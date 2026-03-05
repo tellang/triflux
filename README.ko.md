@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>CLI 기반 멀티모델 오케스트레이터</strong><br>
-  <em>Codex, Gemini, Claude에 작업을 라우팅 — 무료 티어로 할 수 있는 일에 토큰을 낭비하지 마세요</em>
+  <em>Codex, Gemini, Claude에 작업을 라우팅 — 적합한 모델에 작업을 라우팅하여 Claude 토큰을 절약하세요</em>
 </p>
 
 <p align="center">
@@ -41,7 +41,7 @@
 
 ## 왜 triflux인가?
 
-- **비용 지능형 라우팅** — Codex(무료)와 Gemini(무료)에 먼저 작업을 보내고, Claude 토큰은 최소화
+- **비용 지능형 라우팅** — Codex와 Gemini에 먼저 작업을 보내고, Claude 토큰은 최소화
 - **DAG 기반 병렬 실행** — 복잡한 작업을 의존 그래프로 분해하여 동시 실행
 - **자동 트리아지** — Codex가 분류 + Opus가 분해, 수동 에이전트 선택 불필요
 - **16가지 에이전트** — executor부터 architect까지, 각각 최적의 CLI와 effort 레벨에 매핑
@@ -135,7 +135,7 @@ tfx doctor
    [Phase 1: 파싱] ─── 자동 모드 감지
          |
          v
-   [Phase 2a: 분류] ─── Codex (무료)
+   [Phase 2a: 분류] ─── Codex
    │  인증 리팩터링 → codex
    │  UI 개선       → gemini
    │  테스트 추가   → claude

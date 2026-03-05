@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>CLI-first multi-model orchestrator</strong><br>
-  <em>Route tasks to Codex, Gemini, and Claude — don't pay tokens for what free tiers can do</em>
+  <em>Route tasks to Codex, Gemini, and Claude — route tasks to the right model, save Claude tokens</em>
 </p>
 
 <p align="center">
@@ -41,7 +41,7 @@
 
 ## Why triflux?
 
-- **Cost-intelligent routing** — Automatically routes tasks to Codex (free) and Gemini (free) before spending Claude tokens
+- **Cost-intelligent routing** — Automatically routes tasks to Codex and Gemini before spending Claude tokens
 - **DAG-based parallel execution** — Decomposes complex tasks into dependency graphs and runs them concurrently
 - **Auto-triage** — Codex classifies + Opus decomposes, no manual agent selection needed
 - **16 agent types** — From executor to architect, each mapped to the optimal CLI and effort level
@@ -135,7 +135,7 @@ User: "/tfx-auto refactor auth + improve UI + add tests"
    [Phase 1: Parse] ─── Auto mode detected
          |
          v
-   [Phase 2a: Classify] ─── Codex (free)
+   [Phase 2a: Classify] ─── Codex
    │  auth refactor → codex
    │  UI improvement → gemini
    │  test addition  → claude
