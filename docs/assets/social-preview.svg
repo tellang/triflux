@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1A2E"/>
+      <stop offset="100%" stop-color="#16213E"/>
+    </linearGradient>
+    <linearGradient id="title-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFAF00"/>
+      <stop offset="100%" stop-color="#F5C242"/>
+    </linearGradient>
+    <!-- 세 흐름 합류 로고용 그라디언트 -->
+    <linearGradient id="flow-amber" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFAF00" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#FFAF00"/>
+    </linearGradient>
+    <linearGradient id="flow-white" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F9FAFB" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#FFAF00"/>
+    </linearGradient>
+    <linearGradient id="flow-blue" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#FFAF00"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 배경 -->
+  <rect width="1280" height="640" fill="url(#bg-grad)"/>
+
+  <!-- 장식: 미세한 그리드 패턴 -->
+  <g opacity="0.03">
+    <line x1="0" y1="0" x2="0" y2="640" stroke="#F9FAFB" stroke-width="1" transform="translate(160,0)" />
+    <line x1="0" y1="0" x2="0" y2="640" stroke="#F9FAFB" stroke-width="1" transform="translate(320,0)" />
+    <line x1="0" y1="0" x2="0" y2="640" stroke="#F9FAFB" stroke-width="1" transform="translate(480,0)" />
+    <line x1="0" y1="0" x2="0" y2="640" stroke="#F9FAFB" stroke-width="1" transform="translate(640,0)" />
+    <line x1="0" y1="0" x2="0" y2="640" stroke="#F9FAFB" stroke-width="1" transform="translate(800,0)" />
+    <line x1="0" y1="0" x2="0" y2="640" stroke="#F9FAFB" stroke-width="1" transform="translate(960,0)" />
+    <line x1="0" y1="0" x2="0" y2="640" stroke="#F9FAFB" stroke-width="1" transform="translate(1120,0)" />
+  </g>
+
+  <!-- 로고 심볼 (세 흐름 합류) -->
+  <g transform="translate(490, 155) scale(2.5)">
+    <path d="M 10 15 C 40 15, 50 30, 70 35 C 90 40, 95 40, 100 40" stroke="url(#flow-amber)" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <path d="M 10 40 C 40 40, 60 40, 70 40 C 80 40, 90 40, 100 40" stroke="url(#flow-white)" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <path d="M 10 65 C 40 65, 50 50, 70 45 C 90 40, 95 40, 100 40" stroke="url(#flow-blue)" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <path d="M 100 40 C 110 40, 115 40, 120 40" stroke="#FFAF00" stroke-width="4" stroke-linecap="round" fill="none"/>
+    <circle cx="100" cy="40" r="4" fill="#FFAF00"/>
+  </g>
+
+  <!-- 타이틀 -->
+  <text x="640" y="370" text-anchor="middle" font-family="'Geist Mono', 'JetBrains Mono', 'SF Mono', monospace" font-size="56" font-weight="700" fill="url(#title-grad)">triflux</text>
+
+  <!-- 서브타이틀 -->
+  <text x="640" y="410" text-anchor="middle" font-family="'Inter', 'Helvetica Neue', sans-serif" font-size="22" fill="#9CA3AF">CLI-first multi-model orchestrator</text>
+
+  <!-- 3개 모델 카드 -->
+  <g transform="translate(640, 470)">
+    <!-- Claude -->
+    <g transform="translate(-180, 0)">
+      <circle cx="0" cy="0" r="8" fill="#FFAF00"/>
+      <text x="16" y="6" font-family="'Inter', sans-serif" font-size="18" font-weight="600" fill="#F9FAFB">Claude</text>
+    </g>
+    <!-- 화살표 -->
+    <text x="-80" y="6" text-anchor="middle" font-family="monospace" font-size="18" fill="#4B5563">→</text>
+    <!-- Codex -->
+    <g transform="translate(-20, 0)">
+      <circle cx="0" cy="0" r="8" fill="#F9FAFB"/>
+      <text x="16" y="6" font-family="'Inter', sans-serif" font-size="18" font-weight="600" fill="#F9FAFB">Codex</text>
+    </g>
+    <!-- 화살표 -->
+    <text x="90" y="6" text-anchor="middle" font-family="monospace" font-size="18" fill="#4B5563">→</text>
+    <!-- Gemini -->
+    <g transform="translate(150, 0)">
+      <circle cx="0" cy="0" r="8" fill="#38BDF8"/>
+      <text x="16" y="6" font-family="'Inter', sans-serif" font-size="18" font-weight="600" fill="#F9FAFB">Gemini</text>
+    </g>
+  </g>
+
+  <!-- 하단 URL + 버전 -->
+  <text x="640" y="590" text-anchor="middle" font-family="'Geist Mono', monospace" font-size="14" fill="#4B5563">github.com/tellang/triflux · v2.0.0</text>
+</svg>

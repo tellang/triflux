@@ -1,0 +1,23 @@
+{
+  "name": "triflux",
+  "version": "1.0.0",
+  "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
+  "author": {
+    "name": "tellang"
+  },
+  "repository": "https://github.com/tellang/triflux",
+  "homepage": "https://github.com/tellang/triflux",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "plugin",
+    "codex",
+    "gemini",
+    "cli-routing",
+    "orchestration",
+    "multi-model"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
+}

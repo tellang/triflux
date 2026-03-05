@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" fill="none">
+  <defs>
+    <linearGradient id="amber-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFAF00" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#FFAF00"/>
+    </linearGradient>
+    <linearGradient id="white-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F9FAFB" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#FFAF00"/>
+    </linearGradient>
+    <linearGradient id="blue-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#FFAF00"/>
+    </linearGradient>
+  </defs>
+  <!-- 세 흐름이 합류하는 형태 -->
+  <!-- 상단 흐름 (Claude - amber) -->
+  <path d="M 10 15 C 40 15, 50 30, 70 35 C 90 40, 95 40, 100 40" stroke="url(#amber-grad)" stroke-width="3" stroke-linecap="round"/>
+  <!-- 중앙 흐름 (Codex - white) -->
+  <path d="M 10 40 C 40 40, 60 40, 70 40 C 80 40, 90 40, 100 40" stroke="url(#white-grad)" stroke-width="3" stroke-linecap="round"/>
+  <!-- 하단 흐름 (Gemini - blue) -->
+  <path d="M 10 65 C 40 65, 50 50, 70 45 C 90 40, 95 40, 100 40" stroke="url(#blue-grad)" stroke-width="3" stroke-linecap="round"/>
+  <!-- 합류 후 단일 흐름 (amber) -->
+  <path d="M 100 40 C 110 40, 115 40, 120 40" stroke="#FFAF00" stroke-width="4" stroke-linecap="round"/>
+  <!-- 합류점 원 -->
+  <circle cx="100" cy="40" r="4" fill="#FFAF00"/>
+  <!-- 텍스트 -->
+  <text x="130" y="46" font-family="'Geist Mono', 'JetBrains Mono', monospace" font-size="24" font-weight="700" fill="#FFAF00">triflux</text>
+</svg>

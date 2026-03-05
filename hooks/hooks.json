@@ -1,0 +1,17 @@
+{
+  "description": "triflux lifecycle hooks — CLI routing setup and HUD integration",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/setup.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

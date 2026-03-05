@@ -1,0 +1,11 @@
+.omc/
+.claude/
+.codex/
+.gemini/
+*.bak
+node_modules/
+.env
+dist/
+.npmrc
+docs/internal/
+.mcp.json
