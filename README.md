@@ -51,14 +51,7 @@
 <details>
 <summary><strong>Install</strong></summary>
 
-### Plugin (recommended)
-
-```bash
-/plugin marketplace add https://github.com/tellang/triflux
-/plugin install triflux
-```
-
-### npm (global)
+### npm (recommended)
 
 ```bash
 npm install -g triflux

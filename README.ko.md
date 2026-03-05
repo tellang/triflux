@@ -51,14 +51,7 @@
 <details>
 <summary><strong>설치</strong></summary>
 
-### 플러그인 (권장)
-
-```bash
-/plugin marketplace add https://github.com/tellang/triflux
-/plugin install triflux
-```
-
-### npm (전역)
+### npm (권장)
 
 ```bash
 npm install -g triflux
