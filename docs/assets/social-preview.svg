@@ -40,7 +40,7 @@
   <!-- 로고 심볼 (세 흐름 합류) -->
   <g transform="translate(490, 155) scale(2.5)">
     <path d="M 10 15 C 40 15, 50 30, 70 35 C 90 40, 95 40, 100 40" stroke="url(#flow-amber)" stroke-width="3" stroke-linecap="round" fill="none"/>
-    <path d="M 10 40 C 40 40, 60 40, 70 40 C 80 40, 90 40, 100 40" stroke="url(#flow-white)" stroke-width="3" stroke-linecap="round" fill="none"/>
+    <path d="M 10 40 C 35 52, 60 48, 75 43 C 90 40, 95 40, 100 40" stroke="url(#flow-white)" stroke-width="3" stroke-linecap="round" fill="none"/>
     <path d="M 10 65 C 40 65, 50 50, 70 45 C 90 40, 95 40, 100 40" stroke="url(#flow-blue)" stroke-width="3" stroke-linecap="round" fill="none"/>
     <path d="M 100 40 C 110 40, 115 40, 120 40" stroke="#FFAF00" stroke-width="4" stroke-linecap="round" fill="none"/>
     <circle cx="100" cy="40" r="4" fill="#FFAF00"/>

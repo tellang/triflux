@@ -655,11 +655,17 @@ function formatResetRemaining(isoOrUnix) {
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
   const diffMs = d.getTime() - Date.now();
-  if (diffMs <= 0) return "now";
+  if (diffMs <= 0) return "00h00m";
   const totalMinutes = Math.floor(diffMs / 60000);
   const totalHours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return `${String(totalHours).padStart(2, "0")}h${String(minutes).padStart(2, "0")}m`;
+}
+
+function isResetPast(isoOrUnix) {
+  if (!isoOrUnix) return false;
+  const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
+  return !isNaN(d.getTime()) && d.getTime() <= Date.now();
 }
 
 function formatResetRemainingDayHour(isoOrUnix) {
@@ -667,7 +673,7 @@ function formatResetRemainingDayHour(isoOrUnix) {
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
   const diffMs = d.getTime() - Date.now();
-  if (diffMs <= 0) return "now";
+  if (diffMs <= 0) return "0d00h";
   const totalMinutes = Math.floor(diffMs / 60000);
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
@@ -1159,8 +1165,8 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
     if (realQuota?.type === "codex") {
       const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
-        const fiveP = clampPercent(main.primary?.used_percent ?? 0);
-        const weekP = clampPercent(main.secondary?.used_percent ?? 0);
+        const fiveP = isResetPast(main.primary?.resets_at) ? 0 : clampPercent(main.primary?.used_percent ?? 0);
+        const weekP = isResetPast(main.secondary?.resets_at) ? 0 : clampPercent(main.secondary?.used_percent ?? 0);
         if (cols < 40) {
           return { prefix: minPrefix, left: `${colorByPercent(fiveP, `${fiveP}%`)}${dim("/")}${colorByPercent(weekP, `${weekP}%`)}${svCompact}`, right: "" };
         }
@@ -1185,8 +1191,8 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
     if (realQuota?.type === "codex") {
       const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
-        const fiveP = clampPercent(main.primary?.used_percent ?? 0);
-        const weekP = clampPercent(main.secondary?.used_percent ?? 0);
+        const fiveP = isResetPast(main.primary?.resets_at) ? 0 : clampPercent(main.primary?.used_percent ?? 0);
+        const weekP = isResetPast(main.secondary?.resets_at) ? 0 : clampPercent(main.secondary?.used_percent ?? 0);
         quotaSection = `${dim("5h:")}${colorByPercent(fiveP, `${fiveP}%`)} ` +
           `${dim("1w:")}${colorByPercent(weekP, `${weekP}%`)}`;
       }
@@ -1211,8 +1217,8 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
   if (realQuota?.type === "codex") {
     const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
     if (main) {
-      const fiveP = clampPercent(main.primary?.used_percent ?? 0);
-      const weekP = clampPercent(main.secondary?.used_percent ?? 0);
+      const fiveP = isResetPast(main.primary?.resets_at) ? 0 : clampPercent(main.primary?.used_percent ?? 0);
+      const weekP = isResetPast(main.secondary?.resets_at) ? 0 : clampPercent(main.secondary?.used_percent ?? 0);
       const fiveReset = formatResetRemaining(main.primary?.resets_at) || "n/a";
       const weekReset = formatResetRemainingDayHour(main.secondary?.resets_at) || "n/a";
       quotaSection = `${dim("5h:")}${colorByPercent(fiveP, formatPercentCell(fiveP))} ` +

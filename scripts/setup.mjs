@@ -151,6 +151,33 @@ for (const name of staleFiles) {
   }
 }
 
+// ── Windows bash PATH 자동 설정 ──
+// Codex/Gemini가 cmd에는 있지만 bash에서 못 찾는 문제 해결
+
+if (process.platform === "win32") {
+  const npmBin = join(process.env.APPDATA || "", "npm");
+  if (existsSync(npmBin)) {
+    const bashrcPath = join(homedir(), ".bashrc");
+    const pathExport = 'export PATH="$PATH:$APPDATA/npm"';
+    let needsUpdate = true;
+
+    if (existsSync(bashrcPath)) {
+      const content = readFileSync(bashrcPath, "utf8");
+      if (content.includes("APPDATA/npm") || content.includes("APPDATA\\npm")) {
+        needsUpdate = false;
+      }
+    }
+
+    if (needsUpdate) {
+      const line = `\n# triflux: Codex/Gemini CLI를 bash에서 사용하기 위한 PATH 설정\n${pathExport}\n`;
+      try {
+        writeFileSync(bashrcPath, (existsSync(bashrcPath) ? readFileSync(bashrcPath, "utf8") : "") + line, "utf8");
+        synced++;
+      } catch {}
+    }
+  }
+}
+
 // ── MCP 인벤토리 백그라운드 갱신 ──
 
 import { spawn } from "child_process";

@@ -16,8 +16,8 @@
   <!-- 세 흐름이 합류하는 형태 -->
   <!-- 상단 흐름 (Claude - amber) -->
   <path d="M 10 15 C 40 15, 50 30, 70 35 C 90 40, 95 40, 100 40" stroke="url(#amber-grad)" stroke-width="3" stroke-linecap="round"/>
-  <!-- 중앙 흐름 (Codex - dark) -->
-  <path d="M 10 40 C 40 40, 60 40, 70 40 C 80 40, 90 40, 100 40" stroke="url(#dark-grad)" stroke-width="3" stroke-linecap="round"/>
+  <!-- 중앙 흐름 (Codex - dark) — 곡선으로 3갈래 구분 -->
+  <path d="M 10 40 C 35 52, 60 48, 75 43 C 90 40, 95 40, 100 40" stroke="url(#dark-grad)" stroke-width="3" stroke-linecap="round"/>
   <!-- 하단 흐름 (Gemini - blue) -->
   <path d="M 10 65 C 40 65, 50 50, 70 45 C 90 40, 95 40, 100 40" stroke="url(#blue-grad)" stroke-width="3" stroke-linecap="round"/>
   <!-- 합류 후 단일 흐름 -->
