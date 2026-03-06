@@ -50,7 +50,7 @@ function which(cmd) {
 
 function whichInShell(cmd, shell) {
   const cmds = {
-    bash: `bash -c 'command -v ${cmd} 2>/dev/null'`,
+    bash: `bash -c "source ~/.bashrc 2>/dev/null && command -v ${cmd} 2>/dev/null"`,
     cmd: `cmd /c where ${cmd} 2>nul`,
     pwsh: `pwsh -NoProfile -c "(Get-Command ${cmd} -EA SilentlyContinue).Source"`,
   };
