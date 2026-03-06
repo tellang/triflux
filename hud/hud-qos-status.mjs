@@ -405,15 +405,11 @@ function normalizeTimeToken(value) {
   const text = String(value || "n/a");
   const hourMinute = text.match(/^(\d+)h(\d+)m$/);
   if (hourMinute) {
-    const hours = String(Number(hourMinute[1])).padStart(2, "0");
-    const minutes = String(Number(hourMinute[2])).padStart(2, "0");
-    return `${hours}h${minutes}m`;
+    return `${Number(hourMinute[1])}h${Number(hourMinute[2])}m`;
   }
   const dayHour = text.match(/^(\d+)d(\d+)h$/);
   if (dayHour) {
-    const days = String(Number(dayHour[1]));
-    const hours = String(Number(dayHour[2])).padStart(2, "0");
-    return `${days}d${hours}h`;
+    return `${Number(dayHour[1])}d${Number(dayHour[2])}h`;
   }
   return text;
 }
@@ -752,11 +748,11 @@ function formatResetRemaining(isoOrUnix) {
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
   const diffMs = d.getTime() - Date.now();
-  if (diffMs <= 0) return "00h00m";
+  if (diffMs <= 0) return "0h0m";
   const totalMinutes = Math.floor(diffMs / 60000);
   const totalHours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return `${String(totalHours).padStart(2, "0")}h${String(minutes).padStart(2, "0")}m`;
+  return `${totalHours}h${minutes}m`;
 }
 
 function isResetPast(isoOrUnix) {
@@ -770,11 +766,11 @@ function formatResetRemainingDayHour(isoOrUnix) {
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
   const diffMs = d.getTime() - Date.now();
-  if (diffMs <= 0) return "0d00h";
+  if (diffMs <= 0) return "0d0h";
   const totalMinutes = Math.floor(diffMs / 60000);
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  return `${days}d${String(hours).padStart(2, "0")}h`;
+  return `${days}d${hours}h`;
 }
 
 function calcCooldownLeftSeconds(isoDatetime) {
