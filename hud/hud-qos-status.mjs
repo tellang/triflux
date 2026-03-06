@@ -52,15 +52,22 @@ function colorParallel(current, cap) {
   return red(`${current}/${cap}`);
 }
 
-function coloredBar(percent, width = 8) {
+function coloredBar(percent, width = 8, baseColor = null) {
   const safePercent = Math.min(100, Math.max(0, percent));
   const filled = Math.round((safePercent / 100) * width);
   const empty = width - filled;
   let barColor;
   if (safePercent >= 85) barColor = RED;
   else if (safePercent >= 70) barColor = YELLOW;
-  else barColor = GREEN;
+  else barColor = baseColor || GREEN;
   return `${barColor}${"█".repeat(filled)}${DIM}${"░".repeat(empty)}${RESET}`;
+}
+
+// 프로바이더별 색상 % (< 70%: 프로바이더 색, ≥ 70%: 경고색)
+function colorByProvider(value, text, providerColorFn) {
+  if (value >= 85) return red(text);
+  if (value >= 70) return yellow(text);
+  return providerColorFn(text);
 }
 
 // ============================================================================
@@ -265,11 +272,15 @@ function selectTier(stdin) {
 }
 
 // full tier 전용: 게이지 바 접두사 (normal 이하 tier에서는 빈 문자열)
-function tierBar(percent) {
-  return CURRENT_TIER === "full" ? `${coloredBar(percent)} ` : "";
+function tierBar(percent, baseColor = null) {
+  return CURRENT_TIER === "full" ? `${coloredBar(percent, 8, baseColor)} ` : "";
 }
 function tierDimBar() {
   return CURRENT_TIER === "full" ? `${dim("░".repeat(8))} ` : "";
+}
+// Gemini ∞% 전용: 무한 쿼터이므로 dim 회색 바
+function tierInfBar() {
+  return CURRENT_TIER === "full" ? `${DIM}${"█".repeat(8)}${RESET} ` : "";
 }
 
 // ============================================================================
@@ -1166,14 +1177,14 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
       return [{ prefix, left: quotaSection, right: "" }];
     }
     if (cols < 40) {
-      const quotaSection = `${colorByPercent(fiveHourPercent, `${fiveHourPercent}%`)}${dim("/")}` +
-        `${colorByPercent(weeklyPercent, `${weeklyPercent}%`)} ` +
+      const quotaSection = `${colorByProvider(fiveHourPercent, `${fiveHourPercent}%`, claudeOrange)}${dim("/")}` +
+        `${colorByProvider(weeklyPercent, `${weeklyPercent}%`, claudeOrange)} ` +
         `${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
       return [{ prefix, left: quotaSection, right: "" }];
     }
     // nano: c: 5h  12% 1w  95% sv:  191% ctx:90%
-    const quotaSection = `${dim("5h")} ${colorByPercent(fiveHourPercent, formatPercentCell(fiveHourPercent))} ` +
-      `${dim("1w")} ${colorByPercent(weeklyPercent, formatPercentCell(weeklyPercent))} ` +
+    const quotaSection = `${dim("5h")} ${colorByProvider(fiveHourPercent, formatPercentCell(fiveHourPercent), claudeOrange)} ` +
+      `${dim("1w")} ${colorByProvider(weeklyPercent, formatPercentCell(weeklyPercent), claudeOrange)} ` +
       `${dim("sv:")}${svStr} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
     return [{ prefix, left: quotaSection, right: "" }];
   }
@@ -1186,8 +1197,8 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
       return [{ prefix, left: quotaSection, right: "" }];
     }
     // compact: c: 5h: 14% 1w: 96% | sv:  191% ctx:43%
-    const quotaSection = `${dim("5h:")}${colorByPercent(fiveHourPercent, formatPercentCell(fiveHourPercent))} ` +
-      `${dim("1w:")}${colorByPercent(weeklyPercent, formatPercentCell(weeklyPercent))} ` +
+    const quotaSection = `${dim("5h:")}${colorByProvider(fiveHourPercent, formatPercentCell(fiveHourPercent), claudeOrange)} ` +
+      `${dim("1w:")}${colorByProvider(weeklyPercent, formatPercentCell(weeklyPercent), claudeOrange)} ` +
       `${dim("|")} ${svSuffix} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
     return [{ prefix, left: quotaSection, right: "" }];
   }
@@ -1206,9 +1217,9 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
   const weeklyPercentCell = formatPercentCell(weeklyPercent);
   const fiveHourTimeCell = formatTimeCell(fiveHourReset);
   const weeklyTimeCell = formatTimeCellDH(weeklyReset);
-  const quotaSection = `${dim("5h:")}${tierBar(fiveHourPercent)}${colorByPercent(fiveHourPercent, fiveHourPercentCell)} ` +
+  const quotaSection = `${dim("5h:")}${tierBar(fiveHourPercent, CLAUDE_ORANGE)}${colorByProvider(fiveHourPercent, fiveHourPercentCell, claudeOrange)} ` +
     `${dim(fiveHourTimeCell)} ` +
-    `${dim("1w:")}${tierBar(weeklyPercent)}${colorByPercent(weeklyPercent, weeklyPercentCell)} ` +
+    `${dim("1w:")}${tierBar(weeklyPercent, CLAUDE_ORANGE)}${colorByProvider(weeklyPercent, weeklyPercentCell, claudeOrange)} ` +
     `${dim(weeklyTimeCell)}`;
   const contextSection = `${svSuffix} ${dim("|")} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
   return [{ prefix, left: quotaSection, right: contextSection }];
@@ -1234,6 +1245,10 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
   const svStr = svPct != null ? `${svPct}%`.padStart(6) : "--%".padStart(6);
   const modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
 
+  // ── 프로바이더별 색상 프로필 ──
+  const provAnsi = provider === "codex" ? CODEX_WHITE : provider === "gemini" ? GEMINI_BLUE : GREEN;
+  const provFn = provider === "codex" ? codexWhite : provider === "gemini" ? geminiBlue : green;
+
   // ── 쿼터 섹션 ──
   let quotaSection;
   let extraRightSection = "";
@@ -1248,9 +1263,9 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
         const fiveP = isResetPast(main.primary?.resets_at) ? 0 : clampPercent(main.primary?.used_percent ?? 0);
         const weekP = isResetPast(main.secondary?.resets_at) ? 0 : clampPercent(main.secondary?.used_percent ?? 0);
         if (cols < 40) {
-          return { prefix: minPrefix, left: `${colorByPercent(fiveP, formatPercentCell(fiveP))}${dim("/")}${colorByPercent(weekP, formatPercentCell(weekP))}${svCompact}`, right: "" };
+          return { prefix: minPrefix, left: `${colorByProvider(fiveP, formatPercentCell(fiveP), provFn)}${dim("/")}${colorByProvider(weekP, formatPercentCell(weekP), provFn)}${svCompact}`, right: "" };
         }
-        return { prefix: minPrefix, left: `${dim("5h")} ${colorByPercent(fiveP, formatPercentCell(fiveP))} ${dim("1w")} ${colorByPercent(weekP, formatPercentCell(weekP))}${svCompact}`, right: "" };
+        return { prefix: minPrefix, left: `${dim("5h")} ${colorByProvider(fiveP, formatPercentCell(fiveP), provFn)} ${dim("1w")} ${colorByProvider(weekP, formatPercentCell(weekP), provFn)}${svCompact}`, right: "" };
       }
     }
     if (realQuota?.type === "gemini") {
@@ -1258,9 +1273,9 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       if (bucket) {
         const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
         if (cols < 40) {
-          return { prefix: minPrefix, left: `${colorByPercent(usedP, formatPercentCell(usedP))}${svCompact}`, right: "" };
+          return { prefix: minPrefix, left: `${colorByProvider(usedP, formatPercentCell(usedP), provFn)}${svCompact}`, right: "" };
         }
-        return { prefix: minPrefix, left: `${dim("1d")} ${colorByPercent(usedP, formatPercentCell(usedP))} ${dim("1w")} ${bold("\u221E%".padStart(PERCENT_CELL_WIDTH))}${svCompact}`, right: "" };
+        return { prefix: minPrefix, left: `${dim("1d")} ${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim("1w")} ${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))}${svCompact}`, right: "" };
       }
     }
     return { prefix: minPrefix, left: dim("--%".padStart(PERCENT_CELL_WIDTH)), right: "" };
@@ -1272,21 +1287,21 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       if (main) {
         const fiveP = isResetPast(main.primary?.resets_at) ? 0 : clampPercent(main.primary?.used_percent ?? 0);
         const weekP = isResetPast(main.secondary?.resets_at) ? 0 : clampPercent(main.secondary?.used_percent ?? 0);
-        quotaSection = `${dim("5h:")}${colorByPercent(fiveP, formatPercentCell(fiveP))} ` +
-          `${dim("1w:")}${colorByPercent(weekP, formatPercentCell(weekP))}`;
+        quotaSection = `${dim("5h:")}${colorByProvider(fiveP, formatPercentCell(fiveP), provFn)} ` +
+          `${dim("1w:")}${colorByProvider(weekP, formatPercentCell(weekP), provFn)}`;
       }
     }
     if (realQuota?.type === "gemini") {
       const bucket = realQuota.quotaBucket;
       if (bucket) {
         const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
-        quotaSection = `${dim("1d:")}${colorByPercent(usedP, formatPercentCell(usedP))} ${dim("1w:")}${bold("\u221E%".padStart(PERCENT_CELL_WIDTH))}`;
+        quotaSection = `${dim("1d:")}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim("1w:")}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))}`;
       } else {
-        quotaSection = `${dim("1d:")}${dim("--%".padStart(PERCENT_CELL_WIDTH))} ${dim("1w:")}${bold("\u221E%".padStart(PERCENT_CELL_WIDTH))}`;
+        quotaSection = `${dim("1d:")}${dim("--%".padStart(PERCENT_CELL_WIDTH))} ${dim("1w:")}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))}`;
       }
     }
     if (!quotaSection) {
-      quotaSection = `${dim("5h:")}${green("0%".padStart(PERCENT_CELL_WIDTH))} ${dim("1w:")}${green("0%".padStart(PERCENT_CELL_WIDTH))}`;
+      quotaSection = `${dim("5h:")}${provFn("0%".padStart(PERCENT_CELL_WIDTH))} ${dim("1w:")}${provFn("0%".padStart(PERCENT_CELL_WIDTH))}`;
     }
     const prefix = `${bold(markerColor(`${marker}`))}:`;
     // compact: sv + 계정 (모델 라벨 제거)
@@ -1301,9 +1316,9 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       const weekP = isResetPast(main.secondary?.resets_at) ? 0 : clampPercent(main.secondary?.used_percent ?? 0);
       const fiveReset = formatResetRemaining(main.primary?.resets_at) || "n/a";
       const weekReset = formatResetRemainingDayHour(main.secondary?.resets_at) || "n/a";
-      quotaSection = `${dim("5h:")}${tierBar(fiveP)}${colorByPercent(fiveP, formatPercentCell(fiveP))} ` +
+      quotaSection = `${dim("5h:")}${tierBar(fiveP, provAnsi)}${colorByProvider(fiveP, formatPercentCell(fiveP), provFn)} ` +
         `${dim(formatTimeCell(fiveReset))} ` +
-        `${dim("1w:")}${tierBar(weekP)}${colorByPercent(weekP, formatPercentCell(weekP))} ` +
+        `${dim("1w:")}${tierBar(weekP, provAnsi)}${colorByProvider(weekP, formatPercentCell(weekP), provFn)} ` +
         `${dim(formatTimeCellDH(weekReset))}`;
     }
   }
@@ -1313,11 +1328,11 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
     if (bucket) {
       const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
       const rstRemaining = formatResetRemaining(bucket.resetTime) || "n/a";
-      quotaSection = `${dim("1d:")}${tierBar(usedP)}${colorByPercent(usedP, formatPercentCell(usedP))} ${dim(formatTimeCell(rstRemaining))} ` +
-        `${dim("1w:")}${tierBar(100)}${bold("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+      quotaSection = `${dim("1d:")}${tierBar(usedP, provAnsi)}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))} ` +
+        `${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
     } else {
       quotaSection = `${dim("1d:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ` +
-        `${dim(formatTimeCell("--h--m"))} ${dim("1w:")}${tierBar(100)}${bold("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+        `${dim(formatTimeCell("--h--m"))} ${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
     }
   }
 
