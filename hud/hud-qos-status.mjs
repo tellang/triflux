@@ -230,7 +230,7 @@ let CURRENT_TIER = MINIMAL_MODE ? "nano" : COMPACT_MODE ? "compact" : "normal";
  * 인디케이터 인식 + 터미널 크기 기반 tier 자동 선택.
  * main()에서 stdin 수신 후 호출하여 CURRENT_TIER 갱신.
  */
-function selectTier(stdin) {
+function selectTier(stdin, claudeUsage = null) {
   const hudConfig = readJson(HUD_CONFIG_PATH, null);
 
   // 1) 명시적 tier 강제 설정
@@ -259,6 +259,11 @@ function selectTier(stdin) {
   let indicatorRows = 1; // bypass permissions (거의 항상 표시)
   const contextPercent = getContextPercent(stdin);
   if (contextPercent >= 85) indicatorRows += 1; // "Context low" 배너
+  // Claude Code 사용량 경고 (노란색 배너: "You've used X% of your ... limit")
+  const weeklyPct = claudeUsage?.weeklyPercent ?? 0;
+  const fiveHourPct = claudeUsage?.fiveHourPercent ?? 0;
+  if (weeklyPct >= 80) indicatorRows += 1;
+  if (fiveHourPct >= 80) indicatorRows += 1;
 
   // 6) 각 tier에서 줄바꿈 없이 3줄 가용한지 확인
   const tierWidths = { full: 75, normal: 60, compact: 40, nano: 34 };
@@ -1445,8 +1450,8 @@ async function main() {
   // 합산 절약: Codex+Gemini sv% 합산 (컨텍스트 대비 위임 토큰 비율)
   const combinedSvPct = Math.round(((codexSv ?? 0) + (geminiSv ?? 0)) * 100);
 
-  // 인디케이터 인식 tier 선택 (stdin 기반)
-  CURRENT_TIER = selectTier(stdin);
+  // 인디케이터 인식 tier 선택 (stdin + Claude 사용량 기반)
+  CURRENT_TIER = selectTier(stdin, claudeUsageSnapshot.data);
 
   const codexQuotaData = codexBuckets ? { type: "codex", buckets: codexBuckets } : null;
   const geminiQuotaData = { type: "gemini", quotaBucket: geminiBucket, session: geminiSession };
