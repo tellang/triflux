@@ -296,11 +296,18 @@ function cmdDoctor(options = {}) {
     const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
     if (existsSync(hudScript)) {
       try {
-        execSync(`"${process.execPath}" "${hudScript}" --refresh-gemini`, { timeout: 15000, stdio: "ignore" });
+        execSync(`"${process.execPath}" "${hudScript}" --refresh-claude-usage`, { timeout: 20000, stdio: "ignore" });
+        ok("Claude 사용량 캐시 재생성됨");
+      } catch { warn("Claude 사용량 캐시 재생성 실패 — 다음 API 호출 시 자동 생성"); }
+      try {
+        execSync(`"${process.execPath}" "${hudScript}" --refresh-codex-rate-limits`, { timeout: 15000, stdio: "ignore" });
+        ok("Codex 레이트 리밋 캐시 재생성됨");
+      } catch { warn("Codex 레이트 리밋 캐시 재생성 실패"); }
+      try {
+        execSync(`"${process.execPath}" "${hudScript}" --refresh-gemini-quota`, { timeout: 15000, stdio: "ignore" });
         ok("Gemini 쿼터 캐시 재생성됨");
       } catch { warn("Gemini 쿼터 캐시 재생성 실패"); }
     }
-    info("Claude/Codex 캐시는 다음 사용 시 자동 생성됩니다");
     console.log(`\n  ${LINE}`);
     console.log(`  ${GREEN_BRIGHT}${BOLD}✓ 캐시 초기화 + 재생성 완료${RESET}\n`);
     return;
