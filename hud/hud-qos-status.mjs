@@ -302,7 +302,7 @@ function selectTier(stdin, claudeUsage = null) {
   let indicatorRows = 1; // bypass permissions (거의 항상 표시)
   indicatorRows += 1; // 선행 개행 가드 (알림 배너 우회용 빈 줄)
   const contextPercent = getContextPercent(stdin);
-  if (contextPercent >= 85) indicatorRows += 1; // "Context low" 배너
+  // "Context low" 배너 공간은 출력부(leadingBreaks)에서 \n\n으로 처리 — 티어 선택에서 예약 불필요
   // Claude Code 사용량 경고 (노란색 배너: "You've used X% of your ... limit")
   const weeklyPct = claudeUsage?.weeklyPercent ?? 0;
   const fiveHourPct = claudeUsage?.fiveHourPercent ?? 0;
