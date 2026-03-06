@@ -1429,16 +1429,16 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
       const rstRemaining = formatResetRemaining(bucket.resetTime) || "n/a";
       quotaSection = `${dim("1d:")}${tierBar(usedP, provAnsi)}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))} ` +
-        `${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("n/a"))}`;
+        `${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
     } else {
       quotaSection = `${dim("1d:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ` +
-        `${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("n/a"))}`;
+        `${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
     }
   }
 
   // 폴백: 쿼터 데이터 없을 때
   if (!quotaSection) {
-    quotaSection = `${dim("5h:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("n/a"))}`;
+    quotaSection = `${dim("5h:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("-d--h"))}`;
   }
 
   const prefix = `${bold(markerColor(`${marker}`))}:`;
