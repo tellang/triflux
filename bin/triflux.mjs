@@ -283,9 +283,26 @@ function cmdDoctor(options = {}) {
       console.log("");
       ok(`${BOLD}${cleared}개${RESET} 캐시 파일 초기화 완료`);
     }
-    info("다음 세션 시작 시 캐시가 새로 생성됩니다");
+    // 캐시 즉시 재생성
+    console.log("");
+    section("Cache Rebuild");
+    const mcpCheck = join(PKG_ROOT, "scripts", "mcp-check.mjs");
+    if (existsSync(mcpCheck)) {
+      try {
+        execSync(`"${process.execPath}" "${mcpCheck}"`, { timeout: 15000, stdio: "ignore" });
+        ok("MCP 인벤토리 재생성됨");
+      } catch { warn("MCP 인벤토리 재생성 실패 — 다음 세션에서 자동 재시도"); }
+    }
+    const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
+    if (existsSync(hudScript)) {
+      try {
+        execSync(`"${process.execPath}" "${hudScript}" --refresh-gemini`, { timeout: 15000, stdio: "ignore" });
+        ok("Gemini 쿼터 캐시 재생성됨");
+      } catch { warn("Gemini 쿼터 캐시 재생성 실패"); }
+    }
+    info("Claude/Codex 캐시는 다음 사용 시 자동 생성됩니다");
     console.log(`\n  ${LINE}`);
-    console.log(`  ${GREEN_BRIGHT}${BOLD}✓ 캐시 초기화 완료${RESET}\n`);
+    console.log(`  ${GREEN_BRIGHT}${BOLD}✓ 캐시 초기화 + 재생성 완료${RESET}\n`);
     return;
   }
 

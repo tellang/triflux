@@ -1261,10 +1261,10 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
   const weeklyPercent = claudeUsage?.weeklyPercent ?? 0;
   const fiveHourReset = claudeUsage?.fiveHourResetsAt
     ? formatResetRemaining(claudeUsage.fiveHourResetsAt)
-    : (claudeUsage ? "n/a" : "--h--m");
+    : "n/a";
   const weeklyReset = claudeUsage?.weeklyResetsAt
     ? formatResetRemainingDayHour(claudeUsage.weeklyResetsAt)
-    : (claudeUsage ? "n/a" : "--d--h");
+    : "n/a";
 
   const hasData = claudeUsage != null;
 
@@ -1273,7 +1273,7 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
     if (!hasData) {
       const quotaSection = cols < 40
         ? `${dim("--%/--%")} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`
-        : `${dim("5h --% 1w --% sv:-- ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
+        : `${dim("5h --% 1w --% sv:--% ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
       return [{ prefix, left: quotaSection, right: "" }];
     }
     if (cols < 40) {
@@ -1429,16 +1429,16 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
       const rstRemaining = formatResetRemaining(bucket.resetTime) || "n/a";
       quotaSection = `${dim("1d:")}${tierBar(usedP, provAnsi)}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))} ` +
-        `${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+        `${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("n/a"))}`;
     } else {
       quotaSection = `${dim("1d:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ` +
-        `${dim(formatTimeCell("--h--m"))} ${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+        `${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("n/a"))}`;
     }
   }
 
   // 폴백: 쿼터 데이터 없을 때
   if (!quotaSection) {
-    quotaSection = `${dim("5h:")}${tierDimBar()}${dim("--%")} ${dim("1w:")}${tierDimBar()}${dim("--%")}`;
+    quotaSection = `${dim("5h:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("n/a"))}`;
   }
 
   const prefix = `${bold(markerColor(`${marker}`))}:`;
@@ -1575,8 +1575,8 @@ async function main() {
 
   // 비활성 줄 dim 래핑 (rows 순서: [claude, codex, gemini])
   if (outputLines.length >= 3) {
-    if (!codexActive) outputLines[1] = `${DIM}${stripAnsi(outputLines[1])}${RESET}`;
-    if (!geminiActive) outputLines[2] = `${DIM}${stripAnsi(outputLines[2])}${RESET}`;
+    if (!codexActive) outputLines[1] = `${DIM}${outputLines[1]}${RESET}`;
+    if (!geminiActive) outputLines[2] = `${DIM}${outputLines[2]}${RESET}`;
   }
 
   // 선행 개행: 알림 배너(노란 글씨)가 빈 첫 줄에 오도록 → HUD 내용 보호
