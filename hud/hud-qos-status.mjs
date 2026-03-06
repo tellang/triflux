@@ -7,7 +7,7 @@ import https from "node:https";
 import { createHash } from "node:crypto";
 import { spawn, execSync } from "node:child_process";
 
-const VERSION = "1.9";
+const VERSION = "2.0";
 
 // ============================================================================
 // ANSI 색상 (OMC colors.js 스키마 일치)
@@ -109,7 +109,15 @@ const ACCOUNTS_STATE_PATH = join(homedir(), ".omc", "state", "cli_accounts_state
 const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
 const CLAUDE_USAGE_CACHE_PATH = join(homedir(), ".claude", "cache", "claude-usage-cache.json");
 const OMC_PLUGIN_USAGE_CACHE_PATH = join(homedir(), ".claude", "plugins", "oh-my-claudecode", ".usage-cache.json");
-const CLAUDE_USAGE_STALE_MS = 5 * 60 * 1000; // 5분 캐시 (OMC 플러그인과 API 충돌 방지)
+const CLAUDE_USAGE_STALE_MS_SOLO = 5 * 60 * 1000; // OMC 없을 때: 5분 캐시
+const CLAUDE_USAGE_STALE_MS_WITH_OMC = 15 * 60 * 1000; // OMC 있을 때: 15분 (OMC가 30초마다 갱신)
+
+// OMC 활성 여부에 따라 캐시 TTL 동적 결정
+function getClaudeUsageStaleMs() {
+  return existsSync(OMC_PLUGIN_USAGE_CACHE_PATH)
+    ? CLAUDE_USAGE_STALE_MS_WITH_OMC
+    : CLAUDE_USAGE_STALE_MS_SOLO;
+}
 const CLAUDE_USAGE_429_BACKOFF_MS = 10 * 60 * 1000; // 429 에러 시 10분 backoff
 const CLAUDE_USAGE_ERROR_BACKOFF_MS = 3 * 60 * 1000; // 기타 에러 시 3분 backoff
 const CLAUDE_API_TIMEOUT_MS = 10_000;
@@ -263,7 +271,13 @@ function selectTier(stdin, claudeUsage = null) {
 
   // 1) 명시적 tier 강제 설정
   const forcedTier = hudConfig?.tier;
-  if (["full", "normal", "compact", "nano"].includes(forcedTier)) return forcedTier;
+  if (["full", "normal", "compact", "nano", "micro"].includes(forcedTier)) return forcedTier;
+
+  // 1.5) maxLines=1 → micro (1줄 모드: 알림 배너/분할화면 대응)
+  if (Number(hudConfig?.lines) === 1) return "micro";
+
+  // 1.6) 분할화면 감지: 열 < 80이면 micro (COMPACT_MODE보다 우선)
+  if ((getTerminalColumns() || 120) < 80) return "micro";
 
   // 2) 기존 모드 플래그 존중
   if (MINIMAL_MODE) return "nano";
@@ -275,6 +289,7 @@ function selectTier(stdin, claudeUsage = null) {
   // 4) 터미널 행/열에서 상태영역 예산 추정
   const rows = getTerminalRows();
   const cols = getTerminalColumns() || 120;
+
   let budget;
   if (rows >= 40) budget = 6;
   else if (rows >= 35) budget = 5;
@@ -285,6 +300,7 @@ function selectTier(stdin, claudeUsage = null) {
 
   // 5) 인디케이터 줄 추정
   let indicatorRows = 1; // bypass permissions (거의 항상 표시)
+  indicatorRows += 1; // 선행 개행 가드 (알림 배너 우회용 빈 줄)
   const contextPercent = getContextPercent(stdin);
   if (contextPercent >= 85) indicatorRows += 1; // "Context low" 배너
   // Claude Code 사용량 경고 (노란색 배너: "You've used X% of your ... limit")
@@ -301,7 +317,8 @@ function selectTier(stdin, claudeUsage = null) {
     const totalVisualRows = (3 * visualRowsPerLine) + indicatorRows;
     if (totalVisualRows <= budget) return tier;
   }
-  return "nano";
+  // 어떤 tier도 budget에 안 맞으면 micro (1줄 모드)
+  return "micro";
 }
 
 // full tier 전용: 게이지 바 접두사 (normal 이하 tier에서는 빈 문자열)
@@ -415,6 +432,50 @@ function renderAlignedRows(rows) {
   });
 }
 
+// micro tier: 모든 프로바이더를 1줄로 압축 (알림 배너/분할화면 대응)
+// 형식: c:16/3 x:5/2 g:∞ sv:143% ctx:53%
+function getMicroLine(stdin, claudeUsage, codexBuckets, geminiSession, geminiBucket, combinedSvPct) {
+  const ctx = getContextPercent(stdin);
+
+  // Claude 5h/1w
+  const cF = claudeUsage ? clampPercent(claudeUsage.fiveHourPercent ?? 0) : null;
+  const cW = claudeUsage ? clampPercent(claudeUsage.weeklyPercent ?? 0) : null;
+  const cVal = cF != null
+    ? `${colorByProvider(cF, `${cF}`, claudeOrange)}${dim("/")}${colorByProvider(cW, `${cW}`, claudeOrange)}`
+    : dim("--/--");
+
+  // Codex 5h/1w
+  let xVal = dim("--/--");
+  if (codexBuckets) {
+    const mb = codexBuckets.codex || codexBuckets[Object.keys(codexBuckets)[0]];
+    if (mb) {
+      const xF = isResetPast(mb.primary?.resets_at) ? 0 : clampPercent(mb.primary?.used_percent ?? 0);
+      const xW = isResetPast(mb.secondary?.resets_at) ? 0 : clampPercent(mb.secondary?.used_percent ?? 0);
+      xVal = `${colorByProvider(xF, `${xF}`, codexWhite)}${dim("/")}${colorByProvider(xW, `${xW}`, codexWhite)}`;
+    }
+  }
+
+  // Gemini
+  let gVal;
+  if (geminiBucket) {
+    const gU = clampPercent(geminiBucket.usedPercent ?? 0);
+    gVal = colorByProvider(gU, `${gU}`, geminiBlue);
+  } else if ((geminiSession?.total || 0) > 0) {
+    gVal = geminiBlue("\u221E");
+  } else {
+    gVal = dim("--");
+  }
+
+  // sv (trimmed)
+  const sv = formatSvPct(combinedSvPct || 0).trim();
+
+  return `${bold(claudeOrange("c"))}${dim(":")}${cVal} ` +
+    `${bold(codexWhite("x"))}${dim(":")}${xVal} ` +
+    `${bold(geminiBlue("g"))}${dim(":")}${gVal} ` +
+    `${dim("sv:")}${sv} ` +
+    `${dim("ctx:")}${colorByPercent(ctx, `${ctx}%`)}`;
+}
+
 function clampPercent(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -444,7 +505,9 @@ function normalizeTimeToken(value) {
 
 function formatTimeCell(value) {
   const text = normalizeTimeToken(value);
-  return `(${text.padStart(TIME_CELL_INNER_WIDTH, "0")})`;
+  // 시간값(숫자 포함)은 0패딩, 비시간값(n/a 등)은 공백패딩
+  const padChar = /\d/.test(text) ? "0" : " ";
+  return `(${text.padStart(TIME_CELL_INNER_WIDTH, padChar)})`;
 }
 
 // 주간(d/h) 전용 — 최대 7d00h(5자)이므로 공백 불필요
@@ -635,7 +698,7 @@ function readClaudeUsageSnapshot() {
 
   // 1차: 자체 캐시에 유효 데이터가 있는 경우
   if (cache?.data) {
-    const isFresh = ageMs < CLAUDE_USAGE_STALE_MS;
+    const isFresh = ageMs < getClaudeUsageStaleMs();
     return { data: cache.data, shouldRefresh: !isFresh };
   }
 
@@ -651,10 +714,9 @@ function readClaudeUsageSnapshot() {
         writeClaudeUsageCache(omcCache.data);
         return { data: omcCache.data, shouldRefresh: false };
       }
-      // stale OMC fallback 또는 기본 0%
+      // stale OMC fallback 또는 null (--% 플레이스홀더 표시, 가짜 0% 방지)
       const staleData = omcCache?.data?.fiveHourPercent != null ? stripStaleResets(omcCache.data) : null;
-      const fallback = staleData || { fiveHourPercent: 0, weeklyPercent: 0, fiveHourResetsAt: null, weeklyResetsAt: null };
-      return { data: fallback, shouldRefresh: false };
+      return { data: staleData, shouldRefresh: false };
     }
   }
 
@@ -665,14 +727,14 @@ function readClaudeUsageSnapshot() {
     const omcAge = Number.isFinite(omcCache.timestamp) ? Date.now() - omcCache.timestamp : Number.MAX_SAFE_INTEGER;
     if (omcAge < OMC_CACHE_MAX_AGE_MS) {
       writeClaudeUsageCache(omcCache.data);
-      return { data: omcCache.data, shouldRefresh: omcAge > CLAUDE_USAGE_STALE_MS };
+      return { data: omcCache.data, shouldRefresh: omcAge > getClaudeUsageStaleMs() };
     }
     // stale이어도 data: null보다는 오래된 데이터를 fallback으로 표시
     return { data: stripStaleResets(omcCache.data), shouldRefresh: true };
   }
 
-  // 캐시/fallback 모두 없음: 기본 0% 표시 + 리프레시 시도 (--% 방지)
-  return { data: { fiveHourPercent: 0, weeklyPercent: 0, fiveHourResetsAt: null, weeklyResetsAt: null }, shouldRefresh: true };
+  // 캐시/fallback 모두 없음: null 반환 → --% 플레이스홀더 + 리프레시 시도
+  return { data: null, shouldRefresh: true };
 }
 
 function writeClaudeUsageCache(data, errorInfo = null) {
@@ -732,7 +794,7 @@ function scheduleClaudeUsageRefresh() {
     const omcCache = readJson(OMC_PLUGIN_USAGE_CACHE_PATH, null);
     if (omcCache?.data?.fiveHourPercent != null) {
       const omcAge = Number.isFinite(omcCache.timestamp) ? Date.now() - omcCache.timestamp : Infinity;
-      if (omcAge < CLAUDE_USAGE_STALE_MS) {
+      if (omcAge < getClaudeUsageStaleMs()) {
         writeClaudeUsageCache(omcCache.data); // HUD 캐시에 복사만
         return;
       }
@@ -751,7 +813,7 @@ function scheduleClaudeUsageRefresh() {
 
   try {
     const child = spawn(process.execPath, [scriptPath, CLAUDE_REFRESH_FLAG], {
-      detached: true,
+      detached: process.platform !== "win32",
       stdio: "ignore",
       windowsHide: true,
     });
@@ -1050,7 +1112,7 @@ function scheduleGeminiQuotaRefresh(accountId) {
       process.execPath,
       [scriptPath, GEMINI_REFRESH_FLAG, "--account", accountId || "gemini-main"],
       {
-        detached: true,
+        detached: process.platform !== "win32",
         stdio: "ignore",
         windowsHide: true,
       },
@@ -1082,7 +1144,7 @@ function scheduleCodexRateLimitRefresh() {
   if (!scriptPath) return;
   try {
     const child = spawn(process.execPath, [scriptPath, CODEX_REFRESH_FLAG], {
-      detached: true,
+      detached: process.platform !== "win32",
       stdio: "ignore",
       windowsHide: true,
     });
@@ -1113,7 +1175,7 @@ function scheduleGeminiSessionRefresh() {
   if (!scriptPath) return;
   try {
     const child = spawn(process.execPath, [scriptPath, GEMINI_SESSION_REFRESH_FLAG], {
-      detached: true,
+      detached: process.platform !== "win32",
       stdio: "ignore",
       windowsHide: true,
     });
@@ -1486,6 +1548,14 @@ async function main() {
   // 인디케이터 인식 tier 선택 (stdin + Claude 사용량 기반)
   CURRENT_TIER = selectTier(stdin, claudeUsageSnapshot.data);
 
+  // micro tier: 1줄 모드 (알림 배너/분할화면 대응)
+  if (CURRENT_TIER === "micro") {
+    const microLine = getMicroLine(stdin, claudeUsageSnapshot.data, codexBuckets,
+      geminiSession, geminiBucket, combinedSvPct);
+    process.stdout.write(`\x1b[0m${microLine}\n`);
+    return;
+  }
+
   const codexQuotaData = codexBuckets ? { type: "codex", buckets: codexBuckets } : null;
   const geminiQuotaData = { type: "gemini", quotaBucket: geminiBucket, session: geminiSession };
 
@@ -1509,12 +1579,13 @@ async function main() {
     if (!geminiActive) outputLines[2] = `${DIM}${stripAnsi(outputLines[2])}${RESET}`;
   }
 
-  // Context low 메시지 뒤에 HUD가 분리되도록 선행 개행 추가
+  // 선행 개행: 알림 배너(노란 글씨)가 빈 첫 줄에 오도록 → HUD 내용 보호
+  // Context low(≥85%) 시 추가 개행으로 배너 분리
   const contextPercent = getContextPercent(stdin);
-  const contextLowPrefix = contextPercent >= 85 ? "\n" : "";
+  const leadingBreaks = contextPercent >= 85 ? "\n\n" : "\n";
   // 줄별 RESET: Claude Code TUI 스타일 간섭 방지 (색상 밝기 버그 수정)
   const resetedLines = outputLines.map(line => `\x1b[0m${line}`);
-  process.stdout.write(`${contextLowPrefix}${resetedLines.join("\n")}\n`);
+  process.stdout.write(`${leadingBreaks}${resetedLines.join("\n")}\n`);
 }
 
 main().catch(() => {
