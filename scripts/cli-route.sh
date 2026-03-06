@@ -527,31 +527,62 @@ get_gemini_mcp_filter() {
 extract_tokens() {
   local raw="$1"
   local cli_type="$2"
+  local stderr_file="$3"
 
-  if [[ "$cli_type" != "codex" ]] || [[ -z "$raw" ]]; then
+  if [[ "$cli_type" == "codex" ]]; then
+    # Codex CLI: stderr에 "tokens used\n76,239" 형식으로 토큰 출력
+    if [[ -f "$stderr_file" ]]; then
+      local total
+      total=$(grep -A1 "tokens used" "$stderr_file" 2>/dev/null | tail -1 | tr -d ',' | tr -d ' ')
+      if [[ -n "$total" && "$total" =~ ^[0-9]+$ && "$total" -gt 0 ]]; then
+        echo "$total 0"
+        return
+      fi
+    fi
     echo "0 0"
     return
   fi
 
-  local result
-  result=$(echo "$raw" | python3 -c "
-import sys, json
-inp, out = 0, 0
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        obj = json.loads(line)
-        u = obj.get('usage', {})
-        if u:
-            inp = max(inp, u.get('input_tokens', 0))
-            out = max(out, u.get('output_tokens', 0))
-    except:
-        pass
+  if [[ "$cli_type" == "gemini" ]]; then
+    # Gemini CLI: ~/.gemini/tmp/*/chats/session-*.json에서 최신 세션 토큰 추출
+    local gemini_tmp="${HOME}/.gemini/tmp"
+    if [[ -d "$gemini_tmp" ]]; then
+      local latest
+      latest=$(find "$gemini_tmp" -name "session-*.json" -path "*/chats/*" -newer "$stderr_file" 2>/dev/null \
+        | head -1)
+      # stderr보다 새 파일 없으면 가장 최근 파일 사용
+      if [[ -z "$latest" ]]; then
+        latest=$(find "$gemini_tmp" -name "session-*.json" -path "*/chats/*" -printf '%T@ %p\n' 2>/dev/null \
+          | sort -rn | head -1 | cut -d' ' -f2-)
+        # Windows Git Bash: -printf 미지원 시 ls fallback
+        if [[ -z "$latest" ]]; then
+          latest=$(find "$gemini_tmp" -name "session-*.json" -path "*/chats/*" 2>/dev/null \
+            | xargs ls -t 2>/dev/null | head -1)
+        fi
+      fi
+      if [[ -n "$latest" && -f "$latest" ]]; then
+        local result
+        result=$(python3 -c "
+import json, sys
+data = json.load(open(sys.argv[1]))
+inp = sum(m.get('tokens',{}).get('input',0) for m in data.get('messages',[]))
+out = sum(m.get('tokens',{}).get('output',0) for m in data.get('messages',[]))
 print(f'{inp} {out}')
-" 2>/dev/null) || result="0 0"
-  echo "$result"
+" "$latest" 2>/dev/null) || result="0 0"
+        local inp out
+        inp=$(echo "$result" | awk '{print $1}')
+        out=$(echo "$result" | awk '{print $2}')
+        if [[ $((inp + out)) -gt 0 ]]; then
+          echo "$inp $out"
+          return
+        fi
+      fi
+    fi
+    echo "0 0"
+    return
+  fi
+
+  echo "0 0"
 }
 
 # ── Codex JSON-line 출력 파서 ──
@@ -634,7 +665,7 @@ accumulate_tokens() {
   # node로 JSON 읽기/수정/쓰기 (jq 의존성 없이)
   node -e '
 const fs = require("fs");
-const [,, file, cliType, inp, out] = process.argv;
+const [, file, cliType, inp, out] = process.argv;
 let data;
 try { data = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { data = {}; }
 if (!data.codex) data.codex = { tokens: 0, calls: 0 };
@@ -860,7 +891,7 @@ main() {
 
   # 토큰 추출
   local token_info input_tokens output_tokens total_tokens
-  token_info=$(extract_tokens "$raw_output" "$CLI_TYPE") || token_info="0 0"
+  token_info=$(extract_tokens "$raw_output" "$CLI_TYPE" "$STDERR_LOG") || token_info="0 0"
   input_tokens=$(echo "$token_info" | awk '{print $1}')
   output_tokens=$(echo "$token_info" | awk '{print $2}')
   total_tokens=$((input_tokens + output_tokens))
