@@ -7,7 +7,7 @@ import https from "node:https";
 import { createHash } from "node:crypto";
 import { spawn, execSync } from "node:child_process";
 
-const VERSION = "1.8";
+const VERSION = "1.9";
 
 // ============================================================================
 // ANSI 색상 (OMC colors.js 스키마 일치)
@@ -19,7 +19,7 @@ const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
-const CLAUDE_ORANGE = "\x1b[38;5;214m";
+const CLAUDE_ORANGE = "\x1b[38;5;173m"; // #D87656 (Claude 테라코타)
 const CODEX_WHITE = "\x1b[97m"; // bright white (SGR 37은 Windows Terminal에서 연회색 매핑)
 const GEMINI_BLUE = "\x1b[38;5;39m";
 
@@ -52,15 +52,43 @@ function colorParallel(current, cap) {
   return red(`${current}/${cap}`);
 }
 
-function coloredBar(percent, width = 8, baseColor = null) {
+const GAUGE_WIDTH = 5;
+const GAUGE_BLOCKS = ["░", "▒", "▓", "█"]; // 밝기 0~3
+
+function coloredBar(percent, width = GAUGE_WIDTH, baseColor = null) {
   const safePercent = Math.min(100, Math.max(0, percent));
-  const filled = Math.round((safePercent / 100) * width);
-  const empty = width - filled;
+  const perBlock = 100 / width;
+
+  // 상태별 색상
   let barColor;
   if (safePercent >= 85) barColor = RED;
   else if (safePercent >= 70) barColor = YELLOW;
   else barColor = baseColor || GREEN;
-  return `${barColor}${"█".repeat(filled)}${DIM}${"░".repeat(empty)}${RESET}`;
+
+  let bar = "";
+  for (let i = 0; i < width; i++) {
+    const blockStart = i * perBlock;
+    const blockEnd = (i + 1) * perBlock;
+
+    if (safePercent >= blockEnd) {
+      bar += "█"; // 완전 채움
+    } else if (safePercent > blockStart) {
+      // 프론티어: 구간 내 진행률
+      const progress = (safePercent - blockStart) / perBlock;
+      if (progress >= 0.75) bar += "▓";
+      else if (progress >= 0.33) bar += "▒";
+      else bar += "░";
+    } else {
+      bar += "░"; // 미도달
+    }
+  }
+
+  // 채워진 부분 = barColor, 빈 부분 = DIM
+  const filledEnd = Math.ceil(safePercent / perBlock);
+  const coloredPart = barColor + bar.slice(0, filledEnd) + RESET;
+  const dimPart = filledEnd < width ? DIM + bar.slice(filledEnd) + RESET : "";
+
+  return coloredPart + dimPart;
 }
 
 // 프로바이더별 색상 % (< 70%: 프로바이더 색, ≥ 70%: 경고색)
@@ -122,7 +150,7 @@ const GEMINI_SESSION_STALE_MS = 15 * 1000; // 15초
 const GEMINI_API_TIMEOUT_MS = 3000; // 3초
 const ACCOUNT_LABEL_WIDTH = 10;
 const PROVIDER_PREFIX_WIDTH = 2;
-const PERCENT_CELL_WIDTH = 4;
+const PERCENT_CELL_WIDTH = 3;
 const TIME_CELL_INNER_WIDTH = 6;
 const CLAUDE_REFRESH_FLAG = "--refresh-claude-usage";
 const CODEX_REFRESH_FLAG = "--refresh-codex-rate-limits";
@@ -266,7 +294,7 @@ function selectTier(stdin, claudeUsage = null) {
   if (fiveHourPct >= 80) indicatorRows += 1;
 
   // 6) 각 tier에서 줄바꿈 없이 3줄 가용한지 확인
-  const tierWidths = { full: 75, normal: 60, compact: 40, nano: 34 };
+  const tierWidths = { full: 70, normal: 60, compact: 40, nano: 34 };
   for (const tier of ["full", "normal", "compact", "nano"]) {
     const lineWidth = tierWidths[tier];
     const visualRowsPerLine = Math.ceil(lineWidth / Math.max(cols, 1));
@@ -278,14 +306,14 @@ function selectTier(stdin, claudeUsage = null) {
 
 // full tier 전용: 게이지 바 접두사 (normal 이하 tier에서는 빈 문자열)
 function tierBar(percent, baseColor = null) {
-  return CURRENT_TIER === "full" ? `${coloredBar(percent, 8, baseColor)} ` : "";
+  return CURRENT_TIER === "full" ? coloredBar(percent, GAUGE_WIDTH, baseColor) + " " : "";
 }
 function tierDimBar() {
-  return CURRENT_TIER === "full" ? `${dim("░".repeat(8))} ` : "";
+  return CURRENT_TIER === "full" ? DIM + "░".repeat(GAUGE_WIDTH) + RESET + " " : "";
 }
 // Gemini ∞% 전용: 무한 쿼터이므로 dim 회색 바
 function tierInfBar() {
-  return CURRENT_TIER === "full" ? `${DIM}${"█".repeat(8)}${RESET} ` : "";
+  return CURRENT_TIER === "full" ? DIM + "█".repeat(GAUGE_WIDTH) + RESET + " " : "";
 }
 
 // ============================================================================
@@ -405,7 +433,7 @@ function normalizeTimeToken(value) {
   const text = String(value || "n/a");
   const hourMinute = text.match(/^(\d+)h(\d+)m$/);
   if (hourMinute) {
-    return `${Number(hourMinute[1])}h${Number(hourMinute[2])}m`;
+    return `${Number(hourMinute[1])}h${String(Number(hourMinute[2])).padStart(2, "0")}m`;
   }
   const dayHour = text.match(/^(\d+)d(\d+)h$/);
   if (dayHour) {
@@ -416,7 +444,7 @@ function normalizeTimeToken(value) {
 
 function formatTimeCell(value) {
   const text = normalizeTimeToken(value);
-  return `(${text.padStart(TIME_CELL_INNER_WIDTH, " ")})`;
+  return `(${text.padStart(TIME_CELL_INNER_WIDTH, "0")})`;
 }
 
 // 주간(d/h) 전용 — 최대 7d00h(5자)이므로 공백 불필요
@@ -748,11 +776,11 @@ function formatResetRemaining(isoOrUnix) {
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
   const diffMs = d.getTime() - Date.now();
-  if (diffMs <= 0) return "0h0m";
+  if (diffMs <= 0) return "0h00m";
   const totalMinutes = Math.floor(diffMs / 60000);
   const totalHours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
-  return `${totalHours}h${minutes}m`;
+  return `${totalHours}h${String(minutes).padStart(2, "0")}m`;
 }
 
 function isResetPast(isoOrUnix) {
