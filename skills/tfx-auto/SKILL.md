@@ -656,3 +656,10 @@ t3 → t4 (t3-implementation.md, 4.1KB)
 |------|------|
 | `~/.claude/scripts/cli-route.sh` | CLI 라우팅 래퍼 (필수) |
 | `/omc-teams` | tmux 기반 CLI 워커 (별도) |
+
+## Troubleshooting
+
+CLI 실행 오류나 HUD 문제 발생 시:
+1. `/tfx-doctor` — 진단 실행
+2. `/tfx-doctor --fix` — 자동 수정
+3. `/tfx-doctor --reset` — 캐시 초기화

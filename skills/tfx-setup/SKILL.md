@@ -95,3 +95,10 @@ Bash("triflux doctor")
 | `settings.json` 파싱 실패 | 백업 생성 후 새로 작성 |
 | 기존 statusLine이 다른 HUD | 사용자에게 덮어쓸지 확인 |
 | node.exe 경로에 공백 | 큰따옴표로 감싸기 |
+
+## Troubleshooting
+
+설정 후에도 문제가 있으면:
+1. `/tfx-doctor` — 상세 진단 실행
+2. `/tfx-doctor --fix` — 파일 동기화 + 캐시 정리
+3. `/tfx-doctor --reset` — 캐시 전체 초기화 (HUD 이상 시)

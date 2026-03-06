@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // triflux CLI — setup, doctor, version
-import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync } from "fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync } from "child_process";
@@ -246,9 +246,98 @@ function cmdSetup() {
   console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}\n`);
 }
 
-function cmdDoctor() {
-  console.log(`\n  ${AMBER}${BOLD}⬡ triflux doctor${RESET} ${VER}\n`);
+function cmdDoctor(options = {}) {
+  const { fix = false, reset = false } = options;
+  const modeLabel = reset ? ` ${RED}--reset${RESET}` : fix ? ` ${YELLOW}--fix${RESET}` : "";
+  console.log(`\n  ${AMBER}${BOLD}⬡ triflux doctor${RESET} ${VER}${modeLabel}\n`);
   console.log(`  ${LINE}`);
+
+  // ── reset 모드: 캐시 전체 초기화 ──
+  if (reset) {
+    section("Cache Reset");
+    const cacheDir = join(CLAUDE_DIR, "cache");
+    const resetFiles = [
+      "claude-usage-cache.json",
+      ".claude-refresh-lock",
+      "codex-rate-limits-cache.json",
+      "gemini-quota-cache.json",
+      "gemini-project-id.json",
+      "gemini-session-cache.json",
+      "gemini-rpm-tracker.json",
+      "sv-accumulator.json",
+      "mcp-inventory.json",
+      "cli-issues.jsonl",
+      "triflux-update-check.json",
+    ];
+    let cleared = 0;
+    for (const name of resetFiles) {
+      const fp = join(cacheDir, name);
+      if (existsSync(fp)) {
+        try { unlinkSync(fp); cleared++; ok(`삭제됨: ${name}`); }
+        catch (e) { fail(`삭제 실패: ${name} — ${e.message}`); }
+      }
+    }
+    if (cleared === 0) {
+      ok("삭제할 캐시 파일 없음 (이미 깨끗함)");
+    } else {
+      console.log("");
+      ok(`${BOLD}${cleared}개${RESET} 캐시 파일 초기화 완료`);
+    }
+    info("다음 세션 시작 시 캐시가 새로 생성됩니다");
+    console.log(`\n  ${LINE}`);
+    console.log(`  ${GREEN_BRIGHT}${BOLD}✓ 캐시 초기화 완료${RESET}\n`);
+    return;
+  }
+
+  // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
+  if (fix) {
+    section("Auto Fix");
+    syncFile(
+      join(PKG_ROOT, "scripts", "cli-route.sh"),
+      join(CLAUDE_DIR, "scripts", "cli-route.sh"),
+      "cli-route.sh"
+    );
+    syncFile(
+      join(PKG_ROOT, "hud", "hud-qos-status.mjs"),
+      join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
+      "hud-qos-status.mjs"
+    );
+    // 스킬 동기화
+    const fSkillsSrc = join(PKG_ROOT, "skills");
+    const fSkillsDst = join(CLAUDE_DIR, "skills");
+    if (existsSync(fSkillsSrc)) {
+      let sc = 0, st = 0;
+      for (const name of readdirSync(fSkillsSrc)) {
+        const src = join(fSkillsSrc, name, "SKILL.md");
+        const dst = join(fSkillsDst, name, "SKILL.md");
+        if (!existsSync(src)) continue;
+        st++;
+        const dstDir = dirname(dst);
+        if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
+        if (!existsSync(dst)) { copyFileSync(src, dst); sc++; }
+        else if (readFileSync(src, "utf8") !== readFileSync(dst, "utf8")) { copyFileSync(src, dst); sc++; }
+      }
+      if (sc > 0) ok(`스킬: ${sc}/${st}개 업데이트됨`);
+      else ok(`스킬: ${st}개 최신 상태`);
+    }
+    // 에러/스테일 캐시 정리
+    const fCacheDir = join(CLAUDE_DIR, "cache");
+    const staleNames = ["claude-usage-cache.json", ".claude-refresh-lock", "codex-rate-limits-cache.json"];
+    let cleaned = 0;
+    for (const name of staleNames) {
+      const fp = join(fCacheDir, name);
+      if (!existsSync(fp)) continue;
+      try {
+        const parsed = JSON.parse(readFileSync(fp, "utf8"));
+        if (parsed.error || name.startsWith(".")) { unlinkSync(fp); cleaned++; ok(`에러 캐시 정리: ${name}`); }
+      } catch { try { unlinkSync(fp); cleaned++; ok(`손상된 캐시 정리: ${name}`); } catch {} }
+    }
+    if (cleaned === 0) info("에러 캐시 없음");
+    console.log(`\n  ${LINE}`);
+    info("수정 완료 — 아래 진단 결과를 확인하세요");
+    console.log("");
+  }
+
   let issues = 0;
 
   // 1. cli-route.sh
@@ -673,6 +762,8 @@ ${updateNotice}
 
     ${WHITE_BRIGHT}tfx setup${RESET}      ${GRAY}파일 동기화 + HUD 설정${RESET}
     ${WHITE_BRIGHT}tfx doctor${RESET}     ${GRAY}CLI 진단 + 이슈 확인${RESET}
+    ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
+    ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 버전으로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
@@ -683,6 +774,7 @@ ${updateNotice}
     ${WHITE_BRIGHT}/tfx-codex${RESET}      ${GRAY}Codex 전용 모드${RESET}
     ${BLUE}/tfx-gemini${RESET}     ${GRAY}Gemini 전용 모드${RESET}
     ${AMBER}/tfx-setup${RESET}      ${GRAY}HUD 설정 + 진단${RESET}
+    ${YELLOW}/tfx-doctor${RESET}     ${GRAY}진단 + 수리 + 캐시 초기화${RESET}
 
   ${LINE}
   ${GRAY}github.com/tellang/triflux${RESET}
@@ -695,7 +787,12 @@ const cmd = process.argv[2] || "help";
 
 switch (cmd) {
   case "setup":   cmdSetup(); break;
-  case "doctor":  cmdDoctor(); break;
+  case "doctor": {
+    const fix = process.argv.includes("--fix");
+    const reset = process.argv.includes("--reset");
+    cmdDoctor({ fix, reset });
+    break;
+  }
   case "update":  cmdUpdate(); break;
   case "list": case "ls": cmdList(); break;
   case "version": case "--version": case "-v": cmdVersion(); break;

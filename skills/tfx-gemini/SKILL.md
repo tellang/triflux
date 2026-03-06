@@ -76,3 +76,10 @@ argument-hint: "\"작업 설명\" | N:gemini \"작업 설명\""
 
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli): `npm install -g @google/gemini-cli`
 - Codex CLI 불필요
+
+## Troubleshooting
+
+문제가 발생하면:
+1. `/tfx-doctor` — 진단 실행
+2. `/tfx-doctor --fix` — 자동 수정
+3. `/tfx-doctor --reset` — 캐시 초기화 (HUD 이상 시)

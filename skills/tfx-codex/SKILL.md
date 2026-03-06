@@ -59,3 +59,10 @@ argument-hint: "\"작업 설명\" | N:codex \"작업 설명\""
 
 - [Codex CLI](https://github.com/openai/codex): `npm install -g @openai/codex`
 - Gemini CLI 불필요
+
+## Troubleshooting
+
+문제가 발생하면:
+1. `/tfx-doctor` — 진단 실행
+2. `/tfx-doctor --fix` — 자동 수정
+3. `/tfx-doctor --reset` — 캐시 초기화 (HUD 이상 시)
