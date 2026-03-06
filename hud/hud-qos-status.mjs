@@ -1149,12 +1149,21 @@ function formatSavings(dollars) {
   return `$${dollars.toFixed(2)}`;
 }
 
+// sv 퍼센트 포맷 (1000+ → k 표기, 5자 고정폭)
+const SV_CELL_WIDTH = 5;
+function formatSvPct(value) {
+  if (value == null) return "--%".padStart(SV_CELL_WIDTH);
+  if (value >= 10000) return `${Math.round(value / 1000)}k%`.padStart(SV_CELL_WIDTH);
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k%`.padStart(SV_CELL_WIDTH);
+  return `${value}%`.padStart(SV_CELL_WIDTH);
+}
+
 function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
   const contextPercent = getContextPercent(stdin);
   const prefix = `${bold(claudeOrange("c"))}:`;
 
   // 절약 퍼센트 (Codex+Gemini sv% 합산, x/g와 동일 형식)
-  const svStr = combinedSvPct > 0 ? `${combinedSvPct}%`.padStart(6) : "0%".padStart(6);
+  const svStr = formatSvPct(combinedSvPct || 0);
   const svSuffix = `${dim("sv:")}${svStr}`;
 
   // API 실측 데이터 사용 (없으면 플레이스홀더)
@@ -1243,7 +1252,7 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
 
   // 절약 퍼센트 섹션 (context window 대비 %, 4자리 고정폭)
   const svPct = savingsMultiplier != null ? Math.round(savingsMultiplier * 100) : null;
-  const svStr = svPct != null ? `${svPct}%`.padStart(6) : "--%".padStart(6);
+  const svStr = formatSvPct(svPct);
   const modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
 
   // ── 프로바이더별 색상 프로필 ──
