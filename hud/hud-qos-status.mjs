@@ -509,7 +509,7 @@ function normalizeTimeToken(value) {
   }
   const dayHour = text.match(/^(\d+)d(\d+)h$/);
   if (dayHour) {
-    return `${Number(dayHour[1])}d${Number(dayHour[2])}h`;
+    return `${Number(dayHour[1])}d${String(Number(dayHour[2])).padStart(2, "0")}h`;
   }
   return text;
 }
@@ -958,7 +958,9 @@ function getGeminiEmail() {
 // ============================================================================
 function getCodexRateLimits() {
   const now = new Date();
-  let todayHasFiles = false;
+  let syntheticBucket = null; // 오늘 token_count에서 합성 (행 활성화 + 토큰 데이터용)
+
+  // 2일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
   for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
     const d = new Date(now.getTime() - dayOffset * 86_400_000);
     const sessDir = join(
@@ -971,10 +973,7 @@ function getCodexRateLimits() {
     let files;
     try { files = readdirSync(sessDir).filter((f) => f.endsWith(".jsonl")).sort().reverse(); }
     catch { continue; }
-    if (dayOffset === 0 && files.length > 0) todayHasFiles = true;
 
-    // 당일 모든 세션 파일을 스캔해 limit_id별 가장 최신 버킷을 병합
-    // (파일 목록은 이름 역순 정렬 → 최신 세션 우선)
     const mergedBuckets = {};
     for (const file of files) {
       try {
@@ -985,7 +984,7 @@ function getCodexRateLimits() {
             const evt = JSON.parse(line);
             const rl = evt?.payload?.rate_limits;
             if (rl?.limit_id && !mergedBuckets[rl.limit_id]) {
-              // limit_id별로 첫 발견(=해당 세션의 가장 최신 이벤트)만 기록
+              // 실제 rate_limits: limit_id별 최신 이벤트만 기록
               mergedBuckets[rl.limit_id] = {
                 limitId: rl.limit_id, limitName: rl.limit_name,
                 primary: rl.primary, secondary: rl.secondary,
@@ -994,18 +993,33 @@ function getCodexRateLimits() {
                 contextWindow: evt.payload?.info?.model_context_window,
                 timestamp: evt.timestamp,
               };
+            } else if (dayOffset === 0 && !rl && evt?.payload?.info?.total_token_usage && !syntheticBucket) {
+              // 오늘 token_count: 합성 버킷 (rate_limits가 null일 때 행 활성화용)
+              syntheticBucket = {
+                limitId: "codex", limitName: "codex-session",
+                primary: null, secondary: null,
+                credits: null,
+                tokens: evt.payload.info.total_token_usage,
+                contextWindow: evt.payload.info.model_context_window,
+                timestamp: evt.timestamp,
+              };
             }
           } catch { /* 라인 파싱 실패 무시 */ }
           if (Object.keys(mergedBuckets).length >= CODEX_MIN_BUCKETS) break;
         }
       } catch { /* 파일 읽기 실패 무시 */ }
     }
-    if (Object.keys(mergedBuckets).length > 0) return mergedBuckets;
-
-    // 오늘 세션 파일이 존재하지만 rate_limits가 없으면 어제 stale 데이터로 폴백하지 않음
-    if (todayHasFiles && dayOffset === 0) return null;
+    // 실제 rate_limits 발견 → 오늘 토큰 데이터 병합 후 즉시 반환
+    if (Object.keys(mergedBuckets).length > 0) {
+      if (syntheticBucket) {
+        const main = mergedBuckets.codex || mergedBuckets[Object.keys(mergedBuckets)[0]];
+        if (main && !main.tokens) main.tokens = syntheticBucket.tokens;
+      }
+      return mergedBuckets;
+    }
   }
-  return null;
+  // 실제 rate_limits 없음 → 합성 버킷이라도 반환 (행 활성화)
+  return syntheticBucket ? { codex: syntheticBucket } : null;
 }
 
 // ============================================================================
