@@ -121,6 +121,9 @@ function getClaudeUsageStaleMs() {
 const CLAUDE_USAGE_429_BACKOFF_MS = 10 * 60 * 1000; // 429 에러 시 10분 backoff
 const CLAUDE_USAGE_ERROR_BACKOFF_MS = 3 * 60 * 1000; // 기타 에러 시 3분 backoff
 const CLAUDE_API_TIMEOUT_MS = 10_000;
+const FIVE_HOUR_MS = 5 * 60 * 60 * 1000;
+const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
 const CODEX_QUOTA_CACHE_PATH = join(homedir(), ".claude", "cache", "codex-rate-limits-cache.json");
@@ -667,31 +670,15 @@ function parseClaudeUsageResponse(response) {
 // stale 캐시의 과거 resetsAt → 다음 주기로 순환 추정 (null 대신 다음 reset 시간 계산)
 function stripStaleResets(data) {
   if (!data) return data;
-  const now = Date.now();
   const copy = { ...data };
-
-  // 5시간 주기: 과거 reset → 5시간씩 전진하여 미래 시점 추정
   if (copy.fiveHourResetsAt) {
-    let t = new Date(copy.fiveHourResetsAt).getTime();
-    if (t < now) {
-      const cycle = 5 * 60 * 60 * 1000;
-      const elapsed = now - t;
-      t += Math.ceil(elapsed / cycle) * cycle;
-      copy.fiveHourResetsAt = new Date(t).toISOString();
-    }
+    const t = new Date(copy.fiveHourResetsAt).getTime();
+    if (!isNaN(t)) copy.fiveHourResetsAt = new Date(advanceToNextCycle(t, FIVE_HOUR_MS)).toISOString();
   }
-
-  // 7일 주기: 과거 reset → 7일씩 전진하여 미래 시점 추정
   if (copy.weeklyResetsAt) {
-    let t = new Date(copy.weeklyResetsAt).getTime();
-    if (t < now) {
-      const cycle = 7 * 24 * 60 * 60 * 1000;
-      const elapsed = now - t;
-      t += Math.ceil(elapsed / cycle) * cycle;
-      copy.weeklyResetsAt = new Date(t).toISOString();
-    }
+    const t = new Date(copy.weeklyResetsAt).getTime();
+    if (!isNaN(t)) copy.weeklyResetsAt = new Date(advanceToNextCycle(t, SEVEN_DAY_MS)).toISOString();
   }
-
   return copy;
 }
 
@@ -837,11 +824,20 @@ function getContextPercent(stdin) {
   return clampPercent((totalTokens / capacity) * 100);
 }
 
-function formatResetRemaining(isoOrUnix) {
+// 과거 리셋 시간 → 다음 주기로 순환하여 미래 시점 반환
+function advanceToNextCycle(epochMs, cycleMs) {
+  const now = Date.now();
+  if (epochMs >= now || !cycleMs) return epochMs;
+  const elapsed = now - epochMs;
+  return epochMs + Math.ceil(elapsed / cycleMs) * cycleMs;
+}
+
+function formatResetRemaining(isoOrUnix, cycleMs = 0) {
   if (!isoOrUnix) return "";
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
-  const diffMs = d.getTime() - Date.now();
+  const targetMs = advanceToNextCycle(d.getTime(), cycleMs);
+  const diffMs = targetMs - Date.now();
   if (diffMs <= 0) return "";
   const totalMinutes = Math.floor(diffMs / 60000);
   const totalHours = Math.floor(totalMinutes / 60);
@@ -855,11 +851,12 @@ function isResetPast(isoOrUnix) {
   return !isNaN(d.getTime()) && d.getTime() <= Date.now();
 }
 
-function formatResetRemainingDayHour(isoOrUnix) {
+function formatResetRemainingDayHour(isoOrUnix, cycleMs = 0) {
   if (!isoOrUnix) return "";
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
-  const diffMs = d.getTime() - Date.now();
+  const targetMs = advanceToNextCycle(d.getTime(), cycleMs);
+  const diffMs = targetMs - Date.now();
   if (diffMs <= 0) return "";
   const totalMinutes = Math.floor(diffMs / 60000);
   const days = Math.floor(totalMinutes / (60 * 24));
@@ -1268,10 +1265,10 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
   const fiveHourPercent = isResetPast(claudeUsage?.fiveHourResetsAt) ? 0 : (claudeUsage?.fiveHourPercent ?? 0);
   const weeklyPercent = isResetPast(claudeUsage?.weeklyResetsAt) ? 0 : (claudeUsage?.weeklyPercent ?? 0);
   const fiveHourReset = claudeUsage?.fiveHourResetsAt
-    ? formatResetRemaining(claudeUsage.fiveHourResetsAt)
+    ? formatResetRemaining(claudeUsage.fiveHourResetsAt, FIVE_HOUR_MS)
     : "n/a";
   const weeklyReset = claudeUsage?.weeklyResetsAt
-    ? formatResetRemainingDayHour(claudeUsage.weeklyResetsAt)
+    ? formatResetRemainingDayHour(claudeUsage.weeklyResetsAt, SEVEN_DAY_MS)
     : "n/a";
 
   const hasData = claudeUsage != null;
@@ -1422,8 +1419,8 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
     if (main) {
       const fiveP = isResetPast(main.primary?.resets_at) ? 0 : clampPercent(main.primary?.used_percent ?? 0);
       const weekP = isResetPast(main.secondary?.resets_at) ? 0 : clampPercent(main.secondary?.used_percent ?? 0);
-      const fiveReset = formatResetRemaining(main.primary?.resets_at) || "n/a";
-      const weekReset = formatResetRemainingDayHour(main.secondary?.resets_at) || "n/a";
+      const fiveReset = formatResetRemaining(main.primary?.resets_at, FIVE_HOUR_MS) || "n/a";
+      const weekReset = formatResetRemainingDayHour(main.secondary?.resets_at, SEVEN_DAY_MS) || "n/a";
       quotaSection = `${dim("5h:")}${tierBar(fiveP, provAnsi)}${colorByProvider(fiveP, formatPercentCell(fiveP), provFn)} ` +
         `${dim(formatTimeCell(fiveReset))} ` +
         `${dim("1w:")}${tierBar(weekP, provAnsi)}${colorByProvider(weekP, formatPercentCell(weekP), provFn)} ` +
@@ -1435,7 +1432,7 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
     const bucket = realQuota.quotaBucket;
     if (bucket) {
       const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
-      const rstRemaining = formatResetRemaining(bucket.resetTime) || "n/a";
+      const rstRemaining = formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
       quotaSection = `${dim("1d:")}${tierBar(usedP, provAnsi)}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))} ` +
         `${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
     } else {
