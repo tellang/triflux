@@ -187,7 +187,8 @@ tfx doctor
 - **Codex CLI** (선택): `npm install -g @openai/codex`
 - **Gemini CLI** (선택): `npm install -g @google/gemini-cli`
 
-> Codex/Gemini 없이도 동작합니다. 자동으로 Claude 네이티브 에이전트로 fallback됩니다.
+> [!TIP]
+> **triflux는 100% 독립적으로 동작합니다.** 기능을 수행하기 위해 [oh-my-claudecode (OMC)](https://github.com/nicepkg/oh-my-claudecode)가 필요하지 않습니다. OMC가 설치된 경우에만 이를 감지하여 선택적인 통합 기능을 제공합니다. Codex/Gemini 없이도 자동으로 Claude 네이티브 에이전트로 fallback되어 동작합니다.
 
 ### 설치 후
 
@@ -224,14 +225,15 @@ Claude Code 상태줄에서 실시간 모니터링:
 </details>
 
 <details>
-<summary><strong>oh-my-claudecode 통합</strong></summary>
+<summary><strong>선택 사항: oh-my-claudecode (OMC) 통합</strong></summary>
 
-triflux는 단독으로 동작하거나 [oh-my-claudecode](https://github.com/nicepkg/oh-my-claudecode)와 함께 사용할 수 있습니다:
+triflux는 **100% 독립적으로 동작**하며 기능을 수행하기 위해 외부 도구에 의존하지 않습니다. 다만, [oh-my-claudecode](https://github.com/nicepkg/oh-my-claudecode) 생태계를 사용하는 사용자를 위해 선택적 호환성을 제공합니다:
 
-- OMC 플러그인 시스템을 통한 스킬 자동 등록
-- `cli-route.sh`가 OMC 에이전트 카탈로그와 통합
-- HUD가 OMC 상태줄을 확장
-- OMC autopilot, ralph, team, ultrawork 모드와 호환
+- **완전한 독립성**: OMC나 다른 래퍼 없이 단독으로 100% 동작합니다.
+- **캐시 호환성**: OMC 캐시 경로(예: `~/.omc/state/`)가 존재할 경우 이를 감지하고 배려하지만, 기본적으로 자체 격리된 상태를 유지합니다.
+- **심리스한 플러그인**: OMC가 설치된 경우 OMC 플러그인 시스템을 통해 스킬이 자동 등록됩니다.
+- **확장된 HUD**: OMC가 감지되면 HUD가 자동으로 OMC 상태줄을 확장하여 표시합니다.
+- **모드 지원**: OMC autopilot, ralph, team, ultrawork 모드와 완벽히 호환됩니다.
 
 </details>
 

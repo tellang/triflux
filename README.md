@@ -187,7 +187,8 @@ User: "/tfx-auto refactor auth + improve UI + add tests"
 - **Codex CLI** (optional): `npm install -g @openai/codex`
 - **Gemini CLI** (optional): `npm install -g @google/gemini-cli`
 
-> Without Codex or Gemini, triflux automatically falls back to Claude native agents.
+> [!TIP]
+> **triflux is 100% standalone.** It does not require [oh-my-claudecode (OMC)](https://github.com/nicepkg/oh-my-claudecode) to function. It will automatically detect and provide optional integration only if OMC is present. Without Codex or Gemini, triflux falls back to Claude native agents.
 
 ### Post-install
 
@@ -224,14 +225,15 @@ Configured automatically via `tfx setup`.
 </details>
 
 <details>
-<summary><strong>oh-my-claudecode Integration</strong></summary>
+<summary><strong>Optional: oh-my-claudecode (OMC) Integration</strong></summary>
 
-triflux works standalone or as part of [oh-my-claudecode](https://github.com/nicepkg/oh-my-claudecode):
+triflux is **100% independent** and does not require any external tools to function. However, it provides optional compatibility with [oh-my-claudecode](https://github.com/nicepkg/oh-my-claudecode) for users who prefer that ecosystem:
 
-- Skills auto-registered via OMC's plugin system
-- `cli-route.sh` integrates with OMC's agent catalog
-- HUD extends OMC's status line
-- Compatible with OMC autopilot, ralph, team, and ultrawork modes
+- **Full Independence**: Works standalone without OMC or any other wrappers.
+- **Cache Compatibility**: Detects and respects OMC cache paths (e.g., `~/.omc/state/`) if present, but maintains its own isolated state by default.
+- **Seamless Plugin**: Skills auto-registered via OMC's plugin system if OMC is installed.
+- **Extended HUD**: HUD automatically extends OMC's status line when detected.
+- **Mode Support**: Compatible with OMC autopilot, ralph, team, and ultrawork modes.
 
 </details>
 
