@@ -169,6 +169,12 @@ function cmdSetup() {
     "hud-qos-status.mjs"
   );
 
+  syncFile(
+    join(PKG_ROOT, "scripts", "notion-read.mjs"),
+    join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
+    "notion-read.mjs"
+  );
+
   // 스킬 동기화 (~/.claude/skills/{name}/SKILL.md)
   const skillsSrc = join(PKG_ROOT, "skills");
   const skillsDst = join(CLAUDE_DIR, "skills");
@@ -325,6 +331,11 @@ function cmdDoctor(options = {}) {
       join(PKG_ROOT, "hud", "hud-qos-status.mjs"),
       join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
       "hud-qos-status.mjs"
+    );
+    syncFile(
+      join(PKG_ROOT, "scripts", "notion-read.mjs"),
+      join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
+      "notion-read.mjs"
     );
     // 스킬 동기화
     const fSkillsSrc = join(PKG_ROOT, "skills");
@@ -790,6 +801,7 @@ ${updateNotice}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 버전으로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
+    ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
@@ -819,6 +831,14 @@ switch (cmd) {
   }
   case "update":  cmdUpdate(); break;
   case "list": case "ls": cmdList(); break;
+  case "notion-read": case "nr": {
+    const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
+    const nrArgs = process.argv.slice(3).map(a => `"${a}"`).join(" ");
+    try {
+      execSync(`"${process.execPath}" "${scriptPath}" ${nrArgs}`, { stdio: "inherit", timeout: 660000 });
+    } catch (e) { process.exit(e.status || 1); }
+    break;
+  }
   case "version": case "--version": case "-v": cmdVersion(); break;
   case "help": case "--help": case "-h": cmdHelp(); break;
   default:

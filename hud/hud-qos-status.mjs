@@ -437,9 +437,13 @@ function renderAlignedRows(rows) {
 function getMicroLine(stdin, claudeUsage, codexBuckets, geminiSession, geminiBucket, combinedSvPct) {
   const ctx = getContextPercent(stdin);
 
-  // Claude 5h/1w
-  const cF = claudeUsage ? clampPercent(claudeUsage.fiveHourPercent ?? 0) : null;
-  const cW = claudeUsage ? clampPercent(claudeUsage.weeklyPercent ?? 0) : null;
+  // Claude 5h/1w (reset 과거면 0으로 표시)
+  const cF = claudeUsage
+    ? (isResetPast(claudeUsage.fiveHourResetsAt) ? 0 : clampPercent(claudeUsage.fiveHourPercent ?? 0))
+    : null;
+  const cW = claudeUsage
+    ? (isResetPast(claudeUsage.weeklyResetsAt) ? 0 : clampPercent(claudeUsage.weeklyPercent ?? 0))
+    : null;
   const cVal = cF != null
     ? `${colorByProvider(cF, `${cF}`, claudeOrange)}${dim("/")}${colorByProvider(cW, `${cW}`, claudeOrange)}`
     : dim("--/--");
@@ -838,7 +842,7 @@ function formatResetRemaining(isoOrUnix) {
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
   const diffMs = d.getTime() - Date.now();
-  if (diffMs <= 0) return "0h00m";
+  if (diffMs <= 0) return "";
   const totalMinutes = Math.floor(diffMs / 60000);
   const totalHours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -856,7 +860,7 @@ function formatResetRemainingDayHour(isoOrUnix) {
   const d = typeof isoOrUnix === "string" ? new Date(isoOrUnix) : new Date(isoOrUnix * 1000);
   if (isNaN(d.getTime())) return "";
   const diffMs = d.getTime() - Date.now();
-  if (diffMs <= 0) return "0d0h";
+  if (diffMs <= 0) return "";
   const totalMinutes = Math.floor(diffMs / 60000);
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
@@ -941,6 +945,7 @@ function getGeminiEmail() {
 // ============================================================================
 function getCodexRateLimits() {
   const now = new Date();
+  let todayHasFiles = false;
   for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
     const d = new Date(now.getTime() - dayOffset * 86_400_000);
     const sessDir = join(
@@ -953,6 +958,7 @@ function getCodexRateLimits() {
     let files;
     try { files = readdirSync(sessDir).filter((f) => f.endsWith(".jsonl")).sort().reverse(); }
     catch { continue; }
+    if (dayOffset === 0 && files.length > 0) todayHasFiles = true;
     for (const file of files) {
       try {
         const content = readFileSync(join(sessDir, file), "utf-8");
@@ -978,6 +984,8 @@ function getCodexRateLimits() {
         if (Object.keys(buckets).length > 0) return buckets;
       } catch { /* 파일 읽기 실패 무시 */ }
     }
+    // 오늘 세션 파일이 존재하지만 rate_limits가 없으면 어제 stale 데이터로 폴백하지 않음
+    if (todayHasFiles && dayOffset === 0) return null;
   }
   return null;
 }
@@ -1134,7 +1142,7 @@ function readCodexRateLimitSnapshot() {
 
 function refreshCodexRateLimitsCache() {
   const buckets = getCodexRateLimits();
-  if (!buckets) return null;
+  // buckets가 null이어도 캐시 갱신 (stale 데이터 제거)
   writeJsonSafe(CODEX_QUOTA_CACHE_PATH, { timestamp: Date.now(), buckets });
   return buckets;
 }
@@ -1257,8 +1265,8 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
   const svSuffix = `${dim("sv:")}${svStr}`;
 
   // API 실측 데이터 사용 (없으면 플레이스홀더)
-  const fiveHourPercent = claudeUsage?.fiveHourPercent ?? 0;
-  const weeklyPercent = claudeUsage?.weeklyPercent ?? 0;
+  const fiveHourPercent = isResetPast(claudeUsage?.fiveHourResetsAt) ? 0 : (claudeUsage?.fiveHourPercent ?? 0);
+  const weeklyPercent = isResetPast(claudeUsage?.weeklyResetsAt) ? 0 : (claudeUsage?.weeklyPercent ?? 0);
   const fiveHourReset = claudeUsage?.fiveHourResetsAt
     ? formatResetRemaining(claudeUsage.fiveHourResetsAt)
     : "n/a";
