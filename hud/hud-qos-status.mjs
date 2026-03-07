@@ -448,27 +448,20 @@ function renderAlignedRows(rows) {
 function getMicroLine(stdin, claudeUsage, codexBuckets, geminiSession, geminiBucket, combinedSvPct) {
   const ctx = getContextPercent(stdin);
 
-  // Claude 5h/1w (stale reset이면 null → '--' 플레이스홀더 표시)
-  const cF = claudeUsage
-    ? (isResetPast(claudeUsage.fiveHourResetsAt) ? null : clampPercent(claudeUsage.fiveHourPercent ?? 0))
-    : null;
-  const cW = claudeUsage
-    ? (isResetPast(claudeUsage.weeklyResetsAt) ? null : clampPercent(claudeUsage.weeklyPercent ?? 0))
-    : null;
+  // Claude 5h/1w (캐시된 값 그대로 표시, 시간은 advanceToNextCycle이 처리)
+  const cF = claudeUsage?.fiveHourPercent != null ? clampPercent(claudeUsage.fiveHourPercent) : null;
+  const cW = claudeUsage?.weeklyPercent != null ? clampPercent(claudeUsage.weeklyPercent) : null;
   const cVal = claudeUsage != null
     ? `${cF != null ? colorByProvider(cF, `${cF}`, claudeOrange) : dim("--")}${dim("/")}${cW != null ? colorByProvider(cW, `${cW}`, claudeOrange) : dim("--")}`
     : dim("--/--");
 
-  // Codex 5h/1w (stale reset이면 null → '--' 플레이스홀더 표시)
+  // Codex 5h/1w (캐시된 값 그대로 표시)
   let xVal = dim("--/--");
   if (codexBuckets) {
     const mb = codexBuckets.codex || codexBuckets[Object.keys(codexBuckets)[0]];
     if (mb) {
-      // isResetPast 결과를 한 번만 계산하여 재사용
-      const xFPast = isResetPast(mb.primary?.resets_at);
-      const xWPast = isResetPast(mb.secondary?.resets_at);
-      const xF = xFPast ? null : clampPercent(mb.primary?.used_percent ?? 0);
-      const xW = xWPast ? null : clampPercent(mb.secondary?.used_percent ?? 0);
+      const xF = mb.primary?.used_percent != null ? clampPercent(mb.primary.used_percent) : null;
+      const xW = mb.secondary?.used_percent != null ? clampPercent(mb.secondary.used_percent) : null;
       xVal = `${xF != null ? colorByProvider(xF, `${xF}`, codexWhite) : dim("--")}${dim("/")}${xW != null ? colorByProvider(xW, `${xW}`, codexWhite) : dim("--")}`;
     }
   }
@@ -1336,11 +1329,9 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
   const svSuffix = `${dim("sv:")}${svStr}`;
 
   // API 실측 데이터 사용 (없으면 플레이스홀더)
-  // isResetPast 결과를 한 번만 계산하여 percent 판단과 시간 표시에 재사용
-  const fiveHourPast = isResetPast(claudeUsage?.fiveHourResetsAt);
-  const weeklyPast = isResetPast(claudeUsage?.weeklyResetsAt);
-  const fiveHourPercent = fiveHourPast ? null : (claudeUsage?.fiveHourPercent ?? null);
-  const weeklyPercent = weeklyPast ? null : (claudeUsage?.weeklyPercent ?? null);
+  // 캐시된 percent 그대로 사용 (시간 표시는 advanceToNextCycle이 처리)
+  const fiveHourPercent = claudeUsage?.fiveHourPercent ?? null;
+  const weeklyPercent = claudeUsage?.weeklyPercent ?? null;
   const fiveHourReset = claudeUsage?.fiveHourResetsAt
     ? formatResetRemaining(claudeUsage.fiveHourResetsAt, FIVE_HOUR_MS)
     : "n/a";
@@ -1465,11 +1456,9 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
     if (realQuota?.type === "codex") {
       const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
-        // isResetPast 결과를 한 번만 계산하여 재사용, stale 시 null → '--' 표시
-        const fivePast = isResetPast(main.primary?.resets_at);
-        const weekPast = isResetPast(main.secondary?.resets_at);
-        const fiveP = fivePast ? null : clampPercent(main.primary?.used_percent ?? 0);
-        const weekP = weekPast ? null : clampPercent(main.secondary?.used_percent ?? 0);
+        // 캐시된 값 그대로 표시 (시간은 advanceToNextCycle이 처리)
+        const fiveP = main.primary?.used_percent != null ? clampPercent(main.primary.used_percent) : null;
+        const weekP = main.secondary?.used_percent != null ? clampPercent(main.secondary.used_percent) : null;
         const fCellN = fiveP != null ? colorByProvider(fiveP, formatPercentCell(fiveP), provFn) : dim(formatPlaceholderPercentCell());
         const wCellN = weekP != null ? colorByProvider(weekP, formatPercentCell(weekP), provFn) : dim(formatPlaceholderPercentCell());
         if (cols < 40) {
@@ -1495,11 +1484,9 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
     if (realQuota?.type === "codex") {
       const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
-        // isResetPast 결과를 한 번만 계산하여 재사용, stale 시 null → '--' 표시
-        const fivePast = isResetPast(main.primary?.resets_at);
-        const weekPast = isResetPast(main.secondary?.resets_at);
-        const fiveP = fivePast ? null : clampPercent(main.primary?.used_percent ?? 0);
-        const weekP = weekPast ? null : clampPercent(main.secondary?.used_percent ?? 0);
+        // 캐시된 값 그대로 표시 (시간은 advanceToNextCycle이 처리)
+        const fiveP = main.primary?.used_percent != null ? clampPercent(main.primary.used_percent) : null;
+        const weekP = main.secondary?.used_percent != null ? clampPercent(main.secondary.used_percent) : null;
         const fCell = fiveP != null ? colorByProvider(fiveP, formatPercentCell(fiveP), provFn) : dim(formatPlaceholderPercentCell());
         const wCell = weekP != null ? colorByProvider(weekP, formatPercentCell(weekP), provFn) : dim(formatPlaceholderPercentCell());
         quotaSection = `${dim("5h:")}${fCell} ` +
@@ -1527,11 +1514,9 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
   if (realQuota?.type === "codex") {
     const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
     if (main) {
-      // isResetPast 결과를 한 번만 계산하여 재사용, stale 시 null → '--' 표시
-      const fivePast = isResetPast(main.primary?.resets_at);
-      const weekPast = isResetPast(main.secondary?.resets_at);
-      const fiveP = fivePast ? null : clampPercent(main.primary?.used_percent ?? 0);
-      const weekP = weekPast ? null : clampPercent(main.secondary?.used_percent ?? 0);
+      // 캐시된 값 그대로 표시 (시간은 advanceToNextCycle이 처리)
+      const fiveP = main.primary?.used_percent != null ? clampPercent(main.primary.used_percent) : null;
+      const weekP = main.secondary?.used_percent != null ? clampPercent(main.secondary.used_percent) : null;
       const fiveReset = formatResetRemaining(main.primary?.resets_at, FIVE_HOUR_MS) || "n/a";
       const weekReset = formatResetRemainingDayHour(main.secondary?.resets_at, SEVEN_DAY_MS) || "n/a";
       const fCell = fiveP != null ? colorByProvider(fiveP, formatPercentCell(fiveP), provFn) : dim(formatPlaceholderPercentCell());
