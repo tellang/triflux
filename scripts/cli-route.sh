@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cli-route.sh v1.6 — CLI 라우팅 래퍼 (ai-scaffold 템플릿)
+# cli-route.sh v1.7 — CLI 라우팅 래퍼 (ai-scaffold 템플릿)
 # v1.0: 기본 라우팅 (Codex/Gemini/Claude 분기)
 # v1.1: stderr 분리, 출력 필터링, 타임아웃, MCP 프로필 지원
 # v1.2: effort 동적 라우팅, bg/fg 모드, Opus 직접 수행, Gemini 모델 분기, 실행 로그
@@ -7,7 +7,8 @@
 # v1.4: TFX_CLI_MODE 지원 (codex-only/gemini-only), CLI 미설치 자동 fallback
 # v1.5: MCP 인벤토리 캐싱 — 실제 서버 가용성 기반 동적 힌트 생성
 # v1.6: 토큰 사용량 추출 + sv-accumulator.json 누적
-VERSION="1.6"
+# v1.7: 배치 AIMD 전략 — 성공 시 +1, 실패/타임아웃 시 ×0.5, 수렴 감지
+VERSION="1.7"
 #
 # 설치: cp scripts/cli-route.sh ~/.claude/scripts/cli-route.sh
 #
@@ -35,8 +36,207 @@ GEMINI_BIN="${GEMINI_BIN:-$(command -v gemini 2>/dev/null || echo gemini)}"
 # ── 상수 ──
 MAX_STDOUT_BYTES=51200  # 50KB — Claude 컨텍스트 절약
 TIMESTAMP=$(date +%s)
-STDERR_LOG="/tmp/omc-route-${AGENT_TYPE}-${TIMESTAMP}-stderr.log"
-STDOUT_LOG="/tmp/omc-route-${AGENT_TYPE}-${TIMESTAMP}-stdout.log"
+STDERR_LOG="/tmp/tfx-route-${AGENT_TYPE}-${TIMESTAMP}-stderr.log"
+STDOUT_LOG="/tmp/tfx-route-${AGENT_TYPE}-${TIMESTAMP}-stdout.log"
+
+# fallback 시 원래 에이전트/CLI 인자 보존용 (수정 3: review fallback 프로필 유실 방지)
+ORIGINAL_AGENT=""
+ORIGINAL_CLI_ARGS=""
+
+# ── 크로스 세션 활성 에이전트 추적 ──
+# 활성 에이전트 레지스트리 경로
+ACTIVE_AGENTS_FILE="${HOME}/.claude/cache/active-agents.json"
+
+# 죽은 PID 및 좀비 정리
+cleanup_stale_agents() {
+  [[ ! -f "$ACTIVE_AGENTS_FILE" ]] && return
+  local now
+  now=$(date +%s)
+  local tmp="${ACTIVE_AGENTS_FILE}.tmp"
+  # jq가 있으면 사용, 없으면 건너뜀
+  if command -v jq &>/dev/null; then
+    jq --argjson now "$now" '
+      .agents |= map(select(
+        # PID 생존 확인은 셸에서 하므로 여기선 타임아웃만 체크
+        (.started + 1200) > $now
+      ))
+    ' "$ACTIVE_AGENTS_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$ACTIVE_AGENTS_FILE"
+    # 추가로 kill -0으로 죽은 PID 제거
+    local pids
+    pids=$(jq -r '.agents[].pid' "$ACTIVE_AGENTS_FILE" 2>/dev/null)
+    local pid
+    for pid in $pids; do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        jq --argjson pid "$pid" '.agents |= map(select(.pid != $pid))' "$ACTIVE_AGENTS_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$ACTIVE_AGENTS_FILE"
+      fi
+    done
+  fi
+}
+
+# 에이전트 등록
+register_agent() {
+  local pid="$1" cli="$2" agent="$3"
+  local now
+  now=$(date +%s)
+  cleanup_stale_agents
+  if command -v jq &>/dev/null; then
+    # 캐시 디렉토리가 없으면 생성
+    mkdir -p "$(dirname "$ACTIVE_AGENTS_FILE")"
+    if [[ -f "$ACTIVE_AGENTS_FILE" ]]; then
+      jq --argjson pid "$pid" --arg cli "$cli" --arg agent "$agent" --argjson started "$now" \
+        '.agents += [{"pid": $pid, "cli": $cli, "agent": $agent, "started": $started}]' \
+        "$ACTIVE_AGENTS_FILE" > "${ACTIVE_AGENTS_FILE}.tmp" && mv "${ACTIVE_AGENTS_FILE}.tmp" "$ACTIVE_AGENTS_FILE"
+    else
+      echo "{\"agents\":[{\"pid\":$pid,\"cli\":\"$cli\",\"agent\":\"$agent\",\"started\":$now}]}" > "$ACTIVE_AGENTS_FILE"
+    fi
+  fi
+}
+
+# 에이전트 등록 해제
+deregister_agent() {
+  local pid="$1"
+  if command -v jq &>/dev/null && [[ -f "$ACTIVE_AGENTS_FILE" ]]; then
+    jq --argjson pid "$pid" '.agents |= map(select(.pid != $pid))' \
+      "$ACTIVE_AGENTS_FILE" > "${ACTIVE_AGENTS_FILE}.tmp" && mv "${ACTIVE_AGENTS_FILE}.tmp" "$ACTIVE_AGENTS_FILE"
+  fi
+}
+
+# ── 배치 AIMD 전략 ──
+# 배치 설정 파일: ~/.claude/cache/batch-config.json
+# 초기 batch_size=2, 성공→+1 (AI), 실패/타임아웃→×0.5 (MD), 상한=8, 수렴=3연속 동일
+BATCH_CONFIG_FILE="${HOME}/.claude/cache/batch-config.json"
+
+# 현재 batch_size 반환 (파일 없으면 기본값 2)
+get_batch_size() {
+  if ! command -v jq &>/dev/null; then
+    echo "2"
+    return
+  fi
+  if [[ -f "$BATCH_CONFIG_FILE" ]]; then
+    local size
+    size=$(jq -r '.batch_size // 2' "$BATCH_CONFIG_FILE" 2>/dev/null)
+    # 숫자가 아니거나 비어 있으면 기본값
+    if [[ "$size" =~ ^[0-9]+$ ]]; then
+      echo "$size"
+    else
+      echo "2"
+    fi
+  else
+    echo "2"
+  fi
+}
+
+# 현재 활성 에이전트 수 반환 (active-agents.json 기반)
+get_active_agent_count() {
+  if ! command -v jq &>/dev/null; then
+    echo "0"
+    return
+  fi
+  if [[ -f "$ACTIVE_AGENTS_FILE" ]]; then
+    local count
+    count=$(jq '.agents | length' "$ACTIVE_AGENTS_FILE" 2>/dev/null)
+    echo "${count:-0}"
+  else
+    echo "0"
+  fi
+}
+
+# AIMD 결과 기록 및 batch_size 업데이트
+# 인자: result (success/failed/timeout), agent
+update_batch_result() {
+  local result="$1"
+  local agent="${2:-unknown}"
+
+  if ! command -v jq &>/dev/null; then
+    return
+  fi
+
+  mkdir -p "$(dirname "$BATCH_CONFIG_FILE")"
+
+  # 현재 설정 읽기 (없으면 초기값)
+  local current_size consecutive_same converged
+  if [[ -f "$BATCH_CONFIG_FILE" ]]; then
+    current_size=$(jq -r '.batch_size // 2' "$BATCH_CONFIG_FILE" 2>/dev/null)
+    consecutive_same=$(jq -r '.consecutive_same // 0' "$BATCH_CONFIG_FILE" 2>/dev/null)
+    converged=$(jq -r '.converged // false' "$BATCH_CONFIG_FILE" 2>/dev/null)
+  else
+    current_size=2
+    consecutive_same=0
+    converged="false"
+  fi
+
+  # 숫자 검증
+  [[ "$current_size" =~ ^[0-9]+$ ]] || current_size=2
+  [[ "$consecutive_same" =~ ^[0-9]+$ ]] || consecutive_same=0
+
+  # 수렴 상태면 batch_size 고정 (업데이트만 기록)
+  local new_size="$current_size"
+  if [[ "$converged" != "true" ]]; then
+    case "$result" in
+      success)
+        # Additive Increase: +1, 상한 8
+        new_size=$((current_size + 1))
+        if [[ $new_size -gt 8 ]]; then new_size=8; fi
+        ;;
+      failed|timeout)
+        # Multiplicative Decrease: ×0.5, 하한 1
+        new_size=$((current_size / 2))
+        if [[ $new_size -lt 1 ]]; then new_size=1; fi
+        ;;
+    esac
+  fi
+
+  # 수렴 판단: 3연속 동일하면 converged=true
+  if [[ $new_size -eq $current_size ]]; then
+    consecutive_same=$((consecutive_same + 1))
+  else
+    consecutive_same=0
+  fi
+
+  local new_converged="false"
+  if [[ $consecutive_same -ge 3 ]]; then
+    new_converged="true"
+  fi
+
+  local now
+  now=$(date +%s)
+
+  # history에 추가 (최대 50건 유지) 후 batch_size 업데이트
+  local tmp="${BATCH_CONFIG_FILE}.tmp"
+  if [[ -f "$BATCH_CONFIG_FILE" ]]; then
+    jq --argjson now "$now" \
+       --arg agent "$agent" \
+       --arg result "$result" \
+       --argjson batch_at_time "$current_size" \
+       --argjson new_size "$new_size" \
+       --argjson consecutive_same "$consecutive_same" \
+       --argjson converged "$new_converged" \
+       '
+      .history += [{"timestamp": $now, "agent": $agent, "result": $result, "batch_at_time": $batch_at_time}] |
+      .history = (.history | if length > 50 then .[-50:] else . end) |
+      .batch_size = $new_size |
+      .consecutive_same = $consecutive_same |
+      .converged = $converged
+    ' "$BATCH_CONFIG_FILE" > "$tmp" 2>/dev/null && mv "$tmp" "$BATCH_CONFIG_FILE"
+  else
+    # 파일 신규 생성
+    jq -n \
+      --argjson now "$now" \
+      --arg agent "$agent" \
+      --arg result "$result" \
+      --argjson new_size "$new_size" \
+      --argjson consecutive_same "$consecutive_same" \
+      --argjson converged "$new_converged" \
+      '{
+        batch_size: $new_size,
+        history: [{"timestamp": $now, "agent": $agent, "result": $result, "batch_at_time": 2}],
+        consecutive_same: $consecutive_same,
+        converged: $converged
+      }' > "$BATCH_CONFIG_FILE" 2>/dev/null || true
+  fi
+
+  echo "[cli-route] AIMD: $result → batch_size $current_size→$new_size (consecutive_same=$consecutive_same, converged=$new_converged)" >&2
+}
 
 # ── 라우팅 테이블 ──
 # 반환: CLI_CMD, CLI_ARGS, CLI_TYPE, CLI_EFFORT, DEFAULT_TIMEOUT, RUN_MODE, OPUS_OVERSIGHT
@@ -373,10 +573,13 @@ apply_cli_mode() {
           apply_cli_mode
           return
         else
+          # 원래 에이전트 및 MCP 프로필 정보 보존
+          ORIGINAL_AGENT="${AGENT_TYPE}"
+          ORIGINAL_CLI_ARGS="$CLI_ARGS"
           CLI_TYPE="claude-native"
           CLI_CMD=""
           CLI_ARGS=""
-          echo "[cli-route] codex/gemini 모두 미설치: $AGENT_TYPE → claude-native fallback" >&2
+          echo "[cli-route] codex/gemini 모두 미설치: $AGENT_TYPE → claude-native fallback (원래 프로필: $MCP_PROFILE)" >&2
         fi
       elif [[ "$CLI_TYPE" == "gemini" ]] && ! command -v "$GEMINI_BIN" &>/dev/null; then
         if command -v "$CODEX_BIN" &>/dev/null; then
@@ -384,10 +587,13 @@ apply_cli_mode() {
           apply_cli_mode
           return
         else
+          # 원래 에이전트 및 MCP 프로필 정보 보존
+          ORIGINAL_AGENT="${AGENT_TYPE}"
+          ORIGINAL_CLI_ARGS="$CLI_ARGS"
           CLI_TYPE="claude-native"
           CLI_CMD=""
           CLI_ARGS=""
-          echo "[cli-route] codex/gemini 모두 미설치: $AGENT_TYPE → claude-native fallback" >&2
+          echo "[cli-route] codex/gemini 모두 미설치: $AGENT_TYPE → claude-native fallback (원래 프로필: $MCP_PROFILE)" >&2
         fi
       fi
       ;;
@@ -764,6 +970,9 @@ truncate_output() {
 
 # ── 메인 실행 ──
 main() {
+  # 종료 시 활성 에이전트 레지스트리에서 자동 제거
+  trap 'deregister_agent $$' EXIT
+
   route_agent "$AGENT_TYPE"
 
   # CLI 모드 오버라이드 적용 (tfx-codex/tfx-gemini 또는 auto-fallback)
@@ -782,12 +991,12 @@ main() {
     TIMEOUT_SEC="$DEFAULT_TIMEOUT"
   fi
 
-  # kteam 안정화: Gemini 에이전트 기본 타임아웃 축소 (사용자 미지정 시만)
+  # kteam 안정화: Gemini 에이전트 기본 타임아웃 하한 적용 (사용자 미지정 시만)
   if [[ -z "$USER_TIMEOUT" ]]; then
     case "$AGENT_TYPE" in
       designer|writer)
-        if [[ "$DEFAULT_TIMEOUT" -gt 60 ]]; then
-          TIMEOUT_SEC=60
+        if [[ "$DEFAULT_TIMEOUT" -gt 300 ]]; then
+          TIMEOUT_SEC=300
         fi
         ;;
     esac
@@ -808,6 +1017,12 @@ main() {
     echo "RUN_MODE=$RUN_MODE"
     echo "OPUS_OVERSIGHT=$OPUS_OVERSIGHT"
     echo "TIMEOUT=$TIMEOUT_SEC"
+    echo "MCP_PROFILE=$MCP_PROFILE"
+    # fallback 시 원래 에이전트/MCP 프로필 정보를 함께 출력 (수정 3)
+    if [[ -n "$ORIGINAL_AGENT" ]]; then
+      echo "ORIGINAL_AGENT=$ORIGINAL_AGENT"
+      echo "ORIGINAL_CLI_ARGS=$ORIGINAL_CLI_ARGS"
+    fi
     echo "PROMPT=$PROMPT"
     echo "--- Claude Task($model) 에이전트로 위임하세요 ---"
     exit 0
@@ -824,6 +1039,9 @@ main() {
   # 메타정보 출력 (stderr로)
   echo "[cli-route] type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE timeout=${TIMEOUT_SEC}s" >&2
   echo "[cli-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE stderr_log=$STDERR_LOG" >&2
+
+  # 크로스 세션 활성 에이전트 레지스트리에 등록 (수정 4)
+  register_agent $$ "$CLI_TYPE" "$AGENT_TYPE"
 
   # CLI 실행 (stderr 분리 + 타임아웃 + 소요시간 측정)
   local exit_code=0
@@ -904,6 +1122,15 @@ main() {
   # 성공 시 토큰 누적
   if [[ $exit_code -eq 0 ]]; then
     accumulate_tokens "$CLI_TYPE" "$input_tokens" "$output_tokens" || true
+  fi
+
+  # AIMD 배치 크기 업데이트 (exit code 기반)
+  if [[ $exit_code -eq 0 ]]; then
+    update_batch_result "success" "$AGENT_TYPE" || true
+  elif [[ $exit_code -eq 124 ]]; then
+    update_batch_result "timeout" "$AGENT_TYPE" || true
+  else
+    update_batch_result "failed" "$AGENT_TYPE" || true
   fi
 
   # CLI 이슈 자동 수집
