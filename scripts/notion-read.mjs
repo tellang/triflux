@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// notion-read.mjs v1.1 — Notion 대형 페이지 리더 (Codex/Gemini/Claude MCP 위임)
+// notion-read.mjs v1.2 — Notion 대형 페이지 리더 (Codex/Gemini/Claude MCP 위임)
 //
 // Codex/Gemini/Claude CLI에 설치된 Notion MCP를 활용하여 대형 페이지를 마크다운으로 추출.
 // 폴백 체인: Codex(무료) → Gemini(무료) → Claude(최후) → 에러
+// 이관 모드(--delegate): Claude(notion-guest 우선) 단독 실행 + 결과 파일 저장
 //
 // 사용법:
 //   node notion-read.mjs <notion-url-or-page-id> [옵션]
@@ -14,27 +15,28 @@
 //   --cli, -c <codex|gemini> CLI 강제 지정 (기본: 자동 + 폴백)
 //   --depth, -d <n>          중첩 블록 최대 깊이 (기본: 3)
 //   --guest                  notion-guest 통합 사용 (기본: notion)
+//   --delegate               Claude 이관 모드 (notion-guest 우선, 파일 저장)
 
-import { execSync } from "child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync, unlinkSync } from "fs";
-import { join, dirname } from "path";
-import { homedir, tmpdir } from "os";
+import { execSync } from 'child_process';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync, unlinkSync } from 'fs';
+import { join, dirname, resolve } from 'path';
+import { homedir, tmpdir } from 'os';
 
-const VERSION = "1.1";
-const CLAUDE_DIR = join(homedir(), ".claude");
-const MCP_CACHE = join(CLAUDE_DIR, "cache", "mcp-inventory.json");
-const LOG_FILE = join(CLAUDE_DIR, "logs", "cli-route-stats.jsonl");
-const ACC_FILE = join(CLAUDE_DIR, "cache", "sv-accumulator.json");
+const VERSION = '1.2';
+const CLAUDE_DIR = join(homedir(), '.claude');
+const MCP_CACHE = join(CLAUDE_DIR, 'cache', 'mcp-inventory.json');
+const LOG_FILE = join(CLAUDE_DIR, 'logs', 'cli-route-stats.jsonl');
+const ACC_FILE = join(CLAUDE_DIR, 'cache', 'sv-accumulator.json');
 
 // ── ANSI 색상 ──
-const AMBER = "\x1b[38;5;214m";
-const GREEN = "\x1b[38;5;82m";
-const RED = "\x1b[38;5;196m";
-const YELLOW = "\x1b[33m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
-const GRAY = "\x1b[38;5;245m";
+const AMBER = '\x1b[38;5;214m';
+const GREEN = '\x1b[38;5;82m';
+const RED = '\x1b[38;5;196m';
+const YELLOW = '\x1b[33m';
+const DIM = '\x1b[2m';
+const BOLD = '\x1b[1m';
+const RESET = '\x1b[0m';
+const GRAY = '\x1b[38;5;245m';
 
 // ── URL 파싱 ──
 function parseNotionUrl(input) {
@@ -165,24 +167,24 @@ ${mcpServer} MCP 서버의 도구를 사용하라.
 }
 
 // ── CLI 실행 (임시 파일 + execSync — Windows .cmd 호환) ──
-function runWithCli(cliType, prompt, timeout) {
-  const cliName = cliType === "claude" ? "claude" : cliType === "codex" ? "codex" : "gemini";
+function runWithCli(cliType, prompt, timeout, runMode = 'fg') {
+  const cliName = cliType === 'claude' ? 'claude' : cliType === 'codex' ? 'codex' : 'gemini';
   if (!cliExists(cliName)) {
-    return { success: false, output: "", error: `${cliType} CLI 미설치`, cli: cliType };
+    return { success: false, output: '', error: `${cliType} CLI 미설치`, cli: cliType };
   }
 
   // 프롬프트를 임시 파일에 저장 (shell escaping 회피)
   const promptFile = join(tmpdir(), `notion-prompt-${Date.now()}.md`);
-  writeFileSync(promptFile, prompt, "utf8");
-  const promptPath = promptFile.replace(/\\/g, "/");
+  writeFileSync(promptFile, prompt, 'utf8');
+  const promptPath = promptFile.replace(/\\/g, '/');
 
   // CLI에 전달할 짧은 메타 프롬프트
   const metaPrompt = `Read the file at ${promptPath} and execute all instructions in it exactly as described. Output only the final markdown result.`;
 
   let cmd;
-  if (cliType === "codex") {
+  if (cliType === 'codex') {
     cmd = `codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "${metaPrompt}"`;
-  } else if (cliType === "gemini") {
+  } else if (cliType === 'gemini') {
     cmd = `gemini -m gemini-3-flash-preview -y --allowed-mcp-server-names notion,notion-guest --prompt "${metaPrompt}"`;
   } else {
     // Claude CLI — print 모드 (MCP 도구 자동 접근)
@@ -192,16 +194,16 @@ function runWithCli(cliType, prompt, timeout) {
   console.error(`${AMBER}▸${RESET} ${cliType}로 실행 중... (timeout: ${timeout}s)`);
   const startTime = Date.now();
 
-  let stdout = "";
-  let stderr = "";
+  let stdout = '';
+  let stderr = '';
   let exitCode = 0;
 
   try {
     stdout = execSync(cmd, {
-      encoding: "utf8",
+      encoding: 'utf8',
       timeout: (timeout + 30) * 1000,
       maxBuffer: 10 * 1024 * 1024,
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ['pipe', 'pipe', 'pipe'],
       cwd: process.cwd(),
     });
   } catch (e) {
@@ -216,7 +218,7 @@ function runWithCli(cliType, prompt, timeout) {
   try { unlinkSync(promptFile); } catch {}
 
   // 실행 로그 기록
-  logExecution(cliType, exitCode, elapsed, timeout, stderr);
+  logExecution(cliType, exitCode, elapsed, timeout, stderr, runMode);
 
   if (exitCode === 0 && stdout) {
     return { success: true, output: stdout, cli: cliType, elapsed };
@@ -263,30 +265,30 @@ function cleanCodexOutput(raw) {
 }
 
 // ── 실행 로그 (cli-route.sh 호환) ──
-function logExecution(cliType, exitCode, elapsed, timeout, stderr) {
+function logExecution(cliType, exitCode, elapsed, timeout, stderr, runMode = 'fg') {
   try {
     const logDir = dirname(LOG_FILE);
     if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
 
     const ts = new Date().toISOString();
-    const status = exitCode === 0 ? "success" : exitCode === 124 ? "timeout" : "failed";
+    const status = exitCode === 0 ? 'success' : exitCode === 124 ? 'timeout' : 'failed';
     const entry = JSON.stringify({
       ts,
-      agent: "notion-read",
+      agent: 'notion-read',
       cli: cliType,
-      effort: cliType === "codex" ? "high" : cliType === "claude" ? "sonnet" : "flash",
-      run_mode: "fg",
-      opus_oversight: "false",
+      effort: cliType === 'codex' ? 'high' : cliType === 'claude' ? 'sonnet' : 'flash',
+      run_mode: runMode,
+      opus_oversight: 'false',
       status,
       exit_code: exitCode,
       elapsed_sec: elapsed,
       timeout_sec: timeout,
-      mcp_profile: "notion",
+      mcp_profile: runMode === 'delegate' ? 'notion-guest' : 'notion',
       input_tokens: 0,
       output_tokens: 0,
       total_tokens: 0,
     });
-    appendFileSync(LOG_FILE, entry + "\n");
+    appendFileSync(LOG_FILE, entry + '\n');
   } catch {}
 }
 
@@ -309,6 +311,7 @@ function main() {
     --depth, -d <n>           중첩 블록 최대 깊이 (기본: 3)
     --comments                블록/페이지 댓글 포함
     --guest                   notion-guest 통합 사용
+    --delegate                Claude 이관 모드 (notion-guest 우선, 파일 저장)
 
   ${BOLD}폴백 체인${RESET}
     Codex(무료) → Gemini(무료) → Claude(최후) → 에러
@@ -318,6 +321,8 @@ function main() {
     tfx notion-read abc123def456... --output page.md --comments
     tfx notion-read abc123def456... --cli gemini --timeout 900
     tfx notion-read abc123def456... --guest --comments
+    tfx notion-read abc123def456... --delegate
+    tfx notion-read abc123def456... --delegate --output .notion-cache/page.md
 `);
     return;
   }
@@ -330,6 +335,7 @@ function main() {
   let depth = 3;
   let useGuest = false;
   let includeComments = false;
+  let delegateMode = false;
 
   for (let i = 1; i < args.length; i++) {
     switch (args[i]) {
@@ -355,6 +361,9 @@ function main() {
       case "--comments":
         includeComments = true;
         break;
+      case '--delegate':
+        delegateMode = true;
+        break;
     }
   }
 
@@ -368,7 +377,62 @@ function main() {
   console.error(
     `${AMBER}▸${RESET} 페이지: ${parsed.pageId}${parsed.blockId ? ` (블록: ${parsed.blockId})` : ""}`,
   );
-  console.error(`${GRAY}  통합: ${useGuest ? "notion-guest" : "notion"} | 깊이: ${depth} | 댓글: ${includeComments ? "O" : "X"} | 타임아웃: ${timeout}s${RESET}`);
+  console.error(`${GRAY}  통합: ${delegateMode ? 'notion-guest(우선)' : useGuest ? 'notion-guest' : 'notion'} | 깊이: ${depth} | 댓글: ${includeComments ? 'O' : 'X'} | 타임아웃: ${timeout}s${RESET}`);
+
+  // 프롬프트 생성
+  const prompt = buildPrompt(parsed.pageId, parsed.blockId, depth, useGuest, includeComments);
+  // Claude 폴백용: notion/notion-guest 양쪽 시도 프롬프트
+  const claudePrompt = buildPrompt(parsed.pageId, parsed.blockId, depth, false, includeComments)
+    .replace(
+      'notion MCP 서버의 도구를 사용하라.',
+      '가능하면 notion-guest MCP 서버를 먼저 사용하라. 실패하면 notion MCP 서버를 사용하라.',
+    );
+
+  // delegate 모드: Claude 단독 + notion-guest 우선 + 파일 저장
+  if (delegateMode) {
+    console.error(`${AMBER}▸${RESET} delegate 모드 활성화: Claude로 notion-guest 우선 접근`);
+
+    const delegatePrompt = `${claudePrompt}
+
+### delegate 모드 추가 지시
+- notion-guest MCP 서버를 최우선으로 먼저 시도하라.
+- notion-guest가 실패하거나 미구성일 때만 notion 서버로 폴백하라.
+- 도구 호출 결과를 바탕으로 최종 마크다운만 출력하라.`;
+
+    const delegateResult = runWithCli('claude', delegatePrompt, timeout, 'delegate');
+    if (!delegateResult.success) {
+      console.error(`${RED}✗${RESET} delegate 모드 실패: ${delegateResult.error}`);
+      if (delegateResult.stderr) {
+        console.error(`${GRAY}  stderr: ${delegateResult.stderr.slice(0, 250)}${RESET}`);
+      }
+      console.error(`${GRAY}  대안: --delegate 없이 실행해 기존 폴백 체인을 사용하세요.${RESET}`);
+      console.error(`${GRAY}  예: tfx notion-read ${parsed.pageId} --comments${RESET}`);
+      process.exit(1);
+    }
+
+    const delegateOutput = delegateResult.output.trim();
+    const isDelegateFailureOutput =
+      (delegateOutput.includes('조회 실패') || delegateOutput.includes('읽기 실패') || delegateOutput.includes('not_found')) &&
+      delegateOutput.length < 500;
+
+    if (delegateOutput.length <= 100 || isDelegateFailureOutput) {
+      console.error(`${RED}✗${RESET} delegate 모드 실패: Claude 결과가 비정상적입니다.`);
+      console.error(`${GRAY}  대안: --delegate 없이 실행해 Codex/Gemini/Claude 폴백 체인을 사용하세요.${RESET}`);
+      process.exit(1);
+    }
+
+    const delegateTarget = outputFile || join('.notion-cache', `${parsed.pageId}.md`);
+    const delegateDir = dirname(delegateTarget);
+    if (delegateDir && delegateDir !== '.' && !existsSync(delegateDir)) {
+      mkdirSync(delegateDir, { recursive: true });
+    }
+    writeFileSync(delegateTarget, delegateOutput, 'utf8');
+
+    const savedPath = resolve(delegateTarget);
+    console.error(`${GREEN}✓${RESET} delegate 결과 저장: ${savedPath}`);
+    console.error(`${GRAY}  후속 작업 참조 경로: ${savedPath}${RESET}`);
+    return;
+  }
 
   // MCP 가용성 확인
   const mcpAvail = getNotionMcpClis(useGuest);
@@ -399,15 +463,6 @@ function main() {
     // Claude는 항상 최종 폴백 (자체 Notion MCP — notion-guest 포함)
     cliOrder.push("claude");
   }
-
-  // 프롬프트 생성
-  const prompt = buildPrompt(parsed.pageId, parsed.blockId, depth, useGuest, includeComments);
-  // Claude 폴백용: notion/notion-guest 양쪽 시도 프롬프트
-  const claudePrompt = buildPrompt(parsed.pageId, parsed.blockId, depth, false, includeComments)
-    .replace(
-      "404 에러가 나면 notion-guest 서버로 재시도하라.",
-      "404 에러가 나면 반드시 notion-guest 서버로 재시도하라. notion, notion-guest, claude_ai_Notion 등 사용 가능한 모든 Notion MCP 서버를 시도하라.",
-    );
 
   // 실행 + 폴백
   let lastResult = null;
