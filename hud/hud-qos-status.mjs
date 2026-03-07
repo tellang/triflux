@@ -808,7 +808,7 @@ function scheduleClaudeUsageRefresh() {
 
   try {
     const child = spawn(process.execPath, [scriptPath, CLAUDE_REFRESH_FLAG], {
-      detached: process.platform !== "win32",
+      detached: true,
       stdio: "ignore",
       windowsHide: true,
     });
@@ -1169,7 +1169,7 @@ function scheduleGeminiQuotaRefresh(accountId) {
       process.execPath,
       [scriptPath, GEMINI_REFRESH_FLAG, "--account", accountId || "gemini-main"],
       {
-        detached: process.platform !== "win32",
+        detached: true,
         stdio: "ignore",
         windowsHide: true,
       },
@@ -1208,7 +1208,7 @@ function scheduleCodexRateLimitRefresh() {
   if (!scriptPath) return;
   try {
     const child = spawn(process.execPath, [scriptPath, CODEX_REFRESH_FLAG], {
-      detached: process.platform !== "win32",
+      detached: true,
       stdio: "ignore",
       windowsHide: true,
     });
@@ -1247,7 +1247,7 @@ function scheduleGeminiSessionRefresh() {
   if (!scriptPath) return;
   try {
     const child = spawn(process.execPath, [scriptPath, GEMINI_SESSION_REFRESH_FLAG], {
-      detached: process.platform !== "win32",
+      detached: true,
       stdio: "ignore",
       windowsHide: true,
     });
