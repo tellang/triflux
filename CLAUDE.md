@@ -42,7 +42,7 @@ Type: 한국어 설명 (50자 이내)
 triflux/
 ├── bin/           # CLI 진입점 (triflux.mjs, tfx-setup.mjs, tfx-doctor.mjs)
 ├── skills/        # Claude Code 스킬 (tfx-auto, tfx-codex, tfx-gemini, tfx-setup)
-├── scripts/       # cli-route.sh, setup.mjs, mcp-check.mjs
+├── scripts/       # tfx-route.sh, setup.mjs, mcp-check.mjs
 ├── hooks/         # 세션 시작 훅
 ├── hud/           # HUD 상태 표시줄
 ├── docs/          # 문서, 에셋

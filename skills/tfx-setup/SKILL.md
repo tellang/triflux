@@ -74,7 +74,7 @@ Bash("triflux doctor")
 
 | 항목 | 상태 |
 |------|------|
-| cli-route.sh | ✅ v1.5 |
+| tfx-route.sh | ✅ v2.0 |
 | HUD (hud-qos-status.mjs) | ✅ v1.7 |
 | HUD 설정 (settings.json) | ✅ statusLine 등록됨 |
 | Codex CLI | ✅ / ⚠️ 미설치 (선택) |

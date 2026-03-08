@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // MCP 인벤토리 — 백그라운드 비동기 실행
-// Codex/Gemini의 MCP 서버 상태를 캐싱하여 cli-route.sh가 동적 힌트 생성에 사용
+// Codex/Gemini의 MCP 서버 상태를 캐싱하여 tfx-route.sh가 동적 힌트 생성에 사용
 //
 // 출력: ~/.claude/cache/mcp-inventory.json
-// 사용: cli-route.sh의 get_mcp_hint()에서 읽음
+// 사용: tfx-route.sh의 get_mcp_hint()에서 읽음
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";

@@ -27,7 +27,7 @@ argument-hint: "[--fix|--reset]"
 
 `triflux doctor`를 실행하여 다음을 진단합니다:
 
-- cli-route.sh 설치 상태
+- tfx-route.sh 설치 상태
 - HUD 설치 및 설정 상태
 - Codex/Gemini/Claude CLI 경로 (크로스 셸)
 - 스킬 설치 상태
@@ -39,7 +39,7 @@ argument-hint: "[--fix|--reset]"
 
 진단 전에 자동 수정을 시도합니다:
 
-1. cli-route.sh, HUD, 스킬 파일 재동기화
+1. tfx-route.sh, HUD, 스킬 파일 재동기화
 2. 에러/손상된 캐시 파일 정리
 3. 수정 완료 후 전체 진단 실행 → 결과 보고
 

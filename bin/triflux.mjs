@@ -145,7 +145,7 @@ function checkCliCrossShell(cmd, installHint) {
     return 1;
   }
   if (bashMissing) {
-    warn("bash에서 미발견 — cli-route.sh 실행 불가");
+    warn("bash에서 미발견 — tfx-route.sh 실행 불가");
     info('→ ~/.bashrc에 추가: export PATH="$PATH:$APPDATA/npm"');
     return 1;
   }
@@ -158,9 +158,9 @@ function cmdSetup() {
   console.log(`\n${BOLD}triflux setup${RESET}\n`);
 
   syncFile(
-    join(PKG_ROOT, "scripts", "cli-route.sh"),
-    join(CLAUDE_DIR, "scripts", "cli-route.sh"),
-    "cli-route.sh"
+    join(PKG_ROOT, "scripts", "tfx-route.sh"),
+    join(CLAUDE_DIR, "scripts", "tfx-route.sh"),
+    "tfx-route.sh"
   );
 
   syncFile(
@@ -173,6 +173,18 @@ function cmdSetup() {
     join(PKG_ROOT, "scripts", "notion-read.mjs"),
     join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
     "notion-read.mjs"
+  );
+
+  syncFile(
+    join(PKG_ROOT, "scripts", "tfx-route-post.mjs"),
+    join(CLAUDE_DIR, "scripts", "tfx-route-post.mjs"),
+    "tfx-route-post.mjs"
+  );
+
+  syncFile(
+    join(PKG_ROOT, "scripts", "tfx-batch-stats.mjs"),
+    join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
+    "tfx-batch-stats.mjs"
   );
 
   // 스킬 동기화 (~/.claude/skills/{name}/SKILL.md)
@@ -323,9 +335,9 @@ function cmdDoctor(options = {}) {
   if (fix) {
     section("Auto Fix");
     syncFile(
-      join(PKG_ROOT, "scripts", "cli-route.sh"),
-      join(CLAUDE_DIR, "scripts", "cli-route.sh"),
-      "cli-route.sh"
+      join(PKG_ROOT, "scripts", "tfx-route.sh"),
+      join(CLAUDE_DIR, "scripts", "tfx-route.sh"),
+      "tfx-route.sh"
     );
     syncFile(
       join(PKG_ROOT, "hud", "hud-qos-status.mjs"),
@@ -375,9 +387,9 @@ function cmdDoctor(options = {}) {
 
   let issues = 0;
 
-  // 1. cli-route.sh
-  section("cli-route.sh");
-  const routeSh = join(CLAUDE_DIR, "scripts", "cli-route.sh");
+  // 1. tfx-route.sh
+  section("tfx-route.sh");
+  const routeSh = join(CLAUDE_DIR, "scripts", "tfx-route.sh");
   if (existsSync(routeSh)) {
     const ver = getVersion(routeSh);
     ok(`설치됨 ${ver ? `${DIM}v${ver}${RESET}` : ""}`);
@@ -676,7 +688,7 @@ function cmdUpdate() {
     return;
   }
 
-  // 3. setup 재실행 (cli-route.sh, HUD, 스킬 동기화)
+  // 3. setup 재실행 (tfx-route.sh, HUD, 스킬 동기화)
   if (updated) {
     console.log("");
     // 업데이트 후 새 버전 읽기
@@ -742,10 +754,10 @@ function cmdList() {
 }
 
 function cmdVersion() {
-  const routeVer = getVersion(join(CLAUDE_DIR, "scripts", "cli-route.sh"));
+  const routeVer = getVersion(join(CLAUDE_DIR, "scripts", "tfx-route.sh"));
   const hudVer = getVersion(join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"));
   console.log(`\n  ${AMBER}${BOLD}⬡ triflux${RESET} ${WHITE_BRIGHT}v${PKG.version}${RESET}`);
-  if (routeVer) console.log(`  ${GRAY}cli-route${RESET}  v${routeVer}`);
+  if (routeVer) console.log(`  ${GRAY}tfx-route${RESET}  v${routeVer}`);
   if (hudVer) console.log(`  ${GRAY}hud${RESET}        v${hudVer}`);
   console.log("");
 }
