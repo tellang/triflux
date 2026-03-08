@@ -254,152 +254,152 @@ route_agent() {
   case "$agent" in
     # ─── 구현 레인 ───
 
-    # Codex — 코드 구현 (effort: high, 360s, fg — 후속 태스크가 의존)
+    # Codex — 코드 구현 (effort: high, 720s, fg — 후속 태스크가 의존)
     executor)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="exec ${codex_base}"
       CLI_EFFORT="high"
-      DEFAULT_TIMEOUT=360
+      DEFAULT_TIMEOUT=720
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
-    # Codex — 빌드 수정 (effort: fast, 180s, fg — 빌드 통과 확인 필요)
+    # Codex — 빌드 수정 (effort: fast, 360s, fg — 빌드 통과 확인 필요)
     build-fixer)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile fast exec ${codex_base}"
       CLI_EFFORT="fast"
-      DEFAULT_TIMEOUT=180
+      DEFAULT_TIMEOUT=360
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
-    # Codex — 디버깅 (effort: high, 300s, bg — 분석 결과 나중에 수집)
+    # Codex — 디버깅 (effort: high, 600s, bg — 분석 결과 나중에 수집)
     debugger)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="exec ${codex_base}"
       CLI_EFFORT="high"
-      DEFAULT_TIMEOUT=300
+      DEFAULT_TIMEOUT=600
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
-    # Codex — 자율 실행 (effort: xhigh, 900s, bg — 장시간 독립 수행)
+    # Codex — 자율 실행 (effort: xhigh, 2400s, bg — 장시간 독립 수행)
     deep-executor)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile xhigh exec ${codex_base}"
       CLI_EFFORT="xhigh"
-      DEFAULT_TIMEOUT=1200
+      DEFAULT_TIMEOUT=2400
       RUN_MODE="bg"
       OPUS_OVERSIGHT="true"
       ;;
 
     # ─── 설계/분석 레인 ───
 
-    # Codex — 아키텍처 (effort: xhigh, 900s, bg — Opus가 설계 품질 검증)
+    # Codex — 아키텍처 (effort: xhigh, 2400s, bg — Opus가 설계 품질 검증)
     architect)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile xhigh exec ${codex_base}"
       CLI_EFFORT="xhigh"
-      DEFAULT_TIMEOUT=1200
+      DEFAULT_TIMEOUT=2400
       RUN_MODE="bg"
       OPUS_OVERSIGHT="true"
       ;;
-    # Codex — 태스크 분해 (effort: xhigh, 900s, fg — Opus가 검증)
+    # Codex — 태스크 분해 (effort: xhigh, 2400s, fg — Opus가 검증)
     planner)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile xhigh exec ${codex_base}"
       CLI_EFFORT="xhigh"
-      DEFAULT_TIMEOUT=1200
+      DEFAULT_TIMEOUT=2400
       RUN_MODE="fg"
       OPUS_OVERSIGHT="true"
       ;;
-    # Codex — 비판적 검토 (effort: xhigh, 900s, bg — Opus가 비판 품질 검증)
+    # Codex — 비판적 검토 (effort: xhigh, 2400s, bg — Opus가 비판 품질 검증)
     critic)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile xhigh exec ${codex_base}"
       CLI_EFFORT="xhigh"
-      DEFAULT_TIMEOUT=1200
+      DEFAULT_TIMEOUT=2400
       RUN_MODE="bg"
       OPUS_OVERSIGHT="true"
       ;;
-    # Codex — 요구사항 분석 (effort: xhigh, 900s, fg — Opus가 검증)
+    # Codex — 요구사항 분석 (effort: xhigh, 2400s, fg — Opus가 검증)
     analyst)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile xhigh exec ${codex_base}"
       CLI_EFFORT="xhigh"
-      DEFAULT_TIMEOUT=1200
+      DEFAULT_TIMEOUT=2400
       RUN_MODE="fg"
       OPUS_OVERSIGHT="true"
       ;;
 
     # ─── 리뷰 레인 ───
 
-    # Codex — 코드 리뷰 (exec review, effort: thorough, 600s, bg — 전용 리뷰 커맨드)
+    # Codex — 코드 리뷰 (exec review, effort: thorough, 1200s, bg — 전용 리뷰 커맨드)
     code-reviewer)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile thorough exec ${codex_base} review"
       CLI_EFFORT="thorough"
-      DEFAULT_TIMEOUT=600
+      DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
-    # Codex — 보안 리뷰 (exec review, effort: thorough, 600s, bg — Opus 검증 권장)
+    # Codex — 보안 리뷰 (exec review, effort: thorough, 1200s, bg — Opus 검증 권장)
     security-reviewer)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile thorough exec ${codex_base} review"
       CLI_EFFORT="thorough"
-      DEFAULT_TIMEOUT=600
+      DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="true"
       ;;
-    # Codex — 품질 리뷰 (exec review, effort: thorough, 600s, bg — 전용 리뷰 커맨드)
+    # Codex — 품질 리뷰 (exec review, effort: thorough, 1200s, bg — 전용 리뷰 커맨드)
     quality-reviewer)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile thorough exec ${codex_base} review"
       CLI_EFFORT="thorough"
-      DEFAULT_TIMEOUT=600
+      DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
 
     # ─── 리서치 레인 ───
 
-    # Codex — 일반 리서치 (effort: high, 480s, bg — 빠른 검색+요약)
+    # Codex — 일반 리서치 (effort: high, 960s, bg — 빠른 검색+요약)
     scientist)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="exec ${codex_base}"
       CLI_EFFORT="high"
-      DEFAULT_TIMEOUT=480
+      DEFAULT_TIMEOUT=960
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
-    # Codex — 심층 리서치 (effort: thorough, 1200s, bg — 논문 심층 분석)
+    # Codex — 심층 리서치 (effort: thorough, 2400s, bg — 논문 심층 분석)
     scientist-deep)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="--profile thorough exec ${codex_base}"
       CLI_EFFORT="thorough"
-      DEFAULT_TIMEOUT=1200
+      DEFAULT_TIMEOUT=2400
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
-    # Codex — 문서 조사 (effort: high, 480s, bg — 웹 검색 폴백 체인)
+    # Codex — 문서 조사 (effort: high, 960s, bg — 웹 검색 폴백 체인)
     document-specialist)
       CLI_TYPE="codex"
       CLI_CMD="codex"
       CLI_ARGS="exec ${codex_base}"
       CLI_EFFORT="high"
-      DEFAULT_TIMEOUT=480
+      DEFAULT_TIMEOUT=960
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
