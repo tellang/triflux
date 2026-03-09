@@ -38,6 +38,38 @@ STDERR_LOG="/tmp/tfx-route-${AGENT_TYPE}-${TIMESTAMP}-stderr.log"
 STDOUT_LOG="/tmp/tfx-route-${AGENT_TYPE}-${TIMESTAMP}-stdout.log"
 TFX_TMP="${TMPDIR:-/tmp}"
 
+# ── Hub 브릿지 (선택적 — Hub 미실행 시 무시) ──
+# 패키지 내 브릿지 탐색 (npm global / git local 모두 대응)
+find_bridge() {
+  # 1. 환경변수 지정
+  [[ -n "${TFX_BRIDGE:-}" && -f "$TFX_BRIDGE" ]] && echo "$TFX_BRIDGE" && return
+  # 2. 같은 패키지 내
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local pkg_bridge="${script_dir}/../hub/bridge.mjs"
+  [[ -f "$pkg_bridge" ]] && echo "$pkg_bridge" && return
+  # 3. 설치된 triflux 패키지
+  local npm_bridge
+  npm_bridge="$(npm root -g 2>/dev/null)/triflux/hub/bridge.mjs"
+  [[ -f "$npm_bridge" ]] && echo "$npm_bridge" && return
+  echo ""
+}
+BRIDGE_BIN="$(find_bridge)"
+HUB_ENABLED="false"
+if [[ -n "$BRIDGE_BIN" ]]; then
+  # Hub 핑 (3초 타임아웃, 실패 시 무시)
+  HUB_PING=$(node "$BRIDGE_BIN" ping 2>/dev/null || echo '{"ok":false}')
+  if echo "$HUB_PING" | grep -q '"ok":true'; then
+    HUB_ENABLED="true"
+  fi
+fi
+
+# Hub 브릿지 래퍼 (Hub 꺼져있으면 아무것도 안 함)
+hub_bridge() {
+  [[ "$HUB_ENABLED" != "true" ]] && return 0
+  node "$BRIDGE_BIN" "$@" 2>/dev/null || true
+}
+
 # fallback 시 원래 에이전트 정보 보존
 ORIGINAL_AGENT=""
 ORIGINAL_CLI_ARGS=""
@@ -353,10 +385,30 @@ ${ctx_content}
 
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE timeout=${TIMEOUT_SEC}s" >&2
-  echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE" >&2
+  echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE hub=$HUB_ENABLED" >&2
 
   # Per-process 에이전트 등록
   register_agent
+
+  # Hub 브릿지: 에이전트 등록 (프로세스 수명 기반 lease)
+  local hub_agent_id="${AGENT_TYPE}-$$"
+  local hub_topics="${AGENT_TYPE},task.result"
+  hub_bridge register \
+    --agent "$hub_agent_id" \
+    --cli "$CLI_TYPE" \
+    --timeout "$TIMEOUT_SEC" \
+    --topics "$hub_topics" \
+    --capabilities "code,${AGENT_TYPE}"
+
+  # Hub 브릿지: 선행 컨텍스트 폴링 (DAG 의존 태스크용)
+  if [[ "$HUB_ENABLED" == "true" && -z "$CONTEXT_FILE" ]]; then
+    local hub_ctx_file="${TFX_TMP}/tfx-hub-ctx-${hub_agent_id}.md"
+    hub_bridge context --agent "$hub_agent_id" --topics "$hub_topics" --out "$hub_ctx_file"
+    if [[ -s "$hub_ctx_file" ]]; then
+      CONTEXT_FILE="$hub_ctx_file"
+      echo "[tfx-route] hub: 선행 컨텍스트 수신 ($(wc -c < "$hub_ctx_file") bytes)" >&2
+    fi
+  fi
 
   # CLI 실행 (stderr 분리 + 타임아웃 + 소요시간 측정)
   local exit_code=0
@@ -413,6 +465,14 @@ ${ctx_content}
   local end_time
   end_time=$(date +%s)
   local elapsed=$((end_time - start_time))
+
+  # Hub 브릿지: 결과 발행 + 에이전트 해제
+  hub_bridge result \
+    --agent "$hub_agent_id" \
+    --file "$STDOUT_LOG" \
+    --topic "task.result" \
+    --exit-code "$exit_code"
+  hub_bridge deregister --agent "$hub_agent_id"
 
   # ── 후처리: 단일 node 프로세스로 위임 ──
   # 토큰 추출, 출력 필터링, 로그, 토큰 누적, AIMD, 이슈 추적, 결과 출력 전부 처리
