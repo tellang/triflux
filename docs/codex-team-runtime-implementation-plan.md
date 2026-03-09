@@ -6,6 +6,7 @@
 ## 2) 단계별 실행
 ### Phase 0: 정합성 정의 (M0)
 - 산출물: 팀/작업 공통 스키마(`team_id`, `task_id`, `trace_id`, `correlation_id`, `topic`)와 상태 전이 표준.
+- 산출물: Codex 전용 진입 커맨드 `tfx codex-team` 추가 (초기에는 `tfx team` 래퍼)
 - 완료 기준: 기존 `tfx hub` 메시지 포맷과 충돌 없음 검증 완료.
 
 ### Phase 1: 런타임 어댑터 구축 (M1)

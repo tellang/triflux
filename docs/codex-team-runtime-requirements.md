@@ -20,3 +20,8 @@
 ## 4) 수용 기준(요약)
 - `CR1~CR8` 각각에 대해 최소 1개 이상의 통합 시나리오 테스트가 통과해야 한다.
 - 기존 hub consumer 변경 없이(또는 feature flag off 시) 현행 동작이 유지되어야 한다.
+
+## 5) CLI 표면 (초기)
+- `tfx codex-team "작업"`: Codex 워커 2개(`--agents codex,codex`) 기본 주입으로 팀 시작
+- `tfx codex-team status|attach|stop|kill|send|list`: 기존 `tfx team` 제어 명령을 그대로 전달
+- `tfx codex-team --agents ...`: 명시한 경우 기본 주입을 덮어쓴다
