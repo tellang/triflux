@@ -242,6 +242,12 @@ function buildManualAttachCommand(sessionName) {
   }
 }
 
+function wantsWtAttachFallback() {
+  return process.argv.includes("--wt")
+    || process.argv.includes("--spawn-wt")
+    || process.env.TFX_ATTACH_WT_AUTO === "1";
+}
+
 function toAgentId(cli, target) {
   return `${cli}-${target.split(".").pop()}`;
 }
@@ -758,7 +764,8 @@ async function teamAttach() {
   try {
     attachSession(state.sessionName);
   } catch (e) {
-    if (await launchAttachInWindowsTerminal(state.sessionName)) {
+    const allowWt = wantsWtAttachFallback();
+    if (allowWt && await launchAttachInWindowsTerminal(state.sessionName)) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
       console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
@@ -766,7 +773,11 @@ async function teamAttach() {
       return;
     }
     fail(`attach 실패: ${e.message}`);
-    fail("WT 분할창 attach 자동 검증 실패 (session_attached 증가 없음)");
+    if (allowWt) {
+      fail("WT 분할창 attach 자동 검증 실패 (session_attached 증가 없음)");
+    } else {
+      warn("자동 WT 분할은 기본 비활성입니다. 필요 시 --wt 옵션으로 실행하세요.");
+    }
     console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
     console.log("");
     return;
@@ -861,7 +872,8 @@ async function teamFocus() {
   try {
     attachSession(state.sessionName);
   } catch (e) {
-    if (await launchAttachInWindowsTerminal(state.sessionName)) {
+    const allowWt = wantsWtAttachFallback();
+    if (allowWt && await launchAttachInWindowsTerminal(state.sessionName)) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
       console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
@@ -869,7 +881,11 @@ async function teamFocus() {
       return;
     }
     fail(`attach 실패: ${e.message}`);
-    fail("WT 분할창 attach 자동 검증 실패 (session_attached 증가 없음)");
+    if (allowWt) {
+      fail("WT 분할창 attach 자동 검증 실패 (session_attached 증가 없음)");
+    } else {
+      warn("자동 WT 분할은 기본 비활성입니다. 필요 시 --wt 옵션으로 실행하세요.");
+    }
     console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
     console.log("");
     return;
@@ -1072,8 +1088,8 @@ function teamHelp() {
     ${WHITE}tfx team debug${RESET} ${DIM}[--lines 30]${RESET}          ${GRAY}강화 디버그 출력(환경/세션/pane tail)${RESET}
     ${WHITE}tfx team tasks${RESET}                       ${GRAY}공유 태스크 목록${RESET}
     ${WHITE}tfx team task${RESET} ${DIM}<pending|progress|done> <T1>${RESET} ${GRAY}태스크 상태 갱신${RESET}
-    ${WHITE}tfx team attach${RESET}                      ${GRAY}세션 재연결${RESET}
-    ${WHITE}tfx team focus${RESET} ${DIM}<lead|이름|번호>${RESET}      ${GRAY}특정 팀메이트 포커스${RESET}
+    ${WHITE}tfx team attach${RESET} ${DIM}[--wt]${RESET}               ${GRAY}세션 재연결 (WT 분할은 opt-in)${RESET}
+    ${WHITE}tfx team focus${RESET} ${DIM}<lead|이름|번호> [--wt]${RESET} ${GRAY}특정 팀메이트 포커스${RESET}
     ${WHITE}tfx team send${RESET} ${DIM}<lead|이름|번호> "msg"${RESET} ${GRAY}팀메이트에 메시지 주입${RESET}
     ${WHITE}tfx team interrupt${RESET} ${DIM}<대상>${RESET}            ${GRAY}팀메이트 인터럽트(C-c)${RESET}
     ${WHITE}tfx team control${RESET} ${DIM}<대상> <cmd>${RESET}        ${GRAY}리드 제어명령(interrupt|stop|pause|resume)${RESET}
