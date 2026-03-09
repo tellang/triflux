@@ -163,6 +163,44 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1' } = {}
           return res.end(JSON.stringify(result));
         }
 
+        // POST /bridge/control — 리드 제어를 특정 워커 메일박스로 직접 전달
+        if (path === '/bridge/control' && req.method === 'POST') {
+          const {
+            from_agent = 'lead',
+            to_agent,
+            command,
+            reason = '',
+            payload = {},
+            trace_id,
+            correlation_id,
+            ttl_ms = 3600000,
+          } = body;
+
+          if (!to_agent || !command) {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ ok: false, error: 'to_agent, command 필수' }));
+          }
+
+          const result = router.handlePublish({
+            from: from_agent,
+            to: to_agent,
+            topic: 'lead.control',
+            payload: {
+              command,
+              reason,
+              ...payload,
+              issued_at: Date.now(),
+            },
+            priority: 8,
+            ttl_ms: Math.max(1000, Math.min(Number(ttl_ms) || 3600000, 86400000)),
+            trace_id,
+            correlation_id,
+          });
+
+          res.writeHead(200);
+          return res.end(JSON.stringify(result));
+        }
+
         // POST /bridge/context — 선행 컨텍스트 폴링
         if (path === '/bridge/context' && req.method === 'POST') {
           const { agent_id, topics, max_messages = 10 } = body;

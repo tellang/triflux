@@ -68,7 +68,7 @@ Bash("node -e \"
   } else {
     console.log('tfx-hub 미실행');
   }
-\"")
+\")
 ```
 
 ### status — 상태 확인
@@ -106,12 +106,13 @@ claude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp
 | `request_human_input` | 사용자 입력 요청 (CAPTCHA/승인) |
 | `submit_human_input` | 사용자 입력 응답 |
 
-## 브릿지 REST 엔드포인트 (4개)
+## 브릿지 REST 엔드포인트 (5개)
 
 | 엔드포인트 | 설명 |
 |-----------|------|
 | `POST /bridge/register` | 에이전트 등록 (프로세스 수명 기반 lease) |
 | `POST /bridge/result` | 결과 발행 (topic fanout) |
+| `POST /bridge/control` | 특정 에이전트 메일박스에 리드 제어 전달 |
 | `POST /bridge/context` | 선행 컨텍스트 폴링 (auto_ack) |
 | `POST /bridge/deregister` | 에이전트 offline 마킹 |
 

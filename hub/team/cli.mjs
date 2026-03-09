@@ -16,7 +16,7 @@ import {
   detectMultiplexer,
 } from "./session.mjs";
 import { buildCliCommand, startCliInPane, injectPrompt, sendKeys } from "./pane.mjs";
-import { orchestrate, decomposeTask } from "./orchestrator.mjs";
+import { orchestrate, decomposeTask, buildLeadPrompt, buildPrompt } from "./orchestrator.mjs";
 
 // ── 상수 ──
 const PKG_ROOT = dirname(dirname(dirname(new URL(import.meta.url).pathname))).replace(/^\/([A-Z]:)/, "$1");
@@ -151,7 +151,7 @@ function ensureTmuxOrExit() {
   console.log(`
   ${RED}${BOLD}tmux 미발견${RESET}
 
-  현재 tfx team의 tmux/in-process 모드는 모두 tmux 기반입니다.
+  현재 선택한 모드는 tmux 기반 팀세션이 필요합니다.
 
   설치:
     WSL2:   ${WHITE}wsl sudo apt install tmux${RESET}
@@ -168,6 +168,20 @@ function ensureTmuxOrExit() {
 
 function toAgentId(cli, target) {
   return `${cli}-${target.split(".").pop()}`;
+}
+
+function buildNativeCliCommand(cli) {
+  switch (cli) {
+    case "codex":
+      // 비-TTY supervisor 환경에서 확인 프롬프트/alt-screen 의존을 줄임
+      return "codex --dangerously-bypass-approvals-and-sandbox --no-alt-screen";
+    case "gemini":
+      return "gemini";
+    case "claude":
+      return "claude";
+    default:
+      return buildCliCommand(cli);
+  }
 }
 
 function buildTasks(subtasks, workers) {
@@ -228,40 +242,148 @@ async function publishLeadControl(state, targetMember, command, reason = "") {
   const leadAgent = (state?.members || []).find((m) => m.role === "lead")?.agentId || "lead";
 
   const payload = {
-    agent_id: leadAgent,
-    topic: "lead.control",
+    from_agent: leadAgent,
+    to_agent: targetMember.agentId,
+    command,
+    reason,
     payload: {
-      command,
-      reason,
-      target_agent: targetMember.agentId,
       issued_by: leadAgent,
       issued_at: Date.now(),
     },
   };
 
   try {
-    await fetch(`${hubBase}/bridge/result`, {
+    const res = await fetch(`${hubBase}/bridge/control`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return true;
+    return !!res.ok;
   } catch {
     return false;
   }
 }
 
+function isNativeMode(state) {
+  return state?.teammateMode === "in-process" && !!state?.native?.controlUrl;
+}
+
+function isTeamAlive(state) {
+  if (!state) return false;
+  if (isNativeMode(state)) {
+    try {
+      process.kill(state.native.supervisorPid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return sessionExists(state.sessionName);
+}
+
+async function nativeRequest(state, path, body = {}) {
+  if (!isNativeMode(state)) return null;
+  try {
+    const res = await fetch(`${state.native.controlUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function nativeGetStatus(state) {
+  if (!isNativeMode(state)) return null;
+  try {
+    const res = await fetch(`${state.native.controlUrl}/status`);
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function startNativeSupervisor({ sessionId, task, lead, agents, subtasks, hubUrl }) {
+  const nativeConfigPath = join(HUB_PID_DIR, `team-native-${sessionId}.config.json`);
+  const nativeRuntimePath = join(HUB_PID_DIR, `team-native-${sessionId}.runtime.json`);
+  const logsDir = join(HUB_PID_DIR, "team-logs", sessionId);
+  mkdirSync(logsDir, { recursive: true });
+
+  const leadMember = {
+    role: "lead",
+    name: "lead",
+    cli: lead,
+    agentId: `${lead}-lead`,
+    command: buildNativeCliCommand(lead),
+  };
+
+  const workers = agents.map((cli, i) => ({
+    role: "worker",
+    name: `${cli}-${i + 1}`,
+    cli,
+    agentId: `${cli}-w${i + 1}`,
+    command: buildNativeCliCommand(cli),
+    subtask: subtasks[i],
+  }));
+
+  const leadPrompt = buildLeadPrompt(task, {
+    agentId: leadMember.agentId,
+    hubUrl,
+    teammateMode: "in-process",
+    workers: workers.map((w) => ({ agentId: w.agentId, cli: w.cli, subtask: w.subtask })),
+  });
+
+  const members = [
+    { ...leadMember, prompt: leadPrompt },
+    ...workers.map((w) => ({
+      ...w,
+      prompt: buildPrompt(w.subtask, { cli: w.cli, agentId: w.agentId, hubUrl }),
+    })),
+  ];
+
+  const config = {
+    sessionName: sessionId,
+    hubUrl,
+    startupDelayMs: 3000,
+    logsDir,
+    runtimeFile: nativeRuntimePath,
+    members,
+  };
+  writeFileSync(nativeConfigPath, JSON.stringify(config, null, 2) + "\n");
+
+  const supervisorPath = join(PKG_ROOT, "hub", "team", "native-supervisor.mjs");
+  const child = spawn(process.execPath, [supervisorPath, "--config", nativeConfigPath], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env },
+  });
+  child.unref();
+
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (existsSync(nativeRuntimePath)) {
+      try {
+        const runtime = JSON.parse(readFileSync(nativeRuntimePath, "utf8"));
+        return { runtime, members };
+      } catch {}
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  return { runtime: null, members };
+}
+
 // ── 서브커맨드 ──
 
 async function teamStart() {
-  ensureTmuxOrExit();
-
   const { agents, lead, layout, teammateMode, task } = parseTeamArgs();
   if (!task) {
     console.log(`\n  ${AMBER}${BOLD}⬡ tfx team${RESET}\n`);
     console.log(`  사용법: ${WHITE}tfx team "작업 설명"${RESET}`);
     console.log(`          ${WHITE}tfx team --agents codex,gemini --lead claude "작업"${RESET}`);
-    console.log(`          ${WHITE}tfx team --teammate-mode in-process "작업"${RESET}\n`);
+    console.log(`          ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}\n`);
     return;
   }
 
@@ -283,14 +405,73 @@ async function teamStart() {
 
   const sessionId = `tfx-team-${Date.now().toString(36).slice(-4)}`;
   const subtasks = decomposeTask(task, agents.length);
-
-  const paneCount = agents.length + 1; // lead + workers
-  const effectiveLayout = teammateMode === "tmux" && paneCount <= 4 ? layout : "1xN";
+  const hubUrl = hub?.url || "http://127.0.0.1:27888/mcp";
 
   console.log(`  세션:  ${WHITE}${sessionId}${RESET}`);
   console.log(`  모드:  ${teammateMode}`);
   console.log(`  리드:  ${AMBER}${lead}${RESET}`);
   console.log(`  워커:  ${agents.map((a) => `${AMBER}${a}${RESET}`).join(", ")}`);
+
+  // ── in-process(네이티브): tmux 없이 supervisor가 직접 CLI 프로세스 관리 ──
+  if (teammateMode === "in-process") {
+    for (let i = 0; i < subtasks.length; i++) {
+      const preview = subtasks[i].length > 44 ? subtasks[i].slice(0, 44) + "…" : subtasks[i];
+      console.log(`    ${DIM}[${agents[i]}-${i + 1}] ${preview}${RESET}`);
+    }
+    console.log("");
+
+    const { runtime, members } = await startNativeSupervisor({
+      sessionId,
+      task,
+      lead,
+      agents,
+      subtasks,
+      hubUrl,
+    });
+
+    if (!runtime?.controlUrl) {
+      fail("in-process supervisor 시작 실패");
+      return;
+    }
+
+    const tasks = buildTasks(subtasks, members.filter((m) => m.role === "worker"));
+
+    saveTeamState({
+      sessionName: sessionId,
+      task,
+      lead,
+      agents,
+      layout: "native",
+      teammateMode,
+      startedAt: Date.now(),
+      hubUrl,
+      members: members.map((m, idx) => ({
+        role: m.role,
+        name: m.name,
+        cli: m.cli,
+        agentId: m.agentId,
+        pane: `native:${idx}`,
+        subtask: m.subtask || null,
+      })),
+      panes: {},
+      tasks,
+      native: {
+        controlUrl: runtime.controlUrl,
+        supervisorPid: runtime.supervisorPid,
+      },
+    });
+
+    ok("네이티브 in-process 팀 시작 완료");
+    console.log(`  ${DIM}tmux 없이 실행됨 (직접 CLI 프로세스)${RESET}`);
+    console.log(`  ${DIM}제어: tfx team send/control/tasks/status${RESET}\n`);
+    return;
+  }
+
+  // ── tmux 모드 ──
+  ensureTmuxOrExit();
+
+  const paneCount = agents.length + 1; // lead + workers
+  const effectiveLayout = paneCount <= 4 ? layout : "1xN";
   console.log(`  레이아웃: ${effectiveLayout} (${paneCount} panes)`);
 
   const session = createSession(sessionId, {
@@ -341,7 +522,6 @@ async function teamStart() {
   ok("CLI 초기화 대기 (3초)...");
   await new Promise((r) => setTimeout(r, 3000));
 
-  const hubUrl = hub?.url || "http://127.0.0.1:27888/mcp";
   await orchestrate(sessionId, assignments, {
     hubUrl,
     teammateMode,
@@ -381,13 +561,9 @@ async function teamStart() {
 
   const taskListCommand = `${process.execPath} ${join(PKG_ROOT, "bin", "triflux.mjs")} team tasks`;
   configureTeammateKeybindings(sessionId, {
-    inProcess: teammateMode === "in-process",
+    inProcess: false,
     taskListCommand,
   });
-
-  if (teammateMode === "in-process") {
-    focusPane(leadTarget, { zoom: true });
-  }
 
   console.log(`\n  ${GREEN}${BOLD}팀 세션 준비 완료${RESET}`);
   console.log(`  ${DIM}Shift+Down: 다음 팀메이트 전환${RESET}`);
@@ -403,14 +579,14 @@ async function teamStart() {
   }
 }
 
-function teamStatus() {
+async function teamStatus() {
   const state = loadTeamState();
   if (!state) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
 
-  const alive = sessionExists(state.sessionName);
+  const alive = isTeamAlive(state);
   const status = alive ? `${GREEN}● active${RESET}` : `${RED}● dead${RESET}`;
   const uptime = alive ? `${Math.round((Date.now() - state.startedAt) / 60000)}분` : "-";
 
@@ -431,12 +607,23 @@ function teamStatus() {
     }
   }
 
+  if (isNativeMode(state) && alive) {
+    const native = await nativeGetStatus(state);
+    const nativeMembers = native?.data?.members || [];
+    if (nativeMembers.length) {
+      console.log("");
+      for (const m of nativeMembers) {
+        console.log(`    • ${m.name}: ${m.status}${m.lastPreview ? ` ${DIM}${m.lastPreview}${RESET}` : ""}`);
+      }
+    }
+  }
+
   console.log("");
 }
 
 function teamTasks() {
   const state = loadTeamState();
-  if (!state || !sessionExists(state.sessionName)) {
+  if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
@@ -445,7 +632,7 @@ function teamTasks() {
 
 function teamTaskUpdate() {
   const state = loadTeamState();
-  if (!state || !sessionExists(state.sessionName)) {
+  if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
@@ -481,17 +668,30 @@ function teamTaskUpdate() {
 
 function teamAttach() {
   const state = loadTeamState();
-  if (!state || !sessionExists(state.sessionName)) {
+  if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
+
+  if (isNativeMode(state)) {
+    console.log(`\n  ${DIM}in-process 모드는 별도 attach가 없습니다.${RESET}`);
+    console.log(`  ${DIM}상태 확인: tfx team status${RESET}\n`);
+    return;
+  }
+
   attachSession(state.sessionName);
 }
 
 function teamFocus() {
   const state = loadTeamState();
-  if (!state || !sessionExists(state.sessionName)) {
+  if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
+    return;
+  }
+
+  if (isNativeMode(state)) {
+    console.log(`\n  ${DIM}in-process 모드는 focus/attach 개념이 없습니다.${RESET}`);
+    console.log(`  ${DIM}직접 지시: tfx team send <대상> \"메시지\"${RESET}\n`);
     return;
   }
 
@@ -506,9 +706,9 @@ function teamFocus() {
   attachSession(state.sessionName);
 }
 
-function teamInterrupt() {
+async function teamInterrupt() {
   const state = loadTeamState();
-  if (!state || !sessionExists(state.sessionName)) {
+  if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
@@ -520,6 +720,17 @@ function teamInterrupt() {
     return;
   }
 
+  if (isNativeMode(state)) {
+    const result = await nativeRequest(state, "/interrupt", { member: member.name });
+    if (result?.ok) {
+      ok(`${member.name} 인터럽트 전송`);
+    } else {
+      warn(`${member.name} 인터럽트 실패`);
+    }
+    console.log("");
+    return;
+  }
+
   sendKeys(member.pane, "C-c");
   ok(`${member.name} 인터럽트 전송`);
   console.log("");
@@ -527,7 +738,7 @@ function teamInterrupt() {
 
 async function teamControl() {
   const state = loadTeamState();
-  if (!state || !sessionExists(state.sessionName)) {
+  if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
@@ -544,43 +755,71 @@ async function teamControl() {
   }
 
   // 직접 주입: MCP 유무와 무관하게 즉시 전달
-  const controlMsg = `[LEAD CONTROL] command=${command}${reason ? ` reason=${reason}` : ""}`;
-  injectPrompt(member.pane, controlMsg);
-
-  if (command === "interrupt") {
-    sendKeys(member.pane, "C-c");
+  let directOk = false;
+  if (isNativeMode(state)) {
+    const direct = await nativeRequest(state, "/control", {
+      member: member.name,
+      command,
+      reason,
+    });
+    directOk = !!direct?.ok;
+  } else {
+    const controlMsg = `[LEAD CONTROL] command=${command}${reason ? ` reason=${reason}` : ""}`;
+    injectPrompt(member.pane, controlMsg);
+    if (command === "interrupt") {
+      sendKeys(member.pane, "C-c");
+    }
+    directOk = true;
   }
 
-  // Hub에도 발행: 워커 poll_messages 루프가 있으면 메시지 기반으로도 수신
+  // Hub direct mailbox에도 발행
   const published = await publishLeadControl(state, member, command, reason);
 
-  if (published) {
+  if (directOk && published) {
     ok(`${member.name} 제어 전송 (${command}, direct + hub)`);
-  } else {
+  } else if (directOk) {
     ok(`${member.name} 제어 전송 (${command}, direct only)`);
+  } else {
+    warn(`${member.name} 제어 전송 실패 (${command})`);
   }
   console.log("");
 }
 
-function teamStop() {
+async function teamStop() {
   const state = loadTeamState();
   if (!state) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
 
-  if (sessionExists(state.sessionName)) {
-    killSession(state.sessionName);
+  if (isNativeMode(state)) {
+    await nativeRequest(state, "/stop", {});
+    try { process.kill(state.native.supervisorPid, "SIGTERM"); } catch {}
     ok(`세션 종료: ${state.sessionName}`);
   } else {
-    console.log(`  ${DIM}세션 이미 종료됨${RESET}`);
+    if (sessionExists(state.sessionName)) {
+      killSession(state.sessionName);
+      ok(`세션 종료: ${state.sessionName}`);
+    } else {
+      console.log(`  ${DIM}세션 이미 종료됨${RESET}`);
+    }
   }
 
   clearTeamState();
   console.log("");
 }
 
-function teamKill() {
+async function teamKill() {
+  const state = loadTeamState();
+  if (state && isNativeMode(state) && isTeamAlive(state)) {
+    await nativeRequest(state, "/stop", {});
+    try { process.kill(state.native.supervisorPid, "SIGTERM"); } catch {}
+    clearTeamState();
+    ok(`종료: ${state.sessionName}`);
+    console.log("");
+    return;
+  }
+
   const sessions = listSessions();
   if (sessions.length === 0) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
@@ -594,9 +833,9 @@ function teamKill() {
   console.log("");
 }
 
-function teamSend() {
+async function teamSend() {
   const state = loadTeamState();
-  if (!state || !sessionExists(state.sessionName)) {
+  if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
@@ -609,12 +848,31 @@ function teamSend() {
     return;
   }
 
+  if (isNativeMode(state)) {
+    const result = await nativeRequest(state, "/send", { member: member.name, text: message });
+    if (result?.ok) {
+      ok(`${member.name}에 메시지 주입 완료`);
+    } else {
+      warn(`${member.name} 메시지 주입 실패`);
+    }
+    console.log("");
+    return;
+  }
+
   injectPrompt(member.pane, message);
   ok(`${member.name}에 메시지 주입 완료`);
   console.log("");
 }
 
 function teamList() {
+  const state = loadTeamState();
+  if (state && isNativeMode(state) && isTeamAlive(state)) {
+    console.log(`\n  ${AMBER}${BOLD}⬡ 팀 세션 목록${RESET}\n`);
+    console.log(`    ${GREEN}●${RESET} ${state.sessionName} ${DIM}(in-process)${RESET}`);
+    console.log("");
+    return;
+  }
+
   const sessions = listSessions();
   if (sessions.length === 0) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
@@ -635,7 +893,7 @@ function teamHelp() {
     ${WHITE}tfx team "작업 설명"${RESET}
     ${WHITE}tfx team --agents codex,gemini --lead claude "작업"${RESET}
     ${WHITE}tfx team --teammate-mode tmux "작업"${RESET}
-    ${WHITE}tfx team --teammate-mode in-process "작업"${RESET}
+    ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}
 
   ${BOLD}제어${RESET}
     ${WHITE}tfx team status${RESET}                      ${GRAY}현재 팀 상태${RESET}
@@ -645,12 +903,12 @@ function teamHelp() {
     ${WHITE}tfx team focus${RESET} ${DIM}<lead|이름|번호>${RESET}      ${GRAY}특정 팀메이트 포커스${RESET}
     ${WHITE}tfx team send${RESET} ${DIM}<lead|이름|번호> "msg"${RESET} ${GRAY}팀메이트에 메시지 주입${RESET}
     ${WHITE}tfx team interrupt${RESET} ${DIM}<대상>${RESET}            ${GRAY}팀메이트 인터럽트(C-c)${RESET}
-    ${WHITE}tfx team control${RESET} ${DIM}<대상> <cmd>${RESET}        ${GRAY}리드 제어명령(interrupt/stop/pause/resume)${RESET}
+    ${WHITE}tfx team control${RESET} ${DIM}<대상> <cmd>${RESET}        ${GRAY}리드 제어명령(interrupt|stop|pause|resume)${RESET}
     ${WHITE}tfx team stop${RESET}                        ${GRAY}graceful 종료${RESET}
     ${WHITE}tfx team kill${RESET}                        ${GRAY}모든 팀 세션 강제 종료${RESET}
     ${WHITE}tfx team list${RESET}                        ${GRAY}활성 세션 목록${RESET}
 
-  ${BOLD}키 조작(Claude teammate 스타일)${RESET}
+  ${BOLD}키 조작(Claude teammate 스타일, tmux 모드)${RESET}
     ${WHITE}Shift+Down${RESET}  ${GRAY}다음 팀메이트${RESET}
     ${WHITE}Shift+Up${RESET}    ${GRAY}이전 팀메이트${RESET}
     ${WHITE}Escape${RESET}      ${GRAY}현재 팀메이트 인터럽트${RESET}

@@ -18,7 +18,7 @@ argument-hint: '"작업 설명" | --agents codex,gemini "작업" | --teammate-mo
 > | 통신 | 없음 (독립 실행) | **Hub MCP 메시지 버스** |
 > | 개입 | 불가 | **`tfx team send <대상> "추가 지시"`** |
 > | 리드 | 없음 | **Claude lead + Codex/Gemini workers** |
-> | 모드 | 없음 | **`--teammate-mode tmux|in-process`** |
+> | 모드 | 없음 | **`--teammate-mode tmux|in-process`** (in-process는 tmux 불필요) |
 
 ## 사용법
 
@@ -93,16 +93,15 @@ Bash("node {PKG_ROOT}/bin/triflux.mjs team --agents {agents.join(',')} \"{task}\
 
 **내부 동작 (hub/team/ 모듈):**
 1. Hub lazy-start (`hub/server.mjs`)
-2. tmux 세션 생성 (lead + workers)
-3. Pane 0: Lead CLI (기본 `claude`)
-4. Pane 1~N: Worker CLI (`codex`, `gemini`, `claude`)
-5. 3초 대기 (CLI 초기화)
-6. 각 pane에 리드/워커 프롬프트 주입
-7. 팀메이트 키 바인딩 설정
+2. 모드별 런타임 생성
+   - `tmux`: 세션 + pane 생성 (lead + workers)
+   - `in-process`: native supervisor가 CLI 프로세스를 직접 spawn
+3. 리드/워커 프롬프트 주입
+4. tmux 모드에서 팀메이트 키 바인딩
    - `Shift+Down/Shift+Up`: 팀메이트 전환
    - `Escape`: 인터럽트(C-c)
    - `Ctrl+T`: 태스크 목록
-8. tmux attach → 사용자에게 제어권
+5. tmux 모드만 attach (in-process는 attach 없음)
 
 ### Phase 4: 실시간 관찰 + 개입
 
@@ -134,6 +133,7 @@ Hub MCP 도구가 각 CLI에 등록되어 있으면 자동 통신:
 
 리드 제어 표준:
 - `lead.control` payload: `{ command: "interrupt|stop|pause|resume", reason: "..." }`
+- direct mailbox: `POST /bridge/control` (`from_agent`, `to_agent`, `command`, `reason`)
 
 MCP 미등록 시 REST 폴백 (프롬프트에 curl 명령 포함, 제어는 direct send 우선).
 
@@ -165,7 +165,7 @@ MCP 미등록 시 REST 폴백 (프롬프트에 curl 명령 포함, 제어는 dir
 
 ## 전제 조건
 
-- **tmux** — 필수 (Git Bash: v3.6a, WSL2, macOS, Linux)
+- **tmux** — tmux 모드에서만 필수 (in-process 모드는 불필요)
 - **codex/gemini CLI** — 해당 에이전트 사용 시
 - **tfx setup** — Hub MCP 자동 등록 (사전 실행 권장)
 
