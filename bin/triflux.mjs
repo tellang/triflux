@@ -826,6 +826,7 @@ ${updateNotice}
     ${DIM}  --dev${RESET}         ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
+    ${WHITE_BRIGHT}tfx team${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
@@ -1060,6 +1061,12 @@ switch (cmd) {
   case "update":  cmdUpdate(); break;
   case "list": case "ls": cmdList(); break;
   case "hub":     cmdHub(); break;
+  case "team": {
+    const { pathToFileURL } = await import("node:url");
+    const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
+    await cmdTeam();
+    break;
+  }
   case "notion-read": case "nr": {
     const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
     const nrArgs = process.argv.slice(3).map(a => `"${a}"`).join(" ");
