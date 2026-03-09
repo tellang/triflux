@@ -3,7 +3,7 @@ name: tfx-team
 description: 멀티-CLI 팀 모드. tfx-auto와 동일한 트리아지/분해, 실행은 tmux + Hub 기반 interactive 세션.
 triggers:
   - tfx-team
-argument-hint: '"작업 설명" | --agents codex,gemini "작업" | status | stop'
+argument-hint: '"작업 설명" | --agents codex,gemini "작업" | --teammate-mode in-process|tmux "작업" | status | stop'
 ---
 
 # tfx-team — tmux + Hub 기반 멀티-CLI 팀 오케스트레이터
@@ -16,13 +16,17 @@ argument-hint: '"작업 설명" | --agents codex,gemini "작업" | status | stop
 > | 실행 | `tfx-route.sh` one-shot | **tmux pane interactive** |
 > | 관찰 | stdout 반환 후 종료 | **실시간 네이티브 터미널** |
 > | 통신 | 없음 (독립 실행) | **Hub MCP 메시지 버스** |
-> | 개입 | 불가 | **`tfx team send N "추가 지시"`** |
+> | 개입 | 불가 | **`tfx team send <대상> "추가 지시"`** |
+> | 리드 | 없음 | **Claude lead + Codex/Gemini workers** |
+> | 모드 | 없음 | **`--teammate-mode tmux|in-process`** |
 
 ## 사용법
 
 ```
 /tfx-team "인증 리팩터링 + UI 개선 + 보안 리뷰"
 /tfx-team --agents codex,gemini "프론트+백엔드"
+/tfx-team --lead claude --teammate-mode in-process "대규모 병렬 작업"
+/tfx-team --teammate-mode tmux --layout 2x2 "분할 화면 실행"
 /tfx-team status
 /tfx-team stop
 ```
@@ -39,7 +43,7 @@ argument-hint: '"작업 설명" | --agents codex,gemini "작업" | status | stop
 ```
 
 **제어 커맨드 감지:**
-- `status`, `stop`, `kill`, `attach`, `list`, `send` → `Bash("node bin/triflux.mjs team {cmd}")` 직행
+- `status`, `stop`, `kill`, `attach`, `list`, `send`, `focus`, `tasks`, `task`, `control` → `Bash("node bin/triflux.mjs team {cmd}")` 직행
 - 그 외 → Phase 2 트리아지
 
 ### Phase 2: 트리아지 (tfx-auto와 동일)
@@ -89,49 +93,60 @@ Bash("node {PKG_ROOT}/bin/triflux.mjs team --agents {agents.join(',')} \"{task}\
 
 **내부 동작 (hub/team/ 모듈):**
 1. Hub lazy-start (`hub/server.mjs`)
-2. tmux 세션 생성 (2x2 or 1xN 레이아웃)
-3. Pane 0: Dashboard (실시간 상태)
-4. Pane 1~N: 각 CLI interactive 모드 시작 (codex/gemini/claude)
+2. tmux 세션 생성 (lead + workers)
+3. Pane 0: Lead CLI (기본 `claude`)
+4. Pane 1~N: Worker CLI (`codex`, `gemini`, `claude`)
 5. 3초 대기 (CLI 초기화)
-6. 각 pane에 서브태스크 프롬프트 주입 (load-buffer + paste-buffer)
-7. tmux attach → 사용자에게 제어권
+6. 각 pane에 리드/워커 프롬프트 주입
+7. 팀메이트 키 바인딩 설정
+   - `Shift+Down/Shift+Up`: 팀메이트 전환
+   - `Escape`: 인터럽트(C-c)
+   - `Ctrl+T`: 태스크 목록
+8. tmux attach → 사용자에게 제어권
 
 ### Phase 4: 실시간 관찰 + 개입
 
 tmux 세션 내에서:
-- `Ctrl+B → 방향키`: pane 전환
+- `Shift+Down / Shift+Up`: 팀메이트 전환
+- `Escape`: 현재 팀메이트 인터럽트
+- `Ctrl+T`: 태스크 목록 표시
 - `Ctrl+B → D`: 세션 분리 (백그라운드)
-- `Ctrl+B → Z`: pane 전체화면
 
 세션 분리 후 제어:
 ```bash
-/tfx-team status            # 팀 상태 확인
-/tfx-team send 1 "추가 지시"  # Pane 1에 입력
-/tfx-team attach            # 세션 재연결
-/tfx-team stop              # graceful 종료
+/tfx-team status
+/tfx-team focus lead
+/tfx-team send worker-1 "추가 지시"
+/tfx-team control worker-1 interrupt "우선순위 변경"
+/tfx-team tasks
+/tfx-team task done T1
+/tfx-team attach
+/tfx-team stop
 ```
 
 ### Phase 5: 에이전트 간 통신
 
 Hub MCP 도구가 각 CLI에 등록되어 있으면 자동 통신:
 - `register`: 에이전트 등록
-- `publish`: 결과 발행 (topic: task.result)
+- `publish`: 결과 발행 + 리드 제어 발행 (topic: task.result / lead.control)
 - `poll_messages`: 다른 에이전트 메시지 수신
 - `ask`: 다른 에이전트에게 질문
 
-MCP 미등록 시 REST 폴백 (프롬프트에 curl 명령 포함).
+리드 제어 표준:
+- `lead.control` payload: `{ command: "interrupt|stop|pause|resume", reason: "..." }`
+
+MCP 미등록 시 REST 폴백 (프롬프트에 curl 명령 포함, 제어는 direct send 우선).
 
 ## 에이전트 매핑
 
 | 분류 결과 | CLI | 비고 |
 |----------|-----|------|
-| codex | `codex` (interactive) | MCP: ~/.codex/config.json |
-| gemini | `gemini` (interactive) | MCP: ~/.gemini/settings.json |
-| claude | `claude` (interactive) | MCP: .mcp.json |
+| codex | `codex` (interactive) | 래핑 없이 직접 실행 |
+| gemini | `gemini` (interactive) | 래핑 없이 직접 실행 |
+| claude | `claude` (interactive) | 기본 리드 |
 
-> **중요:** tfx-auto와 달리 세부 에이전트(executor, debugger 등)로 분류하지 않음.
-> tmux pane에는 CLI 단위(codex/gemini/claude)로 실행하고,
-> 프롬프트에 역할(구현/리뷰/디버깅)을 명시하여 CLI가 알아서 수행.
+> **중요:** Codex/Gemini 워커는 payload wrapper(`codex exec "..."`/`gemini -p "..."`)로 감싸지 않고
+> CLI 프로세스를 직접 기동한 뒤 프롬프트를 주입한다.
 
 ## tfx-auto와의 차이 요약
 
@@ -139,11 +154,12 @@ MCP 미등록 시 REST 폴백 (프롬프트에 curl 명령 포함).
 |------|----------|----------|
 | 트리아지 | Codex 분류 → Opus 분해 | **동일** |
 | 실행 단위 | 에이전트(executor, reviewer 등) | CLI(codex, gemini, claude) |
-| 실행 방식 | `tfx-route.sh` (one-shot, 블랙박스) | tmux pane (interactive, 관찰 가능) |
-| 결과 수집 | stdout 파싱 | Hub publish/poll |
-| 개입 | 불가 | `tfx team send` |
+| 리드 | 없음 | Claude lead (기본) |
+| 실행 방식 | `tfx-route.sh` (one-shot, 블랙박스) | tmux 기반 interactive (`tmux`/`in-process`) |
+| 결과 수집 | stdout 파싱 | Hub publish/poll + 수동 태스크 상태 |
+| 개입 | 불가 | `tfx team send`, `tfx team focus` |
 | 통신 | 없음 | Hub MCP 메시지 버스 |
-| Dashboard | 없음 | Pane 0 실시간 상태 |
+| 팀메이트 조작 | 없음 | Shift+Down / Escape / Ctrl+T |
 | tmux 필요 | 아니오 | **예** |
 | 종료 | 자동 (실행 완료) | 수동 (`tfx team stop`) |
 

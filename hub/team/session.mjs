@@ -65,6 +65,16 @@ function tmux(args, opts = {}) {
 }
 
 /**
+ * tmux 명령 직접 실행 (고수준 모듈에서 재사용)
+ * @param {string} args
+ * @param {object} opts
+ * @returns {string}
+ */
+export function tmuxExec(args, opts = {}) {
+  return tmux(args, opts);
+}
+
+/**
  * tmux 세션 생성 + 레이아웃 분할
  * @param {string} sessionName — 세션 이름
  * @param {object} opts
@@ -111,6 +121,59 @@ export function createSession(sessionName, opts = {}) {
   }
 
   return { sessionName, panes };
+}
+
+/**
+ * pane 포커스 이동
+ * @param {string} target
+ * @param {object} opts
+ * @param {boolean} opts.zoom
+ */
+export function focusPane(target, opts = {}) {
+  const { zoom = false } = opts;
+  tmux(`select-pane -t ${target}`);
+  if (zoom) {
+    try { tmux(`resize-pane -t ${target} -Z`); } catch {}
+  }
+}
+
+/**
+ * 팀메이트 조작 키 바인딩 설정
+ * - Shift+Down: 다음 팀메이트
+ * - Shift+Up: 이전 팀메이트
+ * - Escape: 현재 팀메이트 인터럽트(C-c)
+ * - Ctrl+T: 태스크 목록 표시
+ * @param {string} sessionName
+ * @param {object} opts
+ * @param {boolean} opts.inProcess
+ * @param {string} opts.taskListCommand
+ */
+export function configureTeammateKeybindings(sessionName, opts = {}) {
+  const { inProcess = false, taskListCommand = "" } = opts;
+  const cond = `#{==:#{session_name},${sessionName}}`;
+
+  if (inProcess) {
+    // 단일 뷰(zoom) 상태에서 팀메이트 순환
+    tmux(`bind-key -T root -n S-Down if-shell -F '${cond}' 'select-pane -t :.+ \\; resize-pane -Z' 'send-keys S-Down'`);
+    tmux(`bind-key -T root -n S-Up if-shell -F '${cond}' 'select-pane -t :.- \\; resize-pane -Z' 'send-keys S-Up'`);
+  } else {
+    // 분할 뷰에서 팀메이트 순환
+    tmux(`bind-key -T root -n S-Down if-shell -F '${cond}' 'select-pane -t :.+' 'send-keys S-Down'`);
+    tmux(`bind-key -T root -n S-Up if-shell -F '${cond}' 'select-pane -t :.-' 'send-keys S-Up'`);
+  }
+
+  // 현재 활성 pane 인터럽트
+  tmux(`bind-key -T root -n Escape if-shell -F '${cond}' 'send-keys C-c' 'send-keys Escape'`);
+
+  // 태스크 목록 토글 (tmux 3.2+ popup 우선, 실패 시 안내 메시지)
+  if (taskListCommand) {
+    const escaped = taskListCommand.replace(/'/g, "'\\''");
+    try {
+      tmux(`bind-key -T root -n C-t if-shell -F '${cond}' \"display-popup -E '${escaped}'\" \"send-keys C-t\"`);
+    } catch {
+      tmux(`bind-key -T root -n C-t if-shell -F '${cond}' 'display-message "tfx team tasks 명령으로 태스크 확인"' 'send-keys C-t'`);
+    }
+  }
 }
 
 /**
