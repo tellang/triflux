@@ -217,6 +217,38 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1' } = {}
           return res.end(JSON.stringify({ ok: true, data: { messages, count: messages.length } }));
         }
 
+        // POST /bridge/agent-status — 특정 에이전트 상태 조회
+        if (path === '/bridge/agent-status' && req.method === 'POST') {
+          const { agent_ids = [] } = body;
+          if (!Array.isArray(agent_ids) || agent_ids.length === 0) {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ ok: false, error: 'agent_ids 배열 필수' }));
+          }
+
+          const statuses = agent_ids.map((agentId) => {
+            const agent = store.getAgent(agentId);
+            if (!agent) {
+              return {
+                agent_id: agentId,
+                status: 'offline',
+                last_seen_ms: null,
+                lease_expires_ms: null,
+                cli: null,
+              };
+            }
+            return {
+              agent_id: agent.agent_id,
+              status: agent.status,
+              last_seen_ms: agent.last_seen_ms,
+              lease_expires_ms: agent.lease_expires_ms,
+              cli: agent.cli,
+            };
+          });
+
+          res.writeHead(200);
+          return res.end(JSON.stringify({ ok: true, data: { statuses } }));
+        }
+
         // POST /bridge/deregister — 에이전트 해제
         if (path === '/bridge/deregister' && req.method === 'POST') {
           const { agent_id } = body;

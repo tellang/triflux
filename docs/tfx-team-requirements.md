@@ -20,9 +20,10 @@
 - Claude Code Agent Team 유사 구조로 리드 + 다중 워커 구성
 - 워커 CLI는 `codex`, `gemini`, `claude`를 혼합 가능
 
-### R2. 실행 모드 2종
+### R2. 실행 모드 3종
 - `tmux` 모드 지원
 - `in-process(native)` 모드 지원
+- `wt(Windows Terminal)` 모드 지원
 
 ### R3. 팀메이트 조작 키 호환
 - Claude teammate 조작과 동일한 전환/제어 키 사용
@@ -47,7 +48,7 @@
 | 요구사항 | 구현 상태 | 구현 위치 |
 |---|---|---|
 | R1 | 구현됨 | `hub/team/cli.mjs` (`--lead`, `--agents`), `hub/team/orchestrator.mjs` |
-| R2 | 구현됨 | `tmux`: `hub/team/session.mjs` / `in-process`: `hub/team/native-supervisor.mjs` |
+| R2 | 구현됨 | `tmux`: `hub/team/session.mjs` / `in-process`: `hub/team/native-supervisor.mjs` / `wt`: `hub/team/wt.mjs`, `hub/team/member-runner.mjs` |
 | R3 | 구현됨(tmux) | `hub/team/session.mjs` (`configureTeammateKeybindings`) |
 | R4 | 구현됨 | `hub/team/pane.mjs` (`buildCliCommand`), `hub/team/cli.mjs` (`buildNativeCliCommand`) |
 | R5 | 구현됨 | `hub/team/orchestrator.mjs` (리드/워커 프롬프트 압축) |
@@ -87,10 +88,19 @@ tfx team control <대상> <interrupt|stop|pause|resume> [사유]
 
 - 키 조작: `Shift+Down`, `Shift+Up`, `Escape`, `Ctrl+T`
 
+### 5.3 wt(Windows Terminal) 모드
+
+```text
+/tfx-team --teammate-mode wt "작업 A + 작업 B"
+```
+
+- 분할 패널은 Windows Terminal(`wt.exe`)로 생성
+- 제어는 `tfx team send/control`을 통한 Hub 메시지 경로 사용
+
 ## 6. 알려진 제약
 
-- 비-TTY 환경에서 일부 interactive CLI(특히 Codex)가 실행을 거부할 수 있음
-- 이 경우 tmux 모드 사용을 우선 권장
+- `wt` 모드는 Windows + `wt.exe` + `node-pty` 런타임 의존성이 필요함
+- `attach/focus`는 tmux 모드에서만 제공됨 (`wt`/`in-process`는 `send/control/status` 사용)
 
 ## 7. 검증 체크리스트
 
@@ -98,7 +108,15 @@ tfx team control <대상> <interrupt|stop|pause|resume> [사유]
 - `node --check hub/team/orchestrator.mjs`
 - `node --check hub/team/session.mjs`
 - `node --check hub/team/native-supervisor.mjs`
+- `node --check hub/team/member-runner.mjs`
+- `node --check hub/team/wt.mjs`
 - `node --check hub/server.mjs`
+- `npm ls node-pty`
 - `tfx team --teammate-mode in-process ...`
 - `tfx team --teammate-mode tmux ...`
+- `tfx team --teammate-mode wt ...`
 - `tfx team control ...`
+
+## 8. 후속 PRD
+
+- Windows Terminal 백엔드 PRD: docs/tfx-team-windows-terminal-prd.md

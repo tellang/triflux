@@ -17,6 +17,7 @@ import {
   detectMultiplexer,
 } from "./session.mjs";
 import { buildCliCommand, startCliInPane, injectPrompt, sendKeys } from "./pane.mjs";
+import { openWtTeamSession, hasWindowsTerminal } from "./wt.mjs";
 import { orchestrate, decomposeTask, buildLeadPrompt, buildPrompt } from "./orchestrator.mjs";
 
 // ── 상수 ──
@@ -70,6 +71,17 @@ function ensureHubRuntimeReady() {
   fail(`Hub 실행 의존성 누락: ${missing.join(", ")}`);
   warn("프로젝트 루트에서 npm install 후 다시 시도하세요.");
   return false;
+}
+
+function ensureWtRuntimeReady() {
+  try {
+    requireFromPkg.resolve("node-pty");
+    return true;
+  } catch {
+    fail("wt 모드 런타임 의존성 누락: node-pty");
+    warn("프로젝트 루트에서 npm install 후 다시 시도하세요.");
+    return false;
+  }
 }
 
 // ── 팀 상태 관리 ──
@@ -143,9 +155,12 @@ function startHubDaemon() {
 function normalizeTeammateMode(mode = "auto") {
   const raw = String(mode).toLowerCase();
   if (raw === "inline" || raw === "native") return "in-process";
-  if (raw === "in-process" || raw === "tmux") return raw;
+  if (raw === "windows-terminal") return "wt";
+  if (raw === "in-process" || raw === "tmux" || raw === "wt") return raw;
   if (raw === "auto") {
-    return process.env.TMUX ? "tmux" : "in-process";
+    if (process.env.TMUX) return "tmux";
+    if (process.platform === "win32" && process.env.WT_SESSION && hasWindowsTerminal()) return "wt";
+    return "in-process";
   }
   return "in-process";
 }
@@ -206,6 +221,43 @@ function ensureTmuxOrExit() {
 
 function toAgentId(cli, target) {
   return `${cli}-${target.split(".").pop()}`;
+}
+
+function psEscapeDouble(v) {
+  return String(v ?? "")
+    .replace(/`/g, "``")
+    .replace(/"/g, "`\"");
+}
+
+function buildWtRunnerCommand(configPath) {
+  const runnerPath = join(PKG_ROOT, "hub", "team", "member-runner.mjs");
+  const nodePath = psEscapeDouble(process.execPath);
+  const runner = psEscapeDouble(runnerPath);
+  const cfg = psEscapeDouble(configPath);
+  return `& \"${nodePath}\" \"${runner}\" --config \"${cfg}\"`;
+}
+
+function isWtMode(state) {
+  return state?.teammateMode === "wt";
+}
+
+async function getWtAgentStatuses(state) {
+  if (!isWtMode(state)) return null;
+  const members = (state?.members || []).map((m) => m.agentId).filter(Boolean);
+  if (!members.length) return [];
+
+  const hubBase = (state?.hubUrl || "http://127.0.0.1:27888/mcp").replace(/\/mcp$/, "");
+  try {
+    const res = await fetch(`${hubBase}/bridge/agent-status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_ids: members }),
+    });
+    const json = await res.json();
+    return json?.data?.statuses || [];
+  } catch {
+    return null;
+  }
 }
 
 function buildNativeCliCommand(cli) {
@@ -275,7 +327,7 @@ function resolveMember(state, selector) {
   return null;
 }
 
-async function publishLeadControl(state, targetMember, command, reason = "") {
+async function publishLeadControl(state, targetMember, command, reason = "", extraPayload = {}) {
   const hubBase = (state?.hubUrl || "http://127.0.0.1:27888/mcp").replace(/\/mcp$/, "");
   const leadAgent = (state?.members || []).find((m) => m.role === "lead")?.agentId || "lead";
 
@@ -287,6 +339,7 @@ async function publishLeadControl(state, targetMember, command, reason = "") {
     payload: {
       issued_by: leadAgent,
       issued_at: Date.now(),
+      ...extraPayload,
     },
   };
 
@@ -315,6 +368,11 @@ function isTeamAlive(state) {
     } catch {
       return false;
     }
+  }
+  if (isWtMode(state)) {
+    // wt 모드는 별도 supervisor PID가 없으므로 상태 파일 존재 시 활성로 취급하고,
+    // 상세 생존 여부는 teamStatus에서 Hub agent-status로 보강한다.
+    return true;
   }
   return sessionExists(state.sessionName);
 }
@@ -413,6 +471,86 @@ async function startNativeSupervisor({ sessionId, task, lead, agents, subtasks, 
   return { runtime: null, members };
 }
 
+async function startWtTeam({ sessionId, task, lead, agents, subtasks, hubUrl, layout }) {
+  if (process.platform !== "win32") {
+    throw new Error("wt 모드는 Windows에서만 지원됨");
+  }
+  if (!hasWindowsTerminal()) {
+    throw new Error("Windows Terminal(wt.exe) 미발견");
+  }
+  if (!ensureWtRuntimeReady()) {
+    throw new Error("node-pty 의존성 누락");
+  }
+
+  const leadMember = {
+    role: "lead",
+    name: "lead",
+    cli: lead,
+    agentId: `${lead}-lead`,
+    command: buildCliCommand(lead),
+  };
+
+  const workers = agents.map((cli, i) => ({
+    role: "worker",
+    name: `${cli}-${i + 1}`,
+    cli,
+    agentId: `${cli}-w${i + 1}`,
+    command: buildCliCommand(cli),
+    subtask: subtasks[i],
+  }));
+
+  const leadPrompt = buildLeadPrompt(task, {
+    agentId: leadMember.agentId,
+    hubUrl,
+    teammateMode: "wt",
+    workers: workers.map((w) => ({ agentId: w.agentId, cli: w.cli, subtask: w.subtask })),
+  });
+
+  const members = [
+    { ...leadMember, prompt: leadPrompt },
+    ...workers.map((w) => ({
+      ...w,
+      prompt: buildPrompt(w.subtask, { cli: w.cli, agentId: w.agentId, hubUrl }),
+    })),
+  ];
+
+  const cfgDir = join(HUB_PID_DIR, "team-wt", sessionId);
+  mkdirSync(cfgDir, { recursive: true });
+
+  const wtMembers = [];
+  for (const member of members) {
+    const cfgPath = join(cfgDir, `${member.name}.json`);
+    const runnerCfg = {
+      name: member.name,
+      role: member.role,
+      cli: member.cli,
+      agentId: member.agentId,
+      command: member.command,
+      hubUrl,
+      prompt: member.prompt,
+      pollMs: 900,
+      startupDelayMs: 2300,
+    };
+    writeFileSync(cfgPath, JSON.stringify(runnerCfg, null, 2) + "\n");
+
+    wtMembers.push({
+      title: `${sessionId}:${member.name}`,
+      command: buildWtRunnerCommand(cfgPath),
+    });
+  }
+
+  const wtInfo = openWtTeamSession(sessionId, wtMembers, {
+    layout,
+    windowRef: "new",
+  });
+
+  return {
+    members,
+    wtInfo,
+    cfgDir,
+  };
+}
+
 // ── 서브커맨드 ──
 
 async function teamStart() {
@@ -421,7 +559,8 @@ async function teamStart() {
     console.log(`\n  ${AMBER}${BOLD}⬡ tfx team${RESET}\n`);
     console.log(`  사용법: ${WHITE}tfx team "작업 설명"${RESET}`);
     console.log(`          ${WHITE}tfx team --agents codex,gemini --lead claude "작업"${RESET}`);
-    console.log(`          ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}\n`);
+    console.log(`          ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}`);
+    console.log(`          ${WHITE}tfx team --teammate-mode wt "작업"${RESET} ${DIM}(Windows Terminal 분할)${RESET}\n`);
     return;
   }
 
@@ -503,6 +642,66 @@ async function teamStart() {
     console.log(`  ${DIM}tmux 없이 실행됨 (직접 CLI 프로세스)${RESET}`);
     console.log(`  ${DIM}제어: tfx team send/control/tasks/status${RESET}\n`);
     return;
+  }
+
+  // ── wt 모드: Windows Terminal split-pane + member-runner ──
+  if (teammateMode === "wt") {
+    for (let i = 0; i < subtasks.length; i++) {
+      const preview = subtasks[i].length > 44 ? subtasks[i].slice(0, 44) + "…" : subtasks[i];
+      console.log(`    ${DIM}[${agents[i]}-${i + 1}] ${preview}${RESET}`);
+    }
+    console.log("");
+
+    try {
+      const paneCount = agents.length + 1;
+      const effectiveLayout = paneCount <= 4 ? layout : "1xN";
+      const { members, wtInfo, cfgDir } = await startWtTeam({
+        sessionId,
+        task,
+        lead,
+        agents,
+        subtasks,
+        hubUrl,
+        layout: effectiveLayout,
+      });
+
+      const tasks = buildTasks(subtasks, members.filter((m) => m.role === "worker"));
+      saveTeamState({
+        sessionName: sessionId,
+        task,
+        lead,
+        agents,
+        layout: effectiveLayout,
+        teammateMode,
+        startedAt: Date.now(),
+        hubUrl,
+        members: members.map((m, idx) => ({
+          role: m.role,
+          name: m.name,
+          cli: m.cli,
+          agentId: m.agentId,
+          pane: `wt:${idx}`,
+          subtask: m.subtask || null,
+        })),
+        panes: {},
+        tasks,
+        wt: {
+          windowRef: wtInfo.windowRef,
+          paneCount: wtInfo.paneCount,
+          layout: wtInfo.layout,
+          configDir: cfgDir,
+        },
+      });
+
+      ok("Windows Terminal 팀 시작 완료");
+      console.log(`  ${DIM}Windows Terminal 새 창에서 팀 패널이 실행됩니다.${RESET}`);
+      console.log(`  ${DIM}제어: tfx team send/control/tasks/status${RESET}`);
+      console.log(`  ${DIM}종료: tfx team stop${RESET}\n`);
+      return;
+    } catch (e) {
+      fail(`wt 모드 시작 실패: ${e.message}`);
+      return;
+    }
   }
 
   // ── tmux 모드 ──
@@ -624,7 +823,15 @@ async function teamStatus() {
     return;
   }
 
-  const alive = isTeamAlive(state);
+  let alive = isTeamAlive(state);
+  let wtStatuses = null;
+  if (isWtMode(state)) {
+    wtStatuses = await getWtAgentStatuses(state);
+    if (Array.isArray(wtStatuses)) {
+      alive = wtStatuses.some((s) => s.status === "online" || s.status === "stale");
+    }
+  }
+
   const status = alive ? `${GREEN}● active${RESET}` : `${RED}● dead${RESET}`;
   const uptime = alive ? `${Math.round((Date.now() - state.startedAt) / 60000)}분` : "-";
 
@@ -653,6 +860,19 @@ async function teamStatus() {
       for (const m of nativeMembers) {
         console.log(`    • ${m.name}: ${m.status}${m.lastPreview ? ` ${DIM}${m.lastPreview}${RESET}` : ""}`);
       }
+    }
+  }
+
+  if (isWtMode(state) && Array.isArray(wtStatuses) && wtStatuses.length) {
+    console.log("");
+    for (const s of wtStatuses) {
+      const tag = s.status === "online"
+        ? `${GREEN}${s.status}${RESET}`
+        : s.status === "stale"
+          ? `${YELLOW}${s.status}${RESET}`
+          : `${RED}${s.status}${RESET}`;
+      const lastSeen = s.last_seen_ms ? new Date(s.last_seen_ms).toLocaleTimeString("ko-KR", { hour12: false }) : "-";
+      console.log(`    • ${s.agent_id}: ${tag} ${DIM}last_seen=${lastSeen}${RESET}`);
     }
   }
 
@@ -711,8 +931,8 @@ function teamAttach() {
     return;
   }
 
-  if (isNativeMode(state)) {
-    console.log(`\n  ${DIM}in-process 모드는 별도 attach가 없습니다.${RESET}`);
+  if (isNativeMode(state) || isWtMode(state)) {
+    console.log(`\n  ${DIM}${state.teammateMode} 모드는 별도 attach가 없습니다.${RESET}`);
     console.log(`  ${DIM}상태 확인: tfx team status${RESET}\n`);
     return;
   }
@@ -727,8 +947,8 @@ function teamFocus() {
     return;
   }
 
-  if (isNativeMode(state)) {
-    console.log(`\n  ${DIM}in-process 모드는 focus/attach 개념이 없습니다.${RESET}`);
+  if (isNativeMode(state) || isWtMode(state)) {
+    console.log(`\n  ${DIM}${state.teammateMode} 모드는 focus/attach 개념이 없습니다.${RESET}`);
     console.log(`  ${DIM}직접 지시: tfx team send <대상> \"메시지\"${RESET}\n`);
     return;
   }
@@ -755,6 +975,17 @@ async function teamInterrupt() {
   const member = resolveMember(state, selector);
   if (!member) {
     console.log(`\n  사용법: ${WHITE}tfx team interrupt <lead|이름|번호>${RESET}\n`);
+    return;
+  }
+
+  if (isWtMode(state)) {
+    const published = await publishLeadControl(state, member, "interrupt", "manual interrupt");
+    if (published) {
+      ok(`${member.name} 인터럽트 전송 (hub)`);
+    } else {
+      warn(`${member.name} 인터럽트 실패`);
+    }
+    console.log("");
     return;
   }
 
@@ -794,7 +1025,10 @@ async function teamControl() {
 
   // 직접 주입: MCP 유무와 무관하게 즉시 전달
   let directOk = false;
-  if (isNativeMode(state)) {
+  if (isWtMode(state)) {
+    // wt 모드는 pane 키주입 API가 없으므로 Hub 제어 메시지로만 전달한다.
+    directOk = false;
+  } else if (isNativeMode(state)) {
     const direct = await nativeRequest(state, "/control", {
       member: member.name,
       command,
@@ -813,6 +1047,16 @@ async function teamControl() {
   // Hub direct mailbox에도 발행
   const published = await publishLeadControl(state, member, command, reason);
 
+  if (isWtMode(state)) {
+    if (published) {
+      ok(`${member.name} 제어 전송 (${command}, hub)`);
+    } else {
+      warn(`${member.name} 제어 전송 실패 (${command})`);
+    }
+    console.log("");
+    return;
+  }
+
   if (directOk && published) {
     ok(`${member.name} 제어 전송 (${command}, direct + hub)`);
   } else if (directOk) {
@@ -830,7 +1074,15 @@ async function teamStop() {
     return;
   }
 
-  if (isNativeMode(state)) {
+  if (isWtMode(state)) {
+    const members = state.members || [];
+    for (const m of members) {
+      try {
+        await publishLeadControl(state, m, "stop", "team stop requested");
+      } catch {}
+    }
+    ok(`세션 종료 요청: ${state.sessionName}`);
+  } else if (isNativeMode(state)) {
     await nativeRequest(state, "/stop", {});
     try { process.kill(state.native.supervisorPid, "SIGTERM"); } catch {}
     ok(`세션 종료: ${state.sessionName}`);
@@ -849,6 +1101,19 @@ async function teamStop() {
 
 async function teamKill() {
   const state = loadTeamState();
+  if (state && isWtMode(state)) {
+    const members = state.members || [];
+    for (const m of members) {
+      try {
+        await publishLeadControl(state, m, "stop", "team kill requested");
+      } catch {}
+    }
+    clearTeamState();
+    ok(`종료 요청: ${state.sessionName}`);
+    console.log("");
+    return;
+  }
+
   if (state && isNativeMode(state) && isTeamAlive(state)) {
     await nativeRequest(state, "/stop", {});
     try { process.kill(state.native.supervisorPid, "SIGTERM"); } catch {}
@@ -886,6 +1151,17 @@ async function teamSend() {
     return;
   }
 
+  if (isWtMode(state)) {
+    const published = await publishLeadControl(state, member, "input", "manual send", { text: message });
+    if (published) {
+      ok(`${member.name}에 메시지 주입 완료 (hub)`);
+    } else {
+      warn(`${member.name} 메시지 주입 실패`);
+    }
+    console.log("");
+    return;
+  }
+
   if (isNativeMode(state)) {
     const result = await nativeRequest(state, "/send", { member: member.name, text: message });
     if (result?.ok) {
@@ -904,9 +1180,9 @@ async function teamSend() {
 
 function teamList() {
   const state = loadTeamState();
-  if (state && isNativeMode(state) && isTeamAlive(state)) {
+  if (state && (isNativeMode(state) || isWtMode(state)) && isTeamAlive(state)) {
     console.log(`\n  ${AMBER}${BOLD}⬡ 팀 세션 목록${RESET}\n`);
-    console.log(`    ${GREEN}●${RESET} ${state.sessionName} ${DIM}(in-process)${RESET}`);
+    console.log(`    ${GREEN}●${RESET} ${state.sessionName} ${DIM}(${state.teammateMode})${RESET}`);
     console.log("");
     return;
   }
@@ -931,16 +1207,17 @@ function teamHelp() {
     ${WHITE}tfx team "작업 설명"${RESET}
     ${WHITE}tfx team --agents codex,gemini --lead claude "작업"${RESET}
     ${WHITE}tfx team --teammate-mode tmux "작업"${RESET}
+    ${WHITE}tfx team --teammate-mode wt "작업"${RESET} ${DIM}(Windows Terminal 분할)${RESET}
     ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}
 
   ${BOLD}제어${RESET}
     ${WHITE}tfx team status${RESET}                      ${GRAY}현재 팀 상태${RESET}
     ${WHITE}tfx team tasks${RESET}                       ${GRAY}공유 태스크 목록${RESET}
     ${WHITE}tfx team task${RESET} ${DIM}<pending|progress|done> <T1>${RESET} ${GRAY}태스크 상태 갱신${RESET}
-    ${WHITE}tfx team attach${RESET}                      ${GRAY}세션 재연결${RESET}
-    ${WHITE}tfx team focus${RESET} ${DIM}<lead|이름|번호>${RESET}      ${GRAY}특정 팀메이트 포커스${RESET}
+    ${WHITE}tfx team attach${RESET}                      ${GRAY}세션 재연결(tmux 전용)${RESET}
+    ${WHITE}tfx team focus${RESET} ${DIM}<lead|이름|번호>${RESET}      ${GRAY}특정 팀메이트 포커스(tmux 전용)${RESET}
     ${WHITE}tfx team send${RESET} ${DIM}<lead|이름|번호> "msg"${RESET} ${GRAY}팀메이트에 메시지 주입${RESET}
-    ${WHITE}tfx team interrupt${RESET} ${DIM}<대상>${RESET}            ${GRAY}팀메이트 인터럽트(C-c)${RESET}
+    ${WHITE}tfx team interrupt${RESET} ${DIM}<대상>${RESET}            ${GRAY}팀메이트 인터럽트${RESET}
     ${WHITE}tfx team control${RESET} ${DIM}<대상> <cmd>${RESET}        ${GRAY}리드 제어명령(interrupt|stop|pause|resume)${RESET}
     ${WHITE}tfx team stop${RESET}                        ${GRAY}graceful 종료${RESET}
     ${WHITE}tfx team kill${RESET}                        ${GRAY}모든 팀 세션 강제 종료${RESET}

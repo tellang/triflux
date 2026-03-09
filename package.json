@@ -39,8 +39,9 @@
   "author": "tellang",
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^12.6.2",
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "node-pty": "^1.1.0"
   },
   "keywords": [
     "claude-code",
