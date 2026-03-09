@@ -166,6 +166,50 @@ function ensureTmuxOrExit() {
   process.exit(1);
 }
 
+function hasWindowsTerminal() {
+  if (process.platform !== "win32") return false;
+  try {
+    execSync("where wt", { stdio: "ignore", timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function quotePs(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function launchAttachInWindowsTerminal() {
+  if (!hasWindowsTerminal()) return false;
+
+  const nodeExe = quotePs(process.execPath);
+  const scriptPath = quotePs(join(PKG_ROOT, "bin", "triflux.mjs"));
+  const repoPath = quotePs(PKG_ROOT);
+  const attachCmd = `cd '${repoPath}'; & '${nodeExe}' '${scriptPath}' team attach`;
+
+  const launch = (args) => {
+    const child = spawn("wt", args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    });
+    child.unref();
+  };
+
+  try {
+    launch(["-w", "0", "split-pane", "-H", "pwsh", "-NoExit", "-Command", attachCmd]);
+    return true;
+  } catch {
+    try {
+      launch(["-w", "0", "new-tab", "pwsh", "-NoExit", "-Command", attachCmd]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 function toAgentId(cli, target) {
   return `${cli}-${target.split(".").pop()}`;
 }
@@ -679,7 +723,17 @@ function teamAttach() {
     return;
   }
 
-  attachSession(state.sessionName);
+  try {
+    attachSession(state.sessionName);
+  } catch (e) {
+    if (launchAttachInWindowsTerminal()) {
+      warn(`현재 터미널에서 attach 실패: ${e.message}`);
+      ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
+      console.log("");
+      return;
+    }
+    throw e;
+  }
 }
 
 function teamFocus() {
@@ -703,7 +757,17 @@ function teamFocus() {
   }
 
   focusPane(member.pane, { zoom: (state.teammateMode === "in-process") });
-  attachSession(state.sessionName);
+  try {
+    attachSession(state.sessionName);
+  } catch (e) {
+    if (launchAttachInWindowsTerminal()) {
+      warn(`현재 터미널에서 attach 실패: ${e.message}`);
+      ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
+      console.log("");
+      return;
+    }
+    throw e;
+  }
 }
 
 async function teamInterrupt() {

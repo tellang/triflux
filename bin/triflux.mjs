@@ -827,7 +827,7 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx team${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
-    ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 agents: codex,codex)${RESET}
+    ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
@@ -849,26 +849,30 @@ async function cmdCodexTeam() {
   const sub = String(args[0] || "").toLowerCase();
   const passthrough = new Set([
     "status", "attach", "stop", "kill", "send", "list", "help", "--help", "-h",
+    "tasks", "task", "focus", "interrupt", "control",
   ]);
 
   if (sub === "help" || sub === "--help" || sub === "-h") {
     console.log(`
   ${AMBER}${BOLD}⬡ tfx codex-team${RESET}
 
-    ${WHITE_BRIGHT}tfx codex-team "작업"${RESET}         ${GRAY}Codex 워커 2개로 팀 시작${RESET}
+    ${WHITE_BRIGHT}tfx codex-team "작업"${RESET}         ${GRAY}Codex 리드 + 워커 2개로 팀 시작${RESET}
     ${WHITE_BRIGHT}tfx codex-team --layout 1x3 "작업"${RESET}
     ${WHITE_BRIGHT}tfx codex-team status${RESET}
     ${WHITE_BRIGHT}tfx codex-team send N "msg"${RESET}
 
-  ${DIM}내부적으로 tfx team을 호출하며, 시작 시 --agents codex,codex를 기본 주입합니다.${RESET}
+  ${DIM}내부적으로 tfx team을 호출하며, 시작 시 --lead codex --agents codex,codex를 기본 주입합니다.${RESET}
 `);
     return;
   }
 
   const hasAgents = args.includes("--agents");
-  const forwarded = passthrough.has(sub) || hasAgents
-    ? args
-    : ["--agents", "codex,codex", ...args];
+  const hasLead = args.includes("--lead");
+  const isControl = passthrough.has(sub);
+  const inject = [];
+  if (!isControl && !hasLead) inject.push("--lead", "codex");
+  if (!isControl && !hasAgents) inject.push("--agents", "codex,codex");
+  const forwarded = isControl ? args : [...inject, ...args];
 
   const { pathToFileURL } = await import("node:url");
   const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
