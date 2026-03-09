@@ -330,6 +330,25 @@ export function listSessions() {
 }
 
 /**
+ * 세션 attach client 수 조회
+ * @param {string} sessionName
+ * @returns {number|null}
+ */
+export function getSessionAttachedCount(sessionName) {
+  try {
+    const output = tmux('list-sessions -F "#{session_name} #{session_attached}"');
+    const line = output
+      .split("\n")
+      .find((l) => l.startsWith(`${sessionName} `));
+    if (!line) return null;
+    const n = parseInt(line.split(" ")[1], 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * pane 마지막 N줄 캡처
  * @param {string} target — 예: tfx-team-abc:0.1
  * @param {number} lines — 캡처할 줄 수 (기본 5)

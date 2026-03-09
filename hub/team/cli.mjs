@@ -11,6 +11,7 @@ import {
   resolveAttachCommand,
   killSession,
   sessionExists,
+  getSessionAttachedCount,
   listSessions,
   capturePaneOutput,
   focusPane,
@@ -186,7 +187,7 @@ function hasWindowsTerminal() {
   }
 }
 
-function launchAttachInWindowsTerminal(sessionName) {
+async function launchAttachInWindowsTerminal(sessionName) {
   if (!hasWindowsTerminal()) return false;
 
   let attachSpec;
@@ -205,10 +206,24 @@ function launchAttachInWindowsTerminal(sessionName) {
     child.unref();
   };
 
+  const beforeAttached = getSessionAttachedCount(sessionName);
+
   try {
     // 분할선이 세로(좌/우)가 되도록 -V 우선
     launch(["-w", "0", "split-pane", "-V", "-d", PKG_ROOT, attachSpec.command, ...attachSpec.args]);
-    return true;
+    if (beforeAttached == null) {
+      return true;
+    }
+
+    const deadline = Date.now() + 3500;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 120));
+      const nowAttached = getSessionAttachedCount(sessionName);
+      if (typeof nowAttached === "number" && nowAttached > beforeAttached) {
+        return true;
+      }
+    }
+    return false;
   } catch {
     return false;
   }
@@ -727,7 +742,7 @@ function teamTaskUpdate() {
   console.log("");
 }
 
-function teamAttach() {
+async function teamAttach() {
   const state = loadTeamState();
   if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
@@ -743,7 +758,7 @@ function teamAttach() {
   try {
     attachSession(state.sessionName);
   } catch (e) {
-    if (launchAttachInWindowsTerminal(state.sessionName)) {
+    if (await launchAttachInWindowsTerminal(state.sessionName)) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
       console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
@@ -751,6 +766,7 @@ function teamAttach() {
       return;
     }
     fail(`attach 실패: ${e.message}`);
+    fail("WT 분할창 attach 자동 검증 실패 (session_attached 증가 없음)");
     console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
     console.log("");
     return;
@@ -786,6 +802,8 @@ async function teamDebug() {
   console.log(`    lead:      ${state.lead}`);
   console.log(`    agents:    ${(state.agents || []).join(", ")}`);
   console.log(`    alive:     ${isTeamAlive(state) ? "yes" : "no"}`);
+  const attached = getSessionAttachedCount(state.sessionName);
+  console.log(`    attached:  ${attached == null ? "-" : attached}`);
 
   if (isNativeMode(state)) {
     const native = await nativeGetStatus(state);
@@ -819,7 +837,7 @@ async function teamDebug() {
   console.log("");
 }
 
-function teamFocus() {
+async function teamFocus() {
   const state = loadTeamState();
   if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
@@ -843,7 +861,7 @@ function teamFocus() {
   try {
     attachSession(state.sessionName);
   } catch (e) {
-    if (launchAttachInWindowsTerminal(state.sessionName)) {
+    if (await launchAttachInWindowsTerminal(state.sessionName)) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
       console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
@@ -851,6 +869,7 @@ function teamFocus() {
       return;
     }
     fail(`attach 실패: ${e.message}`);
+    fail("WT 분할창 attach 자동 검증 실패 (session_attached 증가 없음)");
     console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
     console.log("");
     return;
