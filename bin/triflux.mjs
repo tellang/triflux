@@ -7,7 +7,26 @@ import { execSync, spawn } from "child_process";
 
 const PKG_ROOT = dirname(dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Z]:)/, "$1");
 const CLAUDE_DIR = join(homedir(), ".claude");
+const CODEX_DIR = join(homedir(), ".codex");
+const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
+
+const REQUIRED_CODEX_PROFILES = [
+  {
+    name: "xhigh",
+    lines: [
+      'model = "gpt-5.3-codex"',
+      'model_reasoning_effort = "xhigh"',
+    ],
+  },
+  {
+    name: "spark_fast",
+    lines: [
+      'model = "gpt-5.1-codex-mini"',
+      'model_reasoning_effort = "low"',
+    ],
+  },
+];
 
 // ── 색상 체계 (triflux brand: amber/orange accent) ──
 const CYAN = "\x1b[36m";
@@ -80,6 +99,45 @@ function getVersion(filePath) {
     const match = content.match(/VERSION\s*=\s*"([^"]+)"/);
     return match ? match[1] : null;
   } catch { return null; }
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasProfileSection(tomlContent, profileName) {
+  const section = `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*$`;
+  return new RegExp(section, "m").test(tomlContent);
+}
+
+function ensureCodexProfiles() {
+  try {
+    if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
+
+    const original = existsSync(CODEX_CONFIG_PATH)
+      ? readFileSync(CODEX_CONFIG_PATH, "utf8")
+      : "";
+
+    let updated = original;
+    let added = 0;
+
+    for (const profile of REQUIRED_CODEX_PROFILES) {
+      if (hasProfileSection(updated, profile.name)) continue;
+
+      if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
+      if (updated.trim().length > 0) updated += "\n";
+      updated += `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
+      added++;
+    }
+
+    if (added > 0) {
+      writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
+    }
+
+    return { ok: true, added };
+  } catch (e) {
+    return { ok: false, added: 0, message: e.message };
+  }
 }
 
 function syncFile(src, dst, label) {
@@ -219,6 +277,15 @@ function cmdSetup() {
     } else {
       ok(`스킬: ${skillTotal}개 최신 상태`);
     }
+  }
+
+  const codexProfileResult = ensureCodexProfiles();
+  if (!codexProfileResult.ok) {
+    warn(`Codex profiles 설정 실패: ${codexProfileResult.message}`);
+  } else if (codexProfileResult.added > 0) {
+    ok(`Codex profiles: ${codexProfileResult.added}개 추가됨 (~/.codex/config.toml)`);
+  } else {
+    ok("Codex profiles: 이미 준비됨");
   }
 
   // hub MCP 사전 등록 (서버 미실행이어도 설정만 등록 — hub start 시 즉시 사용 가능)
