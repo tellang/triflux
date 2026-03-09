@@ -116,7 +116,39 @@ function getHubInfo() {
   }
 }
 
-function startHubDaemon() {
+function getDefaultHubEndpoint() {
+  const host = process.env.TFX_HUB_HOST || "127.0.0.1";
+  const parsedPort = Number.parseInt(process.env.TFX_HUB_PORT || "27888", 10);
+  const port = Number.isFinite(parsedPort) ? parsedPort : 27888;
+  return { host, port };
+}
+
+async function probeHubInfo(timeoutMs = 1200) {
+  const { host, port } = getDefaultHubEndpoint();
+  const base = `http://${host}:${port}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${base}/status`, { signal: controller.signal });
+    if (!res.ok) return null;
+
+    const json = await res.json().catch(() => null);
+    return {
+      pid: Number.isFinite(Number(json?.pid)) ? Number(json.pid) : null,
+      port,
+      host,
+      url: `${base}/mcp`,
+      started: Date.now(),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function startHubDaemon() {
   const serverPath = join(PKG_ROOT, "hub", "server.mjs");
   if (!existsSync(serverPath)) {
     fail("hub/server.mjs 없음 — hub 모듈이 설치되지 않음");
@@ -124,6 +156,10 @@ function startHubDaemon() {
   }
 
   if (!ensureHubRuntimeReady()) return null;
+
+  // PID 파일이 없어도 이미 실행 중인 Hub(포트 점유)를 먼저 감지한다.
+  const aliveHub = await probeHubInfo();
+  if (aliveHub) return aliveHub;
 
   let child;
   try {
@@ -139,13 +175,21 @@ function startHubDaemon() {
 
   child.unref();
 
-  // PID 파일 확인 (최대 3초 대기)
-  const deadline = Date.now() + 3000;
+  // PID 파일 또는 /status 응답 확인 (최대 4초 대기)
+  const deadline = Date.now() + 4000;
   while (Date.now() < deadline) {
     if (existsSync(HUB_PID_FILE)) {
-      return JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+      try {
+        return JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+      } catch {
+        // 파일 기록 중일 수 있으므로 다음 루프에서 재시도
+      }
     }
-    execSync('node -e "setTimeout(()=>{},100)"', { stdio: "ignore", timeout: 500 });
+
+    const probed = await probeHubInfo(900);
+    if (probed) return probed;
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
   }
   return null;
 }
@@ -569,7 +613,7 @@ async function teamStart() {
   let hub = getHubInfo();
   if (!hub) {
     process.stdout.write("  Hub 시작 중...");
-    hub = startHubDaemon();
+    hub = await startHubDaemon();
     if (hub) {
       console.log(` ${GREEN}✓${RESET}`);
     } else {
