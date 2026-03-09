@@ -791,7 +791,7 @@ async function fetchClaudeUsage(forceRefresh = false) {
       : result.status === 401 || result.status === 403 ? "auth"
       : result.error === "timeout" || result.error === "network" ? "network"
       : "unknown";
-    writeClaudeUsageCache(null, { type: errorType, status: result.status });
+    writeClaudeUsageCache(existingSnapshot.data, { type: errorType, status: result.status });
     return existingSnapshot.data || null;
   }
   const usage = parseClaudeUsageResponse(result.data);
