@@ -4,10 +4,12 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmod
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync, spawn } from "child_process";
+import { createRequire } from "module";
 
 const PKG_ROOT = dirname(dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Z]:)/, "$1");
 const CLAUDE_DIR = join(homedir(), ".claude");
 const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
+const requireFromPkg = createRequire(join(PKG_ROOT, "package.json"));
 
 // ── 색상 체계 (triflux brand: amber/orange accent) ──
 const CYAN = "\x1b[36m";
@@ -23,6 +25,12 @@ const WHITE_BRIGHT = "\x1b[97m";
 const GRAY = "\x1b[38;5;245m";
 const GREEN_BRIGHT = "\x1b[38;5;82m";
 const RED_BRIGHT = "\x1b[38;5;196m";
+const HUB_RUNTIME_DEPS = [
+  "@modelcontextprotocol/sdk/server/index.js",
+  "@modelcontextprotocol/sdk/server/streamableHttp.js",
+  "@modelcontextprotocol/sdk/types.js",
+  "better-sqlite3",
+];
 
 // ── 브랜드 요소 ──
 const BRAND = `${AMBER}${BOLD}triflux${RESET}`;
@@ -37,6 +45,36 @@ function warn(msg) { console.log(`  ${YELLOW}⚠${RESET} ${msg}`); }
 function fail(msg) { console.log(`  ${RED_BRIGHT}✗${RESET} ${msg}`); }
 function info(msg) { console.log(`    ${GRAY}${msg}${RESET}`); }
 function section(title) { console.log(`\n  ${AMBER}▸${RESET} ${BOLD}${title}${RESET}`); }
+
+function getMissingHubRuntimeDeps() {
+  const missing = [];
+  for (const dep of HUB_RUNTIME_DEPS) {
+    try {
+      requireFromPkg.resolve(dep);
+    } catch {
+      missing.push(dep);
+    }
+  }
+  return missing;
+}
+
+function formatHubForegroundCommand(port, serverPath) {
+  const safePath = serverPath.includes(" ") ? `"${serverPath}"` : serverPath;
+  if (process.platform === "win32") {
+    return `$env:TFX_HUB_PORT='${port}'; node ${safePath}`;
+  }
+  return `TFX_HUB_PORT=${port} node ${safePath}`;
+}
+
+function ensureHubRuntimeReady() {
+  const missing = getMissingHubRuntimeDeps();
+  if (missing.length === 0) return true;
+
+  fail(`hub 실행 의존성 누락: ${missing.join(", ")}`);
+  info("프로젝트 루트에서 다음 명령을 먼저 실행하세요:");
+  info("npm install");
+  return false;
+}
 
 function which(cmd) {
   try {
@@ -949,11 +987,20 @@ function cmdHub() {
         return;
       }
 
-      const child = spawn(process.execPath, [serverPath], {
-        env: { ...process.env, TFX_HUB_PORT: port },
-        stdio: "ignore",
-        detached: true,
-      });
+      if (!ensureHubRuntimeReady()) return;
+
+      let child;
+      try {
+        child = spawn(process.execPath, [serverPath], {
+          env: { ...process.env, TFX_HUB_PORT: port },
+          stdio: "ignore",
+          detached: true,
+        });
+      } catch (e) {
+        fail(`hub 시작 실패: ${e.message}`);
+        console.log(`    ${DIM}${formatHubForegroundCommand(port, serverPath)}${RESET}`);
+        return;
+      }
       child.unref();
 
       // PID 파일 확인 (최대 3초 대기, 100ms 폴링)
@@ -976,7 +1023,7 @@ function cmdHub() {
       } else {
         // 직접 포그라운드 모드로 안내
         console.log(`\n  ${YELLOW}⚠${RESET} 백그라운드 시작 실패 — 포그라운드로 실행:`);
-        console.log(`    ${DIM}TFX_HUB_PORT=${port} node ${serverPath}${RESET}\n`);
+        console.log(`    ${DIM}${formatHubForegroundCommand(port, serverPath)}${RESET}\n`);
       }
       break;
     }

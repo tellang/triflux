@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { execSync, spawn } from "node:child_process";
+import { createRequire } from "node:module";
 
 import {
   createSession,
@@ -23,6 +24,13 @@ const PKG_ROOT = dirname(dirname(dirname(new URL(import.meta.url).pathname))).re
 const HUB_PID_DIR = join(homedir(), ".claude", "cache", "tfx-hub");
 const HUB_PID_FILE = join(HUB_PID_DIR, "hub.pid");
 const TEAM_STATE_FILE = join(HUB_PID_DIR, "team-state.json");
+const requireFromPkg = createRequire(join(PKG_ROOT, "package.json"));
+const HUB_RUNTIME_DEPS = [
+  "@modelcontextprotocol/sdk/server/index.js",
+  "@modelcontextprotocol/sdk/server/streamableHttp.js",
+  "@modelcontextprotocol/sdk/types.js",
+  "better-sqlite3",
+];
 
 const TEAM_SUBCOMMANDS = new Set([
   "status", "attach", "stop", "kill", "send", "list", "help", "tasks", "task", "focus", "interrupt", "control",
@@ -42,6 +50,27 @@ const YELLOW = "\x1b[33m";
 function ok(msg) { console.log(`  ${GREEN}✓${RESET} ${msg}`); }
 function warn(msg) { console.log(`  ${YELLOW}⚠${RESET} ${msg}`); }
 function fail(msg) { console.log(`  ${RED}✗${RESET} ${msg}`); }
+
+function getMissingHubRuntimeDeps() {
+  const missing = [];
+  for (const dep of HUB_RUNTIME_DEPS) {
+    try {
+      requireFromPkg.resolve(dep);
+    } catch {
+      missing.push(dep);
+    }
+  }
+  return missing;
+}
+
+function ensureHubRuntimeReady() {
+  const missing = getMissingHubRuntimeDeps();
+  if (missing.length === 0) return true;
+
+  fail(`Hub 실행 의존성 누락: ${missing.join(", ")}`);
+  warn("프로젝트 루트에서 npm install 후 다시 시도하세요.");
+  return false;
+}
 
 // ── 팀 상태 관리 ──
 
@@ -82,11 +111,20 @@ function startHubDaemon() {
     return null;
   }
 
-  const child = spawn(process.execPath, [serverPath], {
-    env: { ...process.env },
-    stdio: "ignore",
-    detached: true,
-  });
+  if (!ensureHubRuntimeReady()) return null;
+
+  let child;
+  try {
+    child = spawn(process.execPath, [serverPath], {
+      env: { ...process.env },
+      stdio: "ignore",
+      detached: true,
+    });
+  } catch (e) {
+    fail(`Hub 데몬 시작 실패: ${e.message}`);
+    return null;
+  }
+
   child.unref();
 
   // PID 파일 확인 (최대 3초 대기)

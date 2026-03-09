@@ -55,12 +55,50 @@ find_bridge() {
   echo ""
 }
 BRIDGE_BIN="$(find_bridge)"
+HUB_BOOTSTRAP_LOCK="${TFX_TMP}/tfx-hub-bootstrap.lock"
+
+hub_ping_ok() {
+  [[ -z "$BRIDGE_BIN" ]] && return 1
+  local ping_json
+  ping_json=$(node "$BRIDGE_BIN" ping 2>/dev/null || echo '{"ok":false}')
+  echo "$ping_json" | grep -q '"ok":true'
+}
+
+start_hub_async() {
+  [[ -z "$BRIDGE_BIN" ]] && return 0
+
+  local now last
+  now=$(date +%s)
+  last=$(cat "$HUB_BOOTSTRAP_LOCK" 2>/dev/null || echo 0)
+  if [[ "$last" =~ ^[0-9]+$ ]] && (( now - last < 15 )); then
+    return 0
+  fi
+  echo "$now" > "$HUB_BOOTSTRAP_LOCK" 2>/dev/null || true
+
+  local bridge_dir pkg_root hub_cli
+  bridge_dir="$(cd "$(dirname "$BRIDGE_BIN")" && pwd)"
+  pkg_root="$(cd "${bridge_dir}/.." && pwd)"
+  hub_cli="${pkg_root}/bin/triflux.mjs"
+  [[ -f "$hub_cli" ]] || return 0
+
+  # 라우팅 본문을 막지 않기 위해 허브는 비동기로 기동 요청
+  (node "$hub_cli" hub start >/dev/null 2>&1 || true) >/dev/null 2>&1 &
+}
+
 HUB_ENABLED="false"
 if [[ -n "$BRIDGE_BIN" ]]; then
-  # Hub 핑 (3초 타임아웃, 실패 시 무시)
-  HUB_PING=$(node "$BRIDGE_BIN" ping 2>/dev/null || echo '{"ok":false}')
-  if echo "$HUB_PING" | grep -q '"ok":true'; then
+  if hub_ping_ok; then
     HUB_ENABLED="true"
+  else
+    echo "[tfx-route] hub offline, 백그라운드 기동 요청" >&2
+    start_hub_async
+    for _ in 1 2 3 4; do
+      sleep 0.25
+      if hub_ping_ok; then
+        HUB_ENABLED="true"
+        break
+      fi
+    done
   fi
 fi
 
