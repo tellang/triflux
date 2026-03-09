@@ -1,15 +1,43 @@
-# tfx-hub — MCP 메시지 버스 관리
+---
+name: tfx-hub
+description: tfx-hub 개방형 스킬 — 커맨드(start/stop/status) + 자유형 작업 모두 처리
+triggers:
+  - tfx-hub
+argument-hint: "<start|stop|status|자유형 작업 설명>"
+---
+
+# tfx-hub — MCP 메시지 버스 관리 + 개방형 작업
 
 > CLI 에이전트(Codex/Gemini/Claude) 간 실시간 메시지 허브를 관리합니다.
-> **tfx-auto와 완전 독립** — 별도 스킬로 운영됩니다.
+> **커맨드 매칭 + fallthrough**: start/stop/status에 매칭되면 즉시 실행,
+> 매칭 안 되면 **hub 도메인 컨텍스트를 활용한 범용 작업**으로 처리합니다.
 
-## 사용법
+## 입력 해석 규칙
 
 ```
-/tfx-hub start               ← 허브 데몬 시작 (기본 포트 27888)
-/tfx-hub start --port 28000  ← 커스텀 포트
-/tfx-hub stop                ← 허브 중지
-/tfx-hub status              ← 상태/메트릭 확인
+/tfx-hub start          → 커맨드 매칭 → 허브 시작
+/tfx-hub stop           → 커맨드 매칭 → 허브 중지
+/tfx-hub status         → 커맨드 매칭 → 상태 확인
+/tfx-hub 테스트해줘      → fallthrough → hub 관련 범용 작업으로 처리
+/tfx-hub 문서 저장해     → fallthrough → hub 관련 범용 작업으로 처리
+/tfx-hub 브릿지 분석해   → fallthrough → hub 관련 범용 작업으로 처리
+```
+
+**fallthrough 규칙**: 인자가 start/stop/status/--port 등 커맨드 키워드에 매칭되지 않으면,
+사용자의 입력을 **hub/브릿지/메시지버스 도메인의 자유형 작업**으로 해석한다.
+
+fallthrough 라우팅:
+```bash
+# tfx-route.sh 경유 (권장)
+Bash("bash ~/.claude/scripts/tfx-route.sh {에이전트} '{hub 컨텍스트 + 작업}' {mcp_profile}")
+
+# codex 직접 호출 시 — 반드시 exec 서브커맨드 포함
+Bash("codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check '{작업}'")
+Bash("codex --profile xhigh exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check '{작업}'")
+#          ↑ --profile은 exec 앞에, --skip-git-repo-check은 exec 뒤에
+
+# Claude 네이티브 (탐색/검증)
+Agent(subagent_type="oh-my-claudecode:explore", prompt="{작업}")
 ```
 
 ## 커맨드
@@ -77,6 +105,28 @@ claude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp
 | `handoff` | 작업 인계 |
 | `request_human_input` | 사용자 입력 요청 (CAPTCHA/승인) |
 | `submit_human_input` | 사용자 입력 응답 |
+
+## 브릿지 REST 엔드포인트 (4개)
+
+| 엔드포인트 | 설명 |
+|-----------|------|
+| `POST /bridge/register` | 에이전트 등록 (프로세스 수명 기반 lease) |
+| `POST /bridge/result` | 결과 발행 (topic fanout) |
+| `POST /bridge/context` | 선행 컨텍스트 폴링 (auto_ack) |
+| `POST /bridge/deregister` | 에이전트 offline 마킹 |
+
+## 프로젝트 구조
+
+```
+hub/
+├── server.mjs    # MCP 서버 + REST 브릿지 엔드포인트
+├── store.mjs     # SQLite WAL 상태 저장소
+├── router.mjs    # Actor mailbox 라우터 + QoS
+├── tools.mjs     # MCP 도구 8개 정의
+├── hitl.mjs      # Human-in-the-Loop 매니저
+├── bridge.mjs    # tfx-route.sh ↔ hub 브릿지 CLI
+└── schema.sql    # DB 스키마
+```
 
 ## 상태
 
