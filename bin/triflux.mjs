@@ -849,7 +849,7 @@ async function cmdCodexTeam() {
   const sub = String(args[0] || "").toLowerCase();
   const passthrough = new Set([
     "status", "attach", "stop", "kill", "send", "list", "help", "--help", "-h",
-    "tasks", "task", "focus", "interrupt", "control",
+    "tasks", "task", "focus", "interrupt", "control", "debug",
   ]);
 
   if (sub === "help" || sub === "--help" || sub === "-h") {
@@ -857,8 +857,10 @@ async function cmdCodexTeam() {
   ${AMBER}${BOLD}⬡ tfx codex-team${RESET}
 
     ${WHITE_BRIGHT}tfx codex-team "작업"${RESET}         ${GRAY}Codex 리드 + 워커 2개로 팀 시작${RESET}
-    ${WHITE_BRIGHT}tfx codex-team --layout 1x3 "작업"${RESET}
+    ${WHITE_BRIGHT}tfx codex-team --layout 1xN "작업"${RESET}   ${GRAY}(세로 분할 컬럼)${RESET}
+    ${WHITE_BRIGHT}tfx codex-team --layout Nx1 "작업"${RESET}   ${GRAY}(가로 분할 스택)${RESET}
     ${WHITE_BRIGHT}tfx codex-team status${RESET}
+    ${WHITE_BRIGHT}tfx codex-team debug --lines 30${RESET}
     ${WHITE_BRIGHT}tfx codex-team send N "msg"${RESET}
 
   ${DIM}내부적으로 tfx team을 호출하며, 시작 시 --lead codex --agents codex,codex를 기본 주입합니다.${RESET}

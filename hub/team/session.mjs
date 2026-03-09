@@ -128,7 +128,7 @@ export function tmuxExec(args, opts = {}) {
  * tmux 세션 생성 + 레이아웃 분할
  * @param {string} sessionName — 세션 이름
  * @param {object} opts
- * @param {'2x2'|'1xN'} opts.layout — 레이아웃 (기본 2x2)
+ * @param {'2x2'|'1xN'|'Nx1'} opts.layout — 레이아웃 (기본 2x2)
  * @param {number} opts.paneCount — pane 수 (기본 4)
  * @returns {{ sessionName: string, panes: string[] }}
  */
@@ -146,23 +146,33 @@ export function createSession(sessionName, opts = {}) {
   const panes = [`${sessionName}:0.0`];
 
   if (layout === "2x2" && paneCount >= 3) {
-    // 2x2 그리드: 좌|우 → 좌상/좌하 → 우상/우하
-    tmux(`split-window -h -t ${sessionName}:0`);
-    tmux(`split-window -v -t ${sessionName}:0.0`);
+    // 3-pane 기본: lead 왼쪽, workers 오른쪽 상/하
+    // 4-pane: 좌/우 각각 상/하(균등 2x2)
+    tmux(`split-window -h -t ${sessionName}:0.0`);
+    tmux(`split-window -v -t ${sessionName}:0.1`);
     if (paneCount >= 4) {
-      tmux(`split-window -v -t ${sessionName}:0.2`);
+      tmux(`split-window -v -t ${sessionName}:0.0`);
     }
     // pane ID 재수집
     panes.length = 0;
     for (let i = 0; i < Math.min(paneCount, 4); i++) {
       panes.push(`${sessionName}:0.${i}`);
     }
+  } else if (layout === "1xN") {
+    // 세로 분할(좌/우 컬럼 확장)
+    for (let i = 1; i < paneCount; i++) {
+      tmux(`split-window -h -t ${sessionName}:0`);
+    }
+    tmux(`select-layout -t ${sessionName}:0 even-horizontal`);
+    panes.length = 0;
+    for (let i = 0; i < paneCount; i++) {
+      panes.push(`${sessionName}:0.${i}`);
+    }
   } else {
-    // 1xN 수직 분할
+    // Nx1 가로 분할(상/하 스택)
     for (let i = 1; i < paneCount; i++) {
       tmux(`split-window -v -t ${sessionName}:0`);
     }
-    // even-vertical 레이아웃 적용
     tmux(`select-layout -t ${sessionName}:0 even-vertical`);
     panes.length = 0;
     for (let i = 0; i < paneCount; i++) {

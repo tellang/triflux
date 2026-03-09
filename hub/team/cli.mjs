@@ -11,6 +11,7 @@ import {
   killSession,
   sessionExists,
   listSessions,
+  capturePaneOutput,
   focusPane,
   configureTeammateKeybindings,
   detectMultiplexer,
@@ -25,7 +26,7 @@ const HUB_PID_FILE = join(HUB_PID_DIR, "hub.pid");
 const TEAM_STATE_FILE = join(HUB_PID_DIR, "team-state.json");
 
 const TEAM_SUBCOMMANDS = new Set([
-  "status", "attach", "stop", "kill", "send", "list", "help", "tasks", "task", "focus", "interrupt", "control",
+  "status", "attach", "stop", "kill", "send", "list", "help", "tasks", "task", "focus", "interrupt", "control", "debug",
 ]);
 
 // ── 색상 ──
@@ -112,6 +113,14 @@ function normalizeTeammateMode(mode = "auto") {
   return "in-process";
 }
 
+function normalizeLayout(layout = "2x2") {
+  const raw = String(layout).toLowerCase();
+  if (raw === "2x2" || raw === "grid") return "2x2";
+  if (raw === "1xn" || raw === "1x3" || raw === "vertical" || raw === "columns") return "1xN";
+  if (raw === "nx1" || raw === "horizontal" || raw === "rows") return "Nx1";
+  return "2x2";
+}
+
 function parseTeamArgs() {
   const args = process.argv.slice(3);
   let agents = ["codex", "gemini"]; // 기본: codex + gemini
@@ -138,7 +147,7 @@ function parseTeamArgs() {
   return {
     agents,
     lead,
-    layout,
+    layout: normalizeLayout(layout),
     teammateMode: normalizeTeammateMode(teammateMode),
     task: taskParts.join(" ").trim(),
   };
@@ -186,7 +195,7 @@ function launchAttachInWindowsTerminal() {
   const nodeExe = quotePs(process.execPath);
   const scriptPath = quotePs(join(PKG_ROOT, "bin", "triflux.mjs"));
   const repoPath = quotePs(PKG_ROOT);
-  const attachCmd = `cd '${repoPath}'; & '${nodeExe}' '${scriptPath}' team attach`;
+  const attachCmd = `$env:TFX_ATTACH_FROM_WT='1'; cd '${repoPath}'; & '${nodeExe}' '${scriptPath}' team attach`;
 
   const launch = (args) => {
     const child = spawn("wt", args, {
@@ -198,15 +207,11 @@ function launchAttachInWindowsTerminal() {
   };
 
   try {
-    launch(["-w", "0", "split-pane", "-H", "pwsh", "-NoExit", "-Command", attachCmd]);
+    // 분할선이 세로(좌/우)가 되도록 -V 우선
+    launch(["-w", "0", "split-pane", "-V", "pwsh", "-NoExit", "-Command", attachCmd]);
     return true;
   } catch {
-    try {
-      launch(["-w", "0", "new-tab", "pwsh", "-NoExit", "-Command", attachCmd]);
-      return true;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
@@ -515,7 +520,7 @@ async function teamStart() {
   ensureTmuxOrExit();
 
   const paneCount = agents.length + 1; // lead + workers
-  const effectiveLayout = paneCount <= 4 ? layout : "1xN";
+  const effectiveLayout = paneCount <= 4 ? layout : (layout === "Nx1" ? "Nx1" : "1xN");
   console.log(`  레이아웃: ${effectiveLayout} (${paneCount} panes)`);
 
   const session = createSession(sessionId, {
@@ -726,14 +731,79 @@ function teamAttach() {
   try {
     attachSession(state.sessionName);
   } catch (e) {
-    if (launchAttachInWindowsTerminal()) {
+    const fromFallbackPane = process.env.TFX_ATTACH_FROM_WT === "1";
+    if (!fromFallbackPane && launchAttachInWindowsTerminal()) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
       console.log("");
       return;
     }
-    throw e;
+    fail(`attach 실패: ${e.message}`);
+    console.log("");
+    return;
   }
+}
+
+async function teamDebug() {
+  const state = loadTeamState();
+  const linesIdx = process.argv.findIndex((a) => a === "--lines" || a === "-n");
+  const lines = linesIdx !== -1 ? Math.max(3, parseInt(process.argv[linesIdx + 1] || "20", 10) || 20) : 20;
+  const mux = detectMultiplexer() || "none";
+  const hub = getHubInfo();
+
+  console.log(`\n  ${AMBER}${BOLD}⬡ Team Debug${RESET}\n`);
+  console.log(`    platform:  ${process.platform}`);
+  console.log(`    node:      ${process.version}`);
+  console.log(`    tty:       stdout=${!!process.stdout.isTTY}, stdin=${!!process.stdin.isTTY}`);
+  console.log(`    mux:       ${mux}`);
+  console.log(`    hub-pid:   ${hub ? `${hub.pid}` : "-"}`);
+  console.log(`    hub-url:   ${hub?.url || "-"}`);
+
+  const sessions = listSessions();
+  console.log(`    sessions:  ${sessions.length ? sessions.join(", ") : "-"}`);
+
+  if (!state) {
+    console.log(`\n  ${DIM}team-state 없음 (활성 세션 없음)${RESET}\n`);
+    return;
+  }
+
+  console.log(`\n  ${BOLD}state${RESET}`);
+  console.log(`    session:   ${state.sessionName}`);
+  console.log(`    mode:      ${state.teammateMode || "tmux"}`);
+  console.log(`    lead:      ${state.lead}`);
+  console.log(`    agents:    ${(state.agents || []).join(", ")}`);
+  console.log(`    alive:     ${isTeamAlive(state) ? "yes" : "no"}`);
+
+  if (isNativeMode(state)) {
+    const native = await nativeGetStatus(state);
+    const members = native?.data?.members || [];
+    console.log(`\n  ${BOLD}native-members${RESET}`);
+    if (!members.length) {
+      console.log(`    ${DIM}(no data)${RESET}`);
+    } else {
+      for (const m of members) {
+        console.log(`    - ${m.name}: ${m.status}${m.lastPreview ? ` ${DIM}${m.lastPreview}${RESET}` : ""}`);
+      }
+    }
+    console.log("");
+    return;
+  }
+
+  const members = state.members || [];
+  console.log(`\n  ${BOLD}pane-tail${RESET} ${DIM}(last ${lines} lines)${RESET}`);
+  if (!members.length) {
+    console.log(`    ${DIM}(members 없음)${RESET}`);
+  } else {
+    for (const m of members) {
+      const tail = capturePaneOutput(m.pane, lines) || "(empty)";
+      console.log(`\n    [${m.name}] ${m.pane}`);
+      const tailLines = tail.split("\n").slice(-lines);
+      for (const line of tailLines) {
+        console.log(`      ${line}`);
+      }
+    }
+  }
+  console.log("");
 }
 
 function teamFocus() {
@@ -760,13 +830,16 @@ function teamFocus() {
   try {
     attachSession(state.sessionName);
   } catch (e) {
-    if (launchAttachInWindowsTerminal()) {
+    const fromFallbackPane = process.env.TFX_ATTACH_FROM_WT === "1";
+    if (!fromFallbackPane && launchAttachInWindowsTerminal()) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
       console.log("");
       return;
     }
-    throw e;
+    fail(`attach 실패: ${e.message}`);
+    console.log("");
+    return;
   }
 }
 
@@ -957,10 +1030,13 @@ function teamHelp() {
     ${WHITE}tfx team "작업 설명"${RESET}
     ${WHITE}tfx team --agents codex,gemini --lead claude "작업"${RESET}
     ${WHITE}tfx team --teammate-mode tmux "작업"${RESET}
+    ${WHITE}tfx team --layout 1xN "작업"${RESET}               ${DIM}(세로 분할 컬럼)${RESET}
+    ${WHITE}tfx team --layout Nx1 "작업"${RESET}               ${DIM}(가로 분할 스택)${RESET}
     ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}
 
   ${BOLD}제어${RESET}
     ${WHITE}tfx team status${RESET}                      ${GRAY}현재 팀 상태${RESET}
+    ${WHITE}tfx team debug${RESET} ${DIM}[--lines 30]${RESET}          ${GRAY}강화 디버그 출력(환경/세션/pane tail)${RESET}
     ${WHITE}tfx team tasks${RESET}                       ${GRAY}공유 태스크 목록${RESET}
     ${WHITE}tfx team task${RESET} ${DIM}<pending|progress|done> <T1>${RESET} ${GRAY}태스크 상태 갱신${RESET}
     ${WHITE}tfx team attach${RESET}                      ${GRAY}세션 재연결${RESET}
@@ -991,6 +1067,7 @@ export async function cmdTeam() {
 
   switch (sub) {
     case "status":    return teamStatus();
+    case "debug":     return teamDebug();
     case "tasks":     return teamTasks();
     case "task":      return teamTaskUpdate();
     case "attach":    return teamAttach();
