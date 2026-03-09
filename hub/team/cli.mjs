@@ -214,6 +214,19 @@ function launchAttachInWindowsTerminal(sessionName) {
   }
 }
 
+function buildManualAttachCommand(sessionName) {
+  try {
+    const spec = resolveAttachCommand(sessionName);
+    const quoted = [spec.command, ...spec.args].map((s) => {
+      const v = String(s);
+      return /\s/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v;
+    });
+    return quoted.join(" ");
+  } catch {
+    return `tmux attach-session -t ${sessionName}`;
+  }
+}
+
 function toAgentId(cli, target) {
   return `${cli}-${target.split(".").pop()}`;
 }
@@ -733,10 +746,12 @@ function teamAttach() {
     if (launchAttachInWindowsTerminal(state.sessionName)) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
+      console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
       console.log("");
       return;
     }
     fail(`attach 실패: ${e.message}`);
+    console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
     console.log("");
     return;
   }
@@ -831,10 +846,12 @@ function teamFocus() {
     if (launchAttachInWindowsTerminal(state.sessionName)) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
+      console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
       console.log("");
       return;
     }
     fail(`attach 실패: ${e.message}`);
+    console.log(`  ${DIM}수동 attach 명령: ${buildManualAttachCommand(state.sessionName)}${RESET}`);
     console.log("");
     return;
   }
