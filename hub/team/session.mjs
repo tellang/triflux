@@ -231,6 +231,10 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
  * @param {string} sessionName
  */
 export function attachSession(sessionName) {
+  if (!process.stdout.isTTY || !process.stdin.isTTY) {
+    throw new Error("현재 터미널은 tmux attach를 지원하지 않음 (non-TTY)");
+  }
+
   const mux = detectMultiplexer();
   if (mux === "git-bash-tmux") {
     const bash = findGitBashExe();
