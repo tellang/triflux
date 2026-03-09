@@ -145,14 +145,18 @@ export function createTools(store, router, hitl) {
           auto_ack: args.auto_ack,
         });
 
-        // wait_ms > 0 이고 메시지 없으면 대기 후 재시도
+        // wait_ms > 0 이고 메시지 없으면 짧은 간격으로 반복 재시도
         if (!messages.length && args.wait_ms > 0) {
-          await new Promise(r => setTimeout(r, Math.min(args.wait_ms, 30000)));
-          messages = store.pollForAgent(args.agent_id, {
-            max_messages: args.max_messages,
-            include_topics: args.include_topics,
-            auto_ack: args.auto_ack,
-          });
+          const interval = Math.min(args.wait_ms, 500);
+          const deadline = Date.now() + Math.min(args.wait_ms, 30000);
+          while (!messages.length && Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, interval));
+            messages = store.pollForAgent(args.agent_id, {
+              max_messages: args.max_messages,
+              include_topics: args.include_topics,
+              auto_ack: args.auto_ack,
+            });
+          }
         }
 
         return {

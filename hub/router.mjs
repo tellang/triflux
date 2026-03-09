@@ -1,5 +1,6 @@
 // hub/router.mjs — Actor mailbox 라우터 + QoS 스케줄러
 // 메시지 라우팅, ask/publish/handoff 처리, TTL 정리
+import { EventEmitter, once } from 'node:events';
 import { uuidv7 } from './store.mjs';
 
 /**
@@ -9,6 +10,8 @@ import { uuidv7 } from './store.mjs';
 export function createRouter(store) {
   let sweepTimer = null;
   let staleTimer = null;
+  const responseEmitter = new EventEmitter();
+  responseEmitter.setMaxListeners(200);
 
   const router = {
     /**
@@ -54,9 +57,17 @@ export function createRouter(store) {
         };
       }
 
-      // 짧은 폴링 대기 (최대 30초 제한)
-      const deadline = Date.now() + Math.min(await_response_ms, 30000);
-      while (Date.now() < deadline) {
+      // 이벤트 기반 대기 (최대 30초 제한)
+      try {
+        const [payload] = await once(responseEmitter, cid, {
+          signal: AbortSignal.timeout(Math.min(await_response_ms, 30000)),
+        });
+        return {
+          ok: true,
+          data: { request_message_id: msg.id, correlation_id: cid, trace_id: tid, state: 'answered', response: payload },
+        };
+      } catch {
+        // 타임아웃 — DB에서 최종 확인
         const resp = store.getResponseByCorrelation(cid);
         if (resp) {
           return {
@@ -64,14 +75,11 @@ export function createRouter(store) {
             data: { request_message_id: msg.id, correlation_id: cid, trace_id: tid, state: 'answered', response: resp.payload },
           };
         }
-        await new Promise(r => setTimeout(r, 100));
+        return {
+          ok: true,
+          data: { request_message_id: msg.id, correlation_id: cid, trace_id: tid, state: 'delivered' },
+        };
       }
-
-      // 타임아웃 — 티켓 반환
-      return {
-        ok: true,
-        data: { request_message_id: msg.id, correlation_id: cid, trace_id: tid, state: 'delivered' },
-      };
     },
 
     /**
@@ -89,6 +97,9 @@ export function createRouter(store) {
         trace_id: trace_id || uuidv7(),
       });
       const fanout = router.route(msg);
+      if (correlation_id) {
+        responseEmitter.emit(correlation_id, msg.payload);
+      }
       return {
         ok: true,
         data: { message_id: msg.id, fanout_count: fanout, expires_at_ms: msg.expires_at_ms },
@@ -118,12 +129,12 @@ export function createRouter(store) {
 
     // ── 스위퍼 ──
 
-    /** 주기적 만료 정리 시작 (1초: 메시지, 60초: 비활성 에이전트) */
+    /** 주기적 만료 정리 시작 (10초: 메시지, 60초: 비활성 에이전트) */
     startSweeper() {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {
         try { store.sweepExpired(); } catch { /* 무시 */ }
-      }, 1000);
+      }, 10000);
       staleTimer = setInterval(() => {
         try { store.sweepStaleAgents(); } catch { /* 무시 */ }
       }, 120000);
@@ -185,5 +196,5 @@ export function createRouter(store) {
     },
   };
 
-  return router;
+  return { ...router, responseEmitter };
 }

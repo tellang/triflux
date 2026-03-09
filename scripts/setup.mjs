@@ -130,6 +130,19 @@ if (existsSync(hudPath)) {
   }
 }
 
+// ── Stale PID 파일 정리 (hub 좀비 방지) ──
+
+const HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
+if (existsSync(HUB_PID_FILE)) {
+  try {
+    const pidInfo = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+    process.kill(pidInfo.pid, 0); // 프로세스 존재 확인 (신호 미전송)
+  } catch {
+    try { unlinkSync(HUB_PID_FILE); } catch {} // 죽은 프로세스면 PID 파일 삭제
+    synced++;
+  }
+}
+
 // ── HUD 에러 캐시 자동 클리어 (업데이트/재설치 시) ──
 
 const cacheDir = join(CLAUDE_DIR, "cache");

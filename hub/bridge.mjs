@@ -17,6 +17,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { parseArgs as nodeParseArgs } from 'node:util';
 
 const HUB_PID_FILE = join(homedir(), '.claude', 'cache', 'tfx-hub', 'hub.pid');
 
@@ -39,10 +40,12 @@ function getHubUrl() {
   return `http://127.0.0.1:${port}`;
 }
 
+const _cachedHubUrl = getHubUrl();
+
 // ── HTTP 요청 ──
 
 async function post(path, body, timeoutMs = 5000) {
-  const url = `${getHubUrl()}${path}`;
+  const url = `${_cachedHubUrl}${path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -64,20 +67,25 @@ async function post(path, body, timeoutMs = 5000) {
 // ── 인자 파싱 ──
 
 function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i].startsWith('--')) {
-      const key = argv[i].slice(2);
-      const next = argv[i + 1];
-      if (!next || next.startsWith('--')) {
-        args[key] = true;
-      } else {
-        args[key] = next;
-        i++;
-      }
-    }
-  }
-  return args;
+  const { values } = nodeParseArgs({
+    args: argv,
+    options: {
+      agent: { type: 'string' },
+      cli: { type: 'string' },
+      timeout: { type: 'string' },
+      topics: { type: 'string' },
+      capabilities: { type: 'string' },
+      file: { type: 'string' },
+      topic: { type: 'string' },
+      trace: { type: 'string' },
+      correlation: { type: 'string' },
+      'exit-code': { type: 'string' },
+      max: { type: 'string' },
+      out: { type: 'string' },
+    },
+    strict: false,
+  });
+  return values;
 }
 
 // ── 커맨드 ──
@@ -132,7 +140,7 @@ async function cmdResult(args) {
       exit_code: exitCode,
       output_length: output.length,
       output_preview: output.slice(0, 4096), // 미리보기 4KB
-      output_full: output, // 전체 (최대 48KB)
+      output_file: filePath || null,
       completed_at: Date.now(),
     },
     trace_id: traceId,
@@ -195,7 +203,7 @@ async function cmdDeregister(args) {
 
 async function cmdPing() {
   try {
-    const url = `${getHubUrl()}/status`;
+    const url = `${_cachedHubUrl}/status`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(url, { signal: controller.signal });

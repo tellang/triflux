@@ -7,11 +7,22 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+let _rndPool = Buffer.alloc(0), _rndOff = 0;
+
+function pooledRandom(n) {
+  if (_rndOff + n > _rndPool.length) {
+    _rndPool = randomBytes(256);
+    _rndOff = 0;
+  }
+  const out = Buffer.from(_rndPool.subarray(_rndOff, _rndOff + n));
+  _rndOff += n;
+  return out;
+}
 
 /** UUIDv7 생성 (RFC 9562) */
 export function uuidv7() {
   const now = BigInt(Date.now());
-  const buf = randomBytes(16);
+  const buf = pooledRandom(16);
   buf[0] = Number((now >> 40n) & 0xffn);
   buf[1] = Number((now >> 32n) & 0xffn);
   buf[2] = Number((now >> 24n) & 0xffn);
@@ -64,7 +75,18 @@ export function createStore(dbPath) {
 
   // 스키마 초기화 (schema.sql 전체 실행 — 주석 포함 안전 처리)
   const schemaSQL = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
-  db.exec(schemaSQL);
+
+  // 스키마 버전 체크 — 불필요한 재실행 방지
+  db.exec("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)");
+  const SCHEMA_VERSION = '1';
+  const curVer = (() => {
+    try { return db.prepare("SELECT value FROM _meta WHERE key='schema_version'").pluck().get(); }
+    catch { return null; }
+  })();
+  if (curVer !== SCHEMA_VERSION) {
+    db.exec(schemaSQL);
+    db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)").run(SCHEMA_VERSION);
+  }
 
   // ── 준비된 구문 ──
 

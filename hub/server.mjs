@@ -216,12 +216,17 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1' } = {}
 
         if (sessionId && transports.has(sessionId)) {
           // 기존 세션
-          await transports.get(sessionId).handleRequest(req, res, body);
+          const t = transports.get(sessionId);
+          t._lastActivity = Date.now();
+          await t.handleRequest(req, res, body);
         } else if (!sessionId && isInitializeRequest(body)) {
           // 새 세션 초기화
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
-            onsessioninitialized: (sid) => { transports.set(sid, transport); },
+            onsessioninitialized: (sid) => {
+              transport._lastActivity = Date.now();
+              transports.set(sid, transport);
+            },
           });
           transport.onclose = () => {
             if (transport.sessionId) transports.delete(transport.sessionId);
@@ -283,14 +288,15 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1' } = {}
   }, 10000);
   hitlTimer.unref();
 
-  // stale 세션 정리 (60초 주기 — transport.onclose 미호출 대비)
+  // 비활성 세션 정리 (60초 주기, 30분 TTL)
+  const SESSION_TTL_MS = 30 * 60 * 1000;
   const sessionTimer = setInterval(() => {
+    const now = Date.now();
     for (const [sid, transport] of transports) {
-      try {
-        if (transport._writableState?.destroyed || transport._readableState?.destroyed) {
-          transports.delete(sid);
-        }
-      } catch { transports.delete(sid); }
+      if (now - (transport._lastActivity || 0) > SESSION_TTL_MS) {
+        try { transport.close(); } catch {}
+        transports.delete(sid);
+      }
     }
   }, 60000);
   sessionTimer.unref();

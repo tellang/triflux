@@ -1,6 +1,5 @@
 // hub/hitl.mjs — Human-in-the-Loop 매니저
 // 사용자 입력 요청/응답, 타임아웃 자동 처리
-import { uuidv7 } from './store.mjs';
 
 /**
  * HITL 매니저 생성
@@ -91,35 +90,32 @@ export function createHitlManager(store) {
     checkTimeouts() {
       const pending = store.getPendingHumanRequests();
       const now = Date.now();
-      let processed = 0;
+      const expired = pending.filter(hr => hr.deadline_ms <= now);
+      if (!expired.length) return 0;
 
-      for (const hr of pending) {
-        if (hr.deadline_ms > now) continue;
-
-        // default_action 적용
-        if (hr.default_action === 'timeout_continue') {
+      // 트랜잭션으로 만료 요청을 일괄 처리해 DB 왕복을 줄인다.
+      const processExpired = store.db.transaction(() => {
+        for (const hr of expired) {
           store.updateHumanRequest(hr.request_id, 'timed_out', null);
-          // 요청자에게 타임아웃 알림
-          const msg = store.enqueueMessage({
-            type: 'human_response',
-            from: 'hub:hitl',
-            to: hr.requester_agent,
-            topic: 'human.response',
-            priority: 5,
-            ttl_ms: 300000,
-            payload: { request_id: hr.request_id, action: 'timeout_continue', content: null },
-            correlation_id: hr.correlation_id,
-            trace_id: hr.trace_id,
-          });
-          store.deliverToAgent(msg.id, hr.requester_agent);
-        } else {
-          // decline 또는 cancel
-          store.updateHumanRequest(hr.request_id, 'timed_out', null);
+          if (hr.default_action === 'timeout_continue') {
+            const msg = store.enqueueMessage({
+              type: 'human_response',
+              from: 'hub:hitl',
+              to: hr.requester_agent,
+              topic: 'human.response',
+              priority: 5,
+              ttl_ms: 300000,
+              payload: { request_id: hr.request_id, action: 'timeout_continue', content: null },
+              correlation_id: hr.correlation_id,
+              trace_id: hr.trace_id,
+            });
+            store.deliverToAgent(msg.id, hr.requester_agent);
+          }
         }
-        processed++;
-      }
+        return expired.length;
+      });
 
-      return processed;
+      return processExpired();
     },
 
     /** 대기 중인 요청 목록 */
