@@ -8,6 +8,7 @@ import { execSync, spawn } from "node:child_process";
 import {
   createSession,
   attachSession,
+  resolveAttachCommand,
   killSession,
   sessionExists,
   listSessions,
@@ -185,17 +186,15 @@ function hasWindowsTerminal() {
   }
 }
 
-function quotePs(value) {
-  return String(value).replace(/'/g, "''");
-}
-
-function launchAttachInWindowsTerminal() {
+function launchAttachInWindowsTerminal(sessionName) {
   if (!hasWindowsTerminal()) return false;
 
-  const nodeExe = quotePs(process.execPath);
-  const scriptPath = quotePs(join(PKG_ROOT, "bin", "triflux.mjs"));
-  const repoPath = quotePs(PKG_ROOT);
-  const attachCmd = `$env:TFX_ATTACH_FROM_WT='1'; cd '${repoPath}'; & '${nodeExe}' '${scriptPath}' team attach`;
+  let attachSpec;
+  try {
+    attachSpec = resolveAttachCommand(sessionName);
+  } catch {
+    return false;
+  }
 
   const launch = (args) => {
     const child = spawn("wt", args, {
@@ -208,7 +207,7 @@ function launchAttachInWindowsTerminal() {
 
   try {
     // 분할선이 세로(좌/우)가 되도록 -V 우선
-    launch(["-w", "0", "split-pane", "-V", "pwsh", "-NoExit", "-Command", attachCmd]);
+    launch(["-w", "0", "split-pane", "-V", "-d", PKG_ROOT, attachSpec.command, ...attachSpec.args]);
     return true;
   } catch {
     return false;
@@ -731,8 +730,7 @@ function teamAttach() {
   try {
     attachSession(state.sessionName);
   } catch (e) {
-    const fromFallbackPane = process.env.TFX_ATTACH_FROM_WT === "1";
-    if (!fromFallbackPane && launchAttachInWindowsTerminal()) {
+    if (launchAttachInWindowsTerminal(state.sessionName)) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
       console.log("");
@@ -830,8 +828,7 @@ function teamFocus() {
   try {
     attachSession(state.sessionName);
   } catch (e) {
-    const fromFallbackPane = process.env.TFX_ATTACH_FROM_WT === "1";
-    if (!fromFallbackPane && launchAttachInWindowsTerminal()) {
+    if (launchAttachInWindowsTerminal(state.sessionName)) {
       warn(`현재 터미널에서 attach 실패: ${e.message}`);
       ok("Windows Terminal split-pane로 attach 재시도 창을 열었습니다.");
       console.log("");

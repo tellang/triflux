@@ -870,10 +870,12 @@ async function cmdCodexTeam() {
 
   const hasAgents = args.includes("--agents");
   const hasLead = args.includes("--lead");
+  const hasLayout = args.includes("--layout");
   const isControl = passthrough.has(sub);
   const inject = [];
   if (!isControl && !hasLead) inject.push("--lead", "codex");
   if (!isControl && !hasAgents) inject.push("--agents", "codex,codex");
+  if (!isControl && !hasLayout) inject.push("--layout", "1xN");
   const forwarded = isControl ? args : [...inject, ...args];
 
   const { pathToFileURL } = await import("node:url");

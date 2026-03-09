@@ -125,6 +125,39 @@ export function tmuxExec(args, opts = {}) {
 }
 
 /**
+ * 현재 멀티플렉서 환경에 맞는 attach 실행 스펙 반환
+ * @param {string} sessionName
+ * @returns {{ command: string, args: string[] }}
+ */
+export function resolveAttachCommand(sessionName) {
+  const mux = detectMultiplexer();
+  if (!mux) {
+    throw new Error("tmux 미발견");
+  }
+
+  if (mux === "git-bash-tmux") {
+    const bash = findGitBashExe();
+    if (!bash) throw new Error("git-bash-tmux 감지 실패");
+    return {
+      command: bash,
+      args: ["-lc", `tmux attach-session -t ${sessionName}`],
+    };
+  }
+
+  if (mux === "wsl-tmux") {
+    return {
+      command: "wsl",
+      args: ["tmux", "attach-session", "-t", sessionName],
+    };
+  }
+
+  return {
+    command: "tmux",
+    args: ["attach-session", "-t", sessionName],
+  };
+}
+
+/**
  * tmux 세션 생성 + 레이아웃 분할
  * @param {string} sessionName — 세션 이름
  * @param {object} opts
@@ -245,26 +278,14 @@ export function attachSession(sessionName) {
     throw new Error("현재 터미널은 tmux attach를 지원하지 않음 (non-TTY)");
   }
 
-  const mux = detectMultiplexer();
-  if (mux === "git-bash-tmux") {
-    const bash = findGitBashExe();
-    if (!bash) throw new Error("git-bash-tmux 감지 실패");
-    const r = spawnSync(bash, ["-lc", `tmux attach-session -t ${sessionName}`], {
-      stdio: "inherit",
-      timeout: 0,
-    });
-    if ((r.status ?? 1) !== 0) {
-      throw new Error(`tmux attach 실패 (exit=${r.status})`);
-    }
-    return;
-  }
-
-  const prefix = mux === "wsl-tmux" ? "wsl tmux" : "tmux";
-  // stdio: inherit로 사용자에게 제어권 반환
-  execSync(`${prefix} attach-session -t ${sessionName}`, {
+  const { command, args } = resolveAttachCommand(sessionName);
+  const r = spawnSync(command, args, {
     stdio: "inherit",
     timeout: 0, // 타임아웃 없음 (사용자가 detach할 때까지)
   });
+  if ((r.status ?? 1) !== 0) {
+    throw new Error(`tmux attach 실패 (exit=${r.status})`);
+  }
 }
 
 /**
