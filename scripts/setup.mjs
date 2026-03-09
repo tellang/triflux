@@ -130,6 +130,36 @@ if (existsSync(hudPath)) {
   }
 }
 
+// ── Agent Teams 환경변수 자동 설정 ──
+
+try {
+  let agentSettings = {};
+  if (existsSync(settingsPath)) {
+    agentSettings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  }
+
+  if (!agentSettings.env) agentSettings.env = {};
+  let agentSettingsChanged = false;
+
+  if (agentSettings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS !== "1") {
+    agentSettings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
+    agentSettingsChanged = true;
+  }
+
+  // teammateMode: auto (tmux 밖이면 in-process, 안이면 split-pane)
+  if (!agentSettings.teammateMode) {
+    agentSettings.teammateMode = "auto";
+    agentSettingsChanged = true;
+  }
+
+  if (agentSettingsChanged) {
+    writeFileSync(settingsPath, JSON.stringify(agentSettings, null, 2) + "\n", "utf8");
+    synced++;
+  }
+} catch {
+  // settings.json 파싱 실패 시 무시 — 기존 설정 보존
+}
+
 // ── Stale PID 파일 정리 (hub 좀비 방지) ──
 
 const HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
