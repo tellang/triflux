@@ -1,4 +1,4 @@
-// hub/team/session.mjs — tmux 세션 생명주기 관리
+// hub/team/session.mjs — tmux/wt 세션 생명주기 관리
 // 의존성: child_process (Node.js 내장)만 사용
 import { execSync, spawnSync } from "node:child_process";
 
@@ -17,6 +17,22 @@ function findGitBashExe() {
     }
   }
   return null;
+}
+
+/** Windows Terminal 실행 파일 존재 여부 */
+export function hasWindowsTerminal() {
+  if (process.platform !== "win32") return false;
+  try {
+    execSync("where wt.exe", { stdio: "ignore", timeout: 3000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 현재 프로세스가 Windows Terminal 내에서 실행 중인지 여부 */
+export function hasWindowsTerminalSession() {
+  return process.platform === "win32" && !!process.env.WT_SESSION;
 }
 
 /** tmux 실행 가능 여부 확인 */
@@ -155,6 +171,153 @@ export function resolveAttachCommand(sessionName) {
     command: "tmux",
     args: ["attach-session", "-t", sessionName],
   };
+}
+
+/**
+ * wt.exe 커맨드 실행
+ * @param {string[]} args
+ * @param {object} opts
+ * @returns {string}
+ */
+function wt(args, opts = {}) {
+  if (!hasWindowsTerminal()) {
+    throw new Error("wt.exe 미발견");
+  }
+
+  const r = spawnSync("wt.exe", args, {
+    encoding: "utf8",
+    timeout: 10000,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+    ...opts,
+  });
+  if ((r.status ?? 1) !== 0) {
+    const e = new Error((r.stderr || r.stdout || "wt command failed").trim());
+    e.status = r.status;
+    throw e;
+  }
+  return (r.stdout || "").trim();
+}
+
+/**
+ * Windows Terminal pane 분할용 cmd.exe 인자 구성
+ * @param {string} command
+ * @returns {string[]}
+ */
+function buildWtCmdArgs(command) {
+  return ["cmd.exe", "/c", command];
+}
+
+/**
+ * Windows Terminal 독립 모드 세션 생성
+ * - 현재 pane를 앵커로 사용하고, 우측(1xN) 또는 하단(Nx1)으로만 분할
+ * - 생성한 pane에 즉시 CLI 커맨드를 실행
+ * @param {string} sessionName
+ * @param {object} opts
+ * @param {'1xN'|'Nx1'} opts.layout
+ * @param {Array<{title:string,command:string,cwd?:string}>} opts.paneCommands
+ * @returns {{ sessionName: string, panes: string[], titles: string[], layout: '1xN'|'Nx1', paneCount: number, anchorPane: string }}
+ */
+export function createWtSession(sessionName, opts = {}) {
+  const { layout = "1xN", paneCommands = [] } = opts;
+
+  if (!hasWindowsTerminalSession()) {
+    throw new Error("WT_SESSION 미감지");
+  }
+  if (!hasWindowsTerminal()) {
+    throw new Error("wt.exe 미발견");
+  }
+  if (!Array.isArray(paneCommands) || paneCommands.length === 0) {
+    throw new Error("paneCommands가 비어 있음");
+  }
+
+  const splitFlag = layout === "Nx1" ? "-H" : "-V";
+  const panes = [];
+  const titles = [];
+
+  for (let i = 0; i < paneCommands.length; i++) {
+    const pane = paneCommands[i] || {};
+    const title = pane.title || `${sessionName}-${i + 1}`;
+    const command = String(pane.command || "").trim();
+    const cwd = pane.cwd || process.cwd();
+    if (!command) continue;
+
+    wt(["-w", "0", "sp", splitFlag, "--title", title, "-d", cwd, ...buildWtCmdArgs(command)]);
+    panes.push(`wt:${i}`);
+    titles.push(title);
+  }
+
+  return {
+    sessionName,
+    panes,
+    titles,
+    layout: layout === "Nx1" ? "Nx1" : "1xN",
+    paneCount: panes.length,
+    anchorPane: "wt:anchor",
+  };
+}
+
+/**
+ * Windows Terminal pane 포커스 이동
+ * @param {number} paneIndex - createWtSession()에서 생성한 pane 인덱스(0 기반)
+ * @param {object} opts
+ * @param {'1xN'|'Nx1'} opts.layout
+ * @returns {boolean}
+ */
+export function focusWtPane(paneIndex, opts = {}) {
+  if (!hasWindowsTerminalSession() || !hasWindowsTerminal()) return false;
+  const idx = Number(paneIndex);
+  if (!Number.isInteger(idx) || idx < 0) return false;
+
+  const layout = opts.layout === "Nx1" ? "Nx1" : "1xN";
+  const backDir = layout === "Nx1" ? "up" : "left";
+  const stepDir = layout === "Nx1" ? "down" : "right";
+
+  // 앵커로 최대한 복귀
+  for (let i = 0; i < 10; i++) {
+    try { wt(["-w", "0", "move-focus", backDir]); } catch { break; }
+  }
+
+  for (let i = 0; i <= idx; i++) {
+    wt(["-w", "0", "move-focus", stepDir]);
+  }
+  return true;
+}
+
+/**
+ * Windows Terminal에서 생성한 팀 pane 정리
+ * @param {object} opts
+ * @param {'1xN'|'Nx1'} opts.layout
+ * @param {number} opts.paneCount
+ * @returns {number} 닫힌 pane 수 (best-effort)
+ */
+export function closeWtSession(opts = {}) {
+  if (!hasWindowsTerminalSession() || !hasWindowsTerminal()) return 0;
+
+  const paneCount = Math.max(0, Number(opts.paneCount || 0));
+  if (paneCount === 0) return 0;
+
+  const layout = opts.layout === "Nx1" ? "Nx1" : "1xN";
+  const backDir = layout === "Nx1" ? "up" : "left";
+  const stepDir = layout === "Nx1" ? "down" : "right";
+  let closed = 0;
+
+  // 앵커(원래 tfx 실행 pane)로 최대한 복귀
+  for (let i = 0; i < 10; i++) {
+    try { wt(["-w", "0", "move-focus", backDir]); } catch { break; }
+  }
+
+  for (let i = 0; i < paneCount; i++) {
+    try {
+      wt(["-w", "0", "move-focus", stepDir]);
+      wt(["-w", "0", "close-pane"]);
+      closed++;
+    } catch {
+      break;
+    }
+  }
+
+  return closed;
 }
 
 /**
