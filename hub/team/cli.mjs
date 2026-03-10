@@ -95,44 +95,66 @@ function parseTeamArgs() {
   let agents = ["codex", "codex", "gemini"]; // 기본: codex x2 + gemini
   let layout = "2x2";
   let task = "";
+  let noAttach = false;
+  let mode = "tmux"; // tmux (CLI 기본) | native (Claude Code 스킬에서 사용)
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--agents" && args[i + 1]) {
       agents = args[++i].split(",").map((s) => s.trim().toLowerCase());
     } else if (args[i] === "--layout" && args[i + 1]) {
       layout = args[++i];
+    } else if (args[i] === "--no-attach") {
+      noAttach = true;
+    } else if (args[i] === "--native") {
+      mode = "native";
+    } else if (args[i] === "--tmux") {
+      mode = "tmux";
     } else if (!args[i].startsWith("-")) {
       task = args[i];
     }
   }
 
-  return { agents, layout, task };
+  return { agents, layout, task, noAttach, mode };
 }
 
 // ── 서브커맨드 ──
 
 async function teamStart() {
-  // 1. tmux 확인
+  // 1. 인자 파싱
+  const { agents, layout, task, noAttach, mode } = parseTeamArgs();
+
+  // Native 모드: Claude Code 스킬에서 사용 (CLI에서 직접 실행 불가)
+  if (mode === "native") {
+    console.log(`
+  ${AMBER}${BOLD}⬡ tfx team — Native Teams 모드${RESET}
+
+  Native Teams는 Claude Code 스킬 ${WHITE}/tfx-team${RESET}을 통해 사용합니다.
+  Claude Code 안에서 다음을 입력하세요:
+
+    ${WHITE}/tfx-team "${task || "작업 설명"}"${RESET}
+
+  ${DIM}Native Teams는 TeamCreate + Agent 도구로 teammate를 스폰합니다.${RESET}
+  ${DIM}tmux 없이 in-process 모드에서 동작합니다 (Shift+Down으로 전환).${RESET}
+`);
+    return;
+  }
+
+  // 2. tmux 확인 (tmux 모드)
   const mux = detectMultiplexer();
   if (!mux) {
     console.log(`
   ${RED}${BOLD}tmux 미발견${RESET}
 
-  tfx team은 tmux가 필요합니다:
+  tfx team (tmux 모드)은 tmux가 필요합니다:
     WSL2:   ${WHITE}wsl sudo apt install tmux${RESET}
     macOS:  ${WHITE}brew install tmux${RESET}
     Linux:  ${WHITE}apt install tmux${RESET}
 
-  Windows에서는 WSL2를 권장합니다:
-    1. ${WHITE}wsl --install${RESET}
-    2. ${WHITE}wsl sudo apt install tmux${RESET}
-    3. ${WHITE}tfx team "작업"${RESET}
+  ${AMBER}또는 Claude Code에서 Native Teams 모드를 사용하세요:${RESET}
+    ${WHITE}/tfx-team "작업"${RESET}  ${DIM}(tmux 불필요)${RESET}
 `);
     process.exit(1);
   }
-
-  // 2. 인자 파싱
-  const { agents, layout, task } = parseTeamArgs();
   if (!task) {
     console.log(`\n  ${AMBER}${BOLD}⬡ tfx team${RESET}\n`);
     console.log(`  사용법: ${WHITE}tfx team "작업 설명"${RESET}`);
@@ -221,11 +243,16 @@ async function teamStart() {
     panes,
   });
 
-  // 12. tmux attach
+  // 12. tmux attach (--no-attach 시 안내만 출력)
   console.log(`\n  ${GREEN}${BOLD}팀 세션 준비 완료${RESET}`);
   console.log(`  ${DIM}Ctrl+B → 방향키로 pane 전환${RESET}`);
   console.log(`  ${DIM}Ctrl+B → D로 세션 분리 (백그라운드)${RESET}\n`);
-  attachSession(sessionId);
+
+  if (noAttach) {
+    console.log(`  ${AMBER}세션 연결:${RESET} ${WHITE}tmux attach -t ${sessionId}${RESET}\n`);
+  } else {
+    attachSession(sessionId);
+  }
 }
 
 function teamStatus() {
@@ -325,12 +352,18 @@ function teamList() {
 
 function teamHelp() {
   console.log(`
-  ${AMBER}${BOLD}⬡ tfx team${RESET} ${DIM}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
+  ${AMBER}${BOLD}⬡ tfx team${RESET} ${DIM}멀티-CLI 팀 모드${RESET}
 
-  ${BOLD}시작${RESET}
+  ${BOLD}tmux 모드${RESET} ${DIM}(CLI 기본)${RESET}
     ${WHITE}tfx team "작업 설명"${RESET}           ${GRAY}기본 (codex x2 + gemini)${RESET}
     ${WHITE}tfx team --agents codex,gemini "작업"${RESET}  ${GRAY}에이전트 지정${RESET}
     ${WHITE}tfx team --layout 1x3 "작업"${RESET}    ${GRAY}레이아웃 지정${RESET}
+    ${WHITE}tfx team --no-attach "작업"${RESET}      ${GRAY}세션만 생성${RESET}
+
+  ${BOLD}Native Teams 모드${RESET} ${DIM}(Claude Code 스킬)${RESET}
+    ${WHITE}/tfx-team "작업"${RESET}               ${GRAY}in-process 팀 (tmux 불필요)${RESET}
+    ${WHITE}/tfx-team --agents codex,gemini "작업"${RESET}  ${GRAY}에이전트 지정${RESET}
+    ${WHITE}/tfx-team --tmux "작업"${RESET}         ${GRAY}tmux 폴백${RESET}
 
   ${BOLD}제어${RESET}
     ${WHITE}tfx team status${RESET}    ${GRAY}현재 팀 상태${RESET}
