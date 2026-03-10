@@ -1,6 +1,13 @@
-// hub/tools.mjs — MCP 도구 8개 정의
-// register, status, publish, ask, poll_messages, handoff, request_human_input, submit_human_input
+// hub/tools.mjs — MCP 도구 정의
+// register/status/publish/ask/poll/handoff/HITL + team proxy
 // 모든 도구 응답: { ok: boolean, error?: { code, message }, data?: ... }
+
+import {
+  teamInfo,
+  teamTaskList,
+  teamTaskUpdate,
+  teamSendMessage,
+} from './team/nativeProxy.mjs';
 
 /**
  * MCP 도구 목록 생성
@@ -236,6 +243,97 @@ export function createTools(store, router, hitl) {
       },
       handler: wrap('HITL_SUBMIT_FAILED', (args) => {
         return hitl.submitHumanInput(args);
+      }),
+    },
+
+    // ── 9. team_info ──
+    {
+      name: 'team_info',
+      description: 'Claude Native Teams 메타/멤버/경로 정보를 조회합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name'],
+        properties: {
+          team_name: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[a-z0-9][a-z0-9-]*$' },
+          include_members: { type: 'boolean', default: true },
+          include_paths: { type: 'boolean', default: true },
+        },
+      },
+      handler: wrap('TEAM_INFO_FAILED', (args) => {
+        return teamInfo(args);
+      }),
+    },
+
+    // ── 10. team_task_list ──
+    {
+      name: 'team_task_list',
+      description: 'Claude Native Teams task 목록을 owner/status 조건으로 조회합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          owner: { type: 'string' },
+          statuses: {
+            type: 'array',
+            items: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'failed', 'deleted'] },
+            maxItems: 8,
+          },
+          include_internal: { type: 'boolean', default: false },
+          limit: { type: 'integer', minimum: 1, maximum: 1000, default: 200 },
+        },
+      },
+      handler: wrap('TEAM_TASK_LIST_FAILED', (args) => {
+        return teamTaskList(args);
+      }),
+    },
+
+    // ── 11. team_task_update ──
+    {
+      name: 'team_task_update',
+      description: 'Claude Native Teams task를 claim/update 합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name', 'task_id'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          task_id: { type: 'string', minLength: 1, maxLength: 64 },
+          claim: { type: 'boolean', default: false },
+          owner: { type: 'string' },
+          status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'failed', 'deleted'] },
+          subject: { type: 'string' },
+          description: { type: 'string' },
+          activeForm: { type: 'string' },
+          add_blocks: { type: 'array', items: { type: 'string' } },
+          add_blocked_by: { type: 'array', items: { type: 'string' } },
+          metadata_patch: { type: 'object' },
+          if_match_mtime_ms: { type: 'number' },
+          actor: { type: 'string' },
+        },
+      },
+      handler: wrap('TEAM_TASK_UPDATE_FAILED', (args) => {
+        return teamTaskUpdate(args);
+      }),
+    },
+
+    // ── 12. team_send_message ──
+    {
+      name: 'team_send_message',
+      description: 'Claude Native Teams inbox에 메시지를 append 합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name', 'from', 'text'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          from: { type: 'string', minLength: 1, maxLength: 128 },
+          to: { type: 'string', default: 'team-lead' },
+          text: { type: 'string', minLength: 1, maxLength: 200000 },
+          summary: { type: 'string', maxLength: 1000 },
+          color: { type: 'string', default: 'blue' },
+        },
+      },
+      handler: wrap('TEAM_SEND_MESSAGE_FAILED', (args) => {
+        return teamSendMessage(args);
       }),
     },
   ];
