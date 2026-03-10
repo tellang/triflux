@@ -38,6 +38,13 @@ STDERR_LOG="/tmp/tfx-route-${AGENT_TYPE}-${TIMESTAMP}-stderr.log"
 STDOUT_LOG="/tmp/tfx-route-${AGENT_TYPE}-${TIMESTAMP}-stdout.log"
 TFX_TMP="${TMPDIR:-/tmp}"
 
+# ── 팀 환경변수 ──
+TFX_TEAM_NAME="${TFX_TEAM_NAME:-}"
+TFX_TEAM_TASK_ID="${TFX_TEAM_TASK_ID:-}"
+TFX_TEAM_AGENT_NAME="${TFX_TEAM_AGENT_NAME:-${AGENT_TYPE}-worker-$$}"
+TFX_TEAM_LEAD_NAME="${TFX_TEAM_LEAD_NAME:-team-lead}"
+TFX_HUB_URL="${TFX_HUB_URL:-http://127.0.0.1:27888}"
+
 # fallback 시 원래 에이전트 정보 보존
 ORIGINAL_AGENT=""
 ORIGINAL_CLI_ARGS=""
@@ -51,6 +58,76 @@ register_agent() {
 
 deregister_agent() {
   rm -f "${TFX_TMP}/tfx-agent-$$.json" 2>/dev/null || true
+}
+
+# ── 팀 Hub Bridge 통신 ──
+# JSON 문자열 이스케이프 (큰따옴표, 백슬래시, 개행, 탭, CR)
+json_escape() {
+  local s="${1:-}"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/\\r}"
+  echo "$s"
+}
+
+team_claim_task() {
+  [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
+  local http_code safe_team_name safe_task_id safe_agent_name
+  safe_team_name=$(json_escape "$TFX_TEAM_NAME")
+  safe_task_id=$(json_escape "$TFX_TEAM_TASK_ID")
+  safe_agent_name=$(json_escape "$TFX_TEAM_AGENT_NAME")
+
+  http_code=$(curl -sf -o /dev/null -w "%{http_code}" -X POST "${TFX_HUB_URL}/bridge/team/task-update" \
+    -H "Content-Type: application/json" \
+    -d "{\"team_name\":\"${safe_team_name}\",\"task_id\":\"${safe_task_id}\",\"claim\":true,\"owner\":\"${safe_agent_name}\",\"status\":\"in_progress\"}" \
+    2>/dev/null) || http_code="000"
+
+  case "$http_code" in
+    200) ;; # 성공
+    409)
+      echo "[tfx-route] CLAIM_CONFLICT: task ${TFX_TEAM_TASK_ID}가 이미 claim됨. 실행 중단." >&2
+      exit 0 ;;
+    000)
+      echo "[tfx-route] 경고: Hub 연결 실패 (미실행?). claim 없이 계속 실행." >&2 ;;
+    *)
+      echo "[tfx-route] 경고: Hub claim 응답 HTTP ${http_code}. claim 없이 계속 실행." >&2 ;;
+  esac
+}
+
+team_complete_task() {
+  local result_status="${1:-completed}"
+  local result_summary="${2:-작업 완료}"
+  local safe_team_name safe_task_id safe_agent_name safe_status
+  [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
+  safe_team_name=$(json_escape "$TFX_TEAM_NAME")
+  safe_task_id=$(json_escape "$TFX_TEAM_TASK_ID")
+  safe_agent_name=$(json_escape "$TFX_TEAM_AGENT_NAME")
+  safe_status=$(json_escape "$result_status")
+
+  # task 상태 업데이트
+  curl -sf -X POST "${TFX_HUB_URL}/bridge/team/task-update" \
+    -H "Content-Type: application/json" \
+    -d "{\"team_name\":\"${safe_team_name}\",\"task_id\":\"${safe_task_id}\",\"status\":\"${safe_status}\",\"owner\":\"${safe_agent_name}\"}" \
+    >/dev/null 2>&1 || true
+
+  # 리드에게 메시지 전송
+  local msg_text safe_text safe_lead_name
+  msg_text=$(echo "$result_summary" | head -c 4096)
+  safe_text=$(json_escape "$msg_text")
+  safe_lead_name=$(json_escape "$TFX_TEAM_LEAD_NAME")
+
+  curl -sf -X POST "${TFX_HUB_URL}/bridge/team/send-message" \
+    -H "Content-Type: application/json" \
+    -d "{\"team_name\":\"${safe_team_name}\",\"from\":\"${safe_agent_name}\",\"to\":\"${safe_lead_name}\",\"text\":\"${safe_text}\",\"summary\":\"task ${safe_task_id} ${safe_status}\"}" \
+    >/dev/null 2>&1 || true
+
+  # Hub result 발행 (poll_messages 채널 활성화)
+  curl -sf -X POST "${TFX_HUB_URL}/bridge/result" \
+    -H "Content-Type: application/json" \
+    -d "{\"agent_id\":\"${safe_agent_name}\",\"topic\":\"task.result\",\"payload\":{\"task_id\":\"${safe_task_id}\",\"status\":\"${safe_status}\"},\"trace_id\":\"${safe_team_name}\"}" \
+    >/dev/null 2>&1 || true
 }
 
 # ── 라우팅 테이블 ──
@@ -354,9 +431,13 @@ ${ctx_content}
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE timeout=${TIMEOUT_SEC}s" >&2
   echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE" >&2
+  [[ -n "$TFX_TEAM_NAME" ]] && echo "[tfx-route] team=$TFX_TEAM_NAME task=$TFX_TEAM_TASK_ID agent=$TFX_TEAM_AGENT_NAME" >&2
 
   # Per-process 에이전트 등록
   register_agent
+
+  # 팀 모드: task claim
+  team_claim_task
 
   # CLI 실행 (stderr 분리 + 타임아웃 + 소요시간 측정)
   local exit_code=0
@@ -413,6 +494,21 @@ ${ctx_content}
   local end_time
   end_time=$(date +%s)
   local elapsed=$((end_time - start_time))
+
+  # 팀 모드: task complete + 리드 보고
+  if [[ -n "$TFX_TEAM_NAME" ]]; then
+    if [[ "$exit_code" -eq 0 ]]; then
+      local output_preview
+      output_preview=$(head -c 2048 "$STDOUT_LOG" 2>/dev/null || echo "출력 없음")
+      team_complete_task "completed" "$output_preview"
+    elif [[ "$exit_code" -eq 124 ]]; then
+      team_complete_task "failed" "타임아웃 (${TIMEOUT_SEC}초)"
+    else
+      local err_preview
+      err_preview=$(tail -c 1024 "$STDERR_LOG" 2>/dev/null || echo "에러 정보 없음")
+      team_complete_task "failed" "exit_code=${exit_code}: ${err_preview}"
+    fi
+  fi
 
   # ── 후처리: 단일 node 프로세스로 위임 ──
   # 토큰 추출, 출력 필터링, 로그, 토큰 누적, AIMD, 이슈 추적, 결과 출력 전부 처리
