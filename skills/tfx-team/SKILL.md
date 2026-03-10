@@ -6,20 +6,22 @@ triggers:
 argument-hint: '"작업 설명" | --agents codex,gemini "작업" | --tmux "작업" | status | stop'
 ---
 
-# tfx-team v2.1 — Lead Direct Bash 기반 멀티-CLI 팀 오케스트레이터
+# tfx-team v2.2 — 슬림 래퍼 + 네비게이션 복원 기반 멀티-CLI 팀 오케스트레이터
 
-> Claude Code Native Teams는 유지하되, Codex/Gemini 실행 경로에서 Claude teammate 래퍼를 제거한다.
-> 리드가 `tfx-route.sh`를 직접 병렬 실행하고, task 상태는 `team_task_list`를 truth source로 검증한다.
+> Claude Code Native Teams의 Shift+Down 네비게이션을 복원한다.
+> Codex/Gemini 워커마다 최소 프롬프트(~100 토큰)의 슬림 Agent 래퍼를 spawn하여 네비게이션에 등록하고,
+> 실제 작업은 `tfx-route.sh`가 수행한다. task 상태는 `team_task_list`를 truth source로 검증한다.
 
-| 구분 | v2 (기존) | v2.1 (현재) |
-|--|--|--|
-| 실행 | `Agent(teammate)` → `Bash(tfx-route.sh)` | `Lead` → `Bash(tfx-route.sh)` 직접 |
-| teammate | Claude Opus 인스턴스 × N | Codex/Gemini용 없음 |
-| task claim | teammate가 `TaskUpdate` 호출 | `tfx-route.sh`가 Hub bridge로 claim |
-| 결과 보고 | teammate가 `SendMessage` 호출 | `tfx-route.sh`가 Hub bridge로 `send-message` 호출 |
-| 결과 수집 | SendMessage 자동 수신 중심 | `team_task_list` 폴링 + stdout/결과 로그 |
-| 정리 | `shutdown_request` × N 후 `TeamDelete` | `TeamDelete` 직접 |
-| Opus 토큰 | N × 래퍼 오버헤드 | 래퍼 오버헤드 0 |
+| 구분 | v2 (기존) | v2.1 | v2.2 (현재) |
+|--|--|--|--|
+| 실행 | `Agent(teammate)` → `Bash(tfx-route.sh)` | `Lead` → `Bash` 직접 | `Agent(슬림)` → `Bash(tfx-route.sh)` |
+| teammate | Claude Opus 인스턴스 × N | 없음 | 슬림 래퍼 × N |
+| Shift+Down | ✓ | ✗ | ✓ (복원) |
+| task claim | teammate `TaskUpdate` | Hub bridge | Hub bridge (변경 없음) |
+| 결과 보고 | teammate `SendMessage` | Hub bridge | 슬림 래퍼 `SendMessage` + Hub bridge |
+| 결과 수집 | SendMessage 중심 | `team_task_list` 폴링 | `team_task_list` 폴링 (변경 없음) |
+| 정리 | `shutdown_request` × N | `TeamDelete` 직접 | `TeamDelete` 직접 |
+| Opus 토큰 | N × ~800 토큰 | 0 | N × ~180 토큰 (77% 절감) |
 
 ## 사용법
 
@@ -116,17 +118,42 @@ for each assignment in assignments (index i):
   runQueue.push({ taskId, agentName, ...assignment })
 ```
 
-#### Step 3c: 리드가 직접 Bash 병렬 실행 (teammate 스폰 제거)
+#### Step 3c: 슬림 래퍼 Agent 실행 (v2.2 네비게이션 복원)
 
-Codex/Gemini 서브태스크는 teammate를 만들지 않고, 리드가 직접 `Bash(..., run_in_background=true)`를 병렬 호출한다.
+Codex/Gemini 서브태스크마다 최소 프롬프트의 Agent를 spawn하여 네비게이션에 등록한다.
+Agent 내부에서 `Bash(tfx-route.sh)` 1회 실행 후 결과 보고하고 종료한다.
 
 ```
 for each item in runQueue where item.cli in ["codex", "gemini"]:
-  Bash(
-    "TFX_TEAM_NAME={teamName} TFX_TEAM_TASK_ID={item.taskId} TFX_TEAM_AGENT_NAME={item.agentName} TFX_TEAM_LEAD_NAME=team-lead bash ~/.claude/scripts/tfx-route.sh {item.role} \"{item.subtask}\" {mcp_profile}",
-    run_in_background=true
-  )
+  Agent({
+    name: item.agentName,
+    team_name: teamName,
+    run_in_background: true,
+    prompt: buildSlimWrapperPrompt(item.cli, {
+      subtask: item.subtask,
+      role: item.role,
+      teamName: teamName,
+      taskId: item.taskId,
+      agentName: item.agentName,
+      leadName: "team-lead",
+      mcp_profile: mcp_profile
+    })
+  })
 ```
+
+슬림 래퍼 프롬프트 (~100 토큰):
+```
+Bash 1회 실행 후 종료.
+
+TFX_TEAM_NAME={teamName} TFX_TEAM_TASK_ID={taskId} TFX_TEAM_AGENT_NAME={agentName} TFX_TEAM_LEAD_NAME=team-lead bash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}
+
+완료 → TaskUpdate(status: completed) + SendMessage(to: team-lead).
+실패 → TaskUpdate(status: failed) + SendMessage(to: team-lead).
+```
+
+`buildSlimWrapperPrompt()`는 `hub/team/native.mjs`에 정의.
+
+**핵심 차이 vs v2:** 프롬프트 ~100 토큰 (v2의 ~500), task claim/complete/report는 tfx-route.sh Hub bridge가 수행.
 
 `tfx-route.sh` 팀 통합 동작(이미 구현됨, `TFX_TEAM_*` 기반):
 - `TFX_TEAM_NAME`: 팀 식별자
@@ -164,8 +191,8 @@ Agent({
 
 ```
 "팀 '{teamName}' 생성 완료.
-Codex/Gemini 작업은 리드가 백그라운드 Bash로 병렬 실행 중이며,
-claude 작업만 teammate로 실행됩니다."
+Codex/Gemini 워커가 슬림 래퍼 Agent로 네비게이션에 등록되었습니다.
+Shift+Down으로 워커 간 전환이 가능합니다."
 ```
 
 ### Phase 4: 결과 수집 (truth source = team_task_list)
@@ -192,12 +219,12 @@ Bash("curl -sf http://127.0.0.1:27888/bridge/team/task-list -H \"Content-Type: a
 | 3 | claude-worker-1 | claude | 실패 fallback 재시도 | completed |
 ```
 
-### Phase 5: 정리 (간소화)
+### Phase 5: 정리
 
-teammate 래퍼를 제거했으므로 `shutdown_request` 브로드캐스트를 사용하지 않는다.
-정리 단계는 `TeamDelete()` 직접 호출로 마무리한다.
+슬림 래퍼 Agent는 Bash 완료 후 자동 종료된다.
+claude 타입 Agent와 슬림 래퍼 Agent 모두 완료 확인 후 `TeamDelete()`를 호출한다.
 
-> **중요:** claude 타입 백그라운드 Agent가 아직 실행 중이면 `TeamDelete`가 실패할 수 있다. 해당 작업 완료를 확인한 뒤 삭제한다.
+> **중요:** 슬림 래퍼 Agent가 아직 실행 중이면 `TeamDelete`가 실패할 수 있다. 모든 워커 완료를 확인한 뒤 삭제한다.
 
 ### Phase 3-tmux: 레거시 tmux 모드
 

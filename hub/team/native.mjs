@@ -84,6 +84,44 @@ export function buildTeamConfig(teamName, assignments) {
 }
 
 /**
+ * v2.2 슬림 래퍼 프롬프트 생성
+ * Agent spawn으로 네비게이션에 등록하되, 실제 작업은 tfx-route.sh가 수행.
+ * 프롬프트 ~100 토큰 목표 (v2의 ~500 대비 80% 감소).
+ *
+ * @param {'codex'|'gemini'} cli — CLI 타입
+ * @param {object} opts
+ * @param {string} opts.subtask — 서브태스크 설명
+ * @param {string} [opts.role] — 역할 (executor, designer, reviewer 등)
+ * @param {string} [opts.teamName] — 팀 이름
+ * @param {string} [opts.taskId] — Hub task ID
+ * @param {string} [opts.agentName] — 워커 표시 이름
+ * @param {string} [opts.leadName] — 리드 수신자 이름
+ * @param {string} [opts.mcp_profile] — MCP 프로필
+ * @returns {string} 슬림 래퍼 프롬프트
+ */
+export function buildSlimWrapperPrompt(cli, opts = {}) {
+  const {
+    subtask,
+    role = "executor",
+    teamName = "tfx-team",
+    taskId = "",
+    agentName = "",
+    leadName = "team-lead",
+    mcp_profile = "auto",
+  } = opts;
+
+  // 셸 이스케이프
+  const escaped = subtask.replace(/'/g, "'\\''");
+
+  return `Bash 1회 실행 후 종료.
+
+TFX_TEAM_NAME=${teamName} TFX_TEAM_TASK_ID=${taskId} TFX_TEAM_AGENT_NAME=${agentName} TFX_TEAM_LEAD_NAME=${leadName} bash ${ROUTE_SCRIPT} ${role} '${escaped}' ${mcp_profile}
+
+완료 → TaskUpdate(status: completed) + SendMessage(to: ${leadName}).
+실패 → TaskUpdate(status: failed) + SendMessage(to: ${leadName}).`;
+}
+
+/**
  * 팀 이름 생성 (타임스탬프 기반)
  * @returns {string}
  */
