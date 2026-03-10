@@ -441,6 +441,14 @@ function cmdDoctor(options = {}) {
       if (sc > 0) ok(`스킬: ${sc}/${st}개 업데이트됨`);
       else ok(`스킬: ${st}개 최신 상태`);
     }
+    const profileFix = ensureCodexProfiles();
+    if (!profileFix.ok) {
+      warn(`Codex Profiles 자동 복구 실패: ${profileFix.message}`);
+    } else if (profileFix.added > 0) {
+      ok(`Codex Profiles: ${profileFix.added}개 추가됨`);
+    } else {
+      info("Codex Profiles: 이미 최신 상태");
+    }
     // 에러/스테일 캐시 정리
     const fCacheDir = join(CLAUDE_DIR, "cache");
     const staleNames = ["claude-usage-cache.json", ".claude-refresh-lock", "codex-rate-limits-cache.json"];
@@ -492,7 +500,24 @@ function cmdDoctor(options = {}) {
     }
   }
 
-  // 4. Gemini CLI
+  // 4. Codex Profiles
+  section("Codex Profiles");
+  if (existsSync(CODEX_CONFIG_PATH)) {
+    const codexConfig = readFileSync(CODEX_CONFIG_PATH, "utf8");
+    for (const profile of REQUIRED_CODEX_PROFILES) {
+      if (hasProfileSection(codexConfig, profile.name)) {
+        ok(`${profile.name}: 정상`);
+      } else {
+        warn(`${profile.name}: 미설정`);
+        issues++;
+      }
+    }
+  } else {
+    warn("config.toml 미존재");
+    issues++;
+  }
+
+  // 5. Gemini CLI
   section(`Gemini CLI ${BLUE}●${RESET}`);
   issues += checkCliCrossShell("gemini", "npm install -g @google/gemini-cli");
   if (which("gemini")) {
@@ -503,7 +528,7 @@ function cmdDoctor(options = {}) {
     }
   }
 
-  // 5. Claude Code
+  // 6. Claude Code
   section(`Claude Code ${AMBER}●${RESET}`);
   const claudePath = which("claude");
   if (claudePath) {
@@ -513,7 +538,7 @@ function cmdDoctor(options = {}) {
     issues++;
   }
 
-  // 6. 스킬 설치 상태
+  // 7. 스킬 설치 상태
   section("Skills");
   const skillsSrc = join(PKG_ROOT, "skills");
   const skillsDst = join(CLAUDE_DIR, "skills");
@@ -539,7 +564,7 @@ function cmdDoctor(options = {}) {
     }
   }
 
-  // 7. 플러그인 등록
+  // 8. 플러그인 등록
   section("Plugin");
   const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
   if (existsSync(pluginsFile)) {
@@ -554,7 +579,7 @@ function cmdDoctor(options = {}) {
     info("플러그인 시스템 감지 안 됨 — npm 단독 사용");
   }
 
-  // 8. MCP 인벤토리
+  // 9. MCP 인벤토리
   section("MCP Inventory");
   const mcpCache = join(CLAUDE_DIR, "cache", "mcp-inventory.json");
   if (existsSync(mcpCache)) {
@@ -577,7 +602,7 @@ function cmdDoctor(options = {}) {
     info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
   }
 
-  // 9. CLI 이슈 트래커
+  // 10. CLI 이슈 트래커
   section("CLI Issues");
   const issuesFile = join(CLAUDE_DIR, "cache", "cli-issues.jsonl");
   if (existsSync(issuesFile)) {
