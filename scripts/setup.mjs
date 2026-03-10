@@ -343,6 +343,7 @@ ${B}Shortcuts:${R}
 
 ${B}Skills (Claude Code):${R}
   ${C}/tfx-auto${R}   "작업"   자동 분류 + 병렬 실행
+  ${C}/tfx-auto-codex${R} "작업" Codex 리드 + Gemini 유지
   ${C}/tfx-codex${R}  "작업"   Codex 전용 모드
   ${C}/tfx-gemini${R} "작업"   Gemini 전용 모드
   ${C}/tfx-setup${R}           HUD 설정 + 진단

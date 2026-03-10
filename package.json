@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "3.2.0-dev.3",
+  "version": "3.2.0-dev.4",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -26,7 +26,8 @@
   ],
   "scripts": {
     "setup": "node scripts/setup.mjs",
-    "postinstall": "node scripts/setup.mjs"
+    "postinstall": "node scripts/setup.mjs",
+    "test:route-smoke": "node --test scripts/test-tfx-route-no-claude-native.mjs"
   },
   "engines": {
     "node": ">=18.0.0"
