@@ -7,16 +7,21 @@ import { execSync, spawn } from "node:child_process";
 
 import {
   createSession,
+  createWtSession,
   attachSession,
   resolveAttachCommand,
   killSession,
+  closeWtSession,
   sessionExists,
   getSessionAttachedCount,
   listSessions,
   capturePaneOutput,
   focusPane,
+  focusWtPane,
   configureTeammateKeybindings,
   detectMultiplexer,
+  hasWindowsTerminal,
+  hasWindowsTerminalSession,
 } from "./session.mjs";
 import { buildCliCommand, startCliInPane, injectPrompt, sendKeys } from "./pane.mjs";
 import { orchestrate, decomposeTask, buildLeadPrompt, buildPrompt } from "./orchestrator.mjs";
@@ -108,7 +113,8 @@ function startHubDaemon() {
 function normalizeTeammateMode(mode = "auto") {
   const raw = String(mode).toLowerCase();
   if (raw === "inline" || raw === "native") return "in-process";
-  if (raw === "in-process" || raw === "tmux") return raw;
+  if (raw === "in-process" || raw === "tmux" || raw === "wt") return raw;
+  if (raw === "windows-terminal" || raw === "windows_terminal") return "wt";
   if (raw === "auto") {
     return process.env.TMUX ? "tmux" : "in-process";
   }
@@ -177,16 +183,6 @@ function ensureTmuxOrExit() {
   process.exit(1);
 }
 
-function hasWindowsTerminal() {
-  if (process.platform !== "win32") return false;
-  try {
-    execSync("where wt", { stdio: "ignore", timeout: 3000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function launchAttachInWindowsTerminal(sessionName) {
   if (!hasWindowsTerminal()) return false;
 
@@ -249,7 +245,8 @@ function wantsWtAttachFallback() {
 }
 
 function toAgentId(cli, target) {
-  return `${cli}-${target.split(".").pop()}`;
+  const suffix = String(target).split(/[:.]/).pop();
+  return `${cli}-${suffix}`;
 }
 
 function buildNativeCliCommand(cli) {
@@ -309,7 +306,7 @@ function resolveMember(state, selector) {
   const n = parseInt(selector, 10);
   if (!Number.isNaN(n)) {
     // 하위 호환: pane 번호 우선
-    const byPane = members.find((m) => m.pane?.endsWith(`.${n}`));
+    const byPane = members.find((m) => m.pane?.endsWith(`.${n}`) || m.pane?.endsWith(`:${n}`));
     if (byPane) return byPane;
 
     // teammate 스타일: 1-based 인덱스
@@ -350,6 +347,10 @@ function isNativeMode(state) {
   return state?.teammateMode === "in-process" && !!state?.native?.controlUrl;
 }
 
+function isWtMode(state) {
+  return state?.teammateMode === "wt";
+}
+
 function isTeamAlive(state) {
   if (!state) return false;
   if (isNativeMode(state)) {
@@ -359,6 +360,10 @@ function isTeamAlive(state) {
     } catch {
       return false;
     }
+  }
+  if (isWtMode(state)) {
+    // WT pane 상태를 신뢰성 있게 조회할 API가 없어 세션 환경/실행기 존재 여부로 판정
+    return hasWindowsTerminal() && hasWindowsTerminalSession();
   }
   return sessionExists(state.sessionName);
 }
@@ -465,6 +470,7 @@ async function teamStart() {
     console.log(`\n  ${AMBER}${BOLD}⬡ tfx team${RESET}\n`);
     console.log(`  사용법: ${WHITE}tfx team "작업 설명"${RESET}`);
     console.log(`          ${WHITE}tfx team --agents codex,gemini --lead claude "작업"${RESET}`);
+    console.log(`          ${WHITE}tfx team --teammate-mode wt "작업"${RESET} ${DIM}(Windows Terminal split-pane)${RESET}`);
     console.log(`          ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}\n`);
     return;
   }
@@ -488,14 +494,25 @@ async function teamStart() {
   const sessionId = `tfx-team-${Date.now().toString(36).slice(-4)}`;
   const subtasks = decomposeTask(task, agents.length);
   const hubUrl = hub?.url || "http://127.0.0.1:27888/mcp";
+  let effectiveTeammateMode = teammateMode;
+
+  if (teammateMode === "wt") {
+    if (!hasWindowsTerminal()) {
+      warn("wt.exe 미발견 — in-process 모드로 자동 fallback");
+      effectiveTeammateMode = "in-process";
+    } else if (!hasWindowsTerminalSession()) {
+      warn("WT_SESSION 미감지(Windows Terminal 외부) — in-process 모드로 자동 fallback");
+      effectiveTeammateMode = "in-process";
+    }
+  }
 
   console.log(`  세션:  ${WHITE}${sessionId}${RESET}`);
-  console.log(`  모드:  ${teammateMode}`);
+  console.log(`  모드:  ${effectiveTeammateMode}`);
   console.log(`  리드:  ${AMBER}${lead}${RESET}`);
   console.log(`  워커:  ${agents.map((a) => `${AMBER}${a}${RESET}`).join(", ")}`);
 
   // ── in-process(네이티브): tmux 없이 supervisor가 직접 CLI 프로세스 관리 ──
-  if (teammateMode === "in-process") {
+  if (effectiveTeammateMode === "in-process") {
     for (let i = 0; i < subtasks.length; i++) {
       const preview = subtasks[i].length > 44 ? subtasks[i].slice(0, 44) + "…" : subtasks[i];
       console.log(`    ${DIM}[${agents[i]}-${i + 1}] ${preview}${RESET}`);
@@ -524,7 +541,7 @@ async function teamStart() {
       lead,
       agents,
       layout: "native",
-      teammateMode,
+      teammateMode: effectiveTeammateMode,
       startedAt: Date.now(),
       hubUrl,
       members: members.map((m, idx) => ({
@@ -546,6 +563,99 @@ async function teamStart() {
     ok("네이티브 in-process 팀 시작 완료");
     console.log(`  ${DIM}tmux 없이 실행됨 (직접 CLI 프로세스)${RESET}`);
     console.log(`  ${DIM}제어: tfx team send/control/tasks/status${RESET}\n`);
+    return;
+  }
+
+  // ── wt 모드(Windows Terminal 독립 split-pane) ──
+  if (effectiveTeammateMode === "wt") {
+    const paneCount = agents.length + 1; // lead + workers
+    const effectiveLayout = layout === "Nx1" ? "Nx1" : "1xN";
+    if (layout !== effectiveLayout) {
+      warn(`wt 모드에서 ${layout} 레이아웃은 미지원 — ${effectiveLayout}로 대체`);
+    }
+    console.log(`  레이아웃: ${effectiveLayout} (${paneCount} panes)`);
+
+    const paneCommands = [
+      {
+        title: `${sessionId}-lead`,
+        command: buildCliCommand(lead),
+        cwd: PKG_ROOT,
+      },
+      ...agents.map((cli, i) => ({
+        title: `${sessionId}-${cli}-${i + 1}`,
+        command: buildCliCommand(cli),
+        cwd: PKG_ROOT,
+      })),
+    ];
+
+    const session = createWtSession(sessionId, {
+      layout: effectiveLayout,
+      paneCommands,
+    });
+
+    const members = [
+      {
+        role: "lead",
+        name: "lead",
+        cli: lead,
+        pane: session.panes[0] || "wt:0",
+        agentId: toAgentId(lead, session.panes[0] || "wt:0"),
+      },
+    ];
+
+    for (let i = 0; i < agents.length; i++) {
+      const cli = agents[i];
+      const target = session.panes[i + 1] || `wt:${i + 1}`;
+      members.push({
+        role: "worker",
+        name: `${cli}-${i + 1}`,
+        cli,
+        pane: target,
+        subtask: subtasks[i],
+        agentId: toAgentId(cli, target),
+      });
+    }
+
+    for (const worker of members.filter((m) => m.role === "worker")) {
+      const preview = worker.subtask.length > 44 ? worker.subtask.slice(0, 44) + "…" : worker.subtask;
+      console.log(`    ${DIM}[${worker.name}] ${preview}${RESET}`);
+    }
+    console.log("");
+
+    const tasks = buildTasks(subtasks, members.filter((m) => m.role === "worker"));
+    const panes = {};
+    for (const m of members) {
+      panes[m.pane] = {
+        role: m.role,
+        name: m.name,
+        cli: m.cli,
+        agentId: m.agentId,
+        subtask: m.subtask || null,
+      };
+    }
+
+    saveTeamState({
+      sessionName: sessionId,
+      task,
+      lead,
+      agents,
+      layout: effectiveLayout,
+      teammateMode: effectiveTeammateMode,
+      startedAt: Date.now(),
+      hubUrl,
+      members,
+      panes,
+      tasks,
+      wt: {
+        windowId: 0,
+        layout: effectiveLayout,
+        paneCount: session.paneCount,
+      },
+    });
+
+    ok("Windows Terminal wt 팀 시작 완료");
+    console.log(`  ${DIM}현재 pane 기준으로 ${effectiveLayout} 분할 생성됨${RESET}`);
+    console.log(`  ${DIM}wt 모드는 자동 프롬프트 주입/Hub direct 제어(send/control)가 제한됩니다.${RESET}\n`);
     return;
   }
 
@@ -606,7 +716,7 @@ async function teamStart() {
 
   await orchestrate(sessionId, assignments, {
     hubUrl,
-    teammateMode,
+    teammateMode: effectiveTeammateMode,
     lead: {
       target: leadTarget,
       cli: lead,
@@ -633,7 +743,7 @@ async function teamStart() {
     lead,
     agents,
     layout: effectiveLayout,
-    teammateMode,
+    teammateMode: effectiveTeammateMode,
     startedAt: Date.now(),
     hubUrl,
     members,
@@ -761,6 +871,12 @@ async function teamAttach() {
     return;
   }
 
+  if (isWtMode(state)) {
+    console.log(`\n  ${DIM}wt 모드는 attach 개념이 없습니다 (Windows Terminal pane가 독립 실행됨).${RESET}`);
+    console.log(`  ${DIM}재실행/정리는: tfx team stop${RESET}\n`);
+    return;
+  }
+
   try {
     attachSession(state.sessionName);
   } catch (e) {
@@ -816,6 +932,18 @@ async function teamDebug() {
   const attached = getSessionAttachedCount(state.sessionName);
   console.log(`    attached:  ${attached == null ? "-" : attached}`);
 
+  if (isWtMode(state)) {
+    const wtState = state.wt || {};
+    console.log(`\n  ${BOLD}wt-session${RESET}`);
+    console.log(`    window:    ${wtState.windowId ?? 0}`);
+    console.log(`    layout:    ${wtState.layout || state.layout || "-"}`);
+    console.log(`    panes:     ${wtState.paneCount ?? (state.members || []).length}`);
+    console.log(`    wt.exe:    ${hasWindowsTerminal() ? "yes" : "no"}`);
+    console.log(`    WT_SESSION:${hasWindowsTerminalSession() ? "yes" : "no"}`);
+    console.log("");
+    return;
+  }
+
   if (isNativeMode(state)) {
     const native = await nativeGetStatus(state);
     const members = native?.data?.members || [];
@@ -868,6 +996,26 @@ async function teamFocus() {
     return;
   }
 
+  if (isWtMode(state)) {
+    const m = /^wt:(\d+)$/.exec(member.pane || "");
+    const paneIndex = m ? parseInt(m[1], 10) : NaN;
+    if (!Number.isFinite(paneIndex)) {
+      warn(`wt pane 인덱스 파싱 실패: ${member.pane}`);
+      console.log("");
+      return;
+    }
+    const focused = focusWtPane(paneIndex, {
+      layout: state?.wt?.layout || state?.layout || "1xN",
+    });
+    if (focused) {
+      ok(`${member.name} pane 포커스 이동 (wt)`);
+    } else {
+      warn("wt pane 포커스 이동 실패 (WT_SESSION/wt.exe 상태 확인 필요)");
+    }
+    console.log("");
+    return;
+  }
+
   focusPane(member.pane, { zoom: (state.teammateMode === "in-process") });
   try {
     attachSession(state.sessionName);
@@ -906,6 +1054,13 @@ async function teamInterrupt() {
     return;
   }
 
+  if (isWtMode(state)) {
+    warn("wt 모드에서는 pane stdin 주입이 지원되지 않아 interrupt를 자동 전송할 수 없습니다.");
+    console.log(`  ${DIM}수동으로 해당 pane에서 Ctrl+C를 입력하세요.${RESET}`);
+    console.log("");
+    return;
+  }
+
   if (isNativeMode(state)) {
     const result = await nativeRequest(state, "/interrupt", { member: member.name });
     if (result?.ok) {
@@ -937,6 +1092,13 @@ async function teamControl() {
 
   if (!member || !allowed.has(command)) {
     console.log(`\n  사용법: ${WHITE}tfx team control <lead|이름|번호> <interrupt|stop|pause|resume> [사유]${RESET}\n`);
+    return;
+  }
+
+  if (isWtMode(state)) {
+    warn("wt 모드는 Hub direct/control 주입 경로가 비활성입니다.");
+    console.log(`  ${DIM}수동 제어: 해당 pane에서 직접 명령/인터럽트를 수행하세요.${RESET}`);
+    console.log("");
     return;
   }
 
@@ -982,6 +1144,12 @@ async function teamStop() {
     await nativeRequest(state, "/stop", {});
     try { process.kill(state.native.supervisorPid, "SIGTERM"); } catch {}
     ok(`세션 종료: ${state.sessionName}`);
+  } else if (isWtMode(state)) {
+    const closed = closeWtSession({
+      layout: state?.wt?.layout || state?.layout || "1xN",
+      paneCount: state?.wt?.paneCount ?? (state.members || []).length,
+    });
+    ok(`세션 종료: ${state.sessionName}${closed ? ` (${closed} panes closed)` : ""}`);
   } else {
     if (sessionExists(state.sessionName)) {
       killSession(state.sessionName);
@@ -1002,6 +1170,16 @@ async function teamKill() {
     try { process.kill(state.native.supervisorPid, "SIGTERM"); } catch {}
     clearTeamState();
     ok(`종료: ${state.sessionName}`);
+    console.log("");
+    return;
+  }
+  if (state && isWtMode(state)) {
+    const closed = closeWtSession({
+      layout: state?.wt?.layout || state?.layout || "1xN",
+      paneCount: state?.wt?.paneCount ?? (state.members || []).length,
+    });
+    clearTeamState();
+    ok(`종료: ${state.sessionName}${closed ? ` (${closed} panes closed)` : ""}`);
     console.log("");
     return;
   }
@@ -1034,6 +1212,13 @@ async function teamSend() {
     return;
   }
 
+  if (isWtMode(state)) {
+    warn("wt 모드는 pane 프롬프트 자동 주입(send)이 지원되지 않습니다.");
+    console.log(`  ${DIM}수동 전달: 선택한 pane에 직접 붙여넣으세요.${RESET}`);
+    console.log("");
+    return;
+  }
+
   if (isNativeMode(state)) {
     const result = await nativeRequest(state, "/send", { member: member.name, text: message });
     if (result?.ok) {
@@ -1058,6 +1243,12 @@ function teamList() {
     console.log("");
     return;
   }
+  if (state && isWtMode(state) && isTeamAlive(state)) {
+    console.log(`\n  ${AMBER}${BOLD}⬡ 팀 세션 목록${RESET}\n`);
+    console.log(`    ${GREEN}●${RESET} ${state.sessionName} ${DIM}(wt)${RESET}`);
+    console.log("");
+    return;
+  }
 
   const sessions = listSessions();
   if (sessions.length === 0) {
@@ -1079,6 +1270,7 @@ function teamHelp() {
     ${WHITE}tfx team "작업 설명"${RESET}
     ${WHITE}tfx team --agents codex,gemini --lead claude "작업"${RESET}
     ${WHITE}tfx team --teammate-mode tmux "작업"${RESET}
+    ${WHITE}tfx team --teammate-mode wt "작업"${RESET}   ${DIM}(Windows Terminal split-pane)${RESET}
     ${WHITE}tfx team --layout 1xN "작업"${RESET}               ${DIM}(세로 분할 컬럼)${RESET}
     ${WHITE}tfx team --layout Nx1 "작업"${RESET}               ${DIM}(가로 분할 스택)${RESET}
     ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}
