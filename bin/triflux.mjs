@@ -894,6 +894,7 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx team${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
+    ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
@@ -908,6 +909,52 @@ ${updateNotice}
   ${LINE}
   ${GRAY}github.com/tellang/triflux${RESET}
 `);
+}
+
+async function cmdCodexTeam() {
+  const args = process.argv.slice(3);
+  const sub = String(args[0] || "").toLowerCase();
+  const passthrough = new Set([
+    "status", "attach", "stop", "kill", "send", "list", "help", "--help", "-h",
+    "tasks", "task", "focus", "interrupt", "control", "debug",
+  ]);
+
+  if (sub === "help" || sub === "--help" || sub === "-h") {
+    console.log(`
+  ${AMBER}${BOLD}⬡ tfx codex-team${RESET}
+
+    ${WHITE_BRIGHT}tfx codex-team "작업"${RESET}         ${GRAY}Codex 리드 + 워커 2개로 팀 시작${RESET}
+    ${WHITE_BRIGHT}tfx codex-team --layout 1xN "작업"${RESET}   ${GRAY}(세로 분할 컬럼)${RESET}
+    ${WHITE_BRIGHT}tfx codex-team --layout Nx1 "작업"${RESET}   ${GRAY}(가로 분할 스택)${RESET}
+    ${WHITE_BRIGHT}tfx codex-team status${RESET}
+    ${WHITE_BRIGHT}tfx codex-team debug --lines 30${RESET}
+    ${WHITE_BRIGHT}tfx codex-team send N "msg"${RESET}
+
+  ${DIM}내부적으로 tfx team을 호출하며, 시작 시 --lead codex --agents codex,codex를 기본 주입합니다.${RESET}
+`);
+    return;
+  }
+
+  const hasAgents = args.includes("--agents");
+  const hasLead = args.includes("--lead");
+  const hasLayout = args.includes("--layout");
+  const isControl = passthrough.has(sub);
+  const inject = [];
+  if (!isControl && !hasLead) inject.push("--lead", "codex");
+  if (!isControl && !hasAgents) inject.push("--agents", "codex,codex");
+  if (!isControl && !hasLayout) inject.push("--layout", "1xN");
+  const forwarded = isControl ? args : [...inject, ...args];
+
+  const { pathToFileURL } = await import("node:url");
+  const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
+
+  const prevArgv = process.argv;
+  process.argv = [prevArgv[0], prevArgv[1], "team", ...forwarded];
+  try {
+    await cmdTeam();
+  } finally {
+    process.argv = prevArgv;
+  }
 }
 
 // ── hub 서브커맨드 ──
@@ -1134,6 +1181,9 @@ switch (cmd) {
     await cmdTeam();
     break;
   }
+  case "codex-team":
+    await cmdCodexTeam();
+    break;
   case "notion-read": case "nr": {
     const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
     const nrArgs = process.argv.slice(3).map(a => `"${a}"`).join(" ");
