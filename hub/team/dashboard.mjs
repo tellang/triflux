@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// hub/team/dashboard.mjs — 실시간 팀 상태 표시
-// 실행: watch -n 1 -c 'node hub/team/dashboard.mjs --session tfx-team-xxx'
-// 또는: node hub/team/dashboard.mjs --session tfx-team-xxx (단일 출력)
+// hub/team/dashboard.mjs — 실시간 팀 상태 표시 (v2.2)
+// tmux 의존 제거 — Hub task-list + native-supervisor 기반
+//
+// 실행:
+//   node hub/team/dashboard.mjs --session <세션이름> [--interval 2]
+//   node hub/team/dashboard.mjs --team <팀이름> [--interval 2]
 import { get } from "node:http";
-import { capturePaneOutput } from "./session.mjs";
 
 // ── 색상 ──
 const AMBER = "\x1b[38;5;214m";
@@ -15,30 +17,42 @@ const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
 
 /**
- * Hub /status 엔드포인트 조회
- * @param {string} hubUrl — 예: http://127.0.0.1:27888
+ * HTTP GET JSON
+ * @param {string} url
  * @returns {Promise<object|null>}
  */
-function fetchStatus(hubUrl) {
+function fetchJson(url) {
   return new Promise((resolve) => {
-    const url = `${hubUrl}/status`;
     const req = get(url, { timeout: 2000 }, (res) => {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch {
-          resolve(null);
-        }
+        try { resolve(JSON.parse(data)); } catch { resolve(null); }
       });
     });
     req.on("error", () => resolve(null));
-    req.on("timeout", () => {
-      req.destroy();
-      resolve(null);
-    });
+    req.on("timeout", () => { req.destroy(); resolve(null); });
   });
+}
+
+/**
+ * HTTP POST JSON (Hub bridge 용)
+ * @param {string} url
+ * @param {object} body
+ * @returns {Promise<object|null>}
+ */
+async function fetchPost(url, body = {}) {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(2000),
+    });
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -65,56 +79,141 @@ function formatUptime(ms) {
 }
 
 /**
- * 대시보드 렌더링
- * @param {string} sessionName — tmux 세션 이름
+ * task 상태 아이콘
+ * @param {string} status
+ * @returns {string}
+ */
+function statusIcon(status) {
+  switch (status) {
+    case "completed": return `${GREEN}✓${RESET}`;
+    case "in_progress": return `${AMBER}●${RESET}`;
+    case "failed": return `${RED}✗${RESET}`;
+    default: return `${GRAY}○${RESET}`;
+  }
+}
+
+/**
+ * 멤버 목록 구성: Hub tasks + supervisor + teamState 통합
+ * @param {Array} hubTasks — Hub bridge task-list 결과
+ * @param {Array} supervisorMembers — native-supervisor 멤버 상태
+ * @param {object} teamState — team-state.json 내용
+ * @returns {Array<{name: string, cli: string, status: string, subject: string, preview: string}>}
+ */
+function buildMemberList(hubTasks, supervisorMembers, teamState) {
+  const members = [];
+  const supervisorByName = new Map(supervisorMembers.map((m) => [m.name, m]));
+
+  // Hub tasks가 있으면 주 데이터 소스
+  if (hubTasks.length > 0) {
+    for (const task of hubTasks) {
+      const owner = task.owner || task.subject || "";
+      const sup = supervisorByName.get(owner);
+      members.push({
+        name: owner,
+        cli: task.metadata?.cli || sup?.cli || "",
+        status: task.status || "pending",
+        subject: task.subject || "",
+        preview: sup?.lastPreview || task.description?.slice(0, 80) || "",
+      });
+    }
+    return members;
+  }
+
+  // Supervisor 데이터 폴백
+  if (supervisorMembers.length > 0) {
+    for (const m of supervisorMembers) {
+      if (m.role === "lead") continue;
+      members.push({
+        name: m.name,
+        cli: m.cli || "",
+        status: m.status === "running" ? "in_progress" : m.status === "exited" ? "completed" : m.status,
+        subject: "",
+        preview: m.lastPreview || "",
+      });
+    }
+    return members;
+  }
+
+  // teamState 폴백 (하위 호환)
+  const panes = teamState?.panes || {};
+  for (const [, paneInfo] of Object.entries(panes).filter(([, v]) => v.role !== "dashboard" && v.role !== "lead")) {
+    members.push({
+      name: paneInfo.agentId || paneInfo.name || "?",
+      cli: paneInfo.cli || "",
+      status: "unknown",
+      subject: paneInfo.subtask || "",
+      preview: "",
+    });
+  }
+  return members;
+}
+
+/**
+ * 대시보드 렌더링 (v2.2: Hub/supervisor 기반)
+ * @param {string} sessionName — 세션 또는 팀 이름
  * @param {object} opts
  * @param {string} opts.hubUrl — Hub URL (기본 http://127.0.0.1:27888)
- * @param {object} opts.teamState — team-state.json 내용
+ * @param {string} [opts.teamName] — Hub task-list 조회용 팀 이름
+ * @param {string} [opts.supervisorUrl] — native-supervisor 제어 URL
+ * @param {object} [opts.teamState] — team-state.json 내용 (하위 호환)
  */
 export async function renderDashboard(sessionName, opts = {}) {
-  const { hubUrl = "http://127.0.0.1:27888", teamState = {} } = opts;
+  const {
+    hubUrl = "http://127.0.0.1:27888",
+    teamName,
+    supervisorUrl,
+    teamState = {},
+  } = opts;
   const W = 50;
   const border = "─".repeat(W);
 
-  // Hub 상태 조회
-  const status = await fetchStatus(hubUrl);
-  const hubOnline = !!status;
+  // 데이터 수집 (병렬)
+  const [hubStatus, taskListRes, supervisorRes] = await Promise.all([
+    fetchJson(`${hubUrl}/status`),
+    teamName ? fetchPost(`${hubUrl}/bridge/team/task-list`, { team_name: teamName }) : null,
+    supervisorUrl ? fetchJson(`${supervisorUrl}/status`) : null,
+  ]);
+
+  const hubOnline = !!hubStatus;
   const hubState = hubOnline ? `${GREEN}● online${RESET}` : `${RED}● offline${RESET}`;
-  const uptime = status?.hub?.uptime ? formatUptime(status.hub.uptime) : "-";
-  const queueSize = status?.hub?.queue_depth ?? 0;
+  const uptime = hubStatus?.hub?.uptime ? formatUptime(hubStatus.hub.uptime) : "-";
+  const queueSize = hubStatus?.hub?.queue_depth ?? 0;
+
+  // Hub task 데이터
+  const hubTasks = taskListRes?.ok ? (taskListRes.data?.tasks || []) : [];
+  const completedCount = hubTasks.filter((t) => t.status === "completed").length;
+  const totalCount = hubTasks.length;
+
+  // Supervisor 멤버 데이터
+  const supervisorMembers = supervisorRes?.ok ? (supervisorRes.data?.members || []) : [];
 
   // 헤더
-  console.log(`${AMBER}┌─ ${sessionName} ${GRAY}${"─".repeat(Math.max(0, W - sessionName.length - 3))}${AMBER}┐${RESET}`);
+  const progress = totalCount > 0 ? ` ${completedCount}/${totalCount}` : "";
+  console.log(`${AMBER}┌─ ${sessionName}${progress} ${GRAY}${"─".repeat(Math.max(0, W - sessionName.length - progress.length - 3))}${AMBER}┐${RESET}`);
   console.log(`${AMBER}│${RESET} Hub: ${hubState}  Uptime: ${DIM}${uptime}${RESET}  Queue: ${DIM}${queueSize}${RESET}`);
   console.log(`${AMBER}│${RESET}`);
 
-  // 에이전트 상태
-  const panes = teamState?.panes || {};
-  const paneEntries = Object.entries(panes).filter(([, v]) => v.role !== "dashboard");
+  // 멤버/워커 렌더링
+  const members = buildMemberList(hubTasks, supervisorMembers, teamState);
 
-  if (paneEntries.length === 0) {
+  if (members.length === 0) {
     console.log(`${AMBER}│${RESET}  ${DIM}에이전트 정보 없음${RESET}`);
   } else {
-    for (const [paneTarget, paneInfo] of paneEntries) {
-      const { cli = "?", agentId = "?", subtask = "" } = paneInfo;
-      const label = `[${agentId}]`;
-      const cliTag = cli.charAt(0).toUpperCase() + cli.slice(1);
+    for (const m of members) {
+      const icon = statusIcon(m.status);
+      const label = `[${m.name}]`;
+      const cliTag = m.cli ? m.cli.charAt(0).toUpperCase() + m.cli.slice(1) : "";
 
-      // Hub에서 에이전트 상태 확인
-      const agentStatus = status?.agents?.find?.((a) => a.agent_id === agentId);
-      const online = agentStatus ? `${GREEN}● online${RESET}` : `${GRAY}○ -${RESET}`;
+      // 진행률 추정
+      const pct = m.status === "completed" ? 100
+        : m.status === "in_progress" ? 50
+        : m.status === "failed" ? 100
+        : 0;
 
-      // 진행률 추정 (메시지 기반, 단순 휴리스틱)
-      const msgCount = agentStatus?.message_count ?? 0;
-      const pct = msgCount === 0 ? 0 : Math.min(100, msgCount * 25);
+      console.log(`${AMBER}│${RESET}  ${BOLD}${label}${RESET} ${cliTag}  ${icon} ${m.status || "pending"}  ${progressBar(pct)}`);
 
-      console.log(`${AMBER}│${RESET}  ${BOLD}${label}${RESET} ${cliTag}  ${online}  ${progressBar(pct)} ${DIM}${pct}%${RESET}`);
-
-      // pane 미리보기 (마지막 2줄)
-      const preview = capturePaneOutput(paneTarget, 2)
-        .split("\n")
-        .filter(Boolean)
-        .slice(-1)[0] || "";
+      // 미리보기: supervisor lastPreview > task subject
+      const preview = m.preview || m.subject || "";
       if (preview) {
         const truncated = preview.length > W - 8 ? preview.slice(0, W - 11) + "..." : preview;
         console.log(`${AMBER}│${RESET}    ${DIM}> ${truncated}${RESET}`);
@@ -140,14 +239,17 @@ async function loadTeamState() {
   }
 }
 
-// ── CLI 실행 (자체 갱신 루프 — watch 불필요) ──
+// ── CLI 실행 ──
 if (process.argv[1]?.includes("dashboard.mjs")) {
   const sessionIdx = process.argv.indexOf("--session");
+  const teamIdx = process.argv.indexOf("--team");
   const sessionName = sessionIdx !== -1 ? process.argv[sessionIdx + 1] : null;
+  const teamName = teamIdx !== -1 ? process.argv[teamIdx + 1] : null;
   const intervalSec = parseInt(process.argv[process.argv.indexOf("--interval") + 1] || "2", 10);
 
-  if (!sessionName) {
-    console.error("사용법: node dashboard.mjs --session <세션이름> [--interval 2]");
+  const displayName = sessionName || teamName;
+  if (!displayName) {
+    console.error("사용법: node dashboard.mjs --session <세션이름> [--team <팀이름>] [--interval 2]");
     process.exit(1);
   }
 
@@ -157,9 +259,16 @@ if (process.argv[1]?.includes("dashboard.mjs")) {
   // 갱신 루프
   while (true) {
     const teamState = await loadTeamState();
+    const effectiveTeamName = teamName || null;
+    const supervisorUrl = teamState?.native?.controlUrl || null;
+
     // 화면 클리어 (ANSI)
     process.stdout.write("\x1b[2J\x1b[H");
-    await renderDashboard(sessionName, { teamState });
+    await renderDashboard(displayName, {
+      teamName: effectiveTeamName,
+      supervisorUrl,
+      teamState,
+    });
     console.log(`${DIM}  ${intervalSec}초 간격 갱신 | Ctrl+C로 종료${RESET}`);
     await new Promise((r) => setTimeout(r, intervalSec * 1000));
   }

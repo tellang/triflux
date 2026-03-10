@@ -810,7 +810,54 @@ async function teamStatus() {
     }
   }
 
+  // Hub task-list 데이터 통합 (v2.2)
+  if (alive) {
+    const hubTasks = await fetchHubTaskList(state);
+    if (hubTasks.length > 0) {
+      const completed = hubTasks.filter((t) => t.status === "completed").length;
+      const inProgress = hubTasks.filter((t) => t.status === "in_progress").length;
+      const failed = hubTasks.filter((t) => t.status === "failed").length;
+      const pending = hubTasks.filter((t) => !t.status || t.status === "pending").length;
+
+      console.log(`\n  ${BOLD}Hub Tasks${RESET} ${DIM}(${completed}/${hubTasks.length} done)${RESET}`);
+      for (const t of hubTasks) {
+        const icon = t.status === "completed" ? `${GREEN}✓${RESET}`
+          : t.status === "in_progress" ? `${AMBER}●${RESET}`
+          : t.status === "failed" ? `${RED}✗${RESET}`
+          : `${GRAY}○${RESET}`;
+        const owner = t.owner ? ` ${GRAY}[${t.owner}]${RESET}` : "";
+        const subject = t.subject || t.description?.slice(0, 50) || "";
+        console.log(`    ${icon} ${subject}${owner}`);
+      }
+      if (failed > 0) console.log(`    ${RED}⚠ ${failed}건 실패${RESET}`);
+    }
+  }
+
   console.log("");
+}
+
+/**
+ * Hub bridge에서 팀 task-list 조회 (v2.2)
+ * @param {object} state — team-state.json
+ * @returns {Promise<Array>}
+ */
+async function fetchHubTaskList(state) {
+  const hubBase = (state?.hubUrl || "http://127.0.0.1:27888/mcp").replace(/\/mcp$/, "");
+  // teamName: native 모드는 state에 저장된 팀 이름, SKILL.md 모드는 세션 이름 기반
+  const teamName = state?.native?.teamName || state?.sessionName || null;
+  if (!teamName) return [];
+  try {
+    const res = await fetch(`${hubBase}/bridge/team/task-list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ team_name: teamName }),
+      signal: AbortSignal.timeout(2000),
+    });
+    const data = await res.json();
+    return data?.ok ? (data.data?.tasks || []) : [];
+  } catch {
+    return [];
+  }
 }
 
 function teamTasks() {
