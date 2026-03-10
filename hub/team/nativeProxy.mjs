@@ -48,8 +48,8 @@ function atomicWriteJson(path, value) {
 }
 
 function sleepMs(ms) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {}
+  // busy-wait를 피하고 Atomics.wait로 동기 대기 (CPU 점유 최소화)
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function withFileLock(lockPath, fn, retries = 20, delayMs = 25) {
@@ -421,35 +421,40 @@ export function teamSendMessage(args = {}) {
 
   const recipient = sanitizeRecipientName(to);
   const inboxFile = join(paths.inboxes_dir, `${recipient}.json`);
-  const queue = readJsonSafe(inboxFile);
-  const list = Array.isArray(queue) ? queue : [];
-
-  const message = {
-    id: randomUUID(),
-    from: String(from),
-    text: String(text),
-    ...(summary ? { summary: String(summary) } : {}),
-    timestamp: new Date().toISOString(),
-    color: String(color || 'blue'),
-    read: false,
-  };
-  list.push(message);
+  const lockFile = `${inboxFile}.lock`;
+  let message;
 
   try {
-    atomicWriteJson(inboxFile, list);
+    const unreadCount = withFileLock(lockFile, () => {
+      const queue = readJsonSafe(inboxFile);
+      const list = Array.isArray(queue) ? queue : [];
+
+      message = {
+        id: randomUUID(),
+        from: String(from),
+        text: String(text),
+        ...(summary ? { summary: String(summary) } : {}),
+        timestamp: new Date().toISOString(),
+        color: String(color || 'blue'),
+        read: false,
+      };
+      list.push(message);
+      atomicWriteJson(inboxFile, list);
+
+      return list.filter((m) => m?.read !== true).length;
+    });
+
+    return {
+      ok: true,
+      data: {
+        message_id: message.id,
+        recipient,
+        inbox_file: inboxFile,
+        queued_at: message.timestamp,
+        unread_count: unreadCount,
+      },
+    };
   } catch (e) {
     return err('SEND_MESSAGE_FAILED', e.message);
   }
-
-  const unreadCount = list.filter((m) => m?.read !== true).length;
-  return {
-    ok: true,
-    data: {
-      message_id: message.id,
-      recipient,
-      inbox_file: inboxFile,
-      queued_at: message.timestamp,
-      unread_count: unreadCount,
-    },
-  };
 }

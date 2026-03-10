@@ -39,13 +39,18 @@ function tmux(args, opts = {}) {
 /**
  * CLI 에이전트 시작 커맨드 생성
  * @param {'codex'|'gemini'|'claude'} cli
+ * @param {{ trustMode?: boolean }} [options]
  * @returns {string} 실행할 셸 커맨드
  */
-export function buildCliCommand(cli) {
+export function buildCliCommand(cli, options = {}) {
+  const { trustMode = false } = options;
+
   switch (cli) {
     case "codex":
-      // interactive REPL 진입 — MCP는 ~/.codex/config.json에 사전 등록
-      return "codex";
+      // trust 모드에서는 승인/샌드박스 우회 + alt-screen 비활성화
+      return trustMode
+        ? "codex --dangerously-bypass-approvals-and-sandbox --no-alt-screen"
+        : "codex";
     case "gemini":
       // interactive 모드 — MCP는 ~/.gemini/settings.json에 사전 등록
       return "gemini";
