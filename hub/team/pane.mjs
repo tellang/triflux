@@ -1,30 +1,39 @@
 // hub/team/pane.mjs — pane별 CLI 실행 + stdin 주입
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
-import { execSync } from "node:child_process";
 import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { detectMultiplexer } from "./session.mjs";
+import { detectMultiplexer, tmuxExec } from "./session.mjs";
 
 /** Windows 경로를 MSYS2/Git Bash tmux용 POSIX 경로로 변환 */
 function toTmuxPath(p) {
   if (process.platform !== "win32") return p;
-  // C:\Users\... → /c/Users/...
-  return p.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+
+  const normalized = p.replace(/\\/g, "/");
+  const m = normalized.match(/^([A-Za-z]):\/(.*)$/);
+  if (!m) return normalized;
+
+  const drive = m[1].toLowerCase();
+  const rest = m[2];
+  const mux = detectMultiplexer();
+
+  // wsl tmux는 /mnt/c/... 경로를 사용
+  if (mux === "wsl-tmux") {
+    return `/mnt/${drive}/${rest}`;
+  }
+
+  // Git Bash/MSYS tmux는 /c/... 경로를 사용
+  return `/${drive}/${rest}`;
 }
 
 /** tmux 커맨드 실행 (session.mjs와 동일 패턴) */
 function tmux(args, opts = {}) {
-  const mux = detectMultiplexer();
-  if (!mux) throw new Error("tmux 미발견");
-  const prefix = mux === "wsl-tmux" ? "wsl tmux" : "tmux";
-  const result = execSync(`${prefix} ${args}`, {
+  return tmuxExec(args, {
     encoding: "utf8",
     timeout: 10000,
     stdio: ["pipe", "pipe", "pipe"],
     ...opts,
   });
-  return result != null ? result.trim() : "";
 }
 
 /**

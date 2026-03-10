@@ -40,45 +40,81 @@ export function decomposeTask(taskDescription, agentCount) {
 }
 
 /**
- * 에이전트별 초기 프롬프트 생성
+ * 리드(보통 claude) 초기 프롬프트 생성
+ * @param {string} taskDescription
+ * @param {object} config
+ * @param {string} config.agentId
+ * @param {string} config.hubUrl
+ * @param {string} config.teammateMode
+ * @param {Array<{agentId:string, cli:string, subtask:string}>} config.workers
+ * @returns {string}
+ */
+export function buildLeadPrompt(taskDescription, config) {
+  const { agentId, hubUrl, teammateMode = "tmux", workers = [] } = config;
+
+  const roster = workers
+    .map((w, i) => `${i + 1}. ${w.agentId} (${w.cli}) — ${w.subtask}`)
+    .join("\n") || "- (워커 없음)";
+
+  const workerIds = workers.map((w) => w.agentId).join(", ");
+
+  return `리드 에이전트: ${agentId}
+
+목표: ${taskDescription}
+모드: ${teammateMode}
+
+워커:
+${roster}
+
+규칙:
+- 가능한 짧고 핵심만 지시/요약(토큰 절약)
+- 워커 제어 메시지 표준:
+  publish(from="${agentId}", to="<worker-agent-id>", topic="lead.control", payload={command:"interrupt|stop|pause|resume", reason:"..."})
+- 워커 결과 수집:
+  poll_messages(agent_id="${agentId}", wait_ms=1000, max_messages=20)
+- 최종 결과는 topic="task.result"를 모아 통합
+
+권장 워커 ID: ${workerIds || "(없음)"}
+Hub: ${hubUrl}
+지금 즉시 워커를 배정하고 병렬 진행을 관리하라.`;
+}
+
+/**
+ * 워커 초기 프롬프트 생성
  * @param {string} subtask — 이 에이전트의 서브태스크
  * @param {object} config
  * @param {string} config.cli — codex/gemini/claude
  * @param {string} config.agentId — 에이전트 식별자
  * @param {string} config.hubUrl — Hub URL
- * @param {string} config.sessionName — tmux 세션 이름
  * @returns {string}
  */
 export function buildPrompt(subtask, config) {
   const { cli, agentId, hubUrl } = config;
 
-  // Hub MCP 도구 사용 안내 (CLI별 차이 없이 공통)
-  const hubInstructions = `
-[Hub 메시지 도구]
-tfx-hub MCP 서버(${hubUrl})가 연결되어 있다면 아래 도구를 사용할 수 있다:
-- register: 에이전트 등록 (agent_id: "${agentId}", cli: "${cli}")
-- publish: 결과 발행 (topic: "task.result")
-- poll_messages: 다른 에이전트 메시지 수신
-- ask: 다른 에이전트에게 질문
+  const hubBase = hubUrl.replace("/mcp", "");
 
-MCP 도구가 없으면 REST API 사용:
-  curl -s -X POST ${hubUrl.replace("/mcp", "")}/bridge/register -H 'Content-Type: application/json' -d '{"agent_id":"${agentId}","cli":"${cli}","timeout_sec":600}'
-  curl -s -X POST ${hubUrl.replace("/mcp", "")}/bridge/result -H 'Content-Type: application/json' -d '{"agent_id":"${agentId}","topic":"task.result","payload":{"summary":"결과 요약"}}'
-`.trim();
+  return `워커: ${agentId} (${cli})
+작업: ${subtask}
 
-  return `너는 tfx-hub 팀의 에이전트 ${agentId}이다.
+필수 규칙:
+1) 간결하게 작업(불필요한 장문 설명 금지)
+2) 시작 즉시 register 실행:
+   register(agent_id="${agentId}", cli="${cli}", capabilities=["code"], topics=["lead.control","task.result"], heartbeat_ttl_ms=600000)
+3) 주기적으로 수신함 확인:
+   poll_messages(agent_id="${agentId}", wait_ms=1000, max_messages=10)
+4) lead.control 수신 시 즉시 반응
+   - interrupt: 즉시 중단, 진행상태 요약 publish
+   - stop: 작업 종료, 최종 요약 publish 후 대기
+   - pause: 작업 일시정지
+   - resume: 작업 재개
+5) 완료 시 결과 발행:
+   publish(from="${agentId}", to="topic:task.result", topic="task.result", payload={summary:"..."})
 
-[작업]
-${subtask}
+MCP가 없으면 REST 폴백:
+- POST ${hubBase}/bridge/register
+- POST ${hubBase}/bridge/result
 
-[규칙]
-- 작업 완료 후 반드시 결과를 Hub에 발행하라
-- 에이전트 ID: ${agentId}
-- 다른 에이전트 결과가 필요하면 poll_messages로 확인
-
-${hubInstructions}
-
-작업을 시작하라.`;
+지금 작업을 시작하라.`;
 }
 
 /**
@@ -87,16 +123,44 @@ ${hubInstructions}
  * @param {Array<{target: string, cli: string, subtask: string}>} assignments
  * @param {object} opts
  * @param {string} opts.hubUrl — Hub URL
+ * @param {{target:string, cli:string, task:string}|null} opts.lead
+ * @param {string} opts.teammateMode
  * @returns {Promise<void>}
  */
 export async function orchestrate(sessionName, assignments, opts = {}) {
-  const { hubUrl = "http://127.0.0.1:27888/mcp" } = opts;
+  const {
+    hubUrl = "http://127.0.0.1:27888/mcp",
+    lead = null,
+    teammateMode = "tmux",
+  } = opts;
 
-  for (const { target, cli, subtask } of assignments) {
-    const agentId = `${cli}-${target.split(".").pop()}`;
-    const prompt = buildPrompt(subtask, { cli, agentId, hubUrl, sessionName });
-    injectPrompt(target, prompt);
-    // pane 간 100ms 간격 (안정성)
+  const workers = assignments.map(({ target, cli, subtask }) => ({
+    target,
+    cli,
+    subtask,
+    agentId: `${cli}-${target.split(".").pop()}`,
+  }));
+
+  if (lead?.target) {
+    const leadAgentId = `${lead.cli || "claude"}-${lead.target.split(".").pop()}`;
+    const leadPrompt = buildLeadPrompt(lead.task || "팀 작업 조율", {
+      agentId: leadAgentId,
+      hubUrl,
+      teammateMode,
+      workers: workers.map((w) => ({ agentId: w.agentId, cli: w.cli, subtask: w.subtask })),
+    });
+    injectPrompt(lead.target, leadPrompt);
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  for (const worker of workers) {
+    const prompt = buildPrompt(worker.subtask, {
+      cli: worker.cli,
+      agentId: worker.agentId,
+      hubUrl,
+      sessionName,
+    });
+    injectPrompt(worker.target, prompt);
     await new Promise((r) => setTimeout(r, 100));
   }
 }
