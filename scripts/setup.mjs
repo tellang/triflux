@@ -10,6 +10,25 @@ import { homedir } from "os";
 
 const PLUGIN_ROOT = dirname(dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Z]:)/, "$1");
 const CLAUDE_DIR = join(homedir(), ".claude");
+const CODEX_DIR = join(homedir(), ".codex");
+const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
+
+const REQUIRED_CODEX_PROFILES = [
+  {
+    name: "xhigh",
+    lines: [
+      'model = "gpt-5.3-codex"',
+      'model_reasoning_effort = "xhigh"',
+    ],
+  },
+  {
+    name: "spark_fast",
+    lines: [
+      'model = "gpt-5.1-codex-mini"',
+      'model_reasoning_effort = "low"',
+    ],
+  },
+];
 
 // ── 파일 동기화 ──
 
@@ -38,6 +57,45 @@ function getVersion(filePath) {
     return match ? match[1] : null;
   } catch {
     return null;
+  }
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasProfileSection(tomlContent, profileName) {
+  const section = `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*$`;
+  return new RegExp(section, "m").test(tomlContent);
+}
+
+function ensureCodexProfiles() {
+  try {
+    if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
+
+    const original = existsSync(CODEX_CONFIG_PATH)
+      ? readFileSync(CODEX_CONFIG_PATH, "utf8")
+      : "";
+
+    let updated = original;
+    let added = 0;
+
+    for (const profile of REQUIRED_CODEX_PROFILES) {
+      if (hasProfileSection(updated, profile.name)) continue;
+
+      if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
+      if (updated.trim().length > 0) updated += "\n";
+      updated += `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
+      added++;
+    }
+
+    if (added > 0) {
+      writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
+    }
+
+    return added;
+  } catch {
+    return 0;
   }
 }
 
@@ -130,6 +188,36 @@ if (existsSync(hudPath)) {
   }
 }
 
+// ── Agent Teams 환경변수 자동 설정 ──
+
+try {
+  let agentSettings = {};
+  if (existsSync(settingsPath)) {
+    agentSettings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  }
+
+  if (!agentSettings.env) agentSettings.env = {};
+  let agentSettingsChanged = false;
+
+  if (agentSettings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS !== "1") {
+    agentSettings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
+    agentSettingsChanged = true;
+  }
+
+  // teammateMode: auto (tmux 밖이면 in-process, 안이면 split-pane)
+  if (!agentSettings.teammateMode) {
+    agentSettings.teammateMode = "auto";
+    agentSettingsChanged = true;
+  }
+
+  if (agentSettingsChanged) {
+    writeFileSync(settingsPath, JSON.stringify(agentSettings, null, 2) + "\n", "utf8");
+    synced++;
+  }
+} catch {
+  // settings.json 파싱 실패 시 무시 — 기존 설정 보존
+}
+
 // ── Stale PID 파일 정리 (hub 좀비 방지) ──
 
 const HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
@@ -194,6 +282,13 @@ if (process.platform === "win32") {
       } catch {}
     }
   }
+}
+
+// ── Codex 프로필 자동 보정 ──
+
+const codexProfilesAdded = ensureCodexProfiles();
+if (codexProfilesAdded > 0) {
+  synced++;
 }
 
 // ── MCP 인벤토리 백그라운드 갱신 ──
