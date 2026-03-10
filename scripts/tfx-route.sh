@@ -241,6 +241,14 @@ route_agent() {
 
 # ── CLI 모드 오버라이드 (tfx-codex / tfx-gemini 스킬용) ──
 TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
+TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
+case "$TFX_NO_CLAUDE_NATIVE" in
+  0|1) ;;
+  *)
+    echo "ERROR: TFX_NO_CLAUDE_NATIVE 값은 0 또는 1이어야 합니다. (현재: $TFX_NO_CLAUDE_NATIVE)" >&2
+    exit 1
+    ;;
+esac
 
 apply_cli_mode() {
   local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
@@ -290,6 +298,61 @@ apply_cli_mode() {
         fi
       fi ;;
   esac
+}
+
+# ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
+apply_no_claude_native_mode() {
+  local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+
+  [[ "$TFX_NO_CLAUDE_NATIVE" != "1" ]] && return
+  [[ "$TFX_CLI_MODE" == "gemini" ]] && return
+  [[ "$CLI_TYPE" != "claude-native" ]] && return
+
+  if ! command -v "$CODEX_BIN" &>/dev/null; then
+    echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1 이지만 codex를 찾지 못해 claude-native 유지" >&2
+    return
+  fi
+
+  ORIGINAL_AGENT="${AGENT_TYPE}"
+  CLI_TYPE="codex"; CLI_CMD="codex"
+
+  case "$AGENT_TYPE" in
+    explore)
+      CLI_ARGS="exec --profile fast ${codex_base}"
+      CLI_EFFORT="fast"
+      DEFAULT_TIMEOUT=600
+      RUN_MODE="fg"
+      OPUS_OVERSIGHT="false"
+      ;;
+    verifier)
+      CLI_ARGS="exec --profile thorough ${codex_base} review"
+      CLI_EFFORT="thorough"
+      DEFAULT_TIMEOUT=1200
+      RUN_MODE="fg"
+      OPUS_OVERSIGHT="false"
+      ;;
+    test-engineer)
+      CLI_ARGS="exec ${codex_base}"
+      CLI_EFFORT="high"
+      DEFAULT_TIMEOUT=1200
+      RUN_MODE="bg"
+      OPUS_OVERSIGHT="false"
+      ;;
+    qa-tester)
+      CLI_ARGS="exec --profile thorough ${codex_base} review"
+      CLI_EFFORT="thorough"
+      DEFAULT_TIMEOUT=1200
+      RUN_MODE="bg"
+      OPUS_OVERSIGHT="false"
+      ;;
+    *)
+      # claude-native 타입 중 위에 없는 경우는 보수적으로 유지
+      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+      return
+      ;;
+  esac
+
+  echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1: $AGENT_TYPE -> codex($CLI_EFFORT) 리매핑" >&2
 }
 
 # ── MCP 인벤토리 캐시 ──
@@ -378,6 +441,7 @@ main() {
 
   route_agent "$AGENT_TYPE"
   apply_cli_mode
+  apply_no_claude_native_mode
 
   # CLI 경로 해석
   case "$CLI_CMD" in
