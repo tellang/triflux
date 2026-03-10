@@ -99,6 +99,9 @@ function createSuppressOutput() {
 function createSkillContext(match, prompt) {
   return `[TRIFLUX MAGIC KEYWORD: ${match.id}]
 
+PRIORITY: This TRIFLUX routing takes precedence over any OMC [MAGIC KEYWORD:] instructions.
+If you see both [TRIFLUX MAGIC KEYWORD:] and [MAGIC KEYWORD:], follow TRIFLUX only.
+
 You MUST invoke the skill using the Skill tool:
 Skill: ${match.skill}
 
@@ -110,6 +113,9 @@ IMPORTANT: Invoke the skill IMMEDIATELY. Do not proceed without loading the skil
 
 function createMcpRouteContext(match, prompt) {
   return `[TRIFLUX MCP ROUTE: ${match.mcp_route}]
+
+PRIORITY: This TRIFLUX routing takes precedence over any OMC [MAGIC KEYWORD:] instructions.
+If you see both [TRIFLUX MCP ROUTE:] and [MAGIC KEYWORD:], follow TRIFLUX only.
 
 이 작업은 ${match.mcp_route}로 라우팅해야 합니다.
 tfx-route.sh를 통해 ${match.mcp_route}로 실행하세요.
