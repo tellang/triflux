@@ -105,6 +105,9 @@ const QOS_PATH = join(homedir(), ".omc", "state", "cli_qos_profile.json");
 const ACCOUNTS_CONFIG_PATH = join(homedir(), ".omc", "router", "accounts.json");
 const ACCOUNTS_STATE_PATH = join(homedir(), ".omc", "state", "cli_accounts_state.json");
 
+// tfx-team 상태 (v2.2 HUD 통합)
+const TEAM_STATE_PATH = join(homedir(), ".claude", "cache", "tfx-hub", "team-state.json");
+
 // Claude OAuth Usage API (api.anthropic.com/api/oauth/usage)
 const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
 const CLAUDE_USAGE_CACHE_PATH = join(homedir(), ".claude", "cache", "claude-usage-cache.json");
@@ -424,6 +427,54 @@ function getProviderAccountId(provider, accountsConfig, accountsState) {
   if (selectedId) return selectedId;
   const providerConfig = accountsConfig?.providers?.[provider] || [];
   return providerConfig[0]?.id || `${provider}-main`;
+}
+
+/**
+ * tfx-team 상태 행 생성 (v2.2 HUD 통합)
+ * 활성 팀이 있을 때만 행 반환, 없으면 null
+ * @returns {{ prefix: string, left: string, right: string } | null}
+ */
+function getTeamRow() {
+  const teamState = readJson(TEAM_STATE_PATH, null);
+  if (!teamState || !teamState.sessionName) return null;
+
+  // 팀 생존 확인: startedAt 기준 24시간 초과면 stale로 간주
+  if (teamState.startedAt && (Date.now() - teamState.startedAt) > 24 * 60 * 60 * 1000) return null;
+
+  const workers = (teamState.members || []).filter((m) => m.role === "worker");
+  if (!workers.length) return null;
+
+  const tasks = teamState.tasks || [];
+  const completed = tasks.filter((t) => t.status === "completed").length;
+  const failed = tasks.filter((t) => t.status === "failed").length;
+  const total = tasks.length || workers.length;
+
+  // 경과 시간
+  const elapsed = teamState.startedAt
+    ? `${Math.round((Date.now() - teamState.startedAt) / 60000)}m`
+    : "";
+
+  // 멤버 상태 아이콘 요약
+  const memberIcons = workers.map((m) => {
+    const task = tasks.find((t) => t.owner === m.name);
+    const icon = task?.status === "completed" ? green("✓")
+      : task?.status === "in_progress" ? yellow("●")
+      : task?.status === "failed" ? red("✗")
+      : dim("○");
+    const tag = m.cli ? m.cli.charAt(0) : "?";
+    return `${tag}${icon}`;
+  }).join(" ");
+
+  // done / failed 상태 텍스트
+  const doneText = failed > 0
+    ? `${completed}/${total} ${red(`${failed}✗`)}`
+    : `${completed}/${total} done`;
+
+  return {
+    prefix: bold(claudeOrange("⬡")),
+    left: `team ${doneText} ${dim(elapsed)}`,
+    right: memberIcons,
+  };
 }
 
 function renderAlignedRows(rows) {
@@ -1706,6 +1757,10 @@ async function main() {
     getProviderRow("gemini", "g", geminiBlue, qosProfile, accountsConfig, accountsState,
       geminiQuotaData, geminiEmail, geminiSv, null),
   ];
+
+  // tfx-team 활성 시 팀 상태 행 추가 (v2.2)
+  const teamRow = getTeamRow();
+  if (teamRow) rows.push(teamRow);
 
   // 비활성 프로바이더 dim 처리: 데이터 없으면 전체 줄 dim
   const codexActive = codexBuckets != null;
