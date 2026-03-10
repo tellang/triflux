@@ -14,6 +14,12 @@ import { createStore } from './store.mjs';
 import { createRouter } from './router.mjs';
 import { createHitlManager } from './hitl.mjs';
 import { createTools } from './tools.mjs';
+import {
+  teamInfo,
+  teamTaskList,
+  teamTaskUpdate,
+  teamSendMessage,
+} from './team/nativeProxy.mjs';
 
 /** initialize 요청 판별 */
 function isInitializeRequest(body) {
@@ -161,6 +167,71 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1' } = {}
           });
           res.writeHead(200);
           return res.end(JSON.stringify(result));
+        }
+
+        // POST /bridge/control — 리드 제어를 특정 워커 메일박스로 직접 전달
+        if (path === '/bridge/control' && req.method === 'POST') {
+          const {
+            from_agent = 'lead',
+            to_agent,
+            command,
+            reason = '',
+            payload = {},
+            trace_id,
+            correlation_id,
+            ttl_ms = 3600000,
+          } = body;
+
+          if (!to_agent || !command) {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ ok: false, error: 'to_agent, command 필수' }));
+          }
+
+          const result = router.handlePublish({
+            from: from_agent,
+            to: to_agent,
+            topic: 'lead.control',
+            payload: {
+              command,
+              reason,
+              ...payload,
+              issued_at: Date.now(),
+            },
+            priority: 8,
+            ttl_ms: Math.max(1000, Math.min(Number(ttl_ms) || 3600000, 86400000)),
+            trace_id,
+            correlation_id,
+          });
+
+          res.writeHead(200);
+          return res.end(JSON.stringify(result));
+        }
+
+        // POST /bridge/team/* — Native Teams 파일 프록시
+        if (req.method === 'POST') {
+          let teamResult = null;
+          if (path === '/bridge/team/info' || path === '/bridge/team-info') {
+            teamResult = teamInfo(body);
+          } else if (path === '/bridge/team/task-list' || path === '/bridge/team-task-list') {
+            teamResult = teamTaskList(body);
+          } else if (path === '/bridge/team/task-update' || path === '/bridge/team-task-update') {
+            teamResult = teamTaskUpdate(body);
+          } else if (path === '/bridge/team/send-message' || path === '/bridge/team-send-message') {
+            teamResult = teamSendMessage(body);
+          }
+
+          if (teamResult) {
+            let status = 200;
+            const code = teamResult?.error?.code;
+            if (!teamResult.ok) {
+              if (code === 'TEAM_NOT_FOUND' || code === 'TASK_NOT_FOUND' || code === 'TASKS_DIR_NOT_FOUND') status = 404;
+              else if (code === 'CLAIM_CONFLICT' || code === 'MTIME_CONFLICT') status = 409;
+              else if (code === 'INVALID_TEAM_NAME' || code === 'INVALID_TASK_ID' || code === 'INVALID_TEXT' || code === 'INVALID_FROM') status = 400;
+              else status = 500;
+            }
+            res.writeHead(status);
+            return res.end(JSON.stringify(teamResult));
+          }
         }
 
         // POST /bridge/context — 선행 컨텍스트 폴링

@@ -9,6 +9,10 @@
 //   node bridge.mjs result    --agent <id> --file <path> [--topic task.result] [--trace <id>]
 //   node bridge.mjs context   --agent <id> [--topics t1,t2] [--max 10] [--out <path>]
 //   node bridge.mjs deregister --agent <id>
+//   node bridge.mjs team-info --team <team_name>
+//   node bridge.mjs team-task-list --team <team_name> [--owner <name>] [--statuses s1,s2]
+//   node bridge.mjs team-task-update --team <team_name> --task-id <id> [--claim] [--status <s>] [--owner <name>]
+//   node bridge.mjs team-send-message --team <team_name> --from <sender> --text <message> [--to team-lead]
 //   node bridge.mjs ping
 //
 // Hub 미실행 시 모든 커맨드는 조용히 실패 (exit 0).
@@ -82,10 +86,36 @@ function parseArgs(argv) {
       'exit-code': { type: 'string' },
       max: { type: 'string' },
       out: { type: 'string' },
+      team: { type: 'string' },
+      'task-id': { type: 'string' },
+      owner: { type: 'string' },
+      status: { type: 'string' },
+      statuses: { type: 'string' },
+      claim: { type: 'boolean' },
+      actor: { type: 'string' },
+      from: { type: 'string' },
+      to: { type: 'string' },
+      text: { type: 'string' },
+      summary: { type: 'string' },
+      color: { type: 'string' },
+      limit: { type: 'string' },
+      'include-internal': { type: 'boolean' },
+      subject: { type: 'string' },
+      description: { type: 'string' },
+      'active-form': { type: 'string' },
+      'add-blocks': { type: 'string' },
+      'add-blocked-by': { type: 'string' },
+      'metadata-patch': { type: 'string' },
+      'if-match-mtime-ms': { type: 'string' },
     },
     strict: false,
   });
   return values;
+}
+
+function parseJsonSafe(raw, fallback = null) {
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); } catch { return fallback; }
 }
 
 // ── 커맨드 ──
@@ -201,6 +231,58 @@ async function cmdDeregister(args) {
   }
 }
 
+async function cmdTeamInfo(args) {
+  const result = await post('/bridge/team/info', {
+    team_name: args.team,
+    include_members: true,
+    include_paths: true,
+  });
+  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+}
+
+async function cmdTeamTaskList(args) {
+  const statuses = args.statuses ? args.statuses.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const result = await post('/bridge/team/task-list', {
+    team_name: args.team,
+    owner: args.owner,
+    statuses,
+    include_internal: !!args['include-internal'],
+    limit: parseInt(args.limit || '200', 10),
+  });
+  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+}
+
+async function cmdTeamTaskUpdate(args) {
+  const result = await post('/bridge/team/task-update', {
+    team_name: args.team,
+    task_id: args['task-id'],
+    claim: !!args.claim,
+    owner: args.owner,
+    status: args.status,
+    subject: args.subject,
+    description: args.description,
+    activeForm: args['active-form'],
+    add_blocks: args['add-blocks'] ? args['add-blocks'].split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+    add_blocked_by: args['add-blocked-by'] ? args['add-blocked-by'].split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+    metadata_patch: args['metadata-patch'] ? parseJsonSafe(args['metadata-patch'], null) : undefined,
+    if_match_mtime_ms: args['if-match-mtime-ms'] != null ? Number(args['if-match-mtime-ms']) : undefined,
+    actor: args.actor,
+  });
+  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+}
+
+async function cmdTeamSendMessage(args) {
+  const result = await post('/bridge/team/send-message', {
+    team_name: args.team,
+    from: args.from,
+    to: args.to || 'team-lead',
+    text: args.text,
+    summary: args.summary,
+    color: args.color || 'blue',
+  });
+  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+}
+
 async function cmdPing() {
   try {
     const url = `${_cachedHubUrl}/status`;
@@ -225,8 +307,12 @@ switch (cmd) {
   case 'result':     await cmdResult(args); break;
   case 'context':    await cmdContext(args); break;
   case 'deregister': await cmdDeregister(args); break;
+  case 'team-info': await cmdTeamInfo(args); break;
+  case 'team-task-list': await cmdTeamTaskList(args); break;
+  case 'team-task-update': await cmdTeamTaskUpdate(args); break;
+  case 'team-send-message': await cmdTeamSendMessage(args); break;
   case 'ping':       await cmdPing(); break;
   default:
-    console.error('사용법: bridge.mjs <register|result|context|deregister|ping> [--옵션]');
+    console.error('사용법: bridge.mjs <register|result|context|deregister|team-info|team-task-list|team-task-update|team-send-message|ping> [--옵션]');
     process.exit(1);
 }
