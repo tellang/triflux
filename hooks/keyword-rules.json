@@ -231,6 +231,108 @@
       "exclusive": false,
       "state": null,
       "mcp_route": "gemini"
+    },
+    {
+      "id": "tfx-hub",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?hub\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-hub",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-doctor",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?doctor\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-doctor",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-setup",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?setup\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-setup",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "confluence-route",
+      "patterns": [
+        {
+          "source": "\\b(confluence|위키|wiki)[\\s-]?(페이지|문서|조회|생성|수정|검색)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "(confluence|위키|wiki)[\\s-]?(페이지|문서|조회|생성|수정|검색)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "slack-route",
+      "patterns": [
+        {
+          "source": "\\b(slack|슬랙)[\\s-]?(메시지|채널|보내|읽|검색|알림)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "(slack|슬랙)[\\s-]?(메시지|채널|보내|읽|검색|알림)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "github-route",
+      "patterns": [
+        {
+          "source": "\\b(github|깃허브)[\\s-]?(이슈|issue|PR|pull|커밋|commit|리포|repo)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "(github|깃허브)[\\s-]?(이슈|issue|PR|pull|커밋|commit|리포|repo)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "codex"
     }
   ]
 }
