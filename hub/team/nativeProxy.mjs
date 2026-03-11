@@ -52,7 +52,18 @@ function atomicWriteJson(path, value) {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  renameSync(tmp, path);
+  try {
+    renameSync(tmp, path);
+  } catch (e) {
+    // Windows NTFS: 대상 파일 존재 시 rename 실패 가능 → 삭제 후 재시도
+    if (process.platform === 'win32' && (e.code === 'EPERM' || e.code === 'EEXIST')) {
+      try { unlinkSync(path); } catch {}
+      renameSync(tmp, path);
+    } else {
+      try { unlinkSync(tmp); } catch {}
+      throw e;
+    }
+  }
 }
 
 function sleepMs(ms) {
@@ -486,6 +497,22 @@ export function teamSendMessage(args = {}) {
         read: false,
       };
       list.push(message);
+
+      // inbox 정리: 최대 200개 유지, read + 1시간 경과 메시지 제거
+      const MAX_INBOX = 200;
+      if (list.length > MAX_INBOX) {
+        const ONE_HOUR_MS = 3600000;
+        const cutoff = Date.now() - ONE_HOUR_MS;
+        const pruned = list.filter((m) =>
+          m?.read !== true || !m?.timestamp || new Date(m.timestamp).getTime() > cutoff
+        );
+        list.length = 0;
+        list.push(...pruned);
+        if (list.length > MAX_INBOX) {
+          list.splice(0, list.length - MAX_INBOX);
+        }
+      }
+
       atomicWriteJson(inboxFile, list);
 
       return list.filter((m) => m?.read !== true).length;

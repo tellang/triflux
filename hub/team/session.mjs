@@ -72,14 +72,17 @@ function hasGitBashTmux() {
 }
 
 /**
- * 터미널 멀티플렉서 감지
+ * 터미널 멀티플렉서 감지 (결과 캐싱 — 프로세스 수명 동안 불변)
  * @returns {'tmux'|'git-bash-tmux'|'wsl-tmux'|null}
  */
+let _cachedMux;
 export function detectMultiplexer() {
-  if (hasTmux()) return "tmux";
-  if (process.platform === "win32" && hasGitBashTmux()) return "git-bash-tmux";
-  if (process.platform === "win32" && hasWslTmux()) return "wsl-tmux";
-  return null;
+  if (_cachedMux !== undefined) return _cachedMux;
+  if (hasTmux()) { _cachedMux = "tmux"; return _cachedMux; }
+  if (process.platform === "win32" && hasGitBashTmux()) { _cachedMux = "git-bash-tmux"; return _cachedMux; }
+  if (process.platform === "win32" && hasWslTmux()) { _cachedMux = "wsl-tmux"; return _cachedMux; }
+  _cachedMux = null;
+  return _cachedMux;
 }
 
 /**

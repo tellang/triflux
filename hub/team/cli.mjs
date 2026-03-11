@@ -588,7 +588,7 @@ async function teamStart() {
     ok(`Hub: ${DIM}${hub.url}${RESET}`);
   }
 
-  const sessionId = `tfx-team-${Date.now().toString(36).slice(-4)}`;
+  const sessionId = `tfx-team-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
   const subtasks = decomposeTask(task, agents.length);
   const hubUrl = hub?.url || getDefaultHubUrl();
   let effectiveTeammateMode = teammateMode;
