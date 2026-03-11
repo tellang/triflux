@@ -22,6 +22,14 @@ const CLAUDE_HOME = join(homedir(), '.claude');
 const TEAMS_ROOT = join(CLAUDE_HOME, 'teams');
 const TASKS_ROOT = join(CLAUDE_HOME, 'tasks');
 
+// ── 인메모리 캐시 (디렉토리 mtime 기반 무효화) ──
+const _dirCache = new Map(); // tasksDir → { mtimeMs, files: string[] }
+const _taskIdIndex = new Map(); // taskId → filePath
+
+function _invalidateCache(tasksDir) {
+  _dirCache.delete(tasksDir);
+}
+
 function err(code, message, extra = {}) {
   return { ok: false, error: { code, message, ...extra } };
 }
@@ -114,22 +122,46 @@ export function resolveTeamPaths(teamName) {
 
 function collectTaskFiles(tasksDir) {
   if (!existsSync(tasksDir)) return [];
-  return readdirSync(tasksDir)
+
+  // 디렉토리 mtime 기반 캐시 — O(N) I/O를 반복 호출 시 O(1)로 축소
+  let dirMtime;
+  try { dirMtime = statSync(tasksDir).mtimeMs; } catch { return []; }
+
+  const cached = _dirCache.get(tasksDir);
+  if (cached && cached.mtimeMs === dirMtime) {
+    return cached.files;
+  }
+
+  const files = readdirSync(tasksDir)
     .filter((name) => name.endsWith('.json'))
     .filter((name) => !name.endsWith('.lock'))
     .filter((name) => name !== '.highwatermark')
     .map((name) => join(tasksDir, name));
+
+  _dirCache.set(tasksDir, { mtimeMs: dirMtime, files });
+  return files;
 }
 
 function locateTaskFile(tasksDir, taskId) {
   const direct = join(tasksDir, `${taskId}.json`);
   if (existsSync(direct)) return direct;
 
+  // ID→파일 인덱스 캐시
+  const indexed = _taskIdIndex.get(taskId);
+  if (indexed && existsSync(indexed)) return indexed;
+
+  // 캐시된 collectTaskFiles로 풀 스캔
   const files = collectTaskFiles(tasksDir);
   for (const file of files) {
-    if (basename(file, '.json') === taskId) return file;
+    if (basename(file, '.json') === taskId) {
+      _taskIdIndex.set(taskId, file);
+      return file;
+    }
     const json = readJsonSafe(file);
-    if (json && String(json.id || '') === taskId) return file;
+    if (json && String(json.id || '') === taskId) {
+      _taskIdIndex.set(taskId, file);
+      return file;
+    }
   }
   return null;
 }
@@ -242,7 +274,21 @@ export function teamTaskList(args = {}) {
   };
 }
 
+// status 화이트리스트 (Claude Code API 호환)
+const VALID_STATUSES = new Set(['pending', 'in_progress', 'completed', 'deleted']);
+
 export function teamTaskUpdate(args = {}) {
+  // "failed" → "completed" + metadata.result 자동 매핑
+  if (String(args.status || '') === 'failed') {
+    args = {
+      ...args,
+      status: 'completed',
+      metadata_patch: { ...(args.metadata_patch || {}), result: 'failed' },
+    };
+  } else if (args.status != null && !VALID_STATUSES.has(String(args.status))) {
+    return err('INVALID_STATUS', `유효하지 않은 status: ${args.status}. 허용: ${[...VALID_STATUSES].join(', ')}`);
+  }
+
   const {
     team_name,
     task_id,
@@ -369,6 +415,7 @@ export function teamTaskUpdate(args = {}) {
 
       if (updated) {
         atomicWriteJson(taskFile, after);
+        _invalidateCache(dirname(taskFile));
       }
 
       let afterMtime = beforeMtime;
