@@ -454,12 +454,24 @@ main() {
     gemini) CLI_CMD="$GEMINI_BIN" ;;
   esac
 
-  # 타임아웃 결정
+  # 타임아웃 결정 (에이전트별 최소값 보장)
+  local MIN_TIMEOUT
+  case "$AGENT_TYPE" in
+    deep-executor|architect|planner|critic|analyst) MIN_TIMEOUT=900 ;;
+    document-specialist|scientist|scientist-deep) MIN_TIMEOUT=900 ;;
+    code-reviewer|security-reviewer|quality-reviewer) MIN_TIMEOUT=600 ;;
+    executor|debugger) MIN_TIMEOUT=300 ;;
+    *) MIN_TIMEOUT=120 ;;
+  esac
+
   if [[ -n "$USER_TIMEOUT" ]]; then
     if ! [[ "$USER_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
       echo "[tfx-route] 경고: 유효하지 않은 타임아웃 값 ($USER_TIMEOUT), 기본값 사용" >&2
       USER_TIMEOUT=""
       TIMEOUT_SEC="$DEFAULT_TIMEOUT"
+    elif [[ "$USER_TIMEOUT" -lt "$MIN_TIMEOUT" ]]; then
+      echo "[tfx-route] 경고: 타임아웃 ${USER_TIMEOUT}s < 최소 ${MIN_TIMEOUT}s ($AGENT_TYPE), 최소값 적용" >&2
+      TIMEOUT_SEC="$MIN_TIMEOUT"
     else
       TIMEOUT_SEC="$USER_TIMEOUT"
     fi
@@ -537,8 +549,26 @@ ${ctx_content}
     fi
     if [[ ! -s "$STDOUT_LOG" && -s "$STDERR_LOG" ]]; then
       # stderr에서 마지막 "codex" 마커 이후의 텍스트를 stdout으로 복구
-      awk "/^codex$/{found=NR;content=\"\"} found && NR>found{content=content RS \$0} END{if(content) print substr(content,2)}" "$STDERR_LOG" > "$STDOUT_LOG"
-      echo "[tfx-route] 경고: codex stdout 비어있음, stderr에서 응답 복구 ($(wc -c < "$STDOUT_LOG") bytes)" >&2
+      # 1차: "codex" 마커 기반 (Windows \r 제거 후 매칭)
+      sed 's/\r$//' "$STDERR_LOG" \
+        | awk '/^codex$/{found=NR;content=""} found && NR>found{content=content RS $0} END{if(content) print substr(content,2)}' \
+        > "$STDOUT_LOG"
+
+      # 2차: 마커 없을 때 node fallback (MCP/헤더/sandbox 로그 제외, 응답 부분만 추출)
+      if [[ ! -s "$STDOUT_LOG" ]]; then
+        node -e '
+          const fs=require("fs"),lines=fs.readFileSync(process.argv[1],"utf-8").split(/\r?\n/);
+          const skip=/^(mcp[: ]|OpenAI Codex|--------|workdir:|model:|provider:|approval:|sandbox:|reasoning|session id:|user$|tokens used|EXIT:|exec$|"[A-Z]:|succeeded in |\s*$)/;
+          const out=lines.filter(l=>!skip.test(l));
+          if(out.length) fs.writeFileSync(process.argv[2],out.join("\n"));
+        ' -- "$STDERR_LOG" "$STDOUT_LOG" 2>/dev/null || true
+      fi
+
+      if [[ -s "$STDOUT_LOG" ]]; then
+        echo "[tfx-route] 경고: codex stdout 비어있음, stderr에서 응답 복구 ($(wc -c < "$STDOUT_LOG") bytes)" >&2
+      else
+        echo "[tfx-route] 경고: codex stdout 비어있음, stderr 복구도 실패" >&2
+      fi
     fi
 
   elif [[ "$CLI_TYPE" == "gemini" ]]; then
