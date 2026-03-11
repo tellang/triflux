@@ -9,4 +9,5 @@ node_modules/
 dist/
 .npmrc
 docs/internal/
+docs/handoff/
 .mcp.json
