@@ -1,6 +1,18 @@
-// hub/team/session.mjs — tmux/wt 세션 생명주기 관리
+// hub/team/session.mjs — tmux/psmux/wt 세션 생명주기 관리
 // 의존성: child_process (Node.js 내장)만 사용
 import { execSync, spawnSync } from "node:child_process";
+import {
+  attachPsmuxSession,
+  capturePsmuxPane,
+  configurePsmuxKeybindings,
+  createPsmuxSession,
+  getPsmuxSessionAttachedCount,
+  hasPsmux,
+  killPsmuxSession,
+  listPsmuxSessions,
+  psmuxExec,
+  psmuxSessionExists,
+} from "./psmux.mjs";
 
 const GIT_BASH_CANDIDATES = [
   "C:/Program Files/Git/bin/bash.exe",
@@ -73,11 +85,12 @@ function hasGitBashTmux() {
 
 /**
  * 터미널 멀티플렉서 감지 (결과 캐싱 — 프로세스 수명 동안 불변)
- * @returns {'tmux'|'git-bash-tmux'|'wsl-tmux'|null}
+ * @returns {'tmux'|'git-bash-tmux'|'wsl-tmux'|'psmux'|null}
  */
 let _cachedMux;
 export function detectMultiplexer() {
   if (_cachedMux !== undefined) return _cachedMux;
+  if (hasPsmux()) { _cachedMux = "psmux"; return _cachedMux; }
   if (hasTmux()) { _cachedMux = "tmux"; return _cachedMux; }
   if (process.platform === "win32" && hasGitBashTmux()) { _cachedMux = "git-bash-tmux"; return _cachedMux; }
   if (process.platform === "win32" && hasWslTmux()) { _cachedMux = "wsl-tmux"; return _cachedMux; }
@@ -86,7 +99,7 @@ export function detectMultiplexer() {
 }
 
 /**
- * tmux 커맨드 실행 (wsl-tmux 투명 지원)
+ * tmux/psmux 커맨드 실행 (wsl-tmux 투명 지원)
  * @param {string} args — tmux 서브커맨드 + 인자
  * @param {object} opts — execSync 옵션
  * @returns {string} stdout
@@ -95,8 +108,9 @@ function tmux(args, opts = {}) {
   const mux = detectMultiplexer();
   if (!mux) {
     throw new Error(
-      "tmux 미발견.\n\n" +
-      "tfx team은 tmux가 필요합니다:\n" +
+      "tmux/psmux 미발견.\n\n" +
+      "tfx team은 tmux 계열 멀티플렉서가 필요합니다:\n" +
+      "  Windows: psmux 설치 또는 WSL2 tmux 사용\n" +
       "  WSL2:   wsl sudo apt install tmux\n" +
       "  macOS:  brew install tmux\n" +
       "  Linux:  apt install tmux\n\n" +
@@ -105,6 +119,9 @@ function tmux(args, opts = {}) {
       "  2. wsl sudo apt install tmux\n" +
       "  3. tfx team \"작업\"  (자동으로 WSL tmux 사용)"
     );
+  }
+  if (mux === "psmux") {
+    return psmuxExec(args, opts);
   }
   if (mux === "git-bash-tmux") {
     const bash = findGitBashExe();
@@ -151,7 +168,14 @@ export function tmuxExec(args, opts = {}) {
 export function resolveAttachCommand(sessionName) {
   const mux = detectMultiplexer();
   if (!mux) {
-    throw new Error("tmux 미발견");
+    throw new Error("tmux/psmux 미발견");
+  }
+
+  if (mux === "psmux") {
+    return {
+      command: process.env.PSMUX_BIN || "psmux",
+      args: ["attach-session", "-t", sessionName],
+    };
   }
 
   if (mux === "git-bash-tmux") {
@@ -333,10 +357,15 @@ export function closeWtSession(opts = {}) {
  */
 export function createSession(sessionName, opts = {}) {
   const { layout = "2x2", paneCount = 4 } = opts;
+  const mux = detectMultiplexer();
 
   // 기존 세션 정리
   if (sessionExists(sessionName)) {
     killSession(sessionName);
+  }
+
+  if (mux === "psmux") {
+    return createPsmuxSession(sessionName, { layout, paneCount });
   }
 
   // 새 세션 생성 (detached)
@@ -410,6 +439,11 @@ export function focusPane(target, opts = {}) {
  * @param {string} opts.taskListCommand
  */
 export function configureTeammateKeybindings(sessionName, opts = {}) {
+  if (detectMultiplexer() === "psmux") {
+    configurePsmuxKeybindings(sessionName, opts);
+    return;
+  }
+
   const { inProcess = false, taskListCommand = "" } = opts;
   const cond = `#{==:#{session_name},${sessionName}}`;
 
@@ -460,6 +494,11 @@ export function attachSession(sessionName) {
     throw new Error("현재 터미널은 tmux attach를 지원하지 않음 (non-TTY)");
   }
 
+  if (detectMultiplexer() === "psmux") {
+    attachPsmuxSession(sessionName);
+    return;
+  }
+
   const { command, args } = resolveAttachCommand(sessionName);
   const r = spawnSync(command, args, {
     stdio: "inherit",
@@ -476,6 +515,10 @@ export function attachSession(sessionName) {
  * @returns {boolean}
  */
 export function sessionExists(sessionName) {
+  if (detectMultiplexer() === "psmux") {
+    return psmuxSessionExists(sessionName);
+  }
+
   try {
     tmux(`has-session -t ${sessionName}`, { stdio: "ignore" });
     return true;
@@ -489,6 +532,11 @@ export function sessionExists(sessionName) {
  * @param {string} sessionName
  */
 export function killSession(sessionName) {
+  if (detectMultiplexer() === "psmux") {
+    killPsmuxSession(sessionName);
+    return;
+  }
+
   try {
     tmux(`kill-session -t ${sessionName}`, { stdio: "ignore" });
   } catch {
@@ -501,6 +549,10 @@ export function killSession(sessionName) {
  * @returns {string[]}
  */
 export function listSessions() {
+  if (detectMultiplexer() === "psmux") {
+    return listPsmuxSessions();
+  }
+
   try {
     const output = tmux('list-sessions -F "#{session_name}"');
     return output
@@ -517,6 +569,10 @@ export function listSessions() {
  * @returns {number|null}
  */
 export function getSessionAttachedCount(sessionName) {
+  if (detectMultiplexer() === "psmux") {
+    return getPsmuxSessionAttachedCount(sessionName);
+  }
+
   try {
     const output = tmux('list-sessions -F "#{session_name} #{session_attached}"');
     const line = output
@@ -537,6 +593,10 @@ export function getSessionAttachedCount(sessionName) {
  * @returns {string}
  */
 export function capturePaneOutput(target, lines = 5) {
+  if (detectMultiplexer() === "psmux") {
+    return capturePsmuxPane(target, lines);
+  }
+
   try {
     // -l 플래그는 일부 tmux 빌드(MSYS2)에서 미지원 → 전체 캡처 후 JS에서 절삭
     const full = tmux(`capture-pane -t ${target} -p`);

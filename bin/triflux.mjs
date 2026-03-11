@@ -5,6 +5,8 @@ import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
+import { setTimeout as delay } from "node:timers/promises";
+import { detectMultiplexer, getSessionAttachedCount, killSession, listSessions, tmuxExec } from "../hub/team/session.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -49,6 +51,7 @@ const BRAND = `${AMBER}${BOLD}triflux${RESET}`;
 const VER = `${DIM}v${PKG.version}${RESET}`;
 const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
 const DOT = `${GRAY}·${RESET}`;
+const STALE_TEAM_MAX_AGE_SEC = 3600;
 
 // ── 유틸리티 ──
 
@@ -104,6 +107,129 @@ function getVersion(filePath) {
     const match = content.match(/VERSION\s*=\s*"([^"]+)"/);
     return match ? match[1] : null;
   } catch { return null; }
+}
+
+function parseSessionCreated(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 1e12 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+  }
+
+  const parsed = Date.parse(value);
+  if (Number.isFinite(parsed)) {
+    return Math.floor(parsed / 1000);
+  }
+
+  const normalized = value.replace(/^(\d{2})-(\d{2})-(\d{2})(\s+)/, "20$1-$2-$3$4");
+  const reparsed = Date.parse(normalized);
+  if (Number.isFinite(reparsed)) {
+    return Math.floor(reparsed / 1000);
+  }
+
+  return null;
+}
+
+function formatElapsedAge(ageSec) {
+  if (!Number.isFinite(ageSec) || ageSec < 0) return "알 수 없음";
+  if (ageSec < 60) return `${ageSec}초`;
+  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}분`;
+  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}시간`;
+  return `${Math.floor(ageSec / 86400)}일`;
+}
+
+function readTeamSessionCreatedMap() {
+  const createdMap = new Map();
+
+  try {
+    const output = tmuxExec('list-sessions -F "#{session_name} #{session_created}"');
+    for (const line of output.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const firstSpace = trimmed.indexOf(" ");
+      if (firstSpace === -1) continue;
+
+      const sessionName = trimmed.slice(0, firstSpace);
+      const createdRaw = trimmed.slice(firstSpace + 1).trim();
+      const createdAt = parseSessionCreated(createdRaw);
+      createdMap.set(sessionName, {
+        createdAt,
+        createdRaw,
+      });
+    }
+  } catch {
+    // session_created 포맷을 읽지 못하면 stale 판정만 완화한다.
+  }
+
+  return createdMap;
+}
+
+function inspectTeamSessions() {
+  const mux = detectMultiplexer();
+  if (!mux) {
+    return { mux: null, sessions: [] };
+  }
+
+  const sessionNames = listSessions();
+  if (sessionNames.length === 0) {
+    return { mux, sessions: [] };
+  }
+
+  const createdMap = readTeamSessionCreatedMap();
+  const nowSec = Math.floor(Date.now() / 1000);
+  const sessions = sessionNames.map((sessionName) => {
+    const createdInfo = createdMap.get(sessionName) || { createdAt: null, createdRaw: "" };
+    const attachedCount = getSessionAttachedCount(sessionName);
+    const ageSec = createdInfo.createdAt == null ? null : Math.max(0, nowSec - createdInfo.createdAt);
+    const stale = ageSec != null && ageSec >= STALE_TEAM_MAX_AGE_SEC && attachedCount === 0;
+
+    return {
+      sessionName,
+      attachedCount,
+      ageSec,
+      createdAt: createdInfo.createdAt,
+      createdRaw: createdInfo.createdRaw,
+      stale,
+    };
+  });
+
+  return { mux, sessions };
+}
+
+async function cleanupStaleTeamSessions(staleSessions) {
+  let cleaned = 0;
+  let failed = 0;
+
+  for (const session of staleSessions) {
+    let removed = false;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      killSession(session.sessionName);
+      const stillAlive = listSessions().includes(session.sessionName);
+      if (!stillAlive) {
+        removed = true;
+        cleaned++;
+        ok(`stale 세션 정리: ${session.sessionName}`);
+        break;
+      }
+
+      if (attempt < 3) {
+        await delay(1000);
+      }
+    }
+
+    if (!removed) {
+      failed++;
+      fail(`세션 정리 실패: ${session.sessionName} — 수동 정리 필요`);
+    }
+  }
+
+  info(`${cleaned}개 stale 세션 정리 완료`);
+
+  return { cleaned, failed };
 }
 
 function escapeRegExp(value) {
@@ -343,7 +469,7 @@ function cmdSetup() {
   console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}\n`);
 }
 
-function cmdDoctor(options = {}) {
+async function cmdDoctor(options = {}) {
   const { fix = false, reset = false } = options;
   const modeLabel = reset ? ` ${RED}--reset${RESET}` : fix ? ` ${YELLOW}--fix${RESET}` : "";
   console.log(`\n  ${AMBER}${BOLD}⬡ triflux doctor${RESET} ${VER}${modeLabel}\n`);
@@ -672,7 +798,44 @@ function cmdDoctor(options = {}) {
     ok("이슈 로그 없음 (정상)");
   }
 
-  // 11. Orphan Teams
+  // 11. Team Sessions
+  section("Team Sessions");
+  const teamSessionReport = inspectTeamSessions();
+  if (!teamSessionReport.mux) {
+    info("tmux/psmux 미감지 — 팀 세션 검사 건너뜀");
+  } else if (teamSessionReport.sessions.length === 0) {
+    ok(`활성 팀 세션 없음 ${DIM}(${teamSessionReport.mux})${RESET}`);
+  } else {
+    info(`multiplexer: ${teamSessionReport.mux}`);
+
+    for (const session of teamSessionReport.sessions) {
+      const attachedLabel = session.attachedCount == null ? "?" : `${session.attachedCount}`;
+      const ageLabel = formatElapsedAge(session.ageSec);
+
+      if (session.stale) {
+        warn(`${session.sessionName}: stale 추정 (attach=${attachedLabel}, 경과=${ageLabel})`);
+      } else {
+        ok(`${session.sessionName}: 정상 (attach=${attachedLabel}, 경과=${ageLabel})`);
+      }
+
+      if (session.createdAt == null) {
+        info(`${session.sessionName}: session_created 파싱 실패${session.createdRaw ? ` (${session.createdRaw})` : ""}`);
+      }
+    }
+
+    const staleSessions = teamSessionReport.sessions.filter((session) => session.stale);
+    if (staleSessions.length > 0) {
+      if (fix) {
+        const cleanupResult = await cleanupStaleTeamSessions(staleSessions);
+        issues += cleanupResult.failed;
+      } else {
+        info("정리: tfx doctor --fix");
+        issues += staleSessions.length;
+      }
+    }
+  }
+
+  // 12. Orphan Teams
   section("Orphan Teams");
   const teamsDir = join(CLAUDE_DIR, "teams");
   const tasksDir = join(CLAUDE_DIR, "tasks");
@@ -1380,7 +1543,7 @@ switch (cmd) {
   case "doctor": {
     const fix = process.argv.includes("--fix");
     const reset = process.argv.includes("--reset");
-    cmdDoctor({ fix, reset });
+    await cmdDoctor({ fix, reset });
     break;
   }
   case "update":  cmdUpdate(); break;
