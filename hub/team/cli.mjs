@@ -870,7 +870,7 @@ async function teamStart() {
   console.log(`  ${DIM}Shift+Tab / Shift+Left: 이전 팀메이트 전환${RESET}`);
   console.log(`  ${DIM}Escape: 현재 팀메이트 인터럽트${RESET}`);
   console.log(`  ${DIM}Ctrl+T: 태스크 목록${RESET}`);
-  console.log(`  ${DIM}참고: 일부 터미널/호스트에서 Shift+Up 전달이 제한될 수 있음${RESET}`);
+  console.log(`  ${DIM}참고: Shift+Up은 Claude Code 미지원 (scroll-up 충돌). Shift+Tab 사용${RESET}`);
   console.log(`  ${DIM}Ctrl+B → D: 세션 분리 (백그라운드)${RESET}\n`);
 
   if (process.stdout.isTTY && process.stdin.isTTY) {
@@ -1454,7 +1454,7 @@ function teamHelp() {
     ${WHITE}Shift+Down${RESET}  ${GRAY}다음 팀메이트${RESET}
     ${WHITE}Shift+Tab${RESET}   ${GRAY}이전 팀메이트 (권장)${RESET}
     ${WHITE}Shift+Left${RESET}  ${GRAY}이전 팀메이트 (대체)${RESET}
-    ${WHITE}Shift+Up${RESET}    ${GRAY}이전 팀메이트 (환경 따라 미동작 가능)${RESET}
+    ${WHITE}Shift+Up${RESET}    ${GRAY}미지원 (Claude Code가 캡처 불가, scroll-up 충돌)${RESET}
     ${WHITE}Escape${RESET}      ${GRAY}현재 팀메이트 인터럽트${RESET}
     ${WHITE}Ctrl+T${RESET}      ${GRAY}태스크 목록 토글${RESET}
 `);

@@ -207,8 +207,8 @@ Agent({
 ```
 "팀 '{teamName}' 생성 완료.
 Codex/Gemini 워커가 슬림 래퍼 Agent로 네비게이션에 등록되었습니다.
-Shift+Down으로 다음 워커, Shift+Tab/Shift+Left로 이전 워커 전환이 가능합니다.
-(Shift+Up은 일부 환경에서 동작하지 않을 수 있음)"
+Shift+Down으로 다음 워커 (마지막→리드 wrap), Shift+Tab으로 이전 워커 전환이 가능합니다.
+(Shift+Up은 Claude Code 미지원 — 대부분 터미널에서 scroll-up으로 먹힘)"
 ```
 
 ### Phase 4: 결과 수집 (truth source = team_task_list)
