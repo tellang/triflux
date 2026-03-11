@@ -34,11 +34,12 @@ function normalizeRule(rule) {
   if (patterns.length === 0) return null;
 
   const skill = typeof rule.skill === "string" && rule.skill.trim() ? rule.skill.trim() : null;
+  const action = typeof rule.action === "string" && rule.action.trim() ? rule.action.trim() : null;
   const mcpRoute = typeof rule.mcp_route === "string" && VALID_MCP_ROUTES.has(rule.mcp_route)
     ? rule.mcp_route
     : null;
 
-  if (!skill && !mcpRoute) return null;
+  if (!skill && !mcpRoute && !action) return null;
 
   const supersedes = Array.isArray(rule.supersedes)
     ? rule.supersedes.filter((id) => typeof id === "string" && id.trim()).map((id) => id.trim())
@@ -51,6 +52,7 @@ function normalizeRule(rule) {
     id: rule.id.trim(),
     patterns,
     skill,
+    action: rule.action || null,
     priority: rule.priority,
     supersedes,
     exclusive: rule.exclusive === true,
@@ -114,6 +116,7 @@ export function matchRules(compiledRules, cleanText) {
     matches.push({
       id: rule.id,
       skill: rule.skill,
+      action: rule.action || null,
       priority: rule.priority,
       supersedes: rule.supersedes || [],
       exclusive: rule.exclusive === true,

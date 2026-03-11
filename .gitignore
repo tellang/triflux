@@ -11,3 +11,4 @@ dist/
 docs/internal/
 docs/handoff/
 .mcp.json
+.codex-artifacts/

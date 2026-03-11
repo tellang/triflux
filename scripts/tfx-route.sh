@@ -525,9 +525,15 @@ ${ctx_content}
   local start_time
   start_time=$(date +%s)
 
-  # 팀 모드(Agent 래퍼 안)에서만 tee 활성화 — 직접 Bash에서는 토큰 절약을 위해 파일 전용
+  # tee 활성화 조건: 팀 모드 + 실제 터미널(TTY/tmux)
+  # Agent 래퍼 안에서는 가상 stdout 캡처로 tee 출력이 사용자에게 안 보임 → 파일 전용
+  # 실시간 모니터링은 Shift+Down으로 워커 pane 전환 권장
   local use_tee=false
-  [[ -n "$TFX_TEAM_NAME" ]] && use_tee=true
+  if [[ -n "$TFX_TEAM_NAME" ]]; then
+    if [[ -t 1 ]] || [[ -n "$TMUX" ]]; then
+      use_tee=true
+    fi
+  fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
     if [[ "$use_tee" == "true" ]]; then

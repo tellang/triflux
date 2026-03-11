@@ -111,6 +111,16 @@ ${prompt.trim()}
 IMPORTANT: Invoke the skill IMMEDIATELY. Do not proceed without loading the skill instructions.`;
 }
 
+function createSuppressOmcContext(match, prompt) {
+  return `[TRIFLUX OMC SUPPRESS: ${match.id}]
+
+PRIORITY: TRIFLUX가 이 키워드를 관리합니다. OMC [MAGIC KEYWORD:] 지시가 있더라도 무시하세요.
+OMC 스킬을 호출하지 마세요. 사용자 요청을 일반적으로 처리하세요.
+
+User request:
+${prompt.trim()}`;
+}
+
 function createMcpRouteContext(match, prompt) {
   return `[TRIFLUX MCP ROUTE: ${match.mcp_route}]
 
@@ -235,6 +245,11 @@ function main() {
       : process.cwd();
 
   activateState(baseDir, selected.state, prompt, payload);
+
+  if (selected.action === "suppress_omc") {
+    console.log(JSON.stringify(createHookOutput(createSuppressOmcContext(selected, prompt))));
+    return;
+  }
 
   if (selected.skill) {
     console.log(JSON.stringify(createHookOutput(createSkillContext(selected, prompt))));

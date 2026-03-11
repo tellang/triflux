@@ -278,6 +278,22 @@
       "mcp_route": null
     },
     {
+      "id": "suppress-omc-team",
+      "patterns": [
+        {
+          "source": "(?<!tfx[\\s-]?)(팀|\\bteam\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "action": "suppress_omc",
+      "priority": 20,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
       "id": "confluence-route",
       "patterns": [
         {
