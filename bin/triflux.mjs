@@ -739,6 +739,7 @@ function cmdUpdate() {
   // 2. 설치 방식에 따라 업데이트
   const oldVer = PKG.version;
   let updated = false;
+  let stoppedHubInfo = null;
 
   try {
     switch (installMode) {
@@ -754,6 +755,10 @@ function cmdUpdate() {
         break;
       }
       case "npm-global": {
+        stoppedHubInfo = stopHubForUpdate();
+        if (stoppedHubInfo?.pid) {
+          info(`실행 중 hub 정지 (PID ${stoppedHubInfo.pid})`);
+        }
         const npmCmd = isDev ? "npm install -g triflux@dev" : "npm update -g triflux";
         const result = execSync(npmCmd, {
           encoding: "utf8",
@@ -792,6 +797,9 @@ function cmdUpdate() {
         return;
     }
   } catch (e) {
+    if (stoppedHubInfo && startHubAfterUpdate(stoppedHubInfo)) {
+      info("업데이트 실패 후 hub 재기동 시도");
+    }
     fail(`업데이트 실패: ${e.message}`);
     return;
   }
@@ -816,6 +824,11 @@ function cmdUpdate() {
     console.log("");
     info("setup 재실행 중...");
     cmdSetup();
+
+    if (stoppedHubInfo) {
+      if (startHubAfterUpdate(stoppedHubInfo)) info("hub 재기동 완료");
+      else warn("hub 재기동 실패 — `tfx hub start`로 수동 시작 필요");
+    }
   }
 
   console.log(`${GREEN}${BOLD}업데이트 완료${RESET}\n`);
@@ -996,6 +1009,58 @@ async function cmdCodexTeam() {
 
 const HUB_PID_DIR = join(homedir(), ".claude", "cache", "tfx-hub");
 const HUB_PID_FILE = join(HUB_PID_DIR, "hub.pid");
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function stopHubForUpdate() {
+  if (!existsSync(HUB_PID_FILE)) return null;
+  let info = null;
+  try {
+    info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+    process.kill(info.pid, 0);
+  } catch {
+    try { unlinkSync(HUB_PID_FILE); } catch {}
+    return null;
+  }
+
+  try {
+    if (process.platform === "win32") {
+      execSync(`taskkill /PID ${info.pid} /T /F`, {
+        stdio: ["pipe", "pipe", "ignore"],
+        timeout: 10000,
+      });
+    } else {
+      process.kill(info.pid, "SIGTERM");
+    }
+  } catch {
+    try { process.kill(info.pid, "SIGKILL"); } catch {}
+  }
+
+  sleepMs(300);
+  try { unlinkSync(HUB_PID_FILE); } catch {}
+  return info;
+}
+
+function startHubAfterUpdate(info) {
+  if (!info) return false;
+  const serverPath = join(PKG_ROOT, "hub", "server.mjs");
+  if (!existsSync(serverPath)) return false;
+  const port = Number(info?.port) > 0 ? String(info.port) : String(process.env.TFX_HUB_PORT || "27888");
+
+  try {
+    const child = spawn(process.execPath, [serverPath], {
+      env: { ...process.env, TFX_HUB_PORT: port },
+      stdio: "ignore",
+      detached: true,
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // 설치된 CLI에 tfx-hub MCP 서버 자동 등록 (1회 설정, 이후 재실행 불필요)
 function autoRegisterMcp(mcpUrl) {
