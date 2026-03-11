@@ -18,19 +18,31 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, '..', '..');
 const ROUTE_SCRIPT = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
+const FIXTURE_BIN = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin');
 
 // bash 실행 헬퍼 — stdout + stderr 합산 반환
 function runBash(command, extraEnv = {}) {
   return spawnSync('bash', ['-c', command], {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
-    env: { ...process.env, ...extraEnv },
+    env: {
+      ...process.env,
+      TFX_CODEX_TRANSPORT: 'exec',
+      ...extraEnv,
+    },
   });
 }
 
 // stdout + stderr 합산 문자열
 function out(result) {
   return `${result.stdout || ''}\n${result.stderr || ''}`;
+}
+
+function fixtureEnv(extraEnv = {}) {
+  return {
+    ...extraEnv,
+    PATH: `${FIXTURE_BIN}:${process.env.PATH || ''}`,
+  };
 }
 
 // ── claude-native 에이전트 기본 라우팅 ──
@@ -133,6 +145,41 @@ describe('tfx-route.sh — TFX_NO_CLAUDE_NATIVE 유효성 검증', () => {
     assert.equal(result.status, 0, out(result));
     // 리매핑 메시지 확인
     assert.match(out(result), /TFX_NO_CLAUDE_NATIVE=1: explore -> codex/);
+  });
+});
+
+describe('tfx-route.sh — Codex MCP transport', () => {
+  it('TFX_CODEX_TRANSPORT=auto 기본값에서 MCP가 가능하면 MCP 경로를 우선 사용한다', () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=auto bash "${ROUTE_SCRIPT}" executor 'hello-mcp' minimal`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'mcp-ok' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /codex_transport_effective=mcp/);
+    assert.match(out(result), /MCP:hello-mcp/);
+    assert.doesNotMatch(out(result), /EXEC:hello-mcp/);
+  });
+
+  it('MCP bootstrap 실패 시 auto 모드는 legacy exec 경로로 fallback한다', () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=auto bash "${ROUTE_SCRIPT}" executor 'hello-fallback' minimal`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'mcp-fail' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /legacy exec 경로로 fallback/);
+    assert.match(out(result), /codex_transport_effective=exec-fallback/);
+    assert.match(out(result), /EXEC:hello-fallback/);
+  });
+
+  it('TFX_CODEX_TRANSPORT 값이 잘못되면 오류로 종료해야 한다', () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=weird bash "${ROUTE_SCRIPT}" executor 'hello' minimal`,
+    );
+
+    assert.notEqual(result.status, 0, out(result));
+    assert.match(out(result), /auto, mcp, exec/);
   });
 });
 
