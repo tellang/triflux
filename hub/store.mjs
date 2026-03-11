@@ -1,5 +1,5 @@
-// hub/store.mjs — SQLite WAL 상태 저장소
-// tfx-hub 메시지 버스의 영속 상태를 관리
+// hub/store.mjs — SQLite 감사 로그/메타데이터 저장소
+// 실시간 배달 큐는 router/pipe가 담당하고, SQLite는 재생/감사 용도로만 유지한다.
 import Database from 'better-sqlite3';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -27,7 +27,6 @@ export function uuidv7() {
   if (now <= _lastMs) {
     _seq++;
     if (_seq > 0xfff) {
-      // 동일 ms 내 4096개 초과 시 타임스탬프 전진
       now = _lastMs + 1n;
       _seq = 0;
     }
@@ -42,9 +41,9 @@ export function uuidv7() {
   buf[3] = Number((now >> 16n) & 0xffn);
   buf[4] = Number((now >> 8n) & 0xffn);
   buf[5] = Number(now & 0xffn);
-  buf[6] = ((_seq >> 8) & 0x0f) | 0x70;  // version 7 + seq_hi (4비트)
-  buf[7] = _seq & 0xff;                    // seq_lo (8비트)
-  buf[8] = (buf[8] & 0x3f) | 0x80;         // variant 10xx
+  buf[6] = ((_seq >> 8) & 0x0f) | 0x70;
+  buf[7] = _seq & 0xff;
+  buf[8] = (buf[8] & 0x3f) | 0x80;
   const h = buf.toString('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
@@ -57,7 +56,12 @@ function parseJson(str, fallback = null) {
 function parseAgentRow(row) {
   if (!row) return null;
   const { capabilities_json, topics_json, metadata_json, ...rest } = row;
-  return { ...rest, capabilities: parseJson(capabilities_json, []), topics: parseJson(topics_json, []), metadata: parseJson(metadata_json, {}) };
+  return {
+    ...rest,
+    capabilities: parseJson(capabilities_json, []),
+    topics: parseJson(topics_json, []),
+    metadata: parseJson(metadata_json, {}),
+  };
 }
 
 function parseMessageRow(row) {
@@ -69,28 +73,28 @@ function parseMessageRow(row) {
 function parseHumanRequestRow(row) {
   if (!row) return null;
   const { schema_json, response_json, ...rest } = row;
-  return { ...rest, schema: parseJson(schema_json, {}), response: parseJson(response_json, null) };
+  return {
+    ...rest,
+    schema: parseJson(schema_json, {}),
+    response: parseJson(response_json, null),
+  };
 }
 
 /**
- * 상태 저장소 생성
- * @param {string} dbPath — SQLite DB 파일 경로
+ * 저장소 생성
+ * @param {string} dbPath
  */
 export function createStore(dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
 
-  // PRAGMA
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   db.pragma('wal_autocheckpoint = 1000');
 
-  // 스키마 초기화 (schema.sql 전체 실행 — 주석 포함 안전 처리)
   const schemaSQL = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
-
-  // 스키마 버전 체크 — 불필요한 재실행 방지
   db.exec("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)");
   const SCHEMA_VERSION = '1';
   const curVer = (() => {
@@ -102,18 +106,21 @@ export function createStore(dbPath) {
     db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)").run(SCHEMA_VERSION);
   }
 
-  // ── 준비된 구문 ──
-
   const S = {
-    // 에이전트
     upsertAgent: db.prepare(`
       INSERT INTO agents (agent_id, cli, pid, capabilities_json, topics_json, last_seen_ms, lease_expires_ms, status, metadata_json)
       VALUES (@agent_id, @cli, @pid, @capabilities_json, @topics_json, @last_seen_ms, @lease_expires_ms, @status, @metadata_json)
       ON CONFLICT(agent_id) DO UPDATE SET
-        cli=excluded.cli, pid=excluded.pid, capabilities_json=excluded.capabilities_json,
-        topics_json=excluded.topics_json, last_seen_ms=excluded.last_seen_ms,
-        lease_expires_ms=excluded.lease_expires_ms, status=excluded.status, metadata_json=excluded.metadata_json`),
+        cli=excluded.cli,
+        pid=excluded.pid,
+        capabilities_json=excluded.capabilities_json,
+        topics_json=excluded.topics_json,
+        last_seen_ms=excluded.last_seen_ms,
+        lease_expires_ms=excluded.lease_expires_ms,
+        status=excluded.status,
+        metadata_json=excluded.metadata_json`),
     getAgent: db.prepare('SELECT * FROM agents WHERE agent_id = ?'),
+    setAgentTopics: db.prepare('UPDATE agents SET topics_json=?, last_seen_ms=? WHERE agent_id=?'),
     heartbeat: db.prepare("UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=?"),
     setAgentStatus: db.prepare('UPDATE agents SET status=? WHERE agent_id=?'),
     onlineAgents: db.prepare("SELECT * FROM agents WHERE status != 'offline'"),
@@ -122,35 +129,28 @@ export function createStore(dbPath) {
     markStale: db.prepare("UPDATE agents SET status='stale' WHERE status='online' AND lease_expires_ms < ?"),
     markOffline: db.prepare("UPDATE agents SET status='offline' WHERE status='stale' AND lease_expires_ms < ? - 300000"),
 
-    // 메시지
-    insertMsg: db.prepare(`
+    insertAuditMessage: db.prepare(`
       INSERT INTO messages (id, type, from_agent, to_agent, topic, priority, ttl_ms, created_at_ms, expires_at_ms, correlation_id, trace_id, payload_json, status)
       VALUES (@id, @type, @from_agent, @to_agent, @topic, @priority, @ttl_ms, @created_at_ms, @expires_at_ms, @correlation_id, @trace_id, @payload_json, @status)`),
     getMsg: db.prepare('SELECT * FROM messages WHERE id=?'),
     getResponse: db.prepare("SELECT * FROM messages WHERE correlation_id=? AND type='response' ORDER BY created_at_ms DESC LIMIT 1"),
     getMsgsByTrace: db.prepare('SELECT * FROM messages WHERE trace_id=? ORDER BY created_at_ms'),
     setMsgStatus: db.prepare('UPDATE messages SET status=? WHERE id=?'),
+    recentAgentMessages: db.prepare(`
+      SELECT * FROM messages
+      WHERE to_agent=?
+      ORDER BY created_at_ms DESC
+      LIMIT ?`),
+    recentAgentMessagesWithTopics: db.prepare(`
+      SELECT * FROM messages
+      WHERE to_agent=?
+         OR (
+           substr(to_agent, 1, 6)='topic:'
+           AND topic IN (SELECT value FROM json_each(?))
+         )
+      ORDER BY created_at_ms DESC
+      LIMIT ?`),
 
-    // 수신함
-    insertInbox: db.prepare('INSERT OR IGNORE INTO message_inbox (message_id, agent_id, attempts) VALUES (?,?,0)'),
-    poll: db.prepare(`
-      SELECT m.*, i.delivery_id FROM messages m
-      JOIN message_inbox i ON m.id=i.message_id
-      WHERE i.agent_id=? AND i.delivered_at_ms IS NULL
-        AND m.status IN ('queued','delivered') AND m.expires_at_ms > ?
-      ORDER BY m.priority DESC, m.created_at_ms ASC LIMIT ?`),
-    pollTopics: db.prepare(`
-      SELECT m.*, i.delivery_id FROM messages m
-      JOIN message_inbox i ON m.id=i.message_id
-      WHERE i.agent_id=? AND i.delivered_at_ms IS NULL
-        AND m.status IN ('queued','delivered') AND m.expires_at_ms > ?
-        AND m.topic IN (SELECT value FROM json_each(?))
-      ORDER BY m.priority DESC, m.created_at_ms ASC LIMIT ?`),
-    markDelivered: db.prepare('UPDATE message_inbox SET delivered_at_ms=?, attempts=attempts+1 WHERE message_id=? AND agent_id=?'),
-    ackInbox: db.prepare('UPDATE message_inbox SET acked_at_ms=? WHERE message_id=? AND agent_id=? AND acked_at_ms IS NULL'),
-    tryAckMsg: db.prepare("UPDATE messages SET status='acked' WHERE id=? AND NOT EXISTS (SELECT 1 FROM message_inbox WHERE message_id=? AND acked_at_ms IS NULL)"),
-
-    // 사용자 입력
     insertHR: db.prepare(`
       INSERT INTO human_requests (request_id, requester_agent, kind, prompt, schema_json, state, deadline_ms, default_action, correlation_id, trace_id, response_json)
       VALUES (@request_id, @requester_agent, @kind, @prompt, @schema_json, @state, @deadline_ms, @default_action, @correlation_id, @trace_id, @response_json)`),
@@ -159,159 +159,199 @@ export function createStore(dbPath) {
     pendingHR: db.prepare("SELECT * FROM human_requests WHERE state='pending'"),
     expireHR: db.prepare("UPDATE human_requests SET state='timed_out' WHERE state='pending' AND deadline_ms < ?"),
 
-    // 데드 레터
     insertDL: db.prepare('INSERT OR REPLACE INTO dead_letters (message_id, reason, failed_at_ms, last_error) VALUES (?,?,?,?)'),
     getDL: db.prepare('SELECT * FROM dead_letters ORDER BY failed_at_ms DESC LIMIT ?'),
 
-    // 스위퍼
-    findExpired: db.prepare("SELECT id FROM messages WHERE status IN ('queued','delivered') AND expires_at_ms < ?"),
-
-    // 메트릭
-    urgentDepth: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status IN ('queued','delivered') AND priority >= 7"),
-    normalDepth: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status IN ('queued','delivered') AND priority < 7"),
-    dlqDepth: db.prepare('SELECT COUNT(*) as cnt FROM dead_letters'),
+    findExpired: db.prepare("SELECT id FROM messages WHERE status='queued' AND expires_at_ms < ?"),
+    urgentDepth: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority >= 7"),
+    normalDepth: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority < 7"),
     onlineCount: db.prepare("SELECT COUNT(*) as cnt FROM agents WHERE status='online'"),
     msgCount: db.prepare('SELECT COUNT(*) as cnt FROM messages'),
-    deliveryAvg: db.prepare(`
-      SELECT COUNT(*) as total, AVG(i.delivered_at_ms - m.created_at_ms) as avg_ms
-      FROM message_inbox i JOIN messages m ON i.message_id=m.id
-      WHERE i.delivered_at_ms IS NOT NULL AND i.delivered_at_ms > ? - 300000`),
+    dlqDepth: db.prepare('SELECT COUNT(*) as cnt FROM dead_letters'),
+    ackedRecent: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='acked' AND created_at_ms > ? - 300000"),
   };
 
-  // ── API ──
+  function clampMaxMessages(value, fallback = 20) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.max(1, Math.min(Math.trunc(num), 100));
+  }
 
   const store = {
     db,
     uuidv7,
-    close() { db.close(); },
 
-    // ── 에이전트 ──
+    close() {
+      db.close();
+    },
 
     registerAgent({ agent_id, cli, pid, capabilities = [], topics = [], heartbeat_ttl_ms = 30000, metadata = {} }) {
       const now = Date.now();
       const leaseExpires = now + heartbeat_ttl_ms;
       S.upsertAgent.run({
-        agent_id, cli, pid: pid ?? null,
+        agent_id,
+        cli,
+        pid: pid ?? null,
         capabilities_json: JSON.stringify(capabilities),
         topics_json: JSON.stringify(topics),
-        last_seen_ms: now, lease_expires_ms: leaseExpires,
-        status: 'online', metadata_json: JSON.stringify(metadata),
+        last_seen_ms: now,
+        lease_expires_ms: leaseExpires,
+        status: 'online',
+        metadata_json: JSON.stringify(metadata),
       });
       return { agent_id, lease_id: uuidv7(), lease_expires_ms: leaseExpires, server_time_ms: now };
     },
 
-    getAgent(id) { return parseAgentRow(S.getAgent.get(id)); },
+    getAgent(id) {
+      return parseAgentRow(S.getAgent.get(id));
+    },
 
     refreshLease(agentId, ttlMs = 30000) {
       const now = Date.now();
       S.heartbeat.run(now, now + ttlMs, agentId);
-      return { agent_id: agentId, lease_expires_ms: now + ttlMs };
+      return { agent_id: agentId, lease_expires_ms: now + ttlMs, server_time_ms: now };
     },
 
-    listOnlineAgents() { return S.onlineAgents.all().map(parseAgentRow); },
-    listAllAgents() { return S.allAgents.all().map(parseAgentRow); },
-    getAgentsByTopic(topic) { return S.agentsByTopic.all(topic).map(parseAgentRow); },
+    updateAgentTopics(agentId, topics = []) {
+      const now = Date.now();
+      return S.setAgentTopics.run(JSON.stringify(topics), now, agentId).changes > 0;
+    },
+
+    listOnlineAgents() {
+      return S.onlineAgents.all().map(parseAgentRow);
+    },
+
+    listAllAgents() {
+      return S.allAgents.all().map(parseAgentRow);
+    },
+
+    getAgentsByTopic(topic) {
+      return S.agentsByTopic.all(topic).map(parseAgentRow);
+    },
 
     sweepStaleAgents() {
       const now = Date.now();
-      return { stale: S.markStale.run(now).changes, offline: S.markOffline.run(now).changes };
+      return {
+        stale: S.markStale.run(now).changes,
+        offline: S.markOffline.run(now).changes,
+      };
     },
 
     updateAgentStatus(agentId, status) {
       return S.setAgentStatus.run(status, agentId).changes > 0;
     },
 
-    // ── 메시지 ──
-
-    enqueueMessage({ type, from, to, topic, priority = 5, ttl_ms = 300000, payload = {}, trace_id, correlation_id }) {
+    auditLog({ type, from, to, topic, priority = 5, ttl_ms = 300000, payload = {}, trace_id, correlation_id, status = 'queued' }) {
       const now = Date.now();
-      const id = uuidv7();
       const row = {
-        id, type, from_agent: from, to_agent: to, topic, priority, ttl_ms,
-        created_at_ms: now, expires_at_ms: now + ttl_ms,
+        id: uuidv7(),
+        type,
+        from_agent: from,
+        to_agent: to,
+        topic,
+        priority,
+        ttl_ms,
+        created_at_ms: now,
+        expires_at_ms: now + ttl_ms,
         correlation_id: correlation_id || uuidv7(),
         trace_id: trace_id || uuidv7(),
-        payload_json: JSON.stringify(payload), status: 'queued',
+        payload_json: JSON.stringify(payload),
+        status,
       };
-      S.insertMsg.run(row);
+      S.insertAuditMessage.run(row);
       return { ...row, payload };
     },
 
-    getMessage(id) { return parseMessageRow(S.getMsg.get(id)); },
-    getResponseByCorrelation(cid) { return parseMessageRow(S.getResponse.get(cid)); },
-    getMessagesByTrace(tid) { return S.getMsgsByTrace.all(tid).map(parseMessageRow); },
-    updateMessageStatus(id, status) { return S.setMsgStatus.run(status, id).changes > 0; },
-
-    // ── 수신함 ──
-
-    deliverToAgent(messageId, agentId) {
-      S.insertInbox.run(messageId, agentId);
-      S.setMsgStatus.run('delivered', messageId);
-      return true;
+    // 하위 호환: 기존 enqueueMessage 호출은 auditLog로 위임한다.
+    enqueueMessage(args) {
+      return store.auditLog(args);
     },
 
-    deliverToTopic(messageId, topic) {
-      const agents = S.agentsByTopic.all(topic);
-      return db.transaction(() => {
-        for (const a of agents) S.insertInbox.run(messageId, a.agent_id);
-        if (agents.length) S.setMsgStatus.run('delivered', messageId);
-        return agents.length;
-      })();
+    getMessage(id) {
+      return parseMessageRow(S.getMsg.get(id));
     },
 
-    pollForAgent(agentId, { max_messages = 20, include_topics = null, auto_ack = false } = {}) {
-      const now = Date.now();
-      const rows = (include_topics?.length)
-        ? S.pollTopics.all(agentId, now, JSON.stringify(include_topics), max_messages)
-        : S.poll.all(agentId, now, max_messages);
+    getResponseByCorrelation(cid) {
+      return parseMessageRow(S.getResponse.get(cid));
+    },
 
-      db.transaction(() => {
-        for (const r of rows) {
-          S.markDelivered.run(now, r.id, agentId);
-          if (auto_ack) { S.ackInbox.run(now, r.id, agentId); S.tryAckMsg.run(r.id, r.id); }
-        }
-      })();
+    getMessagesByTrace(tid) {
+      return S.getMsgsByTrace.all(tid).map(parseMessageRow);
+    },
 
-      // poll = heartbeat (에이전트 등록 TTL 사용, 미등록 시 30초 기본값)
-      const agentInfo = S.getAgent.get(agentId);
-      const ttl = agentInfo ? (agentInfo.lease_expires_ms - agentInfo.last_seen_ms) || 30000 : 30000;
-      S.heartbeat.run(now, now + ttl, agentId);
+    updateMessageStatus(id, status) {
+      return S.setMsgStatus.run(status, id).changes > 0;
+    },
+
+    getAuditMessagesForAgent(agentId, { max_messages = 20, include_topics = null } = {}) {
+      const limit = clampMaxMessages(max_messages);
+      const topics = Array.isArray(include_topics) && include_topics.length
+        ? include_topics
+        : (store.getAgent(agentId)?.topics || []);
+
+      const rows = topics.length
+        ? S.recentAgentMessagesWithTopics.all(agentId, JSON.stringify(topics), limit)
+        : S.recentAgentMessages.all(agentId, limit);
+
       return rows.map(parseMessageRow);
     },
 
-    ackMessages(ids, agentId) {
-      const now = Date.now();
-      return db.transaction(() => {
-        let n = 0;
-        for (const id of ids) {
-          if (S.ackInbox.run(now, id, agentId).changes > 0) { S.tryAckMsg.run(id, id); n++; }
-        }
-        return n;
-      })();
+    // 하위 호환: 실시간 수신함 대신 감사 로그 재생 결과를 반환한다.
+    deliverToAgent(messageId, agentId) {
+      return !!store.getMessage(messageId) && !!agentId;
     },
 
-    // ── 사용자 입력 ──
+    deliverToTopic(messageId, topic) {
+      void messageId;
+      return store.getAgentsByTopic(topic).length;
+    },
+
+    pollForAgent(agentId, { max_messages = 20, include_topics = null } = {}) {
+      return store.getAuditMessagesForAgent(agentId, {
+        max_messages,
+        include_topics,
+      });
+    },
+
+    ackMessages() {
+      return 0;
+    },
 
     insertHumanRequest({ requester_agent, kind, prompt, requested_schema = {}, deadline_ms, default_action, correlation_id, trace_id }) {
-      const rid = uuidv7();
+      const requestId = uuidv7();
       const now = Date.now();
-      const abs = now + deadline_ms;
+      const deadlineAt = now + deadline_ms;
       S.insertHR.run({
-        request_id: rid, requester_agent, kind, prompt,
+        request_id: requestId,
+        requester_agent,
+        kind,
+        prompt,
         schema_json: JSON.stringify(requested_schema),
-        state: 'pending', deadline_ms: abs, default_action,
+        state: 'pending',
+        deadline_ms: deadlineAt,
+        default_action,
         correlation_id: correlation_id || uuidv7(),
         trace_id: trace_id || uuidv7(),
         response_json: null,
       });
-      return { request_id: rid, state: 'pending', deadline_ms: abs };
+      return { request_id: requestId, state: 'pending', deadline_ms: deadlineAt };
     },
 
-    getHumanRequest(id) { return parseHumanRequestRow(S.getHR.get(id)); },
-    updateHumanRequest(id, state, resp = null) { return S.updateHR.run(state, resp ? JSON.stringify(resp) : null, id).changes > 0; },
-    getPendingHumanRequests() { return S.pendingHR.all().map(parseHumanRequestRow); },
+    getHumanRequest(id) {
+      return parseHumanRequestRow(S.getHR.get(id));
+    },
 
-    // ── 데드 레터 ──
+    updateHumanRequest(id, state, resp = null) {
+      return S.updateHR.run(state, resp ? JSON.stringify(resp) : null, id).changes > 0;
+    },
+
+    getPendingHumanRequests() {
+      return S.pendingHR.all().map(parseHumanRequestRow);
+    },
+
+    expireHumanRequests() {
+      return S.expireHR.run(Date.now()).changes;
+    },
 
     moveToDeadLetter(messageId, reason, lastError = null) {
       db.transaction(() => {
@@ -321,9 +361,9 @@ export function createStore(dbPath) {
       return true;
     },
 
-    getDeadLetters(limit = 50) { return S.getDL.all(limit); },
-
-    // ── 스위퍼 ──
+    getDeadLetters(limit = 50) {
+      return S.getDL.all(limit);
+    },
 
     sweepExpired() {
       const now = Date.now();
@@ -333,24 +373,40 @@ export function createStore(dbPath) {
           S.setMsgStatus.run('dead_letter', id);
           S.insertDL.run(id, 'ttl_expired', now, null);
         }
-        const hr = S.expireHR.run(now).changes;
-        return { messages: expired.length, human_requests: hr };
+        const humanRequests = S.expireHR.run(now).changes;
+        return { messages: expired.length, human_requests: humanRequests };
       })();
     },
 
-    // ── 메트릭 ──
-
     getQueueDepths() {
-      return { urgent: S.urgentDepth.get().cnt, normal: S.normalDepth.get().cnt, dlq: S.dlqDepth.get().cnt };
+      return {
+        urgent: S.urgentDepth.get().cnt,
+        normal: S.normalDepth.get().cnt,
+        dlq: S.dlqDepth.get().cnt,
+      };
     },
 
     getDeliveryStats() {
-      const r = S.deliveryAvg.get(Date.now());
-      return { total_deliveries: r?.total || 0, avg_delivery_ms: Math.round(r?.avg_ms || 0) };
+      return {
+        total_deliveries: S.ackedRecent.get(Date.now()).cnt,
+        avg_delivery_ms: 0,
+      };
     },
 
     getHubStats() {
-      return { online_agents: S.onlineCount.get().cnt, total_messages: S.msgCount.get().cnt, ...store.getQueueDepths() };
+      return {
+        online_agents: S.onlineCount.get().cnt,
+        total_messages: S.msgCount.get().cnt,
+        ...store.getQueueDepths(),
+      };
+    },
+
+    getAuditStats() {
+      return {
+        online_agents: S.onlineCount.get().cnt,
+        total_messages: S.msgCount.get().cnt,
+        dlq: S.dlqDepth.get().cnt,
+      };
     },
   };
 

@@ -14,9 +14,10 @@ import {
  * @param {object} store  — createStore() 반환
  * @param {object} router — createRouter() 반환
  * @param {object} hitl   — createHitlManager() 반환
+ * @param {object} pipe   — createPipeServer() 반환
  * @returns {Array<{name, description, inputSchema, handler}>}
  */
-export function createTools(store, router, hitl) {
+export function createTools(store, router, hitl, pipe = null) {
   /** 도구 핸들러 래퍼 — 에러 처리 + MCP content 형식 변환 */
   function wrap(code, fn) {
     return async (args) => {
@@ -49,7 +50,7 @@ export function createTools(store, router, hitl) {
         },
       },
       handler: wrap('REGISTER_FAILED', (args) => {
-        const data = store.registerAgent(args);
+        const data = router.registerAgent(args);
         return { ok: true, data };
       }),
     },
@@ -124,7 +125,7 @@ export function createTools(store, router, hitl) {
     // ── 5. poll_messages ──
     {
       name: 'poll_messages',
-      description: '에이전트 수신함에서 대기 메시지를 가져옵니다. ack_ids로 이전 메시지 확인 가능',
+      description: 'Deprecated. poll_messages 대신 Named Pipe subscribe/publish 채널을 사용합니다',
       inputSchema: {
         type: 'object',
         required: ['agent_id'],
@@ -137,41 +138,29 @@ export function createTools(store, router, hitl) {
           auto_ack:       { type: 'boolean', default: false },
         },
       },
-      handler: wrap('POLL_FAILED', async (args) => {
-        // ACK 먼저 처리
-        const ackedIds = [];
-        if (args.ack_ids?.length) {
-          store.ackMessages(args.ack_ids, args.agent_id);
-          ackedIds.push(...args.ack_ids);
-        }
-
-        // 1차 폴링
-        let messages = store.pollForAgent(args.agent_id, {
+      handler: wrap('POLL_DEPRECATED', async (args) => {
+        const replay = router.drainAgent(args.agent_id, {
           max_messages: args.max_messages,
           include_topics: args.include_topics,
           auto_ack: args.auto_ack,
         });
-
-        // wait_ms > 0 이고 메시지 없으면 짧은 간격으로 반복 재시도
-        if (!messages.length && args.wait_ms > 0) {
-          const interval = Math.min(args.wait_ms, 500);
-          const deadline = Date.now() + Math.min(args.wait_ms, 30000);
-          while (!messages.length && Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, interval));
-            messages = store.pollForAgent(args.agent_id, {
-              max_messages: args.max_messages,
-              include_topics: args.include_topics,
-              auto_ack: args.auto_ack,
-            });
-          }
+        if (args.ack_ids?.length) {
+          router.ackMessages(args.ack_ids, args.agent_id);
         }
-
         return {
-          ok: true,
+          ok: false,
+          error: {
+            code: 'POLL_DEPRECATED',
+            message: 'poll_messages는 deprecated 되었습니다. pipe subscribe/publish 채널을 사용하세요.',
+          },
           data: {
-            messages,
-            acked_ids: ackedIds,
-            next_poll_after_ms: messages.length ? 0 : 1000,
+            pipe_path: pipe?.path || null,
+            delivery_mode: 'pipe_push',
+            protocol: 'ndjson',
+            replay: {
+              messages: replay,
+              count: replay.length,
+            },
             server_time_ms: Date.now(),
           },
         };
