@@ -64,23 +64,18 @@ deregister_agent() {
 # JSON 문자열 이스케이프 (큰따옴표, 백슬래시, 개행, 탭, CR)
 json_escape() {
   local s="${1:-}"
-  local i ch esc
+  # node로 완전한 JSON 이스케이프 (NUL, 멀티바이트 UTF-8, 제어문자 안전)
+  if command -v node &>/dev/null; then
+    node -e 'process.stdout.write(JSON.stringify(process.argv[1]).slice(1,-1))' -- "$s"
+    return
+  fi
+  # node 미설치 fallback: 기본 Bash 치환
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
   s="${s//$'\n'/\\n}"
   s="${s//$'\t'/\\t}"
   s="${s//$'\r'/\\r}"
-  s="${s//$'\b'/\\b}"
-  s="${s//$'\f'/\\f}"
-  for i in {0..31}; do
-    case "$i" in
-      8|9|10|12|13) continue ;;
-    esac
-    printf -v ch "\\$(printf '%03o' "$i")"
-    printf -v esc '%s%04x' '\\u' "$i"
-    s="${s//$ch/$esc}"
-  done
-  echo "$s"
+  printf '%s' "$s"
 }
 
 team_claim_task() {
@@ -108,36 +103,35 @@ team_claim_task() {
 }
 
 team_complete_task() {
-  local result_status="${1:-completed}"
+  local result="${1:-success}"            # success/failed/timeout
   local result_summary="${2:-작업 완료}"
-  local safe_team_name safe_task_id safe_agent_name safe_status
   [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
+
+  local safe_team_name safe_task_id safe_agent_name safe_result safe_summary safe_lead_name
   safe_team_name=$(json_escape "$TFX_TEAM_NAME")
   safe_task_id=$(json_escape "$TFX_TEAM_TASK_ID")
   safe_agent_name=$(json_escape "$TFX_TEAM_AGENT_NAME")
-  safe_status=$(json_escape "$result_status")
+  safe_result=$(json_escape "$result")
+  safe_summary=$(json_escape "$(echo "$result_summary" | head -c 4096)")
+  safe_lead_name=$(json_escape "$TFX_TEAM_LEAD_NAME")
 
-  # task 상태 업데이트
+  # task 상태: 항상 "completed" (Claude Code API는 "failed" 미지원)
+  # 실제 결과는 metadata.result로 전달
   curl -sf -X POST "${TFX_HUB_URL}/bridge/team/task-update" \
     -H "Content-Type: application/json" \
-    -d "{\"team_name\":\"${safe_team_name}\",\"task_id\":\"${safe_task_id}\",\"status\":\"${safe_status}\",\"owner\":\"${safe_agent_name}\"}" \
+    -d "{\"team_name\":\"${safe_team_name}\",\"task_id\":\"${safe_task_id}\",\"status\":\"completed\",\"owner\":\"${safe_agent_name}\",\"metadata_patch\":{\"result\":\"${safe_result}\",\"summary\":\"${safe_summary}\"}}" \
     >/dev/null 2>&1 || true
 
   # 리드에게 메시지 전송
-  local msg_text safe_text safe_lead_name
-  msg_text=$(echo "$result_summary" | head -c 4096)
-  safe_text=$(json_escape "$msg_text")
-  safe_lead_name=$(json_escape "$TFX_TEAM_LEAD_NAME")
-
   curl -sf -X POST "${TFX_HUB_URL}/bridge/team/send-message" \
     -H "Content-Type: application/json" \
-    -d "{\"team_name\":\"${safe_team_name}\",\"from\":\"${safe_agent_name}\",\"to\":\"${safe_lead_name}\",\"text\":\"${safe_text}\",\"summary\":\"task ${safe_task_id} ${safe_status}\"}" \
+    -d "{\"team_name\":\"${safe_team_name}\",\"from\":\"${safe_agent_name}\",\"to\":\"${safe_lead_name}\",\"text\":\"${safe_summary}\",\"summary\":\"task ${safe_task_id} ${safe_result}\"}" \
     >/dev/null 2>&1 || true
 
   # Hub result 발행 (poll_messages 채널 활성화)
   curl -sf -X POST "${TFX_HUB_URL}/bridge/result" \
     -H "Content-Type: application/json" \
-    -d "{\"agent_id\":\"${safe_agent_name}\",\"topic\":\"task.result\",\"payload\":{\"task_id\":\"${safe_task_id}\",\"status\":\"${safe_status}\"},\"trace_id\":\"${safe_team_name}\"}" \
+    -d "{\"agent_id\":\"${safe_agent_name}\",\"topic\":\"task.result\",\"payload\":{\"task_id\":\"${safe_task_id}\",\"result\":\"${safe_result}\"},\"trace_id\":\"${safe_team_name}\"}" \
     >/dev/null 2>&1 || true
 }
 
@@ -607,9 +601,9 @@ ${ctx_content}
     if [[ "$exit_code" -eq 0 ]]; then
       local output_preview
       output_preview=$(head -c 2048 "$STDOUT_LOG" 2>/dev/null || echo "출력 없음")
-      team_complete_task "completed" "$output_preview"
+      team_complete_task "success" "$output_preview"
     elif [[ "$exit_code" -eq 124 ]]; then
-      team_complete_task "failed" "타임아웃 (${TIMEOUT_SEC}초)"
+      team_complete_task "timeout" "타임아웃 (${TIMEOUT_SEC}초)"
     else
       local err_preview
       err_preview=$(tail -c 1024 "$STDERR_LOG" 2>/dev/null || echo "에러 정보 없음")

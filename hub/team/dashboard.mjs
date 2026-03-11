@@ -6,15 +6,7 @@
 //   node hub/team/dashboard.mjs --session <세션이름> [--interval 2]
 //   node hub/team/dashboard.mjs --team <팀이름> [--interval 2]
 import { get } from "node:http";
-
-// ── 색상 ──
-const AMBER = "\x1b[38;5;214m";
-const GREEN = "\x1b[38;5;82m";
-const RED = "\x1b[38;5;196m";
-const GRAY = "\x1b[38;5;245m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
+import { AMBER, GREEN, RED, GRAY, DIM, BOLD, RESET } from "./shared.mjs";
 
 /**
  * HTTP GET JSON

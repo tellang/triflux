@@ -25,6 +25,7 @@ import {
 } from "./session.mjs";
 import { buildCliCommand, startCliInPane, injectPrompt, sendKeys } from "./pane.mjs";
 import { orchestrate, decomposeTask, buildLeadPrompt, buildPrompt } from "./orchestrator.mjs";
+import { AMBER, GREEN, RED, GRAY, DIM, BOLD, RESET, WHITE, YELLOW } from "./shared.mjs";
 
 // ── 상수 ──
 const PKG_ROOT = dirname(dirname(dirname(new URL(import.meta.url).pathname))).replace(/^\/([A-Z]:)/, "$1");
@@ -43,17 +44,6 @@ const TEAM_STATE_FILE = join(
 const TEAM_SUBCOMMANDS = new Set([
   "status", "attach", "stop", "kill", "send", "list", "help", "tasks", "task", "focus", "interrupt", "control", "debug",
 ]);
-
-// ── 색상 ──
-const AMBER = "\x1b[38;5;214m";
-const GREEN = "\x1b[38;5;82m";
-const RED = "\x1b[38;5;196m";
-const GRAY = "\x1b[38;5;245m";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
-const WHITE = "\x1b[97m";
-const YELLOW = "\x1b[33m";
 
 function ok(msg) { console.log(`  ${GREEN}✓${RESET} ${msg}`); }
 function warn(msg) { console.log(`  ${YELLOW}⚠${RESET} ${msg}`); }
