@@ -34,6 +34,7 @@ argument-hint: "[--fix|--reset]"
 - 플러그인 등록 상태
 - MCP 인벤토리 캐시
 - CLI 이슈 트래커
+- 잔존 팀(orphan teams) 감지 (`~/.claude/teams/`)
 
 ### 수정 모드 (`/tfx-doctor --fix`)
 

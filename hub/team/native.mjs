@@ -31,7 +31,7 @@ export function buildTeammatePrompt(cli, opts = {}) {
 3. 완료 시 TaskUpdate(status: completed) + SendMessage로 리드에게 보고
 4. 추가 작업이 있으면 반복
 
-에러 시 TaskUpdate(status: failed) + SendMessage로 보고.`;
+에러 시 TaskUpdate(status: completed, metadata: {result: "failed", error: "에러 요약"}) + SendMessage로 보고.`;
   }
 
   const label = cli === "codex" ? "Codex" : "Gemini";
@@ -113,12 +113,17 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
   // 셸 이스케이프
   const escaped = subtask.replace(/'/g, "'\\''");
 
-  return `Bash 1회 실행 후 종료.
+  return `Bash 1회 실행 후 반드시 종료하라. 어떤 경우에도 hang하지 마라.
+gemini/codex를 직접 호출하지 마라. 반드시 tfx-route.sh를 거쳐야 한다.
+프롬프트를 파일로 저장하지 마라. tfx-route.sh가 인자로 받는다.
 
-TFX_TEAM_NAME=${teamName} TFX_TEAM_TASK_ID=${taskId} TFX_TEAM_AGENT_NAME=${agentName} TFX_TEAM_LEAD_NAME=${leadName} bash ${ROUTE_SCRIPT} ${role} '${escaped}' ${mcp_profile}
+TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}" bash ${ROUTE_SCRIPT} "${role}" '${escaped}' ${mcp_profile}
 
-완료 → TaskUpdate(status: completed) + SendMessage(to: ${leadName}).
-실패 → TaskUpdate(status: failed) + SendMessage(to: ${leadName}).`;
+성공 → TaskUpdate(status: completed, metadata: {result: "success"}) + SendMessage(to: ${leadName}).
+실패 → TaskUpdate(status: completed, metadata: {result: "failed", error: "에러 요약"}) + SendMessage(to: ${leadName}).
+
+중요: TaskUpdate의 status는 "completed"만 사용. "failed"는 API 미지원.
+실패 여부는 metadata.result로 구분. Bash 실패 시에도 반드시 TaskUpdate + SendMessage 후 종료.`;
 }
 
 /**

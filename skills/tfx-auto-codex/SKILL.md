@@ -74,6 +74,4 @@ Claude 타입 반환은 기본적으로 허용하지 않는다.
 
 ## Troubleshooting
 
-1. `/tfx-doctor` — 진단
-2. `/tfx-doctor --fix` — 자동 수정
-3. `/tfx-doctor --reset` — 캐시 초기화
+문제 발생 시 `/tfx-doctor` 실행. (`--fix` 자동 수정, `--reset` 캐시 초기화)
