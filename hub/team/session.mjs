@@ -397,6 +397,8 @@ export function focusPane(target, opts = {}) {
  * 팀메이트 조작 키 바인딩 설정
  * - Shift+Down: 다음 팀메이트
  * - Shift+Up: 이전 팀메이트
+ * - Shift+Left / Shift+Tab: 이전 팀메이트 대체 키
+ * - Shift+Right: 다음 팀메이트 대체 키
  * - Escape: 현재 팀메이트 인터럽트(C-c)
  * - Ctrl+T: 태스크 목록 표시
  * @param {string} sessionName
@@ -408,15 +410,29 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
   const { inProcess = false, taskListCommand = "" } = opts;
   const cond = `#{==:#{session_name},${sessionName}}`;
 
+  // Shift+Up이 터미널/호스트 조합에 따라 전달되지 않는 경우가 있어
+  // 좌/우/Shift+Tab 대체 키를 함께 바인딩한다.
+  const bindNext = inProcess
+    ? `'select-pane -t :.+ \\; resize-pane -Z'`
+    : `'select-pane -t :.+'`;
+  const bindPrev = inProcess
+    ? `'select-pane -t :.- \\; resize-pane -Z'`
+    : `'select-pane -t :.-'`;
+
   if (inProcess) {
     // 단일 뷰(zoom) 상태에서 팀메이트 순환
-    tmux(`bind-key -T root -n S-Down if-shell -F '${cond}' 'select-pane -t :.+ \\; resize-pane -Z' 'send-keys S-Down'`);
-    tmux(`bind-key -T root -n S-Up if-shell -F '${cond}' 'select-pane -t :.- \\; resize-pane -Z' 'send-keys S-Up'`);
+    tmux(`bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`);
+    tmux(`bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`);
   } else {
     // 분할 뷰에서 팀메이트 순환
-    tmux(`bind-key -T root -n S-Down if-shell -F '${cond}' 'select-pane -t :.+' 'send-keys S-Down'`);
-    tmux(`bind-key -T root -n S-Up if-shell -F '${cond}' 'select-pane -t :.-' 'send-keys S-Up'`);
+    tmux(`bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`);
+    tmux(`bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`);
   }
+
+  // 대체 키: 일부 환경에서 S-Up이 누락될 때 사용
+  tmux(`bind-key -T root -n S-Right if-shell -F '${cond}' ${bindNext} 'send-keys S-Right'`);
+  tmux(`bind-key -T root -n S-Left if-shell -F '${cond}' ${bindPrev} 'send-keys S-Left'`);
+  tmux(`bind-key -T root -n BTab if-shell -F '${cond}' ${bindPrev} 'send-keys BTab'`);
 
   // 현재 활성 pane 인터럽트
   tmux(`bind-key -T root -n Escape if-shell -F '${cond}' 'send-keys C-c' 'send-keys Escape'`);

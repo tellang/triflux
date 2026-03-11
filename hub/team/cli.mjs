@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
-import { execSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 
 import {
   createSession,
@@ -30,7 +30,15 @@ import { orchestrate, decomposeTask, buildLeadPrompt, buildPrompt } from "./orch
 const PKG_ROOT = dirname(dirname(dirname(new URL(import.meta.url).pathname))).replace(/^\/([A-Z]:)/, "$1");
 const HUB_PID_DIR = join(homedir(), ".claude", "cache", "tfx-hub");
 const HUB_PID_FILE = join(HUB_PID_DIR, "hub.pid");
-const TEAM_STATE_FILE = join(HUB_PID_DIR, "team-state.json");
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+const TEAM_PROFILE = (() => {
+  const raw = String(process.env.TFX_TEAM_PROFILE || "team").trim().toLowerCase();
+  return raw === "codex-team" ? "codex-team" : "team";
+})();
+const TEAM_STATE_FILE = join(
+  HUB_PID_DIR,
+  TEAM_PROFILE === "codex-team" ? "team-state-codex-team.json" : "team-state.json",
+);
 
 const TEAM_SUBCOMMANDS = new Set([
   "status", "attach", "stop", "kill", "send", "list", "help", "tasks", "task", "focus", "interrupt", "control", "debug",
@@ -63,7 +71,8 @@ function loadTeamState() {
 
 function saveTeamState(state) {
   mkdirSync(HUB_PID_DIR, { recursive: true });
-  writeFileSync(TEAM_STATE_FILE, JSON.stringify(state, null, 2) + "\n");
+  const nextState = { ...state, profile: TEAM_PROFILE };
+  writeFileSync(TEAM_STATE_FILE, JSON.stringify(nextState, null, 2) + "\n");
 }
 
 function clearTeamState() {
@@ -72,18 +81,113 @@ function clearTeamState() {
 
 // ── Hub 유틸 ──
 
-function getHubInfo() {
-  if (!existsSync(HUB_PID_FILE)) return null;
+function formatHostForUrl(host) {
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+function buildHubBaseUrl(host, port) {
+  return `http://${formatHostForUrl(host)}:${port}`;
+}
+
+function getDefaultHubPort() {
+  const envPortRaw = Number(process.env.TFX_HUB_PORT || "27888");
+  return Number.isFinite(envPortRaw) && envPortRaw > 0 ? envPortRaw : 27888;
+}
+
+function getDefaultHubUrl() {
+  return `${buildHubBaseUrl("127.0.0.1", getDefaultHubPort())}/mcp`;
+}
+
+function getDefaultHubBase() {
+  return getDefaultHubUrl().replace(/\/mcp$/, "");
+}
+
+function normalizeLoopbackHost(host) {
+  if (typeof host !== "string") return "127.0.0.1";
+  const candidate = host.trim();
+  return LOOPBACK_HOSTS.has(candidate) ? candidate : "127.0.0.1";
+}
+
+async function probeHubStatus(host, port, timeoutMs = 1500) {
   try {
-    const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-    process.kill(info.pid, 0); // 프로세스 생존 확인
-    return info;
+    const res = await fetch(`${buildHubBaseUrl(host, port)}/status`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.hub ? data : null;
   } catch {
     return null;
   }
 }
 
-function startHubDaemon() {
+async function getHubInfo() {
+  const probePort = getDefaultHubPort();
+
+  if (existsSync(HUB_PID_FILE)) {
+    try {
+      const raw = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+      const pid = Number(raw?.pid);
+      if (!Number.isFinite(pid) || pid <= 0) throw new Error("invalid pid");
+      process.kill(pid, 0); // 프로세스 생존 확인
+      const host = normalizeLoopbackHost(raw?.host);
+      const port = Number(raw.port) || 27888;
+      const status = await probeHubStatus(host, port, 1200);
+      if (!status) {
+        // transient timeout/응답 지연은 stale로 단정하지 않고 기존 PID 정보를 유지한다.
+        return {
+          ...raw,
+          pid,
+          host,
+          port,
+          url: `${buildHubBaseUrl(host, port)}/mcp`,
+          degraded: true,
+        };
+      }
+      return {
+        ...raw,
+        pid,
+        host,
+        port,
+        url: `${buildHubBaseUrl(host, port)}/mcp`,
+      };
+    } catch {
+      try { unlinkSync(HUB_PID_FILE); } catch {}
+    }
+  }
+
+  // PID 파일이 없거나 stale인 경우에도 실제 Hub가 떠 있으면 재사용
+  const candidates = Array.from(new Set([probePort, 27888]));
+  for (const portCandidate of candidates) {
+    const data = await probeHubStatus("127.0.0.1", portCandidate, 1200);
+    if (!data) continue;
+    const port = Number(data.port) || portCandidate;
+    const pid = Number(data.pid);
+    const recovered = {
+      pid: Number.isFinite(pid) ? pid : null,
+      host: "127.0.0.1",
+      port,
+      url: `${buildHubBaseUrl("127.0.0.1", port)}/mcp`,
+      discovered: true,
+    };
+    if (Number.isFinite(recovered.pid) && recovered.pid > 0) {
+      try {
+        mkdirSync(HUB_PID_DIR, { recursive: true });
+        writeFileSync(HUB_PID_FILE, JSON.stringify({
+          pid: recovered.pid,
+          port: recovered.port,
+          host: recovered.host,
+          url: recovered.url,
+          started: Date.now(),
+        }));
+      } catch {}
+    }
+    return recovered;
+  }
+  return null;
+}
+
+async function startHubDaemon() {
   const serverPath = join(PKG_ROOT, "hub", "server.mjs");
   if (!existsSync(serverPath)) {
     fail("hub/server.mjs 없음 — hub 모듈이 설치되지 않음");
@@ -97,13 +201,14 @@ function startHubDaemon() {
   });
   child.unref();
 
-  // PID 파일 확인 (최대 3초 대기)
+  const expectedPort = getDefaultHubPort();
+
+  // Hub 상태 확인 (최대 3초 대기)
   const deadline = Date.now() + 3000;
   while (Date.now() < deadline) {
-    if (existsSync(HUB_PID_FILE)) {
-      return JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-    }
-    execSync('node -e "setTimeout(()=>{},100)"', { stdio: "ignore", timeout: 500 });
+    const info = await getHubInfo();
+    if (info && info.port === expectedPort) return info;
+    await new Promise((r) => setTimeout(r, 100));
   }
   return null;
 }
@@ -317,7 +422,7 @@ function resolveMember(state, selector) {
 }
 
 async function publishLeadControl(state, targetMember, command, reason = "") {
-  const hubBase = (state?.hubUrl || "http://127.0.0.1:27888/mcp").replace(/\/mcp$/, "");
+  const hubBase = (state?.hubUrl || getDefaultHubUrl()).replace(/\/mcp$/, "");
   const leadAgent = (state?.members || []).find((m) => m.role === "lead")?.agentId || "lead";
 
   const payload = {
@@ -362,8 +467,10 @@ function isTeamAlive(state) {
     }
   }
   if (isWtMode(state)) {
-    // WT pane 상태를 신뢰성 있게 조회할 API가 없어 세션 환경/실행기 존재 여부로 판정
-    return hasWindowsTerminal() && hasWindowsTerminalSession();
+    // WT pane 상태를 신뢰성 있게 조회할 API가 없어, WT_SESSION은 힌트로만 사용한다.
+    if (!hasWindowsTerminal()) return false;
+    if (hasWindowsTerminalSession()) return true;
+    return Array.isArray(state.members) && state.members.length > 0;
   }
   return sessionExists(state.sessionName);
 }
@@ -477,10 +584,10 @@ async function teamStart() {
 
   console.log(`\n  ${AMBER}${BOLD}⬡ tfx team${RESET}\n`);
 
-  let hub = getHubInfo();
+  let hub = await getHubInfo();
   if (!hub) {
     process.stdout.write("  Hub 시작 중...");
-    hub = startHubDaemon();
+    hub = await startHubDaemon();
     if (hub) {
       console.log(` ${GREEN}✓${RESET}`);
     } else {
@@ -493,7 +600,7 @@ async function teamStart() {
 
   const sessionId = `tfx-team-${Date.now().toString(36).slice(-4)}`;
   const subtasks = decomposeTask(task, agents.length);
-  const hubUrl = hub?.url || "http://127.0.0.1:27888/mcp";
+  const hubUrl = hub?.url || getDefaultHubUrl();
   let effectiveTeammateMode = teammateMode;
 
   if (teammateMode === "wt") {
@@ -751,7 +858,8 @@ async function teamStart() {
     tasks,
   });
 
-  const taskListCommand = `${process.execPath} ${join(PKG_ROOT, "bin", "triflux.mjs")} team tasks`;
+  const profilePrefix = TEAM_PROFILE === "team" ? "" : `TFX_TEAM_PROFILE=${TEAM_PROFILE} `;
+  const taskListCommand = `${profilePrefix}${process.execPath} ${join(PKG_ROOT, "bin", "triflux.mjs")} team tasks`;
   configureTeammateKeybindings(sessionId, {
     inProcess: false,
     taskListCommand,
@@ -759,8 +867,10 @@ async function teamStart() {
 
   console.log(`\n  ${GREEN}${BOLD}팀 세션 준비 완료${RESET}`);
   console.log(`  ${DIM}Shift+Down: 다음 팀메이트 전환${RESET}`);
+  console.log(`  ${DIM}Shift+Tab / Shift+Left: 이전 팀메이트 전환${RESET}`);
   console.log(`  ${DIM}Escape: 현재 팀메이트 인터럽트${RESET}`);
   console.log(`  ${DIM}Ctrl+T: 태스크 목록${RESET}`);
+  console.log(`  ${DIM}참고: 일부 터미널/호스트에서 Shift+Up 전달이 제한될 수 있음${RESET}`);
   console.log(`  ${DIM}Ctrl+B → D: 세션 분리 (백그라운드)${RESET}\n`);
 
   if (process.stdout.isTTY && process.stdin.isTTY) {
@@ -789,6 +899,9 @@ async function teamStatus() {
   console.log(`    워커:   ${(state.agents || []).join(", ")}`);
   console.log(`    Uptime: ${uptime}`);
   console.log(`    태스크: ${(state.tasks || []).length}`);
+  if (isWtMode(state) && !hasWindowsTerminalSession()) {
+    console.log(`    ${DIM}WT_SESSION 미감지: 생존성은 heuristics로 판정됨${RESET}`);
+  }
 
   const members = state.members || [];
   if (members.length) {
@@ -842,7 +955,7 @@ async function teamStatus() {
  * @returns {Promise<Array>}
  */
 async function fetchHubTaskList(state) {
-  const hubBase = (state?.hubUrl || "http://127.0.0.1:27888/mcp").replace(/\/mcp$/, "");
+  const hubBase = (state?.hubUrl || getDefaultHubUrl()).replace(/\/mcp$/, "");
   // teamName: native 모드는 state에 저장된 팀 이름, SKILL.md 모드는 세션 이름 기반
   const teamName = state?.native?.teamName || state?.sessionName || null;
   if (!teamName) return [];
@@ -952,7 +1065,7 @@ async function teamDebug() {
   const linesIdx = process.argv.findIndex((a) => a === "--lines" || a === "-n");
   const lines = linesIdx !== -1 ? Math.max(3, parseInt(process.argv[linesIdx + 1] || "20", 10) || 20) : 20;
   const mux = detectMultiplexer() || "none";
-  const hub = getHubInfo();
+  const hub = await getHubInfo();
 
   console.log(`\n  ${AMBER}${BOLD}⬡ Team Debug${RESET}\n`);
   console.log(`    platform:  ${process.platform}`);
@@ -972,6 +1085,7 @@ async function teamDebug() {
 
   console.log(`\n  ${BOLD}state${RESET}`);
   console.log(`    session:   ${state.sessionName}`);
+  console.log(`    profile:   ${state.profile || TEAM_PROFILE}`);
   console.log(`    mode:      ${state.teammateMode || "tmux"}`);
   console.log(`    lead:      ${state.lead}`);
   console.log(`    agents:    ${(state.agents || []).join(", ")}`);
@@ -1338,7 +1452,9 @@ function teamHelp() {
 
   ${BOLD}키 조작(Claude teammate 스타일, tmux 모드)${RESET}
     ${WHITE}Shift+Down${RESET}  ${GRAY}다음 팀메이트${RESET}
-    ${WHITE}Shift+Up${RESET}    ${GRAY}이전 팀메이트${RESET}
+    ${WHITE}Shift+Tab${RESET}   ${GRAY}이전 팀메이트 (권장)${RESET}
+    ${WHITE}Shift+Left${RESET}  ${GRAY}이전 팀메이트 (대체)${RESET}
+    ${WHITE}Shift+Up${RESET}    ${GRAY}이전 팀메이트 (환경 따라 미동작 가능)${RESET}
     ${WHITE}Escape${RESET}      ${GRAY}현재 팀메이트 인터럽트${RESET}
     ${WHITE}Ctrl+T${RESET}      ${GRAY}태스크 목록 토글${RESET}
 `);
@@ -1351,7 +1467,8 @@ function teamHelp() {
  * bin/triflux.mjs에서 호출
  */
 export async function cmdTeam() {
-  const sub = process.argv[3];
+  const rawSub = process.argv[3];
+  const sub = typeof rawSub === "string" ? rawSub.toLowerCase() : rawSub;
 
   switch (sub) {
     case "status":    return teamStatus();
@@ -1374,7 +1491,7 @@ export async function cmdTeam() {
       return teamHelp();
     default:
       // 서브커맨드가 아니면 작업 문자열로 간주
-      if (!sub.startsWith("-") && TEAM_SUBCOMMANDS.has(sub)) {
+      if (typeof sub === "string" && !sub.startsWith("-") && TEAM_SUBCOMMANDS.has(sub)) {
         return teamHelp();
       }
       return teamStart();
