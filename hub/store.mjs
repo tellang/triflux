@@ -203,6 +203,10 @@ export function createStore(dbPath) {
       return { stale: S.markStale.run(now).changes, offline: S.markOffline.run(now).changes };
     },
 
+    updateAgentStatus(agentId, status) {
+      return S.setAgentStatus.run(status, agentId).changes > 0;
+    },
+
     // ── 메시지 ──
 
     enqueueMessage({ type, from, to, topic, priority = 5, ttl_ms = 300000, payload = {}, trace_id, correlation_id }) {

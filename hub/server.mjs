@@ -236,10 +236,17 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1' } = {}
               if (code === 'TEAM_NOT_FOUND' || code === 'TASK_NOT_FOUND' || code === 'TASKS_DIR_NOT_FOUND') status = 404;
               else if (code === 'CLAIM_CONFLICT' || code === 'MTIME_CONFLICT') status = 409;
               else if (code === 'INVALID_TEAM_NAME' || code === 'INVALID_TASK_ID' || code === 'INVALID_TEXT' || code === 'INVALID_FROM') status = 400;
+              else if (code === 'INVALID_STATUS') status = 400;
               else status = 500;
             }
             res.writeHead(status);
             return res.end(JSON.stringify(teamResult));
+          }
+
+          // 알 수 없는 /bridge/team/* → 404 (fall-through 방지)
+          if (path.startsWith('/bridge/team')) {
+            res.writeHead(404);
+            return res.end(JSON.stringify({ ok: false, error: `Unknown team endpoint: ${path}` }));
           }
         }
 
@@ -266,7 +273,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1' } = {}
             res.writeHead(400);
             return res.end(JSON.stringify({ ok: false, error: 'agent_id 필수' }));
           }
-          store.db.prepare("UPDATE agents SET status='offline' WHERE agent_id=?").run(agent_id);
+          store.updateAgentStatus(agent_id, 'offline');
           res.writeHead(200);
           return res.end(JSON.stringify({ ok: true, data: { agent_id, status: 'offline' } }));
         }

@@ -170,8 +170,7 @@ export function createRouter(store) {
             urgent_depth: depths.urgent,
             normal_depth: depths.normal,
             dlq_depth: depths.dlq,
-            p95_delivery_ms: stats.avg_delivery_ms,
-            timeout_rate: 0,
+            avg_delivery_ms: stats.avg_delivery_ms,
           };
         }
       }

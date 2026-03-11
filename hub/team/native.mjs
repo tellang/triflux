@@ -56,5 +56,7 @@ TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${
  * @returns {string}
  */
 export function generateTeamName() {
-  return `tfx-${Date.now().toString(36).slice(-6)}`;
+  const ts = Date.now().toString(36).slice(-4);
+  const rand = Math.random().toString(36).slice(2, 6);
+  return `tfx-${ts}${rand}`;
 }
