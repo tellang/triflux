@@ -1,0 +1,180 @@
+// tests/integration/tfx-route-smoke.test.mjs — tfx-route.sh 스모크 테스트
+//
+// scripts/test-tfx-route-no-claude-native.mjs의 테스트 케이스를 포함하여
+// tests/integration/ 디렉토리의 통합 테스트로 재구성한다.
+//
+// 테스트 범위:
+//   - claude-native 에이전트(explore/verifier/test-engineer/qa-tester) 기본 라우팅
+//   - TFX_CLI_MODE=codex/gemini 오버라이드 메타데이터
+//   - TFX_NO_CLAUDE_NATIVE 유효성 검증 (0/1만 허용)
+//   - 알 수 없는 에이전트 타입 오류
+//   - 인자 부족 시 오류
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(SCRIPT_DIR, '..', '..');
+const ROUTE_SCRIPT = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
+
+// bash 실행 헬퍼 — stdout + stderr 합산 반환
+function runBash(command, extraEnv = {}) {
+  return spawnSync('bash', ['-c', command], {
+    cwd: PROJECT_ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, ...extraEnv },
+  });
+}
+
+// stdout + stderr 합산 문자열
+function out(result) {
+  return `${result.stdout || ''}\n${result.stderr || ''}`;
+}
+
+// ── claude-native 에이전트 기본 라우팅 ──
+
+describe('tfx-route.sh — claude-native 에이전트 메타데이터 출력', () => {
+  it('explore 에이전트는 ROUTE_TYPE=claude-native와 MODEL=haiku를 출력해야 한다', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" explore 'test-prompt'`);
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+    assert.match(out(result), /MODEL=haiku/);
+    assert.match(out(result), /AGENT=explore/);
+  });
+
+  it('verifier 에이전트는 ROUTE_TYPE=claude-native와 MODEL=sonnet을 출력해야 한다', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" verifier 'test-prompt'`);
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+    assert.match(out(result), /MODEL=sonnet/);
+  });
+
+  it('test-engineer 에이전트는 ROUTE_TYPE=claude-native를 출력해야 한다', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" test-engineer 'test-prompt'`);
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+    assert.match(out(result), /AGENT=test-engineer/);
+  });
+
+  it('qa-tester 에이전트는 ROUTE_TYPE=claude-native를 출력해야 한다', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" qa-tester 'test-prompt'`);
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+    assert.match(out(result), /AGENT=qa-tester/);
+  });
+});
+
+// ── TFX_CLI_MODE 오버라이드 ──
+
+describe('tfx-route.sh — TFX_CLI_MODE 오버라이드', () => {
+  it('TFX_CLI_MODE=gemini 일 때 explore는 claude-native 유지(gemini 모드에서는 no-claude-native 비적용)', () => {
+    // gemini 모드에서는 apply_no_claude_native_mode 가 early return하므로
+    // TFX_NO_CLAUDE_NATIVE=1이어도 claude-native가 유지됨
+    const result = runBash(
+      `TFX_CLI_MODE=gemini TFX_NO_CLAUDE_NATIVE=1 bash "${ROUTE_SCRIPT}" explore 'test-case'`,
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+  });
+
+  it('TFX_CLI_MODE=codex 일 때 claude-native 에이전트는 여전히 claude-native를 반환해야 한다', () => {
+    // TFX_CLI_MODE=codex는 gemini→codex 리매핑만 수행하고 claude-native는 그대로
+    const result = runBash(
+      `TFX_CLI_MODE=codex bash "${ROUTE_SCRIPT}" explore 'test-prompt'`,
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+  });
+});
+
+// ── TFX_NO_CLAUDE_NATIVE 검증 ──
+
+describe('tfx-route.sh — TFX_NO_CLAUDE_NATIVE 유효성 검증', () => {
+  it('TFX_NO_CLAUDE_NATIVE=0 은 정상 실행되어야 한다', () => {
+    const result = runBash(
+      `TFX_NO_CLAUDE_NATIVE=0 bash "${ROUTE_SCRIPT}" explore 'test-prompt'`,
+    );
+    assert.equal(result.status, 0, out(result));
+  });
+
+  it('TFX_NO_CLAUDE_NATIVE=1 은 정상 실행되어야 한다 (codex 미설치 시 claude-native 유지)', () => {
+    // 테스트 환경에서 codex가 없을 수 있으므로 종료 코드 0을 기대하되
+    // claude-native 유지 또는 codex 리매핑 모두 허용
+    const result = runBash(
+      `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=__nonexistent_codex__ bash "${ROUTE_SCRIPT}" explore 'test-prompt'`,
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+  });
+
+  it('TFX_NO_CLAUDE_NATIVE=2 는 오류로 종료해야 한다', () => {
+    const result = runBash(
+      `TFX_NO_CLAUDE_NATIVE=2 bash "${ROUTE_SCRIPT}" explore 'test-case'`,
+    );
+    assert.notEqual(result.status, 0, '잘못된 TFX_NO_CLAUDE_NATIVE 값은 non-zero 종료해야 한다');
+    assert.match(out(result), /0 또는 1/);
+  });
+
+  it('TFX_NO_CLAUDE_NATIVE=abc 는 오류로 종료해야 한다', () => {
+    const result = runBash(
+      `TFX_NO_CLAUDE_NATIVE=abc bash "${ROUTE_SCRIPT}" explore 'test-case'`,
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(out(result), /0 또는 1/);
+  });
+
+  it('TFX_NO_CLAUDE_NATIVE=1 + codex 사용 가능 시 explore가 codex로 리매핑되어야 한다', () => {
+    // CODEX_BIN=true 를 사용해 `command -v true`가 성공하도록 한다
+    const result = runBash(
+      `TFX_CLI_MODE=auto TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=true bash "${ROUTE_SCRIPT}" explore 'test-case' minimal 5`,
+    );
+    assert.equal(result.status, 0, out(result));
+    // 리매핑 메시지 확인
+    assert.match(out(result), /TFX_NO_CLAUDE_NATIVE=1: explore -> codex/);
+  });
+});
+
+// ── 오류 케이스 ──
+
+describe('tfx-route.sh — 오류 케이스', () => {
+  it('알 수 없는 에이전트 타입은 non-zero로 종료하고 오류 메시지를 출력해야 한다', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" unknown-agent 'test-prompt'`);
+    assert.notEqual(result.status, 0);
+    assert.match(out(result), /알 수 없는 에이전트 타입/);
+  });
+
+  it('에이전트 타입 인자 없으면 non-zero로 종료해야 한다', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}"`);
+    assert.notEqual(result.status, 0);
+  });
+
+  it('프롬프트 인자 없으면 non-zero로 종료해야 한다', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" executor`);
+    assert.notEqual(result.status, 0);
+  });
+});
+
+// ── 라우팅 테이블 검증 ──
+
+describe('tfx-route.sh — 라우팅 테이블 메타데이터', () => {
+  it('executor 에이전트는 type=codex 메타데이터를 출력해야 한다', () => {
+    // executor는 codex 타입이므로 실제 codex 실행 시도 — CODEX_BIN=false로 빠른 실패 유도
+    // 하지만 메타정보는 stderr에 출력됨
+    const result = runBash(
+      `CODEX_BIN=false bash "${ROUTE_SCRIPT}" executor 'test' 2>&1 || true`,
+    );
+    // stderr에 type=codex 메타정보 포함 확인
+    assert.match(out(result), /type=codex/);
+    assert.match(out(result), /agent=executor/);
+  });
+
+  it('designer 에이전트는 type=gemini 메타데이터를 출력해야 한다', () => {
+    const result = runBash(
+      `GEMINI_BIN=false bash "${ROUTE_SCRIPT}" designer 'test' 2>&1 || true`,
+    );
+    assert.match(out(result), /type=gemini/);
+    assert.match(out(result), /agent=designer/);
+  });
+});
