@@ -4,8 +4,9 @@ import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmod
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync, spawn } from "child_process";
+import { fileURLToPath } from "url";
 
-const PKG_ROOT = dirname(dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Z]:)/, "$1");
+const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
 const CODEX_DIR = join(homedir(), ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
@@ -83,6 +84,10 @@ function whichInShell(cmd, shell) {
     }).trim();
     return result.split(/\r?\n/)[0] || null;
   } catch { return null; }
+}
+
+function isDevUpdateRequested(argv = process.argv) {
+  return argv.includes("--dev") || argv.includes("@dev") || argv.includes("dev");
 }
 
 function checkShellAvailable(shell) {
@@ -677,8 +682,8 @@ function cmdDoctor(options = {}) {
 }
 
 function cmdUpdate() {
-  const isDev = process.argv.includes("--dev");
-  const tagLabel = isDev ? ` ${YELLOW}@dev${RESET}` : "";
+  const isDev = isDevUpdateRequested(process.argv);
+  const tagLabel = isDev ? ` ${YELLOW}--dev${RESET}` : "";
   console.log(`\n${BOLD}triflux update${RESET}${tagLabel}\n`);
 
   // 1. 설치 방식 감지
@@ -755,7 +760,7 @@ function cmdUpdate() {
           timeout: 60000,
           stdio: ["pipe", "pipe", "ignore"],
         }).trim().split(/\r?\n/)[0];
-        ok(`${isDev ? "npm install -g @dev" : "npm update -g"} — ${result || "완료"}`);
+        ok(`${isDev ? "npm install -g triflux@dev" : "npm update -g triflux"} — ${result || "완료"}`);
         updated = true;
         break;
       }
@@ -767,7 +772,7 @@ function cmdUpdate() {
           cwd: process.cwd(),
           stdio: ["pipe", "pipe", "ignore"],
         }).trim().split(/\r?\n/)[0];
-        ok(`npm update — ${result || "완료"}`);
+        ok(`${isDev ? "npm install triflux@dev" : "npm update triflux"} — ${result || "완료"}`);
         updated = true;
         break;
       }
@@ -914,8 +919,8 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx doctor${RESET}     ${GRAY}CLI 진단 + 이슈 확인${RESET}
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
-    ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 버전으로 업데이트${RESET}
-    ${DIM}  --dev${RESET}         ${GRAY}dev 태그로 업데이트${RESET}
+    ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
+    ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx team${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
@@ -965,21 +970,25 @@ async function cmdCodexTeam() {
   const hasLead = args.includes("--lead");
   const hasLayout = args.includes("--layout");
   const isControl = passthrough.has(sub);
+  const normalizedArgs = isControl && args.length ? [sub, ...args.slice(1)] : args;
   const inject = [];
   if (!isControl && !hasLead) inject.push("--lead", "codex");
   if (!isControl && !hasAgents) inject.push("--agents", "codex,codex");
   if (!isControl && !hasLayout) inject.push("--layout", "1xN");
-  const forwarded = isControl ? args : [...inject, ...args];
-
-  const { pathToFileURL } = await import("node:url");
-  const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
+  const forwarded = isControl ? normalizedArgs : [...inject, ...args];
 
   const prevArgv = process.argv;
+  const prevProfile = process.env.TFX_TEAM_PROFILE;
+  process.env.TFX_TEAM_PROFILE = "codex-team";
+  const { pathToFileURL } = await import("node:url");
+  const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
   process.argv = [prevArgv[0], prevArgv[1], "team", ...forwarded];
   try {
     await cmdTeam();
   } finally {
     process.argv = prevArgv;
+    if (typeof prevProfile === "string") process.env.TFX_TEAM_PROFILE = prevProfile;
+    else delete process.env.TFX_TEAM_PROFILE;
   }
 }
 
@@ -1062,8 +1071,38 @@ function autoRegisterMcp(mcpUrl) {
   } catch (e) { warn(`Claude 등록 실패: ${e.message}`); }
 }
 
-function cmdHub() {
+async function cmdHub() {
   const sub = process.argv[3] || "status";
+  const defaultPortRaw = Number(process.env.TFX_HUB_PORT || "27888");
+  const probePort = Number.isFinite(defaultPortRaw) && defaultPortRaw > 0 ? defaultPortRaw : 27888;
+  const formatHostForUrl = (host) => host.includes(":") ? `[${host}]` : host;
+  const probeHubStatus = async (host = "127.0.0.1", port = probePort, timeoutMs = 3000) => {
+    try {
+      const res = await fetch(`http://${formatHostForUrl(host)}:${port}/status`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.hub ? data : null;
+    } catch {
+      return null;
+    }
+  };
+  const recoverPidFile = (statusData, defaultHost = "127.0.0.1") => {
+    const pid = Number(statusData?.pid);
+    const port = Number(statusData?.port) || probePort;
+    if (!Number.isFinite(pid) || pid <= 0) return;
+    try {
+      mkdirSync(HUB_PID_DIR, { recursive: true });
+      writeFileSync(HUB_PID_FILE, JSON.stringify({
+        pid,
+        port,
+        host: defaultHost,
+        url: `http://${formatHostForUrl(defaultHost)}:${port}/mcp`,
+        started: Date.now(),
+      }));
+    } catch {}
+  };
 
   switch (sub) {
     case "start": {
@@ -1101,7 +1140,7 @@ function cmdHub() {
       const deadline = Date.now() + 3000;
       while (Date.now() < deadline) {
         if (existsSync(HUB_PID_FILE)) { started = true; break; }
-        execSync("node -e \"setTimeout(()=>{},100)\"", { stdio: "ignore", timeout: 500 });
+        await new Promise((r) => setTimeout(r, 100));
       }
 
       if (started) {
@@ -1123,6 +1162,15 @@ function cmdHub() {
 
     case "stop": {
       if (!existsSync(HUB_PID_FILE)) {
+        const probed = await probeHubStatus("127.0.0.1", probePort, 1500)
+          || (probePort === 27888 ? null : await probeHubStatus("127.0.0.1", 27888, 1500));
+        if (probed && Number.isFinite(Number(probed.pid))) {
+          try {
+            process.kill(Number(probed.pid), "SIGTERM");
+            console.log(`\n  ${GREEN_BRIGHT}✓${RESET} hub 종료됨 (PID ${probed.pid})${DIM} (probe)${RESET}\n`);
+            return;
+          } catch {}
+        }
         console.log(`\n  ${DIM}hub 미실행${RESET}\n`);
         return;
       }
@@ -1140,7 +1188,29 @@ function cmdHub() {
 
     case "status": {
       if (!existsSync(HUB_PID_FILE)) {
-        console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET}\n`);
+        const probed = await probeHubStatus();
+        if (!probed) {
+          const fallback = probePort === 27888 ? null : await probeHubStatus("127.0.0.1", 27888, 1500);
+          if (fallback) {
+          console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(default port probe 성공)${RESET}`);
+          console.log(`    URL:     http://127.0.0.1:${fallback.port || 27888}/mcp`);
+          if (fallback.pid !== undefined) console.log(`    PID:     ${fallback.pid}`);
+          if (fallback.hub?.state) console.log(`    State:   ${fallback.hub.state}`);
+          if (fallback.sessions !== undefined) console.log(`    Sessions: ${fallback.sessions}`);
+          recoverPidFile(fallback, "127.0.0.1");
+          console.log("");
+          return;
+        }
+          console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET}\n`);
+          return;
+        }
+        console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(pid file 없음 / probe 성공)${RESET}`);
+        console.log(`    URL:     http://127.0.0.1:${probed.port || probePort}/mcp`);
+        if (probed.pid !== undefined) console.log(`    PID:     ${probed.pid}`);
+        if (probed.hub?.state) console.log(`    State:   ${probed.hub.state}`);
+        if (probed.sessions !== undefined) console.log(`    Sessions: ${probed.sessions}`);
+        recoverPidFile(probed, "127.0.0.1");
+        console.log("");
         return;
       }
       try {
@@ -1158,9 +1228,9 @@ function cmdHub() {
 
         // HTTP 상태 조회 시도
         try {
-          const statusUrl = info.url.replace("/mcp", "/status");
-          const result = execSync(`curl -s "${statusUrl}"`, { encoding: "utf8", timeout: 3000, stdio: ["pipe", "pipe", "ignore"] });
-          const data = JSON.parse(result);
+          const host = typeof info.host === "string" ? info.host : "127.0.0.1";
+          const port = Number(info.port) || probePort;
+          const data = await probeHubStatus(host, port, 3000);
           if (data.hub) {
             console.log(`    State:   ${data.hub.state}`);
           }
@@ -1172,7 +1242,18 @@ function cmdHub() {
         console.log("");
       } catch {
         try { unlinkSync(HUB_PID_FILE); } catch {}
-        console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET} ${DIM}(stale PID 정리됨)${RESET}\n`);
+        const probed = await probeHubStatus();
+        if (!probed) {
+          console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET} ${DIM}(stale PID 정리됨)${RESET}\n`);
+          break;
+        }
+        console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(stale PID 정리 후 probe 성공)${RESET}`);
+        console.log(`    URL:     http://127.0.0.1:${probed.port || probePort}/mcp`);
+        if (probed.pid !== undefined) console.log(`    PID:     ${probed.pid}`);
+        if (probed.hub?.state) console.log(`    State:   ${probed.hub.state}`);
+        if (probed.sessions !== undefined) console.log(`    Sessions: ${probed.sessions}`);
+        recoverPidFile(probed, "127.0.0.1");
+        console.log("");
       }
       break;
     }
@@ -1200,7 +1281,7 @@ switch (cmd) {
   }
   case "update":  cmdUpdate(); break;
   case "list": case "ls": cmdList(); break;
-  case "hub":     cmdHub(); break;
+  case "hub":     await cmdHub(); break;
   case "team": {
     const { pathToFileURL } = await import("node:url");
     const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);

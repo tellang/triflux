@@ -116,15 +116,24 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1' } = {}
       return res.end();
     }
 
-    // /status — 허브 상태 (브라우저/curl 용)
+    // /status — 상세 상태 (브라우저/curl 용)
     if (req.url === '/' || req.url === '/status') {
+      const status = router.getStatus('hub').data;
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({
-        ...router.getStatus('hub').data,
+        ...status,
         sessions: transports.size,
         pid: process.pid,
         port,
       }));
+    }
+
+    // /health, /healthz — 최소 헬스 응답 (레거시 호환)
+    if (req.url === '/health' || req.url === '/healthz') {
+      const status = router.getStatus('hub').data;
+      const healthy = status?.hub?.state === 'healthy';
+      res.writeHead(healthy ? 200 : 503, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: healthy }));
     }
 
     // /bridge/* — 경량 REST 엔드포인트 (tfx-route.sh 브릿지용)

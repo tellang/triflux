@@ -7,8 +7,10 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, chmodSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
+import { spawn } from "child_process";
+import { fileURLToPath } from "url";
 
-const PLUGIN_ROOT = dirname(dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Z]:)/, "$1");
+const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
 const CODEX_DIR = join(homedir(), ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
@@ -57,6 +59,15 @@ function getVersion(filePath) {
     return match ? match[1] : null;
   } catch {
     return null;
+  }
+}
+
+function shouldSyncTextFile(src, dst) {
+  if (!existsSync(dst)) return true;
+  try {
+    return readFileSync(src, "utf8") !== readFileSync(dst, "utf8");
+  } catch {
+    return true;
   }
 }
 
@@ -114,9 +125,7 @@ for (const { src, dst, label } of SYNC_MAP) {
     try { chmodSync(dst, 0o755); } catch {}
     synced++;
   } else {
-    const srcVersion = getVersion(src);
-    const dstVersion = getVersion(dst);
-    if (srcVersion && dstVersion && srcVersion !== dstVersion) {
+    if (shouldSyncTextFile(src, dst)) {
       copyFileSync(src, dst);
       try { chmodSync(dst, 0o755); } catch {}
       synced++;
@@ -293,8 +302,6 @@ if (codexProfilesAdded > 0) {
 
 // ── MCP 인벤토리 백그라운드 갱신 ──
 
-import { spawn } from "child_process";
-
 const mcpCheck = join(PLUGIN_ROOT, "scripts", "mcp-check.mjs");
 if (existsSync(mcpCheck)) {
   const child = spawn(process.execPath, [mcpCheck], {
@@ -302,6 +309,26 @@ if (existsSync(mcpCheck)) {
     stdio: "ignore",
   });
   child.unref(); // 부모 프로세스와 분리 — 비동기 실행
+}
+
+// ── Hub 헬스체크 + 자동 기동 (세션 시작 백그라운드) ──
+// setup 훅이 포그라운드 지연을 만들지 않도록 별도 detached 프로세스로 처리한다.
+const hubEnsure = join(PLUGIN_ROOT, "scripts", "hub-ensure.mjs");
+const isPostinstall = process.env.npm_lifecycle_event === "postinstall";
+const isCi = /^(1|true)$/i.test(process.env.CI || "");
+const disableHubAutostart = process.env.TFX_DISABLE_HUB_AUTOSTART === "1";
+
+if (!isPostinstall && !isCi && !disableHubAutostart && existsSync(hubEnsure)) {
+  try {
+    const child = spawn(process.execPath, [hubEnsure], {
+      env: process.env,
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch {
+    // best effort: 실패해도 setup 흐름은 지속
+  }
 }
 
 // ── postinstall 배너 (npm install 시에만 출력) ──
@@ -334,7 +361,8 @@ ${B}Commands:${R}
   ${C}triflux${R} setup     파일 동기화 + HUD 설정
   ${C}triflux${R} doctor    CLI 진단 (Codex/Gemini 확인)
   ${C}triflux${R} list      설치된 스킬 목록
-  ${C}triflux${R} update    최신 버전으로 업데이트
+  ${C}triflux${R} update    최신 안정 버전으로 업데이트
+  ${C}triflux${R} update --dev  dev 채널로 업데이트 (${D}dev 별칭 지원${R})
 
 ${B}Shortcuts:${R}
   ${C}tfx${R}                 triflux 축약

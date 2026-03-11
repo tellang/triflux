@@ -212,11 +212,13 @@ tfx doctor
 |---------|-------------|
 | `tfx setup` | Sync scripts + HUD + skills |
 | `tfx doctor` | CLI diagnostics + issue tracker |
-| `tfx update` | Update to latest version |
+| `tfx update` | Update to latest stable version |
 | `tfx list` | List installed skills |
 | `tfx version` | Show version info |
 
 Shortcuts: `tfx` = `triflux`, `tfl` = `triflux`
+
+Dev channel update: `tfx update --dev` (`dev` alias supported)
 
 ### HUD Status Bar
 

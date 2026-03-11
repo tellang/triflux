@@ -212,11 +212,13 @@ tfx doctor
 |--------|------|
 | `tfx setup` | 스크립트 + HUD + 스킬 동기화 |
 | `tfx doctor` | CLI 진단 + 이슈 추적 |
-| `tfx update` | 최신 버전으로 업데이트 |
+| `tfx update` | 최신 안정 버전으로 업데이트 |
 | `tfx list` | 설치된 스킬 목록 |
 | `tfx version` | 버전 표시 |
 
 축약: `tfx` = `triflux`, `tfl` = `triflux`
+
+dev 채널 업데이트: `tfx update --dev` (`dev` 별칭 지원)
 
 ### HUD 상태 표시줄
 
