@@ -4,10 +4,24 @@ import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
+import { psmuxExec } from "./psmux.mjs";
 
-/** Windows 경로를 MSYS2/Git Bash tmux용 POSIX 경로로 변환 */
-function toTmuxPath(p) {
+function quoteArg(value) {
+  return `"${String(value).replace(/"/g, '\\"')}"`;
+}
+
+function getPsmuxSessionName(target) {
+  return String(target).split(":")[0]?.trim() || "";
+}
+
+/** Windows 경로를 멀티플렉서용 경로로 변환 */
+function toMuxPath(p) {
   if (process.platform !== "win32") return p;
+
+  const mux = detectMultiplexer();
+
+  // psmux는 Windows 네이티브 경로 그대로 사용
+  if (mux === "psmux") return p;
 
   const normalized = p.replace(/\\/g, "/");
   const m = normalized.match(/^([A-Za-z]):\/(.*)$/);
@@ -15,7 +29,6 @@ function toTmuxPath(p) {
 
   const drive = m[1].toLowerCase();
   const rest = m[2];
-  const mux = detectMultiplexer();
 
   // wsl tmux는 /mnt/c/... 경로를 사용
   if (mux === "wsl-tmux") {
@@ -26,9 +39,10 @@ function toTmuxPath(p) {
   return `/${drive}/${rest}`;
 }
 
-/** tmux 커맨드 실행 (session.mjs와 동일 패턴) */
-function tmux(args, opts = {}) {
-  return tmuxExec(args, {
+/** 멀티플렉서 커맨드 실행 (session.mjs와 동일 패턴) */
+function muxExec(args, opts = {}) {
+  const exec = detectMultiplexer() === "psmux" ? psmuxExec : tmuxExec;
+  return exec(args, {
     encoding: "utf8",
     timeout: 10000,
     stdio: ["pipe", "pipe", "pipe"],
@@ -63,14 +77,13 @@ export function buildCliCommand(cli, options = {}) {
 }
 
 /**
- * tmux pane에 CLI 시작
+ * pane에 CLI 시작
  * @param {string} target — 예: tfx-team-abc:0.1
  * @param {string} command — 실행할 커맨드
  */
 export function startCliInPane(target, command) {
-  // 특수문자 이스케이프: 작은따옴표 내부에서 안전하도록
-  const escaped = command.replace(/'/g, "'\\''");
-  tmux(`send-keys -t ${target} '${escaped}' Enter`);
+  // CLI 시작도 buffer paste를 재사용해 셸/플랫폼별 quoting 차이를 제거한다.
+  injectPrompt(target, command);
 }
 
 /**
@@ -91,10 +104,20 @@ export function injectPrompt(target, prompt) {
   try {
     writeFileSync(tmpFile, prompt, "utf8");
 
-    // tmux load-buffer → paste-buffer → Enter (Windows 경로 변환 필요)
-    tmux(`load-buffer ${toTmuxPath(tmpFile)}`);
-    tmux(`paste-buffer -t ${target}`);
-    tmux(`send-keys -t ${target} Enter`);
+    // psmux는 buffer 명령에 세션 컨텍스트가 필요하다.
+    if (detectMultiplexer() === "psmux") {
+      const sessionName = getPsmuxSessionName(target);
+      psmuxExec(["load-buffer", "-t", sessionName, toMuxPath(tmpFile)]);
+      psmuxExec(["select-pane", "-t", target]);
+      psmuxExec(["paste-buffer", "-t", target]);
+      psmuxExec(["send-keys", "-t", target, "Enter"]);
+      return;
+    }
+
+    // tmux load-buffer → paste-buffer → Enter
+    muxExec(`load-buffer ${quoteArg(toMuxPath(tmpFile))}`);
+    muxExec(`paste-buffer -t ${target}`);
+    muxExec(`send-keys -t ${target} Enter`);
   } finally {
     // 임시 파일 정리
     try {
@@ -111,5 +134,5 @@ export function injectPrompt(target, prompt) {
  * @param {string} keys — tmux 키 표현 (예: 'C-c', 'Enter')
  */
 export function sendKeys(target, keys) {
-  tmux(`send-keys -t ${target} ${keys}`);
+  muxExec(`send-keys -t ${target} ${keys}`);
 }
