@@ -64,11 +64,22 @@ deregister_agent() {
 # JSON 문자열 이스케이프 (큰따옴표, 백슬래시, 개행, 탭, CR)
 json_escape() {
   local s="${1:-}"
+  local i ch esc
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
   s="${s//$'\n'/\\n}"
   s="${s//$'\t'/\\t}"
   s="${s//$'\r'/\\r}"
+  s="${s//$'\b'/\\b}"
+  s="${s//$'\f'/\\f}"
+  for i in {0..31}; do
+    case "$i" in
+      8|9|10|12|13) continue ;;
+    esac
+    printf -v ch "\\$(printf '%03o' "$i")"
+    printf -v esc '%s%04x' '\\u' "$i"
+    s="${s//$ch/$esc}"
+  done
   echo "$s"
 }
 
@@ -451,7 +462,13 @@ main() {
 
   # 타임아웃 결정
   if [[ -n "$USER_TIMEOUT" ]]; then
-    TIMEOUT_SEC="$USER_TIMEOUT"
+    if ! [[ "$USER_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+      echo "[tfx-route] 경고: 유효하지 않은 타임아웃 값 ($USER_TIMEOUT), 기본값 사용" >&2
+      USER_TIMEOUT=""
+      TIMEOUT_SEC="$DEFAULT_TIMEOUT"
+    else
+      TIMEOUT_SEC="$USER_TIMEOUT"
+    fi
   else
     TIMEOUT_SEC="$DEFAULT_TIMEOUT"
   fi
@@ -508,9 +525,21 @@ ${ctx_content}
   local start_time
   start_time=$(date +%s)
 
+  # 팀 모드(Agent 래퍼 안)에서만 tee 활성화 — 직접 Bash에서는 토큰 절약을 위해 파일 전용
+  local use_tee=false
+  [[ -n "$TFX_TEAM_NAME" ]] && use_tee=true
+
   if [[ "$CLI_TYPE" == "codex" ]]; then
-    # Codex: stdout/stderr 모두 파일로 캡처 (post.mjs가 읽음)
-    timeout "$TIMEOUT_SEC" $CLI_CMD $CLI_ARGS "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" || exit_code=$?
+    if [[ "$use_tee" == "true" ]]; then
+      timeout "$TIMEOUT_SEC" $CLI_CMD $CLI_ARGS "$FULL_PROMPT" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" || exit_code=$?
+    else
+      timeout "$TIMEOUT_SEC" $CLI_CMD $CLI_ARGS "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" || exit_code=$?
+    fi
+    if [[ ! -s "$STDOUT_LOG" && -s "$STDERR_LOG" ]]; then
+      # stderr에서 마지막 "codex" 마커 이후의 텍스트를 stdout으로 복구
+      awk "/^codex$/{found=NR;content=\"\"} found && NR>found{content=content RS \$0} END{if(content) print substr(content,2)}" "$STDERR_LOG" > "$STDOUT_LOG"
+      echo "[tfx-route] 경고: codex stdout 비어있음, stderr에서 응답 복구 ($(wc -c < "$STDOUT_LOG") bytes)" >&2
+    fi
 
   elif [[ "$CLI_TYPE" == "gemini" ]]; then
     # Gemini: MCP 프로필별 서버 필터
@@ -522,7 +551,11 @@ ${ctx_content}
       echo "[tfx-route] Gemini MCP 필터: $gemini_mcp_filter" >&2
     fi
 
-    timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    if [[ "$use_tee" == "true" ]]; then
+      timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$FULL_PROMPT" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    else
+      timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    fi
     local pid=$!
 
     # 지수 백오프 health check (v1.x: 30×1s → v2.0: 5×exp, 총 19초)
@@ -545,7 +578,11 @@ ${ctx_content}
     if [[ "$health_ok" == "false" ]]; then
       wait "$pid" 2>/dev/null
       echo "[tfx-route] Gemini crash 감지, 재시도 중..." >&2
-      timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+      if [[ "$use_tee" == "true" ]]; then
+        timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$FULL_PROMPT" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+      else
+        timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+      fi
       pid=$!
       wait "$pid"
       exit_code=$?
@@ -591,7 +628,8 @@ ${ctx_content}
       --mcp-profile "$MCP_PROFILE" \
       --stderr-log "$STDERR_LOG" \
       --stdout-log "$STDOUT_LOG" \
-      --max-bytes "$MAX_STDOUT_BYTES"
+      --max-bytes "$MAX_STDOUT_BYTES" \
+      --tee-active "$use_tee"
   else
     # post.mjs 없으면 기본 출력 (fallback)
     echo "=== TFX-ROUTE RESULT ==="
