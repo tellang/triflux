@@ -313,8 +313,10 @@ function selectTier(stdin, claudeUsage = null) {
   else budget = 5; // rows 감지 불가 → 넉넉하게
 
   // 5) 인디케이터 줄 추정
-  let indicatorRows = 1; // bypass permissions (거의 항상 표시)
-  indicatorRows += 1; // 선행 개행 가드 (알림 배너 우회용 빈 줄)
+  // bypass permissions 배너(1줄)만 계상
+  // 선행 \n은 출력 포맷이므로 tier 예산에서 제외 — 이중 계산 시
+  // budget 4(rows 28-34)에서 totalVisualRows 5가 되어 micro로 추락하는 버그 유발
+  let indicatorRows = 1;
   const contextPercent = getContextPercent(stdin);
   // "Context low" 배너 공간은 출력부(leadingBreaks)에서 \n\n으로 처리 — 티어 선택에서 예약 불필요
   // Claude Code 사용량 경고 (노란색 배너: "You've used X% of your ... limit")

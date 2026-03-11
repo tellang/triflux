@@ -1,0 +1,343 @@
+# tfx-auto 내부 구현 상세
+
+> SKILL.md에서 분리된 상세 레퍼런스. 운영 참조는 `skills/tfx-auto/SKILL.md` 참조.
+
+## 아키텍처
+
+### 트리아지 흐름
+
+```
+사용자 입력
+    |
+    +-- agent 지정됨? ──YES──→ [Opus 인라인 분해] → 병렬 실행
+    |
+    NO
+    |
+    v
+[Codex 분류] (--full-auto, 무료)
+  "이 작업은 codex/gemini/claude 중 뭐가 적합?"
+  → 가벼운 분류 결과
+    |
+    v
+[Opus 설계+분해] (인라인, Agent 스폰 없음)
+  → 구체 에이전트 매핑 + scope + DAG 설계
+  → 오케스트레이터 자체가 Opus이므로 별도 Agent 불필요
+    |
+    v
+[tfx-route.sh × N 병렬 실행]
+  → Windows면 Gemini 안정화 자동 적용
+    |
+    v
+[결과 수집 + 보고]
+```
+
+> **설계는 Opus 품질, 비용은 최소화:**
+> - 분류(가벼운 작업) → Codex 무료
+> - 설계+분해(품질 중요) → Opus 인라인 (오케스트레이터가 직접)
+> - Agent 스폰 없음 → MANDATORY RULE 준수 + 오버헤드 제거
+
+### 전체 실행 흐름
+
+```
+User: "/tfx-auto 인증 리팩터링 + UI 개선 + 테스트"
+         |
+         v
+   [Phase 1: 입력 파싱] — 자동 모드 감지
+         |
+         v
+   [Phase 2a: Codex 분류]
+     Bash("codex exec --full-auto --skip-git-repo-check '분류 프롬프트'")
+     → [{auth 리팩터링, codex}, {UI 개선, gemini}, {테스트, claude}]
+     (실패 시 Opus가 직접 분류+분해)
+         |
+         v
+   [Phase 2b: Opus 설계+분해 (인라인)]
+     codex → executor (implement, scope: src/auth/)
+     gemini → designer (docs, scope: src/components/login/)
+     claude → test-engineer (Claude 네이티브)
+     graph_type: DAG, depends_on 설정
+         |
+         v
+   [Phase 3: 병렬 실행]
+     Bash("tfx-route.sh executor '리팩터링' implement", run_in_background=true)
+     Bash("tfx-route.sh designer 'UI 개선' docs", run_in_background=true)
+     Agent(subagent_type="oh-my-claudecode:test-engineer", model="sonnet", run_in_background=true)
+         |
+         v
+   [Phase 4: 결과 수집]
+   [Phase 5: 실패 처리 → Claude fallback]
+   [Phase 6: 보고]
+```
+
+## Phase 1: 입력 파싱
+
+사용자 입력에서 모드를 자동 감지:
+
+```
+입력: "3:codex src/api 리뷰"
+  → 수동 모드: N=3, agent=codex, task="src/api 리뷰"
+
+입력: "인증 모듈 리팩터링 + UI 개선"
+  → 자동 모드: task="인증 모듈 리팩터링 + UI 개선"
+```
+
+**감지 규칙:**
+- `N:agent_type` 패턴 존재 → 수동 모드
+- 그 외 → 자동 모드
+- N > 10이면 거부
+
+## Phase 2: 트리아지
+
+### 자동 모드 — Step 2a: Codex 분류
+
+```bash
+Bash("codex exec --full-auto --skip-git-repo-check '다음 작업을 분석하고 각 부분에 적합한 agent를 분류하라.
+
+  agent 선택:
+  - codex: 코드 구현/수정/분석/리뷰/디버깅/설계 (기본값 — 확신 없으면 codex)
+  - gemini: 문서/UI/디자인/멀티모달
+  - claude: 코드베이스 탐색/테스트 실행/검증 (최후 수단)
+
+  리서치 agent:
+  - scientist: 일반 리서치 (high, 480s)
+  - scientist-deep: 심층 리서치 (thorough, 1200s)
+
+  작업: {task}
+
+  JSON 형식:
+  {
+    \"parts\": [
+      { \"description\": \"...\", \"agent\": \"codex|gemini|claude\" }
+    ]
+  }
+  '")
+```
+
+> Codex 분류 실패 시 → 오케스트레이터(Opus)가 직접 분류+분해.
+
+### 자동 모드 — Step 2b: Opus 설계+분해 (인라인)
+
+```
+오케스트레이터가 인라인으로 수행:
+1. 분류 결과를 기반으로 독립적인 서브태스크로 분해
+2. 각 서브태스크에 구체 agent 배정:
+   - codex → executor / debugger / deep-executor / scientist 등
+   - gemini → designer / writer
+   - claude → explore / test-engineer / verifier
+3. scope (파일/모듈/영역) 명시
+4. 의존 관계 설정 (depends_on, context_output, context_input)
+5. graph_type 결정 (INDEPENDENT / SEQUENTIAL / DAG)
+
+결과 JSON:
+{
+  "graph_type": "INDEPENDENT|SEQUENTIAL|DAG",
+  "subtasks": [
+    {
+      "id": "t1",
+      "description": "...",
+      "scope": "src/auth/",
+      "agent": "executor",
+      "mcp_profile": "implement",
+      "depends_on": [],
+      "context_output": "t1-auth-refactor.md",
+      "context_input": []
+    }
+  ]
+}
+
+의존 관계 규칙:
+- depends_on: 선행 태스크 ID 목록. 순환 금지.
+- context_output: 후속 태스크에 전달할 결과 파일명
+- context_input: 참조할 선행 태스크의 context_output 목록
+```
+
+### 수동 모드 — Opus 인라인 분해
+
+```
+오케스트레이터가 인라인으로 처리:
+1. 작업을 정확히 {N}개의 독립 서브태스크로 분해
+2. 모든 서브태스크에 {agent_type} 배정
+3. 각 서브태스크는 파일 충돌 없이 독립 실행 가능해야 함
+4. JSON 형식으로 구성 후 Phase 3으로 진행
+```
+
+## Phase 3: DAG 기반 실행
+
+### INDEPENDENT: 전부 병렬
+
+모든 서브태스크를 단일 메시지에서 병렬로 실행:
+
+```bash
+Bash("bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile}",
+     run_in_background=true)
+```
+
+### SEQUENTIAL / DAG: 레벨 기반 실행
+
+**Step 1: 토폴로지 정렬 → 레벨 할당**
+
+depends_on 관계를 분석하여 실행 레벨을 결정:
+- Level 0: depends_on이 빈 태스크 (루트)
+- Level N: 모든 의존 태스크가 Level 0~(N-1)에 속하는 태스크
+
+예시:
+```
+t1(리서치A), t2(리서치B) → Level 0 (병렬)
+t3(구현, depends_on:[t1,t2]) → Level 1 (t1,t2 완료 후)
+t4(테스트, depends_on:[t3]) → Level 2 (t3 완료 후)
+```
+
+**Step 2: 컨텍스트 디렉토리 생성**
+
+```bash
+Bash("mkdir -p .omc/context/{session_id}")
+```
+
+**Step 3: 레벨별 순차 실행**
+
+```
+For each level L from 0 to max_level:
+
+  1. 해당 레벨의 모든 태스크를 수집
+
+  2. 각 태스크에 대해:
+     a. context_input이 있으면 → 컨텍스트 머지:
+        for ctx in context_input:
+          echo "=== Context from: {source_task_id} ===" >> combined.md
+          cat .omc/context/{session_id}/{ctx} >> combined.md
+     b. CLI 에이전트:
+        Bash("bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp} '' {context_file}",
+             run_in_background=(같은 레벨에 다른 태스크가 있으면))
+     c. Claude 네이티브 에이전트:
+        Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}",
+             prompt="{prompt}\n\n<prior_context>\n{context_content}\n</prior_context>",
+             run_in_background=(같은 레벨에 다른 태스크가 있으면))
+
+  3. 해당 레벨의 모든 태스크 완료 대기
+
+  4. 각 완료된 태스크에 대해:
+     a. context_output이 있으면 → 결과 저장:
+        - CLI: OUTPUT 섹션 추출 → .omc/context/{session_id}/{context_output}
+        - Claude: 반환값 → .omc/context/{session_id}/{context_output}
+     b. 실패/타임아웃 → 의존 태스크 SKIP 처리 (실패 전파)
+
+  5. 다음 레벨로 진행
+```
+
+### Windows Gemini 안정화 (자동 적용)
+
+- Gemini 워커에 `--timeout 60` 플래그 자동 추가
+- health check: 실행 후 10초 내 응답 없으면 재시작
+- `enableInteractiveShell=false`로 node-pty 우회
+
+### 컨텍스트 머지 규칙
+
+1. 각 선행 태스크 출력에 `=== Context from: {task_id} ({agent}: {description}) ===` 헤더 추가
+2. 합친 크기가 32KB 초과 시 → 각 선행 출력을 비례 절삭
+3. 빈 선행 출력 → 경고 출력, 해당 섹션 건너뜀
+
+### OUTPUT 섹션 추출 (CLI 결과에서)
+
+tfx-route.sh 출력에서 `=== OUTPUT ===` ~ 다음 `===` 사이의 내용을 추출:
+```bash
+echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT ===/d;/^=== /d;p}'
+```
+
+### 토큰 스냅샷 (실행 전/후)
+
+```bash
+# 실행 전
+Bash("node ~/.claude/scripts/token-snapshot.mjs snapshot pre-{subtask_id}")
+
+# 실행 후 + diff
+Bash("node ~/.claude/scripts/token-snapshot.mjs snapshot post-{subtask_id}")
+Bash("node ~/.claude/scripts/token-snapshot.mjs diff pre-{subtask_id} post-{subtask_id} --agent {agent} --cli {cli} --id {subtask_id}")
+```
+
+> tfx-route.sh가 실행별 토큰을 JSONL 로그에 직접 기록하므로, 병렬 실행 시에도 정확한 추적 가능.
+
+## Phase 4: 결과 수집
+
+### CLI 워커 결과 파싱
+
+`=== TFX-ROUTE RESULT ===` 헤더에서:
+
+| 필드 | 의미 |
+|------|------|
+| `exit_code: 0` + `status: success` | 성공. OUTPUT 섹션 사용 |
+| `exit_code: 0` + `status: success_with_warnings` | 성공 + 경고 |
+| `exit_code: 124` + `status: timeout` | 타임아웃. PARTIAL OUTPUT 사용 |
+| `exit_code: ≠0` + `status: failed` | 실패. STDERR 확인 |
+
+### DAG 모드 실패 전파
+
+| 시나리오 | 처리 |
+|----------|------|
+| Level N 태스크 실패 | 해당 태스크에 직접/간접 의존하는 모든 태스크를 SKIPPED |
+| Level N 태스크 타임아웃 | 실패와 동일 처리 |
+| 같은 레벨 일부 실패 | 다른 독립 태스크는 계속 실행 |
+| 전체 레벨 실패 | 이후 레벨 전부 SKIP |
+
+## Phase 5: 실패 처리
+
+1. **1차 실패** → Claude 네이티브 에이전트로 fallback:
+   ```
+   Agent(subagent_type="oh-my-claudecode:executor", model="sonnet",
+        prompt="{failed_subtask}")
+   ```
+2. **2차 연속 실패** → 해당 서브태스크 실패 보고. 나머지 성공 결과만 종합.
+3. **전체 타임아웃** → 부분 결과 보고 + 타임아웃 안내.
+
+## Phase 6: 보고
+
+```markdown
+## tfx-auto 완료
+
+**모드**: 자동 | **트리아지**: Codex 분류 → Opus 분해
+**그래프**: {INDEPENDENT|SEQUENTIAL|DAG} | **레벨**: {max_level+1}
+
+| # | 서브태스크 | Agent | CLI | MCP | 레벨 | 의존 | 상태 | 시간 |
+|---|----------|-------|-----|-----|------|------|------|------|
+| t1 | 리서치A | scientist | codex | analyze | 0 | - | success | 45s |
+| t2 | 리서치B | scientist | codex | analyze | 0 | - | success | 50s |
+| t3 | 구현 | executor | codex | implement | 1 | t1,t2 | success | 30s |
+| t4 | 테스트 | test-engineer | claude | — | 2 | t3 | success | 25s |
+
+### 컨텍스트 체인
+t1 → t3 (t1-research-a.md, 2.3KB)
+t2 → t3 (t2-research-b.md, 1.8KB)
+t3 → t4 (t3-implementation.md, 4.1KB)
+
+### 워커 t1: 리서치A
+(출력 요약)
+
+### Token Savings Report
+
+| # | 서브태스크 | Agent | CLI | Input | Output | Claude 비용(추정) | 실제 비용 | 절약 |
+|---|----------|-------|-----|-------|--------|-----------------|---------|------|
+| t1 | 리서치A | scientist | codex | 138K | 1.7K | $0.44 | $0.00 | $0.44 |
+
+**총 절약: $X.XX** (Codex $X.XX)
+
+전체 소요: Ns(L0) + Ns(L1) + ... = Ns (순차) | 트리아지: ~Ns
+```
+
+> **토큰 보고서 생성:** `node ~/.claude/scripts/token-snapshot.mjs report {session-id}`
+> Claude 네이티브 에이전트는 토큰 측정 불가 → "Claude native" 표시.
+
+## 에러 레퍼런스 (전체)
+
+| 에러 | 원인 | 처리 |
+|------|------|------|
+| `tfx-route.sh: not found` | 래퍼 스크립트 미설치 | `~/.claude/scripts/tfx-route.sh` 생성 |
+| `codex: command not found` | Codex CLI 미설치 | `npm install -g @openai/codex` |
+| `gemini: command not found` | Gemini CLI 미설치 | `npm install -g @google/gemini-cli` |
+| `status: timeout` | CLI 타임아웃 (에이전트별 동적) | 타임아웃 늘리거나 작업 범위 축소 |
+| `status: failed` | CLI 에러 | stderr 로그 확인 → Claude fallback |
+| `N > 10` | 워커 수 초과 | 10 이하로 조정 |
+| Codex 분류 실패 | 모호한 작업 설명 | 기본값 codex로 fallback |
+| Opus 분해 실패 | 작업 분해 불가 | 단일 워커로 실행 |
+| 순환 의존 감지 | depends_on에 순환 존재 | 분해 재시도 또는 사용자에게 확인 |
+| 컨텍스트 파일 미생성 | 선행 태스크 출력 비어있음 | 경고 후 컨텍스트 없이 실행 |
+| 컨텍스트 크기 초과 | 합친 컨텍스트 > 32KB | 비례 절삭 후 실행 |
+| SKIPPED 태스크 발생 | 선행 태스크 실패 | 부분 성공 보고 + 수동 재실행 안내 |

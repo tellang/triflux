@@ -79,7 +79,4 @@ argument-hint: "\"작업 설명\" | N:gemini \"작업 설명\""
 
 ## Troubleshooting
 
-문제가 발생하면:
-1. `/tfx-doctor` — 진단 실행
-2. `/tfx-doctor --fix` — 자동 수정
-3. `/tfx-doctor --reset` — 캐시 초기화 (HUD 이상 시)
+문제 발생 시 `/tfx-doctor` 실행. (`--fix` 자동 수정, `--reset` 캐시 초기화)

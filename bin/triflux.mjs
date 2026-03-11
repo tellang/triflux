@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // triflux CLI — setup, doctor, version
-import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync } from "fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, rmSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync, spawn } from "child_process";
@@ -670,6 +670,45 @@ function cmdDoctor(options = {}) {
     }
   } else {
     ok("이슈 로그 없음 (정상)");
+  }
+
+  // 11. Orphan Teams
+  section("Orphan Teams");
+  const teamsDir = join(CLAUDE_DIR, "teams");
+  const tasksDir = join(CLAUDE_DIR, "tasks");
+  if (existsSync(teamsDir)) {
+    try {
+      const teamDirs = readdirSync(teamsDir).filter(d => {
+        try { return statSync(join(teamsDir, d)).isDirectory(); } catch { return false; }
+      });
+      if (teamDirs.length === 0) {
+        ok("잔존 팀 없음");
+      } else {
+        warn(`${teamDirs.length}개 잔존 팀 발견: ${teamDirs.join(", ")}`);
+        if (fix) {
+          let cleaned = 0;
+          for (const d of teamDirs) {
+            try {
+              rmSync(join(teamsDir, d), { recursive: true, force: true });
+              cleaned++;
+            } catch {}
+            // 연관 tasks 디렉토리도 정리
+            const taskDir = join(tasksDir, d);
+            if (existsSync(taskDir)) {
+              try { rmSync(taskDir, { recursive: true, force: true }); } catch {}
+            }
+          }
+          ok(`${cleaned}개 잔존 팀 정리 완료`);
+        } else {
+          info("정리: /tfx-doctor --fix 또는 수동 rm -rf ~/.claude/teams/{name}/");
+          issues++;
+        }
+      }
+    } catch (e) {
+      warn(`teams 디렉토리 읽기 실패: ${e.message}`);
+    }
+  } else {
+    ok("잔존 팀 없음");
   }
 
   // 결과
