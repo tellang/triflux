@@ -1,60 +1,52 @@
 #!/usr/bin/env node
 // hub/bridge.mjs — tfx-route.sh ↔ tfx-hub 브릿지 CLI
 //
-// tfx-route.sh에서 CLI 에이전트 실행 전후로 호출하여
-// Hub에 자동 등록/결과 발행/컨텍스트 수신/해제를 수행한다.
-//
-// 사용법:
-//   node bridge.mjs register  --agent <id> --cli <type> --timeout <sec> [--topics t1,t2]
-//   node bridge.mjs result    --agent <id> --file <path> [--topic task.result] [--trace <id>]
-//   node bridge.mjs context   --agent <id> [--topics t1,t2] [--max 10] [--out <path>]
-//   node bridge.mjs deregister --agent <id>
-//   node bridge.mjs team-info --team <team_name>
-//   node bridge.mjs team-task-list --team <team_name> [--owner <name>] [--statuses s1,s2]
-//   node bridge.mjs team-task-update --team <team_name> --task-id <id> [--claim] [--status <s>] [--owner <name>]
-//   node bridge.mjs team-send-message --team <team_name> --from <sender> --text <message> [--to team-lead]
-//   node bridge.mjs ping
-//
-// Hub 미실행 시 모든 커맨드는 조용히 실패 (exit 0).
-// tfx-route.sh 흐름을 절대 차단하지 않는다.
+// Named Pipe/Unix Socket 제어 채널을 우선 사용하고,
+// 연결이 없을 때만 HTTP /bridge/* 엔드포인트로 내려간다.
 
+import net from 'node:net';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs as nodeParseArgs } from 'node:util';
+import { randomUUID } from 'node:crypto';
 
 const HUB_PID_FILE = join(homedir(), '.claude', 'cache', 'tfx-hub', 'hub.pid');
 
-// ── Hub URL 해석 ──
-
-function getHubUrl() {
-  // 환경변수 우선
+export function getHubUrl() {
   if (process.env.TFX_HUB_URL) return process.env.TFX_HUB_URL.replace(/\/mcp$/, '');
 
-  // PID 파일에서 읽기
   if (existsSync(HUB_PID_FILE)) {
     try {
       const info = JSON.parse(readFileSync(HUB_PID_FILE, 'utf8'));
       return `http://${info.host || '127.0.0.1'}:${info.port || 27888}`;
-    } catch { /* 무시 */ }
+    } catch {
+      // 무시
+    }
   }
 
-  // 기본값
   const port = process.env.TFX_HUB_PORT || '27888';
   return `http://127.0.0.1:${port}`;
 }
 
-const _cachedHubUrl = getHubUrl();
+export function getHubPipePath() {
+  if (process.env.TFX_HUB_PIPE) return process.env.TFX_HUB_PIPE;
 
-// ── HTTP 요청 ──
+  if (!existsSync(HUB_PID_FILE)) return null;
+  try {
+    const info = JSON.parse(readFileSync(HUB_PID_FILE, 'utf8'));
+    return info.pipe_path || info.pipePath || null;
+  } catch {
+    return null;
+  }
+}
 
-async function post(path, body, timeoutMs = 5000) {
-  const url = `${_cachedHubUrl}${path}`;
+export async function post(path, body, timeoutMs = 5000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
+    const res = await fetch(`${getHubUrl()}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -64,13 +56,97 @@ async function post(path, body, timeoutMs = 5000) {
     return await res.json();
   } catch {
     clearTimeout(timer);
-    return null; // Hub 미실행 — 조용히 실패
+    return null;
   }
 }
 
-// ── 인자 파싱 ──
+export async function connectPipe(timeoutMs = 1200) {
+  const pipePath = getHubPipePath();
+  if (!pipePath) return null;
 
-function parseArgs(argv) {
+  return await new Promise((resolve) => {
+    const socket = net.createConnection(pipePath);
+    const timer = setTimeout(() => {
+      try { socket.destroy(); } catch {}
+      resolve(null);
+    }, timeoutMs);
+
+    socket.once('connect', () => {
+      clearTimeout(timer);
+      socket.setEncoding('utf8');
+      resolve(socket);
+    });
+
+    socket.once('error', () => {
+      clearTimeout(timer);
+      try { socket.destroy(); } catch {}
+      resolve(null);
+    });
+  });
+}
+
+async function pipeRequest(type, action, payload, timeoutMs = 3000) {
+  const socket = await connectPipe(Math.min(timeoutMs, 1500));
+  if (!socket) return null;
+
+  return await new Promise((resolve) => {
+    const requestId = randomUUID();
+    let buffer = '';
+    const timer = setTimeout(() => {
+      try { socket.destroy(); } catch {}
+      resolve(null);
+    }, timeoutMs);
+
+    const finish = (result) => {
+      clearTimeout(timer);
+      try { socket.end(); } catch {}
+      resolve(result);
+    };
+
+    socket.on('data', (chunk) => {
+      buffer += chunk;
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex >= 0) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        newlineIndex = buffer.indexOf('\n');
+        if (!line) continue;
+
+        let frame;
+        try {
+          frame = JSON.parse(line);
+        } catch {
+          continue;
+        }
+
+        if (frame?.type !== 'response' || frame.request_id !== requestId) continue;
+        finish({
+          ok: frame.ok,
+          error: frame.error,
+          data: frame.data,
+        });
+        return;
+      }
+    });
+
+    socket.on('error', () => finish(null));
+    socket.write(JSON.stringify({
+      type,
+      request_id: requestId,
+      payload: { action, ...payload },
+    }) + '\n');
+  });
+}
+
+async function pipeCommand(action, payload, timeoutMs = 3000) {
+  return await pipeRequest('command', action, payload, timeoutMs);
+}
+
+async function pipeQuery(action, payload, timeoutMs = 3000) {
+  return await pipeRequest('query', action, payload, timeoutMs);
+}
+
+export function parseArgs(argv) {
   const { values } = nodeParseArgs({
     args: argv,
     options: {
@@ -113,68 +189,70 @@ function parseArgs(argv) {
   return values;
 }
 
-function parseJsonSafe(raw, fallback = null) {
+export function parseJsonSafe(raw, fallback = null) {
   if (!raw) return fallback;
-  try { return JSON.parse(raw); } catch { return fallback; }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
 }
 
-// ── 커맨드 ──
+async function runPipeFirst(commandName, queryName, httpPath, body, timeoutMs = 3000) {
+  const viaPipe = commandName
+    ? await pipeCommand(commandName, body, timeoutMs)
+    : await pipeQuery(queryName, body, timeoutMs);
+  if (viaPipe) return viaPipe;
+  return await post(httpPath, body, Math.max(timeoutMs, 5000));
+}
 
 async function cmdRegister(args) {
   const agentId = args.agent;
-  const cli = args.cli || 'other';
   const timeoutSec = parseInt(args.timeout || '600', 10);
-  const topics = args.topics ? args.topics.split(',') : [];
-  const capabilities = args.capabilities ? args.capabilities.split(',') : ['code'];
-
-  const result = await post('/bridge/register', {
+  const result = await runPipeFirst('register', null, '/bridge/register', {
     agent_id: agentId,
-    cli,
+    cli: args.cli || 'other',
     timeout_sec: timeoutSec,
-    topics,
-    capabilities,
+    heartbeat_ttl_ms: (timeoutSec + 120) * 1000,
+    topics: args.topics ? args.topics.split(',') : [],
+    capabilities: args.capabilities ? args.capabilities.split(',') : ['code'],
     metadata: {
-      pid: process.ppid, // 부모 프로세스 (tfx-route.sh)
+      pid: process.ppid,
       registered_at: Date.now(),
     },
   });
 
   if (result?.ok) {
-    // 에이전트 ID를 stdout으로 출력 (tfx-route.sh에서 캡처)
-    console.log(JSON.stringify({ ok: true, agent_id: agentId, lease_expires_ms: result.data?.lease_expires_ms }));
+    console.log(JSON.stringify({
+      ok: true,
+      agent_id: agentId,
+      lease_expires_ms: result.data?.lease_expires_ms,
+      pipe_path: result.data?.pipe_path || getHubPipePath(),
+    }));
   } else {
-    // Hub 미실행 — 조용히 패스
     console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
   }
 }
 
 async function cmdResult(args) {
-  const agentId = args.agent;
-  const filePath = args.file;
-  const topic = args.topic || 'task.result';
-  const traceId = args.trace || undefined;
-  const correlationId = args.correlation || undefined;
-  const exitCode = parseInt(args['exit-code'] || '0', 10);
-
-  // 결과 파일 읽기 (최대 48KB — Hub 메시지 크기 제한)
   let output = '';
-  if (filePath && existsSync(filePath)) {
-    output = readFileSync(filePath, 'utf8').slice(0, 49152);
+  if (args.file && existsSync(args.file)) {
+    output = readFileSync(args.file, 'utf8').slice(0, 49152);
   }
 
-  const result = await post('/bridge/result', {
-    agent_id: agentId,
-    topic,
+  const result = await runPipeFirst('result', null, '/bridge/result', {
+    agent_id: args.agent,
+    topic: args.topic || 'task.result',
     payload: {
-      agent_id: agentId,
-      exit_code: exitCode,
+      agent_id: args.agent,
+      exit_code: parseInt(args['exit-code'] || '0', 10),
       output_length: output.length,
-      output_preview: output.slice(0, 4096), // 미리보기 4KB
-      output_file: filePath || null,
+      output_preview: output.slice(0, 4096),
+      output_file: args.file || null,
       completed_at: Date.now(),
     },
-    trace_id: traceId,
-    correlation_id: correlationId,
+    trace_id: args.trace || undefined,
+    correlation_id: args.correlation || undefined,
   });
 
   if (result?.ok) {
@@ -185,47 +263,41 @@ async function cmdResult(args) {
 }
 
 async function cmdContext(args) {
-  const agentId = args.agent;
-  const topics = args.topics ? args.topics.split(',') : undefined;
-  const maxMessages = parseInt(args.max || '10', 10);
-  const outPath = args.out;
-
-  const result = await post('/bridge/context', {
-    agent_id: agentId,
-    topics,
-    max_messages: maxMessages,
+  const result = await runPipeFirst(null, 'drain', '/bridge/context', {
+    agent_id: args.agent,
+    topics: args.topics ? args.topics.split(',') : undefined,
+    max_messages: parseInt(args.max || '10', 10),
+    auto_ack: true,
   });
 
   if (result?.ok && result.data?.messages?.length) {
-    // 컨텍스트 조합
-    const parts = result.data.messages.map((m, i) => {
-      const from = m.from_agent || 'unknown';
-      const topic = m.topic || 'unknown';
-      const payload = typeof m.payload === 'string' ? m.payload : JSON.stringify(m.payload, null, 2);
-      return `=== Context ${i + 1}: ${from} (${topic}) ===\n${payload}`;
+    const parts = result.data.messages.map((message, index) => {
+      const payload = typeof message.payload === 'string'
+        ? message.payload
+        : JSON.stringify(message.payload, null, 2);
+      return `=== Context ${index + 1}: ${message.from_agent || 'unknown'} (${message.topic || 'unknown'}) ===\n${payload}`;
     });
     const combined = parts.join('\n\n');
 
-    if (outPath) {
-      writeFileSync(outPath, combined, 'utf8');
-      console.log(JSON.stringify({ ok: true, count: result.data.messages.length, file: outPath }));
+    if (args.out) {
+      writeFileSync(args.out, combined, 'utf8');
+      console.log(JSON.stringify({ ok: true, count: result.data.messages.length, file: args.out }));
     } else {
       console.log(combined);
     }
-  } else {
-    if (outPath) {
-      console.log(JSON.stringify({ ok: true, count: 0 }));
-    }
-    // 메시지 없으면 빈 출력
+    return;
   }
+
+  if (args.out) console.log(JSON.stringify({ ok: true, count: 0 }));
 }
 
 async function cmdDeregister(args) {
-  const agentId = args.agent;
-  const result = await post('/bridge/deregister', { agent_id: agentId });
+  const result = await runPipeFirst('deregister', null, '/bridge/deregister', {
+    agent_id: args.agent,
+  });
 
   if (result?.ok) {
-    console.log(JSON.stringify({ ok: true, agent_id: agentId, status: 'offline' }));
+    console.log(JSON.stringify({ ok: true, agent_id: args.agent, status: 'offline' }));
   } else {
     console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
   }
@@ -241,11 +313,10 @@ async function cmdTeamInfo(args) {
 }
 
 async function cmdTeamTaskList(args) {
-  const statuses = args.statuses ? args.statuses.split(',').map((s) => s.trim()).filter(Boolean) : [];
   const result = await post('/bridge/team/task-list', {
     team_name: args.team,
     owner: args.owner,
-    statuses,
+    statuses: args.statuses ? args.statuses.split(',').map((status) => status.trim()).filter(Boolean) : [],
     include_internal: !!args['include-internal'],
     limit: parseInt(args.limit || '200', 10),
   });
@@ -262,8 +333,8 @@ async function cmdTeamTaskUpdate(args) {
     subject: args.subject,
     description: args.description,
     activeForm: args['active-form'],
-    add_blocks: args['add-blocks'] ? args['add-blocks'].split(',').map((s) => s.trim()).filter(Boolean) : undefined,
-    add_blocked_by: args['add-blocked-by'] ? args['add-blocked-by'].split(',').map((s) => s.trim()).filter(Boolean) : undefined,
+    add_blocks: args['add-blocks'] ? args['add-blocks'].split(',').map((value) => value.trim()).filter(Boolean) : undefined,
+    add_blocked_by: args['add-blocked-by'] ? args['add-blocked-by'].split(',').map((value) => value.trim()).filter(Boolean) : undefined,
     metadata_patch: args['metadata-patch'] ? parseJsonSafe(args['metadata-patch'], null) : undefined,
     if_match_mtime_ms: args['if-match-mtime-ms'] != null ? Number(args['if-match-mtime-ms']) : undefined,
     actor: args.actor,
@@ -284,35 +355,56 @@ async function cmdTeamSendMessage(args) {
 }
 
 async function cmdPing() {
+  const viaPipe = await pipeQuery('status', { scope: 'hub' }, 2000);
+  if (viaPipe?.ok) {
+    console.log(JSON.stringify({
+      ok: true,
+      hub: viaPipe.data?.hub?.state || 'healthy',
+      pipe_path: getHubPipePath(),
+      transport: 'pipe',
+    }));
+    return;
+  }
+
   try {
-    const url = `${_cachedHubUrl}/status`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(`${getHubUrl()}/status`, { signal: controller.signal });
     clearTimeout(timer);
     const data = await res.json();
-    console.log(JSON.stringify({ ok: true, hub: data.hub?.state, sessions: data.sessions }));
+    console.log(JSON.stringify({
+      ok: true,
+      hub: data.hub?.state,
+      sessions: data.sessions,
+      pipe_path: data.pipe?.path || data.pipe_path || null,
+      transport: 'http',
+    }));
   } catch {
     console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
   }
 }
 
-// ── 메인 ──
+export async function main(argv = process.argv.slice(2)) {
+  const cmd = argv[0];
+  const args = parseArgs(argv.slice(1));
 
-const cmd = process.argv[2];
-const args = parseArgs(process.argv.slice(3));
+  switch (cmd) {
+    case 'register': await cmdRegister(args); break;
+    case 'result': await cmdResult(args); break;
+    case 'context': await cmdContext(args); break;
+    case 'deregister': await cmdDeregister(args); break;
+    case 'team-info': await cmdTeamInfo(args); break;
+    case 'team-task-list': await cmdTeamTaskList(args); break;
+    case 'team-task-update': await cmdTeamTaskUpdate(args); break;
+    case 'team-send-message': await cmdTeamSendMessage(args); break;
+    case 'ping': await cmdPing(args); break;
+    default:
+      console.error('사용법: bridge.mjs <register|result|context|deregister|team-info|team-task-list|team-task-update|team-send-message|ping> [--옵션]');
+      process.exit(1);
+  }
+}
 
-switch (cmd) {
-  case 'register':   await cmdRegister(args); break;
-  case 'result':     await cmdResult(args); break;
-  case 'context':    await cmdContext(args); break;
-  case 'deregister': await cmdDeregister(args); break;
-  case 'team-info': await cmdTeamInfo(args); break;
-  case 'team-task-list': await cmdTeamTaskList(args); break;
-  case 'team-task-update': await cmdTeamTaskUpdate(args); break;
-  case 'team-send-message': await cmdTeamSendMessage(args); break;
-  case 'ping':       await cmdPing(); break;
-  default:
-    console.error('사용법: bridge.mjs <register|result|context|deregister|team-info|team-task-list|team-task-update|team-send-message|ping> [--옵션]');
-    process.exit(1);
+const selfRun = process.argv[1]?.replace(/\\/g, '/').endsWith('hub/bridge.mjs');
+if (selfRun) {
+  await main();
 }

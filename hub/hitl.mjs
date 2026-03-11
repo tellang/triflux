@@ -4,8 +4,26 @@
 /**
  * HITL 매니저 생성
  * @param {object} store — createStore() 반환 객체
+ * @param {object} router — createRouter() 반환 객체
  */
-export function createHitlManager(store) {
+export function createHitlManager(store, router = null) {
+  function forwardHumanResponse({ requesterAgent, requestId, action, content, submittedBy, correlationId, traceId, priority }) {
+    if (!router?.handlePublish) {
+      throw new Error('router.handlePublish is required for HITL forwarding');
+    }
+    return router.handlePublish({
+      from: 'hub:hitl',
+      to: requesterAgent,
+      topic: 'human.response',
+      priority,
+      ttl_ms: 300000,
+      payload: { request_id: requestId, action, content, submitted_by: submittedBy },
+      correlation_id: correlationId,
+      trace_id: traceId,
+      message_type: 'human_response',
+    });
+  }
+
   return {
     /**
      * 사용자에게 입력 요청 생성
@@ -62,19 +80,17 @@ export function createHitlManager(store) {
       // 요청자에게 응답 메시지 전달
       let forwardedMessageId = null;
       if (action === 'accept' || action === 'decline') {
-        const msg = store.enqueueMessage({
-          type: 'human_response',
-          from: 'hub:hitl',
-          to: hr.requester_agent,
-          topic: 'human.response',
-          priority: 7, // urgent — 사용자 블로킹 해소
-          ttl_ms: 300000,
-          payload: { request_id, action, content, submitted_by },
-          correlation_id: hr.correlation_id,
-          trace_id: hr.trace_id,
+        const published = forwardHumanResponse({
+          requesterAgent: hr.requester_agent,
+          requestId: request_id,
+          action,
+          content,
+          submittedBy: submitted_by,
+          correlationId: hr.correlation_id,
+          traceId: hr.trace_id,
+          priority: 7,
         });
-        store.deliverToAgent(msg.id, hr.requester_agent);
-        forwardedMessageId = msg.id;
+        forwardedMessageId = published.data?.message_id || null;
       }
 
       return {
@@ -98,18 +114,16 @@ export function createHitlManager(store) {
         for (const hr of expired) {
           store.updateHumanRequest(hr.request_id, 'timed_out', null);
           if (hr.default_action === 'timeout_continue') {
-            const msg = store.enqueueMessage({
-              type: 'human_response',
-              from: 'hub:hitl',
-              to: hr.requester_agent,
-              topic: 'human.response',
+            forwardHumanResponse({
+              requesterAgent: hr.requester_agent,
+              requestId: hr.request_id,
+              action: 'timeout_continue',
+              content: null,
+              submittedBy: 'system',
+              correlationId: hr.correlation_id,
+              traceId: hr.trace_id,
               priority: 5,
-              ttl_ms: 300000,
-              payload: { request_id: hr.request_id, action: 'timeout_continue', content: null },
-              correlation_id: hr.correlation_id,
-              trace_id: hr.trace_id,
             });
-            store.deliverToAgent(msg.id, hr.requester_agent);
           }
         }
         return expired.length;
