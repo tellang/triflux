@@ -19,9 +19,22 @@ function pooledRandom(n) {
   return out;
 }
 
-/** UUIDv7 생성 (RFC 9562) */
+/** UUIDv7 생성 (RFC 9562, 단조 증가 보장) */
+let _lastMs = 0n;
+let _seq = 0;
 export function uuidv7() {
-  const now = BigInt(Date.now());
+  let now = BigInt(Date.now());
+  if (now <= _lastMs) {
+    _seq++;
+    if (_seq > 0xfff) {
+      // 동일 ms 내 4096개 초과 시 타임스탬프 전진
+      now = _lastMs + 1n;
+      _seq = 0;
+    }
+  } else {
+    _seq = 0;
+  }
+  _lastMs = now;
   const buf = pooledRandom(16);
   buf[0] = Number((now >> 40n) & 0xffn);
   buf[1] = Number((now >> 32n) & 0xffn);
@@ -29,8 +42,9 @@ export function uuidv7() {
   buf[3] = Number((now >> 16n) & 0xffn);
   buf[4] = Number((now >> 8n) & 0xffn);
   buf[5] = Number(now & 0xffn);
-  buf[6] = (buf[6] & 0x0f) | 0x70;  // version 7
-  buf[8] = (buf[8] & 0x3f) | 0x80;  // variant 10xx
+  buf[6] = ((_seq >> 8) & 0x0f) | 0x70;  // version 7 + seq_hi (4비트)
+  buf[7] = _seq & 0xff;                    // seq_lo (8비트)
+  buf[8] = (buf[8] & 0x3f) | 0x80;         // variant 10xx
   const h = buf.toString('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
