@@ -7,6 +7,7 @@ import { execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { setTimeout as delay } from "node:timers/promises";
 import { detectMultiplexer, getSessionAttachedCount, killSession, listSessions, tmuxExec } from "../hub/team/session.mjs";
+import { cleanupStaleOmcTeams, inspectStaleOmcTeams } from "../hub/team/staleState.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -835,7 +836,45 @@ async function cmdDoctor(options = {}) {
     }
   }
 
-  // 12. Orphan Teams
+  // 12. OMC stale team 상태
+  section("OMC Stale Teams");
+  const omcTeamReport = inspectStaleOmcTeams({
+    startDir: process.cwd(),
+    maxAgeMs: STALE_TEAM_MAX_AGE_SEC * 1000,
+    liveSessionNames: teamSessionReport.sessions.map((session) => session.sessionName),
+  });
+  if (!omcTeamReport.stateRoot) {
+    info(".omc/state 없음 — 검사 건너뜀");
+  } else if (omcTeamReport.entries.length === 0) {
+    ok(`stale team 없음 ${DIM}(${omcTeamReport.stateRoot})${RESET}`);
+  } else {
+    warn(`${omcTeamReport.entries.length}개 stale team 발견`);
+
+    for (const entry of omcTeamReport.entries) {
+      const ageLabel = formatElapsedAge(entry.ageSec);
+      const scopeLabel = entry.scope === "root" ? "root-state" : entry.sessionId;
+      warn(`${scopeLabel}: stale team (경과=${ageLabel}, 프로세스 없음)`);
+      if (entry.teamName) info(`팀: ${entry.teamName}`);
+      info(`파일: ${entry.stateFile}`);
+    }
+
+    if (fix) {
+      const cleanupResult = cleanupStaleOmcTeams(omcTeamReport.entries);
+      for (const result of cleanupResult.results) {
+        if (result.ok) {
+          ok(`stale team 정리: ${result.entry.scope === "root" ? "root-state" : result.entry.sessionId}`);
+        } else {
+          fail(`stale team 정리 실패: ${result.entry.scope === "root" ? "root-state" : result.entry.sessionId} — ${result.error.message}`);
+        }
+      }
+      issues += cleanupResult.failed;
+    } else {
+      info("정리: tfx doctor --fix");
+      issues += omcTeamReport.entries.length;
+    }
+  }
+
+  // 13. Orphan Teams
   section("Orphan Teams");
   const teamsDir = join(CLAUDE_DIR, "teams");
   const tasksDir = join(CLAUDE_DIR, "tasks");
