@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# tests/fixtures/bin/codex — fake-codex.mjs bash 래퍼
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec node "$SCRIPT_DIR/../fake-codex.mjs" "$@"

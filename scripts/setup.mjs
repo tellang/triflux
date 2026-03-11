@@ -46,6 +46,36 @@ const SYNC_MAP = [
     label: "tfx-route-post.mjs",
   },
   {
+    src: join(PLUGIN_ROOT, "scripts", "tfx-route-worker.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "tfx-route-worker.mjs"),
+    label: "tfx-route-worker.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "codex-mcp.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "codex-mcp.mjs"),
+    label: "hub/workers/codex-mcp.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "interface.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "interface.mjs"),
+    label: "hub/workers/interface.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "gemini-worker.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "gemini-worker.mjs"),
+    label: "hub/workers/gemini-worker.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "claude-worker.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "claude-worker.mjs"),
+    label: "hub/workers/claude-worker.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "factory.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "factory.mjs"),
+    label: "hub/workers/factory.mjs",
+  },
+  {
     src: join(PLUGIN_ROOT, "hud", "hud-qos-status.mjs"),
     dst: join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
     label: "hud-qos-status.mjs",
