@@ -4,6 +4,7 @@
 .codex/
 .gemini/
 *.bak
+*.tgz
 node_modules/
 .env
 dist/
