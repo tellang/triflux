@@ -310,11 +310,12 @@ export function spawnWorker(sessionName, workerName, cmd) {
     throw new Error("psmux가 설치되어 있지 않습니다. psmux를 먼저 설치하세요.");
   }
   try {
-    const paneId = psmuxExec(
-      `split-window -t ${quoteArg(sessionName)} -P -F "#{pane_id}" ${quoteArg(cmd)}`
+    // 세션 컨텍스트 포함 타겟 반환 (psmux는 세션별 서버 모델)
+    const paneTarget = psmuxExec(
+      `split-window -t ${quoteArg(sessionName)} -P -F "#{session_name}:#{window_index}.#{pane_index}" ${quoteArg(cmd)}`
     );
-    psmuxExec(`select-pane -t ${quoteArg(paneId)} -T ${quoteArg(workerName)}`);
-    return { paneId, workerName };
+    psmuxExec(`select-pane -t ${quoteArg(paneTarget)} -T ${quoteArg(workerName)}`);
+    return { paneId: paneTarget, workerName };
   } catch (err) {
     throw new Error(`워커 생성 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`);
   }
@@ -332,7 +333,7 @@ export function getWorkerStatus(sessionName, workerName) {
   }
   try {
     const output = psmuxExec(
-      `list-panes -t ${quoteArg(sessionName)} -F "#{pane_title}\t#{pane_id}\t#{pane_dead}\t#{pane_dead_status}"`
+      `list-panes -t ${quoteArg(sessionName)} -F "#{pane_title}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_dead}\t#{pane_dead_status}"`
     );
     const lines = output.split("\n").filter(Boolean);
     for (const line of lines) {
