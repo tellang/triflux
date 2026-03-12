@@ -33,12 +33,16 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
     agentName = "",
     leadName = "team-lead",
     mcp_profile = "auto",
+    pipelinePhase = "",
   } = opts;
 
   // 셸 이스케이프
   const escaped = subtask.replace(/'/g, "'\\''");
+  const pipelineHint = pipelinePhase
+    ? `\n파이프라인 단계: ${pipelinePhase}`
+    : '';
 
-  return `Bash 1회 실행 후 반드시 종료하라. 어떤 경우에도 hang하지 마라.
+  return `Bash 1회 실행 후 반드시 종료하라. 어떤 경우에도 hang하지 마라.${pipelineHint}
 gemini/codex를 직접 호출하지 마라. 반드시 tfx-route.sh를 거쳐야 한다.
 프롬프트를 파일로 저장하지 마라. tfx-route.sh가 인자로 받는다.
 
