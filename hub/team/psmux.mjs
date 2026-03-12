@@ -3,6 +3,8 @@
 import { execSync, spawnSync } from "node:child_process";
 
 const PSMUX_BIN = process.env.PSMUX_BIN || "psmux";
+const GIT_BASH = process.env.GIT_BASH_PATH || "C:\\Program Files\\Git\\bin\\bash.exe";
+const IS_WINDOWS = process.platform === "win32";
 
 function quoteArg(value) {
   const str = String(value);
@@ -309,12 +311,26 @@ export function spawnWorker(sessionName, workerName, cmd) {
   if (!hasPsmux()) {
     throw new Error("psmux가 설치되어 있지 않습니다. psmux를 먼저 설치하세요.");
   }
+
+  // remain-on-exit: 종료된 pane이 즉시 사라지는 것 방지
   try {
-    // 세션 컨텍스트 포함 타겟 반환 (psmux는 세션별 서버 모델)
-    const paneTarget = psmuxExec(
-      `split-window -t ${quoteArg(sessionName)} -P -F "#{session_name}:#{window_index}.#{pane_index}" ${quoteArg(cmd)}`
-    );
-    psmuxExec(`select-pane -t ${quoteArg(paneTarget)} -T ${quoteArg(workerName)}`);
+    psmuxExec(`set-option -t ${quoteArg(sessionName)} remain-on-exit on`);
+  } catch { /* 미지원 시 무시 */ }
+
+  // Windows: pane 기본셸이 PowerShell → Git Bash로 래핑
+  // psmux가 이스케이프 시퀀스를 처리하므로 포워드 슬래시로 변환
+  const shellCmd = IS_WINDOWS
+    ? `& '${GIT_BASH.replace(/\\/g, '/')}' -l -c '${cmd.replace(/'/g, "'\\''")}'`
+    : cmd;
+
+  try {
+    // 배열 형태 spawnSync → 쉘 해석 우회 (백슬래시 경로 보존)
+    const paneTarget = psmux([
+      "split-window", "-t", sessionName,
+      "-P", "-F", "#{session_name}:#{window_index}.#{pane_index}",
+      shellCmd,
+    ]);
+    psmux(["select-pane", "-t", paneTarget, "-T", workerName]);
     return { paneId: paneTarget, workerName };
   } catch (err) {
     throw new Error(`워커 생성 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`);
@@ -365,9 +381,15 @@ export function killWorker(sessionName, workerName) {
     throw new Error("psmux가 설치되어 있지 않습니다.");
   }
   try {
-    // paneId 찾기
-    const { paneId } = getWorkerStatus(sessionName, workerName);
-    // C-c로 우아한 종료 시도
+    const { paneId, status } = getWorkerStatus(sessionName, workerName);
+
+    // 이미 종료된 워커 → pane 정리만 수행
+    if (status === "exited") {
+      try { psmuxExec(`kill-pane -t ${quoteArg(paneId)}`); } catch { /* 무시 */ }
+      return { killed: true };
+    }
+
+    // running → C-c 우아한 종료 시도
     try {
       psmuxExec(`send-keys -t ${quoteArg(paneId)} C-c`);
     } catch {
@@ -382,8 +404,9 @@ export function killWorker(sessionName, workerName) {
     }
     return { killed: true };
   } catch (err) {
+    // 워커를 찾을 수 없음 → 이미 종료된 것으로 간주
     if (err.message.includes("워커를 찾을 수 없습니다")) {
-      return { killed: false };
+      return { killed: true };
     }
     throw new Error(`워커 종료 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`);
   }
