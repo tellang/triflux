@@ -109,7 +109,7 @@ function tmux(args, opts = {}) {
   if (!mux) {
     throw new Error(
       "tmux/psmux 미발견.\n\n" +
-      "tfx team은 tmux 계열 멀티플렉서가 필요합니다:\n" +
+      "tfx multi은 tmux 계열 멀티플렉서가 필요합니다:\n" +
       "  Windows: psmux 설치 또는 WSL2 tmux 사용\n" +
       "  WSL2:   wsl sudo apt install tmux\n" +
       "  macOS:  brew install tmux\n" +
@@ -117,7 +117,7 @@ function tmux(args, opts = {}) {
       "Windows에서는 WSL2를 권장합니다:\n" +
       "  1. wsl --install\n" +
       "  2. wsl sudo apt install tmux\n" +
-      "  3. tfx team \"작업\"  (자동으로 WSL tmux 사용)"
+      "  3. tfx multi \"작업\"  (자동으로 WSL tmux 사용)"
     );
   }
   if (mux === "psmux") {
@@ -480,7 +480,7 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
     try {
       tmux(`bind-key -T root -n C-t if-shell -F '${cond}' \"display-popup -E '${escaped}'\" \"send-keys C-t\"`);
     } catch {
-      tmux(`bind-key -T root -n C-t if-shell -F '${cond}' 'display-message "tfx team tasks 명령으로 태스크 확인"' 'send-keys C-t'`);
+      tmux(`bind-key -T root -n C-t if-shell -F '${cond}' 'display-message "tfx multi tasks 명령으로 태스크 확인"' 'send-keys C-t'`);
     }
   }
 }
@@ -545,7 +545,7 @@ export function killSession(sessionName) {
 }
 
 /**
- * tfx-team- 접두사 세션 목록
+ * tfx-multi- 접두사 세션 목록
  * @returns {string[]}
  */
 export function listSessions() {
@@ -557,7 +557,7 @@ export function listSessions() {
     const output = tmux('list-sessions -F "#{session_name}"');
     return output
       .split("\n")
-      .filter((s) => s.startsWith("tfx-team-"));
+      .filter((s) => s.startsWith("tfx-multi-"));
   } catch {
     return [];
   }
@@ -588,7 +588,7 @@ export function getSessionAttachedCount(sessionName) {
 
 /**
  * pane 마지막 N줄 캡처
- * @param {string} target — 예: tfx-team-abc:0.1
+ * @param {string} target — 예: tfx-multi-abc:0.1
  * @param {number} lines — 캡처할 줄 수 (기본 5)
  * @returns {string}
  */

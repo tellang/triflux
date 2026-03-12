@@ -105,7 +105,7 @@ const QOS_PATH = join(homedir(), ".omc", "state", "cli_qos_profile.json");
 const ACCOUNTS_CONFIG_PATH = join(homedir(), ".omc", "router", "accounts.json");
 const ACCOUNTS_STATE_PATH = join(homedir(), ".omc", "state", "cli_accounts_state.json");
 
-// tfx-team 상태 (v2.2 HUD 통합)
+// tfx-multi 상태 (v2.2 HUD 통합)
 const TEAM_STATE_PATH = join(homedir(), ".claude", "cache", "tfx-hub", "team-state.json");
 
 // Claude OAuth Usage API (api.anthropic.com/api/oauth/usage)
@@ -432,7 +432,7 @@ function getProviderAccountId(provider, accountsConfig, accountsState) {
 }
 
 /**
- * tfx-team 상태 행 생성 (v2.2 HUD 통합)
+ * tfx-multi 상태 행 생성 (v2.2 HUD 통합)
  * 활성 팀이 있을 때만 행 반환, 없으면 null
  * @returns {{ prefix: string, left: string, right: string } | null}
  */
@@ -1760,7 +1760,7 @@ async function main() {
       geminiQuotaData, geminiEmail, geminiSv, null),
   ];
 
-  // tfx-team 활성 시 팀 상태 행 추가 (v2.2)
+  // tfx-multi 활성 시 팀 상태 행 추가 (v2.2)
   const teamRow = getTeamRow();
   if (teamRow) rows.push(teamRow);
 

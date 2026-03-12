@@ -3,7 +3,7 @@
 //
 // Claude Code 네이티브 Agent Teams (CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)
 // 환경에서 teammate를 Codex/Gemini CLI 래퍼로 구성하는 유틸리티.
-// SKILL.md가 인라인 프롬프트를 사용하므로, 이 모듈은 CLI(tfx team --native)에서
+// SKILL.md가 인라인 프롬프트를 사용하므로, 이 모듈은 CLI(tfx multi --native)에서
 // 팀 설정을 프로그래밍적으로 생성할 때 사용한다.
 
 const ROUTE_SCRIPT = "~/.claude/scripts/tfx-route.sh";
@@ -28,7 +28,7 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
   const {
     subtask,
     role = "executor",
-    teamName = "tfx-team",
+    teamName = "tfx-multi",
     taskId = "",
     agentName = "",
     leadName = "team-lead",

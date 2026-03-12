@@ -1177,7 +1177,7 @@ ${updateNotice}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
-    ${WHITE_BRIGHT}tfx team${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
+    ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
@@ -1215,7 +1215,7 @@ async function cmdCodexTeam() {
     ${WHITE_BRIGHT}tfx codex-team debug --lines 30${RESET}
     ${WHITE_BRIGHT}tfx codex-team send N "msg"${RESET}
 
-  ${DIM}내부적으로 tfx team을 호출하며, 시작 시 --lead codex --agents codex,codex를 기본 주입합니다.${RESET}
+  ${DIM}내부적으로 tfx multi을 호출하며, 시작 시 --lead codex --agents codex,codex를 기본 주입합니다.${RESET}
 `);
     return;
   }
@@ -1588,7 +1588,7 @@ switch (cmd) {
   case "update":  cmdUpdate(); break;
   case "list": case "ls": cmdList(); break;
   case "hub":     await cmdHub(); break;
-  case "team": {
+  case "multi": {
     const { pathToFileURL } = await import("node:url");
     const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
     await cmdTeam();

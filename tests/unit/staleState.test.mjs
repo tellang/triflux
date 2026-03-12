@@ -75,7 +75,7 @@ describe("staleState.mjs", () => {
     writeJson(stateFile, {
       active: true,
       session_id: sessionId,
-      team_name: "tfx-team-active",
+      team_name: "tfx-multi-active",
       started_at: new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString(),
     });
 

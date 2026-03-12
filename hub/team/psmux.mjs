@@ -199,14 +199,14 @@ export function psmuxSessionExists(sessionName) {
 }
 
 /**
- * tfx-team- 접두사 psmux 세션 목록
+ * tfx-multi- 접두사 psmux 세션 목록
  * @returns {string[]}
  */
 export function listPsmuxSessions() {
   try {
     return parseSessionSummaries(psmuxExec("list-sessions"))
       .map((session) => session.sessionName)
-      .filter((sessionName) => sessionName.startsWith("tfx-team-"));
+      .filter((sessionName) => sessionName.startsWith("tfx-multi-"));
   } catch {
     return [];
   }
@@ -268,6 +268,7 @@ export function getPsmuxSessionAttachedCount(sessionName) {
 export function configurePsmuxKeybindings(sessionName, opts = {}) {
   const { inProcess = false, taskListCommand = "" } = opts;
   const cond = `#{==:#{session_name},${sessionName}}`;
+  const target = `${sessionName}:0`;
   const bindNext = inProcess
     ? `'select-pane -t :.+ \\; resize-pane -Z'`
     : `'select-pane -t :.+'`;
@@ -275,23 +276,22 @@ export function configurePsmuxKeybindings(sessionName, opts = {}) {
     ? `'select-pane -t :.- \\; resize-pane -Z'`
     : `'select-pane -t :.-'`;
 
-  psmuxExec(`bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`);
-  psmuxExec(`bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`);
-  psmuxExec(`bind-key -T root -n S-Right if-shell -F '${cond}' ${bindNext} 'send-keys S-Right'`);
-  psmuxExec(`bind-key -T root -n S-Left if-shell -F '${cond}' ${bindPrev} 'send-keys S-Left'`);
-  psmuxExec(`bind-key -T root -n BTab if-shell -F '${cond}' ${bindPrev} 'send-keys BTab'`);
-  psmuxExec(`bind-key -T root -n Escape if-shell -F '${cond}' 'send-keys C-c' 'send-keys Escape'`);
+  // psmux는 세션별 서버이므로 -t target으로 세션 컨텍스트를 전달해야 한다
+  const bindSafe = (cmd) => {
+    try { psmuxExec(`-t ${quoteArg(target)} ${cmd}`); } catch { /* 미지원 시 무시 */ }
+  };
+
+  bindSafe(`bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`);
+  bindSafe(`bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`);
+  bindSafe(`bind-key -T root -n S-Right if-shell -F '${cond}' ${bindNext} 'send-keys S-Right'`);
+  bindSafe(`bind-key -T root -n S-Left if-shell -F '${cond}' ${bindPrev} 'send-keys S-Left'`);
+  bindSafe(`bind-key -T root -n BTab if-shell -F '${cond}' ${bindPrev} 'send-keys BTab'`);
+  bindSafe(`bind-key -T root -n Escape if-shell -F '${cond}' 'send-keys C-c' 'send-keys Escape'`);
 
   if (taskListCommand) {
     const escaped = taskListCommand.replace(/'/g, "'\\''");
-    try {
-      psmuxExec(
-        `bind-key -T root -n C-t if-shell -F '${cond}' "display-popup -E '${escaped}'" "send-keys C-t"`
-      );
-    } catch {
-      psmuxExec(
-        `bind-key -T root -n C-t if-shell -F '${cond}' 'display-message "tfx team tasks 명령으로 태스크 확인"' 'send-keys C-t'`
-      );
-    }
+    bindSafe(
+      `bind-key -T root -n C-t if-shell -F '${cond}' "display-popup -E '${escaped}'" "send-keys C-t"`
+    );
   }
 }

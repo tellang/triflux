@@ -37,10 +37,13 @@ import {
 function normalizeTeammateMode(mode = "auto") {
   const raw = String(mode).toLowerCase();
   if (raw === "inline" || raw === "native") return "in-process";
-  if (raw === "in-process" || raw === "tmux" || raw === "wt") return raw;
+  if (raw === "in-process" || raw === "tmux" || raw === "wt" || raw === "psmux") return raw;
   if (raw === "windows-terminal" || raw === "windows_terminal") return "wt";
   if (raw === "auto") {
-    return process.env.TMUX ? "tmux" : "in-process";
+    if (process.env.TMUX) return "tmux";
+    const mux = detectMultiplexer();
+    if (mux === "psmux") return "psmux";
+    return "in-process";
   }
   return "in-process";
 }
@@ -112,7 +115,7 @@ function ensureTmuxOrExit() {
   Windows에서는 WSL2를 권장합니다:
     1. ${WHITE}wsl --install${RESET}
     2. ${WHITE}wsl sudo apt install tmux${RESET}
-    3. ${WHITE}tfx team "작업"${RESET}
+    3. ${WHITE}tfx multi "작업"${RESET}
 `);
   process.exit(1);
 }
@@ -208,15 +211,16 @@ async function startNativeSupervisor({ sessionId, task, lead, agents, subtasks, 
 export async function teamStart() {
   const { agents, lead, layout, teammateMode, task } = parseTeamArgs();
   if (!task) {
-    console.log(`\n  ${AMBER}${BOLD}⬡ tfx team${RESET}\n`);
-    console.log(`  사용법: ${WHITE}tfx team "작업 설명"${RESET}`);
-    console.log(`          ${WHITE}tfx team --agents codex,gemini --lead claude "작업"${RESET}`);
-    console.log(`          ${WHITE}tfx team --teammate-mode wt "작업"${RESET} ${DIM}(Windows Terminal split-pane)${RESET}`);
-    console.log(`          ${WHITE}tfx team --teammate-mode in-process "작업"${RESET} ${DIM}(tmux 불필요)${RESET}\n`);
+    console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET}\n`);
+    console.log(`  사용법: ${WHITE}tfx multi "작업 설명"${RESET}`);
+    console.log(`          ${WHITE}tfx multi --agents codex,gemini --lead claude "작업"${RESET}`);
+    console.log(`          ${WHITE}tfx multi --teammate-mode psmux "작업"${RESET} ${DIM}(Windows psmux 네이티브)${RESET}`);
+    console.log(`          ${WHITE}tfx multi --teammate-mode wt "작업"${RESET} ${DIM}(Windows Terminal split-pane)${RESET}`);
+    console.log(`          ${WHITE}tfx multi --teammate-mode in-process "작업"${RESET} ${DIM}(mux 불필요)${RESET}\n`);
     return;
   }
 
-  console.log(`\n  ${AMBER}${BOLD}⬡ tfx team${RESET}\n`);
+  console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET}\n`);
 
   let hub = await getHubInfo();
   if (!hub) {
@@ -232,7 +236,7 @@ export async function teamStart() {
     ok(`Hub: ${DIM}${hub.url}${RESET}`);
   }
 
-  const sessionId = `tfx-team-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
+  const sessionId = `tfx-multi-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
   const subtasks = decomposeTask(task, agents.length);
   const hubUrl = hub?.url || getDefaultHubUrl();
   let effectiveTeammateMode = teammateMode;
@@ -302,7 +306,7 @@ export async function teamStart() {
 
     ok("네이티브 in-process 팀 시작 완료");
     console.log(`  ${DIM}tmux 없이 실행됨 (직접 CLI 프로세스)${RESET}`);
-    console.log(`  ${DIM}제어: tfx team send/control/tasks/status${RESET}\n`);
+    console.log(`  ${DIM}제어: tfx multi send/control/tasks/status${RESET}\n`);
     return;
   }
 
@@ -398,7 +402,7 @@ export async function teamStart() {
     return;
   }
 
-  ensureTmuxOrExit();
+  if (effectiveTeammateMode === "tmux") ensureTmuxOrExit();
 
   const paneCount = agents.length + 1;
   const effectiveLayout = paneCount <= 4 ? layout : (layout === "Nx1" ? "Nx1" : "1xN");
@@ -506,7 +510,7 @@ export async function teamStart() {
     attachSession(sessionId);
   } else {
     warn("TTY 미지원 환경이라 자동 attach를 생략함");
-    console.log(`  ${DIM}수동 연결: tfx team attach${RESET}\n`);
+    console.log(`  ${DIM}수동 연결: tfx multi attach${RESET}\n`);
   }
 }
 

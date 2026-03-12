@@ -79,7 +79,7 @@ test("sanitizeForKeywordDetection: 코드블록/URL/파일경로/XML 태그 제�
   const input = [
     "정상 문장",
     "```sh",
-    "tfx team",
+    "tfx multi",
     "```",
     "https://example.com/path?q=1",
     "C:\\Users\\SSAFY\\Desktop\\Projects\\tools\\triflux",
@@ -90,7 +90,7 @@ test("sanitizeForKeywordDetection: 코드블록/URL/파일경로/XML 태그 제�
   const sanitized = sanitizeForKeywordDetection(input);
 
   assert.ok(sanitized.includes("정상 문장"));
-  assert.ok(!sanitized.includes("tfx team"));
+  assert.ok(!sanitized.includes("tfx multi"));
   assert.ok(!sanitized.includes("https://"));
   assert.ok(!sanitized.includes("C:\\Users\\"));
   assert.ok(!sanitized.includes("./hooks/keyword-rules.json"));
@@ -138,7 +138,7 @@ test("compileRules: 정규식 컴파일 실패", () => {
       id: "bad-pattern",
       priority: 1,
       patterns: [{ source: "[", flags: "" }],
-      skill: "tfx-team",
+      skill: "tfx-multi",
       supersedes: [],
       exclusive: false,
       state: null,
@@ -152,7 +152,7 @@ test("compileRules: 정규식 컴파일 실패", () => {
 test("matchRules: tfx 키워드 매칭", () => {
   const compiledRules = loadCompiledRules();
   const cases = [
-    { text: "tfx team 세션 시작", expectedId: "tfx-team" },
+    { text: "tfx multi 세션 시작", expectedId: "tfx-multi" },
     { text: "tfx auto 돌려줘", expectedId: "tfx-auto" },
     { text: "tfx codex 로 실행", expectedId: "tfx-codex" },
     { text: "tfx gemini 로 실행", expectedId: "tfx-gemini" },
@@ -218,17 +218,17 @@ test("resolveConflicts: exclusive 처리", () => {
 
 test("코드블록 내 키워드: sanitize 후 매칭 안 됨", () => {
   const compiledRules = loadCompiledRules();
-  const input = ["```txt", "tfx team", "jira 이슈 생성", "```"].join("\n");
+  const input = ["```txt", "tfx multi", "jira 이슈 생성", "```"].join("\n");
   const clean = sanitizeForKeywordDetection(input);
   const matches = matchRules(compiledRules, clean);
   assert.deepEqual(matches, []);
 });
 
 test("OMC 키워드와 triflux 키워드 비간섭 + TRIFLUX 네임스페이스", () => {
-  const omcLike = runDetector("my tfx team 세션 보여줘");
+  const omcLike = runDetector("my tfx multi 세션 보여줘");
   assert.equal(omcLike.suppressOutput, true);
 
-  const triflux = runDetector("tfx team 세션 시작");
+  const triflux = runDetector("tfx multi 세션 시작");
   const additionalContext = triflux?.hookSpecificOutput?.additionalContext || "";
-  assert.match(additionalContext, /^\[TRIFLUX MAGIC KEYWORD: tfx-team\]/);
+  assert.match(additionalContext, /^\[TRIFLUX MAGIC KEYWORD: tfx-multi\]/);
 });
