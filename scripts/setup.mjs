@@ -163,6 +163,34 @@ for (const { src, dst, label } of SYNC_MAP) {
   }
 }
 
+// ── Worker 의존성 동기화 (MCP SDK + transitive deps) ──
+
+const workerNodeModules = join(CLAUDE_DIR, "scripts", "node_modules");
+const mcpSdkPath = join(workerNodeModules, "@modelcontextprotocol", "sdk");
+const srcNodeModules = join(PLUGIN_ROOT, "node_modules");
+
+// native 모듈은 제외 (플랫폼 의존적, worker에서 불필요)
+const SKIP_PACKAGES = new Set(["better-sqlite3", "prebuild-install", "node-abi", "node-addon-api"]);
+
+if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
+  try {
+    const { cpSync } = await import("fs");
+    for (const entry of readdirSync(srcNodeModules)) {
+      if (SKIP_PACKAGES.has(entry)) continue;
+
+      const src = join(srcNodeModules, entry);
+      const dst = join(workerNodeModules, entry);
+      if (existsSync(dst)) continue;
+
+      mkdirSync(dirname(dst), { recursive: true });
+      cpSync(src, dst, { recursive: true });
+    }
+    synced++;
+  } catch {
+    // best effort: 의존성 복사 실패 시 exec fallback으로 동작
+  }
+}
+
 // ── 스킬 동기화 ──
 
 const skillsSrc = join(PLUGIN_ROOT, "skills");
