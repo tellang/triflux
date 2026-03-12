@@ -304,27 +304,41 @@ async function cmdDeregister(args) {
 }
 
 async function cmdTeamInfo(args) {
-  const result = await post('/bridge/team/info', {
+  const body = {
     team_name: args.team,
     include_members: true,
     include_paths: true,
-  });
-  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+  };
+  const result = await post('/bridge/team/info', body);
+  if (result) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  // Hub 미실행 fallback — nativeProxy 직접 호출
+  const { teamInfo } = await import('./team/nativeProxy.mjs');
+  console.log(JSON.stringify(teamInfo(body)));
 }
 
 async function cmdTeamTaskList(args) {
-  const result = await post('/bridge/team/task-list', {
+  const body = {
     team_name: args.team,
     owner: args.owner,
     statuses: args.statuses ? args.statuses.split(',').map((status) => status.trim()).filter(Boolean) : [],
     include_internal: !!args['include-internal'],
     limit: parseInt(args.limit || '200', 10),
-  });
-  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+  };
+  const result = await post('/bridge/team/task-list', body);
+  if (result) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  // Hub 미실행 fallback — nativeProxy 직접 호출
+  const { teamTaskList } = await import('./team/nativeProxy.mjs');
+  console.log(JSON.stringify(teamTaskList(body)));
 }
 
 async function cmdTeamTaskUpdate(args) {
-  const result = await post('/bridge/team/task-update', {
+  const body = {
     team_name: args.team,
     task_id: args['task-id'],
     claim: !!args.claim,
@@ -338,20 +352,95 @@ async function cmdTeamTaskUpdate(args) {
     metadata_patch: args['metadata-patch'] ? parseJsonSafe(args['metadata-patch'], null) : undefined,
     if_match_mtime_ms: args['if-match-mtime-ms'] != null ? Number(args['if-match-mtime-ms']) : undefined,
     actor: args.actor,
-  });
-  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+  };
+  const result = await post('/bridge/team/task-update', body);
+  if (result) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  // Hub 미실행 fallback — nativeProxy 직접 호출
+  const { teamTaskUpdate } = await import('./team/nativeProxy.mjs');
+  console.log(JSON.stringify(teamTaskUpdate(body)));
 }
 
 async function cmdTeamSendMessage(args) {
-  const result = await post('/bridge/team/send-message', {
+  const body = {
     team_name: args.team,
     from: args.from,
     to: args.to || 'team-lead',
     text: args.text,
     summary: args.summary,
     color: args.color || 'blue',
+  };
+  const result = await post('/bridge/team/send-message', body);
+  if (result) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  // Hub 미실행 fallback — nativeProxy 직접 호출
+  const { teamSendMessage } = await import('./team/nativeProxy.mjs');
+  console.log(JSON.stringify(teamSendMessage(body)));
+}
+
+function getHubDbPath() {
+  return join(homedir(), '.claude', 'cache', 'tfx-hub', 'state.db');
+}
+
+async function cmdPipelineState(args) {
+  // HTTP 우선
+  const result = await post('/bridge/pipeline/state', { team_name: args.team });
+  if (result) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  // Hub 미실행 fallback — 직접 SQLite 접근
+  try {
+    const { default: Database } = await import('better-sqlite3');
+    const { ensurePipelineTable, readPipelineState } = await import('./pipeline/state.mjs');
+    const dbPath = getHubDbPath();
+    if (!existsSync(dbPath)) {
+      console.log(JSON.stringify({ ok: false, error: 'hub_db_not_found' }));
+      return;
+    }
+    const db = new Database(dbPath, { readonly: true });
+    ensurePipelineTable(db);
+    const state = readPipelineState(db, args.team);
+    db.close();
+    console.log(JSON.stringify(state
+      ? { ok: true, data: state }
+      : { ok: false, error: 'pipeline_not_found' }));
+  } catch (e) {
+    console.log(JSON.stringify({ ok: false, error: e.message }));
+  }
+}
+
+async function cmdPipelineAdvance(args) {
+  // HTTP 우선
+  const result = await post('/bridge/pipeline/advance', {
+    team_name: args.team,
+    phase: args.status, // --status를 phase로 재활용
   });
-  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+  if (result) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  // Hub 미실행 fallback — 직접 SQLite 접근
+  try {
+    const { default: Database } = await import('better-sqlite3');
+    const { createPipeline } = await import('./pipeline/index.mjs');
+    const dbPath = getHubDbPath();
+    if (!existsSync(dbPath)) {
+      console.log(JSON.stringify({ ok: false, error: 'hub_db_not_found' }));
+      return;
+    }
+    const db = new Database(dbPath);
+    const pipeline = createPipeline(db, args.team);
+    const advanceResult = pipeline.advance(args.status);
+    db.close();
+    console.log(JSON.stringify(advanceResult));
+  } catch (e) {
+    console.log(JSON.stringify({ ok: false, error: e.message }));
+  }
 }
 
 async function cmdPing() {
@@ -397,9 +486,11 @@ export async function main(argv = process.argv.slice(2)) {
     case 'team-task-list': await cmdTeamTaskList(args); break;
     case 'team-task-update': await cmdTeamTaskUpdate(args); break;
     case 'team-send-message': await cmdTeamSendMessage(args); break;
+    case 'pipeline-state': await cmdPipelineState(args); break;
+    case 'pipeline-advance': await cmdPipelineAdvance(args); break;
     case 'ping': await cmdPing(args); break;
     default:
-      console.error('사용법: bridge.mjs <register|result|context|deregister|team-info|team-task-list|team-task-update|team-send-message|ping> [--옵션]');
+      console.error('사용법: bridge.mjs <register|result|context|deregister|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|ping> [--옵션]');
       process.exit(1);
   }
 }

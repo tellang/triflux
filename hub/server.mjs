@@ -15,6 +15,15 @@ import { createHitlManager } from './hitl.mjs';
 import { createPipeServer } from './pipe.mjs';
 import { createTools } from './tools.mjs';
 import {
+  ensurePipelineTable,
+  createPipeline,
+} from './pipeline/index.mjs';
+import {
+  readPipelineState,
+  initPipelineState,
+  listPipelineStates,
+} from './pipeline/state.mjs';
+import {
   teamInfo,
   teamTaskList,
   teamTaskUpdate,
@@ -239,6 +248,41 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
           if (path.startsWith('/bridge/team')) {
             res.writeHead(404);
             return res.end(JSON.stringify({ ok: false, error: `Unknown team endpoint: ${path}` }));
+          }
+
+          // ── 파이프라인 엔드포인트 ──
+          if (path === '/bridge/pipeline/state' && req.method === 'POST') {
+            ensurePipelineTable(store.db);
+            const { team_name } = body;
+            const state = readPipelineState(store.db, team_name);
+            res.writeHead(state ? 200 : 404);
+            return res.end(JSON.stringify(state
+              ? { ok: true, data: state }
+              : { ok: false, error: 'pipeline_not_found' }));
+          }
+
+          if (path === '/bridge/pipeline/advance' && req.method === 'POST') {
+            ensurePipelineTable(store.db);
+            const { team_name, phase } = body;
+            const pipeline = createPipeline(store.db, team_name);
+            const result = pipeline.advance(phase);
+            res.writeHead(result.ok ? 200 : 400);
+            return res.end(JSON.stringify(result));
+          }
+
+          if (path === '/bridge/pipeline/init' && req.method === 'POST') {
+            ensurePipelineTable(store.db);
+            const { team_name, fix_max, ralph_max } = body;
+            const state = initPipelineState(store.db, team_name, { fix_max, ralph_max });
+            res.writeHead(200);
+            return res.end(JSON.stringify({ ok: true, data: state }));
+          }
+
+          if (path === '/bridge/pipeline/list' && req.method === 'POST') {
+            ensurePipelineTable(store.db);
+            const states = listPipelineStates(store.db);
+            res.writeHead(200);
+            return res.end(JSON.stringify({ ok: true, data: states }));
           }
         }
 

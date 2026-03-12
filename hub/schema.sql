@@ -78,3 +78,17 @@ CREATE INDEX IF NOT EXISTS idx_inbox_message ON message_inbox(message_id);
 CREATE INDEX IF NOT EXISTS idx_human_requests_state ON human_requests(state);
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 CREATE INDEX IF NOT EXISTS idx_agents_lease ON agents(lease_expires_ms);
+
+-- 파이프라인 상태 테이블 (Phase 2)
+CREATE TABLE IF NOT EXISTS pipeline_state (
+  team_name TEXT PRIMARY KEY,
+  phase TEXT NOT NULL DEFAULT 'plan',
+  fix_attempt INTEGER DEFAULT 0,
+  fix_max INTEGER DEFAULT 3,
+  ralph_iteration INTEGER DEFAULT 0,
+  ralph_max INTEGER DEFAULT 10,
+  artifacts TEXT DEFAULT '{}',
+  phase_history TEXT DEFAULT '[]',
+  created_at INTEGER,
+  updated_at INTEGER
+);

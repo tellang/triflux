@@ -226,8 +226,9 @@ route_agent() {
       CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
       CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=300; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     verifier)
-      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=300; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_TYPE="codex"; CLI_CMD="codex"
+      CLI_ARGS="exec --profile thorough ${codex_base} review"
+      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     test-engineer)
       CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
       CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=300; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;

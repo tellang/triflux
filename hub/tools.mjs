@@ -8,6 +8,15 @@ import {
   teamTaskUpdate,
   teamSendMessage,
 } from './team/nativeProxy.mjs';
+import {
+  ensurePipelineTable,
+  createPipeline,
+} from './pipeline/index.mjs';
+import {
+  readPipelineState,
+  initPipelineState,
+  listPipelineStates,
+} from './pipeline/state.mjs';
 
 /**
  * MCP 도구 목록 생성
@@ -323,6 +332,82 @@ export function createTools(store, router, hitl, pipe = null) {
       },
       handler: wrap('TEAM_SEND_MESSAGE_FAILED', (args) => {
         return teamSendMessage(args);
+      }),
+    },
+
+    // ── 13. pipeline_state ──
+    {
+      name: 'pipeline_state',
+      description: '파이프라인 상태를 조회합니다 (--thorough 모드)',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+        },
+      },
+      handler: wrap('PIPELINE_STATE_FAILED', (args) => {
+        ensurePipelineTable(store.db);
+        const state = readPipelineState(store.db, args.team_name);
+        return state
+          ? { ok: true, data: state }
+          : { ok: false, error: { code: 'PIPELINE_NOT_FOUND', message: `파이프라인 없음: ${args.team_name}` } };
+      }),
+    },
+
+    // ── 14. pipeline_advance ──
+    {
+      name: 'pipeline_advance',
+      description: '파이프라인을 다음 단계로 전이합니다 (전이 규칙 + fix loop 바운딩 적용)',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name', 'phase'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          phase: { type: 'string', enum: ['plan', 'prd', 'exec', 'verify', 'fix', 'complete', 'failed'] },
+        },
+      },
+      handler: wrap('PIPELINE_ADVANCE_FAILED', (args) => {
+        ensurePipelineTable(store.db);
+        const pipeline = createPipeline(store.db, args.team_name);
+        return pipeline.advance(args.phase);
+      }),
+    },
+
+    // ── 15. pipeline_init ──
+    {
+      name: 'pipeline_init',
+      description: '새 파이프라인을 초기화합니다 (기존 상태 덮어쓰기)',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          fix_max: { type: 'integer', minimum: 1, maximum: 20, default: 3 },
+          ralph_max: { type: 'integer', minimum: 1, maximum: 100, default: 10 },
+        },
+      },
+      handler: wrap('PIPELINE_INIT_FAILED', (args) => {
+        ensurePipelineTable(store.db);
+        const state = initPipelineState(store.db, args.team_name, {
+          fix_max: args.fix_max,
+          ralph_max: args.ralph_max,
+        });
+        return { ok: true, data: state };
+      }),
+    },
+
+    // ── 16. pipeline_list ──
+    {
+      name: 'pipeline_list',
+      description: '활성 파이프라인 목록을 조회합니다',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      handler: wrap('PIPELINE_LIST_FAILED', () => {
+        ensurePipelineTable(store.db);
+        return { ok: true, data: listPipelineStates(store.db) };
       }),
     },
   ];
