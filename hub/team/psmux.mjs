@@ -295,3 +295,188 @@ export function configurePsmuxKeybindings(sessionName, opts = {}) {
     );
   }
 }
+
+// ─── 하이브리드 모드 워커 관리 함수 ───
+
+/**
+ * psmux 세션의 새 pane에서 워커 실행
+ * @param {string} sessionName - 대상 psmux 세션 이름
+ * @param {string} workerName - 워커 식별용 pane 타이틀
+ * @param {string} cmd - 실행할 커맨드
+ * @returns {{ paneId: string, workerName: string }}
+ */
+export function spawnWorker(sessionName, workerName, cmd) {
+  if (!hasPsmux()) {
+    throw new Error("psmux가 설치되어 있지 않습니다. psmux를 먼저 설치하세요.");
+  }
+  try {
+    const paneId = psmuxExec(
+      `split-window -t ${quoteArg(sessionName)} -P -F "#{pane_id}" ${quoteArg(cmd)}`
+    );
+    psmuxExec(`select-pane -t ${quoteArg(paneId)} -T ${quoteArg(workerName)}`);
+    return { paneId, workerName };
+  } catch (err) {
+    throw new Error(`워커 생성 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`);
+  }
+}
+
+/**
+ * 워커 pane 실행 상태 확인
+ * @param {string} sessionName - 대상 psmux 세션 이름
+ * @param {string} workerName - 워커 pane 타이틀
+ * @returns {{ status: "running"|"exited", exitCode: number|null, paneId: string }}
+ */
+export function getWorkerStatus(sessionName, workerName) {
+  if (!hasPsmux()) {
+    throw new Error("psmux가 설치되어 있지 않습니다.");
+  }
+  try {
+    const output = psmuxExec(
+      `list-panes -t ${quoteArg(sessionName)} -F "#{pane_title}\t#{pane_id}\t#{pane_dead}\t#{pane_dead_status}"`
+    );
+    const lines = output.split("\n").filter(Boolean);
+    for (const line of lines) {
+      const [title, paneId, dead, deadStatus] = line.split("\t");
+      if (title === workerName) {
+        const isDead = dead === "1";
+        return {
+          status: isDead ? "exited" : "running",
+          exitCode: isDead ? parseInt(deadStatus, 10) || 0 : null,
+          paneId,
+        };
+      }
+    }
+    throw new Error(`워커를 찾을 수 없습니다: ${workerName}`);
+  } catch (err) {
+    if (err.message.includes("워커를 찾을 수 없습니다")) throw err;
+    throw new Error(`워커 상태 조회 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`);
+  }
+}
+
+/**
+ * 워커 pane 프로세스 강제 종료
+ * @param {string} sessionName - 대상 psmux 세션 이름
+ * @param {string} workerName - 워커 pane 타이틀
+ * @returns {{ killed: boolean }}
+ */
+export function killWorker(sessionName, workerName) {
+  if (!hasPsmux()) {
+    throw new Error("psmux가 설치되어 있지 않습니다.");
+  }
+  try {
+    // paneId 찾기
+    const { paneId } = getWorkerStatus(sessionName, workerName);
+    // C-c로 우아한 종료 시도
+    try {
+      psmuxExec(`send-keys -t ${quoteArg(paneId)} C-c`);
+    } catch {
+      // send-keys 실패 무시
+    }
+    // 1초 대기 후 pane 강제 종료
+    spawnSync("sleep", ["1"], { stdio: "ignore", windowsHide: true });
+    try {
+      psmuxExec(`kill-pane -t ${quoteArg(paneId)}`);
+    } catch {
+      // 이미 종료된 pane — 무시
+    }
+    return { killed: true };
+  } catch (err) {
+    if (err.message.includes("워커를 찾을 수 없습니다")) {
+      return { killed: false };
+    }
+    throw new Error(`워커 종료 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`);
+  }
+}
+
+/**
+ * 워커 pane 출력 마지막 N줄 캡처
+ * @param {string} sessionName - 대상 psmux 세션 이름
+ * @param {string} workerName - 워커 pane 타이틀
+ * @param {number} lines - 캡처할 줄 수 (기본 50)
+ * @returns {string} 캡처된 출력
+ */
+export function captureWorkerOutput(sessionName, workerName, lines = 50) {
+  if (!hasPsmux()) {
+    throw new Error("psmux가 설치되어 있지 않습니다.");
+  }
+  try {
+    const { paneId } = getWorkerStatus(sessionName, workerName);
+    return psmuxExec(`capture-pane -t ${quoteArg(paneId)} -p -S -${lines}`);
+  } catch (err) {
+    if (err.message.includes("워커를 찾을 수 없습니다")) throw err;
+    throw new Error(`출력 캡처 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`);
+  }
+}
+
+// ─── CLI 진입점 ───
+
+if (process.argv[1] && process.argv[1].endsWith("psmux.mjs")) {
+  const [,, cmd, ...args] = process.argv;
+
+  // CLI 인자 파싱 헬퍼
+  function getArg(name) {
+    const idx = args.indexOf(`--${name}`);
+    return idx !== -1 && idx + 1 < args.length ? args[idx + 1] : null;
+  }
+
+  try {
+    switch (cmd) {
+      case "spawn": {
+        const session = getArg("session");
+        const name = getArg("name");
+        const workerCmd = getArg("cmd");
+        if (!session || !name || !workerCmd) {
+          console.error("사용법: node psmux.mjs spawn --session <세션> --name <워커명> --cmd <커맨드>");
+          process.exit(1);
+        }
+        const result = spawnWorker(session, name, workerCmd);
+        console.log(JSON.stringify(result, null, 2));
+        break;
+      }
+      case "status": {
+        const session = getArg("session");
+        const name = getArg("name");
+        if (!session || !name) {
+          console.error("사용법: node psmux.mjs status --session <세션> --name <워커명>");
+          process.exit(1);
+        }
+        const result = getWorkerStatus(session, name);
+        console.log(JSON.stringify(result, null, 2));
+        break;
+      }
+      case "kill": {
+        const session = getArg("session");
+        const name = getArg("name");
+        if (!session || !name) {
+          console.error("사용법: node psmux.mjs kill --session <세션> --name <워커명>");
+          process.exit(1);
+        }
+        const result = killWorker(session, name);
+        console.log(JSON.stringify(result, null, 2));
+        break;
+      }
+      case "output": {
+        const session = getArg("session");
+        const name = getArg("name");
+        const lines = parseInt(getArg("lines") || "50", 10);
+        if (!session || !name) {
+          console.error("사용법: node psmux.mjs output --session <세션> --name <워커명> [--lines <줄수>]");
+          process.exit(1);
+        }
+        console.log(captureWorkerOutput(session, name, lines));
+        break;
+      }
+      default:
+        console.error("사용법: node psmux.mjs spawn|status|kill|output [args]");
+        console.error("");
+        console.error("  spawn   --session <세션> --name <워커명> --cmd <커맨드>");
+        console.error("  status  --session <세션> --name <워커명>");
+        console.error("  kill    --session <세션> --name <워커명>");
+        console.error("  output  --session <세션> --name <워커명> [--lines <줄수>]");
+        process.exit(1);
+    }
+  } catch (err) {
+    console.error(`오류: ${err.message}`);
+    process.exit(1);
+  }
+}

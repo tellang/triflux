@@ -192,7 +192,22 @@ status는 "completed"만 사용. 실패 여부는 `metadata.result`로 구분.
 > Windows 호환 경로, 타임아웃, 후처리(토큰 추적/이슈 로깅)가 모두 누락된다.
 > 반드시 `bash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}`을 통해 실행해야 한다.
 
+**Bash timeout 동적 상속:** Bash timeout은 tfx-route.sh의 role/profile별 timeout + 60초 여유를 ms로 변환하여 동적 상속한다. `getRouteTimeout(role, mcpProfile)` 기준: analyze/review 프로필 또는 architect/analyst 역할은 3600초, 그 외 기본 1080초(18분).
+
 **핵심 차이 vs v2:** 프롬프트 ~100 토큰 (v2의 ~500), task claim/complete/report는 tfx-route.sh가 Named Pipe(우선)/HTTP(fallback) 경유로 수행.
+
+#### 인터럽트 프로토콜
+
+워커가 Bash 실행 전에 SendMessage로 시작을 보고하면 턴 경계가 생겨 리드가 방향 전환 메시지를 보낼 수 있다.
+
+```
+1. TaskUpdate(taskId, status: in_progress) — task claim
+2. SendMessage(to: team-lead, "작업 시작: {agentName}") — 시작 보고 (턴 경계 생성)
+3. Bash(command: tfx-route.sh ..., timeout: {bashTimeoutMs}) — 1회 실행
+4. TaskUpdate(status: completed, metadata: {result}) + SendMessage → 종료
+```
+
+리드는 워커의 Step 2 시점에 턴 경계를 인식하고, 필요 시 방향 전환/중단 메시지를 보낼 수 있다.
 
 `tfx-route.sh` 팀 통합 동작(이미 구현됨, `TFX_TEAM_*` 기반):
 - `TFX_TEAM_NAME`: 팀 식별자
@@ -235,8 +250,7 @@ Agent({
 ```
 "팀 '{teamName}' 생성 완료.
 Codex/Gemini 워커가 슬림 래퍼 Agent로 네비게이션에 등록되었습니다.
-Shift+Down으로 다음 워커 (마지막→리드 wrap), Shift+Tab으로 이전 워커 전환이 가능합니다.
-(Shift+Up은 Claude Code 미지원 — 대부분 터미널에서 scroll-up으로 먹힘)"
+Shift+Down으로 다음 워커로 전환 (마지막→리드 wrap). Shift+Tab으로 이전 워커 전환."
 ```
 
 ### Phase 3.5–3.7: Verify/Fix Loop (`--thorough` 전용)
