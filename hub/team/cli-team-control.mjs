@@ -101,13 +101,13 @@ export async function teamAttach() {
 
   if (isNativeMode(state)) {
     console.log(`\n  ${DIM}in-process 모드는 별도 attach가 없습니다.${RESET}`);
-    console.log(`  ${DIM}상태 확인: tfx team status${RESET}\n`);
+    console.log(`  ${DIM}상태 확인: tfx multi status${RESET}\n`);
     return;
   }
 
   if (isWtMode(state)) {
     console.log(`\n  ${DIM}wt 모드는 attach 개념이 없습니다 (Windows Terminal pane가 독립 실행됨).${RESET}`);
-    console.log(`  ${DIM}재실행/정리는: tfx team stop${RESET}\n`);
+    console.log(`  ${DIM}재실행/정리는: tfx multi stop${RESET}\n`);
     return;
   }
 
@@ -142,14 +142,14 @@ export async function teamFocus() {
 
   if (isNativeMode(state)) {
     console.log(`\n  ${DIM}in-process 모드는 focus/attach 개념이 없습니다.${RESET}`);
-    console.log(`  ${DIM}직접 지시: tfx team send <대상> "메시지"${RESET}\n`);
+    console.log(`  ${DIM}직접 지시: tfx multi send <대상> "메시지"${RESET}\n`);
     return;
   }
 
   const selector = process.argv[4];
   const member = resolveMember(state, selector);
   if (!member) {
-    console.log(`\n  사용법: ${WHITE}tfx team focus <lead|이름|번호>${RESET}\n`);
+    console.log(`\n  사용법: ${WHITE}tfx multi focus <lead|이름|번호>${RESET}\n`);
     return;
   }
 
@@ -206,7 +206,7 @@ export async function teamInterrupt() {
   const selector = process.argv[4] || "lead";
   const member = resolveMember(state, selector);
   if (!member) {
-    console.log(`\n  사용법: ${WHITE}tfx team interrupt <lead|이름|번호>${RESET}\n`);
+    console.log(`\n  사용법: ${WHITE}tfx multi interrupt <lead|이름|번호>${RESET}\n`);
     return;
   }
 
@@ -247,7 +247,7 @@ export async function teamControl() {
   const allowed = new Set(["interrupt", "stop", "pause", "resume"]);
 
   if (!member || !allowed.has(command)) {
-    console.log(`\n  사용법: ${WHITE}tfx team control <lead|이름|번호> <interrupt|stop|pause|resume> [사유]${RESET}\n`);
+    console.log(`\n  사용법: ${WHITE}tfx multi control <lead|이름|번호> <interrupt|stop|pause|resume> [사유]${RESET}\n`);
     return;
   }
 
@@ -365,7 +365,7 @@ export async function teamSend() {
   const message = process.argv.slice(5).join(" ");
   const member = resolveMember(state, selector);
   if (!member || !message) {
-    console.log(`\n  사용법: ${WHITE}tfx team send <lead|이름|번호> "메시지"${RESET}\n`);
+    console.log(`\n  사용법: ${WHITE}tfx multi send <lead|이름|번호> "메시지"${RESET}\n`);
     return;
   }
 

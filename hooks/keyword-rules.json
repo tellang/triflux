@@ -11,7 +11,7 @@
       "skill": "tfx-cancel",
       "priority": 0,
       "supersedes": [
-        "tfx-team",
+        "tfx-multi",
         "tfx-auto",
         "tfx-auto-codex",
         "tfx-codex",
@@ -22,14 +22,14 @@
       "mcp_route": null
     },
     {
-      "id": "tfx-team",
+      "id": "tfx-multi",
       "patterns": [
         {
-          "source": "(?<!\\b(?:my|the|our|omc|oh-my-claudecode)\\s)\\btfx[\\s-]?team\\b",
+          "source": "(?<!\\b(?:my|the|our|omc|oh-my-claudecode)\\s)\\btfx[\\s-]?multi\\b",
           "flags": "i"
         }
       ],
-      "skill": "tfx-team",
+      "skill": "tfx-multi",
       "priority": 1,
       "supersedes": [],
       "exclusive": false,

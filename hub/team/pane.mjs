@@ -78,7 +78,7 @@ export function buildCliCommand(cli, options = {}) {
 
 /**
  * pane에 CLI 시작
- * @param {string} target — 예: tfx-team-abc:0.1
+ * @param {string} target — 예: tfx-multi-abc:0.1
  * @param {string} command — 실행할 커맨드
  */
 export function startCliInPane(target, command) {
@@ -89,12 +89,12 @@ export function startCliInPane(target, command) {
 /**
  * pane에 프롬프트 주입 (load-buffer + paste-buffer 방식)
  * 멀티라인 + 특수문자 안전, 크기 제한 없음
- * @param {string} target — 예: tfx-team-abc:0.1
+ * @param {string} target — 예: tfx-multi-abc:0.1
  * @param {string} prompt — 주입할 텍스트
  */
 export function injectPrompt(target, prompt) {
   // 임시 파일에 프롬프트 저장
-  const tmpDir = join(tmpdir(), "tfx-team");
+  const tmpDir = join(tmpdir(), "tfx-multi");
   mkdirSync(tmpDir, { recursive: true });
 
   // pane ID를 파일명에 포함 (충돌 방지)
@@ -130,7 +130,7 @@ export function injectPrompt(target, prompt) {
 
 /**
  * pane에 키 입력 전송
- * @param {string} target — 예: tfx-team-abc:0.1
+ * @param {string} target — 예: tfx-multi-abc:0.1
  * @param {string} keys — tmux 키 표현 (예: 'C-c', 'Enter')
  */
 export function sendKeys(target, keys) {

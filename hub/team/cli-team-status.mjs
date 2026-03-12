@@ -65,7 +65,7 @@ export async function teamStatus() {
   const status = alive ? `${GREEN}● active${RESET}` : `${RED}● dead${RESET}`;
   const uptime = alive ? `${Math.round((Date.now() - state.startedAt) / 60000)}분` : "-";
 
-  console.log(`\n  ${AMBER}${BOLD}⬡ tfx team${RESET} ${status}\n`);
+  console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET} ${status}\n`);
   console.log(`    세션:   ${state.sessionName}`);
   console.log(`    모드:   ${state.teammateMode || "tmux"}`);
   console.log(`    리드:   ${state.lead || "claude"}`);
@@ -146,7 +146,7 @@ export function teamTaskUpdate() {
         : null;
 
   if (!nextStatus || !taskId) {
-    console.log(`\n  사용법: ${WHITE}tfx team task <pending|progress|done> <T1>${RESET}\n`);
+    console.log(`\n  사용법: ${WHITE}tfx multi task <pending|progress|done> <T1>${RESET}\n`);
     return;
   }
 
