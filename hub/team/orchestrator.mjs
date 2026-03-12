@@ -58,6 +58,8 @@ export function buildLeadPrompt(taskDescription, config) {
 
   const workerIds = workers.map((w) => w.agentId).join(", ");
 
+  const bridgePath = "node hub/bridge.mjs";
+
   return `리드 에이전트: ${agentId}
 
 목표: ${taskDescription}
@@ -68,14 +70,13 @@ ${roster}
 
 규칙:
 - 가능한 짧고 핵심만 지시/요약(토큰 절약)
-- 워커 제어 메시지 표준:
-  publish(from="${agentId}", to="<worker-agent-id>", topic="lead.control", payload={command:"interrupt|stop|pause|resume", reason:"..."})
+- 워커 제어:
+  ${bridgePath} result --agent ${agentId} --topic lead.control
 - 워커 결과 수집:
-  poll_messages(agent_id="${agentId}", wait_ms=1000, max_messages=20)
+  ${bridgePath} context --agent ${agentId} --max 20
 - 최종 결과는 topic="task.result"를 모아 통합
 
-권장 워커 ID: ${workerIds || "(없음)"}
-Hub: ${hubUrl}
+워커 ID: ${workerIds || "(없음)"}
 지금 즉시 워커를 배정하고 병렬 진행을 관리하라.`;
 }
 
@@ -93,26 +94,20 @@ export function buildPrompt(subtask, config) {
 
   const hubBase = hubUrl.replace("/mcp", "");
 
+  const bridgePath = "node hub/bridge.mjs";
+
   return `워커: ${agentId} (${cli})
 작업: ${subtask}
 
 필수 규칙:
 1) 간결하게 작업(불필요한 장문 설명 금지)
-2) 시작 즉시 register 실행:
-   register(agent_id="${agentId}", cli="${cli}", capabilities=["code"], topics=["lead.control","task.result"], heartbeat_ttl_ms=600000)
+2) 시작 즉시 등록:
+   ${bridgePath} register --agent ${agentId} --cli ${cli} --topics lead.control,task.result
 3) 주기적으로 수신함 확인:
-   poll_messages(agent_id="${agentId}", wait_ms=1000, max_messages=10)
-4) lead.control 수신 시 즉시 반응
-   - interrupt: 즉시 중단, 진행상태 요약 publish
-   - stop: 작업 종료, 최종 요약 publish 후 대기
-   - pause: 작업 일시정지
-   - resume: 작업 재개
+   ${bridgePath} context --agent ${agentId} --max 10
+4) lead.control 수신 시 즉시 반응 (interrupt/stop/pause/resume)
 5) 완료 시 결과 발행:
-   publish(from="${agentId}", to="topic:task.result", topic="task.result", payload={summary:"..."})
-
-MCP가 없으면 REST 폴백:
-- POST ${hubBase}/bridge/register
-- POST ${hubBase}/bridge/result
+   ${bridgePath} result --agent ${agentId} --topic task.result --file <출력파일>
 
 지금 작업을 시작하라.`;
 }
@@ -149,7 +144,7 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
       teammateMode,
       workers: workers.map((w) => ({ agentId: w.agentId, cli: w.cli, subtask: w.subtask })),
     });
-    injectPrompt(lead.target, leadPrompt);
+    injectPrompt(lead.target, leadPrompt, { useFileRef: true });
     await new Promise((r) => setTimeout(r, 100));
   }
 
@@ -160,7 +155,7 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
       hubUrl,
       sessionName,
     });
-    injectPrompt(worker.target, prompt);
+    injectPrompt(worker.target, prompt, { useFileRef: true });
     await new Promise((r) => setTimeout(r, 100));
   }
 }
