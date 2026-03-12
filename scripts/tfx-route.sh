@@ -694,6 +694,12 @@ run_codex_mcp() {
     timeout "$TIMEOUT_SEC" "$node_bin" "${mcp_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" || exit_code_local=$?
   fi
 
+  # 모듈 로드 실패(의존성 누락) → MCP transport exit code로 변환하여 fallback 트리거
+  if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -q 'ERR_MODULE_NOT_FOUND' "$STDERR_LOG" 2>/dev/null; then
+    echo "[tfx-route] Codex MCP 모듈 로드 실패 — fallback 가능 exit code로 변환" >&2
+    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
+  fi
+
   return "$exit_code_local"
 }
 
