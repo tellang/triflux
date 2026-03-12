@@ -92,19 +92,35 @@ export function startCliInPane(target, command) {
  * @param {string} target — 예: tfx-multi-abc:0.1
  * @param {string} prompt — 주입할 텍스트
  */
-export function injectPrompt(target, prompt) {
-  // 임시 파일에 프롬프트 저장
+/**
+ * pane에 프롬프트 주입
+ * @param {string} target — 예: tfx-multi-abc:0.1
+ * @param {string} prompt — 주입할 텍스트
+ * @param {object} [opts]
+ * @param {boolean} [opts.useFileRef] — true면 TUI용 @file 참조 방식 (psmux 전용)
+ */
+export function injectPrompt(target, prompt, { useFileRef = false } = {}) {
   const tmpDir = join(tmpdir(), "tfx-multi");
   mkdirSync(tmpDir, { recursive: true });
 
-  // pane ID를 파일명에 포함 (충돌 방지)
   const safeTarget = target.replace(/[:.]/g, "-");
   const tmpFile = join(tmpDir, `prompt-${safeTarget}-${Date.now()}.txt`);
+
+  // psmux + TUI 앱: @file 참조로 주입 (paste-buffer는 TUI와 호환 안 됨)
+  if (detectMultiplexer() === "psmux" && useFileRef) {
+    writeFileSync(tmpFile, prompt, "utf8");
+    const filePath = tmpFile.replace(/\\/g, "/");
+    psmuxExec(["select-pane", "-t", target]);
+    psmuxExec(["send-keys", "-t", target, "-l", `@${filePath}`]);
+    psmuxExec(["send-keys", "-t", target, "Enter"]);
+    // TUI가 파일을 읽을 시간을 주고 정리
+    setTimeout(() => { try { unlinkSync(tmpFile); } catch {} }, 10000);
+    return;
+  }
 
   try {
     writeFileSync(tmpFile, prompt, "utf8");
 
-    // psmux는 buffer 명령에 세션 컨텍스트가 필요하다.
     if (detectMultiplexer() === "psmux") {
       const sessionName = getPsmuxSessionName(target);
       psmuxExec(["load-buffer", "-t", sessionName, toMuxPath(tmpFile)]);
@@ -119,12 +135,7 @@ export function injectPrompt(target, prompt) {
     muxExec(`paste-buffer -t ${target}`);
     muxExec(`send-keys -t ${target} Enter`);
   } finally {
-    // 임시 파일 정리
-    try {
-      unlinkSync(tmpFile);
-    } catch {
-      // 정리 실패 무시
-    }
+    try { unlinkSync(tmpFile); } catch {}
   }
 }
 
