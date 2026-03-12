@@ -4,8 +4,6 @@
 import {
   existsSync,
   mkdirSync,
-  readdirSync,
-  readFileSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -13,6 +11,7 @@ import {
   openSync,
   closeSync,
 } from 'node:fs';
+import { readdir, stat, readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -25,6 +24,7 @@ const TASKS_ROOT = join(CLAUDE_HOME, 'tasks');
 // ── 인메모리 캐시 (디렉토리 mtime 기반 무효화) ──
 const _dirCache = new Map(); // tasksDir → { mtimeMs, files: string[] }
 const _taskIdIndex = new Map(); // taskId → filePath
+const _taskContentCache = new Map(); // filePath → { mtimeMs, data }
 
 function _invalidateCache(tasksDir) {
   _dirCache.delete(tasksDir);
@@ -40,9 +40,9 @@ function validateTeamName(teamName) {
   }
 }
 
-function readJsonSafe(path) {
+async function readJsonSafe(path) {
   try {
-    return JSON.parse(readFileSync(path, 'utf8'));
+    return JSON.parse(await readFile(path, 'utf8'));
   } catch {
     return null;
   }
@@ -66,12 +66,11 @@ function atomicWriteJson(path, value) {
   }
 }
 
-function sleepMs(ms) {
-  // busy-wait를 피하고 Atomics.wait로 동기 대기 (CPU 점유 최소화)
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+async function sleepMs(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
-function withFileLock(lockPath, fn, retries = 20, delayMs = 25) {
+async function withFileLock(lockPath, fn, retries = 20, delayMs = 25) {
   let fd = null;
   for (let i = 0; i < retries; i += 1) {
     try {
@@ -79,12 +78,12 @@ function withFileLock(lockPath, fn, retries = 20, delayMs = 25) {
       break;
     } catch (e) {
       if (e?.code !== 'EEXIST' || i === retries - 1) throw e;
-      sleepMs(delayMs);
+      await sleepMs(delayMs);
     }
   }
 
   try {
-    return fn();
+    return await fn();
   } finally {
     try { if (fd != null) closeSync(fd); } catch {}
     try { unlinkSync(lockPath); } catch {}
@@ -99,13 +98,13 @@ function getLeadSessionId(config) {
     || null;
 }
 
-export function resolveTeamPaths(teamName) {
+export async function resolveTeamPaths(teamName) {
   validateTeamName(teamName);
 
   const teamDir = join(TEAMS_ROOT, teamName);
   const configPath = join(teamDir, 'config.json');
   const inboxesDir = join(teamDir, 'inboxes');
-  const config = readJsonSafe(configPath);
+  const config = await readJsonSafe(configPath);
   const leadSessionId = getLeadSessionId(config);
 
   const byTeam = join(TASKS_ROOT, teamName);
@@ -131,19 +130,20 @@ export function resolveTeamPaths(teamName) {
   };
 }
 
-function collectTaskFiles(tasksDir) {
+async function collectTaskFiles(tasksDir) {
   if (!existsSync(tasksDir)) return [];
 
   // 디렉토리 mtime 기반 캐시 — O(N) I/O를 반복 호출 시 O(1)로 축소
   let dirMtime;
-  try { dirMtime = statSync(tasksDir).mtimeMs; } catch { return []; }
+  try { dirMtime = (await stat(tasksDir)).mtimeMs; } catch { return []; }
 
   const cached = _dirCache.get(tasksDir);
   if (cached && cached.mtimeMs === dirMtime) {
     return cached.files;
   }
 
-  const files = readdirSync(tasksDir)
+  const entries = await readdir(tasksDir);
+  const files = entries
     .filter((name) => name.endsWith('.json'))
     .filter((name) => !name.endsWith('.lock'))
     .filter((name) => name !== '.highwatermark')
@@ -153,7 +153,7 @@ function collectTaskFiles(tasksDir) {
   return files;
 }
 
-function locateTaskFile(tasksDir, taskId) {
+async function locateTaskFile(tasksDir, taskId) {
   const direct = join(tasksDir, `${taskId}.json`);
   if (existsSync(direct)) return direct;
 
@@ -162,13 +162,13 @@ function locateTaskFile(tasksDir, taskId) {
   if (indexed && existsSync(indexed)) return indexed;
 
   // 캐시된 collectTaskFiles로 풀 스캔
-  const files = collectTaskFiles(tasksDir);
+  const files = await collectTaskFiles(tasksDir);
   for (const file of files) {
     if (basename(file, '.json') === taskId) {
       _taskIdIndex.set(taskId, file);
       return file;
     }
-    const json = readJsonSafe(file);
+    const json = await readJsonSafe(file);
     if (json && String(json.id || '') === taskId) {
       _taskIdIndex.set(taskId, file);
       return file;
@@ -181,7 +181,7 @@ function isObject(v) {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
-export function teamInfo(args = {}) {
+export async function teamInfo(args = {}) {
   const { team_name, include_members = true, include_paths = true } = args;
   try {
     validateTeamName(team_name);
@@ -189,7 +189,7 @@ export function teamInfo(args = {}) {
     return err('INVALID_TEAM_NAME', 'team_name 형식이 올바르지 않습니다');
   }
 
-  const paths = resolveTeamPaths(team_name);
+  const paths = await resolveTeamPaths(team_name);
   if (!existsSync(paths.team_dir)) {
     return err('TEAM_NOT_FOUND', `팀 디렉토리가 없습니다: ${paths.team_dir}`);
   }
@@ -224,7 +224,7 @@ export function teamInfo(args = {}) {
   };
 }
 
-export function teamTaskList(args = {}) {
+export async function teamTaskList(args = {}) {
   const {
     team_name,
     owner,
@@ -239,7 +239,7 @@ export function teamTaskList(args = {}) {
     return err('INVALID_TEAM_NAME', 'team_name 형식이 올바르지 않습니다');
   }
 
-  const paths = resolveTeamPaths(team_name);
+  const paths = await resolveTeamPaths(team_name);
   if (paths.tasks_dir_resolution === 'not_found') {
     return err('TASKS_DIR_NOT_FOUND', `task 디렉토리를 찾지 못했습니다: ${team_name}`);
   }
@@ -249,8 +249,22 @@ export function teamTaskList(args = {}) {
   let parseWarnings = 0;
 
   const tasks = [];
-  for (const file of collectTaskFiles(paths.tasks_dir)) {
-    const json = readJsonSafe(file);
+  for (const file of await collectTaskFiles(paths.tasks_dir)) {
+    // mtime 기반 task 콘텐츠 캐시 — 변경 없으면 파일 읽기 생략
+    let fileMtime = Date.now();
+    try { fileMtime = (await stat(file)).mtimeMs; } catch {}
+
+    const contentCached = _taskContentCache.get(file);
+    let json;
+    if (contentCached && contentCached.mtimeMs === fileMtime) {
+      json = contentCached.data;
+    } else {
+      json = await readJsonSafe(file);
+      if (json && isObject(json)) {
+        _taskContentCache.set(file, { mtimeMs: fileMtime, data: json });
+      }
+    }
+
     if (!json || !isObject(json)) {
       parseWarnings += 1;
       continue;
@@ -260,13 +274,10 @@ export function teamTaskList(args = {}) {
     if (owner && String(json.owner || '') !== String(owner)) continue;
     if (statusSet.size > 0 && !statusSet.has(String(json.status || ''))) continue;
 
-    let mtime = Date.now();
-    try { mtime = statSync(file).mtimeMs; } catch {}
-
     tasks.push({
       ...json,
       task_file: file,
-      mtime_ms: mtime,
+      mtime_ms: fileMtime,
     });
   }
 
@@ -288,7 +299,7 @@ export function teamTaskList(args = {}) {
 // status 화이트리스트 (Claude Code API 호환)
 const VALID_STATUSES = new Set(['pending', 'in_progress', 'completed', 'deleted']);
 
-export function teamTaskUpdate(args = {}) {
+export async function teamTaskUpdate(args = {}) {
   // "failed" → "completed" + metadata.result 자동 매핑
   if (String(args.status || '') === 'failed') {
     args = {
@@ -326,12 +337,12 @@ export function teamTaskUpdate(args = {}) {
     return err('INVALID_TASK_ID', 'task_id가 필요합니다');
   }
 
-  const paths = resolveTeamPaths(team_name);
+  const paths = await resolveTeamPaths(team_name);
   if (paths.tasks_dir_resolution === 'not_found') {
     return err('TASKS_DIR_NOT_FOUND', `task 디렉토리를 찾지 못했습니다: ${team_name}`);
   }
 
-  const taskFile = locateTaskFile(paths.tasks_dir, String(task_id));
+  const taskFile = await locateTaskFile(paths.tasks_dir, String(task_id));
   if (!taskFile) {
     return err('TASK_NOT_FOUND', `task를 찾지 못했습니다: ${task_id}`);
   }
@@ -339,14 +350,14 @@ export function teamTaskUpdate(args = {}) {
   const lockFile = `${taskFile}.lock`;
 
   try {
-    return withFileLock(lockFile, () => {
-      const before = readJsonSafe(taskFile);
+    return await withFileLock(lockFile, async () => {
+      const before = await readJsonSafe(taskFile);
       if (!before || !isObject(before)) {
         return err('INVALID_TASK_FILE', `task 파일 파싱 실패: ${taskFile}`);
       }
 
       let beforeMtime = Date.now();
-      try { beforeMtime = statSync(taskFile).mtimeMs; } catch {}
+      try { beforeMtime = (await stat(taskFile)).mtimeMs; } catch {}
 
       if (if_match_mtime_ms != null && Number(if_match_mtime_ms) !== Number(beforeMtime)) {
         return err('MTIME_CONFLICT', 'if_match_mtime_ms가 일치하지 않습니다', {
@@ -427,6 +438,8 @@ export function teamTaskUpdate(args = {}) {
       if (updated) {
         atomicWriteJson(taskFile, after);
         _invalidateCache(dirname(taskFile));
+        // 콘텐츠 캐시 무효화
+        _taskContentCache.delete(taskFile);
       }
 
       let afterMtime = beforeMtime;
@@ -453,7 +466,7 @@ function sanitizeRecipientName(v) {
   return String(v || 'team-lead').replace(/[\\/:*?"<>|]/g, '_');
 }
 
-export function teamSendMessage(args = {}) {
+export async function teamSendMessage(args = {}) {
   const {
     team_name,
     from,
@@ -472,7 +485,7 @@ export function teamSendMessage(args = {}) {
   if (!String(from || '').trim()) return err('INVALID_FROM', 'from이 필요합니다');
   if (!String(text || '').trim()) return err('INVALID_TEXT', 'text가 필요합니다');
 
-  const paths = resolveTeamPaths(team_name);
+  const paths = await resolveTeamPaths(team_name);
   if (!existsSync(paths.team_dir)) {
     return err('TEAM_NOT_FOUND', `팀 디렉토리가 없습니다: ${paths.team_dir}`);
   }
@@ -483,8 +496,8 @@ export function teamSendMessage(args = {}) {
   let message;
 
   try {
-    const unreadCount = withFileLock(lockFile, () => {
-      const queue = readJsonSafe(inboxFile);
+    const unreadCount = await withFileLock(lockFile, async () => {
+      const queue = await readJsonSafe(inboxFile);
       const list = Array.isArray(queue) ? queue : [];
 
       message = {

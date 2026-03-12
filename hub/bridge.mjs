@@ -12,6 +12,16 @@ import { parseArgs as nodeParseArgs } from 'node:util';
 import { randomUUID } from 'node:crypto';
 
 const HUB_PID_FILE = join(homedir(), '.claude', 'cache', 'tfx-hub', 'hub.pid');
+const HUB_TOKEN_FILE = join(homedir(), '.claude', '.tfx-hub-token');
+
+// Hub 인증 토큰 읽기 (파일 없으면 null → 하위 호환)
+function readHubToken() {
+  try {
+    return readFileSync(HUB_TOKEN_FILE, 'utf8').trim();
+  } catch {
+    return null;
+  }
+}
 
 export function getHubUrl() {
   if (process.env.TFX_HUB_URL) return process.env.TFX_HUB_URL.replace(/\/mcp$/, '');
@@ -46,9 +56,15 @@ export async function post(path, body, timeoutMs = 5000) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = readHubToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const res = await fetch(`${getHubUrl()}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -316,7 +332,7 @@ async function cmdTeamInfo(args) {
   }
   // Hub 미실행 fallback — nativeProxy 직접 호출
   const { teamInfo } = await import('./team/nativeProxy.mjs');
-  console.log(JSON.stringify(teamInfo(body)));
+  console.log(JSON.stringify(await teamInfo(body)));
 }
 
 async function cmdTeamTaskList(args) {
@@ -334,7 +350,7 @@ async function cmdTeamTaskList(args) {
   }
   // Hub 미실행 fallback — nativeProxy 직접 호출
   const { teamTaskList } = await import('./team/nativeProxy.mjs');
-  console.log(JSON.stringify(teamTaskList(body)));
+  console.log(JSON.stringify(await teamTaskList(body)));
 }
 
 async function cmdTeamTaskUpdate(args) {
@@ -360,7 +376,7 @@ async function cmdTeamTaskUpdate(args) {
   }
   // Hub 미실행 fallback — nativeProxy 직접 호출
   const { teamTaskUpdate } = await import('./team/nativeProxy.mjs');
-  console.log(JSON.stringify(teamTaskUpdate(body)));
+  console.log(JSON.stringify(await teamTaskUpdate(body)));
 }
 
 async function cmdTeamSendMessage(args) {
@@ -379,7 +395,7 @@ async function cmdTeamSendMessage(args) {
   }
   // Hub 미실행 fallback — nativeProxy 직접 호출
   const { teamSendMessage } = await import('./team/nativeProxy.mjs');
-  console.log(JSON.stringify(teamSendMessage(body)));
+  console.log(JSON.stringify(await teamSendMessage(body)));
 }
 
 function getHubDbPath() {

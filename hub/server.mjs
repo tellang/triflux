@@ -52,6 +52,14 @@ async function parseBody(req) {
 
 const PID_DIR = join(homedir(), '.claude', 'cache', 'tfx-hub');
 const PID_FILE = join(PID_DIR, 'hub.pid');
+const TOKEN_FILE = join(homedir(), '.claude', '.tfx-hub-token');
+
+// localhost 계열 Origin만 허용
+const ALLOWED_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
+function isAllowedOrigin(origin) {
+  return origin && ALLOWED_ORIGIN_RE.test(origin);
+}
 
 /**
  * tfx-hub 시작
@@ -65,6 +73,11 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   if (!dbPath) {
     dbPath = join(PID_DIR, 'state.db');
   }
+
+  // 인증 토큰 생성 (환경변수 우선, 없으면 자동 생성)
+  const HUB_TOKEN = process.env.TFX_HUB_TOKEN || randomUUID();
+  mkdirSync(join(homedir(), '.claude'), { recursive: true });
+  writeFileSync(TOKEN_FILE, HUB_TOKEN, { mode: 0o600 });
 
   const store = createStore(dbPath);
   const router = createRouter(store);
@@ -109,12 +122,16 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   }
 
   const httpServer = createHttpServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, Last-Event-ID');
+    // CORS: localhost 계열 Origin만 허용
+    const origin = req.headers['origin'];
+    if (isAllowedOrigin(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id, Last-Event-ID');
+    }
 
     if (req.method === 'OPTIONS') {
-      res.writeHead(204);
+      res.writeHead(isAllowedOrigin(origin) ? 204 : 403);
       return res.end();
     }
 
@@ -140,6 +157,14 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
 
     if (req.url.startsWith('/bridge')) {
       res.setHeader('Content-Type', 'application/json');
+
+      // Bearer 토큰 인증
+      const authHeader = req.headers['authorization'] || '';
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      if (bearerToken !== HUB_TOKEN) {
+        res.writeHead(401);
+        return res.end(JSON.stringify({ ok: false, error: 'Unauthorized' }));
+      }
 
       if (req.method !== 'POST' && req.method !== 'DELETE') {
         res.writeHead(405);
@@ -223,13 +248,13 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         if (req.method === 'POST') {
           let teamResult = null;
           if (path === '/bridge/team/info' || path === '/bridge/team-info') {
-            teamResult = teamInfo(body);
+            teamResult = await teamInfo(body);
           } else if (path === '/bridge/team/task-list' || path === '/bridge/team-task-list') {
-            teamResult = teamTaskList(body);
+            teamResult = await teamTaskList(body);
           } else if (path === '/bridge/team/task-update' || path === '/bridge/team-task-update') {
-            teamResult = teamTaskUpdate(body);
+            teamResult = await teamTaskUpdate(body);
           } else if (path === '/bridge/team/send-message' || path === '/bridge/team-send-message') {
-            teamResult = teamSendMessage(body);
+            teamResult = await teamSendMessage(body);
           }
 
           if (teamResult) {
@@ -452,6 +477,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         await pipe.stop();
         store.close();
         try { unlinkSync(PID_FILE); } catch {}
+        try { unlinkSync(TOKEN_FILE); } catch {}
         await new Promise((resolveClose) => httpServer.close(resolveClose));
       };
 
