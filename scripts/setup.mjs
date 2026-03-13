@@ -17,9 +17,16 @@ const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 
 const REQUIRED_CODEX_PROFILES = [
   {
+    name: "high",
+    lines: [
+      'model = "gpt-5.4"',
+      'model_reasoning_effort = "high"',
+    ],
+  },
+  {
     name: "xhigh",
     lines: [
-      'model = "gpt-5.3-codex"',
+      'model = "gpt-5.4"',
       'model_reasoning_effort = "xhigh"',
     ],
   },

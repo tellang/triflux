@@ -447,7 +447,7 @@ get_gemini_mcp_servers() {
   local profile="$1"
   case "$profile" in
     implement)  echo "context7 brave-search" ;;
-    analyze)    echo "context7 brave-search exa" ;;
+    analyze)    echo "context7 brave-search exa tavily" ;;
     review)     echo "sequential-thinking" ;;
     docs)       echo "context7 brave-search" ;;
     *)          echo "" ;;
