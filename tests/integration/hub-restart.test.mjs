@@ -157,14 +157,13 @@ describe('try_restart_hub() — Hub 재시작 성공', () => {
 
 describe('try_restart_hub() — Hub 재시작 실패 (타임아웃)', () => {
   it('curl이 계속 실패하면 return 1과 실패 메시지를 출력해야 한다', () => {
-    // fake hub (no-op → 서버 미시작) + 미리슨 포트 → curl 항상 실패
-    const deadPort = 29870 + Math.floor(Math.random() * 20);
+    // fake hub (no-op → 서버 미시작) + port 0 → curl이 항상 실패
     const tempDir = mkdtempSync(join(tmpdir(), 'tfx-hub-fail-'));
     try {
       const fakeHub = createFakeHubScript(tempDir);
       const script = createHubRestartWrapper(
         fakeHub,
-        `http://127.0.0.1:${deadPort}`,
+        'http://127.0.0.1:0',
       );
       const result = runBashScript(script);
 

@@ -295,6 +295,17 @@ async function requestHub(operation, body, timeoutMs = 3000, fallback = null) {
   return { transport: 'fallback', result: viaFallback };
 }
 
+function unavailableResult() {
+  return { ok: false, reason: 'hub_unavailable' };
+}
+
+function emitJson(payload) {
+  if (payload !== undefined) {
+    console.log(JSON.stringify(payload));
+  }
+  return payload?.ok !== false;
+}
+
 async function cmdRegister(args) {
   const agentId = args.agent;
   const timeoutSec = parseInt(args.timeout || '600', 10);
@@ -313,15 +324,15 @@ async function cmdRegister(args) {
   const result = outcome?.result;
 
   if (result?.ok) {
-    console.log(JSON.stringify({
+    return emitJson({
       ok: true,
       agent_id: agentId,
       lease_expires_ms: result.data?.lease_expires_ms,
       pipe_path: result.data?.pipe_path || getHubPipePath(),
-    }));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
+    });
   }
+
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdResult(args) {
@@ -349,10 +360,10 @@ async function cmdResult(args) {
   const result = outcome?.result;
 
   if (result?.ok) {
-    console.log(JSON.stringify({ ok: true, message_id: result.data?.message_id }));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
+    return emitJson({ ok: true, message_id: result.data?.message_id });
   }
+
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdControl(args) {
@@ -367,11 +378,7 @@ async function cmdControl(args) {
     ttl_ms: args['ttl-ms'] != null ? Number(args['ttl-ms']) : undefined,
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdContext(args) {
@@ -394,14 +401,21 @@ async function cmdContext(args) {
 
     if (args.out) {
       writeFileSync(args.out, combined, 'utf8');
-      console.log(JSON.stringify({ ok: true, count: result.data.messages.length, file: args.out }));
+      return emitJson({ ok: true, count: result.data.messages.length, file: args.out });
     } else {
       console.log(combined);
+      return true;
     }
-    return;
   }
 
-  if (args.out) console.log(JSON.stringify({ ok: true, count: 0 }));
+  if (result?.ok) {
+    if (args.out) {
+      return emitJson({ ok: true, count: 0 });
+    }
+    return true;
+  }
+
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdDeregister(args) {
@@ -411,10 +425,10 @@ async function cmdDeregister(args) {
   const result = outcome?.result;
 
   if (result?.ok) {
-    console.log(JSON.stringify({ ok: true, agent_id: args.agent, status: 'offline' }));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
+    return emitJson({ ok: true, agent_id: args.agent, status: 'offline' });
   }
+
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdAssignAsync(args) {
@@ -432,11 +446,7 @@ async function cmdAssignAsync(args) {
     correlation_id: args.correlation || undefined,
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdAssignResult(args) {
@@ -451,11 +461,7 @@ async function cmdAssignResult(args) {
     metadata: args.metadata ? parseJsonSafe(args.metadata, {}) : {},
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdAssignStatus(args) {
@@ -463,11 +469,7 @@ async function cmdAssignStatus(args) {
     job_id: args['job-id'],
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdAssignRetry(args) {
@@ -477,11 +479,7 @@ async function cmdAssignRetry(args) {
     requested_by: args['requested-by'],
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdTeamInfo(args) {
@@ -495,9 +493,7 @@ async function cmdTeamInfo(args) {
     return await teamInfo(body);
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdTeamTaskList(args) {
@@ -513,9 +509,7 @@ async function cmdTeamTaskList(args) {
     return await teamTaskList(body);
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdTeamTaskUpdate(args) {
@@ -539,9 +533,7 @@ async function cmdTeamTaskUpdate(args) {
     return await teamTaskUpdate(body);
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdTeamSendMessage(args) {
@@ -558,9 +550,7 @@ async function cmdTeamSendMessage(args) {
     return await teamSendMessage(body);
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 function getHubDbPath() {
@@ -588,9 +578,7 @@ async function cmdPipelineState(args) {
     }
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdPipelineAdvance(args) {
@@ -616,9 +604,7 @@ async function cmdPipelineAdvance(args) {
     }
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdPipelineInit(args) {
@@ -628,49 +614,39 @@ async function cmdPipelineInit(args) {
     ralph_max: args['ralph-max'] != null ? Number(args['ralph-max']) : undefined,
   });
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdPipelineList() {
   const outcome = await requestHub(HUB_OPERATIONS.pipelineList, {});
   const result = outcome?.result;
-  if (result) {
-    console.log(JSON.stringify(result));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
-  }
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdPing() {
   const outcome = await requestHub(HUB_OPERATIONS.hubStatus, { scope: 'hub' }, 2000);
 
   if (outcome?.transport === 'pipe' && outcome.result?.ok) {
-    console.log(JSON.stringify({
+    return emitJson({
       ok: true,
       hub: outcome.result.data?.hub?.state || 'healthy',
       pipe_path: getHubPipePath(),
       transport: 'pipe',
-    }));
-    return;
+    });
   }
 
   if (outcome?.transport === 'http' && outcome.result) {
     const data = outcome.result;
-    console.log(JSON.stringify({
+    return emitJson({
       ok: true,
       hub: data.hub?.state,
       sessions: data.sessions,
       pipe_path: data.pipe?.path || data.pipe_path || null,
       transport: 'http',
-    }));
-    return;
+    });
   }
 
-  console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
+  return emitJson(unavailableResult());
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -678,24 +654,24 @@ export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv.slice(1));
 
   switch (cmd) {
-    case 'register': await cmdRegister(args); break;
-    case 'result': await cmdResult(args); break;
-    case 'control': await cmdControl(args); break;
-    case 'context': await cmdContext(args); break;
-    case 'deregister': await cmdDeregister(args); break;
-    case 'assign-async': await cmdAssignAsync(args); break;
-    case 'assign-result': await cmdAssignResult(args); break;
-    case 'assign-status': await cmdAssignStatus(args); break;
-    case 'assign-retry': await cmdAssignRetry(args); break;
-    case 'team-info': await cmdTeamInfo(args); break;
-    case 'team-task-list': await cmdTeamTaskList(args); break;
-    case 'team-task-update': await cmdTeamTaskUpdate(args); break;
-    case 'team-send-message': await cmdTeamSendMessage(args); break;
-    case 'pipeline-state': await cmdPipelineState(args); break;
-    case 'pipeline-advance': await cmdPipelineAdvance(args); break;
-    case 'pipeline-init': await cmdPipelineInit(args); break;
-    case 'pipeline-list': await cmdPipelineList(args); break;
-    case 'ping': await cmdPing(args); break;
+    case 'register': return await cmdRegister(args);
+    case 'result': return await cmdResult(args);
+    case 'control': return await cmdControl(args);
+    case 'context': return await cmdContext(args);
+    case 'deregister': return await cmdDeregister(args);
+    case 'assign-async': return await cmdAssignAsync(args);
+    case 'assign-result': return await cmdAssignResult(args);
+    case 'assign-status': return await cmdAssignStatus(args);
+    case 'assign-retry': return await cmdAssignRetry(args);
+    case 'team-info': return await cmdTeamInfo(args);
+    case 'team-task-list': return await cmdTeamTaskList(args);
+    case 'team-task-update': return await cmdTeamTaskUpdate(args);
+    case 'team-send-message': return await cmdTeamSendMessage(args);
+    case 'pipeline-state': return await cmdPipelineState(args);
+    case 'pipeline-advance': return await cmdPipelineAdvance(args);
+    case 'pipeline-init': return await cmdPipelineInit(args);
+    case 'pipeline-list': return await cmdPipelineList(args);
+    case 'ping': return await cmdPing(args);
     default:
       console.error('사용법: bridge.mjs <register|result|control|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping> [--옵션]');
       process.exit(1);
@@ -704,5 +680,5 @@ export async function main(argv = process.argv.slice(2)) {
 
 const selfRun = process.argv[1]?.replace(/\\/g, '/').endsWith('hub/bridge.mjs');
 if (selfRun) {
-  await main();
+  process.exitCode = await main() ? 0 : 1;
 }
