@@ -37,6 +37,7 @@
 ## Research
 
 - [라우팅 최적화 리서치 (2026-03-13)](research-2026-03-13-routing-optimization.md) — tfx-route.sh 진단, 멀티모델 MCP 오케스트레이션, Claude hooks, 세션 핸드오프 패턴, 토큰 절약 프로젝트 딥 리서치
+- [병렬 워커 API Quota 분배 전략 (2026-03-13)](research-2026-03-13-parallel-worker-quota-strategy.md) — Brave/Tavily/Exa 최신 quota, 실제 실패 패턴, Round-Robin/Dedicated/Rate-Aware 설계와 권장안
 
 ## Handoff
 
@@ -57,4 +58,3 @@
 - [hub-architecture.html](/C:/Users/SSAFY/Desktop/Projects/tools/triflux/docs/hub-architecture.html)
 - [demo.tape](/C:/Users/SSAFY/Desktop/Projects/tools/triflux/docs/demo.tape)
 - [demo-light.tape](/C:/Users/SSAFY/Desktop/Projects/tools/triflux/docs/demo-light.tape)
-

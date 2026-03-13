@@ -8,6 +8,24 @@
 
 const ROUTE_SCRIPT = "~/.claude/scripts/tfx-route.sh";
 
+function inferWorkerIndex(agentName = "") {
+  const match = /(\d+)(?!.*\d)/.exec(agentName);
+  if (!match) return null;
+  const index = Number(match[1]);
+  return Number.isInteger(index) && index > 0 ? index : null;
+}
+
+function buildRouteEnvPrefix(agentName, workerIndex, searchTool) {
+  const effectiveWorkerIndex = Number.isInteger(workerIndex) && workerIndex > 0
+    ? workerIndex
+    : inferWorkerIndex(agentName);
+
+  let envPrefix = "";
+  if (effectiveWorkerIndex) envPrefix += ` TFX_WORKER_INDEX="${effectiveWorkerIndex}"`;
+  if (searchTool) envPrefix += ` TFX_SEARCH_TOOL="${searchTool}"`;
+  return envPrefix;
+}
+
 /**
  * role/mcp_profile별 tfx-route.sh 기본 timeout (초)
  * analyze/review 프로필이나 설계·분석 역할은 더 긴 timeout을 부여한다.
@@ -35,6 +53,8 @@ function getRouteTimeout(role, mcpProfile) {
  * @param {string} [opts.agentName] — 워커 표시 이름
  * @param {string} [opts.leadName] — 리드 수신자 이름
  * @param {string} [opts.mcp_profile] — MCP 프로필
+ * @param {number} [opts.workerIndex] — 검색 힌트 회전에 사용할 워커 인덱스(1-based)
+ * @param {string} [opts.searchTool] — 전용 검색 도구 힌트(brave-search|tavily|exa)
  * @param {number} [opts.bashTimeout] — Bash timeout(ms). 미지정 시 role/profile 기반 자동 산출.
  * @returns {string} 슬림 래퍼 프롬프트
  */
@@ -47,6 +67,8 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
     agentName = "",
     leadName = "team-lead",
     mcp_profile = "auto",
+    workerIndex,
+    searchTool = "",
     pipelinePhase = "",
     bashTimeout,
   } = opts;
@@ -59,6 +81,7 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
   const pipelineHint = pipelinePhase
     ? `\n파이프라인 단계: ${pipelinePhase}`
     : '';
+  const routeEnvPrefix = buildRouteEnvPrefix(agentName, workerIndex, searchTool);
 
   const taskIdRef = taskId ? `taskId: "${taskId}"` : "";
 
@@ -71,7 +94,7 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
 gemini/codex를 직접 호출하지 마라. 반드시 tfx-route.sh를 거쳐야 한다.
 프롬프트를 파일로 저장하지 마라. tfx-route.sh가 인자로 받는다.
 
-Bash(command: 'TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}" bash ${ROUTE_SCRIPT} "${role}" '"'"'${escaped}'"'"' ${mcp_profile}', timeout: ${bashTimeoutMs})
+Bash(command: 'TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} "${role}" '"'"'${escaped}'"'"' ${mcp_profile}', timeout: ${bashTimeoutMs})
 
 성공 → TaskUpdate(${taskIdRef ? `${taskIdRef}, ` : ""}status: completed, metadata: {result: "success"}) + SendMessage(to: ${leadName}).
 실패 → TaskUpdate(${taskIdRef ? `${taskIdRef}, ` : ""}status: completed, metadata: {result: "failed", error: "에러 요약"}) + SendMessage(to: ${leadName}).
@@ -94,6 +117,8 @@ Bash(command: 'TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM
  * @param {string} [opts.agentName] — 워커 표시 이름
  * @param {string} [opts.leadName] — 리드 수신자 이름
  * @param {string} [opts.mcp_profile] — MCP 프로필
+ * @param {number} [opts.workerIndex] — 검색 힌트 회전에 사용할 워커 인덱스(1-based)
+ * @param {string} [opts.searchTool] — 전용 검색 도구 힌트(brave-search|tavily|exa)
  * @param {string} [opts.sessionName] — psmux 세션 이름
  * @param {string} [opts.pipelinePhase] — 파이프라인 단계
  * @param {string} [opts.psmuxPath] — psmux.mjs 경로
@@ -108,6 +133,8 @@ export function buildHybridWrapperPrompt(cli, opts = {}) {
     agentName = "",
     leadName = "team-lead",
     mcp_profile = "auto",
+    workerIndex,
+    searchTool = "",
     sessionName = teamName,
     pipelinePhase = "",
     psmuxPath = "hub/team/psmux.mjs",
@@ -117,8 +144,9 @@ export function buildHybridWrapperPrompt(cli, opts = {}) {
   const pipelineHint = pipelinePhase ? `\n파이프라인 단계: ${pipelinePhase}` : "";
   const taskIdRef = taskId ? `taskId: "${taskId}"` : "";
   const taskIdArg = taskIdRef ? `${taskIdRef}, ` : "";
+  const routeEnvPrefix = buildRouteEnvPrefix(agentName, workerIndex, searchTool);
 
-  const routeCmd = `TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}" bash ${ROUTE_SCRIPT} "${role}" '${escaped}' ${mcp_profile}`;
+  const routeCmd = `TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} "${role}" '${escaped}' ${mcp_profile}`;
 
   return `하이브리드 psmux 워커 프로토콜:
 

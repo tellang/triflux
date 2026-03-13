@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tfx-route.sh v2.2 — CLI 라우팅 래퍼 (triflux)
+# tfx-route.sh v2.3 — CLI 라우팅 래퍼 (triflux)
 #
 # v1.x: cli-route.sh (jq+python3+node 혼재, 동기 후처리 ~1s)
 # v2.0: tfx-route.sh 리네임
@@ -9,7 +9,7 @@
 #   - Gemini health check 지수 백오프 (30×1s → 5×exp)
 #   - 컨텍스트 파일 5번째 인자 지원
 #
-VERSION="2.2"
+VERSION="2.3"
 #
 # 사용법:
 #   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
@@ -254,6 +254,8 @@ route_agent() {
 TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
+TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
+TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
 case "$TFX_NO_CLAUDE_NATIVE" in
   0|1) ;;
   *)
@@ -265,6 +267,20 @@ case "$TFX_CODEX_TRANSPORT" in
   auto|mcp|exec) ;;
   *)
     echo "ERROR: TFX_CODEX_TRANSPORT 값은 auto, mcp, exec 중 하나여야 합니다. (현재: $TFX_CODEX_TRANSPORT)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_WORKER_INDEX" in
+  "") ;;
+  *[!0-9]*|0)
+    echo "ERROR: TFX_WORKER_INDEX 값은 1 이상의 정수여야 합니다. (현재: $TFX_WORKER_INDEX)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_SEARCH_TOOL" in
+  ""|brave-search|tavily|exa) ;;
+  *)
+    echo "ERROR: TFX_SEARCH_TOOL 값은 brave-search, tavily, exa 중 하나여야 합니다. (현재: $TFX_SEARCH_TOOL)" >&2
     exit 1
     ;;
 esac
@@ -409,23 +425,60 @@ get_mcp_hint() {
 
   has_server() { echo ",$servers," | grep -q ",$1,"; }
 
+  get_search_tool_order() {
+    local available=()
+    local ordered=()
+    local tool
+
+    for tool in brave-search tavily exa; do
+      has_server "$tool" && available+=("$tool")
+    done
+
+    if [[ ${#available[@]} -eq 0 ]]; then
+      return 0
+    fi
+
+    if [[ -n "$TFX_SEARCH_TOOL" ]]; then
+      for tool in "${available[@]}"; do
+        [[ "$tool" == "$TFX_SEARCH_TOOL" ]] && ordered+=("$tool")
+      done
+      for tool in "${available[@]}"; do
+        [[ "$tool" != "$TFX_SEARCH_TOOL" ]] && ordered+=("$tool")
+      done
+    elif [[ -n "$TFX_WORKER_INDEX" && ${#available[@]} -gt 1 ]]; then
+      local offset=$(( (TFX_WORKER_INDEX - 1) % ${#available[@]} ))
+      local i idx
+      for ((i=0; i<${#available[@]}; i++)); do
+        idx=$(( (offset + i) % ${#available[@]} ))
+        ordered+=("${available[$idx]}")
+      done
+    else
+      ordered=("${available[@]}")
+    fi
+
+    printf '%s\n' "${ordered[*]}"
+  }
+
+  local ordered_tools=()
+  read -r -a ordered_tools <<< "$(get_search_tool_order)"
+  local ordered_tools_csv=""
+  if [[ ${#ordered_tools[@]} -gt 0 ]]; then
+    ordered_tools_csv=$(printf '%s, ' "${ordered_tools[@]}")
+    ordered_tools_csv="${ordered_tools_csv%, }"
+  fi
+
   local hint=""
   case "$profile" in
     implement)
       has_server "context7" && hint+="context7으로 라이브러리 문서를 조회하세요. "
-      if has_server "brave-search"; then hint+="웹 검색은 brave-search를 사용하세요. "
-      elif has_server "exa"; then hint+="웹 검색은 exa를 사용하세요. "
-      elif has_server "tavily"; then hint+="웹 검색은 tavily를 사용하세요. "
+      if [[ ${#ordered_tools[@]} -gt 0 ]]; then
+        hint+="웹 검색은 ${ordered_tools[0]}를 사용하세요. "
       fi
-      hint+="검색 도구 실패 시 재시도하지 말고 다음 도구로 전환하세요."
+      hint+="검색 도구 실패 시 402, 429, 432, 433, quota 에러에서 재시도하지 말고 다음 도구로 전환하세요."
       ;;
     analyze)
       has_server "context7" && hint+="context7으로 관련 문서를 조회하세요. "
-      local search_tools=""
-      has_server "brave-search" && search_tools+="brave-search, "
-      has_server "tavily" && search_tools+="tavily, "
-      has_server "exa" && search_tools+="exa, "
-      [[ -n "$search_tools" ]] && hint+="웹 검색 우선순위: ${search_tools%, }. 402 에러 시 즉시 다음 도구로 전환. "
+      [[ -n "$ordered_tools_csv" ]] && hint+="웹 검색 우선순위: ${ordered_tools_csv}. 402, 429, 432, 433, quota 에러 시 즉시 다음 도구로 전환. "
       has_server "playwright" && hint+="모든 검색 실패 시 playwright로 직접 방문 (최대 3 URL). "
       hint+="검색 깊이를 제한하고 결과를 빠르게 요약하세요."
       ;;
@@ -434,7 +487,9 @@ get_mcp_hint() {
       ;;
     docs)
       has_server "context7" && hint+="context7으로 공식 문서를 참조하세요. "
-      has_server "brave-search" && hint+="추가 검색은 brave-search를 사용하세요. "
+      if [[ ${#ordered_tools[@]} -gt 0 ]]; then
+        hint+="추가 검색은 ${ordered_tools[0]}를 사용하세요. "
+      fi
       hint+="검색 결과의 출처 URL을 함께 제시하세요."
       ;;
     minimal|none) ;;
@@ -783,6 +838,9 @@ ${ctx_content}
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE timeout=${TIMEOUT_SEC}s" >&2
   echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE" >&2
+  if [[ -n "$TFX_WORKER_INDEX" || -n "$TFX_SEARCH_TOOL" ]]; then
+    echo "[tfx-route] worker_index=${TFX_WORKER_INDEX:-auto} search_tool=${TFX_SEARCH_TOOL:-auto}" >&2
+  fi
   if [[ "$CLI_TYPE" == "codex" ]]; then
     echo "[tfx-route] codex_transport_request=$TFX_CODEX_TRANSPORT" >&2
   fi

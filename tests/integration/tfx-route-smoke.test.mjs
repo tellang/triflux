@@ -183,6 +183,51 @@ describe('tfx-route.sh — Codex MCP transport', () => {
   });
 });
 
+describe('tfx-route.sh — 검색 도구 힌트 분배', () => {
+  it('TFX_WORKER_INDEX=2 일 때 analyze 검색 우선순위가 회전되어야 한다', () => {
+    const result = runBash(
+      `TFX_WORKER_INDEX=2 bash "${ROUTE_SCRIPT}" executor 'quota-test' analyze`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /worker_index=2 search_tool=auto/);
+    assert.match(out(result), /웹 검색 우선순위: tavily, exa, brave-search\./);
+    assert.match(out(result), /402, 429, 432, 433, quota 에러 시 즉시 다음 도구로 전환/);
+  });
+
+  it('TFX_SEARCH_TOOL=exa 일 때 exa가 analyze 우선순위 맨 앞에 와야 한다', () => {
+    const result = runBash(
+      `TFX_SEARCH_TOOL=exa bash "${ROUTE_SCRIPT}" executor 'quota-test' analyze`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /worker_index=auto search_tool=exa/);
+    assert.match(out(result), /웹 검색 우선순위: exa, brave-search, tavily\./);
+  });
+
+  it('TFX_WORKER_INDEX 값이 0이면 오류로 종료해야 한다', () => {
+    const result = runBash(
+      `TFX_WORKER_INDEX=0 bash "${ROUTE_SCRIPT}" executor 'quota-test' analyze`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec' }),
+    );
+
+    assert.notEqual(result.status, 0, out(result));
+    assert.match(out(result), /TFX_WORKER_INDEX 값은 1 이상의 정수/);
+  });
+
+  it('TFX_SEARCH_TOOL 값이 잘못되면 오류로 종료해야 한다', () => {
+    const result = runBash(
+      `TFX_SEARCH_TOOL=google bash "${ROUTE_SCRIPT}" executor 'quota-test' analyze`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec' }),
+    );
+
+    assert.notEqual(result.status, 0, out(result));
+    assert.match(out(result), /TFX_SEARCH_TOOL 값은 brave-search, tavily, exa 중 하나/);
+  });
+});
+
 // ── 오류 케이스 ──
 
 describe('tfx-route.sh — 오류 케이스', () => {
