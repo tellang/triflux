@@ -245,6 +245,101 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
           return res.end(JSON.stringify(result));
         }
 
+        if (path === '/bridge/assign/async' && req.method === 'POST') {
+          const {
+            supervisor_agent,
+            worker_agent,
+            task,
+            topic = 'assign.job',
+            payload = {},
+            priority = 5,
+            ttl_ms = 600000,
+            timeout_ms = 600000,
+            max_retries = 0,
+            trace_id,
+            correlation_id,
+          } = body;
+
+          if (!supervisor_agent || !worker_agent || !task) {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ ok: false, error: 'supervisor_agent, worker_agent, task 필수' }));
+          }
+
+          const result = await pipe.executeCommand('assign', {
+            supervisor_agent,
+            worker_agent,
+            task,
+            topic,
+            payload,
+            priority,
+            ttl_ms,
+            timeout_ms,
+            max_retries,
+            trace_id,
+            correlation_id,
+          });
+          res.writeHead(result.ok ? 200 : 400);
+          return res.end(JSON.stringify(result));
+        }
+
+        if (path === '/bridge/assign/result' && req.method === 'POST') {
+          const {
+            job_id,
+            worker_agent,
+            status,
+            attempt,
+            result: assignResult,
+            error: assignError,
+            payload = {},
+            metadata = {},
+          } = body;
+
+          if (!job_id || !status) {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ ok: false, error: 'job_id, status 필수' }));
+          }
+
+          const result = await pipe.executeCommand('assign_result', {
+            job_id,
+            worker_agent,
+            status,
+            attempt,
+            result: assignResult,
+            error: assignError,
+            payload,
+            metadata,
+          });
+          res.writeHead(result.ok ? 200 : 409);
+          return res.end(JSON.stringify(result));
+        }
+
+        if (path === '/bridge/assign/status' && req.method === 'POST') {
+          const result = await pipe.executeQuery('assign_status', body);
+          const statusCode = result.ok ? 200 : (result.error?.code === 'ASSIGN_NOT_FOUND' ? 404 : 400);
+          res.writeHead(statusCode);
+          return res.end(JSON.stringify(result));
+        }
+
+        if (path === '/bridge/assign/retry' && req.method === 'POST') {
+          const { job_id, reason, requested_by } = body;
+          if (!job_id) {
+            res.writeHead(400);
+            return res.end(JSON.stringify({ ok: false, error: 'job_id 필수' }));
+          }
+
+          const result = await pipe.executeCommand('assign_retry', {
+            job_id,
+            reason,
+            requested_by,
+          });
+          const statusCode = result.ok ? 200
+            : result.error?.code === 'ASSIGN_NOT_FOUND' ? 404
+              : result.error?.code === 'ASSIGN_RETRY_EXHAUSTED' ? 409
+                : 400;
+          res.writeHead(statusCode);
+          return res.end(JSON.stringify(result));
+        }
+
         if (req.method === 'POST') {
           let teamResult = null;
           if (path === '/bridge/team/info' || path === '/bridge/team-info') {

@@ -80,6 +80,17 @@ function parseHumanRequestRow(row) {
   };
 }
 
+function parseAssignRow(row) {
+  if (!row) return null;
+  const { payload_json, result_json, error_json, ...rest } = row;
+  return {
+    ...rest,
+    payload: parseJson(payload_json, {}),
+    result: parseJson(result_json, null),
+    error: parseJson(error_json, null),
+  };
+}
+
 /**
  * 저장소 생성
  * @param {string} dbPath
@@ -96,7 +107,7 @@ export function createStore(dbPath) {
 
   const schemaSQL = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
   db.exec("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)");
-  const SCHEMA_VERSION = '1';
+  const SCHEMA_VERSION = '2';
   const curVer = (() => {
     try { return db.prepare("SELECT value FROM _meta WHERE key='schema_version'").pluck().get(); }
     catch { return null; }
@@ -162,6 +173,45 @@ export function createStore(dbPath) {
     insertDL: db.prepare('INSERT OR REPLACE INTO dead_letters (message_id, reason, failed_at_ms, last_error) VALUES (?,?,?,?)'),
     getDL: db.prepare('SELECT * FROM dead_letters ORDER BY failed_at_ms DESC LIMIT ?'),
 
+    insertAssign: db.prepare(`
+      INSERT INTO assign_jobs (
+        job_id, supervisor_agent, worker_agent, topic, task, payload_json,
+        status, attempt, retry_count, max_retries, priority, ttl_ms, timeout_ms, deadline_ms,
+        trace_id, correlation_id, last_message_id, result_json, error_json,
+        created_at_ms, updated_at_ms, started_at_ms, completed_at_ms, last_retry_at_ms
+      ) VALUES (
+        @job_id, @supervisor_agent, @worker_agent, @topic, @task, @payload_json,
+        @status, @attempt, @retry_count, @max_retries, @priority, @ttl_ms, @timeout_ms, @deadline_ms,
+        @trace_id, @correlation_id, @last_message_id, @result_json, @error_json,
+        @created_at_ms, @updated_at_ms, @started_at_ms, @completed_at_ms, @last_retry_at_ms
+      )`),
+    getAssign: db.prepare('SELECT * FROM assign_jobs WHERE job_id = ?'),
+    updateAssign: db.prepare(`
+      UPDATE assign_jobs SET
+        supervisor_agent=@supervisor_agent,
+        worker_agent=@worker_agent,
+        topic=@topic,
+        task=@task,
+        payload_json=@payload_json,
+        status=@status,
+        attempt=@attempt,
+        retry_count=@retry_count,
+        max_retries=@max_retries,
+        priority=@priority,
+        ttl_ms=@ttl_ms,
+        timeout_ms=@timeout_ms,
+        deadline_ms=@deadline_ms,
+        trace_id=@trace_id,
+        correlation_id=@correlation_id,
+        last_message_id=@last_message_id,
+        result_json=@result_json,
+        error_json=@error_json,
+        updated_at_ms=@updated_at_ms,
+        started_at_ms=@started_at_ms,
+        completed_at_ms=@completed_at_ms,
+        last_retry_at_ms=@last_retry_at_ms
+      WHERE job_id=@job_id`),
+
     findExpired: db.prepare("SELECT id FROM messages WHERE status='queued' AND expires_at_ms < ?"),
     urgentDepth: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority >= 7"),
     normalDepth: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority < 7"),
@@ -169,12 +219,26 @@ export function createStore(dbPath) {
     msgCount: db.prepare('SELECT COUNT(*) as cnt FROM messages'),
     dlqDepth: db.prepare('SELECT COUNT(*) as cnt FROM dead_letters'),
     ackedRecent: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='acked' AND created_at_ms > ? - 300000"),
+    assignCountByStatus: db.prepare('SELECT COUNT(*) as cnt FROM assign_jobs WHERE status = ?'),
+    activeAssignCount: db.prepare("SELECT COUNT(*) as cnt FROM assign_jobs WHERE status IN ('queued','running')"),
   };
 
   function clampMaxMessages(value, fallback = 20) {
     const num = Number(value);
     if (!Number.isFinite(num)) return fallback;
     return Math.max(1, Math.min(Math.trunc(num), 100));
+  }
+
+  function clampPriority(value, fallback = 5) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.max(1, Math.min(Math.trunc(num), 9));
+  }
+
+  function clampDuration(value, fallback = 600000, min = 1000, max = 86400000) {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return fallback;
+    return Math.max(min, Math.min(Math.trunc(num), max));
   }
 
   const store = {
@@ -365,6 +429,195 @@ export function createStore(dbPath) {
       return S.getDL.all(limit);
     },
 
+    createAssign({
+      job_id,
+      supervisor_agent,
+      worker_agent,
+      topic = 'assign.job',
+      task = '',
+      payload = {},
+      status = 'queued',
+      attempt = 1,
+      retry_count = 0,
+      max_retries = 0,
+      priority = 5,
+      ttl_ms = 600000,
+      timeout_ms = 600000,
+      deadline_ms,
+      trace_id,
+      correlation_id,
+      last_message_id = null,
+      result = null,
+      error = null,
+    }) {
+      const now = Date.now();
+      const normalizedTimeout = clampDuration(timeout_ms, 600000);
+      const row = {
+        job_id: job_id || uuidv7(),
+        supervisor_agent,
+        worker_agent,
+        topic: String(topic || 'assign.job'),
+        task: String(task || ''),
+        payload_json: JSON.stringify(payload || {}),
+        status,
+        attempt: Math.max(1, Number(attempt) || 1),
+        retry_count: Math.max(0, Number(retry_count) || 0),
+        max_retries: Math.max(0, Number(max_retries) || 0),
+        priority: clampPriority(priority, 5),
+        ttl_ms: clampDuration(ttl_ms, normalizedTimeout),
+        timeout_ms: normalizedTimeout,
+        deadline_ms: Number.isFinite(Number(deadline_ms))
+          ? Math.trunc(Number(deadline_ms))
+          : now + normalizedTimeout,
+        trace_id: trace_id || uuidv7(),
+        correlation_id: correlation_id || uuidv7(),
+        last_message_id,
+        result_json: result == null ? null : JSON.stringify(result),
+        error_json: error == null ? null : JSON.stringify(error),
+        created_at_ms: now,
+        updated_at_ms: now,
+        started_at_ms: status === 'running' ? now : null,
+        completed_at_ms: ['succeeded', 'failed', 'timed_out'].includes(status) ? now : null,
+        last_retry_at_ms: retry_count > 0 ? now : null,
+      };
+      S.insertAssign.run(row);
+      return store.getAssign(row.job_id);
+    },
+
+    getAssign(jobId) {
+      return parseAssignRow(S.getAssign.get(jobId));
+    },
+
+    updateAssignStatus(jobId, status, patch = {}) {
+      const current = store.getAssign(jobId);
+      if (!current) return null;
+
+      const now = Date.now();
+      const nextStatus = status || current.status;
+      const isTerminal = ['succeeded', 'failed', 'timed_out'].includes(nextStatus);
+      const nextTimeout = clampDuration(patch.timeout_ms ?? current.timeout_ms, current.timeout_ms);
+      const nextRow = {
+        job_id: current.job_id,
+        supervisor_agent: patch.supervisor_agent ?? current.supervisor_agent,
+        worker_agent: patch.worker_agent ?? current.worker_agent,
+        topic: patch.topic ?? current.topic,
+        task: patch.task ?? current.task,
+        payload_json: JSON.stringify(patch.payload ?? current.payload ?? {}),
+        status: nextStatus,
+        attempt: Math.max(1, Number(patch.attempt ?? current.attempt) || current.attempt || 1),
+        retry_count: Math.max(0, Number(patch.retry_count ?? current.retry_count) || 0),
+        max_retries: Math.max(0, Number(patch.max_retries ?? current.max_retries) || 0),
+        priority: clampPriority(patch.priority ?? current.priority, current.priority || 5),
+        ttl_ms: clampDuration(patch.ttl_ms ?? current.ttl_ms, current.ttl_ms || nextTimeout),
+        timeout_ms: nextTimeout,
+        deadline_ms: (() => {
+          if (Object.prototype.hasOwnProperty.call(patch, 'deadline_ms')) {
+            return patch.deadline_ms == null ? null : Math.trunc(Number(patch.deadline_ms));
+          }
+          if (isTerminal) return null;
+          if (nextStatus === 'running' && !current.deadline_ms) return now + nextTimeout;
+          return current.deadline_ms;
+        })(),
+        trace_id: patch.trace_id ?? current.trace_id,
+        correlation_id: patch.correlation_id ?? current.correlation_id,
+        last_message_id: Object.prototype.hasOwnProperty.call(patch, 'last_message_id')
+          ? patch.last_message_id
+          : current.last_message_id,
+        result_json: Object.prototype.hasOwnProperty.call(patch, 'result')
+          ? (patch.result == null ? null : JSON.stringify(patch.result))
+          : (current.result == null ? null : JSON.stringify(current.result)),
+        error_json: Object.prototype.hasOwnProperty.call(patch, 'error')
+          ? (patch.error == null ? null : JSON.stringify(patch.error))
+          : (current.error == null ? null : JSON.stringify(current.error)),
+        updated_at_ms: now,
+        started_at_ms: Object.prototype.hasOwnProperty.call(patch, 'started_at_ms')
+          ? patch.started_at_ms
+          : (nextStatus === 'running' ? (current.started_at_ms || now) : current.started_at_ms),
+        completed_at_ms: Object.prototype.hasOwnProperty.call(patch, 'completed_at_ms')
+          ? patch.completed_at_ms
+          : (isTerminal ? (current.completed_at_ms || now) : current.completed_at_ms),
+        last_retry_at_ms: Object.prototype.hasOwnProperty.call(patch, 'last_retry_at_ms')
+          ? patch.last_retry_at_ms
+          : current.last_retry_at_ms,
+      };
+      S.updateAssign.run(nextRow);
+      return store.getAssign(jobId);
+    },
+
+    listAssigns({
+      supervisor_agent,
+      worker_agent,
+      status,
+      statuses,
+      trace_id,
+      correlation_id,
+      active_before_ms,
+      limit = 50,
+    } = {}) {
+      const clauses = [];
+      const values = [];
+
+      if (supervisor_agent) {
+        clauses.push('supervisor_agent = ?');
+        values.push(supervisor_agent);
+      }
+      if (worker_agent) {
+        clauses.push('worker_agent = ?');
+        values.push(worker_agent);
+      }
+      if (trace_id) {
+        clauses.push('trace_id = ?');
+        values.push(trace_id);
+      }
+      if (correlation_id) {
+        clauses.push('correlation_id = ?');
+        values.push(correlation_id);
+      }
+
+      const statusList = Array.isArray(statuses) && statuses.length
+        ? statuses
+        : (status ? [status] : []);
+      if (statusList.length) {
+        clauses.push(`status IN (${statusList.map(() => '?').join(',')})`);
+        values.push(...statusList);
+      }
+
+      if (Number.isFinite(Number(active_before_ms))) {
+        clauses.push('deadline_ms IS NOT NULL AND deadline_ms <= ?');
+        values.push(Math.trunc(Number(active_before_ms)));
+      }
+
+      const sql = `
+        SELECT * FROM assign_jobs
+        ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
+        ORDER BY updated_at_ms DESC
+        LIMIT ?`;
+      values.push(clampMaxMessages(limit, 50));
+      return db.prepare(sql).all(...values).map(parseAssignRow);
+    },
+
+    retryAssign(jobId, patch = {}) {
+      const current = store.getAssign(jobId);
+      if (!current) return null;
+
+      const nextRetryCount = Math.max(0, Number(patch.retry_count ?? current.retry_count + 1) || 0);
+      const nextAttempt = Math.max(current.attempt + 1, Number(patch.attempt ?? current.attempt + 1) || 1);
+      const nextTimeout = clampDuration(patch.timeout_ms ?? current.timeout_ms, current.timeout_ms);
+      return store.updateAssignStatus(jobId, 'queued', {
+        retry_count: nextRetryCount,
+        attempt: nextAttempt,
+        timeout_ms: nextTimeout,
+        ttl_ms: patch.ttl_ms ?? current.ttl_ms,
+        deadline_ms: Date.now() + nextTimeout,
+        completed_at_ms: null,
+        started_at_ms: null,
+        last_retry_at_ms: Date.now(),
+        result: patch.result ?? null,
+        error: Object.prototype.hasOwnProperty.call(patch, 'error') ? patch.error : current.error,
+        last_message_id: null,
+      });
+    },
+
     sweepExpired() {
       const now = Date.now();
       return db.transaction(() => {
@@ -397,6 +650,7 @@ export function createStore(dbPath) {
       return {
         online_agents: S.onlineCount.get().cnt,
         total_messages: S.msgCount.get().cnt,
+        active_assign_jobs: S.activeAssignCount.get().cnt,
         ...store.getQueueDepths(),
       };
     },
@@ -406,6 +660,10 @@ export function createStore(dbPath) {
         online_agents: S.onlineCount.get().cnt,
         total_messages: S.msgCount.get().cnt,
         dlq: S.dlqDepth.get().cnt,
+        assign_queued: S.assignCountByStatus.get('queued').cnt,
+        assign_running: S.assignCountByStatus.get('running').cnt,
+        assign_failed: S.assignCountByStatus.get('failed').cnt,
+        assign_timed_out: S.assignCountByStatus.get('timed_out').cnt,
       };
     },
   };

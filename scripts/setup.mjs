@@ -63,6 +63,11 @@ const SYNC_MAP = [
     label: "hub/workers/codex-mcp.mjs",
   },
   {
+    src: join(PLUGIN_ROOT, "hub", "workers", "delegator-mcp.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "delegator-mcp.mjs"),
+    label: "hub/workers/delegator-mcp.mjs",
+  },
+  {
     src: join(PLUGIN_ROOT, "hub", "workers", "interface.mjs"),
     dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "interface.mjs"),
     label: "hub/workers/interface.mjs",

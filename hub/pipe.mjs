@@ -173,6 +173,24 @@ export function createPipeServer({
         return result;
       }
 
+      case 'assign': {
+        const result = router.assignAsync(payload);
+        if (client) touchClient(client);
+        return result;
+      }
+
+      case 'assign_result': {
+        const result = router.reportAssignResult(payload);
+        if (client) touchClient(client);
+        return result;
+      }
+
+      case 'assign_retry': {
+        const result = router.retryAssign(payload.job_id, payload);
+        if (client) touchClient(client);
+        return result;
+      }
+
       case 'result': {
         const result = router.handlePublish({
           from: payload.agent_id,
@@ -280,6 +298,11 @@ export function createPipeServer({
         const scope = payload.scope || 'hub';
         if (client) touchClient(client);
         return router.getStatus(scope, payload);
+      }
+
+      case 'assign_status': {
+        if (client) touchClient(client);
+        return router.getAssignStatus(payload);
       }
 
       default:

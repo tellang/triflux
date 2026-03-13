@@ -201,7 +201,82 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 7. request_human_input ──
+    // ── 7. assign_async ──
+    {
+      name: 'assign_async',
+      description: 'AWS CAO 스타일 비차단 assign job을 생성하고 워커에게 실시간 전달합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['supervisor_agent', 'worker_agent', 'task'],
+        properties: {
+          supervisor_agent: { type: 'string', pattern: '^[a-zA-Z0-9._:-]{3,64}$' },
+          worker_agent: { type: 'string', pattern: '^[a-zA-Z0-9._:-]{3,64}$' },
+          topic: { type: 'string', pattern: '^[a-zA-Z0-9._:-]+$', default: 'assign.job' },
+          task: { type: 'string', minLength: 1, maxLength: 20000 },
+          payload: { type: 'object' },
+          priority: { type: 'integer', minimum: 1, maximum: 9, default: 5 },
+          ttl_ms: { type: 'integer', minimum: 1000, maximum: 86400000, default: 600000 },
+          timeout_ms: { type: 'integer', minimum: 1000, maximum: 86400000, default: 600000 },
+          max_retries: { type: 'integer', minimum: 0, maximum: 20, default: 0 },
+          trace_id: { type: 'string' },
+          correlation_id: { type: 'string' },
+        },
+      },
+      handler: wrap('ASSIGN_ASYNC_FAILED', (args) => {
+        return router.assignAsync(args);
+      }),
+    },
+
+    // ── 8. assign_result ──
+    {
+      name: 'assign_result',
+      description: 'assign job의 진행/완료 결과를 보고합니다. completed + metadata.result 관례를 지원합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['job_id', 'status'],
+        properties: {
+          job_id: { type: 'string', minLength: 1, maxLength: 128 },
+          worker_agent: { type: 'string', pattern: '^[a-zA-Z0-9._:-]{3,64}$' },
+          status: { type: 'string', enum: ['queued', 'running', 'in_progress', 'completed', 'succeeded', 'success', 'failed', 'error', 'timed_out', 'timeout'] },
+          attempt: { type: 'integer', minimum: 1 },
+          result: {},
+          error: {},
+          metadata: { type: 'object' },
+          payload: { type: 'object' },
+        },
+      },
+      handler: wrap('ASSIGN_RESULT_FAILED', (args) => {
+        return router.reportAssignResult(args);
+      }),
+    },
+
+    // ── 9. assign_status ──
+    {
+      name: 'assign_status',
+      description: 'assign job 단건 상태 또는 supervisor/worker/status 기준 목록을 조회합니다',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          job_id: { type: 'string', minLength: 1, maxLength: 128 },
+          supervisor_agent: { type: 'string', pattern: '^[a-zA-Z0-9._:-]{3,64}$' },
+          worker_agent: { type: 'string', pattern: '^[a-zA-Z0-9._:-]{3,64}$' },
+          status: { type: 'string', enum: ['queued', 'running', 'succeeded', 'failed', 'timed_out'] },
+          statuses: {
+            type: 'array',
+            items: { type: 'string', enum: ['queued', 'running', 'succeeded', 'failed', 'timed_out'] },
+            maxItems: 8,
+          },
+          trace_id: { type: 'string' },
+          correlation_id: { type: 'string' },
+          limit: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+        },
+      },
+      handler: wrap('ASSIGN_STATUS_FAILED', (args) => {
+        return router.getAssignStatus(args);
+      }),
+    },
+
+    // ── 10. request_human_input ──
     {
       name: 'request_human_input',
       description: '사용자에게 입력을 요청합니다 (CAPTCHA, 승인, 자격증명, 선택, 텍스트)',
@@ -225,7 +300,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 8. submit_human_input ──
+    // ── 11. submit_human_input ──
     {
       name: 'submit_human_input',
       description: '사용자 입력 요청에 응답합니다 (accept, decline, cancel)',
@@ -244,7 +319,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 9. team_info ──
+    // ── 12. team_info ──
     {
       name: 'team_info',
       description: 'Claude Native Teams 메타/멤버/경로 정보를 조회합니다',
@@ -262,7 +337,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 10. team_task_list ──
+    // ── 13. team_task_list ──
     {
       name: 'team_task_list',
       description: 'Claude Native Teams task 목록을 owner/status 조건으로 조회합니다',
@@ -286,7 +361,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 11. team_task_update ──
+    // ── 14. team_task_update ──
     {
       name: 'team_task_update',
       description: 'Claude Native Teams task를 claim/update 합니다',
@@ -314,7 +389,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 12. team_send_message ──
+    // ── 15. team_send_message ──
     {
       name: 'team_send_message',
       description: 'Claude Native Teams inbox에 메시지를 append 합니다',
@@ -335,7 +410,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 13. pipeline_state ──
+    // ── 16. pipeline_state ──
     {
       name: 'pipeline_state',
       description: '파이프라인 상태를 조회합니다 (--thorough 모드)',
@@ -355,7 +430,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 14. pipeline_advance ──
+    // ── 17. pipeline_advance ──
     {
       name: 'pipeline_advance',
       description: '파이프라인을 다음 단계로 전이합니다 (전이 규칙 + fix loop 바운딩 적용)',
@@ -374,7 +449,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 15. pipeline_init ──
+    // ── 18. pipeline_init ──
     {
       name: 'pipeline_init',
       description: '새 파이프라인을 초기화합니다 (기존 상태 덮어쓰기)',
@@ -397,7 +472,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 16. pipeline_list ──
+    // ── 19. pipeline_list ──
     {
       name: 'pipeline_list',
       description: '활성 파이프라인 목록을 조회합니다',

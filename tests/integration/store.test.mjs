@@ -172,6 +172,91 @@ describe('createStore()', () => {
     });
   });
 
+  // ── assign job ──
+
+  describe('assign job CRUD', () => {
+    it('createAssign()는 queued 상태의 assign job을 생성해야 한다', () => {
+      const job = store.createAssign({
+        supervisor_agent: 'lead-assign-store',
+        worker_agent: 'worker-assign-store',
+        task: '문서를 요약하라',
+        payload: { file: 'README.md' },
+        max_retries: 2,
+      });
+
+      assert.ok(job.job_id);
+      assert.equal(job.status, 'queued');
+      assert.equal(job.attempt, 1);
+      assert.equal(job.retry_count, 0);
+      assert.equal(job.max_retries, 2);
+      assert.deepEqual(job.payload, { file: 'README.md' });
+    });
+
+    it('updateAssignStatus()는 running/succeeded 상태와 결과를 반영해야 한다', () => {
+      const job = store.createAssign({
+        supervisor_agent: 'lead-assign-update',
+        worker_agent: 'worker-assign-update',
+        task: '테스트 실행',
+      });
+
+      const running = store.updateAssignStatus(job.job_id, 'running', {
+        started_at_ms: Date.now(),
+      });
+      assert.equal(running.status, 'running');
+      assert.ok(running.started_at_ms);
+
+      const done = store.updateAssignStatus(job.job_id, 'succeeded', {
+        result: { ok: true },
+      });
+      assert.equal(done.status, 'succeeded');
+      assert.deepEqual(done.result, { ok: true });
+      assert.ok(done.completed_at_ms);
+    });
+
+    it('retryAssign()는 attempt/retry_count를 증가시키고 queued로 되돌려야 한다', () => {
+      const job = store.createAssign({
+        supervisor_agent: 'lead-assign-retry',
+        worker_agent: 'worker-assign-retry',
+        task: '실패 후 재시도',
+        max_retries: 3,
+      });
+      store.updateAssignStatus(job.job_id, 'failed', {
+        error: { message: '첫 실패' },
+      });
+
+      const retried = store.retryAssign(job.job_id, {
+        error: { message: '재시도 예정' },
+      });
+
+      assert.equal(retried.status, 'queued');
+      assert.equal(retried.attempt, 2);
+      assert.equal(retried.retry_count, 1);
+      assert.deepEqual(retried.error, { message: '재시도 예정' });
+      assert.equal(retried.completed_at_ms, null);
+    });
+
+    it('listAssigns()는 supervisor/status 필터를 적용해야 한다', () => {
+      store.createAssign({
+        supervisor_agent: 'lead-filter-a',
+        worker_agent: 'worker-filter-a',
+        task: 'A',
+      });
+      store.createAssign({
+        supervisor_agent: 'lead-filter-b',
+        worker_agent: 'worker-filter-b',
+        task: 'B',
+        status: 'running',
+      });
+
+      const queued = store.listAssigns({ status: 'queued', limit: 20 });
+      const bySupervisor = store.listAssigns({ supervisor_agent: 'lead-filter-a', limit: 20 });
+
+      assert.ok(queued.some((item) => item.status === 'queued'));
+      assert.equal(bySupervisor.length, 1);
+      assert.equal(bySupervisor[0].supervisor_agent, 'lead-filter-a');
+    });
+  });
+
   // ── 스위퍼 ──
 
   describe('sweepExpired()', () => {
