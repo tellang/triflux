@@ -189,10 +189,10 @@ const MINIMAL_COLS_THRESHOLD = 60;
 let _cachedColumns = 0;
 function getTerminalColumns() {
   if (_cachedColumns > 0) return _cachedColumns;
-  if (process.stdout.columns) { _cachedColumns = process.stdout.columns; return _cachedColumns; }
-  if (process.stderr.columns) { _cachedColumns = process.stderr.columns; return _cachedColumns; }
   const envCols = Number(process.env.COLUMNS);
   if (envCols > 0) { _cachedColumns = envCols; return _cachedColumns; }
+  if (process.stdout.columns) { _cachedColumns = process.stdout.columns; return _cachedColumns; }
+  if (process.stderr.columns) { _cachedColumns = process.stderr.columns; return _cachedColumns; }
   try {
     if (process.platform === "win32") {
       const raw = execSync("mode con", { timeout: 2000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }).toString();
@@ -274,7 +274,7 @@ const MINIMAL_MODE = detectMinimalMode();
 // 4-Tier 적응형 렌더링: full > normal > compact > nano
 // ============================================================================
 // 초기 tier (stdin 없이 결정 가능한 수준)
-let CURRENT_TIER = MINIMAL_MODE ? "nano" : COMPACT_MODE ? "compact" : "normal";
+let CURRENT_TIER = MINIMAL_MODE ? "nano" : COMPACT_MODE ? "compact" : "full";
 
 /**
  * 인디케이터 인식 + 터미널 크기 기반 tier 자동 선택.
@@ -285,56 +285,28 @@ function selectTier(stdin, claudeUsage = null) {
 
   // 1) 명시적 tier 강제 설정
   const forcedTier = hudConfig?.tier;
-  if (["full", "normal", "compact", "nano", "micro"].includes(forcedTier)) return forcedTier;
+  if (["full", "compact", "minimal", "micro", "nano"].includes(forcedTier)) return forcedTier;
 
-  // 1.5) maxLines=1 → micro (1줄 모드: 알림 배너/분할화면 대응)
-  if (Number(hudConfig?.lines) === 1) return "micro";
+  // 1.5) maxLines=1 → nano (1줄 모드: 알림 배너/분할화면 대응)
+  if (Number(hudConfig?.lines) === 1) return "nano";
 
-  // 1.6) 분할화면 감지: 열 < 80이면 micro (COMPACT_MODE보다 우선)
-  if ((getTerminalColumns() || 120) < 80) return "micro";
-
-  // 2) 기존 모드 플래그 존중
-  if (MINIMAL_MODE) return "nano";
-  if (COMPACT_MODE) return "compact";
-
-  // 3) autoResize 비활성이면 normal 유지
-  if (hudConfig?.autoResize === false) return "normal";
-
-  // 4) 터미널 행/열에서 상태영역 예산 추정
-  const rows = getTerminalRows();
   const cols = getTerminalColumns() || 120;
 
-  let budget;
-  if (rows >= ROWS_BUDGET_FULL) budget = 6;
-  else if (rows >= ROWS_BUDGET_LARGE) budget = 5;
-  else if (rows >= ROWS_BUDGET_MEDIUM) budget = 4;
-  else if (rows >= ROWS_BUDGET_SMALL) budget = 3;
-  else if (rows > 0) budget = 2;
-  else budget = 5; // rows 감지 불가 → 넉넉하게
+  // 1.6) 극소 폭(< 40col)인 경우 1줄 모드(nano)로 폴백
+  if (cols < 40) return "nano";
 
-  // 5) 인디케이터 줄 추정
-  // bypass permissions 배너(1줄)만 계상
-  // 선행 \n은 출력 포맷이므로 tier 예산에서 제외 — 이중 계산 시
-  // budget 4(rows 28-34)에서 totalVisualRows 5가 되어 micro로 추락하는 버그 유발
-  let indicatorRows = 1;
-  const contextPercent = getContextPercent(stdin);
-  // "Context low" 배너 공간은 출력부(leadingBreaks)에서 \n\n으로 처리 — 티어 선택에서 예약 불필요
-  // Claude Code 사용량 경고 (노란색 배너: "You've used X% of your ... limit")
-  const weeklyPct = claudeUsage?.weeklyPercent ?? 0;
-  const fiveHourPct = claudeUsage?.fiveHourPercent ?? 0;
-  if (weeklyPct >= 80) indicatorRows += 1;
-  if (fiveHourPct >= 80) indicatorRows += 1;
+  // 2) 기존 모드 플래그 존중
+  if (MINIMAL_MODE) return "micro";
+  if (COMPACT_MODE) return "compact";
 
-  // 6) 각 tier에서 줄바꿈 없이 3줄 가용한지 확인
-  const tierWidths = { full: 70, normal: 60, compact: 40, nano: 34 };
-  for (const tier of ["full", "normal", "compact", "nano"]) {
-    const lineWidth = tierWidths[tier];
-    const visualRowsPerLine = Math.ceil(lineWidth / Math.max(cols, 1));
-    const totalVisualRows = (3 * visualRowsPerLine) + indicatorRows;
-    if (totalVisualRows <= budget) return tier;
-  }
-  // 어떤 tier도 budget에 안 맞으면 micro (1줄 모드)
-  return "micro";
+  // 3) autoResize 비활성이면 full 유지
+  if (hudConfig?.autoResize === false) return "full";
+
+  // 4) 터미널 폭에 따른 점진적 축소 (breakpoint)
+  if (cols >= 120) return "full";
+  if (cols >= 80) return "compact";
+  if (cols >= 60) return "minimal";
+  return "micro"; // 40 <= cols < 60
 }
 
 // full tier 전용: 게이지 바 접두사 (normal 이하 tier에서는 빈 문자열)
@@ -451,13 +423,13 @@ function getTeamRow() {
   const failed = tasks.filter((t) => t.status === "failed").length;
   const total = tasks.length || workers.length;
 
-  // 경과 시간
-  const elapsed = teamState.startedAt
+  // 경과 시간 (80col 이상에서만 표시)
+  const elapsed = (teamState.startedAt && (CURRENT_TIER === "full" || CURRENT_TIER === "compact"))
     ? `${Math.round((Date.now() - teamState.startedAt) / 60000)}m`
     : "";
 
-  // 멤버 상태 아이콘 요약
-  const memberIcons = workers.map((m) => {
+  // 멤버 상태 아이콘 요약 (60col 이상에서만 표시)
+  const memberIcons = (CURRENT_TIER === "full" || CURRENT_TIER === "compact" || CURRENT_TIER === "minimal") ? workers.map((m) => {
     const task = tasks.find((t) => t.owner === m.name);
     const icon = task?.status === "completed" ? green("✓")
       : task?.status === "in_progress" ? yellow("●")
@@ -465,16 +437,18 @@ function getTeamRow() {
       : dim("○");
     const tag = m.cli ? m.cli.charAt(0) : "?";
     return `${tag}${icon}`;
-  }).join(" ");
+  }).join(" ") : "";
 
   // done / failed 상태 텍스트
   const doneText = failed > 0
     ? `${completed}/${total} ${red(`${failed}✗`)}`
     : `${completed}/${total} done`;
 
+  const leftText = elapsed ? `team ${doneText} ${dim(elapsed)}` : `team ${doneText}`;
+
   return {
     prefix: bold(claudeOrange("⬡")),
-    left: `team ${doneText} ${dim(elapsed)}`,
+    left: leftText,
     right: memberIcons,
   };
 }
@@ -1415,7 +1389,6 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
   const svSuffix = `${dim("sv:")}${svStr}`;
 
   // API 실측 데이터 사용 (없으면 플레이스홀더)
-  // 캐시된 percent 그대로 사용 (시간 표시는 advanceToNextCycle이 처리)
   const fiveHourPercent = claudeUsage?.fiveHourPercent ?? null;
   const weeklyPercent = claudeUsage?.weeklyPercent ?? null;
   const fiveHourReset = claudeUsage?.fiveHourResetsAt
@@ -1427,82 +1400,36 @@ function getClaudeRows(stdin, claudeUsage, combinedSvPct) {
 
   const hasData = claudeUsage != null;
 
-  if (CURRENT_TIER === "nano") {
-    const cols = getTerminalColumns() || 80;
-    if (!hasData) {
-      const quotaSection = cols < 40
-        ? `${dim("--%/--%")} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`
-        : `${dim("5h --% 1w --% sv:--% ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
-      return [{ prefix, left: quotaSection, right: "" }];
-    }
-    if (cols < 40) {
-      // null이면 '--' 플레이스홀더, 아니면 실제 값
-      const fStr = fiveHourPercent != null ? `${colorByProvider(fiveHourPercent, `${fiveHourPercent}%`, claudeOrange)}` : dim("--");
-      const wStr = weeklyPercent != null ? `${colorByProvider(weeklyPercent, `${weeklyPercent}%`, claudeOrange)}` : dim("--");
-      const quotaSection = `${fStr}${dim("/")}${wStr} ` +
-        `${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
-      return [{ prefix, left: quotaSection, right: "" }];
-    }
-    // nano: c: 5h  12% 1w  95% sv:  191% ctx:90%
-    // null이면 '--%' 플레이스홀더 표시
-    const fCellNano = fiveHourPercent != null
-      ? colorByProvider(fiveHourPercent, formatPercentCell(fiveHourPercent), claudeOrange)
-      : dim(formatPlaceholderPercentCell());
-    const wCellNano = weeklyPercent != null
-      ? colorByProvider(weeklyPercent, formatPercentCell(weeklyPercent), claudeOrange)
-      : dim(formatPlaceholderPercentCell());
-    const quotaSection = `${dim("5h")} ${fCellNano} ` +
-      `${dim("1w")} ${wCellNano} ` +
-      `${dim("sv:")}${svStr} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
+  const fStr = hasData && fiveHourPercent != null ? colorByProvider(fiveHourPercent, formatPercentCell(fiveHourPercent), claudeOrange) : dim(formatPlaceholderPercentCell());
+  const wStr = hasData && weeklyPercent != null ? colorByProvider(weeklyPercent, formatPercentCell(weeklyPercent), claudeOrange) : dim(formatPlaceholderPercentCell());
+  const fBar = hasData && fiveHourPercent != null ? tierBar(fiveHourPercent, CLAUDE_ORANGE) : tierDimBar();
+  const wBar = hasData && weeklyPercent != null ? tierBar(weeklyPercent, CLAUDE_ORANGE) : tierDimBar();
+  const fTime = formatTimeCell(fiveHourReset);
+  const wTime = formatTimeCellDH(weeklyReset);
+
+  if (CURRENT_TIER === "nano" || CURRENT_TIER === "micro") {
+    // 40~59 cols (micro) & <40 (nano): No time, no token count, short labels
+    const fShort = hasData && fiveHourPercent != null ? colorByProvider(fiveHourPercent, `${fiveHourPercent}%`, claudeOrange) : dim("--");
+    const wShort = hasData && weeklyPercent != null ? colorByProvider(weeklyPercent, `${weeklyPercent}%`, claudeOrange) : dim("--");
+    const quotaSection = `${fShort}${dim("/")}${wShort}`;
+    return [{ prefix, left: quotaSection, right: "" }];
+  }
+
+  if (CURRENT_TIER === "minimal") {
+    // 60~79 cols: Labels, but no time, no token count
+    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}`;
     return [{ prefix, left: quotaSection, right: "" }];
   }
 
   if (CURRENT_TIER === "compact") {
-    if (!hasData) {
-      const quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ` +
-        `${dim("1w:")}${dim(formatPlaceholderPercentCell())} ` +
-        `${dim("|")} ${svSuffix} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
-      return [{ prefix, left: quotaSection, right: "" }];
-    }
-    // compact: c: 5h: 14% 1w: 96% | sv:  191% ctx:43%
-    // null이면 '--%' 플레이스홀더 표시
-    const fCellCmp = fiveHourPercent != null
-      ? colorByProvider(fiveHourPercent, formatPercentCell(fiveHourPercent), claudeOrange)
-      : dim(formatPlaceholderPercentCell());
-    const wCellCmp = weeklyPercent != null
-      ? colorByProvider(weeklyPercent, formatPercentCell(weeklyPercent), claudeOrange)
-      : dim(formatPlaceholderPercentCell());
-    const quotaSection = `${dim("5h:")}${fCellCmp} ` +
-      `${dim("1w:")}${wCellCmp} ` +
-      `${dim("|")} ${svSuffix} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
-    return [{ prefix, left: quotaSection, right: "" }];
-  }
-
-  // 데이터 없을 때: 퍼센트+시간 모두 dim 처리 (green 0% 대신)
-  if (!hasData) {
-    const quotaSection = `${dim("5h:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ` +
-      `${dim(formatTimeCell(fiveHourReset))} ` +
-      `${dim("1w:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ` +
-      `${dim(formatTimeCellDH(weeklyReset))}`;
+    // 80~119 cols: Includes Time and token count, no bars
+    const quotaSection = `${dim("5h:")}${fStr} ${dim(fTime)} ${dim("1w:")}${wStr} ${dim(wTime)}`;
     const contextSection = `${svSuffix} ${dim("|")} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
     return [{ prefix, left: quotaSection, right: contextSection }];
   }
 
-  // null이면 dim 바 + '--%' 플레이스홀더, 아니면 실제 값 표시
-  const fiveHourPercentCell = fiveHourPercent != null
-    ? colorByProvider(fiveHourPercent, formatPercentCell(fiveHourPercent), claudeOrange)
-    : dim(formatPlaceholderPercentCell());
-  const weeklyPercentCell = weeklyPercent != null
-    ? colorByProvider(weeklyPercent, formatPercentCell(weeklyPercent), claudeOrange)
-    : dim(formatPlaceholderPercentCell());
-  const fiveHourBar = fiveHourPercent != null ? tierBar(fiveHourPercent, CLAUDE_ORANGE) : tierDimBar();
-  const weeklyBar = weeklyPercent != null ? tierBar(weeklyPercent, CLAUDE_ORANGE) : tierDimBar();
-  const fiveHourTimeCell = formatTimeCell(fiveHourReset);
-  const weeklyTimeCell = formatTimeCellDH(weeklyReset);
-  const quotaSection = `${dim("5h:")}${fiveHourBar}${fiveHourPercentCell} ` +
-    `${dim(fiveHourTimeCell)} ` +
-    `${dim("1w:")}${weeklyBar}${weeklyPercentCell} ` +
-    `${dim(weeklyTimeCell)}`;
+  // full tier (>= 120 cols): Bars, time, token count
+  const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}`;
   const contextSection = `${svSuffix} ${dim("|")} ${dim("ctx:")}${colorByPercent(contextPercent, `${contextPercent}%`)}`;
   return [{ prefix, left: quotaSection, right: contextSection }];
 }
@@ -1535,48 +1462,37 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
   let quotaSection;
   let extraRightSection = "";
 
-  if (CURRENT_TIER === "nano") {
-    const cols = getTerminalColumns() || 80;
+  if (CURRENT_TIER === "nano" || CURRENT_TIER === "micro") {
     const minPrefix = `${bold(markerColor(`${marker}`))}:`;
-    const svCompact = svStr ? ` ${dim("sv:")}${cyan(svStr)}` : "";
     if (realQuota?.type === "codex") {
       const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
-        // 캐시된 값 그대로 표시 (시간은 advanceToNextCycle이 처리)
         const fiveP = main.primary?.used_percent != null ? clampPercent(main.primary.used_percent) : null;
         const weekP = main.secondary?.used_percent != null ? clampPercent(main.secondary.used_percent) : null;
-        const fCellN = fiveP != null ? colorByProvider(fiveP, formatPercentCell(fiveP), provFn) : dim(formatPlaceholderPercentCell());
-        const wCellN = weekP != null ? colorByProvider(weekP, formatPercentCell(weekP), provFn) : dim(formatPlaceholderPercentCell());
-        if (cols < 40) {
-          return { prefix: minPrefix, left: `${fCellN}${dim("/")}${wCellN}${svCompact}`, right: "" };
-        }
-        return { prefix: minPrefix, left: `${dim("5h")} ${fCellN} ${dim("1w")} ${wCellN}${svCompact}`, right: "" };
+        const fCellN = fiveP != null ? colorByProvider(fiveP, `${fiveP}%`, provFn) : dim("--%");
+        const wCellN = weekP != null ? colorByProvider(weekP, `${weekP}%`, provFn) : dim("--%");
+        return { prefix: minPrefix, left: `${fCellN}${dim("/")}${wCellN}`, right: "" };
       }
     }
     if (realQuota?.type === "gemini") {
       const bucket = realQuota.quotaBucket;
       if (bucket) {
         const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
-        if (cols < 40) {
-          return { prefix: minPrefix, left: `${colorByProvider(usedP, formatPercentCell(usedP), provFn)}${svCompact}`, right: "" };
-        }
-        return { prefix: minPrefix, left: `${dim("1d")} ${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim("1w")} ${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))}${svCompact}`, right: "" };
+        return { prefix: minPrefix, left: `${colorByProvider(usedP, `${usedP}%`, provFn)}${dim("/")}${dim("\u221E%")}`, right: "" };
       }
     }
-    return { prefix: minPrefix, left: dim("--%".padStart(PERCENT_CELL_WIDTH)), right: "" };
+    return { prefix: minPrefix, left: dim("--%/--%"), right: "" };
   }
 
-  if (CURRENT_TIER === "compact") {
+  if (CURRENT_TIER === "minimal") {
     if (realQuota?.type === "codex") {
       const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
-        // 캐시된 값 그대로 표시 (시간은 advanceToNextCycle이 처리)
         const fiveP = main.primary?.used_percent != null ? clampPercent(main.primary.used_percent) : null;
         const weekP = main.secondary?.used_percent != null ? clampPercent(main.secondary.used_percent) : null;
         const fCell = fiveP != null ? colorByProvider(fiveP, formatPercentCell(fiveP), provFn) : dim(formatPlaceholderPercentCell());
         const wCell = weekP != null ? colorByProvider(weekP, formatPercentCell(weekP), provFn) : dim(formatPlaceholderPercentCell());
-        quotaSection = `${dim("5h:")}${fCell} ` +
-          `${dim("1w:")}${wCell}`;
+        quotaSection = `${dim("5h:")}${fCell} ${dim("1w:")}${wCell}`;
       }
     }
     if (realQuota?.type === "gemini") {
@@ -1592,7 +1508,36 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim("1w:")}${dim(formatPlaceholderPercentCell())}`;
     }
     const prefix = `${bold(markerColor(`${marker}`))}:`;
-    // compact: sv + 계정 (모델 라벨 제거)
+    return { prefix, left: quotaSection, right: accountLabel ? markerColor(accountLabel) : "" };
+  }
+
+  if (CURRENT_TIER === "compact") {
+    if (realQuota?.type === "codex") {
+      const main = realQuota.buckets.codex || realQuota.buckets[Object.keys(realQuota.buckets)[0]];
+      if (main) {
+        const fiveP = main.primary?.used_percent != null ? clampPercent(main.primary.used_percent) : null;
+        const weekP = main.secondary?.used_percent != null ? clampPercent(main.secondary.used_percent) : null;
+        const fCell = fiveP != null ? colorByProvider(fiveP, formatPercentCell(fiveP), provFn) : dim(formatPlaceholderPercentCell());
+        const wCell = weekP != null ? colorByProvider(weekP, formatPercentCell(weekP), provFn) : dim(formatPlaceholderPercentCell());
+        const fiveReset = formatResetRemaining(main.primary?.resets_at, FIVE_HOUR_MS) || "n/a";
+        const weekReset = formatResetRemainingDayHour(main.secondary?.resets_at, SEVEN_DAY_MS) || "n/a";
+        quotaSection = `${dim("5h:")}${fCell} ${dim(formatTimeCell(fiveReset))} ${dim("1w:")}${wCell} ${dim(formatTimeCellDH(weekReset))}`;
+      }
+    }
+    if (realQuota?.type === "gemini") {
+      const bucket = realQuota.quotaBucket;
+      if (bucket) {
+        const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
+        const rstRemaining = formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
+        quotaSection = `${dim("1d:")}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))} ${dim("1w:")}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+      } else {
+        quotaSection = `${dim("1d:")}${dim("--%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+      }
+    }
+    if (!quotaSection) {
+      quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("-d--h"))}`;
+    }
+    const prefix = `${bold(markerColor(`${marker}`))}:`;
     const compactRight = [svStr ? `${dim("sv:")}${svStr}` : "", accountLabel ? markerColor(accountLabel) : ""].filter(Boolean).join(" ");
     return { prefix, left: quotaSection, right: compactRight };
   }
@@ -1741,8 +1686,8 @@ async function main() {
   // 인디케이터 인식 tier 선택 (stdin + Claude 사용량 기반)
   CURRENT_TIER = selectTier(stdin, claudeUsageSnapshot.data);
 
-  // micro tier: 1줄 모드 (알림 배너/분할화면 대응)
-  if (CURRENT_TIER === "micro") {
+  // nano tier: 1줄 모드 (극소 폭 또는 알림 배너 대응)
+  if (CURRENT_TIER === "nano") {
     const microLine = getMicroLine(stdin, claudeUsageSnapshot.data, codexBuckets,
       geminiSession, geminiBucket, combinedSvPct);
     process.stdout.write(`\x1b[0m${microLine}\n`);
