@@ -83,15 +83,12 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
     : '';
   const routeEnvPrefix = buildRouteEnvPrefix(agentName, workerIndex, searchTool);
 
-  const taskIdRef = taskId ? `taskId: "${taskId}"` : "";
+  return `실행 프로토콜:
+1. Bash(command, timeout: ${bashTimeoutMs}) — 아래 명령 1회만 실행
+2. Bash 종료 후 즉시 종료${pipelineHint}
 
-  return `인터럽트 프로토콜:
-1. TaskUpdate(${taskIdRef ? `${taskIdRef}, ` : ""}status: in_progress) — task claim
-2. SendMessage(to: ${leadName}, "작업 시작: ${agentName}") — 시작 보고 (턴 경계 생성)
-3. Bash(command, timeout: ${bashTimeoutMs}) — 아래 명령 1회 실행
-4. 결과 보고 후 반드시 종료${pipelineHint}
-
-[HARD CONSTRAINT] 너는 Bash, TaskUpdate, TaskGet, TaskList, SendMessage만 사용할 수 있다.
+[HARD CONSTRAINT] 너는 Bash만 사용한다.
+TaskUpdate, TaskGet, TaskList, SendMessage도 직접 호출하지 마라. tfx-route.sh가 team bridge를 통해 claim/start/completion/report를 처리한다.
 Read, Edit, Write, Grep, Glob, Agent, WebSearch, WebFetch 등 다른 모든 도구 사용을 금지한다.
 코드를 직접 읽거나 수정하면 안 된다. 반드시 아래 Bash 명령(tfx-route.sh)을 통해 Codex/Gemini에 위임하라.
 이 규칙을 위반하면 작업 실패로 간주한다.
@@ -101,11 +98,9 @@ gemini/codex를 직접 호출하지 마라. 반드시 tfx-route.sh를 거쳐야 
 
 Bash(command: 'TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} "${role}" '"'"'${escaped}'"'"' ${mcp_profile}', timeout: ${bashTimeoutMs})
 
-성공 → TaskUpdate(${taskIdRef ? `${taskIdRef}, ` : ""}status: completed, metadata: {result: "success"}) + SendMessage(to: ${leadName}).
-실패 → TaskUpdate(${taskIdRef ? `${taskIdRef}, ` : ""}status: completed, metadata: {result: "failed", error: "에러 요약"}) + SendMessage(to: ${leadName}).
-
-중요: TaskUpdate의 status는 "completed"만 사용. "failed"는 API 미지원.
-실패 여부는 metadata.result로 구분. Bash 실패 시에도 반드시 TaskUpdate + SendMessage 후 종료.`;
+중요: 시작/완료 보고와 Task 상태 변경은 tfx-route.sh가 수행한다.
+Bash가 0으로 끝나더라도 출력이 비어 있고 워크스페이스 변화가 없으면 no-op 실패로 처리될 수 있다.
+추가 도구 호출 없이 종료하라.`;
 }
 
 /**

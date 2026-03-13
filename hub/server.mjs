@@ -13,22 +13,8 @@ import { createStore } from './store.mjs';
 import { createRouter } from './router.mjs';
 import { createHitlManager } from './hitl.mjs';
 import { createPipeServer } from './pipe.mjs';
+import { createAssignCallbackServer } from './assign-callbacks.mjs';
 import { createTools } from './tools.mjs';
-import {
-  ensurePipelineTable,
-  createPipeline,
-} from './pipeline/index.mjs';
-import {
-  readPipelineState,
-  initPipelineState,
-  listPipelineStates,
-} from './pipeline/state.mjs';
-import {
-  teamInfo,
-  teamTaskList,
-  teamTaskUpdate,
-  teamSendMessage,
-} from './team/nativeProxy.mjs';
 
 function isInitializeRequest(body) {
   if (body?.method === 'initialize') return true;
@@ -61,6 +47,22 @@ function isAllowedOrigin(origin) {
   return origin && ALLOWED_ORIGIN_RE.test(origin);
 }
 
+function resolveTeamStatusCode(result) {
+  if (result?.ok) return 200;
+  const code = result?.error?.code;
+  if (code === 'TEAM_NOT_FOUND' || code === 'TASK_NOT_FOUND' || code === 'TASKS_DIR_NOT_FOUND') return 404;
+  if (code === 'CLAIM_CONFLICT' || code === 'MTIME_CONFLICT') return 409;
+  if (code === 'INVALID_TEAM_NAME' || code === 'INVALID_TASK_ID' || code === 'INVALID_TEXT' || code === 'INVALID_FROM' || code === 'INVALID_STATUS') return 400;
+  return 500;
+}
+
+function resolvePipelineStatusCode(result) {
+  if (result?.ok) return 200;
+  if (result?.error === 'pipeline_not_found') return 404;
+  if (result?.error === 'hub_db_not_found') return 503;
+  return 400;
+}
+
 /**
  * tfx-hub 시작
  * @param {object} opts
@@ -82,6 +84,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   const store = createStore(dbPath);
   const router = createRouter(store);
   const pipe = createPipeServer({ router, store, sessionId });
+  const assignCallbacks = createAssignCallbackServer({ store, sessionId });
   const hitl = createHitlManager(store, router);
   const tools = createTools(store, router, hitl, pipe);
   const transports = new Map();
@@ -145,6 +148,8 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         port,
         pipe_path: pipe.path,
         pipe: pipe.getStatus(),
+        assign_callback_pipe_path: assignCallbacks.path,
+        assign_callback_pipe: assignCallbacks.getStatus(),
       }));
     }
 
@@ -343,25 +348,17 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         if (req.method === 'POST') {
           let teamResult = null;
           if (path === '/bridge/team/info' || path === '/bridge/team-info') {
-            teamResult = await teamInfo(body);
+            teamResult = await pipe.executeQuery('team_info', body);
           } else if (path === '/bridge/team/task-list' || path === '/bridge/team-task-list') {
-            teamResult = await teamTaskList(body);
+            teamResult = await pipe.executeQuery('team_task_list', body);
           } else if (path === '/bridge/team/task-update' || path === '/bridge/team-task-update') {
-            teamResult = await teamTaskUpdate(body);
+            teamResult = await pipe.executeCommand('team_task_update', body);
           } else if (path === '/bridge/team/send-message' || path === '/bridge/team-send-message') {
-            teamResult = await teamSendMessage(body);
+            teamResult = await pipe.executeCommand('team_send_message', body);
           }
 
           if (teamResult) {
-            let status = 200;
-            const code = teamResult?.error?.code;
-            if (!teamResult.ok) {
-              if (code === 'TEAM_NOT_FOUND' || code === 'TASK_NOT_FOUND' || code === 'TASKS_DIR_NOT_FOUND') status = 404;
-              else if (code === 'CLAIM_CONFLICT' || code === 'MTIME_CONFLICT') status = 409;
-              else if (code === 'INVALID_TEAM_NAME' || code === 'INVALID_TASK_ID' || code === 'INVALID_TEXT' || code === 'INVALID_FROM' || code === 'INVALID_STATUS') status = 400;
-              else status = 500;
-            }
-            res.writeHead(status);
+            res.writeHead(resolveTeamStatusCode(teamResult));
             return res.end(JSON.stringify(teamResult));
           }
 
@@ -372,51 +369,42 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
 
           // ── 파이프라인 엔드포인트 ──
           if (path === '/bridge/pipeline/state' && req.method === 'POST') {
-            ensurePipelineTable(store.db);
-            const { team_name } = body;
-            const state = readPipelineState(store.db, team_name);
-            res.writeHead(state ? 200 : 404);
-            return res.end(JSON.stringify(state
-              ? { ok: true, data: state }
-              : { ok: false, error: 'pipeline_not_found' }));
+            const result = await pipe.executeQuery('pipeline_state', body);
+            res.writeHead(resolvePipelineStatusCode(result));
+            return res.end(JSON.stringify(result));
           }
 
           if (path === '/bridge/pipeline/advance' && req.method === 'POST') {
-            ensurePipelineTable(store.db);
-            const { team_name, phase } = body;
-            const pipeline = createPipeline(store.db, team_name);
-            const result = pipeline.advance(phase);
-            res.writeHead(result.ok ? 200 : 400);
+            const result = await pipe.executeCommand('pipeline_advance', body);
+            res.writeHead(resolvePipelineStatusCode(result));
             return res.end(JSON.stringify(result));
           }
 
           if (path === '/bridge/pipeline/init' && req.method === 'POST') {
-            ensurePipelineTable(store.db);
-            const { team_name, fix_max, ralph_max } = body;
-            const state = initPipelineState(store.db, team_name, { fix_max, ralph_max });
-            res.writeHead(200);
-            return res.end(JSON.stringify({ ok: true, data: state }));
+            const result = await pipe.executeCommand('pipeline_init', body);
+            res.writeHead(resolvePipelineStatusCode(result));
+            return res.end(JSON.stringify(result));
           }
 
           if (path === '/bridge/pipeline/list' && req.method === 'POST') {
-            ensurePipelineTable(store.db);
-            const states = listPipelineStates(store.db);
-            res.writeHead(200);
-            return res.end(JSON.stringify({ ok: true, data: states }));
+            const result = await pipe.executeQuery('pipeline_list', body);
+            res.writeHead(resolvePipelineStatusCode(result));
+            return res.end(JSON.stringify(result));
           }
         }
 
         if (path === '/bridge/context' && req.method === 'POST') {
-          const { agent_id, topics, max_messages = 10 } = body;
+          const { agent_id, topics, max_messages = 10, auto_ack = true } = body;
           if (!agent_id) {
             res.writeHead(400);
             return res.end(JSON.stringify({ ok: false, error: 'agent_id 필수' }));
           }
 
-          const result = await pipe.executeQuery('context', {
+          const result = await pipe.executeQuery('drain', {
             agent_id,
             topics,
             max_messages,
+            auto_ack,
           });
           res.writeHead(200);
           return res.end(JSON.stringify(result));
@@ -536,6 +524,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
 
   mkdirSync(PID_DIR, { recursive: true });
   await pipe.start();
+  await assignCallbacks.start();
 
   return new Promise((resolve, reject) => {
     httpServer.listen(port, host, () => {
@@ -544,9 +533,12 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         host,
         dbPath,
         pid: process.pid,
+        hubToken: HUB_TOKEN,
         url: `http://${host}:${port}/mcp`,
         pipe_path: pipe.path,
         pipePath: pipe.path,
+        assign_callback_pipe_path: assignCallbacks.path,
+        assignCallbackPipePath: assignCallbacks.path,
       };
 
       writeFileSync(PID_FILE, JSON.stringify({
@@ -556,10 +548,11 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         url: info.url,
         pipe_path: pipe.path,
         pipePath: pipe.path,
+        assign_callback_pipe_path: assignCallbacks.path,
         started: Date.now(),
       }));
 
-      console.log(`[tfx-hub] MCP 서버 시작: ${info.url} / pipe ${pipe.path} (PID ${process.pid})`);
+      console.log(`[tfx-hub] MCP 서버 시작: ${info.url} / pipe ${pipe.path} / assign-callback ${assignCallbacks.path} (PID ${process.pid})`);
 
       const stopFn = async () => {
         router.stopSweeper();
@@ -570,13 +563,23 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         }
         transports.clear();
         await pipe.stop();
+        await assignCallbacks.stop();
         store.close();
         try { unlinkSync(PID_FILE); } catch {}
         try { unlinkSync(TOKEN_FILE); } catch {}
         await new Promise((resolveClose) => httpServer.close(resolveClose));
       };
 
-      resolve({ ...info, httpServer, store, router, hitl, pipe, stop: stopFn });
+      resolve({
+        ...info,
+        httpServer,
+        store,
+        router,
+        hitl,
+        pipe,
+        assignCallbacks,
+        stop: stopFn,
+      });
     });
     httpServer.on('error', reject);
   });

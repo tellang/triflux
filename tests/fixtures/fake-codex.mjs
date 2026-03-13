@@ -30,6 +30,7 @@ function errorResult(message) {
 }
 
 function rememberFromPrompt(prompt) {
+  if (prompt.includes('SHOW_CONFIG')) return '__SHOW_CONFIG__';
   const match = /^remember:(.+)$/i.exec(prompt.trim());
   if (match) return match[1].trim();
   return `MCP:${prompt}`;
@@ -59,6 +60,7 @@ async function runMcpServer() {
             cwd: { type: 'string' },
             sandbox: { type: 'string' },
             'approval-policy': { type: 'string' },
+            config: { type: 'object' },
           },
           required: ['prompt'],
         },
@@ -106,6 +108,9 @@ async function runMcpServer() {
       const threadId = nextThreadId();
       const memory = rememberFromPrompt(prompt);
       sessions.set(threadId, { memory, prompts: [prompt] });
+      if (memory === '__SHOW_CONFIG__') {
+        return textResult(threadId, JSON.stringify(args.config ?? null));
+      }
       return textResult(threadId, memory);
     }
 
@@ -128,13 +133,29 @@ async function runMcpServer() {
 
 function runExec() {
   const prompt = process.argv.at(-1) || '';
+  const configFlags = [];
+
+  for (let i = 3; i < process.argv.length - 1; i += 1) {
+    if (process.argv[i] === '-c' && process.argv[i + 1]) {
+      configFlags.push(process.argv[i + 1]);
+      i += 1;
+    }
+  }
 
   if (mode === 'exec-fail') {
     console.error('fake codex exec failed');
     process.exit(5);
   }
 
-  process.stdout.write(`EXEC:${prompt}`);
+  if (mode === 'exec-empty') {
+    process.exit(0);
+  }
+
+  let output = `EXEC:${prompt}`;
+  if (process.env.FAKE_CODEX_ECHO_CONFIG === '1' && configFlags.length) {
+    output += `\nCONFIG:${configFlags.join('|')}`;
+  }
+  process.stdout.write(output);
 }
 
 const subcommand = process.argv[2];

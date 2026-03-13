@@ -5,6 +5,19 @@ import net from 'node:net';
 import { existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import {
+  teamInfo,
+  teamTaskList,
+  teamTaskUpdate,
+  teamSendMessage,
+} from './team/nativeProxy.mjs';
+import { createPipeline } from './pipeline/index.mjs';
+import {
+  ensurePipelineTable,
+  initPipelineState,
+  listPipelineStates,
+  readPipelineState,
+} from './pipeline/state.mjs';
 
 const DEFAULT_HEARTBEAT_TTL_MS = 60000;
 
@@ -236,6 +249,41 @@ export function createPipeServer({
         };
       }
 
+      case 'team_task_update': {
+        const result = await teamTaskUpdate(payload);
+        if (client) touchClient(client);
+        return result;
+      }
+
+      case 'team_send_message': {
+        const result = await teamSendMessage(payload);
+        if (client) touchClient(client);
+        return result;
+      }
+
+      case 'pipeline_advance': {
+        if (client) touchClient(client);
+        if (!store?.db) {
+          return { ok: false, error: 'hub_db_not_found' };
+        }
+        ensurePipelineTable(store.db);
+        const pipeline = createPipeline(store.db, payload.team_name);
+        return pipeline.advance(payload.phase);
+      }
+
+      case 'pipeline_init': {
+        if (client) touchClient(client);
+        if (!store?.db) {
+          return { ok: false, error: 'hub_db_not_found' };
+        }
+        ensurePipelineTable(store.db);
+        const state = initPipelineState(store.db, payload.team_name, {
+          fix_max: payload.fix_max,
+          ralph_max: payload.ralph_max,
+        });
+        return { ok: true, data: state };
+      }
+
       default:
         return {
           ok: false,
@@ -303,6 +351,39 @@ export function createPipeServer({
       case 'assign_status': {
         if (client) touchClient(client);
         return router.getAssignStatus(payload);
+      }
+
+      case 'team_info': {
+        const result = await teamInfo(payload);
+        if (client) touchClient(client);
+        return result;
+      }
+
+      case 'team_task_list': {
+        const result = await teamTaskList(payload);
+        if (client) touchClient(client);
+        return result;
+      }
+
+      case 'pipeline_state': {
+        if (client) touchClient(client);
+        if (!store?.db) {
+          return { ok: false, error: 'hub_db_not_found' };
+        }
+        ensurePipelineTable(store.db);
+        const state = readPipelineState(store.db, payload.team_name);
+        return state
+          ? { ok: true, data: state }
+          : { ok: false, error: 'pipeline_not_found' };
+      }
+
+      case 'pipeline_list': {
+        if (client) touchClient(client);
+        if (!store?.db) {
+          return { ok: false, error: 'hub_db_not_found' };
+        }
+        ensurePipelineTable(store.db);
+        return { ok: true, data: listPipelineStates(store.db) };
       }
 
       default:
