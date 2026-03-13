@@ -34,9 +34,14 @@
 - Hub HTTP: `/bridge/pipeline/{state,advance,init,list}` 엔드포인트
 - Hub MCP: `pipeline_state`, `pipeline_advance`, `pipeline_init`, `pipeline_list` 도구
 
+## Research
+
+- [라우팅 최적화 리서치 (2026-03-13)](research-2026-03-13-routing-optimization.md) — tfx-route.sh 진단, 멀티모델 MCP 오케스트레이션, Claude hooks, 세션 핸드오프 패턴, 토큰 절약 프로젝트 딥 리서치
+
 ## Handoff
 
 - [#16: tfx-multi v3 파이프라인 구현 핸드오프](handoff/16-tfx-multi-v3-handoff.md) — 5 Phase 구현 가이드, 확정 결정, 에이전트 실행법, 검증 체크리스트
+- [중기 아키텍처 검토 (2026-03-13)](handoff/2026-03-13-midterm-actions.md) — Claude Delegator, AWS CAO, Speakeasy Gram, A2A, API quota 분배 5개 항목
 
 ## Hook / Internal
 
