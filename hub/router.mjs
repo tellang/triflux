@@ -3,8 +3,43 @@
 import { EventEmitter, once } from 'node:events';
 import { uuidv7 } from './store.mjs';
 
+const ASSIGN_PENDING_STATUSES = new Set(['queued', 'running']);
+
 function uniqueStrings(values = []) {
   return Array.from(new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
+function clampAssignDuration(value, fallback = 600000, min = 1000, max = 86400000) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(min, Math.min(Math.trunc(num), max));
+}
+
+function normalizeAssignTerminalStatus(input, metadata = {}) {
+  const status = String(input || '').trim().toLowerCase();
+  const resultTag = String(
+    metadata?.result
+    ?? metadata?.status
+    ?? metadata?.outcome
+    ?? '',
+  ).trim().toLowerCase();
+
+  if (status === 'queued') return 'queued';
+  if (status === 'running' || status === 'in_progress') return 'running';
+  if (status === 'timed_out' || status === 'timeout') return 'timed_out';
+  if (status === 'failed' || status === 'error') return 'failed';
+  if (status === 'succeeded' || status === 'success') return 'succeeded';
+
+  if (status === 'completed') {
+    if (resultTag === 'failed' || resultTag === 'error') return 'failed';
+    if (resultTag === 'timed_out' || resultTag === 'timeout') return 'timed_out';
+    return 'succeeded';
+  }
+
+  if (resultTag === 'failed' || resultTag === 'error') return 'failed';
+  if (resultTag === 'timed_out' || resultTag === 'timeout') return 'timed_out';
+  if (resultTag === 'succeeded' || resultTag === 'success') return 'succeeded';
+  return 'succeeded';
 }
 
 function normalizeAgentTopics(store, agentId, runtimeTopics) {
@@ -199,6 +234,133 @@ export function createRouter(store) {
     return { msg, recipients };
   }
 
+  function buildAssignSnapshot(job, extra = {}) {
+    if (!job) return null;
+    return {
+      job_id: job.job_id,
+      supervisor_agent: job.supervisor_agent,
+      worker_agent: job.worker_agent,
+      topic: job.topic,
+      task: job.task,
+      status: job.status,
+      attempt: job.attempt,
+      retry_count: job.retry_count,
+      max_retries: job.max_retries,
+      timeout_ms: job.timeout_ms,
+      deadline_ms: job.deadline_ms,
+      trace_id: job.trace_id,
+      correlation_id: job.correlation_id,
+      last_message_id: job.last_message_id,
+      result: job.result,
+      error: job.error,
+      updated_at_ms: job.updated_at_ms,
+      completed_at_ms: job.completed_at_ms,
+      ...extra,
+    };
+  }
+
+  function notifyAssignSupervisor(job, event, extra = {}) {
+    if (!job?.supervisor_agent) return null;
+    const { msg } = dispatchMessage({
+      type: 'event',
+      from: job.worker_agent || 'assign-router',
+      to: job.supervisor_agent,
+      topic: 'assign.result',
+      priority: Math.max(5, job.priority || 5),
+      ttl_ms: job.ttl_ms || job.timeout_ms || 600000,
+      payload: {
+        event,
+        ...buildAssignSnapshot(job),
+        ...extra,
+      },
+      trace_id: job.trace_id,
+      correlation_id: job.correlation_id,
+    });
+    return msg;
+  }
+
+  function dispatchAssignJob(job, reason = 'dispatch') {
+    const { msg, recipients } = dispatchMessage({
+      type: 'handoff',
+      from: job.supervisor_agent,
+      to: job.worker_agent,
+      topic: job.topic || 'assign.job',
+      priority: job.priority || 5,
+      ttl_ms: job.ttl_ms || job.timeout_ms || 600000,
+      payload: {
+        kind: 'assign.job',
+        reason,
+        assign_job_id: job.job_id,
+        attempt: job.attempt,
+        retry_count: job.retry_count,
+        max_retries: job.max_retries,
+        timeout_ms: job.timeout_ms,
+        supervisor_agent: job.supervisor_agent,
+        worker_agent: job.worker_agent,
+        task: job.task,
+        payload: job.payload || {},
+      },
+      trace_id: job.trace_id,
+      correlation_id: job.correlation_id,
+    });
+
+    const updated = store.updateAssignStatus(job.job_id, job.status, {
+      last_message_id: msg.id,
+    });
+    return { job: updated || job, recipients, message_id: msg.id };
+  }
+
+  function scheduleAssignRetry(job, reason, error = null, requested_by = 'system') {
+    if (!job) {
+      return { ok: false, error: { code: 'ASSIGN_NOT_FOUND', message: 'assign job not found' } };
+    }
+    if (job.retry_count >= job.max_retries) {
+      return {
+        ok: false,
+        error: {
+          code: 'ASSIGN_RETRY_EXHAUSTED',
+          message: `retry exhausted for ${job.job_id}`,
+        },
+      };
+    }
+
+    const queued = store.retryAssign(job.job_id, {
+      error,
+      timeout_ms: job.timeout_ms,
+      ttl_ms: job.ttl_ms,
+    });
+    const dispatched = dispatchAssignJob(queued, 'retry');
+    notifyAssignSupervisor(dispatched.job, 'retry_scheduled', {
+      retry_reason: reason,
+      requested_by,
+    });
+    return {
+      ok: true,
+      data: {
+        retried: true,
+        ...buildAssignSnapshot(dispatched.job, {
+          retry_reason: reason,
+          requested_by,
+        }),
+      },
+    };
+  }
+
+  function handleAssignTimeout(job) {
+    const timedOut = store.updateAssignStatus(job.job_id, 'timed_out', {
+      error: job.error ?? { message: 'assign job timed out' },
+    });
+
+    if (timedOut.retry_count < timedOut.max_retries) {
+      return scheduleAssignRetry(timedOut, 'timed_out', timedOut.error, 'sweeper');
+    }
+
+    notifyAssignSupervisor(timedOut, 'completed', {
+      completion_reason: 'timed_out',
+    });
+    return { ok: true, data: buildAssignSnapshot(timedOut, { completion_reason: 'timed_out' }) };
+  }
+
   const router = {
     responseEmitter,
     deliveryEmitter,
@@ -362,6 +524,137 @@ export function createRouter(store) {
       };
     },
 
+    assignAsync({
+      supervisor_agent,
+      worker_agent,
+      topic = 'assign.job',
+      task = '',
+      payload = {},
+      priority = 5,
+      ttl_ms = 600000,
+      timeout_ms = 600000,
+      max_retries = 0,
+      trace_id,
+      correlation_id,
+    }) {
+      const job = store.createAssign({
+        supervisor_agent,
+        worker_agent,
+        topic,
+        task,
+        payload,
+        priority,
+        ttl_ms,
+        timeout_ms,
+        max_retries,
+        trace_id,
+        correlation_id,
+      });
+      const dispatched = dispatchAssignJob(job, 'create');
+      return {
+        ok: true,
+        data: {
+          assigned_to: worker_agent,
+          ...buildAssignSnapshot(dispatched.job),
+        },
+      };
+    },
+
+    reportAssignResult({
+      job_id,
+      worker_agent,
+      status,
+      attempt,
+      result,
+      error,
+      payload = {},
+      metadata = {},
+    }) {
+      const job = store.getAssign(job_id);
+      if (!job) {
+        return {
+          ok: false,
+          error: { code: 'ASSIGN_NOT_FOUND', message: `assign job not found: ${job_id}` },
+        };
+      }
+      if (worker_agent && worker_agent !== job.worker_agent) {
+        return {
+          ok: false,
+          error: { code: 'ASSIGN_WORKER_MISMATCH', message: `worker mismatch: ${worker_agent}` },
+        };
+      }
+      if (Number.isFinite(Number(attempt)) && Number(attempt) !== job.attempt) {
+        return {
+          ok: false,
+          error: {
+            code: 'ASSIGN_ATTEMPT_MISMATCH',
+            message: `stale assign result for attempt ${attempt} (current ${job.attempt})`,
+          },
+        };
+      }
+
+      const mergedMetadata = {
+        ...(payload?.metadata || {}),
+        ...(metadata || {}),
+      };
+      const normalizedStatus = normalizeAssignTerminalStatus(
+        status || payload?.status,
+        mergedMetadata,
+      );
+      const nextResult = result ?? (Object.prototype.hasOwnProperty.call(payload || {}, 'result') ? payload.result : payload);
+      const nextError = error ?? payload?.error ?? null;
+
+      if (normalizedStatus === 'running') {
+        const running = store.updateAssignStatus(job.job_id, 'running', {
+          started_at_ms: job.started_at_ms || Date.now(),
+          deadline_ms: Date.now() + clampAssignDuration(job.timeout_ms, job.timeout_ms),
+          result: nextResult,
+          error: nextError,
+        });
+        notifyAssignSupervisor(running, 'progress');
+        return { ok: true, data: buildAssignSnapshot(running) };
+      }
+
+      const finalized = store.updateAssignStatus(job.job_id, normalizedStatus, {
+        result: nextResult,
+        error: nextError,
+      });
+
+      if ((normalizedStatus === 'failed' || normalizedStatus === 'timed_out')
+        && finalized.retry_count < finalized.max_retries) {
+        return scheduleAssignRetry(finalized, normalizedStatus, nextError, worker_agent || finalized.worker_agent);
+      }
+
+      notifyAssignSupervisor(finalized, 'completed');
+      return { ok: true, data: buildAssignSnapshot(finalized) };
+    },
+
+    getAssignStatus({ job_id, ...filters } = {}) {
+      if (job_id) {
+        const job = store.getAssign(job_id);
+        return job
+          ? { ok: true, data: buildAssignSnapshot(job) }
+          : { ok: false, error: { code: 'ASSIGN_NOT_FOUND', message: `assign job not found: ${job_id}` } };
+      }
+      return {
+        ok: true,
+        data: {
+          assigns: store.listAssigns(filters).map((job) => buildAssignSnapshot(job)),
+        },
+      };
+    },
+
+    retryAssign(job_id, { reason = 'manual', requested_by = 'manual' } = {}) {
+      const job = store.getAssign(job_id);
+      if (!job) {
+        return {
+          ok: false,
+          error: { code: 'ASSIGN_NOT_FOUND', message: `assign job not found: ${job_id}` },
+        };
+      }
+      return scheduleAssignRetry(job, reason, job.error, requested_by);
+    },
+
     sweepExpired() {
       const now = Date.now();
       let expired = 0;
@@ -374,10 +667,31 @@ export function createRouter(store) {
       return { messages: expired };
     },
 
+    sweepTimedOutAssigns() {
+      const expiredAssigns = store.listAssigns({
+        statuses: Array.from(ASSIGN_PENDING_STATUSES),
+        active_before_ms: Date.now(),
+        limit: 100,
+      });
+      let timed_out = 0;
+      let retried = 0;
+
+      for (const job of expiredAssigns) {
+        const result = handleAssignTimeout(job);
+        timed_out += 1;
+        if (result?.data?.retried) retried += 1;
+      }
+
+      return { timed_out, retried };
+    },
+
     startSweeper() {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {
-        try { router.sweepExpired(); } catch {}
+        try {
+          router.sweepExpired();
+          router.sweepTimedOutAssigns();
+        } catch {}
       }, 10000);
       staleTimer = setInterval(() => {
         try { store.sweepStaleAgents(); } catch {}
@@ -427,11 +741,18 @@ export function createRouter(store) {
         if (include_metrics) {
           const depths = router.getQueueDepths();
           const stats = router.getDeliveryStats();
+          const auditStats = store.getAuditStats();
           data.queues = {
             urgent_depth: depths.urgent,
             normal_depth: depths.normal,
             dlq_depth: depths.dlq,
             avg_delivery_ms: stats.avg_delivery_ms,
+          };
+          data.assigns = {
+            queued: auditStats.assign_queued,
+            running: auditStats.assign_running,
+            failed: auditStats.assign_failed,
+            timed_out: auditStats.assign_timed_out,
           };
         }
       }

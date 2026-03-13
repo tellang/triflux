@@ -181,4 +181,73 @@ describe('Named Pipe 실시간 채널', () => {
 
     client.close();
   });
+
+  it('assign/assign_result/assign_status 명령은 pipe 경로로 동작해야 한다', async () => {
+    const lead = await createPipeClient(hub.pipePath);
+    const worker = await createPipeClient(hub.pipePath);
+
+    await lead.request('command', {
+      action: 'register',
+      agent_id: 'pipe-assign-lead',
+      cli: 'claude',
+      capabilities: ['plan'],
+      topics: [],
+      heartbeat_ttl_ms: 60000,
+    });
+    await worker.request('command', {
+      action: 'register',
+      agent_id: 'pipe-assign-worker',
+      cli: 'codex',
+      capabilities: ['code'],
+      topics: [],
+      heartbeat_ttl_ms: 60000,
+    });
+
+    const nextWorkerEvent = worker.nextEvent();
+    const assigned = await lead.request('command', {
+      action: 'assign',
+      supervisor_agent: 'pipe-assign-lead',
+      worker_agent: 'pipe-assign-worker',
+      task: 'assign via pipe',
+      max_retries: 1,
+    });
+
+    assert.equal(assigned.ok, true);
+    assert.equal(assigned.data.status, 'queued');
+
+    const jobEvent = await nextWorkerEvent;
+    assert.equal(jobEvent.payload.message.payload.assign_job_id, assigned.data.job_id);
+
+    const progressed = await worker.request('command', {
+      action: 'assign_result',
+      job_id: assigned.data.job_id,
+      worker_agent: 'pipe-assign-worker',
+      status: 'running',
+      attempt: 1,
+    });
+    assert.equal(progressed.ok, true);
+    assert.equal(progressed.data.status, 'running');
+
+    const completed = await worker.request('command', {
+      action: 'assign_result',
+      job_id: assigned.data.job_id,
+      worker_agent: 'pipe-assign-worker',
+      status: 'completed',
+      attempt: 1,
+      metadata: { result: 'success' },
+      result: { output: 'done' },
+    });
+    assert.equal(completed.ok, true);
+    assert.equal(completed.data.status, 'succeeded');
+
+    const queried = await lead.request('query', {
+      action: 'assign_status',
+      job_id: assigned.data.job_id,
+    });
+    assert.equal(queried.ok, true);
+    assert.equal(queried.data.status, 'succeeded');
+
+    lead.close();
+    worker.close();
+  });
 });

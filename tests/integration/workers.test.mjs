@@ -71,6 +71,7 @@ describe('createWorker()', () => {
   it('타입별 worker 인스턴스를 생성해야 한다', () => {
     assert.equal(createWorker('gemini').constructor.name, 'GeminiWorker');
     assert.equal(createWorker('claude').constructor.name, 'ClaudeWorker');
+    assert.equal(createWorker('delegator').constructor.name, 'DelegatorMcpWorker');
     assert.throws(() => createWorker('unknown'), /Unknown worker type/);
   });
 });

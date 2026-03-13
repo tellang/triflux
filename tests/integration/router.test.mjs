@@ -160,6 +160,103 @@ describe('createRouter()', () => {
     });
   });
 
+  // ── assignAsync / reportAssignResult ──
+
+  describe('assign job 상태머신', () => {
+    it('assignAsync()는 queued assign job을 생성하고 워커에게 메시지를 큐잉해야 한다', () => {
+      store.registerAgent({ agent_id: 'assign-worker-a', cli: 'codex', capabilities: ['code'], topics: [], heartbeat_ttl_ms: 60000 });
+
+      const result = router.assignAsync({
+        supervisor_agent: 'assign-lead-a',
+        worker_agent: 'assign-worker-a',
+        task: 'README를 점검하라',
+        max_retries: 1,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.data.status, 'queued');
+      assert.ok(result.data.job_id);
+
+      const pending = router.getPendingMessages('assign-worker-a', { max_messages: 10 });
+      assert.ok(pending.some((message) => message.payload?.assign_job_id === result.data.job_id));
+    });
+
+    it('reportAssignResult()는 completed + metadata.result를 succeeded로 정규화해야 한다', () => {
+      const created = router.assignAsync({
+        supervisor_agent: 'assign-lead-success',
+        worker_agent: 'assign-worker-success',
+        task: '성공 케이스',
+      });
+
+      const running = router.reportAssignResult({
+        job_id: created.data.job_id,
+        worker_agent: 'assign-worker-success',
+        status: 'running',
+        attempt: 1,
+      });
+      assert.equal(running.ok, true);
+      assert.equal(running.data.status, 'running');
+
+      const done = router.reportAssignResult({
+        job_id: created.data.job_id,
+        worker_agent: 'assign-worker-success',
+        status: 'completed',
+        attempt: 1,
+        metadata: { result: 'success' },
+        result: { summary: 'ok' },
+      });
+
+      assert.equal(done.ok, true);
+      assert.equal(done.data.status, 'succeeded');
+      assert.deepEqual(done.data.result, { summary: 'ok' });
+
+      const supervisorMessages = router.getPendingMessages('assign-lead-success', { max_messages: 20 });
+      assert.ok(supervisorMessages.some((message) =>
+        message.topic === 'assign.result'
+        && message.payload?.job_id === created.data.job_id
+        && message.payload?.status === 'succeeded'));
+    });
+
+    it('failed 결과는 max_retries 한도 내에서 자동 재시도되어야 한다', () => {
+      const created = router.assignAsync({
+        supervisor_agent: 'assign-lead-retry',
+        worker_agent: 'assign-worker-retry',
+        task: '재시도 케이스',
+        max_retries: 1,
+      });
+
+      const failed = router.reportAssignResult({
+        job_id: created.data.job_id,
+        worker_agent: 'assign-worker-retry',
+        status: 'failed',
+        attempt: 1,
+        error: { message: '실패' },
+      });
+
+      assert.equal(failed.ok, true);
+      assert.equal(failed.data.retried, true);
+      assert.equal(failed.data.status, 'queued');
+      assert.equal(failed.data.retry_count, 1);
+      assert.equal(failed.data.attempt, 2);
+    });
+
+    it('sweepTimedOutAssigns()는 만료된 assign을 timed_out 또는 retry로 처리해야 한다', () => {
+      const job = store.createAssign({
+        supervisor_agent: 'assign-lead-timeout',
+        worker_agent: 'assign-worker-timeout',
+        task: '타임아웃 케이스',
+        max_retries: 0,
+        deadline_ms: Date.now() - 10,
+      });
+
+      const result = router.sweepTimedOutAssigns();
+      assert.equal(result.timed_out >= 1, true);
+
+      const updated = store.getAssign(job.job_id);
+      assert.equal(updated.status, 'timed_out');
+    });
+  });
+
   // ── getStatus ──
 
   describe('getStatus()', () => {

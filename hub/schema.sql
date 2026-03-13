@@ -79,6 +79,39 @@ CREATE INDEX IF NOT EXISTS idx_human_requests_state ON human_requests(state);
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 CREATE INDEX IF NOT EXISTS idx_agents_lease ON agents(lease_expires_ms);
 
+-- Assign Job 테이블
+CREATE TABLE IF NOT EXISTS assign_jobs (
+  job_id TEXT PRIMARY KEY,
+  supervisor_agent TEXT NOT NULL,
+  worker_agent TEXT NOT NULL,
+  topic TEXT NOT NULL DEFAULT 'assign.job',
+  task TEXT NOT NULL DEFAULT '',
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','timed_out')),
+  attempt INTEGER NOT NULL DEFAULT 1,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  max_retries INTEGER NOT NULL DEFAULT 0,
+  priority INTEGER NOT NULL DEFAULT 5 CHECK (priority BETWEEN 1 AND 9),
+  ttl_ms INTEGER NOT NULL DEFAULT 600000,
+  timeout_ms INTEGER NOT NULL DEFAULT 600000,
+  deadline_ms INTEGER,
+  trace_id TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  last_message_id TEXT,
+  result_json TEXT,
+  error_json TEXT,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL,
+  started_at_ms INTEGER,
+  completed_at_ms INTEGER,
+  last_retry_at_ms INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_assign_jobs_status ON assign_jobs(status, updated_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_assign_jobs_supervisor ON assign_jobs(supervisor_agent, updated_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_assign_jobs_worker ON assign_jobs(worker_agent, updated_at_ms DESC);
+CREATE INDEX IF NOT EXISTS idx_assign_jobs_deadline ON assign_jobs(deadline_ms, status);
+
 -- 파이프라인 상태 테이블 (Phase 2)
 CREATE TABLE IF NOT EXISTS pipeline_state (
   team_name TEXT PRIMARY KEY,
