@@ -55,10 +55,69 @@ TFX_HUB_URL="${TFX_HUB_URL:-http://127.0.0.1:27888}"  # bridge.mjs HTTP fallback
 ORIGINAL_AGENT=""
 ORIGINAL_CLI_ARGS=""
 
+# JSON 문자열 이스케이프:
+# - "\", """ 필수 이스케이프
+# - 제어문자 U+0000..U+001F 이스케이프
+# - 비ASCII 문자는 \uXXXX(또는 surrogate pair)로 강제
+json_escape() {
+  local s="${1:-}"
+
+  if command -v "$NODE_BIN" &>/dev/null; then
+    "$NODE_BIN" -e '
+      const input = process.argv[1] ?? "";
+      let out = "";
+      for (const ch of input) {
+        const cp = ch.codePointAt(0);
+        if (cp === 0x22) { out += "\\\""; continue; }   // "
+        if (cp === 0x5c) { out += "\\\\"; continue; }   // \
+        if (cp <= 0x1f) {
+          if (cp === 0x08) { out += "\\b"; continue; }
+          if (cp === 0x09) { out += "\\t"; continue; }
+          if (cp === 0x0a) { out += "\\n"; continue; }
+          if (cp === 0x0c) { out += "\\f"; continue; }
+          if (cp === 0x0d) { out += "\\r"; continue; }
+          out += `\\u${cp.toString(16).padStart(4, "0")}`;
+          continue;
+        }
+        if (cp >= 0x20 && cp <= 0x7e) {
+          out += ch;
+          continue;
+        }
+        if (cp <= 0xffff) {
+          out += `\\u${cp.toString(16).padStart(4, "0")}`;
+          continue;
+        }
+        const v = cp - 0x10000;
+        const hi = 0xd800 + (v >> 10);
+        const lo = 0xdc00 + (v & 0x3ff);
+        out += `\\u${hi.toString(16).padStart(4, "0")}\\u${lo.toString(16).padStart(4, "0")}`;
+      }
+      process.stdout.write(out);
+    ' -- "$s"
+    return
+  fi
+
+  echo "[tfx-route] ERROR: node 미설치로 안전한 JSON 이스케이프를 수행할 수 없습니다." >&2
+  return 1
+}
+
 # ── Per-process 에이전트 등록 (원자적, 락 불필요) ──
 register_agent() {
   local agent_file="${TFX_TMP}/tfx-agent-$$.json"
-  echo "{\"pid\":$$,\"cli\":\"$CLI_TYPE\",\"agent\":\"$AGENT_TYPE\",\"started\":$(date +%s)}" \
+  local safe_cli safe_agent started_at
+  safe_cli=$(json_escape "$CLI_TYPE" 2>/dev/null || true)
+  safe_agent=$(json_escape "$AGENT_TYPE" 2>/dev/null || true)
+  started_at=$(date +%s)
+
+  # fail-closed: 안전 인코딩 불가 시 agent 파일을 쓰지 않는다
+  if [[ -n "$CLI_TYPE" && -z "$safe_cli" ]]; then
+    return 0
+  fi
+  if [[ -n "$AGENT_TYPE" && -z "$safe_agent" ]]; then
+    return 0
+  fi
+
+  printf '{"pid":%s,"cli":"%s","agent":"%s","started":%s}\n' "$$" "$safe_cli" "$safe_agent" "$started_at" \
     > "$agent_file" 2>/dev/null || true
 }
 
@@ -328,6 +387,16 @@ team_complete_task() {
       --trace "$TFX_TEAM_NAME"; then
       echo "[tfx-route] 경고: Hub result 발행 실패 (agent=$TFX_TEAM_AGENT_NAME, task=$TFX_TEAM_TASK_ID)" >&2
     fi
+  fi
+
+  # 로컬 결과 파일 백업 (세션 끊김 복구용)
+  # Claude 재로그인 시 Agent 래퍼가 죽어도 이 파일로 결과 수집 가능
+  local result_dir="${TFX_RESULT_DIR:-${HOME}/.claude/tfx-results/${TFX_TEAM_NAME}}"
+  if mkdir -p "$result_dir" 2>/dev/null; then
+    cat > "${result_dir}/${TFX_TEAM_TASK_ID}.json" 2>/dev/null <<RESULT_EOF
+{"taskId":"${TFX_TEAM_TASK_ID}","agent":"${TFX_TEAM_AGENT_NAME}","team":"${TFX_TEAM_NAME}","result":"${result}","summary":$(printf '%s' "$summary_trimmed" | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.stringify(d)))" 2>/dev/null || echo '""'),"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+RESULT_EOF
+    [[ $? -eq 0 ]] && echo "[tfx-route] 결과 백업: ${result_dir}/${TFX_TEAM_TASK_ID}.json" >&2
   fi
 }
 

@@ -141,6 +141,8 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 
 ### 결과 파싱
 
+여기서 `failed`는 `tfx-route.sh`/CLI 종료 결과를 뜻한다. Claude Code `TaskUpdate` 상태값이 아니다.
+
 | exit_code + status | 사용할 출력 |
 |--------------------|-----------|
 | 0 + success | `=== OUTPUT ===` 섹션 |
@@ -177,10 +179,13 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 |------|------|
 | `tfx-route.sh: not found` | tfx-route.sh 생성 |
 | `codex/gemini: not found` | npm install -g |
-| timeout / failed | stderr → Claude fallback |
+| timeout / failed (`tfx-route.sh` 결과) | stderr → Claude fallback |
 | N > 10 | 10 이하로 조정 |
 | 순환 의존 | 분해 재시도 |
 | 컨텍스트 > 32KB | 비례 절삭 |
+
+> Claude Code `TaskUpdate`를 사용할 때는 `status: "failed"`를 쓰지 않는다.
+> 실패 보고는 `status: "completed"` + `metadata.result: "failed"`로 표현한다.
 
 ## Troubleshooting
 

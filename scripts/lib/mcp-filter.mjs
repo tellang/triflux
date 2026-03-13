@@ -226,7 +226,12 @@ function buildInventoryIndex(inventory = null) {
 }
 
 function getServerMetadata(server, inventoryIndex) {
-  return normalizeServerMetadata(server, inventoryIndex.get(server) || {});
+  const inventoryMetadata = inventoryIndex.get(server) || {};
+  return normalizeServerMetadata(server, {
+    // Inventory tool_count is useful for tie-breaks, but dynamic domain tags
+    // can over-broaden role policies compared to the static catalog.
+    tool_count: inventoryMetadata.tool_count,
+  });
 }
 
 function scoreServer(server, taskText = '', inventoryIndex = new Map()) {

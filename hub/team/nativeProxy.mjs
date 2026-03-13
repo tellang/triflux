@@ -5,13 +5,16 @@ import {
   existsSync,
   mkdirSync,
   renameSync,
-  statSync,
   unlinkSync,
   writeFileSync,
-  openSync,
-  closeSync,
 } from 'node:fs';
-import { readdir, stat, readFile } from 'node:fs/promises';
+import {
+  open as openFile,
+  readdir,
+  readFile,
+  stat,
+  unlink as unlinkFile,
+} from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -20,6 +23,7 @@ const TEAM_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 const CLAUDE_HOME = join(homedir(), '.claude');
 const TEAMS_ROOT = join(CLAUDE_HOME, 'teams');
 const TASKS_ROOT = join(CLAUDE_HOME, 'tasks');
+const LOCK_STALE_MS = 30000;
 
 // ── 인메모리 캐시 (디렉토리 mtime 기반 무효화) ──
 const _dirCache = new Map(); // tasksDir → { mtimeMs, files: string[] }
@@ -70,23 +74,112 @@ async function sleepMs(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function withFileLock(lockPath, fn, retries = 20, delayMs = 25) {
-  let fd = null;
+async function readLockInfo(lockPath) {
+  let lockStat;
+  try {
+    lockStat = await stat(lockPath);
+  } catch {
+    return null;
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(await readFile(lockPath, 'utf8'));
+  } catch {}
+
+  const now = Date.now();
+  const createdAtMs = Number(
+    parsed?.created_at_ms
+    ?? parsed?.timestamp_ms
+    ?? parsed?.timestamp
+    ?? lockStat.mtimeMs,
+  );
+  const pid = Number(parsed?.pid);
+
+  return {
+    token: typeof parsed?.token === 'string' ? parsed.token : null,
+    pid: Number.isInteger(pid) && pid > 0 ? pid : null,
+    created_at_ms: Number.isFinite(createdAtMs) ? createdAtMs : lockStat.mtimeMs,
+    mtime_ms: lockStat.mtimeMs,
+    age_ms: Math.max(0, now - (Number.isFinite(createdAtMs) ? createdAtMs : lockStat.mtimeMs)),
+  };
+}
+
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    if (e?.code === 'EPERM') return true;
+    if (e?.code === 'ESRCH') return false;
+    return false;
+  }
+}
+
+async function releaseFileLock(lockPath, token, handle) {
+  try { await handle?.close(); } catch {}
+
+  try {
+    const current = await readLockInfo(lockPath);
+    if (!current || current.token === token) {
+      await unlinkFile(lockPath);
+    }
+  } catch {}
+}
+
+async function withFileLock(lockPath, fn, retries = 20, delayMs = 25, staleMs = LOCK_STALE_MS) {
+  mkdirSync(dirname(lockPath), { recursive: true });
+  const lockOwner = {
+    pid: process.pid,
+    token: randomUUID(),
+    created_at: new Date().toISOString(),
+    created_at_ms: Date.now(),
+  };
+  let handle = null;
+  let lastError = null;
+
   for (let i = 0; i < retries; i += 1) {
     try {
-      fd = openSync(lockPath, 'wx');
+      handle = await openFile(lockPath, 'wx');
+      try {
+        await handle.writeFile(`${JSON.stringify(lockOwner)}\n`, 'utf8');
+      } catch (writeError) {
+        await releaseFileLock(lockPath, lockOwner.token, handle);
+        throw writeError;
+      }
       break;
     } catch (e) {
-      if (e?.code !== 'EEXIST' || i === retries - 1) throw e;
+      lastError = e;
+      if (e?.code !== 'EEXIST') throw e;
+
+      const current = await readLockInfo(lockPath);
+      const staleByAge = !current || current.age_ms > staleMs;
+      const staleByDeadPid = current?.pid != null && !isPidAlive(current.pid);
+      if (staleByAge || staleByDeadPid) {
+        try {
+          await unlinkFile(lockPath);
+          continue;
+        } catch (unlinkError) {
+          if (unlinkError?.code === 'ENOENT') continue;
+          lastError = unlinkError;
+        }
+      }
+
+      if (i === retries - 1) throw e;
       await sleepMs(delayMs);
     }
+  }
+
+  if (!handle) {
+    throw lastError || new Error(`LOCK_NOT_ACQUIRED: ${lockPath}`);
   }
 
   try {
     return await fn();
   } finally {
-    try { if (fd != null) closeSync(fd); } catch {}
-    try { unlinkSync(lockPath); } catch {}
+    await releaseFileLock(lockPath, lockOwner.token, handle);
   }
 }
 
@@ -151,6 +244,27 @@ async function collectTaskFiles(tasksDir) {
 
   _dirCache.set(tasksDir, { mtimeMs: dirMtime, files });
   return files;
+}
+
+async function readTaskFileCached(file) {
+  let fileMtime;
+  try {
+    fileMtime = (await stat(file)).mtimeMs;
+  } catch {
+    return { file, mtimeMs: null, json: null };
+  }
+
+  const contentCached = _taskContentCache.get(file);
+  if (contentCached && contentCached.mtimeMs === fileMtime) {
+    return { file, mtimeMs: fileMtime, json: contentCached.data };
+  }
+
+  const json = await readJsonSafe(file);
+  if (json && isObject(json)) {
+    _taskContentCache.set(file, { mtimeMs: fileMtime, data: json });
+  }
+
+  return { file, mtimeMs: fileMtime, json };
 }
 
 async function locateTaskFile(tasksDir, taskId) {
@@ -247,24 +361,11 @@ export async function teamTaskList(args = {}) {
   const statusSet = new Set((statuses || []).map((s) => String(s)));
   const maxCount = Math.max(1, Math.min(Number(limit) || 200, 1000));
   let parseWarnings = 0;
+  const files = await collectTaskFiles(paths.tasks_dir);
+  const records = await Promise.all(files.map((file) => readTaskFileCached(file)));
 
   const tasks = [];
-  for (const file of await collectTaskFiles(paths.tasks_dir)) {
-    // mtime 기반 task 콘텐츠 캐시 — 변경 없으면 파일 읽기 생략
-    let fileMtime = Date.now();
-    try { fileMtime = (await stat(file)).mtimeMs; } catch {}
-
-    const contentCached = _taskContentCache.get(file);
-    let json;
-    if (contentCached && contentCached.mtimeMs === fileMtime) {
-      json = contentCached.data;
-    } else {
-      json = await readJsonSafe(file);
-      if (json && isObject(json)) {
-        _taskContentCache.set(file, { mtimeMs: fileMtime, data: json });
-      }
-    }
-
+  for (const { file, mtimeMs: fileMtime, json } of records) {
     if (!json || !isObject(json)) {
       parseWarnings += 1;
       continue;
@@ -443,7 +544,7 @@ export async function teamTaskUpdate(args = {}) {
       }
 
       let afterMtime = beforeMtime;
-      try { afterMtime = statSync(taskFile).mtimeMs; } catch {}
+      try { afterMtime = (await stat(taskFile)).mtimeMs; } catch {}
 
       return {
         ok: true,
