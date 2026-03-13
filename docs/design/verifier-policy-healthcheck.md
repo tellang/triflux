@@ -195,6 +195,26 @@ verifierOverride: z.enum(['auto', 'claude']).optional()
 - Gemini quota가 불안정할 때 verifier를 Claude로 고정해 reviewer lane을 분리할 수 있다.
 - 현재 문서/스킬의 기대와 실제 코드를 다시 맞출 수 있다.
 
+### 4.6 구현 가이드 및 시나리오 명세
+
+#### 1. 환경변수 파싱 및 검증
+- **파싱 로직**: `TFX_VERIFIER_OVERRIDE` 값을 읽을 때 대소문자를 무시하도록 소문자 변환 후 검증.
+- **기본값 Fallback**: 허용되지 않은 값(예: `gpt`, 빈 문자열 등)이 들어오면 경고 로그 출력 후 `auto`로 fallback.
+
+#### 2. 예외 및 Fallback 로직
+- **`claude` 지정 시 Fallback**: 만약 `TFX_VERIFIER_OVERRIDE=claude`가 지정되었으나 Claude 실행 환경(CLI 혹은 인증)이 정상적이지 않은 경우, Hub 차원에서 Health Check 실패로 간주하고 기존 `auto`(해당 시점 모델)로 조용히 downgrade하여 리뷰 파이프라인의 블로킹을 방지.
+
+#### 3. 테스트 시나리오
+- **시나리오 A (Normal Override)**: 
+  - 설정: `TFX_CLI_MODE=gemini`, `TFX_VERIFIER_OVERRIDE=claude`, `AGENT_TYPE=verifier`
+  - 기대결과: 라우팅 결과가 `claude-native`가 되며, 다른 agent는 `gemini`로 라우팅됨.
+- **시나리오 B (Invalid Override)**:
+  - 설정: `TFX_VERIFIER_OVERRIDE=unknown_value`, `AGENT_TYPE=verifier`
+  - 기대결과: Warning 출력 후 현재 기본 모델(`auto` 정책) 유지.
+- **시나리오 C (Non-Verifier Exclusion)**:
+  - 설정: `TFX_VERIFIER_OVERRIDE=claude`, `AGENT_TYPE=coder`
+  - 기대결과: override 무시됨. coder는 현재 CLI 모드(예: Gemini)를 따름.
+
 ## 5. 제안 2: Gemini Health Check 공통화
 
 ### 5.1 설계 원칙

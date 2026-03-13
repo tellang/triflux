@@ -29,7 +29,7 @@ Triflux는 기본적으로 하이브리드 모드(`tfx-auto`)를 지향하지만
 | 항목 | Codex MCP | Gemini MCP (Legacy/Native) |
 | :--- | :--- | :--- |
 | **설정 방식** | Codex 전용 프로필(`analyze`, `implement` 등) | 환경 변수 `GEMINI_ALLOWED_SERVERS` |
-| **필터링 메커니즘** | 각 프로필에 정의된 MCP 서버만 활성화 | `gemini` 실행 시 `--allowed-mcp-server-names` 전달 |
+| **필터링 메커니즘** | 각 프로필에 정의된 MCP 서버만 활성화 | **동적 필터링(M단계 반영)**: `gemini` 실행 시 필요 도구만 허용하도록 `--allowed-mcp-server-names` 동적 전달 |
 | **서버 관리** | `codex mcp-server` 프로세스 내 통합 | 각 서버가 독립적인 프로세스로 실행 가능 |
 | **동작 원리** | `hub/workers/codex-mcp.mjs` (SDK 기반) | `hub/workers/gemini-worker.mjs` (CLI Wrapper) |
 
@@ -42,10 +42,13 @@ Triflux는 기본적으로 하이브리드 모드(`tfx-auto`)를 지향하지만
 - **통신**: MCP SDK `StdioClientTransport` 사용.
 - **특징**: `codex-reply` 도구를 사용하여 장기 세션(Thread) 유지가 아키텍처적으로 통합되어 있음.
 
-### tfx-gemini (`run_legacy_gemini`)
-- **브릿지**: `hub/workers/gemini-worker.mjs`
+### tfx-gemini (`run_legacy_gemini` 및 `gemini-worker`)
+- **브릿지**: `hub/workers/gemini-worker.mjs` (Stream wrapper) 및 legacy 래퍼
 - **통신**: `spawn`을 통한 단발성 CLI 호출. `stream-json` 출력 파싱.
-- **특징**: Windows 환경에서의 안정성을 위해 `--timeout` 및 자동 재시도 로직이 강화됨.
+- **특징**: 
+  - **슬림래퍼 Bypass 방지 (.issues/006 반영)**: Agent 우회 및 무단 실행 방지를 위한 검증 로직 적용.
+  - **Stream Wrapper Fallback 시그널**: Stream 파싱 실패나 예외 상황 시 안정성을 위해 fallback 시그널 처리 강화.
+  - Windows 환경에서의 안정성을 위해 `--timeout` 및 자동 재시도 로직이 강화됨.
 
 ---
 
@@ -65,6 +68,9 @@ Triflux는 기본적으로 하이브리드 모드(`tfx-auto`)를 지향하지만
 | :--- | :--- | :--- |
 | **Codex** | **지원됨** | `threadId` 및 `sessionKey`를 통한 컨텍스트 유지 |
 | **Gemini** | **미구현** | 단발성 실행 위주 (이슈 `.issues/001`에서 추적 중) |
+
+### 6.1 팀/오케스트레이터 연동 동기화
+- **TaskUpdate 동기화**: `tfx-auto` 등 상위 오케스트레이터에서 모델과 무관하게 진행 상태(`TaskUpdate`)가 일관되게 동기화되도록 브릿지 개선 반영.
 
 > **참고**: Gemini 모드에서 Multi-turn이 필요한 경우, `tfx-auto` 모드를 사용하여 상위 오케스트레이터(Opus/Sonnet) 레벨에서 컨텍스트를 관리하는 것이 권장됩니다.
 

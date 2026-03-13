@@ -8,6 +8,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,26 +20,36 @@ const FIXTURE_BIN = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin');
 
 // bash 실행 헬퍼 — stdout + stderr 합산 반환
 function runBash(command, extraEnv = {}) {
-  return spawnSync('bash', ['-c', command], {
-    cwd: PROJECT_ROOT,
-    encoding: 'utf8',
-    timeout: 30_000,
-    env: {
-      ...process.env,
-      TFX_TEAM_NAME: '',
-      TFX_TEAM_TASK_ID: '',
-      TFX_TEAM_AGENT_NAME: '',
-      TFX_TEAM_LEAD_NAME: '',
-      TFX_HUB_URL: '',
-      TMUX: '',
-      TFX_CLI_MODE: 'gemini',
-      TFX_NO_CLAUDE_NATIVE: '0',
-      TFX_CODEX_TRANSPORT: 'exec',
-      TFX_WORKER_INDEX: '',
-      TFX_SEARCH_TOOL: '',
-      ...extraEnv,
-    },
-  });
+  const testTempDir = mkdtempSync(resolve(tmpdir(), 'triflux-gemini-test-'));
+
+  try {
+    return spawnSync('bash', ['-c', command], {
+      cwd: testTempDir,
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: {
+        ...process.env,
+        HOME: testTempDir,
+        TMPDIR: testTempDir,
+        TMP: testTempDir,
+        TEMP: testTempDir,
+        TFX_TEAM_NAME: '',
+        TFX_TEAM_TASK_ID: '',
+        TFX_TEAM_AGENT_NAME: '',
+        TFX_TEAM_LEAD_NAME: '',
+        TFX_HUB_URL: '',
+        TMUX: '',
+        TFX_CLI_MODE: 'gemini',
+        TFX_NO_CLAUDE_NATIVE: '0',
+        TFX_CODEX_TRANSPORT: 'exec',
+        TFX_WORKER_INDEX: '',
+        TFX_SEARCH_TOOL: '',
+        ...extraEnv,
+      },
+    });
+  } finally {
+    rmSync(testTempDir, { recursive: true, force: true });
+  }
 }
 
 function out(result) {
@@ -214,6 +226,15 @@ describe('tfx-route.sh — Gemini CLI 모드 전환', () => {
     );
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /ROUTE_TYPE=claude-native/);
+  });
+
+  it('TFX_VERIFIER_OVERRIDE=claude면 gemini 모드에서도 verifier는 claude-native를 유지해야 한다', () => {
+    const result = runBash(
+      `TFX_VERIFIER_OVERRIDE=claude bash "${ROUTE_SCRIPT}" verifier 'gemini-verifier-override-test'`,
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+    assert.match(out(result), /AGENT=verifier/);
   });
 
   it('gemini 미설치 + codex 미설치 시 claude-native fallback이 발생해야 한다', () => {

@@ -142,6 +142,28 @@ tfx launcher
   -> read NDJSON frames
 ```
 
+**Hub Named Pipe -> CLI 진입점 재사용 흐름:**
+
+```mermaid
+sequenceDiagram
+    participant User as CLI User
+    participant Launcher as tfx launcher<br>(bin/triflux.cjs)
+    participant Pipe as Hub Named Pipe<br>(\\.\pipe\...)
+    participant Hub as Resident Service
+    participant Pool as Warm Session Pool
+
+    User->>Launcher: tfx hub status
+    Launcher->>Pipe: connect & send {"action":"cli_execute"}
+    Pipe->>Hub: Parse Request
+    Hub->>Pipe: {"phase":"ack"}
+    Pipe->>Launcher: Immediate ACK render
+    Hub->>Pool: Route Command
+    Pool-->>Hub: Cache/State/Worker Results
+    Hub->>Pipe: {"phase":"done", "stdout":"..."}
+    Pipe->>Launcher: Print Result & Exit
+    Launcher->>User: Display Output
+```
+
 권장 프레임 형식:
 
 ```json
@@ -334,6 +356,12 @@ tfx __complete ...
 - bash: `~/.bashrc` source
 - zsh: `~/.zshrc` source
 - fish: `~/.config/fish/completions/tfx.fish`
+
+**쉘별 연동 구체화:**
+bash/zsh/fish 자동완성은 위 Named Pipe 흐름을 통해 `tfx __complete`를 호출하여 동적으로 응답을 받아 처리된다.
+- **bash**: `compgen`과 연동하여 `tfx __complete bash "${COMP_WORDS[@]}"`를 실행, 결과를 반환.
+- **zsh**: `compadd`와 연동, `_tfx` 함수에서 파이프를 통해 resident service에 completion 요청 후 동적 후보 제공.
+- **fish**: `complete -c tfx -a "(tfx __complete fish (commandline -cp))"` 형태로 연동되어 실시간 파라미터 완성 지원.
 
 ### 8. 장애 대응과 fallback
 
