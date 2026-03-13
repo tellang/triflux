@@ -181,6 +181,40 @@ team_send_message() {
   fi
 }
 
+# ── Hub 자동 재시작 (슬립 복귀 등으로 Hub 종료 시) ──
+try_restart_hub() {
+  local hub_server script_dir hub_port
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  hub_server="$script_dir/../hub/server.mjs"
+
+  if [[ ! -f "$hub_server" ]]; then
+    echo "[tfx-route] Hub 서버 스크립트 미발견: $hub_server" >&2
+    return 1
+  fi
+
+  # TFX_HUB_URL에서 포트 추출 (기본 27888)
+  hub_port="${TFX_HUB_URL##*:}"
+  hub_port="${hub_port%%/*}"
+  [[ -z "$hub_port" || "$hub_port" == "$TFX_HUB_URL" ]] && hub_port=27888
+
+  echo "[tfx-route] Hub 미응답 — 자동 재시작 시도 (port=$hub_port)..." >&2
+  TFX_HUB_PORT="$hub_port" "$NODE_BIN" "$hub_server" &>/dev/null &
+  local hub_pid=$!
+
+  # 최대 4초 대기 (0.5초 간격)
+  local i
+  for i in 1 2 3 4 5 6 7 8; do
+    sleep 0.5
+    if curl -sf "${TFX_HUB_URL}/status" >/dev/null 2>&1; then
+      echo "[tfx-route] Hub 재시작 성공 (pid=$hub_pid)" >&2
+      return 0
+    fi
+  done
+
+  echo "[tfx-route] Hub 재시작 실패 — claim 없이 계속 실행" >&2
+  return 1
+}
+
 team_claim_task() {
   [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
   local response ok error_code error_message owner_before status_before
@@ -210,7 +244,23 @@ team_claim_task() {
         "task ${TFX_TEAM_TASK_ID} claim conflict"
       exit 0 ;;
     :|false:)
-      echo "[tfx-route] 경고: Hub 연결 실패 (미실행?). claim 없이 계속 실행." >&2 ;;
+      # Hub 연결 실패 → 자동 재시작 시도 후 claim 재시도
+      if try_restart_hub; then
+        response=$(bridge_cli team-task-update \
+          --team "$TFX_TEAM_NAME" \
+          --task-id "$TFX_TEAM_TASK_ID" \
+          --claim \
+          --owner "$TFX_TEAM_AGENT_NAME" \
+          --status in_progress || true)
+        ok=$(bridge_json_get "$response" "ok" || true)
+        if [[ "$ok" == "true" ]]; then
+          echo "[tfx-route] Hub 재시작 후 claim 성공." >&2
+        else
+          echo "[tfx-route] 경고: Hub 재시작 후 claim 실패. claim 없이 계속 실행." >&2
+        fi
+      else
+        echo "[tfx-route] 경고: Hub 연결 실패 (미실행?). claim 없이 계속 실행." >&2
+      fi ;;
     *)
       echo "[tfx-route] 경고: Hub claim 실패 (${error_code:-unknown}${error_message:+: ${error_message}}). claim 없이 계속 실행." >&2 ;;
   esac
@@ -596,6 +646,7 @@ resolve_mcp_policy() {
     "--agent" "$AGENT_TYPE"
     "--profile" "$MCP_PROFILE"
     "--available" "$available_servers"
+    "--inventory-file" "$MCP_CACHE"
     "--task-text" "$PROMPT"
   )
   [[ -n "$TFX_SEARCH_TOOL" ]] && cmd+=("--search-tool" "$TFX_SEARCH_TOOL")
@@ -942,8 +993,21 @@ ${ctx_content}
     fi
   fi
 
-  # Claude 네이티브 에이전트는 이 스크립트로 처리 불가 → 메타데이터만 출력
+  # Claude 네이티브 에이전트는 이 스크립트로 처리 불가
   if [[ "$CLI_TYPE" == "claude-native" ]]; then
+    if [[ -n "$TFX_TEAM_NAME" ]]; then
+      # 팀 모드: Hub에 fallback 필요 시그널 전송 후 구조화된 출력
+      echo "[tfx-route] claude-native 역할($AGENT_TYPE)은 tfx-route.sh로 실행 불가 — Claude Agent fallback 필요" >&2
+      team_complete_task "fallback" "claude-native 역할 실행 불가: ${AGENT_TYPE}. Claude Task(sonnet) 에이전트로 위임하세요."
+      cat <<FALLBACK_EOF
+=== TFX_NEEDS_FALLBACK ===
+agent_type: ${AGENT_TYPE}
+reason: claude-native roles require Claude Agent tools (Read/Edit/Grep). tfx-route.sh cannot provide these.
+action: Lead should spawn Agent(subagent_type="${AGENT_TYPE}") for this task.
+task_id: ${TFX_TEAM_TASK_ID:-none}
+FALLBACK_EOF
+      exit 0
+    fi
     emit_claude_native_metadata
     exit 0
   fi
