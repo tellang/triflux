@@ -91,6 +91,11 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
 3. Bash(command, timeout: ${bashTimeoutMs}) — 아래 명령 1회 실행
 4. 결과 보고 후 반드시 종료${pipelineHint}
 
+[HARD CONSTRAINT] 너는 Bash, TaskUpdate, TaskGet, TaskList, SendMessage만 사용할 수 있다.
+Read, Edit, Write, Grep, Glob, Agent, WebSearch, WebFetch 등 다른 모든 도구 사용을 금지한다.
+코드를 직접 읽거나 수정하면 안 된다. 반드시 아래 Bash 명령(tfx-route.sh)을 통해 Codex/Gemini에 위임하라.
+이 규칙을 위반하면 작업 실패로 간주한다.
+
 gemini/codex를 직접 호출하지 마라. 반드시 tfx-route.sh를 거쳐야 한다.
 프롬프트를 파일로 저장하지 마라. tfx-route.sh가 인자로 받는다.
 
@@ -169,6 +174,11 @@ export function buildHybridWrapperPrompt(cli, opts = {}) {
    Bash: node ${psmuxPath} output --session "${sessionName}" --name "${agentName}" --lines 100
    → 결과를 TaskUpdate + SendMessage로 보고
 ${pipelineHint}
+[HARD CONSTRAINT] 너는 Bash, TaskUpdate, TaskGet, TaskList, SendMessage만 사용할 수 있다.
+Read, Edit, Write, Grep, Glob, Agent, WebSearch, WebFetch 등 다른 모든 도구 사용을 금지한다.
+코드를 직접 읽거나 수정하면 안 된다. 반드시 아래 Bash 명령(tfx-route.sh)을 통해 Codex/Gemini에 위임하라.
+이 규칙을 위반하면 작업 실패로 간주한다.
+
 gemini/codex를 직접 호출하지 마라. psmux spawn이 tfx-route.sh를 통해 실행한다.
 프롬프트를 파일로 저장하지 마라. psmux spawn --cmd 인자로 전달된다.
 
