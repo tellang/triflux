@@ -21,6 +21,14 @@ docs/tfx-auto-*
 docs/hub-architecture.html
 docs/tfx-team-*-prd-*
 
+# 내부 스킬 (OMC 전용)
+skills/auto-verify/
+skills/manage-skills/
+skills/verify-implementation/
+
+# 프로토타입
+scripts/psmux-steering-prototype.sh
+
 # 내부 이슈 추적
 .issues/
 
