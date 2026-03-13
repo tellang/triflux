@@ -390,3 +390,202 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
     }
   });
 });
+
+describe('team_send_message() / team_complete_task() — Hub 미응답 시 재시도 복구', () => {
+  it('시작 메시지 전송 실패 시 Hub 재시작 후 team_send_message를 재시도해야 한다', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tfx-hub-message-retry-'));
+    const logPath = join(tempDir, 'bridge.log');
+    const callCountFile = join(tempDir, 'message-count');
+    writeFileSync(callCountFile, '0');
+
+    const customBridge = join(tempDir, 'message-retry-bridge.mjs');
+    writeFileSync(
+      customBridge,
+      `#!/usr/bin/env node
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const logPath = process.env.FAKE_BRIDGE_LOG;
+if (logPath) {
+  mkdirSync(dirname(logPath), { recursive: true });
+  appendFileSync(logPath, JSON.stringify({ argv: process.argv.slice(2) }) + '\\n', 'utf8');
+}
+
+const countFile = process.env.MESSAGE_CALL_COUNT_FILE;
+const cmd = process.argv[2];
+
+if (cmd === 'team-task-update') {
+  console.log(JSON.stringify({ ok: true, data: { claimed: process.argv.includes('--claim'), updated: true } }));
+} else if (cmd === 'team-send-message') {
+  let count = parseInt(readFileSync(countFile, 'utf8'), 10);
+  count++;
+  writeFileSync(countFile, String(count));
+
+  if (count === 1) {
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify({ ok: true, data: { message_id: 'msg-retry' } }));
+} else if (cmd === 'result') {
+  console.log(JSON.stringify({ ok: true, data: { message_id: 'result-ok' } }));
+} else {
+  console.log(JSON.stringify({ ok: true, data: {} }));
+}
+`,
+    );
+    chmodSync(customBridge, 0o755);
+
+    try {
+      const testPort = 29000 + Math.floor(Math.random() * 100);
+      const result = spawnSync(
+        'bash',
+        ['-c', `bash "${ROUTE_SCRIPT}" executor 'hub-message-retry-test' minimal 5`],
+        {
+          cwd: PROJECT_ROOT,
+          encoding: 'utf8',
+          timeout: 45000,
+          env: {
+            ...process.env,
+            PATH: `${FIXTURE_BIN}:${process.env.PATH || ''}`,
+            FAKE_CODEX_MODE: 'exec',
+            TFX_CODEX_TRANSPORT: 'exec',
+            TFX_TEAM_NAME: 'hub-message-team',
+            TFX_TEAM_TASK_ID: 'task-message-001',
+            TFX_TEAM_AGENT_NAME: 'executor-message-test',
+            TFX_TEAM_LEAD_NAME: 'team-lead',
+            TFX_BRIDGE_SCRIPT: customBridge,
+            FAKE_BRIDGE_LOG: logPath,
+            MESSAGE_CALL_COUNT_FILE: callCountFile,
+            TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
+            TFX_CLI_MODE: 'auto',
+            TFX_NO_CLAUDE_NATIVE: '0',
+            TFX_WORKER_INDEX: '',
+            TFX_SEARCH_TOOL: '',
+          },
+        },
+      );
+
+      assert.equal(result.status, 0, output(result));
+      assert.match(output(result), /Hub 미응답 — 자동 재시작 시도/);
+      assert.match(output(result), /Hub 재시작 후 팀 메시지 전송 성공/);
+
+      const calls = readFileSync(logPath, 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line).argv);
+      const messageCalls = calls.filter((argv) => argv[0] === 'team-send-message');
+      assert.ok(messageCalls.length >= 3, `team-send-message 재시도가 기록되어야 함: ${JSON.stringify(messageCalls)}`);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('완료 보고와 result 발행 실패 시 각각 Hub 재시작 후 재시도해야 한다', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tfx-hub-complete-retry-'));
+    const logPath = join(tempDir, 'bridge.log');
+    const updateCountFile = join(tempDir, 'complete-update-count');
+    const resultCountFile = join(tempDir, 'complete-result-count');
+    writeFileSync(updateCountFile, '0');
+    writeFileSync(resultCountFile, '0');
+
+    const customBridge = join(tempDir, 'complete-retry-bridge.mjs');
+    writeFileSync(
+      customBridge,
+      `#!/usr/bin/env node
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const logPath = process.env.FAKE_BRIDGE_LOG;
+if (logPath) {
+  mkdirSync(dirname(logPath), { recursive: true });
+  appendFileSync(logPath, JSON.stringify({ argv: process.argv.slice(2) }) + '\\n', 'utf8');
+}
+
+const updateCountFile = process.env.COMPLETE_UPDATE_COUNT_FILE;
+const resultCountFile = process.env.COMPLETE_RESULT_COUNT_FILE;
+const cmd = process.argv[2];
+const isClaim = process.argv.includes('--claim');
+
+if (cmd === 'team-task-update' && isClaim) {
+  console.log(JSON.stringify({ ok: true, data: { claimed: true, updated: true } }));
+} else if (cmd === 'team-task-update') {
+  let count = parseInt(readFileSync(updateCountFile, 'utf8'), 10);
+  count++;
+  writeFileSync(updateCountFile, String(count));
+
+  if (count === 1) {
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify({ ok: true, data: { updated: true } }));
+} else if (cmd === 'team-send-message') {
+  console.log(JSON.stringify({ ok: true, data: { message_id: 'msg-complete' } }));
+} else if (cmd === 'result') {
+  let count = parseInt(readFileSync(resultCountFile, 'utf8'), 10);
+  count++;
+  writeFileSync(resultCountFile, String(count));
+
+  if (count === 1) {
+    process.exit(1);
+  }
+
+  console.log(JSON.stringify({ ok: true, data: { message_id: 'result-complete' } }));
+} else {
+  console.log(JSON.stringify({ ok: true, data: {} }));
+}
+`,
+    );
+    chmodSync(customBridge, 0o755);
+
+    try {
+      const testPort = 29100 + Math.floor(Math.random() * 100);
+      const result = spawnSync(
+        'bash',
+        ['-c', `bash "${ROUTE_SCRIPT}" executor 'hub-complete-retry-test' minimal 5`],
+        {
+          cwd: PROJECT_ROOT,
+          encoding: 'utf8',
+          timeout: 45000,
+          env: {
+            ...process.env,
+            PATH: `${FIXTURE_BIN}:${process.env.PATH || ''}`,
+            FAKE_CODEX_MODE: 'exec',
+            TFX_CODEX_TRANSPORT: 'exec',
+            TFX_TEAM_NAME: 'hub-complete-team',
+            TFX_TEAM_TASK_ID: 'task-complete-001',
+            TFX_TEAM_AGENT_NAME: 'executor-complete-test',
+            TFX_TEAM_LEAD_NAME: 'team-lead',
+            TFX_BRIDGE_SCRIPT: customBridge,
+            FAKE_BRIDGE_LOG: logPath,
+            COMPLETE_UPDATE_COUNT_FILE: updateCountFile,
+            COMPLETE_RESULT_COUNT_FILE: resultCountFile,
+            TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
+            TFX_CLI_MODE: 'auto',
+            TFX_NO_CLAUDE_NATIVE: '0',
+            TFX_WORKER_INDEX: '',
+            TFX_SEARCH_TOOL: '',
+          },
+        },
+      );
+
+      assert.equal(result.status, 0, output(result));
+      assert.match(output(result), /Hub 재시작 후 팀 task 완료 보고 성공/);
+      assert.match(output(result), /Hub 재시작 후 Hub result 발행 성공/);
+
+      const calls = readFileSync(logPath, 'utf8')
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line).argv);
+      const completeUpdateCalls = calls.filter(
+        (argv) => argv[0] === 'team-task-update' && !argv.includes('--claim'),
+      );
+      const resultCalls = calls.filter((argv) => argv[0] === 'result');
+      assert.ok(completeUpdateCalls.length >= 2, `완료 보고 재시도가 기록되어야 함: ${JSON.stringify(completeUpdateCalls)}`);
+      assert.ok(resultCalls.length >= 2, `result 발행 재시도가 기록되어야 함: ${JSON.stringify(resultCalls)}`);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});

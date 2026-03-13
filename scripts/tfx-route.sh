@@ -170,15 +170,18 @@ team_send_message() {
   local summary="${2:-}"
   [[ -z "$TFX_TEAM_NAME" || -z "$text" ]] && return 0
 
-  if ! bridge_cli team-send-message \
+  if ! bridge_cli_with_restart "팀 메시지 전송" "Hub 재시작 후 팀 메시지 전송 성공." \
+    team-send-message \
     --team "$TFX_TEAM_NAME" \
     --from "$TFX_TEAM_AGENT_NAME" \
     --to "$TFX_TEAM_LEAD_NAME" \
     --text "$text" \
-    --summary "${summary:-status update}" \
-    >/dev/null 2>&1; then
+    --summary "${summary:-status update}"; then
     echo "[tfx-route] 경고: 팀 메시지 전송 실패 (team=$TFX_TEAM_NAME, to=$TFX_TEAM_LEAD_NAME)" >&2
+    return 0
   fi
+
+  return 0
 }
 
 # ── Hub 자동 재시작 (슬립 복귀 등으로 Hub 종료 시) ──
@@ -212,6 +215,28 @@ try_restart_hub() {
   done
 
   echo "[tfx-route] Hub 재시작 실패 — claim 없이 계속 실행" >&2
+  return 1
+}
+
+bridge_cli_with_restart() {
+  local action_label="${1:-bridge 호출}"
+  local success_message="${2:-}"
+  shift 2 || true
+
+  if bridge_cli "$@" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! try_restart_hub; then
+    return 1
+  fi
+
+  if bridge_cli "$@" >/dev/null 2>&1; then
+    [[ -n "$success_message" ]] && echo "[tfx-route] ${success_message}" >&2
+    return 0
+  fi
+
+  echo "[tfx-route] 경고: Hub 재시작 후 ${action_label} 재시도 실패." >&2
   return 1
 }
 
@@ -279,36 +304,28 @@ team_complete_task() {
   # task 상태: 항상 "completed" (Claude Code API는 "failed" 미지원)
   # 실제 결과는 metadata.result로 전달
   if [[ -n "$metadata_patch" ]]; then
-    if ! bridge_cli team-task-update \
+    if ! bridge_cli_with_restart "팀 task 완료 보고" "Hub 재시작 후 팀 task 완료 보고 성공." \
+      team-task-update \
       --team "$TFX_TEAM_NAME" \
       --task-id "$TFX_TEAM_TASK_ID" \
       --status completed \
       --owner "$TFX_TEAM_AGENT_NAME" \
-      --metadata-patch "$metadata_patch" \
-      >/dev/null 2>&1; then
+      --metadata-patch "$metadata_patch"; then
       echo "[tfx-route] 경고: 팀 task 완료 보고 실패 (team=$TFX_TEAM_NAME, task=$TFX_TEAM_TASK_ID, result=$result)" >&2
     fi
   fi
 
   # 리드에게 메시지 전송
-  if ! bridge_cli team-send-message \
-    --team "$TFX_TEAM_NAME" \
-    --from "$TFX_TEAM_AGENT_NAME" \
-    --to "$TFX_TEAM_LEAD_NAME" \
-    --text "$summary_trimmed" \
-    --summary "task ${TFX_TEAM_TASK_ID} ${result}" \
-    >/dev/null 2>&1; then
-    echo "[tfx-route] 경고: 팀 완료 메시지 전송 실패 (team=$TFX_TEAM_NAME, task=$TFX_TEAM_TASK_ID)" >&2
-  fi
+  team_send_message "$summary_trimmed" "task ${TFX_TEAM_TASK_ID} ${result}"
 
   # Hub result 발행 (poll_messages 채널 활성화)
   if [[ -n "$result_payload" ]]; then
-    if ! bridge_cli result \
+    if ! bridge_cli_with_restart "Hub result 발행" "Hub 재시작 후 Hub result 발행 성공." \
+      result \
       --agent "$TFX_TEAM_AGENT_NAME" \
       --topic task.result \
       --payload "$result_payload" \
-      --trace "$TFX_TEAM_NAME" \
-      >/dev/null 2>&1; then
+      --trace "$TFX_TEAM_NAME"; then
       echo "[tfx-route] 경고: Hub result 발행 실패 (agent=$TFX_TEAM_AGENT_NAME, task=$TFX_TEAM_TASK_ID)" >&2
     fi
   fi
@@ -439,6 +456,7 @@ route_agent() {
 # ── CLI 모드 오버라이드 (tfx-codex / tfx-gemini 스킬용) ──
 TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
+TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
 TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
@@ -453,6 +471,13 @@ case "$TFX_CODEX_TRANSPORT" in
   auto|mcp|exec) ;;
   *)
     echo "ERROR: TFX_CODEX_TRANSPORT 값은 auto, mcp, exec 중 하나여야 합니다. (현재: $TFX_CODEX_TRANSPORT)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_VERIFIER_OVERRIDE" in
+  auto|claude) ;;
+  *)
+    echo "ERROR: TFX_VERIFIER_OVERRIDE 값은 auto 또는 claude여야 합니다. (현재: $TFX_VERIFIER_OVERRIDE)" >&2
     exit 1
     ;;
 esac
@@ -575,6 +600,24 @@ apply_no_claude_native_mode() {
   esac
 
   echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1: $AGENT_TYPE -> codex($CLI_EFFORT) 리매핑" >&2
+}
+
+apply_verifier_override() {
+  [[ "$AGENT_TYPE" != "verifier" ]] && return
+
+  case "$TFX_VERIFIER_OVERRIDE" in
+    auto|"")
+      return 0
+      ;;
+    claude)
+      ORIGINAL_AGENT="${ORIGINAL_AGENT:-$AGENT_TYPE}"
+      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      echo "[tfx-route] TFX_VERIFIER_OVERRIDE=claude: verifier -> claude-native" >&2
+      ;;
+  esac
+
+  return 0
 }
 
 # ── MCP 인벤토리 캐시 ──
@@ -936,6 +979,7 @@ main() {
   route_agent "$AGENT_TYPE"
   apply_cli_mode
   apply_no_claude_native_mode
+  apply_verifier_override
 
   # CLI 경로 해석
   case "$CLI_CMD" in
@@ -1018,7 +1062,7 @@ FALLBACK_EOF
 
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE timeout=${TIMEOUT_SEC}s" >&2
-  echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE resolved_profile=$MCP_RESOLVED_PROFILE" >&2
+  echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE resolved_profile=$MCP_RESOLVED_PROFILE verifier_override=$TFX_VERIFIER_OVERRIDE" >&2
   if [[ ${#GEMINI_ALLOWED_SERVERS[@]} -gt 0 ]]; then
     echo "[tfx-route] allowed_mcp_servers=$(IFS=,; echo "${GEMINI_ALLOWED_SERVERS[*]}")" >&2
   else

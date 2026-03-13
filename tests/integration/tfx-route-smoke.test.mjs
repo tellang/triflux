@@ -68,10 +68,13 @@ describe('tfx-route.sh — claude-native 에이전트 메타데이터 출력', (
 
   it('verifier 에이전트는 기본 route table에서 codex review 메타데이터를 출력해야 한다', () => {
     const result = runBash(
-      `CODEX_BIN=false bash "${ROUTE_SCRIPT}" verifier 'test-prompt' 2>&1 || true`,
+      `CODEX_BIN=codex bash "${ROUTE_SCRIPT}" verifier 'test-prompt'`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec' }),
     );
+    assert.equal(result.status, 0, out(result));
     assert.match(out(result), /type=codex/);
     assert.match(out(result), /agent=verifier/);
+    assert.match(out(result), /EXEC:test-prompt/);
   });
 
   it('test-engineer 에이전트는 ROUTE_TYPE=claude-native를 출력해야 한다', () => {
