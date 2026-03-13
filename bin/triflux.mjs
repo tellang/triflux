@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // triflux CLI — setup, doctor, version
-import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, rmSync, statSync } from "fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, rmSync, statSync, openSync, closeSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync, execFileSync, spawn } from "child_process";
@@ -1408,7 +1408,25 @@ function stopHubForUpdate() {
     try { process.kill(info.pid, "SIGKILL"); } catch {}
   }
 
-  sleepMs(300);
+  // Windows에서 better-sqlite3.node 파일 핸들 해제 대기
+  // taskkill 후 프로세스 종료 + 파일 핸들 해제까지 최대 5초
+  const sqliteNode = join(PKG_ROOT, "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node");
+  for (let i = 0; i < 10; i++) {
+    sleepMs(500);
+    try { process.kill(info.pid, 0); } catch { break; }
+  }
+  // 파일 잠금 해제 확인 (Windows EBUSY 방지)
+  if (existsSync(sqliteNode)) {
+    for (let i = 0; i < 6; i++) {
+      try {
+        const fd = openSync(sqliteNode, "r");
+        closeSync(fd);
+        break;
+      } catch {
+        sleepMs(500);
+      }
+    }
+  }
   try { unlinkSync(HUB_PID_FILE); } catch {}
   return info;
 }
