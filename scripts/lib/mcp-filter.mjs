@@ -2,25 +2,18 @@
 // scripts/lib/mcp-filter.mjs
 // 역할/컨텍스트 기반 MCP 도구 노출 정책의 단일 소스.
 
+import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-export const SEARCH_SERVER_ORDER = Object.freeze(['brave-search', 'tavily', 'exa']);
-
-export const MCP_SERVER_TOOL_CATALOG = Object.freeze({
-  context7: Object.freeze(['resolve-library-id', 'query-docs']),
-  'brave-search': Object.freeze(['brave_web_search', 'brave_news_search']),
-  exa: Object.freeze(['web_search_exa', 'get_code_context_exa']),
-  tavily: Object.freeze(['tavily_search', 'tavily_extract']),
-  playwright: Object.freeze([
-    'browser_navigate',
-    'browser_navigate_back',
-    'browser_snapshot',
-    'browser_take_screenshot',
-    'browser_wait_for',
-  ]),
-  'sequential-thinking': Object.freeze(['sequentialthinking']),
-});
+import {
+  DOMAIN_TAG_KEYWORDS,
+  MCP_SERVER_TOOL_CATALOG,
+  SEARCH_SERVER_ORDER,
+  SERVER_EXPLICIT_KEYWORDS,
+  normalizeServerMetadata,
+  uniqueStrings,
+} from './mcp-server-catalog.mjs';
 
 export const KNOWN_MCP_SERVERS = Object.freeze(Object.keys(MCP_SERVER_TOOL_CATALOG));
 
@@ -28,33 +21,6 @@ const SEARCH_INTENT_PATTERNS = Object.freeze([
   /\b(search|web|browse|look ?up|find|latest|recent|news|current|today|release(?: note)?s?|changelog|announcement|pricing|status|verify|fact[- ]?check)\b/i,
   /(검색|웹|브라우즈|찾아|조회|최신|최근|뉴스|현재|오늘|릴리즈|배포|변경사항|공지|가격|상태|검증)/u,
 ]);
-
-const SERVER_CONTEXT_PATTERNS = Object.freeze({
-  context7: Object.freeze([
-    /\b(context7|docs?|documentation|official docs?|reference|api|sdk|library|package|framework|spec|schema|manual|guide)\b/i,
-    /(문서|공식|레퍼런스|API|SDK|라이브러리|패키지|프레임워크|스펙|스키마|매뉴얼|가이드)/u,
-  ]),
-  'brave-search': Object.freeze([
-    /\b(search|browse|web|site|article|forum|reddit|blog|lookup|find)\b/i,
-    /(검색|웹|사이트|기사|포럼|레딧|블로그|조회|탐색)/u,
-  ]),
-  tavily: Object.freeze([
-    /\b(tavily|latest|recent|news|current|today|release(?: note)?s?|changelog|announcement|pricing|status|up-to-date|verify|fact[- ]?check)\b/i,
-    /(tavily|최신|최근|뉴스|현재|오늘|릴리즈|배포|변경사항|공지|가격|상태|최신화|검증)/u,
-  ]),
-  exa: Object.freeze([
-    /\b(exa|code|repo|repository|source|implementation|stack ?trace|error|bug|fix|unit test|integration test|test case|failing test|snippet|example|cli|script|module|package)\b/i,
-    /(exa|코드|리포|저장소|소스|구현|오류|버그|수정|단위 테스트|통합 테스트|테스트 케이스|예제|CLI|스크립트|모듈|패키지)/u,
-  ]),
-  playwright: Object.freeze([
-    /\b(playwright|browser|page|dom|screenshot|visual|render|layout|responsive|css|html|click|navigate|ux|ui|e2e)\b/i,
-    /(playwright|브라우저|페이지|DOM|스크린샷|화면|시각|렌더|레이아웃|반응형|CSS|HTML|클릭|이동|UI|UX|E2E)/u,
-  ]),
-  'sequential-thinking': Object.freeze([
-    /\b(review|analysis|analyze|audit|reason|plan|compare|root cause|security|risk|threat|critique)\b/i,
-    /(리뷰|분석|검토|감사|추론|계획|비교|원인|보안|위험|위협|비평)/u,
-  ]),
-});
 
 const PROFILE_DEFINITIONS = Object.freeze({
   default: Object.freeze({
@@ -162,10 +128,6 @@ export const SUPPORTED_MCP_PROFILES = Object.freeze([
   ...Object.keys(LEGACY_PROFILE_ALIASES),
 ]);
 
-function uniqueStrings(values = []) {
-  return [...new Set(values.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim()))];
-}
-
 function normalizeTaskText(taskText = '') {
   if (typeof taskText !== 'string') return '';
   return taskText.replace(/\s+/g, ' ').trim();
@@ -211,76 +173,162 @@ function resolveAutoProfile(agentType = '') {
   }
 }
 
-function countMatches(text, patterns = []) {
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function countKeywordMatches(text, keywords = []) {
   let matches = 0;
-  for (const pattern of patterns) {
-    pattern.lastIndex = 0;
+  for (const keyword of keywords) {
+    const source = String(keyword || '').trim();
+    if (!source) continue;
+    const pattern = /^[a-z0-9- ]+$/i.test(source)
+      ? new RegExp(`\\b${escapeRegExp(source)}\\b`, 'i')
+      : new RegExp(escapeRegExp(source), 'iu');
     if (pattern.test(text)) matches += 1;
   }
   return matches;
 }
 
-function collectServerScores(taskText = '') {
-  const normalized = normalizeTaskText(taskText);
-  const scores = new Map(KNOWN_MCP_SERVERS.map((server) => [server, 0]));
-  if (!normalized) return scores;
-
-  for (const [server, patterns] of Object.entries(SERVER_CONTEXT_PATTERNS)) {
-    scores.set(server, countMatches(normalized, patterns));
+function loadInventory(inventoryFile = '') {
+  if (typeof inventoryFile !== 'string' || !inventoryFile.trim()) return null;
+  try {
+    return JSON.parse(readFileSync(inventoryFile, 'utf8'));
+  } catch {
+    return null;
   }
-  return scores;
 }
 
-function hasContextSignals(taskText = '') {
-  const scores = collectServerScores(taskText);
-  return [...scores.values()].some((score) => score > 0);
+function buildInventoryIndex(inventory = null) {
+  const index = new Map();
+  if (!inventory || typeof inventory !== 'object') return index;
+
+  for (const client of ['codex', 'gemini']) {
+    const servers = Array.isArray(inventory[client]?.servers) ? inventory[client].servers : [];
+    for (const server of servers) {
+      if (!server || typeof server.name !== 'string' || !server.name.trim()) continue;
+      const name = server.name.trim();
+      const previous = index.get(name) || {};
+      index.set(name, {
+        ...previous,
+        tool_count: Number.isFinite(server.tool_count)
+          ? Math.max(previous.tool_count ?? 0, Math.trunc(server.tool_count))
+          : previous.tool_count,
+        domain_tags: uniqueStrings([
+          ...(Array.isArray(previous.domain_tags) ? previous.domain_tags : []),
+          ...(Array.isArray(server.domain_tags) ? server.domain_tags : []),
+        ]),
+      });
+    }
+  }
+
+  return index;
 }
 
-function inferPreferredSearchTool(taskText = '') {
+function getServerMetadata(server, inventoryIndex) {
+  return normalizeServerMetadata(server, inventoryIndex.get(server) || {});
+}
+
+function scoreServer(server, taskText = '', inventoryIndex = new Map()) {
   const normalized = normalizeTaskText(taskText);
-  if (!normalized) return '';
+  const metadata = getServerMetadata(server, inventoryIndex);
+  if (!normalized) {
+    return {
+      server,
+      score: 0,
+      toolCount: metadata.tool_count,
+      matchedTags: [],
+      explicitMatch: false,
+    };
+  }
 
-  if (/\btavily\b/i.test(normalized)) return 'tavily';
-  if (/\bexa\b/i.test(normalized)) return 'exa';
-  if (/\bbrave(?:-search)?\b/i.test(normalized)) return 'brave-search';
+  let score = 0;
+  const matchedTags = [];
+  for (const tag of metadata.domain_tags) {
+    const matches = countKeywordMatches(normalized, DOMAIN_TAG_KEYWORDS[tag] || []);
+    if (matches > 0) {
+      matchedTags.push(tag);
+      score += matches * 2;
+    }
+  }
 
-  const searchScores = {
-    'brave-search': countMatches(normalized, SERVER_CONTEXT_PATTERNS['brave-search']),
-    tavily: countMatches(normalized, SERVER_CONTEXT_PATTERNS.tavily),
-    exa: countMatches(normalized, SERVER_CONTEXT_PATTERNS.exa),
+  const explicitMatches = countKeywordMatches(normalized, SERVER_EXPLICIT_KEYWORDS[server] || []);
+  if (explicitMatches > 0) {
+    score += explicitMatches * 4;
+  }
+
+  const toolKeywords = (MCP_SERVER_TOOL_CATALOG[server] || [])
+    .flatMap((toolName) => String(toolName).split(/[_-]+/))
+    .filter((token) => token.length >= 4);
+  score += countKeywordMatches(normalized, toolKeywords);
+
+  return {
+    server,
+    score,
+    toolCount: metadata.tool_count,
+    matchedTags,
+    explicitMatch: explicitMatches > 0,
   };
+}
 
-  if (searchScores.tavily > Math.max(searchScores.exa, searchScores['brave-search'])) {
-    return 'tavily';
+function compareRankedServers(left, right, workerIndex, availableOrder = []) {
+  if (right.explicitMatch !== left.explicitMatch) {
+    return Number(right.explicitMatch) - Number(left.explicitMatch);
   }
-  if (searchScores.exa > Math.max(searchScores.tavily, searchScores['brave-search'])) {
-    return 'exa';
+  if (right.score !== left.score) return right.score - left.score;
+  if (left.toolCount !== right.toolCount) return left.toolCount - right.toolCount;
+
+  if (Number.isInteger(workerIndex) && workerIndex > 0 && availableOrder.length > 1) {
+    const offset = (workerIndex - 1) % availableOrder.length;
+    const rotated = availableOrder.slice(offset).concat(availableOrder.slice(0, offset));
+    return rotated.indexOf(left.server) - rotated.indexOf(right.server);
   }
-  if (searchScores['brave-search'] > 0) {
-    return 'brave-search';
-  }
-  return '';
+
+  return availableOrder.indexOf(left.server) - availableOrder.indexOf(right.server);
+}
+
+function rankServers(servers = [], options = {}) {
+  const inventoryIndex = options.inventoryIndex instanceof Map
+    ? options.inventoryIndex
+    : buildInventoryIndex(options.inventory);
+  return servers
+    .map((server) => scoreServer(server, options.taskText, inventoryIndex))
+    .sort((left, right) => compareRankedServers(left, right, options.workerIndex, servers));
+}
+
+function hasContextSignals(servers = [], options = {}) {
+  return rankServers(servers, options).some((server) => server.score > 0);
+}
+
+function inferPreferredSearchTool(taskText = '', inventoryIndex = new Map(), allowedServers = SEARCH_SERVER_ORDER) {
+  const ranked = rankServers(
+    SEARCH_SERVER_ORDER.filter((server) => allowedServers.includes(server)),
+    { taskText, inventoryIndex },
+  );
+  return ranked.find((server) => server.score > 0)?.server || '';
 }
 
 function selectContextualServers(baseServers, profile, options = {}) {
   const taskText = normalizeTaskText(options.taskText);
   if (!taskText || !baseServers.length) return [...baseServers];
-  if (!hasContextSignals(taskText)) return [...baseServers];
 
-  const scores = collectServerScores(taskText);
+  const inventoryIndex = options.inventoryIndex instanceof Map
+    ? options.inventoryIndex
+    : buildInventoryIndex(options.inventory);
+  if (!hasContextSignals(baseServers, { ...options, inventoryIndex })) return [...baseServers];
+
   const selected = new Set(
     (profile.alwaysOnServers || []).filter((server) => baseServers.includes(server)),
   );
-
   const requestedSearchTool = typeof options.searchTool === 'string' ? options.searchTool : '';
-  if (requestedSearchTool && baseServers.includes(requestedSearchTool)) {
-    selected.add(requestedSearchTool);
-  }
 
-  for (const server of baseServers) {
-    if (SEARCH_SERVER_ORDER.includes(server)) continue;
-    if ((scores.get(server) || 0) > 0) {
-      selected.add(server);
+  const rankedServers = rankServers(
+    baseServers.filter((server) => !SEARCH_SERVER_ORDER.includes(server) && !selected.has(server)),
+    { ...options, inventoryIndex },
+  );
+  for (const ranked of rankedServers) {
+    if (ranked.score > 0 || ranked.explicitMatch) {
+      selected.add(ranked.server);
     }
   }
 
@@ -293,22 +341,39 @@ function selectContextualServers(baseServers, profile, options = {}) {
     Number.isInteger(options.workerIndex) ? options.workerIndex : undefined,
     baseServers.filter((server) => SEARCH_SERVER_ORDER.includes(server)),
     taskText,
+    { inventoryIndex },
   );
-  const positiveSearchServers = orderedSearchServers.filter((server) => {
+  const rankedSearchSet = new Set(orderedSearchServers.filter((server) => {
     if (requestedSearchTool === server) return true;
-    return (scores.get(server) || 0) > 0;
-  });
+    const ranked = scoreServer(server, taskText, inventoryIndex);
+    return ranked.score > 0 || ranked.explicitMatch;
+  }));
   const maxSearchServers = Number.isInteger(profile.maxSearchServers)
     ? profile.maxSearchServers
     : orderedSearchServers.length;
-  const chosenSearchServers = (positiveSearchServers.length ? positiveSearchServers : wantsSearchFallback ? orderedSearchServers.slice(0, 1) : [])
-    .slice(0, maxSearchServers);
+  const chosenSearchServers = (
+    rankedSearchSet.size
+      ? orderedSearchServers.filter((server) => rankedSearchSet.has(server))
+      : wantsSearchFallback
+        ? orderedSearchServers.slice(0, 1)
+        : []
+  ).slice(0, maxSearchServers);
 
   for (const server of chosenSearchServers) {
     selected.add(server);
   }
 
-  const contextualServers = baseServers.filter((server) => selected.has(server));
+  const alwaysOnServers = baseServers.filter((server) => selected.has(server) && (profile.alwaysOnServers || []).includes(server));
+  const contextualNonSearch = rankServers(
+    baseServers.filter((server) => selected.has(server) && !SEARCH_SERVER_ORDER.includes(server) && !alwaysOnServers.includes(server)),
+    { ...options, inventoryIndex },
+  ).map((entry) => entry.server);
+  const contextualSearch = orderedSearchServers.filter((server) => selected.has(server));
+  const contextualServers = uniqueStrings([
+    ...alwaysOnServers,
+    ...contextualNonSearch,
+    ...contextualSearch,
+  ]);
   return contextualServers.length ? contextualServers : [...baseServers];
 }
 
@@ -323,23 +388,23 @@ export function parseAvailableServers(rawAvailableServers = '') {
   return uniqueStrings(rawAvailableServers.split(/[,\s]+/));
 }
 
-export function resolveSearchToolOrder(searchTool = '', workerIndex, allowedServers = SEARCH_SERVER_ORDER, taskText = '') {
+export function resolveSearchToolOrder(searchTool = '', workerIndex, allowedServers = SEARCH_SERVER_ORDER, taskText = '', options = {}) {
   const available = SEARCH_SERVER_ORDER.filter((tool) => allowedServers.includes(tool));
   if (!available.length) return [];
 
+  const inventoryIndex = options.inventoryIndex instanceof Map
+    ? options.inventoryIndex
+    : buildInventoryIndex(options.inventory);
   const preferredSearchTool = searchTool && available.includes(searchTool)
     ? searchTool
-    : inferPreferredSearchTool(taskText);
-  if (preferredSearchTool && available.includes(preferredSearchTool)) {
-    return [preferredSearchTool, ...available.filter((tool) => tool !== preferredSearchTool)];
+    : inferPreferredSearchTool(taskText, inventoryIndex, available);
+
+  const ranked = rankServers(available, { taskText, workerIndex, inventoryIndex }).map((entry) => entry.server);
+  if (!preferredSearchTool || !available.includes(preferredSearchTool)) {
+    return ranked;
   }
 
-  if (Number.isInteger(workerIndex) && workerIndex > 0 && available.length > 1) {
-    const offset = (workerIndex - 1) % available.length;
-    return available.slice(offset).concat(available.slice(0, offset));
-  }
-
-  return available;
+  return [preferredSearchTool, ...ranked.filter((tool) => tool !== preferredSearchTool)];
 }
 
 function getProfileDefinition(resolvedProfile) {
@@ -350,22 +415,27 @@ export function resolveAllowedServers(options = {}) {
   const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
   const profile = getProfileDefinition(resolvedProfile);
   const availableServers = parseAvailableServers(options.availableServers);
+  const inventory = options.inventory || loadInventory(options.inventoryFile);
+  const inventoryIndex = buildInventoryIndex(inventory);
   const baseServers = availableServers.length
     ? profile.allowedServers.filter((server) => availableServers.includes(server))
     : [...profile.allowedServers];
-  return selectContextualServers(baseServers, profile, options);
+  return selectContextualServers(baseServers, profile, { ...options, inventory, inventoryIndex });
 }
 
 export function buildPromptHint(options = {}) {
   const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
   if (resolvedProfile === 'none') return '';
 
-  const allowedServers = resolveAllowedServers(options);
+  const inventory = options.inventory || loadInventory(options.inventoryFile);
+  const inventoryIndex = buildInventoryIndex(inventory);
+  const allowedServers = resolveAllowedServers({ ...options, inventory, inventoryIndex });
   const orderedTools = resolveSearchToolOrder(
     options.searchTool,
     Number.isInteger(options.workerIndex) ? options.workerIndex : undefined,
     allowedServers,
     options.taskText,
+    { inventory, inventoryIndex },
   );
   const has = (server) => allowedServers.includes(server);
   const orderedSearchHint = orderedTools.length > 1
@@ -376,50 +446,20 @@ export function buildPromptHint(options = {}) {
   const searchFallbackHint = orderedTools.length > 1
     ? '검색 도구 실패 시 402, 429, 432, 433, quota 에러에서 재시도하지 말고 다음 도구로 전환하세요.'
     : '';
-
-  switch (resolvedProfile) {
-    case 'executor':
-      return [
-        has('context7') ? 'context7으로 라이브러리 문서를 조회하세요.' : '',
-        orderedSearchHint,
-        searchFallbackHint,
-        has('playwright') ? '브라우저/UI 검증이 필요하면 playwright를 사용하세요.' : '',
-      ].filter(Boolean).join(' ');
-    case 'designer':
-      return [
-        has('context7') ? 'context7으로 관련 프레임워크/라이브러리 문서를 조회하세요.' : '',
-        has('playwright') ? '화면/레이아웃 확인은 playwright를 우선 사용하세요.' : '',
-        orderedSearchHint,
-        searchFallbackHint,
-      ].filter(Boolean).join(' ');
-    case 'explore':
-      return [
-        has('context7') ? 'context7으로 관련 문서를 조회하세요.' : '',
-        orderedSearchHint,
-        searchFallbackHint,
-        '검색 깊이를 제한하고 읽기 전용 조사에 집중하세요.',
-      ].filter(Boolean).join(' ');
-    case 'reviewer':
-      return [
-        has('context7') ? 'context7으로 관련 공식 문서를 먼저 확인하세요.' : '',
-        has('sequential-thinking') ? 'sequential-thinking으로 체계적으로 분석하세요.' : '',
-        orderedTools[0] ? `외부 근거가 더 필요하면 ${orderedTools[0]}를 사용하세요.` : '',
-      ].filter(Boolean).join(' ');
-    case 'writer':
-      return [
-        has('context7') ? 'context7으로 공식 문서를 참조하세요.' : '',
-        orderedSearchHint,
-        searchFallbackHint,
-        '검색 결과의 출처 URL을 함께 제시하세요.',
-      ].filter(Boolean).join(' ');
-    case 'default':
-    default:
-      return [
-        has('context7') ? 'context7으로 관련 문서를 조회하세요.' : '',
-        orderedSearchHint,
-        searchFallbackHint,
-      ].filter(Boolean).join(' ');
-  }
+  return [
+    has('context7') ? 'context7으로 관련 문서를 조회하세요.' : '',
+    has('playwright')
+      ? resolvedProfile === 'designer'
+        ? '화면/레이아웃 확인은 playwright를 우선 사용하세요.'
+        : '브라우저/UI 검증이 필요하면 playwright를 사용하세요.'
+      : '',
+    has('sequential-thinking') ? 'sequential-thinking으로 체계적으로 분석하세요.' : '',
+    resolvedProfile === 'reviewer' && orderedTools[0] ? `외부 근거가 더 필요하면 ${orderedTools[0]}를 사용하세요.` : '',
+    resolvedProfile !== 'reviewer' ? orderedSearchHint : '',
+    resolvedProfile !== 'reviewer' ? searchFallbackHint : '',
+    resolvedProfile === 'explore' ? '검색 깊이를 제한하고 읽기 전용 조사에 집중하세요.' : '',
+    resolvedProfile === 'writer' ? '검색 결과의 출처 URL을 함께 제시하세요.' : '',
+  ].filter(Boolean).join(' ');
 }
 
 export function getGeminiAllowedServers(options = {}) {
@@ -478,9 +518,12 @@ export function getCodexConfigOverrides(options = {}) {
 }
 
 export function buildMcpPolicy(options = {}) {
+  const inventory = options.inventory || loadInventory(options.inventoryFile);
+  const inventoryIndex = buildInventoryIndex(inventory);
+  const resolvedOptions = { ...options, inventory, inventoryIndex };
   const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
-  const allowedServers = resolveAllowedServers(options);
-  const hint = buildPromptHint(options);
+  const allowedServers = resolveAllowedServers(resolvedOptions);
+  const hint = buildPromptHint(resolvedOptions);
   return {
     requestedProfile: typeof options.requestedProfile === 'string' && options.requestedProfile
       ? options.requestedProfile
@@ -488,9 +531,9 @@ export function buildMcpPolicy(options = {}) {
     resolvedProfile,
     allowedServers,
     hint,
-    geminiAllowedServers: getGeminiAllowedServers(options),
-    codexConfig: getCodexMcpConfig(options),
-    codexConfigOverrides: getCodexConfigOverrides(options),
+    geminiAllowedServers: getGeminiAllowedServers(resolvedOptions),
+    codexConfig: getCodexMcpConfig(resolvedOptions),
+    codexConfigOverrides: getCodexConfigOverrides(resolvedOptions),
   };
 }
 
@@ -519,6 +562,7 @@ function parseCliArgs(argv) {
     agentType: '',
     requestedProfile: 'auto',
     availableServers: [],
+    inventoryFile: '',
     searchTool: '',
     taskText: '',
     workerIndex: undefined,
@@ -548,6 +592,9 @@ function parseCliArgs(argv) {
         break;
       case '--available':
         args.availableServers = parseAvailableServers(next());
+        break;
+      case '--inventory-file':
+        args.inventoryFile = next();
         break;
       case '--search-tool':
         args.searchTool = next();

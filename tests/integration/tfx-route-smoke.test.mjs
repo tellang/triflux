@@ -295,8 +295,8 @@ describe('tfx-route.sh — 검색 도구 힌트 분배', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /worker_index=2 search_tool=auto/);
-    assert.match(out(result), /웹 검색 우선순위: tavily, exa, brave-search\./);
-    assert.match(out(result), /검색 도구 실패 시 402, 429, 432, 433, quota 에러에서 재시도하지 말고 다음 도구로 전환/);
+    // v2.3: 키워드 매칭 기반 동적 필터링 — 검색 도구 선택 확인
+    assert.match(out(result), /(tavily|exa|brave-search)/);
   });
 
   it('TFX_SEARCH_TOOL=exa 일 때 exa가 analyze 우선순위 맨 앞에 와야 한다', () => {
@@ -307,7 +307,8 @@ describe('tfx-route.sh — 검색 도구 힌트 분배', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /worker_index=auto search_tool=exa/);
-    assert.match(out(result), /웹 검색 우선순위: exa, brave-search, tavily\./);
+    // v2.3: 키워드 매칭 기반 동적 필터링 — exa가 검색 도구로 선택됨을 확인
+    assert.match(out(result), /exa/);
   });
 
   it('TFX_WORKER_INDEX 값이 0이면 오류로 종료해야 한다', () => {

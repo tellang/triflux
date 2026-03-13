@@ -5,6 +5,7 @@ import {
   buildMcpPolicy,
   getCodexConfigOverrides,
   resolveMcpProfile,
+  resolveSearchToolOrder,
 } from '../../scripts/lib/mcp-filter.mjs';
 
 describe('mcp-filter', () => {
@@ -87,5 +88,38 @@ describe('mcp-filter', () => {
     assert.ok(overrides.includes('mcp_servers.context7.enabled=true'));
     assert.ok(overrides.includes('mcp_servers.exa.enabled_tools=["web_search_exa"]'));
     assert.ok(overrides.includes('mcp_servers.tavily.enabled=false'));
+  });
+
+  it('search server top-k 정렬은 inventory tool_count를 tie-break에 사용한다', () => {
+    const ordered = resolveSearchToolOrder(
+      '',
+      undefined,
+      ['brave-search', 'exa'],
+      'search and find the relevant result quickly.',
+      {
+        inventory: {
+          codex: {
+            servers: [
+              { name: 'brave-search', tool_count: 1, domain_tags: ['search'] },
+              { name: 'exa', tool_count: 7, domain_tags: ['search'] },
+            ],
+          },
+        },
+      },
+    );
+
+    assert.deepEqual(ordered, ['brave-search', 'exa']);
+  });
+
+  it('hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다', () => {
+    const policy = buildMcpPolicy({
+      agentType: 'executor',
+      requestedProfile: 'executor',
+      availableServers: ['context7', 'brave-search', 'exa', 'tavily'],
+      taskText: 'Verify the latest pricing status and current release announcement.',
+    });
+
+    assert.deepEqual(policy.allowedServers, ['context7', 'tavily', 'brave-search']);
+    assert.match(policy.hint, /웹 검색 우선순위: tavily, brave-search\./);
   });
 });

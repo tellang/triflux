@@ -18,6 +18,12 @@ process.stdin.on('end', async () => {
   const model = getArgValue('--model') || 'fake-gemini-model';
   const outputFormat = getArgValue('--output-format');
 
+  if (process.env.FAKE_GEMINI_SILENT_CRASH) {
+    // 출력 없이 즉시 종료 — health check crash 감지 테스트용
+    process.exit(Number(process.env.FAKE_GEMINI_SILENT_CRASH));
+    return;
+  }
+
   if (process.env.FAKE_GEMINI_EXIT_CODE) {
     process.stderr.write('fake gemini failure\n');
     process.exit(Number(process.env.FAKE_GEMINI_EXIT_CODE));
@@ -28,7 +34,7 @@ process.stdin.on('end', async () => {
     await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_GEMINI_DELAY_MS)));
   }
 
-  if (outputFormat !== 'stream-json') {
+  if (outputFormat !== 'stream-json' && !process.env.FAKE_GEMINI_LEGACY_OK) {
     process.stderr.write('expected stream-json\n');
     process.exit(2);
     return;
