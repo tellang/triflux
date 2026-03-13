@@ -12,6 +12,11 @@
           },
           {
             "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hub-ensure.mjs\"",
+            "timeout": 8
+          },
+          {
+            "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-cache.mjs\"",
             "timeout": 5
           }
