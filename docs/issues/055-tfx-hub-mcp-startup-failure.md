@@ -1,7 +1,7 @@
 # #55 tfx-hub MCP 클라이언트 시작 실패
 
 > 등록: 2026-03-13
-> 상태: open
+> 상태: resolved
 > 분류: bug
 > 심각도: medium
 > 관련: hub/server.mjs, Codex rmcp client
@@ -46,3 +46,13 @@ Codex 세션에서 tfx-hub MCP 서버 연결 시 핸드셰이크 실패:
 1. **단기**: Hub 미실행 시 Codex preflight에서 tfx-hub MCP를 비활성화하는 가드
 2. **중기**: Hub `/mcp` 엔드포인트의 Streamable HTTP 응답을 rmcp 스펙에 맞게 조정
 3. **장기**: Hub auto-start (기존 #18 이슈) 해결 시 자연 해소
+
+## 해결 (2026-03-13)
+
+**근본 원인**: Hub 미실행 상태에서 MCP 클라이언트가 `/mcp` 연결 시도 시 TCP 연결 자체가 실패.
+`hub-ensure.mjs`가 Hub를 auto-start하지만 SessionStart 훅에 등록되어 있지 않았고,
+기동 후 ready 대기 없이 즉시 반환하여 MCP 핸드셰이크 시점에 Hub가 아직 리스닝하지 않는 race condition.
+
+**수정 내용**:
+1. `scripts/hub-ensure.mjs`: Hub 기동 후 `waitForHubReady()` 폴링 추가 (250ms 간격, 최대 5초)
+2. `hooks/hooks.json`: SessionStart에 `hub-ensure.mjs` 훅 추가 (preflight-cache 이전에 실행)
