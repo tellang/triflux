@@ -38,11 +38,20 @@
 
 - [라우팅 최적화 리서치 (2026-03-13)](research-2026-03-13-routing-optimization.md) — tfx-route.sh 진단, 멀티모델 MCP 오케스트레이션, Claude hooks, 세션 핸드오프 패턴, 토큰 절약 프로젝트 딥 리서치
 - [병렬 워커 API Quota 분배 전략 (2026-03-13)](research-2026-03-13-parallel-worker-quota-strategy.md) — Brave/Tavily/Exa 최신 quota, 실제 실패 패턴, Round-Robin/Dedicated/Rate-Aware 설계와 권장안
+- [Claude Delegator 패턴 분석 (2026-03-13)](research-2026-03-13-delegator-pattern.md) — jarrodwatts/claude-delegator 코드 분석, MCP persistent session 벤치마크, triflux 통합 설계
+- [AWS CAO Assign 패턴 분석 (2026-03-13)](research-2026-03-13-cao-assign-pattern.md) — awslabs/cli-agent-orchestrator 비동기 위임, Assign Job 레이어 설계
+- [Gram 동적 도구 로딩 분석 (2026-03-13)](research-2026-03-13-gram-dynamic-tool-loading.md) — speakeasy-api/gram 시맨틱 검색, M~XL 단계 구현 전략
+- [세션 작업 기록 (2026-03-13)](research-2026-03-13-session-worklog.md) — 핸드오프 비평, 라우팅 최적화, 4건 딥 리서치, tfx-route v2.3, 이슈 트래커 구축
+
+## Issues
+
+- [로컬 이슈 트래커 INDEX](issues/INDEX.md) — #55~#60 (Hub MCP, Gemini 라우팅, task 구성, auto-multi 통합, HUD 축소, Hub 자동시작)
 
 ## Handoff
 
 - [#16: tfx-multi v3 파이프라인 구현 핸드오프](handoff/16-tfx-multi-v3-handoff.md) — 5 Phase 구현 가이드, 확정 결정, 에이전트 실행법, 검증 체크리스트
 - [중기 아키텍처 검토 (2026-03-13)](handoff/2026-03-13-midterm-actions.md) — Claude Delegator, AWS CAO, Speakeasy Gram, A2A, API quota 분배 5개 항목
+- [다음 세션 핸드오프 (2026-03-13)](handoff/17-next-session-2026-03-13.md) — 전체 이슈 현황, 우선순위별 작업 가이드, 참조 문서 맵
 
 ## Hook / Internal
 
