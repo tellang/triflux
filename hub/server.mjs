@@ -16,13 +16,17 @@ import { createPipeServer } from './pipe.mjs';
 import { createAssignCallbackServer } from './assign-callbacks.mjs';
 import { createTools } from './tools.mjs';
 
+const MAX_BODY_SIZE = 1024 * 1024;
+const PUBLIC_PATHS = new Set(['/', '/status', '/health', '/healthz']);
+const LOOPBACK_REMOTE_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const ALLOWED_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+
 function isInitializeRequest(body) {
   if (body?.method === 'initialize') return true;
   if (Array.isArray(body)) return body.some((message) => message.method === 'initialize');
   return false;
 }
 
-const MAX_BODY_SIZE = 1024 * 1024;
 async function parseBody(req) {
   const chunks = [];
   let size = 0;
@@ -40,11 +44,54 @@ const PID_DIR = join(homedir(), '.claude', 'cache', 'tfx-hub');
 const PID_FILE = join(PID_DIR, 'hub.pid');
 const TOKEN_FILE = join(homedir(), '.claude', '.tfx-hub-token');
 
-// localhost 계열 Origin만 허용
-const ALLOWED_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
-
 function isAllowedOrigin(origin) {
   return origin && ALLOWED_ORIGIN_RE.test(origin);
+}
+
+function getRequestPath(url = '/') {
+  try {
+    return new URL(url, 'http://127.0.0.1').pathname;
+  } catch {
+    return String(url).replace(/\?.*/, '') || '/';
+  }
+}
+
+function isLoopbackRemoteAddress(remoteAddress) {
+  return typeof remoteAddress === 'string' && LOOPBACK_REMOTE_ADDRESSES.has(remoteAddress);
+}
+
+function extractBearerToken(req) {
+  const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
+  return authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+}
+
+function writeJson(res, statusCode, body, headers = {}) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    ...headers,
+  });
+  res.end(JSON.stringify(body));
+}
+
+function applyCorsHeaders(req, res) {
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+  if (origin) {
+    res.setHeader('Vary', 'Origin');
+  }
+  if (!isAllowedOrigin(origin)) return false;
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id, Last-Event-ID');
+  return true;
+}
+
+function isAuthorizedRequest(req, path, hubToken) {
+  if (!hubToken) {
+    return isLoopbackRemoteAddress(req.socket.remoteAddress);
+  }
+  if (PUBLIC_PATHS.has(path)) return true;
+  return extractBearerToken(req) === hubToken;
 }
 
 function resolveTeamStatusCode(result) {
@@ -76,10 +123,13 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     dbPath = join(PID_DIR, 'state.db');
   }
 
-  // 인증 토큰 생성 (환경변수 우선, 없으면 자동 생성)
-  const HUB_TOKEN = process.env.TFX_HUB_TOKEN || randomUUID();
-  mkdirSync(join(homedir(), '.claude'), { recursive: true });
-  writeFileSync(TOKEN_FILE, HUB_TOKEN, { mode: 0o600 });
+  const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;
+  if (HUB_TOKEN) {
+    mkdirSync(join(homedir(), '.claude'), { recursive: true });
+    writeFileSync(TOKEN_FILE, HUB_TOKEN, { mode: 0o600 });
+  } else {
+    try { unlinkSync(TOKEN_FILE); } catch {}
+  }
 
   const store = createStore(dbPath);
   const router = createRouter(store);
@@ -125,66 +175,61 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   }
 
   const httpServer = createHttpServer(async (req, res) => {
-    // CORS: localhost 계열 Origin만 허용
-    const origin = req.headers['origin'];
-    if (isAllowedOrigin(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id, Last-Event-ID');
-    }
+    const path = getRequestPath(req.url);
+    const corsAllowed = applyCorsHeaders(req, res);
 
     if (req.method === 'OPTIONS') {
-      res.writeHead(isAllowedOrigin(origin) ? 204 : 403);
+      const localOnlyMode = !HUB_TOKEN;
+      const isLoopbackRequest = isLoopbackRemoteAddress(req.socket.remoteAddress);
+      res.writeHead(corsAllowed && (!localOnlyMode || isLoopbackRequest) ? 204 : 403);
       return res.end();
     }
 
-    if (req.url === '/' || req.url === '/status') {
+    if (!isAuthorizedRequest(req, path, HUB_TOKEN)) {
+      if (!HUB_TOKEN) {
+        return writeJson(res, 403, { ok: false, error: 'Forbidden: localhost only' });
+      }
+      return writeJson(
+        res,
+        401,
+        { ok: false, error: 'Unauthorized' },
+        { 'WWW-Authenticate': 'Bearer realm="tfx-hub"' },
+      );
+    }
+
+    if (path === '/' || path === '/status') {
       const status = router.getStatus('hub').data;
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
+      return writeJson(res, 200, {
         ...status,
         sessions: transports.size,
         pid: process.pid,
         port,
+        auth_mode: HUB_TOKEN ? 'token-required' : 'localhost-only',
         pipe_path: pipe.path,
         pipe: pipe.getStatus(),
         assign_callback_pipe_path: assignCallbacks.path,
         assign_callback_pipe: assignCallbacks.getStatus(),
-      }));
+      });
     }
 
-    if (req.url === '/health' || req.url === '/healthz') {
+    if (path === '/health' || path === '/healthz') {
       const status = router.getStatus('hub').data;
       const healthy = status?.hub?.state === 'healthy';
-      res.writeHead(healthy ? 200 : 503, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: healthy }));
+      return writeJson(res, healthy ? 200 : 503, { ok: healthy });
     }
 
-    if (req.url.startsWith('/bridge')) {
-      res.setHeader('Content-Type', 'application/json');
-
-      // Bearer 토큰 인증
-      const authHeader = req.headers['authorization'] || '';
-      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-      if (bearerToken !== HUB_TOKEN) {
-        res.writeHead(401);
-        return res.end(JSON.stringify({ ok: false, error: 'Unauthorized' }));
-      }
-
+    if (path.startsWith('/bridge')) {
       if (req.method !== 'POST' && req.method !== 'DELETE') {
-        res.writeHead(405);
-        return res.end(JSON.stringify({ ok: false, error: 'Method Not Allowed' }));
+        return writeJson(res, 405, { ok: false, error: 'Method Not Allowed' });
       }
 
       try {
         const body = req.method === 'POST' ? await parseBody(req) : {};
-        const path = req.url.replace(/\?.*/, '');
 
         if (path === '/bridge/register' && req.method === 'POST') {
           const { agent_id, cli, timeout_sec = 600, topics = [], capabilities = [], metadata = {} } = body;
           if (!agent_id || !cli) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'agent_id, cli 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'agent_id, cli 필수' });
           }
 
           const heartbeat_ttl_ms = (timeout_sec + 120) * 1000;
@@ -196,15 +241,13 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             heartbeat_ttl_ms,
             metadata,
           });
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
         if (path === '/bridge/result' && req.method === 'POST') {
           const { agent_id, topic = 'task.result', payload = {}, trace_id, correlation_id } = body;
           if (!agent_id) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'agent_id 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'agent_id 필수' });
           }
 
           const result = await pipe.executeCommand('result', {
@@ -214,8 +257,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             trace_id,
             correlation_id,
           });
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
         if (path === '/bridge/control' && req.method === 'POST') {
@@ -231,8 +273,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
           } = body;
 
           if (!to_agent || !command) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'to_agent, command 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'to_agent, command 필수' });
           }
 
           const result = await pipe.executeCommand('control', {
@@ -246,8 +287,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             correlation_id,
           });
 
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
         if (path === '/bridge/assign/async' && req.method === 'POST') {
@@ -266,8 +306,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
           } = body;
 
           if (!supervisor_agent || !worker_agent || !task) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'supervisor_agent, worker_agent, task 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'supervisor_agent, worker_agent, task 필수' });
           }
 
           const result = await pipe.executeCommand('assign', {
@@ -283,8 +322,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             trace_id,
             correlation_id,
           });
-          res.writeHead(result.ok ? 200 : 400);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, result.ok ? 200 : 400, result);
         }
 
         if (path === '/bridge/assign/result' && req.method === 'POST') {
@@ -300,8 +338,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
           } = body;
 
           if (!job_id || !status) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'job_id, status 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'job_id, status 필수' });
           }
 
           const result = await pipe.executeCommand('assign_result', {
@@ -314,22 +351,19 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             payload,
             metadata,
           });
-          res.writeHead(result.ok ? 200 : 409);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, result.ok ? 200 : 409, result);
         }
 
         if (path === '/bridge/assign/status' && req.method === 'POST') {
           const result = await pipe.executeQuery('assign_status', body);
           const statusCode = result.ok ? 200 : (result.error?.code === 'ASSIGN_NOT_FOUND' ? 404 : 400);
-          res.writeHead(statusCode);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, statusCode, result);
         }
 
         if (path === '/bridge/assign/retry' && req.method === 'POST') {
           const { job_id, reason, requested_by } = body;
           if (!job_id) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'job_id 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'job_id 필수' });
           }
 
           const result = await pipe.executeCommand('assign_retry', {
@@ -341,8 +375,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             : result.error?.code === 'ASSIGN_NOT_FOUND' ? 404
               : result.error?.code === 'ASSIGN_RETRY_EXHAUSTED' ? 409
                 : 400;
-          res.writeHead(statusCode);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, statusCode, result);
         }
 
         if (req.method === 'POST') {
@@ -358,46 +391,39 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
           }
 
           if (teamResult) {
-            res.writeHead(resolveTeamStatusCode(teamResult));
-            return res.end(JSON.stringify(teamResult));
+            return writeJson(res, resolveTeamStatusCode(teamResult), teamResult);
           }
 
           if (path.startsWith('/bridge/team')) {
-            res.writeHead(404);
-            return res.end(JSON.stringify({ ok: false, error: `Unknown team endpoint: ${path}` }));
+            return writeJson(res, 404, { ok: false, error: `Unknown team endpoint: ${path}` });
           }
 
           // ── 파이프라인 엔드포인트 ──
           if (path === '/bridge/pipeline/state' && req.method === 'POST') {
             const result = await pipe.executeQuery('pipeline_state', body);
-            res.writeHead(resolvePipelineStatusCode(result));
-            return res.end(JSON.stringify(result));
+            return writeJson(res, resolvePipelineStatusCode(result), result);
           }
 
           if (path === '/bridge/pipeline/advance' && req.method === 'POST') {
             const result = await pipe.executeCommand('pipeline_advance', body);
-            res.writeHead(resolvePipelineStatusCode(result));
-            return res.end(JSON.stringify(result));
+            return writeJson(res, resolvePipelineStatusCode(result), result);
           }
 
           if (path === '/bridge/pipeline/init' && req.method === 'POST') {
             const result = await pipe.executeCommand('pipeline_init', body);
-            res.writeHead(resolvePipelineStatusCode(result));
-            return res.end(JSON.stringify(result));
+            return writeJson(res, resolvePipelineStatusCode(result), result);
           }
 
           if (path === '/bridge/pipeline/list' && req.method === 'POST') {
             const result = await pipe.executeQuery('pipeline_list', body);
-            res.writeHead(resolvePipelineStatusCode(result));
-            return res.end(JSON.stringify(result));
+            return writeJson(res, resolvePipelineStatusCode(result), result);
           }
         }
 
         if (path === '/bridge/context' && req.method === 'POST') {
           const { agent_id, topics, max_messages = 10, auto_ack = true } = body;
           if (!agent_id) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'agent_id 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'agent_id 필수' });
           }
 
           const result = await pipe.executeQuery('drain', {
@@ -406,33 +432,28 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             max_messages,
             auto_ack,
           });
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
         if (path === '/bridge/deregister' && req.method === 'POST') {
           const { agent_id } = body;
           if (!agent_id) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'agent_id 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'agent_id 필수' });
           }
           const result = await pipe.executeCommand('deregister', { agent_id });
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
-        res.writeHead(404);
-        return res.end(JSON.stringify({ ok: false, error: 'Unknown bridge endpoint' }));
+        return writeJson(res, 404, { ok: false, error: 'Unknown bridge endpoint' });
       } catch (error) {
         if (!res.headersSent) {
-          res.writeHead(500);
-          res.end(JSON.stringify({ ok: false, error: error.message }));
+          writeJson(res, 500, { ok: false, error: error.message });
         }
         return;
       }
     }
 
-    if (req.url !== '/mcp') {
+    if (path !== '/mcp') {
       res.writeHead(404);
       return res.end('Not Found');
     }
@@ -534,6 +555,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         dbPath,
         pid: process.pid,
         hubToken: HUB_TOKEN,
+        authMode: HUB_TOKEN ? 'token-required' : 'localhost-only',
         url: `http://${host}:${port}/mcp`,
         pipe_path: pipe.path,
         pipePath: pipe.path,
@@ -545,6 +567,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         pid: process.pid,
         port,
         host,
+        auth_mode: HUB_TOKEN ? 'token-required' : 'localhost-only',
         url: info.url,
         pipe_path: pipe.path,
         pipePath: pipe.path,

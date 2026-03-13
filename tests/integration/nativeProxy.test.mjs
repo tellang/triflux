@@ -4,7 +4,8 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
 import {
@@ -59,6 +60,16 @@ function writeTaskFile(tasksDir, taskId, data) {
 function cleanupTeamFixture(teamName) {
   try { rmSync(join(TEAMS_ROOT, teamName), { recursive: true, force: true }); } catch {}
   try { rmSync(join(TASKS_ROOT, teamName), { recursive: true, force: true }); } catch {}
+}
+
+async function createExitedPid() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 0)'], {
+      stdio: 'ignore',
+    });
+    child.once('error', reject);
+    child.once('exit', () => resolve(child.pid));
+  });
 }
 
 // ── resolveTeamPaths ──
@@ -322,6 +333,53 @@ describe('teamTaskUpdate()', () => {
 
     assert.equal(result.ok, false);
     assert.equal(result.error.code, 'MTIME_CONFLICT');
+  });
+
+  it('30초를 초과한 stale lock 파일은 자동 해제 후 업데이트해야 한다', async () => {
+    const taskId = 'stale-age-task';
+    const taskFile = join(tasksDir, `${taskId}.json`);
+    const lockFile = `${taskFile}.lock`;
+    writeTaskFile(tasksDir, taskId, { id: taskId, status: 'pending', owner: '' });
+    writeFileSync(lockFile, JSON.stringify({
+      pid: process.pid,
+      token: 'stale-age-lock',
+      created_at: new Date(Date.now() - 60000).toISOString(),
+      created_at_ms: Date.now() - 60000,
+    }), 'utf8');
+
+    const result = await teamTaskUpdate({
+      team_name: teamName,
+      task_id: taskId,
+      status: 'completed',
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data.task_after.status, 'completed');
+    assert.equal(existsSync(lockFile), false);
+  });
+
+  it('PID가 더 이상 존재하지 않는 lock 파일은 자동 해제 후 업데이트해야 한다', async () => {
+    const taskId = 'stale-pid-task';
+    const taskFile = join(tasksDir, `${taskId}.json`);
+    const lockFile = `${taskFile}.lock`;
+    const deadPid = await createExitedPid();
+    writeTaskFile(tasksDir, taskId, { id: taskId, status: 'pending', owner: '' });
+    writeFileSync(lockFile, JSON.stringify({
+      pid: deadPid,
+      token: 'dead-pid-lock',
+      created_at: new Date().toISOString(),
+      created_at_ms: Date.now(),
+    }), 'utf8');
+
+    const result = await teamTaskUpdate({
+      team_name: teamName,
+      task_id: taskId,
+      status: 'completed',
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.data.task_after.status, 'completed');
+    assert.equal(existsSync(lockFile), false);
   });
 });
 

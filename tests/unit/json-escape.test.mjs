@@ -1,29 +1,84 @@
 // tests/unit/json-escape.test.mjs — json_escape 로직 단위 테스트
 //
-// tfx-route.sh의 json_escape 함수는 node를 사용할 때
-//   node -e 'process.stdout.write(JSON.stringify(process.argv[1]).slice(1,-1))' -- "$s"
-// 위 명령과 동일한 결과를 기대한다.
+// tfx-route.sh의 json_escape(node 경로) 보안 스펙:
+//   1) `\` / `"` / 제어문자(U+0000..U+001F) 이스케이프
+//   2) 비ASCII 문자는 \uXXXX (또는 surrogate pair)로 강제
 //
 // 이 테스트는 동일한 로직을 순수 JS로 재현하여:
 //   1) 이스케이프 결과가 JSON.parse로 복원 가능한지
-//   2) 특수문자(쌍따옴표, 백슬래시, 개행, 탭, CR, NUL, 유니코드)가 올바르게 이스케이프되는지
-//   3) 이스케이프된 문자열을 JSON 값으로 조립했을 때 파싱이 성공하는지
+//   2) 제어문자/유니코드가 기대 포맷으로 이스케이프되는지
+//   3) 실제 node 프로세스 실행 결과와 일치하는지
 // 를 검증한다.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
+const NODE_JSON_ESCAPE_SNIPPET = String.raw`
+  const input = process.argv[1] ?? "";
+  const base = JSON.stringify(input).slice(1, -1);
+  const out = base.replace(/[\u0080-\u{10ffff}]/gu, (ch) => {
+    const cp = ch.codePointAt(0);
+    if (cp <= 0xffff) {
+      return "\\u" + cp.toString(16).padStart(4, "0");
+    }
+    const v = cp - 0x10000;
+    const hi = 0xd800 + (v >> 10);
+    const lo = 0xdc00 + (v & 0x3ff);
+    return (
+      "\\u" +
+      hi.toString(16).padStart(4, "0") +
+      "\\u" +
+      lo.toString(16).padStart(4, "0")
+    );
+  });
+  process.stdout.write(out);
+`.trim();
+
 // tfx-route.sh 내 json_escape(node 경로)와 동일한 로직
-// JSON.stringify로 인코딩한 뒤 앞뒤 따옴표를 제거한다
 function jsonEscape(s) {
-  return JSON.stringify(s).slice(1, -1);
+  let out = '';
+  for (const ch of s) {
+    const cp = ch.codePointAt(0);
+    if (cp === 0x22) {
+      out += '\\"';
+      continue;
+    }
+    if (cp === 0x5c) {
+      out += '\\\\';
+      continue;
+    }
+    if (cp <= 0x1f) {
+      const named = {
+        0x08: '\\b',
+        0x09: '\\t',
+        0x0a: '\\n',
+        0x0c: '\\f',
+        0x0d: '\\r',
+      };
+      out += named[cp] ?? `\\u${cp.toString(16).padStart(4, '0')}`;
+      continue;
+    }
+    if (cp >= 0x20 && cp <= 0x7e) {
+      out += ch;
+      continue;
+    }
+    if (cp <= 0xffff) {
+      out += `\\u${cp.toString(16).padStart(4, '0')}`;
+      continue;
+    }
+    const v = cp - 0x10000;
+    const hi = 0xd800 + (v >> 10);
+    const lo = 0xdc00 + (v & 0x3ff);
+    out += `\\u${hi.toString(16).padStart(4, '0')}\\u${lo.toString(16).padStart(4, '0')}`;
+  }
+  return out;
 }
 
 // node 프로세스를 직접 실행하여 실제 셸 명령과 동일한 결과인지 검증
 function nodeJsonEscape(s) {
   const result = spawnSync(
     process.execPath,
-    ['-e', 'process.stdout.write(JSON.stringify(process.argv[1]).slice(1,-1))', '--', s],
+    ['-e', NODE_JSON_ESCAPE_SNIPPET, '--', s],
     { encoding: 'utf8' },
   );
   return result.stdout;
@@ -56,6 +111,18 @@ describe('json_escape — 기본 이스케이프', () => {
 
   it('캐리지 리턴(\\r)을 \\\\r 로 이스케이프해야 한다', () => {
     assert.equal(jsonEscape('line\r\n'), 'line\\r\\n');
+  });
+
+  it('제어문자 U+0001을 \\\\u0001 로 이스케이프해야 한다', () => {
+    assert.equal(jsonEscape('a\u0001b'), 'a\\u0001b');
+  });
+
+  it('한글을 \\\\uXXXX 로 완전 이스케이프해야 한다', () => {
+    assert.equal(jsonEscape('안'), '\\uc548');
+  });
+
+  it('이모지를 surrogate pair로 이스케이프해야 한다', () => {
+    assert.equal(jsonEscape('😀'), '\\ud83d\\ude00');
   });
 });
 

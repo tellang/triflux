@@ -14,13 +14,18 @@ import { randomUUID } from 'node:crypto';
 const HUB_PID_FILE = join(homedir(), '.claude', 'cache', 'tfx-hub', 'hub.pid');
 const HUB_TOKEN_FILE = join(homedir(), '.claude', '.tfx-hub-token');
 
+function normalizeToken(raw) {
+  if (raw == null) return null;
+  const token = String(raw).trim();
+  return token || null;
+}
+
 // Hub 인증 토큰 읽기 (파일 없으면 null → 하위 호환)
 function readHubToken() {
-  if (process.env.TFX_HUB_TOKEN) {
-    return String(process.env.TFX_HUB_TOKEN).trim();
-  }
+  const envToken = normalizeToken(process.env.TFX_HUB_TOKEN);
+  if (envToken) return envToken;
   try {
-    return readFileSync(HUB_TOKEN_FILE, 'utf8').trim();
+    return normalizeToken(readFileSync(HUB_TOKEN_FILE, 'utf8'));
   } catch {
     return null;
   }

@@ -111,6 +111,27 @@ describe('mcp-filter', () => {
     assert.deepEqual(ordered, ['brave-search', 'exa']);
   });
 
+  it('inventory domain_tags가 과도해도 executor 허용 서버를 불필요하게 넓히지 않아야 한다', () => {
+    const policy = buildMcpPolicy({
+      agentType: 'executor',
+      requestedProfile: 'auto',
+      availableServers: ['context7', 'brave-search', 'exa', 'tavily', 'playwright'],
+      taskText: 'Implement CLI parser, fix failing unit test, and check the package API docs.',
+      inventory: {
+        codex: {
+          servers: [
+            { name: 'playwright', tool_count: 5, domain_tags: ['code', 'docs', 'library'] },
+            { name: 'tavily', tool_count: 2, domain_tags: ['code', 'docs'] },
+          ],
+        },
+      },
+    });
+
+    assert.deepEqual(policy.allowedServers, ['context7', 'exa']);
+    assert.equal(policy.codexConfig.mcp_servers.playwright.enabled, false);
+    assert.equal(policy.codexConfig.mcp_servers.tavily.enabled, false);
+  });
+
   it('hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다', () => {
     const policy = buildMcpPolicy({
       agentType: 'executor',

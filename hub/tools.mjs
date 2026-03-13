@@ -340,7 +340,7 @@ export function createTools(store, router, hitl, pipe = null) {
     // ── 13. team_task_list ──
     {
       name: 'team_task_list',
-      description: 'Claude Native Teams task 목록을 owner/status 조건으로 조회합니다',
+      description: 'Claude Native Teams task 목록을 owner/status 조건으로 조회합니다. 실패 판정은 completed + metadata.result도 함께 확인해야 합니다',
       inputSchema: {
         type: 'object',
         required: ['team_name'],
@@ -364,7 +364,7 @@ export function createTools(store, router, hitl, pipe = null) {
     // ── 14. team_task_update ──
     {
       name: 'team_task_update',
-      description: 'Claude Native Teams task를 claim/update 합니다',
+      description: 'Claude Native Teams task를 claim/update 합니다. status: "failed" 입력은 completed + metadata.result="failed"로 정규화됩니다',
       inputSchema: {
         type: 'object',
         required: ['team_name', 'task_id'],

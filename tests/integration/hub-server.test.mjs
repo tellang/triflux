@@ -2,9 +2,9 @@
 // 실제 HTTP 서버를 임시 포트로 시작하고 /status, /health, /bridge/* 엔드포인트를 검증
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
-import { rmSync, mkdirSync } from 'node:fs';
+import { rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
 import { startHub } from '../../hub/server.mjs';
@@ -16,9 +16,59 @@ function tempDbPath() {
   return join(dir, 'test.db');
 }
 
+function firstNonLoopbackIpv4() {
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry?.family === 'IPv4' && !entry.internal) {
+        return entry.address;
+      }
+    }
+  }
+  return null;
+}
+
 // 테스트용 포트 (기본 27888과 충돌 방지)
 const TEST_PORT = 27990 + Math.floor(Math.random() * 100);
 const TEST_TOKEN = 'hub-server-test-token';
+const EXTERNAL_IP = firstNonLoopbackIpv4();
+const CLAUDE_HOME = join(homedir(), '.claude');
+const TEAMS_ROOT = join(CLAUDE_HOME, 'teams');
+const TASKS_ROOT = join(CLAUDE_HOME, 'tasks');
+
+function uniqueTeamName() {
+  return `hub-http-${randomUUID().slice(0, 8)}`;
+}
+
+function createTeamFixture(teamName, config = {}) {
+  const teamDir = join(TEAMS_ROOT, teamName);
+  const inboxesDir = join(teamDir, 'inboxes');
+  const tasksDir = join(TASKS_ROOT, teamName);
+
+  mkdirSync(teamDir, { recursive: true });
+  mkdirSync(inboxesDir, { recursive: true });
+  mkdirSync(tasksDir, { recursive: true });
+
+  writeFileSync(
+    join(teamDir, 'config.json'),
+    JSON.stringify({ description: 'HTTP bridge 테스트 팀', ...config }, null, 2),
+    'utf8',
+  );
+
+  return { teamDir, tasksDir };
+}
+
+function writeTaskFile(tasksDir, taskId, data) {
+  writeFileSync(
+    join(tasksDir, `${taskId}.json`),
+    JSON.stringify(data, null, 2),
+    'utf8',
+  );
+}
+
+function cleanupTeamFixture(teamName) {
+  try { rmSync(join(TEAMS_ROOT, teamName), { recursive: true, force: true }); } catch {}
+  try { rmSync(join(TASKS_ROOT, teamName), { recursive: true, force: true }); } catch {}
+}
 
 describe('startHub() 라이프사이클', () => {
   let hub;
@@ -61,6 +111,7 @@ describe('startHub() 라이프사이클', () => {
       assert.ok('hub' in body || 'sessions' in body, '/status 응답에 hub 또는 sessions가 있어야 한다');
       assert.equal(body.port, TEST_PORT);
       assert.equal(body.pid, process.pid);
+      assert.equal(body.auth_mode, 'token-required');
     });
 
     it('GET / 도 /status와 동일한 응답을 반환해야 한다', async () => {
@@ -94,13 +145,33 @@ describe('startHub() 라이프사이클', () => {
         headers: { Origin: 'http://localhost:3000' },
       });
       assert.equal(res.status, 204);
-      assert.ok(res.headers.get('access-control-allow-origin'));
+      assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:3000');
+    });
+
+    it('허용되지 않은 Origin은 403을 반환해야 한다', async () => {
+      const res = await fetch(`${baseUrl}/status`, {
+        method: 'OPTIONS',
+        headers: { Origin: 'https://example.com' },
+      });
+      assert.equal(res.status, 403);
+      assert.equal(res.headers.get('access-control-allow-origin'), null);
     });
   });
 
   // ── /bridge/register ──
 
   describe('POST /bridge/register', () => {
+    it('Authorization 헤더가 없으면 401을 반환해야 한다', async () => {
+      const res = await fetch(`${baseUrl}/bridge/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: 'unauthorized-agent', cli: 'codex' }),
+      });
+      assert.equal(res.status, 401);
+      const body = await res.json();
+      assert.equal(body.ok, false);
+    });
+
     it('유효한 에이전트 등록 시 ok: true를 반환해야 한다', async () => {
       const res = await fetch(`${baseUrl}/bridge/register`, {
         method: 'POST',
@@ -369,11 +440,57 @@ describe('startHub() 라이프사이클', () => {
     });
   });
 
+  describe('POST /bridge/team/*', () => {
+    const teamName = uniqueTeamName();
+    const taskId = 'http-fail-task';
+
+    before(() => {
+      const { tasksDir } = createTeamFixture(teamName, {
+        description: 'HTTP team-task-update 테스트',
+      });
+      writeTaskFile(tasksDir, taskId, {
+        id: taskId,
+        status: 'in_progress',
+        owner: 'worker-http',
+        metadata: { existing: 'value' },
+      });
+    });
+
+    after(() => cleanupTeamFixture(teamName));
+
+    it('team-task-update는 status=failed를 completed + metadata.result=failed로 정규화해야 한다', async () => {
+      const res = await fetch(`${baseUrl}/bridge/team/task-update`, {
+        method: 'POST',
+        headers: bridgeHeaders(),
+        body: JSON.stringify({
+          team_name: teamName,
+          task_id: taskId,
+          status: 'failed',
+          metadata_patch: { via: 'http-test' },
+        }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.data.task_after.status, 'completed');
+      assert.equal(body.data.task_after.metadata?.result, 'failed');
+      assert.equal(body.data.task_after.metadata?.via, 'http-test');
+      assert.equal(body.data.task_after.metadata?.existing, 'value');
+    });
+  });
+
   // ── 알 수 없는 경로 ──
 
   describe('알 수 없는 경로', () => {
-    it('GET /nonexistent 는 404를 반환해야 한다', async () => {
+    it('인증 없이 GET /nonexistent 는 401을 반환해야 한다', async () => {
       const res = await fetch(`${baseUrl}/nonexistent`);
+      assert.equal(res.status, 401);
+    });
+
+    it('인증된 GET /nonexistent 는 404를 반환해야 한다', async () => {
+      const res = await fetch(`${baseUrl}/nonexistent`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
       assert.equal(res.status, 404);
     });
 
@@ -398,13 +515,82 @@ describe('startHub() 라이프사이클', () => {
   // ── /mcp 초기화 없는 POST ──
 
   describe('POST /mcp 세션 없는 요청', () => {
-    it('세션 ID 없이 비-initialize 요청 시 400을 반환해야 한다', async () => {
+    it('Authorization 헤더가 없으면 401을 반환해야 한다', async () => {
       const res = await fetch(`${baseUrl}/mcp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
       });
+      assert.equal(res.status, 401);
+    });
+
+    it('세션 ID 없이 비-initialize 요청 시 400을 반환해야 한다', async () => {
+      const res = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${TEST_TOKEN}`,
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
+      });
       assert.equal(res.status, 400);
     });
+  });
+});
+
+describe('startHub() localhost-only 모드', () => {
+  const LOCAL_ONLY_PORT = TEST_PORT + 200;
+  let hub;
+  let baseUrl;
+
+  before(async () => {
+    delete process.env.TFX_HUB_TOKEN;
+    const dbPath = tempDbPath();
+    hub = await startHub({ port: LOCAL_ONLY_PORT, dbPath, host: '0.0.0.0' });
+    baseUrl = `http://127.0.0.1:${LOCAL_ONLY_PORT}`;
+  });
+
+  after(async () => {
+    if (hub?.stop) await hub.stop();
+  });
+
+  it('로컬 /status는 인증 없이 접근 가능해야 한다', async () => {
+    const res = await fetch(`${baseUrl}/status`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.auth_mode, 'localhost-only');
+    assert.equal(hub.hubToken, null);
+    assert.equal(hub.authMode, 'localhost-only');
+  });
+
+  it('로컬 /bridge/register는 인증 없이 동작해야 한다', async () => {
+    const res = await fetch(`${baseUrl}/bridge/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent_id: 'localhost-only-agent',
+        cli: 'codex',
+        timeout_sec: 60,
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+  });
+
+  it('로컬 /mcp는 인증 없이 기존 유효성 검사를 통과해야 한다', async () => {
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'tools/list', id: 1 }),
+    });
+    assert.equal(res.status, 400);
+  });
+
+  it('원격 주소로 들어오면 403으로 차단해야 한다', { skip: !EXTERNAL_IP }, async () => {
+    const res = await fetch(`http://${EXTERNAL_IP}:${LOCAL_ONLY_PORT}/status`);
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.error, 'Forbidden: localhost only');
   });
 });
