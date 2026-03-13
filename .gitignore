@@ -13,3 +13,8 @@ docs/internal/
 docs/handoff/
 .mcp.json
 .codex-artifacts/
+.issues/
+.cache/
+.tmp-research/
+.serena/
+.playwright-mcp/
