@@ -1,20 +1,38 @@
+# AI 설정
 .omc/
 .omx/
 .claude/
 .codex/
 .gemini/
-*.bak
-*.tgz
-node_modules/
-.env
-dist/
-.npmrc
-docs/internal/
-docs/handoff/
-.mcp.json
-.codex-artifacts/
-.issues/
-.cache/
-.tmp-research/
 .serena/
 .playwright-mcp/
+.mcp.json
+CLAUDE.md
+
+# 내부 문서 (제3자 불필요)
+docs/handoff/
+docs/internal/
+docs/issues/
+docs/insights/
+docs/research-*
+docs/codex-*
+docs/native-teams-*
+docs/tfx-auto-*
+docs/hub-architecture.html
+docs/tfx-team-*-prd-*
+
+# 내부 이슈 추적
+.issues/
+
+# 빌드/캐시
+node_modules/
+dist/
+.cache/
+.tmp-research/
+.codex-artifacts/
+
+# 기타
+*.bak
+*.tgz
+.env
+.npmrc
