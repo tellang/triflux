@@ -16,4 +16,7 @@
 
 ## Closed
 
-(없음)
+| # | 제목 | 분류 | 종료일 | 사유 |
+|---|------|------|--------|------|
+| #30 | [SKILL.md vs cli.mjs 실행 경로 이원화](030-skill-md-vs-cli-mjs.md) | architecture | 2026-03-13 | ADR-003 확정 |
+| #32 | [v2.1 vs v2.2 아키텍처 방향 상충](032-v21-vs-v22-direction.md) | architecture | 2026-03-13 | ADR-002 확정 |
