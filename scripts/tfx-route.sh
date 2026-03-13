@@ -241,22 +241,26 @@ team_complete_task() {
   fi
 
   # 리드에게 메시지 전송
-  bridge_cli team-send-message \
+  if ! bridge_cli team-send-message \
     --team "$TFX_TEAM_NAME" \
     --from "$TFX_TEAM_AGENT_NAME" \
     --to "$TFX_TEAM_LEAD_NAME" \
     --text "$summary_trimmed" \
     --summary "task ${TFX_TEAM_TASK_ID} ${result}" \
-    >/dev/null || true
+    >/dev/null 2>&1; then
+    echo "[tfx-route] 경고: 팀 완료 메시지 전송 실패 (team=$TFX_TEAM_NAME, task=$TFX_TEAM_TASK_ID)" >&2
+  fi
 
   # Hub result 발행 (poll_messages 채널 활성화)
   if [[ -n "$result_payload" ]]; then
-    bridge_cli result \
+    if ! bridge_cli result \
       --agent "$TFX_TEAM_AGENT_NAME" \
       --topic task.result \
       --payload "$result_payload" \
       --trace "$TFX_TEAM_NAME" \
-      >/dev/null || true
+      >/dev/null 2>&1; then
+      echo "[tfx-route] 경고: Hub result 발행 실패 (agent=$TFX_TEAM_AGENT_NAME, task=$TFX_TEAM_TASK_ID)" >&2
+    fi
   fi
 }
 
