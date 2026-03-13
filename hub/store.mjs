@@ -223,6 +223,24 @@ export function createStore(dbPath) {
     activeAssignCount: db.prepare("SELECT COUNT(*) as cnt FROM assign_jobs WHERE status IN ('queued','running')"),
   };
 
+  const assignStatusListeners = new Set();
+
+  function buildAssignCallbackEvent(row) {
+    return {
+      job_id: row.job_id,
+      status: row.status,
+      result: row.result ?? row.error ?? null,
+      timestamp: new Date(row.updated_at_ms || Date.now()).toISOString(),
+    };
+  }
+
+  function notifyAssignStatusListeners(row) {
+    const event = buildAssignCallbackEvent(row);
+    for (const listener of Array.from(assignStatusListeners)) {
+      try { listener(event, row); } catch {}
+    }
+  }
+
   function clampMaxMessages(value, fallback = 20) {
     const num = Number(value);
     if (!Number.isFinite(num)) return fallback;
@@ -481,7 +499,9 @@ export function createStore(dbPath) {
         last_retry_at_ms: retry_count > 0 ? now : null,
       };
       S.insertAssign.run(row);
-      return store.getAssign(row.job_id);
+      const inserted = store.getAssign(row.job_id);
+      notifyAssignStatusListeners(inserted);
+      return inserted;
     },
 
     getAssign(jobId) {
@@ -541,7 +561,11 @@ export function createStore(dbPath) {
           : current.last_retry_at_ms,
       };
       S.updateAssign.run(nextRow);
-      return store.getAssign(jobId);
+      const updated = store.getAssign(jobId);
+      if (updated && current.status !== updated.status) {
+        notifyAssignStatusListeners(updated);
+      }
+      return updated;
     },
 
     listAssigns({
@@ -636,6 +660,16 @@ export function createStore(dbPath) {
         urgent: S.urgentDepth.get().cnt,
         normal: S.normalDepth.get().cnt,
         dlq: S.dlqDepth.get().cnt,
+      };
+    },
+
+    onAssignStatusChange(listener) {
+      if (typeof listener !== 'function') {
+        return () => {};
+      }
+      assignStatusListeners.add(listener);
+      return () => {
+        assignStatusListeners.delete(listener);
       };
     },
 

@@ -1,7 +1,9 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import process from 'node:process';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -11,6 +13,7 @@ const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, '..', '..');
 const SERVER_FILE = resolve(PROJECT_ROOT, 'hub', 'workers', 'delegator-mcp.mjs');
 const FAKE_CODEX = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-codex.mjs');
+const FAKE_GEMINI = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-gemini-cli.mjs');
 const FAKE_ROUTE = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-route.sh');
 
 async function createClient(env = {}) {
@@ -71,7 +74,7 @@ describe('delegator-mcp stdio server', () => {
     try {
       const tools = await client.listTools();
       const names = tools.tools.map((tool) => tool.name);
-      assert.deepEqual(names.sort(), ['triflux-delegate', 'triflux-delegate-status']);
+      assert.deepEqual(names.sort(), ['triflux-delegate', 'triflux-delegate-reply', 'triflux-delegate-status']);
     } finally {
       await closeClient(client, transport);
     }
@@ -136,6 +139,101 @@ describe('delegator-mcp stdio server', () => {
       assert.equal(status.status, 'completed');
       assert.equal(status.output, 'BLUE');
       assert.equal(status.providerResolved, 'codex');
+    } finally {
+      await closeClient(client, transport);
+    }
+  });
+
+  it('codex direct 경로는 프롬프트/컨텍스트에 따라 MCP config를 축소해야 한다', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'triflux-delegator-'));
+    const contextFile = join(tempDir, 'context.md');
+    writeFileSync(contextFile, 'Capture a browser screenshot and inspect responsive UI layout.');
+
+    const { client, transport } = await createClient({
+      TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+    });
+
+    try {
+      const result = await client.callTool({
+        name: 'triflux-delegate',
+        arguments: {
+          provider: 'codex',
+          mode: 'sync',
+          agentType: 'designer',
+          prompt: 'SHOW_CONFIG',
+          contextFile,
+        },
+      });
+
+      const config = JSON.parse(result.structuredContent.output);
+      assert.equal(config.mcp_servers.context7.enabled, true);
+      assert.equal(config.mcp_servers.playwright.enabled, true);
+      assert.equal(config.mcp_servers.exa.enabled, false);
+      assert.equal(config.mcp_servers['brave-search'].enabled, false);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      await closeClient(client, transport);
+    }
+  });
+
+  it('gemini direct job은 delegate-reply로 multi-turn 대화를 이어가고 done=true 시 종료해야 한다', async () => {
+    const { client, transport } = await createClient({
+      GEMINI_BIN: process.execPath,
+      GEMINI_BIN_ARGS_JSON: JSON.stringify([FAKE_GEMINI]),
+      TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+    });
+
+    try {
+      const first = await client.callTool({
+        name: 'triflux-delegate',
+        arguments: {
+          provider: 'gemini',
+          mode: 'sync',
+          agentType: 'writer',
+          prompt: 'first turn',
+        },
+      });
+
+      const jobId = first.structuredContent.jobId;
+      assert.equal(typeof jobId, 'string');
+      assert.equal(first.structuredContent.conversationOpen, true);
+
+      const second = await client.callTool({
+        name: 'triflux-delegate-reply',
+        arguments: {
+          job_id: jobId,
+          reply: 'second turn',
+        },
+      });
+
+      assert.equal(second.structuredContent.jobId, jobId);
+      assert.equal(second.structuredContent.conversationOpen, true);
+      assert.match(second.structuredContent.output, /first turn/);
+      assert.match(second.structuredContent.output, /second turn/);
+
+      const finalTurn = await client.callTool({
+        name: 'triflux-delegate-reply',
+        arguments: {
+          job_id: jobId,
+          reply: 'wrap up',
+          done: true,
+        },
+      });
+
+      assert.equal(finalTurn.structuredContent.conversationOpen, false);
+
+      const afterDone = await client.callTool({
+        name: 'triflux-delegate-reply',
+        arguments: {
+          job_id: jobId,
+          reply: 'one more',
+        },
+      });
+
+      assert.equal(afterDone.isError, true);
+      assert.match(afterDone.structuredContent.error, /종료된 대화|대화 컨텍스트가 없습니다/);
     } finally {
       await closeClient(client, transport);
     }

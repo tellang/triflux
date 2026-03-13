@@ -27,7 +27,17 @@ function runBash(command, extraEnv = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
+      TFX_TEAM_NAME: '',
+      TFX_TEAM_TASK_ID: '',
+      TFX_TEAM_AGENT_NAME: '',
+      TFX_TEAM_LEAD_NAME: '',
+      TFX_HUB_URL: '',
+      TMUX: '',
+      TFX_CLI_MODE: 'auto',
+      TFX_NO_CLAUDE_NATIVE: '0',
       TFX_CODEX_TRANSPORT: 'exec',
+      TFX_WORKER_INDEX: '',
+      TFX_SEARCH_TOOL: '',
       ...extraEnv,
     },
   });
@@ -56,11 +66,12 @@ describe('tfx-route.sh — claude-native 에이전트 메타데이터 출력', (
     assert.match(out(result), /AGENT=explore/);
   });
 
-  it('verifier 에이전트는 ROUTE_TYPE=claude-native와 MODEL=sonnet을 출력해야 한다', () => {
-    const result = runBash(`bash "${ROUTE_SCRIPT}" verifier 'test-prompt'`);
-    assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /ROUTE_TYPE=claude-native/);
-    assert.match(out(result), /MODEL=sonnet/);
+  it('verifier 에이전트는 기본 route table에서 codex review 메타데이터를 출력해야 한다', () => {
+    const result = runBash(
+      `CODEX_BIN=false bash "${ROUTE_SCRIPT}" verifier 'test-prompt' 2>&1 || true`,
+    );
+    assert.match(out(result), /type=codex/);
+    assert.match(out(result), /agent=verifier/);
   });
 
   it('test-engineer 에이전트는 ROUTE_TYPE=claude-native를 출력해야 한다', () => {
@@ -138,9 +149,9 @@ describe('tfx-route.sh — TFX_NO_CLAUDE_NATIVE 유효성 검증', () => {
   });
 
   it('TFX_NO_CLAUDE_NATIVE=1 + codex 사용 가능 시 explore가 codex로 리매핑되어야 한다', () => {
-    // CODEX_BIN=true 를 사용해 `command -v true`가 성공하도록 한다
     const result = runBash(
-      `TFX_CLI_MODE=auto TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=true bash "${ROUTE_SCRIPT}" explore 'test-case' minimal 5`,
+      `TFX_CLI_MODE=auto TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=codex bash "${ROUTE_SCRIPT}" explore 'test-case' minimal 5`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec' }),
     );
     assert.equal(result.status, 0, out(result));
     // 리매핑 메시지 확인
@@ -181,6 +192,98 @@ describe('tfx-route.sh — Codex MCP transport', () => {
     assert.notEqual(result.status, 0, out(result));
     assert.match(out(result), /auto, mcp, exec/);
   });
+
+  it('exit 0 이어도 stdout 비어 있고 워크스페이스 변화가 없으면 no-op 실패로 승격해야 한다', () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-noop' minimal`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec-empty' }),
+    );
+
+    assert.notEqual(result.status, 0, out(result));
+    assert.match(out(result), /no-op 성공을 실패로 승격/);
+  });
+});
+
+describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
+  it('spark + auto 는 default profile로 수렴하고 최소 서버만 남겨야 한다', () => {
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" spark 'profile-check' auto`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec', FAKE_CODEX_ECHO_CONFIG: '1' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /resolved_profile=default/);
+    assert.match(out(result), /allowed_mcp_servers=context7,brave-search/);
+    assert.match(out(result), /mcp_servers\.context7\.enabled=true/);
+    assert.match(out(result), /mcp_servers\.exa\.enabled=false/);
+  });
+
+  it('explore + auto 는 explore profile로 수렴하고 playwright는 비활성화해야 한다', () => {
+    const result = runBash(
+      `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=codex bash "${ROUTE_SCRIPT}" explore 'profile-check' auto`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec', FAKE_CODEX_ECHO_CONFIG: '1' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /resolved_profile=explore/);
+    assert.match(out(result), /allowed_mcp_servers=context7,brave-search,tavily,exa/);
+    assert.match(out(result), /mcp_servers\.tavily\.enabled=true/);
+    assert.match(out(result), /mcp_servers\.playwright\.enabled=false/);
+  });
+
+  it('code-reviewer + auto 는 reviewer profile로 수렴하고 sequential-thinking만 분석 도구로 남겨야 한다', () => {
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" code-reviewer 'profile-check' auto`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec', FAKE_CODEX_ECHO_CONFIG: '1' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /resolved_profile=reviewer/);
+    assert.match(out(result), /allowed_mcp_servers=context7,brave-search,sequential-thinking/);
+    assert.match(out(result), /mcp_servers\.sequential-thinking\.enabled=true/);
+    assert.match(out(result), /mcp_servers\.playwright\.enabled=false/);
+  });
+
+  it('writer + auto 는 writer profile로 수렴하고 exa는 web_search_exa만 허용해야 한다', () => {
+    const result = runBash(
+      `TFX_CLI_MODE=codex CODEX_BIN=codex bash "${ROUTE_SCRIPT}" writer 'profile-check' auto`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec', FAKE_CODEX_ECHO_CONFIG: '1' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /resolved_profile=writer/);
+    assert.match(out(result), /allowed_mcp_servers=context7,brave-search,exa/);
+    assert.match(out(result), /mcp_servers\.exa\.enabled_tools=\["web_search_exa"\]/);
+    assert.match(out(result), /mcp_servers\.tavily\.enabled=false/);
+  });
+
+  it('executor + auto 는 구현 문맥에서 context7 + exa로 축소해야 한다', () => {
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" executor 'Implement CLI parser and fix unit test using package docs' auto`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec', FAKE_CODEX_ECHO_CONFIG: '1' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /resolved_profile=executor/);
+    assert.match(out(result), /allowed_mcp_servers=context7,exa/);
+    assert.match(out(result), /mcp_servers\.exa\.enabled=true/);
+    assert.match(out(result), /mcp_servers\.tavily\.enabled=false/);
+    assert.match(out(result), /mcp_servers\.playwright\.enabled=false/);
+  });
+
+  it('designer + auto 는 브라우저 문맥에서 designer profile과 playwright를 남겨야 한다', () => {
+    const result = runBash(
+      `TFX_CLI_MODE=codex CODEX_BIN=codex bash "${ROUTE_SCRIPT}" designer 'Capture browser screenshot and inspect responsive UI layout' auto`,
+      fixtureEnv({ FAKE_CODEX_MODE: 'exec', FAKE_CODEX_ECHO_CONFIG: '1' }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /resolved_profile=designer/);
+    assert.match(out(result), /allowed_mcp_servers=context7,playwright/);
+    assert.match(out(result), /mcp_servers\.playwright\.enabled=true/);
+    assert.match(out(result), /mcp_servers\.tavily\.enabled=false/);
+    assert.match(out(result), /mcp_servers\.exa\.enabled=false/);
+  });
 });
 
 describe('tfx-route.sh — 검색 도구 힌트 분배', () => {
@@ -193,7 +296,7 @@ describe('tfx-route.sh — 검색 도구 힌트 분배', () => {
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /worker_index=2 search_tool=auto/);
     assert.match(out(result), /웹 검색 우선순위: tavily, exa, brave-search\./);
-    assert.match(out(result), /402, 429, 432, 433, quota 에러 시 즉시 다음 도구로 전환/);
+    assert.match(out(result), /검색 도구 실패 시 402, 429, 432, 433, quota 에러에서 재시도하지 말고 다음 도구로 전환/);
   });
 
   it('TFX_SEARCH_TOOL=exa 일 때 exa가 analyze 우선순위 맨 앞에 와야 한다', () => {
