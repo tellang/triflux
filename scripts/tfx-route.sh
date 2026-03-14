@@ -51,6 +51,14 @@ TFX_TEAM_LEAD_NAME="${TFX_TEAM_LEAD_NAME:-team-lead}"
 TFX_HUB_PIPE="${TFX_HUB_PIPE:-}"
 TFX_HUB_URL="${TFX_HUB_URL:-http://127.0.0.1:27888}"  # bridge.mjs HTTP fallback hint
 
+# ── 패키지 루트 해석 (setup.mjs가 기록한 breadcrumb) ──
+TFX_PKG_ROOT=""
+_tfx_breadcrumb="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.tfx-pkg-root"
+if [[ -f "$_tfx_breadcrumb" ]]; then
+  TFX_PKG_ROOT="$(head -1 "$_tfx_breadcrumb" 2>/dev/null | tr -d '\r\n')"
+fi
+unset _tfx_breadcrumb
+
 # fallback 시 원래 에이전트 정보 보존
 ORIGINAL_AGENT=""
 ORIGINAL_CLI_ARGS=""
@@ -152,7 +160,9 @@ resolve_bridge_script() {
 
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local candidates=(
+  local candidates=()
+  [[ -n "$TFX_PKG_ROOT" ]] && candidates+=("$TFX_PKG_ROOT/hub/bridge.mjs")
+  candidates+=(
     "$script_dir/../hub/bridge.mjs"
     "$script_dir/hub/bridge.mjs"
   )
@@ -247,10 +257,17 @@ team_send_message() {
 try_restart_hub() {
   local hub_server script_dir hub_port
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  hub_server="$script_dir/../hub/server.mjs"
+  hub_server=""
+  local _hub_candidates=()
+  [[ -n "$TFX_PKG_ROOT" ]] && _hub_candidates+=("$TFX_PKG_ROOT/hub/server.mjs")
+  _hub_candidates+=("$script_dir/../hub/server.mjs")
+  for _hc in "${_hub_candidates[@]}"; do
+    if [[ -f "$_hc" ]]; then hub_server="$_hc"; break; fi
+  done
+  unset _hub_candidates _hc
 
-  if [[ ! -f "$hub_server" ]]; then
-    echo "[tfx-route] Hub 서버 스크립트 미발견: $hub_server" >&2
+  if [[ -z "$hub_server" ]]; then
+    echo "[tfx-route] Hub 서버 스크립트 미발견 (pkg_root=${TFX_PKG_ROOT:-unset}, script_dir=$script_dir)" >&2
     return 1
   fi
 
@@ -946,7 +963,9 @@ resolve_codex_mcp_script() {
   local script_ref script_dir
   script_ref="$(normalize_script_path "${BASH_SOURCE[0]}")"
   script_dir="$(cd "$(dirname "$script_ref")" && pwd -P)"
-  local candidates=(
+  local candidates=()
+  [[ -n "$TFX_PKG_ROOT" ]] && candidates+=("$TFX_PKG_ROOT/hub/workers/codex-mcp.mjs")
+  candidates+=(
     "$script_dir/hub/workers/codex-mcp.mjs"
     "$script_dir/../hub/workers/codex-mcp.mjs"
   )
