@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -15,11 +16,13 @@ import { createHitlManager } from './hitl.mjs';
 import { createPipeServer } from './pipe.mjs';
 import { createAssignCallbackServer } from './assign-callbacks.mjs';
 import { createTools } from './tools.mjs';
+import { ensurePipelineStateDbPath } from './pipeline/state.mjs';
 
 const MAX_BODY_SIZE = 1024 * 1024;
 const PUBLIC_PATHS = new Set(['/', '/status', '/health', '/healthz']);
 const LOOPBACK_REMOTE_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const ALLOWED_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function isInitializeRequest(body) {
   if (body?.method === 'initialize') return true;
@@ -120,7 +123,7 @@ function resolvePipelineStatusCode(result) {
  */
 export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessionId = process.pid } = {}) {
   if (!dbPath) {
-    dbPath = join(PID_DIR, 'state.db');
+    dbPath = ensurePipelineStateDbPath(PROJECT_ROOT);
   }
 
   const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;

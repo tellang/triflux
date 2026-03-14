@@ -1,4 +1,5 @@
 # AI 설정
+.tfx/
 .omc/
 .omx/
 .claude/
