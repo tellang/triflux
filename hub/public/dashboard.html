@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>triflux QoS 대시보드</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;padding:16px}
+.header{display:flex;align-items:center;justify-content:space-between;padding:12px 0;margin-bottom:16px;border-bottom:1px solid #30363d;max-width:1200px;margin-left:auto;margin-right:auto}
+.header h1{font-size:1.4rem;font-weight:600}
+.status-bar{display:flex;align-items:center;gap:12px;font-size:.85rem;color:#8b949e}
+.status-dot{width:10px;height:10px;border-radius:50%;display:inline-block;transition:background .3s}
+.status-dot.ok{background:#3fb950}
+.status-dot.err{background:#f85149}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1200px;margin:0 auto}
+@media(max-width:768px){.grid{grid-template-columns:1fr}}
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}
+.card-title{font-size:.95rem;font-weight:600;margin-bottom:12px;color:#c9d1d9}
+.sub{color:#8b949e;font-size:.8rem}
+
+.gauge-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+.gauge-value{font-size:2.2rem;font-weight:700;margin-top:-36px}
+.gauge-label{font-size:.85rem;color:#8b949e}
+
+.quota-row{margin-bottom:14px}
+.quota-row:last-child{margin-bottom:0}
+.quota-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:.85rem}
+.quota-header .cli-name{font-weight:600}
+.quota-header .meta{color:#8b949e;font-size:.78rem}
+.bar-row{display:flex;gap:6px;align-items:center;margin-bottom:4px}
+.bar-row:last-child{margin-bottom:0}
+.bar-row .bar-label{font-size:.72rem;color:#8b949e;width:56px;text-align:right;flex-shrink:0}
+.bar-track{height:18px;background:#21262d;border-radius:4px;overflow:hidden;position:relative;flex:1}
+.bar-fill{height:100%;border-radius:4px;transition:width .4s ease;display:flex;align-items:center;justify-content:flex-end;padding-right:6px;font-size:.72rem;font-weight:600;color:#0d1117;min-width:0}
+.bar-pct-outer{font-size:.72rem;color:#8b949e;margin-left:6px;width:32px;flex-shrink:0}
+
+.token-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.token-item{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;text-align:center}
+.token-item .label{font-size:.78rem;color:#8b949e;margin-bottom:4px}
+.token-item .value{font-size:1.5rem;font-weight:700}
+.token-item .calls{font-size:.78rem;color:#8b949e;margin-top:2px}
+
+.chart-wrap{position:relative;width:100%;height:160px}
+.chart-wrap canvas{width:100%!important;height:100%!important}
+.chart-legend{display:flex;gap:14px;margin-top:8px;font-size:.78rem;color:#8b949e}
+.legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
+
+.placeholder{text-align:center;padding:24px;color:#8b949e;font-size:.85rem}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>&#9889; triflux QoS 대시보드</h1>
+  <div class="status-bar">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText">연결 중...</span>
+    <span id="lastUpdate" class="sub"></span>
+  </div>
+</div>
+
+<div class="grid">
+  <!-- AIMD 게이지 -->
+  <div class="card">
+    <div class="card-title">AIMD 동시 워커</div>
+    <div class="gauge-wrap">
+      <svg width="220" height="130" viewBox="0 0 220 130">
+        <path d="M20 120 A90 90 0 0 1 200 120" fill="none" stroke="#21262d" stroke-width="18" stroke-linecap="round"/>
+        <path id="gaugeArc" d="M20 120 A90 90 0 0 1 200 120" fill="none" stroke="#3fb950" stroke-width="18" stroke-linecap="round" stroke-dasharray="0 283"/>
+        <!-- 눈금 -->
+        <g id="gaugeTicks" fill="#8b949e" font-size="10" text-anchor="middle"></g>
+      </svg>
+      <div class="gauge-value" id="gaugeVal">-</div>
+      <div class="gauge-label" id="gaugeLabel">- / 10</div>
+    </div>
+  </div>
+
+  <!-- CLI 쿼터 바 -->
+  <div class="card">
+    <div class="card-title">CLI 쿼터 사용률</div>
+    <div id="quotaBars">
+      <div class="placeholder">데이터 대기 중...</div>
+    </div>
+  </div>
+
+  <!-- 호출 이력 차트 -->
+  <div class="card" style="grid-column:1/-1">
+    <div class="card-title">호출 이력 타임라인</div>
+    <div class="chart-wrap">
+      <canvas id="eventsCanvas"></canvas>
+    </div>
+    <div class="chart-legend">
+      <span><span class="legend-dot" style="background:#3fb950"></span>성공</span>
+      <span><span class="legend-dot" style="background:#f85149"></span>실패</span>
+      <span><span class="legend-dot" style="background:#d29922"></span>타임아웃</span>
+    </div>
+  </div>
+
+  <!-- 토큰 누적 -->
+  <div class="card" style="grid-column:1/-1">
+    <div class="card-title">토큰 누적 현황</div>
+    <div class="token-grid" id="tokenCards">
+      <div class="placeholder" style="grid-column:1/-1">데이터 대기 중...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var POLL = 5000;
+  var MAX_W = 10;
+  var ARC_TOTAL = 283;
+
+  var $dot = document.getElementById('statusDot');
+  var $stxt = document.getElementById('statusText');
+  var $time = document.getElementById('lastUpdate');
+  var $arc = document.getElementById('gaugeArc');
+  var $gval = document.getElementById('gaugeVal');
+  var $glab = document.getElementById('gaugeLabel');
+  var $quota = document.getElementById('quotaBars');
+  var $tokens = document.getElementById('tokenCards');
+  var canvas = document.getElementById('eventsCanvas');
+  var cx = canvas.getContext('2d');
+  var cachedEvents = [];
+
+  function status(ok) {
+    $dot.className = 'status-dot ' + (ok ? 'ok' : 'err');
+    $stxt.textContent = ok ? '연결됨' : '연결 실패';
+  }
+
+  function ts(d) {
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function fmtTok(n) {
+    if (n == null) return '-';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(n);
+  }
+
+  function barCol(p) {
+    if (p >= 80) return '#f85149';
+    if (p >= 50) return '#d29922';
+    return '#3fb950';
+  }
+
+  function remain(rt) {
+    if (!rt) return '';
+    var ms = new Date(rt) - Date.now();
+    if (ms <= 0) return '만료됨';
+    var h = Math.floor(ms / 3600000);
+    var m = Math.floor((ms % 3600000) / 60000);
+    return h > 0 ? h + '시간 ' + m + '분' : m + '분';
+  }
+
+  /* ── 게이지 ── */
+  function gauge(val) {
+    val = Math.max(0, Math.min(MAX_W, val || 0));
+    var r = val / MAX_W;
+    $arc.setAttribute('stroke-dasharray', (r * ARC_TOTAL) + ' ' + ARC_TOTAL);
+    $arc.setAttribute('stroke', r > 0.8 ? '#f85149' : r > 0.5 ? '#d29922' : '#3fb950');
+    $gval.textContent = val;
+    $glab.textContent = val + ' / ' + MAX_W;
+  }
+
+  /* ── 쿼터 ── */
+  function makeBar(label, pct) {
+    pct = Math.min(100, Math.max(0, Math.round(pct)));
+    var c = barCol(pct);
+    var inner = pct > 10 ? pct + '%' : '';
+    var outer = pct <= 10 ? pct + '%' : '';
+    return '<div class="bar-row">' +
+      '<span class="bar-label">' + label + '</span>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + c + '">' + inner + '</div></div>' +
+      '<span class="bar-pct-outer">' + outer + '</span>' +
+      '</div>';
+  }
+
+  function quotaBlock(name, color, bars, resetTime) {
+    var rem = remain(resetTime);
+    var h = '<div class="quota-row"><div class="quota-header">' +
+      '<span class="cli-name" style="color:' + color + '">' + name + '</span>';
+    if (rem) h += '<span class="meta">리셋: ' + rem + '</span>';
+    h += '</div>';
+    for (var i = 0; i < bars.length; i++) h += makeBar(bars[i][0], bars[i][1]);
+    h += '</div>';
+    return h;
+  }
+
+  function renderQuota(d) {
+    var s = '';
+
+    // Claude
+    var cl = d.claude && d.claude.data;
+    if (cl) {
+      s += quotaBlock('Claude (c)', '#d19a66', [
+        ['5시간', cl.fiveHourPercent || 0],
+        ['주간', cl.weeklyPercent || 0]
+      ], cl.resetTime);
+    }
+
+    // Codex
+    var cx2 = d.codex && d.codex.buckets && d.codex.buckets.codex;
+    if (cx2) {
+      s += quotaBlock('Codex (x)', '#ffffff', [
+        ['Primary', cx2.primary ? cx2.primary.used_percent || 0 : 0],
+        ['Secondary', cx2.secondary ? cx2.secondary.used_percent || 0 : 0]
+      ], cx2.primary && cx2.primary.resetTime);
+    }
+
+    // Gemini
+    var gm = d.gemini && d.gemini.buckets;
+    if (gm && gm.length > 0) {
+      var frac = gm[0].remainingFraction;
+      s += quotaBlock('Gemini (g)', '#61afef', [
+        ['사용률', frac != null ? Math.round((1 - frac) * 100) : 0]
+      ], gm[0].resetTime);
+    }
+
+    $quota.innerHTML = s || '<div class="placeholder">쿼터 데이터 없음</div>';
+  }
+
+  /* ── 토큰 ── */
+  function renderTokens(acc) {
+    if (!acc || Object.keys(acc).length === 0) {
+      $tokens.innerHTML = '<div class="placeholder" style="grid-column:1/-1">누적 데이터 없음</div>';
+      return;
+    }
+    var h = '';
+    var keys = Object.keys(acc);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i], v = acc[k];
+      if (!v) continue;
+      h += '<div class="token-item">' +
+        '<div class="label">' + k.toUpperCase() + '</div>' +
+        '<div class="value">' + fmtTok(v.tokens) + '</div>' +
+        '<div class="calls">' + (v.calls || 0) + '회 호출</div>' +
+        '</div>';
+    }
+    $tokens.innerHTML = h || '<div class="placeholder" style="grid-column:1/-1">누적 데이터 없음</div>';
+  }
+
+  /* ── 이벤트 차트 ── */
+  var colorMap = { success: '#3fb950', failed: '#f85149', fail: '#f85149', error: '#f85149', timeout: '#d29922' };
+
+  function drawEvents(evts) {
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.parentElement.getBoundingClientRect();
+    var w = rect.width, h = rect.height;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx.clearRect(0, 0, w, h);
+
+    if (!evts || evts.length === 0) {
+      cx.fillStyle = '#8b949e';
+      cx.font = '13px system-ui';
+      cx.textAlign = 'center';
+      cx.fillText('이벤트 데이터 없음', w / 2, h / 2);
+      return;
+    }
+
+    var pad = { l: 50, r: 16, t: 12, b: 28 };
+    var cw = w - pad.l - pad.r;
+    var ch = h - pad.t - pad.b;
+
+    var times = [];
+    for (var i = 0; i < evts.length; i++) {
+      times.push(new Date(evts[i].timestamp || evts[i].time || evts[i].t).getTime());
+    }
+    var tMin = Math.min.apply(null, times);
+    var tMax = Math.max.apply(null, times);
+    if (tMax === tMin) tMax = tMin + 60000;
+
+    // X축 라인
+    cx.strokeStyle = '#30363d';
+    cx.lineWidth = 1;
+    cx.beginPath();
+    cx.moveTo(pad.l, pad.t + ch);
+    cx.lineTo(pad.l + cw, pad.t + ch);
+    cx.stroke();
+
+    // X축 라벨
+    cx.fillStyle = '#8b949e';
+    cx.font = '11px system-ui';
+    cx.textAlign = 'center';
+    var nL = Math.min(6, evts.length);
+    for (var j = 0; j < nL; j++) {
+      var tp = tMin + (tMax - tMin) * j / (nL - 1 || 1);
+      var xp = pad.l + cw * (tp - tMin) / (tMax - tMin);
+      var dd = new Date(tp);
+      cx.fillText(dd.getHours() + ':' + String(dd.getMinutes()).padStart(2, '0'), xp, h - 6);
+    }
+
+    // 도트
+    var dr = Math.max(3, Math.min(6, cw / evts.length * 0.4));
+    for (var k = 0; k < evts.length; k++) {
+      var ev = evts[k];
+      var t = times[k];
+      var ex = pad.l + cw * (t - tMin) / (tMax - tMin);
+      // Y: 해시 분산 (겹침 방지)
+      var ey = pad.t + ch * 0.15 + (ch * 0.65) * ((k * 7 + 3) % 13) / 13;
+      var st = (ev.status || ev.result || 'success').toLowerCase();
+      cx.beginPath();
+      cx.arc(ex, ey, dr, 0, Math.PI * 2);
+      cx.fillStyle = colorMap[st] || '#8b949e';
+      cx.fill();
+    }
+  }
+
+  /* ── 폴링 ── */
+  function poll() {
+    fetch('/api/qos-stats')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        status(true);
+        $time.textContent = ts(new Date());
+
+        gauge(data.aimd ? data.aimd.batchSize : 0);
+        renderQuota(data);
+
+        cachedEvents = (data.aimd && data.aimd.events) || [];
+        drawEvents(cachedEvents);
+
+        renderTokens(data.accumulator);
+      })
+      .catch(function(e) {
+        status(false);
+        $time.textContent = ts(new Date()) + ' (실패)';
+      });
+  }
+
+  var rTimer;
+  window.addEventListener('resize', function() {
+    clearTimeout(rTimer);
+    rTimer = setTimeout(function() { drawEvents(cachedEvents); }, 150);
+  });
+
+  poll();
+  setInterval(poll, POLL);
+})();
+</script>
+</body>
+</html>
