@@ -1,0 +1,99 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
+const CLI_PATH = join(PROJECT_ROOT, "bin", "triflux.mjs");
+
+function createHomeDir() {
+  const homeDir = mkdtempSync(join(tmpdir(), "triflux-cli-"));
+  mkdirSync(join(homeDir, ".claude"), { recursive: true });
+  mkdirSync(join(homeDir, ".codex"), { recursive: true });
+  return homeDir;
+}
+
+function runCli(args, { homeDir = createHomeDir(), env = {} } = {}) {
+  return spawnSync(process.execPath, [CLI_PATH, ...args], {
+    cwd: PROJECT_ROOT,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      ...env,
+    },
+  });
+}
+
+function parseStdoutJson(result) {
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout);
+}
+
+describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
+  it("version --json은 구조화된 버전 정보를 반환해야 한다", () => {
+    const result = runCli(["version", "--json"]);
+    const payload = parseStdoutJson(result);
+    assert.ok(payload.triflux);
+    assert.ok(payload.node);
+    assert.equal(Object.hasOwn(payload, "tfx_route"), true);
+    assert.equal(Object.hasOwn(payload, "hud"), true);
+  });
+
+  it("schema는 CLI 명세와 hub tool schema를 노출해야 한다", () => {
+    const bundle = parseStdoutJson(runCli(["schema"]));
+    assert.ok(bundle.commands.doctor);
+    assert.ok(Array.isArray(bundle.hub_tools["x-triflux-mcp-tools"]));
+
+    const delegate = parseStdoutJson(runCli(["schema", "delegate"]));
+    assert.equal(delegate.tool, "delegate");
+    assert.ok(delegate.inputSchema);
+    assert.ok(delegate.outputSchema);
+  });
+
+  it("setup --dry-run은 JSON 액션 목록을 반환해야 한다", () => {
+    const result = runCli(["setup", "--dry-run"]);
+    const payload = parseStdoutJson(result);
+    assert.equal(payload.dry_run, true);
+    assert.ok(payload.actions.length > 0);
+    assert.ok(payload.actions.some((action) => action.type === "sync"));
+  });
+
+  it("doctor --json은 checks 배열을 포함해야 한다", () => {
+    const result = runCli(["doctor", "--json"]);
+    const payload = parseStdoutJson(result);
+    assert.ok(Array.isArray(payload.checks));
+    assert.ok(payload.checks.some((check) => check.name === "tfx-route.sh"));
+    assert.ok(payload.checks.some((check) => check.name === "codex"));
+  });
+
+  it("multi status --json은 팀 상태가 없을 때 offline JSON을 반환해야 한다", () => {
+    const result = runCli(["multi", "status", "--json"]);
+    const payload = parseStdoutJson(result);
+    assert.equal(payload.status, "offline");
+    assert.equal(payload.alive, false);
+  });
+});
+
+describe("triflux CLI exit codes", { timeout: 30000 }, () => {
+  it("알 수 없는 명령은 EXIT_ARG_ERROR(2)와 fix 필드를 반환해야 한다", () => {
+    const result = runCli(["nope", "--json"]);
+    assert.equal(result.status, 2);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.error.code, 2);
+    assert.equal(typeof payload.error.fix, "string");
+  });
+
+  it("손상된 settings.json은 setup에서 EXIT_CONFIG_ERROR(5)로 종료해야 한다", () => {
+    const homeDir = createHomeDir();
+    writeFileSync(join(homeDir, ".claude", "settings.json"), "{broken-json", "utf8");
+    const result = runCli(["setup"], { homeDir });
+    assert.equal(result.status, 5, `${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, /settings\.json 처리 실패|fix:/);
+  });
+});
