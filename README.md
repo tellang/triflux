@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <strong>CLI-first multi-model orchestrator</strong><br>
-  <em>Route tasks to Codex, Gemini, and Claude — route tasks to the right model, save Claude tokens</em>
+  <strong>The Multi-Model Orchestration Hub for Claude Code</strong><br>
+  <em>Vanish Claude tokens. Route tasks to Codex and Gemini via high-performance Hub IPC.</em>
 </p>
 
 <p align="center">
@@ -19,7 +19,6 @@
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
   <a href="https://github.com/tellang/triflux/actions"><img src="https://img.shields.io/github/actions/workflow/status/tellang/triflux/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node.js >= 18"></a>
 </p>
 
 <p align="center">
@@ -32,248 +31,158 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
-  <a href="#skills">Skills</a> ·
   <a href="#architecture">Architecture</a> ·
-  <a href="#setup-guide">Setup Guide</a>
+  <a href="#pipeline-thorough">Pipeline</a> ·
+  <a href="#delegator-mcp">Delegator MCP</a> ·
+  <a href="#agent-types">Agent Types</a> ·
+  <a href="#security">Security</a>
 </p>
 
 ---
 
-## Why triflux?
+## What's New in v4?
 
-- **Cost-intelligent routing** — Automatically routes tasks to Codex and Gemini before spending Claude tokens
-- **DAG-based parallel execution** — Decomposes complex tasks into dependency graphs and runs them concurrently
-- **Auto-triage** — Codex classifies + Opus decomposes, no manual agent selection needed
-- **16 agent types** — From executor to architect, each mapped to the optimal CLI and effort level
-- **HUD status bar** — Real-time CLI health, token savings, and rate limit monitoring
-- **Zero config** — Install and start using slash commands in Claude Code immediately
+**triflux v4** evolves from a simple router into a **high-performance orchestration hub**. It introduces resident services, named-pipe IPC, and advanced task pipelines to provide the most stable multi-model experience for [Claude Code](https://claude.ai/code).
 
-<details>
-<summary><strong>Install</strong></summary>
+### Key Features
 
-### npm (recommended)
+- **Hub IPC Architecture** — Lightning-fast resident Hub server with Named Pipe & HTTP MCP bridge.
+- **Pipeline `--thorough`** — Multi-phase task lifecycle: `plan` → `prd` → `exec` → `verify` → `fix`.
+- **Delegator MCP** — Native MCP tools (`delegate`, `reply`, `status`) for seamless agent interaction.
+- **psmux / Windows Native** — Hybrid support for `tmux` (WSL) and `psmux` (Windows Terminal native).
+- **QoS Dashboard** — Real-time health monitoring with AIMD-based dynamic batch sizing.
+- **21+ specialized agents** — From `scientist-deep` to `spark_fast`, each optimized for specific tasks.
+
+---
+
+## Architecture
+
+triflux uses a **Hub-and-Spoke** architecture. The resident Hub manages state, authentication, and task routing via high-performance Named Pipes.
+
+```mermaid
+graph TD
+    User([User / Claude Code]) <-->|Slash Commands| TFX_CLI[tfx CLI]
+    TFX_CLI <-->|Named Pipe / HTTP| HUB[triflux Hub Server]
+    
+    subgraph "Orchestration Hub"
+        HUB <--> STORE[(SQLite Store)]
+        HUB <--> DASH[QoS Dashboard]
+        HUB <--> DELEGATOR[Delegator Service]
+    end
+    
+    DELEGATOR <-->|Spawn| CODEX[Codex CLI]
+    DELEGATOR <-->|Spawn| GEMINI[Gemini CLI]
+    DELEGATOR <-->|Native| CLAUDE[Claude Code]
+    
+    HUB -.->|MCP Bridge| External[External MCP Clients]
+```
+
+---
+
+## Quick Start
+
+### 1. Install
 
 ```bash
 npm install -g triflux
 ```
 
-### npx (one-off)
+### 2. Setup (Required)
+
+Synchronize scripts, register skills to Claude Code, and configure the HUD.
 
 ```bash
-npx triflux doctor
-```
-
-### Verify
-
-```bash
-tfx doctor
-```
-
-</details>
-
-## Quick Start
-
-```bash
-# Auto mode — AI classifies + decomposes + executes in parallel
-/tfx-auto "refactor auth module + improve login UI + add tests"
-
-# Manual mode — specify agent count and type
-/tfx-auto 3:codex "review src/api, src/auth, src/payment"
-
-# Command shortcuts — single agent, instant execution
-/implement "add JWT auth middleware"
-/analyze "security review of payment module"
-/research "latest React Server Components patterns"
-
-# Single-CLI modes
-/tfx-auto-codex "refactor + test + review"  # Codex lead + Gemini kept, no Claude-native roles
-/tfx-codex "refactor + review"     # Codex only
-/tfx-gemini "implement + document"  # Gemini only
-```
-
-## Docs
-
-- [docs/INDEX.md](docs/INDEX.md) — central documentation index
-
-## Skills
-
-| Skill | Mode | Description |
-|-------|------|-------------|
-| `/tfx-auto` | Auto | Triage → decompose → parallel execute via DAG |
-| `/tfx-auto-codex` | Codex-lead | Replace Claude-native roles with Codex, keep Gemini path |
-| `/tfx-codex` | Codex-only | All CLI tasks routed to Codex |
-| `/tfx-gemini` | Gemini-only | All CLI tasks routed to Gemini |
-| `/tfx-setup` | Setup | File sync, HUD config, CLI diagnostics |
-
-### Command Shortcuts
-
-Bypass triage — instant single-agent execution:
-
-| Command | Agent | CLI | Use Case |
-|---------|-------|-----|----------|
-| `/implement` | executor | Codex | Code implementation |
-| `/build` | build-fixer | Codex | Build/type error fixes |
-| `/research` | document-specialist | Codex | Documentation lookup |
-| `/brainstorm` | analyst | Codex | Requirements analysis |
-| `/design` | architect | Codex | Architecture design |
-| `/troubleshoot` | debugger | Codex | Bug analysis |
-| `/cleanup` | executor | Codex | Code cleanup |
-| `/analyze` | quality + security | Codex | Parallel review (2 agents) |
-| `/spec-panel` | architect + analyst + critic | Codex | Spec review (3 agents) |
-| `/explain` | writer | Gemini | Code explanation |
-| `/document` | writer | Gemini | Documentation |
-| `/test` | test-engineer | Claude | Test strategy |
-| `/reflect` | verifier | Claude | Verification |
-
-## Architecture
-
-```
-User: "/tfx-auto refactor auth + improve UI + add tests"
-         |
-         v
-   [Phase 1: Parse] ─── Auto mode detected
-         |
-         v
-   [Phase 2a: Classify] ─── Codex
-   │  auth refactor → codex
-   │  UI improvement → gemini
-   │  test addition  → claude
-         |
-         v
-   [Phase 2b: Decompose] ─── Opus (inline, no agent spawn)
-   │  t1: executor (implement, src/auth/)     Level 0
-   │  t2: designer (docs, src/components/)    Level 0
-   │  t3: test-engineer (Claude native)       Level 1 ← depends on t1
-         |
-         v
-   [Phase 3: Execute] ─── DAG parallel
-   │  Level 0: t1(Codex) + t2(Gemini)  ← parallel
-   │  Level 1: t3(Claude)               ← after t1 completes
-         |
-         v
-   [Phase 4-6: Collect → Retry → Report]
-```
-
-### Agent Routing Table
-
-| Agent | CLI | Effort | Timeout | Mode |
-|-------|-----|--------|---------|------|
-| executor | Codex | high | 360s | fg |
-| build-fixer | Codex | fast | 180s | fg |
-| debugger | Codex | high | 300s | bg |
-| deep-executor | Codex | xhigh | 1200s | bg |
-| architect | Codex | xhigh | 1200s | bg |
-| planner | Codex | xhigh | 1200s | fg |
-| critic | Codex | xhigh | 1200s | bg |
-| analyst | Codex | xhigh | 1200s | fg |
-| code-reviewer | Codex | thorough | 600s | bg |
-| security-reviewer | Codex | thorough | 600s | bg |
-| quality-reviewer | Codex | thorough | 600s | bg |
-| scientist | Codex | high | 480s | bg |
-| document-specialist | Codex | high | 480s | bg |
-| designer | Gemini Pro 3.1 | — | 600s | bg |
-| writer | Gemini Flash 3 | — | 600s | bg |
-| explore | Claude Haiku | — | 300s | fg |
-| verifier | Claude Sonnet | — | 300s | fg |
-| test-engineer | Claude Sonnet | — | 300s | bg |
-
-### Failure Handling
-
-1. **First failure** → Claude native agent fallback
-2. **Second failure** → Report failed subtask, continue with remaining results
-3. **Timeout** → Partial results reported
-
-<details>
-<summary><strong>Setup Guide</strong></summary>
-
-### Prerequisites
-
-- **Node.js** >= 18
-- **Claude Code** (required)
-- **Codex CLI** (optional): `npm install -g @openai/codex`
-- **Gemini CLI** (optional): `npm install -g @google/gemini-cli`
-
-> [!TIP]
-> **triflux is 100% standalone.** It does not require [oh-my-claudecode (OMC)](https://github.com/nicepkg/oh-my-claudecode) to function. It will automatically detect and provide optional integration only if OMC is present. Without Codex or Gemini, triflux falls back to Claude native agents.
-
-### Post-install
-
-```bash
-# Sync files + configure HUD
 tfx setup
-
-# Run diagnostics
-tfx doctor
 ```
 
-### CLI Commands
+### 3. Usage
 
-| Command | Description |
-|---------|-------------|
-| `tfx setup` | Sync scripts + HUD + skills |
-| `tfx doctor` | CLI diagnostics + issue tracker |
-| `tfx update` | Update to latest stable version |
-| `tfx list` | List installed skills |
-| `tfx version` | Show version info |
+```bash
+# Auto mode — Parallel execution via Hub
+/tfx-auto "refactor auth + update UI + add tests"
 
-Shortcuts: `tfx` = `triflux`, `tfl` = `triflux`
+# Pipeline mode — Thorough multi-phase execution
+/tfx-auto --thorough "implement complex data migration"
 
-Dev channel update: `tfx update --dev` (`dev` alias supported)
+# Direct Delegation
+/tfx-delegate "research latest React patterns" --provider gemini
+```
 
-### HUD Status Bar
+---
 
-Real-time monitoring in Claude Code's status line:
+## Pipeline: `--thorough` Mode
 
-- Claude / Codex / Gemini token usage and rate limits
-- CLI health indicators (installed, API key status)
-- Session cost tracking and savings report
+The v4 Pipeline provides a robust execution loop designed for complex engineering tasks.
 
-Configured automatically via `tfx setup`.
+| Phase | Description |
+|-------|-------------|
+| **plan** | Architect the solution and identify dependencies. |
+| **prd** | Generate a detailed Technical Specification / PRD. |
+| **exec** | Perform the actual code implementation. |
+| **verify** | Run tests and verify the implementation against the PRD. |
+| **fix** | (Loop) Automatically fix failures identified in the verify phase (Max 3). |
+| **ralph** | (Reset) If the fix loop fails, restart from `plan` with new insights (Max 10). |
 
-</details>
+---
 
-<details>
-<summary><strong>Optional: oh-my-claudecode (OMC) Integration</strong></summary>
+## Delegator MCP
 
-triflux is **100% independent** and does not require any external tools to function. However, it provides optional compatibility with [oh-my-claudecode](https://github.com/nicepkg/oh-my-claudecode) for users who prefer that ecosystem:
+Interact with the Hub directly through MCP tools.
 
-- **Full Independence**: Works standalone without OMC or any other wrappers.
-- **Cache Compatibility**: Detects and respects OMC cache paths (e.g., `~/.omc/state/`) if present, but maintains its own isolated state by default.
-- **Seamless Plugin**: Skills auto-registered via OMC's plugin system if OMC is installed.
-- **Extended HUD**: HUD automatically extends OMC's status line when detected.
-- **Mode Support**: Compatible with OMC autopilot, ralph, team, and ultrawork modes.
+- **`delegate`**: Route a prompt to a specific provider or let the Hub decide. Supports `sync` and `async` modes.
+- **`reply`**: Continue multi-turn conversations with a running agent (currently Gemini direct).
+- **`status`**: Check the progress of asynchronous background tasks.
 
-</details>
+---
 
-<details>
-<summary><strong>Changelog</strong></summary>
+## Agent Types (21+)
 
-### 2.0.0
+| Agent | CLI | Purpose |
+|-------|-----|---------|
+| **executor** | Codex | Standard implementation & refactoring. |
+| **build-fixer** | Codex/Gemini | Instant fixes for build/type errors. |
+| **architect** | Codex | High-level system design & planning. |
+| **scientist-deep** | Codex | Exhaustive research & deep analysis. |
+| **code-reviewer** | Codex | Security & Logic focused code review. |
+| **security-reviewer**| Codex | Vulnerability & Permission audit. |
+| **quality-reviewer** | Codex | Logic & Maintainability audit. |
+| **designer** | Gemini | UI/UX & documentation design. |
+| **writer** | Gemini | Technical writing & explanations. |
+| **spark** | Gemini | Lightweight, fast prototyping. |
+| **verifier** | Claude | Final verification & validation. |
+| **test-engineer** | Claude | Comprehensive test suite generation. |
+| *...and more* | | `debugger`, `planner`, `critic`, `analyst`, `scientist`, `explore`, `qa-tester` |
 
-- Rebranded from `cx-skills` to `triflux`
-- New CLI commands: `tfx`, `triflux`, `tfl`
-- Updated skills: `/tfx-auto`, `/tfx-codex`, `/tfx-gemini`, `/tfx-setup`
-- Visual refresh with amber branding
-- All internal references updated (`CX_CLI_MODE` → `TFX_CLI_MODE`)
+---
 
-### Previous (cx-skills)
+## Security
 
-See [cx-skills releases](https://github.com/tellang/cx-skills/releases) for v1.x history.
+triflux v4 is designed for secure, professional environments:
 
-</details>
+- **Hub Token Auth** — Secure IPC using `TFX_HUB_TOKEN` (Bearer Auth).
+- **Localhost Only** — Default Hub binding to `127.0.0.1` prevents external access.
+- **CORS Lockdown** — Strict origin checking for the QoS Dashboard.
+- **Injection Protection** — Sanitized shell command execution in `psmux` and `tmux`.
+
+---
+
+## QoS Dashboard
+
+Monitor your orchestration health at `http://localhost:27888/dashboard`.
+
+- **AIMD Batch Sizing** — Automatically scales parallel tasks (3 → 10) based on success rates.
+- **Token Savings** — Real-time tracking of Claude tokens saved by routing to Codex/Gemini.
+- **Rate Limit Tracking** — Live monitoring of Codex and Gemini quotas.
+
+---
+
+## Platform Support
+
+- **Linux / macOS**: Native `tmux` integration.
+- **Windows**: **psmux** (PowerShell Multiplexer) + Windows Terminal hybrid for a native Windows experience.
 
 ---
 
 <p align="center">
-  <a href="https://github.com/tellang/triflux">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=tellang/triflux&type=Date&theme=dark">
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=tellang/triflux&type=Date">
-      <img alt="Star History" src="https://api.star-history.com/svg?repos=tellang/triflux&type=Date" width="600">
-    </picture>
-  </a>
-</p>
-
-<p align="center">
-  <sub>MIT License · Made by <a href="https://github.com/tellang">tellang</a></sub>
+  <sub>MIT License · Made with ❤️ by <a href="https://github.com/tellang">tellang</a></sub>
 </p>
