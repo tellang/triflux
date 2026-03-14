@@ -8,8 +8,26 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const DASHBOARD_URL = "http://127.0.0.1:27888/dashboard";
-const HUB_STATUS_URL = "http://127.0.0.1:27888/status";
+const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
+const DEFAULT_HUB_PORT = "27888";
+
+function getHubBaseUrl() {
+  if (process.env.TFX_HUB_URL) return process.env.TFX_HUB_URL.replace(/\/+$/, "");
+  try {
+    const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+    if (info.port) return `http://${info.host || "127.0.0.1"}:${info.port}`;
+  } catch {}
+  const port = process.env.TFX_HUB_PORT || DEFAULT_HUB_PORT;
+  return `http://127.0.0.1:${port}`;
+}
+
+function getDashboardUrl() {
+  return `${getHubBaseUrl()}/dashboard`;
+}
+
+function getHubStatusUrl() {
+  return `${getHubBaseUrl()}/status`;
+}
 const POLL_INTERVAL_MS = 10_000;
 const HUB_TIMEOUT_MS = 3_000;
 const AIMD_INITIAL = 3;
@@ -115,7 +133,7 @@ function getClaudePercent() {
 
 async function getHubStatusLabel() {
   try {
-    const response = await fetch(HUB_STATUS_URL, {
+    const response = await fetch(getHubStatusUrl(), {
       signal: AbortSignal.timeout(HUB_TIMEOUT_MS),
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -138,7 +156,8 @@ function formatMenuPercent(value) {
 }
 
 function buildTooltip(snapshot) {
-  return `tfx AIMD:${snapshot.aimd}/10 | C:${formatTooltipPercent(snapshot.claude)} X:${formatTooltipPercent(snapshot.codex)} G:${formatTooltipPercent(snapshot.gemini)}`;
+  const hubTag = snapshot.hubLabel.startsWith("Hub 미") ? "H:off" : "H:on";
+  return `tfx AIMD:${snapshot.aimd}/10 | C:${formatTooltipPercent(snapshot.claude)} X:${formatTooltipPercent(snapshot.codex)} G:${formatTooltipPercent(snapshot.gemini)} ${hubTag}`;
 }
 
 function buildUsageTitle(snapshot) {
@@ -146,10 +165,14 @@ function buildUsageTitle(snapshot) {
 }
 
 function openDashboard() {
-  exec(`start "" "${DASHBOARD_URL}"`, {
-    shell: process.env.ComSpec || "cmd.exe",
-    windowsHide: true,
-  }, () => {});
+  const url = getDashboardUrl();
+  const shell = process.env.ComSpec || "cmd.exe";
+  // msedge --app: 주소바/탭 없는 앱 윈도우로 열기
+  exec(`start "" "msedge" "--app=${url}"`, { shell, windowsHide: true }, (err) => {
+    if (err) {
+      exec(`start "" "${url}"`, { shell, windowsHide: true }, () => {});
+    }
+  });
 }
 
 const openDashboardItem = {
@@ -162,19 +185,22 @@ const openDashboardItem = {
 const aimdItem = {
   title: "AIMD: 3/10",
   tooltip: "최근 30분 AIMD 동시 워커",
-  enabled: false,
+  enabled: true,
+  click: openDashboard,
 };
 
 const quotaItem = {
   title: "C: --% | X: --% | G: --%",
   tooltip: "Claude | Codex | Gemini 사용률",
-  enabled: false,
+  enabled: true,
+  click: openDashboard,
 };
 
 const hubItem = {
   title: "Hub 미연결",
   tooltip: "Hub 연결 상태",
-  enabled: false,
+  enabled: true,
+  click: openDashboard,
 };
 
 const refreshItem = {
@@ -198,7 +224,7 @@ const exitItem = {
 const menu = {
   icon: TRAY_ICON_BASE64,
   title: "tfx",
-  tooltip: "tfx AIMD:3/10 | C:--% X:--% G:--%",
+  tooltip: "tfx AIMD:3/10 | C:--% X:--% G:--% H:off",
   items: [
     openDashboardItem,
     SysTray.separator,
