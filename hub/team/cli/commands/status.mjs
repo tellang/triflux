@@ -5,14 +5,49 @@ import { isNativeMode, isTeamAlive, isWtMode } from "../services/runtime-mode.mj
 import { loadTeamState } from "../services/state-store.mjs";
 import { formatCompletionSuffix } from "../render.mjs";
 
-export async function teamStatus() {
+export async function teamStatus(args = []) {
+  const json = process.env.TFX_OUTPUT_JSON === "1" || args.includes("--json");
   const state = loadTeamState();
   if (!state) {
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ status: "offline", sessionName: null, alive: false }, null, 2)}\n`);
+      return;
+    }
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
   }
 
   const alive = isTeamAlive(state);
+  const payload = {
+    status: alive ? "active" : "dead",
+    alive,
+    sessionName: state.sessionName,
+    teammateMode: state.teammateMode || "tmux",
+    lead: state.lead || "claude",
+    agents: state.agents || [],
+    startedAt: state.startedAt || null,
+    taskCount: (state.tasks || []).length,
+    members: (state.members || []).map((member) => ({
+      name: member.name,
+      cli: member.cli,
+      role: member.role,
+      pane: member.pane,
+    })),
+  };
+
+  if (isNativeMode(state) && alive) {
+    payload.nativeMembers = (await nativeGetStatus(state))?.data?.members || [];
+  }
+
+  if (alive) {
+    payload.hubTasks = await fetchHubTaskList(state);
+  }
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return;
+  }
+
   console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET} ${alive ? `${GREEN}● active${RESET}` : `${RED}● dead${RESET}`}\n`);
   console.log(`    세션:   ${state.sessionName}`);
   console.log(`    모드:   ${state.teammateMode || "tmux"}`);
@@ -35,7 +70,7 @@ export async function teamStatus() {
   }
 
   if (alive) {
-    const hubTasks = await fetchHubTaskList(state);
+    const hubTasks = payload.hubTasks || await fetchHubTaskList(state);
     if (hubTasks.length) {
       const completed = hubTasks.filter((task) => task.status === "completed").length;
       const failed = hubTasks.filter((task) => task.status === "failed").length;
