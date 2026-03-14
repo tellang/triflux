@@ -1570,13 +1570,24 @@ function cmdUpdate() {
         if (stoppedHubInfo?.pid) {
           info(`실행 중 hub 정지 (PID ${stoppedHubInfo.pid})`);
         }
-        const npmCmd = isDev ? "npm install -g triflux@dev" : "npm update -g triflux";
-        const result = execSync(npmCmd, {
-          encoding: "utf8",
-          timeout: 60000,
-          stdio: ["pipe", "pipe", "ignore"],
-        }).trim().split(/\r?\n/)[0];
-        ok(`${isDev ? "npm install -g triflux@dev" : "npm update -g triflux"} — ${result || "완료"}`);
+        const npmCmd = isDev ? "npm install -g triflux@dev" : "npm install -g triflux@latest";
+        let result;
+        try {
+          result = execSync(npmCmd, {
+            encoding: "utf8",
+            timeout: 90000,
+            stdio: ["pipe", "pipe", "pipe"],
+          }).trim().split(/\r?\n/)[0];
+        } catch (retryErr) {
+          // Windows: 자기 자신의 파일 잠금으로 첫 시도 실패 가능 → 1회 재시도
+          info("첫 시도 실패, 재시도 중...");
+          result = execSync(npmCmd, {
+            encoding: "utf8",
+            timeout: 90000,
+            stdio: ["pipe", "pipe", "pipe"],
+          }).trim().split(/\r?\n/)[0];
+        }
+        ok(`${npmCmd} — ${result || "완료"}`);
         updated = true;
         break;
       }
@@ -1611,7 +1622,8 @@ function cmdUpdate() {
     if (stoppedHubInfo && startHubAfterUpdate(stoppedHubInfo)) {
       info("업데이트 실패 후 hub 재기동 시도");
     }
-    fail(`업데이트 실패: ${e.message}`);
+    const stderr = e.stderr?.toString().trim();
+    fail(`업데이트 실패: ${e.message}${stderr ? `\n  ${stderr.split(/\r?\n/)[0]}` : ""}`);
     return;
   }
 
