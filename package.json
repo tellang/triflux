@@ -26,6 +26,7 @@
   ],
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "preinstall": "node scripts/preinstall.mjs",
     "postinstall": "node scripts/setup.mjs",
     "test": "node --test --test-force-exit --test-concurrency=1 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
     "test:unit": "node --test --test-force-exit --test-concurrency=1 tests/unit/**/*.test.mjs",
