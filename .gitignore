@@ -10,8 +10,11 @@
 .mcp.json
 CLAUDE.md
 
-# 내부 문서 (제3자 불필요)
+# 내부 문서 (제3자 불필요) — docs/assets/와 docs/demo*.tape만 유지
+docs/INDEX.md
+docs/adr/
 docs/design/
+docs/guides/
 docs/handoff/
 docs/internal/
 docs/issues/
