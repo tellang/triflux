@@ -381,24 +381,60 @@ if (existsSync(mcpCheck)) {
   child.unref(); // 부모 프로세스와 분리 — 비동기 실행
 }
 
-// ── Hub 헬스체크 + 자동 기동 (세션 시작 백그라운드) ──
-// setup 훅이 포그라운드 지연을 만들지 않도록 별도 detached 프로세스로 처리한다.
-const hubEnsure = join(PLUGIN_ROOT, "scripts", "hub-ensure.mjs");
-const isPostinstall = process.env.npm_lifecycle_event === "postinstall";
-const isCi = /^(1|true)$/i.test(process.env.CI || "");
-const disableHubAutostart = process.env.TFX_DISABLE_HUB_AUTOSTART === "1";
+// ── SessionStart 훅 자동 등록 (settings.json) ──
+// .claude-plugin/ 개발 플러그인의 SessionStart 훅은 플러그인 로드 시점 문제로
+// 실행되지 않을 수 있으므로, settings.json에 직접 등록한다.
+// hub-ensure.mjs는 settings.json 훅으로만 실행 (이중 spawn 방지).
 
-if (!isPostinstall && !isCi && !disableHubAutostart && existsSync(hubEnsure)) {
-  try {
-    const child = spawn(process.execPath, [hubEnsure], {
-      env: process.env,
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-  } catch {
-    // best effort: 실패해도 setup 흐름은 지속
+try {
+  let hookSettings = {};
+  if (existsSync(settingsPath)) {
+    hookSettings = JSON.parse(readFileSync(settingsPath, "utf8"));
   }
+
+  if (!hookSettings.hooks) hookSettings.hooks = {};
+  if (!Array.isArray(hookSettings.hooks.SessionStart)) {
+    hookSettings.hooks.SessionStart = [];
+  }
+
+  const existingHooks = hookSettings.hooks.SessionStart;
+  const hasTrifluxHooks = existingHooks.some((entry) =>
+    Array.isArray(entry.hooks) &&
+    entry.hooks.some((h) => typeof h.command === "string" && h.command.includes("triflux")),
+  );
+
+  if (!hasTrifluxHooks) {
+    const nodePath = process.execPath.replace(/\\/g, "/");
+    const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
+    const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
+
+    const trifluxHookEntry = {
+      matcher: "*",
+      hooks: [
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/setup.mjs"`,
+          timeout: 10,
+        },
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/hub-ensure.mjs"`,
+          timeout: 8,
+        },
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/preflight-cache.mjs"`,
+          timeout: 5,
+        },
+      ],
+    };
+
+    hookSettings.hooks.SessionStart.push(trifluxHookEntry);
+    writeFileSync(settingsPath, JSON.stringify(hookSettings, null, 2) + "\n", "utf8");
+    synced++;
+  }
+} catch {
+  // settings.json 파싱 실패 시 무시 — 기존 설정 보존
 }
 
 // ── postinstall 배너 (npm install 시에만 출력) ──

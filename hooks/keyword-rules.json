@@ -109,6 +109,10 @@
         {
           "source": "(노션|notion)[\\s-]?(페이지|글|조회|생성|수정|검색)",
           "flags": "i"
+        },
+        {
+          "source": "(노션|\\bnotion\\b)",
+          "flags": "i"
         }
       ],
       "skill": null,
@@ -127,6 +131,10 @@
         },
         {
           "source": "(크롬|chrome|브라우저)[\\s-]?(열|접속|로그인|navigate|click)",
+          "flags": "i"
+        },
+        {
+          "source": "(크롬|\\bchrome\\b)",
           "flags": "i"
         }
       ],
@@ -147,6 +155,10 @@
         {
           "source": "(jira|지라)[\\s-]?(이슈|티켓|생성|조회|스프린트)",
           "flags": "i"
+        },
+        {
+          "source": "(지라|\\bjira\\b)",
+          "flags": "i"
         }
       ],
       "skill": null,
@@ -166,6 +178,10 @@
         {
           "source": "(메일|gmail|이메일)[\\s-]?(보내|읽|검색|draft)",
           "flags": "i"
+        },
+        {
+          "source": "(메일|이메일|\\bgmail\\b)",
+          "flags": "i"
         }
       ],
       "skill": null,
@@ -184,6 +200,10 @@
         },
         {
           "source": "(일정|캘린더|calendar)[\\s-]?(생성|조회|추가)",
+          "flags": "i"
+        },
+        {
+          "source": "(일정|캘린더|\\bcalendar\\b)",
           "flags": "i"
         }
       ],
@@ -303,6 +323,10 @@
         {
           "source": "(confluence|위키|wiki)[\\s-]?(페이지|문서|조회|생성|수정|검색)",
           "flags": "i"
+        },
+        {
+          "source": "(위키|\\bconfluence\\b|\\bwiki\\b)",
+          "flags": "i"
         }
       ],
       "skill": null,
@@ -322,6 +346,10 @@
         {
           "source": "(slack|슬랙)[\\s-]?(메시지|채널|보내|읽|검색|알림)",
           "flags": "i"
+        },
+        {
+          "source": "(슬랙|\\bslack\\b)",
+          "flags": "i"
         }
       ],
       "skill": null,
@@ -340,6 +368,10 @@
         },
         {
           "source": "(github|깃허브)[\\s-]?(이슈|issue|PR|pull|커밋|commit|리포|repo)",
+          "flags": "i"
+        },
+        {
+          "source": "(깃허브|\\bgithub\\b)",
           "flags": "i"
         }
       ],
