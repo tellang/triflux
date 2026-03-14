@@ -46,6 +46,7 @@ describe("staleState.mjs", () => {
   it("1시간 이상 경과했고 관련 프로세스가 없으면 stale team으로 판정한다", () => {
     const projectDir = makeTempProject();
     const stateRoot = join(projectDir, ".omc", "state");
+    const teamsRoot = join(projectDir, ".claude", "teams");
     const sessionId = "stale-session";
     const stateFile = join(stateRoot, "sessions", sessionId, "team-state.json");
     writeJson(stateFile, {
@@ -57,6 +58,7 @@ describe("staleState.mjs", () => {
 
     const report = inspectStaleOmcTeams({
       startDir: projectDir,
+      teamsRoot,
       nowMs: Date.now(),
       processEntries: [],
     });
@@ -70,6 +72,7 @@ describe("staleState.mjs", () => {
   it("세션 토큰이 살아 있는 프로세스 커맨드라인에 있으면 stale로 보지 않는다", () => {
     const projectDir = makeTempProject();
     const stateRoot = join(projectDir, ".omc", "state");
+    const teamsRoot = join(projectDir, ".claude", "teams");
     const sessionId = "active-session";
     const stateFile = join(stateRoot, "sessions", sessionId, "team-state.json");
     writeJson(stateFile, {
@@ -81,6 +84,7 @@ describe("staleState.mjs", () => {
 
     const report = inspectStaleOmcTeams({
       startDir: projectDir,
+      teamsRoot,
       nowMs: Date.now(),
       processEntries: [
         {
@@ -93,9 +97,38 @@ describe("staleState.mjs", () => {
     assert.equal(report.entries.length, 0);
   });
 
-  it("stale team 정리는 세션 디렉터리와 root state 파일을 삭제한다", () => {
+  it("~/.claude/teams 디렉터리도 stale 대상으로 탐지한다", () => {
+    const projectDir = makeTempProject();
+    const teamsRoot = join(projectDir, ".claude", "teams");
+    const teamName = "tfx-multi-stale";
+    const configPath = join(teamsRoot, teamName, "config.json");
+
+    writeJson(configPath, {
+      name: teamName,
+      leadSessionId: "lead-session-stale",
+      createdAt: Date.now() - (2 * 60 * 60 * 1000),
+      members: [
+        { name: "lead", agentId: "codex-lead", isActive: true },
+      ],
+    });
+
+    const report = inspectStaleOmcTeams({
+      startDir: projectDir,
+      teamsRoot,
+      nowMs: Date.now(),
+      processEntries: [],
+    });
+
+    assert.equal(report.entries.length, 1);
+    assert.equal(report.entries[0].scope, "claude_team");
+    assert.equal(report.entries[0].teamName, teamName);
+    assert.equal(report.entries[0].stale, true);
+  });
+
+  it("stale team 정리는 세션 디렉터리와 root state 파일을 삭제한다", async () => {
     const projectDir = makeTempProject();
     const stateRoot = join(projectDir, ".omc", "state");
+    const teamsRoot = join(projectDir, ".claude", "teams");
     const sessionId = "cleanup-session";
     const sessionStateFile = join(stateRoot, "sessions", sessionId, "team-state.json");
     const rootStateFile = join(stateRoot, "team-state.json");
@@ -113,13 +146,14 @@ describe("staleState.mjs", () => {
 
     const report = inspectStaleOmcTeams({
       startDir: projectDir,
+      teamsRoot,
       nowMs: Date.now(),
       processEntries: [],
     });
 
     assert.equal(report.entries.length, 2);
 
-    const result = cleanupStaleOmcTeams(report.entries);
+    const result = await cleanupStaleOmcTeams(report.entries);
     assert.equal(result.cleaned, 2);
     assert.equal(result.failed, 0);
     assert.equal(existsSync(sessionStateFile), false);
