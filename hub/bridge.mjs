@@ -10,9 +10,13 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { parseArgs as nodeParseArgs } from 'node:util';
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+import { getPipelineStateDbPath } from './pipeline/state.mjs';
 
 const HUB_PID_FILE = join(homedir(), '.claude', 'cache', 'tfx-hub', 'hub.pid');
 const HUB_TOKEN_FILE = join(homedir(), '.claude', '.tfx-hub-token');
+const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 function normalizeToken(raw) {
   if (raw == null) return null;
@@ -554,7 +558,7 @@ async function cmdTeamSendMessage(args) {
 }
 
 function getHubDbPath() {
-  return join(homedir(), '.claude', 'cache', 'tfx-hub', 'state.db');
+  return getPipelineStateDbPath(PROJECT_ROOT);
 }
 
 async function cmdPipelineState(args) {
