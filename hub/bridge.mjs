@@ -82,6 +82,9 @@ const HUB_OPERATIONS = Object.freeze({
   pipelineInit: { transport: 'command', action: 'pipeline_init', httpPath: '/bridge/pipeline/init' },
   pipelineList: { transport: 'query', action: 'pipeline_list', httpPath: '/bridge/pipeline/list' },
   hubStatus: { transport: 'query', action: 'status', httpPath: '/status', httpMethod: 'GET' },
+  delegatorDelegate: { transport: 'command', action: 'delegator_delegate', httpPath: '/bridge/delegator/delegate' },
+  delegatorReply: { transport: 'command', action: 'delegator_reply', httpPath: '/bridge/delegator/reply' },
+  delegatorStatus: { transport: 'query', action: 'delegator_status', httpPath: '/bridge/delegator/status' },
 });
 
 export async function requestJson(path, { method = 'POST', body, timeoutMs = 5000 } = {}) {
@@ -259,6 +262,13 @@ export function parseArgs(argv) {
       'add-blocked-by': { type: 'string' },
       'metadata-patch': { type: 'string' },
       'if-match-mtime-ms': { type: 'string' },
+      provider: { type: 'string' },
+      mode: { type: 'string' },
+      prompt: { type: 'string' },
+      reply: { type: 'string' },
+      done: { type: 'boolean' },
+      'mcp-profile': { type: 'string' },
+      'session-key': { type: 'string' },
     },
     strict: false,
   });
@@ -653,6 +663,39 @@ async function cmdPing() {
   return emitJson(unavailableResult());
 }
 
+async function cmdDelegatorDelegate(args) {
+  const body = {
+    prompt: args.text || args.prompt,
+    provider: args.provider || 'auto',
+    mode: args.mode || 'sync',
+    agent_type: args.agent || 'executor',
+    mcp_profile: args['mcp-profile'] || 'auto',
+    session_key: args['session-key'] || undefined,
+    timeout_ms: args['timeout-ms'] != null ? Number(args['timeout-ms']) : undefined,
+  };
+  const timeoutMs = body.mode === 'async' ? 10000 : 120000;
+  const outcome = await requestHub(HUB_OPERATIONS.delegatorDelegate, body, timeoutMs);
+  return emitJson(outcome?.result || unavailableResult());
+}
+
+async function cmdDelegatorReply(args) {
+  const body = {
+    job_id: args['job-id'],
+    reply: args.text || args.reply,
+    done: !!args.done,
+  };
+  const outcome = await requestHub(HUB_OPERATIONS.delegatorReply, body, 120000);
+  return emitJson(outcome?.result || unavailableResult());
+}
+
+async function cmdDelegatorStatus(args) {
+  const body = {
+    job_id: args['job-id'],
+  };
+  const outcome = await requestHub(HUB_OPERATIONS.delegatorStatus, body, 5000);
+  return emitJson(outcome?.result || unavailableResult());
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
@@ -676,8 +719,11 @@ export async function main(argv = process.argv.slice(2)) {
     case 'pipeline-init': return await cmdPipelineInit(args);
     case 'pipeline-list': return await cmdPipelineList(args);
     case 'ping': return await cmdPing(args);
+    case 'delegator-delegate': return await cmdDelegatorDelegate(args);
+    case 'delegator-reply': return await cmdDelegatorReply(args);
+    case 'delegator-status': return await cmdDelegatorStatus(args);
     default:
-      console.error('사용법: bridge.mjs <register|result|control|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping> [--옵션]');
+      console.error('사용법: bridge.mjs <register|result|control|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status> [--옵션]');
       process.exit(1);
   }
 }
