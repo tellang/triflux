@@ -100,6 +100,27 @@ argument-hint: "<command|task> [args...]"
 
 **수동 모드 (`N:agent_type`):** Codex 분류 건너뜀 → Opus가 N개 서브태스크 분해. N > 10 거부.
 
+## 멀티 태스크 라우팅 (트리아지 후)
+
+> **트리아지 결과 서브태스크가 2개 이상이면 tfx-multi Native Teams 모드로 자동 전환한다.**
+
+| 서브태스크 수 | 실행 경로 | 이유 |
+|--------------|----------|------|
+| 1개 | tfx-auto 직접 실행 (아래 "실행" 섹션) | 팀 오버헤드 불필요, 경량 fire-and-forget |
+| 2개+ | **tfx-multi Phase 3** (TeamCreate → TaskCreate → Agent 래퍼) | Shift+Down 네비게이션, 상태 추적, fallback |
+
+**전환 방법:** 트리아지 완료 후 서브태스크 배열을 그대로 tfx-multi Phase 3에 전달한다.
+tfx-multi의 Phase 2(트리아지)는 건너뛰고 Phase 3a(TeamCreate)부터 시작한다.
+
+```
+if subtasks.length >= 2:
+  → tfx-multi Phase 3 실행 (트리아지 결과 재사용)
+  → TeamCreate → TaskCreate × N → Agent 래퍼 spawn (Phase 3a~3c)
+  → Phase 4 결과 수집 → Phase 5 정리
+else:
+  → tfx-auto 직접 실행 (아래)
+```
+
 ## 실행
 
 ### CLI 에이전트 (Codex/Gemini)
