@@ -228,6 +228,32 @@ if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
   }
 }
 
+// ── 에이전트 동기화 (.claude/agents/ → ~/.claude/agents/) ──
+// slim-wrapper 등 커스텀 에이전트를 글로벌에 배포하여
+// 다른 프로젝트에서도 subagent_type으로 참조 가능하게 한다.
+
+const agentsSrc = join(PLUGIN_ROOT, ".claude", "agents");
+const agentsDst = join(CLAUDE_DIR, "agents");
+
+if (existsSync(agentsSrc)) {
+  if (!existsSync(agentsDst)) mkdirSync(agentsDst, { recursive: true });
+
+  for (const name of readdirSync(agentsSrc)) {
+    if (!name.endsWith(".md")) continue;
+
+    const src = join(agentsSrc, name);
+    const dst = join(agentsDst, name);
+
+    if (!existsSync(dst)) {
+      copyFileSync(src, dst);
+      synced++;
+    } else if (shouldSyncTextFile(src, dst)) {
+      copyFileSync(src, dst);
+      synced++;
+    }
+  }
+}
+
 // ── 스킬 동기화 ──
 
 const skillsSrc = join(PLUGIN_ROOT, "skills");
