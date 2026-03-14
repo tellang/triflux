@@ -70,6 +70,7 @@ function startHubDetached(port) {
       env: { ...process.env, TFX_HUB_PORT: String(port) },
       detached: true,
       stdio: "ignore",
+      windowsHide: true,
     });
     child.unref();
     return true;
