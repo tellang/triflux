@@ -100,159 +100,6 @@
       "mcp_route": null
     },
     {
-      "id": "notion-route",
-      "patterns": [
-        {
-          "source": "\\b(노션|notion)[\\s-]?(페이지|글|조회|생성|수정|검색)\\b",
-          "flags": "i"
-        },
-        {
-          "source": "(노션|notion)[\\s-]?(페이지|글|조회|생성|수정|검색)",
-          "flags": "i"
-        },
-        {
-          "source": "(노션|\\bnotion\\b)",
-          "flags": "i"
-        }
-      ],
-      "skill": null,
-      "priority": 10,
-      "supersedes": [],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": "gemini"
-    },
-    {
-      "id": "chrome-route",
-      "patterns": [
-        {
-          "source": "\\b(크롬|chrome|브라우저)[\\s-]?(열|접속|로그인|navigate|click)\\b",
-          "flags": "i"
-        },
-        {
-          "source": "(크롬|chrome|브라우저)[\\s-]?(열|접속|로그인|navigate|click)",
-          "flags": "i"
-        },
-        {
-          "source": "(크롬|\\bchrome\\b)",
-          "flags": "i"
-        }
-      ],
-      "skill": null,
-      "priority": 10,
-      "supersedes": [],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": "gemini"
-    },
-    {
-      "id": "jira-route",
-      "patterns": [
-        {
-          "source": "\\b(jira|지라)[\\s-]?(이슈|티켓|생성|조회|스프린트)\\b",
-          "flags": "i"
-        },
-        {
-          "source": "(jira|지라)[\\s-]?(이슈|티켓|생성|조회|스프린트)",
-          "flags": "i"
-        },
-        {
-          "source": "(지라|\\bjira\\b)",
-          "flags": "i"
-        }
-      ],
-      "skill": null,
-      "priority": 10,
-      "supersedes": [],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": "codex"
-    },
-    {
-      "id": "mail-route",
-      "patterns": [
-        {
-          "source": "\\b(메일|gmail|이메일)[\\s-]?(보내|읽|검색|draft)\\b",
-          "flags": "i"
-        },
-        {
-          "source": "(메일|gmail|이메일)[\\s-]?(보내|읽|검색|draft)",
-          "flags": "i"
-        },
-        {
-          "source": "(메일|이메일|\\bgmail\\b)",
-          "flags": "i"
-        }
-      ],
-      "skill": null,
-      "priority": 10,
-      "supersedes": [],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": "gemini"
-    },
-    {
-      "id": "calendar-route",
-      "patterns": [
-        {
-          "source": "\\b(일정|캘린더|calendar)[\\s-]?(생성|조회|추가)\\b",
-          "flags": "i"
-        },
-        {
-          "source": "(일정|캘린더|calendar)[\\s-]?(생성|조회|추가)",
-          "flags": "i"
-        },
-        {
-          "source": "(일정|캘린더|\\bcalendar\\b)",
-          "flags": "i"
-        }
-      ],
-      "skill": null,
-      "priority": 10,
-      "supersedes": [],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": "gemini"
-    },
-    {
-      "id": "playwright-route",
-      "patterns": [
-        {
-          "source": "\\b(playwright|브라우저\\s*테스트)\\b",
-          "flags": "i"
-        },
-        {
-          "source": "(playwright|브라우저\\s*테스트)",
-          "flags": "i"
-        }
-      ],
-      "skill": null,
-      "priority": 10,
-      "supersedes": [],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": "gemini"
-    },
-    {
-      "id": "canva-route",
-      "patterns": [
-        {
-          "source": "\\b(canva|캔바|디자인\\s*생성)\\b",
-          "flags": "i"
-        },
-        {
-          "source": "(canva|캔바|디자인\\s*생성)",
-          "flags": "i"
-        }
-      ],
-      "skill": null,
-      "priority": 10,
-      "supersedes": [],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": "gemini"
-    },
-    {
       "id": "tfx-hub",
       "patterns": [
         {
@@ -298,30 +145,150 @@
       "mcp_route": null
     },
     {
-      "id": "suppress-omc-team",
+      "id": "handoff-route",
       "patterns": [
         {
-          "source": "(?<!tfx[\\s-]?)(팀|\\bteam\\b)",
+          "source": "\\b(핸드오프|handoff|세션\\s*넘기)[\\s]*(생성|만들|써줘|작성|넘겨)",
           "flags": "i"
         }
       ],
-      "skill": null,
-      "action": "suppress_omc",
-      "priority": 20,
+      "skill": "mp",
+      "priority": 5,
       "supersedes": [],
       "exclusive": false,
       "state": null,
       "mcp_route": null
     },
     {
+      "id": "notion-route",
+      "patterns": [
+        {
+          "source": "\\b(노션|notion)[\\s-]?(페이지|글|조회|생성|수정|검색)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "(노션|\\bnotion\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "chrome-route",
+      "patterns": [
+        {
+          "source": "\\b(크롬|chrome|브라우저)[\\s-]?(열|접속|로그인|navigate|click)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "(크롬|\\bchrome\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "jira-route",
+      "patterns": [
+        {
+          "source": "\\b(jira|지라)[\\s-]?(이슈|티켓|생성|조회|스프린트)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "(지라|\\bjira\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "codex"
+    },
+    {
+      "id": "mail-route",
+      "patterns": [
+        {
+          "source": "\\b(메일|gmail|이메일)[\\s-]?(보내|읽|검색|draft)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "(메일|이메일|\\bgmail\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "calendar-route",
+      "patterns": [
+        {
+          "source": "\\b(일정|캘린더|calendar)[\\s-]?(생성|조회|추가)\\b",
+          "flags": "i"
+        },
+        {
+          "source": "(일정|캘린더|\\bcalendar\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "playwright-route",
+      "patterns": [
+        {
+          "source": "\\b(playwright|브라우저\\s*테스트)\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "canva-route",
+      "patterns": [
+        {
+          "source": "\\b(canva|캔바|디자인\\s*생성)\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
       "id": "confluence-route",
       "patterns": [
         {
           "source": "\\b(confluence|위키|wiki)[\\s-]?(페이지|문서|조회|생성|수정|검색)\\b",
-          "flags": "i"
-        },
-        {
-          "source": "(confluence|위키|wiki)[\\s-]?(페이지|문서|조회|생성|수정|검색)",
           "flags": "i"
         },
         {
@@ -344,10 +311,6 @@
           "flags": "i"
         },
         {
-          "source": "(slack|슬랙)[\\s-]?(메시지|채널|보내|읽|검색|알림)",
-          "flags": "i"
-        },
-        {
           "source": "(슬랙|\\bslack\\b)",
           "flags": "i"
         }
@@ -367,10 +330,6 @@
           "flags": "i"
         },
         {
-          "source": "(github|깃허브)[\\s-]?(이슈|issue|PR|pull|커밋|commit|리포|repo)",
-          "flags": "i"
-        },
-        {
           "source": "(깃허브|\\bgithub\\b)",
           "flags": "i"
         }
@@ -381,6 +340,22 @@
       "exclusive": false,
       "state": null,
       "mcp_route": "codex"
+    },
+    {
+      "id": "suppress-omc-team",
+      "patterns": [
+        {
+          "source": "(?<!tfx[\\s-]?)(팀|\\bteam\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "action": "suppress_omc",
+      "priority": 20,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
     }
   ]
 }
