@@ -33,6 +33,8 @@ scripts/psmux-steering-prototype.sh
 
 # 내부 이슈 추적
 .issues/
+.prompts/
+ISSUES-*.md
 
 # 빌드/캐시
 node_modules/
