@@ -12,7 +12,7 @@ const CACHE_TTL_MS = 30_000; // 30초
 
 function checkHub() {
   try {
-    const res = execSync("curl -sf http://127.0.0.1:27888/status", { timeout: 3000, encoding: "utf8" });
+    const res = execSync("curl -sf http://127.0.0.1:27888/status", { timeout: 3000, encoding: "utf8", windowsHide: true });
     const data = JSON.parse(res);
     return { ok: true, state: data?.hub?.state || "unknown", pid: data?.pid };
   } catch {
@@ -27,7 +27,7 @@ function checkRoute() {
 
 function checkCli(name) {
   try {
-    const path = execSync(`which ${name} 2>/dev/null || where ${name} 2>nul`, { encoding: "utf8", timeout: 2000 }).trim();
+    const path = execSync(`which ${name} 2>/dev/null || where ${name} 2>nul`, { encoding: "utf8", timeout: 2000, windowsHide: true }).trim();
     return { ok: !!path, path };
   } catch {
     return { ok: false };
