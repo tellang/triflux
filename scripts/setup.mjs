@@ -228,6 +228,23 @@ if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
   }
 }
 
+// ── 패키지 루트 breadcrumb 기록 ──
+// tfx-route.sh가 hub/server.mjs, hub/bridge.mjs를 찾을 수 있도록
+// 패키지 루트 경로를 ~/.claude/scripts/.tfx-pkg-root에 기록한다.
+{
+  const breadcrumbPath = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
+  const pkgRootForward = PLUGIN_ROOT.replace(/\\/g, "/");
+  const currentBreadcrumb = existsSync(breadcrumbPath)
+    ? readFileSync(breadcrumbPath, "utf8").trim()
+    : "";
+  if (currentBreadcrumb !== pkgRootForward) {
+    const breadcrumbDir = dirname(breadcrumbPath);
+    if (!existsSync(breadcrumbDir)) mkdirSync(breadcrumbDir, { recursive: true });
+    writeFileSync(breadcrumbPath, pkgRootForward + "\n", "utf8");
+    synced++;
+  }
+}
+
 // ── 에이전트 동기화 (.claude/agents/ → ~/.claude/agents/) ──
 // slim-wrapper 등 커스텀 에이전트를 글로벌에 배포하여
 // 다른 프로젝트에서도 subagent_type으로 참조 가능하게 한다.
