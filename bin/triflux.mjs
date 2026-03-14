@@ -218,7 +218,7 @@ function handleFatalError(error, { json = false } = {}) {
 function which(cmd) {
   try {
     const result = process.platform === "win32"
-      ? execFileSync("where", [cmd], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] })
+      ? execFileSync("where", [cmd], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"], windowsHide: true })
       : execFileSync("which", [cmd], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] });
     return result.trim().split(/\r?\n/)[0] || null;
   } catch { return null; }
@@ -237,6 +237,7 @@ function whichInShell(cmd, shell) {
       encoding: "utf8",
       timeout: 8000,
       stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
     }).trim();
     return result.split(/\r?\n/)[0] || null;
   } catch { return null; }
@@ -865,7 +866,7 @@ async function cmdDoctor(options = {}) {
       const mcpCheck = join(PKG_ROOT, "scripts", "mcp-check.mjs");
       if (existsSync(mcpCheck)) {
         try {
-          execFileSync(process.execPath, [mcpCheck], { timeout: 15000, stdio: "ignore" });
+          execFileSync(process.execPath, [mcpCheck], { timeout: 15000, stdio: "ignore", windowsHide: true });
           report.actions.push({ type: "rebuild", name: "mcp-inventory", status: "ok" });
           ok("MCP 인벤토리 재생성됨");
         } catch {
@@ -876,7 +877,7 @@ async function cmdDoctor(options = {}) {
       const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
       if (existsSync(hudScript)) {
         try {
-          execFileSync(process.execPath, [hudScript, "--refresh-claude-usage"], { timeout: 20000, stdio: "ignore" });
+          execFileSync(process.execPath, [hudScript, "--refresh-claude-usage"], { timeout: 20000, stdio: "ignore", windowsHide: true });
           report.actions.push({ type: "rebuild", name: "claude-usage-cache", status: "ok" });
           ok("Claude 사용량 캐시 재생성됨");
         } catch {
@@ -884,7 +885,7 @@ async function cmdDoctor(options = {}) {
           warn("Claude 사용량 캐시 재생성 실패 — 다음 API 호출 시 자동 생성");
         }
         try {
-          execFileSync(process.execPath, [hudScript, "--refresh-codex-rate-limits"], { timeout: 15000, stdio: "ignore" });
+          execFileSync(process.execPath, [hudScript, "--refresh-codex-rate-limits"], { timeout: 15000, stdio: "ignore", windowsHide: true });
           report.actions.push({ type: "rebuild", name: "codex-rate-limits-cache", status: "ok" });
           ok("Codex 레이트 리밋 캐시 재생성됨");
         } catch {
@@ -892,7 +893,7 @@ async function cmdDoctor(options = {}) {
           warn("Codex 레이트 리밋 캐시 재생성 실패");
         }
         try {
-          execFileSync(process.execPath, [hudScript, "--refresh-gemini-quota"], { timeout: 15000, stdio: "ignore" });
+          execFileSync(process.execPath, [hudScript, "--refresh-gemini-quota"], { timeout: 15000, stdio: "ignore", windowsHide: true });
           report.actions.push({ type: "rebuild", name: "gemini-quota-cache", status: "ok" });
           ok("Gemini 쿼터 캐시 재생성됨");
         } catch {
@@ -1955,6 +1956,7 @@ function stopHubForUpdate() {
       execFileSync("taskkill", ["/PID", String(info.pid), "/T", "/F"], {
         stdio: ["pipe", "pipe", "ignore"],
         timeout: 10000,
+        windowsHide: true,
       });
     } else {
       process.kill(info.pid, "SIGTERM");
