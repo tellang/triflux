@@ -1346,7 +1346,7 @@ async function cmdCodexTeam() {
   const prevProfile = process.env.TFX_TEAM_PROFILE;
   process.env.TFX_TEAM_PROFILE = "codex-team";
   const { pathToFileURL } = await import("node:url");
-  const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
+  const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli", "index.mjs")).href);
   process.argv = [prevArgv[0], prevArgv[1], "team", ...forwarded];
   try {
     await cmdTeam();
@@ -1442,6 +1442,7 @@ function startHubAfterUpdate(info) {
       env: { ...process.env, TFX_HUB_PORT: port },
       stdio: "ignore",
       detached: true,
+      windowsHide: true,
     });
     child.unref();
     return true;
@@ -1585,6 +1586,7 @@ async function cmdHub() {
         env: { ...process.env, TFX_HUB_PORT: port },
         stdio: "ignore",
         detached: true,
+        windowsHide: true,
       });
       child.unref();
 
@@ -1738,7 +1740,7 @@ switch (cmd) {
   case "multi": {
     await checkHubRunning();
     const { pathToFileURL } = await import("node:url");
-    const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
+    const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli", "index.mjs")).href);
     await cmdTeam();
     break;
   }

@@ -10,6 +10,7 @@
 CLAUDE.md
 
 # 내부 문서 (제3자 불필요)
+docs/design/
 docs/handoff/
 docs/internal/
 docs/issues/
@@ -44,3 +45,4 @@ dist/
 *.tgz
 .env
 .npmrc
+tmp-*.log

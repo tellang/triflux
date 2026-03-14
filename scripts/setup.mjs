@@ -377,6 +377,7 @@ if (existsSync(mcpCheck)) {
   const child = spawn(process.execPath, [mcpCheck], {
     detached: true,
     stdio: "ignore",
+    windowsHide: true,
   });
   child.unref(); // 부모 프로세스와 분리 — 비동기 실행
 }

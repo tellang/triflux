@@ -372,7 +372,7 @@ Bash("node {PKG_ROOT}/bin/triflux.mjs multi --no-attach --agents {agents} \\\"{t
 |------|------|
 | `scripts/tfx-route.sh` | 팀 통합 라우터 (`TFX_TEAM_*`, task claim/complete, send-message, Named Pipe/HTTP bridge) |
 | `hub/team/native.mjs` | Native Teams 래퍼 (프롬프트 템플릿, 팀 설정 빌더) |
-| `hub/team/cli.mjs` | tmux 팀 CLI (`--tmux` 레거시 모드) |
+| `hub/team/cli/index.mjs` | tmux 팀 CLI 라우터 (`hub/team/cli/` 서브커맨드 구조) |
 | `hub/pipeline/` | 파이프라인 상태 기계 (transitions, state, index) — `--thorough` 모드 |
 | `tfx-auto` | one-shot 실행 오케스트레이터 (병행 유지) |
 | `tfx-hub` | MCP 메시지 버스 관리 (tmux 모드용) |
