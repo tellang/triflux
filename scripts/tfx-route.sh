@@ -527,7 +527,19 @@ TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
-TFX_CODEX_PLAN="${TFX_CODEX_PLAN:-pro}"
+# Codex 요금제 자동 감지 (preflight 캐시 → auth.json JWT)
+# 환경변수 명시 설정 시 우선, 미설정 시 캐시에서 읽기, 캐시도 없으면 pro
+if [[ -z "${TFX_CODEX_PLAN:-}" ]]; then
+  _detected_plan=$(node -e '
+    try {
+      const c = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(),".claude","cache","tfx-preflight.json"),"utf8"));
+      const p = c?.codex_plan?.plan;
+      if (p && p !== "unknown" && p !== "api") { process.stdout.write(p); }
+    } catch {}
+  ' 2>/dev/null)
+  TFX_CODEX_PLAN="${_detected_plan:-pro}"
+  unset _detected_plan
+fi
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
 TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
 case "$TFX_NO_CLAUDE_NATIVE" in
