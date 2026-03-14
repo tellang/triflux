@@ -527,12 +527,20 @@ TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
+TFX_CODEX_PLAN="${TFX_CODEX_PLAN:-pro}"
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
 TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
 case "$TFX_NO_CLAUDE_NATIVE" in
   0|1) ;;
   *)
     echo "ERROR: TFX_NO_CLAUDE_NATIVE 값은 0 또는 1이어야 합니다. (현재: $TFX_NO_CLAUDE_NATIVE)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_CODEX_PLAN" in
+  pro|plus|free) ;;
+  *)
+    echo "ERROR: TFX_CODEX_PLAN 값은 pro, plus, free 중 하나여야 합니다. (현재: $TFX_CODEX_PLAN)" >&2
     exit 1
     ;;
 esac
@@ -614,6 +622,19 @@ apply_cli_mode() {
         fi
       fi ;;
   esac
+}
+
+# ── Codex 요금제 가드 (fast 프로필은 Pro 전용) ──
+apply_plan_guard() {
+  [[ "$CLI_TYPE" != "codex" ]] && return
+  [[ "$TFX_CODEX_PLAN" == "pro" ]] && return
+
+  if [[ "$CLI_EFFORT" == "fast" ]]; then
+    local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+    CLI_ARGS="exec ${codex_base}"
+    CLI_EFFORT="high"
+    echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: --profile fast → high로 다운그레이드 (Pro 전용)" >&2
+  fi
 }
 
 # ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
@@ -1048,6 +1069,7 @@ main() {
   route_agent "$AGENT_TYPE"
   apply_cli_mode
   apply_no_claude_native_mode
+  apply_plan_guard
   apply_verifier_override
 
   # CLI 경로 해석
