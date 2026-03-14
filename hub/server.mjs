@@ -230,8 +230,9 @@ function servePublicFile(res, path) {
 
   mkdirSync(PUBLIC_DIR, { recursive: true });
   if (!existsSync(filePath)) {
+    console.warn(`[tfx-hub] 정적 파일 없음: ${filePath}`);
     res.writeHead(404);
-    res.end('Not Found');
+    res.end('Not Found (static file missing)');
     return true;
   }
 
@@ -746,6 +747,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
       }));
 
       console.log(`[tfx-hub] MCP 서버 시작: ${info.url} / pipe ${pipe.path} / assign-callback ${assignCallbacks.path} (PID ${process.pid})`);
+      console.log(`[tfx-hub] PUBLIC_DIR: ${PUBLIC_DIR} (exists: ${existsSync(PUBLIC_DIR)}, dashboard: ${existsSync(resolve(PUBLIC_DIR, 'dashboard.html'))})`);
 
       const stopFn = async () => {
         router.stopSweeper();

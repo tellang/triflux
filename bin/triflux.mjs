@@ -2392,18 +2392,20 @@ async function main() {
     case "tray": {
       const trayUrl = new URL("../hub/tray.mjs", import.meta.url);
       const trayPath = fileURLToPath(trayUrl);
-      if (cmdArgs.includes("--detach")) {
-        const child = spawn(process.execPath, [trayPath], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-        });
-        child.unref();
-        console.log(`\n  ${GREEN_BRIGHT}✓${RESET} tray 시작됨 (PID ${child.pid})\n`);
+      if (cmdArgs.includes("--attach")) {
+        // --attach: 포그라운드 모드 (디버깅용)
+        const { startTray } = await import(trayUrl.href);
+        await startTray();
         return;
       }
-      const { startTray } = await import(trayUrl.href);
-      await startTray();
+      // 기본: detach 모드 (프리징 방지)
+      const child = spawn(process.execPath, [trayPath], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+      console.log(`\n  ${GREEN_BRIGHT}✓${RESET} tray 시작됨 (PID ${child.pid})\n`);
       return;
     }
     case "multi": {

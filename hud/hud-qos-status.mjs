@@ -19,7 +19,7 @@ const RED = "\x1b[31m";
 const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
-const CLAUDE_ORANGE = "\x1b[38;5;173m"; // #D87656 (Claude 테라코타)
+const CLAUDE_ORANGE = "\x1b[38;2;232;112;64m"; // #E87040 (Claude 공식 오렌지)
 const CODEX_WHITE = "\x1b[97m"; // bright white (SGR 37은 Windows Terminal에서 연회색 매핑)
 const GEMINI_BLUE = "\x1b[38;5;39m";
 
