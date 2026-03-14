@@ -1,7 +1,7 @@
 // hub/server.mjs — HTTP MCP + REST bridge + Named Pipe 서버 진입점
 import { createServer as createHttpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -17,12 +17,31 @@ import { createPipeServer } from './pipe.mjs';
 import { createAssignCallbackServer } from './assign-callbacks.mjs';
 import { createTools } from './tools.mjs';
 import { ensurePipelineStateDbPath } from './pipeline/state.mjs';
+import { DelegatorService } from './delegator/index.mjs';
+import { createDelegatorMcpWorker } from './workers/delegator-mcp.mjs';
 
 const MAX_BODY_SIZE = 1024 * 1024;
 const PUBLIC_PATHS = new Set(['/', '/status', '/health', '/healthz']);
 const LOOPBACK_REMOTE_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const ALLOWED_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const PUBLIC_DIR = resolve(join(PROJECT_ROOT, 'hub', 'public'));
+const CACHE_DIR = join(homedir(), '.claude', 'cache');
+const BATCH_EVENTS_PATH = join(CACHE_DIR, 'batch-events.jsonl');
+const SV_ACCUMULATOR_PATH = join(CACHE_DIR, 'sv-accumulator.json');
+const CODEX_RATE_LIMITS_CACHE_PATH = join(CACHE_DIR, 'codex-rate-limits-cache.json');
+const GEMINI_QUOTA_CACHE_PATH = join(CACHE_DIR, 'gemini-quota-cache.json');
+const CLAUDE_USAGE_CACHE_PATH = join(CACHE_DIR, 'claude-usage-cache.json');
+const AIMD_WINDOW_MS = 30 * 60 * 1000;
+const AIMD_INITIAL_BATCH_SIZE = 3;
+const AIMD_MIN_BATCH_SIZE = 1;
+const AIMD_MAX_BATCH_SIZE = 10;
+const STATIC_CONTENT_TYPES = Object.freeze({
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.png': 'image/png',
+});
 
 function isInitializeRequest(body) {
   if (body?.method === 'initialize') return true;
@@ -46,6 +65,13 @@ async function parseBody(req) {
 const PID_DIR = join(homedir(), '.claude', 'cache', 'tfx-hub');
 const PID_FILE = join(PID_DIR, 'hub.pid');
 const TOKEN_FILE = join(homedir(), '.claude', '.tfx-hub-token');
+
+function isPublicPath(path) {
+  return PUBLIC_PATHS.has(path)
+    || path === '/dashboard'
+    || path === '/api/qos-stats'
+    || path.startsWith('/public/');
+}
 
 function isAllowedOrigin(origin) {
   return origin && ALLOWED_ORIGIN_RE.test(origin);
@@ -93,7 +119,7 @@ function isAuthorizedRequest(req, path, hubToken) {
   if (!hubToken) {
     return isLoopbackRemoteAddress(req.socket.remoteAddress);
   }
-  if (PUBLIC_PATHS.has(path)) return true;
+  if (isPublicPath(path)) return true;
   return extractBearerToken(req) === hubToken;
 }
 
@@ -113,6 +139,115 @@ function resolvePipelineStatusCode(result) {
   return 400;
 }
 
+function safeReadJsonFile(filePath) {
+  try {
+    if (!existsSync(filePath)) return null;
+    return JSON.parse(readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function readRecentAimdEvents(now = Date.now()) {
+  try {
+    if (!existsSync(BATCH_EVENTS_PATH)) return [];
+    const cutoff = now - AIMD_WINDOW_MS;
+    return readFileSync(BATCH_EVENTS_PATH, 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter((event) => {
+        const timestamp = Number(event?.ts ?? event?.timestamp ?? 0);
+        return event && Number.isFinite(timestamp) && timestamp >= cutoff;
+      });
+  } catch {
+    return [];
+  }
+}
+
+function calculateAimdBatchSize(events) {
+  let batchSize = AIMD_INITIAL_BATCH_SIZE;
+
+  for (const event of events) {
+    const result = event?.result;
+    if (result === 'success' || result === 'success_with_warnings') {
+      batchSize = Math.min(AIMD_MAX_BATCH_SIZE, batchSize + 1);
+    } else if (result === 'failed' || result === 'timeout') {
+      batchSize = Math.max(AIMD_MIN_BATCH_SIZE, batchSize * 0.5);
+    }
+  }
+
+  return batchSize;
+}
+
+function getQosStatsPayload() {
+  const events = readRecentAimdEvents();
+  return {
+    aimd: {
+      batchSize: calculateAimdBatchSize(events),
+      events,
+    },
+    accumulator: safeReadJsonFile(SV_ACCUMULATOR_PATH),
+    codex: safeReadJsonFile(CODEX_RATE_LIMITS_CACHE_PATH),
+    gemini: safeReadJsonFile(GEMINI_QUOTA_CACHE_PATH),
+    claude: safeReadJsonFile(CLAUDE_USAGE_CACHE_PATH),
+  };
+}
+
+function resolvePublicFilePath(path) {
+  let relativePath = null;
+  if (path === '/dashboard') {
+    relativePath = 'dashboard.html';
+  } else if (path.startsWith('/public/')) {
+    relativePath = path.slice('/public/'.length);
+  }
+
+  if (!relativePath) return null;
+
+  try {
+    relativePath = decodeURIComponent(relativePath).replace(/^[/\\]+/, '');
+  } catch {
+    return null;
+  }
+
+  const filePath = resolve(PUBLIC_DIR, relativePath);
+  const publicPrefix = `${PUBLIC_DIR}${sep}`;
+  if (filePath !== PUBLIC_DIR && !filePath.startsWith(publicPrefix)) {
+    return null;
+  }
+  return filePath;
+}
+
+function servePublicFile(res, path) {
+  const filePath = resolvePublicFilePath(path);
+  if (!filePath) return false;
+
+  mkdirSync(PUBLIC_DIR, { recursive: true });
+  if (!existsSync(filePath)) {
+    res.writeHead(404);
+    res.end('Not Found');
+    return true;
+  }
+
+  try {
+    const body = readFileSync(filePath);
+    res.writeHead(200, {
+      'Content-Type': STATIC_CONTENT_TYPES[extname(filePath).toLowerCase()] || 'application/octet-stream',
+    });
+    res.end(body);
+  } catch {
+    res.writeHead(404);
+    res.end('Not Found');
+  }
+  return true;
+}
+
 /**
  * tfx-hub 시작
  * @param {object} opts
@@ -126,6 +261,8 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     dbPath = ensurePipelineStateDbPath(PROJECT_ROOT);
   }
 
+  mkdirSync(PUBLIC_DIR, { recursive: true });
+
   const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;
   if (HUB_TOKEN) {
     mkdirSync(join(homedir(), '.claude'), { recursive: true });
@@ -136,7 +273,13 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
 
   const store = createStore(dbPath);
   const router = createRouter(store);
-  const pipe = createPipeServer({ router, store, sessionId });
+
+  // Delegator MCP resident service 초기화
+  const delegatorWorker = createDelegatorMcpWorker({ cwd: PROJECT_ROOT });
+  await delegatorWorker.start();
+  const delegatorService = new DelegatorService({ worker: delegatorWorker });
+
+  const pipe = createPipeServer({ router, store, sessionId, delegatorService });
   const assignCallbacks = createAssignCallbackServer({ store, sessionId });
   const hitl = createHitlManager(store, router);
   const tools = createTools(store, router, hitl, pipe);
@@ -219,6 +362,10 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
       const status = router.getStatus('hub').data;
       const healthy = status?.hub?.state === 'healthy';
       return writeJson(res, healthy ? 200 : 503, { ok: healthy });
+    }
+
+    if (path === '/api/qos-stats' && req.method === 'GET') {
+      return writeJson(res, 200, getQosStatsPayload());
     }
 
     if (path.startsWith('/bridge')) {
@@ -421,6 +568,22 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             const result = await pipe.executeQuery('pipeline_list', body);
             return writeJson(res, resolvePipelineStatusCode(result), result);
           }
+
+          // ── Delegator 엔드포인트 ──
+          if (path === '/bridge/delegator/delegate' && req.method === 'POST') {
+            const result = await pipe.executeCommand('delegator_delegate', body);
+            return writeJson(res, result.ok ? 200 : 400, result);
+          }
+
+          if (path === '/bridge/delegator/reply' && req.method === 'POST') {
+            const result = await pipe.executeCommand('delegator_reply', body);
+            return writeJson(res, result.ok ? 200 : 400, result);
+          }
+
+          if (path === '/bridge/delegator/status' && req.method === 'POST') {
+            const result = await pipe.executeQuery('delegator_status', body);
+            return writeJson(res, result.ok ? 200 : 400, result);
+          }
         }
 
         if (path === '/bridge/context' && req.method === 'POST') {
@@ -454,6 +617,10 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         }
         return;
       }
+    }
+
+    if (req.method === 'GET' && servePublicFile(res, path)) {
+      return;
     }
 
     if (path !== '/mcp') {
@@ -590,6 +757,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         transports.clear();
         await pipe.stop();
         await assignCallbacks.stop();
+        await delegatorWorker.stop().catch(() => {});
         store.close();
         try { unlinkSync(PID_FILE); } catch {}
         try { unlinkSync(TOKEN_FILE); } catch {}
@@ -604,6 +772,8 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         hitl,
         pipe,
         assignCallbacks,
+        delegatorService,
+        delegatorWorker,
         stop: stopFn,
       });
     });
