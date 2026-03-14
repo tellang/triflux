@@ -3,7 +3,7 @@
 import _SysTrayModule from "systray2";
 const SysTray = _SysTrayModule.default || _SysTrayModule;
 import { exec } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -164,15 +164,32 @@ function buildUsageTitle(snapshot) {
   return `C: ${formatMenuPercent(snapshot.claude)} | X: ${formatMenuPercent(snapshot.codex)} | G: ${formatMenuPercent(snapshot.gemini)}`;
 }
 
+function findChromePath() {
+  const candidates = [
+    join(process.env.ProgramFiles || "", "Google", "Chrome", "Application", "chrome.exe"),
+    join(process.env["ProgramFiles(x86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+    join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+  ];
+  for (const p of candidates) {
+    try { if (existsSync(p)) return p; } catch {}
+  }
+  return null;
+}
+
 function openDashboard() {
   const url = getDashboardUrl();
   const shell = process.env.ComSpec || "cmd.exe";
-  // msedge --app: 주소바/탭 없는 앱 윈도우로 열기
-  exec(`start "" "msedge" "--app=${url}"`, { shell, windowsHide: true }, (err) => {
-    if (err) {
-      exec(`start "" "${url}"`, { shell, windowsHide: true }, () => {});
-    }
-  });
+  const chrome = findChromePath();
+  if (chrome) {
+    // Chrome --app: 주소바/탭 없는 앱 윈도우로 열기
+    exec(`start "" "${chrome}" "--app=${url}"`, { shell, windowsHide: true }, (err) => {
+      if (err) {
+        exec(`start "" "${url}"`, { shell, windowsHide: true }, () => {});
+      }
+    });
+  } else {
+    exec(`start "" "${url}"`, { shell, windowsHide: true }, () => {});
+  }
 }
 
 const openDashboardItem = {
