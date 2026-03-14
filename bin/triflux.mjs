@@ -7,7 +7,9 @@ import { execSync, execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { setTimeout as delay } from "node:timers/promises";
 import { detectMultiplexer, getSessionAttachedCount, killSession, listSessions, tmuxExec } from "../hub/team/session.mjs";
+import { forceCleanupTeam } from "../hub/team/nativeProxy.mjs";
 import { cleanupStaleOmcTeams, inspectStaleOmcTeams } from "../hub/team/staleState.mjs";
+import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -842,28 +844,43 @@ async function cmdDoctor(options = {}) {
     maxAgeMs: STALE_TEAM_MAX_AGE_SEC * 1000,
     liveSessionNames: teamSessionReport.sessions.map((session) => session.sessionName),
   });
-  if (!omcTeamReport.stateRoot) {
-    info(".omc/state 없음 — 검사 건너뜀");
+  if (!omcTeamReport.stateRoot && !omcTeamReport.teamsRoot) {
+    info(".omc/state 및 ~/.claude/teams 없음 — 검사 건너뜀");
   } else if (omcTeamReport.entries.length === 0) {
-    ok(`stale team 없음 ${DIM}(${omcTeamReport.stateRoot})${RESET}`);
+    const roots = [omcTeamReport.stateRoot, omcTeamReport.teamsRoot].filter(Boolean).join(", ");
+    ok(`stale team 없음 ${DIM}(${roots})${RESET}`);
   } else {
     warn(`${omcTeamReport.entries.length}개 stale team 발견`);
 
     for (const entry of omcTeamReport.entries) {
       const ageLabel = formatElapsedAge(entry.ageSec);
-      const scopeLabel = entry.scope === "root" ? "root-state" : entry.sessionId;
+      const scopeLabel = entry.scope === "root"
+        ? "root-state"
+        : entry.scope === "claude_team"
+          ? `claude-team:${entry.teamName || entry.sessionId}`
+          : entry.sessionId;
       warn(`${scopeLabel}: stale team (경과=${ageLabel}, 프로세스 없음)`);
       if (entry.teamName) info(`팀: ${entry.teamName}`);
-      info(`파일: ${entry.stateFile}`);
+      info(`파일: ${entry.stateFile || entry.cleanupPath}`);
     }
 
     if (fix) {
-      const cleanupResult = cleanupStaleOmcTeams(omcTeamReport.entries);
+      const cleanupResult = await cleanupStaleOmcTeams(omcTeamReport.entries);
       for (const result of cleanupResult.results) {
         if (result.ok) {
-          ok(`stale team 정리: ${result.entry.scope === "root" ? "root-state" : result.entry.sessionId}`);
+          const label = result.entry.scope === "root"
+            ? "root-state"
+            : result.entry.scope === "claude_team"
+              ? (result.entry.teamName || result.entry.sessionId)
+              : result.entry.sessionId;
+          ok(`stale team 정리: ${label}`);
         } else {
-          fail(`stale team 정리 실패: ${result.entry.scope === "root" ? "root-state" : result.entry.sessionId} — ${result.error.message}`);
+          const label = result.entry.scope === "root"
+            ? "root-state"
+            : result.entry.scope === "claude_team"
+              ? (result.entry.teamName || result.entry.sessionId)
+              : result.entry.sessionId;
+          fail(`stale team 정리 실패: ${label} — ${result.error.message}`);
         }
       }
       issues += cleanupResult.failed;
@@ -895,6 +912,7 @@ async function cmdDoctor(options = {}) {
           const configPath = join(teamPath, "config.json");
           let teamConfig = null;
           let configMtimeMs = null;
+          let missingConfig = false;
 
           // config.json 읽기 — createdAt 또는 mtime으로 나이 판정
           try {
@@ -902,7 +920,8 @@ async function cmdDoctor(options = {}) {
             configMtimeMs = configStat.mtimeMs;
             teamConfig = JSON.parse(readFileSync(configPath, "utf8"));
           } catch {
-            // config.json 없으면 디렉토리 mtime 사용
+            missingConfig = true;
+            // config.json 없으면 표시용 경과 시간만 디렉토리 기준으로 계산
             try { configMtimeMs = statSync(teamPath).mtimeMs; } catch {}
           }
 
@@ -955,7 +974,7 @@ async function cmdDoctor(options = {}) {
             }
           }
 
-          const stale = aged && !hasActiveMember;
+          const stale = missingConfig || (aged && !hasActiveMember);
           const teamEntry = {
             name: d,
             teamName: teamConfig?.name || d,
@@ -964,6 +983,7 @@ async function cmdDoctor(options = {}) {
             ageSec,
             stale,
             hasActiveMember,
+            missingConfig,
           };
 
           if (stale) {
@@ -987,7 +1007,8 @@ async function cmdDoctor(options = {}) {
           warn(`${staleTeams.length}개 stale 팀 발견`);
           for (const t of staleTeams) {
             const ageLabel = formatElapsedAge(t.ageSec);
-            warn(`${t.name}: stale (경과=${ageLabel}, 멤버=${t.memberCount}명, 활성 프로세스 없음)`);
+            const reasonLabel = t.missingConfig ? "config.json 없음" : "활성 프로세스 없음";
+            warn(`${t.name}: stale (경과=${ageLabel}, 멤버=${t.memberCount}명, ${reasonLabel})`);
             if (t.description) info(`설명: ${t.description}`);
           }
 
@@ -995,19 +1016,11 @@ async function cmdDoctor(options = {}) {
             let cleaned = 0;
             for (const t of staleTeams) {
               try {
-                rmSync(join(teamsDir, t.name), { recursive: true, force: true });
+                await forceCleanupTeam(t.name);
                 cleaned++;
                 ok(`stale 팀 정리: ${t.name}`);
               } catch (e) {
                 fail(`팀 정리 실패: ${t.name} — ${e.message}`);
-              }
-              // 연관 tasks 디렉토리도 정리
-              const taskDir = join(tasksDir, t.name);
-              if (existsSync(taskDir)) {
-                try {
-                  rmSync(taskDir, { recursive: true, force: true });
-                  ok(`연관 tasks 정리: ${t.name}`);
-                } catch {}
               }
             }
             info(`${cleaned}/${staleTeams.length}개 stale 팀 정리 완료`);
@@ -1603,7 +1616,7 @@ async function cmdHub() {
         console.log(`\n  ${GREEN_BRIGHT}✓${RESET} ${BOLD}tfx-hub 시작${RESET}`);
         console.log(`    URL:  ${AMBER}${hubInfo.url}${RESET}`);
         console.log(`    PID:  ${hubInfo.pid}`);
-        console.log(`    DB:   ${DIM}${HUB_PID_DIR}/state.db${RESET}`);
+        console.log(`    DB:   ${DIM}${getPipelineStateDbPath(PKG_ROOT)}${RESET}`);
         console.log("");
         autoRegisterMcp(hubInfo.url);
         console.log("");

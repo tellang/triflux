@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   renameSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -221,6 +222,49 @@ export async function resolveTeamPaths(teamName) {
     lead_session_id: leadSessionId,
     config,
   };
+}
+
+export async function forceCleanupTeam(teamName) {
+  validateTeamName(teamName);
+
+  let paths;
+  try {
+    paths = await resolveTeamPaths(teamName);
+  } catch {
+    paths = {
+      team_dir: join(TEAMS_ROOT, teamName),
+      config_path: join(TEAMS_ROOT, teamName, 'config.json'),
+      tasks_dir: join(TASKS_ROOT, teamName),
+      lead_session_id: null,
+      config: null,
+    };
+  }
+
+  try {
+    const config = paths.config || await readJsonSafe(paths.config_path);
+    if (config && Array.isArray(config.members)) {
+      atomicWriteJson(paths.config_path, {
+        ...config,
+        members: config.members.map((member) => ({ ...member, isActive: false })),
+      });
+    }
+  } catch {}
+
+  const cleanupTargets = new Set([
+    paths.team_dir,
+    join(TASKS_ROOT, teamName),
+    paths.tasks_dir,
+  ]);
+  if (paths.lead_session_id) {
+    cleanupTargets.add(join(TASKS_ROOT, paths.lead_session_id));
+  }
+
+  for (const targetPath of cleanupTargets) {
+    if (!targetPath) continue;
+    try {
+      rmSync(targetPath, { recursive: true, force: true });
+    } catch {}
+  }
 }
 
 async function collectTaskFiles(tasksDir) {

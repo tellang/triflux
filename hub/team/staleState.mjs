@@ -4,9 +4,13 @@
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
+
+import { forceCleanupTeam } from "./nativeProxy.mjs";
 
 export const TEAM_STATE_FILE_NAME = "team-state.json";
 export const STALE_TEAM_MAX_AGE_MS = 60 * 60 * 1000;
+const CLAUDE_TEAMS_ROOT = join(homedir(), ".claude", "teams");
 
 function safeStat(path) {
   try {
@@ -50,6 +54,10 @@ function findSessionNames(state) {
 
   pushName(state?.sessionName);
   pushName(state?.session_name);
+  pushName(state?.sessionId);
+  pushName(state?.session_id);
+  pushName(state?.leadSessionId);
+  pushName(state?.lead_session_id);
   pushName(state?.native?.teamName);
   pushName(state?.native?.team_name);
 
@@ -67,11 +75,20 @@ function findProcessTokens(state, sessionId) {
   pushToken(sessionId);
   pushToken(state?.session_id);
   pushToken(state?.sessionId);
+  pushToken(state?.leadSessionId);
+  pushToken(state?.lead_session_id);
   pushToken(state?.teamName);
   pushToken(state?.team_name);
   pushToken(state?.name);
   pushToken(state?.native?.teamName);
   pushToken(state?.native?.team_name);
+  if (Array.isArray(state?.members)) {
+    for (const member of state.members) {
+      pushToken(member?.agentId);
+      pushToken(String(member?.agentId || "").split("@")[0]);
+      pushToken(member?.name);
+    }
+  }
 
   return Array.from(tokenSet);
 }
@@ -205,6 +222,31 @@ function collectTeamStateTargets(stateRoot) {
   return targets;
 }
 
+function collectClaudeTeamTargets(teamsRoot) {
+  const teamsStat = safeStat(teamsRoot);
+  if (!teamsStat?.isDirectory()) {
+    return [];
+  }
+
+  const targets = [];
+  for (const entry of readdirSync(teamsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+
+    const teamDir = join(teamsRoot, entry.name);
+    targets.push({
+      scope: "claude_team",
+      sessionId: entry.name,
+      stateFile: join(teamDir, "config.json"),
+      cleanupPath: teamDir,
+      cleanupType: "claude_team",
+      teamDir,
+      teamName: entry.name,
+    });
+  }
+
+  return targets;
+}
+
 export function findNearestOmcStateDir(startDir = process.cwd()) {
   let currentDir = resolve(startDir);
 
@@ -225,37 +267,62 @@ export function findNearestOmcStateDir(startDir = process.cwd()) {
 
 export function inspectStaleOmcTeams(options = {}) {
   const stateRoot = options.stateRoot || findNearestOmcStateDir(options.startDir || process.cwd());
-  if (!stateRoot) {
-    return { stateRoot: null, entries: [] };
-  }
+  const requestedTeamsRoot = options.teamsRoot || CLAUDE_TEAMS_ROOT;
+  const teamsRoot = safeStat(requestedTeamsRoot)?.isDirectory() ? requestedTeamsRoot : null;
 
   const liveSessionNames = new Set(options.liveSessionNames || []);
   const processEntries = normalizeProcessEntries(options.processEntries || readProcessEntries());
   const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
   const maxAgeMs = Number.isFinite(options.maxAgeMs) ? options.maxAgeMs : STALE_TEAM_MAX_AGE_MS;
-  const targets = collectTeamStateTargets(stateRoot);
+  const targets = [
+    ...(stateRoot ? collectTeamStateTargets(stateRoot) : []),
+    ...collectClaudeTeamTargets(teamsRoot),
+  ];
+  if (!stateRoot && targets.length === 0) {
+    return { stateRoot: null, teamsRoot, entries: [] };
+  }
   const entries = [];
 
   for (const target of targets) {
     let state = null;
-    try {
-      state = JSON.parse(readFileSync(target.stateFile, "utf8"));
-    } catch {
-      continue;
+    if (target.scope === "claude_team") {
+      try {
+        state = JSON.parse(readFileSync(target.stateFile, "utf8"));
+      } catch {}
+    } else {
+      try {
+        state = JSON.parse(readFileSync(target.stateFile, "utf8"));
+      } catch {
+        continue;
+      }
     }
 
     const fileStat = safeStat(target.stateFile);
+    const teamDirStat = target.teamDir ? safeStat(target.teamDir) : null;
+    const createdAtMs = Number.isFinite(state?.createdAt) ? state.createdAt : null;
     const startedAtMs = parseStartedAtMs(state?.started_at)
       ?? parseStartedAtMs(state?.startedAt)
+      ?? createdAtMs
       ?? fileStat?.mtimeMs
+      ?? teamDirStat?.mtimeMs
       ?? null;
     const ageMs = startedAtMs == null ? null : Math.max(0, nowMs - startedAtMs);
-    const liveness = resolveLiveness(state, target.sessionId, liveSessionNames, processEntries);
+    const teamName = state?.teamName || state?.team_name || state?.native?.teamName || state?.name || target.teamName || null;
+    const livenessState = target.scope === "claude_team"
+      ? {
+          ...(state || {}),
+          name: teamName,
+          teamName,
+          sessionName: state?.leadSessionId || state?.lead_session_id || state?.sessionName || target.sessionId,
+          sessionId: state?.leadSessionId || state?.lead_session_id || state?.sessionId || target.sessionId,
+        }
+      : state;
+    const liveness = resolveLiveness(livenessState, target.sessionId, liveSessionNames, processEntries);
     const stale = ageMs != null && ageMs >= maxAgeMs && !liveness.active;
 
     entries.push({
       ...target,
-      teamName: state?.teamName || state?.team_name || state?.native?.teamName || state?.name || null,
+      teamName,
       state,
       startedAtMs,
       ageMs,
@@ -268,20 +335,23 @@ export function inspectStaleOmcTeams(options = {}) {
 
   return {
     stateRoot,
+    teamsRoot,
     entries: entries
       .filter((entry) => entry.stale)
       .sort((left, right) => (right.ageMs || 0) - (left.ageMs || 0)),
   };
 }
 
-export function cleanupStaleOmcTeams(entries = []) {
+export async function cleanupStaleOmcTeams(entries = []) {
   let cleaned = 0;
   let failed = 0;
   const results = [];
 
   for (const entry of entries) {
     try {
-      if (entry.cleanupType === "dir") {
+      if (entry.cleanupType === "claude_team") {
+        await forceCleanupTeam(entry.teamName || entry.sessionId);
+      } else if (entry.cleanupType === "dir") {
         rmSync(entry.cleanupPath, { recursive: true, force: true });
       } else {
         unlinkSync(entry.cleanupPath);

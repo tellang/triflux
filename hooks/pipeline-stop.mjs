@@ -6,9 +6,12 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
-const HUB_DB_PATH = join(homedir(), '.claude', 'cache', 'tfx-hub', 'state.db');
+import { getPipelineStateDbPath } from '../hub/pipeline/state.mjs';
+
+const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const HUB_DB_PATH = getPipelineStateDbPath(PROJECT_ROOT);
 const TERMINAL = new Set(['complete', 'failed']);
 
 async function getPipelineStopPrompt() {
