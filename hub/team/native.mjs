@@ -15,6 +15,7 @@ export const SLIM_WRAPPER_SUBAGENT_TYPE = "slim-wrapper";
 const ROUTE_LOG_RE = /\[tfx-route\]/i;
 const ROUTE_COMMAND_RE = /(?:^|[\s"'`])(?:bash\s+)?(?:[^"'`\s]*\/)?tfx-route\.sh\b/i;
 const ROUTE_PROMPT_RE = /tfx-route\.sh/i;
+const DIRECT_TOOL_BYPASS_RE = /\b(?:Read|Edit|Write)\s*\(/;
 
 function inferWorkerIndex(agentName = "") {
   const match = /(\d+)(?!.*\d)/.exec(agentName);
@@ -64,6 +65,7 @@ export function buildSlimWrapperAgent(cli, opts = {}) {
  *   promptMentionsRoute: boolean,
  *   sawRouteCommand: boolean,
  *   sawRouteLog: boolean,
+ *   sawDirectToolBypass: boolean,
  *   usedRoute: boolean,
  *   abnormal: boolean,
  *   reason: string|null,
@@ -77,17 +79,25 @@ export function verifySlimWrapperRouteExecution(input = {}) {
   const promptMentionsRoute = ROUTE_PROMPT_RE.test(promptText);
   const sawRouteCommand = ROUTE_COMMAND_RE.test(combinedLogs);
   const sawRouteLog = ROUTE_LOG_RE.test(combinedLogs);
+  const sawDirectToolBypass = DIRECT_TOOL_BYPASS_RE.test(stdoutText);
   const usedRoute = sawRouteCommand || sawRouteLog;
   const expectedRouteInvocation = promptMentionsRoute;
+  const abnormal = expectedRouteInvocation && (sawDirectToolBypass || !usedRoute);
+  const reason = !abnormal
+    ? null
+    : sawDirectToolBypass
+      ? "direct_tool_bypass_detected"
+      : "missing_tfx_route_evidence";
 
   return {
     expectedRouteInvocation,
     promptMentionsRoute,
     sawRouteCommand,
     sawRouteLog,
+    sawDirectToolBypass,
     usedRoute,
-    abnormal: expectedRouteInvocation && !usedRoute,
-    reason: expectedRouteInvocation && !usedRoute ? "missing_tfx_route_evidence" : null,
+    abnormal,
+    reason,
   };
 }
 
@@ -153,7 +163,7 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
 2. Bash 종료 후 TaskUpdate + SendMessage로 Claude Code 태스크 동기화
 3. 종료${pipelineHint}
 
-[HARD CONSTRAINT] 허용 도구: Bash, TaskUpdate, SendMessage만 사용한다.
+[HARD CONSTRAINT] 허용 도구: Bash, TaskUpdate, TaskGet, TaskList, SendMessage만 사용한다.
 Read, Edit, Write, Grep, Glob, Agent, WebSearch, WebFetch 등 다른 모든 도구 사용을 금지한다.
 코드를 직접 읽거나 수정하면 안 된다. 반드시 아래 Bash 명령(tfx-route.sh)을 통해 Codex/Gemini에 위임하라.
 이 규칙을 위반하면 작업 실패로 간주한다.
