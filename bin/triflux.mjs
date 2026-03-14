@@ -249,7 +249,7 @@ function isDevUpdateRequested(argv = process.argv) {
 function checkShellAvailable(shell) {
   const cmds = { bash: "bash --version", cmd: "cmd /c echo ok", pwsh: "pwsh -NoProfile -c echo ok" };
   try {
-    execSync(cmds[shell], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] });
+    execSync(cmds[shell], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
     return true;
   } catch { return false; }
 }
@@ -1529,6 +1529,7 @@ function cmdUpdate() {
         encoding: "utf8",
         timeout: 10000,
         stdio: ["pipe", "pipe", "ignore"],
+        windowsHide: true,
       });
       if (npmList.includes("triflux")) installMode = "npm-global";
     } catch {}
@@ -1560,6 +1561,7 @@ function cmdUpdate() {
           encoding: "utf8",
           timeout: 30000,
           cwd: gitDir,
+          windowsHide: true,
         }).trim();
         ok(`git pull — ${result}`);
         updated = true;
@@ -1577,6 +1579,7 @@ function cmdUpdate() {
             encoding: "utf8",
             timeout: 90000,
             stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
           }).trim().split(/\r?\n/)[0];
         } catch (retryErr) {
           // Windows: 자기 자신의 파일 잠금으로 첫 시도 실패 가능 → 1회 재시도
@@ -1585,6 +1588,7 @@ function cmdUpdate() {
             encoding: "utf8",
             timeout: 90000,
             stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
           }).trim().split(/\r?\n/)[0];
         }
         ok(`${npmCmd} — ${result || "완료"}`);
@@ -1598,6 +1602,7 @@ function cmdUpdate() {
           timeout: 60000,
           cwd: process.cwd(),
           stdio: ["pipe", "pipe", "ignore"],
+          windowsHide: true,
         }).trim().split(/\r?\n/)[0];
         ok(`${isDev ? "npm install triflux@dev" : "npm update triflux"} — ${result || "완료"}`);
         updated = true;
@@ -1608,6 +1613,7 @@ function cmdUpdate() {
           encoding: "utf8",
           timeout: 30000,
           cwd: PKG_ROOT,
+          windowsHide: true,
         }).trim();
         ok(`git pull — ${result}`);
         updated = true;
@@ -1799,6 +1805,7 @@ function checkForUpdate() {
       encoding: "utf8",
       timeout: 5000,
       stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
     }).trim();
 
     if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
@@ -2007,11 +2014,11 @@ function autoRegisterMcp(mcpUrl) {
   if (which("codex")) {
     try {
       // 이미 등록됐는지 확인
-      const list = execSync("codex mcp list 2>&1", { encoding: "utf8", timeout: 10000, stdio: ["pipe", "pipe", "pipe"] });
+      const list = execSync("codex mcp list 2>&1", { encoding: "utf8", timeout: 10000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
       if (list.includes("tfx-hub")) {
         ok("Codex: 이미 등록됨");
       } else {
-        execFileSync("codex", ["mcp", "add", "tfx-hub", "--url", mcpUrl], { timeout: 10000, stdio: "ignore" });
+        execFileSync("codex", ["mcp", "add", "tfx-hub", "--url", mcpUrl], { timeout: 10000, stdio: "ignore", windowsHide: true });
         ok("Codex: MCP 등록 완료");
       }
     } catch {

@@ -85,7 +85,7 @@ function getNotionMcpClis(useGuest) {
 function cliExists(name) {
   try {
     const cmd = process.platform === "win32" ? `where ${name} 2>nul` : `which ${name} 2>/dev/null`;
-    const result = execSync(cmd, { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] });
+    const result = execSync(cmd, { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
     return !!result.trim();
   } catch {
     return false;
@@ -205,6 +205,7 @@ function runWithCli(cliType, prompt, timeout, runMode = 'fg') {
       maxBuffer: 10 * 1024 * 1024,
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: process.cwd(),
+      windowsHide: true,
     });
   } catch (e) {
     exitCode = e.status || (e.killed ? 124 : 1);
