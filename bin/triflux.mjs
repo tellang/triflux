@@ -591,6 +591,56 @@ function getSetupSyncTargets() {
       dst: join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
       label: "tfx-batch-stats.mjs",
     },
+    {
+      src: join(PKG_ROOT, "scripts", "lib", "mcp-filter.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-filter.mjs"),
+      label: "lib/mcp-filter.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "lib", "mcp-server-catalog.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-server-catalog.mjs"),
+      label: "lib/mcp-server-catalog.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "lib", "keyword-rules.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "lib", "keyword-rules.mjs"),
+      label: "lib/keyword-rules.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "tfx-route-worker.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "tfx-route-worker.mjs"),
+      label: "tfx-route-worker.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "codex-mcp.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "codex-mcp.mjs"),
+      label: "hub/workers/codex-mcp.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "delegator-mcp.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "delegator-mcp.mjs"),
+      label: "hub/workers/delegator-mcp.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "interface.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "interface.mjs"),
+      label: "hub/workers/interface.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "gemini-worker.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "gemini-worker.mjs"),
+      label: "hub/workers/gemini-worker.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "claude-worker.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "claude-worker.mjs"),
+      label: "hub/workers/claude-worker.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "factory.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "factory.mjs"),
+      label: "hub/workers/factory.mjs",
+    },
   ];
 }
 
@@ -912,21 +962,9 @@ async function cmdDoctor(options = {}) {
     // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
     if (fix) {
     section("Auto Fix");
-    syncFile(
-      join(PKG_ROOT, "scripts", "tfx-route.sh"),
-      join(CLAUDE_DIR, "scripts", "tfx-route.sh"),
-      "tfx-route.sh"
-    );
-    syncFile(
-      join(PKG_ROOT, "hud", "hud-qos-status.mjs"),
-      join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
-      "hud-qos-status.mjs"
-    );
-    syncFile(
-      join(PKG_ROOT, "scripts", "notion-read.mjs"),
-      join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
-      "notion-read.mjs"
-    );
+    for (const target of getSetupSyncTargets()) {
+      syncFile(target.src, target.dst, target.label);
+    }
     // 스킬 동기화
     const fSkillsSrc = join(PKG_ROOT, "skills");
     const fSkillsDst = join(CLAUDE_DIR, "skills");

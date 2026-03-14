@@ -92,6 +92,31 @@ const SYNC_MAP = [
     dst: join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
     label: "hud-qos-status.mjs",
   },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "notion-read.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
+    label: "notion-read.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "tfx-batch-stats.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
+    label: "tfx-batch-stats.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "lib", "mcp-filter.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-filter.mjs"),
+    label: "lib/mcp-filter.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "lib", "mcp-server-catalog.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-server-catalog.mjs"),
+    label: "lib/mcp-server-catalog.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "lib", "keyword-rules.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "lib", "keyword-rules.mjs"),
+    label: "lib/keyword-rules.mjs",
+  },
 ];
 
 function getVersion(filePath) {
