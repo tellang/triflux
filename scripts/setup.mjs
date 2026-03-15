@@ -195,6 +195,9 @@ function ensureCodexProfiles() {
   }
 }
 
+export { replaceProfileSection, hasProfileSection };
+
+async function main() {
 let synced = 0;
 
 for (const { src, dst, label } of SYNC_MAP) {
@@ -575,3 +578,9 @@ ${D}https://github.com/tellang/triflux${R}
 }
 
 process.exit(0);
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main();
+}
+

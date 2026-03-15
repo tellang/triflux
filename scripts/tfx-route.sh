@@ -421,9 +421,10 @@ detect_quota_exceeded() {
   local stdout_file="$1"
   local stderr_file="$2"
   local -a patterns=(
-    "usage limit" "rate limit" "try again at" "purchase more credits"
+    "usage limit exceeded" "rate limit exceeded" "rate limit reached"
+    "try again at" "purchase more credits"
     "quota exceeded" "RESOURCE_EXHAUSTED" "rateLimitExceeded" "Too Many Requests"
-    "rate_limit_error" "overloaded_error"
+    "rate_limit_error" "overloaded_error" "insufficient_quota"
   )
   local pattern
   for pattern in "${patterns[@]}"; do
