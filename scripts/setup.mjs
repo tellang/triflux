@@ -19,14 +19,14 @@ const REQUIRED_CODEX_PROFILES = [
   {
     name: "high",
     lines: [
-      'model = "gpt-5.4"',
+      'model = "gpt-5.3-codex"',
       'model_reasoning_effort = "high"',
     ],
   },
   {
     name: "xhigh",
     lines: [
-      'model = "gpt-5.4"',
+      'model = "gpt-5.3-codex"',
       'model_reasoning_effort = "xhigh"',
     ],
   },
@@ -147,6 +147,16 @@ function hasProfileSection(tomlContent, profileName) {
   return new RegExp(section, "m").test(tomlContent);
 }
 
+function replaceProfileSection(tomlContent, profileName, lines) {
+  const header = `[profiles.${profileName}]`;
+  const sectionRe = new RegExp(
+    `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*\\n(?:(?!\\[)[^\\n]*\\n?)*`,
+    "m",
+  );
+  const replacement = `${header}\n${lines.join("\n")}\n`;
+  return tomlContent.replace(sectionRe, replacement);
+}
+
 function ensureCodexProfiles() {
   try {
     if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
@@ -156,22 +166,30 @@ function ensureCodexProfiles() {
       : "";
 
     let updated = original;
-    let added = 0;
+    let changed = 0;
 
     for (const profile of REQUIRED_CODEX_PROFILES) {
-      if (hasProfileSection(updated, profile.name)) continue;
+      const desired = `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
 
-      if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
-      if (updated.trim().length > 0) updated += "\n";
-      updated += `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
-      added++;
+      if (hasProfileSection(updated, profile.name)) {
+        // 기존 프로필이 있으면 강제 갱신
+        const before = updated;
+        updated = replaceProfileSection(updated, profile.name, profile.lines);
+        if (updated !== before) changed++;
+      } else {
+        // 없으면 추가
+        if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
+        if (updated.trim().length > 0) updated += "\n";
+        updated += desired;
+        changed++;
+      }
     }
 
-    if (added > 0) {
+    if (changed > 0) {
       writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
     }
 
-    return added;
+    return changed;
   } catch {
     return 0;
   }
