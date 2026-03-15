@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tfx-route.sh v2.3 — CLI 라우팅 래퍼 (triflux)
+# tfx-route.sh v2.4 — CLI 라우팅 래퍼 (triflux)
 #
 # v1.x: cli-route.sh (jq+python3+node 혼재, 동기 후처리 ~1s)
 # v2.0: tfx-route.sh 리네임
@@ -9,7 +9,7 @@
 #   - Gemini health check 지수 백오프 (30×1s → 5×exp)
 #   - 컨텍스트 파일 5번째 인자 지원
 #
-VERSION="2.3"
+VERSION="2.4"
 #
 # 사용법:
 #   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
@@ -417,6 +417,53 @@ RESULT_EOF
   fi
 }
 
+detect_quota_exceeded() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+  local -a patterns=(
+    "usage limit" "rate limit" "try again at" "purchase more credits"
+    "quota exceeded" "RESOURCE_EXHAUSTED" "rateLimitExceeded" "Too Many Requests"
+    "rate_limit_error" "overloaded_error"
+  )
+  local pattern
+  for pattern in "${patterns[@]}"; do
+    if grep -qi "$pattern" "$stdout_file" 2>/dev/null || grep -qi "$pattern" "$stderr_file" 2>/dev/null; then
+      echo "[tfx-quota] 감지: '$pattern' in $CLI_TYPE" >&2
+      return 0
+    fi
+  done
+  return 1
+}
+
+auto_reroute() {
+  local failed_cli="$1"
+  local target_cli=""
+  case "$failed_cli" in
+    codex) target_cli="gemini"; echo "[tfx-quota] Codex → Gemini 자동 전환" >&2 ;;
+    gemini) target_cli="codex"; echo "[tfx-quota] Gemini → Codex 자동 전환" >&2 ;;
+    *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
+  esac
+
+  # 대상 CLI 존재 확인 (P2: command not found 방지)
+  local target_bin
+  case "$target_cli" in
+    codex) target_bin="$CODEX_BIN" ;;
+    gemini) target_bin="$GEMINI_BIN" ;;
+  esac
+  if ! command -v "$target_bin" &>/dev/null; then
+    echo "[tfx-quota] $target_cli CLI 미설치 — 자동 전환 불가" >&2
+    return 1
+  fi
+
+  local quota_marker="$TFX_TMP/tfx-quota-${failed_cli}-$(date +%Y%m%d)"
+  echo "$(date +%s)" >> "$quota_marker"
+  ORIGINAL_AGENT="$AGENT_TYPE"
+  ORIGINAL_CLI_ARGS="$CLI_ARGS"
+  export TFX_REROUTED_FROM="$CLI_TYPE"
+  TFX_CLI_MODE="$target_cli" exec bash "${BASH_SOURCE[0]}" \
+    "$AGENT_TYPE" "$PROMPT" "$MCP_PROFILE" "$USER_TIMEOUT" "$CONTEXT_FILE"
+}
+
 capture_workspace_signature() {
   if ! command -v git &>/dev/null; then
     return 1
@@ -543,7 +590,7 @@ route_agent() {
 TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
-TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
+TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-exec}"
 # Codex 요금제 자동 감지 (preflight 캐시 → auth.json JWT)
 # 환경변수 명시 설정 시 우선, 미설정 시 캐시에서 읽기, 캐시도 없으면 pro
 if [[ -z "${TFX_CODEX_PLAN:-}" ]]; then
@@ -845,6 +892,44 @@ emit_claude_native_metadata() {
   echo "--- Claude Task($model) 에이전트로 위임하세요 ---"
 }
 
+# heartbeat_monitor PID [INTERVAL] [STALL_THRESHOLD]
+# - PID: 감시할 워커 프로세스 PID
+# - INTERVAL: heartbeat 출력 간격 (초, 기본 10)
+# - STALL_THRESHOLD: stall 경고 임계값 (초, 기본 60)
+# 환경변수: TFX_HEARTBEAT (0이면 비활성화), TFX_HEARTBEAT_INTERVAL, TFX_STALL_THRESHOLD
+heartbeat_monitor() {
+  [[ "${TFX_HEARTBEAT:-1}" -eq 0 ]] && return 0
+  local pid="$1"
+  local interval="${2:-${TFX_HEARTBEAT_INTERVAL:-10}}"
+  local stall_threshold="${3:-${TFX_STALL_THRESHOLD:-60}}"
+  local last_size=0 stall_count=0
+
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep "$interval"
+    local current_size=0
+    [[ -f "$STDOUT_LOG" ]] && current_size=$(wc -c < "$STDOUT_LOG" 2>/dev/null || echo 0)
+    # P3: stderr 활동도 포함하여 거짓 STALL 방지
+    local stderr_size=0
+    [[ -f "$STDERR_LOG" ]] && stderr_size=$(wc -c < "$STDERR_LOG" 2>/dev/null || echo 0)
+    current_size=$((current_size + stderr_size))
+    local elapsed=$(($(date +%s) - TIMESTAMP))
+
+    if [[ "$current_size" -gt "$last_size" ]]; then
+      stall_count=0
+      echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=active" >&2
+    else
+      stall_count=$((stall_count + interval))
+      if [[ "$stall_count" -ge "$stall_threshold" ]]; then
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=STALL stall=${stall_count}s" >&2
+      else
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=quiet stall=${stall_count}s" >&2
+      fi
+    fi
+    last_size=$current_size
+  done
+  echo "[tfx-heartbeat] pid=$pid terminated" >&2
+}
+
 resolve_worker_runner_script() {
   if [[ -n "${TFX_ROUTE_WORKER_RUNNER:-}" && -f "$TFX_ROUTE_WORKER_RUNNER" ]]; then
     printf '%s\n' "$TFX_ROUTE_WORKER_RUNNER"
@@ -864,6 +949,8 @@ run_stream_worker() {
   local prompt="$2"
   local use_tee_flag="$3"
   shift 3
+  local exit_code_local=0
+  local worker_pid hb_pid
 
   local runner_script
   if ! runner_script=$(resolve_worker_runner_script); then
@@ -886,10 +973,18 @@ run_stream_worker() {
   )
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    printf '%s' "$prompt" | timeout "$TIMEOUT_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG"
+    printf '%s' "$prompt" | timeout "$TIMEOUT_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    printf '%s' "$prompt" | timeout "$TIMEOUT_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG"
+    printf '%s' "$prompt" | timeout "$TIMEOUT_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
+  worker_pid=$!
+
+  heartbeat_monitor "$worker_pid" &
+  hb_pid=$!
+
+  wait "$worker_pid" || exit_code_local=$?
+  kill "$hb_pid" 2>/dev/null; wait "$hb_pid" 2>/dev/null
+  return "$exit_code_local"
 }
 
 run_legacy_gemini() {
@@ -939,6 +1034,7 @@ run_legacy_gemini() {
   done
 
   local exit_code_local=0
+  local hb_pid
   if [[ "$health_ok" == "false" ]]; then
     wait "$pid" 2>/dev/null
     echo "[tfx-route] Gemini crash 감지, 재시도 중..." >&2
@@ -950,7 +1046,10 @@ run_legacy_gemini() {
     pid=$!
   fi
 
+  heartbeat_monitor "$pid" &
+  hb_pid=$!
   wait "$pid" || exit_code_local=$?
+  kill "$hb_pid" 2>/dev/null; wait "$hb_pid" 2>/dev/null
   return "$exit_code_local"
 }
 
@@ -985,6 +1084,7 @@ run_codex_exec() {
   local prompt="$1"
   local use_tee_flag="$2"
   local exit_code_local=0
+  local worker_pid hb_pid
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
   if [[ ${#CODEX_CONFIG_FLAGS[@]} -gt 0 ]]; then
@@ -992,10 +1092,17 @@ run_codex_exec() {
   fi
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    timeout "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" || exit_code_local=$?
+    timeout "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    timeout "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" >"$STDOUT_LOG" 2>"$STDERR_LOG" || exit_code_local=$?
+    timeout "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
+  worker_pid=$!
+
+  heartbeat_monitor "$worker_pid" &
+  hb_pid=$!
+
+  wait "$worker_pid" || exit_code_local=$?
+  kill "$hb_pid" 2>/dev/null; wait "$hb_pid" 2>/dev/null
 
   if [[ ! -s "$STDOUT_LOG" && -s "$STDERR_LOG" ]]; then
     # stderr에서 마지막 "codex" 마커 이후의 텍스트를 stdout으로 복구
@@ -1029,6 +1136,7 @@ run_codex_mcp() {
   local use_tee_flag="$2"
   local mcp_script node_bin
   local exit_code_local=0
+  local worker_pid hb_pid
 
   if ! mcp_script=$(resolve_codex_mcp_script); then
     echo "[tfx-route] 경고: Codex MCP 래퍼를 찾지 못했습니다." >&2
@@ -1078,10 +1186,17 @@ run_codex_mcp() {
   esac
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    timeout "$TIMEOUT_SEC" "$node_bin" "${mcp_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" || exit_code_local=$?
+    timeout "$TIMEOUT_SEC" "$node_bin" "${mcp_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    timeout "$TIMEOUT_SEC" "$node_bin" "${mcp_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" || exit_code_local=$?
+    timeout "$TIMEOUT_SEC" "$node_bin" "${mcp_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
+  worker_pid=$!
+
+  heartbeat_monitor "$worker_pid" &
+  hb_pid=$!
+
+  wait "$worker_pid" || exit_code_local=$?
+  kill "$hb_pid" 2>/dev/null; wait "$hb_pid" 2>/dev/null
 
   # 모듈 로드 실패(의존성 누락) → MCP transport exit code로 변환하여 fallback 트리거
   if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -q 'ERR_MODULE_NOT_FOUND' "$STDERR_LOG" 2>/dev/null; then
@@ -1197,6 +1312,7 @@ FALLBACK_EOF
     echo "[tfx-route] codex_transport_request=$TFX_CODEX_TRANSPORT" >&2
   fi
   [[ -n "$TFX_TEAM_NAME" ]] && echo "[tfx-route] team=$TFX_TEAM_NAME task=$TFX_TEAM_TASK_ID agent=$TFX_TEAM_AGENT_NAME" >&2
+  [[ -n "${TFX_REROUTED_FROM:-}" ]] && echo "[tfx-route] rerouted_from=$TFX_REROUTED_FROM" >&2
 
   # Per-process 에이전트 등록
   register_agent
@@ -1327,6 +1443,14 @@ EOF
     fi
   fi
 
+  # 쿼타 감지 + 자동 re-route
+  if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
+    if [[ "${TFX_QUOTA_REROUTE:-1}" -ne 0 ]] && [[ -z "${TFX_REROUTED_FROM:-}" ]] && detect_quota_exceeded "$STDOUT_LOG" "$STDERR_LOG"; then
+      export TFX_REROUTED_FROM="$CLI_TYPE"
+      auto_reroute "$CLI_TYPE"
+    fi
+  fi
+
   # 팀 모드: task complete + 리드 보고
   if [[ -n "$TFX_TEAM_NAME" ]]; then
     if [[ "$exit_code" -eq 0 ]]; then
@@ -1359,18 +1483,29 @@ EOF
       --mcp-profile "$MCP_PROFILE" \
       --stderr-log "$STDERR_LOG" \
       --stdout-log "$STDOUT_LOG" \
+      --rerouted-from "${TFX_REROUTED_FROM:-}" \
       --max-bytes "$MAX_STDOUT_BYTES" \
-      --tee-active "$use_tee"
+      --tee-active "$use_tee" \
+      --clean-tui "${TFX_CLEAN_TUI:-true}"
   else
     # post.mjs 없으면 기본 출력 (fallback)
     echo "=== TFX-ROUTE RESULT ==="
     echo "agent: $AGENT_TYPE"
     echo "cli: $CLI_TYPE"
+    [[ -n "${TFX_REROUTED_FROM:-}" ]] && echo "rerouted_from: $TFX_REROUTED_FROM"
     echo "exit_code: $exit_code"
     echo "elapsed: ${elapsed}s"
     echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
     echo "=== OUTPUT ==="
-    cat "$STDOUT_LOG" 2>/dev/null | head -c "$MAX_STDOUT_BYTES"
+    if [[ "${TFX_CLEAN_TUI:-1}" != "0" ]]; then
+      cat "$STDOUT_LOG" 2>/dev/null \
+        | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
+        | sed '/^[[:space:]]*[╭╮╰╯│─┌┐└┘├┤┬┴┼]/d' \
+        | sed '/^[[:space:]]*[›❯][[:space:]]*$/d' \
+        | head -c "$MAX_STDOUT_BYTES"
+    else
+      cat "$STDOUT_LOG" 2>/dev/null | head -c "$MAX_STDOUT_BYTES"
+    fi
   fi
 
   return "$exit_code"

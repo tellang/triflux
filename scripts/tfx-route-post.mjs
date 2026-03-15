@@ -118,6 +118,36 @@ function filterCodexOutput(rawOutput) {
   return result.join("\n");
 }
 
+function cleanTuiArtifacts(output, cliType) {
+  if (!output) return output;
+
+  const normalizedCliType = cliType || "";
+
+  let cleaned = output
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+    .replace(/\x1b\][^\x07]*\x07/g, "")
+    .replace(/\x1b\[[0-9;]*[mGKHJsu]/g, "");
+
+  cleaned = cleaned.replace(/\r/g, "");
+
+  if (normalizedCliType.startsWith("codex")) {
+    cleaned = cleaned
+      .replace(/^[^\S\n]*[╭╮╰╯│─┌┐└┘├┤┬┴┼].*$/gm, "")
+      .replace(/^[^\S\n]*[›❯]\s*$/gm, "")
+      .replace(/^\s*codex\s*$/gm, "")
+      .replace(/^[^\S\n]*[›❯]\s*Applied.*$/gm, "");
+  } else if (normalizedCliType.startsWith("gemini")) {
+    cleaned = cleaned.replace(/^[^\S\n]*[╭╮╰╯│─═].*$/gm, "").replace(/^[^\S\n]*>\s*$/gm, "");
+  } else if (normalizedCliType.startsWith("claude")) {
+    cleaned = cleaned.replace(/^[^\S\n]*[━─]{5,}.*$/gm, "");
+  }
+
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  cleaned = cleaned.trim();
+
+  return cleaned;
+}
+
 // ── 실행 로그 기록 (JSONL, append-only) ──
 function logExecution(params) {
   const logFile = join(LOG_DIR, "tfx-route-stats.jsonl");
@@ -311,7 +341,19 @@ function main() {
   }
 
   // 3. 실행 로그
-  logExecution({ agent, cli: cliType, effort, run_mode: runMode, opus, status, exit_code: exitCode, elapsed, timeout, mcp_profile: mcpProfile, tokens });
+  logExecution({
+    agent,
+    cli: cliType,
+    effort,
+    run_mode: runMode,
+    opus,
+    status,
+    exit_code: exitCode,
+    elapsed,
+    timeout,
+    mcp_profile: mcpProfile,
+    tokens,
+  });
 
   // 4. 성공 시 토큰 누적
   if (exitCode === 0) accumulateTokens(cliType, tokens);
@@ -344,12 +386,19 @@ function main() {
       console.log("status: success");
     }
     console.log("=== OUTPUT ===");
-    const filtered = cliType === "codex" ? filterCodexOutput(rawOutput) : rawOutput;
+    let filtered = cliType === "codex" ? filterCodexOutput(rawOutput) : rawOutput;
+    if (a.clean_tui !== "false" && process.env.TFX_CLEAN_TUI !== "0") {
+      filtered = cleanTuiArtifacts(filtered, cliType);
+    }
     console.log(truncateOutput(filtered, maxBytes));
   } else if (exitCode === 124) {
     console.log(`status: timeout (${timeout}s 초과)`);
     console.log("=== PARTIAL OUTPUT ===");
-    console.log(truncateOutput(rawOutput, maxBytes));
+    let partialFiltered = rawOutput;
+    if (a.clean_tui !== "false" && process.env.TFX_CLEAN_TUI !== "0") {
+      partialFiltered = cleanTuiArtifacts(partialFiltered, cliType);
+    }
+    console.log(truncateOutput(partialFiltered, maxBytes));
     console.log("=== STDERR ===");
     console.log(stderrContent.split("\n").slice(-10).join("\n"));
   } else {
@@ -358,7 +407,11 @@ function main() {
     console.log(stderrContent.split("\n").slice(-20).join("\n"));
     if (rawOutput) {
       console.log("=== PARTIAL OUTPUT ===");
-      console.log(truncateOutput(rawOutput, maxBytes));
+      let partialFiltered = rawOutput;
+      if (a.clean_tui !== "false" && process.env.TFX_CLEAN_TUI !== "0") {
+        partialFiltered = cleanTuiArtifacts(partialFiltered, cliType);
+      }
+      console.log(truncateOutput(partialFiltered, maxBytes));
     }
   }
 }
