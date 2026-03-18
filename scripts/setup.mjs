@@ -92,6 +92,31 @@ const SYNC_MAP = [
     dst: join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
     label: "hud-qos-status.mjs",
   },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "notion-read.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
+    label: "notion-read.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "tfx-batch-stats.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
+    label: "tfx-batch-stats.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "lib", "mcp-filter.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-filter.mjs"),
+    label: "lib/mcp-filter.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "lib", "mcp-server-catalog.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-server-catalog.mjs"),
+    label: "lib/mcp-server-catalog.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "lib", "keyword-rules.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "lib", "keyword-rules.mjs"),
+    label: "lib/keyword-rules.mjs",
+  },
 ];
 
 function getVersion(filePath) {
@@ -200,6 +225,49 @@ if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
     synced++;
   } catch {
     // best effort: 의존성 복사 실패 시 exec fallback으로 동작
+  }
+}
+
+// ── 패키지 루트 breadcrumb 기록 ──
+// tfx-route.sh가 hub/server.mjs, hub/bridge.mjs를 찾을 수 있도록
+// 패키지 루트 경로를 ~/.claude/scripts/.tfx-pkg-root에 기록한다.
+{
+  const breadcrumbPath = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
+  const pkgRootForward = PLUGIN_ROOT.replace(/\\/g, "/");
+  const currentBreadcrumb = existsSync(breadcrumbPath)
+    ? readFileSync(breadcrumbPath, "utf8").trim()
+    : "";
+  if (currentBreadcrumb !== pkgRootForward) {
+    const breadcrumbDir = dirname(breadcrumbPath);
+    if (!existsSync(breadcrumbDir)) mkdirSync(breadcrumbDir, { recursive: true });
+    writeFileSync(breadcrumbPath, pkgRootForward + "\n", "utf8");
+    synced++;
+  }
+}
+
+// ── 에이전트 동기화 (.claude/agents/ → ~/.claude/agents/) ──
+// slim-wrapper 등 커스텀 에이전트를 글로벌에 배포하여
+// 다른 프로젝트에서도 subagent_type으로 참조 가능하게 한다.
+
+const agentsSrc = join(PLUGIN_ROOT, ".claude", "agents");
+const agentsDst = join(CLAUDE_DIR, "agents");
+
+if (existsSync(agentsSrc)) {
+  if (!existsSync(agentsDst)) mkdirSync(agentsDst, { recursive: true });
+
+  for (const name of readdirSync(agentsSrc)) {
+    if (!name.endsWith(".md")) continue;
+
+    const src = join(agentsSrc, name);
+    const dst = join(agentsDst, name);
+
+    if (!existsSync(dst)) {
+      copyFileSync(src, dst);
+      synced++;
+    } else if (shouldSyncTextFile(src, dst)) {
+      copyFileSync(src, dst);
+      synced++;
+    }
   }
 }
 
@@ -377,28 +445,65 @@ if (existsSync(mcpCheck)) {
   const child = spawn(process.execPath, [mcpCheck], {
     detached: true,
     stdio: "ignore",
+    windowsHide: true,
   });
   child.unref(); // 부모 프로세스와 분리 — 비동기 실행
 }
 
-// ── Hub 헬스체크 + 자동 기동 (세션 시작 백그라운드) ──
-// setup 훅이 포그라운드 지연을 만들지 않도록 별도 detached 프로세스로 처리한다.
-const hubEnsure = join(PLUGIN_ROOT, "scripts", "hub-ensure.mjs");
-const isPostinstall = process.env.npm_lifecycle_event === "postinstall";
-const isCi = /^(1|true)$/i.test(process.env.CI || "");
-const disableHubAutostart = process.env.TFX_DISABLE_HUB_AUTOSTART === "1";
+// ── SessionStart 훅 자동 등록 (settings.json) ──
+// .claude-plugin/ 개발 플러그인의 SessionStart 훅은 플러그인 로드 시점 문제로
+// 실행되지 않을 수 있으므로, settings.json에 직접 등록한다.
+// hub-ensure.mjs는 settings.json 훅으로만 실행 (이중 spawn 방지).
 
-if (!isPostinstall && !isCi && !disableHubAutostart && existsSync(hubEnsure)) {
-  try {
-    const child = spawn(process.execPath, [hubEnsure], {
-      env: process.env,
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-  } catch {
-    // best effort: 실패해도 setup 흐름은 지속
+try {
+  let hookSettings = {};
+  if (existsSync(settingsPath)) {
+    hookSettings = JSON.parse(readFileSync(settingsPath, "utf8"));
   }
+
+  if (!hookSettings.hooks) hookSettings.hooks = {};
+  if (!Array.isArray(hookSettings.hooks.SessionStart)) {
+    hookSettings.hooks.SessionStart = [];
+  }
+
+  const existingHooks = hookSettings.hooks.SessionStart;
+  const hasTrifluxHooks = existingHooks.some((entry) =>
+    Array.isArray(entry.hooks) &&
+    entry.hooks.some((h) => typeof h.command === "string" && h.command.includes("triflux")),
+  );
+
+  if (!hasTrifluxHooks) {
+    const nodePath = process.execPath.replace(/\\/g, "/");
+    const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
+    const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
+
+    const trifluxHookEntry = {
+      matcher: "*",
+      hooks: [
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/setup.mjs"`,
+          timeout: 10,
+        },
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/hub-ensure.mjs"`,
+          timeout: 8,
+        },
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/preflight-cache.mjs"`,
+          timeout: 5,
+        },
+      ],
+    };
+
+    hookSettings.hooks.SessionStart.push(trifluxHookEntry);
+    writeFileSync(settingsPath, JSON.stringify(hookSettings, null, 2) + "\n", "utf8");
+    synced++;
+  }
+} catch {
+  // settings.json 파싱 실패 시 무시 — 기존 설정 보존
 }
 
 // ── postinstall 배너 (npm install 시에만 출력) ──

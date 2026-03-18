@@ -6,8 +6,11 @@ import { homedir } from "os";
 import { execSync, execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { setTimeout as delay } from "node:timers/promises";
+import { loadDelegatorSchemaBundle } from "../hub/delegator/tool-definitions.mjs";
 import { detectMultiplexer, getSessionAttachedCount, killSession, listSessions, tmuxExec } from "../hub/team/session.mjs";
+import { forceCleanupTeam } from "../hub/team/nativeProxy.mjs";
 import { cleanupStaleOmcTeams, inspectStaleOmcTeams } from "../hub/team/staleState.mjs";
+import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -53,6 +56,80 @@ const VER = `${DIM}v${PKG.version}${RESET}`;
 const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
 const DOT = `${GRAY}·${RESET}`;
 const STALE_TEAM_MAX_AGE_SEC = 3600;
+const ANSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+
+const EXIT_SUCCESS = 0;
+const EXIT_ERROR = 1;
+const EXIT_ARG_ERROR = 2;
+const EXIT_CLI_MISSING = 3;
+const EXIT_HUB_ERROR = 4;
+const EXIT_CONFIG_ERROR = 5;
+
+const RAW_ARGS = process.argv.slice(2);
+const JSON_OUTPUT = RAW_ARGS.includes("--json");
+const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
+
+const CLI_COMMAND_SCHEMAS = Object.freeze({
+  setup: {
+    usage: "tfx setup [--dry-run]",
+    description: "파일 동기화 + HUD/MCP 설정",
+    options: [
+      { name: "--dry-run", type: "boolean", description: "실제 변경 없이 예정 작업을 JSON으로 출력" },
+    ],
+  },
+  doctor: {
+    usage: "tfx doctor [--fix] [--reset] [--json]",
+    description: "설치 상태 진단 및 자동 복구",
+    options: [
+      { name: "--fix", type: "boolean", description: "파일/캐시 자동 복구 후 재진단" },
+      { name: "--reset", type: "boolean", description: "캐시 초기화 후 재생성" },
+      { name: "--json", type: "boolean", description: "구조화된 진단 결과 JSON 출력" },
+    ],
+  },
+  version: {
+    usage: "tfx version [--json]",
+    description: "triflux 및 동기화된 스크립트 버전 표시",
+    options: [
+      { name: "--json", type: "boolean", description: "버전 정보를 JSON으로 출력" },
+    ],
+  },
+  list: {
+    usage: "tfx list [--json]",
+    description: "패키지 스킬과 사용자 스킬 목록 표시",
+    options: [
+      { name: "--json", type: "boolean", description: "스킬 목록을 JSON으로 출력" },
+    ],
+  },
+  schema: {
+    usage: "tfx schema [command-or-tool]",
+    description: "CLI 커맨드 파라미터와 Hub delegator schema 번들 출력",
+    options: [
+      { name: "command-or-tool", type: "string", description: "예: doctor, setup, delegate, delegate-reply, status" },
+    ],
+  },
+  hub: {
+    usage: "tfx hub <start|stop|status> [--port N] [--json]",
+    description: "tfx-hub 프로세스 제어",
+    subcommands: {
+      start: { usage: "tfx hub start [--port N]" },
+      stop: { usage: "tfx hub stop" },
+      status: {
+        usage: "tfx hub status [--json]",
+        options: [{ name: "--json", type: "boolean", description: "허브 상태를 JSON으로 출력" }],
+      },
+    },
+  },
+  multi: {
+    usage: "tfx multi <subcommand>",
+    description: "멀티-CLI 팀 모드",
+    subcommands: {
+      status: {
+        usage: "tfx multi status [--json]",
+        options: [{ name: "--json", type: "boolean", description: "팀 상태를 JSON으로 출력" }],
+      },
+    },
+  },
+});
 
 // ── 유틸리티 ──
 
@@ -61,11 +138,87 @@ function warn(msg) { console.log(`  ${YELLOW}⚠${RESET} ${msg}`); }
 function fail(msg) { console.log(`  ${RED_BRIGHT}✗${RESET} ${msg}`); }
 function info(msg) { console.log(`    ${GRAY}${msg}${RESET}`); }
 function section(title) { console.log(`\n  ${AMBER}▸${RESET} ${BOLD}${title}${RESET}`); }
+function stripAnsi(value) { return String(value ?? "").replace(ANSI_PATTERN, ""); }
+function printJson(payload) { process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`); }
+
+function withConsoleSilenced(enabled, fn) {
+  if (!enabled) return fn();
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = () => {};
+  console.error = () => {};
+  try {
+    return fn();
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+}
+
+function createCliError(message, {
+  exitCode = EXIT_ERROR,
+  reason = "error",
+  fix = null,
+  cause = null,
+} = {}) {
+  const error = new Error(message);
+  error.exitCode = exitCode;
+  error.reason = reason;
+  error.fix = fix;
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function inferExitCode(error) {
+  if (Number.isInteger(error?.exitCode)) return error.exitCode;
+  if (error?.code === "ENOENT") return EXIT_CLI_MISSING;
+  return EXIT_ERROR;
+}
+
+function inferReason(error, exitCode) {
+  if (typeof error?.reason === "string" && error.reason) return error.reason;
+  if (exitCode === EXIT_ARG_ERROR) return "argError";
+  if (exitCode === EXIT_CLI_MISSING) return "cliMissing";
+  if (exitCode === EXIT_HUB_ERROR) return "hubError";
+  if (exitCode === EXIT_CONFIG_ERROR) return "configError";
+  return "error";
+}
+
+function inferFix(error, exitCode) {
+  if (typeof error?.fix === "string" && error.fix) return error.fix;
+  if (exitCode === EXIT_ARG_ERROR) return "tfx --help";
+  if (exitCode === EXIT_CLI_MISSING) return "필수 CLI를 설치한 뒤 `tfx doctor`로 상태를 다시 확인하세요.";
+  if (exitCode === EXIT_HUB_ERROR) return "`tfx hub start`로 허브를 다시 시작하거나 설치 상태를 확인하세요.";
+  if (exitCode === EXIT_CONFIG_ERROR) return "설정 파일 JSON/TOML 문법을 수정한 뒤 다시 실행하세요.";
+  return null;
+}
+
+function handleFatalError(error, { json = false } = {}) {
+  const exitCode = inferExitCode(error);
+  const message = stripAnsi(error?.message || "알 수 없는 오류");
+  const reason = inferReason(error, exitCode);
+  const fix = inferFix(error, exitCode);
+
+  if (json) {
+    printJson({
+      error: {
+        code: exitCode,
+        message,
+        reason,
+        ...(fix ? { fix } : {}),
+      },
+    });
+  } else {
+    console.error(message);
+    if (fix) console.error(`fix: ${fix}`);
+  }
+  process.exit(exitCode);
+}
 
 function which(cmd) {
   try {
     const result = process.platform === "win32"
-      ? execFileSync("where", [cmd], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] })
+      ? execFileSync("where", [cmd], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"], windowsHide: true })
       : execFileSync("which", [cmd], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] });
     return result.trim().split(/\r?\n/)[0] || null;
   } catch { return null; }
@@ -84,6 +237,7 @@ function whichInShell(cmd, shell) {
       encoding: "utf8",
       timeout: 8000,
       stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
     }).trim();
     return result.split(/\r?\n/)[0] || null;
   } catch { return null; }
@@ -96,7 +250,7 @@ function isDevUpdateRequested(argv = process.argv) {
 function checkShellAvailable(shell) {
   const cmds = { bash: "bash --version", cmd: "cmd /c echo ok", pwsh: "pwsh -NoProfile -c echo ok" };
   try {
-    execSync(cmds[shell], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] });
+    execSync(cmds[shell], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
     return true;
   } catch { return false; }
 }
@@ -271,6 +425,21 @@ function ensureCodexProfiles() {
   }
 }
 
+function previewCodexProfiles() {
+  const original = existsSync(CODEX_CONFIG_PATH)
+    ? readFileSync(CODEX_CONFIG_PATH, "utf8")
+    : "";
+  const missingProfiles = REQUIRED_CODEX_PROFILES
+    .filter((profile) => !hasProfileSection(original, profile.name))
+    .map((profile) => profile.name);
+
+  return {
+    path: CODEX_CONFIG_PATH,
+    missingProfiles,
+    change: missingProfiles.length > 0 ? (original ? "update" : "create") : "noop",
+  };
+}
+
 function syncFile(src, dst, label) {
   const dstDir = dirname(dst);
   if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
@@ -306,75 +475,286 @@ function syncFile(src, dst, label) {
   return false;
 }
 
+function describeSyncAction(src, dst, label) {
+  if (!existsSync(src)) {
+    throw createCliError(`${label}: 소스 파일 없음 (${src})`, {
+      exitCode: EXIT_CONFIG_ERROR,
+      reason: "configError",
+      fix: "패키지 파일이 손상되지 않았는지 확인한 뒤 triflux를 다시 설치하세요.",
+    });
+  }
+
+  const srcVer = getVersion(src);
+  const dstExists = existsSync(dst);
+  const change = !dstExists
+    ? "create"
+    : readFileSync(src, "utf8") !== readFileSync(dst, "utf8")
+      ? "update"
+      : "noop";
+
+  return {
+    type: "sync",
+    label,
+    from: src,
+    to: dst,
+    change,
+    version: srcVer,
+  };
+}
+
 // ── 크로스 셸 진단 ──
 
 function checkCliCrossShell(cmd, installHint) {
   const shells = process.platform === "win32" ? ["bash", "cmd", "pwsh"] : ["bash"];
   let anyFound = false;
   let bashMissing = false;
+  const shellResults = [];
 
   for (const shell of shells) {
     if (!checkShellAvailable(shell)) {
       info(`${shell}: ${DIM}셸 없음 (건너뜀)${RESET}`);
+      shellResults.push({ shell, status: "unavailable", path: null });
       continue;
     }
     const p = whichInShell(cmd, shell);
     if (p) {
       ok(`${shell}:  ${p}`);
       anyFound = true;
+      shellResults.push({ shell, status: "ok", path: p });
     } else {
       fail(`${shell}:  미발견`);
       if (shell === "bash") bashMissing = true;
+      shellResults.push({ shell, status: "missing", path: null, fix: installHint });
     }
   }
 
   if (!anyFound) {
     info(`미설치 (선택사항) — ${installHint}`);
     info("없으면 Claude 네이티브 에이전트로 fallback");
-    return 1;
+    return {
+      issues: 1,
+      anyFound,
+      bashMissing,
+      shells: shellResults,
+      status: "missing",
+      fix: installHint,
+    };
   }
   if (bashMissing) {
     warn("bash에서 미발견 — tfx-route.sh 실행 불가");
     info('→ ~/.bashrc에 추가: export PATH="$PATH:$APPDATA/npm"');
-    return 1;
+    return {
+      issues: 1,
+      anyFound,
+      bashMissing,
+      shells: shellResults,
+      status: "degraded",
+      fix: 'bash PATH를 정리한 뒤 `tfx doctor`를 다시 실행하세요.',
+    };
   }
-  return 0;
+  return {
+    issues: 0,
+    anyFound,
+    bashMissing,
+    shells: shellResults,
+    status: "ok",
+    fix: null,
+  };
 }
 
 // ── 명령어 ──
 
-function cmdSetup() {
+function getSetupSyncTargets() {
+  return [
+    {
+      src: join(PKG_ROOT, "scripts", "tfx-route.sh"),
+      dst: join(CLAUDE_DIR, "scripts", "tfx-route.sh"),
+      label: "tfx-route.sh",
+    },
+    {
+      src: join(PKG_ROOT, "hud", "hud-qos-status.mjs"),
+      dst: join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
+      label: "hud-qos-status.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "notion-read.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
+      label: "notion-read.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "tfx-route-post.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "tfx-route-post.mjs"),
+      label: "tfx-route-post.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "tfx-batch-stats.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
+      label: "tfx-batch-stats.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "lib", "mcp-filter.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-filter.mjs"),
+      label: "lib/mcp-filter.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "lib", "mcp-server-catalog.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-server-catalog.mjs"),
+      label: "lib/mcp-server-catalog.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "lib", "keyword-rules.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "lib", "keyword-rules.mjs"),
+      label: "lib/keyword-rules.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "scripts", "tfx-route-worker.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "tfx-route-worker.mjs"),
+      label: "tfx-route-worker.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "codex-mcp.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "codex-mcp.mjs"),
+      label: "hub/workers/codex-mcp.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "delegator-mcp.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "delegator-mcp.mjs"),
+      label: "hub/workers/delegator-mcp.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "interface.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "interface.mjs"),
+      label: "hub/workers/interface.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "gemini-worker.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "gemini-worker.mjs"),
+      label: "hub/workers/gemini-worker.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "claude-worker.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "claude-worker.mjs"),
+      label: "hub/workers/claude-worker.mjs",
+    },
+    {
+      src: join(PKG_ROOT, "hub", "workers", "factory.mjs"),
+      dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "factory.mjs"),
+      label: "hub/workers/factory.mjs",
+    },
+  ];
+}
+
+function listSkillSyncActions() {
+  const skillsSrc = join(PKG_ROOT, "skills");
+  if (!existsSync(skillsSrc)) return [];
+
+  const actions = [];
+  for (const name of readdirSync(skillsSrc).sort()) {
+    const src = join(skillsSrc, name, "SKILL.md");
+    const dst = join(CLAUDE_DIR, "skills", name, "SKILL.md");
+    if (!existsSync(src)) continue;
+    actions.push(describeSyncAction(src, dst, `skill:${name}`));
+  }
+  return actions;
+}
+
+function previewStatusLineAction() {
+  const settingsPath = join(CLAUDE_DIR, "settings.json");
+  const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
+
+  let settings = {};
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    } catch (error) {
+      throw createCliError(`settings.json 처리 실패: ${error.message}`, {
+        exitCode: EXIT_CONFIG_ERROR,
+        reason: "configError",
+        fix: `${settingsPath}의 JSON 문법을 수정하세요.`,
+        cause: error,
+      });
+    }
+  }
+
+  const currentCmd = settings.statusLine?.command || "";
+  return {
+    type: "statusLine",
+    path: settingsPath,
+    change: currentCmd.includes("hud-qos-status.mjs") ? "noop" : (currentCmd ? "update" : "create"),
+    current: currentCmd || null,
+    target: hudPath,
+  };
+}
+
+function previewMcpRegistrationActions(mcpUrl) {
+  const actions = [];
+
+  if (which("codex")) {
+    actions.push({
+      type: "mcp-register",
+      cli: "codex",
+      target: "tfx-hub",
+      url: mcpUrl,
+      change: "check",
+    });
+  }
+  if (which("gemini")) {
+    actions.push({
+      type: "mcp-register",
+      cli: "gemini",
+      target: "tfx-hub",
+      url: mcpUrl,
+      change: "check",
+    });
+  }
+
+  actions.push({
+    type: "mcp-register",
+    cli: "claude",
+    target: "tfx-hub",
+    path: join(PKG_ROOT, ".mcp.json"),
+    url: mcpUrl,
+    change: "check",
+  });
+
+  return actions;
+}
+
+function buildSetupDryRunPlan() {
+  const actions = [
+    ...getSetupSyncTargets().map(({ src, dst, label }) => describeSyncAction(src, dst, label)),
+    ...listSkillSyncActions(),
+  ];
+  const codexProfiles = previewCodexProfiles();
+  actions.push({
+    type: "codex-profiles",
+    path: codexProfiles.path,
+    change: codexProfiles.change,
+    profiles: codexProfiles.missingProfiles,
+  });
+
+  const defaultHubUrl = `http://127.0.0.1:${process.env.TFX_HUB_PORT || "27888"}/mcp`;
+  actions.push(...previewMcpRegistrationActions(defaultHubUrl));
+  actions.push(previewStatusLineAction());
+
+  return {
+    dry_run: true,
+    actions,
+  };
+}
+
+function cmdSetup(options = {}) {
+  const { dryRun = false } = options;
+  if (dryRun) {
+    printJson(buildSetupDryRunPlan());
+    return;
+  }
+
   console.log(`\n${BOLD}triflux setup${RESET}\n`);
 
-  syncFile(
-    join(PKG_ROOT, "scripts", "tfx-route.sh"),
-    join(CLAUDE_DIR, "scripts", "tfx-route.sh"),
-    "tfx-route.sh"
-  );
-
-  syncFile(
-    join(PKG_ROOT, "hud", "hud-qos-status.mjs"),
-    join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
-    "hud-qos-status.mjs"
-  );
-
-  syncFile(
-    join(PKG_ROOT, "scripts", "notion-read.mjs"),
-    join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
-    "notion-read.mjs"
-  );
-
-  syncFile(
-    join(PKG_ROOT, "scripts", "tfx-route-post.mjs"),
-    join(CLAUDE_DIR, "scripts", "tfx-route-post.mjs"),
-    "tfx-route-post.mjs"
-  );
-
-  syncFile(
-    join(PKG_ROOT, "scripts", "tfx-batch-stats.mjs"),
-    join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
-    "tfx-batch-stats.mjs"
-  );
+  for (const target of getSetupSyncTargets()) {
+    syncFile(target.src, target.dst, target.label);
+  }
 
   // 스킬 동기화 (~/.claude/skills/{name}/SKILL.md)
   const skillsSrc = join(PKG_ROOT, "skills");
@@ -460,7 +840,12 @@ function cmdSetup() {
         ok("statusLine 설정 완료 — 세션 재시작 후 HUD 표시");
       }
     } catch (e) {
-      fail(`settings.json 처리 실패: ${e.message}`);
+      throw createCliError(`settings.json 처리 실패: ${e.message}`, {
+        exitCode: EXIT_CONFIG_ERROR,
+        reason: "configError",
+        fix: `${settingsPath}의 JSON 문법을 수정하세요.`,
+        cause: e,
+      });
     }
   } else {
     warn("HUD 파일 없음 — 먼저 파일 동기화 필요");
@@ -469,91 +854,117 @@ function cmdSetup() {
   console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}\n`);
 }
 
+function addDoctorCheck(report, entry) {
+  report.checks.push(entry);
+}
+
 async function cmdDoctor(options = {}) {
-  const { fix = false, reset = false } = options;
-  const modeLabel = reset ? ` ${RED}--reset${RESET}` : fix ? ` ${YELLOW}--fix${RESET}` : "";
-  console.log(`\n  ${AMBER}${BOLD}⬡ triflux doctor${RESET} ${VER}${modeLabel}\n`);
-  console.log(`  ${LINE}`);
+  const { fix = false, reset = false, json = false } = options;
+  const report = {
+    status: "ok",
+    mode: reset ? "reset" : fix ? "fix" : "check",
+    checks: [],
+    actions: [],
+    issue_count: 0,
+  };
 
-  // ── reset 모드: 캐시 전체 초기화 ──
-  if (reset) {
-    section("Cache Reset");
-    const cacheDir = join(CLAUDE_DIR, "cache");
-    const resetFiles = [
-      "claude-usage-cache.json",
-      ".claude-refresh-lock",
-      "codex-rate-limits-cache.json",
-      "gemini-quota-cache.json",
-      "gemini-project-id.json",
-      "gemini-session-cache.json",
-      "gemini-rpm-tracker.json",
-      "sv-accumulator.json",
-      "mcp-inventory.json",
-      "cli-issues.jsonl",
-      "triflux-update-check.json",
-    ];
-    let cleared = 0;
-    for (const name of resetFiles) {
-      const fp = join(cacheDir, name);
-      if (existsSync(fp)) {
-        try { unlinkSync(fp); cleared++; ok(`삭제됨: ${name}`); }
-        catch (e) { fail(`삭제 실패: ${name} — ${e.message}`); }
+  return await withConsoleSilenced(json, async () => {
+    const modeLabel = reset ? ` ${RED}--reset${RESET}` : fix ? ` ${YELLOW}--fix${RESET}` : "";
+    console.log(`\n  ${AMBER}${BOLD}⬡ triflux doctor${RESET} ${VER}${modeLabel}\n`);
+    console.log(`  ${LINE}`);
+
+    // ── reset 모드: 캐시 전체 초기화 ──
+    if (reset) {
+      section("Cache Reset");
+      const cacheDir = join(CLAUDE_DIR, "cache");
+      const resetFiles = [
+        "claude-usage-cache.json",
+        ".claude-refresh-lock",
+        "codex-rate-limits-cache.json",
+        "gemini-quota-cache.json",
+        "gemini-project-id.json",
+        "gemini-session-cache.json",
+        "gemini-rpm-tracker.json",
+        "sv-accumulator.json",
+        "mcp-inventory.json",
+        "cli-issues.jsonl",
+        "triflux-update-check.json",
+      ];
+      let cleared = 0;
+      for (const name of resetFiles) {
+        const fp = join(cacheDir, name);
+        if (existsSync(fp)) {
+          try {
+            unlinkSync(fp);
+            cleared++;
+            report.actions.push({ type: "delete", path: fp, status: "ok" });
+            ok(`삭제됨: ${name}`);
+          } catch (e) {
+            report.actions.push({ type: "delete", path: fp, status: "failed", message: e.message });
+            fail(`삭제 실패: ${name} — ${e.message}`);
+          }
+        }
       }
-    }
-    if (cleared === 0) {
-      ok("삭제할 캐시 파일 없음 (이미 깨끗함)");
-    } else {
+      if (cleared === 0) {
+        ok("삭제할 캐시 파일 없음 (이미 깨끗함)");
+      } else {
+        console.log("");
+        ok(`${BOLD}${cleared}개${RESET} 캐시 파일 초기화 완료`);
+      }
       console.log("");
-      ok(`${BOLD}${cleared}개${RESET} 캐시 파일 초기화 완료`);
+      section("Cache Rebuild");
+      const mcpCheck = join(PKG_ROOT, "scripts", "mcp-check.mjs");
+      if (existsSync(mcpCheck)) {
+        try {
+          execFileSync(process.execPath, [mcpCheck], { timeout: 15000, stdio: "ignore", windowsHide: true });
+          report.actions.push({ type: "rebuild", name: "mcp-inventory", status: "ok" });
+          ok("MCP 인벤토리 재생성됨");
+        } catch {
+          report.actions.push({ type: "rebuild", name: "mcp-inventory", status: "failed" });
+          warn("MCP 인벤토리 재생성 실패 — 다음 세션에서 자동 재시도");
+        }
+      }
+      const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
+      if (existsSync(hudScript)) {
+        try {
+          execFileSync(process.execPath, [hudScript, "--refresh-claude-usage"], { timeout: 20000, stdio: "ignore", windowsHide: true });
+          report.actions.push({ type: "rebuild", name: "claude-usage-cache", status: "ok" });
+          ok("Claude 사용량 캐시 재생성됨");
+        } catch {
+          report.actions.push({ type: "rebuild", name: "claude-usage-cache", status: "failed" });
+          warn("Claude 사용량 캐시 재생성 실패 — 다음 API 호출 시 자동 생성");
+        }
+        try {
+          execFileSync(process.execPath, [hudScript, "--refresh-codex-rate-limits"], { timeout: 15000, stdio: "ignore", windowsHide: true });
+          report.actions.push({ type: "rebuild", name: "codex-rate-limits-cache", status: "ok" });
+          ok("Codex 레이트 리밋 캐시 재생성됨");
+        } catch {
+          report.actions.push({ type: "rebuild", name: "codex-rate-limits-cache", status: "failed" });
+          warn("Codex 레이트 리밋 캐시 재생성 실패");
+        }
+        try {
+          execFileSync(process.execPath, [hudScript, "--refresh-gemini-quota"], { timeout: 15000, stdio: "ignore", windowsHide: true });
+          report.actions.push({ type: "rebuild", name: "gemini-quota-cache", status: "ok" });
+          ok("Gemini 쿼터 캐시 재생성됨");
+        } catch {
+          report.actions.push({ type: "rebuild", name: "gemini-quota-cache", status: "failed" });
+          warn("Gemini 쿼터 캐시 재생성 실패");
+        }
+      }
+      console.log(`\n  ${LINE}`);
+      console.log(`  ${GREEN_BRIGHT}${BOLD}✓ 캐시 초기화 + 재생성 완료${RESET}\n`);
+      report.status = report.actions.some((action) => action.status === "failed") ? "issues" : "ok";
+      report.issue_count = report.actions.filter((action) => action.status === "failed").length;
+      if (json) printJson(report);
+      return report;
     }
-    // 캐시 즉시 재생성
-    console.log("");
-    section("Cache Rebuild");
-    const mcpCheck = join(PKG_ROOT, "scripts", "mcp-check.mjs");
-    if (existsSync(mcpCheck)) {
-      try {
-        execFileSync(process.execPath, [mcpCheck], { timeout: 15000, stdio: "ignore" });
-        ok("MCP 인벤토리 재생성됨");
-      } catch { warn("MCP 인벤토리 재생성 실패 — 다음 세션에서 자동 재시도"); }
-    }
-    const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-    if (existsSync(hudScript)) {
-      try {
-        execFileSync(process.execPath, [hudScript, "--refresh-claude-usage"], { timeout: 20000, stdio: "ignore" });
-        ok("Claude 사용량 캐시 재생성됨");
-      } catch { warn("Claude 사용량 캐시 재생성 실패 — 다음 API 호출 시 자동 생성"); }
-      try {
-        execFileSync(process.execPath, [hudScript, "--refresh-codex-rate-limits"], { timeout: 15000, stdio: "ignore" });
-        ok("Codex 레이트 리밋 캐시 재생성됨");
-      } catch { warn("Codex 레이트 리밋 캐시 재생성 실패"); }
-      try {
-        execFileSync(process.execPath, [hudScript, "--refresh-gemini-quota"], { timeout: 15000, stdio: "ignore" });
-        ok("Gemini 쿼터 캐시 재생성됨");
-      } catch { warn("Gemini 쿼터 캐시 재생성 실패"); }
-    }
-    console.log(`\n  ${LINE}`);
-    console.log(`  ${GREEN_BRIGHT}${BOLD}✓ 캐시 초기화 + 재생성 완료${RESET}\n`);
-    return;
-  }
 
-  // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
-  if (fix) {
+    // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
+    if (fix) {
     section("Auto Fix");
-    syncFile(
-      join(PKG_ROOT, "scripts", "tfx-route.sh"),
-      join(CLAUDE_DIR, "scripts", "tfx-route.sh"),
-      "tfx-route.sh"
-    );
-    syncFile(
-      join(PKG_ROOT, "hud", "hud-qos-status.mjs"),
-      join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
-      "hud-qos-status.mjs"
-    );
-    syncFile(
-      join(PKG_ROOT, "scripts", "notion-read.mjs"),
-      join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
-      "notion-read.mjs"
-    );
+    for (const target of getSetupSyncTargets()) {
+      syncFile(target.src, target.dst, target.label);
+    }
     // 스킬 동기화
     const fSkillsSrc = join(PKG_ROOT, "skills");
     const fSkillsDst = join(CLAUDE_DIR, "skills");
@@ -598,76 +1009,106 @@ async function cmdDoctor(options = {}) {
     console.log("");
   }
 
-  let issues = 0;
+    let issues = 0;
 
-  // 1. tfx-route.sh
-  section("tfx-route.sh");
-  const routeSh = join(CLAUDE_DIR, "scripts", "tfx-route.sh");
-  if (existsSync(routeSh)) {
-    const ver = getVersion(routeSh);
-    ok(`설치됨 ${ver ? `${DIM}v${ver}${RESET}` : ""}`);
-  } else {
-    fail("미설치 — tfx setup 실행 필요");
-    issues++;
-  }
-
-  // 2. HUD
-  section("HUD");
-  const hud = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-  if (existsSync(hud)) {
-    ok("설치됨");
-  } else {
-    warn("미설치 ${GRAY}(선택사항)${RESET}");
-  }
-
-  // 3. Codex CLI
-  section(`Codex CLI ${WHITE_BRIGHT}●${RESET}`);
-  issues += checkCliCrossShell("codex", "npm install -g @openai/codex");
-  if (which("codex")) {
-    if (process.env.OPENAI_API_KEY) {
-      ok("OPENAI_API_KEY 설정됨");
+    // 1. tfx-route.sh
+    section("tfx-route.sh");
+    const routeSh = join(CLAUDE_DIR, "scripts", "tfx-route.sh");
+    if (existsSync(routeSh)) {
+      const ver = getVersion(routeSh);
+      addDoctorCheck(report, { name: "tfx-route.sh", status: "ok", path: routeSh, version: ver });
+      ok(`설치됨 ${ver ? `${DIM}v${ver}${RESET}` : ""}`);
     } else {
-      warn(`OPENAI_API_KEY 미설정 ${GRAY}(Pro 구독이면 불필요)${RESET}`);
+      addDoctorCheck(report, { name: "tfx-route.sh", status: "missing", path: routeSh, fix: "tfx setup" });
+      fail("미설치 — tfx setup 실행 필요");
+      issues++;
     }
-  }
 
-  // 4. Codex Profiles
-  section("Codex Profiles");
-  if (existsSync(CODEX_CONFIG_PATH)) {
-    const codexConfig = readFileSync(CODEX_CONFIG_PATH, "utf8");
-    for (const profile of REQUIRED_CODEX_PROFILES) {
-      if (hasProfileSection(codexConfig, profile.name)) {
-        ok(`${profile.name}: 정상`);
+    // 2. HUD
+    section("HUD");
+    const hud = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
+    if (existsSync(hud)) {
+      addDoctorCheck(report, { name: "hud-qos-status.mjs", status: "ok", path: hud });
+      ok("설치됨");
+    } else {
+      addDoctorCheck(report, { name: "hud-qos-status.mjs", status: "missing", path: hud, optional: true, fix: "tfx setup" });
+      warn("미설치 ${GRAY}(선택사항)${RESET}");
+    }
+
+    // 3. Codex CLI
+    section(`Codex CLI ${WHITE_BRIGHT}●${RESET}`);
+    const codexCli = checkCliCrossShell("codex", "npm install -g @openai/codex");
+    issues += codexCli.issues;
+    addDoctorCheck(report, {
+      name: "codex",
+      status: codexCli.status,
+      shells: codexCli.shells,
+      ...(codexCli.fix ? { fix: codexCli.fix } : {}),
+    });
+    if (which("codex")) {
+      if (process.env.OPENAI_API_KEY) {
+        ok("OPENAI_API_KEY 설정됨");
       } else {
-        warn(`${profile.name}: 미설정`);
-        issues++;
+        warn(`OPENAI_API_KEY 미설정 ${GRAY}(Pro 구독이면 불필요)${RESET}`);
       }
     }
-  } else {
-    warn("config.toml 미존재");
-    issues++;
-  }
 
-  // 5. Gemini CLI
-  section(`Gemini CLI ${BLUE}●${RESET}`);
-  issues += checkCliCrossShell("gemini", "npm install -g @google/gemini-cli");
-  if (which("gemini")) {
-    if (process.env.GEMINI_API_KEY) {
-      ok("GEMINI_API_KEY 설정됨");
+    // 4. Codex Profiles
+    section("Codex Profiles");
+    if (existsSync(CODEX_CONFIG_PATH)) {
+      const codexConfig = readFileSync(CODEX_CONFIG_PATH, "utf8");
+      const missingProfiles = [];
+      for (const profile of REQUIRED_CODEX_PROFILES) {
+        if (hasProfileSection(codexConfig, profile.name)) {
+          ok(`${profile.name}: 정상`);
+        } else {
+          missingProfiles.push(profile.name);
+          warn(`${profile.name}: 미설정`);
+          issues++;
+        }
+      }
+      addDoctorCheck(report, {
+        name: "codex-profiles",
+        status: missingProfiles.length === 0 ? "ok" : "missing",
+        path: CODEX_CONFIG_PATH,
+        missing_profiles: missingProfiles,
+        ...(missingProfiles.length > 0 ? { fix: "tfx setup" } : {}),
+      });
     } else {
-      warn(`GEMINI_API_KEY 미설정 ${GRAY}(gemini auth login)${RESET}`);
+      addDoctorCheck(report, { name: "codex-profiles", status: "missing", path: CODEX_CONFIG_PATH, fix: "tfx setup" });
+      warn("config.toml 미존재");
+      issues++;
     }
-  }
 
-  // 6. Claude Code
-  section(`Claude Code ${AMBER}●${RESET}`);
-  const claudePath = which("claude");
-  if (claudePath) {
-    ok("설치됨");
-  } else {
-    fail("미설치 (필수)");
-    issues++;
-  }
+    // 5. Gemini CLI
+    section(`Gemini CLI ${BLUE}●${RESET}`);
+    const geminiCli = checkCliCrossShell("gemini", "npm install -g @google/gemini-cli");
+    issues += geminiCli.issues;
+    addDoctorCheck(report, {
+      name: "gemini",
+      status: geminiCli.status,
+      shells: geminiCli.shells,
+      ...(geminiCli.fix ? { fix: geminiCli.fix } : {}),
+    });
+    if (which("gemini")) {
+      if (process.env.GEMINI_API_KEY) {
+        ok("GEMINI_API_KEY 설정됨");
+      } else {
+        warn(`GEMINI_API_KEY 미설정 ${GRAY}(gemini auth login)${RESET}`);
+      }
+    }
+
+    // 6. Claude Code
+    section(`Claude Code ${AMBER}●${RESET}`);
+    const claudePath = which("claude");
+    if (claudePath) {
+      addDoctorCheck(report, { name: "claude", status: "ok", path: claudePath });
+      ok("설치됨");
+    } else {
+      addDoctorCheck(report, { name: "claude", status: "missing", fix: "Claude Code를 설치한 뒤 `tfx doctor`를 다시 실행하세요." });
+      fail("미설치 (필수)");
+      issues++;
+    }
 
   // 7. 스킬 설치 상태
   section("Skills");
@@ -686,29 +1127,36 @@ async function cmdDoctor(options = {}) {
         missing.push(name);
       }
     }
-    if (installed === total) {
-      ok(`${installed}/${total}개 설치됨`);
+      if (installed === total) {
+        addDoctorCheck(report, { name: "skills", status: "ok", installed, total });
+        ok(`${installed}/${total}개 설치됨`);
+      } else {
+        addDoctorCheck(report, { name: "skills", status: "missing", installed, total, missing, fix: "tfx setup" });
+        warn(`${installed}/${total}개 설치됨 — 미설치: ${missing.join(", ")}`);
+        info("triflux setup으로 동기화 가능");
+        issues++;
+      }
     } else {
-      warn(`${installed}/${total}개 설치됨 — 미설치: ${missing.join(", ")}`);
-      info("triflux setup으로 동기화 가능");
-      issues++;
+      addDoctorCheck(report, { name: "skills", status: "missing", installed: 0, total: 0, fix: "패키지 skills 디렉토리를 확인하세요." });
     }
-  }
 
-  // 8. 플러그인 등록
-  section("Plugin");
-  const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
-  if (existsSync(pluginsFile)) {
-    const content = readFileSync(pluginsFile, "utf8");
-    if (content.includes("triflux")) {
-      ok("triflux 플러그인 등록됨");
+    // 8. 플러그인 등록
+    section("Plugin");
+    const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
+    if (existsSync(pluginsFile)) {
+      const content = readFileSync(pluginsFile, "utf8");
+      if (content.includes("triflux")) {
+        addDoctorCheck(report, { name: "plugin", status: "ok", path: pluginsFile });
+        ok("triflux 플러그인 등록됨");
+      } else {
+        addDoctorCheck(report, { name: "plugin", status: "missing", path: pluginsFile, optional: true, fix: "/plugin marketplace add <repo-url>" });
+        warn("triflux 플러그인 미등록 — npm 단독 사용 중");
+        info("플러그인 등록: /plugin marketplace add <repo-url>");
+      }
     } else {
-      warn("triflux 플러그인 미등록 — npm 단독 사용 중");
-      info("플러그인 등록: /plugin marketplace add <repo-url>");
+      addDoctorCheck(report, { name: "plugin", status: "unavailable", optional: true });
+      info("플러그인 시스템 감지 안 됨 — npm 단독 사용");
     }
-  } else {
-    info("플러그인 시스템 감지 안 됨 — npm 단독 사용");
-  }
 
   // 9. MCP 인벤토리
   section("MCP Inventory");
@@ -716,6 +1164,13 @@ async function cmdDoctor(options = {}) {
   if (existsSync(mcpCache)) {
     try {
       const inv = JSON.parse(readFileSync(mcpCache, "utf8"));
+      addDoctorCheck(report, {
+        name: "mcp-inventory",
+        status: "ok",
+        path: mcpCache,
+        codex_servers: inv.codex?.servers?.length || 0,
+        gemini_servers: inv.gemini?.servers?.length || 0,
+      });
       ok(`캐시 존재 (${inv.timestamp})`);
       if (inv.codex?.servers?.length) {
         const names = inv.codex.servers.map(s => s.name).join(", ");
@@ -726,9 +1181,11 @@ async function cmdDoctor(options = {}) {
         info(`Gemini: ${inv.gemini.servers.length}개 서버 (${names})`);
       }
     } catch {
+      addDoctorCheck(report, { name: "mcp-inventory", status: "invalid", path: mcpCache, fix: `node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}` });
       warn("캐시 파일 파싱 실패");
     }
   } else {
+    addDoctorCheck(report, { name: "mcp-inventory", status: "missing", path: mcpCache, fix: `node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}` });
     warn("캐시 없음 — 다음 세션 시작 시 자동 생성");
     info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
   }
@@ -743,6 +1200,7 @@ async function cmdDoctor(options = {}) {
       const unresolved = entries.filter(e => !e.resolved);
 
       if (unresolved.length === 0) {
+        addDoctorCheck(report, { name: "cli-issues", status: "ok", path: issuesFile, unresolved: 0 });
         ok("미해결 이슈 없음");
       } else {
         // 패턴별 그룹핑
@@ -790,11 +1248,14 @@ async function cmdDoctor(options = {}) {
           writeFileSync(issuesFile, remaining.map(e => JSON.stringify(e)).join("\n") + (remaining.length ? "\n" : ""));
           ok(`${cleaned}개 해결된 이슈 자동 정리됨`);
         }
+        addDoctorCheck(report, { name: "cli-issues", status: unresolved.length === 0 ? "ok" : "issues", path: issuesFile, unresolved: unresolved.length });
       }
     } catch (e) {
+      addDoctorCheck(report, { name: "cli-issues", status: "invalid", path: issuesFile, fix: "cli-issues.jsonl 형식을 확인하세요." });
       warn(`이슈 파일 읽기 실패: ${e.message}`);
     }
   } else {
+    addDoctorCheck(report, { name: "cli-issues", status: "ok", path: issuesFile, unresolved: 0 });
     ok("이슈 로그 없음 (정상)");
   }
 
@@ -802,10 +1263,23 @@ async function cmdDoctor(options = {}) {
   section("Team Sessions");
   const teamSessionReport = inspectTeamSessions();
   if (!teamSessionReport.mux) {
+    addDoctorCheck(report, { name: "team-sessions", status: "skipped", detail: "tmux/psmux unavailable" });
     info("tmux/psmux 미감지 — 팀 세션 검사 건너뜀");
   } else if (teamSessionReport.sessions.length === 0) {
+    addDoctorCheck(report, { name: "team-sessions", status: "ok", multiplexer: teamSessionReport.mux, sessions: 0 });
     ok(`활성 팀 세션 없음 ${DIM}(${teamSessionReport.mux})${RESET}`);
   } else {
+    addDoctorCheck(report, {
+      name: "team-sessions",
+      status: teamSessionReport.sessions.some((session) => session.stale) ? "issues" : "ok",
+      multiplexer: teamSessionReport.mux,
+      sessions: teamSessionReport.sessions.map((session) => ({
+        name: session.sessionName,
+        attached: session.attachedCount,
+        age_sec: session.ageSec,
+        stale: session.stale,
+      })),
+    });
     info(`multiplexer: ${teamSessionReport.mux}`);
 
     for (const session of teamSessionReport.sessions) {
@@ -842,28 +1316,46 @@ async function cmdDoctor(options = {}) {
     maxAgeMs: STALE_TEAM_MAX_AGE_SEC * 1000,
     liveSessionNames: teamSessionReport.sessions.map((session) => session.sessionName),
   });
-  if (!omcTeamReport.stateRoot) {
-    info(".omc/state 없음 — 검사 건너뜀");
+  if (!omcTeamReport.stateRoot && !omcTeamReport.teamsRoot) {
+    addDoctorCheck(report, { name: "omc-stale-teams", status: "skipped" });
+    info(".omc/state 및 ~/.claude/teams 없음 — 검사 건너뜀");
   } else if (omcTeamReport.entries.length === 0) {
-    ok(`stale team 없음 ${DIM}(${omcTeamReport.stateRoot})${RESET}`);
+    addDoctorCheck(report, { name: "omc-stale-teams", status: "ok", entries: 0 });
+    const roots = [omcTeamReport.stateRoot, omcTeamReport.teamsRoot].filter(Boolean).join(", ");
+    ok(`stale team 없음 ${DIM}(${roots})${RESET}`);
   } else {
+    addDoctorCheck(report, { name: "omc-stale-teams", status: "issues", entries: omcTeamReport.entries.length, fix: "tfx doctor --fix" });
     warn(`${omcTeamReport.entries.length}개 stale team 발견`);
 
     for (const entry of omcTeamReport.entries) {
       const ageLabel = formatElapsedAge(entry.ageSec);
-      const scopeLabel = entry.scope === "root" ? "root-state" : entry.sessionId;
+      const scopeLabel = entry.scope === "root"
+        ? "root-state"
+        : entry.scope === "claude_team"
+          ? `claude-team:${entry.teamName || entry.sessionId}`
+          : entry.sessionId;
       warn(`${scopeLabel}: stale team (경과=${ageLabel}, 프로세스 없음)`);
       if (entry.teamName) info(`팀: ${entry.teamName}`);
-      info(`파일: ${entry.stateFile}`);
+      info(`파일: ${entry.stateFile || entry.cleanupPath}`);
     }
 
     if (fix) {
-      const cleanupResult = cleanupStaleOmcTeams(omcTeamReport.entries);
+      const cleanupResult = await cleanupStaleOmcTeams(omcTeamReport.entries);
       for (const result of cleanupResult.results) {
         if (result.ok) {
-          ok(`stale team 정리: ${result.entry.scope === "root" ? "root-state" : result.entry.sessionId}`);
+          const label = result.entry.scope === "root"
+            ? "root-state"
+            : result.entry.scope === "claude_team"
+              ? (result.entry.teamName || result.entry.sessionId)
+              : result.entry.sessionId;
+          ok(`stale team 정리: ${label}`);
         } else {
-          fail(`stale team 정리 실패: ${result.entry.scope === "root" ? "root-state" : result.entry.sessionId} — ${result.error.message}`);
+          const label = result.entry.scope === "root"
+            ? "root-state"
+            : result.entry.scope === "claude_team"
+              ? (result.entry.teamName || result.entry.sessionId)
+              : result.entry.sessionId;
+          fail(`stale team 정리 실패: ${label} — ${result.error.message}`);
         }
       }
       issues += cleanupResult.failed;
@@ -883,6 +1375,7 @@ async function cmdDoctor(options = {}) {
         try { return statSync(join(teamsDir, d)).isDirectory(); } catch { return false; }
       });
       if (teamDirs.length === 0) {
+        addDoctorCheck(report, { name: "stale-teams", status: "ok", entries: 0 });
         ok("잔존 팀 없음");
       } else {
         const nowMs = Date.now();
@@ -895,6 +1388,7 @@ async function cmdDoctor(options = {}) {
           const configPath = join(teamPath, "config.json");
           let teamConfig = null;
           let configMtimeMs = null;
+          let missingConfig = false;
 
           // config.json 읽기 — createdAt 또는 mtime으로 나이 판정
           try {
@@ -902,7 +1396,8 @@ async function cmdDoctor(options = {}) {
             configMtimeMs = configStat.mtimeMs;
             teamConfig = JSON.parse(readFileSync(configPath, "utf8"));
           } catch {
-            // config.json 없으면 디렉토리 mtime 사용
+            missingConfig = true;
+            // config.json 없으면 표시용 경과 시간만 디렉토리 기준으로 계산
             try { configMtimeMs = statSync(teamPath).mtimeMs; } catch {}
           }
 
@@ -955,7 +1450,7 @@ async function cmdDoctor(options = {}) {
             }
           }
 
-          const stale = aged && !hasActiveMember;
+          const stale = missingConfig || (aged && !hasActiveMember);
           const teamEntry = {
             name: d,
             teamName: teamConfig?.name || d,
@@ -964,6 +1459,7 @@ async function cmdDoctor(options = {}) {
             ageSec,
             stale,
             hasActiveMember,
+            missingConfig,
           };
 
           if (stale) {
@@ -982,12 +1478,15 @@ async function cmdDoctor(options = {}) {
 
         // stale 팀 표시 및 정리
         if (staleTeams.length === 0 && activeTeams.length > 0) {
+          addDoctorCheck(report, { name: "stale-teams", status: "ok", active: activeTeams.length, stale: 0 });
           ok("stale 팀 없음");
         } else if (staleTeams.length > 0) {
+          addDoctorCheck(report, { name: "stale-teams", status: "issues", active: activeTeams.length, stale: staleTeams.length, fix: "tfx doctor --fix" });
           warn(`${staleTeams.length}개 stale 팀 발견`);
           for (const t of staleTeams) {
             const ageLabel = formatElapsedAge(t.ageSec);
-            warn(`${t.name}: stale (경과=${ageLabel}, 멤버=${t.memberCount}명, 활성 프로세스 없음)`);
+            const reasonLabel = t.missingConfig ? "config.json 없음" : "활성 프로세스 없음";
+            warn(`${t.name}: stale (경과=${ageLabel}, 멤버=${t.memberCount}명, ${reasonLabel})`);
             if (t.description) info(`설명: ${t.description}`);
           }
 
@@ -995,19 +1494,11 @@ async function cmdDoctor(options = {}) {
             let cleaned = 0;
             for (const t of staleTeams) {
               try {
-                rmSync(join(teamsDir, t.name), { recursive: true, force: true });
+                await forceCleanupTeam(t.name);
                 cleaned++;
                 ok(`stale 팀 정리: ${t.name}`);
               } catch (e) {
                 fail(`팀 정리 실패: ${t.name} — ${e.message}`);
-              }
-              // 연관 tasks 디렉토리도 정리
-              const taskDir = join(tasksDir, t.name);
-              if (existsSync(taskDir)) {
-                try {
-                  rmSync(taskDir, { recursive: true, force: true });
-                  ok(`연관 tasks 정리: ${t.name}`);
-                } catch {}
               }
             }
             info(`${cleaned}/${staleTeams.length}개 stale 팀 정리 완료`);
@@ -1018,9 +1509,11 @@ async function cmdDoctor(options = {}) {
         }
       }
     } catch (e) {
+      addDoctorCheck(report, { name: "stale-teams", status: "invalid", fix: "teams 디렉토리 구조를 확인하세요." });
       warn(`teams 디렉토리 읽기 실패: ${e.message}`);
     }
   } else {
+    addDoctorCheck(report, { name: "stale-teams", status: "ok", entries: 0 });
     ok("잔존 팀 없음");
   }
 
@@ -1031,10 +1524,15 @@ async function cmdDoctor(options = {}) {
   } else {
     console.log(`  ${YELLOW}${BOLD}⚠ ${issues}개 항목 확인 필요${RESET}\n`);
   }
+    report.issue_count = issues;
+    report.status = issues === 0 ? "ok" : "issues";
+    if (json) printJson(report);
+    return report;
+  });
 }
 
 function cmdUpdate() {
-  const isDev = isDevUpdateRequested(process.argv);
+  const isDev = isDevUpdateRequested(NORMALIZED_ARGS);
   const tagLabel = isDev ? ` ${YELLOW}--dev${RESET}` : "";
   console.log(`\n${BOLD}triflux update${RESET}${tagLabel}\n`);
 
@@ -1070,6 +1568,7 @@ function cmdUpdate() {
         encoding: "utf8",
         timeout: 10000,
         stdio: ["pipe", "pipe", "ignore"],
+        windowsHide: true,
       });
       if (npmList.includes("triflux")) installMode = "npm-global";
     } catch {}
@@ -1101,6 +1600,7 @@ function cmdUpdate() {
           encoding: "utf8",
           timeout: 30000,
           cwd: gitDir,
+          windowsHide: true,
         }).trim();
         ok(`git pull — ${result}`);
         updated = true;
@@ -1111,13 +1611,26 @@ function cmdUpdate() {
         if (stoppedHubInfo?.pid) {
           info(`실행 중 hub 정지 (PID ${stoppedHubInfo.pid})`);
         }
-        const npmCmd = isDev ? "npm install -g triflux@dev" : "npm update -g triflux";
-        const result = execSync(npmCmd, {
-          encoding: "utf8",
-          timeout: 60000,
-          stdio: ["pipe", "pipe", "ignore"],
-        }).trim().split(/\r?\n/)[0];
-        ok(`${isDev ? "npm install -g triflux@dev" : "npm update -g triflux"} — ${result || "완료"}`);
+        const npmCmd = isDev ? "npm install -g triflux@dev" : "npm install -g triflux@latest";
+        let result;
+        try {
+          result = execSync(npmCmd, {
+            encoding: "utf8",
+            timeout: 90000,
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
+          }).trim().split(/\r?\n/)[0];
+        } catch (retryErr) {
+          // Windows: 자기 자신의 파일 잠금으로 첫 시도 실패 가능 → 1회 재시도
+          info("첫 시도 실패, 재시도 중...");
+          result = execSync(npmCmd, {
+            encoding: "utf8",
+            timeout: 90000,
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
+          }).trim().split(/\r?\n/)[0];
+        }
+        ok(`${npmCmd} — ${result || "완료"}`);
         updated = true;
         break;
       }
@@ -1128,6 +1641,7 @@ function cmdUpdate() {
           timeout: 60000,
           cwd: process.cwd(),
           stdio: ["pipe", "pipe", "ignore"],
+          windowsHide: true,
         }).trim().split(/\r?\n/)[0];
         ok(`${isDev ? "npm install triflux@dev" : "npm update triflux"} — ${result || "완료"}`);
         updated = true;
@@ -1138,6 +1652,7 @@ function cmdUpdate() {
           encoding: "utf8",
           timeout: 30000,
           cwd: PKG_ROOT,
+          windowsHide: true,
         }).trim();
         ok(`git pull — ${result}`);
         updated = true;
@@ -1152,7 +1667,8 @@ function cmdUpdate() {
     if (stoppedHubInfo && startHubAfterUpdate(stoppedHubInfo)) {
       info("업데이트 실패 후 hub 재기동 시도");
     }
-    fail(`업데이트 실패: ${e.message}`);
+    const stderr = e.stderr?.toString().trim();
+    fail(`업데이트 실패: ${e.message}${stderr ? `\n  ${stderr.split(/\r?\n/)[0]}` : ""}`);
     return;
   }
 
@@ -1186,53 +1702,126 @@ function cmdUpdate() {
   console.log(`${GREEN}${BOLD}업데이트 완료${RESET}\n`);
 }
 
-function cmdList() {
-  console.log(`\n  ${AMBER}${BOLD}⬡ triflux list${RESET} ${VER}\n`);
-  console.log(`  ${LINE}`);
-
+function cmdList(options = {}) {
+  const { json = false } = options;
   const pluginSkills = join(PKG_ROOT, "skills");
   const installedSkills = join(CLAUDE_DIR, "skills");
+  const packageSkills = [];
+  const userSkills = [];
 
-  section("패키지 스킬");
   if (existsSync(pluginSkills)) {
     for (const name of readdirSync(pluginSkills).sort()) {
       const src = join(pluginSkills, name, "SKILL.md");
       if (!existsSync(src)) continue;
       const dst = join(installedSkills, name, "SKILL.md");
-      const installed = existsSync(dst);
-      if (installed) {
-        console.log(`    ${GREEN_BRIGHT}✓${RESET} ${BOLD}${name}${RESET}`);
-      } else {
-        console.log(`    ${RED_BRIGHT}✗${RESET} ${DIM}${name}${RESET} ${GRAY}(미설치)${RESET}`);
-      }
+      packageSkills.push({ name, installed: existsSync(dst) });
     }
   }
 
-  section("사용자 스킬");
   const pkgNames = new Set(existsSync(pluginSkills) ? readdirSync(pluginSkills) : []);
-  let userCount = 0;
   if (existsSync(installedSkills)) {
     for (const name of readdirSync(installedSkills).sort()) {
       if (pkgNames.has(name)) continue;
       const skill = join(installedSkills, name, "SKILL.md");
       if (!existsSync(skill)) continue;
-      console.log(`    ${AMBER}◆${RESET} ${name}`);
-      userCount++;
+      userSkills.push(name);
     }
   }
-  if (userCount === 0) console.log(`    ${GRAY}없음${RESET}`);
+
+  if (json) {
+    printJson({
+      package_skills: packageSkills,
+      user_skills: userSkills,
+      install_path: installedSkills,
+    });
+    return;
+  }
+
+  console.log(`\n  ${AMBER}${BOLD}⬡ triflux list${RESET} ${VER}\n`);
+  console.log(`  ${LINE}`);
+
+  section("패키지 스킬");
+  for (const skill of packageSkills) {
+    if (skill.installed) {
+      console.log(`    ${GREEN_BRIGHT}✓${RESET} ${BOLD}${skill.name}${RESET}`);
+    } else {
+      console.log(`    ${RED_BRIGHT}✗${RESET} ${DIM}${skill.name}${RESET} ${GRAY}(미설치)${RESET}`);
+    }
+  }
+
+  section("사용자 스킬");
+  for (const name of userSkills) {
+    console.log(`    ${AMBER}◆${RESET} ${name}`);
+  }
+  if (userSkills.length === 0) console.log(`    ${GRAY}없음${RESET}`);
 
   console.log(`\n  ${LINE}`);
   console.log(`  ${GRAY}${installedSkills}${RESET}\n`);
 }
 
-function cmdVersion() {
+function cmdVersion(options = {}) {
+  const { json = false } = options;
   const routeVer = getVersion(join(CLAUDE_DIR, "scripts", "tfx-route.sh"));
   const hudVer = getVersion(join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"));
+  if (json) {
+    printJson({
+      triflux: PKG.version,
+      tfx_route: routeVer,
+      hud: hudVer,
+      node: process.versions.node,
+    });
+    return;
+  }
   console.log(`\n  ${AMBER}${BOLD}⬡ triflux${RESET} ${WHITE_BRIGHT}v${PKG.version}${RESET}`);
   if (routeVer) console.log(`  ${GRAY}tfx-route${RESET}  v${routeVer}`);
   if (hudVer) console.log(`  ${GRAY}hud${RESET}        v${hudVer}`);
   console.log("");
+}
+
+function cmdSchema(args = []) {
+  const bundle = loadDelegatorSchemaBundle();
+  const selector = String(args[0] || "").trim();
+  const toolEntry = Array.isArray(bundle["x-triflux-mcp-tools"])
+    ? bundle["x-triflux-mcp-tools"].find((tool) => tool.name === selector)
+    : null;
+
+  if (!selector) {
+    printJson({
+      $schema: bundle.$schema,
+      title: "Triflux CLI Schema Bundle",
+      global_options: [
+        { name: "--json", type: "boolean", description: "지원 커맨드의 출력을 JSON으로 전환" },
+      ],
+      commands: CLI_COMMAND_SCHEMAS,
+      hub_tools: bundle,
+    });
+    return;
+  }
+
+  if (CLI_COMMAND_SCHEMAS[selector]) {
+    printJson({
+      command: selector,
+      ...CLI_COMMAND_SCHEMAS[selector],
+    });
+    return;
+  }
+
+  if (toolEntry) {
+    printJson({
+      tool: toolEntry.name,
+      description: toolEntry.description,
+      pipeAction: toolEntry.pipeAction,
+      inputSchema: bundle.$defs?.[toolEntry.inputSchemaDef] || null,
+      outputSchema: bundle.$defs?.[toolEntry.outputSchemaDef] || null,
+    });
+    return;
+  }
+
+  throw createCliError(`알 수 없는 schema 대상: ${selector}`, {
+    exitCode: EXIT_ARG_ERROR,
+    reason: "argError",
+    fix: "tfx schema 또는 tfx schema <command>를 실행해 사용 가능한 대상을 확인하세요.",
+  });
 }
 
 function checkForUpdate() {
@@ -1255,6 +1844,7 @@ function checkForUpdate() {
       encoding: "utf8",
       timeout: 5000,
       stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
     }).trim();
 
     if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
@@ -1281,13 +1871,18 @@ ${updateNotice}
   ${BOLD}Commands${RESET}
 
     ${WHITE_BRIGHT}tfx setup${RESET}      ${GRAY}파일 동기화 + HUD 설정${RESET}
+    ${DIM}  --dry-run${RESET}    ${GRAY}변경 예정 작업을 JSON으로 미리보기${RESET}
     ${WHITE_BRIGHT}tfx doctor${RESET}     ${GRAY}CLI 진단 + 이슈 확인${RESET}
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
+    ${DIM}  --json${RESET}       ${GRAY}구조화된 진단 결과 JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
+    ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
+    ${WHITE_BRIGHT}tfx tray${RESET}       ${GRAY}Windows 시스템 트레이 실행${RESET}
+    ${DIM}  --detach${RESET}      ${GRAY}백그라운드 트레이 프로세스로 분리${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
@@ -1307,8 +1902,7 @@ ${updateNotice}
 `);
 }
 
-async function cmdCodexTeam() {
-  const args = process.argv.slice(3);
+async function cmdCodexTeam(args = []) {
   const sub = String(args[0] || "").toLowerCase();
   const passthrough = new Set([
     "status", "attach", "stop", "kill", "send", "list", "help", "--help", "-h",
@@ -1346,7 +1940,7 @@ async function cmdCodexTeam() {
   const prevProfile = process.env.TFX_TEAM_PROFILE;
   process.env.TFX_TEAM_PROFILE = "codex-team";
   const { pathToFileURL } = await import("node:url");
-  const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
+  const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli", "index.mjs")).href);
   process.argv = [prevArgv[0], prevArgv[1], "team", ...forwarded];
   try {
     await cmdTeam();
@@ -1400,6 +1994,7 @@ function stopHubForUpdate() {
       execFileSync("taskkill", ["/PID", String(info.pid), "/T", "/F"], {
         stdio: ["pipe", "pipe", "ignore"],
         timeout: 10000,
+        windowsHide: true,
       });
     } else {
       process.kill(info.pid, "SIGTERM");
@@ -1442,6 +2037,7 @@ function startHubAfterUpdate(info) {
       env: { ...process.env, TFX_HUB_PORT: port },
       stdio: "ignore",
       detached: true,
+      windowsHide: true,
     });
     child.unref();
     return true;
@@ -1458,11 +2054,11 @@ function autoRegisterMcp(mcpUrl) {
   if (which("codex")) {
     try {
       // 이미 등록됐는지 확인
-      const list = execSync("codex mcp list 2>&1", { encoding: "utf8", timeout: 10000, stdio: ["pipe", "pipe", "pipe"] });
+      const list = execSync("codex mcp list 2>&1", { encoding: "utf8", timeout: 10000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
       if (list.includes("tfx-hub")) {
         ok("Codex: 이미 등록됨");
       } else {
-        execFileSync("codex", ["mcp", "add", "tfx-hub", "--url", mcpUrl], { timeout: 10000, stdio: "ignore" });
+        execFileSync("codex", ["mcp", "add", "tfx-hub", "--url", mcpUrl], { timeout: 10000, stdio: "ignore", windowsHide: true });
         ok("Codex: MCP 등록 완료");
       }
     } catch {
@@ -1524,8 +2120,9 @@ function autoRegisterMcp(mcpUrl) {
   } catch (e) { warn(`Claude 등록 실패: ${e.message}`); }
 }
 
-async function cmdHub() {
-  const sub = process.argv[3] || "status";
+async function cmdHub(args = [], options = {}) {
+  const { json = false } = options;
+  const sub = args[0] || "status";
   const defaultPortRaw = Number(process.env.TFX_HUB_PORT || "27888");
   const probePort = Number.isFinite(defaultPortRaw) && defaultPortRaw > 0 ? defaultPortRaw : 27888;
   const formatHostForUrl = (host) => host.includes(":") ? `[${host}]` : host;
@@ -1556,6 +2153,11 @@ async function cmdHub() {
       }));
     } catch {}
   };
+  const emitHubStatus = (payload) => {
+    if (!json) return false;
+    printJson(payload);
+    return true;
+  };
 
   switch (sub) {
     case "start": {
@@ -1572,19 +2174,23 @@ async function cmdHub() {
         }
       }
 
-      const portArg = process.argv.indexOf("--port");
-      const port = portArg !== -1 ? process.argv[portArg + 1] : "27888";
+      const portArg = args.indexOf("--port");
+      const port = portArg !== -1 ? args[portArg + 1] : "27888";
       const serverPath = join(PKG_ROOT, "hub", "server.mjs");
 
       if (!existsSync(serverPath)) {
-        fail("hub/server.mjs 없음 — hub 모듈이 설치되지 않음");
-        return;
+        throw createCliError("hub/server.mjs 없음 — hub 모듈이 설치되지 않음", {
+          exitCode: EXIT_HUB_ERROR,
+          reason: "hubError",
+          fix: "hub 모듈이 포함된 triflux 설치본인지 확인한 뒤 다시 실행하세요.",
+        });
       }
 
       const child = spawn(process.execPath, [serverPath], {
         env: { ...process.env, TFX_HUB_PORT: port },
         stdio: "ignore",
         detached: true,
+        windowsHide: true,
       });
       child.unref();
 
@@ -1601,7 +2207,7 @@ async function cmdHub() {
         console.log(`\n  ${GREEN_BRIGHT}✓${RESET} ${BOLD}tfx-hub 시작${RESET}`);
         console.log(`    URL:  ${AMBER}${hubInfo.url}${RESET}`);
         console.log(`    PID:  ${hubInfo.pid}`);
-        console.log(`    DB:   ${DIM}${HUB_PID_DIR}/state.db${RESET}`);
+        console.log(`    DB:   ${DIM}${getPipelineStateDbPath(PKG_ROOT)}${RESET}`);
         console.log("");
         autoRegisterMcp(hubInfo.url);
         console.log("");
@@ -1645,24 +2251,41 @@ async function cmdHub() {
         if (!probed) {
           const fallback = probePort === 27888 ? null : await probeHubStatus("127.0.0.1", 27888, 1500);
           if (fallback) {
-          console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(default port probe 성공)${RESET}`);
-          console.log(`    URL:     http://127.0.0.1:${fallback.port || 27888}/mcp`);
-          if (fallback.pid !== undefined) console.log(`    PID:     ${fallback.pid}`);
-          if (fallback.hub?.state) console.log(`    State:   ${fallback.hub.state}`);
-          if (fallback.sessions !== undefined) console.log(`    Sessions: ${fallback.sessions}`);
-          recoverPidFile(fallback, "127.0.0.1");
-          console.log("");
-          return;
-        }
+            recoverPidFile(fallback, "127.0.0.1");
+            if (emitHubStatus({
+              status: "online",
+              source: "default-port-probe",
+              url: `http://127.0.0.1:${fallback.port || 27888}/mcp`,
+              pid: fallback.pid,
+              state: fallback.hub?.state || null,
+              sessions: fallback.sessions,
+            })) return;
+            console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(default port probe 성공)${RESET}`);
+            console.log(`    URL:     http://127.0.0.1:${fallback.port || 27888}/mcp`);
+            if (fallback.pid !== undefined) console.log(`    PID:     ${fallback.pid}`);
+            if (fallback.hub?.state) console.log(`    State:   ${fallback.hub.state}`);
+            if (fallback.sessions !== undefined) console.log(`    Sessions: ${fallback.sessions}`);
+            console.log("");
+            return;
+          }
+          if (emitHubStatus({ status: "offline", source: "probe", url: null, pid: null, state: null, sessions: 0 })) return;
           console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET}\n`);
           return;
         }
+        recoverPidFile(probed, "127.0.0.1");
+        if (emitHubStatus({
+          status: "online",
+          source: "probe",
+          url: `http://127.0.0.1:${probed.port || probePort}/mcp`,
+          pid: probed.pid,
+          state: probed.hub?.state || null,
+          sessions: probed.sessions,
+        })) return;
         console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(pid file 없음 / probe 성공)${RESET}`);
         console.log(`    URL:     http://127.0.0.1:${probed.port || probePort}/mcp`);
         if (probed.pid !== undefined) console.log(`    PID:     ${probed.pid}`);
         if (probed.hub?.state) console.log(`    State:   ${probed.hub.state}`);
         if (probed.sessions !== undefined) console.log(`    Sessions: ${probed.sessions}`);
-        recoverPidFile(probed, "127.0.0.1");
         console.log("");
         return;
       }
@@ -1674,38 +2297,55 @@ async function cmdHub() {
           : uptime < 3600000 ? `${Math.round(uptime / 60000)}분`
           : `${Math.round(uptime / 3600000)}시간`;
 
+        let data = null;
+        try {
+          const host = typeof info.host === "string" ? info.host : "127.0.0.1";
+          const port = Number(info.port) || probePort;
+          data = await probeHubStatus(host, port, 3000);
+        } catch {}
+
+        if (emitHubStatus({
+          status: "online",
+          source: "pid-file",
+          url: info.url,
+          pid: info.pid,
+          uptime_ms: uptime,
+          state: data?.hub?.state || null,
+          sessions: data?.sessions,
+        })) return;
         console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET}`);
         console.log(`    URL:     ${info.url}`);
         console.log(`    PID:     ${info.pid}`);
         console.log(`    Uptime:  ${uptimeStr}`);
-
-        // HTTP 상태 조회 시도
-        try {
-          const host = typeof info.host === "string" ? info.host : "127.0.0.1";
-          const port = Number(info.port) || probePort;
-          const data = await probeHubStatus(host, port, 3000);
-          if (data.hub) {
-            console.log(`    State:   ${data.hub.state}`);
-          }
-          if (data.sessions !== undefined) {
-            console.log(`    Sessions: ${data.sessions}`);
-          }
-        } catch {}
-
+        if (data?.hub) {
+          console.log(`    State:   ${data.hub.state}`);
+        }
+        if (data?.sessions !== undefined) {
+          console.log(`    Sessions: ${data.sessions}`);
+        }
         console.log("");
       } catch {
         try { unlinkSync(HUB_PID_FILE); } catch {}
         const probed = await probeHubStatus();
         if (!probed) {
+          if (emitHubStatus({ status: "offline", source: "stale-pid", url: null, pid: null, state: null, sessions: 0 })) break;
           console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET} ${DIM}(stale PID 정리됨)${RESET}\n`);
           break;
         }
+        recoverPidFile(probed, "127.0.0.1");
+        if (emitHubStatus({
+          status: "online",
+          source: "stale-pid-probe",
+          url: `http://127.0.0.1:${probed.port || probePort}/mcp`,
+          pid: probed.pid,
+          state: probed.hub?.state || null,
+          sessions: probed.sessions,
+        })) break;
         console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(stale PID 정리 후 probe 성공)${RESET}`);
         console.log(`    URL:     http://127.0.0.1:${probed.port || probePort}/mcp`);
         if (probed.pid !== undefined) console.log(`    PID:     ${probed.pid}`);
         if (probed.hub?.state) console.log(`    State:   ${probed.hub.state}`);
         if (probed.sessions !== undefined) console.log(`    Sessions: ${probed.sessions}`);
-        recoverPidFile(probed, "127.0.0.1");
         console.log("");
       }
       break;
@@ -1722,41 +2362,115 @@ async function cmdHub() {
 
 // ── 메인 ──
 
-const cmd = process.argv[2] || "help";
+async function main() {
+  const cmd = NORMALIZED_ARGS[0] || "help";
+  const cmdArgs = NORMALIZED_ARGS.slice(1);
 
-switch (cmd) {
-  case "setup":   cmdSetup(); break;
-  case "doctor": {
-    const fix = process.argv.includes("--fix");
-    const reset = process.argv.includes("--reset");
-    await cmdDoctor({ fix, reset });
-    break;
+  switch (cmd) {
+    case "setup":
+      cmdSetup({ dryRun: cmdArgs.includes("--dry-run") });
+      return;
+    case "doctor": {
+      const fix = cmdArgs.includes("--fix");
+      const reset = cmdArgs.includes("--reset");
+      await cmdDoctor({ fix, reset, json: JSON_OUTPUT });
+      return;
+    }
+    case "schema":
+      cmdSchema(cmdArgs);
+      return;
+    case "update":
+      cmdUpdate();
+      return;
+    case "list":
+    case "ls":
+      cmdList({ json: JSON_OUTPUT });
+      return;
+    case "hub":
+      await cmdHub(cmdArgs, { json: JSON_OUTPUT && (cmdArgs[0] || "status") === "status" });
+      return;
+    case "tray": {
+      const trayUrl = new URL("../hub/tray.mjs", import.meta.url);
+      const trayPath = fileURLToPath(trayUrl);
+      if (cmdArgs.includes("--attach")) {
+        // --attach: 포그라운드 모드 (디버깅용)
+        const { startTray } = await import(trayUrl.href);
+        await startTray();
+        return;
+      }
+      // 기본: detach 모드 (프리징 방지)
+      const child = spawn(process.execPath, [trayPath], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+      console.log(`\n  ${GREEN_BRIGHT}✓${RESET} tray 시작됨 (PID ${child.pid})\n`);
+      return;
+    }
+    case "multi": {
+      const subcommand = cmdArgs[0] || "";
+      if (JSON_OUTPUT) process.env.TFX_OUTPUT_JSON = "1";
+      else delete process.env.TFX_OUTPUT_JSON;
+      if (subcommand !== "status") {
+        await checkHubRunning();
+      }
+      const { pathToFileURL } = await import("node:url");
+      const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli", "index.mjs")).href);
+      const prevArgv = process.argv;
+      process.argv = [prevArgv[0], prevArgv[1], "team", ...cmdArgs];
+      try {
+        await cmdTeam();
+      } finally {
+        process.argv = prevArgv;
+        delete process.env.TFX_OUTPUT_JSON;
+      }
+      return;
+    }
+    case "codex-team":
+      if (JSON_OUTPUT) process.env.TFX_OUTPUT_JSON = "1";
+      else delete process.env.TFX_OUTPUT_JSON;
+      await checkHubRunning();
+      try {
+        await cmdCodexTeam(cmdArgs);
+      } finally {
+        delete process.env.TFX_OUTPUT_JSON;
+      }
+      return;
+    case "notion-read":
+    case "nr": {
+      const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
+      try {
+        execFileSync(process.execPath, [scriptPath, ...cmdArgs], { stdio: "inherit", timeout: 660000 });
+      } catch (e) {
+        throw createCliError(e.message || "notion-read 실행 실패", {
+          exitCode: e.status || EXIT_ERROR,
+          reason: "error",
+        });
+      }
+      return;
+    }
+    case "version":
+    case "--version":
+    case "-v":
+      cmdVersion({ json: JSON_OUTPUT });
+      return;
+    case "help":
+    case "--help":
+    case "-h":
+      cmdHelp();
+      return;
+    default:
+      throw createCliError(`알 수 없는 명령: ${cmd}`, {
+        exitCode: EXIT_ARG_ERROR,
+        reason: "argError",
+        fix: "tfx --help",
+      });
   }
-  case "update":  cmdUpdate(); break;
-  case "list": case "ls": cmdList(); break;
-  case "hub":     await cmdHub(); break;
-  case "multi": {
-    await checkHubRunning();
-    const { pathToFileURL } = await import("node:url");
-    const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
-    await cmdTeam();
-    break;
-  }
-  case "codex-team":
-    await checkHubRunning();
-    await cmdCodexTeam();
-    break;
-  case "notion-read": case "nr": {
-    const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
-    try {
-      execFileSync(process.execPath, [scriptPath, ...process.argv.slice(3)], { stdio: "inherit", timeout: 660000 });
-    } catch (e) { process.exit(e.status || 1); }
-    break;
-  }
-  case "version": case "--version": case "-v": cmdVersion(); break;
-  case "help": case "--help": case "-h": cmdHelp(); break;
-  default:
-    console.error(`알 수 없는 명령: ${cmd}`);
-    cmdHelp();
-    process.exit(1);
+}
+
+try {
+  await main();
+} catch (error) {
+  handleFatalError(error, { json: JSON_OUTPUT });
 }

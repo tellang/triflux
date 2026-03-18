@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "3.3.0-dev.8",
+  "version": "4.1.3",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -26,6 +26,7 @@
   ],
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "preinstall": "node scripts/preinstall.mjs",
     "postinstall": "node scripts/setup.mjs",
     "test": "node --test --test-force-exit --test-concurrency=1 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
     "test:unit": "node --test --test-force-exit --test-concurrency=1 tests/unit/**/*.test.mjs",
@@ -43,8 +44,9 @@
   "author": "tellang",
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^12.6.2",
-    "@modelcontextprotocol/sdk": "^1.27.1"
+    "systray2": "^2.1.4"
   },
   "keywords": [
     "claude-code",

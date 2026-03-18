@@ -22,7 +22,7 @@ const GIT_BASH_CANDIDATES = [
 function findGitBashExe() {
   for (const p of GIT_BASH_CANDIDATES) {
     try {
-      execSync(`"${p}" --version`, { stdio: "ignore", timeout: 3000 });
+      execSync(`"${p}" --version`, { stdio: "ignore", timeout: 3000, windowsHide: true });
       return p;
     } catch {
       // 다음 후보
@@ -35,7 +35,7 @@ function findGitBashExe() {
 export function hasWindowsTerminal() {
   if (process.platform !== "win32") return false;
   try {
-    execSync("where wt.exe", { stdio: "ignore", timeout: 3000 });
+    execSync("where wt.exe", { stdio: "ignore", timeout: 3000, windowsHide: true });
     return true;
   } catch {
     return false;
@@ -50,7 +50,7 @@ export function hasWindowsTerminalSession() {
 /** tmux 실행 가능 여부 확인 */
 function hasTmux() {
   try {
-    execSync("tmux -V", { stdio: "ignore", timeout: 3000 });
+    execSync("tmux -V", { stdio: "ignore", timeout: 3000, windowsHide: true });
     return true;
   } catch {
     return false;
@@ -60,7 +60,7 @@ function hasTmux() {
 /** WSL2 내 tmux 사용 가능 여부 (Windows 전용) */
 function hasWslTmux() {
   try {
-    execSync("wsl tmux -V", { stdio: "ignore", timeout: 5000 });
+    execSync("wsl tmux -V", { stdio: "ignore", timeout: 5000, windowsHide: true });
     return true;
   } catch {
     return false;
@@ -76,6 +76,7 @@ function hasGitBashTmux() {
       encoding: "utf8",
       timeout: 5000,
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
     return (r.status ?? 1) === 0;
   } catch {
@@ -130,6 +131,7 @@ function tmux(args, opts = {}) {
       encoding: "utf8",
       timeout: 10000,
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
       ...opts,
     });
     if ((r.status ?? 1) !== 0) {
@@ -145,6 +147,7 @@ function tmux(args, opts = {}) {
     encoding: "utf8",
     timeout: 10000,
     stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
     ...opts,
   });
   return result != null ? result.trim() : "";

@@ -28,7 +28,7 @@ describe('hub/team/native.mjs — route env prefix', () => {
     // v2.3: Bash 완료 후 TaskUpdate + SendMessage로 Claude Code 태스크 동기화
     assert.match(prompt, /TaskUpdate\(taskId:/);
     assert.match(prompt, /SendMessage\(type: "message"/);
-    assert.match(prompt, /허용 도구: Bash, TaskUpdate, SendMessage만 사용한다/);
+    assert.match(prompt, /허용 도구: Bash, TaskUpdate, TaskGet, TaskList, SendMessage만 사용한다/);
   });
 
   it('하이브리드 래퍼는 명시적 workerIndex와 searchTool을 함께 주입해야 한다', () => {

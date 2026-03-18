@@ -55,6 +55,7 @@ export function getCodexMcp() {
       encoding: 'utf8',
       timeout: 15000,
       stdio: ['pipe', 'pipe', 'ignore'],
+      windowsHide: true,
     });
     const lines = output.trim().split(/\r?\n/).filter((line) => line.trim());
     if (lines.length < 2) return [];

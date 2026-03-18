@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, createWriteStream } from "node:fs";
 import { dirname, join } from "node:path";
 import { verifySlimWrapperRouteExecution } from "./native.mjs";
+import { forceCleanupTeam } from "./nativeProxy.mjs";
 
 const ROUTE_LOG_TAIL_BYTES = 65536;
 
@@ -73,6 +74,7 @@ if (!args.config) {
 const config = await readJson(args.config);
 const {
   sessionName,
+  teamName = sessionName,
   runtimeFile,
   logsDir,
   startupDelayMs = 3000,
@@ -224,7 +226,7 @@ function maybeAutoShutdown() {
   shutdown();
 }
 
-function shutdown() {
+async function shutdown() {
   if (isShuttingDown) return;
   isShuttingDown = true;
 
@@ -236,6 +238,10 @@ function shutdown() {
     try { state.outWs.end(); } catch {}
     try { state.errWs.end(); } catch {}
   }
+
+  try {
+    await forceCleanupTeam(teamName);
+  } catch {}
 
   setTimeout(() => {
     for (const state of processMap.values()) {

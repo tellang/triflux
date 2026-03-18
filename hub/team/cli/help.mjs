@@ -1,20 +1,6 @@
-// hub/team/cli.mjs — team CLI UI/네비게이션 진입점
-// bin/triflux.mjs에서 import하여 사용
-import { AMBER, GRAY, DIM, BOLD, RESET, WHITE } from "./shared.mjs";
-import { TEAM_SUBCOMMANDS } from "./cli-team-common.mjs";
-import { teamStart } from "./cli-team-start.mjs";
-import { teamStatus, teamTasks, teamTaskUpdate, teamDebug, teamList } from "./cli-team-status.mjs";
-import {
-  teamAttach,
-  teamFocus,
-  teamInterrupt,
-  teamControl,
-  teamStop,
-  teamKill,
-  teamSend,
-} from "./cli-team-control.mjs";
+import { AMBER, BOLD, DIM, GRAY, RESET, WHITE } from "../shared.mjs";
 
-function teamHelp() {
+export function renderTeamHelp() {
   console.log(`
   ${AMBER}${BOLD}⬡ tfx multi${RESET} ${DIM}멀티-CLI 팀 모드 (Lead + Teammates)${RESET}
 
@@ -49,51 +35,4 @@ function teamHelp() {
     ${WHITE}Escape${RESET}      ${GRAY}현재 팀메이트 인터럽트${RESET}
     ${WHITE}Ctrl+T${RESET}      ${GRAY}태스크 목록 토글${RESET}
 `);
-}
-
-/**
- * tfx multi 서브커맨드 라우터
- * bin/triflux.mjs에서 호출
- */
-export async function cmdTeam() {
-  const rawSub = process.argv[3];
-  const sub = typeof rawSub === "string" ? rawSub.toLowerCase() : rawSub;
-
-  switch (sub) {
-    case "status":
-      return teamStatus();
-    case "debug":
-      return teamDebug();
-    case "tasks":
-      return teamTasks();
-    case "task":
-      return teamTaskUpdate();
-    case "attach":
-      return teamAttach();
-    case "focus":
-      return teamFocus();
-    case "interrupt":
-      return teamInterrupt();
-    case "control":
-      return teamControl();
-    case "stop":
-      return teamStop();
-    case "kill":
-      return teamKill();
-    case "send":
-      return teamSend();
-    case "list":
-      return teamList();
-    case "help":
-    case "--help":
-    case "-h":
-      return teamHelp();
-    case undefined:
-      return teamHelp();
-    default:
-      if (typeof sub === "string" && !sub.startsWith("-") && TEAM_SUBCOMMANDS.has(sub)) {
-        return teamHelp();
-      }
-      return teamStart();
-  }
 }

@@ -9,8 +9,8 @@
 </p>
 
 <p align="center">
-  <strong>CLI 기반 멀티모델 오케스트레이터</strong><br>
-  <em>Codex, Gemini, Claude에 작업을 라우팅 — 적합한 모델에 작업을 라우팅하여 Claude 토큰을 절약하세요</em>
+  <strong>Claude Code를 위한 멀티모델 오케스트레이션 허브</strong><br>
+  <em>Claude 토큰 절약의 핵심. 고성능 Hub IPC를 통해 모든 작업을 Codex와 Gemini로 라우팅하세요.</em>
 </p>
 
 <p align="center">
@@ -19,7 +19,6 @@
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
   <a href="https://github.com/tellang/triflux/actions"><img src="https://img.shields.io/github/actions/workflow/status/tellang/triflux/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node.js >= 18"></a>
 </p>
 
 <p align="center">
@@ -32,248 +31,158 @@
 
 <p align="center">
   <a href="#빠른-시작">빠른 시작</a> ·
-  <a href="#스킬">스킬</a> ·
   <a href="#아키텍처">아키텍처</a> ·
-  <a href="#설정-가이드">설정 가이드</a>
+  <a href="#파이프라인-thorough-모드">파이프라인</a> ·
+  <a href="#위임delegator-mcp">위임 MCP</a> ·
+  <a href="#에이전트-타입-21">에이전트 타입</a> ·
+  <a href="#보안">보안</a>
 </p>
 
 ---
 
-## 왜 triflux인가?
+## v4의 새로운 기능
 
-- **비용 지능형 라우팅** — Codex와 Gemini에 먼저 작업을 보내고, Claude 토큰은 최소화
-- **DAG 기반 병렬 실행** — 복잡한 작업을 의존 그래프로 분해하여 동시 실행
-- **자동 트리아지** — Codex가 분류 + Opus가 분해, 수동 에이전트 선택 불필요
-- **16가지 에이전트** — executor부터 architect까지, 각각 최적의 CLI와 effort 레벨에 매핑
-- **HUD 상태 표시줄** — CLI 상태, 토큰 절약량, 속도 제한 실시간 모니터링
-- **제로 설정** — 설치 후 Claude Code에서 바로 슬래시 명령어 사용
+**triflux v4**는 단순한 라우터를 넘어 **고성능 오케스트레이션 허브**로 진화했습니다. 상주형(resident) 서비스, 네임드 파이프(Named Pipe) IPC, 그리고 고도화된 태스크 파이프라인을 통해 [Claude Code](https://claude.ai/code) 환경에서 가장 안정적인 멀티모델 경험을 제공합니다.
 
-<details>
-<summary><strong>설치</strong></summary>
+### 주요 특징
 
-### npm (권장)
+- **Hub IPC 아키텍처** — Named Pipe 및 HTTP MCP 브리지를 활용한 초고속 상주형 허브 서버.
+- **파이프라인 `--thorough`** — `plan` → `prd` → `exec` → `verify` → `fix`로 이어지는 다단계 작업 생명주기.
+- **위임(Delegator) MCP** — 에이전트와 유연하게 상호작용할 수 있는 전용 MCP 도구(`delegate`, `reply`, `status`).
+- **psmux / Windows 네이티브** — `tmux` (WSL)와 `psmux` (Windows Terminal 네이티브)를 모두 지원하는 하이브리드 세션 관리.
+- **QoS 대시보드** — AIMD 기반 동적 배치 사이징 및 실시간 상태 모니터링.
+- **21종 이상의 전문 에이전트** — `scientist-deep`부터 `spark_fast`까지, 작업에 최적화된 에이전트 라인업.
+
+---
+
+## 아키텍처
+
+triflux는 **Hub-and-Spoke** 아키텍처를 사용합니다. 상주형 허브가 상태, 인증, 작업 라우팅을 총괄하며 고성능 네임드 파이프를 통해 통신합니다.
+
+```mermaid
+graph TD
+    User([사용자 / Claude Code]) <-->|슬래시 명령어| TFX_CLI[tfx CLI]
+    TFX_CLI <-->|Named Pipe / HTTP| HUB[triflux Hub 서버]
+    
+    subgraph "오케스트레이션 허브"
+        HUB <--> STORE[(SQLite 저장소)]
+        HUB <--> DASH[QoS 대시보드]
+        HUB <--> DELEGATOR[위임 서비스]
+    end
+    
+    DELEGATOR <-->|Spawn| CODEX[Codex CLI]
+    DELEGATOR <-->|Spawn| GEMINI[Gemini CLI]
+    DELEGATOR <-->|Native| CLAUDE[Claude Code]
+    
+    HUB -.->|MCP 브리지| External[외부 MCP 클라이언트]
+```
+
+---
+
+## 빠른 시작
+
+### 1. 설치
 
 ```bash
 npm install -g triflux
 ```
 
-### npx (일회성)
+### 2. 설정 (필수)
+
+스크립트를 동기화하고 Claude Code에 스킬을 등록하며 HUD를 설정합니다.
 
 ```bash
-npx triflux doctor
-```
-
-### 설치 확인
-
-```bash
-tfx doctor
-```
-
-</details>
-
-## 빠른 시작
-
-```bash
-# 자동 모드 — AI가 분류 + 분해 + 병렬 실행
-/tfx-auto "인증 모듈 리팩터링 + 로그인 UI 개선 + 테스트 추가"
-
-# 수동 모드 — 에이전트 수와 타입 직접 지정
-/tfx-auto 3:codex "src/api, src/auth, src/payment 각각 리뷰"
-
-# 커맨드 숏컷 — 단일 에이전트 즉시 실행
-/implement "JWT 인증 미들웨어 추가"
-/analyze "결제 모듈 보안 리뷰"
-/research "최신 React Server Components 패턴"
-
-# 단일 CLI 모드
-/tfx-auto-codex "리팩터링 + 테스트 + 리뷰"  # Codex 리드 + Gemini 유지, Claude 네이티브 역할 제거
-/tfx-codex "리팩터링 + 리뷰"    # Codex만 사용
-/tfx-gemini "구현 + 문서화"      # Gemini만 사용
-```
-
-## 문서
-
-- [docs/INDEX.md](docs/INDEX.md) — 문서 인덱스
-
-## 스킬
-
-| 스킬 | 모드 | 설명 |
-|------|------|------|
-| `/tfx-auto` | 자동 | 트리아지 → 분해 → DAG 병렬 실행 |
-| `/tfx-auto-codex` | Codex 리드 | Claude 네이티브 역할을 Codex로 치환, Gemini 경로 유지 |
-| `/tfx-codex` | Codex 전용 | 모든 CLI 작업을 Codex로 라우팅 |
-| `/tfx-gemini` | Gemini 전용 | 모든 CLI 작업을 Gemini로 라우팅 |
-| `/tfx-setup` | 설정 | 파일 동기화, HUD 설정, CLI 진단 |
-
-### 커맨드 숏컷
-
-트리아지 없이 즉시 단일 에이전트 실행:
-
-| 커맨드 | 에이전트 | CLI | 용도 |
-|--------|---------|-----|------|
-| `/implement` | executor | Codex | 코드 구현 |
-| `/build` | build-fixer | Codex | 빌드/타입 에러 수정 |
-| `/research` | document-specialist | Codex | 문서 조사 |
-| `/brainstorm` | analyst | Codex | 요구사항 분석 |
-| `/design` | architect | Codex | 아키텍처 설계 |
-| `/troubleshoot` | debugger | Codex | 버그 분석 |
-| `/cleanup` | executor | Codex | 코드 정리 |
-| `/analyze` | quality + security | Codex | 병렬 리뷰 (2 에이전트) |
-| `/spec-panel` | architect + analyst + critic | Codex | 스펙 리뷰 (3 에이전트) |
-| `/explain` | writer | Gemini | 코드 설명 |
-| `/document` | writer | Gemini | 문서 작성 |
-| `/test` | test-engineer | Claude | 테스트 전략 |
-| `/reflect` | verifier | Claude | 검증 |
-
-## 아키텍처
-
-```
-사용자: "/tfx-auto 인증 리팩터링 + UI 개선 + 테스트 추가"
-         |
-         v
-   [Phase 1: 파싱] ─── 자동 모드 감지
-         |
-         v
-   [Phase 2a: 분류] ─── Codex
-   │  인증 리팩터링 → codex
-   │  UI 개선       → gemini
-   │  테스트 추가   → claude
-         |
-         v
-   [Phase 2b: 분해] ─── Opus (인라인, Agent 스폰 없음)
-   │  t1: executor (implement, src/auth/)     Level 0
-   │  t2: designer (docs, src/components/)    Level 0
-   │  t3: test-engineer (Claude 네이티브)     Level 1 ← t1 의존
-         |
-         v
-   [Phase 3: 실행] ─── DAG 병렬
-   │  Level 0: t1(Codex) + t2(Gemini)  ← 병렬
-   │  Level 1: t3(Claude)               ← t1 완료 후
-         |
-         v
-   [Phase 4-6: 수집 → 재시도 → 보고]
-```
-
-### 에이전트 라우팅 테이블
-
-| 에이전트 | CLI | Effort | 타임아웃 | 모드 |
-|---------|-----|--------|---------|------|
-| executor | Codex | high | 360s | fg |
-| build-fixer | Codex | fast | 180s | fg |
-| debugger | Codex | high | 300s | bg |
-| deep-executor | Codex | xhigh | 1200s | bg |
-| architect | Codex | xhigh | 1200s | bg |
-| planner | Codex | xhigh | 1200s | fg |
-| critic | Codex | xhigh | 1200s | bg |
-| analyst | Codex | xhigh | 1200s | fg |
-| code-reviewer | Codex | thorough | 600s | bg |
-| security-reviewer | Codex | thorough | 600s | bg |
-| quality-reviewer | Codex | thorough | 600s | bg |
-| scientist | Codex | high | 480s | bg |
-| document-specialist | Codex | high | 480s | bg |
-| designer | Gemini Pro 3.1 | — | 600s | bg |
-| writer | Gemini Flash 3 | — | 600s | bg |
-| explore | Claude Haiku | — | 300s | fg |
-| verifier | Claude Sonnet | — | 300s | fg |
-| test-engineer | Claude Sonnet | — | 300s | bg |
-
-### 실패 처리
-
-1. **1차 실패** → Claude 네이티브 에이전트로 fallback
-2. **2차 실패** → 해당 서브태스크 실패 보고, 나머지 결과 종합
-3. **타임아웃** → 부분 결과 보고
-
-<details>
-<summary><strong>설정 가이드</strong></summary>
-
-### 사전 조건
-
-- **Node.js** >= 18
-- **Claude Code** (필수)
-- **Codex CLI** (선택): `npm install -g @openai/codex`
-- **Gemini CLI** (선택): `npm install -g @google/gemini-cli`
-
-> [!TIP]
-> **triflux는 100% 독립적으로 동작합니다.** 기능을 수행하기 위해 [oh-my-claudecode (OMC)](https://github.com/nicepkg/oh-my-claudecode)가 필요하지 않습니다. OMC가 설치된 경우에만 이를 감지하여 선택적인 통합 기능을 제공합니다. Codex/Gemini 없이도 자동으로 Claude 네이티브 에이전트로 fallback되어 동작합니다.
-
-### 설치 후
-
-```bash
-# 파일 동기화 + HUD 설정
 tfx setup
-
-# 진단 실행
-tfx doctor
 ```
 
-### CLI 명령어
+### 3. 사용 방법
 
-| 명령어 | 설명 |
-|--------|------|
-| `tfx setup` | 스크립트 + HUD + 스킬 동기화 |
-| `tfx doctor` | CLI 진단 + 이슈 추적 |
-| `tfx update` | 최신 안정 버전으로 업데이트 |
-| `tfx list` | 설치된 스킬 목록 |
-| `tfx version` | 버전 표시 |
+```bash
+# 자동 모드 — 허브를 통한 병렬 실행
+/tfx-auto "인증 리팩터링 + UI 업데이트 + 테스트 추가"
 
-축약: `tfx` = `triflux`, `tfl` = `triflux`
+# 파이프라인 모드 — 정밀한 다단계 실행
+/tfx-auto --thorough "복잡한 데이터 마이그레이션 구현"
 
-dev 채널 업데이트: `tfx update --dev` (`dev` 별칭 지원)
+# 직접 위임
+/tfx-delegate "최신 React 패턴 조사" --provider gemini
+```
 
-### HUD 상태 표시줄
+---
 
-Claude Code 상태줄에서 실시간 모니터링:
+## 파이프라인: `--thorough` 모드
 
-- Claude / Codex / Gemini 토큰 사용량 및 속도 제한
-- CLI 상태 (설치 여부, API 키 상태)
-- 세션 비용 추적 및 절약 보고서
+v4 파이프라인은 복잡한 엔지니어링 작업을 위해 설계된 강력한 실행 루프를 제공합니다.
 
-`tfx setup`으로 자동 설정됩니다.
+| 단계 | 설명 |
+|------|------|
+| **plan** | 해결책을 설계하고 의존성을 식별합니다. |
+| **prd** | 상세한 기술 명세서(Technical Spec / PRD)를 생성합니다. |
+| **exec** | 실제 코드 구현을 수행합니다. |
+| **verify** | 테스트를 실행하고 구현 결과가 PRD와 일치하는지 검증합니다. |
+| **fix** | (루프) 검증 단계에서 발견된 실패를 자동으로 수정합니다 (최대 3회). |
+| **ralph** | (재시작) 수정 루프 실패 시, 새로운 통찰을 바탕으로 `plan`부터 다시 시작합니다 (최대 10회). |
 
-</details>
+---
 
-<details>
-<summary><strong>선택 사항: oh-my-claudecode (OMC) 통합</strong></summary>
+## 위임(Delegator) MCP
 
-triflux는 **100% 독립적으로 동작**하며 기능을 수행하기 위해 외부 도구에 의존하지 않습니다. 다만, [oh-my-claudecode](https://github.com/nicepkg/oh-my-claudecode) 생태계를 사용하는 사용자를 위해 선택적 호환성을 제공합니다:
+MCP 도구를 통해 허브와 직접 상호작용하세요.
 
-- **완전한 독립성**: OMC나 다른 래퍼 없이 단독으로 100% 동작합니다.
-- **캐시 호환성**: OMC 캐시 경로(예: `~/.omc/state/`)가 존재할 경우 이를 감지하고 배려하지만, 기본적으로 자체 격리된 상태를 유지합니다.
-- **심리스한 플러그인**: OMC가 설치된 경우 OMC 플러그인 시스템을 통해 스킬이 자동 등록됩니다.
-- **확장된 HUD**: OMC가 감지되면 HUD가 자동으로 OMC 상태줄을 확장하여 표시합니다.
-- **모드 지원**: OMC autopilot, ralph, team, ultrawork 모드와 완벽히 호환됩니다.
+- **`delegate`**: 프롬프트를 특정 프로바이더로 라우팅하거나 허브에 판단을 맡깁니다. `sync`(동기) 및 `async`(비동기) 모드를 지원합니다.
+- **`reply`**: 실행 중인 에이전트와 대화를 이어갑니다 (현재 Gemini 직접 실행 모드 지원).
+- **`status`**: 비동기 백그라운드 작업의 진행 상황을 확인합니다.
 
-</details>
+---
 
-<details>
-<summary><strong>변경 이력</strong></summary>
+## 에이전트 타입 (21종+)
 
-### 2.0.0
+| 에이전트 | CLI | 용도 |
+|---------|-----|------|
+| **executor** | Codex | 표준적인 코드 구현 및 리팩터링. |
+| **build-fixer** | Codex/Gemini | 빌드 및 타입 에러 즉시 수정. |
+| **architect** | Codex | 상위 레벨 시스템 설계 및 계획. |
+| **scientist-deep** | Codex | 철저한 조사 및 심층 분석. |
+| **code-reviewer** | Codex | 보안 및 로직 중심의 코드 리뷰. |
+| **security-reviewer**| Codex | 취약점 및 권한 설정 감사. |
+| **quality-reviewer** | Codex | 로직 결함 및 유지보수성 감사. |
+| **designer** | Gemini | UI/UX 및 문서 디자인. |
+| **writer** | Gemini | 기술 문서 작성 및 설명. |
+| **spark** | Gemini | 가벼운 프로토타이핑 및 빠른 처리. |
+| **verifier** | Claude | 최종 검증 및 유효성 확인. |
+| **test-engineer** | Claude | 포괄적인 테스트 스위트 생성. |
+| *...기타* | | `debugger`, `planner`, `critic`, `analyst`, `scientist`, `explore`, `qa-tester` |
 
-- `cx-skills`에서 `triflux`로 리브랜딩
-- 새 CLI 명령어: `tfx`, `triflux`, `tfl`
-- 스킬 업데이트: `/tfx-auto`, `/tfx-codex`, `/tfx-gemini`, `/tfx-setup`
-- amber 브랜딩 시각적 리뉴얼
-- 내부 참조 전면 업데이트 (`CX_CLI_MODE` → `TFX_CLI_MODE`)
+---
 
-### 이전 버전 (cx-skills)
+## 보안
 
-v1.x 이력은 [cx-skills releases](https://github.com/tellang/cx-skills/releases) 참조.
+triflux v4는 안전한 전문 개발 환경을 위해 설계되었습니다.
 
-</details>
+- **허브 토큰 인증** — `TFX_HUB_TOKEN`을 이용한 보안 IPC (Bearer 인증).
+- **Localhost 전용** — 허브가 기본적으로 `127.0.0.1`에만 바인딩되어 외부 접근을 차단합니다.
+- **CORS 잠금** — QoS 대시보드에 대한 엄격한 오리진(Origin) 체크.
+- **인젝션 방어** — `psmux` 및 `tmux` 실행 시 쉘 명령어 새니타이징(Sanitizing).
+
+---
+
+## QoS 대시보드
+
+`http://localhost:27888/dashboard`에서 오케스트레이션 상태를 모니터링하세요.
+
+- **AIMD 배치 사이징** — 작업 성공률에 따라 병렬 작업 수(3 → 10)를 자동으로 조절합니다.
+- **토큰 절약량** — Codex/Gemini 라우팅을 통해 절약된 Claude 토큰을 실시간으로 추적합니다.
+- **할당량 추적** — Codex 및 Gemini의 속도 제한(Rate Limit)을 실시간으로 확인합니다.
+
+---
+
+## 플랫폼 지원
+
+- **Linux / macOS**: 네이티브 `tmux` 통합 지원.
+- **Windows**: **psmux** (PowerShell Multiplexer)와 Windows Terminal을 활용한 네이티브 윈도우 환경 지원.
 
 ---
 
 <p align="center">
-  <a href="https://github.com/tellang/triflux">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=tellang/triflux&type=Date&theme=dark">
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=tellang/triflux&type=Date">
-      <img alt="Star History" src="https://api.star-history.com/svg?repos=tellang/triflux&type=Date" width="600">
-    </picture>
-  </a>
-</p>
-
-<p align="center">
-  <sub>MIT License · Made by <a href="https://github.com/tellang">tellang</a></sub>
+  <sub>MIT License · Made with ❤️ by <a href="https://github.com/tellang">tellang</a></sub>
 </p>

@@ -1,4 +1,5 @@
 # AI 설정
+.tfx/
 .omc/
 .omx/
 .claude/
@@ -9,7 +10,11 @@
 .mcp.json
 CLAUDE.md
 
-# 내부 문서 (제3자 불필요)
+# 내부 문서 (제3자 불필요) — docs/assets/와 docs/demo*.tape만 유지
+docs/INDEX.md
+docs/adr/
+docs/design/
+docs/guides/
 docs/handoff/
 docs/internal/
 docs/issues/
@@ -31,6 +36,8 @@ scripts/psmux-steering-prototype.sh
 
 # 내부 이슈 추적
 .issues/
+.prompts/
+ISSUES-*.md
 
 # 빌드/캐시
 node_modules/
@@ -44,3 +51,4 @@ dist/
 *.tgz
 .env
 .npmrc
+tmp-*.log

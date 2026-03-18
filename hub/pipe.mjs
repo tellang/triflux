@@ -57,6 +57,7 @@ export function createPipeServer({
   store = null,
   sessionId = process.pid,
   heartbeatTtlMs = DEFAULT_HEARTBEAT_TTL_MS,
+  delegatorService = null,
 } = {}) {
   if (!router) {
     throw new Error('router is required');
@@ -284,6 +285,24 @@ export function createPipeServer({
         return { ok: true, data: state };
       }
 
+      case 'delegator_delegate': {
+        if (!delegatorService) {
+          return { ok: false, error: { code: 'DELEGATOR_NOT_AVAILABLE', message: 'Delegator service가 초기화되지 않았습니다' } };
+        }
+        if (client) touchClient(client);
+        const result = await delegatorService.delegate(payload);
+        return { ok: result?.ok !== false, data: result };
+      }
+
+      case 'delegator_reply': {
+        if (!delegatorService) {
+          return { ok: false, error: { code: 'DELEGATOR_NOT_AVAILABLE', message: 'Delegator service가 초기화되지 않았습니다' } };
+        }
+        if (client) touchClient(client);
+        const result = await delegatorService.reply(payload);
+        return { ok: result?.ok !== false, data: result };
+      }
+
       default:
         return {
           ok: false,
@@ -384,6 +403,15 @@ export function createPipeServer({
         }
         ensurePipelineTable(store.db);
         return { ok: true, data: listPipelineStates(store.db) };
+      }
+
+      case 'delegator_status': {
+        if (!delegatorService) {
+          return { ok: false, error: { code: 'DELEGATOR_NOT_AVAILABLE', message: 'Delegator service가 초기화되지 않았습니다' } };
+        }
+        if (client) touchClient(client);
+        const result = await delegatorService.status(payload);
+        return { ok: result?.ok !== false, data: result };
       }
 
       default:

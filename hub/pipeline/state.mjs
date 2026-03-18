@@ -3,6 +3,29 @@
 // store.mjs의 기존 SQLite 연결(db)을 활용한다.
 // pipeline_state 테이블은 schema.sql에 정의.
 
+import { join } from 'node:path';
+
+import { TFX_STATE_DIR, ensureTfxDirs } from '../paths.mjs';
+
+/**
+ * 파이프라인 상태 DB 경로를 계산한다.
+ * @param {string} baseDir
+ * @returns {string}
+ */
+export function getPipelineStateDbPath(baseDir) {
+  return join(baseDir, TFX_STATE_DIR, 'state.db');
+}
+
+/**
+ * 파이프라인 상태 DB 경로와 .tfx 디렉토리를 준비한다.
+ * @param {string} baseDir
+ * @returns {string}
+ */
+export function ensurePipelineStateDbPath(baseDir) {
+  ensureTfxDirs(baseDir);
+  return getPipelineStateDbPath(baseDir);
+}
+
 /**
  * pipeline_state 테이블 초기화 (store.db에 없으면 생성)
  * @param {object} db - better-sqlite3 인스턴스

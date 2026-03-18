@@ -51,6 +51,14 @@ TFX_TEAM_LEAD_NAME="${TFX_TEAM_LEAD_NAME:-team-lead}"
 TFX_HUB_PIPE="${TFX_HUB_PIPE:-}"
 TFX_HUB_URL="${TFX_HUB_URL:-http://127.0.0.1:27888}"  # bridge.mjs HTTP fallback hint
 
+# ── 패키지 루트 해석 (setup.mjs가 기록한 breadcrumb) ──
+TFX_PKG_ROOT=""
+_tfx_breadcrumb="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.tfx-pkg-root"
+if [[ -f "$_tfx_breadcrumb" ]]; then
+  TFX_PKG_ROOT="$(head -1 "$_tfx_breadcrumb" 2>/dev/null | tr -d '\r\n')"
+fi
+unset _tfx_breadcrumb
+
 # fallback 시 원래 에이전트 정보 보존
 ORIGINAL_AGENT=""
 ORIGINAL_CLI_ARGS=""
@@ -152,7 +160,9 @@ resolve_bridge_script() {
 
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local candidates=(
+  local candidates=()
+  [[ -n "$TFX_PKG_ROOT" ]] && candidates+=("$TFX_PKG_ROOT/hub/bridge.mjs")
+  candidates+=(
     "$script_dir/../hub/bridge.mjs"
     "$script_dir/hub/bridge.mjs"
   )
@@ -247,10 +257,17 @@ team_send_message() {
 try_restart_hub() {
   local hub_server script_dir hub_port
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  hub_server="$script_dir/../hub/server.mjs"
+  hub_server=""
+  local _hub_candidates=()
+  [[ -n "$TFX_PKG_ROOT" ]] && _hub_candidates+=("$TFX_PKG_ROOT/hub/server.mjs")
+  _hub_candidates+=("$script_dir/../hub/server.mjs")
+  for _hc in "${_hub_candidates[@]}"; do
+    if [[ -f "$_hc" ]]; then hub_server="$_hc"; break; fi
+  done
+  unset _hub_candidates _hc
 
-  if [[ ! -f "$hub_server" ]]; then
-    echo "[tfx-route] Hub 서버 스크립트 미발견: $hub_server" >&2
+  if [[ -z "$hub_server" ]]; then
+    echo "[tfx-route] Hub 서버 스크립트 미발견 (pkg_root=${TFX_PKG_ROOT:-unset}, script_dir=$script_dir)" >&2
     return 1
   fi
 
@@ -527,12 +544,32 @@ TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
+# Codex 요금제 자동 감지 (preflight 캐시 → auth.json JWT)
+# 환경변수 명시 설정 시 우선, 미설정 시 캐시에서 읽기, 캐시도 없으면 pro
+if [[ -z "${TFX_CODEX_PLAN:-}" ]]; then
+  _detected_plan=$(node -e '
+    try {
+      const c = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(),".claude","cache","tfx-preflight.json"),"utf8"));
+      const p = c?.codex_plan?.plan;
+      if (p && p !== "unknown" && p !== "api") { process.stdout.write(p); }
+    } catch {}
+  ' 2>/dev/null)
+  TFX_CODEX_PLAN="${_detected_plan:-pro}"
+  unset _detected_plan
+fi
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
 TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
 case "$TFX_NO_CLAUDE_NATIVE" in
   0|1) ;;
   *)
     echo "ERROR: TFX_NO_CLAUDE_NATIVE 값은 0 또는 1이어야 합니다. (현재: $TFX_NO_CLAUDE_NATIVE)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_CODEX_PLAN" in
+  pro|plus|free) ;;
+  *)
+    echo "ERROR: TFX_CODEX_PLAN 값은 pro, plus, free 중 하나여야 합니다. (현재: $TFX_CODEX_PLAN)" >&2
     exit 1
     ;;
 esac
@@ -614,6 +651,19 @@ apply_cli_mode() {
         fi
       fi ;;
   esac
+}
+
+# ── Codex 요금제 가드 (fast 프로필은 Pro 전용) ──
+apply_plan_guard() {
+  [[ "$CLI_TYPE" != "codex" ]] && return
+  [[ "$TFX_CODEX_PLAN" == "pro" ]] && return
+
+  if [[ "$CLI_EFFORT" == "fast" ]]; then
+    local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+    CLI_ARGS="exec ${codex_base}"
+    CLI_EFFORT="high"
+    echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: --profile fast → high로 다운그레이드 (Pro 전용)" >&2
+  fi
 }
 
 # ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
@@ -913,7 +963,9 @@ resolve_codex_mcp_script() {
   local script_ref script_dir
   script_ref="$(normalize_script_path "${BASH_SOURCE[0]}")"
   script_dir="$(cd "$(dirname "$script_ref")" && pwd -P)"
-  local candidates=(
+  local candidates=()
+  [[ -n "$TFX_PKG_ROOT" ]] && candidates+=("$TFX_PKG_ROOT/hub/workers/codex-mcp.mjs")
+  candidates+=(
     "$script_dir/hub/workers/codex-mcp.mjs"
     "$script_dir/../hub/workers/codex-mcp.mjs"
   )
@@ -1048,6 +1100,7 @@ main() {
   route_agent "$AGENT_TYPE"
   apply_cli_mode
   apply_no_claude_native_mode
+  apply_plan_guard
   apply_verifier_override
 
   # CLI 경로 해석
