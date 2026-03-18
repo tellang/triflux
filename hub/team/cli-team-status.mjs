@@ -54,6 +54,21 @@ function renderTasks(tasks = []) {
   console.log("");
 }
 
+function formatCompletionSuffix(member) {
+  if (!member?.completionStatus) return "";
+  if (member.completionStatus === "abnormal") {
+    const reason = member.completionReason || "unknown";
+    return ` ${RED}[abnormal:${reason}]${RESET}`;
+  }
+  if (member.completionStatus === "normal") {
+    return ` ${GREEN}[route-ok]${RESET}`;
+  }
+  if (member.completionStatus === "unchecked") {
+    return ` ${GRAY}[route-unchecked]${RESET}`;
+  }
+  return "";
+}
+
 export async function teamStatus() {
   const state = loadTeamState();
   if (!state) {
@@ -91,7 +106,7 @@ export async function teamStatus() {
     if (nativeMembers.length) {
       console.log("");
       for (const m of nativeMembers) {
-        console.log(`    • ${m.name}: ${m.status}${m.lastPreview ? ` ${DIM}${m.lastPreview}${RESET}` : ""}`);
+        console.log(`    • ${m.name}: ${m.status}${formatCompletionSuffix(m)}${m.lastPreview ? ` ${DIM}${m.lastPreview}${RESET}` : ""}`);
       }
     }
   }
@@ -216,7 +231,7 @@ export async function teamDebug() {
       console.log(`    ${DIM}(no data)${RESET}`);
     } else {
       for (const m of members) {
-        console.log(`    - ${m.name}: ${m.status}${m.lastPreview ? ` ${DIM}${m.lastPreview}${RESET}` : ""}`);
+        console.log(`    - ${m.name}: ${m.status}${formatCompletionSuffix(m)}${m.lastPreview ? ` ${DIM}${m.lastPreview}${RESET}` : ""}`);
       }
     }
     console.log("");
@@ -266,4 +281,3 @@ export function teamList() {
   }
   console.log("");
 }
-

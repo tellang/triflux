@@ -90,4 +90,39 @@ describe('CodexMcpWorker', () => {
     );
     await worker.stop();
   });
+
+  it('config 옵션은 codex MCP tool 호출 인자로 전달된다', async () => {
+    const worker = createWorker({ FAKE_CODEX_MODE: 'mcp-ok' });
+
+    try {
+      const result = await worker.execute('SHOW_CONFIG', {
+        config: {
+          mcp_servers: {
+            context7: {
+              enabled: true,
+              enabled_tools: ['resolve-library-id', 'query-docs'],
+            },
+            tavily: {
+              enabled: false,
+            },
+          },
+        },
+      });
+
+      assert.equal(result.exitCode, 0);
+      assert.deepEqual(JSON.parse(result.output), {
+        mcp_servers: {
+          context7: {
+            enabled: true,
+            enabled_tools: ['resolve-library-id', 'query-docs'],
+          },
+          tavily: {
+            enabled: false,
+          },
+        },
+      });
+    } finally {
+      await worker.stop();
+    }
+  });
 });

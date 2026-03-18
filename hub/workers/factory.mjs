@@ -3,6 +3,7 @@
 import { GeminiWorker } from './gemini-worker.mjs';
 import { ClaudeWorker } from './claude-worker.mjs';
 import { CodexMcpWorker } from './codex-mcp.mjs';
+import { DelegatorMcpWorker } from './delegator-mcp.mjs';
 
 export function createWorker(type, opts = {}) {
   switch (type) {
@@ -12,6 +13,8 @@ export function createWorker(type, opts = {}) {
       return new ClaudeWorker(opts);
     case 'codex':
       return new CodexMcpWorker(opts);
+    case 'delegator':
+      return new DelegatorMcpWorker(opts);
     default:
       throw new Error(`Unknown worker type: ${type}`);
   }

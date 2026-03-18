@@ -35,7 +35,7 @@
  * @property {() => Promise<void>} start
  * @property {() => Promise<void>} stop
  * @property {() => boolean} isReady
- * @property {string} type - 'codex' | 'gemini' | 'claude'
+ * @property {string} type - 'codex' | 'gemini' | 'claude' | 'delegator'
  */
 
-export const WORKER_TYPES = Object.freeze(['codex', 'gemini', 'claude']);
+export const WORKER_TYPES = Object.freeze(['codex', 'gemini', 'claude', 'delegator']);

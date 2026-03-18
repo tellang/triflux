@@ -13,13 +13,13 @@ import { createStore } from './store.mjs';
 import { createRouter } from './router.mjs';
 import { createHitlManager } from './hitl.mjs';
 import { createPipeServer } from './pipe.mjs';
+import { createAssignCallbackServer } from './assign-callbacks.mjs';
 import { createTools } from './tools.mjs';
-import {
-  teamInfo,
-  teamTaskList,
-  teamTaskUpdate,
-  teamSendMessage,
-} from './team/nativeProxy.mjs';
+
+const MAX_BODY_SIZE = 1024 * 1024;
+const PUBLIC_PATHS = new Set(['/', '/status', '/health', '/healthz']);
+const LOOPBACK_REMOTE_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const ALLOWED_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 
 function isInitializeRequest(body) {
   if (body?.method === 'initialize') return true;
@@ -27,7 +27,6 @@ function isInitializeRequest(body) {
   return false;
 }
 
-const MAX_BODY_SIZE = 1024 * 1024;
 async function parseBody(req) {
   const chunks = [];
   let size = 0;
@@ -43,6 +42,73 @@ async function parseBody(req) {
 
 const PID_DIR = join(homedir(), '.claude', 'cache', 'tfx-hub');
 const PID_FILE = join(PID_DIR, 'hub.pid');
+const TOKEN_FILE = join(homedir(), '.claude', '.tfx-hub-token');
+
+function isAllowedOrigin(origin) {
+  return origin && ALLOWED_ORIGIN_RE.test(origin);
+}
+
+function getRequestPath(url = '/') {
+  try {
+    return new URL(url, 'http://127.0.0.1').pathname;
+  } catch {
+    return String(url).replace(/\?.*/, '') || '/';
+  }
+}
+
+function isLoopbackRemoteAddress(remoteAddress) {
+  return typeof remoteAddress === 'string' && LOOPBACK_REMOTE_ADDRESSES.has(remoteAddress);
+}
+
+function extractBearerToken(req) {
+  const authHeader = typeof req.headers.authorization === 'string' ? req.headers.authorization : '';
+  return authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+}
+
+function writeJson(res, statusCode, body, headers = {}) {
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json',
+    ...headers,
+  });
+  res.end(JSON.stringify(body));
+}
+
+function applyCorsHeaders(req, res) {
+  const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+  if (origin) {
+    res.setHeader('Vary', 'Origin');
+  }
+  if (!isAllowedOrigin(origin)) return false;
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, mcp-session-id, Last-Event-ID');
+  return true;
+}
+
+function isAuthorizedRequest(req, path, hubToken) {
+  if (!hubToken) {
+    return isLoopbackRemoteAddress(req.socket.remoteAddress);
+  }
+  if (PUBLIC_PATHS.has(path)) return true;
+  return extractBearerToken(req) === hubToken;
+}
+
+function resolveTeamStatusCode(result) {
+  if (result?.ok) return 200;
+  const code = result?.error?.code;
+  if (code === 'TEAM_NOT_FOUND' || code === 'TASK_NOT_FOUND' || code === 'TASKS_DIR_NOT_FOUND') return 404;
+  if (code === 'CLAIM_CONFLICT' || code === 'MTIME_CONFLICT') return 409;
+  if (code === 'INVALID_TEAM_NAME' || code === 'INVALID_TASK_ID' || code === 'INVALID_TEXT' || code === 'INVALID_FROM' || code === 'INVALID_STATUS') return 400;
+  return 500;
+}
+
+function resolvePipelineStatusCode(result) {
+  if (result?.ok) return 200;
+  if (result?.error === 'pipeline_not_found') return 404;
+  if (result?.error === 'hub_db_not_found') return 503;
+  return 400;
+}
 
 /**
  * tfx-hub 시작
@@ -57,9 +123,18 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     dbPath = join(PID_DIR, 'state.db');
   }
 
+  const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;
+  if (HUB_TOKEN) {
+    mkdirSync(join(homedir(), '.claude'), { recursive: true });
+    writeFileSync(TOKEN_FILE, HUB_TOKEN, { mode: 0o600 });
+  } else {
+    try { unlinkSync(TOKEN_FILE); } catch {}
+  }
+
   const store = createStore(dbPath);
   const router = createRouter(store);
   const pipe = createPipeServer({ router, store, sessionId });
+  const assignCallbacks = createAssignCallbackServer({ store, sessionId });
   const hitl = createHitlManager(store, router);
   const tools = createTools(store, router, hitl, pipe);
   const transports = new Map();
@@ -100,52 +175,61 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   }
 
   const httpServer = createHttpServer(async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, Last-Event-ID');
+    const path = getRequestPath(req.url);
+    const corsAllowed = applyCorsHeaders(req, res);
 
     if (req.method === 'OPTIONS') {
-      res.writeHead(204);
+      const localOnlyMode = !HUB_TOKEN;
+      const isLoopbackRequest = isLoopbackRemoteAddress(req.socket.remoteAddress);
+      res.writeHead(corsAllowed && (!localOnlyMode || isLoopbackRequest) ? 204 : 403);
       return res.end();
     }
 
-    if (req.url === '/' || req.url === '/status') {
+    if (!isAuthorizedRequest(req, path, HUB_TOKEN)) {
+      if (!HUB_TOKEN) {
+        return writeJson(res, 403, { ok: false, error: 'Forbidden: localhost only' });
+      }
+      return writeJson(
+        res,
+        401,
+        { ok: false, error: 'Unauthorized' },
+        { 'WWW-Authenticate': 'Bearer realm="tfx-hub"' },
+      );
+    }
+
+    if (path === '/' || path === '/status') {
       const status = router.getStatus('hub').data;
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({
+      return writeJson(res, 200, {
         ...status,
         sessions: transports.size,
         pid: process.pid,
         port,
+        auth_mode: HUB_TOKEN ? 'token-required' : 'localhost-only',
         pipe_path: pipe.path,
         pipe: pipe.getStatus(),
-      }));
+        assign_callback_pipe_path: assignCallbacks.path,
+        assign_callback_pipe: assignCallbacks.getStatus(),
+      });
     }
 
-    if (req.url === '/health' || req.url === '/healthz') {
+    if (path === '/health' || path === '/healthz') {
       const status = router.getStatus('hub').data;
       const healthy = status?.hub?.state === 'healthy';
-      res.writeHead(healthy ? 200 : 503, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: healthy }));
+      return writeJson(res, healthy ? 200 : 503, { ok: healthy });
     }
 
-    if (req.url.startsWith('/bridge')) {
-      res.setHeader('Content-Type', 'application/json');
-
+    if (path.startsWith('/bridge')) {
       if (req.method !== 'POST' && req.method !== 'DELETE') {
-        res.writeHead(405);
-        return res.end(JSON.stringify({ ok: false, error: 'Method Not Allowed' }));
+        return writeJson(res, 405, { ok: false, error: 'Method Not Allowed' });
       }
 
       try {
         const body = req.method === 'POST' ? await parseBody(req) : {};
-        const path = req.url.replace(/\?.*/, '');
 
         if (path === '/bridge/register' && req.method === 'POST') {
           const { agent_id, cli, timeout_sec = 600, topics = [], capabilities = [], metadata = {} } = body;
           if (!agent_id || !cli) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'agent_id, cli 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'agent_id, cli 필수' });
           }
 
           const heartbeat_ttl_ms = (timeout_sec + 120) * 1000;
@@ -157,15 +241,13 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             heartbeat_ttl_ms,
             metadata,
           });
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
         if (path === '/bridge/result' && req.method === 'POST') {
           const { agent_id, topic = 'task.result', payload = {}, trace_id, correlation_id } = body;
           if (!agent_id) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'agent_id 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'agent_id 필수' });
           }
 
           const result = await pipe.executeCommand('result', {
@@ -175,8 +257,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             trace_id,
             correlation_id,
           });
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
         if (path === '/bridge/control' && req.method === 'POST') {
@@ -192,8 +273,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
           } = body;
 
           if (!to_agent || !command) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'to_agent, command 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'to_agent, command 필수' });
           }
 
           const result = await pipe.executeCommand('control', {
@@ -207,80 +287,173 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
             correlation_id,
           });
 
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
+        }
+
+        if (path === '/bridge/assign/async' && req.method === 'POST') {
+          const {
+            supervisor_agent,
+            worker_agent,
+            task,
+            topic = 'assign.job',
+            payload = {},
+            priority = 5,
+            ttl_ms = 600000,
+            timeout_ms = 600000,
+            max_retries = 0,
+            trace_id,
+            correlation_id,
+          } = body;
+
+          if (!supervisor_agent || !worker_agent || !task) {
+            return writeJson(res, 400, { ok: false, error: 'supervisor_agent, worker_agent, task 필수' });
+          }
+
+          const result = await pipe.executeCommand('assign', {
+            supervisor_agent,
+            worker_agent,
+            task,
+            topic,
+            payload,
+            priority,
+            ttl_ms,
+            timeout_ms,
+            max_retries,
+            trace_id,
+            correlation_id,
+          });
+          return writeJson(res, result.ok ? 200 : 400, result);
+        }
+
+        if (path === '/bridge/assign/result' && req.method === 'POST') {
+          const {
+            job_id,
+            worker_agent,
+            status,
+            attempt,
+            result: assignResult,
+            error: assignError,
+            payload = {},
+            metadata = {},
+          } = body;
+
+          if (!job_id || !status) {
+            return writeJson(res, 400, { ok: false, error: 'job_id, status 필수' });
+          }
+
+          const result = await pipe.executeCommand('assign_result', {
+            job_id,
+            worker_agent,
+            status,
+            attempt,
+            result: assignResult,
+            error: assignError,
+            payload,
+            metadata,
+          });
+          return writeJson(res, result.ok ? 200 : 409, result);
+        }
+
+        if (path === '/bridge/assign/status' && req.method === 'POST') {
+          const result = await pipe.executeQuery('assign_status', body);
+          const statusCode = result.ok ? 200 : (result.error?.code === 'ASSIGN_NOT_FOUND' ? 404 : 400);
+          return writeJson(res, statusCode, result);
+        }
+
+        if (path === '/bridge/assign/retry' && req.method === 'POST') {
+          const { job_id, reason, requested_by } = body;
+          if (!job_id) {
+            return writeJson(res, 400, { ok: false, error: 'job_id 필수' });
+          }
+
+          const result = await pipe.executeCommand('assign_retry', {
+            job_id,
+            reason,
+            requested_by,
+          });
+          const statusCode = result.ok ? 200
+            : result.error?.code === 'ASSIGN_NOT_FOUND' ? 404
+              : result.error?.code === 'ASSIGN_RETRY_EXHAUSTED' ? 409
+                : 400;
+          return writeJson(res, statusCode, result);
         }
 
         if (req.method === 'POST') {
           let teamResult = null;
           if (path === '/bridge/team/info' || path === '/bridge/team-info') {
-            teamResult = teamInfo(body);
+            teamResult = await pipe.executeQuery('team_info', body);
           } else if (path === '/bridge/team/task-list' || path === '/bridge/team-task-list') {
-            teamResult = teamTaskList(body);
+            teamResult = await pipe.executeQuery('team_task_list', body);
           } else if (path === '/bridge/team/task-update' || path === '/bridge/team-task-update') {
-            teamResult = teamTaskUpdate(body);
+            teamResult = await pipe.executeCommand('team_task_update', body);
           } else if (path === '/bridge/team/send-message' || path === '/bridge/team-send-message') {
-            teamResult = teamSendMessage(body);
+            teamResult = await pipe.executeCommand('team_send_message', body);
           }
 
           if (teamResult) {
-            let status = 200;
-            const code = teamResult?.error?.code;
-            if (!teamResult.ok) {
-              if (code === 'TEAM_NOT_FOUND' || code === 'TASK_NOT_FOUND' || code === 'TASKS_DIR_NOT_FOUND') status = 404;
-              else if (code === 'CLAIM_CONFLICT' || code === 'MTIME_CONFLICT') status = 409;
-              else if (code === 'INVALID_TEAM_NAME' || code === 'INVALID_TASK_ID' || code === 'INVALID_TEXT' || code === 'INVALID_FROM' || code === 'INVALID_STATUS') status = 400;
-              else status = 500;
-            }
-            res.writeHead(status);
-            return res.end(JSON.stringify(teamResult));
+            return writeJson(res, resolveTeamStatusCode(teamResult), teamResult);
           }
 
           if (path.startsWith('/bridge/team')) {
-            res.writeHead(404);
-            return res.end(JSON.stringify({ ok: false, error: `Unknown team endpoint: ${path}` }));
+            return writeJson(res, 404, { ok: false, error: `Unknown team endpoint: ${path}` });
+          }
+
+          // ── 파이프라인 엔드포인트 ──
+          if (path === '/bridge/pipeline/state' && req.method === 'POST') {
+            const result = await pipe.executeQuery('pipeline_state', body);
+            return writeJson(res, resolvePipelineStatusCode(result), result);
+          }
+
+          if (path === '/bridge/pipeline/advance' && req.method === 'POST') {
+            const result = await pipe.executeCommand('pipeline_advance', body);
+            return writeJson(res, resolvePipelineStatusCode(result), result);
+          }
+
+          if (path === '/bridge/pipeline/init' && req.method === 'POST') {
+            const result = await pipe.executeCommand('pipeline_init', body);
+            return writeJson(res, resolvePipelineStatusCode(result), result);
+          }
+
+          if (path === '/bridge/pipeline/list' && req.method === 'POST') {
+            const result = await pipe.executeQuery('pipeline_list', body);
+            return writeJson(res, resolvePipelineStatusCode(result), result);
           }
         }
 
         if (path === '/bridge/context' && req.method === 'POST') {
-          const { agent_id, topics, max_messages = 10 } = body;
+          const { agent_id, topics, max_messages = 10, auto_ack = true } = body;
           if (!agent_id) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'agent_id 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'agent_id 필수' });
           }
 
-          const result = await pipe.executeQuery('context', {
+          const result = await pipe.executeQuery('drain', {
             agent_id,
             topics,
             max_messages,
+            auto_ack,
           });
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
         if (path === '/bridge/deregister' && req.method === 'POST') {
           const { agent_id } = body;
           if (!agent_id) {
-            res.writeHead(400);
-            return res.end(JSON.stringify({ ok: false, error: 'agent_id 필수' }));
+            return writeJson(res, 400, { ok: false, error: 'agent_id 필수' });
           }
           const result = await pipe.executeCommand('deregister', { agent_id });
-          res.writeHead(200);
-          return res.end(JSON.stringify(result));
+          return writeJson(res, 200, result);
         }
 
-        res.writeHead(404);
-        return res.end(JSON.stringify({ ok: false, error: 'Unknown bridge endpoint' }));
+        return writeJson(res, 404, { ok: false, error: 'Unknown bridge endpoint' });
       } catch (error) {
         if (!res.headersSent) {
-          res.writeHead(500);
-          res.end(JSON.stringify({ ok: false, error: error.message }));
+          writeJson(res, 500, { ok: false, error: error.message });
         }
         return;
       }
     }
 
-    if (req.url !== '/mcp') {
+    if (path !== '/mcp') {
       res.writeHead(404);
       return res.end('Not Found');
     }
@@ -372,6 +545,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
 
   mkdirSync(PID_DIR, { recursive: true });
   await pipe.start();
+  await assignCallbacks.start();
 
   return new Promise((resolve, reject) => {
     httpServer.listen(port, host, () => {
@@ -380,22 +554,28 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         host,
         dbPath,
         pid: process.pid,
+        hubToken: HUB_TOKEN,
+        authMode: HUB_TOKEN ? 'token-required' : 'localhost-only',
         url: `http://${host}:${port}/mcp`,
         pipe_path: pipe.path,
         pipePath: pipe.path,
+        assign_callback_pipe_path: assignCallbacks.path,
+        assignCallbackPipePath: assignCallbacks.path,
       };
 
       writeFileSync(PID_FILE, JSON.stringify({
         pid: process.pid,
         port,
         host,
+        auth_mode: HUB_TOKEN ? 'token-required' : 'localhost-only',
         url: info.url,
         pipe_path: pipe.path,
         pipePath: pipe.path,
+        assign_callback_pipe_path: assignCallbacks.path,
         started: Date.now(),
       }));
 
-      console.log(`[tfx-hub] MCP 서버 시작: ${info.url} / pipe ${pipe.path} (PID ${process.pid})`);
+      console.log(`[tfx-hub] MCP 서버 시작: ${info.url} / pipe ${pipe.path} / assign-callback ${assignCallbacks.path} (PID ${process.pid})`);
 
       const stopFn = async () => {
         router.stopSweeper();
@@ -406,12 +586,23 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         }
         transports.clear();
         await pipe.stop();
+        await assignCallbacks.stop();
         store.close();
         try { unlinkSync(PID_FILE); } catch {}
+        try { unlinkSync(TOKEN_FILE); } catch {}
         await new Promise((resolveClose) => httpServer.close(resolveClose));
       };
 
-      resolve({ ...info, httpServer, store, router, hitl, pipe, stop: stopFn });
+      resolve({
+        ...info,
+        httpServer,
+        store,
+        router,
+        hitl,
+        pipe,
+        assignCallbacks,
+        stop: stopFn,
+      });
     });
     httpServer.on('error', reject);
   });

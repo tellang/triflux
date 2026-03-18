@@ -1,88 +1,126 @@
 #!/usr/bin/env node
-// MCP 인벤토리 — 백그라운드 비동기 실행
-// Codex/Gemini의 MCP 서버 상태를 캐싱하여 tfx-route.sh가 동적 힌트 생성에 사용
-//
-// 출력: ~/.claude/cache/mcp-inventory.json
-// 사용: tfx-route.sh의 get_mcp_hint()에서 읽음
+// MCP inventory cache for dynamic MCP filtering.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-import { execSync } from "child_process";
+import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const CACHE_DIR = join(homedir(), ".claude", "cache");
-const CACHE_FILE = join(CACHE_DIR, "mcp-inventory.json");
+import { normalizeServerMetadata } from './lib/mcp-server-catalog.mjs';
 
-function getCodexMcp() {
+const CACHE_DIR = join(homedir(), '.claude', 'cache');
+const CACHE_FILE = join(CACHE_DIR, 'mcp-inventory.json');
+
+function countConfiguredTools(config = {}, fallbackToolCount = 0) {
+  const directKeys = ['tools', 'toolNames', 'allowedTools', 'includeTools'];
+  for (const key of directKeys) {
+    if (Array.isArray(config[key])) return config[key].length;
+  }
+
+  if (Array.isArray(config.excludeTools)) {
+    return Math.max(0, fallbackToolCount - config.excludeTools.length);
+  }
+
+  return fallbackToolCount;
+}
+
+export function createServerRecord(name, status, config = {}) {
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+  const fallback = normalizeServerMetadata(normalizedName, {});
+  const toolCount = countConfiguredTools(config, fallback.tool_count);
+  const domainTags = Array.isArray(config.domain_tags)
+    ? config.domain_tags
+    : Array.isArray(config.domainTags)
+      ? config.domainTags
+      : [];
+
+  const metadata = normalizeServerMetadata(normalizedName, {
+    ...config,
+    tool_count: toolCount,
+    domain_tags: domainTags,
+  });
+
+  return {
+    name: normalizedName,
+    status,
+    tool_count: metadata.tool_count,
+    domain_tags: metadata.domain_tags,
+  };
+}
+
+export function getCodexMcp() {
   try {
-    const output = execSync("codex mcp list", {
-      encoding: "utf8",
+    const output = execSync('codex mcp list', {
+      encoding: 'utf8',
       timeout: 15000,
-      stdio: ["pipe", "pipe", "ignore"], // stderr 무시 (Windows 호환)
+      stdio: ['pipe', 'pipe', 'ignore'],
     });
-    // 테이블 파싱: 첫 줄 헤더, 이후 줄에서 Name과 Status 추출
-    const lines = output.trim().split(/\r?\n/).filter(l => l.trim());
+    const lines = output.trim().split(/\r?\n/).filter((line) => line.trim());
     if (lines.length < 2) return [];
 
     const servers = [];
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = 1; i < lines.length; i += 1) {
       const cols = lines[i].split(/\s{2,}/);
-      if (cols.length >= 2) {
-        const name = cols[0].trim();
-        // Status는 마지막에서 2번째 컬럼 근처
-        const statusMatch = lines[i].match(/\b(enabled|disabled)\b/i);
-        const status = statusMatch ? statusMatch[1].toLowerCase() : "unknown";
-        if (name && !name.startsWith("-")) {
-          servers.push({ name, status });
-        }
-      }
+      if (cols.length < 2) continue;
+
+      const name = cols[0].trim();
+      const statusMatch = lines[i].match(/\b(enabled|disabled)\b/i);
+      const status = statusMatch ? statusMatch[1].toLowerCase() : 'unknown';
+      if (!name || name.startsWith('-')) continue;
+      servers.push(createServerRecord(name, status));
     }
     return servers;
-  } catch {
-    return null; // codex 미설치 또는 타임아웃
-  }
-}
-
-function getGeminiMcp() {
-  try {
-    const settingsPath = join(homedir(), ".gemini", "settings.json");
-    if (!existsSync(settingsPath)) return null;
-
-    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    const mcpServers = settings.mcpServers || {};
-    return Object.keys(mcpServers).map(name => ({
-      name,
-      status: "configured",
-    }));
   } catch {
     return null;
   }
 }
 
-function main() {
-  if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+export function getGeminiMcp() {
+  try {
+    const settingsPath = join(homedir(), '.gemini', 'settings.json');
+    if (!existsSync(settingsPath)) return null;
 
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    const mcpServers = settings.mcpServers || {};
+    return Object.entries(mcpServers).map(([name, config]) => createServerRecord(name, 'configured', config || {}));
+  } catch {
+    return null;
+  }
+}
+
+export function buildInventory() {
   const inventory = {
     timestamp: new Date().toISOString(),
     codex: { available: false, servers: [] },
     gemini: { available: false, servers: [] },
   };
 
-  // Codex MCP
   const codexServers = getCodexMcp();
   if (codexServers !== null) {
     inventory.codex.available = true;
     inventory.codex.servers = codexServers;
   }
 
-  // Gemini MCP
   const geminiServers = getGeminiMcp();
   if (geminiServers !== null) {
     inventory.gemini.available = true;
     inventory.gemini.servers = geminiServers;
   }
 
-  writeFileSync(CACHE_FILE, JSON.stringify(inventory, null, 2));
+  return inventory;
 }
 
-main();
+export function writeInventoryCache(inventory = buildInventory()) {
+  if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+  writeFileSync(CACHE_FILE, JSON.stringify(inventory, null, 2));
+  return inventory;
+}
+
+export function main() {
+  writeInventoryCache();
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main();
+}

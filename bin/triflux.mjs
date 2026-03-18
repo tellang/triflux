@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // triflux CLI — setup, doctor, version
-import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, rmSync, statSync } from "fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, rmSync, statSync, openSync, closeSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
-import { execSync, spawn } from "child_process";
+import { execSync, execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { setTimeout as delay } from "node:timers/promises";
 import { detectMultiplexer, getSessionAttachedCount, killSession, listSessions, tmuxExec } from "../hub/team/session.mjs";
@@ -64,24 +64,23 @@ function section(title) { console.log(`\n  ${AMBER}▸${RESET} ${BOLD}${title}${
 
 function which(cmd) {
   try {
-    const result = execSync(
-      process.platform === "win32" ? `where ${cmd} 2>nul` : `which ${cmd} 2>/dev/null`,
-      { encoding: "utf8", timeout: 5000 }
-    ).trim();
-    return result.split(/\r?\n/)[0] || null;
+    const result = process.platform === "win32"
+      ? execFileSync("where", [cmd], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] })
+      : execFileSync("which", [cmd], { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "ignore"] });
+    return result.trim().split(/\r?\n/)[0] || null;
   } catch { return null; }
 }
 
 function whichInShell(cmd, shell) {
-  const cmds = {
-    bash: `bash -c "source ~/.bashrc 2>/dev/null && command -v ${cmd} 2>/dev/null"`,
-    cmd: `cmd /c where ${cmd} 2>nul`,
-    pwsh: `pwsh -NoProfile -c "(Get-Command ${cmd} -EA SilentlyContinue).Source"`,
+  const shellArgs = {
+    bash: ["bash", ["-c", `source ~/.bashrc 2>/dev/null && command -v "${cmd}" 2>/dev/null`]],
+    cmd: ["cmd", ["/c", "where", cmd]],
+    pwsh: ["pwsh", ["-NoProfile", "-c", `(Get-Command '${cmd.replace(/'/g, "''")}' -EA SilentlyContinue).Source`]],
   };
-  const command = cmds[shell];
-  if (!command) return null;
+  const entry = shellArgs[shell];
+  if (!entry) return null;
   try {
-    const result = execSync(command, {
+    const result = execFileSync(entry[0], entry[1], {
       encoding: "utf8",
       timeout: 8000,
       stdio: ["pipe", "pipe", "ignore"],
@@ -513,22 +512,22 @@ async function cmdDoctor(options = {}) {
     const mcpCheck = join(PKG_ROOT, "scripts", "mcp-check.mjs");
     if (existsSync(mcpCheck)) {
       try {
-        execSync(`"${process.execPath}" "${mcpCheck}"`, { timeout: 15000, stdio: "ignore" });
+        execFileSync(process.execPath, [mcpCheck], { timeout: 15000, stdio: "ignore" });
         ok("MCP 인벤토리 재생성됨");
       } catch { warn("MCP 인벤토리 재생성 실패 — 다음 세션에서 자동 재시도"); }
     }
     const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
     if (existsSync(hudScript)) {
       try {
-        execSync(`"${process.execPath}" "${hudScript}" --refresh-claude-usage`, { timeout: 20000, stdio: "ignore" });
+        execFileSync(process.execPath, [hudScript, "--refresh-claude-usage"], { timeout: 20000, stdio: "ignore" });
         ok("Claude 사용량 캐시 재생성됨");
       } catch { warn("Claude 사용량 캐시 재생성 실패 — 다음 API 호출 시 자동 생성"); }
       try {
-        execSync(`"${process.execPath}" "${hudScript}" --refresh-codex-rate-limits`, { timeout: 15000, stdio: "ignore" });
+        execFileSync(process.execPath, [hudScript, "--refresh-codex-rate-limits"], { timeout: 15000, stdio: "ignore" });
         ok("Codex 레이트 리밋 캐시 재생성됨");
       } catch { warn("Codex 레이트 리밋 캐시 재생성 실패"); }
       try {
-        execSync(`"${process.execPath}" "${hudScript}" --refresh-gemini-quota`, { timeout: 15000, stdio: "ignore" });
+        execFileSync(process.execPath, [hudScript, "--refresh-gemini-quota"], { timeout: 15000, stdio: "ignore" });
         ok("Gemini 쿼터 캐시 재생성됨");
       } catch { warn("Gemini 쿼터 캐시 재생성 실패"); }
     }
@@ -874,8 +873,8 @@ async function cmdDoctor(options = {}) {
     }
   }
 
-  // 13. Orphan Teams
-  section("Orphan Teams");
+  // 13. Stale Teams (Claude teams/ + tasks/ 자동 감지)
+  section("Stale Teams");
   const teamsDir = join(CLAUDE_DIR, "teams");
   const tasksDir = join(CLAUDE_DIR, "tasks");
   if (existsSync(teamsDir)) {
@@ -886,24 +885,136 @@ async function cmdDoctor(options = {}) {
       if (teamDirs.length === 0) {
         ok("잔존 팀 없음");
       } else {
-        warn(`${teamDirs.length}개 잔존 팀 발견: ${teamDirs.join(", ")}`);
-        if (fix) {
-          let cleaned = 0;
-          for (const d of teamDirs) {
-            try {
-              rmSync(join(teamsDir, d), { recursive: true, force: true });
-              cleaned++;
-            } catch {}
-            // 연관 tasks 디렉토리도 정리
-            const taskDir = join(tasksDir, d);
-            if (existsSync(taskDir)) {
-              try { rmSync(taskDir, { recursive: true, force: true }); } catch {}
+        const nowMs = Date.now();
+        const staleMaxAgeMs = STALE_TEAM_MAX_AGE_SEC * 1000;
+        const staleTeams = [];
+        const activeTeams = [];
+
+        for (const d of teamDirs) {
+          const teamPath = join(teamsDir, d);
+          const configPath = join(teamPath, "config.json");
+          let teamConfig = null;
+          let configMtimeMs = null;
+
+          // config.json 읽기 — createdAt 또는 mtime으로 나이 판정
+          try {
+            const configStat = statSync(configPath);
+            configMtimeMs = configStat.mtimeMs;
+            teamConfig = JSON.parse(readFileSync(configPath, "utf8"));
+          } catch {
+            // config.json 없으면 디렉토리 mtime 사용
+            try { configMtimeMs = statSync(teamPath).mtimeMs; } catch {}
+          }
+
+          const createdAtMs = teamConfig?.createdAt ?? configMtimeMs;
+          const ageMs = createdAtMs != null ? Math.max(0, nowMs - createdAtMs) : null;
+          const ageSec = ageMs != null ? Math.floor(ageMs / 1000) : null;
+          const aged = ageMs != null && ageMs >= staleMaxAgeMs;
+
+          // 활성 멤버 확인 — leadSessionId 또는 멤버 agentId로 프로세스 검색
+          let hasActiveMember = false;
+          if (teamConfig?.members?.length > 0) {
+            const searchTokens = [];
+            if (teamConfig.leadSessionId) searchTokens.push(teamConfig.leadSessionId.toLowerCase());
+            if (teamConfig.name) searchTokens.push(teamConfig.name.toLowerCase());
+            for (const member of teamConfig.members) {
+              if (member.agentId) searchTokens.push(member.agentId.split("@")[0].toLowerCase());
+            }
+
+            // tmux 세션 이름과 매칭
+            const liveSessionNames = teamSessionReport.sessions.map(s => s.sessionName.toLowerCase());
+            hasActiveMember = searchTokens.some(token =>
+              liveSessionNames.some(name => name.includes(token))
+            );
+
+            // 프로세스 명령줄에서 세션 ID 매칭 (tmux 없는 in-process 팀 지원)
+            if (!hasActiveMember && teamConfig.leadSessionId) {
+              try {
+                const sessionToken = teamConfig.leadSessionId.toLowerCase();
+                // Claude Code 프로세스에서 세션 ID 검색
+                if (process.platform === "win32") {
+                  const psOut = execSync(
+                    `powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '${teamConfig.leadSessionId.slice(0, 8)}' } | Select-Object ProcessId | ConvertTo-Json -Compress"`,
+                    { encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
+                  ).trim();
+                  if (psOut && psOut !== "null") {
+                    const parsed = JSON.parse(psOut);
+                    const procs = Array.isArray(parsed) ? parsed : [parsed];
+                    hasActiveMember = procs.some(p => p.ProcessId > 0);
+                  }
+                } else {
+                  const psOut = execSync(
+                    `ps -ax -o pid=,command= | grep -i '${teamConfig.leadSessionId.slice(0, 8)}' | grep -v grep`,
+                    { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] },
+                  ).trim();
+                  hasActiveMember = psOut.length > 0;
+                }
+              } catch {
+                // 프로세스 검색 실패 — stale로 간주하지 않음 (보수적)
+              }
             }
           }
-          ok(`${cleaned}개 잔존 팀 정리 완료`);
-        } else {
-          info("정리: /tfx-doctor --fix 또는 수동 rm -rf ~/.claude/teams/{name}/");
-          issues++;
+
+          const stale = aged && !hasActiveMember;
+          const teamEntry = {
+            name: d,
+            teamName: teamConfig?.name || d,
+            description: teamConfig?.description || null,
+            memberCount: teamConfig?.members?.length || 0,
+            ageSec,
+            stale,
+            hasActiveMember,
+          };
+
+          if (stale) {
+            staleTeams.push(teamEntry);
+          } else {
+            activeTeams.push(teamEntry);
+          }
+        }
+
+        // 활성 팀 표시
+        for (const t of activeTeams) {
+          const ageLabel = formatElapsedAge(t.ageSec);
+          const memberLabel = `${t.memberCount}명`;
+          ok(`${t.name}: 활성 (경과=${ageLabel}, 멤버=${memberLabel})`);
+        }
+
+        // stale 팀 표시 및 정리
+        if (staleTeams.length === 0 && activeTeams.length > 0) {
+          ok("stale 팀 없음");
+        } else if (staleTeams.length > 0) {
+          warn(`${staleTeams.length}개 stale 팀 발견`);
+          for (const t of staleTeams) {
+            const ageLabel = formatElapsedAge(t.ageSec);
+            warn(`${t.name}: stale (경과=${ageLabel}, 멤버=${t.memberCount}명, 활성 프로세스 없음)`);
+            if (t.description) info(`설명: ${t.description}`);
+          }
+
+          if (fix) {
+            let cleaned = 0;
+            for (const t of staleTeams) {
+              try {
+                rmSync(join(teamsDir, t.name), { recursive: true, force: true });
+                cleaned++;
+                ok(`stale 팀 정리: ${t.name}`);
+              } catch (e) {
+                fail(`팀 정리 실패: ${t.name} — ${e.message}`);
+              }
+              // 연관 tasks 디렉토리도 정리
+              const taskDir = join(tasksDir, t.name);
+              if (existsSync(taskDir)) {
+                try {
+                  rmSync(taskDir, { recursive: true, force: true });
+                  ok(`연관 tasks 정리: ${t.name}`);
+                } catch {}
+              }
+            }
+            info(`${cleaned}/${staleTeams.length}개 stale 팀 정리 완료`);
+          } else {
+            info("정리: tfx doctor --fix");
+            issues += staleTeams.length;
+          }
         }
       }
     } catch (e) {
@@ -1246,6 +1357,24 @@ async function cmdCodexTeam() {
   }
 }
 
+// ── Hub preflight 체크 (multi/auto 실행 전) ──
+
+async function checkHubRunning() {
+  const port = Number(process.env.TFX_HUB_PORT || "27888");
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/status`, {
+      signal: AbortSignal.timeout(2000),
+    });
+    if (res.ok) return true;
+  } catch {}
+  console.log("");
+  warn(`${AMBER}tfx-hub${RESET}가 실행되고 있지 않습니다.`);
+  info(`Hub 없이 실행하면 Claude 네이티브 에이전트로 폴백되어 토큰이 소비됩니다.`);
+  info(`Codex(무료) 위임을 활용하려면 먼저 Hub를 시작하세요:\n`);
+  console.log(`    ${WHITE_BRIGHT}tfx hub start${RESET}\n`);
+  return false;
+}
+
 // ── hub 서브커맨드 ──
 
 const HUB_PID_DIR = join(homedir(), ".claude", "cache", "tfx-hub");
@@ -1268,7 +1397,7 @@ function stopHubForUpdate() {
 
   try {
     if (process.platform === "win32") {
-      execSync(`taskkill /PID ${info.pid} /T /F`, {
+      execFileSync("taskkill", ["/PID", String(info.pid), "/T", "/F"], {
         stdio: ["pipe", "pipe", "ignore"],
         timeout: 10000,
       });
@@ -1279,7 +1408,25 @@ function stopHubForUpdate() {
     try { process.kill(info.pid, "SIGKILL"); } catch {}
   }
 
-  sleepMs(300);
+  // Windows에서 better-sqlite3.node 파일 핸들 해제 대기
+  // taskkill 후 프로세스 종료 + 파일 핸들 해제까지 최대 5초
+  const sqliteNode = join(PKG_ROOT, "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node");
+  for (let i = 0; i < 10; i++) {
+    sleepMs(500);
+    try { process.kill(info.pid, 0); } catch { break; }
+  }
+  // 파일 잠금 해제 확인 (Windows EBUSY 방지)
+  if (existsSync(sqliteNode)) {
+    for (let i = 0; i < 6; i++) {
+      try {
+        const fd = openSync(sqliteNode, "r");
+        closeSync(fd);
+        break;
+      } catch {
+        sleepMs(500);
+      }
+    }
+  }
   try { unlinkSync(HUB_PID_FILE); } catch {}
   return info;
 }
@@ -1315,7 +1462,7 @@ function autoRegisterMcp(mcpUrl) {
       if (list.includes("tfx-hub")) {
         ok("Codex: 이미 등록됨");
       } else {
-        execSync(`codex mcp add tfx-hub --url ${mcpUrl}`, { timeout: 10000, stdio: "ignore" });
+        execFileSync("codex", ["mcp", "add", "tfx-hub", "--url", mcpUrl], { timeout: 10000, stdio: "ignore" });
         ok("Codex: MCP 등록 완료");
       }
     } catch {
@@ -1589,19 +1736,20 @@ switch (cmd) {
   case "list": case "ls": cmdList(); break;
   case "hub":     await cmdHub(); break;
   case "multi": {
+    await checkHubRunning();
     const { pathToFileURL } = await import("node:url");
     const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
     await cmdTeam();
     break;
   }
   case "codex-team":
+    await checkHubRunning();
     await cmdCodexTeam();
     break;
   case "notion-read": case "nr": {
     const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
-    const nrArgs = process.argv.slice(3).map(a => `"${a}"`).join(" ");
     try {
-      execSync(`"${process.execPath}" "${scriptPath}" ${nrArgs}`, { stdio: "inherit", timeout: 660000 });
+      execFileSync(process.execPath, [scriptPath, ...process.argv.slice(3)], { stdio: "inherit", timeout: 660000 });
     } catch (e) { process.exit(e.status || 1); }
     break;
   }

@@ -3,6 +3,9 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, createWriteStream } from "node:fs";
 import { dirname, join } from "node:path";
+import { verifySlimWrapperRouteExecution } from "./native.mjs";
+
+const ROUTE_LOG_TAIL_BYTES = 65536;
 
 function parseArgs(argv) {
   const out = {};
@@ -22,6 +25,39 @@ async function readJson(path) {
 function safeText(v, fallback = "") {
   if (v == null) return fallback;
   return String(v);
+}
+
+function readTailText(path, maxBytes = ROUTE_LOG_TAIL_BYTES) {
+  try {
+    const raw = readFileSync(path, "utf8");
+    if (raw.length <= maxBytes) return raw;
+    return raw.slice(-maxBytes);
+  } catch {
+    return "";
+  }
+}
+
+function finalizeRouteVerification(state) {
+  if (state?.member?.role !== "worker") return;
+
+  const verification = verifySlimWrapperRouteExecution({
+    promptText: safeText(state.member?.prompt),
+    stdoutText: readTailText(state.logFile),
+    stderrText: readTailText(state.errFile),
+  });
+
+  state.routeVerification = verification;
+  if (!verification.expectedRouteInvocation) {
+    state.completionStatus = "unchecked";
+    state.completionReason = null;
+    return;
+  }
+
+  state.completionStatus = verification.abnormal ? "abnormal" : "normal";
+  state.completionReason = verification.reason;
+  if (verification.abnormal) {
+    state.lastPreview = "[abnormal] tfx-route.sh evidence missing";
+  }
 }
 
 function nowMs() {
@@ -63,6 +99,9 @@ function memberStateSnapshot() {
       status: state?.status || "unknown",
       exitCode: state?.exitCode ?? null,
       lastPreview: state?.lastPreview || "",
+      completionStatus: state?.completionStatus || null,
+      completionReason: state?.completionReason || null,
+      routeVerification: state?.routeVerification || null,
       logFile: state?.logFile || null,
       errFile: state?.errFile || null,
     });
@@ -131,6 +170,7 @@ function spawnMember(member) {
   child.on("exit", (code) => {
     state.status = "exited";
     state.exitCode = code;
+    finalizeRouteVerification(state);
     try { outWs.end(); } catch {}
     try { errWs.end(); } catch {}
     maybeAutoShutdown();

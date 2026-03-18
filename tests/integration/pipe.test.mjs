@@ -93,6 +93,55 @@ async function createPipeClient(pipePath) {
   });
 }
 
+async function createAssignCallbackClient(pipePath) {
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection(pipePath);
+    let buffer = '';
+    const events = [];
+    const waiters = [];
+
+    function emitEvent(frame) {
+      const waiter = waiters.shift();
+      if (waiter) {
+        waiter(frame);
+      } else {
+        events.push(frame);
+      }
+    }
+
+    socket.setEncoding('utf8');
+    socket.once('connect', () => {
+      socket.on('data', (chunk) => {
+        buffer += chunk;
+        let newlineIndex = buffer.indexOf('\n');
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          if (line) emitEvent(JSON.parse(line));
+          newlineIndex = buffer.indexOf('\n');
+        }
+      });
+
+      resolve({
+        async nextEvent(timeoutMs = 3000) {
+          if (events.length) return events.shift();
+          return await new Promise((resolveEvent, rejectEvent) => {
+            const timer = setTimeout(() => rejectEvent(new Error('assign callback timeout')), timeoutMs);
+            waiters.push((frame) => {
+              clearTimeout(timer);
+              resolveEvent(frame);
+            });
+          });
+        },
+        close() {
+          socket.end();
+        },
+      });
+    });
+    socket.once('error', reject);
+  });
+}
+
 const TEST_PORT = 28100 + Math.floor(Math.random() * 100);
 
 describe('Named Pipe 실시간 채널', () => {
@@ -180,5 +229,151 @@ describe('Named Pipe 실시간 채널', () => {
     assert.deepEqual(drained.data.messages[0].payload, { command: 'pause' });
 
     client.close();
+  });
+
+  it('assign/assign_result/assign_status 명령은 pipe 경로로 동작해야 한다', async () => {
+    const lead = await createPipeClient(hub.pipePath);
+    const worker = await createPipeClient(hub.pipePath);
+
+    await lead.request('command', {
+      action: 'register',
+      agent_id: 'pipe-assign-lead',
+      cli: 'claude',
+      capabilities: ['plan'],
+      topics: [],
+      heartbeat_ttl_ms: 60000,
+    });
+    await worker.request('command', {
+      action: 'register',
+      agent_id: 'pipe-assign-worker',
+      cli: 'codex',
+      capabilities: ['code'],
+      topics: [],
+      heartbeat_ttl_ms: 60000,
+    });
+
+    const nextWorkerEvent = worker.nextEvent();
+    const assigned = await lead.request('command', {
+      action: 'assign',
+      supervisor_agent: 'pipe-assign-lead',
+      worker_agent: 'pipe-assign-worker',
+      task: 'assign via pipe',
+      max_retries: 1,
+    });
+
+    assert.equal(assigned.ok, true);
+    assert.equal(assigned.data.status, 'queued');
+
+    const jobEvent = await nextWorkerEvent;
+    assert.equal(jobEvent.payload.message.payload.assign_job_id, assigned.data.job_id);
+
+    const progressed = await worker.request('command', {
+      action: 'assign_result',
+      job_id: assigned.data.job_id,
+      worker_agent: 'pipe-assign-worker',
+      status: 'running',
+      attempt: 1,
+    });
+    assert.equal(progressed.ok, true);
+    assert.equal(progressed.data.status, 'running');
+
+    const completed = await worker.request('command', {
+      action: 'assign_result',
+      job_id: assigned.data.job_id,
+      worker_agent: 'pipe-assign-worker',
+      status: 'completed',
+      attempt: 1,
+      metadata: { result: 'success' },
+      result: { output: 'done' },
+    });
+    assert.equal(completed.ok, true);
+    assert.equal(completed.data.status, 'succeeded');
+
+    const queried = await lead.request('query', {
+      action: 'assign_status',
+      job_id: assigned.data.job_id,
+    });
+    assert.equal(queried.ok, true);
+    assert.equal(queried.data.status, 'succeeded');
+
+    lead.close();
+    worker.close();
+  });
+
+  it('assign_jobs 상태 변경은 assign callback pipe로 실시간 JSON 이벤트를 보내야 한다', async () => {
+    const callbacks = await createAssignCallbackClient(hub.assignCallbackPipePath);
+    const lead = await createPipeClient(hub.pipePath);
+    const worker = await createPipeClient(hub.pipePath);
+
+    await lead.request('command', {
+      action: 'register',
+      agent_id: 'pipe-callback-lead',
+      cli: 'claude',
+      capabilities: ['plan'],
+      topics: [],
+      heartbeat_ttl_ms: 60000,
+    });
+    await worker.request('command', {
+      action: 'register',
+      agent_id: 'pipe-callback-worker',
+      cli: 'codex',
+      capabilities: ['code'],
+      topics: [],
+      heartbeat_ttl_ms: 60000,
+    });
+
+    const queuedEventPromise = callbacks.nextEvent();
+    const assigned = await lead.request('command', {
+      action: 'assign',
+      supervisor_agent: 'pipe-callback-lead',
+      worker_agent: 'pipe-callback-worker',
+      task: 'assign callback via pipe',
+    });
+
+    const queuedEvent = await queuedEventPromise;
+    assert.equal(queuedEvent.job_id, assigned.data.job_id);
+    assert.equal(queuedEvent.event, 'assign_job_status');
+    assert.equal(queuedEvent.status, 'queued');
+    assert.equal(queuedEvent.supervisor_agent, 'pipe-callback-lead');
+    assert.equal(queuedEvent.worker_agent, 'pipe-callback-worker');
+    assert.equal(queuedEvent.task, 'assign callback via pipe');
+    assert.equal(typeof queuedEvent.timestamp, 'string');
+
+    const runningEventPromise = callbacks.nextEvent();
+    await worker.request('command', {
+      action: 'assign_result',
+      job_id: assigned.data.job_id,
+      worker_agent: 'pipe-callback-worker',
+      status: 'running',
+      attempt: 1,
+      result: { step: 'started' },
+    });
+
+    const runningEvent = await runningEventPromise;
+    assert.equal(runningEvent.job_id, assigned.data.job_id);
+    assert.equal(runningEvent.status, 'running');
+    assert.equal(runningEvent.event, 'assign_job_status');
+    assert.deepEqual(runningEvent.result, { step: 'started' });
+
+    const doneEventPromise = callbacks.nextEvent();
+    await worker.request('command', {
+      action: 'assign_result',
+      job_id: assigned.data.job_id,
+      worker_agent: 'pipe-callback-worker',
+      status: 'completed',
+      attempt: 1,
+      result: { output: 'done' },
+    });
+
+    const doneEvent = await doneEventPromise;
+    assert.equal(doneEvent.job_id, assigned.data.job_id);
+    assert.equal(doneEvent.status, 'succeeded');
+    assert.equal(doneEvent.event, 'assign_job_status');
+    assert.equal(doneEvent.completed_at_ms !== null, true);
+    assert.deepEqual(doneEvent.result, { output: 'done' });
+
+    callbacks.close();
+    lead.close();
+    worker.close();
   });
 });

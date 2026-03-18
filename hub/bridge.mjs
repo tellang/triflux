@@ -12,6 +12,24 @@ import { parseArgs as nodeParseArgs } from 'node:util';
 import { randomUUID } from 'node:crypto';
 
 const HUB_PID_FILE = join(homedir(), '.claude', 'cache', 'tfx-hub', 'hub.pid');
+const HUB_TOKEN_FILE = join(homedir(), '.claude', '.tfx-hub-token');
+
+function normalizeToken(raw) {
+  if (raw == null) return null;
+  const token = String(raw).trim();
+  return token || null;
+}
+
+// Hub 인증 토큰 읽기 (파일 없으면 null → 하위 호환)
+function readHubToken() {
+  const envToken = normalizeToken(process.env.TFX_HUB_TOKEN);
+  if (envToken) return envToken;
+  try {
+    return normalizeToken(readFileSync(HUB_TOKEN_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
 
 export function getHubUrl() {
   if (process.env.TFX_HUB_URL) return process.env.TFX_HUB_URL.replace(/\/mcp$/, '');
@@ -41,15 +59,45 @@ export function getHubPipePath() {
   }
 }
 
-export async function post(path, body, timeoutMs = 5000) {
+const HUB_OPERATIONS = Object.freeze({
+  register: { transport: 'command', action: 'register', httpPath: '/bridge/register' },
+  result: { transport: 'command', action: 'result', httpPath: '/bridge/result' },
+  control: { transport: 'command', action: 'control', httpPath: '/bridge/control' },
+  context: { transport: 'query', action: 'drain', httpPath: '/bridge/context' },
+  deregister: { transport: 'command', action: 'deregister', httpPath: '/bridge/deregister' },
+  assignAsync: { transport: 'command', action: 'assign', httpPath: '/bridge/assign/async' },
+  assignResult: { transport: 'command', action: 'assign_result', httpPath: '/bridge/assign/result' },
+  assignStatus: { transport: 'query', action: 'assign_status', httpPath: '/bridge/assign/status' },
+  assignRetry: { transport: 'command', action: 'assign_retry', httpPath: '/bridge/assign/retry' },
+  teamInfo: { transport: 'query', action: 'team_info', httpPath: '/bridge/team/info' },
+  teamTaskList: { transport: 'query', action: 'team_task_list', httpPath: '/bridge/team/task-list' },
+  teamTaskUpdate: { transport: 'command', action: 'team_task_update', httpPath: '/bridge/team/task-update' },
+  teamSendMessage: { transport: 'command', action: 'team_send_message', httpPath: '/bridge/team/send-message' },
+  pipelineState: { transport: 'query', action: 'pipeline_state', httpPath: '/bridge/pipeline/state' },
+  pipelineAdvance: { transport: 'command', action: 'pipeline_advance', httpPath: '/bridge/pipeline/advance' },
+  pipelineInit: { transport: 'command', action: 'pipeline_init', httpPath: '/bridge/pipeline/init' },
+  pipelineList: { transport: 'query', action: 'pipeline_list', httpPath: '/bridge/pipeline/list' },
+  hubStatus: { transport: 'query', action: 'status', httpPath: '/status', httpMethod: 'GET' },
+});
+
+export async function requestJson(path, { method = 'POST', body, timeoutMs = 5000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const headers = {};
+    const token = readHubToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+
     const res = await fetch(`${getHubUrl()}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
     clearTimeout(timer);
@@ -58,6 +106,10 @@ export async function post(path, body, timeoutMs = 5000) {
     clearTimeout(timer);
     return null;
   }
+}
+
+export async function post(path, body, timeoutMs = 5000) {
+  return await requestJson(path, { method: 'POST', body, timeoutMs });
 }
 
 export async function connectPipe(timeoutMs = 1200) {
@@ -92,12 +144,14 @@ async function pipeRequest(type, action, payload, timeoutMs = 3000) {
   return await new Promise((resolve) => {
     const requestId = randomUUID();
     let buffer = '';
+    let settled = false;
     const timer = setTimeout(() => {
-      try { socket.destroy(); } catch {}
-      resolve(null);
+      finish(null);
     }, timeoutMs);
 
     const finish = (result) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       try { socket.end(); } catch {}
       resolve(result);
@@ -156,6 +210,7 @@ export function parseArgs(argv) {
       topics: { type: 'string' },
       capabilities: { type: 'string' },
       file: { type: 'string' },
+      payload: { type: 'string' },
       topic: { type: 'string' },
       trace: { type: 'string' },
       correlation: { type: 'string' },
@@ -164,20 +219,37 @@ export function parseArgs(argv) {
       out: { type: 'string' },
       team: { type: 'string' },
       'task-id': { type: 'string' },
+      'job-id': { type: 'string' },
       owner: { type: 'string' },
       status: { type: 'string' },
       statuses: { type: 'string' },
       claim: { type: 'boolean' },
       actor: { type: 'string' },
+      command: { type: 'string' },
+      reason: { type: 'string' },
       from: { type: 'string' },
       to: { type: 'string' },
       text: { type: 'string' },
+      task: { type: 'string' },
+      'supervisor-agent': { type: 'string' },
+      'worker-agent': { type: 'string' },
+      priority: { type: 'string' },
+      'ttl-ms': { type: 'string' },
+      'timeout-ms': { type: 'string' },
+      'max-retries': { type: 'string' },
+      attempt: { type: 'string' },
+      result: { type: 'string' },
+      error: { type: 'string' },
+      metadata: { type: 'string' },
+      'requested-by': { type: 'string' },
       summary: { type: 'string' },
       color: { type: 'string' },
       limit: { type: 'string' },
       'include-internal': { type: 'boolean' },
       subject: { type: 'string' },
       description: { type: 'string' },
+      'fix-max': { type: 'string' },
+      'ralph-max': { type: 'string' },
       'active-form': { type: 'string' },
       'add-blocks': { type: 'string' },
       'add-blocked-by': { type: 'string' },
@@ -198,18 +270,46 @@ export function parseJsonSafe(raw, fallback = null) {
   }
 }
 
-async function runPipeFirst(commandName, queryName, httpPath, body, timeoutMs = 3000) {
-  const viaPipe = commandName
-    ? await pipeCommand(commandName, body, timeoutMs)
-    : await pipeQuery(queryName, body, timeoutMs);
-  if (viaPipe) return viaPipe;
-  return await post(httpPath, body, Math.max(timeoutMs, 5000));
+async function requestHub(operation, body, timeoutMs = 3000, fallback = null) {
+  const viaPipe = operation.transport === 'command'
+    ? await pipeCommand(operation.action, body, timeoutMs)
+    : await pipeQuery(operation.action, body, timeoutMs);
+  if (viaPipe) {
+    return { transport: 'pipe', result: viaPipe };
+  }
+
+  const viaHttp = operation.httpPath
+    ? await requestJson(operation.httpPath, {
+      method: operation.httpMethod || 'POST',
+      body: operation.httpMethod === 'GET' ? undefined : body,
+      timeoutMs: Math.max(timeoutMs, 5000),
+    })
+    : null;
+  if (viaHttp) {
+    return { transport: 'http', result: viaHttp };
+  }
+
+  if (!fallback) return null;
+  const viaFallback = await fallback();
+  if (!viaFallback) return null;
+  return { transport: 'fallback', result: viaFallback };
+}
+
+function unavailableResult() {
+  return { ok: false, reason: 'hub_unavailable' };
+}
+
+function emitJson(payload) {
+  if (payload !== undefined) {
+    console.log(JSON.stringify(payload));
+  }
+  return payload?.ok !== false;
 }
 
 async function cmdRegister(args) {
   const agentId = args.agent;
   const timeoutSec = parseInt(args.timeout || '600', 10);
-  const result = await runPipeFirst('register', null, '/bridge/register', {
+  const outcome = await requestHub(HUB_OPERATIONS.register, {
     agent_id: agentId,
     cli: args.cli || 'other',
     timeout_sec: timeoutSec,
@@ -221,17 +321,18 @@ async function cmdRegister(args) {
       registered_at: Date.now(),
     },
   });
+  const result = outcome?.result;
 
   if (result?.ok) {
-    console.log(JSON.stringify({
+    return emitJson({
       ok: true,
       agent_id: agentId,
       lease_expires_ms: result.data?.lease_expires_ms,
       pipe_path: result.data?.pipe_path || getHubPipePath(),
-    }));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
+    });
   }
+
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdResult(args) {
@@ -240,35 +341,54 @@ async function cmdResult(args) {
     output = readFileSync(args.file, 'utf8').slice(0, 49152);
   }
 
-  const result = await runPipeFirst('result', null, '/bridge/result', {
+  const defaultPayload = {
+    agent_id: args.agent,
+    exit_code: parseInt(args['exit-code'] || '0', 10),
+    output_length: output.length,
+    output_preview: output.slice(0, 4096),
+    output_file: args.file || null,
+    completed_at: Date.now(),
+  };
+
+  const outcome = await requestHub(HUB_OPERATIONS.result, {
     agent_id: args.agent,
     topic: args.topic || 'task.result',
-    payload: {
-      agent_id: args.agent,
-      exit_code: parseInt(args['exit-code'] || '0', 10),
-      output_length: output.length,
-      output_preview: output.slice(0, 4096),
-      output_file: args.file || null,
-      completed_at: Date.now(),
-    },
+    payload: args.payload ? parseJsonSafe(args.payload, defaultPayload) : defaultPayload,
     trace_id: args.trace || undefined,
     correlation_id: args.correlation || undefined,
   });
+  const result = outcome?.result;
 
   if (result?.ok) {
-    console.log(JSON.stringify({ ok: true, message_id: result.data?.message_id }));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
+    return emitJson({ ok: true, message_id: result.data?.message_id });
   }
+
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdControl(args) {
+  const outcome = await requestHub(HUB_OPERATIONS.control, {
+    from_agent: args.from || 'lead',
+    to_agent: args.to,
+    command: args.command,
+    reason: args.reason || '',
+    payload: args.payload ? parseJsonSafe(args.payload, {}) : {},
+    trace_id: args.trace || undefined,
+    correlation_id: args.correlation || undefined,
+    ttl_ms: args['ttl-ms'] != null ? Number(args['ttl-ms']) : undefined,
+  });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdContext(args) {
-  const result = await runPipeFirst(null, 'drain', '/bridge/context', {
+  const outcome = await requestHub(HUB_OPERATIONS.context, {
     agent_id: args.agent,
     topics: args.topics ? args.topics.split(',') : undefined,
     max_messages: parseInt(args.max || '10', 10),
     auto_ack: true,
   });
+  const result = outcome?.result;
 
   if (result?.ok && result.data?.messages?.length) {
     const parts = result.data.messages.map((message, index) => {
@@ -281,50 +401,119 @@ async function cmdContext(args) {
 
     if (args.out) {
       writeFileSync(args.out, combined, 'utf8');
-      console.log(JSON.stringify({ ok: true, count: result.data.messages.length, file: args.out }));
+      return emitJson({ ok: true, count: result.data.messages.length, file: args.out });
     } else {
       console.log(combined);
+      return true;
     }
-    return;
   }
 
-  if (args.out) console.log(JSON.stringify({ ok: true, count: 0 }));
+  if (result?.ok) {
+    if (args.out) {
+      return emitJson({ ok: true, count: 0 });
+    }
+    return true;
+  }
+
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdDeregister(args) {
-  const result = await runPipeFirst('deregister', null, '/bridge/deregister', {
+  const outcome = await requestHub(HUB_OPERATIONS.deregister, {
     agent_id: args.agent,
   });
+  const result = outcome?.result;
 
   if (result?.ok) {
-    console.log(JSON.stringify({ ok: true, agent_id: args.agent, status: 'offline' }));
-  } else {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
+    return emitJson({ ok: true, agent_id: args.agent, status: 'offline' });
   }
+
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdAssignAsync(args) {
+  const outcome = await requestHub(HUB_OPERATIONS.assignAsync, {
+    supervisor_agent: args['supervisor-agent'],
+    worker_agent: args['worker-agent'],
+    task: args.task,
+    topic: args.topic || 'assign.job',
+    payload: args.payload ? parseJsonSafe(args.payload, {}) : {},
+    priority: args.priority != null ? Number(args.priority) : undefined,
+    ttl_ms: args['ttl-ms'] != null ? Number(args['ttl-ms']) : undefined,
+    timeout_ms: args['timeout-ms'] != null ? Number(args['timeout-ms']) : undefined,
+    max_retries: args['max-retries'] != null ? Number(args['max-retries']) : undefined,
+    trace_id: args.trace || undefined,
+    correlation_id: args.correlation || undefined,
+  });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdAssignResult(args) {
+  const outcome = await requestHub(HUB_OPERATIONS.assignResult, {
+    job_id: args['job-id'],
+    worker_agent: args['worker-agent'],
+    status: args.status,
+    attempt: args.attempt != null ? Number(args.attempt) : undefined,
+    result: args.result ? parseJsonSafe(args.result, null) : undefined,
+    error: args.error ? parseJsonSafe(args.error, null) : undefined,
+    payload: args.payload ? parseJsonSafe(args.payload, {}) : {},
+    metadata: args.metadata ? parseJsonSafe(args.metadata, {}) : {},
+  });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdAssignStatus(args) {
+  const outcome = await requestHub(HUB_OPERATIONS.assignStatus, {
+    job_id: args['job-id'],
+  });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdAssignRetry(args) {
+  const outcome = await requestHub(HUB_OPERATIONS.assignRetry, {
+    job_id: args['job-id'],
+    reason: args.reason,
+    requested_by: args['requested-by'],
+  });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdTeamInfo(args) {
-  const result = await post('/bridge/team/info', {
+  const body = {
     team_name: args.team,
     include_members: true,
     include_paths: true,
+  };
+  const outcome = await requestHub(HUB_OPERATIONS.teamInfo, body, 3000, async () => {
+    const { teamInfo } = await import('./team/nativeProxy.mjs');
+    return await teamInfo(body);
   });
-  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdTeamTaskList(args) {
-  const result = await post('/bridge/team/task-list', {
+  const body = {
     team_name: args.team,
     owner: args.owner,
     statuses: args.statuses ? args.statuses.split(',').map((status) => status.trim()).filter(Boolean) : [],
     include_internal: !!args['include-internal'],
     limit: parseInt(args.limit || '200', 10),
+  };
+  const outcome = await requestHub(HUB_OPERATIONS.teamTaskList, body, 3000, async () => {
+    const { teamTaskList } = await import('./team/nativeProxy.mjs');
+    return await teamTaskList(body);
   });
-  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdTeamTaskUpdate(args) {
-  const result = await post('/bridge/team/task-update', {
+  const body = {
     team_name: args.team,
     task_id: args['task-id'],
     claim: !!args.claim,
@@ -338,50 +527,126 @@ async function cmdTeamTaskUpdate(args) {
     metadata_patch: args['metadata-patch'] ? parseJsonSafe(args['metadata-patch'], null) : undefined,
     if_match_mtime_ms: args['if-match-mtime-ms'] != null ? Number(args['if-match-mtime-ms']) : undefined,
     actor: args.actor,
+  };
+  const outcome = await requestHub(HUB_OPERATIONS.teamTaskUpdate, body, 3000, async () => {
+    const { teamTaskUpdate } = await import('./team/nativeProxy.mjs');
+    return await teamTaskUpdate(body);
   });
-  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdTeamSendMessage(args) {
-  const result = await post('/bridge/team/send-message', {
+  const body = {
     team_name: args.team,
     from: args.from,
     to: args.to || 'team-lead',
     text: args.text,
     summary: args.summary,
     color: args.color || 'blue',
+  };
+  const outcome = await requestHub(HUB_OPERATIONS.teamSendMessage, body, 3000, async () => {
+    const { teamSendMessage } = await import('./team/nativeProxy.mjs');
+    return await teamSendMessage(body);
   });
-  console.log(JSON.stringify(result || { ok: false, reason: 'hub_unavailable' }));
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+function getHubDbPath() {
+  return join(homedir(), '.claude', 'cache', 'tfx-hub', 'state.db');
+}
+
+async function cmdPipelineState(args) {
+  const outcome = await requestHub(HUB_OPERATIONS.pipelineState, { team_name: args.team }, 3000, async () => {
+    try {
+      const { default: Database } = await import('better-sqlite3');
+      const { ensurePipelineTable, readPipelineState } = await import('./pipeline/state.mjs');
+      const dbPath = getHubDbPath();
+      if (!existsSync(dbPath)) {
+        return { ok: false, error: 'hub_db_not_found' };
+      }
+      const db = new Database(dbPath, { readonly: true });
+      ensurePipelineTable(db);
+      const state = readPipelineState(db, args.team);
+      db.close();
+      return state
+        ? { ok: true, data: state }
+        : { ok: false, error: 'pipeline_not_found' };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdPipelineAdvance(args) {
+  const body = {
+    team_name: args.team,
+    phase: args.status, // --status를 phase로 재활용
+  };
+  const outcome = await requestHub(HUB_OPERATIONS.pipelineAdvance, body, 3000, async () => {
+    try {
+      const { default: Database } = await import('better-sqlite3');
+      const { createPipeline } = await import('./pipeline/index.mjs');
+      const dbPath = getHubDbPath();
+      if (!existsSync(dbPath)) {
+        return { ok: false, error: 'hub_db_not_found' };
+      }
+      const db = new Database(dbPath);
+      const pipeline = createPipeline(db, args.team);
+      const advanceResult = pipeline.advance(args.status);
+      db.close();
+      return advanceResult;
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdPipelineInit(args) {
+  const outcome = await requestHub(HUB_OPERATIONS.pipelineInit, {
+    team_name: args.team,
+    fix_max: args['fix-max'] != null ? Number(args['fix-max']) : undefined,
+    ralph_max: args['ralph-max'] != null ? Number(args['ralph-max']) : undefined,
+  });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdPipelineList() {
+  const outcome = await requestHub(HUB_OPERATIONS.pipelineList, {});
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
 }
 
 async function cmdPing() {
-  const viaPipe = await pipeQuery('status', { scope: 'hub' }, 2000);
-  if (viaPipe?.ok) {
-    console.log(JSON.stringify({
+  const outcome = await requestHub(HUB_OPERATIONS.hubStatus, { scope: 'hub' }, 2000);
+
+  if (outcome?.transport === 'pipe' && outcome.result?.ok) {
+    return emitJson({
       ok: true,
-      hub: viaPipe.data?.hub?.state || 'healthy',
+      hub: outcome.result.data?.hub?.state || 'healthy',
       pipe_path: getHubPipePath(),
       transport: 'pipe',
-    }));
-    return;
+    });
   }
 
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`${getHubUrl()}/status`, { signal: controller.signal });
-    clearTimeout(timer);
-    const data = await res.json();
-    console.log(JSON.stringify({
+  if (outcome?.transport === 'http' && outcome.result) {
+    const data = outcome.result;
+    return emitJson({
       ok: true,
       hub: data.hub?.state,
       sessions: data.sessions,
       pipe_path: data.pipe?.path || data.pipe_path || null,
       transport: 'http',
-    }));
-  } catch {
-    console.log(JSON.stringify({ ok: false, reason: 'hub_unavailable' }));
+    });
   }
+
+  return emitJson(unavailableResult());
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -389,22 +654,31 @@ export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv.slice(1));
 
   switch (cmd) {
-    case 'register': await cmdRegister(args); break;
-    case 'result': await cmdResult(args); break;
-    case 'context': await cmdContext(args); break;
-    case 'deregister': await cmdDeregister(args); break;
-    case 'team-info': await cmdTeamInfo(args); break;
-    case 'team-task-list': await cmdTeamTaskList(args); break;
-    case 'team-task-update': await cmdTeamTaskUpdate(args); break;
-    case 'team-send-message': await cmdTeamSendMessage(args); break;
-    case 'ping': await cmdPing(args); break;
+    case 'register': return await cmdRegister(args);
+    case 'result': return await cmdResult(args);
+    case 'control': return await cmdControl(args);
+    case 'context': return await cmdContext(args);
+    case 'deregister': return await cmdDeregister(args);
+    case 'assign-async': return await cmdAssignAsync(args);
+    case 'assign-result': return await cmdAssignResult(args);
+    case 'assign-status': return await cmdAssignStatus(args);
+    case 'assign-retry': return await cmdAssignRetry(args);
+    case 'team-info': return await cmdTeamInfo(args);
+    case 'team-task-list': return await cmdTeamTaskList(args);
+    case 'team-task-update': return await cmdTeamTaskUpdate(args);
+    case 'team-send-message': return await cmdTeamSendMessage(args);
+    case 'pipeline-state': return await cmdPipelineState(args);
+    case 'pipeline-advance': return await cmdPipelineAdvance(args);
+    case 'pipeline-init': return await cmdPipelineInit(args);
+    case 'pipeline-list': return await cmdPipelineList(args);
+    case 'ping': return await cmdPing(args);
     default:
-      console.error('사용법: bridge.mjs <register|result|context|deregister|team-info|team-task-list|team-task-update|team-send-message|ping> [--옵션]');
+      console.error('사용법: bridge.mjs <register|result|control|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping> [--옵션]');
       process.exit(1);
   }
 }
 
 const selfRun = process.argv[1]?.replace(/\\/g, '/').endsWith('hub/bridge.mjs');
 if (selfRun) {
-  await main();
+  process.exitCode = await main() ? 0 : 1;
 }

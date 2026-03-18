@@ -11,7 +11,16 @@ const PROJECT_ROOT = resolve(SCRIPT_DIR, "..");
 function runBash(command) {
   return spawnSync("bash", ["-lc", command], {
     cwd: PROJECT_ROOT,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      TFX_TEAM_NAME: '',
+      TFX_TEAM_TASK_ID: '',
+      TFX_TEAM_AGENT_NAME: '',
+      TFX_TEAM_LEAD_NAME: '',
+      TFX_HUB_URL: '',
+      TMUX: '',
+    }
   });
 }
 
@@ -46,4 +55,3 @@ test("TFX_NO_CLAUDE_NATIVE는 0/1 값만 허용한다", () => {
   assert.notEqual(result.status, 0, out(result));
   assert.match(out(result), /0 또는 1/, out(result));
 });
-

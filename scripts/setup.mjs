@@ -17,9 +17,16 @@ const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 
 const REQUIRED_CODEX_PROFILES = [
   {
+    name: "high",
+    lines: [
+      'model = "gpt-5.4"',
+      'model_reasoning_effort = "high"',
+    ],
+  },
+  {
     name: "xhigh",
     lines: [
-      'model = "gpt-5.3-codex"',
+      'model = "gpt-5.4"',
       'model_reasoning_effort = "xhigh"',
     ],
   },
@@ -54,6 +61,11 @@ const SYNC_MAP = [
     src: join(PLUGIN_ROOT, "hub", "workers", "codex-mcp.mjs"),
     dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "codex-mcp.mjs"),
     label: "hub/workers/codex-mcp.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "delegator-mcp.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "delegator-mcp.mjs"),
+    label: "hub/workers/delegator-mcp.mjs",
   },
   {
     src: join(PLUGIN_ROOT, "hub", "workers", "interface.mjs"),

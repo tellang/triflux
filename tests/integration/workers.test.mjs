@@ -13,11 +13,23 @@ import { createWorker } from '../../hub/workers/factory.mjs';
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, '..', '..');
 const FIXTURE_DIR = resolve(PROJECT_ROOT, 'tests', 'fixtures');
+const FIXTURE_BIN = resolve(FIXTURE_DIR, 'bin');
 const GEMINI_FIXTURE = resolve(FIXTURE_DIR, 'fake-gemini-cli.mjs');
 const CLAUDE_FIXTURE = resolve(FIXTURE_DIR, 'fake-claude-cli.mjs');
 const ROUTE_SCRIPT = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
 
-describe('GeminiWorker', () => {
+function buildRouteEnv(extraEnv = {}) {
+  return {
+    ...process.env,
+    PATH: `${FIXTURE_BIN}:${process.env.PATH || ''}`,
+    TFX_CLI_MODE: 'auto',
+    TFX_NO_CLAUDE_NATIVE: '0',
+    TFX_CODEX_TRANSPORT: 'exec',
+    ...extraEnv,
+  };
+}
+
+describe('GeminiWorker', { timeout: 15000 }, () => {
   it('stream-json stdout를 파싱해 최종 응답을 반환해야 한다', async () => {
     const worker = new GeminiWorker({
       command: process.execPath,
@@ -33,7 +45,7 @@ describe('GeminiWorker', () => {
   });
 });
 
-describe('ClaudeWorker', () => {
+describe('ClaudeWorker', { timeout: 15000 }, () => {
   it('여러 turn을 같은 세션으로 처리하고 history를 유지해야 한다', async () => {
     const worker = new ClaudeWorker({
       command: process.execPath,
@@ -67,26 +79,26 @@ describe('ClaudeWorker', () => {
   });
 });
 
-describe('createWorker()', () => {
+describe('createWorker()', { timeout: 15000 }, () => {
   it('타입별 worker 인스턴스를 생성해야 한다', () => {
     assert.equal(createWorker('gemini').constructor.name, 'GeminiWorker');
     assert.equal(createWorker('claude').constructor.name, 'ClaudeWorker');
+    assert.equal(createWorker('delegator').constructor.name, 'DelegatorMcpWorker');
     assert.throws(() => createWorker('unknown'), /Unknown worker type/);
   });
 });
 
-describe('tfx-route.sh wrapper integration', () => {
+describe('tfx-route.sh wrapper integration', { timeout: 15000 }, () => {
   it('designer는 Gemini wrapper를 통해 실행되어야 한다', () => {
     const result = spawnSync('bash', [ROUTE_SCRIPT, 'designer', 'route gemini', 'implement', '5'], {
       cwd: PROJECT_ROOT,
       encoding: 'utf8',
-      env: {
-        ...process.env,
+      env: buildRouteEnv({
         HOME: resolve(PROJECT_ROOT, '.tmp-home-route-gemini'),
         TFX_TEAM_NAME: 'phase3-team',
         GEMINI_BIN: process.execPath,
         GEMINI_BIN_ARGS_JSON: JSON.stringify([GEMINI_FIXTURE]),
-      },
+      }),
     });
 
     const output = `${result.stdout}\n${result.stderr}`;
@@ -95,22 +107,21 @@ describe('tfx-route.sh wrapper integration', () => {
     assert.match(output, /type=gemini/);
   });
 
-  it('verifier는 팀 비-TTY 환경에서 Claude wrapper를 사용해야 한다', () => {
-    const result = spawnSync('bash', [ROUTE_SCRIPT, 'verifier', 'route claude', 'analyze', '5'], {
+  it('verifier는 현재 route table에서 Codex review 경로를 사용해야 한다', () => {
+    const result = spawnSync('bash', [ROUTE_SCRIPT, 'verifier', 'route verify', 'analyze', '5'], {
       cwd: PROJECT_ROOT,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        HOME: resolve(PROJECT_ROOT, '.tmp-home-route-claude'),
+      env: buildRouteEnv({
+        HOME: resolve(PROJECT_ROOT, '.tmp-home-route-codex'),
         TFX_TEAM_NAME: 'phase3-team',
-        CLAUDE_BIN: process.execPath,
-        CLAUDE_BIN_ARGS_JSON: JSON.stringify([CLAUDE_FIXTURE]),
-      },
+        CODEX_BIN: 'codex',
+      }),
     });
 
     const output = `${result.stdout}\n${result.stderr}`;
     assert.equal(result.status, 0, output);
-    assert.match(output, /claude:route claude/);
-    assert.match(output, /type=claude/);
+    assert.match(output, /EXEC:route verify/);
+    assert.match(output, /type=codex/);
+    assert.match(output, /codex_transport_effective=exec/);
   });
 });

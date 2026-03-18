@@ -63,7 +63,7 @@ async function isHubHealthy(host, port) {
 
 function startHubDetached(port) {
   const serverPath = join(PLUGIN_ROOT, "hub", "server.mjs");
-  if (!existsSync(serverPath)) return;
+  if (!existsSync(serverPath)) return false;
 
   try {
     const child = spawn(process.execPath, [serverPath], {
@@ -72,12 +72,30 @@ function startHubDetached(port) {
       stdio: "ignore",
     });
     child.unref();
+    return true;
   } catch {
-    // best effort
+    return false;
   }
+}
+
+/** Hub 기동 후 ready 상태까지 대기 (최대 maxWaitMs) */
+async function waitForHubReady(host, port, maxWaitMs = 5000) {
+  const interval = 250;
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    if (await isHubHealthy(host, port)) return true;
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  return false;
 }
 
 const { host, port } = resolveHubTarget();
 if (!(await isHubHealthy(host, port))) {
-  startHubDetached(port);
+  const started = startHubDetached(port);
+  if (started) {
+    const ready = await waitForHubReady(host, port);
+    if (!ready) {
+      console.error("[tfx-hub-ensure] Hub 시작했으나 ready 대기 초과 — MCP 연결 실패 가능");
+    }
+  }
 }
