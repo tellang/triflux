@@ -660,14 +660,17 @@ function fetchClaudeUsageFromApi(accessToken) {
 }
 
 function parseClaudeUsageResponse(response) {
-  const fiveHour = response?.five_hour?.utilization;
-  const sevenDay = response?.seven_day?.utilization;
-  if (fiveHour == null && sevenDay == null) return null;
+  if (!response || typeof response !== "object") return null;
+  // five_hour/seven_day 키 자체가 없으면 비정상 응답
+  if (!response.five_hour && !response.seven_day) return null;
+  const fiveHour = response.five_hour?.utilization;
+  const sevenDay = response.seven_day?.utilization;
+  // utilization이 null이면 0%로 처리 (API 200 성공 시 null = 사용량 없음)
   return {
     fiveHourPercent: clampPercent(fiveHour ?? 0),
     weeklyPercent: clampPercent(sevenDay ?? 0),
-    fiveHourResetsAt: response?.five_hour?.resets_at || null,
-    weeklyResetsAt: response?.seven_day?.resets_at || null,
+    fiveHourResetsAt: response.five_hour?.resets_at || null,
+    weeklyResetsAt: response.seven_day?.resets_at || null,
   };
 }
 
@@ -693,6 +696,13 @@ function readClaudeUsageSnapshot() {
 
   // 1차: 자체 캐시에 유효 데이터가 있는 경우
   if (cache?.data) {
+    // 에러 상태에서 보존된 stale 데이터 → backoff 존중하되 표시용 데이터 반환
+    if (cache.error) {
+      const backoffMs = cache.errorType === "rate_limit"
+        ? CLAUDE_USAGE_429_BACKOFF_MS
+        : CLAUDE_USAGE_ERROR_BACKOFF_MS;
+      return { data: stripStaleResets(cache.data), shouldRefresh: ageMs >= backoffMs };
+    }
     const isFresh = ageMs < getClaudeUsageStaleMs();
     return { data: cache.data, shouldRefresh: !isFresh };
   }
@@ -733,13 +743,22 @@ function readClaudeUsageSnapshot() {
 }
 
 function writeClaudeUsageCache(data, errorInfo = null) {
-  writeJsonSafe(CLAUDE_USAGE_CACHE_PATH, {
+  const entry = {
     timestamp: Date.now(),
     data,
     error: !!errorInfo,
     errorType: errorInfo?.type || null,   // "rate_limit" | "auth" | "network" | "unknown"
     errorStatus: errorInfo?.status || null, // HTTP 상태 코드
-  });
+  };
+  // 에러 시 기존 유효 데이터 보존 (--% n/a 방지)
+  if (errorInfo && data == null) {
+    const prev = readJson(CLAUDE_USAGE_CACHE_PATH, null);
+    if (prev?.data) {
+      entry.data = prev.data;
+      entry.stale = true;
+    }
+  }
+  writeJsonSafe(CLAUDE_USAGE_CACHE_PATH, entry);
 }
 
 async function fetchClaudeUsage(forceRefresh = false) {

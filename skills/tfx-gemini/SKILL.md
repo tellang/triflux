@@ -58,7 +58,7 @@ argument-hint: "\"작업 설명\" | N:gemini \"작업 설명\""
 
 1. **Phase 3 CLI 실행 시** `TFX_CLI_MODE=gemini`을 환경변수로 전달:
    ```bash
-   TFX_CLI_MODE=gemini bash ~/.claude/scripts/cli-route.sh {agent} '{prompt}' {mcp_profile}
+   TFX_CLI_MODE=gemini bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile}
    ```
 
 2. **Phase 2 트리아지에서** codex 분류 결과를 gemini로 강제 변환:

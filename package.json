@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "2.5.2",
+  "version": "3.1.0-dev.3",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -12,6 +12,7 @@
   },
   "files": [
     "bin",
+    "hub",
     "skills",
     "!**/failure-reports",
     "scripts",
@@ -37,6 +38,10 @@
   "homepage": "https://github.com/tellang/triflux#readme",
   "author": "tellang",
   "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "@modelcontextprotocol/sdk": "^1.27.1"
+  },
   "keywords": [
     "claude-code",
     "plugin",

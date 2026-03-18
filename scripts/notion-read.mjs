@@ -25,7 +25,7 @@ import { homedir, tmpdir } from 'os';
 const VERSION = '1.2';
 const CLAUDE_DIR = join(homedir(), '.claude');
 const MCP_CACHE = join(CLAUDE_DIR, 'cache', 'mcp-inventory.json');
-const LOG_FILE = join(CLAUDE_DIR, 'logs', 'cli-route-stats.jsonl');
+const LOG_FILE = join(CLAUDE_DIR, 'logs', 'tfx-route-stats.jsonl');
 const ACC_FILE = join(CLAUDE_DIR, 'cache', 'sv-accumulator.json');
 
 // ── ANSI 색상 ──
@@ -264,7 +264,7 @@ function cleanCodexOutput(raw) {
   return texts.join("\n");
 }
 
-// ── 실행 로그 (cli-route.sh 호환) ──
+// ── 실행 로그 (tfx-route.sh 호환) ──
 function logExecution(cliType, exitCode, elapsed, timeout, stderr, runMode = 'fg') {
   try {
     const logDir = dirname(LOG_FILE);
