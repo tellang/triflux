@@ -71,8 +71,21 @@ const PROFILE_DEFINITIONS = Object.freeze({
       ]),
     }),
   }),
+  analyze: Object.freeze({
+    description: '분석/설계 워커용. 추론 + 검색 MCP 허용',
+    allowedServers: Object.freeze(['context7', 'brave-search', 'tavily', 'exa', 'sequential-thinking']),
+    alwaysOnServers: Object.freeze(['context7', 'sequential-thinking']),
+    maxSearchServers: 2,
+    allowedToolsByServer: Object.freeze({
+      context7: Object.freeze(['resolve-library-id', 'query-docs']),
+      'brave-search': Object.freeze(['brave_web_search', 'brave_news_search']),
+      exa: Object.freeze(['web_search_exa', 'get_code_context_exa']),
+      tavily: Object.freeze(['tavily_search', 'tavily_extract']),
+      'sequential-thinking': Object.freeze(['sequentialthinking']),
+    }),
+  }),
   explore: Object.freeze({
-    description: '탐색 워커용. 읽기/검색 중심 MCP만 허용',
+    description: '탐색/리서치 워커용. 읽기/검색 중심 MCP만 허용',
     allowedServers: Object.freeze(['context7', 'brave-search', 'tavily', 'exa']),
     alwaysOnServers: Object.freeze(['context7']),
     maxSearchServers: 2,
@@ -116,7 +129,7 @@ const PROFILE_DEFINITIONS = Object.freeze({
 
 export const LEGACY_PROFILE_ALIASES = Object.freeze({
   implement: 'executor',
-  analyze: 'explore',
+  analyze: 'analyze',
   review: 'reviewer',
   docs: 'writer',
   minimal: 'default',
@@ -147,15 +160,17 @@ function resolveAutoProfile(agentType = '') {
     case 'build-fixer':
     case 'debugger':
     case 'deep-executor':
+      return 'executor';
     case 'test-engineer':
     case 'qa-tester':
-      return 'executor';
+      return 'none';
     case 'designer':
       return 'designer';
     case 'architect':
     case 'planner':
     case 'critic':
     case 'analyst':
+      return 'analyze';
     case 'scientist':
     case 'scientist-deep':
     case 'document-specialist':
@@ -474,17 +489,28 @@ export function getGeminiAllowedServers(options = {}) {
 export function getCodexMcpConfig(options = {}) {
   const allowedServers = new Set(resolveAllowedServers(options));
   const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
+  // Codex에 실제 등록된 서버만 대상으로 config override 생성.
+  // 미등록 서버에 enabled=false를 보내면 "invalid transport" 에러 발생.
+  const registeredServers = parseAvailableServers(options.availableServers);
+  // Codex 0.115+: 미등록 서버에 config override를 보내면 "invalid transport" 에러.
+  // 등록 서버 정보가 없으면 override를 생성하지 않는다 (안전 기본값).
+  if (registeredServers.length === 0) {
+    return { mcp_servers: {} };
+  }
+  const targetServers = registeredServers;
+
   if (resolvedProfile === 'none') {
-    return {
-      mcp_servers: Object.fromEntries(KNOWN_MCP_SERVERS.map((server) => [server, { enabled: false }])),
-    };
+    // Codex 0.115+: transport 없는 서버에 enabled=false를 보내면 "invalid transport" 에러.
+    // 비허용 서버는 override에서 제외하고, 허용 서버만 명시적으로 설정한다.
+    return { mcp_servers: {} };
   }
 
   const config = { mcp_servers: {} };
   const allowedToolsByServer = getProfileDefinition(resolvedProfile).allowedToolsByServer;
-  for (const server of KNOWN_MCP_SERVERS) {
+  for (const server of targetServers) {
+    // Codex 0.115+: transport 없는 서버에 enabled=false를 보내면 "invalid transport" 에러.
+    // 비허용 서버는 override에서 제외한다 (Codex 기본 설정이 유지됨).
     if (!allowedServers.has(server)) {
-      config.mcp_servers[server] = { enabled: false };
       continue;
     }
 

@@ -46,6 +46,7 @@ function muxExec(args, opts = {}) {
     encoding: "utf8",
     timeout: 10000,
     stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
     ...opts,
   });
 }

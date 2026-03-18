@@ -718,7 +718,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   await pipe.start();
   await assignCallbacks.start();
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolveHub, reject) => {
     httpServer.listen(port, host, () => {
       const info = {
         port,
@@ -763,10 +763,11 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         store.close();
         try { unlinkSync(PID_FILE); } catch {}
         try { unlinkSync(TOKEN_FILE); } catch {}
+        httpServer.closeAllConnections();
         await new Promise((resolveClose) => httpServer.close(resolveClose));
       };
 
-      resolve({
+      resolveHub({
         ...info,
         httpServer,
         store,

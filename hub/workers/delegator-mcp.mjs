@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -14,15 +14,25 @@ import * as z from 'zod';
 
 import { CodexMcpWorker } from './codex-mcp.mjs';
 import { GeminiWorker } from './gemini-worker.mjs';
-import {
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+
+// mcp-filter.mjs 동적 해석 — 프로젝트(hub/workers/)와 배포(scripts/hub/workers/) 양쪽 대응
+const MCP_FILTER_CANDIDATES = [
+  resolve(SCRIPT_DIR, '../../scripts/lib/mcp-filter.mjs'), // 프로젝트 원본
+  resolve(SCRIPT_DIR, '../../lib/mcp-filter.mjs'),         // 배포 (~/.claude/scripts/)
+];
+const mcpFilterPath = MCP_FILTER_CANDIDATES.find((p) => existsSync(p));
+if (!mcpFilterPath) {
+  throw new Error(`mcp-filter.mjs not found. candidates: ${MCP_FILTER_CANDIDATES.join(', ')}`);
+}
+const {
   buildPromptHint,
   getCodexMcpConfig,
   getGeminiAllowedServers,
   resolveMcpProfile,
   SUPPORTED_MCP_PROFILES,
-} from '../../scripts/lib/mcp-filter.mjs';
-
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+} = await import(pathToFileURL(mcpFilterPath).href);
 const SERVER_INFO = { name: 'triflux-delegator', version: '1.0.0' };
 const DEFAULT_CONTEXT_BYTES = 32 * 1024;
 const DEFAULT_ROUTE_TIMEOUT_SEC = 120;
@@ -70,6 +80,8 @@ const CODEX_PROFILE_BY_AGENT = Object.freeze({
   'scientist-deep': 'thorough',
   'document-specialist': 'high',
   verifier: 'thorough',
+  designer: 'high',  // Gemini primary, codex fallback용
+  writer: 'high',    // Gemini primary, codex fallback용
   spark: 'spark_fast',
 });
 

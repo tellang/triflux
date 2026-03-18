@@ -108,10 +108,21 @@ export function verifySlimWrapperRouteExecution(input = {}) {
  * @param {string} mcpProfile — MCP 프로필
  * @returns {number} timeout(초)
  */
-function getRouteTimeout(role, mcpProfile) {
-  if (mcpProfile === "analyze" || mcpProfile === "review") return 3600;
-  if (role === "architect" || role === "analyst") return 3600;
-  return 1080; // 기본 18분
+function getRouteTimeout(role, _mcpProfile) {
+  // tfx-route.sh route_agent()의 DEFAULT_TIMEOUT 기반, 최소 1080초(18분) 보장.
+  // Bash timeout = 이 값 + 60초 여유. 짧은 역할도 네트워크/스케줄 지연 대비.
+  const TIMEOUTS = {
+    'build-fixer': 1080, debugger: 1080, executor: 1080,
+    'deep-executor': 3600, architect: 3600, planner: 3600,
+    critic: 3600, analyst: 3600, scientist: 1800,
+    'scientist-deep': 3600, 'document-specialist': 1800,
+    'code-reviewer': 1800, 'security-reviewer': 1800,
+    'quality-reviewer': 1800, verifier: 1800,
+    designer: 1080, writer: 1080,
+    explore: 1080, 'test-engineer': 1080, 'qa-tester': 1080,
+    spark: 600,
+  };
+  return TIMEOUTS[role] || 1080;
 }
 
 /**

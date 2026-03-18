@@ -3,6 +3,7 @@
 .omc/
 .omx/
 .claude/
+!.claude/agents/
 .codex/
 .gemini/
 .serena/
@@ -10,21 +11,11 @@
 .mcp.json
 CLAUDE.md
 
-# 내부 문서 (제3자 불필요) — docs/assets/와 docs/demo*.tape만 유지
-docs/INDEX.md
-docs/adr/
-docs/design/
-docs/guides/
-docs/handoff/
-docs/internal/
-docs/issues/
-docs/insights/
-docs/research-*
-docs/codex-*
-docs/native-teams-*
-docs/tfx-auto-*
-docs/hub-architecture.html
-docs/tfx-team-*-prd-*
+# 내부 문서 — 기본 전체 제외, 필요한 것만 허용
+docs/*
+!docs/assets/
+!docs/demo.tape
+!docs/demo-light.tape
 
 # 내부 스킬 (OMC 전용)
 skills/auto-verify/
@@ -52,3 +43,6 @@ dist/
 .env
 .npmrc
 tmp-*.log
+
+# 바이너리/임시
+download.bin

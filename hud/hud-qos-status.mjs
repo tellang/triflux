@@ -355,7 +355,7 @@ function readJson(filePath, fallback) {
 function writeJsonSafe(filePath, data) {
   try {
     mkdirSync(dirname(filePath), { recursive: true });
-    writeFileSync(filePath, JSON.stringify(data));
+    writeFileSync(filePath, JSON.stringify(data), { mode: 0o600 });
   } catch { /* 쓰기 실패 무시 */ }
 }
 
@@ -731,7 +731,16 @@ function readClaudeUsageSnapshot() {
       return { data: stripStaleResets(cache.data), shouldRefresh: ageMs >= backoffMs };
     }
     const isFresh = ageMs < getClaudeUsageStaleMs();
-    return { data: cache.data, shouldRefresh: !isFresh };
+    // resets_at이 지난 윈도우의 percent를 0으로 보정 (stale 캐시 방지)
+    const data = { ...cache.data };
+    const now = Date.now();
+    if (data.fiveHourResetsAt && new Date(data.fiveHourResetsAt).getTime() <= now) {
+      data.fiveHourPercent = 0;
+    }
+    if (data.weeklyResetsAt && new Date(data.weeklyResetsAt).getTime() <= now) {
+      data.weeklyPercent = 0;
+    }
+    return { data, shouldRefresh: !isFresh };
   }
 
   // 2차: 에러 backoff — 최근 에러 시 재시도 억제 (무한 spawn 방지)
@@ -996,6 +1005,22 @@ function getGeminiEmail() {
   } catch { return null; }
 }
 
+// resets_at이 지난 윈도우의 used_percent를 0으로 보정
+function expireStaleCodexBuckets(buckets) {
+  if (!buckets) return buckets;
+  const nowSec = Math.floor(Date.now() / 1000);
+  for (const bucket of Object.values(buckets)) {
+    if (!bucket) continue;
+    if (bucket.primary?.resets_at && bucket.primary.resets_at <= nowSec) {
+      bucket.primary.used_percent = 0;
+    }
+    if (bucket.secondary?.resets_at && bucket.secondary.resets_at <= nowSec) {
+      bucket.secondary.used_percent = 0;
+    }
+  }
+  return buckets;
+}
+
 // ============================================================================
 // Codex 세션 JSONL에서 실제 rate limits 추출
 // 한계: rate_limits는 세션별 스냅샷이므로 여러 세션 간 토큰 합산은 불가.
@@ -1061,6 +1086,7 @@ function getCodexRateLimits() {
         const main = mergedBuckets.codex || mergedBuckets[Object.keys(mergedBuckets)[0]];
         if (main && !main.tokens) main.tokens = syntheticBucket.tokens;
       }
+      expireStaleCodexBuckets(mergedBuckets);
       return mergedBuckets;
     }
   }
@@ -1213,6 +1239,15 @@ function readGeminiQuotaSnapshot(accountId, authContext) {
   const isFresh = ageMs < GEMINI_QUOTA_STALE_MS;
 
   if (keyMatched) {
+    // resetTime이 지난 버킷의 remainingFraction을 1로 보정 (stale 캐시 방지)
+    if (Array.isArray(cache.buckets)) {
+      const now = Date.now();
+      for (const b of cache.buckets) {
+        if (b?.resetTime && new Date(b.resetTime).getTime() <= now) {
+          b.remainingFraction = 1;
+        }
+      }
+    }
     return { quota: cache, shouldRefresh: !isFresh };
   }
   if (isLegacyCache) {
@@ -1250,6 +1285,7 @@ function readCodexRateLimitSnapshot() {
   if (!cache?.buckets) {
     return { buckets: null, shouldRefresh: true };
   }
+  expireStaleCodexBuckets(cache.buckets);
   const ts = Number(cache.timestamp);
   const ageMs = Number.isFinite(ts) ? Date.now() - ts : Number.MAX_SAFE_INTEGER;
   const isFresh = ageMs < CODEX_QUOTA_STALE_MS;

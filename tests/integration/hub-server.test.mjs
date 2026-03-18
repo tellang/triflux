@@ -84,12 +84,14 @@ describe('startHub() 라이프사이클', () => {
   before(async () => {
     process.env.TFX_HUB_TOKEN = TEST_TOKEN;
     const dbPath = tempDbPath();
-    hub = await startHub({ port: TEST_PORT, dbPath, host: '127.0.0.1' });
+    hub = await startHub({ port: TEST_PORT, dbPath, host: '127.0.0.1', sessionId: `test-${TEST_PORT}` });
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
   });
 
   after(async () => {
-    if (hub?.stop) await hub.stop();
+    if (hub?.stop) {
+      await Promise.race([hub.stop(), new Promise((r) => setTimeout(r, 5000))]);
+    }
     delete process.env.TFX_HUB_TOKEN;
   });
 
@@ -546,12 +548,14 @@ describe('startHub() localhost-only 모드', () => {
   before(async () => {
     delete process.env.TFX_HUB_TOKEN;
     const dbPath = tempDbPath();
-    hub = await startHub({ port: LOCAL_ONLY_PORT, dbPath, host: '0.0.0.0' });
+    hub = await startHub({ port: LOCAL_ONLY_PORT, dbPath, host: '0.0.0.0', sessionId: `test-${LOCAL_ONLY_PORT}` });
     baseUrl = `http://127.0.0.1:${LOCAL_ONLY_PORT}`;
   });
 
   after(async () => {
-    if (hub?.stop) await hub.stop();
+    if (hub?.stop) {
+      await Promise.race([hub.stop(), new Promise((r) => setTimeout(r, 5000))]);
+    }
   });
 
   it('로컬 /status는 인증 없이 접근 가능해야 한다', async () => {

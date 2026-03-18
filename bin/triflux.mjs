@@ -1045,13 +1045,7 @@ async function cmdDoctor(options = {}) {
       shells: codexCli.shells,
       ...(codexCli.fix ? { fix: codexCli.fix } : {}),
     });
-    if (which("codex")) {
-      if (process.env.OPENAI_API_KEY) {
-        ok("OPENAI_API_KEY 설정됨");
-      } else {
-        warn(`OPENAI_API_KEY 미설정 ${GRAY}(Pro 구독이면 불필요)${RESET}`);
-      }
-    }
+    // API 키 검사 제거 — bash exec 기반이므로 API 키 불필요
 
     // 4. Codex Profiles
     section("Codex Profiles");
@@ -1090,13 +1084,7 @@ async function cmdDoctor(options = {}) {
       shells: geminiCli.shells,
       ...(geminiCli.fix ? { fix: geminiCli.fix } : {}),
     });
-    if (which("gemini")) {
-      if (process.env.GEMINI_API_KEY) {
-        ok("GEMINI_API_KEY 설정됨");
-      } else {
-        warn(`GEMINI_API_KEY 미설정 ${GRAY}(gemini auth login)${RESET}`);
-      }
-    }
+    // API 키 검사 제거 — bash exec 기반이므로 API 키 불필요
 
     // 6. Claude Code
     section(`Claude Code ${AMBER}●${RESET}`);
@@ -2441,7 +2429,7 @@ async function main() {
     case "nr": {
       const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
       try {
-        execFileSync(process.execPath, [scriptPath, ...cmdArgs], { stdio: "inherit", timeout: 660000 });
+        execFileSync(process.execPath, [scriptPath, ...cmdArgs], { stdio: "inherit", timeout: 660000, windowsHide: true });
       } catch (e) {
         throw createCliError(e.message || "notion-read 실행 실패", {
           exitCode: e.status || EXIT_ERROR,

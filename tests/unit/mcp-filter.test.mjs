@@ -20,7 +20,7 @@ describe('mcp-filter', () => {
 
   it('legacy 프로필 별칭은 새 role profile로 정규화된다', () => {
     assert.equal(resolveMcpProfile('executor', 'implement'), 'executor');
-    assert.equal(resolveMcpProfile('analyst', 'analyze'), 'explore');
+    assert.equal(resolveMcpProfile('analyst', 'analyze'), 'analyze');
     assert.equal(resolveMcpProfile('code-reviewer', 'review'), 'reviewer');
     assert.equal(resolveMcpProfile('writer', 'docs'), 'writer');
     assert.equal(resolveMcpProfile('spark', 'minimal'), 'default');
@@ -67,7 +67,7 @@ describe('mcp-filter', () => {
     const policy = buildMcpPolicy({
       agentType: 'code-reviewer',
       requestedProfile: 'reviewer',
-      availableServers: ['context7', 'brave-search', 'exa', 'tavily', 'sequential-thinking'],
+      availableServers: ['context7', 'brave-search', 'exa', 'tavily', 'sequential-thinking', 'playwright'],
     });
 
     assert.deepEqual(policy.geminiAllowedServers, ['context7', 'brave-search', 'sequential-thinking']);
