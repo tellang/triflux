@@ -7,9 +7,30 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, chmodSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
+import { spawn } from "child_process";
+import { fileURLToPath } from "url";
 
-const PLUGIN_ROOT = dirname(dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Z]:)/, "$1");
+const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
+const CODEX_DIR = join(homedir(), ".codex");
+const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
+
+const REQUIRED_CODEX_PROFILES = [
+  {
+    name: "xhigh",
+    lines: [
+      'model = "gpt-5.3-codex"',
+      'model_reasoning_effort = "xhigh"',
+    ],
+  },
+  {
+    name: "spark_fast",
+    lines: [
+      'model = "gpt-5.1-codex-mini"',
+      'model_reasoning_effort = "low"',
+    ],
+  },
+];
 
 // ── 파일 동기화 ──
 
@@ -23,6 +44,36 @@ const SYNC_MAP = [
     src: join(PLUGIN_ROOT, "scripts", "tfx-route-post.mjs"),
     dst: join(CLAUDE_DIR, "scripts", "tfx-route-post.mjs"),
     label: "tfx-route-post.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "tfx-route-worker.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "tfx-route-worker.mjs"),
+    label: "tfx-route-worker.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "codex-mcp.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "codex-mcp.mjs"),
+    label: "hub/workers/codex-mcp.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "interface.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "interface.mjs"),
+    label: "hub/workers/interface.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "gemini-worker.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "gemini-worker.mjs"),
+    label: "hub/workers/gemini-worker.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "claude-worker.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "claude-worker.mjs"),
+    label: "hub/workers/claude-worker.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "workers", "factory.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "factory.mjs"),
+    label: "hub/workers/factory.mjs",
   },
   {
     src: join(PLUGIN_ROOT, "hud", "hud-qos-status.mjs"),
@@ -41,6 +92,54 @@ function getVersion(filePath) {
   }
 }
 
+function shouldSyncTextFile(src, dst) {
+  if (!existsSync(dst)) return true;
+  try {
+    return readFileSync(src, "utf8") !== readFileSync(dst, "utf8");
+  } catch {
+    return true;
+  }
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasProfileSection(tomlContent, profileName) {
+  const section = `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*$`;
+  return new RegExp(section, "m").test(tomlContent);
+}
+
+function ensureCodexProfiles() {
+  try {
+    if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
+
+    const original = existsSync(CODEX_CONFIG_PATH)
+      ? readFileSync(CODEX_CONFIG_PATH, "utf8")
+      : "";
+
+    let updated = original;
+    let added = 0;
+
+    for (const profile of REQUIRED_CODEX_PROFILES) {
+      if (hasProfileSection(updated, profile.name)) continue;
+
+      if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
+      if (updated.trim().length > 0) updated += "\n";
+      updated += `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
+      added++;
+    }
+
+    if (added > 0) {
+      writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
+    }
+
+    return added;
+  } catch {
+    return 0;
+  }
+}
+
 let synced = 0;
 
 for (const { src, dst, label } of SYNC_MAP) {
@@ -56,13 +155,39 @@ for (const { src, dst, label } of SYNC_MAP) {
     try { chmodSync(dst, 0o755); } catch {}
     synced++;
   } else {
-    const srcVersion = getVersion(src);
-    const dstVersion = getVersion(dst);
-    if (srcVersion && dstVersion && srcVersion !== dstVersion) {
+    if (shouldSyncTextFile(src, dst)) {
       copyFileSync(src, dst);
       try { chmodSync(dst, 0o755); } catch {}
       synced++;
     }
+  }
+}
+
+// ── Worker 의존성 동기화 (MCP SDK + transitive deps) ──
+
+const workerNodeModules = join(CLAUDE_DIR, "scripts", "node_modules");
+const mcpSdkPath = join(workerNodeModules, "@modelcontextprotocol", "sdk");
+const srcNodeModules = join(PLUGIN_ROOT, "node_modules");
+
+// native 모듈은 제외 (플랫폼 의존적, worker에서 불필요)
+const SKIP_PACKAGES = new Set(["better-sqlite3", "prebuild-install", "node-abi", "node-addon-api"]);
+
+if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
+  try {
+    const { cpSync } = await import("fs");
+    for (const entry of readdirSync(srcNodeModules)) {
+      if (SKIP_PACKAGES.has(entry)) continue;
+
+      const src = join(srcNodeModules, entry);
+      const dst = join(workerNodeModules, entry);
+      if (existsSync(dst)) continue;
+
+      mkdirSync(dirname(dst), { recursive: true });
+      cpSync(src, dst, { recursive: true });
+    }
+    synced++;
+  } catch {
+    // best effort: 의존성 복사 실패 시 exec fallback으로 동작
   }
 }
 
@@ -128,6 +253,36 @@ if (existsSync(hudPath)) {
   } catch {
     // settings.json 파싱 실패 시 무시 — 기존 설정 보존
   }
+}
+
+// ── Agent Teams 환경변수 자동 설정 ──
+
+try {
+  let agentSettings = {};
+  if (existsSync(settingsPath)) {
+    agentSettings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  }
+
+  if (!agentSettings.env) agentSettings.env = {};
+  let agentSettingsChanged = false;
+
+  if (agentSettings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS !== "1") {
+    agentSettings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
+    agentSettingsChanged = true;
+  }
+
+  // teammateMode: auto (tmux 밖이면 in-process, 안이면 split-pane)
+  if (!agentSettings.teammateMode) {
+    agentSettings.teammateMode = "auto";
+    agentSettingsChanged = true;
+  }
+
+  if (agentSettingsChanged) {
+    writeFileSync(settingsPath, JSON.stringify(agentSettings, null, 2) + "\n", "utf8");
+    synced++;
+  }
+} catch {
+  // settings.json 파싱 실패 시 무시 — 기존 설정 보존
 }
 
 // ── Stale PID 파일 정리 (hub 좀비 방지) ──
@@ -196,9 +351,14 @@ if (process.platform === "win32") {
   }
 }
 
-// ── MCP 인벤토리 백그라운드 갱신 ──
+// ── Codex 프로필 자동 보정 ──
 
-import { spawn } from "child_process";
+const codexProfilesAdded = ensureCodexProfiles();
+if (codexProfilesAdded > 0) {
+  synced++;
+}
+
+// ── MCP 인벤토리 백그라운드 갱신 ──
 
 const mcpCheck = join(PLUGIN_ROOT, "scripts", "mcp-check.mjs");
 if (existsSync(mcpCheck)) {
@@ -207,6 +367,26 @@ if (existsSync(mcpCheck)) {
     stdio: "ignore",
   });
   child.unref(); // 부모 프로세스와 분리 — 비동기 실행
+}
+
+// ── Hub 헬스체크 + 자동 기동 (세션 시작 백그라운드) ──
+// setup 훅이 포그라운드 지연을 만들지 않도록 별도 detached 프로세스로 처리한다.
+const hubEnsure = join(PLUGIN_ROOT, "scripts", "hub-ensure.mjs");
+const isPostinstall = process.env.npm_lifecycle_event === "postinstall";
+const isCi = /^(1|true)$/i.test(process.env.CI || "");
+const disableHubAutostart = process.env.TFX_DISABLE_HUB_AUTOSTART === "1";
+
+if (!isPostinstall && !isCi && !disableHubAutostart && existsSync(hubEnsure)) {
+  try {
+    const child = spawn(process.execPath, [hubEnsure], {
+      env: process.env,
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch {
+    // best effort: 실패해도 setup 흐름은 지속
+  }
 }
 
 // ── postinstall 배너 (npm install 시에만 출력) ──
@@ -239,7 +419,8 @@ ${B}Commands:${R}
   ${C}triflux${R} setup     파일 동기화 + HUD 설정
   ${C}triflux${R} doctor    CLI 진단 (Codex/Gemini 확인)
   ${C}triflux${R} list      설치된 스킬 목록
-  ${C}triflux${R} update    최신 버전으로 업데이트
+  ${C}triflux${R} update    최신 안정 버전으로 업데이트
+  ${C}triflux${R} update --dev  dev 채널로 업데이트 (${D}dev 별칭 지원${R})
 
 ${B}Shortcuts:${R}
   ${C}tfx${R}                 triflux 축약
@@ -248,6 +429,7 @@ ${B}Shortcuts:${R}
 
 ${B}Skills (Claude Code):${R}
   ${C}/tfx-auto${R}   "작업"   자동 분류 + 병렬 실행
+  ${C}/tfx-auto-codex${R} "작업" Codex 리드 + Gemini 유지
   ${C}/tfx-codex${R}  "작업"   Codex 전용 모드
   ${C}/tfx-gemini${R} "작업"   Gemini 전용 모드
   ${C}/tfx-setup${R}           HUD 설정 + 진단

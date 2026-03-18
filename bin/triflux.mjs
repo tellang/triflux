@@ -1,13 +1,36 @@
 #!/usr/bin/env node
 // triflux CLI — setup, doctor, version
-import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync } from "fs";
+import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, rmSync, statSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync, spawn } from "child_process";
+import { fileURLToPath } from "url";
+import { setTimeout as delay } from "node:timers/promises";
+import { detectMultiplexer, getSessionAttachedCount, killSession, listSessions, tmuxExec } from "../hub/team/session.mjs";
+import { cleanupStaleOmcTeams, inspectStaleOmcTeams } from "../hub/team/staleState.mjs";
 
-const PKG_ROOT = dirname(dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Z]:)/, "$1");
+const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
+const CODEX_DIR = join(homedir(), ".codex");
+const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
+
+const REQUIRED_CODEX_PROFILES = [
+  {
+    name: "xhigh",
+    lines: [
+      'model = "gpt-5.3-codex"',
+      'model_reasoning_effort = "xhigh"',
+    ],
+  },
+  {
+    name: "spark_fast",
+    lines: [
+      'model = "gpt-5.1-codex-mini"',
+      'model_reasoning_effort = "low"',
+    ],
+  },
+];
 
 // ── 색상 체계 (triflux brand: amber/orange accent) ──
 const CYAN = "\x1b[36m";
@@ -29,6 +52,7 @@ const BRAND = `${AMBER}${BOLD}triflux${RESET}`;
 const VER = `${DIM}v${PKG.version}${RESET}`;
 const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
 const DOT = `${GRAY}·${RESET}`;
+const STALE_TEAM_MAX_AGE_SEC = 3600;
 
 // ── 유틸리티 ──
 
@@ -66,6 +90,10 @@ function whichInShell(cmd, shell) {
   } catch { return null; }
 }
 
+function isDevUpdateRequested(argv = process.argv) {
+  return argv.includes("--dev") || argv.includes("@dev") || argv.includes("dev");
+}
+
 function checkShellAvailable(shell) {
   const cmds = { bash: "bash --version", cmd: "cmd /c echo ok", pwsh: "pwsh -NoProfile -c echo ok" };
   try {
@@ -80,6 +108,168 @@ function getVersion(filePath) {
     const match = content.match(/VERSION\s*=\s*"([^"]+)"/);
     return match ? match[1] : null;
   } catch { return null; }
+}
+
+function parseSessionCreated(rawValue) {
+  const value = String(rawValue || "").trim();
+  if (!value) return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 1e12 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+  }
+
+  const parsed = Date.parse(value);
+  if (Number.isFinite(parsed)) {
+    return Math.floor(parsed / 1000);
+  }
+
+  const normalized = value.replace(/^(\d{2})-(\d{2})-(\d{2})(\s+)/, "20$1-$2-$3$4");
+  const reparsed = Date.parse(normalized);
+  if (Number.isFinite(reparsed)) {
+    return Math.floor(reparsed / 1000);
+  }
+
+  return null;
+}
+
+function formatElapsedAge(ageSec) {
+  if (!Number.isFinite(ageSec) || ageSec < 0) return "알 수 없음";
+  if (ageSec < 60) return `${ageSec}초`;
+  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}분`;
+  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}시간`;
+  return `${Math.floor(ageSec / 86400)}일`;
+}
+
+function readTeamSessionCreatedMap() {
+  const createdMap = new Map();
+
+  try {
+    const output = tmuxExec('list-sessions -F "#{session_name} #{session_created}"');
+    for (const line of output.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      const firstSpace = trimmed.indexOf(" ");
+      if (firstSpace === -1) continue;
+
+      const sessionName = trimmed.slice(0, firstSpace);
+      const createdRaw = trimmed.slice(firstSpace + 1).trim();
+      const createdAt = parseSessionCreated(createdRaw);
+      createdMap.set(sessionName, {
+        createdAt,
+        createdRaw,
+      });
+    }
+  } catch {
+    // session_created 포맷을 읽지 못하면 stale 판정만 완화한다.
+  }
+
+  return createdMap;
+}
+
+function inspectTeamSessions() {
+  const mux = detectMultiplexer();
+  if (!mux) {
+    return { mux: null, sessions: [] };
+  }
+
+  const sessionNames = listSessions();
+  if (sessionNames.length === 0) {
+    return { mux, sessions: [] };
+  }
+
+  const createdMap = readTeamSessionCreatedMap();
+  const nowSec = Math.floor(Date.now() / 1000);
+  const sessions = sessionNames.map((sessionName) => {
+    const createdInfo = createdMap.get(sessionName) || { createdAt: null, createdRaw: "" };
+    const attachedCount = getSessionAttachedCount(sessionName);
+    const ageSec = createdInfo.createdAt == null ? null : Math.max(0, nowSec - createdInfo.createdAt);
+    const stale = ageSec != null && ageSec >= STALE_TEAM_MAX_AGE_SEC && attachedCount === 0;
+
+    return {
+      sessionName,
+      attachedCount,
+      ageSec,
+      createdAt: createdInfo.createdAt,
+      createdRaw: createdInfo.createdRaw,
+      stale,
+    };
+  });
+
+  return { mux, sessions };
+}
+
+async function cleanupStaleTeamSessions(staleSessions) {
+  let cleaned = 0;
+  let failed = 0;
+
+  for (const session of staleSessions) {
+    let removed = false;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      killSession(session.sessionName);
+      const stillAlive = listSessions().includes(session.sessionName);
+      if (!stillAlive) {
+        removed = true;
+        cleaned++;
+        ok(`stale 세션 정리: ${session.sessionName}`);
+        break;
+      }
+
+      if (attempt < 3) {
+        await delay(1000);
+      }
+    }
+
+    if (!removed) {
+      failed++;
+      fail(`세션 정리 실패: ${session.sessionName} — 수동 정리 필요`);
+    }
+  }
+
+  info(`${cleaned}개 stale 세션 정리 완료`);
+
+  return { cleaned, failed };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasProfileSection(tomlContent, profileName) {
+  const section = `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*$`;
+  return new RegExp(section, "m").test(tomlContent);
+}
+
+function ensureCodexProfiles() {
+  try {
+    if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
+
+    const original = existsSync(CODEX_CONFIG_PATH)
+      ? readFileSync(CODEX_CONFIG_PATH, "utf8")
+      : "";
+
+    let updated = original;
+    let added = 0;
+
+    for (const profile of REQUIRED_CODEX_PROFILES) {
+      if (hasProfileSection(updated, profile.name)) continue;
+
+      if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
+      if (updated.trim().length > 0) updated += "\n";
+      updated += `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
+      added++;
+    }
+
+    if (added > 0) {
+      writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
+    }
+
+    return { ok: true, added };
+  } catch (e) {
+    return { ok: false, added: 0, message: e.message };
+  }
 }
 
 function syncFile(src, dst, label) {
@@ -221,6 +411,15 @@ function cmdSetup() {
     }
   }
 
+  const codexProfileResult = ensureCodexProfiles();
+  if (!codexProfileResult.ok) {
+    warn(`Codex profiles 설정 실패: ${codexProfileResult.message}`);
+  } else if (codexProfileResult.added > 0) {
+    ok(`Codex profiles: ${codexProfileResult.added}개 추가됨 (~/.codex/config.toml)`);
+  } else {
+    ok("Codex profiles: 이미 준비됨");
+  }
+
   // hub MCP 사전 등록 (서버 미실행이어도 설정만 등록 — hub start 시 즉시 사용 가능)
   if (existsSync(join(PKG_ROOT, "hub", "server.mjs"))) {
     const defaultHubUrl = `http://127.0.0.1:${process.env.TFX_HUB_PORT || "27888"}/mcp`;
@@ -271,7 +470,7 @@ function cmdSetup() {
   console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}\n`);
 }
 
-function cmdDoctor(options = {}) {
+async function cmdDoctor(options = {}) {
   const { fix = false, reset = false } = options;
   const modeLabel = reset ? ` ${RED}--reset${RESET}` : fix ? ` ${YELLOW}--fix${RESET}` : "";
   console.log(`\n  ${AMBER}${BOLD}⬡ triflux doctor${RESET} ${VER}${modeLabel}\n`);
@@ -374,6 +573,14 @@ function cmdDoctor(options = {}) {
       if (sc > 0) ok(`스킬: ${sc}/${st}개 업데이트됨`);
       else ok(`스킬: ${st}개 최신 상태`);
     }
+    const profileFix = ensureCodexProfiles();
+    if (!profileFix.ok) {
+      warn(`Codex Profiles 자동 복구 실패: ${profileFix.message}`);
+    } else if (profileFix.added > 0) {
+      ok(`Codex Profiles: ${profileFix.added}개 추가됨`);
+    } else {
+      info("Codex Profiles: 이미 최신 상태");
+    }
     // 에러/스테일 캐시 정리
     const fCacheDir = join(CLAUDE_DIR, "cache");
     const staleNames = ["claude-usage-cache.json", ".claude-refresh-lock", "codex-rate-limits-cache.json"];
@@ -425,7 +632,24 @@ function cmdDoctor(options = {}) {
     }
   }
 
-  // 4. Gemini CLI
+  // 4. Codex Profiles
+  section("Codex Profiles");
+  if (existsSync(CODEX_CONFIG_PATH)) {
+    const codexConfig = readFileSync(CODEX_CONFIG_PATH, "utf8");
+    for (const profile of REQUIRED_CODEX_PROFILES) {
+      if (hasProfileSection(codexConfig, profile.name)) {
+        ok(`${profile.name}: 정상`);
+      } else {
+        warn(`${profile.name}: 미설정`);
+        issues++;
+      }
+    }
+  } else {
+    warn("config.toml 미존재");
+    issues++;
+  }
+
+  // 5. Gemini CLI
   section(`Gemini CLI ${BLUE}●${RESET}`);
   issues += checkCliCrossShell("gemini", "npm install -g @google/gemini-cli");
   if (which("gemini")) {
@@ -436,7 +660,7 @@ function cmdDoctor(options = {}) {
     }
   }
 
-  // 5. Claude Code
+  // 6. Claude Code
   section(`Claude Code ${AMBER}●${RESET}`);
   const claudePath = which("claude");
   if (claudePath) {
@@ -446,7 +670,7 @@ function cmdDoctor(options = {}) {
     issues++;
   }
 
-  // 6. 스킬 설치 상태
+  // 7. 스킬 설치 상태
   section("Skills");
   const skillsSrc = join(PKG_ROOT, "skills");
   const skillsDst = join(CLAUDE_DIR, "skills");
@@ -472,7 +696,7 @@ function cmdDoctor(options = {}) {
     }
   }
 
-  // 7. 플러그인 등록
+  // 8. 플러그인 등록
   section("Plugin");
   const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
   if (existsSync(pluginsFile)) {
@@ -487,7 +711,7 @@ function cmdDoctor(options = {}) {
     info("플러그인 시스템 감지 안 됨 — npm 단독 사용");
   }
 
-  // 8. MCP 인벤토리
+  // 9. MCP 인벤토리
   section("MCP Inventory");
   const mcpCache = join(CLAUDE_DIR, "cache", "mcp-inventory.json");
   if (existsSync(mcpCache)) {
@@ -510,7 +734,7 @@ function cmdDoctor(options = {}) {
     info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
   }
 
-  // 9. CLI 이슈 트래커
+  // 10. CLI 이슈 트래커
   section("CLI Issues");
   const issuesFile = join(CLAUDE_DIR, "cache", "cli-issues.jsonl");
   if (existsSync(issuesFile)) {
@@ -575,6 +799,120 @@ function cmdDoctor(options = {}) {
     ok("이슈 로그 없음 (정상)");
   }
 
+  // 11. Team Sessions
+  section("Team Sessions");
+  const teamSessionReport = inspectTeamSessions();
+  if (!teamSessionReport.mux) {
+    info("tmux/psmux 미감지 — 팀 세션 검사 건너뜀");
+  } else if (teamSessionReport.sessions.length === 0) {
+    ok(`활성 팀 세션 없음 ${DIM}(${teamSessionReport.mux})${RESET}`);
+  } else {
+    info(`multiplexer: ${teamSessionReport.mux}`);
+
+    for (const session of teamSessionReport.sessions) {
+      const attachedLabel = session.attachedCount == null ? "?" : `${session.attachedCount}`;
+      const ageLabel = formatElapsedAge(session.ageSec);
+
+      if (session.stale) {
+        warn(`${session.sessionName}: stale 추정 (attach=${attachedLabel}, 경과=${ageLabel})`);
+      } else {
+        ok(`${session.sessionName}: 정상 (attach=${attachedLabel}, 경과=${ageLabel})`);
+      }
+
+      if (session.createdAt == null) {
+        info(`${session.sessionName}: session_created 파싱 실패${session.createdRaw ? ` (${session.createdRaw})` : ""}`);
+      }
+    }
+
+    const staleSessions = teamSessionReport.sessions.filter((session) => session.stale);
+    if (staleSessions.length > 0) {
+      if (fix) {
+        const cleanupResult = await cleanupStaleTeamSessions(staleSessions);
+        issues += cleanupResult.failed;
+      } else {
+        info("정리: tfx doctor --fix");
+        issues += staleSessions.length;
+      }
+    }
+  }
+
+  // 12. OMC stale team 상태
+  section("OMC Stale Teams");
+  const omcTeamReport = inspectStaleOmcTeams({
+    startDir: process.cwd(),
+    maxAgeMs: STALE_TEAM_MAX_AGE_SEC * 1000,
+    liveSessionNames: teamSessionReport.sessions.map((session) => session.sessionName),
+  });
+  if (!omcTeamReport.stateRoot) {
+    info(".omc/state 없음 — 검사 건너뜀");
+  } else if (omcTeamReport.entries.length === 0) {
+    ok(`stale team 없음 ${DIM}(${omcTeamReport.stateRoot})${RESET}`);
+  } else {
+    warn(`${omcTeamReport.entries.length}개 stale team 발견`);
+
+    for (const entry of omcTeamReport.entries) {
+      const ageLabel = formatElapsedAge(entry.ageSec);
+      const scopeLabel = entry.scope === "root" ? "root-state" : entry.sessionId;
+      warn(`${scopeLabel}: stale team (경과=${ageLabel}, 프로세스 없음)`);
+      if (entry.teamName) info(`팀: ${entry.teamName}`);
+      info(`파일: ${entry.stateFile}`);
+    }
+
+    if (fix) {
+      const cleanupResult = cleanupStaleOmcTeams(omcTeamReport.entries);
+      for (const result of cleanupResult.results) {
+        if (result.ok) {
+          ok(`stale team 정리: ${result.entry.scope === "root" ? "root-state" : result.entry.sessionId}`);
+        } else {
+          fail(`stale team 정리 실패: ${result.entry.scope === "root" ? "root-state" : result.entry.sessionId} — ${result.error.message}`);
+        }
+      }
+      issues += cleanupResult.failed;
+    } else {
+      info("정리: tfx doctor --fix");
+      issues += omcTeamReport.entries.length;
+    }
+  }
+
+  // 13. Orphan Teams
+  section("Orphan Teams");
+  const teamsDir = join(CLAUDE_DIR, "teams");
+  const tasksDir = join(CLAUDE_DIR, "tasks");
+  if (existsSync(teamsDir)) {
+    try {
+      const teamDirs = readdirSync(teamsDir).filter(d => {
+        try { return statSync(join(teamsDir, d)).isDirectory(); } catch { return false; }
+      });
+      if (teamDirs.length === 0) {
+        ok("잔존 팀 없음");
+      } else {
+        warn(`${teamDirs.length}개 잔존 팀 발견: ${teamDirs.join(", ")}`);
+        if (fix) {
+          let cleaned = 0;
+          for (const d of teamDirs) {
+            try {
+              rmSync(join(teamsDir, d), { recursive: true, force: true });
+              cleaned++;
+            } catch {}
+            // 연관 tasks 디렉토리도 정리
+            const taskDir = join(tasksDir, d);
+            if (existsSync(taskDir)) {
+              try { rmSync(taskDir, { recursive: true, force: true }); } catch {}
+            }
+          }
+          ok(`${cleaned}개 잔존 팀 정리 완료`);
+        } else {
+          info("정리: /tfx-doctor --fix 또는 수동 rm -rf ~/.claude/teams/{name}/");
+          issues++;
+        }
+      }
+    } catch (e) {
+      warn(`teams 디렉토리 읽기 실패: ${e.message}`);
+    }
+  } else {
+    ok("잔존 팀 없음");
+  }
+
   // 결과
   console.log(`\n  ${LINE}`);
   if (issues === 0) {
@@ -585,8 +923,8 @@ function cmdDoctor(options = {}) {
 }
 
 function cmdUpdate() {
-  const isDev = process.argv.includes("--dev");
-  const tagLabel = isDev ? ` ${YELLOW}@dev${RESET}` : "";
+  const isDev = isDevUpdateRequested(process.argv);
+  const tagLabel = isDev ? ` ${YELLOW}--dev${RESET}` : "";
   console.log(`\n${BOLD}triflux update${RESET}${tagLabel}\n`);
 
   // 1. 설치 방식 감지
@@ -642,6 +980,7 @@ function cmdUpdate() {
   // 2. 설치 방식에 따라 업데이트
   const oldVer = PKG.version;
   let updated = false;
+  let stoppedHubInfo = null;
 
   try {
     switch (installMode) {
@@ -657,13 +996,17 @@ function cmdUpdate() {
         break;
       }
       case "npm-global": {
+        stoppedHubInfo = stopHubForUpdate();
+        if (stoppedHubInfo?.pid) {
+          info(`실행 중 hub 정지 (PID ${stoppedHubInfo.pid})`);
+        }
         const npmCmd = isDev ? "npm install -g triflux@dev" : "npm update -g triflux";
         const result = execSync(npmCmd, {
           encoding: "utf8",
           timeout: 60000,
           stdio: ["pipe", "pipe", "ignore"],
         }).trim().split(/\r?\n/)[0];
-        ok(`${isDev ? "npm install -g @dev" : "npm update -g"} — ${result || "완료"}`);
+        ok(`${isDev ? "npm install -g triflux@dev" : "npm update -g triflux"} — ${result || "완료"}`);
         updated = true;
         break;
       }
@@ -675,7 +1018,7 @@ function cmdUpdate() {
           cwd: process.cwd(),
           stdio: ["pipe", "pipe", "ignore"],
         }).trim().split(/\r?\n/)[0];
-        ok(`npm update — ${result || "완료"}`);
+        ok(`${isDev ? "npm install triflux@dev" : "npm update triflux"} — ${result || "완료"}`);
         updated = true;
         break;
       }
@@ -695,6 +1038,9 @@ function cmdUpdate() {
         return;
     }
   } catch (e) {
+    if (stoppedHubInfo && startHubAfterUpdate(stoppedHubInfo)) {
+      info("업데이트 실패 후 hub 재기동 시도");
+    }
     fail(`업데이트 실패: ${e.message}`);
     return;
   }
@@ -719,6 +1065,11 @@ function cmdUpdate() {
     console.log("");
     info("setup 재실행 중...");
     cmdSetup();
+
+    if (stoppedHubInfo) {
+      if (startHubAfterUpdate(stoppedHubInfo)) info("hub 재기동 완료");
+      else warn("hub 재기동 실패 — `tfx hub start`로 수동 시작 필요");
+    }
   }
 
   console.log(`${GREEN}${BOLD}업데이트 완료${RESET}\n`);
@@ -822,16 +1173,19 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx doctor${RESET}     ${GRAY}CLI 진단 + 이슈 확인${RESET}
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
-    ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 버전으로 업데이트${RESET}
-    ${DIM}  --dev${RESET}         ${GRAY}dev 태그로 업데이트${RESET}
+    ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
+    ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
+    ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
+    ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
 
     ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행${RESET}
+    ${WHITE_BRIGHT}/tfx-auto-codex${RESET} ${GRAY}Codex 리드 + Gemini 유지 (no-Claude-native)${RESET}
     ${WHITE_BRIGHT}/tfx-codex${RESET}      ${GRAY}Codex 전용 모드${RESET}
     ${BLUE}/tfx-gemini${RESET}     ${GRAY}Gemini 전용 모드${RESET}
     ${AMBER}/tfx-setup${RESET}      ${GRAY}HUD 설정 + 진단${RESET}
@@ -842,10 +1196,112 @@ ${updateNotice}
 `);
 }
 
+async function cmdCodexTeam() {
+  const args = process.argv.slice(3);
+  const sub = String(args[0] || "").toLowerCase();
+  const passthrough = new Set([
+    "status", "attach", "stop", "kill", "send", "list", "help", "--help", "-h",
+    "tasks", "task", "focus", "interrupt", "control", "debug",
+  ]);
+
+  if (sub === "help" || sub === "--help" || sub === "-h") {
+    console.log(`
+  ${AMBER}${BOLD}⬡ tfx codex-team${RESET}
+
+    ${WHITE_BRIGHT}tfx codex-team "작업"${RESET}         ${GRAY}Codex 리드 + 워커 2개로 팀 시작${RESET}
+    ${WHITE_BRIGHT}tfx codex-team --layout 1xN "작업"${RESET}   ${GRAY}(세로 분할 컬럼)${RESET}
+    ${WHITE_BRIGHT}tfx codex-team --layout Nx1 "작업"${RESET}   ${GRAY}(가로 분할 스택)${RESET}
+    ${WHITE_BRIGHT}tfx codex-team status${RESET}
+    ${WHITE_BRIGHT}tfx codex-team debug --lines 30${RESET}
+    ${WHITE_BRIGHT}tfx codex-team send N "msg"${RESET}
+
+  ${DIM}내부적으로 tfx multi을 호출하며, 시작 시 --lead codex --agents codex,codex를 기본 주입합니다.${RESET}
+`);
+    return;
+  }
+
+  const hasAgents = args.includes("--agents");
+  const hasLead = args.includes("--lead");
+  const hasLayout = args.includes("--layout");
+  const isControl = passthrough.has(sub);
+  const normalizedArgs = isControl && args.length ? [sub, ...args.slice(1)] : args;
+  const inject = [];
+  if (!isControl && !hasLead) inject.push("--lead", "codex");
+  if (!isControl && !hasAgents) inject.push("--agents", "codex,codex");
+  if (!isControl && !hasLayout) inject.push("--layout", "1xN");
+  const forwarded = isControl ? normalizedArgs : [...inject, ...args];
+
+  const prevArgv = process.argv;
+  const prevProfile = process.env.TFX_TEAM_PROFILE;
+  process.env.TFX_TEAM_PROFILE = "codex-team";
+  const { pathToFileURL } = await import("node:url");
+  const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
+  process.argv = [prevArgv[0], prevArgv[1], "team", ...forwarded];
+  try {
+    await cmdTeam();
+  } finally {
+    process.argv = prevArgv;
+    if (typeof prevProfile === "string") process.env.TFX_TEAM_PROFILE = prevProfile;
+    else delete process.env.TFX_TEAM_PROFILE;
+  }
+}
+
 // ── hub 서브커맨드 ──
 
 const HUB_PID_DIR = join(homedir(), ".claude", "cache", "tfx-hub");
 const HUB_PID_FILE = join(HUB_PID_DIR, "hub.pid");
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function stopHubForUpdate() {
+  if (!existsSync(HUB_PID_FILE)) return null;
+  let info = null;
+  try {
+    info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+    process.kill(info.pid, 0);
+  } catch {
+    try { unlinkSync(HUB_PID_FILE); } catch {}
+    return null;
+  }
+
+  try {
+    if (process.platform === "win32") {
+      execSync(`taskkill /PID ${info.pid} /T /F`, {
+        stdio: ["pipe", "pipe", "ignore"],
+        timeout: 10000,
+      });
+    } else {
+      process.kill(info.pid, "SIGTERM");
+    }
+  } catch {
+    try { process.kill(info.pid, "SIGKILL"); } catch {}
+  }
+
+  sleepMs(300);
+  try { unlinkSync(HUB_PID_FILE); } catch {}
+  return info;
+}
+
+function startHubAfterUpdate(info) {
+  if (!info) return false;
+  const serverPath = join(PKG_ROOT, "hub", "server.mjs");
+  if (!existsSync(serverPath)) return false;
+  const port = Number(info?.port) > 0 ? String(info.port) : String(process.env.TFX_HUB_PORT || "27888");
+
+  try {
+    const child = spawn(process.execPath, [serverPath], {
+      env: { ...process.env, TFX_HUB_PORT: port },
+      stdio: "ignore",
+      detached: true,
+    });
+    child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // 설치된 CLI에 tfx-hub MCP 서버 자동 등록 (1회 설정, 이후 재실행 불필요)
 function autoRegisterMcp(mcpUrl) {
@@ -921,8 +1377,38 @@ function autoRegisterMcp(mcpUrl) {
   } catch (e) { warn(`Claude 등록 실패: ${e.message}`); }
 }
 
-function cmdHub() {
+async function cmdHub() {
   const sub = process.argv[3] || "status";
+  const defaultPortRaw = Number(process.env.TFX_HUB_PORT || "27888");
+  const probePort = Number.isFinite(defaultPortRaw) && defaultPortRaw > 0 ? defaultPortRaw : 27888;
+  const formatHostForUrl = (host) => host.includes(":") ? `[${host}]` : host;
+  const probeHubStatus = async (host = "127.0.0.1", port = probePort, timeoutMs = 3000) => {
+    try {
+      const res = await fetch(`http://${formatHostForUrl(host)}:${port}/status`, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.hub ? data : null;
+    } catch {
+      return null;
+    }
+  };
+  const recoverPidFile = (statusData, defaultHost = "127.0.0.1") => {
+    const pid = Number(statusData?.pid);
+    const port = Number(statusData?.port) || probePort;
+    if (!Number.isFinite(pid) || pid <= 0) return;
+    try {
+      mkdirSync(HUB_PID_DIR, { recursive: true });
+      writeFileSync(HUB_PID_FILE, JSON.stringify({
+        pid,
+        port,
+        host: defaultHost,
+        url: `http://${formatHostForUrl(defaultHost)}:${port}/mcp`,
+        started: Date.now(),
+      }));
+    } catch {}
+  };
 
   switch (sub) {
     case "start": {
@@ -960,7 +1446,7 @@ function cmdHub() {
       const deadline = Date.now() + 3000;
       while (Date.now() < deadline) {
         if (existsSync(HUB_PID_FILE)) { started = true; break; }
-        execSync("node -e \"setTimeout(()=>{},100)\"", { stdio: "ignore", timeout: 500 });
+        await new Promise((r) => setTimeout(r, 100));
       }
 
       if (started) {
@@ -982,6 +1468,15 @@ function cmdHub() {
 
     case "stop": {
       if (!existsSync(HUB_PID_FILE)) {
+        const probed = await probeHubStatus("127.0.0.1", probePort, 1500)
+          || (probePort === 27888 ? null : await probeHubStatus("127.0.0.1", 27888, 1500));
+        if (probed && Number.isFinite(Number(probed.pid))) {
+          try {
+            process.kill(Number(probed.pid), "SIGTERM");
+            console.log(`\n  ${GREEN_BRIGHT}✓${RESET} hub 종료됨 (PID ${probed.pid})${DIM} (probe)${RESET}\n`);
+            return;
+          } catch {}
+        }
         console.log(`\n  ${DIM}hub 미실행${RESET}\n`);
         return;
       }
@@ -999,7 +1494,29 @@ function cmdHub() {
 
     case "status": {
       if (!existsSync(HUB_PID_FILE)) {
-        console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET}\n`);
+        const probed = await probeHubStatus();
+        if (!probed) {
+          const fallback = probePort === 27888 ? null : await probeHubStatus("127.0.0.1", 27888, 1500);
+          if (fallback) {
+          console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(default port probe 성공)${RESET}`);
+          console.log(`    URL:     http://127.0.0.1:${fallback.port || 27888}/mcp`);
+          if (fallback.pid !== undefined) console.log(`    PID:     ${fallback.pid}`);
+          if (fallback.hub?.state) console.log(`    State:   ${fallback.hub.state}`);
+          if (fallback.sessions !== undefined) console.log(`    Sessions: ${fallback.sessions}`);
+          recoverPidFile(fallback, "127.0.0.1");
+          console.log("");
+          return;
+        }
+          console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET}\n`);
+          return;
+        }
+        console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(pid file 없음 / probe 성공)${RESET}`);
+        console.log(`    URL:     http://127.0.0.1:${probed.port || probePort}/mcp`);
+        if (probed.pid !== undefined) console.log(`    PID:     ${probed.pid}`);
+        if (probed.hub?.state) console.log(`    State:   ${probed.hub.state}`);
+        if (probed.sessions !== undefined) console.log(`    Sessions: ${probed.sessions}`);
+        recoverPidFile(probed, "127.0.0.1");
+        console.log("");
         return;
       }
       try {
@@ -1017,9 +1534,9 @@ function cmdHub() {
 
         // HTTP 상태 조회 시도
         try {
-          const statusUrl = info.url.replace("/mcp", "/status");
-          const result = execSync(`curl -s "${statusUrl}"`, { encoding: "utf8", timeout: 3000, stdio: ["pipe", "pipe", "ignore"] });
-          const data = JSON.parse(result);
+          const host = typeof info.host === "string" ? info.host : "127.0.0.1";
+          const port = Number(info.port) || probePort;
+          const data = await probeHubStatus(host, port, 3000);
           if (data.hub) {
             console.log(`    State:   ${data.hub.state}`);
           }
@@ -1031,7 +1548,18 @@ function cmdHub() {
         console.log("");
       } catch {
         try { unlinkSync(HUB_PID_FILE); } catch {}
-        console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET} ${DIM}(stale PID 정리됨)${RESET}\n`);
+        const probed = await probeHubStatus();
+        if (!probed) {
+          console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET} ${DIM}(stale PID 정리됨)${RESET}\n`);
+          break;
+        }
+        console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(stale PID 정리 후 probe 성공)${RESET}`);
+        console.log(`    URL:     http://127.0.0.1:${probed.port || probePort}/mcp`);
+        if (probed.pid !== undefined) console.log(`    PID:     ${probed.pid}`);
+        if (probed.hub?.state) console.log(`    State:   ${probed.hub.state}`);
+        if (probed.sessions !== undefined) console.log(`    Sessions: ${probed.sessions}`);
+        recoverPidFile(probed, "127.0.0.1");
+        console.log("");
       }
       break;
     }
@@ -1054,12 +1582,21 @@ switch (cmd) {
   case "doctor": {
     const fix = process.argv.includes("--fix");
     const reset = process.argv.includes("--reset");
-    cmdDoctor({ fix, reset });
+    await cmdDoctor({ fix, reset });
     break;
   }
   case "update":  cmdUpdate(); break;
   case "list": case "ls": cmdList(); break;
-  case "hub":     cmdHub(); break;
+  case "hub":     await cmdHub(); break;
+  case "multi": {
+    const { pathToFileURL } = await import("node:url");
+    const { cmdTeam } = await import(pathToFileURL(join(PKG_ROOT, "hub", "team", "cli.mjs")).href);
+    await cmdTeam();
+    break;
+  }
+  case "codex-team":
+    await cmdCodexTeam();
+    break;
   case "notion-read": case "nr": {
     const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
     const nrArgs = process.argv.slice(3).map(a => `"${a}"`).join(" ");

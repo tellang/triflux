@@ -105,6 +105,9 @@ const QOS_PATH = join(homedir(), ".omc", "state", "cli_qos_profile.json");
 const ACCOUNTS_CONFIG_PATH = join(homedir(), ".omc", "router", "accounts.json");
 const ACCOUNTS_STATE_PATH = join(homedir(), ".omc", "state", "cli_accounts_state.json");
 
+// tfx-multi 상태 (v2.2 HUD 통합)
+const TEAM_STATE_PATH = join(homedir(), ".claude", "cache", "tfx-hub", "team-state.json");
+
 // Claude OAuth Usage API (api.anthropic.com/api/oauth/usage)
 const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
 const CLAUDE_USAGE_CACHE_PATH = join(homedir(), ".claude", "cache", "claude-usage-cache.json");
@@ -310,8 +313,10 @@ function selectTier(stdin, claudeUsage = null) {
   else budget = 5; // rows 감지 불가 → 넉넉하게
 
   // 5) 인디케이터 줄 추정
-  let indicatorRows = 1; // bypass permissions (거의 항상 표시)
-  indicatorRows += 1; // 선행 개행 가드 (알림 배너 우회용 빈 줄)
+  // bypass permissions 배너(1줄)만 계상
+  // 선행 \n은 출력 포맷이므로 tier 예산에서 제외 — 이중 계산 시
+  // budget 4(rows 28-34)에서 totalVisualRows 5가 되어 micro로 추락하는 버그 유발
+  let indicatorRows = 1;
   const contextPercent = getContextPercent(stdin);
   // "Context low" 배너 공간은 출력부(leadingBreaks)에서 \n\n으로 처리 — 티어 선택에서 예약 불필요
   // Claude Code 사용량 경고 (노란색 배너: "You've used X% of your ... limit")
@@ -424,6 +429,54 @@ function getProviderAccountId(provider, accountsConfig, accountsState) {
   if (selectedId) return selectedId;
   const providerConfig = accountsConfig?.providers?.[provider] || [];
   return providerConfig[0]?.id || `${provider}-main`;
+}
+
+/**
+ * tfx-multi 상태 행 생성 (v2.2 HUD 통합)
+ * 활성 팀이 있을 때만 행 반환, 없으면 null
+ * @returns {{ prefix: string, left: string, right: string } | null}
+ */
+function getTeamRow() {
+  const teamState = readJson(TEAM_STATE_PATH, null);
+  if (!teamState || !teamState.sessionName) return null;
+
+  // 팀 생존 확인: startedAt 기준 24시간 초과면 stale로 간주
+  if (teamState.startedAt && (Date.now() - teamState.startedAt) > 24 * 60 * 60 * 1000) return null;
+
+  const workers = (teamState.members || []).filter((m) => m.role === "worker");
+  if (!workers.length) return null;
+
+  const tasks = teamState.tasks || [];
+  const completed = tasks.filter((t) => t.status === "completed").length;
+  const failed = tasks.filter((t) => t.status === "failed").length;
+  const total = tasks.length || workers.length;
+
+  // 경과 시간
+  const elapsed = teamState.startedAt
+    ? `${Math.round((Date.now() - teamState.startedAt) / 60000)}m`
+    : "";
+
+  // 멤버 상태 아이콘 요약
+  const memberIcons = workers.map((m) => {
+    const task = tasks.find((t) => t.owner === m.name);
+    const icon = task?.status === "completed" ? green("✓")
+      : task?.status === "in_progress" ? yellow("●")
+      : task?.status === "failed" ? red("✗")
+      : dim("○");
+    const tag = m.cli ? m.cli.charAt(0) : "?";
+    return `${tag}${icon}`;
+  }).join(" ");
+
+  // done / failed 상태 텍스트
+  const doneText = failed > 0
+    ? `${completed}/${total} ${red(`${failed}✗`)}`
+    : `${completed}/${total} done`;
+
+  return {
+    prefix: bold(claudeOrange("⬡")),
+    left: `team ${doneText} ${dim(elapsed)}`,
+    right: memberIcons,
+  };
 }
 
 function renderAlignedRows(rows) {
@@ -791,7 +844,7 @@ async function fetchClaudeUsage(forceRefresh = false) {
       : result.status === 401 || result.status === 403 ? "auth"
       : result.error === "timeout" || result.error === "network" ? "network"
       : "unknown";
-    writeClaudeUsageCache(null, { type: errorType, status: result.status });
+    writeClaudeUsageCache(existingSnapshot.data, { type: errorType, status: result.status });
     return existingSnapshot.data || null;
   }
   const usage = parseClaudeUsageResponse(result.data);
@@ -1706,6 +1759,10 @@ async function main() {
     getProviderRow("gemini", "g", geminiBlue, qosProfile, accountsConfig, accountsState,
       geminiQuotaData, geminiEmail, geminiSv, null),
   ];
+
+  // tfx-multi 활성 시 팀 상태 행 추가 (v2.2)
+  const teamRow = getTeamRow();
+  if (teamRow) rows.push(teamRow);
 
   // 비활성 프로바이더 dim 처리: 데이터 없으면 전체 줄 dim
   const codexActive = codexBuckets != null;

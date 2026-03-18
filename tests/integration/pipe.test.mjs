@@ -1,0 +1,184 @@
+// tests/integration/pipe.test.mjs — Named Pipe 실시간 push 통합 테스트
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import net from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { mkdirSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+
+import { startHub } from '../../hub/server.mjs';
+
+function tempDbPath() {
+  const dir = join(tmpdir(), `tfx-hub-pipe-test-${randomUUID()}`);
+  mkdirSync(dir, { recursive: true });
+  return join(dir, 'test.db');
+}
+
+async function createPipeClient(pipePath) {
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection(pipePath);
+    let buffer = '';
+    const pending = new Map();
+    const events = [];
+    const waiters = [];
+
+    function emitEvent(frame) {
+      const waiter = waiters.shift();
+      if (waiter) {
+        waiter(frame);
+      } else {
+        events.push(frame);
+      }
+    }
+
+    function flush(line) {
+      if (!line) return;
+      const frame = JSON.parse(line);
+      if (frame.type === 'response' && pending.has(frame.request_id)) {
+        const resolvePending = pending.get(frame.request_id);
+        pending.delete(frame.request_id);
+        resolvePending(frame);
+        return;
+      }
+      emitEvent(frame);
+    }
+
+    socket.setEncoding('utf8');
+    socket.once('connect', () => {
+      socket.on('data', (chunk) => {
+        buffer += chunk;
+        let newlineIndex = buffer.indexOf('\n');
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          flush(line);
+          newlineIndex = buffer.indexOf('\n');
+        }
+      });
+
+      resolve({
+        async request(type, payload, timeoutMs = 3000) {
+          const requestId = randomUUID();
+          return await new Promise((resolveRequest, rejectRequest) => {
+            const timer = setTimeout(() => {
+              pending.delete(requestId);
+              rejectRequest(new Error(`pipe request timeout: ${payload.action || type}`));
+            }, timeoutMs);
+
+            pending.set(requestId, (frame) => {
+              clearTimeout(timer);
+              resolveRequest(frame);
+            });
+
+            socket.write(`${JSON.stringify({ type, request_id: requestId, payload })}\n`);
+          });
+        },
+        async nextEvent(timeoutMs = 3000) {
+          if (events.length) return events.shift();
+          return await new Promise((resolveEvent, rejectEvent) => {
+            const timer = setTimeout(() => rejectEvent(new Error('pipe event timeout')), timeoutMs);
+            waiters.push((frame) => {
+              clearTimeout(timer);
+              resolveEvent(frame);
+            });
+          });
+        },
+        close() {
+          socket.end();
+        },
+      });
+    });
+    socket.once('error', reject);
+  });
+}
+
+const TEST_PORT = 28100 + Math.floor(Math.random() * 100);
+
+describe('Named Pipe 실시간 채널', () => {
+  let hub;
+  let dbPath;
+
+  before(async () => {
+    dbPath = tempDbPath();
+    hub = await startHub({ port: TEST_PORT, dbPath, host: '127.0.0.1' });
+  });
+
+  after(async () => {
+    if (hub?.stop) await hub.stop();
+    try { rmSync(join(dbPath, '..'), { recursive: true, force: true }); } catch {}
+  });
+
+  it('구독된 에이전트는 publish 후 메시지를 실시간 push로 받아야 한다', async () => {
+    const subscriber = await createPipeClient(hub.pipePath);
+    const publisher = await createPipeClient(hub.pipePath);
+
+    const register = await subscriber.request('command', {
+      action: 'register',
+      agent_id: 'pipe-subscriber',
+      cli: 'codex',
+      capabilities: ['code'],
+      topics: ['task.result'],
+      heartbeat_ttl_ms: 60000,
+    });
+    assert.equal(register.ok, true);
+
+    const eventPromise = subscriber.nextEvent();
+    const published = await publisher.request('command', {
+      action: 'publish',
+      from: 'pipe-publisher',
+      to: 'topic:task.result',
+      topic: 'task.result',
+      payload: { summary: 'done' },
+    });
+    assert.equal(published.ok, true);
+
+    const pushed = await eventPromise;
+    assert.equal(pushed.type, 'event');
+    assert.equal(pushed.event, 'message');
+    assert.equal(pushed.payload.message.topic, 'task.result');
+    assert.deepEqual(pushed.payload.message.payload, { summary: 'done' });
+
+    const acked = await subscriber.request('command', {
+      action: 'ack',
+      agent_id: 'pipe-subscriber',
+      message_ids: [pushed.payload.message.id],
+    });
+    assert.equal(acked.ok, true);
+    assert.equal(acked.data.acked_count, 1);
+
+    subscriber.close();
+    publisher.close();
+  });
+
+  it('query drain은 연결 시점 이전에 쌓인 메시지를 반환해야 한다', async () => {
+    hub.router.registerAgent({
+      agent_id: 'pipe-drain-agent',
+      cli: 'claude',
+      capabilities: ['x'],
+      topics: [],
+      heartbeat_ttl_ms: 60000,
+    });
+    hub.router.handlePublish({
+      from: 'lead',
+      to: 'pipe-drain-agent',
+      topic: 'lead.control',
+      payload: { command: 'pause' },
+    });
+
+    const client = await createPipeClient(hub.pipePath);
+    const drained = await client.request('query', {
+      action: 'drain',
+      agent_id: 'pipe-drain-agent',
+      max_messages: 5,
+      auto_ack: true,
+    });
+
+    assert.equal(drained.ok, true);
+    assert.equal(drained.data.count, 1);
+    assert.equal(drained.data.messages[0].topic, 'lead.control');
+    assert.deepEqual(drained.data.messages[0].payload, { command: 'pause' });
+
+    client.close();
+  });
+});

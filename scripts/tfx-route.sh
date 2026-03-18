@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tfx-route.sh v2.0 — CLI 라우팅 래퍼 (triflux)
+# tfx-route.sh v2.2 — CLI 라우팅 래퍼 (triflux)
 #
 # v1.x: cli-route.sh (jq+python3+node 혼재, 동기 후처리 ~1s)
 # v2.0: tfx-route.sh 리네임
@@ -9,7 +9,7 @@
 #   - Gemini health check 지수 백오프 (30×1s → 5×exp)
 #   - 컨텍스트 파일 5번째 인자 지원
 #
-VERSION="2.0"
+VERSION="2.2"
 #
 # 사용법:
 #   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
@@ -28,47 +28,27 @@ USER_TIMEOUT="${4:-}"
 CONTEXT_FILE="${5:-}"
 
 # ── CLI 경로 해석 (Windows npm global 대응) ──
+NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || echo node)}"
 CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo codex)}"
 GEMINI_BIN="${GEMINI_BIN:-$(command -v gemini 2>/dev/null || echo gemini)}"
+CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo claude)}"
+GEMINI_BIN_ARGS_JSON="${GEMINI_BIN_ARGS_JSON:-[]}"
+CLAUDE_BIN_ARGS_JSON="${CLAUDE_BIN_ARGS_JSON:-[]}"
 
 # ── 상수 ──
 MAX_STDOUT_BYTES=51200  # 50KB — Claude 컨텍스트 절약
 TIMESTAMP=$(date +%s)
-STDERR_LOG="/tmp/tfx-route-${AGENT_TYPE}-${TIMESTAMP}-stderr.log"
-STDOUT_LOG="/tmp/tfx-route-${AGENT_TYPE}-${TIMESTAMP}-stdout.log"
+RUN_ID="${TIMESTAMP}-$$-${RANDOM}"
+STDERR_LOG="/tmp/tfx-route-${AGENT_TYPE}-${RUN_ID}-stderr.log"
+STDOUT_LOG="/tmp/tfx-route-${AGENT_TYPE}-${RUN_ID}-stdout.log"
 TFX_TMP="${TMPDIR:-/tmp}"
 
-# ── Hub 브릿지 (선택적 — Hub 미실행 시 무시) ──
-# 패키지 내 브릿지 탐색 (npm global / git local 모두 대응)
-find_bridge() {
-  # 1. 환경변수 지정
-  [[ -n "${TFX_BRIDGE:-}" && -f "$TFX_BRIDGE" ]] && echo "$TFX_BRIDGE" && return
-  # 2. 같은 패키지 내
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  local pkg_bridge="${script_dir}/../hub/bridge.mjs"
-  [[ -f "$pkg_bridge" ]] && echo "$pkg_bridge" && return
-  # 3. 설치된 triflux 패키지
-  local npm_bridge
-  npm_bridge="$(npm root -g 2>/dev/null)/triflux/hub/bridge.mjs"
-  [[ -f "$npm_bridge" ]] && echo "$npm_bridge" && return
-  echo ""
-}
-BRIDGE_BIN="$(find_bridge)"
-HUB_ENABLED="false"
-if [[ -n "$BRIDGE_BIN" ]]; then
-  # Hub 핑 (3초 타임아웃, 실패 시 무시)
-  HUB_PING=$(node "$BRIDGE_BIN" ping 2>/dev/null || echo '{"ok":false}')
-  if echo "$HUB_PING" | grep -q '"ok":true'; then
-    HUB_ENABLED="true"
-  fi
-fi
-
-# Hub 브릿지 래퍼 (Hub 꺼져있으면 아무것도 안 함)
-hub_bridge() {
-  [[ "$HUB_ENABLED" != "true" ]] && return 0
-  node "$BRIDGE_BIN" "$@" 2>/dev/null || true
-}
+# ── 팀 환경변수 ──
+TFX_TEAM_NAME="${TFX_TEAM_NAME:-}"
+TFX_TEAM_TASK_ID="${TFX_TEAM_TASK_ID:-}"
+TFX_TEAM_AGENT_NAME="${TFX_TEAM_AGENT_NAME:-${AGENT_TYPE}-worker-$$}"
+TFX_TEAM_LEAD_NAME="${TFX_TEAM_LEAD_NAME:-team-lead}"
+TFX_HUB_URL="${TFX_HUB_URL:-http://127.0.0.1:27888}"
 
 # fallback 시 원래 에이전트 정보 보존
 ORIGINAL_AGENT=""
@@ -85,6 +65,81 @@ deregister_agent() {
   rm -f "${TFX_TMP}/tfx-agent-$$.json" 2>/dev/null || true
 }
 
+# ── 팀 Hub Bridge 통신 ──
+# JSON 문자열 이스케이프 (큰따옴표, 백슬래시, 개행, 탭, CR)
+json_escape() {
+  local s="${1:-}"
+  # node로 완전한 JSON 이스케이프 (NUL, 멀티바이트 UTF-8, 제어문자 안전)
+  if command -v node &>/dev/null; then
+    node -e 'process.stdout.write(JSON.stringify(process.argv[1]).slice(1,-1))' -- "$s"
+    return
+  fi
+  # node 미설치 fallback: 기본 Bash 치환
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/\\r}"
+  printf '%s' "$s"
+}
+
+team_claim_task() {
+  [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
+  local http_code safe_team_name safe_task_id safe_agent_name
+  safe_team_name=$(json_escape "$TFX_TEAM_NAME")
+  safe_task_id=$(json_escape "$TFX_TEAM_TASK_ID")
+  safe_agent_name=$(json_escape "$TFX_TEAM_AGENT_NAME")
+
+  http_code=$(curl -sf -o /dev/null -w "%{http_code}" -X POST "${TFX_HUB_URL}/bridge/team/task-update" \
+    -H "Content-Type: application/json" \
+    -d "{\"team_name\":\"${safe_team_name}\",\"task_id\":\"${safe_task_id}\",\"claim\":true,\"owner\":\"${safe_agent_name}\",\"status\":\"in_progress\"}" \
+    2>/dev/null) || http_code="000"
+
+  case "$http_code" in
+    200) ;; # 성공
+    409)
+      echo "[tfx-route] CLAIM_CONFLICT: task ${TFX_TEAM_TASK_ID}가 이미 claim됨. 실행 중단." >&2
+      exit 0 ;;
+    000)
+      echo "[tfx-route] 경고: Hub 연결 실패 (미실행?). claim 없이 계속 실행." >&2 ;;
+    *)
+      echo "[tfx-route] 경고: Hub claim 응답 HTTP ${http_code}. claim 없이 계속 실행." >&2 ;;
+  esac
+}
+
+team_complete_task() {
+  local result="${1:-success}"            # success/failed/timeout
+  local result_summary="${2:-작업 완료}"
+  [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
+
+  local safe_team_name safe_task_id safe_agent_name safe_result safe_summary safe_lead_name
+  safe_team_name=$(json_escape "$TFX_TEAM_NAME")
+  safe_task_id=$(json_escape "$TFX_TEAM_TASK_ID")
+  safe_agent_name=$(json_escape "$TFX_TEAM_AGENT_NAME")
+  safe_result=$(json_escape "$result")
+  safe_summary=$(json_escape "$(echo "$result_summary" | head -c 4096)")
+  safe_lead_name=$(json_escape "$TFX_TEAM_LEAD_NAME")
+
+  # task 상태: 항상 "completed" (Claude Code API는 "failed" 미지원)
+  # 실제 결과는 metadata.result로 전달
+  curl -sf -X POST "${TFX_HUB_URL}/bridge/team/task-update" \
+    -H "Content-Type: application/json" \
+    -d "{\"team_name\":\"${safe_team_name}\",\"task_id\":\"${safe_task_id}\",\"status\":\"completed\",\"owner\":\"${safe_agent_name}\",\"metadata_patch\":{\"result\":\"${safe_result}\",\"summary\":\"${safe_summary}\"}}" \
+    >/dev/null 2>&1 || true
+
+  # 리드에게 메시지 전송
+  curl -sf -X POST "${TFX_HUB_URL}/bridge/team/send-message" \
+    -H "Content-Type: application/json" \
+    -d "{\"team_name\":\"${safe_team_name}\",\"from\":\"${safe_agent_name}\",\"to\":\"${safe_lead_name}\",\"text\":\"${safe_summary}\",\"summary\":\"task ${safe_task_id} ${safe_result}\"}" \
+    >/dev/null 2>&1 || true
+
+  # Hub result 발행 (poll_messages 채널 활성화)
+  curl -sf -X POST "${TFX_HUB_URL}/bridge/result" \
+    -H "Content-Type: application/json" \
+    -d "{\"agent_id\":\"${safe_agent_name}\",\"topic\":\"task.result\",\"payload\":{\"task_id\":\"${safe_task_id}\",\"result\":\"${safe_result}\"},\"trace_id\":\"${safe_team_name}\"}" \
+    >/dev/null 2>&1 || true
+}
+
 # ── 라우팅 테이블 ──
 # 반환: CLI_CMD, CLI_ARGS, CLI_TYPE, CLI_EFFORT, DEFAULT_TIMEOUT, RUN_MODE, OPUS_OVERSIGHT
 route_agent() {
@@ -99,7 +154,7 @@ route_agent() {
       CLI_EFFORT="high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     build-fixer)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile fast exec ${codex_base}"
+      CLI_ARGS="exec --profile fast ${codex_base}"
       CLI_EFFORT="fast"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     debugger)
       CLI_TYPE="codex"; CLI_CMD="codex"
@@ -107,39 +162,39 @@ route_agent() {
       CLI_EFFORT="high"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     deep-executor)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile xhigh exec ${codex_base}"
+      CLI_ARGS="exec --profile xhigh ${codex_base}"
       CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
 
     # ─── 설계/분석 레인 ───
     architect)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile xhigh exec ${codex_base}"
+      CLI_ARGS="exec --profile xhigh ${codex_base}"
       CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
     planner)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile xhigh exec ${codex_base}"
+      CLI_ARGS="exec --profile xhigh ${codex_base}"
       CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
     critic)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile xhigh exec ${codex_base}"
+      CLI_ARGS="exec --profile xhigh ${codex_base}"
       CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
     analyst)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile xhigh exec ${codex_base}"
+      CLI_ARGS="exec --profile xhigh ${codex_base}"
       CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
 
     # ─── 리뷰 레인 ───
     code-reviewer)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile thorough exec ${codex_base} review"
+      CLI_ARGS="exec --profile thorough ${codex_base} review"
       CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     security-reviewer)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile thorough exec ${codex_base} review"
+      CLI_ARGS="exec --profile thorough ${codex_base} review"
       CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
     quality-reviewer)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile thorough exec ${codex_base} review"
+      CLI_ARGS="exec --profile thorough ${codex_base} review"
       CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 리서치 레인 ───
@@ -149,7 +204,7 @@ route_agent() {
       CLI_EFFORT="high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     scientist-deep)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile thorough exec ${codex_base}"
+      CLI_ARGS="exec --profile thorough ${codex_base}"
       CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     document-specialist)
       CLI_TYPE="codex"; CLI_CMD="codex"
@@ -183,7 +238,7 @@ route_agent() {
     # ─── 경량 ───
     spark)
       CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="--profile spark_fast exec ${codex_base}"
+      CLI_ARGS="exec --profile spark_fast ${codex_base}"
       CLI_EFFORT="spark_fast"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     *)
       echo "ERROR: 알 수 없는 에이전트 타입: $agent" >&2
@@ -196,6 +251,23 @@ route_agent() {
 
 # ── CLI 모드 오버라이드 (tfx-codex / tfx-gemini 스킬용) ──
 TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
+TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
+TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
+case "$TFX_NO_CLAUDE_NATIVE" in
+  0|1) ;;
+  *)
+    echo "ERROR: TFX_NO_CLAUDE_NATIVE 값은 0 또는 1이어야 합니다. (현재: $TFX_NO_CLAUDE_NATIVE)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_CODEX_TRANSPORT" in
+  auto|mcp|exec) ;;
+  *)
+    echo "ERROR: TFX_CODEX_TRANSPORT 값은 auto, mcp, exec 중 하나여야 합니다. (현재: $TFX_CODEX_TRANSPORT)" >&2
+    exit 1
+    ;;
+esac
+CODEX_MCP_TRANSPORT_EXIT_CODE=70
 
 apply_cli_mode() {
   local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
@@ -208,7 +280,7 @@ apply_cli_mode() {
           designer)
             CLI_ARGS="exec ${codex_base}"; CLI_EFFORT="high"; DEFAULT_TIMEOUT=600 ;;
           writer)
-            CLI_ARGS="--profile spark_fast exec ${codex_base}"; CLI_EFFORT="spark_fast"; DEFAULT_TIMEOUT=180 ;;
+            CLI_ARGS="exec --profile spark_fast ${codex_base}"; CLI_EFFORT="spark_fast"; DEFAULT_TIMEOUT=180 ;;
         esac
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
       fi ;;
@@ -245,6 +317,61 @@ apply_cli_mode() {
         fi
       fi ;;
   esac
+}
+
+# ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
+apply_no_claude_native_mode() {
+  local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+
+  [[ "$TFX_NO_CLAUDE_NATIVE" != "1" ]] && return
+  [[ "$TFX_CLI_MODE" == "gemini" ]] && return
+  [[ "$CLI_TYPE" != "claude-native" ]] && return
+
+  if ! command -v "$CODEX_BIN" &>/dev/null; then
+    echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1 이지만 codex를 찾지 못해 claude-native 유지" >&2
+    return
+  fi
+
+  ORIGINAL_AGENT="${AGENT_TYPE}"
+  CLI_TYPE="codex"; CLI_CMD="codex"
+
+  case "$AGENT_TYPE" in
+    explore)
+      CLI_ARGS="exec --profile fast ${codex_base}"
+      CLI_EFFORT="fast"
+      DEFAULT_TIMEOUT=600
+      RUN_MODE="fg"
+      OPUS_OVERSIGHT="false"
+      ;;
+    verifier)
+      CLI_ARGS="exec --profile thorough ${codex_base} review"
+      CLI_EFFORT="thorough"
+      DEFAULT_TIMEOUT=1200
+      RUN_MODE="fg"
+      OPUS_OVERSIGHT="false"
+      ;;
+    test-engineer)
+      CLI_ARGS="exec ${codex_base}"
+      CLI_EFFORT="high"
+      DEFAULT_TIMEOUT=1200
+      RUN_MODE="bg"
+      OPUS_OVERSIGHT="false"
+      ;;
+    qa-tester)
+      CLI_ARGS="exec --profile thorough ${codex_base} review"
+      CLI_EFFORT="thorough"
+      DEFAULT_TIMEOUT=1200
+      RUN_MODE="bg"
+      OPUS_OVERSIGHT="false"
+      ;;
+    *)
+      # claude-native 타입 중 위에 없는 경우는 보수적으로 유지
+      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+      return
+      ;;
+  esac
+
+  echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1: $AGENT_TYPE -> codex($CLI_EFFORT) 리매핑" >&2
 }
 
 # ── MCP 인벤토리 캐시 ──
@@ -315,15 +442,265 @@ get_mcp_hint() {
 }
 
 # ── Gemini MCP 서버 선택적 로드 ──
-get_gemini_mcp_filter() {
+get_gemini_mcp_servers() {
   local profile="$1"
   case "$profile" in
-    implement)  echo "--allowed-mcp-server-names context7,brave-search" ;;
-    analyze)    echo "--allowed-mcp-server-names context7,brave-search,exa" ;;
-    review)     echo "--allowed-mcp-server-names sequential-thinking" ;;
-    docs)       echo "--allowed-mcp-server-names context7,brave-search" ;;
+    implement)  echo "context7 brave-search" ;;
+    analyze)    echo "context7 brave-search exa" ;;
+    review)     echo "sequential-thinking" ;;
+    docs)       echo "context7 brave-search" ;;
     *)          echo "" ;;
   esac
+}
+
+get_gemini_mcp_filter() {
+  local servers
+  servers=$(get_gemini_mcp_servers "$1")
+  [[ -z "$servers" ]] && return 0
+  echo "--allowed-mcp-server-names ${servers// /,}"
+}
+
+get_claude_model() {
+  case "$AGENT_TYPE" in
+    explore) echo "haiku" ;;
+    *) echo "sonnet" ;;
+  esac
+}
+
+emit_claude_native_metadata() {
+  local model
+  model=$(get_claude_model)
+  echo "ROUTE_TYPE=claude-native"
+  echo "AGENT=$AGENT_TYPE"
+  echo "MODEL=$model"
+  echo "RUN_MODE=$RUN_MODE"
+  echo "OPUS_OVERSIGHT=$OPUS_OVERSIGHT"
+  echo "TIMEOUT=$TIMEOUT_SEC"
+  echo "MCP_PROFILE=$MCP_PROFILE"
+  [[ -n "$ORIGINAL_AGENT" ]] && echo "ORIGINAL_AGENT=$ORIGINAL_AGENT"
+  echo "PROMPT=$PROMPT"
+  echo "--- Claude Task($model) 에이전트로 위임하세요 ---"
+}
+
+resolve_worker_runner_script() {
+  if [[ -n "${TFX_ROUTE_WORKER_RUNNER:-}" && -f "$TFX_ROUTE_WORKER_RUNNER" ]]; then
+    printf '%s\n' "$TFX_ROUTE_WORKER_RUNNER"
+    return 0
+  fi
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local candidate="$script_dir/tfx-route-worker.mjs"
+  [[ -f "$candidate" ]] || return 1
+  printf '%s\n' "$candidate"
+}
+
+run_stream_worker() {
+  local worker_type="$1"
+  local prompt="$2"
+  local use_tee_flag="$3"
+  shift 3
+
+  local runner_script
+  if ! runner_script=$(resolve_worker_runner_script); then
+    echo "[tfx-route] 경고: stream worker runner를 찾지 못했습니다." >&2
+    return 127
+  fi
+
+  if ! command -v "$NODE_BIN" &>/dev/null; then
+    echo "[tfx-route] 경고: node를 찾지 못해 stream worker를 실행할 수 없습니다." >&2
+    return 127
+  fi
+
+  local -a worker_cmd=(
+    "$NODE_BIN"
+    "$runner_script"
+    "--type" "$worker_type"
+    "--timeout-ms" "$((TIMEOUT_SEC * 1000))"
+    "--cwd" "$PWD"
+    "$@"
+  )
+
+  if [[ "$use_tee_flag" == "true" ]]; then
+    printf '%s' "$prompt" | timeout "$TIMEOUT_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG"
+  else
+    printf '%s' "$prompt" | timeout "$TIMEOUT_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG"
+  fi
+}
+
+run_legacy_gemini() {
+  local prompt="$1"
+  local use_tee_flag="$2"
+  local gemini_mcp_filter
+  gemini_mcp_filter=$(get_gemini_mcp_filter "$MCP_PROFILE")
+  local gemini_args="$CLI_ARGS"
+
+  if [[ -n "$gemini_mcp_filter" ]]; then
+    gemini_args="${CLI_ARGS/--prompt/$gemini_mcp_filter --prompt}"
+    echo "[tfx-route] Gemini MCP 필터: $gemini_mcp_filter" >&2
+  fi
+
+  if [[ "$use_tee_flag" == "true" ]]; then
+    timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$prompt" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+  else
+    timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$prompt" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+  fi
+  local pid=$!
+
+  local health_ok=true
+  local intervals=(1 2 3 5 8)
+  for wait_sec in "${intervals[@]}"; do
+    sleep "$wait_sec"
+    if [[ -s "$STDOUT_LOG" ]] || [[ -s "$STDERR_LOG" ]]; then
+      break
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
+      health_ok=false
+      echo "[tfx-route] Gemini: 출력 없이 프로세스 종료 (${wait_sec}초 체크)" >&2
+      break
+    fi
+  done
+
+  local exit_code_local=0
+  if [[ "$health_ok" == "false" ]]; then
+    wait "$pid" 2>/dev/null
+    echo "[tfx-route] Gemini crash 감지, 재시도 중..." >&2
+    if [[ "$use_tee_flag" == "true" ]]; then
+      timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$prompt" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    else
+      timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$prompt" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    fi
+    pid=$!
+  fi
+
+  wait "$pid" || exit_code_local=$?
+  return "$exit_code_local"
+}
+
+resolve_codex_mcp_script() {
+  if [[ -n "${TFX_CODEX_MCP_SCRIPT:-}" && -f "$TFX_CODEX_MCP_SCRIPT" ]]; then
+    printf '%s\n' "$TFX_CODEX_MCP_SCRIPT"
+    return 0
+  fi
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local candidates=(
+    "$script_dir/hub/workers/codex-mcp.mjs"
+    "$script_dir/../hub/workers/codex-mcp.mjs"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+run_codex_exec() {
+  local prompt="$1"
+  local use_tee_flag="$2"
+  local exit_code_local=0
+
+  if [[ "$use_tee_flag" == "true" ]]; then
+    timeout "$TIMEOUT_SEC" $CLI_CMD $CLI_ARGS "$prompt" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" || exit_code_local=$?
+  else
+    timeout "$TIMEOUT_SEC" $CLI_CMD $CLI_ARGS "$prompt" >"$STDOUT_LOG" 2>"$STDERR_LOG" || exit_code_local=$?
+  fi
+
+  if [[ ! -s "$STDOUT_LOG" && -s "$STDERR_LOG" ]]; then
+    # stderr에서 마지막 "codex" 마커 이후의 텍스트를 stdout으로 복구
+    # 1차: "codex" 마커 기반 (Windows \r 제거 후 매칭)
+    sed 's/\r$//' "$STDERR_LOG" \
+      | awk '/^codex$/{found=NR;content=""} found && NR>found{content=content RS $0} END{if(content) print substr(content,2)}' \
+      > "$STDOUT_LOG"
+
+    # 2차: 마커 없을 때 node fallback (MCP/헤더/sandbox 로그 제외, 응답 부분만 추출)
+    if [[ ! -s "$STDOUT_LOG" ]]; then
+      node -e '
+        const fs=require("fs"),lines=fs.readFileSync(process.argv[1],"utf-8").split(/\r?\n/);
+        const skip=/^(mcp[: ]|OpenAI Codex|--------|workdir:|model:|provider:|approval:|sandbox:|reasoning|session id:|user$|tokens used|EXIT:|exec$|"[A-Z]:|succeeded in |\s*$)/;
+        const out=lines.filter(l=>!skip.test(l));
+        if(out.length) fs.writeFileSync(process.argv[2],out.join("\n"));
+      ' -- "$STDERR_LOG" "$STDOUT_LOG" 2>/dev/null || true
+    fi
+
+    if [[ -s "$STDOUT_LOG" ]]; then
+      echo "[tfx-route] 경고: codex stdout 비어있음, stderr에서 응답 복구 ($(wc -c < "$STDOUT_LOG") bytes)" >&2
+    else
+      echo "[tfx-route] 경고: codex stdout 비어있음, stderr 복구도 실패" >&2
+    fi
+  fi
+
+  return "$exit_code_local"
+}
+
+run_codex_mcp() {
+  local prompt="$1"
+  local use_tee_flag="$2"
+  local mcp_script node_bin
+  local exit_code_local=0
+
+  if ! mcp_script=$(resolve_codex_mcp_script); then
+    echo "[tfx-route] 경고: Codex MCP 래퍼를 찾지 못했습니다." >&2
+    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
+  fi
+
+  node_bin="${NODE_BIN:-$(command -v node 2>/dev/null || echo node)}"
+  if ! command -v "$node_bin" &>/dev/null; then
+    echo "[tfx-route] 경고: node를 찾지 못해 Codex MCP 경로를 사용할 수 없습니다." >&2
+    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
+  fi
+
+  local -a mcp_args=(
+    "$mcp_script"
+    "--prompt" "$prompt"
+    "--cwd" "$PWD"
+    "--profile" "$CLI_EFFORT"
+    "--approval-policy" "never"
+    "--sandbox" "danger-full-access"
+    "--timeout-ms" "$((TIMEOUT_SEC * 1000))"
+    "--codex-command" "$CODEX_BIN"
+  )
+
+  case "$AGENT_TYPE" in
+    code-reviewer)
+      mcp_args+=(
+        "--developer-instructions"
+        "코드 리뷰 모드로 동작하라. 버그, 리스크, 회귀, 테스트 누락을 우선 식별하라."
+      )
+      ;;
+    security-reviewer)
+      mcp_args+=(
+        "--developer-instructions"
+        "보안 리뷰 모드로 동작하라. 취약점, 권한 경계, 비밀정보 노출 가능성을 우선 식별하라."
+      )
+      ;;
+    quality-reviewer)
+      mcp_args+=(
+        "--developer-instructions"
+        "품질 리뷰 모드로 동작하라. 로직 결함, 유지보수성 저하, 테스트 누락을 우선 식별하라."
+      )
+      ;;
+  esac
+
+  if [[ "$use_tee_flag" == "true" ]]; then
+    timeout "$TIMEOUT_SEC" "$node_bin" "${mcp_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" || exit_code_local=$?
+  else
+    timeout "$TIMEOUT_SEC" "$node_bin" "${mcp_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" || exit_code_local=$?
+  fi
+
+  # 모듈 로드 실패(의존성 누락) → MCP transport exit code로 변환하여 fallback 트리거
+  if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -q 'ERR_MODULE_NOT_FOUND' "$STDERR_LOG" 2>/dev/null; then
+    echo "[tfx-route] Codex MCP 모듈 로드 실패 — fallback 가능 exit code로 변환" >&2
+    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
+  fi
+
+  return "$exit_code_local"
 }
 
 # ── 메인 실행 ──
@@ -333,16 +710,36 @@ main() {
 
   route_agent "$AGENT_TYPE"
   apply_cli_mode
+  apply_no_claude_native_mode
 
   # CLI 경로 해석
   case "$CLI_CMD" in
     codex) CLI_CMD="$CODEX_BIN" ;;
     gemini) CLI_CMD="$GEMINI_BIN" ;;
+    claude) CLI_CMD="$CLAUDE_BIN" ;;
   esac
 
-  # 타임아웃 결정
+  # 타임아웃 결정 (에이전트별 최소값 보장)
+  local MIN_TIMEOUT
+  case "$AGENT_TYPE" in
+    deep-executor|architect|planner|critic|analyst) MIN_TIMEOUT=900 ;;
+    document-specialist|scientist|scientist-deep) MIN_TIMEOUT=900 ;;
+    code-reviewer|security-reviewer|quality-reviewer) MIN_TIMEOUT=600 ;;
+    executor|debugger) MIN_TIMEOUT=300 ;;
+    *) MIN_TIMEOUT=120 ;;
+  esac
+
   if [[ -n "$USER_TIMEOUT" ]]; then
-    TIMEOUT_SEC="$USER_TIMEOUT"
+    if ! [[ "$USER_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+      echo "[tfx-route] 경고: 유효하지 않은 타임아웃 값 ($USER_TIMEOUT), 기본값 사용" >&2
+      USER_TIMEOUT=""
+      TIMEOUT_SEC="$DEFAULT_TIMEOUT"
+    elif [[ "$USER_TIMEOUT" -lt "$MIN_TIMEOUT" ]]; then
+      echo "[tfx-route] 경고: 타임아웃 ${USER_TIMEOUT}s < 최소 ${MIN_TIMEOUT}s ($AGENT_TYPE), 최소값 적용" >&2
+      TIMEOUT_SEC="$MIN_TIMEOUT"
+    else
+      TIMEOUT_SEC="$USER_TIMEOUT"
+    fi
   else
     TIMEOUT_SEC="$DEFAULT_TIMEOUT"
   fi
@@ -358,22 +755,20 @@ ${ctx_content}
 </prior_context>"
   fi
 
+  # Claude native는 팀 비-TTY 환경에서 subprocess wrapper를 우선 시도
+  if [[ "$CLI_TYPE" == "claude-native" && -n "$TFX_TEAM_NAME" ]]; then
+    if { [[ ! -t 0 ]] || [[ ! -t 1 ]]; } && command -v "$CLAUDE_BIN" &>/dev/null && resolve_worker_runner_script >/dev/null 2>&1; then
+      CLI_TYPE="claude"
+      CLI_CMD="$CLAUDE_BIN"
+      echo "[tfx-route] non-tty 팀 환경: claude-native -> claude stream wrapper 전환" >&2
+    else
+      echo "[tfx-route] claude stream wrapper 미사용: native metadata 유지" >&2
+    fi
+  fi
+
   # Claude 네이티브 에이전트는 이 스크립트로 처리 불가 → 메타데이터만 출력
   if [[ "$CLI_TYPE" == "claude-native" ]]; then
-    local model="sonnet"
-    case "$AGENT_TYPE" in
-      explore) model="haiku" ;;
-    esac
-    echo "ROUTE_TYPE=claude-native"
-    echo "AGENT=$AGENT_TYPE"
-    echo "MODEL=$model"
-    echo "RUN_MODE=$RUN_MODE"
-    echo "OPUS_OVERSIGHT=$OPUS_OVERSIGHT"
-    echo "TIMEOUT=$TIMEOUT_SEC"
-    echo "MCP_PROFILE=$MCP_PROFILE"
-    [[ -n "$ORIGINAL_AGENT" ]] && echo "ORIGINAL_AGENT=$ORIGINAL_AGENT"
-    echo "PROMPT=$PROMPT"
-    echo "--- Claude Task($model) 에이전트로 위임하세요 ---"
+    emit_claude_native_metadata
     exit 0
   fi
 
@@ -382,83 +777,115 @@ ${ctx_content}
   mcp_hint=$(get_mcp_hint "$MCP_PROFILE" "$AGENT_TYPE")
   local FULL_PROMPT="$PROMPT"
   [[ -n "$mcp_hint" ]] && FULL_PROMPT="${PROMPT}. ${mcp_hint}"
+  local codex_transport_effective="n/a"
 
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE timeout=${TIMEOUT_SEC}s" >&2
-  echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE hub=$HUB_ENABLED" >&2
+  echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE" >&2
+  if [[ "$CLI_TYPE" == "codex" ]]; then
+    echo "[tfx-route] codex_transport_request=$TFX_CODEX_TRANSPORT" >&2
+  fi
+  [[ -n "$TFX_TEAM_NAME" ]] && echo "[tfx-route] team=$TFX_TEAM_NAME task=$TFX_TEAM_TASK_ID agent=$TFX_TEAM_AGENT_NAME" >&2
 
   # Per-process 에이전트 등록
   register_agent
 
-  # Hub 브릿지: 에이전트 등록 (프로세스 수명 기반 lease)
-  local hub_agent_id="${AGENT_TYPE}-$$"
-  local hub_topics="${AGENT_TYPE},task.result"
-  hub_bridge register \
-    --agent "$hub_agent_id" \
-    --cli "$CLI_TYPE" \
-    --timeout "$TIMEOUT_SEC" \
-    --topics "$hub_topics" \
-    --capabilities "code,${AGENT_TYPE}"
-
-  # Hub 브릿지: 선행 컨텍스트 폴링 (DAG 의존 태스크용)
-  if [[ "$HUB_ENABLED" == "true" && -z "$CONTEXT_FILE" ]]; then
-    local hub_ctx_file="${TFX_TMP}/tfx-hub-ctx-${hub_agent_id}.md"
-    hub_bridge context --agent "$hub_agent_id" --topics "$hub_topics" --out "$hub_ctx_file"
-    if [[ -s "$hub_ctx_file" ]]; then
-      CONTEXT_FILE="$hub_ctx_file"
-      echo "[tfx-route] hub: 선행 컨텍스트 수신 ($(wc -c < "$hub_ctx_file") bytes)" >&2
-    fi
-  fi
+  # 팀 모드: task claim
+  team_claim_task
 
   # CLI 실행 (stderr 분리 + 타임아웃 + 소요시간 측정)
   local exit_code=0
   local start_time
   start_time=$(date +%s)
 
+  # tee 활성화 조건: 팀 모드 + 실제 터미널(TTY/tmux)
+  # Agent 래퍼 안에서는 가상 stdout 캡처로 tee 출력이 사용자에게 안 보임 → 파일 전용
+  # 실시간 모니터링은 Shift+Down으로 워커 pane 전환 권장
+  local use_tee=false
+  if [[ -n "$TFX_TEAM_NAME" ]]; then
+    if [[ -t 1 ]] || [[ -n "${TMUX:-}" ]]; then
+      use_tee=true
+    fi
+  fi
+
   if [[ "$CLI_TYPE" == "codex" ]]; then
-    # Codex: stdout/stderr 모두 파일로 캡처 (post.mjs가 읽음)
-    timeout "$TIMEOUT_SEC" $CLI_CMD $CLI_ARGS "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" || exit_code=$?
+    codex_transport_effective="exec"
+    if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
+      run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
+      if [[ "$exit_code" -eq 0 ]]; then
+        codex_transport_effective="mcp"
+      elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
+        echo "[tfx-route] Codex MCP bootstrap 실패(exit=${exit_code}). legacy exec 경로로 fallback합니다." >&2
+        : > "$STDOUT_LOG"
+        : > "$STDERR_LOG"
+        exit_code=0
+        run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
+        codex_transport_effective="exec-fallback"
+      else
+        codex_transport_effective="mcp"
+      fi
+    else
+      run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
+      codex_transport_effective="exec"
+    fi
+    echo "[tfx-route] codex_transport_effective=$codex_transport_effective" >&2
 
   elif [[ "$CLI_TYPE" == "gemini" ]]; then
-    # Gemini: MCP 프로필별 서버 필터
-    local gemini_mcp_filter
-    gemini_mcp_filter=$(get_gemini_mcp_filter "$MCP_PROFILE")
-    local gemini_args="$CLI_ARGS"
-    if [[ -n "$gemini_mcp_filter" ]]; then
-      gemini_args="${CLI_ARGS/--prompt/$gemini_mcp_filter --prompt}"
-      echo "[tfx-route] Gemini MCP 필터: $gemini_mcp_filter" >&2
+    local gemini_model
+    gemini_model=$(awk '{
+      for (i = 1; i <= NF; i++) {
+        if ($i == "-m" || $i == "--model") {
+          print $(i + 1)
+          exit
+        }
+      }
+    }' <<< "$CLI_ARGS")
+    local gemini_servers
+    gemini_servers=$(get_gemini_mcp_servers "$MCP_PROFILE")
+    local -a gemini_worker_args=(
+      "--command" "$CLI_CMD"
+      "--command-args-json" "$GEMINI_BIN_ARGS_JSON"
+      "--model" "$gemini_model"
+      "--approval-mode" "yolo"
+    )
+
+    if [[ -n "$gemini_servers" ]]; then
+      echo "[tfx-route] Gemini MCP 서버: ${gemini_servers}" >&2
+      local server_name
+      for server_name in $gemini_servers; do
+        gemini_worker_args+=("--allowed-mcp-server-name" "$server_name")
+      done
     fi
 
-    timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-    local pid=$!
+    run_stream_worker "gemini" "$FULL_PROMPT" "$use_tee" "${gemini_worker_args[@]}" || exit_code=$?
+    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
+      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}). legacy CLI 경로로 fallback합니다." >&2
+      : > "$STDOUT_LOG"
+      : > "$STDERR_LOG"
+      exit_code=0
+      run_legacy_gemini "$FULL_PROMPT" "$use_tee" || exit_code=$?
+    fi
 
-    # 지수 백오프 health check (v1.x: 30×1s → v2.0: 5×exp, 총 19초)
-    local health_ok=true
-    local intervals=(1 2 3 5 8)
-    for wait_sec in "${intervals[@]}"; do
-      sleep "$wait_sec"
-      # 출력 있으면 정상 → 조기 탈출
-      if [[ -s "$STDOUT_LOG" ]] || [[ -s "$STDERR_LOG" ]]; then
-        break
-      fi
-      # 프로세스 사망 + 출력 없음 → crash
-      if ! kill -0 "$pid" 2>/dev/null; then
-        health_ok=false
-        echo "[tfx-route] Gemini: 출력 없이 프로세스 종료 (${wait_sec}초 체크)" >&2
-        break
-      fi
-    done
+  elif [[ "$CLI_TYPE" == "claude" ]]; then
+    local claude_model
+    claude_model=$(get_claude_model)
+    local -a claude_worker_args=(
+      "--command" "$CLI_CMD"
+      "--command-args-json" "$CLAUDE_BIN_ARGS_JSON"
+      "--model" "$claude_model"
+      "--permission-mode" "bypassPermissions"
+      "--allow-dangerously-skip-permissions"
+    )
 
-    if [[ "$health_ok" == "false" ]]; then
-      wait "$pid" 2>/dev/null
-      echo "[tfx-route] Gemini crash 감지, 재시도 중..." >&2
-      timeout "$TIMEOUT_SEC" $CLI_CMD $gemini_args "$FULL_PROMPT" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-      pid=$!
-      wait "$pid"
-      exit_code=$?
-    else
-      wait "$pid"
-      exit_code=$?
+    run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
+    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
+      echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}). native metadata로 fallback합니다." >&2
+      cat > "$STDOUT_LOG" <<EOF
+$(emit_claude_native_metadata)
+EOF
+      : > "$STDERR_LOG"
+      exit_code=0
+      CLI_TYPE="claude-native"
     fi
   fi
 
@@ -466,13 +893,20 @@ ${ctx_content}
   end_time=$(date +%s)
   local elapsed=$((end_time - start_time))
 
-  # Hub 브릿지: 결과 발행 + 에이전트 해제
-  hub_bridge result \
-    --agent "$hub_agent_id" \
-    --file "$STDOUT_LOG" \
-    --topic "task.result" \
-    --exit-code "$exit_code"
-  hub_bridge deregister --agent "$hub_agent_id"
+  # 팀 모드: task complete + 리드 보고
+  if [[ -n "$TFX_TEAM_NAME" ]]; then
+    if [[ "$exit_code" -eq 0 ]]; then
+      local output_preview
+      output_preview=$(head -c 2048 "$STDOUT_LOG" 2>/dev/null || echo "출력 없음")
+      team_complete_task "success" "$output_preview"
+    elif [[ "$exit_code" -eq 124 ]]; then
+      team_complete_task "timeout" "타임아웃 (${TIMEOUT_SEC}초)"
+    else
+      local err_preview
+      err_preview=$(tail -c 1024 "$STDERR_LOG" 2>/dev/null || echo "에러 정보 없음")
+      team_complete_task "failed" "exit_code=${exit_code}: ${err_preview}"
+    fi
+  fi
 
   # ── 후처리: 단일 node 프로세스로 위임 ──
   # 토큰 추출, 출력 필터링, 로그, 토큰 누적, AIMD, 이슈 추적, 결과 출력 전부 처리
@@ -491,7 +925,8 @@ ${ctx_content}
       --mcp-profile "$MCP_PROFILE" \
       --stderr-log "$STDERR_LOG" \
       --stdout-log "$STDOUT_LOG" \
-      --max-bytes "$MAX_STDOUT_BYTES"
+      --max-bytes "$MAX_STDOUT_BYTES" \
+      --tee-active "$use_tee"
   else
     # post.mjs 없으면 기본 출력 (fallback)
     echo "=== TFX-ROUTE RESULT ==="

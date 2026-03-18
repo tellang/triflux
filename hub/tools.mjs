@@ -1,15 +1,23 @@
-// hub/tools.mjs — MCP 도구 8개 정의
-// register, status, publish, ask, poll_messages, handoff, request_human_input, submit_human_input
+// hub/tools.mjs — MCP 도구 정의
+// register/status/publish/ask/poll/handoff/HITL + team proxy
 // 모든 도구 응답: { ok: boolean, error?: { code, message }, data?: ... }
+
+import {
+  teamInfo,
+  teamTaskList,
+  teamTaskUpdate,
+  teamSendMessage,
+} from './team/nativeProxy.mjs';
 
 /**
  * MCP 도구 목록 생성
  * @param {object} store  — createStore() 반환
  * @param {object} router — createRouter() 반환
  * @param {object} hitl   — createHitlManager() 반환
+ * @param {object} pipe   — createPipeServer() 반환
  * @returns {Array<{name, description, inputSchema, handler}>}
  */
-export function createTools(store, router, hitl) {
+export function createTools(store, router, hitl, pipe = null) {
   /** 도구 핸들러 래퍼 — 에러 처리 + MCP content 형식 변환 */
   function wrap(code, fn) {
     return async (args) => {
@@ -42,7 +50,7 @@ export function createTools(store, router, hitl) {
         },
       },
       handler: wrap('REGISTER_FAILED', (args) => {
-        const data = store.registerAgent(args);
+        const data = router.registerAgent(args);
         return { ok: true, data };
       }),
     },
@@ -117,7 +125,7 @@ export function createTools(store, router, hitl) {
     // ── 5. poll_messages ──
     {
       name: 'poll_messages',
-      description: '에이전트 수신함에서 대기 메시지를 가져옵니다. ack_ids로 이전 메시지 확인 가능',
+      description: 'Deprecated. poll_messages 대신 Named Pipe subscribe/publish 채널을 사용합니다',
       inputSchema: {
         type: 'object',
         required: ['agent_id'],
@@ -130,41 +138,29 @@ export function createTools(store, router, hitl) {
           auto_ack:       { type: 'boolean', default: false },
         },
       },
-      handler: wrap('POLL_FAILED', async (args) => {
-        // ACK 먼저 처리
-        const ackedIds = [];
-        if (args.ack_ids?.length) {
-          store.ackMessages(args.ack_ids, args.agent_id);
-          ackedIds.push(...args.ack_ids);
-        }
-
-        // 1차 폴링
-        let messages = store.pollForAgent(args.agent_id, {
+      handler: wrap('POLL_DEPRECATED', async (args) => {
+        const replay = router.drainAgent(args.agent_id, {
           max_messages: args.max_messages,
           include_topics: args.include_topics,
           auto_ack: args.auto_ack,
         });
-
-        // wait_ms > 0 이고 메시지 없으면 짧은 간격으로 반복 재시도
-        if (!messages.length && args.wait_ms > 0) {
-          const interval = Math.min(args.wait_ms, 500);
-          const deadline = Date.now() + Math.min(args.wait_ms, 30000);
-          while (!messages.length && Date.now() < deadline) {
-            await new Promise(r => setTimeout(r, interval));
-            messages = store.pollForAgent(args.agent_id, {
-              max_messages: args.max_messages,
-              include_topics: args.include_topics,
-              auto_ack: args.auto_ack,
-            });
-          }
+        if (args.ack_ids?.length) {
+          router.ackMessages(args.ack_ids, args.agent_id);
         }
-
         return {
-          ok: true,
+          ok: false,
+          error: {
+            code: 'POLL_DEPRECATED',
+            message: 'poll_messages는 deprecated 되었습니다. pipe subscribe/publish 채널을 사용하세요.',
+          },
           data: {
-            messages,
-            acked_ids: ackedIds,
-            next_poll_after_ms: messages.length ? 0 : 1000,
+            pipe_path: pipe?.path || null,
+            delivery_mode: 'pipe_push',
+            protocol: 'ndjson',
+            replay: {
+              messages: replay,
+              count: replay.length,
+            },
             server_time_ms: Date.now(),
           },
         };
@@ -236,6 +232,97 @@ export function createTools(store, router, hitl) {
       },
       handler: wrap('HITL_SUBMIT_FAILED', (args) => {
         return hitl.submitHumanInput(args);
+      }),
+    },
+
+    // ── 9. team_info ──
+    {
+      name: 'team_info',
+      description: 'Claude Native Teams 메타/멤버/경로 정보를 조회합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name'],
+        properties: {
+          team_name: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[a-z0-9][a-z0-9-]*$' },
+          include_members: { type: 'boolean', default: true },
+          include_paths: { type: 'boolean', default: true },
+        },
+      },
+      handler: wrap('TEAM_INFO_FAILED', (args) => {
+        return teamInfo(args);
+      }),
+    },
+
+    // ── 10. team_task_list ──
+    {
+      name: 'team_task_list',
+      description: 'Claude Native Teams task 목록을 owner/status 조건으로 조회합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          owner: { type: 'string' },
+          statuses: {
+            type: 'array',
+            items: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'failed', 'deleted'] },
+            maxItems: 8,
+          },
+          include_internal: { type: 'boolean', default: false },
+          limit: { type: 'integer', minimum: 1, maximum: 1000, default: 200 },
+        },
+      },
+      handler: wrap('TEAM_TASK_LIST_FAILED', (args) => {
+        return teamTaskList(args);
+      }),
+    },
+
+    // ── 11. team_task_update ──
+    {
+      name: 'team_task_update',
+      description: 'Claude Native Teams task를 claim/update 합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name', 'task_id'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          task_id: { type: 'string', minLength: 1, maxLength: 64 },
+          claim: { type: 'boolean', default: false },
+          owner: { type: 'string' },
+          status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'failed', 'deleted'] },
+          subject: { type: 'string' },
+          description: { type: 'string' },
+          activeForm: { type: 'string' },
+          add_blocks: { type: 'array', items: { type: 'string' } },
+          add_blocked_by: { type: 'array', items: { type: 'string' } },
+          metadata_patch: { type: 'object' },
+          if_match_mtime_ms: { type: 'number' },
+          actor: { type: 'string' },
+        },
+      },
+      handler: wrap('TEAM_TASK_UPDATE_FAILED', (args) => {
+        return teamTaskUpdate(args);
+      }),
+    },
+
+    // ── 12. team_send_message ──
+    {
+      name: 'team_send_message',
+      description: 'Claude Native Teams inbox에 메시지를 append 합니다',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name', 'from', 'text'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          from: { type: 'string', minLength: 1, maxLength: 128 },
+          to: { type: 'string', default: 'team-lead' },
+          text: { type: 'string', minLength: 1, maxLength: 200000 },
+          summary: { type: 'string', maxLength: 1000 },
+          color: { type: 'string', default: 'blue' },
+        },
+      },
+      handler: wrap('TEAM_SEND_MESSAGE_FAILED', (args) => {
+        return teamSendMessage(args);
       }),
     },
   ];

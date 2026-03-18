@@ -1,11 +1,15 @@
 .omc/
+.omx/
 .claude/
 .codex/
 .gemini/
 *.bak
+*.tgz
 node_modules/
 .env
 dist/
 .npmrc
 docs/internal/
+docs/handoff/
 .mcp.json
+.codex-artifacts/

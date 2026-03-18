@@ -86,15 +86,21 @@ tfx doctor
 /research "최신 React Server Components 패턴"
 
 # 단일 CLI 모드
+/tfx-auto-codex "리팩터링 + 테스트 + 리뷰"  # Codex 리드 + Gemini 유지, Claude 네이티브 역할 제거
 /tfx-codex "리팩터링 + 리뷰"    # Codex만 사용
 /tfx-gemini "구현 + 문서화"      # Gemini만 사용
 ```
+
+## 문서
+
+- [docs/INDEX.md](docs/INDEX.md) — 문서 인덱스
 
 ## 스킬
 
 | 스킬 | 모드 | 설명 |
 |------|------|------|
 | `/tfx-auto` | 자동 | 트리아지 → 분해 → DAG 병렬 실행 |
+| `/tfx-auto-codex` | Codex 리드 | Claude 네이티브 역할을 Codex로 치환, Gemini 경로 유지 |
 | `/tfx-codex` | Codex 전용 | 모든 CLI 작업을 Codex로 라우팅 |
 | `/tfx-gemini` | Gemini 전용 | 모든 CLI 작업을 Gemini로 라우팅 |
 | `/tfx-setup` | 설정 | 파일 동기화, HUD 설정, CLI 진단 |
@@ -206,11 +212,13 @@ tfx doctor
 |--------|------|
 | `tfx setup` | 스크립트 + HUD + 스킬 동기화 |
 | `tfx doctor` | CLI 진단 + 이슈 추적 |
-| `tfx update` | 최신 버전으로 업데이트 |
+| `tfx update` | 최신 안정 버전으로 업데이트 |
 | `tfx list` | 설치된 스킬 목록 |
 | `tfx version` | 버전 표시 |
 
 축약: `tfx` = `triflux`, `tfl` = `triflux`
+
+dev 채널 업데이트: `tfx update --dev` (`dev` 별칭 지원)
 
 ### HUD 상태 표시줄
 

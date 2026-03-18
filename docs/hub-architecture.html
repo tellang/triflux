@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>triflux Hub Architecture (v3.1.0-dev.4)</title>
+  <style>
+    :root {
+      --bg: #0f172a; /* slate-900 */
+      --card-bg: #1e293b; /* slate-800 */
+      --amber: #FFAF00; /* triflux branding */
+      --sky: #38BDF8; /* sky blue */
+      --text: #f1f5f9; /* slate-100 */
+      --text-dim: #94a3b8; /* slate-400 */
+      --border: #334155; /* slate-700 */
+      --success: #10b981;
+      --error: #ef4444;
+      --mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      scroll-behavior: smooth;
+    }
+
+    header {
+      padding: 3rem 2rem;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(to bottom, #1e293b, #0f172a);
+    }
+    h1 {
+      margin: 0;
+      font-size: 2.5rem;
+      color: var(--amber);
+      letter-spacing: -0.025em;
+    }
+    .version {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      background: rgba(255, 175, 0, 0.1);
+      border: 1px solid var(--amber);
+      border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+    header p { color: var(--text-dim); max-width: 600px; margin: 1rem auto 0; }
+
+    nav {
+      position: sticky;
+      top: 0;
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: blur(8px);
+      padding: 1rem;
+      display: flex;
+      justify-content: center;
+      gap: 2rem;
+      border-bottom: 1px solid var(--border);
+      z-index: 100;
+    }
+    nav a {
+      color: var(--text-dim);
+      text-decoration: none;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    nav a:hover { color: var(--amber); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+    section { margin-bottom: 6rem; }
+    h2 {
+      font-size: 1.8rem;
+      margin-bottom: 2rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    h2::before { content: '◈'; color: var(--amber); }
+
+    /* Comparison Section */
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .card h3 {
+      margin-top: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .badge {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      text-transform: uppercase;
+      font-weight: bold;
+    }
+    .badge-gray { background: #475569; color: #f1f5f9; }
+    .badge-amber { background: var(--amber); color: #000; }
+
+    .diagram-container {
+      background: #020617;
+      border-radius: 8px;
+      margin: 1rem 0;
+      padding: 1rem;
+      min-height: 400px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .features {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+    }
+    .features li {
+      margin-bottom: 0.5rem;
+      padding-left: 1.2rem;
+      position: relative;
+    }
+    .features li::before {
+      content: '✓';
+      position: absolute;
+      left: 0;
+      color: var(--amber);
+    }
+
+    /* Hub Internal Structure */
+    .internal-layout {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 2rem;
+    }
+    .module-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .module-item {
+      padding: 1rem;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .module-item:hover { border-color: var(--amber); transform: translateX(5px); }
+    .module-item.active { border-color: var(--amber); background: rgba(255, 175, 0, 0.05); }
+    .module-item strong { display: block; color: var(--amber); font-family: var(--mono); }
+    .module-item span { font-size: 0.8rem; color: var(--text-dim); }
+
+    .module-detail {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2rem;
+      min-height: 400px;
+    }
+
+    /* SVG Components */
+    svg { width: 100%; height: 100%; }
+    .node { cursor: help; }
+    .node rect { stroke: var(--border); stroke-width: 1.5; transition: fill 0.2s; }
+    .node:hover rect { stroke: var(--amber); fill: rgba(255, 175, 0, 0.1); }
+    .node text { fill: var(--text); font-family: var(--mono); font-size: 12px; pointer-events: none; }
+    .node .icon { font-size: 16px; }
+
+    .edge { fill: none; stroke: var(--border); stroke-width: 1.5; }
+    .edge-animate {
+      stroke: var(--amber);
+      stroke-dasharray: 5, 5;
+      animation: dash 10s linear infinite;
+    }
+    @keyframes dash { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+
+    .tooltip {
+      position: absolute;
+      background: #1e293b;
+      border: 1px solid var(--amber);
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      pointer-events: none;
+      z-index: 1000;
+      display: none;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      max-width: 300px;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .comparison-grid { grid-template-columns: 1fr; }
+      .internal-layout { grid-template-columns: 1fr; }
+      nav { gap: 1rem; font-size: 0.9rem; }
+    }
+
+    /* Highlight Section */
+    .v3-updates {
+      background: linear-gradient(135deg, rgba(255, 175, 0, 0.1), rgba(56, 189, 248, 0.1));
+      border: 1px solid rgba(255, 175, 0, 0.3);
+      padding: 1.5rem;
+      border-radius: 12px;
+      margin-top: 2rem;
+    }
+    .v3-updates h4 { margin-top: 0; color: var(--amber); }
+    .update-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+    .update-item { font-size: 0.85rem; }
+    .update-item strong { color: var(--sky); display: block; }
+
+    /* Timeline Comparison */
+    .timeline-comparison {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      margin-top: 2rem;
+    }
+    .timeline-box {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .timeline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+    .timeline-visual {
+      background: #020617;
+      border-radius: 8px;
+      padding: 2.5rem 1rem 1rem 1rem;
+      position: relative;
+      min-height: 480px;
+      border-left: 2px solid var(--border);
+      margin-left: 100px;
+    }
+    .time-label {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      font-family: var(--mono);
+    }
+    .timeline-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      position: relative;
+    }
+    .row-label {
+      position: absolute;
+      left: -110px;
+      width: 90px;
+      text-align: right;
+      font-size: 0.75rem;
+      font-family: var(--mono);
+      color: var(--text-dim);
+    }
+    .block {
+      height: 28px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: bold;
+      color: #000;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      position: relative;
+    }
+    .block-triage { background: var(--sky); width: 70px; }
+    .block-exec { background: var(--success); width: 100px; }
+    .block-wait { background: #334155; color: var(--text-dim); width: 150px; border: 1px dashed var(--border); }
+    .block-report { background: var(--amber); width: 80px; }
+    
+    .flow-dot {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      background: var(--amber);
+      border-radius: 50%;
+      z-index: 10;
+    }
+    @keyframes move-down {
+      0% { transform: translateY(0); opacity: 0; }
+      20% { opacity: 1; }
+      80% { opacity: 1; }
+      100% { transform: translateY(30px); opacity: 0; }
+    }
+    @keyframes move-right {
+      0% { transform: translateX(0); opacity: 0; }
+      20% { opacity: 1; }
+      80% { opacity: 1; }
+      100% { transform: translateX(20px); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>triflux Architecture</h1>
+  <div class="version">v3.1.0-dev.4 (latest)</div>
+  <p>에이전트 간 실시간 통신 및 상태 동기화를 위한 분산형 오케스트레이션 아키텍처 비교</p>
+</header>
+
+<nav>
+  <a href="#comparison">Architecture Comparison</a>
+  <a href="#internal">Hub Internal</a>
+  <a href="#flow">Data Flow</a>
+  <a href="#timeline">Timeline Comparison</a>
+  <a href="#v3">v3.1 Highlights</a>
+</nav>
+
+<div class="container">
+  <!-- Comparison Section -->
+  <section id="comparison">
+    <h2>Architecture Comparison</h2>
+    <div class="comparison-grid">
+      <!-- Left: tfx-auto -->
+      <div class="card">
+        <h3>tfx-auto <span class="badge badge-gray">Without Hub</span></h3>
+        <p style="font-size: 0.85rem; color: var(--text-dim);">기존 CLI 실행 방식 (Sequential & File-based)</p>
+        
+        <div class="diagram-container">
+          <svg viewBox="0 0 400 450">
+            <!-- User -->
+            <g class="node" data-tip="사용자 명령 입력 (Claude CLI)">
+              <rect x="150" y="20" width="100" height="40" rx="4" fill="#334155" />
+              <text x="200" y="45" text-anchor="middle">User</text>
+            </g>
+
+            <!-- Orchestrator -->
+            <g class="node" data-tip="중앙 조율자 (Claude Code)">
+              <rect x="125" y="90" width="150" height="40" rx="4" fill="#475569" />
+              <text x="200" y="115" text-anchor="middle">Orchestrator</text>
+            </g>
+
+            <path class="edge" d="M200,60 L200,90" marker-end="url(#arrow)" />
+
+            <!-- Agents -->
+            <g class="node" data-tip="tfx-route.sh를 통한 CLI 실행">
+              <rect x="40" y="170" width="80" height="40" rx="4" fill="#1e293b" />
+              <text x="80" y="195" text-anchor="middle">Codex</text>
+            </g>
+            <g class="node" data-tip="tfx-route.sh를 통한 CLI 실행">
+              <rect x="160" y="170" width="80" height="40" rx="4" fill="#1e293b" />
+              <text x="200" y="195" text-anchor="middle">Gemini</text>
+            </g>
+            <g class="node" data-tip="Claude Task 실행">
+              <rect x="280" y="170" width="80" height="40" rx="4" fill="#1e293b" />
+              <text x="320" y="195" text-anchor="middle">Claude</text>
+            </g>
+
+            <path class="edge" d="M200,130 L80,170" />
+            <path class="edge" d="M200,130 L200,170" />
+            <path class="edge" d="M200,130 L320,170" />
+
+            <!-- Context Storage -->
+            <g class="node" data-tip="DAG 레벨별 .omc/context/ 파일">
+              <rect x="100" y="260" width="200" height="40" rx="4" fill="#0f172a" stroke="#475569" stroke-dasharray="4" />
+              <text x="200" y="285" text-anchor="middle">.omc/context/ (Files)</text>
+            </g>
+
+            <path class="edge" d="M80,210 L150,260" />
+            <path class="edge" d="M200,210 L200,260" />
+            <path class="edge" d="M320,210 L250,260" />
+
+            <!-- Results -->
+            <g class="node" data-tip="프로세스 종료 후 stdout 파싱 및 후처리">
+              <rect x="100" y="350" width="200" height="60" rx="8" fill="#1e293b" />
+              <text x="200" y="375" text-anchor="middle">tfx-route-post.mjs</text>
+              <text x="200" y="395" text-anchor="middle" fill="#94a3b8" style="font-size: 10px;">(stdout/stderr parsing)</text>
+            </g>
+
+            <path class="edge" d="M200,300 L200,350" />
+            
+            <!-- Markers -->
+            <defs>
+              <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#475569" />
+              </marker>
+            </defs>
+          </svg>
+        </div>
+
+        <ul class="features">
+          <li>중앙 집중형 제어: 모든 결정이 오케스트레이터에 의존</li>
+          <li>에이전트 간 통신 불가능 (Isolated execution)</li>
+          <li>컨텍스트 전달: 오직 파일 시스템 공유를 통해서만 가능</li>
+          <li>결과 수집: stdout/stderr 로그 파싱 (후속 작업 블로킹)</li>
+          <li>상태 판단: 오직 프로세스 종료 코드로만 수행</li>
+        </ul>
+      </div>
+
+      <!-- Right: tfx-hub -->
+      <div class="card" style="border-color: var(--amber);">
+        <h3>tfx-hub <span class="badge badge-amber">With Hub</span></h3>
+        <p style="font-size: 0.85rem; color: var(--text-dim);">메시지 버스 기반 실시간 통신 (Real-time & Pub/Sub)</p>
+        
+        <div class="diagram-container">
+          <svg viewBox="0 0 400 450">
+            <!-- Agents -->
+            <g class="node" data-tip="Codex Agent">
+              <rect x="40" y="20" width="80" height="40" rx="4" fill="#1e293b" stroke="#FFAF00" />
+              <text x="80" y="45" text-anchor="middle">Codex</text>
+            </g>
+            <g class="node" data-tip="Gemini Agent">
+              <rect x="160" y="20" width="80" height="40" rx="4" fill="#1e293b" stroke="#FFAF00" />
+              <text x="200" y="45" text-anchor="middle">Gemini</text>
+            </g>
+            <g class="node" data-tip="Claude Task Agent">
+              <rect x="280" y="20" width="80" height="40" rx="4" fill="#1e293b" stroke="#FFAF00" />
+              <text x="320" y="45" text-anchor="middle">Claude</text>
+            </g>
+
+            <!-- Bridges/MCP -->
+            <g class="node" data-tip="CLI 브릿지 및 MCP 도구 인터페이스">
+              <rect x="40" y="100" width="140" height="35" rx="17.5" fill="rgba(56, 189, 248, 0.1)" stroke="#38BDF8" />
+              <text x="110" y="122" text-anchor="middle" fill="#38BDF8" style="font-size: 10px;">bridge.mjs (REST)</text>
+            </g>
+            <g class="node" data-tip="MCP SDK를 통한 실시간 메시징">
+              <rect x="220" y="100" width="140" height="35" rx="17.5" fill="rgba(56, 189, 248, 0.1)" stroke="#38BDF8" />
+              <text x="290" y="122" text-anchor="middle" fill="#38BDF8" style="font-size: 10px;">MCP Tools</text>
+            </g>
+
+            <path class="edge" d="M80,60 L110,100" />
+            <path class="edge" d="M200,60 L110,100" />
+            <path class="edge" d="M200,60 L290,100" />
+            <path class="edge" d="M320,60 L290,100" />
+
+            <!-- Hub -->
+            <g class="node" data-tip="triflux Hub: 중앙 메시지 라우터">
+              <rect x="100" y="180" width="200" height="80" rx="12" fill="rgba(255, 175, 0, 0.1)" stroke="#FFAF00" stroke-width="2" />
+              <text x="200" y="215" text-anchor="middle" font-weight="bold">tfx-hub</text>
+              <text x="200" y="235" text-anchor="middle" style="font-size: 10px;" fill="#FFAF00">:27888/mcp</text>
+            </g>
+
+            <path class="edge-animate" d="M110,135 L150,180" />
+            <path class="edge-animate" d="M290,135 L250,180" />
+
+            <!-- Internal Persistence -->
+            <g class="node" data-tip="SQLite WAL 모드: 모든 메시지/상태 저장">
+              <rect x="40" y="320" width="100" height="40" rx="4" fill="#0f172a" stroke="#334155" />
+              <text x="90" y="345" text-anchor="middle">SQLite</text>
+            </g>
+            <g class="node" data-tip="토픽 기반 메시지 라우팅 엔진">
+              <rect x="150" y="320" width="100" height="40" rx="4" fill="#0f172a" stroke="#334155" />
+              <text x="200" y="345" text-anchor="middle">Router</text>
+            </g>
+            <g class="node" data-tip="Human-in-the-Loop 요청 관리">
+              <rect x="260" y="320" width="100" height="40" rx="4" fill="#0f172a" stroke="#334155" />
+              <text x="310" y="345" text-anchor="middle">HITL</text>
+            </g>
+
+            <path class="edge" d="M150,260 L90,320" />
+            <path class="edge" d="M200,260 L200,320" />
+            <path class="edge" d="M250,260 L310,320" />
+
+            <!-- User interaction -->
+            <path class="edge" d="M310,360 L310,410 L150,410" stroke-dasharray="2,2" />
+            <text x="230" y="405" style="font-size: 9px;" fill="#94a3b8">Human Input Approval</text>
+
+          </svg>
+        </div>
+
+        <ul class="features">
+          <li>실시간 메시지 교환 (ask/publish/handoff)</li>
+          <li>토픽 기반 Pub/Sub 팬아웃으로 대규모 정보 동기화</li>
+          <li>컨텍스트 전달: 브릿지 폴링을 통한 자동 주입</li>
+          <li>Lease 기반 상태 관리 (Heartbeat)</li>
+          <li>HITL: CAPTCHA나 승인 요청을 비동기적으로 처리</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Hub Internal Section -->
+  <section id="internal">
+    <h2>Hub Internal Structure</h2>
+    <div class="internal-layout">
+      <div class="module-list" id="module-list">
+        <div class="module-item active" data-module="server">
+          <strong>server.mjs</strong>
+          <span>HTTP 서버 + MCP 세션 관리</span>
+        </div>
+        <div class="module-item" data-module="router">
+          <strong>router.mjs</strong>
+          <span>메시지 라우팅 + QoS</span>
+        </div>
+        <div class="module-item" data-module="store">
+          <strong>store.mjs</strong>
+          <span>SQLite WAL 상태 저장소</span>
+        </div>
+        <div class="module-item" data-module="tools">
+          <strong>tools.mjs</strong>
+          <span>MCP 도구 8개 정의</span>
+        </div>
+        <div class="module-item" data-module="hitl">
+          <strong>hitl.mjs</strong>
+          <span>Human-in-the-Loop</span>
+        </div>
+        <div class="module-item" data-module="bridge">
+          <strong>bridge.mjs</strong>
+          <span>CLI 브릿지 (tfx-route.sh)</span>
+        </div>
+      </div>
+      <div class="module-detail" id="module-detail">
+        <h3 id="detail-title">server.mjs</h3>
+        <p id="detail-desc">Streamable HTTP MCP 서버 진입점입니다. Express 의존성 없이 Node.js http 모듈만으로 경량 구현되어 있습니다.</p>
+        <ul id="detail-features" class="features" style="margin-top: 1rem;">
+          <li>/mcp: SSE 기반 MCP 전송 레이어</li>
+          <li>/bridge: CLI를 위한 REST API 엔드포인트</li>
+          <li>Session TTL: 30분 비활성 세션 자동 정리</li>
+          <li>CORS 지원으로 로컬 도구 간 호환성 확보</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Data Flow Section -->
+  <section id="flow">
+    <h2>Data Flow (DAG Execution)</h2>
+    <div class="card" style="padding: 0;">
+      <div class="diagram-container" style="background: #020617; min-height: 500px;">
+        <svg viewBox="0 0 800 500">
+          <!-- Timelines -->
+          <line x1="100" y1="50" x2="100" y2="450" stroke="#334155" stroke-dasharray="4" />
+          <line x1="300" y1="50" x2="300" y2="450" stroke="#334155" stroke-dasharray="4" />
+          <line x1="500" y1="50" x2="500" y2="450" stroke="#334155" stroke-dasharray="4" />
+          <line x1="700" y1="50" x2="700" y2="450" stroke="#334155" stroke-dasharray="4" />
+
+          <text x="100" y="40" text-anchor="middle" fill="#94a3b8" style="font-size: 12px;">tfx-route.sh</text>
+          <text x="300" y="40" text-anchor="middle" fill="#94a3b8" style="font-size: 12px;">bridge.mjs</text>
+          <text x="500" y="40" text-anchor="middle" fill="#FFAF00" style="font-size: 12px;">tfx-hub</text>
+          <text x="700" y="40" text-anchor="middle" fill="#94a3b8" style="font-size: 12px;">Agent (CLI)</text>
+
+          <!-- 1. Register -->
+          <path d="M100,80 L300,80" stroke="#38BDF8" marker-end="url(#arrow-blue)" />
+          <text x="200" y="75" text-anchor="middle" fill="#38BDF8" style="font-size: 10px;">register</text>
+          
+          <path d="M300,100 L500,100" stroke="#FFAF00" marker-end="url(#arrow-amber)" />
+          <text x="400" y="95" text-anchor="middle" fill="#FFAF00" style="font-size: 10px;">POST /register</text>
+
+          <!-- 2. Poll Context -->
+          <path d="M100,140 L300,140" stroke="#38BDF8" marker-end="url(#arrow-blue)" />
+          <text x="200" y="135" text-anchor="middle" fill="#38BDF8" style="font-size: 10px;">context</text>
+
+          <path d="M300,160 L500,160" stroke="#FFAF00" marker-end="url(#arrow-amber)" />
+          <text x="400" y="155" text-anchor="middle" fill="#FFAF00" style="font-size: 10px;">POST /context</text>
+          
+          <path d="M500,180 L300,180" stroke="#FFAF00" marker-end="url(#arrow-amber)" />
+          <text x="400" y="175" text-anchor="middle" fill="#FFAF00" style="font-size: 10px;">prior messages</text>
+
+          <!-- 3. Start Agent -->
+          <path d="M100,220 L700,220" stroke="#f1f5f9" marker-end="url(#arrow-white)" />
+          <text x="400" y="215" text-anchor="middle" fill="#f1f5f9" style="font-size: 10px;">spawn with prompt + context</text>
+
+          <!-- 4. Agent Interaction -->
+          <path d="M700,260 L500,260" stroke="#FFAF00" stroke-dasharray="2" marker-end="url(#arrow-amber)" />
+          <text x="600" y="255" text-anchor="middle" fill="#FFAF00" style="font-size: 10px;">MCP ask/publish</text>
+
+          <!-- 5. Result -->
+          <path d="M100,320 L300,320" stroke="#38BDF8" marker-end="url(#arrow-blue)" />
+          <text x="200" y="315" text-anchor="middle" fill="#38BDF8" style="font-size: 10px;">result --file log.txt</text>
+
+          <path d="M300,340 L500,340" stroke="#FFAF00" marker-end="url(#arrow-amber)" />
+          <text x="400" y="335" text-anchor="middle" fill="#FFAF00" style="font-size: 10px;">POST /result</text>
+
+          <!-- 6. Deregister -->
+          <path d="M100,380 L300,380" stroke="#38BDF8" marker-end="url(#arrow-blue)" />
+          <text x="200" y="375" text-anchor="middle" fill="#38BDF8" style="font-size: 10px;">deregister</text>
+
+          <path d="M300,400 L500,400" stroke="#FFAF00" marker-end="url(#arrow-amber)" />
+          <text x="400" y="395" text-anchor="middle" fill="#FFAF00" style="font-size: 10px;">POST /deregister</text>
+
+          <defs>
+            <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#38BDF8" />
+            </marker>
+            <marker id="arrow-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#FFAF00" />
+            </marker>
+            <marker id="arrow-white" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#f1f5f9" />
+            </marker>
+          </defs>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- Timeline Comparison Section -->
+  <section id="timeline">
+    <h2>⏱ Timeline: 동기 vs 비동기 실행 흐름</h2>
+    <div class="v3-updates" style="margin-bottom: 2rem; border-color: var(--sky);">
+       <span class="badge badge-amber">v3.1.0-dev.4 개선사항</span>
+       <p style="font-size: 0.9rem; margin-top: 0.5rem; color: var(--text);">
+         EventEmitter 기반 즉시 응답 엔진 및 pooled random ID 생성으로 비동기 통신 오버헤드 최소화
+       </p>
+    </div>
+
+    <div class="timeline-comparison">
+      <!-- Left: Without Hub -->
+      <div class="timeline-box" style="opacity: 0.7;">
+        <div class="timeline-header">
+          <h4>tfx-auto (Sequential)</h4>
+          <span class="badge badge-gray">Without Hub</span>
+        </div>
+        <div class="timeline-visual">
+          <div class="time-label">시간 →</div>
+          
+          <div class="timeline-row">
+            <div class="row-label">Claude</div>
+            <div class="block block-triage node" data-tip="작업 분석 및 초기 계획 수립">triage</div>
+          </div>
+          
+          <!-- spawn arrow -->
+          <div style="margin-left: 30px; height: 30px; border-left: 1px dashed var(--text-dim); position: relative;">
+            <div class="flow-dot" style="left: -3.5px; animation: move-down 1.5s infinite;"></div>
+            <div style="position: absolute; left: 10px; top: 5px; font-size: 9px; color: var(--text-dim);">spawn</div>
+          </div>
+
+          <div class="timeline-row">
+            <div class="row-label">Codex-1</div>
+            <div class="block block-wait" style="width: 120px;">대기 (Blocking)</div>
+            <div class="block block-exec node" data-tip="첫 번째 레벨 태스크 실행">실행</div>
+          </div>
+
+          <!-- stdout parse arrow -->
+          <div style="margin-left: 150px; height: 30px; border-left: 1px dashed var(--text-dim); position: relative;">
+            <div class="flow-dot" style="left: -3.5px; animation: move-down 1.5s infinite;"></div>
+            <div style="position: absolute; left: 10px; top: 5px; font-size: 9px; color: var(--text-dim);">stdout 파싱</div>
+          </div>
+
+          <div class="timeline-row">
+            <div class="row-label">Claude</div>
+            <div style="width: 150px;"></div>
+            <div class="block block-triage node" style="width: 80px; background: #475569;" data-tip="결과 수집 및 컨텍스트 파일 저장">수집/저장</div>
+          </div>
+
+          <!-- spawn L1 arrow -->
+          <div style="margin-left: 190px; height: 30px; border-left: 1px dashed var(--text-dim); position: relative;">
+            <div class="flow-dot" style="left: -3.5px; animation: move-down 1.5s infinite;"></div>
+            <div style="position: absolute; left: 10px; top: 5px; font-size: 9px; color: var(--text-dim);">spawn (Level 1)</div>
+          </div>
+
+          <div class="timeline-row">
+            <div class="row-label">Codex-2</div>
+            <div style="width: 190px;"></div>
+            <div class="block block-exec node" data-tip="두 번째 레벨 태스크 실행 (순차)">실행</div>
+          </div>
+
+          <div class="timeline-row">
+            <div class="row-label">Claude</div>
+            <div style="width: 290px;"></div>
+            <div class="block block-report node" data-tip="최종 결과 보고">보고</div>
+          </div>
+        </div>
+        <ul class="features" style="margin-top: 1rem;">
+          <li>블로킹: Claude가 각 워커 완료를 대기</li>
+          <li>컨텍스트: .omc/context/ 파일 읽기/쓰기</li>
+          <li>에이전트 간 통신: 불가능 (Isolated)</li>
+          <li>Level별 순차 실행 (High Latency)</li>
+        </ul>
+      </div>
+
+      <!-- Right: With Hub -->
+      <div class="timeline-box" style="border-color: var(--amber);">
+        <div class="timeline-header">
+          <h4>tfx-hub (Event-driven)</h4>
+          <span class="badge badge-amber">With Hub</span>
+        </div>
+        <div class="timeline-visual">
+          <div class="time-label">시간 →</div>
+          
+          <div class="timeline-row">
+            <div class="row-label">Claude</div>
+            <div class="block block-triage node" data-tip="작업 분석 및 병렬 실행 지시">triage</div>
+          </div>
+          
+          <!-- Parallel spawn arrows -->
+          <div style="margin-left: 30px; height: 40px; position: relative;">
+            <div style="position: absolute; left: 0; top: 0; width: 200px; height: 1px; background: var(--border);"></div>
+            <div style="position: absolute; left: 0; top: 0; width: 1px; height: 40px; background: var(--border);"></div>
+            <div style="position: absolute; left: 200px; top: 0; width: 1px; height: 40px; background: var(--border);"></div>
+            <div class="flow-dot" style="left: -3px; top: 0; animation: move-down 1s infinite;"></div>
+            <div class="flow-dot" style="left: 197px; top: 0; animation: move-down 1s infinite;"></div>
+            <div style="position: absolute; left: 60px; top: 10px; font-size: 9px; color: var(--amber);">spawn (전부 동시)</div>
+          </div>
+
+          <div class="timeline-row">
+            <div class="row-label">Codex-1</div>
+            <div class="block block-exec node" style="width: 120px;" data-tip="자율 실행 및 실시간 허브 등록">실행</div>
+            <div style="width: 20px; height: 1px; background: var(--amber); position: relative;">
+               <div class="flow-dot" style="top: -3px; animation: move-right 1s infinite;"></div>
+            </div>
+            <div class="block node" style="width: 60px; background: var(--amber); font-size: 0.6rem;" data-tip="Hub에 결과 및 상태 즉시 발행">Hub Pub</div>
+          </div>
+
+          <div class="timeline-row" style="margin-top: -10px;">
+            <div class="row-label">Hub</div>
+            <div style="width: 140px;"></div>
+            <div class="block node" style="width: 100px; background: rgba(255,175,0,0.2); color: var(--amber); border: 1px solid var(--amber);" data-tip="EventEmitter로 즉시 메시지 라우팅">Fanout (Emit)</div>
+          </div>
+
+          <div class="timeline-row">
+            <div class="row-label">Codex-2</div>
+            <div style="width: 40px;"></div>
+            <div class="block block-wait node" style="width: 60px; background: rgba(56, 189, 248, 0.1); border-color: var(--sky); color: var(--sky);" data-tip="Hub로부터 필요한 컨텍스트를 즉시 수신">Poll</div>
+            <div class="block block-exec node" style="width: 140px;" data-tip="컨텍스트 수신 즉시 실행 시작">실행 (Non-blocking)</div>
+          </div>
+
+          <div class="timeline-row">
+            <div class="row-label">Claude</div>
+            <div style="width: 240px;"></div>
+            <div class="block block-report node" data-tip="이벤트 수신 즉시 결과 보고">보고</div>
+          </div>
+        </div>
+        <ul class="features" style="margin-top: 1rem;">
+          <li>논블로킹: 워커들이 Hub를 통해 자율 통신</li>
+          <li>컨텍스트: 메시지 큐 (자동 라우팅/주입)</li>
+          <li>에이전트 간 통신: ask / publish / poll</li>
+          <li>EventEmitter: 폴링 없이 즉시 응답 (v3.1)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- Highlights Section -->
+  <section id="v3">
+    <h2>v3.1.0-dev.4 Highlights</h2>
+    <div class="v3-updates">
+      <div class="update-grid">
+        <div class="update-item">
+          <strong>Pooled Random (UUIDv7)</strong>
+          crypto.randomBytes(256) 풀을 사용하여 UUIDv7 생성 성능 극대화 및 시스템 entropy 고갈 방지.
+        </div>
+        <div class="update-item">
+          <strong>EventEmitter Router</strong>
+          ask() 요청에 대해 SQLite 폴링 대신 Node.js 내부 이벤트를 통한 즉시 응답(Low Latency) 구현.
+        </div>
+        <div class="update-item">
+          <strong>Session Heartbeat</strong>
+          30분(TTL) 비활성 세션 자동 해제 및 Lease 기반 에이전트 생명주기 관리 안정화.
+        </div>
+        <div class="update-item">
+          <strong>Lite REST Bridge</strong>
+          쉘 스크립트(tfx-route.sh) 호환성을 위한 원격 호출용 /bridge 엔드포인트 세트 최적화.
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+  // Tooltip
+  const tooltip = document.getElementById('tooltip');
+  document.querySelectorAll('.node').forEach(node => {
+    node.addEventListener('mouseenter', (e) => {
+      tooltip.innerText = node.getAttribute('data-tip');
+      tooltip.style.display = 'block';
+    });
+    node.addEventListener('mousemove', (e) => {
+      tooltip.style.left = (e.pageX + 10) + 'px';
+      tooltip.style.top = (e.pageY + 10) + 'px';
+    });
+    node.addEventListener('mouseleave', () => {
+      tooltip.style.display = 'none';
+    });
+  });
+
+  // Module Tabs
+  const moduleData = {
+    server: {
+      title: 'server.mjs',
+      desc: 'Streamable HTTP MCP 서버 진입점입니다. Express 의존성 없이 Node.js http 모듈만으로 경량 구현되어 있습니다.',
+      features: [
+        '/mcp: SSE 기반 MCP 전송 레이어',
+        '/bridge: CLI를 위한 REST API 엔드포인트',
+        'Session TTL: 30분 비활성 세션 자동 정리',
+        'CORS 지원으로 로컬 도구 간 호환성 확보'
+      ]
+    },
+    router: {
+      title: 'router.mjs',
+      desc: 'Actor mailbox 라우터이자 QoS 스케줄러입니다. 에이전트 간 메시지 전달을 조율합니다.',
+      features: [
+        'ask/reply: correlation_id를 통한 요청/응답 매칭',
+        'publish: 토픽 기반 구독자 팬아웃(fanout)',
+        'handoff: 작업 인계 및 컨텍스트 위임',
+        'Sweeper: 10초 주기 만료 메시지(TTL) 정리'
+      ]
+    },
+    store: {
+      title: 'store.mjs',
+      desc: 'SQLite WAL 모드를 사용하는 영속성 저장소입니다. 모든 상태를 원자적으로 관리합니다.',
+      features: [
+        'UUIDv7: 시간 순서 정렬이 가능한 ID 생성',
+        'Pooled Random: 256B 엔트로피 풀링으로 성능 최적화',
+        'WAL Mode: 동시 읽기/쓰기 성능 극대화',
+        'Schema Meta: 자동 버전 체크 및 초기화'
+      ]
+    },
+    tools: {
+      title: 'tools.mjs',
+      desc: 'MCP 클라이언트(Claude 등)가 호출할 수 있는 8개의 핵심 도구를 정의합니다.',
+      features: [
+        'register: 에이전트 등록 및 Lease 발급',
+        'poll_messages: 500ms 간격 반복 재시도 폴링',
+        'request_human_input: HITL 워크플로우 시작',
+        'status: 허브 및 큐 메트릭 조회'
+      ]
+    },
+    hitl: {
+      title: 'hitl.mjs',
+      desc: 'Human-in-the-Loop 관리자입니다. 사람의 개입이 필요한 요청을 비동기 처리합니다.',
+      features: [
+        'Kind Support: captcha, approval, credential, choice, text',
+        'Auto Timeout: 제한 시간 초과 시 default_action 적용',
+        'Urgent Message: 사용자 응답 시 우선순위 7(High)로 즉시 전달',
+        'Batching: 트랜잭션 기반 타임아웃 일괄 체크'
+      ]
+    },
+    bridge: {
+      title: 'bridge.mjs',
+      desc: 'tfx-route.sh와 Hub를 연결하는 CLI 브릿지입니다. Hub 미실행 시에도 쉘 흐름을 방해하지 않습니다.',
+      features: [
+        'Register: 프로세스 PID 및 수명 동기화',
+        'Result: CLI 실행 결과(stdout)를 Hub에 발행',
+        'Context: 이전 태스크들의 결과를 컨텍스트로 수집',
+        'Graceful Failure: Hub 미동작 시 자동 skip'
+      ]
+    }
+  };
+
+  const moduleItems = document.querySelectorAll('.module-item');
+  const detailTitle = document.getElementById('detail-title');
+  const detailDesc = document.getElementById('detail-desc');
+  const detailFeatures = document.getElementById('detail-features');
+
+  moduleItems.forEach(item => {
+    item.addEventListener('click', () => {
+      moduleItems.forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+
+      const data = moduleData[item.dataset.module];
+      detailTitle.innerText = data.title;
+      detailDesc.innerText = data.desc;
+      
+      detailFeatures.innerHTML = '';
+      data.features.forEach(f => {
+        const li = document.createElement('li');
+        li.innerText = f;
+        detailFeatures.appendChild(li);
+      });
+    });
+  });
+</script>
+
+</body>
+</html>

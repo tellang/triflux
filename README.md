@@ -86,15 +86,21 @@ tfx doctor
 /research "latest React Server Components patterns"
 
 # Single-CLI modes
+/tfx-auto-codex "refactor + test + review"  # Codex lead + Gemini kept, no Claude-native roles
 /tfx-codex "refactor + review"     # Codex only
 /tfx-gemini "implement + document"  # Gemini only
 ```
+
+## Docs
+
+- [docs/INDEX.md](docs/INDEX.md) — central documentation index
 
 ## Skills
 
 | Skill | Mode | Description |
 |-------|------|-------------|
 | `/tfx-auto` | Auto | Triage → decompose → parallel execute via DAG |
+| `/tfx-auto-codex` | Codex-lead | Replace Claude-native roles with Codex, keep Gemini path |
 | `/tfx-codex` | Codex-only | All CLI tasks routed to Codex |
 | `/tfx-gemini` | Gemini-only | All CLI tasks routed to Gemini |
 | `/tfx-setup` | Setup | File sync, HUD config, CLI diagnostics |
@@ -206,11 +212,13 @@ tfx doctor
 |---------|-------------|
 | `tfx setup` | Sync scripts + HUD + skills |
 | `tfx doctor` | CLI diagnostics + issue tracker |
-| `tfx update` | Update to latest version |
+| `tfx update` | Update to latest stable version |
 | `tfx list` | List installed skills |
 | `tfx version` | Show version info |
 
 Shortcuts: `tfx` = `triflux`, `tfl` = `triflux`
+
+Dev channel update: `tfx update --dev` (`dev` alias supported)
 
 ### HUD Status Bar
 

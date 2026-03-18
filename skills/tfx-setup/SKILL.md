@@ -98,7 +98,4 @@ Bash("triflux doctor")
 
 ## Troubleshooting
 
-설정 후에도 문제가 있으면:
-1. `/tfx-doctor` — 상세 진단 실행
-2. `/tfx-doctor --fix` — 파일 동기화 + 캐시 정리
-3. `/tfx-doctor --reset` — 캐시 전체 초기화 (HUD 이상 시)
+문제 발생 시 `/tfx-doctor` 실행. (`--fix` 자동 수정, `--reset` 캐시 초기화)
