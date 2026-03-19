@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "4.2.5",
+  "version": "4.2.8",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -14,6 +14,7 @@
     "bin",
     "hub",
     "skills",
+    "!skills/tfx-workspace",
     "!**/failure-reports",
     "scripts",
     "hooks",

@@ -293,31 +293,36 @@ if (existsSync(agentsSrc)) {
 }
 
 // ── 스킬 동기화 ──
+// SKILL.md + 하위 디렉토리(references/ 등)를 재귀적으로 동기화
 
 const skillsSrc = join(PLUGIN_ROOT, "skills");
 const skillsDst = join(CLAUDE_DIR, "skills");
 
-if (existsSync(skillsSrc)) {
-  for (const name of readdirSync(skillsSrc)) {
-    const src = join(skillsSrc, name, "SKILL.md");
-    if (!existsSync(src)) continue;
+function syncSkillDir(srcDir, dstDir) {
+  if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
 
-    const dstDir = join(skillsDst, name);
-    const dst = join(dstDir, "SKILL.md");
+  for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = join(srcDir, entry.name);
+    const dstPath = join(dstDir, entry.name);
 
-    if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
-
-    if (!existsSync(dst)) {
-      copyFileSync(src, dst);
-      synced++;
-    } else {
-      const srcContent = readFileSync(src, "utf8");
-      const dstContent = readFileSync(dst, "utf8");
-      if (srcContent !== dstContent) {
-        copyFileSync(src, dst);
+    if (entry.isDirectory()) {
+      syncSkillDir(srcPath, dstPath);
+    } else if (entry.name.endsWith(".md")) {
+      if (shouldSyncTextFile(srcPath, dstPath)) {
+        copyFileSync(srcPath, dstPath);
         synced++;
       }
     }
+  }
+}
+
+if (existsSync(skillsSrc)) {
+  for (const name of readdirSync(skillsSrc)) {
+    const skillDir = join(skillsSrc, name);
+    const skillMd = join(skillDir, "SKILL.md");
+    if (!existsSync(skillMd)) continue;
+
+    syncSkillDir(skillDir, join(skillsDst, name));
   }
 }
 

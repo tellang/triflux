@@ -23,6 +23,12 @@ function stopHub() {
     process.kill(pid, "SIGTERM");
     console.log(`[triflux preinstall] Hub 중지됨 (PID ${pid}) — EBUSY 방지`);
 
+    // Windows: 프로세스 종료 + 파일 핸들 해제 대기 (최대 3초)
+    const start = Date.now();
+    while (Date.now() - start < 3000) {
+      try { process.kill(pid, 0); } catch { break; }
+    }
+
     // PID 파일 정리
     try { unlinkSync(HUB_PID_FILE); } catch {}
   } catch (err) {

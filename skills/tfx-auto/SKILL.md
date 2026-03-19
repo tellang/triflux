@@ -214,4 +214,4 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 
 ## 상세 레퍼런스
 
-DAG 알고리즘, 컨텍스트 머지 규칙, 토큰 스냅샷, 보고서 상세 → [`docs/tfx-auto-internals.md`](../../docs/tfx-auto-internals.md)
+DAG 알고리즘, 컨텍스트 머지 규칙, 토큰 스냅샷, 보고서 상세는 `scripts/tfx-route.sh` 내부 주석 및 `hub/` 모듈 참조.
