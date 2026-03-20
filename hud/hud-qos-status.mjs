@@ -151,12 +151,33 @@ function getGeminiRpmLimit(model) {
   return 300; // Flash 기본
 }
 
-// Gemini 모델 ID → HUD 표시 라벨
+// Gemini 모델 ID → HUD 표시 라벨 (동적 매핑)
 function getGeminiModelLabel(model) {
   if (!model) return "";
-  if (model.includes("pro")) return "[Pro3.1]";
-  if (model.includes("flash")) return "[Flash3]";
-  return "";
+  // 버전 + 티어 추출: gemini-3.1-pro-preview → [3.1Pro], gemini-2.5-flash → [2.5Flash]
+  const m = model.match(/gemini-(\d+(?:\.\d+)?)-(\w+)/);
+  if (!m) return "";
+  const ver = m[1];
+  const tier = m[2].charAt(0).toUpperCase() + m[2].slice(1);
+  return `[${ver}${tier}]`;
+}
+
+// Gemini Pro 풀 공유 그룹: 같은 remainingFraction을 공유하는 모델 ID들
+const GEMINI_PRO_POOL = new Set(["gemini-2.5-pro", "gemini-3-pro-preview", "gemini-3.1-pro-preview"]);
+const GEMINI_FLASH_POOL = new Set(["gemini-2.5-flash", "gemini-3-flash-preview"]);
+
+// remainingFraction → 사용 퍼센트 변환 (remainingAmount가 있으면 절대값도 제공)
+function deriveGeminiLimits(bucket) {
+  if (!bucket || bucket.remainingFraction == null) return null;
+  const fraction = bucket.remainingFraction;
+  const usedPct = clampPercent(Math.round((1 - fraction) * 100));
+  // remainingAmount가 API에서 오면 절대값 역산 (Gemini CLI 방식)
+  if (bucket.remainingAmount != null) {
+    const remaining = parseInt(bucket.remainingAmount, 10);
+    const limit = fraction > 0 ? Math.round(remaining / fraction) : 0;
+    return { usedPct, remaining, limit, resetTime: bucket.resetTime, modelId: bucket.modelId };
+  }
+  return { usedPct, remaining: null, limit: null, resetTime: bucket.resetTime, modelId: bucket.modelId };
 }
 // rows 임계값 상수 (selectTier 에서 tier 결정에 사용)
 const ROWS_BUDGET_FULL = 40;
@@ -493,10 +514,11 @@ function getMicroLine(stdin, claudeUsage, codexBuckets, geminiSession, geminiBuc
     }
   }
 
-  // Gemini
+  // Gemini (일간 쿼터 — P/F/L 3풀)
   let gVal;
   if (geminiBucket) {
-    const gU = clampPercent(geminiBucket.usedPercent ?? 0);
+    const gl = deriveGeminiLimits(geminiBucket);
+    const gU = gl ? gl.usedPct : clampPercent((1 - (geminiBucket.remainingFraction ?? 1)) * 100);
     gVal = colorByProvider(gU, `${gU}`, geminiBlue);
   } else if ((geminiSession?.total || 0) > 0) {
     gVal = geminiBlue("\u221E");
@@ -536,7 +558,7 @@ function normalizeTimeToken(value) {
   }
   const dayHour = text.match(/^(\d+)d(\d+)h$/);
   if (dayHour) {
-    return `${Number(dayHour[1])}d${String(Number(dayHour[2])).padStart(2, "0")}h`;
+    return `${String(Number(dayHour[1])).padStart(2, "0")}d${String(Number(dayHour[2])).padStart(2, "0")}h`;
   }
   return text;
 }
@@ -923,7 +945,7 @@ function formatResetRemainingDayHour(isoOrUnix, cycleMs = 0) {
   const totalMinutes = Math.floor(diffMs / 60000);
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  return `${days}d${hours}h`;
+  return `${String(days).padStart(2, "0")}d${String(hours).padStart(2, "0")}h`;
 }
 
 function calcCooldownLeftSeconds(isoDatetime) {
@@ -1511,13 +1533,16 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       }
     }
     if (realQuota?.type === "gemini") {
-      const bucket = realQuota.quotaBucket;
-      if (bucket) {
-        const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
-        return { prefix: minPrefix, left: `${colorByProvider(usedP, `${usedP}%`, provFn)}${dim("/")}${dim("\u221E%")}`, right: "" };
+      const pools = realQuota.pools || {};
+      if (pools.pro || pools.flash) {
+        const pP = pools.pro ? clampPercent(Math.round((1 - (pools.pro.remainingFraction ?? 1)) * 100)) : null;
+        const pF = pools.flash ? clampPercent(Math.round((1 - (pools.flash.remainingFraction ?? 1)) * 100)) : null;
+        const pStr = pP != null ? colorByProvider(pP, `${pP}`, provFn) : dim("--");
+        const fStr = pF != null ? colorByProvider(pF, `${pF}`, provFn) : dim("--");
+        return { prefix: minPrefix, left: `${pStr}${dim("/")}${fStr}`, right: "" };
       }
     }
-    return { prefix: minPrefix, left: dim("--%/--%"), right: "" };
+    return { prefix: minPrefix, left: dim("--/--"), right: "" };
   }
 
   if (CURRENT_TIER === "minimal") {
@@ -1532,12 +1557,17 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       }
     }
     if (realQuota?.type === "gemini") {
-      const bucket = realQuota.quotaBucket;
-      if (bucket) {
-        const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
-        quotaSection = `${dim("1d:")}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim("1w:")}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))}`;
+      const pools = realQuota.pools || {};
+      if (pools.pro || pools.flash) {
+        const slot = (bucket, label) => {
+          if (!bucket) return `${dim(label + ":")}${dim(formatPlaceholderPercentCell())}`;
+          const gl = deriveGeminiLimits(bucket);
+          const usedP = gl ? gl.usedPct : clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
+          return `${dim(label + ":")}${colorByProvider(usedP, formatPercentCell(usedP), provFn)}`;
+        };
+        quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
       } else {
-        quotaSection = `${dim("1d:")}${dim("--%".padStart(PERCENT_CELL_WIDTH))} ${dim("1w:")}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))}`;
+        quotaSection = `${dim("Pr:")}${dim(formatPlaceholderPercentCell())} ${dim("Fl:")}${dim(formatPlaceholderPercentCell())}`;
       }
     }
     if (!quotaSection) {
@@ -1561,17 +1591,23 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
       }
     }
     if (realQuota?.type === "gemini") {
-      const bucket = realQuota.quotaBucket;
-      if (bucket) {
-        const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
-        const rstRemaining = formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
-        quotaSection = `${dim("1d:")}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))} ${dim("1w:")}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+      const pools = realQuota.pools || {};
+      const hasAnyPool = pools.pro || pools.flash;
+      if (hasAnyPool) {
+        const slot = (bucket, label) => {
+          if (!bucket) return `${dim(label + ":")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
+          const gl = deriveGeminiLimits(bucket);
+          const usedP = gl ? gl.usedPct : clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
+          const rstRemaining = formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
+          return `${dim(label + ":")}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))}`;
+        };
+        quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
       } else {
-        quotaSection = `${dim("1d:")}${dim("--%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+        quotaSection = `${dim("Pr:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("Fl:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
       }
     }
     if (!quotaSection) {
-      quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("-d--h"))}`;
+      quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("--d--h"))}`;
     }
     const prefix = `${bold(markerColor(`${marker}`))}:`;
     const compactRight = [svStr ? `${dim("sv:")}${svStr}` : "", accountLabel ? markerColor(accountLabel) : ""].filter(Boolean).join(" ");
@@ -1598,21 +1634,31 @@ function getProviderRow(provider, marker, markerColor, qosProfile, accountsConfi
   }
 
   if (realQuota?.type === "gemini") {
-    const bucket = realQuota.quotaBucket;
-    if (bucket) {
-      const usedP = clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
-      const rstRemaining = formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
-      quotaSection = `${dim("1d:")}${tierBar(usedP, provAnsi)}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))} ` +
-        `${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+    const pools = realQuota.pools || {};
+    const hasAnyPool = pools.pro || pools.flash;
+
+    if (hasAnyPool) {
+      // C/X와 동일한 2슬롯 구조: P:gauge %% (time) F:gauge %% (time)
+      const slot = (bucket, label) => {
+        if (!bucket) {
+          return `${dim(label + ":")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
+        }
+        const gl = deriveGeminiLimits(bucket);
+        const usedP = gl ? gl.usedPct : clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
+        const rstRemaining = formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
+        return `${dim(label + ":")}${tierBar(usedP, provAnsi)}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))}`;
+      };
+
+      quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
     } else {
-      quotaSection = `${dim("1d:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ` +
-        `${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierInfBar()}${dim("\u221E%".padStart(PERCENT_CELL_WIDTH))} ${dim(formatTimeCellDH("-d--h"))}`;
+      quotaSection = `${dim("Pr:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ` +
+        `${dim("Fl:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
     }
   }
 
   // 폴백: 쿼터 데이터 없을 때
   if (!quotaSection) {
-    quotaSection = `${dim("5h:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("-d--h"))}`;
+    quotaSection = `${dim("5h:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierDimBar()}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("--d--h"))}`;
   }
 
   const prefix = `${bold(markerColor(`${marker}`))}:`;
@@ -1710,11 +1756,15 @@ async function main() {
     geminiSv = geminiTokens ? geminiTokens / ctxCapacity : null;
   }
 
-  // Gemini: 사용 중인 모델의 쿼터 버킷 찾기
+  // Gemini: 3풀 버킷 추출 (Pro/Flash/Lite — 각 풀 내 모델들은 쿼터 공유)
   const geminiModel = geminiSession?.model || "gemini-3-flash-preview";
-  const geminiBucket = geminiQuota?.buckets?.find((b) => b.modelId === geminiModel)
-    || geminiQuota?.buckets?.find((b) => b.modelId === "gemini-3-flash-preview")
+  const geminiBuckets = geminiQuota?.buckets || [];
+  const geminiBucket = geminiBuckets.find((b) => b.modelId === geminiModel)
+    || geminiBuckets.find((b) => b.modelId === "gemini-3-flash-preview")
     || null;
+  const geminiProBucket = geminiBuckets.find((b) => GEMINI_PRO_POOL.has(b.modelId)) || null;
+  const geminiFlashBucket = geminiBuckets.find((b) => GEMINI_FLASH_POOL.has(b.modelId)) || null;
+  const geminiLiteBucket = geminiBuckets.find((b) => b.modelId?.includes("flash-lite")) || null;
 
   // 합산 절약: Codex+Gemini sv% 합산 (컨텍스트 대비 위임 토큰 비율)
   const combinedSvPct = Math.round(((codexSv ?? 0) + (geminiSv ?? 0)) * 100);
@@ -1731,7 +1781,12 @@ async function main() {
   }
 
   const codexQuotaData = codexBuckets ? { type: "codex", buckets: codexBuckets } : null;
-  const geminiQuotaData = { type: "gemini", quotaBucket: geminiBucket, session: geminiSession };
+  const geminiQuotaData = {
+    type: "gemini",
+    quotaBucket: geminiBucket,
+    pools: { pro: geminiProBucket, flash: geminiFlashBucket, lite: geminiLiteBucket },
+    session: geminiSession,
+  };
 
   const rows = [
     ...getClaudeRows(stdin, claudeUsageSnapshot.data, combinedSvPct),
@@ -1747,7 +1802,8 @@ async function main() {
 
   // 비활성 프로바이더 dim 처리: 데이터 없으면 전체 줄 dim
   const codexActive = codexBuckets != null;
-  const geminiActive = (geminiSession?.total || 0) > 0 || geminiBucket != null;
+  const geminiActive = (geminiSession?.total || 0) > 0 || geminiBucket != null
+    || geminiProBucket != null || geminiFlashBucket != null;
 
   let outputLines = renderAlignedRows(rows);
 

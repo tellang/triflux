@@ -19,6 +19,10 @@ import { createTools } from './tools.mjs';
 import { ensurePipelineStateDbPath } from './pipeline/state.mjs';
 import { DelegatorService } from './delegator/index.mjs';
 import { createDelegatorMcpWorker } from './workers/delegator-mcp.mjs';
+import { createModuleLogger } from '../scripts/lib/logger.mjs';
+import { wrapRequestHandler } from './middleware/request-logger.mjs';
+
+const hubLog = createModuleLogger('hub');
 
 const MAX_BODY_SIZE = 1024 * 1024;
 const PUBLIC_PATHS = new Set(['/', '/status', '/health', '/healthz']);
@@ -230,7 +234,7 @@ function servePublicFile(res, path) {
 
   mkdirSync(PUBLIC_DIR, { recursive: true });
   if (!existsSync(filePath)) {
-    console.warn(`[tfx-hub] 정적 파일 없음: ${filePath}`);
+    hubLog.warn({ filePath }, 'static.not_found');
     res.writeHead(404);
     res.end('Not Found (static file missing)');
     return true;
@@ -326,7 +330,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     return mcp;
   }
 
-  const httpServer = createHttpServer(async (req, res) => {
+  const httpServer = createHttpServer(wrapRequestHandler(async (req, res) => {
     const path = getRequestPath(req.url);
     const corsAllowed = applyCorsHeaders(req, res);
 
@@ -685,7 +689,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         res.end('Method Not Allowed');
       }
     } catch (error) {
-      console.error('[tfx-hub] 요청 처리 에러:', error.message);
+      hubLog.error({ err: error }, 'http.error');
       if (!res.headersSent) {
         const code = error.statusCode === 413 ? 413
           : error instanceof SyntaxError ? 400 : 500;
@@ -699,7 +703,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         }));
       }
     }
-  });
+  }));
 
   router.startSweeper();
 
@@ -751,8 +755,8 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         started: Date.now(),
       }));
 
-      console.log(`[tfx-hub] MCP 서버 시작: ${info.url} / pipe ${pipe.path} / assign-callback ${assignCallbacks.path} (PID ${process.pid})`);
-      console.log(`[tfx-hub] PUBLIC_DIR: ${PUBLIC_DIR} (exists: ${existsSync(PUBLIC_DIR)}, dashboard: ${existsSync(resolve(PUBLIC_DIR, 'dashboard.html'))})`);
+      hubLog.info({ url: info.url, pipePath: pipe.path, assignCallbackPath: assignCallbacks.path, pid: process.pid }, 'hub.started');
+      hubLog.debug({ publicDir: PUBLIC_DIR, exists: existsSync(PUBLIC_DIR), hasDashboard: existsSync(resolve(PUBLIC_DIR, 'dashboard.html')) }, 'hub.public_dir');
 
       const stopFn = async () => {
         router.stopSweeper();
@@ -805,14 +809,14 @@ if (selfRun) {
 
   startHub({ port, dbPath }).then((info) => {
     const shutdown = async (signal) => {
-      console.log(`\n[tfx-hub] ${signal} 수신, 종료 중...`);
+      hubLog.info({ signal }, 'hub.stopping');
       await info.stop();
       process.exit(0);
     };
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('SIGTERM', () => shutdown('SIGTERM'));
   }).catch((error) => {
-    console.error('[tfx-hub] 시작 실패:', error.message);
+    hubLog.fatal({ err: error }, 'hub.start_failed');
     process.exit(1);
   });
 }
