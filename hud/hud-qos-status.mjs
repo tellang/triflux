@@ -1046,15 +1046,15 @@ function expireStaleCodexBuckets(buckets) {
 // ============================================================================
 // Codex 세션 JSONL에서 실제 rate limits 추출
 // 한계: rate_limits는 세션별 스냅샷이므로 여러 세션 간 토큰 합산은 불가.
-// 오늘 날짜의 모든 세션 파일을 스캔해 가장 최신 rate_limits 버킷을 수집한다.
-// (단일 파일 즉시 return 방식에서 → 당일 전체 스캔 후 최신 데이터 우선 병합으로 변경)
+// 최근 7일간 세션 파일을 스캔해 가장 최신 rate_limits 버킷을 수집한다.
+// 합성 버킷(token_count 기반)은 2일 이내 데이터만 허용하여 stale 방지.
 // ============================================================================
 function getCodexRateLimits() {
   const now = new Date();
-  let syntheticBucket = null; // 오늘 token_count에서 합성 (행 활성화 + 토큰 데이터용)
+  let syntheticBucket = null; // 최근 token_count에서 합성 (행 활성화 + 토큰 데이터용)
 
-  // 2일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
-  for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+  // 7일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
+  for (let dayOffset = 0; dayOffset <= 6; dayOffset++) {
     const d = new Date(now.getTime() - dayOffset * 86_400_000);
     const sessDir = join(
       homedir(), ".codex", "sessions",
@@ -1086,8 +1086,8 @@ function getCodexRateLimits() {
                 contextWindow: evt.payload?.info?.model_context_window,
                 timestamp: evt.timestamp,
               };
-            } else if (dayOffset === 0 && !rl && evt?.payload?.info?.total_token_usage && !syntheticBucket) {
-              // 오늘 token_count: 합성 버킷 (rate_limits가 null일 때 행 활성화용)
+            } else if (dayOffset <= 1 && !rl && evt?.payload?.info?.total_token_usage && !syntheticBucket) {
+              // 2일 이내 token_count: 합성 버킷 (rate_limits가 null일 때 행 활성화용, stale 방지)
               syntheticBucket = {
                 limitId: "codex", limitName: "codex-session",
                 primary: null, secondary: null,
@@ -1102,7 +1102,7 @@ function getCodexRateLimits() {
         }
       } catch { /* 파일 읽기 실패 무시 */ }
     }
-    // 실제 rate_limits 발견 → 오늘 토큰 데이터 병합 후 즉시 반환
+    // 실제 rate_limits 발견 → 토큰 데이터 병합 후 즉시 반환
     if (Object.keys(mergedBuckets).length > 0) {
       if (syntheticBucket) {
         const main = mergedBuckets.codex || mergedBuckets[Object.keys(mergedBuckets)[0]];
