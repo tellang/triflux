@@ -93,13 +93,13 @@ export function createModuleLogger(module) {
 
 // 정상 종료 시 버퍼 flush 보장
 process.on('uncaughtException', (err) => {
-  const finalLogger = pino.final(logger);
-  finalLogger.fatal({ err }, 'process.uncaught_exception');
+  logger.fatal({ err }, 'process.uncaught_exception');
+  logger.flush();
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason) => {
-  const finalLogger = pino.final(logger);
-  finalLogger.fatal({ reason: String(reason) }, 'process.unhandled_rejection');
+  logger.fatal({ reason: String(reason) }, 'process.unhandled_rejection');
+  logger.flush();
   process.exit(1);
 });

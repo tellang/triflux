@@ -160,12 +160,31 @@ status는 "completed"만 사용. 실패 여부는 `metadata.result`로 구분.
 - pane 이름: `"lead"` → index 0, `"worker-N"` → index N (대소문자 무관)
 
 **헤드리스 오케스트레이션** (`hub/team/headless.mjs`):
-```
+
+멀티 CLI 병렬 실행:
+```javascript
 import { runHeadlessWithCleanup } from "hub/team/headless.mjs";
-const { results } = runHeadlessWithCleanup([
+const { results } = await runHeadlessWithCleanup([
   { cli: "codex", prompt: "코드 리뷰", role: "reviewer" },
   { cli: "gemini", prompt: "문서 작성", role: "writer" },
 ], { timeoutSec: 300 });
+// results: [{ cli, paneName, matched, exitCode, output, sessionDead }]
+```
+
+단일 CLI 실행:
+```javascript
+const { results } = await runHeadlessWithCleanup([
+  { cli: "codex", prompt: "2+2=? number only" }
+], { timeoutSec: 60 });
+console.log(results[0].output); // "4"
+```
+
+세션 이름 직접 지정 (자동 정리 없이):
+```javascript
+import { runHeadless } from "hub/team/headless.mjs";
+import { killPsmuxSession } from "hub/team/psmux.mjs";
+const { sessionName, results } = await runHeadless("my-session", assignments, { timeoutSec: 120 });
+// 수동 정리 필요: killPsmuxSession(sessionName)
 ```
 
 **CLI 헤드리스 명령 패턴:**
@@ -176,6 +195,8 @@ const { results } = runHeadlessWithCleanup([
 | Claude | `claude -p 'prompt' --output-format text > result.txt` | 리다이렉트 |
 
 **E4 크래시 복구:** `waitForCompletion`이 세션 사망 시 `{sessionDead: true}` 반환 (throw 대신).
+
+**elevation 불필요:** psmux IPC는 TCP 기반 (`TcpListener::bind("127.0.0.1", 0)`). headless 모드는 wt.exe 없이 동작하므로 비-elevated 환경에서 정상 실행. (v5.2.0 검증 완료)
 
 **레거시 인터랙티브 모드:** `Bash("node {PKG_ROOT}/bin/triflux.mjs multi --no-attach --agents {agents} \\\"{task}\\\"")`
 

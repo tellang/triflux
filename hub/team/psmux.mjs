@@ -641,9 +641,11 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
  * @param {string} paneNameOrTarget
  * @param {string|RegExp} pattern
  * @param {number} timeoutSec
+ * @param {object} [opts]
+ * @param {(snapshot: {content: string, paneId: string, paneName: string, elapsed: number}) => void} [opts.onPoll] — 각 폴링 주기마다 호출
  * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null }}
  */
-export async function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSec = 300) {
+export async function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSec = 300, opts = {}) {
   ensurePsmuxInstalled();
 
   // E4 크래시 복구: 초기 resolvePane도 세션 사망을 감지
@@ -670,7 +672,8 @@ export async function waitForPattern(sessionName, paneNameOrTarget, pattern, tim
     throw new Error(`캡처 로그가 없습니다. 먼저 startCapture(${sessionName}, ${paneName})를 호출하세요.`);
   }
 
-  const deadline = Date.now() + Math.max(0, Math.trunc(timeoutSec * 1000));
+  const startTime = Date.now();
+  const deadline = startTime + Math.max(0, Math.trunc(timeoutSec * 1000));
   const regex = toPatternRegExp(pattern);
 
   while (Date.now() <= deadline) {
@@ -692,6 +695,14 @@ export async function waitForPattern(sessionName, paneNameOrTarget, pattern, tim
     }
 
     const content = readCaptureLog(logPath);
+
+    // onPoll 콜백 — 각 폴링 주기마다 중간 상태 전달
+    if (opts.onPoll) {
+      try {
+        opts.onPoll({ content, paneId: pane.paneId, paneName, elapsed: Date.now() - startTime });
+      } catch { /* 콜백 예외는 삼킴 — 폴링 루프 보호 */ }
+    }
+
     const match = regex.exec(content);
     if (match) {
       return {
@@ -724,14 +735,15 @@ export async function waitForPattern(sessionName, paneNameOrTarget, pattern, tim
  * @param {string} paneNameOrTarget
  * @param {string} token
  * @param {number} timeoutSec
+ * @param {object} [opts] — waitForPattern에 전달할 옵션 (onPoll 등)
  * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null, token: string, exitCode: number|null }}
  */
-export async function waitForCompletion(sessionName, paneNameOrTarget, token, timeoutSec = 300) {
+export async function waitForCompletion(sessionName, paneNameOrTarget, token, timeoutSec = 300, opts = {}) {
   const completionRegex = new RegExp(
     `${escapeRegExp(COMPLETION_PREFIX)}${escapeRegExp(token)}:(\\d+)`,
     "m",
   );
-  const result = await waitForPattern(sessionName, paneNameOrTarget, completionRegex, timeoutSec);
+  const result = await waitForPattern(sessionName, paneNameOrTarget, completionRegex, timeoutSec, opts);
   const exitMatch = result.match ? completionRegex.exec(result.match) : null;
   return {
     ...result,
