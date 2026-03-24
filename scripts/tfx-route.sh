@@ -466,27 +466,12 @@ team_complete_task() {
   local result_summary="${2:-작업 완료}"
   [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
 
-  local summary_trimmed metadata_patch result_payload
+  local summary_trimmed result_payload
   summary_trimmed=$(echo "$result_summary" | head -c 4096)
-  metadata_patch=$(bridge_json_stringify metadata-patch "$result" "$summary_trimmed" 2>/dev/null || true)
   result_payload=$(bridge_json_stringify task-result "$TFX_TEAM_TASK_ID" "$result" 2>/dev/null || true)
 
-  # task 상태: 항상 "completed" (Claude Code API는 "failed" 미지원)
-  # 실제 결과는 metadata.result로 전달
-  if [[ -n "$metadata_patch" ]]; then
-    if ! bridge_cli_with_restart "팀 task 완료 보고" "Hub 재시작 후 팀 task 완료 보고 성공." \
-      team-task-update \
-      --team "$TFX_TEAM_NAME" \
-      --task-id "$TFX_TEAM_TASK_ID" \
-      --status completed \
-      --owner "$TFX_TEAM_AGENT_NAME" \
-      --metadata-patch "$metadata_patch"; then
-      echo "[tfx-route] 경고: 팀 task 완료 보고 실패 (team=$TFX_TEAM_NAME, task=$TFX_TEAM_TASK_ID, result=$result)" >&2
-    fi
-  fi
-
-  # 리드에게 메시지 전송
-  team_send_message "$summary_trimmed" "task ${TFX_TEAM_TASK_ID} ${result}"
+  # task 파일 completion 쓰기는 Worker Step 6 TaskUpdate가 authority다.
+  # route 레벨에서는 task.result 발행 + 로컬 backup만 유지한다.
 
   # Hub result 발행 (poll_messages 채널 활성화)
   if [[ -n "$result_payload" ]]; then

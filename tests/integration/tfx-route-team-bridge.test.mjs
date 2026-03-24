@@ -30,9 +30,10 @@ function output(result) {
 }
 
 describe('tfx-route.sh — team bridge integration', () => {
-  it('team claim/complete/send-message/result를 bridge CLI 단일 경로로 호출해야 한다', () => {
+  it('team claim/start-message/result를 bridge CLI 단일 경로로 호출하고 완료는 backup 파일로 남겨야 한다', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tfx-route-team-bridge-'));
     const logPath = join(tempDir, 'bridge.log');
+    const resultDir = join(tempDir, 'results');
     mkdirSync(tempDir, { recursive: true });
 
     try {
@@ -46,6 +47,7 @@ describe('tfx-route.sh — team bridge integration', () => {
           TFX_TEAM_LEAD_NAME: 'team-lead',
           TFX_BRIDGE_SCRIPT: FAKE_BRIDGE,
           FAKE_BRIDGE_LOG: logPath,
+          TFX_RESULT_DIR: resultDir,
         },
       );
 
@@ -57,26 +59,35 @@ describe('tfx-route.sh — team bridge integration', () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.equal(calls.length, 5, JSON.stringify(calls, null, 2));
+      assert.equal(calls.length, 3, JSON.stringify(calls, null, 2));
       assert.equal(calls[0][0], 'team-task-update');
       assert.ok(calls[0].includes('--claim'));
       assert.equal(calls[1][0], 'team-send-message');
       assert.match(calls[1][calls[1].indexOf('--text') + 1], /작업 시작: executor-worker-test/);
-      assert.equal(calls[2][0], 'team-task-update');
-      assert.ok(calls[2].includes('--metadata-patch'));
-      assert.equal(calls[3][0], 'team-send-message');
-      assert.equal(calls[4][0], 'result');
+      assert.equal(calls[2][0], 'result');
 
-      const metadataPatch = calls[2][calls[2].indexOf('--metadata-patch') + 1];
-      const resultPayload = calls[4][calls[4].indexOf('--payload') + 1];
-
-      const parsedMetadataPatch = JSON.parse(metadataPatch);
-      assert.equal(parsedMetadataPatch.result, 'success');
-      assert.match(parsedMetadataPatch.summary, /^EXEC:bridge-team-flow/);
+      const resultPayload = calls[2][calls[2].indexOf('--payload') + 1];
       assert.deepEqual(JSON.parse(resultPayload), {
         task_id: 'task-001',
         result: 'success',
       });
+
+      const backup = JSON.parse(readFileSync(join(resultDir, 'task-001.json'), 'utf8'));
+      assert.deepEqual(
+        {
+          taskId: backup.taskId,
+          agent: backup.agent,
+          team: backup.team,
+          result: backup.result,
+        },
+        {
+          taskId: 'task-001',
+          agent: 'executor-worker-test',
+          team: 'team-bridge-test',
+          result: 'success',
+        },
+      );
+      assert.match(backup.summary, /^EXEC:bridge-team-flow/);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
@@ -85,6 +96,7 @@ describe('tfx-route.sh — team bridge integration', () => {
   it('same-owner claim conflict는 idempotent하게 계속 실행해야 한다', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tfx-route-team-bridge-'));
     const logPath = join(tempDir, 'bridge.log');
+    const resultDir = join(tempDir, 'results');
     mkdirSync(tempDir, { recursive: true });
 
     try {
@@ -99,6 +111,7 @@ describe('tfx-route.sh — team bridge integration', () => {
           TFX_BRIDGE_SCRIPT: FAKE_BRIDGE,
           FAKE_BRIDGE_LOG: logPath,
           FAKE_BRIDGE_CLAIM_MODE: 'same-owner',
+          TFX_RESULT_DIR: resultDir,
         },
       );
 
@@ -111,12 +124,14 @@ describe('tfx-route.sh — team bridge integration', () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.equal(calls.length, 5, JSON.stringify(calls, null, 2));
+      assert.equal(calls.length, 3, JSON.stringify(calls, null, 2));
       assert.equal(calls[0][0], 'team-task-update');
       assert.equal(calls[1][0], 'team-send-message');
-      assert.equal(calls[2][0], 'team-task-update');
-      assert.equal(calls[3][0], 'team-send-message');
-      assert.equal(calls[4][0], 'result');
+      assert.equal(calls[2][0], 'result');
+
+      const backup = JSON.parse(readFileSync(join(resultDir, 'task-002.json'), 'utf8'));
+      assert.equal(backup.result, 'success');
+      assert.match(backup.summary, /^EXEC:bridge-team-flow/);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
