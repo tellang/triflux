@@ -40,14 +40,20 @@
 
 ---
 
-## v4의 새로운 기능
+## v5의 새로운 기능
 
-**triflux v4**는 단순한 라우터를 넘어 **고성능 오케스트레이션 허브**로 진화했습니다. 상주형(resident) 서비스, 네임드 파이프(Named Pipe) IPC, 그리고 고도화된 태스크 파이프라인을 통해 [Claude Code](https://claude.ai/code) 환경에서 가장 안정적인 멀티모델 경험을 제공합니다.
+**triflux v5**는 v4의 오케스트레이션 기반을 유지하면서 파이프라인을 더 똑똑하고, 더 phase-aware하게, 더 협업적으로 발전시켰습니다. 멀티태스크 오케스트레이션에서는 이제 `--thorough`가 기본 경로이므로, 계획, 승인, 검증, 복구가 기본값으로 활성화됩니다.
 
 ### 주요 특징
 
+- **`--thorough` 기본화** — 멀티태스크 오케스트레이션은 기본적으로 `plan` → `prd` → `exec` → `verify` → `fix` 전체 파이프라인을 실행합니다. 경량 경로가 필요할 때만 `--quick`을 명시합니다.
+- **Opus × Codex Scout 계획 협업** — `plan` 단계에서 Opus가 설계를 주도하고 Codex scout 워커가 코드베이스를 병렬 탐색한 뒤 최종 계획에 반영합니다.
+- **DAG 기반 라우팅 휴리스틱** — `dag_width`와 `complexity`를 함께 반영해 `quick_single`, `thorough_single`, `quick_team`, `thorough_team`, `batch_single` 전략 중 하나를 선택합니다.
+- **피드백 루프 복원** — 워커는 여러 차례 재실행될 수 있고, 최종 완료 전 리드의 피드백을 다시 받아 반영할 수 있습니다.
+- **HITL 승인 게이트** — `pipeline_advance_gated`를 통해 단계 전이 전에 사람 승인 체크포인트를 삽입합니다.
+- **Phase-aware MCP 필터링** — 파이프라인 단계에 따라 MCP 노출을 조정해 `plan`, `prd`, `verify`는 읽기 중심으로 유지하고 `exec`는 더 넓은 도구 세트를 사용합니다.
+- **Plan 파일 영속화** — 최종 계획 Markdown을 `.tfx/plans/{team}-plan.md`에 저장하고 파이프라인 artifact로 추적합니다.
 - **Hub IPC 아키텍처** — Named Pipe 및 HTTP MCP 브리지를 활용한 초고속 상주형 허브 서버.
-- **파이프라인 `--thorough`** — `plan` → `prd` → `exec` → `verify` → `fix`로 이어지는 다단계 작업 생명주기.
 - **위임(Delegator) MCP** — 에이전트와 유연하게 상호작용할 수 있는 전용 MCP 도구(`delegate`, `reply`, `status`).
 - **psmux / Windows 네이티브** — `tmux` (WSL)와 `psmux` (Windows Terminal 네이티브)를 모두 지원하는 하이브리드 세션 관리.
 - **QoS 대시보드** — AIMD 기반 동적 배치 사이징 및 실시간 상태 모니터링.
@@ -98,30 +104,34 @@ tfx setup
 ### 3. 사용 방법
 
 ```bash
-# 자동 모드 — 허브를 통한 병렬 실행
+# 자동 모드 — 허브를 통한 thorough 멀티태스크 오케스트레이션
 /tfx-auto "인증 리팩터링 + UI 업데이트 + 테스트 추가"
 
-# 파이프라인 모드 — 정밀한 다단계 실행
-/tfx-auto --thorough "복잡한 데이터 마이그레이션 구현"
+# quick 모드 — 전체 계획/검증 루프 생략
+/tfx-auto --quick "작은 회귀 버그 수정"
 
 # 직접 위임
 /tfx-delegate "최신 React 패턴 조사" --provider gemini
 ```
 
+v5에서는 멀티태스크 오케스트레이션이 기본적으로 `--thorough`로 실행되며, 더 가벼운 경로가 필요할 때 `--quick`을 사용합니다.
+
 ---
 
 ## 파이프라인: `--thorough` 모드
 
-v4 파이프라인은 복잡한 엔지니어링 작업을 위해 설계된 강력한 실행 루프를 제공합니다.
+v5 파이프라인은 복잡한 엔지니어링 작업에서 기본이 되는 thorough 실행 루프입니다. Plan 산출물은 영속화되고, PRD 핸드오프에는 사람 승인 게이트를 둘 수 있으며, verify/fix 단계는 워커 피드백 루프를 복원합니다.
 
 | 단계 | 설명 |
 |------|------|
-| **plan** | 해결책을 설계하고 의존성을 식별합니다. |
-| **prd** | 상세한 기술 명세서(Technical Spec / PRD)를 생성합니다. |
+| **plan** | Opus가 설계를 주도하고 Codex scout가 병렬 탐색을 수행하며, 계획 산출물을 파일로 영속화합니다. |
+| **prd** | 상세한 기술 명세서(Technical Spec / PRD)를 생성하고 승인 체크포인트를 준비합니다. |
 | **exec** | 실제 코드 구현을 수행합니다. |
 | **verify** | 테스트를 실행하고 구현 결과가 PRD와 일치하는지 검증합니다. |
-| **fix** | (루프) 검증 단계에서 발견된 실패를 자동으로 수정합니다 (최대 3회). |
+| **fix** | (루프) 검증 단계에서 발견된 실패를 리드 피드백과 함께 재실행하여 수정합니다 (최대 3회). |
 | **ralph** | (재시작) 수정 루프 실패 시, 새로운 통찰을 바탕으로 `plan`부터 다시 시작합니다 (최대 10회). |
+
+Phase-aware MCP 필터링으로 `plan`, `prd`, `verify`는 읽기 중심으로 제한되며, `prd` → `exec` 전이는 `pipeline_advance_gated`로 승인 대기를 걸 수 있습니다.
 
 ---
 
@@ -157,7 +167,7 @@ MCP 도구를 통해 허브와 직접 상호작용하세요.
 
 ## 보안
 
-triflux v4는 안전한 전문 개발 환경을 위해 설계되었습니다.
+triflux v5는 안전한 전문 개발 환경을 위해 설계되었습니다.
 
 - **허브 토큰 인증** — `TFX_HUB_TOKEN`을 이용한 보안 IPC (Bearer 인증).
 - **Localhost 전용** — 허브가 기본적으로 `127.0.0.1`에만 바인딩되어 외부 접근을 차단합니다.

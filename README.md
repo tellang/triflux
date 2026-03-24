@@ -40,14 +40,20 @@
 
 ---
 
-## What's New in v4?
+## What's New in v5?
 
-**triflux v4** evolves from a simple router into a **high-performance orchestration hub**. It introduces resident services, named-pipe IPC, and advanced task pipelines to provide the most stable multi-model experience for [Claude Code](https://claude.ai/code).
+**triflux v5** keeps the v4 orchestration foundation intact while making the pipeline smarter, more phase-aware, and more collaborative. For multi-task orchestration, `--thorough` is now the default path, so planning, approval, verification, and recovery stay on by default instead of being bolted on later.
 
 ### Key Features
 
+- **`--thorough` by Default** — Multi-task orchestration now defaults to the full `plan` → `prd` → `exec` → `verify` → `fix` pipeline. Reach for `--quick` only when you explicitly want the lighter path.
+- **Opus × Codex Scout Planning** — In `plan`, Opus leads architecture decisions while Codex scout workers explore the codebase in parallel and feed findings back into the final plan.
+- **DAG-based Routing Heuristics** — Routing now considers both `dag_width` and `complexity` to choose between `quick_single`, `thorough_single`, `quick_team`, `thorough_team`, and `batch_single`.
+- **Restored Feedback Loop** — Workers can be re-run for multiple iterations and receive lead feedback before final completion.
+- **HITL Approval Gate** — `pipeline_advance_gated` inserts a human approval checkpoint before gated phase transitions.
+- **Phase-aware MCP Filtering** — MCP exposure changes by pipeline phase so `plan`, `prd`, and `verify` stay read-focused while `exec` keeps broader tooling.
+- **Persistent Plan Files** — Final plan markdown is saved to `.tfx/plans/{team}-plan.md` and tracked as a pipeline artifact.
 - **Hub IPC Architecture** — Lightning-fast resident Hub server with Named Pipe & HTTP MCP bridge.
-- **Pipeline `--thorough`** — Multi-phase task lifecycle: `plan` → `prd` → `exec` → `verify` → `fix`.
 - **Delegator MCP** — Native MCP tools (`delegate`, `reply`, `status`) for seamless agent interaction.
 - **psmux / Windows Native** — Hybrid support for `tmux` (WSL) and `psmux` (Windows Terminal native).
 - **QoS Dashboard** — Real-time health monitoring with AIMD-based dynamic batch sizing.
@@ -98,30 +104,34 @@ tfx setup
 ### 3. Usage
 
 ```bash
-# Auto mode — Parallel execution via Hub
+# Auto mode — Thorough multi-task orchestration via Hub
 /tfx-auto "refactor auth + update UI + add tests"
 
-# Pipeline mode — Thorough multi-phase execution
-/tfx-auto --thorough "implement complex data migration"
+# Quick mode — Skip the full planning/verification loop
+/tfx-auto --quick "fix a small regression"
 
 # Direct Delegation
 /tfx-delegate "research latest React patterns" --provider gemini
 ```
 
+In v5, multi-task orchestration defaults to `--thorough`; use `--quick` when you explicitly want the lighter path.
+
 ---
 
 ## Pipeline: `--thorough` Mode
 
-The v4 Pipeline provides a robust execution loop designed for complex engineering tasks.
+The v5 pipeline is the default thorough execution loop for complex engineering work. Plan artifacts are persisted, PRD handoff can be gated by human approval, and verify/fix restores the worker feedback loop.
 
 | Phase | Description |
 |-------|-------------|
-| **plan** | Architect the solution and identify dependencies. |
-| **prd** | Generate a detailed Technical Specification / PRD. |
+| **plan** | Opus-led solution design with parallel Codex scout exploration and a persisted plan artifact. |
+| **prd** | Generate a detailed Technical Specification / PRD and prepare the approval checkpoint. |
 | **exec** | Perform the actual code implementation. |
 | **verify** | Run tests and verify the implementation against the PRD. |
-| **fix** | (Loop) Automatically fix failures identified in the verify phase (Max 3). |
+| **fix** | (Loop) Re-run workers with lead feedback to fix failures identified in the verify phase (Max 3). |
 | **ralph** | (Reset) If the fix loop fails, restart from `plan` with new insights (Max 10). |
+
+Phase-aware MCP filtering keeps `plan`, `prd`, and `verify` read-heavy, while the `prd` → `exec` handoff can be gated through `pipeline_advance_gated`.
 
 ---
 
@@ -157,7 +167,7 @@ Interact with the Hub directly through MCP tools.
 
 ## Security
 
-triflux v4 is designed for secure, professional environments:
+triflux v5 is designed for secure, professional environments:
 
 - **Hub Token Auth** — Secure IPC using `TFX_HUB_TOKEN` (Bearer Auth).
 - **Localhost Only** — Default Hub binding to `127.0.0.1` prevents external access.
