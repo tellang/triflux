@@ -472,7 +472,72 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 19. pipeline_list ──
+    // ── 19. pipeline_advance_gated (HITL 승인 게이트) ──
+    {
+      name: 'pipeline_advance_gated',
+      description: 'HITL 승인 게이트가 포함된 파이프라인 전이. 지정 단계로의 전이 전 사용자 승인을 요청하고, 승인 후 전이를 실행합니다. deadline 초과 시 default_action에 따라 자동 처리됩니다.',
+      inputSchema: {
+        type: 'object',
+        required: ['team_name', 'phase'],
+        properties: {
+          team_name: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+          phase: { type: 'string', enum: ['plan', 'prd', 'exec', 'verify', 'fix', 'complete', 'failed'] },
+          prompt: { type: 'string', description: '사용자에게 표시할 승인 요청 메시지' },
+          deadline_ms: { type: 'integer', minimum: 5000, maximum: 600000, default: 120000 },
+          default_action: { type: 'string', enum: ['timeout_continue', 'timeout_abort'], default: 'timeout_continue' },
+          requester_agent: { type: 'string', description: '요청자 에이전트 이름' },
+        },
+      },
+      handler: wrap('PIPELINE_ADVANCE_GATED_FAILED', (args) => {
+        ensurePipelineTable(store.db);
+        const pipeline = createPipeline(store.db, args.team_name);
+
+        // 전이 가능 여부 사전 확인
+        if (!pipeline.canAdvance(args.phase)) {
+          const current = pipeline.getState();
+          return {
+            ok: false,
+            error: {
+              code: 'TRANSITION_BLOCKED',
+              message: `전이 불가: ${current.phase} → ${args.phase}`,
+            },
+          };
+        }
+
+        // HITL 승인 요청 생성
+        const approvalPrompt = args.prompt || `파이프라인 ${args.team_name}: ${pipeline.getState().phase} → ${args.phase} 전이를 승인하시겠습니까?`;
+        const deadlineMs = args.deadline_ms || 120000;
+        const now = Date.now();
+
+        const hitlResult = hitl.requestHumanInput({
+          requester_agent: args.requester_agent || `pipeline:${args.team_name}`,
+          kind: 'approval',
+          prompt: approvalPrompt,
+          deadline_ms: now + deadlineMs,
+          default_action: args.default_action || 'timeout_continue',
+        });
+
+        if (!hitlResult.ok) {
+          return hitlResult;
+        }
+
+        return {
+          ok: true,
+          data: {
+            pending: true,
+            request_id: hitlResult.data.request_id,
+            team_name: args.team_name,
+            target_phase: args.phase,
+            current_phase: pipeline.getState().phase,
+            deadline_ms: now + deadlineMs,
+            default_action: args.default_action || 'timeout_continue',
+            message: `승인 대기 중. ID: ${hitlResult.data.request_id}. ${Math.round(deadlineMs / 1000)}초 후 ${args.default_action || 'timeout_continue'} 자동 실행.`,
+          },
+        };
+      }),
+    },
+
+    // ── 20. pipeline_list ──
     {
       name: 'pipeline_list',
       description: '활성 파이프라인 목록을 조회합니다',

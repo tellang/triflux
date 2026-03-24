@@ -127,6 +127,31 @@ const PROFILE_DEFINITIONS = Object.freeze({
   }),
 });
 
+/**
+ * 파이프라인 단계별 MCP 서버/도구 제한 (post-filter).
+ * role-based 프로필 위에 추가 적용. 빈 배열 = 전체 차단, 미정의 = 제한 없음.
+ */
+export const PHASE_OVERRIDES = Object.freeze({
+  plan: Object.freeze({
+    description: '계획 단계: 읽기 전용 탐색만 허용',
+    allowedServers: Object.freeze(['context7']),
+    blockedServers: Object.freeze(['playwright', 'tavily', 'exa']),
+  }),
+  prd: Object.freeze({
+    description: 'PRD 단계: 읽기 전용 탐색 + 문서 조회',
+    allowedServers: Object.freeze(['context7', 'brave-search']),
+    blockedServers: Object.freeze(['playwright']),
+  }),
+  exec: Object.freeze({
+    description: '실행 단계: 프로필 기반 전체 허용 (제한 없음)',
+  }),
+  verify: Object.freeze({
+    description: '검증 단계: 읽기 전용 + 분석 도구',
+    allowedServers: Object.freeze(['context7', 'brave-search', 'exa']),
+    blockedServers: Object.freeze(['playwright']),
+  }),
+});
+
 export const LEGACY_PROFILE_ALIASES = Object.freeze({
   implement: 'executor',
   analyze: 'analyze',
@@ -553,13 +578,23 @@ export function buildMcpPolicy(options = {}) {
   const inventoryIndex = buildInventoryIndex(inventory);
   const resolvedOptions = { ...options, inventory, inventoryIndex };
   const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
-  const allowedServers = resolveAllowedServers(resolvedOptions);
+  let allowedServers = resolveAllowedServers(resolvedOptions);
   const hint = buildPromptHint(resolvedOptions);
+
+  // Phase-aware post-filter: 파이프라인 단계별 서버 제한 적용
+  const phase = options.phase;
+  const phaseOverride = phase && PHASE_OVERRIDES[phase];
+  if (phaseOverride && phaseOverride.blockedServers) {
+    const blocked = new Set(phaseOverride.blockedServers);
+    allowedServers = allowedServers.filter((s) => !blocked.has(s));
+  }
+
   return {
     requestedProfile: typeof options.requestedProfile === 'string' && options.requestedProfile
       ? options.requestedProfile
       : 'auto',
     resolvedProfile,
+    resolvedPhase: phase || null,
     allowedServers,
     hint,
     geminiAllowedServers: getGeminiAllowedServers(resolvedOptions),
@@ -577,14 +612,18 @@ function shellArray(name, values) {
 }
 
 export function toShellExports(policy) {
-  return [
+  const lines = [
     `MCP_PROFILE_REQUESTED=${shellEscape(policy.requestedProfile)}`,
     `MCP_RESOLVED_PROFILE=${shellEscape(policy.resolvedProfile)}`,
     `MCP_HINT=${shellEscape(policy.hint)}`,
     shellArray('GEMINI_ALLOWED_SERVERS', policy.geminiAllowedServers),
     shellArray('CODEX_CONFIG_FLAGS', policy.codexConfigOverrides.flatMap((override) => ['-c', override])),
     `CODEX_CONFIG_JSON=${shellEscape(JSON.stringify(policy.codexConfig))}`,
-  ].join('\n');
+  ];
+  if (policy.resolvedPhase) {
+    lines.push(`MCP_PIPELINE_PHASE=${shellEscape(policy.resolvedPhase)}`);
+  }
+  return lines.join('\n');
 }
 
 function parseCliArgs(argv) {
@@ -635,6 +674,9 @@ function parseCliArgs(argv) {
         break;
       case '--worker-index':
         args.workerIndex = Number.parseInt(next(), 10);
+        break;
+      case '--phase':
+        args.phase = next();
         break;
       default:
         throw new Error(`알 수 없는 옵션: ${token}`);

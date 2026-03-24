@@ -2,6 +2,9 @@
 //
 // 상태(state.mjs) + 전이(transitions.mjs) 통합 인터페이스
 
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
 import { canTransition, transitionPhase, ralphRestart, TERMINAL } from './transitions.mjs';
 import {
   ensurePipelineTable,
@@ -90,6 +93,22 @@ export function createPipeline(db, teamName, opts = {}) {
       if (!current) return;
       const artifacts = { ...(current.artifacts || {}), [key]: value };
       state = updatePipelineState(db, teamName, { artifacts });
+    },
+
+    /**
+     * Plan 파일을 .tfx/plans/{teamName}-plan.md 에 기록하고
+     * artifact('plan_path')에 절대 경로를 저장한다.
+     * @param {string} content - Plan markdown 내용
+     * @returns {string} 절대 경로
+     */
+    writePlanFile(content) {
+      const safeName = teamName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+      const planDir = resolve(process.cwd(), '.tfx', 'plans');
+      mkdirSync(planDir, { recursive: true });
+      const planPath = join(planDir, `${safeName}-plan.md`);
+      writeFileSync(planPath, content, 'utf8');
+      this.setArtifact('plan_path', planPath);
+      return planPath;
     },
 
     /**

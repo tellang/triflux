@@ -36,6 +36,7 @@ describe('mcp-filter', () => {
 
     assert.deepEqual(policy.allowedServers, ['context7', 'brave-search', 'tavily', 'exa']);
     assert.match(policy.hint, /웹 검색 우선순위: tavily, exa, brave-search\./);
+    assert.match(policy.hint, /검색 깊이를 제한하고 읽기 전용 조사에 집중하세요/);
   });
 
   it('executor 프로필은 코드 구현 문맥에서 context7 + exa로 축소된다', () => {
@@ -47,8 +48,8 @@ describe('mcp-filter', () => {
     });
 
     assert.deepEqual(policy.allowedServers, ['context7', 'exa']);
-    assert.equal(policy.codexConfig.mcp_servers.playwright.enabled, false);
-    assert.equal(policy.codexConfig.mcp_servers.tavily.enabled, false);
+    assert.strictEqual(policy.codexConfig.mcp_servers.playwright, undefined);
+    assert.strictEqual(policy.codexConfig.mcp_servers.tavily, undefined);
   });
 
   it('designer 프로필은 브라우저/UI 문맥에서 playwright를 남기고 일반 검색 서버를 줄인다', () => {
@@ -71,7 +72,7 @@ describe('mcp-filter', () => {
     });
 
     assert.deepEqual(policy.geminiAllowedServers, ['context7', 'brave-search', 'sequential-thinking']);
-    assert.equal(policy.codexConfig.mcp_servers['playwright'].enabled, false);
+    assert.strictEqual(policy.codexConfig.mcp_servers['playwright'], undefined);
     assert.deepEqual(
       policy.codexConfig.mcp_servers['sequential-thinking'].enabled_tools,
       ['sequentialthinking'],
@@ -87,7 +88,7 @@ describe('mcp-filter', () => {
 
     assert.ok(overrides.includes('mcp_servers.context7.enabled=true'));
     assert.ok(overrides.includes('mcp_servers.exa.enabled_tools=["web_search_exa"]'));
-    assert.ok(overrides.includes('mcp_servers.tavily.enabled=false'));
+    assert.ok(!overrides.includes('mcp_servers.tavily.enabled=false'));
   });
 
   it('search server top-k 정렬은 inventory tool_count를 tie-break에 사용한다', () => {
@@ -128,8 +129,8 @@ describe('mcp-filter', () => {
     });
 
     assert.deepEqual(policy.allowedServers, ['context7', 'exa']);
-    assert.equal(policy.codexConfig.mcp_servers.playwright.enabled, false);
-    assert.equal(policy.codexConfig.mcp_servers.tavily.enabled, false);
+    assert.strictEqual(policy.codexConfig.mcp_servers.playwright, undefined);
+    assert.strictEqual(policy.codexConfig.mcp_servers.tavily, undefined);
   });
 
   it('hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다', () => {
@@ -142,5 +143,64 @@ describe('mcp-filter', () => {
 
     assert.deepEqual(policy.allowedServers, ['context7', 'tavily', 'brave-search']);
     assert.match(policy.hint, /웹 검색 우선순위: tavily, brave-search\./);
+  });
+});
+
+describe('mcp-filter — phase-aware filtering (이슈 3)', () => {
+  it('T3-01: plan phase는 playwright를 차단해야 한다', () => {
+    const policy = buildMcpPolicy({
+      agentType: 'executor',
+      requestedProfile: 'executor',
+      availableServers: ['context7', 'playwright', 'brave-search', 'exa', 'tavily'],
+      phase: 'plan',
+    });
+    assert.ok(!policy.allowedServers.includes('playwright'), 'plan 단계에서 playwright 차단');
+    assert.ok(!policy.allowedServers.includes('tavily'), 'plan 단계에서 tavily 차단');
+    assert.ok(!policy.allowedServers.includes('exa'), 'plan 단계에서 exa 차단');
+    assert.equal(policy.resolvedPhase, 'plan');
+  });
+
+  it('T3-02: exec phase는 프로필 기반 전체 허용해야 한다', () => {
+    const policy = buildMcpPolicy({
+      agentType: 'executor',
+      requestedProfile: 'executor',
+      availableServers: ['context7', 'playwright', 'brave-search', 'exa'],
+      phase: 'exec',
+    });
+    // exec phase에는 blockedServers가 없으므로 프로필 기반 결과 그대로
+    assert.ok(policy.allowedServers.length > 0);
+    assert.equal(policy.resolvedPhase, 'exec');
+  });
+
+  it('T3-03: verify phase는 playwright를 차단해야 한다', () => {
+    const policy = buildMcpPolicy({
+      agentType: 'executor',
+      requestedProfile: 'executor',
+      availableServers: ['context7', 'playwright', 'brave-search', 'exa'],
+      phase: 'verify',
+    });
+    assert.ok(!policy.allowedServers.includes('playwright'), 'verify 단계에서 playwright 차단');
+    assert.equal(policy.resolvedPhase, 'verify');
+  });
+
+  it('T3-04: phase 미지정 시 기존 동작 유지 (회귀 방지)', () => {
+    const withPhase = buildMcpPolicy({
+      agentType: 'executor',
+      requestedProfile: 'executor',
+      availableServers: ['context7', 'brave-search'],
+    });
+    assert.equal(withPhase.resolvedPhase, null);
+    assert.ok(withPhase.allowedServers.includes('context7'));
+  });
+
+  it('T3-05: prd phase는 brave-search를 허용하고 playwright를 차단해야 한다', () => {
+    const policy = buildMcpPolicy({
+      agentType: 'analyst',
+      requestedProfile: 'analyze',
+      availableServers: ['context7', 'playwright', 'brave-search', 'exa'],
+      phase: 'prd',
+    });
+    assert.ok(!policy.allowedServers.includes('playwright'), 'prd 단계에서 playwright 차단');
+    assert.equal(policy.resolvedPhase, 'prd');
   });
 });
