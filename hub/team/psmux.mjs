@@ -641,7 +641,25 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
  */
 export function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSec = 300) {
   ensurePsmuxInstalled();
-  const pane = resolvePane(sessionName, paneNameOrTarget);
+
+  // E4 크래시 복구: 초기 resolvePane도 세션 사망을 감지
+  let pane;
+  try {
+    pane = resolvePane(sessionName, paneNameOrTarget);
+  } catch (resolveError) {
+    if (!psmuxSessionExists(sessionName)) {
+      return {
+        matched: false,
+        paneId: "",
+        paneName: String(paneNameOrTarget),
+        logPath: "",
+        match: null,
+        sessionDead: true,
+      };
+    }
+    throw resolveError; // 세션은 살아있지만 pane을 못 찾음 → 원래 에러 전파
+  }
+
   const paneName = pane.title || paneNameOrTarget;
   const logPath = getCaptureLogPath(sessionName, paneName);
   if (!existsSync(logPath)) {
@@ -652,7 +670,23 @@ export function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSe
   const regex = toPatternRegExp(pattern);
 
   while (Date.now() <= deadline) {
-    refreshCaptureSnapshot(sessionName, pane.paneId);
+    // E4 크래시 복구: capture 실패 시 세션 생존 체크
+    try {
+      refreshCaptureSnapshot(sessionName, pane.paneId);
+    } catch {
+      if (!psmuxSessionExists(sessionName)) {
+        return {
+          matched: false,
+          paneId: pane.paneId,
+          paneName,
+          logPath,
+          match: null,
+          sessionDead: true,
+        };
+      }
+      // 일시적 오류 — 다음 폴링에서 재시도
+    }
+
     const content = readCaptureLog(logPath);
     const match = regex.exec(content);
     if (match) {

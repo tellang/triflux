@@ -148,10 +148,36 @@ status는 "completed"만 사용. 실패 여부는 `metadata.result`로 구분.
 3. 실패 시 `forceCleanupTeam(teamName)` → 그래도 실패 시 `rm -rf ~/.claude/teams/{teamName}/` 안내
 4. 종합 보고서 출력
 
-### Phase 3-mux: 레거시 psmux/tmux 모드
+### Phase 3-mux: psmux 헤드리스 모드
 
-`--tmux`/`--psmux` 시 pane 기반 실행. psmux가 Windows 1순위.
-`Bash("node {PKG_ROOT}/bin/triflux.mjs multi --no-attach --agents {agents} \\\"{task}\\\"")`
+`--tmux`/`--psmux` 시 pane 기반 헤드리스 실행. Agent 래퍼 없이 Lead가 직접 CLI를 제어하여 토큰 76-89% 절감.
+
+**핵심 프리미티브** (`hub/team/psmux.mjs`):
+- `createPsmuxSession(name, {layout, paneCount})` — 세션 + pane 분할
+- `dispatchCommand(session, paneName, cmd)` → `{token, paneId, logPath}`
+- `waitForCompletion(session, paneName, token, timeoutSec)` → `{matched, exitCode, sessionDead?}`
+- 완료 마커: `__TRIFLUX_DONE__:token:exitCode` (PowerShell 래핑)
+- pane 이름: `"lead"` → index 0, `"worker-N"` → index N (대소문자 무관)
+
+**헤드리스 오케스트레이션** (`hub/team/headless.mjs`):
+```
+import { runHeadlessWithCleanup } from "hub/team/headless.mjs";
+const { results } = runHeadlessWithCleanup([
+  { cli: "codex", prompt: "코드 리뷰", role: "reviewer" },
+  { cli: "gemini", prompt: "문서 작성", role: "writer" },
+], { timeoutSec: 300 });
+```
+
+**CLI 헤드리스 명령 패턴:**
+| CLI | 명령 | 출력 |
+|-----|-------|------|
+| Codex | `codex exec 'prompt' -o result.txt --color never` | 파일 |
+| Gemini | `gemini -p 'prompt' -o text > result.txt` | 리다이렉트 |
+| Claude | `claude -p 'prompt' --output-format text > result.txt` | 리다이렉트 |
+
+**E4 크래시 복구:** `waitForCompletion`이 세션 사망 시 `{sessionDead: true}` 반환 (throw 대신).
+
+**레거시 인터랙티브 모드:** `Bash("node {PKG_ROOT}/bin/triflux.mjs multi --no-attach --agents {agents} \\\"{task}\\\"")`
 
 ## 전제 조건
 
