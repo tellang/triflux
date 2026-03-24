@@ -176,7 +176,10 @@ function normalizeProfileName(profile) {
   if (raw === 'auto') return raw;
   if (PROFILE_DEFINITIONS[raw]) return raw;
   if (LEGACY_PROFILE_ALIASES[raw]) return LEGACY_PROFILE_ALIASES[raw];
-  throw new Error(`지원하지 않는 MCP 프로필: ${raw}`);
+  // graceful fallback: --flag나 잘못된 프로필 → 'auto'로 폴백 (hard crash 방지)
+  if (raw.startsWith('-') || raw.startsWith('/')) return 'auto';
+  console.error(`[mcp-filter] 경고: 알 수 없는 프로필 '${raw}', 'auto'로 폴백`);
+  return 'auto';
 }
 
 function resolveAutoProfile(agentType = '') {

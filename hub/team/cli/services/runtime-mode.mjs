@@ -8,6 +8,7 @@ import {
 export function normalizeTeammateMode(mode = "auto") {
   const raw = String(mode).toLowerCase();
   if (raw === "inline" || raw === "native") return "in-process";
+  if (raw === "headless" || raw === "hl") return "headless";
   if (raw === "in-process" || raw === "tmux" || raw === "wt" || raw === "psmux") return raw;
   if (raw === "windows-terminal" || raw === "windows_terminal") return "wt";
   if (raw === "auto") {

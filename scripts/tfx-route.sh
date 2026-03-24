@@ -121,14 +121,7 @@ MCP_PROFILE="${3:-auto}"
 USER_TIMEOUT="${4:-}"
 CONTEXT_FILE="${5:-}"
 
-# ── 인자 검증: CLI 이름을 role 자리에 사용한 경우 안내 ──
-case "$AGENT_TYPE" in
-  codex|gemini|claude|claude-native)
-    echo "ERROR: '$AGENT_TYPE'는 CLI 이름이지 에이전트 역할이 아닙니다." >&2
-    echo "올바른 사용법: TFX_CLI_MODE=$AGENT_TYPE bash tfx-route.sh <역할> \"프롬프트\"" >&2
-    echo "사용 가능한 역할: executor, code-reviewer, scientist, designer, architect, verifier 등" >&2
-    exit 64 ;;
-esac
+# ── CLI 이름은 route_agent()에서 기본 역할 alias로 처리됨 (codex→executor, gemini→designer, claude→explore) ──
 
 # ── 인자 검증: MCP_PROFILE이 --flag 형태인 경우 거절 ──
 if [[ "$MCP_PROFILE" == --* ]]; then
@@ -668,11 +661,24 @@ route_agent() {
       CLI_TYPE="codex"; CLI_CMD="codex"
       CLI_ARGS="exec --profile spark_fast ${codex_base}"
       CLI_EFFORT="spark_fast"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+    # ─── CLI 이름 alias (사용자 편의) ───
+    codex)
+      CLI_TYPE="codex"; CLI_CMD="codex"
+      CLI_ARGS="exec ${codex_base}"
+      CLI_EFFORT="high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+    gemini)
+      CLI_TYPE="gemini"; CLI_CMD="gemini"
+      CLI_ARGS="-m gemini-3.1-pro-preview -y --prompt"
+      CLI_EFFORT="pro"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+    claude)
+      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     *)
       echo "ERROR: 알 수 없는 에이전트 타입: $agent" >&2
       echo "사용 가능: executor, build-fixer, debugger, deep-executor, architect, planner, critic, analyst," >&2
       echo "          code-reviewer, security-reviewer, quality-reviewer, scientist, document-specialist," >&2
-      echo "          designer, writer, explore, verifier, test-engineer, qa-tester, spark" >&2
+      echo "          designer, writer, explore, verifier, test-engineer, qa-tester, spark," >&2
+      echo "          codex, gemini, claude (CLI alias)" >&2
       exit 1 ;;
   esac
 }

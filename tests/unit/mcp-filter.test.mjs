@@ -204,17 +204,19 @@ describe('mcp-filter — phase-aware filtering (이슈 3)', () => {
     assert.equal(policy.resolvedPhase, 'prd');
   });
 
-  it('잘못된 MCP 프로필은 buildMcpPolicy에서 throw되어야 한다', () => {
-    assert.throws(
-      () => buildMcpPolicy({ agentType: 'executor', requestedProfile: '--cli' }),
-      /지원하지 않는 MCP 프로필/,
-    );
+  it('잘못된 MCP 프로필은 auto로 graceful fallback한다', () => {
+    // --flag 형태는 auto로 폴백 (hard crash 방지)
+    const policy = buildMcpPolicy({ agentType: 'executor', requestedProfile: '--cli' });
+    assert.ok(policy, 'auto 폴백으로 policy 반환');
   });
 
-  it('--flag 형태 프로필은 normalizeProfileName에서 throw', () => {
-    assert.throws(
-      () => resolveMcpProfile('executor', '--verbose'),
-      /지원하지 않는 MCP 프로필/,
-    );
+  it('--flag 형태 프로필은 auto로 폴백한다', () => {
+    const result = resolveMcpProfile('executor', '--verbose');
+    assert.ok(result, 'auto 폴백으로 결과 반환');
+  });
+
+  it('알 수 없는 프로필도 auto로 폴백한다', () => {
+    const result = resolveMcpProfile('executor', 'nonexistent-profile');
+    assert.ok(result, 'auto 폴백으로 결과 반환');
   });
 });

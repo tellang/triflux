@@ -8,6 +8,7 @@ import { fail, ok, warn } from "../../render.mjs";
 import { parseTeamArgs } from "./parse-args.mjs";
 import { startInProcessTeam } from "./start-in-process.mjs";
 import { startMuxTeam } from "./start-mux.mjs";
+import { startHeadlessTeam } from "./start-headless.mjs";
 import { startWtTeam } from "./start-wt.mjs";
 
 function printStartUsage() {
@@ -68,9 +69,11 @@ export async function teamStart(args = []) {
 
   const state = effectiveMode === "in-process"
     ? await startInProcessTeam({ sessionId, task, lead, agents, subtasks, hubUrl })
-    : effectiveMode === "wt"
-      ? await startWtTeam({ sessionId, task, lead, agents, subtasks, layout, hubUrl })
-      : await startMuxTeam({ sessionId, task, lead, agents, subtasks, layout, hubUrl, teammateMode: effectiveMode });
+    : effectiveMode === "headless"
+      ? await startHeadlessTeam({ sessionId, task, lead, agents, subtasks, layout })
+      : effectiveMode === "wt"
+        ? await startWtTeam({ sessionId, task, lead, agents, subtasks, layout, hubUrl })
+        : await startMuxTeam({ sessionId, task, lead, agents, subtasks, layout, hubUrl, teammateMode: effectiveMode });
 
   if (!state) return fail("in-process supervisor 시작 실패");
   saveTeamState(state);
