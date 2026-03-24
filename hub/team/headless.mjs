@@ -64,7 +64,7 @@ function readResult(resultFile, sessionName, paneName) {
  * @param {(event: object) => void} [opts.onProgress] — 진행 콜백
  * @returns {{ sessionName: string, results: Array<{cli: string, paneName: string, matched: boolean, exitCode: number|null, output: string, sessionDead?: boolean}> }}
  */
-export function runHeadless(sessionName, assignments, opts = {}) {
+export async function runHeadless(sessionName, assignments, opts = {}) {
   const {
     timeoutSec = 300,
     layout = "2x2",
@@ -89,9 +89,9 @@ export function runHeadless(sessionName, assignments, opts = {}) {
     return { ...dispatch, paneName, resultFile, cli: assignment.cli, role: assignment.role };
   });
 
-  // 순차 대기 (각 pane은 독립 실행, 총 시간 ≈ max(개별 시간))
-  const results = dispatches.map((d) => {
-    const completion = waitForCompletion(sessionName, d.paneName, d.token, timeoutSec);
+  // 병렬 대기 (Promise.all — 모든 pane 동시 폴링, 총 시간 = max(개별 시간))
+  const results = await Promise.all(dispatches.map(async (d) => {
+    const completion = await waitForCompletion(sessionName, d.paneName, d.token, timeoutSec);
 
     const output = completion.matched
       ? readResult(d.resultFile, sessionName, d.paneName)
@@ -117,7 +117,7 @@ export function runHeadless(sessionName, assignments, opts = {}) {
       output,
       sessionDead: completion.sessionDead || false,
     };
-  });
+  }));
 
   return { sessionName, results };
 }
@@ -130,12 +130,12 @@ export function runHeadless(sessionName, assignments, opts = {}) {
  * @param {object} [opts] — runHeadless opts + sessionPrefix
  * @returns {{ results: Array, sessionName: string }}
  */
-export function runHeadlessWithCleanup(assignments, opts = {}) {
+export async function runHeadlessWithCleanup(assignments, opts = {}) {
   const { sessionPrefix = "tfx-hl", ...runOpts } = opts;
   const sessionName = `${sessionPrefix}-${Date.now().toString(36).slice(-6)}`;
 
   try {
-    return runHeadless(sessionName, assignments, runOpts);
+    return await runHeadless(sessionName, assignments, runOpts);
   } finally {
     try {
       killPsmuxSession(sessionName);

@@ -337,7 +337,7 @@ describe("psmux.mjs steering", () => {
     const { startCapture, waitForCompletion } = await importFreshPsmux();
 
     const capture = startCapture("tfx-test", "worker-1");
-    const result = waitForCompletion("tfx-test", "worker-1", "token-123", 1);
+    const result = await waitForCompletion("tfx-test", "worker-1", "token-123", 1);
 
     assert.equal(capture.paneId, "tfx-test:0.1");
     assert.equal(result.matched, true);

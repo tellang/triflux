@@ -37,6 +37,10 @@ function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
 }
 
+function sleepMsAsync(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
 function tokenizeCommand(command) {
   const source = String(command || "").trim();
   if (!source) return [];
@@ -639,7 +643,7 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
  * @param {number} timeoutSec
  * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null }}
  */
-export function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSec = 300) {
+export async function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSec = 300) {
   ensurePsmuxInstalled();
 
   // E4 크래시 복구: 초기 resolvePane도 세션 사망을 감지
@@ -702,7 +706,7 @@ export function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSe
     if (Date.now() > deadline) {
       break;
     }
-    sleepMs(POLL_INTERVAL_MS);
+    await sleepMsAsync(POLL_INTERVAL_MS);
   }
 
   return {
@@ -722,12 +726,12 @@ export function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSe
  * @param {number} timeoutSec
  * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null, token: string, exitCode: number|null }}
  */
-export function waitForCompletion(sessionName, paneNameOrTarget, token, timeoutSec = 300) {
+export async function waitForCompletion(sessionName, paneNameOrTarget, token, timeoutSec = 300) {
   const completionRegex = new RegExp(
     `${escapeRegExp(COMPLETION_PREFIX)}${escapeRegExp(token)}:(\\d+)`,
     "m",
   );
-  const result = waitForPattern(sessionName, paneNameOrTarget, completionRegex, timeoutSec);
+  const result = await waitForPattern(sessionName, paneNameOrTarget, completionRegex, timeoutSec);
   const exitMatch = result.match ? completionRegex.exec(result.match) : null;
   return {
     ...result,
@@ -874,6 +878,7 @@ export function captureWorkerOutput(sessionName, workerName, lines = 50) {
 // ─── CLI 진입점 ───
 
 if (process.argv[1] && process.argv[1].endsWith("psmux.mjs")) {
+  (async () => {
   const [, , cmd, ...args] = process.argv;
 
   // CLI 인자 파싱 헬퍼
@@ -956,7 +961,7 @@ if (process.argv[1] && process.argv[1].endsWith("psmux.mjs")) {
           console.error("사용법: node psmux.mjs wait-pattern --session <세션> --name <pane> --pattern <정규식> [--timeout <초>]");
           process.exit(1);
         }
-        const result = waitForPattern(session, name, pattern, timeoutSec);
+        const result = await waitForPattern(session, name, pattern, timeoutSec);
         console.log(JSON.stringify(result, null, 2));
         if (!result.matched) process.exit(2);
         break;
@@ -970,7 +975,7 @@ if (process.argv[1] && process.argv[1].endsWith("psmux.mjs")) {
           console.error("사용법: node psmux.mjs wait-completion --session <세션> --name <pane> --token <토큰> [--timeout <초>]");
           process.exit(1);
         }
-        const result = waitForCompletion(session, name, token, timeoutSec);
+        const result = await waitForCompletion(session, name, token, timeoutSec);
         console.log(JSON.stringify(result, null, 2));
         if (!result.matched) process.exit(2);
         break;
@@ -992,4 +997,5 @@ if (process.argv[1] && process.argv[1].endsWith("psmux.mjs")) {
     console.error(`오류: ${err.message}`);
     process.exit(1);
   }
+  })();
 }
