@@ -14,7 +14,7 @@ export async function startHeadlessTeam({ sessionId, task, lead, agents, subtask
   }));
 
   ok("헤드리스 실행 시작...");
-  const { sessionName, results } = runHeadless(sessionId, assignments, {
+  const { sessionName, results } = await runHeadless(sessionId, assignments, {
     timeoutSec: 300,
     layout,
     onProgress(event) {

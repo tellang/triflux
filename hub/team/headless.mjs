@@ -45,12 +45,12 @@ export function buildHeadlessCommand(cli, prompt, resultFile) {
  * @param {string} paneName
  * @returns {string}
  */
-function readResult(resultFile, sessionName, paneName) {
+function readResult(resultFile, paneId) {
   if (existsSync(resultFile)) {
     return readFileSync(resultFile, "utf8").trim();
   }
-  // fallback: capture-pane에서 읽기
-  return capturePsmuxPane(`${sessionName}:0.${paneName}`, 30);
+  // fallback: capture-pane (paneId = "tfx:0.1" 형태)
+  return capturePsmuxPane(paneId, 30);
 }
 
 /**
@@ -94,7 +94,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     const completion = await waitForCompletion(sessionName, d.paneName, d.token, timeoutSec);
 
     const output = completion.matched
-      ? readResult(d.resultFile, sessionName, d.paneName)
+      ? readResult(d.resultFile, d.paneId)
       : "";
 
     if (onProgress) {
