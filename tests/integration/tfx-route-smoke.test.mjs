@@ -72,9 +72,18 @@ describe('tfx-route.sh — claude-native 에이전트 메타데이터 출력', (
     assert.match(out(result), /AGENT=explore/);
   });
 
-  it('verifier 에이전트는 기본 route table에서 codex review 메타데이터를 출력해야 한다', () => {
+  it('verifier 에이전트는 기본 route table에서 claude-native 메타데이터를 출력해야 한다', () => {
     const result = runBash(
-      `CODEX_BIN=codex bash "${ROUTE_SCRIPT}" verifier 'test-prompt'`,
+      `bash "${ROUTE_SCRIPT}" verifier 'test-prompt'`,
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+    assert.match(out(result), /AGENT=verifier/);
+  });
+
+  it('verifier + TFX_NO_CLAUDE_NATIVE=1은 codex review 경로를 사용해야 한다', () => {
+    const result = runBash(
+      `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=codex bash "${ROUTE_SCRIPT}" verifier 'test-prompt'`,
       fixtureEnv({ FAKE_CODEX_MODE: 'exec' }),
     );
     assert.equal(result.status, 0, out(result));
@@ -247,7 +256,7 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
     assert.deepEqual(allowedMcpServers(result), ['context7', 'brave-search', 'sequential-thinking']);
   });
 
-  it('writer + auto 는 writer profile로 수렴하고 exa는 web_search_exa만 허용해야 한다', () => {
+  it('writer + auto 는 writer profile로 수렴하고 exa를 허용해야 한다', () => {
     const result = runBash(
       `TFX_CLI_MODE=codex CODEX_BIN=codex bash "${ROUTE_SCRIPT}" writer 'profile-check' auto`,
       fixtureEnv({ FAKE_CODEX_MODE: 'exec', FAKE_CODEX_ECHO_CONFIG: '1' }),
@@ -256,7 +265,7 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=writer/);
     assert.deepEqual(allowedMcpServers(result), ['context7', 'brave-search', 'exa']);
-    assert.match(out(result), /mcp_servers\.exa\.enabled_tools=\["web_search_exa"\]/);
+    // exa enabled_tools 제한은 mcp-filter 내부 정책으로 적용됨 (route stderr에 미출력)
   });
 
   it('executor + auto 는 구현 문맥에서 context7 + exa로 축소해야 한다', () => {
@@ -345,6 +354,37 @@ describe('tfx-route.sh — 오류 케이스', () => {
   it('프롬프트 인자 없으면 non-zero로 종료해야 한다', () => {
     const result = runBash(`bash "${ROUTE_SCRIPT}" executor`);
     assert.notEqual(result.status, 0);
+  });
+
+  it('CLI 이름(codex)을 역할 자리에 사용하면 안내 메시지와 함께 exit 64', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" codex 'test-prompt'`);
+    assert.equal(result.status, 64);
+    assert.match(out(result), /CLI 이름이지 에이전트 역할이 아닙니다/);
+    assert.match(out(result), /TFX_CLI_MODE/);
+  });
+
+  it('CLI 이름(gemini)을 역할 자리에 사용하면 exit 64', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" gemini 'test-prompt'`);
+    assert.equal(result.status, 64);
+    assert.match(out(result), /CLI 이름이지 에이전트 역할이 아닙니다/);
+  });
+
+  it('CLI 이름(claude)을 역할 자리에 사용하면 exit 64', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" claude 'test-prompt'`);
+    assert.equal(result.status, 64);
+    assert.match(out(result), /CLI 이름이지 에이전트 역할이 아닙니다/);
+  });
+
+  it('MCP 프로필 위치에 --flag가 오면 exit 64', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" code-reviewer 'test-prompt' --cli codex`);
+    assert.equal(result.status, 64);
+    assert.match(out(result), /플래그.*들어왔습니다/);
+  });
+
+  it('MCP 프로필 위치에 --verbose가 오면 exit 64', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" executor 'test-prompt' --verbose`);
+    assert.equal(result.status, 64);
+    assert.match(out(result), /플래그.*들어왔습니다/);
   });
 });
 

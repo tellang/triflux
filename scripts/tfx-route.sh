@@ -121,6 +121,23 @@ MCP_PROFILE="${3:-auto}"
 USER_TIMEOUT="${4:-}"
 CONTEXT_FILE="${5:-}"
 
+# ── 인자 검증: CLI 이름을 role 자리에 사용한 경우 안내 ──
+case "$AGENT_TYPE" in
+  codex|gemini|claude|claude-native)
+    echo "ERROR: '$AGENT_TYPE'는 CLI 이름이지 에이전트 역할이 아닙니다." >&2
+    echo "올바른 사용법: TFX_CLI_MODE=$AGENT_TYPE bash tfx-route.sh <역할> \"프롬프트\"" >&2
+    echo "사용 가능한 역할: executor, code-reviewer, scientist, designer, architect, verifier 등" >&2
+    exit 64 ;;
+esac
+
+# ── 인자 검증: MCP_PROFILE이 --flag 형태인 경우 거절 ──
+if [[ "$MCP_PROFILE" == --* ]]; then
+  echo "ERROR: MCP 프로필 위치(3번째 인자)에 플래그 '$MCP_PROFILE'가 들어왔습니다." >&2
+  echo "사용법: tfx-route.sh <역할> \"프롬프트\" [mcp_profile] [timeout]" >&2
+  echo "지원 프로필: auto, executor, analyze, implement, review, minimal, full" >&2
+  exit 64
+fi
+
 # ── CLI 경로 해석 (Windows npm global 대응) ──
 NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || echo node)}"
 CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo codex)}"
@@ -637,23 +654,14 @@ route_agent() {
       CLI_ARGS="-m gemini-3-flash-preview -y --prompt"
       CLI_EFFORT="flash"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
-    # ─── 탐색/검증/테스트 (Codex 우선, claude-native fallback은 apply_cli_mode auto에서) ───
-    explore)
-      CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="exec --profile fast ${codex_base}"
-      CLI_EFFORT="fast"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-    verifier)
-      CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-    test-engineer)
-      CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="exec ${codex_base}"
-      CLI_EFFORT="high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-    qa-tester)
-      CLI_TYPE="codex"; CLI_CMD="codex"
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+    # ─── 탐색/검증/테스트 (Claude-native 우선, TFX_NO_CLAUDE_NATIVE=1일 때만 Codex 리매핑) ───
+    explore|verifier|test-engineer|qa-tester)
+      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      case "$agent" in
+        test-engineer|qa-tester) DEFAULT_TIMEOUT=1200; RUN_MODE="bg" ;;
+      esac
+      ;;
 
     # ─── 경량 ───
     spark)

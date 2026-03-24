@@ -203,4 +203,18 @@ describe('mcp-filter — phase-aware filtering (이슈 3)', () => {
     assert.ok(!policy.allowedServers.includes('playwright'), 'prd 단계에서 playwright 차단');
     assert.equal(policy.resolvedPhase, 'prd');
   });
+
+  it('잘못된 MCP 프로필은 buildMcpPolicy에서 throw되어야 한다', () => {
+    assert.throws(
+      () => buildMcpPolicy({ agentType: 'executor', requestedProfile: '--cli' }),
+      /지원하지 않는 MCP 프로필/,
+    );
+  });
+
+  it('--flag 형태 프로필은 normalizeProfileName에서 throw', () => {
+    assert.throws(
+      () => resolveMcpProfile('executor', '--verbose'),
+      /지원하지 않는 MCP 프로필/,
+    );
+  });
 });

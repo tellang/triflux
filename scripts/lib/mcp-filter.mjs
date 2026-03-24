@@ -696,7 +696,14 @@ export async function runCli(argv = process.argv.slice(2)) {
     return;
   }
 
-  const policy = buildMcpPolicy(args);
+  let policy;
+  try {
+    policy = buildMcpPolicy(args);
+  } catch (error) {
+    console.error(`[mcp-filter] ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 65;
+    return;
+  }
   if (args.command === 'shell') {
     process.stdout.write(`${toShellExports(policy)}\n`);
     return;
