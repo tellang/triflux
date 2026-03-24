@@ -148,55 +148,58 @@ status는 "completed"만 사용. 실패 여부는 `metadata.result`로 구분.
 3. 실패 시 `forceCleanupTeam(teamName)` → 그래도 실패 시 `rm -rf ~/.claude/teams/{teamName}/` 안내
 4. 종합 보고서 출력
 
-### Phase 3-mux: psmux 헤드리스 모드
+### Phase 3-direct: Lead-Direct Headless 실행 (v6.0.0, 기본)
 
-`--tmux`/`--psmux` 시 pane 기반 헤드리스 실행. Agent 래퍼 없이 Lead가 직접 CLI를 제어하여 토큰 76-89% 절감.
+CLI 워커(Codex/Gemini/Claude)를 Agent 래퍼 없이 Lead가 headless.mjs로 직접 실행.
+Windows Terminal에 psmux 세션이 자동 팝업되어 사용자가 실시간으로 CLI 출력을 확인.
 
-**핵심 프리미티브** (`hub/team/psmux.mjs`):
-- `createPsmuxSession(name, {layout, paneCount})` — 세션 + pane 분할
-- `dispatchCommand(session, paneName, cmd)` → `{token, paneId, logPath}`
-- `waitForCompletion(session, paneName, token, timeoutSec)` → `{matched, exitCode, sessionDead?}`
-- 완료 마커: `__TRIFLUX_DONE__:token:exitCode` (PowerShell 래핑)
-- pane 이름: `"lead"` → index 0, `"worker-N"` → index N (대소문자 무관)
+**핵심 기능:**
+- `progressive: true` (기본) — pane이 하나씩 split-window로 추가 (실시간 스플릿)
+- `autoAttach: true` — 세션 생성 즉시 Windows Terminal 자동 팝업
+- `progressIntervalSec` — N초마다 각 pane 스냅샷을 onProgress로 전달
+- `applyTrifluxTheme()` — status bar + pane border 테마 자동 적용
+- 피드백 재실행 — 같은 pane에 후속 명령 dispatch (세션 유지)
 
-**헤드리스 오케스트레이션** (`hub/team/headless.mjs`):
+**Lead 오케스트레이션 패턴:**
 
-멀티 CLI 병렬 실행:
 ```javascript
-import { runHeadlessWithCleanup } from "hub/team/headless.mjs";
-const { results } = await runHeadlessWithCleanup([
+// headless.mjs의 runHeadlessInteractive()를 Bash 내에서 호출
+// Lead는 Bash의 결과를 직접 파싱 — Agent 래퍼 불필요
+const handle = await runHeadlessInteractive("tfx-session", [
   { cli: "codex", prompt: "코드 리뷰", role: "reviewer" },
   { cli: "gemini", prompt: "문서 작성", role: "writer" },
-], { timeoutSec: 300 });
-// results: [{ cli, paneName, matched, exitCode, output, sessionDead }]
+  { cli: "claude", prompt: "테스트 실행", role: "tester" },
+], {
+  timeoutSec: 300,
+  autoAttach: true,          // WT 자동 팝업
+  progressive: true,         // 실시간 스플릿 (기본)
+  progressIntervalSec: 10,   // 10초마다 진행 스냅샷
+});
+// handle: { results, dispatch(), capture(), snapshots(), waitFor(), kill() }
 ```
 
-단일 CLI 실행:
-```javascript
-const { results } = await runHeadlessWithCleanup([
-  { cli: "codex", prompt: "2+2=? number only" }
-], { timeoutSec: 60 });
-console.log(results[0].output); // "4"
+**결정 로직:**
 ```
-
-세션 이름 직접 지정 (자동 정리 없이):
-```javascript
-import { runHeadless } from "hub/team/headless.mjs";
-import { killPsmuxSession } from "hub/team/psmux.mjs";
-const { sessionName, results } = await runHeadless("my-session", assignments, { timeoutSec: 120 });
-// 수동 정리 필요: killPsmuxSession(sessionName)
+Phase 3 선택:
+  assignments.every(a => a.cli !== 'claude')
+    → Phase 3-direct (headless, 전부 CLI)
+  assignments.some(a => a.cli === 'claude') AND Claude 워커가 Read/Edit 필요
+    → Claude 워커: Agent(subagent_type), CLI 워커: Phase 3-direct
+  fallback (psmux 미설치)
+    → Phase 3 Native Teams (기존 slim wrapper)
 ```
 
 **CLI 헤드리스 명령 패턴:**
 | CLI | 명령 | 출력 |
 |-----|-------|------|
 | Codex | `codex exec 'prompt' -o result.txt --color never` | 파일 |
-| Gemini | `gemini -p 'prompt' -o text > result.txt` | 리다이렉트 |
-| Claude | `claude -p 'prompt' --output-format text > result.txt` | 리다이렉트 |
+| Gemini | `gemini -p 'prompt' -o text > result.txt 2>result.txt.err` | 리다이렉트 |
+| Claude | `claude -p 'prompt' --output-format text > result.txt 2>&1` | 리다이렉트 |
 
 **E4 크래시 복구:** `waitForCompletion`이 세션 사망 시 `{sessionDead: true}` 반환 (throw 대신).
-
-**elevation 불필요:** psmux IPC는 TCP 기반 (`TcpListener::bind("127.0.0.1", 0)`). headless 모드는 wt.exe 없이 동작하므로 비-elevated 환경에서 정상 실행. (v5.2.0 검증 완료)
+**elevation 불필요:** psmux IPC는 TCP 기반. 비-elevated 환경에서 정상 실행. (v5.2.0 검증 완료)
+**시각적 확인:** Windows Terminal 자동 팝업 + pane 타이틀 `codex (reviewer)` + triflux 테마.
+**실수로 닫아도:** psmux 세션은 독립적. `psmux attach -t 세션이름`으로 재연결.
 
 **레거시 인터랙티브 모드:** `Bash("node {PKG_ROOT}/bin/triflux.mjs multi --no-attach --agents {agents} \\\"{task}\\\"")`
 

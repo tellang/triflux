@@ -67,7 +67,7 @@ function readResult(resultFile, paneId) {
  * @param {string} [opts.layout='2x2'] — pane 레이아웃
  * @param {(event: object) => void} [opts.onProgress] — 진행 콜백
  * @param {number} [opts.progressIntervalSec=0] — N초마다 progress 이벤트 발화 (0=비활성)
- * @param {boolean} [opts.progressive=false] — true면 pane을 하나씩 split-window로 추가 (실시간 스플릿)
+ * @param {boolean} [opts.progressive=true] — true면 pane을 하나씩 split-window로 추가 (실시간 스플릿)
  * @returns {{ sessionName: string, results: Array<{cli: string, paneName: string, matched: boolean, exitCode: number|null, output: string, sessionDead?: boolean}> }}
  */
 export async function runHeadless(sessionName, assignments, opts = {}) {
@@ -76,7 +76,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     layout = "2x2",
     onProgress,
     progressIntervalSec = 0,
-    progressive = false,
+    progressive = true,
   } = opts;
 
   mkdirSync(RESULT_DIR, { recursive: true });
@@ -86,6 +86,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   if (progressive) {
     // ─── 실시간 스플릿 모드: lead pane만 생성 후, 워커를 하나씩 추가 ───
     const session = createPsmuxSession(sessionName, { layout, paneCount: 1 });
+    applyTrifluxTheme(sessionName);
     if (onProgress) onProgress({ type: "session_created", sessionName, panes: session.panes });
 
     dispatches = assignments.map((assignment, i) => {
@@ -123,6 +124,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     // ─── 기존 모드: 모든 pane을 한 번에 생성 ───
     const paneCount = assignments.length + 1;
     const session = createPsmuxSession(sessionName, { layout, paneCount });
+    applyTrifluxTheme(sessionName);
     if (onProgress) onProgress({ type: "session_created", sessionName, panes: session.panes });
 
     dispatches = assignments.map((assignment, i) => {
@@ -214,6 +216,33 @@ export async function runHeadlessWithCleanup(assignments, opts = {}) {
     } catch {
       // 이미 종료된 세션 — 무시
     }
+  }
+}
+
+// ─── v6.0.0: Theme + Visual ───
+
+/**
+ * psmux 세션에 triflux 테마를 적용한다.
+ * status bar + pane border 색상 + 브랜딩.
+ *
+ * @param {string} sessionName
+ */
+export function applyTrifluxTheme(sessionName) {
+  const opts = [
+    // Status bar — Catppuccin Mocha 기반
+    ["status-style", "bg=#1e1e2e,fg=#cdd6f4"],
+    ["status-left", " #[fg=#89b4fa,bold]▲ triflux#[default] "],
+    ["status-left-length", "20"],
+    ["status-right", " #[fg=#a6adc8]#{pane_title}#[default] │ #[fg=#f9e2af]%H:%M#[default] "],
+    ["status-right-length", "40"],
+    // Pane border — active/inactive 구분
+    ["pane-active-border-style", "fg=#89b4fa"],
+    ["pane-border-style", "fg=#45475a"],
+    // Status bar 위치
+    ["status-position", "bottom"],
+  ];
+  for (const [key, value] of opts) {
+    try { psmuxExec(["set-option", "-t", sessionName, key, value]); } catch { /* 무시 */ }
   }
 }
 
