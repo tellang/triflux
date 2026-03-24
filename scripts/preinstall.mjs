@@ -1,43 +1,80 @@
 #!/usr/bin/env node
 // npm install 전 Hub를 안전하게 중지하여 EBUSY 방지
 // better-sqlite3.node 파일이 Hub 프로세스에 의해 잠기면 npm이 덮어쓸 수 없음
+//
+// v6.0.0: taskkill /T /F + Atomics.wait sleep + 파일 잠금 확인
+// (bin/triflux.mjs stopHubForUpdate 패턴과 동일)
 
-import { existsSync, readFileSync, unlinkSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, unlinkSync, openSync, closeSync } from "fs";
+import { join, dirname } from "path";
 import { homedir } from "os";
+import { execFileSync } from "child_process";
+import { fileURLToPath } from "url";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PKG_ROOT = join(__dirname, "..");
 const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
 
 function stopHub() {
   if (!existsSync(HUB_PID_FILE)) return;
 
+  let info;
   try {
-    const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+    info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
     const pid = Number(info?.pid);
     if (!Number.isFinite(pid) || pid <= 0) return;
-
-    // 프로세스 존재 확인
-    process.kill(pid, 0);
-
-    // SIGTERM 전송
-    process.kill(pid, "SIGTERM");
-    console.log(`[triflux preinstall] Hub 중지됨 (PID ${pid}) — EBUSY 방지`);
-
-    // Windows: 프로세스 종료 + 파일 핸들 해제 대기 (최대 3초)
-    const start = Date.now();
-    while (Date.now() - start < 3000) {
-      try { process.kill(pid, 0); } catch { break; }
-    }
-
-    // PID 파일 정리
+    process.kill(pid, 0); // 프로세스 존재 확인
+  } catch {
+    // 프로세스 없음 또는 PID 파일 손상 — PID 파일만 정리
     try { unlinkSync(HUB_PID_FILE); } catch {}
-  } catch (err) {
-    if (err.code === "ESRCH") {
-      // 프로세스 이미 종료됨 — PID 파일만 정리
-      try { unlinkSync(HUB_PID_FILE); } catch {}
-    }
-    // EPERM 등 기타 에러는 무시 (설치를 막으면 안 됨)
+    return;
   }
+
+  const pid = Number(info.pid);
+
+  // 1단계: 프로세스 종료 — Windows는 taskkill, Unix는 SIGTERM
+  try {
+    if (process.platform === "win32") {
+      execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+        stdio: ["pipe", "pipe", "ignore"],
+        timeout: 10000,
+        windowsHide: true,
+      });
+    } else {
+      process.kill(pid, "SIGTERM");
+    }
+  } catch {
+    // taskkill 실패 시 SIGKILL fallback
+    try { process.kill(pid, "SIGKILL"); } catch {}
+  }
+
+  // 2단계: 프로세스 종료 대기 (최대 5초, 500ms 간격)
+  for (let i = 0; i < 10; i++) {
+    sleepMs(500);
+    try { process.kill(pid, 0); } catch { break; }
+  }
+
+  // 3단계: better-sqlite3.node 파일 잠금 해제 확인 (최대 3초)
+  const sqliteNode = join(PKG_ROOT, "node_modules", "better-sqlite3", "build", "Release", "better_sqlite3.node");
+  if (existsSync(sqliteNode)) {
+    for (let i = 0; i < 6; i++) {
+      try {
+        const fd = openSync(sqliteNode, "r");
+        closeSync(fd);
+        break; // 열림 = 잠금 해제됨
+      } catch {
+        sleepMs(500);
+      }
+    }
+  }
+
+  // 4단계: PID 파일 정리 (종료 확인 후)
+  try { unlinkSync(HUB_PID_FILE); } catch {}
+  console.log(`[triflux preinstall] Hub 중지 완료 (PID ${pid})`);
 }
 
 stopHub();
