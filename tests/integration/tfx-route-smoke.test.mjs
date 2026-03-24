@@ -48,6 +48,12 @@ function out(result) {
   return `${result.stdout || ''}\n${result.stderr || ''}`;
 }
 
+function allowedMcpServers(result) {
+  const allowedLine = out(result).match(/allowed_mcp_servers=([^\n]+)/)?.[1] ?? '';
+  if (!allowedLine || allowedLine === 'none') return [];
+  return allowedLine.split(',').map((server) => server.trim()).filter(Boolean);
+}
+
 function fixtureEnv(extraEnv = {}) {
   return {
     ...extraEnv,
@@ -216,9 +222,7 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=default/);
-    assert.match(out(result), /allowed_mcp_servers=context7,brave-search/);
-    assert.match(out(result), /mcp_servers\.context7\.enabled=true/);
-    assert.match(out(result), /mcp_servers\.exa\.enabled=false/);
+    assert.deepEqual(allowedMcpServers(result), ['context7', 'brave-search']);
   });
 
   it('explore + auto 는 explore profile로 수렴하고 playwright는 비활성화해야 한다', () => {
@@ -229,9 +233,7 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=explore/);
-    assert.match(out(result), /allowed_mcp_servers=context7,brave-search,tavily,exa/);
-    assert.match(out(result), /mcp_servers\.tavily\.enabled=true/);
-    assert.match(out(result), /mcp_servers\.playwright\.enabled=false/);
+    assert.deepEqual(allowedMcpServers(result), ['context7', 'brave-search', 'tavily', 'exa']);
   });
 
   it('code-reviewer + auto 는 reviewer profile로 수렴하고 sequential-thinking만 분석 도구로 남겨야 한다', () => {
@@ -242,9 +244,7 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=reviewer/);
-    assert.match(out(result), /allowed_mcp_servers=context7,brave-search,sequential-thinking/);
-    assert.match(out(result), /mcp_servers\.sequential-thinking\.enabled=true/);
-    assert.match(out(result), /mcp_servers\.playwright\.enabled=false/);
+    assert.deepEqual(allowedMcpServers(result), ['context7', 'brave-search', 'sequential-thinking']);
   });
 
   it('writer + auto 는 writer profile로 수렴하고 exa는 web_search_exa만 허용해야 한다', () => {
@@ -255,9 +255,8 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=writer/);
-    assert.match(out(result), /allowed_mcp_servers=context7,brave-search,exa/);
+    assert.deepEqual(allowedMcpServers(result), ['context7', 'brave-search', 'exa']);
     assert.match(out(result), /mcp_servers\.exa\.enabled_tools=\["web_search_exa"\]/);
-    assert.match(out(result), /mcp_servers\.tavily\.enabled=false/);
   });
 
   it('executor + auto 는 구현 문맥에서 context7 + exa로 축소해야 한다', () => {
@@ -268,10 +267,7 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=executor/);
-    assert.match(out(result), /allowed_mcp_servers=context7,exa/);
-    assert.match(out(result), /mcp_servers\.exa\.enabled=true/);
-    assert.match(out(result), /mcp_servers\.tavily\.enabled=false/);
-    assert.match(out(result), /mcp_servers\.playwright\.enabled=false/);
+    assert.deepEqual(allowedMcpServers(result), ['context7', 'exa']);
   });
 
   it('designer + auto 는 브라우저 문맥에서 designer profile과 playwright를 남겨야 한다', () => {
@@ -282,10 +278,7 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=designer/);
-    assert.match(out(result), /allowed_mcp_servers=context7,playwright/);
-    assert.match(out(result), /mcp_servers\.playwright\.enabled=true/);
-    assert.match(out(result), /mcp_servers\.tavily\.enabled=false/);
-    assert.match(out(result), /mcp_servers\.exa\.enabled=false/);
+    assert.deepEqual(allowedMcpServers(result), ['context7', 'playwright']);
   });
 });
 

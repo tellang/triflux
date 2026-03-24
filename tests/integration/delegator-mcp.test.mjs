@@ -167,10 +167,8 @@ describe('delegator-mcp stdio server', () => {
       });
 
       const config = JSON.parse(result.structuredContent.output);
-      assert.equal(config.mcp_servers.context7.enabled, true);
-      assert.equal(config.mcp_servers.playwright.enabled, true);
-      assert.equal(config.mcp_servers.exa.enabled, false);
-      assert.equal(config.mcp_servers['brave-search'].enabled, false);
+      const allowedMcpServers = Object.keys(config.mcp_servers).sort();
+      assert.deepEqual(allowedMcpServers, ['context7', 'playwright']);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       await closeClient(client, transport);
