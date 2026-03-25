@@ -20,6 +20,15 @@ import {
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
 
+/** CLI별 브랜드 — 이모지 + ANSI 색상 (시각적 구분) */
+const CLI_BRAND = {
+  codex:  { emoji: "\u{1F7E2}", label: "Codex",  ansi: "\x1b[32m" },  // 🟢 green
+  gemini: { emoji: "\u{1F535}", label: "Gemini", ansi: "\x1b[34m" },  // 🔵 blue
+  claude: { emoji: "\u{1F7E0}", label: "Claude", ansi: "\x1b[33m" },  // 🟠 yellow/orange
+};
+const ANSI_RESET = "\x1b[0m";
+const ANSI_DIM = "\x1b[2m";
+
 /**
  * CLI별 헤드리스 명령 빌더
  * @param {'codex'|'gemini'|'claude'} cli
@@ -96,25 +105,34 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
     dispatches = assignments.map((assignment, i) => {
       const paneName = `worker-${i + 1}`;
+      const brand = CLI_BRAND[assignment.cli] || { emoji: "\u{25CF}", label: assignment.cli, ansi: "" };
       const paneTitle = assignment.role
-        ? `${assignment.cli} (${assignment.role})`
-        : `${assignment.cli}-${i + 1}`;
+        ? `${brand.emoji} ${assignment.cli} (${assignment.role})`
+        : `${brand.emoji} ${assignment.cli}-${i + 1}`;
 
-      // split-window로 새 pane 추가 — paneId 직접 획득
-      const newPaneId = psmuxExec([
-        "split-window", "-t", sessionName, "-P", "-F",
-        "#{session_name}:#{window_index}.#{pane_index}",
-      ]);
+      let newPaneId;
+      if (i === 0) {
+        // 첫 번째 워커: 빈 lead pane을 직접 사용 (빈 pane 제거)
+        newPaneId = `${sessionName}:0.0`;
+      } else {
+        // 2번째+: split-window로 추가
+        newPaneId = psmuxExec([
+          "split-window", "-t", sessionName, "-P", "-F",
+          "#{session_name}:#{window_index}.#{pane_index}",
+        ]);
+      }
 
-      // 타이틀 설정
+      // 타이틀 설정 (이모지 포함)
       try { psmuxExec(["select-pane", "-t", newPaneId, "-T", paneTitle]); } catch { /* 무시 */ }
 
       if (safeProgress) safeProgress({ type: "worker_added", paneName, cli: assignment.cli, paneTitle });
 
-      // 캡처 시작 + 명령 dispatch (paneId 직접 사용 — resolvePane race 회피)
+      // 캡처 시작 + 컬러 배너 + 명령 dispatch
       const resultFile = join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
       const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile);
       startCapture(sessionName, newPaneId);
+      // pane 간 pipe-pane EBUSY 방지 — capture 스크립트 파일 잠금 해제 대기
+      if (i > 0) { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); } catch {} }
       const dispatch = dispatchCommand(sessionName, newPaneId, cmd);
 
       if (safeProgress) safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
@@ -276,17 +294,16 @@ export function autoAttachTerminal(sessionName, opts = {}) {
     return false; // wt.exe 미설치 — 사용자에게 수동 attach 안내 필요
   }
 
-  // PowerShell 래핑 — wt가 psmux를 파일로 인식하는 문제 방지
-  // "--" 구분자 필수: -NoExit 등이 wt 옵션으로 해석되는 것 방지
+  // PowerShell 래핑 + "--" 구분자 + 포커스 비탈취
   // pwsh.exe (PS7) 우선, 없으면 powershell.exe (PS5.1) fallback
   const shells = ["pwsh.exe", "powershell.exe"];
   for (const shell of shells) {
     try {
-      execFileSync("wt.exe", [
-        "nt", "--title", "triflux", "--",
-        shell, "-NoExit", "-Command",
-        `psmux attach -t ${sessionName}`,
-      ], { stdio: "ignore" });
+      // start "" /b — 포커스를 현재 창에 유지 (사용자 타이핑 보호)
+      execSync(
+        `start "" /b wt.exe nt --title triflux -- ${shell} -NoExit -Command "psmux attach -t ${sessionName}"`,
+        { stdio: "ignore", shell: true, timeout: 5000 },
+      );
       return true;
     } catch { /* 다음 shell 시도 */ }
   }
