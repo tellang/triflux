@@ -6,6 +6,10 @@ export function parseTeamArgs(args = []) {
   let layout = "2x2";
   let teammateMode = "auto";
   const taskParts = [];
+  const assigns = []; // --assign "codex:프롬프트:역할" 형식
+  let autoAttach = false;
+  let progressive = true;
+  let timeoutSec = 300;
 
   for (let index = 0; index < args.length; index += 1) {
     const current = args[index];
@@ -17,6 +21,18 @@ export function parseTeamArgs(args = []) {
       layout = args[++index];
     } else if ((current === "--teammate-mode" || current === "--mode") && args[index + 1]) {
       teammateMode = args[++index];
+    } else if (current === "--assign" && args[index + 1]) {
+      // "cli:prompt:role" 형식 파싱
+      const parts = args[++index].split(":");
+      if (parts.length >= 2) {
+        assigns.push({ cli: parts[0].trim(), prompt: parts.slice(1, -1).join(":").trim() || parts[1].trim(), role: parts[parts.length - 1]?.trim() || "" });
+      }
+    } else if (current === "--auto-attach") {
+      autoAttach = true;
+    } else if (current === "--no-progressive") {
+      progressive = false;
+    } else if (current === "--timeout" && args[index + 1]) {
+      timeoutSec = Number(args[++index]) || 300;
     } else if (!current.startsWith("-")) {
       taskParts.push(current);
     }
@@ -28,5 +44,9 @@ export function parseTeamArgs(args = []) {
     layout: normalizeLayout(layout),
     teammateMode: normalizeTeammateMode(teammateMode),
     task: taskParts.join(" ").trim(),
+    assigns,
+    autoAttach,
+    progressive,
+    timeoutSec,
   };
 }

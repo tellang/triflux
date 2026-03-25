@@ -277,12 +277,14 @@ export function autoAttachTerminal(sessionName, opts = {}) {
   }
 
   // PowerShell 래핑 — wt가 psmux를 파일로 인식하는 문제 방지
+  // "--" 구분자 필수: -NoExit 등이 wt 옵션으로 해석되는 것 방지
   // pwsh.exe (PS7) 우선, 없으면 powershell.exe (PS5.1) fallback
   const shells = ["pwsh.exe", "powershell.exe"];
   for (const shell of shells) {
     try {
       execFileSync("wt.exe", [
-        "nt", shell, "-NoExit", "-Command",
+        "nt", "--title", "triflux", "--",
+        shell, "-NoExit", "-Command",
         `psmux attach -t ${sessionName}`,
       ], { stdio: "ignore" });
       return true;
