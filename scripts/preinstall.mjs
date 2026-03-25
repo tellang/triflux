@@ -36,6 +36,22 @@ function stopHub() {
 
   const pid = Number(info.pid);
 
+  // D4 fix: PID 소유자 검증 — node 프로세스인지 확인 (PID 재사용 보호)
+  if (process.platform === "win32") {
+    try {
+      const taskInfo = execFileSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], {
+        encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], timeout: 5000, windowsHide: true,
+      }).trim();
+      if (!taskInfo.toLowerCase().includes("node")) {
+        console.log(`[triflux preinstall] PID ${pid}은 node 프로세스가 아님 — kill 건너뜀`);
+        try { unlinkSync(HUB_PID_FILE); } catch {}
+        return;
+      }
+    } catch {
+      // tasklist 실패 — 안전하게 진행 (프로세스가 이미 죽었을 수 있음)
+    }
+  }
+
   // 1단계: 프로세스 종료 — Windows는 taskkill, Unix는 SIGTERM
   try {
     if (process.platform === "win32") {

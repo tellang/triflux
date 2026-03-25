@@ -128,7 +128,9 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   } else {
     // ─── 기존 모드: 모든 pane을 한 번에 생성 ───
     const paneCount = assignments.length + 1;
-    const session = createPsmuxSession(sessionName, { layout, paneCount });
+    // A2b fix: 2x2 레이아웃은 최대 4 pane — 초과 시 tiled로 자동 전환
+    const effectiveLayout = (layout === "2x2" && paneCount > 4) ? "tiled" : layout;
+    const session = createPsmuxSession(sessionName, { layout: effectiveLayout, paneCount });
     applyTrifluxTheme(sessionName);
     if (safeProgress) safeProgress({ type: "session_created", sessionName, panes: session.panes });
 
