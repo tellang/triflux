@@ -20,11 +20,11 @@ import {
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
 
-/** CLI별 브랜드 — 이모지 + ANSI 색상 (시각적 구분) */
+/** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
 const CLI_BRAND = {
-  codex:  { emoji: "\u{1F7E2}", label: "Codex",  ansi: "\x1b[32m" },  // 🟢 green
-  gemini: { emoji: "\u{1F535}", label: "Gemini", ansi: "\x1b[34m" },  // 🔵 blue
-  claude: { emoji: "\u{1F7E0}", label: "Claude", ansi: "\x1b[33m" },  // 🟠 yellow/orange
+  codex:  { emoji: "\u{26AA}", label: "Codex",  ansi: "\x1b[97m" },   // ⚪ bright white (codexWhite)
+  gemini: { emoji: "\u{1F535}", label: "Gemini", ansi: "\x1b[38;5;39m" }, // 🔵 geminiBlue
+  claude: { emoji: "\u{1F7E0}", label: "Claude", ansi: "\x1b[38;2;232;112;64m" }, // 🟠 claudeOrange
 };
 const ANSI_RESET = "\x1b[0m";
 const ANSI_DIM = "\x1b[2m";

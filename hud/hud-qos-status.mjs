@@ -450,7 +450,8 @@ function getTeamRow() {
     : "";
 
   // CLI 브랜드: 단일문자 + ANSI 색상 (x=codex, g=gemini, c=claude)
-  const cliTag = (cli) => cli === "codex" ? green("x") : cli === "gemini" ? geminiBlue("g") : claudeOrange("c");
+  // CLI 브랜드 색상 통일 — 프로바이더 행과 동일 (codexWhite, geminiBlue, claudeOrange)
+  const cliTag = (cli) => cli === "codex" ? bold(codexWhite("x")) : cli === "gemini" ? bold(geminiBlue("g")) : bold(claudeOrange("c"));
   // 멤버 상태: 태그 + 상태기호 (60col 이상)
   const memberIcons = (CURRENT_TIER === "full" || CURRENT_TIER === "compact" || CURRENT_TIER === "minimal") ? workers.map((m) => {
     const task = tasks.find((t) => t.owner === m.name);
