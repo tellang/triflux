@@ -302,9 +302,9 @@ export function ensureWtProfile() {
         icon: "\u{1F53A}", // 🔺
         tabTitle: "triflux",
         suppressApplicationTitle: true,
-        opacity: 50,
+        opacity: 40,
         useAcrylic: true,
-        unfocusedAppearance: { opacity: 30 },
+        unfocusedAppearance: { opacity: 20 },
         colorScheme: "One Half Dark",
         font: { size: 11 },
         hidden: true, // 프로필 목록에는 숨김 (triflux에서만 사용)
