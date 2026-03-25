@@ -7,7 +7,7 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, chmodSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -401,6 +401,27 @@ if (existsSync(HUB_PID_FILE)) {
   } catch {
     try { unlinkSync(HUB_PID_FILE); } catch {} // 죽은 프로세스면 PID 파일 삭제
     synced++;
+  }
+}
+
+// ── psmux 자동 설치 (Windows, headless 모드용) ──
+
+if (process.platform === "win32") {
+  try {
+    execFileSync("where", ["psmux"], { stdio: "ignore" });
+  } catch {
+    // psmux 미설치 — winget으로 자동 설치 시도
+    console.log("  psmux 미설치 — winget으로 설치 중...");
+    try {
+      execFileSync("winget", ["install", "--id", "marlocarlo.psmux", "--accept-package-agreements", "--accept-source-agreements"], {
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 60000,
+      });
+      console.log("  \x1b[32m✓\x1b[0m psmux 설치 완료");
+      synced++;
+    } catch {
+      console.log("  \x1b[33m⚠\x1b[0m psmux 자동 설치 실패 — 수동 설치: winget install psmux");
+    }
   }
 }
 
