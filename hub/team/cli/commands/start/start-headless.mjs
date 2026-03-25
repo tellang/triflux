@@ -2,6 +2,7 @@ import { BOLD, DIM, GREEN, RESET, AMBER } from "../../../shared.mjs";
 import { runHeadlessInteractive } from "../../../headless.mjs";
 import { ok, warn } from "../../render.mjs";
 import { buildTasks } from "../../services/task-model.mjs";
+import { clearTeamState } from "../../services/state-store.mjs";
 
 export async function startHeadlessTeam({ sessionId, task, lead, agents, subtasks, layout, assigns, autoAttach, progressive, timeoutSec }) {
   console.log(`  ${AMBER}모드: headless (Lead-Direct v6.0.0)${RESET}`);
@@ -78,6 +79,8 @@ export async function startHeadlessTeam({ sessionId, task, lead, agents, subtask
     headlessResults: results,
     tasks: buildTasks(assignments.map(a => a.prompt), members.filter((m) => m.role === "worker")),
     postSave() {
+      // headless는 실행 완료 후 즉시 정리 — HUD에 잔존 방지
+      clearTeamState();
       console.log(`\n  ${DIM}세션 정리 완료.${RESET}\n`);
     },
   };
