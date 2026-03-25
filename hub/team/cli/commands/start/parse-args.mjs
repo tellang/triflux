@@ -7,7 +7,7 @@ export function parseTeamArgs(args = []) {
   let teammateMode = "auto";
   const taskParts = [];
   const assigns = []; // --assign "codex:프롬프트:역할" 형식
-  let autoAttach = false;
+  let autoAttach = true;
   let progressive = true;
   let timeoutSec = 300;
 
