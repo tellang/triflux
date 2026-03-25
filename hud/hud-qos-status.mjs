@@ -449,17 +449,16 @@ function getTeamRow() {
     ? `${Math.round((Date.now() - teamState.startedAt) / 60000)}m`
     : "";
 
-  // CLI 브랜드 이모지 매핑
-  const cliBrand = { codex: "\u{1F7E2}", gemini: "\u{1F535}", claude: "\u{1F7E0}" }; // 🟢🔵🟠
-  // 멤버 상태: 이모지 + 상태기호 (60col 이상)
+  // CLI 브랜드: 단일문자 + ANSI 색상 (x=codex, g=gemini, c=claude)
+  const cliTag = (cli) => cli === "codex" ? green("x") : cli === "gemini" ? geminiBlue("g") : claudeOrange("c");
+  // 멤버 상태: 태그 + 상태기호 (60col 이상)
   const memberIcons = (CURRENT_TIER === "full" || CURRENT_TIER === "compact" || CURRENT_TIER === "minimal") ? workers.map((m) => {
     const task = tasks.find((t) => t.owner === m.name);
     const status = task?.status === "completed" ? green("✓")
       : task?.status === "in_progress" ? yellow("⋯")
       : task?.status === "failed" ? red("✗")
       : dim("◌");
-    const emoji = cliBrand[m.cli] || dim("●");
-    return `${emoji}${status}`;
+    return `${cliTag(m.cli)}${status}`;
   }).join(" ") : "";
 
   // 진행 텍스트 — "team" 제거, 숫자만
