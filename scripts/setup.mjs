@@ -117,6 +117,11 @@ const SYNC_MAP = [
     dst: join(CLAUDE_DIR, "scripts", "lib", "keyword-rules.mjs"),
     label: "lib/keyword-rules.mjs",
   },
+  {
+    src: join(PLUGIN_ROOT, "scripts", "headless-guard.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "headless-guard.mjs"),
+    label: "headless-guard.mjs",
+  },
 ];
 
 function getVersion(filePath) {
@@ -548,6 +553,55 @@ try {
     hookSettings.hooks.SessionStart.push(trifluxHookEntry);
     writeFileSync(settingsPath, JSON.stringify(hookSettings, null, 2) + "\n", "utf8");
     synced++;
+  }
+
+  // ── PreToolUse 훅: headless-guard (auto-route) ──
+  // Phase 3 headless 모드 활성 중 tfx-route.sh 개별 호출을
+  // headless 명령으로 자동 변환한다.
+  if (!Array.isArray(hookSettings.hooks.PreToolUse)) {
+    hookSettings.hooks.PreToolUse = [];
+  }
+
+  const guardScriptPath = join(CLAUDE_DIR, "scripts", "headless-guard.mjs").replace(/\\/g, "/");
+  const hasGuardHook = hookSettings.hooks.PreToolUse.some((entry) =>
+    Array.isArray(entry.hooks) &&
+    entry.hooks.some((h) => typeof h.command === "string" && h.command.includes("headless-guard")),
+  );
+
+  if (!hasGuardHook && existsSync(guardScriptPath.replace(/\//g, "\\"))) {
+    const nodePath = process.execPath.replace(/\\/g, "/");
+    const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
+
+    hookSettings.hooks.PreToolUse.push({
+      matcher: "Bash|Agent",
+      hooks: [
+        {
+          type: "command",
+          command: `${nodeRef} "${guardScriptPath}"`,
+          timeout: 3,
+        },
+      ],
+    });
+    writeFileSync(settingsPath, JSON.stringify(hookSettings, null, 2) + "\n", "utf8");
+    synced++;
+  } else if (hasGuardHook) {
+    // 기존 훅 경로를 동기화된 경로로 업데이트
+    let updated = false;
+    for (const entry of hookSettings.hooks.PreToolUse) {
+      if (!Array.isArray(entry.hooks)) continue;
+      for (const h of entry.hooks) {
+        if (typeof h.command === "string" && h.command.includes("headless-guard") && !h.command.includes(guardScriptPath)) {
+          const nodePath = process.execPath.replace(/\\/g, "/");
+          const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
+          h.command = `${nodeRef} "${guardScriptPath}"`;
+          updated = true;
+        }
+      }
+    }
+    if (updated) {
+      writeFileSync(settingsPath, JSON.stringify(hookSettings, null, 2) + "\n", "utf8");
+      synced++;
+    }
   }
 } catch {
   // settings.json 파싱 실패 시 무시 — 기존 설정 보존
