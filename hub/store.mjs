@@ -27,6 +27,8 @@ export function uuidv7() {
   let now = BigInt(Date.now());
   if (now <= _lastMs) {
     _seq++;
+    // _seq > 0xfff (4095): 시퀀스 공간 소진 시 타임스탬프를 1ms 앞당겨 단조 증가를 보장.
+    // 고처리량 환경에서는 타임스탬프가 실제 벽시계보다 앞서 드리프트될 수 있음 (설계상 의도).
     if (_seq > 0xfff) {
       now = _lastMs + 1n;
       _seq = 0;

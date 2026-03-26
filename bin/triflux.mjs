@@ -139,6 +139,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
 });
 
 // ── 유틸리티 ──
+// ok/warn/fail/info/section 의 console.log는 디버그 로그가 아닌 의도된 CLI 출력입니다.
 
 function ok(msg) { console.log(`  ${GREEN_BRIGHT}✓${RESET} ${msg}`); }
 function warn(msg) { console.log(`  ${YELLOW}⚠${RESET} ${msg}`); }
