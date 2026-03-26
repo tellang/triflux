@@ -14,6 +14,10 @@ import {
   updatePipelineState,
   removePipelineState,
 } from './state.mjs';
+import { runConfidenceCheck } from './gates/confidence.mjs';
+import { runSelfCheck } from './gates/selfcheck.mjs';
+import { classifyIntent as _classifyIntent } from '../intent.mjs';
+// deslop gate: 호출자가 scanDirectory/detectSlop 결과를 전달
 
 /**
  * 파이프라인 매니저 생성
@@ -154,6 +158,86 @@ export function createPipeline(db, teamName, opts = {}) {
     remove() {
       return removePipelineState(db, teamName);
     },
+
+    /**
+     * Confidence Gate 실행 + 자동 전이
+     * prd → confidence → exec/failed
+     * @param {string|object} planArtifact
+     * @param {object} context - { checks?, codebaseFiles?, existingTests? }
+     * @returns {{ ok: boolean, gate: object, state?: object, error?: string }}
+     */
+    runConfidenceGate(planArtifact, context = {}) {
+      const current = readPipelineState(db, teamName);
+      if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
+
+      if (current.phase !== 'confidence') {
+        return { ok: false, error: `confidence gate는 confidence 단계에서만 실행 가능 (현재: ${current.phase})` };
+      }
+
+      const gate = runConfidenceCheck(planArtifact, context);
+      this.setArtifact('confidence_result', gate);
+
+      if (gate.decision === 'abort') {
+        const result = this.advance('failed');
+        return { ok: true, gate, state: result.state };
+      }
+
+      // proceed 또는 alternative → exec로 전이
+      const result = this.advance('exec');
+      return { ok: result.ok, gate, state: result.state, error: result.error };
+    },
+
+    /**
+     * Deslop Gate 실행 + 자동 전이
+     * exec → deslop → verify
+     * 호출자가 미리 deslop 결과를 생성하여 전달.
+     * @param {object} [deslopResult] - scanDirectory() 또는 detectSlop() 결과
+     * @returns {{ ok: boolean, gate: object, state?: object, error?: string }}
+     */
+    runDeslopGate(deslopResult = null) {
+      const current = readPipelineState(db, teamName);
+      if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
+
+      if (current.phase !== 'deslop') {
+        return { ok: false, error: `deslop gate는 deslop 단계에서만 실행 가능 (현재: ${current.phase})` };
+      }
+
+      const gate = deslopResult || { files: [], summary: { total: 0, clean: 0 } };
+      this.setArtifact('deslop_result', gate);
+
+      // deslop은 항상 verify로 전이 (정보 제공 게이트, 차단 없음)
+      const result = this.advance('verify');
+      return { ok: result.ok, gate, state: result.state, error: result.error };
+    },
+
+    /**
+     * Self-Check Gate 실행 + 자동 전이
+     * verify → selfcheck → complete/fix
+     * @param {string|object} execResult
+     * @param {string|object} verifyResult
+     * @param {object} requirements - { hasDiff?, evidence? }
+     * @returns {{ ok: boolean, gate: object, state?: object, error?: string }}
+     */
+    runSelfCheckGate(execResult, verifyResult, requirements = {}) {
+      const current = readPipelineState(db, teamName);
+      if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
+
+      if (current.phase !== 'selfcheck') {
+        return { ok: false, error: `selfcheck gate는 selfcheck 단계에서만 실행 가능 (현재: ${current.phase})` };
+      }
+
+      const gate = runSelfCheck(execResult, verifyResult, requirements);
+      this.setArtifact('selfcheck_result', gate);
+
+      if (gate.passed) {
+        const result = this.advance('complete');
+        return { ok: result.ok, gate, state: result.state, error: result.error };
+      }
+
+      // Red Flag 탐지 또는 필수 질문 실패 → fix
+      const result = this.advance('fix');
+      return { ok: result.ok, gate, state: result.state, error: result.error };
+    },
   };
 }
 
@@ -212,5 +296,23 @@ export async function benchmarkEnd(preLabel, postLabel, options = {}) {
   } catch { return null; }
 }
 
+/**
+ * 트리아지 통합: quickClassify 고신뢰 시 Codex 분류 스킵 판정
+ * @param {string} prompt
+ * @param {number} [threshold=0.8]
+ * @returns {{ skip: boolean, routing: object|null, classification: object }}
+ */
+export function triageWithIntent(prompt, threshold = 0.8) {
+  const classification = _classifyIntent(prompt);
+  if (classification.confidence >= threshold) {
+    return { skip: true, routing: classification.routing, classification };
+  }
+  return { skip: false, routing: null, classification };
+}
+
 export { ensurePipelineTable } from './state.mjs';
 export { PHASES, TERMINAL, ALLOWED, canTransition } from './transitions.mjs';
+export { CRITERIA, runConfidenceCheck } from './gates/confidence.mjs';
+export { RED_FLAGS, QUESTIONS, runSelfCheck } from './gates/selfcheck.mjs';
+export { detectSlop, autoFixSlop, scanDirectory } from '../quality/deslop.mjs';
+export { quickClassify, classifyIntent, INTENT_CATEGORIES } from '../intent.mjs';

@@ -6,7 +6,7 @@
 import { join } from "node:path";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { execSync, execFileSync } from "node:child_process";
+import { execSync, execFileSync, spawn } from "node:child_process";
 import {
   createPsmuxSession,
   killPsmuxSession,
@@ -17,6 +17,7 @@ import {
   startCapture,
   psmuxExec,
 } from "./psmux.mjs";
+import { HANDOFF_INSTRUCTION, processHandoff } from "./handoff.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
 
@@ -29,26 +30,65 @@ const CLI_BRAND = {
 const ANSI_RESET = "\x1b[0m";
 const ANSI_DIM = "\x1b[2m";
 
+/** 에이전트 역할명 → CLI 타입 매핑 (route_agent() 미러) */
+const AGENT_TO_CLI = {
+  executor: "codex", "build-fixer": "codex", debugger: "codex", "deep-executor": "codex",
+  architect: "codex", planner: "codex", critic: "codex", analyst: "codex",
+  "code-reviewer": "codex", "security-reviewer": "codex", "quality-reviewer": "codex",
+  scientist: "codex", "scientist-deep": "codex", "document-specialist": "codex",
+  spark: "codex",
+  designer: "gemini", writer: "gemini",
+  explore: "claude", verifier: "claude", "test-engineer": "claude", "qa-tester": "claude",
+  codex: "codex", gemini: "gemini", claude: "claude",
+};
+
+/**
+ * 에이전트 역할명 또는 CLI 이름을 CLI 타입("codex"|"gemini"|"claude")으로 해석한다.
+ * route_agent()가 적용되지 않는 headless 경로에서 사용.
+ * @param {string} agentOrCli — "executor", "codex", "designer" 등
+ * @returns {'codex'|'gemini'|'claude'} CLI 타입
+ */
+export function resolveCliType(agentOrCli) {
+  return AGENT_TO_CLI[agentOrCli] || agentOrCli;
+}
+
+/** MCP 프로필별 프롬프트 힌트 (tfx-route.sh resolve_mcp_policy의 경량 미러) */
+const MCP_PROFILE_HINTS = {
+  implement: "You have full filesystem read/write access. Implement changes directly.",
+  analyze:   "Focus on reading and analyzing the codebase. Prefer analysis over modification.",
+  review:    "Review the code for quality, security, and correctness.",
+  docs:      "Focus on documentation and explanation tasks.",
+};
+
 /**
  * CLI별 헤드리스 명령 빌더
  * @param {'codex'|'gemini'|'claude'} cli
  * @param {string} prompt — 실행할 프롬프트
  * @param {string} resultFile — 결과 저장 파일 경로
+ * @param {object} [opts]
+ * @param {boolean} [opts.handoff=true]
+ * @param {string} [opts.mcp] — MCP 프로필 ("implement"|"analyze"|"review"|"docs")
  * @returns {string} PowerShell 명령
  */
-export function buildHeadlessCommand(cli, prompt, resultFile) {
-  // 프롬프트의 단일 인용부호를 이스케이프
-  const escaped = prompt.replace(/'/g, "''");
+export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
+  const { handoff = true, mcp } = opts;
+  const resolvedCli = resolveCliType(cli);
+  const mcpHint = mcp && MCP_PROFILE_HINTS[mcp] ? ` [MCP: ${mcp}] ${MCP_PROFILE_HINTS[mcp]}` : "";
+  // HANDOFF 지시는 프롬프트에 삽입하지 않음 — headless 후처리(processHandoff)에서 처리
+  // psmux send-keys 줄바꿈 문제 + codex exec "---" 인자 충돌 방지
+  const fullPrompt = `${prompt}${mcpHint}`;
+  const escaped = fullPrompt.replace(/'/g, "''");
+  const cls = "Clear-Host; ";
 
-  switch (cli) {
+  switch (resolvedCli) {
     case "codex":
-      return `codex exec '${escaped}' -o '${resultFile}' --color never`;
+      return `${cls}codex exec '${escaped}' -o '${resultFile}' --color never`;
     case "gemini":
-      return `gemini -p '${escaped}' -o text > '${resultFile}' 2>'${resultFile}.err'`;
+      return `${cls}gemini -p '${escaped}' -o text > '${resultFile}' 2>'${resultFile}.err'`;
     case "claude":
-      return `claude -p '${escaped}' --output-format text > '${resultFile}' 2>&1`;
+      return `${cls}claude -p '${escaped}' --output-format text > '${resultFile}' 2>&1`;
     default:
-      throw new Error(`지원하지 않는 CLI: ${cli}`);
+      throw new Error(`지원하지 않는 CLI: ${resolvedCli} (원본: ${cli})`);
   }
 }
 
@@ -86,6 +126,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     onProgress,
     progressIntervalSec = 0,
     progressive = true,
+    dashboard = false,
   } = opts;
 
   mkdirSync(RESULT_DIR, { recursive: true });
@@ -103,16 +144,20 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     applyTrifluxTheme(sessionName);
     if (safeProgress) safeProgress({ type: "session_created", sessionName, panes: session.panes });
 
+    // dashboard: 워커 pane을 먼저 생성한 후 pane 0에 대시보드를 실행
+    // (listPanes로 워커 감지가 가능하려면 워커 pane이 먼저 존재해야 함)
+
     dispatches = assignments.map((assignment, i) => {
       const paneName = `worker-${i + 1}`;
-      const brand = CLI_BRAND[assignment.cli] || { emoji: "\u{25CF}", label: assignment.cli, ansi: "" };
+      const resolvedCli = resolveCliType(assignment.cli);
+      const brand = CLI_BRAND[resolvedCli] || { emoji: "\u{25CF}", label: resolvedCli, ansi: "" };
       const paneTitle = assignment.role
-        ? `${brand.emoji} ${assignment.cli} (${assignment.role})`
-        : `${brand.emoji} ${assignment.cli}-${i + 1}`;
+        ? `${brand.emoji} ${resolvedCli} (${assignment.role})`
+        : `${brand.emoji} ${resolvedCli}-${i + 1}`;
 
       let newPaneId;
       if (i === 0) {
-        // 첫 번째 워커: 빈 lead pane을 직접 사용 (빈 pane 제거)
+        // 첫 번째 워커: 빈 lead pane 사용
         newPaneId = `${sessionName}:0.0`;
       } else {
         // 2번째+: split-window로 추가
@@ -129,7 +174,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
       // 캡처 시작 + 컬러 배너 + 명령 dispatch
       const resultFile = join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
-      const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile);
+      const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile, { mcp: assignment.mcp });
       startCapture(sessionName, newPaneId);
       // pane 간 pipe-pane EBUSY 방지 — capture 스크립트 파일 잠금 해제 대기
       if (i > 0) { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300); } catch {} }
@@ -143,6 +188,8 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     // 모든 split 완료 후 레이아웃 한 번만 정렬 (깜빡임 방지)
     try { psmuxExec(["select-layout", "-t", sessionName, "tiled"]); } catch { /* 무시 */ }
 
+    // v7.1.3: psmux 내부 대시보드 pane 제거 — WT 스플릿에서 tui-viewer 직접 실행
+
   } else {
     // ─── 기존 모드: 모든 pane을 한 번에 생성 ───
     const paneCount = assignments.length + 1;
@@ -155,8 +202,9 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     dispatches = assignments.map((assignment, i) => {
       const paneName = `worker-${i + 1}`;
       const resultFile = join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
-      const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile);
-      const dispatch = dispatchCommand(sessionName, paneName, cmd);
+      const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile, { mcp: assignment.mcp });
+      const scriptDir = join(RESULT_DIR, sessionName);
+      const dispatch = dispatchCommand(sessionName, paneName, cmd, { scriptDir, scriptName: paneName });
 
       // P1 fix: 비-progressive에서는 pane 리네임 금지 — 캡처 로그 경로가 타이틀 기반이므로
       // 리네임하면 waitForCompletion이 "codex (role).log"를 찾지만 실제는 "worker-N.log"로 불일치
@@ -208,6 +256,25 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       });
     }
 
+    return { d, completion, output };
+  }));
+
+  // B3 fix: git diff를 루프 밖에서 1회만 실행 (워커 수만큼 중복 방지)
+  let gitDiffFiles;
+  try {
+    const diffOut = execSync("git diff --name-only HEAD", { encoding: "utf8", timeout: 5000 });
+    gitDiffFiles = diffOut.trim().split("\n").filter(Boolean);
+  } catch { /* git 미설치 또는 non-repo — 무시 */ }
+
+  // handoff 파이프라인: parse → validate → format (각 워커 결과에 적용)
+  const finalResults = results.map(({ d, completion, output }) => {
+    const handoffResult = processHandoff(output, {
+      exitCode: completion.exitCode,
+      resultFile: d.resultFile,
+      cli: d.cli,
+      gitDiffFiles,
+    });
+
     return {
       cli: d.cli,
       paneName: d.paneName,
@@ -216,11 +283,16 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       matched: completion.matched,
       exitCode: completion.exitCode,
       output,
+      resultFile: d.resultFile,
       sessionDead: completion.sessionDead || false,
+      handoff: handoffResult.handoff,
+      handoffFormatted: handoffResult.formatted,
+      handoffValid: handoffResult.valid,
+      handoffFallback: handoffResult.fallback,
     };
-  }));
+  });
 
-  return { sessionName, results };
+  return { sessionName, results: finalResults };
 }
 
 /**
@@ -278,6 +350,7 @@ export function applyTrifluxTheme(sessionName) {
  * 반투명 + 비포커스 시 더 투명 + Catppuccin 테마.
  * @returns {boolean} 성공 여부
  */
+
 /**
  * WT 기본 프로필의 폰트 크기를 읽는다.
  * @returns {number} 기본 폰트 크기 (못 읽으면 12)
@@ -357,52 +430,103 @@ export function ensureWtProfile(workerCount = 2) {
  */
 export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
   try {
-    // Windows Terminal이 설치되어 있는지 확인
     execSync("where wt.exe", { stdio: "ignore" });
   } catch {
-    return false; // wt.exe 미설치 — 사용자에게 수동 attach 안내 필요
+    return false;
   }
 
-  // triflux WT 프로필 확보 (투명도 + 테마 + 폰트 크기)
   ensureWtProfile(workerCount);
 
-  const shells = ["pwsh.exe", "powershell.exe"];
-  const mode = opts.mode || "auto"; // "split" | "window" | "auto"
+  const mode = opts.mode || "auto";
 
-  // v6.0.20: 기본 popup(별도 창). split은 --split 명시 시에만.
-  // 이유: WT sp는 포커스된 pane을 분할하므로, 사용자가 다른 탭에 있으면
-  // 엉뚱한 곳이 분할됨. 별도 창은 포커스 무관하게 안정적.
-  const preferSplit = mode === "split";
-  const preferWindow = mode !== "split";
-
-  if (preferSplit && !preferWindow && process.env.WT_SESSION) {
-    // inner split — 같은 WT 창에서 가로 분할
-    const splitSize = "0.50";
-    for (const shell of shells) {
-      try {
-        execSync(
-          `wt.exe -w 0 sp -H --size ${splitSize} --profile triflux --title triflux -- ${shell} -Command "psmux attach -t ${sessionName}"`,
-          { stdio: "ignore", timeout: 5000 },
-        );
-        try { execSync(`wt.exe -w 0 mf up`, { stdio: "ignore", timeout: 2000 }); } catch { /* 무시 */ }
-        return true;
-      } catch { /* 다음 shell */ }
-    }
-  }
-  // 별도 WT 창 — PowerShell 콘솔 크기 지정 후 psmux attach
-  const cols = Math.max(100, 60 + workerCount * 15);
-  const rows = Math.max(25, 15 + workerCount * 4);
-  const resizePs = `$s=$Host.UI.RawUI;$b=$s.BufferSize;$b.Width=${cols};$s.BufferSize=$b;$w=$s.WindowSize;$w.Width=${cols};$w.Height=${rows};$s.WindowSize=$w`;
-  for (const shell of shells) {
+  if (mode === "split" && process.env.WT_SESSION) {
+    // inner split — 같은 WT 창에서 가로 분할. psmux를 직접 실행 (pwsh 불필요).
     try {
-      execSync(
-        `start "" /b wt.exe -w new --profile triflux --title "triflux workers (${workerCount})" -- ${shell} -NoProfile -Command "${resizePs};psmux attach -t ${sessionName}"`,
-        { stdio: "ignore", shell: true, timeout: 5000 },
-      );
+      const child = spawn("wt.exe", [
+        "-w", "0", "sp", "-H", "-s", "0.50",
+        "--profile", "triflux", "--title", "triflux",
+        "--", "psmux", "attach", "-t", sessionName,
+      ], { detached: true, stdio: "ignore" });
+      child.unref();
+      try { spawn("wt.exe", ["-w", "0", "mf", "up"], { detached: true, stdio: "ignore" }).unref(); } catch { /* 무시 */ }
       return true;
+    } catch { /* fallthrough to window */ }
+  }
+
+  // v6.1.0: 읽기전용 뷰어 + 포커스 복원 + 윈도우 배치
+  const logDir = join(tmpdir(), "psmux-steering", sessionName).replace(/\\/g, "/");
+  const cols = opts.cols || Math.max(100, 60 + workerCount * 15);
+  const rows = opts.rows || Math.max(25, 15 + workerCount * 4);
+
+  // 읽기전용 뷰어 스크립트 생성
+  const viewerScript = join(tmpdir(), "tfx-viewer-" + sessionName + ".ps1").replace(/\\/g, "/");
+  writeFileSync(viewerScript, [
+    "$Host.UI.RawUI.WindowTitle = '" + sessionName + "'",
+    "Write-Host \"`e[38;5;214m⬡ triflux viewer (read-only)`e[0m — " + sessionName + "\"",
+    "Write-Host 'Log: " + logDir + "'",
+    "Write-Host '---'",
+    "for ($i=0; $i -lt 30; $i++) { if ((Get-ChildItem '" + logDir + "' -Filter *.log -ErrorAction SilentlyContinue).Count -gt 0) { break }; Start-Sleep 1 }",
+    "if (-not (Get-ChildItem '" + logDir + "' -Filter *.log -ErrorAction SilentlyContinue)) { Write-Host 'No log files found after 30s'; exit 1 }",
+    "Get-Content -Path '" + logDir + "\\*.log' -Wait -Tail 50",
+  ].join("\n"), "utf8");
+
+  // T1 fix: 현재 HWND를 먼저 저장 → 탭 추가 → 즉시 원래 탭으로 복귀
+  // 2단계 포커스 복원: (1) 탭 추가 전 HWND 캡처 (2) 탭 추가 후 150ms+SendKeys
+  const saveHwndScript = [
+    "Add-Type -AssemblyName System.Windows.Forms",
+    "$before = [System.Windows.Forms.Form]::ActiveForm",
+    // 150ms로 단축 (300ms → 150ms) — WT 탭 생성은 ~100ms
+    "Start-Sleep -Milliseconds 150",
+    "[System.Windows.Forms.SendKeys]::SendWait('^+{TAB}')",
+  ].join("; ");
+
+  // WT new-tab은 --size 미지원 (window-level only). 기존 창(-w 0)에 탭 추가만.
+  const wtArgs = ["-w", "0", "nt", "--profile", "triflux", "--title", sessionName];
+  wtArgs.push("--", "pwsh.exe", "-NoProfile", "-NoLogo", "-File", viewerScript);
+
+  try {
+    const child = spawn("wt.exe", wtArgs, { detached: true, stdio: "ignore" });
+    child.unref();
+  } catch {
+    return false;
+  }
+
+  // T1: 포커스 복원 (150ms — 기존 300ms에서 단축)
+  for (const shell of ["pwsh.exe", "powershell.exe"]) {
+    try {
+      spawn(shell, ["-NoProfile", "-NonInteractive", "-Command", saveHwndScript], {
+        detached: true, stdio: "ignore",
+      }).unref();
+      break;
     } catch { /* 다음 shell */ }
   }
-  return false;
+  return true;
+}
+
+/**
+ * v7.0: psmux 세션을 WT 탭에 attach (대시보드 + 워커 전체 뷰)
+ * @param {string} sessionName
+ * @param {number} workerCount
+ * @returns {boolean}
+ */
+export function attachDashboardTab(sessionName, workerCount = 2) {
+  try { execSync("where wt.exe", { stdio: "ignore" }); } catch { return false; }
+  ensureWtProfile(workerCount);
+
+  // v7.1.3: 대시보드만 스플릿 (psmux attach 대신 tui-viewer 직접 실행)
+  // raw CLI 출력은 사용자에게 불필요 — 대시보드 로그만 표시
+  const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
+  try {
+    const child = spawn("wt.exe", [
+      "-w", "0", "sp", "-H", "-s", "0.30",
+      "--profile", "triflux",
+      "--title", `▲ ${sessionName}`,
+      "--", "node", viewerPath, "--session", sessionName,
+    ], { detached: true, stdio: "ignore" });
+    child.unref();
+    try { spawn("wt.exe", ["-w", "0", "mf", "up"], { detached: true, stdio: "ignore" }).unref(); } catch {}
+    return true;
+  } catch { return false; }
 }
 
 /**
@@ -455,10 +579,14 @@ export function getProgressSnapshots(sessionName, dispatches, lines = 15) {
 export async function runHeadlessInteractive(sessionName, assignments, opts = {}) {
   const {
     autoAttach = false,
+    dashboard = false,
     signal,
     maxIdleSec = 0,
     ...runOpts
   } = opts;
+
+  // dashboard 옵션을 runHeadless에 전달
+  if (dashboard) runOpts.dashboard = true;
 
   // autoAttach를 session_created 시점에 트리거 (CLI 실행 전에 터미널 열림)
   const userOnProgress = runOpts.onProgress;
@@ -466,8 +594,12 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
   runOpts.onProgress = (event) => {
     if (autoAttach && event.type === "session_created" && !terminalAttached) {
       terminalAttached = true;
-      // v6.0.20: 항상 별도 창 (포커스 문제 회피)
-      autoAttachTerminal(sessionName, { mode: "window" }, assignments.length);
+      if (dashboard) {
+        // v7.0: psmux attach로 대시보드+워커 전체 세션을 WT 탭에 표시
+        attachDashboardTab(sessionName, assignments.length);
+      } else {
+        autoAttachTerminal(sessionName, { mode: "window" }, assignments.length);
+      }
     }
     if (userOnProgress) userOnProgress(event);
   };
@@ -557,11 +689,8 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
     }
   }
 
-  // 유휴 타임아웃 자동 정리
-  if (maxIdleSec > 0) {
-    const timer = setTimeout(() => handle.kill(), maxIdleSec * 1000);
-    if (timer.unref) timer.unref(); // Node.js exit를 방해하지 않음
-  }
+  // 유휴 타임아웃 자동 정리 (resetIdleTimer 단일 경로 사용)
+  resetIdleTimer();
 
   // 프로세스 종료 시 safety net
   const exitHandler = () => handle.kill();

@@ -1,21 +1,27 @@
 // hub/pipeline/transitions.mjs — 파이프라인 단계 전이 규칙
 //
-// plan → prd → exec → verify → complete/fix
+// plan → prd → confidence → exec → deslop → verify → selfcheck → complete/fix
 // fix → exec/verify/complete/failed
 // complete, failed = 터미널 상태
 
-export const PHASES = ['plan', 'prd', 'exec', 'verify', 'fix', 'complete', 'failed'];
+export const PHASES = [
+  'plan', 'prd', 'confidence', 'exec', 'deslop', 'verify', 'selfcheck',
+  'fix', 'complete', 'failed',
+];
 
 export const TERMINAL = new Set(['complete', 'failed']);
 
 export const ALLOWED = {
-  'plan':     ['prd'],
-  'prd':      ['exec'],
-  'exec':     ['verify'],
-  'verify':   ['fix', 'complete', 'failed'],
-  'fix':      ['exec', 'verify', 'complete', 'failed'],
-  'complete': [],
-  'failed':   [],
+  'plan':       ['prd'],
+  'prd':        ['confidence'],
+  'confidence': ['exec', 'failed'],
+  'exec':       ['deslop'],
+  'deslop':     ['verify'],
+  'verify':     ['selfcheck', 'fix', 'failed'],
+  'selfcheck':  ['complete', 'fix'],
+  'fix':        ['exec', 'verify', 'complete', 'failed'],
+  'complete':   [],
+  'failed':     [],
 };
 
 /**

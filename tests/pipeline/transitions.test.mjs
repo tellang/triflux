@@ -11,8 +11,11 @@ import {
 } from '../../hub/pipeline/transitions.mjs';
 
 describe('PHASES / TERMINAL', () => {
-  it('7개 단계 정의', () => {
-    assert.equal(PHASES.length, 7);
+  it('10개 단계 정의 (confidence + deslop + selfcheck 포함)', () => {
+    assert.equal(PHASES.length, 10);
+    assert.ok(PHASES.includes('confidence'));
+    assert.ok(PHASES.includes('deslop'));
+    assert.ok(PHASES.includes('selfcheck'));
   });
 
   it('터미널 상태는 complete, failed', () => {
@@ -23,14 +26,19 @@ describe('PHASES / TERMINAL', () => {
 });
 
 describe('canTransition', () => {
-  // 허용 전이
+  // 허용 전이 (confidence + selfcheck 포함)
   const allowed = [
     ['plan', 'prd'],
-    ['prd', 'exec'],
-    ['exec', 'verify'],
+    ['prd', 'confidence'],
+    ['confidence', 'exec'],
+    ['confidence', 'failed'],
+    ['exec', 'deslop'],
+    ['deslop', 'verify'],
+    ['verify', 'selfcheck'],
     ['verify', 'fix'],
-    ['verify', 'complete'],
     ['verify', 'failed'],
+    ['selfcheck', 'complete'],
+    ['selfcheck', 'fix'],
     ['fix', 'exec'],
     ['fix', 'verify'],
     ['fix', 'complete'],
@@ -43,19 +51,25 @@ describe('canTransition', () => {
     });
   }
 
-  // 금지 전이
+  // 금지 전이 (confidence + selfcheck 포함)
   const forbidden = [
     ['plan', 'exec'],
     ['plan', 'verify'],
     ['plan', 'fix'],
     ['plan', 'complete'],
     ['prd', 'plan'],
+    ['prd', 'exec'],
     ['prd', 'verify'],
+    ['confidence', 'plan'],
+    ['confidence', 'verify'],
     ['exec', 'plan'],
     ['exec', 'fix'],
     ['exec', 'complete'],
     ['verify', 'plan'],
     ['verify', 'exec'],
+    ['verify', 'complete'],
+    ['selfcheck', 'plan'],
+    ['selfcheck', 'exec'],
     ['complete', 'plan'],
     ['complete', 'exec'],
     ['failed', 'plan'],
@@ -86,18 +100,30 @@ describe('transitionPhase', () => {
     };
   }
 
-  it('정상 전이 체인: plan → prd → exec → verify → complete', () => {
+  it('정상 전이 체인: plan → prd → confidence → exec → deslop → verify → selfcheck → complete', () => {
     let r = transitionPhase(makeState('plan'), 'prd');
     assert.ok(r.ok);
     assert.equal(r.state.phase, 'prd');
+
+    r = transitionPhase(r.state, 'confidence');
+    assert.ok(r.ok);
+    assert.equal(r.state.phase, 'confidence');
 
     r = transitionPhase(r.state, 'exec');
     assert.ok(r.ok);
     assert.equal(r.state.phase, 'exec');
 
+    r = transitionPhase(r.state, 'deslop');
+    assert.ok(r.ok);
+    assert.equal(r.state.phase, 'deslop');
+
     r = transitionPhase(r.state, 'verify');
     assert.ok(r.ok);
     assert.equal(r.state.phase, 'verify');
+
+    r = transitionPhase(r.state, 'selfcheck');
+    assert.ok(r.ok);
+    assert.equal(r.state.phase, 'selfcheck');
 
     r = transitionPhase(r.state, 'complete');
     assert.ok(r.ok);
@@ -108,6 +134,16 @@ describe('transitionPhase', () => {
     const r = transitionPhase(makeState('plan'), 'exec');
     assert.ok(!r.ok);
     assert.ok(r.error.includes('전이 불가'));
+  });
+
+  it('금지 전이: prd → exec (confidence 거쳐야 함)', () => {
+    const r = transitionPhase(makeState('prd'), 'exec');
+    assert.ok(!r.ok);
+  });
+
+  it('금지 전이: verify → complete (selfcheck 거쳐야 함)', () => {
+    const r = transitionPhase(makeState('verify'), 'complete');
+    assert.ok(!r.ok);
   });
 
   it('fix 진입 시 fix_attempt 증가', () => {
@@ -123,7 +159,7 @@ describe('transitionPhase', () => {
     assert.ok(r.error.includes('fix loop 초과'));
   });
 
-  it('fix → exec → verify → fix 반복 시 attempt 누적', () => {
+  it('fix → exec → deslop → verify → fix 반복 시 attempt 누적', () => {
     let s = makeState('verify');
 
     // fix 1회
@@ -131,6 +167,7 @@ describe('transitionPhase', () => {
     assert.equal(r.state.fix_attempt, 1);
 
     r = transitionPhase(r.state, 'exec');
+    r = transitionPhase(r.state, 'deslop');
     r = transitionPhase(r.state, 'verify');
 
     // fix 2회
@@ -138,6 +175,7 @@ describe('transitionPhase', () => {
     assert.equal(r.state.fix_attempt, 2);
 
     r = transitionPhase(r.state, 'exec');
+    r = transitionPhase(r.state, 'deslop');
     r = transitionPhase(r.state, 'verify');
 
     // fix 3회
@@ -145,6 +183,7 @@ describe('transitionPhase', () => {
     assert.equal(r.state.fix_attempt, 3);
 
     r = transitionPhase(r.state, 'exec');
+    r = transitionPhase(r.state, 'deslop');
     r = transitionPhase(r.state, 'verify');
 
     // fix 4회 — 초과

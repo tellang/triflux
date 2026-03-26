@@ -91,6 +91,12 @@ function parseAssignRow(row) {
   };
 }
 
+function parseReflexionRow(row) {
+  if (!row) return null;
+  const { context_json, ...rest } = row;
+  return { ...rest, context: parseJson(context_json, {}) };
+}
+
 /**
  * 저장소 생성
  * @param {string} dbPath
@@ -107,7 +113,7 @@ export function createStore(dbPath) {
 
   const schemaSQL = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
   db.exec("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)");
-  const SCHEMA_VERSION = '2';
+  const SCHEMA_VERSION = '3';
   const curVer = (() => {
     try { return db.prepare("SELECT value FROM _meta WHERE key='schema_version'").pluck().get(); }
     catch { return null; }
@@ -221,6 +227,18 @@ export function createStore(dbPath) {
     ackedRecent: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='acked' AND created_at_ms > ? - 300000"),
     assignCountByStatus: db.prepare('SELECT COUNT(*) as cnt FROM assign_jobs WHERE status = ?'),
     activeAssignCount: db.prepare("SELECT COUNT(*) as cnt FROM assign_jobs WHERE status IN ('queued','running')"),
+
+    // reflexion
+    insertReflexion: db.prepare(`
+      INSERT INTO reflexion_entries (id, error_pattern, error_message, context_json, solution, solution_code, confidence, hit_count, success_count, last_hit_ms, created_at_ms, updated_at_ms)
+      VALUES (@id, @error_pattern, @error_message, @context_json, @solution, @solution_code, @confidence, @hit_count, @success_count, @last_hit_ms, @created_at_ms, @updated_at_ms)`),
+    getReflexionById: db.prepare('SELECT * FROM reflexion_entries WHERE id = ?'),
+    findReflexionExact: db.prepare('SELECT * FROM reflexion_entries WHERE error_pattern = ? ORDER BY confidence DESC'),
+    findReflexionLike: db.prepare("SELECT * FROM reflexion_entries WHERE error_pattern LIKE ? ESCAPE '\\' ORDER BY confidence DESC LIMIT 10"),
+    updateReflexionHitSuccess: db.prepare('UPDATE reflexion_entries SET hit_count = hit_count + 1, success_count = success_count + 1, last_hit_ms = ?, updated_at_ms = ? WHERE id = ?'),
+    updateReflexionHitOnly: db.prepare('UPDATE reflexion_entries SET hit_count = hit_count + 1, last_hit_ms = ?, updated_at_ms = ? WHERE id = ?'),
+    updateReflexionConfidence: db.prepare('UPDATE reflexion_entries SET confidence = ?, updated_at_ms = ? WHERE id = ?'),
+    pruneReflexionEntries: db.prepare('DELETE FROM reflexion_entries WHERE updated_at_ms < ? AND confidence < ?'),
   };
 
   const assignStatusListeners = new Set();
@@ -699,6 +717,60 @@ export function createStore(dbPath) {
         assign_failed: S.assignCountByStatus.get('failed').cnt,
         assign_timed_out: S.assignCountByStatus.get('timed_out').cnt,
       };
+    },
+
+    // --- Reflexion CRUD ---
+
+    addReflexion({ error_pattern, error_message, context = {}, solution, solution_code = null }) {
+      const now = Date.now();
+      const id = uuidv7();
+      S.insertReflexion.run({
+        id,
+        error_pattern,
+        error_message,
+        context_json: JSON.stringify(context),
+        solution,
+        solution_code,
+        confidence: 0.5,
+        hit_count: 1,
+        success_count: 0,
+        last_hit_ms: now,
+        created_at_ms: now,
+        updated_at_ms: now,
+      });
+      return store.getReflexion(id);
+    },
+
+    getReflexion(id) {
+      return parseReflexionRow(S.getReflexionById.get(id));
+    },
+
+    findReflexion(errorPattern) {
+      let rows = S.findReflexionExact.all(errorPattern);
+      if (rows.length) return rows.map(parseReflexionRow);
+      const escaped = errorPattern.replace(/[%_\\]/g, '\\$&');
+      rows = S.findReflexionLike.all(`%${escaped.slice(0, 100)}%`);
+      return rows.map(parseReflexionRow);
+    },
+
+    updateReflexionHit(id, success = false) {
+      const now = Date.now();
+      if (success) {
+        S.updateReflexionHitSuccess.run(now, now, id);
+      } else {
+        S.updateReflexionHitOnly.run(now, now, id);
+      }
+      const entry = store.getReflexion(id);
+      if (entry && entry.hit_count > 0) {
+        const conf = entry.success_count / entry.hit_count;
+        S.updateReflexionConfidence.run(Math.max(0, Math.min(1, conf)), now, id);
+      }
+      return store.getReflexion(id);
+    },
+
+    pruneReflexion(maxAge_ms = 30 * 24 * 3600 * 1000, minConfidence = 0.2) {
+      const cutoff = Date.now() - maxAge_ms;
+      return S.pruneReflexionEntries.run(cutoff, minConfidence).changes;
     },
   };
 

@@ -125,3 +125,22 @@ CREATE TABLE IF NOT EXISTS pipeline_state (
   created_at INTEGER,
   updated_at INTEGER
 );
+
+-- Reflexion 에러 학습 테이블
+CREATE TABLE IF NOT EXISTS reflexion_entries (
+  id TEXT PRIMARY KEY,
+  error_pattern TEXT NOT NULL,          -- 에러 시그니처 (정규화)
+  error_message TEXT NOT NULL,          -- 원본 에러 메시지
+  context_json TEXT NOT NULL DEFAULT '{}', -- { file, function, cli, agent }
+  solution TEXT NOT NULL,               -- 해결책 설명
+  solution_code TEXT,                   -- 해결 코드 스니펫 (있으면)
+  confidence REAL NOT NULL DEFAULT 0.5, -- 솔루션 신뢰도 (0-1)
+  hit_count INTEGER NOT NULL DEFAULT 1, -- 매칭 횟수
+  success_count INTEGER NOT NULL DEFAULT 0, -- 성공 횟수
+  last_hit_ms INTEGER NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  updated_at_ms INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reflexion_pattern ON reflexion_entries(error_pattern);
+CREATE INDEX IF NOT EXISTS idx_reflexion_confidence ON reflexion_entries(confidence DESC);

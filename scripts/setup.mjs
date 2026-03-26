@@ -15,6 +15,19 @@ const CLAUDE_DIR = join(homedir(), ".claude");
 const CODEX_DIR = join(homedir(), ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 
+// ── 로컬 개발 모드 감지 ──
+
+/**
+ * PLUGIN_ROOT에 .git 디렉토리가 존재하면 dev mode (git clone 직접 사용)로 판정.
+ * @param {string} [root] - 검사할 루트 경로 (기본: PLUGIN_ROOT)
+ * @returns {boolean}
+ */
+function detectDevMode(root = PLUGIN_ROOT) {
+  return existsSync(join(root, ".git"));
+}
+
+const BREADCRUMB_PATH = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
+
 const REQUIRED_CODEX_PROFILES = [
   {
     name: "high",
@@ -200,9 +213,20 @@ function ensureCodexProfiles() {
   }
 }
 
-export { replaceProfileSection, hasProfileSection };
+export { replaceProfileSection, hasProfileSection, detectDevMode, SYNC_MAP, BREADCRUMB_PATH, PLUGIN_ROOT, CLAUDE_DIR };
 
 async function main() {
+const isSync = process.argv.includes("--sync");
+const isDev = detectDevMode();
+
+if (isDev) {
+  console.log("  [dev] \uB85C\uCEEC \uAC1C\uBC1C \uBAA8\uB4DC \uAC10\uC9C0");
+}
+
+if (isSync) {
+  console.log("  [sync] \uBA85\uC2DC\uC801 \uC7AC\uB3D9\uAE30\uD654 \uC2E4\uD589");
+}
+
 let synced = 0;
 
 for (const { src, dst, label } of SYNC_MAP) {
@@ -257,16 +281,16 @@ if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
 // ── 패키지 루트 breadcrumb 기록 ──
 // tfx-route.sh가 hub/server.mjs, hub/bridge.mjs를 찾을 수 있도록
 // 패키지 루트 경로를 ~/.claude/scripts/.tfx-pkg-root에 기록한다.
+// dev mode에서는 항상 최신 경로를 기록 (--sync 시 강제 갱신).
 {
-  const breadcrumbPath = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
   const pkgRootForward = PLUGIN_ROOT.replace(/\\/g, "/");
-  const currentBreadcrumb = existsSync(breadcrumbPath)
-    ? readFileSync(breadcrumbPath, "utf8").trim()
+  const currentBreadcrumb = existsSync(BREADCRUMB_PATH)
+    ? readFileSync(BREADCRUMB_PATH, "utf8").trim()
     : "";
-  if (currentBreadcrumb !== pkgRootForward) {
-    const breadcrumbDir = dirname(breadcrumbPath);
+  if (currentBreadcrumb !== pkgRootForward || isSync) {
+    const breadcrumbDir = dirname(BREADCRUMB_PATH);
     if (!existsSync(breadcrumbDir)) mkdirSync(breadcrumbDir, { recursive: true });
-    writeFileSync(breadcrumbPath, pkgRootForward + "\n", "utf8");
+    writeFileSync(BREADCRUMB_PATH, pkgRootForward + "\n", "utf8");
     synced++;
   }
 }

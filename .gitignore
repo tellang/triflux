@@ -46,3 +46,12 @@ tmp-*.log
 
 # 바이너리/임시
 download.bin
+
+# 내부 문서 (공개 금지)
+docs/design/
+docs/insights/
+docs/GAP-*
+docs/META-*
+docs/HANDOFF-*
+docs/BUGFIX-*
+docs/SESSION-*

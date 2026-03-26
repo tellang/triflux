@@ -630,6 +630,7 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
 
   const token = randomToken(paneName);
   const wrapped = `${commandText}; $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit"`;
+
   sendLiteralToPane(pane.paneId, wrapped, true);
 
   return { paneId: pane.paneId, paneName, token, logPath };

@@ -7,9 +7,12 @@ export function parseTeamArgs(args = []) {
   let teammateMode = "auto";
   const taskParts = [];
   const assigns = []; // --assign "codex:프롬프트:역할" 형식
-  let autoAttach = true;
+  let autoAttach = false;
   let progressive = true;
   let timeoutSec = 300;
+  let verbose = false;
+  let dashboard = false;
+  let mcpProfile = "";
 
   for (let index = 0; index < args.length; index += 1) {
     const current = args[index];
@@ -29,10 +32,18 @@ export function parseTeamArgs(args = []) {
       }
     } else if (current === "--auto-attach") {
       autoAttach = true;
+    } else if (current === "--no-auto-attach") {
+      autoAttach = false;
+    } else if (current === "--verbose") {
+      verbose = true;
+    } else if (current === "--dashboard") {
+      dashboard = true;
     } else if (current === "--no-progressive") {
       progressive = false;
     } else if (current === "--timeout" && args[index + 1]) {
       timeoutSec = Number(args[++index]) || 300;
+    } else if (current === "--mcp-profile" && args[index + 1]) {
+      mcpProfile = args[++index].trim();
     } else if (!current.startsWith("-")) {
       taskParts.push(current);
     }
@@ -48,5 +59,8 @@ export function parseTeamArgs(args = []) {
     autoAttach,
     progressive,
     timeoutSec,
+    verbose,
+    dashboard,
+    mcpProfile,
   };
 }

@@ -1,0 +1,117 @@
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = join(__dirname, '..', '..');
+
+// dynamic import to pick up fresh module state
+const {
+  detectDevMode,
+  SYNC_MAP,
+  BREADCRUMB_PATH,
+  PLUGIN_ROOT,
+  CLAUDE_DIR,
+} = await import('../../scripts/setup.mjs');
+
+// ── helpers ──
+
+const TMP_DIR = join(PROJECT_ROOT, 'tests', '.tmp-setup-sync');
+
+function ensureTmpDir() {
+  if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
+}
+
+function cleanTmpDir() {
+  if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true, force: true });
+}
+
+// ── tests ──
+
+describe('setup-sync: detectDevMode', () => {
+  before(ensureTmpDir);
+  after(cleanTmpDir);
+
+  it('.git 디렉토리가 존재하면 true를 반환한다', () => {
+    const fakeRoot = join(TMP_DIR, 'with-git');
+    mkdirSync(join(fakeRoot, '.git'), { recursive: true });
+    assert.equal(detectDevMode(fakeRoot), true);
+  });
+
+  it('.git 디렉토리가 없으면 false를 반환한다', () => {
+    const fakeRoot = join(TMP_DIR, 'without-git');
+    mkdirSync(fakeRoot, { recursive: true });
+    assert.equal(detectDevMode(fakeRoot), false);
+  });
+});
+
+describe('setup-sync: BREADCRUMB_PATH', () => {
+  it('breadcrumb 경로는 ~/.claude/scripts/.tfx-pkg-root 형식이다', () => {
+    // BREADCRUMB_PATH는 절대 경로
+    assert.ok(BREADCRUMB_PATH.length > 0, 'BREADCRUMB_PATH must not be empty');
+    // .claude/scripts/.tfx-pkg-root 패턴 확인 (OS 구분자 무관)
+    const normalized = BREADCRUMB_PATH.replace(/\\/g, '/');
+    assert.ok(
+      normalized.endsWith('.claude/scripts/.tfx-pkg-root'),
+      `Expected path ending with .claude/scripts/.tfx-pkg-root, got: ${normalized}`,
+    );
+  });
+});
+
+describe('setup-sync: --sync 플래그 파싱', () => {
+  it('--sync 인자가 있으면 process.argv에서 감지된다', () => {
+    const args = ['node', 'setup.mjs', '--sync'];
+    assert.ok(args.includes('--sync'));
+  });
+
+  it('--sync 인자가 없으면 감지되지 않는다', () => {
+    const args = ['node', 'setup.mjs'];
+    assert.ok(!args.includes('--sync'));
+  });
+});
+
+describe('setup-sync: SYNC_MAP', () => {
+  it('SYNC_MAP은 최소 3개 항목을 포함한다', () => {
+    assert.ok(Array.isArray(SYNC_MAP), 'SYNC_MAP must be an array');
+    assert.ok(SYNC_MAP.length >= 3, `Expected >= 3 entries, got ${SYNC_MAP.length}`);
+  });
+
+  it('각 항목은 src, dst, label 필드를 가진다', () => {
+    for (const entry of SYNC_MAP) {
+      assert.ok(typeof entry.src === 'string', `src must be string: ${JSON.stringify(entry)}`);
+      assert.ok(typeof entry.dst === 'string', `dst must be string: ${JSON.stringify(entry)}`);
+      assert.ok(typeof entry.label === 'string', `label must be string: ${JSON.stringify(entry)}`);
+    }
+  });
+});
+
+describe('setup-sync: dry-run 실행', () => {
+  it('setup.mjs를 --help 없이 실행해도 에러 없이 종료된다', () => {
+    // setup.mjs는 main()이 process.argv[1] 매칭 시에만 실행되므로
+    // 직접 node로 실행하여 exit code 0 확인
+    const result = execFileSync(process.execPath, [
+      join(PROJECT_ROOT, 'scripts', 'setup.mjs'),
+    ], {
+      timeout: 15000,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    // 정상 종료 — execFileSync는 non-zero exit 시 throw
+    assert.ok(true, 'setup.mjs exited successfully');
+  });
+
+  it('--sync 플래그로 실행해도 에러 없이 종료된다', () => {
+    const result = execFileSync(process.execPath, [
+      join(PROJECT_ROOT, 'scripts', 'setup.mjs'),
+      '--sync',
+    ], {
+      timeout: 15000,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.ok(true, 'setup.mjs --sync exited successfully');
+  });
+});

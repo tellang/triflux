@@ -50,7 +50,8 @@ function isPsmuxInstalled() {
 }
 
 /**
- * tfx-route.sh 명령에서 agent, prompt를 파싱한다.
+ * tfx-route.sh 명령에서 agent, prompt, mcp, 추가 플래그를 파싱한다.
+ * v3: 손실 없는 파싱 — 원본 명령의 모든 플래그를 보존.
  */
 function parseRouteCommand(cmd) {
   const MCP_PROFILES = ["implement", "analyze", "review", "docs"];
@@ -79,7 +80,17 @@ function parseRouteCommand(cmd) {
     .replace(/'"'"'/g, "'")
     .trim();
 
-  return { agent, prompt, mcp };
+  // v3: 원본 명령에서 추가 플래그 추출
+  const flags = {};
+  const timeoutMatch = cmd.match(/(?:^|\s)(\d{2,4})(?:\s|$)/);  // 4번째 인자 (timeout)
+  if (timeoutMatch) flags.timeout = parseInt(timeoutMatch[1], 10);
+
+  // 환경변수 기반 글로벌 플래그
+  if (process.env.TFX_DASHBOARD === "1") flags.dashboard = true;
+  if (process.env.TFX_VERBOSE === "1") flags.verbose = true;
+  if (process.env.TFX_NO_AUTO_ATTACH === "1") flags.noAutoAttach = true;
+
+  return { agent, prompt, mcp, flags };
 }
 
 function autoRoute(updatedCommand, reason) {
@@ -124,6 +135,11 @@ async function main() {
       process.exit(0);
     }
 
+    // psmux send-keys / capture-pane은 통과 (pane 내 간접 실행)
+    if (/psmux\s+(send-keys|capture-pane|list-panes|split-window|select-pane)/.test(cmd)) {
+      process.exit(0);
+    }
+
     // codex/gemini 직접 CLI 호출 → deny
     if (/\bcodex\s+exec\b/.test(cmd) || /\bgemini\s+(-p|--prompt)\b/.test(cmd)) {
       deny(
@@ -134,12 +150,30 @@ async function main() {
 
     // tfx-route.sh 실행만 감지: 명령이 bash로 시작할 때만 (커밋 메시지/echo 등 무시)
     if (/^\s*bash\s+.*tfx-route\.sh\s/.test(cmd)) {
+      // --async, --job-status, --job-result, --job-wait는 tfx-route.sh 내부 플래그 → 통과
+      if (/tfx-route\.sh\s+--(async|job-status|job-result|job-wait)\b/.test(cmd)) {
+        process.exit(0);
+      }
+
       const parsed = parseRouteCommand(cmd);
       if (parsed) {
         const safePrompt = parsed.prompt.replace(/'/g, "'\\''");
+        const VALID_MCP = new Set(["implement", "analyze", "review", "docs"]);
+        const f = parsed.flags || {};
+
+        // v3: 플래그 빌더 — 하드코딩 제거, 원본 의도 보존
+        const parts = ["tfx multi --teammate-mode headless"];
+        if (!f.noAutoAttach) parts.push("--auto-attach");
+        if (f.dashboard) parts.push("--dashboard");
+        if (f.verbose) parts.push("--verbose");
+        parts.push(`--assign '${parsed.agent}:${safePrompt}:${parsed.agent}'`);
+        if (parsed.mcp && VALID_MCP.has(parsed.mcp)) parts.push(`--mcp-profile ${parsed.mcp}`);
+        parts.push(`--timeout ${f.timeout || 600}`);
+
+        const builtCmd = parts.join(" ");
         autoRoute(
-          `tfx multi --teammate-mode headless --auto-attach --assign '${parsed.agent}:${safePrompt}:${parsed.agent}' --timeout 600`,
-          `[headless-guard] auto-route: tfx-route.sh ${parsed.agent} → headless. mcp=${parsed.mcp}`,
+          builtCmd,
+          `[headless-guard] auto-route: tfx-route.sh ${parsed.agent} → headless. mcp=${parsed.mcp} dashboard=${!!f.dashboard}`,
         );
       }
       deny(
