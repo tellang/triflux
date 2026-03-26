@@ -241,6 +241,7 @@ const DelegateInputSchema = z.object({
   resetSession: z.boolean().optional().describe('기존 Codex 세션 초기화 여부'),
   mcpProfile: z.enum(SUPPORTED_MCP_PROFILES).default('auto'),
   contextFile: z.string().optional().describe('tfx-route prior_context 파일 경로'),
+  availableServers: z.array(z.string()).optional().describe('Codex에 등록된 MCP 서버 이름 목록 (config override 대상)'),
   searchTool: z.enum(['brave-search', 'tavily', 'exa']).optional().describe('검색 우선 도구'),
   workerIndex: z.number().int().positive().optional().describe('병렬 워커 인덱스'),
   model: z.string().optional().describe('직접 실행 시 모델 오버라이드'),
@@ -313,6 +314,7 @@ function sanitizeDelegateArgs(args = {}) {
     resetSession: Boolean(args.resetSession),
     mcpProfile: args.mcpProfile || 'auto',
     contextFile: args.contextFile || null,
+    availableServers: Array.isArray(args.availableServers) ? args.availableServers : null,
     searchTool: args.searchTool || null,
     workerIndex: Number.isInteger(args.workerIndex) ? args.workerIndex : null,
     model: args.model || null,
@@ -634,6 +636,7 @@ export class DelegatorMcpWorker {
       searchTool: args.searchTool,
       workerIndex: Number.isInteger(args.workerIndex) ? args.workerIndex : undefined,
       taskText: withContext(String(args.prompt ?? ''), args.contextFile),
+      availableServers: Array.isArray(args.availableServers) ? args.availableServers : undefined,
     };
   }
 

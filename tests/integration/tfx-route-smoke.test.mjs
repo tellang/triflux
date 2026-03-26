@@ -356,23 +356,22 @@ describe('tfx-route.sh — 오류 케이스', () => {
     assert.notEqual(result.status, 0);
   });
 
-  it('CLI 이름(codex)을 역할 자리에 사용하면 안내 메시지와 함께 exit 64', () => {
-    const result = runBash(`bash "${ROUTE_SCRIPT}" codex 'test-prompt'`);
-    assert.equal(result.status, 64);
-    assert.match(out(result), /CLI 이름이지 에이전트 역할이 아닙니다/);
-    assert.match(out(result), /TFX_CLI_MODE/);
+  it('CLI 이름(codex)을 역할 자리에 사용하면 alias로 허용된다 (type=codex 메타 출력)', () => {
+    const result = runBash(`CODEX_BIN=false bash "${ROUTE_SCRIPT}" codex 'test-prompt' 2>&1 || true`);
+    assert.match(out(result), /type=codex/);
+    assert.match(out(result), /agent=codex/);
   });
 
-  it('CLI 이름(gemini)을 역할 자리에 사용하면 exit 64', () => {
-    const result = runBash(`bash "${ROUTE_SCRIPT}" gemini 'test-prompt'`);
-    assert.equal(result.status, 64);
-    assert.match(out(result), /CLI 이름이지 에이전트 역할이 아닙니다/);
+  it('CLI 이름(gemini)을 역할 자리에 사용하면 alias로 허용된다 (type=gemini 메타 출력)', () => {
+    const result = runBash(`GEMINI_BIN=false bash "${ROUTE_SCRIPT}" gemini 'test-prompt' 2>&1 || true`);
+    assert.match(out(result), /type=gemini/);
+    assert.match(out(result), /agent=gemini/);
   });
 
-  it('CLI 이름(claude)을 역할 자리에 사용하면 exit 64', () => {
-    const result = runBash(`bash "${ROUTE_SCRIPT}" claude 'test-prompt'`);
-    assert.equal(result.status, 64);
-    assert.match(out(result), /CLI 이름이지 에이전트 역할이 아닙니다/);
+  it('CLI 이름(claude)을 역할 자리에 사용하면 alias로 허용된다 (ROUTE_TYPE=claude-native)', () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" claude 'test-prompt' 2>&1`);
+    assert.equal(result.status, 0);
+    assert.match(out(result), /ROUTE_TYPE=claude-native|claude-native/);
   });
 
   it('MCP 프로필 위치에 --flag가 오면 exit 64', () => {

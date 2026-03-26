@@ -163,6 +163,7 @@ describe('delegator-mcp stdio server', () => {
           agentType: 'designer',
           prompt: 'SHOW_CONFIG',
           contextFile,
+          availableServers: ['context7', 'playwright', 'brave-search', 'exa', 'tavily'],
         },
       });
 
