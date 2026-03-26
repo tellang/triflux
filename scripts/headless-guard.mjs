@@ -82,7 +82,8 @@ function parseRouteCommand(cmd) {
 
   // v3: 원본 명령에서 추가 플래그 추출
   const flags = {};
-  const timeoutMatch = cmd.match(/(?:^|\s)(\d{2,4})(?:\s|$)/);  // 4번째 인자 (timeout)
+  const afterPrompt = cmd.replace(/'.+?'/gs, "").replace(/".+?"/gs, "");
+  const timeoutMatch = afterPrompt.match(/(?:^|\s)(\d{2,4})(?:\s|$)/);  // 4번째 인자 (timeout)
   if (timeoutMatch) flags.timeout = parseInt(timeoutMatch[1], 10);
 
   // 환경변수 기반 글로벌 플래그
@@ -163,7 +164,7 @@ async function main() {
 
         // v3: 플래그 빌더 — 하드코딩 제거, 원본 의도 보존
         const parts = ["tfx multi --teammate-mode headless"];
-        if (!f.noAutoAttach) parts.push("--auto-attach");
+        if (process.env.TFX_AUTO_ATTACH === "1" || !process.env.TFX_NO_AUTO_ATTACH) parts.push("--auto-attach");
         if (f.dashboard) parts.push("--dashboard");
         if (f.verbose) parts.push("--verbose");
         parts.push(`--assign '${parsed.agent}:${safePrompt}:${parsed.agent}'`);

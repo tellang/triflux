@@ -24,6 +24,7 @@ const handlers = {
   kill: teamKill,
   list: teamList,
   send: teamSend,
+  start: teamStart,
   status: teamStatus,
   stop: teamStop,
   task: teamTaskUpdate,
@@ -34,6 +35,7 @@ export async function cmdTeam() {
   const args = process.argv.slice(3);
   const command = resolveTeamCommand(args[0]);
   if (!args.length) return renderTeamHelp();
+  // 미등록 커맨드는 teamStart로 fallthrough (팀 생성 기본값)
   if (!command) return teamStart(args);
   return handlers[command](args.slice(1));
 }

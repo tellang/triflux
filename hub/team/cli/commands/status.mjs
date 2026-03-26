@@ -64,7 +64,7 @@ export async function teamStatus(args = []) {
   }
 
   if (isNativeMode(state) && alive) {
-    for (const member of (await nativeGetStatus(state))?.data?.members || []) {
+    for (const member of payload.nativeMembers) {
       console.log(`    • ${member.name}: ${member.status}${formatCompletionSuffix(member)}${member.lastPreview ? ` ${DIM}${member.lastPreview}${RESET}` : ""}`);
     }
   }

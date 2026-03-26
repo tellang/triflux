@@ -8,7 +8,8 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-cancel",
+      "skill": null,
+      "action": "suppress_all",
       "priority": 0,
       "supersedes": [
         "tfx-multi",
@@ -145,6 +146,36 @@
       "mcp_route": null
     },
     {
+      "id": "tfx-autoresearch",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?autoresearch\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-autoresearch",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-deep-interview",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?deep[\\s-]?interview\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-deep-interview",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
       "id": "handoff-route",
       "patterns": [
         {
@@ -152,7 +183,8 @@
           "flags": "i"
         }
       ],
-      "skill": "mp",
+      "skill": null,
+      "action": "handoff",
       "priority": 5,
       "supersedes": [],
       "exclusive": false,

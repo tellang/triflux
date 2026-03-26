@@ -652,19 +652,25 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         const body = await parseBody(req);
 
         if (sessionIdHeader && transports.has(sessionIdHeader)) {
-          const transport = transports.get(sessionIdHeader);
-          transport._lastActivity = Date.now();
-          await transport.handleRequest(req, res, body);
+          const session = transports.get(sessionIdHeader);
+          session.transport._lastActivity = Date.now();
+          await session.transport.handleRequest(req, res, body);
         } else if (!sessionIdHeader && isInitializeRequest(body)) {
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sid) => {
               transport._lastActivity = Date.now();
-              transports.set(sid, transport);
+              transports.set(sid, { transport, mcp });
             },
           });
           transport.onclose = () => {
-            if (transport.sessionId) transports.delete(transport.sessionId);
+            if (transport.sessionId) {
+              const session = transports.get(transport.sessionId);
+              if (session) {
+                try { session.mcp.close(); } catch {}
+              }
+              transports.delete(transport.sessionId);
+            }
           };
           const mcp = createMcpForSession();
           await mcp.connect(transport);
@@ -679,14 +685,14 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         }
       } else if (req.method === 'GET') {
         if (sessionIdHeader && transports.has(sessionIdHeader)) {
-          await transports.get(sessionIdHeader).handleRequest(req, res);
+          await transports.get(sessionIdHeader).transport.handleRequest(req, res);
         } else {
           res.writeHead(400);
           res.end('Invalid or missing session ID');
         }
       } else if (req.method === 'DELETE') {
         if (sessionIdHeader && transports.has(sessionIdHeader)) {
-          await transports.get(sessionIdHeader).handleRequest(req, res);
+          await transports.get(sessionIdHeader).transport.handleRequest(req, res);
         } else {
           res.writeHead(400);
           res.end('Invalid or missing session ID');
@@ -712,6 +718,9 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     }
   }));
 
+  httpServer.requestTimeout = 30000;
+  httpServer.headersTimeout = 10000;
+
   router.startSweeper();
 
   const hitlTimer = setInterval(() => {
@@ -722,9 +731,10 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   const SESSION_TTL_MS = 30 * 60 * 1000;
   const sessionTimer = setInterval(() => {
     const now = Date.now();
-    for (const [sid, transport] of transports) {
-      if (now - (transport._lastActivity || 0) <= SESSION_TTL_MS) continue;
-      try { transport.close(); } catch {}
+    for (const [sid, session] of transports) {
+      if (now - (session.transport._lastActivity || 0) <= SESSION_TTL_MS) continue;
+      try { session.mcp.close(); } catch {}
+      try { session.transport.close(); } catch {}
       transports.delete(sid);
     }
   }, 60000);
@@ -769,8 +779,9 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         router.stopSweeper();
         clearInterval(hitlTimer);
         clearInterval(sessionTimer);
-        for (const [, transport] of transports) {
-          try { await transport.close(); } catch {}
+        for (const [, session] of transports) {
+          try { await session.mcp.close(); } catch {}
+          try { await session.transport.close(); } catch {}
         }
         transports.clear();
         await pipe.stop();

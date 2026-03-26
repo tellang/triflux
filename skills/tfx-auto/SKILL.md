@@ -88,7 +88,7 @@ argument-hint: "<command|task> [args...]"
 | 커맨드 | 실행 |
 |--------|------|
 | `test` | `Agent(subagent_type="oh-my-claudecode:test-engineer", model="sonnet")` |
-| `reflect` | `Agent(subagent_type="oh-my-claudecode:verifier", model="sonnet")` |
+| `reflect` | `Bash(tfx-route.sh verifier '{PROMPT}' review)` (기본) / `Agent(subagent_type="oh-my-claudecode:verifier", model="sonnet")` (TFX_VERIFIER_OVERRIDE=claude 시) |
 
 ### 복합
 
@@ -205,18 +205,19 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 
 | 입력 | CLI | MCP |
 |------|-----|-----|
-| codex / executor / debugger / deep-executor | Codex | implement |
+| codex / executor / build-fixer / spark / debugger / deep-executor | Codex | implement |
 | architect / planner / critic / analyst | Codex (xhigh) | analyze |
 | scientist / document-specialist | Codex | analyze |
 | code-reviewer / security-reviewer / quality-reviewer | Codex (review) | review |
 | gemini / designer / writer | Gemini | docs |
-| claude / explore / verifier / test-engineer / qa-tester | Claude native | — |
+| explore / test-engineer / qa-tester | Claude native | — |
+| verifier | Codex review (기본) / Claude native (TFX_VERIFIER_OVERRIDE=claude 시) | review / — |
 
 ### MCP 프로필 자동 결정
 
 | 에이전트 | MCP |
 |----------|-----|
-| executor, build-fixer, debugger, deep-executor | implement |
+| executor, build-fixer, spark, debugger, deep-executor | implement |
 | architect, planner, critic, analyst, scientist, document-specialist | analyze |
 | code-reviewer, security-reviewer, quality-reviewer | review |
 | designer, writer | docs |

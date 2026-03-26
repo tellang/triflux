@@ -207,8 +207,8 @@ function parseRouteType(stderr = '') {
 
 function summarizePayload(payload) {
   if (typeof payload.output === 'string' && payload.output.trim()) return payload.output.trim();
-  if (payload.mode === 'async' && payload.jobId) return `비동기 위임이 시작되었습니다. jobId=${payload.jobId}`;
-  if (payload.jobId) return `jobId=${payload.jobId} 상태=${payload.status}`;
+  if (payload.mode === 'async' && payload.job_id) return `비동기 위임이 시작되었습니다. jobId=${payload.job_id}`;
+  if (payload.job_id) return `jobId=${payload.job_id} 상태=${payload.status}`;
   if (payload.status) return `상태=${payload.status}`;
   return payload.ok ? '완료되었습니다.' : '실패했습니다.';
 }
@@ -937,24 +937,23 @@ export class DelegatorMcpWorker {
   _serializeJob(job) {
     return {
       ok: job.ok,
-      jobId: job.jobId,
       job_id: job.jobId,
       mode: job.mode || 'async',
       status: job.status,
-      providerRequested: job.providerRequested,
-      providerResolved: job.providerResolved,
-      agentType: job.agentType,
+      provider_requested: job.providerRequested,
+      provider_resolved: job.providerResolved,
+      agent_type: job.agentType,
       transport: job.transport,
-      createdAt: job.createdAt,
-      startedAt: job.startedAt,
-      updatedAt: job.updatedAt,
-      completedAt: job.completedAt,
-      exitCode: job.exitCode,
+      created_at: job.createdAt,
+      started_at: job.startedAt,
+      updated_at: job.updatedAt,
+      completed_at: job.completedAt,
       output: job.output,
       stderr: job.stderr,
-      threadId: job.threadId,
-      sessionKey: job.sessionKey,
-      conversationOpen: this.geminiConversations.has(job.jobId),
+      error: '',
+      thread_id: job.threadId,
+      session_key: job.sessionKey,
+      conversation_open: this.geminiConversations.has(job.jobId),
     };
   }
 

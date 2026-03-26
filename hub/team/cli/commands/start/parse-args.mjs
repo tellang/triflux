@@ -44,7 +44,9 @@ export function parseTeamArgs(args = []) {
       timeoutSec = Number(args[++index]) || 300;
     } else if (current === "--mcp-profile" && args[index + 1]) {
       mcpProfile = args[++index].trim();
-    } else if (!current.startsWith("-")) {
+    } else if (current.startsWith("-")) {
+      console.warn(`  ⚠ 미인식 플래그 무시: ${current}`);
+    } else {
       taskParts.push(current);
     }
   }

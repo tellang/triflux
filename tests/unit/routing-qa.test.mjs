@@ -118,7 +118,7 @@ describe("keyword-rules: 충돌 해결", () => {
     const matches = matchRules(compiled, "canceltfx tfx-auto");
     const resolved = resolveConflicts(matches);
     assert.equal(resolved.length, 1);
-    assert.equal(resolved[0].skill, "tfx-cancel");
+    assert.equal(resolved[0].id, "tfx-cancel");
   });
 
   it("tfx-auto-codex는 tfx-auto를 supersede", () => {

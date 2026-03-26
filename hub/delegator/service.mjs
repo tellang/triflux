@@ -193,6 +193,11 @@ export class DelegatorService {
 
   async delegate(input = {}) {
     const normalized = this._normalizeInput(input);
+
+    if (!normalized.prompt || typeof normalized.prompt !== 'string' || !normalized.prompt.trim()) {
+      return this._errorSnapshot(null, 'prompt is required');
+    }
+
     const snapshot = this.createJobSnapshot(normalized);
     this.recordJob(snapshot);
 

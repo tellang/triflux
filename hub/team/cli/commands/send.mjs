@@ -1,5 +1,5 @@
 import { injectPrompt } from "../../pane.mjs";
-import { DIM, RESET, WHITE } from "../../shared.mjs";
+import { DIM, RESET, WHITE, YELLOW } from "../../shared.mjs";
 import { resolveMember } from "../services/member-selector.mjs";
 import { nativeRequest } from "../services/native-control.mjs";
 import { isNativeMode, isTeamAlive, isWtMode } from "../services/runtime-mode.mjs";
@@ -20,7 +20,7 @@ export async function teamSend(args = []) {
     return;
   }
   if (isWtMode(state)) {
-    console.log(`\n  \x1b[33m⚠\x1b[0m wt 모드는 pane 프롬프트 자동 주입(send)이 지원되지 않습니다.\n  ${DIM}수동 전달: 선택한 pane에 직접 붙여넣으세요.${RESET}\n`);
+    console.log(`\n  ${YELLOW}⚠${RESET} wt 모드는 pane 프롬프트 자동 주입(send)이 지원되지 않습니다.\n  ${DIM}수동 전달: 선택한 pane에 직접 붙여넣으세요.${RESET}\n`);
     return;
   }
 
