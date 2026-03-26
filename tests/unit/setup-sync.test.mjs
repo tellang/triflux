@@ -62,14 +62,27 @@ describe('setup-sync: BREADCRUMB_PATH', () => {
 });
 
 describe('setup-sync: --sync 플래그 파싱', () => {
-  it('--sync 인자가 있으면 process.argv에서 감지된다', () => {
-    const args = ['node', 'setup.mjs', '--sync'];
-    assert.ok(args.includes('--sync'));
+  it('--sync 플래그 전달 시 [sync] 메시지를 출력한다', () => {
+    const result = execFileSync(process.execPath, [
+      join(PROJECT_ROOT, 'scripts', 'setup.mjs'),
+      '--sync',
+    ], {
+      timeout: 15000,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.ok(result.includes('[sync]'), `Expected [sync] in output, got: ${result}`);
   });
 
-  it('--sync 인자가 없으면 감지되지 않는다', () => {
-    const args = ['node', 'setup.mjs'];
-    assert.ok(!args.includes('--sync'));
+  it('--sync 플래그 없이 실행 시 [sync] 메시지가 출력되지 않는다', () => {
+    const result = execFileSync(process.execPath, [
+      join(PROJECT_ROOT, 'scripts', 'setup.mjs'),
+    ], {
+      timeout: 15000,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.ok(!result.includes('[sync]'), `Expected no [sync] in output, got: ${result}`);
   });
 });
 

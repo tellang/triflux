@@ -87,11 +87,11 @@ describe("createLogDashboard", () => {
     tui.close();
   });
 
-  it("파이프라인 업데이트 (상태 저장)", () => {
+  it("파이프라인 업데이트 후 getPipelineState에 반영", () => {
     const tui = createLogDashboard({ refreshMs: 0 });
     tui.updatePipeline({ phase: "verify" });
-    // pipeline 상태는 내부 저장되며, render는 워커 변경 시에만 출력
-    tui.render();
+    const state = tui.getPipelineState();
+    assert.equal(state.phase, "verify");
     tui.close();
   });
 

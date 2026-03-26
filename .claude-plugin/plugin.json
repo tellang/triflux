@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "1.0.0",
+  "version": "7.1.4",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "author": {
     "name": "tellang"
@@ -18,6 +18,5 @@
     "multi-model"
   ],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
-  "mcpServers": "./.mcp.json"
+  "hooks": "./hooks/hooks.json"
 }

@@ -12,6 +12,7 @@ export const TEAM_COMMANDS = [
   { name: "kill", usage: "tfx multi kill", desc: "모든 팀 세션 강제 종료" },
   { name: "list", usage: "tfx multi list", desc: "활성 세션 목록" },
   { name: "help", usage: "tfx multi help", desc: "도움말" },
+  { name: "start", usage: "tfx multi start [options]", desc: "새 팀 세션 시작 (기본 커맨드)" },
 ];
 
 export const TEAM_COMMAND_ALIASES = new Map([

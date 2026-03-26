@@ -573,7 +573,7 @@ export function createPipeServer({
         clients: clients.size,
         pending_messages: Array.from(clients.values()).reduce((sum, client) => {
           if (!client.agentId) return sum;
-          return sum + router.getPendingMessages(client.agentId, { max_messages: 1000 }).length;
+          return sum + router.countPendingMessages(client.agentId);
         }, 0),
       };
     },

@@ -1,6 +1,7 @@
 // hub/store.mjs — SQLite 감사 로그/메타데이터 저장소
 // 실시간 배달 큐는 router/pipe가 담당하고, SQLite는 재생/감사 용도로만 유지한다.
 import Database from 'better-sqlite3';
+import { recalcConfidence } from './reflexion.mjs';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -118,7 +119,14 @@ export function createStore(dbPath) {
     try { return db.prepare("SELECT value FROM _meta WHERE key='schema_version'").pluck().get(); }
     catch { return null; }
   })();
+  // 마이그레이션 전략: 스키마 버전이 다르면 schema.sql을 재실행한다.
+  // schema.sql은 CREATE TABLE IF NOT EXISTS 패턴을 사용하므로 멱등하게 적용된다.
+  // 비파괴적 컬럼 추가는 자동으로 처리되지만, 컬럼 제거/이름 변경은 수동 마이그레이션이 필요하다.
   if (curVer !== SCHEMA_VERSION) {
+    if (curVer != null) {
+      // 이미 버전이 기록된 DB에서 버전 불일치가 발생한 경우 경고한다.
+      console.warn(`[store] schema version mismatch: found=${curVer} expected=${SCHEMA_VERSION}. Applying schema.sql (idempotent).`);
+    }
     db.exec(schemaSQL);
     db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)").run(SCHEMA_VERSION);
   }
@@ -629,6 +637,10 @@ export function createStore(dbPath) {
         values.push(Math.trunc(Number(active_before_ms)));
       }
 
+      // WHERE 절은 호출마다 달라지므로 prepared statement를 미리 캐시할 수 없다.
+      // db.prepare()는 호출당 한 번 실행되며, better-sqlite3 내부에서 SQLite 구문 파싱을
+      // 수행한다. 필터 조합이 2^6 = 64가지이므로 정적 캐시 대신 동적 생성을 선택했다.
+      // 이 함수는 hot path(heartbeat/poll)가 아닌 관리/조회 경로에서만 호출되므로 허용한다.
       const sql = `
         SELECT * FROM assign_jobs
         ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
@@ -745,11 +757,26 @@ export function createStore(dbPath) {
       return parseReflexionRow(S.getReflexionById.get(id));
     },
 
-    findReflexion(errorPattern) {
-      let rows = S.findReflexionExact.all(errorPattern);
+    findReflexion(errorPattern, context = {}) {
+      const ctxKeys = Object.keys(context).filter(k => context[k] != null);
+      const ctxWhere = ctxKeys.map(k => ` AND json_extract(context_json, '$.${k}') = ?`).join('');
+      const ctxVals = ctxKeys.map(k => context[k]);
+
+      if (ctxKeys.length === 0) {
+        let rows = S.findReflexionExact.all(errorPattern);
+        if (rows.length) return rows.map(parseReflexionRow);
+        const escaped = errorPattern.replace(/[%_\\]/g, '\\$&');
+        rows = S.findReflexionLike.all(`%${escaped.slice(0, 100)}%`);
+        return rows.map(parseReflexionRow);
+      }
+
+      const exactSql = `SELECT * FROM reflexion_entries WHERE error_pattern = ?${ctxWhere} ORDER BY confidence DESC`;
+      let rows = db.prepare(exactSql).all(errorPattern, ...ctxVals);
       if (rows.length) return rows.map(parseReflexionRow);
+
       const escaped = errorPattern.replace(/[%_\\]/g, '\\$&');
-      rows = S.findReflexionLike.all(`%${escaped.slice(0, 100)}%`);
+      const likeSql = `SELECT * FROM reflexion_entries WHERE error_pattern LIKE ? ESCAPE '\\'${ctxWhere} ORDER BY confidence DESC LIMIT 10`;
+      rows = db.prepare(likeSql).all(`%${escaped.slice(0, 100)}%`, ...ctxVals);
       return rows.map(parseReflexionRow);
     },
 
@@ -762,7 +789,7 @@ export function createStore(dbPath) {
       }
       const entry = store.getReflexion(id);
       if (entry && entry.hit_count > 0) {
-        const conf = entry.success_count / entry.hit_count;
+        const conf = recalcConfidence(entry);
         S.updateReflexionConfidence.run(Math.max(0, Math.min(1, conf)), now, id);
       }
       return store.getReflexion(id);

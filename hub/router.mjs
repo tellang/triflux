@@ -64,7 +64,9 @@ export function createRouter(store) {
   const runtimeTopics = new Map();
   const queuesByAgent = new Map();
   const liveMessages = new Map();
-  const deliveryLatencies = [];
+  const MAX_LATENCY_SAMPLES = 100;
+  let latencyIdx = 0;
+  const deliveryLatencies = new Array(MAX_LATENCY_SAMPLES).fill(0);
 
   function ensureAgentQueue(agentId) {
     let queue = queuesByAgent.get(agentId);
@@ -75,10 +77,9 @@ export function createRouter(store) {
     return queue;
   }
 
-  function pruneDeliveryStats(now = Date.now()) {
-    while (deliveryLatencies.length && deliveryLatencies[0].at < now - 300000) {
-      deliveryLatencies.shift();
-    }
+  function recordLatency(ms) {
+    deliveryLatencies[latencyIdx % MAX_LATENCY_SAMPLES] = ms;
+    latencyIdx++;
   }
 
   function upsertRuntimeTopics(agentId, topics, { replace = true } = {}) {
@@ -174,11 +175,7 @@ export function createRouter(store) {
       delivery.delivered_at_ms = Date.now();
       record.message.status = 'delivered';
       store.updateMessageStatus(messageId, 'delivered');
-      deliveryLatencies.push({
-        at: delivery.delivered_at_ms,
-        ms: delivery.delivered_at_ms - record.message.created_at_ms,
-      });
-      pruneDeliveryStats(delivery.delivered_at_ms);
+      recordLatency(delivery.delivered_at_ms - record.message.created_at_ms);
       return true;
     }
     return false;
@@ -406,6 +403,18 @@ export function createRouter(store) {
 
     getPendingMessages(agentId, options = {}) {
       return sortedPending(agentId, options);
+    },
+
+    countPendingMessages(agentId) {
+      const queue = ensureAgentQueue(agentId);
+      const now = Date.now();
+      let count = 0;
+      for (const delivery of queue.values()) {
+        if (delivery.acked_at_ms) continue;
+        if (delivery.message.expires_at_ms <= now) continue;
+        count++;
+      }
+      return count;
     },
 
     markMessagePushed(agentId, messageId) {
@@ -717,14 +726,14 @@ export function createRouter(store) {
     },
 
     getDeliveryStats() {
-      pruneDeliveryStats();
-      if (!deliveryLatencies.length) {
+      if (latencyIdx === 0) {
         return { total_deliveries: 0, avg_delivery_ms: 0 };
       }
-      const total = deliveryLatencies.reduce((sum, item) => sum + item.ms, 0);
+      const filled = Math.min(latencyIdx, MAX_LATENCY_SAMPLES);
+      const total = deliveryLatencies.slice(0, filled).reduce((sum, ms) => sum + ms, 0);
       return {
-        total_deliveries: deliveryLatencies.length,
-        avg_delivery_ms: Math.round(total / deliveryLatencies.length),
+        total_deliveries: latencyIdx,
+        avg_delivery_ms: Math.round(total / filled),
       };
     },
 

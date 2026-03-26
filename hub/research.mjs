@@ -2,7 +2,7 @@
 // 검색 쿼리 생성 → 결과 정규화 → 보고서 빌드 → 저장
 
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { TFX_REPORTS_DIR } from './paths.mjs';
 
 /**
@@ -103,6 +103,11 @@ ${sourcesSection || '_출처 없음_'}
  */
 export function saveReport(topic, content, baseDir = process.cwd()) {
   const dir = join(baseDir, TFX_REPORTS_DIR);
+  const resolvedDir = resolve(dir);
+  const expectedBase = resolve(baseDir || TFX_REPORTS_DIR);
+  if (!resolvedDir.startsWith(expectedBase)) {
+    throw new Error('Invalid report directory: path traversal detected');
+  }
   mkdirSync(dir, { recursive: true });
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);

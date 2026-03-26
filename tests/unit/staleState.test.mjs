@@ -113,7 +113,7 @@ describe("staleState.mjs", () => {
     });
 
     const report = inspectStaleOmcTeams({
-      startDir: projectDir,
+      stateRoot: null,
       teamsRoot,
       nowMs: Date.now(),
       processEntries: [],

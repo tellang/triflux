@@ -1039,7 +1039,7 @@ async function cmdDoctor(options = {}) {
       ok("설치됨");
     } else {
       addDoctorCheck(report, { name: "hud-qos-status.mjs", status: "missing", path: hud, optional: true, fix: "tfx setup" });
-      warn("미설치 ${GRAY}(선택사항)${RESET}");
+      warn(`미설치 ${GRAY}(선택사항)${RESET}`);
     }
 
     // 3. Codex CLI
@@ -1207,6 +1207,17 @@ async function cmdDoctor(options = {}) {
           if (e.ts > groups[key].ts) { groups[key].ts = e.ts; groups[key].snippet = e.snippet; }
         }
 
+        // semver 비교 (lexicographic 비교 버그 방지)
+        function semverGte(a, b) {
+          const pa = a.split('.').map(Number);
+          const pb = b.split('.').map(Number);
+          for (let i = 0; i < 3; i++) {
+            if ((pa[i] || 0) > (pb[i] || 0)) return true;
+            if ((pa[i] || 0) < (pb[i] || 0)) return false;
+          }
+          return true;
+        }
+
         // 알려진 해결 버전 (패턴별 수정된 triflux 버전)
         const KNOWN_FIXES = {
           "gemini:deprecated_flag": "1.8.9",  // -p → --prompt
@@ -1217,7 +1228,7 @@ async function cmdDoctor(options = {}) {
 
         for (const [key, g] of Object.entries(groups)) {
           const fixVer = KNOWN_FIXES[key];
-          if (fixVer && currentVer >= fixVer) {
+          if (fixVer && semverGte(currentVer, fixVer)) {
             // 해결된 이슈 — 자동 정리
             cleaned += g.count;
             continue;
@@ -1238,7 +1249,7 @@ async function cmdDoctor(options = {}) {
           const remaining = entries.filter(e => {
             const key = `${e.cli}:${e.pattern}`;
             const fixVer = KNOWN_FIXES[key];
-            return !(fixVer && currentVer >= fixVer);
+            return !(fixVer && semverGte(currentVer, fixVer));
           });
           writeFileSync(issuesFile, remaining.map(e => JSON.stringify(e)).join("\n") + (remaining.length ? "\n" : ""));
           ok(`${cleaned}개 해결된 이슈 자동 정리됨`);
@@ -1421,10 +1432,11 @@ async function cmdDoctor(options = {}) {
             if (!hasActiveMember && teamConfig.leadSessionId) {
               try {
                 const sessionToken = teamConfig.leadSessionId.toLowerCase();
+                const safeToken = teamConfig.leadSessionId.slice(0, 8).replace(/[^a-zA-Z0-9\-]/g, '');
                 // Claude Code 프로세스에서 세션 ID 검색
                 if (process.platform === "win32") {
                   const psOut = execSync(
-                    `powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '${teamConfig.leadSessionId.slice(0, 8)}' } | Select-Object ProcessId | ConvertTo-Json -Compress"`,
+                    `powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '${safeToken}' } | Select-Object ProcessId | ConvertTo-Json -Compress"`,
                     { encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
                   ).trim();
                   if (psOut && psOut !== "null") {
@@ -1434,7 +1446,7 @@ async function cmdDoctor(options = {}) {
                   }
                 } else {
                   const psOut = execSync(
-                    `ps -ax -o pid=,command= | grep -i '${teamConfig.leadSessionId.slice(0, 8)}' | grep -v grep`,
+                    `ps -ax -o pid=,command= | grep -i '${safeToken}' | grep -v grep`,
                     { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] },
                   ).trim();
                   hasActiveMember = psOut.length > 0;

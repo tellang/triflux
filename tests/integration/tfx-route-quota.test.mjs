@@ -6,11 +6,13 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import os from 'node:os';
+import { toBashPath, BASH_EXE } from '../helpers/bash-path.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, '..', '..');
-const ROUTE_SCRIPT = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
-const FIXTURE_BIN = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin');
+const ROUTE_SCRIPT_WIN = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
+const ROUTE_SCRIPT = toBashPath(ROUTE_SCRIPT_WIN);
+const FIXTURE_BIN = toBashPath(resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin'));
 
 // 헬퍼: bash 스크립트에서 특정 함수 내용만 추출
 function extractFunction(scriptPath, funcName) {
@@ -23,7 +25,7 @@ function extractFunction(scriptPath, funcName) {
 
 // 헬퍼: 추출한 함수와 추가 스크립트를 bash -c로 실행
 function runBash(command, extraEnv = {}) {
-  return spawnSync('bash', ['-c', command], {
+  return spawnSync(BASH_EXE, ['-c', command], {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
     env: {
@@ -41,8 +43,8 @@ function out(result) {
 
 describe('tfx-route.sh — Quota Functions', () => {
   let tmpStdout, tmpStderr, dummyBashSource;
-  const detectFunc = extractFunction(ROUTE_SCRIPT, 'detect_quota_exceeded');
-  const rerouteFunc = extractFunction(ROUTE_SCRIPT, 'auto_reroute');
+  const detectFunc = extractFunction(ROUTE_SCRIPT_WIN, 'detect_quota_exceeded');
+  const rerouteFunc = extractFunction(ROUTE_SCRIPT_WIN, 'auto_reroute');
 
   before(() => {
     tmpStdout = resolve(os.tmpdir(), `tfx-quota-stdout-${Date.now()}.log`);
@@ -128,7 +130,7 @@ auto_reroute codex
 
       // BASH_SOURCE[0]이 dummyBashSource를 가리키도록 source 대신 직접 실행
       // exec가 dummyBashSource를 실행하면 REROUTED 메시지 출력
-      const result = spawnSync('bash', [wrapperScript], {
+      const result = spawnSync(BASH_EXE, [wrapperScript], {
         cwd: PROJECT_ROOT,
         encoding: 'utf8',
         env: {
@@ -158,7 +160,7 @@ auto_reroute gemini
 `);
       fs.chmodSync(wrapperScript, 0o755);
 
-      const result = spawnSync('bash', [wrapperScript], {
+      const result = spawnSync(BASH_EXE, [wrapperScript], {
         cwd: PROJECT_ROOT,
         encoding: 'utf8',
         env: {
@@ -191,7 +193,7 @@ auto_reroute codex
       fs.writeFileSync(fakeCodex, '#!/usr/bin/env bash\necho "Error: quota exceeded"\nexit 1\n');
       fs.chmodSync(fakeCodex, 0o755);
 
-      const result = spawnSync('bash', [ROUTE_SCRIPT, 'executor', 'test'], {
+      const result = spawnSync(BASH_EXE, [ROUTE_SCRIPT, 'executor', 'test'], {
         cwd: PROJECT_ROOT,
         encoding: 'utf8',
         env: {
@@ -215,7 +217,7 @@ auto_reroute codex
       fs.writeFileSync(fakeCodex, '#!/usr/bin/env bash\necho "Error: quota exceeded"\nexit 1\n');
       fs.chmodSync(fakeCodex, 0o755);
 
-      const result = spawnSync('bash', [ROUTE_SCRIPT, 'executor', 'test'], {
+      const result = spawnSync(BASH_EXE, [ROUTE_SCRIPT, 'executor', 'test'], {
         cwd: PROJECT_ROOT,
         encoding: 'utf8',
         env: {

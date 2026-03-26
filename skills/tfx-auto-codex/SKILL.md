@@ -46,9 +46,30 @@ TFX_NO_CLAUDE_NATIVE=1 bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {m
 `TFX_NO_CLAUDE_NATIVE=1`일 때:
 
 - `explore` -> Codex `fast`
-- `verifier` -> Codex `thorough review`
+- `verifier` -> Codex `thorough review` (**기본값: 이미 Codex로 설정됨**)
 - `test-engineer` -> Codex `high`
 - `qa-tester` -> Codex `thorough review`
+
+> **참고:** `verifier`는 tfx-auto-codex의 기본 라우팅에서 이미 Codex로 실행된다.
+> 별도 오버라이드가 필요한 경우 `TFX_VERIFIER_OVERRIDE` 환경변수를 사용한다.
+
+### TFX_VERIFIER_OVERRIDE
+
+`verifier` 역할의 기본 Codex 라우팅을 재정의한다.
+
+```bash
+# Claude 네이티브 verifier로 실행 (예: 도구 접근이 필요한 경우)
+TFX_VERIFIER_OVERRIDE=claude-native /tfx-auto-codex "..."
+
+# 특정 Codex 프로필로 강제 지정
+TFX_VERIFIER_OVERRIDE=codex:xhigh /tfx-auto-codex "..."
+```
+
+| 값 | 동작 |
+|----|------|
+| 미설정 (기본) | Codex `thorough review` |
+| `codex:<profile>` | 지정 프로필로 Codex 실행 |
+| `claude-native` | Claude 네이티브 verifier로 폴백 |
 
 ## 트리아지 기준
 

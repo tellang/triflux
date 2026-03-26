@@ -1,5 +1,5 @@
 import { injectPrompt, sendKeys } from "../../pane.mjs";
-import { DIM, RESET, WHITE } from "../../shared.mjs";
+import { DIM, RESET, WHITE, YELLOW } from "../../shared.mjs";
 import { publishLeadControl } from "../services/hub-client.mjs";
 import { resolveMember } from "../services/member-selector.mjs";
 import { nativeRequest } from "../services/native-control.mjs";
@@ -22,7 +22,7 @@ export async function teamControl(args = []) {
     return;
   }
   if (isWtMode(state)) {
-    console.log(`\n  \x1b[33m⚠\x1b[0m wt 모드는 Hub direct/control 주입 경로가 비활성입니다.\n  ${DIM}수동 제어: 해당 pane에서 직접 명령/인터럽트를 수행하세요.${RESET}\n`);
+    console.log(`\n  ${YELLOW}⚠${RESET} wt 모드는 Hub direct/control 주입 경로가 비활성입니다.\n  ${DIM}수동 제어: 해당 pane에서 직접 명령/인터럽트를 수행하세요.${RESET}\n`);
     return;
   }
 

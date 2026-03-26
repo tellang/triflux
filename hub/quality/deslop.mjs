@@ -6,8 +6,8 @@
 import { readdir, readFile, writeFile, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
-/** @type {Array<{type: string, pattern: RegExp, severity: string, autoFixable: boolean, multiline: boolean}>} */
-export const SLOP_PATTERNS = [
+/** @type {ReadonlyArray<{type: string, pattern: RegExp, severity: string, autoFixable: boolean, multiline: boolean}>} */
+export const SLOP_PATTERNS = Object.freeze([
   {
     type: 'trivial_comment',
     pattern: /^\s*\/\/\s*(import|define|set|get|return|export)\s/i,
@@ -57,7 +57,7 @@ export const SLOP_PATTERNS = [
     autoFixable: true,
     multiline: false,
   },
-];
+]);
 
 const SEVERITY_WEIGHT = { low: 2, med: 5 };
 
@@ -82,6 +82,7 @@ export function detectSlop(content, filePath = '') {
           suggestion: `${sp.type} 패턴 감지`,
           text: lines[i].trim(),
           autoFixable: sp.autoFixable,
+          file: filePath,
         });
       }
     }
@@ -100,6 +101,7 @@ export function detectSlop(content, filePath = '') {
         suggestion: `${sp.type} 패턴 감지`,
         text: match[0].split('\n')[0].trim(),
         autoFixable: sp.autoFixable,
+        file: filePath,
       });
     }
   }

@@ -43,6 +43,7 @@ export function quickClassify(prompt) {
   const lower = prompt.toLowerCase().trim();
   let bestCategory = null;
   let bestScore = 0;
+  let bestMatchCount = 0;
 
   for (const { category, keywords, weight } of KEYWORD_PATTERNS) {
     let matchCount = 0;
@@ -54,6 +55,7 @@ export function quickClassify(prompt) {
       if (score > bestScore) {
         bestScore = score;
         bestCategory = category;
+        bestMatchCount = matchCount;
       }
     }
   }
@@ -62,8 +64,8 @@ export function quickClassify(prompt) {
     return { category: 'implement', confidence: 0.3 };
   }
 
-  // 매칭 품질 기반 신뢰도 (0.5~0.95 범위)
-  const confidence = Math.min(0.95, 0.5 + bestScore * 0.5);
+  // 매칭 품질 기반 신뢰도 (0.5~0.95 범위) — matchCount 기준으로 정규화 (3개 매칭이면 최대)
+  const confidence = Math.min(0.95, 0.5 + (Math.min(bestMatchCount, 3) / 3) * 0.45);
   return { category: bestCategory, confidence };
 }
 

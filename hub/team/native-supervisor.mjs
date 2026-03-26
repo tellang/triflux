@@ -178,6 +178,15 @@ function spawnMember(member) {
     maybeAutoShutdown();
   });
 
+  child.on("error", (err) => {
+    state.status = "exited";
+    state.exitCode = -1;
+    state.lastPreview = `[spawn error] ${err.message}`;
+    try { outWs.end(); } catch {}
+    try { errWs.end(); } catch {}
+    maybeAutoShutdown();
+  });
+
   processMap.set(member.name, state);
 }
 
@@ -281,8 +290,14 @@ const server = createServer(async (req, res) => {
 
   let body = {};
   try {
+    const MAX_BODY = 1024 * 1024;
     const chunks = [];
-    for await (const c of req) chunks.push(c);
+    let totalLen = 0;
+    for await (const c of req) {
+      totalLen += c.length;
+      if (totalLen > MAX_BODY) { send(413, { ok: false, error: "payload_too_large" }); return; }
+      chunks.push(c);
+    }
     const raw = Buffer.concat(chunks).toString("utf8") || "{}";
     body = JSON.parse(raw);
   } catch {
@@ -320,6 +335,11 @@ const server = createServer(async (req, res) => {
   }
 
   return send(404, { ok: false, error: "not_found" });
+});
+
+server.on("error", (err) => {
+  console.error("[native-supervisor] HTTP server error:", err.message);
+  process.exit(1);
 });
 
 server.listen(0, "127.0.0.1", () => {

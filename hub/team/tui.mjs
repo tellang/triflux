@@ -131,6 +131,7 @@ export function createLogDashboard(opts = {}) {
     render,
     getWorkers() { return new Map(workers); },
     getFrameCount() { return frameCount; },
+    getPipelineState() { return { ...pipeline }; },
     close() {
       if (closed) return;
       if (timer) clearInterval(timer);

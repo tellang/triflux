@@ -19,6 +19,7 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { isPidAlive } from '../lib/process-utils.mjs';
 
 const TEAM_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 const CLAUDE_HOME = join(homedir(), '.claude');
@@ -104,19 +105,6 @@ async function readLockInfo(lockPath) {
     mtime_ms: lockStat.mtimeMs,
     age_ms: Math.max(0, now - (Number.isFinite(createdAtMs) ? createdAtMs : lockStat.mtimeMs)),
   };
-}
-
-function isPidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    if (e?.code === 'EPERM') return true;
-    if (e?.code === 'ESRCH') return false;
-    return false;
-  }
 }
 
 async function releaseFileLock(lockPath, token, handle) {

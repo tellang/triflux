@@ -1,4 +1,16 @@
-#!/usr/bin/env bash
-# tests/fixtures/bin/gemini — fake-gemini-cli.mjs bash 래퍼
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec node "$SCRIPT_DIR/../fake-gemini-cli.mjs" "$@"
+#!/usr/bin/env node
+// tests/fixtures/bin/gemini — fake-gemini-cli.mjs node 래퍼
+// Uses node shebang so Windows Git Bash can execute this without needing bash shebang resolution.
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const target = resolve(__dirname, '..', 'fake-gemini-cli.mjs');
+
+const { spawnSync } = createRequire(import.meta.url)('child_process');
+const result = spawnSync(process.execPath, [target, ...process.argv.slice(2)], {
+  stdio: 'inherit',
+  env: process.env,
+});
+process.exit(result.status ?? 1);

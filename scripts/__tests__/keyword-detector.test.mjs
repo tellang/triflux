@@ -29,7 +29,7 @@ const { extractPrompt, sanitizeForKeywordDetection } = detectorModule;
 
 function loadCompiledRules() {
   const rules = loadRules(rulesPath);
-  assert.equal(rules.length, 21);
+  assert.equal(rules.length, 23);
   return compileRules(rules);
 }
 
@@ -100,7 +100,7 @@ test("sanitizeForKeywordDetection: 코드블록/URL/파일경로/XML 태그 제�
 
 test("loadRules: 유효한 JSON 로드", () => {
   const rules = loadRules(rulesPath);
-  assert.equal(rules.length, 21);
+  assert.equal(rules.length, 23);
   assert.equal(rules.filter((rule) => rule.skill).length, 10);
   assert.equal(rules.filter((rule) => rule.mcp_route).length, 10);
 });
@@ -122,7 +122,7 @@ test("loadRules: 잘못된 파일 처리", () => {
 test("compileRules: 정규식 컴파일 성공", () => {
   const rules = loadRules(rulesPath);
   const compiled = compileRules(rules);
-  assert.equal(compiled.length, 21);
+  assert.equal(compiled.length, 23);
   for (const rule of compiled) {
     assert.ok(Array.isArray(rule.compiledPatterns));
     assert.ok(rule.compiledPatterns.length > 0);

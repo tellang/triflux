@@ -1,5 +1,5 @@
 import { sendKeys } from "../../pane.mjs";
-import { DIM, RESET, WHITE } from "../../shared.mjs";
+import { DIM, RESET, WHITE, YELLOW } from "../../shared.mjs";
 import { resolveMember } from "../services/member-selector.mjs";
 import { nativeRequest } from "../services/native-control.mjs";
 import { isNativeMode, isTeamAlive, isWtMode } from "../services/runtime-mode.mjs";
@@ -19,7 +19,7 @@ export async function teamInterrupt(args = []) {
     return;
   }
   if (isWtMode(state)) {
-    console.log(`\n  \x1b[33m⚠\x1b[0m wt 모드에서는 pane stdin 주입이 지원되지 않아 interrupt를 자동 전송할 수 없습니다.\n  ${DIM}수동으로 해당 pane에서 Ctrl+C를 입력하세요.${RESET}\n`);
+    console.log(`\n  ${YELLOW}⚠${RESET} wt 모드에서는 pane stdin 주입이 지원되지 않아 interrupt를 자동 전송할 수 없습니다.\n  ${DIM}수동으로 해당 pane에서 Ctrl+C를 입력하세요.${RESET}\n`);
     return;
   }
 

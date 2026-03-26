@@ -21,11 +21,12 @@ import {
   chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { toBashPath, BASH_EXE } from '../helpers/bash-path.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, '..', '..');
-const ROUTE_SCRIPT = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
-const FIXTURE_BIN = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin');
+const ROUTE_SCRIPT = toBashPath(resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh'));
+const FIXTURE_BIN = toBashPath(resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin'));
 
 function output(result) {
   return `${result.stdout || ''}\n${result.stderr || ''}`;
@@ -80,7 +81,7 @@ try_restart_hub
 }
 
 function runBashScript(script, env = {}, timeoutMs = 15000) {
-  return spawnSync('bash', ['-c', script], {
+  return spawnSync(BASH_EXE, ['-c', script], {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
     timeout: timeoutMs,
@@ -264,7 +265,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
       // 임의 포트 사용 — 실제 Hub가 해당 포트에서 시작됨
       const testPort = 28800 + Math.floor(Math.random() * 100);
       const result = spawnSync(
-        'bash',
+        BASH_EXE,
         ['-c', `bash "${ROUTE_SCRIPT}" executor 'hub-claim-retry-test' minimal 5`],
         {
           cwd: PROJECT_ROOT,
@@ -351,7 +352,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
       // 실제 Hub가 시작될 수 있는 포트 사용
       const testPort = 28900 + Math.floor(Math.random() * 100);
       const result = spawnSync(
-        'bash',
+        BASH_EXE,
         ['-c', `bash "${ROUTE_SCRIPT}" executor 'hub-fail-test' minimal 5`],
         {
           cwd: PROJECT_ROOT,
@@ -437,7 +438,7 @@ if (cmd === 'team-task-update') {
     try {
       const testPort = 29000 + Math.floor(Math.random() * 100);
       const result = spawnSync(
-        'bash',
+        BASH_EXE,
         ['-c', `bash "${ROUTE_SCRIPT}" executor 'hub-message-retry-test' minimal 5`],
         {
           cwd: PROJECT_ROOT,
@@ -528,7 +529,7 @@ if (cmd === 'team-task-update' && isClaim) {
     try {
       const testPort = 29100 + Math.floor(Math.random() * 100);
       const result = spawnSync(
-        'bash',
+        BASH_EXE,
         ['-c', `bash "${ROUTE_SCRIPT}" executor 'hub-complete-retry-test' minimal 5`],
         {
           cwd: PROJECT_ROOT,

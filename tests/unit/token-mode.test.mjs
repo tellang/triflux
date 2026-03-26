@@ -1,5 +1,5 @@
 // tests/unit/token-mode.test.mjs — token efficiency mode 테스트
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   COMPACT_RULES,
@@ -8,7 +8,22 @@ import {
   isCompactMode,
 } from '../../hub/token-mode.mjs';
 
+// ── 모듈 레벨 상태(_compactMode) 초기화 헬퍼 ──
+// hub/token-mode.mjs의 _compactMode는 모듈 싱글턴이므로
+// 각 테스트 전에 동적 임포트(nonce)로 신선한 모듈을 얻어 상태를 초기화한다.
+async function freshModule() {
+  const nonce = Date.now() + Math.random();
+  const mod = await import(`../../hub/token-mode.mjs?nonce=${nonce}`);
+  return mod;
+}
+
 describe('token-mode', () => {
+  // _compactMode 상태를 매 테스트 전에 expand() 호출로 초기화
+  // (expand는 _compactMode = false로 설정)
+  beforeEach(() => {
+    expand('');
+  });
+
   // 1. 심볼 치환: "results in" → "→"
   it('심볼 치환: "results in" → "→"', () => {
     assert.equal(compactify('this results in that'), 'this → that');
@@ -83,10 +98,12 @@ describe('token-mode', () => {
     }
   });
 
-  // 11. isCompactMode: compactify 호출 후 true
-  it('isCompactMode: compactify 호출 후 true', () => {
-    compactify('test');
-    assert.equal(isCompactMode(), true);
+  // 11. isCompactMode: 신선한 모듈에서 초기값 false, compactify 후 true
+  it('isCompactMode: 초기값 false, compactify 호출 후 true', async () => {
+    const mod = await freshModule();
+    assert.equal(mod.isCompactMode(), false, '초기값은 false');
+    mod.compactify('test');
+    assert.equal(mod.isCompactMode(), true, 'compactify 후 true');
   });
 
   // 12. expand도 코드 블록 보호
@@ -106,5 +123,14 @@ describe('token-mode', () => {
   it('greedy: "in progress" 전체가 매칭됨', () => {
     const result = compactify('task is in progress now');
     assert.ok(result.includes('⏳'), 'in progress → ⏳');
+  });
+
+  // 15. isCompactMode: expand 호출 후 false로 리셋
+  it('isCompactMode: expand 호출 후 false로 리셋', async () => {
+    const mod = await freshModule();
+    mod.compactify('test');
+    assert.equal(mod.isCompactMode(), true, 'compactify 후 true');
+    mod.expand('test');
+    assert.equal(mod.isCompactMode(), false, 'expand 후 false');
   });
 });

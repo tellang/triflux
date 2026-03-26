@@ -110,25 +110,27 @@ function serializeState(state) {
  * @returns {object} 초기 상태
  */
 export function initPipelineState(db, teamName, opts = {}) {
-  const S = getStatements(db);
-  const now = Date.now();
-  const state = {
-    team_name: teamName,
-    phase: 'plan',
-    fix_attempt: 0,
-    fix_max: opts.fix_max ?? 3,
-    ralph_iteration: 0,
-    ralph_max: opts.ralph_max ?? 10,
-    artifacts: {},
-    phase_history: [],
-    created_at: now,
-    updated_at: now,
-  };
+  return db.transaction(() => {
+    const S = getStatements(db);
+    const now = Date.now();
+    const state = {
+      team_name: teamName,
+      phase: 'plan',
+      fix_attempt: 0,
+      fix_max: opts.fix_max ?? 3,
+      ralph_iteration: 0,
+      ralph_max: opts.ralph_max ?? 10,
+      artifacts: {},
+      phase_history: [],
+      created_at: now,
+      updated_at: now,
+    };
 
-  // 기존 상태가 있으면 삭제 후 재생성
-  S.remove.run(teamName);
-  S.insert.run(serializeState(state));
-  return state;
+    // 기존 상태가 있으면 삭제 후 재생성
+    S.remove.run(teamName);
+    S.insert.run(serializeState(state));
+    return state;
+  })();
 }
 
 /**
@@ -150,19 +152,21 @@ export function readPipelineState(db, teamName) {
  * @returns {object|null} 업데이트된 상태
  */
 export function updatePipelineState(db, teamName, patch) {
-  const S = getStatements(db);
-  const current = parseRow(S.get.get(teamName));
-  if (!current) return null;
+  return db.transaction(() => {
+    const S = getStatements(db);
+    const current = parseRow(S.get.get(teamName));
+    if (!current) return null;
 
-  const merged = {
-    ...current,
-    ...patch,
-    team_name: teamName, // team_name 변경 불가
-    updated_at: Date.now(),
-  };
+    const merged = {
+      ...current,
+      ...patch,
+      team_name: teamName, // team_name 변경 불가
+      updated_at: Date.now(),
+    };
 
-  S.update.run(serializeState(merged));
-  return merged;
+    S.update.run(serializeState(merged));
+    return merged;
+  })();
 }
 
 /**

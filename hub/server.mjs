@@ -1,6 +1,6 @@
 // hub/server.mjs — HTTP MCP + REST bridge + Named Pipe 서버 진입점
 import { createServer as createHttpServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { extname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -16,7 +16,6 @@ import { createHitlManager } from './hitl.mjs';
 import { createPipeServer } from './pipe.mjs';
 import { createAssignCallbackServer } from './assign-callbacks.mjs';
 import { createTools } from './tools.mjs';
-import { ensurePipelineStateDbPath } from './pipeline/state.mjs';
 import { DelegatorService } from './delegator/index.mjs';
 import { createDelegatorMcpWorker } from './workers/delegator-mcp.mjs';
 import { createModuleLogger } from '../scripts/lib/logger.mjs';
@@ -26,6 +25,8 @@ const hubLog = createModuleLogger('hub');
 
 const MAX_BODY_SIZE = 1024 * 1024;
 const PUBLIC_PATHS = new Set(['/', '/status', '/health', '/healthz']);
+const RATE_LIMIT_MAX = 100;       // requests per window
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute sliding window
 const LOOPBACK_REMOTE_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const ALLOWED_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -46,6 +47,24 @@ const STATIC_CONTENT_TYPES = Object.freeze({
   '.js': 'application/javascript',
   '.png': 'image/png',
 });
+
+// IP-based sliding window rate limiter (in-memory, no external deps)
+// Each entry is an array of request timestamps within the current window.
+const rateLimitMap = new Map();
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const cutoff = now - RATE_LIMIT_WINDOW_MS;
+  const timestamps = (rateLimitMap.get(ip) || []).filter((t) => t >= cutoff);
+  if (timestamps.length >= RATE_LIMIT_MAX) {
+    // Oldest timestamp in window tells us when a slot frees up
+    const retryAfterMs = timestamps[0] + RATE_LIMIT_WINDOW_MS - now;
+    rateLimitMap.set(ip, timestamps);
+    return { allowed: false, retryAfterSec: Math.ceil(retryAfterMs / 1000) };
+  }
+  rateLimitMap.set(ip, [...timestamps, now]);
+  return { allowed: true, retryAfterSec: 0 };
+}
 
 function isInitializeRequest(body) {
   if (body?.method === 'initialize') return true;
@@ -124,7 +143,12 @@ function isAuthorizedRequest(req, path, hubToken) {
     return isLoopbackRemoteAddress(req.socket.remoteAddress);
   }
   if (isPublicPath(path)) return true;
-  return extractBearerToken(req) === hubToken;
+  const supplied = extractBearerToken(req);
+  if (!supplied) return false;
+  const bufA = Buffer.from(supplied, 'utf8');
+  const bufB = Buffer.from(hubToken, 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
 
 function resolveTeamStatusCode(result) {
@@ -331,6 +355,8 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   }
 
   const httpServer = createHttpServer(wrapRequestHandler(async (req, res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
     const path = getRequestPath(req.url);
     const corsAllowed = applyCorsHeaders(req, res);
 
@@ -339,6 +365,17 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
       const isLoopbackRequest = isLoopbackRemoteAddress(req.socket.remoteAddress);
       res.writeHead(corsAllowed && (!localOnlyMode || isLoopbackRequest) ? 204 : 403);
       return res.end();
+    }
+
+    const clientIp = req.socket.remoteAddress || 'unknown';
+    const rateCheck = checkRateLimit(clientIp);
+    if (!rateCheck.allowed) {
+      return writeJson(
+        res,
+        429,
+        { ok: false, error: 'Too Many Requests' },
+        { 'Retry-After': String(rateCheck.retryAfterSec) },
+      );
     }
 
     if (!isAuthorizedRequest(req, path, HUB_TOKEN)) {
@@ -623,7 +660,8 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         return writeJson(res, 404, { ok: false, error: 'Unknown bridge endpoint' });
       } catch (error) {
         if (!res.headersSent) {
-          writeJson(res, 500, { ok: false, error: error.message });
+          console.error('[tfx-hub] bridge error:', error);
+          writeJson(res, 500, { ok: false, error: 'Internal server error' });
         }
         return;
       }
@@ -645,19 +683,25 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         const body = await parseBody(req);
 
         if (sessionIdHeader && transports.has(sessionIdHeader)) {
-          const transport = transports.get(sessionIdHeader);
-          transport._lastActivity = Date.now();
-          await transport.handleRequest(req, res, body);
+          const session = transports.get(sessionIdHeader);
+          session.transport._lastActivity = Date.now();
+          await session.transport.handleRequest(req, res, body);
         } else if (!sessionIdHeader && isInitializeRequest(body)) {
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (sid) => {
               transport._lastActivity = Date.now();
-              transports.set(sid, transport);
+              transports.set(sid, { transport, mcp });
             },
           });
           transport.onclose = () => {
-            if (transport.sessionId) transports.delete(transport.sessionId);
+            if (transport.sessionId) {
+              const session = transports.get(transport.sessionId);
+              if (session) {
+                try { session.mcp.close(); } catch {}
+              }
+              transports.delete(transport.sessionId);
+            }
           };
           const mcp = createMcpForSession();
           await mcp.connect(transport);
@@ -672,14 +716,14 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         }
       } else if (req.method === 'GET') {
         if (sessionIdHeader && transports.has(sessionIdHeader)) {
-          await transports.get(sessionIdHeader).handleRequest(req, res);
+          await transports.get(sessionIdHeader).transport.handleRequest(req, res);
         } else {
           res.writeHead(400);
           res.end('Invalid or missing session ID');
         }
       } else if (req.method === 'DELETE') {
         if (sessionIdHeader && transports.has(sessionIdHeader)) {
-          await transports.get(sessionIdHeader).handleRequest(req, res);
+          await transports.get(sessionIdHeader).transport.handleRequest(req, res);
         } else {
           res.writeHead(400);
           res.end('Invalid or missing session ID');
@@ -705,23 +749,43 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     }
   }));
 
+  httpServer.requestTimeout = 30000;
+  httpServer.headersTimeout = 10000;
+
   router.startSweeper();
 
   const hitlTimer = setInterval(() => {
-    try { hitl.checkTimeouts(); } catch {}
+    try { hitl.checkTimeouts(); } catch (err) { hubLog.warn({ err }, 'hitl.timeout_check_failed'); }
   }, 10000);
   hitlTimer.unref();
 
-  const SESSION_TTL_MS = 30 * 60 * 1000;
+  // MCP session TTL: sessions idle for SESSION_TTL_MS are closed automatically.
+  // Configurable via SESSION_TTL_MS (default 30 minutes). The sweep runs every 60 s.
+  const SESSION_TTL_MS = parseInt(process.env.TFX_SESSION_TTL_MS || '', 10) || 30 * 60 * 1000;
   const sessionTimer = setInterval(() => {
     const now = Date.now();
-    for (const [sid, transport] of transports) {
-      if (now - (transport._lastActivity || 0) <= SESSION_TTL_MS) continue;
-      try { transport.close(); } catch {}
+    for (const [sid, session] of transports) {
+      if (now - (session.transport._lastActivity || 0) <= SESSION_TTL_MS) continue;
+      try { session.mcp.close(); } catch {}
+      try { session.transport.close(); } catch {}
       transports.delete(sid);
     }
   }, 60000);
   sessionTimer.unref();
+
+  // Evict stale rate-limit buckets once per minute to bound memory usage.
+  const rateLimitTimer = setInterval(() => {
+    const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+    for (const [ip, timestamps] of rateLimitMap) {
+      const fresh = timestamps.filter((t) => t >= cutoff);
+      if (fresh.length === 0) {
+        rateLimitMap.delete(ip);
+      } else {
+        rateLimitMap.set(ip, fresh);
+      }
+    }
+  }, RATE_LIMIT_WINDOW_MS);
+  rateLimitTimer.unref();
 
   mkdirSync(PID_DIR, { recursive: true });
   await pipe.start();
@@ -762,8 +826,10 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         router.stopSweeper();
         clearInterval(hitlTimer);
         clearInterval(sessionTimer);
-        for (const [, transport] of transports) {
-          try { await transport.close(); } catch {}
+        clearInterval(rateLimitTimer);
+        for (const [, session] of transports) {
+          try { await session.mcp.close(); } catch {}
+          try { await session.transport.close(); } catch {}
         }
         transports.clear();
         await pipe.stop();

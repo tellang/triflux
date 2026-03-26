@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { toBashPath, BASH_EXE } from '../helpers/bash-path.mjs';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -110,7 +111,7 @@ describe('delegator-mcp stdio server', () => {
 
       assert.equal(first.structuredContent.output, 'ORANGE');
       assert.equal(second.structuredContent.output, 'ORANGE');
-      assert.equal(first.structuredContent.threadId, second.structuredContent.threadId);
+      assert.equal(first.structuredContent.thread_id, second.structuredContent.thread_id);
       assert.equal(second.structuredContent.transport, 'codex-mcp');
     } finally {
       await closeClient(client, transport);
@@ -135,10 +136,10 @@ describe('delegator-mcp stdio server', () => {
         },
       });
 
-      const status = await waitForCompletion(client, kickoff.structuredContent.jobId);
+      const status = await waitForCompletion(client, kickoff.structuredContent.job_id);
       assert.equal(status.status, 'completed');
       assert.equal(status.output, 'BLUE');
-      assert.equal(status.providerResolved, 'codex');
+      assert.equal(status.provider_resolved, 'codex');
     } finally {
       await closeClient(client, transport);
     }
@@ -194,9 +195,9 @@ describe('delegator-mcp stdio server', () => {
         },
       });
 
-      const jobId = first.structuredContent.jobId;
+      const jobId = first.structuredContent.job_id;
       assert.equal(typeof jobId, 'string');
-      assert.equal(first.structuredContent.conversationOpen, true);
+      assert.equal(first.structuredContent.conversation_open, true);
 
       const second = await client.callTool({
         name: 'triflux-delegate-reply',
@@ -206,8 +207,8 @@ describe('delegator-mcp stdio server', () => {
         },
       });
 
-      assert.equal(second.structuredContent.jobId, jobId);
-      assert.equal(second.structuredContent.conversationOpen, true);
+      assert.equal(second.structuredContent.job_id, jobId);
+      assert.equal(second.structuredContent.conversation_open, true);
       assert.match(second.structuredContent.output, /first turn/);
       assert.match(second.structuredContent.output, /second turn/);
 
@@ -220,7 +221,7 @@ describe('delegator-mcp stdio server', () => {
         },
       });
 
-      assert.equal(finalTurn.structuredContent.conversationOpen, false);
+      assert.equal(finalTurn.structuredContent.conversation_open, false);
 
       const afterDone = await client.callTool({
         name: 'triflux-delegate-reply',
@@ -242,7 +243,7 @@ describe('delegator-mcp stdio server', () => {
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
       TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
       TFX_DELEGATOR_ROUTE_SCRIPT: FAKE_ROUTE,
-      TFX_DELEGATOR_BASH_COMMAND: 'bash',
+      TFX_DELEGATOR_BASH_COMMAND: BASH_EXE,
     });
 
     try {

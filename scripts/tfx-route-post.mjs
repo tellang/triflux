@@ -14,7 +14,7 @@
 //   7. 구조화된 결과 출력 (=== TFX-ROUTE RESULT ===)
 
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
-import { join, dirname } from "path";
+import { join } from "path";
 import { homedir } from "os";
 
 const HOME = homedir();

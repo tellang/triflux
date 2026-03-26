@@ -34,20 +34,20 @@ argument-hint: "\"작업 설명\" | N:codex \"작업 설명\""
 | **designer** | ~~Gemini~~ | **Codex** (effort: high) — UI 코드 생성 |
 | **writer** | ~~Gemini~~ | **Codex Spark** (effort: spark_fast) — 경량 문서 |
 | explore | Claude Haiku | Claude Haiku (변경 없음) |
-| verifier, test-engineer | Claude Sonnet | Claude Sonnet (변경 없음) |
+| verifier, test-engineer | Claude Sonnet | Codex (변경 없음) |
 
 ## 실행 규칙
 
-**tfx-auto SKILL.md의 전체 워크플로우(커맨드 숏컷 → 트리아지 → 실행 → 결과 파싱 → 보고)를 그대로 따릅니다.**
+**tfx-auto SKILL.md의 커맨드 숏컷 → 트리아지 → 멀티 태스크 라우팅 → 실행 → 결과 파싱 → 보고 섹션을 그대로 따릅니다.**
 
 유일한 차이점:
 
-1. **Phase 3 CLI 실행 시** `TFX_CLI_MODE=codex`를 환경변수로 전달:
+1. **실행 섹션(CLI 에이전트) 수행 시** `TFX_CLI_MODE=codex`를 환경변수로 전달:
    ```bash
    TFX_CLI_MODE=codex bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile}
    ```
 
-2. **Phase 2 트리아지에서** gemini 분류 결과를 codex로 강제 변환:
+2. **트리아지 섹션에서** gemini 분류 결과를 codex로 강제 변환:
    - Codex 분류가 `gemini`를 반환하면 → `codex`로 교체
    - Opus 분해에서 designer/writer → Codex 에이전트 + implement/analyze MCP 프로필
 

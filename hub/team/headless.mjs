@@ -4,9 +4,10 @@
 // v6.0.0: Lead-direct 모드 (runHeadlessInteractive, autoAttachTerminal)
 // 의존성: psmux.mjs (Node.js 내장 모듈만 사용)
 import { join } from "node:path";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execSync, execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   createPsmuxSession,
   killPsmuxSession,
@@ -77,16 +78,21 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   // HANDOFF 지시는 프롬프트에 삽입하지 않음 — headless 후처리(processHandoff)에서 처리
   // psmux send-keys 줄바꿈 문제 + codex exec "---" 인자 충돌 방지
   const fullPrompt = `${prompt}${mcpHint}`;
-  const escaped = fullPrompt.replace(/'/g, "''");
+
+  // 보안: 프롬프트를 임시 파일에 쓰고 파일 참조로 전달 (셸 주입 방지)
+  if (!existsSync(RESULT_DIR)) mkdirSync(RESULT_DIR, { recursive: true });
+  const promptFile = join(RESULT_DIR, "prompt-" + randomUUID().slice(0, 8) + ".txt").replace(/\\/g, "/");
+  writeFileSync(promptFile, fullPrompt, "utf8");
+
   const cls = "Clear-Host; ";
 
   switch (resolvedCli) {
     case "codex":
-      return `${cls}codex exec '${escaped}' -o '${resultFile}' --color never`;
+      return `${cls}codex exec (Get-Content -Raw '${promptFile}') -o '${resultFile}' --color never`;
     case "gemini":
-      return `${cls}gemini -p '${escaped}' -o text > '${resultFile}' 2>'${resultFile}.err'`;
+      return `${cls}gemini -p (Get-Content -Raw '${promptFile}') -o text > '${resultFile}' 2>'${resultFile}.err'`;
     case "claude":
-      return `${cls}claude -p '${escaped}' --output-format text > '${resultFile}' 2>&1`;
+      return `${cls}claude -p (Get-Content -Raw '${promptFile}') --output-format text > '${resultFile}' 2>&1`;
     default:
       throw new Error(`지원하지 않는 CLI: ${resolvedCli} (원본: ${cli})`);
   }
@@ -374,6 +380,23 @@ function getWtDefaultFontSize() {
   return 12;
 }
 
+/**
+ * 파일을 원자적으로 쓴다 — 임시 파일에 먼저 기록 후 rename으로 교체.
+ * 프로세스가 쓰기 도중 충돌해도 원본 파일이 손상되지 않는다.
+ * @param {string} filePath — 대상 파일 경로
+ * @param {string} data — 쓸 내용
+ */
+function atomicWriteSync(filePath, data) {
+  const tmpPath = `${filePath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmpPath, data, "utf8");
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { writeFileSync(tmpPath.replace(/\.tmp$/, ".tmp.del"), ""); } catch { /* 무시 */ }
+    throw err;
+  }
+}
+
 export function ensureWtProfile(workerCount = 2) {
   const settingsPaths = [
     join(process.env.LOCALAPPDATA || "", "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"),
@@ -410,7 +433,7 @@ export function ensureWtProfile(workerCount = 2) {
         settings.profiles.list.push(profile);
       }
 
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+      atomicWriteSync(settingsPath, JSON.stringify(settings, null, 2));
       return true;
     } catch { /* 파싱 실패 — 다음 경로 */ }
   }
@@ -429,6 +452,9 @@ export function ensureWtProfile(workerCount = 2) {
  * @returns {boolean} 성공 여부
  */
 export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
+  // 보안: sessionName 셸 주입 방지 — 영숫자, 하이픈, 언더스코어만 허용
+  const safeName = String(sessionName).replace(/[^a-zA-Z0-9_\-]/g, "");
+  sessionName = safeName || "tfx-session";
   try {
     execSync("where wt.exe", { stdio: "ignore" });
   } catch {

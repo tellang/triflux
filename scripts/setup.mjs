@@ -168,7 +168,7 @@ function hasProfileSection(tomlContent, profileName) {
 function replaceProfileSection(tomlContent, profileName, lines) {
   const header = `[profiles.${profileName}]`;
   const sectionRe = new RegExp(
-    `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*\\n(?:(?!\\[)[^\\n]*\\n?)*`,
+    `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*\\n?(?:(?!\\[)[^\\n]*\\n?)*`,
     "m",
   );
   const replacement = `${header}\n${lines.join("\n")}\n`;
@@ -330,19 +330,21 @@ const skillsDst = join(CLAUDE_DIR, "skills");
 function syncSkillDir(srcDir, dstDir) {
   if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
 
+  let count = 0;
   for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
     const srcPath = join(srcDir, entry.name);
     const dstPath = join(dstDir, entry.name);
 
     if (entry.isDirectory()) {
-      syncSkillDir(srcPath, dstPath);
+      count += syncSkillDir(srcPath, dstPath);
     } else if (entry.name.endsWith(".md")) {
       if (shouldSyncTextFile(srcPath, dstPath)) {
         copyFileSync(srcPath, dstPath);
-        synced++;
+        count++;
       }
     }
   }
+  return count;
 }
 
 if (existsSync(skillsSrc)) {
@@ -351,7 +353,7 @@ if (existsSync(skillsSrc)) {
     const skillMd = join(skillDir, "SKILL.md");
     if (!existsSync(skillMd)) continue;
 
-    syncSkillDir(skillDir, join(skillsDst, name));
+    synced += syncSkillDir(skillDir, join(skillsDst, name));
   }
 }
 

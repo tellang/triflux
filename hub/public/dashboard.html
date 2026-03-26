@@ -108,6 +108,8 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
 
 <script>
 (function() {
+  function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
   var POLL = 5000;
   var MAX_W = 10;
   var ARC_TOTAL = 283;
@@ -146,9 +148,12 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
     return '#3fb950';
   }
 
+  // rt: ISO 문자열 또는 Unix 초(정수). Unix 초는 1e10 미만으로 구분
   function remain(rt) {
     if (!rt) return '';
-    var ms = new Date(rt) - Date.now();
+    var ts = typeof rt === 'number' && rt < 1e10 ? rt * 1000 : new Date(rt).getTime();
+    if (!isFinite(ts)) return '';
+    var ms = ts - Date.now();
     if (ms <= 0) return '만료됨';
     var h = Math.floor(ms / 3600000);
     var m = Math.floor((ms % 3600000) / 60000);
@@ -172,7 +177,7 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
     var inner = pct > 10 ? pct + '%' : '';
     var outer = pct <= 10 ? pct + '%' : '';
     return '<div class="bar-row">' +
-      '<span class="bar-label">' + label + '</span>' +
+      '<span class="bar-label">' + esc(label) + '</span>' +
       '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + c + '">' + inner + '</div></div>' +
       '<span class="bar-pct-outer">' + outer + '</span>' +
       '</div>';
@@ -180,9 +185,10 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
 
   function quotaBlock(name, color, bars, resetTime) {
     var rem = remain(resetTime);
+    var expired = rem === '만료됨';
     var h = '<div class="quota-row"><div class="quota-header">' +
-      '<span class="cli-name" style="color:' + color + '">' + name + '</span>';
-    if (rem) h += '<span class="meta">리셋: ' + rem + '</span>';
+      '<span class="cli-name" style="color:' + color + '">' + esc(name) + '</span>';
+    if (rem) h += '<span class="meta" style="' + (expired ? 'color:#f85149' : '') + '">리셋: ' + rem + '</span>';
     h += '</div>';
     for (var i = 0; i < bars.length; i++) h += makeBar(bars[i][0], bars[i][1]);
     h += '</div>';
@@ -198,7 +204,7 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
       s += quotaBlock('Claude (c)', '#d19a66', [
         ['5시간', cl.fiveHourPercent || 0],
         ['주간', cl.weeklyPercent || 0]
-      ], cl.resetTime);
+      ], cl.fiveHourResetsAt);
     }
 
     // Codex
@@ -207,7 +213,7 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
       s += quotaBlock('Codex (x)', '#ffffff', [
         ['Primary', cx2.primary ? cx2.primary.used_percent || 0 : 0],
         ['Secondary', cx2.secondary ? cx2.secondary.used_percent || 0 : 0]
-      ], cx2.primary && cx2.primary.resetTime);
+      ], cx2.primary && cx2.primary.resets_at);
     }
 
     // Gemini
@@ -234,8 +240,8 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
       var k = keys[i], v = acc[k];
       if (!v) continue;
       h += '<div class="token-item">' +
-        '<div class="label">' + k.toUpperCase() + '</div>' +
-        '<div class="value">' + fmtTok(v.tokens) + '</div>' +
+        '<div class="label">' + esc(k.toUpperCase()) + '</div>' +
+        '<div class="value">' + esc(fmtTok(v.tokens)) + '</div>' +
         '<div class="calls">' + (v.calls || 0) + '회 호출</div>' +
         '</div>';
     }

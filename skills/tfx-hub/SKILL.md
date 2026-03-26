@@ -96,18 +96,52 @@ codex mcp add tfx-hub --url http://127.0.0.1:27888/mcp
 claude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp
 ```
 
-## MCP 도구 (8개)
+## MCP 도구 (20개)
+
+### Core — 기본 통신
 
 | 도구 | 설명 |
 |------|------|
 | `register` | 에이전트 등록 + lease 발급 |
-| `status` | 허브/에이전트/큐 상태 조회 |
-| `publish` | 이벤트/응답 메시지 발행 |
-| `ask` | 다른 에이전트에게 질문 (request/reply) |
-| `poll_messages` | 수신함에서 메시지 폴링 |
-| `handoff` | 작업 인계 |
-| `request_human_input` | 사용자 입력 요청 (CAPTCHA/승인) |
-| `submit_human_input` | 사용자 입력 응답 |
+| `status` | 허브/에이전트/큐/트레이스 상태 조회 |
+| `publish` | 이벤트/응답 메시지 발행 (topic fanout 지원) |
+| `ask` | 다른 에이전트에게 질문 (request/reply, await_response_ms 폴링 지원) |
+| `handoff` | 작업 인계 (acceptance_criteria 지정 가능) |
+| `poll_messages` | 수신함에서 메시지 폴링 **(Deprecated — Named Pipe 사용)** |
+
+### Assign — 비차단 작업 할당
+
+| 도구 | 설명 |
+|------|------|
+| `assign_async` | AWS CAO 스타일 비차단 job 생성 + 워커 실시간 전달 |
+| `assign_result` | job 진행/완료 결과 보고 |
+| `assign_status` | job 단건 상태 또는 목록 조회 |
+
+### Team — Claude Native Teams 프록시
+
+| 도구 | 설명 |
+|------|------|
+| `team_info` | Teams 메타/멤버/경로 정보 조회 |
+| `team_task_list` | task 목록 조회 (owner/status 필터) |
+| `team_task_update` | task claim/update |
+| `team_send_message` | Teams inbox에 메시지 append |
+
+### Pipeline — 파이프라인 관리
+
+| 도구 | 설명 |
+|------|------|
+| `pipeline_init` | 새 파이프라인 초기화 |
+| `pipeline_state` | 파이프라인 상태 조회 |
+| `pipeline_advance` | 다음 단계로 전이 (전이 규칙 + fix loop 바운딩) |
+| `pipeline_advance_gated` | HITL 승인 게이트 포함 전이 |
+| `pipeline_list` | 활성 파이프라인 목록 조회 |
+
+### HITL — Human-in-the-Loop
+
+| 도구 | 설명 |
+|------|------|
+| `request_human_input` | 사용자 입력 요청 (CAPTCHA/승인/자격증명/선택/텍스트) |
+| `submit_human_input` | 사용자 입력 응답 (accept/decline/cancel) |
 
 ## 브릿지 REST 엔드포인트 (4개)
 
@@ -122,13 +156,48 @@ claude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp
 
 ```
 hub/
-├── server.mjs    # MCP 서버 + REST 브릿지 엔드포인트
-├── store.mjs     # SQLite WAL 상태 저장소
-├── router.mjs    # Actor mailbox 라우터 + QoS
-├── tools.mjs     # MCP 도구 8개 정의
-├── hitl.mjs      # Human-in-the-Loop 매니저
-├── bridge.mjs    # tfx-route.sh ↔ hub 브릿지 CLI
-└── schema.sql    # DB 스키마
+├── server.mjs            # MCP 서버 + REST 브릿지 엔드포인트
+├── store.mjs             # SQLite WAL 상태 저장소
+├── router.mjs            # Actor mailbox 라우터 + QoS
+├── tools.mjs             # MCP 도구 20개 정의
+├── hitl.mjs              # Human-in-the-Loop 매니저
+├── bridge.mjs            # tfx-route.sh ↔ hub 브릿지 CLI
+├── schema.sql            # DB 스키마
+├── paths.mjs             # 경로 상수 (PID 파일, DB 경로 등)
+├── pipe.mjs              # Named Pipe 서버 (push 구독 채널)
+├── assign-callbacks.mjs  # assign job 콜백 처리
+├── intent.mjs            # 인텐트 파싱
+├── reflexion.mjs         # reflexion 루프
+├── research.mjs          # 리서치 프록시
+├── token-mode.mjs        # 토큰 모드 관리
+├── pipeline/             # 파이프라인 엔진
+│   ├── index.mjs         # createPipeline() 팩토리
+│   ├── state.mjs         # 파이프라인 상태 CRUD
+│   ├── transitions.mjs   # 전이 규칙
+│   └── gates/            # HITL 게이트 (selfcheck, confidence)
+├── delegator/            # 작업 위임 레이어
+│   ├── index.mjs
+│   ├── service.mjs
+│   ├── contracts.mjs
+│   └── tool-definitions.mjs
+├── team/                 # Claude Native Teams 통합
+│   ├── nativeProxy.mjs   # Teams MCP 프록시
+│   ├── orchestrator.mjs  # 팀 오케스트레이터
+│   ├── session.mjs       # 세션 관리
+│   ├── dashboard.mjs     # TUI 대시보드
+│   ├── tui.mjs           # TUI 렌더러
+│   └── cli/              # tfx team CLI 커맨드
+├── workers/              # CLI 워커 어댑터
+│   ├── factory.mjs
+│   ├── claude-worker.mjs
+│   ├── codex-mcp.mjs
+│   ├── gemini-worker.mjs
+│   └── delegator-mcp.mjs
+├── middleware/           # 요청 미들웨어
+│   └── request-logger.mjs
+├── quality/              # 품질 검사
+│   └── deslop.mjs
+└── public/               # 정적 자산 (대시보드 HTML, 트레이 아이콘)
 ```
 
 ## 상태

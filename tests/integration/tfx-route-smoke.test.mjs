@@ -14,15 +14,16 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { toBashPath, BASH_EXE } from '../helpers/bash-path.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, '..', '..');
-const ROUTE_SCRIPT = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
-const FIXTURE_BIN = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin');
+const ROUTE_SCRIPT = toBashPath(resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh'));
+const FIXTURE_BIN = toBashPath(resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin'));
 
 // bash 실행 헬퍼 — stdout + stderr 합산 반환
 function runBash(command, extraEnv = {}) {
-  return spawnSync('bash', ['-c', command], {
+  return spawnSync(BASH_EXE, ['-c', command], {
     cwd: PROJECT_ROOT,
     encoding: 'utf8',
     env: {

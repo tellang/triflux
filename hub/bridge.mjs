@@ -5,7 +5,7 @@
 // 연결이 없을 때만 HTTP /bridge/* 엔드포인트로 내려간다.
 
 import net from 'node:net';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -290,10 +290,24 @@ async function tryRestartHub() {
   const serverPath = join(PROJECT_ROOT, 'hub', 'server.mjs');
   if (!existsSync(serverPath)) return false;
 
+  if (existsSync(HUB_PID_FILE)) {
+    try {
+      const info = JSON.parse(readFileSync(HUB_PID_FILE, 'utf8'));
+      if (info.pid) {
+        try { process.kill(info.pid, 0); return false; } // still alive
+        catch (e) { if (e.code === 'EPERM') return false; } // alive, no permission
+      }
+    } catch {} // corrupt PID file, proceed with restart
+  }
+
   try {
+    const logDir = join(process.cwd(), '.tfx', 'logs');
+    if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
+    const logFile = join(logDir, 'hub-restart.log');
+    const logFd = openSync(logFile, 'a');
     const child = spawn(process.execPath, [serverPath], {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', logFd],
       windowsHide: true,
     });
     child.unref();
@@ -469,8 +483,7 @@ async function cmdContext(args) {
       writeFileSync(args.out, combined, 'utf8');
       return emitJson({ ok: true, count: result.data.messages.length, file: args.out });
     } else {
-      console.log(combined);
-      return true;
+      return emitJson({ ok: true, count: result.data.messages.length, context: combined });
     }
   }
 
@@ -478,7 +491,7 @@ async function cmdContext(args) {
     if (args.out) {
       return emitJson({ ok: true, count: 0 });
     }
-    return true;
+    return emitJson({ ok: true, count: 0, context: '' });
   }
 
   return emitJson(result || unavailableResult());

@@ -121,6 +121,7 @@ export function compactify(text) {
  */
 export function expand(text) {
   if (!text || typeof text !== 'string') return text ?? '';
+  _compactMode = false;
 
   return withCodeProtection(text, (segment) => {
     let result = segment;

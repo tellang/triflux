@@ -8,7 +8,8 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-cancel",
+      "skill": null,
+      "action": "suppress_all",
       "priority": 0,
       "supersedes": [
         "tfx-multi",
@@ -145,14 +146,45 @@
       "mcp_route": null
     },
     {
-      "id": "handoff-route",
+      "id": "tfx-autoresearch",
       "patterns": [
         {
-          "source": "\\b(핸드오프|handoff|세션\\s*넘기)[\\s]*(생성|만들|써줘|작성|넘겨)",
+          "source": "\\btfx[\\s-]?autoresearch\\b",
           "flags": "i"
         }
       ],
-      "skill": "mp",
+      "skill": "tfx-autoresearch",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-deep-interview",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?deep[\\s-]?interview\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-deep-interview",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "handoff-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(핸드오프|handoff|세션\\s*넘기)[\\s]*(생성|만들|써줘|작성|넘겨)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "action": "handoff",
       "priority": 5,
       "supersedes": [],
       "exclusive": false,
@@ -163,7 +195,7 @@
       "id": "notion-route",
       "patterns": [
         {
-          "source": "\\b(노션|notion)[\\s-]?(페이지|글|조회|생성|수정|검색)\\b",
+          "source": "(?:^|(?<=\\s))(노션|notion)[\\s-]?(페이지|글|조회|생성|수정|검색)(?:$|(?=\\s))",
           "flags": "i"
         },
         {
@@ -182,7 +214,7 @@
       "id": "chrome-route",
       "patterns": [
         {
-          "source": "\\b(크롬|chrome|브라우저)[\\s-]?(열|접속|로그인|navigate|click)\\b",
+          "source": "(?:^|(?<=\\s))(크롬|chrome|브라우저)[\\s-]?(열|접속|로그인|navigate|click)(?:$|(?=\\s))",
           "flags": "i"
         },
         {
@@ -201,7 +233,7 @@
       "id": "jira-route",
       "patterns": [
         {
-          "source": "\\b(jira|지라)[\\s-]?(이슈|티켓|생성|조회|스프린트)\\b",
+          "source": "(?:^|(?<=\\s))(jira|지라)[\\s-]?(이슈|티켓|생성|조회|스프린트)(?:$|(?=\\s))",
           "flags": "i"
         },
         {
@@ -220,7 +252,7 @@
       "id": "mail-route",
       "patterns": [
         {
-          "source": "\\b(메일|gmail|이메일)[\\s-]?(보내|읽|검색|draft)\\b",
+          "source": "(?:^|(?<=\\s))(메일|gmail|이메일)[\\s-]?(보내|읽|검색|draft)(?:$|(?=\\s))",
           "flags": "i"
         },
         {
@@ -239,7 +271,7 @@
       "id": "calendar-route",
       "patterns": [
         {
-          "source": "\\b(일정|캘린더|calendar)[\\s-]?(생성|조회|추가)\\b",
+          "source": "(?:^|(?<=\\s))(일정|캘린더|calendar)[\\s-]?(생성|조회|추가)(?:$|(?=\\s))",
           "flags": "i"
         },
         {
@@ -258,7 +290,7 @@
       "id": "playwright-route",
       "patterns": [
         {
-          "source": "\\b(playwright|브라우저\\s*테스트)\\b",
+          "source": "(?:^|(?<=\\s))(playwright|브라우저\\s*테스트)(?:$|(?=\\s))",
           "flags": "i"
         }
       ],
@@ -273,7 +305,7 @@
       "id": "canva-route",
       "patterns": [
         {
-          "source": "\\b(canva|캔바|디자인\\s*생성)\\b",
+          "source": "(?:^|(?<=\\s))(canva|캔바|디자인\\s*생성)(?:$|(?=\\s))",
           "flags": "i"
         }
       ],
@@ -288,7 +320,7 @@
       "id": "confluence-route",
       "patterns": [
         {
-          "source": "\\b(confluence|위키|wiki)[\\s-]?(페이지|문서|조회|생성|수정|검색)\\b",
+          "source": "(?:^|(?<=\\s))(confluence|위키|wiki)[\\s-]?(페이지|문서|조회|생성|수정|검색)(?:$|(?=\\s))",
           "flags": "i"
         },
         {
@@ -307,7 +339,7 @@
       "id": "slack-route",
       "patterns": [
         {
-          "source": "\\b(slack|슬랙)[\\s-]?(메시지|채널|보내|읽|검색|알림)\\b",
+          "source": "(?:^|(?<=\\s))(slack|슬랙)[\\s-]?(메시지|채널|보내|읽|검색|알림)(?:$|(?=\\s))",
           "flags": "i"
         },
         {
@@ -326,7 +358,7 @@
       "id": "github-route",
       "patterns": [
         {
-          "source": "\\b(github|깃허브)[\\s-]?(이슈|issue|PR|pull|커밋|commit|리포|repo)\\b",
+          "source": "(?:^|(?<=\\s))(github|깃허브)[\\s-]?(이슈|issue|PR|pull|커밋|commit|리포|repo)(?:$|(?=\\s))",
           "flags": "i"
         },
         {

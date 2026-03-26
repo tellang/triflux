@@ -32,7 +32,6 @@ export const DELEGATOR_PROVIDERS = Object.freeze([
   'auto',
   'codex',
   'gemini',
-  'claude',
 ]);
 
 export const DELEGATOR_SCHEMA_URL = new URL('./schema/delegator-tools.schema.json', import.meta.url);

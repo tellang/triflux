@@ -1,0 +1,14 @@
+#!/usr/bin/env node
+// tests/fixtures/bin/timeout — GNU timeout shim for Windows Git Bash
+// Windows Git Bash resolves 'timeout' to C:\Windows\System32\TIMEOUT.EXE which
+// only supports interactive waiting and cannot wrap command execution.
+// This shim implements: timeout DURATION COMMAND [ARGS...]
+// by spawning the command directly (no actual time limit in tests).
+import { spawnSync } from 'node:child_process';
+
+// argv[0]=node, argv[1]=this script, argv[2]=duration, argv[3]=command, argv[4+]=args
+const [, , /* duration */, command, ...args] = process.argv;
+if (!command) process.exit(1);
+
+const result = spawnSync(command, args, { stdio: 'inherit', shell: false });
+process.exit(result.status ?? 1);

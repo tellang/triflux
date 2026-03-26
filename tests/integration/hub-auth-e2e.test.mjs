@@ -7,10 +7,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 
+import { toBashPath, BASH_EXE } from '../helpers/bash-path.mjs';
+
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, '..', '..');
-const ROUTE_SCRIPT = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
-const FIXTURE_BIN = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin').replace(/\\/g, '/');
+const ROUTE_SCRIPT = toBashPath(resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh'));
+const FIXTURE_BIN = toBashPath(resolve(PROJECT_ROOT, 'tests', 'fixtures', 'bin'));
 const HUB_SERVER_URL = pathToFileURL(resolve(PROJECT_ROOT, 'hub', 'server.mjs')).href;
 const HUB_BRIDGE_URL = pathToFileURL(resolve(PROJECT_ROOT, 'hub', 'bridge.mjs')).href;
 const SHARED_HOME_DIR = mkdtempSync(join(tmpdir(), 'hub-auth-e2e-shared-'));
@@ -200,8 +202,8 @@ function runRouteWithBridgeLogger({ homeDir, tokenEnv = '' }) {
   const { scriptPath, logPath } = createBridgeLoggerScript(homeDir);
 
   const result = spawnSync(
-    'bash',
-    ['-lc', `bash "${ROUTE_SCRIPT.replace(/\\/g, '/')}" executor "hub-auth-route" minimal 5`],
+    BASH_EXE,
+    [ROUTE_SCRIPT, 'executor', 'hub-auth-route', 'minimal', '5'],
     {
       cwd: workspaceDir,
       encoding: 'utf8',

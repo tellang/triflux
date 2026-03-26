@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { toBashPath, BASH_EXE } from '../helpers/bash-path.mjs';
 
 import { GeminiWorker } from '../../hub/workers/gemini-worker.mjs';
 import { ClaudeWorker } from '../../hub/workers/claude-worker.mjs';
@@ -13,10 +14,10 @@ import { createWorker } from '../../hub/workers/factory.mjs';
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, '..', '..');
 const FIXTURE_DIR = resolve(PROJECT_ROOT, 'tests', 'fixtures');
-const FIXTURE_BIN = resolve(FIXTURE_DIR, 'bin');
+const FIXTURE_BIN = toBashPath(resolve(FIXTURE_DIR, 'bin'));
 const GEMINI_FIXTURE = resolve(FIXTURE_DIR, 'fake-gemini-cli.mjs');
 const CLAUDE_FIXTURE = resolve(FIXTURE_DIR, 'fake-claude-cli.mjs');
-const ROUTE_SCRIPT = resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh');
+const ROUTE_SCRIPT = toBashPath(resolve(PROJECT_ROOT, 'scripts', 'tfx-route.sh'));
 
 function buildRouteEnv(extraEnv = {}) {
   return {
@@ -90,7 +91,7 @@ describe('createWorker()', { timeout: 15000 }, () => {
 
 describe('tfx-route.sh wrapper integration', { timeout: 15000 }, () => {
   it('designer는 Gemini wrapper를 통해 실행되어야 한다', () => {
-    const result = spawnSync('bash', [ROUTE_SCRIPT, 'designer', 'route gemini', 'implement', '5'], {
+    const result = spawnSync(BASH_EXE, [ROUTE_SCRIPT, 'designer', 'route gemini', 'implement', '5'], {
       cwd: PROJECT_ROOT,
       encoding: 'utf8',
       env: buildRouteEnv({
@@ -108,7 +109,7 @@ describe('tfx-route.sh wrapper integration', { timeout: 15000 }, () => {
   });
 
   it('verifier는 기본 route table에서 claude-native 경로를 사용해야 한다', () => {
-    const result = spawnSync('bash', [ROUTE_SCRIPT, 'verifier', 'route verify', 'analyze', '5'], {
+    const result = spawnSync(BASH_EXE, [ROUTE_SCRIPT, 'verifier', 'route verify', 'analyze', '5'], {
       cwd: PROJECT_ROOT,
       encoding: 'utf8',
       env: buildRouteEnv({
@@ -125,7 +126,7 @@ describe('tfx-route.sh wrapper integration', { timeout: 15000 }, () => {
   });
 
   it('verifier는 TFX_NO_CLAUDE_NATIVE=1일 때 Codex review 경로를 사용해야 한다', () => {
-    const result = spawnSync('bash', [ROUTE_SCRIPT, 'verifier', 'route verify', 'analyze', '5'], {
+    const result = spawnSync(BASH_EXE, [ROUTE_SCRIPT, 'verifier', 'route verify', 'analyze', '5'], {
       cwd: PROJECT_ROOT,
       encoding: 'utf8',
       env: buildRouteEnv({
