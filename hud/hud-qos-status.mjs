@@ -1033,16 +1033,19 @@ function getGeminiEmail() {
 function expireStaleCodexBuckets(buckets) {
   if (!buckets) return buckets;
   const nowSec = Math.floor(Date.now() / 1000);
-  for (const bucket of Object.values(buckets)) {
-    if (!bucket) continue;
+  const result = {};
+  for (const [key, bucket] of Object.entries(buckets)) {
+    if (!bucket) { result[key] = bucket; continue; }
+    let updated = bucket;
     if (bucket.primary?.resets_at && bucket.primary.resets_at <= nowSec) {
-      bucket.primary.used_percent = 0;
+      updated = { ...updated, primary: { ...updated.primary, used_percent: 0 } };
     }
     if (bucket.secondary?.resets_at && bucket.secondary.resets_at <= nowSec) {
-      bucket.secondary.used_percent = 0;
+      updated = { ...updated, secondary: { ...updated.secondary, used_percent: 0 } };
     }
+    result[key] = updated;
   }
-  return buckets;
+  return result;
 }
 
 // ============================================================================
@@ -1266,11 +1269,12 @@ function readGeminiQuotaSnapshot(accountId, authContext) {
     // resetTime이 지난 버킷의 remainingFraction을 1로 보정 (stale 캐시 방지)
     if (Array.isArray(cache.buckets)) {
       const now = Date.now();
-      for (const b of cache.buckets) {
-        if (b?.resetTime && new Date(b.resetTime).getTime() <= now) {
-          b.remainingFraction = 1;
-        }
-      }
+      const patchedBuckets = cache.buckets.map(b =>
+        b?.resetTime && new Date(b.resetTime).getTime() <= now
+          ? { ...b, remainingFraction: 1 }
+          : b
+      );
+      return { quota: { ...cache, buckets: patchedBuckets }, shouldRefresh: !isFresh };
     }
     return { quota: cache, shouldRefresh: !isFresh };
   }

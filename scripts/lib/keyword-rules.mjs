@@ -52,7 +52,7 @@ function normalizeRule(rule) {
     id: rule.id.trim(),
     patterns,
     skill,
-    action: rule.action || null,
+    action,
     priority: rule.priority,
     supersedes,
     exclusive: rule.exclusive === true,
@@ -81,16 +81,14 @@ export function loadRules(rulesPath) {
 
 // pattern.source / flags를 RegExp로 컴파일
 export function compileRules(rules) {
-  try {
-    return rules.map((rule) => ({
-      ...rule,
-      compiledPatterns: rule.patterns.map((pattern) => new RegExp(pattern.source, pattern.flags))
-    }));
-  } catch (error) {
-    // fail-open: 정규식 오류 시 전체 비활성
-    logRuleError("정규식 컴파일 실패", error);
-    return [];
-  }
+  return rules.map((rule) => {
+    try {
+      return { ...rule, compiledPatterns: rule.patterns.map((p) => new RegExp(p.source, p.flags)) };
+    } catch (error) {
+      logRuleError(`정규식 컴파일 실패: ${rule.id}`, error);
+      return null;
+    }
+  }).filter(Boolean);
 }
 
 // 입력 텍스트에서 매칭된 규칙 목록 반환
@@ -116,7 +114,7 @@ export function matchRules(compiledRules, cleanText) {
     matches.push({
       id: rule.id,
       skill: rule.skill,
-      action: rule.action || null,
+      action: rule.action,
       priority: rule.priority,
       supersedes: rule.supersedes || [],
       exclusive: rule.exclusive === true,

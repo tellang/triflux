@@ -88,7 +88,7 @@ export function truncate(str, maxLen) {
 }
 
 export function stripAnsi(str) {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?(\x07|\x1b\\)/g, "");
 }
 
 // ── 진행률 바 ──

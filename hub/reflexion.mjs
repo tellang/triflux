@@ -68,13 +68,17 @@ export function learnFromError(store, { error, solution, context = {}, success =
     return store.updateReflexionHit(existing[0].id, success);
   }
 
-  return store.addReflexion({
+  const newEntry = store.addReflexion({
     error_pattern: pattern,
     error_message: error,
     context,
     solution,
     solution_code: null,
   });
+  if (success && newEntry) {
+    return store.updateReflexionHit(newEntry.id, true);
+  }
+  return newEntry;
 }
 
 /**

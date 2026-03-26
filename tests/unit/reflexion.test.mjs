@@ -120,9 +120,9 @@ describe('reflexion', () => {
       error_message: 'old error',
       solution: 'old solution',
     });
-    // confidence를 매우 낮게 설정
-    store.updateReflexionHit(oldEntry.id, false); // hit_count=2, success_count=0 → conf=0
-    store.updateReflexionHit(oldEntry.id, false); // hit_count=3, success_count=0 → conf=0
+    // confidence를 낮게 설정 (recalcConfidence decay: 10회 실패 → conf=0)
+    for (let i = 0; i < 9; i++) store.updateReflexionHit(oldEntry.id, false);
+    // hit_count=10, success_count=0 → decay=1.0 → recalcConfidence=0
 
     // updated_at_ms를 강제로 과거로 수정
     store.db.prepare('UPDATE reflexion_entries SET updated_at_ms = ? WHERE id = ?')

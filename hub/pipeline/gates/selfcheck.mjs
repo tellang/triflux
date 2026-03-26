@@ -58,10 +58,8 @@ function detectRedFlags(text, context = {}) {
  * @returns {{ passed: boolean, score: number, flags: Array, checklist: Array }}
  */
 export function runSelfCheck(execResult, verifyResult, requirements = {}) {
-  const text = [
-    typeof execResult === 'string' ? execResult : JSON.stringify(execResult || ''),
-    typeof verifyResult === 'string' ? verifyResult : JSON.stringify(verifyResult || ''),
-  ].join('\n');
+  const normalize = (v) => typeof v === 'string' ? v : (v != null ? JSON.stringify(v) : '');
+  const text = [normalize(execResult), normalize(verifyResult)].join('\n');
 
   const flags = detectRedFlags(text, requirements);
 

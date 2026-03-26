@@ -268,7 +268,7 @@ export function findNearestOmcStateDir(startDir = process.cwd()) {
 }
 
 export function inspectStaleOmcTeams(options = {}) {
-  const stateRoot = options.stateRoot || findNearestOmcStateDir(options.startDir || process.cwd());
+  const stateRoot = options.stateRoot !== undefined ? options.stateRoot : findNearestOmcStateDir(options.startDir || process.cwd());
   const requestedTeamsRoot = options.teamsRoot || CLAUDE_TEAMS_ROOT;
   const teamsRoot = safeStat(requestedTeamsRoot)?.isDirectory() ? requestedTeamsRoot : null;
 

@@ -60,7 +60,7 @@ export function transitionPhase(state, nextPhase) {
     if (next.fix_attempt > (state.fix_max || 3)) {
       return {
         ok: false,
-        error: `fix loop 초과: ${next.fix_attempt}/${state.fix_max || 3}회. ralph loop로 승격 필요.`,
+        error: `fix loop 초과: ${state.fix_max || 3}회 도달`,
       };
     }
   }
@@ -95,6 +95,10 @@ export function transitionPhase(state, nextPhase) {
  * @returns {{ ok: boolean, state?: object, error?: string }}
  */
 export function ralphRestart(state) {
+  if (TERMINAL.has(state.phase)) {
+    return { ok: false, error: '터미널 상태에서 재시작 불가' };
+  }
+
   const iteration = (state.ralph_iteration || 0) + 1;
   if (iteration > (state.ralph_max || 10)) {
     return {

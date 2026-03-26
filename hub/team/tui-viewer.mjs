@@ -22,6 +22,14 @@ if (!SESSION) {
   process.exit(1);
 }
 
+// ── psmux 존재 확인 ──
+try {
+  execFileSync("psmux", ["--version"], { encoding: "utf8", timeout: 2000 });
+} catch {
+  process.stderr.write("ERROR: psmux not found or not executable. Install psmux before running tui-viewer.\n");
+  process.exit(1);
+}
+
 const tui = createLogDashboard({ refreshMs: 0 });
 const startTime = Date.now();
 tui.setStartTime(startTime);
@@ -38,6 +46,7 @@ function listPanes() {
       return { index: parseInt(index, 10), title: title || "", pid };
     });
   } catch {
+    // psmux 미설치 또는 세션 없음 — 빈 목록 반환
     return [];
   }
 }
@@ -49,6 +58,7 @@ function capturePane(paneIdx, lines = 5) {
       "capture-pane", "-t", `${SESSION}:0.${paneIdx}`, "-p",
     ], { encoding: "utf8", timeout: 2000 }).trim().split("\n").slice(-lines).join("\n");
   } catch {
+    // pane 캡처 실패 (pane 종료 또는 세션 소멸) — 빈 문자열 반환
     return "";
   }
 }
@@ -62,6 +72,7 @@ function checkResultFile(paneName) {
     if (content.trim().length === 0) return null;
     return processHandoff(content, { exitCode: 0, resultFile });
   } catch {
+    // result 파일 파싱 실패 — null 반환하여 진행 중으로 처리
     return null;
   }
 }
@@ -111,7 +122,7 @@ function poll() {
     // 완료 감지: (1) result 파일 존재, (2) 셸 프롬프트 복귀, (3) "tokens used" 텍스트
     const resultFile = join(RESULT_DIR, `${SESSION}-${paneName}.txt`);
     let resultSize = 0;
-    try { resultSize = statSync(resultFile).size; } catch {}
+    try { resultSize = statSync(resultFile).size; } catch { /* 파일 미존재 — size 0 유지 */ }
 
     const shellReturned = /^(PS\s|>|\$)\s*/.test(lastLine) && lines.length > 2;
     const tokensLine = lines.find(l => /tokens?\s+used/i.test(l));
@@ -152,5 +163,5 @@ const doneCheck = setInterval(() => {
   }
 }, 2000);
 
-process.on("SIGINT", () => { tui.close(); clearInterval(timer); process.exit(0); });
-setTimeout(() => { tui.close(); clearInterval(timer); process.exit(0); }, 10 * 60 * 1000);
+process.on("SIGINT", () => { tui.close(); clearInterval(timer); clearInterval(doneCheck); process.exit(0); });
+setTimeout(() => { tui.close(); clearInterval(timer); clearInterval(doneCheck); process.exit(0); }, 10 * 60 * 1000);

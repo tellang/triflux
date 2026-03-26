@@ -16,7 +16,6 @@ import { createHitlManager } from './hitl.mjs';
 import { createPipeServer } from './pipe.mjs';
 import { createAssignCallbackServer } from './assign-callbacks.mjs';
 import { createTools } from './tools.mjs';
-import { ensurePipelineStateDbPath } from './pipeline/state.mjs';
 import { DelegatorService } from './delegator/index.mjs';
 import { createDelegatorMcpWorker } from './workers/delegator-mcp.mjs';
 import { createModuleLogger } from '../scripts/lib/logger.mjs';
@@ -716,7 +715,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   router.startSweeper();
 
   const hitlTimer = setInterval(() => {
-    try { hitl.checkTimeouts(); } catch {}
+    try { hitl.checkTimeouts(); } catch (err) { hubLog.warn({ err }, 'hitl.timeout_check_failed'); }
   }, 10000);
   hitlTimer.unref();
 

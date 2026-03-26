@@ -1,6 +1,7 @@
 // hub/store.mjs — SQLite 감사 로그/메타데이터 저장소
 // 실시간 배달 큐는 router/pipe가 담당하고, SQLite는 재생/감사 용도로만 유지한다.
 import Database from 'better-sqlite3';
+import { recalcConfidence } from './reflexion.mjs';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -777,7 +778,7 @@ export function createStore(dbPath) {
       }
       const entry = store.getReflexion(id);
       if (entry && entry.hit_count > 0) {
-        const conf = entry.success_count / entry.hit_count;
+        const conf = recalcConfidence(entry);
         S.updateReflexionConfidence.run(Math.max(0, Math.min(1, conf)), now, id);
       }
       return store.getReflexion(id);

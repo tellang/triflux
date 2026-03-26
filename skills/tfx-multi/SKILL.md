@@ -137,6 +137,10 @@ headless stdout 출력에서 성공/실패 워커를 파싱.
 psmux가 없는 환경에서만 사용. Agent slim wrapper로 CLI를 실행.
 `hub/team/native.mjs`의 `buildSlimWrapperPrompt()` 기반.
 
+**팀 이름 생성 (`generateTeamName`):**
+`tfx-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`
+타임스탬프 base36 끝 4자 + 난수 4자 조합. 예: `tfx-p1q2r3s4`.
+
 > 래퍼 규칙 상세 → [`references/agent-wrapper-rules.md`](references/agent-wrapper-rules.md)
 
 ## 전제 조건

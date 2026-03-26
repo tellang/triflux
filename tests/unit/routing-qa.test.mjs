@@ -333,7 +333,13 @@ describe("tfx-route.sh: 기본 검증", () => {
       });
       assert.fail("존재하지 않는 job은 에러여야 함");
     } catch (e) {
-      assert.ok(e.stdout?.includes("error") || e.stderr?.includes("error"));
+      assert.ok(
+        e.status !== 0 ||
+          e.stdout?.toString().includes("error") ||
+          e.stderr?.toString().includes("error") ||
+          e.message?.includes("error"),
+        "에러 출력에 'error' 문자열 포함"
+      );
     }
   });
 

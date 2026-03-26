@@ -52,5 +52,5 @@ export function runConfidenceCheck(planArtifact, context = {}) {
     reasoning = `확신도 ${totalScore}%: 기준 미달. 실행 중단.`;
   }
 
-  return { score: totalScore, breakdown, decision, reasoning };
+  return { score: totalScore, breakdown, decision, reasoning, needsReview: decision === 'alternative' };
 }

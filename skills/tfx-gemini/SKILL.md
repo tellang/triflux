@@ -31,7 +31,8 @@ argument-hint: "\"작업 설명\" | N:gemini \"작업 설명\""
 | **build-fixer** | ~~Codex~~ | **Gemini Flash** |
 | **architect, planner, critic, analyst** | ~~Codex~~ | **Gemini Pro** |
 | **code-reviewer, security-reviewer, quality-reviewer** | ~~Codex~~ | **Gemini Pro** |
-| **scientist, scientist-deep** | ~~Codex~~ | **Gemini Pro/Flash** |
+| **scientist** | ~~Codex~~ | **Gemini Flash** |
+| **scientist-deep** | ~~Codex~~ | **Gemini Pro** |
 | **document-specialist** | ~~Codex~~ | **Gemini Flash** |
 | designer | Gemini | Gemini (변경 없음) |
 | writer | Gemini | Gemini (변경 없음) |
@@ -52,20 +53,20 @@ argument-hint: "\"작업 설명\" | N:gemini \"작업 설명\""
 
 ## 실행 규칙
 
-**tfx-auto SKILL.md의 전체 워크플로우(커맨드 숏컷 → 트리아지 → 실행 → 결과 파싱 → 보고)를 그대로 따릅니다.**
+**tfx-auto SKILL.md의 커맨드 숏컷 → 트리아지 → 멀티 태스크 라우팅 → 실행 → 결과 파싱 → 보고 섹션을 그대로 따릅니다.**
 
 유일한 차이점:
 
-1. **Phase 3 CLI 실행 시** `TFX_CLI_MODE=gemini`을 환경변수로 전달:
+1. **실행 섹션(CLI 에이전트) 수행 시** `TFX_CLI_MODE=gemini`을 환경변수로 전달:
    ```bash
    TFX_CLI_MODE=gemini bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile}
    ```
 
-2. **Phase 2 트리아지에서** codex 분류 결과를 gemini로 강제 변환:
+2. **트리아지 섹션에서** codex 분류 결과를 gemini로 강제 변환:
    - Codex 분류가 `codex`를 반환하면 → `gemini`로 교체
    - Opus 분해에서 모든 Codex 에이전트 → Gemini 모델 매핑
 
-3. **Phase 2a Codex 분류 단계를 건너뜀**:
+3. **트리아지 섹션 1단계(Codex 분류)를 건너뜀**:
    - Codex CLI가 없으므로 Opus가 직접 분류+분해 수행
 
 4. **Windows 안정화 자동 적용**:
