@@ -20,6 +20,7 @@ import {
   psmuxExec,
 } from "./psmux.mjs";
 import { HANDOFF_INSTRUCTION_SHORT, processHandoff } from "./handoff.mjs";
+import { getBackend } from "./backend.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
 
@@ -93,16 +94,9 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
 
   const cls = "Clear-Host; ";
 
-  switch (resolvedCli) {
-    case "codex":
-      return `${cls}codex exec (Get-Content -Raw '${promptFile}') -o '${resultFile}' --color never`;
-    case "gemini":
-      return `${cls}gemini -p (Get-Content -Raw '${promptFile}') -o text > '${resultFile}' 2>'${resultFile}.err'`;
-    case "claude":
-      return `${cls}claude -p (Get-Content -Raw '${promptFile}') --output-format text > '${resultFile}' 2>&1`;
-    default:
-      throw new Error(`지원하지 않는 CLI: ${resolvedCli} (원본: ${cli})`);
-  }
+  const backend = getBackend(resolvedCli);
+  const promptExpr = `(Get-Content -Raw '${promptFile}')`;
+  return `${cls}${backend.buildArgs(promptExpr, resultFile, opts)}`;
 }
 
 /**
