@@ -578,6 +578,10 @@ route_agent() {
   if [[ ! -f "$map_file" && -n "$TFX_PKG_ROOT" ]]; then
     map_file="$TFX_PKG_ROOT/hub/team/agent-map.json"
   fi
+  if [[ ! -f "$map_file" ]]; then
+    echo "ERROR: agent-map.json 미발견 (경로: $map_file, TFX_PKG_ROOT=${TFX_PKG_ROOT:-unset})" >&2
+    exit 1
+  fi
 
   # ── CLI_TYPE: 단일 소스 (agent-map.json) ──
   local _raw_type

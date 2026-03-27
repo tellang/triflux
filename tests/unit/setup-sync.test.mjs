@@ -106,8 +106,20 @@ describe('setup-sync: SYNC_MAP', () => {
   });
 
   it('agent-map.json이 SYNC_MAP에 포함되어 있다', () => {
-    const hasAgentMap = SYNC_MAP.some(e => e.label === 'hub/team/agent-map.json');
-    assert.ok(hasAgentMap, 'SYNC_MAP must include hub/team/agent-map.json');
+    const entry = SYNC_MAP.find(e => e.label === 'hub/team/agent-map.json');
+    assert.ok(entry, 'SYNC_MAP must include hub/team/agent-map.json');
+    assert.ok(entry.src.replace(/\\/g, '/').includes('hub/team/agent-map.json'), 'src path must reference agent-map.json');
+  });
+
+  it('agent-map.json의 synced 경로가 tfx-route.sh 상대경로와 일치한다', () => {
+    const routeEntry = SYNC_MAP.find(e => e.label === 'tfx-route.sh');
+    const mapEntry = SYNC_MAP.find(e => e.label === 'hub/team/agent-map.json');
+    assert.ok(routeEntry && mapEntry, 'both entries must exist');
+    // tfx-route.sh: ../hub/team/agent-map.json relative to its synced dir
+    const expected = join(dirname(routeEntry.dst), '..', 'hub', 'team', 'agent-map.json');
+    const normalized = (p) => p.replace(/\\/g, '/');
+    assert.equal(normalized(mapEntry.dst), normalized(expected),
+      `agent-map.json dst must resolve from tfx-route.sh relative path`);
   });
 });
 
