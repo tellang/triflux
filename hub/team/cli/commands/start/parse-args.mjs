@@ -1,5 +1,40 @@
 import { normalizeLayout, normalizeTeammateMode } from "../../services/runtime-mode.mjs";
 
+// --assign 파싱 시 마지막 콜론 뒤를 role로 인식할 알려진 역할/CLI 이름
+const KNOWN_ROLES = new Set([
+  "codex", "gemini", "claude",
+  "executor", "architect", "planner", "analyst", "critic",
+  "debugger", "verifier", "code-reviewer", "security-reviewer",
+  "test-engineer", "designer", "writer", "scientist",
+]);
+
+/**
+ * --assign "cli:prompt:role" 형식을 콜론-안전하게 파싱한다.
+ * 프롬프트 내부의 콜론(:)은 구분자로 취급하지 않는다.
+ *
+ * 규칙:
+ *   1. 첫 번째 콜론 앞 = CLI 이름
+ *   2. 마지막 콜론 뒤가 KNOWN_ROLES에 있으면 role, 나머지가 prompt
+ *   3. 그 외에는 첫 콜론 뒤 전체가 prompt, role은 빈 문자열
+ */
+function parseAssignValue(raw) {
+  const firstColon = raw.indexOf(":");
+  if (firstColon < 0) return null;
+
+  const cli = raw.slice(0, firstColon).trim();
+  const rest = raw.slice(firstColon + 1);
+
+  const lastColon = rest.lastIndexOf(":");
+  if (lastColon > 0) {
+    const candidate = rest.slice(lastColon + 1).trim().toLowerCase();
+    if (KNOWN_ROLES.has(candidate)) {
+      return { cli, prompt: rest.slice(0, lastColon).trim(), role: candidate };
+    }
+  }
+
+  return { cli, prompt: rest.trim(), role: "" };
+}
+
 export function parseTeamArgs(args = []) {
   let agents = ["codex", "gemini"];
   let lead = "claude";
@@ -13,6 +48,7 @@ export function parseTeamArgs(args = []) {
   let verbose = false;
   let dashboard = false;
   let mcpProfile = "";
+  let model = "";
 
   for (let index = 0; index < args.length; index += 1) {
     const current = args[index];
@@ -25,11 +61,8 @@ export function parseTeamArgs(args = []) {
     } else if ((current === "--teammate-mode" || current === "--mode") && args[index + 1]) {
       teammateMode = args[++index];
     } else if (current === "--assign" && args[index + 1]) {
-      // "cli:prompt:role" 형식 파싱
-      const parts = args[++index].split(":");
-      if (parts.length >= 2) {
-        assigns.push({ cli: parts[0].trim(), prompt: parts.slice(1, -1).join(":").trim() || parts[1].trim(), role: parts[parts.length - 1]?.trim() || "" });
-      }
+      const parsed = parseAssignValue(args[++index]);
+      if (parsed) assigns.push(parsed);
     } else if (current === "--auto-attach") {
       autoAttach = true;
     } else if (current === "--no-auto-attach") {
@@ -44,6 +77,8 @@ export function parseTeamArgs(args = []) {
       timeoutSec = Number(args[++index]) || 300;
     } else if (current === "--mcp-profile" && args[index + 1]) {
       mcpProfile = args[++index].trim();
+    } else if ((current === "--model" || current === "-m") && args[index + 1]) {
+      model = args[++index].trim();
     } else if (current.startsWith("-")) {
       console.warn(`  ⚠ 미인식 플래그 무시: ${current}`);
     } else {
@@ -64,5 +99,6 @@ export function parseTeamArgs(args = []) {
     verbose,
     dashboard,
     mcpProfile,
+    model,
   };
 }

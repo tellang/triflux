@@ -18,7 +18,8 @@ export class CodexBackend {
    * @returns {string} PowerShell 명령 (cls 제외)
    */
   buildArgs(prompt, resultFile, opts = {}) {
-    return `codex exec ${prompt} -o '${resultFile}' --color never`;
+    const modelFlag = opts.model ? ` --model '${opts.model}'` : "";
+    return `codex exec ${prompt} -o '${resultFile}' --color never${modelFlag}`;
   }
 
   env() { return {}; }

@@ -4,11 +4,11 @@ import { ok, warn } from "../../render.mjs";
 import { buildTasks } from "../../services/task-model.mjs";
 import { clearTeamState } from "../../services/state-store.mjs";
 
-export async function startHeadlessTeam({ sessionId, task, lead, agents, subtasks, layout, assigns, autoAttach, progressive, timeoutSec, verbose, dashboard, mcpProfile }) {
+export async function startHeadlessTeam({ sessionId, task, lead, agents, subtasks, layout, assigns, autoAttach, progressive, timeoutSec, verbose, dashboard, mcpProfile, model }) {
   // --assign이 있으면 그것을 사용, 없으면 agents+subtasks 조합
   const assignments = assigns && assigns.length > 0
-    ? assigns.map((a, i) => ({ cli: resolveCliType(a.cli), prompt: a.prompt, role: a.role || `worker-${i + 1}`, mcp: mcpProfile }))
-    : subtasks.map((subtask, i) => ({ cli: resolveCliType(agents[i] || agents[0]), prompt: subtask, role: `worker-${i + 1}`, mcp: mcpProfile }));
+    ? assigns.map((a, i) => ({ cli: resolveCliType(a.cli), prompt: a.prompt, role: a.role || `worker-${i + 1}`, mcp: mcpProfile, model }))
+    : subtasks.map((subtask, i) => ({ cli: resolveCliType(agents[i] || agents[0]), prompt: subtask, role: `worker-${i + 1}`, mcp: mcpProfile, model }));
 
   const startedAt = Date.now();
   ok(`headless ${assignments.length}워커 시작`);

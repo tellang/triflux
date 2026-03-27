@@ -67,7 +67,7 @@ const MCP_PROFILE_HINTS = {
  * @returns {string} PowerShell 명령
  */
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
-  const { handoff = true, mcp, contextFile } = opts;
+  const { handoff = true, mcp, contextFile, model } = opts;
   const resolvedCli = resolveCliType(cli);
 
   // contextFile 처리: 32KB(32768 bytes) 초과 시 UTF-8 안전 절단
@@ -96,7 +96,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
 
   const backend = getBackend(resolvedCli);
   const promptExpr = `(Get-Content -Raw '${promptFile}')`;
-  return `${cls}${backend.buildArgs(promptExpr, resultFile, opts)}`;
+  return `${cls}${backend.buildArgs(promptExpr, resultFile, { ...opts, model })}`;
 }
 
 /**
@@ -151,7 +151,7 @@ async function dispatchProgressive(sessionName, assignments, layout, safeProgres
 
     // 캡처 시작 + 컬러 배너 + 명령 dispatch
     const resultFile = join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
-    const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile, { mcp: assignment.mcp });
+    const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile, { mcp: assignment.mcp, model: assignment.model });
     startCapture(sessionName, newPaneId);
     // pane 간 pipe-pane EBUSY 방지 — 이벤트 루프 해방하며 순차 대기
     if (i > 0) await new Promise(r => setTimeout(r, 300));
@@ -182,7 +182,7 @@ function dispatchBatch(sessionName, assignments, layout, safeProgress) {
   return assignments.map((assignment, i) => {
     const paneName = `worker-${i + 1}`;
     const resultFile = join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
-    const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile, { mcp: assignment.mcp });
+    const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile, { mcp: assignment.mcp, model: assignment.model });
     const scriptDir = join(RESULT_DIR, sessionName);
     const dispatch = dispatchCommand(sessionName, paneName, cmd, { scriptDir, scriptName: paneName });
 
