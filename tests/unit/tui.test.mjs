@@ -135,8 +135,8 @@ describe("createLogDashboard", () => {
 
   it("render: 단일 워커 카드에 tier1/tier2/tier3 정보 출력", () => {
     let output = "";
-    const fakeStream = { write: (s) => { output += s; }, columns: 92, isTTY: false };
-    const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0, columns: 92 });
+    const fakeStream = { write: (s) => { output += s; }, columns: 160, isTTY: false };
+    const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0, columns: 160 });
     output = "";
     tui.updateWorker("worker-1", {
       cli: "codex",
@@ -198,7 +198,7 @@ describe("createLogDashboard", () => {
     tui.close();
   });
 
-  it("2-3 워커는 수평 스플릿으로 렌더링", () => {
+  it("2-3 워커는 좌우 분할(rail+focus)로 렌더링", () => {
     let output = "";
     const fakeStream = { write: (s) => { output += s; }, columns: 132, isTTY: false };
     const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0, columns: 132 });
@@ -210,7 +210,8 @@ describe("createLogDashboard", () => {
     const clean = stripAnsi(output);
     const firstLine = clean.split("\n").find((line) => line.includes("┌"));
     assert.ok(firstLine);
-    assert.equal((firstLine.match(/┌/g) || []).length, 3);
+    // 좌우 분할: rail 카드 ┌ + focus pane ┌ = 2개
+    assert.equal((firstLine.match(/┌/g) || []).length, 2);
     assert.ok(clean.includes("auth done"));
     assert.ok(clean.includes("dep missing"));
     tui.close();

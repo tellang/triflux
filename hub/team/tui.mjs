@@ -185,6 +185,36 @@ function statusColor(status) {
   return FG.muted;
 }
 
+// ── MOCHA RGB (gradual fade 보간용) ──
+const MOCHA_RGB = {
+  ok:        { r: 166, g: 227, b: 161 },
+  partial:   { r: 250, g: 179, b: 135 },
+  fail:      { r: 243, g: 139, b: 168 },
+  executing: { r: 116, g: 199, b: 236 },
+  muted:     { r: 147, g: 153, b: 178 },
+  border:    { r: 69,  g: 71,  b: 90  },
+};
+
+function statusToRgb(status) {
+  if (status === "ok" || status === "completed") return MOCHA_RGB.ok;
+  if (status === "partial") return MOCHA_RGB.partial;
+  if (status === "failed") return MOCHA_RGB.fail;
+  if (status === "running" || status === "in_progress") return MOCHA_RGB.executing;
+  return MOCHA_RGB.muted;
+}
+
+const FADE_DURATION_MS = 1500;
+
+function fadeBorderColor(currentStatus, prevStatus, changedAt) {
+  const elapsed = Date.now() - (changedAt || 0);
+  if (elapsed >= FADE_DURATION_MS || !prevStatus) return MOCHA.border;
+  const t = Math.min(1, elapsed / FADE_DURATION_MS);
+  const from = statusToRgb(currentStatus);
+  const to = MOCHA_RGB.border;
+  const c = lerpRgb(from, to, t);
+  return `\x1b[38;2;${c.r};${c.g};${c.b}m`;
+}
+
 // ── 텍스트 래핑 ──────────────────────────────────────────────────────────
 function wrapLine(text, width) {
   const limit = Math.max(8, width);
@@ -328,7 +358,9 @@ function buildWorkerRail(name, st, opts = {}) {
     innerWidth,
   );
 
-  const borderColor = focused ? MOCHA.thinking : MOCHA.border;
+  const borderColor = focused
+    ? MOCHA.thinking
+    : fadeBorderColor(status, st._prevStatus, st._statusChangedAt);
 
   if (compact) {
     // compact 2-line 카드
@@ -365,13 +397,14 @@ function buildWorkerRail(name, st, opts = {}) {
   const findings = detailHighlights(st).join(" / ") || "no notable findings yet";
   const files = sanitizeFiles(st.handoff?.files_changed || st.files_changed).join(", ") || "none";
 
+  const verdictClr = statusColor(status);
   const lines = [
     title,
     statusLine,
     progressLine,
-    truncate(`verdict ${verdict}`, innerWidth),
-    truncate(`findings ${findings}`, innerWidth),
-    truncate(`files ${files}`, innerWidth),
+    truncate(`${dim("verdict")} ${color(verdict, verdictClr)}`, innerWidth),
+    truncate(`${dim("findings")} ${color(findings, MOCHA.partial)}`, innerWidth),
+    truncate(`${dim("files")} ${color(files, FG.muted)}`, innerWidth),
   ];
 
   const framed = box(lines, Math.max(MIN_CARD_WIDTH, width), borderColor);
@@ -396,10 +429,17 @@ function buildFocusPane(name, st, opts = {}) {
   const files = sanitizeFiles(st.handoff?.files_changed || st.files_changed);
   const status = runtimeStatus(st);
 
+  // Tab bar: 현재는 Log 활성 (향후 Tab 키로 전환 예정)
+  const tabLog = color("[Log]", FG.accent);
+  const tabDetail = dim("[Detail]");
+  const tabFiles = dim(`[Files ${files.length}]`);
+  const tabBar = truncate(`${tabLog} ${tabDetail} ${tabFiles}`, innerWidth);
+
   const stickyLines = [
     truncate(`${color(name, FG.triflux)} ${dim("•")} ${statusBadge(status)}`, innerWidth),
-    truncate(`verdict  ${color(verdict, MOCHA.ok)}`, innerWidth),
-    truncate(`conf     ${confidence}  files ${files.length}`, innerWidth),
+    tabBar,
+    truncate(`${dim("verdict")}  ${color(verdict, statusColor(status))}`, innerWidth),
+    truncate(`${dim("conf")}     ${confidence}`, innerWidth),
     dim("─").repeat(Math.max(4, innerWidth)),
   ];
 
@@ -495,6 +535,10 @@ function normalizeWorkerState(existing, state) {
     tokens: state.tokens !== undefined ? normalizeTokens(state.tokens) : existing.tokens,
     progress: state.progress !== undefined ? clamp(Number(state.progress) || 0, 0, 1) : existing.progress,
     handoff: nextHandoff,
+    _prevStatus: (state.status !== undefined && sanitizeOneLine(state.status) !== existing.status)
+      ? existing.status : existing._prevStatus,
+    _statusChangedAt: (state.status !== undefined && sanitizeOneLine(state.status) !== existing.status)
+      ? Date.now() : (existing._statusChangedAt || 0),
   };
 }
 

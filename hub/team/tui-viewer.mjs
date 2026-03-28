@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // hub/team/tui-viewer.mjs — worker state aggregator v5
 // psmux capture-pane 기반 워커 상태 집계 + TUI 렌더링
-// data ingest: ~4Hz (250ms), render: 8-12FPS (별도 루프)
+// data ingest: ~2Hz (500ms), render: 8-12FPS (별도 루프)
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -431,7 +431,7 @@ function cleanup() {
 
 // ── 진입점 ──
 tui.render();
-const ingestTimer = setInterval(ingest, 250);   // 4Hz
+const ingestTimer = setInterval(ingest, 500);   // 2Hz
 startRender();
 
 // 타임아웃 (10분)

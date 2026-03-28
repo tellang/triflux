@@ -635,7 +635,7 @@ export function startCapture(sessionName, paneNameOrTarget) {
  */
 function wrapCliForBash(cmd) {
   const trimmed = cmd.trimStart();
-  const isCli = /^(codex|gemini)\b/u.test(trimmed);
+  const isCli = /\b(codex|gemini)\b/u.test(trimmed);
   if (!isCli) return cmd;
   // 단일 따옴표 이스케이프: ' → '\''
   const escaped = trimmed.replace(/'/g, "'\\''");
