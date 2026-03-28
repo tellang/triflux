@@ -234,7 +234,7 @@ describe("createLogDashboard", () => {
     tui.selectWorker("w1");
     tui.render();
     const clean = stripAnsi(output);
-    assert.ok(clean.includes("workers 4"));
+    assert.ok(clean.includes("▲") && clean.includes("exec"));
     assert.ok(clean.includes("1.w1"));
     assert.ok(clean.includes("4.w4"));
     // summary bar에 w4의 상태(completed) 포함 확인

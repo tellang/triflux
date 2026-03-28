@@ -610,7 +610,7 @@ export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
  * @param {number} [dashboardSize=0.50] — 대시보드 분할 비율 (0.2~0.8)
  * @returns {boolean}
  */
-export function attachDashboardTab(sessionName, workerCount = 2, dashboardLayout = "single", dashboardSize = 0.50) {
+export function attachDashboardTab(sessionName, workerCount = 2, dashboardLayout = "single", dashboardSize = 0.40) {
   try { execSync("where wt.exe", { stdio: "ignore" }); } catch { return false; }
   ensureWtProfile(workerCount);
   const resolvedDashboardLayout = resolveDashboardLayout(dashboardLayout, workerCount);
@@ -684,7 +684,7 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
   const {
     autoAttach = false,
     dashboard = false,
-    dashboardSize = 0.50,
+    dashboardSize = 0.40,
     signal,
     maxIdleSec = 0,
     ...runOpts

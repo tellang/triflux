@@ -297,18 +297,15 @@ function countStatuses(names, workers) {
   return { ok, partial, failed, running };
 }
 
-// ── Tier1: 상단 고정 2행 ─────────────────────────────────────────────────
+// ── Tier1: 상단 고정 1행 ─────────────────────────────────────────────────
 function buildTier1(names, workers, pipeline, elapsed, width, version) {
   const { ok, partial, failed, running } = countStatuses(names, workers);
   const row1 = truncate(
-    `${color("▲ triflux", FG.triflux)} v${version} ${dim("│")} phase ${color(pipeline.phase || "exec", FG.accent)} ${dim("│")} elapsed ${elapsed}s ${dim("│")} workers ${names.length}`,
+    `${color("▲", FG.triflux)} v${version} ${dim("│")} ${color(pipeline.phase || "exec", FG.accent)} ${dim("│")} ${elapsed}s ${dim("│")} ` +
+    `${color(`✓${ok}`, MOCHA.ok)} ${color(`◑${partial}`, MOCHA.partial)} ${color(`✗${failed}`, MOCHA.fail)} ${dim(`▶${running}`)}  ${dim("Tab/j/k:nav • f:follow • r:raw • 1-9:jump")}`,
     width,
   );
-  const row2 = truncate(
-    `${color(`✓ ${ok}`, MOCHA.ok)}  ${color(`◑ ${partial}`, MOCHA.partial)}  ${color(`✗ ${failed}`, MOCHA.fail)}  ${dim(`▶ ${running} running`)}  ${dim("Tab/j/k:nav • f:follow • r:raw • 1-9:jump")}`,
-    width,
-  );
-  return [row1, row2];
+  return [row1];
 }
 
 // ── 카드 렌더러 (Tier2 worker rail) ─────────────────────────────────────
@@ -741,7 +738,7 @@ export function createLogDashboard(opts = {}) {
     // 좌우 분할: Left Rail (30%) | Right Focus (70%)
     // 목업: Tier2 Left Rail + Tier3 Focus 나란히 렌더링
     const GAP = 1; // rail과 focus 사이 구분선
-    const railWidth = Math.max(MIN_CARD_WIDTH, Math.floor(totalCols * 0.30));
+    const railWidth = Math.max(MIN_CARD_WIDTH, Math.floor(totalCols * 0.25));
     const focusWidth = totalCols - railWidth - GAP;
     const bodyHeight = Math.max(6, totalRows - tier1.length - 1); // -1 for status bar
 

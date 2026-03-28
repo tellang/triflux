@@ -49,7 +49,7 @@ export function parseTeamArgs(args = []) {
   let verbose = false;
   let dashboard = true;
   let dashboardLayout = "single";
-  let dashboardSize = 0.50;
+  let dashboardSize = 0.40;
   let mcpProfile = "";
   let model = "";
 
