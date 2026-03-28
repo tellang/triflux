@@ -4,7 +4,7 @@ import { ok, warn } from "../../render.mjs";
 import { buildTasks } from "../../services/task-model.mjs";
 import { clearTeamState } from "../../services/state-store.mjs";
 
-export async function startHeadlessTeam({ sessionId, task, lead, agents, subtasks, layout, assigns, autoAttach, progressive, timeoutSec, verbose, dashboard, mcpProfile, model }) {
+export async function startHeadlessTeam({ sessionId, task, lead, agents, subtasks, layout, assigns, autoAttach, progressive, timeoutSec, verbose, dashboard, dashboardLayout, dashboardSize, mcpProfile, model }) {
   // --assign이 있으면 그것을 사용, 없으면 agents+subtasks 조합
   const assignments = assigns && assigns.length > 0
     ? assigns.map((a, i) => ({ cli: resolveCliType(a.cli), prompt: a.prompt, role: a.role || `worker-${i + 1}`, mcp: mcpProfile, model }))
@@ -18,6 +18,8 @@ export async function startHeadlessTeam({ sessionId, task, lead, agents, subtask
     layout,
     autoAttach: !!autoAttach,
     dashboard: !!dashboard,
+    dashboardLayout,
+    dashboardSize: dashboardSize ?? 0.50,
     progressive: progressive !== false,
     progressIntervalSec: verbose ? 10 : 0,
     onProgress: verbose ? function onProgress(event) {

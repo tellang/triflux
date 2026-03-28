@@ -16,6 +16,7 @@ function printStartUsage() {
   console.log(`  사용법: ${WHITE}tfx multi "작업 설명"${RESET}`);
   console.log(`          ${WHITE}tfx multi --agents codex,gemini --lead claude "작업"${RESET}`);
   console.log(`          ${WHITE}tfx multi --teammate-mode headless "작업"${RESET} ${DIM}(psmux 헤드리스, 기본)${RESET}`);
+  console.log(`          ${WHITE}tfx multi --dashboard-layout auto "작업"${RESET} ${DIM}(dashboard viewer 레이아웃 자동)${RESET}`);
   console.log(`          ${WHITE}tfx multi --teammate-mode wt "작업"${RESET} ${DIM}(Windows Terminal split-pane)${RESET}`);
   console.log(`          ${WHITE}tfx multi --teammate-mode in-process "작업"${RESET} ${DIM}(mux 불필요)${RESET}\n`);
 }
@@ -38,7 +39,7 @@ function renderTmuxInstallHelp() {
 export { parseTeamArgs };
 
 export async function teamStart(args = []) {
-  const { agents, lead, layout, teammateMode, task: rawTask, assigns, autoAttach, progressive, timeoutSec, verbose, dashboard, mcpProfile, model } = parseTeamArgs(args);
+  const { agents, lead, layout, teammateMode, task: rawTask, assigns, autoAttach, progressive, timeoutSec, verbose, dashboard, dashboardLayout, dashboardSize, mcpProfile, model } = parseTeamArgs(args);
   // --assign 사용 시 task를 자동 생성
   const task = rawTask || (assigns.length > 0 ? assigns.map(a => a.prompt).join(" + ") : "");
   if (!task) return printStartUsage();
@@ -82,7 +83,7 @@ export async function teamStart(args = []) {
   const state = effectiveMode === "in-process"
     ? await startInProcessTeam({ sessionId, task, lead, agents, subtasks, hubUrl })
     : effectiveMode === "headless"
-      ? await startHeadlessTeam({ sessionId, task, lead, agents, subtasks, layout, assigns, autoAttach, progressive, timeoutSec, verbose, dashboard, mcpProfile, model })
+      ? await startHeadlessTeam({ sessionId, task, lead, agents, subtasks, layout, assigns, autoAttach, progressive, timeoutSec, verbose, dashboard, dashboardLayout, dashboardSize, mcpProfile, model })
       : effectiveMode === "wt"
         ? await startWtTeam({ sessionId, task, lead, agents, subtasks, layout, hubUrl })
         : await startMuxTeam({ sessionId, task, lead, agents, subtasks, layout, hubUrl, teammateMode: effectiveMode });

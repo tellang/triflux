@@ -127,8 +127,13 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     },
   },
   multi: {
-    usage: "tfx multi <subcommand>",
+    usage: "tfx multi [--dashboard-layout single|split-2col|split-3col|auto] <subcommand|task>",
     description: "멀티-CLI 팀 모드",
+    options: [
+      { name: "--dashboard", type: "boolean", description: "headless dashboard viewer 표시 (기본값: 켜짐)" },
+      { name: "--no-dashboard", type: "boolean", description: "headless dashboard viewer 비활성화" },
+      { name: "--dashboard-layout", type: "string", description: "dashboard viewer 레이아웃 선택: single|split-2col|split-3col|auto" },
+    ],
     subcommands: {
       status: {
         usage: "tfx multi status [--json]",

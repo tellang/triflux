@@ -10,8 +10,8 @@
 //   node remote-spawn.mjs --probe <ssh-host>
 
 import { randomUUID } from "crypto";
-import { execFileSync, spawn } from "child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs";
+import { execFileSync, execSync, spawn } from "child_process";
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { homedir, platform as getPlatform, tmpdir } from "os";
 import { join, posix as posixPath, resolve, win32 as win32Path } from "path";
 import {
@@ -184,24 +184,76 @@ function parseArgs(argv) {
   };
 }
 
+function parseVersion(versionStr) {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(versionStr);
+  if (!match) return null;
+  return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+}
+
+function compareVersions(a, b) {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+function probeVersion(binPath) {
+  try {
+    if (/\.(cmd|bat)$/iu.test(binPath)) {
+      // .cmd/.bat → execSync로 shell 경유 (execFileSync EINVAL 회피)
+      const out = execSync(`"${binPath}" --version`, {
+        encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+      });
+      return parseVersion(out);
+    }
+    const out = execFileSync(binPath, ["--version"], {
+      encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+    });
+    return parseVersion(out);
+  } catch {
+    return null;
+  }
+}
+
 function detectClaudePath() {
   if (process.env.CLAUDE_BIN_PATH) return process.env.CLAUDE_BIN_PATH;
 
+  const candidates = [];
+
   const wingetPath = join(homedir(), "AppData", "Local", "Microsoft", "WinGet", "Links", "claude.exe");
-  if (existsSync(wingetPath)) return wingetPath;
+  if (existsSync(wingetPath)) candidates.push(wingetPath);
 
   const npmPath = join(process.env.APPDATA || "", "npm", "claude.cmd");
-  if (existsSync(npmPath)) return npmPath;
+  if (existsSync(npmPath)) candidates.push(npmPath);
 
   try {
     const command = IS_WINDOWS_LOCAL ? "where" : "which";
     const result = execFileSync(command, ["claude"], { encoding: "utf8", timeout: 5000 }).trim();
-    if (result) return result.split(/\r?\n/u)[0].trim();
+    if (result) {
+      for (const line of result.split(/\r?\n/u)) {
+        const p = line.trim();
+        if (p && !candidates.includes(p)) candidates.push(p);
+      }
+    }
   } catch {
     // not found
   }
 
-  return "claude";
+  if (candidates.length === 0) return "claude";
+
+  let bestPath = candidates[0];
+  let bestVersion = probeVersion(candidates[0]);
+
+  for (const candidate of candidates.slice(1)) {
+    const ver = probeVersion(candidate);
+    if (ver === null) continue;
+    if (bestVersion === null || compareVersions(ver, bestVersion) > 0) {
+      bestVersion = ver;
+      bestPath = candidate;
+    }
+  }
+
+  return bestPath;
 }
 
 function getPermissionFlag() {
@@ -598,16 +650,44 @@ function spawnLocal(args, claudePath, prompt) {
   const sessionName = `tfx-spawn-${randomUUID().slice(0, 8)}`;
   const paneId = `${sessionName}:0.0`;
   const permissionFlags = getPermissionFlag().join(" ");
-  const command = `& '${escapePwshSingleQuoted(normalizeCommandPath(claudePath))}'${permissionFlags ? ` ${permissionFlags}` : ""}`;
+  const claudePathNorm = normalizeCommandPath(claudePath);
+
+  // 임시파일 생성 (프롬프트가 있을 때만)
+  // 정리는 pwsh 스크립트 내부에서 수행 (Node exit 시 삭제하면 pane 실행 전 사라짐)
+  let tmpFile = null;
+  if (prompt) {
+    tmpFile = join(tmpdir(), `tfx-prompt-${randomUUID().slice(0, 8)}.md`);
+    writeFileSync(tmpFile, prompt, { encoding: "utf8" });
+  }
 
   createPsmuxSession(sessionName, { layout: "1xN", paneCount: 1 });
   sendKeysToPane(paneId, `cd '${escapePwshSingleQuoted(dir)}'`);
-  sleepMs(500);
-  sendKeysToPane(paneId, command);
-  if (prompt) {
-    sleepMs(2000);
-    sendKeysToPane(paneId, prompt);
+  sleepMs(300);
+
+  if (prompt && tmpFile) {
+    // pwsh -File 패턴: 인라인 쿼팅 문제 회피 (피드백: -Command 금지)
+    // 1단계: 프롬프트를 Get-Content -Raw → claude -p (one-shot), 세션 ID 추출
+    // 2단계: --resume으로 인터랙티브 세션 이어붙이기
+    const tmpFileNorm = normalizeCommandPath(tmpFile);
+    const flags = getPermissionFlag().map((f) => `'${escapePwshSingleQuoted(f)}'`).join(", ");
+    const scriptContent = [
+      `$ErrorActionPreference = 'SilentlyContinue'`,
+      `$t = '${escapePwshSingleQuoted(tmpFileNorm)}'`,
+      `$c = '${escapePwshSingleQuoted(claudePathNorm)}'`,
+      `$f = @(${flags})`,
+      `$raw = Get-Content -Raw $t`,
+      `Remove-Item -ErrorAction SilentlyContinue $t`,
+      `Remove-Item -ErrorAction SilentlyContinue $MyInvocation.MyCommand.Definition`,
+      `& $c @f $raw`,
+    ].join("\n");
+    const scriptFile = join(tmpdir(), `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`);
+    writeFileSync(scriptFile, scriptContent, { encoding: "utf8" });
+    sendKeysToPane(paneId, `pwsh -NoProfile -NoExit -File '${escapePwshSingleQuoted(normalizeCommandPath(scriptFile))}'`);
+  } else {
+    const command = `& '${escapePwshSingleQuoted(claudePathNorm)}'${permissionFlags ? ` ${permissionFlags}` : ""}`;
+    sendKeysToPane(paneId, command);
   }
+
   openAttachTab(sessionName, "Claude@local");
   console.log(sessionName);
 }
