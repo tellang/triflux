@@ -90,7 +90,9 @@ Options:
   --send <session> 실행 중인 세션에 프롬프트 전송
   --list           tfx-spawn-* psmux 세션 목록
   --attach <name>  WT 새 탭에서 세션 attach
-  --probe <host>   SSH 원격 환경 강제 프로브 + 캐시 갱신`;
+  --probe <host>   SSH 원격 환경 강제 프로브 + 캐시 갱신
+  --capture <name> 세션 pane 내용 캡처 출력
+  --wait <name>    세션의 Claude 준비 완료 대기 (기본 60초)`;
 }
 
 function parseArgs(argv) {
@@ -150,6 +152,18 @@ function parseArgs(argv) {
     if (arg === "--probe" && argv[index + 1]) {
       command = "probe";
       probeHost = validateHost(argv[index + 1]);
+      index += 1;
+      continue;
+    }
+    if (arg === "--capture" && argv[index + 1]) {
+      command = "capture";
+      sessionName = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--wait" && argv[index + 1]) {
+      command = "wait";
+      sessionName = argv[index + 1];
       index += 1;
       continue;
     }
@@ -659,6 +673,34 @@ function attachSession(sessionName) {
   openAttachTab(sessionName);
 }
 
+function captureSession(sessionName, lines = 30) {
+  requirePsmux();
+  if (!psmuxSessionExists(sessionName)) {
+    throw new Error(`psmux session not found: ${sessionName}`);
+  }
+  return capturePsmuxPane(`${sessionName}:0.0`, lines);
+}
+
+async function waitForClaudeReady(sessionName, timeoutSec = 60) {
+  requirePsmux();
+  if (!psmuxSessionExists(sessionName)) {
+    throw new Error(`psmux session not found: ${sessionName}`);
+  }
+  const paneId = `${sessionName}:0.0`;
+  const readyPattern = /(\u276f|\u2795|>\s*$|bypass permissions)/;
+  const deadline = Date.now() + timeoutSec * 1000;
+
+  while (Date.now() <= deadline) {
+    const snapshot = capturePsmuxPane(paneId, 5);
+    const lastLine = snapshot.split(/\r?\n/).filter((l) => l.trim()).at(-1) || "";
+    if (readyPattern.test(lastLine)) {
+      return true;
+    }
+    sleepMs(1000);
+  }
+  throw new Error(`claude ready wait timed out after ${timeoutSec}s for ${sessionName}`);
+}
+
 async function main() {
   const args = parseArgs(process.argv);
 
@@ -682,6 +724,25 @@ async function main() {
       process.exit(1);
     }
     console.log(JSON.stringify(probeRemoteEnv(args.probeHost, { force: true }), null, 2));
+    return;
+  }
+
+  if (args.command === "capture") {
+    if (!args.sessionName) {
+      console.error("--capture requires a session name");
+      process.exit(1);
+    }
+    console.log(captureSession(args.sessionName));
+    return;
+  }
+
+  if (args.command === "wait") {
+    if (!args.sessionName) {
+      console.error("--wait requires a session name");
+      process.exit(1);
+    }
+    await waitForClaudeReady(args.sessionName);
+    console.log("ready");
     return;
   }
 
