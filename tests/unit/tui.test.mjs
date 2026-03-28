@@ -276,6 +276,22 @@ describe("createLogDashboard", () => {
     tui.close();
   });
 
+  it("forceTTY=true: isTTY=false 스트림에서도 altScreen 활성화", () => {
+    const chunks = [];
+    const fakeStream = { write: (s) => { chunks.push(s); }, columns: 96, rows: 30, isTTY: false };
+    const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0, columns: 96, forceTTY: true });
+    // altScreen 진입 시퀀스가 출력되어야 함
+    const combined = chunks.join("");
+    assert.ok(combined.includes(altScreenOn), "altScreenOn 시퀀스가 출력되어야 함");
+    assert.ok(combined.includes(cursorHide), "cursorHide 시퀀스가 출력되어야 함");
+    tui.updateWorker("w1", { cli: "codex", status: "running", snapshot: "step 1", elapsed: 1 });
+    tui.render();
+    // altScreen diff 렌더 — moveTo 시퀀스 포함 확인
+    const allOutput = chunks.join("");
+    assert.ok(allOutput.includes("\x1b["), "ANSI 커서 이동 시퀀스가 포함되어야 함");
+    tui.close();
+  });
+
   it("detail toggle과 selection 상태를 유지한다", () => {
     let output = "";
     const fakeStream = { write: (s) => { output += s; }, columns: 96, isTTY: false };

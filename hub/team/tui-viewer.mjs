@@ -42,12 +42,15 @@ try {
 const MAX_BODY_BYTES = 10240;
 
 // ── TUI 초기화 ──
+// WT pane에서 spawn 시 process.stdout.isTTY=false — WT_SESSION 환경변수로 감지하여 forceTTY
+const isWindowsTerminal = !!process.env.WT_SESSION;
 const tui = createLogDashboard({
   refreshMs: 0,          // render 루프를 직접 제어
   stream: process.stdout,
   input: process.stdin,
-  columns: process.stdout.columns,
+  columns: process.stdout.columns || parseInt(process.env.COLUMNS, 10) || 120,
   layout: LAYOUT,
+  forceTTY: isWindowsTerminal,
 });
 const startTime = Date.now();
 tui.setStartTime(startTime);

@@ -560,9 +560,10 @@ export function createLogDashboard(opts = {}) {
     refreshMs = 1000,
     columns,
     layout: layoutHint = "auto",
+    forceTTY = false,
   } = opts;
 
-  const isTTY = !!stream?.isTTY;
+  const isTTY = forceTTY || !!stream?.isTTY;
 
   const workers = new Map();
   let pipeline = { phase: "exec", fix_attempt: 0 };
@@ -679,7 +680,7 @@ export function createLogDashboard(opts = {}) {
 
   function attachInput() {
     if (inputAttached) return;
-    if (!isTTY || !input?.isTTY || typeof input?.on !== "function") return;
+    if (!isTTY || (!forceTTY && !input?.isTTY) || typeof input?.on !== "function") return;
     inputAttached = true;
     if (typeof input.setRawMode === "function") { input.setRawMode(true); rawModeEnabled = true; }
     if (typeof input.resume === "function") input.resume();

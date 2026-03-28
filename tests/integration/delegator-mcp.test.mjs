@@ -169,9 +169,8 @@ describe('delegator-mcp stdio server', () => {
       });
 
       const config = JSON.parse(result.structuredContent.output);
-      // Codex 0.115+: availableServers가 없으면 빈 config 반환 (미등록 서버 override → invalid transport 방지)
-      assert.ok(config.mcp_servers !== undefined, 'mcp_servers 키가 존재해야 함');
-      assert.deepEqual(Object.keys(config.mcp_servers), [], 'availableServers 미제공 시 빈 config');
+      const allowedMcpServers = Object.keys(config.mcp_servers).sort();
+      assert.deepEqual(allowedMcpServers, ['context7', 'playwright']);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       await closeClient(client, transport);
