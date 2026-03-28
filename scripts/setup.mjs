@@ -293,6 +293,14 @@ function ensureCodexProfiles() {
       }
     }
 
+    // headless 모드에서 승인 없이 실행하려면 sandbox 설정 필수
+    // Codex 0.117.0+: config.toml 설정과 CLI 플래그 중복 시 에러
+    if (process.platform === "win32" && !updated.includes('[windows]')) {
+      if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
+      updated += "\n[windows]\nsandbox = \"elevated\"\n";
+      changed++;
+    }
+
     if (changed > 0) {
       writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
     }

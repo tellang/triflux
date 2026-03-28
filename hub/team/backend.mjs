@@ -19,7 +19,9 @@ export class CodexBackend {
    */
   buildArgs(prompt, resultFile, opts = {}) {
     const modelFlag = opts.model ? ` --model '${opts.model}'` : "";
-    return `codex exec --dangerously-bypass-approvals-and-sandbox ${prompt} --output-last-message '${resultFile}' --color never${modelFlag}`;
+    // Codex 0.117.0+: config.toml에 sandbox 설정이 있으면 CLI 플래그 중복 불가
+    // --dangerously-bypass-approvals-and-sandbox 대신 exec 서브커맨드만 사용 (config가 sandbox 관리)
+    return `codex exec ${prompt} --output-last-message '${resultFile}' --color never${modelFlag}`;
   }
 
   env() { return {}; }
