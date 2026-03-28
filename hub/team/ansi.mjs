@@ -196,6 +196,13 @@ export const MOCHA = {
   thinking:  `${ESC}[38;5;183m`,  // #cba6f7 mauve
   executing: `${ESC}[38;5;117m`,  // #74c7ec sky
   border:    `${ESC}[38;5;238m`,  // #45475a surface1
+  text:      `${ESC}[38;2;205;214;244m`, // #cdd6f4 catppuccin text
+  subtext:   `${ESC}[38;2;166;173;200m`, // #a6adc8 subtext0
+  overlay:   `${ESC}[38;2;108;112;134m`, // #6c7086 overlay0
+  blue:      `${ESC}[38;2;137;180;250m`, // #89b4fa blue
+  yellow:    `${ESC}[38;2;249;226;175m`, // #f9e2af yellow
+  red:       `${ESC}[38;2;243;139;168m`, // #f38ba8 red (truecolor)
+  surface0:  `${ESC}[38;2;49;50;68m`,    // #313244 surface0
 };
 
 // ── badge 헬퍼 ──

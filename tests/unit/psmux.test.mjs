@@ -345,3 +345,84 @@ describe("psmux.mjs steering", () => {
     assert.equal(result.match, "__TRIFLUX_DONE__:token-123:7");
   });
 });
+
+describe("killPsmuxSession cleanup", () => {
+  function mockForKillSession() {
+    const calls = [];
+
+    const tracker = mock.method(childProcess, "execFileSync", (file, args) => {
+      const argv = Array.isArray(args) ? [...args] : [];
+      calls.push({ file, args: argv });
+
+      switch (argv[0]) {
+        case "-V":
+          return "psmux 3.3.0";
+        case "list-panes": {
+          const fmt = argv.find((a) => a.includes("pane_index"));
+          if (fmt) {
+            return "0\ttfx-kill:0.0\n1\ttfx-kill:0.1";
+          }
+          // #{pane_pid} format
+          return "1234\n5678";
+        }
+        case "pipe-pane":
+          return "";
+        case "kill-session":
+          return "";
+        default:
+          return "";
+      }
+    });
+
+    // mock execSync for taskkill and powershell orphan cleanup
+    const execSyncTracker = mock.method(childProcess, "execSync", (cmd) => {
+      calls.push({ file: "execSync", args: [cmd] });
+      return "";
+    });
+
+    registerRestore(() => tracker.mock.restore());
+    registerRestore(() => execSyncTracker.mock.restore());
+    return { calls };
+  }
+
+  it("killPsmuxSession은 pipe-pane 해제 → 트리 종료 → 세션 종료 → 고아 정리 순서로 실행한다", async () => {
+    createTempCaptureRoot("psmux-kill-");
+    const { calls } = mockForKillSession();
+    const { killPsmuxSession } = await importFreshPsmux();
+
+    killPsmuxSession("tfx-kill");
+
+    // pipe-pane 해제 호출 확인 (각 pane에 대해)
+    const pipePaneCalls = calls.filter(
+      (c) => Array.isArray(c.args) && c.args[0] === "pipe-pane",
+    );
+    assert.ok(pipePaneCalls.length >= 2, `pipe-pane 해제가 2회 이상 호출되어야 함 (실제: ${pipePaneCalls.length})`);
+
+    // taskkill 호출 확인
+    const taskkillCalls = calls.filter(
+      (c) => c.file === "execSync" && typeof c.args[0] === "string" && c.args[0].includes("taskkill"),
+    );
+    assert.ok(taskkillCalls.length >= 2, `taskkill이 2회 이상 호출되어야 함 (실제: ${taskkillCalls.length})`);
+
+    // kill-session 호출 확인
+    const killSessionCalls = calls.filter(
+      (c) => Array.isArray(c.args) && c.args[0] === "kill-session",
+    );
+    assert.equal(killSessionCalls.length, 1, "kill-session은 1회 호출");
+
+    // 고아 프로세스 정리 호출 확인 (pipe-pane-capture + node.exe)
+    const orphanCalls = calls.filter(
+      (c) => c.file === "execSync" && typeof c.args[0] === "string" && c.args[0].includes("pipe-pane-capture"),
+    );
+    assert.ok(orphanCalls.length >= 1, "고아 pipe-pane 헬퍼 정리가 호출되어야 함");
+
+    // 순서 검증: pipe-pane 해제가 taskkill보다 먼저
+    const firstPipePaneIdx = calls.findIndex(
+      (c) => Array.isArray(c.args) && c.args[0] === "pipe-pane",
+    );
+    const firstTaskkillIdx = calls.findIndex(
+      (c) => c.file === "execSync" && typeof c.args[0] === "string" && c.args[0].includes("taskkill"),
+    );
+    assert.ok(firstPipePaneIdx < firstTaskkillIdx, "pipe-pane 해제가 taskkill보다 먼저 실행되어야 함");
+  });
+});

@@ -282,7 +282,7 @@ function refreshCaptureSnapshot(sessionName, paneNameOrTarget) {
   const paneName = pane.title || paneNameOrTarget;
   const logPath = getCaptureLogPath(sessionName, paneName);
   mkdirSync(getCaptureSessionDir(sessionName), { recursive: true });
-  const snapshot = psmuxExec(["capture-pane", "-t", pane.paneId, "-p"]);
+  const snapshot = psmuxExec(["capture-pane", "-t", pane.paneId, "-p", "-S", "-"]);
   writeFileSync(logPath, snapshot, "utf8");
   return { paneId: pane.paneId, paneName, logPath, snapshot };
 }
@@ -489,20 +489,98 @@ function killProcessTree(pid) {
 }
 
 /**
+ * 세션의 모든 pane에서 pipe-pane 캡처를 해제한다.
+ * pipe-pane을 인자 없이 호출하면 psmux가 reader 프로세스에 EOF를 보내 정상 종료시킨다.
+ * @param {string} sessionName
+ * @param {string[]} paneIds — collectSessionPanes() 결과
+ */
+function disableAllPipeCaptures(sessionName, paneIds) {
+  for (const paneId of paneIds) {
+    try {
+      psmuxExec(["pipe-pane", "-t", paneId]);
+    } catch {
+      // pane이 이미 죽었거나 pipe가 없으면 무시
+    }
+  }
+}
+
+/**
+ * 세션과 관련된 고아 pipe-pane 헬퍼 프로세스를 찾아 종료한다.
+ * pipe-pane disable 후에도 reader가 종료되지 않는 경우의 안전망.
+ * @param {string} sessionName
+ */
+function killOrphanPipeHelpers(sessionName) {
+  if (!IS_WINDOWS) return;
+  const safeSession = sanitizePathPart(sessionName);
+  try {
+    const output = childProcess.execSync(
+      `powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'pipe-pane-capture' -and $_.CommandLine -match '${safeSession}' } | Select-Object -ExpandProperty ProcessId"`,
+      { encoding: "utf8", timeout: 8000, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const pids = output.split(/\r?\n/).map((l) => Number.parseInt(l.trim(), 10)).filter((p) => Number.isFinite(p) && p > 0);
+    for (const pid of pids) {
+      killProcessTree(pid);
+    }
+  } catch {
+    // WMI 조회 실패 — 무시
+  }
+}
+
+/**
+ * 세션이 spawn한 CLI(codex/gemini)의 고아 MCP 서버 프로세스를 찾아 종료한다.
+ * headless 워커가 codex/gemini를 실행하면 MCP 서버(node.exe)가 자식으로 생성되는데,
+ * 부모가 죽어도 Windows에서는 자식이 자동 종료되지 않아 고아가 된다.
+ * @param {string} sessionName
+ */
+function killOrphanMcpProcesses(sessionName) {
+  if (!IS_WINDOWS) return;
+  const safeSession = sanitizePathPart(sessionName);
+  try {
+    // 세션 결과 디렉토리 패턴으로 MCP 서버 프로세스 식별
+    const output = childProcess.execSync(
+      `powershell -NoProfile -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match '${safeSession}' } | Select-Object -ExpandProperty ProcessId"`,
+      { encoding: "utf8", timeout: 8000, stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const pids = output.split(/\r?\n/).map((l) => Number.parseInt(l.trim(), 10)).filter((p) => Number.isFinite(p) && p > 0);
+    for (const pid of pids) {
+      killProcessTree(pid);
+    }
+  } catch {
+    // WMI 조회 실패 — 무시
+  }
+}
+
+/**
  * psmux 세션 종료
+ * 순서: pipe-pane 해제 → pane 프로세스 트리 정리 → 세션 종료 → 고아 정리
  * @param {string} sessionName
  */
 export function killPsmuxSession(sessionName) {
-  // Windows: pane 프로세스 트리를 먼저 정리 (MCP 서버 좀비 방지)
+  // 1. pipe-pane 캡처 해제 — reader 프로세스에 EOF 전송하여 정상 종료 유도
+  let paneIds = [];
+  try {
+    paneIds = collectSessionPanes(sessionName);
+  } catch {
+    // 세션이 이미 죽었으면 pane 목록 수집 불가 — 계속 진행
+  }
+  disableAllPipeCaptures(sessionName, paneIds);
+
+  // 2. pane 프로세스 트리 강제 종료 (MCP 서버 포함)
   const pids = collectPanePids(sessionName);
   for (const pid of pids) {
     killProcessTree(pid);
   }
+
+  // 3. psmux 세션 자체 종료
   try {
     psmuxExec(["kill-session", "-t", sessionName], { stdio: "ignore" });
   } catch {
     // 이미 종료된 세션 — 무시
   }
+
+  // 4. 고아 프로세스 정리 (pipe-pane 헬퍼 + MCP 서버)
+  killOrphanPipeHelpers(sessionName);
+  killOrphanMcpProcesses(sessionName);
 }
 
 /**
@@ -541,7 +619,7 @@ export function listPsmuxSessions() {
  */
 export function capturePsmuxPane(target, lines = 5) {
   try {
-    const full = psmuxExec(["capture-pane", "-t", target, "-p"]);
+    const full = psmuxExec(["capture-pane", "-t", target, "-p", "-S", "-"]);
     const nonEmpty = full.split("\n").filter((line) => line.trim() !== "");
     return nonEmpty.slice(-lines).join("\n");
   } catch {
@@ -696,7 +774,7 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
 
   const token = randomToken(paneName);
   const safeCommand = wrapCliForBash(commandText);
-  const wrapped = `${safeCommand}; $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit"`;
+  const wrapped = `try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
 
   sendLiteralToPane(pane.paneId, wrapped, true);
 
@@ -752,7 +830,7 @@ export async function waitForPattern(sessionName, paneNameOrTarget, pattern, tim
     try {
       if (opts.logPath) {
         // logPath 직접 지정 시 — 셸 타이틀 변경과 무관하게 올바른 파일에 기록
-        const snapshot = psmuxExec(["capture-pane", "-t", pane.paneId, "-p"]);
+        const snapshot = psmuxExec(["capture-pane", "-t", pane.paneId, "-p", "-S", "-"]);
         writeFileSync(logPath, snapshot, "utf8");
       } else {
         refreshCaptureSnapshot(sessionName, pane.paneId);
@@ -910,6 +988,9 @@ export function killWorker(sessionName, workerName) {
   }
   try {
     const { paneId, status } = getWorkerStatus(sessionName, workerName);
+
+    // pipe-pane 캡처 해제 — reader 프로세스 정상 종료 유도
+    disablePipeCapture(paneId);
 
     // pane PID 수집 → 프로세스 트리 정리 (MCP 서버 좀비 방지)
     try {

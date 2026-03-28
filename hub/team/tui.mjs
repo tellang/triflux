@@ -298,11 +298,19 @@ function countStatuses(names, workers) {
 }
 
 // ── Tier1: 상단 고정 1행 ─────────────────────────────────────────────────
+function phaseColor(phase) {
+  if (phase === "exec" || phase === "executing") return MOCHA.blue;
+  if (phase === "verify" || phase === "verifying") return MOCHA.yellow;
+  if (phase === "fix" || phase === "fixing") return MOCHA.red;
+  return FG.accent;
+}
+
 function buildTier1(names, workers, pipeline, elapsed, width, version) {
   const { ok, partial, failed, running } = countStatuses(names, workers);
+  const phase = pipeline.phase || "exec";
   const row1 = truncate(
-    `${color("▲", FG.triflux)} v${version} ${dim("│")} ${color(pipeline.phase || "exec", FG.accent)} ${dim("│")} ${elapsed}s ${dim("│")} ` +
-    `${color(`✓${ok}`, MOCHA.ok)} ${color(`◑${partial}`, MOCHA.partial)} ${color(`✗${failed}`, MOCHA.fail)} ${dim(`▶${running}`)}  ${dim("Tab/j/k:nav • f:follow • r:raw • 1-9:jump")}`,
+    `${color("▲", FG.triflux)} v${version} ${dim("│")} ${color(phase, phaseColor(phase))} ${dim("│")} ${elapsed}s ${dim("│")} ` +
+    `${color(`✓${ok}`, MOCHA.ok)} ${color(`◑${partial}`, MOCHA.partial)} ${color(`✗${failed}`, MOCHA.fail)} ${dim(`▶${running}`)}  ${color("Tab/j/k:nav • f:follow • r:raw • 1-9:jump", MOCHA.subtext)}`,
     width,
   );
   return [row1];
@@ -348,16 +356,24 @@ function buildWorkerRail(name, st, opts = {}) {
   const sec = Number.isFinite(st._logSec) ? st._logSec : 0;
 
   // Tier2 행 1: 이름 + CLI + role
-  const selMark = selected ? (focused ? color("▶", FG.accent) : color(">", FG.triflux)) : " ";
+  const selMark = selected ? (focused ? color("▶", MOCHA.blue) : color(">", FG.triflux)) : " ";
   const hb = heartbeat(status);
   const title = truncate(
-    `${selMark} ${hb} ${color(name, FG.triflux)} ${dim("•")} ${color(cli, cliColor(cli))}${role ? ` ${dim(`(${role})`)}` : ""}`,
+    `${selMark} ${hb} ${color(name, FG.triflux)} ${color("•", MOCHA.overlay)} ${color(cli, cliColor(cli))}${role ? ` ${color(`(${role})`, MOCHA.overlay)}` : ""}`,
     innerWidth,
   );
 
-  const borderColor = focused
-    ? MOCHA.thinking
-    : fadeBorderColor(status, st._prevStatus, st._statusChangedAt);
+  // status-specific border: running→blue, completed→green, failed→red, partial→yellow
+  const statusBorderColor = (() => {
+    if (focused) return MOCHA.thinking;
+    if (selected) {
+      if (status === "running" || status === "in_progress") return MOCHA.blue;
+      if (status === "ok" || status === "completed") return MOCHA.ok;
+      if (status === "failed") return MOCHA.fail;
+      if (status === "partial") return MOCHA.yellow;
+    }
+    return fadeBorderColor(status, st._prevStatus, st._statusChangedAt);
+  })();
 
   if (compact) {
     // compact 2-line 카드
@@ -368,15 +384,15 @@ function buildWorkerRail(name, st, opts = {}) {
       innerWidth,
     );
     const verdict = sanitizeOneLine(st.handoff?.verdict || st.summary || st.snapshot, status);
-    const compactLine2 = truncate(verdict, innerWidth);
-    const framed = box([compactLine1, compactLine2], Math.max(MIN_CARD_WIDTH, width), borderColor);
+    const compactLine2 = truncate(color(verdict, MOCHA.text), innerWidth);
+    const framed = box([compactLine1, compactLine2], Math.max(MIN_CARD_WIDTH, width), statusBorderColor);
     return [framed.top, ...framed.body, framed.bot];
   }
 
   // Tier2 행 2: 상태 배지 + elapsed + tokens + conf
   const confidence = sanitizeOneLine(st.handoff?.confidence || st.confidence, "n/a");
   const statusLine = truncate(
-    `${statusBadge(status)} ${dim("•")} ${sec}s ${dim("•")} tok ${formatTokens(st.tokens)} ${dim("•")} conf ${confidence}`,
+    `${statusBadge(status)} ${color("•", MOCHA.overlay)} ${color(`${sec}s`, MOCHA.subtext)} ${color("•", MOCHA.overlay)} ${color(`tok ${formatTokens(st.tokens)}`, MOCHA.subtext)} ${color("•", MOCHA.overlay)} ${color(`conf ${confidence}`, MOCHA.subtext)}`,
     innerWidth,
   );
 
@@ -385,7 +401,7 @@ function buildWorkerRail(name, st, opts = {}) {
   const percent = Math.round(progress * 100);
   const barWidth = clamp(Math.floor(innerWidth * 0.3), 8, 16);
   const progressLine = truncate(
-    `${progressBar(percent, barWidth)} ${String(percent).padStart(3)}%`,
+    `${progressBar(percent, barWidth)} ${color(`${String(percent).padStart(3)}%`, MOCHA.text)}`,
     innerWidth,
   );
 
@@ -399,12 +415,12 @@ function buildWorkerRail(name, st, opts = {}) {
     title,
     statusLine,
     progressLine,
-    truncate(`${dim("verdict")} ${color(verdict, verdictClr)}`, innerWidth),
-    truncate(`${dim("findings")} ${color(findings, MOCHA.partial)}`, innerWidth),
-    truncate(`${dim("files")} ${color(files, FG.muted)}`, innerWidth),
+    truncate(`${color("verdict", MOCHA.overlay)} ${color(verdict, verdictClr)}`, innerWidth),
+    truncate(`${color("findings", MOCHA.overlay)} ${color(findings, MOCHA.subtext)}`, innerWidth),
+    truncate(`${color("files", MOCHA.overlay)} ${color(files, MOCHA.subtext)}`, innerWidth),
   ];
 
-  const framed = box(lines, Math.max(MIN_CARD_WIDTH, width), borderColor);
+  const framed = box(lines, Math.max(MIN_CARD_WIDTH, width), statusBorderColor);
   return [framed.top, ...framed.body, framed.bot];
 }
 
@@ -426,18 +442,18 @@ function buildFocusPane(name, st, opts = {}) {
   const files = sanitizeFiles(st.handoff?.files_changed || st.files_changed);
   const status = runtimeStatus(st);
 
-  // Tab bar: 현재는 Log 활성 (향후 Tab 키로 전환 예정)
-  const tabLog = color("[Log]", FG.accent);
-  const tabDetail = dim("[Detail]");
-  const tabFiles = dim(`[Files ${files.length}]`);
+  // Tab bar: 활성 탭은 MOCHA.blue + bold, 비활성은 MOCHA.overlay
+  const tabLog = `${MOCHA.blue}${bold("[Log]")}`;
+  const tabDetail = color("[Detail]", MOCHA.overlay);
+  const tabFiles = color(`[Files ${files.length}]`, MOCHA.overlay);
   const tabBar = truncate(`${tabLog} ${tabDetail} ${tabFiles}`, innerWidth);
 
   const stickyLines = [
-    truncate(`${color(name, FG.triflux)} ${dim("•")} ${statusBadge(status)}`, innerWidth),
+    truncate(`${color(name, FG.triflux)} ${color("•", MOCHA.overlay)} ${statusBadge(status)}`, innerWidth),
     tabBar,
-    truncate(`${dim("verdict")}  ${color(verdict, statusColor(status))}`, innerWidth),
-    truncate(`${dim("conf")}     ${confidence}`, innerWidth),
-    dim("─").repeat(Math.max(4, innerWidth)),
+    truncate(`${color("verdict", MOCHA.overlay)}  ${color(verdict, statusColor(status))}`, innerWidth),
+    truncate(`${color("conf", MOCHA.overlay)}     ${color(confidence, MOCHA.text)}`, innerWidth),
+    color("─", MOCHA.surface0).repeat(Math.max(4, innerWidth)),
   ];
 
   // 본문 스크롤 영역
@@ -454,10 +470,10 @@ function buildFocusPane(name, st, opts = {}) {
   const bodySlice = allBodyLines.slice(startIdx, startIdx + bodyAvail);
   if (bodySlice.length === 0) bodySlice.push(dim("no detail available"));
 
-  // scroll indicator
+  // scroll indicator — MOCHA.overlay for position
   const scrollInfo = allBodyLines.length > bodyAvail
-    ? dim(`${startIdx + 1}-${Math.min(startIdx + bodyAvail, allBodyLines.length)}/${allBodyLines.length}`)
-    : dim(`${allBodyLines.length} lines`);
+    ? color(`${startIdx + 1}-${Math.min(startIdx + bodyAvail, allBodyLines.length)}/${allBodyLines.length}`, MOCHA.overlay)
+    : color(`${allBodyLines.length} lines`, MOCHA.overlay);
 
   const contentLines = [
     ...stickyLines,
@@ -465,7 +481,8 @@ function buildFocusPane(name, st, opts = {}) {
     truncate(scrollInfo, innerWidth),
   ];
 
-  const borderColor = focused ? MOCHA.thinking : MOCHA.border;
+  // focused pane gets bright border, unfocused gets dim
+  const borderColor = focused ? MOCHA.blue : MOCHA.border;
   const framed = box(contentLines, Math.max(MIN_CARD_WIDTH, width), borderColor);
   return [framed.top, ...framed.body, framed.bot];
 }
@@ -480,8 +497,8 @@ function buildSummaryBar(names, workers, selectedWorker, pipeline, width, versio
     const label = `${selectedWorker === name ? ">" : " "} ${idx + 1}.${name} ${status} ${Math.round(progress * 100)}%`;
     return padRight(truncate(label, maxChipWidth), maxChipWidth);
   });
-  const chipsLine = truncate(chips.join(dim(" │ ")), width - 4);
-  const keysLine = truncate(dim("Tab:focus • j/k:scroll • f:follow • r:raw • 1-9:jump"), width - 4);
+  const chipsLine = truncate(chips.join(color(" │ ", MOCHA.overlay)), width - 4);
+  const keysLine = truncate(color("Tab:focus • j/k:scroll • f:follow • r:raw • 1-9:jump", MOCHA.subtext), width - 4);
   const framed = box([chipsLine, keysLine], width);
   return [framed.top, ...framed.body, framed.bot];
 }
@@ -787,7 +804,7 @@ export function createLogDashboard(opts = {}) {
 
     // 하단 상태바
     const statusBar = truncate(
-      dim(`  세션 종료됨 — 아무 키나 누르면 닫힘`),
+      color(`  세션 종료됨 — 아무 키나 누르면 닫힘`, MOCHA.subtext),
       totalCols,
     );
 

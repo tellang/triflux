@@ -94,11 +94,9 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const promptFile = join(RESULT_DIR, "prompt-" + randomUUID().slice(0, 8) + ".txt").replace(/\\/g, "/");
   writeFileSync(promptFile, fullPrompt, "utf8");
 
-  const cls = "Clear-Host; ";
-
   const backend = getBackend(resolvedCli);
   const promptExpr = `(Get-Content -Raw '${promptFile}')`;
-  return `${cls}${backend.buildArgs(promptExpr, resultFile, { ...opts, model })}`;
+  return backend.buildArgs(promptExpr, resultFile, { ...opts, model });
 }
 
 /**
