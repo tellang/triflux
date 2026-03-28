@@ -489,6 +489,18 @@ function applyAgentTeams(s) {
 }
 
 /**
+ * Remote Control 자동 활성화.
+ * 모든 세션에서 remote control URL을 자동 발급하도록 설정.
+ * @param {object} s - settings 객체 (직접 변경)
+ * @returns {boolean} 변경 여부
+ */
+function applyRemoteControl(s) {
+  if (s.remoteControlAtStartup === true) return false;
+  s.remoteControlAtStartup = true;
+  return true;
+}
+
+/**
  * SessionStart + PreToolUse 훅 섹션 적용.
  * @param {object} s - settings 객체 (직접 변경)
  * @returns {boolean} 변경 여부
@@ -611,6 +623,7 @@ if (existsSync(settingsPath)) {
 let settingsChanged = false;
 try { if (applyStatusLine(settings)) { settingsChanged = true; synced++; } } catch {}
 try { if (applyAgentTeams(settings)) { settingsChanged = true; synced++; } } catch {}
+try { if (applyRemoteControl(settings)) { settingsChanged = true; synced++; } } catch {}
 try { if (applyHooks(settings)) { settingsChanged = true; synced++; } } catch {}
 
 // 1회 쓰기
