@@ -35,6 +35,49 @@
 
 ---
 
+## Quick Start
+
+### 1. Install
+
+```bash
+npm install -g triflux
+```
+
+### 2. Setup
+
+```bash
+tfx setup
+```
+
+### 3. Use
+
+```bash
+# Light — single model, fast execution
+/tfx-research "React 19 Server Actions best practices"
+/tfx-review
+/tfx-plan "add JWT auth middleware"
+
+# Deep — 3-party consensus for critical work
+/tfx-deep-research "microservice architecture comparison 2026"
+/tfx-deep-review
+/tfx-deep-plan "migrate REST to GraphQL"
+
+# Debate — get 3 independent opinions
+/tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
+
+# Persistence — don't stop until done
+/tfx-ralph "implement full auth flow with tests"
+
+# Team — Multi-CLI parallel orchestration
+/tfx-multi "refactor auth + update UI + add tests"
+
+# Remote — spawn Claude sessions on other machines
+/tfx-remote-setup                                # interactive host wizard (Tailscale + SSH)
+/tfx-remote-spawn "run security review on ultra4" # spawn on remote host
+```
+
+---
+
 ## What's New in v8
 
 **triflux v8** introduces **Tri-CLI Consensus Intelligence** — a fundamentally new approach where Claude, Codex, and Gemini independently analyze, then cross-validate through structured debate. Every Deep skill guarantees anti-herding (no bias contamination) and consensus-gated output.

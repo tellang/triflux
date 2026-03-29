@@ -35,6 +35,49 @@
 
 ---
 
+## 빠른 시작
+
+### 1. 설치
+
+```bash
+npm install -g triflux
+```
+
+### 2. 설정
+
+```bash
+tfx setup
+```
+
+### 3. 사용법
+
+```bash
+# Light — 단일 모델로 빠르게 실행
+/tfx-research "React 19 Server Actions best practices"
+/tfx-review
+/tfx-plan "add JWT auth middleware"
+
+# Deep — 중요한 작업에 3자 합의 적용
+/tfx-deep-research "microservice architecture comparison 2026"
+/tfx-deep-review
+/tfx-deep-plan "migrate REST to GraphQL"
+
+# Debate — 3개의 독립적인 의견을 확보
+/tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
+
+# Persistence — 완료될 때까지 멈추지 않음
+/tfx-ralph "implement full auth flow with tests"
+
+# Team — Multi-CLI 병렬 오케스트레이션
+/tfx-multi "refactor auth + update UI + add tests"
+
+# Remote — 원격 머신에 Claude 세션 생성
+/tfx-remote-setup                              # 인터랙티브 호스트 설정 위저드 (Tailscale + SSH)
+/tfx-remote-spawn "울트라에서 보안 리뷰 해"      # 원격 호스트에서 세션 실행
+```
+
+---
+
 ## v8의 새로운 기능
 
 **triflux v8**은 **Tri-CLI Consensus Intelligence**를 도입합니다. Claude, Codex, Gemini가 각각 독립적으로 분석한 뒤, 구조화된 토론을 거쳐 교차 검증하는 근본적으로 새로운 접근 방식입니다. 모든 Deep 스킬은 Anti-Herding(편향 오염 방지)과 Consensus Gate를 통한 출력 보장을 제공합니다.
