@@ -20,6 +20,10 @@ docs/*
 # 리서치 (대외비 — 클론 레포, 분석 보고서, 설계문서)
 research/
 
+# 프로젝트 인덱스 (세션별 자동 생성)
+PROJECT_INDEX.md
+PROJECT_INDEX.json
+
 # 내부 스킬 (OMC 전용)
 skills/auto-verify/
 skills/manage-skills/
