@@ -15,122 +15,195 @@ argument-hint: "<완료할 작업 설명>"
 > OMC ralph 오마주. 핵심 차별점: 검증자가 단일 agent가 아니라 **3-CLI consensus**.
 > The boulder never stops — but it stops being wrong.
 
-## 핵심 원리
+## HARD RULES
 
-OMC ralph는 단일 verifier(code-reviewer 또는 critic)가 검증한다.
-tfx-persist는 Claude/Codex/Gemini **3자 독립 검증**으로 편향 없는 완료 판단을 보장한다.
+> headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
-## 워크플로우
+1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+2. Codex·Gemini 검증자 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+3. Claude 검증자 → `Agent(run_in_background=true)`
+4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
+5. 루프 종료 조건: 모든 criteria 3자 검증 통과 + 통합 검증 Consensus >= 70
+
+## MODEL ROLES
+
+| 단계 | 역할 | 담당 |
+|------|------|------|
+| Goal Definition | 완료 기준 추출 및 사용자 확인 | Claude (직접 실행) |
+| 구현 (단순) | 코드 작성, 파일 수정, 테스트 | Codex (tfx headless) |
+| 구현 (복잡) | 태스크 분해 후 병렬 실행 | Codex + Gemini (tfx headless) |
+| 기준별 검증 — Claude | 코드 읽기 + 논리 검증 | Claude (Agent, background) |
+| 기준별 검증 — Codex | 코드 실행 + 테스트 검증 | Codex (tfx headless) |
+| 기준별 검증 — Gemini | 코드 리뷰 + 품질 검증 | Gemini (tfx headless) |
+| 통합 검증 | 전체 criteria 최종 합의 | Claude + Codex + Gemini (동시) |
+| Deslop Pass | 슬롭 감지 및 제거 | Codex + Gemini (tfx headless) |
+
+## EXECUTION STEPS
 
 ### Step 1: Goal Definition
 
-```
-사용자 요청에서 완료 기준(acceptance criteria)을 추출:
-{
-  "goal": "JWT 인증 미들웨어 구현",
-  "criteria": [
-    "로그인 엔드포인트 /api/auth/login 작동",
-    "JWT 토큰 발급/검증 로직",
-    "보호된 라우트에 미들웨어 적용",
-    "refresh 토큰 지원",
-    "테스트 커버리지 80%+"
-  ]
-}
-```
+Claude가 직접 실행한다.
 
-자동 추출된 기준을 AskUserQuestion으로 사용자에게 확인받는다:
-
-```
-AskUserQuestion:
-  "다음 완료 기준이 맞나요?"
-  {추출된 criteria 목록 표시}
-  1. 맞습니다 — 진행
-  2. 수정 필요 — 기준 편집
-  3. 추가 필요 — 기준 추가
-```
-
-- 1번 선택 → Step 2로 진행
-- 2번 선택 → 사용자가 수정할 기준 번호와 내용을 입력, 반영 후 재확인
-- 3번 선택 → 사용자가 추가 기준을 입력, 반영 후 재확인
+1. 사용자 요청에서 완료 기준(acceptance criteria)을 추출한다.
+2. AskUserQuestion으로 추출된 기준을 사용자에게 확인받는다:
+   - "맞습니다 — 진행" → Step 2로 이동
+   - "수정 필요" → 해당 기준 번호와 내용 입력 받아 반영 후 재확인
+   - "추가 필요" → 추가 기준 입력 받아 반영 후 재확인
+3. 확정된 `{criteria_list}`를 루프 전체에서 사용한다.
 
 ### Step 2: Execution Loop
 
+**모든 criteria가 검증 통과할 때까지 반복한다.**
+
+#### 2a. 현재 상태 평가
+
+미완료 criteria를 식별하고 다음 구현 작업을 결정한다.
+
+#### 2b. 구현 실행
+
+단순 작업 (파일 수정, 단일 모듈):
 ```
-WHILE (NOT all criteria verified):
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:{미완료_criterion}을 충족하도록 구현하라. 구체적 작업: {task_description}. TDD 필요 시 테스트 먼저 작성(RED) → 구현(GREEN) 순서로 진행하라.:implementer' \
+  --timeout 600")
+```
 
-  2a. 현재 상태 평가
-      - 어떤 기준이 미완료인지 확인
-      - 다음 작업 결정
+복잡 작업 (여러 파일, 연동 모듈):
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:{서브태스크_A} 구현하라. 세부사항: {spec_A}:implementer' \
+  --assign 'codex:{서브태스크_B} 구현하라. 세부사항: {spec_B}:implementer' \
+  --assign 'gemini:{문서/UI_항목} 작성하라. 세부사항: {spec_C}:writer' \
+  --timeout 600")
+```
 
-  2b. 구현 실행
-      - 단순 작업 → Codex exec 직접 실행
-      - 복잡 작업 → tfx-auto로 분해 후 실행
-      - 파일 수정, 테스트 작성, 빌드 등
+#### 2c. 3자 독립 검증
 
-  2c. 3자 독립 검증 (매 기준 완료 시)
-      Claude: "다음 기준이 충족되었는가? 코드를 직접 읽고 판단하라: {criterion}"
-      Codex:  "다음 기준 충족 여부를 코드 실행/테스트로 검증하라: {criterion}"
-      Gemini: "다음 기준 충족 여부를 코드 리뷰로 판단하라: {criterion}"
+**구현 완료 후, 아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
 
-      결과: 2/3 이상 "통과" → 기준 확정
-             1/3만 "통과" → 재작업 필요
-             0/3 "통과" → 즉시 재작업
+**Claude 검증 (Agent):**
+```
+Agent(
+  subagent_type="oh-my-claudecode:verifier",
+  model="sonnet",
+  run_in_background=true,
+  prompt="다음 기준이 충족되었는지 코드를 직접 읽고 판단하라.
+기준: {current_criterion}
+코드를 읽고 논리적으로 충족 여부를 판단하라.
+결과: PASS 또는 FAIL + 근거 1문장"
+)
+```
 
-  2d. 진행 보고
-      "🪨 Ralph: {완료}/{전체} 기준 충족. 현재: {작업 중인 것}. 다음: {예정}"
+**Codex + Gemini 검증 (Bash — 동시에 위 Agent와 같은 응답에서 호출):**
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:다음 기준 충족 여부를 코드 실행/테스트로 검증하라. 기준: {current_criterion}. 실제 테스트를 실행하여 결과를 확인하라. 결과: PASS 또는 FAIL + 근거 1문장:verifier' \
+  --assign 'gemini:다음 기준 충족 여부를 코드 리뷰로 판단하라. 기준: {current_criterion}. 코드 품질, 엣지 케이스, 완전성을 확인하라. 결과: PASS 또는 FAIL + 근거 1문장:verifier' \
+  --timeout 600")
+```
 
-END WHILE
+**검증 판정:**
+- 2/3 이상 PASS → 해당 기준 확정, 다음 기준으로 이동
+- 1/3만 PASS → 재작업 필요, 실패 근거를 구현 프롬프트에 포함하여 2b 재실행
+- 0/3 PASS → 즉시 재작업, 실패 근거 전달
+
+#### 2d. 진행 보고
+
+각 기준 검증 후 보고한다:
+```
+[tfx-persist] {완료수}/{전체수} 기준 충족.
+완료: {완료된_criteria_목록}
+현재: {작업_중인_criterion}
+다음: {예정_criterion}
 ```
 
 ### Step 3: Final Verification
 
-모든 기준이 개별 검증을 통과한 후, 전체 통합 검증:
+모든 기준이 개별 검증을 통과한 후, 전체 통합 검증을 실행한다.
 
-```
-3자 독립 통합 검증:
-  "모든 acceptance criteria가 충족되었는지 전체적으로 검증하라.
-   기준 목록: {criteria}
-   코드를 직접 읽고, 테스트를 실행하고, 회귀 여부를 확인하라."
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
 
-Consensus Score >= 70 → 완료 선언
-Consensus Score < 70 → 미달 항목 재작업 후 재검증
+**Claude 통합 검증 (Agent):**
 ```
+Agent(
+  subagent_type="oh-my-claudecode:verifier",
+  model="opus",
+  run_in_background=true,
+  prompt="모든 acceptance criteria가 충족되었는지 전체적으로 검증하라.
+기준 목록: {criteria_list}
+코드를 직접 읽고, 회귀 여부를 확인하고, 기준 간 상호 의존성을 검증하라.
+JSON 형식: { criteria_results: [{criterion, pass, reason}], regression_check, overall_pass }"
+)
+```
+
+**Codex + Gemini 통합 검증 (Bash — 동시에 위 Agent와 같은 응답에서 호출):**
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:모든 acceptance criteria 충족 여부를 테스트 실행으로 통합 검증하라. 기준 목록: {criteria_list}. 전체 테스트 스위트를 실행하고 회귀 여부를 확인하라. JSON 형식: { criteria_results, test_results, overall_pass }:verifier' \
+  --assign 'gemini:모든 acceptance criteria 충족 여부를 코드 리뷰로 통합 검증하라. 기준 목록: {criteria_list}. 전체 변경사항을 검토하고 누락, 불완전한 구현, 엣지 케이스를 확인하라. JSON 형식: { criteria_results, edge_cases, overall_pass }:verifier' \
+  --timeout 600")
+```
+
+**통합 판정:**
+- Consensus Score >= 70 → Step 4(Deslop) 또는 Step 5(완료) 진행
+- Consensus Score < 70 → 미달 항목을 추출하여 Step 2 루프 재진입
 
 ### Step 4: Deslop Pass (선택적)
 
-검증 통과 후, 변경된 파일에 대해 슬롭 제거:
+검증 통과 후 변경된 파일에 슬롭이 있으면 제거한다.
+
 ```
-변경된 파일 목록 → 3자 독립 슬롭 감지 → 합의된 슬롭만 제거 → 회귀 검증
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:다음 파일에서 AI가 생성한 불필요 코드(슬롭)를 감지하라. 파일: {changed_files}. 중복 코드, 불필요 추상화, 과잉 에러 핸들링, 사용되지 않는 임포트를 보고하라. 수정하지 말고 목록만 반환하라.:critic' \
+  --assign 'gemini:다음 파일에서 AI가 생성한 불필요 코드(슬롭)를 감지하라. 파일: {changed_files}. 중복 코드, 불필요 추상화, 과잉 에러 핸들링, 사용되지 않는 임포트를 보고하라. 수정하지 말고 목록만 반환하라.:critic' \
+  --timeout 600")
 ```
+
+2/3 이상 동의한 슬롭만 Codex로 제거하고, 제거 후 회귀 검증을 실행한다.
 
 ### Step 5: 완료
 
-```
-모든 기준 3자 검증 통과 + 통합 검증 통과 → 완료 보고:
-
-"🪨 Ralph 완료: {전체}/{전체} 기준 충족 (Consensus Score: {score}%)
- 변경 파일: {count}개
- 테스트: {pass}/{total} 통과
- 검증: Claude ✓ Codex ✓ Gemini ✓"
-```
-
-## Anti-Stuck 메커니즘
+모든 기준 3자 검증 통과 + 통합 검증 통과 시 완료를 보고한다.
 
 ```
-같은 기준에서 3회 연속 검증 실패 시:
-  1. 접근법 변경 시도
-  2. 변경 후에도 실패 → AskUserQuestion으로 사용자 도움 요청
-  3. 사용자 지시 받은 후 재시도
+[tfx-persist 완료] {전체}/{전체} 기준 충족
+Consensus Score: {score}%
+변경 파일: {count}개
+테스트: {pass}/{total} 통과
+검증: Claude PASS | Codex PASS | Gemini PASS
+```
+
+## ANTI-STUCK 메커니즘
+
+같은 기준에서 3회 연속 검증 실패 시 즉시 실행한다:
+
+1. 접근법을 변경하여 재시도한다 (다른 구현 전략 선택).
+2. 변경 후에도 실패하면 AskUserQuestion으로 사용자 도움을 요청한다:
+   - 실패한 기준, 3회 시도 내역, 각 실패 이유를 제시한다.
+3. 사용자 지시를 받은 후 재시도한다.
 
 같은 전체 루프가 5회 반복 시:
-  → 강제 진행 상황 보고 + 사용자 판단 요청
-```
+- 강제로 진행 상황을 보고하고 AskUserQuestion으로 사용자 판단을 요청한다.
 
-## 토큰 예산
+## ERROR RECOVERY
 
-기준당: ~8K (구현 ~3K + 3자검증 ~5K)
-전체: 기준 수 × 8K + 통합검증 15K
-예: 5개 기준 → ~55K tokens
+| 상황 | 대응 |
+|------|------|
+| tfx headless 타임아웃 | `--timeout` 900으로 올려 재시도 |
+| 검증 결과 불일치 (2자 PASS, 1자 FAIL) | FAIL 근거를 구현 프롬프트에 포함하여 재작업 |
+| 빌드 실패 | Codex에 빌드 로그 전달하여 수정 지시 |
+| 무한 루프 감지 (5회 이상) | 강제 보고 + AskUserQuestion |
+
+## TOKEN BUDGET
+
+| 항목 | 토큰 |
+|------|------|
+| 기준당 구현 | ~3K |
+| 기준당 3자 검증 | ~5K |
+| 기준당 합계 | ~8K |
+| 통합 검증 (Step 3) | ~15K |
+| Deslop Pass (선택) | ~5K |
+| **예시: 5개 기준** | **~55K** |
 
 ## 사용 예
 

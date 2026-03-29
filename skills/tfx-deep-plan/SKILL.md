@@ -11,107 +11,215 @@ triggers:
 argument-hint: "<구현할 기능 설명>"
 ---
 
-# tfx-deep-plan — Consensus Planning via Tri-CLI Debate
+# tfx-deep-plan — Tri-Model Consensus Planning
 
-> OMC ralplan 오마주. Planner + Architect + Critic 3자 반복 토론으로 합의된 계획.
+3개 모델(Opus 4.6 · GPT 5.4 · Gemini)이 독립 설계 후 교차검증하여 합의된 계획을 도출한다.
 
-## 워크플로우
+---
 
-### Round 1: 독립 계획 (Anti-Herding)
+## HARD RULES
 
+> headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
+
+1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+2. Codex·Gemini 작업은 반드시 아래 형식으로만 실행:
+   `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")`
+3. Claude 작업은 `Agent(run_in_background=true)`
+4. Step 2, Step 4에서 **Bash + Agent를 같은 메시지에서 동시 호출**하여 3개 모델 병렬 실행
+
+## MODEL ROLES
+
+| Model | Profile | 역할 | 강점 |
+|-------|---------|------|------|
+| **Claude Opus 4.6** | Agent(model="opus") | Planner | 전략적 아키텍처 비전, 리스크 통합 판단 |
+| **Codex GPT 5.4** | `--assign 'codex:...:architect'` (gpt54_xhigh) | Architect | 구현 설계, API 인터페이스, 파일 구조 |
+| **Gemini** | `--assign 'gemini:...:critic'` | Critic | 엣지케이스, 보안 위협, 테스트 전략 |
+
+---
+
+## EXECUTION — 아래 Step을 순서대로 실행하라
+
+사용자 입력을 `TASK`로 참조한다.
+
+### Step 1: 코드베이스 정찰
+
+TASK와 관련된 코드베이스를 파악한다. 결과를 `RECON`으로 기억한다.
+
+도구 호출:
 ```
-Claude Opus (Planner, Agent):
-  "소프트웨어 아키텍트로서 {feature}의 구현 계획을 수립하라.
-   태스크 분해, 순서, 의존성, 검증 방법 포함.
-   JSON: { tasks, dependencies, risks, complexity, reasoning }"
-
-> **MANDATORY: Codex/Gemini 계획 라운드는 headless dispatch로 실행**
-
-Codex (Architect) + Gemini (Critic) — Bash (background, headless dispatch):
-  Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
-    --assign 'codex:시니어 엔지니어로서 {feature}의 기술적 설계를 작성하라.
-   파일 구조, API 인터페이스, 데이터 모델, 에러 처리 포함.
-   JSON: { design, file_changes, interfaces, data_models, risks }:architect' \
-    --assign 'gemini:QA/보안 전문가로서 {feature} 구현 시 예상되는 문제를 분석하라.
-   엣지 케이스, 보안 위협, 성능 병목, 테스트 전략 포함.
-   JSON: { edge_cases, security_risks, performance_concerns, test_strategy }:critic' \
-    --timeout 600")
-```
-
-### Round 2: 교차 검토
-
-각 CLI에게 다른 두 CLI의 결과를 제시:
-
-```
-Claude에게 (Agent):
-  "Architect 설계: {codex_result}
-   Critic 우려: {gemini_result}
-   이를 반영하여 계획을 수정하라. 수용/반박 근거 포함."
-
-> **MANDATORY: Codex/Gemini 교차 검토도 headless dispatch로 실행**
-
-Codex에게 + Gemini에게 — Bash (background, headless dispatch):
-  Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
-    --assign 'codex:Planner 계획: {claude_result}
-   Critic 우려: {gemini_result}
-   설계를 수정하라.:architect' \
-    --assign 'gemini:Planner 계획: {claude_result}
-   Architect 설계: {codex_result}
-   우려 사항이 해소되었는지 판단하라. 미해소 항목 지적.:critic' \
-    --timeout 600")
+Agent(
+  subagent_type="Explore",
+  model="haiku",
+  description="codebase recon",
+  prompt="다음 기능과 관련된 코드베이스를 탐색하라: [TASK 삽입]
+  보고할 것: (1) 관련 파일/디렉토리 (2) 기존 아키텍처 패턴 (3) 주요 의존성/인터페이스. bullet point로 간결하게."
+)
 ```
 
-### Round 3: 합의 도출 (필요 시)
+### Step 2: Round 1 — 독립 설계 (Anti-Herding)
+
+3개 모델이 서로의 결과를 **보지 않고** 동시에 독립 분석한다.
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
+
+#### 2a. Claude Opus — Planner (Agent, background)
 
 ```
-Round 2 후 Consensus Score 산출:
-  >= 80 → 합의 확정
-  60-79 → Round 3 진행 (미합의 항목만)
-  < 60 → 사용자에게 주요 불일치 제시 + 방향 결정 요청
+Agent(
+  subagent_type="oh-my-claudecode:architect",
+  model="opus",
+  run_in_background=true,
+  name="planner-r1",
+  description="deep-plan R1 Planner",
+  prompt="소프트웨어 아키텍트로서 구현 계획을 수립하라.
+
+기능: [TASK 삽입]
+코드베이스: [RECON 삽입]
+
+아래 JSON으로 응답하라:
+{
+  \"vision\": \"설계 방향 1-2문장\",
+  \"tasks\": [{\"id\": \"T1\", \"title\": \"...\", \"desc\": \"...\", \"deps\": [], \"complexity\": \"low|med|high\"}],
+  \"order\": [\"T1\", \"T2\"],
+  \"risks\": [{\"id\": \"R1\", \"desc\": \"...\", \"severity\": \"critical|high|med|low\", \"mitigation\": \"...\"}],
+  \"files\": [{\"path\": \"...\", \"action\": \"create|modify|delete\", \"reason\": \"...\"}],
+  \"confidence\": 0.85,
+  \"reasoning\": \"핵심 결정 이유\"
+}"
+)
 ```
 
-### Final: 합의된 계획 출력
+#### 2b. Codex + Gemini — Architect + Critic (headless)
+
+`TASK`와 `RECON`을 프롬프트에 삽입하여 아래 Bash를 호출한다.
+프롬프트 안의 작은따옴표는 `'\''`로 이스케이프한다.
+
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:시니어 엔지니어로서 기술적 설계를 작성하라. 기능: [TASK]. 코드베이스: [RECON]. JSON 응답: {\"architecture\": \"패턴+이유\", \"components\": [{\"name\": \"\", \"responsibility\": \"\", \"interfaces\": []}], \"data_models\": [{\"name\": \"\", \"fields\": [], \"relations\": []}], \"api\": [{\"endpoint\": \"\", \"method\": \"\", \"desc\": \"\"}], \"files\": [{\"path\": \"\", \"purpose\": \"\"}], \"impl_notes\": [], \"confidence\": 0.85}:architect' \
+  --assign 'gemini:QA 보안 전문가로서 구현 리스크를 분석하라. 기능: [TASK]. 코드베이스: [RECON]. JSON 응답: {\"edge_cases\": [{\"id\": \"E1\", \"scenario\": \"\", \"impact\": \"\", \"fix\": \"\"}], \"security\": [{\"id\": \"S1\", \"threat\": \"\", \"severity\": \"critical|high|med|low\", \"mitigation\": \"\"}], \"performance\": [{\"id\": \"P1\", \"bottleneck\": \"\", \"optimization\": \"\"}], \"test_strategy\": {\"unit\": [], \"integration\": [], \"edge_case\": []}, \"missing_reqs\": [], \"risk_level\": \"low|med|high|critical\", \"confidence\": 0.85}:critic' \
+  --timeout 600")
+```
+
+### Step 3: 결과 수집
+
+- `RESULT_PLANNER`: planner-r1 Agent 결과 (SendMessage로 수신 또는 완료 알림 대기)
+- `RESULT_ARCHITECT` + `RESULT_CRITIC`: headless stdout JSON에서 각 워커 출력 추출
+
+**실패 워커 처리**: 워커가 실패하면 Claude Agent로 해당 역할을 대체 실행한다.
+
+### Step 4: Round 2 — 교차 검토
+
+각 모델에게 다른 두 모델의 Round 1 결과를 제시하고 수용/수정/반박을 요청한다.
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
+
+#### 4a. Claude Opus — 계획 수정 (Agent, background)
+
+```
+Agent(
+  subagent_type="oh-my-claudecode:critic",
+  model="opus",
+  run_in_background=true,
+  name="planner-r2",
+  description="deep-plan R2 cross-review",
+  prompt="Round 1 결과를 교차 검토하고 계획을 수정하라.
+
+네 계획: [RESULT_PLANNER 삽입]
+Architect(Codex) 설계: [RESULT_ARCHITECT 삽입]
+Critic(Gemini) 분석: [RESULT_CRITIC 삽입]
+
+각 항목에 대해:
+- ACCEPT: 수용 (이유)
+- MODIFY: 부분 수정 (원안→수정안, 이유)
+- REJECT: 반박 (근거)
+
+JSON: {\"revisions\": [{\"source\": \"codex|gemini\", \"item\": \"...\", \"action\": \"accept|modify|reject\", \"reason\": \"...\"}], \"updated_plan\": {같은 스키마}}"
+)
+```
+
+#### 4b. Codex + Gemini — 교차 검토 (headless)
+
+3개 Round 1 결과를 각 프롬프트에 삽입한다. 결과가 길면 핵심만 요약하여 삽입.
+
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:교차 검토하라. Planner 계획: [RESULT_PLANNER 요약]. 네 설계: [RESULT_ARCHITECT 요약]. Critic 분석: [RESULT_CRITIC 요약]. 각 항목 ACCEPT/MODIFY/REJECT + 이유. JSON: {\"revisions\": [...], \"updated_design\": {같은 스키마}}:architect' \
+  --assign 'gemini:교차 검토하라. Planner 계획: [RESULT_PLANNER 요약]. Architect 설계: [RESULT_ARCHITECT 요약]. 네 분석: [RESULT_CRITIC 요약]. 우려 해소 여부 판단. JSON: {\"resolved\": [...], \"still_concerned\": [...], \"new_concerns\": [...], \"updated_test_strategy\": {...}}:critic' \
+  --timeout 600")
+```
+
+### Step 5: 합의 점수 산출
+
+Round 2 결과를 모아 Claude가 직접 계산한다 (Agent 불필요):
+
+```
+모든 고유 항목에 대해:
+  동의 수 = 해당 항목에 동의한 모델 수 (ACCEPT 또는 유사 제안)
+
+  >= 2 동의 → CONSENSUS (합의)
+  == 1 동의 → DISPUTED (미합의)
+
+consensus_score = CONSENSUS / 전체_고유_항목 * 100
+
+분기:
+  >= 80% → Step 6 확정
+  60-79% → Round 3 진행 (미합의 항목만 재토론, 같은 headless 패턴)
+  < 60%  → AskUserQuestion으로 핵심 불일치 제시, 사용자 판단 요청
+```
+
+### Step 6: 합의된 계획 출력
+
+아래 형식으로 최종 결과를 출력한다:
 
 ```markdown
-## 합의된 구현 계획: {feature}
-**Consensus Score**: {score}% | **Rounds**: {count}
+## 합의된 구현 계획: [TASK]
 
-### 아키텍처 결정
-{3자 합의된 설계 방향}
+**Consensus**: {score}% | **Rounds**: {count} | **Models**: Opus 4.6 + GPT 5.4 + Gemini
 
-### 태스크 (합의됨)
-1. [ ] {태스크1} → 검증: {방법} — Planner ✓ Architect ✓ Critic ✓
-2. [ ] {태스크2} → 검증: {방법} — Planner ✓ Architect ✓ Critic: "{조건부}"
-...
+### 설계 방향
+{3자 합의된 아키텍처 결정}
 
-### 파일 변경 계획
+### 태스크
+| # | 태스크 | 복잡도 | 합의 | 비고 |
+|---|--------|--------|------|------|
+| T1 | {title} | {complexity} | P:✓ A:✓ C:✓ | {notes} |
+
+### 파일 변경
 | 파일 | 작업 | 이유 |
 |------|------|------|
-| {file} | 생성/수정 | {reason} |
+| {path} | {action} | {reason} |
 
-### 리스크 및 완화 (합의됨)
-- {리스크}: {완화} — 3/3 합의
+### 리스크 & 완화
+| 리스크 | 심각도 | 완화 | 합의 |
+|--------|--------|------|------|
+| {risk} | {severity} | {mitigation} | {n}/3 |
 
 ### 테스트 전략 (Critic 주도)
-{Gemini가 제안하고 Claude/Codex가 합의한 테스트 전략}
+{Gemini가 제안하고 나머지가 합의한 테스트 계획}
 
 ### 미합의 사항
-- {항목}: {각 CLI 입장 요약}
+| 항목 | Planner(Opus) | Architect(GPT5.4) | Critic(Gemini) |
+|------|---------------|---------------------|----------------|
+| {item} | {position} | {position} | {position} |
 ```
 
-## 토큰 예산
+---
 
-| 라운드 | 토큰 |
-|--------|------|
-| Round 1 (3x 독립) | ~12K |
-| Round 2 (3x 교차) | ~9K |
-| Round 3 (필요시) | ~6K |
-| 합의 종합 | ~3K |
-| **총합** | **~20-30K** |
+## ERROR RECOVERY
 
-## 사용 예
+| 상황 | 대응 |
+|------|------|
+| headless timeout (600s) | Claude Agent로 해당 역할 대체 실행 |
+| Codex 워커 실패 | `Agent(subagent_type="oh-my-claudecode:architect", model="opus")` 대체 |
+| Gemini 워커 실패 | `Agent(subagent_type="oh-my-claudecode:critic", model="sonnet")` 대체 |
+| consensus < 60% | AskUserQuestion → 사용자 방향 결정 후 해당 방향으로 확정 |
+| 프롬프트 quoting 오류 | 작은따옴표 → `'\''` 이스케이프. 줄바꿈 → 공백 치환 |
 
-```
-/tfx-deep-plan "마이크로서비스 간 이벤트 기반 통신 도입"
-/tfx-deep-plan "기존 REST API를 GraphQL로 점진적 마이그레이션"
-```
+## TOKEN BUDGET
+
+| Phase | Tokens |
+|-------|--------|
+| Step 1: Recon (Haiku) | ~2K |
+| Step 2: Round 1 (3 parallel) | ~15K |
+| Step 4: Round 2 (3 parallel) | ~12K |
+| Step 5-6: Consensus + Output | ~3K |
+| **Total** | **~25-32K** |

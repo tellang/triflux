@@ -14,132 +14,135 @@ argument-hint: "<구현할 기능 전체 설명>"
 > 5-Phase 파이프라인: Expansion → Planning → Execution → QA → Validation.
 > OMC autopilot + Superpowers TDD + MetaGPT SOP 영감. 처음부터 끝까지 자율 실행.
 
-## 핵심 원리
+## HARD RULES
 
-단순 autopilot은 "구현 → 검증" 2단계. Deep autopilot은 **계획 단계부터 3자 합의**, **구현은 분업**, **검증은 3자 독립 리뷰** — 전체 소프트웨어 개발 SOP를 자동화한다.
+> headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
-## 용도
+1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+2. Codex·Gemini 워커 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+3. Claude 워커 → `Agent(run_in_background=true)`
+4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
-- 신규 기능 전체 구현 (설계 → 코드 → 테스트 → 검증)
-- 대규모 리팩터링
-- 복잡한 버그 수정 (재현 → 분석 → 수정 → 회귀 검증)
-- "처음부터 끝까지 알아서 해" 류의 복합 요청
+## MODEL ROLES
 
-## 워크플로우
+| Phase | 역할 | 담당 |
+|-------|------|------|
+| Phase 1: Expansion | 아키텍트 — 요구사항 분석, acceptance criteria 도출 | Claude Opus (Agent) |
+| Phase 2: Planning | 플래너 — 태스크 분해, TDD 전략 | Claude Opus (Agent, background) |
+| Phase 2: Planning | 아키텍트 — 기술 설계, 파일 구조, API 인터페이스 | Codex (tfx headless) |
+| Phase 2: Planning | 크리틱 — 리스크 분석, 엣지 케이스, 보안 | Gemini (tfx headless) |
+| Phase 3: Execution | 구현자 — 코드 작성, TDD RED→GREEN→REFACTOR | Codex (tfx headless) |
+| Phase 3: Execution | 문서/UI 작성자 | Gemini (tfx headless) |
+| Phase 4: QA | 기능 검증자 — acceptance criteria 충족 여부 | Claude (Agent, background) |
+| Phase 4: QA | 보안/성능 검증자 — OWASP, 병목, 에러 핸들링 | Codex (tfx headless) |
+| Phase 4: QA | UX/접근성 검증자 — 반응형, DX, 문서화 | Gemini (tfx headless) |
+| Phase 5: Validation | 합의 판정 — Consensus Score 계산 및 완료 결정 | Claude (직접 판단) |
 
-### Phase 1: Expansion (Claude Opus)
+## EXECUTION STEPS
 
-요구사항을 분석하고 구현 범위를 확장한다:
+### Phase 1: Expansion
 
+**Claude가 직접 실행한다.** Agent 호출 없이 Claude 자신이 아키텍트 역할을 수행한다.
+
+1. 사용자 요청에서 구현 범위, 영향 파일, 엣지 케이스, 암묵적 요구사항을 분석한다.
+2. 검증 가능한 acceptance criteria 목록을 도출한다.
+3. 모호한 점이 있으면 AskUserQuestion으로 사용자에게 확인한다.
+4. 출력: `{expanded_requirements}`, `{acceptance_criteria}` (이후 Phase에서 사용)
+
+### Phase 2: Planning
+
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
+
+**Step 2-A: Claude Planner (Agent)**
 ```
-Claude Opus:
-  "소프트웨어 아키텍트로서 다음 요구사항을 분석하라:
-   요구사항: {user_request}
-   프로젝트 컨텍스트: {context from PROJECT_INDEX.md}
-
-   출력:
-   1. 요구사항 해석 및 범위 정의
-   2. 영향 받는 파일/모듈 목록
-   3. 엣지 케이스 및 고려사항
-   4. 암묵적 요구사항 (사용자가 언급하지 않았지만 필요한 것)
-   5. acceptance criteria 목록 (검증 가능한 형태)"
-```
-
-모호한 점이 있으면 AskUserQuestion으로 사용자 확인.
-
-### Phase 2: Planning (3자 합의)
-
-**3개 CLI가 동시에, 상호 결과를 보지 않고 독립 계획 수립.**
-
-```
-Claude Opus (Planner, background):
-  "다음 기능의 구현 계획을 수립하라:
-   기능: {expanded_requirements}
-   태스크 분해, 순서, 의존성, TDD 전략 포함.
-   JSON: { tasks, order, dependencies, tdd_strategy, risks }"
-
-> **MANDATORY: Codex/Gemini 계획 라운드는 headless dispatch로 실행**
-
-CLI 워커 headless dispatch (Bash, background):
-  Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
-    --assign 'codex:시니어 엔지니어로서 기술적 설계를 작성하라:
-   기능: {expanded_requirements}
-   파일 구조, API 인터페이스, 데이터 모델 포함.
-   JSON: { design, file_changes, interfaces, test_plan }:architect' \
-    --assign 'gemini:QA 전문가로서 구현 계획의 리스크를 분석하라:
-   기능: {expanded_requirements}
-   엣지 케이스, 보안, 성능, 접근성 우려 포함.
-   JSON: { edge_cases, security_risks, performance, accessibility, test_cases }:critic' \
-    --timeout 600")
+Agent(
+  subagent_type="oh-my-claudecode:planner",
+  model="opus",
+  run_in_background=true,
+  prompt="다음 기능의 구현 계획을 수립하라.
+기능: {expanded_requirements}
+태스크 분해, 실행 순서, 의존성, TDD 전략을 포함하라.
+JSON 형식으로 출력하라: { tasks, order, dependencies, tdd_strategy, risks }"
+)
 ```
 
-3개 결과를 tfx-consensus 프로토콜로 합의 도출:
+**Step 2-B: Codex Architect + Gemini Critic (Bash — 동시에 위 Agent와 같은 응답에서 호출)**
 ```
-Consensus Score >= 70 → Phase 3 진행
-Consensus Score < 70 → Round 2 교차검토 → 재합의
-Round 2 후에도 < 60 → 사용자에게 불일치 제시 + 방향 결정 요청
-```
-
-### Phase 3: Execution (Codex + Gemini 분업)
-
-합의된 계획에 따라 태스크를 병렬 실행:
-
-```
-태스크 라우팅:
-  코드 구현/수정 → Codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check
-  테스트 작성 → Codex (TDD: 테스트 먼저 → RED 확인 → 구현 → GREEN)
-  UI/문서 → Gemini -y -p
-
-실행 순서:
-  1. 테스트 먼저 작성 (TDD RED phase)
-  2. 구현 코드 작성 (TDD GREEN phase)
-  3. 리팩터링 (TDD REFACTOR phase)
-  4. 통합 테스트 실행
-
-병렬 가능 태스크는 동시 실행:
-  독립 모듈 A (Codex pane 1) | 독립 모듈 B (Codex pane 2) | 문서 (Gemini)
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:시니어 엔지니어로서 다음 기능의 기술적 설계를 작성하라. 기능: {expanded_requirements}. 파일 구조, API 인터페이스, 데이터 모델을 포함하라. JSON 형식: { design, file_changes, interfaces, test_plan }:architect' \
+  --assign 'gemini:QA 전문가로서 다음 기능 구현의 리스크를 분석하라. 기능: {expanded_requirements}. 엣지 케이스, 보안, 성능, 접근성 우려를 포함하라. JSON 형식: { edge_cases, security_risks, performance, accessibility, test_cases }:critic' \
+  --timeout 600")
 ```
 
-각 태스크 완료 시 단순 검증 (테스트 통과 여부) 확인 후 다음 진행.
+**합의 판정:**
+- Consensus Score >= 70 → Phase 3 진행
+- Consensus Score < 70 → 3자 결과를 교차 공유 후 Round 2 재합의
+- Round 2 후에도 < 60 → AskUserQuestion으로 불일치 항목 제시 + 방향 결정 요청
 
-### Phase 4: QA (3자 독립 리뷰)
+### Phase 3: Execution
 
-**전체 변경사항에 대해 3개 CLI가 독립 리뷰한다.**
+태스크를 라우팅 규칙에 따라 병렬 실행한다. 독립 태스크는 같은 응답에서 동시 호출한다.
 
-```
-Claude (기능 + 엣지케이스, background):
-  "다음 변경사항이 acceptance criteria를 충족하는지 검증하라:
-   criteria: {acceptance_criteria}
-   변경 파일: {changed_files}
-   각 criterion별 PASS/FAIL + 근거.
-   엣지 케이스 테스트 시나리오 제안.
-   JSON: { criteria_results, edge_case_findings, overall_pass }"
+**라우팅 규칙:**
+- 코드 구현/수정/테스트 작성 → Codex (tfx headless)
+- UI/문서 → Gemini (tfx headless)
 
-> **MANDATORY: Codex/Gemini QA 리뷰는 headless dispatch로 실행**
+**TDD 실행 순서 (Codex에 전달하는 프롬프트에 명시):**
+1. 테스트 먼저 작성 (RED)
+2. 테스트 실행하여 실패 확인
+3. 구현 코드 작성 (GREEN)
+4. 테스트 통과 확인
+5. 리팩터링 (REFACTOR)
 
-CLI 워커 headless dispatch (Bash, background):
-  Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
-    --assign 'codex:보안/성능 관점에서 변경사항을 리뷰하라:
-   OWASP Top 10, 성능 병목, 에러 핸들링, 리소스 누수 확인.
-   JSON: { security_findings, performance_findings, overall_pass }:verifier' \
-    --assign 'gemini:UX/접근성 관점에서 변경사항을 리뷰하라:
-   UI 변경 있으면: 접근성, 반응형, 사용성.
-   API 변경 있으면: DX, 문서화, 일관성.
-   JSON: { ux_findings, accessibility_findings, overall_pass }:verifier' \
-    --timeout 600")
-```
+**병렬 실행 예시 (독립 태스크 A + B + 문서 동시 실행):**
 
-### Phase 5: Validation (Consensus >= 70)
-
-Phase 4 결과에 tfx-consensus 프로토콜 적용:
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
 
 ```
-Consensus 판정:
-  Score >= 70 + Critical 0건 → 완료 확정
-  Score >= 70 + Critical 존재 → Critical만 수정 후 재검증
-  Score < 70 → 미합의 항목 수정 → Phase 4 재실행 (최대 2회)
-  2회 재실행 후에도 < 70 → 사용자에게 보고 + 판단 요청
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:TDD로 {모듈_A}를 구현하라. 테스트 먼저 작성(RED), 구현(GREEN), 리팩터링(REFACTOR) 순서로 진행하라. 계획: {task_A_spec}:implementer' \
+  --assign 'codex:TDD로 {모듈_B}를 구현하라. 테스트 먼저 작성(RED), 구현(GREEN), 리팩터링(REFACTOR) 순서로 진행하라. 계획: {task_B_spec}:implementer' \
+  --assign 'gemini:{문서_항목}을 작성하라. 변경된 API 인터페이스: {interfaces}:writer' \
+  --timeout 600")
 ```
+
+각 태스크 완료 시 테스트 통과 여부를 확인하고 다음 태스크로 진행한다.
+
+### Phase 4: QA
+
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
+
+**Step 4-A: Claude 기능 검증 (Agent)**
+```
+Agent(
+  subagent_type="oh-my-claudecode:verifier",
+  model="opus",
+  run_in_background=true,
+  prompt="다음 변경사항이 acceptance criteria를 충족하는지 검증하라.
+criteria: {acceptance_criteria}
+변경 파일: {changed_files}
+각 criterion별 PASS/FAIL과 근거를 제시하라.
+엣지 케이스 테스트 시나리오를 제안하라.
+JSON 형식: { criteria_results, edge_case_findings, overall_pass }"
+)
+```
+
+**Step 4-B: Codex 보안/성능 + Gemini UX/접근성 (Bash — 동시에 위 Agent와 같은 응답에서 호출)**
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:보안/성능 관점에서 다음 변경사항을 리뷰하라. OWASP Top 10, 성능 병목, 에러 핸들링, 리소스 누수를 확인하라. 변경 파일: {changed_files}. JSON 형식: { security_findings, performance_findings, overall_pass }:verifier' \
+  --assign 'gemini:UX/접근성 관점에서 다음 변경사항을 리뷰하라. UI 변경: 접근성, 반응형, 사용성. API 변경: DX, 문서화, 일관성. 변경 파일: {changed_files}. JSON 형식: { ux_findings, accessibility_findings, overall_pass }:verifier' \
+  --timeout 600")
+```
+
+### Phase 5: Validation
+
+Phase 4의 3자 결과에 Consensus 프로토콜을 적용한다.
+
+- Score >= 70 + Critical 0건 → 완료 확정
+- Score >= 70 + Critical 존재 → Critical만 수정 후 Phase 4 재실행
+- Score < 70 → 미합의 항목 수정 → Phase 4 재실행 (최대 2회)
+- 2회 재실행 후에도 < 70 → AskUserQuestion으로 현황 보고 + 사용자 판단 요청
 
 ### Final: 완료 보고
 
@@ -147,13 +150,13 @@ Consensus 판정:
 # Deep Autopilot 완료: {feature}
 
 ## Pipeline Summary
-| Phase | 상태 | 소요 |
+| Phase | 상태 | 결과 |
 |-------|------|------|
-| Expansion | ✓ | {criteria_count}개 기준 도출 |
-| Planning | ✓ | Consensus {score}% (Round {n}) |
-| Execution | ✓ | {task_count}개 태스크, {file_count}개 파일 변경 |
-| QA | ✓ | 3자 독립 리뷰 완료 |
-| Validation | ✓ | Consensus {score}%, Critical 0건 |
+| Expansion | 완료 | {criteria_count}개 기준 도출 |
+| Planning | 완료 | Consensus {score}% (Round {n}) |
+| Execution | 완료 | {task_count}개 태스크, {file_count}개 파일 변경 |
+| QA | 완료 | 3자 독립 리뷰 완료 |
+| Validation | 완료 | Consensus {score}%, Critical 0건 |
 
 ## 변경 사항
 | 파일 | 작업 | 설명 |
@@ -173,14 +176,23 @@ Consensus 판정:
 - {항목}: {각 CLI 입장}
 ```
 
-## 토큰 예산
+## ERROR RECOVERY
+
+| 상황 | 대응 |
+|------|------|
+| tfx headless 타임아웃 | `--timeout` 값을 900으로 올려 재시도 |
+| Consensus 2회 연속 실패 | AskUserQuestion으로 미합의 항목 제시 + 사용자 판단 요청 |
+| 특정 Phase 결과 누락 | 해당 Phase만 단독 재실행 |
+| 빌드/테스트 실패 | Codex에 실패 로그 전달하여 수정 지시 |
+
+## TOKEN BUDGET
 
 | Phase | 토큰 |
 |-------|------|
 | Phase 1 (Expansion) | ~5K |
-| Phase 2 (Planning, 3x) | ~20K |
+| Phase 2 (Planning, 3자) | ~20K |
 | Phase 3 (Execution) | ~25K |
-| Phase 4 (QA, 3x) | ~18K |
+| Phase 4 (QA, 3자) | ~18K |
 | Phase 5 (Validation) | ~5K |
 | 재시도 (필요 시) | +15K |
 | **총합** | **~73-88K** |

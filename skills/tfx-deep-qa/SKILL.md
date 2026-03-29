@@ -25,81 +25,72 @@ argument-hint: "[테스트 대상 경로 또는 기능 설명]"
 - 단일 CLI 검증으로는 놓치는 교차 영역 결함 탐지
 - false-positive 최소화가 필요한 QA 게이트
 
-## 워크플로우
+## HARD RULES
+
+> headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
+
+1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+2. Codex·Gemini → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+3. Claude → `Agent(run_in_background=true)`
+4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
+
+## MODEL ROLES
+
+| CLI | 역할 | 관점 |
+|-----|------|------|
+| Claude Opus | 기능검증 | 기능 정확성, 엣지케이스, 누락 테스트 |
+| Codex | 보안+성능 | OWASP Top 10, O(n²) 복잡도, 메모리 누수, 입력 검증 |
+| Gemini | UX+접근성 | API 응답 일관성, 에러 메시지, WCAG 2.1 AA |
+
+## EXECUTION STEPS
 
 ### Step 1: 검증 대상 수집
 
+대상을 다음 우선순위로 결정한다:
+1. 사용자 지정 파일/경로 → 해당 범위
+2. `git diff` (staged + unstaged) → 변경된 파일
+3. 지정 없음 → 프로젝트 전체 테스트
+
+수집 항목: 변경 파일 목록 + diff, 관련 테스트 파일, 영향 받는 모듈/의존성
+
+### Step 2: 3-CLI 독립 검증 — 아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.
+
+**Claude Agent (기능검증):**
 ```
-대상 결정:
-  1. 사용자 지정 파일/경로 → 해당 범위
-  2. git diff (staged + unstaged) → 변경된 파일
-  3. 지정 없음 → 프로젝트 전체 테스트
-
-수집 항목:
-  - 변경 파일 목록 + diff
-  - 관련 테스트 파일
-  - 영향 받는 모듈/의존성
+Agent(
+  subagent_type="oh-my-claudecode:verifier",
+  model="opus",
+  run_in_background=true,
+  name="qa-functional",
+  description="기능 정확성 및 엣지케이스 검증",
+  prompt="QA 엔지니어로서 다음 코드의 기능 정확성을 검증하라. 테스트를 실행하고 결과를 보고하라. 누락된 엣지 케이스를 식별하라 (null, 빈 입력, 경계값, 동시성). 누락된 테스트 케이스를 제안하라. JSON으로 응답하라: { test_result: {pass, fail, skip}, findings: [{id, file, line, category, severity, description, test_scenario}], edge_case_tests: [...], overall_verdict: 'pass'|'fail' }"
+)
 ```
 
-### Step 2: 3-CLI 독립 검증 (동시, 상호 비공개)
-
+**Codex + Gemini headless dispatch (보안+성능+UX):**
 ```
-Claude Opus (기능 + 엣지케이스, background):
-  "QA 엔지니어로서 다음 코드의 기능 정확성을 검증하라.
-   - 테스트 실행 후 결과 보고
-   - 누락된 엣지 케이스 식별 (null, 빈 입력, 경계값, 동시성)
-   - 누락된 테스트 케이스 제안
-   JSON: { test_result: {pass, fail, skip},
-           findings: [{id, file, line, category, severity, description, test_scenario}],
-           edge_case_tests: [...],
-           overall_verdict: 'pass'|'fail' }"
-
-> **MANDATORY: Codex/Gemini 검증은 headless dispatch로 실행**
-
-Codex (보안 + 성능) + Gemini (UX + 접근성) — Bash (background, headless dispatch):
-  Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
-    --assign 'codex:보안/성능 전문가로서 검증하라.
-   - OWASP Top 10 체크
-   - O(n²) 이상 복잡도 탐지
-   - 메모리 누수 패턴
-   - 입력 검증 누락
-   JSON: { findings: [{id, file, line, category, severity, description, fix}],
-           overall_verdict: 'pass'|'fail' }:verifier' \
-    --assign 'gemini:UX/접근성 전문가로서 검증하라.
-   - API 응답 형식 일관성
-   - 에러 메시지 사용자 친화성
-   - WCAG 2.1 AA 준수 (UI 관련 시)
-   - 문서와 실제 동작 일치 여부
-   JSON: { findings: [{id, file, line, category, severity, description, suggestion}],
-           overall_verdict: 'pass'|'fail' }:verifier' \
-    --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가로서 이 코드를 검증하라. OWASP Top 10을 체크하라. O(n²) 이상 복잡도를 탐지하라. 메모리 누수 패턴을 찾아라. 입력 검증 누락을 확인하라. JSON으로 응답하라: { findings: [{id, file, line, category, severity, description, fix}], overall_verdict: \"pass\"|\"fail\" }:verifier' --assign 'gemini:UX/접근성 전문가로서 이 코드를 검증하라. API 응답 형식 일관성을 확인하라. 에러 메시지의 사용자 친화성을 평가하라. WCAG 2.1 AA 준수를 검토하라 (UI 관련 시). 문서와 실제 동작 일치 여부를 확인하라. JSON으로 응답하라: { findings: [{id, file, line, category, severity, description, suggestion}], overall_verdict: \"pass\"|\"fail\" }:verifier' --timeout 600")
 ```
 
 ### Step 3: Consensus Scoring
 
-```
-모든 findings를 수집하여 유사도 비교:
-  - 동일 파일+라인±5 + 유사 카테고리 → 동일 이슈로 간주
-  - 3/3 합의 → CONFIRMED (severity 유지)
-  - 2/3 합의 → LIKELY (severity 유지, 반대 의견 첨부)
-  - 1/3만 지적 → UNVERIFIED (참고용, 별도 섹션)
+모든 findings를 수집하여 유사도를 비교한다:
+- 동일 파일+라인±5 + 유사 카테고리 → 동일 이슈로 간주
+- 3/3 합의 → CONFIRMED (severity 유지)
+- 2/3 합의 → LIKELY (severity 유지, 반대 의견 첨부)
+- 1/3만 지적 → UNVERIFIED (참고용, 별도 섹션)
 
-consensus_score = consensus_items / total_unique_items × 100
-```
+`consensus_score = consensus_items / total_unique_items × 100`
 
-### Step 4: 실패 수정 (합의된 항목만)
+### Step 4: 실패 수정 — 합의된 Critical/High 항목에 대해서만 실행
 
 ```
-합의된 Critical/High 항목에 대해:
-  > **MANDATORY: 수정 단계도 headless dispatch로 실행**
-  Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
-    --assign 'codex:다음 합의된 이슈를 수정하라:
-   {consensus_findings}
-   수정 후 테스트를 재실행하여 확인하라.:fixer' \
-    --timeout 300")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:다음 합의된 이슈들을 수정하라. 각 이슈에 대해 최소한의 변경으로 수정하고 수정 후 테스트를 재실행하여 통과 여부를 확인하라. 이슈 목록: {consensus_findings}:fixer' --timeout 300")
 ```
 
-### Step 5: 종합 보고서
+### Step 5: 종합 보고서 작성
+
+아래 형식으로 보고서를 출력한다:
 
 ```markdown
 ## Deep QA Report: {target}
@@ -137,6 +128,15 @@ consensus_score = consensus_items / total_unique_items × 100
 | Codex | 보안/성능 | {n} | {%} |
 | Gemini | UX/접근성 | {n} | {%} |
 ```
+
+## ERROR RECOVERY
+
+| 오류 | 조치 |
+|------|------|
+| headless dispatch 타임아웃 | `--timeout` 값을 900으로 올려 재시도 |
+| Agent 결과 미수신 | Step 2를 Agent만 단독 재실행 |
+| consensus 0% | 대상 범위가 너무 넓음 — 파일 단위로 분할 후 재실행 |
+| tfx multi 명령 실패 | `tfx status`로 teammate 연결 상태 확인 |
 
 ## 토큰 예산
 

@@ -25,6 +25,23 @@ argument-hint: "[--depth quick|standard|deep] <리서치 주제>"
 - 아키텍처 결정 근거 수집
 - 학술/산업 동향 파악
 
+## HARD RULES
+
+> headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
+
+1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+2. Codex·Gemini → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+3. Claude → `Agent(run_in_background=true)`
+4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
+
+## MODEL ROLES
+
+| CLI | MCP | 관점 |
+|-----|-----|------|
+| Claude | Exa (neural semantic) | 학술/기술 깊이 (논문, 공식 문서, 벤치마크) |
+| Codex | Brave Search | 실용/구현/산업 사례 중심 |
+| Gemini | Tavily | 비용/운영/DX(개발자 경험) 중심 |
+
 ## Depth 모드
 
 | 모드 | 서브쿼리 | 소스/쿼리 | 라운드 | 토큰 | 시간 |
@@ -35,11 +52,11 @@ argument-hint: "[--depth quick|standard|deep] <리서치 주제>"
 
 기본값: standard
 
-## 워크플로우
+## EXECUTION STEPS
 
-### Pre-Phase: Depth 선택 (--depth 미지정 시)
+### Pre-Phase: Depth 선택
 
-`--depth` 플래그가 지정되지 않은 경우, AskUserQuestion으로 depth를 선택받는다:
+`--depth` 플래그가 지정되지 않은 경우, AskUserQuestion으로 depth를 선택받아라:
 
 ```
 AskUserQuestion:
@@ -49,84 +66,63 @@ AskUserQuestion:
   3. deep (8-10 서브쿼리, ~80K 토큰, 10-15분)
 ```
 
-사용자가 선택하지 않고 빈 응답을 보내면 기본값 `standard`를 적용한다.
+사용자가 빈 응답을 보내면 기본값 `standard`를 적용하라.
 
-### Phase 0: 주제 분석 및 쿼리 분해
+### Step 1: 주제 분석 및 쿼리 분해
 
-Claude Opus가 주제를 분석하고 서브쿼리로 분해한다:
+Claude Opus로 주제를 분석하고 서브쿼리로 분해하라:
 
-```
-입력: "2026년 실시간 데이터 파이프라인 아키텍처 비교"
+- depth에 따라 서브쿼리 수를 결정한다 (quick=3, standard=5, deep=8-10)
+- 각 서브쿼리에 관점(학술/기술, 실용/산업, 비용/운영)을 매핑한다
+- sub_queries 목록과 perspectives 목록을 내부적으로 보유한다
 
-분해 결과:
-{
-  "main_topic": "실시간 데이터 파이프라인 아키텍처 2026",
-  "sub_queries": [
-    "Apache Kafka vs Apache Pulsar vs Redpanda 2026 comparison benchmark",
-    "real-time data pipeline architecture patterns 2026 stream processing",
-    "Apache Flink vs Spark Structured Streaming vs RisingWave 2026",
-    "real-time data pipeline cloud managed services AWS Kinesis GCP Dataflow Azure Event Hub",
-    "real-time CDC change data capture Debezium alternatives 2026"
-  ],
-  "perspectives": [
-    "성능/처리량 관점",
-    "운영 복잡도/DevOps 관점",
-    "비용/스케일링 관점"
-  ]
-}
-```
+### Step 2: 3-CLI 독립 병렬 검색 (Anti-Herding)
 
-### Phase 1: 3-CLI 독립 병렬 검색 (Anti-Herding)
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
 
-**3개 CLI가 동시에, 서로의 결과를 보지 않고 검색한다.**
-
-각 CLI에 서로 다른 MCP + 관점을 할당:
+Claude Agent를 백그라운드로 실행하라:
 
 ```
-Claude (Agent, background):
-  - MCP: Exa (neural semantic search)
-  - 관점: 학술/기술 깊이 (논문, 공식 문서, 벤치마크)
-  - 각 서브쿼리를 Exa web_search_exa로 검색
-  - category: "research paper" 우선
-  - highlights 추출, numResults: 5/쿼리
-
-> **MANDATORY: Codex/Gemini 검색은 headless dispatch로 실행**
-
-Codex (Brave Search) + Gemini (Tavily) — Bash (background, headless dispatch):
-  Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
-    --assign 'codex:다음 서브쿼리를 Brave Search로 검색하고 결과를 종합하라:
-   {sub_queries}
-   관점: 실용/구현/산업 사례 중심
-   각 쿼리당 상위 5개 결과의 제목, URL, 핵심 내용을 추출하라.:researcher' \
-    --assign 'gemini:다음 서브쿼리를 Tavily로 검색하라:
-   {sub_queries}
-   관점: 비용/운영/DX(개발자 경험) 중심
-   각 결과를 구조화하여 정리하라.:researcher' \
-    --timeout 600")
+Agent(
+  subagent_type="claude",
+  model="opus",
+  run_in_background=true,
+  prompt="다음 서브쿼리를 Exa web_search_exa로 검색하라.
+  서브쿼리 목록: {sub_queries}
+  관점: 학술/기술 깊이 (논문, 공식 문서, 벤치마크)
+  각 쿼리에서 category='research paper' 우선, highlights=true, numResults=5로 검색하라.
+  각 결과의 제목, URL, 핵심 내용을 추출하여 구조화하여 반환하라."
+)
 ```
 
-### Phase 2: 결과 수집 및 교차검증
-
-3개 CLI 결과를 수집한 후 tfx-consensus 프로토콜 적용:
+Codex와 Gemini를 headless dispatch로 동시에 실행하라:
 
 ```
-교차검증 항목:
-  1. 사실 일치 (3개 소스가 동일 사실을 보고하는가)
-  2. 추천 일치 (동일 기술/접근법을 추천하는가)
-  3. 수치 일치 (벤치마크, 가격, 성능 수치)
-  4. 리스크 일치 (동일 위험을 식별하는가)
-
-소스 신뢰도:
-  - 공식 문서/벤치마크 → weight 1.0
-  - 학술 논문 → weight 0.9
-  - 신뢰 블로그 (engineering blog) → weight 0.7
-  - 일반 블로그/포럼 → weight 0.5
-  - 날짜 가중: 6개월 이내 ×1.0, 1년 이내 ×0.8, 2년 이내 ×0.5
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:다음 서브쿼리를 Brave Search로 검색하고 결과를 종합하라. 서브쿼리 목록: {sub_queries}. 관점: 실용/구현/산업 사례 중심. brave_web_search와 brave_news_search를 활용하고, freshness=pw로 최신 결과를 우선하라. 각 쿼리당 상위 5개 결과의 제목, URL, 핵심 내용을 구조화하여 반환하라.:researcher' \
+  --assign 'gemini:다음 서브쿼리를 Tavily로 검색하라. 서브쿼리 목록: {sub_queries}. 관점: 비용/운영/DX(개발자 경험) 중심. tavily_search를 search_depth=advanced, max_results=5, include_raw_content=false로 호출하라. 각 결과를 구조화하여 제목, URL, 핵심 내용을 반환하라.:researcher' \
+  --timeout 600")
 ```
 
-### Phase 3: 합의 종합 보고서 생성
+### Step 3: 결과 수집 및 교차검증
 
-Claude Opus가 교차검증된 결과를 종합하여 최종 보고서 작성:
+3개 CLI 결과가 모두 수집되면 다음 기준으로 교차검증하라:
+
+1. 사실 일치: 3개 소스가 동일 사실을 보고하는가
+2. 추천 일치: 동일 기술/접근법을 추천하는가
+3. 수치 일치: 벤치마크, 가격, 성능 수치가 일치하는가
+4. 리스크 일치: 동일 위험을 식별하는가
+
+소스 신뢰도를 다음 가중치로 평가하라:
+- 공식 문서/벤치마크 → weight 1.0
+- 학술 논문 → weight 0.9
+- 신뢰 블로그 (engineering blog) → weight 0.7
+- 일반 블로그/포럼 → weight 0.5
+- 날짜 가중: 6개월 이내 ×1.0, 1년 이내 ×0.8, 2년 이내 ×0.5
+
+### Step 4: 합의 종합 보고서 생성
+
+Claude Opus가 교차검증된 결과를 종합하여 다음 구조로 최종 보고서를 작성하라:
 
 ```markdown
 # Deep Research Report: {topic}
@@ -161,26 +157,29 @@ Claude Opus가 교차검증된 결과를 종합하여 최종 보고서 작성:
 ...
 ```
 
-### Phase 4: Recursive Depth (deep 모드 전용)
+### Step 5: Recursive Depth (deep 모드 전용)
 
-deep 모드에서는 Phase 2에서 발견된 중요 하위 주제에 대해 재귀적으로 Phase 1-3을 반복:
+deep 모드에서 Phase 3 교차검증 중 중요 하위 주제가 발견되면 재귀적으로 Step 2-4를 반복하라:
 
-```
-if depth == "deep" AND Phase 2에서 중요 하위 주제 발견:
-  for each important_subtopic (max 3):
-    recurse Phase 1-3 with sub_queries = [subtopic-specific queries]
-  merge recursive results into main report
-```
+- 최대 3개 하위 주제까지 재귀 실행한다
+- 각 재귀 결과를 메인 보고서에 병합한다
+- 재귀 실행도 반드시 Agent + Bash 동시 호출 패턴을 사용한다
 
-## 토큰 예산
+## ERROR RECOVERY
+
+- Codex 또는 Gemini 결과가 없으면: 해당 CLI 없이 2개 소스로 교차검증을 진행하고 보고서에 누락 CLI를 명시하라
+- tfx multi 명령이 실패하면: 오류 메시지를 그대로 출력하고 재시도 1회 후 실패를 사용자에게 보고하라
+- Agent 결과가 없으면: Claude Exa 검색 없이 나머지 2개 소스로 진행하라
+
+## TOKEN BUDGET
 
 | 단계 | quick | standard | deep |
 |------|-------|----------|------|
-| Phase 0 (분해) | 1K | 2K | 3K |
-| Phase 1 (3x검색) | 9K | 18K | 30K |
-| Phase 2 (교차검증) | 3K | 5K | 8K |
-| Phase 3 (보고서) | 5K | 10K | 15K |
-| Phase 4 (재귀) | — | — | 24K |
+| Step 1 (분해) | 1K | 2K | 3K |
+| Step 2 (3x검색) | 9K | 18K | 30K |
+| Step 3 (교차검증) | 3K | 5K | 8K |
+| Step 4 (보고서) | 5K | 10K | 15K |
+| Step 5 (재귀) | — | — | 24K |
 | **총합** | **~18K** | **~35K** | **~80K** |
 
 ## MCP 활용 전략 (Exa/Brave/Tavily 리버스엔지니어링 기반)
