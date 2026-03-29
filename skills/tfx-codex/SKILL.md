@@ -31,8 +31,8 @@ argument-hint: "\"작업 설명\" | N:codex \"작업 설명\""
 | architect, planner, critic, analyst | Codex | Codex (변경 없음) |
 | code-reviewer, security-reviewer | Codex | Codex (변경 없음) |
 | scientist, document-specialist | Codex | Codex (변경 없음) |
-| **designer** | ~~Gemini~~ | **Codex** (effort: high) — UI 코드 생성 |
-| **writer** | ~~Gemini~~ | **Codex Spark** (effort: spark_fast) — 경량 문서 |
+| **designer** | ~~Gemini~~ | **Codex** (effort: codex53_high) — UI 코드 생성 |
+| **writer** | ~~Gemini~~ | **Codex Spark** (effort: spark53_low) — 경량 문서 |
 | explore | Claude Haiku | Claude Haiku (변경 없음) |
 | verifier, test-engineer | Claude Sonnet | Codex (변경 없음) |
 

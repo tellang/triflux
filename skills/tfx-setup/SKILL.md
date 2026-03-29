@@ -82,7 +82,7 @@ Bash("triflux setup")
 #### 단계 3: Codex 프로파일
 
 `~/.codex/config.toml`을 Read 도구로 읽어 필수 프로파일 존재 여부 확인.
-필수: `high`, `xhigh`, `spark_fast`.
+필수: `codex53_high`, `codex53_xhigh`, `spark53_low`.
 
 - 모두 존재 → ✅ 표시
 - 누락 있으면 → AskUserQuestion:
