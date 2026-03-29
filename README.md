@@ -22,11 +22,7 @@
 </p>
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/demo-dark.gif">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/demo-light.gif">
-    <img alt="triflux demo" src="docs/assets/demo-dark.gif" width="680">
-  </picture>
+  <img alt="triflux demo" src="docs/assets/demo-multi.gif" width="680">
 </p>
 
 <p align="center">
