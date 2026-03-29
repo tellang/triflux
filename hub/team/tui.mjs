@@ -72,6 +72,13 @@ function heartbeat(status, shimmerIntensity = 0) {
     : SPINNER_BASE_COLOR;
   return `\x1b[38;2;${c.r};${c.g};${c.b}m${SPINNER_FRAMES[idx]}${RESET}`;
 }
+
+function currentShimmer() {
+  const elapsed = Date.now() - spinnerStart;
+  const t = (elapsed % SPINNER_CYCLE_MS) / SPINNER_CYCLE_MS;
+  return 0.5 * (1 + Math.sin(t * Math.PI * 2));
+}
+
 const GRID_GAP = 2;
 const DEFAULT_DETAIL_LINES = 10;
 // Tier1 상단 고정 행 수
@@ -215,6 +222,16 @@ function fadeBorderColor(currentStatus, prevStatus, changedAt) {
   return `\x1b[38;2;${c.r};${c.g};${c.b}m`;
 }
 
+function dedupeRole(role, name, cli) {
+  if (!role) return "";
+  let r = role;
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  r = r.replace(new RegExp(esc(cli), "gi"), "").trim();
+  r = r.replace(new RegExp(esc(name), "gi"), "").trim();
+  r = r.replace(/\(\s*\)/g, "").replace(/^\s*[•·\-]\s*/, "").trim();
+  return r;
+}
+
 // ── 텍스트 래핑 ──────────────────────────────────────────────────────────
 function wrapLine(text, width) {
   const limit = Math.max(8, width);
@@ -310,7 +327,7 @@ function buildTier1(names, workers, pipeline, elapsed, width, version) {
   const phase = pipeline.phase || "exec";
   const row1 = truncate(
     `${color("▲", FG.triflux)} v${version} ${dim("│")} ${color(phase, phaseColor(phase))} ${dim("│")} ${elapsed}s ${dim("│")} ` +
-    `${color(`✓${ok}`, MOCHA.ok)} ${color(`◑${partial}`, MOCHA.partial)} ${color(`✗${failed}`, MOCHA.fail)} ${dim(`▶${running}`)}  ${color("Tab/j/k:nav • f:follow • r:raw • 1-9:jump", MOCHA.subtext)}`,
+    `${color(`✓${ok}`, MOCHA.ok)} ${color(`◑${partial}`, MOCHA.partial)} ${color(`✗${failed}`, MOCHA.fail)} ${dim(`▶${running}`)}  ${color("Tab:focus • j/k/↑↓:nav • f:follow • r:raw • l:tab • 1-9:jump", MOCHA.subtext)}`,
     width,
   );
   return [row1];
@@ -357,9 +374,10 @@ function buildWorkerRail(name, st, opts = {}) {
 
   // Tier2 행 1: 이름 + CLI + role
   const selMark = selected ? (focused ? color("▶", MOCHA.blue) : color(">", FG.triflux)) : " ";
-  const hb = heartbeat(status);
+  const hb = heartbeat(status, status === "running" ? currentShimmer() : 0);
+  const displayRole = dedupeRole(role, name, cli);
   const title = truncate(
-    `${selMark} ${hb} ${color(name, FG.triflux)} ${color("•", MOCHA.overlay)} ${color(cli, cliColor(cli))}${role ? ` ${color(`(${role})`, MOCHA.overlay)}` : ""}`,
+    `${selMark} ${hb} ${color(name, FG.triflux)} ${color("•", MOCHA.overlay)} ${color(cli, cliColor(cli))}${displayRole ? ` ${color(`(${displayRole})`, MOCHA.overlay)}` : ""}`,
     innerWidth,
   );
 
@@ -442,9 +460,10 @@ function buildFocusPane(name, st, opts = {}) {
   const status = runtimeStatus(st);
 
   // Tab bar: 활성 탭은 MOCHA.blue + bold, 비활성은 MOCHA.overlay
-  const tabLog = `${MOCHA.blue}${bold("[Log]")}`;
-  const tabDetail = color("[Detail]", MOCHA.overlay);
-  const tabFiles = color(`[Files ${files.length}]`, MOCHA.overlay);
+  const activeTab = opts.activeTab || "log";
+  const tabLog = activeTab === "log" ? `${MOCHA.blue}${bold("[Log]")}` : color("[Log]", MOCHA.overlay);
+  const tabDetail = activeTab === "detail" ? `${MOCHA.blue}${bold("[Detail]")}` : color("[Detail]", MOCHA.overlay);
+  const tabFiles = activeTab === "files" ? `${MOCHA.blue}${bold(`[Files ${files.length}]`)}` : color(`[Files ${files.length}]`, MOCHA.overlay);
   const tabBar = truncate(`${tabLog} ${tabDetail} ${tabFiles}`, innerWidth);
 
   const stickyLines = [
@@ -457,7 +476,26 @@ function buildFocusPane(name, st, opts = {}) {
 
   // 본문 스크롤 영역
   const bodyAvail = Math.max(0, height - stickyLines.length - 3); // top+bot border + scrollInfo
-  const allBodyLines = wrapTextAll(detailText(st), innerWidth, rawMode);
+
+  let allBodyLines;
+  if (activeTab === "detail") {
+    const summaryLines = [];
+    for (const key of SUMMARY_KEYS) {
+      const value = st.handoff?.[key];
+      if (Array.isArray(value) && value.length > 0) summaryLines.push(`${key}: ${value.join(", ")}`);
+      else if (value) summaryLines.push(`${key}: ${value}`);
+    }
+    allBodyLines = summaryLines.length > 0
+      ? summaryLines.flatMap((l) => wrapLine(l, innerWidth))
+      : [dim("no structured data")];
+  } else if (activeTab === "files") {
+    const filesList = sanitizeFiles(st.handoff?.files_changed || st.files_changed);
+    allBodyLines = filesList.length > 0
+      ? filesList.map((f, i) => `${i + 1}. ${f}`)
+      : [dim("no files changed")];
+  } else {
+    allBodyLines = wrapTextAll(detailText(st), innerWidth, rawMode);
+  }
 
   let startIdx;
   if (followTail) {
@@ -497,7 +535,7 @@ function buildSummaryBar(names, workers, selectedWorker, pipeline, width, versio
     return padRight(truncate(label, maxChipWidth), maxChipWidth);
   });
   const chipsLine = truncate(chips.join(color(" │ ", MOCHA.overlay)), width - 4);
-  const keysLine = truncate(color("Tab:focus • j/k:scroll • f:follow • r:raw • 1-9:jump", MOCHA.subtext), width - 4);
+  const keysLine = truncate(color("Tab:focus • j/k/↑↓:nav • f:follow • r:raw • l:tab • 1-9:jump", MOCHA.subtext), width - 4);
   const framed = box([chipsLine, keysLine], width);
   return [framed.top, ...framed.body, framed.bot];
 }
@@ -590,6 +628,7 @@ export function createLogDashboard(opts = {}) {
   let detailScrollOffset = 0;
   let followTail = false;
   let rawMode = false;
+  let focusTab = "log"; // "log" | "detail" | "files"
   let inputAttached = false;
   let rawModeEnabled = false;
 
@@ -682,6 +721,14 @@ export function createLogDashboard(opts = {}) {
     if (key === "f") { followTail = !followTail; if (followTail) detailScrollOffset = 0; render(); return; }
     // r: raw mode 토글
     if (key === "r") { rawMode = !rawMode; render(); return; }
+    // l: 탭 전환 (Log → Detail → Files)
+    if (key === "l") {
+      const tabs = ["log", "detail", "files"];
+      focusTab = tabs[(tabs.indexOf(focusTab) + 1) % tabs.length];
+      detailScrollOffset = 0;
+      render();
+      return;
+    }
     // 1-9: 워커 직접 선택
     if (/^[1-9]$/.test(key)) {
       const names = visibleWorkerNames();
@@ -747,6 +794,7 @@ export function createLogDashboard(opts = {}) {
         followTail,
         rawMode,
         focused: focus === "detail",
+        activeTab: focusTab,
       });
       return [...tier1, ...summaryBar, ...focusPane];
     }
@@ -787,6 +835,7 @@ export function createLogDashboard(opts = {}) {
         followTail,
         rawMode,
         focused: focus === "detail",
+        activeTab: focusTab,
       });
     }
     while (focusLines.length < bodyHeight) focusLines.push(padRight("", focusWidth));
@@ -925,6 +974,15 @@ export function createLogDashboard(opts = {}) {
 
     isDetailExpanded() {
       return focus === "detail";
+    },
+
+    getFocusTab() {
+      return focusTab;
+    },
+
+    setFocusTab(tab) {
+      const valid = ["log", "detail", "files"];
+      if (valid.includes(tab)) { focusTab = tab; detailScrollOffset = 0; }
     },
 
     getLayout() {

@@ -448,6 +448,105 @@ describe("createLogDashboard", () => {
     tui.close();
   });
 
+  it("P0: role에 중복된 워커명/CLI명이 제거된다", () => {
+    let output = "";
+    const fakeStream = { write: (s) => { output += s; }, columns: 160, isTTY: false };
+    const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0, columns: 160 });
+    output = "";
+    tui.updateWorker("worker-1", {
+      cli: "codex",
+      role: "codex (worker-1)",
+      status: "running",
+      progress: 0.5,
+    });
+    tui.render();
+    const clean = stripAnsi(output);
+    // "codex (worker-1)" 중복이 제거되어 role 부분에 "codex" 와 "worker-1"이 괄호 안에 반복되지 않아야 함
+    assert.equal(clean.includes("(codex (worker-1))"), false, "중복 role이 표시되면 안됨");
+    assert.ok(clean.includes("worker-1"), "워커 이름은 표시되어야 함");
+    tui.close();
+  });
+
+  it("P1: Tier1 키바인딩 힌트에 ↑↓와 l:tab 포함", () => {
+    let output = "";
+    const fakeStream = { write: (s) => { output += s; }, columns: 160, isTTY: false };
+    const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0, columns: 160 });
+    output = "";
+    tui.updateWorker("w1", { cli: "codex", status: "running" });
+    tui.render();
+    const clean = stripAnsi(output);
+    assert.ok(clean.includes("↑↓"), "화살표 키 힌트 포함");
+    assert.ok(clean.includes("l:tab"), "l:tab 힌트 포함");
+    tui.close();
+  });
+
+  it("P2b: l 키로 탭 전환 (log → detail → files → log)", () => {
+    const chunks = [];
+    const fakeStream = { write: (s) => { chunks.push(s); }, columns: 96, rows: 30, isTTY: true };
+    let capturedHandler = null;
+    const fakeInput = {
+      isTTY: true,
+      setRawMode: () => {},
+      resume: () => {},
+      on: (event, handler) => { if (event === "data") capturedHandler = handler; },
+      off: () => {},
+      pause: () => {},
+    };
+    const tui = createLogDashboard({ stream: fakeStream, input: fakeInput, refreshMs: 0, columns: 96 });
+    tui.updateWorker("w1", {
+      cli: "codex",
+      status: "completed",
+      handoff: { status: "ok", verdict: "done", confidence: "high", files_changed: ["a.mjs", "b.mjs"] },
+    });
+
+    assert.equal(tui.getFocusTab(), "log");
+
+    if (capturedHandler) {
+      capturedHandler(Buffer.from("l"));
+      assert.equal(tui.getFocusTab(), "detail");
+      capturedHandler(Buffer.from("l"));
+      assert.equal(tui.getFocusTab(), "files");
+      capturedHandler(Buffer.from("l"));
+      assert.equal(tui.getFocusTab(), "log");
+    } else {
+      tui.setFocusTab("detail");
+      assert.equal(tui.getFocusTab(), "detail");
+      tui.setFocusTab("files");
+      assert.equal(tui.getFocusTab(), "files");
+      tui.setFocusTab("log");
+      assert.equal(tui.getFocusTab(), "log");
+    }
+    tui.close();
+  });
+
+  it("P2b: setFocusTab은 유효하지 않은 탭을 무시한다", () => {
+    const fakeStream = { write: () => {}, columns: 60, isTTY: false };
+    const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0 });
+    tui.setFocusTab("invalid");
+    assert.equal(tui.getFocusTab(), "log");
+    tui.setFocusTab("files");
+    assert.equal(tui.getFocusTab(), "files");
+    tui.close();
+  });
+
+  it("P2b: files 탭에서 파일 목록을 렌더링한다", () => {
+    let output = "";
+    const fakeStream = { write: (s) => { output += s; }, columns: 132, isTTY: false };
+    const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0, columns: 132 });
+    output = "";
+    tui.updateWorker("w1", {
+      cli: "codex",
+      status: "completed",
+      handoff: { status: "ok", verdict: "done", files_changed: ["hub/team/tui.mjs", "hub/team/ansi.mjs"] },
+    });
+    tui.setFocusTab("files");
+    tui.render();
+    const clean = stripAnsi(output);
+    assert.ok(clean.includes("hub/team/tui.mjs"), "파일 목록에 tui.mjs 포함");
+    assert.ok(clean.includes("hub/team/ansi.mjs"), "파일 목록에 ansi.mjs 포함");
+    tui.close();
+  });
+
   it("커서 이동/화면 클리어 ANSI를 출력하지 않음", () => {
     let output = "";
     const fakeStream = { write: (s) => { output += s; }, columns: 80, isTTY: false };
