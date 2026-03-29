@@ -108,6 +108,11 @@
   <text x="220" y="264" text-anchor="middle" fill="#e6edf3" font-family="SF Mono,Consolas,monospace" font-size="12" font-weight="bold">Consensus Engine</text>
   <text x="220" y="280" text-anchor="middle" fill="#8b949e" font-family="SF Mono,Consolas,monospace" font-size="9">Anti-Herding  |  Cross-Validation  |  Consensus Gate</text>
 
+  <!-- FAIL → Resolve (loop) — behind CLI boxes -->
+  <line x1="168" y1="413" x2="72" y2="413" stroke="#f85149" stroke-width="1" stroke-dasharray="3"/>
+  <path d="M72,413 L52,413 L52,310 L50,310" stroke="#f85149" stroke-width="1" stroke-dasharray="3" fill="none"/>
+  <text x="60" y="365" fill="#f85149" font-family="SF Mono,Consolas,monospace" font-size="7" transform="rotate(-90,60,365)">RETRY</text>
+
   <!-- 3 CLI boxes -->
   <rect x="50" y="292" width="105" height="56" rx="6" fill="#1c1917" stroke="#d4a574" stroke-width="1.2"/>
   <circle cx="70" cy="308" r="6" fill="url(#claude)"/>
@@ -156,11 +161,6 @@
   <polygon points="307,407 317,413 307,419" fill="#3fb950"/>
   <rect x="318" y="401" width="82" height="24" rx="5" fill="#0d1f17" stroke="#238636" stroke-width="1"/>
   <text x="359" y="417" text-anchor="middle" fill="#3fb950" font-family="SF Mono,Consolas,monospace" font-size="9" font-weight="bold">VERIFIED</text>
-
-  <!-- FAIL → Resolve (loop) -->
-  <line x1="168" y1="413" x2="72" y2="413" stroke="#f85149" stroke-width="1" stroke-dasharray="3"/>
-  <path d="M72,413 L52,413 L52,310 L50,310" stroke="#f85149" stroke-width="1" stroke-dasharray="3" fill="none"/>
-  <text x="60" y="365" fill="#f85149" font-family="SF Mono,Consolas,monospace" font-size="7" transform="rotate(-90,60,365)">RETRY</text>
 
   <!-- ===== Hub Server (Right) ===== -->
   <rect x="430" y="242" width="340" height="190" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1"/>
