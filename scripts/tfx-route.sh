@@ -641,53 +641,53 @@ route_agent() {
   case "$agent" in
     # ─── 구현 레인 ───
     executor)
-      CLI_ARGS="exec ${codex_base}"
-      CLI_EFFORT="high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base}"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     build-fixer)
-      CLI_ARGS="exec --profile fast ${codex_base}"
-      CLI_EFFORT="fast"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_low ${codex_base}"
+      CLI_EFFORT="codex53_low"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     debugger)
-      CLI_ARGS="exec ${codex_base}"
-      CLI_EFFORT="high"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base}"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     deep-executor)
-      CLI_ARGS="exec --profile xhigh ${codex_base}"
-      CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"
+      CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
 
-    # ─── 설계/분석 레인 ───
+    # ─── 설계/분석 레인 (5.4: 1M 컨텍스트, 에이전틱) ───
     architect)
-      CLI_ARGS="exec --profile xhigh ${codex_base}"
-      CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"
+      CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
     planner)
-      CLI_ARGS="exec --profile xhigh ${codex_base}"
-      CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"
+      CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
     critic)
-      CLI_ARGS="exec --profile xhigh ${codex_base}"
-      CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"
+      CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
     analyst)
-      CLI_ARGS="exec --profile xhigh ${codex_base}"
-      CLI_EFFORT="xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"
+      CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
 
-    # ─── 리뷰 레인 ───
+    # ─── 리뷰 레인 (5.3-codex: SWE-Bench 72%) ───
     code-reviewer)
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     security-reviewer)
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
     quality-reviewer)
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 리서치 레인 ───
     scientist)
-      CLI_ARGS="exec ${codex_base}"
-      CLI_EFFORT="high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base}"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     scientist-deep)
-      CLI_ARGS="exec --profile thorough ${codex_base}"
-      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt54_high ${codex_base}"
+      CLI_EFFORT="gpt54_high"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     document-specialist)
-      CLI_ARGS="exec ${codex_base}"
-      CLI_EFFORT="high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base}"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── UI/문서 레인 ───
     designer)
@@ -703,23 +703,23 @@ route_agent() {
 
     # ─── 검증/테스트 (Codex: 무료 + 파일 쓰기 가능) ───
     verifier)
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     test-engineer)
-      CLI_ARGS="exec ${codex_base}"
-      CLI_EFFORT="high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base}"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     qa-tester)
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 경량 ───
     spark)
-      CLI_ARGS="exec --profile spark_fast ${codex_base}"
-      CLI_EFFORT="spark_fast"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile spark53_low ${codex_base}"
+      CLI_EFFORT="spark53_low"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     # ─── CLI 이름 alias (사용자 편의) ───
     codex)
-      CLI_ARGS="exec ${codex_base}"
-      CLI_EFFORT="high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile codex53_high ${codex_base}"
+      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     gemini)
       CLI_ARGS="-m gemini-3.1-pro-preview -y --prompt"
       CLI_EFFORT="pro"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
@@ -729,8 +729,8 @@ route_agent() {
     *)
       case "$CLI_TYPE" in
         codex)
-          CLI_ARGS="exec ${codex_base}"
-          CLI_EFFORT="high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+          CLI_ARGS="exec --profile codex53_high ${codex_base}"
+          CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
         gemini)
           CLI_ARGS="-m gemini-3.1-pro-preview -y --prompt"
           CLI_EFFORT="pro"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
@@ -813,9 +813,9 @@ apply_cli_mode() {
         CLI_TYPE="codex"; CLI_CMD="codex"
         case "$AGENT_TYPE" in
           designer)
-            CLI_ARGS="exec ${codex_base}"; CLI_EFFORT="high"; DEFAULT_TIMEOUT=600 ;;
+            CLI_ARGS="exec --profile codex53_high ${codex_base}"; CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=600 ;;
           writer)
-            CLI_ARGS="exec --profile spark_fast ${codex_base}"; CLI_EFFORT="spark_fast"; DEFAULT_TIMEOUT=180 ;;
+            CLI_ARGS="exec --profile spark53_low ${codex_base}"; CLI_EFFORT="spark53_low"; DEFAULT_TIMEOUT=180 ;;
         esac
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
       fi ;;
@@ -854,16 +854,16 @@ apply_cli_mode() {
   esac
 }
 
-# ── Codex 요금제 가드 (fast 프로필은 Pro 전용) ──
+# ── Codex 요금제 가드 (spark 프로필은 Pro 전용) ──
 apply_plan_guard() {
   [[ "$CLI_TYPE" != "codex" ]] && return
   [[ "$TFX_CODEX_PLAN" == "pro" ]] && return
 
-  if [[ "$CLI_EFFORT" == "fast" ]]; then
+  if [[ "$CLI_EFFORT" == spark53_* ]]; then
     local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
-    CLI_ARGS="exec ${codex_base}"
-    CLI_EFFORT="high"
-    echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: --profile fast → high로 다운그레이드 (Pro 전용)" >&2
+    CLI_ARGS="exec --profile codex53_high ${codex_base}"
+    CLI_EFFORT="codex53_high"
+    echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: spark → codex53_high로 다운그레이드 (Pro 전용)" >&2
   fi
 }
 
@@ -885,29 +885,29 @@ apply_no_claude_native_mode() {
 
   case "$AGENT_TYPE" in
     explore)
-      CLI_ARGS="exec --profile fast ${codex_base}"
-      CLI_EFFORT="fast"
+      CLI_ARGS="exec --profile codex53_low ${codex_base}"
+      CLI_EFFORT="codex53_low"
       DEFAULT_TIMEOUT=600
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
     verifier)
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"
+      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
+      CLI_EFFORT="codex53_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
     test-engineer)
-      CLI_ARGS="exec ${codex_base}"
-      CLI_EFFORT="high"
+      CLI_ARGS="exec --profile codex53_high ${codex_base}"
+      CLI_EFFORT="codex53_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
     qa-tester)
-      CLI_ARGS="exec --profile thorough ${codex_base} review"
-      CLI_EFFORT="thorough"
+      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
+      CLI_EFFORT="codex53_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"

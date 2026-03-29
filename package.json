@@ -8,10 +8,14 @@
     "tfx": "bin/triflux.mjs",
     "tfl": "bin/triflux.mjs",
     "tfx-setup": "bin/tfx-setup.mjs",
-    "tfx-doctor": "bin/tfx-doctor.mjs"
+    "tfx-doctor": "bin/tfx-doctor.mjs",
+    "tfx-profile": "bin/tfx-profile.mjs",
+    "tfx-doctor-tui": "bin/tfx-doctor-tui.mjs",
+    "tfx-setup-tui": "bin/tfx-setup-tui.mjs"
   },
   "files": [
     "bin",
+    "tui",
     "hub",
     "skills",
     "!skills/tfx-workspace",

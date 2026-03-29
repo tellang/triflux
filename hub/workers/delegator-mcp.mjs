@@ -65,24 +65,24 @@ const AGENT_TIMEOUT_SEC = Object.freeze({
 });
 
 const CODEX_PROFILE_BY_AGENT = Object.freeze({
-  executor: 'high',
-  'build-fixer': 'fast',
-  debugger: 'high',
-  'deep-executor': 'xhigh',
-  architect: 'xhigh',
-  planner: 'xhigh',
-  critic: 'xhigh',
-  analyst: 'xhigh',
-  'code-reviewer': 'thorough',
-  'security-reviewer': 'thorough',
-  'quality-reviewer': 'thorough',
-  scientist: 'high',
-  'scientist-deep': 'thorough',
-  'document-specialist': 'high',
-  verifier: 'thorough',
-  designer: 'high',  // Gemini primary, codex fallback용
-  writer: 'high',    // Gemini primary, codex fallback용
-  spark: 'spark_fast',
+  executor: 'codex53_high',
+  'build-fixer': 'codex53_low',
+  debugger: 'codex53_high',
+  'deep-executor': 'gpt54_xhigh',
+  architect: 'gpt54_xhigh',
+  planner: 'gpt54_xhigh',
+  critic: 'gpt54_xhigh',
+  analyst: 'gpt54_xhigh',
+  'code-reviewer': 'codex53_high',
+  'security-reviewer': 'codex53_high',
+  'quality-reviewer': 'codex53_high',
+  scientist: 'codex53_high',
+  'scientist-deep': 'gpt54_high',
+  'document-specialist': 'codex53_high',
+  verifier: 'codex53_high',
+  designer: 'codex53_high',  // Gemini primary, codex fallback용
+  writer: 'codex53_high',    // Gemini primary, codex fallback용
+  spark: 'spark53_low',
 });
 
 const GEMINI_MODEL_BY_AGENT = Object.freeze({

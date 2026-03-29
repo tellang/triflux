@@ -20,23 +20,23 @@ const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
 
 const REQUIRED_CODEX_PROFILES = [
   {
-    name: "high",
+    name: "codex53_high",
     lines: [
       'model = "gpt-5.3-codex"',
       'model_reasoning_effort = "high"',
     ],
   },
   {
-    name: "xhigh",
+    name: "codex53_xhigh",
     lines: [
       'model = "gpt-5.3-codex"',
       'model_reasoning_effort = "xhigh"',
     ],
   },
   {
-    name: "spark_fast",
+    name: "spark53_low",
     lines: [
-      'model = "gpt-5.1-codex-mini"',
+      'model = "gpt-5.3-codex-spark"',
       'model_reasoning_effort = "low"',
     ],
   },

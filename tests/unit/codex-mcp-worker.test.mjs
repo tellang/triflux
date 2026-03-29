@@ -33,7 +33,7 @@ describe('CodexMcpWorker', () => {
     try {
       const first = await worker.execute('remember:ORANGE', {
         sessionKey: 'task-1',
-        profile: 'fast',
+        profile: 'codex53_low',
       });
       const second = await worker.execute('what did i say?', {
         sessionKey: 'task-1',

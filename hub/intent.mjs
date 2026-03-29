@@ -61,14 +61,14 @@ function _tryCodexClassify(prompt) {
 
 /** triflux 특화 의도 카테고리 (10개) */
 export const INTENT_CATEGORIES = {
-  implement:  { agent: 'executor',       mcp: 'implement', effort: 'high' },
-  debug:      { agent: 'debugger',       mcp: 'implement', effort: 'high' },
-  analyze:    { agent: 'analyst',        mcp: 'analyze',   effort: 'xhigh' },
-  design:     { agent: 'architect',      mcp: 'analyze',   effort: 'xhigh' },
-  review:     { agent: 'code-reviewer',  mcp: 'review',    effort: 'thorough' },
+  implement:  { agent: 'executor',       mcp: 'implement', effort: 'codex53_high' },
+  debug:      { agent: 'debugger',       mcp: 'implement', effort: 'codex53_high' },
+  analyze:    { agent: 'analyst',        mcp: 'analyze',   effort: 'gpt54_xhigh' },
+  design:     { agent: 'architect',      mcp: 'analyze',   effort: 'gpt54_xhigh' },
+  review:     { agent: 'code-reviewer',  mcp: 'review',    effort: 'codex53_high' },
   document:   { agent: 'writer',         mcp: 'docs',      effort: 'pro' },
-  research:   { agent: 'scientist',      mcp: 'analyze',   effort: 'high' },
-  'quick-fix':{ agent: 'build-fixer',    mcp: 'implement', effort: 'fast' },
+  research:   { agent: 'scientist',      mcp: 'analyze',   effort: 'codex53_high' },
+  'quick-fix':{ agent: 'build-fixer',    mcp: 'implement', effort: 'codex53_low' },
   explain:    { agent: 'writer',         mcp: 'docs',      effort: 'flash' },
   test:       { agent: 'test-engineer',  mcp: null,         effort: null },
 };
