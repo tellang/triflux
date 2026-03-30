@@ -2,8 +2,8 @@
 // remote-spawn.mjs — 로컬/원격 Claude 세션 실행 유틸리티
 //
 // Usage:
-//   node remote-spawn.mjs --local [--dir <path>] [--prompt "..."] [--handoff <file>]
-//   node remote-spawn.mjs --host <ssh-host> [--dir <path>] [--prompt "..."] [--handoff <file>]
+//   node remote-spawn.mjs --local [--dir <path>] [--prompt "..."] [--handoff <file>] [--transfer <file>]
+//   node remote-spawn.mjs --host <ssh-host> [--dir <path>] [--prompt "..."] [--handoff <file>] [--transfer <file>]
 //   node remote-spawn.mjs --send <session> "prompt"
 //   node remote-spawn.mjs --list
 //   node remote-spawn.mjs --attach <session>
@@ -13,7 +13,7 @@ import { randomUUID } from "crypto";
 import { execFileSync, execSync, spawn } from "child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { homedir, platform as getPlatform, tmpdir } from "os";
-import { join, posix as posixPath, resolve, win32 as win32Path } from "path";
+import { basename, join, posix as posixPath, resolve, win32 as win32Path } from "path";
 import { fileURLToPath } from "url";
 import {
   attachPsmuxSession,
@@ -32,6 +32,7 @@ import {
 const MAX_HANDOFF_BYTES = 1 * 1024 * 1024; // 1 MB
 const REMOTE_ENV_TTL_MS = 86_400_000;
 const REMOTE_ENV_CACHE_DIR = resolve(".omc", "state", "remote-env");
+const REMOTE_STAGE_ROOT = "tfx-remote";
 const SSH_PROMPT_PATTERN = /(\$|%|#|PS |>)\s*$/;
 const IS_WINDOWS_LOCAL = getPlatform() === "win32";
 const SELF_SCRIPT_PATH = fileURLToPath(import.meta.url);
@@ -138,8 +139,8 @@ export function buildSpawnCleanupWatcherArgs(sessionName, paneId, timingOptions 
 
 function usageText() {
   return `Usage:
-  remote-spawn --local [--dir <path>] [--prompt "task"] [--handoff <file>]
-  remote-spawn --host <ssh-host> [--dir <path>] [--prompt "task"] [--handoff <file>]
+  remote-spawn --local [--dir <path>] [--prompt "task"] [--handoff <file>] [--transfer <file>]
+  remote-spawn --host <ssh-host> [--dir <path>] [--prompt "task"] [--handoff <file>] [--transfer <file>]
   remote-spawn --send <session> "prompt"
   remote-spawn --list
   remote-spawn --attach <session>
@@ -151,6 +152,7 @@ Options:
   --dir <path>     작업 디렉토리 (기본: 현재 디렉토리 / 원격 홈)
   --prompt "..."   Claude에 전달할 첫 메시지
   --handoff <file> 핸드오프 파일 경로 (prompt와 결합 가능)
+  --transfer <file> 원격 스테이징할 추가 파일 (반복 지정 가능)
   --send <session> 실행 중인 세션에 프롬프트 전송
   --list           tfx-spawn-* psmux 세션 목록
   --attach <name>  WT 새 탭에서 세션 attach
@@ -165,6 +167,7 @@ function parseArgs(argv) {
   let dir = null;
   let prompt = null;
   let handoff = null;
+  const transferFiles = [];
   let local = false;
   let sessionName = null;
   let probeHost = null;
@@ -198,6 +201,11 @@ function parseArgs(argv) {
     }
     if (arg === "--handoff" && argv[index + 1]) {
       handoff = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--transfer" && argv[index + 1]) {
+      transferFiles.push(argv[index + 1]);
       index += 1;
       continue;
     }
@@ -275,6 +283,7 @@ function parseArgs(argv) {
     probeHost,
     prompt: mergedPrompt,
     sessionName,
+    transferFiles,
     watchGraceMs,
     watchMaxMs,
     watchPane,
@@ -358,28 +367,113 @@ function getPermissionFlag() {
   return process.env.TFX_CLAUDE_SAFE_MODE === "1" ? [] : ["--dangerously-skip-permissions"];
 }
 
-function buildPrompt(args) {
+function failFast(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+function validateTransferCandidate(pathLike, label) {
+  const localPath = resolve(pathLike);
+  if (!existsSync(localPath)) {
+    failFast(`${label} not found: ${localPath}`);
+  }
+
+  // 프로젝트 디렉토리 외부 파일 전송 방지
+  const projectRoot = process.cwd();
+  if (!localPath.startsWith(projectRoot)) {
+    failFast(`${label} must be within project directory: ${localPath}`);
+  }
+
+  const size = statSync(localPath).size;
+  if (size > MAX_HANDOFF_BYTES) {
+    failFast(`${label} too large: ${size} bytes (max ${MAX_HANDOFF_BYTES})`);
+  }
+
+  return {
+    inputPath: pathLike,
+    localPath,
+    size,
+  };
+}
+
+function dedupeTransferCandidates(candidates) {
+  const byPath = new Map();
+  for (const candidate of candidates) {
+    if (!byPath.has(candidate.localPath)) {
+      byPath.set(candidate.localPath, candidate);
+    }
+  }
+  return [...byPath.values()];
+}
+
+function buildPromptContext(args, options = {}) {
+  const includeTransferFiles = options.includeTransferFiles === true;
+  const candidates = [];
   let content = "";
 
   if (args.handoff) {
-    const handoffPath = resolve(args.handoff);
-    if (!existsSync(handoffPath)) {
-      console.error(`handoff file not found: ${handoffPath}`);
-      process.exit(1);
+    const handoffCandidate = validateTransferCandidate(args.handoff, "handoff file");
+    content = readFileSync(handoffCandidate.localPath, "utf8").trim();
+    candidates.push(handoffCandidate);
+  }
+
+  if (includeTransferFiles) {
+    for (const filePath of args.transferFiles || []) {
+      candidates.push(validateTransferCandidate(filePath, "transfer file"));
     }
-    const size = statSync(handoffPath).size;
-    if (size > MAX_HANDOFF_BYTES) {
-      console.error(`handoff file too large: ${size} bytes (max ${MAX_HANDOFF_BYTES})`);
-      process.exit(1);
-    }
-    content = readFileSync(handoffPath, "utf8").trim();
   }
 
   if (args.prompt) {
     content = content ? `${content}\n\n---\n\n${args.prompt}` : args.prompt;
   }
 
-  return content;
+  return {
+    prompt: content,
+    transferCandidates: dedupeTransferCandidates(candidates),
+  };
+}
+
+function buildLocalPathVariants(pathLike) {
+  const resolvedPath = resolve(pathLike);
+  const variants = new Set([
+    pathLike,
+    resolvedPath,
+    normalizeCommandPath(pathLike),
+    normalizeCommandPath(resolvedPath),
+    pathLike.replace(/\//g, "\\"),
+    resolvedPath.replace(/\//g, "\\"),
+  ]);
+
+  return [...variants]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value.length > 2);
+}
+
+function rewritePromptPaths(prompt, stagedFiles) {
+  if (!prompt || stagedFiles.length === 0) {
+    return prompt;
+  }
+
+  const replacements = [];
+  for (const file of stagedFiles) {
+    for (const variant of buildLocalPathVariants(file.inputPath)) {
+      replacements.push({ from: variant, to: file.remotePath });
+    }
+    for (const variant of buildLocalPathVariants(file.localPath)) {
+      replacements.push({ from: variant, to: file.remotePath });
+    }
+  }
+
+  replacements.sort((a, b) => b.from.length - a.from.length);
+
+  let rewritten = prompt;
+  for (const replacement of replacements) {
+    if (rewritten.includes(replacement.from)) {
+      rewritten = rewritten.split(replacement.from).join(replacement.to);
+    }
+  }
+
+  return rewritten;
 }
 
 function spawnLocalFallback(args, claudePath, prompt) {
@@ -421,7 +515,7 @@ function spawnLocalFallback(args, claudePath, prompt) {
   }
 }
 
-function spawnRemoteFallback(args, prompt) {
+function spawnRemoteFallback(args, promptContext) {
   const { host } = args;
   if (!host) {
     console.error("--host required for remote spawn");
@@ -430,6 +524,34 @@ function spawnRemoteFallback(args, prompt) {
 
   const dir = args.dir || "~";
   const permFlags = getPermissionFlag();
+  let prompt = promptContext.prompt;
+
+  let remoteHome;
+  try {
+    remoteHome = execFileSync("ssh", [host, "echo", "$env:USERPROFILE"], { encoding: "utf8", timeout: 5000 }).trim();
+  } catch {
+    try {
+      remoteHome = execFileSync("ssh", [host, "echo", "$HOME"], { encoding: "utf8", timeout: 5000 }).trim();
+    } catch {
+      // 원격 홈 감지 실패 시 transfer 기능을 사용할 수 없음
+      console.warn(`[tfx] 원격 홈 디렉토리 감지 실패 (${host}) — file transfer 비활성화`);
+      remoteHome = null;
+    }
+  }
+
+  if (remoteHome) {
+    try {
+      const fallbackEnv = { home: remoteHome, os: "win32", shell: "pwsh" };
+      const stageId = `spawn-${randomUUID().slice(0, 8)}`;
+      const { stagedFiles } = stageRemotePromptFiles(host, fallbackEnv, promptContext.transferCandidates, stageId);
+      prompt = rewritePromptPaths(prompt, stagedFiles);
+    } catch (error) {
+      failFast(`failed to stage remote files: ${error?.message || String(error)}`);
+    }
+  } else if (promptContext.transferCandidates.length > 0) {
+    console.warn("[tfx] 원격 홈 미감지 — --transfer 파일이 무시됩니다");
+  }
+
   const scriptLines = [
     `cd '${dir.replace(/'/g, "''")}'`,
   ];
@@ -450,13 +572,6 @@ function spawnRemoteFallback(args, prompt) {
   } catch (error) {
     console.error("failed to copy script to remote:", error.message);
     process.exit(1);
-  }
-
-  let remoteHome;
-  try {
-    remoteHome = execFileSync("ssh", [host, "echo", "$env:USERPROFILE"], { encoding: "utf8", timeout: 5000 }).trim();
-  } catch {
-    remoteHome = `C:\\Users\\${host}`;
   }
 
   const remoteScript = `${remoteHome.replace(/\\/g, "/")}/tfx-remote-spawn.ps1`;
@@ -670,6 +785,56 @@ function resolveRemoteDir(dir, env) {
   return posixPath.join(env.home, requestedDir);
 }
 
+function resolveRemoteStageDir(env, stageId) {
+  const normalizedHome = normalizeCommandPath(env.home);
+  return `${normalizedHome}/${REMOTE_STAGE_ROOT}/${stageId}`;
+}
+
+function ensureRemoteStageDir(host, env, remoteStageDir) {
+  if (env.os === "win32") {
+    const command = [
+      `$path = '${escapePwshSingleQuoted(remoteStageDir)}'`,
+      "New-Item -ItemType Directory -Path $path -Force | Out-Null",
+    ].join("; ");
+    execFileSync("ssh", [host, "pwsh", "-NoProfile", "-Command", command], { timeout: 10000, stdio: "pipe" });
+    return;
+  }
+
+  execFileSync("ssh", [host, "sh", "-lc", `mkdir -p ${shellQuote(remoteStageDir)}`], {
+    timeout: 10000,
+    stdio: "pipe",
+  });
+}
+
+function uploadFileToRemote(host, localPath, remotePath) {
+  execFileSync("scp", [localPath, `${host}:${shellQuote(remotePath)}`], { timeout: 15000, stdio: "pipe" });
+}
+
+function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
+  if (!transferCandidates || transferCandidates.length === 0) {
+    return { remoteStageDir: null, stagedFiles: [] };
+  }
+
+  const remoteStageDir = resolveRemoteStageDir(env, stageId);
+  ensureRemoteStageDir(host, env, remoteStageDir);
+
+  const basenameCounts = new Map();
+  const stagedFiles = transferCandidates.map((candidate) => {
+    const fileName = basename(candidate.localPath);
+    const count = (basenameCounts.get(fileName) || 0) + 1;
+    basenameCounts.set(fileName, count);
+    const stagedName = count === 1 ? fileName : `${count}-${fileName}`;
+    const remotePath = `${remoteStageDir}/${stagedName}`;
+    uploadFileToRemote(host, candidate.localPath, remotePath);
+    return {
+      ...candidate,
+      remotePath,
+    };
+  });
+
+  return { remoteStageDir, stagedFiles };
+}
+
 function listSessionNamesFromRawOutput(output) {
   return output
     .split(/\r?\n/u)
@@ -857,7 +1022,7 @@ function spawnLocal(args, claudePath, prompt) {
   }
 }
 
-async function spawnRemote(args, prompt) {
+async function spawnRemote(args, promptContext) {
   const { host } = args;
   if (!host) {
     console.error("--host required for remote spawn");
@@ -865,7 +1030,7 @@ async function spawnRemote(args, prompt) {
   }
 
   if (!shouldUsePsmux()) {
-    spawnRemoteFallback(args, prompt);
+    spawnRemoteFallback(args, promptContext);
     return;
   }
 
@@ -878,6 +1043,14 @@ async function spawnRemote(args, prompt) {
   const sessionName = `tfx-spawn-${host}-${randomUUID().slice(0, 8)}`;
   const paneId = `${sessionName}:0.0`;
   const permissionFlags = getPermissionFlag().join(" ");
+  let prompt = promptContext.prompt;
+
+  try {
+    const { stagedFiles } = stageRemotePromptFiles(host, env, promptContext.transferCandidates, sessionName);
+    prompt = rewritePromptPaths(prompt, stagedFiles);
+  } catch (error) {
+    failFast(`failed to stage remote files: ${error?.message || String(error)}`);
+  }
 
   createPsmuxSession(sessionName, { layout: "1xN", paneCount: 1 });
   try {
@@ -1010,7 +1183,14 @@ async function main() {
     return;
   }
 
-  const prompt = buildPrompt(args);
+  const promptContext = buildPromptContext(args, {
+    includeTransferFiles: Boolean(args.host),
+  });
+  const prompt = promptContext.prompt;
+
+  if (args.local && args.transferFiles.length > 0) {
+    console.warn("[tfx] --transfer는 원격 모드에서만 사용 가능합니다 (--local에서는 무시됨)");
+  }
 
   if (args.command === "send") {
     if (!args.sessionName) {
@@ -1035,7 +1215,7 @@ async function main() {
     return;
   }
 
-  await spawnRemote(args, prompt);
+  await spawnRemote(args, promptContext);
 }
 
 const selfRun = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
@@ -1045,3 +1225,11 @@ if (selfRun) {
     process.exit(1);
   });
 }
+
+export const __remoteSpawnTest = {
+  buildPromptContext,
+  parseArgs,
+  rewritePromptPaths,
+  stageRemotePromptFiles,
+  validateTransferCandidate,
+};
