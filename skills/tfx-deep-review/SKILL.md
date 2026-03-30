@@ -19,6 +19,57 @@ argument-hint: "[파일 경로 또는 변경 설명]"
 **Anti-Herding**: Round 1에서 3개 CLI가 서로의 결과를 보지 않고 독립 리뷰.
 **Consensus Only**: 2개 이상 CLI가 동일 이슈를 지적한 항목만 최종 보고 → false-positive 87% 감소.
 
+## 전제조건 프로브 및 Tier Degradation
+
+> **진입 즉시 실행** — 10초 내 가시적 출력을 보장한다. 빈 stdout + exit 0 **금지**.
+
+### 환경 프로브
+
+워크플로우 진입 전, 아래 프로브를 실행하여 가용 환경을 감지한다:
+
+```bash
+psmux --version 2>/dev/null && \
+  curl -sf http://127.0.0.1:27888/status >/dev/null && \
+  codex --version 2>/dev/null && \
+  gemini --version 2>/dev/null
+```
+
+### Tier 판정
+
+| Tier | 조건 | 실행 방식 |
+|------|------|----------|
+| **Tier 1** | psmux + Hub + Codex + Gemini 전부 정상 | 기존 headless multi (변경 없음) |
+| **Tier 2** | 일부 CLI만 가용 (Codex 또는 Gemini 중 하나) | 가용 CLI + Claude Agent 조합 |
+| **Tier 3** | headless 불가 또는 `claude -p` one-shot | Claude Agent only |
+
+```
+IF claude -p (one-shot 모드):
+  → Tier 3 즉시 fallback
+
+IF psmux 없음 OR Hub 미응답:
+  → Tier 3
+
+IF Codex 없음 AND Gemini 없음:
+  → Tier 3
+
+IF Codex 없음 OR Gemini 없음:
+  → Tier 2
+
+ELSE:
+  → Tier 1
+```
+
+### Tier 3 진입 시 필수 출력
+
+```
+⚠ [Tier 3] headless multi 환경 미충족 — single-model 모드로 실행합니다 (consensus 미적용)
+  누락: {missing_components}
+  권장: psmux, Hub, Codex CLI, Gemini CLI 설치 후 재실행
+```
+
+Tier 3에서는 모든 headless dispatch(`tfx multi ...`)를 **Claude Agent**(subagent)로 대체한다.
+Tier 2에서는 누락된 CLI만 Claude Agent로 대체한다.
+
 ## HARD RULES
 
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.

@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Tri-CLI Orchestration with Consensus Intelligence</strong><br>
-  <em>Claude + Codex + Gemini — 3-party debate, anti-herding verification, and 33 skills with Deep/Light variants.</em>
+  <em>Claude + Codex + Gemini — 3-party debate, anti-herding verification, and 35 skills with Deep/Light variants.</em>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
   <a href="#tri-cli-consensus">Tri-CLI Consensus</a> ·
-  <a href="#33-skills">33 Skills</a> ·
+  <a href="#35-skills">35 Skills</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#deep-vs-light">Deep vs Light</a> ·
   <a href="#security">Security</a>
@@ -86,7 +86,7 @@ tfx setup
 
 ### Highlights
 
-- **33 Skills** — 11 Light + 10 Deep + 12 Infrastructure, organized across 9 domains
+- **35 Skills** — 11 Light + 10 Deep + 12 Infrastructure, organized across 9 domains
 - **Tri-Debate Engine** — 3-CLI independent analysis with anti-herding, cross-validation, and consensus scoring
 - **Deep/Light Variants** — Every capability has a token-efficient Light mode and a thorough Deep mode
 - **Consensus Gate** — Deep skills require 2/3+ CLI agreement; learned weights track CLI reliability over time
@@ -128,7 +128,7 @@ Phase 3: Resolution (if consensus < 70%)
 
 ---
 
-## 33 Skills
+## 35 Skills
 
 ### Research
 
@@ -313,6 +313,7 @@ tfx setup
 # Team — Multi-CLI parallel orchestration
 /tfx-multi "refactor auth + update UI + add tests"
 ```
+n> **Note**: Deep skills (`/tfx-deep-*`, `/tfx-persist`, `/tfx-ralph`) require **psmux** (or tmux), **triflux Hub**, **Codex CLI**, and **Gemini CLI** for full Tri-CLI consensus (Tier 1). Without these prerequisites, skills automatically degrade to Tier 3 (Claude-only, single-model) mode. Run `tfx doctor` to check your environment.
 
 ---
 

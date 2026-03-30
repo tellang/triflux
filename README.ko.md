@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Consensus Intelligence 기반 Tri-CLI 오케스트레이션</strong><br>
-  <em>Claude + Codex + Gemini — 3자 토론, Anti-Herding 검증, Deep/Light 변형을 갖춘 33개 스킬.</em>
+  <em>Claude + Codex + Gemini — 3자 토론, Anti-Herding 검증, Deep/Light 변형을 갖춘 35개 스킬.</em>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 <p align="center">
   <a href="#빠른-시작">빠른 시작</a> ·
   <a href="#tri-cli-합의-엔진">Tri-CLI 합의 엔진</a> ·
-  <a href="#33개-스킬">33개 스킬</a> ·
+  <a href="#35개-스킬">35개 스킬</a> ·
   <a href="#아키텍처">아키텍처</a> ·
   <a href="#deep-vs-light">Deep vs Light</a> ·
   <a href="#보안">보안</a>
@@ -86,7 +86,7 @@ tfx setup
 
 ### 주요 특징
 
-- **33개 스킬** — Light 11개 + Deep 10개 + Infrastructure 12개, 9개 도메인으로 구성
+- **35개 스킬** — Light 11개 + Deep 10개 + Infrastructure 12개, 9개 도메인으로 구성
 - **Tri-Debate Engine** — 3개 CLI가 독립 분석 후 Anti-Herding, 교차 검증, 합의 점수 산출
 - **Deep/Light 변형** — 모든 기능에 토큰 효율적인 Light 모드와 정밀한 Deep 모드를 제공
 - **Consensus Gate** — Deep 스킬은 3개 CLI 중 2개 이상의 동의를 요구하며, 학습된 가중치로 CLI 신뢰도를 추적
@@ -128,7 +128,7 @@ Phase 3: Resolution (합의율 < 70%일 경우)
 
 ---
 
-## 33개 스킬
+## 35개 스킬
 
 ### 리서치
 
@@ -313,6 +313,7 @@ tfx setup
 # Team — Multi-CLI 병렬 오케스트레이션
 /tfx-multi "refactor auth + update UI + add tests"
 ```
+n> **참고**: Deep 스킬(`/tfx-deep-*`, `/tfx-persist`, `/tfx-ralph`)은 완전한 Tri-CLI 합의(Tier 1)를 위해 **psmux**(또는 tmux), **triflux Hub**, **Codex CLI**, **Gemini CLI**가 필요합니다. 전제조건이 충족되지 않으면 Tier 3(Claude 단독, single-model) 모드로 자동 전환됩니다. `tfx doctor`로 환경을 확인하세요.
 
 ---
 
