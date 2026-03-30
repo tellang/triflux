@@ -166,6 +166,9 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo claude)}"
 GEMINI_BIN_ARGS_JSON="${GEMINI_BIN_ARGS_JSON:-[]}"
 CLAUDE_BIN_ARGS_JSON="${CLAUDE_BIN_ARGS_JSON:-[]}"
 
+# ── Gemini 프로필 경로 (Codex config.toml 대칭) ──
+GEMINI_PROFILES_PATH="${GEMINI_PROFILES_PATH:-$(eval echo ~)/.gemini/triflux-profiles.json}"
+
 # ── 상수 ──
 MAX_STDOUT_BYTES=51200  # 50KB — Claude 컨텍스트 절약
 TIMESTAMP=$(date +%s)
@@ -610,6 +613,33 @@ codex_gte() {
   printf '%s\n%s' "$min" "$cur" | sort -V | head -1 | grep -q "^${min}$"
 }
 
+# ── Gemini 프로필 해석 (Codex --profile 대칭) ──
+_GEMINI_PROFILE_CACHE=""
+resolve_gemini_profile() {
+  local profile="$1"
+  if [[ -z "$_GEMINI_PROFILE_CACHE" && -f "$GEMINI_PROFILES_PATH" ]]; then
+    _GEMINI_PROFILE_CACHE=$(cat "$GEMINI_PROFILES_PATH" 2>/dev/null || echo "{}")
+  fi
+  local result
+  result=$("$NODE_BIN" -e "
+    const name = process.argv[1];
+    const defaults = {
+      pro31: 'gemini-3.1-pro-preview',
+      flash3: 'gemini-3-flash-preview',
+      pro25: 'gemini-2.5-pro',
+      flash25: 'gemini-2.5-flash',
+      lite25: 'gemini-2.5-flash-lite'
+    };
+    try {
+      const cfg = JSON.parse(process.argv[2] || '{}');
+      const p = cfg.profiles?.[name];
+      if (p?.model) { process.stdout.write(p.model); return; }
+    } catch {}
+    process.stdout.write(defaults[name] || 'gemini-3.1-pro-preview');
+  " "$profile" "$_GEMINI_PROFILE_CACHE" 2>/dev/null)
+  echo "${result:-gemini-3.1-pro-preview}"
+}
+
 # ── 라우팅 테이블 ──
 # CLI_TYPE/CLI_CMD: agent-map.json 단일 소스. 상세 설정: 아래 case 문.
 # 반환: CLI_TYPE, CLI_CMD, CLI_ARGS, CLI_EFFORT, DEFAULT_TIMEOUT, RUN_MODE, OPUS_OVERSIGHT
@@ -708,11 +738,11 @@ route_agent() {
 
     # ─── UI/문서 레인 ───
     designer)
-      CLI_ARGS="-m gemini-3.1-pro-preview -y --prompt"
-      CLI_EFFORT="pro"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"
+      CLI_EFFORT="pro31"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     writer)
-      CLI_ARGS="-m gemini-3-flash-preview -y --prompt"
-      CLI_EFFORT="flash"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"
+      CLI_EFFORT="flash3"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 탐색 (Claude-native: Glob/Grep/Read 직접 접근) ───
     explore)
@@ -738,8 +768,8 @@ route_agent() {
       CLI_ARGS="exec --profile codex53_high ${codex_base}"
       CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     gemini)
-      CLI_ARGS="-m gemini-3.1-pro-preview -y --prompt"
-      CLI_EFFORT="pro"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"
+      CLI_EFFORT="pro31"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     claude)
       CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     # ─── agent-map.json에만 정의된 신규 에이전트 (CLI_TYPE별 기본값) ───
@@ -749,8 +779,8 @@ route_agent() {
           CLI_ARGS="exec --profile codex53_high ${codex_base}"
           CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
         gemini)
-          CLI_ARGS="-m gemini-3.1-pro-preview -y --prompt"
-          CLI_EFFORT="pro"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+          CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"
+          CLI_EFFORT="pro31"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
         claude-native)
           CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
       esac ;;
@@ -855,12 +885,14 @@ apply_cli_mode() {
         CLI_TYPE="gemini"; CLI_CMD="gemini"
         case "$AGENT_TYPE" in
           executor|debugger|deep-executor|architect|planner|critic|analyst|\
-          code-reviewer|security-reviewer|quality-reviewer|scientist-deep)
-            CLI_ARGS="-m gemini-3.1-pro-preview -y --prompt"; CLI_EFFORT="pro" ;;
+          code-reviewer|security-reviewer|quality-reviewer|scientist-deep|designer)
+            CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"; CLI_EFFORT="pro31" ;;
           build-fixer|spark)
-            CLI_ARGS="-m gemini-3-flash-preview -y --prompt"; CLI_EFFORT="flash"; DEFAULT_TIMEOUT=180 ;;
+            CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"; CLI_EFFORT="flash3"; DEFAULT_TIMEOUT=180 ;;
+          writer)
+            CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"; CLI_EFFORT="flash3" ;;
           *)
-            CLI_ARGS="-m gemini-3-flash-preview -y --prompt"; CLI_EFFORT="flash" ;;
+            CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"; CLI_EFFORT="flash3" ;;
         esac
         echo "[tfx-route] TFX_CLI_MODE=gemini: $AGENT_TYPE → gemini($CLI_EFFORT)로 리매핑" >&2
       fi ;;

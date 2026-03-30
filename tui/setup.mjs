@@ -15,6 +15,7 @@ import {
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
 const CODEX_DIR = join(homedir(), ".codex");
+const GEMINI_DIR = join(homedir(), ".gemini");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 
 // ── Step Definitions ──
@@ -23,6 +24,7 @@ const STEPS = [
   { id: "sync",     name: "파일 동기화",      desc: "스크립트/HUD/스킬을 ~/.claude/에 배포" },
   { id: "hud",      name: "HUD 설정",         desc: "settings.json에 statusLine 등록" },
   { id: "profiles", name: "Codex 프로파일",   desc: "필수 프로파일 생성/확인" },
+  { id: "gemini-profiles", name: "Gemini 프로필", desc: "triflux-profiles.json 생성/확인" },
   { id: "cli",      name: "CLI 진단",         desc: "Codex/Gemini/Claude CLI 확인" },
   { id: "mcp",      name: "MCP 서버 확인",    desc: "MCP 서버 인벤토리 점검" },
 ];
@@ -96,6 +98,39 @@ function stepProfiles() {
   return { ok: false, detail: `누락: ${missing.join(", ")}`, missing, action: "create" };
 }
 
+function stepGeminiProfiles() {
+  const configPath = join(GEMINI_DIR, "triflux-profiles.json");
+  if (!existsSync(configPath)) {
+    // 기본 프로필 자동 생성
+    const defaultConfig = {
+      model: "gemini-3.1-pro-preview",
+      profiles: {
+        pro31:   { model: "gemini-3.1-pro-preview",   hint: "3.1 Pro — 플래그십 (1M ctx, 멀티모달)" },
+        flash3:  { model: "gemini-3-flash-preview",   hint: "3.0 Flash — 빠른 응답, 비용 효율" },
+        pro25:   { model: "gemini-2.5-pro",           hint: "2.5 Pro — 안정 (추론 강화)" },
+        flash25: { model: "gemini-2.5-flash",         hint: "2.5 Flash — 경량 범용" },
+        lite25:  { model: "gemini-2.5-flash-lite",    hint: "2.5 Flash Lite — 최경량" },
+      },
+    };
+    if (!existsSync(GEMINI_DIR)) mkdirSync(GEMINI_DIR, { recursive: true });
+    writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2) + "\n", "utf8");
+    return { ok: true, detail: "기본 프로필 5개 자동 생성됨", action: "created" };
+  }
+
+  try {
+    const cfg = JSON.parse(readFileSync(configPath, "utf8"));
+    const required = ["pro31", "flash3"];
+    const missing = required.filter((name) => !cfg.profiles?.[name]);
+    if (missing.length === 0) {
+      const count = Object.keys(cfg.profiles || {}).length;
+      return { ok: true, detail: `프로필 ${count}개 확인됨` };
+    }
+    return { ok: false, detail: `누락: ${missing.join(", ")}`, action: "update" };
+  } catch {
+    return { ok: false, detail: "triflux-profiles.json 파싱 실패", action: "recreate" };
+  }
+}
+
 function stepCli() {
   const results = [];
   for (const [name, installCmd] of [
@@ -130,7 +165,7 @@ function stepMcp() {
   }
 }
 
-const STEP_RUNNERS = { sync: stepSync, hud: stepHud, profiles: stepProfiles, cli: stepCli, mcp: stepMcp };
+const STEP_RUNNERS = { sync: stepSync, hud: stepHud, profiles: stepProfiles, "gemini-profiles": stepGeminiProfiles, cli: stepCli, mcp: stepMcp };
 
 // ── UI ──
 

@@ -96,6 +96,24 @@ Bash("triflux setup")
       description: "나중에 /tfx-profile로 관리"
   ```
 
+#### 단계 3.5: Gemini 프로필
+
+`~/.gemini/triflux-profiles.json` 존재 여부 확인.
+필수 프로필: `pro31`, `flash3`.
+
+- 파일 존재 + 필수 프로필 있음 → ✅ 표시
+- 파일 미존재 → 기본 프로필 5개 자동 생성 (pro31, flash3, pro25, flash25, lite25)
+- 누락 있으면 → AskUserQuestion:
+  ```
+  question: "누락된 Gemini 프로필을 생성하시겠습니까?"
+  header: "Gemini Profiles"
+  options:
+    - label: "생성 (Recommended)"
+      description: "누락된 프로필을 triflux-profiles.json에 추가"
+    - label: "건너뛰기"
+      description: "나중에 /tfx-profile --gemini로 관리"
+  ```
+
 #### 단계 4: CLI 진단
 
 `triflux doctor --json`을 Bash로 실행하여 CLI 존재 여부 확인.
@@ -120,6 +138,8 @@ options:
     description: "settings.json statusLine 등록"
   - label: "Codex 프로파일"
     description: "필수 프로파일 생성"
+  - label: "Gemini 프로필"
+    description: "triflux-profiles.json 생성/확인"
   - label: "CLI + MCP 진단"
     description: "CLI 존재 + MCP 인벤토리 확인"
 ```
