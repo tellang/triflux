@@ -57,23 +57,43 @@ function sleep(ms) {
 // ── 시작 ──
 
 function spawnGateway(srv) {
-  // 단일 명령 문자열 — shell: true에서 공백 인자를 올바르게 쿼팅
-  const cmdStr = `npx -y supergateway --stdio "${srv.cmd}" --port ${srv.port} --outputTransport sse --healthEndpoint /healthz`;
+  // 임시 .cmd 파일로 quoting 문제 회피
+  const cmdContent = `@echo off\nnpx -y supergateway --stdio "${srv.cmd}" --port ${srv.port} --outputTransport sse --healthEndpoint /healthz --cors "http://localhost"`;
+  const cmdFile = join(tmpdir(), `tfx-sg-${srv.name}.cmd`);
+  writeFileSync(cmdFile, cmdContent);
 
-  // detached: true → 독립 프로세스 그룹 (부모 종료 후 생존)
-  // shell: true → Windows에서 npx.cmd 해석
-  const child = spawn(cmdStr, [], {
-    detached: true,
-    stdio: 'ignore',
-    shell: true,
-    windowsHide: true,
-    env: process.env,
-  });
-  child.unref();
-  return child.pid;
+  // PowerShell Start-Process: Windows Job Object에서 벗어나 부모 종료 후 생존
+  execSync(
+    `powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath cmd.exe -ArgumentList '/c','${cmdFile.replaceAll("'", "''")}'"`
+  , { stdio: 'ignore', timeout: 10000 });
+}
+
+function ensureFirewallRule() {
+  if (process.platform !== 'win32') return;
+  const ports = SERVERS.map((s) => s.port).join(',');
+  const ruleName = 'TFX-MCP-Gateway-Block-External';
+  try {
+    // 기존 규칙 있으면 스킵
+    const check = execSync(
+      `netsh advfirewall firewall show rule name="${ruleName}" 2>&1`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 },
+    );
+    if (check.includes(ruleName)) return;
+  } catch { /* 규칙 없음 — 생성 */ }
+
+  try {
+    execSync(
+      `netsh advfirewall firewall add rule name="${ruleName}" dir=in action=block protocol=tcp localport=${ports} remoteip=any profile=any`,
+      { stdio: 'ignore', timeout: 5000 },
+    );
+    console.log(`[SEC] Firewall rule added: block external access to ports ${ports}`);
+  } catch {
+    console.log(`[SEC] WARNING: Could not add firewall rule — run as admin or manually block ports ${ports}`);
+  }
 }
 
 async function startAll() {
+  ensureFirewallRule();
   const launched = [];
 
   for (const srv of SERVERS) {
@@ -136,8 +156,14 @@ async function startAll() {
 function stopAll() {
   // supergateway + 하위 MCP 프로세스를 포트 기반으로 찾아 종료
   try {
-    const ps = `Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" | Where-Object { $_.CommandLine -match 'supergateway' } | ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null; Write-Output "[STOP] PID $($_.ProcessId)" }`;
-    const output = execSync(`powershell -NoProfile -Command "${ps}"`, {
+    // temp .ps1 파일로 bash/cmd 쿼팅 충돌 회피
+    const psFile = join(tmpdir(), 'tfx-sg-stop.ps1');
+    writeFileSync(psFile, [
+      `Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" |`,
+      `  Where-Object { $_.CommandLine -match 'supergateway' } |`,
+      `  ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null; Write-Output "[STOP] PID $($_.ProcessId)" }`,
+    ].join('\n'));
+    const output = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psFile}"`, {
       encoding: 'utf8',
       timeout: 10000,
       stdio: ['pipe', 'pipe', 'ignore'],
