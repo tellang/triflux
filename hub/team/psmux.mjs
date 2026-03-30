@@ -323,12 +323,15 @@ function escapeRegExp(value) {
 
 function psmux(args, opts = {}) {
   const normalizedArgs = normalizePsmuxArgs(args);
+  // PSMUX_SESSION 제거 — 기존 psmux 세션 내에서 호출 시 중첩 세션 차단 방지
+  const { PSMUX_SESSION: _, ...cleanEnv } = process.env;
   try {
     const result = childProcess.execFileSync(PSMUX_BIN, normalizedArgs, {
       encoding: "utf8",
       timeout: PSMUX_TIMEOUT_MS,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
+      env: cleanEnv,
       ...opts,
     });
     return result != null ? String(result).trim() : "";

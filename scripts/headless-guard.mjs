@@ -153,6 +153,11 @@ function deny(reason) {
 }
 
 async function main() {
+  // P0: TFX_ALLOW_DIRECT_CLI 환경변수 바이패스 — psmux 세션 생성 불가 시 수동 활성화
+  if (process.env.TFX_ALLOW_DIRECT_CLI === "1") {
+    nudge("[headless-guard] direct CLI mode (TFX_ALLOW_DIRECT_CLI=1)");
+  }
+
   // psmux 미설치 → 전부 통과
   if (!isPsmuxInstalled()) process.exit(0);
 
