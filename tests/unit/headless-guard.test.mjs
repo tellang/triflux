@@ -1,11 +1,11 @@
 // tests/unit/headless-guard.test.mjs — headless-guard 플래그 보존 테스트
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { BASH_EXE } from "../helpers/bash-path.mjs";
 
 const GUARD_PATH = join(process.cwd(), "scripts", "headless-guard.mjs");
 
@@ -20,6 +20,71 @@ async function loadGuard() {
   // headless-guard.mjs는 main()을 즉시 실행하므로 직접 import 불가.
   // 대신 parseRouteCommand 로직을 인라인 미러로 테스트.
   return null;
+}
+
+function createFakePsmux(binDir) {
+  if (process.platform === "win32") {
+    const cmdPath = join(binDir, "psmux.cmd");
+    writeFileSync(
+      cmdPath,
+      [
+        "@echo off",
+        "if \"%1\"==\"-V\" (",
+        "  echo psmux 9.9.9",
+        "  exit /b 0",
+        ")",
+        "exit /b 1",
+      ].join("\r\n"),
+      "utf8",
+    );
+    return cmdPath;
+  }
+
+  const shPath = join(binDir, "psmux");
+  writeFileSync(
+    shPath,
+    [
+      "#!/usr/bin/env sh",
+      "if [ \"$1\" = \"-V\" ]; then",
+      "  echo \"psmux 9.9.9\"",
+      "  exit 0",
+      "fi",
+      "exit 1",
+    ].join("\n"),
+    "utf8",
+  );
+  chmodSync(shPath, 0o755);
+  return shPath;
+}
+
+function runGuardWithBashCommand(command, extraEnv = {}) {
+  const sandboxDir = mkdtempSync(join(tmpdir(), "tfx-guard-runtime-"));
+  const binDir = join(sandboxDir, "bin");
+  mkdirSync(binDir, { recursive: true });
+  createFakePsmux(binDir);
+  const pathSep = process.platform === "win32" ? ";" : ":";
+  const originalPath = process.env.PATH || "";
+
+  try {
+    return spawnSync(process.execPath, [GUARD_PATH], {
+      input: JSON.stringify({
+        tool_name: "Bash",
+        tool_input: { command },
+      }),
+      encoding: "utf8",
+      timeout: 5000,
+      env: {
+        ...process.env,
+        ...extraEnv,
+        PATH: `${binDir}${pathSep}${originalPath}`,
+        TMPDIR: sandboxDir,
+        TEMP: sandboxDir,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } finally {
+    rmSync(sandboxDir, { recursive: true, force: true });
+  }
 }
 
 // parseRouteCommand 미러 (headless-guard.mjs와 동일 로직)
@@ -99,6 +164,33 @@ describe("parseRouteCommand", () => {
   it("timeout 추출", () => {
     const r = parseRouteCommand("bash ~/.claude/scripts/tfx-route.sh executor 'prompt' implement 300");
     assert.equal(r.flags.timeout, 300);
+  });
+});
+
+describe("headless-guard decision matrix (runtime)", () => {
+  it("psmux 설치 + direct codex exec는 deny되고 fallback+bypass 힌트를 함께 제공한다", () => {
+    const result = runGuardWithBashCommand("codex exec 'hello'");
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /--teammate-mode headless/u);
+    assert.match(result.stderr, /TFX_ALLOW_DIRECT_CLI=1/u);
+  });
+
+  it("psmux 설치 + direct gemini --prompt는 deny되고 fallback+bypass 힌트를 함께 제공한다", () => {
+    const result = runGuardWithBashCommand("gemini --prompt 'hello'");
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /--teammate-mode headless/u);
+    assert.match(result.stderr, /TFX_ALLOW_DIRECT_CLI=1/u);
+  });
+
+  it("TFX_ALLOW_DIRECT_CLI=1이면 direct CLI deny를 우회한다", () => {
+    const result = runGuardWithBashCommand("codex exec 'hello'", {
+      TFX_ALLOW_DIRECT_CLI: "1",
+    });
+    assert.equal(result.status, 0);
+
+    const payload = JSON.parse((result.stdout || "").trim());
+    assert.equal(payload?.hookSpecificOutput?.hookEventName, "PreToolUse");
+    assert.match(payload?.hookSpecificOutput?.additionalContext || "", /TFX_ALLOW_DIRECT_CLI=1/u);
   });
 });
 
@@ -270,7 +362,7 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
 
   it("캐시 ok:false + TTL 유효 → exit 0 (Node.js 미기동)", () => {
     writeFileSync(cacheFile, JSON.stringify({ ts: Date.now(), ok: false }));
-    const result = execFileSync("bash", [FAST_SH_PATH], {
+    const result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
       input: "{}",
       timeout: 5000,
       env: { ...process.env, TMPDIR: testTmpDir, TEMP: testTmpDir },
@@ -285,7 +377,7 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
     const expiredTs = Date.now() - (6 * 60 * 1000); // 6분 전
     writeFileSync(cacheFile, JSON.stringify({ ts: expiredTs, ok: false }));
     // This will exec node headless-guard.mjs which also exits 0 when psmux is not installed
-    const result = execFileSync("bash", [FAST_SH_PATH], {
+    const result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
       input: "{}",
       timeout: 10000,
       env: { ...process.env, TMPDIR: testTmpDir, TEMP: testTmpDir },
@@ -298,7 +390,7 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
   it("캐시 미존재 → node fallthrough", () => {
     // Remove cache file if exists
     try { rmSync(cacheFile); } catch {}
-    const result = execFileSync("bash", [FAST_SH_PATH], {
+    const result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
       input: "{}",
       timeout: 10000,
       env: { ...process.env, TMPDIR: testTmpDir, TEMP: testTmpDir },

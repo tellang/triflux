@@ -152,6 +152,11 @@ function deny(reason) {
   process.exit(2);
 }
 
+const HEADLESS_FALLBACK_COMMAND =
+  'Bash("tfx multi --teammate-mode headless --assign \'codex:prompt:role\' ...")';
+const DIRECT_CLI_BYPASS_HINT =
+  "로컬 디버깅이 목적이면 TFX_ALLOW_DIRECT_CLI=1로 일시 우회할 수 있습니다.";
+
 async function main() {
   // P0: TFX_ALLOW_DIRECT_CLI 환경변수 바이패스 — psmux 세션 생성 불가 시 수동 활성화
   if (process.env.TFX_ALLOW_DIRECT_CLI === "1") {
@@ -202,8 +207,9 @@ async function main() {
     // codex/gemini 직접 CLI 호출 → deny
     if (/\bcodex\s+exec\b/.test(cmd) || /\bgemini\s+(-p|--prompt)\b/.test(cmd)) {
       deny(
-        "[headless-guard] codex/gemini 직접 호출 대신 headless를 사용하세요. " +
-        'Bash("tfx multi --teammate-mode headless --assign \'codex:prompt:role\' ...")',
+        "[headless-guard] codex/gemini 직접 호출은 spawn-session에서 차단됩니다. " +
+        `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+        DIRECT_CLI_BYPASS_HINT,
       );
     }
 
@@ -310,7 +316,8 @@ async function main() {
     if (cliPatterns.some((p) => p.test(combined))) {
       deny(
         "[headless-guard] Codex/Gemini를 Agent()로 래핑하지 마세요. " +
-        'Bash("tfx multi --teammate-mode headless --assign \'codex:prompt:role\' ...")',
+        `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+        DIRECT_CLI_BYPASS_HINT,
       );
     }
   }

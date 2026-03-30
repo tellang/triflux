@@ -9,6 +9,7 @@ const ORIGINAL_ENV = {
   PSMUX_CAPTURE_ROOT: process.env.PSMUX_CAPTURE_ROOT,
   PSMUX_POLL_INTERVAL_MS: process.env.PSMUX_POLL_INTERVAL_MS,
   PSMUX_POLL_INTERVAL_SEC: process.env.PSMUX_POLL_INTERVAL_SEC,
+  PSMUX_SESSION: process.env.PSMUX_SESSION,
 };
 
 const restorers = [];
@@ -266,6 +267,30 @@ describe("resolvePane fallback (psmux title 미설정 우회)", () => {
     // title "worker-1"이 index 2에 있으므로, title 매칭 우선 → tfx-test:0.2
     const result = startCapture("tfx-test", "worker-1");
     assert.equal(result.paneId, "tfx-test:0.2");
+  });
+});
+
+describe("psmux nested-session protection", () => {
+  it("psmuxExec는 subprocess env에서 PSMUX_SESSION을 제거한다", async () => {
+    createTempCaptureRoot("psmux-nested-session-");
+    process.env.PSMUX_SESSION = "inside-psmux-session";
+    const calls = [];
+
+    const tracker = mock.method(childProcess, "execFileSync", (file, args, opts = {}) => {
+      const argv = Array.isArray(args) ? [...args] : [];
+      calls.push({ file, args: argv, opts });
+      if (argv[0] === "-V") return "psmux 3.3.0";
+      return "";
+    });
+    registerRestore(() => tracker.mock.restore());
+
+    const { psmuxExec } = await importFreshPsmux();
+    psmuxExec(["-V"]);
+
+    const versionCall = calls.find((call) => call.args[0] === "-V");
+    assert.ok(versionCall, "psmux -V 호출이 있어야 함");
+    assert.equal(versionCall.opts?.env?.PSMUX_SESSION, undefined);
+    assert.equal(process.env.PSMUX_SESSION, "inside-psmux-session");
   });
 });
 
