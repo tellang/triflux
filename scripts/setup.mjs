@@ -819,6 +819,19 @@ if (existsSync(mcpCheck)) {
   child.unref(); // 부모 프로세스와 분리 — 비동기 실행
 }
 
+// ── 캐시 빌드업 Phase 1 (백그라운드) ──
+
+const cacheBuildupScript = join(PLUGIN_ROOT, "scripts", "cache-buildup.mjs");
+if (existsSync(cacheBuildupScript)) {
+  const child2 = spawn(process.execPath, [cacheBuildupScript], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    cwd: process.cwd(),
+  });
+  child2.unref();
+}
+
 // ── /tmp 임시 파일 자동 정리 (setup 지연 방지: fire-and-forget) ──
 cleanupTmpFiles().catch(() => {});
 
