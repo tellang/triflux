@@ -2,8 +2,9 @@
 .tfx/
 .omc/
 .omx/
-.claude/
+.claude/**
 !.claude/agents/
+!.claude/agents/*.md
 .codex/
 .gemini/
 .serena/
@@ -51,6 +52,7 @@ dist/
 .env
 .npmrc
 tmp-*.log
+tests/hud/__mock_home__/
 
 # 바이너리/임시
 download.bin

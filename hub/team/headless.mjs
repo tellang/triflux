@@ -22,6 +22,7 @@ import {
 import { HANDOFF_INSTRUCTION_SHORT, processHandoff } from "./handoff.mjs";
 import { getBackend } from "./backend.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
+import { normalizeDashboardAnchor } from "./dashboard-anchor.mjs";
 import { createLogDashboard } from "./tui.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
@@ -608,9 +609,26 @@ export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
       "--", "psmux", "attach", "-t", sessionName,
     ], { detached: true, stdio: "ignore" });
     child.unref();
-    try { spawn("wt.exe", ["-w", "0", "mf", "up"], { detached: true, stdio: "ignore" }).unref(); } catch { /* 무시 */ }
+    // v7.2: mf up 제거 — 새 WT window/process로 attach하므로 포커스 이동 불필요
     return true;
   } catch { return false; }
+}
+
+export function buildDashboardAttachArgs(sessionName, dashboardLayout = "single", workerCount = 2, dashboardAnchor = "window") {
+  const safeName = String(sessionName).replace(/[^a-zA-Z0-9_\-]/g, "") || "tfx-session";
+  const resolvedDashboardLayout = resolveDashboardLayout(dashboardLayout, workerCount);
+  const resolvedDashboardAnchor = normalizeDashboardAnchor(dashboardAnchor);
+  const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
+  const viewerArgs = [
+    "--profile", "triflux",
+    "--title", `▲ ${safeName}`,
+    "--", "node", viewerPath, "--session", safeName, "--result-dir", RESULT_DIR, "--layout", resolvedDashboardLayout,
+  ];
+
+  if (resolvedDashboardAnchor === "tab") {
+    return ["-w", "0", "nt", ...viewerArgs];
+  }
+  return ["-w", "new", ...viewerArgs];
 }
 
 /**
@@ -619,26 +637,17 @@ export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
  * @param {number} workerCount
  * @param {string} [dashboardLayout='single']
  * @param {number} [dashboardSize=0.50] — 대시보드 분할 비율 (0.2~0.8)
+ * @deprecated dashboardSize — anchor=window|tab 모드에서는 무시됨
+ * @param {string} [dashboardAnchor='window'] — dashboard anchor 정책(window|tab)
  * @returns {boolean}
  */
-export function attachDashboardTab(sessionName, workerCount = 2, dashboardLayout = "single", dashboardSize = 0.40) {
+export function attachDashboardTab(sessionName, workerCount = 2, dashboardLayout = "single", dashboardSize = 0.40, dashboardAnchor = "window") {
   try { execSync("where wt.exe", { stdio: "ignore" }); } catch { return false; }
   ensureWtProfile(workerCount);
-  const resolvedDashboardLayout = resolveDashboardLayout(dashboardLayout, workerCount);
-
-  // v7.1.3: 대시보드만 스플릿 (psmux attach 대신 tui-viewer 직접 실행)
-  // raw CLI 출력은 사용자에게 불필요 — 대시보드 로그만 표시
-  const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
-  const sizeStr = String(Math.round(dashboardSize * 100) / 100);
   try {
-    const child = spawn("wt.exe", [
-      "-w", "0", "sp", "-H", "-s", sizeStr,
-      "--profile", "triflux",
-      "--title", `▲ ${sessionName}`,
-      "--", "node", viewerPath, "--session", sessionName, "--result-dir", RESULT_DIR, "--layout", resolvedDashboardLayout,
-    ], { detached: true, stdio: "ignore" });
+    const args = buildDashboardAttachArgs(sessionName, dashboardLayout, workerCount, dashboardAnchor);
+    const child = spawn("wt.exe", args, { detached: true, stdio: "ignore" });
     child.unref();
-    try { spawn("wt.exe", ["-w", "0", "mf", "up"], { detached: true, stdio: "ignore" }).unref(); } catch {}
     return true;
   } catch { return false; }
 }
@@ -677,6 +686,7 @@ export function getProgressSnapshots(sessionName, dispatches, lines = 15) {
  * @param {number} [opts.progressIntervalSec=0]
  * @param {boolean} [opts.autoAttach=false] — Windows Terminal 자동 attach
  * @param {string} [opts.dashboardLayout='single'] — dashboard viewer 레이아웃
+ * @param {string} [opts.dashboardAnchor='window'] — dashboard anchor 정책(window|tab)
  * @param {AbortSignal} [opts.signal] — abort 시 자동 세션 정리
  * @param {number} [opts.maxIdleSec=0] — 유휴 시 자동 정리 (0=비활성)
  * @returns {Promise<{
@@ -696,6 +706,7 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
     autoAttach = false,
     dashboard = false,
     dashboardSize = 0.40,
+    dashboardAnchor = "window",
     signal,
     maxIdleSec = 0,
     ...runOpts
@@ -717,6 +728,7 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
           assignments.length,
           event.dashboardLayout || resolveDashboardLayout(headlessOpts.dashboardLayout, assignments.length),
           dashboardSize,
+          dashboardAnchor,
         );
       } else {
         autoAttachTerminal(sessionName, {}, assignments.length);

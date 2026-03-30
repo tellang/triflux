@@ -5,6 +5,7 @@ import {
   parseDashboardLayout,
   resolveDashboardLayout,
 } from "../../hub/team/dashboard-layout.mjs";
+import { parseDashboardAnchor } from "../../hub/team/dashboard-anchor.mjs";
 import { parseTeamArgs } from "../../hub/team/cli/commands/start/parse-args.mjs";
 import { createLogDashboard } from "../../hub/team/tui.mjs";
 
@@ -26,6 +27,16 @@ describe("dashboard-layout", () => {
     const parsed = parseTeamArgs(["--dashboard-layout", "auto", "fix", "bug"]);
     assert.equal(parsed.dashboardLayout, "auto");
     assert.equal(parsed.dashboard, true);
+  });
+
+  it("dashboard anchor 기본값은 window", () => {
+    assert.equal(parseDashboardAnchor(""), "window");
+    assert.equal(parseDashboardAnchor("unknown"), "window");
+  });
+
+  it("parseTeamArgs가 --dashboard-anchor 플래그를 보존한다", () => {
+    const parsed = parseTeamArgs(["--dashboard-anchor", "tab", "fix", "bug"]);
+    assert.equal(parsed.dashboardAnchor, "tab");
   });
 
   it("createLogDashboard가 resolved layout을 유지한다", () => {

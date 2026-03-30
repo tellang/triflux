@@ -1,5 +1,6 @@
 import { normalizeLayout, normalizeTeammateMode } from "../../services/runtime-mode.mjs";
 import { parseDashboardLayout } from "../../../dashboard-layout.mjs";
+import { parseDashboardAnchor } from "../../../dashboard-anchor.mjs";
 
 // --assign 파싱 시 마지막 콜론 뒤를 role로 인식할 알려진 역할/CLI 이름
 const KNOWN_ROLES = new Set([
@@ -50,6 +51,7 @@ export function parseTeamArgs(args = []) {
   let dashboard = true;
   let dashboardLayout = "single";
   let dashboardSize = 0.40;
+  let dashboardAnchor = "window";
   let mcpProfile = "";
   let model = "";
 
@@ -80,6 +82,8 @@ export function parseTeamArgs(args = []) {
       dashboardLayout = parseDashboardLayout(args[++index]);
     } else if (current === "--dashboard-size" && args[index + 1]) {
       dashboardSize = Math.min(0.8, Math.max(0.2, parseFloat(args[++index]) || 0.50));
+    } else if (current === "--dashboard-anchor" && args[index + 1]) {
+      dashboardAnchor = parseDashboardAnchor(args[++index]);
     } else if (current === "--no-progressive") {
       progressive = false;
     } else if (current === "--timeout" && args[index + 1]) {
@@ -109,6 +113,7 @@ export function parseTeamArgs(args = []) {
     dashboard,
     dashboardLayout,
     dashboardSize,
+    dashboardAnchor,
     mcpProfile,
     model,
   };

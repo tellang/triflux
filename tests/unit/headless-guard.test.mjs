@@ -348,9 +348,22 @@ describe("P2: HANDOFF_INSTRUCTION_SHORT", () => {
 
 const FAST_SH_PATH = join(process.cwd(), "scripts", "headless-guard-fast.sh");
 
+function hasBashRuntime() {
+  try {
+    execFileSync("bash", ["--version"], {
+      timeout: 3000,
+      stdio: ["ignore", "ignore", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe("headless-guard-fast.sh — bash pre-filter", () => {
   const testTmpDir = join(tmpdir(), "tfx-guard-test-" + process.pid);
   const cacheFile = join(testTmpDir, "tfx-psmux-check.json");
+  const bashAvailable = hasBashRuntime();
 
   before(() => {
     mkdirSync(testTmpDir, { recursive: true });
@@ -360,7 +373,11 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
     rmSync(testTmpDir, { recursive: true, force: true });
   });
 
-  it("캐시 ok:false + TTL 유효 → exit 0 (Node.js 미기동)", () => {
+  it("캐시 ok:false + TTL 유효 → exit 0 (Node.js 미기동)", (t) => {
+    if (!bashAvailable) {
+      t.skip("bash 미설치 환경");
+      return;
+    }
     writeFileSync(cacheFile, JSON.stringify({ ts: Date.now(), ok: false }));
     const result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
       input: "{}",
@@ -373,7 +390,11 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
     assert.ok(true, "fast.sh exited 0 on cached ok:false");
   });
 
-  it("캐시 만료(5분 초과) → node fallthrough", () => {
+  it("캐시 만료(5분 초과) → node fallthrough", (t) => {
+    if (!bashAvailable) {
+      t.skip("bash 미설치 환경");
+      return;
+    }
     const expiredTs = Date.now() - (6 * 60 * 1000); // 6분 전
     writeFileSync(cacheFile, JSON.stringify({ ts: expiredTs, ok: false }));
     // This will exec node headless-guard.mjs which also exits 0 when psmux is not installed
@@ -387,7 +408,11 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
     assert.ok(true, "fast.sh fell through to node on expired cache");
   });
 
-  it("캐시 미존재 → node fallthrough", () => {
+  it("캐시 미존재 → node fallthrough", (t) => {
+    if (!bashAvailable) {
+      t.skip("bash 미설치 환경");
+      return;
+    }
     // Remove cache file if exists
     try { rmSync(cacheFile); } catch {}
     const result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
