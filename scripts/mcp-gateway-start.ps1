@@ -34,27 +34,30 @@ function Test-PortInUse {
 }
 
 function Stop-AllGateways {
-  if (-not (Test-Path $PidFile)) {
-    Write-Host '[gateway] PID file not found — nothing to stop'
-    return
-  }
-  try {
-    $entries = Get-Content $PidFile -Raw | ConvertFrom-Json
-    foreach ($entry in $entries) {
+  # WMI CommandLine 기반 — PID 매니페스트 의존 제거 (F-02)
+  $procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" |
+    Where-Object { $_.CommandLine -match 'supergateway' }
+
+  if ($procs) {
+    foreach ($p in $procs) {
       try {
-        Stop-Process -Id $entry.pid -Force -ErrorAction SilentlyContinue
-        Write-Host "[STOP] $($entry.name) (PID $($entry.pid))"
+        & taskkill /F /T /PID $p.ProcessId 2>$null | Out-Null
+        Write-Host "[STOP] PID $($p.ProcessId)"
       }
       catch {
-        Write-Host "[SKIP] $($entry.name) (PID $($entry.pid)) — already gone"
+        Write-Host "[SKIP] PID $($p.ProcessId) — already gone"
       }
     }
+  }
+  else {
+    Write-Host '[gateway] No supergateway processes found'
+  }
+
+  if (Test-Path $PidFile) {
     Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
-    Write-Host '[gateway] All gateways stopped'
+    Write-Host '[gateway] PID file removed'
   }
-  catch {
-    Write-Error "[gateway] Failed to parse PID file: $_"
-  }
+  Write-Host '[gateway] All gateways stopped'
 }
 
 function Start-AllGateways {
