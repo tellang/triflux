@@ -62,32 +62,64 @@ options:
   - label: "나머��� 전부 제외"
 ```
 
-### Step 3: 태스크 분류 및 OMX 스킬 매핑
+### Step 3: 태스크 분류 및 Codex 스킬 매핑
+
+#### 3-1. 설치된 스킬 동적 발견
+
+Codex에 설치된 스킬을 스캔하여 사용 가능한 목록을 구성한다.
+OMX 스킬뿐 아니라 OpenAI 빌트인, 커스텀 스킬 모두 포함.
+
+```bash
+# 스킬 스캔 경로 (우선순위 순)
+~/.codex/skills/*/SKILL.md      # 유저 레벨 (OMX, 커스텀)
+.agents/skills/*/SKILL.md       # 레포 레벨
+~/.codex/.tmp/plugins/**/SKILL.md  # 플러그인 스킬
+```
+
+각 SKILL.md의 frontmatter에서 `name`과 `description`을 추출하여 역할 매핑:
+
+| 역할 | description 키워드 매칭 | 예시 |
+|------|------------------------|------|
+| 계획 (plan) | "plan", "계획", "decompos" | `$plan` |
+| 자율 실행 (auto) | "autonomous", "자율", "auto-execute" | `$autopilot` |
+| 반복 완료 (persist) | "loop", "반복", "completion", "persist" | `$ralph` |
+| 조사 (investigate) | "investigate", "research", "조사" | `$plan` (단독) |
+| 코드 리뷰 (review) | "review", "리뷰" | `$code-review` |
+
+**스킬 0개인 경우** → 스킬 없이 프롬프트 직접 전달 (codex에 지시만 포함).
+
+#### 3-2. 태스크 유형 분류
 
 각 태스크 파일의 내용을 읽고 자동 분류한다:
 
-| 유형 | 판별 기준 (파일 내용) | 기본 OMX 스킬 |
-|------|----------------------|--------------|
-| 구현 (implement) | "구현", "implement", "추가", "변경", "fix" | `$plan` → `$autopilot` |
-| 조사 (investigate) | "조사", "investigation", "재현", "reproduce" | `$plan` (조사 모드) |
-| 리팩터링 (refactor) | "리팩터", "refactor", "정리", "개선" | `$plan` → `$ralph` |
+| 유형 | 판별 기준 (파일 내용) | 기본 스킬 조합 |
+|------|----------------------|---------------|
+| 구현 (implement) | "구현", "implement", "추가", "변경", "fix" | plan → auto |
+| 조사 (investigate) | "조사", "investigation", "재현", "reproduce" | plan (단독) |
+| 리팩터링 (refactor) | "리팩터", "refactor", "정리", "개선" | plan → persist |
+
+유형이 결정되면 3-1에서 발견한 스킬 중 해당 역할에 매칭되는 스킬을 자동 선택.
+매칭 실패 시 → 프롬프트에 역할을 텍스트로 직접 기술.
+
+#### 3-3. 사용자 오버라이드
 
 **사용자가 스킬을 명시한 경우** → 해당 스킬 사용.
 
 **미지정이고 자동 분류가 모호한 경우** → AskUserQuestion:
 
 ```
-question: "어떤 OMX 워크플로우를 사용하시겠습니까?"
-header: "OMX 스킬"
+question: "어떤 Codex 스킬을 사용하시겠습니까?"
+header: "설치된 스킬 ({N}개 발견)"
 options:
-  - label: "$plan → $autopilot"
-    description: "계획 후 자율 구현 (기본)"
-  - label: "$plan → $ralph"
+  # 동적 생성: 발견된 스킬에서 옵션 구성
+  - label: "${plan_skill} → ${auto_skill}"
+    description: "{plan_skill.description} → {auto_skill.description}"
+  - label: "${plan_skill} → ${persist_skill}"
     description: "계획 후 완료까지 반복 실행"
-  - label: "$plan 만"
+  - label: "${plan_skill} 만"
     description: "계획 수립만 (조사/분석용)"
-  - label: "$autopilot 직행"
-    description: "계획 없이 바로 자율 실행"
+  - label: "스킬 없이 실행"
+    description: "프롬프트만 전달, $skill 미사용"
 ```
 
 ### Step 4: 프로파일 자동 라우팅
