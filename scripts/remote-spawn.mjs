@@ -14,6 +14,7 @@ import { execFileSync, execSync, spawn } from "child_process";
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { homedir, platform as getPlatform, tmpdir } from "os";
 import { join, posix as posixPath, resolve, win32 as win32Path } from "path";
+import { fileURLToPath } from "url";
 import {
   attachPsmuxSession,
   capturePsmuxPane,
@@ -33,6 +34,11 @@ const REMOTE_ENV_TTL_MS = 86_400_000;
 const REMOTE_ENV_CACHE_DIR = resolve(".omc", "state", "remote-env");
 const SSH_PROMPT_PATTERN = /(\$|%|#|PS |>)\s*$/;
 const IS_WINDOWS_LOCAL = getPlatform() === "win32";
+const SELF_SCRIPT_PATH = fileURLToPath(import.meta.url);
+
+const DEFAULT_CLEANUP_WATCH_POLL_MS = 1000;
+const DEFAULT_CLEANUP_WATCH_GRACE_MS = 1500;
+const DEFAULT_CLEANUP_WATCH_MAX_MS = 60 * 60 * 1000;
 
 const SAFE_HOST_RE = /^[a-zA-Z0-9._-]+$/;
 const SAFE_DIR_RE = /^[a-zA-Z0-9_.~\/:\\-]+$/;
@@ -73,6 +79,63 @@ function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
 }
 
+function sleepMsAsync(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, Math.max(0, ms)));
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function buildPwshExitTail() {
+  return "$trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; exit $trifluxExit";
+}
+
+export function buildPosixExitTail() {
+  return "exit $?";
+}
+
+export function buildRemoteBootstrapCommand(host) {
+  return `ssh -t ${host}; ${buildPwshExitTail()}`;
+}
+
+export function buildLocalClaudeCommand(claudePathNorm, permissionFlags = "") {
+  return `& '${escapePwshSingleQuoted(claudePathNorm)}'${permissionFlags ? ` ${permissionFlags}` : ""}; ${buildPwshExitTail()}`;
+}
+
+export function buildRemoteClaudeCommand(env, permissionFlags = "") {
+  if (env.shell === "pwsh") {
+    return `& "${escapePwshDoubleQuoted(env.claudePath)}"${permissionFlags ? ` ${permissionFlags}` : ""}; ${buildPwshExitTail()}`;
+  }
+  return `${shellQuote(env.claudePath)}${permissionFlags ? ` ${permissionFlags}` : ""}; ${buildPosixExitTail()}`;
+}
+
+export function resolveCleanupWatcherTimingOptions(source = {}, env = process.env) {
+  return Object.freeze({
+    graceMs: parsePositiveInt(source.graceMs ?? env.TFX_SPAWN_CLEANUP_GRACE_MS, DEFAULT_CLEANUP_WATCH_GRACE_MS),
+    maxMs: parsePositiveInt(source.maxMs ?? env.TFX_SPAWN_CLEANUP_MAX_MS, DEFAULT_CLEANUP_WATCH_MAX_MS),
+    pollMs: parsePositiveInt(source.pollMs ?? env.TFX_SPAWN_CLEANUP_POLL_MS, DEFAULT_CLEANUP_WATCH_POLL_MS),
+  });
+}
+
+export function buildSpawnCleanupWatcherArgs(sessionName, paneId, timingOptions = {}) {
+  const timings = resolveCleanupWatcherTimingOptions(timingOptions);
+  return [
+    SELF_SCRIPT_PATH,
+    "--watch-cleanup",
+    sessionName,
+    "--pane",
+    paneId,
+    "--poll-ms",
+    String(timings.pollMs),
+    "--grace-ms",
+    String(timings.graceMs),
+    "--max-ms",
+    String(timings.maxMs),
+  ];
+}
+
 function usageText() {
   return `Usage:
   remote-spawn --local [--dir <path>] [--prompt "task"] [--handoff <file>]
@@ -105,6 +168,10 @@ function parseArgs(argv) {
   let local = false;
   let sessionName = null;
   let probeHost = null;
+  let watchPane = null;
+  let watchGraceMs = null;
+  let watchPollMs = null;
+  let watchMaxMs = null;
   const promptParts = [];
 
   for (let index = 2; index < argv.length; index += 1) {
@@ -168,6 +235,32 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--watch-cleanup" && argv[index + 1]) {
+      command = "watch-cleanup";
+      sessionName = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--pane" && argv[index + 1]) {
+      watchPane = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--grace-ms" && argv[index + 1]) {
+      watchGraceMs = parsePositiveInt(argv[index + 1], null);
+      index += 1;
+      continue;
+    }
+    if (arg === "--poll-ms" && argv[index + 1]) {
+      watchPollMs = parsePositiveInt(argv[index + 1], null);
+      index += 1;
+      continue;
+    }
+    if (arg === "--max-ms" && argv[index + 1]) {
+      watchMaxMs = parsePositiveInt(argv[index + 1], null);
+      index += 1;
+      continue;
+    }
 
     promptParts.push(arg);
   }
@@ -182,6 +275,10 @@ function parseArgs(argv) {
     probeHost,
     prompt: mergedPrompt,
     sessionName,
+    watchGraceMs,
+    watchMaxMs,
+    watchPane,
+    watchPollMs,
   };
 }
 
@@ -641,6 +738,65 @@ async function waitForRemotePrompt(sessionName, paneId) {
   throw new Error(`ssh prompt wait timed out for ${sessionName}: ${capturePsmuxPane(paneId, 20)}`);
 }
 
+/** @returns {boolean|null} true=dead, false=alive, null=probe 실패 */
+function isPrimaryPaneDead(paneId) {
+  try {
+    const output = psmuxExec(["list-panes", "-t", paneId, "-F", "#{pane_dead}"]);
+    const lines = output.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+    if (lines.some((line) => line === "1")) return true;
+    return false;
+  } catch {
+    return null;
+  }
+}
+
+async function runSpawnCleanupWatcher(sessionName, paneId, timingOptions = {}) {
+  const timings = resolveCleanupWatcherTimingOptions(timingOptions);
+  const startedAt = Date.now();
+  let consecutiveErrors = 0;
+
+  while (Date.now() - startedAt <= timings.maxMs) {
+    if (!psmuxSessionExists(sessionName)) {
+      return;
+    }
+
+    const dead = isPrimaryPaneDead(paneId);
+    if (dead === null) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= 10) return; // psmux 반복 실패 시 조기 종료
+    } else {
+      consecutiveErrors = 0;
+    }
+    if (dead === true) {
+      await sleepMsAsync(timings.graceMs);
+
+      if (!psmuxSessionExists(sessionName)) {
+        return;
+      }
+
+      if (isPrimaryPaneDead(paneId) === true) {
+        try { killPsmuxSession(sessionName); } catch {}
+        return;
+      }
+    }
+
+    await sleepMsAsync(timings.pollMs);
+  }
+}
+
+function startSpawnSessionCleanupWatcher(sessionName, paneId, timingOptions = {}) {
+  const args = buildSpawnCleanupWatcherArgs(sessionName, paneId, timingOptions);
+  try {
+    spawn(process.execPath, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    }).unref();
+  } catch {
+    // watcher 시작 실패는 spawn 자체 실패로 보지 않는다.
+  }
+}
+
 function spawnLocal(args, claudePath, prompt) {
   if (!shouldUsePsmux()) {
     spawnLocalFallback(args, claudePath, prompt);
@@ -681,15 +837,18 @@ function spawnLocal(args, claudePath, prompt) {
         `Remove-Item -ErrorAction SilentlyContinue $t`,
         `Remove-Item -ErrorAction SilentlyContinue $MyInvocation.MyCommand.Definition`,
         `& $c @f $raw`,
+        `$trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }`,
+        `exit $trifluxExit`,
       ].join("\n");
       const scriptFile = join(tmpdir(), `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`);
       writeFileSync(scriptFile, scriptContent, { encoding: "utf8" });
-      sendKeysToPane(paneId, `pwsh -NoProfile -NoExit -File '${escapePwshSingleQuoted(normalizeCommandPath(scriptFile))}'`);
+      sendKeysToPane(paneId, `pwsh -NoProfile -File '${escapePwshSingleQuoted(normalizeCommandPath(scriptFile))}'; ${buildPwshExitTail()}`);
     } else {
-      const command = `& '${escapePwshSingleQuoted(claudePathNorm)}'${permissionFlags ? ` ${permissionFlags}` : ""}`;
+      const command = buildLocalClaudeCommand(claudePathNorm, permissionFlags);
       sendKeysToPane(paneId, command);
     }
 
+    startSpawnSessionCleanupWatcher(sessionName, paneId);
     openAttachTab(sessionName, "Claude@local");
     console.log(sessionName);
   } catch (err) {
@@ -722,24 +881,23 @@ async function spawnRemote(args, prompt) {
 
   createPsmuxSession(sessionName, { layout: "1xN", paneCount: 1 });
   try {
-    sendKeysToPane(paneId, `ssh -t ${host}`);
+    sendKeysToPane(paneId, buildRemoteBootstrapCommand(host));
     await waitForRemotePrompt(sessionName, paneId);
 
+    const claudeCommand = buildRemoteClaudeCommand(env, permissionFlags);
     if (env.shell === "pwsh") {
-      const claudeCommand = `& "${escapePwshDoubleQuoted(env.claudePath)}"${permissionFlags ? ` ${permissionFlags}` : ""}`;
       sendKeysToPane(paneId, `cd '${escapePwshSingleQuoted(resolvedDir)}'`);
-      sendKeysToPane(paneId, claudeCommand);
     } else {
-      const claudeCommand = `${shellQuote(env.claudePath)}${permissionFlags ? ` ${permissionFlags}` : ""}`;
       sendKeysToPane(paneId, `cd ${shellQuote(resolvedDir)}`);
-      sendKeysToPane(paneId, claudeCommand);
     }
+    sendKeysToPane(paneId, claudeCommand);
 
     if (prompt) {
       sleepMs(2000);
       sendKeysToPane(paneId, prompt);
     }
 
+    startSpawnSessionCleanupWatcher(sessionName, paneId);
     openAttachTab(sessionName, `Claude@${host}`);
     console.log(sessionName);
   } catch (err) {
@@ -794,6 +952,21 @@ async function waitForClaudeReady(sessionName, timeoutSec = 60) {
 
 async function main() {
   const args = parseArgs(process.argv);
+
+  if (args.command === "watch-cleanup") {
+    if (!args.sessionName) {
+      console.error("--watch-cleanup requires a session name");
+      process.exit(1);
+    }
+
+    const paneId = args.watchPane || `${args.sessionName}:0.0`;
+    await runSpawnCleanupWatcher(args.sessionName, paneId, {
+      graceMs: args.watchGraceMs,
+      maxMs: args.watchMaxMs,
+      pollMs: args.watchPollMs,
+    });
+    return;
+  }
 
   if (args.command === "list") {
     console.log(listSpawnSessions().join("\n"));
@@ -865,7 +1038,10 @@ async function main() {
   await spawnRemote(args, prompt);
 }
 
-main().catch((error) => {
-  console.error(error?.message || String(error));
-  process.exit(1);
-});
+const selfRun = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+if (selfRun) {
+  main().catch((error) => {
+    console.error(error?.message || String(error));
+    process.exit(1);
+  });
+}

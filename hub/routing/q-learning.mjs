@@ -130,7 +130,8 @@ export class QLearningRouter {
     this._gamma = opts.discountFactor ?? 0.9;
     this._epsilon = opts.epsilon ?? 0.3;
     this._epsilonDecay = opts.epsilonDecay ?? 0.995;
-    this._epsilonMin = opts.epsilonMin ?? 0.05;
+    // epsilon=0 시에도 최소 탐색 보장 (pure-exploit 방지)
+    this._epsilonMin = opts.epsilonMin ?? Math.max(0.01, Math.min(0.05, this._epsilon));
     this._minConfidence = opts.minConfidence ?? 0.6;
     this._modelPath = opts.modelPath ?? join(homedir(), '.omc', 'routing-model.json');
 
