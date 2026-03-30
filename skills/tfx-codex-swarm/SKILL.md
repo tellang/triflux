@@ -64,19 +64,31 @@ options:
 
 ### Step 3: 태스크 분류 및 Codex 스킬 매핑
 
-#### 3-1. 설치된 스킬 동적 발견
+#### 3-1. 설치된 스킬 캐시 참조
 
-Codex에 설치된 스킬을 스캔하여 사용 가능한 목록을 구성한다.
-OMX 스킬뿐 아니라 OpenAI 빌트인, 커스텀 스킬 모두 포함.
+`tfx setup` 또는 `tfx update` 실행 시 Codex 설치 스킬을 스캔하여 캐시에 저장한다.
+스웜 스킬은 매번 스캔하지 않고 **캐시 파일만 읽는다**.
 
-```bash
-# 스킬 스캔 경로 (우선순위 순)
-~/.codex/skills/*/SKILL.md      # 유저 레벨 (OMX, 커스텀)
-.agents/skills/*/SKILL.md       # 레포 레벨
-~/.codex/.tmp/plugins/**/SKILL.md  # 플러그인 스킬
+```
+캐시 경로: .omc/cache/codex-skills.json
+생성 시점: tfx setup / tfx update
 ```
 
-각 SKILL.md의 frontmatter에서 `name`과 `description`을 추출하여 역할 매핑:
+캐시 구조:
+```json
+{
+  "scanned_at": "2026-03-30T16:00:00Z",
+  "skills": [
+    {"name": "autopilot", "role": "auto", "description": "Full autonomous execution..."},
+    {"name": "ralph", "role": "persist", "description": "Persistent loop until..."},
+    {"name": "plan", "role": "plan", "description": "Strategic planning..."}
+  ]
+}
+```
+
+캐시 미존재 시 → fallback으로 OMX 기본 매핑 사용 (하위 호환).
+
+역할 매핑 기준 (tfx setup이 스캔 시 description에서 추출):
 
 | 역할 | description 키워드 매칭 | 예시 |
 |------|------------------------|------|
