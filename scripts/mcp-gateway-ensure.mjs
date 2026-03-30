@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { spawn } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -35,18 +35,16 @@ function hasManifest() {
   return existsSync(PID_FILE);
 }
 
-/** mcp-gateway-start.mjs를 detached로 기동 */
+/** mcp-gateway-start.mjs를 독립 프로세스로 기동 */
 function startGateway() {
   const scriptPath = join(PLUGIN_ROOT, 'scripts', 'mcp-gateway-start.mjs');
   if (!existsSync(scriptPath)) return false;
 
   try {
-    // hub-ensure.mjs 패턴: cmd.exe /c start /b → hook timeout에서 생존
-    const child = spawn('cmd.exe', ['/c', 'start', '/b', '', process.execPath, scriptPath], {
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    child.unref();
+    // PowerShell Start-Process: Windows Job Object에서 벗어나 부모 종료 후 생존
+    execSync(
+      `powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath '${process.execPath}' -ArgumentList '${scriptPath.replaceAll("'", "''")}'"`
+    , { stdio: 'ignore', timeout: 10000 });
     return true;
   } catch {
     return false;
