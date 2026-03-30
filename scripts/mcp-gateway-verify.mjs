@@ -57,7 +57,7 @@ async function main() {
       : `${downCount}/${entries.length} gateways down`,
   );
 
-  process.exit(downCount > 0 ? 1 : 0);
+  process.exitCode = downCount > 0 ? 1 : 0;
 }
 
 main();

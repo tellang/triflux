@@ -58,7 +58,7 @@ function sleep(ms) {
 
 function spawnGateway(srv) {
   // 임시 .cmd 파일로 quoting 문제 회피
-  const cmdContent = `@echo off\nnpx -y supergateway --stdio "${srv.cmd}" --port ${srv.port} --outputTransport sse --healthEndpoint /healthz`;
+  const cmdContent = `@echo off\nnpx -y supergateway --stdio "${srv.cmd}" --port ${srv.port} --outputTransport sse --healthEndpoint /healthz --cors "http://localhost"`;
   const cmdFile = join(tmpdir(), `tfx-sg-${srv.name}.cmd`);
   writeFileSync(cmdFile, cmdContent);
 
@@ -68,7 +68,32 @@ function spawnGateway(srv) {
   , { stdio: 'ignore', timeout: 10000 });
 }
 
+function ensureFirewallRule() {
+  if (process.platform !== 'win32') return;
+  const ports = SERVERS.map((s) => s.port).join(',');
+  const ruleName = 'TFX-MCP-Gateway-Block-External';
+  try {
+    // 기존 규칙 있으면 스킵
+    const check = execSync(
+      `netsh advfirewall firewall show rule name="${ruleName}" 2>&1`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 },
+    );
+    if (check.includes(ruleName)) return;
+  } catch { /* 규칙 없음 — 생성 */ }
+
+  try {
+    execSync(
+      `netsh advfirewall firewall add rule name="${ruleName}" dir=in action=block protocol=tcp localport=${ports} remoteip=any profile=any`,
+      { stdio: 'ignore', timeout: 5000 },
+    );
+    console.log(`[SEC] Firewall rule added: block external access to ports ${ports}`);
+  } catch {
+    console.log(`[SEC] WARNING: Could not add firewall rule — run as admin or manually block ports ${ports}`);
+  }
+}
+
 async function startAll() {
+  ensureFirewallRule();
   const launched = [];
 
   for (const srv of SERVERS) {
