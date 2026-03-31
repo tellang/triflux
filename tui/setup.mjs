@@ -326,6 +326,56 @@ function showSummary(results) {
   }
 }
 
+// ── Star Request ──
+
+async function starRequest() {
+  let ghOk = false;
+  try {
+    execFileSync("gh", ["auth", "status"], {
+      timeout: 5000, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
+    });
+    ghOk = true;
+  } catch {}
+
+  if (!ghOk) {
+    console.log();
+    info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
+    console.log();
+    return;
+  }
+
+  // gh 인증됨 — 스타 여부 확인
+  let alreadyStarred = false;
+  try {
+    execFileSync("gh", ["api", "user/starred/tellang/triflux"], {
+      timeout: 5000, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
+    });
+    alreadyStarred = true;
+  } catch {}
+
+  console.log();
+
+  if (alreadyStarred) {
+    ok(`이미 함께하고 계시군요. ${AMBER}⭐${RESET}`);
+    console.log();
+    return;
+  }
+
+  if (await confirm(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다.`, true)) {
+    try {
+      execFileSync("gh", ["api", "-X", "PUT", "/user/starred/tellang/triflux"], {
+        timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
+      });
+      ok(`함께해 주셔서 감사합니다. ${AMBER}⭐${RESET}`);
+    } catch {
+      info(`${CYAN}https://github.com/tellang/triflux${RESET}`);
+    }
+  } else {
+    console.log(`     ${DIM}${CYAN}https://github.com/tellang/triflux${RESET}`);
+  }
+  console.log();
+}
+
 // ── Main Menu ──
 
 const MENU = [
@@ -357,6 +407,7 @@ async function main() {
       case 0: {
         const results = await runWizard();
         showSummary(results);
+        await starRequest();
         break;
       }
 

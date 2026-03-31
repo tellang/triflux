@@ -930,6 +930,22 @@ function cmdSetup(options = {}) {
     warn("HUD 파일 없음 — 먼저 파일 동기화 필요");
   }
 
+  // Star request
+  try {
+    execFileSync("gh", ["auth", "status"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      execFileSync("gh", ["api", "user/starred/tellang/triflux"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
+      console.log();
+      ok(`이미 함께하고 계시군요. ${AMBER}⭐${RESET}`);
+    } catch {
+      console.log();
+      info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
+    }
+  } catch {
+    console.log();
+    info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
+  }
+
   console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}\n`);
 }
 
