@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Tri-CLI Orchestration with Consensus Intelligence</strong><br>
-  <em>Claude + Codex + Gemini — 3-party debate, anti-herding verification, and 35 skills with Deep/Light variants.</em>
+  <em>Claude + Codex + Gemini — natural language routing, cross-model review, 38 skills with Deep/Light variants.</em>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
   <a href="#tri-cli-consensus">Tri-CLI Consensus</a> ·
-  <a href="#35-skills">35 Skills</a> ·
+  <a href="#38-skills">38 Skills</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#deep-vs-light">Deep vs Light</a> ·
   <a href="#security">Security</a>
@@ -80,21 +80,26 @@ tfx setup
 
 ---
 
-## What's New in v8
+## What's New in v9
 
-**triflux v8** introduces **Tri-CLI Consensus Intelligence** — a fundamentally new approach where Claude, Codex, and Gemini independently analyze, then cross-validate through structured debate. Every Deep skill guarantees anti-herding (no bias contamination) and consensus-gated output.
+**triflux v9** introduces **Harness-Native Intelligence** — speak naturally, and triflux routes to the right skill automatically. Cross-model review ensures no model approves its own work.
 
-### Highlights
+### v9 Highlights
 
-- **35 Skills** — 11 Light + 10 Deep + 12 Infrastructure, organized across 9 domains
+- **Natural Language Routing** — Say "review this" or "리뷰해줘" instead of memorizing `/tfx-review`. Depth modifiers ("thoroughly", "제대로") auto-escalate to Deep variants
+- **Cross-Model Review** — Claude writes → Codex reviews. Codex writes → Claude reviews. Same-model self-approve is blocked. Pre-commit nudge for unreviewed files
+- **Context Isolation** — Off-topic requests auto-detected; spawns a clean psmux session so your main context stays focused
+- **38 Skills** — 14 Light + 10 Deep + 14 Infrastructure, organized across 10 domains
+- **Codex Swarm Hardened** — PowerShell `.ps1` launchers, profile-based execution (no `--dangerously` flag), `/merge-worktree` auto-invocation for result collection
+- **Skill Metadata** — Every skill labeled: wrapper/infrastructure/Light-Deep pairs. Trigger conflicts resolved
+
+### v8 Foundations (carried forward)
+
 - **Tri-Debate Engine** — 3-CLI independent analysis with anti-herding, cross-validation, and consensus scoring
 - **Deep/Light Variants** — Every capability has a token-efficient Light mode and a thorough Deep mode
 - **Consensus Gate** — Deep skills require 2/3+ CLI agreement; learned weights track CLI reliability over time
-- **Anti-Herding** — Round 1 runs in parallel with zero cross-visibility to prevent bias contamination
-- **Expert Panel** — Virtual expert simulation (Fowler, Newman, Porter, etc.) via `tfx-panel`
-- **94% Token Reduction** — `tfx-index` creates a 3KB project map replacing 58K tokens of file reads
-- **Persistence Loops** — `tfx-persist` (canonical, 3-party verified), `/tfx-ralph` (compat alias), and `tfx-sisyphus` (auto-routing) run until verified complete
-- **Hub IPC** — Lightning-fast resident Hub server with Named Pipe & HTTP MCP bridge
+- **Expert Panel** — Virtual expert simulation via `tfx-panel`
+- **Hub IPC** — Resident Hub server with Named Pipe & HTTP MCP bridge
 - **psmux / Windows Native** — Hybrid support for `tmux` (WSL) and `psmux` (Windows Terminal)
 
 ---
@@ -128,7 +133,7 @@ Phase 3: Resolution (if consensus < 70%)
 
 ---
 
-## 35 Skills
+## 38 Skills
 
 ### Research
 

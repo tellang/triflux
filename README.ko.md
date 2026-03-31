@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Consensus Intelligence 기반 Tri-CLI 오케스트레이션</strong><br>
-  <em>Claude + Codex + Gemini — 3자 토론, Anti-Herding 검증, Deep/Light 변형을 갖춘 35개 스킬.</em>
+  <em>Claude + Codex + Gemini — 자연어 라우팅, 교차 모델 리뷰, Deep/Light 변형을 갖춘 38개 스킬.</em>
 </p>
 
 <p align="center">
@@ -27,7 +27,7 @@
 <p align="center">
   <a href="#빠른-시작">빠른 시작</a> ·
   <a href="#tri-cli-합의-엔진">Tri-CLI 합의 엔진</a> ·
-  <a href="#35개-스킬">35개 스킬</a> ·
+  <a href="#38개-스킬">38개 스킬</a> ·
   <a href="#아키텍처">아키텍처</a> ·
   <a href="#deep-vs-light">Deep vs Light</a> ·
   <a href="#보안">보안</a>
@@ -80,21 +80,26 @@ tfx setup
 
 ---
 
-## v8의 새로운 기능
+## v9의 새로운 기능
 
-**triflux v8**은 **Tri-CLI Consensus Intelligence**를 도입합니다. Claude, Codex, Gemini가 각각 독립적으로 분석한 뒤, 구조화된 토론을 거쳐 교차 검증하는 근본적으로 새로운 접근 방식입니다. 모든 Deep 스킬은 Anti-Herding(편향 오염 방지)과 Consensus Gate를 통한 출력 보장을 제공합니다.
+**triflux v9**은 **하네스 네이티브 인텔리전스**를 도입합니다. 자연어로 말하면 적절한 스킬로 자동 라우팅되고, 교차 모델 리뷰로 동일 모델의 self-approve를 차단합니다.
 
-### 주요 특징
+### v9 주요 특징
 
-- **35개 스킬** — Light 11개 + Deep 10개 + Infrastructure 12개, 9개 도메인으로 구성
+- **자연어 라우팅** — "리뷰해줘"라고 말하면 `/tfx-review`가 자동 호출. "제대로/꼼꼼히" 수정자로 Deep 변형 자동 에스컬레이션
+- **교차 모델 리뷰** — Claude가 작성하면 Codex가 리뷰, Codex가 작성하면 Claude가 리뷰. 동일 모델 self-approve 차단. 커밋 전 미검증 파일 nudge
+- **맥락 격리** — 현재 맥락과 무관한 요청을 감지하면 별도 psmux 세션으로 분리 제안
+- **38개 스킬** — Light 14개 + Deep 10개 + Infrastructure 14개, 10개 도메인으로 구성
+- **Codex Swarm 강화** — PowerShell `.ps1` 런처, 프로파일 기반 실행, `/merge-worktree`로 결과 자동 수집
+- **스킬 메타데이터** — 모든 스킬에 래퍼/인프라/Light-Deep 관계 표기. 트리거 충돌 해소
+
+### v8 기반 (계속 유지)
+
 - **Tri-Debate Engine** — 3개 CLI가 독립 분석 후 Anti-Herding, 교차 검증, 합의 점수 산출
 - **Deep/Light 변형** — 모든 기능에 토큰 효율적인 Light 모드와 정밀한 Deep 모드를 제공
-- **Consensus Gate** — Deep 스킬은 3개 CLI 중 2개 이상의 동의를 요구하며, 학습된 가중치로 CLI 신뢰도를 추적
-- **Anti-Herding** — 1라운드는 상호 참조 없이 병렬 실행하여 편향 오염을 원천 차단
-- **Expert Panel** — `tfx-panel`을 통한 가상 전문가 시뮬레이션 (Fowler, Newman, Porter 등)
-- **94% 토큰 절감** — `tfx-index`가 58K 토큰 분량의 파일 읽기를 3KB 프로젝트 맵으로 대체
-- **Persistence Loop** — `tfx-persist`(정식 이름, 3자 검증), `/tfx-ralph`(호환 별칭), `tfx-sisyphus`(자동 라우팅)가 검증 완료까지 반복 실행
-- **Hub IPC** — Named Pipe 및 HTTP MCP 브리지를 활용한 초고속 상주형 Hub 서버
+- **Consensus Gate** — Deep 스킬은 3개 CLI 중 2개 이상의 동의 요구
+- **Expert Panel** — `tfx-panel`을 통한 가상 전문가 시뮬레이션
+- **Hub IPC** — Named Pipe 및 HTTP MCP 브리지를 활용한 상주형 Hub 서버
 - **psmux / Windows 네이티브** — `tmux`(WSL)와 `psmux`(Windows Terminal) 하이브리드 지원
 
 ---
@@ -128,7 +133,7 @@ Phase 3: Resolution (합의율 < 70%일 경우)
 
 ---
 
-## 35개 스킬
+## 38개 스킬
 
 ### 리서치
 
