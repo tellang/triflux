@@ -4,6 +4,7 @@
 //        node mcp-gateway-config.mjs --disable  # SSE → stdio (복원)
 
 import { execSync } from 'node:child_process';
+import { isServerEnabled } from './lib/mcp-manifest.mjs';
 
 export const GATEWAY_SERVERS = [
   { name: 'context7',     port: 8100, stdioCmd: 'cmd /c npx -y @upstash/context7-mcp@latest' },
@@ -47,6 +48,10 @@ function enableSse() {
 
   for (const { name, port } of GATEWAY_SERVERS) {
     if (SKIP_SERVERS.has(name)) continue;
+    if (!isServerEnabled(name)) {
+      console.log(`  [SKIP] ${name} — manifest에서 비활성`);
+      continue;
+    }
 
     removeMcp(name);
     const url = `http://localhost:${port}/sse`;
@@ -71,6 +76,10 @@ function disableSse() {
 
   for (const { name, stdioCmd } of GATEWAY_SERVERS) {
     if (SKIP_SERVERS.has(name)) continue;
+    if (!isServerEnabled(name)) {
+      console.log(`  [SKIP] ${name} — manifest에서 비활성`);
+      continue;
+    }
 
     removeMcp(name);
     const success = run(`claude mcp add "${name}" -s user -- ${stdioCmd}`);

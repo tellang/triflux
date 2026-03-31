@@ -14,6 +14,7 @@ import {
   normalizeServerMetadata,
   uniqueStrings,
 } from './mcp-server-catalog.mjs';
+import { readManifest, CORE_SERVERS } from './mcp-manifest.mjs';
 
 export const KNOWN_MCP_SERVERS = Object.freeze(Object.keys(MCP_SERVER_TOOL_CATALOG));
 
@@ -459,6 +460,14 @@ function getProfileDefinition(resolvedProfile) {
   return PROFILE_DEFINITIONS[resolvedProfile] || PROFILE_DEFINITIONS.default;
 }
 
+/** 매니페스트 기반 필터. 매니페스트 없으면 전체 허용 (레거시). */
+function applyManifestFilter(servers) {
+  const manifest = readManifest();
+  if (!manifest) return servers;
+  const enabled = new Set([...(manifest.enabled || []), ...CORE_SERVERS]);
+  return servers.filter((s) => enabled.has(s));
+}
+
 export function resolveAllowedServers(options = {}) {
   const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
   const profile = getProfileDefinition(resolvedProfile);
@@ -468,7 +477,8 @@ export function resolveAllowedServers(options = {}) {
   const baseServers = availableServers.length
     ? profile.allowedServers.filter((server) => availableServers.includes(server))
     : [...profile.allowedServers];
-  return selectContextualServers(baseServers, profile, { ...options, inventory, inventoryIndex });
+  const manifestFiltered = applyManifestFilter(baseServers);
+  return selectContextualServers(manifestFiltered, profile, { ...options, inventory, inventoryIndex });
 }
 
 export function buildPromptHint(options = {}) {

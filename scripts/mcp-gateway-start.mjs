@@ -9,6 +9,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createConnection } from 'node:net';
+import { isServerEnabled } from './lib/mcp-manifest.mjs';
 
 const PID_FILE = join(tmpdir(), 'tfx-gateway-pids.json');
 const STARTUP_WAIT_MS = 8000;
@@ -100,6 +101,12 @@ async function startAll() {
     // 포트 사용 중이면 스킵
     if (await isPortInUse(srv.port)) {
       console.log(`[SKIP] ${srv.name} already running on :${srv.port}`);
+      continue;
+    }
+
+    // 매니페스트 체크 (위저드에서 비활성화한 서버)
+    if (!isServerEnabled(srv.name)) {
+      console.log(`[SKIP] ${srv.name} — manifest에서 비활성`);
       continue;
     }
 

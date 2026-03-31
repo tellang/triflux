@@ -119,10 +119,118 @@ Bash("triflux setup")
 `triflux doctor --json`을 Bash로 실행하여 CLI 존재 여부 확인.
 결과를 테이블로 표시.
 
-#### 단계 5: MCP 서버 확인
+#### 단계 5: MCP 서버 설정 위저드
 
-`~/.claude/cache/mcp-inventory.json` 존재 여부 + 서버 수 확인.
-없으면 재생성 여부를 AskUserQuestion으로 확인.
+> MCP 서버를 선택적으로 활성화한다. API 키 없는 서버는 건너뛸 수 있다.
+> 선택 결과는 `~/.claude/cache/mcp-enabled.json` 매니페스트에 저장된다.
+> 이후 gateway-start, gateway-config, mcp-filter 모두 이 매니페스트를 참조한다.
+
+##### 5-1: 기존 매니페스트 확인
+
+Read 도구로 `~/.claude/cache/mcp-enabled.json` 읽기 시도.
+- 존재하면 → 현재 설정 표시 후 AskUserQuestion:
+  ```
+  question: "MCP 서버 설정을 변경하시겠습니까?"
+  header: "MCP"
+  options:
+    - label: "현재 설정 유지"
+      description: "활성: {현재 enabled 목록}"
+    - label: "다시 설정"
+      description: "서버를 다시 선택"
+  ```
+  "현재 설정 유지" 선택 시 → Step 5 완료, 다음 단계로.
+
+##### 5-2: Core 서버 안내
+
+Core 서버(context7, serena)는 API 키 불필요, 자동 활성화됨을 표시:
+```
+✅ context7 — 라이브러리 문서 조회 (API 키 불필요)
+✅ serena   — 시맨틱 코드 분석 (API 키 불필요)
+```
+
+##### 5-3: 검색 MCP 선택
+
+AskUserQuestion(multiSelect):
+```
+question: "어떤 검색 MCP를 활성화하시겠습니까? (API 키 필요)"
+header: "검색 MCP"
+multiSelect: true
+options:
+  - label: "brave-search"
+    description: "Brave 웹/뉴스 검색 (BRAVE_API_KEY 필요)"
+  - label: "exa"
+    description: "코드/리포/학술 검색 (EXA_API_KEY 필요)"
+  - label: "tavily"
+    description: "리서치/팩트체크 검색 (TAVILY_API_KEY 필요)"
+  - label: "없음"
+    description: "검색 MCP 사용 안 함 (context7만 사용)"
+```
+
+선택된 서버마다 환경변수 존재 여부를 `process.env`로 확인:
+- 환경변수 있음 → ✅ 표시
+- 환경변수 없음 → ⚠️ 경고 + 안내:
+  ```
+  ⚠️ exa: EXA_API_KEY가 설정되지 않았습니다.
+     → 환경변수를 설정한 뒤 세션을 재시작하면 활성화됩니다.
+     → 매니페스트에는 활성으로 기록합니다 (키 추가 후 바로 사용 가능).
+  ```
+
+##### 5-4: 통합 MCP 선택
+
+AskUserQuestion(multiSelect):
+```
+question: "어떤 통합 MCP를 활성화하시겠습니까?"
+header: "통합 MCP"
+multiSelect: true
+options:
+  - label: "jira"
+    description: "Jira 이슈/스프린트 관리 (JIRA_API_TOKEN + EMAIL + URL 필요)"
+  - label: "notion"
+    description: "Notion 페이지 관리 (NOTION_TOKEN 필요)"
+  - label: "없음"
+    description: "통합 MCP 사용 안 함"
+```
+
+notion 선택 시 notion-guest도 함께 활성화.
+환경변수 체크는 5-3과 동일 패턴.
+
+##### 5-5: 매니페스트 저장
+
+선택된 서버 목록을 수집하여 Bash 도구로 저장:
+```bash
+node -e "
+  import { writeManifest } from './scripts/lib/mcp-manifest.mjs';
+  writeManifest(['brave-search', 'exa']);  // 예시: 선택된 서버
+  console.log('Manifest saved');
+"
+```
+
+또는 Write 도구로 직접 `~/.claude/cache/mcp-enabled.json` 작성:
+```json
+{
+  "version": 1,
+  "updatedAt": "2026-03-31T...",
+  "enabled": ["context7", "serena", "brave-search", "exa"]
+}
+```
+
+##### 5-6: 결과 표시
+
+```
+## MCP 서버 설정 완료
+
+| 서버 | 상태 | 비고 |
+|------|------|------|
+| context7 | ✅ 활성 | Core (항상 활성) |
+| serena | ✅ 활성 | Core (항상 활성) |
+| brave-search | ✅ 활성 | BRAVE_API_KEY ✅ |
+| exa | ⚠️ 활성 | EXA_API_KEY 미설정 — 키 추가 후 사용 가능 |
+| tavily | ⏭️ 건너뜀 | 사용자 선택 |
+| jira | ⏭️ 건너뜀 | 사용자 선택 |
+| notion | ⏭️ 건너뜀 | 사용자 선택 |
+
+💡 나중에 변경: `/tfx-setup` → 단계별 선택 → MCP 설정
+```
 
 ### Step 3: 단계별 선택
 
