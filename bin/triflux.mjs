@@ -16,7 +16,23 @@ const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
 const CODEX_DIR = join(homedir(), ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
+const GEMINI_DIR = join(homedir(), ".gemini");
+const GEMINI_PROFILES_PATH = join(GEMINI_DIR, "triflux-profiles.json");
 const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
+
+// 이 배열에 포함된 버전에서만 star prompt를 표시한다 (빈 배열 = 모든 버전에서 표시)
+const STAR_PROMPT_VERSIONS = ["9.2.0"];
+
+const DEFAULT_GEMINI_PROFILES = {
+  model: "gemini-3.1-pro-preview",
+  profiles: {
+    pro31:   { model: "gemini-3.1-pro-preview",   hint: "3.1 Pro — 플래그십 (1M ctx, 멀티모달)" },
+    flash3:  { model: "gemini-3-flash-preview",   hint: "3.0 Flash — 빠른 응답, 비용 효율" },
+    pro25:   { model: "gemini-2.5-pro",           hint: "2.5 Pro — 안정 (추론 강화)" },
+    flash25: { model: "gemini-2.5-flash",         hint: "2.5 Flash — 경량 범용" },
+    lite25:  { model: "gemini-2.5-flash-lite",    hint: "2.5 Flash Lite — 최경량" },
+  },
+};
 
 const REQUIRED_CODEX_PROFILES = [
   {
@@ -496,6 +512,44 @@ function previewCodexProfiles() {
   };
 }
 
+function ensureGeminiProfiles() {
+  try {
+    if (!existsSync(GEMINI_DIR)) mkdirSync(GEMINI_DIR, { recursive: true });
+
+    if (!existsSync(GEMINI_PROFILES_PATH)) {
+      writeFileSync(GEMINI_PROFILES_PATH, JSON.stringify(DEFAULT_GEMINI_PROFILES, null, 2) + "\n", "utf8");
+      return { ok: true, created: true, count: Object.keys(DEFAULT_GEMINI_PROFILES.profiles).length };
+    }
+
+    let cfg;
+    try {
+      cfg = JSON.parse(readFileSync(GEMINI_PROFILES_PATH, "utf8"));
+    } catch {
+      // 파싱 실패 → 재생성
+      writeFileSync(GEMINI_PROFILES_PATH, JSON.stringify(DEFAULT_GEMINI_PROFILES, null, 2) + "\n", "utf8");
+      return { ok: true, created: true, count: Object.keys(DEFAULT_GEMINI_PROFILES.profiles).length };
+    }
+
+    if (!cfg.profiles) cfg.profiles = {};
+    let added = 0;
+    for (const [name, value] of Object.entries(DEFAULT_GEMINI_PROFILES.profiles)) {
+      if (!cfg.profiles[name]) {
+        cfg.profiles[name] = value;
+        added++;
+      }
+    }
+    if (!cfg.model) cfg.model = DEFAULT_GEMINI_PROFILES.model;
+
+    if (added > 0) {
+      writeFileSync(GEMINI_PROFILES_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+    }
+
+    return { ok: true, created: false, added, count: Object.keys(cfg.profiles).length };
+  } catch (e) {
+    return { ok: false, message: e.message };
+  }
+}
+
 function syncFile(src, dst, label) {
   const dstDir = dirname(dst);
   if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
@@ -869,19 +923,42 @@ function cmdSetup(options = {}) {
     }
   }
 
+  // ── 결과 추적 ──
+  const summary = [];
+
   const codexProfileResult = ensureCodexProfiles();
   if (!codexProfileResult.ok) {
     warn(`Codex profiles 설정 실패: ${codexProfileResult.message}`);
+    summary.push({ item: "Codex profiles", status: "⚠️", detail: codexProfileResult.message });
   } else if (codexProfileResult.added > 0) {
     ok(`Codex profiles: ${codexProfileResult.added}개 추가됨 (~/.codex/config.toml)`);
+    summary.push({ item: "Codex profiles", status: "✅", detail: `${codexProfileResult.added}개 추가됨` });
   } else {
     ok("Codex profiles: 이미 준비됨");
+    summary.push({ item: "Codex profiles", status: "✅", detail: "이미 준비됨" });
+  }
+
+  // Gemini 프로필
+  const geminiResult = ensureGeminiProfiles();
+  if (!geminiResult.ok) {
+    warn(`Gemini profiles 설정 실패: ${geminiResult.message}`);
+    summary.push({ item: "Gemini profiles", status: "⚠️", detail: geminiResult.message });
+  } else if (geminiResult.created) {
+    ok(`Gemini profiles: ${geminiResult.count}개 생성됨 (~/.gemini/triflux-profiles.json)`);
+    summary.push({ item: "Gemini profiles", status: "✅", detail: `${geminiResult.count}개 생성됨` });
+  } else if (geminiResult.added > 0) {
+    ok(`Gemini profiles: ${geminiResult.added}개 추가됨`);
+    summary.push({ item: "Gemini profiles", status: "✅", detail: `${geminiResult.added}개 추가됨 (총 ${geminiResult.count}개)` });
+  } else {
+    ok(`Gemini profiles: ${geminiResult.count}개 준비됨`);
+    summary.push({ item: "Gemini profiles", status: "✅", detail: `${geminiResult.count}개 준비됨` });
   }
 
   // hub MCP 사전 등록 (서버 미실행이어도 설정만 등록 — hub start 시 즉시 사용 가능)
   if (existsSync(join(PKG_ROOT, "hub", "server.mjs"))) {
     const defaultHubUrl = `http://127.0.0.1:${process.env.TFX_HUB_PORT || "27888"}/mcp`;
     autoRegisterMcp(defaultHubUrl);
+    summary.push({ item: "Hub MCP", status: "✅", detail: "등록됨" });
     console.log("");
   }
 
@@ -900,6 +977,7 @@ function cmdSetup(options = {}) {
       const currentCmd = settings.statusLine?.command || "";
       if (currentCmd.includes("hud-qos-status.mjs")) {
         ok("statusLine 이미 설정됨");
+        summary.push({ item: "HUD statusLine", status: "✅", detail: "이미 설정됨" });
       } else {
         const nodePath = process.execPath.replace(/\\/g, "/");
         const hudForward = hudPath.replace(/\\/g, "/");
@@ -917,6 +995,7 @@ function cmdSetup(options = {}) {
 
         writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
         ok("statusLine 설정 완료 — 세션 재시작 후 HUD 표시");
+        summary.push({ item: "HUD statusLine", status: "✅", detail: "설정 완료" });
       }
     } catch (e) {
       throw createCliError(`settings.json 처리 실패: ${e.message}`, {
@@ -928,25 +1007,50 @@ function cmdSetup(options = {}) {
     }
   } else {
     warn("HUD 파일 없음 — 먼저 파일 동기화 필요");
+    summary.push({ item: "HUD statusLine", status: "⚠️", detail: "HUD 파일 없음" });
   }
 
-  // Star request
-  try {
-    execFileSync("gh", ["auth", "status"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
+  // CLI 존재 확인
+  const cliChecks = [
+    { name: "codex", install: "npm i -g @openai/codex" },
+    { name: "gemini", install: "npm i -g @google/gemini-cli" },
+  ];
+  for (const { name, install } of cliChecks) {
+    if (which(name)) {
+      summary.push({ item: `${name} CLI`, status: "✅", detail: "설치됨" });
+    } else {
+      summary.push({ item: `${name} CLI`, status: "⏭️", detail: `미설치 (${install})` });
+    }
+  }
+
+  // Star request (버전 게이팅)
+  const showStar = STAR_PROMPT_VERSIONS.length === 0 || STAR_PROMPT_VERSIONS.includes(PKG.version);
+  if (showStar) {
     try {
-      execFileSync("gh", ["api", "user/starred/tellang/triflux"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
-      console.log();
-      ok(`이미 함께하고 계시군요. ${AMBER}⭐${RESET}`);
+      execFileSync("gh", ["auth", "status"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
+      try {
+        execFileSync("gh", ["api", "user/starred/tellang/triflux"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
+        console.log();
+        ok(`이미 함께하고 계시군요. ${AMBER}⭐${RESET}`);
+      } catch {
+        console.log();
+        info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
+      }
     } catch {
       console.log();
       info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
     }
-  } catch {
-    console.log();
-    info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
   }
 
-  console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}\n`);
+  // ── 결과 요약 테이블 ──
+  console.log(`\n${BOLD}── 설정 요약 ──${RESET}`);
+  const maxItem = Math.max(...summary.map((s) => s.item.length));
+  for (const { item, status, detail } of summary) {
+    console.log(`  ${status} ${item.padEnd(maxItem)}  ${DIM}${detail}${RESET}`);
+  }
+
+  console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}`);
+  console.log(`${DIM}버전: v${PKG.version}${RESET}\n`);
 }
 
 function addDoctorCheck(report, entry) {
@@ -1865,7 +1969,7 @@ function cmdUpdate() {
     return;
   }
 
-  // 3. setup 재실행 (tfx-route.sh, HUD, 스킬 동기화)
+  // 3. setup 재실행 (파일 동기화, 프로파일, HUD, CLI 확인)
   if (updated) {
     console.log("");
     // 업데이트 후 새 버전 읽기
@@ -1881,18 +1985,17 @@ function cmdUpdate() {
       ok(`버전: v${oldVer} (이미 최신)`);
     }
 
-    // setup 재실행
-    console.log("");
-    info("setup 재실행 중...");
+    // setup 재실행 — 개선된 cmdSetup()이 Gemini 프로필, CLI 확인, 요약 테이블 포함
+    console.log(`\n${CYAN}── 설정 동기화 ──${RESET}`);
     cmdSetup();
 
     if (stoppedHubInfo) {
-      if (startHubAfterUpdate(stoppedHubInfo)) info("hub 재기동 완료");
+      if (startHubAfterUpdate(stoppedHubInfo)) ok("hub 재기동 완료");
       else warn("hub 재기동 실패 — `tfx hub start`로 수동 시작 필요");
     }
   }
 
-  console.log(`${GREEN}${BOLD}업데이트 완료${RESET}\n`);
+  console.log(`${GREEN}${BOLD}✓ 업데이트 완료${RESET}\n`);
 }
 
 function cmdList(options = {}) {
