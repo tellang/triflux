@@ -2,7 +2,7 @@
 name: tfx-setup
 description: >
   triflux 초기 설정 및 진단. AskUserQuestion 기반 인터랙티브 위저드로
-  파일 동기화, HUD 설정, Codex 프로파일, CLI 진단, MCP 확인을 수행합니다.
+  파일 동기화, HUD 설정, Codex 프로파일, CLI 진단, MCP 확인, 검색 MCP 설정을 수행합니다.
   Use when: setup, 설정, 설치, install, 초기화, 처음, 시작, wizard
 triggers:
   - tfx-setup
@@ -22,7 +22,7 @@ question: "어떤 설정 모드를 실행하시겠습니까?"
 header: "모드"
 options:
   - label: "전체 설정 (Recommended)"
-    description: "5단계 순서 실행: 동기화 → HUD → 프로파일 → CLI → MCP"
+    description: "6단계 순서 실행: 동기화 → HUD → 프로파일 → CLI → MCP → 검색 MCP"
   - label: "단계별 선택"
     description: "필요한 단계만 골라서 실행"
   - label: "현재 상태 확인"
@@ -31,7 +31,7 @@ options:
 
 `doctor` 인자가 있으면 바로 `triflux doctor` 실행.
 
-### Step 2: 전체 설정 (5단계)
+### Step 2: 전체 설정 (6단계)
 
 각 단계를 순서대로 실행하며 결과를 보고한다.
 
@@ -232,6 +232,69 @@ node -e "
 💡 나중에 변경: `/tfx-setup` → 단계별 선택 → MCP 설정
 ```
 
+#### 단계 6: 검색 MCP 설정
+
+프로젝트 `.mcp.json`을 Read 도구로 읽어 기존 검색 MCP 서버 확인.
+환경변수 파일(`~/projects/.env`, 프로젝트 `.env`)에서 API 키 자동 감지.
+
+감지된 키 상태를 옵션 description에 반영하여 표시 → AskUserQuestion:
+```
+question: "어떤 검색 MCP 서버를 설정하시겠습니까?"
+header: "검색 MCP"
+multiSelect: true
+options:
+  - label: "Exa Web Search"
+    description: "시맨틱 검색 + 크롤링 (EXA_API_KEY: ✅감지됨/❌미감지)"
+  - label: "Brave Search"
+    description: "웹/뉴스/이미지 검색 (BRAVE_API_KEY: ✅감지됨/❌미감지)"
+  - label: "Tavily Search"
+    description: "AI 최적화 검색 (TAVILY_API_KEY: ✅감지됨/❌미감지)"
+  - label: "건너뛰기"
+    description: "검색 MCP 설정 안 함"
+```
+
+"건너뛰기" 선택 시 이 단계 종료.
+
+각 선택된 서버에 대해:
+1. API 키가 감지됨 → "감지된 키를 사용합니다" 확인 메시지
+2. API 키 미감지 → AskUserQuestion으로 키 입력 요청:
+   ```
+   question: "{서버명} API 키를 입력하세요 (발급: {URL})"
+   header: "API Key"
+   ```
+   빈 입력이면 해당 서버 건너뛰기.
+3. `.mcp.json`에 서버 추가 (Edit 도구). 파일 없으면 Write 도구로 생성.
+
+MCP 서버 설정 레지스트리:
+```json
+{
+  "exa": {
+    "command": "npx",
+    "args": ["-y", "exa-mcp-server"],
+    "env": { "EXA_API_KEY": "{key}" },
+    "keyUrl": "https://exa.ai/dashboard"
+  },
+  "brave-search": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+    "env": { "BRAVE_API_KEY": "{key}" },
+    "keyUrl": "https://brave.com/search/api/"
+  },
+  "tavily": {
+    "command": "npx",
+    "args": ["-y", "tavily-mcp@latest"],
+    "env": { "TAVILY_API_KEY": "{key}" },
+    "keyUrl": "https://app.tavily.com/home"
+  }
+}
+```
+
+키 감지 경로 (순서대로 탐색, 첫 번째 매치 사용):
+1. 셸 환경변수 (`$EXA_API_KEY` 등)
+2. `~/projects/.env`
+3. 프로젝트 루트 `.env`
+4. `~/.claude/settings.json` → `env` 섹션
+
 ### Step 3: 단계별 선택
 
 AskUserQuestion(multiSelect):
@@ -250,6 +313,8 @@ options:
     description: "triflux-profiles.json 생성/확인"
   - label: "CLI + MCP 진단"
     description: "CLI 존재 + MCP 인벤토리 확인"
+  - label: "검색 MCP"
+    description: "Exa/Brave/Tavily 검색 서버 설정"
 ```
 
 선택된 단계만 순서대로 실행.
@@ -267,11 +332,13 @@ options:
 | Codex CLI | ✅ |
 | Gemini CLI | ⚠ 미설치 (선택) |
 | MCP 인벤토리 | ✅ N개 서버 |
+| 검색 MCP | ✅ Exa, Tavily / ⏭ Brave (키 없음) |
 
 ### 다음 단계
 - Codex 미설치 시: `npm install -g @openai/codex`
 - Gemini 미설치 시: `npm install -g @google/gemini-cli`
-- 세션 재시작하면 HUD가 표시됩니다
+- 검색 MCP 추가/변경: `/tfx-setup` → 단계별 선택 → 검색 MCP
+- 세션 재시작하면 HUD + 검색 MCP가 활성화됩니다
 ```
 
 ## 에러 처리
