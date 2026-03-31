@@ -74,6 +74,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.ok(Array.isArray(payload.checks));
     assert.ok(payload.checks.some((check) => check.name === "tfx-route.sh"));
     assert.ok(payload.checks.some((check) => check.name === "codex"));
+    assert.ok(payload.checks.some((check) => check.name === "warmup-cache"));
   });
 
   it("multi status --json은 팀 상태가 없을 때 offline JSON을 반환해야 한다", () => {

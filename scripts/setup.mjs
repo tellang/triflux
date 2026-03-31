@@ -10,6 +10,7 @@ import { homedir } from "os";
 import { spawn, execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
+import { buildAll as buildCacheWarmup } from "./cache-warmup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -824,17 +825,15 @@ if (existsSync(mcpCheck)) {
   child.unref(); // 부모 프로세스와 분리 — 비동기 실행
 }
 
-// ── 캐시 빌드업 Phase 1 (백그라운드) ──
+// ── Step 6. 캐시 웜업 Phase 1 ──
 
-const cacheBuildupScript = join(PLUGIN_ROOT, "scripts", "cache-buildup.mjs");
-if (existsSync(cacheBuildupScript)) {
-  const child2 = spawn(process.execPath, [cacheBuildupScript], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
+try {
+  buildCacheWarmup({
     cwd: process.cwd(),
+    ttlMs: 5 * 60 * 1000,
   });
-  child2.unref();
+} catch {
+  // cache-warmup 실패는 setup 전체를 막지 않는다
 }
 
 // ── /tmp 임시 파일 자동 정리 (setup 지연 방지: fire-and-forget) ──

@@ -87,6 +87,10 @@ Bash("triflux doctor --fix")
 | mcp-inventory.json | MCP 서버 인벤토리 |
 | cli-issues.jsonl | CLI 이슈 로그 |
 | triflux-update-check.json | 업데이트 체크 |
+| .omc/cache/codex-skills.json | Codex 스킬 인덱스 |
+| .omc/state/tier-environment.json | Tier 환경 스냅샷 |
+| .omc/cache/project-meta.json | 프로젝트 메타 |
+| .omc/state/search-engines.json | 검색 엔진 상태 |
 
 존재하는 캐시 파일 목록과 크기를 테이블로 표시 후 AskUserQuestion:
 
@@ -146,6 +150,7 @@ options:
 - 스킬 설치 상태
 - 플러그인 등록 상태
 - MCP 인벤토리 캐시
+- Phase 1 웜업 캐시 무결성 (`node scripts/cache-doctor.mjs`)
 - 잔존 팀(orphan teams) 감지
 
 ## 에러 처리
