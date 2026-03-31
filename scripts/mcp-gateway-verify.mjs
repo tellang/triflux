@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // mcp-gateway-verify.mjs — supergateway SSE 엔드포인트 헬스체크
 
-const ENDPOINTS = [
+import { readManifest } from './lib/mcp-manifest.mjs';
+
+const ALL_ENDPOINTS = [
   { name: 'context7',     port: 8100 },
   { name: 'brave-search', port: 8101 },
   { name: 'exa',          port: 8102 },
@@ -11,6 +13,18 @@ const ENDPOINTS = [
   { name: 'notion',       port: 8106 },
   { name: 'notion-guest', port: 8107 },
 ];
+
+const manifest = readManifest();
+if (!manifest) {
+  console.log('gateway: not configured (no manifest)');
+  process.exit(0);
+}
+const enabled = new Set(manifest.enabled || []);
+const ENDPOINTS = ALL_ENDPOINTS.filter((e) => enabled.has(e.name));
+if (ENDPOINTS.length === 0) {
+  console.log('gateway: no enabled servers');
+  process.exit(0);
+}
 
 async function checkHealth(name, port) {
   const start = Date.now();
