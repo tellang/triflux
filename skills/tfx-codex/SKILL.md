@@ -8,6 +8,7 @@ argument-hint: "\"작업 설명\" | N:codex \"작업 설명\""
 
 # tfx-codex — Codex-Only 오케스트레이터
 
+> **래퍼**: tfx-auto의 Codex 전용 바로가기. TFX_CLI_MODE=codex.
 > **HARD RULE**: Claude는 이 스킬에서 Edit/Write를 사용하면 안 된다. 모든 코드 수정은 Codex CLI를 통해 수행한다.
 > Codex CLI만 사용하여 모든 외부 CLI 작업을 라우팅합니다.
 > Gemini CLI가 없는 환경에서 사용합니다.

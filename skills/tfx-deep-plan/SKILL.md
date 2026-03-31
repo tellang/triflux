@@ -13,6 +13,7 @@ argument-hint: "<구현할 기능 설명>"
 
 # tfx-deep-plan — Tri-Model Consensus Planning
 
+> **Light 버전**: tfx-plan. 기본값. 깊이 수정자 없으면 Light 선택.
 3개 모델(Opus 4.6 · GPT 5.4 · Gemini)이 독립 설계 후 교차검증하여 합의된 계획을 도출한다.
 
 ---

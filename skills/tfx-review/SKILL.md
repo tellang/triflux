@@ -11,6 +11,7 @@ argument-hint: "[파일 경로 또는 변경 설명]"
 
 # tfx-review — Light Code Review
 
+> **Deep 버전**: tfx-deep-review. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > **HARD RULE**: 리뷰 결과를 생성할 때 Claude가 직접 git log/diff를 실행하지 마라. Codex code-reviewer에게 위임하라.
 > Codex 단일 리뷰로 빠른 피드백. 토큰 최소화.
 

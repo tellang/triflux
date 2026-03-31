@@ -11,6 +11,7 @@ argument-hint: "<구현할 기능 설명>"
 
 # tfx-plan — Light Implementation Plan
 
+> **Deep 버전**: tfx-deep-plan. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > Claude Opus 단독 빠른 계획. 복잡한 합의 없이 즉시 태스크 분해.
 
 ## 워크플로우

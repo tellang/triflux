@@ -11,6 +11,7 @@ argument-hint: "[테스트 대상 경로 또는 기능 설명]"
 
 # tfx-deep-qa — Tri-CLI Deep Verification
 
+> **Light 버전**: tfx-qa. 기본값. 깊이 수정자 없으면 Light 선택.
 > 3-CLI 독립 검증 → 교차검증 → 2+ 합의 항목만 보고. false-positive 87% 감소.
 
 ## 핵심 원리

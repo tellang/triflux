@@ -14,6 +14,7 @@ argument-hint: "[--depth quick|standard|deep] <리서치 주제>"
 
 # tfx-deep-research — Multi-Source Deep Research with Tri-CLI Consensus
 
+> **Light 버전**: tfx-research. 기본값. 깊이 수정자 없으면 Light 선택.
 > 쿼리 분해 → 3-CLI 독립 병렬 검색 → 교차검증 → 합의 기반 종합 보고서.
 > STORM(Stanford) perspective-guided + GPT-Researcher recursive tree + Tavily deep research pipeline 영감.
 

@@ -7,6 +7,7 @@ argument-hint: "(내부 전용 — Deep 스킬이 자동 호출)"
 
 # tfx-consensus — Tri-CLI Consensus Engine
 
+> **인프라**: 다른 스킬이 내부적으로 사용. 직접 호출할 필요 없음.
 > 모든 Deep 스킬의 공통 기반. 3개 CLI의 독립 결과를 교차검증하여 합의 도출.
 
 ## HARD RULES

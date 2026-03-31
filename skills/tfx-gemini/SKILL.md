@@ -8,6 +8,7 @@ argument-hint: "\"작업 설명\" | N:gemini \"작업 설명\""
 
 # tfx-gemini — Gemini-Only 오케스트레이터
 
+> **래퍼**: tfx-auto의 Gemini 전용 바로가기. TFX_CLI_MODE=gemini.
 > Gemini CLI만 사용하여 모든 외부 CLI 작업을 라우팅합니다.
 > Codex CLI가 없는 환경에서 사용합니다.
 

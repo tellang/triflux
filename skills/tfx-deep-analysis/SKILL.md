@@ -10,6 +10,7 @@ argument-hint: "<분석 대상 — 파일, 디렉토리, 또는 주제>"
 
 # tfx-deep-analysis — Tri-CLI Deep Analysis
 
+> **Light 버전**: tfx-analysis. 기본값. 깊이 수정자 없으면 Light 선택.
 > Claude(아키텍처) + Codex(구현/보안) + Gemini(UX/문서화) → Tri-Debate → 합의.
 > 3자 전문 관점의 편향 없는 분석.
 

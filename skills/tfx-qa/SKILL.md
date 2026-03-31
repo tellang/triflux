@@ -11,6 +11,7 @@ argument-hint: "[테스트 명령 또는 파일 경로]"
 
 # tfx-qa — Light Test-Fix Cycle
 
+> **Deep 버전**: tfx-deep-qa. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > 테스트 실행 → 실패 분석 → 자동 수정 → 재실행. 최대 3회. OMC ultraqa 영감.
 
 ## 용도

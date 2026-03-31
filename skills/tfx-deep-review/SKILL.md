@@ -12,6 +12,7 @@ argument-hint: "[파일 경로 또는 변경 설명]"
 
 # tfx-deep-review — Tri-CLI Deep Code Review
 
+> **Light 버전**: tfx-review. 기본값. 깊이 수정자 없으면 Light 선택.
 > 3-CLI 독립 리뷰 → 교차검증 → 2+ 합의 항목만 보고. Diffray + Calimero 영감.
 
 ## 핵심 원리

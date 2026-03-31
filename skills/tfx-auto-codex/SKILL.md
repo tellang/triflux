@@ -8,6 +8,7 @@ argument-hint: "\"작업 설명\" | N:agent_type \"작업 설명\""
 
 # tfx-auto-codex — Codex 리드형 tfx-auto
 
+> **래퍼**: tfx-auto의 Codex 전용 바로가기. TFX_NO_CLAUDE_NATIVE=1.
 > 목적: 기존 `tfx-auto`의 오케스트레이션 패턴을 유지하면서
 > Claude 네이티브 역할(`explore`, `verifier`, `test-engineer`, `qa-tester`)을
 > Codex로 치환해 Codex/Gemini만으로 실행한다.

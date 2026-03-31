@@ -11,6 +11,7 @@ argument-hint: "<분석 대상 — 파일, 디렉토리, 또는 주제>"
 
 # tfx-analysis — Light Code Analysis
 
+> **Deep 버전**: tfx-deep-analysis. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > Codex 단일 분석으로 빠른 인사이트. SuperClaude sc:analyze 영감.
 
 ## 용도

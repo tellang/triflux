@@ -13,6 +13,7 @@ argument-hint: "<검색 주제>"
 
 # tfx-research — Light Web Research
 
+> **Deep 버전**: tfx-deep-research. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > 빠른 단일 소스 검색 + 요약. 토큰 최소화, 즉시 결과.
 
 ## 용도
