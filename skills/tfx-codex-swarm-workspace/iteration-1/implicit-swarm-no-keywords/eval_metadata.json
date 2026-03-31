@@ -1,0 +1,32 @@
+{
+  "eval_id": 3,
+  "eval_name": "implicit-swarm-no-keywords",
+  "prompt": "이 PRD 3개 파일을 각각 독립적으로 코덱스한테 맡겨서 병렬로 구현해줘. docs/prd/auth-refactor.md, docs/prd/api-v2.md, docs/prd/cache-layer.md",
+  "assertions": [
+    {
+      "name": "3-paths-recognized",
+      "description": "사용자 제공 3개 파일 경로 인식",
+      "check": "classification.md에 auth-refactor, api-v2, cache-layer 모두 등장"
+    },
+    {
+      "name": "filename-classification",
+      "description": "파일명 기반 유형 분류 시도",
+      "check": "auth-refactor를 리팩터링으로, api-v2/cache-layer를 구현으로 분류"
+    },
+    {
+      "name": "profile-routing-applied",
+      "description": "자동 프로파일 라우팅 적용",
+      "check": "routing.md에 프로파일 매핑 존재 (codex53 또는 gpt54)"
+    },
+    {
+      "name": "worktree-isolation",
+      "description": "3개 독립 worktree 생성",
+      "check": "commands.sh에 git worktree add가 3개"
+    },
+    {
+      "name": "psmux-and-wt",
+      "description": "psmux 세션 + WT 탭 명령 생성",
+      "check": "commands.sh에 psmux + wt 명령 존재"
+    }
+  ]
+}

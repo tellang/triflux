@@ -1,6 +1,6 @@
 import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { dirname, join, resolve } from 'node:path';
@@ -16,6 +16,26 @@ const SERVER_FILE = resolve(PROJECT_ROOT, 'hub', 'workers', 'delegator-mcp.mjs')
 const FAKE_CODEX = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-codex.mjs');
 const FAKE_GEMINI = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-gemini-cli.mjs');
 const FAKE_ROUTE = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-route.sh');
+const SEARCH_ENGINE_CACHE_FILE = resolve(PROJECT_ROOT, '.omc', 'state', 'search-engines.json');
+
+function writeSearchEngineCache(payload) {
+  mkdirSync(dirname(SEARCH_ENGINE_CACHE_FILE), { recursive: true });
+  writeFileSync(SEARCH_ENGINE_CACHE_FILE, JSON.stringify(payload, null, 2));
+}
+
+function readSearchEngineCacheBackup() {
+  return existsSync(SEARCH_ENGINE_CACHE_FILE)
+    ? readFileSync(SEARCH_ENGINE_CACHE_FILE, 'utf8')
+    : null;
+}
+
+function restoreSearchEngineCacheBackup(original) {
+  if (typeof original === 'string') {
+    writeFileSync(SEARCH_ENGINE_CACHE_FILE, original);
+    return;
+  }
+  rmSync(SEARCH_ENGINE_CACHE_FILE, { force: true });
+}
 
 async function createClient(env = {}) {
   const transport = new StdioClientTransport({
@@ -173,6 +193,83 @@ describe('delegator-mcp stdio server', () => {
       assert.deepEqual(allowedMcpServers, ['context7', 'playwright']);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
+      await closeClient(client, transport);
+    }
+  });
+
+  it('availableServers 미지정 시 search-engines 캐시가 있어도 부분 리스트를 주입하지 않아야 한다', async () => {
+    const originalCache = readSearchEngineCacheBackup();
+    writeSearchEngineCache({
+      checked_at: '2026-03-31T00:00:00.000Z',
+      engines: [
+        { name: 'context7', status: 'available' },
+        { name: 'playwright', status: 'unavailable' },
+        { name: 'brave-search', status: 'unavailable' },
+      ],
+    });
+
+    const { client, transport } = await createClient({
+      TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+    });
+
+    try {
+      const result = await client.callTool({
+        name: 'triflux-delegate',
+        arguments: {
+          provider: 'codex',
+          mode: 'sync',
+          agentType: 'designer',
+          prompt: 'SHOW_CONFIG',
+        },
+      });
+
+      // 캐시의 부분 리스트가 availableServers로 주입되면 안 됨 — 교집합 필터로 MCP 서버 탈락 버그 유발
+      const config = JSON.parse(result.structuredContent.output);
+      assert.deepEqual(config, { mcp_servers: {} });
+    } finally {
+      restoreSearchEngineCacheBackup(originalCache);
+      await closeClient(client, transport);
+    }
+  });
+
+  it('search-engines 캐시가 없으면 기존 fallback을 유지해야 한다', async () => {
+    const originalCache = readSearchEngineCacheBackup();
+    rmSync(SEARCH_ENGINE_CACHE_FILE, { force: true });
+
+    const { client, transport } = await createClient({
+      TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      GEMINI_BIN: process.execPath,
+      GEMINI_BIN_ARGS_JSON: JSON.stringify([FAKE_GEMINI]),
+      FAKE_GEMINI_ECHO_ALLOWED_MCP: '1',
+    });
+
+    try {
+      const codexResult = await client.callTool({
+        name: 'triflux-delegate',
+        arguments: {
+          provider: 'codex',
+          mode: 'sync',
+          agentType: 'designer',
+          prompt: 'SHOW_CONFIG',
+        },
+      });
+      const codexConfig = JSON.parse(codexResult.structuredContent.output);
+      assert.deepEqual(codexConfig, { mcp_servers: {} });
+
+      const geminiResult = await client.callTool({
+        name: 'triflux-delegate',
+        arguments: {
+          provider: 'gemini',
+          mode: 'sync',
+          agentType: 'writer',
+          prompt: 'cache fallback',
+        },
+      });
+      assert.match(geminiResult.structuredContent.output, /allowed:context7,brave-search,exa/);
+    } finally {
+      restoreSearchEngineCacheBackup(originalCache);
       await closeClient(client, transport);
     }
   });

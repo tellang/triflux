@@ -7,6 +7,17 @@ function getArgValue(name) {
   return index >= 0 ? args[index + 1] ?? null : null;
 }
 
+function getArgValues(name) {
+  const index = args.indexOf(name);
+  if (index < 0) return [];
+  const values = [];
+  for (let i = index + 1; i < args.length; i += 1) {
+    if (args[i].startsWith('--')) break;
+    values.push(args[i]);
+  }
+  return values;
+}
+
 let stdin = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
@@ -17,6 +28,7 @@ process.stdin.on('end', async () => {
   const promptText = `${stdin}${getArgValue('--prompt') || ''}`.trim();
   const model = getArgValue('--model') || 'fake-gemini-model';
   const outputFormat = getArgValue('--output-format');
+  const allowedMcpServerNames = getArgValues('--allowed-mcp-server-names');
 
   if (process.env.FAKE_GEMINI_SILENT_CRASH) {
     // 출력 없이 즉시 종료 — health check crash 감지 테스트용
@@ -40,17 +52,21 @@ process.stdin.on('end', async () => {
     return;
   }
 
+  const responseText = process.env.FAKE_GEMINI_ECHO_ALLOWED_MCP === '1'
+    ? `gemini:${promptText}\nallowed:${allowedMcpServerNames.join(',')}`
+    : `gemini:${promptText}`;
+
   process.stdout.write(`${JSON.stringify({ type: 'init', model })}\n`);
   process.stdout.write(`${JSON.stringify({
     type: 'message',
     message: {
       role: 'assistant',
-      content: [{ type: 'text', text: `gemini:${promptText}` }],
+      content: [{ type: 'text', text: responseText }],
     },
   })}\n`);
   process.stdout.write(`${JSON.stringify({
     type: 'result',
-    response: `gemini:${promptText}`,
+    response: responseText,
     usage: { totalTokens: promptText.length },
   })}\n`);
 });

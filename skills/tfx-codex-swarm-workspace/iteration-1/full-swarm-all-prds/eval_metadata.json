@@ -1,0 +1,42 @@
+{
+  "eval_id": 1,
+  "eval_name": "full-swarm-all-prds",
+  "prompt": ".omx/plans/ 에 PRD 7개 있는데 전부 codex swarm으로 돌려줘. 구현은 autopilot, 조사는 plan만 쓰고. 하나의 WT에 탭으로 넣어줘",
+  "assertions": [
+    {
+      "name": "all-7-prds-found",
+      "description": "7개 PRD 파일 모두 스캔 및 나열",
+      "check": "classification.md에 issue 24~30 모든 PRD가 언급되어야 함"
+    },
+    {
+      "name": "correct-type-classification",
+      "description": "구현(24,26,27,28,29) vs 조사(25,30) 정확히 분류",
+      "check": "issue 25, 30은 조사/investigation으로, 나머지는 구현/implement로 분류"
+    },
+    {
+      "name": "profile-routing-varies",
+      "description": "조사 태스크에 gpt54, 구현에 codex53 프로파일 적용",
+      "check": "routing.md에서 조사=gpt54_*, 구현=codex53_* 매핑"
+    },
+    {
+      "name": "worktree-per-task",
+      "description": "7개 독립 git worktree 생성 명령 존재",
+      "check": "commands.sh에 git worktree add 명령이 7개"
+    },
+    {
+      "name": "psmux-sessions",
+      "description": "7개 psmux 세션 생성 + codex 실행 명령",
+      "check": "commands.sh에 psmux new-session이 7개, send-keys에 codex 명령 포함"
+    },
+    {
+      "name": "single-wt-window",
+      "description": "하나의 WT 윈도우에 7탭 attach",
+      "check": "commands.sh에 wt-new-window 1회 + wt-tab 6회 (또는 wt.exe -w new + new-tab)"
+    },
+    {
+      "name": "omx-skill-mapping",
+      "description": "구현=$autopilot, 조사=$plan 매핑",
+      "check": "classification.md 또는 commands.sh에서 구현 태스크에 $autopilot, 조사에 $plan"
+    }
+  ]
+}
