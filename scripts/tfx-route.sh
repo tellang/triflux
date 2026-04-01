@@ -78,7 +78,7 @@ if [[ "${1:-}" == "--job-status" ]]; then
     pid=$(cat "$job_dir/pid")
     if kill -0 "$pid" 2>/dev/null; then
       # 진행 상황 힌트
-      local_bytes=$(wc -c < "$job_dir/stdout.log" 2>/dev/null || echo 0)
+      local_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null || echo 0)
       elapsed=$(( $(date +%s) - $(cat "$job_dir/start_time" 2>/dev/null || date +%s) ))
       echo "running elapsed=${elapsed}s output=${local_bytes}B"
     else
@@ -98,7 +98,12 @@ if [[ "${1:-}" == "--job-result" ]]; then
   [[ -d "$job_dir" ]] || { echo "error: job not found"; exit 1; }
   [[ -f "$job_dir/done" ]] || { echo "error: job still running"; exit 1; }
 
-  cat "$job_dir/result.log" 2>/dev/null
+  result_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null || echo 0)
+  if [[ "$result_bytes" -eq 0 ]] && [[ -s "$job_dir/stderr.log" ]]; then
+    cat "$job_dir/stderr.log" 2>/dev/null
+  else
+    cat "$job_dir/result.log" 2>/dev/null
+  fi
   exit_code=$(cat "$job_dir/exit_code" 2>/dev/null || echo 1)
   exit "$exit_code"
 fi
