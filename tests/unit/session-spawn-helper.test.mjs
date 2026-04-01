@@ -1,14 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
 
 import {
-  buildBackgroundCompletionSummary,
-  buildWtAttachArgs,
-  createIsolatedSession,
+  attachWithWindowsTerminal,
   createIsolatedSessionName,
-  emitBackgroundCompletionSummary,
   evaluateContextDrift,
 } from "../../scripts/session-spawn-helper.mjs";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(__dirname, "../..");
 
 describe("session-spawn-helper createIsolatedSessionName()", () => {
   it("uses required tfx-isolated-{timestamp} format", () => {
@@ -17,45 +20,23 @@ describe("session-spawn-helper createIsolatedSessionName()", () => {
   });
 });
 
-describe("session-spawn-helper createIsolatedSession()", () => {
-  it("creates isolated psmux session and optional initial command", () => {
-    const calls = [];
-    const result = createIsolatedSession(
-      {
-        timestamp: 1735689600123,
-        initialCommand: "echo hello",
-      },
-      {
-        createSessionFn: (...args) => calls.push({ type: "create", args }),
-        sendKeysFn: (...args) => calls.push({ type: "send", args }),
-      },
-    );
-
-    assert.equal(result.sessionName, "tfx-isolated-1735689600123");
-    assert.equal(result.paneId, "tfx-isolated-1735689600123:0.0");
-    assert.deepEqual(calls[0], {
-      type: "create",
-      args: ["tfx-isolated-1735689600123", { layout: "1xN", paneCount: 1 }],
+describe("session-spawn-helper attachWithWindowsTerminal()", () => {
+  it("returns current WT split-pane attach args", () => {
+    const args = attachWithWindowsTerminal("tfx-isolated-1735689600123", {
+      profile: "triflux",
+      title: "tfx-isolated-1735689600123",
+      spawnFn: () => ({ unref() {} }),
     });
-    assert.deepEqual(calls[1], {
-      type: "send",
-      args: ["tfx-isolated-1735689600123:0.0", "echo hello", true],
-    });
-  });
-});
 
-describe("session-spawn-helper buildWtAttachArgs()", () => {
-  it("attaches via wt triflux profile", () => {
-    const args = buildWtAttachArgs("tfx-isolated-1735689600123");
     assert.deepEqual(args, [
-      "new-tab",
+      "sp",
       "-p",
       "triflux",
       "--title",
       "tfx-isolated-1735689600123",
       "--",
       "psmux",
-      "attach",
+      "attach-session",
       "-t",
       "tfx-isolated-1735689600123",
     ]);
@@ -84,36 +65,16 @@ describe("session-spawn-helper evaluateContextDrift()", () => {
   });
 });
 
-describe("session-spawn-helper background completion summary", () => {
-  it("builds stdout-friendly summary payload", () => {
-    const summary = buildBackgroundCompletionSummary({
-      sessionName: "tfx-isolated-1735689600123",
-      exitCode: 0,
-      taskPrompt: "Implement context isolation",
-      stdoutText: "Implemented context isolation and added tests.",
-    });
-    assert.equal(summary.status, "success");
-    assert.match(summary.summaryLine, /\[session=tfx-isolated-1735689600123\]/u);
-    assert.match(summary.summaryLine, /context_drift=no/u);
-  });
-
-  it("emits summary to stdout writer", () => {
-    const writes = [];
-    const writer = {
-      write(chunk) {
-        writes.push(String(chunk));
-      },
-    };
-    emitBackgroundCompletionSummary(
-      {
-        sessionName: "tfx-isolated-1735689600123",
-        exitCode: 1,
-        taskPrompt: "Implement context isolation",
-        stderrText: "Unhandled exception while attaching session",
-      },
-      writer,
+describe("session-spawn-helper CLI", () => {
+  it("prints usage text without --spawn", () => {
+    const result = spawnSync(
+      process.execPath,
+      [resolve(ROOT, "scripts", "session-spawn-helper.mjs")],
+      { encoding: "utf8", timeout: 5000 },
     );
-    assert.equal(writes.length, 1);
-    assert.match(writes[0], /status=failed/u);
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /session-spawn-helper: psmux 격리 세션 생성 도구/);
+    assert.match(result.stdout, /--spawn/);
   });
 });

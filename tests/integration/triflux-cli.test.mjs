@@ -66,6 +66,40 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.ok(payload.actions.length > 0);
     assert.ok(payload.actions.some((action) => action.type === "sync"));
     assert.ok(payload.actions.some((action) => action.label === "skill-alias:tfx-ralph"));
+    assert.ok(payload.actions.some((action) => action.label === "headless-guard-fast.sh"));
+    assert.ok(payload.actions.some((action) => action.label === "hub/team/agent-map.json"));
+  });
+
+  it("setup --dry-run은 stale Codex 프로필도 update로 보고해야 한다", () => {
+    const homeDir = createHomeDir();
+    writeFileSync(join(homeDir, ".codex", "config.toml"), [
+      "[profiles.codex53_high]",
+      'model = "legacy-model"',
+      'model_reasoning_effort = "low"',
+      "",
+      "[profiles.codex53_xhigh]",
+      'model = "legacy-model"',
+      'model_reasoning_effort = "medium"',
+      "",
+      "[profiles.spark53_low]",
+      'model = "legacy-spark"',
+      'model_reasoning_effort = "high"',
+      "",
+    ].join("\n"), "utf8");
+
+    const payload = parseStdoutJson(runCli(["setup", "--dry-run"], { homeDir }));
+    const codexProfiles = payload.actions.find((action) => action.type === "codex-profiles");
+
+    assert.ok(codexProfiles, "codex-profiles action missing");
+    assert.equal(codexProfiles.change, "update");
+    assert.deepEqual(codexProfiles.profiles, [
+      "codex53_high",
+      "codex53_xhigh",
+      "spark53_low",
+    ]);
+    if (process.platform === "win32") {
+      assert.equal(codexProfiles.windowsSandbox, true);
+    }
   });
 
   it("doctor --json은 checks 배열을 포함해야 한다", () => {
@@ -100,6 +134,32 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       { alias: "tfx-ralph", source: "tfx-persist", installed: true },
     ]);
     assert.equal(listPayload.user_skills.includes("tfx-ralph"), false);
+  });
+
+  it("setup은 기존 Codex 프로필을 공유 로직으로 보정해야 한다", () => {
+    const homeDir = createHomeDir();
+    const codexConfigPath = join(homeDir, ".codex", "config.toml");
+    writeFileSync(codexConfigPath, [
+      "[profiles.codex53_high]",
+      'model = "legacy-model"',
+      "",
+      "[profiles.spark53_low]",
+      'model = "legacy-spark"',
+      "",
+    ].join("\n"), "utf8");
+
+    const result = runCli(["setup"], { homeDir });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.doesNotMatch(result.stdout, /Codex profiles 설정 실패|Codex Profiles 자동 복구 실패/);
+
+    const updated = readFileSync(codexConfigPath, "utf8");
+    assert.match(updated, /\[profiles\.codex53_high\]\nmodel = "gpt-5\.3-codex"\nmodel_reasoning_effort = "high"/);
+    assert.match(updated, /\[profiles\.codex53_xhigh\]\nmodel = "gpt-5\.3-codex"\nmodel_reasoning_effort = "xhigh"/);
+    assert.match(updated, /\[profiles\.spark53_low\]\nmodel = "gpt-5\.3-codex-spark"\nmodel_reasoning_effort = "low"/);
+
+    if (process.platform === "win32") {
+      assert.match(updated, /\[windows\]\nsandbox = "elevated"/);
+    }
   });
 });
 

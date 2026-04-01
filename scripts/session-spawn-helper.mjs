@@ -69,10 +69,11 @@ export function createIsolatedSession(options = {}) {
 export function attachWithWindowsTerminal(sessionName, options = {}) {
   const profile = options.profile || DEFAULT_ATTACH_PROFILE;
   const title = options.title || sessionName;
+  const spawnFn = options.spawnFn || spawn;
 
   // sp (split-pane), not new-tab
   const wtArgs = ["sp", "-p", profile, "--title", title, "--", "psmux", "attach-session", "-t", sessionName];
-  const child = spawn("wt.exe", wtArgs, { detached: true, stdio: "ignore", windowsHide: false });
+  const child = spawnFn("wt.exe", wtArgs, { detached: true, stdio: "ignore", windowsHide: false });
   child.unref();
   return wtArgs;
 }

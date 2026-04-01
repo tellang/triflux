@@ -1,8 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 import { __remoteSpawnTest } from "../../scripts/remote-spawn.mjs";
@@ -10,7 +9,9 @@ import { __remoteSpawnTest } from "../../scripts/remote-spawn.mjs";
 const { buildPromptContext, parseArgs, rewritePromptPaths } = __remoteSpawnTest;
 
 function withTempDir(run) {
-  const dir = mkdtempSync(join(tmpdir(), "tfx-remote-spawn-test-"));
+  const parent = resolve("tests", ".tmp-remote-spawn");
+  mkdirSync(parent, { recursive: true });
+  const dir = mkdtempSync(join(parent, "case-"));
   try {
     return run(dir);
   } finally {
@@ -111,15 +112,17 @@ describe("remote-spawn rewritePromptPaths()", () => {
 
 describe("remote-spawn CLI fail-fast", () => {
   it("fails before SSH when transfer file is missing", () => {
-    const missingPath = join(tmpdir(), `missing-${Date.now()}.md`);
-    const result = spawnSync(
-      process.execPath,
-      ["scripts/remote-spawn.mjs", "--host", "example-host", "--transfer", missingPath, "hello"],
-      { cwd: resolve("."), encoding: "utf8" },
-    );
+    withTempDir((dir) => {
+      const missingPath = join(dir, `missing-${Date.now()}.md`);
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/remote-spawn.mjs", "--host", "example-host", "--transfer", missingPath, "hello"],
+        { cwd: resolve("."), encoding: "utf8" },
+      );
 
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /transfer file not found:/u);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /transfer file not found:/u);
+    });
   });
 
   it("fails before SSH when transfer file exceeds MAX_HANDOFF_BYTES", () => {

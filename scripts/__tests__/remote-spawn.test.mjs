@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { startSpawnExitWatcher, watchSpawnSessionExit } from "../remote-spawn.mjs";
+import { __remoteSpawnTest } from "../remote-spawn.mjs";
+
+const { startSpawnExitWatcher, watchSpawnSessionExit } = __remoteSpawnTest;
 
 describe("remote-spawn watcher", () => {
   it("lead pane dead 상태가 grace 기간 유지되면 세션을 정리한다", async () => {
@@ -51,7 +53,7 @@ describe("remote-spawn watcher", () => {
     assert.equal(killCount, 0);
   });
 
-  it("detached watcher를 --watch-exit 인자로 실행한다", () => {
+  it("detached watcher를 현재 cleanup watcher 인자로 실행한다", () => {
     const calls = [];
     const started = startSpawnExitWatcher("tfx-spawn-detached", {
       force: true,
@@ -70,7 +72,19 @@ describe("remote-spawn watcher", () => {
     assert.equal(started, true);
     assert.equal(calls.length, 1);
     assert.equal(calls[0].file, "node-test");
-    assert.deepEqual(calls[0].args, ["C:/tmp/remote-spawn.mjs", "--watch-exit", "tfx-spawn-detached"]);
+    assert.deepEqual(calls[0].args, [
+      "C:/tmp/remote-spawn.mjs",
+      "--watch-cleanup",
+      "tfx-spawn-detached",
+      "--pane",
+      "tfx-spawn-detached:0.0",
+      "--poll-ms",
+      "1000",
+      "--grace-ms",
+      "1500",
+      "--max-ms",
+      "3600000",
+    ]);
     assert.equal(calls[0].options.detached, true);
     assert.equal(calls[0].options.stdio, "ignore");
     assert.equal(calls[0].unrefCalled, true);

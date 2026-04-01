@@ -213,8 +213,8 @@ describe("route_agent: effort 레벨 검증", () => {
     assert.equal(ROUTE_TABLE["codex"]?.CLI_EFFORT, "codex53_high");
   });
 
-  it("gemini alias → pro effort", () => {
-    assert.equal(ROUTE_TABLE["gemini"]?.CLI_EFFORT, "pro");
+  it("gemini alias → pro31 effort", () => {
+    assert.equal(ROUTE_TABLE["gemini"]?.CLI_EFFORT, "pro31");
   });
 });
 

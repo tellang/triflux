@@ -2,11 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { stripAnsi } from "../../hub/team/ansi.mjs";
-import { createLogDashboard } from "../../hub/team/tui-lite.mjs";
+import { createLiteDashboard } from "../../hub/team/tui-lite.mjs";
 
 describe("createLogDashboard(tui-lite)", () => {
   it("워커 상태를 저장하고 선택 워커를 유지한다", () => {
-    const tui = createLogDashboard({ refreshMs: 0 });
+    const tui = createLiteDashboard({ refreshMs: 0 });
     tui.updateWorker("w1", { cli: "codex", status: "running" });
     tui.updateWorker("w2", { cli: "gemini", status: "completed" });
     tui.selectWorker("w2");
@@ -18,7 +18,7 @@ describe("createLogDashboard(tui-lite)", () => {
   it("렌더 시 핵심 메타데이터를 출력하고 코드 블록은 제거한다", () => {
     let output = "";
     const stream = { write: (chunk) => { output += chunk; }, columns: 120, isTTY: false };
-    const tui = createLogDashboard({ stream, refreshMs: 0, columns: 120 });
+    const tui = createLiteDashboard({ stream, refreshMs: 0, columns: 120 });
     tui.updateWorker("worker-1", {
       cli: "codex",
       status: "completed",
@@ -42,7 +42,7 @@ describe("createLogDashboard(tui-lite)", () => {
   it("넓은 화면에서는 rail + detail 분할 레이아웃을 쓴다", () => {
     let output = "";
     const stream = { write: (chunk) => { output += chunk; }, columns: 132, rows: 20, isTTY: false };
-    const tui = createLogDashboard({ stream, refreshMs: 0, columns: 132, rows: 20 });
+    const tui = createLiteDashboard({ stream, refreshMs: 0, columns: 132, rows: 20 });
     tui.updateWorker("w1", { cli: "codex", status: "running", summary: "step 1" });
     tui.updateWorker("w2", { cli: "claude", status: "completed", handoff: { status: "ok", verdict: "done" } });
     tui.selectWorker("w2");

@@ -915,48 +915,100 @@ function isPrimaryPaneDead(paneId) {
   }
 }
 
-async function runSpawnCleanupWatcher(sessionName, paneId, timingOptions = {}) {
-  const timings = resolveCleanupWatcherTimingOptions(timingOptions);
-  const startedAt = Date.now();
+async function watchSpawnSessionExit(sessionName, options = {}) {
+  const paneId = options.paneId || `${sessionName}:0.0`;
+  const pollMs = parsePositiveInt(options.pollMs, DEFAULT_CLEANUP_WATCH_POLL_MS);
+  const graceMs = parsePositiveInt(options.graceMs, DEFAULT_CLEANUP_WATCH_GRACE_MS);
+  const maxWaitMs = parsePositiveInt(options.maxWaitMs, DEFAULT_CLEANUP_WATCH_MAX_MS);
+  const sessionExists = typeof options.sessionExists === "function"
+    ? options.sessionExists
+    : psmuxSessionExists;
+  const getPaneStatus = typeof options.getPaneStatus === "function"
+    ? options.getPaneStatus
+    : (targetPaneId) => ({ isDead: isPrimaryPaneDead(targetPaneId), exitCode: null });
+  const killSession = typeof options.killSession === "function"
+    ? options.killSession
+    : killPsmuxSession;
+  const now = typeof options.now === "function" ? options.now : Date.now;
+  const sleep = typeof options.sleep === "function" ? options.sleep : sleepMsAsync;
+  const startedAt = now();
   let consecutiveErrors = 0;
 
-  while (Date.now() - startedAt <= timings.maxMs) {
-    if (!psmuxSessionExists(sessionName)) {
-      return;
+  while (now() - startedAt <= maxWaitMs) {
+    if (!sessionExists(sessionName)) {
+      return { cleaned: false, reason: "session-missing" };
     }
 
-    const dead = isPrimaryPaneDead(paneId);
-    if (dead === null) {
+    const paneStatus = getPaneStatus(paneId) || {};
+    if (paneStatus.isDead == null) {
       consecutiveErrors += 1;
-      if (consecutiveErrors >= 10) return; // psmux 반복 실패 시 조기 종료
+      if (consecutiveErrors >= 10) {
+        return { cleaned: false, reason: "probe-failed" };
+      }
     } else {
       consecutiveErrors = 0;
     }
-    if (dead === true) {
-      await sleepMsAsync(timings.graceMs);
 
-      if (!psmuxSessionExists(sessionName)) {
-        return;
+    if (paneStatus.isDead === true) {
+      await sleep(graceMs);
+
+      if (!sessionExists(sessionName)) {
+        return { cleaned: false, reason: "session-missing" };
       }
 
-      if (isPrimaryPaneDead(paneId) === true) {
-        try { killPsmuxSession(sessionName); } catch {}
-        return;
+      const afterGrace = getPaneStatus(paneId) || {};
+      if (afterGrace.isDead === true) {
+        killSession(sessionName);
+        return {
+          cleaned: true,
+          reason: "pane-dead",
+          exitCode: afterGrace.exitCode ?? paneStatus.exitCode ?? null,
+        };
       }
     }
 
-    await sleepMsAsync(timings.pollMs);
+    await sleep(pollMs);
   }
+
+  return { cleaned: false, reason: "timeout" };
+}
+
+async function runSpawnCleanupWatcher(sessionName, paneId, timingOptions = {}) {
+  await watchSpawnSessionExit(sessionName, {
+    paneId,
+    pollMs: timingOptions.pollMs,
+    graceMs: timingOptions.graceMs,
+    maxWaitMs: timingOptions.maxMs,
+  });
+}
+
+function startSpawnExitWatcher(sessionName, options = {}) {
+  if (!options.force && !shouldUsePsmux()) {
+    return false;
+  }
+
+  const paneId = options.paneId || `${sessionName}:0.0`;
+  const args = buildSpawnCleanupWatcherArgs(sessionName, paneId, {
+    graceMs: options.graceMs,
+    maxMs: options.maxMs,
+    pollMs: options.pollMs,
+  });
+  args[0] = options.scriptPath || args[0];
+  const spawnFn = typeof options.spawnFn === "function" ? options.spawnFn : spawn;
+  const child = spawnFn(options.execPath || process.execPath, args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  if (child && typeof child.unref === "function") {
+    child.unref();
+  }
+  return true;
 }
 
 function startSpawnSessionCleanupWatcher(sessionName, paneId, timingOptions = {}) {
-  const args = buildSpawnCleanupWatcherArgs(sessionName, paneId, timingOptions);
   try {
-    spawn(process.execPath, args, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    }).unref();
+    startSpawnExitWatcher(sessionName, { ...timingOptions, force: true, paneId });
   } catch {
     // watcher 시작 실패는 spawn 자체 실패로 보지 않는다.
   }
@@ -1230,6 +1282,8 @@ export const __remoteSpawnTest = {
   buildPromptContext,
   parseArgs,
   rewritePromptPaths,
+  startSpawnExitWatcher,
   stageRemotePromptFiles,
   validateTransferCandidate,
+  watchSpawnSessionExit,
 };
