@@ -1210,10 +1210,25 @@ async function cmdDoctor(options = {}) {
           ok("기본 셸: PowerShell");
           addDoctorCheck(report, { name: "psmux", status: "ok", path: psmuxPath, shell: "powershell" });
         } else {
-          warn("기본 셸이 cmd.exe — headless 명령 실패 가능");
-          info("수정: psmux set-option -g default-shell \"powershell.exe\"");
-          addDoctorCheck(report, { name: "psmux", status: "issues", path: psmuxPath, shell: "cmd", fix: 'psmux set-option -g default-shell "powershell.exe"' });
-          issues++;
+          if (fix) {
+            // --fix: PowerShell로 자동 변경
+            const pwshBin = which("pwsh") ? "pwsh" : "powershell.exe";
+            try {
+              execSync(`psmux set-option -g default-shell "${pwshBin}"`, { timeout: 3000, stdio: "pipe" });
+              ok(`기본 셸 → ${pwshBin} 으로 변경 완료`);
+              addDoctorCheck(report, { name: "psmux", status: "ok", path: psmuxPath, shell: pwshBin, fixed: true });
+              report.actions.push("psmux default-shell → " + pwshBin);
+            } catch (e) {
+              fail(`기본 셸 변경 실패: ${e.message}`);
+              addDoctorCheck(report, { name: "psmux", status: "issues", path: psmuxPath, shell: "cmd", fix: `psmux set-option -g default-shell "${pwshBin}"` });
+              issues++;
+            }
+          } else {
+            warn("기본 셸이 cmd.exe — headless 명령 실패 가능");
+            info(`수정: tfx doctor --fix 또는 psmux set-option -g default-shell "powershell.exe"`);
+            addDoctorCheck(report, { name: "psmux", status: "issues", path: psmuxPath, shell: "cmd", fix: "tfx doctor --fix" });
+            issues++;
+          }
         }
       } else {
         info(`미설치 ${GRAY}(선택 — 멀티모델 병렬 실행에 필요)${RESET}`);
