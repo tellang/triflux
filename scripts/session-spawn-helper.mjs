@@ -155,7 +155,7 @@ async function main() {
   }
 
   if (!hasPsmux()) {
-    process.stderr.write("ERROR: psmux가 설치되어 있지 않습니다. npm install -g psmux\n");
+    process.stderr.write("ERROR: psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)\n");
     process.exit(1);
   }
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // triflux CLI — setup, doctor, version
-import { copyFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, statSync, openSync, closeSync } from "fs";
+import { copyFileSync, existsSync, readFileSync, readSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, statSync, openSync, closeSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import { execSync, execFileSync, spawn } from "child_process";
@@ -13,9 +13,9 @@ import { cleanupStaleOmcTeams, inspectStaleOmcTeams } from "../hub/team/staleSta
 import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
 import {
-  SYNC_MAP, SKILL_ALIASES, REQUIRED_CODEX_PROFILES,
+  SYNC_MAP, SKILL_ALIASES, REQUIRED_CODEX_PROFILES, LEGACY_CODEX_MODELS,
   syncAliasedSkillDir, hasProfileSection, replaceProfileSection,
-  ensureCodexProfiles, getVersion,
+  ensureCodexProfiles, getVersion, cleanupStaleSkills, DEPRECATED_SKILLS,
 } from "../scripts/setup.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -720,6 +720,11 @@ function cmdSetup(options = {}) {
     } else {
       ok(`스킬: ${skillTotal}개 최신 상태`);
     }
+    // Stale 스킬 정리 (패키지에서 제거된 tfx-* 스킬 삭제)
+    const staleCleanup = cleanupStaleSkills(skillsDst, skillsSrc);
+    if (staleCleanup.count > 0) {
+      ok(`구형 스킬 ${staleCleanup.count}개 제거: ${staleCleanup.removed.join(", ")}`);
+    }
   }
 
   // ── 결과 추적 ──
@@ -822,22 +827,55 @@ function cmdSetup(options = {}) {
     }
   }
 
-  // Star request (버전 게이팅)
+  // Star request (버전 게이팅 + 인터랙티브 [y/n])
   const showStar = STAR_PROMPT_VERSIONS.length === 0 || STAR_PROMPT_VERSIONS.includes(PKG.version);
   if (showStar) {
+    let ghOk = false;
     try {
       execFileSync("gh", ["auth", "status"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
-      try {
-        execFileSync("gh", ["api", "user/starred/tellang/triflux"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
-        console.log();
-        ok(`이미 함께하고 계시군요. ${AMBER}⭐${RESET}`);
-      } catch {
-        console.log();
-        info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
-      }
-    } catch {
+      ghOk = true;
+    } catch {}
+
+    if (!ghOk) {
+      // gh 미설치/미인증 — URL만 표시
       console.log();
       info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
+    } else {
+      let alreadyStarred = false;
+      try {
+        execFileSync("gh", ["api", "user/starred/tellang/triflux"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
+        alreadyStarred = true;
+      } catch {}
+
+      if (alreadyStarred) {
+        console.log();
+        ok(`이미 함께하고 계시군요. ${AMBER}⭐${RESET}`);
+      } else {
+        // 인터랙티브 confirm
+        console.log();
+        process.stdout.write(`    ${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. Star? ${DIM}[y/N]${RESET} `);
+        let answer = "";
+        try {
+          const buf = Buffer.alloc(128);
+          const n = readSync(0, buf, 0, 128);
+          answer = buf.toString("utf8", 0, n).trim().toLowerCase();
+        } catch {
+          // non-interactive stdin — 건너뜀
+        }
+        if (answer.startsWith("y")) {
+          try {
+            execFileSync("gh", ["api", "-X", "PUT", "/user/starred/tellang/triflux"], {
+              timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
+            });
+            ok(`함께해 주셔서 감사합니다. ${AMBER}⭐${RESET}`);
+          } catch {
+            info(`${CYAN}https://github.com/tellang/triflux${RESET}`);
+          }
+        } else if (answer === "") {
+          // 아무 입력 없이 Enter — 조용히 URL만
+          console.log(`      ${DIM}https://github.com/tellang/triflux${RESET}`);
+        }
+      }
     }
   }
 
@@ -1079,7 +1117,9 @@ async function cmdDoctor(options = {}) {
       const missingProfiles = [];
       for (const profile of REQUIRED_CODEX_PROFILES) {
         if (hasProfileSection(codexConfig, profile.name)) {
-          ok(`${profile.name}: 정상`);
+          ok(`${profile.name}: 정상${profile.proOnly ? ` ${DIM}(Pro 전용)${RESET}` : ""}`);
+        } else if (profile.proOnly) {
+          info(`${profile.name}: 미설정 ${DIM}(Pro 전용 — Plus/기본에서는 불필요)${RESET}`);
         } else {
           missingProfiles.push(profile.name);
           warn(`${profile.name}: 미설정`);
@@ -1099,6 +1139,18 @@ async function cmdDoctor(options = {}) {
       issues++;
     }
 
+    // Codex 구형 모델 감지
+    if (existsSync(CODEX_CONFIG_PATH)) {
+      const codexContent = readFileSync(CODEX_CONFIG_PATH, "utf8");
+      const legacyFound = LEGACY_CODEX_MODELS.filter(m => codexContent.includes(`"${m}"`));
+      if (legacyFound.length > 0) {
+        warn(`구형 모델 감지: ${legacyFound.join(", ")}`);
+        info("최신 프로필로 마이그레이션: tfx setup 또는 tfx profile");
+        addDoctorCheck(report, { name: "codex-legacy-models", status: "issues", models: legacyFound, fix: "tfx setup" });
+        issues++;
+      }
+    }
+
     // 5. Gemini CLI
     section(`Gemini CLI ${BLUE}●${RESET}`);
     const geminiCli = checkCliCrossShell("gemini", "npm install -g @google/gemini-cli");
@@ -1110,6 +1162,22 @@ async function cmdDoctor(options = {}) {
       ...(geminiCli.fix ? { fix: geminiCli.fix } : {}),
     });
     // API 키 검사 제거 — bash exec 기반이므로 API 키 불필요
+
+    // Gemini 구형 모델 감지
+    const geminiProfilesPath = join(homedir(), ".gemini", "triflux-profiles.json");
+    const LEGACY_GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.5-pro-preview"];
+    if (existsSync(geminiProfilesPath)) {
+      try {
+        const geminiContent = readFileSync(geminiProfilesPath, "utf8");
+        const geminiLegacy = LEGACY_GEMINI_MODELS.filter(m => geminiContent.includes(m));
+        if (geminiLegacy.length > 0) {
+          warn(`구형 모델 감지: ${geminiLegacy.join(", ")}`);
+          info("최신 프로필로 마이그레이션: tfx setup 또는 tfx profile");
+          addDoctorCheck(report, { name: "gemini-legacy-models", status: "issues", models: geminiLegacy, fix: "tfx setup" });
+          issues++;
+        }
+      } catch {}
+    }
 
     // 6. Claude Code
     section(`Claude Code ${AMBER}●${RESET}`);
@@ -1123,7 +1191,38 @@ async function cmdDoctor(options = {}) {
       issues++;
     }
 
-  // 7. 스킬 설치 상태
+    // 7. psmux (Windows only)
+    if (process.platform === "win32") {
+      section("psmux (터미널 멀티플렉서)");
+      const psmuxPath = which("psmux");
+      if (psmuxPath) {
+        ok("설치됨");
+        // 기본 셸 확인: psmux 세션의 기본 셸이 PowerShell인지 cmd.exe인지
+        let shellOk = false;
+        try {
+          const defaultShell = execSync("psmux show-options -g default-shell 2>NUL", { encoding: "utf8", timeout: 3000 }).trim();
+          shellOk = /powershell|pwsh/i.test(defaultShell);
+        } catch {
+          // show-options 실패 시 pwsh/powershell 존재 여부로 판단
+          shellOk = !!which("pwsh") || !!which("powershell.exe");
+        }
+        if (shellOk) {
+          ok("기본 셸: PowerShell");
+          addDoctorCheck(report, { name: "psmux", status: "ok", path: psmuxPath, shell: "powershell" });
+        } else {
+          warn("기본 셸이 cmd.exe — headless 명령 실패 가능");
+          info("수정: psmux set-option -g default-shell \"powershell.exe\"");
+          addDoctorCheck(report, { name: "psmux", status: "issues", path: psmuxPath, shell: "cmd", fix: 'psmux set-option -g default-shell "powershell.exe"' });
+          issues++;
+        }
+      } else {
+        info(`미설치 ${GRAY}(선택 — 멀티모델 병렬 실행에 필요)${RESET}`);
+        info(`설치: winget install marlocarlo.psmux`);
+        addDoctorCheck(report, { name: "psmux", status: "skipped", detail: "미설치 (선택)", fix: "winget install marlocarlo.psmux" });
+      }
+    }
+
+  // 8. 스킬 설치 상태
   section("Skills");
   const skillsSrc = join(PKG_ROOT, "skills");
   const skillsDst = join(CLAUDE_DIR, "skills");
@@ -1153,7 +1252,32 @@ async function cmdDoctor(options = {}) {
       addDoctorCheck(report, { name: "skills", status: "missing", installed: 0, total: 0, fix: "패키지 skills 디렉토리를 확인하세요." });
     }
 
-    // 8. 플러그인 등록
+    // Stale 스킬 체크
+    const staleSkills = [];
+    const userSkillsDir = join(CLAUDE_DIR, "skills");
+    if (existsSync(userSkillsDir)) {
+      const pkgSkillsDir = join(PKG_ROOT, "skills");
+      const pkgSkills = new Set();
+      if (existsSync(pkgSkillsDir)) {
+        for (const n of readdirSync(pkgSkillsDir)) pkgSkills.add(n);
+      }
+      for (const { alias } of SKILL_ALIASES) pkgSkills.add(alias);
+
+      for (const n of readdirSync(userSkillsDir)) {
+        if (!n.startsWith("tfx-")) continue;
+        if (!pkgSkills.has(n)) staleSkills.push(n);
+      }
+    }
+    if (staleSkills.length > 0) {
+      warn(`구형 스킬 ${staleSkills.length}개 감지: ${staleSkills.join(", ")}`);
+      info("제거: tfx setup 또는 tfx update");
+      addDoctorCheck(report, { name: "stale-skills", status: "issues", skills: staleSkills, fix: "tfx setup" });
+      issues++;
+    } else {
+      addDoctorCheck(report, { name: "stale-skills", status: "ok" });
+    }
+
+    // 9. 플러그인 등록
     section("Plugin");
     const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
     if (existsSync(pluginsFile)) {
@@ -1171,7 +1295,7 @@ async function cmdDoctor(options = {}) {
       info("플러그인 시스템 감지 안 됨 — npm 단독 사용");
     }
 
-  // 9. MCP 인벤토리
+  // 10. MCP 인벤토리
   section("MCP Inventory");
   const mcpCache = join(CLAUDE_DIR, "cache", "mcp-inventory.json");
   if (existsSync(mcpCache)) {
@@ -1240,7 +1364,7 @@ async function cmdDoctor(options = {}) {
     issues++;
   }
 
-  // 10. CLI 이슈 트래커
+  // 11. CLI 이슈 트래커
   section("CLI Issues");
   const issuesFile = join(CLAUDE_DIR, "cache", "cli-issues.jsonl");
   if (existsSync(issuesFile)) {
@@ -1320,7 +1444,7 @@ async function cmdDoctor(options = {}) {
     ok("이슈 로그 없음 (정상)");
   }
 
-  // 11. Team Sessions
+  // 12. Team Sessions
   section("Team Sessions");
   const teamSessionReport = inspectTeamSessions();
   if (!teamSessionReport.mux) {
@@ -1370,7 +1494,7 @@ async function cmdDoctor(options = {}) {
     }
   }
 
-  // 12. OMC stale team 상태
+  // 13. OMC stale team 상태
   section("OMC Stale Teams");
   const omcTeamReport = inspectStaleOmcTeams({
     startDir: process.cwd(),
@@ -1460,7 +1584,7 @@ async function cmdDoctor(options = {}) {
     ok("Windows 전용 검사 — 건너뜀");
   }
 
-  // 13. Stale Teams (Claude teams/ + tasks/ 자동 감지)
+  // 14. Stale Teams (Claude teams/ + tasks/ 자동 감지)
   section("Stale Teams");
   const teamsDir = join(CLAUDE_DIR, "teams");
   const tasksDir = join(CLAUDE_DIR, "tasks");

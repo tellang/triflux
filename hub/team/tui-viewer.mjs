@@ -35,7 +35,7 @@ try {
   execFileSync("psmux", ["--version"], { encoding: "utf8", timeout: 2000 });
 } catch {
   process.stderr.write(
-    "ERROR: psmux not found or not executable. Install psmux before running tui-viewer.\n",
+    "ERROR: psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)\n",
   );
   process.exit(1);
 }

@@ -28,6 +28,23 @@ const PSMUX_BIN = (() => {
 })();
 const GIT_BASH = process.env.GIT_BASH_PATH || "C:\\Program Files\\Git\\bin\\bash.exe";
 const IS_WINDOWS = process.platform === "win32";
+
+/** Windows psmux 세션의 기본 셸을 PowerShell로 강제한다 (pwsh7 우선, ps5 fallback). */
+const PWSH_BIN = (() => {
+  if (!IS_WINDOWS) return "";
+  if (process.env.PSMUX_SHELL) return process.env.PSMUX_SHELL;
+  // pwsh 7 우선
+  try {
+    childProcess.execFileSync("pwsh", ["-NoLogo", "-NoProfile", "-Command", "exit 0"], { stdio: "ignore", timeout: 3000, windowsHide: true });
+    return "pwsh";
+  } catch { /* not found */ }
+  // powershell 5 fallback
+  try {
+    childProcess.execFileSync("powershell.exe", ["-NoLogo", "-NoProfile", "-Command", "exit 0"], { stdio: "ignore", timeout: 3000, windowsHide: true });
+    return "powershell.exe";
+  } catch { /* not found */ }
+  return ""; // 둘 다 없으면 psmux 기본 셸 사용
+})();
 const PSMUX_TIMEOUT_MS = 10000;
 const COMPLETION_PREFIX = "__TRIFLUX_DONE__:";
 const CAPTURE_ROOT = process.env.PSMUX_CAPTURE_ROOT || join(tmpdir(), "psmux-steering");
@@ -145,7 +162,15 @@ function randomToken(prefix) {
 
 function ensurePsmuxInstalled() {
   if (!hasPsmux()) {
-    throw new Error("psmux가 설치되어 있지 않습니다.");
+    throw new Error(
+      "psmux가 설치되어 있지 않습니다.\n\n" +
+      "psmux는 Codex/Gemini CLI를 병렬 세션으로 실행하는 터미널 멀티플렉서입니다.\n" +
+      "설치 방법 (택 1):\n" +
+      "  winget install marlocarlo.psmux\n" +
+      "  scoop install psmux\n" +
+      "  npm install -g psmux\n\n" +
+      "설치 후 터미널을 재시작하세요."
+    );
   }
 }
 
@@ -409,7 +434,7 @@ export function createPsmuxSession(sessionName, opts = {}) {
   const limitedPaneCount = layout === "2x2" ? Math.min(paneCount, 4) : paneCount;
   const sessionTarget = `${sessionName}:0`;
 
-  const leadPane = psmuxExec([
+  const newSessionArgs = [
     "new-session",
     "-d",
     "-P",
@@ -421,7 +446,15 @@ export function createPsmuxSession(sessionName, opts = {}) {
     "220",
     "-y",
     "55",
-  ]);
+  ];
+  // Windows: psmux 기본 셸이 cmd.exe일 수 있으므로 PowerShell 강제
+  if (PWSH_BIN) newSessionArgs.push(PWSH_BIN, "-NoLogo", "-NoProfile");
+  const leadPane = psmuxExec(newSessionArgs);
+
+  // split-window로 생성되는 pane도 동일 셸 사용
+  if (PWSH_BIN) {
+    try { psmuxExec(["set-option", "-t", sessionName, "default-command", `${PWSH_BIN} -NoLogo -NoProfile`]); } catch { /* 미지원 시 무시 */ }
+  }
 
   if (layout === "2x2" && limitedPaneCount >= 3) {
     const rightPane = psmuxExec([
@@ -976,7 +1009,10 @@ export async function waitForCompletion(sessionName, paneNameOrTarget, token, ti
  */
 export function spawnWorker(sessionName, workerName, cmd) {
   if (!hasPsmux()) {
-    throw new Error("psmux가 설치되어 있지 않습니다. psmux를 먼저 설치하세요.");
+    throw new Error(
+      "psmux가 설치되어 있지 않습니다.\n" +
+      "설치: winget install marlocarlo.psmux  (또는 scoop install psmux / npm i -g psmux)"
+    );
   }
 
   // remain-on-exit: 종료된 pane이 즉시 사라지는 것 방지
@@ -1017,7 +1053,7 @@ export function spawnWorker(sessionName, workerName, cmd) {
  */
 export function getWorkerStatus(sessionName, workerName) {
   if (!hasPsmux()) {
-    throw new Error("psmux가 설치되어 있지 않습니다.");
+    throw new Error("psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)");
   }
   try {
     const pane = resolvePane(sessionName, workerName);
@@ -1042,7 +1078,7 @@ export function getWorkerStatus(sessionName, workerName) {
  */
 export function killWorker(sessionName, workerName) {
   if (!hasPsmux()) {
-    throw new Error("psmux가 설치되어 있지 않습니다.");
+    throw new Error("psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)");
   }
   try {
     const { paneId, status } = getWorkerStatus(sessionName, workerName);
@@ -1101,7 +1137,7 @@ export function killWorker(sessionName, workerName) {
  */
 export function captureWorkerOutput(sessionName, workerName, lines = 50) {
   if (!hasPsmux()) {
-    throw new Error("psmux가 설치되어 있지 않습니다.");
+    throw new Error("psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)");
   }
   try {
     const { paneId } = getWorkerStatus(sessionName, workerName);
