@@ -20,7 +20,7 @@ const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
 
 // 이 배열에 포함된 버전에서만 star prompt를 표시한다 (빈 배열 = 모든 버전에서 표시)
-const STAR_PROMPT_VERSIONS = [];
+const STAR_PROMPT_VERSIONS = ["9.2.2"];
 
 const REQUIRED_CODEX_PROFILES = [
   {
