@@ -13,6 +13,8 @@ argument-hint: "[--update] [경로]"
 
 > SuperClaude index-repo 오마주. 1회 2K 토큰으로 인덱스 생성, 이후 세션마다 55K 토큰 절감.
 
+> **Gemini 위임**: 스캔 + 인덱스 생성 작업은 Gemini CLI에 위임한다. Claude는 모드 선택(Step 0)과 파일 쓰기만 담당. Claude 토큰 소비 ~500 tokens으로 줄어든다.
+
 ## 원리
 
 매 세션마다 프로젝트 구조를 파악하려면 수십 개 파일을 읽어야 한다 (~58K tokens).
@@ -40,102 +42,65 @@ AskUserQuestion:
 
 `--update` 플래그나 경로 인자가 이미 제공된 경우 이 단계를 건너뛴다.
 
-### Step 1: 파일 트리 스캔
+### Step 1: Gemini에 스캔 + 인덱스 생성 위임
+
+Claude는 프로젝트 경로와 모드를 Gemini에 전달하고, Gemini가 파일 트리 스캔·메타데이터 추출·인덱스 생성을 모두 수행한다.
 
 ```
-병렬 Glob으로 전체 파일 트리 수집:
-  - **/*.{ts,js,mjs,tsx,jsx,py,go,rs,java} (소스)
-  - **/*.{md,json,yaml,toml} (설정/문서)
-  - **/package.json, **/tsconfig.json (프로젝트 메타)
+Bash("bash scripts/tfx-route.sh gemini exec 'Scan the project at {path}. For each source file, extract: exports, imports, line count, file type. Exclude node_modules/, .git/, dist/, build/, coverage/, *.lock, *.log, *.map. Generate both PROJECT_INDEX.md and PROJECT_INDEX.json following this format:
 
-제외:
-  - node_modules/, .git/, dist/, build/, coverage/
-  - *.lock, *.log, *.map
-```
-
-### Step 2: 메타데이터 추출 (병렬)
-
-각 소스 파일에서 핵심 메타데이터만 추출 (전체 읽기 금지):
-
-```
-파일당 추출 항목:
-  - exports (함수, 클래스, 상수 이름)
-  - imports (의존성)
-  - 파일 크기 (라인 수)
-  - 주요 패턴 (테스트? 설정? 컴포넌트? 유틸?)
-
-추출 방법:
-  - Grep으로 export/import 문 추출 (파일당 ~20줄만)
-  - 전체 파일을 읽지 않음 → 토큰 절약
-```
-
-### Step 3: 인덱스 생성
-
-```markdown
+PROJECT_INDEX.md:
 # PROJECT_INDEX.md
 Generated: {date} | Files: {count} | Lines: {total_lines}
-
 ## Architecture
-{1-2줄 아키텍처 요약}
-
+{1-2 line summary}
 ## Directory Map
-```
-src/
-  ├─ hub/          # MCP 메시지 버스 (bridge, router, pipe)
-  │   ├─ team/     # 멀티-CLI 팀 모드 (headless, psmux, native)
-  │   └─ pipeline/ # 상태 관리 (state, transitions, gates)
-  ├─ skills/       # 스킬 정의 (tfx-*, SKILL.md)
-  └─ bin/          # CLI 진입점
-```
-
+{tree with inline comments}
 ## Key Files
 | File | Lines | Exports | Role |
-|------|-------|---------|------|
-| hub/bridge.mjs | 850 | BridgeServer, createBridge | MCP 프로토콜 브릿지 |
-| hub/router.mjs | 720 | Router, routeRequest | 요청/응답 라우팅 |
-| ... | ... | ... | ... |
-
 ## Dependencies
 | Package | Version | Purpose |
-|---------|---------|---------|
-| express | 4.x | HTTP 서버 |
-| ... | ... | ... |
-
 ## Entry Points
-- `bin/tfx` → CLI 메인
-- `hub/bridge.mjs` → MCP 서버
-- `skills/*/SKILL.md` → 스킬 정의
-```
+- {entry}: {role}
 
-### Step 4: JSON 인덱스 (기계용)
-
-```json
-// PROJECT_INDEX.json (~10KB)
+PROJECT_INDEX.json:
 {
-  "generated": "2026-03-29",
-  "stats": { "files": 45, "lines": 12500 },
-  "files": {
-    "hub/bridge.mjs": {
-      "lines": 850,
-      "exports": ["BridgeServer", "createBridge"],
-      "imports": ["express", "./router"],
-      "type": "server"
-    }
-  },
-  "graph": {
-    "hub/bridge.mjs": ["hub/router.mjs", "hub/pipe.mjs"],
-    "hub/router.mjs": ["hub/intent.mjs"]
-  }
+  "generated": "{date}",
+  "stats": { "files": N, "lines": N },
+  "files": { "{path}": { "lines": N, "exports": [], "imports": [], "type": "" } },
+  "graph": { "{path}": ["{dep}", ...] }
 }
+
+Return the full content of both files separated by the delimiter: ===PROJECT_INDEX_JSON_START===
+Mode: {mode}
+'")
 ```
 
-### Step 5: 검증
+Gemini 출력을 받은 후 Claude가 파일로 기록한다:
 
 ```
-생성된 인덱스 검증:
-  - 파일 수 일치 확인
+Write("PROJECT_INDEX.md", <md_section>)
+Write("PROJECT_INDEX.json", <json_section>)
+```
+
+#### Fallback: Gemini 실패 시
+
+Gemini 위임이 실패하거나 `tfx-route.sh`가 없는 경우, Claude가 직접 원래 워크플로우로 폴백한다:
+
+```
+1. 병렬 Glob으로 파일 트리 수집 (**/*.{ts,js,mjs,tsx,jsx,...})
+2. Grep으로 export/import 문 추출 (파일당 ~20줄)
+3. PROJECT_INDEX.md + PROJECT_INDEX.json 직접 생성
+```
+
+### Step 2: 검증 (Claude 담당)
+
+```
+생성된 인덱스 빠른 검증:
+  - 파일 수 일치 확인 (stats.files vs 실제)
   - 주요 진입점 포함 확인
   - 인덱스 크기 < 5KB 확인
+  - PROJECT_INDEX.json 파싱 가능 여부 확인
 ```
 
 ## --update 모드
@@ -158,12 +123,15 @@ src/
 
 ## 토큰 예산
 
-| 작업 | 토큰 |
-|------|------|
-| 스캔+추출 | ~1.5K |
-| 인덱스 생성 | ~0.5K |
-| **총합** | **~2K** |
-| **세션당 절감** | **~55K** |
+| 작업 | Claude | Gemini |
+|------|--------|--------|
+| 모드 선택 (Step 0) | ~100 | — |
+| 스캔 + 메타데이터 추출 | — | Gemini 부담 |
+| 인덱스 생성 (MD + JSON) | — | Gemini 부담 |
+| 파일 쓰기 (Write) | ~300 | — |
+| 검증 (Step 2) | ~100 | — |
+| **Claude 총합** | **~500** | — |
+| **세션당 절감** | **~55K** | — |
 
 ## 사용 예
 

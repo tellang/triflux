@@ -14,6 +14,25 @@ argument-hint: "<구현할 주제 또는 요구사항>"
 
 > OMC deep-interview + ouroboros 오마주. 모호성을 숫자로 측정하고 20% 미만까지 질문한다.
 > "측정할 수 없으면 개선할 수 없다."
+>
+> **Gemini 위임**: 분석·점수 계산·산출물 초안은 Gemini CLI에 위임하여 Claude 토큰을 절약한다.
+> 위임 패턴: `Bash("bash scripts/tfx-route.sh gemini exec '{prompt}'")`
+
+## 위임 패턴
+
+Claude와 Gemini의 역할을 분리하여 토큰을 최적화한다.
+
+| 담당 | 작업 |
+|------|------|
+| **Claude** | AskUserQuestion (사용자 상호작용), 최종 파일 저장 |
+| **Gemini** | 모호성 점수 계산, 질문 생성, 응답 분석, 산출물 초안 |
+
+```bash
+# 위임 호출 형태
+Bash("bash scripts/tfx-route.sh gemini exec '{prompt}'")
+```
+
+Gemini 실패 시 Fallback: Claude Opus가 분석을 직접 처리한다.
 
 ## 용도
 
@@ -48,15 +67,17 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
 
 ### Step 1: 초기 모호성 평가
 
-사용자 입력을 분석하여 초기 ambiguity score를 계산한다:
+사용자 입력을 Gemini에 전달하여 초기 ambiguity score를 계산한다:
+
+```bash
+# Claude → Gemini 위임
+Bash("bash scripts/tfx-route.sh gemini exec 'Analyze the following requirement and calculate ambiguity score. Return JSON: {goal, constraints, criteria, ambiguity, suggested_questions}: {user_input}'")
+```
+
+Gemini가 반환한 JSON에서 점수를 읽어 사용자에게 표시한다:
 
 ```
-입력 분석:
-  1. goal, constraints, criteria 각 요소의 현재 명확도 평가
-  2. ambiguity score 계산
-  3. 가장 불명확한 요소 식별 → 해당 단계부터 질문 시작
-
-출력:
+출력 예시:
   "📊 현재 모호성: 71%
    - 목표: 50% 명확 (어떤 인증 방식?)
    - 제약: 20% 명확 (기술 스택 미정)
@@ -66,7 +87,9 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
 
 ### Step 2: 5단계 인터뷰 (모호성 < 20%까지)
 
-각 단계에서 AskUserQuestion으로 질문하고, 응답 후 ambiguity score를 재계산한다.
+각 단계에서 Claude가 AskUserQuestion으로 질문하고, 사용자 응답을 Gemini에 전달하여 분석 및 다음 질문을 생성한다.
+
+흐름: `Claude(질문) → 사용자(응답) → Gemini(분석+재계산) → Claude(다음 질문 제시)`
 
 #### Stage 1: Clarify (명확화) — goal 개선
 
@@ -75,8 +98,15 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
   - "정확히 무엇을 달성하려는가?"
   - "이 작업의 범위는 어디까지인가?"
   - "완료 후 어떤 상태가 되어야 하는가?"
+```
 
-응답 후: goal 점수 재평가 → ambiguity 재계산
+```bash
+# 응답 수집 후 Gemini에 분석 위임
+Bash("bash scripts/tfx-route.sh gemini exec 'Stage 1 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+```
+
+```
+응답 후: Gemini JSON에서 goal 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
 #### Stage 2: Decompose (분해) — constraints 개선
@@ -86,8 +116,15 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
   - "이것을 어떤 하위 문제로 나눌 수 있는가?"
   - "기술적 제약 조건은? (스택, 호환성, 성능)"
   - "의존하는 외부 시스템이나 API는?"
+```
 
-응답 후: constraints 점수 재평가 → ambiguity 재계산
+```bash
+# 응답 수집 후 Gemini에 분석 위임
+Bash("bash scripts/tfx-route.sh gemini exec 'Stage 2 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+```
+
+```
+응답 후: Gemini JSON에서 constraints 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
 #### Stage 3: Challenge (반론) — 숨은 제약 발견
@@ -97,8 +134,15 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
   - "이 접근의 약점은?"
   - "실패할 수 있는 시나리오는?"
   - "6개월 후 유지보수 관점에서 문제될 부분은?"
+```
 
-응답 후: constraints + criteria 재평가 → ambiguity 재계산
+```bash
+# 응답 수집 후 Gemini에 분석 위임
+Bash("bash scripts/tfx-route.sh gemini exec 'Stage 3 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+```
+
+```
+응답 후: Gemini JSON에서 constraints + criteria 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
 #### Stage 4: Alternatives (대안) — criteria 정밀화
@@ -108,8 +152,15 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
   - "다른 방법은 없는가?"
   - "시간이 절반이라면 어떤 방식을 택하겠는가?"
   - "각 대안의 trade-off는?"
+```
 
-응답 후: criteria 점수 재평가 → ambiguity 재계산
+```bash
+# 응답 수집 후 Gemini에 분석 위임
+Bash("bash scripts/tfx-route.sh gemini exec 'Stage 4 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+```
+
+```
+응답 후: Gemini JSON에서 criteria 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
 #### Stage 5: Synthesize (종합) — 최종 확인
@@ -119,8 +170,15 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
   - "지금까지의 논의를 종합하면 최적 경로는?"
   - "첫 번째로 실행할 단계는?"
   - "이 결정에 대한 확신도는? (1-10)"
+```
 
-응답 후: 전체 재평가 → 최종 ambiguity score
+```bash
+# 응답 수집 후 Gemini에 최종 분석 위임
+Bash("bash scripts/tfx-route.sh gemini exec 'Stage 5 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+```
+
+```
+응답 후: Gemini JSON에서 전체 점수 읽기 → 최종 ambiguity score 사용자에게 표시
 ```
 
 ### Step 3: 조기 종료 판단
@@ -140,7 +198,18 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
 
 ### Step 4: 산출물 생성
 
-인터뷰 결과를 구조화된 문서로 저장한다:
+Gemini가 인터뷰 전체 컨텍스트를 바탕으로 구조화된 문서 초안을 생성하고, Claude가 파일로 저장한다:
+
+```bash
+# Gemini에 산출물 초안 생성 위임
+Bash("bash scripts/tfx-route.sh gemini exec 'Generate a structured interview output document based on the following interview context: {full_context}. Return the complete markdown document.'")
+```
+
+Claude는 Gemini가 반환한 마크다운을 Write 도구로 저장한다.
+
+저장 위치: `.omc/plans/interview-{timestamp}.md`
+
+산출물 형식:
 
 ```markdown
 # Interview: {topic}
@@ -179,8 +248,6 @@ Date: {date} | Final Ambiguity: {score}%
 3. ...
 ```
 
-저장 위치: `.omc/plans/interview-{timestamp}.md`
-
 ## 동작 규칙
 
 1. 각 단계에서 반드시 사용자 응답을 수집한 후 다음으로 이동한다.
@@ -192,13 +259,16 @@ Date: {date} | Final Ambiguity: {score}%
 
 ## 토큰 예산
 
-| 단계 | 토큰 |
-|------|------|
-| 초기 평가 | ~1K |
-| 5단계 인터뷰 (질문+분석) | ~10K |
-| 산출물 생성 | ~2K |
-| 코드베이스 탐색 | ~2K |
-| **총합** | **~15K** |
+| 단계 | Claude | Gemini |
+|------|--------|--------|
+| 초기 평가 (모호성 분석) | ~0.2K | ~1K |
+| 5단계 인터뷰 (질문 제시) | ~1K | ~10K |
+| 산출물 초안 생성 | — | ~2K |
+| 최종 파일 저장 | ~0.5K | — |
+| 코드베이스 탐색 | ~0.3K | — |
+| **총합** | **~2K** | **~13K** |
+
+Fallback: Gemini 호출 실패 시 Claude Opus가 분석을 직접 처리한다 (총합 ~15K).
 
 ## 사용 예
 

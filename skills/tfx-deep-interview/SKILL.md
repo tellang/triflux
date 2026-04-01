@@ -25,6 +25,24 @@ argument-hint: "<topic>"
 /딥인터뷰 데이터 파이프라인 설계
 ```
 
+## 위임 패턴
+
+Claude 토큰을 절약하기 위해 분석 작업은 Gemini CLI에 위임합니다.
+
+- **Claude 담당**: AskUserQuestion (사용자 상호작용), 산출물 저장
+- **Gemini 담당**: 질문 생성, 응답 분석, 종합 문서 초안 작성
+
+각 단계에서 Claude는 누적 컨텍스트를 Gemini에 전달하고, Gemini가 반환한 질문을 AskUserQuestion으로 사용자에게 제시합니다. 사용자 답변은 다음 단계 Gemini 호출의 입력으로 전달됩니다.
+
+**Fallback**: Gemini 호출이 실패하면 Claude Opus가 모든 분석을 직접 수행합니다 (원래 동작 유지).
+
+## 토큰 예산
+
+| 담당 | 토큰 | 역할 |
+|------|------|------|
+| Claude | ~2K | 오케스트레이션 + AskUserQuestion만 |
+| Gemini | ~10K | 분석 + 질문 생성 + 문서 초안 |
+
 ## 5단계 인터뷰 프로세스
 
 인터뷰는 반드시 아래 5단계를 순서대로 진행합니다. 각 단계에서 사용자 응답을 수집한 후 다음 단계로 이동합니다.
@@ -35,7 +53,15 @@ argument-hint: "<topic>"
 
 목표를 한 문장으로 정의하고, 성공 기준과 현재 상태의 차이를 파악합니다.
 
-**질문 템플릿:**
+**단계 진입 시 Gemini 위임:**
+
+```
+Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 1: Clarify. Topic: {topic}. Previous answers: none. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+```
+
+Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
+
+**질문 템플릿 (Gemini 실패 시 Fallback):**
 
 1. "이 작업의 핵심 목표를 한 문장으로 설명해주세요."
 2. "완료 후 어떤 상태가 되어야 성공인가요?"
@@ -47,7 +73,15 @@ argument-hint: "<topic>"
 
 대상을 3-5개의 독립적 하위 문제로 분해하고, 의존성과 우선순위를 결정합니다.
 
-**질문 템플릿:**
+**단계 진입 시 Gemini 위임:**
+
+```
+Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 2: Decompose. Topic: {topic}. Previous answers: {stage1_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+```
+
+Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
+
+**질문 템플릿 (Gemini 실패 시 Fallback):**
 
 1. "이 작업을 3-5개의 독립된 단계로 나눈다면?"
 2. "각 단계 사이에 의존성이 있나요?"
@@ -59,7 +93,15 @@ argument-hint: "<topic>"
 
 선택한 접근 방식의 단점을 식별하고, 실패 시나리오와 기술 부채 가능성을 탐색합니다.
 
-**질문 템플릿:**
+**단계 진입 시 Gemini 위임:**
+
+```
+Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 3: Challenge. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+```
+
+Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
+
+**질문 템플릿 (Gemini 실패 시 Fallback):**
 
 1. "이 방식이 실패할 수 있는 시나리오는?"
 2. "6개월 후 이 코드를 유지보수할 때 문제가 될 부분은?"
@@ -71,7 +113,15 @@ argument-hint: "<topic>"
 
 최소 2개의 대안을 검토하고, 각 대안의 trade-off를 비교합니다.
 
-**질문 템플릿:**
+**단계 진입 시 Gemini 위임:**
+
+```
+Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 4: Alternatives. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers} {stage3_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+```
+
+Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
+
+**질문 템플릿 (Gemini 실패 시 Fallback):**
 
 1. "같은 목표를 달성할 수 있는 완전히 다른 접근은?"
 2. "시간이 절반밖에 없다면 어떤 방식을 택하겠습니까?"
@@ -83,7 +133,15 @@ argument-hint: "<topic>"
 
 인터뷰 결과를 종합하여 실행 계획을 도출하고, 구조화된 요구사항 문서를 생성합니다.
 
-**질문 템플릿:**
+**단계 진입 시 Gemini 위임:**
+
+```
+Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 5: Synthesize. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers} {stage3_answers} {stage4_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+```
+
+Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
+
+**질문 템플릿 (Gemini 실패 시 Fallback):**
 
 1. "지금까지의 논의를 종합하면, 최적의 접근 방식은?"
 2. "첫 번째 단계로 무엇을 실행하시겠습니까?"
@@ -91,7 +149,15 @@ argument-hint: "<topic>"
 
 ## 산출물
 
-인터뷰 완료 후 `.tfx/plans/interview-{timestamp}.md` 경로에 구조화된 요구사항 문서를 생성합니다.
+인터뷰 완료 후 Gemini가 전체 인터뷰 문서 초안을 생성하고, Claude가 Write 툴로 `.tfx/plans/interview-{timestamp}.md`에 저장합니다.
+
+**산출물 생성 Gemini 위임:**
+
+```
+Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview complete. Topic: {topic}. All answers: {all_answers}. Generate a structured requirements document draft. Return the full markdown document.'")
+```
+
+Gemini 실패 시 Claude가 직접 아래 형식으로 문서를 작성합니다.
 
 ### 산출물 형식
 

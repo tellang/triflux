@@ -40,6 +40,18 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-route-guard.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "*",
