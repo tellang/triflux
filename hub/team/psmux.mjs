@@ -5,7 +5,27 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 
-const PSMUX_BIN = process.env.PSMUX_BIN || "psmux";
+const PSMUX_BIN = (() => {
+  if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
+  // PATH에서 찾기
+  try {
+    childProcess.execFileSync("psmux", ["-V"], { stdio: "ignore", timeout: 2000, windowsHide: true });
+    return "psmux";
+  } catch { /* not in PATH */ }
+  // Windows 기본 설치 경로 탐색
+  if (process.platform === "win32") {
+    const candidates = [
+      join(process.env.LOCALAPPDATA || "", "psmux", "psmux.exe"),
+      join(process.env.APPDATA || "", "npm", "psmux.cmd"),
+      join(homedir(), "AppData", "Local", "psmux", "psmux.exe"),
+      join(homedir(), "scoop", "shims", "psmux.exe"),
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) return p;
+    }
+  }
+  return "psmux"; // 최종 fallback — 원래대로
+})();
 const GIT_BASH = process.env.GIT_BASH_PATH || "C:\\Program Files\\Git\\bin\\bash.exe";
 const IS_WINDOWS = process.platform === "win32";
 const PSMUX_TIMEOUT_MS = 10000;
