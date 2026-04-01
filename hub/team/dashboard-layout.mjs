@@ -3,6 +3,7 @@ const USER_DASHBOARD_LAYOUTS = new Set([
   "split-2col",
   "split-3col",
   "auto",
+  "lite",
 ]);
 
 const DASHBOARD_LAYOUTS = new Set([
@@ -23,6 +24,7 @@ export function parseDashboardLayout(value) {
 
 export function resolveDashboardLayout(value, workerCount = 0) {
   const normalized = normalizeDashboardLayout(value, { allowAuto: true });
+  if (normalized === "lite") return "lite";
   if (normalized !== "auto") return normalized;
   if (workerCount >= 4) return "summary+detail";
   if (workerCount === 3) return "split-3col";

@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createLogDashboard } from "./tui.mjs";
+import { createLiteDashboard } from "./tui-lite.mjs";
 import { processHandoff } from "./handoff.mjs";
 import { statusBadge } from "./ansi.mjs";
 
@@ -45,7 +46,8 @@ const MAX_BODY_BYTES = 10240;
 // ── TUI 초기화 ──
 // WT pane에서 spawn 시 process.stdout.isTTY=false일 수 있음
 // forceTTY 시 alternate screen이 WT pane에서 렌더링 안 되는 문제 → append-only 유지
-const tui = createLogDashboard({
+const tuiFactory = LAYOUT === "lite" ? createLiteDashboard : createLogDashboard;
+const tui = tuiFactory({
   refreshMs: 0,          // render 루프를 직접 제어
   stream: process.stdout,
   input: process.stdin,

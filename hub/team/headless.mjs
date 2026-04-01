@@ -24,6 +24,7 @@ import { getBackend } from "./backend.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import { normalizeDashboardAnchor } from "./dashboard-anchor.mjs";
 import { createLogDashboard } from "./tui.mjs";
+import { createLiteDashboard } from "./tui-lite.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
 
@@ -357,12 +358,15 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   let tui = null;
   const resolvedLayout = resolveDashboardLayout(dashboardLayout, assignments.length);
   if (dashboard && process.stdout.isTTY) {
-    tui = createLogDashboard({
+    const dashOpts = {
       stream: process.stdout,
       input: process.stdin,
       refreshMs: 200,
       layout: resolvedLayout,
-    });
+    };
+    tui = resolvedLayout === "lite"
+      ? createLiteDashboard(dashOpts)
+      : createLogDashboard(dashOpts);
     tui.setStartTime(Date.now());
     // 초기 워커 상태 등록
     for (let i = 0; i < assignments.length; i++) {
