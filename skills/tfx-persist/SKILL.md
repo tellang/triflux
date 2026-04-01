@@ -12,6 +12,10 @@ argument-hint: "<완료할 작업 설명>"
 
 # tfx-persist — Tri-Verified Persistence Loop
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > OMC ralph 오마주. 핵심 차별점: 검증자가 단일 agent가 아니라 **3-CLI consensus**.
 > The boulder never stops — but it stops being wrong.
 

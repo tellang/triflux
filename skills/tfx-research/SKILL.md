@@ -13,6 +13,10 @@ argument-hint: "<검색 주제>"
 
 # tfx-research — Light Web Research
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **Deep 버전**: tfx-deep-research. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > 빠른 단일 소스 검색 + 요약. **검색 자체를 Gemini에 위임**해 Claude 토큰 최소화. Gemini CLI의 네이티브 Google Search로 검색+요약을 한 번에 처리.
 

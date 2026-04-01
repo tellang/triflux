@@ -12,6 +12,10 @@ argument-hint: "<구현할 주제 또는 요구사항>"
 
 # tfx-interview — Quantified Socratic Requirements Exploration
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > OMC deep-interview + ouroboros 오마주. 모호성을 숫자로 측정하고 20% 미만까지 질문한다.
 > "측정할 수 없으면 개선할 수 없다."
 >

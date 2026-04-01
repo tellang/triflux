@@ -12,6 +12,10 @@ argument-hint: "[--add|--edit|--probe-all|--diagnose]"
 
 # tfx-remote-setup — 원격 호스트 설정 위저드
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > 원격 세션(tfx-remote-spawn)을 쓰기 전에 호스트를 설정합니다.
 > Tailscale 네트워크 자동 감지 → SSH 연결 → Claude 프로브 → hosts.json 등록을 한번에.
 

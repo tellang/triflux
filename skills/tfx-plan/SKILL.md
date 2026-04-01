@@ -11,6 +11,10 @@ argument-hint: "<구현할 기능 설명>"
 
 # tfx-plan — Light Implementation Plan
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **Deep 버전**: tfx-deep-plan. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > Gemini 위임 빠른 계획 — Claude는 컨텍스트 수집·출력 포맷만, 핵심 계획 수립은 Gemini에 위임.
 

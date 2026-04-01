@@ -10,6 +10,10 @@ argument-hint: "\"작업 설명\" | N:gemini \"작업 설명\""
 
 # tfx-gemini — Gemini-Only 오케스트레이터
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **래퍼**: tfx-auto의 Gemini 전용 바로가기. TFX_CLI_MODE=gemini.
 > Gemini CLI만 사용하여 모든 외부 CLI 작업을 라우팅합니다.
 > Codex CLI가 없는 환경에서 사용합니다.

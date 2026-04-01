@@ -15,6 +15,10 @@ argument-hint: "[호스트] [프롬프트] 또는 자연어"
 
 # tfx-remote-spawn — 원격/로컬 Claude 세션 관리
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > psmux 세션 기반으로 Claude를 원격/로컬에서 실행하고 관리합니다.
 > AskUserQuestion 기반 인터랙티브 메뉴로 다중 호출 없이 한번에 처리.
 

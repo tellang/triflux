@@ -10,6 +10,10 @@ argument-hint: "\"작업 설명\" | N:agent_type \"작업 설명\""
 
 # tfx-auto-codex — Codex 리드형 tfx-auto
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **래퍼**: tfx-auto의 Codex 전용 바로가기. TFX_NO_CLAUDE_NATIVE=1.
 > 목적: 기존 `tfx-auto`의 오케스트레이션 패턴을 유지하면서
 > Claude 네이티브 역할(`explore`, `verifier`, `test-engineer`, `qa-tester`)을

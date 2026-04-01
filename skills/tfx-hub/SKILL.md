@@ -11,6 +11,10 @@ argument-hint: "<start|stop|status|자유형 작업 설명>"
 
 # tfx-hub — MCP 메시지 버스 관리 + 개방형 작업
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **인프라**: 다른 스킬이 내부적으로 사용. 직접 호출할 필요 없음.
 > CLI 에이전트(Codex/Gemini/Claude) 간 실시간 메시지 허브를 관리합니다.
 > **커맨드 매칭 + fallthrough**: start/stop/status에 매칭되면 즉시 실행,

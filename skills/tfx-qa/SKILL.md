@@ -11,6 +11,10 @@ argument-hint: "[테스트 명령 또는 파일 경로]"
 
 # tfx-qa — Light Test-Fix Cycle
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **Deep 버전**: tfx-deep-qa. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > 테스트 실행 → 실패 분석 → 자동 수정 → 재실행. 최대 3회. OMC ultraqa 영감.
 

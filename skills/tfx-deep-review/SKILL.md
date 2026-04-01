@@ -12,6 +12,10 @@ argument-hint: "[파일 경로 또는 변경 설명]"
 
 # tfx-deep-review — Tri-CLI Deep Code Review
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **Light 버전**: tfx-review. 기본값. 깊이 수정자 없으면 Light 선택.
 > 3-CLI 독립 리뷰 → 교차검증 → 2+ 합의 항목만 보고. Diffray + Calimero 영감.
 

@@ -12,6 +12,10 @@ argument-hint: "[파일 경로 또는 git diff 범위]"
 
 # tfx-prune — Tri-Verified AI Slop Remover
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > OMC ai-slop-cleaner 오마주. 핵심 차별점: 단일 판단이 아닌 **3자 독립 감지 + 합의** 기반 제거.
 > "AI가 만든 슬롭은 AI 3명이 합의해야 슬롭이다."
 

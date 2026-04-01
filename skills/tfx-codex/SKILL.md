@@ -10,6 +10,10 @@ argument-hint: "\"작업 설명\" | N:codex \"작업 설명\""
 
 # tfx-codex — Codex-Only 오케스트레이터
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **래퍼**: tfx-auto의 Codex 전용 바로가기. TFX_CLI_MODE=codex.
 > **HARD RULE**: Claude는 이 스킬에서 Edit/Write를 사용하면 안 된다. 모든 코드 수정은 Codex CLI를 통해 수행한다.
 > Codex CLI만 사용하여 모든 외부 CLI 작업을 라우팅합니다.

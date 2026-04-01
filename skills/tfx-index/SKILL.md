@@ -11,6 +11,10 @@ argument-hint: "[--update] [경로]"
 
 # tfx-index — Project Indexing (94% Token Reduction)
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > SuperClaude index-repo 오마주. 1회 2K 토큰으로 인덱스 생성, 이후 세션마다 55K 토큰 절감.
 
 > **Gemini 위임**: 스캔 + 인덱스 생성 작업은 Gemini CLI에 위임한다. Claude는 모드 선택(Step 0)과 파일 쓰기만 담당. Claude 토큰 소비 ~500 tokens으로 줄어든다.

@@ -14,6 +14,10 @@ argument-hint: "[--depth quick|standard|deep] <리서치 주제>"
 
 # tfx-deep-research — Multi-Source Deep Research with Tri-CLI Consensus
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **Light 버전**: tfx-research. 기본값. 깊이 수정자 없으면 Light 선택.
 > 쿼리 분해 → 3-CLI 독립 병렬 검색 → 교차검증 → 합의 기반 종합 보고서.
 > STORM(Stanford) perspective-guided + GPT-Researcher recursive tree + Tavily deep research pipeline 영감.

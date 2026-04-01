@@ -11,6 +11,10 @@ argument-hint: "[파일 경로 또는 변경 설명]"
 
 # tfx-review — Light Code Review
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **Deep 버전**: tfx-deep-review. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > **HARD RULE**: 리뷰 결과를 생성할 때 Claude가 직접 git log/diff를 실행하지 마라. Codex code-reviewer에게 위임하라.
 > Codex 단일 리뷰로 빠른 피드백. 토큰 최소화.

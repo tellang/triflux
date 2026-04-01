@@ -13,6 +13,10 @@ argument-hint: "<구현할 기능 설명>"
 
 # tfx-deep-plan — Tri-Model Consensus Planning
 
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
 > **Light 버전**: tfx-plan. 기본값. 깊이 수정자 없으면 Light 선택.
 3개 모델(Opus 4.6 · GPT 5.4 · Gemini)이 독립 설계 후 교차검증하여 합의된 계획을 도출한다.
 
