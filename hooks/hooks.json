@@ -1,5 +1,5 @@
 {
-  "description": "triflux lifecycle hooks — CLI routing setup and HUD integration",
+  "description": "triflux lifecycle hooks v2 — hook-orchestrator 기반 순차 실행. 우선순위는 hook-registry.json에서 관리.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,23 +7,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/setup.mjs\"",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hub-ensure.mjs\"",
-            "timeout": 8
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-gateway-ensure.mjs\"",
-            "timeout": 8
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/preflight-cache.mjs\"",
-            "timeout": 5
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "timeout": 15
           }
         ]
       }
@@ -34,20 +19,44 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/run.cjs\" \"${CLAUDE_PLUGIN_ROOT}/scripts/keyword-detector.mjs\"",
-            "timeout": 5
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "timeout": 10
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "Agent",
+        "matcher": "Bash|Agent|Skill",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/agent-route-guard.mjs\"",
-            "timeout": 3
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "timeout": 5
           }
         ]
       }
@@ -58,7 +67,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pipeline-stop.mjs\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "timeout": 35
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
             "timeout": 5
           }
         ]
