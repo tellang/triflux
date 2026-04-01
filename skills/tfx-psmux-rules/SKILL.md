@@ -153,34 +153,121 @@ Get-Content 'C:\path\prompts\prompt.md' -Raw | codex
 
 ---
 
-## RULE 5: WT 패인 정리 (프리징 방지)
+## RULE 5: WT 세션 정리 — CRITICAL (프리징 치명 버그)
 
-WT 패인이 psmux 세션에 attach된 상태에서 `kill-session`하면 WT가 프리징된다.
+> **이 규칙을 위반하면 Windows Terminal이 완전히 프리징된다.**
+> 복구 방법은 작업 관리자에서 WindowsTerminal.exe 강제 종료뿐이다.
+> **모든 열린 탭/세션이 유실된다.** 절대 위반하지 마라.
 
-### MUST (3단계 정리)
+### 프리징 원인
+
+WT 패인이 `psmux attach-session`으로 세션에 연결된 상태에서
+`psmux kill-session`을 직접 호출하면 WT의 PTY 핸들이 dangling 상태가 되어
+**전체 WT 프로세스가 응답 불능**이 된다.
+
+### MUST — 3단계 정리 (순서 반드시 준수)
 
 ```bash
-# 1) graceful exit
-for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep codex-swarm); do
+# 1) graceful exit — 각 세션 내 프로세스를 정상 종료
+for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"); do
   psmux send-keys -t "$s" "exit" Enter 2>/dev/null || true
 done
 
-# 2) WT 패인 종료 대기
+# 2) WT 패인 분리 대기 — exit이 WT에 전파되는 시간 필요
 sleep 2
 
-# 3) 잔여 세션 강제 종료
-for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep codex-swarm); do
+# 3) 잔여 세션 강제 종료 — exit이 먹히지 않은 경우만
+for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"); do
   psmux kill-session -t "$s" 2>/dev/null || true
 done
 ```
 
-### MUST NOT
+### MUST NOT — 아래 패턴은 전부 프리징 유발
 
 ```bash
-# WRONG — WT 프리징 발생
-for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep codex-swarm); do
-  psmux kill-session -t "$s"
-done
+# WRONG 1 — exit 없이 바로 kill
+psmux kill-session -t "$session"
+
+# WRONG 2 — sleep 없이 exit 직후 kill
+psmux send-keys -t "$s" "exit" Enter
+psmux kill-session -t "$s"   # ← WT가 아직 PTY를 잡고 있음
+
+# WRONG 3 — detach 직후 kill
+psmux send-keys -t "$s" "psmux detach" Enter
+psmux kill-session -t "$s"   # ← detach 완료 전에 kill → 프리징
+```
+
+### WT 패인 직접 닫기 (세션이 아닌 WT 쪽에서 정리)
+
+```bash
+# WT 패인을 닫는 것이 세션 kill보다 안전
+wt.exe -w 0 close-pane    # 현재 포커스된 패인 닫기
+```
+
+---
+
+## RULE 5-1: psmux 경로 탐색
+
+psmux는 환경마다 설치 위치가 다르다. `hub/team/psmux.mjs`의 `PSMUX_BIN`이
+자동 탐색하지만, 스크립트에서 직접 psmux를 호출할 때도 경로를 고려해야 한다.
+
+탐색 우선순위:
+1. `$PSMUX_BIN` 환경변수 (설정 시 최우선)
+2. PATH의 `psmux`
+3. `%LOCALAPPDATA%\psmux\psmux.exe` (Windows 기본)
+4. `%APPDATA%\npm\psmux.cmd` (npm global)
+5. `~\scoop\shims\psmux.exe` (Scoop)
+
+---
+
+## RULE 5-2: WT 명령 치트시트
+
+### 패인 분할
+
+```bash
+# 현재 창에서 수평 분할 (상/하)
+wt.exe -w 0 sp -H -p triflux --title "worker" psmux attach-session -t SESSION
+
+# 현재 창에서 수직 분할 (좌/우)
+wt.exe -w 0 sp -V -p triflux --title "worker" psmux attach-session -t SESSION
+
+# 2x2 그리드 (4 패인)
+wt.exe -w 0 \
+  sp -H -p triflux --title "w1" psmux attach-session -t S1 \; \
+  sp -V -p triflux --title "w2" psmux attach-session -t S2 \; \
+  move-focus up \; \
+  sp -V -p triflux --title "w3" psmux attach-session -t S3
+```
+
+### 포커스 이동
+
+```bash
+wt.exe -w 0 move-focus up|down|left|right
+```
+
+### 패인 닫기 (세션 kill보다 안전)
+
+```bash
+wt.exe -w 0 close-pane
+```
+
+### 필수 옵션
+
+| 옵션 | 의미 | 필수 여부 |
+|------|------|----------|
+| `-w 0` | 현재 WT 윈도우 | 필수 (없으면 새 창) |
+| `-p triflux` | triflux WT 프로파일 | 필수 (테마/셸 일관성) |
+| `--title "name"` | 패인 제목 | 권장 (식별용) |
+| `sp -H` / `sp -V` | 분할 방향 | 필수 |
+
+### 새 탭 금지
+
+```bash
+# WRONG — 새 탭 생성 (nt)
+wt.exe -w 0 nt -p triflux ...
+
+# RIGHT — split-pane (sp)
+wt.exe -w 0 sp -V -p triflux ...
 ```
 
 ---
