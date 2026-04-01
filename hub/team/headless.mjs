@@ -243,10 +243,12 @@ function dispatchBatch(sessionName, assignments, opts = {}) {
  * @returns {Promise<Array<{d, completion, output}>>}
  */
 async function awaitAll(sessionName, dispatches, timeoutSec, safeProgress, progressIntervalSec) {
+  const ac = new AbortController();
+
   // 병렬 대기 (Promise.all — 모든 pane 동시 폴링, 총 시간 = max(개별 시간))
   return Promise.all(dispatches.map(async (d) => {
     // onPoll → onProgress 변환 (throttle by progressIntervalSec)
-    const pollOpts = {};
+    const pollOpts = { signal: ac.signal };
     if (safeProgress && progressIntervalSec > 0) {
       let lastProgressAt = 0;
       const intervalMs = progressIntervalSec * 1000;
@@ -267,6 +269,11 @@ async function awaitAll(sessionName, dispatches, timeoutSec, safeProgress, progr
     // dispatch 시 확정된 logPath를 전달 — 셸이 pane 타이틀 변경해도 캡처 로그 매칭 유지
     if (d.logPath) pollOpts.logPath = d.logPath;
     const completion = await waitForCompletion(sessionName, d.paneId || d.paneName, d.token, timeoutSec, pollOpts);
+
+    // 세션 사망 감지 시 나머지 워커 폴링 즉시 중단
+    if (completion.sessionDead && !ac.signal.aborted) {
+      ac.abort();
+    }
 
     const output = completion.matched
       ? readResult(d.resultFile, d.paneId)

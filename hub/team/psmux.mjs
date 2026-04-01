@@ -570,7 +570,7 @@ function killOrphanPipeHelpers(sessionName) {
   const safeSession = sanitizePathPart(sessionName);
   try {
     const output = childProcess.execSync(
-      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'pipe-pane-capture' -and $_.CommandLine -match '${safeSession}' } | Select-Object -ExpandProperty ProcessId"`,
+      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'pipe-pane-capture' -and $_.CommandLine -match 'tfx-headless[/\\\\]${safeSession}' } | Select-Object -ExpandProperty ProcessId"`,
       { encoding: "utf8", timeout: 8000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
     );
     const pids = output.split(/\r?\n/).map((l) => Number.parseInt(l.trim(), 10)).filter((p) => Number.isFinite(p) && p > 0);
@@ -605,7 +605,7 @@ function killOrphanMcpProcesses(sessionName) {
   try {
     // 세션 결과 디렉토리 패턴으로 MCP 서버 프로세스 식별
     const output = childProcess.execSync(
-      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match '${safeSession}' } | Select-Object -ExpandProperty ProcessId"`,
+      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'tfx-headless[/\\\\]${safeSession}' } | Select-Object -ExpandProperty ProcessId"`,
       { encoding: "utf8", timeout: 8000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
     );
     const pids = output.split(/\r?\n/).map((l) => Number.parseInt(l.trim(), 10)).filter((p) => Number.isFinite(p) && p > 0 && p !== hubPid);
@@ -631,6 +631,9 @@ export function killPsmuxSession(sessionName) {
     // 세션이 이미 죽었으면 pane 목록 수집 불가 — 계속 진행
   }
   disableAllPipeCaptures(sessionName, paneIds);
+
+  // pipe-pane reader가 EOF를 처리하고 정상 종료할 시간 확보
+  sleepMs(500);
 
   // 2. pane 프로세스 트리 강제 종료 (MCP 서버 포함)
   const pids = collectPanePids(sessionName);
@@ -856,7 +859,8 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
  * @param {number} timeoutSec
  * @param {object} [opts]
  * @param {(snapshot: {content: string, paneId: string, paneName: string, elapsed: number}) => void} [opts.onPoll] — 각 폴링 주기마다 호출
- * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null }}
+ * @param {AbortSignal} [opts.signal] — 외부에서 폴링 중단 요청 시 사용
+ * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null, aborted?: boolean }}
  */
 export async function waitForPattern(sessionName, paneNameOrTarget, pattern, timeoutSec = 300, opts = {}) {
   ensurePsmuxInstalled();
@@ -892,7 +896,14 @@ export async function waitForPattern(sessionName, paneNameOrTarget, pattern, tim
   const deadline = startTime + Math.max(0, Math.trunc(timeoutSec * 1000));
   const regex = toPatternRegExp(pattern);
 
+  if (opts?.signal?.aborted) {
+    return { matched: false, paneId: pane.paneId, paneName, logPath, match: null, aborted: true };
+  }
+
   while (Date.now() <= deadline) {
+    if (opts?.signal?.aborted) {
+      return { matched: false, paneId: pane.paneId, paneName, logPath, match: null, aborted: true };
+    }
     // E4 크래시 복구: capture 실패 시 세션 생존 체크
     try {
       if (opts.logPath) {
@@ -940,6 +951,9 @@ export async function waitForPattern(sessionName, paneNameOrTarget, pattern, tim
       break;
     }
     await sleepMsAsync(POLL_INTERVAL_MS);
+    if (opts?.signal?.aborted) {
+      return { matched: false, paneId: pane.paneId, paneName, logPath, match: null, aborted: true };
+    }
   }
 
   return {
@@ -1112,7 +1126,13 @@ export function killWorker(sessionName, workerName) {
       // send-keys 실패 무시
     }
 
-    sleepMs(1000);
+    try {
+      psmuxExec(["send-keys", "-t", paneId, "exit", "Enter"]);
+    } catch {
+      // send-keys 실패 무시
+    }
+
+    sleepMs(2000);
 
     try {
       psmuxExec(["kill-pane", "-t", paneId]);

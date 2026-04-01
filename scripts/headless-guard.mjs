@@ -193,7 +193,7 @@ async function main() {
     }
 
     // codex/gemini 직접 CLI 호출 → deny
-    if (/\bcodex\s+exec\b/.test(cmd) || /\bgemini\s+(-p|--prompt)\b/.test(cmd)) {
+    if (/\bcodex\b.*\bexec\b/.test(cmd) || /\bgemini\s+(-p|--prompt)\b/.test(cmd)) {
       deny(
         "[headless-guard] codex/gemini 직접 호출은 spawn-session에서 차단됩니다. " +
         `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +

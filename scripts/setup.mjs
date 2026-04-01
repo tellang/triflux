@@ -569,6 +569,19 @@ if (existsSync(skillsSrc)) {
   }
 }
 
+// ── docs 동기화 ──
+const docsDirs = ['docs/design', 'docs/research'];
+for (const dir of docsDirs) {
+  const src = join(PLUGIN_ROOT, dir);
+  const dest = join(CLAUDE_DIR, dir);
+  if (existsSync(src)) {
+    mkdirSync(dest, { recursive: true });
+    for (const f of readdirSync(src).filter(f => f.endsWith('.md'))) {
+      copyFileSync(join(src, f), join(dest, f));
+    }
+  }
+}
+
 // ── settings.json 통합 R/W ──
 // 3개 섹션(statusLine, agentTeams, hooks)을 1회 read → 일괄 수정 → 1회 write
 

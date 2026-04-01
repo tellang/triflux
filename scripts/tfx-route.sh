@@ -76,9 +76,13 @@ if [[ "${1:-}" == "--job-status" ]]; then
     fi
   elif [[ -f "$job_dir/pid" ]]; then
     pid=$(cat "$job_dir/pid")
+    if [[ "$pid" == "starting" ]]; then
+      echo "starting"
+      exit 0
+    fi
     if kill -0 "$pid" 2>/dev/null; then
       # 진행 상황 힌트
-      local_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null || echo 0)
+      local_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null | tr -d ' ' || echo 0)
       elapsed=$(( $(date +%s) - $(cat "$job_dir/start_time" 2>/dev/null || date +%s) ))
       echo "running elapsed=${elapsed}s output=${local_bytes}B"
     else
@@ -98,7 +102,7 @@ if [[ "${1:-}" == "--job-result" ]]; then
   [[ -d "$job_dir" ]] || { echo "error: job not found"; exit 1; }
   [[ -f "$job_dir/done" ]] || { echo "error: job still running"; exit 1; }
 
-  result_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null || echo 0)
+  result_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null | tr -d ' ' || echo 0)
   if [[ "$result_bytes" -eq 0 ]] && [[ -s "$job_dir/stderr.log" ]]; then
     cat "$job_dir/stderr.log" 2>/dev/null
   else
@@ -1367,6 +1371,8 @@ gemini_with_retry() {
       attempt=$(( attempt + 1 ))
       if (( attempt < max_retries )); then
         echo "[tfx-route] Gemini 429 감지. ${delay}초 후 재시도 ($attempt/$max_retries)..." >&2
+        kill "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
         sleep "$delay"
         delay=$(( delay * 2 ))
         : > "$STDOUT_LOG"
@@ -1481,7 +1487,7 @@ run_codex_exec() {
     fi
 
     if [[ -s "$STDOUT_LOG" ]]; then
-      echo "[tfx-route] 경고: codex stdout 비어있음, stderr에서 응답 복구 ($(wc -c < "$STDOUT_LOG") bytes)" >&2
+      echo "[tfx-route] 경고: codex stdout 비어있음, stderr에서 응답 복구 ($(wc -c < "$STDOUT_LOG" | tr -d ' ') bytes)" >&2
     else
       echo "[tfx-route] 경고: codex stdout 비어있음, stderr 복구도 실패" >&2
     fi
@@ -1880,11 +1886,12 @@ if [[ "$TFX_ASYNC_MODE" -eq 1 ]]; then
   date +%s > "$JOB_DIR/start_time"
 
   # 백그라운드 서브쉘: main 실행 → 결과 저장
+  echo "starting" > "$JOB_DIR/pid"
   (
     set +e  # main 내부 에러가 exit_code 기록 전에 서브쉘을 죽이는 것 방지
     exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
-    main
-    echo $? > "$JOB_DIR/exit_code"
+    main; _ec=$?
+    echo "$_ec" > "$JOB_DIR/exit_code"
     touch "$JOB_DIR/done"
   ) &
   bg_pid=$!
