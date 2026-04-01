@@ -23,7 +23,7 @@ function ensureGeminiProfiles({
     if (!existsSync(geminiDir)) mkdirSync(geminiDir, { recursive: true });
 
     if (!existsSync(profilesPath)) {
-      writeFileSync(profilesPath, JSON.stringify(DEFAULT_GEMINI_PROFILES, null, 2) + "\n", "utf8");
+      writeFileSync(profilesPath, JSON.stringify(DEFAULT_GEMINI_PROFILES, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
       return {
         ok: true,
         created: true,
@@ -38,7 +38,7 @@ function ensureGeminiProfiles({
       cfg = JSON.parse(readFileSync(profilesPath, "utf8"));
     } catch {
       try { copyFileSync(profilesPath, profilesPath + `.bak.${Date.now()}`); } catch {}
-      writeFileSync(profilesPath, JSON.stringify(DEFAULT_GEMINI_PROFILES, null, 2) + "\n", "utf8");
+      writeFileSync(profilesPath, JSON.stringify(DEFAULT_GEMINI_PROFILES, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
       return {
         ok: true,
         created: true,
@@ -61,7 +61,7 @@ function ensureGeminiProfiles({
     if (!cfg.model) cfg.model = DEFAULT_GEMINI_PROFILES.model;
 
     if (added > 0) {
-      writeFileSync(profilesPath, JSON.stringify(cfg, null, 2) + "\n", "utf8");
+      writeFileSync(profilesPath, JSON.stringify(cfg, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
     }
 
     return {

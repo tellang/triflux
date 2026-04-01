@@ -825,7 +825,7 @@ function buildSetupDryRunPlan() {
 }
 
 function cmdSetup(options = {}) {
-  const { dryRun = false } = options;
+  const { dryRun = false, fromUpdate = false } = options;
   if (dryRun) {
     printJson(buildSetupDryRunPlan());
     return;
@@ -979,7 +979,7 @@ function cmdSetup(options = {}) {
   }
 
   // Star request (버전 게이팅)
-  const showStar = STAR_PROMPT_VERSIONS.length === 0 || STAR_PROMPT_VERSIONS.includes(PKG.version);
+  const showStar = !fromUpdate && (STAR_PROMPT_VERSIONS.length === 0 || STAR_PROMPT_VERSIONS.includes(PKG.version));
   if (showStar) {
     try {
       execFileSync("gh", ["auth", "status"], { timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
@@ -1942,7 +1942,7 @@ function cmdUpdate() {
 
     // setup 재실행 — 개선된 cmdSetup()이 Gemini 프로필, CLI 확인, 요약 테이블 포함
     console.log(`\n${CYAN}── 설정 동기화 ──${RESET}`);
-    cmdSetup();
+    cmdSetup({ fromUpdate: true });
 
     if (stoppedHubInfo) {
       if (startHubAfterUpdate(stoppedHubInfo)) ok("hub 재기동 완료");
