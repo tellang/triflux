@@ -5,7 +5,7 @@
 // - skills/를 ~/.claude/skills/에 동기화
 
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, chmodSync, unlinkSync, rmSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, basename } from "path";
 import { homedir } from "os";
 import { spawn, execFileSync } from "child_process";
 import { fileURLToPath } from "url";
@@ -412,13 +412,247 @@ function ensureCodexProfiles() {
   }
 }
 
+const WINDOWS_DEFAULT_NODE_PATH = "C:/Program Files/nodejs/node.exe";
+const MANAGED_HOOK_FILENAMES = new Set([
+  "safety-guard.mjs",
+  "agent-route-guard.mjs",
+  "cross-review-tracker.mjs",
+  "error-context.mjs",
+  "keyword-detector.mjs",
+  "pipeline-stop.mjs",
+  "subagent-verifier.mjs",
+]);
+
+function toForwardPath(value) {
+  return String(value || "").replace(/\\/g, "/");
+}
+
+function quotePath(value) {
+  return `"${toForwardPath(value)}"`;
+}
+
+function normalizeCommand(value) {
+  return toForwardPath(value).replace(/\s+/g, " ").trim();
+}
+
+function extractManagedHookFilename(command) {
+  if (typeof command !== "string") return null;
+  const matches = command.match(/[A-Za-z0-9._-]+\.mjs/g) || [];
+  for (const match of matches) {
+    const fileName = basename(match);
+    if (MANAGED_HOOK_FILENAMES.has(fileName)) return fileName;
+  }
+  return null;
+}
+
+function isValidManagedHookRoot(candidateRoot) {
+  if (typeof candidateRoot !== "string" || !candidateRoot.trim()) return false;
+  const root = candidateRoot.trim();
+  if (!existsSync(join(root, "hooks", "hook-registry.json"))) return false;
+  if (!existsSync(join(root, "scripts", "run.cjs"))) return false;
+  if (!existsSync(join(root, "scripts", "keyword-detector.mjs"))) return false;
+
+  for (const fileName of MANAGED_HOOK_FILENAMES) {
+    if (!existsSync(join(root, "hooks", fileName))) return false;
+  }
+
+  return true;
+}
+
+function resolveHookPluginRoot() {
+  const envRoot = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT;
+  if (isValidManagedHookRoot(envRoot)) {
+    return toForwardPath(envRoot.trim());
+  }
+
+  try {
+    const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+    const npmGlobalRoot = execFileSync(npmCmd, ["root", "-g"], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
+    const npmPluginRoot = npmGlobalRoot ? join(npmGlobalRoot, "triflux") : "";
+    if (isValidManagedHookRoot(npmPluginRoot)) {
+      return toForwardPath(npmPluginRoot);
+    }
+  } catch {
+    // npm global root 조회 실패 시 로컬 패키지 루트를 fallback으로 사용
+  }
+
+  return toForwardPath(PLUGIN_ROOT);
+}
+
+function resolveManagedNodePath() {
+  if (process.platform === "win32" && existsSync(WINDOWS_DEFAULT_NODE_PATH)) {
+    return toForwardPath(WINDOWS_DEFAULT_NODE_PATH);
+  }
+  return toForwardPath(process.execPath || "node");
+}
+
+function buildManagedHookCommand(fileName, { pluginRoot, nodePath }) {
+  if (fileName === "keyword-detector.mjs") {
+    const runScript = join(pluginRoot, "scripts", "run.cjs");
+    const detectorScript = join(pluginRoot, "scripts", "keyword-detector.mjs");
+    return `${quotePath(nodePath)} ${quotePath(runScript)} ${quotePath(detectorScript)}`;
+  }
+  const hookPath = join(pluginRoot, "hooks", fileName);
+  return `${quotePath(nodePath)} ${quotePath(hookPath)}`;
+}
+
+function getManagedRegistryHooks(registryPath = join(PLUGIN_ROOT, "hooks", "hook-registry.json")) {
+  if (!existsSync(registryPath)) return [];
+
+  let registry;
+  try {
+    registry = JSON.parse(readFileSync(registryPath, "utf8"));
+  } catch {
+    return [];
+  }
+
+  const hooks = [];
+  for (const [event, eventEntries] of Object.entries(registry.events || {})) {
+    if (!Array.isArray(eventEntries)) continue;
+
+    for (const eventEntry of eventEntries) {
+      if (!eventEntry || eventEntry.enabled === false || eventEntry.source !== "triflux") continue;
+      const fileName = extractManagedHookFilename(eventEntry.command);
+      if (!fileName) continue;
+
+      hooks.push({
+        id: String(eventEntry.id || fileName.replace(/\.mjs$/i, "")),
+        event: String(event),
+        matcher: String(eventEntry.matcher || "*"),
+        fileName,
+        timeout: Number.isFinite(eventEntry.timeout) ? eventEntry.timeout : undefined,
+        blocking: typeof eventEntry.blocking === "boolean" ? eventEntry.blocking : undefined,
+        priority: Number.isFinite(eventEntry.priority) ? eventEntry.priority : undefined,
+      });
+    }
+  }
+
+  return hooks;
+}
+
+function ensureHooksInSettings({
+  settingsPath = join(homedir(), ".claude", "settings.json"),
+  registryPath = join(PLUGIN_ROOT, "hooks", "hook-registry.json"),
+  pluginRoot = resolveHookPluginRoot(),
+  nodePath = resolveManagedNodePath(),
+} = {}) {
+  const managedHooks = getManagedRegistryHooks(registryPath);
+  if (managedHooks.length === 0) {
+    return {
+      ok: false,
+      changed: false,
+      total: 0,
+      added: [],
+      reason: "registry_unavailable",
+    };
+  }
+
+  let settings = {};
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    } catch (error) {
+      return {
+        ok: false,
+        changed: false,
+        total: managedHooks.length,
+        added: [],
+        reason: `settings_parse_failed:${error.message}`,
+      };
+    }
+  }
+  if (!settings.hooks || typeof settings.hooks !== "object") settings.hooks = {};
+
+  const added = [];
+  for (const hookSpec of managedHooks) {
+    if (!Array.isArray(settings.hooks[hookSpec.event])) settings.hooks[hookSpec.event] = [];
+    const eventEntries = settings.hooks[hookSpec.event];
+    const expectedCommand = buildManagedHookCommand(hookSpec.fileName, { pluginRoot, nodePath });
+    const expectedNormalizedCommand = normalizeCommand(expectedCommand);
+
+    const hasSameMatcherAndCommand = eventEntries.some((entry) =>
+      entry?.matcher === hookSpec.matcher &&
+      Array.isArray(entry.hooks) &&
+      entry.hooks.some((hook) => normalizeCommand(hook?.command) === expectedNormalizedCommand),
+    );
+    if (hasSameMatcherAndCommand) continue;
+
+    const hookEntry = {
+      type: "command",
+      command: expectedCommand,
+    };
+    if (Number.isFinite(hookSpec.timeout)) hookEntry.timeout = hookSpec.timeout;
+    if (typeof hookSpec.blocking === "boolean") hookEntry.blocking = hookSpec.blocking;
+    if (Number.isFinite(hookSpec.priority)) hookEntry.priority = hookSpec.priority;
+
+    const matcherEntry = eventEntries.find(
+      (entry) => entry?.matcher === hookSpec.matcher && Array.isArray(entry.hooks),
+    );
+    if (matcherEntry) {
+      matcherEntry.hooks.push(hookEntry);
+    } else {
+      eventEntries.push({ matcher: hookSpec.matcher, hooks: [hookEntry] });
+    }
+
+    added.push({
+      id: hookSpec.id,
+      event: hookSpec.event,
+      matcher: hookSpec.matcher,
+      fileName: hookSpec.fileName,
+    });
+  }
+
+  if (added.length === 0) {
+    return {
+      ok: true,
+      changed: false,
+      total: managedHooks.length,
+      added: [],
+    };
+  }
+
+  let backupPath = null;
+  try {
+    if (existsSync(settingsPath)) {
+      backupPath = `${settingsPath}.bak.${Date.now()}`;
+      copyFileSync(settingsPath, backupPath);
+    } else {
+      const settingsDir = dirname(settingsPath);
+      if (!existsSync(settingsDir)) mkdirSync(settingsDir, { recursive: true });
+    }
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+  } catch (error) {
+    return {
+      ok: false,
+      changed: false,
+      total: managedHooks.length,
+      added,
+      backupPath,
+      reason: `settings_write_failed:${error.message}`,
+    };
+  }
+
+  return {
+    ok: true,
+    changed: true,
+    total: managedHooks.length,
+    added,
+    backupPath,
+  };
+}
+
 export {
   replaceProfileSection, hasProfileSection, escapeRegExp, detectDevMode,
   SYNC_MAP, BREADCRUMB_PATH, PLUGIN_ROOT, CLAUDE_DIR,
   SKILL_ALIASES, REQUIRED_CODEX_PROFILES,
   DEPRECATED_SKILLS, LEGACY_CODEX_MODELS,
   buildAliasedSkillContent, syncAliasedSkillDir, getVersion, ensureCodexProfiles,
-  cleanupStaleSkills,
+  cleanupStaleSkills, extractManagedHookFilename, getManagedRegistryHooks, ensureHooksInSettings,
 };
 
 function runMcpGuardAudit() {
@@ -875,6 +1109,12 @@ if (settingsChanged) {
   } catch {
     // settings.json 쓰기 실패 시 무시
   }
+}
+
+// ── hook-registry 기반 누락 훅 자동 등록 ──
+{
+  const hookEnsureResult = ensureHooksInSettings();
+  if (hookEnsureResult.changed) synced++;
 }
 
 // ── Stale PID 파일 정리 (hub 좀비 방지) ──

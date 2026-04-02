@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // triflux CLI — setup, doctor, version
 import { copyFileSync, existsSync, readFileSync, readSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, statSync, openSync, closeSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, basename } from "path";
 import { homedir } from "os";
 import { execSync, execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
@@ -24,6 +24,7 @@ import {
   SYNC_MAP, SKILL_ALIASES, REQUIRED_CODEX_PROFILES, LEGACY_CODEX_MODELS,
   syncAliasedSkillDir, hasProfileSection, replaceProfileSection,
   ensureCodexProfiles, getVersion, cleanupStaleSkills, DEPRECATED_SKILLS,
+  extractManagedHookFilename, getManagedRegistryHooks, ensureHooksInSettings,
 } from "../scripts/setup.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -941,6 +942,37 @@ function addDoctorCheck(report, entry) {
   report.checks.push(entry);
 }
 
+function toHookCoverageName(fileName, fallbackId = "") {
+  if (typeof fileName === "string" && fileName.trim()) {
+    return basename(fileName).replace(/\.mjs$/i, "");
+  }
+  return String(fallbackId || "").replace(/^tfx-/, "");
+}
+
+function computeHookCoverage(settings, managedHooks) {
+  const coverage = {
+    total: managedHooks.length,
+    registered: 0,
+    missing: [],
+  };
+
+  const hooksByEvent = settings?.hooks && typeof settings.hooks === "object" ? settings.hooks : {};
+  for (const spec of managedHooks) {
+    const eventEntries = Array.isArray(hooksByEvent[spec.event]) ? hooksByEvent[spec.event] : [];
+    const found = eventEntries.some((entry) =>
+      Array.isArray(entry?.hooks) &&
+      entry.hooks.some((hook) => extractManagedHookFilename(hook?.command) === spec.fileName),
+    );
+    if (found) {
+      coverage.registered++;
+      continue;
+    }
+    coverage.missing.push(toHookCoverageName(spec.fileName, spec.id));
+  }
+
+  return coverage;
+}
+
 function formatPathForDisplay(filePath) {
   const value = String(filePath || "").replace(/\\/g, "/");
   const homePath = homedir().replace(/\\/g, "/");
@@ -1046,6 +1078,7 @@ async function cmdDoctor(options = {}) {
     mode: reset ? "reset" : fix ? "fix" : "check",
     checks: [],
     actions: [],
+    hook_coverage: { total: 0, registered: 0, missing: [] },
     issue_count: 0,
   };
 
@@ -2088,6 +2121,93 @@ async function cmdDoctor(options = {}) {
     } else {
       addDoctorCheck(report, { name: "route-sync", status: "ok" });
       ok("소스 없음 (npm 패키지 모드)");
+    }
+  }
+
+  // ── Hook Coverage (hook-registry vs settings.json) ──
+  section("Hook Coverage");
+  {
+    const registryPath = join(PKG_ROOT, "hooks", "hook-registry.json");
+    const settingsPath = join(CLAUDE_DIR, "settings.json");
+    const managedHooks = getManagedRegistryHooks(registryPath);
+
+    if (managedHooks.length === 0) {
+      addDoctorCheck(report, {
+        name: "hook-coverage",
+        status: "invalid",
+        total: 0,
+        registered: 0,
+        missing: [],
+        fix: "hook-registry.json을 확인하세요.",
+      });
+      warn("hook-registry.json에서 관리 대상 훅을 찾지 못했습니다.");
+      issues++;
+    } else {
+      let settings = {};
+      if (existsSync(settingsPath)) {
+        try {
+          settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+        } catch (error) {
+          const unreadableCoverage = {
+            total: managedHooks.length,
+            registered: 0,
+            missing: managedHooks.map((spec) => toHookCoverageName(spec.fileName, spec.id)),
+          };
+          report.hook_coverage = unreadableCoverage;
+          addDoctorCheck(report, {
+            name: "hook-coverage",
+            status: "invalid",
+            total: unreadableCoverage.total,
+            registered: unreadableCoverage.registered,
+            missing: unreadableCoverage.missing,
+            fix: "settings.json 문법을 수정하거나 tfx setup을 다시 실행하세요.",
+          });
+          fail(`settings.json 파싱 실패: ${error.message}`);
+          issues++;
+          settings = null;
+        }
+      }
+
+      if (settings) {
+        let coverage = computeHookCoverage(settings, managedHooks);
+
+        if (coverage.missing.length > 0 && fix) {
+          const hookFixResult = ensureHooksInSettings({ settingsPath, registryPath });
+          if (hookFixResult.ok) {
+            if (hookFixResult.changed) {
+              ok(`누락 훅 ${hookFixResult.added.length}개 자동 등록됨`);
+            } else {
+              info("누락 훅 자동 등록: 변경 사항 없음");
+            }
+            try {
+              const fixedSettings = JSON.parse(readFileSync(settingsPath, "utf8"));
+              coverage = computeHookCoverage(fixedSettings, managedHooks);
+            } catch (error) {
+              warn(`자동 등록 후 settings.json 재검증 실패: ${error.message}`);
+            }
+          } else {
+            warn(`누락 훅 자동 등록 실패: ${hookFixResult.reason || "unknown_error"}`);
+          }
+        }
+
+        report.hook_coverage = coverage;
+        const coverageStatus = coverage.missing.length === 0 ? "ok" : "issues";
+        addDoctorCheck(report, {
+          name: "hook-coverage",
+          status: coverageStatus,
+          total: coverage.total,
+          registered: coverage.registered,
+          missing: coverage.missing,
+          ...(coverage.missing.length > 0 ? { fix: "tfx doctor --fix 또는 tfx setup" } : {}),
+        });
+
+        if (coverage.missing.length === 0) {
+          ok(`Hook Coverage: ${coverage.registered}/${coverage.total} registered`);
+        } else {
+          fail(`Missing hooks: ${coverage.missing.join(", ")}`);
+          issues += coverage.missing.length;
+        }
+      }
     }
   }
 

@@ -106,6 +106,9 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     const result = runCli(["doctor", "--json"]);
     const payload = parseStdoutJson(result);
     assert.ok(Array.isArray(payload.checks));
+    assert.equal(typeof payload.hook_coverage?.total, "number");
+    assert.equal(typeof payload.hook_coverage?.registered, "number");
+    assert.ok(Array.isArray(payload.hook_coverage?.missing));
     assert.ok(payload.checks.some((check) => check.name === "tfx-route.sh"));
     assert.ok(payload.checks.some((check) => check.name === "codex"));
     assert.ok(payload.checks.some((check) => check.name === "warmup-cache"));

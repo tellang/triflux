@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -15,6 +15,7 @@ const {
   BREADCRUMB_PATH,
   PLUGIN_ROOT,
   CLAUDE_DIR,
+  ensureHooksInSettings,
 } = await import('../../scripts/setup.mjs');
 
 // ── helpers ──
@@ -155,5 +156,40 @@ describe('setup-sync: dry-run 실행', () => {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     assert.ok(true, 'setup.mjs --sync exited successfully');
+  });
+});
+
+describe('setup-sync: managed hook registration', () => {
+  before(ensureTmpDir);
+  after(cleanTmpDir);
+
+  it('유효하지 않은 CLAUDE_PLUGIN_ROOT는 무시하고 실제 패키지 루트를 사용한다', () => {
+    const settingsPath = join(TMP_DIR, 'settings.json');
+    const invalidPluginRoot = join(TMP_DIR, 'empty-worktree');
+    mkdirSync(invalidPluginRoot, { recursive: true });
+
+    const prevPluginRoot = process.env.PLUGIN_ROOT;
+    const prevClaudePluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    process.env.PLUGIN_ROOT = invalidPluginRoot;
+    process.env.CLAUDE_PLUGIN_ROOT = invalidPluginRoot;
+
+    try {
+      const result = ensureHooksInSettings({ settingsPath });
+      assert.equal(result.ok, true);
+
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      const stopEntries = settings.hooks?.Stop || [];
+      const stopCommands = stopEntries.flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
+        .map((hook) => String(hook.command || ''));
+
+      assert.ok(stopCommands.some((command) => command.includes('pipeline-stop.mjs')), 'pipeline-stop hook must be registered');
+      assert.ok(stopCommands.every((command) => !command.includes(invalidPluginRoot.replace(/\\/g, '/'))), 'invalid plugin root must not leak into settings');
+      assert.ok(stopCommands.some((command) => command.includes(PLUGIN_ROOT.replace(/\\/g, '/'))), 'registered hook must point at the actual package root');
+    } finally {
+      if (prevPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
+      else process.env.PLUGIN_ROOT = prevPluginRoot;
+      if (prevClaudePluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+      else process.env.CLAUDE_PLUGIN_ROOT = prevClaudePluginRoot;
+    }
   });
 });
