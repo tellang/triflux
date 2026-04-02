@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 import { buildAll as buildCacheWarmup } from "./cache-warmup.mjs";
 import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
+import { loadRegistry, remediate, scanForStdioServers } from "./lib/mcp-guard-engine.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -420,6 +421,54 @@ export {
   cleanupStaleSkills,
 };
 
+function runMcpGuardAudit() {
+  let registry;
+  try {
+    registry = loadRegistry();
+  } catch (error) {
+    return {
+      audited: 0,
+      modified: 0,
+      messages: [`[mcp-guard] registry 로드 실패: ${error.message}`],
+    };
+  }
+
+  const watchedPaths = Array.isArray(registry?.policies?.watched_paths)
+    ? registry.policies.watched_paths
+    : [];
+
+  const messages = [];
+  let modified = 0;
+
+  for (const watchedPath of watchedPaths) {
+    const stdioServers = scanForStdioServers(watchedPath);
+    if (stdioServers.length === 0) continue;
+
+    const result = remediate(watchedPath, stdioServers, registry.policies);
+    if (result.modified) {
+      modified++;
+      const serverNames = stdioServers.map((server) => server.name).join(", ");
+      messages.push(`[mcp-guard] ${watchedPath}: stdio MCP 자동 정리 (${serverNames})`);
+      if (result.replacement?.name && result.replacement?.url) {
+        messages.push(`[mcp-guard] ${watchedPath}: ${result.replacement.name} -> ${result.replacement.url}`);
+      }
+      if (result.backupPath) {
+        messages.push(`[mcp-guard] ${watchedPath}: 백업 ${result.backupPath}`);
+      }
+    }
+
+    for (const warning of result.warnings || []) {
+      messages.push(`${warning} (${watchedPath})`);
+    }
+  }
+
+  return {
+    audited: watchedPaths.length,
+    modified,
+    messages,
+  };
+}
+
 async function main() {
 const isSync = process.argv.includes("--sync");
 const isDev = detectDevMode();
@@ -580,6 +629,15 @@ for (const dir of docsDirs) {
       copyFileSync(join(src, f), join(dest, f));
     }
   }
+}
+
+// ── MCP 설정 감사 및 stdio 가드 적용 ──
+const mcpAudit = runMcpGuardAudit();
+if (mcpAudit.modified > 0) {
+  synced += mcpAudit.modified;
+}
+for (const message of mcpAudit.messages) {
+  console.log(`  ${message}`);
 }
 
 // ── settings.json 통합 R/W ──

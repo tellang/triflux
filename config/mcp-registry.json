@@ -1,0 +1,29 @@
+{
+  "$schema": "mcp-registry-schema",
+  "version": 1,
+  "description": "MCP 서버 중앙 레지스트리 — 진실의 원천",
+  "defaults": {
+    "transport": "hub-url",
+    "hub_base": "http://127.0.0.1:27888"
+  },
+  "servers": {
+    "tfx-hub": {
+      "transport": "hub-url",
+      "url": "http://127.0.0.1:27888/mcp",
+      "safe": true,
+      "targets": ["claude", "gemini", "codex"],
+      "description": "triflux Hub MCP 서버"
+    }
+  },
+  "policies": {
+    "stdio_action": "replace-with-hub",
+    "unknown_server_action": "warn",
+    "watched_paths": [
+      "~/.gemini/settings.json",
+      "~/.codex/config.toml",
+      "~/.claude/settings.json",
+      "~/.claude/settings.local.json",
+      ".mcp.json"
+    ]
+  }
+}

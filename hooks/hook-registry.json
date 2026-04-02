@@ -65,6 +65,17 @@
         "timeout": 3,
         "blocking": false,
         "description": "파일 수정 추적 → 교차 리뷰 nudge"
+      },
+      {
+        "id": "tfx-mcp-config-watcher",
+        "source": "triflux",
+        "matcher": "Edit|Write",
+        "command": "node \"${PLUGIN_ROOT}/hooks/mcp-config-watcher.mjs\"",
+        "priority": 1,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "감시 대상 MCP 설정 변경 감지 → stdio MCP 자동 치환"
       }
     ],
     "PostToolUseFailure": [
