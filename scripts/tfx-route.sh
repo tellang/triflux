@@ -56,6 +56,22 @@ resolve_tmp_dir() {
 
 TFX_TMP="$(resolve_tmp_dir)"
 
+# ── config.toml sandbox/approval_mode 감지 ──
+# config.toml에 이미 설정되어 있으면 CLI 플래그 중복 시 Codex가 에러를 던짐
+_CODEX_CONFIG="${HOME}/.codex/config.toml"
+_CODEX_HAS_SANDBOX=""
+if [[ -f "$_CODEX_CONFIG" ]] && grep -qE '^\s*(sandbox|approval_mode)\s*=' "$_CODEX_CONFIG" 2>/dev/null; then
+  _CODEX_HAS_SANDBOX="1"
+fi
+
+build_codex_base() {
+  if [[ -n "$_CODEX_HAS_SANDBOX" ]]; then
+    echo "--skip-git-repo-check"
+  else
+    echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+  fi
+}
+
 # ── Async Job 디렉토리 ──
 TFX_JOBS_DIR="${TFX_TMP}/tfx-jobs"
 
@@ -726,7 +742,8 @@ resolve_gemini_profile() {
 # 반환: CLI_TYPE, CLI_CMD, CLI_ARGS, CLI_EFFORT, DEFAULT_TIMEOUT, RUN_MODE, OPUS_OVERSIGHT
 route_agent() {
   local agent="$1"
-  local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+  local codex_base
+  codex_base="$(build_codex_base)"
   echo "[tfx-route] Codex 버전: $(get_codex_version)" >&2
   local map_file
   map_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../hub/team/agent-map.json"
@@ -933,7 +950,8 @@ esac
 CODEX_MCP_TRANSPORT_EXIT_CODE=70
 
 apply_cli_mode() {
-  local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+  local codex_base
+  codex_base="$(build_codex_base)"
   local gemini_tier=""
 
   case "$TFX_CLI_MODE" in
@@ -1010,7 +1028,8 @@ apply_plan_guard() {
   [[ "$TFX_CODEX_PLAN" == "pro" ]] && return
 
   if [[ "$CLI_EFFORT" == spark53_* ]]; then
-    local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+    local codex_base
+  codex_base="$(build_codex_base)"
     CLI_ARGS="exec --profile codex53_high ${codex_base}"
     CLI_EFFORT="codex53_high"
     echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: spark → codex53_high로 다운그레이드 (Pro 전용)" >&2
@@ -1019,7 +1038,8 @@ apply_plan_guard() {
 
 # ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
 apply_no_claude_native_mode() {
-  local codex_base="--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+  local codex_base
+  codex_base="$(build_codex_base)"
 
   [[ "$TFX_NO_CLAUDE_NATIVE" != "1" ]] && return
   [[ "$TFX_CLI_MODE" == "gemini" ]] && return
