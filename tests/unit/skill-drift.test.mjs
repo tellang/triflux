@@ -277,6 +277,62 @@ describe('신규 스킬 완결성', () => {
       .filter(l => /^###\s+Stage\s+\d+:/.test(l));
     assert.equal(stageHeadings.length, 5, `### Stage N: 헤더가 5개여야 하는데 ${stageHeadings.length}개임`);
   });
+
+  it('tfx-fullcycle: pre-context gate와 context snapshot 계약을 명시', () => {
+    const content = readSkill('tfx-fullcycle');
+    assert.ok(
+      /##\s+PRE-CONTEXT\s+GATE/.test(content),
+      'PRE-CONTEXT GATE 섹션이 없음'
+    );
+    assert.ok(
+      /task slug/i.test(content) && /context-snapshot\.md/i.test(content),
+      'task slug 또는 context-snapshot.md 계약이 없음'
+    );
+  });
+
+  it('tfx-fullcycle: deep-interview 산출물 재사용 규칙을 명시', () => {
+    const content = readSkill('tfx-fullcycle');
+    assert.ok(
+      /\.tfx\/plans\/interview-\*/.test(content) || /\.tfx\/plans\/interview-\{timestamp\}/.test(content),
+      'deep-interview 산출물 경로 규칙이 없음'
+    );
+    assert.ok(
+      /재사용/.test(content) || /reuse/i.test(content),
+      'deep-interview 산출물 재사용 규칙이 없음'
+    );
+  });
+
+  it('tfx-fullcycle: phase-state/resume 아티팩트 경로를 명시', () => {
+    const content = readSkill('tfx-fullcycle');
+    assert.ok(
+      /\.tfx\/fullcycle\/\{run-id\}\//.test(content),
+      'fullcycle run 아티팩트 디렉토리 규칙이 없음'
+    );
+    assert.ok(
+      /\bresume\b/i.test(content) && /state\.json/i.test(content),
+      'resume 또는 state.json 계약이 없음'
+    );
+  });
+
+  it('tfx-fullcycle: 동일 QA 에러 3회 반복 시 중단 규칙을 명시', () => {
+    const content = readSkill('tfx-fullcycle');
+    assert.ok(
+      /동일.+3회 반복/.test(content) || /same.+3 times/i.test(content),
+      '동일 QA 에러 3회 반복 중단 규칙이 없음'
+    );
+  });
+
+  it('tfx-fullcycle: cleanup/cancel 메타데이터 규칙을 명시', () => {
+    const content = readSkill('tfx-fullcycle');
+    assert.ok(
+      /##\s+CLEANUP\s+&\s+CANCEL\s+RULES/.test(content),
+      'CLEANUP & CANCEL RULES 섹션이 없음'
+    );
+    assert.ok(
+      /failure_reason/i.test(content) && /complete 상태/.test(content),
+      'cleanup/cancel 메타데이터 규칙이 충분히 명시되지 않음'
+    );
+  });
 });
 
 describe('tfx-route.sh와 tfx-auto SKILL.md 에이전트 매핑 교차 검증', () => {
