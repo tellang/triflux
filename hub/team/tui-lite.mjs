@@ -154,8 +154,11 @@ function buildDetail(workerName, worker, width, tab, helpVisible) {
     return frame(
       [
         bold("tui-lite"),
-        "selectWorker(name) / setFocusTab(tab) / render()",
-        "tabs: log | detail | files",
+        "j/k or arrows: worker selection",
+        "Enter: open selected worker",
+        "Shift+Enter: open all workers",
+        "l: tabs log/detail/files",
+        "1-9: direct select, q: quit",
         "toggleDetail(false) 로 상세 패널 숨김",
       ],
       width,
@@ -185,11 +188,14 @@ function buildDetail(workerName, worker, width, tab, helpVisible) {
 export function createLiteDashboard(opts = {}) {
   const {
     stream = process.stdout,
+    input = process.stdin,
     refreshMs = 1000,
     columns,
     rows,
     layout = "auto",
     forceTTY = false,
+    onOpenSelectedWorker,
+    onOpenAllWorkers,
   } = opts;
 
   const isTTY = forceTTY || !!stream?.isTTY;
@@ -203,12 +209,103 @@ export function createLiteDashboard(opts = {}) {
   let detailExpanded = true;
   let focusTab = "log";
   let helpVisible = false;
+  let inputAttached = false;
+  let rawModeEnabled = false;
 
   const write = (text) => { if (!closed) stream.write(text); };
   const workerNames = () => [...workers.keys()].sort();
   const viewportColumns = () => Math.max(48, columns || stream?.columns || process.stdout?.columns || FALLBACK_COLUMNS);
   const viewportRows = () => Math.max(10, rows || stream?.rows || process.stdout?.rows || FALLBACK_ROWS);
   const ensureSelection = (names) => { if (names.length && (!selectedWorker || !workers.has(selectedWorker))) selectedWorker = names[0]; };
+
+  function selectRelative(offset) {
+    const names = workerNames();
+    if (names.length === 0) return;
+    ensureSelection(names);
+    const idx = Math.max(0, names.indexOf(selectedWorker));
+    selectedWorker = names[(idx + offset + names.length) % names.length];
+  }
+
+  function triggerOpenSelected() {
+    if (typeof onOpenSelectedWorker !== "function" || !selectedWorker || !workers.has(selectedWorker)) return;
+    try {
+      const result = onOpenSelectedWorker(selectedWorker, workers.get(selectedWorker), new Map(workers));
+      if (result && typeof result.catch === "function") result.catch(() => {});
+    } catch {}
+  }
+
+  function triggerOpenAll() {
+    if (typeof onOpenAllWorkers !== "function") return;
+    try {
+      const result = onOpenAllWorkers(selectedWorker, workers.get(selectedWorker), new Map(workers));
+      if (result && typeof result.catch === "function") result.catch(() => {});
+    } catch {}
+  }
+
+  function handleInput(chunk) {
+    const key = String(chunk);
+    if (key === "\u0003") return;
+
+    if (helpVisible) {
+      helpVisible = false;
+      render();
+      return;
+    }
+
+    if (key === "j" || key === "\u001b[B") {
+      selectRelative(1);
+      render();
+      return;
+    }
+    if (key === "k" || key === "\u001b[A") {
+      selectRelative(-1);
+      render();
+      return;
+    }
+    if (key === "\r" || key === "\n") {
+      triggerOpenSelected();
+      return;
+    }
+    if (key === "\x1b[13;2u" || key === "\x1b[27;13;2~" || key === "\x1b\r" || key === "\x1b\n") {
+      triggerOpenAll();
+      return;
+    }
+    if (key === "l") {
+      const tabs = ["log", "detail", "files"];
+      focusTab = tabs[(tabs.indexOf(focusTab) + 1) % tabs.length];
+      render();
+      return;
+    }
+    if (key === "h" || key === "?") {
+      helpVisible = true;
+      render();
+      return;
+    }
+    if (key === "q") {
+      close();
+      return;
+    }
+    if (/^[1-9]$/.test(key)) {
+      const names = workerNames();
+      const target = names[Number.parseInt(key, 10) - 1];
+      if (target) {
+        selectedWorker = target;
+        render();
+      }
+    }
+  }
+
+  function attachInput() {
+    if (inputAttached) return;
+    if (!isTTY || !input?.isTTY || typeof input?.on !== "function") return;
+    inputAttached = true;
+    if (typeof input.setRawMode === "function") {
+      input.setRawMode(true);
+      rawModeEnabled = true;
+    }
+    if (typeof input.resume === "function") input.resume();
+    input.on("data", handleInput);
+  }
 
   function buildRows() {
     const names = workerNames();
@@ -235,6 +332,7 @@ export function createLiteDashboard(opts = {}) {
 
   function render() {
     if (closed) return;
+    attachInput();
     frameCount++;
     const rowsOut = buildRows();
     if (isTTY) write(cursorHome + clearScreen + rowsOut.join("\n"));
@@ -244,6 +342,9 @@ export function createLiteDashboard(opts = {}) {
   function close() {
     if (closed) return;
     if (timer) clearInterval(timer);
+    if (inputAttached && typeof input?.off === "function") input.off("data", handleInput);
+    if (rawModeEnabled && typeof input?.setRawMode === "function") input.setRawMode(false);
+    if (inputAttached && typeof input?.pause === "function") input.pause();
     if (isTTY) write(cursorShow + altScreenOff);
     closed = true;
   }

@@ -11,6 +11,7 @@ export function renderTeamHelp() {
     ${WHITE}tfx multi --teammate-mode wt "작업"${RESET}   ${DIM}(Windows Terminal split-pane)${RESET}
     ${WHITE}tfx multi --layout 1xN "작업"${RESET}               ${DIM}(세로 분할 컬럼)${RESET}
     ${WHITE}tfx multi --layout Nx1 "작업"${RESET}               ${DIM}(가로 분할 스택)${RESET}
+    ${WHITE}tfx multi --dashboard-layout lite "작업"${RESET}    ${DIM}(dashboard-lite 기본 뷰)${RESET}
     ${WHITE}tfx multi --dashboard-layout auto "작업"${RESET}    ${DIM}(dashboard viewer 레이아웃 자동 결정)${RESET}
     ${WHITE}tfx multi --dashboard-size 0.4 "작업"${RESET}      ${DIM}(대시보드 분할 비율 0.2~0.8, 기본 0.50)${RESET}
     ${WHITE}tfx multi --dashboard-anchor window "작업"${RESET} ${DIM}(대시보드 고정 위치: window|tab, 기본 window)${RESET}

@@ -16,6 +16,7 @@ function printStartUsage() {
   console.log(`  사용법: ${WHITE}tfx multi "작업 설명"${RESET}`);
   console.log(`          ${WHITE}tfx multi --agents codex,gemini --lead claude "작업"${RESET}`);
   console.log(`          ${WHITE}tfx multi --teammate-mode headless "작업"${RESET} ${DIM}(psmux 헤드리스, 기본)${RESET}`);
+  console.log(`          ${WHITE}tfx multi --dashboard-layout lite "작업"${RESET} ${DIM}(dashboard-lite 기본 뷰)${RESET}`);
   console.log(`          ${WHITE}tfx multi --dashboard-layout auto "작업"${RESET} ${DIM}(dashboard viewer 레이아웃 자동)${RESET}`);
   console.log(`          ${WHITE}tfx multi --dashboard-anchor window "작업"${RESET} ${DIM}(dashboard anchor: window|tab, 기본 window)${RESET}`);
   console.log(`          ${WHITE}tfx multi --teammate-mode wt "작업"${RESET} ${DIM}(Windows Terminal split-pane)${RESET}`);

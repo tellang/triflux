@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 
 import { stripAnsi } from "../../hub/team/ansi.mjs";
 import { createLiteDashboard } from "../../hub/team/tui-lite.mjs";
@@ -52,6 +53,57 @@ describe("createLogDashboard(tui-lite)", () => {
     assert.ok(clean.includes("w2"));
     assert.ok(clean.includes("│"));
     assert.ok(clean.includes("verdict done"));
+    tui.close();
+  });
+
+  it("TTY 입력에서 j/k와 Enter 콜백을 처리한다", () => {
+    let opened = "";
+    const input = new EventEmitter();
+    input.isTTY = true;
+    input.resume = () => {};
+    input.pause = () => {};
+    input.setRawMode = () => {};
+
+    const stream = { write: () => {}, columns: 120, rows: 20, isTTY: true };
+    const tui = createLiteDashboard({
+      stream,
+      input,
+      refreshMs: 0,
+      onOpenSelectedWorker: (name) => { opened = name; },
+    });
+    tui.updateWorker("worker-1", { cli: "codex", status: "running" });
+    tui.updateWorker("worker-2", { cli: "gemini", status: "running" });
+    tui.render();
+
+    input.emit("data", "j");
+    input.emit("data", "\r");
+
+    assert.equal(tui.getSelectedWorker(), "worker-2");
+    assert.equal(opened, "worker-2");
+    tui.close();
+  });
+
+  it("Shift+Enter에서 전체 열기 콜백을 호출한다", () => {
+    let called = false;
+    const input = new EventEmitter();
+    input.isTTY = true;
+    input.resume = () => {};
+    input.pause = () => {};
+    input.setRawMode = () => {};
+
+    const stream = { write: () => {}, columns: 120, rows: 20, isTTY: true };
+    const tui = createLiteDashboard({
+      stream,
+      input,
+      refreshMs: 0,
+      onOpenAllWorkers: () => { called = true; },
+    });
+    tui.updateWorker("worker-1", { cli: "codex", status: "running" });
+    tui.render();
+
+    input.emit("data", "\x1b[13;2u");
+
+    assert.equal(called, true);
     tui.close();
   });
 });

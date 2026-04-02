@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createLogDashboard } from "./tui.mjs";
 import { createLiteDashboard } from "./tui-lite.mjs";
+import { openHeadlessDashboardTarget } from "./dashboard-open.mjs";
 import { processHandoff } from "./handoff.mjs";
 import { statusBadge } from "./ansi.mjs";
 
@@ -53,6 +54,15 @@ const tui = tuiFactory({
   input: process.stdin,
   columns: process.stdout.columns || parseInt(process.env.COLUMNS, 10) || 120,
   layout: LAYOUT,
+  onOpenSelectedWorker: (workerName) => openHeadlessDashboardTarget(SESSION, {
+    worker: workerName,
+    openAll: false,
+    cwd: process.cwd(),
+  }),
+  onOpenAllWorkers: () => openHeadlessDashboardTarget(SESSION, {
+    openAll: true,
+    cwd: process.cwd(),
+  }),
 });
 const startTime = Date.now();
 tui.setStartTime(startTime);
@@ -221,6 +231,8 @@ function makeWorkerState(paneIdx) {
     handoff: null,
     progress: 0,
     activityAt: Date.now(),
+    title: "",
+    cli: "codex",
   };
 }
 
@@ -278,6 +290,8 @@ function ingest() {
     let cli = "codex";
     if (pane.title.includes("gemini") || pane.title.includes("🔵")) cli = "gemini";
     else if (pane.title.includes("claude") || pane.title.includes("🟠")) cli = "claude";
+    ws.title = pane.title;
+    ws.cli = cli;
 
     const resultData = checkResultFile(paneName);
     if (resultData?.processed && !resultData.processed.fallback) {

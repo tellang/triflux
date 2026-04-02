@@ -29,6 +29,12 @@ describe("dashboard-layout", () => {
     assert.equal(parsed.dashboard, true);
   });
 
+  it("parseTeamArgs 기본 dashboard layout은 lite", () => {
+    const parsed = parseTeamArgs(["fix", "bug"]);
+    assert.equal(parsed.dashboardLayout, "lite");
+    assert.equal(parsed.dashboard, true);
+  });
+
   it("dashboard anchor 기본값은 window", () => {
     assert.equal(parseDashboardAnchor(""), "window");
     assert.equal(parseDashboardAnchor("unknown"), "window");
