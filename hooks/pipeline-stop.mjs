@@ -6,20 +6,23 @@
 // 파이프라인이 없으면 정상 종료를 허용한다.
 
 import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
 
 let getPipelineStateDbPath;
+let ensurePipelineTable;
+let listPipelineStates;
 try {
-  const stateModule = await import("../hub/pipeline/state.mjs");
-  getPipelineStateDbPath = stateModule.getPipelineStateDbPath;
+  ({
+    getPipelineStateDbPath,
+    ensurePipelineTable,
+    listPipelineStates,
+  } = await import("../hub/pipeline/state.mjs"));
 } catch {
   // hub/pipeline 모듈 없으면 훅 무동작
   process.exit(0);
 }
 
-const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const HUB_DB_PATH = getPipelineStateDbPath(PROJECT_ROOT);
+const HUB_DB_PATH = getPipelineStateDbPath(PLUGIN_ROOT);
 const TERMINAL = new Set(["complete", "failed"]);
 
 async function checkActivePipelines() {
@@ -27,14 +30,6 @@ async function checkActivePipelines() {
 
   try {
     const { default: Database } = await import("better-sqlite3");
-    const { ensurePipelineTable, listPipelineStates } = await import(
-      join(
-        process.env.CLAUDE_PLUGIN_ROOT || PROJECT_ROOT,
-        "hub",
-        "pipeline",
-        "state.mjs"
-      )
-    );
 
     const db = new Database(HUB_DB_PATH, { readonly: true });
     ensurePipelineTable(db);

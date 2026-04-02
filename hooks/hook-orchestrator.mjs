@@ -23,6 +23,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REGISTRY_PATH =
@@ -50,10 +51,10 @@ function loadRegistry() {
 // ── 경로 변수 치환 ──────────────────────────────────────────
 function resolveCommand(cmd) {
   const home = process.env.HOME || process.env.USERPROFILE || "";
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || __dirname.replace(/[\\/]hooks$/, "");
 
   return cmd
-    .replace(/\$\{PLUGIN_ROOT\}/g, pluginRoot)
+    .replace(/\$\{PLUGIN_ROOT\}/g, PLUGIN_ROOT)
+    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, PLUGIN_ROOT)
     .replace(/\$\{HOME\}/g, home)
     .replace(/\$HOME\b/g, home);
 }

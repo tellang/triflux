@@ -12,16 +12,16 @@
 //
 // Claude 대화에서 AskUserQuestion으로 UI를 제공하며 내부적으로 이 명령들을 호출합니다.
 
-import { readFileSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOME = process.env.HOME || process.env.USERPROFILE || "";
 const SETTINGS_PATH = join(HOME, ".claude", "settings.json");
 const BACKUP_PATH = join(HOME, ".claude", "settings.hooks-backup.json");
 const REGISTRY_PATH = join(__dirname, "hook-registry.json");
-const ORCHESTRATOR_PATH = join(__dirname, "hook-orchestrator.mjs");
 
 // ── 유틸리티 ────────────────────────────────────────────────
 
@@ -105,9 +105,9 @@ function normalizeCmd(cmd) {
 }
 
 function resolveVars(cmd) {
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || __dirname.replace(/[\\/]hooks$/, "");
   return cmd
-    .replace(/\$\{PLUGIN_ROOT\}/g, pluginRoot)
+    .replace(/\$\{PLUGIN_ROOT\}/g, PLUGIN_ROOT)
+    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, PLUGIN_ROOT)
     .replace(/\$\{HOME\}/g, HOME)
     .replace(/\$HOME\b/g, HOME);
 }
@@ -171,7 +171,8 @@ function apply() {
 
   // 오케스트레이터 명령 생성
   const nodeExe = getNodeExe();
-  const orchestratorCmd = `"${nodeExe}" "${ORCHESTRATOR_PATH}"`;
+  const orchestratorPath = "${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs";
+  const orchestratorCmd = `"${nodeExe}" "${orchestratorPath}"`;
 
   // 모든 이벤트를 하나의 오케스트레이터로 통합
   const newHooks = {};

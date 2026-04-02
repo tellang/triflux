@@ -155,7 +155,7 @@
         "matcher": "*",
         "command": "${HOME}/Desktop/Projects/cli/session-vault/scripts/start_hook.sh",
         "priority": 100,
-        "enabled": true,
+        "enabled": false,
         "timeout": 10,
         "blocking": false,
         "description": "세션 볼트 로깅 시작"
@@ -179,7 +179,7 @@
         "matcher": "*",
         "command": "${HOME}/Desktop/Projects/cli/session-vault/scripts/export_hook.sh",
         "priority": 100,
-        "enabled": true,
+        "enabled": false,
         "timeout": 30,
         "blocking": false,
         "description": "세션 트랜스크립트 내보내기"
@@ -190,7 +190,7 @@
         "matcher": "*",
         "command": "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"${HOME}/.claude/scripts/mcp-cleanup.ps1\"",
         "priority": 100,
-        "enabled": true,
+        "enabled": false,
         "timeout": 8,
         "blocking": false,
         "description": "MCP 고아 프로세스 정리"

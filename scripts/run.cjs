@@ -4,9 +4,26 @@
 const { execFileSync } = require("child_process");
 const { existsSync, readFileSync } = require("fs");
 const { dirname, isAbsolute, join, resolve } = require("path");
+const { homedir } = require("os");
+
+function isValidPluginRoot(candidate) {
+  return typeof candidate === "string"
+    && candidate.trim().length > 0
+    && existsSync(join(candidate.trim(), "hooks", "hook-orchestrator.mjs"));
+}
 
 function resolvePluginRoot() {
-  if (process.env.CLAUDE_PLUGIN_ROOT) return process.env.CLAUDE_PLUGIN_ROOT;
+  const breadcrumb = join(homedir(), ".claude", "scripts", ".tfx-pkg-root");
+  if (existsSync(breadcrumb)) {
+    try {
+      const value = readFileSync(breadcrumb, "utf8").trim();
+      if (isValidPluginRoot(value)) return value;
+    } catch {
+      // breadcrumb 읽기 실패 시 다음 fallback
+    }
+  }
+
+  if (isValidPluginRoot(process.env.CLAUDE_PLUGIN_ROOT)) return process.env.CLAUDE_PLUGIN_ROOT;
   return dirname(__dirname);
 }
 
