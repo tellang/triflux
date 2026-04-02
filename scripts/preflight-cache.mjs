@@ -12,7 +12,7 @@ const PKG_ROOT = join(dirname(__filename), "..");
 
 const CACHE_DIR = join(homedir(), ".claude", "cache");
 const CACHE_FILE = join(CACHE_DIR, "tfx-preflight.json");
-const CACHE_TTL_MS = 300_000; // 5분 (warmup과 통일)
+const CACHE_TTL_MS = 3_600_000; // 1시간 (세션당 1회, SessionStart 훅에서 갱신)
 
 function checkRoute() {
   const routePath = join(homedir(), ".claude", "scripts", "tfx-route.sh");

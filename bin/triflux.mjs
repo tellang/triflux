@@ -2856,7 +2856,7 @@ async function checkHubRunning() {
   try {
     const cacheFile = join(homedir(), ".claude", "cache", "tfx-preflight.json");
     const cached = JSON.parse(readFileSync(cacheFile, "utf8"));
-    if (Date.now() - cached.timestamp < 300_000 && cached.hub?.ok) return true;
+    if (Date.now() - cached.timestamp < 3_600_000 && cached.hub?.ok) return true;
   } catch {}
   const port = Number(process.env.TFX_HUB_PORT || "27888");
   try {
