@@ -890,18 +890,25 @@ TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-exec}"
-# Codex 요금제 자동 감지 (preflight 캐시 → auth.json JWT)
-# 환경변수 명시 설정 시 우선, 미설정 시 캐시에서 읽기, 캐시도 없으면 pro
-if [[ -z "${TFX_CODEX_PLAN:-}" ]]; then
-  _detected_plan=$(node -e '
+# Preflight 캐시 일괄 로드 — CLI/Hub 가용성 + Codex 요금제를 환경변수로 내보냄
+# 하위 프로세스(스킬 포함)가 TFX_CODEX_OK, TFX_GEMINI_OK, TFX_HUB_OK로 즉시 참조 가능
+if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
+  eval "$(node -e '
     try {
       const c = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(),".claude","cache","tfx-preflight.json"),"utf8"));
+      const lines = [];
+      lines.push("export TFX_CODEX_OK=" + (c?.codex?.ok ? "1" : "0"));
+      lines.push("export TFX_GEMINI_OK=" + (c?.gemini?.ok ? "1" : "0"));
+      lines.push("export TFX_HUB_OK=" + (c?.hub?.ok ? "1" : "0"));
       const p = c?.codex_plan?.plan;
-      if (p && p !== "unknown" && p !== "api") { process.stdout.write(p); }
-    } catch {}
-  ' 2>/dev/null)
-  TFX_CODEX_PLAN="${_detected_plan:-pro}"
-  unset _detected_plan
+      if (p && p !== "unknown" && p !== "api") lines.push("export TFX_CODEX_PLAN=" + p);
+      const agents = c?.available_agents;
+      if (Array.isArray(agents)) lines.push("export TFX_AVAILABLE_AGENTS=" + agents.join(","));
+      lines.push("export TFX_PREFLIGHT_LOADED=1");
+      process.stdout.write(lines.join("\n") + "\n");
+    } catch { process.stdout.write("export TFX_PREFLIGHT_LOADED=1\n"); }
+  ' 2>/dev/null)"
+  TFX_CODEX_PLAN="${TFX_CODEX_PLAN:-pro}"
 fi
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
 TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
