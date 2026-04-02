@@ -28,6 +28,7 @@ const CACHE_FILES = [
   { name: "mcp-inventory.json", desc: "MCP 인벤토리" },
   { name: "cli-issues.jsonl", desc: "CLI 이슈 로그" },
   { name: "triflux-update-check.json", desc: "업데이트 체크" },
+  { name: "tfx-preflight.json", desc: "Preflight 캐시 (CLI/Hub 가용성)" },
 ];
 
 // ── Run triflux doctor --json ──
