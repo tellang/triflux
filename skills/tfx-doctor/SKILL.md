@@ -152,6 +152,9 @@ options:
 - MCP 인벤토리 캐시
 - Phase 1 웜업 캐시 무결성 (`node scripts/cache-doctor.mjs`)
 - 잔존 팀(orphan teams) 감지
+- **Docs 동기화** — `docs/design/`, `docs/research/` → `~/.claude/docs/` 레퍼런스 문서 동기화 상태
+- **Gemini MCP 안전성** — `~/.gemini/settings.json`의 stdio MCP 감지 (spawn EPERM 방지)
+- **Route Script 정합성** — 프로젝트 소스 `scripts/tfx-route.sh`와 `~/.claude/scripts/tfx-route.sh` 일치 여부
 
 ## 에러 처리
 

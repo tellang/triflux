@@ -1766,6 +1766,115 @@ async function cmdDoctor(options = {}) {
     ok("잔존 팀 없음");
   }
 
+  // ── Docs 동기화 상태 ──
+  section("Docs Sync");
+  {
+    const docsDirs = ["docs/design", "docs/research"];
+    const missingDocs = [];
+    for (const dir of docsDirs) {
+      const src = join(PKG_ROOT, dir);
+      const dest = join(CLAUDE_DIR, dir);
+      if (existsSync(src)) {
+        const srcFiles = readdirSync(src).filter(f => f.endsWith(".md"));
+        if (!existsSync(dest)) {
+          missingDocs.push({ dir, missing: srcFiles.length, detail: "디렉토리 없음" });
+        } else {
+          const destFiles = readdirSync(dest).filter(f => f.endsWith(".md"));
+          const missing = srcFiles.filter(f => !destFiles.includes(f));
+          if (missing.length > 0) missingDocs.push({ dir, missing: missing.length, detail: missing.join(", ") });
+        }
+      }
+    }
+    if (missingDocs.length === 0) {
+      addDoctorCheck(report, { name: "docs-sync", status: "ok" });
+      ok("레퍼런스 문서 동기화 정상");
+    } else {
+      addDoctorCheck(report, { name: "docs-sync", status: "issues", missingDocs, fix: "tfx setup" });
+      warn(`${missingDocs.reduce((s, d) => s + d.missing, 0)}개 레퍼런스 미동기화`);
+      for (const d of missingDocs) info(`${d.dir}: ${d.detail}`);
+      if (fix) {
+        for (const dir of docsDirs) {
+          const src = join(PKG_ROOT, dir);
+          const dest = join(CLAUDE_DIR, dir);
+          if (existsSync(src)) {
+            mkdirSync(dest, { recursive: true });
+            for (const f of readdirSync(src).filter(f => f.endsWith(".md"))) {
+              copyFileSync(join(src, f), join(dest, f));
+            }
+          }
+        }
+        ok("레퍼런스 동기화 완료");
+      } else {
+        issues += missingDocs.length;
+      }
+    }
+  }
+
+  // ── Gemini MCP 안전성 ──
+  section("Gemini MCP Safety");
+  {
+    const geminiSettings = join(homedir(), ".gemini", "settings.json");
+    if (existsSync(geminiSettings)) {
+      try {
+        const gs = JSON.parse(readFileSync(geminiSettings, "utf8"));
+        const mcpServers = gs.mcpServers || {};
+        const dangerousServers = Object.keys(mcpServers).filter(name => {
+          const s = mcpServers[name];
+          return s.command && !s.url && name !== "tfx-hub";
+        });
+        if (dangerousServers.length === 0) {
+          addDoctorCheck(report, { name: "gemini-mcp-safety", status: "ok" });
+          ok("stdio MCP 없음 (spawn EPERM 안전)");
+        } else {
+          addDoctorCheck(report, { name: "gemini-mcp-safety", status: "warning", servers: dangerousServers, fix: "~/.gemini/settings.json에서 stdio MCP 제거" });
+          warn(`${dangerousServers.length}개 stdio MCP 감지 — Gemini stall 위험`);
+          for (const s of dangerousServers) info(`  ${s}`);
+          issues++;
+        }
+      } catch {
+        addDoctorCheck(report, { name: "gemini-mcp-safety", status: "ok" });
+        ok("설정 파일 파싱 불가 — 건너뜀");
+      }
+    } else {
+      addDoctorCheck(report, { name: "gemini-mcp-safety", status: "ok" });
+      ok("Gemini 설정 없음 (정상)");
+    }
+  }
+
+  // ── Route Script 정합성 ──
+  section("Route Script Sync");
+  {
+    const srcRoute = join(PKG_ROOT, "scripts", "tfx-route.sh");
+    const destRoute = join(CLAUDE_DIR, "scripts", "tfx-route.sh");
+    if (existsSync(srcRoute) && existsSync(destRoute)) {
+      const srcHash = readFileSync(srcRoute, "utf8").length;
+      const destHash = readFileSync(destRoute, "utf8").length;
+      const srcContent = readFileSync(srcRoute, "utf8");
+      const destContent = readFileSync(destRoute, "utf8");
+      if (srcContent === destContent) {
+        addDoctorCheck(report, { name: "route-sync", status: "ok" });
+        ok("프로젝트 소스와 설치본 일치");
+      } else {
+        addDoctorCheck(report, { name: "route-sync", status: "issues", fix: "tfx setup" });
+        warn("tfx-route.sh 프로젝트 소스와 설치본 불일치");
+        info(`소스: ${srcRoute} (${srcHash}B) / 설치: ${destRoute} (${destHash}B)`);
+        if (fix) {
+          copyFileSync(srcRoute, destRoute);
+          ok("tfx-route.sh 동기화 완료");
+        } else {
+          issues++;
+        }
+      }
+    } else if (existsSync(srcRoute) && !existsSync(destRoute)) {
+      addDoctorCheck(report, { name: "route-sync", status: "missing", fix: "tfx setup" });
+      fail("설치본 없음");
+      issues++;
+    } else {
+      addDoctorCheck(report, { name: "route-sync", status: "ok" });
+      ok("소스 없음 (npm 패키지 모드)");
+    }
+  }
+
   // 결과
   console.log(`\n  ${LINE}`);
   if (issues === 0) {
