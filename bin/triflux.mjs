@@ -688,7 +688,7 @@ function buildSetupDryRunPlan() {
 }
 
 function cmdSetup(options = {}) {
-  const { dryRun = false } = options;
+  const { dryRun = false, overrideVersion } = options;
   if (dryRun) {
     printJson(buildSetupDryRunPlan());
     return;
@@ -935,7 +935,7 @@ function cmdSetup(options = {}) {
   }
 
   console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}`);
-  console.log(`${DIM}버전: v${PKG.version}${RESET}\n`);
+  console.log(`${DIM}버전: v${overrideVersion || PKG.version}${RESET}\n`);
 }
 
 function addDoctorCheck(report, entry) {
@@ -2384,7 +2384,7 @@ function cmdUpdate() {
 
     // setup 재실행 — 개선된 cmdSetup()이 Gemini 프로필, CLI 확인, 요약 테이블 포함
     console.log(`\n${CYAN}── 설정 동기화 ──${RESET}`);
-    cmdSetup({ fromUpdate: true });
+    cmdSetup({ fromUpdate: true, overrideVersion: newVer });
 
     // hook-orchestrator apply — settings.json 훅 경로를 올바른 절대경로로 갱신
     try {
