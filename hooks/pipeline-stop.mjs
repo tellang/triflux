@@ -6,7 +6,6 @@
 // 파이프라인이 없으면 정상 종료를 허용한다.
 
 import { existsSync } from "node:fs";
-import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
 
 let getPipelineStateDbPath;
 let ensurePipelineTable;
@@ -22,7 +21,8 @@ try {
   process.exit(0);
 }
 
-const HUB_DB_PATH = getPipelineStateDbPath(PLUGIN_ROOT);
+const PROJECT_ROOT = process.env.CLAUDE_CWD || process.cwd();
+const HUB_DB_PATH = getPipelineStateDbPath(PROJECT_ROOT);
 const TERMINAL = new Set(["complete", "failed"]);
 
 async function checkActivePipelines() {
