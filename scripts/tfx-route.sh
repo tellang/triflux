@@ -1893,6 +1893,19 @@ EOF
     fi
   fi
 
+  # 결과를 파일에도 저장 — run_in_background에서 TaskOutput이 stdout을 놓칠 때 대비
+  local result_file="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-result.log"
+  {
+    echo "agent: $AGENT_TYPE"
+    echo "cli: $CLI_TYPE"
+    echo "exit_code: $exit_code"
+    echo "elapsed: ${elapsed}s"
+    echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
+    echo "stdout_log: $STDOUT_LOG"
+    echo "result_file: $result_file"
+  } > "$result_file" 2>/dev/null
+  echo "[tfx-route] result_file=$result_file" >&2
+
   return "$exit_code"
 }
 
