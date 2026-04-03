@@ -58,7 +58,12 @@ export function writeFullcycleState(runId, state, baseDir = process.cwd()) {
 
 export function readFullcycleState(runId, baseDir = process.cwd()) {
   const content = readFullcycleArtifact(runId, 'state.json', baseDir);
-  return content ? JSON.parse(content) : null;
+  if (!content) return null;
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
 }
 
 export function findLatestInterviewPlan(baseDir = process.cwd()) {
