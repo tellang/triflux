@@ -266,6 +266,222 @@ function replaceProfileSection(tomlContent, profileName, lines) {
   return tomlContent.replace(sectionRe, replacement);
 }
 
+// ── 스킬 별칭 (하나의 소스 스킬을 다른 이름으로도 노출) ──
+
+const SKILL_ALIASES = [
+  { alias: "tfx-autopilot", source: "tfx-auto" },
+  { alias: "tfx-persist", source: "tfx-auto" },
+  { alias: "tfx-fullcycle", source: "tfx-auto" },
+];
+
+// ── 폐기 예정 스킬 목록 ──
+
+const DEPRECATED_SKILLS = [
+  "tfx-codex-route",
+  "tfx-gemini-route",
+];
+
+// ── 구형 Codex 모델 (마이그레이션 안내 대상) ──
+
+const LEGACY_CODEX_MODELS = [
+  "o4-mini",
+  "o3",
+  "codex-mini-latest",
+];
+
+/**
+ * 별칭 스킬 디렉토리를 동기화한다.
+ * 소스 스킬의 SKILL.md와 하위 파일을 별칭 디렉토리에 복사하면서
+ * SKILL.md 내부의 소스 이름 참조를 별칭으로 치환한다.
+ * @param {string} srcDir - 소스 스킬 디렉토리
+ * @param {string} dstDir - 대상(별칭) 디렉토리
+ * @param {{ alias: string, source: string }} meta - 별칭 메타 정보
+ * @returns {number} 동기화된 파일 수
+ */
+function syncAliasedSkillDir(srcDir, dstDir, { alias, source }) {
+  if (!existsSync(srcDir)) return 0;
+  if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
+
+  let count = 0;
+  for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = join(srcDir, entry.name);
+    const dstPath = join(dstDir, entry.name);
+
+    if (entry.isDirectory()) {
+      count += syncAliasedSkillDir(srcPath, dstPath, { alias, source });
+      continue;
+    }
+    if (!entry.name.endsWith(".md")) continue;
+
+    const srcContent = readFileSync(srcPath, "utf8");
+    const aliased = srcContent.replaceAll(source, alias);
+    const existing = existsSync(dstPath) ? readFileSync(dstPath, "utf8") : null;
+    if (aliased !== existing) {
+      writeFileSync(dstPath, aliased, "utf8");
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * 설치된 스킬 디렉토리에서 패키지에 더 이상 없는 tfx-* 스킬을 제거한다.
+ * @param {string} installedDir - ~/.claude/skills
+ * @param {string} pkgDir - PLUGIN_ROOT/skills
+ * @returns {{ count: number, removed: string[] }}
+ */
+function cleanupStaleSkills(installedDir, pkgDir) {
+  const removed = [];
+  if (!existsSync(installedDir)) return { count: 0, removed };
+
+  const pkgNames = new Set();
+  if (existsSync(pkgDir)) {
+    for (const n of readdirSync(pkgDir)) pkgNames.add(n);
+  }
+  for (const { alias } of SKILL_ALIASES) pkgNames.add(alias);
+  for (const dep of DEPRECATED_SKILLS) pkgNames.add(dep);
+
+  for (const name of readdirSync(installedDir)) {
+    if (!name.startsWith("tfx-")) continue;
+    if (pkgNames.has(name)) continue;
+
+    const skillPath = join(installedDir, name);
+    try {
+      const entries = readdirSync(skillPath);
+      for (const f of entries) unlinkSync(join(skillPath, f));
+      // rmdir only works on empty dirs; ignore errors for nested
+      try { readdirSync(skillPath).length === 0 && unlinkSync(skillPath); } catch {}
+    } catch { /* best effort */ }
+    removed.push(name);
+  }
+  return { count: removed.length, removed };
+}
+
+/**
+ * 훅 커맨드 문자열에서 스크립트 파일명을 추출한다.
+ * 예: 'node "/path/to/safety-guard.mjs"' → "safety-guard.mjs"
+ * @param {string|undefined} command
+ * @returns {string|null}
+ */
+function extractManagedHookFilename(command) {
+  if (typeof command !== "string") return null;
+  const match = command.match(/([^/\\"\s]+\.(?:mjs|js|sh|cjs))(?:["'\s]|$)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * hook-registry.json에서 관리 대상 훅 목록을 플랫 배열로 반환한다.
+ * @param {string} registryPath - hook-registry.json 경로
+ * @returns {Array<{ event: string, id: string, fileName: string, matcher: string, command: string, priority: number, enabled: boolean }>}
+ */
+function getManagedRegistryHooks(registryPath) {
+  if (!existsSync(registryPath)) return [];
+  try {
+    const registry = JSON.parse(readFileSync(registryPath, "utf8"));
+    const events = registry.events || {};
+    const result = [];
+    for (const [event, hooks] of Object.entries(events)) {
+      if (!Array.isArray(hooks)) continue;
+      for (const hook of hooks) {
+        if (!hook.enabled) continue;
+        const fileName = extractManagedHookFilename(hook.command);
+        result.push({
+          event,
+          id: hook.id || "",
+          fileName,
+          matcher: hook.matcher || "*",
+          command: hook.command || "",
+          priority: hook.priority ?? 100,
+          enabled: hook.enabled,
+        });
+      }
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * hook-registry.json 기준으로 settings.json에 누락된 훅을 자동 등록한다.
+ * @param {{ settingsPath: string, registryPath: string }} opts
+ * @returns {{ ok: boolean, changed: boolean, added: string[] }}
+ */
+function ensureHooksInSettings({ settingsPath, registryPath }) {
+  try {
+    const managed = getManagedRegistryHooks(registryPath);
+    if (managed.length === 0) return { ok: true, changed: false, added: [] };
+
+    let settings = {};
+    if (existsSync(settingsPath)) {
+      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    }
+    if (!settings.hooks) settings.hooks = {};
+
+    const added = [];
+    for (const spec of managed) {
+      if (!Array.isArray(settings.hooks[spec.event])) {
+        settings.hooks[spec.event] = [];
+      }
+      const entries = settings.hooks[spec.event];
+      const alreadyRegistered = entries.some((entry) =>
+        Array.isArray(entry?.hooks) &&
+        entry.hooks.some((h) => extractManagedHookFilename(h?.command) === spec.fileName),
+      );
+      if (alreadyRegistered) continue;
+
+      entries.push({
+        matcher: spec.matcher,
+        hooks: [{ type: "command", command: spec.command, timeout: 5 }],
+      });
+      added.push(spec.id || spec.fileName);
+    }
+
+    if (added.length > 0) {
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+    }
+    return { ok: true, changed: added.length > 0, added };
+  } catch {
+    return { ok: false, changed: false, added: [] };
+  }
+}
+
+/**
+ * Codex config.json에 tfx-hub MCP 서버 엔트리를 보장한다.
+ * @param {{ mcpUrl: string, createIfMissing?: boolean, enabled?: boolean }} opts
+ * @returns {{ ok: boolean, changed: boolean, reason?: string }}
+ */
+function ensureCodexHubServerConfig({ mcpUrl, createIfMissing = false, enabled = false }) {
+  try {
+    const codexConfigDir = join(homedir(), ".codex");
+    const configPath = join(codexConfigDir, "config.json");
+
+    if (!existsSync(configPath)) {
+      if (!createIfMissing) return { ok: true, changed: false, reason: "no-config" };
+      if (!existsSync(codexConfigDir)) mkdirSync(codexConfigDir, { recursive: true });
+      const config = { mcpServers: { "tfx-hub": { url: mcpUrl, enabled } } };
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+      return { ok: true, changed: true };
+    }
+
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    if (!config.mcpServers) config.mcpServers = {};
+
+    if (config.mcpServers["tfx-hub"]) {
+      return { ok: true, changed: false };
+    }
+
+    const updated = {
+      ...config,
+      mcpServers: { ...config.mcpServers, "tfx-hub": { url: mcpUrl, enabled } },
+    };
+    writeFileSync(configPath, JSON.stringify(updated, null, 2) + "\n", "utf8");
+    return { ok: true, changed: true };
+  } catch (err) {
+    return { ok: false, changed: false, reason: err?.message || "unknown" };
+  }
+}
+
 function ensureCodexProfiles() {
   try {
     if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
@@ -323,6 +539,18 @@ export {
   SETUP_MARKER_PATH,
   readMarker,
   writeMarker,
+  REQUIRED_CODEX_PROFILES,
+  getVersion,
+  ensureCodexProfiles,
+  SKILL_ALIASES,
+  LEGACY_CODEX_MODELS,
+  DEPRECATED_SKILLS,
+  syncAliasedSkillDir,
+  cleanupStaleSkills,
+  extractManagedHookFilename,
+  getManagedRegistryHooks,
+  ensureHooksInSettings,
+  ensureCodexHubServerConfig,
 };
 
 async function main() {
