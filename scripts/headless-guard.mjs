@@ -189,8 +189,11 @@ async function main() {
       process.exit(0);
     }
 
-    // codex/gemini 직접 CLI 호출 → deny
+    // codex/gemini 직접 CLI 호출 → deny (인라인 TFX_ALLOW_DIRECT_CLI=1 우회 허용)
     if (/\bcodex\b.*\bexec\b/.test(cmd) || /\bgemini\s+(-p|--prompt)\b/.test(cmd)) {
+      if (/\bTFX_ALLOW_DIRECT_CLI=1\b/.test(cmd)) {
+        nudge("[headless-guard] direct CLI mode (inline TFX_ALLOW_DIRECT_CLI=1)");
+      }
       deny(
         "[headless-guard] codex/gemini 직접 호출은 spawn-session에서 차단됩니다. " +
         `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +

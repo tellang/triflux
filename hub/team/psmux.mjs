@@ -195,6 +195,9 @@ function ensureCaptureHelper() {
       "  New-Item -ItemType Directory -Force -Path $parent | Out-Null",
       "}",
       "",
+      "# Force UTF-8 encoding — CP949 등 non-UTF-8 codepage에서 Gemini stdout 캡처 실패 방지",
+      "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+      "",
       "$reader = [Console]::In",
       "while (($line = $reader.ReadLine()) -ne $null) {",
       "  Add-Content -LiteralPath $Path -Value $line -Encoding utf8",
@@ -877,7 +880,9 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
 
   const token = randomToken(paneName);
   const safeCommand = wrapCliForBash(commandText);
-  const wrapped = `try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
+  // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout이 깨지는 문제 방지 (belt-and-suspenders)
+  const chcpPrefix = process.platform === "win32" ? "chcp 65001 > $null; " : "";
+  const wrapped = `${chcpPrefix}try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
 
   sendLiteralToPane(pane.paneId, wrapped, true);
 
