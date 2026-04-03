@@ -372,7 +372,7 @@ describe("psmux.mjs steering", () => {
 });
 
 describe("killPsmuxSession cleanup", () => {
-  function mockForKillSession() {
+  function mockForKillSession({ attached = true } = {}) {
     const calls = [];
 
     const tracker = mock.method(childProcess, "execFileSync", (file, args) => {
@@ -382,6 +382,8 @@ describe("killPsmuxSession cleanup", () => {
       switch (argv[0]) {
         case "-V":
           return "psmux 3.3.0";
+        case "list-sessions":
+          return attached ? "tfx-kill: 1 windows (1 attached)" : "tfx-kill: 1 windows";
         case "list-panes": {
           const fmt = argv.find((a) => a.includes("pane_index"));
           if (fmt) {
@@ -390,6 +392,8 @@ describe("killPsmuxSession cleanup", () => {
           // #{pane_pid} format
           return "1234\n5678";
         }
+        case "detach-client":
+          return "";
         case "pipe-pane":
           return "";
         case "kill-session":
@@ -441,13 +445,106 @@ describe("killPsmuxSession cleanup", () => {
     );
     assert.ok(orphanCalls.length >= 1, "고아 pipe-pane 헬퍼 정리가 호출되어야 함");
 
-    // 순서 검증: pipe-pane 해제가 taskkill보다 먼저
+    const detachClientIdx = calls.findIndex(
+      (c) => Array.isArray(c.args) && c.args[0] === "detach-client",
+    );
+    assert.ok(detachClientIdx >= 0, "attached session이면 detach-client가 호출되어야 함");
+
+    // 순서 검증: detach-client가 pipe-pane / taskkill보다 먼저
     const firstPipePaneIdx = calls.findIndex(
       (c) => Array.isArray(c.args) && c.args[0] === "pipe-pane",
     );
+    assert.ok(detachClientIdx < firstPipePaneIdx, "detach-client가 pipe-pane 해제보다 먼저 실행되어야 함");
+
+    // 순서 검증: pipe-pane 해제가 taskkill보다 먼저
     const firstTaskkillIdx = calls.findIndex(
       (c) => c.file === "execSync" && typeof c.args[0] === "string" && c.args[0].includes("taskkill"),
     );
     assert.ok(firstPipePaneIdx < firstTaskkillIdx, "pipe-pane 해제가 taskkill보다 먼저 실행되어야 함");
+  });
+
+  it("unattached session이면 detach-client를 생략한다", async () => {
+    createTempCaptureRoot("psmux-kill-unattached-");
+    const { calls } = mockForKillSession({ attached: false });
+    const { killPsmuxSession } = await importFreshPsmux();
+
+    killPsmuxSession("tfx-kill");
+
+    const detachClientCalls = calls.filter(
+      (c) => Array.isArray(c.args) && c.args[0] === "detach-client",
+    );
+    assert.equal(detachClientCalls.length, 0, "unattached session에는 detach-client가 불필요");
+  });
+});
+
+describe("killWorker focus-safe cleanup", () => {
+  function mockForKillWorker({ attached = true, workerDead = false } = {}) {
+    const calls = [];
+
+    const tracker = mock.method(childProcess, "execFileSync", (file, args) => {
+      const argv = Array.isArray(args) ? [...args] : [];
+      calls.push({ file, args: argv });
+
+      switch (argv[0]) {
+        case "-V":
+          return "psmux 3.3.1";
+        case "list-sessions":
+          return attached ? "tfx-test: 1 windows (1 attached)" : "tfx-test: 1 windows";
+        case "list-panes":
+          if (argv.includes("#{pane_pid}")) return "4321";
+          return [
+            `0\tlead\ttfx-test:0.0\t0\t`,
+            `1\tworker-1\ttfx-test:0.1\t${workerDead ? "1" : "0"}\t0`,
+            "2\tworker-2\ttfx-test:0.2\t0\t",
+          ].join("\n");
+        case "select-pane":
+        case "pipe-pane":
+        case "send-keys":
+        case "kill-pane":
+          return "";
+        default:
+          throw new Error(`예상하지 못한 execFileSync 호출: ${argv.join(" ")}`);
+      }
+    });
+
+    const execSyncTracker = mock.method(childProcess, "execSync", (cmd) => {
+      calls.push({ file: "execSync", args: [cmd] });
+      return "";
+    });
+
+    registerRestore(() => tracker.mock.restore());
+    registerRestore(() => execSyncTracker.mock.restore());
+    return { calls };
+  }
+
+  it("attached session에서는 fallback pane을 먼저 선택하고 exit 전송을 생략한다", async () => {
+    createTempCaptureRoot("psmux-kill-worker-attached-");
+    const { calls } = mockForKillWorker({ attached: true });
+    const { killWorker } = await importFreshPsmux();
+
+    killWorker("tfx-test", "worker-1");
+
+    const selectPaneCalls = calls.filter(
+      (c) => Array.isArray(c.args) && c.args[0] === "select-pane",
+    );
+    assert.ok(selectPaneCalls.length >= 2, "attached cleanup은 fallback pane 재선택을 포함해야 함");
+
+    const sendExitCalls = calls.filter(
+      (c) => Array.isArray(c.args) && c.args[0] === "send-keys" && c.args.includes("exit"),
+    );
+    assert.equal(sendExitCalls.length, 0, "attached session에서는 exit 전송을 생략해야 함");
+  });
+
+  it("unattached session에서는 기존 exit 전송 경로를 유지한다", async () => {
+    createTempCaptureRoot("psmux-kill-worker-unattached-");
+    const { calls } = mockForKillWorker({ attached: false });
+    const { killWorker } = await importFreshPsmux();
+
+    killWorker("tfx-test", "worker-1");
+
+    const sendExitCalls = calls.filter(
+      (c) => Array.isArray(c.args) && c.args[0] === "send-keys" && c.args.includes("exit"),
+    );
+    assert.equal(sendExitCalls.length, 1, "unattached session에서는 exit 전송을 유지해야 함");
   });
 });

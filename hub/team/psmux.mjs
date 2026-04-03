@@ -261,13 +261,19 @@ function parsePaneDetails(output) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const [title = "", paneId = "", dead = "0", deadStatus = ""] = line.split("\t");
+      const parts = line.split("\t");
+      const hasPaneIndex = parts.length >= 5;
+      const [paneIndexText = "", title = "", paneId = "", dead = "0", deadStatus = ""] = hasPaneIndex
+        ? parts
+        : ["", ...parts];
       const exitCode = dead === "1"
         ? Number.parseInt(deadStatus, 10)
         : null;
+      const paneIndex = Number.parseInt(paneIndexText, 10);
       return {
         title,
         paneId,
+        paneIndex: Number.isFinite(paneIndex) ? paneIndex : null,
         isDead: dead === "1",
         exitCode: Number.isFinite(exitCode) ? exitCode : dead === "1" ? 0 : null,
       };
@@ -292,7 +298,7 @@ function listPaneDetails(sessionName) {
     "-t",
     sessionName,
     "-F",
-    "#{pane_title}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_dead}\t#{pane_dead_status}",
+    "#{pane_index}\t#{pane_title}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_dead}\t#{pane_dead_status}",
   ]);
   return parsePaneDetails(output);
 }
@@ -617,12 +623,40 @@ function killOrphanMcpProcesses(sessionName) {
   }
 }
 
+function detachAttachedClients(sessionName, waitMs = 750) {
+  const attachedCount = getPsmuxSessionAttachedCount(sessionName);
+  if (!Number.isFinite(attachedCount) || attachedCount <= 0) return false;
+  try {
+    psmuxExec(["detach-client", "-t", sessionName], { stdio: "ignore" });
+    sleepMs(waitMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function findFallbackPane(sessionName, excludedPaneId) {
+  try {
+    const panes = listPaneDetails(sessionName)
+      .filter((pane) => pane.paneId !== excludedPaneId && !pane.isDead);
+    if (panes.length === 0) return null;
+    return panes.find((pane) => pane.title === "lead")
+      || panes.find((pane) => pane.paneIndex === 0)
+      || panes[0];
+  } catch {
+    return null;
+  }
+}
+
 /**
  * psmux 세션 종료
  * 순서: pipe-pane 해제 → pane 프로세스 트리 정리 → 세션 종료 → 고아 정리
  * @param {string} sessionName
  */
 export function killPsmuxSession(sessionName) {
+  // attach된 WT/ConPTY 클라이언트가 있으면 먼저 안전하게 분리한다.
+  detachAttachedClients(sessionName);
+
   // 1. pipe-pane 캡처 해제 — reader 프로세스에 EOF 전송하여 정상 종료 유도
   let paneIds = [];
   try {
@@ -1096,6 +1130,18 @@ export function killWorker(sessionName, workerName) {
   }
   try {
     const { paneId, status } = getWorkerStatus(sessionName, workerName);
+    const attachedCount = getPsmuxSessionAttachedCount(sessionName);
+    const fallbackPane = attachedCount > 0
+      ? findFallbackPane(sessionName, paneId)
+      : null;
+
+    if (fallbackPane?.paneId) {
+      try {
+        psmuxExec(["select-pane", "-t", fallbackPane.paneId]);
+      } catch {
+        // focus 회복 best-effort
+      }
+    }
 
     // pipe-pane 캡처 해제 — reader 프로세스 정상 종료 유도
     disablePipeCapture(paneId);
@@ -1126,10 +1172,12 @@ export function killWorker(sessionName, workerName) {
       // send-keys 실패 무시
     }
 
-    try {
-      psmuxExec(["send-keys", "-t", paneId, "exit", "Enter"]);
-    } catch {
-      // send-keys 실패 무시
+    if (!fallbackPane) {
+      try {
+        psmuxExec(["send-keys", "-t", paneId, "exit", "Enter"]);
+      } catch {
+        // send-keys 실패 무시
+      }
     }
 
     sleepMs(2000);
@@ -1138,6 +1186,14 @@ export function killWorker(sessionName, workerName) {
       psmuxExec(["kill-pane", "-t", paneId]);
     } catch {
       // 이미 종료된 pane — 무시
+    }
+
+    if (fallbackPane?.paneId) {
+      try {
+        psmuxExec(["select-pane", "-t", fallbackPane.paneId]);
+      } catch {
+        // pane 정리 후 focus 재선택 best-effort
+      }
     }
     return { killed: true };
   } catch (err) {

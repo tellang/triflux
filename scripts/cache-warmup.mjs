@@ -309,6 +309,7 @@ export function extractProjectMeta(options = {}) {
   if (existsSync(packageJsonPath)) {
     try {
       const pkg = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+      name = pkg.name || name;
       description = pkg.description || "";
       testCmd = pkg.scripts?.test || null;
       lang = "JavaScript/ESM (Node.js)";
