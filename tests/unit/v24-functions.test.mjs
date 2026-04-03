@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { cleanTuiArtifacts } from "../../scripts/tfx-route-post.mjs";
+import { appendCodexResumeHint, cleanTuiArtifacts, extractCodexSessionId } from "../../scripts/tfx-route-post.mjs";
 import { replaceProfileSection, hasProfileSection } from "../../scripts/setup.mjs";
 
 describe("v2.4 신규 JS 함수 테스트", () => {
@@ -51,6 +51,32 @@ describe("v2.4 신규 JS 함수 테스트", () => {
       // claude
       const claudeText = "━━━━━━━\nClaude response";
       assert.equal(cleanTuiArtifacts(claudeText, "claude"), "Claude response");
+    });
+  });
+
+  describe("Codex session resume helpers", () => {
+    it("7. stderr의 session id를 추출한다", () => {
+      const stderr = "OpenAI Codex\nsession id: thr_route_123\nmodel: gpt-5.4";
+      assert.equal(extractCodexSessionId("", stderr), "thr_route_123");
+    });
+
+    it("8. JSON line의 threadId를 추출한다", () => {
+      const rawOutput = '{"type":"completed","threadId":"thr_json_456"}';
+      assert.equal(extractCodexSessionId(rawOutput, ""), "thr_json_456");
+    });
+
+    it("9. 세션 정보가 없을 때만 resume 힌트를 덧붙인다", () => {
+      const stderr = "session id: thr_route_789";
+      const output = appendCodexResumeHint("Useful Text", "", stderr);
+      assert.equal(
+        output,
+        "Useful Text\n\nCodex session ID: thr_route_789\nResume in Codex: codex resume thr_route_789",
+      );
+    });
+
+    it("10. 기존 resume 힌트가 있으면 중복 추가하지 않는다", () => {
+      const existing = "Done.\n\nCodex session ID: thr_existing\nResume in Codex: codex resume thr_existing";
+      assert.equal(appendCodexResumeHint(existing, "", "session id: thr_other"), existing);
     });
   });
 
