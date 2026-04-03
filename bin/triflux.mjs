@@ -2363,13 +2363,22 @@ async function cmdDoctor(options = {}) {
                   e.hooks.some((h) => typeof h?.command === "string" && h.command.includes("hook-orchestrator")),
                 );
                 if (!hasOrch) continue;
-                // orchestrator가 아닌 엔트리 제거
+                // 패턴 A: orchestrator 없는 별도 엔트리 제거
                 const before = entries.length;
                 fixedSettings.hooks[event] = entries.filter((e) =>
                   Array.isArray(e?.hooks) &&
                   e.hooks.some((h) => typeof h?.command === "string" && h.command.includes("hook-orchestrator")),
                 );
                 removed += before - fixedSettings.hooks[event].length;
+                // 패턴 B: orchestrator 엔트리 내부의 개별 훅 제거
+                for (const entry of fixedSettings.hooks[event]) {
+                  if (!Array.isArray(entry.hooks) || entry.hooks.length <= 1) continue;
+                  const beforeInner = entry.hooks.length;
+                  entry.hooks = entry.hooks.filter(
+                    (h) => typeof h?.command === "string" && h.command.includes("hook-orchestrator"),
+                  );
+                  removed += beforeInner - entry.hooks.length;
+                }
               }
               if (removed > 0) {
                 writeFileSync(settingsPath, JSON.stringify(fixedSettings, null, 2) + "\n", "utf8");

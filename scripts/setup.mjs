@@ -630,7 +630,10 @@ function ensureHooksInSettings({
   }
   if (!settings.hooks || typeof settings.hooks !== "object") settings.hooks = {};
 
-  // ── 이중 실행 정리: orchestrator가 있는 이벤트에서 개별 훅 엔트리 제거 ──
+  // ── 이중 실행 정리: orchestrator가 있는 이벤트에서 개별 훅 제거 ──
+  // 두 가지 패턴 모두 처리:
+  //   A) orchestrator 엔트리와 별도 개별 훅 엔트리가 공존 → 개별 엔트리 제거
+  //   B) orchestrator와 개별 훅이 같은 엔트리의 hooks[] 안에 공존 → 개별 훅 제거
   let dedupRemoved = 0;
   for (const [event, entries] of Object.entries(settings.hooks)) {
     if (!Array.isArray(entries)) continue;
@@ -639,12 +642,24 @@ function ensureHooksInSettings({
       e.hooks.some((h) => typeof h?.command === "string" && h.command.includes("hook-orchestrator")),
     );
     if (!hasOrch) continue;
+
+    // 패턴 A: orchestrator 없는 별도 엔트리 제거
     const before = entries.length;
     settings.hooks[event] = entries.filter((e) =>
       Array.isArray(e?.hooks) &&
       e.hooks.some((h) => typeof h?.command === "string" && h.command.includes("hook-orchestrator")),
     );
     dedupRemoved += before - settings.hooks[event].length;
+
+    // 패턴 B: orchestrator가 있는 엔트리 내부에서 개별 훅 제거
+    for (const entry of settings.hooks[event]) {
+      if (!Array.isArray(entry.hooks) || entry.hooks.length <= 1) continue;
+      const beforeInner = entry.hooks.length;
+      entry.hooks = entry.hooks.filter(
+        (h) => typeof h?.command === "string" && h.command.includes("hook-orchestrator"),
+      );
+      dedupRemoved += beforeInner - entry.hooks.length;
+    }
   }
 
   const added = [];
