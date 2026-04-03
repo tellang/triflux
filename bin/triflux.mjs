@@ -28,6 +28,7 @@ import {
   extractManagedHookFilename, getManagedRegistryHooks, ensureHooksInSettings,
   ensureCodexHubServerConfig,
 } from "../scripts/setup.mjs";
+import { cleanupTmpFiles } from "../scripts/tmp-cleanup.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -3530,6 +3531,10 @@ async function cmdHub(args = [], options = {}) {
 async function main() {
   const cmd = NORMALIZED_ARGS[0] || "help";
   const cmdArgs = NORMALIZED_ARGS.slice(1);
+
+  cleanupTmpFiles({
+    protectPaths: [process.env.HOME, process.env.USERPROFILE],
+  }).catch(() => {});
 
   switch (cmd) {
     case "setup":

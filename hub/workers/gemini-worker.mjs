@@ -206,6 +206,7 @@ export class GeminiWorker {
       env: { ...this.env, ...(options.env || {}) },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      shell: process.platform === 'win32',
     });
 
     this.child = child;

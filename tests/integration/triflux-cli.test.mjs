@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -39,6 +39,27 @@ function parseStdoutJson(result) {
 }
 
 describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
+  it("CLI startup should sweep stale triflux-cli temp dirs without deleting the active HOME dir", () => {
+    const activeHomeDir = createHomeDir();
+    const staleHomeDir = createHomeDir();
+    const staleDate = new Date(Date.now() - (2 * 24 * 60 * 60 * 1000));
+
+    try {
+      utimesSync(activeHomeDir, staleDate, staleDate);
+      utimesSync(staleHomeDir, staleDate, staleDate);
+
+      const result = runCli(["version", "--json"], { homeDir: activeHomeDir });
+      const payload = parseStdoutJson(result);
+
+      assert.ok(payload.triflux);
+      assert.equal(existsSync(activeHomeDir), true, "active HOME dir should be preserved");
+      assert.equal(existsSync(staleHomeDir), false, "stale triflux-cli dir should be swept on startup");
+    } finally {
+      rmSync(activeHomeDir, { recursive: true, force: true });
+      rmSync(staleHomeDir, { recursive: true, force: true });
+    }
+  });
+
   it("version --json은 구조화된 버전 정보를 반환해야 한다", () => {
     const result = runCli(["version", "--json"]);
     const payload = parseStdoutJson(result);

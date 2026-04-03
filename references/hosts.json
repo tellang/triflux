@@ -1,0 +1,19 @@
+{
+  "hosts": {
+    "ultra4": {
+      "description": "Windows 데스크탑 (고RAM/고CPU)",
+      "aliases": [
+        "울트라",
+        "울트라4",
+        "데스크탑"
+      ],
+      "default_dir": "~/Desktop/Projects/cli/triflux"
+    }
+  },
+  "default_host": "ultra4",
+  "triggers": [
+    "원격에서",
+    "다른 머신에서",
+    "다른 컴퓨터에서"
+  ]
+}

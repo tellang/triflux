@@ -5,35 +5,64 @@
  * SessionStart 훅 또는 독립 실행으로 사용.
  */
 import { existsSync, readdirSync, statSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7일
+const TRIFLUX_CLI_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1일
 
 // tfx-psmux-check.json은 guard가 TTL을 직접 관리하므로 제외
 const SKIP_FILES = new Set(["tfx-psmux-check.json"]);
+const TOP_LEVEL_RULES = Object.freeze([
+  { prefix: "tfx-", maxAgeMs: MAX_AGE_MS },
+  { prefix: "triflux-cli-", maxAgeMs: TRIFLUX_CLI_MAX_AGE_MS },
+]);
+
+function normalizeProtectedPath(target) {
+  const normalized = resolve(target);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function buildProtectedPathSet(protectPaths = []) {
+  const protectedPaths = new Set();
+  for (const target of protectPaths) {
+    if (!target) continue;
+    try {
+      protectedPaths.add(normalizeProtectedPath(target));
+    } catch {
+      // ignore invalid paths
+    }
+  }
+  return protectedPaths;
+}
 
 /**
  * 7일 이상 된 임시 파일/디렉터리를 정리한다.
+ * triflux-cli-* 테스트 홈 디렉터리는 1일 이상 지난 경우 정리한다.
+ * @param {{ protectPaths?: string[] }} [options]
  * @returns {number} 삭제된 항목 수
  */
-export async function cleanupTmpFiles() {
+export async function cleanupTmpFiles({ protectPaths = [] } = {}) {
   const now = Date.now();
   let cleaned = 0;
   const tmp = tmpdir();
+  const protectedPaths = buildProtectedPathSet(protectPaths);
 
-  // 1) tmpdir() 직하위의 tfx-* 패턴 항목 정리
+  // 1) tmpdir() 직하위의 관리 대상 항목 정리
   let topEntries;
   try { topEntries = readdirSync(tmp); } catch { topEntries = []; }
 
   for (const entry of topEntries) {
-    if (!entry.startsWith("tfx-")) continue;
+    const rule = TOP_LEVEL_RULES.find(({ prefix }) => entry.startsWith(prefix));
+    if (!rule) continue;
     if (SKIP_FILES.has(entry)) continue;
 
     const full = join(tmp, entry);
+    if (protectedPaths.has(normalizeProtectedPath(full))) continue;
+
     try {
       const stat = statSync(full);
-      if (now - stat.mtimeMs > MAX_AGE_MS) {
+      if (now - stat.mtimeMs > rule.maxAgeMs) {
         rmSync(full, { recursive: true, force: true });
         cleaned++;
       }

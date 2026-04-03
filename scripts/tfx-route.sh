@@ -1484,9 +1484,9 @@ run_codex_exec() {
   fi
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
 

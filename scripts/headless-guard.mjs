@@ -190,7 +190,13 @@ async function main() {
     }
 
     // codex/gemini 직접 CLI 호출 → deny (인라인 TFX_ALLOW_DIRECT_CLI=1 우회 허용)
-    if (/\bcodex\b.*\bexec\b/.test(cmd) || /\bgemini\s+(-p|--prompt)\b/.test(cmd)) {
+    // 복합 명령(&&, ||, ;) 분리 후 각 세그먼트의 커맨드 위치만 검사 (args/quotes 안의 codex는 무시)
+    const cmdParts = cmd.split(/\s*(?:&&|\|\||;)\s*/);
+    const hasDirectCli = cmdParts.some(part => {
+      const stripped = part.replace(/^\s*(?:[\w_]+=\S+\s+)*/, "");
+      return /^\s*codex\b.*\bexec\b/i.test(stripped) || /^\s*gemini\s+(-p|--prompt)\b/i.test(stripped);
+    });
+    if (hasDirectCli) {
       if (/\bTFX_ALLOW_DIRECT_CLI=1\b/.test(cmd)) {
         nudge("[headless-guard] direct CLI mode (inline TFX_ALLOW_DIRECT_CLI=1)");
       }

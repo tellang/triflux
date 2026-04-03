@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 
 // ── 차단 규칙 ──────────────────────────────────────────────
 const BLOCK_RULES = [
-  { pattern: /\brm\s+(-[^\s]*)?-rf?\s+[/~](?!\S*node_modules)/i, reason: "루트/홈 디렉토리 rm -rf 차단" },
+  { pattern: /\brm\s+(-[^\s]*)?-rf?\s+[/~](?!tmp\b)(?!\S*node_modules)/i, reason: "루트/홈 디렉토리 rm -rf 차단" },
   { pattern: /\brm\s+(-[^\s]*)?-rf?\s+\.\s*$/i, reason: "현재 디렉토리 rm -rf . 차단" },
   { pattern: /\bgit\s+push\s+.*--force\s+.*\b(main|master)\b/i, reason: "main/master force push 차단" },
   { pattern: /\bgit\s+push\s+--force\s*$/i, reason: "대상 미지정 force push 차단" },

@@ -263,7 +263,7 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
       if (onPoll) { try { onPoll(currentOutput); } catch { /* 삼킴 */ } }
 
       // 2) completion 토큰 감지
-      const completionMatch = COMPLETION_RE.exec(currentOutput);
+      const completionMatch = completionRe.exec(currentOutput);
       if (completionMatch) {
         return {
           matched: true,

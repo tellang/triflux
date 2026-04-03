@@ -44,6 +44,8 @@ const AIMD_WINDOW_MS = 30 * 60 * 1000;
 const AIMD_INITIAL_BATCH_SIZE = 3;
 const AIMD_MIN_BATCH_SIZE = 1;
 const AIMD_MAX_BATCH_SIZE = 10;
+const HUB_IDLE_TIMEOUT_DEFAULT_MS = 10 * 60 * 1000;
+const HUB_IDLE_SWEEP_DEFAULT_MS = 60 * 1000;
 const STATIC_CONTENT_TYPES = Object.freeze({
   '.html': 'text/html',
   '.css': 'text/css',
@@ -182,6 +184,11 @@ function safeReadJsonFile(filePath) {
   }
 }
 
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function readRecentAimdEvents(now = Date.now()) {
   try {
     if (!existsSync(BATCH_EVENTS_PATH)) return [];
@@ -290,8 +297,25 @@ function servePublicFile(res, path) {
  * @param {string} [opts.dbPath]
  * @param {string} [opts.host]
  * @param {string|number} [opts.sessionId]
+ * @param {(options: { cwd: string }) => object} [opts.createDelegatorWorker]
  */
-export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessionId = process.pid } = {}) {
+export async function startHub({
+  port = 27888,
+  dbPath,
+  host = '127.0.0.1',
+  sessionId = process.pid,
+  createDelegatorWorker = createDelegatorMcpWorker,
+} = {}) {
+  const hubIdleTimeoutMs = parsePositiveInt(process.env.TFX_HUB_IDLE_TIMEOUT_MS, HUB_IDLE_TIMEOUT_DEFAULT_MS);
+  const hubIdleSweepMs = parsePositiveInt(
+    process.env.TFX_HUB_IDLE_SWEEP_MS,
+    Math.min(HUB_IDLE_SWEEP_DEFAULT_MS, hubIdleTimeoutMs),
+  );
+  let lastRequestAt = Date.now();
+  const markRequestActivity = () => {
+    lastRequestAt = Date.now();
+  };
+
   if (!dbPath) {
     // DB를 npm 패키지 밖에 저장하여 npm update 시 EBUSY 방지
     // 기존: PROJECT_ROOT/.tfx/state/state.db (패키지 내부 → 락 충돌)
@@ -326,7 +350,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   const router = createRouter(store);
 
   // Delegator MCP resident service 초기화
-  const delegatorWorker = createDelegatorMcpWorker({ cwd: PROJECT_ROOT });
+  const delegatorWorker = createDelegatorWorker({ cwd: PROJECT_ROOT });
   try {
     await delegatorWorker.start();
   } catch (error) {
@@ -377,6 +401,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   }
 
   const httpServer = createHttpServer(wrapRequestHandler(async (req, res) => {
+    markRequestActivity();
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     const path = getRequestPath(req.url);
@@ -422,6 +447,8 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         pid: process.pid,
         port,
         auth_mode: HUB_TOKEN ? 'token-required' : 'localhost-only',
+        idle_timeout_ms: hubIdleTimeoutMs,
+        last_request_at: new Date(lastRequestAt).toISOString(),
         pipe_path: pipe.path,
         pipe: pipe.getStatus(),
         assign_callback_pipe_path: assignCallbacks.path,
@@ -440,6 +467,8 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         node: process.version,
         sessions: transports.size,
         store: store.type || 'sqlite',
+        idle_timeout_ms: hubIdleTimeoutMs,
+        idle_ms: Math.max(0, Date.now() - lastRequestAt),
       });
     }
 
@@ -886,6 +915,9 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
   return await new Promise((resolveHub, reject) => {
     httpServer.listen(port, host, () => {
       try {
+        let idleTimer = null;
+        let stopPromise = null;
+
         const info = {
           port,
           host,
@@ -900,6 +932,7 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
           assignCallbackPipePath: assignCallbacks.path,
           version,
           storeType: store.type || 'sqlite',
+          idleTimeoutMs: hubIdleTimeoutMs,
         };
 
         writeFileSync(PID_FILE, JSON.stringify({
@@ -928,25 +961,47 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
         hubLog.debug({ publicDir: PUBLIC_DIR, exists: existsSync(PUBLIC_DIR), hasDashboard: existsSync(resolve(PUBLIC_DIR, 'dashboard.html')) }, 'hub.public_dir');
 
         const stopFn = async () => {
-          router.stopSweeper();
-          clearInterval(hitlTimer);
-          clearInterval(sessionTimer);
-          clearInterval(rateLimitTimer);
-          clearInterval(orphanCleanupTimer);
-          for (const [, session] of transports) {
-            try { await session.mcp.close(); } catch {}
-            try { await session.transport.close(); } catch {}
-          }
-          transports.clear();
-          await pipe.stop();
-          await assignCallbacks.stop();
-          await delegatorWorker.stop().catch(() => {});
-          store.close();
-          try { unlinkSync(PID_FILE); } catch {}
-          try { unlinkSync(TOKEN_FILE); } catch {}
-          httpServer.closeAllConnections();
-          await new Promise((resolveClose) => httpServer.close(resolveClose));
+          if (stopPromise) return stopPromise;
+
+          stopPromise = (async () => {
+            router.stopSweeper();
+            clearInterval(hitlTimer);
+            clearInterval(sessionTimer);
+            clearInterval(rateLimitTimer);
+            clearInterval(orphanCleanupTimer);
+            if (idleTimer) {
+              clearInterval(idleTimer);
+            }
+            for (const [, session] of transports) {
+              try { await session.mcp.close(); } catch {}
+              try { await session.transport.close(); } catch {}
+            }
+            transports.clear();
+            await pipe.stop();
+            await assignCallbacks.stop();
+            await delegatorWorker.stop().catch(() => {});
+            store.close();
+            try { unlinkSync(PID_FILE); } catch {}
+            try { unlinkSync(TOKEN_FILE); } catch {}
+            httpServer.closeAllConnections();
+            await new Promise((resolveClose) => httpServer.close(resolveClose));
+          })().catch((error) => {
+            stopPromise = null;
+            throw error;
+          });
+
+          return stopPromise;
         };
+
+        idleTimer = setInterval(() => {
+          const idleMs = Date.now() - lastRequestAt;
+          if (idleMs < hubIdleTimeoutMs) return;
+          hubLog.warn({ idleMs, idleTimeoutMs: hubIdleTimeoutMs, port }, 'hub.idle_timeout_shutdown');
+          void stopFn().catch((error) => {
+            hubLog.error({ err: error, idleMs, idleTimeoutMs: hubIdleTimeoutMs, port }, 'hub.idle_timeout_shutdown_failed');
+          });
+        }, hubIdleSweepMs);
+        idleTimer.unref();
 
         resolveHub({
           ...info,

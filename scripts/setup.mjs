@@ -98,6 +98,11 @@ const SYNC_MAP = [
     label: "hub/workers/claude-worker.mjs",
   },
   {
+    src: join(PLUGIN_ROOT, "hub", "workers", "worker-utils.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "worker-utils.mjs"),
+    label: "hub/workers/worker-utils.mjs",
+  },
+  {
     src: join(PLUGIN_ROOT, "hub", "workers", "factory.mjs"),
     dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "factory.mjs"),
     label: "hub/workers/factory.mjs",
