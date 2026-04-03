@@ -2,7 +2,7 @@
 // triflux CLI — setup, doctor, version
 import { copyFileSync, existsSync, readFileSync, readSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, statSync, openSync, closeSync } from "fs";
 import { join, dirname, basename } from "path";
-import { homedir } from "os";
+import { homedir, tmpdir } from "os";
 import { execSync, execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -2451,26 +2451,94 @@ function cmdUpdate() {
       ok(`버전: v${oldVer} (이미 최신)`);
     }
 
-    // setup 재실행 — 개선된 cmdSetup()이 Gemini 프로필, CLI 확인, 요약 테이블 포함
+    // ── Post-update: 캐시 갱신 (삭제 → 재생성) ──
+    console.log(`\n${CYAN}── 캐시 갱신 ──${RESET}`);
+    {
+      const cacheDir = join(CLAUDE_DIR, "cache");
+      // stale 캐시 삭제
+      for (const name of ["tfx-preflight.json", "mcp-inventory.json"]) {
+        const p = join(cacheDir, name);
+        if (existsSync(p)) { try { unlinkSync(p); } catch {} }
+      }
+      // tmpdir 상태 파일 정리
+      for (const name of ["tfx-multi-state.json"]) {
+        const p = join(tmpdir(), name);
+        if (existsSync(p)) { try { unlinkSync(p); } catch {} }
+      }
+
+      // preflight 캐시 재생성
+      const preflightScript = join(PKG_ROOT, "scripts", "preflight-cache.mjs");
+      if (existsSync(preflightScript)) {
+        try {
+          execSync(`node "${preflightScript}"`, { encoding: "utf8", timeout: 15000, windowsHide: true, stdio: "pipe" });
+          ok("preflight 캐시 재생성 완료");
+        } catch (e) {
+          warn(`preflight 캐시 재생성 실패: ${e.message?.split(/\r?\n/)[0] || "unknown"}`);
+        }
+      }
+
+      // MCP 인벤토리 캐시 재생성
+      const mcpCheckScript = join(PKG_ROOT, "scripts", "mcp-check.mjs");
+      if (existsSync(mcpCheckScript)) {
+        try {
+          execSync(`node "${mcpCheckScript}"`, { encoding: "utf8", timeout: 10000, windowsHide: true, stdio: "pipe" });
+          ok("MCP 인벤토리 캐시 재생성 완료");
+        } catch (e) {
+          warn(`MCP 인벤토리 재생성 실패: ${e.message?.split(/\r?\n/)[0] || "unknown"}`);
+        }
+      }
+    }
+
+    // ── Post-update: 핵심 파일 무결성 검증 ──
+    console.log(`\n${CYAN}── 무결성 검증 ──${RESET}`);
+    {
+      const criticalFiles = [
+        { path: join(PKG_ROOT, "hooks", "hook-orchestrator.mjs"), label: "hook-orchestrator" },
+        { path: join(PKG_ROOT, "hooks", "hook-registry.json"), label: "hook-registry" },
+        { path: join(PKG_ROOT, "hooks", "safety-guard.mjs"), label: "safety-guard" },
+        { path: join(PKG_ROOT, "scripts", "keyword-detector.mjs"), label: "keyword-detector" },
+        { path: join(PKG_ROOT, "scripts", "setup.mjs"), label: "setup" },
+        { path: join(PKG_ROOT, "bin", "triflux.mjs"), label: "triflux CLI" },
+      ];
+      let missing = 0;
+      for (const { path: fp, label } of criticalFiles) {
+        if (!existsSync(fp)) {
+          fail(`누락: ${label} (${formatPathForDisplay(fp)})`);
+          missing++;
+        }
+      }
+      if (missing > 0) {
+        fail(`핵심 파일 ${missing}개 누락 — npm install -g triflux@latest 재설치 필요`);
+      } else {
+        ok(`핵심 파일 ${criticalFiles.length}개 확인 완료`);
+      }
+    }
+
+    // ── Post-update: 설정 동기화 ──
     console.log(`\n${CYAN}── 설정 동기화 ──${RESET}`);
     cmdSetup({ fromUpdate: true, overrideVersion: newVer });
 
-    // hook-orchestrator apply — settings.json 훅 경로를 올바른 절대경로로 갱신
-    try {
+    // ── Post-update: 훅 오케스트레이터 적용 ──
+    {
       const hookMgrPath = join(PKG_ROOT, "hooks", "hook-manager.mjs");
       if (existsSync(hookMgrPath)) {
-        const result = execSync(`node "${hookMgrPath}" apply`, {
-          encoding: "utf8",
-          timeout: 10000,
-          windowsHide: true,
-        }).trim();
-        const parsed = JSON.parse(result);
-        if (parsed?.status === "applied") {
-          ok(`훅 오케스트레이터 적용 (${parsed.events?.length || 0}개 이벤트)`);
+        try {
+          const result = execSync(`node "${hookMgrPath}" apply`, {
+            encoding: "utf8",
+            timeout: 10000,
+            windowsHide: true,
+          }).trim();
+          const parsed = JSON.parse(result);
+          if (parsed?.status === "applied") {
+            ok(`훅 오케스트레이터 적용 (${parsed.events?.length || 0}개 이벤트)`);
+          }
+        } catch (e) {
+          warn(`훅 오케스트레이터 적용 실패: ${e.message?.split(/\r?\n/)[0] || "unknown"}`);
+          warn("tfx hooks apply 로 수동 적용하세요.");
         }
+      } else {
+        fail("hook-manager.mjs 누락 — 훅 오케스트레이터 적용 불가");
       }
-    } catch {
-      // apply 실패 시 무시 — ensureHooksInSettings이 개별 훅을 이미 등록함
     }
 
     if (stoppedHubInfo) {
