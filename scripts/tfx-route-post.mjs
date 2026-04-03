@@ -118,6 +118,83 @@ function filterCodexOutput(rawOutput) {
   return result.join("\n");
 }
 
+function findSessionIdInObject(value) {
+  if (!value || typeof value !== "object") return null;
+
+  const directKeys = ["sessionId", "session_id", "threadId", "thread_id"];
+  for (const key of directKeys) {
+    const candidate = value[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  for (const nested of Object.values(value)) {
+    if (nested && typeof nested === "object") {
+      const found = findSessionIdInObject(nested);
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+function extractCodexSessionId(rawOutput, stderrContent = "") {
+  const sessionPatterns = [
+    /Resume in Codex:\s*codex resume\s+([^\s]+)/i,
+    /Codex session ID:\s*([^\s]+)/i,
+    /session id:\s*([^\s]+)/i,
+  ];
+
+  const combinedText = `${rawOutput || ""}\n${stderrContent || ""}`;
+  for (const pattern of sessionPatterns) {
+    const match = combinedText.match(pattern);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  for (const line of String(rawOutput || "").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      const sessionId = findSessionIdInObject(parsed);
+      if (sessionId) return sessionId;
+    } catch {
+      // ignore non-JSON lines
+    }
+  }
+
+  return null;
+}
+
+function appendCodexResumeHint(output, rawOutput, stderrContent = "") {
+  const normalizedOutput = String(output || "").trim();
+  if (/Codex session ID:/i.test(normalizedOutput) || /codex resume\s+/i.test(normalizedOutput)) {
+    return normalizedOutput;
+  }
+
+  const sessionId = extractCodexSessionId(rawOutput, stderrContent);
+  if (!sessionId) {
+    return normalizedOutput;
+  }
+
+  const hint = `Codex session ID: ${sessionId}\nResume in Codex: codex resume ${sessionId}`;
+  return normalizedOutput ? `${normalizedOutput}\n\n${hint}` : hint;
+}
+
+function prepareCliOutput(rawOutput, cliType, { cleanTui = true, stderrContent = "" } = {}) {
+  let prepared = cliType === "codex" ? filterCodexOutput(rawOutput) : rawOutput;
+  if (cleanTui && process.env.TFX_CLEAN_TUI !== "0") {
+    prepared = cleanTuiArtifacts(prepared, cliType);
+  }
+  if (cliType === "codex") {
+    prepared = appendCodexResumeHint(prepared, rawOutput, stderrContent);
+  }
+  return prepared;
+}
+
 function cleanTuiArtifacts(output, cliType) {
   if (!output) return output;
 
@@ -390,18 +467,18 @@ function main() {
       console.log("status: success");
     }
     console.log("=== OUTPUT ===");
-    let filtered = cliType === "codex" ? filterCodexOutput(rawOutput) : rawOutput;
-    if (a.clean_tui !== "false" && process.env.TFX_CLEAN_TUI !== "0") {
-      filtered = cleanTuiArtifacts(filtered, cliType);
-    }
+    const filtered = prepareCliOutput(rawOutput, cliType, {
+      cleanTui: a.clean_tui !== "false",
+      stderrContent,
+    });
     console.log(truncateOutput(filtered, maxBytes));
   } else if (exitCode === 124) {
     console.log(`status: timeout (${timeout}s 초과)`);
     console.log("=== PARTIAL OUTPUT ===");
-    let partialFiltered = rawOutput;
-    if (a.clean_tui !== "false" && process.env.TFX_CLEAN_TUI !== "0") {
-      partialFiltered = cleanTuiArtifacts(partialFiltered, cliType);
-    }
+    const partialFiltered = prepareCliOutput(rawOutput, cliType, {
+      cleanTui: a.clean_tui !== "false",
+      stderrContent,
+    });
     console.log(truncateOutput(partialFiltered, maxBytes));
     console.log("=== STDERR ===");
     console.log(stderrContent.split("\n").slice(-10).join("\n"));
@@ -411,10 +488,10 @@ function main() {
     console.log(stderrContent.split("\n").slice(-20).join("\n"));
     if (rawOutput) {
       console.log("=== PARTIAL OUTPUT ===");
-      let partialFiltered = rawOutput;
-      if (a.clean_tui !== "false" && process.env.TFX_CLEAN_TUI !== "0") {
-        partialFiltered = cleanTuiArtifacts(partialFiltered, cliType);
-      }
+      const partialFiltered = prepareCliOutput(rawOutput, cliType, {
+        cleanTui: a.clean_tui !== "false",
+        stderrContent,
+      });
       console.log(truncateOutput(partialFiltered, maxBytes));
     }
   }
@@ -425,4 +502,4 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main();
 }
 
-export { cleanTuiArtifacts };
+export { appendCodexResumeHint, cleanTuiArtifacts, extractCodexSessionId };
