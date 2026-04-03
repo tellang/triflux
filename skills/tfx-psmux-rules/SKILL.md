@@ -153,55 +153,41 @@ Get-Content 'C:\path\prompts\prompt.md' -Raw | codex
 
 ---
 
-## RULE 5: WT 세션 정리 — CRITICAL (프리징 치명 버그)
+## RULE 5: WT 패인 정리 — CRITICAL (크래시/프리징 방지)
 
-> **이 규칙을 위반하면 Windows Terminal이 완전히 프리징된다.**
-> 복구 방법은 작업 관리자에서 WindowsTerminal.exe 강제 종료뿐이다.
-> **모든 열린 탭/세션이 유실된다.** 절대 위반하지 마라.
+> **이 규칙을 위반하면 Windows Terminal이 크래시/프리징된다.**
+> 원인: WT 1.24의 ConPTY close 레이스 버그 ([microsoft/terminal#17871](https://github.com/microsoft/terminal/issues/17871)).
+> `kill-session`은 물론 `send-keys "exit"`도 ConPTY 파이프 끊김 → 동일 레이스 가능.
+> **유일한 안전 경로: detach-client로 WT와 ConPTY 연결을 먼저 분리.**
 
-### 프리징 원인
-
-WT 패인이 `psmux attach-session`으로 세션에 연결된 상태에서
-`psmux kill-session`을 직접 호출하면 WT의 PTY 핸들이 dangling 상태가 되어
-**전체 WT 프로세스가 응답 불능**이 된다.
-
-### MUST — 3단계 정리 (순서 반드시 준수)
+### MUST — 3단계 정리 (detach-first, 순서 반드시 준수)
 
 ```bash
-# 1) graceful exit — 각 세션 내 프로세스를 정상 종료
+# 1) WT 클라이언트를 세션에서 detach (ConPTY 연결 안전 분리)
 for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"); do
-  psmux send-keys -t "$s" "exit" Enter 2>/dev/null || true
+  psmux detach-client -t "$s" 2>/dev/null || true
 done
 
-# 2) WT 패인 분리 대기 — exit이 WT에 전파되는 시간 필요
+# 2) WT가 detach된 pane을 정리할 시간 확보
 sleep 2
 
-# 3) 잔여 세션 강제 종료 — exit이 먹히지 않은 경우만
+# 3) detach된 세션을 안전하게 kill (WT와 무관)
 for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"); do
   psmux kill-session -t "$s" 2>/dev/null || true
 done
 ```
 
-### MUST NOT — 아래 패턴은 전부 프리징 유발
+### MUST NOT — 아래 패턴은 전부 크래시/프리징 유발
 
 ```bash
-# WRONG 1 — exit 없이 바로 kill
-psmux kill-session -t "$session"
+# WRONG 1 — detach 없이 바로 kill
+psmux kill-session -t "$s"
 
-# WRONG 2 — sleep 없이 exit 직후 kill
+# WRONG 2 — exit도 ConPTY 파이프 끊김 → 같은 레이스
 psmux send-keys -t "$s" "exit" Enter
-psmux kill-session -t "$s"   # ← WT가 아직 PTY를 잡고 있음
 
-# WRONG 3 — detach 직후 kill
-psmux send-keys -t "$s" "psmux detach" Enter
-psmux kill-session -t "$s"   # ← detach 완료 전에 kill → 프리징
-```
-
-### WT 패인 직접 닫기 (세션이 아닌 WT 쪽에서 정리)
-
-```bash
-# WT 패인을 닫는 것이 세션 kill보다 안전
-wt.exe -w 0 close-pane    # 현재 포커스된 패인 닫기
+# WRONG 3 — WT split pane 직접 닫기 (Ctrl+Shift+W 금지)
+# 대신: pane 안에서 psmux detach (또는 Ctrl+B, D) → pane이 자동으로 닫힘
 ```
 
 ---

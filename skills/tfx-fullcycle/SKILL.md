@@ -17,6 +17,55 @@ argument-hint: "<구현할 기능 전체 설명>"
 
 > 5-Phase 파이프라인: Expansion → Planning → Execution → QA → Validation.
 > OMC autopilot + Superpowers TDD + MetaGPT SOP 영감. 처음부터 끝까지 자율 실행.
+> 실행 전 컨텍스트 grounding, deep-interview 산출물 재사용, phase-state/resume 계약을 포함한다.
+
+## PRE-CONTEXT GATE
+
+Phase 1 시작 전 아래 intake를 먼저 수행한다.
+
+1. task slug를 생성한다.
+2. 최근 관련 컨텍스트/산출물을 탐색한다.
+3. 현재 작업용 스냅샷을 생성한다.
+4. ambiguity가 높으면 `/deep-interview` 또는 기존 인터뷰 산출물 재사용을 우선 고려한다.
+
+**필수 스냅샷 필드**
+- task statement
+- desired outcome
+- known facts / evidence
+- constraints
+- unknowns / open questions
+- likely codebase touchpoints
+
+**권장 저장 경로**
+- `.tfx/fullcycle/{run-id}/context-snapshot.md`
+
+## STATE & ARTIFACT CONTRACT
+
+`tfx-fullcycle`은 phase별로 산출물과 상태를 남긴다.
+
+**기본 아티팩트 디렉토리**
+- `.tfx/fullcycle/{run-id}/`
+
+**최소 산출물**
+- `context-snapshot.md`
+- `expanded-spec.md`
+- `implementation-plan.md`
+- `execution-summary.md`
+- `qa-findings.md`
+- `validation-decision.md`
+- `state.json`
+
+**phase-state 필드**
+- current phase
+- started_at
+- last_successful_phase
+- retry_count
+- failure_reason
+
+**resume 규칙**
+- 재실행 시 전체를 처음부터 다시 돌리지 않는다.
+- `state.json`을 읽고 마지막 미완료 phase부터 resume한다.
+- QA / Validation 재시도는 해당 phase만 다시 실행한다.
 
 ## HARD RULES
 
@@ -48,10 +97,13 @@ argument-hint: "<구현할 기능 전체 설명>"
 
 **Claude가 직접 실행한다.** Agent 호출 없이 Claude 자신이 아키텍트 역할을 수행한다.
 
-1. 사용자 요청에서 구현 범위, 영향 파일, 엣지 케이스, 암묵적 요구사항을 분석한다.
-2. 검증 가능한 acceptance criteria 목록을 도출한다.
-3. 모호한 점이 있으면 AskUserQuestion으로 사용자에게 확인한다.
-4. 출력: `{expanded_requirements}`, `{acceptance_criteria}` (이후 Phase에서 사용)
+1. `.tfx/plans/interview-*.md` 산출물이 있으면 관련 문서를 먼저 탐색한다.
+2. 인터뷰 산출물이 충분히 명확하면 raw prompt에서 다시 시작하지 말고 해당 문서를 Expansion 입력으로 재사용한다.
+3. 인터뷰 산출물이 없거나 부족하면 사용자 요청에서 구현 범위, 영향 파일, 엣지 케이스, 암묵적 요구사항을 분석한다.
+4. 검증 가능한 acceptance criteria 목록을 도출한다.
+5. 모호한 점이 남아 있으면 AskUserQuestion 또는 `/deep-interview`로 명확화한다.
+6. 출력: `{expanded_requirements}`, `{acceptance_criteria}`
+7. 산출물 저장: `.tfx/fullcycle/{run-id}/expanded-spec.md`
 
 ### Phase 2: Planning
 
@@ -83,6 +135,9 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
 - Consensus Score < 70 → 3자 결과를 교차 공유 후 Round 2 재합의
 - Round 2 후에도 < 60 → AskUserQuestion으로 불일치 항목 제시 + 방향 결정 요청
 
+**산출물 저장**
+- `.tfx/fullcycle/{run-id}/implementation-plan.md`
+
 ### Phase 3: Execution
 
 태스크를 라우팅 규칙에 따라 병렬 실행한다. 독립 태스크는 같은 응답에서 동시 호출한다.
@@ -112,6 +167,9 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
 
 각 태스크 완료 시 테스트 통과 여부를 확인하고 다음 태스크로 진행한다.
 
+**산출물 저장**
+- 변경 파일 목록과 태스크별 결과를 `.tfx/fullcycle/{run-id}/execution-summary.md`에 기록한다.
+
 ### Phase 4: QA
 
 **아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
@@ -139,6 +197,13 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --timeout 600")
 ```
 
+**QA 반복 규칙**
+- 동일한 실패 / 동일한 에러가 3회 반복되면 무한 루프를 중단한다.
+- 이 경우 `.tfx/fullcycle/{run-id}/qa-findings.md`에 근본 이슈 보고서를 남기고 사용자 판단을 요청한다.
+
+**산출물 저장**
+- `.tfx/fullcycle/{run-id}/qa-findings.md`
+
 ### Phase 5: Validation
 
 Phase 4의 3자 결과에 Consensus 프로토콜을 적용한다.
@@ -147,6 +212,9 @@ Phase 4의 3자 결과에 Consensus 프로토콜을 적용한다.
 - Score >= 70 + Critical 존재 → Critical만 수정 후 Phase 4 재실행
 - Score < 70 → 미합의 항목 수정 → Phase 4 재실행 (최대 2회)
 - 2회 재실행 후에도 < 70 → AskUserQuestion으로 현황 보고 + 사용자 판단 요청
+
+**산출물 저장**
+- `.tfx/fullcycle/{run-id}/validation-decision.md`
 
 ### Final: 완료 보고
 
@@ -180,6 +248,12 @@ Phase 4의 3자 결과에 Consensus 프로토콜을 적용한다.
 - {항목}: {각 CLI 입장}
 ```
 
+## CLEANUP & CANCEL RULES
+
+- 성공 시 `state.json`을 complete 상태로 기록하고 orphan state가 남지 않도록 정리한다.
+- 취소/비정상 종료 시에도 마지막 phase, failure_reason, 재개 힌트를 남겨 다음 실행에서 resume 가능해야 한다.
+- cleanup은 상태를 무조건 삭제하는 것이 아니라, 성공/취소 여부가 판별되도록 메타데이터를 남긴 뒤 정리한다.
+
 ## ERROR RECOVERY
 
 | 상황 | 대응 |
@@ -188,6 +262,7 @@ Phase 4의 3자 결과에 Consensus 프로토콜을 적용한다.
 | Consensus 2회 연속 실패 | AskUserQuestion으로 미합의 항목 제시 + 사용자 판단 요청 |
 | 특정 Phase 결과 누락 | 해당 Phase만 단독 재실행 |
 | 빌드/테스트 실패 | Codex에 실패 로그 전달하여 수정 지시 |
+| 동일 QA 에러 3회 반복 | 루프 중단 + 근본 이슈 보고서 작성 + 사용자 판단 요청 |
 
 ## TOKEN BUDGET
 

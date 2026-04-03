@@ -431,6 +431,9 @@ wt.exe -w 0 -p triflux --title "swarm-dashboard" bash -c '
     for s in $(psmux list-sessions -F "#{session_name}" 2>/dev/null | grep codex-swarm); do
       echo "  [$s] $(psmux capture-pane -t "$s" -p | tail -1)"
     done
+    echo ""
+    echo "Attach: psmux attach -t <session-name>"
+    echo "Close:  detach first (Ctrl+B,D), then close pane. NEVER close pane directly!"
     sleep 10
   done
 '
@@ -572,6 +575,10 @@ fi
 
 ## 정리
 
+> **중요: WT split pane에 attach된 psmux 세션을 직접 kill하면 WT가 크래시한다.**
+> WT 1.24의 ConPTY close 레이스 버그 ([#17871](https://github.com/microsoft/terminal/issues/17871)).
+> 반드시 detach → WT pane 닫기 → kill 순서를 지켜야 한다.
+
 전체 스웜 종료 시:
 
 > **WT 프리징 방지**: `kill-session` 전에 반드시 각 세션에 `exit`을 보내
@@ -579,20 +586,40 @@ fi
 > 강제 kill하면 WT가 응답 없음 상태로 전환될 수 있다.
 
 ```bash
-# 1) graceful exit — 각 세션에 exit 전송 (WT 패인 자연 종료 유도)
+# 1) detach — 모든 swarm 세션에서 WT detach (ConPTY 안전 해제)
+for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep codex-swarm); do
+  psmux detach-client -t "$s" 2>/dev/null
+done
+
+# 2) WT가 pane을 정리할 시간 확보
+sleep 2
+
+# 3) graceful exit — 각 세션에 exit 전송
 for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep codex-swarm); do
   psmux send-keys -t "$s" "exit" Enter 2>/dev/null || true
 done
 
-# 2) 프로세스 종료 대기 (WT 패인이 닫힐 시간 확보)
+# 4) 프로세스 종료 대기
 sleep 2
 
-# 3) 잔여 세션 강제 종료 (exit이 먹히지 않은 경우)
+# 5) 잔여 세션 강제 종료
 for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep codex-swarm); do
   psmux kill-session -t "$s" 2>/dev/null || true
 done
 
-# 4) worktree 정리 (머지 완료된 것만)
+# 6) worktree 정리 (머지 완료된 것만)
 git worktree prune
 rm -rf .codex-swarm/
+```
+
+### 개별 세션 닫기 (WT pane에서)
+
+WT split pane을 직접 닫지 말 것. 대신:
+```bash
+# pane 안에서:
+psmux detach        # 또는 Ctrl+B, D
+# detach 후 WT pane이 자동으로 닫힘 (안전)
+
+# 세션 자체를 종료하려면 detach 후:
+psmux kill-session -t codex-swarm-{id}
 ```
