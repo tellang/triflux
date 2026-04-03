@@ -568,6 +568,23 @@ function ensureHooksInSettings({
   }
   if (!settings.hooks || typeof settings.hooks !== "object") settings.hooks = {};
 
+  // ── 이중 실행 정리: orchestrator가 있는 이벤트에서 개별 훅 엔트리 제거 ──
+  let dedupRemoved = 0;
+  for (const [event, entries] of Object.entries(settings.hooks)) {
+    if (!Array.isArray(entries)) continue;
+    const hasOrch = entries.some((e) =>
+      Array.isArray(e?.hooks) &&
+      e.hooks.some((h) => typeof h?.command === "string" && h.command.includes("hook-orchestrator")),
+    );
+    if (!hasOrch) continue;
+    const before = entries.length;
+    settings.hooks[event] = entries.filter((e) =>
+      Array.isArray(e?.hooks) &&
+      e.hooks.some((h) => typeof h?.command === "string" && h.command.includes("hook-orchestrator")),
+    );
+    dedupRemoved += before - settings.hooks[event].length;
+  }
+
   const added = [];
   for (const hookSpec of managedHooks) {
     if (!Array.isArray(settings.hooks[hookSpec.event])) settings.hooks[hookSpec.event] = [];
@@ -624,12 +641,36 @@ function ensureHooksInSettings({
     });
   }
 
-  if (added.length === 0) {
+  if (added.length === 0 && dedupRemoved === 0) {
     return {
       ok: true,
       changed: false,
       total: managedHooks.length,
       added: [],
+      dedupRemoved: 0,
+    };
+  }
+
+  // 중복 제거만 발생한 경우에도 저장 필요
+  if (added.length === 0 && dedupRemoved > 0) {
+    try {
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf8");
+    } catch (error) {
+      return {
+        ok: false,
+        changed: false,
+        total: managedHooks.length,
+        added: [],
+        dedupRemoved,
+        reason: `settings_write_failed:${error.message}`,
+      };
+    }
+    return {
+      ok: true,
+      changed: true,
+      total: managedHooks.length,
+      added: [],
+      dedupRemoved,
     };
   }
 
@@ -1132,6 +1173,9 @@ if (settingsChanged) {
 {
   const hookEnsureResult = ensureHooksInSettings();
   if (hookEnsureResult.changed) synced++;
+  if (hookEnsureResult.dedupRemoved > 0) {
+    console.log(`  ✓ 중복 훅 ${hookEnsureResult.dedupRemoved}개 엔트리 자동 제거 (orchestrator 체이닝)`);
+  }
 }
 
 // ── Stale PID 파일 정리 (hub 좀비 방지) ──
