@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, extname, join } from 'node:path';
 import readline from 'node:readline';
+import { IS_WINDOWS } from '../platform.mjs';
 import { toStringList, safeJsonParse, createWorkerError, DEFAULT_TIMEOUT_MS, DEFAULT_KILL_GRACE_MS } from './worker-utils.mjs';
 
 function appendTextFragments(value, parts) {
@@ -71,7 +72,7 @@ function buildGeminiArgs(options) {
 
 function resolveSpawnCommand(command, env = process.env) {
   const raw = String(command ?? '').trim();
-  if (!raw || process.platform !== 'win32') return raw;
+  if (!raw || !IS_WINDOWS) return raw;
 
   const pathExts = (env.PATHEXT || process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
     .split(';')
@@ -133,7 +134,7 @@ function toBashPath(value) {
 function buildSpawnSpec(command, args, env = process.env) {
   const resolvedCommand = resolveSpawnCommand(command, env);
 
-  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolvedCommand)) {
+  if (IS_WINDOWS && /\.(cmd|bat)$/i.test(resolvedCommand)) {
     const commandLine = [resolvedCommand, ...args]
       .map((part) => quoteWindowsCmdArg(part))
       .join(' ');
@@ -145,7 +146,7 @@ function buildSpawnSpec(command, args, env = process.env) {
     };
   }
 
-  if (process.platform === 'win32' && !extname(resolvedCommand) && existsSync(resolvedCommand)) {
+  if (IS_WINDOWS && !extname(resolvedCommand) && existsSync(resolvedCommand)) {
     const bashCommand = env.TFX_BASH_BIN || env.BASH || 'bash';
     const commandLine = [toBashPath(resolvedCommand), ...args]
       .map((part) => quotePosixShellArg(part))

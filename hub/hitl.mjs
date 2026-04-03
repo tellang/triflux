@@ -109,8 +109,7 @@ export function createHitlManager(store, router = null) {
       const expired = pending.filter(hr => hr.deadline_ms <= now);
       if (!expired.length) return 0;
 
-      // 트랜잭션으로 만료 요청을 일괄 처리해 DB 왕복을 줄인다.
-      const processExpired = store.db.transaction(() => {
+      const expireRequests = () => {
         for (const hr of expired) {
           store.updateHumanRequest(hr.request_id, 'timed_out', null);
           if (hr.default_action === 'timeout_continue') {
@@ -127,7 +126,11 @@ export function createHitlManager(store, router = null) {
           }
         }
         return expired.length;
-      });
+      };
+
+      const processExpired = store.db?.transaction
+        ? store.db.transaction(expireRequests)
+        : expireRequests;
 
       return processExpired();
     },

@@ -5,6 +5,7 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { IS_WINDOWS, killProcess } from "../platform.mjs";
 
 const CLEANUP_SCRIPT_DIR = join(tmpdir(), "tfx-process-utils");
 const SCAN_SCRIPT_PATH = join(CLEANUP_SCRIPT_DIR, "scan-processes.ps1");
@@ -58,7 +59,7 @@ function killWithEscalation(orphanPids, procMap) {
   const aliveBeforeKill = new Set(orphanPids.filter(pid => isPidAlive(pid)));
 
   for (const pid of aliveBeforeKill) {
-    try { process.kill(pid, "SIGTERM"); } catch {}
+    killProcess(pid, { signal: "SIGTERM" });
   }
 
   sleepSyncMs(3000);
@@ -73,7 +74,7 @@ function killWithEscalation(orphanPids, procMap) {
         if (snapshot) {
           try {
             const current = execSync(
-              process.platform === "win32"
+              IS_WINDOWS
                 ? `powershell -NoProfile -WindowStyle Hidden -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction SilentlyContinue).ParentProcessId"`
                 : `ps -o ppid= -p ${pid}`,
               { encoding: "utf8", timeout: 3000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
@@ -88,7 +89,7 @@ function killWithEscalation(orphanPids, procMap) {
           }
         }
       }
-      try { process.kill(pid, "SIGKILL"); } catch {}
+      killProcess(pid, { signal: "SIGKILL", force: true });
     }
     if (!isPidAlive(pid)) killed++;
   }
@@ -206,7 +207,7 @@ const KILLABLE_NAMES = new Set([
  * @returns {{ killed: number, remaining: number }}
  */
 export function cleanupOrphanNodeProcesses() {
-  if (process.platform !== "win32") return cleanupOrphansUnix();
+  if (!IS_WINDOWS) return cleanupOrphansUnix();
 
   ensureHelperScripts();
 

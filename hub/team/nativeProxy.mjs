@@ -20,6 +20,7 @@ import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { isPidAlive } from '../lib/process-utils.mjs';
+import { IS_WINDOWS } from '../platform.mjs';
 
 const TEAM_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 const CLAUDE_HOME = join(homedir(), '.claude');
@@ -62,7 +63,7 @@ function atomicWriteJson(path, value) {
     renameSync(tmp, path);
   } catch (e) {
     // Windows NTFS: 대상 파일 존재 시 rename 실패 가능 → 삭제 후 재시도
-    if (process.platform === 'win32' && (e.code === 'EPERM' || e.code === 'EEXIST')) {
+    if (IS_WINDOWS && (e.code === 'EPERM' || e.code === 'EEXIST')) {
       try { unlinkSync(path); } catch {}
       renameSync(tmp, path);
     } else {

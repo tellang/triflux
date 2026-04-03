@@ -11,7 +11,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import { createStore } from './store.mjs';
+import { createStoreAdapter } from './store-adapter.mjs';
 import { createRouter } from './router.mjs';
 import { createHitlManager } from './hitl.mjs';
 import { createPipeServer } from './pipe.mjs';
@@ -22,6 +22,7 @@ import { createDelegatorMcpWorker } from './workers/delegator-mcp.mjs';
 import { cleanupOrphanNodeProcesses } from './lib/process-utils.mjs';
 import { createModuleLogger } from '../scripts/lib/logger.mjs';
 import { wrapRequestHandler } from './middleware/request-logger.mjs';
+import { acquireLock, getVersionHash, releaseLock, writeState } from './state.mjs';
 
 const hubLog = createModuleLogger('hub');
 
@@ -302,6 +303,17 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
 
   mkdirSync(PUBLIC_DIR, { recursive: true });
 
+  const version = getVersionHash();
+  const startedAtMs = Date.now();
+  const startedAt = new Date(startedAtMs).toISOString();
+  await acquireLock();
+  let lockHeld = true;
+  const releaseStartupLock = () => {
+    if (!lockHeld) return;
+    releaseLock();
+    lockHeld = false;
+  };
+
   const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;
   if (HUB_TOKEN) {
     mkdirSync(join(homedir(), '.claude'), { recursive: true });
@@ -310,12 +322,17 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     try { unlinkSync(TOKEN_FILE); } catch {}
   }
 
-  const store = createStore(dbPath);
+  const store = await createStoreAdapter(dbPath);
   const router = createRouter(store);
 
   // Delegator MCP resident service 초기화
   const delegatorWorker = createDelegatorMcpWorker({ cwd: PROJECT_ROOT });
-  await delegatorWorker.start();
+  try {
+    await delegatorWorker.start();
+  } catch (error) {
+    releaseStartupLock();
+    throw error;
+  }
   const delegatorService = new DelegatorService({ worker: delegatorWorker });
 
   const pipe = createPipeServer({ router, store, sessionId, delegatorService });
@@ -415,7 +432,15 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     if (path === '/health' || path === '/healthz') {
       const status = router.getStatus('hub').data;
       const healthy = status?.hub?.state === 'healthy';
-      return writeJson(res, healthy ? 200 : 503, { ok: healthy });
+      return writeJson(res, healthy ? 200 : 503, {
+        ok: healthy,
+        version,
+        platform: process.platform,
+        uptime_s: Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)),
+        node: process.version,
+        sessions: transports.size,
+        store: store.type || 'sqlite',
+      });
     }
 
     if (path === '/api/qos-stats' && req.method === 'GET') {
@@ -840,75 +865,107 @@ export async function startHub({ port = 27888, dbPath, host = '127.0.0.1', sessi
     }
   }
 
-  await pipe.start();
-  await assignCallbacks.start();
+  const cleanupStartupFailure = async () => {
+    try { router.stopSweeper(); } catch {}
+    try { await pipe.stop(); } catch {}
+    try { await assignCallbacks.stop(); } catch {}
+    try { await delegatorWorker.stop(); } catch {}
+    try { store.close(); } catch {}
+    try { unlinkSync(TOKEN_FILE); } catch {}
+    releaseStartupLock();
+  };
 
-  return new Promise((resolveHub, reject) => {
+  try {
+    await pipe.start();
+    await assignCallbacks.start();
+  } catch (error) {
+    await cleanupStartupFailure();
+    throw error;
+  }
+
+  return await new Promise((resolveHub, reject) => {
     httpServer.listen(port, host, () => {
-      const info = {
-        port,
-        host,
-        dbPath,
-        pid: process.pid,
-        hubToken: HUB_TOKEN,
-        authMode: HUB_TOKEN ? 'token-required' : 'localhost-only',
-        url: `http://${host}:${port}/mcp`,
-        pipe_path: pipe.path,
-        pipePath: pipe.path,
-        assign_callback_pipe_path: assignCallbacks.path,
-        assignCallbackPipePath: assignCallbacks.path,
-      };
+      try {
+        const info = {
+          port,
+          host,
+          dbPath,
+          pid: process.pid,
+          hubToken: HUB_TOKEN,
+          authMode: HUB_TOKEN ? 'token-required' : 'localhost-only',
+          url: `http://${host}:${port}/mcp`,
+          pipe_path: pipe.path,
+          pipePath: pipe.path,
+          assign_callback_pipe_path: assignCallbacks.path,
+          assignCallbackPipePath: assignCallbacks.path,
+          version,
+          storeType: store.type || 'sqlite',
+        };
 
-      writeFileSync(PID_FILE, JSON.stringify({
-        pid: process.pid,
-        port,
-        host,
-        auth_mode: HUB_TOKEN ? 'token-required' : 'localhost-only',
-        url: info.url,
-        pipe_path: pipe.path,
-        pipePath: pipe.path,
-        assign_callback_pipe_path: assignCallbacks.path,
-        started: Date.now(),
-      }));
+        writeFileSync(PID_FILE, JSON.stringify({
+          pid: process.pid,
+          port,
+          host,
+          auth_mode: HUB_TOKEN ? 'token-required' : 'localhost-only',
+          url: info.url,
+          pipe_path: pipe.path,
+          pipePath: pipe.path,
+          assign_callback_pipe_path: assignCallbacks.path,
+          started: startedAtMs,
+          version,
+          session_id: sessionId,
+        }));
+        writeState({
+          pid: process.pid,
+          port,
+          version,
+          sessionId,
+          startedAt,
+        });
+        releaseStartupLock();
 
-      hubLog.info({ url: info.url, pipePath: pipe.path, assignCallbackPath: assignCallbacks.path, pid: process.pid }, 'hub.started');
-      hubLog.debug({ publicDir: PUBLIC_DIR, exists: existsSync(PUBLIC_DIR), hasDashboard: existsSync(resolve(PUBLIC_DIR, 'dashboard.html')) }, 'hub.public_dir');
+        hubLog.info({ url: info.url, pipePath: pipe.path, assignCallbackPath: assignCallbacks.path, pid: process.pid, storeType: info.storeType, version }, 'hub.started');
+        hubLog.debug({ publicDir: PUBLIC_DIR, exists: existsSync(PUBLIC_DIR), hasDashboard: existsSync(resolve(PUBLIC_DIR, 'dashboard.html')) }, 'hub.public_dir');
 
-      const stopFn = async () => {
-        router.stopSweeper();
-        clearInterval(hitlTimer);
-        clearInterval(sessionTimer);
-        clearInterval(rateLimitTimer);
-        clearInterval(orphanCleanupTimer);
-        for (const [, session] of transports) {
-          try { await session.mcp.close(); } catch {}
-          try { await session.transport.close(); } catch {}
-        }
-        transports.clear();
-        await pipe.stop();
-        await assignCallbacks.stop();
-        await delegatorWorker.stop().catch(() => {});
-        store.close();
-        try { unlinkSync(PID_FILE); } catch {}
-        try { unlinkSync(TOKEN_FILE); } catch {}
-        httpServer.closeAllConnections();
-        await new Promise((resolveClose) => httpServer.close(resolveClose));
-      };
+        const stopFn = async () => {
+          router.stopSweeper();
+          clearInterval(hitlTimer);
+          clearInterval(sessionTimer);
+          clearInterval(rateLimitTimer);
+          clearInterval(orphanCleanupTimer);
+          for (const [, session] of transports) {
+            try { await session.mcp.close(); } catch {}
+            try { await session.transport.close(); } catch {}
+          }
+          transports.clear();
+          await pipe.stop();
+          await assignCallbacks.stop();
+          await delegatorWorker.stop().catch(() => {});
+          store.close();
+          try { unlinkSync(PID_FILE); } catch {}
+          try { unlinkSync(TOKEN_FILE); } catch {}
+          httpServer.closeAllConnections();
+          await new Promise((resolveClose) => httpServer.close(resolveClose));
+        };
 
-      resolveHub({
-        ...info,
-        httpServer,
-        store,
-        router,
-        hitl,
-        pipe,
-        assignCallbacks,
-        delegatorService,
-        delegatorWorker,
-        stop: stopFn,
-      });
+        resolveHub({
+          ...info,
+          httpServer,
+          store,
+          router,
+          hitl,
+          pipe,
+          assignCallbacks,
+          delegatorService,
+          delegatorWorker,
+          stop: stopFn,
+        });
+      } catch (error) {
+        void cleanupStartupFailure().finally(() => reject(error));
+      }
     });
     httpServer.on('error', (err) => {
+      void cleanupStartupFailure();
       if (err.code === 'EADDRINUSE') {
         hubLog.error({ port, host }, 'hub.port_in_use: port already occupied — check for existing hub or other service');
         reject(new Error(`Hub 포트 ${port}이(가) 이미 사용 중입니다. 기존 Hub 프로세스를 확인하세요. (PID file: ${PID_FILE})`));

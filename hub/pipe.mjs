@@ -3,7 +3,6 @@
 
 import net from 'node:net';
 import { existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   teamInfo,
@@ -18,16 +17,14 @@ import {
   listPipelineStates,
   readPipelineState,
 } from './pipeline/state.mjs';
+import { IS_WINDOWS, pipePath } from './platform.mjs';
 import { safeJsonParse } from './workers/worker-utils.mjs';
 
 const DEFAULT_HEARTBEAT_TTL_MS = 60000;
 
 /** 플랫폼별 pipe 경로 계산 */
 export function getPipePath(sessionId = process.pid) {
-  if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\triflux-${sessionId}`;
-  }
-  return join('/tmp', `triflux-${sessionId}.sock`);
+  return pipePath('triflux', sessionId);
 }
 
 function normalizeTopics(topics) {
@@ -517,7 +514,7 @@ export function createPipeServer({
     async start() {
       if (server) return { path: pipePath };
 
-      if (process.platform !== 'win32' && existsSync(pipePath)) {
+      if (!IS_WINDOWS && existsSync(pipePath)) {
         try { unlinkSync(pipePath); } catch {}
       }
 
@@ -554,7 +551,7 @@ export function createPipeServer({
         await new Promise((resolve) => current.close(resolve));
       }
 
-      if (process.platform !== 'win32' && existsSync(pipePath)) {
+      if (!IS_WINDOWS && existsSync(pipePath)) {
         try { unlinkSync(pipePath); } catch {}
       }
     },

@@ -3,6 +3,7 @@
 
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import { whichCommand } from './platform.mjs';
 
 /** 캐시 엔트리: { category, confidence, ts } */
 const _intentCache = new Map();
@@ -13,13 +14,7 @@ let _codexAvailable = null;
 
 function _isCodexAvailable() {
   if (_codexAvailable !== null) return _codexAvailable;
-  try {
-    const cmd = process.platform === 'win32' ? 'where' : 'which';
-    execFileSync(cmd, ['codex'], { stdio: 'ignore' });
-    _codexAvailable = true;
-  } catch {
-    _codexAvailable = false;
-  }
+  _codexAvailable = Boolean(whichCommand('codex'));
   return _codexAvailable;
 }
 

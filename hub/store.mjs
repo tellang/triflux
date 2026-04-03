@@ -1,13 +1,14 @@
 // hub/store.mjs — SQLite 감사 로그/메타데이터 저장소
 // 실시간 배달 큐는 router/pipe가 담당하고, SQLite는 재생/감사 용도로만 유지한다.
-import Database from 'better-sqlite3';
 import { recalcConfidence } from './reflexion.mjs';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { createRequire } from 'node:module';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 let _rndPool = Buffer.alloc(0), _rndOff = 0;
 
 function pooledRandom(n) {
@@ -104,8 +105,20 @@ function parseReflexionRow(row) {
  * 저장소 생성
  * @param {string} dbPath
  */
-export function createStore(dbPath) {
+export async function importBetterSqlite3() {
+  const mod = await import('better-sqlite3');
+  return mod.default ?? mod;
+}
+
+function resolveBetterSqlite3(options = {}) {
+  if (options.DatabaseCtor) return options.DatabaseCtor;
+  const mod = require('better-sqlite3');
+  return mod.default ?? mod;
+}
+
+export function createStore(dbPath, options = {}) {
   mkdirSync(dirname(dbPath), { recursive: true });
+  const Database = resolveBetterSqlite3(options);
   const db = new Database(dbPath);
 
   db.pragma('journal_mode = WAL');

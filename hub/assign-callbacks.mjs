@@ -2,13 +2,10 @@
 
 import net from 'node:net';
 import { existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { IS_WINDOWS, pipePath } from './platform.mjs';
 
 export function getAssignCallbackPipePath(sessionId = process.pid) {
-  if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\triflux-assign-callback-${sessionId}`;
-  }
-  return join('/tmp', `triflux-assign-callback-${sessionId}.sock`);
+  return pipePath('triflux-assign-callback', sessionId);
 }
 
 function buildAssignCallbackEvent(event = {}, row = null) {
@@ -89,7 +86,7 @@ export function createAssignCallbackServer({ store = null, sessionId = process.p
     },
     async start() {
       if (server) return { path: pipePath };
-      if (process.platform !== 'win32' && existsSync(pipePath)) {
+      if (!IS_WINDOWS && existsSync(pipePath)) {
         try { unlinkSync(pipePath); } catch {}
       }
 
@@ -127,7 +124,7 @@ export function createAssignCallbackServer({ store = null, sessionId = process.p
       }
       await new Promise((resolve) => server.close(resolve));
       server = null;
-      if (process.platform !== 'win32' && existsSync(pipePath)) {
+      if (!IS_WINDOWS && existsSync(pipePath)) {
         try { unlinkSync(pipePath); } catch {}
       }
     },

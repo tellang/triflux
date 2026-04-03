@@ -7,6 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { IS_WINDOWS } from "./platform.mjs";
 
 const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
 const DEFAULT_HUB_PORT = "27888";
@@ -312,7 +313,7 @@ async function shutdown(reason = "shutdown") {
 }
 
 export async function startTray() {
-  if (process.platform !== "win32") {
+  if (!IS_WINDOWS) {
     throw new Error("tray command is only supported on Windows.");
   }
 

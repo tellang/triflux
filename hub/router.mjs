@@ -745,7 +745,7 @@ export function createRouter(store) {
           state: 'healthy',
           uptime_ms: process.uptime() * 1000 | 0,
           realtime_transport: 'named-pipe',
-          audit_store: 'sqlite',
+          audit_store: store.type || 'sqlite',
         };
         if (include_metrics) {
           const depths = router.getQueueDepths();

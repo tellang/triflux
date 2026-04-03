@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
+import { IS_WINDOWS } from "../platform.mjs";
 
 const PSMUX_BIN = (() => {
   if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
@@ -14,7 +15,7 @@ const PSMUX_BIN = (() => {
     return "psmux";
   } catch { /* not in PATH */ }
   // Windows 기본 설치 경로 탐색
-  if (process.platform === "win32") {
+  if (IS_WINDOWS) {
     const candidates = [
       join(process.env.LOCALAPPDATA || "", "psmux", "psmux.exe"),
       join(process.env.APPDATA || "", "npm", "psmux.cmd"),
@@ -28,7 +29,6 @@ const PSMUX_BIN = (() => {
   return "psmux"; // 최종 fallback — 원래대로
 })();
 const GIT_BASH = process.env.GIT_BASH_PATH || "C:\\Program Files\\Git\\bin\\bash.exe";
-const IS_WINDOWS = process.platform === "win32";
 
 /** Windows psmux 세션의 기본 셸을 PowerShell로 강제한다 (pwsh7 우선, ps5 fallback). */
 const PWSH_BIN = (() => {
@@ -881,7 +881,7 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
   const token = randomToken(paneName);
   const safeCommand = wrapCliForBash(commandText);
   // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout이 깨지는 문제 방지 (belt-and-suspenders)
-  const chcpPrefix = process.platform === "win32" ? "chcp 65001 > $null; " : "";
+  const chcpPrefix = IS_WINDOWS ? "chcp 65001 > $null; " : "";
   const wrapped = `${chcpPrefix}try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
 
   sendLiteralToPane(pane.paneId, wrapped, true);
