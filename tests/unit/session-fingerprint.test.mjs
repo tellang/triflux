@@ -6,10 +6,10 @@ import {
   createAdaptiveFingerprintService,
   loadAdaptiveFingerprint,
   saveAdaptiveFingerprint,
-} from '../../hub/adaptive-fingerprint.mjs';
+} from '../../hub/session-fingerprint.mjs';
 import { createMemoryStore } from '../../hub/store-adapter.mjs';
 
-describe('hub/adaptive-fingerprint.mjs', () => {
+describe('hub/session-fingerprint.mjs', () => {
   it('세션 컨텍스트에서 경로/작업유형/시간대 기반 fingerprint를 계산한다', () => {
     const context = {
       scope: 'project-alpha',
