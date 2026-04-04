@@ -532,21 +532,37 @@ export function createMemoryStore() {
       };
     },
 
-    addReflexion({ error_pattern, error_message, context = {}, solution, solution_code = null }) {
+    addReflexion({
+      type = 'reflexion',
+      error_pattern,
+      error_message,
+      context = {},
+      solution,
+      solution_code = null,
+      adaptive_state = {},
+      confidence = 0.5,
+      hit_count = 1,
+      success_count = 0,
+      last_hit_ms,
+      created_at_ms,
+      updated_at_ms,
+    }) {
       const now = Date.now();
       const entry = {
         id: uuidv7(),
+        type,
         error_pattern,
         error_message,
         context: clone(context),
         solution,
         solution_code,
-        confidence: 0.5,
-        hit_count: 1,
-        success_count: 0,
-        last_hit_ms: now,
-        created_at_ms: now,
-        updated_at_ms: now,
+        adaptive_state: clone(adaptive_state),
+        confidence,
+        hit_count,
+        success_count,
+        last_hit_ms: last_hit_ms ?? now,
+        created_at_ms: created_at_ms ?? now,
+        updated_at_ms: updated_at_ms ?? now,
       };
       reflexionEntries.set(entry.id, entry);
       return clone(entry);
@@ -574,6 +590,34 @@ export function createMemoryStore() {
       current.updated_at_ms = now;
       current.confidence = Math.max(0, Math.min(1, recalcConfidence(current)));
       return clone(current);
+    },
+
+    listReflexion(filters = {}) {
+      const { type, minConfidence = Number.NEGATIVE_INFINITY, projectSlug } = filters;
+      return Array.from(reflexionEntries.values())
+        .filter((entry) => !type || entry.type === type)
+        .filter((entry) => entry.confidence >= minConfidence)
+        .filter((entry) => !projectSlug || entry.adaptive_state?.project_slug === projectSlug)
+        .sort((left, right) => right.confidence - left.confidence)
+        .map((entry) => clone(entry));
+    },
+
+    patchReflexion(id, patch = {}) {
+      const current = reflexionEntries.get(id);
+      if (!current) return null;
+      const next = {
+        ...current,
+        ...clone(patch),
+        context: patch.context ? clone(patch.context) : current.context,
+        adaptive_state: patch.adaptive_state ? clone(patch.adaptive_state) : current.adaptive_state,
+        updated_at_ms: patch.updated_at_ms ?? Date.now(),
+      };
+      reflexionEntries.set(id, next);
+      return clone(next);
+    },
+
+    deleteReflexion(id) {
+      return reflexionEntries.delete(id);
     },
 
     pruneReflexion(maxAge_ms = 30 * 24 * 3600 * 1000, minConfidence = 0.2) {

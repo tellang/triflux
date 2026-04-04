@@ -97,8 +97,23 @@ function parseAssignRow(row) {
 
 function parseReflexionRow(row) {
   if (!row) return null;
-  const { context_json, ...rest } = row;
-  return { ...rest, context: parseJson(context_json, {}) };
+  const { context_json, adaptive_state_json, ...rest } = row;
+  return {
+    ...rest,
+    type: rest.type || 'reflexion',
+    context: parseJson(context_json, {}),
+    adaptive_state: parseJson(adaptive_state_json, {}),
+  };
+}
+
+function hasColumn(db, tableName, columnName) {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  return rows.some((row) => row.name === columnName);
+}
+
+function ensureColumn(db, tableName, columnName, definition) {
+  if (hasColumn(db, tableName, columnName)) return;
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
 }
 
 /**
@@ -129,7 +144,7 @@ export function createStore(dbPath, options = {}) {
 
   const schemaSQL = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
   db.exec("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)");
-  const SCHEMA_VERSION = '3';
+  const SCHEMA_VERSION = '4';
   const curVer = (() => {
     try { return db.prepare("SELECT value FROM _meta WHERE key='schema_version'").pluck().get(); }
     catch { return null; }
@@ -145,6 +160,8 @@ export function createStore(dbPath, options = {}) {
     db.exec(schemaSQL);
     db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)").run(SCHEMA_VERSION);
   }
+  ensureColumn(db, 'reflexion_entries', 'type', "TEXT NOT NULL DEFAULT 'reflexion'");
+  ensureColumn(db, 'reflexion_entries', 'adaptive_state_json', "TEXT NOT NULL DEFAULT '{}'");
 
   const S = {
     upsertAgent: db.prepare(`
@@ -253,8 +270,8 @@ export function createStore(dbPath, options = {}) {
 
     // reflexion
     insertReflexion: db.prepare(`
-      INSERT INTO reflexion_entries (id, error_pattern, error_message, context_json, solution, solution_code, confidence, hit_count, success_count, last_hit_ms, created_at_ms, updated_at_ms)
-      VALUES (@id, @error_pattern, @error_message, @context_json, @solution, @solution_code, @confidence, @hit_count, @success_count, @last_hit_ms, @created_at_ms, @updated_at_ms)`),
+      INSERT INTO reflexion_entries (id, type, error_pattern, error_message, context_json, solution, solution_code, adaptive_state_json, confidence, hit_count, success_count, last_hit_ms, created_at_ms, updated_at_ms)
+      VALUES (@id, @type, @error_pattern, @error_message, @context_json, @solution, @solution_code, @adaptive_state_json, @confidence, @hit_count, @success_count, @last_hit_ms, @created_at_ms, @updated_at_ms)`),
     getReflexionById: db.prepare('SELECT * FROM reflexion_entries WHERE id = ?'),
     findReflexionExact: db.prepare('SELECT * FROM reflexion_entries WHERE error_pattern = ? ORDER BY confidence DESC'),
     findReflexionLike: db.prepare("SELECT * FROM reflexion_entries WHERE error_pattern LIKE ? ESCAPE '\\' ORDER BY confidence DESC LIMIT 10"),
@@ -262,6 +279,8 @@ export function createStore(dbPath, options = {}) {
     updateReflexionHitOnly: db.prepare('UPDATE reflexion_entries SET hit_count = hit_count + 1, last_hit_ms = ?, updated_at_ms = ? WHERE id = ?'),
     updateReflexionConfidence: db.prepare('UPDATE reflexion_entries SET confidence = ?, updated_at_ms = ? WHERE id = ?'),
     pruneReflexionEntries: db.prepare('DELETE FROM reflexion_entries WHERE updated_at_ms < ? AND confidence < ?'),
+    listReflexionEntries: db.prepare('SELECT * FROM reflexion_entries ORDER BY confidence DESC, updated_at_ms DESC'),
+    deleteReflexionEntry: db.prepare('DELETE FROM reflexion_entries WHERE id = ?'),
   };
 
   const assignStatusListeners = new Set();
@@ -748,22 +767,38 @@ export function createStore(dbPath, options = {}) {
 
     // --- Reflexion CRUD ---
 
-    addReflexion({ error_pattern, error_message, context = {}, solution, solution_code = null }) {
+    addReflexion({
+      type = 'reflexion',
+      error_pattern,
+      error_message,
+      context = {},
+      solution,
+      solution_code = null,
+      adaptive_state = {},
+      confidence = 0.5,
+      hit_count = 1,
+      success_count = 0,
+      last_hit_ms,
+      created_at_ms,
+      updated_at_ms,
+    }) {
       const now = Date.now();
       const id = uuidv7();
       S.insertReflexion.run({
         id,
+        type,
         error_pattern,
         error_message,
         context_json: JSON.stringify(context),
         solution,
         solution_code,
-        confidence: 0.5,
-        hit_count: 1,
-        success_count: 0,
-        last_hit_ms: now,
-        created_at_ms: now,
-        updated_at_ms: now,
+        adaptive_state_json: JSON.stringify(adaptive_state),
+        confidence,
+        hit_count,
+        success_count,
+        last_hit_ms: last_hit_ms ?? now,
+        created_at_ms: created_at_ms ?? now,
+        updated_at_ms: updated_at_ms ?? now,
       });
       return store.getReflexion(id);
     },
@@ -808,6 +843,48 @@ export function createStore(dbPath, options = {}) {
         S.updateReflexionConfidence.run(Math.max(0, Math.min(1, conf)), now, id);
       }
       return store.getReflexion(id);
+    },
+
+    listReflexion(filters = {}) {
+      const { type, minConfidence = Number.NEGATIVE_INFINITY, projectSlug } = filters;
+      return S.listReflexionEntries.all()
+        .map(parseReflexionRow)
+        .filter((entry) => !type || entry.type === type)
+        .filter((entry) => entry.confidence >= minConfidence)
+        .filter((entry) => !projectSlug || entry.adaptive_state?.project_slug === projectSlug);
+    },
+
+    patchReflexion(id, patch = {}) {
+      const current = store.getReflexion(id);
+      if (!current) return null;
+      const next = {
+        ...current,
+        ...patch,
+        context: patch.context ?? current.context,
+        adaptive_state: patch.adaptive_state ?? current.adaptive_state,
+        updated_at_ms: patch.updated_at_ms ?? Date.now(),
+      };
+      const sets = [
+        ['type', next.type],
+        ['error_pattern', next.error_pattern],
+        ['error_message', next.error_message],
+        ['context_json', JSON.stringify(next.context ?? {})],
+        ['solution', next.solution],
+        ['solution_code', next.solution_code ?? null],
+        ['adaptive_state_json', JSON.stringify(next.adaptive_state ?? {})],
+        ['confidence', next.confidence],
+        ['hit_count', next.hit_count],
+        ['success_count', next.success_count],
+        ['last_hit_ms', next.last_hit_ms],
+        ['updated_at_ms', next.updated_at_ms],
+      ];
+      const sql = `UPDATE reflexion_entries SET ${sets.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`;
+      db.prepare(sql).run(...sets.map(([, value]) => value), id);
+      return store.getReflexion(id);
+    },
+
+    deleteReflexion(id) {
+      return S.deleteReflexionEntry.run(id).changes > 0;
     },
 
     pruneReflexion(maxAge_ms = 30 * 24 * 3600 * 1000, minConfidence = 0.2) {
