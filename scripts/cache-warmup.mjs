@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { readPreflightCache } from "./preflight-cache.mjs";
-import { checkCli, checkHub, detectCodexAuthState } from "./lib/env-probe.mjs";
+import { checkCliSync, checkHub, detectCodexAuthState } from "./lib/env-probe.mjs";
 import { SEARCH_SERVER_ORDER, MCP_SERVER_DOMAIN_TAGS } from "./lib/mcp-server-catalog.mjs";
 
 export const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -207,8 +207,8 @@ export function probeTierEnvironment(options = {}) {
   const execSyncFn = options.execSyncFn || execSync;
   const codexAuth = preflight?.codex_plan ?? detectCodexAuthState({ homeDir });
 
-  const codexCheck = preflight?.codex || checkCli("codex", { execSyncFn });
-  const geminiCheck = preflight?.gemini || checkCli("gemini", { execSyncFn });
+  const codexCheck = preflight?.codex || checkCliSync("codex", { whichCommandFn: options.whichCommandFn });
+  const geminiCheck = preflight?.gemini || checkCliSync("gemini", { whichCommandFn: options.whichCommandFn });
   const hubCheck = preflight?.hub || checkHub({
     pkgRoot: options.pkgRoot,
     restart: options.hubRestart === true,

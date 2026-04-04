@@ -2,6 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 
+import { resetCliProbeCache } from '../../scripts/lib/env-probe.mjs';
+
 import {
   checkSearchEngines,
   extractProjectMeta,
@@ -41,6 +43,7 @@ describe('cache-buildup', () => {
   });
 
   it('probeTierEnvironment는 tier와 에이전트/체크 상태를 일관되게 반환한다', () => {
+    resetCliProbeCache();
     const result = probeTierEnvironment();
 
     assertIsoTimestamp(result.probed_at);
@@ -78,18 +81,20 @@ describe('cache-buildup', () => {
   });
 
   it('stale preflight cache면 codex/gemini를 직접 CLI probe로 판정한다', () => {
+    resetCliProbeCache();
     const commands = [];
-    const isWin = process.platform === 'win32';
-    const codexProbe = isWin ? 'where codex 2>nul' : 'which codex 2>/dev/null';
-    const geminiProbe = isWin ? 'where gemini 2>nul' : 'which gemini 2>/dev/null';
     const result = probeTierEnvironment({
       preflight: {},
+      whichCommandFn: (name) => {
+        commands.push(name);
+        if (name === 'codex') return '/usr/bin/codex';
+        if (name === 'gemini') return null;
+        throw new Error(`missing: ${name}`);
+      },
       execSyncFn: (command) => {
-        commands.push(command);
-        if (command === codexProbe) return '/usr/bin/codex';
         if (command === 'psmux --version') return '';
         if (command.startsWith('curl -sf')) return '{"hub":{"state":"running"},"pid":1}';
-        if (isWin && command.startsWith('where wt')) return '';
+        if (process.platform === 'win32' && command.startsWith('where wt')) return '';
         throw new Error(`missing: ${command}`);
       },
     });
@@ -99,11 +104,12 @@ describe('cache-buildup', () => {
     assert.equal(result.tier, 'full');
     assert.ok(result.available_agents.includes('codex'));
     assert.ok(!result.available_agents.includes('gemini'));
-    assert.ok(commands.includes(codexProbe));
-    assert.ok(commands.includes(geminiProbe));
+    assert.ok(commands.includes('codex'));
+    assert.ok(commands.includes('gemini'));
   });
 
   it('fresh preflight cache가 있으면 codex/gemini 직접 probe 없이 캐시 값을 사용한다', () => {
+    resetCliProbeCache();
     const commands = [];
     const result = probeTierEnvironment({
       preflight: {
@@ -123,8 +129,9 @@ describe('cache-buildup', () => {
     assert.equal(result.checks.gemini, true);
     assert.equal(result.tier, 'standard');
     assert.deepEqual(result.codex_plan, { plan: 'pro' });
-    assert.ok(!commands.includes('codex --version'));
-    assert.ok(!commands.includes('gemini --version'));
+    assert.ok(!commands.includes('codex'));
+    assert.ok(!commands.includes('gemini'));
+    assert.ok(commands.includes('psmux --version'));
   });
 
   it('extractProjectMeta는 현재 프로젝트 메타를 추출한다', () => {

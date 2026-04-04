@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFile, execFileSync, execSync } from 'node:child_process';
 
 export const IS_WINDOWS = process.platform === 'win32';
 export const IS_MAC = process.platform === 'darwin';
@@ -26,6 +26,44 @@ function sanitizePipeSegment(value) {
     .replace(/[<>:"/\\|?*\u0000-\u001f]+/gu, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+function buildWhichCommandSpec(name, options = {}) {
+  const commandName = String(name ?? '').trim();
+  if (!commandName) return null;
+
+  const platform = options.platform || process.platform;
+  return {
+    lookupCommand: platform === 'win32' ? 'where' : 'which',
+    args: [commandName],
+    execOptions: {
+      encoding: 'utf8',
+      timeout: options.timeout ?? 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+      env: options.env || process.env,
+      cwd: options.cwd,
+    },
+  };
+}
+
+function parseWhichCommandOutput(output) {
+  return String(output)
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find(Boolean) || null;
+}
+
+function execFileAsync(command, args, options, execFileFn = execFile) {
+  return new Promise((resolve, reject) => {
+    execFileFn(command, args, options, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
 }
 
 /**
@@ -61,28 +99,29 @@ export function normalizePath(value, options = {}) {
  * @returns {string|null} 명령어의 절대 경로 또는 찾지 못한 경우 null
  */
 export function whichCommand(name, options = {}) {
-  const commandName = String(name ?? '').trim();
-  if (!commandName) return null;
-
-  const platform = options.platform || process.platform;
-  const lookupCommand = platform === 'win32' ? 'where' : 'which';
+  const spec = buildWhichCommandSpec(name, options);
+  if (!spec) return null;
 
   try {
-    const output = execFileSync(lookupCommand, [commandName], {
-      encoding: 'utf8',
-      timeout: options.timeout ?? 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-      env: options.env || process.env,
-      cwd: options.cwd,
-    });
+    const output = execFileSync(spec.lookupCommand, spec.args, spec.execOptions);
+    return parseWhichCommandOutput(output);
+  } catch {
+    return null;
+  }
+}
 
-    const match = String(output)
-      .split(/\r?\n/u)
-      .map((line) => line.trim())
-      .find(Boolean);
+export async function whichCommandAsync(name, options = {}) {
+  const spec = buildWhichCommandSpec(name, options);
+  if (!spec) return null;
 
-    return match || null;
+  try {
+    const output = await execFileAsync(
+      spec.lookupCommand,
+      spec.args,
+      spec.execOptions,
+      options.execFileFn || execFile,
+    );
+    return parseWhichCommandOutput(output);
   } catch {
     return null;
   }

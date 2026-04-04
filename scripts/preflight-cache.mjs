@@ -5,7 +5,7 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { checkCli, checkHub, detectCodexPlan } from "./lib/env-probe.mjs";
+import { checkHub, detectCodexPlan, probeClis } from "./lib/env-probe.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const PKG_ROOT = join(dirname(__filename), "..");
@@ -19,13 +19,14 @@ function checkRoute() {
   return { ok: existsSync(routePath), path: routePath };
 }
 
-function runPreflight() {
+async function runPreflight() {
+  const cliChecks = await probeClis(["codex", "gemini"]);
   const result = {
     timestamp: Date.now(),
     hub: checkHub({ pkgRoot: PKG_ROOT }),
     route: checkRoute(),
-    codex: checkCli("codex"),
-    gemini: checkCli("gemini"),
+    codex: cliChecks.codex || { ok: false },
+    gemini: cliChecks.gemini || { ok: false },
     codex_plan: detectCodexPlan(),
     ok: false,
   };
@@ -52,7 +53,7 @@ export function readPreflightCache() {
 
 // 메인 실행
 if (process.argv[1]?.endsWith("preflight-cache.mjs")) {
-  const result = runPreflight();
+  const result = await runPreflight();
   mkdirSync(CACHE_DIR, { recursive: true });
   writeFileSync(CACHE_FILE, JSON.stringify(result, null, 2));
   // 간결 출력 (hook stdout)

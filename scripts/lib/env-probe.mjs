@@ -4,9 +4,12 @@ import { homedir } from "node:os";
 import { execSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { whichCommand, whichCommandAsync } from "../../hub/platform.mjs";
 
 const DEFAULT_STATUS_URL = "http://127.0.0.1:27888/status";
 const _sab = new Int32Array(new SharedArrayBuffer(4));
+const CLI_PROBE_CACHE = new Map();
+const CLI_PROBE_PROMISES = new Map();
 
 const __filename = fileURLToPath(import.meta.url);
 const DEFAULT_PKG_ROOT = join(dirname(__filename), "..", "..");
@@ -33,20 +36,98 @@ function fetchHubStatus({
   };
 }
 
-export function checkCli(name, { execSyncFn = execSync } = {}) {
-  const command = process.platform === "win32"
-    ? `where ${name} 2>nul`
-    : `which ${name} 2>/dev/null`;
-  try {
-    const path = execSyncFn(command, {
-      encoding: "utf8",
-      timeout: 2000,
-      windowsHide: true,
-    }).trim();
-    return { ok: !!path, path };
-  } catch {
-    return { ok: false };
-  }
+function normalizeCliName(name) {
+  return String(name ?? "").trim() || null;
+}
+
+function toCliResult(path) {
+  return path ? { ok: true, path } : { ok: false };
+}
+
+function cloneCliResult(result) {
+  return result?.ok ? { ...result } : { ok: false };
+}
+
+function readCachedCliResult(name) {
+  const cached = CLI_PROBE_CACHE.get(name);
+  return cached ? cloneCliResult(cached) : null;
+}
+
+function storeCliResult(name, result) {
+  const snapshot = cloneCliResult(result);
+  CLI_PROBE_CACHE.set(name, snapshot);
+  return cloneCliResult(snapshot);
+}
+
+function buildCliProbeOptions(options = {}) {
+  return {
+    timeout: options.timeout ?? 2000,
+    env: options.env,
+    cwd: options.cwd,
+    platform: options.platform,
+  };
+}
+
+function normalizeCliNames(names) {
+  return [...new Set((names || []).map(normalizeCliName).filter(Boolean))];
+}
+
+function mapCliResults(names, results) {
+  return names.reduce((acc, name, index) => ({
+    ...acc,
+    [name]: results[index],
+  }), {});
+}
+
+async function resolveCliProbe(name, options = {}) {
+  const path = await (options.whichCommandAsyncFn || whichCommandAsync)(name, {
+    ...buildCliProbeOptions(options),
+    execFileFn: options.execFileFn,
+  });
+  return toCliResult(path);
+}
+
+export async function checkCli(name, options = {}) {
+  const cliName = normalizeCliName(name);
+  if (!cliName) return { ok: false };
+
+  const cached = readCachedCliResult(cliName);
+  if (cached) return cached;
+
+  const pending = CLI_PROBE_PROMISES.get(cliName);
+  if (pending) return pending.then(cloneCliResult);
+
+  const nextProbe = resolveCliProbe(cliName, options)
+    .then((result) => storeCliResult(cliName, result))
+    .catch(() => storeCliResult(cliName, { ok: false }))
+    .finally(() => {
+      CLI_PROBE_PROMISES.delete(cliName);
+    });
+
+  CLI_PROBE_PROMISES.set(cliName, nextProbe);
+  return nextProbe.then(cloneCliResult);
+}
+
+export function checkCliSync(name, options = {}) {
+  const cliName = normalizeCliName(name);
+  if (!cliName) return { ok: false };
+
+  const cached = readCachedCliResult(cliName);
+  if (cached) return cached;
+
+  const path = (options.whichCommandFn || whichCommand)(cliName, buildCliProbeOptions(options));
+  return storeCliResult(cliName, toCliResult(path));
+}
+
+export async function probeClis(names, options = {}) {
+  const cliNames = normalizeCliNames(names);
+  const results = await Promise.all(cliNames.map((name) => checkCli(name, options)));
+  return mapCliResults(cliNames, results);
+}
+
+export function resetCliProbeCache() {
+  CLI_PROBE_CACHE.clear();
+  CLI_PROBE_PROMISES.clear();
 }
 
 export function detectCodexAuthState({
