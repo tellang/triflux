@@ -38,6 +38,46 @@
       "mcp_route": null
     },
     {
+      "id": "tfx-codex-swarm",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?codex[\\s-]?swarm\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bcodex[\\s-]?swarm\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-codex-swarm",
+      "priority": 1,
+      "supersedes": [
+        "tfx-codex"
+      ],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-remote-spawn",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?remote[\\s-]?spawn\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bremote[\\s-]?spawn\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-remote-spawn",
+      "priority": 1,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
       "id": "tfx-auto-codex",
       "patterns": [
         {
@@ -74,7 +114,7 @@
       "id": "tfx-codex",
       "patterns": [
         {
-          "source": "\\btfx[\\s-]?codex\\b",
+          "source": "\\btfx[\\s-]?codex\\b(?![\\s-]?swarm)",
           "flags": "i"
         }
       ],
@@ -372,6 +412,154 @@
       "exclusive": false,
       "state": null,
       "mcp_route": "codex"
+    },
+    {
+      "id": "gstack-checkpoint",
+      "patterns": [
+        {
+          "source": "(?:어디까지\\s*했|뭐\\s*하고\\s*있었|뭘\\s*해야\\s*하|까먹|기억이\\s*안|이어서\\s*하|중단\\s*지점)",
+          "flags": "i"
+        },
+        {
+          "source": "\\b(?:checkpoint|resume|pick\\s*up|where\\s*was\\s*I)\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "checkpoint",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-office-hours",
+      "patterns": [
+        {
+          "source": "(?:아이디어\\s*(?:있|정리|브레인)|뭘\\s*만들|제품\\s*구상)",
+          "flags": "i"
+        },
+        {
+          "source": "\\boffice[\\s-]?hours\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "office-hours",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-ship",
+      "patterns": [
+        {
+          "source": "(?:배포해|PR\\s*만들|릴리스\\s*해|머지하고\\s*배포)",
+          "flags": "i"
+        },
+        {
+          "source": "\\bship\\b(?!.*tfx)",
+          "flags": "i"
+        }
+      ],
+      "skill": "ship",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-investigate",
+      "patterns": [
+        {
+          "source": "(?:왜\\s*(?:안\\s*돼|터져|에러)|원인\\s*(?:찾아|분석)|root\\s*cause)",
+          "flags": "i"
+        },
+        {
+          "source": "\\binvestigate\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "investigate",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-cso",
+      "patterns": [
+        {
+          "source": "(?:보안\\s*(?:감사|점검|리뷰|스캔)|\\bcso\\b|\\bOWASP\\b|\\bSTRIDE\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": "cso",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-qa-browser",
+      "patterns": [
+        {
+          "source": "(?:사이트|브라우저|웹)\\s*(?:QA|테스트|확인|점검)",
+          "flags": "i"
+        },
+        {
+          "source": "(?:클릭|접속).*(?:테스트|확인)",
+          "flags": "i"
+        }
+      ],
+      "skill": "qa",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-retro",
+      "patterns": [
+        {
+          "source": "(?:회고|이번\\s*주\\s*뭐\\s*했|주간\\s*리뷰|뭘\\s*했지)",
+          "flags": "i"
+        },
+        {
+          "source": "\\bretro\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "retro",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-autoplan",
+      "patterns": [
+        {
+          "source": "(?:자동\\s*리뷰|리뷰\\s*파이프라인|전체\\s*리뷰)",
+          "flags": "i"
+        },
+        {
+          "source": "\\bautoplan\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "autoplan",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
     },
     {
       "id": "suppress-omc-team",

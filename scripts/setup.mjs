@@ -991,6 +991,34 @@ if (codexProfilesAdded > 0) {
   synced++;
 }
 
+// ── CLAUDE.md TFX 섹션 관리 (마이그레이션 + 업데이트) ──
+
+try {
+  const { migrate, readSection, diagnose, getPackageVersion: getTfxVersion } = await import("./lib/claudemd-manager.mjs");
+  const globalClaudeMd = join(CLAUDE_DIR, "CLAUDE.md");
+  const projectClaudeMd = join(PLUGIN_ROOT, "CLAUDE.md");
+
+  for (const mdPath of [globalClaudeMd, projectClaudeMd]) {
+    if (!existsSync(mdPath)) continue;
+    const section = readSection(mdPath);
+    const ver = getTfxVersion();
+
+    if (!section.found || section.version !== ver) {
+      const result = migrate(mdPath, { version: ver });
+      const label = mdPath === globalClaudeMd ? "global" : "project";
+      if (result.action === "migrated") {
+        console.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (${label}): 레거시 → TFX v${ver} 마이그레이션`);
+        synced++;
+      } else if (result.action !== "already_managed") {
+        console.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (${label}): TFX v${ver} ${result.action}`);
+        synced++;
+      }
+    }
+  }
+} catch (error) {
+  console.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 관리 실패: ${error.message}`);
+}
+
 // ── MCP 인벤토리 백그라운드 갱신 ──
 
 const mcpCheck = join(PLUGIN_ROOT, "scripts", "mcp-check.mjs");
