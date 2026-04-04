@@ -23,6 +23,64 @@ function clampDuration(value, fallback = 600000, min = 1000, max = 86400000) {
   return Math.max(min, Math.min(Math.trunc(num), max));
 }
 
+function clampConfidence(value, fallback = 0.5) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(num, 1));
+}
+
+function clampHitCount(value, fallback = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(1, Math.trunc(num));
+}
+
+function clampHitIncrement(value, fallback = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.trunc(num));
+}
+
+function coerceTimestamp(value, fallback = Date.now()) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.trunc(num);
+}
+
+function clampRetentionMs(value, fallback = 30 * 24 * 3600 * 1000) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(1, Math.trunc(num));
+}
+
+function normalizeAdaptiveRuleIdentity(projectSlug, pattern) {
+  const normalizedProject = String(projectSlug || '');
+  const normalizedPattern = String(pattern || '');
+  if (!normalizedProject || !normalizedPattern) return null;
+  return { project_slug: normalizedProject, pattern: normalizedPattern };
+}
+
+function buildAdaptiveRuleRow({
+  project_slug,
+  pattern,
+  confidence = 0.5,
+  hit_count = 1,
+  last_seen_ms,
+  created_ms,
+} = {}) {
+  const identity = normalizeAdaptiveRuleIdentity(project_slug, pattern);
+  if (!identity) return null;
+  const createdAt = coerceTimestamp(created_ms);
+  const lastSeenAt = Math.max(createdAt, coerceTimestamp(last_seen_ms, createdAt));
+  return {
+    ...identity,
+    confidence: clampConfidence(confidence, 0.5),
+    hit_count: clampHitCount(hit_count, 1),
+    last_seen_ms: lastSeenAt,
+    created_ms: createdAt,
+  };
+}
+
 function buildAssignCallbackEvent(row) {
   return {
     job_id: row.job_id,
@@ -45,7 +103,12 @@ export function createMemoryStore() {
   const deadLetters = new Map();
   const assignJobs = new Map();
   const reflexionEntries = new Map();
+  const adaptiveRules = new Map();
   const assignStatusListeners = new Set();
+
+  function getAdaptiveRuleKey(projectSlug, pattern) {
+    return `${projectSlug}\u0000${pattern}`;
+  }
 
   function notifyAssignStatusListeners(row) {
     const event = buildAssignCallbackEvent(row);
@@ -381,7 +444,7 @@ export function createMemoryStore() {
         ttl_ms: clampDuration(patch.ttl_ms ?? current.ttl_ms, current.ttl_ms || nextTimeout),
         timeout_ms: nextTimeout,
         deadline_ms: (() => {
-          if (Object.prototype.hasOwnProperty.call(patch, 'deadline_ms')) {
+          if (Object.hasOwn(patch, 'deadline_ms')) {
             return patch.deadline_ms == null ? null : Math.trunc(Number(patch.deadline_ms));
           }
           if (isTerminal) return null;
@@ -390,23 +453,23 @@ export function createMemoryStore() {
         })(),
         trace_id: patch.trace_id ?? current.trace_id,
         correlation_id: patch.correlation_id ?? current.correlation_id,
-        last_message_id: Object.prototype.hasOwnProperty.call(patch, 'last_message_id')
+        last_message_id: Object.hasOwn(patch, 'last_message_id')
           ? patch.last_message_id
           : current.last_message_id,
-        result: Object.prototype.hasOwnProperty.call(patch, 'result')
+        result: Object.hasOwn(patch, 'result')
           ? (patch.result == null ? null : clone(patch.result))
           : current.result,
-        error: Object.prototype.hasOwnProperty.call(patch, 'error')
+        error: Object.hasOwn(patch, 'error')
           ? (patch.error == null ? null : clone(patch.error))
           : current.error,
         updated_at_ms: now,
-        started_at_ms: Object.prototype.hasOwnProperty.call(patch, 'started_at_ms')
+        started_at_ms: Object.hasOwn(patch, 'started_at_ms')
           ? patch.started_at_ms
           : (nextStatus === 'running' ? (current.started_at_ms || now) : current.started_at_ms),
-        completed_at_ms: Object.prototype.hasOwnProperty.call(patch, 'completed_at_ms')
+        completed_at_ms: Object.hasOwn(patch, 'completed_at_ms')
           ? patch.completed_at_ms
           : (isTerminal ? (current.completed_at_ms || now) : current.completed_at_ms),
-        last_retry_at_ms: Object.prototype.hasOwnProperty.call(patch, 'last_retry_at_ms')
+        last_retry_at_ms: Object.hasOwn(patch, 'last_retry_at_ms')
           ? patch.last_retry_at_ms
           : current.last_retry_at_ms,
       };
@@ -459,7 +522,7 @@ export function createMemoryStore() {
         started_at_ms: null,
         last_retry_at_ms: Date.now(),
         result: patch.result ?? null,
-        error: Object.prototype.hasOwnProperty.call(patch, 'error') ? patch.error : current.error,
+        error: Object.hasOwn(patch, 'error') ? patch.error : current.error,
         last_message_id: null,
       });
     },
@@ -587,6 +650,136 @@ export function createMemoryStore() {
       }
       return removed;
     },
+
+    addAdaptiveRule(rule) {
+      const next = buildAdaptiveRuleRow(rule);
+      if (!next) return null;
+      const key = getAdaptiveRuleKey(next.project_slug, next.pattern);
+      const current = adaptiveRules.get(key);
+      adaptiveRules.set(key, {
+        ...next,
+        created_ms: current ? Math.min(current.created_ms, next.created_ms) : next.created_ms,
+      });
+      return clone(adaptiveRules.get(key));
+    },
+
+    findAdaptiveRule(projectSlug, pattern) {
+      const identity = normalizeAdaptiveRuleIdentity(projectSlug, pattern);
+      if (!identity) return null;
+      return clone(adaptiveRules.get(getAdaptiveRuleKey(identity.project_slug, identity.pattern)) || null);
+    },
+
+    updateRuleConfidence(projectSlug, pattern, confidence, options = {}) {
+      const current = store.findAdaptiveRule(projectSlug, pattern);
+      if (!current) return null;
+      const next = {
+        ...current,
+        confidence: clampConfidence(confidence, current.confidence),
+        hit_count: current.hit_count + clampHitIncrement(options.hit_count_increment, 1),
+        last_seen_ms: Math.max(
+          current.last_seen_ms,
+          coerceTimestamp(options.last_seen_ms, Date.now()),
+        ),
+      };
+      adaptiveRules.set(getAdaptiveRuleKey(current.project_slug, current.pattern), next);
+      return clone(next);
+    },
+
+    pruneStaleRules(maxAge_ms = 30 * 24 * 3600 * 1000, minConfidence = 0.2) {
+      const cutoff = Date.now() - clampRetentionMs(maxAge_ms, 30 * 24 * 3600 * 1000);
+      let removed = 0;
+      for (const [key, rule] of Array.from(adaptiveRules.entries())) {
+        if (rule.last_seen_ms < cutoff && rule.confidence < minConfidence) {
+          adaptiveRules.delete(key);
+          removed += 1;
+        }
+      }
+      return removed;
+    },
+  };
+
+  return store;
+}
+
+function ensureAdaptiveRulesSchema(db) {
+  const schemaKey = 'adaptive_rules_schema_version';
+  const currentVersion = db.prepare('SELECT value FROM _meta WHERE key = ?').pluck().get(schemaKey);
+  if (currentVersion === '1') return;
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS adaptive_rules (
+      project_slug TEXT NOT NULL,
+      pattern TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0.5,
+      hit_count INTEGER NOT NULL DEFAULT 1,
+      last_seen_ms INTEGER NOT NULL,
+      created_ms INTEGER NOT NULL,
+      PRIMARY KEY (project_slug, pattern)
+    );
+    CREATE INDEX IF NOT EXISTS idx_adaptive_rules_last_seen
+      ON adaptive_rules(project_slug, last_seen_ms DESC);
+    CREATE INDEX IF NOT EXISTS idx_adaptive_rules_confidence
+      ON adaptive_rules(project_slug, confidence DESC);
+  `);
+  db.prepare('INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)').run(schemaKey, '1');
+}
+
+function attachAdaptiveRuleStore(store) {
+  if (store.type !== 'sqlite' || !store.db) return store;
+  ensureAdaptiveRulesSchema(store.db);
+  const statements = {
+    upsertRule: store.db.prepare(`
+      INSERT INTO adaptive_rules (
+        project_slug, pattern, confidence, hit_count, last_seen_ms, created_ms
+      ) VALUES (
+        @project_slug, @pattern, @confidence, @hit_count, @last_seen_ms, @created_ms
+      )
+      ON CONFLICT(project_slug, pattern) DO UPDATE SET
+        confidence = excluded.confidence,
+        hit_count = excluded.hit_count,
+        last_seen_ms = excluded.last_seen_ms,
+        created_ms = MIN(adaptive_rules.created_ms, excluded.created_ms)`),
+    getRule: store.db.prepare('SELECT * FROM adaptive_rules WHERE project_slug = ? AND pattern = ?'),
+    updateRule: store.db.prepare(`
+      UPDATE adaptive_rules SET
+        confidence = ?,
+        hit_count = hit_count + ?,
+        last_seen_ms = ?
+      WHERE project_slug = ? AND pattern = ?`),
+    pruneRules: store.db.prepare(`
+      DELETE FROM adaptive_rules
+      WHERE last_seen_ms < ? AND confidence < ?`),
+  };
+
+  store.addAdaptiveRule = function addAdaptiveRule(rule) {
+    const next = buildAdaptiveRuleRow(rule);
+    if (!next) return null;
+    statements.upsertRule.run(next);
+    return store.findAdaptiveRule(next.project_slug, next.pattern);
+  };
+
+  store.findAdaptiveRule = function findAdaptiveRule(projectSlug, pattern) {
+    const identity = normalizeAdaptiveRuleIdentity(projectSlug, pattern);
+    if (!identity) return null;
+    return clone(statements.getRule.get(identity.project_slug, identity.pattern) || null);
+  };
+
+  store.updateRuleConfidence = function updateRuleConfidence(projectSlug, pattern, confidence, options = {}) {
+    const current = store.findAdaptiveRule(projectSlug, pattern);
+    if (!current) return null;
+    const updatedAt = Math.max(current.last_seen_ms, coerceTimestamp(options.last_seen_ms, Date.now()));
+    statements.updateRule.run(
+      clampConfidence(confidence, current.confidence),
+      clampHitIncrement(options.hit_count_increment, 1),
+      updatedAt,
+      current.project_slug,
+      current.pattern,
+    );
+    return store.findAdaptiveRule(current.project_slug, current.pattern);
+  };
+
+  store.pruneStaleRules = function pruneStaleRules(maxAge_ms = 30 * 24 * 3600 * 1000, minConfidence = 0.2) {
+    const cutoff = Date.now() - clampRetentionMs(maxAge_ms, 30 * 24 * 3600 * 1000);
+    return statements.pruneRules.run(cutoff, minConfidence).changes;
   };
 
   return store;
@@ -606,7 +799,7 @@ export async function createStoreAdapter(dbPath, options = {}) {
     const DatabaseCtor = await loadDatabase();
     const store = createStore(dbPath, { DatabaseCtor });
     store.type = 'sqlite';
-    return store;
+    return attachAdaptiveRuleStore(store);
   } catch (error) {
     console.warn(`[store] SQLite unavailable (${error.message}), using in-memory fallback`);
     return createMemoryStore();
