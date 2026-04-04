@@ -22,6 +22,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync, unl
 import { join, dirname, resolve } from 'path';
 import { homedir, tmpdir } from 'os';
 
+import { buildExecArgs } from '../hub/codex-adapter.mjs';
+
 const VERSION = '1.2';
 const CLAUDE_DIR = join(homedir(), '.claude');
 const MCP_CACHE = join(CLAUDE_DIR, 'cache', 'mcp-inventory.json');
@@ -183,7 +185,7 @@ function runWithCli(cliType, prompt, timeout, runMode = 'fg') {
 
   let cmd;
   if (cliType === 'codex') {
-    cmd = `codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "${metaPrompt}"`;
+    cmd = buildExecArgs({ prompt: metaPrompt });
   } else if (cliType === 'gemini') {
     cmd = `gemini -m gemini-3-flash-preview -y --allowed-mcp-server-names notion,notion-guest --prompt "${metaPrompt}"`;
   } else {

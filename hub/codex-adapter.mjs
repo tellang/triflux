@@ -150,6 +150,24 @@ export function buildLaunchScript(opts = {}) {
   return path;
 }
 
+export function buildExecArgs(opts = {}) {
+  const prompt = typeof opts.prompt === 'string' ? opts.prompt : '';
+  const command = buildExecCommand(prompt, opts.resultFile || null, {
+    profile: opts.profile,
+    skipGitRepoCheck: true,
+    sandboxBypass: true,
+  });
+
+  if (!prompt) return command.replace(/\s+""$/u, '');
+
+  const quotedPrompt = JSON.stringify(prompt);
+  if (/^\(Get-Content\b[\s\S]*\)$/u.test(prompt) && command.endsWith(quotedPrompt)) {
+    return `${command.slice(0, -quotedPrompt.length)}${prompt}`;
+  }
+
+  return command;
+}
+
 async function terminateChild(pid) {
   if (!pid) return;
   killProcess(pid, { signal: 'SIGTERM', tree: true, timeout: 5000 });

@@ -3,6 +3,8 @@
 // v7.2.2
 import { createRequire } from "node:module";
 
+import { buildExecArgs } from "../codex-adapter.mjs";
+
 const _require = createRequire(import.meta.url);
 
 // ── 백엔드 클래스 ──────────────────────────────────────────────────────────
@@ -18,11 +20,7 @@ export class CodexBackend {
    * @returns {string} PowerShell 명령 (cls 제외)
    */
   buildArgs(prompt, resultFile, opts = {}) {
-    const modelFlag = opts.model ? ` --model '${opts.model}'` : "";
-    const cwdFlag = opts.cwd ? ` --cwd '${opts.cwd}'` : "";
-    // Codex 0.117.0+: config.toml에 sandbox 설정이 있으면 CLI 플래그 중복 불가
-    // --dangerously-bypass-approvals-and-sandbox 대신 exec 서브커맨드만 사용 (config가 sandbox 관리)
-    return `codex exec ${prompt} --output-last-message '${resultFile}' --color never --skip-git-repo-check${modelFlag}${cwdFlag}`;
+    return buildExecArgs({ prompt, resultFile, ...opts });
   }
 
   env() { return {}; }

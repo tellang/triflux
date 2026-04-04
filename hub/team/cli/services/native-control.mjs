@@ -4,14 +4,13 @@ import { spawn } from "node:child_process";
 
 import { buildLeadPrompt, buildPrompt } from "../../orchestrator.mjs";
 import { HUB_PID_DIR, PKG_ROOT } from "./state-store.mjs";
-import { FEATURES } from "../../codex-compat.mjs";
+
+import { buildExecArgs } from "../../../codex-adapter.mjs";
 
 export function buildNativeCliCommand(cli) {
   switch (cli) {
     case "codex":
-      return FEATURES.execSubcommand
-        ? "codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
-        : "codex --dangerously-bypass-approvals-and-sandbox";
+      return buildExecArgs({});
     case "gemini":
       return "gemini";
     case "claude":

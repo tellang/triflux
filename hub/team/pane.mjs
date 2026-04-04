@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
 import { psmuxExec } from "./psmux.mjs";
-import { FEATURES } from "./codex-compat.mjs";
+
+import { buildExecArgs } from "../codex-adapter.mjs";
 
 function quoteArg(value) {
   return `"${String(value).replace(/"/g, '\\"')}"`;
@@ -63,11 +64,9 @@ export function buildCliCommand(cli, options = {}) {
 
   switch (cli) {
     case "codex":
-      // trust 모드에서는 exec 서브커맨드(0.117.0+) 또는 구버전 플래그 사용
+      // trust 모드에서는 exec 서브커맨드 기반 명령을 사용
       if (trustMode) {
-        return FEATURES.execSubcommand
-          ? "codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
-          : "codex --dangerously-bypass-approvals-and-sandbox --no-alt-screen";
+        return buildExecArgs({});
       }
       return "codex";
     case "gemini":
