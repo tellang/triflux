@@ -1,87 +1,22 @@
-import { spawn } from 'node:child_process';
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runPreflight } from './codex-preflight.mjs';
 import { withRetry } from './workers/worker-utils.mjs';
-import { killProcess, IS_WINDOWS } from './platform.mjs';
 import { buildExecCommand } from './team/codex-compat.mjs';
+import {
+  createCircuitBreaker,
+  createResult,
+  appendWarnings,
+  normalizePathForShell,
+  shellQuote,
+  runProcess,
+} from './cli-adapter-base.mjs';
 
-const circuitBreaker = {
-  failures: [],
-  maxFailures: 3,
-  windowMs: 10 * 60_000,
-  openedAt: 0,
-  trialInFlight: false,
-};
+const breaker = createCircuitBreaker();
 
-function sleep(ms) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-}
-
-function pruneFailures(now = Date.now()) {
-  circuitBreaker.failures = circuitBreaker.failures.filter((stamp) => now - stamp < circuitBreaker.windowMs);
-}
-
-function resetCircuit() {
-  circuitBreaker.failures = [];
-  circuitBreaker.openedAt = 0;
-  circuitBreaker.trialInFlight = false;
-}
-
-function recordFailure(isHalfOpen, now = Date.now()) {
-  pruneFailures(now);
-  circuitBreaker.failures = [...circuitBreaker.failures, now];
-  circuitBreaker.trialInFlight = false;
-  if (isHalfOpen || circuitBreaker.failures.length >= circuitBreaker.maxFailures) {
-    circuitBreaker.openedAt = now;
-  }
-}
-
-export function getCircuitState(now = Date.now()) {
-  pruneFailures(now);
-  const withinWindow = circuitBreaker.openedAt && now - circuitBreaker.openedAt < circuitBreaker.windowMs;
-  const state = withinWindow ? 'open' : (circuitBreaker.openedAt ? 'half-open' : 'closed');
-  return {
-    state,
-    failures: [...circuitBreaker.failures],
-    maxFailures: circuitBreaker.maxFailures,
-    windowMs: circuitBreaker.windowMs,
-    openedAt: circuitBreaker.openedAt || null,
-    trialInFlight: circuitBreaker.trialInFlight,
-  };
-}
-
-function normalizePathForShell(value) {
-  return IS_WINDOWS ? String(value).replace(/\\/g, '/') : String(value);
-}
-
-function shellQuote(value) {
-  return JSON.stringify(String(value));
-}
-
-function createResult(ok, extra = {}) {
-  return {
-    ok,
-    output: '',
-    stderr: '',
-    exitCode: null,
-    duration: 0,
-    retried: false,
-    fellBack: false,
-    failureMode: ok ? null : 'crash',
-    ...extra,
-  };
-}
-
-function appendWarnings(stderr, warnings = []) {
-  const text = warnings.map((item) => `[preflight] ${item}`).join('\n');
-  return [stderr, text].filter(Boolean).join('\n');
-}
+// ── Codex-specific stall inference ──────────────────────────────
 
 function inferStallMode(stdout, stderr) {
   const text = `${stdout}\n${stderr}`.toLowerCase();
@@ -89,6 +24,8 @@ function inferStallMode(stdout, stderr) {
   if (/\bmcp\b|context7|playwright|tavily|exa|brave|sequential|server/u.test(text)) return 'mcp_stall';
   return 'timeout';
 }
+
+// ── Codex command building ──────────────────────────────────────
 
 function commandWithOverrides(command, prompt, codexPath, overrides = []) {
   let next = codexPath ? command.replace(/^codex\b/u, shellQuote(codexPath)) : command;
@@ -122,6 +59,8 @@ function buildAttempts(opts, preflight) {
   ];
 }
 
+// ── Launch script ───────────────────────────────────────────────
+
 function createLaunchScriptText(opts) {
   const parts = ['codex'];
   if (opts.profile) parts.push('--profile', shellQuote(opts.profile));
@@ -150,6 +89,8 @@ export function buildLaunchScript(opts = {}) {
   return path;
 }
 
+// ── Exec args builder ───────────────────────────────────────────
+
 export function buildExecArgs(opts = {}) {
   const prompt = typeof opts.prompt === 'string' ? opts.prompt : '';
   const command = buildExecCommand(prompt, opts.resultFile || null, {
@@ -168,67 +109,7 @@ export function buildExecArgs(opts = {}) {
   return command;
 }
 
-async function terminateChild(pid) {
-  if (!pid) return;
-  killProcess(pid, { signal: 'SIGTERM', tree: true, timeout: 5000 });
-  await sleep(5000);
-  killProcess(pid, { signal: 'SIGKILL', tree: true, force: true, timeout: 5000 });
-}
-
-async function runAttempt(command, workdir, timeout, resultFile) {
-  const startedAt = Date.now();
-  let stdout = '';
-  let stderr = '';
-  let exitCode = null;
-  let failureMode = null;
-  let child;
-
-  try {
-    child = spawn(command, { cwd: workdir, shell: true, windowsHide: true });
-  } catch (error) {
-    return createResult(false, { stderr: String(error?.message || error), duration: Date.now() - startedAt });
-  }
-
-  let lastBytes = 0;
-  let lastChange = Date.now();
-  const touch = () => { lastChange = Date.now(); };
-  child.stdout?.on('data', (chunk) => { stdout += String(chunk); touch(); });
-  child.stderr?.on('data', (chunk) => { stderr += String(chunk); touch(); });
-  child.on('error', (error) => { stderr += String(error?.message || error); failureMode ||= 'crash'; });
-
-  const stopFor = async (mode) => {
-    if (failureMode) return;
-    failureMode = mode;
-    await terminateChild(child.pid);
-  };
-
-  const timeoutTimer = setTimeout(() => { void stopFor('timeout'); }, timeout);
-  const stallTimer = setInterval(() => {
-    const size = Buffer.byteLength(stdout) + Buffer.byteLength(stderr);
-    if (size !== lastBytes) {
-      lastBytes = size;
-      return;
-    }
-    if (Date.now() - lastChange >= 30_000) void stopFor(inferStallMode(stdout, stderr));
-  }, 10_000);
-  timeoutTimer.unref?.();
-  stallTimer.unref?.();
-
-  await new Promise((resolve) => child.on('close', (code) => { exitCode = code; resolve(); }));
-  clearTimeout(timeoutTimer);
-  clearInterval(stallTimer);
-
-  const fileOutput = existsSync(resultFile) ? readFileSync(resultFile, 'utf8') : '';
-  const output = fileOutput || stdout;
-  const ok = failureMode == null && exitCode === 0;
-  return createResult(ok, {
-    output,
-    stderr,
-    exitCode,
-    duration: Date.now() - startedAt,
-    failureMode: ok ? null : (failureMode || 'crash'),
-  });
-}
+// ── Codex execution ─────────────────────────────────────────────
 
 async function runCodex(prompt, workdir, preflight, attempt) {
   const dir = join(tmpdir(), 'triflux-codex-exec');
@@ -244,22 +125,25 @@ async function runCodex(prompt, workdir, preflight, attempt) {
     preflight.codexPath,
     buildOverrides(attempt.requested, attempt.excluded),
   );
-  return runAttempt(command, workdir, attempt.timeout, resultFile);
+  return runProcess(command, workdir, attempt.timeout, { resultFile, inferStallMode });
+}
+
+// ── Public API ──────────────────────────────────────────────────
+
+export function getCircuitState(now) {
+  return breaker.getState(now);
 }
 
 export async function execute(opts = {}) {
-  const circuit = getCircuitState();
-  if (circuit.state === 'open' || (circuit.state === 'half-open' && circuitBreaker.trialInFlight)) {
+  const entry = breaker.canExecute();
+  if (!entry.allowed) {
     return createResult(false, { fellBack: true, failureMode: 'circuit_open' });
   }
 
-  const wasHalfOpen = circuit.state === 'half-open';
-  circuitBreaker.trialInFlight = wasHalfOpen;
-
   const preflight = await runPreflight({ mcpServers: opts.mcpServers, subcommand: 'exec' });
   if (!preflight.ok) {
-    circuitBreaker.trialInFlight = false;
-    recordFailure(wasHalfOpen);
+    breaker.clearTrial();
+    breaker.recordFailure(entry.halfOpen);
     return createResult(false, {
       stderr: appendWarnings('', preflight.warnings),
       fellBack: opts.fallbackToClaude !== false,
@@ -293,11 +177,11 @@ export async function execute(opts = {}) {
   }
 
   if (lastResult.ok) {
-    resetCircuit();
+    breaker.reset();
     return lastResult;
   }
 
-  recordFailure(wasHalfOpen);
+  breaker.recordFailure(entry.halfOpen);
   return {
     ...lastResult,
     retried: attempts.length > 1,
