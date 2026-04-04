@@ -23,6 +23,7 @@ import { cleanupOrphanNodeProcesses } from './lib/process-utils.mjs';
 import { createModuleLogger } from '../scripts/lib/logger.mjs';
 import { wrapRequestHandler } from './middleware/request-logger.mjs';
 import { acquireLock, getVersionHash, releaseLock, writeState } from './state.mjs';
+import { createAdaptiveFingerprintService } from './session-fingerprint.mjs';
 
 const hubLog = createModuleLogger('hub');
 
@@ -348,6 +349,7 @@ export async function startHub({
 
   const store = await createStoreAdapter(dbPath);
   const router = createRouter(store);
+  const fingerprintService = createAdaptiveFingerprintService({ store });
 
   // Delegator MCP resident service 초기화
   const delegatorWorker = createDelegatorWorker({ cwd: PROJECT_ROOT });
@@ -469,6 +471,7 @@ export async function startHub({
         store: store.type || 'sqlite',
         idle_timeout_ms: hubIdleTimeoutMs,
         idle_ms: Math.max(0, Date.now() - lastRequestAt),
+        fingerprint: fingerprintService.getHealth(),
       });
     }
 
