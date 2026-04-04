@@ -801,6 +801,79 @@ function atomicWriteSync(filePath, data) {
   }
 }
 
+function sanitizeSessionName(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_\-]/g, "") || "tfx-session";
+}
+
+function sanitizeWindowTitle(value, fallback = "triflux") {
+  const text = String(value || "").replace(/[\r\n]+/g, " ").trim();
+  return text || fallback;
+}
+
+function buildWtAttachPaneArgs(sessionName, title) {
+  const safeSession = sanitizeSessionName(sessionName);
+  return [
+    "--profile", "triflux",
+    "--title", sanitizeWindowTitle(title, `▲ ${safeSession}`),
+    "--", "psmux", "attach-session", "-t", safeSession,
+  ];
+}
+
+function joinWtCommands(commands) {
+  return commands.flatMap((command, index) => (index === 0 ? command : [";", ...command]));
+}
+
+function buildAttachTitle(sessionName, suffix = "") {
+  const base = `▲ ${sanitizeSessionName(sessionName)}`;
+  return suffix ? `${base} ${suffix}` : base;
+}
+
+export function buildDashboardAttachArgs(sessionName, dashboardLayout = "single", workerCount = 2, anchor = "window") {
+  const safeSession = sanitizeSessionName(sessionName);
+  const resolvedLayout = resolveDashboardLayout(dashboardLayout, workerCount);
+  const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
+  const prefix = anchor === "tab" ? ["-w", "0", "nt"] : ["-w", "new"];
+  return [
+    ...prefix,
+    "--profile", "triflux",
+    "--title", buildAttachTitle(safeSession, "dashboard"),
+    "--", "node", viewerPath,
+    "--session", safeSession,
+    "--result-dir", RESULT_DIR,
+    "--layout", resolvedLayout,
+  ];
+}
+
+export function buildWtAttachArgs(sessionName, workerCount = 1) {
+  const safeSession = sanitizeSessionName(sessionName);
+  const count = Number.isFinite(workerCount) ? Math.max(1, Math.trunc(workerCount)) : 1;
+  if (count >= 5) return buildDashboardAttachArgs(safeSession, "single", count);
+
+  const pane1 = ["nt", ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession))];
+  if (count === 1) return ["-w", "0", ...pane1];
+
+  const pane2 = ["sp", count >= 3 ? "-V" : "-H", ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "2"))];
+  if (count === 2) return ["-w", "0", ...joinWtCommands([pane1, pane2])];
+
+  const pane3 = ["sp", "-H", ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "3"))];
+  if (count === 3) return ["-w", "0", ...joinWtCommands([pane1, pane2, ["move-focus", "left"], pane3])];
+
+  const pane4 = ["sp", "-H", ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "4"))];
+  return [
+    "-w", "0",
+    ...joinWtCommands([pane1, pane2, ["move-focus", "left"], pane3, ["move-focus", "right"], pane4]),
+  ];
+}
+
+function spawnDetachedWt(args) {
+  const child = spawn("wt.exe", args, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false,
+  });
+  child.unref();
+}
+
 export function ensureWtProfile(workerCount = 2) {
   const settingsPaths = [
     join(process.env.LOCALAPPDATA || "", "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"),
@@ -848,29 +921,23 @@ export function ensureWtProfile(workerCount = 2) {
 // ─── v6.0.0: Lead-Direct Interactive Mode ───
 
 /**
- * Windows Terminal에서 psmux 세션을 split-pane으로 자동 attach한다.
- * WT_SESSION 안에서만 동작하며, 새 탭(nt)은 생성하지 않는다.
+ * Windows Terminal에서 psmux 세션을 자동 attach한다.
+ * 1명은 새 탭 단일 attach, 2/3/4명은 새 탭 내 split-pane, 5명 이상은 dashboard로 전환한다.
  *
  * @param {string} sessionName — attach할 psmux 세션 이름
- * @param {object} [opts] — 예약 (현재 미사용)
+ * @param {object} [opts]
  * @param {number} [workerCount=2]
  * @returns {boolean} 성공 여부
  */
 export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
-  // 보안: sessionName 셸 주입 방지 — 영숫자, 하이픈, 언더스코어만 허용
-  const safeName = String(sessionName).replace(/[^a-zA-Z0-9_\-]/g, "");
-  sessionName = safeName || "tfx-session";
   if (!process.env.WT_SESSION) return false;
   try { execSync("where wt.exe", { stdio: "ignore" }); } catch { return false; }
   ensureWtProfile(workerCount);
   try {
-    const child = spawn("wt.exe", [
-      "-w", "0", "sp", "-H", "-s", "0.50",
-      "--profile", "triflux", "--title", "triflux",
-      "--", "psmux", "attach", "-t", sessionName,
-    ], { detached: true, stdio: "ignore" });
-    child.unref();
-    try { spawn("wt.exe", ["-w", "0", "mf", "up"], { detached: true, stdio: "ignore" }).unref(); } catch { /* 무시 */ }
+    const args = workerCount >= 5
+      ? buildDashboardAttachArgs(sessionName, opts.dashboardLayout, workerCount, opts.dashboardAnchor)
+      : buildWtAttachArgs(sessionName, workerCount);
+    spawnDetachedWt(args);
     return true;
   } catch { return false; }
 }
@@ -880,27 +947,17 @@ export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
  * @param {string} sessionName
  * @param {number} workerCount
  * @param {string} [dashboardLayout='single']
- * @param {number} [dashboardSize=0.50] — 대시보드 분할 비율 (0.2~0.8)
+ * @param {number} [dashboardSize=0.50] — 하위 호환용 인자 (현재는 anchor 기반 attach만 사용)
+ * @param {string} [dashboardAnchor='window'] — window | tab
  * @returns {boolean}
  */
-export function attachDashboardTab(sessionName, workerCount = 2, dashboardLayout = "single", dashboardSize = 0.40) {
+export function attachDashboardTab(sessionName, workerCount = 2, dashboardLayout = "single", dashboardSize = 0.40, dashboardAnchor = "window") {
   try { execSync("where wt.exe", { stdio: "ignore" }); } catch { return false; }
   ensureWtProfile(workerCount);
-  const resolvedDashboardLayout = resolveDashboardLayout(dashboardLayout, workerCount);
-
-  // v7.1.3: 대시보드만 스플릿 (psmux attach 대신 tui-viewer 직접 실행)
-  // raw CLI 출력은 사용자에게 불필요 — 대시보드 로그만 표시
-  const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
-  const sizeStr = String(Math.round(dashboardSize * 100) / 100);
   try {
-    const child = spawn("wt.exe", [
-      "-w", "0", "sp", "-H", "-s", sizeStr,
-      "--profile", "triflux",
-      "--title", `▲ ${sessionName}`,
-      "--", "node", viewerPath, "--session", sessionName, "--result-dir", RESULT_DIR, "--layout", resolvedDashboardLayout,
-    ], { detached: true, stdio: "ignore" });
-    child.unref();
-    try { spawn("wt.exe", ["-w", "0", "mf", "up"], { detached: true, stdio: "ignore" }).unref(); } catch {}
+    const args = buildDashboardAttachArgs(sessionName, dashboardLayout, workerCount, dashboardAnchor);
+    void dashboardSize;
+    spawnDetachedWt(args);
     return true;
   } catch { return false; }
 }
@@ -958,6 +1015,7 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
     autoAttach = false,
     dashboard = false,
     dashboardSize = 0.40,
+    dashboardAnchor = "window",
     signal,
     maxIdleSec = 0,
     ...runOpts
@@ -979,9 +1037,10 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
           assignments.length,
           event.dashboardLayout || resolveDashboardLayout(headlessOpts.dashboardLayout, assignments.length),
           dashboardSize,
+          dashboardAnchor,
         );
       } else {
-        autoAttachTerminal(sessionName, {}, assignments.length);
+        autoAttachTerminal(sessionName, { dashboardLayout: headlessOpts.dashboardLayout, dashboardAnchor }, assignments.length);
       }
     }
     if (userOnProgress) userOnProgress(event);
