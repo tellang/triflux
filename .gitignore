@@ -18,7 +18,9 @@ docs/*
 !docs/demo.tape
 !docs/demo-light.tape
 !docs/design/
+!docs/prd/
 !docs/research/
+!docs/codex-conventions.md
 
 # 리서치 (대외비 — 클론 레포, 분석 보고서, 설계문서)
 research/
@@ -73,4 +75,10 @@ docs/SESSION-*
 .venv/
 
 # 개인 호스트 설정 (커밋 금지)
-skills/remote-spawn/references/hosts.json
+**/hosts.json
+references/hosts.json
+.test-lock/
+.tmp-home-setup-check/
+*.codex-npm-test*.log
+docs/research/*reverse*
+docs/research/*competitor*

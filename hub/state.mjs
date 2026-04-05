@@ -5,7 +5,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
-const STATE_FILE_NAME = 'hub-state.json';
+const PID_FILE_NAME = 'hub.pid';
+const LEGACY_STATE_FILE_NAME = 'hub-state.json';
 const LOCK_FILE_NAME = 'hub-start.lock';
 
 let heldLockPath = null;
@@ -17,7 +18,11 @@ function getStateDir(options = {}) {
 }
 
 function getStatePath(options = {}) {
-  return join(getStateDir(options), STATE_FILE_NAME);
+  return options.statePath || join(getStateDir(options), PID_FILE_NAME);
+}
+
+function getLegacyStatePath(options = {}) {
+  return join(getStateDir(options), LEGACY_STATE_FILE_NAME);
 }
 
 function getLockPath(options = {}) {
@@ -59,6 +64,21 @@ function safeReplaceFile(tempPath, targetPath) {
   }
 }
 
+function writeJsonFile(targetPath, payload) {
+  const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  safeReplaceFile(tempPath, targetPath);
+}
+
+function readJsonFile(filePath) {
+  try {
+    if (!existsSync(filePath)) return null;
+    return parseJson(readFileSync(filePath, 'utf8'), null);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 허브의 현재 상태(PID, 포트, 버전 등)를 파일에 기록합니다.
  * 원자적(atomic) 쓰기를 위해 임시 파일을 생성한 후 교체하는 방식을 사용합니다.
@@ -73,15 +93,14 @@ function safeReplaceFile(tempPath, targetPath) {
  * @param {string} [options.stateDir] - 상태 파일이 저장될 디렉토리
  * @returns {object} 기록된 상태 데이터
  */
-export function writeState({ pid, port, version, sessionId, startedAt }, options = {}) {
+export function writeState({ pid, port, version, sessionId, startedAt, ...rest }, options = {}) {
   const stateDir = getStateDir(options);
   const statePath = getStatePath(options);
-  const tempPath = join(stateDir, `${STATE_FILE_NAME}.${process.pid}.${Date.now()}.tmp`);
-  const payload = { pid, port, version, sessionId, startedAt };
+  const payload = { pid, port, version, sessionId, startedAt, ...rest };
 
   mkdirSync(stateDir, { recursive: true });
-  writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-  safeReplaceFile(tempPath, statePath);
+  writeJsonFile(statePath, payload);
+  try { unlinkSync(getLegacyStatePath(options)); } catch {}
   return payload;
 }
 
@@ -93,13 +112,7 @@ export function writeState({ pid, port, version, sessionId, startedAt }, options
  * @returns {object|null} 읽어온 상태 데이터 또는 실패 시 null
  */
 export function readState(options = {}) {
-  const statePath = getStatePath(options);
-  try {
-    if (!existsSync(statePath)) return null;
-    return parseJson(readFileSync(statePath, 'utf8'), null);
-  } catch {
-    return null;
-  }
+  return readJsonFile(getStatePath(options)) ?? readJsonFile(getLegacyStatePath(options));
 }
 
 /**

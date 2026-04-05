@@ -22,7 +22,21 @@ const BLOCK_RULES = [
   { pattern: /\bformat\s+[a-z]:/i, reason: "디스크 포맷 차단" },
   { pattern: /\b(del|rmdir)\s+\/[sq]\b/i, reason: "Windows 재귀 삭제 차단" },
   { pattern: /\bgit\s+clean\s+.*-fd/i, reason: "git clean -fd 차단 — 추적되지 않은 파일 소실 위험" },
+  { pattern: /\bpsmux\s+kill-session\b/i, reason: "raw psmux kill-session 차단 — WT ConPTY 프리징 위험. 안전 경로: node hub/team/psmux.mjs kill --session <name>", skipIfGit: true },
+  { pattern: /\bpsmux\s+kill-server\b/i, reason: "psmux kill-server 차단 — 모든 세션이 즉시 종료됩니다. node hub/team/psmux.mjs kill-swarm 사용", skipIfGit: true },
 ];
+
+const WT_DIRECT_PATTERNS = [
+  /\bwt\.exe\b/i,
+  /\bwt\s+new-tab\b/i,
+  /\bwt\s+split-pane\b/i,
+  /\bwt\s+-w\b/i,
+  /\bStart-Process\s+wt/i,
+  /\bStart-Process\s+['"]?wt\.exe/i,
+];
+
+const WT_DIRECT_BLOCK_MESSAGE =
+  "[safety-guard] wt.exe 직접 호출 차단됨. → hub/team/wt-manager.mjs의 createTab() / splitPane() / applySplitLayout()을 사용하세요.";
 
 // ── 경고 규칙 ──────────────────────────────────────────────
 const WARN_RULES = [
@@ -44,6 +58,45 @@ function readStdin() {
   }
 }
 
+function shouldSkipSegment(segment) {
+  return !segment || segment.startsWith("#") || /^\s*(echo|printf|grep|git\s+commit)\b/i.test(segment);
+}
+
+function hasSegmentInvocation(cmd, patterns) {
+  if (!patterns.some((pattern) => pattern.test(cmd))) return false;
+
+  const lines = cmd.split(/\n/);
+  let heredocDelimiter = null;
+  return lines.some((line) => {
+    if (heredocDelimiter !== null) {
+      if (line.trim() === heredocDelimiter) heredocDelimiter = null;
+      return false;
+    }
+
+    const heredocMatch = line.match(/<<['"]?(\w+)['"]?/);
+    if (heredocMatch) {
+      heredocDelimiter = heredocMatch[1];
+      return false;
+    }
+
+    const segments = line.split(/\s*(?:&&|;|\|\|)\s*/);
+    return segments.some((seg) => {
+      const trimmed = seg.trim();
+      if (shouldSkipSegment(trimmed)) return false;
+      return patterns.some((pattern) => pattern.test(trimmed));
+    });
+  });
+}
+
+function blockCommand(message, command) {
+  process.stderr.write(
+    `${message}\n` +
+      `명령어: ${command.slice(0, 120)}${command.length > 120 ? "..." : ""}\n` +
+      "이 명령은 실행할 수 없습니다. 안전한 대안을 사용하세요."
+  );
+  process.exit(2);
+}
+
 function main() {
   const raw = readStdin();
   if (!raw.trim()) process.exit(0);
@@ -60,15 +113,25 @@ function main() {
   const command = (input.tool_input?.command || "").trim();
   if (!command) process.exit(0);
 
+  // psmux 명령이 실제 CLI 호출인지 판별 (오탐 방지)
+  // git commit 메시지, echo, grep, cat, heredoc 안의 텍스트는 무시
+  function isPsmuxInvocation(cmd) {
+    return hasSegmentInvocation(cmd, [/\bpsmux\s+kill-(session|server)\b/i]);
+  }
+
+  function isWtDirectInvocation(cmd) {
+    return hasSegmentInvocation(cmd, WT_DIRECT_PATTERNS);
+  }
+
+  if (isWtDirectInvocation(command)) {
+    blockCommand(WT_DIRECT_BLOCK_MESSAGE, command);
+  }
+
   // 1. BLOCK 체크 — exit 2로 차단
   for (const rule of BLOCK_RULES) {
+    if (rule.skipIfGit && !isPsmuxInvocation(command)) continue;
     if (rule.pattern.test(command)) {
-      process.stderr.write(
-        `[triflux safety-guard] BLOCKED: ${rule.reason}\n` +
-          `명령어: ${command.slice(0, 120)}${command.length > 120 ? "..." : ""}\n` +
-          `이 명령은 실행할 수 없습니다. 안전한 대안을 사용하세요.`
-      );
-      process.exit(2);
+      blockCommand(`[triflux safety-guard] BLOCKED: ${rule.reason}`, command);
     }
   }
 

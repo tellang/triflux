@@ -1,0 +1,8 @@
+{
+  "name": "tfx-psmux-rules",
+  "description": "psmux + Codex CLI 명령 생성 시 반드시 적용되는 강제 규칙. PowerShell/bash 구분, 경로 형식, 인자 이스케이프, WT 정리, 프로파일 지정 방식 등을 검증한다. 이 스킬은 psmux, send-keys, codex exec, codex spawn, 세션 생성, worktree 실행, launch 스크립트 생성, WT attach, 패널 스플릿, 스웜 정리 시 자동 트리거된다. 다른 스킬(tfx-codex-swarm, tfx-multi, tfx-remote-spawn 등)이 psmux 명령을 생성할 때 이 스킬의 규칙을 위반하면 생성을 중단하고 수정해야 한다.",
+  "triggers": [
+    "tfx-psmux-rules",
+    "psmux-rules"
+  ]
+}

@@ -2,12 +2,7 @@
 // register/status/publish/ask/poll/handoff/HITL + team proxy
 // 모든 도구 응답: { ok: boolean, error?: { code, message }, data?: ... }
 
-import {
-  teamInfo,
-  teamTaskList,
-  teamTaskUpdate,
-  teamSendMessage,
-} from './team/nativeProxy.mjs';
+import { getTeamBridge } from './team-bridge.mjs';
 import {
   ensurePipelineTable,
   createPipeline,
@@ -17,6 +12,89 @@ import {
   initPipelineState,
   listPipelineStates,
 } from './pipeline/state.mjs';
+
+const TEAM_BRIDGE_NOT_REGISTERED = 'bridge_not_registered';
+
+function getTeamBridgeMethod(methodName) {
+  const method = getTeamBridge()?.[methodName];
+  return typeof method === 'function' ? method : null;
+}
+
+function teamInfoFallback(args = {}) {
+  return {
+    ok: true,
+    data: {
+      team: {
+        team_name: args.team_name ?? null,
+        description: null,
+      },
+      lead: {
+        lead_agent_id: null,
+        lead_session_id: null,
+      },
+      ...(args.include_members !== false ? { members: [] } : {}),
+      ...(args.include_paths !== false
+        ? {
+            paths: {
+              config_path: null,
+              tasks_dir: null,
+              inboxes_dir: null,
+              tasks_dir_resolution: TEAM_BRIDGE_NOT_REGISTERED,
+            },
+          }
+        : {}),
+      bridge_installed: false,
+      skipped: true,
+    },
+  };
+}
+
+function teamTaskListFallback() {
+  return {
+    ok: true,
+    data: {
+      tasks: [],
+      count: 0,
+      parse_warnings: 0,
+      tasks_dir: null,
+      tasks_dir_resolution: TEAM_BRIDGE_NOT_REGISTERED,
+      bridge_installed: false,
+      skipped: true,
+    },
+  };
+}
+
+function teamTaskUpdateFallback(args = {}) {
+  return {
+    ok: true,
+    data: {
+      claimed: false,
+      updated: false,
+      task_before: null,
+      task_after: null,
+      task_file: null,
+      task_id: args.task_id ?? null,
+      mtime_ms: null,
+      bridge_installed: false,
+      skipped: true,
+    },
+  };
+}
+
+function teamSendMessageFallback(args = {}) {
+  return {
+    ok: true,
+    data: {
+      message_id: null,
+      recipient: args.to ?? 'team-lead',
+      inbox_file: null,
+      queued_at: null,
+      unread_count: 0,
+      bridge_installed: false,
+      skipped: true,
+    },
+  };
+}
 
 /**
  * MCP 도구 목록 생성
@@ -333,7 +411,8 @@ export function createTools(store, router, hitl, pipe = null) {
         },
       },
       handler: wrap('TEAM_INFO_FAILED', (args) => {
-        return teamInfo(args);
+        const teamInfo = getTeamBridgeMethod('teamInfo');
+        return teamInfo ? teamInfo(args) : teamInfoFallback(args);
       }),
     },
 
@@ -357,7 +436,8 @@ export function createTools(store, router, hitl, pipe = null) {
         },
       },
       handler: wrap('TEAM_TASK_LIST_FAILED', (args) => {
-        return teamTaskList(args);
+        const teamTaskList = getTeamBridgeMethod('teamTaskList');
+        return teamTaskList ? teamTaskList(args) : teamTaskListFallback(args);
       }),
     },
 
@@ -385,7 +465,8 @@ export function createTools(store, router, hitl, pipe = null) {
         },
       },
       handler: wrap('TEAM_TASK_UPDATE_FAILED', (args) => {
-        return teamTaskUpdate(args);
+        const teamTaskUpdate = getTeamBridgeMethod('teamTaskUpdate');
+        return teamTaskUpdate ? teamTaskUpdate(args) : teamTaskUpdateFallback(args);
       }),
     },
 
@@ -406,7 +487,8 @@ export function createTools(store, router, hitl, pipe = null) {
         },
       },
       handler: wrap('TEAM_SEND_MESSAGE_FAILED', (args) => {
-        return teamSendMessage(args);
+        const teamSendMessage = getTeamBridgeMethod('teamSendMessage');
+        return teamSendMessage ? teamSendMessage(args) : teamSendMessageFallback(args);
       }),
     },
 

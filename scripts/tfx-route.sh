@@ -1231,6 +1231,18 @@ emit_claude_native_metadata() {
   echo "--- Claude Task($model) 에이전트로 위임하세요 ---"
 }
 
+# _find_fork_pids PID — cross-platform child PID lookup
+# pgrep -P (Linux/macOS) → Git Bash ps fallback (PPID/PGID column)
+_find_fork_pids() {
+  local parent="$1"
+  if command -v pgrep &>/dev/null; then
+    pgrep -P "$parent" 2>/dev/null || true
+    return
+  fi
+  # Git Bash: PID PPID PGID WINPID ... — match by PPID or PGID
+  ps 2>/dev/null | awk -v p="$parent" 'NR>1 && ($2==p || ($3==p && $1!=p)) {print $1}' | sort -un | tr '\n' ' '
+}
+
 # heartbeat_monitor PID [INTERVAL] [STALL_THRESHOLD]
 # - PID: 감시할 워커 프로세스 PID
 # - INTERVAL: heartbeat 출력 간격 (초, 기본 10)
@@ -1242,9 +1254,28 @@ heartbeat_monitor() {
   local interval="${2:-${TFX_HEARTBEAT_INTERVAL:-10}}"
   local stall_threshold="${3:-${TFX_STALL_THRESHOLD:-60}}"
   local last_size=0 stall_count=0
+  local pid_gone=false
+  local post_exit_checks=0
+  local max_post_exit_checks=6  # fallback drain: 6 intervals (fork PID 미발견 시)
+  local last_known_forks=""     # direct fork PID tracking
 
-  while kill -0 "$pid" 2>/dev/null; do
+  while true; do
     sleep "$interval"
+
+    # Check if the tracked PID is still alive; snapshot forks while alive
+    if ! kill -0 "$pid" 2>/dev/null; then
+      if [[ "$pid_gone" == "false" ]]; then
+        pid_gone=true
+        local _imm; _imm=$(_find_fork_pids "$pid") || true
+        [[ -n "$_imm" ]] && last_known_forks="$_imm"
+        [[ -n "$last_known_forks" ]] && \
+          echo "[tfx-heartbeat] pid=$pid exited, tracking forks: $last_known_forks" >&2
+      fi
+    else
+      local _cf; _cf=$(_find_fork_pids "$pid") || true
+      [[ -n "$_cf" ]] && last_known_forks="$_cf"
+    fi
+
     local current_size=0
     [[ -f "$STDOUT_LOG" ]] && current_size=$(wc -c < "$STDOUT_LOG" 2>/dev/null || echo 0)
     # P3: stderr 활동도 포함하여 거짓 STALL 방지
@@ -1255,10 +1286,37 @@ heartbeat_monitor() {
 
     if [[ "$current_size" -gt "$last_size" ]]; then
       stall_count=0
-      echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=active" >&2
+      if [[ "$pid_gone" == "true" ]]; then
+        local _fi="forked"; [[ -n "$last_known_forks" ]] && _fi="forks:${last_known_forks// /,}"
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=active(${_fi})" >&2
+        post_exit_checks=0  # reset — still producing output
+      else
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=active" >&2
+      fi
     else
       stall_count=$((stall_count + interval))
-      if [[ "$stall_count" -ge "$stall_threshold" ]]; then
+      if [[ "$pid_gone" == "true" ]]; then
+        if [[ -n "$last_known_forks" ]]; then
+          # Direct fork tracking — terminate when all forks are dead
+          local _alive=false
+          for _fp in $last_known_forks; do
+            kill -0 "$_fp" 2>/dev/null && _alive=true && break
+          done
+          if [[ "$_alive" == "false" ]]; then
+            echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=terminated(forks-exited)" >&2
+            break
+          fi
+          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=fork-idle(${last_known_forks// /,})" >&2
+        else
+          # Fallback: output-based drain (no fork PIDs found)
+          post_exit_checks=$((post_exit_checks + 1))
+          if [[ "$post_exit_checks" -ge "$max_post_exit_checks" ]]; then
+            echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=terminated(drain-done)" >&2
+            break
+          fi
+          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=draining(${post_exit_checks}/${max_post_exit_checks})" >&2
+        fi
+      elif [[ "$stall_count" -ge "$stall_threshold" ]]; then
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=STALL stall=${stall_count}s" >&2
       else
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=quiet stall=${stall_count}s" >&2

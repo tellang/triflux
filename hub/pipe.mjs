@@ -4,12 +4,7 @@
 import net from 'node:net';
 import { existsSync, unlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import {
-  teamInfo,
-  teamTaskList,
-  teamTaskUpdate,
-  teamSendMessage,
-} from './team/nativeProxy.mjs';
+import { getTeamBridge } from './team-bridge.mjs';
 import { createPipeline } from './pipeline/index.mjs';
 import {
   ensurePipelineTable,
@@ -21,6 +16,7 @@ import { IS_WINDOWS, pipePath } from './platform.mjs';
 import { safeJsonParse } from './workers/worker-utils.mjs';
 
 const DEFAULT_HEARTBEAT_TTL_MS = 60000;
+const TEAM_BRIDGE_NOT_REGISTERED = 'bridge_not_registered';
 
 /** 플랫폼별 pipe 경로 계산 */
 export function getPipePath(sessionId = process.pid) {
@@ -32,6 +28,87 @@ function normalizeTopics(topics) {
   return topics
     .map((topic) => String(topic || '').trim())
     .filter(Boolean);
+}
+
+function getTeamBridgeMethod(methodName) {
+  const method = getTeamBridge()?.[methodName];
+  return typeof method === 'function' ? method : null;
+}
+
+function teamInfoFallback(payload = {}) {
+  return {
+    ok: true,
+    data: {
+      team: {
+        team_name: payload.team_name ?? null,
+        description: null,
+      },
+      lead: {
+        lead_agent_id: null,
+        lead_session_id: null,
+      },
+      ...(payload.include_members !== false ? { members: [] } : {}),
+      ...(payload.include_paths !== false
+        ? {
+            paths: {
+              config_path: null,
+              tasks_dir: null,
+              inboxes_dir: null,
+              tasks_dir_resolution: TEAM_BRIDGE_NOT_REGISTERED,
+            },
+          }
+        : {}),
+      bridge_installed: false,
+      skipped: true,
+    },
+  };
+}
+
+function teamTaskListFallback() {
+  return {
+    ok: true,
+    data: {
+      tasks: [],
+      count: 0,
+      parse_warnings: 0,
+      tasks_dir: null,
+      tasks_dir_resolution: TEAM_BRIDGE_NOT_REGISTERED,
+      bridge_installed: false,
+      skipped: true,
+    },
+  };
+}
+
+function teamTaskUpdateFallback(payload = {}) {
+  return {
+    ok: true,
+    data: {
+      claimed: false,
+      updated: false,
+      task_before: null,
+      task_after: null,
+      task_file: null,
+      task_id: payload.task_id ?? null,
+      mtime_ms: null,
+      bridge_installed: false,
+      skipped: true,
+    },
+  };
+}
+
+function teamSendMessageFallback(payload = {}) {
+  return {
+    ok: true,
+    data: {
+      message_id: null,
+      recipient: payload.to ?? 'team-lead',
+      inbox_file: null,
+      queued_at: null,
+      unread_count: 0,
+      bridge_installed: false,
+      skipped: true,
+    },
+  };
 }
 
 /**
@@ -241,13 +318,19 @@ export function createPipeServer({
       }
 
       case 'team_task_update': {
-        const result = await teamTaskUpdate(payload);
+        const teamTaskUpdate = getTeamBridgeMethod('teamTaskUpdate');
+        const result = teamTaskUpdate
+          ? await teamTaskUpdate(payload)
+          : teamTaskUpdateFallback(payload);
         if (client) touchClient(client);
         return result;
       }
 
       case 'team_send_message': {
-        const result = await teamSendMessage(payload);
+        const teamSendMessage = getTeamBridgeMethod('teamSendMessage');
+        const result = teamSendMessage
+          ? await teamSendMessage(payload)
+          : teamSendMessageFallback(payload);
         if (client) touchClient(client);
         return result;
       }
@@ -363,13 +446,15 @@ export function createPipeServer({
       }
 
       case 'team_info': {
-        const result = await teamInfo(payload);
+        const teamInfo = getTeamBridgeMethod('teamInfo');
+        const result = teamInfo ? await teamInfo(payload) : teamInfoFallback(payload);
         if (client) touchClient(client);
         return result;
       }
 
       case 'team_task_list': {
-        const result = await teamTaskList(payload);
+        const teamTaskList = getTeamBridgeMethod('teamTaskList');
+        const result = teamTaskList ? await teamTaskList(payload) : teamTaskListFallback(payload);
         if (client) touchClient(client);
         return result;
       }

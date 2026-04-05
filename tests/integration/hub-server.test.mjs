@@ -284,6 +284,50 @@ describe('startHub() 라이프사이클', () => {
     });
   });
 
+  // ── /bridge/status ──
+
+  describe('/bridge/status', () => {
+    it('GET /bridge/status는 Hub 상태를 반환해야 한다', async () => {
+      const res = await fetch(`${baseUrl}/bridge/status?scope=hub`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.data?.hub?.state, 'healthy');
+    });
+
+    it('POST /bridge/status는 멤버 상태 보고를 반영해야 한다', async () => {
+      await fetch(`${baseUrl}/bridge/register`, {
+        method: 'POST',
+        headers: bridgeHeaders(),
+        body: JSON.stringify({ agent_id: 'status-agent', cli: 'codex', timeout_sec: 60, topics: [], capabilities: ['code'] }),
+      });
+
+      const reportRes = await fetch(`${baseUrl}/bridge/status`, {
+        method: 'POST',
+        headers: bridgeHeaders(),
+        body: JSON.stringify({
+          agent_id: 'status-agent',
+          status: 'paused',
+        }),
+      });
+      assert.equal(reportRes.status, 200);
+      const reportBody = await reportRes.json();
+      assert.equal(reportBody.ok, true);
+      assert.equal(reportBody.data?.reported_status, 'paused');
+      assert.equal(reportBody.data?.snapshot?.status, 'online');
+
+      const agentRes = await fetch(`${baseUrl}/bridge/status?scope=agent&agent_id=status-agent`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      assert.equal(agentRes.status, 200);
+      const agentBody = await agentRes.json();
+      assert.equal(agentBody.ok, true);
+      assert.equal(agentBody.data?.agent?.status, 'online');
+    });
+  });
+
   // ── /bridge/context ──
 
   describe('POST /bridge/context', () => {

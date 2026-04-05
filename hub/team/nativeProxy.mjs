@@ -679,3 +679,10 @@ export async function teamSendMessage(args = {}) {
     return err('SEND_MESSAGE_FAILED', e.message);
   }
 }
+
+export const nativeProxy = Object.freeze({
+  teamInfo,
+  teamTaskList,
+  teamTaskUpdate,
+  teamSendMessage,
+});

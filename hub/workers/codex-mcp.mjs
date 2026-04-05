@@ -5,12 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
+import {
+  CODEX_MCP_EXECUTION_EXIT_CODE,
+  CODEX_MCP_TRANSPORT_EXIT_CODE,
+} from '../cli-adapter-base.mjs';
 import { withRetry } from './worker-utils.mjs';
 
 const REQUIRED_TOOLS = ['codex', 'codex-reply'];
 
-export const CODEX_MCP_TRANSPORT_EXIT_CODE = 70;
-export const CODEX_MCP_EXECUTION_EXIT_CODE = 1;
+export { CODEX_MCP_EXECUTION_EXIT_CODE, CODEX_MCP_TRANSPORT_EXIT_CODE };
 export const DEFAULT_CODEX_MCP_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_CODEX_MCP_BOOTSTRAP_TIMEOUT_MS = 10 * 1000;
 

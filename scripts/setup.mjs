@@ -5,10 +5,11 @@
 // - skills/를 ~/.claude/skills/에 동기화
 
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync, chmodSync, unlinkSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, relative } from "path";
 import { homedir } from "os";
 import { spawn, execFileSync } from "child_process";
 import { fileURLToPath } from "url";
+import { ensureGlobalClaudeRoutingSection, ensureTfxSection, getLatestRoutingTable } from "./claudemd-sync.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -53,6 +54,42 @@ const REQUIRED_CODEX_PROFILES = [
     ],
   },
 ];
+
+const HUD_SYNC_EXCLUDES = new Set(["omc-hud.mjs", "omc-hud.mjs.bak"]);
+
+function scanHudFiles(pluginRoot, claudeDir) {
+  const hudRoot = join(pluginRoot, "hud");
+  if (!existsSync(hudRoot)) return [];
+
+  const walk = (currentDir) => {
+    const entries = readdirSync(currentDir, { withFileTypes: true })
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    return entries.flatMap((entry) => {
+      const absolutePath = join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        return walk(absolutePath);
+      }
+
+      if (!entry.isFile() || HUD_SYNC_EXCLUDES.has(entry.name) || !entry.name.endsWith(".mjs")) {
+        return [];
+      }
+
+      const hudRelativePath = relative(hudRoot, absolutePath);
+      const normalizedRelativePath = hudRelativePath.replace(/\\/g, "/");
+
+      return [{
+        src: absolutePath,
+        dst: join(claudeDir, "hud", hudRelativePath),
+        label: normalizedRelativePath === "hud-qos-status.mjs"
+          ? "hud-qos-status.mjs"
+          : `hud/${normalizedRelativePath}`,
+      }];
+    });
+  };
+
+  return walk(hudRoot);
+}
 
 // ── 파일 동기화 ──
 
@@ -107,51 +144,7 @@ const SYNC_MAP = [
     dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "factory.mjs"),
     label: "hub/workers/factory.mjs",
   },
-  {
-    src: join(PLUGIN_ROOT, "hud", "hud-qos-status.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "hud-qos-status.mjs"),
-    label: "hud-qos-status.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hud", "colors.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "colors.mjs"),
-    label: "hud/colors.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hud", "constants.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "constants.mjs"),
-    label: "hud/constants.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hud", "terminal.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "terminal.mjs"),
-    label: "hud/terminal.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hud", "utils.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "utils.mjs"),
-    label: "hud/utils.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hud", "renderers.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "renderers.mjs"),
-    label: "hud/renderers.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hud", "providers", "claude.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "providers", "claude.mjs"),
-    label: "hud/providers/claude.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hud", "providers", "codex.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "providers", "codex.mjs"),
-    label: "hud/providers/codex.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hud", "providers", "gemini.mjs"),
-    dst: join(CLAUDE_DIR, "hud", "providers", "gemini.mjs"),
-    label: "hud/providers/gemini.mjs",
-  },
+  ...scanHudFiles(PLUGIN_ROOT, CLAUDE_DIR),
   {
     src: join(PLUGIN_ROOT, "scripts", "notion-read.mjs"),
     dst: join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
@@ -249,6 +242,25 @@ function writeMarker(marker) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeErrorMessage(error, fallback = "unknown error") {
+  const isMeaningful = (value) => {
+    if (typeof value !== "string") return false;
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return false;
+    return normalized !== "undefined" && normalized !== "null";
+  };
+
+  if (error instanceof Error && isMeaningful(error.message)) {
+    return error.message.trim();
+  }
+  if (isMeaningful(error)) return error.trim();
+  if (error && typeof error === "object") {
+    const candidate = /** @type {{ message?: unknown }} */ (error).message;
+    if (isMeaningful(candidate)) return candidate.trim();
+  }
+  return fallback;
 }
 
 function hasProfileSection(tomlContent, profileName) {
@@ -451,14 +463,15 @@ function ensureHooksInSettings({ settingsPath, registryPath }) {
  * @param {{ mcpUrl: string, createIfMissing?: boolean, enabled?: boolean }} opts
  * @returns {{ ok: boolean, changed: boolean, reason?: string }}
  */
-function ensureCodexHubServerConfig({ mcpUrl, createIfMissing = false, enabled = false }) {
+function ensureCodexHubServerConfig({ configFile, mcpUrl, createIfMissing = false, enabled = false }) {
   try {
     const codexConfigDir = join(homedir(), ".codex");
-    const configPath = join(codexConfigDir, "config.json");
+    const configPath = configFile || join(codexConfigDir, "config.json");
 
     if (!existsSync(configPath)) {
       if (!createIfMissing) return { ok: true, changed: false, reason: "no-config" };
-      if (!existsSync(codexConfigDir)) mkdirSync(codexConfigDir, { recursive: true });
+      const dir = dirname(configPath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const config = { mcpServers: { "tfx-hub": { url: mcpUrl, enabled } } };
       writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
       return { ok: true, changed: true };
@@ -467,13 +480,16 @@ function ensureCodexHubServerConfig({ mcpUrl, createIfMissing = false, enabled =
     const config = JSON.parse(readFileSync(configPath, "utf8"));
     if (!config.mcpServers) config.mcpServers = {};
 
-    if (config.mcpServers["tfx-hub"]) {
+    const existing = config.mcpServers["tfx-hub"];
+    const desired = { ...(existing || {}), url: mcpUrl, enabled };
+
+    if (existing && existing.url === desired.url && existing.enabled === desired.enabled) {
       return { ok: true, changed: false };
     }
 
     const updated = {
       ...config,
-      mcpServers: { ...config.mcpServers, "tfx-hub": { url: mcpUrl, enabled } },
+      mcpServers: { ...config.mcpServers, "tfx-hub": desired },
     };
     writeFileSync(configPath, JSON.stringify(updated, null, 2) + "\n", "utf8");
     return { ok: true, changed: true };
@@ -522,9 +538,23 @@ function ensureCodexProfiles() {
       writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
     }
 
-    return changed;
-  } catch {
-    return 0;
+    return { ok: true, changed };
+  } catch (error) {
+    const message = error instanceof Error && error.message ? error.message.trim() : "unknown error";
+    return { ok: false, changed: 0, message };
+  }
+}
+
+function syncClaudeRoutingSections() {
+  try {
+    const routingTable = getLatestRoutingTable();
+    return [
+      ensureTfxSection(join(PLUGIN_ROOT, "CLAUDE.md"), routingTable),
+      ensureGlobalClaudeRoutingSection(CLAUDE_DIR),
+    ];
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "routing_sync_failed";
+    return [{ action: "unchanged", path: join(PLUGIN_ROOT, "CLAUDE.md"), skipped: true, reason }];
   }
 }
 
@@ -532,6 +562,7 @@ export {
   replaceProfileSection,
   hasProfileSection,
   detectDevMode,
+  scanHudFiles,
   SYNC_MAP,
   BREADCRUMB_PATH,
   PLUGIN_ROOT,
@@ -568,14 +599,47 @@ if (isSync) {
 
 const pkgVersion = getPackageVersion();
 const marker = readMarker();
+const claudeRoutingResults = syncClaudeRoutingSections();
+const claudeRoutingChangedCount = claudeRoutingResults.filter((result) => result.action === "created" || result.action === "updated").length;
 if (pkgVersion && marker?.version === pkgVersion && !isForce) {
-  console.log(`setup: skip (v${pkgVersion} already synced)`);
+  if (claudeRoutingChangedCount > 0) {
+    console.log(`setup: skip core sync (v${pkgVersion} already synced, CLAUDE.md ${claudeRoutingChangedCount}건 반영)`);
+  } else {
+    console.log(`setup: skip (v${pkgVersion} already synced)`);
+  }
   process.exit(0);
 }
 
-let synced = 0;
+let synced = claudeRoutingChangedCount;
 
-for (const { src, dst, label } of SYNC_MAP) {
+// ── Memory Doctor (P0 자동 수정) ──
+const isCIEnv = process.env.CI === "true" || process.env.DOCKER === "true";
+if (!isCIEnv) {
+  try {
+    const { createMemoryDoctor } = await import("../hub/memory-doctor.mjs");
+    const projectSlug = process.cwd().replace(/^([A-Z]):/u, "$1-").replace(/[\\/]/gu, "-");
+    const memDir = join(CLAUDE_DIR, "projects", projectSlug, "memory");
+    if (existsSync(memDir)) {
+      const doctor = createMemoryDoctor({
+        memoryDir: memDir,
+        rulesDir: join(process.cwd(), ".claude", "rules"),
+        projectDir: process.cwd(),
+        claudeDir: CLAUDE_DIR,
+      });
+      const { checks, healthScore } = doctor.scan();
+      const p0Auto = checks.filter((c) => c.severity === "P0" && c.autofix && !c.passed);
+      if (p0Auto.length > 0) {
+        doctor.fixAll({ severity: "P0" });
+        console.log(`  memory-doctor: ${p0Auto.length}건 P0 자동 수정 (health: ${healthScore})`);
+        synced += p0Auto.length;
+      }
+    }
+  } catch (err) {
+    console.log(`  memory-doctor: skip (${err.message})`);
+  }
+}
+
+for (const { src, dst } of SYNC_MAP) {
   if (!existsSync(src)) continue;
 
   const dstDir = dirname(dst);
@@ -594,6 +658,11 @@ for (const { src, dst, label } of SYNC_MAP) {
       synced++;
     }
   }
+}
+
+{
+  const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
+  if (claudeGuide.changed) synced++;
 }
 
 // ── Worker 의존성 동기화 (MCP SDK + transitive deps) ──
@@ -986,39 +1055,28 @@ if (process.platform === "win32") {
 
 // ── Codex 프로필 자동 보정 ──
 
-const codexProfilesAdded = ensureCodexProfiles();
-if (codexProfilesAdded > 0) {
+const codexProfilesResult = ensureCodexProfiles();
+if (codexProfilesResult.ok && codexProfilesResult.changed > 0) {
   synced++;
 }
 
-// ── CLAUDE.md TFX 섹션 관리 (마이그레이션 + 업데이트) ──
+// ── CLAUDE.md 라우팅 섹션 자동 동기화 ──
 
 try {
-  const { migrate, readSection, diagnose, getPackageVersion: getTfxVersion } = await import("./lib/claudemd-manager.mjs");
-  const globalClaudeMd = join(CLAUDE_DIR, "CLAUDE.md");
-  const projectClaudeMd = join(PLUGIN_ROOT, "CLAUDE.md");
-
-  for (const mdPath of [globalClaudeMd, projectClaudeMd]) {
-    if (!existsSync(mdPath)) continue;
-    const section = readSection(mdPath);
-    const ver = getTfxVersion();
-
-    if (!section.found || section.version !== ver) {
-      const result = migrate(mdPath, { version: ver });
-      const label = mdPath === globalClaudeMd ? "global" : "project";
-      if (result.action === "migrated") {
-        console.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (${label}): 레거시 → TFX v${ver} 마이그레이션`);
-        synced++;
-      } else if (result.action !== "already_managed") {
-        console.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (${label}): TFX v${ver} ${result.action}`);
-        synced++;
-      }
-    }
+  const routingTable = getLatestRoutingTable();
+  const projectResult = ensureTfxSection(join(PLUGIN_ROOT, "CLAUDE.md"), routingTable);
+  if (projectResult.action !== "unchanged") {
+    console.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (project): ${projectResult.action}`);
+    synced++;
+  }
+  const globalResult = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
+  if (globalResult.action !== "unchanged") {
+    console.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (global): ${globalResult.action}`);
+    synced++;
   }
 } catch (error) {
-  console.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 관리 실패: ${error.message}`);
+  console.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 동기화 실패: ${error.message}`);
 }
-
 // ── MCP 인벤토리 백그라운드 갱신 ──
 
 const mcpCheck = join(PLUGIN_ROOT, "scripts", "mcp-check.mjs");
@@ -1033,6 +1091,30 @@ if (existsSync(mcpCheck)) {
 
 // ── /tmp 임시 파일 자동 정리 (setup 지연 방지: fire-and-forget) ──
 cleanupTmpFiles().catch(() => {});
+
+// ── npm 글로벌 패키지 동기화 ──
+// dev mode가 아닌 경우(npm install로 설치), 글로벌 triflux 패키지 버전을 확인하고
+// 로컬 버전과 다르면 업데이트를 안내한다. dev mode에서는 git 기반이므로 skip.
+if (pkgVersion && !isDev) {
+  try {
+    const globalVer = execFileSync("npm", ["list", "-g", "triflux", "--json", "--depth=0"], {
+      encoding: "utf8",
+      timeout: 10000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const parsed = JSON.parse(globalVer);
+    const installedVer = parsed?.dependencies?.triflux?.version;
+    if (installedVer && installedVer !== pkgVersion) {
+      const tag = pkgVersion.includes("alpha") ? "alpha" : "latest";
+      console.log(`  npm: triflux global ${installedVer} → ${pkgVersion} (npm i -g triflux@${tag})`);
+    }
+  } catch {
+    // npm list 실패 = 글로벌 미설치. 안내만 출력.
+    if (pkgVersion.includes("alpha")) {
+      console.log("  npm: triflux global 미설치 (npm i -g triflux@alpha 로 설치 가능)");
+    }
+  }
+}
 
 if (pkgVersion) {
   writeMarker({ version: pkgVersion, timestamp: Date.now() });

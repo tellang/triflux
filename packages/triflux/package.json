@@ -1,0 +1,36 @@
+{
+  "name": "triflux",
+  "version": "10.0.0",
+  "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
+  "type": "module",
+  "bin": {
+    "triflux": "bin/triflux.mjs",
+    "tfx": "bin/triflux.mjs",
+    "tfl": "bin/triflux.mjs",
+    "tfx-setup": "bin/tfx-setup.mjs",
+    "tfx-doctor": "bin/tfx-doctor.mjs",
+    "tfx-profile": "bin/tfx-profile.mjs",
+    "tfx-doctor-tui": "bin/tfx-doctor-tui.mjs",
+    "tfx-setup-tui": "bin/tfx-setup-tui.mjs"
+  },
+  "engines": { "node": ">=18.0.0" },
+  "dependencies": {
+    "@triflux/core": "^10.0.0-alpha.1",
+    "@triflux/remote": "^10.0.0-alpha.1"
+  },
+  "files": [
+    "bin",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": ["claude-code", "plugin", "codex", "gemini", "cli-routing", "orchestration", "multi-model", "triflux", "tfx"],
+  "author": "tellang",
+  "license": "MIT",
+  "homepage": "https://github.com/tellang/triflux#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tellang/triflux.git",
+    "directory": "packages/triflux"
+  }
+}

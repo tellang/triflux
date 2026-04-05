@@ -296,7 +296,7 @@ describe('tfx-route.sh — 역할별 MCP profile 필터', () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=designer/);
-    assert.deepEqual(allowedMcpServers(result), ['context7', 'tavily', 'exa', 'brave-search']);
+    assert.deepEqual(allowedMcpServers(result), ['context7', 'playwright']);
   });
 });
 

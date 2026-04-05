@@ -1,4 +1,4 @@
-import { after, describe, it } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,39 +53,69 @@ async function createClient(env = {}) {
   return { client, transport };
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isProcessAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForProcessExit(pid, timeoutMs = 2000) {
+  if (!pid) return;
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      return;
+    }
+    await sleep(50);
+  }
+}
+
 async function closeClient(client, transport) {
   const pid = transport.pid;
   const settled = Promise.allSettled([
     client.close().catch(() => {}),
     transport.close().catch(() => {}),
   ]);
-  await Promise.race([
-    settled,
-    new Promise((resolve) => setTimeout(resolve, 250)),
-  ]);
-  if (pid) {
+  await Promise.race([settled, sleep(750)]);
+
+  if (isProcessAlive(pid)) {
     try { process.kill(pid); } catch {}
+    await Promise.race([settled, waitForProcessExit(pid, 1000)]);
+    return;
   }
+
+  await settled;
 }
 
 async function waitForCompletion(client, jobId) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  const deadline = Date.now() + 5000;
+  let lastStatus = 'unknown';
+
+  while (Date.now() < deadline) {
     const result = await client.callTool({
       name: 'triflux-delegate-status',
       arguments: { jobId },
     });
     const payload = result.structuredContent;
+    lastStatus = payload?.status || lastStatus;
     if (payload?.status === 'completed' || payload?.status === 'failed') {
       return payload;
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await sleep(100);
   }
-  throw new Error(`job ${jobId} did not complete in time`);
+  throw new Error(`job ${jobId} did not complete in time (last status: ${lastStatus})`);
 }
 
 describe('delegator-mcp stdio server', () => {
-  after(() => setTimeout(() => process.exit(0), 100));
-
   it('필수 도구를 노출해야 한다', async () => {
     const { client, transport } = await createClient({
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,

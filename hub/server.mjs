@@ -22,8 +22,13 @@ import { createDelegatorMcpWorker } from './workers/delegator-mcp.mjs';
 import { cleanupOrphanNodeProcesses } from './lib/process-utils.mjs';
 import { createModuleLogger } from '../scripts/lib/logger.mjs';
 import { wrapRequestHandler } from './middleware/request-logger.mjs';
-import { acquireLock, getVersionHash, releaseLock, writeState } from './state.mjs';
+import { acquireLock, getVersionHash, isServerHealthy, readState, releaseLock, writeState } from './state.mjs';
 import { createAdaptiveFingerprintService } from './session-fingerprint.mjs';
+import { createAdaptiveEngine } from './adaptive.mjs';
+import { registerTeamBridge } from './team-bridge.mjs';
+import { nativeProxy } from './team/nativeProxy.mjs';
+
+registerTeamBridge(nativeProxy);
 
 const hubLog = createModuleLogger('hub');
 
@@ -57,6 +62,53 @@ const STATIC_CONTENT_TYPES = Object.freeze({
 // IP-based sliding window rate limiter (in-memory, no external deps)
 // Each entry is an array of request timestamps within the current window.
 const rateLimitMap = new Map();
+
+function formatHostForUrl(host = '127.0.0.1') {
+  return String(host).includes(':') ? `[${host}]` : host;
+}
+
+function buildHubUrl(host, port) {
+  return `http://${formatHostForUrl(host || '127.0.0.1')}:${port}/mcp`;
+}
+
+function isPidAlive(pid, killFn = process.kill) {
+  const resolvedPid = Number(pid);
+  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return false;
+  try {
+    killFn(resolvedPid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function tryReuseExistingHub({
+  port,
+  host = '127.0.0.1',
+  readCurrentState = readState,
+  readInfo = getHubInfo,
+  checkHealth = isServerHealthy,
+  killFn = process.kill,
+} = {}) {
+  const existing = readCurrentState();
+  const existingPort = Number(existing?.port);
+  if (!isPidAlive(existing?.pid, killFn) || !Number.isFinite(existingPort) || existingPort <= 0) {
+    return null;
+  }
+  if (Number.isFinite(Number(port)) && existingPort !== Number(port)) return null;
+  if (!(await checkHealth(existingPort))) return null;
+
+  const info = readInfo() ?? existing;
+  const infoHost = typeof info?.host === 'string' ? info.host : host;
+  return {
+    reused: true,
+    external: true,
+    port: existingPort,
+    pid: Number(existing.pid),
+    url: info?.url ?? buildHubUrl(infoHost, existingPort),
+    stop: async () => false,
+  };
+}
 
 function checkRateLimit(ip) {
   const now = Date.now();
@@ -301,12 +353,17 @@ function servePublicFile(res, path) {
  * @param {(options: { cwd: string }) => object} [opts.createDelegatorWorker]
  */
 export async function startHub({
-  port = 27888,
+  port: portOpt,
   dbPath,
   host = '127.0.0.1',
   sessionId = process.pid,
   createDelegatorWorker = createDelegatorMcpWorker,
 } = {}) {
+  const port = portOpt ?? parseInt(process.env.TFX_HUB_PORT || '27888', 10);
+
+  const existingHub = await tryReuseExistingHub({ port, host });
+  if (existingHub) return existingHub;
+
   const hubIdleTimeoutMs = parsePositiveInt(process.env.TFX_HUB_IDLE_TIMEOUT_MS, HUB_IDLE_TIMEOUT_DEFAULT_MS);
   const hubIdleSweepMs = parsePositiveInt(
     process.env.TFX_HUB_IDLE_SWEEP_MS,
@@ -339,6 +396,12 @@ export async function startHub({
     lockHeld = false;
   };
 
+  const lockedExistingHub = await tryReuseExistingHub({ port, host });
+  if (lockedExistingHub) {
+    releaseStartupLock();
+    return lockedExistingHub;
+  }
+
   const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;
   if (HUB_TOKEN) {
     mkdirSync(join(homedir(), '.claude'), { recursive: true });
@@ -350,6 +413,10 @@ export async function startHub({
   const store = await createStoreAdapter(dbPath);
   const router = createRouter(store);
   const fingerprintService = createAdaptiveFingerprintService({ store });
+
+  // Neural Memory adaptive engine 초기화
+  const adaptiveEngine = createAdaptiveEngine({ repoRoot: PROJECT_ROOT, fingerprintService });
+  adaptiveEngine.startSession();
 
   // Delegator MCP resident service 초기화
   const delegatorWorker = createDelegatorWorker({ cwd: PROJECT_ROOT });
@@ -480,12 +547,28 @@ export async function startHub({
     }
 
     if (path.startsWith('/bridge')) {
-      if (req.method !== 'POST' && req.method !== 'DELETE') {
+      const isBridgeStatusGet = path === '/bridge/status' && req.method === 'GET';
+      if (req.method !== 'POST' && req.method !== 'DELETE' && !isBridgeStatusGet) {
         return writeJson(res, 405, { ok: false, error: 'Method Not Allowed' });
       }
 
       try {
         const body = req.method === 'POST' ? await parseBody(req) : {};
+        const requestUrl = new URL(req.url || path, 'http://127.0.0.1');
+
+        if (path === '/bridge/status' && req.method === 'GET') {
+          const scope = requestUrl.searchParams.get('scope') || 'hub';
+          const include_metrics = requestUrl.searchParams.get('include_metrics') !== '0';
+          const agent_id = requestUrl.searchParams.get('agent_id') || undefined;
+          const trace_id = requestUrl.searchParams.get('trace_id') || undefined;
+          const result = await pipe.executeQuery('status', {
+            scope,
+            include_metrics,
+            agent_id,
+            trace_id,
+          });
+          return writeJson(res, 200, result);
+        }
 
         if (path === '/bridge/register' && req.method === 'POST') {
           const { agent_id, cli, timeout_sec = 600, topics = [], capabilities = [], metadata = {} } = body;
@@ -548,6 +631,51 @@ export async function startHub({
             correlation_id,
           });
 
+          return writeJson(res, 200, result);
+        }
+
+        if (path === '/bridge/status' && req.method === 'POST') {
+          const {
+            scope = 'hub',
+            agent_id,
+            status,
+            include_metrics = true,
+            trace_id,
+          } = body;
+
+          if (agent_id && status) {
+            const normalizedAgentId = String(agent_id || '').trim();
+            const normalizedStatus = String(status || '').trim().toLowerCase();
+            if (!normalizedAgentId || !normalizedStatus) {
+              return writeJson(res, 400, { ok: false, error: 'agent_id, status 필수' });
+            }
+            const statusForStore = new Set(['online', 'stale', 'offline']).has(normalizedStatus)
+              ? normalizedStatus
+              : 'online';
+            router.updateAgentStatus(normalizedAgentId, statusForStore);
+            const snapshot = await pipe.executeQuery('status', {
+              scope: 'agent',
+              agent_id: normalizedAgentId,
+              include_metrics: false,
+            });
+            return writeJson(res, 200, {
+              ok: true,
+              data: {
+                agent_id: normalizedAgentId,
+                status: statusForStore,
+                reported_status: normalizedStatus,
+                reported_at_ms: Date.now(),
+                snapshot: snapshot?.data?.agent || null,
+              },
+            });
+          }
+
+          const result = await pipe.executeQuery('status', {
+            scope,
+            agent_id,
+            include_metrics,
+            trace_id,
+          });
           return writeJson(res, 200, result);
         }
 
@@ -928,7 +1056,7 @@ export async function startHub({
           pid: process.pid,
           hubToken: HUB_TOKEN,
           authMode: HUB_TOKEN ? 'token-required' : 'localhost-only',
-          url: `http://${host}:${port}/mcp`,
+          url: buildHubUrl(host, port),
           pipe_path: pipe.path,
           pipePath: pipe.path,
           assign_callback_pipe_path: assignCallbacks.path,
@@ -938,7 +1066,7 @@ export async function startHub({
           idleTimeoutMs: hubIdleTimeoutMs,
         };
 
-        writeFileSync(PID_FILE, JSON.stringify({
+        writeState({
           pid: process.pid,
           port,
           host,
@@ -947,16 +1075,13 @@ export async function startHub({
           pipe_path: pipe.path,
           pipePath: pipe.path,
           assign_callback_pipe_path: assignCallbacks.path,
+          assignCallbackPipePath: assignCallbacks.path,
+          authMode: HUB_TOKEN ? 'token-required' : 'localhost-only',
+          startedAt,
           started: startedAtMs,
           version,
-          session_id: sessionId,
-        }));
-        writeState({
-          pid: process.pid,
-          port,
-          version,
           sessionId,
-          startedAt,
+          session_id: sessionId,
         });
         releaseStartupLock();
 
@@ -1007,6 +1132,8 @@ export async function startHub({
         idleTimer.unref();
 
         resolveHub({
+          reused: false,
+          external: false,
           ...info,
           httpServer,
           store,
@@ -1035,12 +1162,32 @@ export async function startHub({
 }
 
 export function getHubInfo() {
-  if (!existsSync(PID_FILE)) return null;
-  try {
-    return JSON.parse(readFileSync(PID_FILE, 'utf8'));
-  } catch {
-    return null;
-  }
+  return readState();
+}
+
+/**
+ * MCP 서버 싱글톤 팩토리 — 이미 실행 중인 서버가 있으면 재사용하고,
+ * 없거나 응답하지 않으면 새로 startHub()를 호출합니다.
+ *
+ * @param {object} [opts] - startHub()에 전달할 옵션 (port, dbPath, host, sessionId 등)
+ * @param {object} [opts._deps] - 테스트용 의존성 주입 (isHealthy, getInfo, readState, startHub)
+ * @returns {Promise<{reused: boolean, port: number, pid: number, url: string, stop?: Function}>}
+ */
+export async function getOrCreateServer(opts = {}) {
+  const { _deps, ...startOpts } = opts;
+  const existingHub = await tryReuseExistingHub({
+    port: startOpts.port,
+    host: startOpts.host,
+    checkHealth: _deps?.isHealthy ?? isServerHealthy,
+    readInfo: _deps?.getInfo ?? getHubInfo,
+    readCurrentState: _deps?.readState ?? readState,
+  });
+  const boot = _deps?.startHub ?? startHub;
+
+  if (existingHub) return existingHub;
+
+  const server = await boot(startOpts);
+  return server.reused === true ? server : { reused: false, ...server };
 }
 
 /**
@@ -1113,3 +1260,5 @@ if (selfRun) {
     process.exit(1);
   });
 }
+
+export { startHub as createServer };

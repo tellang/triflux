@@ -38,8 +38,12 @@
       "mcp_route": null
     },
     {
-      "id": "tfx-codex-swarm",
+      "id": "tfx-swarm",
       "patterns": [
+        {
+          "source": "\\btfx[\\s-]?swarm\\b",
+          "flags": "i"
+        },
         {
           "source": "\\btfx[\\s-]?codex[\\s-]?swarm\\b",
           "flags": "i"
@@ -47,20 +51,7 @@
         {
           "source": "\\bcodex[\\s-]?swarm\\b",
           "flags": "i"
-        }
-      ],
-      "skill": "tfx-codex-swarm",
-      "priority": 1,
-      "supersedes": [
-        "tfx-codex"
-      ],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": null
-    },
-    {
-      "id": "tfx-remote-spawn",
-      "patterns": [
+        },
         {
           "source": "\\btfx[\\s-]?remote[\\s-]?spawn\\b",
           "flags": "i"
@@ -70,9 +61,11 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-remote-spawn",
+      "skill": "tfx-swarm",
       "priority": 1,
-      "supersedes": [],
+      "supersedes": [
+        "tfx-codex"
+      ],
       "exclusive": false,
       "state": null,
       "mcp_route": null

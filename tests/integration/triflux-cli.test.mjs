@@ -9,6 +9,8 @@ import { tmpdir } from "node:os";
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
 const CLI_PATH = join(PROJECT_ROOT, "bin", "triflux.mjs");
+const THROW_UNDEFINED_CODEX_CONFIG_FIXTURE = join(PROJECT_ROOT, "tests", "fixtures", "throw-undefined-codex-config.cjs")
+  .replace(/\\/g, "/");
 
 function createHomeDir() {
   const homeDir = mkdtempSync(join(tmpdir(), "triflux-cli-"));
@@ -202,6 +204,20 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     if (process.platform === "win32") {
       assert.match(updated, /\[windows\]\nsandbox = "elevated"/);
     }
+  });
+
+  it("setup은 non-Error 예외가 발생해도 undefined 경고를 노출하지 않아야 한다", () => {
+    const homeDir = createHomeDir();
+    const result = runCli(["setup"], {
+      homeDir,
+      env: {
+        NODE_OPTIONS: `--require ${THROW_UNDEFINED_CODEX_CONFIG_FIXTURE}`,
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.doesNotMatch(result.stdout, /Codex profiles 설정 실패:\s*undefined/);
+    assert.match(result.stdout, /Codex profiles 설정 실패:\s*unknown error/);
   });
 });
 

@@ -92,6 +92,16 @@ test('runPreflight marks unreachable MCP servers for exclusion', async () => {
   });
 });
 
+test('codex-compat re-exports getCodexVersion from codex-preflight', async () => {
+  await withSandbox(async () => {
+    const preflight = await importFresh('../../hub/codex-preflight.mjs');
+    const compat = await importFresh('../../hub/codex-compat.mjs');
+
+    assert.equal(preflight.getCodexVersion(), 119);
+    assert.equal(compat.getCodexVersion(), 119);
+  });
+});
+
 test('buildLaunchScript emits headless codex exec wrapper', async () => {
   const { buildLaunchScript } = await importFresh('../../hub/codex-adapter.mjs');
   const scriptPath = buildLaunchScript({

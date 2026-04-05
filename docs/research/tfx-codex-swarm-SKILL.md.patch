@@ -1,0 +1,33 @@
+--- C:/Users/tellang/.claude/skills/tfx-codex-swarm/SKILL.md
++++ C:/Users/tellang/.claude/skills/tfx-codex-swarm/SKILL.md
+@@ -315,6 +315,11 @@
+ 프로젝트 정보:
+ - {PROJECT_NAME}: {PROJECT_DESC}
+ - 언어: {PROJECT_LANG}, 테스트: {PROJECT_TEST_CMD}
++
++완료 조건 (필수):
++- 작업이 끝나면 반드시 git add로 변경 파일을 스테이징하세요
++- git commit -m "feat: <작업 설명>" 으로 커밋하세요
++- 커밋하지 않으면 worktree 정리 시 작업이 유실됩니다
+ ```
+ 
+ `{PROJECT_NAME}`, `{PROJECT_DESC}`, `{PROJECT_LANG}`, `{PROJECT_TEST_CMD}` 변수는 실행 시점에 자동 결정한다:
+@@ -488,12 +493,14 @@
+ 스폰 완료 후 요약 테이블을 표시:
+ 
+ ```
+-| # | 태스크 | 유형 | OMX 스킬 | Worktree | 세션 |
+-|---|--------|------|----------|----------|------|
+-| 24 | file-transfer | 구현 | $plan→$autopilot | wt-issue-24 | codex-swarm-24 |
+-| 25 | resize-blank | 조사 | $plan | wt-issue-25 | codex-swarm-25 |
++| # | 태스크 | 유형 | OMX 스킬 | Worktree | 세션 | 커밋 |
++|---|--------|------|----------|----------|------|------|
++| 24 | file-transfer | 구현 | $plan→$autopilot | wt-issue-24 | codex-swarm-24 | 미확인 |
++| 25 | resize-blank | 조사 | $plan | wt-issue-25 | codex-swarm-25 | ✅ |
+ ...
+ ```
++
++`커밋` 열에는 각 세션의 커밋 여부를 반드시 기록한다 (예: `✅`, `❌`, `미확인`).
+ 
+ ### Step 10: 후속 관리 (선택)
+ 

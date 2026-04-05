@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Tri-CLI Orchestration with Consensus Intelligence</strong><br>
-  <em>Claude + Codex + Gemini — natural language routing, cross-model review, 38 skills with Deep/Light variants.</em>
+  <em>Claude + Codex + Gemini — natural language routing, cross-model review, 42 skills with Deep/Light variants.</em>
 </p>
 
 <p align="center">
@@ -75,12 +75,24 @@ tfx setup
 
 # Remote — spawn Claude sessions on other machines
 /tfx-remote-setup                                # interactive host wizard (Tailscale + SSH)
-/tfx-remote-spawn "run security review on ultra4" # spawn on remote host
+/tfx-remote-spawn "run security review on my-server" # spawn on remote host
 ```
 
 ---
 
-## What's New in v9
+## What's New in v10
+
+**triflux v10** completes the **4-Lake Roadmap** — a systematic hardening of every layer from CLI stability to remote multi-agent orchestration.
+
+### v10 Highlights
+
+- **Lake 1: CLI Stability** — Retry, stall detection, version cache. Zero silent failures
+- **Lake 2: Plugin Isolation** — cli-adapter-base, team-bridge, pack.mjs sync
+- **Lake 3: Remote Infrastructure** — SSH keepalive/retry, hosts.json capability routing, remote handoff, MCP singleton daemon
+- **Lake 4: Token Optimization** — Skill template engine, shared segments, manifest separation. 62% prompt token reduction
+- **Lake 5: Agent Mesh** — Message routing, per-agent queues, heartbeat monitoring, Conductor integration
+
+### v9 (carried forward)
 
 **triflux v9** introduces **Harness-Native Intelligence** — speak naturally, and triflux routes to the right skill automatically. Cross-model review ensures no model approves its own work.
 
@@ -141,7 +153,7 @@ Phase 3: Resolution (if consensus < 70%)
 |-------|------|-------------|--------|
 | `tfx-research` | Light | Quick web search via Exa/Brave/Tavily auto-selection | ~5K |
 | `tfx-deep-research` | Deep | Multi-source parallel search with 3-CLI cross-validation | ~50K |
-| `tfx-codebase-search` | Light | Fast codebase exploration via Haiku agent | ~3K |
+| `tfx-find` | Light | Fast codebase search — files, symbols, patterns via Haiku | ~3K |
 | `tfx-autoresearch` | Light | Autonomous web research to structured report | ~15K |
 
 ### Analysis
@@ -155,9 +167,9 @@ Phase 3: Resolution (if consensus < 70%)
 
 | Skill | Type | Description | Tokens |
 |-------|------|-------------|--------|
-| `tfx-autopilot` | Light | Simple autonomous task execution | ~10K |
-| `tfx-deep-autopilot` | Deep | Full 5-phase pipeline: Expand → Plan → Execute → QA → Validate | ~80K |
-| `tfx-auto` | — | Unified CLI orchestrator with command shortcuts | varies |
+| `tfx-autopilot` | Light | Simple autonomous task execution (single file, <5min) | ~10K |
+| `tfx-fullcycle` | Deep | Full pipeline: Design → Plan → Execute → QA → Verify | ~80K |
+| `tfx-auto` | — | Unified CLI orchestrator with command shortcuts + auto-triage | varies |
 
 ### QA & Verification
 
@@ -191,8 +203,9 @@ Phase 3: Resolution (if consensus < 70%)
 
 | Skill | Type | Description | Tokens |
 |-------|------|-------------|--------|
-| `tfx-persist` | Deep | 3-party verified persistence loop until done (`/tfx-ralph` compat alias) | varies |
-| `tfx-sisyphus` | Light | Auto-routing execution with model escalation | varies |
+| `tfx-persist` | Deep | 3-party verified persistence loop until done | varies |
+| `tfx-ralph` | — | Alias for `tfx-persist` | varies |
+| `tfx-autoroute` | Light | Auto-routing with model escalation on failure | varies |
 
 ### Meta & Utility
 
@@ -201,7 +214,8 @@ Phase 3: Resolution (if consensus < 70%)
 | `tfx-index` | Light | 94% token reduction via project indexing (58K→3K) | ~2K |
 | `tfx-forge` | Light | Create new skills interactively | ~10K |
 | `tfx-interview` | Light | Socratic requirements exploration | ~15K |
-| `tfx-deslop` | Deep | AI slop removal with 3-party consensus | ~10K |
+| `tfx-deep-interview` | Deep | Socratic deep interview with ambiguity gating | ~25K |
+| `tfx-prune` | Light | AI slop removal — dead code, over-abstraction cleanup | ~10K |
 
 ### Infrastructure
 
@@ -210,13 +224,16 @@ Phase 3: Resolution (if consensus < 70%)
 | `tfx-consensus` | Core consensus engine (internal, used by all Deep skills) |
 | `tfx-hub` | MCP message bus management |
 | `tfx-multi` | Multi-CLI team orchestration |
+| `tfx-codex-swarm` | Parallel Codex sessions via worktree + psmux |
+| `tfx-swarm` | Unified swarm orchestration |
 | `tfx-setup` | Initial setup wizard |
 | `tfx-doctor` | Diagnostics and auto-repair |
-| `tfx-profile` | Codex CLI profile management |
+| `tfx-hooks` | Claude Code hook priority manager |
+| `tfx-profile` | Codex/Gemini CLI profile management |
 | `tfx-codex` | Codex-only orchestrator |
 | `tfx-gemini` | Gemini-only orchestrator |
 | `tfx-auto-codex` | Codex-lead orchestrator |
-| `tfx-remote-spawn` | Remote session management via psmux |
+| `tfx-remote-spawn` | Remote session management via psmux + SSH |
 | `tfx-remote-setup` | Remote host setup wizard (Tailscale + SSH) |
 
 ---
@@ -326,9 +343,9 @@ tfx setup
 
 ## Research Foundation
 
-The v8 skill suite was designed after comprehensive reverse-engineering of 37 cloned repositories across the Claude Code ecosystem:
+The v8 skill suite was inspired by patterns and ideas from across the Claude Code ecosystem:
 
-| Project | Stars | Key Insight Adopted |
+| Project | Stars | Inspiration |
 |---------|-------|-------------------|
 | everything-claude-code | 114K | Instinct-based learning patterns |
 | Superpowers | 93K | TDD enforcement, composable skills |
@@ -363,7 +380,7 @@ The v8 skill suite was designed after comprehensive reverse-engineering of 37 cl
 
 ## QoS Dashboard
 
-Monitor orchestration health at `http://localhost:27888/dashboard`.
+Monitor orchestration health via the built-in QoS Dashboard (run `tfx doctor` for URL).
 
 - **AIMD Batch Sizing** — Auto-scales parallel tasks based on success rates
 - **Token Savings** — Real-time tracking of Claude tokens saved

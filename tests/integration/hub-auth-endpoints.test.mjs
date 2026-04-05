@@ -109,6 +109,7 @@ describe('hub auth 다중 엔드포인트 E2E', () => {
         { path: '/bridge/register', body: { agent_id: 'x', cli: 'codex' } },
         { path: '/bridge/result', body: { agent_id: 'x' } },
         { path: '/bridge/control', body: { to_agent: 'x', command: 'stop' } },
+        { path: '/bridge/status', body: { scope: 'hub' } },
         { path: '/bridge/context', body: { agent_id: 'x' } },
         { path: '/bridge/deregister', body: { agent_id: 'x' } },
         { path: '/bridge/team/info', body: { team_name: 'x' } },

@@ -1,0 +1,582 @@
+{
+  "rules": [
+    {
+      "id": "tfx-cancel",
+      "patterns": [
+        {
+          "source": "\\b(canceltfx|stoptfx)\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "action": "suppress_all",
+      "priority": 0,
+      "supersedes": [
+        "tfx-multi",
+        "tfx-auto",
+        "tfx-auto-codex",
+        "tfx-codex",
+        "tfx-gemini"
+      ],
+      "exclusive": true,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-multi",
+      "patterns": [
+        {
+          "source": "(?<!\\b(?:my|the|our|omc|oh-my-claudecode)\\s)\\btfx[\\s-]?multi\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-multi",
+      "priority": 1,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-codex-swarm",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?codex[\\s-]?swarm\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bcodex[\\s-]?swarm\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-swarm",
+      "deprecated_from": "tfx-codex-swarm",
+      "priority": 1,
+      "supersedes": [
+        "tfx-codex"
+      ],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-remote-spawn",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?remote[\\s-]?spawn\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bremote[\\s-]?spawn\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-remote-spawn",
+      "priority": 1,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-auto-codex",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?auto[\\s-]?codex\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-auto-codex",
+      "priority": 1,
+      "supersedes": [
+        "tfx-auto",
+        "tfx-codex"
+      ],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-auto",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?auto\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-auto",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-codex",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?codex\\b(?![\\s-]?swarm)",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-codex",
+      "priority": 3,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-gemini",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?gemini\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-gemini",
+      "priority": 3,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-hub",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?hub\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-hub",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-doctor",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?doctor\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-doctor",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-setup",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?setup\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-setup",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-autoresearch",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?autoresearch\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-autoresearch",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-deep-interview",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?deep[\\s-]?interview\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-deep-interview",
+      "priority": 2,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "handoff-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(핸드오프|handoff|세션\\s*넘기)[\\s]*(생성|만들|써줘|작성|넘겨)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "action": "handoff",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "notion-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(노션|notion)[\\s-]?(페이지|글|조회|생성|수정|검색)(?:$|(?=\\s))",
+          "flags": "i"
+        },
+        {
+          "source": "(노션|\\bnotion\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "chrome-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(크롬|chrome|브라우저)[\\s-]?(열|접속|로그인|navigate|click)(?:$|(?=\\s))",
+          "flags": "i"
+        },
+        {
+          "source": "(크롬|\\bchrome\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "jira-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(jira|지라)[\\s-]?(이슈|티켓|생성|조회|스프린트)(?:$|(?=\\s))",
+          "flags": "i"
+        },
+        {
+          "source": "(지라|\\bjira\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "codex"
+    },
+    {
+      "id": "mail-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(메일|gmail|이메일)[\\s-]?(보내|읽|검색|draft)(?:$|(?=\\s))",
+          "flags": "i"
+        },
+        {
+          "source": "(메일|이메일|\\bgmail\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "calendar-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(일정|캘린더|calendar)[\\s-]?(생성|조회|추가)(?:$|(?=\\s))",
+          "flags": "i"
+        },
+        {
+          "source": "(일정|캘린더|\\bcalendar\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "playwright-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(playwright|브라우저\\s*테스트)(?:$|(?=\\s))",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "canva-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(canva|캔바|디자인\\s*생성)(?:$|(?=\\s))",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "confluence-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(confluence|위키|wiki)[\\s-]?(페이지|문서|조회|생성|수정|검색)(?:$|(?=\\s))",
+          "flags": "i"
+        },
+        {
+          "source": "(위키|\\bconfluence\\b|\\bwiki\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "slack-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(slack|슬랙)[\\s-]?(메시지|채널|보내|읽|검색|알림)(?:$|(?=\\s))",
+          "flags": "i"
+        },
+        {
+          "source": "(슬랙|\\bslack\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "gemini"
+    },
+    {
+      "id": "github-route",
+      "patterns": [
+        {
+          "source": "(?:^|(?<=\\s))(github|깃허브)[\\s-]?(이슈|issue|PR|pull|커밋|commit|리포|repo)(?:$|(?=\\s))",
+          "flags": "i"
+        },
+        {
+          "source": "(깃허브|\\bgithub\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "priority": 10,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": "codex"
+    },
+    {
+      "id": "gstack-checkpoint",
+      "patterns": [
+        {
+          "source": "(?:어디까지\\s*했|뭐\\s*하고\\s*있었|뭘\\s*해야\\s*하|까먹|기억이\\s*안|이어서\\s*하|중단\\s*지점)",
+          "flags": "i"
+        },
+        {
+          "source": "\\b(?:checkpoint|resume|pick\\s*up|where\\s*was\\s*I)\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "checkpoint",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-office-hours",
+      "patterns": [
+        {
+          "source": "(?:아이디어\\s*(?:있|정리|브레인)|뭘\\s*만들|제품\\s*구상)",
+          "flags": "i"
+        },
+        {
+          "source": "\\boffice[\\s-]?hours\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "office-hours",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-ship",
+      "patterns": [
+        {
+          "source": "(?:배포해|PR\\s*만들|릴리스\\s*해|머지하고\\s*배포)",
+          "flags": "i"
+        },
+        {
+          "source": "\\bship\\b(?!.*tfx)",
+          "flags": "i"
+        }
+      ],
+      "skill": "ship",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-investigate",
+      "patterns": [
+        {
+          "source": "(?:왜\\s*(?:안\\s*돼|터져|에러)|원인\\s*(?:찾아|분석)|root\\s*cause)",
+          "flags": "i"
+        },
+        {
+          "source": "\\binvestigate\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "investigate",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-cso",
+      "patterns": [
+        {
+          "source": "(?:보안\\s*(?:감사|점검|리뷰|스캔)|\\bcso\\b|\\bOWASP\\b|\\bSTRIDE\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": "cso",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-qa-browser",
+      "patterns": [
+        {
+          "source": "(?:사이트|브라우저|웹)\\s*(?:QA|테스트|확인|점검)",
+          "flags": "i"
+        },
+        {
+          "source": "(?:클릭|접속).*(?:테스트|확인)",
+          "flags": "i"
+        }
+      ],
+      "skill": "qa",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-retro",
+      "patterns": [
+        {
+          "source": "(?:회고|이번\\s*주\\s*뭐\\s*했|주간\\s*리뷰|뭘\\s*했지)",
+          "flags": "i"
+        },
+        {
+          "source": "\\bretro\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "retro",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "gstack-autoplan",
+      "patterns": [
+        {
+          "source": "(?:자동\\s*리뷰|리뷰\\s*파이프라인|전체\\s*리뷰)",
+          "flags": "i"
+        },
+        {
+          "source": "\\bautoplan\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "autoplan",
+      "priority": 5,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "suppress-omc-team",
+      "patterns": [
+        {
+          "source": "(?<!tfx[\\s-]?)(팀|\\bteam\\b)",
+          "flags": "i"
+        }
+      ],
+      "skill": null,
+      "action": "suppress_omc",
+      "priority": 20,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    }
+  ]
+}

@@ -1,112 +1,171 @@
 # triflux — Claude Code 운영 가이드
 
+<core-systems>
+## 핵심 스킬 시스템 (항상 인지)
+
+이 프로젝트는 3개의 스킬 시스템을 동시에 사용한다. 어떤 작업이든 해당 시스템의 스킬이 있는지 먼저 확인한다.
+
+| 시스템 | 접두사 | 용도 | 스킬 수 |
+|--------|--------|------|---------|
+| **triflux** | `/tfx-*` | CLI 라우팅, 멀티모델 오케스트레이션, 스웜, 원격 실행 | ~40개 |
+| **gstack** | `/` (접두사 없음) | QA, ship, investigate, design, review, checkpoint | ~35개 |
+| **omc** | `/oh-my-claudecode:*` | autopilot, ralph, team, ultrawork, ccg | ~25개 |
+
+스킬을 모르면 자연어 라우팅(아래)으로 자동 매핑된다.
+세션 종료 전 메모리 파일이 3개+ 변경됐으면 `/memory-hygiene` 제안을 검토한다.
+</core-systems>
+
+<routing>
 ## 자연어 → 스킬 라우팅
 
-사용자가 스킬명을 모르더라도 자연어로 요청하면 아래 규칙에 따라 적절한 스킬을 내부적으로 호출한다.
+사용자가 스킬명을 모르더라도 자연어로 요청하면 아래 규칙에 따라 적절한 스킬을 호출한다.
 
-### 1차 분류: 행동 유형
+### 행동 유형 → 스킬 매핑
 
-| 의도 | 한국어 | 영어 | 스킬 |
-|------|--------|------|------|
-| 구현 | 만들어, 추가해, 구현해, 짜줘, 개발해, 넣어줘, 붙여줘 | implement, build, add, create, develop | tfx-auto |
-| 수정 | 고쳐, 수정해, 바꿔, 변경해, 패치해, 업데이트해 | fix, modify, change, patch, update | tfx-auto |
-| 리뷰 | 봐줘, 리뷰해, 검토해, 확인해, 괜찮아?, 이상 없어? | review, check, look at, examine, is this ok | tfx-review |
-| 분석 | 분석해, 파악해, 어떻게 돌아가?, 구조가 뭐야, 해부해 | analyze, how does it work, structure, dissect | tfx-analysis |
-| 계획 | 계획, 어떻게 하지, 순서, 단계, 설계해, 로드맵 | plan, how should I, steps, design, roadmap | tfx-plan |
-| 검색 | 찾아, 어디있어, 파일 찾아, 위치, 어디서 쓰여 | find, where is, locate, which file | tfx-find |
-| 리서치 | 조사해, 알아봐, 최신, 공식문서, 뭐가 좋아, 비교해봐 | research, look up, latest, docs, compare options | tfx-research |
-| 테스트 | 테스트, 검증, 돌려봐, 통과시켜, QA | test, verify, run tests, make pass, QA | tfx-qa |
-| 정리 | 정리해, 슬롭 제거, 불필요한 거 지워, 클린업, 다이어트 | clean up, remove slop, simplify, trim | tfx-prune |
-| 토론 | 뭐가 나을까, 비교해, A vs B, 장단점, 트레이드오프 | which is better, compare, pros cons, tradeoff | tfx-debate |
+| 의도 | 자연어 신호 | 스킬 |
+|------|-----------|------|
+| 구현/수정 | 만들어, 고쳐, 구현해, 짜줘, 수정해, 바꿔 | tfx-auto |
+| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | tfx-review |
+| 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-analysis |
+| 계획 | 계획, 어떻게 하지, 설계해 | tfx-plan |
+| 검색 | 찾아, 어디있어, 파일 찾아 | tfx-find |
+| 리서치 (빠른) | 검색해줘, 찾아봐, 공식문서, 이거 뭐야 | tfx-research |
+| 리서치 (자율) | 자율 리서치, 검색하고 정리해, research and plan | tfx-autoresearch |
+| 테스트 | 테스트, 검증, 돌려봐, QA | tfx-qa |
+| 정리 | 정리해, 슬롭 제거, 클린업 | tfx-prune |
+| 토론 | 뭐가 나을까, 비교해, A vs B | tfx-debate |
 
-### 2차 분류: 깊이 수정자
+### 깊이 수정자
 
-| 수정자 | 자연어 신호 | 효과 |
-|--------|-----------|------|
-| 기본 | (없음), 빠르게, 간단히, 얼른 | Light 스킬 사용 |
-| 깊이 | 제대로, 꼼꼼히, 철저히, 심층, 확실하게, 편향 없이 | Deep 스킬로 에스컬레이션 |
-| 합의 | 3자, 교차, 합의, 다각도, 여러 관점, 세 모델 다 | consensus 프로토콜 활성화 |
-| 반복 | 끝까지, 멈추지마, 완료될때까지, 다 될때까지, ralph | persist 모드 |
-| 자율 | 알아서, 자동으로, 그냥 해, autopilot, 손 안 대고 | autopilot 모드 |
-
-### 라우팅 매트릭스 (행동 x 깊이 → 스킬)
-
-| 행동 \ 깊이 | 기본 | 깊이 | 합의 | 반복 | 자율 |
-|------------|------|------|------|------|------|
-| 리뷰 | tfx-review | tfx-deep-review | tfx-deep-review | — | — |
-| 분석 | tfx-analysis | tfx-deep-analysis | tfx-deep-analysis | — | — |
-| 계획 | tfx-plan | tfx-deep-plan | tfx-deep-plan | — | — |
-| QA | tfx-qa | tfx-deep-qa | tfx-deep-qa | — | — |
-| 리서치 | tfx-research | tfx-deep-research | tfx-deep-research | — | — |
-| 구현 | tfx-auto | tfx-autopilot | tfx-fullcycle | tfx-persist | tfx-autopilot |
-| 토론 | tfx-debate | tfx-panel | tfx-panel | — | — |
-
-### 3차 분류: 모델 선호
-
-| 신호 | 라우팅 |
-|------|--------|
-| codex한테, codex가, codex로 | TFX_CLI_MODE=codex |
-| gemini한테, gemini가, gemini로 | TFX_CLI_MODE=gemini |
-| 셋 다, 3개 다, 전부 동원 | tfx-consensus / tfx-multi |
-| (없음) | 자동 판단 |
-
-### 신뢰도 기반 행동
-
-| 신뢰도 | 조건 | 행동 |
+| 수정자 | 신호 | 효과 |
 |--------|------|------|
-| 높음 | 의도 + 깊이 모두 명확 | 자동으로 Skill 호출 |
-| 중간 | 의도 명확, 깊이 불명확 | Light 기본값 사용 |
-| 낮음 | 의도 불명확 | 1문장 확인 질문 |
+| 기본 | (없음), 빠르게, 간단히 | Light 스킬 |
+| 깊이 | 제대로, 꼼꼼히, 철저히 | Deep 스킬 (tfx-deep-*). 예외: tfx-deep-interview는 Gemini 단독 |
+| 합의 | 3자, 교차, 다각도 | consensus 프로토콜 |
+| 반복 | 끝까지, 멈추지마, ralph | persist 모드 |
+| 자율 | 알아서, 자동으로, autopilot | autopilot 모드 |
 
-### 트리거 충돌 해소
+### CLI 라우팅
 
-| 충돌 | 해소 규칙 |
-|------|----------|
-| ralph vs persist | ralph은 persist alias. 라우팅은 persist로 통합 |
-| auto vs autopilot | "auto" 단독 → tfx-auto. "알아서 해/자동으로" → tfx-autopilot |
-| analysis vs /analyze | /analyze 커맨드 → tfx-auto. "분석해" 자연어 → tfx-analysis |
-| research vs /research | /research 커맨드 → tfx-auto. "조사해" 자연어 → tfx-research |
-| 검색 vs find vs research | "코드에서 찾아/어디있어" → tfx-find. "알아봐/조사해" → tfx-research |
+headless-guard가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. tfx 스킬 경유 필수.
 
-### 복합 의도 처리
+**Layer 1 — Light** (tfx-route.sh → 단일 CLI)
 
-여러 의도가 한 문장에 섞인 경우:
-* "구현하고 리뷰까지" → tfx-auto(구현) → 완료 후 교차 리뷰(cross-review hook)
-* "계획 세우고 바로 실행" → tfx-plan → 승인 후 tfx-auto
-* "3자 합의로 리뷰하고 끝까지 수정" → tfx-deep-review → 이슈 발견 시 tfx-persist
+| 스킬 | CLI | 용도 |
+|------|-----|------|
+| tfx-auto | 자동 | 통합 진입점 |
+| tfx-codex | Codex | Codex 전용 |
+| tfx-gemini | Gemini | Gemini 전용 |
+| tfx-autopilot | Codex→검증 | 단일 파일, 5분 이내 |
+| tfx-autoroute | 자동 승격 | 실패→더 강한 모델 |
 
+**Layer 2 — Deep** (headless 3-CLI 합의)
+
+tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-consensus, tfx-debate, tfx-panel, tfx-fullcycle, tfx-persist
+
+**Layer 3 — Remote/병렬**
+
+| 스킬 | 용도 |
+|------|------|
+| tfx-multi | 2+개 태스크 headless 병렬 |
+| tfx-codex-swarm | PRD별 worktree + Codex 다중 (로컬 전용) |
+| tfx-remote-spawn | Claude Code 원격 세션 (SSH, setup 필수) |
+
+**Claude 네이티브** (CLI 불필요): tfx-find, tfx-forge, tfx-prune, tfx-index, tfx-setup, tfx-doctor, tfx-hooks, tfx-hub
+
+자원 우선순위: remote-spawn > codex-swarm > multi > Light > 로컬 단독
+
+### 충돌 해소
+
+- ralph = persist alias
+- "auto" 단독 → tfx-auto. "알아서 해" → tfx-autopilot
+- "코드에서 찾아" → tfx-find. "알아봐" → tfx-research
+- 복합 의도: "구현하고 리뷰까지" → tfx-auto → cross-review hook
+</routing>
+
+<session-context>
 ## 맥락 이탈 판단
 
 현재 세션 맥락과 무관한 요청이 감지되면 psmux 격리를 제안한다.
 
 | 확신도 | 신호 | 행동 |
 |--------|------|------|
-| 확실 | "새 탭", "별도로", "새 세션", "깨끗하게" | 바로 psmux spawn |
-| 높음 | 다른 프로젝트/디렉토리/스택 언급 | AskUserQuestion으로 분리 제안 |
-| 중간 | 작업 유형 전환, 무관한 모듈 언급 | 분리 제안 + 현재 세션 옵션 |
-| 낮음 | 현재 작업 연장, 부연 질문 | 현재 세션 유지 |
+| 확실 | "새 탭", "별도로", "새 세션" | 바로 psmux spawn |
+| 높음 | 다른 프로젝트/스택 언급 | 분리 제안 |
+| 중간 | 작업 유형 전환 | 분리 제안 + 현재 세션 옵션 |
+| 낮음 | 현재 작업 연장 | 세션 유지 |
+</session-context>
 
-## psmux/WT 필수 규칙
+<psmux-wt>
+## psmux/WT 규칙
 
-**psmux 세션·WT 패인을 생성/조작/정리할 때 반드시 `tfx-psmux-rules` 스킬을 참조하라.**
-RULE 5(WT 프리징 방지)를 위반하면 WT 전체가 응답 불능이 되어 모든 탭이 유실된다.
-핵심: exit → sleep 2 → kill 순서. 바로 kill 절대 금지.
+psmux 세션·WT 패인을 생성/조작/정리할 때 `tfx-psmux-rules` 스킬을 참조한다.
+WT 프리징 방지: exit → sleep 2 → kill 순서. 바로 kill하지 않는다.
 
-## Codex config.toml 충돌 방지
+### wt.exe → wt-manager 경유
 
-`~/.codex/config.toml`에 `sandbox`, `approval_mode` 등이 이미 설정된 경우 CLI 플래그(`--full-auto`, `--sandbox`)를 중복 지정하면 Codex가 에러를 던진다.
+safety-guard가 `wt.exe`, `wt new-tab`, `wt split-pane`, `Start-Process wt`를 차단한다.
+`hub/team/wt-manager.mjs`의 API를 사용한다.
 
-| config.toml에 있으면 | CLI에서 금지 |
-|---------------------|------------|
-| `sandbox = "elevated"` | `--full-auto` (sandbox를 재설정하려 함) |
+| 용도 | API |
+|------|-----|
+| 새 탭 | `createTab({ title, command, profile, cwd })` |
+| 패인 분할 | `splitPane({ direction: 'H'\|'V', title, command })` |
+| 다중 배치 | `applySplitLayout([{ title, command, direction }])` |
+| 탭 정리 | `closeTab(title)` / `closeStale({ olderThanMs, titlePattern })` |
+
+차단과 대안은 항상 쌍으로 존재해야 한다. 차단만 추가하고 대안을 안 만들면 데드락.
+
+### psmux에서 Codex 실행
+
+| 방식 | 동작 | 이유 |
+|------|------|------|
+| `codex` (interactive) | 불가 | psmux에서 TTY를 못 잡음 |
+| `codex < prompt.md` | 불가 | "stdin is not a terminal" |
+| `codex exec "$(cat prompt.md)" -s danger-full-access --dangerously-bypass-approvals-and-sandbox` | 사용 | 유일한 안전 경로 |
+
+`codex exec`는 config.toml `approval_mode`를 무시하므로 `--dangerously-bypass-approvals-and-sandbox` 필수.
+`-s` 유효값: read-only, workspace-write, danger-full-access.
+</psmux-wt>
+
+<codex-config>
+## Codex config.toml
+
+config.toml에 이미 설정된 값은 CLI 플래그로 중복 지정하지 않는다.
+
+| config.toml에 있으면 | CLI에서 생략 |
+|---------------------|-------------|
+| `sandbox = "elevated"` | `--full-auto` |
 | `approval_mode = "full-auto"` | `--full-auto` |
-| `model = "gpt-5.3-codex"` | `-c 'model="..."'` |
 
-**안전 패턴:** config.toml에 기본값을 두고, CLI에서는 `--profile` 선택만 한다. 런처 스크립트·tfx-route.sh에서 `--full-auto`를 추가하기 전에 반드시 config.toml을 확인하라.
+안전 패턴: config.toml에 기본값을 두고, CLI에서는 `--profile` 선택만 한다.
+</codex-config>
 
-## 교차 검증 규칙
+<remote>
+## 원격 실행
 
-* Claude 작성 코드 → Codex 리뷰
-* Codex 작성 코드 → Claude 리뷰
-* 동일 모델 self-approve 금지
-* git commit 전 미검증 파일 감지 시 nudge
+### 스킬 구분
+
+| 스킬 | 대상 | 방식 |
+|------|------|------|
+| tfx-codex-swarm | 로컬 전용 | 로컬 worktree + psmux |
+| tfx-remote-spawn | Claude Code 원격 | SSH → Claude Code 세션 → 내부 tfx 라우팅 |
+
+codex를 SSH 너머로 직접 실행하지 않는다. config.toml 충돌 + TTY 문제.
+원격에서 codex가 필요하면: remote-spawn → Claude Code → Claude가 내부에서 codex 호출.
+
+### SSH 패턴
+
+- 인라인 쿼팅 대신 scp + `pwsh -File` 패턴 사용
+- SSH 전송 중 `$var` 전개 주의, PowerShell 변수는 인라인 불가
+- `~` → `$HOME` 변환 필수, 원격 기본 셸 = PowerShell
+</remote>
+
+<cross-review>
+## 교차 검증
+
+- Claude 작성 코드 → Codex 리뷰
+- Codex 작성 코드 → Claude 리뷰
+- 동일 모델 self-approve 하지 않는다
+- git commit 전 미검증 파일 감지 시 nudge
+</cross-review>

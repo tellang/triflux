@@ -1,0 +1,72 @@
+{
+  "$schema": "Neural Memory 에러 시그니처 시드 — 자동 학습 전 수동 등록 패턴",
+  "version": 1,
+  "signatures": {
+    "ssh-powershell-devnull": {
+      "pattern": "Could not find a part of the path.*dev.null",
+      "tool": "Bash",
+      "context": "SSH 명령 실행",
+      "root_cause": "원격 호스트가 PowerShell인데 bash 문법(2>/dev/null)을 사용",
+      "dna_factor": "remote.os",
+      "rule_template": "원격 호스트 {host}는 PowerShell 기본 셸. 2>/dev/null 대신 2>$null, && 대신 ;, $(cmd) 대신 $(cmd) PowerShell 구문 사용.",
+      "fix": "hub/lib/ssh-command.mjs의 suppressStderr(os) 사용",
+      "confidence_base": 0.95,
+      "severity": "high"
+    },
+    "ssh-powershell-ampamp": {
+      "pattern": "The token '&&' is not a valid statement separator",
+      "tool": "Bash",
+      "context": "SSH 명령 실행",
+      "root_cause": "원격 호스트가 PowerShell인데 bash의 && 연결자를 사용",
+      "dna_factor": "remote.os",
+      "rule_template": "원격 호스트 {host}는 PowerShell 기본 셸. && 대신 ; 사용.",
+      "fix": "hub/lib/ssh-command.mjs의 commandJoin(os) 사용",
+      "confidence_base": 0.95,
+      "severity": "high"
+    },
+    "codex-sandbox-duplicate": {
+      "pattern": "cannot be used multiple times",
+      "tool": "Bash",
+      "context": "codex exec 실행",
+      "root_cause": "config.toml sandbox 설정과 CLI 플래그(--full-auto) 중복",
+      "dna_factor": "cli.codex.config.sandbox",
+      "rule_template": "Codex config.toml에 sandbox=\"{value}\" 설정이 있으므로 CLI에서 --full-auto 플래그 사용 금지",
+      "fix": "config.toml에 기본값을 두고, CLI에서는 --profile만 선택",
+      "confidence_base": 0.95,
+      "severity": "critical"
+    },
+    "codex-exec-approval-stall": {
+      "pattern": "Reading additional input from stdin",
+      "tool": "Bash",
+      "context": "codex exec 비대화형 실행",
+      "root_cause": "codex exec이 config.toml approval_mode를 무시하여 무한 대기",
+      "dna_factor": null,
+      "rule_template": "codex exec은 config.toml approval_mode를 무시함. 반드시 --dangerously-bypass-approvals-and-sandbox 명시적 추가 필수",
+      "fix": "codex exec 호출 시 항상 --dangerously-bypass-approvals-and-sandbox 플래그 포함",
+      "confidence_base": 1.0,
+      "severity": "critical"
+    },
+    "ssh-stdin-hang": {
+      "pattern": "Reading additional input from stdin|Pseudo-terminal will not be allocated",
+      "tool": "Bash",
+      "context": "SSH 원격 CLI 실행",
+      "root_cause": "SSH 세션에서 stdin이 리다이렉트되지 않음",
+      "dna_factor": null,
+      "rule_template": "SSH 원격 실행 시 ssh -n 또는 stdin: 'ignore' 옵션으로 stdin 리다이렉트 필수",
+      "fix": "execFileSync('ssh', [...], { stdio: ['ignore', 'pipe', 'pipe'] })",
+      "confidence_base": 0.9,
+      "severity": "high"
+    },
+    "psmux-node-not-found": {
+      "pattern": "node: not found|node: command not found",
+      "tool": "Bash",
+      "context": "psmux 세션에서 node 실행",
+      "root_cause": "psmux 세션이 PowerShell 7인데 bash 경로의 node를 참조",
+      "dna_factor": "multiplexer.name",
+      "rule_template": "psmux pane은 PowerShell 7 환경. bash PATH의 node 경로가 아닌 PowerShell PATH를 사용해야 함. wrapCliForBash 래핑 금지.",
+      "fix": "PowerShell 네이티브 명령 사용, bash 래핑 금지",
+      "confidence_base": 0.9,
+      "severity": "high"
+    }
+  }
+}

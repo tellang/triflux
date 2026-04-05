@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { execSync, spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
+import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import {
   createPsmuxSession,
   killPsmuxSession,
@@ -25,11 +26,6 @@ import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import { createLogDashboard } from "./tui.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
-
-// remote-spawn.mjs의 escapePwshSingleQuoted와 동일 — 순환 의존 방지를 위해 인라인
-function escapePwshSingleQuoted(value) {
-  return String(value).replace(/'/g, "''");
-}
 
 /** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
 const CLI_BRAND = {
@@ -121,7 +117,13 @@ function readResult(resultFile, paneId) {
   if (existsSync(resultFile)) {
     return readFileSync(resultFile, "utf8").trim();
   }
-  // fallback: capture-pane (paneId = "tfx:0.1" 형태)
+  // fallback 1: stderr 파일 (codex 실패 시 원인 추적)
+  const errFile = `${resultFile}.err`;
+  if (existsSync(errFile)) {
+    const stderr = readFileSync(errFile, "utf8").trim();
+    if (stderr) return `[stderr] ${stderr}`;
+  }
+  // fallback 2: capture-pane (paneId = "tfx:0.1" 형태)
   return capturePsmuxPane(paneId, 30);
 }
 
@@ -228,11 +230,16 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
   const _dispatch = deps.dispatchCommand || dispatchCommand;
   const _startCapture = deps.startCapture || startCapture;
 
-  const _PREFIX = "__TRIFLUX_DONE__:";
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const completionRe = token
-    ? new RegExp(`${esc(_PREFIX)}${esc(token)}:(\\d+)`, "m")
-    : new RegExp(`${esc(_PREFIX)}\\S+:(\\d+)`, "m");
+  const completionPatterns = [
+    token
+      ? `${esc("__TRIFLUX_DONE__:")}${esc(token)}:(\\d+)`
+      : `${esc("__TRIFLUX_DONE__:")}\\S+:(\\d+)`,
+    token
+      ? `${esc("TFX_DONE_")}${esc(token)}:(\\d+)`
+      : `${esc("TFX_DONE_")}\\S+:(\\d+)`,
+  ];
+  const completionRe = new RegExp(completionPatterns.join("|"), "m");
 
   let restarts = 0;
   let currentPaneId = paneId;
@@ -267,7 +274,7 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
       if (completionMatch) {
         return {
           matched: true,
-          exitCode: Number.parseInt(completionMatch[1], 10),
+          exitCode: Number.parseInt((completionMatch.slice(1).find(Boolean) || '0'), 10),
           restarts,
           stallDetected,
           timedOut: false,

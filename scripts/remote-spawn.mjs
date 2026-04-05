@@ -102,12 +102,13 @@ export function buildRemoteBootstrapCommand(host) {
 }
 
 export function buildLocalClaudeCommand(claudePathNorm, permissionFlags = "") {
-  return `& '${escapePwshSingleQuoted(claudePathNorm)}'${permissionFlags ? ` ${permissionFlags}` : ""}; ${buildPwshExitTail()}`;
+  // try/finally: Ctrl+C로 Claude 종료해도 shell이 자동 exit
+  return `try { & '${escapePwshSingleQuoted(claudePathNorm)}'${permissionFlags ? ` ${permissionFlags}` : ""} } finally { exit }`;
 }
 
 export function buildRemoteClaudeCommand(env, permissionFlags = "") {
   if (env.shell === "pwsh") {
-    return `& "${escapePwshDoubleQuoted(env.claudePath)}"${permissionFlags ? ` ${permissionFlags}` : ""}; ${buildPwshExitTail()}`;
+    return `try { & "${escapePwshDoubleQuoted(env.claudePath)}"${permissionFlags ? ` ${permissionFlags}` : ""} } finally { exit }`;
   }
   return `${shellQuote(env.claudePath)}${permissionFlags ? ` ${permissionFlags}` : ""}; ${buildPosixExitTail()}`;
 }
@@ -137,10 +138,52 @@ export function buildSpawnCleanupWatcherArgs(sessionName, paneId, timingOptions 
   ];
 }
 
+/** 문자열을 psmux 세션명에 안전한 slug로 변환 */
+function toSlug(raw) {
+  return raw
+    .replace(/[^a-zA-Z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase()
+    .slice(0, 24);
+}
+
+/** 세션 이름용 slug 생성: --name > git branch > random UUID */
+function buildSessionSlug(customName) {
+  if (customName) return toSlug(customName);
+  try {
+    const branch = execFileSync("git", ["branch", "--show-current"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (branch) {
+      // feature/swarm-hypervisor → swarm-hypervisor
+      const stripped = branch.includes("/") ? branch.split("/").slice(1).join("-") : branch;
+      const slug = toSlug(stripped);
+      if (slug) return slug;
+    }
+  } catch { /* git not available */ }
+  return randomUUID().slice(0, 8);
+}
+
+/** 같은 slug의 세션이 이미 존재하면 -2, -3 ... 카운터 추가 */
+function deduplicateSessionName(baseName) {
+  try {
+    const existing = listPsmuxSessions();
+    if (!existing.includes(baseName)) return baseName;
+    for (let i = 2; i <= 99; i++) {
+      const candidate = `${baseName}-${i}`;
+      if (!existing.includes(candidate)) return candidate;
+    }
+  } catch { /* psmux not available */ }
+  return `${baseName}-${randomUUID().slice(0, 4)}`;
+}
+
 function usageText() {
   return `Usage:
-  remote-spawn --local [--dir <path>] [--prompt "task"] [--handoff <file>] [--transfer <file>]
-  remote-spawn --host <ssh-host> [--dir <path>] [--prompt "task"] [--handoff <file>] [--transfer <file>]
+  remote-spawn --local [--dir <path>] [--prompt "task"] [--name <slug>] [--handoff <file>] [--transfer <file>]
+  remote-spawn --host <ssh-host> [--dir <path>] [--prompt "task"] [--name <slug>] [--handoff <file>] [--transfer <file>]
   remote-spawn --send <session> "prompt"
   remote-spawn --list
   remote-spawn --attach <session>
@@ -151,6 +194,7 @@ Options:
   --host <name>    SSH 호스트로 원격 Claude 실행
   --dir <path>     작업 디렉토리 (기본: 현재 디렉토리 / 원격 홈)
   --prompt "..."   Claude에 전달할 첫 메시지
+  --name <slug>    세션/탭 이름 (기본: git branch명)
   --handoff <file> 핸드오프 파일 경로 (prompt와 결합 가능)
   --transfer <file> 원격 스테이징할 추가 파일 (반복 지정 가능)
   --send <session> 실행 중인 세션에 프롬프트 전송
@@ -169,6 +213,7 @@ function parseArgs(argv) {
   let handoff = null;
   const transferFiles = [];
   let local = false;
+  let spawnName = null;
   let sessionName = null;
   let probeHost = null;
   let watchPane = null;
@@ -206,6 +251,11 @@ function parseArgs(argv) {
     }
     if (arg === "--transfer" && argv[index + 1]) {
       transferFiles.push(argv[index + 1]);
+      index += 1;
+      continue;
+    }
+    if (arg === "--name" && argv[index + 1]) {
+      spawnName = argv[index + 1];
       index += 1;
       continue;
     }
@@ -283,6 +333,7 @@ function parseArgs(argv) {
     probeHost,
     prompt: mergedPrompt,
     sessionName,
+    spawnName,
     transferFiles,
     watchGraceMs,
     watchMaxMs,
@@ -792,10 +843,8 @@ function resolveRemoteStageDir(env, stageId) {
 
 function ensureRemoteStageDir(host, env, remoteStageDir) {
   if (env.os === "win32") {
-    const command = [
-      `$path = '${escapePwshSingleQuoted(remoteStageDir)}'`,
-      "New-Item -ItemType Directory -Path $path -Force | Out-Null",
-    ].join("; ");
+    const safePath = escapePwshSingleQuoted(remoteStageDir);
+    const command = `New-Item -ItemType Directory -Path '${safePath}' -Force | Out-Null`;
     execFileSync("ssh", [host, "pwsh", "-NoProfile", "-Command", command], { timeout: 10000, stdio: "pipe" });
     return;
   }
@@ -807,7 +856,9 @@ function ensureRemoteStageDir(host, env, remoteStageDir) {
 }
 
 function uploadFileToRemote(host, localPath, remotePath) {
-  execFileSync("scp", [localPath, `${host}:${shellQuote(remotePath)}`], { timeout: 15000, stdio: "pipe" });
+  // scp는 remote path를 셸 확장 없이 직접 전달 — shellQuote 불필요
+  // Windows 원격에서 쿼트가 리터럴 문자로 해석되어 경로 오류 발생
+  execFileSync("scp", [localPath, `${host}:${remotePath}`], { timeout: 15000, stdio: "pipe" });
 }
 
 function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
@@ -861,7 +912,7 @@ function listSpawnSessions() {
 function openAttachTab(sessionName, title = null) {
   if (IS_WINDOWS_LOCAL) {
     const wtArgs = title
-      ? ["new-tab", "--title", title, "--", "psmux", "attach", "-t", sessionName]
+      ? ["new-tab", "--title", title, "--suppressApplicationTitle", "--", "psmux", "attach", "-t", sessionName]
       : ["new-tab", "--", "psmux", "attach", "-t", sessionName];
     spawn("wt.exe", wtArgs, { detached: true, stdio: "ignore", windowsHide: false }).unref();
     return;
@@ -1021,7 +1072,8 @@ function spawnLocal(args, claudePath, prompt) {
   }
 
   const dir = args.dir ? resolve(args.dir) : process.cwd();
-  const sessionName = `tfx-spawn-${randomUUID().slice(0, 8)}`;
+  const slug = buildSessionSlug(args.spawnName);
+  const sessionName = deduplicateSessionName(`tfx-spawn-${slug}`);
   const paneId = `${sessionName}:0.0`;
   const permissionFlags = getPermissionFlag().join(" ");
   const claudePathNorm = normalizeCommandPath(claudePath);
@@ -1066,7 +1118,7 @@ function spawnLocal(args, claudePath, prompt) {
     }
 
     startSpawnSessionCleanupWatcher(sessionName, paneId);
-    openAttachTab(sessionName, "Claude@local");
+    openAttachTab(sessionName, `local:${slug}`);
     console.log(sessionName);
   } catch (err) {
     try { killPsmuxSession(sessionName); } catch {}
@@ -1092,7 +1144,8 @@ async function spawnRemote(args, promptContext) {
     process.exit(1);
   }
   const resolvedDir = resolveRemoteDir(args.dir, env);
-  const sessionName = `tfx-spawn-${host}-${randomUUID().slice(0, 8)}`;
+  const slug = buildSessionSlug(args.spawnName);
+  const sessionName = deduplicateSessionName(`tfx-spawn-${host}-${slug}`);
   const paneId = `${sessionName}:0.0`;
   const permissionFlags = getPermissionFlag().join(" ");
   let prompt = promptContext.prompt;
@@ -1109,21 +1162,55 @@ async function spawnRemote(args, promptContext) {
     sendKeysToPane(paneId, buildRemoteBootstrapCommand(host));
     await waitForRemotePrompt(sessionName, paneId);
 
-    const claudeCommand = buildRemoteClaudeCommand(env, permissionFlags);
     if (env.shell === "pwsh") {
       sendKeysToPane(paneId, `cd '${escapePwshSingleQuoted(resolvedDir)}'`);
     } else {
       sendKeysToPane(paneId, `cd ${shellQuote(resolvedDir)}`);
     }
-    sendKeysToPane(paneId, claudeCommand);
 
     if (prompt) {
-      sleepMs(2000);
-      sendKeysToPane(paneId, prompt);
+      // file-based prompt delivery: SCP prompt → remote launcher script
+      // send-keys로 긴 프롬프트를 보내면 깨지므로 파일 전송 후 스크립트 실행
+      const stageDir = resolveRemoteStageDir(env, sessionName);
+      ensureRemoteStageDir(host, env, stageDir);
+
+      const localPromptFile = join(tmpdir(), `tfx-prompt-${randomUUID().slice(0, 8)}.md`);
+      writeFileSync(localPromptFile, prompt, { encoding: "utf8" });
+      const remotePromptFile = `${stageDir}/prompt.md`;
+      uploadFileToRemote(host, localPromptFile, remotePromptFile);
+      try { unlinkSync(localPromptFile); } catch { /* cleanup best-effort */ }
+
+      if (env.shell === "pwsh") {
+        const remotePromptWin = remotePromptFile.replace(/\//g, "\\");
+        const scriptContent = [
+          `$ErrorActionPreference = 'SilentlyContinue'`,
+          `$t = '${escapePwshSingleQuoted(remotePromptWin)}'`,
+          `$c = '${escapePwshSingleQuoted(env.claudePath)}'`,
+          `$raw = Get-Content -Raw $t`,
+          `Remove-Item -ErrorAction SilentlyContinue $t`,
+          `Remove-Item -ErrorAction SilentlyContinue $MyInvocation.MyCommand.Definition`,
+          `& $c ${permissionFlags} $raw`,
+          `$trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }`,
+          `exit $trifluxExit`,
+        ].join("\n");
+        const localScript = join(tmpdir(), `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`);
+        writeFileSync(localScript, scriptContent, { encoding: "utf8" });
+        const remoteScript = `${stageDir}/launch.ps1`;
+        uploadFileToRemote(host, localScript, remoteScript);
+        try { unlinkSync(localScript); } catch { /* cleanup best-effort */ }
+
+        const remoteScriptWin = remoteScript.replace(/\//g, "\\");
+        sendKeysToPane(paneId, `pwsh -NoProfile -File '${escapePwshSingleQuoted(remoteScriptWin)}'`);
+      } else {
+        sendKeysToPane(paneId, `${shellQuote(env.claudePath)} ${permissionFlags} < ${shellQuote(remotePromptFile)} && rm -f ${shellQuote(remotePromptFile)}; ${buildPosixExitTail()}`);
+      }
+    } else {
+      const claudeCommand = buildRemoteClaudeCommand(env, permissionFlags);
+      sendKeysToPane(paneId, claudeCommand);
     }
 
     startSpawnSessionCleanupWatcher(sessionName, paneId);
-    openAttachTab(sessionName, `Claude@${host}`);
+    openAttachTab(sessionName, `${host}:${slug}`);
     console.log(sessionName);
   } catch (err) {
     try { killPsmuxSession(sessionName); } catch {}

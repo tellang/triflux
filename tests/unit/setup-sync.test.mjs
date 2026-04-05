@@ -166,6 +166,7 @@ describe('setup-sync: managed hook registration', () => {
 
   it('유효하지 않은 CLAUDE_PLUGIN_ROOT는 무시하고 실제 패키지 루트를 사용한다', () => {
     const settingsPath = join(TMP_DIR, 'settings.json');
+    const registryPath = join(PROJECT_ROOT, 'hooks', 'hook-registry.json');
     const invalidPluginRoot = join(TMP_DIR, 'empty-worktree');
     mkdirSync(invalidPluginRoot, { recursive: true });
 
@@ -175,7 +176,7 @@ describe('setup-sync: managed hook registration', () => {
     process.env.CLAUDE_PLUGIN_ROOT = invalidPluginRoot;
 
     try {
-      const result = ensureHooksInSettings({ settingsPath });
+      const result = ensureHooksInSettings({ settingsPath, registryPath });
       assert.equal(result.ok, true);
 
       const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
@@ -185,7 +186,7 @@ describe('setup-sync: managed hook registration', () => {
 
       assert.ok(stopCommands.some((command) => command.includes('pipeline-stop.mjs')), 'pipeline-stop hook must be registered');
       assert.ok(stopCommands.every((command) => !command.includes(invalidPluginRoot.replace(/\\/g, '/'))), 'invalid plugin root must not leak into settings');
-      assert.ok(stopCommands.some((command) => command.includes(PLUGIN_ROOT.replace(/\\/g, '/'))), 'registered hook must point at the actual package root');
+      assert.ok(stopCommands.some((command) => command.includes('${PLUGIN_ROOT}')), 'registered hook must use ${PLUGIN_ROOT} template variable');
     } finally {
       if (prevPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
       else process.env.PLUGIN_ROOT = prevPluginRoot;

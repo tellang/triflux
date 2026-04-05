@@ -1,0 +1,27 @@
+---
+name: tfx-ralph
+description: >
+  tfx-persist의 별칭(alias). 'ralph', '끝까지 해', '멈추지 마' 같은 요청에 사용.
+  실제 동작은 tfx-persist 스킬이 수행합니다.
+  Use when: ralph, 끝까지, don't stop, 멈추지 마
+triggers:
+  - tfx-ralph
+  - ralph
+---
+
+# tfx-ralph — tfx-persist 별칭
+
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
+이 스킬은 `tfx-persist`와 동일합니다. `/tfx-persist` 스킬을 호출하세요.
+
+## 동작
+
+Skill 도구로 tfx-persist를 호출한다:
+```
+Skill: tfx-persist
+```
+
+사용자의 원래 요청을 그대로 전달한다.

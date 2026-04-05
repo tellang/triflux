@@ -294,14 +294,23 @@ wt.exe -w 0 sp -V -p triflux ...
 
 ---
 
-## RULE 6: spark53 프로파일은 Pro 전용
+## RULE 6: WT 탭/창은 wt-manager 경유 필수
+
+- `wt.exe new-tab ...` 직접 호출 금지
+- `wt.exe split-pane ...` 직접 호출 금지
+- `Start-Process wt.exe ...` PowerShell 호출 금지
+- 반드시 wt-manager.mjs의 createTab() / applyLayout() 사용
+
+---
+
+## RULE 7: spark53 프로파일은 Pro 전용
 
 `spark53_med`, `spark53_low` 등 spark 모델 프로파일은 **Codex Pro 구독 전용**이다.
 비-Pro 환경에서는 `codex53_low`로 폴백한다.
 
 ---
 
-## RULE 7: WT 레이아웃 선택 필수
+## RULE 8: WT 레이아웃 선택 필수
 
 WT에 패인을 배치하기 전에 **반드시** 사용자에게 레이아웃을 확인한다.
 새 탭(`nt`)은 금지 — split + dashboard가 기본.

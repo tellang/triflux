@@ -27,21 +27,23 @@ describe("remote-spawn normal-exit cleanup command builders", () => {
     assert.match(command, /exit\s+\$trifluxExit/);
   });
 
-  it("buildLocalClaudeCommand appends pwsh exit tail", () => {
+  it("buildLocalClaudeCommand wraps in try/finally for Ctrl+C safety", () => {
     const command = buildLocalClaudeCommand("C:/Users/O'Neil/claude.exe", "--dangerously-skip-permissions");
+    assert.match(command, /try\s*\{/);
     assert.match(command, /& 'C:\/Users\/O''Neil\/claude\.exe'/);
     assert.match(command, /--dangerously-skip-permissions/);
-    assert.match(command, /exit\s+\$trifluxExit/);
+    assert.match(command, /finally\s*\{\s*exit\s*\}/);
   });
 
-  it("buildRemoteClaudeCommand for pwsh appends pwsh exit tail", () => {
+  it("buildRemoteClaudeCommand for pwsh wraps in try/finally", () => {
     const command = buildRemoteClaudeCommand(
       { shell: "pwsh", claudePath: "C:\\Users\\dev\\bin\\claude.exe" },
       "--dangerously-skip-permissions",
     );
-    assert.match(command, /^& "C:\\Users\\dev\\bin\\claude\.exe"/);
+    assert.match(command, /try\s*\{/);
+    assert.match(command, /& "C:\\Users\\dev\\bin\\claude\.exe"/);
     assert.match(command, /--dangerously-skip-permissions/);
-    assert.match(command, /exit\s+\$trifluxExit/);
+    assert.match(command, /finally\s*\{\s*exit\s*\}/);
   });
 
   it("buildRemoteClaudeCommand for posix appends posix exit tail", () => {

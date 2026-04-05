@@ -1,0 +1,12 @@
+{
+  "name": "tfx-deep-interview",
+  "description": "구현 전 소크라테스식 질의로 요구사항 깊이 탐색. 5단계 인터뷰를 통해 요구사항을 명확히 하고 최적 구현 경로를 도출합니다.",
+  "triggers": [
+    "deep-interview",
+    "딥인터뷰",
+    "소크라테스",
+    "깊이 탐색",
+    "요구사항 분석"
+  ],
+  "argument_hint": "<topic>"
+}

@@ -13,6 +13,7 @@ import {
   releaseLock,
   writeState,
 } from '../../hub/state.mjs';
+import { getOrCreateServer } from '../../hub/server.mjs';
 
 const TEMP_DIRS = [];
 
@@ -70,9 +71,23 @@ describe('hub/state.mjs', () => {
       startedAt: '2026-04-03T01:00:00.000Z',
     });
 
-    const raw = readFileSync(join(process.env.TFX_HUB_STATE_DIR, 'hub-state.json'), 'utf8');
+    const raw = readFileSync(join(process.env.TFX_HUB_STATE_DIR, 'hub.pid'), 'utf8');
     assert.doesNotThrow(() => JSON.parse(raw));
     assert.equal(readState()?.version, 'second');
+  });
+
+  it('readState는 legacy hub-state.json 파일도 fallback으로 읽는다', () => {
+    const stateDir = makeTempStateDir();
+    const expected = {
+      pid: process.pid,
+      port: 27888,
+      version: 'legacy',
+      sessionId: 'legacy-session',
+      startedAt: '2026-04-03T00:00:00.000Z',
+    };
+
+    writeFileSync(join(stateDir, 'hub-state.json'), JSON.stringify(expected), 'utf8');
+    assert.deepEqual(readState(), expected);
   });
 
   it('acquireLock는 경합 시 timeout 후 실패하고 release 후 재획득 가능하다', async () => {
@@ -115,5 +130,99 @@ describe('hub/state.mjs', () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+describe('getOrCreateServer — 싱글톤 팩토리', () => {
+  it('기존 서버가 없으면 새로 시작한다', async () => {
+    const fakeBoot = async () => ({
+      port: 30000,
+      pid: 99999,
+      url: 'http://127.0.0.1:30000/mcp',
+    });
+
+    const result = await getOrCreateServer({
+      _deps: {
+        readState: () => null,
+        startHub: fakeBoot,
+        isHealthy: () => true,
+        getInfo: () => null,
+      },
+    });
+
+    assert.equal(result.reused, false);
+    assert.equal(result.port, 30000);
+    assert.equal(result.pid, 99999);
+  });
+
+  it('기존 서버가 healthy하면 재사용한다 (reused: true)', async () => {
+    const result = await getOrCreateServer({
+      _deps: {
+        readState: () => ({ pid: process.pid, port: 31000 }),
+        startHub: () => { throw new Error('startHub이 호출되면 안 됨'); },
+        isHealthy: () => true,
+        getInfo: () => ({ url: 'http://127.0.0.1:31000/mcp' }),
+      },
+    });
+
+    assert.equal(result.reused, true);
+    assert.equal(result.port, 31000);
+    assert.equal(result.pid, process.pid);
+    assert.equal(result.url, 'http://127.0.0.1:31000/mcp');
+  });
+
+  it('PID는 살아있지만 health 체크 실패 시 새로 시작한다', async () => {
+    const fakeBoot = async () => ({
+      port: 32000,
+      pid: 88888,
+      url: 'http://127.0.0.1:32000/mcp',
+    });
+
+    const result = await getOrCreateServer({
+      _deps: {
+        readState: () => ({ pid: process.pid, port: 31000 }),
+        startHub: fakeBoot,
+        isHealthy: () => false,
+        getInfo: () => null,
+      },
+    });
+
+    assert.equal(result.reused, false);
+    assert.equal(result.port, 32000);
+    assert.equal(result.pid, 88888);
+  });
+
+  it('state에 pid/port가 불완전하면 새로 시작한다', async () => {
+    const fakeBoot = async () => ({
+      port: 33000,
+      pid: 77777,
+      url: 'http://127.0.0.1:33000/mcp',
+    });
+
+    const result = await getOrCreateServer({
+      _deps: {
+        readState: () => ({ pid: null, port: 27888 }),
+        startHub: fakeBoot,
+        isHealthy: () => true,
+        getInfo: () => null,
+      },
+    });
+
+    assert.equal(result.reused, false);
+    assert.equal(result.port, 33000);
+  });
+
+  it('getInfo가 url을 반환하지 않으면 기본 url로 폴백한다', async () => {
+    const result = await getOrCreateServer({
+      _deps: {
+        readState: () => ({ pid: process.pid, port: 34000 }),
+        startHub: () => { throw new Error('startHub이 호출되면 안 됨'); },
+        isHealthy: () => true,
+        getInfo: () => null,
+      },
+    });
+
+    assert.equal(result.reused, true);
+    assert.equal(result.url, 'http://127.0.0.1:34000/mcp');
   });
 });

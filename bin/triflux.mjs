@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // triflux CLI — setup, doctor, version
 import { copyFileSync, existsSync, readFileSync, readSync, writeFileSync, mkdirSync, chmodSync, readdirSync, unlinkSync, statSync, openSync, closeSync } from "fs";
-import { join, dirname, basename } from "path";
+import { join, dirname, basename, resolve } from "path";
 import { homedir, tmpdir } from "os";
 import { execSync, execFileSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
@@ -11,14 +11,17 @@ import { detectMultiplexer, getSessionAttachedCount, killSession, listSessions, 
 import { forceCleanupTeam } from "../hub/team/nativeProxy.mjs";
 import { cleanupStaleOmcTeams, inspectStaleOmcTeams } from "../hub/team/staleState.mjs";
 import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
+import { serializeHandoff } from "../scripts/lib/handoff.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
 import { probePsmuxSupport, formatPsmuxInstallGuidance, formatPsmuxUpdateGuidance } from "../scripts/lib/psmux-info.mjs";
 import {
   addRegistryServer,
+  createDefaultRegistry,
   inspectRegistry,
   inspectRegistryStatus,
   removeRegistryServer,
   removeServerFromTargets,
+  saveRegistry,
   syncRegistryTargets,
 } from "../scripts/lib/mcp-guard-engine.mjs";
 import {
@@ -28,7 +31,13 @@ import {
   extractManagedHookFilename, getManagedRegistryHooks, ensureHooksInSettings,
   ensureCodexHubServerConfig,
 } from "../scripts/setup.mjs";
+import {
+  ensureGlobalClaudeRoutingSection,
+  ensureTfxSection,
+  getLatestRoutingTable,
+} from "../scripts/claudemd-sync.mjs";
 import { cleanupTmpFiles } from "../scripts/tmp-cleanup.mjs";
+import { checkNetworkAvailability, validateRuntimeCachePaths } from "../hub/lib/cache-guard.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -96,6 +105,17 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     description: "triflux 및 동기화된 스크립트 버전 표시",
     options: [
       { name: "--json", type: "boolean", description: "버전 정보를 JSON으로 출력" },
+    ],
+  },
+  handoff: {
+    usage: "tfx handoff [--target local|remote] [--decision <text>] [--decision-file <path>] [--output <path>] [--json]",
+    description: "현재 작업 컨텍스트를 세션 핸드오프 프롬프트로 직렬화",
+    options: [
+      { name: "--target", type: "string", description: "주입 대상 (local|remote, 기본값 remote)" },
+      { name: "--decision", type: "string", description: "핸드오프 결정사항 (반복 지정 가능)" },
+      { name: "--decision-file", type: "string", description: "결정사항 파일 (라인/불릿 단위)" },
+      { name: "--output", type: "string", description: "생성한 핸드오프 프롬프트 저장 경로" },
+      { name: "--json", type: "boolean", description: "핸드오프 결과를 JSON으로 출력" },
     ],
   },
   list: {
@@ -262,6 +282,16 @@ function handleFatalError(error, { json = false } = {}) {
     if (fix) console.error(`fix: ${fix}`);
   }
   process.exit(exitCode);
+}
+
+function renderErrorMessage(message, fallback = "unknown error") {
+  if (typeof message === "string") {
+    const normalized = message.trim().toLowerCase();
+    if (normalized.length > 0 && normalized !== "undefined" && normalized !== "null") {
+      return message.trim();
+    }
+  }
+  return fallback;
 }
 
 function which(cmd) {
@@ -522,6 +552,26 @@ function describeSyncAction(src, dst, label) {
   };
 }
 
+function syncClaudeRoutingSectionsForCli() {
+  try {
+    const routingTable = getLatestRoutingTable();
+    return [
+      ensureTfxSection(join(PKG_ROOT, "CLAUDE.md"), routingTable),
+      ensureGlobalClaudeRoutingSection(CLAUDE_DIR),
+    ];
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "routing_sync_failed";
+    return [{ action: "unchanged", path: join(PKG_ROOT, "CLAUDE.md"), skipped: true, reason }];
+  }
+}
+
+function getClaudeRoutingSyncSummary(results) {
+  return results.reduce((summary, result) => ({
+    changed: summary.changed + (result.action === "created" || result.action === "updated" ? 1 : 0),
+    skipped: summary.skipped + (result.skipped ? 1 : 0),
+  }), { changed: 0, skipped: 0 });
+}
+
 // ── 크로스 셸 진단 ──
 
 function checkCliCrossShell(cmd, installHint) {
@@ -666,11 +716,45 @@ function previewMcpRegistrationActions(mcpUrl) {
   return actions;
 }
 
+function previewClaudeRoutingAction() {
+  const globalClaudePath = join(CLAUDE_DIR, "CLAUDE.md");
+  const projectClaudePath = join(PKG_ROOT, "CLAUDE.md");
+  const projectContent = existsSync(projectClaudePath)
+    ? readFileSync(projectClaudePath, "utf8")
+    : "";
+  const projectSection = extractMarkdownSection(projectContent, TFX_SECTION_HEADING);
+
+  if (!projectSection) {
+    return {
+      type: "claude-guidance",
+      path: globalClaudePath,
+      source: projectClaudePath,
+      change: "skip",
+      reason: "project-section-missing",
+    };
+  }
+
+  const globalContent = existsSync(globalClaudePath)
+    ? readFileSync(globalClaudePath, "utf8")
+    : "";
+  const preview = ensureTfxSection(globalContent, { scope: "global", projectSection });
+
+  return {
+    type: "claude-guidance",
+    path: globalClaudePath,
+    source: projectClaudePath,
+    change: preview.changed ? (existsSync(globalClaudePath) ? "update" : "create") : "noop",
+    heading: TFX_SECTION_HEADING,
+    summary: TFX_GLOBAL_SUMMARY_SECTION,
+  };
+}
+
 function buildSetupDryRunPlan() {
   const actions = [
     ...SYNC_MAP.map(({ src, dst, label }) => describeSyncAction(src, dst, label)),
     ...listSkillSyncActions(),
   ];
+  actions.push(previewClaudeRoutingAction());
   const codexProfiles = previewCodexProfiles();
   actions.push({
     type: "codex-profiles",
@@ -691,7 +775,7 @@ function buildSetupDryRunPlan() {
 }
 
 function cmdSetup(options = {}) {
-  const { dryRun = false, overrideVersion } = options;
+  const { dryRun = false, overrideVersion, skipClaudeMdSync = false } = options;
   if (dryRun) {
     printJson(buildSetupDryRunPlan());
     return;
@@ -701,6 +785,12 @@ function cmdSetup(options = {}) {
 
   for (const target of SYNC_MAP) {
     syncFile(target.src, target.dst, target.label);
+  }
+  {
+    const claudeGuide = ensureGlobalClaudeRoutingSection();
+    if (!claudeGuide.ok) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
+    else if (claudeGuide.changed) ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
+    else ok("CLAUDE.md: 전역 triflux 라우팅 요약 유지");
   }
 
   // 스킬 동기화 (~/.claude/skills/{name}/SKILL.md)
@@ -781,10 +871,26 @@ function cmdSetup(options = {}) {
   // ── 결과 추적 ──
   const summary = [];
 
+  if (!skipClaudeMdSync) {
+    const claudeRoutingResults = syncClaudeRoutingSectionsForCli();
+    const claudeRoutingSummary = getClaudeRoutingSyncSummary(claudeRoutingResults);
+    if (claudeRoutingSummary.changed > 0) {
+      ok(`CLAUDE.md 라우팅: ${claudeRoutingSummary.changed}개 파일 반영`);
+      summary.push({ item: "CLAUDE.md 라우팅", status: "✅", detail: `${claudeRoutingSummary.changed}개 파일 반영` });
+    } else if (claudeRoutingSummary.skipped > 0) {
+      ok("CLAUDE.md 라우팅: 대상 파일 없음 (건너뜀)");
+      summary.push({ item: "CLAUDE.md 라우팅", status: "⏭️", detail: "대상 파일 없음" });
+    } else {
+      ok("CLAUDE.md 라우팅: 최신 상태");
+      summary.push({ item: "CLAUDE.md 라우팅", status: "✅", detail: "최신 상태" });
+    }
+  }
+
   const codexProfileResult = ensureCodexProfiles();
   if (!codexProfileResult.ok) {
-    warn(`Codex profiles 설정 실패: ${codexProfileResult.message}`);
-    summary.push({ item: "Codex profiles", status: "⚠️", detail: codexProfileResult.message });
+    const reason = renderErrorMessage(codexProfileResult.message);
+    warn(`Codex profiles 설정 실패: ${reason}`);
+    summary.push({ item: "Codex profiles", status: "⚠️", detail: reason });
   } else if (codexProfileResult.changed > 0) {
     ok(`Codex profiles: ${codexProfileResult.changed}개 반영됨 (~/.codex/config.toml)`);
     summary.push({ item: "Codex profiles", status: "✅", detail: `${codexProfileResult.changed}개 반영됨` });
@@ -796,8 +902,9 @@ function cmdSetup(options = {}) {
   // Gemini 프로필
   const geminiResult = ensureGeminiProfiles();
   if (!geminiResult.ok) {
-    warn(`Gemini profiles 설정 실패: ${geminiResult.message}`);
-    summary.push({ item: "Gemini profiles", status: "⚠️", detail: geminiResult.message });
+    const reason = renderErrorMessage(geminiResult.message);
+    warn(`Gemini profiles 설정 실패: ${reason}`);
+    summary.push({ item: "Gemini profiles", status: "⚠️", detail: reason });
   } else if (geminiResult.created) {
     ok(`Gemini profiles: ${geminiResult.count}개 생성됨 (~/.gemini/triflux-profiles.json)`);
     summary.push({ item: "Gemini profiles", status: "✅", detail: `${geminiResult.count}개 생성됨` });
@@ -1128,13 +1235,10 @@ function buildMcpStatusRows(statusInfo) {
 }
 
 function ensureValidRegistryState() {
-  const registryState = inspectRegistry();
+  let registryState = inspectRegistry();
   if (!registryState.exists) {
-    throw createCliError(`MCP registry missing: ${registryState.path}`, {
-      exitCode: EXIT_CONFIG_ERROR,
-      reason: "configError",
-      fix: "config/mcp-registry.json을 복원하거나 `tfx mcp add <name> --url <url>`로 다시 생성하세요.",
-    });
+    saveRegistry(createDefaultRegistry());
+    registryState = inspectRegistry();
   }
   if (!registryState.valid) {
     throw createCliError(`MCP registry invalid: ${registryState.errors.join("; ")}`, {
@@ -1268,6 +1372,11 @@ async function cmdDoctor(options = {}) {
     for (const target of SYNC_MAP) {
       syncFile(target.src, target.dst, target.label);
     }
+    {
+      const claudeGuide = ensureGlobalClaudeRoutingSection();
+      if (!claudeGuide.ok) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
+      else if (claudeGuide.changed) ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
+    }
     // 스킬 동기화
     const fSkillsSrc = join(PKG_ROOT, "skills");
     const fSkillsDst = join(CLAUDE_DIR, "skills");
@@ -1288,7 +1397,7 @@ async function cmdDoctor(options = {}) {
     }
     const profileFix = ensureCodexProfiles();
     if (!profileFix.ok) {
-      warn(`Codex Profiles 자동 복구 실패: ${profileFix.message}`);
+      warn(`Codex Profiles 자동 복구 실패: ${renderErrorMessage(profileFix.message)}`);
     } else if (profileFix.changed > 0) {
       ok(`Codex Profiles: ${profileFix.changed}개 반영됨`);
     } else {
@@ -1335,9 +1444,13 @@ async function cmdDoctor(options = {}) {
         warn(`MCP registry 자동 동기화 실패: ${error.message}`);
       }
     } else if (registryStateForFix.exists) {
-      warn("MCP registry invalid — auto sync 건너뜀");
+      saveRegistry(createDefaultRegistry());
+      report.actions.push({ type: "mcp-registry-reset", status: "ok" });
+      ok("MCP registry 손상 → 기본값으로 재생성됨");
     } else {
-      info("MCP registry 없음 — auto sync 건너뜀");
+      saveRegistry(createDefaultRegistry());
+      report.actions.push({ type: "mcp-registry-create", status: "ok" });
+      ok("MCP registry 없음 → 기본값으로 자동 생성됨");
     }
     console.log(`\n  ${LINE}`);
     info("수정 완료 — 아래 진단 결과를 확인하세요");
@@ -2157,28 +2270,27 @@ async function cmdDoctor(options = {}) {
   // ── MCP 중앙 레지스트리 ──
   section("MCP Registry");
   {
-    const registryState = inspectRegistry();
+    let registryState = inspectRegistry();
     if (!registryState.exists) {
+      saveRegistry(createDefaultRegistry());
+      registryState = inspectRegistry();
       addDoctorCheck(report, {
         name: "mcp-registry",
-        status: "missing",
+        status: "fixed",
         path: registryState.path,
-        fix: "config/mcp-registry.json을 복원하거나 `tfx mcp add <name> --url <url>`를 실행하세요.",
+        action: "기본값으로 자동 생성됨",
       });
-      warn("mcp-registry.json 없음");
-      info(`path: ${registryState.path}`);
-      issues++;
+      ok("mcp-registry.json 없음 → 기본값으로 자동 생성됨");
     } else if (!registryState.valid) {
+      saveRegistry(createDefaultRegistry());
+      registryState = inspectRegistry();
       addDoctorCheck(report, {
         name: "mcp-registry",
-        status: "invalid",
+        status: "fixed",
         path: registryState.path,
-        errors: registryState.errors,
-        fix: "config/mcp-registry.json 구조를 수정하세요.",
+        action: "손상 감지 → 기본값으로 재생성됨",
       });
-      fail("mcp-registry.json invalid");
-      for (const entry of registryState.errors) info(entry);
-      issues++;
+      warn("mcp-registry.json 손상 → 기본값으로 재생성됨");
     } else {
       const statusInfo = inspectRegistryStatus(registryState.registry);
       const invalidConfigs = statusInfo.configs.filter((config) => config.parseError);
@@ -2434,7 +2546,56 @@ async function cmdDoctor(options = {}) {
   });
 }
 
-function cmdUpdate() {
+function normalizeRemoteReachabilityUrl(remoteUrl) {
+  if (!remoteUrl) return null;
+  if (/^https?:\/\//iu.test(remoteUrl)) {
+    try {
+      return new URL(remoteUrl).origin;
+    } catch {
+      return null;
+    }
+  }
+  const scpMatch = /^git@([^:]+):/iu.exec(remoteUrl);
+  if (scpMatch) return `https://${scpMatch[1]}`;
+  if (/^ssh:\/\//iu.test(remoteUrl)) {
+    try {
+      return `https://${new URL(remoteUrl).hostname}`;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function resolveGitUpdateUrl(repoDir) {
+  try {
+    const remoteUrl = execSync("git remote get-url origin", {
+      encoding: "utf8",
+      timeout: 10_000,
+      cwd: repoDir,
+      stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
+    return normalizeRemoteReachabilityUrl(remoteUrl);
+  } catch {
+    return null;
+  }
+}
+
+function resolveUpdateTargets({ installMode, pluginPath }) {
+  const repoDir = installMode === "plugin" ? (pluginPath || PKG_ROOT) : PKG_ROOT;
+  const gitUrl = resolveGitUpdateUrl(repoDir);
+
+  if (installMode === "npm-global" || installMode === "npm-local") {
+    return ["https://registry.npmjs.org/triflux"];
+  }
+  if (installMode === "plugin" || installMode === "git-local") {
+    return gitUrl ? [gitUrl] : ["https://github.com"];
+  }
+  return [];
+}
+
+async function cmdUpdate() {
   const isDev = isDevUpdateRequested(NORMALIZED_ARGS);
   const tagLabel = isDev ? ` ${YELLOW}--dev${RESET}` : "";
   console.log(`\n${BOLD}triflux update${RESET}${tagLabel}\n`);
@@ -2489,6 +2650,27 @@ function cmdUpdate() {
   }
 
   info(`검색: ${installMode === "plugin" ? "플러그인" : installMode === "npm-global" ? "npm global" : installMode === "npm-local" ? "npm local" : installMode === "git-local" ? "git 로컬 저장소" : "알 수 없음"} 설치 감지`);
+
+  const networkTargets = resolveUpdateTargets({ installMode, pluginPath });
+  if (networkTargets.length > 0) {
+    const networkStatus = await checkNetworkAvailability(networkTargets);
+    if (!networkStatus.online) {
+      fail(`네트워크 확인 실패: ${networkStatus.unreachable.join(", ")}`);
+      info("네트워크 연결을 확인한 뒤 다시 시도하세요.");
+      return;
+    }
+    ok(`네트워크 확인 완료 (${networkStatus.reachable.join(", ")})`);
+  }
+
+  const cacheValidation = validateRuntimeCachePaths(join(CLAUDE_DIR, "cache"));
+  if (!cacheValidation.ok) {
+    warn(`런타임 캐시 검증 이슈 ${cacheValidation.issues.length}건 발견`);
+    for (const issue of cacheValidation.issues) {
+      info(`${issue.file}: ${issue.error}`);
+    }
+  } else {
+    ok("런타임 캐시 검증 완료");
+  }
 
   // 2. 설치 방식에 따라 업데이트
   const oldVer = PKG.version;
@@ -2654,9 +2836,23 @@ function cmdUpdate() {
       }
     }
 
+    // ── Post-update: CLAUDE.md 라우팅 동기화 ──
+    console.log(`\n${CYAN}── CLAUDE.md 라우팅 동기화 ──${RESET}`);
+    {
+      const claudeRoutingResults = syncClaudeRoutingSectionsForCli();
+      const claudeRoutingSummary = getClaudeRoutingSyncSummary(claudeRoutingResults);
+      if (claudeRoutingSummary.changed > 0) {
+        ok(`CLAUDE.md 라우팅 ${claudeRoutingSummary.changed}개 파일 반영`);
+      } else if (claudeRoutingSummary.skipped > 0) {
+        ok("CLAUDE.md 라우팅 대상 파일 없음 (건너뜀)");
+      } else {
+        ok("CLAUDE.md 라우팅 최신 상태");
+      }
+    }
+
     // ── Post-update: 설정 동기화 ──
     console.log(`\n${CYAN}── 설정 동기화 ──${RESET}`);
-    cmdSetup({ fromUpdate: true, overrideVersion: newVer });
+    cmdSetup({ fromUpdate: true, overrideVersion: newVer, skipClaudeMdSync: true });
 
     // ── Post-update: 훅 오케스트레이터 적용 ──
     {
@@ -2781,6 +2977,128 @@ function cmdVersion(options = {}) {
   if (routeVer) console.log(`  ${GRAY}tfx-route${RESET}  v${routeVer}`);
   if (hudVer) console.log(`  ${GRAY}hud${RESET}        v${hudVer}`);
   console.log("");
+}
+
+function cmdHandoff(args = [], options = {}) {
+  const { json = false } = options;
+  const parsed = {
+    target: "remote",
+    decisions: [],
+    decisionFile: null,
+    output: null,
+    cwd: process.cwd(),
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    const next = args[index + 1];
+
+    if (arg === "--target") {
+      if (!next || next.startsWith("-")) {
+        throw createCliError("--target 값이 필요합니다 (local|remote)", {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx handoff --target remote",
+        });
+      }
+      if (!["local", "remote"].includes(next)) {
+        throw createCliError(`지원하지 않는 --target 값: ${next}`, {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx handoff --target local|remote",
+        });
+      }
+      parsed.target = next;
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--decision") {
+      if (!next || next.startsWith("-")) {
+        throw createCliError("--decision 값이 필요합니다", {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx handoff --decision \"결정사항\"",
+        });
+      }
+      parsed.decisions.push(next);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--decision-file") {
+      if (!next || next.startsWith("-")) {
+        throw createCliError("--decision-file 경로가 필요합니다", {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx handoff --decision-file .omx/notepad.md",
+        });
+      }
+      parsed.decisionFile = resolve(next);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--output" || arg === "--out") {
+      if (!next || next.startsWith("-")) {
+        throw createCliError(`${arg} 경로가 필요합니다`, {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx handoff --output .omx/handoff.md",
+        });
+      }
+      parsed.output = resolve(next);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--cwd") {
+      if (!next || next.startsWith("-")) {
+        throw createCliError("--cwd 경로가 필요합니다", {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx handoff --cwd <project-path>",
+        });
+      }
+      parsed.cwd = resolve(next);
+      index += 1;
+      continue;
+    }
+
+    throw createCliError(`알 수 없는 handoff 옵션: ${arg}`, {
+      exitCode: EXIT_ARG_ERROR,
+      reason: "argError",
+      fix: "tfx handoff --target remote --output .omx/handoff.md",
+    });
+  }
+
+  const result = serializeHandoff({
+    target: parsed.target,
+    decisions: parsed.decisions,
+    decisionFile: parsed.decisionFile,
+    cwd: parsed.cwd,
+  });
+
+  if (parsed.output) {
+    const outputDir = dirname(parsed.output);
+    if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
+    writeFileSync(parsed.output, `${result.prompt}\n`, "utf8");
+  }
+
+  if (json) {
+    printJson({
+      handoff: {
+        ...result,
+        ...(parsed.output ? { output: parsed.output } : {}),
+      },
+    });
+    return;
+  }
+
+  console.log(result.prompt);
+  if (parsed.output) {
+    console.log(`\n${DIM}saved:${RESET} ${parsed.output}`);
+  }
 }
 
 function cmdSchema(args = []) {
@@ -3054,6 +3372,7 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
+    ${WHITE_BRIGHT}tfx handoff${RESET}    ${GRAY}현재 컨텍스트를 원격/로컬 핸드오프 프롬프트로 생성${RESET}
     ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx tray${RESET}       ${GRAY}Windows 시스템 트레이 실행${RESET}
@@ -3553,11 +3872,14 @@ async function main() {
       cmdSchema(cmdArgs);
       return;
     case "update":
-      cmdUpdate();
+      await cmdUpdate();
       return;
     case "list":
     case "ls":
       cmdList({ json: JSON_OUTPUT });
+      return;
+    case "handoff":
+      cmdHandoff(cmdArgs, { json: JSON_OUTPUT });
       return;
     case "hub":
       await cmdHub(cmdArgs, { json: JSON_OUTPUT && (cmdArgs[0] || "status") === "status" });

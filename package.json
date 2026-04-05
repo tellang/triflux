@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "9.8.4",
+  "version": "10.0.0",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -17,6 +17,7 @@
     "bin",
     "tui",
     "hub",
+    "config",
     "skills",
     "!skills/tfx-workspace",
     "!**/failure-reports",
@@ -28,17 +29,27 @@
     "README.ko.md",
     "LICENSE"
   ],
+  "workspaces": [
+    "packages/core",
+    "packages/remote",
+    "packages/triflux"
+  ],
   "scripts": {
+    "pack": "node scripts/pack.mjs all",
+    "pack:core": "node scripts/pack.mjs core",
+    "pack:remote": "node scripts/pack.mjs remote",
     "setup": "node scripts/setup.mjs",
     "preinstall": "node scripts/preinstall.mjs",
     "postinstall": "node scripts/setup.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",
     "health": "npm test && npm run lint",
-    "test": "node --test --test-force-exit --test-concurrency=1 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
-    "test:unit": "node --test --test-force-exit --test-concurrency=1 tests/unit/**/*.test.mjs",
-    "test:integration": "node --test --test-force-exit --test-concurrency=1 tests/integration/**/*.test.mjs",
-    "test:route-smoke": "node --test scripts/test-tfx-route-no-claude-native.mjs"
+    "test": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
+    "test:unit": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 tests/unit/**/*.test.mjs",
+    "test:integration": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 tests/integration/**/*.test.mjs",
+    "test:route-smoke": "node scripts/test-lock.mjs --test scripts/test-tfx-route-no-claude-native.mjs",
+    "test:contract": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 tests/contract/**/*.test.mjs",
+    "gen:skill-docs": "node scripts/gen-skill-docs.mjs"
   },
   "engines": {
     "node": ">=18.0.0"
