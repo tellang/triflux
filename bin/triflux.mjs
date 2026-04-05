@@ -788,8 +788,8 @@ function cmdSetup(options = {}) {
   }
   {
     const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-    if (!claudeGuide.ok) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
-    else if (claudeGuide.changed) ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
+    if (claudeGuide.skipped) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
+    else if (claudeGuide.action === "created" || claudeGuide.action === "updated") ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
     else ok("CLAUDE.md: 전역 triflux 라우팅 요약 유지");
   }
 
@@ -1374,8 +1374,8 @@ async function cmdDoctor(options = {}) {
     }
     {
       const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-      if (!claudeGuide.ok) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
-      else if (claudeGuide.changed) ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
+      if (claudeGuide.skipped) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
+      else if (claudeGuide.action === "created" || claudeGuide.action === "updated") ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
     }
     // 스킬 동기화
     const fSkillsSrc = join(PKG_ROOT, "skills");
