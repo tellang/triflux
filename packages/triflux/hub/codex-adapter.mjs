@@ -1,0 +1,199 @@
+import { writeFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+import { runPreflight } from './codex-preflight.mjs';
+import { withRetry } from './workers/worker-utils.mjs';
+import {
+  createCircuitBreaker,
+  createResult,
+  appendWarnings,
+  buildExecCommand,
+  normalizePathForShell,
+  shellQuote,
+  runProcess,
+} from './cli-adapter-base.mjs';
+
+const breaker = createCircuitBreaker();
+
+// ── Codex-specific stall inference ──────────────────────────────
+
+function inferStallMode(stdout, stderr) {
+  const text = `${stdout}\n${stderr}`.toLowerCase();
+  if (/(rate.?limit|quota|throttl|too.many.requests|429|usage.limit)/u.test(text)) return 'rate_limited';
+  if (/(approval|approve|permission|sandbox|bypass)/u.test(text)) return 'approval_stall';
+  if (/\bmcp\b|context7|playwright|tavily|exa|brave|sequential|server/u.test(text)) return 'mcp_stall';
+  return 'timeout';
+}
+
+// ── Codex command building ──────────────────────────────────────
+
+function commandWithOverrides(command, prompt, codexPath, overrides = []) {
+  let next = codexPath ? command.replace(/^codex\b/u, shellQuote(codexPath)) : command;
+  if (!overrides.length) return next;
+  const promptArg = JSON.stringify(prompt);
+  const flags = overrides.flatMap((value) => ['-c', shellQuote(value)]).join(' ');
+  return next.endsWith(promptArg)
+    ? `${next.slice(0, -promptArg.length)}${flags} ${promptArg}`
+    : `${next} ${flags}`;
+}
+
+function buildOverrides(requested, excluded) {
+  return [...new Set((requested || []).filter((name) => (excluded || []).includes(name)))]
+    .map((name) => `mcp_servers.${name}.enabled=false`);
+}
+
+function buildAttempts(opts, preflight) {
+  const timeout = Number.isFinite(opts.timeout) ? opts.timeout : 300_000;
+  const requested = Array.isArray(opts.mcpServers) ? [...opts.mcpServers] : [];
+  const base = {
+    timeout,
+    profile: opts.profile,
+    requested,
+    excluded: [...(preflight.excludeMcpServers || [])],
+    forceBypass: preflight.needsBypass,
+  };
+  if (opts.retryOnFail === false) return [base];
+  return [
+    base,
+    { ...base, timeout: timeout * 2, excluded: requested, forceBypass: true },
+  ];
+}
+
+// ── Launch script ───────────────────────────────────────────────
+
+function createLaunchScriptText(opts) {
+  const parts = ['codex'];
+  if (opts.profile) parts.push('--profile', shellQuote(opts.profile));
+  parts.push(
+    'exec',
+    '--dangerously-bypass-approvals-and-sandbox',
+    '--skip-git-repo-check',
+    '$(cat "$PROMPT_FILE")',
+  );
+  return [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    `cd ${shellQuote(normalizePathForShell(opts.workdir))}`,
+    `PROMPT_FILE=${shellQuote(normalizePathForShell(opts.promptFile))}`,
+    `TFX_CODEX_TIMEOUT_MS=${shellQuote(String(opts.timeout ?? ''))}`,
+    parts.join(' '),
+    '',
+  ].join('\n');
+}
+
+export function buildLaunchScript(opts = {}) {
+  const dir = join(tmpdir(), 'triflux-codex-launch');
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${String(opts.id || 'launch')}.sh`);
+  writeFileSync(path, createLaunchScriptText(opts), 'utf8');
+  return path;
+}
+
+// ── Exec args builder ───────────────────────────────────────────
+
+export function buildExecArgs(opts = {}) {
+  const prompt = typeof opts.prompt === 'string' ? opts.prompt : '';
+  const command = buildExecCommand(prompt, opts.resultFile || null, {
+    profile: opts.profile,
+    skipGitRepoCheck: true,
+    sandboxBypass: true,
+    cwd: opts.cwd,
+  });
+
+  if (!prompt) return command.replace(/\s+""$/u, '');
+
+  let result;
+  const quotedPrompt = JSON.stringify(prompt);
+  if (/^\(Get-Content\b[\s\S]*\)$/u.test(prompt) && command.endsWith(quotedPrompt)) {
+    result = `${command.slice(0, -quotedPrompt.length)}${prompt}`;
+  } else {
+    result = command;
+  }
+
+  // stderr 캡처: codex 실패 시에도 원인 추적 가능 (resultFile.err)
+  if (opts.resultFile) {
+    result += ` 2>'${opts.resultFile}.err'`;
+  }
+  return result;
+}
+
+// ── Codex execution ─────────────────────────────────────────────
+
+async function runCodex(prompt, workdir, preflight, attempt) {
+  const dir = join(tmpdir(), 'triflux-codex-exec');
+  mkdirSync(dir, { recursive: true });
+  const resultFile = join(dir, `codex-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+  const command = commandWithOverrides(
+    buildExecCommand(prompt, resultFile, {
+      profile: attempt.profile,
+      skipGitRepoCheck: true,
+      sandboxBypass: attempt.forceBypass,
+    }),
+    prompt,
+    preflight.codexPath,
+    buildOverrides(attempt.requested, attempt.excluded),
+  );
+  return runProcess(command, workdir, attempt.timeout, { resultFile, inferStallMode });
+}
+
+// ── Public API ──────────────────────────────────────────────────
+
+export function getCircuitState(now) {
+  return breaker.getState(now);
+}
+
+export async function execute(opts = {}) {
+  const entry = breaker.canExecute();
+  if (!entry.allowed) {
+    return createResult(false, { fellBack: true, failureMode: 'circuit_open' });
+  }
+
+  const preflight = await runPreflight({ mcpServers: opts.mcpServers, subcommand: 'exec' });
+  if (!preflight.ok) {
+    breaker.clearTrial();
+    breaker.recordFailure(entry.halfOpen);
+    return createResult(false, {
+      stderr: appendWarnings('', preflight.warnings),
+      fellBack: opts.fallbackToClaude !== false,
+      failureMode: 'crash',
+    });
+  }
+
+  const attempts = buildAttempts(opts, preflight);
+  let attemptIndex = 0;
+  let lastResult = createResult(false);
+
+  try {
+    lastResult = await withRetry(async () => {
+      const result = await runCodex(opts.prompt || '', opts.workdir || process.cwd(), preflight, attempts[attemptIndex]);
+      const current = { ...result, stderr: appendWarnings(result.stderr, preflight.warnings), retried: attemptIndex > 0 };
+      const canRetry = !current.ok && attemptIndex < attempts.length - 1;
+      attemptIndex += 1;
+      if (!canRetry) return current;
+      const error = new Error('retry');
+      error.retryable = true;
+      error.result = current;
+      throw error;
+    }, {
+      maxAttempts: attempts.length,
+      baseDelayMs: 250,
+      maxDelayMs: 750,
+      shouldRetry: (error) => error?.retryable === true,
+    });
+  } catch (error) {
+    lastResult = error?.result || createResult(false, { stderr: String(error?.message || error) });
+  }
+
+  if (lastResult.ok) {
+    breaker.reset();
+    return lastResult;
+  }
+
+  breaker.recordFailure(entry.halfOpen);
+  return {
+    ...lastResult,
+    retried: attempts.length > 1,
+    fellBack: opts.fallbackToClaude !== false,
+  };
+}

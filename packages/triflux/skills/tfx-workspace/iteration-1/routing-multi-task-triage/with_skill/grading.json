@@ -1,0 +1,10 @@
+{
+  "expectations": [
+    {"text": "Identifies this as auto mode (not command shortcut)", "passed": true, "evidence": "Agent output: 'Mode selected: AUTO — does not match any command shortcut keyword'"},
+    {"text": "Triggers Codex classification step", "passed": true, "evidence": "Agent output: 'Step 1: Codex runs --full-auto --skip-git-repo-check and classifies the input'"},
+    {"text": "Decomposes into at least 2 subtasks", "passed": true, "evidence": "Agent output: 2 subtasks — executor(프론트엔드 리팩터링) + security-reviewer(보안 리뷰)"},
+    {"text": "Notes delegation to tfx-multi for subtasks >= 2", "passed": true, "evidence": "Agent output: 'subtasks.length = 2 >= 2, tfx-auto automatically hands off to tfx-multi Phase 3'"},
+    {"text": "Does NOT try to execute all subtasks directly", "passed": true, "evidence": "Agent correctly delegates to tfx-multi instead of direct execution"}
+  ],
+  "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}
+}

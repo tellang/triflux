@@ -1,8 +1,0 @@
-{
-  "name": "tfx-multi",
-  "description": "멀티-CLI 팀 모드. Claude Native Agent Teams + Codex/Gemini 멀티모델 오케스트레이션. '멀티로', '팀 모드', '다중 CLI', '3개 다 동원', 'multi' 같은 요청에 반드시 사용. Claude+Codex+Gemini 협업이 필요한 모든 상황에 적극 활용.",
-  "triggers": [
-    "tfx-multi"
-  ],
-  "argument_hint": "\"작업 설명\" | --agents codex,gemini \"작업\" | --tmux \"작업\" | status | stop"
-}

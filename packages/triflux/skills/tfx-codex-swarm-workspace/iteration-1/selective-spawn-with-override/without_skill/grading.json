@@ -1,0 +1,8 @@
+{
+  "expectations": [
+    {"text": "only-2-selected", "passed": true, "evidence": "24, 28만 선택됨"},
+    {"text": "xhigh-override", "passed": true, "evidence": "xhigh 적용, config.toml 프로파일 참조"},
+    {"text": "ralph-skill", "passed": true, "evidence": "$ralph 참조 존재"},
+    {"text": "worktree-2-only", "passed": true, "evidence": "2개 worktree (create-or-reuse 패턴)"}
+  ]
+}

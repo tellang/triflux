@@ -1,0 +1,246 @@
+{
+  "$schema": "hook-registry-schema",
+  "version": 1,
+  "description": "훅 우선순위 레지스트리 — 오케스트레이터가 이 파일을 읽어 순차 실행한다. priority 낮을수록 먼저 실행.",
+  "defaults": {
+    "triflux_priority": 0,
+    "omc_priority": 50,
+    "external_priority": 100
+  },
+  "events": {
+    "PreToolUse": [
+      {
+        "id": "tfx-safety-guard",
+        "source": "triflux",
+        "matcher": "Bash",
+        "command": "node \"${PLUGIN_ROOT}/hooks/safety-guard.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": true,
+        "description": "위험 Bash 명령 사전 차단 (rm -rf, force push 등)"
+      },
+      {
+        "id": "tfx-agent-route-guard",
+        "source": "triflux",
+        "matcher": "Agent",
+        "command": "node \"${PLUGIN_ROOT}/hooks/agent-route-guard.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "서브에이전트 스폰 시 triflux 컨텍스트 주입"
+      },
+      {
+        "id": "tfx-cross-review-gate",
+        "source": "triflux",
+        "matcher": "Bash",
+        "command": "node \"${PLUGIN_ROOT}/scripts/cross-review-gate.mjs\"",
+        "priority": 1,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": true,
+        "description": "git commit 전 교차 리뷰 미검증 파일 차단/경고"
+      },
+      {
+        "id": "omc-headless-guard",
+        "source": "omc",
+        "matcher": "Bash|Agent",
+        "command": "bash \"${HOME}/.claude/scripts/headless-guard-fast.sh\"",
+        "priority": 50,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "psmux headless 가드"
+      },
+      {
+        "id": "omc-tfx-gate-activate",
+        "source": "omc",
+        "matcher": "Skill",
+        "command": "node \"${HOME}/.claude/scripts/tfx-gate-activate.mjs\"",
+        "priority": 50,
+        "enabled": true,
+        "timeout": 2,
+        "blocking": false,
+        "description": "tfx-multi 상태 추적 게이트"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "id": "tfx-cross-review-tracker",
+        "source": "triflux",
+        "matcher": "Edit|Write",
+        "command": "node \"${PLUGIN_ROOT}/hooks/cross-review-tracker.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "파일 수정 추적 → 교차 리뷰 nudge"
+      },
+      {
+        "id": "tfx-mcp-config-watcher",
+        "source": "triflux",
+        "matcher": "Edit|Write",
+        "command": "node \"${PLUGIN_ROOT}/hooks/mcp-config-watcher.mjs\"",
+        "priority": 1,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "감시 대상 MCP 설정 변경 감지 → stdio MCP 자동 치환"
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "id": "tfx-error-context",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/error-context.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "도구 실패 시 에러 힌트 자동 주입"
+      },
+      {
+        "id": "tfx-adaptive-collector",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/hook-adaptive-collector.mjs\"",
+        "priority": 1,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "에러 패턴 수집 → Neural Memory adaptive engine 학습"
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "id": "tfx-keyword-detector",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/scripts/run.cjs\" \"${PLUGIN_ROOT}/scripts/keyword-detector.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 5,
+        "blocking": false,
+        "description": "키워드 매칭 → 스킬 자동 라우팅"
+      }
+    ],
+    "SessionStart": [
+      {
+        "id": "tfx-setup",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/scripts/setup.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 10,
+        "blocking": false,
+        "description": "triflux 환경 초기화"
+      },
+      {
+        "id": "tfx-mcp-safety-guard",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/scripts/mcp-safety-guard.mjs\"",
+        "priority": 1,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "Gemini stdio MCP 자동 감지 + 제거 (spawn EPERM 방지)"
+      },
+      {
+        "id": "tfx-hub-ensure",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/scripts/hub-ensure.mjs\"",
+        "priority": 2,
+        "enabled": true,
+        "timeout": 8,
+        "blocking": false,
+        "description": "tfx-hub 서비스 헬스체크 및 시작"
+      },
+      {
+        "id": "tfx-preflight-cache",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/scripts/preflight-cache.mjs\"",
+        "priority": 3,
+        "enabled": true,
+        "timeout": 5,
+        "blocking": false,
+        "description": "CLI/Hub 가용성 캐시 (hub-ensure 완료 후 실행)"
+      },
+      {
+        "id": "tfx-mcp-gateway-ensure",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/scripts/mcp-gateway-ensure.mjs\"",
+        "priority": 4,
+        "enabled": true,
+        "timeout": 8,
+        "blocking": false,
+        "description": "supergateway MCP 서비스 헬스체크 및 자동 기동"
+      },
+      {
+        "id": "ext-session-vault-start",
+        "source": "session-vault",
+        "matcher": "*",
+        "command": "bash \"${HOME}/Desktop/Projects/tools/session-vault/scripts/start_hook.sh\"",
+        "priority": 100,
+        "enabled": true,
+        "timeout": 10,
+        "blocking": false,
+        "description": "세션 볼트 로깅 시작"
+      }
+    ],
+    "Stop": [
+      {
+        "id": "tfx-pipeline-stop",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/pipeline-stop.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 5,
+        "blocking": true,
+        "description": "활성 파이프라인 감지 → 종료 차단"
+      },
+      {
+        "id": "ext-session-vault-export",
+        "source": "session-vault",
+        "matcher": "*",
+        "command": "bash \"${HOME}/Desktop/Projects/tools/session-vault/scripts/export_hook.sh\"",
+        "priority": 100,
+        "enabled": true,
+        "timeout": 30,
+        "blocking": false,
+        "description": "세션 트랜스크립트 내보내기"
+      },
+      {
+        "id": "ext-mcp-cleanup",
+        "source": "system",
+        "matcher": "*",
+        "command": "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \"${HOME}/.claude/scripts/mcp-cleanup.ps1\"",
+        "priority": 100,
+        "enabled": true,
+        "timeout": 8,
+        "blocking": false,
+        "description": "MCP 고아 프로세스 정리"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "id": "tfx-subagent-verifier",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/subagent-verifier.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "서브에이전트 결과 품질 체크"
+      }
+    ]
+  }
+}

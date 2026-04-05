@@ -5,6 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join, posix as posixPath, win32 as win32Path } from 'node:path';
+import { execSshWithRetry } from '@triflux/core/hub/lib/ssh-retry.mjs';
 
 const REMOTE_ENV_TTL_MS = 86_400_000; // 24h
 const REMOTE_STAGE_ROOT = 'tfx-remote';
@@ -84,8 +85,9 @@ function probeRemoteEnvViaPwsh(host) {
   ].join('; ');
 
   try {
-    const output = execFileSync('ssh', [host, 'pwsh', '-NoProfile', '-Command', command], {
+    const output = execSshWithRetry([host, 'pwsh', '-NoProfile', '-Command', command], {
       encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'],
+      maxRetries: 2, baseDelayMs: 1000,
     });
     return normalizePwshProbeEnv(parseProbeLines(output));
   } catch {
@@ -102,8 +104,9 @@ function probeRemoteEnvViaPosix(host) {
   ].join('\n');
 
   try {
-    const output = execFileSync('ssh', [host, 'sh'], {
+    const output = execSshWithRetry([host, 'sh'], {
       encoding: 'utf8', timeout: 15000, input: script,
+      maxRetries: 2, baseDelayMs: 1000,
     });
     return normalizePosixProbeEnv(parseProbeLines(output));
   } catch {

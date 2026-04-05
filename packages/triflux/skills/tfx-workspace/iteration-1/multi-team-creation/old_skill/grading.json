@@ -1,0 +1,10 @@
+{
+  "expectations": [
+    {"text": "Creates exactly one TeamCreate with tfx- prefix naming", "passed": true, "evidence": "Agent output: TeamCreate({ team_name: 'tfx-<id>' })"},
+    {"text": "Creates 3 TaskCreate calls (one per subtask)", "passed": true, "evidence": "Agent output: 'Three TaskCreate calls (one per subtask), preserving taskIds'"},
+    {"text": "Spawns 3 Agent wrappers with mode: bypassPermissions", "passed": true, "evidence": "Agent output: 'mode: bypassPermissions — included in all 3 Agent calls. Mandatory.'"},
+    {"text": "Uses tfx-route.sh inside Agent wrapper (not direct codex/gemini)", "passed": true, "evidence": "Agent output: 'all wrappers internally call bash ~/.claude/scripts/tfx-route.sh — never direct codex exec or gemini -y -p'"},
+    {"text": "Includes Phase 5 cleanup (TeamDelete)", "passed": true, "evidence": "Agent output: 'TeamDelete is called unconditionally (success or failure), with 30-second wait'"}
+  ],
+  "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}
+}

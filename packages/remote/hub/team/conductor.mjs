@@ -495,8 +495,8 @@ export function createConductor(opts = {}) {
           agent: config.agent,
           eta: eta ? new Date(eta).toISOString() : 'unknown',
         });
-        // PoC: skip session when all accounts in cooldown
-        return config.id;
+        // 계정이 모두 cooldown이어도 세션 생성 자체는 유지한다.
+        // 로컬 테스트/단일 계정 없는 환경에서도 상태 머신이 일관되게 동작해야 한다.
       }
     }
 

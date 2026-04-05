@@ -1,0 +1,10 @@
+{
+  "expectations": [
+    {"text": "Routes to 'executor' agent (not architect, not analyst)", "passed": true, "evidence": "Agent output: 'Agent: executor — Directly mapped from the implement shortcut row'"},
+    {"text": "Uses 'implement' MCP profile", "passed": true, "evidence": "Agent output: 'MCP Profile: implement — Mapped from both the shortcut table and the MCP 프로필 자동 결정 table'"},
+    {"text": "Generates correct tfx-route.sh command syntax", "passed": true, "evidence": "Command: bash ~/.claude/scripts/tfx-route.sh executor 'JWT 인증 미들웨어 추가해줘' implement"},
+    {"text": "Does NOT trigger triage (single command shortcut)", "passed": true, "evidence": "Agent output: 'Triage: Not triggered — Command shortcut mode explicitly skips the Codex --full-auto classification'"},
+    {"text": "Does NOT delegate to tfx-multi", "passed": true, "evidence": "Agent output: 'tfx-multi: Not delegated — only activates after triage produces 2+ subtasks'"}
+  ],
+  "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}
+}

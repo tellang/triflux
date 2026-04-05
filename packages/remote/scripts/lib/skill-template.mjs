@@ -1,8 +1,9 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, extname, join, relative } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
 
 const IF_TAG_RE = /{{\s*(#if\s+([A-Za-z0-9_.-]+)|\/if)\s*}}/g;
-const INCLUDE_RE = /{{>\s*([A-Za-z0-9_./-]+)\s*}}/g;
+const PARTIAL_RE = /{{>\s*([A-Za-z0-9_./-]+)\s*}}/g;
+const FILE_INCLUDE_RE = /{{#include\s+([A-Za-z0-9_./-]+)\s*}}/g;
 const VARIABLE_RE = /{{\s*([A-Za-z0-9_.-]+)\s*}}/g;
 const FRONTMATTER_RE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?/;
 
@@ -152,8 +153,8 @@ function evaluateConditionals(source, context) {
   return walk(0, false).output;
 }
 
-function renderIncludes(source, context, partials, includeStack) {
-  return source.replace(INCLUDE_RE, (_full, partialName) => {
+function renderPartials(source, context, partials, options, includeStack) {
+  return source.replace(PARTIAL_RE, (_full, partialName) => {
     const partial = partials[partialName];
     if (partial == null) {
       throw new Error(`Missing partial: ${partialName}`);
@@ -162,7 +163,53 @@ function renderIncludes(source, context, partials, includeStack) {
       const chain = [...includeStack, partialName].join(" -> ");
       throw new Error(`Circular partial include: ${chain}`);
     }
-    return renderWithContext(partial, context, partials, [...includeStack, partialName]);
+    return renderWithContext(partial, context, partials, options, [
+      ...includeStack,
+      partialName,
+    ]);
+  });
+}
+
+function normalizeIncludeName(includeName) {
+  return includeName.replace(/\\/g, "/");
+}
+
+function resolveIncludeContent(includeName, options) {
+  const normalizedName = normalizeIncludeName(includeName);
+  if (Object.prototype.hasOwnProperty.call(options.includes, normalizedName)) {
+    return options.includes[normalizedName];
+  }
+  if (!options.includeBaseDir) {
+    throw new Error(`Missing include: ${normalizedName}`);
+  }
+
+  const baseDir = resolve(options.includeBaseDir);
+  const fullPath = resolve(baseDir, normalizedName);
+  const relativePath = relative(baseDir, fullPath);
+  const isInsideBaseDir =
+    relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+
+  if (!isInsideBaseDir || !existsSync(fullPath)) {
+    throw new Error(`Missing include: ${normalizedName}`);
+  }
+
+  const content = readFileSync(fullPath, "utf8");
+  options.includes[normalizedName] = content;
+  return content;
+}
+
+function renderFileIncludes(source, context, partials, options, includeStack) {
+  return source.replace(FILE_INCLUDE_RE, (_full, includeName) => {
+    const normalizedName = normalizeIncludeName(includeName);
+    const content = resolveIncludeContent(normalizedName, options);
+    if (includeStack.includes(normalizedName)) {
+      const chain = [...includeStack, normalizedName].join(" -> ");
+      throw new Error(`Circular template include: ${chain}`);
+    }
+    return renderWithContext(content, context, partials, options, [
+      ...includeStack,
+      normalizedName,
+    ]);
   });
 }
 
@@ -176,10 +223,17 @@ function renderVariables(source, context) {
   });
 }
 
-function renderWithContext(source, context, partials, includeStack = []) {
+function renderWithContext(source, context, partials, options, includeStack = []) {
   const afterIf = evaluateConditionals(source, context);
-  const afterInclude = renderIncludes(afterIf, context, partials, includeStack);
-  return renderVariables(afterInclude, context);
+  const afterPartials = renderPartials(afterIf, context, partials, options, includeStack);
+  const afterFileIncludes = renderFileIncludes(
+    afterPartials,
+    context,
+    partials,
+    options,
+    includeStack,
+  );
+  return renderVariables(afterFileIncludes, context);
 }
 
 function readAllTemplateFiles(rootDir, currentDir = rootDir) {
@@ -264,6 +318,9 @@ export function loadTemplatePartials(partialsDir) {
 }
 
 export function renderSkillTemplate(template, context = {}, options = {}) {
-  const { partials = {} } = options;
-  return renderWithContext(template, context, partials);
+  const { partials = {}, includes = {}, includeBaseDir = "" } = options;
+  return renderWithContext(template, context, partials, {
+    includeBaseDir,
+    includes: { ...includes },
+  });
 }

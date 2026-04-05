@@ -1,0 +1,9 @@
+{
+  "expectations": [
+    {"text": "designer remapped to Codex with effort: high", "passed": true, "evidence": "Agent output: designer → Codex (effort: high)"},
+    {"text": "writer remapped to Codex Spark with effort: spark_fast", "passed": true, "evidence": "Agent output: writer → Codex Spark (effort: spark_fast)"},
+    {"text": "Sets TFX_CLI_MODE=codex environment variable", "passed": true, "evidence": "Agent output: 'TFX_CLI_MODE: Set to codex'"},
+    {"text": "Changes MCP profile: designer->implement, writer->analyze", "passed": true, "evidence": "Agent output: writer→analyze, designer→implement"}
+  ],
+  "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}
+}

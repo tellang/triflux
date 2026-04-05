@@ -1,0 +1,8 @@
+{
+  "expectations": [
+    {"text": "Runs 'node hub/server.mjs' with run_in_background=true", "passed": true, "evidence": "Agent output: 'Bash(\"node hub/server.mjs\", run_in_background=true)'"},
+    {"text": "Mentions port 27888 and /mcp endpoint", "passed": true, "evidence": "Agent output: 'Port: 27888, MCP endpoint: http://127.0.0.1:27888/mcp'"},
+    {"text": "Does NOT try to run any triage or routing", "passed": true, "evidence": "Agent correctly identified as command match, not fallthrough"}
+  ],
+  "summary": {"passed": 3, "failed": 0, "total": 3, "pass_rate": 1.0}
+}

@@ -1,0 +1,9 @@
+{
+  "expectations": [
+    {"text": "3-paths-recognized", "passed": true, "evidence": "3개 파일 경로 인식"},
+    {"text": "filename-classification", "passed": false, "evidence": "모두 implement로 평탄화, auth-refactor를 리팩터링으로 분류 실패"},
+    {"text": "profile-routing-applied", "passed": false, "evidence": "프로파일 라우팅 없음, 동일 설정 적용 또는 bare codex"},
+    {"text": "worktree-isolation", "passed": true, "evidence": "3개 worktree 생성 (시나리오 C)"},
+    {"text": "psmux-and-wt", "passed": true, "evidence": "psmux + WT 명령 존재 (시나리오 C)"}
+  ]
+}

@@ -787,7 +787,7 @@ function cmdSetup(options = {}) {
     syncFile(target.src, target.dst, target.label);
   }
   {
-    const claudeGuide = ensureGlobalClaudeRoutingSection();
+    const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
     if (!claudeGuide.ok) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
     else if (claudeGuide.changed) ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
     else ok("CLAUDE.md: 전역 triflux 라우팅 요약 유지");
@@ -1373,7 +1373,7 @@ async function cmdDoctor(options = {}) {
       syncFile(target.src, target.dst, target.label);
     }
     {
-      const claudeGuide = ensureGlobalClaudeRoutingSection();
+      const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
       if (!claudeGuide.ok) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
       else if (claudeGuide.changed) ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
     }

@@ -1,0 +1,10 @@
+{
+  "eval_id": 5,
+  "eval_name": "hub-start-sequence",
+  "prompt": "/tfx-hub start",
+  "assertions": [
+    "Runs 'node hub/server.mjs' with run_in_background=true",
+    "Mentions port 27888 and /mcp endpoint",
+    "Does NOT try to run any triage or routing"
+  ]
+}

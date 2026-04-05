@@ -284,6 +284,16 @@ function handleFatalError(error, { json = false } = {}) {
   process.exit(exitCode);
 }
 
+function renderErrorMessage(message, fallback = "unknown error") {
+  if (typeof message === "string") {
+    const normalized = message.trim().toLowerCase();
+    if (normalized.length > 0 && normalized !== "undefined" && normalized !== "null") {
+      return message.trim();
+    }
+  }
+  return fallback;
+}
+
 function which(cmd) {
   try {
     const result = process.platform === "win32"
@@ -706,11 +716,45 @@ function previewMcpRegistrationActions(mcpUrl) {
   return actions;
 }
 
+function previewClaudeRoutingAction() {
+  const globalClaudePath = join(CLAUDE_DIR, "CLAUDE.md");
+  const projectClaudePath = join(PKG_ROOT, "CLAUDE.md");
+  const projectContent = existsSync(projectClaudePath)
+    ? readFileSync(projectClaudePath, "utf8")
+    : "";
+  const projectSection = extractMarkdownSection(projectContent, TFX_SECTION_HEADING);
+
+  if (!projectSection) {
+    return {
+      type: "claude-guidance",
+      path: globalClaudePath,
+      source: projectClaudePath,
+      change: "skip",
+      reason: "project-section-missing",
+    };
+  }
+
+  const globalContent = existsSync(globalClaudePath)
+    ? readFileSync(globalClaudePath, "utf8")
+    : "";
+  const preview = ensureTfxSection(globalContent, { scope: "global", projectSection });
+
+  return {
+    type: "claude-guidance",
+    path: globalClaudePath,
+    source: projectClaudePath,
+    change: preview.changed ? (existsSync(globalClaudePath) ? "update" : "create") : "noop",
+    heading: TFX_SECTION_HEADING,
+    summary: TFX_GLOBAL_SUMMARY_SECTION,
+  };
+}
+
 function buildSetupDryRunPlan() {
   const actions = [
     ...SYNC_MAP.map(({ src, dst, label }) => describeSyncAction(src, dst, label)),
     ...listSkillSyncActions(),
   ];
+  actions.push(previewClaudeRoutingAction());
   const codexProfiles = previewCodexProfiles();
   actions.push({
     type: "codex-profiles",
@@ -741,6 +785,12 @@ function cmdSetup(options = {}) {
 
   for (const target of SYNC_MAP) {
     syncFile(target.src, target.dst, target.label);
+  }
+  {
+    const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
+    if (!claudeGuide.ok) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
+    else if (claudeGuide.changed) ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
+    else ok("CLAUDE.md: 전역 triflux 라우팅 요약 유지");
   }
 
   // 스킬 동기화 (~/.claude/skills/{name}/SKILL.md)
@@ -838,8 +888,9 @@ function cmdSetup(options = {}) {
 
   const codexProfileResult = ensureCodexProfiles();
   if (!codexProfileResult.ok) {
-    warn(`Codex profiles 설정 실패: ${codexProfileResult.message}`);
-    summary.push({ item: "Codex profiles", status: "⚠️", detail: codexProfileResult.message });
+    const reason = renderErrorMessage(codexProfileResult.message);
+    warn(`Codex profiles 설정 실패: ${reason}`);
+    summary.push({ item: "Codex profiles", status: "⚠️", detail: reason });
   } else if (codexProfileResult.changed > 0) {
     ok(`Codex profiles: ${codexProfileResult.changed}개 반영됨 (~/.codex/config.toml)`);
     summary.push({ item: "Codex profiles", status: "✅", detail: `${codexProfileResult.changed}개 반영됨` });
@@ -851,8 +902,9 @@ function cmdSetup(options = {}) {
   // Gemini 프로필
   const geminiResult = ensureGeminiProfiles();
   if (!geminiResult.ok) {
-    warn(`Gemini profiles 설정 실패: ${geminiResult.message}`);
-    summary.push({ item: "Gemini profiles", status: "⚠️", detail: geminiResult.message });
+    const reason = renderErrorMessage(geminiResult.message);
+    warn(`Gemini profiles 설정 실패: ${reason}`);
+    summary.push({ item: "Gemini profiles", status: "⚠️", detail: reason });
   } else if (geminiResult.created) {
     ok(`Gemini profiles: ${geminiResult.count}개 생성됨 (~/.gemini/triflux-profiles.json)`);
     summary.push({ item: "Gemini profiles", status: "✅", detail: `${geminiResult.count}개 생성됨` });
@@ -1320,6 +1372,11 @@ async function cmdDoctor(options = {}) {
     for (const target of SYNC_MAP) {
       syncFile(target.src, target.dst, target.label);
     }
+    {
+      const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
+      if (!claudeGuide.ok) warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
+      else if (claudeGuide.changed) ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
+    }
     // 스킬 동기화
     const fSkillsSrc = join(PKG_ROOT, "skills");
     const fSkillsDst = join(CLAUDE_DIR, "skills");
@@ -1340,7 +1397,7 @@ async function cmdDoctor(options = {}) {
     }
     const profileFix = ensureCodexProfiles();
     if (!profileFix.ok) {
-      warn(`Codex Profiles 자동 복구 실패: ${profileFix.message}`);
+      warn(`Codex Profiles 자동 복구 실패: ${renderErrorMessage(profileFix.message)}`);
     } else if (profileFix.changed > 0) {
       ok(`Codex Profiles: ${profileFix.changed}개 반영됨`);
     } else {

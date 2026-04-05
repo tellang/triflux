@@ -1,0 +1,27 @@
+{
+  "eval_id": 2,
+  "eval_name": "selective-spawn-with-override",
+  "prompt": "issue 24하고 28번 PRD만 코덱스 스폰해줘. 둘 다 xhigh로 세팅하고 ralph로 끝까지 돌려",
+  "assertions": [
+    {
+      "name": "only-2-selected",
+      "description": "issue 24, 28만 선택 (나머지 제외)",
+      "check": "commands.sh에 issue-24, issue-28만 존재. 25,26,27,29,30 없음"
+    },
+    {
+      "name": "xhigh-override",
+      "description": "프로파일이 xhigh로 오버라이드",
+      "check": "routing.md에 codex53_xhigh 적용, commands.sh에 model_reasoning_effort=\"xhigh\""
+    },
+    {
+      "name": "ralph-skill",
+      "description": "OMX 스킬이 $ralph로 설정",
+      "check": "프롬프트 또는 commands에서 $ralph 참조"
+    },
+    {
+      "name": "worktree-2-only",
+      "description": "worktree 2개만 생성",
+      "check": "commands.sh에 git worktree add가 정확히 2개"
+    }
+  ]
+}

@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #faf9f5;
+      --surface: #ffffff;
+      --border: #e8e6dc;
+      --text: #141413;
+      --text-muted: #b0aea5;
+      --accent: #d97757;
+      --accent-hover: #c4613f;
+      --green: #788c5d;
+      --green-bg: #eef2e8;
+      --red: #c44;
+      --red-bg: #fceaea;
+      --header-bg: #141413;
+      --header-text: #faf9f5;
+      --radius: 6px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Lora', Georgia, serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ---- Header ---- */
+    .header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }
+    .header .instructions {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-top: 0.25rem;
+    }
+    .header .progress {
+      font-size: 0.875rem;
+      opacity: 0.8;
+      text-align: right;
+    }
+
+    /* ---- Main content ---- */
+    .main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* ---- Sections ---- */
+    .section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      flex-shrink: 0;
+    }
+    .section-header {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.75rem 1rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .section-body {
+      padding: 1rem;
+    }
+
+    /* ---- Config badge ---- */
+    .config-badge {
+      display: inline-block;
+      padding: 0.2rem 0.625rem;
+      border-radius: 9999px;
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin-left: 0.75rem;
+      vertical-align: middle;
+    }
+    .config-badge.config-primary {
+      background: rgba(33, 150, 243, 0.12);
+      color: #1976d2;
+    }
+    .config-badge.config-baseline {
+      background: rgba(255, 193, 7, 0.15);
+      color: #f57f17;
+    }
+
+    /* ---- Prompt ---- */
+    .prompt-text {
+      white-space: pre-wrap;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+    }
+
+    /* ---- Outputs ---- */
+    .output-file {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .output-file + .output-file {
+      margin-top: 1rem;
+    }
+    .output-file-header {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .output-file-header .dl-btn {
+      font-size: 0.7rem;
+      color: var(--accent);
+      text-decoration: none;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-weight: 500;
+      opacity: 0.8;
+    }
+    .output-file-header .dl-btn:hover {
+      opacity: 1;
+      text-decoration: underline;
+    }
+    .output-file-content {
+      padding: 0.75rem;
+      overflow-x: auto;
+    }
+    .output-file-content pre {
+      font-size: 0.8125rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    .output-file-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+    }
+    .output-file-content iframe {
+      width: 100%;
+      height: 600px;
+      border: none;
+    }
+    .output-file-content table {
+      border-collapse: collapse;
+      font-size: 0.8125rem;
+      width: 100%;
+    }
+    .output-file-content table td,
+    .output-file-content table th {
+      border: 1px solid var(--border);
+      padding: 0.375rem 0.5rem;
+      text-align: left;
+    }
+    .output-file-content table th {
+      background: var(--bg);
+      font-weight: 600;
+    }
+    .output-file-content .download-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+      cursor: pointer;
+    }
+    .output-file-content .download-link:hover {
+      background: var(--border);
+    }
+    .empty-state {
+      color: var(--text-muted);
+      font-style: italic;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    /* ---- Feedback ---- */
+    .prev-feedback {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.625rem 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .prev-feedback-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.25rem;
+      color: var(--text-muted);
+    }
+    .feedback-textarea {
+      width: 100%;
+      min-height: 100px;
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      resize: vertical;
+      color: var(--text);
+    }
+    .feedback-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .feedback-status {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.5rem;
+      min-height: 1.1em;
+    }
+
+    /* ---- Grades (collapsible) ---- */
+    .grades-toggle {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .grades-toggle:hover {
+      color: var(--accent);
+    }
+    .grades-toggle .arrow {
+      margin-right: 0.5rem;
+      transition: transform 0.15s;
+      font-size: 0.75rem;
+    }
+    .grades-toggle .arrow.open {
+      transform: rotate(90deg);
+    }
+    .grades-content {
+      display: none;
+      margin-top: 0.75rem;
+    }
+    .grades-content.open {
+      display: block;
+    }
+    .grades-summary {
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .grade-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .grade-pass { background: var(--green-bg); color: var(--green); }
+    .grade-fail { background: var(--red-bg); color: var(--red); }
+    .assertion-list {
+      list-style: none;
+    }
+    .assertion-item {
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8125rem;
+    }
+    .assertion-item:last-child { border-bottom: none; }
+    .assertion-status {
+      font-weight: 600;
+      margin-right: 0.5rem;
+    }
+    .assertion-status.pass { color: var(--green); }
+    .assertion-status.fail { color: var(--red); }
+    .assertion-evidence {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      padding-left: 1.5rem;
+    }
+
+    /* ---- View tabs ---- */
+    .view-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 2rem;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .view-tab {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.625rem 1.25rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+    .view-panel { display: none; }
+    .view-panel.active { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+    /* ---- Benchmark view ---- */
+    .benchmark-view {
+      padding: 1.5rem 2rem;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .benchmark-table {
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      font-size: 0.8125rem;
+      width: 100%;
+      margin-bottom: 1.5rem;
+    }
+    .benchmark-table th, .benchmark-table td {
+      padding: 0.625rem 0.75rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+    .benchmark-table th {
+      font-family: 'Poppins', sans-serif;
+      background: var(--header-bg);
+      color: var(--header-text);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .benchmark-table tr:hover { background: var(--bg); }
+    .benchmark-table tr.benchmark-row-with { background: rgba(33, 150, 243, 0.06); }
+    .benchmark-table tr.benchmark-row-without { background: rgba(255, 193, 7, 0.06); }
+    .benchmark-table tr.benchmark-row-with:hover { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-without:hover { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-table tr.benchmark-row-avg { font-weight: 600; border-top: 2px solid var(--border); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-with { background: rgba(33, 150, 243, 0.12); }
+    .benchmark-table tr.benchmark-row-avg.benchmark-row-without { background: rgba(255, 193, 7, 0.12); }
+    .benchmark-delta-positive { color: var(--green); font-weight: 600; }
+    .benchmark-delta-negative { color: var(--red); font-weight: 600; }
+    .benchmark-notes {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+    }
+    .benchmark-notes h3 {
+      font-family: 'Poppins', sans-serif;
+      font-size: 0.875rem;
+      margin-bottom: 0.75rem;
+    }
+    .benchmark-notes ul {
+      list-style: disc;
+      padding-left: 1.25rem;
+    }
+    .benchmark-notes li {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      margin-bottom: 0.375rem;
+    }
+    .benchmark-empty {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 3rem;
+    }
+
+    /* ---- Navigation ---- */
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 2rem;
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      flex-shrink: 0;
+    }
+    .nav-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text);
+      transition: all 0.15s;
+    }
+    .nav-btn:hover:not(:disabled) {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .nav-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .done-btn {
+      font-family: 'Poppins', sans-serif;
+      padding: 0.5rem 1.5rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .done-btn:hover {
+      background: var(--bg);
+      border-color: var(--text-muted);
+    }
+    .done-btn.ready {
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-weight: 600;
+    }
+    .done-btn.ready:hover {
+      background: var(--accent-hover);
+    }
+    /* ---- Done overlay ---- */
+    .done-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .done-overlay.visible {
+      display: flex;
+    }
+    .done-card {
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 2rem 3rem;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+    }
+    .done-card h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .done-card p {
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+      line-height: 1.5;
+    }
+    .done-card .btn-row {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+    }
+    .done-card button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 0.875rem;
+    }
+    .done-card button:hover {
+      background: var(--bg);
+    }
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed;
+      bottom: 5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--header-bg);
+      color: var(--header-text);
+      padding: 0.625rem 1.25rem;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 200;
+    }
+    .toast.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="app" style="height:100vh; display:flex; flex-direction:column;">
+    <div class="header">
+      <div>
+        <h1>Eval Review: <span id="skill-name"></span></h1>
+        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, copy feedback and paste into Claude Code.</div>
+      </div>
+      <div class="progress" id="progress"></div>
+    </div>
+
+    <!-- View tabs (only shown when benchmark data exists) -->
+    <div class="view-tabs" id="view-tabs" style="display:none;">
+      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
+      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+    </div>
+
+    <!-- Outputs panel (qualitative review) -->
+    <div class="view-panel active" id="panel-outputs">
+    <div class="main">
+      <!-- Prompt -->
+      <div class="section">
+        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-body">
+          <div class="prompt-text" id="prompt-text"></div>
+        </div>
+      </div>
+
+      <!-- Outputs -->
+      <div class="section">
+        <div class="section-header">Output</div>
+        <div class="section-body" id="outputs-body">
+          <div class="empty-state">No output files found</div>
+        </div>
+      </div>
+
+      <!-- Previous Output (collapsible) -->
+      <div class="section" id="prev-outputs-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="togglePrevOutputs()">
+            <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
+            Previous Output
+          </div>
+        </div>
+        <div class="grades-content" id="prev-outputs-content"></div>
+      </div>
+
+      <!-- Grades (collapsible) -->
+      <div class="section" id="grades-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleGrades()">
+            <span class="arrow" id="grades-arrow">&#9654;</span>
+            Formal Grades
+          </div>
+        </div>
+        <div class="grades-content" id="grades-content"></div>
+      </div>
+
+      <!-- Feedback -->
+      <div class="section">
+        <div class="section-header">Your Feedback</div>
+        <div class="section-body">
+          <textarea
+            class="feedback-textarea"
+            id="feedback"
+            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+          ></textarea>
+          <div class="feedback-status" id="feedback-status"></div>
+          <div class="prev-feedback" id="prev-feedback" style="display:none;">
+            <div class="prev-feedback-label">Previous feedback</div>
+            <div id="prev-feedback-text"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav" id="outputs-nav">
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+    </div>
+    </div><!-- end panel-outputs -->
+
+    <!-- Benchmark panel (quantitative stats) -->
+    <div class="view-panel" id="panel-benchmark">
+      <div class="benchmark-view" id="benchmark-content">
+        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Done overlay -->
+  <div class="done-overlay" id="done-overlay">
+    <div class="done-card">
+      <h2>Review Complete</h2>
+      <p>Your feedback has been saved. Go back to your Claude Code session and tell Claude you're done reviewing.</p>
+      <div class="btn-row">
+        <button onclick="closeDoneDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ---- Embedded data (injected by generate_review.py) ----
+    const EMBEDDED_DATA = {"skill_name": "tfx-skills-suite", "runs": [{"id": "routing-implement-shortcut-old_skill", "prompt": "/implement JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918", "eval_id": 1, "outputs": [{"name": "analysis.md", "type": "text", "content": "# Routing Analysis: `/implement JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918`\n\n## Input\n\n```\n/implement JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918\n```\n\n---\n\n## Mode Selected: Command Shortcut (\ucee4\ub9e8\ub4dc \uc20f\ucef7)\n\n**Reason:** The user input begins with `/implement`, which is one of the explicitly listed triggers in SKILL.md. The skill's mode table states:\n\n> `/implement JWT \ucd94\uac00` \u2192 \ucee4\ub9e8\ub4dc \uc20f\ucef7 | \ud2b8\ub9ac\uc544\uc9c0: \uc5c6\uc74c (\uc989\uc2dc \uc2e4\ud589)\n\nThe command word `implement` directly maps to the \"Codex \uc9c1\ud589\" shortcut table. No triage step is performed.\n\n---\n\n## Agent Selected: `executor`\n\n**Reason:** From the \"\ucee4\ub9e8\ub4dc \uc20f\ucef7 \u2192 Codex \uc9c1\ud589\" table:\n\n| \ucee4\ub9e8\ub4dc | \uc5d0\uc774\uc804\ud2b8 | MCP |\n|--------|---------|-----|\n| `implement` | executor | implement |\n\nThe command keyword `implement` maps to the `executor` agent.\n\n---\n\n## Exact Bash Command Generated\n\n```bash\nbash ~/.claude/scripts/tfx-route.sh executor 'JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918' implement\n```\n\n**Explanation of each argument:**\n- `executor` \u2014 agent resolved from the `implement` shortcut\n- `'JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918'` \u2014 the prompt is everything after the command keyword\n- `implement` \u2014 MCP profile resolved from the shortcut table\n\nThe full invocation as specified by SKILL.md section \"\ucee4\ub9e8\ub4dc \uc20f\ucef7\":\n\n> `Bash(\"bash ~/.claude/scripts/tfx-route.sh {\uc5d0\uc774\uc804\ud2b8} '{PROMPT}' {MCP}\")`\n\nSo the complete call is:\n\n```\nBash(\"bash ~/.claude/scripts/tfx-route.sh executor 'JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918' implement\")\n```\n\n`run_in_background` is not specified for single shortcut execution (it is only explicitly required for background parallel tasks in SEQUENTIAL/DAG triage flows).\n\n---\n\n## MCP Profile Used: `implement`\n\n**Reason:** The shortcut table assigns `implement` as the MCP profile for the `implement` command. This is confirmed by the \"MCP \ud504\ub85c\ud544 \uc790\ub3d9 \uacb0\uc815\" table:\n\n| \uc5d0\uc774\uc804\ud2b8 | MCP |\n|----------|-----|\n| executor, build-fixer, debugger, deep-executor | implement |\n\n---\n\n## Triage Triggered: NO\n\nCommand shortcut mode explicitly bypasses triage. From the mode table:\n\n> \ucee4\ub9e8\ub4dc \uc20f\ucef7 \u2192 \ud2b8\ub9ac\uc544\uc9c0: **\uc5c6\uc74c (\uc989\uc2dc \uc2e4\ud589)**\n\nThe triage pipeline (Codex `--full-auto` classification + Opus inline decomposition) is only activated in **auto** mode (`/tfx-auto \"...\"`) or **manual** mode (`/tfx-auto N:agent_type \"...\"`).\n\n---\n\n## Delegation to tfx-multi: NO\n\n`tfx-multi` delegation only occurs after triage produces **2 or more subtasks**. Since triage is skipped entirely in command shortcut mode, tfx-multi is never invoked. The task is executed directly as a single `tfx-route.sh` call.\n\n> From SKILL.md: \"\uc11c\ube0c\ud0dc\uc2a4\ud06c \uc218 1\uac1c \u2192 tfx-auto \uc9c1\uc811 \uc2e4\ud589 ... 2\uac1c+ \u2192 tfx-multi Phase 3\"\n> Shortcut mode never reaches the subtask-count decision point.\n\n---\n\n## Summary Table\n\n| Dimension | Value |\n|-----------|-------|\n| Mode | Command Shortcut (\ucee4\ub9e8\ub4dc \uc20f\ucef7) |\n| Triage | None (\uc989\uc2dc \uc2e4\ud589) |\n| Agent | `executor` (Codex) |\n| MCP Profile | `implement` |\n| Bash command | `bash ~/.claude/scripts/tfx-route.sh executor 'JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918' implement` |\n| tfx-multi delegation | No |\n| run_in_background | Not applied (single shortcut, foreground) |\n"}], "grading": {"expectations": [{"text": "Routes to 'executor' agent (not architect, not analyst)", "passed": true, "evidence": "Agent output: 'Agent chosen: executor \u2014 From the Codex \uc9c1\ud589 shortcut table'"}, {"text": "Uses 'implement' MCP profile", "passed": true, "evidence": "Agent output: 'MCP profile: implement \u2014 Assigned directly by the shortcut table'"}, {"text": "Generates correct tfx-route.sh command syntax", "passed": true, "evidence": "Command: bash ~/.claude/scripts/tfx-route.sh executor 'JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918' implement"}, {"text": "Does NOT trigger triage (single command shortcut)", "passed": true, "evidence": "Agent output: 'Triage triggered: No. Command shortcut mode explicitly skips triage'"}, {"text": "Does NOT delegate to tfx-multi", "passed": true, "evidence": "Agent output: 'tfx-multi delegation: No'"}], "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}}}, {"id": "routing-implement-shortcut-with_skill", "prompt": "/implement JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918", "eval_id": 1, "outputs": [{"name": "analysis.md", "type": "text", "content": "# Routing Analysis: `/implement JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918`\n\n## Input\n\n```\n/implement JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918\n```\n\n---\n\n## Mode Selected: Command Shortcut\n\nThe trigger word is `implement`, which is listed in the SKILL.md `triggers` list and matches a **\ucee4\ub9e8\ub4dc \uc20f\ucef7 (Command Shortcut)** entry in the \"Codex \uc9c1\ud589\" table.\n\nPer the skill definition (\ubaa8\ub4dc \ud45c):\n\n| \uc785\ub825 \ud615\uc2dd | \ubaa8\ub4dc | \ud2b8\ub9ac\uc544\uc9c0 |\n|-----------|------|----------|\n| `/implement JWT \ucd94\uac00` | \ucee4\ub9e8\ub4dc \uc20f\ucef7 | \uc5c6\uc74c (\uc989\uc2dc \uc2e4\ud589) |\n\nThe input `/implement JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918` matches this exact pattern.\n\n---\n\n## Agent Selected: `executor`\n\nFrom the \"Codex \uc9c1\ud589\" shortcut table:\n\n| \ucee4\ub9e8\ub4dc | \uc5d0\uc774\uc804\ud2b8 | MCP |\n|--------|---------|-----|\n| `implement` | executor | implement |\n\n`executor` is selected because the command shortcut `implement` maps directly to it. No classification or decomposition step occurs.\n\n---\n\n## Exact Bash Command That Would Be Generated\n\n```\nbash ~/.claude/scripts/tfx-route.sh executor 'JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918' implement\n```\n\nThis follows the shortcut execution pattern defined in the skill:\n\n> \ud328\ud134: `Bash(\"bash ~/.claude/scripts/tfx-route.sh {\uc5d0\uc774\uc804\ud2b8} '{PROMPT}' {MCP}\")`\n\nThe PROMPT is the remainder of the user's input after the command keyword (`JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918`).\n\n---\n\n## MCP Profile Used: `implement`\n\nFrom the shortcut table, `implement` \u2192 `executor` \u2192 MCP profile `implement`.\n\nThis is also confirmed by the \"MCP \ud504\ub85c\ud544 \uc790\ub3d9 \uacb0\uc815\" table:\n\n| \uc5d0\uc774\uc804\ud2b8 | MCP |\n|----------|-----|\n| executor, build-fixer, debugger, deep-executor | implement |\n\n---\n\n## Triage Triggered: No\n\nThe skill definition explicitly states that command shortcuts bypass triage:\n\n> \ucee4\ub9e8\ub4dc\uba85 \ub9e4\uce6d \uc2dc \ud2b8\ub9ac\uc544\uc9c0 \uc5c6\uc774 \uc989\uc2dc \uc2e4\ud589.\n\nThe mode table also confirms: \ud2b8\ub9ac\uc544\uc9c0 = **\uc5c6\uc74c (\uc989\uc2dc \uc2e4\ud589)** for command shortcut inputs.\n\n---\n\n## Delegation to tfx-multi: No\n\n`tfx-multi` delegation is only triggered **after triage** when subtask count >= 2:\n\n> \ud2b8\ub9ac\uc544\uc9c0 \uacb0\uacfc \uc11c\ube0c\ud0dc\uc2a4\ud06c\uac00 2\uac1c \uc774\uc0c1\uc774\uba74 tfx-multi Native Teams \ubaa8\ub4dc\ub85c \uc790\ub3d9 \uc804\ud658\ud55c\ub2e4.\n\nSince triage is skipped entirely in command shortcut mode, there are no subtasks to count, and the execution goes directly to `tfx-auto` single-agent execution. `tfx-multi` is **not** invoked.\n\n---\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| Mode | Command Shortcut |\n| Triage | None (skipped) |\n| Agent | `executor` |\n| CLI | Codex |\n| MCP Profile | `implement` |\n| tfx-multi delegation | No |\n| Bash command | `bash ~/.claude/scripts/tfx-route.sh executor 'JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918' implement` |\n| run_in_background | Not specified for single shortcut (no explicit flag in shortcut pattern; background flag applies to triage-spawned workers) |\n"}], "grading": {"expectations": [{"text": "Routes to 'executor' agent (not architect, not analyst)", "passed": true, "evidence": "Agent output: 'Agent: executor \u2014 Directly mapped from the implement shortcut row'"}, {"text": "Uses 'implement' MCP profile", "passed": true, "evidence": "Agent output: 'MCP Profile: implement \u2014 Mapped from both the shortcut table and the MCP \ud504\ub85c\ud544 \uc790\ub3d9 \uacb0\uc815 table'"}, {"text": "Generates correct tfx-route.sh command syntax", "passed": true, "evidence": "Command: bash ~/.claude/scripts/tfx-route.sh executor 'JWT \uc778\uc99d \ubbf8\ub4e4\uc6e8\uc5b4 \ucd94\uac00\ud574\uc918' implement"}, {"text": "Does NOT trigger triage (single command shortcut)", "passed": true, "evidence": "Agent output: 'Triage: Not triggered \u2014 Command shortcut mode explicitly skips the Codex --full-auto classification'"}, {"text": "Does NOT delegate to tfx-multi", "passed": true, "evidence": "Agent output: 'tfx-multi: Not delegated \u2014 only activates after triage produces 2+ subtasks'"}], "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}}}, {"id": "routing-multi-task-triage-old_skill", "prompt": "/tfx-auto \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918", "eval_id": 2, "outputs": [{"name": "analysis.md", "type": "text", "content": "# tfx-auto \ub77c\uc6b0\ud305 \ubd84\uc11d\n\n## \uc785\ub825\n```\n/tfx-auto \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918\n```\n\n---\n\n## 1. \ubaa8\ub4dc \uc120\ud0dd\n\n**\uc120\ud0dd\ub41c \ubaa8\ub4dc: \uc790\ub3d9(Auto)**\n\n\uc785\ub825 \ud615\uc2dd\uc774 `/tfx-auto \"...\"` \ud615\ud0dc\uc774\uba70, \ucee4\ub9e8\ub4dc \uc20f\ucef7 \ud0a4\uc6cc\ub4dc(`implement`, `build`, `research` \ub4f1) \uc5c6\uc774 \uc790\uc5f0\uc5b4 \ubcf5\ud569 \uc694\uccad\uc774 \uc8fc\uc5b4\uc84c\ub2e4. \ub610\ud55c \uc218\ub3d9 \ubaa8\ub4dc\uc758 `N:agent_type` \uc811\ub450\uc5b4\ub3c4 \uc5c6\ub2e4.\n\nSKILL.md \ubaa8\ub4dc \ud310\uc815\ud45c\uc5d0 \ub530\ub77c:\n\n| \uc785\ub825 \ud615\uc2dd | \ubaa8\ub4dc | \ud2b8\ub9ac\uc544\uc9c0 |\n|-----------|------|----------|\n| `/tfx-auto \"\ub9ac\ud329\ud130\ub9c1 + UI\"` | \uc790\ub3d9 | Codex \ubd84\ub958 \u2192 Opus \ubd84\ud574 |\n\n\ub530\ub77c\uc11c \uc774 \uc694\uccad\uc740 **\uc790\ub3d9 \ubaa8\ub4dc**\ub85c \ucc98\ub9ac\ub418\uba70, \ud2b8\ub9ac\uc544\uc9c0 \ud30c\uc774\ud504\ub77c\uc778\uc774 \uc804\ubd80 \uc2e4\ud589\ub41c\ub2e4.\n\n---\n\n## 2. \ud2b8\ub9ac\uc544\uc9c0 \uc2e4\ud589 \uc5ec\ubd80 \ubc0f \ubc29\uc2dd\n\n**\ud2b8\ub9ac\uc544\uc9c0\uac00 \ud2b8\ub9ac\uac70\ub41c\ub2e4.**\n\n\uc790\ub3d9 \ubaa8\ub4dc\uc5d0\uc11c\ub294 \ub2e4\uc74c 2\ub2e8\uacc4 \ud2b8\ub9ac\uc544\uc9c0\uac00 \uc218\ud589\ub41c\ub2e4:\n\n### 2-1\ub2e8\uacc4: Codex \ubd84\ub958\n\n```bash\ncodex exec --full-auto --skip-git-repo-check\n```\n\n\ud504\ub86c\ud504\ud2b8\ub97c Codex\uc5d0 \uc804\ub2ec\ud558\uc5ec \ud0dc\uc2a4\ud06c\ub97c \ubd80\ubd84(parts)\uc73c\ub85c \ubd84\ub958\ud55c\ub2e4. \ubc18\ud658 \ud615\uc2dd:\n\n```json\n{\n  \"parts\": [\n    { \"description\": \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\", \"agent\": \"codex\" },\n    { \"description\": \"\ubcf4\uc548 \ub9ac\ubdf0\", \"agent\": \"codex\" }\n  ]\n}\n```\n\n### 2-2\ub2e8\uacc4: Opus \uc778\ub77c\uc778 \ubd84\ud574\n\nCodex \ubd84\ub958 \uacb0\uacfc\ub97c \ubc14\ud0d5\uc73c\ub85c Opus\uac00 \uc11c\ube0c\ud0dc\uc2a4\ud06c\ub97c \ubd84\ud574\ud55c\ub2e4. \ubc18\ud658 \ud615\uc2dd:\n\n```json\n{\n  \"graph_type\": \"INDEPENDENT\",\n  \"subtasks\": [\n    {\n      \"id\": \"t1\",\n      \"description\": \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ucf54\ub4dc \ub9ac\ud329\ud130\ub9c1\",\n      \"scope\": \"frontend\",\n      \"agent\": \"executor\",\n      \"mcp_profile\": \"implement\",\n      \"depends_on\": [],\n      \"context_output\": \"refactor-summary\",\n      \"context_input\": null\n    },\n    {\n      \"id\": \"t2\",\n      \"description\": \"\ubcf4\uc548 \ucde8\uc57d\uc810 \ub9ac\ubdf0\",\n      \"scope\": \"security\",\n      \"agent\": \"security-reviewer\",\n      \"mcp_profile\": \"review\",\n      \"depends_on\": [],\n      \"context_output\": \"security-report\",\n      \"context_input\": null\n    }\n  ]\n}\n```\n\n\"\ub9ac\ud329\ud130\ub9c1\"\uacfc \"\ubcf4\uc548 \ub9ac\ubdf0\"\ub294 \uc11c\ub85c \ub3c5\ub9bd\uc801\uc774\ubbc0\ub85c `graph_type: \"INDEPENDENT\"`\ub85c \ubd84\ud574\ub420 \uac00\ub2a5\uc131\uc774 \ub192\ub2e4. (\ubcf4\uc548 \ub9ac\ubdf0\uac00 \ub9ac\ud329\ud130\ub9c1 \ud6c4 \ucf54\ub4dc\ub97c \ub300\uc0c1\uc73c\ub85c \ud574\uc57c \ud55c\ub2e4\uba74 `SEQUENTIAL`\uc774 \ub420 \uc218\ub3c4 \uc788\uc73c\ub098, \uc694\uccad \ubb38\ub9e5\uc0c1 \uae30\uc874 \ucf54\ub4dc\ub97c \ub300\uc0c1\uc73c\ub85c \ud55c \ub3c5\ub9bd \ubcd1\ub82c \uc791\uc5c5\uc73c\ub85c \ubd84\ub958\ud558\ub294 \uac83\uc774 \uc790\uc5f0\uc2a4\ub7fd\ub2e4.)\n\n### \ud2b8\ub9ac\uc544\uc9c0 \uc2e4\ud328 \uc2dc\n\nCodex \ubd84\ub958 \uc2e4\ud328 \u2192 Opus\uac00 \uc9c1\uc811 \ubd84\ub958 + \ubd84\ud574\ub97c \uc218\ud589\ud55c\ub2e4 (SKILL.md: \"\uc2e4\ud328 \uc2dc Opus\uac00 \uc9c1\uc811 \ubd84\ub958+\ubd84\ud574\").\n\n---\n\n## 3. \ud0dc\uc2a4\ud06c \ubd84\ud574\n\n\uc694\uccad \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918\"\ub294 \uba85\ud655\ud788 \ub450 \uac00\uc9c0 \ub3c5\ub9bd \ud0dc\uc2a4\ud06c\ub97c \ud3ec\ud568\ud55c\ub2e4:\n\n| # | \uc11c\ube0c\ud0dc\uc2a4\ud06c | \ubd84\ub958 \uadfc\uac70 | \uc608\uc0c1 Agent | \uc608\uc0c1 MCP |\n|---|-----------|---------|-----------|---------|\n| t1 | \ud504\ub860\ud2b8\uc5d4\ub4dc \ucf54\ub4dc \ub9ac\ud329\ud130\ub9c1 | \"\ub9ac\ud329\ud130\ub9c1\" \ud0a4\uc6cc\ub4dc \u2192 \ucf54\ub4dc \uc218\uc815 \uc791\uc5c5 | executor | implement |\n| t2 | \ubcf4\uc548 \ucde8\uc57d\uc810 \ub9ac\ubdf0 | \"\ubcf4\uc548 \ub9ac\ubdf0\" \ud0a4\uc6cc\ub4dc \u2192 \ubcf4\uc548 \ubd84\uc11d \uc791\uc5c5 | security-reviewer | review |\n\n\uc5d0\uc774\uc804\ud2b8 \ub9e4\ud551 \uadfc\uac70 (SKILL.md \"\uc5d0\uc774\uc804\ud2b8 \ub9e4\ud551\" \uc139\uc158):\n- `executor` \u2192 Codex, MCP: implement\n- `security-reviewer` \u2192 Codex (review), MCP: review\n\n---\n\n## 4. \uc11c\ube0c\ud0dc\uc2a4\ud06c \uc218 >= 2 \uc77c \ub54c\uc758 \ub3d9\uc791 (tfx-multi \uc704\uc784)\n\n**\uc11c\ube0c\ud0dc\uc2a4\ud06c\uac00 2\uac1c\uc774\ubbc0\ub85c tfx-multi Native Teams \ubaa8\ub4dc\ub85c \uc790\ub3d9 \uc804\ud658\ub41c\ub2e4.**\n\nSKILL.md \uaddc\uce59:\n> \ud2b8\ub9ac\uc544\uc9c0 \uacb0\uacfc \uc11c\ube0c\ud0dc\uc2a4\ud06c\uac00 2\uac1c \uc774\uc0c1\uc774\uba74 tfx-multi Native Teams \ubaa8\ub4dc\ub85c \uc790\ub3d9 \uc804\ud658\ud55c\ub2e4.\n\n| \uc11c\ube0c\ud0dc\uc2a4\ud06c \uc218 | \uc2e4\ud589 \uacbd\ub85c |\n|---|---|\n| 1\uac1c | tfx-auto \uc9c1\uc811 \uc2e4\ud589 |\n| **2\uac1c+ (\ud604\uc7ac \ucf00\uc774\uc2a4)** | **tfx-multi Phase 3** (TeamCreate \u2192 TaskCreate \u2192 Agent \ub798\ud37c) |\n\n\uc804\ud658 \uc2dc \uc8fc\uc694 \uaddc\uce59:\n- \ud2b8\ub9ac\uc544\uc9c0 \uacb0\uacfc(\uc11c\ube0c\ud0dc\uc2a4\ud06c \ubc30\uc5f4)\ub97c \uadf8\ub300\ub85c tfx-multi Phase 3\uc5d0 \uc804\ub2ec\ud55c\ub2e4.\n- tfx-multi\uc758 Phase 2(\ud2b8\ub9ac\uc544\uc9c0)\ub294 \uac74\ub108\ub6f4\ub2e4 (\uc774\ubbf8 \uc218\ud589\ud588\uc73c\ubbc0\ub85c).\n- Phase 3a(TeamCreate)\ubd80\ud130 \uc2dc\uc791\ud55c\ub2e4.\n\n```\nsubtasks.length >= 2\n  \u2192 tfx-multi Phase 3 \uc2e4\ud589 (\ud2b8\ub9ac\uc544\uc9c0 \uacb0\uacfc \uc7ac\uc0ac\uc6a9)\n  \u2192 TeamCreate \u2192 TaskCreate \u00d7 2 \u2192 Agent \ub798\ud37c spawn (Phase 3a~3c)\n  \u2192 Phase 4 \uacb0\uacfc \uc218\uc9d1 \u2192 Phase 5 \uc815\ub9ac\n```\n\n---\n\n## 5. \uc2e4\ud589 \uc2dc\ud000\uc2a4 (\uc804\uccb4 \ud750\ub984)\n\n```\n[Step 1] \ubaa8\ub4dc \ud310\uc815\n  \uc785\ub825: /tfx-auto \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918\n  \u2192 \ucee4\ub9e8\ub4dc \uc20f\ucef7 \uc5c6\uc74c, N:agent \uc5c6\uc74c\n  \u2192 \uc790\ub3d9 \ubaa8\ub4dc \ud655\uc815\n\n[Step 2] \ud2b8\ub9ac\uc544\uc9c0 1\ub2e8\uacc4 \u2014 Codex \ubd84\ub958\n  codex exec --full-auto --skip-git-repo-check\n  \ud504\ub86c\ud504\ud2b8: \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918\"\n  \u2192 \ubc18\ud658: { parts: [ {description, agent}, ... ] }\n  (\uc2e4\ud328 \uc2dc: Step 3\uc73c\ub85c \ub118\uc5b4\uac00\ub418 Opus\uac00 \uc9c1\uc811 \ubd84\ub958)\n\n[Step 3] \ud2b8\ub9ac\uc544\uc9c0 2\ub2e8\uacc4 \u2014 Opus \uc778\ub77c\uc778 \ubd84\ud574\n  Codex \ubd84\ub958 \uacb0\uacfc\ub97c \uc785\ub825\uc73c\ub85c Opus \ud638\ucd9c\n  \u2192 \ubc18\ud658: { graph_type: \"INDEPENDENT\", subtasks: [ t1(\ub9ac\ud329\ud130\ub9c1), t2(\ubcf4\uc548\ub9ac\ubdf0) ] }\n\n[Step 4] \uc11c\ube0c\ud0dc\uc2a4\ud06c \uc218 \ud310\uc815\n  subtasks.length = 2 \u2192 >= 2 \uc870\uac74 \ucda9\uc871\n  \u2192 tfx-multi Phase 3\uc73c\ub85c \uc804\ud658\n\n[Step 5] tfx-multi Phase 3a \u2014 TeamCreate\n  \ud300 \uc0dd\uc131: 2\uac1c\uc758 \uc6cc\ucee4 \uc2ac\ub86f \ud655\ubcf4\n\n[Step 6] tfx-multi Phase 3b \u2014 TaskCreate \u00d7 2\n  Task 1: \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1 (executor / implement)\n  Task 2: \ubcf4\uc548 \ub9ac\ubdf0 (security-reviewer / review)\n\n[Step 7] tfx-multi Phase 3c \u2014 Agent \ub798\ud37c spawn (\ubcd1\ub82c)\n  graph_type = INDEPENDENT\uc774\ubbc0\ub85c \ub450 \ud0dc\uc2a4\ud06c\ub97c \ub3d9\uc2dc\uc5d0 \uc2e4\ud589:\n\n  \uc6cc\ucee4 1 (t1 - \ub9ac\ud329\ud130\ub9c1):\n    Bash(\"bash ~/.claude/scripts/tfx-route.sh executor '\ud504\ub860\ud2b8\uc5d4\ub4dc \ucf54\ub4dc \ub9ac\ud329\ud130\ub9c1' implement\",\n         run_in_background=true)\n\n  \uc6cc\ucee4 2 (t2 - \ubcf4\uc548 \ub9ac\ubdf0):\n    Bash(\"bash ~/.claude/scripts/tfx-route.sh security-reviewer '\ubcf4\uc548 \ucde8\uc57d\uc810 \ub9ac\ubdf0' review\",\n         run_in_background=true)\n\n  (graph_type\uc774 SEQUENTIAL\uc774\uc5c8\ub2e4\uba74 t1 \uc644\ub8cc \ud6c4 context_output\uc744\n   .omc/context/{sid}/combined-{tid}.md\uc5d0 \uc800\uc7a5\ud558\uace0 t2\uc5d0 5\ubc88\uc9f8 \uc778\uc790\ub85c \uc804\ub2ec)\n\n[Step 8] tfx-multi Phase 4 \u2014 \uacb0\uacfc \uc218\uc9d1\n  \uac01 \uc6cc\ucee4\uc758 exit_code \ud310\uc815:\n    exit 0 + success \u2192 === OUTPUT === \uc139\uc158 \ucd94\ucd9c\n    exit 124 + timeout \u2192 === PARTIAL OUTPUT === \uc0ac\uc6a9\n    exit \u22600 + failed \u2192 stderr \uc218\uc9d1 \u2192 Claude fallback \uc2e4\ud589\n      1\ucc28 fallback: Agent(subagent_type=\"oh-my-claudecode:executor\", model=\"sonnet\")\n      2\ucc28 \uc5f0\uc18d \uc2e4\ud328: \uc2e4\ud328 \ubcf4\uace0 + \uc131\uacf5 \uacb0\uacfc\ub9cc \uc885\ud569\n\n[Step 9] tfx-multi Phase 5 \u2014 \uc815\ub9ac \ubc0f \ubcf4\uace0\n  \ubcf4\uace0 \ud615\uc2dd:\n    ## tfx-auto \uc644\ub8cc\n    **\ubaa8\ub4dc**: auto | **\uadf8\ub798\ud504**: INDEPENDENT | **\ub808\ubca8**: 0\n    | # | \uc11c\ube0c\ud0dc\uc2a4\ud06c | Agent | CLI | MCP | \ub808\ubca8 | \uc0c1\ud0dc | \uc2dc\uac04 |\n    | 1 | \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1 | executor | Codex | implement | 0 | \u2713 | Xs |\n    | 2 | \ubcf4\uc548 \ub9ac\ubdf0 | security-reviewer | Codex | review | 0 | \u2713 | Xs |\n    ### \uc6cc\ucee4 1: \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\n    (\ucd9c\ub825 \uc694\uc57d)\n    ### \uc6cc\ucee4 2: \ubcf4\uc548 \ub9ac\ubdf0\n    (\ucd9c\ub825 \uc694\uc57d)\n    ### Token Savings Report\n    node ~/.claude/scripts/token-snapshot.mjs report {session-id}\n```\n\n---\n\n## 6. \ud575\uc2ec \ud310\ub2e8 \ud3ec\uc778\ud2b8 \uc694\uc57d\n\n| \ud56d\ubaa9 | \uacb0\uc815\uac12 | \uadfc\uac70 |\n|------|--------|------|\n| \ubaa8\ub4dc | \uc790\ub3d9(Auto) | \ucee4\ub9e8\ub4dc \uc20f\ucef7 \uc5c6\uc74c, N:agent \uc5c6\uc74c |\n| \ud2b8\ub9ac\uc544\uc9c0 | \uc2e4\ud589 (Codex \u2192 Opus) | \uc790\ub3d9 \ubaa8\ub4dc \ud544\uc218 |\n| \uc11c\ube0c\ud0dc\uc2a4\ud06c \uc218 | 2\uac1c | \"\ub9ac\ud329\ud130\ub9c1\" + \"\ubcf4\uc548 \ub9ac\ubdf0\" \uba85\ud655 \ubd84\ub9ac |\n| \uadf8\ub798\ud504 \ud0c0\uc785 | INDEPENDENT (\uc608\uc0c1) | \ub450 \ud0dc\uc2a4\ud06c \uac04 \uc758\uc874 \uc5c6\uc74c |\n| \uc2e4\ud589 \uacbd\ub85c | tfx-multi Phase 3 | subtasks.length >= 2 |\n| \uc6cc\ucee4 1 \uc5d0\uc774\uc804\ud2b8 | executor / Codex | \ucf54\ub4dc \uc218\uc815 \u2192 implement MCP |\n| \uc6cc\ucee4 2 \uc5d0\uc774\uc804\ud2b8 | security-reviewer / Codex | \ubcf4\uc548 \ubd84\uc11d \u2192 review MCP |\n| \ubcd1\ub82c \uc2e4\ud589 | \uc608 | INDEPENDENT \u2192 run_in_background=true |\n"}], "grading": {"expectations": [{"text": "Identifies this as auto mode (not command shortcut)", "passed": true, "evidence": "Agent output: 'Mode selected: Auto (\uc790\ub3d9) \u2014 matches none of the command shortcut keywords'"}, {"text": "Triggers Codex classification step", "passed": true, "evidence": "Agent output: 'Codex --full-auto classification to identify task parts'"}, {"text": "Decomposes into at least 2 subtasks", "passed": true, "evidence": "Agent output: 2 subtasks \u2014 executor(Frontend refactoring) + security-reviewer(Security review)"}, {"text": "Notes delegation to tfx-multi for subtasks >= 2", "passed": true, "evidence": "Agent output: 'subtasks.length = 2 >= 2, hands off to tfx-multi Phase 3'"}, {"text": "Does NOT try to execute all subtasks directly", "passed": true, "evidence": "Agent correctly delegates to tfx-multi Phase 3"}], "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}}}, {"id": "routing-multi-task-triage-with_skill", "prompt": "/tfx-auto \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918", "eval_id": 2, "outputs": [{"name": "analysis.md", "type": "text", "content": "# Routing Analysis: `/tfx-auto \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918`\n\n## 1. Mode Selection\n\n**Selected mode: AUTO**\n\nThe input `/tfx-auto \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918` uses the `tfx-auto` trigger directly with a free-form natural language task description. It does not match any command shortcut keyword (e.g., `implement`, `cleanup`, `analyze`), and it does not use the manual `N:agent_type` prefix syntax.\n\nPer the SKILL.md mode table:\n\n| Input pattern | Mode | Triage |\n|---|---|---|\n| `/tfx-auto \"\ub9ac\ud329\ud130\ub9c1 + UI\"` | \uc790\ub3d9 (auto) | Codex \ubd84\ub958 \u2192 Opus \ubd84\ud574 |\n\nThis request falls exactly into the **auto mode** pattern.\n\n---\n\n## 2. Triage Trigger\n\nTriage **IS triggered** because the mode is auto (not a command shortcut, not manual).\n\nThe triage proceeds in two steps:\n\n### Step 1 \u2014 Codex Classification\n```\ncodex exec --full-auto --skip-git-repo-check\n```\nInput: `\"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918\"`\n\nExpected output JSON:\n```json\n{\n  \"parts\": [\n    { \"description\": \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\", \"agent\": \"codex\" },\n    { \"description\": \"\ubcf4\uc548 \ub9ac\ubdf0\", \"agent\": \"codex\" }\n  ]\n}\n```\n\n### Step 2 \u2014 Opus Inline Decomposition\nOpus receives the classified parts and decomposes them into a structured subtask graph:\n\n```json\n{\n  \"graph_type\": \"INDEPENDENT\",\n  \"subtasks\": [\n    {\n      \"id\": \"st-1\",\n      \"description\": \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ucf54\ub4dc \ub9ac\ud329\ud130\ub9c1\",\n      \"scope\": \"frontend source files\",\n      \"agent\": \"executor\",\n      \"mcp_profile\": \"implement\",\n      \"depends_on\": [],\n      \"context_output\": \"refactor-summary\",\n      \"context_input\": null\n    },\n    {\n      \"id\": \"st-2\",\n      \"description\": \"\ubcf4\uc548 \ub9ac\ubdf0 \uc218\ud589\",\n      \"scope\": \"\uc804\uccb4 \ucf54\ub4dc\ubca0\uc774\uc2a4 \ub610\ub294 \ud504\ub860\ud2b8\uc5d4\ub4dc\",\n      \"agent\": \"security-reviewer\",\n      \"mcp_profile\": \"review\",\n      \"depends_on\": [],\n      \"context_output\": \"security-review-report\",\n      \"context_input\": null\n    }\n  ]\n}\n```\n\nThe two tasks (\"\ub9ac\ud329\ud130\ub9c1\" and \"\ubcf4\uc548 \ub9ac\ubdf0\") are **semantically independent**: refactoring does not depend on the security review and vice versa, so `graph_type` resolves to `INDEPENDENT`.\n\nIf Codex classification fails, Opus performs both classification and decomposition directly (fallback path per SKILL.md \u00a7\ud2b8\ub9ac\uc544\uc9c0).\n\n---\n\n## 3. Task Decomposition into Subtasks\n\nThe request contains two distinct tasks:\n\n| # | Description | Agent | MCP Profile |\n|---|---|---|---|\n| st-1 | \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1 | `executor` | `implement` |\n| st-2 | \ubcf4\uc548 \ub9ac\ubdf0 | `security-reviewer` | `review` |\n\nAgent assignments follow the SKILL.md agent mapping table:\n- Refactoring \u2192 `executor` \u2192 Codex, MCP: `implement`\n- Security review \u2192 `security-reviewer` \u2192 Codex (review mode), MCP: `review`\n\n---\n\n## 4. Subtask Count >= 2 \u2192 Delegation to tfx-multi\n\n**Subtask count = 2, which satisfies `>= 2`.**\n\nPer SKILL.md \u00a7\uba40\ud2f0 \ud0dc\uc2a4\ud06c \ub77c\uc6b0\ud305:\n\n> \ud2b8\ub9ac\uc544\uc9c0 \uacb0\uacfc \uc11c\ube0c\ud0dc\uc2a4\ud06c\uac00 2\uac1c \uc774\uc0c1\uc774\uba74 tfx-multi Native Teams \ubaa8\ub4dc\ub85c \uc790\ub3d9 \uc804\ud658\ud55c\ub2e4.\n\nThe skill **automatically delegates to tfx-multi Phase 3**, skipping tfx-multi's own Phase 2 (triage) since triage has already been completed by tfx-auto.\n\nThe handoff logic:\n```\nif subtasks.length >= 2:\n  \u2192 tfx-multi Phase 3 \uc2e4\ud589 (\ud2b8\ub9ac\uc544\uc9c0 \uacb0\uacfc \uc7ac\uc0ac\uc6a9)\n  \u2192 TeamCreate \u2192 TaskCreate \u00d7 N \u2192 Agent \ub798\ud37c spawn (Phase 3a~3c)\n  \u2192 Phase 4 \uacb0\uacfc \uc218\uc9d1 \u2192 Phase 5 \uc815\ub9ac\n```\n\n---\n\n## 5. Exact Sequence of Actions\n\n```\n[Step 1] Mode detection\n  Input: \"/tfx-auto \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918\"\n  \u2192 No command shortcut match\n  \u2192 No N:agent_type prefix\n  \u2192 Mode = AUTO, triage = ENABLED\n\n[Step 2] Triage \u2014 Codex classification\n  codex exec --full-auto --skip-git-repo-check\n  Prompt: \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\ud558\uace0 \ubcf4\uc548 \ub9ac\ubdf0\ub3c4 \ud574\uc918\"\n  Output: { parts: [ {description: \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\", agent: \"codex\"},\n                     {description: \"\ubcf4\uc548 \ub9ac\ubdf0\", agent: \"codex\"} ] }\n\n[Step 3] Triage \u2014 Opus inline decomposition\n  Input: classified parts from Step 2\n  Output: {\n    graph_type: \"INDEPENDENT\",\n    subtasks: [\n      { id: \"st-1\", description: \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\", agent: \"executor\",\n        mcp_profile: \"implement\", depends_on: [] },\n      { id: \"st-2\", description: \"\ubcf4\uc548 \ub9ac\ubdf0\", agent: \"security-reviewer\",\n        mcp_profile: \"review\", depends_on: [] }\n    ]\n  }\n\n[Step 4] Subtask count check\n  subtasks.length = 2  \u2192  >= 2 condition TRUE\n  \u2192 Delegate to tfx-multi Phase 3 (skip tfx-multi Phase 2)\n\n[Step 5] tfx-multi Phase 3a \u2014 TeamCreate\n  Create a Native Teams session with the decomposed subtask list\n\n[Step 6] tfx-multi Phase 3b \u2014 TaskCreate \u00d7 2\n  Task 1: \"\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\" \u2192 executor / implement\n  Task 2: \"\ubcf4\uc548 \ub9ac\ubdf0\" \u2192 security-reviewer / review\n\n[Step 7] tfx-multi Phase 3c \u2014 Agent wrapper spawn (parallel, INDEPENDENT graph)\n  Bash(\"bash ~/.claude/scripts/tfx-route.sh executor '\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1' implement\",\n       run_in_background=true)\n  Bash(\"bash ~/.claude/scripts/tfx-route.sh security-reviewer '\ubcf4\uc548 \ub9ac\ubdf0' review\",\n       run_in_background=true)\n  Both tasks run concurrently because graph_type = INDEPENDENT (no depends_on).\n\n[Step 8] tfx-multi Phase 4 \u2014 Result collection\n  Await both background tasks.\n  Parse exit codes and extract OUTPUT sections.\n  On timeout (exit 124): use PARTIAL OUTPUT.\n  On failure (exit \u2260 0): Claude fallback \u2192 Agent(subagent_type=\"oh-my-claudecode:executor\", model=\"sonnet\")\n\n[Step 9] tfx-multi Phase 5 \u2014 Cleanup & report\n  Produce final report in tfx-auto format:\n  ## tfx-auto \uc644\ub8cc\n  **\ubaa8\ub4dc**: auto | **\uadf8\ub798\ud504**: INDEPENDENT | **\ub808\ubca8**: 0\n  | # | \uc11c\ube0c\ud0dc\uc2a4\ud06c | Agent | CLI | MCP | \ub808\ubca8 | \uc0c1\ud0dc | \uc2dc\uac04 |\n  |---|---|---|---|---|---|---|---|\n  | 1 | \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1 | executor | codex | implement | 0 | \u2713 | Xs |\n  | 2 | \ubcf4\uc548 \ub9ac\ubdf0 | security-reviewer | codex | review | 0 | \u2713 | Ys |\n  ### \uc6cc\ucee4 1: \ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1\n  (\ub9ac\ud329\ud130\ub9c1 \uacb0\uacfc \uc694\uc57d)\n  ### \uc6cc\ucee4 2: \ubcf4\uc548 \ub9ac\ubdf0\n  (\ubcf4\uc548 \ub9ac\ubdf0 \uacb0\uacfc \uc694\uc57d)\n  ### Token Savings Report\n  (node ~/.claude/scripts/token-snapshot.mjs report {session-id})\n```\n\n---\n\n## Summary\n\n| Item | Value |\n|---|---|\n| Mode | AUTO |\n| Triage triggered | Yes (Codex classification \u2192 Opus decomposition) |\n| Graph type | INDEPENDENT |\n| Subtask count | 2 |\n| Delegation to tfx-multi | Yes (Phase 3 entry, skipping Phase 2) |\n| Execution style | Parallel (both tasks run concurrently via run_in_background=true) |\n| st-1 agent/MCP | executor / implement |\n| st-2 agent/MCP | security-reviewer / review |\n"}], "grading": {"expectations": [{"text": "Identifies this as auto mode (not command shortcut)", "passed": true, "evidence": "Agent output: 'Mode selected: AUTO \u2014 does not match any command shortcut keyword'"}, {"text": "Triggers Codex classification step", "passed": true, "evidence": "Agent output: 'Step 1: Codex runs --full-auto --skip-git-repo-check and classifies the input'"}, {"text": "Decomposes into at least 2 subtasks", "passed": true, "evidence": "Agent output: 2 subtasks \u2014 executor(\ud504\ub860\ud2b8\uc5d4\ub4dc \ub9ac\ud329\ud130\ub9c1) + security-reviewer(\ubcf4\uc548 \ub9ac\ubdf0)"}, {"text": "Notes delegation to tfx-multi for subtasks >= 2", "passed": true, "evidence": "Agent output: 'subtasks.length = 2 >= 2, tfx-auto automatically hands off to tfx-multi Phase 3'"}, {"text": "Does NOT try to execute all subtasks directly", "passed": true, "evidence": "Agent correctly delegates to tfx-multi instead of direct execution"}], "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}}}, {"id": "multi-team-creation-old_skill", "prompt": "/tfx-multi \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0", "eval_id": 3, "outputs": [{"name": "analysis.md", "type": "text", "content": "# tfx-multi Routing Analysis\n\n## Input\n```\n/tfx-multi \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0\n```\n\n---\n\n## Phase 0: Preflight Checks\n\n**Mode determination:** The input has no `--tmux`, `--psmux`, `--agents`, or `N:agent` prefix, and is not a control command (`status`/`stop`/etc.), so this is **auto mode**.\n\n**Execution order (auto mode):** Phase 0 (preflight) and Phase 2 (triage) run **simultaneously in parallel** (NOT sequentially). Phase 3 starts only after both complete.\n\n**Single combined Bash check:**\n```bash\nBash({\n  command: \"curl -sf http://127.0.0.1:27888/status >/dev/null && test -f ~/.claude/scripts/tfx-route.sh && echo \\\"preflight: ok\\\" || echo \\\"preflight: FAIL\\\"\"\n})\n```\n\n**What is verified:**\n- Hub is running and healthy at `http://127.0.0.1:27888/status` (`/status` endpoint \u2014 `/health` alone is forbidden)\n- `~/.claude/scripts/tfx-route.sh` exists on disk\n\n**Output policy:** Only a single summary line is shown to the user (e.g., `preflight: ok (route/hub)`). No individual Bash logs are surfaced unless preflight fails.\n\n**Failure actions (only if preflight fails):**\n- `tfx-route.sh` missing \u2192 advise user to run `tfx setup`\n- Hub not running/unhealthy \u2192 surface Hub error detail\n- Required CLI not installed \u2192 surface missing CLI detail\n\n---\n\n## Phase 1: Input Parsing\n\n**Raw input:** `\"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0\"`\n\n**Parse results:**\n- No `--tmux` / `--psmux` flag \u2192 NOT routed to Phase 3-mux\n- No `--agents` flag\n- No `N:agent_type` prefix (e.g., `3:codex`)\n- Not a control command (`status`, `stop`, `kill`, `attach`, `list`, `send`)\n- Input string is non-empty \u2192 no prompt to user required\n- No `--thorough` flag \u2192 **`--quick` mode (default)**; Phase 2.5, 2.6, 3.5, 3.6, 3.7 are all SKIPPED\n\n**Determined mode:** Auto mode, `--quick`\n\n---\n\n## Phase 2: Triage \u2014 Decomposition\n\n### Step 2a: Codex Classification\n\n```bash\nBash({\n  command: \"codex exec --full-auto --skip-git-repo-check '\ub2e4\uc74c \uc791\uc5c5\uc744 \ubd84\uc11d\ud558\uace0 \uac01 \ubd80\ubd84\uc5d0 \uc801\ud569\ud55c agent\ub97c \ubd84\ub958\ud558\ub77c.\\n\\n  agent \uc120\ud0dd:\\n  - codex: \ucf54\ub4dc \uad6c\ud604/\uc218\uc815/\ubd84\uc11d/\ub9ac\ubdf0/\ub514\ubc84\uae45/\uc124\uacc4 (\uae30\ubcf8\uac12)\\n  - gemini: \ubb38\uc11c/UI/\ub514\uc790\uc778/\uba40\ud2f0\ubaa8\ub2ec\\n  - claude: \ucf54\ub4dc\ubca0\uc774\uc2a4 \ud0d0\uc0c9/\ud14c\uc2a4\ud2b8 \uc2e4\ud589/\uac80\uc99d (\ucd5c\ud6c4 \uc218\ub2e8)\\n\\n  \ubaa8\ub4e0 \uc5ed\ud560\uc740 Codex/Gemini \uc6b0\uc120 \ubc30\uc815:\\n  - explore, verifier, test-engineer, qa-tester \ud3ec\ud568 \uc804 \uc5ed\ud560\uc774 Codex/Gemini\ub85c \ub77c\uc6b0\ud305\\n  - Codex/Gemini \ubbf8\uc124\uce58 \uc2dc\uc5d0\ub9cc claude-native(sonnet/haiku) fallback\\n  - claude \ud0c0\uc785\uc740 \ucd5c\ud6c4 \uc218\ub2e8\uc73c\ub85c\ub9cc \uc0ac\uc6a9\\n\\n  \uc791\uc5c5: \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0\\n\\n  JSON\ub9cc \ucd9c\ub825:\\n  { \\\"parts\\\": [{ \\\"description\\\": \\\"...\\\", \\\"agent\\\": \\\"codex|gemini|claude\\\" }] }\\n'\"\n})\n```\n\n**Expected Codex classification output (JSON):**\n```json\n{\n  \"parts\": [\n    { \"description\": \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\", \"agent\": \"codex\" },\n    { \"description\": \"UI \uac1c\uc120\",      \"agent\": \"gemini\" },\n    { \"description\": \"\ubcf4\uc548 \ub9ac\ubdf0\",    \"agent\": \"codex\" }\n  ]\n}\n```\n\nRationale per the skill's agent selection rules:\n- \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\" \u2192 code refactoring \u2192 `codex` (executor)\n- \"UI \uac1c\uc120\" \u2192 UI/design \u2192 `gemini` (designer)\n- \"\ubcf4\uc548 \ub9ac\ubdf0\" \u2192 code review/analysis \u2192 `codex` (reviewer)\n\nIf Codex classification fails, the Lead (Opus) directly classifies and decomposes inline with the same result.\n\n### Step 2b: Inline Decomposition\n\n```javascript\nassignments = [\n  { cli: \"codex\",  subtask: \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\", role: \"executor\"  },\n  { cli: \"gemini\", subtask: \"UI \uac1c\uc120\",       role: \"designer\"  },\n  { cli: \"codex\",  subtask: \"\ubcf4\uc548 \ub9ac\ubdf0\",     role: \"reviewer\"  }\n]\n```\n\n**Note:** Phase 2.5 (Plan) and Phase 2.6 (PRD) are SKIPPED because `--thorough` was NOT specified.\n\n---\n\n## Phase 3: Native Teams Execution\n\n### Step 3a: TeamCreate\n\n```\nteamName = \"tfx-\" + Date.now().toString(36).slice(-6)\n// Example: \"tfx-m3x9pq\"\n```\n\n```javascript\nTeamCreate({\n  team_name: \"tfx-m3x9pq\",\n  description: \"tfx-multi: \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0\"\n})\n```\n\n### Step 3b: TaskCreate (3 tasks, one per subtask)\n\n**Task 1:**\n```javascript\nTaskCreate({\n  subject: \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\",\n  description: \"CLI: codex, \uc5ed\ud560: executor\\n\\n\uc778\uc99d \uad00\ub828 \ucf54\ub4dc\ub97c \ub9ac\ud329\ud130\ub9c1\ud55c\ub2e4.\",\n  metadata: { cli: \"codex\", role: \"executor\" }\n})\n// \u2192 taskId: <task-id-1>\n// \u2192 agentName: \"codex-worker-1\"\n```\n\n**Task 2:**\n```javascript\nTaskCreate({\n  subject: \"UI \uac1c\uc120\",\n  description: \"CLI: gemini, \uc5ed\ud560: designer\\n\\nUI\ub97c \uac1c\uc120\ud55c\ub2e4.\",\n  metadata: { cli: \"gemini\", role: \"designer\" }\n})\n// \u2192 taskId: <task-id-2>\n// \u2192 agentName: \"gemini-worker-1\"\n```\n\n**Task 3:**\n```javascript\nTaskCreate({\n  subject: \"\ubcf4\uc548 \ub9ac\ubdf0\",\n  description: \"CLI: codex, \uc5ed\ud560: reviewer\\n\\n\ubcf4\uc548 \uad00\ub828 \ucf54\ub4dc \ub9ac\ubdf0\ub97c \uc218\ud589\ud55c\ub2e4.\",\n  metadata: { cli: \"codex\", role: \"reviewer\" }\n})\n// \u2192 taskId: <task-id-3>\n// \u2192 agentName: \"codex-worker-2\"\n```\n\n**runQueue after 3b:**\n```javascript\nrunQueue = [\n  { taskId: \"<task-id-1>\", agentName: \"codex-worker-1\",  cli: \"codex\",  subtask: \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\", role: \"executor\"  },\n  { taskId: \"<task-id-2>\", agentName: \"gemini-worker-1\", cli: \"gemini\", subtask: \"UI \uac1c\uc120\",       role: \"designer\"  },\n  { taskId: \"<task-id-3>\", agentName: \"codex-worker-2\",  cli: \"codex\",  subtask: \"\ubcf4\uc548 \ub9ac\ubdf0\",     role: \"reviewer\"  }\n]\n```\n\n### Step 3c: Agent Slim-Wrapper Spawn (codex and gemini items)\n\nAll three items use `cli: \"codex\"` or `cli: \"gemini\"`, so ALL THREE get slim-wrapper Agents (none are `cli: \"claude\"`).\n\nThe prompt for each is generated by `buildSlimWrapperPrompt()` in `hub/team/native.mjs`. The wrapper's core behavior:\n1. `TaskUpdate(taskId, status: in_progress)` \u2014 claim\n2. `SendMessage(to: \"team-lead\", \"\uc791\uc5c5 \uc2dc\uc791: {agentName}\")` \u2014 start report (creates turn boundary)\n3. `Bash(command: \"bash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}\", timeout: {bashTimeoutMs})` \u2014 delegate to tfx-route.sh\n4. `SendMessage(to: \"team-lead\", \"\uacb0\uacfc: {\uc694\uc57d}\")` \u2014 result report (creates turn boundary)\n5. Await lead feedback; loop back to step 3 if further instructions received\n6. Final: `TaskUpdate(status: completed, metadata: {result: \"success\"|\"failed\"})` + `SendMessage` \u2192 exit\n\n**Bash timeout calculation (from `getRouteTimeout`):**\n- `executor` role \u2192 default 1080 seconds + 60 buffer = **1140 seconds = 1,140,000 ms**\n- `designer` role \u2192 default 1080 seconds + 60 buffer = **1140 seconds = 1,140,000 ms**\n- `reviewer` role \u2192 maps to `review` profile \u2192 **3600 seconds + 60 buffer = 3,660,000 ms**\n\n**Agent call 1 \u2014 codex-worker-1:**\n```javascript\nAgent({\n  name: \"codex-worker-1\",\n  team_name: \"tfx-m3x9pq\",\n  mode: \"bypassPermissions\",\n  run_in_background: true,\n  prompt: buildSlimWrapperPrompt(\"codex\", {\n    subtask:   \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\",\n    role:      \"executor\",\n    teamName:  \"tfx-m3x9pq\",\n    taskId:    \"<task-id-1>\",\n    agentName: \"codex-worker-1\",\n    leadName:  \"team-lead\",\n    mcp_profile: <resolved_mcp_profile>\n  })\n  // Internal Bash: \"bash ~/.claude/scripts/tfx-route.sh executor '\uc778\uc99d \ub9ac\ud329\ud130\ub9c1' <mcp_profile>\"\n  // Bash timeout: 1,140,000 ms\n})\n```\n\n**Agent call 2 \u2014 gemini-worker-1:**\n```javascript\nAgent({\n  name: \"gemini-worker-1\",\n  team_name: \"tfx-m3x9pq\",\n  mode: \"bypassPermissions\",\n  run_in_background: true,\n  prompt: buildSlimWrapperPrompt(\"gemini\", {\n    subtask:   \"UI \uac1c\uc120\",\n    role:      \"designer\",\n    teamName:  \"tfx-m3x9pq\",\n    taskId:    \"<task-id-2>\",\n    agentName: \"gemini-worker-1\",\n    leadName:  \"team-lead\",\n    mcp_profile: <resolved_mcp_profile>\n  })\n  // Internal Bash: \"bash ~/.claude/scripts/tfx-route.sh designer 'UI \uac1c\uc120' <mcp_profile>\"\n  // Bash timeout: 1,140,000 ms\n})\n```\n\n**Agent call 3 \u2014 codex-worker-2:**\n```javascript\nAgent({\n  name: \"codex-worker-2\",\n  team_name: \"tfx-m3x9pq\",\n  mode: \"bypassPermissions\",\n  run_in_background: true,\n  prompt: buildSlimWrapperPrompt(\"codex\", {\n    subtask:   \"\ubcf4\uc548 \ub9ac\ubdf0\",\n    role:      \"reviewer\",\n    teamName:  \"tfx-m3x9pq\",\n    taskId:    \"<task-id-3>\",\n    agentName: \"codex-worker-2\",\n    leadName:  \"team-lead\",\n    mcp_profile: <resolved_mcp_profile>\n  })\n  // Internal Bash: \"bash ~/.claude/scripts/tfx-route.sh reviewer '\ubcf4\uc548 \ub9ac\ubdf0' <mcp_profile>\"\n  // Bash timeout: 3,660,000 ms\n})\n```\n\n**`mode: \"bypassPermissions\"` \u2014 YES, included in all three Agent calls.** This is mandatory per the skill definition; without it workers would pause awaiting user approval on every Bash call.\n\n**`tfx-route.sh` usage \u2014 YES.** Workers call `bash ~/.claude/scripts/tfx-route.sh`, never `codex exec ...` or `gemini -y -p ...` directly. Direct calls are explicitly forbidden by the skill.\n\n### Step 3d: claude-type Agent \u2014 NOT APPLICABLE\n\nNone of the three subtasks were classified as `cli: \"claude\"`, so Step 3d is skipped entirely.\n\n### Step 3e: User Notification\n\n```\n\ud300 'tfx-m3x9pq' \uc0dd\uc131 \uc644\ub8cc.\nCodex/Gemini \uc6cc\ucee4\uac00 \uc2ac\ub9bc \ub798\ud37c Agent\ub85c \ub124\ube44\uac8c\uc774\uc158\uc5d0 \ub4f1\ub85d\ub418\uc5c8\uc2b5\ub2c8\ub2e4.\nShift+Down\uc73c\ub85c \ub2e4\uc74c \uc6cc\ucee4\ub85c \uc804\ud658 (\ub9c8\uc9c0\ub9c9\u2192\ub9ac\ub4dc wrap). Shift+Tab\uc73c\ub85c \uc774\uc804 \uc6cc\ucee4 \uc804\ud658.\n```\n\n---\n\n## Phase 4: Result Collection\n\n1. Lead waits for all three background Agent processes to complete.\n2. Query `team_task_list` as the **single truth source**:\n\n```bash\nBash({\n  command: \"node hub/bridge.mjs team-task-list --team tfx-m3x9pq\"\n})\n```\n\n3. For any task where status is `completed` but `metadata.result == \"failed\"`: trigger Claude fallback retry.\n4. After fallback, re-query `team_task_list` to confirm final state.\n5. `send-message` and `result(task.result)` events are observation channels only; final verdict is always from `team_task_list`.\n\n**Summary report (example):**\n```markdown\n## tfx-multi \uc2e4\ud589 \uacb0\uacfc\n\n| # | Worker         | CLI    | \uc791\uc5c5          | \uc0c1\ud0dc      |\n|---|----------------|--------|---------------|-----------|\n| 1 | codex-worker-1 | codex  | \uc778\uc99d \ub9ac\ud329\ud130\ub9c1  | completed |\n| 2 | gemini-worker-1| gemini | UI \uac1c\uc120       | completed |\n| 3 | codex-worker-2 | codex  | \ubcf4\uc548 \ub9ac\ubdf0     | completed |\n```\n\n---\n\n## Phase 5: Cleanup (always runs \u2014 success or failure)\n\n1. Wait up to **30 seconds** for all background Agents to finish.\n2. If any Agent is still running after 30 seconds, proceed with cleanup anyway.\n3. Call `TeamDelete`:\n\n```javascript\nTeamDelete({\n  team_name: \"tfx-m3x9pq\"\n})\n```\n\n4. If `TeamDelete` fails (active members still present), call `forceCleanupTeam(\"tfx-m3x9pq\")`.\n   If that also fails, output manual cleanup instructions:\n   ```\n   rm -rf ~/.claude/teams/tfx-m3x9pq/ ~/.claude/tasks/tfx-m3x9pq/\n   ```\n5. Output the final summary report.\n\n**Reason TeamDelete is mandatory:** Leaving `~/.claude/teams/{teamName}/` on disk causes the OMC hook to repeatedly detect \"team executing\", creating an infinite loop.\n\n---\n\n## Key Routing Decisions Summary\n\n| Question | Answer |\n|----------|--------|\n| `mode: \"bypassPermissions\"` in Agent calls? | YES \u2014 all three Agent calls include it |\n| `tfx-route.sh` used inside Agent wrappers? | YES \u2014 `bash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}` |\n| Direct `codex exec` or `gemini -y -p` calls? | NO \u2014 explicitly forbidden |\n| Workers use Read/Edit/Write/Grep/Glob tools? | NO \u2014 forbidden; all file operations delegated via tfx-route.sh |\n| `--thorough` pipeline stages (Phase 2.5, 2.6, 3.5\u20133.7)? | SKIPPED \u2014 `--quick` (default) mode |\n| `--tmux`/`--psmux` mode? | NO \u2014 not in input |\n| Step 3d (claude-type Agent)? | SKIPPED \u2014 no subtask has `cli: \"claude\"` |\n| TeamDelete on failure? | YES \u2014 Phase 5 is unconditional |\n| Preflight and triage run in parallel? | YES \u2014 auto mode runs Phase 0 + Phase 2 in parallel |\n| Lead directly calling Codex/Gemini Bash? | NO \u2014 Lead spawns Agent wrappers; wrappers call tfx-route.sh |\n"}], "grading": {"expectations": [{"text": "Creates exactly one TeamCreate with tfx- prefix naming", "passed": true, "evidence": "Agent output: TeamCreate({ team_name: 'tfx-<id>' })"}, {"text": "Creates 3 TaskCreate calls (one per subtask)", "passed": true, "evidence": "Agent output: 'Three TaskCreate calls (one per subtask), preserving taskIds'"}, {"text": "Spawns 3 Agent wrappers with mode: bypassPermissions", "passed": true, "evidence": "Agent output: 'mode: bypassPermissions \u2014 included in all 3 Agent calls. Mandatory.'"}, {"text": "Uses tfx-route.sh inside Agent wrapper (not direct codex/gemini)", "passed": true, "evidence": "Agent output: 'all wrappers internally call bash ~/.claude/scripts/tfx-route.sh \u2014 never direct codex exec or gemini -y -p'"}, {"text": "Includes Phase 5 cleanup (TeamDelete)", "passed": true, "evidence": "Agent output: 'TeamDelete is called unconditionally (success or failure), with 30-second wait'"}], "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}}}, {"id": "multi-team-creation-with_skill", "prompt": "/tfx-multi \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0", "eval_id": 3, "outputs": [{"name": "analysis.md", "type": "text", "content": "# tfx-multi Routing Analysis\n\n**Input:** `/tfx-multi \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0`\n**Skill:** `tfx-multi` (SKILL.md \u2014 v3 \ud30c\uc774\ud504\ub77c\uc778 \uae30\ubc18 \uba40\ud2f0-CLI \ud300 \uc624\ucf00\uc2a4\ud2b8\ub808\uc774\ud130)\n**Mode detected:** `--quick` (\uae30\ubcf8\uac12, `--thorough` \ud50c\ub798\uadf8 \uc5c6\uc74c)\n\n---\n\n## Phase 0: Preflight Checks\n\n**\ubcd1\ub82c \uc815\ucc45:** \uc790\ub3d9 \ubaa8\ub4dc\uc774\ubbc0\ub85c Phase 0(preflight) + Phase 2(triage)\ub97c \ub3d9\uc2dc \ubcd1\ub82c\ub85c \uc2e4\ud589\ud55c\ub2e4.\nAgent spawn(Phase 3)\uc740 Phase 2 \uc644\ub8cc \ud6c4 \uc2dc\uc791\ud55c\ub2e4.\n\n\ub2e8\uc77c Bash \uba85\ub839\uc73c\ub85c \ud1b5\ud569 \uc2e4\ud589:\n\n```bash\nBash(\"curl -sf http://127.0.0.1:27888/status >/dev/null && test -f ~/.claude/scripts/tfx-route.sh && echo 'preflight: ok' || echo 'preflight: FAIL'\")\n```\n\n\uc810\uac80 \ud56d\ubaa9:\n- Hub \uc0c1\ud0dc: `http://127.0.0.1:27888/status` \uc751\ub2f5 \ud655\uc778 (`/health` \ub2e8\ub3c5 \ud310\uc815 \uae08\uc9c0)\n- `tfx-route.sh` \ud30c\uc77c \uc874\uc7ac \uc5ec\ubd80: `~/.claude/scripts/tfx-route.sh`\n- \ud544\uc218 CLI \uc124\uce58 \uc5ec\ubd80: codex, gemini (\uac80\uc99d \uc2e4\ud328 \uc2dc \ud574\ub2f9 \uc6cc\ucee4\ub97c claude fallback\uc73c\ub85c \ub300\uccb4)\n\n\ucd9c\ub825 \uc815\ucc45: \uc131\uacf5 \uc2dc `preflight: ok (route/hub)` \ud55c \uc904\ub9cc \ub178\ucd9c. \uc2e4\ud328 \ud56d\ubaa9\uc774 \uc788\uc744 \ub54c\ub9cc \uc0c1\uc138 \ucd9c\ub825.\n\n---\n\n## Phase 1: Input Parsing\n\n\uc785\ub825 \ubb38\uc790\uc5f4: `\"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0\"`\n\n- `--tmux` / `--psmux` \ud50c\ub798\uadf8: \uc5c6\uc74c \u2192 Phase 3-mux \ubd84\uae30 \uc5c6\uc74c\n- `--thorough` \ud50c\ub798\uadf8: \uc5c6\uc74c \u2192 `--quick` (\uae30\ubcf8) \ubaa8\ub4dc \ud655\uc815\n- `N:agent` \ud328\ud134: \uc5c6\uc74c \u2192 \uc218\ub3d9 \ubaa8\ub4dc \uc544\ub2d8\n- `--agents` \ud50c\ub798\uadf8: \uc5c6\uc74c\n- \uc81c\uc5b4 \ucee4\ub9e8\ub4dc (`status`, `stop`, `kill`, `attach`, `list`, `send`): \uc5c6\uc74c\n- \uc778\uc790: \ube44\uc5b4 \uc788\uc9c0 \uc54a\uc74c \u2192 Phase 2\ub85c \uc9c4\ud589 \uac00\ub2a5\n\n\uacb0\ub860: **\uc790\ub3d9 \ubaa8\ub4dc** (Codex \ubd84\ub958 \u2192 Opus \ubd84\ud574)\ub85c Phase 2 \uc9c4\ud589.\n\n---\n\n## Phase 2: Triage (\uc790\ub3d9 \ubaa8\ub4dc)\n\n### Step 2a: Codex \ubd84\ub958\n\n```bash\nBash(\"codex exec --full-auto --skip-git-repo-check '\ub2e4\uc74c \uc791\uc5c5\uc744 \ubd84\uc11d\ud558\uace0 \uac01 \ubd80\ubd84\uc5d0 \uc801\ud569\ud55c agent\ub97c \ubd84\ub958\ud558\ub77c.\n\n  agent \uc120\ud0dd:\n  - codex: \ucf54\ub4dc \uad6c\ud604/\uc218\uc815/\ubd84\uc11d/\ub9ac\ubdf0/\ub514\ubc84\uae45/\uc124\uacc4 (\uae30\ubcf8\uac12)\n  - gemini: \ubb38\uc11c/UI/\ub514\uc790\uc778/\uba40\ud2f0\ubaa8\ub2ec\n  - claude: \ucf54\ub4dc\ubca0\uc774\uc2a4 \ud0d0\uc0c9/\ud14c\uc2a4\ud2b8 \uc2e4\ud589/\uac80\uc99d (\ucd5c\ud6c4 \uc218\ub2e8)\n\n  \ubaa8\ub4e0 \uc5ed\ud560\uc740 Codex/Gemini \uc6b0\uc120 \ubc30\uc815:\n  - explore, verifier, test-engineer, qa-tester \ud3ec\ud568 \uc804 \uc5ed\ud560\uc774 Codex/Gemini\ub85c \ub77c\uc6b0\ud305\n  - Codex/Gemini \ubbf8\uc124\uce58 \uc2dc\uc5d0\ub9cc claude-native(sonnet/haiku) fallback\n  - claude \ud0c0\uc785\uc740 \ucd5c\ud6c4 \uc218\ub2e8\uc73c\ub85c\ub9cc \uc0ac\uc6a9\n\n  \uc791\uc5c5: \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0\n\n  JSON\ub9cc \ucd9c\ub825:\n  { \\\"parts\\\": [{ \\\"description\\\": \\\"...\\\", \\\"agent\\\": \\\"codex|gemini|claude\\\" }] }\n'\")\n```\n\nCodex \ubd84\ub958 \uc2e4\ud328 \uc2dc \u2192 Opus(\uc624\ucf00\uc2a4\ud2b8\ub808\uc774\ud130)\uac00 \uc9c1\uc811 \ubd84\ub958+\ubd84\ud574.\n\n### Step 2b: \uc778\ub77c\uc778 \ubd84\ud574 (\uc608\uc0c1 \uacb0\uacfc)\n\nCodex \ubd84\ub958 \uacb0\uacfc\ub97c \uae30\ubc18\uc73c\ub85c \uc544\ub798 \uc11c\ube0c\ud0dc\uc2a4\ud06c \ubc30\uc5f4\uc744 \uad6c\uc131\ud55c\ub2e4:\n\n| # | CLI    | Subtask       | Role      |\n|---|--------|---------------|-----------|\n| 1 | codex  | \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 | executor  |\n| 2 | gemini | UI \uac1c\uc120       | designer  |\n| 3 | codex  | \ubcf4\uc548 \ub9ac\ubdf0     | reviewer  |\n\n```javascript\nassignments = [\n  { cli: \"codex\",  subtask: \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\", role: \"executor\" },\n  { cli: \"gemini\", subtask: \"UI \uac1c\uc120\",       role: \"designer\" },\n  { cli: \"codex\",  subtask: \"\ubcf4\uc548 \ub9ac\ubdf0\",     role: \"reviewer\" }\n]\n```\n\n> \ucc38\uace0: \uc785\ub825\uc5d0 `+`\ub85c \uad6c\ubd84\ub41c 3\uac1c\uc758 \uba85\uc2dc\uc801 \ud30c\ud2b8\uac00 \uc788\uc73c\ubbc0\ub85c \ubd84\ub958 \uacb0\uacfc\ub294 \uc774 3\ud30c\ud2b8 \uae30\uc900\uc73c\ub85c \ub9de\ucdb0\uc9c4\ub2e4.\n> \uc2e4\uc81c Codex \ubd84\ub958 JSON\uc5d0 \ub530\ub77c CLI \ubc30\uc815\uc774 \ub2ec\ub77c\uc9c8 \uc218 \uc788\ub2e4.\n\n### Phase 2.5\u20132.6: \uac74\ub108\ub700\n\n`--quick` \uae30\ubcf8 \ubaa8\ub4dc\uc774\ubbc0\ub85c Plan(2.5), PRD(2.6) \ub2e8\uacc4\ub97c \uc2e4\ud589\ud558\uc9c0 \uc54a\ub294\ub2e4.\n\n---\n\n## Phase 3: Native Teams \uc2e4\ud589\n\n### Step 3a: TeamCreate\n\n```javascript\nteamName = \"tfx-\" + Date.now().toString(36).slice(-6)\n// \uc608: \"tfx-m3x7qk\" (\uc2e4\ud589 \uc2dc\uc810\uc5d0 \ub530\ub77c \ub2e4\ub984)\n\nTeamCreate({\n  team_name: teamName,         // e.g. \"tfx-m3x7qk\"\n  description: \"tfx-multi: \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 + UI \uac1c\uc120 + \ubcf4\uc548 \ub9ac\ubdf0\"\n})\n```\n\n### Step 3b: TaskCreate (\uacf5\uc720 \uc791\uc5c5 \ub4f1\ub85d)\n\n\uac01 \uc11c\ube0c\ud0dc\uc2a4\ud06c\uc5d0 \ub300\ud574 \uc21c\uc11c\ub300\ub85c TaskCreate\ub97c \ud638\ucd9c\ud558\uace0 \ubc18\ud658\ub41c taskId\ub97c \ubcf4\uc874\ud55c\ub2e4.\n\n**\uc11c\ube0c\ud0dc\uc2a4\ud06c 1 (\uc778\uc99d \ub9ac\ud329\ud130\ub9c1):**\n```javascript\nTaskCreate({\n  subject: \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\",\n  description: \"CLI: codex, \uc5ed\ud560: executor\\n\\n\uc778\uc99d \ub9ac\ud329\ud130\ub9c1 \uc791\uc5c5 \uc0c1\uc138 \ub0b4\uc6a9\",\n  metadata: { cli: \"codex\", role: \"executor\" }\n})\n// taskId_1 = created_task.id\n// agentName_1 = \"codex-worker-1\"\n```\n\n**\uc11c\ube0c\ud0dc\uc2a4\ud06c 2 (UI \uac1c\uc120):**\n```javascript\nTaskCreate({\n  subject: \"UI \uac1c\uc120\",\n  description: \"CLI: gemini, \uc5ed\ud560: designer\\n\\nUI \uac1c\uc120 \uc791\uc5c5 \uc0c1\uc138 \ub0b4\uc6a9\",\n  metadata: { cli: \"gemini\", role: \"designer\" }\n})\n// taskId_2 = created_task.id\n// agentName_2 = \"gemini-worker-2\"\n```\n\n**\uc11c\ube0c\ud0dc\uc2a4\ud06c 3 (\ubcf4\uc548 \ub9ac\ubdf0):**\n```javascript\nTaskCreate({\n  subject: \"\ubcf4\uc548 \ub9ac\ubdf0\",\n  description: \"CLI: codex, \uc5ed\ud560: reviewer\\n\\n\ubcf4\uc548 \ub9ac\ubdf0 \uc791\uc5c5 \uc0c1\uc138 \ub0b4\uc6a9\",\n  metadata: { cli: \"codex\", role: \"reviewer\" }\n})\n// taskId_3 = created_task.id\n// agentName_3 = \"codex-worker-3\"\n```\n\n### Step 3c: Agent \uc2ac\ub9bc \ub798\ud37c spawn (codex/gemini \uc11c\ube0c\ud0dc\uc2a4\ud06c)\n\n3\uac1c \uc11c\ube0c\ud0dc\uc2a4\ud06c \ubaa8\ub450 cli\uac00 `codex` \ub610\ub294 `gemini`\uc774\ubbc0\ub85c, 3\uac1c \ubaa8\ub450 \uc2ac\ub9bc \ub798\ud37c Agent\ub85c spawn\ud55c\ub2e4.\n`mode: \"bypassPermissions\"`\ub294 \ubaa8\ub4e0 Agent spawn\uc5d0 \ubc18\ub4dc\uc2dc \ud3ec\ud568\ub41c\ub2e4.\n\n**Agent 1 \u2014 codex-worker-1 (\uc778\uc99d \ub9ac\ud329\ud130\ub9c1):**\n```javascript\nAgent({\n  name: \"codex-worker-1\",\n  team_name: teamName,            // \"tfx-m3x7qk\"\n  mode: \"bypassPermissions\",      // [\ud544\uc218] \uc0ac\uc6a9\uc790 \uc2b9\uc778 \uc5c6\uc774 Bash \uc2e4\ud589\n  run_in_background: true,\n  prompt: buildSlimWrapperPrompt(\"codex\", {\n    subtask:   \"\uc778\uc99d \ub9ac\ud329\ud130\ub9c1\",\n    role:      \"executor\",\n    teamName:  teamName,\n    taskId:    taskId_1,\n    agentName: \"codex-worker-1\",\n    leadName:  \"team-lead\",\n    mcp_profile: mcp_profile      // tfx-route.sh\uc5d0 \uc804\ub2ec\ud560 MCP \ud504\ub85c\ud30c\uc77c\n  })\n  // prompt \ub0b4\uc6a9(buildSlimWrapperPrompt \ucd9c\ub825, ~100 \ud1a0\ud070):\n  // 1. TaskUpdate(taskId_1, status: \"in_progress\")\n  // 2. SendMessage(to: \"team-lead\", \"\uc791\uc5c5 \uc2dc\uc791: codex-worker-1\")\n  // 3. Bash(\"bash ~/.claude/scripts/tfx-route.sh executor '\uc778\uc99d \ub9ac\ud329\ud130\ub9c1' {mcp_profile}\",\n  //         timeout: 1140000)   // 1080\ucd08 + 60\ucd08 \uc5ec\uc720 = 1140\ucd08 \u2192 ms\n  // 4. SendMessage(to: \"team-lead\", \"\uacb0\uacfc: {\uc694\uc57d}\")\n  // 5. \ub9ac\ub4dc \ud53c\ub4dc\ubc31 \ub300\uae30 \u2192 \ud544\uc694 \uc2dc Step 3 \uc7ac\uc2e4\ud589\n  // 6. TaskUpdate(taskId_1, status: \"completed\", metadata: {result: \"success\"|\"failed\"})\n  //    + SendMessage(to: \"team-lead\") \u2192 \uc885\ub8cc\n})\n```\n\nBash timeout \uacc4\uc0b0: `executor` \uc5ed\ud560, \uc77c\ubc18 \ud504\ub85c\ud30c\uc77c \u2192 \uae30\ubcf8 1080\ucd08 + 60\ucd08 = **1140\ucd08 \u2192 1,140,000 ms**\n\n**Agent 2 \u2014 gemini-worker-2 (UI \uac1c\uc120):**\n```javascript\nAgent({\n  name: \"gemini-worker-2\",\n  team_name: teamName,\n  mode: \"bypassPermissions\",\n  run_in_background: true,\n  prompt: buildSlimWrapperPrompt(\"gemini\", {\n    subtask:   \"UI \uac1c\uc120\",\n    role:      \"designer\",\n    teamName:  teamName,\n    taskId:    taskId_2,\n    agentName: \"gemini-worker-2\",\n    leadName:  \"team-lead\",\n    mcp_profile: mcp_profile\n  })\n  // Bash \ub0b4\ubd80:\n  // Bash(\"bash ~/.claude/scripts/tfx-route.sh designer 'UI \uac1c\uc120' {mcp_profile}\",\n  //      timeout: 1140000)\n})\n```\n\n**Agent 3 \u2014 codex-worker-3 (\ubcf4\uc548 \ub9ac\ubdf0):**\n```javascript\nAgent({\n  name: \"codex-worker-3\",\n  team_name: teamName,\n  mode: \"bypassPermissions\",\n  run_in_background: true,\n  prompt: buildSlimWrapperPrompt(\"codex\", {\n    subtask:   \"\ubcf4\uc548 \ub9ac\ubdf0\",\n    role:      \"reviewer\",\n    teamName:  teamName,\n    taskId:    taskId_3,\n    agentName: \"codex-worker-3\",\n    leadName:  \"team-lead\",\n    mcp_profile: mcp_profile\n  })\n  // Bash \ub0b4\ubd80:\n  // Bash(\"bash ~/.claude/scripts/tfx-route.sh reviewer '\ubcf4\uc548 \ub9ac\ubdf0' {mcp_profile}\",\n  //      timeout: 4260000)   // reviewer \u2192 review \ud504\ub85c\ud30c\uc77c \u2192 3600\ucd08 + 60\ucd08 = 3660\ucd08\n  // \u203b reviewer \uc5ed\ud560\uc740 review \ud504\ub85c\ud30c\uc77c\ub85c \ubd84\ub958\ub420 \uc218 \uc788\uc5b4 timeout\uc774 3660\ucd08\uac00 \ub420 \uc218 \uc788\uc74c\n})\n```\n\n> Bash timeout \ucc38\uace0:\n> - `analyze/review` \ud504\ub85c\ud30c\uc77c \ub610\ub294 `architect/analyst` \uc5ed\ud560: 3600\ucd08 + 60\ucd08 = 3660\ucd08 \u2192 3,660,000 ms\n> - \uadf8 \uc678 \uae30\ubcf8: 1080\ucd08 + 60\ucd08 = 1140\ucd08 \u2192 1,140,000 ms\n> - `reviewer` \uc5ed\ud560\uc774 `review` \ud504\ub85c\ud30c\uc77c\ub85c \ub9e4\ud551\ub418\uba74 3,660,000 ms, \uae30\ubcf8 \ud504\ub85c\ud30c\uc77c\uc774\uba74 1,140,000 ms\n\n### Step 3d: claude \ud0c0\uc785 Agent \uc9c1\uc811 \uc2e4\ud589\n\n\uc774 \ucf00\uc774\uc2a4\uc5d0\uc11c\ub294 `cli == \"claude\"` \uc11c\ube0c\ud0dc\uc2a4\ud06c\uac00 \uc5c6\uc73c\ubbc0\ub85c Step 3d\ub294 \uc2e4\ud589\ub418\uc9c0 \uc54a\ub294\ub2e4.\n\n### Step 3e: \uc0ac\uc6a9\uc790 \uc548\ub0b4\n\n```\n\"\ud300 '{teamName}' \uc0dd\uc131 \uc644\ub8cc.\nCodex/Gemini \uc6cc\ucee4\uac00 \uc2ac\ub9bc \ub798\ud37c Agent\ub85c \ub124\ube44\uac8c\uc774\uc158\uc5d0 \ub4f1\ub85d\ub418\uc5c8\uc2b5\ub2c8\ub2e4.\nShift+Down\uc73c\ub85c \ub2e4\uc74c \uc6cc\ucee4\ub85c \uc804\ud658 (\ub9c8\uc9c0\ub9c9\u2192\ub9ac\ub4dc wrap). Shift+Tab\uc73c\ub85c \uc774\uc804 \uc6cc\ucee4 \uc804\ud658.\"\n```\n\n### Phase 3.5\u20133.7: \uac74\ub108\ub700\n\n`--quick` \ubaa8\ub4dc\uc774\ubbc0\ub85c Verify(3.5), Fix Loop(3.6), Ralph Loop(3.7)\uc744 \uc2e4\ud589\ud558\uc9c0 \uc54a\ub294\ub2e4.\n\n---\n\n## Phase 4: \uacb0\uacfc \uc218\uc9d1\n\ntruth source: `team_task_list`\n\n```bash\nBash(\"node hub/bridge.mjs team-task-list --team ${teamName}\")\n```\n\n1. \ubaa8\ub4e0 \ubc31\uadf8\ub77c\uc6b4\ub4dc Agent \uc644\ub8cc\ub97c \ub300\uae30\ud55c\ub2e4.\n2. \uc704 \uba85\ub839\uc73c\ub85c `team_task_list`\ub97c \ucd5c\uc885 truth source\ub85c \uc870\ud68c\ud55c\ub2e4.\n3. `status: \"completed\"` + `metadata.result == \"failed\"` \ud0dc\uc2a4\ud06c\uac00 \uc788\uc73c\uba74 Claude fallback \uc7ac\uc2dc\ub3c4\ud55c\ub2e4.\n4. \uc7ac\uc2dc\ub3c4 \ud6c4 `team_task_list`\ub97c \uc7ac\uc870\ud68c\ud558\uc5ec \ucd5c\uc885 \uc0c1\ud0dc\ub97c \ud655\uc815\ud55c\ub2e4.\n5. `send-message` \ubc0f `result(task.result)` \uc774\ubca4\ud2b8\ub294 \uc9c4\ud589 \uad00\ucc30 \ucc44\ub110\ub85c\ub9cc \uc0ac\uc6a9\ud55c\ub2e4. \ucd5c\uc885 \ud310\uc815\uc740 \ubc18\ub4dc\uc2dc `team_task_list` \uae30\uc900.\n\n\uc885\ud569 \ubcf4\uace0\uc11c \ud615\uc2dd:\n```markdown\n## tfx-multi \uc2e4\ud589 \uacb0\uacfc\n\n| # | Worker        | CLI    | \uc791\uc5c5          | \uc0c1\ud0dc      |\n|---|---------------|--------|---------------|-----------|\n| 1 | codex-worker-1  | codex  | \uc778\uc99d \ub9ac\ud329\ud130\ub9c1 | completed |\n| 2 | gemini-worker-2 | gemini | UI \uac1c\uc120       | completed |\n| 3 | codex-worker-3  | codex  | \ubcf4\uc548 \ub9ac\ubdf0     | completed |\n```\n\n---\n\n## Phase 5: Cleanup (TeamDelete)\n\n\ubc18\ub4dc\uc2dc \uc2e4\ud589 \u2014 \uc131\uacf5/\uc2e4\ud328 \uad00\uacc4\uc5c6\uc774 \uac74\ub108\ub6f8 \uc218 \uc5c6\uc74c.\n\n1. \ubaa8\ub4e0 \ubc31\uadf8\ub77c\uc6b4\ub4dc Agent \uc644\ub8cc\ub97c **\ucd5c\ub300 30\ucd08** \ub300\uae30\ud55c\ub2e4.\n2. 30\ucd08 \ud6c4\uc5d0\ub3c4 \ubbf8\uc644\ub8cc Agent\uac00 \uc788\uc73c\uba74 \ub300\uae30\ub97c \uc911\ub2e8\ud558\uace0 \uc815\ub9ac\ub97c \uc9c4\ud589\ud55c\ub2e4.\n3. `TeamDelete()` \ud638\ucd9c:\n   ```javascript\n   TeamDelete({ team_name: teamName })\n   ```\n4. TeamDelete \uc2e4\ud328 \uc2dc (\ud65c\uc131 \uba64\ubc84 \uc794\uc874) \u2192 `forceCleanupTeam(teamName)` \uac15\uc81c \uc815\ub9ac.\n   `forceCleanupTeam`\ub3c4 \uc2e4\ud328 \uc2dc \uc218\ub3d9 \uc815\ub9ac \uc548\ub0b4:\n   ```bash\n   rm -rf ~/.claude/teams/{teamName}/ ~/.claude/tasks/{teamName}/\n   ```\n5. \uc885\ud569 \ubcf4\uace0\uc11c\ub97c \ucd9c\ub825\ud55c\ub2e4.\n\nTeamDelete\ub97c \ubc18\ub4dc\uc2dc \uc2e4\ud589\ud574\uc57c \ud558\ub294 \uc774\uc720: `~/.claude/teams/{teamName}/`\uc774 \uc794\uc874\ud558\uba74\nOMC hook\uc774 \"team executing\"\uc744 \ubc18\ubcf5 \uac10\uc9c0\ud558\ub294 \ubb34\ud55c \ub8e8\ud504\uc5d0 \ube60\uc9c4\ub2e4.\n\n---\n\n## \ud575\uc2ec \uaddc\uce59 \ud655\uc778\n\n### `mode: \"bypassPermissions\"` \ud3ec\ud568 \uc5ec\ubd80\n\n**\ud3ec\ud568 \u2014 \ud544\uc218.** \ubaa8\ub4e0 Agent spawn(codex-worker, gemini-worker, claude-worker)\uc5d0 \ubc18\ub4dc\uc2dc \ud3ec\ud568\ud55c\ub2e4.\n\uc774 \uc124\uc815\uc774 \uc5c6\uc73c\uba74 \uc6cc\ucee4\uc758 Bash \uc2e4\ud589 \uc2dc \uc0ac\uc6a9\uc790 \uc2b9\uc778\uc774 \uc694\uccad\ub418\uc5b4 \uc790\ub3d9 \uc2e4\ud589\uc774 \uc911\ub2e8\ub41c\ub2e4.\n\n\ubcf8 \ucf00\uc774\uc2a4\uc758 3\uac1c Agent \ubaa8\ub450:\n- `Agent({ ..., mode: \"bypassPermissions\", ... })`\n\n### `tfx-route.sh` \uc0ac\uc6a9 \uc5ec\ubd80 (Agent \ub0b4\ubd80)\n\n**\uc0ac\uc6a9 \u2014 \ud544\uc218.** \uc2ac\ub9bc \ub798\ud37c Agent \ub0b4\ubd80\uc5d0\uc11c Codex/Gemini\ub97c \uc2e4\ud589\ud560 \ub54c \ubc18\ub4dc\uc2dc \uc544\ub798 \ud615\uc2dd\ub9cc \ud5c8\uc6a9:\n\n```bash\nbash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}\n```\n\n**\uc9c1\uc811 \ud638\ucd9c \uae08\uc9c0:**\n- `codex exec \"...\"` \u2014 \uc9c1\uc811 \ud638\ucd9c \uae08\uc9c0\n- `gemini -y -p \"...\"` \u2014 \uc9c1\uc811 \ud638\ucd9c \uae08\uc9c0\n\n\uc9c1\uc811 \ud638\ucd9c \uc2dc \ub204\ub77d\ub418\ub294 \ud56d\ubaa9:\n- \ubaa8\ub378 \uc9c0\uc815 (`-m gemini-3.1-pro-preview` \ub4f1)\n- MCP \ud544\ud130\n- \ud300 bridge \uc5f0\ub3d9 (`TFX_TEAM_*`)\n- Windows \ud638\ud658 \uacbd\ub85c\n- \ud0c0\uc784\uc544\uc6c3\n- \ud6c4\ucc98\ub9ac (\ud1a0\ud070 \ucd94\uc801/\uc774\uc288 \ub85c\uae45)\n\ntfx-route.sh \ub0b4\ubd80\uc5d0\uc11c `TFX_TEAM_*` \ud658\uacbd\ubcc0\uc218\ub97c \ud1b5\ud574 Hub \ud1b5\uc2e0:\n- `TFX_TEAM_NAME` \u2014 \ud300 \uc2dd\ubcc4\uc790 (`teamName`)\n- `TFX_TEAM_TASK_ID` \u2014 \uc791\uc5c5 \uc2dd\ubcc4\uc790 (`taskId`)\n- `TFX_TEAM_AGENT_NAME` \u2014 \uc6cc\ucee4 \uc774\ub984 (`agentName`)\n- `TFX_TEAM_LEAD_NAME` \u2014 \ub9ac\ub4dc \uc218\uc2e0\uc790 (`\"team-lead\"`)\n\nHub \ud1b5\uc2e0 \uacbd\ub85c: Named Pipe(`\\\\.\\pipe\\triflux-{pid}`) \uc6b0\uc120, HTTP(`127.0.0.1:27888`) fallback.\n\n---\n\n## \uc694\uc57d\n\n| \ud56d\ubaa9                          | \uac12                                      |\n|-------------------------------|-----------------------------------------|\n| \uac10\uc9c0 \ubaa8\ub4dc                     | \uc790\ub3d9 \ubaa8\ub4dc, `--quick` (\uae30\ubcf8)             |\n| Phase 0 \ubcd1\ub82c \uc2e4\ud589             | preflight + Phase 2(triage) \ub3d9\uc2dc \ubcd1\ub82c   |\n| \uc11c\ube0c\ud0dc\uc2a4\ud06c \uc218                 | 3\uac1c                                     |\n| Agent spawn \ubc29\uc2dd              | \uc2ac\ub9bc \ub798\ud37c (Step 3c) \u00d7 3, Step 3d \uc5c6\uc74c  |\n| `mode: \"bypassPermissions\"`   | 3\uac1c Agent \ubaa8\ub450 \ud3ec\ud568 (\ud544\uc218)              |\n| tfx-route.sh \uacbd\uc720             | 3\uac1c Agent \ub0b4\ubd80 Bash \ubaa8\ub450 \uacbd\uc720 (\ud544\uc218)    |\n| Phase 2.5\u20132.6 (Plan/PRD)      | \uac74\ub108\ub700 (`--quick` \ubaa8\ub4dc)                 |\n| Phase 3.5\u20133.7 (Verify/Fix)    | \uac74\ub108\ub700 (`--quick` \ubaa8\ub4dc)                 |\n| Phase 5 (TeamDelete)          | \ubc18\ub4dc\uc2dc \uc2e4\ud589 (\uc131\uacf5/\uc2e4\ud328 \ubb34\uad00)            |\n"}], "grading": {"expectations": [{"text": "Creates exactly one TeamCreate with tfx- prefix naming", "passed": true, "evidence": "Agent output: TeamCreate({ team_name: 'tfx-<6-char-base36>' })"}, {"text": "Creates 3 TaskCreate calls (one per subtask)", "passed": true, "evidence": "Agent output: '3x TaskCreate(...) with metadata: { cli, role }'"}, {"text": "Spawns 3 Agent wrappers with mode: bypassPermissions", "passed": true, "evidence": "Agent output: '3x Agent({ mode: bypassPermissions, run_in_background: true })'"}, {"text": "Uses tfx-route.sh inside Agent wrapper (not direct codex/gemini)", "passed": true, "evidence": "Agent output: 'Each wrapper executes bash ~/.claude/scripts/tfx-route.sh. Direct codex exec or gemini -y -p calls are prohibited.'"}, {"text": "Includes Phase 5 cleanup (TeamDelete)", "passed": true, "evidence": "Agent output: 'Phase 5: TeamDelete() always runs regardless of success/failure, with max 30s wait'"}], "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}}}, {"id": "doctor-diagnosis-old_skill", "prompt": "HUD\uac00 \uc548 \ubcf4\uc774\uace0 codex\ub3c4 \uc548 \ub418\ub294\ub370 \uc5b4\ub5bb\uac8c \ud574?", "eval_id": 4, "outputs": [{"name": "analysis.md", "type": "text", "content": "# tfx-doctor Routing Analysis\n\n## User Request\n\"HUD\uac00 \uc548 \ubcf4\uc774\uace0 codex\ub3c4 \uc548 \ub418\ub294\ub370 \uc5b4\ub5bb\uac8c \ud574?\"\n\n---\n\n## 1. Mode Selection\n\n**Mode used: default (\uc9c4\ub2e8\ub9cc)**\n\nRationale:\n- The user is reporting two symptoms: HUD not visible and Codex not working.\n- The request does not contain any explicit repair intent (\"--fix\"), cache reset request (\"\uce90\uc2dc \ucd08\uae30\ud654\", \"\ub9ac\uc14b\", \"reset\"), or destructive intent.\n- The skill's auto-suggest trigger list includes both \"HUD\uac00 \uc548 \ubcf4\uc5ec\" and \"codex/gemini\uac00 \uc548 \ub3fc\", which directly match the user's message.\n- Because no `--fix` or `--reset` flag is implied, the skill begins in read-only diagnostic mode.\n- After the diagnostic report is shown, `--fix` would be **suggested** to the user as a next step.\n\n---\n\n## 2. Exact Bash Command That Would Be Run\n\n```bash\nBash(\"triflux doctor\")\n```\n\nNo additional flags. This is the read-only diagnostic path.\n\n---\n\n## 3. Diagnostics Checked\n\nThe `triflux doctor` command (default mode) checks all of the following:\n\n| Diagnostic Item | Relevance to This Request |\n|----------------|--------------------------|\n| tfx-route.sh \uc124\uce58 \uc0c1\ud0dc | General health baseline |\n| HUD \uc124\uce58 \ubc0f \uc124\uc815 \uc0c1\ud0dc | **Directly relevant** \u2014 user reports HUD not visible |\n| Codex/Gemini/Claude CLI \uacbd\ub85c (\ud06c\ub85c\uc2a4 \uc178) | **Directly relevant** \u2014 user reports Codex not working |\n| \uc2a4\ud0ac \uc124\uce58 \uc0c1\ud0dc | General health |\n| \ud50c\ub7ec\uadf8\uc778 \ub4f1\ub85d \uc0c1\ud0dc | General health |\n| MCP \uc778\ubca4\ud1a0\ub9ac \uce90\uc2dc | Could affect HUD and CLI display |\n| CLI \uc774\uc288 \ud2b8\ub798\ucee4 | May log the Codex failure |\n| \uc794\uc874 \ud300(orphan teams) \uac10\uc9c0 (`~/.claude/teams/`) | General health |\n\nAll eight diagnostic areas are checked in default mode \u2014 none are skipped.\n\n---\n\n## 4. Whether --fix Would Be Suggested\n\n**Yes.** After the diagnostic report is displayed, `--fix` would be recommended to the user as the next step if any issues are found (e.g., HUD misconfiguration, missing Codex CLI path, corrupted cache). The skill definition explicitly states:\n\n> \uc218\uc815 \ubaa8\ub4dc (`/tfx-doctor --fix`): \uc9c4\ub2e8 \uc804\uc5d0 \uc790\ub3d9 \uc218\uc815\uc744 \uc2dc\ub3c4\ud569\ub2c8\ub2e4.\n\nThe agent would prompt: \"\ubb38\uc81c\uac00 \ubc1c\uacac\ub418\uc5c8\uc2b5\ub2c8\ub2e4. `/tfx-doctor --fix`\ub97c \uc2e4\ud589\ud558\uc5ec \uc790\ub3d9 \uc218\uc815\uc744 \uc2dc\ub3c4\ud558\uc2dc\uaca0\uc2b5\ub2c8\uae4c?\"\n\n---\n\n## 5. Whether --reset Would Be Used (and Why/Why Not)\n\n**No. `--reset` would NOT be used.**\n\nReasons:\n- The user's message contains no reset/cache-clear intent (\"\uce90\uc2dc \ucd08\uae30\ud654\", \"\ub9ac\uc14b\", \"reset\").\n- `--reset` is a destructive operation that wipes all triflux-related caches (8 files including claude-usage-cache.json, mcp-inventory.json, etc.).\n- The symptoms described (HUD not visible, Codex not working) are diagnostic-first scenarios \u2014 they should be investigated before resorting to full cache deletion.\n- Per the skill definition, `--reset` is reserved for explicit cache-initialization requests.\n- If `--fix` still leaves issues unresolved, the agent would then consider suggesting `--reset` as a last resort, but only with user confirmation.\n\n---\n\n## 6. Expected Report Format\n\nAfter `triflux doctor` runs, the agent reports results in this structure:\n\n```\n## triflux doctor \uc9c4\ub2e8 \uacb0\uacfc\n\n| \ud56d\ubaa9 | \uc0c1\ud0dc | \ube44\uace0 |\n|------|------|------|\n| tfx-route.sh | \u2713 / \u2717 | ... |\n| HUD | \u2713 / \u2717 | \uc124\uce58\ub428/\uc124\uce58 \uc548\ub428/\uc124\uc815 \uc624\ub958 |\n| Codex CLI \uacbd\ub85c | \u2713 / \u2717 | \uacbd\ub85c \ubc1c\uacac/\ubbf8\ubc1c\uacac |\n| Gemini CLI \uacbd\ub85c | \u2713 / \u2717 | ... |\n| Claude CLI \uacbd\ub85c | \u2713 / \u2717 | ... |\n| \uc2a4\ud0ac \uc124\uce58 \uc0c1\ud0dc | \u2713 / \u2717 | ... |\n| \ud50c\ub7ec\uadf8\uc778 \ub4f1\ub85d | \u2713 / \u2717 | ... |\n| MCP \uc778\ubca4\ud1a0\ub9ac \uce90\uc2dc | \u2713 / \u2717 | ... |\n| CLI \uc774\uc288 \ud2b8\ub798\ucee4 | \u2713 / \u2717 | ... |\n| orphan teams | \u2713 / \u2717 | ... |\n\n\uc774\uc288\uac00 \ubc1c\uacac\ub418\uc5c8\uc2b5\ub2c8\ub2e4. `/tfx-doctor --fix`\ub85c \uc790\ub3d9 \uc218\uc815\uc744 \uc2dc\ub3c4\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.\n```\n\nIf no issues are found:\n```\n\ubaa8\ub4e0 \uc9c4\ub2e8 \ud56d\ubaa9\uc774 \uc815\uc0c1\uc785\ub2c8\ub2e4.\n```\n\nIf `--fix` is subsequently run and issues still remain after repair:\n```\nCodex/Gemini \uc124\uce58\ub294 \uc218\ub3d9\uc73c\ub85c \uc9c4\ud589\ud574\uc57c \ud569\ub2c8\ub2e4. (\uc124\uce58 \uc548\ub0b4 \ub9c1\ud06c \ub610\ub294 \uba85\ub839\uc5b4 \uc81c\uacf5)\n```\n\n---\n\n## Summary\n\n| Decision Point | Result |\n|----------------|--------|\n| Skill triggered | tfx-doctor |\n| Mode | default (read-only diagnostic) |\n| Command | `Bash(\"triflux doctor\")` |\n| HUD diagnosed | Yes |\n| Codex CLI path diagnosed | Yes |\n| --fix suggested after report | Yes (if issues found) |\n| --reset used | No |\n| --reset trigger condition | Only if user explicitly requests cache reset |\n"}], "grading": {"expectations": [{"text": "Runs 'triflux doctor' as first diagnostic step", "passed": true, "evidence": "Agent output: 'Exact command: Bash(\"triflux doctor\")'"}, {"text": "Suggests '--fix' mode for auto-repair", "passed": true, "evidence": "Agent output: 'after the diagnostic report, offer /tfx-doctor --fix as the next step'"}, {"text": "Mentions HUD and CLI path checks in explanation", "passed": true, "evidence": "Agent output: 'HUD installation and config, Codex/Gemini/Claude CLI paths \u2014 directly relevant'"}, {"text": "Does NOT jump straight to --reset (that's for cache only)", "passed": true, "evidence": "Agent output: '--reset is destructive and reserved for explicit cache-clear request'"}], "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}}}, {"id": "doctor-diagnosis-with_skill", "prompt": "HUD\uac00 \uc548 \ubcf4\uc774\uace0 codex\ub3c4 \uc548 \ub418\ub294\ub370 \uc5b4\ub5bb\uac8c \ud574?", "eval_id": 4, "outputs": [{"name": "analysis.md", "type": "text", "content": "# tfx-doctor Routing Analysis\n\n## User Request\n\n> \"HUD\uac00 \uc548 \ubcf4\uc774\uace0 codex\ub3c4 \uc548 \ub418\ub294\ub370 \uc5b4\ub5bb\uac8c \ud574?\"\n\n---\n\n## Skill Matched\n\n**tfx-doctor** (`skills/tfx-doctor/SKILL.md`)\n\nThe request directly matches two of the documented auto-suggestion triggers:\n- \"HUD\uac00 \uc548 \ubcf4\uc5ec\" \u2192 maps to \"HUD\uac00 \uc548 \ubcf4\uc774\uace0\"\n- \"codex/gemini\uac00 \uc548 \ub3fc\" \u2192 maps to \"codex\ub3c4 \uc548 \ub418\ub294\ub370\"\n\n---\n\n## Mode Selected\n\n**Default mode** (`/tfx-doctor` \u2014 \uc9c4\ub2e8\ub9cc, \uc77d\uae30 \uc804\uc6a9)\n\nRationale: The user is reporting symptoms (\"\uc548 \ubcf4\uc774\uace0\", \"\uc548 \ub418\ub294\ub370\") but has not asked for an automatic fix, a reset, or a cache wipe. The skill definition states that the default mode is read-only diagnosis only. `--fix` would be *suggested* after the diagnosis if issues are found, but it would not be applied automatically without user consent. `--reset` is not appropriate here because the user has not said \"\uce90\uc2dc \ucd08\uae30\ud654\", \"\ub9ac\uc14b\", or \"reset\".\n\n---\n\n## Exact Bash Command That Would Be Run\n\n```bash\nBash(\"triflux doctor\")\n```\n\nNo flags. This is the single command executed in default mode.\n\n---\n\n## Diagnostics Checked\n\nThe skill definition lists the following items that `triflux doctor` inspects:\n\n| # | Diagnostic Item | Relevance to this Request |\n|---|-----------------|--------------------------|\n| 1 | tfx-route.sh \uc124\uce58 \uc0c1\ud0dc | Baseline routing check |\n| 2 | HUD \uc124\uce58 \ubc0f \uc124\uc815 \uc0c1\ud0dc | Directly relevant \u2014 HUD\uac00 \uc548 \ubcf4\uc784 |\n| 3 | Codex/Gemini/Claude CLI \uacbd\ub85c (\ud06c\ub85c\uc2a4 \uc178) | Directly relevant \u2014 codex \uc548 \ub428 |\n| 4 | \uc2a4\ud0ac \uc124\uce58 \uc0c1\ud0dc | General health |\n| 5 | \ud50c\ub7ec\uadf8\uc778 \ub4f1\ub85d \uc0c1\ud0dc | General health |\n| 6 | MCP \uc778\ubca4\ud1a0\ub9ac \uce90\uc2dc | Could affect HUD/Codex behaviour |\n| 7 | CLI \uc774\uc288 \ud2b8\ub798\ucee4 | May surface logged errors |\n| 8 | \uc794\uc874 \ud300(orphan teams) \uac10\uc9c0 (`~/.claude/teams/`) | General health |\n\nBoth primary symptoms (HUD invisible, Codex not working) are covered by items 2 and 3.\n\n---\n\n## --fix Suggestion\n\n**Yes \u2014 `--fix` would be suggested** after the diagnosis report is returned to the user.\n\nThe skill's error-handling table states: \"if issues remain after `--fix`, manual installation of Codex/Gemini is guided.\" This implies the flow is:\n\n1. Run default diagnosis \u2192 report findings.\n2. If issues are found, offer the user the option to re-run with `--fix`.\n3. User decides; skill does not auto-escalate.\n\n---\n\n## --reset Decision\n\n**`--reset` would NOT be used.**\n\nReasons:\n- The user did not request a cache wipe, full reset, or use the words \"\ub9ac\uc14b\", \"\ucd08\uae30\ud654\", or \"reset\".\n- `--reset` is a destructive, irreversible operation (deletes all cache files listed in the skill) and must only be triggered by explicit user intent.\n- The reported symptoms (HUD invisible, Codex not working) are diagnostic problems, not confirmed cache-corruption problems. A reset would be premature without diagnosis confirming a cache issue.\n\n---\n\n## Expected Report Format\n\nAfter `triflux doctor` completes, the output is relayed to the user verbatim (per the skill: \"\uacb0\uacfc\ub97c \uc0ac\uc6a9\uc790\uc5d0\uac8c \ubcf4\uace0\ud569\ub2c8\ub2e4\"). Based on the diagnostic items, the expected report structure is:\n\n```\n[triflux doctor] \uc9c4\ub2e8 \uacb0\uacfc\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\u2713 / \u2717  tfx-route.sh \uc124\uce58 \uc0c1\ud0dc\n\u2713 / \u2717  HUD \uc124\uce58 \ubc0f \uc124\uc815 \uc0c1\ud0dc\n\u2713 / \u2717  Codex CLI \uacbd\ub85c\n\u2713 / \u2717  Gemini CLI \uacbd\ub85c\n\u2713 / \u2717  Claude CLI \uacbd\ub85c\n\u2713 / \u2717  \uc2a4\ud0ac \uc124\uce58 \uc0c1\ud0dc\n\u2713 / \u2717  \ud50c\ub7ec\uadf8\uc778 \ub4f1\ub85d \uc0c1\ud0dc\n\u2713 / \u2717  MCP \uc778\ubca4\ud1a0\ub9ac \uce90\uc2dc\n\u2713 / \u2717  CLI \uc774\uc288 \ud2b8\ub798\ucee4\n\u2713 / \u2717  \uc794\uc874 \ud300(orphan teams)\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nN\uac1c \uc774\uc288 \ubc1c\uacac. --fix\ub85c \uc790\ub3d9 \uc218\uc815\ud558\ub824\uba74: /tfx-doctor --fix\n```\n\nIf `--fix` is subsequently accepted by the user, the report repeats after remediation, showing whether items moved from \u2717 to \u2713. Any items that `--fix` cannot resolve (e.g., Codex not installed) are surfaced with a manual-installation note.\n\n---\n\n## Summary\n\n| Decision Point | Answer |\n|----------------|--------|\n| Skill triggered | tfx-doctor |\n| Mode | default (\uc9c4\ub2e8\ub9cc) |\n| Command run | `triflux doctor` |\n| HUD checked | Yes |\n| CLI paths checked | Yes (Codex, Gemini, Claude) |\n| --fix suggested | Yes, after diagnosis |\n| --fix auto-applied | No |\n| --reset used | No |\n"}], "grading": {"expectations": [{"text": "Runs 'triflux doctor' as first diagnostic step", "passed": true, "evidence": "Agent output: 'Exact command: Bash(\"triflux doctor\")'"}, {"text": "Suggests '--fix' mode for auto-repair", "passed": true, "evidence": "Agent output: '--fix would be suggested to the user after the diagnosis report is returned'"}, {"text": "Mentions HUD and CLI path checks in explanation", "passed": true, "evidence": "Agent output: 'HUD installation and config, Codex/Gemini/Claude CLI paths \u2014 directly relevant to symptoms'"}, {"text": "Does NOT jump straight to --reset (that's for cache only)", "passed": true, "evidence": "Agent output: '--reset is destructive and reserved for explicit reset requests; user never said \ub9ac\uc14b/\ucd08\uae30\ud654/reset'"}], "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}}}, {"id": "hub-start-sequence-old_skill", "prompt": "/tfx-hub start", "eval_id": 5, "outputs": [{"name": "analysis.md", "type": "text", "content": "# Routing Analysis: `/tfx-hub start`\n\n**Skill source:** `skills/tfx-workspace/skill-snapshot/tfx-hub/SKILL.md`\n**Input:** `/tfx-hub start`\n**Run mode:** DRY RUN \u2014 no commands executed\n\n---\n\n## 1. Command Match vs. Fallthrough\n\nThis input **matches a command** \u2014 specifically the `start` command.\n\nThe skill's input interpretation table explicitly lists:\n\n```\n/tfx-hub start  \u2192 \ucee4\ub9e8\ub4dc \ub9e4\uce6d \u2192 \ud5c8\ube0c \uc2dc\uc791\n```\n\nThe argument `start` is a recognized command keyword (alongside `stop`, `status`, `--port`). Therefore, the fallthrough path is NOT taken.\n\n---\n\n## 2. Exact Bash Command That Would Be Run\n\n```bash\nBash(\"node hub/server.mjs\", run_in_background=true)\n```\n\nThis is quoted verbatim from the `### start \u2014 \ud5c8\ube0c \uc2dc\uc791` section of the skill definition.\n\n---\n\n## 3. run_in_background Setting\n\n`run_in_background` would be set to **`true`**.\n\nThe skill definition explicitly passes `run_in_background=true` as a parameter to the `Bash` call for the `start` command. The hub process is a long-running server and must not block the agent thread.\n\n---\n\n## 4. Port and Endpoint\n\n- **Port:** `27888`\n- **MCP endpoint:** `http://127.0.0.1:27888/mcp`\n- **Status endpoint:** `http://127.0.0.1:27888/status`\n\nThe skill states: \"Streamable HTTP MCP \uc11c\ubc84\ub97c `http://127.0.0.1:27888/mcp` \uc5d0\uc11c \uc2dc\uc791\"\n\nSupporting runtime details:\n- SQLite WAL DB: `~/.claude/cache/tfx-hub/state.db`\n- PID file: `~/.claude/cache/tfx-hub/hub.pid`\n- Port can be overridden via env var `TFX_HUB_PORT`; DB path via `TFX_HUB_DB`\n\n---\n\n## 5. Post-Start Registration Steps\n\nThe skill documents a section titled **\"\uac01 CLI \ub4f1\ub85d \ubc29\ubc95\"** (How to register with each CLI) describing steps to run after the hub starts. These are not executed automatically by the `start` command \u2014 they are listed as manual follow-up actions:\n\n```bash\n# Codex\ncodex mcp add tfx-hub --url http://127.0.0.1:27888/mcp\n\n# Gemini (settings.json)\n# mcpServers.tfx-hub.url = \"http://127.0.0.1:27888/mcp\"\n\n# Claude\nclaude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp\n```\n\nThe `start` command itself only launches `node hub/server.mjs` in the background. Registration with individual CLI agents is a separate, post-start step described in the skill but not triggered automatically. The skill does not indicate these registration calls are part of the `start` flow \u2014 they are presented as supplementary instructions under their own heading.\n\n---\n\n## Summary Table\n\n| Field                   | Value                                      |\n|-------------------------|--------------------------------------------|\n| Routing outcome         | Command match (`start`)                    |\n| Fallthrough triggered   | No                                         |\n| Exact command           | `Bash(\"node hub/server.mjs\", run_in_background=true)` |\n| run_in_background       | `true`                                     |\n| Hub port                | `27888`                                    |\n| MCP endpoint            | `http://127.0.0.1:27888/mcp`              |\n| Status endpoint         | `http://127.0.0.1:27888/status`           |\n| Post-start registration | Manual \u2014 not auto-executed by start command |\n"}], "grading": {"expectations": [{"text": "Runs 'node hub/server.mjs' with run_in_background=true", "passed": true, "evidence": "Agent output: 'Bash(\"node hub/server.mjs\", run_in_background=true)'"}, {"text": "Mentions port 27888 and /mcp endpoint", "passed": true, "evidence": "Agent output: 'Port: 27888, MCP endpoint: http://127.0.0.1:27888/mcp'"}, {"text": "Does NOT try to run any triage or routing", "passed": true, "evidence": "Agent correctly identified as command match, not fallthrough"}], "summary": {"passed": 3, "failed": 0, "total": 3, "pass_rate": 1.0}}}, {"id": "hub-start-sequence-with_skill", "prompt": "/tfx-hub start", "eval_id": 5, "outputs": [{"name": "analysis.md", "type": "text", "content": "# Routing Analysis: `/tfx-hub start`\n\n## Source\nSkill definition: `skills/tfx-hub/SKILL.md`\n\n---\n\n## 1. Command Match vs. Fallthrough\n\n**Result: Command match \u2014 `start`**\n\nThe skill defines an explicit routing table under \"\uc785\ub825 \ud574\uc11d \uaddc\uce59\":\n\n```\n/tfx-hub start  \u2192 \ucee4\ub9e8\ub4dc \ub9e4\uce6d \u2192 \ud5c8\ube0c \uc2dc\uc791\n```\n\nThe argument `start` is listed as a command keyword. The fallthrough rule only applies when the argument does NOT match `start`, `stop`, `status`, or `--port`. Therefore `/tfx-hub start` is handled by the `start` command branch, not the free-form fallthrough.\n\n---\n\n## 2. Exact Bash Command\n\n```bash\nBash(\"node hub/server.mjs\", run_in_background=true)\n```\n\nQuoted verbatim from the skill's `### start \u2014 \ud5c8\ube0c \uc2dc\uc791` section.\n\n---\n\n## 3. `run_in_background`\n\n**Set to `true`.**\n\nThe skill explicitly passes `run_in_background=true` in the `start` command call. This is the only command in the skill that uses background execution.\n\n---\n\n## 4. Port and Endpoint\n\n- **Port:** `27888` (default; overridable via environment variable `TFX_HUB_PORT`)\n- **MCP endpoint:** `http://127.0.0.1:27888/mcp`\n- **Status endpoint:** `http://127.0.0.1:27888/status`\n\nAdditional runtime artefacts written on start:\n- SQLite WAL DB: `~/.claude/cache/tfx-hub/state.db`\n- PID file: `~/.claude/cache/tfx-hub/hub.pid`\n\n---\n\n## 5. Post-Start Registration Steps\n\nThe skill describes registering the running hub with each CLI agent under \"\uac01 CLI \ub4f1\ub85d \ubc29\ubc95\":\n\n```bash\n# Codex\ncodex mcp add tfx-hub --url http://127.0.0.1:27888/mcp\n\n# Gemini (settings.json)\n# mcpServers.tfx-hub.url = \"http://127.0.0.1:27888/mcp\"\n\n# Claude\nclaude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp\n```\n\nThese steps are documented but are listed as per-CLI manual registration steps \u2014 the skill does not show them being executed automatically as part of the `start` command block itself. The `start` block contains only the single `Bash(\"node hub/server.mjs\", run_in_background=true)` call.\n\n---\n\n## Summary Table\n\n| Attribute | Value |\n|-----------|-------|\n| Routing outcome | Command match (`start`) |\n| Fallthrough triggered | No |\n| Bash command | `Bash(\"node hub/server.mjs\", run_in_background=true)` |\n| `run_in_background` | `true` |\n| Port | `27888` |\n| MCP endpoint | `http://127.0.0.1:27888/mcp` |\n| Post-start registration | Documented (manual, per-CLI); not auto-executed by `start` |\n"}], "grading": {"expectations": [{"text": "Runs 'node hub/server.mjs' with run_in_background=true", "passed": true, "evidence": "Agent output: 'Bash(\"node hub/server.mjs\", run_in_background=true)'"}, {"text": "Mentions port 27888 and /mcp endpoint", "passed": true, "evidence": "Agent output: 'Port 27888, MCP endpoint at http://127.0.0.1:27888/mcp'"}, {"text": "Does NOT try to run any triage or routing", "passed": true, "evidence": "Agent correctly identified this as a command match (start), not fallthrough to triage"}], "summary": {"passed": 3, "failed": 0, "total": 3, "pass_rate": 1.0}}}, {"id": "codex-gemini-remap-old_skill", "prompt": "/tfx-codex API \ubb38\uc11c\ub97c \uc791\uc131\ud558\uace0 \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918", "eval_id": 6, "outputs": [{"name": "analysis.md", "type": "text", "content": "# tfx-codex \ub77c\uc6b0\ud305 \ubd84\uc11d \u2014 DRY RUN\n\n**\uc694\uccad**: `/tfx-codex API \ubb38\uc11c\ub97c \uc791\uc131\ud558\uace0 \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918`\n**\ubd84\uc11d \uae30\uc900 SKILL**: `skills/tfx-workspace/skill-snapshot/tfx-codex/SKILL.md`\n\n---\n\n## 1. \uc5d0\uc774\uc804\ud2b8 \ub9ac\ub9e4\ud551 \ud14c\uc774\ube14\n\n\uc774 \uc694\uccad\uc740 \ub450 \uac1c\uc758 \ub3c5\ub9bd \uc11c\ube0c\ud0dc\uc2a4\ud06c\ub85c \ubd84\ud574\ub429\ub2c8\ub2e4:\n- \uc11c\ube0c\ud0dc\uc2a4\ud06c A: \"API \ubb38\uc11c\ub97c \uc791\uc131\" \u2192 **writer** \uc5ed\ud560\n- \uc11c\ube0c\ud0dc\uc2a4\ud06c B: \"\ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918\" \u2192 **designer** \uc5ed\ud560\n\n| \uc5d0\uc774\uc804\ud2b8 | \uc6d0\ub798 CLI (tfx-auto) | tfx-codex\uc5d0\uc11c | effort \ud30c\ub77c\ubbf8\ud130 | MCP \ud504\ub85c\ud544 |\n|----------|---------------------|---------------|-----------------|-----------|\n| **writer** | ~~Gemini~~ (`docs` MCP) | **Codex** (effort: spark_fast) \u2014 Codex Spark \uacbd\ub7c9 \ubb38\uc11c | `spark_fast` | `analyze` |\n| **designer** | ~~Gemini~~ (`docs` MCP) | **Codex** (effort: high) \u2014 UI \ucf54\ub4dc \uc0dd\uc131 | `high` | `implement` |\n\n### \uc6d0\ubcf8 tfx-auto \uae30\uc900 (\ub9ac\ub9e4\ud551 \uc804)\n\n`tfx-auto` SKILL.md\uc758 \uc5d0\uc774\uc804\ud2b8 \ub9e4\ud551 \ud14c\uc774\ube14\uc5d0\uc11c:\n\n```\n| gemini / designer / writer | Gemini | docs |\n```\n\n\uc989, \uc6d0\ub798 \ub450 \uc5ed\ud560 \ubaa8\ub450 Gemini CLI + `docs` MCP\ub85c \uc2e4\ud589\ub429\ub2c8\ub2e4.\n\n### tfx-codex \uae30\uc900 (\ub9ac\ub9e4\ud551 \ud6c4)\n\n`tfx-codex` SKILL.md\uc758 \uc5d0\uc774\uc804\ud2b8 \ub77c\uc6b0\ud305 \ud14c\uc774\ube14\uc5d0\uc11c:\n\n```\n| designer | ~~Gemini~~ | Codex (effort: high) \u2014 UI \ucf54\ub4dc \uc0dd\uc131     | implement |\n| writer   | ~~Gemini~~ | Codex Spark (effort: spark_fast) \u2014 \uacbd\ub7c9 \ubb38\uc11c | analyze   |\n```\n\n---\n\n## 2. TFX_CLI_MODE \ud658\uacbd\ubcc0\uc218\n\n```\nTFX_CLI_MODE=codex\n```\n\n\uc774 \ud658\uacbd\ubcc0\uc218\ub294 tfx-route.sh\uc5d0 \uc804\ub2ec\ub418\uc5b4 Gemini \uc5d0\uc774\uc804\ud2b8\uac00 \uc120\ud0dd\ub420 \uacbd\uc6b0 Codex\ub85c \uac15\uc81c \uad50\uccb4\ud558\ub3c4\ub85d \uc9c0\uc2dc\ud569\ub2c8\ub2e4. Phase 2 \ud2b8\ub9ac\uc544\uc9c0\uc5d0\uc11c Codex \ubd84\ub958\uae30\uac00 `gemini`\ub97c \ubc18\ud658\ud558\ub354\ub77c\ub3c4 \uc774 \uac12\uc5d0 \uc758\ud574 `codex`\ub85c \uad50\uccb4\ub429\ub2c8\ub2e4.\n\n---\n\n## 3. Phase 2 \ud2b8\ub9ac\uc544\uc9c0 \ub3d9\uc791\n\n**\uc790\ub3d9 \ubaa8\ub4dc** (`/tfx-codex \"API \ubb38\uc11c\ub97c \uc791\uc131\ud558\uace0 \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918\"`):\n\n1. **Codex \ubd84\ub958** (`--full-auto --skip-git-repo-check`):\n   - \uc785\ub825 \ud30c\uc2f1 \uacb0\uacfc \uc608\uc0c1 JSON:\n     ```json\n     {\n       \"parts\": [\n         { \"description\": \"API \ubb38\uc11c \uc791\uc131\", \"agent\": \"gemini\" },\n         { \"description\": \"\ub514\uc790\uc778 \uac00\uc774\ub4dc \uc0dd\uc131\", \"agent\": \"gemini\" }\n       ]\n     }\n     ```\n   - `TFX_CLI_MODE=codex` \uc801\uc6a9 \u2192 \ub450 \ud56d\ubaa9 \ubaa8\ub450 `\"gemini\"` \u2192 **`\"codex\"`\ub85c \uac15\uc81c \uad50\uccb4**\n\n2. **Opus \uc778\ub77c\uc778 \ubd84\ud574** (\uac15\uc81c \ubcc0\ud658 \uc774\ud6c4):\n   - `writer` \uc5ed\ud560: MCP \ud504\ub85c\ud544 `analyze` \ud560\ub2f9\n   - `designer` \uc5ed\ud560: MCP \ud504\ub85c\ud544 `implement` \ud560\ub2f9\n   - \ub450 \uc11c\ube0c\ud0dc\uc2a4\ud06c\ub294 \ub3c5\ub9bd\uc801(INDEPENDENT), `graph_type: \"INDEPENDENT\"`\n\n3. **\uc11c\ube0c\ud0dc\uc2a4\ud06c \uc218 = 2** \u2192 tfx-multi Native Teams \ubaa8\ub4dc\ub85c \uc790\ub3d9 \uc804\ud658 (tfx-auto \uaddc\uce59: 2\uac1c \uc774\uc0c1 \uc2dc tfx-multi Phase 3)\n\n---\n\n## 4. \uc0dd\uc131\ub418\ub294 Bash \ucee4\ub9e8\ub4dc (\uc11c\ube0c\ud0dc\uc2a4\ud06c\ubcc4)\n\n\uc11c\ube0c\ud0dc\uc2a4\ud06c\uac00 2\uac1c\uc774\ubbc0\ub85c tfx-multi Phase 3a(TeamCreate) \u2192 Phase 3b(TaskCreate) \u2192 Phase 3c(Agent \ub798\ud37c spawn) \uc21c\uc11c\ub85c \uc2e4\ud589\ub429\ub2c8\ub2e4. \uac01 Agent \ub798\ud37c \ub0b4\ubd80\uc5d0\uc11c \ub2e4\uc74c Bash \ucee4\ub9e8\ub4dc\uac00 \uc2e4\ud589\ub429\ub2c8\ub2e4:\n\n### \uc11c\ube0c\ud0dc\uc2a4\ud06c A \u2014 writer (API \ubb38\uc11c \uc791\uc131)\n\n```bash\nTFX_CLI_MODE=codex bash ~/.claude/scripts/tfx-route.sh writer 'API \ubb38\uc11c\ub97c \uc791\uc131\ud574\uc918' analyze\n```\n\n- `writer` \uc5d0\uc774\uc804\ud2b8: Codex Spark (`effort: spark_fast`) \ub85c \uc2e4\ud589\n- MCP \ud504\ub85c\ud544: `analyze` (\ubb38\uc11c \uae30\ubc18 \ub9ac\uc11c\uce58+\uc791\uc131)\n- `run_in_background=true` (INDEPENDENT \ubcd1\ub82c \uc2e4\ud589)\n\n### \uc11c\ube0c\ud0dc\uc2a4\ud06c B \u2014 designer (\ub514\uc790\uc778 \uac00\uc774\ub4dc \uc0dd\uc131)\n\n```bash\nTFX_CLI_MODE=codex bash ~/.claude/scripts/tfx-route.sh designer '\ub514\uc790\uc778 \uac00\uc774\ub4dc\ub97c \ub9cc\ub4e4\uc5b4\uc918' implement\n```\n\n- `designer` \uc5d0\uc774\uc804\ud2b8: Codex (`effort: high`) \ub85c \uc2e4\ud589\n- MCP \ud504\ub85c\ud544: `implement` (\ucf54\ub4dc \uae30\ubc18 UI \uc791\uc5c5)\n- `run_in_background=true` (INDEPENDENT \ubcd1\ub82c \uc2e4\ud589)\n\n> \ub450 \uc11c\ube0c\ud0dc\uc2a4\ud06c\ub294 `depends_on` \uc5c6\uc774 Level 0\uc5d0\uc11c \ubcd1\ub82c \uc2e4\ud589\ub429\ub2c8\ub2e4.\n\n---\n\n## 5. MCP \ud504\ub85c\ud544 \ubcc0\ud654 \uc0c1\uc138\n\n| \uc5d0\uc774\uc804\ud2b8 | tfx-auto \uc6d0\ubcf8 MCP | tfx-codex \ubcc0\uacbd \ud6c4 MCP | \ubcc0\uacbd \uc774\uc720 |\n|----------|-------------------|----------------------|----------|\n| **writer** | `docs` | `analyze` | Gemini \u2192 Codex \uc804\ud658 \uc2dc \ubb38\uc11c \ub9ac\uc11c\uce58+\uc791\uc131\uc5d0 \uc801\ud569\ud55c `analyze` \ud504\ub85c\ud544 \uc0ac\uc6a9 |\n| **designer** | `docs` | `implement` | Gemini \u2192 Codex \uc804\ud658 \uc2dc UI \ucf54\ub4dc \uc0dd\uc131\uc5d0 \uc801\ud569\ud55c `implement` \ud504\ub85c\ud544 \uc0ac\uc6a9 |\n\n\uc6d0\ub798 `docs` MCP\ub294 Gemini CLI\uc758 \uc6f9 \uac80\uc0c9/\ubb38\uc11c \uc811\uadfc \uae30\ub2a5\uc744 \uc804\uc81c\ub85c \uc124\uacc4\ub418\uc5c8\uc2b5\ub2c8\ub2e4. Codex\ub85c \ub9ac\ub9e4\ud551 \uc2dc \uac01 \uc5ed\ud560\uc758 \uc2e4\uc81c \uc791\uc5c5 \uc131\uaca9\uc5d0 \ub9de\ub294 \ud504\ub85c\ud544\ub85c \uad50\uccb4\ub429\ub2c8\ub2e4.\n\n---\n\n## 6. \uc6cc\ud06c\ud50c\ub85c\uc6b0 \ub808\ud37c\ub7f0\uc2a4\n\n**tfx-codex\ub294 tfx-auto SKILL.md\uc758 Phase 1~6 \uc804\uccb4\ub97c \uadf8\ub300\ub85c \ub530\ub985\ub2c8\ub2e4.**\n\n```\nPhase 1: \uc785\ub825 \ud30c\uc2f1 \u2014 \ud2b8\ub9ac\uac70 `/tfx-codex` \uc778\uc2dd, \uc778\uc790 \ucd94\ucd9c\nPhase 2: \ud2b8\ub9ac\uc544\uc9c0\n  - Codex \ubd84\ub958 \uc2e4\ud589 (TFX_CLI_MODE=codex)\n  - gemini \ubc18\ud658\uac12 \u2192 codex \uac15\uc81c \uad50\uccb4\n  - Opus \uc778\ub77c\uc778 \ubd84\ud574 (writer\u2192analyze MCP, designer\u2192implement MCP)\nPhase 3: CLI \uc2e4\ud589\n  - TFX_CLI_MODE=codex \ud658\uacbd\ubcc0\uc218 \ud3ec\ud568\n  - tfx-route.sh \ud638\ucd9c\n  - \uc11c\ube0c\ud0dc\uc2a4\ud06c 2\uac1c \u2192 tfx-multi Phase 3 \uc804\ud658\nPhase 4: \uacb0\uacfc \uc218\uc9d1\n  - exit_code 0: === OUTPUT === \uc139\uc158 \ud30c\uc2f1\n  - exit_code 124: === PARTIAL OUTPUT === \uc0ac\uc6a9\n  - \uadf8 \uc678: STDERR \u2192 Claude fallback\nPhase 5: \uc2e4\ud328 \ucc98\ub9ac\n  - 1\ucc28: Claude executor(sonnet) fallback\n  - 2\ucc28: \uc2e4\ud328 \ubcf4\uace0 + \uc131\uacf5 \uacb0\uacfc\ub9cc \uc885\ud569\nPhase 6: \ubcf4\uace0 \ud615\uc2dd \ucd9c\ub825\n  - \ubaa8\ub4dc/\uadf8\ub798\ud504/\ub808\ubca8/\uc11c\ube0c\ud0dc\uc2a4\ud06c \uc0c1\ud0dc \ud14c\uc774\ube14\n  - Token Savings Report\n```\n\n**\ud575\uc2ec \ucc28\uc774\uc810 \uc694\uc57d**: Phase 2\uc640 Phase 3\uc5d0\uc11c\ub9cc \ub3d9\uc791\uc774 \ub2ec\ub77c\uc9d1\ub2c8\ub2e4.\n- Phase 2: gemini \ubd84\ub958 \uacb0\uacfc\ub97c codex\ub85c \uac15\uc81c \ubcc0\ud658 + MCP \ud504\ub85c\ud544 \uc7ac\ud560\ub2f9\n- Phase 3: \ubaa8\ub4e0 tfx-route.sh \ud638\ucd9c\uc5d0 `TFX_CLI_MODE=codex` \uc811\ub450 \ucd94\uac00\n\n---\n\n## 7. \uc694\uc57d\n\n\uc774 \uc694\uccad(`/tfx-codex API \ubb38\uc11c\ub97c \uc791\uc131\ud558\uace0 \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918`)\uc740 \ub2e4\uc74c\uacfc \uac19\uc774 \ucc98\ub9ac\ub429\ub2c8\ub2e4:\n\n1. \ub450 \uc11c\ube0c\ud0dc\uc2a4\ud06c\ub85c \ubd84\ud574 (INDEPENDENT \uadf8\ub798\ud504)\n2. \uc6d0\ub798 Gemini\ub85c \ub77c\uc6b0\ud305\ub420 `writer`\uc640 `designer` \ubaa8\ub450 Codex\ub85c \ub9ac\ub9e4\ud551\n3. MCP \ud504\ub85c\ud544: writer \u2192 `analyze`, designer \u2192 `implement` (\uc6d0\ubcf8 `docs`\uc5d0\uc11c \ubcc0\uacbd)\n4. \uc11c\ube0c\ud0dc\uc2a4\ud06c 2\uac1c\uc774\ubbc0\ub85c tfx-multi Native Teams \ubaa8\ub4dc\ub85c \uc790\ub3d9 \uc804\ud658\ud558\uc5ec \ubcd1\ub82c \uc2e4\ud589\n5. \uc804\uccb4 Phase 1~6\uc740 tfx-auto \uc6cc\ud06c\ud50c\ub85c\uc6b0\ub97c \uadf8\ub300\ub85c \ub530\ub984\n"}], "grading": {"expectations": [{"text": "designer remapped to Codex with effort: high", "passed": true, "evidence": "Agent output: designer \u2192 Codex (effort: high)"}, {"text": "writer remapped to Codex Spark with effort: spark_fast", "passed": true, "evidence": "Agent output: writer \u2192 Codex Spark (effort: spark_fast)"}, {"text": "Sets TFX_CLI_MODE=codex environment variable", "passed": true, "evidence": "Agent output: 'TFX_CLI_MODE: Set to codex'"}, {"text": "Changes MCP profile: designer->implement, writer->analyze", "passed": true, "evidence": "Agent output: writer\u2192analyze, designer\u2192implement"}], "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}}}, {"id": "codex-gemini-remap-with_skill", "prompt": "/tfx-codex API \ubb38\uc11c\ub97c \uc791\uc131\ud558\uace0 \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918", "eval_id": 6, "outputs": [{"name": "analysis.md", "type": "text", "content": "# tfx-codex Routing Analysis \u2014 DRY RUN\n\n**User Request:** `/tfx-codex API \ubb38\uc11c\ub97c \uc791\uc131\ud558\uace0 \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918`\n\n**Skill Definition Source:** `skills/tfx-codex/SKILL.md`\n\n---\n\n## 1. Trigger Matching\n\nThe command prefix `/tfx-codex` matches the skill trigger `tfx-codex` exactly.\nThe skill is invoked with the argument: `\"API \ubb38\uc11c\ub97c \uc791\uc131\ud558\uace0 \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918\"`\n\n---\n\n## 2. TFX_CLI_MODE Environment Variable\n\n```\nTFX_CLI_MODE=codex\n```\n\nThis variable is set for every CLI execution in Phase 3. It forces `tfx-route.sh` to substitute\nany `gemini` classification with `codex`, ensuring Gemini CLI is never called.\n\n---\n\n## 3. Task Decomposition (Phase 2 Triage)\n\nThe user request contains two distinct subtasks:\n\n| # | Subtask | Natural Agent Assignment | tfx-codex Override |\n|---|---------|-------------------------|--------------------|\n| 1 | API \ubb38\uc11c\ub97c \uc791\uc131 (Write API documentation) | **writer** (originally Gemini) | **Codex Spark** |\n| 2 | \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918 (Create design guide) | **designer** (originally Gemini) | **Codex** (effort: high) |\n\nDuring Phase 2, the Opus decomposition step detects that both subtasks would ordinarily route to\nGemini-backed roles. The `TFX_CLI_MODE=codex` override forces:\n- Any `gemini` classification result \u2192 replaced with `codex`\n- `designer` and `writer` agent types \u2192 mapped to Codex with adjusted MCP profiles\n\n---\n\n## 4. Agent Remapping Table\n\n| \uc5d0\uc774\uc804\ud2b8 | \uc6d0\ub798 CLI | tfx-codex \ub9e4\ud551 | effort \ud50c\ub798\uadf8 |\n|----------|---------|---------------|--------------|\n| **designer** | ~~Gemini~~ | **Codex** | `effort: high` \u2014 UI/\uc2dc\uac01 \ucf54\ub4dc \uc0dd\uc131 |\n| **writer** | ~~Gemini~~ | **Codex Spark** | `effort: spark_fast` \u2014 \uacbd\ub7c9 \ubb38\uc11c \uc791\uc131 |\n| executor, build-fixer, debugger | Codex | Codex | \ubcc0\uacbd \uc5c6\uc74c |\n| architect, planner, critic, analyst | Codex | Codex | \ubcc0\uacbd \uc5c6\uc74c |\n| code-reviewer, security-reviewer | Codex | Codex | \ubcc0\uacbd \uc5c6\uc74c |\n| scientist, document-specialist | Codex | Codex | \ubcc0\uacbd \uc5c6\uc74c |\n| explore | Claude Haiku | Claude Haiku | \ubcc0\uacbd \uc5c6\uc74c |\n| verifier, test-engineer | Claude Sonnet | Claude Sonnet | \ubcc0\uacbd \uc5c6\uc74c |\n\n---\n\n## 5. MCP Profile Changes for designer and writer\n\n| \uc5d0\uc774\uc804\ud2b8 | \uae30\ubcf8 MCP \ud504\ub85c\ud544 | tfx-codex MCP \ud504\ub85c\ud544 | \uc774\uc720 |\n|----------|--------------|---------------------|------|\n| **designer** | (Gemini \uc804\uc6a9 \u2014 \uc5c6\uc74c) | `implement` | \ucf54\ub4dc \uae30\ubc18 UI \uc791\uc5c5\uc73c\ub85c \ucc98\ub9ac |\n| **writer** | (Gemini \uc804\uc6a9 \u2014 \uc5c6\uc74c) | `analyze` | \ubb38\uc11c \uae30\ubc18 \ub9ac\uc11c\uce58 + \uc791\uc131 \uc6cc\ud06c\ud50c\ub85c\uc6b0 |\n\nBoth roles lose access to Gemini's multimodal/creative profile and are instead assigned\nCodex-compatible MCP profiles that match the nature of the work:\n- `implement` for designer: treats the design guide as a code artifact (e.g., CSS, component specs)\n- `analyze` for writer: treats API documentation as a research-and-summarize task\n\n---\n\n## 6. Exact Bash Commands Generated (Phase 3)\n\n### Subtask 1 \u2014 writer: API \ubb38\uc11c \uc791\uc131\n\n```bash\nTFX_CLI_MODE=codex bash ~/.claude/scripts/tfx-route.sh writer 'API \ubb38\uc11c\ub97c \uc791\uc131\ud574\uc918' analyze\n```\n\n- Agent: `writer` \u2192 remapped to **Codex Spark** (`effort: spark_fast`)\n- MCP Profile: `analyze`\n- The `tfx-route.sh` script reads `TFX_CLI_MODE=codex` and substitutes the Gemini path with\n  a Codex Spark invocation.\n\n### Subtask 2 \u2014 designer: \ub514\uc790\uc778 \uac00\uc774\ub4dc \uc791\uc131\n\n```bash\nTFX_CLI_MODE=codex bash ~/.claude/scripts/tfx-route.sh designer '\ub514\uc790\uc778 \uac00\uc774\ub4dc\ub97c \ub9cc\ub4e4\uc5b4\uc918' implement\n```\n\n- Agent: `designer` \u2192 remapped to **Codex** (`effort: high`)\n- MCP Profile: `implement`\n- The `tfx-route.sh` script reads `TFX_CLI_MODE=codex` and substitutes the Gemini path with\n  a full-effort Codex invocation.\n\n---\n\n## 7. Workflow Reference \u2014 tfx-auto Phases Followed\n\nPer the skill definition: *\"tfx-auto SKILL.md\uc758 \uc804\uccb4 \uc6cc\ud06c\ud50c\ub85c\uc6b0(\ucee4\ub9e8\ub4dc \uc20f\ucef7 \u2192 \ud2b8\ub9ac\uc544\uc9c0 \u2192 \uc2e4\ud589 \u2192 \uacb0\uacfc \ud30c\uc2f1 \u2192 \ubcf4\uace0)\ub97c \uadf8\ub300\ub85c \ub530\ub985\ub2c8\ub2e4.\"*\n\nThe exact same phase sequence as `tfx-auto` is executed:\n\n| Phase | Name | tfx-codex \ud2b9\uc774\uc0ac\ud56d |\n|-------|------|--------------------|\n| Phase 1 | \ucee4\ub9e8\ub4dc \uc20f\ucef7 \ud30c\uc2f1 | \ub3d9\uc77c (`N:codex` \uc20f\ucef7 \uc9c0\uc6d0) |\n| Phase 2 | \ud2b8\ub9ac\uc544\uc9c0 (Opus \ubd84\ud574) | `gemini` \ubd84\ub958 \uacb0\uacfc\ub97c `codex`\ub85c \uac15\uc81c \ubcc0\ud658; designer/writer \u2192 Codex + MCP \uc7ac\ud560\ub2f9 |\n| Phase 3 | CLI \uc2e4\ud589 | `TFX_CLI_MODE=codex` \ud658\uacbd\ubcc0\uc218 \uc8fc\uc785\ud558\uc5ec `tfx-route.sh` \ud638\ucd9c |\n| Phase 4 | \uacb0\uacfc \ud30c\uc2f1 | \ub3d9\uc77c |\n| Phase 5 | \ubcf4\uace0 | \ub3d9\uc77c |\n\nThe only deviation from `tfx-auto` occurs in **Phase 2** (forced gemini\u2192codex substitution)\nand **Phase 3** (environment variable injection). All other phases are identical.\n\n---\n\n## 8. Summary\n\nFor the request `/tfx-codex API \ubb38\uc11c\ub97c \uc791\uc131\ud558\uace0 \ub514\uc790\uc778 \uac00\uc774\ub4dc\ub3c4 \ub9cc\ub4e4\uc5b4\uc918`:\n\n- Two subtasks are identified: **writer** (API docs) and **designer** (design guide).\n- Both roles were originally mapped to **Gemini CLI** in the default `tfx-auto` routing.\n- `tfx-codex` remaps them: `writer` \u2192 Codex Spark (`analyze` MCP), `designer` \u2192 Codex high-effort (`implement` MCP).\n- `TFX_CLI_MODE=codex` is injected at Phase 3 for every `tfx-route.sh` call.\n- The full `tfx-auto` 5-phase workflow is followed with the two overrides noted above.\n- Gemini CLI is never invoked; no Gemini dependency exists.\n"}], "grading": {"expectations": [{"text": "designer remapped to Codex with effort: high", "passed": true, "evidence": "Agent output: designer \u2192 Codex (effort: high)"}, {"text": "writer remapped to Codex Spark with effort: spark_fast", "passed": true, "evidence": "Agent output: writer \u2192 Codex Spark (effort: spark_fast)"}, {"text": "Sets TFX_CLI_MODE=codex environment variable", "passed": true, "evidence": "Agent output: 'TFX_CLI_MODE: Set to codex for every Phase 3 call'"}, {"text": "Changes MCP profile: designer->implement, writer->analyze", "passed": true, "evidence": "Agent output: writer\u2192analyze, designer\u2192implement (changed from docs)"}], "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}}}], "previous_feedback": {}, "previous_outputs": {}, "benchmark": {"metadata": {"skill_name": "tfx-skills-suite", "skill_path": "C:/Users/SSAFY/Desktop/Projects/cli/triflux/skills", "executor_model": "claude-sonnet-4-6", "analyzer_model": "claude-opus-4-6", "timestamp": "2026-03-19T10:00:00Z", "evals_run": [1, 2, 3, 4, 5, 6], "runs_per_configuration": 1}, "runs": [{"eval_id": 1, "eval_name": "routing-implement-shortcut", "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 5, "failed": 0, "total": 5, "time_seconds": 43.6, "tokens": 16303, "tool_calls": 4, "errors": 0}, "expectations": [{"text": "Routes to executor agent", "passed": true, "evidence": "Correctly mapped from implement shortcut table"}, {"text": "Uses implement MCP profile", "passed": true, "evidence": "Mapped from shortcut table"}, {"text": "Generates correct tfx-route.sh command", "passed": true, "evidence": "bash ~/.claude/scripts/tfx-route.sh executor '...' implement"}, {"text": "Does NOT trigger triage", "passed": true, "evidence": "Command shortcut skips triage"}, {"text": "Does NOT delegate to tfx-multi", "passed": true, "evidence": "No subtask decomposition occurred"}]}, {"eval_id": 1, "eval_name": "routing-implement-shortcut", "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 5, "failed": 0, "total": 5, "time_seconds": 48.1, "tokens": 16436, "tool_calls": 4, "errors": 0}, "expectations": [{"text": "Routes to executor agent", "passed": true, "evidence": "Correctly mapped"}, {"text": "Uses implement MCP profile", "passed": true, "evidence": "Assigned by shortcut table"}, {"text": "Generates correct tfx-route.sh command", "passed": true, "evidence": "Correct syntax generated"}, {"text": "Does NOT trigger triage", "passed": true, "evidence": "Shortcut mode skips triage"}, {"text": "Does NOT delegate to tfx-multi", "passed": true, "evidence": "No delegation"}]}, {"eval_id": 2, "eval_name": "routing-multi-task-triage", "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 5, "failed": 0, "total": 5, "time_seconds": 58.2, "tokens": 17584, "tool_calls": 3, "errors": 0}, "expectations": [{"text": "Identifies as auto mode", "passed": true, "evidence": "No shortcut match, auto mode selected"}, {"text": "Triggers Codex classification", "passed": true, "evidence": "Codex --full-auto classification triggered"}, {"text": "Decomposes into 2+ subtasks", "passed": true, "evidence": "2 subtasks: executor + security-reviewer"}, {"text": "Notes tfx-multi delegation", "passed": true, "evidence": "subtasks.length >= 2 triggers tfx-multi Phase 3"}, {"text": "Does NOT execute directly", "passed": true, "evidence": "Delegates to tfx-multi"}]}, {"eval_id": 2, "eval_name": "routing-multi-task-triage", "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 5, "failed": 0, "total": 5, "time_seconds": 77.2, "tokens": 18626, "tool_calls": 4, "errors": 0}, "expectations": [{"text": "Identifies as auto mode", "passed": true, "evidence": "Auto mode selected"}, {"text": "Triggers Codex classification", "passed": true, "evidence": "Codex --full-auto triggered"}, {"text": "Decomposes into 2+ subtasks", "passed": true, "evidence": "2 subtasks decomposed"}, {"text": "Notes tfx-multi delegation", "passed": true, "evidence": "Hands off to tfx-multi Phase 3"}, {"text": "Does NOT execute directly", "passed": true, "evidence": "Delegates correctly"}]}, {"eval_id": 3, "eval_name": "multi-team-creation", "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 5, "failed": 0, "total": 5, "time_seconds": 115.3, "tokens": 27197, "tool_calls": 3, "errors": 0}, "expectations": [{"text": "Creates TeamCreate with tfx- prefix", "passed": true, "evidence": "TeamCreate({ team_name: 'tfx-<base36>' })"}, {"text": "Creates 3 TaskCreate calls", "passed": true, "evidence": "3x TaskCreate with metadata"}, {"text": "Spawns 3 Agent wrappers with bypassPermissions", "passed": true, "evidence": "3x Agent({ mode: bypassPermissions })"}, {"text": "Uses tfx-route.sh inside wrappers", "passed": true, "evidence": "Direct codex/gemini calls prohibited"}, {"text": "Includes Phase 5 TeamDelete", "passed": true, "evidence": "TeamDelete always runs, max 30s wait"}]}, {"eval_id": 3, "eval_name": "multi-team-creation", "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 5, "failed": 0, "total": 5, "time_seconds": 100.6, "tokens": 26140, "tool_calls": 3, "errors": 0}, "expectations": [{"text": "Creates TeamCreate with tfx- prefix", "passed": true, "evidence": "TeamCreate with tfx-<id>"}, {"text": "Creates 3 TaskCreate calls", "passed": true, "evidence": "Three TaskCreate calls"}, {"text": "Spawns 3 Agent wrappers with bypassPermissions", "passed": true, "evidence": "mode: bypassPermissions in all 3"}, {"text": "Uses tfx-route.sh inside wrappers", "passed": true, "evidence": "Never direct codex/gemini calls"}, {"text": "Includes Phase 5 TeamDelete", "passed": true, "evidence": "TeamDelete unconditionally"}]}, {"eval_id": 4, "eval_name": "doctor-diagnosis", "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 4, "failed": 0, "total": 4, "time_seconds": 53.8, "tokens": 14499, "tool_calls": 4, "errors": 0}, "expectations": [{"text": "Runs triflux doctor first", "passed": true, "evidence": "Bash(\"triflux doctor\")"}, {"text": "Suggests --fix mode", "passed": true, "evidence": "Suggests after diagnosis report"}, {"text": "Mentions HUD and CLI checks", "passed": true, "evidence": "HUD and CLI paths checked"}, {"text": "Does NOT jump to --reset", "passed": true, "evidence": "--reset reserved for explicit request"}]}, {"eval_id": 4, "eval_name": "doctor-diagnosis", "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 4, "failed": 0, "total": 4, "time_seconds": 48.3, "tokens": 14482, "tool_calls": 3, "errors": 0}, "expectations": [{"text": "Runs triflux doctor first", "passed": true, "evidence": "Bash(\"triflux doctor\")"}, {"text": "Suggests --fix mode", "passed": true, "evidence": "Offers --fix after diagnosis"}, {"text": "Mentions HUD and CLI checks", "passed": true, "evidence": "All 8 diagnostics listed"}, {"text": "Does NOT jump to --reset", "passed": true, "evidence": "--reset reserved for explicit request"}]}, {"eval_id": 5, "eval_name": "hub-start-sequence", "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 3, "failed": 0, "total": 3, "time_seconds": 47.2, "tokens": 14821, "tool_calls": 4, "errors": 0}, "expectations": [{"text": "Runs node hub/server.mjs in background", "passed": true, "evidence": "Bash(\"node hub/server.mjs\", run_in_background=true)"}, {"text": "Mentions port 27888 and /mcp", "passed": true, "evidence": "Port 27888, http://127.0.0.1:27888/mcp"}, {"text": "No triage or routing attempted", "passed": true, "evidence": "Command match, not fallthrough"}]}, {"eval_id": 5, "eval_name": "hub-start-sequence", "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 3, "failed": 0, "total": 3, "time_seconds": 51.8, "tokens": 14904, "tool_calls": 4, "errors": 0}, "expectations": [{"text": "Runs node hub/server.mjs in background", "passed": true, "evidence": "Bash(\"node hub/server.mjs\", run_in_background=true)"}, {"text": "Mentions port 27888 and /mcp", "passed": true, "evidence": "Port 27888, endpoint /mcp"}, {"text": "No triage or routing attempted", "passed": true, "evidence": "Command match, not fallthrough"}]}, {"eval_id": 6, "eval_name": "codex-gemini-remap", "configuration": "with_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 4, "failed": 0, "total": 4, "time_seconds": 69.7, "tokens": 14889, "tool_calls": 5, "errors": 0}, "expectations": [{"text": "designer remapped to Codex (effort: high)", "passed": true, "evidence": "designer \u2192 Codex (effort: high)"}, {"text": "writer remapped to Codex Spark (spark_fast)", "passed": true, "evidence": "writer \u2192 Codex Spark (effort: spark_fast)"}, {"text": "TFX_CLI_MODE=codex set", "passed": true, "evidence": "Set for every Phase 3 call"}, {"text": "MCP profiles changed", "passed": true, "evidence": "designer\u2192implement, writer\u2192analyze"}]}, {"eval_id": 6, "eval_name": "codex-gemini-remap", "configuration": "without_skill", "run_number": 1, "result": {"pass_rate": 1.0, "passed": 4, "failed": 0, "total": 4, "time_seconds": 85.2, "tokens": 19802, "tool_calls": 7, "errors": 0}, "expectations": [{"text": "designer remapped to Codex (effort: high)", "passed": true, "evidence": "designer \u2192 Codex (effort: high)"}, {"text": "writer remapped to Codex Spark (spark_fast)", "passed": true, "evidence": "writer \u2192 Codex Spark (effort: spark_fast)"}, {"text": "TFX_CLI_MODE=codex set", "passed": true, "evidence": "TFX_CLI_MODE set to codex"}, {"text": "MCP profiles changed", "passed": true, "evidence": "writer\u2192analyze, designer\u2192implement"}]}], "run_summary": {"with_skill": {"pass_rate": {"mean": 1.0, "stddev": 0.0, "min": 1.0, "max": 1.0}, "time_seconds": {"mean": 64.6, "stddev": 26.4, "min": 43.6, "max": 115.3}, "tokens": {"mean": 17549, "stddev": 4857, "min": 14499, "max": 27197}}, "without_skill": {"pass_rate": {"mean": 1.0, "stddev": 0.0, "min": 1.0, "max": 1.0}, "time_seconds": {"mean": 68.5, "stddev": 20.4, "min": 48.1, "max": 100.6}, "tokens": {"mean": 18398, "stddev": 4227, "min": 14482, "max": 26140}}, "delta": {"pass_rate": "+0.00", "time_seconds": "-3.9", "tokens": "-849"}}, "notes": ["All 26 assertions pass at 100% for both configurations \u2014 the skills are functionally correct", "The fixes applied (dead reference removal, Phase numbering consistency, hub description) don't change routing logic, so pass rates are identical", "NEW version is marginally faster (-3.9s avg) and uses fewer tokens (-849 avg), likely due to cleaner references reducing model confusion", "tfx-multi is the most complex skill (115s / 27K tokens with_skill) \u2014 consider extracting reference docs to reduce context load", "tfx-codex OLD references 'Phase(1~6)' which doesn't exist in tfx-auto \u2014 the NEW version correctly references the actual workflow names", "All assertions pass regardless of configuration \u2014 these test the core routing logic which is unchanged. Consider adding assertions that specifically test the fixed issues (dead refs, phase naming) for differentiation"]}};
+
+    // ---- State ----
+    let feedbackMap = {};  // run_id -> feedback text
+    let currentIndex = 0;
+    let visitedRuns = new Set();
+
+    // ---- Init ----
+    async function init() {
+      // Load saved feedback from server — but only if this isn't a fresh
+      // iteration (indicated by previous_feedback being present). When
+      // previous feedback exists, the feedback.json on disk is stale from
+      // the prior iteration and should not pre-fill the textareas.
+      const hasPrevious = Object.keys(EMBEDDED_DATA.previous_feedback || {}).length > 0
+        || Object.keys(EMBEDDED_DATA.previous_outputs || {}).length > 0;
+      if (!hasPrevious) {
+        try {
+          const resp = await fetch("/api/feedback");
+          const data = await resp.json();
+          if (data.reviews) {
+            for (const r of data.reviews) feedbackMap[r.run_id] = r.feedback;
+          }
+        } catch { /* first run, no feedback yet */ }
+      }
+
+      document.getElementById("skill-name").textContent = EMBEDDED_DATA.skill_name;
+      showRun(0);
+
+      // Wire up feedback auto-save
+      const textarea = document.getElementById("feedback");
+      let saveTimeout = null;
+      textarea.addEventListener("input", () => {
+        clearTimeout(saveTimeout);
+        document.getElementById("feedback-status").textContent = "";
+        saveTimeout = setTimeout(() => saveCurrentFeedback(), 800);
+      });
+    }
+
+    // ---- Navigation ----
+    function navigate(delta) {
+      const newIndex = currentIndex + delta;
+      if (newIndex >= 0 && newIndex < EMBEDDED_DATA.runs.length) {
+        saveCurrentFeedback();
+        showRun(newIndex);
+      }
+    }
+
+    function updateNavButtons() {
+      document.getElementById("prev-btn").disabled = currentIndex === 0;
+      document.getElementById("next-btn").disabled =
+        currentIndex === EMBEDDED_DATA.runs.length - 1;
+    }
+
+    // ---- Show a run ----
+    function showRun(index) {
+      currentIndex = index;
+      const run = EMBEDDED_DATA.runs[index];
+
+      // Progress
+      document.getElementById("progress").textContent =
+        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+
+      // Prompt
+      document.getElementById("prompt-text").textContent = run.prompt;
+
+      // Config badge
+      const badge = document.getElementById("config-badge");
+      const configMatch = run.id.match(/(with_skill|without_skill|new_skill|old_skill)/);
+      if (configMatch) {
+        const config = configMatch[1];
+        const isBaseline = config === "without_skill" || config === "old_skill";
+        badge.textContent = config.replace(/_/g, " ");
+        badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+
+      // Outputs
+      renderOutputs(run);
+
+      // Previous outputs
+      renderPrevOutputs(run);
+
+      // Grades
+      renderGrades(run);
+
+      // Previous feedback
+      const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
+      const prevEl = document.getElementById("prev-feedback");
+      if (prevFb) {
+        document.getElementById("prev-feedback-text").textContent = prevFb;
+        prevEl.style.display = "block";
+      } else {
+        prevEl.style.display = "none";
+      }
+
+      // Feedback
+      document.getElementById("feedback").value = feedbackMap[run.id] || "";
+      document.getElementById("feedback-status").textContent = "";
+
+      updateNavButtons();
+
+      // Track visited runs and promote done button when all visited
+      visitedRuns.add(index);
+      const doneBtn = document.getElementById("done-btn");
+      if (visitedRuns.size >= EMBEDDED_DATA.runs.length) {
+        doneBtn.classList.add("ready");
+      }
+
+      // Scroll main content to top
+      document.querySelector(".main").scrollTop = 0;
+    }
+
+    // ---- Render outputs ----
+    function renderOutputs(run) {
+      const container = document.getElementById("outputs-body");
+      container.innerHTML = "";
+
+      const outputs = run.outputs || [];
+      if (outputs.length === 0) {
+        container.innerHTML = '<div class="empty-state">No output files</div>';
+        return;
+      }
+
+      for (const file of outputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        // Always show file header with download link
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const content = document.createElement("div");
+        content.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          content.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          content.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          content.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(content, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          content.appendChild(a);
+        } else if (file.type === "error") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          pre.style.color = "var(--red)";
+          content.appendChild(pre);
+        }
+
+        fileDiv.appendChild(content);
+        container.appendChild(fileDiv);
+      }
+    }
+
+    // ---- XLSX rendering via SheetJS ----
+    function renderXlsx(container, b64Data) {
+      try {
+        const raw = Uint8Array.from(atob(b64Data), c => c.charCodeAt(0));
+        const wb = XLSX.read(raw, { type: "array" });
+
+        for (let i = 0; i < wb.SheetNames.length; i++) {
+          const sheetName = wb.SheetNames[i];
+          const ws = wb.Sheets[sheetName];
+
+          if (wb.SheetNames.length > 1) {
+            const sheetLabel = document.createElement("div");
+            sheetLabel.style.cssText =
+              "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
+            sheetLabel.textContent = "Sheet: " + sheetName;
+            container.appendChild(sheetLabel);
+          }
+
+          const htmlStr = XLSX.utils.sheet_to_html(ws, { editable: false });
+          const wrapper = document.createElement("div");
+          wrapper.innerHTML = htmlStr;
+          container.appendChild(wrapper);
+        }
+      } catch (err) {
+        container.textContent = "Error rendering spreadsheet: " + err.message;
+      }
+    }
+
+    // ---- Grades ----
+    function renderGrades(run) {
+      const section = document.getElementById("grades-section");
+      const content = document.getElementById("grades-content");
+
+      if (!run.grading) {
+        section.style.display = "none";
+        return;
+      }
+
+      const grading = run.grading;
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("grades-arrow").classList.remove("open");
+
+      const summary = grading.summary || {};
+      const expectations = grading.expectations || [];
+
+      let html = '<div style="padding: 1rem;">';
+
+      // Summary line
+      const passRate = summary.pass_rate != null
+        ? Math.round(summary.pass_rate * 100) + "%"
+        : "?";
+      const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
+      html += '<div class="grades-summary">';
+      html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
+      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '</div>';
+
+      // Assertions list
+      html += '<ul class="assertion-list">';
+      for (const exp of expectations) {
+        const statusClass = exp.passed ? "pass" : "fail";
+        const statusIcon = exp.passed ? "\u2713" : "\u2717";
+        html += '<li class="assertion-item">';
+        html += '<span class="assertion-status ' + statusClass + '">' + statusIcon + '</span>';
+        html += '<span>' + escapeHtml(exp.text) + '</span>';
+        if (exp.evidence) {
+          html += '<div class="assertion-evidence">' + escapeHtml(exp.evidence) + '</div>';
+        }
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleGrades() {
+      const content = document.getElementById("grades-content");
+      const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Previous outputs (collapsible) ----
+    function renderPrevOutputs(run) {
+      const section = document.getElementById("prev-outputs-section");
+      const content = document.getElementById("prev-outputs-content");
+      const prevOutputs = (EMBEDDED_DATA.previous_outputs || {})[run.id];
+
+      if (!prevOutputs || prevOutputs.length === 0) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      // Reset to collapsed
+      content.classList.remove("open");
+      document.getElementById("prev-outputs-arrow").classList.remove("open");
+
+      // Render the files into the content area
+      content.innerHTML = "";
+      const wrapper = document.createElement("div");
+      wrapper.style.padding = "1rem";
+
+      for (const file of prevOutputs) {
+        const fileDiv = document.createElement("div");
+        fileDiv.className = "output-file";
+
+        const header = document.createElement("div");
+        header.className = "output-file-header";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = file.name;
+        header.appendChild(nameSpan);
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "dl-btn";
+        dlBtn.textContent = "Download";
+        dlBtn.download = file.name;
+        dlBtn.href = getDownloadUri(file);
+        header.appendChild(dlBtn);
+        fileDiv.appendChild(header);
+
+        const fc = document.createElement("div");
+        fc.className = "output-file-content";
+
+        if (file.type === "text") {
+          const pre = document.createElement("pre");
+          pre.textContent = file.content;
+          fc.appendChild(pre);
+        } else if (file.type === "image") {
+          const img = document.createElement("img");
+          img.src = file.data_uri;
+          img.alt = file.name;
+          fc.appendChild(img);
+        } else if (file.type === "pdf") {
+          const iframe = document.createElement("iframe");
+          iframe.src = file.data_uri;
+          fc.appendChild(iframe);
+        } else if (file.type === "xlsx") {
+          renderXlsx(fc, file.data_b64);
+        } else if (file.type === "binary") {
+          const a = document.createElement("a");
+          a.className = "download-link";
+          a.href = file.data_uri;
+          a.download = file.name;
+          a.textContent = "Download " + file.name;
+          fc.appendChild(a);
+        }
+
+        fileDiv.appendChild(fc);
+        wrapper.appendChild(fileDiv);
+      }
+
+      content.appendChild(wrapper);
+    }
+
+    function togglePrevOutputs() {
+      const content = document.getElementById("prev-outputs-content");
+      const arrow = document.getElementById("prev-outputs-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    // ---- Feedback (saved to server -> feedback.json) ----
+    function saveCurrentFeedback() {
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // Build reviews array from map
+      const reviews = [];
+      for (const [run_id, feedback] of Object.entries(feedbackMap)) {
+        if (feedback.trim()) {
+          reviews.push({ run_id, feedback, timestamp: new Date().toISOString() });
+        }
+      }
+
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviews, status: "in_progress" }),
+      }).then(() => {
+        document.getElementById("feedback-status").textContent = "Saved";
+      }).catch(() => {
+        // Static mode or server unavailable — no-op on auto-save,
+        // feedback will be downloaded on final submit
+        document.getElementById("feedback-status").textContent = "Will download on submit";
+      });
+    }
+
+    // ---- Done ----
+    function showDoneDialog() {
+      // Save current textarea to feedbackMap (but don't POST yet)
+      const run = EMBEDDED_DATA.runs[currentIndex];
+      const text = document.getElementById("feedback").value;
+      if (text.trim() === "") {
+        delete feedbackMap[run.id];
+      } else {
+        feedbackMap[run.id] = text;
+      }
+
+      // POST once with status: complete — include ALL runs so the model
+      // can distinguish "no feedback" (looks good) from "not reviewed"
+      const reviews = [];
+      const ts = new Date().toISOString();
+      for (const r of EMBEDDED_DATA.runs) {
+        reviews.push({ run_id: r.id, feedback: feedbackMap[r.id] || "", timestamp: ts });
+      }
+      const payload = JSON.stringify({ reviews, status: "complete" }, null, 2);
+      fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+      }).then(() => {
+        document.getElementById("done-overlay").classList.add("visible");
+      }).catch(() => {
+        // Server not available (static mode) — download as file
+        const blob = new Blob([payload], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "feedback.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        document.getElementById("done-overlay").classList.add("visible");
+      });
+    }
+
+    function closeDoneDialog() {
+      // Reset status back to in_progress
+      saveCurrentFeedback();
+      document.getElementById("done-overlay").classList.remove("visible");
+    }
+
+    // ---- Toast ----
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("visible");
+      setTimeout(() => toast.classList.remove("visible"), 2000);
+    }
+
+    // ---- Keyboard nav ----
+    document.addEventListener("keydown", (e) => {
+      // Don't capture when typing in textarea
+      if (e.target.tagName === "TEXTAREA") return;
+
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigate(1);
+      }
+    });
+
+    // ---- Util ----
+    function getDownloadUri(file) {
+      if (file.data_uri) return file.data_uri;
+      if (file.data_b64) return "data:application/octet-stream;base64," + file.data_b64;
+      if (file.type === "text") return "data:text/plain;charset=utf-8," + encodeURIComponent(file.content);
+      return "#";
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ---- View switching ----
+    function switchView(view) {
+      document.querySelectorAll(".view-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+      document.querySelector(`[onclick="switchView('${view}')"]`).classList.add("active");
+      document.getElementById("panel-" + view).classList.add("active");
+    }
+
+    // ---- Benchmark rendering ----
+    function renderBenchmark() {
+      const data = EMBEDDED_DATA.benchmark;
+      if (!data) return;
+
+      // Show the tabs
+      document.getElementById("view-tabs").style.display = "flex";
+
+      const container = document.getElementById("benchmark-content");
+      const summary = data.run_summary || {};
+      const metadata = data.metadata || {};
+      const notes = data.notes || [];
+
+      let html = "";
+
+      // Header
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
+      if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
+      if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
+      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      html += "</p>";
+
+      // Summary table
+      html += '<table class="benchmark-table">';
+
+      function fmtStat(stat, pct) {
+        if (!stat) return "—";
+        const suffix = pct ? "%" : "";
+        const m = pct ? (stat.mean * 100).toFixed(0) : stat.mean.toFixed(1);
+        const s = pct ? (stat.stddev * 100).toFixed(0) : stat.stddev.toFixed(1);
+        return m + suffix + " ± " + s + suffix;
+      }
+
+      function deltaClass(val) {
+        if (!val) return "";
+        const n = parseFloat(val);
+        if (n > 0) return "benchmark-delta-positive";
+        if (n < 0) return "benchmark-delta-negative";
+        return "";
+      }
+
+      // Discover config names dynamically (everything except "delta")
+      const configs = Object.keys(summary).filter(k => k !== "delta");
+      const configA = configs[0] || "config_a";
+      const configB = configs[1] || "config_b";
+      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const a = summary[configA] || {};
+      const b = summary[configB] || {};
+      const delta = summary.delta || {};
+
+      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<tbody>";
+
+      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
+      html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
+      html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
+
+      // Time (only show row if data exists)
+      if (a.time_seconds || b.time_seconds) {
+        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
+        html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
+      }
+
+      // Tokens (only show row if data exists)
+      if (a.tokens || b.tokens) {
+        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<td>" + fmtStat(a.tokens, false) + "</td>";
+        html += "<td>" + fmtStat(b.tokens, false) + "</td>";
+        html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
+      }
+
+      html += "</tbody></table>";
+
+      // Per-eval breakdown (if runs data available)
+      const runs = data.runs || [];
+      if (runs.length > 0) {
+        const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
+
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+
+        const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
+        const hasErrors = runs.some(r => r.result && r.result.errors > 0);
+
+        for (const evalId of evalIds) {
+          const evalRuns = runs.filter(r => r.eval_id === evalId);
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+
+          html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
+          html += '<table class="benchmark-table">';
+          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
+          if (hasTime) html += "<th>Time (s)</th>";
+          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "</tr></thead>";
+          html += "<tbody>";
+
+          // Group by config and render with average rows
+          const configGroups = [...new Set(evalRuns.map(r => r.configuration))];
+          for (let ci = 0; ci < configGroups.length; ci++) {
+            const config = configGroups[ci];
+            const configRuns = evalRuns.filter(r => r.configuration === config);
+            if (configRuns.length === 0) continue;
+
+            const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
+            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+            for (const run of configRuns) {
+              const r = run.result || {};
+              const prClass = r.pass_rate >= 0.8 ? "benchmark-delta-positive" : r.pass_rate < 0.5 ? "benchmark-delta-negative" : "";
+              html += '<tr class="' + rowClass + '">';
+              html += "<td>" + configLabel + "</td>";
+              html += "<td>" + run.run_number + "</td>";
+              html += '<td class="' + prClass + '">' + ((r.pass_rate || 0) * 100).toFixed(0) + "% (" + (r.passed || 0) + "/" + (r.total || 0) + ")</td>";
+              if (hasTime) html += "<td>" + (r.time_seconds != null ? r.time_seconds.toFixed(1) : "—") + "</td>";
+              if (hasErrors) html += "<td>" + (r.errors || 0) + "</td>";
+              html += "</tr>";
+            }
+
+            // Average row
+            const rates = configRuns.map(r => (r.result || {}).pass_rate || 0);
+            const avgRate = rates.reduce((a, b) => a + b, 0) / rates.length;
+            const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
+            html += '<tr class="benchmark-row-avg ' + rowClass + '">';
+            html += "<td>" + configLabel + "</td>";
+            html += "<td>Avg</td>";
+            html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
+            if (hasTime) {
+              const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
+              html += "<td>" + (times.length ? (times.reduce((a, b) => a + b, 0) / times.length).toFixed(1) : "—") + "</td>";
+            }
+            if (hasErrors) html += "<td></td>";
+            html += "</tr>";
+          }
+          html += "</tbody></table>";
+
+          // Per-assertion detail for this eval
+          const runsWithExpectations = {};
+          for (const config of configGroups) {
+            runsWithExpectations[config] = evalRuns.filter(r => r.configuration === config && r.expectations && r.expectations.length > 0);
+          }
+          const hasAnyExpectations = Object.values(runsWithExpectations).some(runs => runs.length > 0);
+          if (hasAnyExpectations) {
+            // Collect all unique assertion texts across all configs
+            const allAssertions = [];
+            const seen = new Set();
+            for (const config of configGroups) {
+              for (const run of runsWithExpectations[config]) {
+                for (const exp of (run.expectations || [])) {
+                  if (!seen.has(exp.text)) {
+                    seen.add(exp.text);
+                    allAssertions.push(exp.text);
+                  }
+                }
+              }
+            }
+
+            html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
+            html += "<thead><tr><th>Assertion</th>";
+            for (const config of configGroups) {
+              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              html += "<th>" + escapeHtml(label) + "</th>";
+            }
+            html += "</tr></thead><tbody>";
+
+            for (const assertionText of allAssertions) {
+              html += "<tr><td>" + escapeHtml(assertionText) + "</td>";
+
+              for (const config of configGroups) {
+                html += "<td>";
+                for (const run of runsWithExpectations[config]) {
+                  const exp = (run.expectations || []).find(e => e.text === assertionText);
+                  if (exp) {
+                    const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
+                    const icon = exp.passed ? "\u2713" : "\u2717";
+                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                  } else {
+                    html += "— ";
+                  }
+                }
+                html += "</td>";
+              }
+              html += "</tr>";
+            }
+            html += "</tbody></table>";
+          }
+        }
+      }
+
+      // Notes
+      if (notes.length > 0) {
+        html += '<div class="benchmark-notes">';
+        html += "<h3>Analysis Notes</h3>";
+        html += "<ul>";
+        for (const note of notes) {
+          html += "<li>" + escapeHtml(note) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ---- Start ----
+    init();
+    renderBenchmark();
+  </script>
+</body>
+</html>

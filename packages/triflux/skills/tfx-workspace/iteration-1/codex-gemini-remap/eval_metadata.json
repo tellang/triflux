@@ -1,0 +1,11 @@
+{
+  "eval_id": 6,
+  "eval_name": "codex-gemini-remap",
+  "prompt": "/tfx-codex API 문서를 작성하고 디자인 가이드도 만들어줘",
+  "assertions": [
+    "designer remapped to Codex with effort: high",
+    "writer remapped to Codex Spark with effort: spark_fast",
+    "Sets TFX_CLI_MODE=codex environment variable",
+    "Changes MCP profile: designer->implement, writer->analyze"
+  ]
+}

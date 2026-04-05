@@ -1,0 +1,11 @@
+{
+  "eval_id": 4,
+  "eval_name": "doctor-diagnosis",
+  "prompt": "HUD가 안 보이고 codex도 안 되는데 어떻게 해?",
+  "assertions": [
+    "Runs 'triflux doctor' as first diagnostic step",
+    "Suggests '--fix' mode for auto-repair",
+    "Mentions HUD and CLI path checks in explanation",
+    "Does NOT jump straight to --reset (that's for cache only)"
+  ]
+}

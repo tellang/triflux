@@ -1,0 +1,11 @@
+{
+  "expectations": [
+    {"text": "Creates exactly one TeamCreate with tfx- prefix naming", "passed": true, "evidence": "TeamCreate({ team_name: 'tfx-<hex6>' })"},
+    {"text": "Creates 3 TaskCreate calls (one per subtask)", "passed": true, "evidence": "3x TaskCreate with { subject, metadata: { cli, role } }"},
+    {"text": "Spawns 3 Agent wrappers with mode: bypassPermissions", "passed": true, "evidence": "3x Agent({ mode: bypassPermissions, run_in_background: true })"},
+    {"text": "Uses tfx-route.sh inside Agent wrapper (not direct codex/gemini)", "passed": true, "evidence": "bash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}; direct codex exec is forbidden"},
+    {"text": "Includes Phase 5 cleanup (TeamDelete)", "passed": true, "evidence": "TeamDelete always executed, max 30s wait, skipping causes infinite loop"},
+    {"text": "References agent-wrapper-rules.md for detailed rules", "passed": true, "evidence": "agent-wrapper-rules.md provided 6-step interrupt protocol, dynamic timeout values, and 7 technical reasons for tfx-route.sh"}
+  ],
+  "summary": {"passed": 6, "failed": 0, "total": 6, "pass_rate": 1.0}
+}

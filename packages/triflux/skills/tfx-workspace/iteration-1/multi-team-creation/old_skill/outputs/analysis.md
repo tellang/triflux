@@ -1,0 +1,316 @@
+# tfx-multi Routing Analysis
+
+## Input
+```
+/tfx-multi 인증 리팩터링 + UI 개선 + 보안 리뷰
+```
+
+---
+
+## Phase 0: Preflight Checks
+
+**Mode determination:** The input has no `--tmux`, `--psmux`, `--agents`, or `N:agent` prefix, and is not a control command (`status`/`stop`/etc.), so this is **auto mode**.
+
+**Execution order (auto mode):** Phase 0 (preflight) and Phase 2 (triage) run **simultaneously in parallel** (NOT sequentially). Phase 3 starts only after both complete.
+
+**Single combined Bash check:**
+```bash
+Bash({
+  command: "curl -sf http://127.0.0.1:27888/status >/dev/null && test -f ~/.claude/scripts/tfx-route.sh && echo \"preflight: ok\" || echo \"preflight: FAIL\""
+})
+```
+
+**What is verified:**
+- Hub is running and healthy at `http://127.0.0.1:27888/status` (`/status` endpoint — `/health` alone is forbidden)
+- `~/.claude/scripts/tfx-route.sh` exists on disk
+
+**Output policy:** Only a single summary line is shown to the user (e.g., `preflight: ok (route/hub)`). No individual Bash logs are surfaced unless preflight fails.
+
+**Failure actions (only if preflight fails):**
+- `tfx-route.sh` missing → advise user to run `tfx setup`
+- Hub not running/unhealthy → surface Hub error detail
+- Required CLI not installed → surface missing CLI detail
+
+---
+
+## Phase 1: Input Parsing
+
+**Raw input:** `"인증 리팩터링 + UI 개선 + 보안 리뷰"`
+
+**Parse results:**
+- No `--tmux` / `--psmux` flag → NOT routed to Phase 3-mux
+- No `--agents` flag
+- No `N:agent_type` prefix (e.g., `3:codex`)
+- Not a control command (`status`, `stop`, `kill`, `attach`, `list`, `send`)
+- Input string is non-empty → no prompt to user required
+- No `--thorough` flag → **`--quick` mode (default)**; Phase 2.5, 2.6, 3.5, 3.6, 3.7 are all SKIPPED
+
+**Determined mode:** Auto mode, `--quick`
+
+---
+
+## Phase 2: Triage — Decomposition
+
+### Step 2a: Codex Classification
+
+```bash
+Bash({
+  command: "codex exec --full-auto --skip-git-repo-check '다음 작업을 분석하고 각 부분에 적합한 agent를 분류하라.\n\n  agent 선택:\n  - codex: 코드 구현/수정/분석/리뷰/디버깅/설계 (기본값)\n  - gemini: 문서/UI/디자인/멀티모달\n  - claude: 코드베이스 탐색/테스트 실행/검증 (최후 수단)\n\n  모든 역할은 Codex/Gemini 우선 배정:\n  - explore, verifier, test-engineer, qa-tester 포함 전 역할이 Codex/Gemini로 라우팅\n  - Codex/Gemini 미설치 시에만 claude-native(sonnet/haiku) fallback\n  - claude 타입은 최후 수단으로만 사용\n\n  작업: 인증 리팩터링 + UI 개선 + 보안 리뷰\n\n  JSON만 출력:\n  { \"parts\": [{ \"description\": \"...\", \"agent\": \"codex|gemini|claude\" }] }\n'"
+})
+```
+
+**Expected Codex classification output (JSON):**
+```json
+{
+  "parts": [
+    { "description": "인증 리팩터링", "agent": "codex" },
+    { "description": "UI 개선",      "agent": "gemini" },
+    { "description": "보안 리뷰",    "agent": "codex" }
+  ]
+}
+```
+
+Rationale per the skill's agent selection rules:
+- "인증 리팩터링" → code refactoring → `codex` (executor)
+- "UI 개선" → UI/design → `gemini` (designer)
+- "보안 리뷰" → code review/analysis → `codex` (reviewer)
+
+If Codex classification fails, the Lead (Opus) directly classifies and decomposes inline with the same result.
+
+### Step 2b: Inline Decomposition
+
+```javascript
+assignments = [
+  { cli: "codex",  subtask: "인증 리팩터링", role: "executor"  },
+  { cli: "gemini", subtask: "UI 개선",       role: "designer"  },
+  { cli: "codex",  subtask: "보안 리뷰",     role: "reviewer"  }
+]
+```
+
+**Note:** Phase 2.5 (Plan) and Phase 2.6 (PRD) are SKIPPED because `--thorough` was NOT specified.
+
+---
+
+## Phase 3: Native Teams Execution
+
+### Step 3a: TeamCreate
+
+```
+teamName = "tfx-" + Date.now().toString(36).slice(-6)
+// Example: "tfx-m3x9pq"
+```
+
+```javascript
+TeamCreate({
+  team_name: "tfx-m3x9pq",
+  description: "tfx-multi: 인증 리팩터링 + UI 개선 + 보안 리뷰"
+})
+```
+
+### Step 3b: TaskCreate (3 tasks, one per subtask)
+
+**Task 1:**
+```javascript
+TaskCreate({
+  subject: "인증 리팩터링",
+  description: "CLI: codex, 역할: executor\n\n인증 관련 코드를 리팩터링한다.",
+  metadata: { cli: "codex", role: "executor" }
+})
+// → taskId: <task-id-1>
+// → agentName: "codex-worker-1"
+```
+
+**Task 2:**
+```javascript
+TaskCreate({
+  subject: "UI 개선",
+  description: "CLI: gemini, 역할: designer\n\nUI를 개선한다.",
+  metadata: { cli: "gemini", role: "designer" }
+})
+// → taskId: <task-id-2>
+// → agentName: "gemini-worker-1"
+```
+
+**Task 3:**
+```javascript
+TaskCreate({
+  subject: "보안 리뷰",
+  description: "CLI: codex, 역할: reviewer\n\n보안 관련 코드 리뷰를 수행한다.",
+  metadata: { cli: "codex", role: "reviewer" }
+})
+// → taskId: <task-id-3>
+// → agentName: "codex-worker-2"
+```
+
+**runQueue after 3b:**
+```javascript
+runQueue = [
+  { taskId: "<task-id-1>", agentName: "codex-worker-1",  cli: "codex",  subtask: "인증 리팩터링", role: "executor"  },
+  { taskId: "<task-id-2>", agentName: "gemini-worker-1", cli: "gemini", subtask: "UI 개선",       role: "designer"  },
+  { taskId: "<task-id-3>", agentName: "codex-worker-2",  cli: "codex",  subtask: "보안 리뷰",     role: "reviewer"  }
+]
+```
+
+### Step 3c: Agent Slim-Wrapper Spawn (codex and gemini items)
+
+All three items use `cli: "codex"` or `cli: "gemini"`, so ALL THREE get slim-wrapper Agents (none are `cli: "claude"`).
+
+The prompt for each is generated by `buildSlimWrapperPrompt()` in `hub/team/native.mjs`. The wrapper's core behavior:
+1. `TaskUpdate(taskId, status: in_progress)` — claim
+2. `SendMessage(to: "team-lead", "작업 시작: {agentName}")` — start report (creates turn boundary)
+3. `Bash(command: "bash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}", timeout: {bashTimeoutMs})` — delegate to tfx-route.sh
+4. `SendMessage(to: "team-lead", "결과: {요약}")` — result report (creates turn boundary)
+5. Await lead feedback; loop back to step 3 if further instructions received
+6. Final: `TaskUpdate(status: completed, metadata: {result: "success"|"failed"})` + `SendMessage` → exit
+
+**Bash timeout calculation (from `getRouteTimeout`):**
+- `executor` role → default 1080 seconds + 60 buffer = **1140 seconds = 1,140,000 ms**
+- `designer` role → default 1080 seconds + 60 buffer = **1140 seconds = 1,140,000 ms**
+- `reviewer` role → maps to `review` profile → **3600 seconds + 60 buffer = 3,660,000 ms**
+
+**Agent call 1 — codex-worker-1:**
+```javascript
+Agent({
+  name: "codex-worker-1",
+  team_name: "tfx-m3x9pq",
+  mode: "bypassPermissions",
+  run_in_background: true,
+  prompt: buildSlimWrapperPrompt("codex", {
+    subtask:   "인증 리팩터링",
+    role:      "executor",
+    teamName:  "tfx-m3x9pq",
+    taskId:    "<task-id-1>",
+    agentName: "codex-worker-1",
+    leadName:  "team-lead",
+    mcp_profile: <resolved_mcp_profile>
+  })
+  // Internal Bash: "bash ~/.claude/scripts/tfx-route.sh executor '인증 리팩터링' <mcp_profile>"
+  // Bash timeout: 1,140,000 ms
+})
+```
+
+**Agent call 2 — gemini-worker-1:**
+```javascript
+Agent({
+  name: "gemini-worker-1",
+  team_name: "tfx-m3x9pq",
+  mode: "bypassPermissions",
+  run_in_background: true,
+  prompt: buildSlimWrapperPrompt("gemini", {
+    subtask:   "UI 개선",
+    role:      "designer",
+    teamName:  "tfx-m3x9pq",
+    taskId:    "<task-id-2>",
+    agentName: "gemini-worker-1",
+    leadName:  "team-lead",
+    mcp_profile: <resolved_mcp_profile>
+  })
+  // Internal Bash: "bash ~/.claude/scripts/tfx-route.sh designer 'UI 개선' <mcp_profile>"
+  // Bash timeout: 1,140,000 ms
+})
+```
+
+**Agent call 3 — codex-worker-2:**
+```javascript
+Agent({
+  name: "codex-worker-2",
+  team_name: "tfx-m3x9pq",
+  mode: "bypassPermissions",
+  run_in_background: true,
+  prompt: buildSlimWrapperPrompt("codex", {
+    subtask:   "보안 리뷰",
+    role:      "reviewer",
+    teamName:  "tfx-m3x9pq",
+    taskId:    "<task-id-3>",
+    agentName: "codex-worker-2",
+    leadName:  "team-lead",
+    mcp_profile: <resolved_mcp_profile>
+  })
+  // Internal Bash: "bash ~/.claude/scripts/tfx-route.sh reviewer '보안 리뷰' <mcp_profile>"
+  // Bash timeout: 3,660,000 ms
+})
+```
+
+**`mode: "bypassPermissions"` — YES, included in all three Agent calls.** This is mandatory per the skill definition; without it workers would pause awaiting user approval on every Bash call.
+
+**`tfx-route.sh` usage — YES.** Workers call `bash ~/.claude/scripts/tfx-route.sh`, never `codex exec ...` or `gemini -y -p ...` directly. Direct calls are explicitly forbidden by the skill.
+
+### Step 3d: claude-type Agent — NOT APPLICABLE
+
+None of the three subtasks were classified as `cli: "claude"`, so Step 3d is skipped entirely.
+
+### Step 3e: User Notification
+
+```
+팀 'tfx-m3x9pq' 생성 완료.
+Codex/Gemini 워커가 슬림 래퍼 Agent로 네비게이션에 등록되었습니다.
+Shift+Down으로 다음 워커로 전환 (마지막→리드 wrap). Shift+Tab으로 이전 워커 전환.
+```
+
+---
+
+## Phase 4: Result Collection
+
+1. Lead waits for all three background Agent processes to complete.
+2. Query `team_task_list` as the **single truth source**:
+
+```bash
+Bash({
+  command: "node hub/bridge.mjs team-task-list --team tfx-m3x9pq"
+})
+```
+
+3. For any task where status is `completed` but `metadata.result == "failed"`: trigger Claude fallback retry.
+4. After fallback, re-query `team_task_list` to confirm final state.
+5. `send-message` and `result(task.result)` events are observation channels only; final verdict is always from `team_task_list`.
+
+**Summary report (example):**
+```markdown
+## tfx-multi 실행 결과
+
+| # | Worker         | CLI    | 작업          | 상태      |
+|---|----------------|--------|---------------|-----------|
+| 1 | codex-worker-1 | codex  | 인증 리팩터링  | completed |
+| 2 | gemini-worker-1| gemini | UI 개선       | completed |
+| 3 | codex-worker-2 | codex  | 보안 리뷰     | completed |
+```
+
+---
+
+## Phase 5: Cleanup (always runs — success or failure)
+
+1. Wait up to **30 seconds** for all background Agents to finish.
+2. If any Agent is still running after 30 seconds, proceed with cleanup anyway.
+3. Call `TeamDelete`:
+
+```javascript
+TeamDelete({
+  team_name: "tfx-m3x9pq"
+})
+```
+
+4. If `TeamDelete` fails (active members still present), call `forceCleanupTeam("tfx-m3x9pq")`.
+   If that also fails, output manual cleanup instructions:
+   ```
+   rm -rf ~/.claude/teams/tfx-m3x9pq/ ~/.claude/tasks/tfx-m3x9pq/
+   ```
+5. Output the final summary report.
+
+**Reason TeamDelete is mandatory:** Leaving `~/.claude/teams/{teamName}/` on disk causes the OMC hook to repeatedly detect "team executing", creating an infinite loop.
+
+---
+
+## Key Routing Decisions Summary
+
+| Question | Answer |
+|----------|--------|
+| `mode: "bypassPermissions"` in Agent calls? | YES — all three Agent calls include it |
+| `tfx-route.sh` used inside Agent wrappers? | YES — `bash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}` |
+| Direct `codex exec` or `gemini -y -p` calls? | NO — explicitly forbidden |
+| Workers use Read/Edit/Write/Grep/Glob tools? | NO — forbidden; all file operations delegated via tfx-route.sh |
+| `--thorough` pipeline stages (Phase 2.5, 2.6, 3.5–3.7)? | SKIPPED — `--quick` (default) mode |
+| `--tmux`/`--psmux` mode? | NO — not in input |
+| Step 3d (claude-type Agent)? | SKIPPED — no subtask has `cli: "claude"` |
+| TeamDelete on failure? | YES — Phase 5 is unconditional |
+| Preflight and triage run in parallel? | YES — auto mode runs Phase 0 + Phase 2 in parallel |
+| Lead directly calling Codex/Gemini Bash? | NO — Lead spawns Agent wrappers; wrappers call tfx-route.sh |

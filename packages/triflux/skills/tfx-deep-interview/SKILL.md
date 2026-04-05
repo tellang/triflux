@@ -1,9 +1,8 @@
 ---
 name: tfx-deep-interview
 description: >
-  구현 전 소크라테스식 질의로 요구사항 깊이 탐색 (Gemini 위임, 3-CLI consensus 미사용).
+  구현 전 소크라테스식 질의로 요구사항 깊이 탐색.
   5단계 인터뷰를 통해 요구사항을 명확히 하고 최적 구현 경로를 도출합니다.
-  NOTE: deep- 접두사이지만 Gemini 단독 분석 스킬. 3-CLI Deep 규약의 예외.
 triggers:
   - deep-interview
   - 딥인터뷰

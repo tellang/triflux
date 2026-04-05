@@ -373,9 +373,6 @@ export class CodexMcpWorker {
       };
     } catch (error) {
       await this.stop().catch(() => {});
-      if (error instanceof CodexMcpTransportError) {
-        throw error;
-      }
       return {
         output: error instanceof Error ? error.message : String(error),
         exitCode: CODEX_MCP_EXECUTION_EXIT_CODE,

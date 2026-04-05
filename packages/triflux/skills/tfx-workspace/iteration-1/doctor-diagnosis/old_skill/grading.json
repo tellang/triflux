@@ -1,0 +1,9 @@
+{
+  "expectations": [
+    {"text": "Runs 'triflux doctor' as first diagnostic step", "passed": true, "evidence": "Agent output: 'Exact command: Bash(\"triflux doctor\")'"},
+    {"text": "Suggests '--fix' mode for auto-repair", "passed": true, "evidence": "Agent output: 'after the diagnostic report, offer /tfx-doctor --fix as the next step'"},
+    {"text": "Mentions HUD and CLI path checks in explanation", "passed": true, "evidence": "Agent output: 'HUD installation and config, Codex/Gemini/Claude CLI paths — directly relevant'"},
+    {"text": "Does NOT jump straight to --reset (that's for cache only)", "passed": true, "evidence": "Agent output: '--reset is destructive and reserved for explicit cache-clear request'"}
+  ],
+  "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0}
+}

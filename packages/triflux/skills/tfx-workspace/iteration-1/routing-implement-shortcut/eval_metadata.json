@@ -1,0 +1,12 @@
+{
+  "eval_id": 1,
+  "eval_name": "routing-implement-shortcut",
+  "prompt": "/implement JWT 인증 미들웨어 추가해줘",
+  "assertions": [
+    "Routes to 'executor' agent (not architect, not analyst)",
+    "Uses 'implement' MCP profile",
+    "Generates correct tfx-route.sh command syntax",
+    "Does NOT trigger triage (single command shortcut)",
+    "Does NOT delegate to tfx-multi"
+  ]
+}

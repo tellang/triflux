@@ -1,9 +1,0 @@
-{
-  "name": "tfx-remote-spawn",
-  "description": "원격/로컬 머신에 Claude 세션을 psmux 기반으로 spawn하고 관리합니다. 자동 핸드오프, 추가 프롬프트 전송, 세션 재부착, 원격 환경 자동 감지를 지원합니다. 이 스킬은 다음 상황에서 반드시 사용하세요: 원격 실행, 세션 spawn, 다른 머신에서 작업, 원격 Claude, 세션 전달, 핸드오프 전달, 원격 세션에 프롬프트 보내기, 세션 목록, 세션 재부착. 로컬 호스트 별칭이 references/hosts.json에 등록되어 있으면 호스트명 언급만으로도 트리거됩니다.",
-  "triggers": [
-    "tfx-remote-spawn",
-    "remote-spawn"
-  ],
-  "argument_hint": "[호스트] [프롬프트] 또는 자연어"
-}

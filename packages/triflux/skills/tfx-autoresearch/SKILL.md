@@ -2,16 +2,17 @@
 name: tfx-autoresearch
 description: >
   자율 웹 리서치 → 실행 가능 계획 도출.
-  주제를 받아 웹 검색 → 정보 수집 → 분석 → 구조화된 리서치 보고서 + 실행 계획 생성.
-  '자율 리서치', 'autoresearch', '검색하고 정리해', 'research and plan' 같은 요청에 사용.
-  단순 검색은 tfx-research, 자율 리서치+계획 도출은 이 스킬.
+  주제를 받아 웹 검색 → 정보 수집 → 분석 → 구조화된 리서치 보고서 생성.
+  '알아봐', '조사해', '리서치해줘', '검색하고 정리해', 'research and plan' 같은 요청에 반드시 사용.
+  웹 검색 후 실행 가능한 계획까지 도출이 필요할 때 적극 활용.
 triggers:
   - autoresearch
   - 자율 리서치
   - 자동 리서치
   - 웹 리서치
-  - research and plan
-  - 검색하고 정리해
+  - 조사해
+  - 알아봐
+  - research this
 argument-hint: "<topic>"
 source: GAP 분석 P2 #8
 ---

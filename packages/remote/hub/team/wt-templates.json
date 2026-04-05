@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "templates": {
+    "swarm-3": {
+      "description": "Lead tab plus two worker tabs in the shared triflux window.",
+      "windowName": "triflux",
+      "tabs": [
+        {
+          "title": "swarm lead",
+          "profile": "triflux"
+        },
+        {
+          "title": "swarm worker-1",
+          "profile": "triflux"
+        },
+        {
+          "title": "swarm worker-2",
+          "profile": "triflux"
+        }
+      ]
+    },
+    "monitor": {
+      "description": "Single monitoring tab for dashboard, log tailing, or observer flows.",
+      "windowName": "triflux",
+      "tabs": [
+        {
+          "title": "swarm monitor",
+          "profile": "triflux"
+        }
+      ]
+    },
+    "single": {
+      "description": "One focused tab for direct operator work.",
+      "windowName": "triflux",
+      "tabs": [
+        {
+          "title": "single worker",
+          "profile": "triflux"
+        }
+      ]
+    }
+  }
+}

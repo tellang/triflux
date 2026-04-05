@@ -1,22 +1,19 @@
 ---
 name: tfx-remote-spawn
-deprecated: true
-superseded_by: tfx-swarm
-description: "DEPRECATED — tfx-swarm으로 통합됨. 이 스킬 대신 /tfx-swarm을 사용하세요. 원격 실행, 세션 spawn, 호스트 관리 모두 tfx-swarm에서 처리."
+description: >
+  원격/로컬 머신에 Claude 세션을 psmux 기반으로 spawn하고 관리합니다.
+  자동 핸드오프, 추가 프롬프트 전송, 세션 재부착, 원격 환경 자동 감지를 지원합니다.
+  이 스킬은 다음 상황에서 반드시 사용하세요:
+  원격 실행, 세션 spawn, 다른 머신에서 작업, 원격 Claude, 세션 전달, 핸드오프 전달,
+  원격 세션에 프롬프트 보내기, 세션 목록, 세션 재부착.
+  로컬 호스트 별칭이 references/hosts.json에 등록되어 있으면 호스트명 언급만으로도 트리거됩니다.
 triggers:
   - tfx-remote-spawn
   - remote-spawn
 argument-hint: "[호스트] [프롬프트] 또는 자연어"
 ---
 
-# tfx-remote-spawn — DEPRECATED
-
-> **DEPRECATED:** 이 스킬은 `tfx-swarm`으로 통합되었습니다. `/tfx-swarm`을 사용하세요.
-> 원격 실행, 세션 spawn, 호스트 관리 모두 tfx-swarm에서 처리합니다.
-
----
-
-# (레거시) 원격/로컬 Claude 세션 관리
+# tfx-remote-spawn — 원격/로컬 Claude 세션 관리
 
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
 > 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.

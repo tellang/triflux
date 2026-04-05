@@ -1,0 +1,12 @@
+{
+  "eval_id": 2,
+  "eval_name": "routing-multi-task-triage",
+  "prompt": "/tfx-auto 프론트엔드 리팩터링하고 보안 리뷰도 해줘",
+  "assertions": [
+    "Identifies this as auto mode (not command shortcut)",
+    "Triggers Codex classification step",
+    "Decomposes into at least 2 subtasks",
+    "Notes delegation to tfx-multi for subtasks >= 2",
+    "Does NOT try to execute all subtasks directly"
+  ]
+}

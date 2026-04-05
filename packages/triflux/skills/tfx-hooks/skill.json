@@ -1,8 +1,0 @@
-{
-  "name": "tfx-hooks",
-  "description": "Claude Code 훅 우선순위 관리자. AskUserQuestion 기반 인터랙티브 UI로 훅 스캔, 우선순위 조정, 오케스트레이터 적용/복원, 개별 훅 토글을 수행합니다. 사용자가 훅, hooks, 훅 관리, hook priority, 훅 우선순위, 오케스트레이터, orchestrator, 훅 설정, hook 설정, 훅 순서, hook order를 언급할 때마다 반드시 이 스킬을 사용하세요. Use when: hooks, 훅, hook priority, 훅 관리, orchestrator, 오케스트레이터, 훅 설정, 훅 순서",
-  "triggers": [
-    "tfx-hooks"
-  ],
-  "argument_hint": "[scan|apply|restore]"
-}

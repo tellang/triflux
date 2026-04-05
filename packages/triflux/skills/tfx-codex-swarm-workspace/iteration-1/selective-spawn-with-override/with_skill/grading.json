@@ -1,0 +1,8 @@
+{
+  "expectations": [
+    {"text": "only-2-selected", "passed": true, "evidence": "issue-24, issue-28만 존재, 다른 이슈 없음"},
+    {"text": "xhigh-override", "passed": true, "evidence": "codex53_xhigh, model_reasoning_effort=xhigh"},
+    {"text": "ralph-skill", "passed": true, "evidence": "프롬프트에 $ralph 참조, 반복 실행 지시"},
+    {"text": "worktree-2-only", "passed": true, "evidence": "git worktree add 2개만"}
+  ]
+}

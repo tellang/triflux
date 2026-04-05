@@ -1,0 +1,11 @@
+{
+  "expectations": [
+    {"text": "Creates exactly one TeamCreate with tfx- prefix naming", "passed": true, "evidence": "TeamCreate({ team_name: 'tfx-<6chars>' })"},
+    {"text": "Creates 3 TaskCreate calls (one per subtask)", "passed": true, "evidence": "3x TaskCreate with subject, description, metadata"},
+    {"text": "Spawns 3 Agent wrappers with mode: bypassPermissions", "passed": true, "evidence": "mode: bypassPermissions in all Agent calls"},
+    {"text": "Uses tfx-route.sh inside Agent wrapper (not direct codex/gemini)", "passed": true, "evidence": "Direct codex exec / gemini -y -p explicitly prohibited"},
+    {"text": "Includes Phase 5 cleanup (TeamDelete)", "passed": true, "evidence": "TeamDelete mandatory, 30s wait, force cleanup fallback"},
+    {"text": "References agent-wrapper-rules.md for detailed rules", "passed": false, "evidence": "OLD version has all rules inline in SKILL.md (426 lines), no reference file structure"}
+  ],
+  "summary": {"passed": 5, "failed": 1, "total": 6, "pass_rate": 0.83}
+}

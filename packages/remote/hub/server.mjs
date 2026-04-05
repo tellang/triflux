@@ -63,6 +63,53 @@ const STATIC_CONTENT_TYPES = Object.freeze({
 // Each entry is an array of request timestamps within the current window.
 const rateLimitMap = new Map();
 
+function formatHostForUrl(host = '127.0.0.1') {
+  return String(host).includes(':') ? `[${host}]` : host;
+}
+
+function buildHubUrl(host, port) {
+  return `http://${formatHostForUrl(host || '127.0.0.1')}:${port}/mcp`;
+}
+
+function isPidAlive(pid, killFn = process.kill) {
+  const resolvedPid = Number(pid);
+  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return false;
+  try {
+    killFn(resolvedPid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function tryReuseExistingHub({
+  port,
+  host = '127.0.0.1',
+  readCurrentState = readState,
+  readInfo = getHubInfo,
+  checkHealth = isServerHealthy,
+  killFn = process.kill,
+} = {}) {
+  const existing = readCurrentState();
+  const existingPort = Number(existing?.port);
+  if (!isPidAlive(existing?.pid, killFn) || !Number.isFinite(existingPort) || existingPort <= 0) {
+    return null;
+  }
+  if (Number.isFinite(Number(port)) && existingPort !== Number(port)) return null;
+  if (!(await checkHealth(existingPort))) return null;
+
+  const info = readInfo() ?? existing;
+  const infoHost = typeof info?.host === 'string' ? info.host : host;
+  return {
+    reused: true,
+    external: true,
+    port: existingPort,
+    pid: Number(existing.pid),
+    url: info?.url ?? buildHubUrl(infoHost, existingPort),
+    stop: async () => false,
+  };
+}
+
 function checkRateLimit(ip) {
   const now = Date.now();
   const cutoff = now - RATE_LIMIT_WINDOW_MS;
@@ -314,24 +361,8 @@ export async function startHub({
 } = {}) {
   const port = portOpt ?? parseInt(process.env.TFX_HUB_PORT || '27888', 10);
 
-  // Singleton reuse: if a healthy hub is already running on the target port, return a lightweight handle
-  const existingState = readState();
-  if (existingState?.pid && Number(existingState.port) === Number(port)) {
-    const pidAlive = (() => {
-      try { process.kill(Number(existingState.pid), 0); return true; } catch { return false; }
-    })();
-    if (pidAlive && await isServerHealthy(port)) {
-      const existingInfo = getHubInfo();
-      return {
-        reused: true,
-        external: true,
-        port: Number(port),
-        pid: Number(existingState.pid),
-        url: existingInfo?.url ?? `http://${host}:${port}/mcp`,
-        stop: async () => false,
-      };
-    }
-  }
+  const existingHub = await tryReuseExistingHub({ port, host });
+  if (existingHub) return existingHub;
 
   const hubIdleTimeoutMs = parsePositiveInt(process.env.TFX_HUB_IDLE_TIMEOUT_MS, HUB_IDLE_TIMEOUT_DEFAULT_MS);
   const hubIdleSweepMs = parsePositiveInt(
@@ -364,6 +395,12 @@ export async function startHub({
     releaseLock();
     lockHeld = false;
   };
+
+  const lockedExistingHub = await tryReuseExistingHub({ port, host });
+  if (lockedExistingHub) {
+    releaseStartupLock();
+    return lockedExistingHub;
+  }
 
   const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;
   if (HUB_TOKEN) {
@@ -1019,7 +1056,7 @@ export async function startHub({
           pid: process.pid,
           hubToken: HUB_TOKEN,
           authMode: HUB_TOKEN ? 'token-required' : 'localhost-only',
-          url: `http://${host}:${port}/mcp`,
+          url: buildHubUrl(host, port),
           pipe_path: pipe.path,
           pipePath: pipe.path,
           assign_callback_pipe_path: assignCallbacks.path,
@@ -1029,7 +1066,7 @@ export async function startHub({
           idleTimeoutMs: hubIdleTimeoutMs,
         };
 
-        writeFileSync(PID_FILE, JSON.stringify({
+        writeState({
           pid: process.pid,
           port,
           host,
@@ -1038,16 +1075,13 @@ export async function startHub({
           pipe_path: pipe.path,
           pipePath: pipe.path,
           assign_callback_pipe_path: assignCallbacks.path,
+          assignCallbackPipePath: assignCallbacks.path,
+          authMode: HUB_TOKEN ? 'token-required' : 'localhost-only',
+          startedAt,
           started: startedAtMs,
           version,
-          session_id: sessionId,
-        }));
-        writeState({
-          pid: process.pid,
-          port,
-          version,
           sessionId,
-          startedAt,
+          session_id: sessionId,
         });
         releaseStartupLock();
 
@@ -1128,12 +1162,7 @@ export async function startHub({
 }
 
 export function getHubInfo() {
-  if (!existsSync(PID_FILE)) return null;
-  try {
-    return JSON.parse(readFileSync(PID_FILE, 'utf8'));
-  } catch {
-    return null;
-  }
+  return readState();
 }
 
 /**
@@ -1146,29 +1175,19 @@ export function getHubInfo() {
  */
 export async function getOrCreateServer(opts = {}) {
   const { _deps, ...startOpts } = opts;
-  const checkHealth = _deps?.isHealthy ?? isServerHealthy;
-  const readInfo = _deps?.getInfo ?? getHubInfo;
-  const readCurrentState = _deps?.readState ?? readState;
+  const existingHub = await tryReuseExistingHub({
+    port: startOpts.port,
+    host: startOpts.host,
+    checkHealth: _deps?.isHealthy ?? isServerHealthy,
+    readInfo: _deps?.getInfo ?? getHubInfo,
+    readCurrentState: _deps?.readState ?? readState,
+  });
   const boot = _deps?.startHub ?? startHub;
 
-  const existing = readCurrentState();
-  if (existing?.pid && existing?.port) {
-    const pidAlive = (() => {
-      try { process.kill(Number(existing.pid), 0); return true; } catch { return false; }
-    })();
-
-    if (pidAlive && await checkHealth(existing.port)) {
-      return {
-        reused: true,
-        port: existing.port,
-        pid: existing.pid,
-        url: readInfo()?.url ?? `http://127.0.0.1:${existing.port}/mcp`,
-      };
-    }
-  }
+  if (existingHub) return existingHub;
 
   const server = await boot(startOpts);
-  return { reused: false, ...server };
+  return server.reused === true ? server : { reused: false, ...server };
 }
 
 /**

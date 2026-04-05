@@ -1,0 +1,10 @@
+{
+  "expectations": [
+    {"text": "Identifies this as auto mode (not command shortcut)", "passed": true, "evidence": "Agent output: 'Mode selected: Auto (자동) — matches none of the command shortcut keywords'"},
+    {"text": "Triggers Codex classification step", "passed": true, "evidence": "Agent output: 'Codex --full-auto classification to identify task parts'"},
+    {"text": "Decomposes into at least 2 subtasks", "passed": true, "evidence": "Agent output: 2 subtasks — executor(Frontend refactoring) + security-reviewer(Security review)"},
+    {"text": "Notes delegation to tfx-multi for subtasks >= 2", "passed": true, "evidence": "Agent output: 'subtasks.length = 2 >= 2, hands off to tfx-multi Phase 3'"},
+    {"text": "Does NOT try to execute all subtasks directly", "passed": true, "evidence": "Agent correctly delegates to tfx-multi Phase 3"}
+  ],
+  "summary": {"passed": 5, "failed": 0, "total": 5, "pass_rate": 1.0}
+}

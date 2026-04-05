@@ -14,8 +14,8 @@ export { createPsmuxSession, startCapture } from './team/psmux.mjs';
 export { createConductor } from './team/conductor.mjs';
 
 // Swarm
-export { createSwarmLocks } from '../../../hub/team/swarm-locks.mjs';
-export { parseShards, buildFileLeaseMap, buildMcpManifest, computeMergeOrder, planSwarm } from '../../../hub/team/swarm-planner.mjs';
-export { createSwarmHypervisor, SWARM_STATES } from '../../../hub/team/swarm-hypervisor.mjs';
-export { reconcile, buildRedundantIds, shouldRunRedundant } from '../../../hub/team/swarm-reconciler.mjs';
-export { ensureWorktree, prepareIntegrationBranch, rebaseShardOntoIntegration, pruneWorktree } from '../../../hub/team/worktree-lifecycle.mjs';
+export { createSwarmLocks } from './team/swarm-locks.mjs';
+export { parseShards, buildFileLeaseMap, buildMcpManifest, computeMergeOrder, planSwarm } from './team/swarm-planner.mjs';
+export { createSwarmHypervisor, SWARM_STATES } from './team/swarm-hypervisor.mjs';
+export { reconcile, buildRedundantIds, shouldRunRedundant } from './team/swarm-reconciler.mjs';
+export { ensureWorktree, prepareIntegrationBranch, rebaseShardOntoIntegration, pruneWorktree } from './team/worktree-lifecycle.mjs';

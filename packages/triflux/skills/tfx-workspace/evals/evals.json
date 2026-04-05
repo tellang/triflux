@@ -1,0 +1,79 @@
+{
+  "skill_name": "tfx-skills-suite",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "You are a Claude Code agent. Read the tfx-auto skill definition, then explain how you would handle this user request: '/implement JWT 인증 미들웨어 추가해줘'. List the EXACT bash commands you would run. Do NOT actually execute them.",
+      "expected_output": "Should route to executor agent via tfx-route.sh with 'implement' MCP profile. Command: bash ~/.claude/scripts/tfx-route.sh executor 'JWT 인증 미들웨어 추가해줘' implement",
+      "files": [],
+      "expectations": [
+        "Routes to 'executor' agent (not architect, not analyst)",
+        "Uses 'implement' MCP profile",
+        "Generates correct tfx-route.sh command syntax",
+        "Does NOT trigger triage (single command shortcut)",
+        "Does NOT delegate to tfx-multi"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "You are a Claude Code agent. Read the tfx-auto skill definition, then explain how you would handle: '/tfx-auto 프론트엔드 리팩터링하고 보안 리뷰도 해줘'. List all routing decisions, triage steps, and delegation.",
+      "expected_output": "Should enter auto triage mode, classify via Codex, decompose into 2+ subtasks, then delegate to tfx-multi Phase 3",
+      "files": [],
+      "expectations": [
+        "Identifies this as auto mode (not command shortcut)",
+        "Triggers Codex classification step",
+        "Decomposes into at least 2 subtasks",
+        "Notes delegation to tfx-multi for subtasks >= 2",
+        "Does NOT try to execute all subtasks directly"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "You are a Claude Code agent. Read the tfx-multi skill definition, then explain step-by-step how you would handle: '/tfx-multi 인증 리팩터링 + UI 개선 + 보안 리뷰'. List all TeamCreate, TaskCreate, Agent calls with exact parameters.",
+      "expected_output": "Should create team, 3 TaskCreates, 3 Agent spawns with slim wrapper structure following Phase 0-5",
+      "files": [],
+      "expectations": [
+        "Creates exactly one TeamCreate with tfx- prefix naming",
+        "Creates 3 TaskCreate calls (one per subtask)",
+        "Spawns 3 Agent wrappers with mode: bypassPermissions",
+        "Uses tfx-route.sh inside Agent wrapper (not direct codex/gemini)",
+        "Includes Phase 5 cleanup (TeamDelete)"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "You are a Claude Code agent. Read the tfx-doctor skill definition, then explain how you would handle: 'HUD가 안 보이고 codex도 안 되는데 어떻게 해?'. List exact commands and reasoning.",
+      "expected_output": "Should suggest running triflux doctor first, then triflux doctor --fix if issues found",
+      "files": [],
+      "expectations": [
+        "Runs 'triflux doctor' as first diagnostic step",
+        "Suggests '--fix' mode for auto-repair",
+        "Mentions HUD and CLI path checks in explanation",
+        "Does NOT jump straight to --reset (that's for cache only)"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "You are a Claude Code agent. Read the tfx-hub skill definition, then explain how you would handle: '/tfx-hub start'. List exact commands.",
+      "expected_output": "Should run 'node hub/server.mjs' in background",
+      "files": [],
+      "expectations": [
+        "Runs 'node hub/server.mjs' with run_in_background=true",
+        "Mentions port 27888 and /mcp endpoint",
+        "Does NOT try to run any triage or routing"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "You are a Claude Code agent. Read the tfx-codex skill definition, then explain the Gemini-to-Codex remapping. For '/tfx-codex API 문서를 작성하고 디자인 가이드도 만들어줘', list the routing showing how designer/writer get remapped.",
+      "expected_output": "designer remapped to Codex(high), writer to Codex Spark(spark_fast), TFX_CLI_MODE=codex env var",
+      "files": [],
+      "expectations": [
+        "designer remapped to Codex with effort: high",
+        "writer remapped to Codex Spark with effort: spark_fast",
+        "Sets TFX_CLI_MODE=codex environment variable",
+        "Changes MCP profile: designer->implement, writer->analyze"
+      ]
+    }
+  ]
+}

@@ -230,11 +230,16 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
   const _dispatch = deps.dispatchCommand || dispatchCommand;
   const _startCapture = deps.startCapture || startCapture;
 
-  const _PREFIX = "__TRIFLUX_DONE__:";
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const completionRe = token
-    ? new RegExp(`${esc(_PREFIX)}${esc(token)}:(\\d+)`, "m")
-    : new RegExp(`${esc(_PREFIX)}\\S+:(\\d+)`, "m");
+  const completionPatterns = [
+    token
+      ? `${esc("__TRIFLUX_DONE__:")}${esc(token)}:(\\d+)`
+      : `${esc("__TRIFLUX_DONE__:")}\\S+:(\\d+)`,
+    token
+      ? `${esc("TFX_DONE_")}${esc(token)}:(\\d+)`
+      : `${esc("TFX_DONE_")}\\S+:(\\d+)`,
+  ];
+  const completionRe = new RegExp(completionPatterns.join("|"), "m");
 
   let restarts = 0;
   let currentPaneId = paneId;
@@ -269,7 +274,7 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
       if (completionMatch) {
         return {
           matched: true,
-          exitCode: Number.parseInt(completionMatch[1], 10),
+          exitCode: Number.parseInt((completionMatch.slice(1).find(Boolean) || '0'), 10),
           restarts,
           stallDetected,
           timedOut: false,

@@ -1,0 +1,11 @@
+{
+  "executor": "codex", "build-fixer": "codex", "debugger": "codex", "deep-executor": "codex",
+  "architect": "codex", "planner": "codex", "critic": "codex", "analyst": "codex",
+  "code-reviewer": "codex", "security-reviewer": "codex", "quality-reviewer": "codex",
+  "scientist": "codex", "scientist-deep": "codex", "document-specialist": "codex",
+  "spark": "codex",
+  "designer": "gemini", "writer": "gemini",
+  "explore": "claude",
+  "verifier": "codex", "test-engineer": "codex", "qa-tester": "codex",
+  "codex": "codex", "gemini": "gemini", "claude": "claude"
+}
