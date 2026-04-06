@@ -82,6 +82,12 @@ tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-consensus, t
 - "auto" 단독 → tfx-auto. "알아서 해" → tfx-autopilot
 - "코드에서 찾아" → tfx-find. "알아봐" → tfx-research
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto → cross-review hook
+
+### Q-Learning 동적 라우팅 (실험적)
+
+- `TRIFLUX_DYNAMIC_ROUTING=true` 설정 시 Q-Learning 기반 동적 스킬 라우팅 활성화
+- `routing-weights.json` + Q-table로 스킬 선택 최적화
+- 기본 비활성
 </routing>
 
 <session-context>

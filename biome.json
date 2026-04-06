@@ -9,8 +9,8 @@
     }
   },
   "files": {
-    "includes": ["bin/**", "hub/**", "scripts/**", "packages/**", "hooks/**", "hud/**", "tests/**"],
-    "experimentalScannerIgnores": ["research/**", "node_modules/**", "skills/**"]
+    "includes": ["**/*.mjs", "**/*.js", "**/*.cjs", "**/*.json"],
+    "experimentalScannerIgnores": ["research/**", "node_modules/**", "**/skills/**", "**/public/**"]
   },
   "linter": {
     "enabled": true,
@@ -29,7 +29,8 @@
       "suspicious": {
         "noControlCharactersInRegex": "off",
         "noPrototypeBuiltins": "warn",
-        "noAssignInExpressions": "off"
+        "noAssignInExpressions": "off",
+        "noTemplateCurlyInString": "off"
       },
       "complexity": {
         "useArrowFunction": "off"
