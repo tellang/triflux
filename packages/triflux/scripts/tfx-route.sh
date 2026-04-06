@@ -191,19 +191,6 @@ CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo claude)}"
 GEMINI_BIN_ARGS_JSON="${GEMINI_BIN_ARGS_JSON:-[]}"
 CLAUDE_BIN_ARGS_JSON="${CLAUDE_BIN_ARGS_JSON:-[]}"
 
-# ── Codex 최소 버전 체크 (exec + profile 체계 = 0.117.0+) ──
-if command -v "$CODEX_BIN" &>/dev/null; then
-  _codex_ver_raw=$("$CODEX_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-  if [[ -n "$_codex_ver_raw" ]]; then
-    _codex_minor=$(echo "$_codex_ver_raw" | cut -d. -f2)
-    if [[ "$_codex_minor" -lt 117 ]] 2>/dev/null; then
-      echo "ERROR: codex-cli ${_codex_ver_raw} 감지. triflux는 0.117.0+ 필요 (exec + profile 체계)." >&2
-      echo "업그레이드: npm i -g @openai/codex@latest" >&2
-      exit 64
-    fi
-  fi
-fi
-
 # ── Gemini 프로필 경로 (Codex config.toml 대칭) ──
 GEMINI_PROFILES_PATH="${GEMINI_PROFILES_PATH:-$(eval echo ~)/.gemini/triflux-profiles.json}"
 
