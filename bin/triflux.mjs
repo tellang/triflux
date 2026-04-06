@@ -3888,6 +3888,12 @@ async function main() {
     case "hub":
       await cmdHub(cmdArgs, { json: JSON_OUTPUT && (cmdArgs[0] || "status") === "status" });
       return;
+    case "monitor": {
+      const { createMonitor } = await import("../tui/monitor.mjs");
+      const mon = createMonitor();
+      await mon.start();
+      break;
+    }
     case "tray": {
       const trayUrl = new URL("../hub/tray.mjs", import.meta.url);
       const trayPath = fileURLToPath(trayUrl);
