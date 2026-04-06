@@ -6,7 +6,7 @@
 import { execFile } from 'node:child_process';
 import { resolve, normalize } from 'node:path';
 import { mkdir, rm, access } from 'node:fs/promises';
-import { remoteGit } from './remote-session.mjs';
+import { remoteGit, validateHost } from './remote-session.mjs';
 
 const SWARM_ROOT = '.codex-swarm';
 const SLEEP_MS = 2000; // WT race-guard (MEMORY.md: wt-attach-spacing)
@@ -189,5 +189,41 @@ export async function pruneWorktree({ worktreePath, branchName, rootDir = proces
   // Delete branch if specified
   if (branchName) {
     try { await git(['branch', '-D', branchName], rootDir); } catch { /* may not exist */ }
+  }
+}
+
+/**
+ * Fetch a remote shard's branch to the local repo via SSH.
+ * Workaround for hosts that cannot push to GitHub (e.g. Ultra4).
+ *
+ * Flow: add temp remote → fetch branch → remove remote.
+ *
+ * @param {object} opts
+ * @param {string} opts.host — SSH host (e.g. "ultra4")
+ * @param {string} opts.sshUser — SSH user (e.g. "SSAFY")
+ * @param {string} opts.remoteRepoPath — absolute path on remote (e.g. "/c/Users/SSAFY/Desktop/Projects/cli/triflux")
+ * @param {string} opts.branchName — branch to fetch (e.g. "swarm/run123/auth")
+ * @param {string} [opts.rootDir=process.cwd()] — local repo root
+ * @returns {Promise<{ ok: boolean, localRef?: string, error?: string }>}
+ */
+export async function fetchRemoteShard({ host, sshUser, remoteRepoPath, branchName, rootDir = process.cwd() }) {
+  validateHost(host);
+
+  const remoteName = `_swarm-${host}-${Date.now()}`;
+  const sshUrl = `ssh://${sshUser}@${host}${remoteRepoPath}`;
+
+  try {
+    await git(['remote', 'add', remoteName, sshUrl], rootDir);
+
+    await git(['fetch', remoteName, branchName, '--no-tags'], rootDir);
+
+    const localRef = `${remoteName}/${branchName}`;
+    const headCommit = await git(['rev-parse', `FETCH_HEAD`], rootDir);
+
+    return { ok: true, localRef, headCommit };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  } finally {
+    try { await git(['remote', 'remove', remoteName], rootDir); } catch { /* cleanup */ }
   }
 }

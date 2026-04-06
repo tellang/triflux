@@ -19,6 +19,8 @@ import { createConductor, STATES } from './conductor.mjs';
 import { createSwarmLocks } from './swarm-locks.mjs';
 import { createEventLog } from './event-log.mjs';
 import { probeRemoteEnv, resolveRemoteDir } from './remote-session.mjs';
+import { fetchRemoteShard } from './worktree-lifecycle.mjs';
+import { getHostConfig } from '../lib/ssh-command.mjs';
 
 // ── Swarm states ──────────────────────────────────────────────
 
@@ -336,6 +338,28 @@ export function createSwarmHypervisor(opts) {
 
       const worker = workers.get(shardName);
       if (!worker) continue;
+
+      // Fetch remote shard branch to local (push-blocked hosts like Ultra4)
+      const shard = plan.shards.find((s) => s.name === shardName);
+      if (shard?.host && shard._remoteEnv) {
+        const hostConfig = getHostConfig(shard.host, config.rootDir);
+        const sshUser = hostConfig?.ssh_user || shard.host;
+        const remoteRepoPath = resolveRemoteDir(config.rootDir || process.cwd(), shard._remoteEnv);
+        const fetchResult = await fetchRemoteShard({
+          host: shard.host,
+          sshUser,
+          remoteRepoPath,
+          branchName: worker.branchName || `swarm/${config.runId}/${shardName}`,
+          rootDir: config.rootDir || process.cwd(),
+        });
+
+        if (!fetchResult.ok) {
+          eventLog.append('remote_fetch_failed', { shard: shardName, error: fetchResult.error });
+          integrationFailures.push(shardName);
+          continue;
+        }
+        eventLog.append('remote_fetch_ok', { shard: shardName, headCommit: fetchResult.headCommit });
+      }
 
       // Read shard output log for changed files
       const changedFiles = detectChangedFiles(shardName, worker);
