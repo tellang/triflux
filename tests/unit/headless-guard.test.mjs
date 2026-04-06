@@ -246,6 +246,31 @@ describe("headless-guard decision matrix (runtime)", () => {
     const result = runGuardWithBashCommand("echo test || codex exec 'hello'");
     assert.equal(result.status, 2);
   });
+
+  it("env prefix로 감싼 codex exec도 deny한다", () => {
+    const result = runGuardWithBashCommand("env codex exec 'hello'");
+    assert.equal(result.status, 2);
+  });
+
+  it("절대경로 codex도 deny한다", () => {
+    const result = runGuardWithBashCommand("/usr/bin/codex exec 'hello'");
+    assert.equal(result.status, 2);
+  });
+
+  it("bash -c 래핑된 codex exec도 deny한다", () => {
+    const result = runGuardWithBashCommand('bash -c "codex exec hello"');
+    assert.equal(result.status, 2);
+  });
+
+  it("bash -lc 래핑된 codex exec도 deny한다", () => {
+    const result = runGuardWithBashCommand("bash -lc \"codex exec 'hello'\"");
+    assert.equal(result.status, 2);
+  });
+
+  it("정상 env 명령은 통과한다 (오탐 방지)", () => {
+    const result = runGuardWithBashCommand("env NODE_ENV=test npm test");
+    assert.equal(result.status, 0);
+  });
 });
 
 describe("tfx-multi Edit/Write gate (runtime)", () => {

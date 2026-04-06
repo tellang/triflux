@@ -192,7 +192,14 @@ async function main() {
     // NOTE: || 는 | 보다 먼저 매칭되므로 logical OR이 단일 pipe로 잘못 분리되지 않음
     const cmdParts = cmd.split(/\s*(?:&&|\|\||\||;)\s*/);
     const hasDirectCli = cmdParts.some(part => {
-      const stripped = part.replace(/^\s*(?:[\w_]+=\S+\s+)*/, "");
+      // 1단계: env var prefix 제거 (FOO=bar ...)
+      // 2단계: wrapper prefix 제거 (env, command, nohup, timeout N, 절대경로, bash -c/-lc "...")
+      const stripped = part
+        .replace(/^\s*(?:[\w_]+=\S+\s+)*/, "")
+        .replace(/^\s*(?:env|command|nohup)\s+/, "")
+        .replace(/^\s*timeout\s+\d+\s+/, "")
+        .replace(/^\s*(?:bash|sh)\s+(?:-\w+\s+)*(?:"([^"]*)".*|'([^']*)'.*)/i, "$1$2")
+        .replace(/^\s*(?:\/[\w./+-]+\/)(codex|gemini)\b/, " $1");
       return /^\s*codex\b.*\bexec\b/i.test(stripped) || /^\s*gemini\s+(-p|--prompt)\b/i.test(stripped);
     });
     if (hasDirectCli) {
