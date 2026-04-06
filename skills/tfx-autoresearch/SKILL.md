@@ -1,4 +1,5 @@
 ---
+internal: true
 name: tfx-autoresearch
 description: >
   자율 웹 리서치 → 실행 가능 계획 도출.

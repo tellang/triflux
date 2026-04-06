@@ -1,4 +1,5 @@
 ---
+internal: true
 name: tfx-ralph
 description: >
   tfx-persist의 별칭(alias). 'ralph', '끝까지 해', '멈추지 마' 같은 요청에 사용.

@@ -1,4 +1,5 @@
 ---
+internal: true
 name: tfx-consensus
 description: >
   3자 합의 엔진 — 모든 Deep 스킬의 핵심 인프라. Claude/Codex/Gemini 독립 분석 결과를 교차검증하여 편향 없는 합의를 도출한다.

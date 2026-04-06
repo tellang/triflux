@@ -1,4 +1,5 @@
 ---
+internal: true
 name: tfx-codex
 description: >
   Codex-Only 오케스트레이터. tfx-auto 워크플로우를 Codex 전용으로 고정합니다.

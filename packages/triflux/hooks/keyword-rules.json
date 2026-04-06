@@ -13,8 +13,7 @@
       "priority": 0,
       "supersedes": [
         "tfx-multi",
-        "tfx-auto",
-        "tfx-auto-codex",
+        "tfx-unified",
         "tfx-codex",
         "tfx-gemini"
       ],
@@ -71,34 +70,21 @@
       "mcp_route": null
     },
     {
-      "id": "tfx-auto-codex",
+      "id": "tfx-unified",
       "patterns": [
-        {
-          "source": "\\btfx[\\s-]?auto[\\s-]?codex\\b",
-          "flags": "i"
-        }
-      ],
-      "skill": "tfx-auto-codex",
-      "priority": 1,
-      "supersedes": [
-        "tfx-auto",
-        "tfx-codex"
-      ],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": null
-    },
-    {
-      "id": "tfx-auto",
-      "patterns": [
-        {
-          "source": "\\btfx[\\s-]?auto\\b",
-          "flags": "i"
-        }
+        { "source": "\\btfx[\\s-]?auto\\b", "flags": "i" },
+        { "source": "\\btfx[\\s-]?auto[\\s-]?codex\\b", "flags": "i" },
+        { "source": "(?:만들어|고쳐|구현해|짜줘|수정해|바꿔)", "flags": "i" },
+        { "source": "(?:리뷰해|검토해|봐줘|괜찮아)", "flags": "i" },
+        { "source": "(?:테스트|검증|돌려봐|QA)", "flags": "i" },
+        { "source": "(?:분석해|계획|설계해)", "flags": "i" },
+        { "source": "(?:찾아봐|조사해|검색해)", "flags": "i" },
+        { "source": "(?:정리해|슬롭|클린업)", "flags": "i" },
+        { "source": "\\b(?:implement|build|fix|review|test|plan|analyze)\\b", "flags": "i" }
       ],
       "skill": "tfx-auto",
       "priority": 2,
-      "supersedes": [],
+      "supersedes": ["tfx-auto-codex"],
       "exclusive": false,
       "state": null,
       "mcp_route": null
