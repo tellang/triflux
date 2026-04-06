@@ -879,15 +879,49 @@ export function startCapture(sessionName, paneNameOrTarget) {
  * @param {string} cmd
  * @returns {string}
  */
+// Windows: PowerShell의 bash가 WSL을 가리킬 수 있음. Git Bash를 명시적으로 사용.
+// WSL bash에서는 /c/Users/... 경로가 유효하지 않아 exit 127 발생.
+const GIT_BASH_BIN = (() => {
+  if (!IS_WINDOWS) return "bash";
+  const candidates = [
+    "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+    "C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe",
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return `"${p}"`;
+  }
+  return "bash";
+})();
+
+// CLI 바이너리 절대 경로 캐시 (세션 중 1회만 resolve)
+const _cliPathCache = new Map();
+function resolveCliAbsPath(name) {
+  if (_cliPathCache.has(name)) return _cliPathCache.get(name);
+  try {
+    const resolved = childProcess
+      .execSync(`${GIT_BASH_BIN} -c "which ${name}"`, { encoding: "utf8", timeout: 3000 })
+      .trim();
+    if (resolved) _cliPathCache.set(name, resolved);
+    return resolved || name;
+  } catch {
+    return name;
+  }
+}
+
 function wrapCliForBash(cmd) {
   const trimmed = cmd.trimStart();
   // PowerShell 구문(Clear-Host, Get-Content 등) 또는 completion token이 포함되면 PowerShell 직통
   if (/Clear-Host|Get-Content|__TRIFLUX_DONE__/i.test(trimmed)) return cmd;
-  const isCli = /\b(codex|gemini)\b/u.test(trimmed);
-  if (!isCli) return cmd;
+  const cliMatch = trimmed.match(/^(codex|gemini)\b/u);
+  if (!cliMatch) return cmd;
+  // Node.js 측에서 절대 경로 resolve → psmux pane의 bash PATH 불일치 문제 해결 (exit 127)
+  const absPath = resolveCliAbsPath(cliMatch[1]);
+  const resolved = absPath !== cliMatch[1]
+    ? trimmed.replace(new RegExp(`^${cliMatch[1]}\\b`), absPath)
+    : trimmed;
   // 단일 따옴표 이스케이프: ' → '\''
-  const escaped = trimmed.replace(/'/g, "'\\''");
-  return `bash -c '${escaped}'`;
+  const escaped = resolved.replace(/'/g, "'\\''");
+  return `${GIT_BASH_BIN} -c '${escaped}'`;
 }
 
 export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
