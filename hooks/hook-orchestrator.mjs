@@ -340,6 +340,20 @@ async function main() {
     }
   }
 
+  // ── PostToolUse:Skill 완료 시 라우팅 가중치 기록 ──
+  if (eventName === "PostToolUse" && toolName === "Skill" && !blocked) {
+    try {
+      const input = JSON.parse(stdinRaw);
+      const skillName = input.tool_input?.skill || "";
+      if (skillName && skillName.startsWith("tfx-")) {
+        const mode = skillName.replace(/^tfx-/, "");
+        const gitRoot = process.env.GIT_WORK_TREE || process.cwd();
+        const slug = gitRoot.split(/[\\/]/).pop() || "unknown";
+        recordRouteOutcome(slug, mode, "completion");
+      }
+    } catch { /* 가중치 기록 실패 무시 */ }
+  }
+
   // 결과 출력
   if (blocked) {
     process.exit(2);
