@@ -81,23 +81,26 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
   const parts = ['codex'];
   if (profile) parts.push('--profile', profile);
 
-  if (FEATURES.execSubcommand) {
-    parts.push('exec');
-    if (sandboxBypass) parts.push('--dangerously-bypass-approvals-and-sandbox');
-    if (skipGitRepoCheck) parts.push('--skip-git-repo-check');
-    if (resultFile && FEATURES.outputLastMessage) {
-      parts.push('--output-last-message', resultFile);
+  if (!FEATURES.execSubcommand) {
+    const ver = getCodexVersion();
+    throw new Error(
+      `codex-cli 0.${ver}.x 감지. triflux는 0.117.0+ 필요 (exec + profile 체계). ` +
+      `업그레이드: npm i -g @openai/codex@latest`
+    );
+  }
+
+  parts.push('exec');
+  if (sandboxBypass) parts.push('--dangerously-bypass-approvals-and-sandbox');
+  if (skipGitRepoCheck) parts.push('--skip-git-repo-check');
+  if (resultFile && FEATURES.outputLastMessage) {
+    parts.push('--output-last-message', resultFile);
+  }
+  if (FEATURES.colorNever) parts.push('--color', 'never');
+  if (cwd) parts.push('--cwd', `'${escapePwshSingleQuoted(cwd)}'`);
+  if (Array.isArray(mcpServers)) {
+    for (const server of mcpServers) {
+      parts.push('-c', `mcp_servers.${server}.enabled=true`);
     }
-    if (FEATURES.colorNever) parts.push('--color', 'never');
-    if (cwd) parts.push('--cwd', `'${escapePwshSingleQuoted(cwd)}'`);
-    if (Array.isArray(mcpServers)) {
-      for (const server of mcpServers) {
-        parts.push('-c', `mcp_servers.${server}.enabled=true`);
-      }
-    }
-  } else {
-    parts.push('--dangerously-bypass-approvals-and-sandbox');
-    if (skipGitRepoCheck) parts.push('--skip-git-repo-check');
   }
 
   parts.push(JSON.stringify(prompt));
