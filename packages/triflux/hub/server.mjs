@@ -418,6 +418,15 @@ export async function startHub({
   const adaptiveEngine = createAdaptiveEngine({ repoRoot: PROJECT_ROOT, fingerprintService });
   adaptiveEngine.startSession();
 
+  // safety-guard → reflexion 패널티 승격 (pending-penalties.jsonl → adaptive_rules)
+  try {
+    const { promotePenalties } = await import("./promote-penalties.mjs");
+    const result = promotePenalties(store, { projectSlug: PROJECT_ROOT.split(/[\\/]/).pop() });
+    if (result.promoted > 0) {
+      console.log(`[reflexion] ${result.promoted} penalties promoted to adaptive rules`);
+    }
+  } catch { /* promote-penalties 실패는 Hub 시작을 막지 않음 */ }
+
   // Delegator MCP resident service 초기화
   const delegatorWorker = createDelegatorWorker({ cwd: PROJECT_ROOT });
   try {
