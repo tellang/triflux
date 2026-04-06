@@ -29,7 +29,7 @@ const { extractPrompt, sanitizeForKeywordDetection } = detectorModule;
 
 function loadCompiledRules() {
   const rules = loadRules(rulesPath);
-  assert.equal(rules.length, 33);
+  assert.equal(rules.length, 31);
   return compileRules(rules);
 }
 
@@ -100,8 +100,8 @@ test("sanitizeForKeywordDetection: 코드블록/URL/파일경로/XML 태그 제�
 
 test("loadRules: 유효한 JSON 로드", () => {
   const rules = loadRules(rulesPath);
-  assert.equal(rules.length, 33);
-  assert.equal(rules.filter((rule) => rule.skill).length, 20);
+  assert.equal(rules.length, 31);
+  assert.equal(rules.filter((rule) => rule.skill).length, 18);
   assert.equal(rules.filter((rule) => rule.mcp_route).length, 10);
 });
 
@@ -122,7 +122,7 @@ test("loadRules: 잘못된 파일 처리", () => {
 test("compileRules: 정규식 컴파일 성공", () => {
   const rules = loadRules(rulesPath);
   const compiled = compileRules(rules);
-  assert.equal(compiled.length, 33);
+  assert.equal(compiled.length, 31);
   for (const rule of compiled) {
     assert.ok(Array.isArray(rule.compiledPatterns));
     assert.ok(rule.compiledPatterns.length > 0);
@@ -153,7 +153,7 @@ test("matchRules: tfx 키워드 매칭", () => {
   const compiledRules = loadCompiledRules();
   const cases = [
     { text: "tfx multi 세션 시작", expectedId: "tfx-multi" },
-    { text: "tfx auto 돌려줘", expectedId: "tfx-auto" },
+    { text: "tfx auto 돌려줘", expectedId: "tfx-unified" },
     { text: "tfx codex 로 실행", expectedId: "tfx-codex" },
     { text: "tfx gemini 로 실행", expectedId: "tfx-gemini" },
     { text: "canceltfx", expectedId: "tfx-cancel" }
