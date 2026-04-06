@@ -68,6 +68,9 @@ export function buildAdaptiveRuleRow({
   hit_count = 1,
   last_seen_ms,
   created_ms,
+  error_message,
+  solution,
+  context,
 } = {}) {
   const identity = normalizeAdaptiveRuleIdentity(project_slug, pattern);
   if (!identity) return null;
@@ -79,6 +82,9 @@ export function buildAdaptiveRuleRow({
     hit_count: clampHitCount(hit_count, 1),
     last_seen_ms: lastSeenAt,
     created_ms: createdAt,
+    error_message: typeof error_message === 'string' ? error_message : null,
+    solution: typeof solution === 'string' ? solution : null,
+    context: typeof context === 'string' ? context : null,
   };
 }
 
@@ -740,6 +746,22 @@ export function createMemoryStore() {
         }
       }
       return removed;
+    },
+
+    listAdaptiveRules(projectSlug) {
+      const results = [];
+      for (const rule of adaptiveRules.values()) {
+        if (!projectSlug || rule.project_slug === projectSlug) {
+          results.push(clone(rule));
+        }
+      }
+      return results.sort((a, b) => b.confidence - a.confidence);
+    },
+
+    deleteAdaptiveRule(projectSlug, pattern) {
+      const identity = normalizeAdaptiveRuleIdentity(projectSlug, pattern);
+      if (!identity) return false;
+      return adaptiveRules.delete(getAdaptiveRuleKey(identity.project_slug, identity.pattern));
     },
   };
 

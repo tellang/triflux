@@ -15,23 +15,35 @@ export { createMemoryStore };
 function ensureAdaptiveRulesSchema(db) {
   const schemaKey = 'adaptive_rules_schema_version';
   const currentVersion = db.prepare('SELECT value FROM _meta WHERE key = ?').pluck().get(schemaKey);
-  if (currentVersion === '1') return;
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS adaptive_rules (
-      project_slug TEXT NOT NULL,
-      pattern TEXT NOT NULL,
-      confidence REAL NOT NULL DEFAULT 0.5,
-      hit_count INTEGER NOT NULL DEFAULT 1,
-      last_seen_ms INTEGER NOT NULL,
-      created_ms INTEGER NOT NULL,
-      PRIMARY KEY (project_slug, pattern)
-    );
-    CREATE INDEX IF NOT EXISTS idx_adaptive_rules_last_seen
-      ON adaptive_rules(project_slug, last_seen_ms DESC);
-    CREATE INDEX IF NOT EXISTS idx_adaptive_rules_confidence
-      ON adaptive_rules(project_slug, confidence DESC);
-  `);
-  db.prepare('INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)').run(schemaKey, '1');
+  if (currentVersion === '2') return;
+  if (!currentVersion) {
+    // 신규 생성
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS adaptive_rules (
+        project_slug TEXT NOT NULL,
+        pattern TEXT NOT NULL,
+        confidence REAL NOT NULL DEFAULT 0.5,
+        hit_count INTEGER NOT NULL DEFAULT 1,
+        last_seen_ms INTEGER NOT NULL,
+        created_ms INTEGER NOT NULL,
+        error_message TEXT,
+        solution TEXT,
+        context TEXT,
+        PRIMARY KEY (project_slug, pattern)
+      );
+      CREATE INDEX IF NOT EXISTS idx_adaptive_rules_last_seen
+        ON adaptive_rules(project_slug, last_seen_ms DESC);
+      CREATE INDEX IF NOT EXISTS idx_adaptive_rules_confidence
+        ON adaptive_rules(project_slug, confidence DESC);
+    `);
+  } else {
+    // v1 → v2 마이그레이션: 컬럼 추가
+    const cols = db.pragma('table_info(adaptive_rules)').map(c => c.name);
+    if (!cols.includes('error_message')) db.exec('ALTER TABLE adaptive_rules ADD COLUMN error_message TEXT');
+    if (!cols.includes('solution')) db.exec('ALTER TABLE adaptive_rules ADD COLUMN solution TEXT');
+    if (!cols.includes('context')) db.exec('ALTER TABLE adaptive_rules ADD COLUMN context TEXT');
+  }
+  db.prepare('INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)').run(schemaKey, '2');
 }
 
 function attachAdaptiveRuleStore(store) {
@@ -40,15 +52,20 @@ function attachAdaptiveRuleStore(store) {
   const statements = {
     upsertRule: store.db.prepare(`
       INSERT INTO adaptive_rules (
-        project_slug, pattern, confidence, hit_count, last_seen_ms, created_ms
+        project_slug, pattern, confidence, hit_count, last_seen_ms, created_ms,
+        error_message, solution, context
       ) VALUES (
-        @project_slug, @pattern, @confidence, @hit_count, @last_seen_ms, @created_ms
+        @project_slug, @pattern, @confidence, @hit_count, @last_seen_ms, @created_ms,
+        @error_message, @solution, @context
       )
       ON CONFLICT(project_slug, pattern) DO UPDATE SET
         confidence = excluded.confidence,
         hit_count = excluded.hit_count,
         last_seen_ms = excluded.last_seen_ms,
-        created_ms = MIN(adaptive_rules.created_ms, excluded.created_ms)`),
+        created_ms = MIN(adaptive_rules.created_ms, excluded.created_ms),
+        error_message = COALESCE(excluded.error_message, adaptive_rules.error_message),
+        solution = COALESCE(excluded.solution, adaptive_rules.solution),
+        context = COALESCE(excluded.context, adaptive_rules.context)`),
     getRule: store.db.prepare('SELECT * FROM adaptive_rules WHERE project_slug = ? AND pattern = ?'),
     updateRule: store.db.prepare(`
       UPDATE adaptive_rules SET

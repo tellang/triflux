@@ -11,7 +11,7 @@
 
 import { readFileSync, writeFileSync, existsSync, } from "node:fs";
 import { join } from "node:path";
-import { adaptiveRuleFromError } from "./reflexion.mjs";
+import { adaptiveRuleFromError, promoteRule } from "./reflexion.mjs";
 
 const HOME = process.env.HOME || process.env.USERPROFILE || "";
 const PENALTY_DIR = join(HOME, ".triflux", "reflexion");
@@ -70,16 +70,23 @@ export function promotePenalties(store, options = {}) {
 
     try {
       if (store.addAdaptiveRule) {
-        store.addAdaptiveRule({
-          project_slug: projectSlug,
-          pattern: rule.error_pattern,
-          error_message: rule.error_message,
-          solution: rule.solution,
-          context: typeof rule.context === "string" ? rule.context : JSON.stringify(rule.context),
-          confidence: rule.confidence,
-          hit_count: rule.hit_count,
-          last_seen_ms: Date.now(),
-        });
+        const existing = store.findAdaptiveRule?.(projectSlug, rule.error_pattern);
+        if (existing) {
+          // 기존 규칙 → confidence 승격
+          promoteRule(store, projectSlug, rule.error_pattern);
+        } else {
+          // 새 규칙 → 추가
+          store.addAdaptiveRule({
+            project_slug: projectSlug,
+            pattern: rule.error_pattern,
+            error_message: rule.error_message,
+            solution: rule.solution,
+            context: typeof rule.context === "string" ? rule.context : JSON.stringify(rule.context),
+            confidence: rule.confidence,
+            hit_count: rule.hit_count,
+            last_seen_ms: Date.now(),
+          });
+        }
         promoted++;
       } else {
         skipped++;

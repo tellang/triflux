@@ -434,10 +434,10 @@ export async function startHub({
     if (pruned > 0) console.log(`[reflexion] ${pruned} stale adaptive rules pruned`);
   } catch { /* prune 실패 무시 */ }
 
-  // adaptive rule confidence decay (5세션 이상 관측 안 된 규칙 감소)
+  // adaptive rule confidence decay (7일 이상 미관측 규칙 -0.1 감소)
   try {
     const { decayRules } = await import("./reflexion.mjs");
-    const decay = decayRules(store, adaptiveEngine.sessionCount?.() || 1);
+    const decay = decayRules(store, adaptiveEngine.sessionCount?.() || 1, projectSlug);
     if (decay.deleted.length > 0) console.log(`[reflexion] ${decay.deleted.length} low-confidence rules removed`);
   } catch { /* decay 실패 무시 */ }
 

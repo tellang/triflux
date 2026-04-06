@@ -63,8 +63,11 @@ describe('hub/store-adapter.mjs tier2 adaptive rules', () => {
         hit_count: 1,
         last_seen_ms: added.last_seen_ms,
         created_ms: added.created_ms,
+        error_message: null,
+        solution: null,
+        context: null,
       });
-      assert.equal(store.db.prepare("SELECT value FROM _meta WHERE key = 'adaptive_rules_schema_version'").pluck().get(), '1');
+      assert.equal(store.db.prepare("SELECT value FROM _meta WHERE key = 'adaptive_rules_schema_version'").pluck().get(), '2');
       assert.deepEqual(store.findAdaptiveRule('alpha', 'retry-throttle'), added);
 
       const updated = store.updateRuleConfidence('alpha', 'retry-throttle', 0.9, {

@@ -7,6 +7,7 @@ const DEFAULT_CONFIDENCE = 0.5;
 const ACTIVE_RULE_CONFIDENCE = 0.5;
 const ADAPTIVE_PROMOTION_STEP = 0.1;
 const ADAPTIVE_DECAY_STEP = 0.1;
+/** @deprecated 세션 기반 decay에서 시간 기반으로 변경됨. 미사용. */
 const ADAPTIVE_DECAY_WINDOW = 5;
 const ADAPTIVE_DELETE_THRESHOLD = 0.3;
 
@@ -31,6 +32,7 @@ function pickString(...values) {
   );
 }
 
+/** @deprecated 세션 기반 decay 제거로 미사용. 세션 인식 복원 시 재활용 예정. */
 function pickSessionCount(...values) {
   const raw = values.find((value) => Number.isFinite(Number(value)));
   return raw == null ? 0 : Math.max(0, Math.trunc(Number(raw)));
@@ -109,6 +111,7 @@ function normalizeSessionIds(sessionIds) {
   ];
 }
 
+/** @deprecated reflexion_entries 기반. adaptive_rules에서는 미사용. 세션 인식 복원 시 재활용 예정. */
 function getAdaptiveState(rule = {}) {
   const state = rule.adaptive_state || {};
   const session_ids = normalizeSessionIds(state.session_ids);
@@ -125,6 +128,7 @@ function getAdaptiveState(rule = {}) {
   };
 }
 
+/** @deprecated reflexion_entries 기반. adaptive_rules에서는 미사용. 세션 인식 복원 시 재활용 예정. */
 function mergeAdaptiveState(rule, errorContext = {}) {
   const current = getAdaptiveState(rule);
   const sessionId = pickSessionId(errorContext);
@@ -297,19 +301,20 @@ export function promoteRule(store, projectSlug, pattern) {
 }
 
 /**
- * confidence가 낮은 adaptive rules 정리
+ * 7일 이상 미관측된 adaptive rules의 confidence를 -0.1 감소, 임계값 이하면 삭제
  * @param {object} store — store-adapter 인스턴스 (listAdaptiveRules, updateRuleConfidence, deleteAdaptiveRule 필요)
- * @param {number} _sessionCount — 하위 호환용 (현재 미사용, pruneStaleRules가 시간 기반으로 대체)
+ * @param {number} _sessionCount — 하위 호환용 (현재 미사용)
+ * @param {string} [projectSlug] — 특정 프로젝트만 대상. 미지정 시 전체 스캔
  * @returns {{ updated: Array, deleted: string[] }}
  */
-export function decayRules(store, _sessionCount) {
+export function decayRules(store, _sessionCount, projectSlug) {
   if (!store.listAdaptiveRules) return { updated: [], deleted: [] };
   const result = { updated: [], deleted: [] };
-  const rules = store.listAdaptiveRules();
+  const rules = store.listAdaptiveRules(projectSlug);
   for (const rule of rules) {
-    // 30일 이상 미관측 + confidence < 0.5 → decay
+    // 7일 이상 미관측된 규칙만 decay 대상
     const ageDays = (Date.now() - (rule.last_seen_ms || 0)) / (24 * 3600 * 1000);
-    if (ageDays < 7) continue; // 7일 미만은 건너뜀
+    if (ageDays < 7) continue;
     const decayed = clampConfidence(rule.confidence - ADAPTIVE_DECAY_STEP);
     if (decayed <= ADAPTIVE_DELETE_THRESHOLD) {
       if (store.deleteAdaptiveRule(rule.project_slug, rule.pattern)) {
@@ -318,7 +323,7 @@ export function decayRules(store, _sessionCount) {
       continue;
     }
     if (decayed < rule.confidence) {
-      const updated = store.updateRuleConfidence(rule.project_slug, rule.pattern, decayed);
+      const updated = store.updateRuleConfidence(rule.project_slug, rule.pattern, decayed, { hit_count_increment: 0 });
       if (updated) result.updated.push(updated);
     }
   }
@@ -334,7 +339,7 @@ export function decayRules(store, _sessionCount) {
 export function getActiveAdaptiveRules(store, projectSlug) {
   if (!store.listAdaptiveRules) return [];
   return store.listAdaptiveRules(projectSlug)
-    .filter((rule) => rule.confidence > ACTIVE_RULE_CONFIDENCE);
+    .filter((rule) => rule.confidence >= ACTIVE_RULE_CONFIDENCE);
 }
 
 /**

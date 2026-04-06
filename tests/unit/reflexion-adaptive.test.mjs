@@ -141,7 +141,6 @@ describe("reflexion adaptive rules", () => {
   });
 
   it("returns only active adaptive rules for a project slug", () => {
-    // active: confidence > 0.5
     store.addAdaptiveRule({
       project_slug: "project-active",
       pattern: "err_module_not_found",
@@ -149,7 +148,6 @@ describe("reflexion adaptive rules", () => {
       hit_count: 5,
       last_seen_ms: Date.now(),
     });
-    // inactive: confidence <= 0.5
     store.addAdaptiveRule({
       project_slug: "project-active",
       pattern: "modulenotfounderror",
@@ -157,7 +155,6 @@ describe("reflexion adaptive rules", () => {
       hit_count: 1,
       last_seen_ms: Date.now(),
     });
-    // different project
     store.addAdaptiveRule({
       project_slug: "project-other",
       pattern: "fatal_not_a_git_repository",
@@ -171,5 +168,163 @@ describe("reflexion adaptive rules", () => {
     assert.equal(rules.length, 1);
     assert.equal(rules[0].pattern, "err_module_not_found");
     assert.equal(rules[0].confidence, 0.8);
+  });
+
+  it("includes rules at default confidence (0.5) in active results", () => {
+    store.addAdaptiveRule({
+      project_slug: "alpha",
+      pattern: "default_confidence_rule",
+      confidence: 0.5,
+      hit_count: 1,
+      last_seen_ms: Date.now(),
+    });
+
+    const rules = getActiveAdaptiveRules(store, "alpha");
+    assert.equal(rules.length, 1);
+    assert.equal(rules[0].confidence, 0.5);
+  });
+
+  it("promoteRule returns null for non-existing rule", () => {
+    const result = promoteRule(store, "nonexistent", "missing_pattern");
+    assert.equal(result, null);
+  });
+
+  it("decayRules does not inflate hit_count", () => {
+    const oldTime = Date.now() - (10 * 24 * 3600 * 1000);
+    store.addAdaptiveRule({
+      project_slug: "alpha",
+      pattern: "no_inflate_test",
+      confidence: 0.7,
+      hit_count: 3,
+      last_seen_ms: oldTime,
+      created_ms: oldTime,
+    });
+
+    decayRules(store, 1);
+
+    const rule = store.findAdaptiveRule("alpha", "no_inflate_test");
+    assert.ok(rule);
+    assert.equal(rule.hit_count, 3); // unchanged, not 4
+    assert.ok(rule.confidence < 0.7); // decayed
+  });
+
+  it("decayRules skips rules younger than 7 days", () => {
+    const recentTime = Date.now() - (3 * 24 * 3600 * 1000); // 3일 전
+    store.addAdaptiveRule({
+      project_slug: "alpha",
+      pattern: "recent_rule",
+      confidence: 0.6,
+      hit_count: 1,
+      last_seen_ms: recentTime,
+      created_ms: recentTime,
+    });
+
+    const result = decayRules(store, 1);
+
+    assert.equal(result.updated.length, 0);
+    assert.equal(result.deleted.length, 0);
+    const rule = store.findAdaptiveRule("alpha", "recent_rule");
+    assert.equal(rule.confidence, 0.6); // unchanged
+  });
+
+  it("decayRules filters by projectSlug when provided", () => {
+    const oldTime = Date.now() - (10 * 24 * 3600 * 1000);
+    store.addAdaptiveRule({ project_slug: "alpha", pattern: "p1", confidence: 0.7, hit_count: 1, last_seen_ms: oldTime, created_ms: oldTime });
+    store.addAdaptiveRule({ project_slug: "beta", pattern: "p2", confidence: 0.7, hit_count: 1, last_seen_ms: oldTime, created_ms: oldTime });
+
+    const result = decayRules(store, 1, "alpha");
+
+    // alpha만 decay됨
+    assert.equal(result.updated.length, 1);
+    const betaRule = store.findAdaptiveRule("beta", "p2");
+    assert.equal(betaRule.confidence, 0.7); // beta는 건드리지 않음
+  });
+
+  it("listAdaptiveRules returns all rules without projectSlug", () => {
+    store.addAdaptiveRule({ project_slug: "a", pattern: "p1", confidence: 0.8, hit_count: 1, last_seen_ms: Date.now() });
+    store.addAdaptiveRule({ project_slug: "b", pattern: "p2", confidence: 0.6, hit_count: 1, last_seen_ms: Date.now() });
+
+    const all = store.listAdaptiveRules();
+    assert.equal(all.length, 2);
+  });
+
+  it("listAdaptiveRules filters by projectSlug", () => {
+    store.addAdaptiveRule({ project_slug: "a", pattern: "p1", confidence: 0.8, hit_count: 1, last_seen_ms: Date.now() });
+    store.addAdaptiveRule({ project_slug: "b", pattern: "p2", confidence: 0.6, hit_count: 1, last_seen_ms: Date.now() });
+
+    const filtered = store.listAdaptiveRules("a");
+    assert.equal(filtered.length, 1);
+    assert.equal(filtered[0].project_slug, "a");
+  });
+
+  it("deleteAdaptiveRule returns false for non-existing rule", () => {
+    const result = store.deleteAdaptiveRule("nonexistent", "missing");
+    assert.equal(result, false);
+  });
+
+  it("schema v2 stores solution and error_message", () => {
+    const added = store.addAdaptiveRule({
+      project_slug: "alpha",
+      pattern: "schema_v2_test",
+      confidence: 0.5,
+      hit_count: 1,
+      last_seen_ms: Date.now(),
+      error_message: "connection refused",
+      solution: "check if server is running",
+      context: '{"tool":"exec"}',
+    });
+
+    assert.ok(added);
+    const found = store.findAdaptiveRule("alpha", "schema_v2_test");
+    assert.equal(found.error_message, "connection refused");
+    assert.equal(found.solution, "check if server is running");
+    assert.equal(found.context, '{"tool":"exec"}');
+  });
+});
+
+describe("reflexion adaptive rules — memory-store fallback", () => {
+  let store;
+
+  beforeEach(async () => {
+    // SQLite 없이 인메모리 스토어로 생성
+    store = await createStoreAdapter("/nonexistent/path.db", {
+      loadDatabase: async () => { throw new Error("SQLite unavailable"); },
+    });
+  });
+
+  it("memory-store supports listAdaptiveRules", () => {
+    store.addAdaptiveRule({ project_slug: "mem", pattern: "p1", confidence: 0.8, hit_count: 1, last_seen_ms: Date.now() });
+    store.addAdaptiveRule({ project_slug: "mem", pattern: "p2", confidence: 0.6, hit_count: 1, last_seen_ms: Date.now() });
+
+    const all = store.listAdaptiveRules();
+    assert.equal(all.length, 2);
+
+    const filtered = store.listAdaptiveRules("mem");
+    assert.equal(filtered.length, 2);
+  });
+
+  it("memory-store supports deleteAdaptiveRule", () => {
+    store.addAdaptiveRule({ project_slug: "mem", pattern: "deleteme", confidence: 0.5, hit_count: 1, last_seen_ms: Date.now() });
+    assert.ok(store.findAdaptiveRule("mem", "deleteme"));
+
+    const deleted = store.deleteAdaptiveRule("mem", "deleteme");
+    assert.equal(deleted, true);
+    assert.equal(store.findAdaptiveRule("mem", "deleteme"), null);
+  });
+
+  it("decayRules works with memory-store fallback", () => {
+    const oldTime = Date.now() - (10 * 24 * 3600 * 1000);
+    store.addAdaptiveRule({ project_slug: "mem", pattern: "stale", confidence: 0.35, hit_count: 1, last_seen_ms: oldTime, created_ms: oldTime });
+
+    const result = decayRules(store, 1);
+
+    assert.ok(result.deleted.length >= 1);
+  });
+
+  it("getActiveAdaptiveRules works with memory-store fallback", () => {
+    store.addAdaptiveRule({ project_slug: "mem", pattern: "active_rule", confidence: 0.7, hit_count: 1, last_seen_ms: Date.now() });
+
+    const rules = getActiveAdaptiveRules(store, "mem");
+    assert.equal(rules.length, 1);
   });
 });
