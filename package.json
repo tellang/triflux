@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "10.0.0",
+  "version": "10.1.0",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
