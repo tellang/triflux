@@ -267,6 +267,36 @@ describe("headless-guard decision matrix (runtime)", () => {
     assert.equal(result.status, 2);
   });
 
+  it("eval로 감싼 codex exec도 deny한다", () => {
+    const result = runGuardWithBashCommand("eval \"codex exec 'hello'\"");
+    assert.equal(result.status, 2);
+  });
+
+  it("$() subshell 안의 codex exec도 deny한다", () => {
+    const result = runGuardWithBashCommand("result=$(codex exec 'hello')");
+    assert.equal(result.status, 2);
+  });
+
+  it("psmux send-keys에 codex exec payload가 있으면 deny한다", () => {
+    const result = runGuardWithBashCommand("psmux send-keys -t sess \"codex exec 'hello'\" Enter");
+    assert.equal(result.status, 2);
+  });
+
+  it("psmux send-keys에 codex 없으면 통과한다", () => {
+    const result = runGuardWithBashCommand("psmux send-keys -t sess \"echo hello\" Enter");
+    assert.equal(result.status, 0);
+  });
+
+  it("psmux capture-pane은 항상 통과한다", () => {
+    const result = runGuardWithBashCommand("psmux capture-pane -t sess");
+    assert.equal(result.status, 0);
+  });
+
+  it("정상 eval은 통과한다 (오탐 방지)", () => {
+    const result = runGuardWithBashCommand("eval \"echo hello world\"");
+    assert.equal(result.status, 0);
+  });
+
   it("정상 env 명령은 통과한다 (오탐 방지)", () => {
     const result = runGuardWithBashCommand("env NODE_ENV=test npm test");
     assert.equal(result.status, 0);

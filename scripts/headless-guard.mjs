@@ -182,8 +182,20 @@ async function main() {
       process.exit(0);
     }
 
-    // psmux send-keys / capture-pane은 통과 (pane 내 간접 실행)
-    if (/psmux\s+(send-keys|capture-pane|list-panes|split-window|select-pane)/.test(cmd)) {
+    // psmux capture-pane / list-panes / select-pane은 통과 (읽기 전용)
+    if (/psmux\s+(capture-pane|list-panes|select-pane)/.test(cmd)) {
+      process.exit(0);
+    }
+
+    // psmux send-keys / split-window: payload에 codex/gemini가 있으면 deny (간접 실행 터널 차단)
+    if (/psmux\s+(send-keys|split-window)/.test(cmd)) {
+      if (/\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)) {
+        deny(
+          "[headless-guard] psmux send-keys/split-window에 codex/gemini 직접 호출이 포함되어 있습니다. " +
+          `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+          DIRECT_CLI_BYPASS_HINT,
+        );
+      }
       process.exit(0);
     }
 
@@ -191,7 +203,7 @@ async function main() {
     // 복합 명령(&&, ||, ;, |) 분리 후 각 세그먼트의 커맨드 위치만 검사 (args/quotes 안의 codex는 무시)
     // NOTE: || 는 | 보다 먼저 매칭되므로 logical OR이 단일 pipe로 잘못 분리되지 않음
     const cmdParts = cmd.split(/\s*(?:&&|\|\||\||;)\s*/);
-    const hasDirectCli = cmdParts.some(part => {
+    let hasDirectCli = cmdParts.some(part => {
       // 1단계: env var prefix 제거 (FOO=bar ...)
       // 2단계: wrapper prefix 제거 (env, command, nohup, timeout N, 절대경로, bash -c/-lc "...")
       const stripped = part
@@ -202,6 +214,15 @@ async function main() {
         .replace(/^\s*(?:\/[\w./+-]+\/)(codex|gemini)\b/, " $1");
       return /^\s*codex\b.*\bexec\b/i.test(stripped) || /^\s*gemini\s+(-p|--prompt)\b/i.test(stripped);
     });
+    // 2차 휴리스틱: 1차 세그먼트 검사를 통과한 간접 실행 패턴 탐지
+    // full AST 파서 대신 현실적 위협 벡터만 커버 — eval, subshell, variable 확장
+    if (!hasDirectCli) {
+      hasDirectCli = (
+        /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd) ||
+        /\$[\({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)
+      );
+    }
+
     if (hasDirectCli) {
       // process.env만 허용 — 인라인 텍스트 체크는 combined bypass 취약 (명령 내 아무 위치의 TFX_ALLOW_DIRECT_CLI=1로 우회 가능)
       if (process.env.TFX_ALLOW_DIRECT_CLI === "1") {
