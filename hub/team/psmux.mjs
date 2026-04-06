@@ -881,17 +881,23 @@ export function startCapture(sessionName, paneNameOrTarget) {
  */
 // Windows: PowerShell의 bash가 WSL을 가리킬 수 있음. Git Bash를 명시적으로 사용.
 // WSL bash에서는 /c/Users/... 경로가 유효하지 않아 exit 127 발생.
-const GIT_BASH_BIN = (() => {
-  if (!IS_WINDOWS) return "bash";
+// psmux pane 용 (PowerShell → bash 실행): & "path" 형식
+// Node.js execSync 용 (직접 실행): "path" 형식
+const _gitBashPath = (() => {
+  if (!IS_WINDOWS) return null;
   const candidates = [
     "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
     "C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe",
   ];
   for (const p of candidates) {
-    if (existsSync(p)) return `"${p}"`;
+    if (existsSync(p)) return p;
   }
-  return "bash";
+  return null;
 })();
+// PowerShell call operator(&)가 필요: & "C:\...\bash.exe" -c '...'
+const GIT_BASH_BIN_PS = _gitBashPath ? `& "${_gitBashPath}"` : "bash";
+// Node.js execSync에서 직접 실행할 때는 따옴표만
+const GIT_BASH_BIN_EXEC = _gitBashPath ? `"${_gitBashPath}"` : "bash";
 
 // CLI 바이너리 절대 경로 캐시 (세션 중 1회만 resolve)
 const _cliPathCache = new Map();
@@ -899,7 +905,7 @@ function resolveCliAbsPath(name) {
   if (_cliPathCache.has(name)) return _cliPathCache.get(name);
   try {
     const resolved = childProcess
-      .execSync(`${GIT_BASH_BIN} -c "which ${name}"`, { encoding: "utf8", timeout: 3000 })
+      .execSync(`${GIT_BASH_BIN_EXEC} -c "which ${name}"`, { encoding: "utf8", timeout: 3000 })
       .trim();
     if (resolved) _cliPathCache.set(name, resolved);
     return resolved || name;
@@ -921,7 +927,7 @@ function wrapCliForBash(cmd) {
     : trimmed;
   // 단일 따옴표 이스케이프: ' → '\''
   const escaped = resolved.replace(/'/g, "'\\''");
-  return `${GIT_BASH_BIN} -c '${escaped}'`;
+  return `${GIT_BASH_BIN_PS} -c '${escaped}'`;
 }
 
 export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
