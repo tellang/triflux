@@ -1,7 +1,11 @@
 # Enforce LF line endings for all text files
 * text=auto eol=lf
 
-# Ensure shell scripts use LF (critical for bash execution)
+# Explicit LF overrides for common source, data, docs, and shell files
+*.mjs text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
 *.sh text eol=lf
 *.bash text eol=lf
 
