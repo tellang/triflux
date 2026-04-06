@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { TFX_REPORTS_DIR } from './paths.mjs';
 
 /**
+ * @experimental
  * 주제에서 검색 쿼리 3-5개를 자동 생성한다.
  * 한국어 주제 → 한국어 + 영어 혼합, 영어 주제 → 영어 쿼리.
  * @param {string} topic - 리서치 주제

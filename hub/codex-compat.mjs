@@ -1,5 +1,6 @@
 // hub/codex-compat.mjs — backward-compatible facade for legacy imports
 
+/** @experimental */
 export {
   CODEX_MCP_EXECUTION_EXIT_CODE,
   CODEX_MCP_TRANSPORT_EXIT_CODE,
