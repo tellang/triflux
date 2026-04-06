@@ -4,7 +4,8 @@
 // 도구 실패 시 에러 패턴을 분석하여 해결 힌트를 additionalContext로 주입한다.
 // Claude가 동일 에러를 반복하지 않도록 구체적 가이드를 제공.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 
 // ── 에러 패턴 → 해결 힌트 매핑 ─────────────────────────────
 const ERROR_HINTS = [
@@ -128,16 +129,43 @@ function main() {
     JSON.stringify(input.tool_result || ""),
   ].join("\n");
 
+  // ── reflexion 적응형 학습: safety-guard/headless-guard 차단을 패널티로 기록 ──
+  const isSafetyBlock = /\[(?:safety-guard|headless-guard)\].*(?:BLOCKED|차단)/i.test(errorText);
+  if (isSafetyBlock) {
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const penaltyDir = join(home, ".triflux", "reflexion");
+      mkdirSync(penaltyDir, { recursive: true });
+      const penaltyFile = join(penaltyDir, "pending-penalties.jsonl");
+      const command = input.tool_input?.command || "";
+      const entry = {
+        ts: new Date().toISOString(),
+        type: "guard_block",
+        tool: input.tool_name || "Bash",
+        error_pattern: errorText.match(/\[.*?\]\s*(.{0,120})/)?.[1] || errorText.slice(0, 120),
+        command_preview: command.slice(0, 200),
+        source: errorText.includes("safety-guard") ? "safety-guard" : "headless-guard",
+      };
+      writeFileSync(penaltyFile, JSON.stringify(entry) + "\n", { flag: "a" });
+    } catch { /* reflexion 기록 실패는 무시 — 힌트 출력에 영향 주지 않음 */ }
+  }
+
   const hints = findHints(errorText);
-  if (hints.length === 0) process.exit(0);
+  // safety-guard 차단에는 guard가 이미 구체적 안내를 제공하므로 추가 힌트 불필요
+  if (hints.length === 0 && !isSafetyBlock) process.exit(0);
 
   const toolName = input.tool_name || "Unknown";
-  const output = {
-    systemMessage:
-      `[error-context] ${toolName} 실패 — 해결 힌트:\n` +
-      hints.map((h) => `  → ${h}`).join("\n"),
-  };
+  const parts = [];
+  if (hints.length > 0) {
+    parts.push(`[error-context] ${toolName} 실패 — 해결 힌트:\n` + hints.map((h) => `  → ${h}`).join("\n"));
+  }
+  if (isSafetyBlock) {
+    parts.push("[reflexion] 이 패턴이 적응형 학습에 기록되었습니다. 다음 세션에서 동일 패턴 시 사전 차단됩니다.");
+  }
 
+  if (parts.length === 0) process.exit(0);
+
+  const output = { systemMessage: parts.join("\n") };
   process.stdout.write(JSON.stringify(output));
 }
 

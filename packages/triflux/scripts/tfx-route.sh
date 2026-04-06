@@ -1654,6 +1654,12 @@ run_codex_mcp() {
     return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
   fi
 
+  # MCP 연결 실패(서버 미응답, 연결 종료) → transport exit code로 변환
+  if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -qE 'MCP error|Connection closed|연결 실패' "$STDOUT_LOG" 2>/dev/null; then
+    echo "[tfx-route] Codex MCP 연결 실패 — fallback 가능 exit code로 변환" >&2
+    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
+  fi
+
   return "$exit_code_local"
 }
 

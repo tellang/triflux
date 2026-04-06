@@ -72,7 +72,7 @@ describe('hub/adaptive-diagnostic.mjs', () => {
     assert.ok(second.confidence > first.confidence);
   });
 
-  it('known errors 파일을 읽지 못하면 health를 degraded로 표시한다', () => {
+  it('known errors 파일을 읽지 못하면 빈 카탈로그로 healthy 상태를 유지한다', () => {
     const pipeline = createDiagnosticPipeline({
       knownErrorsPath: 'hub/lib/missing-known-errors.json',
     });
@@ -83,8 +83,8 @@ describe('hub/adaptive-diagnostic.mjs', () => {
     });
 
     assert.equal(diagnosis.source, 'novel');
-    assert.equal(pipeline.getHealth().state, 'degraded');
-    assert.match(pipeline.getHealth().last_error?.message || '', /missing-known-errors/);
+    assert.equal(pipeline.getHealth().state, 'healthy');
+    assert.equal(pipeline.getHealth().known_errors_count, 0);
   });
 
   it('listKnownErrors는 외부 변경으로부터 안전한 복사본을 반환한다', () => {

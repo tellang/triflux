@@ -8,6 +8,30 @@
       }
     }
   },
-  "linter": { "enabled": true },
+  "files": {
+    "includes": ["bin/**", "hub/**", "scripts/**", "packages/**", "hooks/**", "hud/**", "tests/**"],
+    "experimentalScannerIgnores": ["research/**", "node_modules/**", "skills/**"]
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "correctness": {
+        "noUnusedVariables": "warn",
+        "noUnusedImports": "warn",
+        "noUnusedFunctionParameters": "off"
+      },
+      "style": {
+        "useTemplate": "off",
+        "useNodejsImportProtocol": "off"
+      },
+      "suspicious": {
+        "noControlCharactersInRegex": "off",
+        "noPrototypeBuiltins": "warn"
+      },
+      "complexity": {
+        "useArrowFunction": "off"
+      }
+    }
+  },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2 }
 }

@@ -8,7 +8,8 @@
 //   BLOCK (exit 2)  — 복구 불가능한 파괴적 명령
 //   WARN  (allow + context) — 주의가 필요한 명령
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
 // ── 차단 규칙 ──────────────────────────────────────────────
 const BLOCK_RULES = [
@@ -38,6 +39,21 @@ const WT_DIRECT_PATTERNS = [
 const WT_DIRECT_BLOCK_MESSAGE =
   "[safety-guard] wt.exe 직접 호출 차단됨. → hub/team/wt-manager.mjs의 createTab() / splitPane() / applySplitLayout()을 사용하세요.";
 
+// ── SSH+PowerShell bash 문법 차단 ────────────────────────────
+// 원격 기본 셸이 PowerShell인 호스트에 bash redirect/glob을 보내면 오동작
+const BASH_SYNTAX_IN_SSH = [
+  /2>\/dev\/null/,          // 2>/dev/null → PowerShell에서 Out-File C:\dev\null
+  />\s*\/dev\/null/,        // >/dev/null
+  /&>\s*\/dev\/null/,       // &>/dev/null
+  /\$\(/,                   // $(cmd) → PowerShell에서 다른 의미
+  /\bsource\s+/,            // source → PowerShell에 없음
+  /\bexport\s+\w+=/,        // export VAR= → PowerShell에 없음
+];
+
+const SSH_POWERSHELL_HINT =
+  "원격 셸이 PowerShell입니다. bash 문법 직접 전달 금지. scp + pwsh -File 패턴 사용. " +
+  "2>/dev/null → 2>$null, $() → $(), export → $env:, source → . (dot-source)";
+
 // ── 경고 규칙 ──────────────────────────────────────────────
 const WARN_RULES = [
   { pattern: /\bgit\s+push\b(?!.*--force)/i, warn: "git push 감지. 원격 저장소에 반영됩니다." },
@@ -49,6 +65,20 @@ const WARN_RULES = [
   { pattern: /\bchmod\s+777\b/i, warn: "chmod 777 감지. 보안 위험." },
   { pattern: /\bcurl\s.*\|\s*(bash|sh)\b/i, warn: "curl | sh 감지. 원격 스크립트 실행 주의." },
 ];
+
+// ── reflexion 적응형 패널티 로드 ──────────────────────────────
+function loadReflexionPenalties() {
+  try {
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    const penaltyFile = join(home, ".triflux", "reflexion", "pending-penalties.jsonl");
+    if (!existsSync(penaltyFile)) return [];
+    return readFileSync(penaltyFile, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map(line => { try { return JSON.parse(line); } catch { return null; } })
+      .filter(Boolean);
+  } catch { return []; }
+}
 
 function readStdin() {
   try {
@@ -125,6 +155,45 @@ function main() {
 
   if (isWtDirectInvocation(command)) {
     blockCommand(WT_DIRECT_BLOCK_MESSAGE, command);
+  }
+
+  // 0.1. reflexion 적응형 패널티 — 이전 세션에서 차단된 패턴 사전 경고
+  const penalties = loadReflexionPenalties();
+  if (penalties.length > 0) {
+    for (const penalty of penalties) {
+      if (penalty.error_pattern && new RegExp(penalty.error_pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").slice(0, 80), "i").test(command)) {
+        const output = {
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "allow",
+            additionalContext:
+              `[reflexion] 이전 세션에서 차단된 패턴과 유사합니다 (${penalty.source}, ${penalty.ts?.slice(0, 10)}). ` +
+              `이전 차단 사유: ${penalty.error_pattern?.slice(0, 100)}`,
+          },
+        };
+        process.stdout.write(JSON.stringify(output));
+        process.exit(0);
+      }
+    }
+  }
+
+  // 0.5. SSH → PowerShell 호스트에 bash 문법 전달 차단
+  // 세그먼트 시작 위치에서 ssh 명령인 경우만 (문자열/코드 안의 ssh는 무시)
+  if (hasSegmentInvocation(command, [/^\s*ssh\s+/i])) {
+    // 세그먼트 분리 후 ssh로 시작하는 세그먼트의 payload만 검사
+    const segments = command.split(/\s*(?:&&|;|\|\||\|)\s*/);
+    for (const seg of segments) {
+      const sshMatch = seg.trim().match(/^ssh\s+\S+\s+(.*)/s);
+      if (!sshMatch) continue;
+      const sshPayload = sshMatch[1];
+      const bashSyntax = BASH_SYNTAX_IN_SSH.find(p => p.test(sshPayload));
+      if (bashSyntax) {
+        blockCommand(
+          `[safety-guard] SSH 명령에 bash 전용 문법 감지: ${bashSyntax}. ${SSH_POWERSHELL_HINT}`,
+          command,
+        );
+      }
+    }
   }
 
   // 1. BLOCK 체크 — exit 2로 차단

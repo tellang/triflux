@@ -719,12 +719,11 @@ function previewMcpRegistrationActions(mcpUrl) {
 function previewClaudeRoutingAction() {
   const globalClaudePath = join(CLAUDE_DIR, "CLAUDE.md");
   const projectClaudePath = join(PKG_ROOT, "CLAUDE.md");
-  const projectContent = existsSync(projectClaudePath)
-    ? readFileSync(projectClaudePath, "utf8")
-    : "";
-  const projectSection = extractMarkdownSection(projectContent, TFX_SECTION_HEADING);
 
-  if (!projectSection) {
+  let routingTable;
+  try {
+    routingTable = getLatestRoutingTable();
+  } catch {
     return {
       type: "claude-guidance",
       path: globalClaudePath,
@@ -734,18 +733,23 @@ function previewClaudeRoutingAction() {
     };
   }
 
-  const globalContent = existsSync(globalClaudePath)
-    ? readFileSync(globalClaudePath, "utf8")
-    : "";
-  const preview = ensureTfxSection(globalContent, { scope: "global", projectSection });
+  if (!existsSync(globalClaudePath)) {
+    return {
+      type: "claude-guidance",
+      path: globalClaudePath,
+      source: projectClaudePath,
+      change: "create",
+    };
+  }
+
+  const globalContent = readFileSync(globalClaudePath, "utf8");
+  const hasRouting = globalContent.includes("<routing>") || globalContent.includes("## triflux CLI 라우팅");
 
   return {
     type: "claude-guidance",
     path: globalClaudePath,
     source: projectClaudePath,
-    change: preview.changed ? (existsSync(globalClaudePath) ? "update" : "create") : "noop",
-    heading: TFX_SECTION_HEADING,
-    summary: TFX_GLOBAL_SUMMARY_SECTION,
+    change: hasRouting ? "noop" : "create",
   };
 }
 

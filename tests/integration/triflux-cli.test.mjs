@@ -88,7 +88,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.equal(payload.dry_run, true);
     assert.ok(payload.actions.length > 0);
     assert.ok(payload.actions.some((action) => action.type === "sync"));
-    assert.ok(payload.actions.some((action) => action.label === "skill-alias:tfx-ralph"));
+    assert.ok(payload.actions.some((action) => action.label === "skill-alias:tfx-autopilot"));
     assert.ok(payload.actions.some((action) => action.label === "headless-guard-fast.sh"));
     assert.ok(payload.actions.some((action) => action.label === "hub/team/agent-map.json"));
   });
@@ -162,22 +162,24 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.equal(payload.alive, false);
   });
 
-  it("setup은 tfx-persist를 tfx-ralph 별칭으로도 동기화해야 한다", () => {
+  it("setup은 tfx-auto의 별칭 스킬(autopilot, persist, fullcycle)을 동기화해야 한다", () => {
     const homeDir = createHomeDir();
     const setupResult = runCli(["setup"], { homeDir });
     assert.equal(setupResult.status, 0, setupResult.stderr || setupResult.stdout);
 
-    const aliasPath = join(homeDir, ".claude", "skills", "tfx-ralph", "SKILL.md");
-    const sourcePath = join(homeDir, ".claude", "skills", "tfx-persist", "SKILL.md");
-    assert.equal(existsSync(aliasPath), true, `alias missing: ${aliasPath}`);
+    const autopilotPath = join(homeDir, ".claude", "skills", "tfx-autopilot", "SKILL.md");
+    const sourcePath = join(homeDir, ".claude", "skills", "tfx-auto", "SKILL.md");
+    assert.equal(existsSync(autopilotPath), true, `alias missing: ${autopilotPath}`);
     assert.equal(existsSync(sourcePath), true, `source missing: ${sourcePath}`);
-    assert.match(readFileSync(aliasPath, "utf8"), /^name:\s*tfx-ralph$/m);
+    assert.match(readFileSync(autopilotPath, "utf8"), /^name:\s*tfx-autopilot$/m);
 
     const listPayload = parseStdoutJson(runCli(["list", "--json"], { homeDir }));
     assert.deepEqual(listPayload.skill_aliases, [
-      { alias: "tfx-ralph", source: "tfx-persist", installed: true },
+      { alias: "tfx-autopilot", source: "tfx-auto", installed: true },
+      { alias: "tfx-persist", source: "tfx-auto", installed: true },
+      { alias: "tfx-fullcycle", source: "tfx-auto", installed: true },
     ]);
-    assert.equal(listPayload.user_skills.includes("tfx-ralph"), false);
+    assert.equal(listPayload.user_skills.includes("tfx-autopilot"), false);
   });
 
   it("setup은 기존 Codex 프로필을 공유 로직으로 보정해야 한다", () => {
