@@ -26,7 +26,13 @@ function readAgentRecord(filePath, deps) {
 }
 
 // PID 생존 여부를 확인한다.
-function isAlive(pid, deps) {
+// Windows에서 process.kill(pid, 0)이 불안정할 수 있으므로
+// 24시간 이상 경과한 에이전트는 좀비로 간주한다.
+const MAX_AGENT_AGE_S = 86400;
+
+function isAlive(pid, deps, startedAt = 0) {
+  const age = Math.floor(deps.now() / 1000) - (Number(startedAt) || 0);
+  if (age > MAX_AGENT_AGE_S) return false;
   try {
     deps.kill(pid, 0);
     return true;
@@ -75,13 +81,13 @@ function pollAgents(deps = {}) {
     return [];
   }
 
-  const now = resolved.now();
+  const now = Math.floor(resolved.now() / 1000);
   const agents = [];
   for (const name of names) {
     const filePath = join(dir, name);
     const record = readAgentRecord(filePath, resolved);
     if (!record) continue;
-    if (!isAlive(Number(record.pid), resolved)) {
+    if (!isAlive(Number(record.pid), resolved, record.started)) {
       removeZombie(filePath, resolved);
       continue;
     }

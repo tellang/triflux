@@ -13,7 +13,7 @@ function makeFsDeps(overrides = {}) {
     unlinkSync: () => {},
     kill: () => {},
     env: { TMPDIR: "/tmp/mock" },
-    now: () => 10_000,
+    now: () => 10_000_000,
     ...overrides,
   };
 }
@@ -65,7 +65,7 @@ describe("pollAgents", () => {
     const filePath = join(env.TMPDIR, "tfx-agent-101.json");
     const agents = pollAgents(makeFsDeps({
       env,
-      now: () => 25_000,
+      now: () => 25_000_000,
       readdirSync: (dir) => {
         assert.equal(dir, env.TMPDIR);
         return ["tfx-agent-101.json", "ignore.txt"];
