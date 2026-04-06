@@ -6,7 +6,7 @@
 //
 // 사용: node scripts/test-lock.mjs [-- ...node --test args]
 
-import { existsSync, writeFileSync, readFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 

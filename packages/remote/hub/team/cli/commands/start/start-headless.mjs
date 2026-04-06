@@ -1,6 +1,6 @@
-import { BOLD, DIM, GREEN, RESET, AMBER } from "../../../shared.mjs";
+import { DIM, GREEN, RESET, AMBER } from "../../../shared.mjs";
 import { runHeadlessInteractive, resolveCliType } from "../../../headless.mjs";
-import { ok, warn } from "../../render.mjs";
+import { ok, } from "../../render.mjs";
 import { buildTasks } from "../../services/task-model.mjs";
 import { clearTeamState } from "../../services/state-store.mjs";
 
@@ -10,7 +10,7 @@ export async function startHeadlessTeam({ sessionId, task, lead, agents, subtask
     ? assigns.map((a, i) => ({ cli: resolveCliType(a.cli), prompt: a.prompt, role: a.role || `worker-${i + 1}`, mcp: mcpProfile, model }))
     : subtasks.map((subtask, i) => ({ cli: resolveCliType(agents[i] || agents[0]), prompt: subtask, role: `worker-${i + 1}`, mcp: mcpProfile, model }));
 
-  const startedAt = Date.now();
+  const _startedAt = Date.now();
   ok(`headless ${assignments.length}워커 시작`);
 
   const handle = await runHeadlessInteractive(sessionId, assignments, {

@@ -161,7 +161,7 @@ function disableSse() {
     // H2 fix: 백업의 scope/raw를 사용하여 원본 복원, fallback으로 stdioCmd
     removeMcp(name);
     const restoreScope = orig.scope || 'user';
-    const restoreCmd = orig.raw && orig.raw.trim() ? orig.raw.trim() : stdioCmd;
+    const restoreCmd = orig.raw?.trim() ? orig.raw.trim() : stdioCmd;
     const success = run(`claude mcp add "${name}" -s ${restoreScope} -- ${restoreCmd}`);
 
     if (success) {

@@ -1,7 +1,7 @@
 // ============================================================================
 // Claude Usage API (api.anthropic.com/api/oauth/usage)
 // ============================================================================
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import https from "node:https";
@@ -142,11 +142,11 @@ export function stripStaleResets(data) {
   const copy = { ...data };
   if (copy.fiveHourResetsAt) {
     const t = new Date(copy.fiveHourResetsAt).getTime();
-    if (!isNaN(t)) copy.fiveHourResetsAt = new Date(advanceToNextCycle(t, FIVE_HOUR_MS)).toISOString();
+    if (!Number.isNaN(t)) copy.fiveHourResetsAt = new Date(advanceToNextCycle(t, FIVE_HOUR_MS)).toISOString();
   }
   if (copy.weeklyResetsAt) {
     const t = new Date(copy.weeklyResetsAt).getTime();
-    if (!isNaN(t)) copy.weeklyResetsAt = new Date(advanceToNextCycle(t, SEVEN_DAY_MS)).toISOString();
+    if (!Number.isNaN(t)) copy.weeklyResetsAt = new Date(advanceToNextCycle(t, SEVEN_DAY_MS)).toISOString();
   }
   return copy;
 }

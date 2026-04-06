@@ -33,8 +33,8 @@ const CLI_BRAND = {
   gemini: { emoji: "\u{1F535}", label: "Gemini", ansi: "\x1b[38;5;39m" }, // 🔵 geminiBlue
   claude: { emoji: "\u{1F7E0}", label: "Claude", ansi: "\x1b[38;2;232;112;64m" }, // 🟠 claudeOrange
 };
-const ANSI_RESET = "\x1b[0m";
-const ANSI_DIM = "\x1b[2m";
+const _ANSI_RESET = "\x1b[0m";
+const _ANSI_DIM = "\x1b[2m";
 
 /** 에이전트 역할명 → CLI 타입 매핑 (단일 소스: agent-map.json) */
 const _require = createRequire(import.meta.url);
@@ -478,7 +478,7 @@ async function awaitAll(sessionName, dispatches, timeoutSec, safeProgress, progr
     }
 
     let completion;
-    if (stallOpts && stallOpts.enabled) {
+    if (stallOpts?.enabled) {
       // 하이브리드 stall detection 모드
       try {
         const stallPollCb = safeProgress && progressIntervalSec > 0
@@ -809,7 +809,7 @@ function atomicWriteSync(filePath, data) {
 }
 
 function sanitizeSessionName(value) {
-  return String(value || "").replace(/[^a-zA-Z0-9_\-]/g, "") || "tfx-session";
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "") || "tfx-session";
 }
 
 function sanitizeWindowTitle(value, fallback = "triflux") {

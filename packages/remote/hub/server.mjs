@@ -418,6 +418,29 @@ export async function startHub({
   const adaptiveEngine = createAdaptiveEngine({ repoRoot: PROJECT_ROOT, fingerprintService });
   adaptiveEngine.startSession();
 
+  // safety-guard → reflexion 패널티 승격 + 적응형 규칙 유지보수
+  const projectSlug = PROJECT_ROOT.split(/[\\/]/).pop();
+  try {
+    const { promotePenalties } = await import("./promote-penalties.mjs");
+    const result = promotePenalties(store, { projectSlug });
+    if (result.promoted > 0) {
+      console.log(`[reflexion] ${result.promoted} penalties promoted to adaptive rules`);
+    }
+  } catch { /* promote-penalties 실패는 Hub 시작을 막지 않음 */ }
+
+  // stale adaptive_rules 정리 (30일 초과 + confidence 0.2 미만)
+  try {
+    const pruned = store.pruneStaleRules();
+    if (pruned > 0) console.log(`[reflexion] ${pruned} stale adaptive rules pruned`);
+  } catch { /* prune 실패 무시 */ }
+
+  // adaptive rule confidence decay (5세션 이상 관측 안 된 규칙 감소)
+  try {
+    const { decayRules } = await import("./reflexion.mjs");
+    const decay = decayRules(store, adaptiveEngine.sessionCount?.() || 1);
+    if (decay.deleted.length > 0) console.log(`[reflexion] ${decay.deleted.length} low-confidence rules removed`);
+  } catch { /* decay 실패 무시 */ }
+
   // Delegator MCP resident service 초기화
   const delegatorWorker = createDelegatorWorker({ cwd: PROJECT_ROOT });
   try {

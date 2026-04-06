@@ -54,7 +54,7 @@ export async function loadSkillsForAgent(agentId, skillsDir) {
       continue;
     }
 
-    if (skillContent && skillContent.includes(agentId)) {
+    if (skillContent?.includes(agentId)) {
       skills.push(skillName);
     }
   }

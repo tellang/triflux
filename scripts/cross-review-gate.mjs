@@ -69,7 +69,7 @@ async function main() {
   const statePath = join(baseDir, STATE_REL_PATH);
 
   const state = loadState(statePath);
-  if (!state || !state.files || typeof state.files !== "object") process.exit(0);
+  if (!state?.files || typeof state.files !== "object") process.exit(0);
 
   const pending = [];
   const selfApproved = [];

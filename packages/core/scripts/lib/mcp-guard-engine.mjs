@@ -218,7 +218,7 @@ function getHubServerEntry(registry) {
     || entries[0];
 }
 
-function makeHubRuntimeConfig() {
+function _makeHubRuntimeConfig() {
   return { url: resolveHubUrl() };
 }
 

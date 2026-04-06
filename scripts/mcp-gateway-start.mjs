@@ -4,7 +4,7 @@
 //        node mcp-gateway-start.mjs --stop   # 중지
 //        node mcp-gateway-start.mjs --status # 상태 확인
 
-import { spawn, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';

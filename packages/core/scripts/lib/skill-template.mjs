@@ -13,9 +13,9 @@ function isTruthy(value) {
 }
 
 function normalizeVariable(context, key) {
-  if (Object.prototype.hasOwnProperty.call(context, key)) return context[key];
+  if (Object.hasOwn(context, key)) return context[key];
   const upper = key.toUpperCase();
-  if (Object.prototype.hasOwnProperty.call(context, upper)) return context[upper];
+  if (Object.hasOwn(context, upper)) return context[upper];
   return undefined;
 }
 
@@ -176,7 +176,7 @@ function normalizeIncludeName(includeName) {
 
 function resolveIncludeContent(includeName, options) {
   const normalizedName = normalizeIncludeName(includeName);
-  if (Object.prototype.hasOwnProperty.call(options.includes, normalizedName)) {
+  if (Object.hasOwn(options.includes, normalizedName)) {
     return options.includes[normalizedName];
   }
   if (!options.includeBaseDir) {
@@ -264,7 +264,7 @@ function readAllTemplateFiles(rootDir, currentDir = rootDir) {
 
 function setPartial(partials, key, value) {
   if (!key) return;
-  if (!Object.prototype.hasOwnProperty.call(partials, key)) {
+  if (!Object.hasOwn(partials, key)) {
     partials[key] = value;
   }
 }

@@ -1,7 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync } from "node:fs";
 import { spawn, execFileSync } from "node:child_process";
-import { resolve } from "node:path";
 
 const SESSION_PREFIX = "tfx-isolated";
 const DEFAULT_ATTACH_PROFILE = "triflux";
@@ -128,7 +126,7 @@ function parseArgs(argv) {
     if (arg === "--attach") { a.attach = true; continue; }
     if (arg === "--background") { a.background = true; continue; }
     if ((arg === "--prompt" || arg === "-p") && argv[i + 1]) { a.prompt = argv[++i]; continue; }
-    if ((arg === "--name" || arg === "-n") && argv[i + 1]) { a.name = argv[++i]; continue; }
+    if ((arg === "--name" || arg === "-n") && argv[i + 1]) { a.name = argv[++i]; }
   }
   return a;
 }

@@ -42,7 +42,7 @@ const DEFAULT_CLEANUP_WATCH_GRACE_MS = 1500;
 const DEFAULT_CLEANUP_WATCH_MAX_MS = 60 * 60 * 1000;
 
 const SAFE_HOST_RE = /^[a-zA-Z0-9._-]+$/;
-const SAFE_DIR_RE = /^[a-zA-Z0-9_.~\/:\\-]+$/;
+const SAFE_DIR_RE = /^[a-zA-Z0-9_.~/:-]+$/;
 
 function validateHost(host) {
   if (!SAFE_HOST_RE.test(host)) {

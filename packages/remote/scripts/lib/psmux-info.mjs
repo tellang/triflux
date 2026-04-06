@@ -84,10 +84,10 @@ export function probePsmuxSupport(options = {}) {
     }
 
     const missingCommands = PSMUX_REQUIRED_COMMANDS.filter(
-      (command) => !helpOutput || !helpOutput.includes(command),
+      (command) => !helpOutput?.includes(command),
     );
     const missingOptionalCommands = PSMUX_OPTIONAL_COMMANDS.filter(
-      (command) => !helpOutput || !helpOutput.includes(command),
+      (command) => !helpOutput?.includes(command),
     );
 
     return {

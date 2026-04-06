@@ -27,7 +27,7 @@ import {
 import {
   SYNC_MAP, SKILL_ALIASES, REQUIRED_CODEX_PROFILES, LEGACY_CODEX_MODELS,
   syncAliasedSkillDir, hasProfileSection, replaceProfileSection,
-  ensureCodexProfiles, getVersion, cleanupStaleSkills, DEPRECATED_SKILLS,
+  ensureCodexProfiles, getVersion, cleanupStaleSkills, 
   extractManagedHookFilename, getManagedRegistryHooks, ensureHooksInSettings,
   ensureCodexHubServerConfig,
 } from "../scripts/setup.mjs";
@@ -65,14 +65,14 @@ const GREEN_BRIGHT = "\x1b[38;5;82m";
 const RED_BRIGHT = "\x1b[38;5;196m";
 
 // ── 브랜드 요소 ──
-const BRAND = `${AMBER}${BOLD}triflux${RESET}`;
+const _BRAND = `${AMBER}${BOLD}triflux${RESET}`;
 const VER = `${DIM}v${PKG.version}${RESET}`;
 const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
-const DOT = `${GRAY}·${RESET}`;
+const _DOT = `${GRAY}·${RESET}`;
 const STALE_TEAM_MAX_AGE_SEC = 3600;
 const ANSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 
-const EXIT_SUCCESS = 0;
+const _EXIT_SUCCESS = 0;
 const EXIT_ERROR = 1;
 const EXIT_ARG_ERROR = 2;
 const EXIT_CLI_MISSING = 3;
@@ -720,9 +720,9 @@ function previewClaudeRoutingAction() {
   const globalClaudePath = join(CLAUDE_DIR, "CLAUDE.md");
   const projectClaudePath = join(PKG_ROOT, "CLAUDE.md");
 
-  let routingTable;
+  let _routingTable;
   try {
-    routingTable = getLatestRoutingTable();
+    _routingTable = getLatestRoutingTable();
   } catch {
     return {
       type: "claude-guidance",
@@ -2077,7 +2077,7 @@ async function cmdDoctor(options = {}) {
   // 14. Stale Teams (Claude teams/ + tasks/ 자동 감지)
   section("Stale Teams");
   const teamsDir = join(CLAUDE_DIR, "teams");
-  const tasksDir = join(CLAUDE_DIR, "tasks");
+  const _tasksDir = join(CLAUDE_DIR, "tasks");
   if (existsSync(teamsDir)) {
     try {
       const teamDirs = readdirSync(teamsDir).filter(d => {
@@ -2134,8 +2134,8 @@ async function cmdDoctor(options = {}) {
             // 프로세스 명령줄에서 세션 ID 매칭 (tmux 없는 in-process 팀 지원)
             if (!hasActiveMember && teamConfig.leadSessionId) {
               try {
-                const sessionToken = teamConfig.leadSessionId.toLowerCase();
-                const safeToken = teamConfig.leadSessionId.slice(0, 8).replace(/[^a-zA-Z0-9\-]/g, '');
+                const _sessionToken = teamConfig.leadSessionId.toLowerCase();
+                const safeToken = teamConfig.leadSessionId.slice(0, 8).replace(/[^a-zA-Z0-9-]/g, '');
                 // Claude Code 프로세스에서 세션 ID 검색
                 if (process.platform === "win32") {
                   const psOut = execSync(
@@ -3727,7 +3727,7 @@ async function cmdHub(args = [], options = {}) {
         process.kill(info.pid, "SIGTERM");
         try { unlinkSync(HUB_PID_FILE); } catch {}
         console.log(`\n  ${GREEN_BRIGHT}✓${RESET} hub 종료됨 (PID ${info.pid})\n`);
-      } catch (e) {
+      } catch (_e) {
         try { unlinkSync(HUB_PID_FILE); } catch {}
         console.log(`\n  ${DIM}hub 프로세스 없음 — PID 파일 정리됨${RESET}\n`);
       }

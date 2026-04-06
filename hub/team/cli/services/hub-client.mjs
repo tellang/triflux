@@ -154,7 +154,7 @@ export async function ensureHubAlive(maxRetries = 3) {
     }
     // 다음 재시도 전 대기: 1초, 2초, 4초 (마지막 시도 후에는 대기 없음)
     if (i < maxRetries - 1) {
-      const backoffMs = Math.pow(2, i) * 1000; // i=0: 1초, i=1: 2초, i=2: 4초
+      const backoffMs = 2 ** i * 1000; // i=0: 1초, i=1: 2초, i=2: 4초
       await new Promise((resolve) => setTimeout(resolve, backoffMs));
     }
   }

@@ -14,7 +14,7 @@ import { detectInputWait, PROBE_DEFAULTS } from './health-probe.mjs';
 const COMPLETION_TOKEN_RE = /__TRIFLUX_DONE__/;
 
 /** 프롬프트 idle 패턴 (Claude Code 프롬프트 복귀) */
-const PROMPT_IDLE_RE = /(\u276f|\u2795|>\s*$)/;
+const _PROMPT_IDLE_RE = /(\u276f|\u2795|>\s*$)/;
 
 /**
  * SSH 경유로 원격 psmux capture-pane 실행.

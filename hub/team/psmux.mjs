@@ -1292,7 +1292,7 @@ export function captureWorkerOutput(sessionName, workerName, lines = 50) {
 
 // ─── CLI 진입점 ───
 
-if (process.argv[1] && process.argv[1].endsWith("psmux.mjs")) {
+if (process.argv[1]?.endsWith("psmux.mjs")) {
   (async () => {
   const [, , cmd, ...args] = process.argv;
 

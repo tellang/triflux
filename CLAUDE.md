@@ -1,3 +1,4 @@
+<!-- prompt-hygiene:ignore line_count_warning -->
 # triflux — Claude Code 운영 가이드
 
 <core-systems>

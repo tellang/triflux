@@ -18,18 +18,24 @@
       "correctness": {
         "noUnusedVariables": "warn",
         "noUnusedImports": "warn",
-        "noUnusedFunctionParameters": "off"
+        "noUnusedFunctionParameters": "off",
+        "noInnerDeclarations": "off"
       },
       "style": {
         "useTemplate": "off",
-        "useNodejsImportProtocol": "off"
+        "useNodejsImportProtocol": "off",
+        "noDescendingSpecificity": "off"
       },
       "suspicious": {
         "noControlCharactersInRegex": "off",
-        "noPrototypeBuiltins": "warn"
+        "noPrototypeBuiltins": "warn",
+        "noAssignInExpressions": "off"
       },
       "complexity": {
         "useArrowFunction": "off"
+      },
+      "performance": {
+        "noAccumulatingSpread": "off"
       }
     }
   },

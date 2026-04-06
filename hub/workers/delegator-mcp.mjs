@@ -30,7 +30,6 @@ const {
   buildPromptHint,
   getCodexMcpConfig,
   getGeminiAllowedServers,
-  resolveMcpProfile,
   SUPPORTED_MCP_PROFILES,
 } = await import(pathToFileURL(mcpFilterPath).href);
 const SERVER_INFO = { name: 'triflux-delegator', version: '1.0.0' };
@@ -198,7 +197,7 @@ function joinInstructions(...values) {
     .trim();
 }
 
-function loadAvailableServersFromSearchEngineCache(cwd = process.cwd()) {
+function _loadAvailableServersFromSearchEngineCache(cwd = process.cwd()) {
   const cacheFile = resolve(cwd, ...SEARCH_ENGINE_CACHE_PATH);
   if (!existsSync(cacheFile)) return null;
 

@@ -42,7 +42,7 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
 .token-item .calls{font-size:.78rem;color:#8b949e;margin-top:2px}
 
 .chart-wrap{position:relative;width:100%;height:160px}
-.chart-wrap canvas{width:100%!important;height:100%!important}
+.chart-wrap canvas{width:100%;height:100%}
 .chart-legend{display:flex;gap:14px;margin-top:8px;font-size:.78rem;color:#8b949e}
 .legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
 
@@ -152,7 +152,7 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
   function remain(rt) {
     if (!rt) return '';
     var ts = typeof rt === 'number' && rt < 1e10 ? rt * 1000 : new Date(rt).getTime();
-    if (!isFinite(ts)) return '';
+    if (!Number.isFinite(ts)) return '';
     var ms = ts - Date.now();
     if (ms <= 0) return '만료됨';
     var h = Math.floor(ms / 3600000);
@@ -199,7 +199,7 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
     var s = '';
 
     // Claude
-    var cl = d.claude && d.claude.data;
+    var cl = d.claude?.data;
     if (cl) {
       s += quotaBlock('Claude (c)', '#d19a66', [
         ['5시간', cl.fiveHourPercent || 0],
@@ -208,16 +208,16 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
     }
 
     // Codex
-    var cx2 = d.codex && d.codex.buckets && d.codex.buckets.codex;
+    var cx2 = d.codex?.buckets?.codex;
     if (cx2) {
       s += quotaBlock('Codex (x)', '#ffffff', [
         ['Primary', cx2.primary ? cx2.primary.used_percent || 0 : 0],
         ['Secondary', cx2.secondary ? cx2.secondary.used_percent || 0 : 0]
-      ], cx2.primary && cx2.primary.resets_at);
+      ], cx2.primary?.resets_at);
     }
 
     // Gemini
-    var gm = d.gemini && d.gemini.buckets;
+    var gm = d.gemini?.buckets;
     if (gm && gm.length > 0) {
       var frac = gm[0].remainingFraction;
       s += quotaBlock('Gemini (g)', '#61afef', [
@@ -330,7 +330,7 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
         gauge(data.aimd ? data.aimd.batchSize : 0);
         renderQuota(data);
 
-        cachedEvents = (data.aimd && data.aimd.events) || [];
+        cachedEvents = (data.aimd?.events) || [];
         drawEvents(cachedEvents);
 
         renderTokens(data.accumulator);

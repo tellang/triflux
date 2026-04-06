@@ -11,7 +11,6 @@ import { createLogDashboard } from "./tui.mjs";
 import { createLiteDashboard } from "./tui-lite.mjs";
 import { openHeadlessDashboardTarget } from "./dashboard-open.mjs";
 import { processHandoff } from "./handoff.mjs";
-import { statusBadge } from "./ansi.mjs";
 
 
 // ── CLI 인자 파싱 ──

@@ -481,7 +481,7 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
   if (taskListCommand) {
     const escaped = taskListCommand.replace(/'/g, "'\\''");
     try {
-      tmux(`bind-key -T root -n C-t if-shell -F '${cond}' \"display-popup -E '${escaped}'\" \"send-keys C-t\"`);
+      tmux(`bind-key -T root -n C-t if-shell -F '${cond}' "display-popup -E '${escaped}'" "send-keys C-t"`);
     } catch {
       tmux(`bind-key -T root -n C-t if-shell -F '${cond}' 'display-message "tfx multi tasks 명령으로 태스크 확인"' 'send-keys C-t'`);
     }

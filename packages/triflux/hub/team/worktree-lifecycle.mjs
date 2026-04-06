@@ -173,7 +173,7 @@ export async function pruneWorktree({ worktreePath, branchName, rootDir = proces
     try {
       await git(['worktree', 'remove', worktreePath, ...(forceFlag ? [forceFlag] : [])], rootDir);
       break;
-    } catch (err) {
+    } catch (_err) {
       if (attempt === 2) {
         // Last resort: rm the directory and prune
         try { await rm(worktreePath, { recursive: true, force: true }); } catch { /* ignore */ }

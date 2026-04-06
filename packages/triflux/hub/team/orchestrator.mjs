@@ -92,7 +92,7 @@ ${roster}
 export function buildPrompt(subtask, config) {
   const { cli, agentId, hubUrl } = config;
 
-  const hubBase = hubUrl.replace("/mcp", "");
+  const _hubBase = hubUrl.replace("/mcp", "");
 
   const bridgePath = "node hub/bridge.mjs";
 

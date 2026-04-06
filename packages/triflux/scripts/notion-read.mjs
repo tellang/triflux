@@ -28,7 +28,7 @@ const VERSION = '1.2';
 const CLAUDE_DIR = join(homedir(), '.claude');
 const MCP_CACHE = join(CLAUDE_DIR, 'cache', 'mcp-inventory.json');
 const LOG_FILE = join(CLAUDE_DIR, 'logs', 'tfx-route-stats.jsonl');
-const ACC_FILE = join(CLAUDE_DIR, 'cache', 'sv-accumulator.json');
+const _ACC_FILE = join(CLAUDE_DIR, 'cache', 'sv-accumulator.json');
 
 // ── ANSI 색상 ──
 const AMBER = '\x1b[38;5;214m';
@@ -348,7 +348,7 @@ function main() {
         break;
       case "--timeout":
       case "-t":
-        timeout = parseInt(args[++i]) || 600;
+        timeout = parseInt(args[++i], 10) || 600;
         break;
       case "--cli":
       case "-c":
@@ -356,7 +356,7 @@ function main() {
         break;
       case "--depth":
       case "-d":
-        depth = parseInt(args[++i]) || 3;
+        depth = parseInt(args[++i], 10) || 3;
         break;
       case "--guest":
         useGuest = true;

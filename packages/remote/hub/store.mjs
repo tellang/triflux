@@ -551,7 +551,7 @@ export function createStore(dbPath, options = {}) {
         ttl_ms: clampDuration(patch.ttl_ms ?? current.ttl_ms, current.ttl_ms || nextTimeout),
         timeout_ms: nextTimeout,
         deadline_ms: (() => {
-          if (Object.prototype.hasOwnProperty.call(patch, 'deadline_ms')) {
+          if (Object.hasOwn(patch, 'deadline_ms')) {
             return patch.deadline_ms == null ? null : Math.trunc(Number(patch.deadline_ms));
           }
           if (isTerminal) return null;
@@ -560,23 +560,23 @@ export function createStore(dbPath, options = {}) {
         })(),
         trace_id: patch.trace_id ?? current.trace_id,
         correlation_id: patch.correlation_id ?? current.correlation_id,
-        last_message_id: Object.prototype.hasOwnProperty.call(patch, 'last_message_id')
+        last_message_id: Object.hasOwn(patch, 'last_message_id')
           ? patch.last_message_id
           : current.last_message_id,
-        result_json: Object.prototype.hasOwnProperty.call(patch, 'result')
+        result_json: Object.hasOwn(patch, 'result')
           ? (patch.result == null ? null : JSON.stringify(patch.result))
           : (current.result == null ? null : JSON.stringify(current.result)),
-        error_json: Object.prototype.hasOwnProperty.call(patch, 'error')
+        error_json: Object.hasOwn(patch, 'error')
           ? (patch.error == null ? null : JSON.stringify(patch.error))
           : (current.error == null ? null : JSON.stringify(current.error)),
         updated_at_ms: now,
-        started_at_ms: Object.prototype.hasOwnProperty.call(patch, 'started_at_ms')
+        started_at_ms: Object.hasOwn(patch, 'started_at_ms')
           ? patch.started_at_ms
           : (nextStatus === 'running' ? (current.started_at_ms || now) : current.started_at_ms),
-        completed_at_ms: Object.prototype.hasOwnProperty.call(patch, 'completed_at_ms')
+        completed_at_ms: Object.hasOwn(patch, 'completed_at_ms')
           ? patch.completed_at_ms
           : (isTerminal ? (current.completed_at_ms || now) : current.completed_at_ms),
-        last_retry_at_ms: Object.prototype.hasOwnProperty.call(patch, 'last_retry_at_ms')
+        last_retry_at_ms: Object.hasOwn(patch, 'last_retry_at_ms')
           ? patch.last_retry_at_ms
           : current.last_retry_at_ms,
       };
@@ -661,7 +661,7 @@ export function createStore(dbPath, options = {}) {
         started_at_ms: null,
         last_retry_at_ms: Date.now(),
         result: patch.result ?? null,
-        error: Object.prototype.hasOwnProperty.call(patch, 'error') ? patch.error : current.error,
+        error: Object.hasOwn(patch, 'error') ? patch.error : current.error,
         last_message_id: null,
       });
     },

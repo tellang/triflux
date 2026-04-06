@@ -244,7 +244,7 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function normalizeErrorMessage(error, fallback = "unknown error") {
+function _normalizeErrorMessage(error, fallback = "unknown error") {
   const isMeaningful = (value) => {
     if (typeof value !== "string") return false;
     const normalized = value.trim().toLowerCase();

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TFX_START, TFX_END, OMC_END, writeSection } from "./lib/claudemd-scanner.mjs";
+import { TFX_START, OMC_END, writeSection } from "./lib/claudemd-scanner.mjs";
 
 const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PROJECT_CLAUDE_MD_PATH = join(PROJECT_ROOT, "CLAUDE.md");

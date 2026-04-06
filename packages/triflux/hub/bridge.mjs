@@ -96,7 +96,7 @@ export async function requestJson(path, { method = 'POST', body, timeoutMs = 500
     const headers = {};
     const token = readHubToken();
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+      headers.Authorization = `Bearer ${token}`;
     }
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';

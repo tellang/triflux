@@ -87,7 +87,7 @@ function collectRawPathCandidates(context = {}) {
   const direct = [context.file_path, context.filePath, context.path, context.target_path, context.targetPath];
   const fromArrays = [context.files, context.paths, context.targets]
     .filter(Array.isArray)
-    .flatMap((entry) => entry)
+    .flat()
     .map((entry) => (typeof entry === 'string' ? entry : entry?.path));
   return [...direct, ...fromArrays].filter((entry) => typeof entry === 'string' && entry.trim().length > 0);
 }
@@ -130,7 +130,7 @@ function collectActivityTimestamps(context = {}, now = Date.now) {
   const nowValue = typeof now === 'function' ? now() : now;
   const fromList = [context.activity_timestamps, context.activityTimestamps, context.timestamps]
     .filter(Array.isArray)
-    .flatMap((entry) => entry)
+    .flat()
     .map(toTimestamp)
     .filter((entry) => entry != null);
   const singles = [context.timestamp, context.started_at, context.startedAt]

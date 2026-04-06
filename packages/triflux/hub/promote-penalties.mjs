@@ -9,7 +9,7 @@
 //   - Hub 시작 시 (server.mjs에서 import)
 //   - 수동: node hub/promote-penalties.mjs
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, } from "node:fs";
 import { join } from "node:path";
 import { adaptiveRuleFromError } from "./reflexion.mjs";
 

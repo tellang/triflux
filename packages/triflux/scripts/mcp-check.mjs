@@ -4,7 +4,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { MCP_SERVER_TOOL_CATALOG, normalizeServerMetadata } from './lib/mcp-server-catalog.mjs';

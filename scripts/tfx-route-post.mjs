@@ -42,7 +42,7 @@ function extractTokens(cliType, stderrFile) {
       const stderr = readFileSync(stderrFile, "utf-8");
       const match = stderr.match(/tokens used\s*\n\s*([\d,]+)/i);
       if (match) {
-        const total = parseInt(match[1].replace(/,/g, ""));
+        const total = parseInt(match[1].replace(/,/g, ""), 10);
         if (total > 0) return { input: total, output: 0 };
       }
     } catch {}
@@ -342,7 +342,7 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
     const snippet = stderrText.substring(0, 200).replace(/\n/g, " ");
 
     const retryCount = (matched.pattern === "rate_limit" && cliType === "gemini")
-      ? parseInt(process.env.TFX_GEMINI_429_RETRIES || "0")
+      ? parseInt(process.env.TFX_GEMINI_429_RETRIES || "0", 10)
       : undefined;
 
     const issueEntry = {
@@ -389,13 +389,13 @@ function main() {
   const effort = a.effort || "high";
   const runMode = a.run_mode || "bg";
   const opus = a.opus || "false";
-  const exitCode = parseInt(a.exit_code || "0");
-  const elapsed = parseInt(a.elapsed || "0");
-  const timeout = parseInt(a.timeout || "300");
+  const exitCode = parseInt(a.exit_code || "0", 10);
+  const elapsed = parseInt(a.elapsed || "0", 10);
+  const timeout = parseInt(a.timeout || "300", 10);
   const mcpProfile = a.mcp_profile || "auto";
   const stderrLog = a.stderr_log || "";
   const stdoutLog = a.stdout_log || "";
-  const maxBytes = parseInt(a.max_bytes || "51200");
+  const maxBytes = parseInt(a.max_bytes || "51200", 10);
   const cliCmd = a.cli_cmd || cliType;
 
   // stderr/stdout 읽기

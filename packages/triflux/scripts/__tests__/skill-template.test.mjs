@@ -13,7 +13,6 @@ import {
   renderSkillTemplate,
 } from "../lib/skill-template.mjs";
 import { generateSkillDocs } from "../gen-skill-docs.mjs";
-import { generateSkillManifests } from "../gen-skill-manifest.mjs";
 
 function makeTempDir() {
   return mkdtempSync(join(tmpdir(), "tfx-skill-template-"));

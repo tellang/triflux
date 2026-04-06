@@ -13,7 +13,6 @@
 import { EventEmitter } from 'node:events';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
 
 import { createConductor, STATES } from './conductor.mjs';
 import { createSwarmLocks } from './swarm-locks.mjs';
@@ -68,9 +67,9 @@ export function createSwarmHypervisor(opts) {
     logsDir,
     maxRestarts = 2,
     graceMs = 10_000,
-    integrationTimeoutMs = 60_000,
+    _integrationTimeoutMs = 60_000,
     probeOpts = {},
-    deps = {},
+    _deps = {},
   } = opts;
 
   if (!workdir) throw new Error('workdir is required');
@@ -415,7 +414,7 @@ export function createSwarmHypervisor(opts) {
    */
   function detectChangedFiles(shardName, worker) {
     // Best-effort: parse output log for file paths
-    const outPath = join(logsDir, shardName);
+    const _outPath = join(logsDir, shardName);
     try {
       const snap = worker.conductor.getSnapshot();
       for (const session of snap) {

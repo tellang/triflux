@@ -15,7 +15,7 @@ function sanitizeWindowTitle(value, fallback = "triflux") {
 }
 
 function sanitizeSessionName(value) {
-  return String(value || "").replace(/[^a-zA-Z0-9_\-]/g, "") || "tfx-session";
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "") || "tfx-session";
 }
 
 function sanitizeWorkingDirectory(value) {

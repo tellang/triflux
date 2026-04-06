@@ -29,7 +29,7 @@ function inferStallMode(stdout, stderr) {
 // ── Codex command building ──────────────────────────────────────
 
 function commandWithOverrides(command, prompt, codexPath, overrides = []) {
-  let next = codexPath ? command.replace(/^codex\b/u, shellQuote(codexPath)) : command;
+  const next = codexPath ? command.replace(/^codex\b/u, shellQuote(codexPath)) : command;
   if (!overrides.length) return next;
   const promptArg = JSON.stringify(prompt);
   const flags = overrides.flatMap((value) => ['-c', shellQuote(value)]).join(' ');

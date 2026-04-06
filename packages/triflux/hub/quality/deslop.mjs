@@ -4,7 +4,7 @@
  */
 
 import { readdir, readFile, writeFile, stat } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join, } from 'node:path';
 
 /** @type {ReadonlyArray<{type: string, pattern: RegExp, severity: string, autoFixable: boolean, multiline: boolean}>} */
 export const SLOP_PATTERNS = Object.freeze([

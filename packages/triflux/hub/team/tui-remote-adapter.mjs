@@ -57,7 +57,7 @@ function resolveSshUser(hostsData, host) {
  * @returns {string|null}
  */
 function resolveHostFromSessionName(sessionName) {
-  if (!sessionName || !sessionName.startsWith(SESSION_PREFIX)) return null;
+  if (!sessionName?.startsWith(SESSION_PREFIX)) return null;
   const rest = sessionName.slice(SESSION_PREFIX.length);
   const dashIdx = rest.indexOf("-");
   if (dashIdx === -1) return rest || null;
@@ -162,7 +162,7 @@ export function createRemoteAdapter(opts = {}) {
   const loadHosts = deps.loadHostsJson || loadHostsJson;
   const setIntervalFn = deps.setInterval || setInterval;
   const clearIntervalFn = deps.clearInterval || clearInterval;
-  const nowFn = deps.now || Date.now;
+  const _nowFn = deps.now || Date.now;
 
   const emitter = new EventEmitter();
   let hostsData = loadHosts(hostsJsonPath);
@@ -175,7 +175,7 @@ export function createRemoteAdapter(opts = {}) {
   function handleStateChange({ sessionId, from, to, reason }) {
     const snapshots = conductor.getSnapshot();
     const entry = snapshots.find((s) => s.id === sessionId);
-    if (!entry || !entry.remote) return;
+    if (!entry?.remote) return;
 
     const watcherStatus = getWatcherSession(sessionId);
     const workerData = buildWorkerData(entry, watcherStatus, hostsData);

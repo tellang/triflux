@@ -5,7 +5,6 @@
 import {
   RESET,
   FG,
-  BG,
   MOCHA,
   color,
   dim,
@@ -18,7 +17,6 @@ import {
   wcswidth,
   progressBar,
   statusBadge,
-  STATUS_ICON,
   altScreenOn,
   altScreenOff,
   clearScreen,
@@ -27,7 +25,6 @@ import {
   cursorShow,
   moveTo,
   clearLine,
-  clearToEnd,
 } from "./ansi.mjs";
 
 import { execFile as _execFile } from "node:child_process";
@@ -52,7 +49,7 @@ const SPINNER_FRAMES = [...SPINNER_FRAMES_RAW, ...[...SPINNER_FRAMES_RAW].revers
 const SPINNER_CYCLE_MS = 2000;
 const SPINNER_BASE_COLOR = { r: 203, g: 166, b: 247 }; // Catppuccin Mocha mauve
 const SPINNER_SHIMMER = { r: 171, g: 43, b: 63 };      // Claude shimmer #ab2b3f
-let spinnerStart = Date.now();
+const spinnerStart = Date.now();
 let spinnerTick = 0;
 
 function lerpRgb(a, b, t) {
@@ -119,7 +116,7 @@ function activityWave(tick, count = 4) {
 const GRID_GAP = 2;
 const DEFAULT_DETAIL_LINES = 10;
 // Tier1 상단 고정 행 수
-const TIER1_ROWS = 2;
+const _TIER1_ROWS = 2;
 
 const SUMMARY_KEYS = [
   "status", "lead_action", "verdict", "files_changed",
@@ -128,14 +125,14 @@ const SUMMARY_KEYS = [
 
 // ── 레이아웃 브레이크포인트 ──────────────────────────────────────────────
 // 80-119: 28col rail, 120-159: 36col rail, 160+: 균등
-function resolveRailWidth(totalCols, columnCount) {
+function _resolveRailWidth(totalCols, columnCount) {
   if (columnCount <= 1) return totalCols;
   if (totalCols >= 160) return Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount);
   if (totalCols >= 120) return Math.min(36, Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount));
   return Math.min(28, Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount));
 }
 
-function autoColumnCount(totalCols, workerCount) {
+function _autoColumnCount(totalCols, workerCount) {
   if (workerCount <= 1) return 1;
   if (totalCols >= 160) return Math.min(workerCount, 3);
   if (totalCols >= 120) return Math.min(workerCount, 2);
@@ -154,7 +151,7 @@ function stripCodeBlocks(text) {
     .replace(/```[\s\S]*?(?:```|$)/g, "\n")
     .replace(/^\s*```.*$/gm, "")
     // indented code blocks (4+ spaces or tab at line start)
-    .replace(/^(?:    |\t).+$/gm, "")
+    .replace(/^(?: {4}|\t).+$/gm, "")
     // shell prompts: PS C:\...>, >, $
     .replace(/^(?:PS\s+\S[^\n]*?>|>\s+|\$\s+)[^\n]*/gm, "")
     .trim();
@@ -275,7 +272,7 @@ function gradientBorderFn(topRgb, bottomRgb) {
 }
 
 // Effect 3: Flash-fade border — 상태 변경 시 백색 플래시 → 페이드아웃
-function flashFadeBorderColor(currentStatus, prevStatus, changedAt) {
+function _flashFadeBorderColor(currentStatus, prevStatus, changedAt) {
   const elapsed = Date.now() - (changedAt || 0);
   if (elapsed >= FADE_DURATION_MS || !prevStatus) return null;
   const statusRgb = statusToRgb(currentStatus);
@@ -319,11 +316,11 @@ function dedupeRole(role, name, cli) {
   r = r.replace(new RegExp(esc(cli), "gi"), "").trim();
   r = r.replace(new RegExp(esc(name), "gi"), "").trim();
   // CLI indicator emojis 제거
-  r = r.replace(/[⚪⚫🔴🟠🟡🟢🔵🟣🟤⭕🔘]/g, "").trim();
+  r = r.replace(/[⚪⚫🔴🟠🟡🟢🔵🟣🟤⭕🔘]/gu, "").trim();
   // 빈 괄호 제거 + 중첩 괄호 정리
   r = r.replace(/\(\s*\)/g, "").trim();
   r = r.replace(/^\(([^()]+)\)$/, "$1").trim();
-  r = r.replace(/^\s*[•·\-]\s*/, "").trim();
+  r = r.replace(/^\s*[•·-]\s*/, "").trim();
   return r;
 }
 
@@ -350,7 +347,7 @@ function wrapLine(text, width) {
   return lines.length > 0 ? lines : [source.slice(0, limit)];
 }
 
-function wrapText(text, width, maxLines = DEFAULT_DETAIL_LINES, rawMode = false) {
+function _wrapText(text, width, maxLines = DEFAULT_DETAIL_LINES, rawMode = false) {
   if (maxLines <= 0) return [];
   const input = sanitizeTextBlock(text, rawMode);
   if (!input) return [];
@@ -465,7 +462,7 @@ function buildWorkerRail(name, st, opts = {}) {
     selected = false,
     focused = false,  // rail 포커스 여부
     previousSelected = false,
-    rawMode = false,
+    _rawMode = false,
     compact = false,
     time = Date.now(),
   } = opts;
@@ -713,7 +710,7 @@ function buildHelpOverlay(width, height) {
 }
 
 // ── joinColumns ───────────────────────────────────────────────────────────
-function joinColumns(blocks, gap = GRID_GAP) {
+function _joinColumns(blocks, gap = GRID_GAP) {
   const maxHeight = Math.max(...blocks.map((b) => b.length));
   return Array.from({ length: maxHeight }, (_, rowIdx) =>
     blocks
@@ -1418,7 +1415,7 @@ export function renderConductorTier(snapshot, cols = 100) {
   const dataLines = [];
   if (!snapshot || snapshot.length === 0) {
     const emptyMsg = color('(no sessions)', FG.muted);
-    const emptyPad = clip(stripAnsi(emptyMsg) === '(no sessions)' ? emptyMsg : emptyMsg, inner);
+    const _emptyPad = clip(stripAnsi(emptyMsg) === '(no sessions)' ? emptyMsg : emptyMsg, inner);
     dataLines.push(`${borderSeq}│${RESET} ${padRight(emptyMsg, inner - 2)} ${borderSeq}│${RESET}`);
   } else {
     for (const s of snapshot) {

@@ -610,7 +610,7 @@ export function createRouter(store) {
         status || payload?.status,
         mergedMetadata,
       );
-      const nextResult = result ?? (Object.prototype.hasOwnProperty.call(payload || {}, 'result') ? payload.result : payload);
+      const nextResult = result ?? (Object.hasOwn(payload || {}, 'result') ? payload.result : payload);
       const nextError = error ?? payload?.error ?? null;
 
       if (normalizedStatus === 'running') {

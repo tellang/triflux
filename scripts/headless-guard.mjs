@@ -152,7 +152,7 @@ async function main() {
   let raw = "";
   for await (const chunk of process.stdin) raw += chunk;
 
-  if (!raw || !raw.trim()) {
+  if (!raw?.trim()) {
     console.error('[headless-guard] stdin이 비어있습니다 — 기본 허용');
     process.exit(0);
   }
@@ -219,7 +219,7 @@ async function main() {
     if (!hasDirectCli) {
       hasDirectCli = (
         /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd) ||
-        /\$[\({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)
+        /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)
       );
     }
 
@@ -284,7 +284,7 @@ async function main() {
     const multiState = readMultiState();
 
     // 일반 모드(tfx-multi 비활성)에서는 기존처럼 통과
-    if (!multiState || !multiState.active) {
+    if (!multiState?.active) {
       process.exit(0);
     }
 
@@ -325,7 +325,7 @@ async function main() {
 
     // ── A+B: tfx-multi 상태 기반 처리 ──
     const multiState = readMultiState();
-    if (multiState && multiState.active && isNative) {
+    if (multiState?.active && isNative) {
       if (!multiState.dispatched) {
         // ── A: gate — dispatch 전, Agent 작업 위임 제한 ──
         multiState.nativeWorkCalls = (multiState.nativeWorkCalls || 0) + 1;

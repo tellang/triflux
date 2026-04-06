@@ -34,12 +34,12 @@ function buildAssignCallbackEvent(event = {}, row = null) {
     trace_id: source.trace_id || null,
     correlation_id: source.correlation_id || null,
     last_message_id: source.last_message_id || null,
-    result: Object.prototype.hasOwnProperty.call(source, 'result')
+    result: Object.hasOwn(source, 'result')
       ? source.result
-      : (Object.prototype.hasOwnProperty.call(event, 'result') ? event.result : null),
-    error: Object.prototype.hasOwnProperty.call(source, 'error')
+      : (Object.hasOwn(event, 'result') ? event.result : null),
+    error: Object.hasOwn(source, 'error')
       ? source.error
-      : (Object.prototype.hasOwnProperty.call(event, 'error') ? event.error : null),
+      : (Object.hasOwn(event, 'error') ? event.error : null),
     created_at_ms: Number.isFinite(createdAtMs) ? createdAtMs : null,
     updated_at_ms: Number.isFinite(updatedAtMs) ? updatedAtMs : null,
     started_at_ms: Number.isFinite(Number(source.started_at_ms)) ? Number(source.started_at_ms) : null,

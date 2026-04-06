@@ -606,7 +606,7 @@ export function buildMcpPolicy(options = {}) {
   // Phase-aware post-filter: 파이프라인 단계별 서버 제한 적용
   const phase = options.phase;
   const phaseOverride = phase && PHASE_OVERRIDES[phase];
-  if (phaseOverride && phaseOverride.blockedServers) {
+  if (phaseOverride?.blockedServers) {
     const blocked = new Set(phaseOverride.blockedServers);
     allowedServers = allowedServers.filter((s) => !blocked.has(s));
   }
@@ -626,7 +626,7 @@ export function buildMcpPolicy(options = {}) {
 }
 
 function shellEscape(value) {
-  return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
 
 function shellArray(name, values) {

@@ -5,7 +5,7 @@
 // 각 모듈에서 색상, 터미널, 프로바이더, 렌더러를 가져와 조합한다.
 // ============================================================================
 
-import { DIM, RESET, bold, dim, green, claudeOrange, codexWhite, geminiBlue, colorByPercent } from "./colors.mjs";
+import { DIM, RESET, bold, dim, green, claudeOrange, codexWhite, geminiBlue, } from "./colors.mjs";
 import {
   QOS_PATH, ACCOUNTS_CONFIG_PATH, ACCOUNTS_STATE_PATH,
   CLAUDE_REFRESH_FLAG, CODEX_REFRESH_FLAG,
@@ -112,7 +112,7 @@ async function main() {
   // 누적 절약 데이터 읽기
   const svSavings = readTokenSavings();
   const svAccumulator = readSvAccumulator();
-  const totalCostSaved = svSavings?.totalSaved || svAccumulator?.totalCostSaved || 0;
+  const _totalCostSaved = svSavings?.totalSaved || svAccumulator?.totalCostSaved || 0;
 
   // 세션/누적 토큰 → context 대비 절약 배수 (개별 provider sv%)
   const ctxCapacity = stdin?.context_window?.context_window_size || 200000;
@@ -189,7 +189,7 @@ async function main() {
   const geminiActive = (geminiSession?.total || 0) > 0 || geminiBucket != null
     || geminiProBucket != null || geminiFlashBucket != null;
 
-  let outputLines = renderAlignedRows(rows);
+  const outputLines = renderAlignedRows(rows);
 
   // 비활성 줄 dim 래핑 (rows 순서: [claude, codex, gemini])
   if (outputLines.length >= 3) {

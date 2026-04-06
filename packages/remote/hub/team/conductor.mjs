@@ -14,7 +14,7 @@ import { homedir } from 'node:os';
 import { mkdirSync, createWriteStream, readFileSync, copyFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 
-import { killProcess, IS_WINDOWS } from '@triflux/core/hub/platform.mjs';
+import { killProcess, } from '@triflux/core/hub/platform.mjs';
 import { createEventLog } from './event-log.mjs';
 import { createHealthProbe } from './health-probe.mjs';
 import { createRemoteProbe } from './remote-probe.mjs';

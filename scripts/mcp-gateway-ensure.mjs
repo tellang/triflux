@@ -2,7 +2,7 @@
 // mcp-gateway-ensure.mjs — SessionStart 훅에서 supergateway MCP 서비스 보장
 // hub-ensure.mjs 패턴을 따름. 가볍게 헬스체크만 수행하고 필요시 기동.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
