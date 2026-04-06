@@ -38,15 +38,16 @@ export function gte(minMinor) {
 
 /**
  * Codex CLI 기능별 분기 객체.
- * 117 = 0.117.0 (Rust 리라이트, exec 서브커맨드 도입)
+ * 실측 기반 임계값: 0.114.0에서 exec/skip-git-repo-check/color 확인됨.
+ * --output-last-message는 0.114.0에 없음 (0.117+ 추정).
  */
 export const FEATURES = {
-  /** exec 서브커맨드 사용 가능 여부 */
-  get execSubcommand() { return gte(117); },
-  /** --output-last-message 플래그 지원 여부 */
+  /** exec 서브커맨드 사용 가능 여부 (0.110+ 이전부터 존재) */
+  get execSubcommand() { return gte(110); },
+  /** --output-last-message 플래그 지원 여부 (0.117+) */
   get outputLastMessage() { return gte(117); },
-  /** --color never 플래그 지원 여부 */
-  get colorNever() { return gte(117); },
+  /** --color <COLOR> 플래그 지원 여부 (exec와 동시 도입) */
+  get colorNever() { return gte(110); },
   /** 플러그인 시스템 지원 여부 (향후 확장용) */
   get pluginSystem() { return gte(120); },
 };
