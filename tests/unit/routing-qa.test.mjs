@@ -122,13 +122,12 @@ describe("keyword-rules: 충돌 해결", () => {
     assert.equal(resolved[0].id, "tfx-cancel");
   });
 
-  it("tfx-auto-codex는 tfx-auto를 supersede", () => {
-    const matches = matchRules(compiled, "tfx-auto-codex 리팩터링");
+  it("tfx-unified가 tfx-auto-codex를 supersede (통합 규칙)", () => {
+    const matches = matchRules(compiled, "tfx auto 리팩터링");
     const resolved = resolveConflicts(matches);
-    // tfx-auto-codex가 포함되고 tfx-auto는 suppressed
-    const skills = resolved.map((r) => r.skill);
-    assert.ok(skills.includes("tfx-auto-codex"));
-    assert.ok(!skills.includes("tfx-auto"), "tfx-auto가 superseded되어야 함");
+    const ids = resolved.map((r) => r.id);
+    assert.ok(ids.includes("tfx-unified"), "tfx-unified 규칙이 매칭되어야 함");
+    assert.ok(!ids.includes("tfx-auto-codex"), "tfx-auto-codex는 superseded되어야 함");
   });
 
   it("MCP 라우트: notion 키워드 → gemini 라우트", () => {
