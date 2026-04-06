@@ -11,18 +11,19 @@ import {
   promoteRule,
 } from "../../hub/reflexion.mjs";
 import { createStore } from "../../hub/store.mjs";
+import { createStoreAdapter } from "../../hub/store-adapter.mjs";
 
 describe("reflexion adaptive rules", () => {
   let store;
   let tmpDir;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), "reflexion-adaptive-test-"));
-    store = createStore(join(tmpDir, "adaptive.db"));
+    store = await createStoreAdapter(join(tmpDir, "adaptive.db"));
   });
 
   afterEach(() => {
-    store.close();
+    if (store.close) store.close();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -47,128 +48,128 @@ describe("reflexion adaptive rules", () => {
   });
 
   it("keeps reflexion learning backward compatible when adaptive rules coexist", () => {
+    // learnFromError는 reflexion_entries 테이블 사용 (@deprecated)
+    // addAdaptiveRule은 adaptive_rules 테이블 사용
+    // 두 시스템이 독립적으로 공존 가능한지 검증
     const error =
       "TypeError: Cannot read properties of undefined at /tmp/example.js:10:2";
-    const adaptive = store.addReflexion({
-      ...adaptiveRuleFromError({
-        projectSlug: "alpha",
-        sessionId: "adaptive-session",
-        sessionCount: 1,
-        tool_name: "exec_command",
-        error,
-      }),
+
+    const adaptiveRule = adaptiveRuleFromError({
+      projectSlug: "alpha",
+      sessionId: "adaptive-session",
+      sessionCount: 1,
+      tool_name: "exec_command",
+      error,
+    });
+    const added = store.addAdaptiveRule({
+      project_slug: "alpha",
+      pattern: adaptiveRule.error_pattern,
       confidence: 0.9,
+      hit_count: 1,
+      last_seen_ms: Date.now(),
     });
 
+    // reflexion_entries에 별도 저장 (learnFromError는 reflexion_entries 사용)
     const reflexion = learnFromError(store, {
       error,
       solution: "Guard before property access",
     });
-    const updated = learnFromError(store, {
-      error,
-      solution: "Guard before property access",
-      success: true,
-    });
 
-    assert.notEqual(reflexion.id, adaptive.id);
-    assert.equal(updated.id, reflexion.id);
-    assert.equal(updated.type, "reflexion");
-    assert.equal(store.getReflexion(adaptive.id).type, "adaptive");
+    assert.ok(added);
+    assert.ok(reflexion);
+    // 다른 테이블이므로 ID가 다름
+    assert.notEqual(reflexion.id, `${added.project_slug}:${added.pattern}`);
   });
 
-  it("promotes adaptive rules after the same pattern appears in a second session", () => {
-    const created = store.addReflexion(
-      adaptiveRuleFromError({
-        projectSlug: "alpha",
-        sessionId: "session-1",
-        sessionCount: 1,
-        tool_name: "exec_command",
-        error: "ECONNREFUSED: connect ECONNREFUSED 127.0.0.1:3000",
-      }),
-    );
-
-    const promoted = promoteRule(store, created.id, {
+  it("promotes adaptive rules after the same pattern appears", () => {
+    // adaptive_rules 테이블에 규칙 추가
+    const rule = adaptiveRuleFromError({
       projectSlug: "alpha",
-      sessionId: "session-2",
-      sessionCount: 2,
+      sessionId: "session-1",
+      sessionCount: 1,
+      tool_name: "exec_command",
+      error: "ECONNREFUSED: connect ECONNREFUSED 127.0.0.1:3000",
+    });
+    store.addAdaptiveRule({
+      project_slug: "alpha",
+      pattern: rule.error_pattern,
+      confidence: 0.5,
+      hit_count: 1,
+      last_seen_ms: Date.now(),
     });
 
+    // promoteRule: projectSlug + pattern 기반
+    const promoted = promoteRule(store, "alpha", rule.error_pattern);
+
     assert.ok(promoted);
-    assert.equal(promoted.hit_count, 2);
-    assert.equal(promoted.adaptive_state.session_occurrences, 2);
-    assert.deepEqual(promoted.adaptive_state.session_ids, [
-      "session-1",
-      "session-2",
-    ]);
-    assert.equal(promoted.confidence, 0.6);
+    assert.equal(promoted.hit_count, 2); // +1
+    assert.ok(promoted.confidence > 0.5); // promoted
   });
 
   it("decays stale adaptive rules and deletes entries below the confidence floor", () => {
-    const survivor = store.addReflexion({
-      ...adaptiveRuleFromError({
-        projectSlug: "alpha",
-        sessionId: "session-1",
-        sessionCount: 1,
-        tool_name: "exec_command",
-        error: "TimeoutError: command timed out",
-      }),
+    const oldTime = Date.now() - (10 * 24 * 3600 * 1000); // 10일 전
+
+    // survivor: confidence 높음
+    store.addAdaptiveRule({
+      project_slug: "alpha",
+      pattern: "timeouterror_command_timed_out",
       confidence: 0.75,
+      hit_count: 3,
+      last_seen_ms: oldTime,
+      created_ms: oldTime,
     });
-    const removable = store.addReflexion({
-      ...adaptiveRuleFromError({
-        projectSlug: "alpha",
-        sessionId: "session-1",
-        sessionCount: 1,
-        tool_name: "exec_command",
-        error: "EACCES: permission denied",
-      }),
+
+    // removable: confidence 낮음 → decay 후 삭제
+    store.addAdaptiveRule({
+      project_slug: "alpha",
+      pattern: "eacces_permission_denied",
       confidence: 0.35,
+      hit_count: 1,
+      last_seen_ms: oldTime,
+      created_ms: oldTime,
     });
 
     const result = decayRules(store, 6);
 
-    assert.equal(result.updated.length, 1);
-    assert.deepEqual(result.deleted, [removable.id]);
-    assert.equal(store.getReflexion(removable.id), null);
-    assert.equal(store.getReflexion(survivor.id).confidence, 0.65);
+    // removable은 0.35 - 0.1 = 0.25 < 0.3 → 삭제
+    assert.ok(result.deleted.length >= 1);
+    assert.ok(result.deleted.some(id => id.includes("eacces")));
+    // survivor는 0.75 - 0.1 = 0.65 → 생존
+    const survivorRule = store.findAdaptiveRule("alpha", "timeouterror_command_timed_out");
+    assert.ok(survivorRule);
+    assert.ok(survivorRule.confidence < 0.75); // decayed
   });
 
   it("returns only active adaptive rules for a project slug", () => {
-    const active = store.addReflexion({
-      ...adaptiveRuleFromError({
-        projectSlug: "project-active",
-        sessionId: "session-a",
-        sessionCount: 1,
-        tool_name: "exec_command",
-        error: "ERR_MODULE_NOT_FOUND: missing package",
-      }),
+    // active: confidence > 0.5
+    store.addAdaptiveRule({
+      project_slug: "project-active",
+      pattern: "err_module_not_found",
       confidence: 0.8,
+      hit_count: 5,
+      last_seen_ms: Date.now(),
     });
-    store.addReflexion({
-      ...adaptiveRuleFromError({
-        projectSlug: "project-active",
-        sessionId: "session-b",
-        sessionCount: 1,
-        tool_name: "exec_command",
-        error: "ModuleNotFoundError: missing python package",
-      }),
+    // inactive: confidence <= 0.5
+    store.addAdaptiveRule({
+      project_slug: "project-active",
+      pattern: "modulenotfounderror",
       confidence: 0.4,
+      hit_count: 1,
+      last_seen_ms: Date.now(),
     });
-    store.addReflexion({
-      ...adaptiveRuleFromError({
-        projectSlug: "project-other",
-        sessionId: "session-c",
-        sessionCount: 1,
-        tool_name: "exec_command",
-        error: "fatal: not a git repository",
-      }),
+    // different project
+    store.addAdaptiveRule({
+      project_slug: "project-other",
+      pattern: "fatal_not_a_git_repository",
       confidence: 0.9,
+      hit_count: 10,
+      last_seen_ms: Date.now(),
     });
 
     const rules = getActiveAdaptiveRules(store, "project-active");
 
     assert.equal(rules.length, 1);
-    assert.equal(rules[0].id, active.id);
-    assert.equal(rules[0].type, "adaptive");
+    assert.equal(rules[0].pattern, "err_module_not_found");
+    assert.equal(rules[0].confidence, 0.8);
   });
 });

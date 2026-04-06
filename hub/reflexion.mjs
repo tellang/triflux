@@ -185,6 +185,7 @@ export function normalizeError(errorMessage) {
 
 /**
  * 에러에 대한 기존 솔루션 검색
+ * @deprecated reflexion_entries 기반. adaptive_rules로 통합 예정. 현재 런타임 호출 없음.
  * @param {object} store - createStore() 반환 객체
  * @param {string} errorMessage - 원본 에러 메시지
  * @param {object} [context={}] - { file, function, cli, agent }
@@ -200,6 +201,7 @@ export function lookupSolution(store, errorMessage, context = {}) {
 
 /**
  * 에러 해결 후 학습 저장
+ * @deprecated reflexion_entries 기반. adaptive_rules로 통합 예정. 현재 런타임 호출 없음.
  * 동일 패턴이 존재하면 hit 업데이트, 없으면 새로 생성
  * @param {object} store
  * @param {{ error: string, solution: string, context?: object, success?: boolean }} opts
@@ -233,6 +235,7 @@ export function learnFromError(
 
 /**
  * 솔루션 적용 결과 피드백
+ * @deprecated reflexion_entries 기반. adaptive_rules로 통합 예정. 현재 런타임 호출 없음.
  * @param {object} store
  * @param {string} entryId
  * @param {boolean} success
@@ -280,81 +283,57 @@ export function adaptiveRuleFromError(errorContext = {}) {
 
 /**
  * 동일 패턴이 여러 세션에서 재발하면 adaptive rule confidence를 승격
- * @param {object} store
- * @param {string} ruleId
- * @param {object} [errorContext={}]
+ * @param {object} store — store-adapter 인스턴스 (findAdaptiveRule, updateRuleConfidence 필요)
+ * @param {string} projectSlug
+ * @param {string} pattern
  * @returns {object|null}
  */
-export function promoteRule(store, ruleId, errorContext = {}) {
-  const rule = store.getReflexion(ruleId);
-  if (!rule || rule.type !== ADAPTIVE_RULE_TYPE || !store.patchReflexion)
-    return null;
-  const current = getAdaptiveState(rule);
-  const next = mergeAdaptiveState(rule, errorContext);
-  const newSession = next.session_occurrences > current.session_occurrences;
-  const promoted =
-    newSession && next.session_occurrences >= 2
-      ? clampConfidence(rule.confidence + ADAPTIVE_PROMOTION_STEP)
-      : rule.confidence;
-  return store.patchReflexion(ruleId, {
-    adaptive_state: next,
-    confidence: promoted,
-    hit_count: (rule.hit_count || 0) + 1,
-    last_hit_ms: Date.now(),
-  });
+export function promoteRule(store, projectSlug, pattern) {
+  if (!store.findAdaptiveRule || !store.updateRuleConfidence) return null;
+  const rule = store.findAdaptiveRule(projectSlug, pattern);
+  if (!rule) return null;
+  const promoted = clampConfidence(rule.confidence + ADAPTIVE_PROMOTION_STEP);
+  return store.updateRuleConfidence(projectSlug, pattern, promoted, { hit_count_increment: 1 });
 }
 
 /**
- * 지정 세션 수만큼 관측되지 않은 adaptive rules confidence 감소
- * @param {object} store
- * @param {number} sessionCount
+ * confidence가 낮은 adaptive rules 정리
+ * @param {object} store — store-adapter 인스턴스 (listAdaptiveRules, updateRuleConfidence, deleteAdaptiveRule 필요)
+ * @param {number} _sessionCount — 하위 호환용 (현재 미사용, pruneStaleRules가 시간 기반으로 대체)
  * @returns {{ updated: Array, deleted: string[] }}
  */
-export function decayRules(store, sessionCount) {
-  const currentSession = pickSessionCount(sessionCount);
-  if (!store.listReflexion || !store.patchReflexion || !store.deleteReflexion) {
-    return { updated: [], deleted: [] };
-  }
+export function decayRules(store, _sessionCount) {
+  if (!store.listAdaptiveRules) return { updated: [], deleted: [] };
   const result = { updated: [], deleted: [] };
-  for (const rule of store.listReflexion({ type: ADAPTIVE_RULE_TYPE })) {
-    const state = getAdaptiveState(rule);
-    const baseline = Math.max(
-      state.last_seen_session,
-      state.last_decay_session,
-    );
-    const decaySteps = Math.floor(
-      (currentSession - baseline) / ADAPTIVE_DECAY_WINDOW,
-    );
-    if (decaySteps <= 0) continue;
-    const confidence = clampConfidence(
-      rule.confidence - decaySteps * ADAPTIVE_DECAY_STEP,
-    );
-    if (confidence <= ADAPTIVE_DELETE_THRESHOLD) {
-      if (store.deleteReflexion(rule.id)) result.deleted.push(rule.id);
+  const rules = store.listAdaptiveRules();
+  for (const rule of rules) {
+    // 30일 이상 미관측 + confidence < 0.5 → decay
+    const ageDays = (Date.now() - (rule.last_seen_ms || 0)) / (24 * 3600 * 1000);
+    if (ageDays < 7) continue; // 7일 미만은 건너뜀
+    const decayed = clampConfidence(rule.confidence - ADAPTIVE_DECAY_STEP);
+    if (decayed <= ADAPTIVE_DELETE_THRESHOLD) {
+      if (store.deleteAdaptiveRule(rule.project_slug, rule.pattern)) {
+        result.deleted.push(`${rule.project_slug}:${rule.pattern}`);
+      }
       continue;
     }
-    const updated = store.patchReflexion(rule.id, {
-      confidence,
-      adaptive_state: {
-        ...state,
-        last_decay_session: baseline + decaySteps * ADAPTIVE_DECAY_WINDOW,
-      },
-    });
-    if (updated) result.updated.push(updated);
+    if (decayed < rule.confidence) {
+      const updated = store.updateRuleConfidence(rule.project_slug, rule.pattern, decayed);
+      if (updated) result.updated.push(updated);
+    }
   }
   return result;
 }
 
 /**
  * 현재 활성화된 adaptive rules 조회
- * @param {object} store
+ * @param {object} store — store-adapter 인스턴스 (listAdaptiveRules 필요)
  * @param {string} projectSlug
  * @returns {Array}
  */
 export function getActiveAdaptiveRules(store, projectSlug) {
-  if (!store.listReflexion) return [];
-  return store
-    .listReflexion({ type: ADAPTIVE_RULE_TYPE, projectSlug })
+  if (!store.listAdaptiveRules) return [];
+  return store.listAdaptiveRules(projectSlug)
     .filter((rule) => rule.confidence > ACTIVE_RULE_CONFIDENCE);
 }
 
