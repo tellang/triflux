@@ -93,6 +93,20 @@ function attachAdaptiveRuleStore(store) {
     return statements.pruneRules.run(cutoff, minConfidence).changes;
   };
 
+  // listAdaptiveRules: decayRules/getActiveAdaptiveRules에서 사용
+  const listStmt = store.db.prepare('SELECT * FROM adaptive_rules WHERE project_slug = ? ORDER BY confidence DESC');
+  const listAllStmt = store.db.prepare('SELECT * FROM adaptive_rules ORDER BY confidence DESC');
+  const deleteRuleStmt = store.db.prepare('DELETE FROM adaptive_rules WHERE project_slug = ? AND pattern = ?');
+
+  store.listAdaptiveRules = function listAdaptiveRules(projectSlug) {
+    if (projectSlug) return listStmt.all(projectSlug).map(clone);
+    return listAllStmt.all().map(clone);
+  };
+
+  store.deleteAdaptiveRule = function deleteAdaptiveRule(projectSlug, pattern) {
+    return deleteRuleStmt.run(projectSlug, pattern).changes > 0;
+  };
+
   return store;
 }
 
