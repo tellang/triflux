@@ -1,4 +1,5 @@
 ---
+internal: true
 name: tfx-find
 description: >
   코드베이스에서 파일, 함수, 클래스, 문자열을 빠르게 찾을 때 사용한다.
