@@ -196,7 +196,12 @@ function ensureCaptureHelper() {
       "}",
       "",
       "# Force UTF-8 encoding — CP949 등 non-UTF-8 codepage에서 Gemini stdout 캡처 실패 방지",
+      "# InputEncoding: pipe-pane에서 읽어들이는 바이트 해석",
+      "# OutputEncoding: 네이티브 명령(gemini/codex CLI)의 stdout 디코딩",
+      "# $OutputEncoding: PowerShell 파이프라인 기본 인코딩 (BOM 없는 UTF-8)",
       "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+      "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
       "",
       "$reader = [Console]::In",
       "while (($line = $reader.ReadLine()) -ne $null) {",
@@ -513,6 +518,23 @@ export function createPsmuxSession(sessionName, opts = {}) {
   panes.forEach((pane, index) => {
     psmuxExec(["select-pane", "-t", pane, "-T", toPaneTitle(index)]);
   });
+
+  // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout 깨짐 방지:
+  // pane 생성 직후 UTF-8 인코딩을 강제 설정한다.
+  // chcp 65001: 프로세스 코드 페이지를 UTF-8로 전환
+  // OutputEncoding: 네이티브 명령(gemini/codex) stdout 디코딩
+  // $OutputEncoding: PowerShell 파이프라인 기본 인코딩
+  if (IS_WINDOWS) {
+    const encodingInit = [
+      "chcp 65001 > $null",
+      "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+      "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+    ].join("; ");
+    panes.forEach((paneId) => {
+      sendLiteralToPane(paneId, encodingInit, true);
+    });
+  }
 
   return { sessionName, panes };
 }
