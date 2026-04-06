@@ -1,0 +1,8 @@
+{
+  "name": "tfx-setup",
+  "description": "triflux 초기 설정 및 진단. AskUserQuestion 기반 인터랙티브 위저드로 파일 동기화, HUD 설정, Codex 프로파일, CLI 진단, MCP 확인, 검색 MCP 설정을 수행합니다. Use when: setup, 설정, 설치, install, 초기화, 처음, 시작, wizard",
+  "triggers": [
+    "tfx-setup"
+  ],
+  "argument_hint": "[doctor]"
+}

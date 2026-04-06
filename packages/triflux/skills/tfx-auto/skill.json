@@ -1,0 +1,26 @@
+{
+  "name": "tfx-auto",
+  "description": "통합 CLI 오케스트레이터. 커맨드 숏컷(단일) + 자동 분류/분해(병렬) + 수동 병렬. tfx-route.sh 기반. '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은 구현/수정 요청에 사용. CLI 라우팅이 필요한 모든 작업에 적극 활용.",
+  "triggers": [
+    "tfx-auto",
+    "implement",
+    "build",
+    "research",
+    "brainstorm",
+    "design",
+    "test",
+    "analyze",
+    "troubleshoot",
+    "improve",
+    "cleanup",
+    "explain",
+    "document",
+    "pm",
+    "reflect",
+    "estimate",
+    "spec-panel",
+    "business-panel",
+    "index-repo"
+  ],
+  "argument_hint": "<command|task> [args...]"
+}

@@ -6,11 +6,14 @@ import { describe, it } from "node:test";
 
 import {
   buildSkillTemplateContext,
+  loadSkillManifest,
   loadTemplatePartials,
   parseFrontmatter,
+  parseFrontmatterWithManifest,
   renderSkillTemplate,
 } from "../lib/skill-template.mjs";
 import { generateSkillDocs } from "../gen-skill-docs.mjs";
+import { generateSkillManifests } from "../gen-skill-manifest.mjs";
 
 function makeTempDir() {
   return mkdtempSync(join(tmpdir(), "tfx-skill-template-"));
@@ -157,6 +160,93 @@ describe("skill-template engine", () => {
     assert.equal(renderedLines.length, 1_201);
     assert.equal(renderedLines[0], "line-0");
     assert.equal(renderedLines.at(-1), "name=big-template");
+  });
+
+  it("{{#include shared/*.md}}로 파일을 인라인 확장한다", () => {
+    const root = makeTempDir();
+    try {
+      const sharedDir = join(root, "shared");
+      mkdirSync(sharedDir, { recursive: true });
+      writeFileSync(join(sharedDir, "telemetry.md"), "TEL={{SKILL_NAME}}", "utf8");
+
+      const template = "before\n{{#include shared/telemetry.md}}\nafter";
+      const output = renderSkillTemplate(template, { SKILL_NAME: "test-skill" }, {
+        partials: {},
+        includeBaseDir: root,
+      });
+
+      assert.match(output, /before/);
+      assert.match(output, /TEL=test-skill/);
+      assert.match(output, /after/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadSkillManifest는 skill.json이 있으면 파싱한다", () => {
+    const root = makeTempDir();
+    try {
+      writeFileSync(join(root, "skill.json"), JSON.stringify({
+        name: "tfx-test",
+        description: "test skill",
+        triggers: ["test"],
+      }), "utf8");
+
+      const manifest = loadSkillManifest(root);
+      assert.equal(manifest.name, "tfx-test");
+      assert.deepEqual(manifest.triggers, ["test"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadSkillManifest는 skill.json이 없으면 null을 반환한다", () => {
+    const root = makeTempDir();
+    try {
+      assert.equal(loadSkillManifest(root), null);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("parseFrontmatterWithManifest는 skill.json 우선으로 병합한다", () => {
+    const root = makeTempDir();
+    try {
+      writeFileSync(join(root, "skill.json"), JSON.stringify({
+        name: "manifest-name",
+        description: "manifest-desc",
+        internal: true,
+      }), "utf8");
+
+      const source = [
+        "---",
+        "name: yaml-name",
+        "description: yaml-desc",
+        "deep: true",
+        "---",
+        "body",
+      ].join("\n");
+
+      const result = parseFrontmatterWithManifest(source, root);
+      assert.equal(result.data.name, "manifest-name");
+      assert.equal(result.data.description, "manifest-desc");
+      assert.equal(result.data.internal, true);
+      assert.equal(result.data.deep, true);
+      assert.equal(result.body, "body");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("parseFrontmatterWithManifest는 skill.json 없으면 YAML fallback한다", () => {
+    const root = makeTempDir();
+    try {
+      const source = "---\nname: yaml-only\n---\nbody";
+      const result = parseFrontmatterWithManifest(source, root);
+      assert.equal(result.data.name, "yaml-only");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("gen-skill-docs에서 누락 partial 참조 시 에러를 전파한다", () => {

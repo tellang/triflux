@@ -317,6 +317,30 @@ export function loadTemplatePartials(partialsDir) {
   return partials;
 }
 
+export function loadSkillManifest(skillDir) {
+  const manifestPath = join(skillDir, "skill.json");
+  if (!existsSync(manifestPath)) return null;
+
+  const raw = readFileSync(manifestPath, "utf8");
+  return JSON.parse(raw);
+}
+
+export function parseFrontmatterWithManifest(source, skillDir) {
+  const manifest = skillDir ? loadSkillManifest(skillDir) : null;
+  const { data: yamlData, body } = parseFrontmatter(source);
+
+  if (!manifest) return { data: yamlData, body };
+
+  const merged = { ...yamlData };
+  if (manifest.name) merged.name = manifest.name;
+  if (manifest.description) merged.description = manifest.description;
+  if (manifest.triggers) merged.triggers = manifest.triggers;
+  if (manifest.argument_hint) merged["argument-hint"] = manifest.argument_hint;
+  if (manifest.internal != null) merged.internal = manifest.internal;
+
+  return { data: merged, body };
+}
+
 export function renderSkillTemplate(template, context = {}, options = {}) {
   const { partials = {}, includes = {}, includeBaseDir = "" } = options;
   return renderWithContext(template, context, partials, {

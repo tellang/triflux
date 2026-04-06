@@ -65,7 +65,10 @@ export function generateSkillDocs({
   for (const templatePath of templateFiles) {
     const templateContent = readFileSync(templatePath, "utf8");
     const context = createRenderContext(templateContent, templatePath);
-    const rendered = renderSkillTemplate(templateContent, context, { partials });
+    const rendered = renderSkillTemplate(templateContent, context, {
+      partials,
+      includeBaseDir: skillsDir,
+    });
     const outputPath = resolveOutputPath(templatePath);
 
     if (write) {

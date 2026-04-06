@@ -1,0 +1,8 @@
+{
+  "name": "tfx-doctor",
+  "description": "triflux 진단 및 수리 도구. AskUserQuestion 기반 인터랙티브 선택지로 CLI 미발견, HUD 미표시, 캐시 오류, 스킬 미설치 등을 진단하고 자동 수정합니다. Use when: not working, broken, error, 안 돼, 이상해, 에러, 캐시, reset, doctor",
+  "triggers": [
+    "tfx-doctor"
+  ],
+  "argument_hint": "[--fix|--reset]"
+}

@@ -1,0 +1,5 @@
+{
+  "name": "merge-worktree",
+  "description": "워크트리 브랜치를 main으로 squash-merge + conventional commit 자동 생성. codex-swarm 워크트리 자동 인식. '머지해', 'merge worktree', '워크트리 머지', '결과 수집', 'squash merge' 요청에 사용.",
+  "argument_hint": "[target-branch]"
+}
