@@ -1,6 +1,6 @@
 {
   "name": "@triflux/remote",
-  "version": "10.0.0",
+  "version": "10.0.1",
   "description": "triflux remote — team mode, psmux, MCP workers, SQLite store.",
   "type": "module",
   "main": "hub/index.mjs",
@@ -8,7 +8,9 @@
     ".": "./hub/index.mjs",
     "./hub/*": "./hub/*"
   },
-  "engines": { "node": ">=18.0.0" },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "peerDependencies": {
     "@triflux/core": "^10.0.0-alpha.1"
   },
@@ -20,7 +22,13 @@
   "files": [
     "hub"
   ],
-  "keywords": ["triflux", "team-mode", "psmux", "remote", "mcp-workers"],
+  "keywords": [
+    "triflux",
+    "team-mode",
+    "psmux",
+    "remote",
+    "mcp-workers"
+  ],
   "author": "tellang",
   "license": "MIT",
   "repository": {

@@ -1,0 +1,12 @@
+{
+  "name": "tfx-deep-qa",
+  "description": "보안, 성능, 접근성까지 포함한 철저한 검증이 필요할 때 사용한다. 'deep qa', '심층 검증', '철저히 테스트', '보안까지 확인', '전방위 검증' 같은 요청에 사용. 프로덕션 배포 전 다각도 품질 검증에 적극 활용.",
+  "triggers": [
+    "deep qa",
+    "심층 검증",
+    "thorough test",
+    "deep-qa"
+  ],
+  "argument_hint": "[테스트 대상 경로 또는 기능 설명]",
+  "internal": true
+}

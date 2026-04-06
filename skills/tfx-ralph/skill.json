@@ -1,0 +1,9 @@
+{
+  "name": "tfx-ralph",
+  "description": "tfx-persist의 별칭(alias). 'ralph', '끝까지 해', '멈추지 마' 같은 요청에 사용. 실제 동작은 tfx-persist 스킬이 수행합니다. Use when: ralph, 끝까지, don't stop, 멈추지 마",
+  "triggers": [
+    "tfx-ralph",
+    "ralph"
+  ],
+  "internal": true
+}

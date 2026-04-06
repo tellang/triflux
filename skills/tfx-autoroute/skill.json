@@ -1,0 +1,13 @@
+{
+  "name": "tfx-autoroute",
+  "description": "작업 유형에 따라 최적 모델을 자동 선택하여 실행해야 할 때 사용한다. 'sisyphus', '시지프스', 'auto-route', '알아서 라우팅', '최적 모델로' 같은 요청에 사용. 어떤 CLI를 쓸지 모르겠을 때, 또는 실패 시 자동 모델 승격이 필요할 때 적극 활용.",
+  "triggers": [
+    "sisyphus",
+    "끝없이",
+    "never stop",
+    "시지프스",
+    "auto-route"
+  ],
+  "argument_hint": "<작업 설명>",
+  "internal": true
+}

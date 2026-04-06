@@ -1,0 +1,8 @@
+{
+  "name": "tfx-hub",
+  "description": "tfx-hub MCP 메시지 버스 관리. CLI 에이전트 간 실시간 통신 허브를 시작/중지/상태확인하고, hub 도메인의 자유형 작업도 처리합니다. Use when: hub, 허브, 메시지 버스, message bus, 브릿지, bridge, MCP 서버 관리, 에이전트 통신",
+  "triggers": [
+    "tfx-hub"
+  ],
+  "argument_hint": "<start|stop|status|자유형 작업 설명>"
+}

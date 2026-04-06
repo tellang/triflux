@@ -20,7 +20,7 @@ import { createSwarmLocks } from './swarm-locks.mjs';
 import { createEventLog } from './event-log.mjs';
 import { probeRemoteEnv, resolveRemoteDir } from './remote-session.mjs';
 import { fetchRemoteShard } from './worktree-lifecycle.mjs';
-import { getHostConfig } from '../lib/ssh-command.mjs';
+import { getHostConfig } from '@triflux/core/hub/lib/ssh-command.mjs';
 
 // ── Swarm states ──────────────────────────────────────────────
 
