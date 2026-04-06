@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 
 import {
   CONTEXT_MONITOR_CACHE_PATH,

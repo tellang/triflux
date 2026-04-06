@@ -5,7 +5,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  dim, bold, green, red, yellow, 
+  dim, bold, green, red, yellow, cyan,
   claudeOrange, codexWhite, geminiBlue,
   colorByPercent, colorByProvider,
   CLAUDE_ORANGE, CODEX_WHITE, GEMINI_BLUE,
@@ -63,7 +63,7 @@ export function formatTokenSummary(diff) {
   const inputStr = formatTokenCount(t.input);
   const outputStr = formatTokenCount(t.output);
   const actualStr = formatSavings(s.actualCost);
-  const _claudeStr = formatSavings(s.claudeCost);
+  const claudeStr = formatSavings(s.claudeCost);
   const savedPct = s.claudeCost > 0
     ? Math.round((s.saved / s.claudeCost) * 100)
     : 0;
@@ -78,7 +78,7 @@ export function formatTokenSummary(diff) {
 // ============================================================================
 export function getTeamRow(currentTier) {
   const teamState = readJson(TEAM_STATE_PATH, null);
-  if (!teamState?.sessionName) return null;
+  if (!teamState || !teamState.sessionName) return null;
 
   // 팀 생존 확인: startedAt 기준 24시간 초과면 stale로 간주
   if (teamState.startedAt && (Date.now() - teamState.startedAt) > 24 * 60 * 60 * 1000) return null;
@@ -280,14 +280,14 @@ export function getProviderRow(currentTier, provider, marker, markerColor, qosPr
   // 절약 퍼센트 섹션
   const svPct = savingsMultiplier != null ? Math.round(savingsMultiplier * 100) : null;
   const svStr = formatSvPct(svPct);
-  const _modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
+  const modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
 
   // 프로바이더별 색상 프로필
   const provAnsi = provider === "codex" ? CODEX_WHITE : provider === "gemini" ? GEMINI_BLUE : GREEN;
   const provFn = provider === "codex" ? codexWhite : provider === "gemini" ? geminiBlue : green;
 
   let quotaSection;
-  const _extraRightSection = "";
+  let extraRightSection = "";
 
   if (currentTier === "nano" || currentTier === "micro") {
     const minPrefix = `${bold(markerColor(`${marker}`))}:`;

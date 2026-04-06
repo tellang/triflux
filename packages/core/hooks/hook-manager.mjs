@@ -266,7 +266,7 @@ function setPriority(hookId, priority) {
   if (!registry) return { status: "error", message: "레지스트리를 찾을 수 없습니다." };
 
   const numPriority = parseInt(priority, 10);
-  if (Number.isNaN(numPriority)) return { status: "error", message: "priority는 숫자여야 합니다." };
+  if (isNaN(numPriority)) return { status: "error", message: "priority는 숫자여야 합니다." };
 
   let found = false;
   for (const hooks of Object.values(registry.events)) {
@@ -318,7 +318,7 @@ function status() {
   let orchestrated = 0;
   let individual = 0;
 
-  for (const [_event, matchers] of Object.entries(settings.hooks)) {
+  for (const [event, matchers] of Object.entries(settings.hooks)) {
     if (isOrchestrator(matchers)) {
       orchestrated++;
     } else {

@@ -24,7 +24,7 @@ const httpsPost = createHttpsPost(https, GEMINI_API_TIMEOUT_MS);
 
 // Gemini 모델별 RPM 한도 (실측 기반: Pro 25, Flash 300)
 export function getGeminiRpmLimit(model) {
-  if (model?.includes("pro")) return 25;
+  if (model && model.includes("pro")) return 25;
   return 300; // Flash 기본
 }
 

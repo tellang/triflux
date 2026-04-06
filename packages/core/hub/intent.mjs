@@ -54,7 +54,10 @@ function _tryCodexClassify(prompt) {
   }
 }
 
-/** triflux 특화 의도 카테고리 (10개) */
+/**
+ * @experimental
+ * triflux 특화 의도 카테고리 (10개)
+ */
 export const INTENT_CATEGORIES = {
   implement:  { agent: 'executor',       mcp: 'implement', effort: 'codex53_high' },
   debug:      { agent: 'debugger',       mcp: 'implement', effort: 'codex53_high' },

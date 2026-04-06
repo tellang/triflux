@@ -22,7 +22,7 @@ export function getTerminalColumns() {
       const raw = execSync("tput cols 2>/dev/null || stty size 2>/dev/null | awk '{print $2}'", {
         timeout: 2000, stdio: ["pipe", "pipe", "pipe"],
       }).toString().trim();
-      if (raw && !Number.isNaN(Number(raw))) { _cachedColumns = Number(raw); return _cachedColumns; }
+      if (raw && !isNaN(Number(raw))) { _cachedColumns = Number(raw); return _cachedColumns; }
     }
   } catch { /* 감지 실패 */ }
   return 0;
@@ -44,7 +44,7 @@ export function getTerminalRows() {
       const raw = execSync("tput lines 2>/dev/null || stty size 2>/dev/null | awk '{print $1}'", {
         timeout: 2000, stdio: ["pipe", "pipe", "pipe"],
       }).toString().trim();
-      if (raw && !Number.isNaN(Number(raw))) { _cachedRows = Number(raw); return _cachedRows; }
+      if (raw && !isNaN(Number(raw))) { _cachedRows = Number(raw); return _cachedRows; }
     }
   } catch { /* 감지 실패 */ }
   return 0;

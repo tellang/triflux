@@ -50,7 +50,7 @@ export function decomposeTask(taskDescription, agentCount) {
  * @returns {string}
  */
 export function buildLeadPrompt(taskDescription, config) {
-  const { agentId, hubUrl, teammateMode = "tmux", workers = [] } = config;
+  const { agentId, teammateMode = "tmux", workers = [] } = config;
 
   const roster = workers
     .map((w, i) => `${i + 1}. ${w.agentId} (${w.cli}) — ${w.subtask}`)

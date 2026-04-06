@@ -63,6 +63,16 @@
         "timeout": 2,
         "blocking": false,
         "description": "tfx-multi 상태 추적 게이트"
+      },
+      {
+        "id": "tfx-write-edit-passthrough",
+        "source": "triflux",
+        "matcher": "Edit|Write",
+        "command": "exit 0",
+        "priority": 999,
+        "enabled": true,
+        "blocking": false,
+        "description": "Edit/Write passthrough"
       }
     ],
     "PostToolUse": [

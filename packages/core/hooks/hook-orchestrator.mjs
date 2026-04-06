@@ -345,7 +345,7 @@ async function main() {
     try {
       const input = JSON.parse(stdinRaw);
       const skillName = input.tool_input?.skill || "";
-      if (skillName?.startsWith("tfx-")) {
+      if (skillName && skillName.startsWith("tfx-")) {
         const mode = skillName.replace(/^tfx-/, "");
         const gitRoot = process.env.GIT_WORK_TREE || process.cwd();
         const slug = gitRoot.split(/[\\/]/).pop() || "unknown";

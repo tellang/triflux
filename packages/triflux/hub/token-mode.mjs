@@ -1,7 +1,10 @@
 // hub/token-mode.mjs — Token Efficiency Mode
 // GAP 분석 P2 #7: 심볼 통신 + 약어로 30-50% 토큰 절감
 
-/** @type {Array<{ from: string[], to: string, type: 'symbol'|'abbrev' }>} */
+/**
+ * @experimental
+ * @type {Array<{ from: string[], to: string, type: 'symbol'|'abbrev' }>}
+ */
 export const COMPACT_RULES = [
   // ── 심볼 치환 (긴 매칭 우선 정렬) ──
   { from: ['greater than or equal'],                to: '≥',  type: 'symbol' },

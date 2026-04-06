@@ -4,7 +4,7 @@
 // 도구 실패 시 에러 패턴을 분석하여 해결 힌트를 additionalContext로 주입한다.
 // Claude가 동일 에러를 반복하지 않도록 구체적 가이드를 제공.
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 // ── 에러 패턴 → 해결 힌트 매핑 ─────────────────────────────
