@@ -8,7 +8,8 @@
 //   BLOCK (exit 2)  — 복구 불가능한 파괴적 명령
 //   WARN  (allow + context) — 주의가 필요한 명령
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
 // ── 차단 규칙 ──────────────────────────────────────────────
 const BLOCK_RULES = [
@@ -64,6 +65,20 @@ const WARN_RULES = [
   { pattern: /\bchmod\s+777\b/i, warn: "chmod 777 감지. 보안 위험." },
   { pattern: /\bcurl\s.*\|\s*(bash|sh)\b/i, warn: "curl | sh 감지. 원격 스크립트 실행 주의." },
 ];
+
+// ── reflexion 적응형 패널티 로드 ──────────────────────────────
+function loadReflexionPenalties() {
+  try {
+    const home = process.env.HOME || process.env.USERPROFILE || "";
+    const penaltyFile = join(home, ".triflux", "reflexion", "pending-penalties.jsonl");
+    if (!existsSync(penaltyFile)) return [];
+    return readFileSync(penaltyFile, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map(line => { try { return JSON.parse(line); } catch { return null; } })
+      .filter(Boolean);
+  } catch { return []; }
+}
 
 function readStdin() {
   try {
@@ -140,6 +155,26 @@ function main() {
 
   if (isWtDirectInvocation(command)) {
     blockCommand(WT_DIRECT_BLOCK_MESSAGE, command);
+  }
+
+  // 0.1. reflexion 적응형 패널티 — 이전 세션에서 차단된 패턴 사전 경고
+  const penalties = loadReflexionPenalties();
+  if (penalties.length > 0) {
+    for (const penalty of penalties) {
+      if (penalty.error_pattern && new RegExp(penalty.error_pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").slice(0, 80), "i").test(command)) {
+        const output = {
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "allow",
+            additionalContext:
+              `[reflexion] 이전 세션에서 차단된 패턴과 유사합니다 (${penalty.source}, ${penalty.ts?.slice(0, 10)}). ` +
+              `이전 차단 사유: ${penalty.error_pattern?.slice(0, 100)}`,
+          },
+        };
+        process.stdout.write(JSON.stringify(output));
+        process.exit(0);
+      }
+    }
   }
 
   // 0.5. SSH → PowerShell 호스트에 bash 문법 전달 차단
