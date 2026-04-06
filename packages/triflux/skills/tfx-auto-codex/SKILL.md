@@ -1,4 +1,5 @@
 ---
+internal: true
 name: tfx-auto-codex
 description: >
   Codex 리드형 tfx-auto. Claude 네이티브 역할을 Codex로 치환하고 Gemini 사용은 유지합니다.

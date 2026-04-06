@@ -19,7 +19,7 @@
 //   CLAUDE_PLUGIN_ROOT    — ${PLUGIN_ROOT} 치환용
 //   HOME / USERPROFILE    — ${HOME} 치환용
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync, execFile } from "node:child_process";
@@ -210,8 +210,55 @@ function mergeOutputs(accumulated, newOutput) {
   }
 }
 
+// ── 라우팅 가중치 기록 ────────────────────────────────────────
+function recordRouteOutcome(slug, mode, outcome) {
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  const projDir = join(home, ".gstack", "projects", slug);
+  const weightsPath = join(projDir, "routing-weights.json");
+
+  mkdirSync(projDir, { recursive: true });
+
+  const weights = existsSync(weightsPath)
+    ? JSON.parse(readFileSync(weightsPath, "utf8"))
+    : { updated_at: null, total_routes: 0, overrides: 0, weights: { mode_bias: {}, profile_bias: {}, depth_bias: {} } };
+
+  weights.total_routes++;
+  weights.updated_at = new Date().toISOString();
+
+  const bias = weights.weights.mode_bias;
+  const current = bias[mode] || 0;
+
+  if (outcome === "override") {
+    bias[mode] = Math.max(0, current - 0.1);
+    weights.overrides++;
+  } else if (outcome === "completion") {
+    bias[mode] = Math.min(1, current + 0.05);
+  } else if (outcome === "abort") {
+    bias[mode] = Math.max(0, current - 0.1);
+  }
+
+  const total = Object.values(bias).reduce((s, v) => s + v, 0);
+  if (total > 0) {
+    for (const key of Object.keys(bias)) {
+      bias[key] = +(bias[key] / total).toFixed(3);
+    }
+  }
+
+  writeFileSync(weightsPath, JSON.stringify(weights, null, 2), "utf8");
+}
+
 // ── 메인 ────────────────────────────────────────────────────
 async function main() {
+  // CLI: --record-route <slug> <mode> <outcome>
+  const rrIdx = process.argv.indexOf("--record-route");
+  if (rrIdx !== -1) {
+    const slug = process.argv[rrIdx + 1];
+    const mode = process.argv[rrIdx + 2];
+    const outcome = process.argv[rrIdx + 3];
+    if (slug && mode && outcome) recordRouteOutcome(slug, mode, outcome);
+    process.exit(0);
+  }
+
   const stdinRaw = readStdin();
   const registry = loadRegistry();
 

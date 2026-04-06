@@ -31,6 +31,51 @@ argument-hint: "<command|task> [args...]"
 
 {{> base}}
 
+### Step 0: 스마트 라우팅 (tfx-auto 진입 시 자동 실행)
+
+preamble에서 routing-weights.json을 읽고, 사용자 입력을 분석하여 dispatch 결정.
+
+```bash
+SLUG=$(basename "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null || echo "unknown")
+WEIGHTS_FILE="$HOME/.gstack/projects/$SLUG/routing-weights.json"
+USER_MODE=""
+if [ -f "$WEIGHTS_FILE" ]; then
+  USER_MODE=$(node -e "
+    const w=JSON.parse(require('fs').readFileSync('$WEIGHTS_FILE','utf8'));
+    const m=w.weights?.mode_bias||{};
+    const top=Object.entries(m).sort((a,b)=>b[1]-a[1])[0];
+    if(top && top[1]>0.3) console.log(top[0]);
+  " 2>/dev/null)
+fi
+echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
+```
+
+판단 기준 (우선순위 순):
+
+1. **사용자 명시 키워드** (최우선):
+   - "병렬", "swarm", "PRD 돌려" → `Skill("tfx-swarm")` dispatch
+   - "꼼꼼히", "제대로", "deep" → 해당 `tfx-deep-*` dispatch
+   - "끝까지", "멈추지마", "ralph" → `Skill("tfx-persist")` dispatch
+   - "multi", "팀", "협업" → `Skill("tfx-multi")` dispatch
+   - "codex로", "gemini로" → `Skill("tfx-codex")` 또는 `Skill("tfx-gemini")` dispatch
+
+2. **PRD 인자 분석**:
+   - PRD 경로 2개 이상 → `Skill("tfx-swarm")` dispatch
+   - PRD 1개 + XL 규모 → `Skill("tfx-fullcycle")` dispatch
+
+3. **선호도 가중치** (tiebreaker):
+   - USER_PREFERRED_MODE가 있고 가중치 > 0.3이면 제안
+   - "[tfx] 사용자 선호: {mode}. 이 모드로 실행할까요?" 1줄 표시
+   - 응답 없으면 기본(auto) 진행
+
+4. **기본**: 기존 tfx-auto 워크플로우 그대로 실행
+
+dispatch 시 해당 스킬을 Skill 도구로 호출하고 **이 워크플로우를 종료**한다. dispatch하지 않으면 아래 기존 워크플로우 진행.
+
+라우팅 결정 후 1줄 표시:
+```
+[tfx] 규모: {S/M/L/XL}, 모드: {mode} ({profile}) — 오버라이드: /tfx-multi, /tfx-swarm 등
+```
 
 > **MANDATORY RULES**
 >
