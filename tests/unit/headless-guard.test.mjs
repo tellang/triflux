@@ -219,6 +219,33 @@ describe("headless-guard decision matrix (runtime)", () => {
     assert.equal(payload?.hookSpecificOutput?.hookEventName, "PreToolUse");
     assert.match(payload?.hookSpecificOutput?.additionalContext || "", /TFX_ALLOW_DIRECT_CLI=1/u);
   });
+
+  it("pipe를 통한 codex exec 호출도 deny한다", () => {
+    const result = runGuardWithBashCommand("cat prompt.md | codex exec 'hello'");
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /headless-guard/u);
+  });
+
+  it("pipe를 통한 gemini --prompt 호출도 deny한다", () => {
+    const result = runGuardWithBashCommand("echo test | gemini --prompt 'hello'");
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /headless-guard/u);
+  });
+
+  it("정상 pipe 명령은 통과한다 (오탐 방지)", () => {
+    const result = runGuardWithBashCommand("npm test 2>&1 | tee log.txt");
+    assert.equal(result.status, 0);
+  });
+
+  it("env prefix + codex exec pipe 조합도 deny한다", () => {
+    const result = runGuardWithBashCommand("TFX_ALLOW_DIRECT_CLI=1 cat prompt.md | codex exec 'hello'");
+    assert.equal(result.status, 2);
+  });
+
+  it("|| (logical OR)는 pipe로 잘못 분리되지 않는다", () => {
+    const result = runGuardWithBashCommand("echo test || codex exec 'hello'");
+    assert.equal(result.status, 2);
+  });
 });
 
 describe("tfx-multi Edit/Write gate (runtime)", () => {

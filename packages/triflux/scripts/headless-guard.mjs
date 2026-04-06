@@ -143,10 +143,8 @@ const DIRECT_CLI_BYPASS_HINT =
   "로컬 디버깅이 목적이면 TFX_ALLOW_DIRECT_CLI=1로 일시 우회할 수 있습니다.";
 
 async function main() {
-  // P0: TFX_ALLOW_DIRECT_CLI 환경변수 바이패스 — psmux 세션 생성 불가 시 수동 활성화
-  if (process.env.TFX_ALLOW_DIRECT_CLI === "1") {
-    nudge("[headless-guard] direct CLI mode (TFX_ALLOW_DIRECT_CLI=1)");
-  }
+  // P0: TFX_ALLOW_DIRECT_CLI는 hasDirectCli 블록 안에서만 체크 (CLI deny만 스킵)
+  // 전체 guard를 비활성화하지 않음 — tfx-multi gate, Edit/Write gate 등은 유지
 
   // psmux 미설치 → 전부 통과
   if (!isPsmuxInstalled()) process.exit(0);
@@ -190,18 +188,20 @@ async function main() {
     }
 
     // codex/gemini 직접 CLI 호출 → deny (인라인 TFX_ALLOW_DIRECT_CLI=1 우회 허용)
-    // 복합 명령(&&, ||, ;) 분리 후 각 세그먼트의 커맨드 위치만 검사 (args/quotes 안의 codex는 무시)
-    const cmdParts = cmd.split(/\s*(?:&&|\|\||;)\s*/);
+    // 복합 명령(&&, ||, ;, |) 분리 후 각 세그먼트의 커맨드 위치만 검사 (args/quotes 안의 codex는 무시)
+    // NOTE: || 는 | 보다 먼저 매칭되므로 logical OR이 단일 pipe로 잘못 분리되지 않음
+    const cmdParts = cmd.split(/\s*(?:&&|\|\||\||;)\s*/);
     const hasDirectCli = cmdParts.some(part => {
       const stripped = part.replace(/^\s*(?:[\w_]+=\S+\s+)*/, "");
       return /^\s*codex\b.*\bexec\b/i.test(stripped) || /^\s*gemini\s+(-p|--prompt)\b/i.test(stripped);
     });
     if (hasDirectCli) {
-      if (/\bTFX_ALLOW_DIRECT_CLI=1\b/.test(cmd)) {
-        nudge("[headless-guard] direct CLI mode (inline TFX_ALLOW_DIRECT_CLI=1)");
+      // process.env만 허용 — 인라인 텍스트 체크는 combined bypass 취약 (명령 내 아무 위치의 TFX_ALLOW_DIRECT_CLI=1로 우회 가능)
+      if (process.env.TFX_ALLOW_DIRECT_CLI === "1") {
+        nudge("[headless-guard] direct CLI mode (TFX_ALLOW_DIRECT_CLI=1)");
       }
       deny(
-        "[headless-guard] codex/gemini 직접 호출은 spawn-session에서 차단됩니다. " +
+        "[headless-guard] codex/gemini 직접 호출(파이프/복합 명령 포함)은 headless-guard에서 차단됩니다. " +
         `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
         DIRECT_CLI_BYPASS_HINT,
       );

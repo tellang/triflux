@@ -46,6 +46,8 @@ export async function startHeadlessTeam({ sessionId, task, lead, agents, subtask
   const failed = results.filter((r) => !r.matched || r.exitCode !== 0);
 
   ok(`헤드리스 완료: ${succeeded.length}성공 / ${failed.length}실패 / ${results.length}전체`);
+  // 머신 파싱용 완료 마커 — background task에서 결과 회수 시점 판단에 사용
+  console.log(`=== HEADLESS_COMPLETE succeeded=${succeeded.length} failed=${failed.length} total=${results.length} ===`);
 
   if (failed.length > 0) {
     for (const r of failed) console.log(`  ${AMBER}✗${RESET} ${r.paneName} (${r.cli}) exit=${r.exitCode}`);
