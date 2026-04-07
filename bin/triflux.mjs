@@ -171,11 +171,12 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     },
   },
   hub: {
-    usage: "tfx hub <start|stop|status> [--port N] [--json]",
+    usage: "tfx hub <start|stop|status|ensure> [--port N] [--json]",
     description: "tfx-hub 프로세스 제어",
     subcommands: {
       start: { usage: "tfx hub start [--port N]" },
       stop: { usage: "tfx hub stop" },
+      ensure: { usage: "tfx hub ensure [--port N] [--json]", description: "헬스체크 + 자동 시작 (idempotent)" },
       status: {
         usage: "tfx hub status [--json]",
         options: [{ name: "--json", type: "boolean", description: "허브 상태를 JSON으로 출력" }],
@@ -3840,12 +3841,93 @@ async function cmdHub(args = [], options = {}) {
       break;
     }
 
+    case "ensure": {
+      // 사일런트 idempotent 보장 — 스킬 환경 프로브용.
+      // Hub 살아있으면 즉시 종료, 죽어있으면 자동 시작 + ready 대기.
+      const portArg = args.indexOf("--port");
+      const ensurePort = portArg !== -1 ? args[portArg + 1] : (process.env.TFX_HUB_PORT || "27888");
+
+      // 1. 이미 healthy?
+      const ensureProbed = await probeHubStatus("127.0.0.1", Number(ensurePort), 1500);
+      if (ensureProbed?.hub?.state === "healthy") {
+        if (json) printJson({ status: "ok", pid: ensureProbed.pid, port: Number(ensurePort) });
+        else process.stdout.write("hub: ok\n");
+        return;
+      }
+
+      // 2. PID 파일 있는데 프로세스 죽었으면 정리
+      if (existsSync(HUB_PID_FILE)) {
+        try {
+          const staleInfo = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
+          process.kill(staleInfo.pid, 0);
+          // 프로세스 살아있지만 healthy가 아님 — 잠시 더 대기
+          const retryDeadline = Date.now() + 3000;
+          while (Date.now() < retryDeadline) {
+            await new Promise((r) => setTimeout(r, 250));
+            const retry = await probeHubStatus("127.0.0.1", Number(ensurePort), 1000);
+            if (retry?.hub?.state === "healthy") {
+              if (json) printJson({ status: "ok", pid: retry.pid, port: Number(ensurePort) });
+              else process.stdout.write("hub: ok\n");
+              return;
+            }
+          }
+        } catch {
+          try { unlinkSync(HUB_PID_FILE); } catch {}
+        }
+      }
+
+      // 3. 시작
+      const serverPath = join(PKG_ROOT, "hub", "server.mjs");
+      if (!existsSync(serverPath)) {
+        if (json) printJson({ status: "error", reason: "server_missing" });
+        else process.stderr.write("hub: server.mjs not found\n");
+        process.exitCode = 1;
+        return;
+      }
+
+      if (process.platform === "win32") {
+        const child = spawn("cmd.exe", ["/c", "start", "/b", "", process.execPath, serverPath], {
+          env: { ...process.env, TFX_HUB_PORT: String(ensurePort) },
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        child.unref();
+      } else {
+        const child = spawn(process.execPath, [serverPath], {
+          env: { ...process.env, TFX_HUB_PORT: String(ensurePort) },
+          detached: true,
+          stdio: "ignore",
+        });
+        child.unref();
+      }
+
+      // 4. ready 대기 (최대 5초)
+      const readyDeadline = Date.now() + 5000;
+      while (Date.now() < readyDeadline) {
+        await new Promise((r) => setTimeout(r, 250));
+        if (existsSync(HUB_PID_FILE)) {
+          const readyProbe = await probeHubStatus("127.0.0.1", Number(ensurePort), 1000);
+          if (readyProbe?.hub?.state === "healthy") {
+            if (json) printJson({ status: "ok", pid: readyProbe.pid, port: Number(ensurePort), started: true });
+            else process.stdout.write("hub: started\n");
+            return;
+          }
+        }
+      }
+
+      // 5. 타임아웃이지만 프로세스는 기동 중일 수 있음
+      if (json) printJson({ status: "starting", port: Number(ensurePort) });
+      else process.stdout.write("hub: starting\n");
+      break;
+    }
+
     default:
       console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET}\n`);
-      console.log(`    ${WHITE_BRIGHT}tfx hub start${RESET}   ${GRAY}허브 데몬 시작${RESET}`);
-      console.log(`    ${DIM}  --port N${RESET}      ${GRAY}포트 지정 (기본 27888)${RESET}`);
-      console.log(`    ${WHITE_BRIGHT}tfx hub stop${RESET}    ${GRAY}허브 중지${RESET}`);
-      console.log(`    ${WHITE_BRIGHT}tfx hub status${RESET}  ${GRAY}상태 확인${RESET}\n`);
+      console.log(`    ${WHITE_BRIGHT}tfx hub start${RESET}    ${GRAY}허브 데몬 시작${RESET}`);
+      console.log(`    ${DIM}  --port N${RESET}       ${GRAY}포트 지정 (기본 27888)${RESET}`);
+      console.log(`    ${WHITE_BRIGHT}tfx hub stop${RESET}     ${GRAY}허브 중지${RESET}`);
+      console.log(`    ${WHITE_BRIGHT}tfx hub status${RESET}   ${GRAY}상태 확인${RESET}`);
+      console.log(`    ${WHITE_BRIGHT}tfx hub ensure${RESET}   ${GRAY}헬스체크 + 자동 시작 (스킬 프로브용)${RESET}\n`);
   }
 }
 
@@ -3886,7 +3968,7 @@ async function main() {
       cmdHandoff(cmdArgs, { json: JSON_OUTPUT });
       return;
     case "hub":
-      await cmdHub(cmdArgs, { json: JSON_OUTPUT && (cmdArgs[0] || "status") === "status" });
+      await cmdHub(cmdArgs, { json: JSON_OUTPUT && ["status", "ensure"].includes(cmdArgs[0] || "status") });
       return;
     case "monitor": {
       const { createMonitor } = await import("../tui/monitor.mjs");
