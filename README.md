@@ -76,31 +76,21 @@ tfx setup
 ### 3. Use
 
 ```bash
-# Light — single model, fast execution
-/tfx-research "React 19 Server Actions best practices"
-/tfx-review
-/tfx-plan "add JWT auth middleware"
-
-# Deep — 3-party consensus for critical work
-/tfx-deep-research "microservice architecture comparison 2026"
+# 3-party consensus — three models argue, only consensus survives
 /tfx-deep-review
 /tfx-deep-plan "migrate REST to GraphQL"
 
-# Debate — get 3 independent opinions
-/tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
+# Swarm — split PRD into shards, parallel worktree execution
+/tfx-swarm
 
-# Persistence — don't stop until done
-/tfx-persist "implement full auth flow with tests"
-
-# Team — multi-CLI parallel orchestration
+# Team — Claude + Codex + Gemini on parallel tasks
 /tfx-multi "refactor auth + update UI + add tests"
 
-# Monitor — real-time routing dashboard
-tfx monitor
+# Persist — don't stop until done, 3-party verified
+/tfx-persist "implement full auth flow with tests"
 
-# Remote — spawn Claude sessions on other machines
-/tfx-remote-setup           # interactive host wizard
-/tfx-remote-spawn "run security review on my-server"
+# Remote — spawn sessions on other machines
+/tfx-remote-spawn "run security review on ryzen5-7600"
 ```
 
 > **Note**: Deep skills require **psmux** (or tmux), **triflux Hub**, **Codex CLI**, and **Gemini CLI** for full Tri-CLI consensus. Without these, skills automatically degrade to Claude-only mode. Run `tfx doctor` to check your environment.
