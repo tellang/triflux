@@ -1,12 +1,16 @@
 // tests/unit/swarm-hypervisor.test.mjs — swarm-hypervisor 유닛 테스트
-import { describe, it, beforeEach, afterEach } from 'node:test';
-import assert from 'node:assert/strict';
-import { join } from 'node:path';
-import { mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 
-import { createSwarmHypervisor, SWARM_STATES } from '../../hub/team/swarm-hypervisor.mjs';
-import { planSwarm } from '../../hub/team/swarm-planner.mjs';
+import assert from "node:assert/strict";
+import { mkdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+
+import {
+  createSwarmHypervisor,
+  SWARM_STATES,
+} from "../../hub/team/swarm-hypervisor.mjs";
+import { planSwarm } from "../../hub/team/swarm-planner.mjs";
 
 process.setMaxListeners(50);
 
@@ -46,46 +50,129 @@ const CRITICAL_PRD = `
 
 // ── Tests ────────────────────────────────────────────────────
 
-describe('swarm-hypervisor', () => {
+describe("swarm-hypervisor", () => {
   let workdir;
   let logsDir;
   let hv;
 
   beforeEach(() => {
     workdir = makeTmpDir();
-    logsDir = join(workdir, 'logs');
+    logsDir = join(workdir, "logs");
     mkdirSync(logsDir, { recursive: true });
     hv = null;
   });
 
   afterEach(async () => {
     if (hv) {
-      try { await hv.shutdown('test_cleanup'); } catch { /* ignore */ }
+      try {
+        await hv.shutdown("test_cleanup");
+      } catch {
+        /* ignore */
+      }
     }
-    try { rmSync(workdir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try {
+      rmSync(workdir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   });
 
-  describe('createSwarmHypervisor', () => {
-    it('requires workdir and logsDir', () => {
+  describe("createSwarmHypervisor", () => {
+    it("requires workdir and logsDir", () => {
       assert.throws(() => createSwarmHypervisor({}), /workdir is required/);
-      assert.throws(() => createSwarmHypervisor({ workdir }), /logsDir is required/);
+      assert.throws(
+        () => createSwarmHypervisor({ workdir }),
+        /logsDir is required/,
+      );
     });
 
-    it('creates hypervisor in PLANNING state', () => {
+    it("creates hypervisor in PLANNING state", () => {
       hv = createSwarmHypervisor({ workdir, logsDir });
       assert.equal(hv.state, SWARM_STATES.PLANNING);
     });
+
+    it("creates one shared mesh registry for all shard conductors", () => {
+      const plan = planSwarm(null, { content: SIMPLE_PRD });
+      const conductorOpts = [];
+      const registry = {
+        register() {},
+        unregister() {},
+        discover() {
+          return [];
+        },
+        getAgent() {
+          return null;
+        },
+        listAll() {
+          return [];
+        },
+        clear() {},
+      };
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        _deps: {
+          createRegistry: () => registry,
+          createConductor: (opts) => {
+            conductorOpts.push(opts);
+            return {
+              spawnSession() {},
+              on() {},
+              getSnapshot() {
+                return [];
+              },
+              shutdown() {
+                return Promise.resolve();
+              },
+            };
+          },
+        },
+      });
+
+      hv.launch(plan);
+
+      assert.equal(hv.getMeshRegistry(), registry);
+      assert.equal(conductorOpts.length, 2);
+      assert.ok(conductorOpts.every((opts) => opts.meshRegistry === registry));
+      assert.ok(conductorOpts.every((opts) => opts.enableMesh === true));
+    });
+
+    it("falls back to a noop mesh registry when registry creation fails", async () => {
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        _deps: {
+          createRegistry: () => {
+            throw new Error("boom");
+          },
+        },
+      });
+
+      const registry = hv.getMeshRegistry();
+      assert.deepEqual(registry.discover("any-capability"), []);
+      assert.equal(registry.getAgent("missing"), null);
+      assert.deepEqual(registry.listAll(), []);
+      assert.doesNotThrow(() => registry.clear());
+
+      await hv.shutdown("test_fallback_cleanup");
+      hv = null;
+    });
   });
 
-  describe('launch', () => {
-    it('transitions to RUNNING state on launch', async () => {
+  describe("launch", () => {
+    it("transitions to RUNNING state on launch", async () => {
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       const status = hv.launch(plan);
@@ -94,44 +181,56 @@ describe('swarm-hypervisor', () => {
       assert.ok(status.mergeOrder.length > 0);
     });
 
-    it('prevents double launch', async () => {
+    it("prevents double launch", async () => {
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       hv.launch(plan);
       assert.throws(() => hv.launch(plan), /Cannot launch/);
     });
 
-    it('launches redundant workers for critical shards', async () => {
+    it("launches redundant workers for critical shards", async () => {
       const plan = planSwarm(null, { content: CRITICAL_PRD });
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       hv.launch(plan);
-      assert.deepEqual(plan.criticalShards, ['critical-shard']);
+      assert.deepEqual(plan.criticalShards, ["critical-shard"]);
     });
   });
 
-  describe('getStatus', () => {
-    it('returns full status snapshot', async () => {
+  describe("getStatus", () => {
+    it("returns full status snapshot", async () => {
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       hv.launch(plan);
@@ -145,94 +244,149 @@ describe('swarm-hypervisor', () => {
     });
   });
 
-  describe('validateResult', () => {
-    it('passes when worker modifies only its leased files', async () => {
+  describe("validateResult", () => {
+    it("passes when worker modifies only its leased files", async () => {
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       hv.launch(plan);
 
-      const result = hv.validateResult('worker-a', ['src/a.mjs']);
+      const result = hv.validateResult("worker-a", ["src/a.mjs"]);
       assert.equal(result.ok, true);
       assert.equal(result.violations.length, 0);
     });
 
-    it('detects violations when worker modifies other shard files', async () => {
+    it("detects violations when worker modifies other shard files", async () => {
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       hv.launch(plan);
 
       // worker-a tries to modify worker-b's file
-      const result = hv.validateResult('worker-a', ['src/b.mjs']);
+      const result = hv.validateResult("worker-a", ["src/b.mjs"]);
       assert.equal(result.ok, false);
       assert.equal(result.violations.length, 1);
     });
   });
 
-  describe('shutdown', () => {
-    it('transitions to FAILED state on early shutdown', async () => {
+  describe("shutdown", () => {
+    it("transitions to FAILED state on early shutdown", async () => {
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       hv.launch(plan);
-      await hv.shutdown('test_abort');
+      await hv.shutdown("test_abort");
 
       assert.equal(hv.state, SWARM_STATES.FAILED);
       hv = null; // afterEach won't call it again
     });
 
-    it('emits shutdown event', async () => {
+    it("emits shutdown event", async () => {
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       let emitted = false;
-      hv.on('shutdown', () => { emitted = true; });
+      hv.on("shutdown", () => {
+        emitted = true;
+      });
 
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       hv.launch(plan);
-      await hv.shutdown('test');
+      await hv.shutdown("test");
 
       assert.equal(emitted, true);
       hv = null; // afterEach won't call it again
     });
+
+    it("clears the shared mesh registry during shutdown", async () => {
+      let cleared = 0;
+      const registry = {
+        register() {},
+        unregister() {},
+        discover() {
+          return [];
+        },
+        getAgent() {
+          return null;
+        },
+        listAll() {
+          return [];
+        },
+        clear() {
+          cleared += 1;
+        },
+      };
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        _deps: {
+          createRegistry: () => registry,
+        },
+      });
+
+      await hv.shutdown("test_registry_cleanup");
+
+      assert.equal(cleared, 1);
+      hv = null;
+    });
   });
 
-  describe('events', () => {
-    it('emits stateChange events', async () => {
+  describe("events", () => {
+    it("emits stateChange events", async () => {
       hv = createSwarmHypervisor({
         workdir,
         logsDir,
         maxRestarts: 0,
         graceMs: 200,
-        probeOpts: { intervalMs: 999_999, l1ThresholdMs: 999_999, l3ThresholdMs: 999_999 },
+        probeOpts: {
+          intervalMs: 999_999,
+          l1ThresholdMs: 999_999,
+          l3ThresholdMs: 999_999,
+        },
       });
 
       const events = [];
-      hv.on('stateChange', (e) => events.push(e));
+      hv.on("stateChange", (e) => events.push(e));
 
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       hv.launch(plan);
