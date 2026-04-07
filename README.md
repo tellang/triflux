@@ -34,7 +34,7 @@
   <a href="#42-skills">42 Skills</a> &middot;
   <a href="#deep-vs-light">Deep vs Light</a> &middot;
   <a href="#architecture">Architecture</a> &middot;
-  <a href="#tui-routing-monitor">TUI Monitor</a> &middot;
+  <a href="#under-the-hood">Under the Hood</a> &middot;
   <a href="#security">Security</a>
 </p>
 
@@ -338,6 +338,85 @@ graph TD
 ```
 
 </details>
+
+---
+
+## Under the Hood
+
+### Singleton MCP Hub with Dual-Protocol IPC
+
+triflux Hub runs as a **singleton daemon** per machine. A filesystem lock prevents duplicate instances.
+
+```
+Local agents ──→ Named Pipe (NDJSON, sub-ms latency) ──→ Hub
+Remote/Dashboard ──→ HTTP/REST ──────────────────────→ Hub
+```
+
+The bridge client tries Named Pipe first and falls back to HTTP automatically. Sessions auto-expire after 30 minutes, and the Hub self-terminates when idle. Run `tfx hub ensure` to guarantee the Hub is alive from any context.
+
+### Reflexion Adaptive Learning
+
+Errors become knowledge automatically. The Reflexion Engine runs a closed-loop learning pipeline:
+
+```
+safety-guard blocks command
+  → error normalized (paths, timestamps, UUIDs stripped)
+  → pattern stored in pending-penalties
+  → promoted to adaptive rule (Bayesian confidence scoring)
+  → injected into CLAUDE.md when confidence > threshold
+
+Three-tier memory:
+  Tier 1 (Session)   → cleared on session end
+  Tier 2 (Project)   → decays -0.2 confidence per 5 unobserved sessions
+  Tier 3 (Permanent) → auto-injected into CLAUDE.md as machine-readable rules
+```
+
+A blocked command in Session 1 becomes a proactive warning in Session 2 and eventually a permanent instruction. Your AI agent literally gets smarter over time.
+
+### Pipeline Quality Gates
+
+Every Deep task runs through a **10-phase state machine** with quality gates:
+
+```
+plan → PRD → confidence gate → execute → deslop → verify → selfcheck → complete
+                                                              ↓
+                                                          fix (max 3) → retry
+```
+
+- **Confidence Gate** (pre-execution): 5 weighted criteria must score >= 90% before execution starts
+- **Hallucination Detection** (post-execution): 7 regex patterns catch AI claims without evidence:
+  - "tests pass" without test output
+  - "performance improved" without benchmarks
+  - "backward compatible" without verification
+  - "no changes needed" when diff exists
+- **Bounded loops**: Fix attempts capped at 3, ralph iterations at 10. State persists in SQLite for crash recovery.
+
+### 5-Tier Adaptive HUD
+
+The Claude Code status bar auto-adapts to any terminal width:
+
+```
+ full (120+ cols)  ██████░░░░ claude 52%  ██████░░░░ codex 48%  savings: $2.40
+ compact (80 cols) c:52% x:48% g:Free  sv:$2.40  CTX:67%
+ minimal (60 cols) c:52% x:48% sv:$2.40
+ micro (<60 cols)  c52 x48 sv$2
+ nano (<40 cols)   c:52%/x:48%
+```
+
+Zero config. Open a vertical split pane and the HUD auto-collapses. Close it and it expands back. When `tfx-multi` is active, a live worker row appears showing per-CLI progress: `x✓ g⋯ c✗` (completed/running/failed).
+
+Context token attribution tracks usage by skill, file, and tool call, with warnings at 60%/80%/90% context fill.
+
+### Windows Terminal Orchestration
+
+triflux doesn't just run in a terminal -- it **orchestrates** it. The WT Manager API provides:
+
+- **Tab creation** with PID-tracked lifecycle (temp file polling for readiness)
+- **Split-pane layouts** via `applySplitLayout()` for multi-agent dashboards
+- **Dead tab pruning** using cross-platform PID liveness detection
+- **Base64 PowerShell encoding** eliminating all quoting/escaping issues
+
+Every direct `wt.exe` call is blocked by safety-guard. Agents can only use the managed API path, preventing uncontrolled terminal sprawl.
 
 ---
 
