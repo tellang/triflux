@@ -39,8 +39,14 @@ export const DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 export const CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
 export const CODEX_QUOTA_CACHE_PATH = join(homedir(), ".claude", "cache", "codex-rate-limits-cache.json");
-export const CODEX_QUOTA_STALE_MS = 15 * 1000; // 15초
+export const CODEX_QUOTA_STALE_MS = 30 * 1000; // 30초
 export const CODEX_MIN_BUCKETS = 2;
+
+// Spawn lock (중복 refresh 방지)
+export const CODEX_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".codex-refresh-lock");
+export const GEMINI_QUOTA_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".gemini-quota-refresh-lock");
+export const GEMINI_SESSION_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".gemini-session-refresh-lock");
+export const SPAWN_LOCK_TTL_MS = 30 * 1000; // 30초 spawn dedup
 
 // Gemini 쿼터 API 관련
 export const GEMINI_OAUTH_PATH = join(homedir(), ".gemini", "oauth_creds.json");
@@ -58,7 +64,7 @@ export const LEGACY_SV_ACCUMULATOR = join(homedir(), ".omc", "state", "sv-accumu
 
 export const GEMINI_RPM_WINDOW_MS = 60 * 1000; // 60초 슬라이딩 윈도우
 export const GEMINI_QUOTA_STALE_MS = 5 * 60 * 1000; // 5분
-export const GEMINI_SESSION_STALE_MS = 15 * 1000; // 15초
+export const GEMINI_SESSION_STALE_MS = 30 * 1000; // 30초
 export const GEMINI_API_TIMEOUT_MS = 3000; // 3초
 
 export const ACCOUNT_LABEL_WIDTH = 10;

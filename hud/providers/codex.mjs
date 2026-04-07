@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import {
   CODEX_AUTH_PATH, CODEX_QUOTA_CACHE_PATH, CODEX_QUOTA_STALE_MS,
   CODEX_MIN_BUCKETS, CODEX_REFRESH_FLAG,
+  CODEX_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
 import { readJson, writeJsonSafe, decodeJwtEmail } from "../utils.mjs";
 
@@ -154,6 +155,16 @@ export function refreshCodexRateLimitsCache() {
 export function scheduleCodexRateLimitRefresh() {
   const scriptPath = process.argv[1];
   if (!scriptPath) return;
+
+  // 스폰 락: 30초 내 이미 스폰했으면 중복 방지
+  try {
+    if (existsSync(CODEX_REFRESH_LOCK_PATH)) {
+      const lockAge = Date.now() - readJson(CODEX_REFRESH_LOCK_PATH, {}).t;
+      if (lockAge < SPAWN_LOCK_TTL_MS) return;
+    }
+    writeJsonSafe(CODEX_REFRESH_LOCK_PATH, { t: Date.now() });
+  } catch { /* 락 실패 무시 — 스폰 진행 */ }
+
   try {
     const child = spawn(process.execPath, [scriptPath, CODEX_REFRESH_FLAG], {
       detached: true,
