@@ -117,6 +117,13 @@ describe("bridge.mjs parseArgs()", () => {
     assert.equal(args.command, undefined);
     assert.equal(args["job-id"], undefined);
   });
+
+  it("위치 인자를 1-based 키로 함께 노출해야 한다", () => {
+    const args = parseArgs(["approval", "승인 요청", "cli"]);
+    assert.equal(args[1], "approval");
+    assert.equal(args[2], "승인 요청");
+    assert.equal(args[3], "cli");
+  });
 });
 
 describe("bridge.mjs parseJsonSafe()", () => {

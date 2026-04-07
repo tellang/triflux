@@ -180,6 +180,21 @@ const HUB_OPERATIONS = Object.freeze({
     action: "delegator_status",
     httpPath: "/bridge/delegator/status",
   },
+  "hitl-request": {
+    transport: "command",
+    action: "hitl_request",
+    httpPath: "/bridge/hitl/request",
+  },
+  "hitl-submit": {
+    transport: "command",
+    action: "hitl_submit",
+    httpPath: "/bridge/hitl/submit",
+  },
+  "hitl-pending": {
+    transport: "query",
+    action: "hitl_pending",
+    httpPath: "/bridge/hitl/pending",
+  },
 });
 
 export async function requestJson(
@@ -315,8 +330,9 @@ async function pipeQuery(action, payload, timeoutMs = 3000) {
 }
 
 export function parseArgs(argv) {
-  const { values } = nodeParseArgs({
+  const { values, positionals } = nodeParseArgs({
     args: argv,
+    allowPositionals: true,
     options: {
       agent: { type: "string" },
       cli: { type: "string" },
@@ -380,7 +396,11 @@ export function parseArgs(argv) {
     },
     strict: false,
   });
-  return values;
+  const parsed = { ...values };
+  positionals.forEach((value, index) => {
+    parsed[index + 1] = value;
+  });
+  return parsed;
 }
 
 export function parseJsonSafe(raw, fallback = null) {
@@ -959,6 +979,35 @@ async function cmdDelegatorStatus(args) {
   return emitJson(outcome?.result || unavailableResult());
 }
 
+async function cmdHitlRequest(args) {
+  const body = {
+    kind: args[1],
+    prompt: args[2],
+    requester_agent: args[3] || "cli",
+  };
+  const outcome = await requestHub(
+    HUB_OPERATIONS["hitl-request"],
+    body,
+    120000,
+  );
+  return emitJson(outcome?.result || unavailableResult());
+}
+
+async function cmdHitlSubmit(args) {
+  const body = {
+    request_id: args[1],
+    action: args[2] || "accept",
+    content: args[3],
+  };
+  const outcome = await requestHub(HUB_OPERATIONS["hitl-submit"], body, 120000);
+  return emitJson(outcome?.result || unavailableResult());
+}
+
+async function cmdHitlPending() {
+  const outcome = await requestHub(HUB_OPERATIONS["hitl-pending"], {}, 5000);
+  return emitJson(outcome?.result || unavailableResult());
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
@@ -1008,9 +1057,15 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdDelegatorReply(args);
     case "delegator-status":
       return await cmdDelegatorStatus(args);
+    case "hitl-request":
+      return await cmdHitlRequest(args);
+    case "hitl-submit":
+      return await cmdHitlSubmit(args);
+    case "hitl-pending":
+      return await cmdHitlPending(args);
     default:
       console.error(
-        "사용법: bridge.mjs <register|result|control|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status> [--옵션]",
+        "사용법: bridge.mjs <register|result|control|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending> [--옵션]",
       );
       process.exit(1);
   }
