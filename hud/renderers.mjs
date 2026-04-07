@@ -123,6 +123,38 @@ export function getTeamRow(currentTier) {
 }
 
 // ============================================================================
+// Mission Board 렌더러
+// ============================================================================
+
+const STATUS_ICON = {
+  active: "*",
+  idle: ".",
+  done: "+",
+  failed: "!",
+};
+
+/**
+ * Mission Board 상태를 1줄 compact 포맷으로 렌더링한다.
+ * 예: "MB: exec:+ ui:* perf:. [2/3 67%]"
+ * @param {{ agents: Array<{name: string, status: string, progress: number}>, dagLevel: number, totalProgress: number } | null} state
+ * @returns {string}
+ */
+export function renderMissionBoard(state) {
+  if (!state) return "";
+
+  const { agents, totalProgress } = state;
+  const done = agents.filter((a) => a.status === "done").length;
+  const total = agents.length;
+
+  const parts = agents.map((a) => {
+    const icon = STATUS_ICON[a.status] ?? "?";
+    return `${a.name}:${icon}`;
+  });
+
+  return `MB: ${parts.join(" ")} [${done}/${total} ${totalProgress}%]`;
+}
+
+// ============================================================================
 // 행 정렬 렌더링
 // ============================================================================
 export function renderAlignedRows(rows) {
