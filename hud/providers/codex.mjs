@@ -11,6 +11,27 @@ import {
 } from "../constants.mjs";
 import { readJson, writeJsonSafe, decodeJwtEmail } from "../utils.mjs";
 
+// window_minutes 기반 5h/1w 슬롯 분류
+export function classifyBucket(bucket) {
+  if (!bucket?.window_minutes) return null;
+  if (bucket.window_minutes <= 360) return "five_hour";
+  if (bucket.window_minutes >= 1440) return "weekly";
+  return null;
+}
+
+// primary/secondary를 window_minutes 기준으로 정규화
+// HUD 규약: primary=5h, secondary=1w
+export function normalizeBuckets(rl) {
+  let primary = null;
+  let secondary = null;
+  for (const bucket of [rl.primary, rl.secondary].filter(Boolean)) {
+    const kind = classifyBucket(bucket);
+    if (kind === "five_hour") primary = bucket;
+    else if (kind === "weekly") secondary = bucket;
+  }
+  return { primary, secondary };
+}
+
 export function getCodexEmail() {
   try {
     const auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, "utf-8"));
@@ -71,10 +92,11 @@ export function getCodexRateLimits() {
             const evt = JSON.parse(line);
             const rl = evt?.payload?.rate_limits;
             if (rl?.limit_id && !mergedBuckets[rl.limit_id]) {
-              // 실제 rate_limits: limit_id별 최신 이벤트만 기록
+              // window_minutes 기준으로 5h/1w 슬롯 정규화
+              const { primary, secondary } = normalizeBuckets(rl);
               mergedBuckets[rl.limit_id] = {
                 limitId: rl.limit_id, limitName: rl.limit_name,
-                primary: rl.primary, secondary: rl.secondary,
+                primary, secondary,
                 credits: rl.credits,
                 tokens: evt.payload?.info?.total_token_usage,
                 contextWindow: evt.payload?.info?.model_context_window,
