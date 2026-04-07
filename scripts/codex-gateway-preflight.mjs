@@ -4,22 +4,45 @@
 // gateway가 alive인지 확인하고 죽었으면 기동한다.
 // 실제 MCP 기능은 없음 (no-op). 역할은 gateway 보장뿐.
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PROBE_PORT = 8100;
 const PROBE_TIMEOUT_MS = 2000;
 const STARTUP_WAIT_MS = 6000;
 const POLL_MS = 500;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5분
+const CACHE_FILE = join(tmpdir(), 'tfx-gateway-alive.json');
+
+function readCache() {
+  try {
+    if (!existsSync(CACHE_FILE)) return null;
+    const data = JSON.parse(readFileSync(CACHE_FILE, 'utf8'));
+    if (Date.now() - data.ts < CACHE_TTL_MS) return data;
+  } catch { /* ignore */ }
+  return null;
+}
+
+function writeCache() {
+  try {
+    writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), alive: true }));
+  } catch { /* ignore */ }
+}
 
 async function isGatewayAlive() {
+  // B) Preflight 캐시: 5분 이내 확인했으면 프로브 스킵
+  const cached = readCache();
+  if (cached) return true;
+
   try {
     const res = await fetch(`http://127.0.0.1:${PROBE_PORT}/healthz`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    return res.ok;
+    if (res.ok) { writeCache(); return true; }
+    return false;
   } catch {
     return false;
   }

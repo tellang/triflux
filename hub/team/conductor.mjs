@@ -22,6 +22,7 @@ import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
 import { killProcess } from "../platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
+import { getConductorRegistry } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
@@ -85,6 +86,7 @@ export function createConductor(opts = {}) {
   const emitter = new EventEmitter();
   const sessions = new Map();
   let shuttingDown = false;
+  let publicApi = null;
 
   // 공유 event log (모든 세션 이벤트를 하나의 JSONL에)
   const eventLog = createEventLog(join(logsDir, "conductor-events.jsonl"));
@@ -128,6 +130,7 @@ export function createConductor(opts = {}) {
     // Terminal state cleanup
     if (TERMINAL_STATES.has(nextState)) {
       session.probe?.stop();
+      getConductorRegistry()?.unregister?.(session.id, publicApi);
     }
 
     return true;
@@ -654,6 +657,7 @@ export function createConductor(opts = {}) {
     };
 
     sessions.set(resolvedConfig.id, session);
+    getConductorRegistry()?.register?.(resolvedConfig.id, publicApi);
 
     if (resolvedConfig.remote) {
       startRemoteSession(session);
@@ -792,5 +796,7 @@ export function createConductor(opts = {}) {
     }
   }
 
-  return Object.freeze(conductor);
+  const frozenApi = Object.freeze(conductor);
+  getConductorRegistry().register(frozenApi);
+  return frozenApi;
 }
