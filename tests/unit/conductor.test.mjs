@@ -1,11 +1,13 @@
 // tests/unit/conductor.test.mjs — conductor.mjs 상태 머신 유닛 테스트
-import { describe, it, beforeEach, afterEach } from "node:test";
+
 import assert from "node:assert/strict";
-import { join } from "node:path";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { createConductor, STATES } from "../../hub/team/conductor.mjs";
+import { createRegistry } from "../../mesh/mesh-registry.mjs";
 
 // 각 테스트가 createConductor를 호출할 때마다 process에 SIGINT/SIGTERM 리스너가
 // 추가된다. 테스트 파일 전체 실행 시 11개를 초과해 MaxListenersExceededWarning이
@@ -26,9 +28,9 @@ function makeConductor(logsDir) {
   return createConductor({
     logsDir,
     maxRestarts: 1,
-    graceMs: 200,           // 200ms grace — 테스트 시간 단축
+    graceMs: 200, // 200ms grace — 테스트 시간 단축
     probeOpts: {
-      intervalMs: 999_999,  // probe 자동 발화 억제
+      intervalMs: 999_999, // probe 자동 발화 억제
       l1ThresholdMs: 999_999,
       l3ThresholdMs: 999_999,
     },
@@ -52,8 +54,13 @@ function waitFor(fn, timeoutMs = 3000, intervalMs = 50) {
     const check = () => {
       try {
         const result = fn();
-        if (result) { resolve(result); return; }
-      } catch { /* 아직 조건 미충족 */ }
+        if (result) {
+          resolve(result);
+          return;
+        }
+      } catch {
+        /* 아직 조건 미충족 */
+      }
       if (Date.now() - start > timeoutMs) {
         reject(new Error(`waitFor 타임아웃 (${timeoutMs}ms)`));
         return;
@@ -76,8 +83,16 @@ beforeEach(() => {
 
 afterEach(async () => {
   // 각 테스트 후 conductor와 tmpdir 정리
-  try { await conductor.shutdown("afterEach_cleanup"); } catch { /* 이미 shutdown */ }
-  try { rmSync(logsDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    await conductor.shutdown("afterEach_cleanup");
+  } catch {
+    /* 이미 shutdown */
+  }
+  try {
+    rmSync(logsDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 // ── 1. STATES export 검증 ────────────────────────────────────────────────────
@@ -132,10 +147,7 @@ describe("conductor: STATES export", () => {
 
 describe("conductor: createConductor", () => {
   it("logsDir 없이 생성하면 에러를 던져야 한다", () => {
-    assert.throws(
-      () => createConductor({}),
-      /logsDir is required/,
-    );
+    assert.throws(() => createConductor({}), /logsDir is required/);
   });
 
   it("conductor는 공개 API를 노출해야 한다", () => {
@@ -143,6 +155,7 @@ describe("conductor: createConductor", () => {
     assert.equal(typeof conductor.killSession, "function");
     assert.equal(typeof conductor.sendInput, "function");
     assert.equal(typeof conductor.getSnapshot, "function");
+    assert.equal(typeof conductor.getMeshRegistry, "function");
     assert.equal(typeof conductor.shutdown, "function");
     assert.equal(typeof conductor.on, "function");
     assert.equal(typeof conductor.off, "function");
@@ -154,6 +167,45 @@ describe("conductor: createConductor", () => {
 
   it("초기 isShuttingDown은 false여야 한다", () => {
     assert.equal(conductor.isShuttingDown, false);
+  });
+
+  it("기본값으로 mesh registry가 자동 연결되어야 한다", () => {
+    assert.ok(conductor.getMeshRegistry());
+  });
+
+  it("enableMesh가 false면 mesh registry가 비활성화되어야 한다", async () => {
+    await conductor.shutdown("disable_mesh_recreate");
+    conductor = createConductor({
+      logsDir,
+      enableMesh: false,
+      maxRestarts: 1,
+      graceMs: 200,
+      probeOpts: {
+        intervalMs: 999_999,
+        l1ThresholdMs: 999_999,
+        l3ThresholdMs: 999_999,
+      },
+    });
+
+    assert.equal(conductor.getMeshRegistry(), null);
+  });
+
+  it("주입된 mesh registry를 그대로 노출해야 한다", async () => {
+    const meshRegistry = createRegistry();
+    await conductor.shutdown("inject_mesh_registry");
+    conductor = createConductor({
+      logsDir,
+      meshRegistry,
+      maxRestarts: 1,
+      graceMs: 200,
+      probeOpts: {
+        intervalMs: 999_999,
+        l1ThresholdMs: 999_999,
+        l3ThresholdMs: 999_999,
+      },
+    });
+
+    assert.equal(conductor.getMeshRegistry(), meshRegistry);
   });
 });
 
@@ -192,10 +244,7 @@ describe("conductor: 중복 ID 에러", () => {
   it("같은 ID로 두 번 spawn하면 에러를 던져야 한다", () => {
     const cfg = minConfig({ id: "dup-id" });
     conductor.spawnSession(cfg);
-    assert.throws(
-      () => conductor.spawnSession(cfg),
-      /already exists/,
-    );
+    assert.throws(() => conductor.spawnSession(cfg), /already exists/);
   });
 });
 
@@ -218,7 +267,12 @@ describe("conductor: agent 누락 에러", () => {
 
   it("알 수 없는 agent로 spawnSession하면 에러를 던져야 한다", () => {
     assert.throws(
-      () => conductor.spawnSession({ id: "bad-agent", agent: "unknown_cli", prompt: "test" }),
+      () =>
+        conductor.spawnSession({
+          id: "bad-agent",
+          agent: "unknown_cli",
+          prompt: "test",
+        }),
       /Unknown agent/,
     );
   });
@@ -246,7 +300,10 @@ describe("conductor: getSnapshot 구조", () => {
     conductor.spawnSession(minConfig({ id: "snap-state" }));
     const [entry] = conductor.getSnapshot();
     assert.ok("state" in entry, "state 필드 없음");
-    assert.ok(Object.values(STATES).includes(entry.state), `예상치 못한 state: ${entry.state}`);
+    assert.ok(
+      Object.values(STATES).includes(entry.state),
+      `예상치 못한 state: ${entry.state}`,
+    );
   });
 
   it("스냅샷 항목이 restarts 필드를 포함해야 한다", () => {
@@ -297,7 +354,9 @@ describe("conductor: killSession", () => {
     const cfg = minConfig({ id: "double-kill" });
     conductor.spawnSession(cfg);
     await conductor.killSession(cfg.id, "first_kill");
-    await assert.doesNotReject(() => conductor.killSession(cfg.id, "second_kill"));
+    await assert.doesNotReject(() =>
+      conductor.killSession(cfg.id, "second_kill"),
+    );
   });
 });
 
@@ -316,17 +375,31 @@ describe("conductor: shutdown", () => {
 
   it("shutdown 후 spawnSession을 호출하면 에러를 던져야 한다", async () => {
     await conductor.shutdown("test_shutdown");
-    assert.throws(
-      () => conductor.spawnSession(minConfig()),
-      /shutting down/i,
-    );
+    assert.throws(() => conductor.spawnSession(minConfig()), /shutting down/i);
   });
 
   it("shutdown은 shutdown 이벤트를 emit해야 한다", async () => {
     let fired = false;
-    conductor.on("shutdown", () => { fired = true; });
+    conductor.on("shutdown", () => {
+      fired = true;
+    });
     await conductor.shutdown("emit_test");
     assert.equal(fired, true);
+  });
+
+  it("shutdown 시 mesh bridge가 detach되어 registry를 정리해야 한다", async () => {
+    const cfg = minConfig({ id: "shutdown-mesh-session" });
+    conductor.spawnSession(cfg);
+
+    await waitFor(() =>
+      conductor.getMeshRegistry()?.getAgent(`session:${cfg.id}`),
+    );
+    await conductor.shutdown("mesh_detach_test");
+
+    assert.equal(
+      conductor.getMeshRegistry()?.getAgent(`session:${cfg.id}`),
+      null,
+    );
   });
 
   it("shutdown 후 살아있는 세션은 DEAD 상태로 전이해야 한다", async () => {
@@ -338,8 +411,8 @@ describe("conductor: shutdown", () => {
     const [entry] = conductor.getSnapshot();
     assert.ok(
       entry.state === STATES.DEAD ||
-      entry.state === STATES.COMPLETED ||
-      entry.state === STATES.FAILED,
+        entry.state === STATES.COMPLETED ||
+        entry.state === STATES.FAILED,
       `예상치 못한 state: ${entry.state}`,
     );
   });
@@ -398,7 +471,10 @@ describe("conductor: eventLogPath", () => {
   it("eventLogPath는 logsDir 내 .jsonl 파일을 가리켜야 한다", () => {
     const logPath = conductor.eventLogPath;
     assert.ok(typeof logPath === "string");
-    assert.ok(logPath.endsWith(".jsonl"), `예상: .jsonl 확장자, 실제: ${logPath}`);
+    assert.ok(
+      logPath.endsWith(".jsonl"),
+      `예상: .jsonl 확장자, 실제: ${logPath}`,
+    );
     assert.ok(logPath.includes("conductor-events"));
   });
 });

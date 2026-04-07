@@ -8,43 +8,54 @@
 // 3. Auto-restart (maxRestarts=3)
 // 4. JSONL event log (블랙박스 리코더)
 
-import { spawn, execFile } from 'node:child_process';
-import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
-import { mkdirSync, createWriteStream, readFileSync, copyFileSync } from 'node:fs';
-import { EventEmitter } from 'node:events';
-
-import { killProcess, } from '../platform.mjs';
-import { createEventLog } from './event-log.mjs';
-import { createHealthProbe } from './health-probe.mjs';
-import { createRemoteProbe } from './remote-probe.mjs';
-import { buildLauncher } from './launcher-template.mjs';
-import { broker } from '../account-broker.mjs';
+import { execFile, spawn } from "node:child_process";
+import { EventEmitter } from "node:events";
+import {
+  copyFileSync,
+  createWriteStream,
+  mkdirSync,
+  readFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { createRegistry } from "../../mesh/mesh-registry.mjs";
+import { broker } from "../account-broker.mjs";
+import { killProcess } from "../platform.mjs";
+import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
+import { createEventLog } from "./event-log.mjs";
+import { createHealthProbe } from "./health-probe.mjs";
+import { buildLauncher } from "./launcher-template.mjs";
+import { createRemoteProbe } from "./remote-probe.mjs";
 
 /** 세션 상태 */
 export const STATES = Object.freeze({
-  INIT: 'init',
-  STARTING: 'starting',
-  HEALTHY: 'healthy',
-  STALLED: 'stalled',
-  INPUT_WAIT: 'input_wait',
-  FAILED: 'failed',
-  RESTARTING: 'restarting',
-  DEAD: 'dead',
-  COMPLETED: 'completed',
+  INIT: "init",
+  STARTING: "starting",
+  HEALTHY: "healthy",
+  STALLED: "stalled",
+  INPUT_WAIT: "input_wait",
+  FAILED: "failed",
+  RESTARTING: "restarting",
+  DEAD: "dead",
+  COMPLETED: "completed",
 });
 
 /** 유효한 상태 전이 테이블 */
 const TRANSITIONS = Object.freeze({
-  [STATES.INIT]:       [STATES.STARTING],
-  [STATES.STARTING]:   [STATES.HEALTHY, STATES.FAILED],
-  [STATES.HEALTHY]:    [STATES.STALLED, STATES.INPUT_WAIT, STATES.FAILED, STATES.COMPLETED],
-  [STATES.STALLED]:    [STATES.HEALTHY, STATES.FAILED],
+  [STATES.INIT]: [STATES.STARTING],
+  [STATES.STARTING]: [STATES.HEALTHY, STATES.FAILED],
+  [STATES.HEALTHY]: [
+    STATES.STALLED,
+    STATES.INPUT_WAIT,
+    STATES.FAILED,
+    STATES.COMPLETED,
+  ],
+  [STATES.STALLED]: [STATES.HEALTHY, STATES.FAILED],
   [STATES.INPUT_WAIT]: [STATES.HEALTHY, STATES.FAILED],
-  [STATES.FAILED]:     [STATES.RESTARTING, STATES.DEAD],
+  [STATES.FAILED]: [STATES.RESTARTING, STATES.DEAD],
   [STATES.RESTARTING]: [STATES.STARTING],
-  [STATES.DEAD]:       [],
-  [STATES.COMPLETED]:  [],
+  [STATES.DEAD]: [],
+  [STATES.COMPLETED]: [],
 });
 
 const TERMINAL_STATES = new Set([STATES.DEAD, STATES.COMPLETED]);
@@ -68,7 +79,7 @@ export function createConductor(opts = {}) {
     probeOpts = {},
   } = opts;
 
-  if (!logsDir) throw new Error('logsDir is required');
+  if (!logsDir) throw new Error("logsDir is required");
   mkdirSync(logsDir, { recursive: true });
 
   const emitter = new EventEmitter();
@@ -76,7 +87,7 @@ export function createConductor(opts = {}) {
   let shuttingDown = false;
 
   // 공유 event log (모든 세션 이벤트를 하나의 JSONL에)
-  const eventLog = createEventLog(join(logsDir, 'conductor-events.jsonl'));
+  const eventLog = createEventLog(join(logsDir, "conductor-events.jsonl"));
 
   /**
    * 세션 상태 전이.
@@ -84,10 +95,10 @@ export function createConductor(opts = {}) {
    * @param {string} nextState
    * @param {string} [reason]
    */
-  function transition(session, nextState, reason = '') {
+  function transition(session, nextState, reason = "") {
     const valid = TRANSITIONS[session.state] || [];
     if (!valid.includes(nextState)) {
-      eventLog.append('invalid_transition', {
+      eventLog.append("invalid_transition", {
         session: session.id,
         from: session.state,
         to: nextState,
@@ -99,7 +110,7 @@ export function createConductor(opts = {}) {
     const prev = session.state;
     session.state = nextState;
 
-    eventLog.append('stateChange', {
+    eventLog.append("stateChange", {
       session: session.id,
       from: prev,
       to: nextState,
@@ -107,7 +118,12 @@ export function createConductor(opts = {}) {
       restarts: session.restarts,
     });
 
-    emitter.emit('stateChange', { sessionId: session.id, from: prev, to: nextState, reason });
+    emitter.emit("stateChange", {
+      sessionId: session.id,
+      from: prev,
+      to: nextState,
+      reason,
+    });
 
     // Terminal state cleanup
     if (TERMINAL_STATES.has(nextState)) {
@@ -123,7 +139,12 @@ export function createConductor(opts = {}) {
    */
   function forceKill(pid) {
     if (!pid || pid <= 0) return;
-    killProcess(pid, { signal: 'SIGKILL', tree: true, force: true, timeout: 5000 });
+    killProcess(pid, {
+      signal: "SIGKILL",
+      tree: true,
+      force: true,
+      timeout: 5000,
+    });
   }
 
   /**
@@ -137,19 +158,34 @@ export function createConductor(opts = {}) {
     let sshIp = host;
     // hosts.json에서 ssh_user/IP 해결
     try {
-      const hostsPath = join(opts.repoRoot || process.cwd(), 'references', 'hosts.json');
-      const hosts = JSON.parse(readFileSync(hostsPath, 'utf8'));
+      const hostsPath = join(
+        opts.repoRoot || process.cwd(),
+        "references",
+        "hosts.json",
+      );
+      const hosts = JSON.parse(readFileSync(hostsPath, "utf8"));
       const hostCfg = hosts.hosts?.[host];
       if (hostCfg) {
         sshUser = sshUser || hostCfg.ssh_user;
         sshIp = hostCfg.tailscale?.ip || host;
       }
-    } catch { /* hosts.json 없으면 fallback */ }
+    } catch {
+      /* hosts.json 없으면 fallback */
+    }
     if (!sshUser) return;
     const execFn = opts.deps?.execFile || execFile;
-    execFn('ssh', [`${sshUser}@${sshIp}`, 'psmux', 'kill-session', '-t', session.id],
-      { timeout: 10_000 }, () => {});
-    eventLog.append('remote_kill', { session: session.id, host, sshUser, sshIp });
+    execFn(
+      "ssh",
+      [`${sshUser}@${sshIp}`, "psmux", "kill-session", "-t", session.id],
+      { timeout: 10_000 },
+      () => {},
+    );
+    eventLog.append("remote_kill", {
+      session: session.id,
+      host,
+      sshUser,
+      sshIp,
+    });
   }
 
   /**
@@ -172,7 +208,11 @@ export function createConductor(opts = {}) {
     if (!pid) return;
 
     // SIGTERM 먼저
-    try { child.kill('SIGTERM'); } catch { /* already dead */ }
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      /* already dead */
+    }
 
     // Grace period 대기
     await new Promise((resolve) => {
@@ -181,7 +221,7 @@ export function createConductor(opts = {}) {
         resolve();
       }, graceMs);
       timer.unref?.();
-      child.once('exit', () => {
+      child.once("exit", () => {
         clearTimeout(timer);
         resolve();
       });
@@ -193,26 +233,27 @@ export function createConductor(opts = {}) {
    */
   function handleProbeResult(session, result) {
     if (TERMINAL_STATES.has(session.state)) return;
-    if (session.state === STATES.INIT || session.state === STATES.RESTARTING) return;
+    if (session.state === STATES.INIT || session.state === STATES.RESTARTING)
+      return;
 
-    eventLog.append('health', {
+    eventLog.append("health", {
       session: session.id,
       ...result,
     });
 
     // L0 실패 — 로컬: exit handler에서 처리. 원격: probe가 유일한 감지 수단.
-    if (result.l0 === 'fail') {
+    if (result.l0 === "fail") {
       if (session.config.remote) {
-        handleFailure(session, 'remote_L0_fail');
+        handleFailure(session, "remote_L0_fail");
       }
       return;
     }
 
     // L3 completed (원격 완료 토큰 감지)
-    if (result.l3 === 'completed' && session.config.remote) {
-      transition(session, STATES.COMPLETED, 'remote_completion_token');
-      emitter.emit('completed', { sessionId: session.id });
-      if (typeof session.config.onCompleted === 'function') {
+    if (result.l3 === "completed" && session.config.remote) {
+      transition(session, STATES.COMPLETED, "remote_completion_token");
+      emitter.emit("completed", { sessionId: session.id });
+      if (typeof session.config.onCompleted === "function") {
         session.config.onCompleted({ sessionId: session.id });
       }
       maybeAutoShutdown();
@@ -220,9 +261,13 @@ export function createConductor(opts = {}) {
     }
 
     // L1 INPUT_WAIT 감지
-    if (result.l1 === 'input_wait' && session.state === STATES.HEALTHY) {
-      transition(session, STATES.INPUT_WAIT, `input_wait:${result.inputWaitPattern}`);
-      emitter.emit('inputWait', {
+    if (result.l1 === "input_wait" && session.state === STATES.HEALTHY) {
+      transition(
+        session,
+        STATES.INPUT_WAIT,
+        `input_wait:${result.inputWaitPattern}`,
+      );
+      emitter.emit("inputWait", {
         sessionId: session.id,
         pattern: result.inputWaitPattern,
       });
@@ -230,32 +275,36 @@ export function createConductor(opts = {}) {
     }
 
     // INPUT_WAIT → output 재개 시 HEALTHY 복귀
-    if (session.state === STATES.INPUT_WAIT && result.l1 === 'ok') {
-      transition(session, STATES.HEALTHY, 'output_resumed');
+    if (session.state === STATES.INPUT_WAIT && result.l1 === "ok") {
+      transition(session, STATES.HEALTHY, "output_resumed");
       return;
     }
 
     // L1 stall
-    if (result.l1 === 'stall' && session.state === STATES.HEALTHY) {
-      transition(session, STATES.STALLED, 'L1_stall');
+    if (result.l1 === "stall" && session.state === STATES.HEALTHY) {
+      transition(session, STATES.STALLED, "L1_stall");
       return;
     }
 
     // STALLED → output 재개 시 HEALTHY 복귀
-    if (session.state === STATES.STALLED && result.l1 === 'ok') {
-      transition(session, STATES.HEALTHY, 'output_resumed');
+    if (session.state === STATES.STALLED && result.l1 === "ok") {
+      transition(session, STATES.HEALTHY, "output_resumed");
       return;
     }
 
     // L3 timeout (아직 STARTING 상태)
-    if (result.l3 === 'timeout' && session.state === STATES.STARTING) {
-      handleFailure(session, 'L3_timeout');
+    if (result.l3 === "timeout" && session.state === STATES.STARTING) {
+      handleFailure(session, "L3_timeout");
       return;
     }
 
     // STARTING → L0 ok + L3 ok → HEALTHY
-    if (session.state === STATES.STARTING && result.l0 === 'ok' && result.l3 === 'ok') {
-      transition(session, STATES.HEALTHY, 'probe_healthy');
+    if (
+      session.state === STATES.STARTING &&
+      result.l0 === "ok" &&
+      result.l3 === "ok"
+    ) {
+      transition(session, STATES.HEALTHY, "probe_healthy");
       return;
     }
 
@@ -271,17 +320,24 @@ export function createConductor(opts = {}) {
     transition(session, STATES.FAILED, reason);
 
     if (session.restarts < maxRestarts) {
-      transition(session, STATES.RESTARTING, `restart_${session.restarts + 1}/${maxRestarts}`);
+      transition(
+        session,
+        STATES.RESTARTING,
+        `restart_${session.restarts + 1}/${maxRestarts}`,
+      );
       session.restarts += 1;
       void respawnSession(session);
     } else {
       transition(session, STATES.DEAD, `maxRestarts(${maxRestarts})_exceeded`);
-      emitter.emit('dead', { sessionId: session.id, reason });
+      emitter.emit("dead", { sessionId: session.id, reason });
 
       // broker release on final death
       if (broker && session.config.accountId) {
-        broker.release(session.config.accountId, { ok: false, failureMode: session.lastFailureMode });
-        if (session.lastFailureMode === 'rate_limited') {
+        broker.release(session.config.accountId, {
+          ok: false,
+          failureMode: session.lastFailureMode,
+        });
+        if (session.lastFailureMode === "rate_limited") {
           broker.markRateLimited(session.config.accountId, 5 * 60 * 1000);
         }
       }
@@ -295,29 +351,36 @@ export function createConductor(opts = {}) {
     // 기존 child 정리
     await cleanupChild(session);
 
-    transition(session, STATES.STARTING, session.restarts > 0 ? 'respawn' : 'initial');
+    transition(
+      session,
+      STATES.STARTING,
+      session.restarts > 0 ? "respawn" : "initial",
+    );
 
     const launcher = session.launcher;
     const outPath = join(logsDir, `${session.id}.out.log`);
     const errPath = join(logsDir, `${session.id}.err.log`);
     mkdirSync(logsDir, { recursive: true });
 
-    const outWs = createWriteStream(outPath, { flags: 'a' });
-    const errWs = createWriteStream(errPath, { flags: 'a' });
+    const outWs = createWriteStream(outPath, { flags: "a" });
+    const errWs = createWriteStream(errPath, { flags: "a" });
 
     let outputBytes = 0;
-    let recentOutput = '';
+    let recentOutput = "";
 
     let child;
     try {
       child = spawn(launcher.command, {
         shell: true,
         env: { ...process.env, ...launcher.env, ...(session.config.env || {}) },
-        stdio: ['pipe', 'pipe', 'pipe'],
+        stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
       });
     } catch (err) {
-      eventLog.append('spawn_error', { session: session.id, error: err.message });
+      eventLog.append("spawn_error", {
+        session: session.id,
+        error: err.message,
+      });
       handleFailure(session, `spawn_error:${err.message}`);
       return;
     }
@@ -326,7 +389,7 @@ export function createConductor(opts = {}) {
     session.outPath = outPath;
     session.errPath = errPath;
 
-    eventLog.append('spawn', {
+    eventLog.append("spawn", {
       session: session.id,
       agent: session.config.agent,
       pid: child.pid,
@@ -345,15 +408,29 @@ export function createConductor(opts = {}) {
       }
     };
 
-    child.stdout?.on('data', (buf) => { outWs.write(buf); trackOutput(buf); });
-    child.stderr?.on('data', (buf) => { errWs.write(buf); trackOutput(buf); });
+    child.stdout?.on("data", (buf) => {
+      outWs.write(buf);
+      trackOutput(buf);
+    });
+    child.stderr?.on("data", (buf) => {
+      errWs.write(buf);
+      trackOutput(buf);
+    });
 
-    child.on('exit', (code, signal) => {
+    child.on("exit", (code, signal) => {
       session.alive = false;
-      try { outWs.end(); } catch { /* ignore */ }
-      try { errWs.end(); } catch { /* ignore */ }
+      try {
+        outWs.end();
+      } catch {
+        /* ignore */
+      }
+      try {
+        errWs.end();
+      } catch {
+        /* ignore */
+      }
 
-      eventLog.append('exit', {
+      eventLog.append("exit", {
         session: session.id,
         code,
         signal,
@@ -363,9 +440,9 @@ export function createConductor(opts = {}) {
       if (TERMINAL_STATES.has(session.state)) return;
 
       if (code === 0 && !signal) {
-        transition(session, STATES.COMPLETED, 'exit_0');
-        emitter.emit('completed', { sessionId: session.id });
-        if (typeof session.config.onCompleted === 'function') {
+        transition(session, STATES.COMPLETED, "exit_0");
+        emitter.emit("completed", { sessionId: session.id });
+        if (typeof session.config.onCompleted === "function") {
           session.config.onCompleted({ sessionId: session.id });
         }
         if (broker && session.config.accountId) {
@@ -373,8 +450,12 @@ export function createConductor(opts = {}) {
         }
       } else {
         // detect rate_limited from recent output before handleFailure
-        if (/(rate.?limit|quota|throttl|too.many.requests|429|usage.limit)/ui.test(recentOutput)) {
-          session.lastFailureMode = 'rate_limited';
+        if (
+          /(rate.?limit|quota|throttl|too.many.requests|429|usage.limit)/iu.test(
+            recentOutput,
+          )
+        ) {
+          session.lastFailureMode = "rate_limited";
         }
         handleFailure(session, `exit_code:${code},signal:${signal}`);
       }
@@ -382,9 +463,12 @@ export function createConductor(opts = {}) {
       maybeAutoShutdown();
     });
 
-    child.on('error', (err) => {
+    child.on("error", (err) => {
       session.alive = false;
-      eventLog.append('child_error', { session: session.id, error: err.message });
+      eventLog.append("child_error", {
+        session: session.id,
+        error: err.message,
+      });
       if (!TERMINAL_STATES.has(session.state)) {
         handleFailure(session, `child_error:${err.message}`);
       }
@@ -396,8 +480,12 @@ export function createConductor(opts = {}) {
     session.probe?.stop();
     const probe = createHealthProbe(
       {
-        get pid() { return child.pid; },
-        get alive() { return session.alive; },
+        get pid() {
+          return child.pid;
+        },
+        get alive() {
+          return session.alive;
+        },
         getOutputBytes: () => outputBytes,
         getRecentOutput: () => recentOutput,
       },
@@ -415,13 +503,13 @@ export function createConductor(opts = {}) {
    * 원격 세션은 remote-spawn.mjs가 이미 psmux 세션을 생성한 상태를 가정.
    */
   function startRemoteSession(session) {
-    transition(session, STATES.STARTING, 'remote_initial');
+    transition(session, STATES.STARTING, "remote_initial");
 
     const { host, paneTarget, sessionName } = session.config;
     const resolvedPane = paneTarget || `${sessionName || session.id}:0.0`;
     const resolvedSessionName = sessionName || session.id;
 
-    eventLog.append('remote_start', {
+    eventLog.append("remote_start", {
       session: session.id,
       host,
       paneTarget: resolvedPane,
@@ -452,11 +540,11 @@ export function createConductor(opts = {}) {
    */
   function maybeAutoShutdown() {
     if (shuttingDown) return;
-    const allTerminal = [...sessions.values()].every(
-      (s) => TERMINAL_STATES.has(s.state),
+    const allTerminal = [...sessions.values()].every((s) =>
+      TERMINAL_STATES.has(s.state),
     );
     if (allTerminal && sessions.size > 0) {
-      emitter.emit('allCompleted');
+      emitter.emit("allCompleted");
     }
   }
 
@@ -479,10 +567,12 @@ export function createConductor(opts = {}) {
    * @returns {string} session ID
    */
   function spawnSession(config) {
-    if (shuttingDown) throw new Error('Conductor is shutting down');
-    if (!config.id) throw new Error('session id is required');
-    if (sessions.has(config.id)) throw new Error(`Session "${config.id}" already exists`);
-    if (config.remote && !config.host) throw new Error('host is required for remote sessions');
+    if (shuttingDown) throw new Error("Conductor is shutting down");
+    if (!config.id) throw new Error("session id is required");
+    if (sessions.has(config.id))
+      throw new Error(`Session "${config.id}" already exists`);
+    if (config.remote && !config.host)
+      throw new Error("host is required for remote sessions");
 
     // broker lease (graceful — broker null if accounts.json absent)
     let lease = null;
@@ -490,10 +580,10 @@ export function createConductor(opts = {}) {
       lease = broker.lease({ provider: config.agent });
       if (lease === null) {
         const eta = broker.nextAvailableEta(config.agent);
-        eventLog.append('broker_no_lease', {
+        eventLog.append("broker_no_lease", {
           session: config.id,
           agent: config.agent,
-          eta: eta ? new Date(eta).toISOString() : 'unknown',
+          eta: eta ? new Date(eta).toISOString() : "unknown",
         });
         // 계정이 모두 cooldown이어도 세션 생성 자체는 유지한다.
         // 로컬 테스트/단일 계정 없는 환경에서도 상태 머신이 일관되게 동작해야 한다.
@@ -511,20 +601,29 @@ export function createConductor(opts = {}) {
       : config;
 
     // auth file copy — broker resolved absolute path, conductor does the actual copy
-    if (lease?.mode === 'auth' && lease.authFile) {
-      const dests = config.agent === 'codex'
-        ? [join(homedir(), '.codex', 'auth.json')]
-        : [
-            join(homedir(), '.gemini', 'oauth_creds.json'),
-            join(homedir(), '.gemini', 'gemini-credentials.json'),
-          ];
+    if (lease?.mode === "auth" && lease.authFile) {
+      const dests =
+        config.agent === "codex"
+          ? [join(homedir(), ".codex", "auth.json")]
+          : [
+              join(homedir(), ".gemini", "oauth_creds.json"),
+              join(homedir(), ".gemini", "gemini-credentials.json"),
+            ];
       for (const dest of dests) {
         try {
           mkdirSync(dirname(dest), { recursive: true });
           copyFileSync(lease.authFile, dest);
-          eventLog.append('auth_copy', { session: config.id, agent: config.agent, dest });
+          eventLog.append("auth_copy", {
+            session: config.id,
+            agent: config.agent,
+            dest,
+          });
         } catch (err) {
-          eventLog.append('auth_copy_error', { session: config.id, dest, error: err.message });
+          eventLog.append("auth_copy_error", {
+            session: config.id,
+            dest,
+            error: err.message,
+          });
         }
       }
     }
@@ -569,12 +668,12 @@ export function createConductor(opts = {}) {
    * @param {string} id
    * @param {string} [reason]
    */
-  async function killSession(id, reason = 'user_kill') {
+  async function killSession(id, reason = "user_kill") {
     const session = sessions.get(id);
     if (!session) return;
     if (TERMINAL_STATES.has(session.state)) return;
 
-    eventLog.append('kill', { session: id, reason });
+    eventLog.append("kill", { session: id, reason });
     await cleanupChild(session);
     transition(session, STATES.FAILED, reason);
     transition(session, STATES.DEAD, reason);
@@ -591,14 +690,14 @@ export function createConductor(opts = {}) {
 
     // 원격 세션 — stdin 미지원 (psmux send-keys는 별도 경로)
     if (session.config.remote) {
-      eventLog.append('stdin_remote_unsupported', { session: id });
+      eventLog.append("stdin_remote_unsupported", { session: id });
       return false;
     }
 
     if (!session.child) return false;
     try {
       session.child.stdin.write(`${text}\n`);
-      eventLog.append('stdin', { session: id, text: text.slice(0, 100) });
+      eventLog.append("stdin", { session: id, text: text.slice(0, 100) });
       return true;
     } catch {
       return false;
@@ -628,11 +727,11 @@ export function createConductor(opts = {}) {
   /**
    * Graceful shutdown — 전체 세션 종료.
    */
-  async function shutdown(reason = 'shutdown') {
+  async function shutdown(reason = "shutdown") {
     if (shuttingDown) return;
     shuttingDown = true;
 
-    eventLog.append('shutdown', { reason, sessions: sessions.size });
+    eventLog.append("shutdown", { reason, sessions: sessions.size });
 
     const cleanups = [...sessions.values()]
       .filter((s) => !TERMINAL_STATES.has(s.state))
@@ -646,26 +745,52 @@ export function createConductor(opts = {}) {
       });
 
     await Promise.allSettled(cleanups);
+    if (conductor._meshBridge) conductor._meshBridge.detach();
     await eventLog.flush();
     await eventLog.close();
-    emitter.emit('shutdown');
+    emitter.emit("shutdown");
   }
 
   // Shutdown traps
-  const onSignal = () => { void shutdown('signal'); };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  const onSignal = () => {
+    void shutdown("signal");
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
 
-  return Object.freeze({
+  const conductor = {
     spawnSession,
     killSession,
     sendInput,
     getSnapshot,
+    getMeshRegistry() {
+      return this._meshRegistry || null;
+    },
     shutdown,
     on: emitter.on.bind(emitter),
     off: emitter.off.bind(emitter),
-    get sessionCount() { return sessions.size; },
-    get isShuttingDown() { return shuttingDown; },
-    get eventLogPath() { return eventLog.filePath; },
-  });
+    get sessionCount() {
+      return sessions.size;
+    },
+    get isShuttingDown() {
+      return shuttingDown;
+    },
+    get eventLogPath() {
+      return eventLog.filePath;
+    },
+  };
+
+  if (opts.enableMesh !== false) {
+    try {
+      const registry = opts.meshRegistry || createRegistry();
+      const bridge = createConductorMeshBridge(conductor, registry);
+      bridge.attach();
+      conductor._meshBridge = bridge;
+      conductor._meshRegistry = registry;
+    } catch {
+      // mesh 실패해도 conductor 정상 동작
+    }
+  }
+
+  return Object.freeze(conductor);
 }
