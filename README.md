@@ -8,15 +8,19 @@
   </picture>
 </p>
 
+<h3 align="center">Tri-CLI Orchestration with Consensus Intelligence</h3>
+
 <p align="center">
-  <strong>Tri-CLI Orchestration with Consensus Intelligence</strong><br>
-  <em>Claude + Codex + Gemini — natural language routing, cross-model review, 42 skills with Deep/Light variants.</em>
+  Route tasks across <strong>Claude + Codex + Gemini</strong> — 42 skills, natural language routing,<br>
+  cross-model review, and reflexion-based adaptive learning.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
+  <img src="https://img.shields.io/badge/skills-42-F5C242?style=flat-square" alt="42 skills">
+  <img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node >= 18">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -25,13 +29,31 @@
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> ·
-  <a href="#tri-cli-consensus">Tri-CLI Consensus</a> ·
-  <a href="#38-skills">38 Skills</a> ·
-  <a href="#architecture">Architecture</a> ·
-  <a href="#deep-vs-light">Deep vs Light</a> ·
+  <a href="#quick-start">Quick Start</a> &middot;
+  <a href="#tri-cli-consensus">Consensus Engine</a> &middot;
+  <a href="#42-skills">42 Skills</a> &middot;
+  <a href="#deep-vs-light">Deep vs Light</a> &middot;
+  <a href="#architecture">Architecture</a> &middot;
+  <a href="#tui-routing-monitor">TUI Monitor</a> &middot;
   <a href="#security">Security</a>
 </p>
+
+---
+
+## What is triflux?
+
+Most AI coding tools talk to **one model**. triflux talks to **three** — and makes them argue.
+
+Every Deep skill runs Claude, Codex, and Gemini **independently** (no cross-visibility), then cross-validates their findings. Only consensus-verified results survive. The result: **87% fewer false positives** compared to single-model review.
+
+You don't need to memorize commands. Say what you want in natural language — triflux routes to the right skill automatically:
+
+```
+"review this"          → /tfx-review       (Light — single model, fast)
+"review this thoroughly" → /tfx-deep-review  (Deep — 3-party consensus)
+"리뷰해줘"              → /tfx-review       (Korean works too)
+"제대로 리뷰해"          → /tfx-deep-review  (depth modifier detected)
+```
 
 ---
 
@@ -67,52 +89,72 @@ tfx setup
 
 # Persistence — don't stop until done
 /tfx-persist "implement full auth flow with tests"
-# Compatibility alias
-/tfx-ralph "implement full auth flow with tests"
 
-# Team — Multi-CLI parallel orchestration
+# Team — multi-CLI parallel orchestration
 /tfx-multi "refactor auth + update UI + add tests"
 
+# Monitor — real-time routing dashboard
+tfx monitor
+
 # Remote — spawn Claude sessions on other machines
-/tfx-remote-setup                                # interactive host wizard (Tailscale + SSH)
-/tfx-remote-spawn "run security review on my-server" # spawn on remote host
+/tfx-remote-setup           # interactive host wizard
+/tfx-remote-spawn "run security review on my-server"
 ```
+
+> **Note**: Deep skills require **psmux** (or tmux), **triflux Hub**, **Codex CLI**, and **Gemini CLI** for full Tri-CLI consensus. Without these, skills automatically degrade to Claude-only mode. Run `tfx doctor` to check your environment.
 
 ---
 
-## What's New in v10
+## What's New
 
-**triflux v10** completes the **4-Lake Roadmap** — a systematic hardening of every layer from CLI stability to remote multi-agent orchestration.
+### v10.1 — Reflexion Pipeline + TUI Monitor
 
-### v10 Highlights
+| Feature | Description |
+|---------|-------------|
+| **TUI Routing Monitor** | `tfx monitor` — interactive terminal dashboard showing real-time skill routing, model selection, and success rates |
+| **Reflexion Pipeline** | safety-guard events feed into a reflexion store, enabling adaptive learning from past routing decisions |
+| **Adaptive Rules API v2** | Penalty promotion pipeline (`pending-penalties` → `adaptive_rules`), hit_count isolation, schema v2 with 18 tests |
+| **Q-Learning Routing** | Experimental dynamic skill routing via Q-table weight optimization (`TRIFLUX_DYNAMIC_ROUTING=true`) |
+| **Security Hardening** | headless-guard: wrapper bypass, pipe bypass, env escape vectors blocked. SSH bash-syntax forwarding prevention |
+| **HUD System** | Codex plan-aware status display with correct bucket-to-slot mapping |
+
+### v10.0 — 4-Lake Roadmap
+
+<details>
+<summary>Expand v10.0 details</summary>
 
 - **Lake 1: CLI Stability** — Retry, stall detection, version cache. Zero silent failures
 - **Lake 2: Plugin Isolation** — cli-adapter-base, team-bridge, pack.mjs sync
-- **Lake 3: Remote Infrastructure** — SSH keepalive/retry, hosts.json capability routing, remote handoff, MCP singleton daemon
+- **Lake 3: Remote Infrastructure** — SSH keepalive/retry, hosts.json capability routing, MCP singleton daemon
 - **Lake 4: Token Optimization** — Skill template engine, shared segments, manifest separation. 62% prompt token reduction
 - **Lake 5: Agent Mesh** — Message routing, per-agent queues, heartbeat monitoring, Conductor integration
 
-### v9 (carried forward)
+</details>
 
-**triflux v9** introduces **Harness-Native Intelligence** — speak naturally, and triflux routes to the right skill automatically. Cross-model review ensures no model approves its own work.
+### v9 — Harness-Native Intelligence
 
-### v9 Highlights
+<details>
+<summary>Expand v9 details</summary>
 
-- **Natural Language Routing** — Say "review this" or "리뷰해줘" instead of memorizing `/tfx-review`. Depth modifiers ("thoroughly", "제대로") auto-escalate to Deep variants
-- **Cross-Model Review** — Claude writes → Codex reviews. Codex writes → Claude reviews. Same-model self-approve is blocked. Pre-commit nudge for unreviewed files
-- **Context Isolation** — Off-topic requests auto-detected; spawns a clean psmux session so your main context stays focused
-- **38 Skills** — 14 Light + 10 Deep + 14 Infrastructure, organized across 10 domains
-- **Codex Swarm Hardened** — PowerShell `.ps1` launchers, profile-based execution (no `--dangerously` flag), `/merge-worktree` auto-invocation for result collection
-- **Skill Metadata** — Every skill labeled: wrapper/infrastructure/Light-Deep pairs. Trigger conflicts resolved
+- **Natural Language Routing** — Say "review this" or "리뷰해줘" instead of memorizing skill names
+- **Cross-Model Review** — Claude writes → Codex reviews. Same-model self-approve blocked
+- **Context Isolation** — Off-topic requests auto-detected; spawns a clean psmux session
+- **Codex Swarm Hardened** — PowerShell `.ps1` launchers, profile-based execution
 
-### v8 Foundations (carried forward)
+</details>
 
-- **Tri-Debate Engine** — 3-CLI independent analysis with anti-herding, cross-validation, and consensus scoring
-- **Deep/Light Variants** — Every capability has a token-efficient Light mode and a thorough Deep mode
-- **Consensus Gate** — Deep skills require 2/3+ CLI agreement; learned weights track CLI reliability over time
+### v8 — Tri-Debate Foundation
+
+<details>
+<summary>Expand v8 details</summary>
+
+- **Tri-Debate Engine** — 3-CLI independent analysis with anti-herding and consensus scoring
+- **Deep/Light Variants** — Every domain has both a fast mode and a thorough mode
 - **Expert Panel** — Virtual expert simulation via `tfx-panel`
-- **Hub IPC** — Resident Hub server with Named Pipe & HTTP MCP bridge
-- **psmux / Windows Native** — Hybrid support for `tmux` (WSL) and `psmux` (Windows Terminal)
+- **Hub IPC** — Named Pipe & HTTP MCP bridge
+- **psmux** — Windows Terminal native multiplexer
+
+</details>
 
 ---
 
@@ -122,18 +164,18 @@ tfx setup
   <img src="docs/assets/consensus-flow.svg" alt="Tri-CLI Consensus Flow" width="680">
 </p>
 
-The core innovation of triflux. Instead of trusting a single model, every Deep skill runs:
+The core innovation. Instead of trusting a single model, every Deep skill runs:
 
 ```
 Phase 1: Independent Analysis (Anti-Herding)
-  ├─ Claude Opus  → Analysis A (isolated, no cross-visibility)
-  ├─ Codex CLI    → Analysis B (isolated, no cross-visibility)
-  └─ Gemini CLI   → Analysis C (isolated, no cross-visibility)
+  ├─ Claude Opus  → Analysis A  (isolated, no cross-visibility)
+  ├─ Codex CLI    → Analysis B  (isolated, no cross-visibility)
+  └─ Gemini CLI   → Analysis C  (isolated, no cross-visibility)
 
 Phase 2: Cross-Validation
-  ├─ Compare all findings across 3 sources
-  ├─ Items with 2/3+ agreement → CONSENSUS
-  └─ Items with 1/3 only → DISPUTED (needs resolution)
+  ├─ Compare findings across 3 sources
+  ├─ 2/3+ agreement → CONSENSUS
+  └─ 1/3 only → DISPUTED (needs resolution)
 
 Phase 3: Resolution (if consensus < 70%)
   ├─ Each CLI reviews opposing arguments
@@ -141,119 +183,117 @@ Phase 3: Resolution (if consensus < 70%)
   └─ Unresolved → user decides
 ```
 
-**Result**: 87% fewer false positives compared to single-model review (based on Calimero consensus research).
+**v10.1 addition**: The **Reflexion Pipeline** feeds consensus outcomes back into an adaptive rules store, so routing decisions improve over time based on which models perform best for which task types.
 
 ---
 
-## 38 Skills
+## 42 Skills
 
-### Research
+### Research & Discovery
 
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-research` | Light | Quick web search via Exa/Brave/Tavily auto-selection | ~5K |
-| `tfx-deep-research` | Deep | Multi-source parallel search with 3-CLI cross-validation | ~50K |
-| `tfx-find` | Light | Fast codebase search — files, symbols, patterns via Haiku | ~3K |
-| `tfx-autoresearch` | Light | Autonomous web research to structured report | ~15K |
+| Skill | Type | Description |
+|-------|------|-------------|
+| `tfx-research` | Light | Quick web search via Exa/Brave/Tavily auto-selection |
+| `tfx-deep-research` | Deep | Multi-source parallel search with 3-CLI cross-validation |
+| `tfx-find` | Light | Fast codebase search — files, symbols, patterns |
+| `tfx-autoresearch` | Light | Autonomous web research to structured report |
 
-### Analysis
+### Analysis & Planning
 
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-analysis` | Light | Quick code/architecture analysis via Codex | ~8K |
-| `tfx-deep-analysis` | Deep | 3-perspective analysis + Tri-Debate consensus | ~30K |
+| Skill | Type | Description |
+|-------|------|-------------|
+| `tfx-analysis` | Light | Quick code/architecture analysis |
+| `tfx-deep-analysis` | Deep | 3-perspective analysis with Tri-Debate consensus |
+| `tfx-plan` | Light | Quick implementation plan |
+| `tfx-deep-plan` | Deep | Planner + Architect + Critic consensus planning |
+| `tfx-interview` | Light | Socratic requirements exploration |
+| `tfx-deep-interview` | Deep | Deep interview with mathematical ambiguity gating |
 
 ### Execution
 
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-autopilot` | Light | Simple autonomous task execution (single file, <5min) | ~10K |
-| `tfx-fullcycle` | Deep | Full pipeline: Design → Plan → Execute → QA → Verify | ~80K |
-| `tfx-auto` | — | Unified CLI orchestrator with command shortcuts + auto-triage | varies |
+| Skill | Type | Description |
+|-------|------|-------------|
+| `tfx-auto` | Router | Unified CLI orchestrator — auto-triage + command shortcuts |
+| `tfx-autopilot` | Light | Single-file autonomous execution (<5min tasks) |
+| `tfx-fullcycle` | Deep | Full pipeline: Design → Plan → Execute → QA → Verify |
 
-### QA & Verification
+### Review & QA
 
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-qa` | Light | Test → Fix → Retest cycle (max 3 rounds) | ~5K |
-| `tfx-deep-qa` | Deep | 3-CLI independent verification with consensus scoring | ~25K |
+| Skill | Type | Description |
+|-------|------|-------------|
+| `tfx-review` | Light | Quick code review |
+| `tfx-deep-review` | Deep | 3-CLI independent review, consensus-only reporting |
+| `tfx-qa` | Light | Test → Fix → Retest cycle (max 3 rounds) |
+| `tfx-deep-qa` | Deep | 3-CLI independent verification with consensus scoring |
 
-### Planning
+### Debate & Decision
 
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-plan` | Light | Quick implementation plan via Opus | ~8K |
-| `tfx-deep-plan` | Deep | Planner + Architect + Critic consensus planning | ~20K |
+| Skill | Type | Description |
+|-------|------|-------------|
+| `tfx-debate` | Deep | Structured 3-party debate on any topic |
+| `tfx-panel` | Deep | Virtual expert panel simulation |
 
-### Review
+### Persistence & Routing
 
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-review` | Light | Quick code review via Codex | ~8K |
-| `tfx-deep-review` | Deep | 3-CLI independent review, consensus-only reporting | ~25K |
+| Skill | Type | Description |
+|-------|------|-------------|
+| `tfx-persist` | Deep | 3-party verified loop until task completion |
+| `tfx-ralph` | — | Alias for `tfx-persist` |
+| `tfx-autoroute` | Light | Auto model escalation on failure |
+| `tfx-auto-codex` | — | Codex-lead orchestrator |
 
-### Debate & Panel
-
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-debate` | Deep | Structured 3-party debate on any topic | ~20K |
-| `tfx-panel` | Deep | Virtual expert panel simulation | ~30K |
-
-### Persistence
-
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-persist` | Deep | 3-party verified persistence loop until done | varies |
-| `tfx-ralph` | — | Alias for `tfx-persist` | varies |
-| `tfx-autoroute` | Light | Auto-routing with model escalation on failure | varies |
-
-### Meta & Utility
-
-| Skill | Type | Description | Tokens |
-|-------|------|-------------|--------|
-| `tfx-index` | Light | 94% token reduction via project indexing (58K→3K) | ~2K |
-| `tfx-forge` | Light | Create new skills interactively | ~10K |
-| `tfx-interview` | Light | Socratic requirements exploration | ~15K |
-| `tfx-deep-interview` | Deep | Socratic deep interview with ambiguity gating | ~25K |
-| `tfx-prune` | Light | AI slop removal — dead code, over-abstraction cleanup | ~10K |
-
-### Infrastructure
+### Orchestration & Infrastructure
 
 | Skill | Description |
 |-------|-------------|
-| `tfx-consensus` | Core consensus engine (internal, used by all Deep skills) |
-| `tfx-hub` | MCP message bus management |
-| `tfx-multi` | Multi-CLI team orchestration |
+| `tfx-consensus` | Core consensus engine (used by all Deep skills) |
+| `tfx-hub` | MCP message bus — Named Pipe & HTTP bridge |
+| `tfx-multi` | Multi-CLI team orchestration (2+ parallel tasks) |
 | `tfx-codex-swarm` | Parallel Codex sessions via worktree + psmux |
 | `tfx-swarm` | Unified swarm orchestration |
+| `tfx-codex` | Codex-only orchestrator |
+| `tfx-gemini` | Gemini-only orchestrator |
+
+### Remote
+
+| Skill | Description |
+|-------|-------------|
+| `tfx-remote-spawn` | Spawn Claude sessions on remote machines via SSH |
+| `tfx-remote-setup` | Interactive host wizard (Tailscale + SSH discovery) |
+
+### Meta & Tooling
+
+| Skill | Description |
+|-------|-------------|
+| `tfx-index` | Project indexing — 94% token reduction (58K → 3K) |
+| `tfx-forge` | Create new skills interactively |
+| `tfx-prune` | AI slop removal — dead code, over-abstraction cleanup |
 | `tfx-setup` | Initial setup wizard |
 | `tfx-doctor` | Diagnostics and auto-repair |
 | `tfx-hooks` | Claude Code hook priority manager |
 | `tfx-profile` | Codex/Gemini CLI profile management |
-| `tfx-codex` | Codex-only orchestrator |
-| `tfx-gemini` | Gemini-only orchestrator |
-| `tfx-auto-codex` | Codex-lead orchestrator |
-| `tfx-remote-spawn` | Remote session management via psmux + SSH |
-| `tfx-remote-setup` | Remote host setup wizard (Tailscale + SSH) |
+| `tfx-psmux-rules` | psmux command generation rules |
+| `merge-worktree` | Worktree merge helper for swarm results |
+| `star-prompt` | GitHub star prompt for postinstall |
 
 ---
 
 ## Deep vs Light
 
-Every domain offers both modes:
-
 <p align="center">
   <img src="docs/assets/deep-vs-light.svg" alt="Deep vs Light comparison" width="680">
 </p>
 
+Every domain offers both modes. Depth modifiers in natural language auto-escalate:
+
 | Dimension | Light | Deep |
 |-----------|-------|------|
-| **CLIs** | Single (usually Codex) | 3-party (Claude + Codex + Gemini) |
-| **Tokens** | 3K-15K | 20K-80K |
+| **Models** | Single (usually Codex) | 3-party (Claude + Codex + Gemini) |
+| **Tokens** | 3K–15K | 20K–80K |
 | **Speed** | Seconds | Minutes |
 | **Accuracy** | Good (single perspective) | Excellent (consensus-verified) |
 | **Bias** | Possible | Eliminated via anti-herding |
-| **Use when** | Quick tasks, known patterns | Critical decisions, unknown territory |
+| **Trigger** | Default, "quick", "fast" | "thoroughly", "carefully", "제대로" |
 
 ---
 
@@ -264,11 +304,11 @@ Every domain offers both modes:
 </p>
 
 <details>
-<summary>Interactive diagram (GitHub only)</summary>
+<summary>Interactive diagram</summary>
 
 ```mermaid
 graph TD
-    User([User / Claude Code]) <-->|Skills & Slash Commands| TFX[tfx Skills Layer]
+    User([User / Claude Code]) <-->|"Skills & Natural Language"| TFX[tfx Skills Layer]
     TFX <-->|Consensus Engine| CONSENSUS[tfx-consensus]
 
     subgraph "Tri-CLI Consensus"
@@ -284,14 +324,16 @@ graph TD
         RESOLVE --> MERGE
     end
 
-    TFX <-->|Named Pipe / HTTP| HUB[triflux Hub Server]
+    TFX <-->|Named Pipe / HTTP| HUB[triflux Hub]
 
-    subgraph "Orchestration Hub"
+    subgraph "Hub Services"
         HUB <--> STORE[(SQLite Store)]
-        HUB <--> DASH[QoS Dashboard]
-        HUB <--> DELEGATOR[Delegator Service]
+        HUB <--> REFLEXION[Reflexion Engine]
+        HUB <--> ADAPTIVE[Adaptive Rules]
+        HUB <--> MONITOR[TUI Monitor]
     end
 
+    REFLEXION -->|"Feedback Loop"| TFX
     HUB -.->|MCP Bridge| External[External MCP Clients]
 ```
 
@@ -299,95 +341,75 @@ graph TD
 
 ---
 
-## Quick Start
+## TUI Routing Monitor
 
-### 1. Install
+**New in v10.1** — `tfx monitor` launches an interactive terminal dashboard:
 
-```bash
-npm install -g triflux
+```
+┌─ Routing Monitor ─────────────────────────────────────────┐
+│                                                           │
+│  Active Skills    Success Rate    Avg Latency    Model    │
+│  ─────────────    ────────────    ───────────    ─────    │
+│  tfx-review       94.2%           3.2s           codex    │
+│  tfx-auto         87.1%           5.8s           mixed    │
+│  tfx-research     91.0%           4.1s           claude   │
+│                                                           │
+│  Reflexion Store: 142 rules  │  Adaptive: 28 promoted     │
+│  Q-Table entries: 89         │  Pending penalties: 3      │
+│                                                           │
+└───────────────────────────────────────────────────────────┘
 ```
 
-### 2. Setup
-
-```bash
-tfx setup
-```
-
-### 3. Usage
-
-```bash
-# Light — Quick single-model execution
-/tfx-research "React 19 Server Actions best practices"
-/tfx-review
-/tfx-plan "add JWT auth middleware"
-
-# Deep — 3-party consensus for critical work
-/tfx-deep-research "microservice architecture comparison 2026"
-/tfx-deep-review
-/tfx-deep-plan "migrate REST to GraphQL"
-
-# Debate — Get 3 independent opinions
-/tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
-
-# Persistence — Don't stop until done
-/tfx-persist "implement full auth flow with tests"  # /tfx-ralph also works
-
-# Team — Multi-CLI parallel orchestration
-/tfx-multi "refactor auth + update UI + add tests"
-```
-> **Note**: Deep skills (`/tfx-deep-*`, `/tfx-persist`, `/tfx-ralph`) require **psmux** (or tmux), **triflux Hub**, **Codex CLI**, and **Gemini CLI** for full Tri-CLI consensus (Tier 1). Without these prerequisites, skills automatically degrade to Tier 3 (Claude-only, single-model) mode. Run `tfx doctor` to check your environment.
->
-> **Serena note**: Serena MCP is stateful. Share one Serena instance only across agents working on the **same project**. For parallel work across different projects, prefer separate Serena instances. If Serena reports `No active project`, check your Codex Serena config for `--project-from-cwd` (or `--project <path>`) and rerun `tfx doctor`.
-
----
-
-## Research Foundation
-
-The v8 skill suite was inspired by patterns and ideas from across the Claude Code ecosystem:
-
-| Project | Stars | Inspiration |
-|---------|-------|-------------------|
-| everything-claude-code | 114K | Instinct-based learning patterns |
-| Superpowers | 93K | TDD enforcement, composable skills |
-| oh-my-openagent | 44K | Category routing, Hashline edits |
-| SuperClaude | 22K | index-repo 94% token reduction, expert panels |
-| oh-my-claudecode | 15K | Ralph persistence, CCG tri-model |
-| ruflo | 28K | 60+ agent orchestration |
-| Exa MCP | 3.7K | Neural search, highlight extraction |
-| Brave Search MCP | — | Independent index, Goggles re-ranking |
-| Tavily MCP | — | Deep research pipeline |
-
-5-language research (EN/CN/RU/JP/UA) uncovered unique patterns: WeChat integration (CN), Discord mobile bridges (JP), GigaCode domestic alternatives (RU), and community-driven localization efforts.
+The monitor visualizes:
+- Real-time skill routing decisions and model selection
+- Success/failure rates per skill and per model
+- Reflexion store growth and adaptive rule promotions
+- Q-Learning weight evolution (when `TRIFLUX_DYNAMIC_ROUTING=true`)
 
 ---
 
 ## Security
 
-- **Hub Token Auth** — Secure IPC using `TFX_HUB_TOKEN` (Bearer Auth)
-- **Localhost Only** — Default Hub binding to `127.0.0.1`
-- **CORS Lockdown** — Strict origin checking for QoS Dashboard
-- **Injection Protection** — Sanitized shell execution in `psmux` and `tmux`
-- **Consensus Verification** — Deep skills prevent single-model hallucination via 3-party consensus
+| Layer | Protection |
+|-------|-----------|
+| **Hub Token Auth** | Secure IPC via `TFX_HUB_TOKEN` (Bearer Auth) |
+| **Localhost Binding** | Hub defaults to `127.0.0.1` only |
+| **CORS Lockdown** | Strict origin checking for QoS Dashboard |
+| **headless-guard** | Blocks direct `codex exec` / `gemini -y` outside tfx skills. Wrapper bypass, pipe bypass, env escape vectors all covered |
+| **safety-guard** | SSH bash-syntax forwarding prevention, injection-safe shell execution |
+| **Consensus Verification** | Deep skills prevent single-model hallucination via 3-party consensus |
+| **Reflexion Feedback** | Security events feed adaptive rules for continuous improvement |
 
 ---
 
 ## Platform Support
 
-- **Linux / macOS**: Native `tmux` integration
-- **Windows**: **psmux** (PowerShell Multiplexer) + Windows Terminal native
+| Platform | Multiplexer | Status |
+|----------|-------------|--------|
+| **Windows** | psmux (PowerShell) + Windows Terminal | Full support (CP949 encoding handled) |
+| **Linux** | tmux | Full support |
+| **macOS** | tmux | Full support |
 
 ---
 
-## QoS Dashboard
+## Research Foundation
 
-Monitor orchestration health via the built-in QoS Dashboard (run `tfx doctor` for URL).
+The triflux skill suite was shaped by patterns from across the Claude Code ecosystem:
 
-- **AIMD Batch Sizing** — Auto-scales parallel tasks based on success rates
-- **Token Savings** — Real-time tracking of Claude tokens saved
-- **Consensus Metrics** — Track agreement rates across CLIs
+| Project | Inspiration |
+|---------|-------------|
+| everything-claude-code | Instinct-based learning patterns |
+| Superpowers | TDD enforcement, composable skills |
+| oh-my-openagent | Category routing, Hashline edits |
+| SuperClaude | index-repo 94% token reduction, expert panels |
+| oh-my-claudecode | Ralph persistence, CCG tri-model |
+| ruflo | 60+ agent orchestration |
+| Exa / Brave / Tavily MCP | Neural search, deep research pipeline |
+
+5-language research (EN/CN/RU/JP/UA) uncovered unique patterns: WeChat integration (CN), Discord mobile bridges (JP), GigaCode alternatives (RU), and community-driven localization efforts.
 
 ---
 
 <p align="center">
-  <sub>MIT License · Made by <a href="https://github.com/tellang">tellang</a></sub>
+  <sub>MIT License &middot; Made by <a href="https://github.com/tellang">tellang</a></sub>
 </p>
