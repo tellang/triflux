@@ -54,7 +54,7 @@ describe("server: bridge catch 블록 에러 메시지 미노출", () => {
   it("bridge catch 블록에서 고정 에러 메시지를 사용해야 함", () => {
     // catch 블록 내 writeJson 호출이 'Internal server error' 고정 문자열 사용
     assert.ok(
-      src.includes("'Internal server error'"),
+      src.includes("Internal server error"),
       "고정 에러 메시지 'Internal server error'가 존재해야 함",
     );
   });

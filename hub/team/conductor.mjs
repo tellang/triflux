@@ -22,7 +22,7 @@ import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
 import { killProcess } from "../platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
-import { getConductorRegistry } from "./conductor-registry.mjs";
+import { ensureConductorRegistry, getConductorRegistry } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
@@ -797,6 +797,6 @@ export function createConductor(opts = {}) {
   }
 
   const frozenApi = Object.freeze(conductor);
-  getConductorRegistry().register(frozenApi);
+  ensureConductorRegistry();
   return frozenApi;
 }

@@ -249,39 +249,55 @@ export function padRight(str, len) {
   return str + " ".repeat(pad);
 }
 
-// wcwidth-aware truncate: wide char 경계에서 자름
-export function truncate(str, maxLen) {
-  const plain = stripAnsi(str);
-  const w = wcswidth(plain);
-  if (w <= maxLen) return str;
-
-  let acc = 0;
+// ANSI-preserving slice: ANSI escape를 보존하면서 visible width만큼 자름
+function ansiSlice(str, maxWidth) {
+  let result = "";
+  let visWidth = 0;
+  let hasAnsi = false;
   let i = 0;
-  for (const char of plain) {
-    const cw = charWidth(char.codePointAt(0));
-    if (acc + cw > maxLen - 1) break;
-    acc += cw;
-    i += char.length;
+
+  while (i < str.length) {
+    if (str.charCodeAt(i) === 0x1B) {
+      const rest = str.slice(i);
+      const m = rest.match(/^(\x1b(?:\[[0-9;]*[a-zA-Z]|\].*?(?:\x07|\x1b\\)))/);
+      if (m) {
+        result += m[1];
+        hasAnsi = true;
+        i += m[1].length;
+        continue;
+      }
+    }
+
+    const cp = str.codePointAt(i);
+    const charLen = cp > 0xFFFF ? 2 : 1;
+    const cw = charWidth(cp);
+
+    if (visWidth + cw > maxWidth) break;
+
+    result += str.slice(i, i + charLen);
+    visWidth += cw;
+    i += charLen;
   }
-  return plain.slice(0, i) + "…";
+
+  return { result, visWidth, hasAnsi };
 }
 
-// wcwidth-aware clip: 정확히 width 셀에 맞게 자르고 패딩 (wide char 경계 보정)
+// wcwidth-aware truncate: wide char 경계에서 자름 (ANSI 보존)
+export function truncate(str, maxLen) {
+  if (wcswidth(str) <= maxLen) return str;
+
+  const { result, hasAnsi } = ansiSlice(str, maxLen - 1);
+  return hasAnsi ? result + RESET + "…" : result + "…";
+}
+
+// wcwidth-aware clip: 정확히 width 셀에 맞게 자르고 패딩 (ANSI 보존, wide char 경계 보정)
 export function clip(str, width) {
-  const plain = stripAnsi(str);
-  let acc = 0;
-  let i = 0;
-  for (const char of plain) {
-    const cw = charWidth(char.codePointAt(0));
-    if (acc + cw > width) {
-      // wide char이 경계를 넘으면 공백으로 채움
-      const result = plain.slice(0, i) + " ".repeat(width - acc);
-      return result;
-    }
-    acc += cw;
-    i += char.length;
-  }
-  return str + " ".repeat(width - acc);
+  const vis = wcswidth(str);
+  if (vis <= width) return str + " ".repeat(width - vis);
+
+  const { result, visWidth, hasAnsi } = ansiSlice(str, width);
+  const suffix = hasAnsi ? RESET : "";
+  return result + suffix + " ".repeat(Math.max(0, width - visWidth));
 }
 
 // ── Catppuccin Mocha 색상 상수 ──
