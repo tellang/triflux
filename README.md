@@ -202,13 +202,25 @@ Run Claude + Codex + Gemini as a coordinated team on parallel tasks. Say `"refac
 /tfx-multi --agents codex,gemini "frontend + backend"
 ```
 
-### Swarm Execution — `tfx-swarm`
+### Multi-Machine x Multi-Model Swarm — `tfx-swarm`
 
-PRD-driven parallel execution. Takes a PRD document, splits it into shards, creates isolated git worktrees for each, and launches parallel workers. A hypervisor monitors progress, detects zombies, and orchestrates merges.
+One PRD, multiple machines, multiple models. Write a PRD with `agent:` and `host:` per shard, and triflux distributes work across local and remote machines using Claude + Codex + Gemini in parallel.
 
 ```bash
-/tfx-swarm    # select PRDs from docs/prd/, plan shards, launch workers
+/tfx-swarm    # select PRDs, choose remote/model config, launch workers
 ```
+
+Example PRD shard:
+```markdown
+## Shard: security-audit
+- agent: claude
+- host: ryzen5-7600
+- critical: true
+- files: src/security.mjs
+- prompt: Security vulnerability audit
+```
+
+Each shard gets its own git worktree, file-lease enforcement prevents conflicts, and results merge automatically in dependency order. Critical shards run on two different models for redundant verification.
 
 ### Remote Sessions — `tfx-remote-spawn`
 
@@ -311,7 +323,7 @@ Three models take independent positions on a technical question, debate, and con
 | `tfx-consensus` | Core consensus engine (used by all Deep skills) |
 | `tfx-hub` | MCP message bus — Named Pipe & HTTP bridge |
 | `tfx-multi` | Multi-CLI team orchestration (2+ parallel tasks) |
-| `tfx-swarm` | Unified swarm orchestration (PRD → shard → worktree) |
+| `tfx-swarm` | Multi-machine x multi-model swarm (PRD → shard → worktree, local+remote) |
 | `tfx-codex` | Codex-only orchestrator |
 | `tfx-gemini` | Gemini-only orchestrator |
 

@@ -69,12 +69,12 @@ tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-consensus, t
 | 스킬 | 용도 |
 |------|------|
 | tfx-multi | 2+개 태스크 headless 병렬 |
-| tfx-codex-swarm | PRD별 worktree + Codex 다중 (로컬 전용) |
+| tfx-swarm | PRD별 worktree + 다중 모델(Codex/Gemini/Claude) + 다중 기기(로컬+원격) |
 | tfx-remote-spawn | Claude Code 원격 세션 (SSH, setup 필수) |
 
 **Claude 네이티브** (CLI 불필요): tfx-find, tfx-forge, tfx-prune, tfx-index, tfx-setup, tfx-doctor, tfx-hooks, tfx-hub
 
-자원 우선순위: remote-spawn > codex-swarm > multi > Light > 로컬 단독
+자원 우선순위: remote-spawn > swarm > multi > Light > 로컬 단독
 
 ### 충돌 해소
 
