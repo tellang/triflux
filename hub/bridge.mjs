@@ -88,6 +88,16 @@ const HUB_OPERATIONS = Object.freeze({
     action: "control",
     httpPath: "/bridge/control",
   },
+  handoff: {
+    transport: "command",
+    action: "handoff",
+    httpPath: "/bridge/handoff",
+  },
+  publish: {
+    transport: "command",
+    action: "publish",
+    httpPath: "/bridge/publish",
+  },
   sendInput: {
     transport: "command",
     action: "send_input",
@@ -358,6 +368,7 @@ export function parseArgs(argv) {
       command: { type: "string" },
       "session-id": { type: "string" },
       reason: { type: "string" },
+      type: { type: "string" },
       from: { type: "string" },
       to: { type: "string" },
       text: { type: "string" },
@@ -394,9 +405,10 @@ export function parseArgs(argv) {
       "mcp-profile": { type: "string" },
       "session-key": { type: "string" },
     },
+    allowPositionals: true,
     strict: false,
   });
-  const parsed = { ...values };
+  const parsed = { ...values, _: positionals };
   positionals.forEach((value, index) => {
     parsed[index + 1] = value;
   });
@@ -410,6 +422,35 @@ export function parseJsonSafe(raw, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function normalizeBridgePayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return {};
+  }
+  return payload;
+}
+
+function buildHandoffBody(from, to, payload) {
+  const normalizedPayload = normalizeBridgePayload(payload);
+  return {
+    ...normalizedPayload,
+    from,
+    to,
+    payload: normalizedPayload,
+  };
+}
+
+function buildPublishBody(from, to, type, payload) {
+  const normalizedPayload = normalizeBridgePayload(payload);
+  return {
+    ...normalizedPayload,
+    from,
+    to,
+    type,
+    message_type: type,
+    payload: normalizedPayload,
+  };
 }
 
 // Hub 자동 재시작 (Pipe+HTTP 모두 실패 시 1회 시도, 최대 4초 대기)
@@ -593,6 +634,31 @@ async function cmdControl(args) {
     correlation_id: args.correlation || undefined,
     ttl_ms: args["ttl-ms"] != null ? Number(args["ttl-ms"]) : undefined,
   });
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdHandoff(args) {
+  const from = args.from || args[1];
+  const to = args.to || args[2];
+  const payload = parseJsonSafe(args.payload || args[3] || "{}", {});
+  const outcome = await requestHub(
+    HUB_OPERATIONS.handoff,
+    buildHandoffBody(from, to, payload),
+  );
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdPublish(args) {
+  const from = args.from || args[1];
+  const to = args.to || args[2];
+  const type = args.type || args[3] || "event";
+  const payload = parseJsonSafe(args.payload || args[4] || "{}", {});
+  const outcome = await requestHub(
+    HUB_OPERATIONS.publish,
+    buildPublishBody(from, to, type, payload),
+  );
   const result = outcome?.result;
   return emitJson(result || unavailableResult());
 }
@@ -1019,6 +1085,10 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdResult(args);
     case "control":
       return await cmdControl(args);
+    case "handoff":
+      return await cmdHandoff(args);
+    case "publish":
+      return await cmdPublish(args);
     case "send-input":
       return await cmdSendInput(args);
     case "context":
@@ -1065,7 +1135,7 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdHitlPending(args);
     default:
       console.error(
-        "사용법: bridge.mjs <register|result|control|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending> [--옵션]",
+        "사용법: bridge.mjs <register|result|control|handoff|publish|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending> [--옵션]",
       );
       process.exit(1);
   }

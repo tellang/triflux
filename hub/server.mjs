@@ -291,6 +291,38 @@ function resolveSendInputStatusCode(result) {
   return 400;
 }
 
+function normalizeBridgePayload(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return {};
+  }
+  return payload;
+}
+
+function normalizeHandoffBody(body) {
+  const payload = normalizeBridgePayload(body?.payload);
+  return {
+    ...payload,
+    ...body,
+    from: body?.from,
+    to: body?.to,
+    payload,
+  };
+}
+
+function normalizePublishBody(body) {
+  const payload = normalizeBridgePayload(body?.payload);
+  const type = body?.type || body?.message_type || "event";
+  return {
+    ...payload,
+    ...body,
+    from: body?.from,
+    to: body?.to,
+    type,
+    message_type: type,
+    payload,
+  };
+}
+
 function safeReadJsonFile(filePath) {
   try {
     if (!existsSync(filePath)) return null;
@@ -798,6 +830,16 @@ export async function startHub({
             });
 
             return writeJson(res, 200, result);
+          }
+
+          if (path === "/bridge/handoff" && req.method === "POST") {
+            const result = router.handleHandoff(normalizeHandoffBody(body));
+            return writeJson(res, result.ok ? 200 : 400, result);
+          }
+
+          if (path === "/bridge/publish" && req.method === "POST") {
+            const result = router.handlePublish(normalizePublishBody(body));
+            return writeJson(res, result.ok ? 200 : 400, result);
           }
 
           if (path === "/bridge/send-input" && req.method === "POST") {
