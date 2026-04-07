@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "10.2.1",
+  "version": "10.3.0",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -44,11 +44,11 @@
     "lint": "biome check .",
     "lint:fix": "biome check --fix .",
     "health": "npm test && npm run lint",
-    "test": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
-    "test:unit": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 tests/unit/**/*.test.mjs",
-    "test:integration": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 tests/integration/**/*.test.mjs",
+    "test": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
+    "test:unit": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/unit/**/*.test.mjs",
+    "test:integration": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/integration/**/*.test.mjs",
     "test:route-smoke": "node scripts/test-lock.mjs --test scripts/test-tfx-route-no-claude-native.mjs",
-    "test:contract": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 tests/contract/**/*.test.mjs",
+    "test:contract": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/contract/**/*.test.mjs",
     "gen:skill-docs": "node scripts/gen-skill-docs.mjs",
     "gen:skill-manifest": "node scripts/gen-skill-manifest.mjs"
   },
