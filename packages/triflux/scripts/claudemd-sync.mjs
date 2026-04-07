@@ -3,7 +3,16 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TFX_START, OMC_END, writeSection } from "./lib/claudemd-scanner.mjs";
 
-const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
+import { execFileSync } from "node:child_process";
+
+function resolveProjectRoot() {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+  } catch { /* not a git repo */ }
+  return process.cwd();
+}
+
+const PROJECT_ROOT = resolveProjectRoot();
 const PROJECT_CLAUDE_MD_PATH = join(PROJECT_ROOT, "CLAUDE.md");
 const ROUTING_TAG_OPEN = "<routing>";
 const ROUTING_TAG_CLOSE = "</routing>";
