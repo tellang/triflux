@@ -15,6 +15,7 @@
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 import { SERVERS } from './mcp-gateway-start.mjs';
 
@@ -109,6 +110,16 @@ export function enableGateway() {
       changed++;
       console.log(`[CONVERT] ${name}: stdio → ${url}`);
     }
+  }
+
+  // preflight MCP 서버 등록 — Codex 시작 시 gateway 자동 기동 보장
+  const preflightName = 'tfx-gateway-preflight';
+  if (!servers.has(preflightName)) {
+    const resolvedPath = join(dirname(fileURLToPath(import.meta.url)), 'codex-gateway-preflight.mjs')
+      .replace(/\\/g, '\\\\');
+    content += `\n[mcp_servers.${preflightName}]\ncommand = "node"\nargs = ["${resolvedPath}"]\nenabled = true\nstartup_timeout_sec = 10\n`;
+    changed++;
+    console.log(`[ADD] ${preflightName} — Codex 시작 시 gateway 자동 기동`);
   }
 
   if (changed > 0) {
