@@ -124,6 +124,7 @@ export function createPipeServer({
   sessionId = process.pid,
   heartbeatTtlMs = DEFAULT_HEARTBEAT_TTL_MS,
   delegatorService = null,
+  hitlManager = null,
 } = {}) {
   if (!router) {
     throw new Error("router is required");
@@ -381,6 +382,22 @@ export function createPipeServer({
         return { ok: true, data: state };
       }
 
+      case "hitl_request": {
+        if (!hitlManager) {
+          return { ok: false, error: "hitl not available" };
+        }
+        if (client) touchClient(client);
+        return hitlManager.requestHumanInput(payload);
+      }
+
+      case "hitl_submit": {
+        if (!hitlManager) {
+          return { ok: false, error: "hitl not available" };
+        }
+        if (client) touchClient(client);
+        return hitlManager.submitHumanInput(payload);
+      }
+
       case "delegator_delegate": {
         if (!delegatorService) {
           return {
@@ -531,6 +548,14 @@ export function createPipeServer({
         }
         ensurePipelineTable(store.db);
         return { ok: true, data: listPipelineStates(store.db) };
+      }
+
+      case "hitl_pending": {
+        if (client) touchClient(client);
+        if (!hitlManager) {
+          return { ok: false, error: "hitl not available" };
+        }
+        return { ok: true, data: hitlManager.getPendingRequests() };
       }
 
       case "delegator_status": {

@@ -540,9 +540,15 @@ export async function startHub({
   }
   const delegatorService = new DelegatorService({ worker: delegatorWorker });
 
-  const pipe = createPipeServer({ router, store, sessionId, delegatorService });
-  const assignCallbacks = createAssignCallbackServer({ store, sessionId });
   const hitl = createHitlManager(store, router);
+  const pipe = createPipeServer({
+    router,
+    store,
+    sessionId,
+    delegatorService,
+    hitlManager: hitl,
+  });
+  const assignCallbacks = createAssignCallbackServer({ store, sessionId });
   const tools = createTools(store, router, hitl, pipe);
   const transports = new Map();
 
@@ -671,10 +677,13 @@ export async function startHub({
       if (path.startsWith("/bridge")) {
         const isBridgeStatusGet =
           path === "/bridge/status" && req.method === "GET";
+        const isBridgeHitlPendingGet =
+          path === "/bridge/hitl/pending" && req.method === "GET";
         if (
           req.method !== "POST" &&
           req.method !== "DELETE" &&
-          !isBridgeStatusGet
+          !isBridgeStatusGet &&
+          !isBridgeHitlPendingGet
         ) {
           return writeJson(res, 405, {
             ok: false,
@@ -701,6 +710,11 @@ export async function startHub({
               trace_id,
             });
             return writeJson(res, 200, result);
+          }
+
+          if (path === "/bridge/hitl/pending" && req.method === "GET") {
+            const result = { ok: true, data: hitl.getPendingRequests() };
+            return writeJson(res, result.ok ? 200 : 400, result);
           }
 
           if (path === "/bridge/register" && req.method === "POST") {
@@ -1036,6 +1050,16 @@ export async function startHub({
 
             if (path === "/bridge/delegator/status" && req.method === "POST") {
               const result = await pipe.executeQuery("delegator_status", body);
+              return writeJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (path === "/bridge/hitl/request" && req.method === "POST") {
+              const result = hitl.requestHumanInput(body);
+              return writeJson(res, result.ok ? 200 : 400, result);
+            }
+
+            if (path === "/bridge/hitl/submit" && req.method === "POST") {
+              const result = hitl.submitHumanInput(body);
               return writeJson(res, result.ok ? 200 : 400, result);
             }
           }
