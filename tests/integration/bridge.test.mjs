@@ -111,6 +111,14 @@ describe("bridge.mjs parseArgs()", () => {
     assert.equal(args["ralph-max"], "5");
   });
 
+  it("포지셔널 인자를 숫자 키와 배열로 함께 보존해야 한다", () => {
+    const args = parseArgs(["lead", "worker", '{"task":"ship"}']);
+    assert.equal(args[1], "lead");
+    assert.equal(args[2], "worker");
+    assert.equal(args[3], '{"task":"ship"}');
+    assert.deepEqual(args._, ["lead", "worker", '{"task":"ship"}']);
+  });
+
   it("플래그 없을 때 undefined를 반환해야 한다", () => {
     const args = parseArgs([]);
     assert.equal(args.agent, undefined);
