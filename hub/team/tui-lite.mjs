@@ -1,4 +1,4 @@
-import { altScreenOff, altScreenOn, BG, bold, box, clearScreen, clearToEnd, color, cursorHide, cursorHome, cursorShow, dim, eraseBelow, FG, MOCHA, padRight, progressBar, statusBadge, stripAnsi, truncate, wcswidth } from "./ansi.mjs";
+import { altScreenOff, altScreenOn, BG, bold, box, clearScreen, clearToEnd, color, cursorHide, cursorHome, cursorShow, dim, eraseBelow, FG, MOCHA, moveTo, padRight, progressBar, statusBadge, stripAnsi, truncate, wcswidth } from "./ansi.mjs";
 
 const FALLBACK_COLUMNS = 100, FALLBACK_ROWS = 24;
 const VALID_TABS = new Set(["log", "detail", "files"]);
@@ -128,7 +128,7 @@ function buildHeader(width, names, workers, pipeline, startedAt) {
     else if (status === "running" || status === "in_progress") counts.running++;
   }
   const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
-  const line1 = color(` triflux ${VERSION} `, FG.black, BG.header)
+  const line1 = color(` triflux ${VERSION} `, FG.white, BG.header)
     + ` ${bold(`phase ${pipeline.phase || "exec"}`)}`
     + ` ${dim(`+${elapsed}s`)} ${names.length} workers`;
   const line2 = `${color(`ok ${counts.ok}`, MOCHA.ok)}  ${color(`partial ${counts.partial}`, MOCHA.partial)}  ${color(`failed ${counts.failed}`, MOCHA.fail)}  ${color(`running ${counts.running}`, MOCHA.executing)}`;
@@ -209,6 +209,8 @@ export function createLiteDashboard(opts = {}) {
   let detailExpanded = true;
   let focusTab = "log";
   let helpVisible = false;
+  let prevFrame = [];
+  let prevWidth = 0;
   let inputAttached = false;
   let rawModeEnabled = false;
 
@@ -263,7 +265,14 @@ export function createLiteDashboard(opts = {}) {
       return;
     }
     if (key === "\r" || key === "\n") {
-      triggerOpenSelected();
+      if (typeof onOpenSelectedWorker !== "function") {
+        // 콜백 없으면 탭 순환 (기본 동작)
+        const tabs = ["log", "detail", "files"];
+        focusTab = tabs[(tabs.indexOf(focusTab) + 1) % tabs.length];
+      } else {
+        triggerOpenSelected();
+      }
+      render();
       return;
     }
     if (key === "\x1b[13;2u" || key === "\x1b[27;13;2~" || key === "\x1b\r" || key === "\x1b\n") {
@@ -297,7 +306,7 @@ export function createLiteDashboard(opts = {}) {
 
   function attachInput() {
     if (inputAttached) return;
-    if (!isTTY || !input?.isTTY || typeof input?.on !== "function") return;
+    if (!input?.isTTY || typeof input?.on !== "function") return;
     inputAttached = true;
     if (typeof input.setRawMode === "function") {
       input.setRawMode(true);
@@ -337,8 +346,26 @@ export function createLiteDashboard(opts = {}) {
     const rowsOut = buildRows();
     if (isTTY) {
       const width = viewportColumns();
-      const padded = rowsOut.map((line) => padRight(String(line ?? ""), width) + clearToEnd);
-      write(cursorHome + padded.join("\n") + eraseBelow);
+      const padded = rowsOut.map((line) => padRight(String(line ?? ""), width));
+      // Full redraw on first frame or terminal resize to avoid artifacts
+      if (prevFrame.length === 0 || width !== prevWidth) {
+        prevWidth = width;
+        write(cursorHome + padded.map((l) => l + clearToEnd).join("\n") + eraseBelow);
+        prevFrame = padded;
+        return;
+      }
+      // Diff-based rendering: only rewrite lines that actually changed
+      let buf = "";
+      for (let i = 0; i < padded.length; i++) {
+        if (padded[i] !== prevFrame[i]) {
+          buf += moveTo(i + 1, 1) + padded[i] + clearToEnd;
+        }
+      }
+      if (prevFrame.length > padded.length) {
+        buf += moveTo(padded.length + 1, 1) + eraseBelow;
+      }
+      if (buf) write(buf);
+      prevFrame = padded;
     } else write(`${rowsOut.join("\n")}\n`);
   }
 
@@ -349,6 +376,7 @@ export function createLiteDashboard(opts = {}) {
     if (rawModeEnabled && typeof input?.setRawMode === "function") input.setRawMode(false);
     if (inputAttached && typeof input?.pause === "function") input.pause();
     if (isTTY) write(cursorShow + altScreenOff);
+    prevFrame = [];
     closed = true;
   }
 

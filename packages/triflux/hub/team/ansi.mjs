@@ -128,9 +128,28 @@ function renderBorderChar(glyph, row, col, highlightCell, borderSeq, highlightSe
 export function box(lines, width, borderColor = "", options = {}) {
   const isFn = typeof borderColor === "function";
   const totalRows = lines.length + 2;
+  const highlightCell = borderHighlightCell(width, totalRows, options.highlightPos);
+
+  // Fast path: static border, no highlight — batch border chars (~13x less output)
+  if (!highlightCell && !isFn) {
+    const bc = borderColor || "";
+    const rst = bc ? RESET : "";
+    const hLine = BOX.h.repeat(Math.max(0, width - 2));
+    const top = `${bc}${BOX.tl}${hLine}${BOX.tr}${rst}`;
+    const bot = `${bc}${BOX.bl}${hLine}${BOX.br}${rst}`;
+    const mid = `${bc}${BOX.ml}${hLine}${BOX.mr}${rst}`;
+    const body = lines.map((l, i) => {
+      const content = options.titleFlashBg && i === 0
+        ? reapplyBackground(padRight(l, width - 4), options.titleFlashBg)
+        : padRight(l, width - 4);
+      return `${bc}${BOX.v}${rst} ${content} ${bc}${BOX.v}${rst}`;
+    });
+    return { top, body, bot, mid };
+  }
+
+  // Slow path: per-character rendering for highlight animation
   const bc = isFn ? (row) => borderColor(row, totalRows) : () => borderColor;
   const rst = (isFn || borderColor) ? RESET : "";
-  const highlightCell = borderHighlightCell(width, totalRows, options.highlightPos);
   const highlightSeq = options.highlightColor
     || (() => {
       const parsed = parseRgbSeq(typeof borderColor === "string" ? borderColor : "");
@@ -144,7 +163,7 @@ export function box(lines, width, borderColor = "", options = {}) {
   const bot = botChars
     .map((glyph, col) => renderBorderChar(glyph, totalRows - 1, col, highlightCell, bc(totalRows - 1), highlightSeq))
     .join("");
-  const mid = `${bc(Math.floor(totalRows / 2))}${BOX.ml}${BOX.h.repeat(width - 2)}${BOX.mr}${rst}`;
+  const mid = `${bc(Math.floor(totalRows / 2))}${BOX.ml}${BOX.h.repeat(Math.max(0, width - 2))}${BOX.mr}${rst}`;
   const body = lines.map((l, i) => {
     const row = i + 1;
     const content = options.titleFlashBg && i === 0
