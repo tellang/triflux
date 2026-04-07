@@ -130,6 +130,31 @@ Bash("triflux setup")
       description: "나중에 /tfx-profile --gemini로 관리"
   ```
 
+#### 단계 3.6: Codex MCP Gateway 싱글톤 전환
+
+Codex CLI가 매 호출마다 MCP 서버를 stdio로 spawn하면 좀비 Node.js 프로세스가 생긴다.
+gateway SSE 싱글톤을 사용하도록 config.toml을 전환한다.
+
+```bash
+node scripts/codex-mcp-gateway-sync.mjs --status
+```
+
+- 전부 `sse` → ✅ 이미 전환됨
+- `stdio` 또는 `missing` 있으면 → AskUserQuestion:
+  ```
+  question: "Codex MCP 서버를 gateway 싱글톤(SSE)으로 전환하시겠습니까? 매 호출마다 MCP를 새로 spawn하는 대신, 영속 gateway 데몬을 공유합니다. (좀비 Node.js 방지)"
+  header: "MCP Gateway"
+  options:
+    - label: "전환 (Recommended)"
+      description: "stdio → SSE URL 전환. 좀비 프로세스 방지"
+    - label: "건너뛰기"
+      description: "현재 stdio 방식 유지"
+  ```
+  "전환" 선택 시:
+  1. gateway 데몬이 안 떠 있으면 먼저 기동: `node scripts/mcp-gateway-start.mjs`
+  2. config.toml 전환: `node scripts/codex-mcp-gateway-sync.mjs --enable`
+  3. 결과 확인: `node scripts/codex-mcp-gateway-sync.mjs --status`
+
 #### 단계 3.7: Codex config.toml 충돌 감지
 
 `~/.codex/config.toml`을 Read 도구로 읽어 `approval_mode`와 `sandbox` 설정을 확인한다.
