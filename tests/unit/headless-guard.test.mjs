@@ -303,6 +303,43 @@ describe("headless-guard decision matrix (runtime)", () => {
   });
 });
 
+describe("#37 Bug4: gh/git 명령 화이트리스트 (runtime)", () => {
+  it("gh issue create --body에 codex 문자열이 있어도 통과한다", () => {
+    const result = runGuardWithBashCommand(
+      'gh issue create --title "test" --body "codex exec 관련 버그 수정"',
+    );
+    assert.equal(result.status, 0);
+  });
+
+  it("gh pr create --body에 codex exec가 있어도 통과한다", () => {
+    const result = runGuardWithBashCommand(
+      'gh pr create --title "fix" --body "$(cat <<\'EOF\'\ncodex exec 패턴을 변경함\nEOF\n)"',
+    );
+    assert.equal(result.status, 0);
+  });
+
+  it("git commit -m에 codex/gemini 문자열이 있어도 통과한다", () => {
+    const result = runGuardWithBashCommand(
+      'git commit -m "fix: codex exec 플래그 마이그레이션"',
+    );
+    assert.equal(result.status, 0);
+  });
+
+  it("gh 명령과 실제 codex exec가 체이닝되면 deny한다", () => {
+    const result = runGuardWithBashCommand(
+      'gh issue close 37 && codex exec "fix something"',
+    );
+    assert.equal(result.status, 2);
+  });
+
+  it("git log에 codex 문자열이 있어도 통과한다", () => {
+    const result = runGuardWithBashCommand(
+      'git log --oneline --grep="codex exec"',
+    );
+    assert.equal(result.status, 0);
+  });
+});
+
 describe("tfx-multi Edit/Write gate (runtime)", () => {
   it("Edit with active tfx-multi gate should deny after threshold", () => {
     const result = runGuardWithInput(

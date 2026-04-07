@@ -11,6 +11,7 @@ import {
   ensureWorktree,
   prepareIntegrationBranch,
   pruneWorktree,
+  pruneOrphanWorktrees,
 } from '../../hub/team/worktree-lifecycle.mjs';
 
 function makeTmpRepo() {
@@ -114,5 +115,63 @@ describe('worktree-lifecycle', () => {
       { cwd: repoDir, windowsHide: true },
     ).toString().trim();
     assert.equal(branches, '');
+  });
+
+  it('W-04: ensureWorktree — .claude-plugin 디렉토리가 자동 제거된다 (#34 L2)', async () => {
+    // main 브랜치에 .claude-plugin/ 생성 후 커밋
+    const pluginDir = join(repoDir, '.claude-plugin');
+    mkdirSync(pluginDir, { recursive: true });
+    const pluginJson = join(pluginDir, 'plugin.json');
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(pluginJson, '{"name":"triflux"}');
+    execFileSync('git', ['add', '.claude-plugin'], { cwd: repoDir, windowsHide: true });
+    execFileSync('git', ['commit', '-m', 'add plugin'], { cwd: repoDir, windowsHide: true });
+
+    // worktree 생성
+    const wt = await ensureWorktree({
+      slug: 'plugin-test',
+      runId: 'test-run',
+      rootDir: repoDir,
+      baseBranch: 'main',
+    });
+
+    // .claude-plugin이 worktree에서 제거됨
+    const wtPluginDir = join(wt.worktreePath.replace(/\//g, '\\'), '.claude-plugin');
+    assert.equal(existsSync(wtPluginDir), false, '.claude-plugin should be removed from worktree');
+
+    // 원본 repo에서는 여전히 존재
+    assert.ok(existsSync(pluginDir), '.claude-plugin should still exist in main repo');
+  });
+
+  it('W-05: pruneOrphanWorktrees — 고아 디렉토리만 정리된다 (#34 L3)', async () => {
+    // 정상 worktree 생성
+    const wt = await ensureWorktree({
+      slug: 'valid-wt',
+      runId: 'test-run',
+      rootDir: repoDir,
+      baseBranch: 'main',
+    });
+    const validPath = wt.worktreePath.replace(/\//g, '\\');
+    assert.ok(existsSync(validPath));
+
+    // 고아 디렉토리 수동 생성 (git worktree list에 등록 안 됨)
+    const orphanDir = join(repoDir, '.codex-swarm', 'wt-orphan-test');
+    mkdirSync(orphanDir, { recursive: true });
+    assert.ok(existsSync(orphanDir));
+
+    // pruneOrphanWorktrees 실행
+    const removed = await pruneOrphanWorktrees({ rootDir: repoDir });
+
+    // 고아만 제거됨
+    assert.ok(removed.includes('wt-orphan-test'), 'orphan should be removed');
+    assert.equal(existsSync(orphanDir), false, 'orphan dir should not exist');
+
+    // 정상 worktree는 보존됨
+    assert.ok(existsSync(validPath), 'valid worktree should still exist');
+  });
+
+  it('W-06: pruneOrphanWorktrees — .codex-swarm 없으면 빈 배열 반환', async () => {
+    const removed = await pruneOrphanWorktrees({ rootDir: repoDir });
+    assert.deepEqual(removed, []);
   });
 });

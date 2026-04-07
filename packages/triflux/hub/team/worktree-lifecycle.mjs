@@ -4,8 +4,8 @@
 // Remote support: host option → SSH-based git operations via remote-session.mjs.
 
 import { execFile } from 'node:child_process';
-import { resolve, normalize } from 'node:path';
-import { mkdir, rm, access } from 'node:fs/promises';
+import { resolve, normalize, join } from 'node:path';
+import { mkdir, rm, access, readdir } from 'node:fs/promises';
 import { remoteGit, validateHost } from './remote-session.mjs';
 
 const SWARM_ROOT = '.codex-swarm';
@@ -91,6 +91,10 @@ export async function ensureWorktree({ slug, runId, rootDir = process.cwd(), bas
   } catch {
     await git(['worktree', 'add', wtDir, branchName], rootDir);
   }
+
+  // #34 L2: worktree에 복사된 .claude-plugin 제거 (하네스가 PLUGIN_ROOT를 오인하는 것 방지)
+  const pluginDir = join(wtDir, '.claude-plugin');
+  try { await rm(pluginDir, { recursive: true, force: true }); } catch { /* absent → ok */ }
 
   return { worktreePath: normPath(wtDir), branchName, remote: false };
 }
@@ -190,6 +194,61 @@ export async function pruneWorktree({ worktreePath, branchName, rootDir = proces
   if (branchName) {
     try { await git(['branch', '-D', branchName], rootDir); } catch { /* may not exist */ }
   }
+}
+
+/**
+ * #34 L3: Detect and remove orphan worktree directories.
+ * Compares .codex-swarm/wt-* directories against `git worktree list`.
+ * Directories not registered as worktrees are removed.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.rootDir=process.cwd()]
+ * @returns {Promise<string[]>} removed directory names
+ */
+export async function pruneOrphanWorktrees({ rootDir = process.cwd() } = {}) {
+  const swarmDir = resolve(rootDir, SWARM_ROOT);
+  const removed = [];
+
+  let entries;
+  try {
+    entries = await readdir(swarmDir);
+  } catch {
+    return removed; // .codex-swarm/ doesn't exist → nothing to clean
+  }
+
+  const wtDirs = entries.filter(e => e.startsWith('wt-'));
+  if (wtDirs.length === 0) return removed;
+
+  // Get registered worktree paths from git
+  let registeredPaths;
+  try {
+    const raw = await git(['worktree', 'list', '--porcelain'], rootDir);
+    registeredPaths = new Set(
+      raw.split('\n')
+        .filter(l => l.startsWith('worktree '))
+        .map(l => normPath(l.slice('worktree '.length))),
+    );
+  } catch {
+    return removed; // git worktree list failed → don't remove anything
+  }
+
+  for (const dir of wtDirs) {
+    const fullPath = resolve(swarmDir, dir);
+    const normalized = normPath(fullPath);
+    if (!registeredPaths.has(normalized)) {
+      try {
+        await rm(fullPath, { recursive: true, force: true });
+        removed.push(dir);
+      } catch { /* best-effort */ }
+    }
+  }
+
+  // Prune stale git references
+  if (removed.length > 0) {
+    try { await git(['worktree', 'prune'], rootDir); } catch { /* best-effort */ }
+  }
+
+  return removed;
 }
 
 /**

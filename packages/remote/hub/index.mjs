@@ -18,4 +18,4 @@ export { createSwarmLocks } from './team/swarm-locks.mjs';
 export { parseShards, buildFileLeaseMap, buildMcpManifest, computeMergeOrder, planSwarm } from './team/swarm-planner.mjs';
 export { createSwarmHypervisor, SWARM_STATES } from './team/swarm-hypervisor.mjs';
 export { reconcile, buildRedundantIds, shouldRunRedundant } from './team/swarm-reconciler.mjs';
-export { ensureWorktree, prepareIntegrationBranch, rebaseShardOntoIntegration, pruneWorktree, fetchRemoteShard } from './team/worktree-lifecycle.mjs';
+export { ensureWorktree, prepareIntegrationBranch, rebaseShardOntoIntegration, pruneWorktree, pruneOrphanWorktrees, fetchRemoteShard } from './team/worktree-lifecycle.mjs';
