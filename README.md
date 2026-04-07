@@ -63,6 +63,14 @@ You don't need to memorize commands. Say what you want in natural language — t
 
 ### 1. Install
 
+**Claude Code Plugin** (recommended):
+
+```bash
+claude plugin add triflux
+```
+
+**npm global**:
+
 ```bash
 npm install -g triflux
 ```
