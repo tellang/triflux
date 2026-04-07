@@ -1,19 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { TFX_START, OMC_END, writeSection } from "./lib/claudemd-scanner.mjs";
 
-import { execFileSync } from "node:child_process";
-
-function resolveProjectRoot() {
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-  } catch { /* not a git repo */ }
-  return process.cwd();
-}
-
-const PROJECT_ROOT = resolveProjectRoot();
-const PROJECT_CLAUDE_MD_PATH = join(PROJECT_ROOT, "CLAUDE.md");
+const PKG_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const GLOBAL_CLAUDE_MD_PATH = join(homedir(), ".claude", "CLAUDE.md");
+const PKG_CLAUDE_MD_PATH = join(PKG_ROOT, "CLAUDE.md");
 const ROUTING_TAG_OPEN = "<routing>";
 const ROUTING_TAG_CLOSE = "</routing>";
 // Legacy heading fallback
@@ -82,18 +75,14 @@ function toSkippedResult(path, reason) {
 }
 
 export function getLatestRoutingTable() {
-  if (!existsSync(PROJECT_CLAUDE_MD_PATH)) {
-    throw new Error(`project CLAUDE.md not found: ${PROJECT_CLAUDE_MD_PATH}`);
+  // 1차: 사용자 글로벌 ~/.claude/CLAUDE.md (어디서든 접근 가능한 공통 경로)
+  for (const candidate of [GLOBAL_CLAUDE_MD_PATH, PKG_CLAUDE_MD_PATH]) {
+    if (!existsSync(candidate)) continue;
+    const section = findRoutingSection(readFileSync(candidate, "utf8"));
+    if (section.found) return section.section.trim();
   }
-
-  const projectMarkdown = readFileSync(PROJECT_CLAUDE_MD_PATH, "utf8");
-  const section = findRoutingSection(projectMarkdown);
-
-  if (!section.found) {
-    throw new Error(`routing section not found in: ${PROJECT_CLAUDE_MD_PATH}`);
-  }
-
-  return section.section.trim();
+  // 2차 fallback: 패키지 CLAUDE.md도 없으면 에러
+  throw new Error(`routing section not found in: ${GLOBAL_CLAUDE_MD_PATH} or ${PKG_CLAUDE_MD_PATH}`);
 }
 
 export function ensureTfxSection(claudeMdPath, routingTable) {
