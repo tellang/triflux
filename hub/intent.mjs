@@ -12,6 +12,7 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5분
 /** codex 설치 여부 (프로세스당 1회 확인) */
 let _codexAvailable = null;
 
+/** @experimental 런타임 미연결 — 사용자 의도 분류, 향후 통합 예정 */
 function _isCodexAvailable() {
   if (_codexAvailable !== null) return _codexAvailable;
   _codexAvailable = Boolean(whichCommand('codex'));

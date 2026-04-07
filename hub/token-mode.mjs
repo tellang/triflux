@@ -2,6 +2,7 @@
 // GAP 분석 P2 #7: 심볼 통신 + 약어로 30-50% 토큰 절감
 
 /**
+ * @experimental 런타임 미연결 — 토큰 압축/확장, 향후 통합 예정
  * @experimental
  * @type {Array<{ from: string[], to: string, type: 'symbol'|'abbrev' }>}
  */
