@@ -85,7 +85,7 @@ tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-consensus, t
 
 ### Q-Learning 동적 라우팅 (실험적)
 
-- `TRIFLUX_DYNAMIC_ROUTING=true` 설정 시 Q-Learning 기반 동적 스킬 라우팅 활성화
+- `TRIFLUX_DYNAMIC_ROUTING=true` 또는 `1` 설정 시 Q-Learning 기반 동적 스킬 라우팅 활성화
 - `routing-weights.json` + Q-table로 스킬 선택 최적화
 - 기본 비활성
 </routing>
