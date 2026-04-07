@@ -8,7 +8,7 @@ const ACTIVE_RULE_CONFIDENCE = 0.5;
 const ADAPTIVE_PROMOTION_STEP = 0.1;
 const ADAPTIVE_DECAY_STEP = 0.1;
 /** @deprecated 세션 기반 decay에서 시간 기반으로 변경됨. 미사용. */
-const ADAPTIVE_DECAY_WINDOW = 5;
+const _ADAPTIVE_DECAY_WINDOW = 5;
 const ADAPTIVE_DELETE_THRESHOLD = 0.3;
 
 function clampConfidence(value) {
@@ -129,7 +129,7 @@ function getAdaptiveState(rule = {}) {
 }
 
 /** @deprecated reflexion_entries 기반. adaptive_rules에서는 미사용. 세션 인식 복원 시 재활용 예정. */
-function mergeAdaptiveState(rule, errorContext = {}) {
+function _mergeAdaptiveState(rule, errorContext = {}) {
   const current = getAdaptiveState(rule);
   const sessionId = pickSessionId(errorContext);
   const sessionCount = pickSessionCount(
@@ -161,6 +161,63 @@ function filterEntriesByType(entries, type) {
   return entries.filter(
     (entry) => (entry.type || DEFAULT_REFLEXION_TYPE) === type,
   );
+}
+
+function parseAdaptiveRuleId(ruleId, projectSlug = "") {
+  const value = pickString(ruleId);
+  if (!value) return null;
+  const nulSeparator = value.indexOf("\u0000");
+  if (nulSeparator > 0) {
+    return {
+      project_slug: value.slice(0, nulSeparator),
+      pattern: value.slice(nulSeparator + 1),
+    };
+  }
+  if (projectSlug && value.startsWith(`${projectSlug}:`)) {
+    return {
+      project_slug: projectSlug,
+      pattern: value.slice(projectSlug.length + 1),
+    };
+  }
+  return null;
+}
+
+function resolveAdaptiveRuleIdentity(
+  ruleIdOrProjectSlug,
+  patternOrErrorContext,
+) {
+  if (typeof patternOrErrorContext === "string") {
+    return {
+      project_slug: pickString(ruleIdOrProjectSlug),
+      pattern: pickString(patternOrErrorContext),
+    };
+  }
+
+  const errorContext =
+    patternOrErrorContext && typeof patternOrErrorContext === "object"
+      ? patternOrErrorContext
+      : {};
+  const projectSlug = pickString(pickProjectSlug(errorContext));
+  const fromRuleId = parseAdaptiveRuleId(ruleIdOrProjectSlug, projectSlug);
+  const errorText = pickString(
+    errorContext.error_pattern,
+    errorContext.pattern,
+    errorContext.error,
+    errorContext.errorText,
+    errorContext.errorMessage,
+    buildErrorText(errorContext),
+  );
+  const pattern = pickString(normalizeError(errorText), fromRuleId?.pattern);
+  return {
+    project_slug: pickString(projectSlug, fromRuleId?.project_slug),
+    pattern,
+  };
+}
+
+function listAdaptiveRulesFromStore(store, projectSlug) {
+  if (!store?.listAdaptiveRules) return [];
+  const rules = store.listAdaptiveRules(projectSlug);
+  return Array.isArray(rules) ? rules : [];
 }
 
 /**
@@ -287,17 +344,28 @@ export function adaptiveRuleFromError(errorContext = {}) {
 
 /**
  * 동일 패턴이 여러 세션에서 재발하면 adaptive rule confidence를 승격
+ * 현재 (projectSlug, pattern)과 구형 (ruleId, errorContext) 시그니처를 모두 지원한다.
  * @param {object} store — store-adapter 인스턴스 (findAdaptiveRule, updateRuleConfidence 필요)
- * @param {string} projectSlug
- * @param {string} pattern
+ * @param {string} ruleIdOrProjectSlug
+ * @param {object|string} patternOrErrorContext
  * @returns {object|null}
  */
-export function promoteRule(store, projectSlug, pattern) {
+export function promoteRule(store, ruleIdOrProjectSlug, patternOrErrorContext) {
   if (!store.findAdaptiveRule || !store.updateRuleConfidence) return null;
-  const rule = store.findAdaptiveRule(projectSlug, pattern);
+  const identity = resolveAdaptiveRuleIdentity(
+    ruleIdOrProjectSlug,
+    patternOrErrorContext,
+  );
+  if (!identity.project_slug || !identity.pattern) return null;
+  const rule = store.findAdaptiveRule(identity.project_slug, identity.pattern);
   if (!rule) return null;
   const promoted = clampConfidence(rule.confidence + ADAPTIVE_PROMOTION_STEP);
-  return store.updateRuleConfidence(projectSlug, pattern, promoted, { hit_count_increment: 1 });
+  return store.updateRuleConfidence(
+    identity.project_slug,
+    identity.pattern,
+    promoted,
+    { hit_count_increment: 1 },
+  );
 }
 
 /**
@@ -310,10 +378,11 @@ export function promoteRule(store, projectSlug, pattern) {
 export function decayRules(store, _sessionCount, projectSlug) {
   if (!store.listAdaptiveRules) return { updated: [], deleted: [] };
   const result = { updated: [], deleted: [] };
-  const rules = store.listAdaptiveRules(projectSlug);
+  const rules = listAdaptiveRulesFromStore(store, projectSlug);
   for (const rule of rules) {
     // 7일 이상 미관측된 규칙만 decay 대상
-    const ageDays = (Date.now() - (rule.last_seen_ms || 0)) / (24 * 3600 * 1000);
+    const ageDays =
+      (Date.now() - (rule.last_seen_ms || 0)) / (24 * 3600 * 1000);
     if (ageDays < 7) continue;
     const decayed = clampConfidence(rule.confidence - ADAPTIVE_DECAY_STEP);
     if (decayed <= ADAPTIVE_DELETE_THRESHOLD) {
@@ -323,7 +392,12 @@ export function decayRules(store, _sessionCount, projectSlug) {
       continue;
     }
     if (decayed < rule.confidence) {
-      const updated = store.updateRuleConfidence(rule.project_slug, rule.pattern, decayed, { hit_count_increment: 0 });
+      const updated = store.updateRuleConfidence(
+        rule.project_slug,
+        rule.pattern,
+        decayed,
+        { hit_count_increment: 0 },
+      );
       if (updated) result.updated.push(updated);
     }
   }
@@ -337,9 +411,9 @@ export function decayRules(store, _sessionCount, projectSlug) {
  * @returns {Array}
  */
 export function getActiveAdaptiveRules(store, projectSlug) {
-  if (!store.listAdaptiveRules) return [];
-  return store.listAdaptiveRules(projectSlug)
-    .filter((rule) => rule.confidence >= ACTIVE_RULE_CONFIDENCE);
+  return listAdaptiveRulesFromStore(store, projectSlug).filter(
+    (rule) => rule.confidence >= ACTIVE_RULE_CONFIDENCE,
+  );
 }
 
 /**
