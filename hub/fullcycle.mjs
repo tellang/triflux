@@ -13,7 +13,7 @@ function safeResolve(baseDir, relativePath) {
   return target;
 }
 
-/** @experimental 런타임 미연결 — Fullcycle 아티팩트 관리, 향후 통합 예정 */
+/** @experimental 런타임 미연결 — 향후 통합 예정 */
 export function createFullcycleRunId(now = new Date()) {
   return now
     .toISOString()
