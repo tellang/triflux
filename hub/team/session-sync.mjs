@@ -1,18 +1,73 @@
+import { readState } from "../state.mjs";
+
 const DEFAULT_TIMEOUT_MS = 2500;
+const DEFAULT_HEADLESS_POLL_MS = 1000;
 
 function resolveFetch(fetchImpl) {
   if (typeof fetchImpl === "function") return fetchImpl;
-  if (typeof globalThis.fetch === "function") return globalThis.fetch.bind(globalThis);
+  if (typeof globalThis.fetch === "function")
+    return globalThis.fetch.bind(globalThis);
   return null;
 }
 
 function normalizeHubBaseUrl(hubUrl) {
-  return String(hubUrl || "").replace(/\/+$/, "").replace(/\/mcp$/, "");
+  return String(hubUrl || "")
+    .replace(/\/+$/, "")
+    .replace(/\/mcp$/, "");
 }
 
 function safeAbortSignal(timeoutMs) {
   if (typeof AbortSignal?.timeout !== "function") return undefined;
   return AbortSignal.timeout(timeoutMs);
+}
+
+function isPidAlive(pid) {
+  const resolvedPid = Number(pid);
+  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return false;
+  try {
+    process.kill(resolvedPid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveHeadlessHubUrl(hubUrl) {
+  const normalized = normalizeHubBaseUrl(hubUrl);
+  if (normalized) return normalized;
+
+  const stateUrl = normalizeHubBaseUrl(readState()?.url);
+  if (stateUrl) return stateUrl;
+
+  const envHubUrl = normalizeHubBaseUrl(process.env.TFX_HUB_URL);
+  if (envHubUrl) return envHubUrl;
+
+  const envPort = Number(process.env.TFX_HUB_PORT || "27888");
+  const port = Number.isFinite(envPort) && envPort > 0 ? envPort : 27888;
+  return `http://127.0.0.1:${port}`;
+}
+
+function hasLiveHubState() {
+  const state = readState();
+  return !!normalizeHubBaseUrl(state?.url) && isPidAlive(state?.pid);
+}
+
+function toHeadlessSessionAgentId(sessionName) {
+  const normalizedSessionName = String(sessionName || "").trim();
+  return normalizedSessionName ? `session:${normalizedSessionName}` : "";
+}
+
+async function dispatchHeadlessCommand(command, callbacks) {
+  const callbackMap = {
+    pause: callbacks.onPause,
+    resume: callbacks.onResume,
+    abort: callbacks.onAbort,
+    reassign: callbacks.onReassign,
+  };
+  const handler = callbackMap[command?.command];
+  if (typeof handler === "function") {
+    await handler(command);
+  }
 }
 
 async function safeJson(res) {
@@ -24,8 +79,13 @@ async function safeJson(res) {
 }
 
 function normalizeLeadCommandMessage(message) {
-  const payload = message?.payload && typeof message.payload === "object" ? message.payload : {};
-  const command = String(payload.command || "").trim().toLowerCase();
+  const payload =
+    message?.payload && typeof message.payload === "object"
+      ? message.payload
+      : {};
+  const command = String(payload.command || "")
+    .trim()
+    .toLowerCase();
   if (!command) return null;
   return {
     messageId: message.id || null,
@@ -79,7 +139,9 @@ export async function subscribeToLeadCommands({
     });
 
     const body = await safeJson(res);
-    const messages = Array.isArray(body?.data?.messages) ? body.data.messages : [];
+    const messages = Array.isArray(body?.data?.messages)
+      ? body.data.messages
+      : [];
     const commands = messages
       .filter((message) => message?.topic === "lead.control")
       .map(normalizeLeadCommandMessage)
@@ -108,6 +170,90 @@ export async function subscribeToLeadCommands({
   }
 }
 
+export function createHeadlessControlSubscriber(
+  sessionName,
+  {
+    onPause,
+    onResume,
+    onAbort,
+    onReassign,
+    hubUrl,
+    pollIntervalMs = DEFAULT_HEADLESS_POLL_MS,
+    maxMessages = 10,
+    autoAck = true,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    fetchImpl,
+  } = {},
+) {
+  const sessionAgentId = toHeadlessSessionAgentId(sessionName);
+  if (!sessionAgentId) {
+    return { stop() {} };
+  }
+
+  const explicitHubUrl =
+    normalizeHubBaseUrl(hubUrl) || normalizeHubBaseUrl(process.env.TFX_HUB_URL);
+  if (!explicitHubUrl && !hasLiveHubState()) {
+    return { stop() {} };
+  }
+
+  const resolvedHubUrl = explicitHubUrl || resolveHeadlessHubUrl(hubUrl);
+  const callbacks = { onPause, onResume, onAbort, onReassign };
+  const intervalMs = Math.max(
+    50,
+    Number(pollIntervalMs) || DEFAULT_HEADLESS_POLL_MS,
+  );
+
+  let stopped = false;
+  let timer = null;
+  let pending = false;
+
+  const stop = () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+
+  const scheduleNext = () => {
+    if (stopped) return;
+    timer = setTimeout(tick, intervalMs);
+    if (typeof timer?.unref === "function") timer.unref();
+  };
+
+  const tick = async () => {
+    if (stopped || pending) {
+      scheduleNext();
+      return;
+    }
+
+    pending = true;
+    try {
+      const result = await subscribeToLeadCommands({
+        hubUrl: resolvedHubUrl,
+        agentId: sessionAgentId,
+        maxMessages,
+        autoAck,
+        timeoutMs,
+        fetchImpl,
+        onCommand: async (command) => {
+          await dispatchHeadlessCommand(command, callbacks);
+        },
+      });
+
+      if (!result?.ok && result?.error === "LEAD_COMMAND_SUBSCRIBE_FAILED") {
+        stop();
+        return;
+      }
+    } finally {
+      pending = false;
+      scheduleNext();
+    }
+  };
+
+  void tick();
+
+  return { stop };
+}
+
 export async function getTeamStatus({
   hubUrl,
   scope = "hub",
@@ -127,7 +273,8 @@ export async function getTeamStatus({
     return { ok: false, error: "HUB_URL_REQUIRED" };
   }
 
-  const normalizedMethod = String(method || "GET").toUpperCase() === "POST" ? "POST" : "GET";
+  const normalizedMethod =
+    String(method || "GET").toUpperCase() === "POST" ? "POST" : "GET";
   const statusScope = String(scope || "hub").trim() || "hub";
 
   let endpoint = `${hubBase}/bridge/status`;
