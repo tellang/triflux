@@ -44,5 +44,10 @@ export async function getMissionBoardState(sessionsDir = SESSIONS_DIR) {
     ? Math.round(agents.reduce((sum, a) => sum + a.progress, 0) / agents.length)
     : 0;
 
-  return { agents, dagLevel: 0, totalProgress };
+  return {
+    agents,
+    // TODO: derive dagLevel from real mission dependency metadata instead of hardcoding 0.
+    dagLevel: 0,
+    totalProgress,
+  };
 }

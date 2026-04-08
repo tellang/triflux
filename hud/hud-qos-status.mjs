@@ -16,6 +16,7 @@ import {
   readJson, readStdinJson, getProviderAccountId, getCliArgValue,
 } from "./utils.mjs";
 import { selectTier } from "./terminal.mjs";
+import { getMissionBoardState } from "./mission-board.mjs";
 
 // Claude provider
 import {
@@ -41,7 +42,7 @@ import {
 // Renderers
 import {
   getClaudeRows, getProviderRow, getTeamRow,
-  renderAlignedRows, getMicroLine,
+  renderAlignedRows, getMicroLine, renderMissionBoard,
   readLatestBenchmarkDiff, formatTokenSummary,
   readTokenSavings, readSvAccumulator,
 } from "./renderers.mjs";
@@ -108,6 +109,7 @@ async function main() {
   const codexBuckets = codexSnapshot.buckets;
   const geminiSession = geminiSessionSnapshot.session;
   const geminiQuota = geminiQuotaSnapshot.quota;
+  const missionBoardState = await getMissionBoardState();
 
   // 누적 절약 데이터 읽기
   const svSavings = readTokenSavings();
@@ -174,6 +176,15 @@ async function main() {
   // tfx-multi 활성 시 팀 상태 행 추가 (v2.2)
   const teamRow = getTeamRow(CURRENT_TIER);
   if (teamRow) rows.push(teamRow);
+
+  const missionBoard = renderMissionBoard(missionBoardState);
+  if (missionBoard) {
+    rows.push({
+      prefix: bold(claudeOrange("\u25B2")),
+      left: missionBoard,
+      right: "",
+    });
+  }
 
   // 최근 벤치마크 diff → 토큰 요약 행 추가
   const latestDiff = readLatestBenchmarkDiff();
