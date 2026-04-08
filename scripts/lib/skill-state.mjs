@@ -8,21 +8,76 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const DEFAULT_STATE_DIR = join(process.cwd(), ".tfx", "state");
+const STOP_HOOKS = new Map();
 
 function stateFilePath(stateDir, skillName) {
   return join(stateDir, `${skillName}-active.json`);
 }
 
 function assertValidSkillName(skillName) {
-  if (
-    skillName.includes("/") ||
-    skillName.includes("\\") ||
-    skillName.includes("..")
-  ) {
+  if (basename(skillName) !== skillName) {
     throw new Error(`Invalid skill name: ${skillName}`);
+  }
+}
+
+function assertValidOnStop(onStop) {
+  if (onStop !== undefined && typeof onStop !== "function") {
+    throw new TypeError("onStop must be a function");
+  }
+}
+
+async function readStateFile(filePath) {
+  try {
+    const raw = await readFile(filePath, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function rememberStopHook(filePath, onStop) {
+  if (typeof onStop === "function") {
+    STOP_HOOKS.set(filePath, onStop);
+    return;
+  }
+  STOP_HOOKS.delete(filePath);
+}
+
+function logStopHookWarning(message, error) {
+  if (error) {
+    console.warn(message, error);
+    return;
+  }
+  console.warn(message);
+}
+
+async function runStopHook(filePath, state, onStop) {
+  if (!state?.hasStopHook) {
+    STOP_HOOKS.delete(filePath);
+    return;
+  }
+
+  const hook = onStop ?? STOP_HOOKS.get(filePath);
+  STOP_HOOKS.delete(filePath);
+
+  if (typeof hook !== "function") {
+    return;
+  }
+
+  try {
+    await hook({
+      skillName: state.skillName,
+      filePath,
+      state,
+    });
+  } catch (error) {
+    logStopHookWarning(
+      `Failed to run stop-hook for skill: ${state.skillName}`,
+      error,
+    );
   }
 }
 
@@ -31,19 +86,22 @@ function assertValidSkillName(skillName) {
  * Throws if the skill is already active.
  *
  * @param {string} skillName
- * @param {{ stateDir?: string }} options
+ * @param {{ stateDir?: string, onStop?: (() => Promise<void> | void) }} options
  */
 export async function activateSkill(
   skillName,
-  { stateDir = DEFAULT_STATE_DIR } = {},
+  { stateDir = DEFAULT_STATE_DIR, onStop } = {},
 ) {
   assertValidSkillName(skillName);
+  assertValidOnStop(onStop);
+
   await mkdir(stateDir, { recursive: true });
 
   const filePath = stateFilePath(stateDir, skillName);
   const lockPath = `${filePath}.lock`;
   const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   let lockHandle;
+
   try {
     lockHandle = await open(lockPath, "wx");
     try {
@@ -58,9 +116,15 @@ export async function activateSkill(
       }
     }
 
-    const state = { skillName, pid: process.pid, activatedAt: Date.now() };
+    const state = {
+      skillName,
+      pid: process.pid,
+      activatedAt: Date.now(),
+      hasStopHook: typeof onStop === "function",
+    };
     await writeFile(tmpPath, JSON.stringify(state), "utf8");
     await rename(tmpPath, filePath);
+    rememberStopHook(filePath, onStop);
   } finally {
     await rm(tmpPath, { force: true }).catch(() => {});
     if (lockHandle) {
@@ -75,17 +139,22 @@ export async function activateSkill(
  * Does not throw if the file does not exist.
  *
  * @param {string} skillName
- * @param {{ stateDir?: string }} options
+ * @param {{ stateDir?: string, onStop?: (() => Promise<void> | void) }} options
  */
 export async function deactivateSkill(
   skillName,
-  { stateDir = DEFAULT_STATE_DIR } = {},
+  { stateDir = DEFAULT_STATE_DIR, onStop } = {},
 ) {
+  assertValidOnStop(onStop);
+
   const filePath = stateFilePath(stateDir, skillName);
+  const state = await readStateFile(filePath);
+
   try {
-    await rm(filePath, { force: true });
-  } catch {
-    // ignore
+    await runStopHook(filePath, state, onStop);
+  } finally {
+    STOP_HOOKS.delete(filePath);
+    await rm(filePath, { force: true }).catch(() => {});
   }
 }
 
@@ -93,7 +162,7 @@ export async function deactivateSkill(
  * Return all currently active skills by scanning *-active.json files.
  *
  * @param {{ stateDir?: string }} options
- * @returns {Promise<Array<{ skillName: string, pid: number, activatedAt: number }>>}
+ * @returns {Promise<Array<{ skillName: string, pid: number, activatedAt: number, hasStopHook?: boolean }>>}
  */
 export async function getActiveSkills({ stateDir = DEFAULT_STATE_DIR } = {}) {
   let entries;
@@ -106,11 +175,9 @@ export async function getActiveSkills({ stateDir = DEFAULT_STATE_DIR } = {}) {
   const results = [];
   for (const entry of entries) {
     if (!entry.endsWith("-active.json")) continue;
-    try {
-      const raw = await readFile(join(stateDir, entry), "utf8");
-      results.push(JSON.parse(raw));
-    } catch {
-      // skip malformed files
+    const state = await readStateFile(join(stateDir, entry));
+    if (state) {
+      results.push(state);
     }
   }
   return results;
@@ -128,17 +195,24 @@ export async function pruneOrphanSkillStates({
   const active = await getActiveSkills({ stateDir });
   const pruned = [];
 
-  for (const { skillName, pid } of active) {
+  for (const state of active) {
     let alive = true;
     try {
-      process.kill(pid, 0);
+      process.kill(state.pid, 0);
     } catch {
       alive = false;
     }
 
     if (!alive) {
-      await deactivateSkill(skillName, { stateDir });
-      pruned.push(skillName);
+      const filePath = stateFilePath(stateDir, state.skillName);
+      STOP_HOOKS.delete(filePath);
+      if (state.hasStopHook) {
+        logStopHookWarning(
+          `Skipping stop-hook for orphaned skill state: ${state.skillName}`,
+        );
+      }
+      await rm(filePath, { force: true }).catch(() => {});
+      pruned.push(state.skillName);
     }
   }
 

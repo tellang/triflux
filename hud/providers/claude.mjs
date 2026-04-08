@@ -16,11 +16,64 @@ import {
 import { readJson, writeJsonSafe, clampPercent, advanceToNextCycle } from "../utils.mjs";
 import { readContextMonitorSnapshot } from "../context-monitor.mjs";
 
+export const CLAUDE_USAGE_POLL_BASE_MS = 5_000;
+export const CLAUDE_USAGE_POLL_JITTER_RATIO = 0.2;
+export const CLAUDE_USAGE_RATE_LIMIT_BACKOFF_MS = [
+  CLAUDE_USAGE_POLL_BASE_MS,
+  10_000,
+  30_000,
+  60_000,
+  120_000,
+];
+
 // OMC 활성 여부에 따라 캐시 TTL 동적 결정
 function getClaudeUsageStaleMs() {
   return existsSync(OMC_PLUGIN_USAGE_CACHE_PATH)
     ? CLAUDE_USAGE_STALE_MS_WITH_OMC
     : CLAUDE_USAGE_STALE_MS_SOLO;
+}
+
+export function computeClaudeUsagePollState({
+  consecutive429s = 0,
+  outcome = "success",
+  random = Math.random,
+  jitterRatio = CLAUDE_USAGE_POLL_JITTER_RATIO,
+} = {}) {
+  const current429s = Number.isFinite(consecutive429s) ? Math.max(0, consecutive429s) : 0;
+  const next429s = outcome === "rate_limit" ? current429s + 1 : 0;
+  const stepIndex = outcome === "rate_limit"
+    ? Math.min(next429s, CLAUDE_USAGE_RATE_LIMIT_BACKOFF_MS.length - 1)
+    : 0;
+  const baseDelayMs = CLAUDE_USAGE_RATE_LIMIT_BACKOFF_MS[stepIndex];
+  const sample = Number(random?.());
+  const normalized = Number.isFinite(sample) ? Math.min(1, Math.max(0, sample)) : 0.5;
+  const jitterFactor = 1 + ((normalized * 2) - 1) * jitterRatio;
+  return {
+    consecutive429s: next429s,
+    baseDelayMs,
+    delayMs: Math.max(1, Math.round(baseDelayMs * jitterFactor)),
+  };
+}
+
+function getSnapshotSchedule(cache) {
+  const timestamp = Number(cache?.timestamp);
+  const nextRefreshAt = Number(cache?.nextRefreshAt);
+  if (Number.isFinite(nextRefreshAt)) {
+    return {
+      nextRefreshAt,
+      shouldRefresh: Date.now() >= nextRefreshAt,
+    };
+  }
+
+  const ageMs = Number.isFinite(timestamp) ? Date.now() - timestamp : Number.MAX_SAFE_INTEGER;
+  const fallbackMs = cache?.error
+    ? (cache.errorType === "rate_limit" ? CLAUDE_USAGE_429_BACKOFF_MS : CLAUDE_USAGE_ERROR_BACKOFF_MS)
+    : getClaudeUsageStaleMs();
+
+  return {
+    nextRefreshAt: Number.isFinite(timestamp) ? timestamp + fallbackMs : null,
+    shouldRefresh: ageMs >= fallbackMs,
+  };
 }
 
 export function readClaudeCredentials() {
@@ -154,18 +207,21 @@ export function stripStaleResets(data) {
 export function readClaudeUsageSnapshot() {
   const cache = readJson(CLAUDE_USAGE_CACHE_PATH, null);
   const ts = Number(cache?.timestamp);
-  const ageMs = Number.isFinite(ts) ? Date.now() - ts : Number.MAX_SAFE_INTEGER;
+  const schedule = getSnapshotSchedule(cache);
+  const staleBackoffActive = cache?.errorType === "rate_limit"
+    && Number.isFinite(schedule.nextRefreshAt)
+    && Date.now() < schedule.nextRefreshAt;
 
   // 1차: 자체 캐시에 유효 데이터가 있는 경우
   if (cache?.data) {
     // 에러 상태에서 보존된 stale 데이터 → backoff 존중하되 표시용 데이터 반환
     if (cache.error) {
-      const backoffMs = cache.errorType === "rate_limit"
-        ? CLAUDE_USAGE_429_BACKOFF_MS
-        : CLAUDE_USAGE_ERROR_BACKOFF_MS;
-      return { data: stripStaleResets(cache.data), shouldRefresh: ageMs >= backoffMs };
+      return {
+        data: stripStaleResets(cache.data),
+        shouldRefresh: schedule.shouldRefresh,
+        isStale: staleBackoffActive,
+      };
     }
-    const isFresh = ageMs < getClaudeUsageStaleMs();
     // resets_at이 지난 윈도우의 percent를 0으로 보정 (stale 캐시 방지)
     const data = { ...cache.data };
     const now = Date.now();
@@ -175,24 +231,21 @@ export function readClaudeUsageSnapshot() {
     if (data.weeklyResetsAt && new Date(data.weeklyResetsAt).getTime() <= now) {
       data.weeklyPercent = 0;
     }
-    return { data, shouldRefresh: !isFresh };
+    return { data, shouldRefresh: schedule.shouldRefresh, isStale: false };
   }
 
   // 2차: 에러 backoff — 최근 에러 시 재시도 억제 (무한 spawn 방지)
   if (cache?.error && Number.isFinite(ts)) {
-    const backoffMs = cache.errorType === "rate_limit"
-      ? CLAUDE_USAGE_429_BACKOFF_MS
-      : CLAUDE_USAGE_ERROR_BACKOFF_MS;
-    if (ageMs < backoffMs) {
+    if (!schedule.shouldRefresh) {
       const omcCache = readJson(OMC_PLUGIN_USAGE_CACHE_PATH, null);
       // OMC 캐시가 에러 이후 갱신되었으면 → 에러 캐시 덮어쓰고 그 데이터 사용
       if (omcCache?.data?.fiveHourPercent != null && omcCache.timestamp > ts) {
         writeClaudeUsageCache(omcCache.data);
-        return { data: omcCache.data, shouldRefresh: false };
+        return { data: omcCache.data, shouldRefresh: false, isStale: false };
       }
       // stale OMC fallback 또는 null (--% 플레이스홀더 표시, 가짜 0% 방지)
       const staleData = omcCache?.data?.fiveHourPercent != null ? stripStaleResets(omcCache.data) : null;
-      return { data: staleData, shouldRefresh: false };
+      return { data: staleData, shouldRefresh: false, isStale: staleBackoffActive };
     }
   }
 
@@ -203,23 +256,37 @@ export function readClaudeUsageSnapshot() {
     const omcAge = Number.isFinite(omcCache.timestamp) ? Date.now() - omcCache.timestamp : Number.MAX_SAFE_INTEGER;
     if (omcAge < OMC_CACHE_MAX_AGE_MS) {
       writeClaudeUsageCache(omcCache.data);
-      return { data: omcCache.data, shouldRefresh: omcAge > getClaudeUsageStaleMs() };
+      return { data: omcCache.data, shouldRefresh: omcAge > getClaudeUsageStaleMs(), isStale: false };
     }
     // stale이어도 data: null보다는 오래된 데이터를 fallback으로 표시
-    return { data: stripStaleResets(omcCache.data), shouldRefresh: true };
+    return { data: stripStaleResets(omcCache.data), shouldRefresh: true, isStale: false };
   }
 
   // 캐시/fallback 모두 없음: null 반환 → --% 플레이스홀더 + 리프레시 시도
-  return { data: null, shouldRefresh: true };
+  return { data: null, shouldRefresh: true, isStale: false };
 }
 
-export function writeClaudeUsageCache(data, errorInfo = null) {
+export function writeClaudeUsageCache(data, errorInfo = null, pollState = null) {
+  const state = pollState || (errorInfo
+    ? {
+      consecutive429s: errorInfo.type === "rate_limit" ? 1 : 0,
+      baseDelayMs: errorInfo.type === "rate_limit"
+        ? CLAUDE_USAGE_429_BACKOFF_MS
+        : CLAUDE_USAGE_ERROR_BACKOFF_MS,
+      delayMs: errorInfo.type === "rate_limit"
+        ? CLAUDE_USAGE_429_BACKOFF_MS
+        : CLAUDE_USAGE_ERROR_BACKOFF_MS,
+    }
+    : computeClaudeUsagePollState({ outcome: "success" }));
   const entry = {
     timestamp: Date.now(),
     data,
     error: !!errorInfo,
     errorType: errorInfo?.type || null,   // "rate_limit" | "auth" | "network" | "unknown"
     errorStatus: errorInfo?.status || null, // HTTP 상태 코드
+    consecutive429s: state.consecutive429s,
+    nextRefreshBaseMs: state.baseDelayMs,
+    nextRefreshAt: Date.now() + state.delayMs,
   };
   // 에러 시 기존 유효 데이터 보존 (--% n/a 방지)
   if (errorInfo && data == null) {
@@ -234,9 +301,11 @@ export function writeClaudeUsageCache(data, errorInfo = null) {
 
 export async function fetchClaudeUsage(forceRefresh = false) {
   const existingSnapshot = readClaudeUsageSnapshot();
-  if (!forceRefresh && !existingSnapshot.shouldRefresh && existingSnapshot.data) {
-    return existingSnapshot.data;
+  if (!forceRefresh && !existingSnapshot.shouldRefresh) {
+    return existingSnapshot.data || null;
   }
+  const cache = readJson(CLAUDE_USAGE_CACHE_PATH, null);
+  const consecutive429s = Number.isFinite(cache?.consecutive429s) ? cache.consecutive429s : 0;
   let creds = readClaudeCredentials();
   if (!creds) {
     writeClaudeUsageCache(null, { type: "auth", status: 0 });
@@ -262,11 +331,15 @@ export async function fetchClaudeUsage(forceRefresh = false) {
       : result.status === 401 || result.status === 403 ? "auth"
       : result.error === "timeout" || result.error === "network" ? "network"
       : "unknown";
-    writeClaudeUsageCache(existingSnapshot.data, { type: errorType, status: result.status });
+    const pollState = errorType === "rate_limit"
+      ? computeClaudeUsagePollState({ consecutive429s, outcome: "rate_limit" })
+      : null;
+    writeClaudeUsageCache(existingSnapshot.data, { type: errorType, status: result.status }, pollState);
     return existingSnapshot.data || null;
   }
   const usage = parseClaudeUsageResponse(result.data);
-  writeClaudeUsageCache(usage, usage ? null : { type: "unknown", status: 0 });
+  const pollState = usage ? computeClaudeUsagePollState({ outcome: "success" }) : null;
+  writeClaudeUsageCache(usage, usage ? null : { type: "unknown", status: 0 }, pollState);
   return usage;
 }
 
@@ -291,7 +364,7 @@ export function scheduleClaudeUsageRefresh() {
   try {
     if (existsSync(lockPath)) {
       const lockAge = Date.now() - readJson(lockPath, {}).t;
-      if (lockAge < 30000) return; // 30초 이내 스폰 이력 → 건너뜀
+      if (lockAge < 1000) return; // 짧은 중복 스폰만 억제, 실제 폴링 주기는 nextRefreshAt가 제어
     }
     writeJsonSafe(lockPath, { t: Date.now() });
   } catch { /* 락 실패 무시 — 스폰 진행 */ }

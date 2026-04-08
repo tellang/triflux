@@ -191,6 +191,7 @@ export function renderAlignedRows(rows) {
 // ============================================================================
 export function getMicroLine(contextView, claudeUsage, codexBuckets, geminiSession, geminiBucket, combinedSvPct) {
   const ctxView = contextView || buildContextUsageView({}, null);
+  const staleMarker = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
 
   // Claude 5h/1w
   const cF = claudeUsage?.fiveHourPercent != null ? clampPercent(claudeUsage.fiveHourPercent) : null;
@@ -230,7 +231,7 @@ export function getMicroLine(contextView, claudeUsage, codexBuckets, geminiSessi
     `${bold(codexWhite("x"))}${dim(":")}${xVal} ` +
     `${bold(geminiBlue("g"))}${dim(":")}${gVal} ` +
     `${dim("sv:")}${sv} ` +
-    `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
+    `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${staleMarker}`;
   return truncateAnsi(line, cols);
 }
 
@@ -240,6 +241,7 @@ export function getMicroLine(contextView, claudeUsage, codexBuckets, geminiSessi
 export function getClaudeRows(currentTier, contextView, claudeUsage, combinedSvPct) {
   const ctxView = contextView || buildContextUsageView({}, null);
   const prefix = `${bold(claudeOrange("c"))}:`;
+  const staleMarker = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
 
   // 절약 퍼센트
   const svStr = formatSvPct(combinedSvPct || 0);
@@ -267,25 +269,25 @@ export function getClaudeRows(currentTier, contextView, claudeUsage, combinedSvP
   if (currentTier === "nano" || currentTier === "micro") {
     const fShort = hasData && fiveHourPercent != null ? colorByProvider(fiveHourPercent, `${fiveHourPercent}%`, claudeOrange) : dim("--");
     const wShort = hasData && weeklyPercent != null ? colorByProvider(weeklyPercent, `${weeklyPercent}%`, claudeOrange) : dim("--");
-    const quotaSection = `${fShort}${dim("/")}${wShort}`;
+    const quotaSection = `${fShort}${dim("/")}${wShort}${staleMarker}`;
     return [{ prefix, left: quotaSection, right: "" }];
   }
 
   if (currentTier === "minimal") {
-    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}`;
+    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${staleMarker}`;
     const right = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
     return [{ prefix, left: quotaSection, right }];
   }
 
   if (currentTier === "compact") {
-    const quotaSection = `${dim("5h:")}${fStr} ${dim(fTime)} ${dim("1w:")}${wStr} ${dim(wTime)}`;
+    const quotaSection = `${dim("5h:")}${fStr} ${dim(fTime)} ${dim("1w:")}${wStr} ${dim(wTime)}${staleMarker}`;
     const warning = ctxView.warningTag ? ` ${dim("|")} ${yellow(ctxView.warningTag)}` : "";
     const contextSection = `${svSuffix} ${dim("|")} ${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${warning}`;
     return [{ prefix, left: quotaSection, right: contextSection }];
   }
 
   // full tier (>= 120 cols)
-  const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}`;
+  const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}${staleMarker}`;
   const warning = ctxView.warningTag ? ` ${dim("|")} ${yellow(ctxView.warningTag)}` : "";
   const contextSection = `${svSuffix} ${dim("|")} ${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${warning}`;
   return [{ prefix, left: quotaSection, right: contextSection }];

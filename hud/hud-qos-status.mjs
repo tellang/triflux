@@ -104,6 +104,9 @@ async function main() {
   // 실측 데이터 추출
   const stdin = await stdinPromise;
   const contextView = buildContextUsageView(stdin, contextSnapshot);
+  const claudeUsage = claudeUsageSnapshot.isStale
+    ? { ...(claudeUsageSnapshot.data || {}), stale: true }
+    : claudeUsageSnapshot.data;
   const codexEmail = getCodexEmail();
   const geminiEmail = getGeminiEmail();
   const codexBuckets = codexSnapshot.buckets;
@@ -151,7 +154,7 @@ async function main() {
 
   // nano tier: 1줄 모드 (극소 폭 또는 알림 배너 대응)
   if (CURRENT_TIER === "nano") {
-    const microLine = getMicroLine(contextView, claudeUsageSnapshot.data, codexBuckets,
+    const microLine = getMicroLine(contextView, claudeUsage, codexBuckets,
       geminiSession, geminiBucket, combinedSvPct);
     process.stdout.write(`\x1b[0m${microLine}\n`);
     return;
@@ -166,7 +169,7 @@ async function main() {
   };
 
   const rows = [
-    ...getClaudeRows(CURRENT_TIER, contextView, claudeUsageSnapshot.data, combinedSvPct),
+    ...getClaudeRows(CURRENT_TIER, contextView, claudeUsage, combinedSvPct),
     getProviderRow(CURRENT_TIER, "codex", "x", codexWhite, qosProfile, accountsConfig, accountsState,
       codexQuotaData, codexEmail, codexSv, null),
     getProviderRow(CURRENT_TIER, "gemini", "g", geminiBlue, qosProfile, accountsConfig, accountsState,
