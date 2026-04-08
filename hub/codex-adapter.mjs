@@ -135,9 +135,9 @@ async function runCodex(prompt, workdir, preflight, attempt) {
 // ── Public API ──────────────────────────────────────────────────
 
 export async function getCircuitState() {
-  const { broker } = await import('./account-broker.mjs');
-  if (!broker) return { state: 'closed', failures: [] };
-  const snap = broker.snapshot().filter((a) => a.provider === 'codex');
+  const brokerMod = await import('./account-broker.mjs');
+  if (!brokerMod.broker) return { state: 'closed', failures: [] };
+  const snap = brokerMod.broker.snapshot().filter((a) => a.provider === 'codex');
   return snap.length ? { state: snap[0].circuitState, accounts: snap } : { state: 'closed', failures: [] };
 }
 

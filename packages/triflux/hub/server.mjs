@@ -710,34 +710,12 @@ export async function startHub({
       // ── Broker reload ────────────────────────────────────────────
       if (path === "/broker/reload" && req.method === "POST") {
         try {
-          const configPath = join(
-            homedir(),
-            ".claude",
-            "cache",
-            "tfx-hub",
-            "accounts.json",
-          );
-          if (!existsSync(configPath)) {
-            return writeJson(res, 404, {
-              ok: false,
-              error: "accounts.json not found",
-            });
+          const { reloadBroker } = await import("./account-broker.mjs");
+          const result = reloadBroker();
+          if (!result.ok) {
+            return writeJson(res, 500, result);
           }
-          const raw = JSON.parse(readFileSync(configPath, "utf8"));
-          const newBroker = new AccountBroker(raw);
-          const accounts = (raw.codex?.length ?? 0) + (raw.gemini?.length ?? 0);
-          // Re-export via the core barrel so consumers pick up the new instance
-          try {
-            const brokerMod = await import("./account-broker.mjs");
-            if (
-              Object.getOwnPropertyDescriptor(brokerMod, "broker")?.writable ||
-              Object.getOwnPropertyDescriptor(brokerMod, "broker")?.set
-            ) {
-              brokerMod.broker = newBroker;
-            }
-          } catch {
-            /* best-effort reassign */
-          }
+          const accounts = result.broker.snapshot().length;
           return writeJson(res, 200, { ok: true, accounts });
         } catch (err) {
           return writeJson(res, 500, {

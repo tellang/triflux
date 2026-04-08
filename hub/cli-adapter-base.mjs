@@ -215,18 +215,18 @@ export function createCircuitBreaker(opts = {}) {
  */
 export async function executeWithCircuitBroker({ provider, runFn, preflightFn, buildAttemptsFn, opts = {} }) {
   // late-import to avoid circular dependency at module load time
-  const { broker } = await import('./account-broker.mjs');
+  const brokerMod = await import('./account-broker.mjs');
   const { withRetry } = await import('./workers/worker-utils.mjs');
 
-  // lease an account (returns null if all circuits open / no accounts)
-  const lease = broker?.lease({ provider });
+  // access broker as live binding property (not destructured) so reloadBroker() propagates
+  const lease = brokerMod.broker?.lease({ provider });
   if (!lease) {
     return createResult(false, { fellBack: true, failureMode: 'circuit_open' });
   }
 
   const preflight = await preflightFn(opts);
   if (!preflight.ok) {
-    broker.release(lease.id, { ok: false });
+    brokerMod.broker.release(lease.id, { ok: false });
     return createResult(false, {
       stderr: appendWarnings('', preflight.warnings),
       fellBack: opts.fallbackToClaude !== false,
@@ -260,11 +260,11 @@ export async function executeWithCircuitBroker({ provider, runFn, preflightFn, b
   }
 
   if (lastResult.ok) {
-    broker.release(lease.id, { ok: true });
+    brokerMod.broker.release(lease.id, { ok: true });
     return lastResult;
   }
 
-  broker.release(lease.id, { ok: false });
+  brokerMod.broker.release(lease.id, { ok: false });
   return {
     ...lastResult,
     retried: attempts.length > 1,

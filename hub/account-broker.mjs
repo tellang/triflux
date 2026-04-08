@@ -6,7 +6,7 @@
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import * as z from "zod";
 
 // ── Zod schema ───────────────────────────────────────────────────
@@ -258,7 +258,7 @@ class AccountBroker extends EventEmitter {
     let authFile;
     if (acct.mode === "auth") {
       const resolved = join(AUTH_BASE_PATH, acct.authFile);
-      if (!resolved.startsWith(AUTH_BASE_PATH)) {
+      if (!resolved.startsWith(AUTH_BASE_PATH + sep)) {
         this.emit("securityViolation", { id: acct.id, authFile: acct.authFile });
         // undo the lease — path traversal blocked
         this.#state.set(acct.id, {
