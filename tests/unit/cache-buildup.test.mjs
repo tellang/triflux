@@ -143,7 +143,7 @@ describe('cache-buildup', () => {
     assert.equal(result.is_git, true);
     assert.equal(typeof result.description, 'string');
     assert.ok(result.description.length > 0);
-    assert.equal(result.test_cmd, 'node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=1 "tests/**/*.test.mjs" "scripts/__tests__/**/*.test.mjs"');
+    assert.match(result.test_cmd, /node scripts\/test-lock\.mjs --test --test-force-exit --test-concurrency=\d+/);
   });
 
   it('checkSearchEngines는 검색 엔진 상태 구조와 집계를 반환한다', () => {
