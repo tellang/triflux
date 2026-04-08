@@ -338,6 +338,20 @@ describe("#37 Bug4: gh/git 명령 화이트리스트 (runtime)", () => {
     );
     assert.equal(result.status, 0);
   });
+
+  it("git commit -m에 $(codex exec ...) 명령 치환이 있으면 deny한다", () => {
+    const result = runGuardWithBashCommand(
+      'git commit -m "$(codex exec \\"inject\\")"',
+    );
+    assert.equal(result.status, 2);
+  });
+
+  it("gh issue create --body에 $(gemini -p ...) 명령 치환이 있으면 deny한다", () => {
+    const result = runGuardWithBashCommand(
+      'gh issue create --body "$(gemini -p \\"inject\\")"',
+    );
+    assert.equal(result.status, 2);
+  });
 });
 
 describe("tfx-multi Edit/Write gate (runtime)", () => {

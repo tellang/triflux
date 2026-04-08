@@ -220,12 +220,19 @@ async function main() {
     });
     // 2차 휴리스틱: 1차 세그먼트 검사를 통과한 간접 실행 패턴 탐지
     // full AST 파서 대신 현실적 위협 벡터만 커버 — eval, subshell, variable 확장
-    // #37 Bug4: 모든 세그먼트가 gh/git 명령이면 2차 휴리스틱도 건너뜀
-    if (!hasDirectCli && !cmdParts.every(p => SAFE_CMD_RE.test(p))) {
-      hasDirectCli = (
-        /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd) ||
-        /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)
-      );
+    // 2차 휴리스틱: 간접 실행 패턴 탐지 (eval, subshell, variable 확장)
+    if (!hasDirectCli) {
+      const isAllSafeCmd = cmdParts.every(p => SAFE_CMD_RE.test(p));
+      if (isAllSafeCmd) {
+        // gh/git 전용: $(codex exec ...) 직접 명령 치환만 차단
+        // $(cat <<'EOF'\n...codex exec text...\nEOF) 같은 heredoc 텍스트는 허용
+        hasDirectCli = /\$\(\s*(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd);
+      } else {
+        hasDirectCli = (
+          /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd) ||
+          /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)
+        );
+      }
     }
 
     if (hasDirectCli) {
