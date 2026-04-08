@@ -11,8 +11,6 @@ const { values: flags } = parseArgs({
   strict: false,
 });
 
-const DRY_RUN = flags["dry-run"];
-const KEEP_SESSION = flags.keep;
 const SESSION_NAME = "triflux-demo";
 
 const WORKERS = [
@@ -45,8 +43,8 @@ const WORKERS = [
   },
 ];
 
-export function checkPsmux() {
-  if (DRY_RUN) return false;
+export function checkPsmux(opts = {}) {
+  if (opts.dryRun) return false;
   try {
     childProcess.execFileSync("psmux", ["-V"], { encoding: "utf8", stdio: "pipe" });
     return true;
@@ -55,8 +53,8 @@ export function checkPsmux() {
   }
 }
 
-export function createDemoSession(sessionName) {
-  if (DRY_RUN) {
+export function createDemoSession(sessionName, opts = {}) {
+  if (opts.dryRun) {
     console.log(`[dry-run] psmux new-session -d -s ${sessionName}`);
     console.log(`[dry-run] psmux split-window -h -t ${sessionName}`);
     console.log(`[dry-run] psmux split-window -h -t ${sessionName}`);
@@ -67,14 +65,16 @@ export function createDemoSession(sessionName) {
   childProcess.execFileSync("psmux", ["split-window", "-h", "-t", sessionName], { stdio: "pipe" });
 }
 
-export function simulateWorker(pane, agentName, messages) {
+export function simulateWorker(pane, agentName, messages, opts = {}) {
+  const sessionName = opts.sessionName || SESSION_NAME;
   for (const msg of messages) {
-    if (DRY_RUN) {
-      console.log(`[dry-run] psmux send-keys -t ${SESSION_NAME}:0.${pane} "echo '${msg}'" Enter`);
+    const escapedMsg = msg.replace(/'/g, "'\\''");
+    if (opts.dryRun) {
+      console.log(`[dry-run] psmux send-keys -t ${sessionName}:0.${pane} "echo '${escapedMsg}'" Enter`);
     } else {
       childProcess.execFileSync(
         "psmux",
-        ["send-keys", "-t", `${SESSION_NAME}:0.${pane}`, `echo '${msg}'`, "Enter"],
+        ["send-keys", "-t", `${sessionName}:0.${pane}`, `echo '${escapedMsg}'`, "Enter"],
         { stdio: "pipe" },
       );
     }
@@ -96,8 +96,8 @@ export function showSummary() {
   }
 }
 
-export function cleanup(sessionName) {
-  if (DRY_RUN) {
+export function cleanup(sessionName, opts = {}) {
+  if (opts.dryRun) {
     console.log(`[dry-run] psmux kill-session -t ${sessionName}`);
     return;
   }
@@ -113,43 +113,41 @@ async function wait(ms) {
 }
 
 async function main() {
-  const psmuxAvailable = checkPsmux();
-  const effectiveDryRun = DRY_RUN || !psmuxAvailable;
+  const { values: flags } = parseArgs({
+    options: {
+      "dry-run": { type: "boolean", default: false },
+      keep: { type: "boolean", default: false },
+    },
+    strict: false,
+  });
 
-  if (!psmuxAvailable && !DRY_RUN) {
+  const psmuxAvailable = checkPsmux({ dryRun: flags["dry-run"] });
+  const dryRun = flags["dry-run"] || !psmuxAvailable;
+
+  if (!psmuxAvailable && !flags["dry-run"]) {
     console.log("[demo] psmux not found — switching to dry-run mode");
   }
 
-  if (effectiveDryRun && !DRY_RUN) {
-    // Re-enter dry-run mode by setting module-level flag is not possible,
-    // but we can call functions with the understanding they will check DRY_RUN.
-    // Since DRY_RUN is module-level const, we log commands manually here.
-    console.log(`[dry-run] psmux new-session -d -s ${SESSION_NAME}`);
-    console.log(`[dry-run] psmux split-window -h -t ${SESSION_NAME}`);
-    console.log(`[dry-run] psmux split-window -h -t ${SESSION_NAME}`);
-    for (const { pane, messages } of WORKERS) {
-      for (const msg of messages) {
-        console.log(`[dry-run] psmux send-keys -t ${SESSION_NAME}:0.${pane} "echo '${msg}'" Enter`);
-      }
-    }
-    showSummary();
-    if (!KEEP_SESSION) {
-      console.log(`[dry-run] psmux kill-session -t ${SESSION_NAME}`);
-    }
-    return;
+  const opts = {
+    dryRun,
+    keep: flags.keep,
+    sessionName: SESSION_NAME,
+  };
+
+  createDemoSession(SESSION_NAME, opts);
+
+  for (const { pane, agent, messages } of WORKERS) {
+    simulateWorker(pane, agent, messages, opts);
   }
 
-  createDemoSession(SESSION_NAME);
-
-  for (const { pane, agentName, messages } of WORKERS) {
-    simulateWorker(pane, agentName, messages);
+  if (!opts.dryRun) {
+    await wait(2000);
   }
-
-  await wait(2000);
+  
   showSummary();
 
-  if (!KEEP_SESSION) {
-    cleanup(SESSION_NAME);
+  if (!opts.keep) {
+    cleanup(SESSION_NAME, opts);
   }
 }
 
