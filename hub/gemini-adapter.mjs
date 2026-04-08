@@ -5,18 +5,13 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { withRetry } from './workers/worker-utils.mjs';
 import { whichCommandAsync } from './platform.mjs';
 import {
-  createCircuitBreaker,
-  createResult,
-  appendWarnings,
+  executeWithCircuitBroker,
   normalizePathForShell,
   shellQuote,
   runProcess,
 } from './cli-adapter-base.mjs';
-
-const breaker = createCircuitBreaker();
 
 // ── Gemini-specific stall inference ─────────────────────────────
 
@@ -120,61 +115,19 @@ async function runGemini(prompt, workdir, preflight, attempt) {
 
 // ── Public API ──────────────────────────────────────────────────
 
-export function getCircuitState(now) {
-  return breaker.getState(now);
+export async function getCircuitState() {
+  const { broker } = await import('./account-broker.mjs');
+  if (!broker) return { state: 'closed', failures: [] };
+  const snap = broker.snapshot().filter((a) => a.provider === 'gemini');
+  return snap.length ? { state: snap[0].circuitState, accounts: snap } : { state: 'closed', failures: [] };
 }
 
-export async function execute(opts = {}) {
-  const entry = breaker.canExecute();
-  if (!entry.allowed) {
-    return createResult(false, { fellBack: true, failureMode: 'circuit_open' });
-  }
-
-  const preflight = await runPreflight({ mcpServers: opts.mcpServers });
-  if (!preflight.ok) {
-    breaker.clearTrial();
-    breaker.recordFailure(entry.halfOpen);
-    return createResult(false, {
-      stderr: appendWarnings('', preflight.warnings),
-      fellBack: opts.fallbackToClaude !== false,
-      failureMode: 'crash',
-    });
-  }
-
-  const attempts = buildAttempts(opts, preflight);
-  let attemptIndex = 0;
-  let lastResult = createResult(false);
-
-  try {
-    lastResult = await withRetry(async () => {
-      const result = await runGemini(opts.prompt || '', opts.workdir || process.cwd(), preflight, attempts[attemptIndex]);
-      const current = { ...result, stderr: appendWarnings(result.stderr, preflight.warnings), retried: attemptIndex > 0 };
-      const canRetry = !current.ok && attemptIndex < attempts.length - 1;
-      attemptIndex += 1;
-      if (!canRetry) return current;
-      const error = new Error('retry');
-      error.retryable = true;
-      error.result = current;
-      throw error;
-    }, {
-      maxAttempts: attempts.length,
-      baseDelayMs: 250,
-      maxDelayMs: 750,
-      shouldRetry: (error) => error?.retryable === true,
-    });
-  } catch (error) {
-    lastResult = error?.result || createResult(false, { stderr: String(error?.message || error) });
-  }
-
-  if (lastResult.ok) {
-    breaker.reset();
-    return lastResult;
-  }
-
-  breaker.recordFailure(entry.halfOpen);
-  return {
-    ...lastResult,
-    retried: attempts.length > 1,
-    fellBack: opts.fallbackToClaude !== false,
-  };
+export function execute(opts = {}) {
+  return executeWithCircuitBroker({
+    provider: 'gemini',
+    runFn: runGemini,
+    preflightFn: (o) => runPreflight({ mcpServers: o.mcpServers }),
+    buildAttemptsFn: buildAttempts,
+    opts,
+  });
 }
