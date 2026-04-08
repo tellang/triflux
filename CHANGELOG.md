@@ -2,6 +2,24 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.5.0] - 2026-04-09
+
+### Changed
+- **AccountBroker per-account CircuitBreaker**: 전역 breaker를 계정 단위로 이전, 한 계정 장애가 다른 계정에 전파되지 않음
+- **DRY adapter refactor**: `executeWithCircuitBroker()` 공통 추출, codex/gemini adapter ~80줄 중복 제거
+- **EventEmitter 관측성**: lease/release/circuitOpen/circuitClose/tierFallback/noAvailableAccounts 이벤트
+
+### Added
+- `/broker/reload` 엔드포인트: 장시간 세션에서 accounts.json 핫리로드
+- `reloadBroker()`: 모듈 레벨 singleton 직접 교체 (ESM live binding)
+- 테스트 10개 추가 (22→32): circuit breaker, half-open, 시간 감쇠, busy guard, EventEmitter
+
+### Fixed
+- `authFile` path traversal guard: `join()` 결과가 AUTH_BASE_PATH 밖이면 차단
+- `release()` busy guard: 비-busy 계정에 대한 중복 release 방지 (가짜 쿨다운 제거)
+- `snapshot()` 방어 복사: `failureTimestamps` 배열 참조 노출 방지
+- config loader 에러 로깅: `catch { return null }` → `console.error` 후 null 반환
+
 ## [10.4.0] - 2026-04-08
 
 ### Added

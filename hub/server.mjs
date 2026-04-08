@@ -1534,11 +1534,11 @@ export async function startHub({
           { port, host },
           "hub.port_in_use: port already occupied — check for existing hub or other service",
         );
-        reject(
-          new Error(
-            `Hub 포트 ${port}이(가) 이미 사용 중입니다. 기존 Hub 프로세스를 확인하세요. (PID file: ${PID_FILE})`,
-          ),
+        const wrapped = new Error(
+          `Hub 포트 ${port}이(가) 이미 사용 중입니다. 기존 Hub 프로세스를 확인하세요. (PID file: ${PID_FILE})`,
         );
+        wrapped.code = "EADDRINUSE";
+        reject(wrapped);
       } else {
         reject(err);
       }

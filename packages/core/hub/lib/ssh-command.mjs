@@ -112,8 +112,10 @@ export function buildSshArgs(host, remoteCmd, opts = {}) {
   const remoteCmdStr = [cmd, ...quotedArgs].join(" ");
 
   const sshArgs = [
-    "-o", `ConnectTimeout=${connectTimeout}`,
-    "-o", "BatchMode=yes",
+    "-o",
+    `ConnectTimeout=${connectTimeout}`,
+    "-o",
+    "BatchMode=yes",
   ];
 
   if (keepalive) {
@@ -189,9 +191,10 @@ export function resolveHostAlias(alias, repoRoot) {
 
 /**
  * 특정 capability를 보유한 호스트 목록을 반환한다.
+ * 명시적 선택 UI에서 바로 리소스 정보를 보여줄 수 있도록 specs를 평탄화한다.
  * @param {string} capability — e.g. "codex", "claude", "gpu"
  * @param {string} [repoRoot]
- * @returns {Array<{ name: string, config: object }>}
+ * @returns {Array<{ name: string, config: object, specs: { cores?: number, ram_gb?: number } }>}
  */
 export function selectHostForCapability(capability, repoRoot) {
   loadHostsCache(repoRoot);
@@ -199,10 +202,37 @@ export function selectHostForCapability(capability, repoRoot) {
   const matches = [];
   for (const [name, cfg] of Object.entries(hostsCache.hosts || {})) {
     if (cfg.capabilities?.includes(capability)) {
-      matches.push({ name, config: cfg });
+      matches.push({
+        name,
+        config: cfg,
+        specs: {
+          cores: cfg.specs?.cores,
+          ram_gb: cfg.specs?.ram_gb,
+        },
+      });
     }
   }
   return matches;
+}
+
+/**
+ * 특정 capability를 가진 호스트를 리소스 기준으로 정렬해 반환한다.
+ * 자동 선택은 하지 않고, 명시적 선택 목록 정렬에만 사용한다.
+ * @param {string} capability — e.g. "codex", "claude", "gpu"
+ * @param {"cores"|"ram_gb"} sortBy
+ * @param {string} [repoRoot]
+ * @returns {Array<{ name: string, config: object, specs: { cores?: number, ram_gb?: number } }>}
+ */
+export function selectHostByResources(capability, sortBy, repoRoot) {
+  if (sortBy !== "cores" && sortBy !== "ram_gb") {
+    throw new TypeError('sortBy must be "cores" or "ram_gb"');
+  }
+
+  return selectHostForCapability(capability, repoRoot).sort((a, b) => {
+    const aValue = a.specs?.[sortBy] ?? -Infinity;
+    const bValue = b.specs?.[sortBy] ?? -Infinity;
+    return bValue - aValue;
+  });
 }
 
 /** hosts.json 캐시 초기화 (테스트용) */
