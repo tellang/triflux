@@ -1,10 +1,29 @@
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import {
+  access,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { join } from "node:path";
 
-const DEFAULT_STATE_DIR = join(process.cwd(), '.omc', 'state');
+const DEFAULT_STATE_DIR = join(process.cwd(), ".tfx", "state");
 
 function stateFilePath(stateDir, skillName) {
   return join(stateDir, `${skillName}-active.json`);
+}
+
+function assertValidSkillName(skillName) {
+  if (
+    skillName.includes("/") ||
+    skillName.includes("\\") ||
+    skillName.includes("..")
+  ) {
+    throw new Error(`Invalid skill name: ${skillName}`);
+  }
 }
 
 /**
@@ -14,24 +33,41 @@ function stateFilePath(stateDir, skillName) {
  * @param {string} skillName
  * @param {{ stateDir?: string }} options
  */
-export async function activateSkill(skillName, { stateDir = DEFAULT_STATE_DIR } = {}) {
+export async function activateSkill(
+  skillName,
+  { stateDir = DEFAULT_STATE_DIR } = {},
+) {
+  assertValidSkillName(skillName);
   await mkdir(stateDir, { recursive: true });
 
   const filePath = stateFilePath(stateDir, skillName);
-
-  let existing;
+  const lockPath = `${filePath}.lock`;
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  let lockHandle;
   try {
-    existing = await readFile(filePath, 'utf8');
-  } catch {
-    existing = null;
-  }
+    lockHandle = await open(lockPath, "wx");
+    try {
+      await access(filePath);
+      throw new Error(`Skill already active: ${skillName}`);
+    } catch (error) {
+      if (error?.message === `Skill already active: ${skillName}`) {
+        throw error;
+      }
+      if (error?.code !== "ENOENT") {
+        throw error;
+      }
+    }
 
-  if (existing !== null) {
-    throw new Error(`Skill already active: ${skillName}`);
+    const state = { skillName, pid: process.pid, activatedAt: Date.now() };
+    await writeFile(tmpPath, JSON.stringify(state), "utf8");
+    await rename(tmpPath, filePath);
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => {});
+    if (lockHandle) {
+      await lockHandle.close().catch(() => {});
+    }
+    await rm(lockPath, { force: true }).catch(() => {});
   }
-
-  const state = { skillName, pid: process.pid, activatedAt: Date.now() };
-  await writeFile(filePath, JSON.stringify(state), 'utf8');
 }
 
 /**
@@ -41,7 +77,10 @@ export async function activateSkill(skillName, { stateDir = DEFAULT_STATE_DIR } 
  * @param {string} skillName
  * @param {{ stateDir?: string }} options
  */
-export async function deactivateSkill(skillName, { stateDir = DEFAULT_STATE_DIR } = {}) {
+export async function deactivateSkill(
+  skillName,
+  { stateDir = DEFAULT_STATE_DIR } = {},
+) {
   const filePath = stateFilePath(stateDir, skillName);
   try {
     await rm(filePath, { force: true });
@@ -66,9 +105,9 @@ export async function getActiveSkills({ stateDir = DEFAULT_STATE_DIR } = {}) {
 
   const results = [];
   for (const entry of entries) {
-    if (!entry.endsWith('-active.json')) continue;
+    if (!entry.endsWith("-active.json")) continue;
     try {
-      const raw = await readFile(join(stateDir, entry), 'utf8');
+      const raw = await readFile(join(stateDir, entry), "utf8");
       results.push(JSON.parse(raw));
     } catch {
       // skip malformed files
@@ -83,7 +122,9 @@ export async function getActiveSkills({ stateDir = DEFAULT_STATE_DIR } = {}) {
  * @param {{ stateDir?: string }} options
  * @returns {Promise<string[]>} list of pruned skill names
  */
-export async function pruneOrphanSkillStates({ stateDir = DEFAULT_STATE_DIR } = {}) {
+export async function pruneOrphanSkillStates({
+  stateDir = DEFAULT_STATE_DIR,
+} = {}) {
   const active = await getActiveSkills({ stateDir });
   const pruned = [];
 
