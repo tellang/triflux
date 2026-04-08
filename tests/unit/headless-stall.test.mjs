@@ -133,6 +133,7 @@ describe("waitForCompletionWithStallDetect", () => {
       pollInterval: 10,
       stallTimeout: 50, // 50ms 무변화 → stall
       completionTimeout: 5000,
+      maxRestarts: 3, // 3 cycles needed: cycle 1(1-5), cycle 2(6-10), cycle 3(11+ → done)
       _deps: deps,
     });
 
