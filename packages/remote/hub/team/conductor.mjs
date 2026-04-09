@@ -332,7 +332,11 @@ export function createConductor(opts = {}) {
         `restart_${session.restarts + 1}/${maxRestarts}`,
       );
       session.restarts += 1;
-      void respawnSession(session);
+      const backoffMs = Math.min(1000 * 2 ** (session.restarts - 1), 30_000);
+      session._respawnTimer = setTimeout(() => {
+        session._respawnTimer = null;
+        void respawnSession(session);
+      }, backoffMs);
     } else {
       transition(session, STATES.DEAD, `maxRestarts(${maxRestarts})_exceeded`);
       emitter.emit("dead", { sessionId: session.id, reason });
@@ -681,6 +685,10 @@ export function createConductor(opts = {}) {
     if (!session) return;
     if (TERMINAL_STATES.has(session.state)) return;
 
+    if (session._respawnTimer) {
+      clearTimeout(session._respawnTimer);
+      session._respawnTimer = null;
+    }
     eventLog.append("kill", { session: id, reason });
     await cleanupChild(session);
     transition(session, STATES.FAILED, reason);
@@ -744,6 +752,10 @@ export function createConductor(opts = {}) {
     const cleanups = [...sessions.values()]
       .filter((s) => !TERMINAL_STATES.has(s.state))
       .map(async (s) => {
+        if (s._respawnTimer) {
+          clearTimeout(s._respawnTimer);
+          s._respawnTimer = null;
+        }
         s.probe?.stop();
         await cleanupChild(s);
         if (!TERMINAL_STATES.has(s.state)) {
