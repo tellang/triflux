@@ -193,6 +193,17 @@
         "description": "supergateway MCP 서비스 헬스체크 및 자동 기동"
       },
       {
+        "id": "tfx-session-stale-cleanup",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/scripts/session-stale-cleanup.mjs\"",
+        "priority": 5,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "이전 세션의 stale tfx-multi 상태 파일 정리 (#62)"
+      },
+      {
         "id": "ext-session-vault-start",
         "source": "session-vault",
         "matcher": "*",

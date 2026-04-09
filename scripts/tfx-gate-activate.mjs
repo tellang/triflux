@@ -53,9 +53,11 @@ async function main() {
 
   if (TFX_ROUTING_SKILLS.has(skill)) {
     // 활성화: 상태 파일 생성/갱신
+    // ppid = Claude Code 세션 PID (훅은 Claude Code의 자식 프로세스)
     const state = {
       active: true,
       activatedAt: Date.now(),
+      ownerPid: process.ppid,
       dispatched: false,
       nativeWorkCalls: 0,
       nativeWorkCallsSinceDispatch: 0,

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -766,6 +767,119 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
       encoding: "utf8",
     });
     assert.ok(true, "fast.sh fell through to node on missing cache");
+  });
+});
+
+describe("#62: session-stale-cleanup (runtime)", () => {
+  const CLEANUP_PATH = join(
+    process.cwd(),
+    "scripts",
+    "session-stale-cleanup.mjs",
+  );
+
+  function runCleanup(stateContent) {
+    const sandboxDir = mkdtempSync(join(tmpdir(), "tfx-cleanup-test-"));
+    const stateFile = join(sandboxDir, "tfx-multi-state.json");
+
+    try {
+      if (stateContent !== undefined) {
+        writeFileSync(stateFile, JSON.stringify(stateContent), "utf8");
+      }
+
+      const result = spawnSync(process.execPath, [CLEANUP_PATH], {
+        encoding: "utf8",
+        timeout: 5000,
+        env: {
+          ...process.env,
+          TMPDIR: sandboxDir,
+          TEMP: sandboxDir,
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      const fileExists = existsSync(stateFile);
+      return { result, fileExists, sandboxDir };
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  }
+
+  it("죽은 PID의 stale state를 삭제한다", () => {
+    const { fileExists } = runCleanup({
+      active: true,
+      dispatched: false,
+      activatedAt: Date.now() - 10 * 60 * 1000,
+      ownerPid: 99999999, // 존재하지 않는 PID
+      nativeWorkCalls: 6,
+    });
+    assert.equal(fileExists, false, "죽은 PID의 state 삭제됨");
+  });
+
+  it("살아있는 PID의 state는 유지한다 (동시 세션 보호)", () => {
+    // process.pid = 현재 테스트 프로세스 (살아있음)
+    const { fileExists } = runCleanup({
+      active: true,
+      dispatched: true,
+      activatedAt: Date.now() - 5 * 60 * 1000,
+      ownerPid: process.pid,
+      nativeWorkCalls: 2,
+    });
+    assert.equal(fileExists, true, "살아있는 PID의 state 유지됨");
+  });
+
+  it("ownerPid 없는 구버전 state — 만료 시 삭제", () => {
+    const { fileExists } = runCleanup({
+      active: true,
+      dispatched: false,
+      activatedAt: Date.now() - 31 * 60 * 1000, // 31분 전 (만료)
+      nativeWorkCalls: 3,
+    });
+    assert.equal(fileExists, false, "만료된 구버전 state 삭제됨");
+  });
+
+  it("ownerPid 없는 구버전 state — 미만료 시 유지", () => {
+    const { fileExists } = runCleanup({
+      active: true,
+      dispatched: false,
+      activatedAt: Date.now() - 10 * 60 * 1000, // 10분 전 (미만료)
+      nativeWorkCalls: 3,
+    });
+    assert.equal(fileExists, true, "미만료 구버전 state 유지됨");
+  });
+
+  it("inactive state — 죽은 PID면 삭제", () => {
+    const { fileExists } = runCleanup({
+      active: false,
+      dispatched: false,
+      activatedAt: Date.now(),
+      ownerPid: 99999999,
+    });
+    assert.equal(fileExists, false, "죽은 PID의 inactive state 삭제됨");
+  });
+
+  it("상태 파일 없으면 에러 없이 통과", () => {
+    const { result } = runCleanup(undefined);
+    assert.equal(result.status, 0);
+  });
+
+  it("손상된 JSON도 삭제한다", () => {
+    const sandboxDir = mkdtempSync(join(tmpdir(), "tfx-cleanup-corrupt-"));
+    const stateFile = join(sandboxDir, "tfx-multi-state.json");
+
+    try {
+      writeFileSync(stateFile, "{corrupted json...", "utf8");
+
+      spawnSync(process.execPath, [CLEANUP_PATH], {
+        encoding: "utf8",
+        timeout: 5000,
+        env: { ...process.env, TMPDIR: sandboxDir, TEMP: sandboxDir },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      assert.equal(existsSync(stateFile), false, "손상된 파일 삭제됨");
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
   });
 });
 
