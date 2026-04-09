@@ -22,6 +22,7 @@
 
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
@@ -314,6 +315,32 @@ async function main() {
 
   if (!eventName) process.exit(0);
 
+  // ── SessionStart fast-path ──
+  // TRIFLUX_HOOK_FAST_PATH=false로 비활성화 가능 (rollback)
+  if (eventName === "SessionStart" && process.env.TRIFLUX_HOOK_FAST_PATH !== "false") {
+    try {
+      const { execute } = await import("./session-start-fast.mjs");
+      const result = await execute(stdinRaw);
+      if (result.stdout?.trim()) {
+        const output = { additionalContext: result.stdout.trim() };
+        process.stdout.write(JSON.stringify(output));
+      }
+
+      // external source 훅 (session-vault 등)은 기존 방식으로 실행
+      const allHooks = registry.events.SessionStart || [];
+      const externalHooks = allHooks.filter((h) => h.enabled !== false && h.source !== "triflux");
+      for (const hook of externalHooks) {
+        const hookResult = executeHookAsync(hook, stdinRaw);
+        hookResult.catch(() => {}); // fire-and-forget for external hooks
+      }
+
+      process.exit(0);
+    } catch (err) {
+      // fast-path 실패 시 기존 방식으로 폴백
+      process.stderr.write(`[orchestrator] fast-path failed, falling back: ${err.message}\n`);
+    }
+  }
+
   // 이벤트에 해당하는 훅 목록
   const hooks = registry.events[eventName];
   if (!hooks || hooks.length === 0) process.exit(0);
@@ -370,6 +397,29 @@ async function main() {
         }
       }
     }
+  }
+
+  // ── PostToolUse: 컨텍스트 압축 nudge (인라인, 프로세스 추가 없음) ──
+  if (eventName === "PostToolUse" && !blocked) {
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const snapshotPath = join(home, ".claude", "cache", "tfx-hub", "context-monitor.json");
+      const nudgeMarker = join(tmpdir(), "tfx-compact-nudge-sent");
+      if (existsSync(snapshotPath) && !existsSync(nudgeMarker)) {
+        const snap = JSON.parse(readFileSync(snapshotPath, "utf8"));
+        const percent = Number(snap.percent || 0);
+        if (percent >= 80) {
+          const level = percent >= 90 ? "critical" : "warn";
+          const msg = level === "critical"
+            ? `[context ${percent}%] 컨텍스트 ${percent}% 사용. /compact 또는 에이전트 분할을 강력 권장합니다.`
+            : `[context ${percent}%] 컨텍스트 ${percent}% 사용. 마일스톤이면 /compact를 권장합니다.`;
+          mergedOutput = mergeOutputs(mergedOutput, JSON.stringify({ systemMessage: msg }));
+          if (level === "warn") {
+            writeFileSync(nudgeMarker, new Date().toISOString());
+          }
+        }
+      }
+    } catch { /* 컨텍스트 모니터 읽기 실패 무시 */ }
   }
 
   // ── PostToolUse:Skill 완료 시 라우팅 가중치 기록 ──
