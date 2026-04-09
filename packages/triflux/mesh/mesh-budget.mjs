@@ -28,9 +28,11 @@ function clampPercent(value) {
  */
 function classifyLevel(percent) {
   const p = clampPercent(percent);
-  if (p >= WARNING_LEVELS.critical) return { level: "critical", message: "에이전트 분할 또는 세션 교체 권장" };
+  if (p >= WARNING_LEVELS.critical)
+    return { level: "critical", message: "에이전트 분할 또는 세션 교체 권장" };
   if (p >= WARNING_LEVELS.warn) return { level: "warn", message: "압축 권장" };
-  if (p >= WARNING_LEVELS.info) return { level: "info", message: "컨텍스트 절반 이상 사용" };
+  if (p >= WARNING_LEVELS.info)
+    return { level: "info", message: "컨텍스트 절반 이상 사용" };
   return { level: "ok", message: "" };
 }
 
@@ -78,9 +80,10 @@ export function createMeshBudget() {
     budgets.set(agentId, updated);
 
     const remaining = Math.max(0, updated.allocated - updated.consumed);
-    const percent = updated.allocated > 0
-      ? clampPercent((updated.consumed / updated.allocated) * 100)
-      : 100;
+    const percent =
+      updated.allocated > 0
+        ? clampPercent((updated.consumed / updated.allocated) * 100)
+        : 100;
     const { level } = classifyLevel(percent);
     return { remaining, percent, level };
   }
@@ -96,11 +99,17 @@ export function createMeshBudget() {
       return { allocated: 0, consumed: 0, remaining: 0, level: "ok" };
     }
     const remaining = Math.max(0, budget.allocated - budget.consumed);
-    const percent = budget.allocated > 0
-      ? clampPercent((budget.consumed / budget.allocated) * 100)
-      : 0;
+    const percent =
+      budget.allocated > 0
+        ? clampPercent((budget.consumed / budget.allocated) * 100)
+        : 0;
     const { level } = classifyLevel(percent);
-    return { allocated: budget.allocated, consumed: budget.consumed, remaining, level };
+    return {
+      allocated: budget.allocated,
+      consumed: budget.consumed,
+      remaining,
+      level,
+    };
   }
 
   /**

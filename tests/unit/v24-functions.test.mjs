@@ -1,11 +1,13 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-
-import { appendCodexResumeHint, cleanTuiArtifacts, extractCodexSessionId } from "../../scripts/tfx-route-post.mjs";
-import { replaceProfileSection, hasProfileSection } from "../../scripts/setup.mjs";
+import { describe, it } from "node:test";
+import { replaceProfileSection } from "../../scripts/setup.mjs";
+import {
+  appendCodexResumeHint,
+  cleanTuiArtifacts,
+  extractCodexSessionId,
+} from "../../scripts/tfx-route-post.mjs";
 
 describe("v2.4 신규 JS 함수 테스트", () => {
-
   describe("cleanTuiArtifacts()", () => {
     it("1. ANSI escape 시퀀스 제거 확인", () => {
       const input = "\x1b[31mRed Text\x1b[0m And \x1b[1mBold\x1b[22m";
@@ -35,7 +37,8 @@ describe("v2.4 신규 JS 함수 테스트", () => {
 
     it("5. 일반 텍스트는 변경하지 않음 확인", () => {
       const input = "Hello, this is a normal text.\nIt should remain the same.";
-      const expected = "Hello, this is a normal text.\nIt should remain the same.";
+      const expected =
+        "Hello, this is a normal text.\nIt should remain the same.";
       assert.equal(cleanTuiArtifacts(input, "codex"), expected);
     });
 
@@ -75,8 +78,12 @@ describe("v2.4 신규 JS 함수 테스트", () => {
     });
 
     it("10. 기존 resume 힌트가 있으면 중복 추가하지 않는다", () => {
-      const existing = "Done.\n\nCodex session ID: thr_existing\nResume in Codex: codex resume thr_existing";
-      assert.equal(appendCodexResumeHint(existing, "", "session id: thr_other"), existing);
+      const existing =
+        "Done.\n\nCodex session ID: thr_existing\nResume in Codex: codex resume thr_existing";
+      assert.equal(
+        appendCodexResumeHint(existing, "", "session id: thr_other"),
+        existing,
+      );
     });
   });
 
@@ -93,17 +100,19 @@ model = "gpt-3.5"
     it("1. 기존 프로필 교체 확인", () => {
       const newLines = ['model = "gpt-5"', 'effort = "max"'];
       const updated = replaceProfileSection(tomlContent, "high", newLines);
-      
-      assert.ok(updated.includes('[profiles.high]\nmodel = "gpt-5"\neffort = "max"'));
+
+      assert.ok(
+        updated.includes('[profiles.high]\nmodel = "gpt-5"\neffort = "max"'),
+      );
       assert.ok(!updated.includes('model = "gpt-4"'));
       // low 프로필은 유지되어야 함
-      assert.ok(updated.includes('[profiles.low]'));
+      assert.ok(updated.includes("[profiles.low]"));
     });
 
     it("2. 프로필 없을 때 원본 유지 확인 (replace는 match 실패 시 원본 반환)", () => {
       const newLines = ['model = "gpt-5"'];
       const updated = replaceProfileSection(tomlContent, "missing", newLines);
-      
+
       // 변경이 없어야 함
       assert.equal(updated, tomlContent);
     });
@@ -111,7 +120,7 @@ model = "gpt-3.5"
     it("3. 여러 프로필 중 특정 하나만 교체 확인", () => {
       const newLines = ['model = "gpt-4o-mini"'];
       const updated = replaceProfileSection(tomlContent, "low", newLines);
-      
+
       // high 프로필은 유지
       assert.ok(updated.includes('[profiles.high]\nmodel = "gpt-4"'));
       // low 프로필은 변경

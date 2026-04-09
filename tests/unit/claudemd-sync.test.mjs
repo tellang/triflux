@@ -1,8 +1,14 @@
-import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 
 import {
   ensureGlobalClaudeRoutingSection,
@@ -31,8 +37,15 @@ describe("getLatestRoutingTable()", () => {
     // XML 태그 또는 legacy heading 둘 다 허용
     const hasXmlTag = routingTable.startsWith("<routing>");
     const hasLegacyHeading = routingTable.startsWith("## triflux CLI 라우팅");
-    assert.equal(hasXmlTag || hasLegacyHeading, true, `routing starts with <routing> or ## heading`);
-    assert.equal(routingTable.includes("Layer 1") || routingTable.includes("CLI 라우팅"), true);
+    assert.equal(
+      hasXmlTag || hasLegacyHeading,
+      true,
+      `routing starts with <routing> or ## heading`,
+    );
+    assert.equal(
+      routingTable.includes("Layer 1") || routingTable.includes("CLI 라우팅"),
+      true,
+    );
   });
 });
 
@@ -54,19 +67,23 @@ describe("ensureTfxSection()", () => {
     const root = makeTempDir("triflux-claudemd-sync-update-");
     const target = join(root, "CLAUDE.md");
     const routingTable = getLatestRoutingTable();
-    writeFileSync(target, [
-      "# Intro",
-      "",
-      "## triflux CLI 라우팅",
-      "",
-      "legacy-body",
-      "",
-      "### nested",
-      "- keep-inside-old-section",
-      "",
-      "## Preserve",
-      "- untouched",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      target,
+      [
+        "# Intro",
+        "",
+        "## triflux CLI 라우팅",
+        "",
+        "legacy-body",
+        "",
+        "### nested",
+        "- keep-inside-old-section",
+        "",
+        "## Preserve",
+        "- untouched",
+      ].join("\n"),
+      "utf8",
+    );
 
     const result = ensureTfxSection(target, routingTable);
     const saved = readFileSync(target, "utf8");
@@ -115,8 +132,17 @@ describe("ensureGlobalClaudeRoutingSection()", () => {
     const result = ensureGlobalClaudeRoutingSection(claudeDir);
     const saved = readFileSync(globalClaudeMdPath, "utf8");
 
-    assert.deepEqual(result, { action: "unchanged", path: globalClaudeMdPath, skipped: true, reason: "global_sync_disabled" });
-    assert.equal(saved, "# Global\n\n## Notes\n- keep\n", "파일이 수정되지 않아야 한다");
+    assert.deepEqual(result, {
+      action: "unchanged",
+      path: globalClaudeMdPath,
+      skipped: true,
+      reason: "global_sync_disabled",
+    });
+    assert.equal(
+      saved,
+      "# Global\n\n## Notes\n- keep\n",
+      "파일이 수정되지 않아야 한다",
+    );
   });
 
   it("글로벌 CLAUDE.md가 없어도 skipped를 반환한다", () => {
@@ -134,4 +160,3 @@ describe("ensureGlobalClaudeRoutingSection()", () => {
     });
   });
 });
-

@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { describe, it } from "node:test";
 
 import { stripAnsi } from "../../hub/team/ansi.mjs";
 import { createLiteDashboard } from "../../hub/team/tui-lite.mjs";
@@ -18,7 +18,13 @@ describe("createLogDashboard(tui-lite)", () => {
 
   it("렌더 시 핵심 메타데이터를 출력하고 코드 블록은 제거한다", () => {
     let output = "";
-    const stream = { write: (chunk) => { output += chunk; }, columns: 120, isTTY: false };
+    const stream = {
+      write: (chunk) => {
+        output += chunk;
+      },
+      columns: 120,
+      isTTY: false,
+    };
     const tui = createLiteDashboard({ stream, refreshMs: 0, columns: 120 });
     tui.updateWorker("worker-1", {
       cli: "codex",
@@ -26,8 +32,14 @@ describe("createLogDashboard(tui-lite)", () => {
       progress: 1,
       tokens: "1.2k tokens used",
       summary: "요약 문장",
-      detail: "verdict: done\n```js\nconsole.log('secret');\n```\nconfidence: high",
-      handoff: { status: "ok", verdict: "done", confidence: "high", files_changed: ["hub/team/tui-lite.mjs"] },
+      detail:
+        "verdict: done\n```js\nconsole.log('secret');\n```\nconfidence: high",
+      handoff: {
+        status: "ok",
+        verdict: "done",
+        confidence: "high",
+        files_changed: ["hub/team/tui-lite.mjs"],
+      },
     });
     tui.setFocusTab("files");
     tui.render();
@@ -42,10 +54,30 @@ describe("createLogDashboard(tui-lite)", () => {
 
   it("넓은 화면에서는 rail + detail 분할 레이아웃을 쓴다", () => {
     let output = "";
-    const stream = { write: (chunk) => { output += chunk; }, columns: 132, rows: 20, isTTY: false };
-    const tui = createLiteDashboard({ stream, refreshMs: 0, columns: 132, rows: 20 });
-    tui.updateWorker("w1", { cli: "codex", status: "running", summary: "step 1" });
-    tui.updateWorker("w2", { cli: "claude", status: "completed", handoff: { status: "ok", verdict: "done" } });
+    const stream = {
+      write: (chunk) => {
+        output += chunk;
+      },
+      columns: 132,
+      rows: 20,
+      isTTY: false,
+    };
+    const tui = createLiteDashboard({
+      stream,
+      refreshMs: 0,
+      columns: 132,
+      rows: 20,
+    });
+    tui.updateWorker("w1", {
+      cli: "codex",
+      status: "running",
+      summary: "step 1",
+    });
+    tui.updateWorker("w2", {
+      cli: "claude",
+      status: "completed",
+      handoff: { status: "ok", verdict: "done" },
+    });
     tui.selectWorker("w2");
     tui.render();
     const clean = stripAnsi(output);
@@ -69,7 +101,9 @@ describe("createLogDashboard(tui-lite)", () => {
       stream,
       input,
       refreshMs: 0,
-      onOpenSelectedWorker: (name) => { opened = name; },
+      onOpenSelectedWorker: (name) => {
+        opened = name;
+      },
     });
     tui.updateWorker("worker-1", { cli: "codex", status: "running" });
     tui.updateWorker("worker-2", { cli: "gemini", status: "running" });
@@ -96,7 +130,9 @@ describe("createLogDashboard(tui-lite)", () => {
       stream,
       input,
       refreshMs: 0,
-      onOpenAllWorkers: () => { called = true; },
+      onOpenAllWorkers: () => {
+        called = true;
+      },
     });
     tui.updateWorker("worker-1", { cli: "codex", status: "running" });
     tui.render();

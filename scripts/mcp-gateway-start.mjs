@@ -4,27 +4,67 @@
 //        node mcp-gateway-start.mjs --stop   # 중지
 //        node mcp-gateway-start.mjs --status # 상태 확인
 
-import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { createConnection } from 'node:net';
-import { isServerEnabled } from './lib/mcp-manifest.mjs';
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { isServerEnabled } from "./lib/mcp-manifest.mjs";
 
-const PID_FILE = join(tmpdir(), 'tfx-gateway-pids.json');
+const PID_FILE = join(tmpdir(), "tfx-gateway-pids.json");
 const STARTUP_WAIT_MS = 8000;
 const POLL_INTERVAL_MS = 500;
 const HEALTH_TIMEOUT_MS = 3000;
 
 const SERVERS = [
-  { name: 'context7',     port: 8100, cmd: 'npx -y @upstash/context7-mcp@latest',          envVars: [] },
-  { name: 'brave-search', port: 8101, cmd: 'npx -y @brave/brave-search-mcp-server',        envVars: ['BRAVE_API_KEY'] },
-  { name: 'exa',          port: 8102, cmd: 'npx -y exa-mcp-server',                        envVars: ['EXA_API_KEY'] },
-  { name: 'tavily',       port: 8103, cmd: 'npx -y tavily-mcp@latest',                     envVars: ['TAVILY_API_KEY'] },
-  { name: 'jira',         port: 8104, cmd: 'npx -y mcp-jira-cloud@latest',                 envVars: ['JIRA_API_TOKEN', 'JIRA_EMAIL', 'JIRA_INSTANCE_URL'] },
-  { name: 'serena',       port: 8105, cmd: 'uvx --from git+https://github.com/oraios/serena serena start-mcp-server', envVars: [] },
-  { name: 'notion',       port: 8106, cmd: 'npx -y @notionhq/notion-mcp-server',           envVars: ['NOTION_TOKEN'] },
-  { name: 'notion-guest', port: 8107, cmd: 'npx -y @notionhq/notion-mcp-server',           envVars: ['NOTION_TOKEN'] },
+  {
+    name: "context7",
+    port: 8100,
+    cmd: "npx -y @upstash/context7-mcp@latest",
+    envVars: [],
+  },
+  {
+    name: "brave-search",
+    port: 8101,
+    cmd: "npx -y @brave/brave-search-mcp-server",
+    envVars: ["BRAVE_API_KEY"],
+  },
+  {
+    name: "exa",
+    port: 8102,
+    cmd: "npx -y exa-mcp-server",
+    envVars: ["EXA_API_KEY"],
+  },
+  {
+    name: "tavily",
+    port: 8103,
+    cmd: "npx -y tavily-mcp@latest",
+    envVars: ["TAVILY_API_KEY"],
+  },
+  {
+    name: "jira",
+    port: 8104,
+    cmd: "npx -y mcp-jira-cloud@latest",
+    envVars: ["JIRA_API_TOKEN", "JIRA_EMAIL", "JIRA_INSTANCE_URL"],
+  },
+  {
+    name: "serena",
+    port: 8105,
+    cmd: "uvx --from git+https://github.com/oraios/serena serena start-mcp-server",
+    envVars: [],
+  },
+  {
+    name: "notion",
+    port: 8106,
+    cmd: "npx -y @notionhq/notion-mcp-server",
+    envVars: ["NOTION_TOKEN"],
+  },
+  {
+    name: "notion-guest",
+    port: 8107,
+    cmd: "npx -y @notionhq/notion-mcp-server",
+    envVars: ["NOTION_TOKEN"],
+  },
 ];
 
 export { SERVERS };
@@ -33,10 +73,16 @@ export { SERVERS };
 
 function isPortInUse(port) {
   return new Promise((resolve) => {
-    const sock = createConnection({ host: '127.0.0.1', port });
-    sock.once('connect', () => { sock.destroy(); resolve(true); });
-    sock.once('error', () => resolve(false));
-    sock.setTimeout(1000, () => { sock.destroy(); resolve(false); });
+    const sock = createConnection({ host: "127.0.0.1", port });
+    sock.once("connect", () => {
+      sock.destroy();
+      resolve(true);
+    });
+    sock.once("error", () => resolve(false));
+    sock.setTimeout(1000, () => {
+      sock.destroy();
+      resolve(false);
+    });
   });
 }
 
@@ -65,31 +111,38 @@ function spawnGateway(srv) {
 
   // PowerShell Start-Process: Windows Job Object에서 벗어나 부모 종료 후 생존
   execSync(
-    `powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath cmd.exe -ArgumentList '/c','${cmdFile.replaceAll("'", "''")}'"`
-  , { stdio: 'ignore', timeout: 10000 });
+    `powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath cmd.exe -ArgumentList '/c','${cmdFile.replaceAll("'", "''")}'"`,
+    { stdio: "ignore", timeout: 10000 },
+  );
 }
 
 function ensureFirewallRule() {
-  if (process.platform !== 'win32') return;
-  const ports = SERVERS.map((s) => s.port).join(',');
-  const ruleName = 'TFX-MCP-Gateway-Block-External';
+  if (process.platform !== "win32") return;
+  const ports = SERVERS.map((s) => s.port).join(",");
+  const ruleName = "TFX-MCP-Gateway-Block-External";
   try {
     // 기존 규칙 있으면 스킵
     const check = execSync(
       `netsh advfirewall firewall show rule name="${ruleName}" 2>&1`,
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 },
+      { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], timeout: 5000 },
     );
     if (check.includes(ruleName)) return;
-  } catch { /* 규칙 없음 — 생성 */ }
+  } catch {
+    /* 규칙 없음 — 생성 */
+  }
 
   try {
     execSync(
       `netsh advfirewall firewall add rule name="${ruleName}" dir=in action=block protocol=tcp localport=${ports} remoteip=any profile=any`,
-      { stdio: 'ignore', timeout: 5000 },
+      { stdio: "ignore", timeout: 5000 },
     );
-    console.log(`[SEC] Firewall rule added: block external access to ports ${ports}`);
+    console.log(
+      `[SEC] Firewall rule added: block external access to ports ${ports}`,
+    );
   } catch {
-    console.log(`[SEC] WARNING: Could not add firewall rule — run as admin or manually block ports ${ports}`);
+    console.log(
+      `[SEC] WARNING: Could not add firewall rule — run as admin or manually block ports ${ports}`,
+    );
   }
 }
 
@@ -113,7 +166,9 @@ async function startAll() {
     // 필수 환경변수 체크
     const missing = srv.envVars.filter((k) => !process.env[k]);
     if (missing.length > 0) {
-      console.log(`[WARN] ${srv.name} skipped — missing env: ${missing.join(', ')}`);
+      console.log(
+        `[WARN] ${srv.name} skipped — missing env: ${missing.join(", ")}`,
+      );
       continue;
     }
 
@@ -123,7 +178,7 @@ async function startAll() {
   }
 
   if (launched.length === 0) {
-    console.log('\n[gateway] No servers started (all running or skipped)');
+    console.log("\n[gateway] No servers started (all running or skipped)");
     return;
   }
 
@@ -140,22 +195,27 @@ async function startAll() {
   }
 
   // 결과 출력
-  console.log('\nHealth Check');
-  console.log('='.repeat(50));
+  console.log("\nHealth Check");
+  console.log("=".repeat(50));
   const pidEntries = [];
   for (const srv of launched) {
     const healthy = !pending.has(srv.port);
-    const mark = healthy ? '\u2713' : '\u2717';
-    const status = healthy ? 'ok' : 'down';
+    const mark = healthy ? "\u2713" : "\u2717";
+    const status = healthy ? "ok" : "down";
     console.log(`  ${srv.name.padEnd(16)} :${srv.port}  ${mark} ${status}`);
     if (healthy) pidEntries.push({ name: srv.name, port: srv.port });
   }
 
   // PID 파일 대신 포트 매니페스트 저장 (프로세스 찾기는 포트 기반)
   const existing = loadManifest();
-  const merged = [...existing.filter((e) => !pidEntries.some((p) => p.port === e.port)), ...pidEntries];
+  const merged = [
+    ...existing.filter((e) => !pidEntries.some((p) => p.port === e.port)),
+    ...pidEntries,
+  ];
   writeFileSync(PID_FILE, JSON.stringify(merged, null, 2));
-  console.log(`\n[gateway] ${launched.length - pending.size}/${launched.length} healthy. Manifest: ${PID_FILE}`);
+  console.log(
+    `\n[gateway] ${launched.length - pending.size}/${launched.length} healthy. Manifest: ${PID_FILE}`,
+  );
 }
 
 // ── 중지 ──
@@ -164,26 +224,32 @@ function stopAll() {
   // supergateway + 하위 MCP 프로세스를 포트 기반으로 찾아 종료
   try {
     // temp .ps1 파일로 bash/cmd 쿼팅 충돌 회피
-    const psFile = join(tmpdir(), 'tfx-sg-stop.ps1');
-    writeFileSync(psFile, [
-      `Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" |`,
-      `  Where-Object { $_.CommandLine -match 'supergateway' } |`,
-      `  ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null; Write-Output "[STOP] PID $($_.ProcessId)" }`,
-    ].join('\n'));
-    const output = execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${psFile}"`, {
-      encoding: 'utf8',
-      timeout: 10000,
-      stdio: ['pipe', 'pipe', 'ignore'],
-    });
+    const psFile = join(tmpdir(), "tfx-sg-stop.ps1");
+    writeFileSync(
+      psFile,
+      [
+        `Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" |`,
+        `  Where-Object { $_.CommandLine -match 'supergateway' } |`,
+        `  ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null; Write-Output "[STOP] PID $($_.ProcessId)" }`,
+      ].join("\n"),
+    );
+    const output = execSync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -File "${psFile}"`,
+      {
+        encoding: "utf8",
+        timeout: 10000,
+        stdio: ["pipe", "pipe", "ignore"],
+      },
+    );
     if (output.trim()) console.log(output.trim());
-    else console.log('[gateway] No supergateway processes found');
+    else console.log("[gateway] No supergateway processes found");
   } catch {
-    console.log('[gateway] No supergateway processes found');
+    console.log("[gateway] No supergateway processes found");
   }
 
   if (existsSync(PID_FILE)) {
     unlinkSync(PID_FILE);
-    console.log('[gateway] Manifest removed');
+    console.log("[gateway] Manifest removed");
   }
 }
 
@@ -192,15 +258,15 @@ function stopAll() {
 async function showStatus() {
   const manifest = loadManifest();
   if (manifest.length === 0) {
-    console.log('[gateway] No manifest — checking all ports...');
+    console.log("[gateway] No manifest — checking all ports...");
   }
 
-  console.log('\nMCP Gateway Status');
-  console.log('='.repeat(50));
+  console.log("\nMCP Gateway Status");
+  console.log("=".repeat(50));
   for (const srv of SERVERS) {
     const healthy = await checkHealth(srv.port);
-    const mark = healthy ? '\u2713' : '\u2717';
-    const status = healthy ? 'ok' : 'down';
+    const mark = healthy ? "\u2713" : "\u2717";
+    const status = healthy ? "ok" : "down";
     console.log(`  ${srv.name.padEnd(16)} :${srv.port}  ${mark} ${status}`);
   }
 }
@@ -208,7 +274,7 @@ async function showStatus() {
 function loadManifest() {
   if (!existsSync(PID_FILE)) return [];
   try {
-    return JSON.parse(readFileSync(PID_FILE, 'utf8'));
+    return JSON.parse(readFileSync(PID_FILE, "utf8"));
   } catch {
     return [];
   }
@@ -217,9 +283,9 @@ function loadManifest() {
 // ── main ──
 
 const flag = process.argv[2];
-if (flag === '--stop') {
+if (flag === "--stop") {
   stopAll();
-} else if (flag === '--status') {
+} else if (flag === "--status") {
   await showStatus();
 } else {
   await startAll();

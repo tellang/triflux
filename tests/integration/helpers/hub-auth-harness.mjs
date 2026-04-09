@@ -1,16 +1,26 @@
 // Hub 인증 E2E 테스트 공유 하네스
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HELPERS_DIR = dirname(fileURLToPath(import.meta.url));
-export const PROJECT_ROOT = resolve(HELPERS_DIR, '..', '..', '..');
-export const HUB_SERVER_URL = pathToFileURL(resolve(PROJECT_ROOT, 'hub', 'server.mjs')).href;
+export const PROJECT_ROOT = resolve(HELPERS_DIR, "..", "..", "..");
+export const HUB_SERVER_URL = pathToFileURL(
+  resolve(PROJECT_ROOT, "hub", "server.mjs"),
+).href;
 
 export function tempDbPath(rootDir) {
-  const dbDir = join(rootDir, '.claude', 'cache', 'tfx-hub');
+  const dbDir = join(rootDir, ".claude", "cache", "tfx-hub");
   mkdirSync(dbDir, { recursive: true });
   return join(dbDir, `hub-auth-${randomUUID()}.db`);
 }
@@ -42,7 +52,7 @@ export function withEnv(overrides, fn) {
  * @returns {{ homeDir: string, port: number, baseUrl: string, hub: object, cleanup: () => Promise<void>, cleanupAll: () => Promise<void> }}
  */
 export async function createHubHarness({ token, homeDir: providedHome } = {}) {
-  const homeDir = providedHome || mkdtempSync(join(tmpdir(), 'hub-auth-e2e-'));
+  const homeDir = providedHome || mkdtempSync(join(tmpdir(), "hub-auth-e2e-"));
   const ownsHome = !providedHome;
   let hub = null;
   let port = 0;
@@ -51,17 +61,31 @@ export async function createHubHarness({ token, homeDir: providedHome } = {}) {
     port = randomPort();
     const dbPath = tempDbPath(homeDir);
     try {
-      hub = await withEnv({
-        HOME: homeDir,
-        USERPROFILE: homeDir,
-        TFX_HUB_TOKEN: token ?? null,
-      }, async () => {
-        const mod = await import(`${HUB_SERVER_URL}?nonce=${Date.now()}-${Math.random()}`);
-        return await mod.startHub({ port, dbPath, host: '127.0.0.1', sessionId: `hub-auth-e2e-${randomUUID()}` });
-      });
+      hub = await withEnv(
+        {
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          TFX_HUB_TOKEN: token ?? null,
+        },
+        async () => {
+          const mod = await import(
+            `${HUB_SERVER_URL}?nonce=${Date.now()}-${Math.random()}`
+          );
+          return await mod.startHub({
+            port,
+            dbPath,
+            host: "127.0.0.1",
+            sessionId: `hub-auth-e2e-${randomUUID()}`,
+          });
+        },
+      );
       break;
     } catch (error) {
-      if (attempt === 4 || (error?.code !== 'EADDRINUSE' && error?.code !== 'EACCES')) throw error;
+      if (
+        attempt === 4 ||
+        (error?.code !== "EADDRINUSE" && error?.code !== "EACCES")
+      )
+        throw error;
     }
   }
 
@@ -80,36 +104,45 @@ export async function createHubHarness({ token, homeDir: providedHome } = {}) {
         if (hub?.stop) await hub.stop();
       });
       if (ownsHome) {
-        try { rmSync(homeDir, { recursive: true, force: true }); } catch {}
+        try {
+          rmSync(homeDir, { recursive: true, force: true });
+        } catch {}
       }
     },
   };
 }
 
-export function createTeamFixture(homeDir, { teamName, taskId, status = 'pending' }) {
-  const teamDir = join(homeDir, '.claude', 'teams', teamName);
-  mkdirSync(join(teamDir, 'inboxes'), { recursive: true });
-  const tasksDir = join(homeDir, '.claude', 'tasks', teamName);
+export function createTeamFixture(
+  homeDir,
+  { teamName, taskId, status = "pending" },
+) {
+  const teamDir = join(homeDir, ".claude", "teams", teamName);
+  mkdirSync(join(teamDir, "inboxes"), { recursive: true });
+  const tasksDir = join(homeDir, ".claude", "tasks", teamName);
   mkdirSync(tasksDir, { recursive: true });
 
   writeFileSync(
-    join(teamDir, 'config.json'),
-    JSON.stringify({ description: 'hub auth e2e test team' }, null, 2),
-    'utf8',
+    join(teamDir, "config.json"),
+    JSON.stringify({ description: "hub auth e2e test team" }, null, 2),
+    "utf8",
   );
 
   const taskPath = join(tasksDir, `${taskId}.json`);
   writeFileSync(
     taskPath,
-    JSON.stringify({ id: taskId, status, subject: 'Hub auth e2e task', metadata: {} }, null, 2),
-    'utf8',
+    JSON.stringify(
+      { id: taskId, status, subject: "Hub auth e2e task", metadata: {} },
+      null,
+      2,
+    ),
+    "utf8",
   );
 
   return taskPath;
 }
 
 export function readJson(filePath) {
-  return JSON.parse(readFileSync(filePath, 'utf8'));
+  return JSON.parse(readFileSync(filePath, "utf8"));
 }
 
-export { existsSync, join, rmSync, randomUUID };
+export { existsSync, join, randomUUID, rmSync };

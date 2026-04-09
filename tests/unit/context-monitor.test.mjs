@@ -1,17 +1,17 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
 
 import {
-  estimateTokens,
-  parseUsageFromPayload,
-  classifyContextThreshold,
-  formatContextUsage,
   buildContextUsageView,
+  classifyContextThreshold,
   createContextMonitor,
+  estimateTokens,
+  formatContextUsage,
+  parseUsageFromPayload,
 } from "../../hud/context-monitor.mjs";
 
 function makeTmpPath(prefix) {
@@ -60,7 +60,10 @@ describe("hud/context-monitor.mjs", () => {
       {
         context_window: {
           context_window_size: 200_000,
-          current_usage: { input_tokens: 30_000, cache_read_input_tokens: 15_000 },
+          current_usage: {
+            input_tokens: 30_000,
+            cache_read_input_tokens: 15_000,
+          },
         },
       },
       { usedTokens: 10_000, limitTokens: 200_000 },
@@ -97,7 +100,10 @@ describe("hud/context-monitor.mjs", () => {
     assert.equal(existsSync(cachePath), true);
 
     const reportPath = monitor.flush("test");
-    assert.ok(reportPath?.includes("context-usage-test-session-"), "report file name should include session id");
+    assert.ok(
+      reportPath?.includes("context-usage-test-session-"),
+      "report file name should include session id",
+    );
     assert.equal(existsSync(reportPath), true);
 
     const report = JSON.parse(readFileSync(reportPath, "utf8"));
@@ -181,7 +187,8 @@ describe("hud/context-monitor.mjs", () => {
 
     monitor.record({
       requestBody: '{"method":"tools/call","params":{"name":"read_file"}}',
-      responseBody: '{"result":{"usage":{"input_tokens":10,"output_tokens":5}}}',
+      responseBody:
+        '{"result":{"usage":{"input_tokens":10,"output_tokens":5}}}',
     });
 
     const first = monitor.flush("first");

@@ -1,0 +1,122 @@
+---
+internal: true
+name: tfx-qa
+description: "테스트 실행하고 실패하면 수정해서 통과시켜야 할 때 사용한다. 'qa', '검증해', '테스트 돌려', 'test-fix', '테스트 통과시켜' 같은 요청에 반드시 사용. 테스트 실패를 반복 수정하여 전부 통과시켜야 할 때 적극 활용."
+triggers:
+  - qa
+  - 검증
+  - 테스트 검증
+  - test-fix
+argument-hint: "[테스트 명령 또는 파일 경로]"
+---
+
+# {{SKILL_NAME}} — Light Test-Fix Cycle
+
+{{> base}}
+
+
+> **Deep 버전**: tfx-deep-qa. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
+> 테스트 실행 → 실패 분석 → 자동 수정 → 재실행. 최대 3회. OMC ultraqa 영감.
+
+## 용도
+
+- 테스트 실행 후 실패 자동 수정
+- CI 실패 빠른 해결
+- 리팩터링 후 회귀 검증 + 수정
+- "테스트 돌려서 깨진 거 고쳐" 류의 요청
+
+## 워크플로우
+
+### Step 1: 테스트 대상 식별
+
+```
+우선순위:
+  1. 사용자가 테스트 명령 지정 → 그대로 실행
+  2. 사용자가 파일 지정 → 해당 파일의 테스트 탐색
+  3. 지정 없음 → 프로젝트 테스트 전체 (npm test / pytest 등 자동 감지)
+
+자동 감지:
+  package.json의 "test" 스크립트 → npm test
+  pytest.ini / pyproject.toml → pytest
+  Makefile의 test 타깃 → make test
+```
+
+### Step 2: 테스트 실행 (Round 1)
+
+```bash
+bash ~/.claude/scripts/tfx-route.sh codex \
+  "다음 테스트를 실행하고 결과를 보고하라:
+   명령: {test_command}
+
+   출력 형식:
+   - 총 테스트 수
+   - 통과/실패/스킵 수
+   - 실패한 테스트 목록 (파일:테스트명:에러 메시지)
+   - 실패 원인 분석 (각 실패별)" implement
+```
+
+### Step 3: 실패 수정 + 재실행 루프
+
+```
+MAX_RETRIES = 3
+retry = 0
+
+WHILE (failures > 0 AND retry < MAX_RETRIES):
+  retry++
+
+  Codex로 실패 수정:
+    bash ~/.claude/scripts/tfx-route.sh codex \
+    "다음 테스트 실패를 수정하라:
+     실패 목록: {failures}
+
+     규칙:
+     - 테스트 코드가 아닌 구현 코드를 수정하라 (테스트가 정확한 경우)
+     - 테스트 자체가 잘못된 경우만 테스트를 수정하라
+     - 수정 후 해당 테스트를 다시 실행하여 확인하라" implement
+
+  재실행하여 결과 확인
+
+END WHILE
+```
+
+### Step 4: 결과 보고
+
+```markdown
+## QA 결과: {test_target}
+
+### 실행 요약
+| 라운드 | 통과 | 실패 | 수정 |
+|--------|------|------|------|
+| Round 1 | {n} | {n} | — |
+| Round 2 | {n} | {n} | {수정 내용} |
+| Round 3 | {n} | {n} | {수정 내용} |
+
+### 최종 결과
+- 테스트: {pass}/{total} 통과
+- 수정된 파일: {list}
+- 미해결 실패: {list, 있으면}
+
+### 수정 상세
+- `{file}:{line}` — {무엇을 왜 수정했는지}
+```
+
+3회 후에도 실패가 남으면 미해결 목록 + 원인 분석을 사용자에게 보고.
+
+## 토큰 예산
+
+| 단계 | 토큰 |
+|------|------|
+| Step 1 (식별) | ~300 |
+| Step 2 (실행) | ~1.5K |
+| Step 3 (수정, 회당) | ~1.5K |
+| Step 4 (보고) | ~500 |
+| **총합 (최대 3회)** | **~5K** |
+
+## 사용 예
+
+```
+/tfx-qa
+/tfx-qa "npm test -- --grep auth"
+/tfx-qa "pytest tests/test_api.py -v"
+/tfx-qa "깨진 테스트 고쳐줘"
+```

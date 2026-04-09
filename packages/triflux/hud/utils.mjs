@@ -1,11 +1,14 @@
 // ============================================================================
 // 유틸리티 함수
 // ============================================================================
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+
 import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import {
-  PERCENT_CELL_WIDTH, TIME_CELL_INNER_WIDTH, SV_CELL_WIDTH,
+  PERCENT_CELL_WIDTH,
+  SV_CELL_WIDTH,
+  TIME_CELL_INNER_WIDTH,
 } from "./constants.mjs";
 
 export async function readStdinJson() {
@@ -20,8 +23,15 @@ export async function readStdinJson() {
     process.stdin.on("end", () => {
       clearTimeout(timeout);
       const raw = chunks.join("").trim();
-      if (!raw) { resolve({}); return; }
-      try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+      if (!raw) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        resolve({});
+      }
     });
     process.stdin.on("error", () => {
       clearTimeout(timeout);
@@ -33,14 +43,20 @@ export async function readStdinJson() {
 
 export function readJson(filePath, fallback) {
   if (!existsSync(filePath)) return fallback;
-  try { return JSON.parse(readFileSync(filePath, "utf-8")); } catch { return fallback; }
+  try {
+    return JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch {
+    return fallback;
+  }
 }
 
 export function writeJsonSafe(filePath, data) {
   try {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, JSON.stringify(data), { mode: 0o600 });
-  } catch { /* 쓰기 실패 무시 */ }
+  } catch {
+    /* 쓰기 실패 무시 */
+  }
 }
 
 // .omc/ → .claude/cache/ 마이그레이션: 새 경로 우선, 없으면 레거시 읽고 복사
@@ -48,7 +64,10 @@ export function readJsonMigrate(newPath, legacyPath, fallback) {
   const data = readJson(newPath, null);
   if (data != null) return data;
   const legacy = readJson(legacyPath, null);
-  if (legacy != null) { writeJsonSafe(newPath, legacy); return legacy; }
+  if (legacy != null) {
+    writeJsonSafe(newPath, legacy);
+    return legacy;
+  }
   return fallback;
 }
 
@@ -109,7 +128,10 @@ export function truncateAnsi(text, maxWidth) {
 }
 
 export function makeHash(text) {
-  return createHash("sha256").update(String(text || ""), "utf8").digest("hex").slice(0, 16);
+  return createHash("sha256")
+    .update(String(text || ""), "utf8")
+    .digest("hex")
+    .slice(0, 16);
 }
 
 export function clampPercent(value) {
@@ -177,11 +199,13 @@ export function formatTokenCount(n) {
 
 export function getContextPercent(stdin) {
   const nativePercent = stdin?.context_window?.used_percentage;
-  if (typeof nativePercent === "number" && Number.isFinite(nativePercent)) return clampPercent(nativePercent);
+  if (typeof nativePercent === "number" && Number.isFinite(nativePercent))
+    return clampPercent(nativePercent);
   const usage = stdin?.context_window?.current_usage || {};
-  const totalTokens = Number(usage.input_tokens || 0)
-    + Number(usage.cache_creation_input_tokens || 0)
-    + Number(usage.cache_read_input_tokens || 0);
+  const totalTokens =
+    Number(usage.input_tokens || 0) +
+    Number(usage.cache_creation_input_tokens || 0) +
+    Number(usage.cache_read_input_tokens || 0);
   const capacity = Number(stdin?.context_window?.context_window_size || 0);
   if (!capacity || capacity <= 0) return 0;
   return clampPercent((totalTokens / capacity) * 100);
@@ -197,9 +221,10 @@ export function advanceToNextCycle(epochMs, cycleMs) {
 
 function parseResetDate(isoOrUnix) {
   if (!isoOrUnix) return null;
-  const date = typeof isoOrUnix === "string"
-    ? new Date(isoOrUnix)
-    : new Date(isoOrUnix * 1000);
+  const date =
+    typeof isoOrUnix === "string"
+      ? new Date(isoOrUnix)
+      : new Date(isoOrUnix * 1000);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -261,9 +286,13 @@ export function decodeJwtEmail(idToken) {
   let payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
   while (payload.length % 4) payload += "=";
   try {
-    const decoded = JSON.parse(Buffer.from(payload, "base64").toString("utf-8"));
+    const decoded = JSON.parse(
+      Buffer.from(payload, "base64").toString("utf-8"),
+    );
     return decoded.email || null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // HTTPS POST (타임아웃 포함) — https 모듈은 호출자가 주입
@@ -272,26 +301,35 @@ export function createHttpsPost(https, timeoutMs) {
     return new Promise((resolve) => {
       const urlObj = new URL(url);
       const data = JSON.stringify(body);
-      const req = https.request({
-        hostname: urlObj.hostname,
-        path: urlObj.pathname + urlObj.search,
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Length": Buffer.byteLength(data),
+      const req = https.request(
+        {
+          hostname: urlObj.hostname,
+          path: urlObj.pathname + urlObj.search,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Length": Buffer.byteLength(data),
+          },
+          timeout: timeoutMs,
         },
-        timeout: timeoutMs,
-      }, (res) => {
-        const chunks = [];
-        res.on("data", (c) => chunks.push(c));
-        res.on("end", () => {
-          try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
-          catch { resolve(null); }
-        });
-      });
+        (res) => {
+          const chunks = [];
+          res.on("data", (c) => chunks.push(c));
+          res.on("end", () => {
+            try {
+              resolve(JSON.parse(Buffer.concat(chunks).toString()));
+            } catch {
+              resolve(null);
+            }
+          });
+        },
+      );
       req.on("error", () => resolve(null));
-      req.on("timeout", () => { req.destroy(); resolve(null); });
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(null);
+      });
       req.write(data);
       req.end();
     });
@@ -301,8 +339,10 @@ export function createHttpsPost(https, timeoutMs) {
 // sv 퍼센트 포맷 (1000+ → k 표기, 5자 고정폭)
 export function formatSvPct(value) {
   if (value == null) return "--%".padStart(SV_CELL_WIDTH);
-  if (value >= 10000) return `${Math.round(value / 1000)}k%`.padStart(SV_CELL_WIDTH);
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}k%`.padStart(SV_CELL_WIDTH);
+  if (value >= 10000)
+    return `${Math.round(value / 1000)}k%`.padStart(SV_CELL_WIDTH);
+  if (value >= 1000)
+    return `${(value / 1000).toFixed(1)}k%`.padStart(SV_CELL_WIDTH);
   return `${value}%`.padStart(SV_CELL_WIDTH);
 }
 

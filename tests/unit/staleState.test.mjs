@@ -1,8 +1,8 @@
-import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 
 import {
   cleanupStaleOmcTeams,
@@ -13,7 +13,10 @@ import {
 const TEMP_DIRS = [];
 
 function makeTempProject() {
-  const baseDir = join(tmpdir(), `triflux-stale-state-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const baseDir = join(
+    tmpdir(),
+    `triflux-stale-state-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
   mkdirSync(baseDir, { recursive: true });
   TEMP_DIRS.push(baseDir);
   return baseDir;
@@ -40,7 +43,10 @@ describe("staleState.mjs", () => {
     mkdirSync(join(projectDir, ".omc", "state"), { recursive: true });
     mkdirSync(nestedDir, { recursive: true });
 
-    assert.equal(findNearestOmcStateDir(nestedDir), join(projectDir, ".omc", "state"));
+    assert.equal(
+      findNearestOmcStateDir(nestedDir),
+      join(projectDir, ".omc", "state"),
+    );
   });
 
   it("1시간 이상 경과했고 관련 프로세스가 없으면 stale team으로 판정한다", () => {
@@ -53,7 +59,7 @@ describe("staleState.mjs", () => {
       active: true,
       name: "team",
       session_id: sessionId,
-      started_at: new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString(),
+      started_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     });
 
     const report = inspectStaleOmcTeams({
@@ -79,7 +85,7 @@ describe("staleState.mjs", () => {
       active: true,
       session_id: sessionId,
       team_name: "tfx-multi-active",
-      started_at: new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString(),
+      started_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     });
 
     const report = inspectStaleOmcTeams({
@@ -106,10 +112,8 @@ describe("staleState.mjs", () => {
     writeJson(configPath, {
       name: teamName,
       leadSessionId: "lead-session-stale",
-      createdAt: Date.now() - (2 * 60 * 60 * 1000),
-      members: [
-        { name: "lead", agentId: "codex-lead", isActive: true },
-      ],
+      createdAt: Date.now() - 2 * 60 * 60 * 1000,
+      members: [{ name: "lead", agentId: "codex-lead", isActive: true }],
     });
 
     const report = inspectStaleOmcTeams({
@@ -130,18 +134,23 @@ describe("staleState.mjs", () => {
     const stateRoot = join(projectDir, ".omc", "state");
     const teamsRoot = join(projectDir, ".claude", "teams");
     const sessionId = "cleanup-session";
-    const sessionStateFile = join(stateRoot, "sessions", sessionId, "team-state.json");
+    const sessionStateFile = join(
+      stateRoot,
+      "sessions",
+      sessionId,
+      "team-state.json",
+    );
     const rootStateFile = join(stateRoot, "team-state.json");
 
     writeJson(sessionStateFile, {
       active: true,
       session_id: sessionId,
-      started_at: new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString(),
+      started_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     });
     writeJson(rootStateFile, {
       active: true,
       session_id: "root-session",
-      started_at: new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString(),
+      started_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     });
 
     const report = inspectStaleOmcTeams({

@@ -1,9 +1,9 @@
-import { afterEach, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, describe, it, mock } from "node:test";
 
 const ORIGINAL_ENV = {
   PSMUX_CAPTURE_ROOT: process.env.PSMUX_CAPTURE_ROOT,
@@ -40,14 +40,15 @@ function mockExecFileSync({ captureOutputs = [] } = {}) {
       case "-V":
         return "psmux 1.0.0";
       case "list-panes":
-        return [
-          "lead\ttfx-test:0.0\t0\t",
-          "worker-1\ttfx-test:0.1\t0\t",
-        ].join("\n");
+        return ["lead\ttfx-test:0.0\t0\t", "worker-1\ttfx-test:0.1\t0\t"].join(
+          "\n",
+        );
       case "pipe-pane":
         return "";
       case "capture-pane": {
-        const value = captureOutputs[Math.min(captureIndex, captureOutputs.length - 1)] || "";
+        const value =
+          captureOutputs[Math.min(captureIndex, captureOutputs.length - 1)] ||
+          "";
         captureIndex += 1;
         return value;
       }
@@ -64,7 +65,9 @@ function mockExecFileSync({ captureOutputs = [] } = {}) {
 
 async function importFreshPsmux() {
   const stamp = `${Date.now()}-${Math.random()}`;
-  return import(new URL(`../../hub/team/psmux.mjs?test=${stamp}`, import.meta.url));
+  return import(
+    new URL(`../../hub/team/psmux.mjs?test=${stamp}`, import.meta.url)
+  );
 }
 
 afterEach(() => {
@@ -107,7 +110,9 @@ describe("resolvePane fallback (psmux title 미설정 우회)", () => {
         case "pipe-pane":
           return "";
         case "capture-pane": {
-          const value = captureOutputs[Math.min(captureIndex, captureOutputs.length - 1)] || "";
+          const value =
+            captureOutputs[Math.min(captureIndex, captureOutputs.length - 1)] ||
+            "";
           captureIndex += 1;
           return value;
         }
@@ -220,9 +225,18 @@ describe("resolvePane fallback (psmux title 미설정 우회)", () => {
     mockWithPsmuxDefaultTitles({ captureOutputs: ["snapshot"] });
     const { startCapture } = await importFreshPsmux();
 
-    assert.throws(() => startCapture("tfx-test", "worker-1; rm -rf /"), /Pane을 찾을 수 없습니다/);
-    assert.throws(() => startCapture("tfx-test", "$(whoami)"), /Pane을 찾을 수 없습니다/);
-    assert.throws(() => startCapture("tfx-test", "worker-1\ttfx:0.0"), /Pane을 찾을 수 없습니다/);
+    assert.throws(
+      () => startCapture("tfx-test", "worker-1; rm -rf /"),
+      /Pane을 찾을 수 없습니다/,
+    );
+    assert.throws(
+      () => startCapture("tfx-test", "$(whoami)"),
+      /Pane을 찾을 수 없습니다/,
+    );
+    assert.throws(
+      () => startCapture("tfx-test", "worker-1\ttfx:0.0"),
+      /Pane을 찾을 수 없습니다/,
+    );
   });
 
   // B-edge: 대소문자 — WORKER-1, Lead, LEAD 모두 동작
@@ -247,7 +261,8 @@ describe("resolvePane fallback (psmux title 미설정 우회)", () => {
       const argv = Array.isArray(args) ? [...args] : [];
       calls.push({ file, args: argv });
       switch (argv[0]) {
-        case "-V": return "psmux 3.3.0";
+        case "-V":
+          return "psmux 3.3.0";
         case "list-panes":
           // worker-1 title이 실제 설정된 경우 — index 2에 위치
           return [
@@ -255,10 +270,14 @@ describe("resolvePane fallback (psmux title 미설정 우회)", () => {
             "other\ttfx-test:0.1\t0\t",
             "worker-1\ttfx-test:0.2\t0\t",
           ].join("\n");
-        case "pipe-pane": return "";
-        case "capture-pane": return captureIndex++ < 1 ? "snapshot" : "";
-        case "send-keys": return "";
-        default: throw new Error(`unexpected: ${argv.join(" ")}`);
+        case "pipe-pane":
+          return "";
+        case "capture-pane":
+          return captureIndex++ < 1 ? "snapshot" : "";
+        case "send-keys":
+          return "";
+        default:
+          throw new Error(`unexpected: ${argv.join(" ")}`);
       }
     });
     registerRestore(() => tracker.mock.restore());
@@ -276,12 +295,16 @@ describe("psmux nested-session protection", () => {
     process.env.PSMUX_SESSION = "inside-psmux-session";
     const calls = [];
 
-    const tracker = mock.method(childProcess, "execFileSync", (file, args, opts = {}) => {
-      const argv = Array.isArray(args) ? [...args] : [];
-      calls.push({ file, args: argv, opts });
-      if (argv[0] === "-V") return "psmux 3.3.0";
-      return "";
-    });
+    const tracker = mock.method(
+      childProcess,
+      "execFileSync",
+      (file, args, opts = {}) => {
+        const argv = Array.isArray(args) ? [...args] : [];
+        calls.push({ file, args: argv, opts });
+        if (argv[0] === "-V") return "psmux 3.3.0";
+        return "";
+      },
+    );
     registerRestore(() => tracker.mock.restore());
 
     const { psmuxExec } = await importFreshPsmux();
@@ -306,7 +329,10 @@ describe("psmux.mjs steering", () => {
 
     assert.equal(result.paneId, "tfx-test:0.1");
     assert.equal(result.paneName, "worker-1");
-    assert.equal(readFileSync(result.logPath, "utf8"), "first line\nsecond line");
+    assert.equal(
+      readFileSync(result.logPath, "utf8"),
+      "first line\nsecond line",
+    );
     assert.ok(
       execMock.calls.some(
         (call) =>
@@ -326,7 +352,11 @@ describe("psmux.mjs steering", () => {
     });
     const { dispatchCommand } = await importFreshPsmux();
 
-    const result = dispatchCommand("tfx-test", "worker-1", 'Write-Host "hello"');
+    const result = dispatchCommand(
+      "tfx-test",
+      "worker-1",
+      'Write-Host "hello"',
+    );
 
     const literalSend = execMock.calls.find(
       (call) => call.args[0] === "send-keys" && call.args.includes("-l"),
@@ -362,7 +392,12 @@ describe("psmux.mjs steering", () => {
     const { startCapture, waitForCompletion } = await importFreshPsmux();
 
     const capture = startCapture("tfx-test", "worker-1");
-    const result = await waitForCompletion("tfx-test", "worker-1", "token-123", 1);
+    const result = await waitForCompletion(
+      "tfx-test",
+      "worker-1",
+      "token-123",
+      1,
+    );
 
     assert.equal(capture.paneId, "tfx-test:0.1");
     assert.equal(result.matched, true);
@@ -383,7 +418,9 @@ describe("killPsmuxSession cleanup", () => {
         case "-V":
           return "psmux 3.3.0";
         case "list-sessions":
-          return attached ? "tfx-kill: 1 windows (1 attached)" : "tfx-kill: 1 windows";
+          return attached
+            ? "tfx-kill: 1 windows (1 attached)"
+            : "tfx-kill: 1 windows";
         case "list-panes": {
           const fmt = argv.find((a) => a.includes("pane_index"));
           if (fmt) {
@@ -425,13 +462,22 @@ describe("killPsmuxSession cleanup", () => {
     const pipePaneCalls = calls.filter(
       (c) => Array.isArray(c.args) && c.args[0] === "pipe-pane",
     );
-    assert.ok(pipePaneCalls.length >= 2, `pipe-pane 해제가 2회 이상 호출되어야 함 (실제: ${pipePaneCalls.length})`);
+    assert.ok(
+      pipePaneCalls.length >= 2,
+      `pipe-pane 해제가 2회 이상 호출되어야 함 (실제: ${pipePaneCalls.length})`,
+    );
 
     // taskkill 호출 확인
     const taskkillCalls = calls.filter(
-      (c) => c.file === "execSync" && typeof c.args[0] === "string" && c.args[0].includes("taskkill"),
+      (c) =>
+        c.file === "execSync" &&
+        typeof c.args[0] === "string" &&
+        c.args[0].includes("taskkill"),
     );
-    assert.ok(taskkillCalls.length >= 2, `taskkill이 2회 이상 호출되어야 함 (실제: ${taskkillCalls.length})`);
+    assert.ok(
+      taskkillCalls.length >= 2,
+      `taskkill이 2회 이상 호출되어야 함 (실제: ${taskkillCalls.length})`,
+    );
 
     // kill-session 호출 확인
     const killSessionCalls = calls.filter(
@@ -441,26 +487,44 @@ describe("killPsmuxSession cleanup", () => {
 
     // 고아 프로세스 정리 호출 확인 (pipe-pane-capture + node.exe)
     const orphanCalls = calls.filter(
-      (c) => c.file === "execSync" && typeof c.args[0] === "string" && c.args[0].includes("pipe-pane-capture"),
+      (c) =>
+        c.file === "execSync" &&
+        typeof c.args[0] === "string" &&
+        c.args[0].includes("pipe-pane-capture"),
     );
-    assert.ok(orphanCalls.length >= 1, "고아 pipe-pane 헬퍼 정리가 호출되어야 함");
+    assert.ok(
+      orphanCalls.length >= 1,
+      "고아 pipe-pane 헬퍼 정리가 호출되어야 함",
+    );
 
     const detachClientIdx = calls.findIndex(
       (c) => Array.isArray(c.args) && c.args[0] === "detach-client",
     );
-    assert.ok(detachClientIdx >= 0, "attached session이면 detach-client가 호출되어야 함");
+    assert.ok(
+      detachClientIdx >= 0,
+      "attached session이면 detach-client가 호출되어야 함",
+    );
 
     // 순서 검증: detach-client가 pipe-pane / taskkill보다 먼저
     const firstPipePaneIdx = calls.findIndex(
       (c) => Array.isArray(c.args) && c.args[0] === "pipe-pane",
     );
-    assert.ok(detachClientIdx < firstPipePaneIdx, "detach-client가 pipe-pane 해제보다 먼저 실행되어야 함");
+    assert.ok(
+      detachClientIdx < firstPipePaneIdx,
+      "detach-client가 pipe-pane 해제보다 먼저 실행되어야 함",
+    );
 
     // 순서 검증: pipe-pane 해제가 taskkill보다 먼저
     const firstTaskkillIdx = calls.findIndex(
-      (c) => c.file === "execSync" && typeof c.args[0] === "string" && c.args[0].includes("taskkill"),
+      (c) =>
+        c.file === "execSync" &&
+        typeof c.args[0] === "string" &&
+        c.args[0].includes("taskkill"),
     );
-    assert.ok(firstPipePaneIdx < firstTaskkillIdx, "pipe-pane 해제가 taskkill보다 먼저 실행되어야 함");
+    assert.ok(
+      firstPipePaneIdx < firstTaskkillIdx,
+      "pipe-pane 해제가 taskkill보다 먼저 실행되어야 함",
+    );
   });
 
   it("unattached session이면 detach-client를 생략한다", async () => {
@@ -473,7 +537,11 @@ describe("killPsmuxSession cleanup", () => {
     const detachClientCalls = calls.filter(
       (c) => Array.isArray(c.args) && c.args[0] === "detach-client",
     );
-    assert.equal(detachClientCalls.length, 0, "unattached session에는 detach-client가 불필요");
+    assert.equal(
+      detachClientCalls.length,
+      0,
+      "unattached session에는 detach-client가 불필요",
+    );
   });
 });
 
@@ -489,7 +557,9 @@ describe("killWorker focus-safe cleanup", () => {
         case "-V":
           return "psmux 3.3.1";
         case "list-sessions":
-          return attached ? "tfx-test: 1 windows (1 attached)" : "tfx-test: 1 windows";
+          return attached
+            ? "tfx-test: 1 windows (1 attached)"
+            : "tfx-test: 1 windows";
         case "list-panes":
           if (argv.includes("#{pane_pid}")) return "4321";
           return [
@@ -527,12 +597,22 @@ describe("killWorker focus-safe cleanup", () => {
     const selectPaneCalls = calls.filter(
       (c) => Array.isArray(c.args) && c.args[0] === "select-pane",
     );
-    assert.ok(selectPaneCalls.length >= 2, "attached cleanup은 fallback pane 재선택을 포함해야 함");
+    assert.ok(
+      selectPaneCalls.length >= 2,
+      "attached cleanup은 fallback pane 재선택을 포함해야 함",
+    );
 
     const sendExitCalls = calls.filter(
-      (c) => Array.isArray(c.args) && c.args[0] === "send-keys" && c.args.includes("exit"),
+      (c) =>
+        Array.isArray(c.args) &&
+        c.args[0] === "send-keys" &&
+        c.args.includes("exit"),
     );
-    assert.equal(sendExitCalls.length, 0, "attached session에서는 exit 전송을 생략해야 함");
+    assert.equal(
+      sendExitCalls.length,
+      0,
+      "attached session에서는 exit 전송을 생략해야 함",
+    );
   });
 
   it("unattached session에서는 기존 exit 전송 경로를 유지한다", async () => {
@@ -543,8 +623,15 @@ describe("killWorker focus-safe cleanup", () => {
     killWorker("tfx-test", "worker-1");
 
     const sendExitCalls = calls.filter(
-      (c) => Array.isArray(c.args) && c.args[0] === "send-keys" && c.args.includes("exit"),
+      (c) =>
+        Array.isArray(c.args) &&
+        c.args[0] === "send-keys" &&
+        c.args.includes("exit"),
     );
-    assert.equal(sendExitCalls.length, 1, "unattached session에서는 exit 전송을 유지해야 함");
+    assert.equal(
+      sendExitCalls.length,
+      1,
+      "unattached session에서는 exit 전송을 유지해야 함",
+    );
   });
 });

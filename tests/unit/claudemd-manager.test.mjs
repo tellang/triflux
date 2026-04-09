@@ -1,13 +1,12 @@
-import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, beforeEach, describe, it } from "node:test";
 
-const {
-  ensureTfxSection,
-  ensureGlobalClaudeRoutingSection,
-} = await import("../../scripts/claudemd-sync.mjs");
+const { ensureTfxSection, ensureGlobalClaudeRoutingSection } = await import(
+  "../../scripts/claudemd-sync.mjs"
+);
 
 const TMP_ROOT = join(tmpdir(), "tfx-claudemd-manager-test");
 
@@ -24,7 +23,8 @@ describe("claudemd-manager: ensureTfxSection", () => {
     const claudeMdPath = join(TMP_ROOT, "CLAUDE.md");
     writeFileSync(claudeMdPath, "# project\n\n## other\n- keep\n", "utf8");
 
-    const routingTable = "<routing>\n## triflux CLI 라우팅\n- rule A\n</routing>";
+    const routingTable =
+      "<routing>\n## triflux CLI 라우팅\n- rule A\n</routing>";
     const result = ensureTfxSection(claudeMdPath, routingTable);
 
     assert.equal(result.action, "created");
@@ -36,17 +36,21 @@ describe("claudemd-manager: ensureTfxSection", () => {
 
   it("기존 라우팅 섹션을 새 버전으로 업데이트한다", () => {
     const claudeMdPath = join(TMP_ROOT, "CLAUDE.md");
-    writeFileSync(claudeMdPath, [
-      "# project",
-      "",
-      "<routing>",
-      "- old rule",
-      "</routing>",
-      "",
-      "## other",
-      "- keep",
-      "",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      claudeMdPath,
+      [
+        "# project",
+        "",
+        "<routing>",
+        "- old rule",
+        "</routing>",
+        "",
+        "## other",
+        "- keep",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
 
     const routingTable = "<routing>\n- new rule\n</routing>";
     const result = ensureTfxSection(claudeMdPath, routingTable);
@@ -69,7 +73,10 @@ describe("claudemd-manager: ensureTfxSection", () => {
   });
 
   it("파일이 없으면 skipped를 반환한다", () => {
-    const result = ensureTfxSection(join(TMP_ROOT, "missing.md"), "<routing></routing>");
+    const result = ensureTfxSection(
+      join(TMP_ROOT, "missing.md"),
+      "<routing></routing>",
+    );
 
     assert.equal(result.skipped, true);
     assert.equal(result.reason, "missing_file");

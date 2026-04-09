@@ -21,7 +21,8 @@ export const SCOUT_ROLE_CONFIG = {
   readOnly: true,
 };
 const ROUTE_LOG_RE = /\[tfx-route\]/i;
-const ROUTE_COMMAND_RE = /(?:^|[\s"'`])(?:bash\s+)?(?:[^"'`\s]*\/)?tfx-route\.sh\b/i;
+const ROUTE_COMMAND_RE =
+  /(?:^|[\s"'`])(?:bash\s+)?(?:[^"'`\s]*\/)?tfx-route\.sh\b/i;
 const ROUTE_PROMPT_RE = /tfx-route\.sh/i;
 const DIRECT_TOOL_BYPASS_RE = /\b(?:Read|Edit|Write)\s*\(/;
 
@@ -33,12 +34,14 @@ function inferWorkerIndex(agentName = "") {
 }
 
 function buildRouteEnvPrefix(agentName, workerIndex, searchTool) {
-  const effectiveWorkerIndex = Number.isInteger(workerIndex) && workerIndex > 0
-    ? workerIndex
-    : inferWorkerIndex(agentName);
+  const effectiveWorkerIndex =
+    Number.isInteger(workerIndex) && workerIndex > 0
+      ? workerIndex
+      : inferWorkerIndex(agentName);
 
   let envPrefix = "";
-  if (effectiveWorkerIndex) envPrefix += ` TFX_WORKER_INDEX="${effectiveWorkerIndex}"`;
+  if (effectiveWorkerIndex)
+    envPrefix += ` TFX_WORKER_INDEX="${effectiveWorkerIndex}"`;
   if (searchTool) envPrefix += ` TFX_SEARCH_TOOL="${searchTool}"`;
   return envPrefix;
 }
@@ -91,7 +94,8 @@ export function verifySlimWrapperRouteExecution(input = {}) {
   const sawDirectToolBypass = DIRECT_TOOL_BYPASS_RE.test(stdoutText);
   const usedRoute = sawRouteCommand || sawRouteLog;
   const expectedRouteInvocation = promptMentionsRoute;
-  const abnormal = expectedRouteInvocation && (sawDirectToolBypass || !usedRoute);
+  const abnormal =
+    expectedRouteInvocation && (sawDirectToolBypass || !usedRoute);
   const reason = !abnormal
     ? null
     : sawDirectToolBypass
@@ -123,14 +127,26 @@ function getRouteTimeout(role, _mcpProfile) {
   // tfx-route.sh route_agent()의 DEFAULT_TIMEOUT 기반, 최소 1080초(18분) 보장.
   // Bash timeout = 이 값 + 60초 여유. 짧은 역할도 네트워크/스케줄 지연 대비.
   const TIMEOUTS = {
-    'build-fixer': 1080, debugger: 1080, executor: 1080,
-    'deep-executor': 3600, architect: 3600, planner: 3600,
-    critic: 3600, analyst: 3600, scientist: 1800,
-    'scientist-deep': 3600, 'document-specialist': 1800,
-    'code-reviewer': 1800, 'security-reviewer': 1800,
-    'quality-reviewer': 1800, verifier: 1800,
-    designer: 1080, writer: 1080,
-    explore: 1080, 'test-engineer': 1080, 'qa-tester': 1080,
+    "build-fixer": 1080,
+    debugger: 1080,
+    executor: 1080,
+    "deep-executor": 3600,
+    architect: 3600,
+    planner: 3600,
+    critic: 3600,
+    analyst: 3600,
+    scientist: 1800,
+    "scientist-deep": 3600,
+    "document-specialist": 1800,
+    "code-reviewer": 1800,
+    "security-reviewer": 1800,
+    "quality-reviewer": 1800,
+    verifier: 1800,
+    designer: 1080,
+    writer: 1080,
+    explore: 1080,
+    "test-engineer": 1080,
+    "qa-tester": 1080,
     spark: 600,
   };
   return TIMEOUTS[role] || 1080;
@@ -176,16 +192,21 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
   const escaped = subtask.replace(/'/g, "'\\''");
   const pipelineHint = pipelinePhase
     ? `\n파이프라인 단계: ${pipelinePhase}`
-    : '';
-  const routeEnvPrefix = buildRouteEnvPrefix(agentName, workerIndex, searchTool);
-  const scoutConstraint = (role === "scout" || role === "scientist")
-    ? "\n이 워커는 scout(탐색 전용)이다. 코드를 수정하거나 파일을 생성하지 마라. 기존 코드를 읽고 분석하여 보고만 하라."
     : "";
+  const routeEnvPrefix = buildRouteEnvPrefix(
+    agentName,
+    workerIndex,
+    searchTool,
+  );
+  const scoutConstraint =
+    role === "scout" || role === "scientist"
+      ? "\n이 워커는 scout(탐색 전용)이다. 코드를 수정하거나 파일을 생성하지 마라. 기존 코드를 읽고 분석하여 보고만 하라."
+      : "";
 
   // Bash 도구 timeout (모두 600초 이내)
-  const launchTimeoutMs = 15000;   // Step 1: fork + job_id 반환
-  const waitTimeoutMs = 570000;    // Step 2: 내부 폴링 (540초 대기 + 여유)
-  const resultTimeoutMs = 30000;   // Step 3: 결과 읽기
+  const launchTimeoutMs = 15000; // Step 1: fork + job_id 반환
+  const waitTimeoutMs = 570000; // Step 2: 내부 폴링 (540초 대기 + 여유)
+  const resultTimeoutMs = 30000; // Step 3: 결과 읽기
 
   return `실행 프로토콜 (subagent_type="${SLIM_WRAPPER_SUBAGENT_TYPE}", async + feedback):
 MAX_ITERATIONS = ${maxIterations}
@@ -252,9 +273,7 @@ SendMessage(type: "message", recipient: "${leadName}", content: "최종 완료: 
  */
 export function buildScoutDispatchPrompt(opts = {}) {
   const { question, scope = "", teamName, taskId, agentName, leadName } = opts;
-  const subtask = scope
-    ? `${question} 탐색 범위: ${scope}`
-    : question;
+  const subtask = scope ? `${question} 탐색 범위: ${scope}` : question;
   return buildSlimWrapperPrompt("codex", {
     subtask,
     role: "scientist",
@@ -305,10 +324,16 @@ export function buildHybridWrapperPrompt(cli, opts = {}) {
   } = opts;
 
   const escaped = subtask.replace(/'/g, "'\\''");
-  const pipelineHint = pipelinePhase ? `\n파이프라인 단계: ${pipelinePhase}` : "";
+  const pipelineHint = pipelinePhase
+    ? `\n파이프라인 단계: ${pipelinePhase}`
+    : "";
   const taskIdRef = taskId ? `taskId: "${taskId}"` : "";
   const taskIdArg = taskIdRef ? `${taskIdRef}, ` : "";
-  const routeEnvPrefix = buildRouteEnvPrefix(agentName, workerIndex, searchTool);
+  const routeEnvPrefix = buildRouteEnvPrefix(
+    agentName,
+    workerIndex,
+    searchTool,
+  );
 
   const routeCmd = `TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} "${role}" '${escaped}' ${mcp_profile}`;
 
@@ -374,7 +399,12 @@ export async function pollTeamResults(teamName, expectedTaskIds = []) {
     return { completed: [], pending: normalizedTaskIds };
   }
 
-  const resultDir = path.join(os.homedir(), ".claude", "tfx-results", normalizedTeamName);
+  const resultDir = path.join(
+    os.homedir(),
+    ".claude",
+    "tfx-results",
+    normalizedTeamName,
+  );
 
   let entries;
   try {
@@ -387,9 +417,7 @@ export async function pollTeamResults(teamName, expectedTaskIds = []) {
   }
 
   const availableFiles = new Set(
-    entries
-      .filter((entry) => entry.isFile())
-      .map((entry) => entry.name),
+    entries.filter((entry) => entry.isFile()).map((entry) => entry.name),
   );
 
   const completedCandidates = await Promise.all(
@@ -418,7 +446,9 @@ export async function pollTeamResults(teamName, expectedTaskIds = []) {
 
   const completed = completedCandidates.filter(Boolean);
   const completedTaskIds = new Set(completed.map((item) => item.taskId));
-  const pending = normalizedTaskIds.filter((taskId) => !completedTaskIds.has(taskId));
+  const pending = normalizedTaskIds.filter(
+    (taskId) => !completedTaskIds.has(taskId),
+  );
 
   return { completed, pending };
 }
@@ -430,7 +460,9 @@ export async function pollTeamResults(teamName, expectedTaskIds = []) {
  * @returns {string}
  */
 export function formatPollReport(pollResult = {}) {
-  const completed = Array.isArray(pollResult.completed) ? pollResult.completed : [];
+  const completed = Array.isArray(pollResult.completed)
+    ? pollResult.completed
+    : [];
   const pending = Array.isArray(pollResult.pending) ? pollResult.pending : [];
   const total = completed.length + pending.length;
 
@@ -453,7 +485,10 @@ export function formatPollReport(pollResult = {}) {
  * @returns {string}
  */
 function normalizeText(s) {
-  return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  return String(s || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -523,7 +558,8 @@ export function compressScoutReport(rawReport) {
   const text = String(rawReport || "");
 
   // 파일:라인 패턴 추출 (path/to/file.ext:123 형태 + 뒤따르는 설명)
-  const fileLineRe = /([a-zA-Z0-9_./-]+\.[a-zA-Z]{1,10}):(\d+)\s*[:\-–—]?\s*(.+)/g;
+  const fileLineRe =
+    /([a-zA-Z0-9_./-]+\.[a-zA-Z]{1,10}):(\d+)\s*[:\-–—]?\s*(.+)/g;
   const findings = [];
   let match;
   while ((match = fileLineRe.exec(text)) !== null) {
@@ -546,7 +582,10 @@ export function compressScoutReport(rawReport) {
 
   // findings를 먼저 계산하고, 남은 공간에 맞춰 summary를 자른다
   const findingsJson = JSON.stringify(findings);
-  const findingsBudget = Math.min(findingsJson.length, Math.floor(MAX_CHARS * 0.3));
+  const findingsBudget = Math.min(
+    findingsJson.length,
+    Math.floor(MAX_CHARS * 0.3),
+  );
 
   let trimmedFindings = findings;
   if (findingsJson.length > findingsBudget && findings.length > 0) {

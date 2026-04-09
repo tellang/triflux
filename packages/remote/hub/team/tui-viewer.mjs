@@ -1,17 +1,17 @@
 #!/usr/bin/env node
+
 // hub/team/tui-viewer.mjs — worker state aggregator v5
 // psmux capture-pane 기반 워커 상태 집계 + TUI 렌더링
 // data ingest: ~2Hz (500ms), render: 8-12FPS (별도 루프)
 
-import { existsSync, readFileSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { createLogDashboard } from "./tui.mjs";
-import { createLiteDashboard } from "./tui-lite.mjs";
+import { join } from "node:path";
 import { openHeadlessDashboardTarget } from "./dashboard-open.mjs";
 import { processHandoff } from "./handoff.mjs";
-
+import { createLogDashboard } from "./tui.mjs";
+import { createLiteDashboard } from "./tui-lite.mjs";
 
 // ── CLI 인자 파싱 ──
 const args = process.argv.slice(2);
@@ -20,9 +20,9 @@ function argVal(flag) {
   return idx >= 0 ? args[idx + 1] : null;
 }
 
-const SESSION    = argVal("--session");
+const SESSION = argVal("--session");
 const RESULT_DIR = argVal("--result-dir") ?? join(tmpdir(), "tfx-headless");
-const LAYOUT     = argVal("--layout") ?? "single";
+const LAYOUT = argVal("--layout") ?? "single";
 
 if (!SESSION) {
   process.stderr.write(
@@ -48,20 +48,22 @@ const MAX_BODY_BYTES = 10240;
 // forceTTY 시 alternate screen이 WT pane에서 렌더링 안 되는 문제 → append-only 유지
 const tuiFactory = LAYOUT === "lite" ? createLiteDashboard : createLogDashboard;
 const tui = tuiFactory({
-  refreshMs: 0,          // render 루프를 직접 제어
+  refreshMs: 0, // render 루프를 직접 제어
   stream: process.stdout,
   input: process.stdin,
   columns: process.stdout.columns || parseInt(process.env.COLUMNS, 10) || 120,
   layout: LAYOUT,
-  onOpenSelectedWorker: (workerName) => openHeadlessDashboardTarget(SESSION, {
-    worker: workerName,
-    openAll: false,
-    cwd: process.cwd(),
-  }),
-  onOpenAllWorkers: () => openHeadlessDashboardTarget(SESSION, {
-    openAll: true,
-    cwd: process.cwd(),
-  }),
+  onOpenSelectedWorker: (workerName) =>
+    openHeadlessDashboardTarget(SESSION, {
+      worker: workerName,
+      openAll: false,
+      cwd: process.cwd(),
+    }),
+  onOpenAllWorkers: () =>
+    openHeadlessDashboardTarget(SESSION, {
+      openAll: true,
+      cwd: process.cwd(),
+    }),
 });
 const startTime = Date.now();
 tui.setStartTime(startTime);
@@ -126,10 +128,10 @@ function extractFindings(lines, verdict = "") {
 
 // ── Phase 가중치 진행률 (Plan=10%, Research=30%, Exec=50%, Verify=10%) ──
 const PHASE_WEIGHTS = {
-  plan:    0.10,
-  research:0.40,   // plan + research
-  exec:    0.90,   // plan + research + exec
-  verify:  1.00,
+  plan: 0.1,
+  research: 0.4, // plan + research
+  exec: 0.9, // plan + research + exec
+  verify: 1.0,
 };
 
 function estimateProgress(lines, context = {}) {
@@ -138,9 +140,11 @@ function estimateProgress(lines, context = {}) {
   const text = lines.join("\n").toLowerCase();
   let phase = "plan";
 
-  if (/verify|assert|test|check|confirm/.test(text))       phase = "verify";
-  else if (/edit|patch|implement|write|update|fix|refactor/.test(text)) phase = "exec";
-  else if (/search|read|inspect|analy|review|research/.test(text))     phase = "research";
+  if (/verify|assert|test|check|confirm/.test(text)) phase = "verify";
+  else if (/edit|patch|implement|write|update|fix|refactor/.test(text))
+    phase = "exec";
+  else if (/search|read|inspect|analy|review|research/.test(text))
+    phase = "research";
 
   let ratio = PHASE_WEIGHTS[phase];
 
@@ -161,7 +165,13 @@ function listPanes() {
   try {
     const out = execFileSync(
       "psmux",
-      ["list-panes", "-t", SESSION, "-F", "#{pane_index}:#{pane_title}:#{pane_pid}"],
+      [
+        "list-panes",
+        "-t",
+        SESSION,
+        "-F",
+        "#{pane_index}:#{pane_title}:#{pane_pid}",
+      ],
       { encoding: "utf8", timeout: 2000 },
     );
     return out
@@ -245,7 +255,7 @@ function splitHandoff(handoff) {
 }
 
 // ── 상태 집계 저장소 ──
-const workerState = new Map();   // paneName → 내부 상태
+const workerState = new Map(); // paneName → 내부 상태
 let emptyPollCount = 0;
 
 // ── data ingest (4Hz = 250ms) ──
@@ -260,13 +270,21 @@ function ingest() {
       clearInterval(ingestTimer);
       clearInterval(renderTimer);
       tui.render();
-      process.stdout.write("\n\x1b[38;5;245m  세션 종료됨 — 아무 키나 누르면 닫힘\x1b[0m");
+      process.stdout.write(
+        "\n\x1b[38;5;245m  세션 종료됨 — 아무 키나 누르면 닫힘\x1b[0m",
+      );
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(true);
         process.stdin.resume();
-        process.stdin.once("data", () => { cleanup(); process.exit(0); });
+        process.stdin.once("data", () => {
+          cleanup();
+          process.exit(0);
+        });
       } else {
-        setTimeout(() => { cleanup(); process.exit(0); }, 30000);
+        setTimeout(() => {
+          cleanup();
+          process.exit(0);
+        }, 30000);
       }
       return;
     }
@@ -287,8 +305,10 @@ function ingest() {
 
     // CLI 타입 감지
     let cli = "codex";
-    if (pane.title.includes("gemini") || pane.title.includes("🔵")) cli = "gemini";
-    else if (pane.title.includes("claude") || pane.title.includes("🟠")) cli = "claude";
+    if (pane.title.includes("gemini") || pane.title.includes("🔵"))
+      cli = "gemini";
+    else if (pane.title.includes("claude") || pane.title.includes("🟠"))
+      cli = "claude";
     ws.title = pane.title;
     ws.cli = cli;
 
@@ -334,7 +354,11 @@ function ingest() {
 
     const resultFile = join(RESULT_DIR, `${SESSION}-${paneName}.txt`);
     let resultSize = 0;
-    try { resultSize = statSync(resultFile).size; } catch { /* missing */ }
+    try {
+      resultSize = statSync(resultFile).size;
+    } catch {
+      /* missing */
+    }
 
     const shellReturned = /^(PS\s|>|\$)\s*/.test(lastLine) && lines.length > 2;
     const tokens = extractTokenLabel(snapshot);
@@ -346,7 +370,9 @@ function ingest() {
         : snapshot;
       const rLines = toLines(resultContent);
       const verdict = extractFindings(rLines).at(-1) || lastLine || "completed";
-      const handoffStatus = /fail|error|exception/i.test(rLines.join("\n")) ? "failed" : "ok";
+      const handoffStatus = /fail|error|exception/i.test(rLines.join("\n"))
+        ? "failed"
+        : "ok";
       const handoff = {
         status: handoffStatus,
         lead_action: handoffStatus === "failed" ? "retry" : "accept",
@@ -378,11 +404,22 @@ function ingest() {
     }
 
     // 진행 중
-    const progress = estimateProgress(lines, { tokens, resultSize, shellReturned, done: false });
+    const progress = estimateProgress(lines, {
+      tokens,
+      resultSize,
+      shellReturned,
+      done: false,
+    });
     const verdict = lastLine;
 
-    ws.raw_body = raw_body.length > MAX_BODY_BYTES ? raw_body.slice(-MAX_BODY_BYTES) : raw_body;
-    ws.filtered_body = filtered_body.length > MAX_BODY_BYTES ? filtered_body.slice(-MAX_BODY_BYTES) : filtered_body;
+    ws.raw_body =
+      raw_body.length > MAX_BODY_BYTES
+        ? raw_body.slice(-MAX_BODY_BYTES)
+        : raw_body;
+    ws.filtered_body =
+      filtered_body.length > MAX_BODY_BYTES
+        ? filtered_body.slice(-MAX_BODY_BYTES)
+        : filtered_body;
     ws.verdict = verdict;
     ws.findings = extractFindings(lines, lastLine);
     ws.progress = progress;
@@ -415,7 +452,9 @@ function pushToTui(paneName, cli, paneTitle, update) {
 // ── render 루프 (8-12FPS ≈ 100ms) ──
 let renderTimer = null;
 function startRender() {
-  renderTimer = setInterval(() => { tui.render(); }, 100);
+  renderTimer = setInterval(() => {
+    tui.render();
+  }, 100);
   if (renderTimer.unref) renderTimer.unref();
 }
 
@@ -426,13 +465,21 @@ const doneCheck = setInterval(() => {
     clearInterval(doneCheck);
     clearInterval(ingestTimer);
     clearInterval(renderTimer);
-    process.stdout.write("\n\x1b[38;5;245m  전체 완료 — 아무 키나 누르면 닫힘\x1b[0m");
+    process.stdout.write(
+      "\n\x1b[38;5;245m  전체 완료 — 아무 키나 누르면 닫힘\x1b[0m",
+    );
     if (process.stdin.isTTY) {
       process.stdin.setRawMode(true);
       process.stdin.resume();
-      process.stdin.once("data", () => { cleanup(); process.exit(0); });
+      process.stdin.once("data", () => {
+        cleanup();
+        process.exit(0);
+      });
     } else {
-      setTimeout(() => { cleanup(); process.exit(0); }, 30000);
+      setTimeout(() => {
+        cleanup();
+        process.exit(0);
+      }, 30000);
     }
   }
 }, 2000);
@@ -452,11 +499,20 @@ function cleanup() {
 
 // ── 진입점 ──
 tui.render();
-const ingestTimer = setInterval(ingest, 500);   // 2Hz
+const ingestTimer = setInterval(ingest, 500); // 2Hz
 startRender();
 
 // 타임아웃 (10분)
-setTimeout(() => { cleanup(); process.exit(0); }, 10 * 60 * 1000);
+setTimeout(
+  () => {
+    cleanup();
+    process.exit(0);
+  },
+  10 * 60 * 1000,
+);
 
 // Ctrl-C
-process.on("SIGINT", () => { cleanup(); process.exit(0); });
+process.on("SIGINT", () => {
+  cleanup();
+  process.exit(0);
+});

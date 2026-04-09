@@ -2,7 +2,13 @@
 // 프로세스 관련 공유 유틸리티
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { IS_WINDOWS, killProcess } from "../platform.mjs";
@@ -27,8 +33,8 @@ export function isPidAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (e) {
-    if (e?.code === 'EPERM') return true;
-    if (e?.code === 'ESRCH') return false;
+    if (e?.code === "EPERM") return true;
+    if (e?.code === "ESRCH") return false;
     return false;
   }
 }
@@ -41,7 +47,9 @@ function sleepSyncMs(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
   } catch {
     const end = Date.now() + ms;
-    while (Date.now() < end) { /* spin */ }
+    while (Date.now() < end) {
+      /* spin */
+    }
   }
 }
 
@@ -56,7 +64,7 @@ function killWithEscalation(orphanPids, procMap) {
   if (orphanPids.length === 0) return 0;
 
   // SIGTERM 전 alive 스냅샷 — 이미 죽은 PID는 카운트에서 제외
-  const aliveBeforeKill = new Set(orphanPids.filter(pid => isPidAlive(pid)));
+  const aliveBeforeKill = new Set(orphanPids.filter((pid) => isPidAlive(pid)));
 
   for (const pid of aliveBeforeKill) {
     killProcess(pid, { signal: "SIGTERM" });
@@ -77,7 +85,12 @@ function killWithEscalation(orphanPids, procMap) {
               IS_WINDOWS
                 ? `powershell -NoProfile -WindowStyle Hidden -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction SilentlyContinue).ParentProcessId"`
                 : `ps -o ppid= -p ${pid}`,
-              { encoding: "utf8", timeout: 3000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+              {
+                encoding: "utf8",
+                timeout: 3000,
+                stdio: ["pipe", "pipe", "pipe"],
+                windowsHide: true,
+              },
             );
             const currentPpid = Number.parseInt(current.trim(), 10);
             if (Number.isFinite(currentPpid) && currentPpid !== snapshot.ppid) {
@@ -107,41 +120,56 @@ function ensureHelperScripts() {
   let needsUpdate = true;
   try {
     if (existsSync(VERSION_FILE)) {
-      const cached = Number.parseInt(readFileSync(VERSION_FILE, "utf8").trim(), 10);
+      const cached = Number.parseInt(
+        readFileSync(VERSION_FILE, "utf8").trim(),
+        10,
+      );
       if (cached === SCRIPT_VERSION) needsUpdate = false;
     }
   } catch {}
 
   if (needsUpdate) {
     // 기존 스크립트 삭제 후 재생성
-    try { unlinkSync(SCAN_SCRIPT_PATH); } catch {}
-    try { unlinkSync(TREE_SCRIPT_PATH); } catch {}
+    try {
+      unlinkSync(SCAN_SCRIPT_PATH);
+    } catch {}
+    try {
+      unlinkSync(TREE_SCRIPT_PATH);
+    } catch {}
   }
 
   if (!existsSync(TREE_SCRIPT_PATH)) {
-    writeFileSync(TREE_SCRIPT_PATH, [
-      "param([int]$StartPid)",
-      "$p = $StartPid",
-      "for ($i = 0; $i -lt 10; $i++) {",
-      "    if ($p -le 0) { break }",
-      "    Write-Output $p",
-      '    $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$p" -ErrorAction SilentlyContinue).ParentProcessId',
-      "    if ($null -eq $parent -or $parent -le 0) { break }",
-      "    $p = $parent",
-      "}",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      TREE_SCRIPT_PATH,
+      [
+        "param([int]$StartPid)",
+        "$p = $StartPid",
+        "for ($i = 0; $i -lt 10; $i++) {",
+        "    if ($p -le 0) { break }",
+        "    Write-Output $p",
+        '    $parent = (Get-CimInstance Win32_Process -Filter "ProcessId=$p" -ErrorAction SilentlyContinue).ParentProcessId',
+        "    if ($null -eq $parent -or $parent -le 0) { break }",
+        "    $p = $parent",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
   }
 
   if (!existsSync(SCAN_SCRIPT_PATH)) {
     // CLI + 쉘 + 런타임 전체를 스캔하여 PID,ParentPID,Name 출력
     // codex/claude/pwsh/uvx 누락 시 중간 프로세스가 alive 판정되어 고아 트리 전체가 보호됨
     // 예: WT(dead)→pwsh(alive,미스캔)→codex→cmd→node — pwsh에서 isPidAlive=true로 끊김
-    writeFileSync(SCAN_SCRIPT_PATH, [
-      "$ErrorActionPreference = 'SilentlyContinue'",
-      "Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='bash.exe' OR Name='cmd.exe' OR Name='codex.exe' OR Name='claude.exe' OR Name='pwsh.exe' OR Name='uvx.exe'\" | ForEach-Object {",
-      '    Write-Output "$($_.ProcessId),$($_.ParentProcessId),$($_.Name)"',
-      "}",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      SCAN_SCRIPT_PATH,
+      [
+        "$ErrorActionPreference = 'SilentlyContinue'",
+        "Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='bash.exe' OR Name='cmd.exe' OR Name='codex.exe' OR Name='claude.exe' OR Name='pwsh.exe' OR Name='uvx.exe'\" | ForEach-Object {",
+        '    Write-Output "$($_.ProcessId),$($_.ParentProcessId),$($_.Name)"',
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
   }
 
   if (needsUpdate) {
@@ -191,8 +219,12 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
 // codex/claude도 포함: protectedPids + hasLiveAncestorChain이 활성 인스턴스를 보호하므로
 // 고아(부모 dead + 자식 dead)만 kill됨. pwsh.exe는 사용자 인터랙티브 쉘이므로 제외.
 const KILLABLE_NAMES = new Set([
-  "node.exe", "bash.exe", "cmd.exe", "uvx.exe",
-  "codex.exe", "claude.exe",
+  "node.exe",
+  "bash.exe",
+  "cmd.exe",
+  "uvx.exe",
+  "codex.exe",
+  "claude.exe",
 ]);
 
 /**
@@ -216,7 +248,13 @@ export function cleanupOrphanNodeProcesses() {
   // Hub PID 보호
   let hubPid = null;
   try {
-    const hubPidPath = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
+    const hubPidPath = join(
+      homedir(),
+      ".claude",
+      "cache",
+      "tfx-hub",
+      "hub.pid",
+    );
     if (existsSync(hubPidPath)) {
       const hubInfo = JSON.parse(readFileSync(hubPidPath, "utf8"));
       hubPid = Number(hubInfo?.pid);
@@ -231,7 +269,12 @@ export function cleanupOrphanNodeProcesses() {
   try {
     const treeOutput = execSync(
       `powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${TREE_SCRIPT_PATH}" -StartPid ${myPid}`,
-      { encoding: "utf8", timeout: 8000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+      {
+        encoding: "utf8",
+        timeout: 8000,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      },
     );
     for (const line of treeOutput.split(/\r?\n/)) {
       const pid = Number.parseInt(line.trim(), 10);
@@ -244,7 +287,12 @@ export function cleanupOrphanNodeProcesses() {
   try {
     const output = execSync(
       `powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${SCAN_SCRIPT_PATH}"`,
-      { encoding: "utf8", timeout: 15000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+      {
+        encoding: "utf8",
+        timeout: 15000,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      },
     );
 
     for (const line of output.split(/\r?\n/)) {
@@ -276,7 +324,12 @@ export function cleanupOrphanNodeProcesses() {
   try {
     const countOutput = execSync(
       `powershell -NoProfile -WindowStyle Hidden -Command "(Get-Process node -ErrorAction SilentlyContinue).Count"`,
-      { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true },
+      {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      },
     );
     remaining = Number.parseInt(countOutput.trim(), 10) || 0;
   } catch {}
@@ -296,7 +349,13 @@ function cleanupOrphansUnix() {
   const protectedPids = new Set();
   protectedPids.add(myPid);
   try {
-    const hubPidPath = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
+    const hubPidPath = join(
+      homedir(),
+      ".claude",
+      "cache",
+      "tfx-hub",
+      "hub.pid",
+    );
     if (existsSync(hubPidPath)) {
       const hubPid = Number(JSON.parse(readFileSync(hubPidPath, "utf8"))?.pid);
       if (Number.isFinite(hubPid) && hubPid > 0) protectedPids.add(hubPid);
@@ -309,7 +368,9 @@ function cleanupOrphansUnix() {
     for (let i = 0; i < 10; i++) {
       protectedPids.add(current);
       const output = execSync(`ps -o ppid= -p ${current}`, {
-        encoding: "utf8", timeout: 3000, stdio: ["pipe", "pipe", "pipe"],
+        encoding: "utf8",
+        timeout: 3000,
+        stdio: ["pipe", "pipe", "pipe"],
       });
       const ppid = Number.parseInt(output.trim(), 10);
       if (!Number.isFinite(ppid) || ppid <= 1) break;
@@ -321,7 +382,9 @@ function cleanupOrphansUnix() {
   const procMap = new Map();
   try {
     const output = execSync("ps -eo pid,ppid,comm", {
-      encoding: "utf8", timeout: 10000, stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf8",
+      timeout: 10000,
+      stdio: ["pipe", "pipe", "pipe"],
     });
     for (const line of output.split("\n").slice(1)) {
       const parts = line.trim().split(/\s+/);
@@ -329,7 +392,11 @@ function cleanupOrphansUnix() {
       const pid = Number.parseInt(parts[0], 10);
       const ppid = Number.parseInt(parts[1], 10);
       const name = parts.slice(2).join(" ");
-      if (Number.isFinite(pid) && pid > 0 && /^(node|bash|sh|python|codex|claude|uvx)/.test(name)) {
+      if (
+        Number.isFinite(pid) &&
+        pid > 0 &&
+        /^(node|bash|sh|python|codex|claude|uvx)/.test(name)
+      ) {
         procMap.set(pid, { ppid, name });
       }
     }
@@ -352,7 +419,9 @@ function cleanupOrphansUnix() {
   let remaining = 0;
   try {
     const output = execSync("ps -eo comm | grep -c '^node$'", {
-      encoding: "utf8", timeout: 3000, stdio: ["pipe", "pipe", "pipe"],
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["pipe", "pipe", "pipe"],
     });
     remaining = Number.parseInt(output.trim(), 10) || 0;
   } catch {}

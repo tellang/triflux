@@ -14,10 +14,7 @@ const BRIDGE_AGENT_ID = "conductor";
  * @returns {object} Bridge API
  */
 export function createConductorMeshBridge(conductor, registry, opts = {}) {
-  const {
-    bridgeAgentId = BRIDGE_AGENT_ID,
-    onMessage,
-  } = opts;
+  const { bridgeAgentId = BRIDGE_AGENT_ID, onMessage } = opts;
 
   const sessionAgentMap = new Map();
   let attached = false;
@@ -49,12 +46,13 @@ export function createConductorMeshBridge(conductor, registry, opts = {}) {
     }
 
     // Emit mesh event
-    const msg = createMessage(
-      MSG_TYPES.EVENT,
-      bridgeAgentId,
-      "*",
-      { event: "stateChange", sessionId, from, to, reason },
-    );
+    const msg = createMessage(MSG_TYPES.EVENT, bridgeAgentId, "*", {
+      event: "stateChange",
+      sessionId,
+      from,
+      to,
+      reason,
+    });
     emit(msg);
 
     // Unregister on terminal states
@@ -68,12 +66,10 @@ export function createConductorMeshBridge(conductor, registry, opts = {}) {
    * Handle conductor completed events.
    */
   function handleCompleted(event) {
-    const msg = createMessage(
-      MSG_TYPES.EVENT,
-      bridgeAgentId,
-      "*",
-      { event: "completed", sessionId: event.sessionId },
-    );
+    const msg = createMessage(MSG_TYPES.EVENT, bridgeAgentId, "*", {
+      event: "completed",
+      sessionId: event.sessionId,
+    });
     emit(msg);
   }
 
@@ -81,12 +77,11 @@ export function createConductorMeshBridge(conductor, registry, opts = {}) {
    * Handle conductor dead events.
    */
   function handleDead(event) {
-    const msg = createMessage(
-      MSG_TYPES.EVENT,
-      bridgeAgentId,
-      "*",
-      { event: "dead", sessionId: event.sessionId, reason: event.reason },
-    );
+    const msg = createMessage(MSG_TYPES.EVENT, bridgeAgentId, "*", {
+      event: "dead",
+      sessionId: event.sessionId,
+      reason: event.reason,
+    });
     emit(msg);
   }
 
@@ -117,5 +112,11 @@ export function createConductorMeshBridge(conductor, registry, opts = {}) {
     attached = false;
   }
 
-  return { attach, detach, get isAttached() { return attached; } };
+  return {
+    attach,
+    detach,
+    get isAttached() {
+      return attached;
+    },
+  };
 }

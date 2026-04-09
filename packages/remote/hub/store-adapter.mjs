@@ -1,21 +1,24 @@
-import { createStore, importBetterSqlite3 } from './store.mjs';
 import {
-  createMemoryStore,
-  clone,
   buildAdaptiveRuleRow,
-  normalizeAdaptiveRuleIdentity,
   clampConfidence,
   clampHitIncrement,
-  coerceTimestamp,
   clampRetentionMs,
-} from '@triflux/core/hub/lib/memory-store.mjs';
+  clone,
+  coerceTimestamp,
+  createMemoryStore,
+  normalizeAdaptiveRuleIdentity,
+} from "@triflux/core/hub/lib/memory-store.mjs";
+import { createStore, importBetterSqlite3 } from "./store.mjs";
 
 export { createMemoryStore };
 
 function ensureAdaptiveRulesSchema(db) {
-  const schemaKey = 'adaptive_rules_schema_version';
-  const currentVersion = db.prepare('SELECT value FROM _meta WHERE key = ?').pluck().get(schemaKey);
-  if (currentVersion === '2') return;
+  const schemaKey = "adaptive_rules_schema_version";
+  const currentVersion = db
+    .prepare("SELECT value FROM _meta WHERE key = ?")
+    .pluck()
+    .get(schemaKey);
+  if (currentVersion === "2") return;
   if (!currentVersion) {
     // 신규 생성
     db.exec(`
@@ -38,16 +41,22 @@ function ensureAdaptiveRulesSchema(db) {
     `);
   } else {
     // v1 → v2 마이그레이션: 컬럼 추가
-    const cols = db.pragma('table_info(adaptive_rules)').map(c => c.name);
-    if (!cols.includes('error_message')) db.exec('ALTER TABLE adaptive_rules ADD COLUMN error_message TEXT');
-    if (!cols.includes('solution')) db.exec('ALTER TABLE adaptive_rules ADD COLUMN solution TEXT');
-    if (!cols.includes('context')) db.exec('ALTER TABLE adaptive_rules ADD COLUMN context TEXT');
+    const cols = db.pragma("table_info(adaptive_rules)").map((c) => c.name);
+    if (!cols.includes("error_message"))
+      db.exec("ALTER TABLE adaptive_rules ADD COLUMN error_message TEXT");
+    if (!cols.includes("solution"))
+      db.exec("ALTER TABLE adaptive_rules ADD COLUMN solution TEXT");
+    if (!cols.includes("context"))
+      db.exec("ALTER TABLE adaptive_rules ADD COLUMN context TEXT");
   }
-  db.prepare('INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)').run(schemaKey, '2');
+  db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)").run(
+    schemaKey,
+    "2",
+  );
 }
 
 function attachAdaptiveRuleStore(store) {
-  if (store.type !== 'sqlite' || !store.db) return store;
+  if (store.type !== "sqlite" || !store.db) return store;
   ensureAdaptiveRulesSchema(store.db);
   const statements = {
     upsertRule: store.db.prepare(`
@@ -66,7 +75,9 @@ function attachAdaptiveRuleStore(store) {
         error_message = COALESCE(excluded.error_message, adaptive_rules.error_message),
         solution = COALESCE(excluded.solution, adaptive_rules.solution),
         context = COALESCE(excluded.context, adaptive_rules.context)`),
-    getRule: store.db.prepare('SELECT * FROM adaptive_rules WHERE project_slug = ? AND pattern = ?'),
+    getRule: store.db.prepare(
+      "SELECT * FROM adaptive_rules WHERE project_slug = ? AND pattern = ?",
+    ),
     updateRule: store.db.prepare(`
       UPDATE adaptive_rules SET
         confidence = ?,
@@ -88,13 +99,23 @@ function attachAdaptiveRuleStore(store) {
   store.findAdaptiveRule = function findAdaptiveRule(projectSlug, pattern) {
     const identity = normalizeAdaptiveRuleIdentity(projectSlug, pattern);
     if (!identity) return null;
-    return clone(statements.getRule.get(identity.project_slug, identity.pattern) || null);
+    return clone(
+      statements.getRule.get(identity.project_slug, identity.pattern) || null,
+    );
   };
 
-  store.updateRuleConfidence = function updateRuleConfidence(projectSlug, pattern, confidence, options = {}) {
+  store.updateRuleConfidence = function updateRuleConfidence(
+    projectSlug,
+    pattern,
+    confidence,
+    options = {},
+  ) {
     const current = store.findAdaptiveRule(projectSlug, pattern);
     if (!current) return null;
-    const updatedAt = Math.max(current.last_seen_ms, coerceTimestamp(options.last_seen_ms, Date.now()));
+    const updatedAt = Math.max(
+      current.last_seen_ms,
+      coerceTimestamp(options.last_seen_ms, Date.now()),
+    );
     statements.updateRule.run(
       clampConfidence(confidence, current.confidence),
       clampHitIncrement(options.hit_count_increment, 1),
@@ -105,15 +126,25 @@ function attachAdaptiveRuleStore(store) {
     return store.findAdaptiveRule(current.project_slug, current.pattern);
   };
 
-  store.pruneStaleRules = function pruneStaleRules(maxAge_ms = 30 * 24 * 3600 * 1000, minConfidence = 0.2) {
-    const cutoff = Date.now() - clampRetentionMs(maxAge_ms, 30 * 24 * 3600 * 1000);
+  store.pruneStaleRules = function pruneStaleRules(
+    maxAge_ms = 30 * 24 * 3600 * 1000,
+    minConfidence = 0.2,
+  ) {
+    const cutoff =
+      Date.now() - clampRetentionMs(maxAge_ms, 30 * 24 * 3600 * 1000);
     return statements.pruneRules.run(cutoff, minConfidence).changes;
   };
 
   // listAdaptiveRules: decayRules/getActiveAdaptiveRules에서 사용
-  const listStmt = store.db.prepare('SELECT * FROM adaptive_rules WHERE project_slug = ? ORDER BY confidence DESC');
-  const listAllStmt = store.db.prepare('SELECT * FROM adaptive_rules ORDER BY confidence DESC');
-  const deleteRuleStmt = store.db.prepare('DELETE FROM adaptive_rules WHERE project_slug = ? AND pattern = ?');
+  const listStmt = store.db.prepare(
+    "SELECT * FROM adaptive_rules WHERE project_slug = ? ORDER BY confidence DESC",
+  );
+  const listAllStmt = store.db.prepare(
+    "SELECT * FROM adaptive_rules ORDER BY confidence DESC",
+  );
+  const deleteRuleStmt = store.db.prepare(
+    "DELETE FROM adaptive_rules WHERE project_slug = ? AND pattern = ?",
+  );
 
   store.listAdaptiveRules = function listAdaptiveRules(projectSlug) {
     if (projectSlug) return listStmt.all(projectSlug).map(clone);
@@ -140,10 +171,12 @@ export async function createStoreAdapter(dbPath, options = {}) {
   try {
     const DatabaseCtor = await loadDatabase();
     const store = createStore(dbPath, { DatabaseCtor });
-    store.type = 'sqlite';
+    store.type = "sqlite";
     return attachAdaptiveRuleStore(store);
   } catch (error) {
-    console.warn(`[store] SQLite unavailable (${error.message}), using in-memory fallback`);
+    console.warn(
+      `[store] SQLite unavailable (${error.message}), using in-memory fallback`,
+    );
     return createMemoryStore();
   }
 }

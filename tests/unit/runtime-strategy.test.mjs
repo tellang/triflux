@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
   createPsmuxRuntime,
@@ -55,20 +55,11 @@ describe("hub/team/runtime-strategy.mjs", () => {
   });
 
   it("native/wt placeholder는 미구현 에러를 던진다", () => {
-    assert.throws(
-      () => createRuntime("native"),
-      /not implemented yet/i,
-    );
-    assert.throws(
-      () => createRuntime("wt"),
-      /not implemented yet/i,
-    );
+    assert.throws(() => createRuntime("native"), /not implemented yet/i);
+    assert.throws(() => createRuntime("wt"), /not implemented yet/i);
   });
 
   it("지원하지 않는 런타임 모드는 에러를 던진다", () => {
-    assert.throws(
-      () => createRuntime("bogus"),
-      /unsupported runtime mode/i,
-    );
+    assert.throws(() => createRuntime("bogus"), /unsupported runtime mode/i);
   });
 });

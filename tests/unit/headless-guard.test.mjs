@@ -1,10 +1,18 @@
 // tests/unit/headless-guard.test.mjs — headless-guard 플래그 보존 테스트
-import { describe, it, before, after } from "node:test";
+
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
-import { join } from "node:path";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import { BASH_EXE } from "../helpers/bash-path.mjs";
 
 const GUARD_PATH = join(process.cwd(), "scripts", "headless-guard.mjs");
@@ -16,7 +24,7 @@ const GUARD_PATH = join(process.cwd(), "scripts", "headless-guard.mjs");
  */
 
 // parseRouteCommand를 직접 테스트하기 위해 동적 import
-async function loadGuard() {
+async function _loadGuard() {
   // headless-guard.mjs는 main()을 즉시 실행하므로 직접 import 불가.
   // 대신 parseRouteCommand 로직을 인라인 미러로 테스트.
   return null;
@@ -29,11 +37,11 @@ function createFakePsmux(binDir) {
       cmdPath,
       [
         "@echo off",
-        "if \"%1\"==\"-V\" (",
+        'if "%1"=="-V" (',
         "  echo psmux 9.9.9",
         "  exit /b 0",
         ")",
-        "if \"%1\"==\"--help\" (",
+        'if "%1"=="--help" (',
         "  echo new-session",
         "  echo attach-session",
         "  echo kill-session",
@@ -53,16 +61,16 @@ function createFakePsmux(binDir) {
     shPath,
     [
       "#!/usr/bin/env sh",
-      "if [ \"$1\" = \"-V\" ]; then",
-      "  echo \"psmux 9.9.9\"",
+      'if [ "$1" = "-V" ]; then',
+      '  echo "psmux 9.9.9"',
       "  exit 0",
       "fi",
-      "if [ \"$1\" = \"--help\" ]; then",
-      "  echo \"new-session\"",
-      "  echo \"attach-session\"",
-      "  echo \"kill-session\"",
-      "  echo \"capture-pane\"",
-      "  echo \"detach-client\"",
+      'if [ "$1" = "--help" ]; then',
+      '  echo "new-session"',
+      '  echo "attach-session"',
+      '  echo "kill-session"',
+      '  echo "capture-pane"',
+      '  echo "detach-client"',
       "  exit 0",
       "fi",
       "exit 1",
@@ -93,7 +101,11 @@ function runGuardWithInput(payload, extraEnv = {}, options = {}) {
 
   try {
     if (options.multiState) {
-      writeFileSync(join(sandboxDir, "tfx-multi-state.json"), JSON.stringify(options.multiState), "utf8");
+      writeFileSync(
+        join(sandboxDir, "tfx-multi-state.json"),
+        JSON.stringify(options.multiState),
+        "utf8",
+      );
     }
 
     return spawnSync(process.execPath, [GUARD_PATH], {
@@ -159,10 +171,11 @@ function buildCommand(parsed) {
 
   const parts = ["tfx multi --teammate-mode headless"];
   if (!f.noAutoAttach) parts.push("--auto-attach");
-  if (!f.noAutoAttach) parts.push("--dashboard");  // 워커 요약 스플릿이 기본
+  if (!f.noAutoAttach) parts.push("--dashboard"); // 워커 요약 스플릿이 기본
   if (f.verbose) parts.push("--verbose");
   parts.push(`--assign '${parsed.agent}:${safePrompt}:${parsed.agent}'`);
-  if (parsed.mcp && VALID_MCP.has(parsed.mcp)) parts.push(`--mcp-profile ${parsed.mcp}`);
+  if (parsed.mcp && VALID_MCP.has(parsed.mcp))
+    parts.push(`--mcp-profile ${parsed.mcp}`);
   parts.push(`--timeout ${f.timeout || 600}`);
 
   return parts.join(" ");
@@ -170,14 +183,18 @@ function buildCommand(parsed) {
 
 describe("parseRouteCommand", () => {
   it("기본 파싱: agent + prompt + mcp", () => {
-    const r = parseRouteCommand("bash ~/.claude/scripts/tfx-route.sh executor 'fix bug' implement");
+    const r = parseRouteCommand(
+      "bash ~/.claude/scripts/tfx-route.sh executor 'fix bug' implement",
+    );
     assert.equal(r.agent, "executor");
     assert.equal(r.prompt, "fix bug");
     assert.equal(r.mcp, "implement");
   });
 
   it("MCP 없는 명령", () => {
-    const r = parseRouteCommand("bash ~/.claude/scripts/tfx-route.sh architect 'design API'");
+    const r = parseRouteCommand(
+      "bash ~/.claude/scripts/tfx-route.sh architect 'design API'",
+    );
     assert.equal(r.agent, "architect");
     assert.equal(r.prompt, "design API");
     assert.equal(r.mcp, "");
@@ -189,7 +206,9 @@ describe("parseRouteCommand", () => {
   });
 
   it("timeout 추출", () => {
-    const r = parseRouteCommand("bash ~/.claude/scripts/tfx-route.sh executor 'prompt' implement 300");
+    const r = parseRouteCommand(
+      "bash ~/.claude/scripts/tfx-route.sh executor 'prompt' implement 300",
+    );
     assert.equal(r.flags.timeout, 300);
   });
 });
@@ -217,17 +236,24 @@ describe("headless-guard decision matrix (runtime)", () => {
 
     const payload = JSON.parse((result.stdout || "").trim());
     assert.equal(payload?.hookSpecificOutput?.hookEventName, "PreToolUse");
-    assert.match(payload?.hookSpecificOutput?.additionalContext || "", /TFX_ALLOW_DIRECT_CLI=1/u);
+    assert.match(
+      payload?.hookSpecificOutput?.additionalContext || "",
+      /TFX_ALLOW_DIRECT_CLI=1/u,
+    );
   });
 
   it("pipe를 통한 codex exec 호출도 deny한다", () => {
-    const result = runGuardWithBashCommand("cat prompt.md | codex exec 'hello'");
+    const result = runGuardWithBashCommand(
+      "cat prompt.md | codex exec 'hello'",
+    );
     assert.equal(result.status, 2);
     assert.match(result.stderr, /headless-guard/u);
   });
 
   it("pipe를 통한 gemini --prompt 호출도 deny한다", () => {
-    const result = runGuardWithBashCommand("echo test | gemini --prompt 'hello'");
+    const result = runGuardWithBashCommand(
+      "echo test | gemini --prompt 'hello'",
+    );
     assert.equal(result.status, 2);
     assert.match(result.stderr, /headless-guard/u);
   });
@@ -238,7 +264,9 @@ describe("headless-guard decision matrix (runtime)", () => {
   });
 
   it("env prefix + codex exec pipe 조합도 deny한다", () => {
-    const result = runGuardWithBashCommand("TFX_ALLOW_DIRECT_CLI=1 cat prompt.md | codex exec 'hello'");
+    const result = runGuardWithBashCommand(
+      "TFX_ALLOW_DIRECT_CLI=1 cat prompt.md | codex exec 'hello'",
+    );
     assert.equal(result.status, 2);
   });
 
@@ -278,12 +306,16 @@ describe("headless-guard decision matrix (runtime)", () => {
   });
 
   it("psmux send-keys에 codex exec payload가 있으면 deny한다", () => {
-    const result = runGuardWithBashCommand("psmux send-keys -t sess \"codex exec 'hello'\" Enter");
+    const result = runGuardWithBashCommand(
+      "psmux send-keys -t sess \"codex exec 'hello'\" Enter",
+    );
     assert.equal(result.status, 2);
   });
 
   it("psmux send-keys에 codex 없으면 통과한다", () => {
-    const result = runGuardWithBashCommand("psmux send-keys -t sess \"echo hello\" Enter");
+    const result = runGuardWithBashCommand(
+      'psmux send-keys -t sess "echo hello" Enter',
+    );
     assert.equal(result.status, 0);
   });
 
@@ -293,7 +325,7 @@ describe("headless-guard decision matrix (runtime)", () => {
   });
 
   it("정상 eval은 통과한다 (오탐 방지)", () => {
-    const result = runGuardWithBashCommand("eval \"echo hello world\"");
+    const result = runGuardWithBashCommand('eval "echo hello world"');
     assert.equal(result.status, 0);
   });
 
@@ -359,7 +391,11 @@ describe("tfx-multi Edit/Write gate (runtime)", () => {
     const result = runGuardWithInput(
       {
         tool_name: "Edit",
-        tool_input: { file_path: "README.md", old_string: "a", new_string: "b" },
+        tool_input: {
+          file_path: "README.md",
+          old_string: "a",
+          new_string: "b",
+        },
       },
       {},
       {
@@ -420,7 +456,10 @@ describe("tfx-multi Edit/Write gate (runtime)", () => {
 
     assert.equal(resultAtThreshold.status, 0);
     const payload = JSON.parse((resultAtThreshold.stdout || "").trim());
-    assert.match(payload?.hookSpecificOutput?.additionalContext || "", /코드 수정 중.*충돌 위험/u);
+    assert.match(
+      payload?.hookSpecificOutput?.additionalContext || "",
+      /코드 수정 중.*충돌 위험/u,
+    );
   });
 
   it("Edit without tfx-multi state should pass", () => {
@@ -436,7 +475,12 @@ describe("tfx-multi Edit/Write gate (runtime)", () => {
 
 describe("buildCommand — 플래그 보존", () => {
   it("기본 빌드: auto-attach + dashboard 포함 (워커 요약 스플릿 기본)", () => {
-    const parsed = { agent: "executor", prompt: "fix", mcp: "implement", flags: {} };
+    const parsed = {
+      agent: "executor",
+      prompt: "fix",
+      mcp: "implement",
+      flags: {},
+    };
     const cmd = buildCommand(parsed);
     assert.ok(cmd.includes("--auto-attach"));
     assert.ok(cmd.includes("--dashboard"));
@@ -444,27 +488,47 @@ describe("buildCommand — 플래그 보존", () => {
   });
 
   it("dashboard 플래그 전달", () => {
-    const parsed = { agent: "executor", prompt: "fix", mcp: "implement", flags: { dashboard: true } };
+    const parsed = {
+      agent: "executor",
+      prompt: "fix",
+      mcp: "implement",
+      flags: { dashboard: true },
+    };
     const cmd = buildCommand(parsed);
     assert.ok(cmd.includes("--dashboard"));
     assert.ok(cmd.includes("--auto-attach"));
   });
 
   it("verbose 플래그 전달", () => {
-    const parsed = { agent: "executor", prompt: "fix", mcp: "implement", flags: { verbose: true } };
+    const parsed = {
+      agent: "executor",
+      prompt: "fix",
+      mcp: "implement",
+      flags: { verbose: true },
+    };
     const cmd = buildCommand(parsed);
     assert.ok(cmd.includes("--verbose"));
   });
 
   it("noAutoAttach 시 --auto-attach + --dashboard 모두 제거", () => {
-    const parsed = { agent: "executor", prompt: "fix", mcp: "implement", flags: { noAutoAttach: true } };
+    const parsed = {
+      agent: "executor",
+      prompt: "fix",
+      mcp: "implement",
+      flags: { noAutoAttach: true },
+    };
     const cmd = buildCommand(parsed);
     assert.ok(!cmd.includes("--auto-attach"));
     assert.ok(!cmd.includes("--dashboard"));
   });
 
   it("커스텀 timeout 전달", () => {
-    const parsed = { agent: "executor", prompt: "fix", mcp: "implement", flags: { timeout: 300 } };
+    const parsed = {
+      agent: "executor",
+      prompt: "fix",
+      mcp: "implement",
+      flags: { timeout: 300 },
+    };
     const cmd = buildCommand(parsed);
     assert.ok(cmd.includes("--timeout 300"));
   });
@@ -476,7 +540,12 @@ describe("buildCommand — 플래그 보존", () => {
   });
 
   it("모든 플래그 동시 적용", () => {
-    const parsed = { agent: "codex", prompt: "impl auth", mcp: "implement", flags: { dashboard: true, verbose: true, timeout: 180 } };
+    const parsed = {
+      agent: "codex",
+      prompt: "impl auth",
+      mcp: "implement",
+      flags: { dashboard: true, verbose: true, timeout: 180 },
+    };
     const cmd = buildCommand(parsed);
     assert.ok(cmd.includes("--dashboard"));
     assert.ok(cmd.includes("--verbose"));
@@ -487,7 +556,12 @@ describe("buildCommand — 플래그 보존", () => {
   });
 
   it("프롬프트 인용부호 이스케이프", () => {
-    const parsed = { agent: "executor", prompt: "it's a test", mcp: "", flags: {} };
+    const parsed = {
+      agent: "executor",
+      prompt: "it's a test",
+      mcp: "",
+      flags: {},
+    };
     const cmd = buildCommand(parsed);
     assert.ok(cmd.includes("it'\\''s a test"));
   });
@@ -502,21 +576,35 @@ function shouldBypassHeadless(cmd) {
 
 describe("P1a: 단일 워커 headless 우회", () => {
   it("단일 tfx-route.sh → 우회 (headless 변환 안 함)", () => {
-    assert.equal(shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' implement"), true);
+    assert.equal(
+      shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' implement"),
+      true,
+    );
   });
 
   it("--multi 플래그 → headless 변환 수행", () => {
-    assert.equal(shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' --multi implement"), false);
+    assert.equal(
+      shouldBypassHeadless(
+        "bash tfx-route.sh executor 'fix bug' --multi implement",
+      ),
+      false,
+    );
   });
 
   it("--parallel 플래그 → headless 변환 수행", () => {
-    assert.equal(shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' --parallel"), false);
+    assert.equal(
+      shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' --parallel"),
+      false,
+    );
   });
 
   it("TFX_FORCE_HEADLESS=1 → 단일이어도 headless 변환", () => {
     const orig = process.env.TFX_FORCE_HEADLESS;
     process.env.TFX_FORCE_HEADLESS = "1";
-    assert.equal(shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' implement"), false);
+    assert.equal(
+      shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' implement"),
+      false,
+    );
     if (orig === undefined) delete process.env.TFX_FORCE_HEADLESS;
     else process.env.TFX_FORCE_HEADLESS = orig;
   });
@@ -524,7 +612,10 @@ describe("P1a: 단일 워커 headless 우회", () => {
   it("TFX_FORCE_HEADLESS 미설정 + 단일 워커 → 우회", () => {
     const orig = process.env.TFX_FORCE_HEADLESS;
     delete process.env.TFX_FORCE_HEADLESS;
-    assert.equal(shouldBypassHeadless("bash tfx-route.sh codex 'analyze code' review"), true);
+    assert.equal(
+      shouldBypassHeadless("bash tfx-route.sh codex 'analyze code' review"),
+      true,
+    );
     if (orig) process.env.TFX_FORCE_HEADLESS = orig;
   });
 });
@@ -533,7 +624,9 @@ describe("환경변수 기반 플래그", () => {
   it("TFX_VERBOSE=1 → verbose: true", () => {
     const orig = process.env.TFX_VERBOSE;
     process.env.TFX_VERBOSE = "1";
-    const r = parseRouteCommand("bash ~/.claude/scripts/tfx-route.sh executor 'test' implement");
+    const r = parseRouteCommand(
+      "bash ~/.claude/scripts/tfx-route.sh executor 'test' implement",
+    );
     assert.equal(r.flags.verbose, true);
     if (orig === undefined) delete process.env.TFX_VERBOSE;
     else process.env.TFX_VERBOSE = orig;
@@ -542,7 +635,9 @@ describe("환경변수 기반 플래그", () => {
   it("TFX_NO_AUTO_ATTACH=1 → noAutoAttach: true", () => {
     const orig = process.env.TFX_NO_AUTO_ATTACH;
     process.env.TFX_NO_AUTO_ATTACH = "1";
-    const r = parseRouteCommand("bash ~/.claude/scripts/tfx-route.sh executor 'test' implement");
+    const r = parseRouteCommand(
+      "bash ~/.claude/scripts/tfx-route.sh executor 'test' implement",
+    );
     assert.equal(r.flags.noAutoAttach, true);
     if (orig === undefined) delete process.env.TFX_NO_AUTO_ATTACH;
     else process.env.TFX_NO_AUTO_ATTACH = orig;
@@ -551,7 +646,9 @@ describe("환경변수 기반 플래그", () => {
 
 describe("P2: HANDOFF_INSTRUCTION_SHORT", () => {
   it("HANDOFF_INSTRUCTION_SHORT가 유효한 문자열", async () => {
-    const { HANDOFF_INSTRUCTION_SHORT } = await import("../../hub/team/handoff.mjs");
+    const { HANDOFF_INSTRUCTION_SHORT } = await import(
+      "../../hub/team/handoff.mjs"
+    );
     assert.ok(typeof HANDOFF_INSTRUCTION_SHORT === "string");
     assert.ok(HANDOFF_INSTRUCTION_SHORT.length > 0);
     assert.ok(HANDOFF_INSTRUCTION_SHORT.includes("--- HANDOFF ---"));
@@ -560,13 +657,16 @@ describe("P2: HANDOFF_INSTRUCTION_SHORT", () => {
   });
 
   it("HANDOFF_INSTRUCTION_SHORT는 HANDOFF_INSTRUCTION보다 짧음", async () => {
-    const { HANDOFF_INSTRUCTION, HANDOFF_INSTRUCTION_SHORT } = await import("../../hub/team/handoff.mjs");
+    const { HANDOFF_INSTRUCTION, HANDOFF_INSTRUCTION_SHORT } = await import(
+      "../../hub/team/handoff.mjs"
+    );
     assert.ok(HANDOFF_INSTRUCTION_SHORT.length < HANDOFF_INSTRUCTION.length);
   });
 
   it("buildHeadlessCommand에 handoff 지시가 삽입됨 (미러)", () => {
     // buildHeadlessCommand 동작 미러: handoff=true일 때 프롬프트에 HANDOFF 삽입
-    const HANDOFF_SHORT = "After completing, output this block at the end:\n--- HANDOFF ---";
+    const HANDOFF_SHORT =
+      "After completing, output this block at the end:\n--- HANDOFF ---";
     const prompt = "fix bug";
     const handoff = true;
     const handoffHint = handoff ? `\n\n${HANDOFF_SHORT}` : "";
@@ -576,7 +676,8 @@ describe("P2: HANDOFF_INSTRUCTION_SHORT", () => {
   });
 
   it("handoff=false일 때 HANDOFF 지시 미삽입", () => {
-    const HANDOFF_SHORT = "After completing, output this block at the end:\n--- HANDOFF ---";
+    const HANDOFF_SHORT =
+      "After completing, output this block at the end:\n--- HANDOFF ---";
     const prompt = "fix bug";
     const handoff = false;
     const handoffHint = handoff ? `\n\n${HANDOFF_SHORT}` : "";
@@ -619,7 +720,7 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
       return;
     }
     writeFileSync(cacheFile, JSON.stringify({ ts: Date.now(), ok: false }));
-    const result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
+    const _result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
       input: "{}",
       timeout: 5000,
       env: { ...process.env, TMPDIR: testTmpDir, TEMP: testTmpDir },
@@ -635,10 +736,10 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
       t.skip("bash 미설치 환경");
       return;
     }
-    const expiredTs = Date.now() - (6 * 60 * 1000); // 6분 전
+    const expiredTs = Date.now() - 6 * 60 * 1000; // 6분 전
     writeFileSync(cacheFile, JSON.stringify({ ts: expiredTs, ok: false }));
     // This will exec node headless-guard.mjs which also exits 0 when psmux is not installed
-    const result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
+    const _result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
       input: "{}",
       timeout: 10000,
       env: { ...process.env, TMPDIR: testTmpDir, TEMP: testTmpDir },
@@ -654,8 +755,10 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
       return;
     }
     // Remove cache file if exists
-    try { rmSync(cacheFile); } catch {}
-    const result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
+    try {
+      rmSync(cacheFile);
+    } catch {}
+    const _result = execFileSync(BASH_EXE, [FAST_SH_PATH], {
       input: "{}",
       timeout: 10000,
       env: { ...process.env, TMPDIR: testTmpDir, TEMP: testTmpDir },
@@ -668,8 +771,17 @@ describe("headless-guard-fast.sh — bash pre-filter", () => {
 
 describe("parseRouteCommand 소스 패리티", () => {
   it("parseRouteCommand 소스 코드와 테스트 미러가 일치해야 한다", () => {
-    const source = readFileSync(join(process.cwd(), "scripts", "headless-guard.mjs"), "utf8");
-    assert.ok(source.includes("MCP_PROFILES"), "MCP_PROFILES 상수가 소스에 존재");
-    assert.ok(source.includes("timeoutMatch"), "timeout 매칭 로직이 소스에 존재");
+    const source = readFileSync(
+      join(process.cwd(), "scripts", "headless-guard.mjs"),
+      "utf8",
+    );
+    assert.ok(
+      source.includes("MCP_PROFILES"),
+      "MCP_PROFILES 상수가 소스에 존재",
+    );
+    assert.ok(
+      source.includes("timeoutMatch"),
+      "timeout 매칭 로직이 소스에 존재",
+    );
   });
 });

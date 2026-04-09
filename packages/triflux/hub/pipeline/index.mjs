@@ -2,21 +2,25 @@
 //
 // 상태(state.mjs) + 전이(transitions.mjs) 통합 인터페이스
 
-import { writeFileSync, mkdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { homedir } from 'node:os';
-
-import { canTransition, transitionPhase, ralphRestart, TERMINAL } from './transitions.mjs';
+import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { classifyIntent as _classifyIntent } from "../intent.mjs";
+import { runConfidenceCheck } from "./gates/confidence.mjs";
+import { runSelfCheck } from "./gates/selfcheck.mjs";
 import {
   ensurePipelineTable,
   initPipelineState,
   readPipelineState,
-  updatePipelineState,
   removePipelineState,
-} from './state.mjs';
-import { runConfidenceCheck } from './gates/confidence.mjs';
-import { runSelfCheck } from './gates/selfcheck.mjs';
-import { classifyIntent as _classifyIntent } from '../intent.mjs';
+  updatePipelineState,
+} from "./state.mjs";
+import {
+  canTransition,
+  ralphRestart,
+  TERMINAL,
+  transitionPhase,
+} from "./transitions.mjs";
 // deslop gate: 호출자가 scanDirectory/detectSlop 결과를 전달
 
 /**
@@ -127,12 +131,12 @@ export function createPipeline(db, teamName, opts = {}) {
      * @returns {string} 절대 경로
      */
     writePlanFile(content) {
-      const safeName = teamName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
-      const planDir = resolve(process.cwd(), '.tfx', 'plans');
+      const safeName = teamName.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+      const planDir = resolve(process.cwd(), ".tfx", "plans");
       mkdirSync(planDir, { recursive: true });
       const planPath = join(planDir, `${safeName}-plan.md`);
-      writeFileSync(planPath, content, 'utf8');
-      this.setArtifact('plan_path', planPath);
+      writeFileSync(planPath, content, "utf8");
+      this.setArtifact("plan_path", planPath);
       return planPath;
     },
 
@@ -170,20 +174,23 @@ export function createPipeline(db, teamName, opts = {}) {
       const current = readPipelineState(db, teamName);
       if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
 
-      if (current.phase !== 'confidence') {
-        return { ok: false, error: `confidence gate는 confidence 단계에서만 실행 가능 (현재: ${current.phase})` };
+      if (current.phase !== "confidence") {
+        return {
+          ok: false,
+          error: `confidence gate는 confidence 단계에서만 실행 가능 (현재: ${current.phase})`,
+        };
       }
 
       const gate = runConfidenceCheck(planArtifact, context);
-      this.setArtifact('confidence_result', gate);
+      this.setArtifact("confidence_result", gate);
 
-      if (gate.decision === 'abort') {
-        const result = this.advance('failed');
+      if (gate.decision === "abort") {
+        const result = this.advance("failed");
         return { ok: true, gate, state: result.state };
       }
 
       // proceed 또는 alternative → exec로 전이
-      const result = this.advance('exec');
+      const result = this.advance("exec");
       return { ok: result.ok, gate, state: result.state, error: result.error };
     },
 
@@ -198,15 +205,21 @@ export function createPipeline(db, teamName, opts = {}) {
       const current = readPipelineState(db, teamName);
       if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
 
-      if (current.phase !== 'deslop') {
-        return { ok: false, error: `deslop gate는 deslop 단계에서만 실행 가능 (현재: ${current.phase})` };
+      if (current.phase !== "deslop") {
+        return {
+          ok: false,
+          error: `deslop gate는 deslop 단계에서만 실행 가능 (현재: ${current.phase})`,
+        };
       }
 
-      const gate = deslopResult || { files: [], summary: { total: 0, clean: 0 } };
-      this.setArtifact('deslop_result', gate);
+      const gate = deslopResult || {
+        files: [],
+        summary: { total: 0, clean: 0 },
+      };
+      this.setArtifact("deslop_result", gate);
 
       // deslop은 항상 verify로 전이 (정보 제공 게이트, 차단 없음)
-      const result = this.advance('verify');
+      const result = this.advance("verify");
       return { ok: result.ok, gate, state: result.state, error: result.error };
     },
 
@@ -222,20 +235,28 @@ export function createPipeline(db, teamName, opts = {}) {
       const current = readPipelineState(db, teamName);
       if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
 
-      if (current.phase !== 'selfcheck') {
-        return { ok: false, error: `selfcheck gate는 selfcheck 단계에서만 실행 가능 (현재: ${current.phase})` };
+      if (current.phase !== "selfcheck") {
+        return {
+          ok: false,
+          error: `selfcheck gate는 selfcheck 단계에서만 실행 가능 (현재: ${current.phase})`,
+        };
       }
 
       const gate = runSelfCheck(execResult, verifyResult, requirements);
-      this.setArtifact('selfcheck_result', gate);
+      this.setArtifact("selfcheck_result", gate);
 
       if (gate.passed) {
-        const result = this.advance('complete');
-        return { ok: result.ok, gate, state: result.state, error: result.error };
+        const result = this.advance("complete");
+        return {
+          ok: result.ok,
+          gate,
+          state: result.state,
+          error: result.error,
+        };
       }
 
       // Red Flag 탐지 또는 필수 질문 실패 → fix
-      const result = this.advance('fix');
+      const result = this.advance("fix");
       return { ok: result.ok, gate, state: result.state, error: result.error };
     },
   };
@@ -248,7 +269,7 @@ let _tokenSnapshotMod = null;
 async function loadTokenSnapshot() {
   if (_tokenSnapshotMod) return _tokenSnapshotMod;
   try {
-    _tokenSnapshotMod = await import('../../scripts/token-snapshot.mjs');
+    _tokenSnapshotMod = await import("../../scripts/token-snapshot.mjs");
   } catch {
     _tokenSnapshotMod = null;
   }
@@ -266,7 +287,9 @@ export async function benchmarkStart(label) {
   try {
     const snapshot = mod.takeSnapshot(label);
     return { label, snapshot };
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -286,14 +309,22 @@ export async function benchmarkEnd(preLabel, postLabel, options = {}) {
     const diff = mod.computeDiff(preLabel, postLabel, options);
 
     // 추가로 타임스탬프 기반 사본 저장
-    const diffsDir = join(homedir(), '.omc', 'state', 'cx-auto-tokens', 'diffs');
+    const diffsDir = join(
+      homedir(),
+      ".omc",
+      "state",
+      "cx-auto-tokens",
+      "diffs",
+    );
     mkdirSync(diffsDir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const outPath = join(diffsDir, `${ts}.json`);
     writeFileSync(outPath, JSON.stringify(diff, null, 2));
 
     return diff;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -310,9 +341,13 @@ export function triageWithIntent(prompt, threshold = 0.8) {
   return { skip: false, routing: null, classification };
 }
 
-export { ensurePipelineTable } from './state.mjs';
-export { PHASES, TERMINAL, ALLOWED, canTransition } from './transitions.mjs';
-export { CRITERIA, runConfidenceCheck } from './gates/confidence.mjs';
-export { RED_FLAGS, QUESTIONS, runSelfCheck } from './gates/selfcheck.mjs';
-export { detectSlop, autoFixSlop, scanDirectory } from '../quality/deslop.mjs';
-export { quickClassify, classifyIntent, INTENT_CATEGORIES } from '../intent.mjs';
+export {
+  classifyIntent,
+  INTENT_CATEGORIES,
+  quickClassify,
+} from "../intent.mjs";
+export { autoFixSlop, detectSlop, scanDirectory } from "../quality/deslop.mjs";
+export { CRITERIA, runConfidenceCheck } from "./gates/confidence.mjs";
+export { QUESTIONS, RED_FLAGS, runSelfCheck } from "./gates/selfcheck.mjs";
+export { ensurePipelineTable } from "./state.mjs";
+export { ALLOWED, canTransition, PHASES, TERMINAL } from "./transitions.mjs";

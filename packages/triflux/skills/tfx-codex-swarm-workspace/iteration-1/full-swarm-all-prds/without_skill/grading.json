@@ -1,11 +1,39 @@
 {
   "expectations": [
-    {"text": "all-7-prds-found", "passed": true, "evidence": "7개 PRD 모두 발견 및 나열"},
-    {"text": "correct-type-classification", "passed": true, "evidence": "5 implement + 2 investigate 정확"},
-    {"text": "profile-routing-varies", "passed": true, "evidence": "codex53_high/gpt54_high 분리 적용"},
-    {"text": "worktree-per-task", "passed": true, "evidence": "7개 worktree 생성 명령 존재"},
-    {"text": "psmux-sessions", "passed": true, "evidence": "7개 psmux 세션 생성됨"},
-    {"text": "single-wt-window", "passed": true, "evidence": "WT 탭 attach 포함"},
-    {"text": "omx-skill-mapping", "passed": true, "evidence": "autopilot/plan 매핑 존재"}
+    {
+      "text": "all-7-prds-found",
+      "passed": true,
+      "evidence": "7개 PRD 모두 발견 및 나열"
+    },
+    {
+      "text": "correct-type-classification",
+      "passed": true,
+      "evidence": "5 implement + 2 investigate 정확"
+    },
+    {
+      "text": "profile-routing-varies",
+      "passed": true,
+      "evidence": "codex53_high/gpt54_high 분리 적용"
+    },
+    {
+      "text": "worktree-per-task",
+      "passed": true,
+      "evidence": "7개 worktree 생성 명령 존재"
+    },
+    {
+      "text": "psmux-sessions",
+      "passed": true,
+      "evidence": "7개 psmux 세션 생성됨"
+    },
+    {
+      "text": "single-wt-window",
+      "passed": true,
+      "evidence": "WT 탭 attach 포함"
+    },
+    {
+      "text": "omx-skill-mapping",
+      "passed": true,
+      "evidence": "autopilot/plan 매핑 존재"
+    }
   ]
 }

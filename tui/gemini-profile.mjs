@@ -1,36 +1,66 @@
 #!/usr/bin/env node
 // tui/gemini-profile.mjs — Interactive Gemini Profile Manager
 // Codex config.toml 대칭 구조 — JSON 기반 프로필 CRUD
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import {
-  clear, box, table, divider, label, ok, warn, fail, info,
-  select, confirm, input, spinner,
-  RESET, DIM, BOLD, CYAN, AMBER, GREEN, RED, YELLOW, WHITE, GRAY,
-  onExit, showCursor,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import {
+  BOLD,
+  box,
+  CYAN,
+  clear,
+  confirm,
+  DIM,
+  divider,
+  fail,
+  GREEN,
+  info,
+  input,
+  label,
+  ok,
+  onExit,
+  RED,
+  RESET,
+  select,
+  showCursor,
+  table,
+  WHITE,
+  warn,
+  YELLOW,
 } from "./core.mjs";
 
 const GEMINI_DIR = join(homedir(), ".gemini");
 const CONFIG_PATH = join(GEMINI_DIR, "triflux-profiles.json");
 
 const KNOWN_MODELS = [
-  { label: "gemini-3.1-pro-preview",   hint: "3.1 Pro — 플래그십" },
-  { label: "gemini-3-flash-preview",   hint: "3.0 Flash — 빠른 응답" },
-  { label: "gemini-2.5-pro",           hint: "2.5 Pro — 안정" },
-  { label: "gemini-2.5-flash",         hint: "2.5 Flash — 경량" },
-  { label: "gemini-2.5-flash-lite",    hint: "2.5 Flash Lite — 최경량" },
-  { label: "직접 입력",                 hint: "" },
+  { label: "gemini-3.1-pro-preview", hint: "3.1 Pro — 플래그십" },
+  { label: "gemini-3-flash-preview", hint: "3.0 Flash — 빠른 응답" },
+  { label: "gemini-2.5-pro", hint: "2.5 Pro — 안정" },
+  { label: "gemini-2.5-flash", hint: "2.5 Flash — 경량" },
+  { label: "gemini-2.5-flash-lite", hint: "2.5 Flash Lite — 최경량" },
+  { label: "직접 입력", hint: "" },
 ];
 
 const DEFAULT_CONFIG = {
   model: "gemini-3.1-pro-preview",
   profiles: {
-    pro31:   { model: "gemini-3.1-pro-preview",   hint: "3.1 Pro — 플래그십 (1M ctx, 멀티모달)" },
-    flash3:  { model: "gemini-3-flash-preview",   hint: "3.0 Flash — 빠른 응답, 비용 효율" },
-    pro25:   { model: "gemini-2.5-pro",           hint: "2.5 Pro — 안정 (추론 강화)" },
-    flash25: { model: "gemini-2.5-flash",         hint: "2.5 Flash — 경량 범용" },
-    lite25:  { model: "gemini-2.5-flash-lite",    hint: "2.5 Flash Lite — 최경량" },
+    pro31: {
+      model: "gemini-3.1-pro-preview",
+      hint: "3.1 Pro — 플래그십 (1M ctx, 멀티모달)",
+    },
+    flash3: {
+      model: "gemini-3-flash-preview",
+      hint: "3.0 Flash — 빠른 응답, 비용 효율",
+    },
+    pro25: { model: "gemini-2.5-pro", hint: "2.5 Pro — 안정 (추론 강화)" },
+    flash25: { model: "gemini-2.5-flash", hint: "2.5 Flash — 경량 범용" },
+    lite25: { model: "gemini-2.5-flash-lite", hint: "2.5 Flash Lite — 최경량" },
   },
 };
 
@@ -88,7 +118,9 @@ function modelColor(model) {
 
 async function pickModel(current) {
   const idx = KNOWN_MODELS.findIndex((m) => m.label === current);
-  const choice = await select("모델 선택", KNOWN_MODELS, { initial: Math.max(0, idx) });
+  const choice = await select("모델 선택", KNOWN_MODELS, {
+    initial: Math.max(0, idx),
+  });
   if (!choice) return null;
   if (choice.value.label === "직접 입력") {
     return await input("모델 ID", current || "");
@@ -125,7 +157,10 @@ async function editProfile(config) {
 
   if (!(await confirm("저장하시겠습니까?"))) return config;
 
-  config.profiles[profile.name] = { model: newModel, hint: hint || profile.hint };
+  config.profiles[profile.name] = {
+    model: newModel,
+    hint: hint || profile.hint,
+  };
   save(config);
   ok(`${profile.name} 프로필 저장 완료`);
   return readConfig();
@@ -184,7 +219,9 @@ async function removeProfile(config) {
   if (!picked) return config;
 
   const name = profiles[picked.index].name;
-  if (!(await confirm(`${RED}${name}${RESET} 프로필을 삭제하시겠습니까?`, false))) {
+  if (
+    !(await confirm(`${RED}${name}${RESET} 프로필을 삭제하시겠습니까?`, false))
+  ) {
     return config;
   }
 
@@ -208,11 +245,11 @@ function save(config) {
 // ── Main Loop ──
 
 const MENU = [
-  { label: "프로필 모델 변경",   hint: "모델 수정" },
-  { label: "기본 모델 변경",     hint: "top-level default" },
-  { label: "프로필 추가",        hint: "새 프로필 생성" },
-  { label: "프로필 삭제",        hint: "기존 프로필 제거" },
-  { label: "종료",              hint: "Ctrl+C" },
+  { label: "프로필 모델 변경", hint: "모델 수정" },
+  { label: "기본 모델 변경", hint: "top-level default" },
+  { label: "프로필 추가", hint: "새 프로필 생성" },
+  { label: "프로필 삭제", hint: "기존 프로필 제거" },
+  { label: "종료", hint: "Ctrl+C" },
 ];
 
 async function main() {
@@ -236,10 +273,18 @@ async function main() {
 
     console.log();
     switch (choice.index) {
-      case 0: config = await editProfile(config); break;
-      case 1: config = await editDefault(config); break;
-      case 2: config = await addProfile(config); break;
-      case 3: config = await removeProfile(config); break;
+      case 0:
+        config = await editProfile(config);
+        break;
+      case 1:
+        config = await editDefault(config);
+        break;
+      case 2:
+        config = await addProfile(config);
+        break;
+      case 3:
+        config = await removeProfile(config);
+        break;
     }
 
     console.log();

@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -24,9 +30,21 @@ describe("lake4 integration", () => {
       mkdirSync(basicSkillDir, { recursive: true });
       mkdirSync(deepSkillDir, { recursive: true });
 
-      writeFileSync(join(templatesDir, "header.md"), "# {{SKILL_NAME}}", "utf8");
-      writeFileSync(join(templatesDir, "summary.md"), "desc={{SKILL_DESCRIPTION}}", "utf8");
-      writeFileSync(join(templatesDir, "deep.md"), "deep-enabled={{SKILL_NAME}}", "utf8");
+      writeFileSync(
+        join(templatesDir, "header.md"),
+        "# {{SKILL_NAME}}",
+        "utf8",
+      );
+      writeFileSync(
+        join(templatesDir, "summary.md"),
+        "desc={{SKILL_DESCRIPTION}}",
+        "utf8",
+      );
+      writeFileSync(
+        join(templatesDir, "deep.md"),
+        "deep-enabled={{SKILL_NAME}}",
+        "utf8",
+      );
       writeFileSync(join(templatesDir, "footer.md"), "eof", "utf8");
 
       writeFileSync(
@@ -63,7 +81,11 @@ describe("lake4 integration", () => {
         "utf8",
       );
 
-      const result = generateSkillDocs({ skillsDir, templatesDir, write: true });
+      const result = generateSkillDocs({
+        skillsDir,
+        templatesDir,
+        write: true,
+      });
       assert.equal(result.count, 2);
 
       const basicOut = readFileSync(join(basicSkillDir, "SKILL.md"), "utf8");

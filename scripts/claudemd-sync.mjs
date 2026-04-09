@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
-import { TFX_START, OMC_END, writeSection } from "./lib/claudemd-scanner.mjs";
+import { OMC_END, TFX_START, writeSection } from "./lib/claudemd-scanner.mjs";
 
 const PKG_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GLOBAL_CLAUDE_MD_PATH = join(homedir(), ".claude", "CLAUDE.md");
@@ -29,7 +29,10 @@ function findRoutingSection(markdown) {
   }
 
   // Legacy heading fallback
-  const headingPattern = new RegExp(`(^|\\n)${ROUTING_SECTION_HEADING.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?=\\n|$)`, "u");
+  const headingPattern = new RegExp(
+    `(^|\\n)${ROUTING_SECTION_HEADING.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?=\\n|$)`,
+    "u",
+  );
   const match = headingPattern.exec(content);
 
   if (!match) {
@@ -37,8 +40,12 @@ function findRoutingSection(markdown) {
   }
 
   const startIndex = match.index + match[1].length;
-  const nextHeadingIndex = content.indexOf("\n## ", startIndex + ROUTING_SECTION_HEADING.length);
-  const endIndex = nextHeadingIndex === -1 ? content.length : nextHeadingIndex + 1;
+  const nextHeadingIndex = content.indexOf(
+    "\n## ",
+    startIndex + ROUTING_SECTION_HEADING.length,
+  );
+  const endIndex =
+    nextHeadingIndex === -1 ? content.length : nextHeadingIndex + 1;
 
   return {
     found: true,
@@ -66,7 +73,11 @@ function buildNextMarkdown(currentMarkdown, routingSection) {
     return nextSection;
   }
 
-  const separator = current.endsWith("\n\n") ? "" : current.endsWith("\n") ? "\n" : "\n\n";
+  const separator = current.endsWith("\n\n")
+    ? ""
+    : current.endsWith("\n")
+      ? "\n"
+      : "\n\n";
   return `${current}${separator}${nextSection}`;
 }
 
@@ -82,7 +93,9 @@ export function getLatestRoutingTable() {
     if (section.found) return section.section.trim();
   }
   // 2차 fallback: 패키지 CLAUDE.md도 없으면 에러
-  throw new Error(`routing section not found in: ${GLOBAL_CLAUDE_MD_PATH} or ${PKG_CLAUDE_MD_PATH}`);
+  throw new Error(
+    `routing section not found in: ${GLOBAL_CLAUDE_MD_PATH} or ${PKG_CLAUDE_MD_PATH}`,
+  );
 }
 
 export function ensureTfxSection(claudeMdPath, routingTable) {
@@ -134,5 +147,10 @@ export function ensureTfxCrown(claudeMdPath, options = {}) {
 export function ensureGlobalClaudeRoutingSection(claudeDir) {
   // routing은 프로젝트 CLAUDE.md에만 유지. global 중복 주입 중단.
   const claudeMdPath = join(claudeDir, "CLAUDE.md");
-  return { action: "unchanged", path: claudeMdPath, skipped: true, reason: "global_sync_disabled" };
+  return {
+    action: "unchanged",
+    path: claudeMdPath,
+    skipped: true,
+    reason: "global_sync_disabled",
+  };
 }

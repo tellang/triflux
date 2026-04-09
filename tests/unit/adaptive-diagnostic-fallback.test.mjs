@@ -1,9 +1,10 @@
 // tests/unit/adaptive-diagnostic-fallback.test.mjs — loadKnownErrors 파일 누락/손상 fallback 테스트
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { describe, it } from "node:test";
 
 import { loadKnownErrors } from "../../hub/adaptive-diagnostic.mjs";
 

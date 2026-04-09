@@ -1,17 +1,18 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
   detectMultiplexer,
-  sessionExists,
-  listSessions,
   hasWindowsTerminal,
+  listSessions,
+  sessionExists,
 } from "../../hub/team/session.mjs";
 
 describe("session.mjs", () => {
   it("detectMultiplexer()는 string 또는 null을 반환해야 한다", () => {
     const mux = detectMultiplexer();
     assert.ok(
-      mux === null || ["tmux", "git-bash-tmux", "wsl-tmux", "psmux"].includes(mux),
+      mux === null ||
+        ["tmux", "git-bash-tmux", "wsl-tmux", "psmux"].includes(mux),
     );
   });
 

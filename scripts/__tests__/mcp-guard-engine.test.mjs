@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { describe, it, afterEach } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -22,7 +22,10 @@ const originalHome = {
 };
 
 function createHomeDir(prefix = "mcp-guard-") {
-  const base = join(tmpdir(), `${prefix}${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const base = join(
+    tmpdir(),
+    `${prefix}${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
   mkdirSync(base, { recursive: true });
   mkdirSync(join(base, ".gemini"), { recursive: true });
   mkdirSync(join(base, ".claude", "cache", "tfx-hub"), { recursive: true });
@@ -58,9 +61,18 @@ describe("mcp guard engine", () => {
     const homeDir = createHomeDir();
     withHome(homeDir);
 
-    assert.equal(isWatchedPath(join(homeDir, ".gemini", "settings.json")), true);
-    assert.equal(isWatchedPath(join(PROJECT_ROOT, "nested", ".mcp.json")), true);
-    assert.equal(isWatchedPath(join(PROJECT_ROOT, "nested", "settings.yaml")), false);
+    assert.equal(
+      isWatchedPath(join(homeDir, ".gemini", "settings.json")),
+      true,
+    );
+    assert.equal(
+      isWatchedPath(join(PROJECT_ROOT, "nested", ".mcp.json")),
+      true,
+    );
+    assert.equal(
+      isWatchedPath(join(PROJECT_ROOT, "nested", "settings.yaml")),
+      false,
+    );
   });
 
   it("detects stdio MCP servers from JSON config", () => {
@@ -68,15 +80,25 @@ describe("mcp guard engine", () => {
     withHome(homeDir);
 
     const settingsPath = join(homeDir, ".gemini", "settings.json");
-    writeFileSync(settingsPath, JSON.stringify({
-      mcpServers: {
-        "unsafe-stdio": { command: "node", args: ["server.js"] },
-        "safe-url": { url: "http://127.0.0.1:27888/mcp" },
-      },
-    }, null, 2));
+    writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        {
+          mcpServers: {
+            "unsafe-stdio": { command: "node", args: ["server.js"] },
+            "safe-url": { url: "http://127.0.0.1:27888/mcp" },
+          },
+        },
+        null,
+        2,
+      ),
+    );
 
     const found = scanForStdioServers(settingsPath);
-    assert.deepEqual(found.map((server) => server.name), ["unsafe-stdio"]);
+    assert.deepEqual(
+      found.map((server) => server.name),
+      ["unsafe-stdio"],
+    );
   });
 
   it("replaces stdio MCP entries with tfx-hub and writes a backup", () => {
@@ -84,22 +106,38 @@ describe("mcp guard engine", () => {
     withHome(homeDir);
 
     const pidPath = join(homeDir, ".claude", "cache", "tfx-hub", "hub.pid");
-    writeFileSync(pidPath, JSON.stringify({ host: "127.0.0.1", port: 30123 }), "utf8");
+    writeFileSync(
+      pidPath,
+      JSON.stringify({ host: "127.0.0.1", port: 30123 }),
+      "utf8",
+    );
 
     const settingsPath = join(homeDir, ".gemini", "settings.json");
-    writeFileSync(settingsPath, JSON.stringify({
-      mcpServers: {
-        "unsafe-stdio": { command: "node", args: ["server.js"] },
-      },
-    }, null, 2));
+    writeFileSync(
+      settingsPath,
+      JSON.stringify(
+        {
+          mcpServers: {
+            "unsafe-stdio": { command: "node", args: ["server.js"] },
+          },
+        },
+        null,
+        2,
+      ),
+    );
 
-    const result = remediate(settingsPath, scanForStdioServers(settingsPath), { stdio_action: "replace-with-hub" });
+    const result = remediate(settingsPath, scanForStdioServers(settingsPath), {
+      stdio_action: "replace-with-hub",
+    });
     const updated = JSON.parse(readFileSync(settingsPath, "utf8"));
 
     assert.equal(result.modified, true);
     assert.equal(existsSync(`${settingsPath}.bak`), true);
     assert.deepEqual(result.removedServers, ["unsafe-stdio"]);
-    assert.equal(updated.mcpServers["tfx-hub"].url, "http://127.0.0.1:30123/mcp");
+    assert.equal(
+      updated.mcpServers["tfx-hub"].url,
+      "http://127.0.0.1:30123/mcp",
+    );
     assert.equal(Object.hasOwn(updated.mcpServers, "unsafe-stdio"), false);
   });
 

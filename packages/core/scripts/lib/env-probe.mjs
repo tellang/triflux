@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { homedir } from "node:os";
 import { execSync, spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { whichCommand, whichCommandAsync } from "../../hub/platform.mjs";
 
 const DEFAULT_STATUS_URL = "http://127.0.0.1:27888/status";
@@ -73,10 +73,13 @@ function normalizeCliNames(names) {
 }
 
 function mapCliResults(names, results) {
-  return names.reduce((acc, name, index) => ({
-    ...acc,
-    [name]: results[index],
-  }), {});
+  return names.reduce(
+    (acc, name, index) => ({
+      ...acc,
+      [name]: results[index],
+    }),
+    {},
+  );
 }
 
 async function resolveCliProbe(name, options = {}) {
@@ -115,13 +118,18 @@ export function checkCliSync(name, options = {}) {
   const cached = readCachedCliResult(cliName);
   if (cached) return cached;
 
-  const path = (options.whichCommandFn || whichCommand)(cliName, buildCliProbeOptions(options));
+  const path = (options.whichCommandFn || whichCommand)(
+    cliName,
+    buildCliProbeOptions(options),
+  );
   return storeCliResult(cliName, toCliResult(path));
 }
 
 export async function probeClis(names, options = {}) {
   const cliNames = normalizeCliNames(names);
-  const results = await Promise.all(cliNames.map((name) => checkCli(name, options)));
+  const results = await Promise.all(
+    cliNames.map((name) => checkCli(name, options)),
+  );
   return mapCliResults(cliNames, results);
 }
 
@@ -137,15 +145,18 @@ export function detectCodexAuthState({
 } = {}) {
   try {
     const authPath = join(homeDir, ".codex", "auth.json");
-    if (!existsSyncFn(authPath)) return { plan: "unknown", source: "no_auth", fingerprint: "no_auth" };
+    if (!existsSyncFn(authPath))
+      return { plan: "unknown", source: "no_auth", fingerprint: "no_auth" };
 
     const auth = JSON.parse(readFileSyncFn(authPath, "utf8"));
     if (auth.auth_mode !== "chatgpt") {
       const fingerprint = createHash("sha256")
-        .update(JSON.stringify({
-          auth_mode: auth.auth_mode || "api_key",
-          has_api_key: Boolean(auth.api_key || auth.apiKey),
-        }))
+        .update(
+          JSON.stringify({
+            auth_mode: auth.auth_mode || "api_key",
+            has_api_key: Boolean(auth.api_key || auth.apiKey),
+          }),
+        )
         .digest("hex");
       return { plan: "api", source: "api_key", fingerprint };
     }
@@ -156,20 +167,30 @@ export function detectCodexAuthState({
         plan: "unknown",
         source: "no_token",
         fingerprint: createHash("sha256")
-          .update(JSON.stringify({ auth_mode: auth.auth_mode || "chatgpt", token: null }))
+          .update(
+            JSON.stringify({
+              auth_mode: auth.auth_mode || "chatgpt",
+              token: null,
+            }),
+          )
           .digest("hex"),
       };
     }
 
-    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
-    const plan = payload?.["https://api.openai.com/auth"]?.chatgpt_plan_type || "unknown";
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString(),
+    );
+    const plan =
+      payload?.["https://api.openai.com/auth"]?.chatgpt_plan_type || "unknown";
     const fingerprint = createHash("sha256")
-      .update(JSON.stringify({
-        auth_mode: auth.auth_mode || "chatgpt",
-        plan,
-        sub: payload?.sub || null,
-        exp: payload?.exp || null,
-      }))
+      .update(
+        JSON.stringify({
+          auth_mode: auth.auth_mode || "chatgpt",
+          plan,
+          sub: payload?.sub || null,
+          exp: payload?.exp || null,
+        }),
+      )
       .digest("hex");
     return { plan, source: "jwt", fingerprint };
   } catch {
@@ -205,7 +226,8 @@ export function checkHub({
   if (!restart) return { ok: false, state: "unreachable", restart: "disabled" };
 
   const serverPath = join(pkgRoot, "hub", "server.mjs");
-  if (!existsSyncFn(serverPath)) return { ok: false, state: "unreachable", restart: "no_server" };
+  if (!existsSyncFn(serverPath))
+    return { ok: false, state: "unreachable", restart: "no_server" };
 
   try {
     const child = spawnFn(process.execPath, [serverPath], {
@@ -235,7 +257,4 @@ export function checkHub({
   return { ok: false, state: "unreachable", restart: "timeout" };
 }
 
-export {
-  DEFAULT_PKG_ROOT,
-  DEFAULT_STATUS_URL,
-};
+export { DEFAULT_PKG_ROOT, DEFAULT_STATUS_URL };

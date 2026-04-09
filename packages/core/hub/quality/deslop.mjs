@@ -3,57 +3,59 @@
  * AI 생성 코드에서 불필요한 요소를 자동 탐지/제거하는 정적 분석 모듈
  */
 
-import { readdir, readFile, writeFile, stat } from 'node:fs/promises';
-import { join, } from 'node:path';
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 /** @type {ReadonlyArray<{type: string, pattern: RegExp, severity: string, autoFixable: boolean, multiline: boolean}>} */
 export const SLOP_PATTERNS = Object.freeze([
   {
-    type: 'trivial_comment',
+    type: "trivial_comment",
     pattern: /^\s*\/\/\s*(import|define|set|get|return|export)\s/i,
-    severity: 'low',
+    severity: "low",
     autoFixable: true,
     multiline: false,
   },
   {
-    type: 'empty_catch',
+    type: "empty_catch",
     pattern: /catch\s*\([^)]*\)\s*\{\s*\}/,
-    severity: 'med',
+    severity: "med",
     autoFixable: false,
     multiline: true,
   },
   {
-    type: 'console_debug',
+    type: "console_debug",
     pattern: /^\s*console\.(log|debug|info)\(/,
-    severity: 'low',
+    severity: "low",
     autoFixable: true,
     multiline: false,
   },
   {
-    type: 'useless_jsdoc',
+    type: "useless_jsdoc",
     pattern: /\/\*\*\s*\n\s*\*\s*\n\s*\*\//,
-    severity: 'low',
+    severity: "low",
     autoFixable: true,
     multiline: true,
   },
   {
-    type: 'rethrow_only',
+    type: "rethrow_only",
     pattern: /catch\s*\((\w+)\)\s*\{\s*throw\s+\1\s*;?\s*\}/,
-    severity: 'med',
+    severity: "med",
     autoFixable: false,
     multiline: true,
   },
   {
-    type: 'redundant_type',
-    pattern: /:\s*(string|number|boolean)\s*=\s*('[^']*'|"[^"]*"|\d+|true|false)/,
-    severity: 'low',
+    type: "redundant_type",
+    pattern:
+      /:\s*(string|number|boolean)\s*=\s*('[^']*'|"[^"]*"|\d+|true|false)/,
+    severity: "low",
     autoFixable: false,
     multiline: false,
   },
   {
-    type: 'commented_code',
-    pattern: /^\s*\/\/\s*(const |let |var |function |class |if\s*\(|for\s*\(|while\s*\(|return |await )/,
-    severity: 'low',
+    type: "commented_code",
+    pattern:
+      /^\s*\/\/\s*(const |let |var |function |class |if\s*\(|for\s*\(|while\s*\(|return |await )/,
+    severity: "low",
     autoFixable: true,
     multiline: false,
   },
@@ -67,8 +69,8 @@ const SEVERITY_WEIGHT = { low: 2, med: 5 };
  * @param {string} [filePath] - 파일 경로 (보고용)
  * @returns {{ issues: Array<{line: number, type: string, severity: string, suggestion: string, text: string, autoFixable: boolean}>, score: number }}
  */
-export function detectSlop(content, filePath = '') {
-  const lines = content.split('\n');
+export function detectSlop(content, filePath = "") {
+  const lines = content.split("\n");
   const issues = [];
 
   for (const sp of SLOP_PATTERNS) {
@@ -90,16 +92,19 @@ export function detectSlop(content, filePath = '') {
 
   for (const sp of SLOP_PATTERNS) {
     if (!sp.multiline) continue;
-    const regex = new RegExp(sp.pattern.source, sp.pattern.flags.replace('g', '') + 'g');
+    const regex = new RegExp(
+      sp.pattern.source,
+      sp.pattern.flags.replace("g", "") + "g",
+    );
     let match;
     while ((match = regex.exec(content)) !== null) {
-      const line = content.substring(0, match.index).split('\n').length;
+      const line = content.substring(0, match.index).split("\n").length;
       issues.push({
         line,
         type: sp.type,
         severity: sp.severity,
         suggestion: `${sp.type} 패턴 감지`,
-        text: match[0].split('\n')[0].trim(),
+        text: match[0].split("\n")[0].trim(),
         autoFixable: sp.autoFixable,
         file: filePath,
       });
@@ -108,7 +113,10 @@ export function detectSlop(content, filePath = '') {
 
   issues.sort((a, b) => a.line - b.line);
 
-  const totalPenalty = issues.reduce((sum, i) => sum + (SEVERITY_WEIGHT[i.severity] || 2), 0);
+  const totalPenalty = issues.reduce(
+    (sum, i) => sum + (SEVERITY_WEIGHT[i.severity] || 2),
+    0,
+  );
   const score = Math.max(0, 100 - totalPenalty);
 
   return { issues, score };
@@ -121,9 +129,10 @@ export function detectSlop(content, filePath = '') {
  * @returns {{ fixed: string, applied: number, skipped: number }}
  */
 export function autoFixSlop(content, issues) {
-  if (!issues || issues.length === 0) return { fixed: content, applied: 0, skipped: 0 };
+  if (!issues || issues.length === 0)
+    return { fixed: content, applied: 0, skipped: 0 };
 
-  const fixable = issues.filter(i => i.autoFixable);
+  const fixable = issues.filter((i) => i.autoFixable);
   const skipped = issues.length - fixable.length;
 
   if (fixable.length === 0) return { fixed: content, applied: 0, skipped };
@@ -132,10 +141,10 @@ export function autoFixSlop(content, issues) {
   let applied = 0;
 
   // Multi-line: useless_jsdoc 제거
-  if (fixable.some(i => i.type === 'useless_jsdoc')) {
+  if (fixable.some((i) => i.type === "useless_jsdoc")) {
     const matches = fixed.match(/\/\*\*\s*\n\s*\*\s*\n\s*\*\/\n?/g);
     if (matches) {
-      fixed = fixed.replace(/\/\*\*\s*\n\s*\*\s*\n\s*\*\/\n?/g, '');
+      fixed = fixed.replace(/\/\*\*\s*\n\s*\*\s*\n\s*\*\/\n?/g, "");
       applied += matches.length;
     }
   }
@@ -143,13 +152,15 @@ export function autoFixSlop(content, issues) {
   // Line-level: trivial_comment, console_debug, commented_code 제거
   const lineTypes = new Set(
     fixable
-      .filter(i => ['trivial_comment', 'console_debug', 'commented_code'].includes(i.type))
-      .map(i => i.type),
+      .filter((i) =>
+        ["trivial_comment", "console_debug", "commented_code"].includes(i.type),
+      )
+      .map((i) => i.type),
   );
 
   if (lineTypes.size > 0) {
-    const linePatterns = SLOP_PATTERNS.filter(p => lineTypes.has(p.type));
-    const lines = fixed.split('\n');
+    const linePatterns = SLOP_PATTERNS.filter((p) => lineTypes.has(p.type));
+    const lines = fixed.split("\n");
     const result = [];
     for (const line of lines) {
       let remove = false;
@@ -162,23 +173,23 @@ export function autoFixSlop(content, issues) {
       }
       if (!remove) result.push(line);
     }
-    fixed = result.join('\n');
+    fixed = result.join("\n");
   }
 
   return { fixed, applied, skipped };
 }
 
 function matchesGlob(filePath, pattern) {
-  const normalized = '/' + filePath.replace(/\\/g, '/');
+  const normalized = "/" + filePath.replace(/\\/g, "/");
 
   // **/*.ext → 확장자 매칭
-  if (pattern.startsWith('**/*.')) {
+  if (pattern.startsWith("**/*.")) {
     const ext = pattern.slice(4);
     return normalized.endsWith(ext);
   }
 
   // *.ext → 확장자 매칭 (디렉토리 무관)
-  if (pattern.startsWith('*.') && !pattern.includes('/')) {
+  if (pattern.startsWith("*.") && !pattern.includes("/")) {
     const ext = pattern.slice(1);
     return normalized.endsWith(ext);
   }
@@ -186,7 +197,7 @@ function matchesGlob(filePath, pattern) {
   // **/dir/** → 디렉토리 포함 여부
   const dirMatch = pattern.match(/^\*\*\/([^*]+)\/\*\*$/);
   if (dirMatch) {
-    return normalized.includes('/' + dirMatch[1] + '/');
+    return normalized.includes("/" + dirMatch[1] + "/");
   }
 
   return false;
@@ -203,8 +214,8 @@ function matchesGlob(filePath, pattern) {
  */
 export async function scanDirectory(dirPath, opts = {}) {
   const {
-    include = ['**/*.mjs', '**/*.js', '**/*.ts'],
-    exclude = ['**/node_modules/**', '**/dist/**', '**/.git/**'],
+    include = ["**/*.mjs", "**/*.js", "**/*.ts"],
+    exclude = ["**/node_modules/**", "**/dist/**", "**/.git/**"],
     autoFix = false,
   } = opts;
 
@@ -212,32 +223,37 @@ export async function scanDirectory(dirPath, opts = {}) {
   const files = [];
 
   for (const entry of entries) {
-    const normalized = entry.replace(/\\/g, '/');
+    const normalized = entry.replace(/\\/g, "/");
     const fullPath = join(dirPath, entry);
 
     let st;
-    try { st = await stat(fullPath); } catch { continue; }
+    try {
+      st = await stat(fullPath);
+    } catch {
+      continue;
+    }
     if (!st.isFile()) continue;
 
-    const included = include.some(p => matchesGlob(normalized, p));
-    const excluded = exclude.some(p => matchesGlob(normalized, p));
+    const included = include.some((p) => matchesGlob(normalized, p));
+    const excluded = exclude.some((p) => matchesGlob(normalized, p));
     if (!included || excluded) continue;
 
-    const fileContent = await readFile(fullPath, 'utf-8');
+    const fileContent = await readFile(fullPath, "utf-8");
     const { issues, score } = detectSlop(fileContent, normalized);
 
     if (autoFix && issues.length > 0) {
       const { fixed, applied } = autoFixSlop(fileContent, issues);
-      if (applied > 0) await writeFile(fullPath, fixed, 'utf-8');
+      if (applied > 0) await writeFile(fullPath, fixed, "utf-8");
     }
 
     files.push({ path: normalized, issues, score });
   }
 
   const totalIssues = files.reduce((sum, f) => sum + f.issues.length, 0);
-  const avgScore = files.length > 0
-    ? Math.round(files.reduce((sum, f) => sum + f.score, 0) / files.length)
-    : 100;
+  const avgScore =
+    files.length > 0
+      ? Math.round(files.reduce((sum, f) => sum + f.score, 0) / files.length)
+      : 100;
 
   const byType = {};
   for (const f of files) {
@@ -248,6 +264,11 @@ export async function scanDirectory(dirPath, opts = {}) {
 
   return {
     files,
-    summary: { totalFiles: files.length, totalIssues, averageScore: avgScore, byType },
+    summary: {
+      totalFiles: files.length,
+      totalIssues,
+      averageScore: avgScore,
+      byType,
+    },
   };
 }

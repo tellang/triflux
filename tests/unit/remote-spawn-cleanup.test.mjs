@@ -1,12 +1,12 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import {
-  buildSpawnCleanupWatcherArgs,
   buildLocalClaudeCommand,
   buildPosixExitTail,
   buildPwshExitTail,
   buildRemoteBootstrapCommand,
   buildRemoteClaudeCommand,
+  buildSpawnCleanupWatcherArgs,
   resolveCleanupWatcherTimingOptions,
 } from "../../scripts/remote-spawn.mjs";
 
@@ -28,7 +28,10 @@ describe("remote-spawn normal-exit cleanup command builders", () => {
   });
 
   it("buildLocalClaudeCommand wraps in try/finally for Ctrl+C safety", () => {
-    const command = buildLocalClaudeCommand("C:/Users/O'Neil/claude.exe", "--dangerously-skip-permissions");
+    const command = buildLocalClaudeCommand(
+      "C:/Users/O'Neil/claude.exe",
+      "--dangerously-skip-permissions",
+    );
     assert.match(command, /try\s*\{/);
     assert.match(command, /& 'C:\/Users\/O''Neil\/claude\.exe'/);
     assert.match(command, /--dangerously-skip-permissions/);
@@ -74,11 +77,15 @@ describe("remote-spawn normal-exit cleanup command builders", () => {
   });
 
   it("buildSpawnCleanupWatcherArgs creates deterministic watcher argv", () => {
-    const argv = buildSpawnCleanupWatcherArgs("tfx-spawn-abcd1234", "tfx-spawn-abcd1234:0.0", {
-      graceMs: 2000,
-      pollMs: 300,
-      maxMs: 9000,
-    });
+    const argv = buildSpawnCleanupWatcherArgs(
+      "tfx-spawn-abcd1234",
+      "tfx-spawn-abcd1234:0.0",
+      {
+        graceMs: 2000,
+        pollMs: 300,
+        maxMs: 9000,
+      },
+    );
     assert.ok(argv.length >= 11);
     assert.equal(argv[1], "--watch-cleanup");
     assert.equal(argv[2], "tfx-spawn-abcd1234");

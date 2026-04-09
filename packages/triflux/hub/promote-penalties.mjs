@@ -9,7 +9,7 @@
 //   - Hub 시작 시 (server.mjs에서 import)
 //   - 수동: node hub/promote-penalties.mjs
 
-import { readFileSync, writeFileSync, existsSync, } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { adaptiveRuleFromError, promoteRule } from "./reflexion.mjs";
 
@@ -24,14 +24,24 @@ function loadPenalties() {
       .split("\n")
       .filter(Boolean)
       .map((line) => {
-        try { return JSON.parse(line); } catch { return null; }
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
       })
       .filter(Boolean);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 function clearPenalties() {
-  try { writeFileSync(PENALTY_FILE, "", "utf8"); } catch { /* ignore */ }
+  try {
+    writeFileSync(PENALTY_FILE, "", "utf8");
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -70,7 +80,10 @@ export function promotePenalties(store, options = {}) {
 
     try {
       if (store.addAdaptiveRule) {
-        const existing = store.findAdaptiveRule?.(projectSlug, rule.error_pattern);
+        const existing = store.findAdaptiveRule?.(
+          projectSlug,
+          rule.error_pattern,
+        );
         if (existing) {
           // 기존 규칙 → confidence 승격
           promoteRule(store, projectSlug, rule.error_pattern);
@@ -81,7 +94,10 @@ export function promotePenalties(store, options = {}) {
             pattern: rule.error_pattern,
             error_message: rule.error_message,
             solution: rule.solution,
-            context: typeof rule.context === "string" ? rule.context : JSON.stringify(rule.context),
+            context:
+              typeof rule.context === "string"
+                ? rule.context
+                : JSON.stringify(rule.context),
             confidence: rule.confidence,
             hit_count: rule.hit_count,
             last_seen_ms: Date.now(),
@@ -109,7 +125,9 @@ export function dryRun() {
   const penalties = loadPenalties();
   console.log(`[promote-penalties] ${penalties.length} pending penalties`);
   for (const p of penalties) {
-    console.log(`  ${p.ts?.slice(0, 19)} [${p.source}] ${p.error_pattern?.slice(0, 80)}`);
+    console.log(
+      `  ${p.ts?.slice(0, 19)} [${p.source}] ${p.error_pattern?.slice(0, 80)}`,
+    );
   }
   return penalties;
 }

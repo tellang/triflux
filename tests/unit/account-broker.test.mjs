@@ -189,8 +189,16 @@ describe("AccountBroker", () => {
 
     const snap = broker.snapshot();
     const acct = snap.find((a) => a.id === "codex-a");
-    assert.equal(acct.failureTimestamps.length, 0, "circuit should reset on ok release");
-    assert.equal(acct.circuitState, "closed", "circuit should be closed after ok release");
+    assert.equal(
+      acct.failureTimestamps.length,
+      0,
+      "circuit should reset on ok release",
+    );
+    assert.equal(
+      acct.circuitState,
+      "closed",
+      "circuit should be closed after ok release",
+    );
   });
 
   it("returns null for unknown provider", () => {
@@ -452,15 +460,25 @@ describe("AccountBroker", () => {
       const snapBusy = broker.snapshot();
       const busy = snapBusy.find((a) => a.id === "codex-a");
       assert.equal(busy.busy, true, "account should be busy while leased");
-      assert.ok(busy.remainingMs > 0, "remainingMs should be positive while leased");
+      assert.ok(
+        busy.remainingMs > 0,
+        "remainingMs should be positive while leased",
+      );
 
       // advance time past 30-min TTL (31 minutes)
       Date.now = () => 31 * 60 * 1000;
 
       // next lease() triggers pruneExpiredLeases, so the expired lease is freed
       const lease2 = broker.lease({ provider: "codex" });
-      assert.ok(lease2, "should re-lease after TTL expiry prunes the old lease");
-      assert.equal(lease2.id, "codex-a", "same account should be available again");
+      assert.ok(
+        lease2,
+        "should re-lease after TTL expiry prunes the old lease",
+      );
+      assert.equal(
+        lease2.id,
+        "codex-a",
+        "same account should be available again",
+      );
     } finally {
       Date.now = realNow;
     }
@@ -473,7 +491,11 @@ describe("AccountBroker", () => {
     broker.release("codex-a", { ok: false });
 
     const acct = broker.snapshot().find((a) => a.id === "codex-a");
-    assert.equal(acct.failureTimestamps.length, 0, "failureTimestamps should remain empty");
+    assert.equal(
+      acct.failureTimestamps.length,
+      0,
+      "failureTimestamps should remain empty",
+    );
     assert.equal(acct.busy, false, "account should remain idle");
     assert.equal(acct.cooldownUntil, 0, "cooldownUntil should remain 0");
   });
@@ -488,7 +510,10 @@ describe("AccountBroker", () => {
 
     // existing accounts should be unaffected
     const snap = broker.snapshot();
-    assert.ok(snap.every((a) => a.cooldownUntil === 0), "no account should be in cooldown");
+    assert.ok(
+      snap.every((a) => a.cooldownUntil === 0),
+      "no account should be in cooldown",
+    );
   });
 
   it("nextAvailableEta() returns null for empty/unknown provider", () => {
@@ -513,12 +538,23 @@ describe("AccountBroker", () => {
     // verify circuit is open via snapshot
     const snap = broker.snapshot();
     const acct = snap.find((a) => a.id === "codex-a");
-    assert.equal(acct.circuitState, "open", "circuit should be open after 3 failures");
-    assert.ok(acct.failureTimestamps.length >= 3, "should have at least 3 failure timestamps");
+    assert.equal(
+      acct.circuitState,
+      "open",
+      "circuit should be open after 3 failures",
+    );
+    assert.ok(
+      acct.failureTimestamps.length >= 3,
+      "should have at least 3 failure timestamps",
+    );
 
     // lease should now return null since the only account has an open circuit
     const blocked = broker.lease({ provider: "codex" });
-    assert.equal(blocked, null, "lease should return null when circuit is open");
+    assert.equal(
+      blocked,
+      null,
+      "lease should return null when circuit is open",
+    );
   });
 
   it("circuit resets to closed after successful release", () => {
@@ -551,15 +587,27 @@ describe("AccountBroker", () => {
       // lease in half-open state (trial)
       const trialLease = broker.lease({ provider: "codex" });
       assert.ok(trialLease, "half-open trial lease should succeed");
-      assert.equal(trialLease.halfOpen, true, "lease should indicate half-open trial");
+      assert.equal(
+        trialLease.halfOpen,
+        true,
+        "lease should indicate half-open trial",
+      );
 
       // release with ok=true to close the circuit
       broker.release(trialLease.id, { ok: true });
 
       snap = broker.snapshot();
       acct = snap.find((a) => a.id === "codex-a");
-      assert.equal(acct.circuitState, "closed", "circuit should be closed after successful release");
-      assert.equal(acct.failureTimestamps.length, 0, "failureTimestamps should be reset");
+      assert.equal(
+        acct.circuitState,
+        "closed",
+        "circuit should be closed after successful release",
+      );
+      assert.equal(
+        acct.failureTimestamps.length,
+        0,
+        "failureTimestamps should be reset",
+      );
     } finally {
       Date.now = realNow;
     }
@@ -604,7 +652,11 @@ describe("AccountBroker", () => {
     assert.equal(typeof leaseEvents[0].halfOpen, "boolean");
 
     broker.release(lease.id, { ok: true });
-    assert.equal(releaseEvents.length, 1, "should emit exactly one release event");
+    assert.equal(
+      releaseEvents.length,
+      1,
+      "should emit exactly one release event",
+    );
     assert.equal(releaseEvents[0].id, "codex-a");
     assert.equal(releaseEvents[0].ok, true);
   });
@@ -631,7 +683,11 @@ describe("AccountBroker", () => {
       // confirm circuit is open
       let snap = broker.snapshot();
       let acct = snap.find((a) => a.id === "codex-a");
-      assert.equal(acct.circuitState, "open", "circuit should be open after 3 failures");
+      assert.equal(
+        acct.circuitState,
+        "open",
+        "circuit should be open after 3 failures",
+      );
 
       // advance past the 10-minute circuit window so it transitions to half-open
       now += 10 * 60_000 + 1;
@@ -639,14 +695,22 @@ describe("AccountBroker", () => {
       // lease in half-open state (trial)
       const trialLease = broker.lease({ provider: "codex" });
       assert.ok(trialLease, "half-open trial lease should succeed");
-      assert.equal(trialLease.halfOpen, true, "lease should indicate half-open trial");
+      assert.equal(
+        trialLease.halfOpen,
+        true,
+        "lease should indicate half-open trial",
+      );
 
       // release with ok=false → circuit should re-open
       broker.release(trialLease.id, { ok: false });
 
       snap = broker.snapshot();
       acct = snap.find((a) => a.id === "codex-a");
-      assert.equal(acct.circuitState, "open", "circuit should re-open after half-open trial failure");
+      assert.equal(
+        acct.circuitState,
+        "open",
+        "circuit should re-open after half-open trial failure",
+      );
     } finally {
       Date.now = realNow;
     }
@@ -682,7 +746,11 @@ describe("AccountBroker", () => {
       // verify: only the recent failure remains; old 2 decayed out of window
       const snap = broker.snapshot();
       const acct = snap.find((a) => a.id === "codex-a");
-      assert.equal(acct.failureTimestamps.length, 1, "old failures should have decayed, leaving only 1");
+      assert.equal(
+        acct.failureTimestamps.length,
+        1,
+        "old failures should have decayed, leaving only 1",
+      );
     } finally {
       Date.now = realNow;
     }

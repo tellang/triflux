@@ -28,8 +28,10 @@ export function nowSec() {
 }
 
 export function resolveBaseDir(payload) {
-  if (typeof payload?.cwd === "string" && payload.cwd.trim()) return payload.cwd;
-  if (typeof payload?.directory === "string" && payload.directory.trim()) return payload.directory;
+  if (typeof payload?.cwd === "string" && payload.cwd.trim())
+    return payload.cwd;
+  if (typeof payload?.directory === "string" && payload.directory.trim())
+    return payload.directory;
   return process.cwd();
 }
 
@@ -38,7 +40,8 @@ export function shouldTrackPath(filePath) {
 
   const lower = filePath.toLowerCase();
   if (lower.startsWith(".omc/") || lower.startsWith(".claude/")) return false;
-  if (lower === "package-lock.json" || lower.endsWith("/package-lock.json")) return false;
+  if (lower === "package-lock.json" || lower.endsWith("/package-lock.json"))
+    return false;
   if (/\.(md|lock|yml|yaml)$/i.test(lower)) return false;
   return true;
 }

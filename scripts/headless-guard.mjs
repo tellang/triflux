@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /**
  * headless-guard.mjs — PreToolUse 훅 (상시 활성 auto-route)
  *
@@ -24,11 +25,11 @@
  * 성능: psmux 감지 결과를 5분간 캐시 ($TMPDIR/tfx-psmux-check.json)
  */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { nudge, deny } from "./lib/hook-utils.mjs";
+import { deny, nudge } from "./lib/hook-utils.mjs";
 import { probePsmuxSupport } from "./lib/psmux-info.mjs";
 
 const CACHE_FILE = join(tmpdir(), "tfx-psmux-check.json");
@@ -37,8 +38,8 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5분
 // ── tfx-multi 상태 관리 (A+B) ──
 const MULTI_STATE_FILE = join(tmpdir(), "tfx-multi-state.json");
 const MULTI_EXPIRE_MS = 30 * 60 * 1000; // 30분 자동 만료
-const GATE_THRESHOLD = 2;   // A: dispatch 전 허용할 Agent 호출 수
-const NUDGE_THRESHOLD = 4;  // B: dispatch 후 nudge 트리거 횟수
+const GATE_THRESHOLD = 2; // A: dispatch 전 허용할 Agent 호출 수
+const NUDGE_THRESHOLD = 4; // B: dispatch 후 nudge 트리거 횟수
 
 function readMultiState() {
   try {
@@ -47,17 +48,25 @@ function readMultiState() {
     if (!state.active) return null;
     // 자동 만료
     if (Date.now() - state.activatedAt > MULTI_EXPIRE_MS) {
-      try { unlinkSync(MULTI_STATE_FILE); } catch { /* ignore */ }
+      try {
+        unlinkSync(MULTI_STATE_FILE);
+      } catch {
+        /* ignore */
+      }
       return null;
     }
     return state;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function writeMultiState(state) {
   try {
     writeFileSync(MULTI_STATE_FILE, JSON.stringify(state));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function isPsmuxInstalled() {
@@ -69,15 +78,27 @@ function isPsmuxInstalled() {
       if (age >= 0 && age < CACHE_TTL_MS) return cache.ok;
       // age < 0 → 미래 ts (오염) → 캐시 무시하고 재검사
     }
-  } catch { /* cache miss */ }
+  } catch {
+    /* cache miss */
+  }
 
   const probe = probePsmuxSupport({ execFileSyncFn: execFileSync });
   const ok = probe.ok;
 
   // 캐시 저장
   try {
-    writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), ok, version: probe.version, missingCommands: probe.missingCommands }));
-  } catch { /* ignore */ }
+    writeFileSync(
+      CACHE_FILE,
+      JSON.stringify({
+        ts: Date.now(),
+        ok,
+        version: probe.version,
+        missingCommands: probe.missingCommands,
+      }),
+    );
+  } catch {
+    /* ignore */
+  }
 
   return ok;
 }
@@ -116,7 +137,7 @@ function parseRouteCommand(cmd) {
   // v3: 원본 명령에서 추가 플래그 추출
   const flags = {};
   const afterPrompt = cmd.replace(/'.+?'/gs, "").replace(/".+?"/gs, "");
-  const timeoutMatch = afterPrompt.match(/(?:^|\s)(\d{2,4})(?:\s|$)/);  // 4번째 인자 (timeout)
+  const timeoutMatch = afterPrompt.match(/(?:^|\s)(\d{2,4})(?:\s|$)/); // 4번째 인자 (timeout)
   if (timeoutMatch) flags.timeout = parseInt(timeoutMatch[1], 10);
 
   // 환경변수 기반 글로벌 플래그
@@ -127,18 +148,20 @@ function parseRouteCommand(cmd) {
 }
 
 function autoRoute(updatedCommand, reason) {
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      updatedInput: { command: updatedCommand },
-      additionalContext: reason,
-    },
-  }));
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        updatedInput: { command: updatedCommand },
+        additionalContext: reason,
+      },
+    }),
+  );
   process.exit(0);
 }
 
 const HEADLESS_FALLBACK_COMMAND =
-  'Bash("tfx multi --teammate-mode headless --assign \'codex:prompt:role\' ...")';
+  "Bash(\"tfx multi --teammate-mode headless --assign 'codex:prompt:role' ...\")";
 const DIRECT_CLI_BYPASS_HINT =
   "로컬 디버깅이 목적이면 TFX_ALLOW_DIRECT_CLI=1로 일시 우회할 수 있습니다.";
 
@@ -153,7 +176,7 @@ async function main() {
   for await (const chunk of process.stdin) raw += chunk;
 
   if (!raw?.trim()) {
-    console.error('[headless-guard] stdin이 비어있습니다 — 기본 허용');
+    console.error("[headless-guard] stdin이 비어있습니다 — 기본 허용");
     process.exit(0);
   }
 
@@ -192,8 +215,8 @@ async function main() {
       if (/\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)) {
         deny(
           "[headless-guard] psmux send-keys/split-window에 codex/gemini 직접 호출이 포함되어 있습니다. " +
-          `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
-          DIRECT_CLI_BYPASS_HINT,
+            `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+            DIRECT_CLI_BYPASS_HINT,
         );
       }
       process.exit(0);
@@ -205,7 +228,7 @@ async function main() {
     // #37 Bug4: gh/git 명령은 본문에 codex/gemini 문자열이 있어도 차단하지 않음
     const SAFE_CMD_RE = /^\s*(?:[\w_]+=\S+\s+)*\s*(gh|git)\b/;
     const cmdParts = cmd.split(/\s*(?:&&|\|\||\||;)\s*/);
-    let hasDirectCli = cmdParts.some(part => {
+    let hasDirectCli = cmdParts.some((part) => {
       // gh/git 세그먼트는 건너뜀 (이슈 본문/커밋 메시지 내 codex/gemini 언급은 정상)
       if (SAFE_CMD_RE.test(part)) return false;
       // 1단계: env var prefix 제거 (FOO=bar ...)
@@ -214,24 +237,31 @@ async function main() {
         .replace(/^\s*(?:[\w_]+=\S+\s+)*/, "")
         .replace(/^\s*(?:env|command|nohup)\s+/, "")
         .replace(/^\s*timeout\s+\d+\s+/, "")
-        .replace(/^\s*(?:bash|sh)\s+(?:-\w+\s+)*(?:"([^"]*)".*|'([^']*)'.*)/i, "$1$2")
+        .replace(
+          /^\s*(?:bash|sh)\s+(?:-\w+\s+)*(?:"([^"]*)".*|'([^']*)'.*)/i,
+          "$1$2",
+        )
         .replace(/^\s*(?:\/[\w./+-]+\/)(codex|gemini)\b/, " $1");
-      return /^\s*codex\b.*\bexec\b/i.test(stripped) || /^\s*gemini\s+(-p|--prompt)\b/i.test(stripped);
+      return (
+        /^\s*codex\b.*\bexec\b/i.test(stripped) ||
+        /^\s*gemini\s+(-p|--prompt)\b/i.test(stripped)
+      );
     });
     // 2차 휴리스틱: 1차 세그먼트 검사를 통과한 간접 실행 패턴 탐지
     // full AST 파서 대신 현실적 위협 벡터만 커버 — eval, subshell, variable 확장
     // 2차 휴리스틱: 간접 실행 패턴 탐지 (eval, subshell, variable 확장)
     if (!hasDirectCli) {
-      const isAllSafeCmd = cmdParts.every(p => SAFE_CMD_RE.test(p));
+      const isAllSafeCmd = cmdParts.every((p) => SAFE_CMD_RE.test(p));
       if (isAllSafeCmd) {
         // gh/git 전용: $(codex exec ...) 직접 명령 치환만 차단
         // $(cat <<'EOF'\n...codex exec text...\nEOF) 같은 heredoc 텍스트는 허용
-        hasDirectCli = /\$\(\s*(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd);
-      } else {
-        hasDirectCli = (
-          /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd) ||
-          /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)
+        hasDirectCli = /\$\(\s*(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
+          cmd,
         );
+      } else {
+        hasDirectCli =
+          /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd) ||
+          /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd);
       }
     }
 
@@ -242,15 +272,17 @@ async function main() {
       }
       deny(
         "[headless-guard] codex/gemini 직접 호출(파이프/복합 명령 포함)은 headless-guard에서 차단됩니다. " +
-        `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
-        DIRECT_CLI_BYPASS_HINT,
+          `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+          DIRECT_CLI_BYPASS_HINT,
       );
     }
 
     // tfx-route.sh 실행만 감지: 명령이 bash로 시작할 때만 (커밋 메시지/echo 등 무시)
     if (/^\s*bash\s+.*tfx-route\.sh\s/.test(cmd)) {
       // --async, --job-status, --job-result, --job-wait는 tfx-route.sh 내부 플래그 → 통과
-      if (/tfx-route\.sh\s+--(async|job-status|job-result|job-wait)\b/.test(cmd)) {
+      if (
+        /tfx-route\.sh\s+--(async|job-status|job-result|job-wait)\b/.test(cmd)
+      ) {
         process.exit(0);
       }
 
@@ -261,7 +293,7 @@ async function main() {
         if (!process.env.TFX_FORCE_HEADLESS) {
           const isMultiWorker = /\s--(multi|parallel)\b/.test(cmd);
           if (!isMultiWorker) {
-            process.exit(0);  // 원본 tfx-route.sh 명령 그대로 통과
+            process.exit(0); // 원본 tfx-route.sh 명령 그대로 통과
           }
         }
 
@@ -272,10 +304,11 @@ async function main() {
         // v3: 플래그 빌더 — 하드코딩 제거, 원본 의도 보존
         const parts = ["tfx multi --teammate-mode headless"];
         if (!f.noAutoAttach) parts.push("--auto-attach");
-        if (!f.noAutoAttach) parts.push("--dashboard");  // 워커 요약 스플릿이 기본
+        if (!f.noAutoAttach) parts.push("--dashboard"); // 워커 요약 스플릿이 기본
         if (f.verbose) parts.push("--verbose");
         parts.push(`--assign '${parsed.agent}:${safePrompt}:${parsed.agent}'`);
-        if (parsed.mcp && VALID_MCP.has(parsed.mcp)) parts.push(`--mcp-profile ${parsed.mcp}`);
+        if (parsed.mcp && VALID_MCP.has(parsed.mcp))
+          parts.push(`--mcp-profile ${parsed.mcp}`);
         parts.push(`--timeout ${f.timeout || 600}`);
 
         const builtCmd = parts.join(" ");
@@ -286,7 +319,7 @@ async function main() {
       }
       deny(
         "[headless-guard] tfx-route.sh를 headless로 변환 실패. " +
-        'Bash("tfx multi --teammate-mode headless --assign \'cli:prompt:role\' ...") 형식을 사용하세요.',
+          "Bash(\"tfx multi --teammate-mode headless --assign 'cli:prompt:role' ...\") 형식을 사용하세요.",
       );
     }
   }
@@ -307,24 +340,27 @@ async function main() {
       if (multiState.nativeWorkCalls > GATE_THRESHOLD) {
         deny(
           `[headless-guard] tfx-multi gate: ${toolName} 호출 ${multiState.nativeWorkCalls}회 — headless dispatch 먼저 하세요.\n` +
-          'Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign \'codex:프롬프트:역할\' --timeout 600")',
+            "Bash(\"tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:프롬프트:역할' --timeout 600\")",
         );
       }
 
       nudge(
         `[headless-guard] tfx-multi 활성 (${multiState.nativeWorkCalls}/${GATE_THRESHOLD}). ` +
-        "headless dispatch 후 작업을 시작하세요.",
+          "headless dispatch 후 작업을 시작하세요.",
       );
     }
 
     // H3 fix: Agent gate와 동일하게 NUDGE_THRESHOLD 기반 주기적 nudge
-    multiState.nativeWorkCallsSinceDispatch = (multiState.nativeWorkCallsSinceDispatch || 0) + 1;
+    multiState.nativeWorkCallsSinceDispatch =
+      (multiState.nativeWorkCallsSinceDispatch || 0) + 1;
     writeMultiState(multiState);
 
     if (multiState.nativeWorkCallsSinceDispatch >= NUDGE_THRESHOLD) {
       multiState.nativeWorkCallsSinceDispatch = 0;
       writeMultiState(multiState);
-      nudge("[headless-guard] nudge: headless 워커가 코드 수정 중. 직접 수정은 충돌 위험.");
+      nudge(
+        "[headless-guard] nudge: headless 워커가 코드 수정 중. 직접 수정은 충돌 위험.",
+      );
     }
     process.exit(0); // threshold 미만이면 조용히 통과
   }
@@ -333,7 +369,8 @@ async function main() {
   if (toolName === "Agent") {
     const subType = (toolInput.subagent_type || "").toLowerCase();
     const NATIVE_TYPES = new Set(["explore", "plan", "general-purpose", ""]);
-    const isNative = NATIVE_TYPES.has(subType) || subType.startsWith("oh-my-claudecode:");
+    const isNative =
+      NATIVE_TYPES.has(subType) || subType.startsWith("oh-my-claudecode:");
 
     // ── A+B: tfx-multi 상태 기반 처리 ──
     const multiState = readMultiState();
@@ -346,17 +383,18 @@ async function main() {
         if (multiState.nativeWorkCalls > GATE_THRESHOLD) {
           deny(
             `[headless-guard] tfx-multi gate: Agent(${subType || "default"}) 호출 ${multiState.nativeWorkCalls}회 — headless에 먼저 dispatch하세요.\n` +
-            'Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign \'codex:프롬프트:역할\' --timeout 600")',
+              "Bash(\"tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:프롬프트:역할' --timeout 600\")",
           );
         }
         // 허용 범위 내 → 경고 + 통과
         nudge(
           `[headless-guard] tfx-multi 활성 (${multiState.nativeWorkCalls}/${GATE_THRESHOLD}). ` +
-          "headless dispatch 후 작업을 시작하세요.",
+            "headless dispatch 후 작업을 시작하세요.",
         );
       } else {
         // ── B: nudge — dispatch 후, 네이티브 드리프트 감지 ──
-        multiState.nativeWorkCallsSinceDispatch = (multiState.nativeWorkCallsSinceDispatch || 0) + 1;
+        multiState.nativeWorkCallsSinceDispatch =
+          (multiState.nativeWorkCallsSinceDispatch || 0) + 1;
         writeMultiState(multiState);
 
         if (multiState.nativeWorkCallsSinceDispatch >= NUDGE_THRESHOLD) {
@@ -364,7 +402,7 @@ async function main() {
           writeMultiState(multiState);
           nudge(
             "[headless-guard] nudge: headless 워커가 실행 중입니다. " +
-            "결과를 기다리거나 추가 --assign으로 위임하세요.",
+              "결과를 기다리거나 추가 --assign으로 위임하세요.",
           );
         }
       }
@@ -388,8 +426,8 @@ async function main() {
     if (cliPatterns.some((p) => p.test(combined))) {
       deny(
         "[headless-guard] Codex/Gemini를 Agent()로 래핑하지 마세요. " +
-        `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
-        DIRECT_CLI_BYPASS_HINT,
+          `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+          DIRECT_CLI_BYPASS_HINT,
       );
     }
   }

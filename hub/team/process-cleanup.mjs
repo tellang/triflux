@@ -13,10 +13,7 @@ const TARGET_PROCESS_NAMES = ["node", "python", "python3"];
 const SIGTERM_GRACE_MS = 5000;
 
 // cmdLine 패턴 기반 화이트리스트 (고아 후보에서 제외)
-const WHITELIST_CMDLINE = [
-  /oh-my-claudecode/i,
-  /triflux[\\/]hub[\\/]s/i,
-];
+const WHITELIST_CMDLINE = [/oh-my-claudecode/i, /triflux[\\/]hub[\\/]s/i];
 
 // 프로세스명 기반 화이트리스트
 const WHITELIST_NAMES = ["claude", "CCXProcess"];
@@ -44,15 +41,13 @@ async function queryWindowsProcesses(execFileFn) {
   const raw = JSON.parse(stdout.trim());
   const items = Array.isArray(raw) ? raw : [raw];
 
-  return items
-    .filter(Boolean)
-    .map((p) => ({
-      pid: Number(p.ProcessId),
-      name: String(p.Name || "").replace(/\.exe$/i, ""),
-      parentPid: Number(p.ParentProcessId) || 0,
-      cmdLine: String(p.CommandLine || ""),
-      ramMB: Math.round((Number(p.WorkingSetSize) || 0) / 1024 / 1024),
-    }));
+  return items.filter(Boolean).map((p) => ({
+    pid: Number(p.ProcessId),
+    name: String(p.Name || "").replace(/\.exe$/i, ""),
+    parentPid: Number(p.ParentProcessId) || 0,
+    cmdLine: String(p.CommandLine || ""),
+    ramMB: Math.round((Number(p.WorkingSetSize) || 0) / 1024 / 1024),
+  }));
 }
 
 /**
@@ -225,7 +220,11 @@ export async function findOrphanProcesses(opts = {}) {
     const nameLower = p.name.toLowerCase();
 
     // 대상 프로세스만
-    if (!TARGET_PROCESS_NAMES.some((t) => nameLower === t || nameLower === `${t}.exe`)) {
+    if (
+      !TARGET_PROCESS_NAMES.some(
+        (t) => nameLower === t || nameLower === `${t}.exe`,
+      )
+    ) {
       return false;
     }
 
@@ -299,7 +298,12 @@ export function createProcessCleanup(opts = {}) {
    */
   async function kill() {
     if (dryRun) {
-      return lastOrphans.map((p) => ({ pid: p.pid, name: p.name, killed: false, dryRun: true }));
+      return lastOrphans.map((p) => ({
+        pid: p.pid,
+        name: p.name,
+        killed: false,
+        dryRun: true,
+      }));
     }
 
     const results = await Promise.all(
@@ -322,7 +326,12 @@ export function createProcessCleanup(opts = {}) {
 
           return { pid: p.pid, name: p.name, killed: true };
         } catch (err) {
-          return { pid: p.pid, name: p.name, killed: false, error: String(err.message || err) };
+          return {
+            pid: p.pid,
+            name: p.name,
+            killed: false,
+            error: String(err.message || err),
+          };
         }
       }),
     );

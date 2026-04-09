@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { describe, it } from "node:test";
 
 function runGuard(command) {
   const input = JSON.stringify({ tool_name: "Bash", tool_input: { command } });
@@ -46,17 +46,25 @@ describe("safety-guard psmux rules", () => {
   });
 
   it("for 루프 안의 psmux kill-session 차단", () => {
-    assert.equal(runGuard('for s in a b c; do\n  psmux kill-session -t "$s"\ndone'), 2);
+    assert.equal(
+      runGuard('for s in a b c; do\n  psmux kill-session -t "$s"\ndone'),
+      2,
+    );
   });
 
   it("heredoc 본문 안의 텍스트는 통과", () => {
-    assert.equal(runGuard("cat <<'EOF'\npsmux kill-session is dangerous\nEOF"), 0);
+    assert.equal(
+      runGuard("cat <<'EOF'\npsmux kill-session is dangerous\nEOF"),
+      0,
+    );
   });
 
   it("git commit heredoc 본문 안의 텍스트는 통과", () => {
     assert.equal(
-      runGuard('git commit -m "$(cat <<\'EOF\'\nfix: psmux kill-session safety\nEOF\n)"'),
-      0
+      runGuard(
+        "git commit -m \"$(cat <<'EOF'\nfix: psmux kill-session safety\nEOF\n)\"",
+      ),
+      0,
     );
   });
 

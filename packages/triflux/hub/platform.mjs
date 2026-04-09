@@ -1,45 +1,45 @@
-import os from 'node:os';
-import path from 'node:path';
-import { execFile, execFileSync, execSync } from 'node:child_process';
+import { execFile, execFileSync, execSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 
-export const IS_WINDOWS = process.platform === 'win32';
-export const IS_MAC = process.platform === 'darwin';
-export const IS_LINUX = process.platform === 'linux';
-export const TEMP_DIR = IS_WINDOWS ? os.tmpdir() : '/tmp';
+export const IS_WINDOWS = process.platform === "win32";
+export const IS_MAC = process.platform === "darwin";
+export const IS_LINUX = process.platform === "linux";
+export const TEMP_DIR = IS_WINDOWS ? os.tmpdir() : "/tmp";
 export const PATH_SEP = path.sep;
 
 function getPathApi(platform) {
-  return platform === 'win32' ? path.win32 : path.posix;
+  return platform === "win32" ? path.win32 : path.posix;
 }
 
 function coercePathInput(value, platform) {
-  const text = String(value ?? '');
-  if (platform === 'win32') {
-    return text.replaceAll('/', '\\');
+  const text = String(value ?? "");
+  if (platform === "win32") {
+    return text.replaceAll("/", "\\");
   }
-  return text.replaceAll('\\', '/');
+  return text.replaceAll("\\", "/");
 }
 
 function sanitizePipeSegment(value) {
-  return String(value ?? '')
+  return String(value ?? "")
     .trim()
-    .replace(/[<>:"/\\|?*\u0000-\u001f]+/gu, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/gu, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function buildWhichCommandSpec(name, options = {}) {
-  const commandName = String(name ?? '').trim();
+  const commandName = String(name ?? "").trim();
   if (!commandName) return null;
 
   const platform = options.platform || process.platform;
   return {
-    lookupCommand: platform === 'win32' ? 'where' : 'which',
+    lookupCommand: platform === "win32" ? "where" : "which",
     args: [commandName],
     execOptions: {
-      encoding: 'utf8',
+      encoding: "utf8",
       timeout: options.timeout ?? 5000,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
       env: options.env || process.env,
       cwd: options.cwd,
@@ -48,10 +48,12 @@ function buildWhichCommandSpec(name, options = {}) {
 }
 
 function parseWhichCommandOutput(output) {
-  return String(output)
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .find(Boolean) || null;
+  return (
+    String(output)
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .find(Boolean) || null
+  );
 }
 
 function execFileAsync(command, args, options, execFileFn = execFile) {
@@ -69,7 +71,7 @@ function execFileAsync(command, args, options, execFileFn = execFile) {
 /**
  * 경로를 플랫폼에 맞게 정규화합니다.
  * Windows 환경에서는 역슬래시(\)를 슬래시(/)로 변환하여 반환합니다.
- * 
+ *
  * @param {string} value - 정규화할 경로 문자열
  * @param {object} [options] - 옵션
  * @param {string} [options.platform] - 대상 플랫폼 (기본값: process.platform)
@@ -80,8 +82,8 @@ export function normalizePath(value, options = {}) {
   const pathApi = getPathApi(platform);
   const normalized = pathApi.normalize(coercePathInput(value, platform));
 
-  if (platform === 'win32') {
-    return normalized.replaceAll('\\', '/');
+  if (platform === "win32") {
+    return normalized.replaceAll("\\", "/");
   }
   return normalized;
 }
@@ -89,7 +91,7 @@ export function normalizePath(value, options = {}) {
 /**
  * 시스템에서 실행 가능한 명령의 절대 경로를 찾습니다.
  * Windows에서는 'where', Unix 계열에서는 'which' 명령을 사용합니다.
- * 
+ *
  * @param {string} name - 찾을 명령어 이름
  * @param {object} [options] - 옵션
  * @param {string} [options.platform] - 대상 플랫폼
@@ -103,7 +105,11 @@ export function whichCommand(name, options = {}) {
   if (!spec) return null;
 
   try {
-    const output = execFileSync(spec.lookupCommand, spec.args, spec.execOptions);
+    const output = execFileSync(
+      spec.lookupCommand,
+      spec.args,
+      spec.execOptions,
+    );
     return parseWhichCommandOutput(output);
   } catch {
     return null;
@@ -130,7 +136,7 @@ export async function whichCommandAsync(name, options = {}) {
 /**
  * 프로세스를 종료합니다.
  * Windows에서는 트리 구조 종료(/T) 및 강제 종료(/F)를 지원합니다.
- * 
+ *
  * @param {number|string} pid - 종료할 프로세스 ID
  * @param {object} [options] - 옵션
  * @param {string} [options.platform] - 대상 플랫폼
@@ -145,23 +151,23 @@ export function killProcess(pid, options = {}) {
   if (!Number.isInteger(numericPid) || numericPid <= 0) return false;
 
   const platform = options.platform || process.platform;
-  const signal = options.signal || 'SIGTERM';
+  const signal = options.signal || "SIGTERM";
   const tree = options.tree === true;
-  const force = options.force === true || signal === 'SIGKILL';
+  const force = options.force === true || signal === "SIGKILL";
 
   try {
-    if (platform === 'win32' && (tree || force)) {
+    if (platform === "win32" && (tree || force)) {
       const command = [
-        'taskkill',
-        '/PID',
+        "taskkill",
+        "/PID",
         String(numericPid),
-        tree ? '/T' : '',
-        force ? '/F' : '',
+        tree ? "/T" : "",
+        force ? "/F" : "",
       ]
         .filter(Boolean)
-        .join(' ');
+        .join(" ");
       execSync(command, {
-        stdio: 'ignore',
+        stdio: "ignore",
         timeout: options.timeout ?? 5000,
         windowsHide: true,
       });
@@ -178,7 +184,7 @@ export function killProcess(pid, options = {}) {
 /**
  * 플랫폼별 IPC 파이프 또는 소켓 경로를 생성합니다.
  * Windows에서는 네임드 파이프 경로를, Unix 계열에서는 도메인 소켓 파일 경로를 반환합니다.
- * 
+ *
  * @param {string} name - 파이프/소켓 기본 이름
  * @param {number|string} [pid=process.pid] - 프로세스 ID (식별자 추가용)
  * @param {object} [options] - 옵션
@@ -188,10 +194,10 @@ export function killProcess(pid, options = {}) {
  */
 export function pipePath(name, pid = process.pid, options = {}) {
   const platform = options.platform || process.platform;
-  const safeName = sanitizePipeSegment(name) || 'triflux';
-  const suffix = pid == null || pid === '' ? safeName : `${safeName}-${pid}`;
+  const safeName = sanitizePipeSegment(name) || "triflux";
+  const suffix = pid == null || pid === "" ? safeName : `${safeName}-${pid}`;
 
-  if (platform === 'win32') {
+  if (platform === "win32") {
     return `\\\\.\\pipe\\${suffix}`;
   }
 
@@ -202,7 +208,7 @@ export function pipePath(name, pid = process.pid, options = {}) {
 /**
  * 특정 경로가 대상 디렉토리 내부에 포함되는지 확인합니다.
  * 대소문자 구분 및 상대 경로 처리를 플랫폼 규격에 맞게 수행합니다.
- * 
+ *
  * @param {string} resolvedPath - 검사할 절대 경로
  * @param {string} dir - 기준이 되는 대상 디렉토리 경로
  * @param {object} [options] - 옵션
@@ -217,9 +223,12 @@ export function isPathWithin(resolvedPath, dir, options = {}) {
   const left = pathApi.resolve(coercePathInput(resolvedPath, platform));
   const right = pathApi.resolve(coercePathInput(dir, platform));
 
-  const normalizedLeft = platform === 'win32' ? left.toLowerCase() : left;
-  const normalizedRight = platform === 'win32' ? right.toLowerCase() : right;
+  const normalizedLeft = platform === "win32" ? left.toLowerCase() : left;
+  const normalizedRight = platform === "win32" ? right.toLowerCase() : right;
   const relative = pathApi.relative(normalizedRight, normalizedLeft);
 
-  return relative === '' || (!relative.startsWith('..') && !pathApi.isAbsolute(relative));
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !pathApi.isAbsolute(relative))
+  );
 }

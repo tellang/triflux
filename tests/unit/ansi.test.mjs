@@ -1,17 +1,39 @@
 // tests/unit/ansi.test.mjs — ansi.mjs 단위 테스트 (wcwidth + badge + progressBar 포함)
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
-  moveTo, moveUp, moveDown,
-  color, bold, dim,
+  altScreenOff,
+  altScreenOn,
+  BG,
+  BOLD,
+  bold,
   box,
-  padRight, truncate, clip, stripAnsi, wcswidth,
-  progressBar, statusBadge,
-  STATUS_ICON, CLI_ICON,
-  FG, BG, RESET, BOLD, DIM, MOCHA,
-  altScreenOn, altScreenOff, clearScreen, cursorHome, cursorHide, cursorShow,
-  clearLine, clearToEnd,
+  CLI_ICON,
+  clearLine,
+  clearScreen,
+  clearToEnd,
+  clip,
+  color,
+  cursorHide,
+  cursorHome,
+  cursorShow,
+  DIM,
+  dim,
+  FG,
+  MOCHA,
+  moveDown,
+  moveTo,
+  moveUp,
+  padRight,
+  progressBar,
+  RESET,
+  STATUS_ICON,
+  statusBadge,
+  stripAnsi,
+  truncate,
+  wcswidth,
 } from "../../hub/team/ansi.mjs";
 
 // ── 화면 시퀀스 ──
@@ -87,7 +109,10 @@ describe("color / bold / dim", () => {
 describe("stripAnsi", () => {
   it("ANSI 색상 코드 제거", () => {
     assert.equal(stripAnsi(`${FG.red}hello${RESET}`), "hello");
-    assert.equal(stripAnsi(`${FG.green}foo${RESET} ${FG.blue}bar${RESET}`), "foo bar");
+    assert.equal(
+      stripAnsi(`${FG.green}foo${RESET} ${FG.blue}bar${RESET}`),
+      "foo bar",
+    );
   });
 
   it("ANSI 없는 문자열은 그대로", () => {
@@ -310,7 +335,14 @@ describe("STATUS_ICON / CLI_ICON", () => {
 // ── MOCHA 색상 상수 ──
 describe("MOCHA 색상 상수", () => {
   it("ok / partial / fail / thinking / executing / border 모두 ANSI 시퀀스", () => {
-    for (const key of ["ok", "partial", "fail", "thinking", "executing", "border"]) {
+    for (const key of [
+      "ok",
+      "partial",
+      "fail",
+      "thinking",
+      "executing",
+      "border",
+    ]) {
       assert.ok(MOCHA[key].startsWith("\x1b["), `MOCHA.${key} ANSI 아님`);
     }
   });

@@ -22,7 +22,10 @@ import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
 import { killProcess } from "../platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
-import { ensureConductorRegistry, getConductorRegistry } from "./conductor-registry.mjs";
+import {
+  ensureConductorRegistry,
+  getConductorRegistry,
+} from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
@@ -86,7 +89,7 @@ export function createConductor(opts = {}) {
   const emitter = new EventEmitter();
   const sessions = new Map();
   let shuttingDown = false;
-  let publicApi = null;
+  const publicApi = null;
 
   // 공유 event log (모든 세션 이벤트를 하나의 JSONL에)
   const eventLog = createEventLog(join(logsDir, "conductor-events.jsonl"));

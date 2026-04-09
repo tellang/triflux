@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
   compareSemver,
@@ -37,7 +37,8 @@ describe("psmux-info", () => {
       execFileSyncFn(command, args) {
         calls.push([command, ...args]);
         if (args[0] === "-V") return "psmux 3.3.1";
-        if (args[0] === "--help") return "new-session\nattach-session\nkill-session\ncapture-pane\ndetach-client\n";
+        if (args[0] === "--help")
+          return "new-session\nattach-session\nkill-session\ncapture-pane\ndetach-client\n";
         throw new Error("unexpected");
       },
     });
@@ -46,14 +47,18 @@ describe("psmux-info", () => {
     assert.equal(result.ok, true);
     assert.equal(result.recommended, true);
     assert.deepEqual(result.missingCommands, []);
-    assert.deepEqual(calls, [["psmux", "-V"], ["psmux", "--help"]]);
+    assert.deepEqual(calls, [
+      ["psmux", "-V"],
+      ["psmux", "--help"],
+    ]);
   });
 
   it("probePsmuxSupport marks missing commands as incompatible", () => {
     const result = probePsmuxSupport({
       execFileSyncFn(_command, args) {
         if (args[0] === "-V") return "psmux 3.2.0";
-        if (args[0] === "--help") return "new-session\nattach-session\nkill-session\n";
+        if (args[0] === "--help")
+          return "new-session\nattach-session\nkill-session\n";
         throw new Error("unexpected");
       },
     });
@@ -76,7 +81,14 @@ describe("psmux-info", () => {
 
     assert.equal(result.installed, true);
     assert.equal(result.version, "3.3.1");
-    assert.equal(result.ok, false, "help 실패 시 required commands 검증 불가 → ok=false");
-    assert.ok(result.missingCommands.length > 0, "모든 required commands가 missing으로 판정");
+    assert.equal(
+      result.ok,
+      false,
+      "help 실패 시 required commands 검증 불가 → ok=false",
+    );
+    assert.ok(
+      result.missingCommands.length > 0,
+      "모든 required commands가 missing으로 판정",
+    );
   });
 });

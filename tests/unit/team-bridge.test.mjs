@@ -1,9 +1,9 @@
-import { describe, it } from 'node:test';
-import assert from 'node:assert/strict';
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
-import { createPipeServer } from '../../hub/pipe.mjs';
-import { registerTeamBridge, getTeamBridge } from '../../hub/team-bridge.mjs';
-import { createTools } from '../../hub/tools.mjs';
+import { createPipeServer } from "../../hub/pipe.mjs";
+import { getTeamBridge, registerTeamBridge } from "../../hub/team-bridge.mjs";
+import { createTools } from "../../hub/tools.mjs";
 
 function withBridge(bridge, fn) {
   const previous = getTeamBridge();
@@ -17,10 +17,10 @@ function parseToolResult(result) {
   return JSON.parse(result.content[0].text);
 }
 
-describe('team-bridge', () => {
-  it('registerTeamBridge/getTeamBridge roundtrip을 제공해야 한다', async () => {
+describe("team-bridge", () => {
+  it("registerTeamBridge/getTeamBridge roundtrip을 제공해야 한다", async () => {
     const fakeBridge = {
-      teamInfo: async () => ({ ok: true, data: { fake: 'info' } }),
+      teamInfo: async () => ({ ok: true, data: { fake: "info" } }),
       teamTaskList: async () => ({ ok: true, data: { tasks: [] } }),
       teamTaskUpdate: async () => ({ ok: true, data: { updated: true } }),
       teamSendMessage: async () => ({ ok: true, data: { sent: true } }),
@@ -31,27 +31,37 @@ describe('team-bridge', () => {
     });
   });
 
-  it('tools는 bridge가 없을 때 team 도구를 graceful fallback 해야 한다', async () => {
+  it("tools는 bridge가 없을 때 team 도구를 graceful fallback 해야 한다", async () => {
     await withBridge(null, async () => {
       const tools = createTools({}, {}, {}, null);
-      const teamInfo = tools.find((tool) => tool.name === 'team_info');
-      const teamTaskList = tools.find((tool) => tool.name === 'team_task_list');
-      const teamTaskUpdate = tools.find((tool) => tool.name === 'team_task_update');
-      const teamSendMessage = tools.find((tool) => tool.name === 'team_send_message');
+      const teamInfo = tools.find((tool) => tool.name === "team_info");
+      const teamTaskList = tools.find((tool) => tool.name === "team_task_list");
+      const teamTaskUpdate = tools.find(
+        (tool) => tool.name === "team_task_update",
+      );
+      const teamSendMessage = tools.find(
+        (tool) => tool.name === "team_send_message",
+      );
 
       assert.deepEqual(
-        parseToolResult(await teamInfo.handler({ team_name: 'no-team', include_members: true, include_paths: true })),
+        parseToolResult(
+          await teamInfo.handler({
+            team_name: "no-team",
+            include_members: true,
+            include_paths: true,
+          }),
+        ),
         {
           ok: true,
           data: {
-            team: { team_name: 'no-team', description: null },
+            team: { team_name: "no-team", description: null },
             lead: { lead_agent_id: null, lead_session_id: null },
             members: [],
             paths: {
               config_path: null,
               tasks_dir: null,
               inboxes_dir: null,
-              tasks_dir_resolution: 'bridge_not_registered',
+              tasks_dir_resolution: "bridge_not_registered",
             },
             bridge_installed: false,
             skipped: true,
@@ -60,7 +70,7 @@ describe('team-bridge', () => {
       );
 
       assert.deepEqual(
-        parseToolResult(await teamTaskList.handler({ team_name: 'no-team' })),
+        parseToolResult(await teamTaskList.handler({ team_name: "no-team" })),
         {
           ok: true,
           data: {
@@ -68,7 +78,7 @@ describe('team-bridge', () => {
             count: 0,
             parse_warnings: 0,
             tasks_dir: null,
-            tasks_dir_resolution: 'bridge_not_registered',
+            tasks_dir_resolution: "bridge_not_registered",
             bridge_installed: false,
             skipped: true,
           },
@@ -76,7 +86,12 @@ describe('team-bridge', () => {
       );
 
       assert.deepEqual(
-        parseToolResult(await teamTaskUpdate.handler({ team_name: 'no-team', task_id: 'task-1' })),
+        parseToolResult(
+          await teamTaskUpdate.handler({
+            team_name: "no-team",
+            task_id: "task-1",
+          }),
+        ),
         {
           ok: true,
           data: {
@@ -85,7 +100,7 @@ describe('team-bridge', () => {
             task_before: null,
             task_after: null,
             task_file: null,
-            task_id: 'task-1',
+            task_id: "task-1",
             mtime_ms: null,
             bridge_installed: false,
             skipped: true,
@@ -94,12 +109,17 @@ describe('team-bridge', () => {
       );
 
       assert.deepEqual(
-        parseToolResult(await teamSendMessage.handler({ team_name: 'no-team', to: 'team-lead' })),
+        parseToolResult(
+          await teamSendMessage.handler({
+            team_name: "no-team",
+            to: "team-lead",
+          }),
+        ),
         {
           ok: true,
           data: {
             message_id: null,
-            recipient: 'team-lead',
+            recipient: "team-lead",
             inbox_file: null,
             queued_at: null,
             unread_count: 0,
@@ -111,7 +131,7 @@ describe('team-bridge', () => {
     });
   });
 
-  it('pipe는 bridge가 없을 때 team query/command를 graceful fallback 해야 한다', async () => {
+  it("pipe는 bridge가 없을 때 team query/command를 graceful fallback 해야 한다", async () => {
     await withBridge(null, async () => {
       const pipe = createPipeServer({
         router: {
@@ -122,31 +142,31 @@ describe('team-bridge', () => {
         },
       });
 
-      const info = await pipe.executeQuery('team_info', {
-        team_name: 'no-team',
+      const info = await pipe.executeQuery("team_info", {
+        team_name: "no-team",
         include_members: true,
         include_paths: true,
       });
       assert.deepEqual(info, {
         ok: true,
         data: {
-          team: { team_name: 'no-team', description: null },
+          team: { team_name: "no-team", description: null },
           lead: { lead_agent_id: null, lead_session_id: null },
           members: [],
           paths: {
             config_path: null,
             tasks_dir: null,
             inboxes_dir: null,
-            tasks_dir_resolution: 'bridge_not_registered',
+            tasks_dir_resolution: "bridge_not_registered",
           },
           bridge_installed: false,
           skipped: true,
         },
       });
 
-      const update = await pipe.executeCommand('team_task_update', {
-        team_name: 'no-team',
-        task_id: 'task-2',
+      const update = await pipe.executeCommand("team_task_update", {
+        team_name: "no-team",
+        task_id: "task-2",
       });
       assert.deepEqual(update, {
         ok: true,
@@ -156,7 +176,7 @@ describe('team-bridge', () => {
           task_before: null,
           task_after: null,
           task_file: null,
-          task_id: 'task-2',
+          task_id: "task-2",
           mtime_ms: null,
           bridge_installed: false,
           skipped: true,

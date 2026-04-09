@@ -1,8 +1,7 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-
-import { createMessageQueue } from "../../mesh/mesh-queue.mjs";
+import { describe, it } from "node:test";
 import { createMessage, MSG_TYPES } from "../../mesh/mesh-protocol.mjs";
+import { createMessageQueue } from "../../mesh/mesh-queue.mjs";
 
 function makeMsg(id) {
   return createMessage(MSG_TYPES.REQUEST, "sender", `agent-${id}`, { id });

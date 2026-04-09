@@ -1,9 +1,9 @@
-import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-
+import { dirname, join } from "node:path";
+import { afterEach, describe, it } from "node:test";
+import { dim } from "../../hud/colors.mjs";
 import {
   clampPercent,
   decodeJwtEmail,
@@ -16,12 +16,14 @@ import {
   readJsonMigrate,
   stripAnsi,
 } from "../../hud/utils.mjs";
-import { dim } from "../../hud/colors.mjs";
 
 const TEMP_DIRS = [];
 
 function makeTempDir() {
-  const dir = join(tmpdir(), `triflux-hud-utils-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const dir = join(
+    tmpdir(),
+    `triflux-hud-utils-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
   mkdirSync(dir, { recursive: true });
   TEMP_DIRS.push(dir);
   return dir;
@@ -70,13 +72,22 @@ describe("hud/utils.mjs", () => {
     const legacyPath = join(dir, "state", "legacy.json");
 
     writeJson(legacyPath, { source: "legacy" });
-    const migrated = readJsonMigrate(newPath, legacyPath, { source: "fallback" });
+    const migrated = readJsonMigrate(newPath, legacyPath, {
+      source: "fallback",
+    });
 
     assert.deepEqual(migrated, { source: "legacy" });
-    assert.equal(existsSync(newPath), true, "legacy data should be copied to the new path");
+    assert.equal(
+      existsSync(newPath),
+      true,
+      "legacy data should be copied to the new path",
+    );
 
     writeJson(newPath, { source: "new" });
-    assert.deepEqual(readJsonMigrate(newPath, legacyPath, { source: "fallback" }), { source: "new" });
+    assert.deepEqual(
+      readJsonMigrate(newPath, legacyPath, { source: "fallback" }),
+      { source: "new" },
+    );
   });
 
   it("clampPercent clamps numeric input and treats invalid input as zero", () => {
@@ -87,7 +98,10 @@ describe("hud/utils.mjs", () => {
   });
 
   it("getContextPercent prefers native usage percentage and otherwise calculates from token usage", () => {
-    assert.equal(getContextPercent({ context_window: { used_percentage: 87.4 } }), 87);
+    assert.equal(
+      getContextPercent({ context_window: { used_percentage: 87.4 } }),
+      87,
+    );
 
     assert.equal(
       getContextPercent({
@@ -103,7 +117,10 @@ describe("hud/utils.mjs", () => {
       50,
     );
 
-    assert.equal(getContextPercent({ context_window: { context_window_size: 0 } }), 0);
+    assert.equal(
+      getContextPercent({ context_window: { context_window_size: 0 } }),
+      0,
+    );
   });
 
   it("reset helpers share the same future-target behavior for past timestamps", () => {
@@ -124,8 +141,10 @@ describe("hud/utils.mjs", () => {
   });
 
   it("decodeJwtEmail extracts email from the JWT payload and rejects malformed tokens", () => {
-    const payload = Buffer.from(JSON.stringify({ email: "dev@example.com" }), "utf8")
-      .toString("base64url");
+    const payload = Buffer.from(
+      JSON.stringify({ email: "dev@example.com" }),
+      "utf8",
+    ).toString("base64url");
     const token = `header.${payload}.sig`;
 
     assert.equal(decodeJwtEmail(token), "dev@example.com");

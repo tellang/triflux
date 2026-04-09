@@ -1,12 +1,18 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
-export { MSG_TYPES, createMessage, serialize, deserialize, validate } from "./mesh-protocol.mjs";
-export { createRegistry } from "./mesh-registry.mjs";
 export { createMeshBudget } from "./mesh-budget.mjs";
-export { routeMessage, routeOrDeadLetter } from "./mesh-router.mjs";
-export { createMessageQueue } from "./mesh-queue.mjs";
 export { createHeartbeatMonitor } from "./mesh-heartbeat.mjs";
+export {
+  createMessage,
+  deserialize,
+  MSG_TYPES,
+  serialize,
+  validate,
+} from "./mesh-protocol.mjs";
+export { createMessageQueue } from "./mesh-queue.mjs";
+export { createRegistry } from "./mesh-registry.mjs";
+export { routeMessage, routeOrDeadLetter } from "./mesh-router.mjs";
 
 /**
  * Loads skills assigned to a specific agent from a skills directory.
@@ -54,7 +60,7 @@ export async function loadSkillsForAgent(agentId, skillsDir) {
       continue;
     }
 
-    if (skillContent && skillContent.includes(agentId)) {
+    if (skillContent?.includes(agentId)) {
       skills.push(skillName);
     }
   }

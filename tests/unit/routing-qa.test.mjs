@@ -1,18 +1,16 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
-import { toBashPath, BASH_EXE } from "../helpers/bash-path.mjs";
-
 import {
-  loadRules,
   compileRules,
+  loadRules,
   matchRules,
   resolveConflicts,
 } from "../../scripts/lib/keyword-rules.mjs";
+import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
@@ -22,14 +20,16 @@ const ROUTE_SH = toBashPath(join(ROOT, "scripts/tfx-route.sh"));
 // ── 헬퍼: route_agent 라우팅 테이블 파싱 ──
 // CLI_TYPE: agent-map.json 단일 소스, 상세 설정(effort/runMode): case 문 파싱
 function parseRouteTable() {
-  const agentMap = JSON.parse(readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"));
+  const agentMap = JSON.parse(
+    readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"),
+  );
   const src = readFileSync(join(ROOT, "scripts/tfx-route.sh"), "utf8");
   const funcMatch = src.match(/route_agent\(\)\s*\{([\s\S]*?)^\}/m);
   if (!funcMatch) return {};
 
   const funcBody = funcMatch[1];
   const table = {};
-  const caseRe = /^\s+(\S+(?:\|[^\)]+)?)\)\s*\n([\s\S]*?)\s*;;\s*$/gm;
+  const caseRe = /^\s+(\S+(?:\|[^)]+)?)\)\s*\n([\s\S]*?)\s*;;\s*$/gm;
   let m;
   while ((m = caseRe.exec(funcBody)) !== null) {
     const agents = m[1].split("|").map((a) => a.trim());
@@ -39,7 +39,11 @@ function parseRouteTable() {
     for (const agent of agents) {
       const rawType = agentMap[agent] || null;
       const cliType = rawType === "claude" ? "claude-native" : rawType;
-      table[agent] = { CLI_TYPE: cliType, CLI_EFFORT: effort, RUN_MODE: runMode };
+      table[agent] = {
+        CLI_TYPE: cliType,
+        CLI_EFFORT: effort,
+        RUN_MODE: runMode,
+      };
     }
   }
   return table;
@@ -59,7 +63,10 @@ describe("keyword-rules: tfx-auto 매칭", () => {
     const matches = matchRules(compiled, "tfx-auto 인증 리팩터링");
     const resolved = resolveConflicts(matches);
     const skills = resolved.map((r) => r.skill).filter(Boolean);
-    assert.ok(skills.includes("tfx-auto"), `tfx-auto가 포함되어야 함: ${JSON.stringify(skills)}`);
+    assert.ok(
+      skills.includes("tfx-auto"),
+      `tfx-auto가 포함되어야 함: ${JSON.stringify(skills)}`,
+    );
   });
 
   it("'tfx auto' (공백) 입력도 매칭", () => {
@@ -107,7 +114,11 @@ describe("keyword-rules: tfx-multi 매칭", () => {
     const matches = matchRules(compiled, "omc tfx-multi test");
     // omc/oh-my-claudecode 접두사 시 미매칭이어야 함
     const multiMatch = matches.filter((r) => r.id === "tfx-multi");
-    assert.equal(multiMatch.length, 0, "omc 접두사 시 tfx-multi가 매칭되면 안 됨");
+    assert.equal(
+      multiMatch.length,
+      0,
+      "omc 접두사 시 tfx-multi가 매칭되면 안 됨",
+    );
   });
 });
 
@@ -127,7 +138,10 @@ describe("keyword-rules: 충돌 해결", () => {
     const resolved = resolveConflicts(matches);
     const ids = resolved.map((r) => r.id);
     assert.ok(ids.includes("tfx-unified"), "tfx-unified 규칙이 매칭되어야 함");
-    assert.ok(!ids.includes("tfx-auto-codex"), "tfx-auto-codex는 superseded되어야 함");
+    assert.ok(
+      !ids.includes("tfx-auto-codex"),
+      "tfx-auto-codex는 superseded되어야 함",
+    );
   });
 
   it("MCP 라우트: notion 키워드 → gemini 라우트", () => {
@@ -148,28 +162,41 @@ describe("keyword-rules: 충돌 해결", () => {
 // ========================================================================
 describe("route_agent: 에이전트→CLI 매핑", () => {
   it("라우팅 테이블이 비어있지 않아야 함", () => {
-    assert.ok(Object.keys(ROUTE_TABLE).length > 10, `최소 10개 이상 에이전트 정의 필요: ${Object.keys(ROUTE_TABLE).length}`);
+    assert.ok(
+      Object.keys(ROUTE_TABLE).length > 10,
+      `최소 10개 이상 에이전트 정의 필요: ${Object.keys(ROUTE_TABLE).length}`,
+    );
   });
 
   const codexAgents = [
-    "executor", "build-fixer", "debugger", "architect",
-    "planner", "analyst", "code-reviewer", "scientist",
+    "executor",
+    "build-fixer",
+    "debugger",
+    "architect",
+    "planner",
+    "analyst",
+    "code-reviewer",
+    "scientist",
   ];
 
   for (const agent of codexAgents) {
     it(`${agent} → codex`, () => {
       const r = ROUTE_TABLE[agent];
       assert.ok(r, `${agent}가 라우팅 테이블에 있어야 함`);
-      assert.equal(r.CLI_TYPE, "codex", `${agent}는 codex여야 함 (got: ${r.CLI_TYPE})`);
+      assert.equal(
+        r.CLI_TYPE,
+        "codex",
+        `${agent}는 codex여야 함 (got: ${r.CLI_TYPE})`,
+      );
     });
   }
 
   it("designer → gemini", () => {
-    assert.equal(ROUTE_TABLE["designer"]?.CLI_TYPE, "gemini");
+    assert.equal(ROUTE_TABLE.designer?.CLI_TYPE, "gemini");
   });
 
   it("writer → gemini", () => {
-    assert.equal(ROUTE_TABLE["writer"]?.CLI_TYPE, "gemini");
+    assert.equal(ROUTE_TABLE.writer?.CLI_TYPE, "gemini");
   });
 
   it("explore → claude-native", () => {
@@ -189,7 +216,7 @@ describe("route_agent: 에이전트→CLI 매핑", () => {
 // ========================================================================
 describe("route_agent: effort 레벨 검증", () => {
   it("executor → codex53_high effort", () => {
-    assert.equal(ROUTE_TABLE["executor"]?.CLI_EFFORT, "codex53_high");
+    assert.equal(ROUTE_TABLE.executor?.CLI_EFFORT, "codex53_high");
   });
 
   it("build-fixer → codex53_low effort", () => {
@@ -201,7 +228,7 @@ describe("route_agent: effort 레벨 검증", () => {
   });
 
   it("spark → spark53_low effort", () => {
-    assert.equal(ROUTE_TABLE["spark"]?.CLI_EFFORT, "spark53_low");
+    assert.equal(ROUTE_TABLE.spark?.CLI_EFFORT, "spark53_low");
   });
 
   it("code-reviewer → codex53_high effort", () => {
@@ -209,11 +236,11 @@ describe("route_agent: effort 레벨 검증", () => {
   });
 
   it("codex alias → codex53_high effort (executor와 동일)", () => {
-    assert.equal(ROUTE_TABLE["codex"]?.CLI_EFFORT, "codex53_high");
+    assert.equal(ROUTE_TABLE.codex?.CLI_EFFORT, "codex53_high");
   });
 
   it("gemini alias → pro31 effort", () => {
-    assert.equal(ROUTE_TABLE["gemini"]?.CLI_EFFORT, "pro31");
+    assert.equal(ROUTE_TABLE.gemini?.CLI_EFFORT, "pro31");
   });
 });
 
@@ -231,26 +258,43 @@ describe("headless: buildHeadlessCommand", async () => {
   });
 
   it("gemini → gemini --prompt ... --output-format text > result", () => {
-    const cmd = buildHeadlessCommand("gemini", "test prompt", "/tmp/result.txt");
+    const cmd = buildHeadlessCommand(
+      "gemini",
+      "test prompt",
+      "/tmp/result.txt",
+    );
     assert.ok(cmd.includes("gemini --prompt"), `gemini --prompt 포함: ${cmd}`);
     assert.ok(cmd.includes("--output-format text"));
     assert.ok(cmd.includes("> '/tmp/result.txt'"));
   });
 
   it("claude → claude --print ... --output-format text", () => {
-    const cmd = buildHeadlessCommand("claude", "test prompt", "/tmp/result.txt");
+    const cmd = buildHeadlessCommand(
+      "claude",
+      "test prompt",
+      "/tmp/result.txt",
+    );
     assert.ok(cmd.includes("claude --print"), `claude --print 포함: ${cmd}`);
     assert.ok(cmd.includes("--output-format text"));
   });
 
   it("프롬프트를 임시 파일에 저장 (셸 주입 방지)", () => {
     const cmd = buildHeadlessCommand("codex", "it's a test", "/tmp/r.txt");
-    assert.ok(cmd.includes("Get-Content -Raw"), `프롬프트가 파일에서 읽혀야 함: ${cmd}`);
-    assert.ok(cmd.includes("prompt-"), `프롬프트 파일 경로가 포함되어야 함: ${cmd}`);
+    assert.ok(
+      cmd.includes("Get-Content -Raw"),
+      `프롬프트가 파일에서 읽혀야 함: ${cmd}`,
+    );
+    assert.ok(
+      cmd.includes("prompt-"),
+      `프롬프트 파일 경로가 포함되어야 함: ${cmd}`,
+    );
   });
 
   it("지원하지 않는 CLI → throw", () => {
-    assert.throws(() => buildHeadlessCommand("unknown", "prompt", "/tmp/r.txt"), /지원하지 않는/);
+    assert.throws(
+      () => buildHeadlessCommand("unknown", "prompt", "/tmp/r.txt"),
+      /지원하지 않는/,
+    );
   });
 
   it("에이전트 역할명 → CLI 타입 자동 해석 (resolveCliType)", () => {
@@ -262,7 +306,10 @@ describe("headless: buildHeadlessCommand", async () => {
 
   it("MCP 프로필 힌트 주입 (implement)", async () => {
     const { readFileSync, existsSync } = await import("node:fs");
-    const cmd = buildHeadlessCommand("codex", "test", "/tmp/r.txt", { handoff: false, mcp: "implement" });
+    const cmd = buildHeadlessCommand("codex", "test", "/tmp/r.txt", {
+      handoff: false,
+      mcp: "implement",
+    });
     // 힌트는 프롬프트 파일에 포함됨 — 파일 경로를 추출하고 내용 검증
     const promptMatch = cmd.match(/prompt-[a-f0-9]+\.txt/);
     assert.ok(promptMatch, `프롬프트 파일 경로가 명령에 포함되어야 함: ${cmd}`);
@@ -270,18 +317,29 @@ describe("headless: buildHeadlessCommand", async () => {
     const fullPath = cmd.match(/'([^']*prompt-[a-f0-9]+\.txt)'/)?.[1];
     if (fullPath && existsSync(fullPath)) {
       const content = readFileSync(fullPath, "utf8");
-      assert.ok(content.includes("[MCP: implement]"), `프롬프트 파일에 MCP 힌트가 포함되어야 함: ${content.slice(0, 100)}`);
+      assert.ok(
+        content.includes("[MCP: implement]"),
+        `프롬프트 파일에 MCP 힌트가 포함되어야 함: ${content.slice(0, 100)}`,
+      );
     }
   });
 
   it("MCP 프로필 없으면 힌트 미삽입", () => {
-    const cmd = buildHeadlessCommand("codex", "test", "/tmp/r.txt", { handoff: false });
+    const cmd = buildHeadlessCommand("codex", "test", "/tmp/r.txt", {
+      handoff: false,
+    });
     assert.ok(!cmd.includes("[MCP:"), `MCP 힌트가 없어야 함: ${cmd}`);
   });
 
   it("알 수 없는 MCP 프로필은 무시", () => {
-    const cmd = buildHeadlessCommand("codex", "test", "/tmp/r.txt", { handoff: false, mcp: "bogus" });
-    assert.ok(!cmd.includes("[MCP:"), `알 수 없는 MCP 힌트가 없어야 함: ${cmd}`);
+    const cmd = buildHeadlessCommand("codex", "test", "/tmp/r.txt", {
+      handoff: false,
+      mcp: "bogus",
+    });
+    assert.ok(
+      !cmd.includes("[MCP:"),
+      `알 수 없는 MCP 힌트가 없어야 함: ${cmd}`,
+    );
   });
 });
 
@@ -295,8 +353,8 @@ describe("headless: WT pane 정리 — 수동 close-pane 제거 (레이스 컨�
 
     // close-pane 수동 호출이 제거되었는지 확인
     assert.ok(
-      !src.includes('wt.exe -w 0 close-pane'),
-      "wt.exe close-pane 수동 호출이 없어야 함 (레이스 컨디션)"
+      !src.includes("wt.exe -w 0 close-pane"),
+      "wt.exe close-pane 수동 호출이 없어야 함 (레이스 컨디션)",
     );
   });
 
@@ -305,7 +363,10 @@ describe("headless: WT pane 정리 — 수동 close-pane 제거 (레이스 컨�
     const src = readFileSync(join(ROOT, "hub/team/headless.mjs"), "utf8");
 
     const killCount = (src.match(/killPsmuxSession/g) || []).length;
-    assert.ok(killCount >= 2, `killPsmuxSession이 최소 2곳에 있어야 함 (got: ${killCount})`);
+    assert.ok(
+      killCount >= 2,
+      `killPsmuxSession이 최소 2곳에 있어야 함 (got: ${killCount})`,
+    );
   });
 });
 
@@ -315,22 +376,25 @@ describe("headless: WT pane 정리 — 수동 close-pane 제거 (레이스 컨�
 describe("tfx-route.sh: 기본 검증", () => {
   it("--help 없이 인자 없으면 에러 (에이전트 타입 필수)", () => {
     try {
-      execSync(`"${BASH_EXE}" "${ROUTE_SH}" 2>&1`, { encoding: "utf8", timeout: 5000 });
+      execSync(`"${BASH_EXE}" "${ROUTE_SH}" 2>&1`, {
+        encoding: "utf8",
+        timeout: 5000,
+      });
       assert.fail("인자 없이 실행 시 에러가 나야 함");
     } catch (e) {
-      assert.ok(
-        e.status !== 0,
-        "종료 코드가 0이 아니어야 함"
-      );
+      assert.ok(e.status !== 0, "종료 코드가 0이 아니어야 함");
     }
   });
 
   it("--job-status: 존재하지 않는 job → 에러", () => {
     try {
-      execSync(`"${BASH_EXE}" "${ROUTE_SH}" --job-status nonexistent-job-id 2>&1`, {
-        encoding: "utf8",
-        timeout: 5000,
-      });
+      execSync(
+        `"${BASH_EXE}" "${ROUTE_SH}" --job-status nonexistent-job-id 2>&1`,
+        {
+          encoding: "utf8",
+          timeout: 5000,
+        },
+      );
       assert.fail("존재하지 않는 job은 에러여야 함");
     } catch (e) {
       assert.ok(
@@ -338,7 +402,7 @@ describe("tfx-route.sh: 기본 검증", () => {
           e.stdout?.toString().includes("error") ||
           e.stderr?.toString().includes("error") ||
           e.message?.includes("error"),
-        "에러 출력에 'error' 문자열 포함"
+        "에러 출력에 'error' 문자열 포함",
       );
     }
   });
@@ -347,19 +411,28 @@ describe("tfx-route.sh: 기본 검증", () => {
     const src = readFileSync(join(ROOT, "scripts/tfx-route.sh"), "utf8");
     const vMatch = src.match(/^VERSION="?([\d.]+)"?/m);
     assert.ok(vMatch, "VERSION= 선언이 있어야 함");
-    assert.match(vMatch[1], /^2\.\d+$/, `버전이 2.x 형식이어야 함: ${vMatch[1]}`);
+    assert.match(
+      vMatch[1],
+      /^2\.\d+$/,
+      `버전이 2.x 형식이어야 함: ${vMatch[1]}`,
+    );
   });
 });
 
 // ========================================================================
 // 9. agent-map.json ↔ route_agent() 교차 검증
 // ========================================================================
-const agentMap = JSON.parse(readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"));
+const agentMap = JSON.parse(
+  readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"),
+);
 
 describe("agent-map.json ↔ route_agent() 교차 검증", () => {
   it("agent-map.json의 모든 에이전트가 route_agent() case에 존재", () => {
     for (const agent of Object.keys(agentMap)) {
-      assert.ok(ROUTE_TABLE[agent], `agent-map.json의 "${agent}"가 route_agent()에 없음`);
+      assert.ok(
+        ROUTE_TABLE[agent],
+        `agent-map.json의 "${agent}"가 route_agent()에 없음`,
+      );
     }
   });
 
@@ -369,15 +442,21 @@ describe("agent-map.json ↔ route_agent() 교차 검증", () => {
       // * fallback 내 nested "case $CLI_TYPE" 블록에서 파싱된 CLI_TYPE 값은 제외
       // (agent-map.json은 "claude"를 사용, route.sh는 "claude-native"로 변환)
       if (!agentMap[agent] && agent === "claude-native") continue;
-      assert.ok(agentMap[agent], `route_agent()의 "${agent}"가 agent-map.json에 없음`);
+      assert.ok(
+        agentMap[agent],
+        `route_agent()의 "${agent}"가 agent-map.json에 없음`,
+      );
     }
   });
 
   it("headless resolveCliType이 agent-map.json과 일치", async () => {
     const { resolveCliType } = await import("../../hub/team/headless.mjs");
     for (const [agent, expected] of Object.entries(agentMap)) {
-      assert.equal(resolveCliType(agent), expected,
-        `${agent}: resolveCliType(${expected}) ≠ ${resolveCliType(agent)}`);
+      assert.equal(
+        resolveCliType(agent),
+        expected,
+        `${agent}: resolveCliType(${expected}) ≠ ${resolveCliType(agent)}`,
+      );
     }
   });
 });

@@ -25,10 +25,14 @@ function buildSystemMessage(filePath, stdioServers, result) {
 
   if (result.modified) {
     const actionLabel = result.replacement ? "자동 치환" : "자동 제거";
-    lines.push(`[mcp-guard] stdio MCP ${actionLabel}: ${stdioServers.map((server) => server.name).join(", ")}`);
+    lines.push(
+      `[mcp-guard] stdio MCP ${actionLabel}: ${stdioServers.map((server) => server.name).join(", ")}`,
+    );
 
     if (result.replacement?.name && result.replacement?.url) {
-      lines.push(`[mcp-guard] 대체 서버: ${result.replacement.name} -> ${result.replacement.url}`);
+      lines.push(
+        `[mcp-guard] 대체 서버: ${result.replacement.name} -> ${result.replacement.url}`,
+      );
     }
 
     if (result.backupPath) {

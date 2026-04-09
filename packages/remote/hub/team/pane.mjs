@@ -1,12 +1,11 @@
 // hub/team/pane.mjs — pane별 CLI 실행 + stdin 주입
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
-import { writeFileSync, unlinkSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { detectMultiplexer, tmuxExec } from "./session.mjs";
-import { psmuxExec } from "./psmux.mjs";
-
+import { join } from "node:path";
 import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
+import { psmuxExec } from "./psmux.mjs";
+import { detectMultiplexer, tmuxExec } from "./session.mjs";
 
 function quoteArg(value) {
   return `"${String(value).replace(/"/g, '\\"')}"`;
@@ -118,7 +117,11 @@ export function injectPrompt(target, prompt, { useFileRef = false } = {}) {
     psmuxExec(["send-keys", "-t", target, "-l", `@${filePath}`]);
     psmuxExec(["send-keys", "-t", target, "Enter"]);
     // TUI가 파일을 읽을 시간을 주고 정리
-    setTimeout(() => { try { unlinkSync(tmpFile); } catch {} }, 10000);
+    setTimeout(() => {
+      try {
+        unlinkSync(tmpFile);
+      } catch {}
+    }, 10000);
     return;
   }
 
@@ -139,7 +142,9 @@ export function injectPrompt(target, prompt, { useFileRef = false } = {}) {
     muxExec(`paste-buffer -t ${target}`);
     muxExec(`send-keys -t ${target} Enter`);
   } finally {
-    try { unlinkSync(tmpFile); } catch {}
+    try {
+      unlinkSync(tmpFile);
+    } catch {}
   }
 }
 

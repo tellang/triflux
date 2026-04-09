@@ -1,8 +1,8 @@
-import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { join } from "node:path";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 
 import { createEventLog } from "../../hub/team/event-log.mjs";
 
@@ -14,7 +14,11 @@ function setup() {
 }
 
 afterEach(() => {
-  try { rmSync(TEST_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 describe("event-log", () => {

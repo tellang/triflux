@@ -6,9 +6,7 @@ export const DEFAULT_KILL_GRACE_MS = 1000;
 
 export function toStringList(value) {
   if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => String(item ?? '').trim())
-    .filter(Boolean);
+  return value.map((item) => String(item ?? "").trim()).filter(Boolean);
 }
 
 export function safeJsonParse(line) {
@@ -51,8 +49,9 @@ export async function withRetry(fn, opts = {}) {
         throw error;
       }
 
-      const delay = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs)
-        * (0.5 + Math.random() * 0.5);
+      const delay =
+        Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs) *
+        (0.5 + Math.random() * 0.5);
       await sleep(delay);
     }
   }
@@ -63,7 +62,7 @@ export async function withRetry(fn, opts = {}) {
 export function appendTextFragments(value, parts) {
   if (value == null) return;
 
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const trimmed = value.trim();
     if (trimmed) parts.push(trimmed);
     return;
@@ -74,11 +73,13 @@ export function appendTextFragments(value, parts) {
     return;
   }
 
-  if (typeof value !== 'object') return;
+  if (typeof value !== "object") return;
 
-  if (typeof value.text === 'string') appendTextFragments(value.text, parts);
-  if (typeof value.response === 'string') appendTextFragments(value.response, parts);
-  if (typeof value.result === 'string') appendTextFragments(value.result, parts);
+  if (typeof value.text === "string") appendTextFragments(value.text, parts);
+  if (typeof value.response === "string")
+    appendTextFragments(value.response, parts);
+  if (typeof value.result === "string")
+    appendTextFragments(value.result, parts);
   if (value.content != null) appendTextFragments(value.content, parts);
   if (value.message != null) appendTextFragments(value.message, parts);
 }
@@ -86,18 +87,24 @@ export function appendTextFragments(value, parts) {
 export function extractText(value) {
   const parts = [];
   appendTextFragments(value, parts);
-  return parts.join('\n').trim();
+  return parts.join("\n").trim();
 }
 
 export function terminateChild(child, killGraceMs) {
   if (!child || child.exitCode !== null || child.killed) return;
 
-  try { child.stdin.end(); } catch {}
-  try { child.kill(); } catch {}
+  try {
+    child.stdin.end();
+  } catch {}
+  try {
+    child.kill();
+  } catch {}
 
   const timer = setTimeout(() => {
     if (child.exitCode === null) {
-      try { child.kill('SIGKILL'); } catch {}
+      try {
+        child.kill("SIGKILL");
+      } catch {}
     }
   }, killGraceMs);
   timer.unref?.();

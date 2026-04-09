@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { compileRules, loadRules, matchRules, resolveConflicts } from "../lib/keyword-rules.mjs";
+import {
+  compileRules,
+  loadRules,
+  matchRules,
+  resolveConflicts,
+} from "../lib/keyword-rules.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..", "..");
@@ -37,7 +42,7 @@ function runDetector(prompt) {
   const payload = { prompt, cwd: projectRoot };
   const result = spawnSync(process.execPath, [detectorScriptPath], {
     input: JSON.stringify(payload),
-    encoding: "utf8"
+    encoding: "utf8",
   });
 
   assert.equal(result.status, 0, result.stderr);
@@ -50,29 +55,32 @@ test("extractPrompt: prompt/message.content/parts[].text 우선순위", () => {
     extractPrompt({
       prompt: "from prompt",
       message: { content: "from message" },
-      parts: [{ text: "from parts" }]
+      parts: [{ text: "from parts" }],
     }),
-    "from prompt"
+    "from prompt",
   );
 
   assert.equal(
     extractPrompt({
       prompt: "   ",
       message: { content: "from message" },
-      parts: [{ text: "from parts" }]
+      parts: [{ text: "from parts" }],
     }),
-    "from message"
+    "from message",
   );
 
   assert.equal(
     extractPrompt({
       message: { content: [{ text: "from message-part" }] },
-      parts: [{ text: "from parts" }]
+      parts: [{ text: "from parts" }],
     }),
-    "from message-part"
+    "from message-part",
   );
 
-  assert.equal(extractPrompt({ parts: [{ text: "from parts" }] }), "from parts");
+  assert.equal(
+    extractPrompt({ parts: [{ text: "from parts" }] }),
+    "from parts",
+  );
 });
 
 test("sanitizeForKeywordDetection: 코드블록/URL/파일경로/XML 태그 제거", () => {
@@ -84,7 +92,7 @@ test("sanitizeForKeywordDetection: 코드블록/URL/파일경로/XML 태그 제�
     "https://example.com/path?q=1",
     "C:\\Users\\SSAFY\\Desktop\\Projects\\tools\\triflux",
     "./hooks/keyword-rules.json",
-    "<tag>jira 이슈 생성</tag>"
+    "<tag>jira 이슈 생성</tag>",
   ].join("\n");
 
   const sanitized = sanitizeForKeywordDetection(input);
@@ -142,8 +150,8 @@ test("compileRules: 정규식 컴파일 실패", () => {
       supersedes: [],
       exclusive: false,
       state: null,
-      mcp_route: null
-    }
+      mcp_route: null,
+    },
   ]);
 
   assert.deepEqual(compiled, []);
@@ -156,30 +164,64 @@ test("matchRules: tfx 키워드 매칭", () => {
     { text: "tfx auto 돌려줘", expectedId: "tfx-unified" },
     { text: "tfx codex 로 실행", expectedId: "tfx-codex" },
     { text: "tfx gemini 로 실행", expectedId: "tfx-gemini" },
-    { text: "canceltfx", expectedId: "tfx-cancel" }
+    { text: "canceltfx", expectedId: "tfx-cancel" },
   ];
 
   for (const { text, expectedId } of cases) {
     const clean = sanitizeForKeywordDetection(text);
     const matches = matchRules(compiledRules, clean);
-    assert.ok(matches.some((match) => match.id === expectedId), `${text} => ${expectedId} 미매칭`);
+    assert.ok(
+      matches.some((match) => match.id === expectedId),
+      `${text} => ${expectedId} 미매칭`,
+    );
   }
 });
 
 test("matchRules: MCP 라우팅 매칭", () => {
   const compiledRules = loadCompiledRules();
   const cases = [
-    { text: "노션 페이지 조회해줘", expectedId: "notion-route", expectedRoute: "gemini" },
-    { text: "jira 이슈 생성", expectedId: "jira-route", expectedRoute: "codex" },
-    { text: "크롬 열고 로그인", expectedId: "chrome-route", expectedRoute: "gemini" },
-    { text: "이메일 보내줘", expectedId: "mail-route", expectedRoute: "gemini" },
-    { text: "캘린더 일정 생성", expectedId: "calendar-route", expectedRoute: "gemini" },
-    { text: "playwright 테스트 작성", expectedId: "playwright-route", expectedRoute: "gemini" },
-    { text: "canva 디자인 생성", expectedId: "canva-route", expectedRoute: "gemini" }
+    {
+      text: "노션 페이지 조회해줘",
+      expectedId: "notion-route",
+      expectedRoute: "gemini",
+    },
+    {
+      text: "jira 이슈 생성",
+      expectedId: "jira-route",
+      expectedRoute: "codex",
+    },
+    {
+      text: "크롬 열고 로그인",
+      expectedId: "chrome-route",
+      expectedRoute: "gemini",
+    },
+    {
+      text: "이메일 보내줘",
+      expectedId: "mail-route",
+      expectedRoute: "gemini",
+    },
+    {
+      text: "캘린더 일정 생성",
+      expectedId: "calendar-route",
+      expectedRoute: "gemini",
+    },
+    {
+      text: "playwright 테스트 작성",
+      expectedId: "playwright-route",
+      expectedRoute: "gemini",
+    },
+    {
+      text: "canva 디자인 생성",
+      expectedId: "canva-route",
+      expectedRoute: "gemini",
+    },
   ];
 
   for (const { text, expectedId, expectedRoute } of cases) {
-    const matches = matchRules(compiledRules, sanitizeForKeywordDetection(text));
+    const matches = matchRules(
+      compiledRules,
+      sanitizeForKeywordDetection(text),
+    );
     const matched = matches.find((match) => match.id === expectedId);
     assert.ok(matched, `${text} => ${expectedId} 미매칭`);
     assert.equal(matched.mcp_route, expectedRoute);
@@ -188,7 +230,10 @@ test("matchRules: MCP 라우팅 매칭", () => {
 
 test("matchRules: 일반 대화는 매칭 없음", () => {
   const compiledRules = loadCompiledRules();
-  const matches = matchRules(compiledRules, sanitizeForKeywordDetection("오늘 점심 메뉴 추천해줘"));
+  const matches = matchRules(
+    compiledRules,
+    sanitizeForKeywordDetection("오늘 점심 메뉴 추천해줘"),
+  );
   assert.deepEqual(matches, []);
 });
 
@@ -197,12 +242,12 @@ test("resolveConflicts: priority 정렬 및 supersedes 처리", () => {
     { id: "rule-c", priority: 3, supersedes: [], exclusive: false },
     { id: "rule-b", priority: 2, supersedes: ["rule-c"], exclusive: false },
     { id: "rule-a", priority: 1, supersedes: [], exclusive: false },
-    { id: "rule-a", priority: 1, supersedes: [], exclusive: false }
+    { id: "rule-a", priority: 1, supersedes: [], exclusive: false },
   ]);
 
   assert.deepEqual(
     resolved.map((rule) => rule.id),
-    ["rule-a", "rule-b"]
+    ["rule-a", "rule-b"],
   );
 });
 
@@ -210,10 +255,13 @@ test("resolveConflicts: exclusive 처리", () => {
   const resolved = resolveConflicts([
     { id: "normal", priority: 1, supersedes: [], exclusive: false },
     { id: "exclusive", priority: 0, supersedes: [], exclusive: true },
-    { id: "later", priority: 2, supersedes: [], exclusive: false }
+    { id: "later", priority: 2, supersedes: [], exclusive: false },
   ]);
 
-  assert.deepEqual(resolved.map((rule) => rule.id), ["exclusive"]);
+  assert.deepEqual(
+    resolved.map((rule) => rule.id),
+    ["exclusive"],
+  );
 });
 
 test("코드블록 내 키워드: sanitize 후 매칭 안 됨", () => {
@@ -229,6 +277,7 @@ test("OMC 키워드와 triflux 키워드 비간섭 + TRIFLUX 네임스페이스"
   assert.equal(omcLike.suppressOutput, true);
 
   const triflux = runDetector("tfx multi 세션 시작");
-  const additionalContext = triflux?.hookSpecificOutput?.additionalContext || "";
+  const additionalContext =
+    triflux?.hookSpecificOutput?.additionalContext || "";
   assert.match(additionalContext, /^\[TRIFLUX MAGIC KEYWORD: tfx-multi\]/);
 });

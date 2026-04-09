@@ -1,22 +1,43 @@
-import { describe, it } from 'node:test';
-import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import process from 'node:process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { toBashPath, BASH_EXE } from '../helpers/bash-path.mjs';
-
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import assert from "node:assert/strict";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import process from "node:process";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { BASH_EXE } from "../helpers/bash-path.mjs";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = resolve(TEST_DIR, '..', '..');
-const SERVER_FILE = resolve(PROJECT_ROOT, 'hub', 'workers', 'delegator-mcp.mjs');
-const FAKE_CODEX = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-codex.mjs');
-const FAKE_GEMINI = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-gemini-cli.mjs');
-const FAKE_ROUTE = resolve(PROJECT_ROOT, 'tests', 'fixtures', 'fake-route.sh');
-const SEARCH_ENGINE_CACHE_FILE = resolve(PROJECT_ROOT, '.omc', 'state', 'search-engines.json');
+const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
+const SERVER_FILE = resolve(
+  PROJECT_ROOT,
+  "hub",
+  "workers",
+  "delegator-mcp.mjs",
+);
+const FAKE_CODEX = resolve(PROJECT_ROOT, "tests", "fixtures", "fake-codex.mjs");
+const FAKE_GEMINI = resolve(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "fake-gemini-cli.mjs",
+);
+const FAKE_ROUTE = resolve(PROJECT_ROOT, "tests", "fixtures", "fake-route.sh");
+const SEARCH_ENGINE_CACHE_FILE = resolve(
+  PROJECT_ROOT,
+  ".omc",
+  "state",
+  "search-engines.json",
+);
 
 function writeSearchEngineCache(payload) {
   mkdirSync(dirname(SEARCH_ENGINE_CACHE_FILE), { recursive: true });
@@ -25,12 +46,12 @@ function writeSearchEngineCache(payload) {
 
 function readSearchEngineCacheBackup() {
   return existsSync(SEARCH_ENGINE_CACHE_FILE)
-    ? readFileSync(SEARCH_ENGINE_CACHE_FILE, 'utf8')
+    ? readFileSync(SEARCH_ENGINE_CACHE_FILE, "utf8")
     : null;
 }
 
 function restoreSearchEngineCacheBackup(original) {
-  if (typeof original === 'string') {
+  if (typeof original === "string") {
     writeFileSync(SEARCH_ENGINE_CACHE_FILE, original);
     return;
   }
@@ -46,9 +67,12 @@ async function createClient(env = {}) {
       ...process.env,
       ...env,
     },
-    stderr: 'pipe',
+    stderr: "pipe",
   });
-  const client = new Client({ name: 'delegator-test', version: '1.0.0' }, { capabilities: {} });
+  const client = new Client(
+    { name: "delegator-test", version: "1.0.0" },
+    { capabilities: {} },
+  );
   await client.connect(transport);
   return { client, transport };
 }
@@ -88,7 +112,9 @@ async function closeClient(client, transport) {
   await Promise.race([settled, sleep(750)]);
 
   if (isProcessAlive(pid)) {
-    try { process.kill(pid); } catch {}
+    try {
+      process.kill(pid);
+    } catch {}
     await Promise.race([settled, waitForProcessExit(pid, 1000)]);
     return;
   }
@@ -98,159 +124,180 @@ async function closeClient(client, transport) {
 
 async function waitForCompletion(client, jobId) {
   const deadline = Date.now() + 5000;
-  let lastStatus = 'unknown';
+  let lastStatus = "unknown";
 
   while (Date.now() < deadline) {
     const result = await client.callTool({
-      name: 'triflux-delegate-status',
+      name: "triflux-delegate-status",
       arguments: { jobId },
     });
     const payload = result.structuredContent;
     lastStatus = payload?.status || lastStatus;
-    if (payload?.status === 'completed' || payload?.status === 'failed') {
+    if (payload?.status === "completed" || payload?.status === "failed") {
       return payload;
     }
     await sleep(100);
   }
-  throw new Error(`job ${jobId} did not complete in time (last status: ${lastStatus})`);
+  throw new Error(
+    `job ${jobId} did not complete in time (last status: ${lastStatus})`,
+  );
 }
 
-describe('delegator-mcp stdio server', () => {
-  it('필수 도구를 노출해야 한다', async () => {
+describe("delegator-mcp stdio server", () => {
+  it("필수 도구를 노출해야 한다", async () => {
     const { client, transport } = await createClient({
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
-      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
     });
 
     try {
       const tools = await client.listTools();
       const names = tools.tools.map((tool) => tool.name);
-      assert.deepEqual(names.sort(), ['triflux-delegate', 'triflux-delegate-reply', 'triflux-delegate-status']);
+      assert.deepEqual(names.sort(), [
+        "triflux-delegate",
+        "triflux-delegate-reply",
+        "triflux-delegate-status",
+      ]);
     } finally {
       await closeClient(client, transport);
     }
   });
 
-  it('codex direct sync 경로에서 sessionKey로 warm session을 재사용해야 한다', async () => {
+  it("codex direct sync 경로에서 sessionKey로 warm session을 재사용해야 한다", async () => {
     const { client, transport } = await createClient({
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
-      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
     });
 
     try {
       const first = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'codex',
-          mode: 'sync',
-          agentType: 'executor',
-          sessionKey: 'task-1',
-          prompt: 'remember:ORANGE',
+          provider: "codex",
+          mode: "sync",
+          agentType: "executor",
+          sessionKey: "task-1",
+          prompt: "remember:ORANGE",
         },
       });
       const second = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'codex',
-          mode: 'sync',
-          agentType: 'executor',
-          sessionKey: 'task-1',
-          prompt: 'what did i say?',
+          provider: "codex",
+          mode: "sync",
+          agentType: "executor",
+          sessionKey: "task-1",
+          prompt: "what did i say?",
         },
       });
 
-      assert.equal(first.structuredContent.output, 'ORANGE');
-      assert.equal(second.structuredContent.output, 'ORANGE');
-      assert.equal(first.structuredContent.thread_id, second.structuredContent.thread_id);
-      assert.equal(second.structuredContent.transport, 'codex-mcp');
+      assert.equal(first.structuredContent.output, "ORANGE");
+      assert.equal(second.structuredContent.output, "ORANGE");
+      assert.equal(
+        first.structuredContent.thread_id,
+        second.structuredContent.thread_id,
+      );
+      assert.equal(second.structuredContent.transport, "codex-mcp");
     } finally {
       await closeClient(client, transport);
     }
   });
 
-  it('codex direct async 경로는 status polling으로 완료 결과를 돌려줘야 한다', async () => {
+  it("codex direct async 경로는 status polling으로 완료 결과를 돌려줘야 한다", async () => {
     const { client, transport } = await createClient({
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
-      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
     });
 
     try {
       const kickoff = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'codex',
-          mode: 'async',
-          agentType: 'executor',
-          sessionKey: 'task-async',
-          prompt: 'remember:BLUE',
+          provider: "codex",
+          mode: "async",
+          agentType: "executor",
+          sessionKey: "task-async",
+          prompt: "remember:BLUE",
         },
       });
 
-      const status = await waitForCompletion(client, kickoff.structuredContent.job_id);
-      assert.equal(status.status, 'completed');
-      assert.equal(status.output, 'BLUE');
-      assert.equal(status.provider_resolved, 'codex');
+      const status = await waitForCompletion(
+        client,
+        kickoff.structuredContent.job_id,
+      );
+      assert.equal(status.status, "completed");
+      assert.equal(status.output, "BLUE");
+      assert.equal(status.provider_resolved, "codex");
     } finally {
       await closeClient(client, transport);
     }
   });
 
-  it('codex direct 경로는 프롬프트/컨텍스트에 따라 MCP config를 축소해야 한다', async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), 'triflux-delegator-'));
-    const contextFile = join(tempDir, 'context.md');
-    writeFileSync(contextFile, 'Capture a browser screenshot and inspect responsive UI layout.');
+  it("codex direct 경로는 프롬프트/컨텍스트에 따라 MCP config를 축소해야 한다", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "triflux-delegator-"));
+    const contextFile = join(tempDir, "context.md");
+    writeFileSync(
+      contextFile,
+      "Capture a browser screenshot and inspect responsive UI layout.",
+    );
 
     const { client, transport } = await createClient({
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
-      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
     });
 
     try {
       const result = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'codex',
-          mode: 'sync',
-          agentType: 'designer',
-          prompt: 'SHOW_CONFIG',
+          provider: "codex",
+          mode: "sync",
+          agentType: "designer",
+          prompt: "SHOW_CONFIG",
           contextFile,
-          availableServers: ['context7', 'playwright', 'brave-search', 'exa', 'tavily'],
+          availableServers: [
+            "context7",
+            "playwright",
+            "brave-search",
+            "exa",
+            "tavily",
+          ],
         },
       });
 
       const config = JSON.parse(result.structuredContent.output);
       const allowedMcpServers = Object.keys(config.mcp_servers).sort();
-      assert.deepEqual(allowedMcpServers, ['context7', 'playwright']);
+      assert.deepEqual(allowedMcpServers, ["context7", "playwright"]);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       await closeClient(client, transport);
     }
   });
 
-  it('availableServers 미지정 시 search-engines 캐시가 있어도 부분 리스트를 주입하지 않아야 한다', async () => {
+  it("availableServers 미지정 시 search-engines 캐시가 있어도 부분 리스트를 주입하지 않아야 한다", async () => {
     const originalCache = readSearchEngineCacheBackup();
     writeSearchEngineCache({
-      checked_at: '2026-03-31T00:00:00.000Z',
+      checked_at: "2026-03-31T00:00:00.000Z",
       engines: [
-        { name: 'context7', status: 'available' },
-        { name: 'playwright', status: 'unavailable' },
-        { name: 'brave-search', status: 'unavailable' },
+        { name: "context7", status: "available" },
+        { name: "playwright", status: "unavailable" },
+        { name: "brave-search", status: "unavailable" },
       ],
     });
 
     const { client, transport } = await createClient({
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
-      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
     });
 
     try {
       const result = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'codex',
-          mode: 'sync',
-          agentType: 'designer',
-          prompt: 'SHOW_CONFIG',
+          provider: "codex",
+          mode: "sync",
+          agentType: "designer",
+          prompt: "SHOW_CONFIG",
         },
       });
 
@@ -263,75 +310,78 @@ describe('delegator-mcp stdio server', () => {
     }
   });
 
-  it('search-engines 캐시가 없으면 기존 fallback을 유지해야 한다', async () => {
+  it("search-engines 캐시가 없으면 기존 fallback을 유지해야 한다", async () => {
     const originalCache = readSearchEngineCacheBackup();
     rmSync(SEARCH_ENGINE_CACHE_FILE, { force: true });
 
     const { client, transport } = await createClient({
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
-      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
       GEMINI_BIN: process.execPath,
       GEMINI_BIN_ARGS_JSON: JSON.stringify([FAKE_GEMINI]),
-      FAKE_GEMINI_ECHO_ALLOWED_MCP: '1',
+      FAKE_GEMINI_ECHO_ALLOWED_MCP: "1",
     });
 
     try {
       const codexResult = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'codex',
-          mode: 'sync',
-          agentType: 'designer',
-          prompt: 'SHOW_CONFIG',
+          provider: "codex",
+          mode: "sync",
+          agentType: "designer",
+          prompt: "SHOW_CONFIG",
         },
       });
       const codexConfig = JSON.parse(codexResult.structuredContent.output);
       assert.deepEqual(codexConfig, { mcp_servers: {} });
 
       const geminiResult = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'gemini',
-          mode: 'sync',
-          agentType: 'writer',
-          prompt: 'cache fallback',
+          provider: "gemini",
+          mode: "sync",
+          agentType: "writer",
+          prompt: "cache fallback",
         },
       });
-      assert.match(geminiResult.structuredContent.output, /allowed:context7,brave-search,exa/);
+      assert.match(
+        geminiResult.structuredContent.output,
+        /allowed:context7,brave-search,exa/,
+      );
     } finally {
       restoreSearchEngineCacheBackup(originalCache);
       await closeClient(client, transport);
     }
   });
 
-  it('gemini direct job은 delegate-reply로 multi-turn 대화를 이어가고 done=true 시 종료해야 한다', async () => {
+  it("gemini direct job은 delegate-reply로 multi-turn 대화를 이어가고 done=true 시 종료해야 한다", async () => {
     const { client, transport } = await createClient({
       GEMINI_BIN: process.execPath,
       GEMINI_BIN_ARGS_JSON: JSON.stringify([FAKE_GEMINI]),
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
-      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
     });
 
     try {
       const first = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'gemini',
-          mode: 'sync',
-          agentType: 'writer',
-          prompt: 'first turn',
+          provider: "gemini",
+          mode: "sync",
+          agentType: "writer",
+          prompt: "first turn",
         },
       });
 
       const jobId = first.structuredContent.job_id;
-      assert.equal(typeof jobId, 'string');
+      assert.equal(typeof jobId, "string");
       assert.equal(first.structuredContent.conversation_open, true);
 
       const second = await client.callTool({
-        name: 'triflux-delegate-reply',
+        name: "triflux-delegate-reply",
         arguments: {
           job_id: jobId,
-          reply: 'second turn',
+          reply: "second turn",
         },
       });
 
@@ -341,10 +391,10 @@ describe('delegator-mcp stdio server', () => {
       assert.match(second.structuredContent.output, /second turn/);
 
       const finalTurn = await client.callTool({
-        name: 'triflux-delegate-reply',
+        name: "triflux-delegate-reply",
         arguments: {
           job_id: jobId,
-          reply: 'wrap up',
+          reply: "wrap up",
           done: true,
         },
       });
@@ -352,45 +402,48 @@ describe('delegator-mcp stdio server', () => {
       assert.equal(finalTurn.structuredContent.conversation_open, false);
 
       const afterDone = await client.callTool({
-        name: 'triflux-delegate-reply',
+        name: "triflux-delegate-reply",
         arguments: {
           job_id: jobId,
-          reply: 'one more',
+          reply: "one more",
         },
       });
 
       assert.equal(afterDone.isError, true);
-      assert.match(afterDone.structuredContent.error, /종료된 대화|대화 컨텍스트가 없습니다/);
+      assert.match(
+        afterDone.structuredContent.error,
+        /종료된 대화|대화 컨텍스트가 없습니다/,
+      );
     } finally {
       await closeClient(client, transport);
     }
   });
 
-  it('팀 환경이 주어지면 tfx-route.sh 경로로 위임하고 TFX_TEAM_* 를 전달해야 한다', async () => {
+  it("팀 환경이 주어지면 tfx-route.sh 경로로 위임하고 TFX_TEAM_* 를 전달해야 한다", async () => {
     const { client, transport } = await createClient({
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
-      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, 'mcp-server']),
+      TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
       TFX_DELEGATOR_ROUTE_SCRIPT: FAKE_ROUTE,
       TFX_DELEGATOR_BASH_COMMAND: BASH_EXE,
     });
 
     try {
       const result = await client.callTool({
-        name: 'triflux-delegate',
+        name: "triflux-delegate",
         arguments: {
-          provider: 'gemini',
-          mode: 'sync',
-          agentType: 'designer',
-          prompt: 'route me',
-          teamName: 'alpha-team',
-          teamTaskId: 'TASK-1',
-          teamAgentName: 'delegator-worker',
-          teamLeadName: 'team-lead',
+          provider: "gemini",
+          mode: "sync",
+          agentType: "designer",
+          prompt: "route me",
+          teamName: "alpha-team",
+          teamTaskId: "TASK-1",
+          teamAgentName: "delegator-worker",
+          teamLeadName: "team-lead",
         },
       });
 
       const payload = result.structuredContent;
-      assert.equal(payload.transport, 'route-script');
+      assert.equal(payload.transport, "route-script");
       assert.match(payload.output, /route:designer:auto:900:route me/);
       assert.match(payload.stderr, /team=alpha-team/);
       assert.match(payload.stderr, /task=TASK-1/);

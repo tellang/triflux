@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import {
-  readStdin,
-  parseJson,
-  nowSec,
-  resolveBaseDir,
-  shouldTrackPath,
   expectedReviewer,
+  nowSec,
+  parseJson,
+  readStdin,
+  resolveBaseDir,
   SESSION_TTL_SEC,
   STATE_REL_PATH,
+  shouldTrackPath,
 } from "./lib/cross-review-utils.mjs";
 
 function resolveStatePath(baseDir) {
@@ -39,7 +45,8 @@ function loadState(statePath) {
     }
 
     return {
-      files: parsed?.files && typeof parsed.files === "object" ? parsed.files : {},
+      files:
+        parsed?.files && typeof parsed.files === "object" ? parsed.files : {},
       session_start: sessionStart,
     };
   } catch {
@@ -69,7 +76,8 @@ function normalizePath(filePath, baseDir) {
 
 function extractFilePath(toolInput) {
   if (!toolInput || typeof toolInput !== "object") return "";
-  const candidate = toolInput.file_path ?? toolInput.path ?? toolInput.filePath ?? "";
+  const candidate =
+    toolInput.file_path ?? toolInput.path ?? toolInput.filePath ?? "";
   return typeof candidate === "string" ? candidate : "";
 }
 
@@ -81,7 +89,12 @@ function extractCandidatePaths(payload, baseDir) {
     const trimmed = value.trim();
     if (!trimmed || /\s/.test(trimmed)) return false;
     if (trimmed.length > 260) return false;
-    if (!trimmed.includes(".") && !trimmed.includes("/") && !trimmed.includes("\\")) return false;
+    if (
+      !trimmed.includes(".") &&
+      !trimmed.includes("/") &&
+      !trimmed.includes("\\")
+    )
+      return false;
     return /^[./\\A-Za-z0-9_-]/.test(trimmed);
   };
 

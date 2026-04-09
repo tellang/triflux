@@ -4,7 +4,7 @@
 // 도구 실패 시 에러 패턴을 분석하여 해결 힌트를 additionalContext로 주입한다.
 // Claude가 동일 에러를 반복하지 않도록 구체적 가이드를 제공.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // ── 에러 패턴 → 해결 힌트 매핑 ─────────────────────────────
@@ -130,7 +130,8 @@ function main() {
   ].join("\n");
 
   // ── reflexion 적응형 학습: safety-guard/headless-guard 차단을 패널티로 기록 ──
-  const isSafetyBlock = /\[(?:safety-guard|headless-guard)\].*(?:BLOCKED|차단)/i.test(errorText);
+  const isSafetyBlock =
+    /\[(?:safety-guard|headless-guard)\].*(?:BLOCKED|차단)/i.test(errorText);
   if (isSafetyBlock) {
     try {
       const home = process.env.HOME || process.env.USERPROFILE || "";
@@ -142,12 +143,18 @@ function main() {
         ts: new Date().toISOString(),
         type: "guard_block",
         tool: input.tool_name || "Bash",
-        error_pattern: errorText.match(/\[.*?\]\s*(.{0,120})/)?.[1] || errorText.slice(0, 120),
+        error_pattern:
+          errorText.match(/\[.*?\]\s*(.{0,120})/)?.[1] ||
+          errorText.slice(0, 120),
         command_preview: command.slice(0, 200),
-        source: errorText.includes("safety-guard") ? "safety-guard" : "headless-guard",
+        source: errorText.includes("safety-guard")
+          ? "safety-guard"
+          : "headless-guard",
       };
       writeFileSync(penaltyFile, JSON.stringify(entry) + "\n", { flag: "a" });
-    } catch { /* reflexion 기록 실패는 무시 — 힌트 출력에 영향 주지 않음 */ }
+    } catch {
+      /* reflexion 기록 실패는 무시 — 힌트 출력에 영향 주지 않음 */
+    }
   }
 
   const hints = findHints(errorText);
@@ -157,10 +164,15 @@ function main() {
   const toolName = input.tool_name || "Unknown";
   const parts = [];
   if (hints.length > 0) {
-    parts.push(`[error-context] ${toolName} 실패 — 해결 힌트:\n` + hints.map((h) => `  → ${h}`).join("\n"));
+    parts.push(
+      `[error-context] ${toolName} 실패 — 해결 힌트:\n` +
+        hints.map((h) => `  → ${h}`).join("\n"),
+    );
   }
   if (isSafetyBlock) {
-    parts.push("[reflexion] 이 패턴이 적응형 학습에 기록되었습니다. 다음 세션에서 동일 패턴 시 사전 차단됩니다.");
+    parts.push(
+      "[reflexion] 이 패턴이 적응형 학습에 기록되었습니다. 다음 세션에서 동일 패턴 시 사전 차단됩니다.",
+    );
   }
 
   if (parts.length === 0) process.exit(0);

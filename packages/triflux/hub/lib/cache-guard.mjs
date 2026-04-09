@@ -1,4 +1,10 @@
-import { accessSync, constants, existsSync, readFileSync, readdirSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  existsSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { basename, join, relative } from "node:path";
@@ -7,7 +13,10 @@ const NETWORK_TIMEOUT_MS = 3_000;
 
 function toIssuePath(cacheDir, filePath) {
   const relPath = relative(cacheDir, filePath);
-  return (relPath && relPath.length > 0 ? relPath : basename(filePath)).replace(/\\/g, "/");
+  return (relPath && relPath.length > 0 ? relPath : basename(filePath)).replace(
+    /\\/g,
+    "/",
+  );
 }
 
 function collectCacheFiles(cacheDir) {
@@ -45,19 +54,28 @@ function probeUrl(url) {
 
     try {
       const parsed = new URL(url);
-      const transport = parsed.protocol === "https:" ? https : parsed.protocol === "http:" ? http : null;
+      const transport =
+        parsed.protocol === "https:"
+          ? https
+          : parsed.protocol === "http:"
+            ? http
+            : null;
       if (!transport) {
         finish(false);
         return;
       }
 
-      const request = transport.request(parsed, {
-        method: "HEAD",
-        headers: { "user-agent": "triflux-cache-guard" },
-      }, (response) => {
-        response.resume();
-        finish(true);
-      });
+      const request = transport.request(
+        parsed,
+        {
+          method: "HEAD",
+          headers: { "user-agent": "triflux-cache-guard" },
+        },
+        (response) => {
+          response.resume();
+          finish(true);
+        },
+      );
 
       request.setTimeout(NETWORK_TIMEOUT_MS, () => {
         request.destroy(new Error("timeout"));
@@ -88,23 +106,31 @@ export function validateRuntimeCachePaths(cacheDir) {
   } catch (error) {
     return {
       ok: false,
-      issues: [{
-        file: ".",
-        error: error instanceof Error ? error.message : String(error),
-      }],
+      issues: [
+        {
+          file: ".",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      ],
     };
   }
 }
 
 export async function checkNetworkAvailability(urls) {
-  const targets = [...new Set((Array.isArray(urls) ? urls : []).filter(Boolean))];
+  const targets = [
+    ...new Set((Array.isArray(urls) ? urls : []).filter(Boolean)),
+  ];
   if (targets.length === 0) {
     return { online: true, reachable: [], unreachable: [] };
   }
 
   const results = await Promise.all(targets.map((url) => probeUrl(url)));
-  const reachable = results.filter((result) => result.ok).map((result) => result.url);
-  const unreachable = results.filter((result) => !result.ok).map((result) => result.url);
+  const reachable = results
+    .filter((result) => result.ok)
+    .map((result) => result.url);
+  const unreachable = results
+    .filter((result) => !result.ok)
+    .map((result) => result.url);
 
   return {
     online: unreachable.length === 0,

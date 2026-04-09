@@ -1,8 +1,8 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   attachWithWindowsTerminal,
@@ -74,7 +74,10 @@ describe("session-spawn-helper CLI", () => {
     );
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /session-spawn-helper: psmux 격리 세션 생성 도구/);
+    assert.match(
+      result.stdout,
+      /session-spawn-helper: psmux 격리 세션 생성 도구/,
+    );
     assert.match(result.stdout, /--spawn/);
   });
 });

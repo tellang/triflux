@@ -5,28 +5,28 @@
 // F4 해결: codex exec "prompt" 인라인 (파이프/리다이렉트 아님)
 // F5 해결: 동일 입력 → 동일 args 배열 (런타임 분기 없음)
 
-import { buildExecArgs as buildCodexArgs } from '@triflux/core/hub/codex-adapter.mjs';
-import { buildExecArgs as buildGeminiArgs } from '@triflux/core/hub/gemini-adapter.mjs';
+import { buildExecArgs as buildCodexArgs } from "@triflux/core/hub/codex-adapter.mjs";
+import { buildExecArgs as buildGeminiArgs } from "@triflux/core/hub/gemini-adapter.mjs";
 
 /** CLI별 adapter 레지스트리 */
 const ADAPTERS = Object.freeze({
   codex: {
-    bin: 'codex',
+    bin: "codex",
     buildArgs: buildCodexArgs,
     env: (profile) => (profile ? { CODEX_PROFILE: profile } : {}),
   },
   gemini: {
-    bin: 'gemini',
+    bin: "gemini",
     buildArgs: buildGeminiArgs,
     env: () => ({}),
   },
   claude: {
-    bin: 'claude',
+    bin: "claude",
     buildArgs: (opts = {}) => {
-      const parts = ['claude'];
-      if (opts.model) parts.push('--model', opts.model);
-      parts.push('-p', JSON.stringify(opts.prompt || ''));
-      return parts.join(' ');
+      const parts = ["claude"];
+      if (opts.model) parts.push("--model", opts.model);
+      parts.push("-p", JSON.stringify(opts.prompt || ""));
+      return parts.join(" ");
     },
     env: () => ({}),
   },
@@ -41,7 +41,9 @@ const ADAPTERS = Object.freeze({
 export function getAdapter(agent) {
   const adapter = ADAPTERS[agent];
   if (!adapter) {
-    throw new Error(`Unknown agent: "${agent}". Supported: ${Object.keys(ADAPTERS).join(', ')}`);
+    throw new Error(
+      `Unknown agent: "${agent}". Supported: ${Object.keys(ADAPTERS).join(", ")}`,
+    );
   }
   return adapter;
 }
@@ -60,10 +62,11 @@ export function getAdapter(agent) {
  * @returns {{ bin: string, command: string, env: object, agent: string }}
  */
 export function buildLauncher(opts) {
-  const { agent, profile, prompt, workdir, model, resultFile, mcpServers } = opts;
+  const { agent, profile, prompt, workdir, model, resultFile, mcpServers } =
+    opts;
 
-  if (!agent) throw new Error('agent is required');
-  if (!prompt && prompt !== '') throw new Error('prompt is required');
+  if (!agent) throw new Error("agent is required");
+  if (!prompt && prompt !== "") throw new Error("prompt is required");
 
   const adapter = getAdapter(agent);
 

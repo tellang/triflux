@@ -1,9 +1,16 @@
 // tests/unit/headless-read-result.test.mjs — readResult stderr fallback 로직 검증
-import { describe, it, beforeEach, afterEach } from "node:test";
+
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 
 const TEST_DIR = join(tmpdir(), "tfx-readresult-test");
 const RESULT_FILE = join(TEST_DIR, "test-result.txt");
@@ -25,12 +32,18 @@ function readResultLike(resultFile) {
 describe("headless readResult fallback logic", () => {
   beforeEach(() => {
     mkdirSync(TEST_DIR, { recursive: true });
-    try { rmSync(RESULT_FILE); } catch {}
-    try { rmSync(ERR_FILE); } catch {}
+    try {
+      rmSync(RESULT_FILE);
+    } catch {}
+    try {
+      rmSync(ERR_FILE);
+    } catch {}
   });
 
   afterEach(() => {
-    try { rmSync(TEST_DIR, { recursive: true }); } catch {}
+    try {
+      rmSync(TEST_DIR, { recursive: true });
+    } catch {}
   });
 
   it("resultFile 존재 시 내용 반환", () => {

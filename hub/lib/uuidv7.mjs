@@ -1,7 +1,8 @@
 // hub/lib/uuidv7.mjs — UUIDv7 generator (RFC 9562, monotonic)
-import { randomBytes } from 'node:crypto';
+import { randomBytes } from "node:crypto";
 
-let _rndPool = Buffer.alloc(0), _rndOff = 0;
+let _rndPool = Buffer.alloc(0),
+  _rndOff = 0;
 
 function pooledRandom(n) {
   if (_rndOff + n > _rndPool.length) {
@@ -39,6 +40,6 @@ export function uuidv7() {
   buf[6] = ((_seq >> 8) & 0x0f) | 0x70;
   buf[7] = _seq & 0xff;
   buf[8] = (buf[8] & 0x3f) | 0x80;
-  const h = buf.toString('hex');
+  const h = buf.toString("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }

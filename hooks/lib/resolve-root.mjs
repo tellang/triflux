@@ -51,7 +51,7 @@ export function resolvePluginRoot(callerUrl) {
 
   const moduleFallback = toPluginRootFromUrl(import.meta.url) || process.cwd();
   process.stderr.write(
-    `[resolve-root] warning: failed to resolve plugin root from breadcrumb/env/caller; fallback=${moduleFallback}\n`
+    `[resolve-root] warning: failed to resolve plugin root from breadcrumb/env/caller; fallback=${moduleFallback}\n`,
   );
   return moduleFallback;
 }

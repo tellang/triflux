@@ -1,4 +1,10 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,13 +49,16 @@ function cloneDefaultRegistry() {
 
 function expandHome(filePath) {
   if (typeof filePath !== "string") return "";
-  if (!filePath.startsWith("~/") && !filePath.startsWith("~\\")) return filePath;
+  if (!filePath.startsWith("~/") && !filePath.startsWith("~\\"))
+    return filePath;
   return join(homedir(), filePath.slice(2));
 }
 
 function resolveFilePath(filePath) {
   const expanded = expandHome(filePath);
-  return isAbsolute(expanded) ? resolve(expanded) : resolve(process.cwd(), expanded);
+  return isAbsolute(expanded)
+    ? resolve(expanded)
+    : resolve(process.cwd(), expanded);
 }
 
 function normalizeForMatch(filePath) {
@@ -77,7 +86,11 @@ function ensureBackup(filePath) {
 
 function isJsonMcpConfig(filePath) {
   const name = pathBasename(filePath);
-  return name === "settings.json" || name === "settings.local.json" || name === ".mcp.json";
+  return (
+    name === "settings.json" ||
+    name === "settings.local.json" ||
+    name === ".mcp.json"
+  );
 }
 
 function isCodexConfig(filePath) {
@@ -90,9 +103,9 @@ function detectClient(filePath) {
   if (normalized.endsWith("/.gemini/settings.json")) return "gemini";
   if (normalized.endsWith("/.codex/config.toml")) return "codex";
   if (
-    normalized.endsWith("/.claude/settings.json")
-    || normalized.endsWith("/.claude/settings.local.json")
-    || normalized.endsWith("/.mcp.json")
+    normalized.endsWith("/.claude/settings.json") ||
+    normalized.endsWith("/.claude/settings.local.json") ||
+    normalized.endsWith("/.mcp.json")
   ) {
     return "claude";
   }
@@ -104,16 +117,19 @@ function detectLabel(filePath) {
   if (normalized.endsWith("/.gemini/settings.json")) return "Gemini";
   if (normalized.endsWith("/.codex/config.toml")) return "Codex";
   if (normalized.endsWith("/.claude/settings.json")) return "Claude User";
-  if (normalized.endsWith("/.claude/settings.local.json")) return "Claude Local";
+  if (normalized.endsWith("/.claude/settings.local.json"))
+    return "Claude Local";
   if (normalized.endsWith("/.mcp.json")) return "Project MCP";
   return basename(filePath);
 }
 
 function isPrimaryConfigTarget(filePath) {
   const normalized = normalizeForMatch(filePath);
-  return normalized.endsWith("/.gemini/settings.json")
-    || normalized.endsWith("/.codex/config.toml")
-    || normalized.endsWith("/.mcp.json");
+  return (
+    normalized.endsWith("/.gemini/settings.json") ||
+    normalized.endsWith("/.codex/config.toml") ||
+    normalized.endsWith("/.mcp.json")
+  );
 }
 
 function normalizeUrl(value) {
@@ -192,15 +208,15 @@ function removeTomlSection(raw, sectionName) {
     if (!skipping) output.push(line);
   }
 
-  const cleaned = output.join("\n").replace(/\n{3,}$/g, "\n\n").replace(/^\n+/, "");
+  const cleaned = output
+    .join("\n")
+    .replace(/\n{3,}$/g, "\n\n")
+    .replace(/^\n+/, "");
   return cleaned.length > 0 ? cleaned.replace(/\n{3,}/g, "\n\n") : "";
 }
 
 function upsertTomlUrlServer(raw, name, url) {
-  const section = [
-    `[mcp_servers.${name}]`,
-    `url = ${formatTomlString(url)}`,
-  ];
+  const section = [`[mcp_servers.${name}]`, `url = ${formatTomlString(url)}`];
   const withoutExisting = removeTomlSection(raw, name).trimEnd();
   return withoutExisting.length > 0
     ? `${withoutExisting}\n\n${section.join("\n")}\n`
@@ -210,12 +226,19 @@ function upsertTomlUrlServer(raw, name, url) {
 function getHubServerEntry(registry) {
   const entries = Object.entries(registry?.servers || {});
   if (entries.length === 0) {
-    return ["tfx-hub", { url: `${registry?.defaults?.hub_base || "http://127.0.0.1:27888"}${DEFAULT_HUB_PATH}` }];
+    return [
+      "tfx-hub",
+      {
+        url: `${registry?.defaults?.hub_base || "http://127.0.0.1:27888"}${DEFAULT_HUB_PATH}`,
+      },
+    ];
   }
 
-  return entries.find(([name]) => name === "tfx-hub")
-    || entries.find(([, config]) => config?.transport === "hub-url")
-    || entries[0];
+  return (
+    entries.find(([name]) => name === "tfx-hub") ||
+    entries.find(([, config]) => config?.transport === "hub-url") ||
+    entries[0]
+  );
 }
 
 function _makeHubRuntimeConfig() {
@@ -224,7 +247,13 @@ function _makeHubRuntimeConfig() {
 
 function serverTargets(serverConfig) {
   if (Array.isArray(serverConfig?.targets) && serverConfig.targets.length > 0) {
-    return [...new Set(serverConfig.targets.map((value) => String(value).trim()).filter(Boolean))];
+    return [
+      ...new Set(
+        serverConfig.targets
+          .map((value) => String(value).trim())
+          .filter(Boolean),
+      ),
+    ];
   }
   return ["claude", "gemini", "codex"];
 }
@@ -234,9 +263,10 @@ function serverAppliesToClient(serverConfig, client) {
 }
 
 function buildDesiredServerRecord(name, serverConfig, filePath) {
-  const url = serverConfig?.transport === "hub-url"
-    ? resolveHubUrl()
-    : normalizeUrl(serverConfig?.url || "");
+  const url =
+    serverConfig?.transport === "hub-url"
+      ? resolveHubUrl()
+      : normalizeUrl(serverConfig?.url || "");
   const basenameValue = pathBasename(filePath);
 
   if (basenameValue === ".mcp.json") {
@@ -266,22 +296,30 @@ function scanJsonConfig(filePath) {
   try {
     const parsed = readJsonFile(filePath);
     const mcpServers = parsed?.mcpServers;
-    const servers = !mcpServers || typeof mcpServers !== "object"
-      ? []
-      : Object.entries(mcpServers)
-        .filter(([name, config]) => typeof name === "string" && config && typeof config === "object")
-        .map(([name, config]) => ({
-          name: name.trim(),
-          url: typeof config.url === "string" ? normalizeUrl(config.url) : "",
-          command: typeof config.command === "string" ? config.command : "",
-          type: typeof config.type === "string" ? config.type : "",
-          transport: typeof config.url === "string" && config.url
-            ? "url"
-            : typeof config.command === "string" && config.command
-              ? "stdio"
-              : "unknown",
-          raw: config,
-        }));
+    const servers =
+      !mcpServers || typeof mcpServers !== "object"
+        ? []
+        : Object.entries(mcpServers)
+            .filter(
+              ([name, config]) =>
+                typeof name === "string" &&
+                config &&
+                typeof config === "object",
+            )
+            .map(([name, config]) => ({
+              name: name.trim(),
+              url:
+                typeof config.url === "string" ? normalizeUrl(config.url) : "",
+              command: typeof config.command === "string" ? config.command : "",
+              type: typeof config.type === "string" ? config.type : "",
+              transport:
+                typeof config.url === "string" && config.url
+                  ? "url"
+                  : typeof config.command === "string" && config.command
+                    ? "stdio"
+                    : "unknown",
+              raw: config,
+            }));
 
     return {
       filePath,
@@ -325,11 +363,12 @@ function scanCodexConfig(filePath) {
       name,
       url: typeof config.url === "string" ? normalizeUrl(config.url) : "",
       command: typeof config.command === "string" ? config.command : "",
-      transport: typeof config.url === "string" && config.url
-        ? "url"
-        : typeof config.command === "string" && config.command
-          ? "stdio"
-          : "unknown",
+      transport:
+        typeof config.url === "string" && config.url
+          ? "url"
+          : typeof config.command === "string" && config.command
+            ? "stdio"
+            : "unknown",
       raw: config,
     }));
 
@@ -368,7 +407,11 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
     parsed = {};
   }
 
-  if (!parsed.mcpServers || typeof parsed.mcpServers !== "object" || Array.isArray(parsed.mcpServers)) {
+  if (
+    !parsed.mcpServers ||
+    typeof parsed.mcpServers !== "object" ||
+    Array.isArray(parsed.mcpServers)
+  ) {
     parsed.mcpServers = {};
   }
 
@@ -383,8 +426,12 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
 
   for (const update of updates) {
     const current = parsed.mcpServers[update.name];
-    const nextConfig = { ...(current && typeof current === "object" ? current : {}), ...update.config };
-    const changed = JSON.stringify(current || null) !== JSON.stringify(nextConfig);
+    const nextConfig = {
+      ...(current && typeof current === "object" ? current : {}),
+      ...update.config,
+    };
+    const changed =
+      JSON.stringify(current || null) !== JSON.stringify(nextConfig);
     if (changed) {
       parsed.mcpServers[update.name] = nextConfig;
       modified = true;
@@ -412,7 +459,9 @@ function updateCodexConfig(filePath, updates = [], removals = []) {
   }
 
   const finalRaw = raw.trim().length > 0 ? `${raw.trimEnd()}\n` : "";
-  const previousRaw = existsSync(resolvedPath) ? readFileSync(resolvedPath, "utf8") : "";
+  const previousRaw = existsSync(resolvedPath)
+    ? readFileSync(resolvedPath, "utf8")
+    : "";
   if (finalRaw === previousRaw) {
     return { modified: false, filePath: resolvedPath };
   }
@@ -460,7 +509,11 @@ export function validateRegistry(registry) {
     errors.push("registry.defaults must be an object");
   }
 
-  if (!registry.servers || typeof registry.servers !== "object" || Array.isArray(registry.servers)) {
+  if (
+    !registry.servers ||
+    typeof registry.servers !== "object" ||
+    Array.isArray(registry.servers)
+  ) {
     errors.push("registry.servers must be an object");
   } else {
     for (const [name, server] of Object.entries(registry.servers)) {
@@ -481,14 +534,23 @@ export function validateRegistry(registry) {
     }
   }
 
-  if (!registry.policies || typeof registry.policies !== "object" || Array.isArray(registry.policies)) {
+  if (
+    !registry.policies ||
+    typeof registry.policies !== "object" ||
+    Array.isArray(registry.policies)
+  ) {
     errors.push("registry.policies must be an object");
   } else {
     if (!Array.isArray(registry.policies.watched_paths)) {
       errors.push("registry.policies.watched_paths must be an array");
     }
-    if (registry.policies.stdio_action && !["replace-with-hub", "warn"].includes(registry.policies.stdio_action)) {
-      errors.push("registry.policies.stdio_action must be replace-with-hub or warn");
+    if (
+      registry.policies.stdio_action &&
+      !["replace-with-hub", "warn"].includes(registry.policies.stdio_action)
+    ) {
+      errors.push(
+        "registry.policies.stdio_action must be replace-with-hub or warn",
+      );
     }
   }
 
@@ -578,7 +640,9 @@ export function listManagedConfigTargets(registry = loadRegistryOrDefault()) {
 }
 
 export function listPrimaryConfigTargets(registry = loadRegistryOrDefault()) {
-  return listManagedConfigTargets(registry).filter((target) => isPrimaryConfigTarget(target.filePath));
+  return listManagedConfigTargets(registry).filter((target) =>
+    isPrimaryConfigTarget(target.filePath),
+  );
 }
 
 export function scanManagedConfigs(registry = loadRegistryOrDefault()) {
@@ -590,17 +654,28 @@ export function scanManagedConfigs(registry = loadRegistryOrDefault()) {
 
 export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
   const configs = scanManagedConfigs(registry);
-  const primaryTargets = new Set(listPrimaryConfigTargets(registry).map((target) => normalizeForMatch(target.filePath)));
+  const primaryTargets = new Set(
+    listPrimaryConfigTargets(registry).map((target) =>
+      normalizeForMatch(target.filePath),
+    ),
+  );
   const rows = [];
 
   for (const config of configs) {
     const isPrimary = primaryTargets.has(normalizeForMatch(config.filePath));
-    const managedServers = Object.entries(registry.servers || {})
-      .filter(([, serverConfig]) => isPrimary && serverAppliesToClient(serverConfig, config.client));
+    const managedServers = Object.entries(registry.servers || {}).filter(
+      ([, serverConfig]) =>
+        isPrimary && serverAppliesToClient(serverConfig, config.client),
+    );
 
     for (const [name, serverConfig] of managedServers) {
-      const expectedUrl = buildDesiredServerRecord(name, serverConfig, config.filePath).config.url;
-      const actual = config.servers.find((server) => server.name === name) || null;
+      const expectedUrl = buildDesiredServerRecord(
+        name,
+        serverConfig,
+        config.filePath,
+      ).config.url;
+      const actual =
+        config.servers.find((server) => server.name === name) || null;
       let status = "missing";
 
       if (!config.exists) {
@@ -658,7 +733,9 @@ export function scanForStdioServers(filePath) {
 
 export function remediate(filePath, stdioServers, policy = {}) {
   const resolvedPath = resolveFilePath(filePath);
-  const offenders = Array.isArray(stdioServers) ? stdioServers.filter((server) => server?.name) : [];
+  const offenders = Array.isArray(stdioServers)
+    ? stdioServers.filter((server) => server?.name)
+    : [];
   const action = policy?.stdio_action || "warn";
 
   if (offenders.length === 0) {
@@ -724,7 +801,11 @@ export function remediate(filePath, stdioServers, policy = {}) {
   if (action === "replace-with-hub") {
     const registry = loadRegistryOrDefault();
     const [hubServerName, hubServerConfig] = getHubServerEntry(registry);
-    const desired = buildDesiredServerRecord(hubServerName, hubServerConfig, resolvedPath);
+    const desired = buildDesiredServerRecord(
+      hubServerName,
+      hubServerConfig,
+      resolvedPath,
+    );
     replacement = { name: desired.name, ...desired.config };
     updates.push(desired);
   }
@@ -742,9 +823,13 @@ export function remediate(filePath, stdioServers, policy = {}) {
 
 export function resolveHubUrl() {
   const registryState = inspectRegistry();
-  const registry = registryState.valid ? registryState.registry : cloneDefaultRegistry();
+  const registry = registryState.valid
+    ? registryState.registry
+    : cloneDefaultRegistry();
   const [, hubServer] = getHubServerEntry(registry);
-  const fallbackRaw = hubServer?.url || `${registry?.defaults?.hub_base || "http://127.0.0.1:27888"}${DEFAULT_HUB_PATH}`;
+  const fallbackRaw =
+    hubServer?.url ||
+    `${registry?.defaults?.hub_base || "http://127.0.0.1:27888"}${DEFAULT_HUB_PATH}`;
 
   let fallback;
   try {
@@ -754,12 +839,16 @@ export function resolveHubUrl() {
   }
 
   const envPortRaw = Number(process.env.TFX_HUB_PORT || "");
-  const envPort = Number.isFinite(envPortRaw) && envPortRaw > 0 ? envPortRaw : null;
+  const envPort =
+    Number.isFinite(envPortRaw) && envPortRaw > 0 ? envPortRaw : null;
   const target = {
     protocol: fallback.protocol || "http:",
     host: fallback.hostname || "127.0.0.1",
     port: envPort || Number(fallback.port || 27888),
-    pathname: fallback.pathname && fallback.pathname !== "/" ? fallback.pathname : DEFAULT_HUB_PATH,
+    pathname:
+      fallback.pathname && fallback.pathname !== "/"
+        ? fallback.pathname
+        : DEFAULT_HUB_PATH,
   };
 
   const hubPidPath = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
@@ -785,7 +874,9 @@ export function resolveHubUrl() {
 
 export function isWatchedPath(filePath) {
   const registryState = inspectRegistry();
-  const registry = registryState.valid ? registryState.registry : cloneDefaultRegistry();
+  const registry = registryState.valid
+    ? registryState.registry
+    : cloneDefaultRegistry();
   const candidate = normalizeForMatch(filePath);
 
   return (registry?.policies?.watched_paths || []).some((watchedPath) => {
@@ -802,7 +893,10 @@ export function isWatchedPath(filePath) {
       return pathBasename(candidate) === trimmed.toLowerCase();
     }
 
-    const suffix = trimmed.replace(/^[.][\\/]/, "").replace(/\\/g, "/").toLowerCase();
+    const suffix = trimmed
+      .replace(/^[.][\\/]/, "")
+      .replace(/\\/g, "/")
+      .toLowerCase();
     return candidate.endsWith(`/${suffix}`);
   });
 }
@@ -814,16 +908,26 @@ export function addRegistryServer(name, url, options = {}) {
   if (!normalizedUrl) throw new Error("server url is required");
 
   const registryState = inspectRegistry();
-  const registry = registryState.valid ? loadRegistry() : cloneDefaultRegistry();
-  const transport = options.transport || (trimmedName === "tfx-hub" ? "hub-url" : "url");
+  const registry = registryState.valid
+    ? loadRegistry()
+    : cloneDefaultRegistry();
+  const transport =
+    options.transport || (trimmedName === "tfx-hub" ? "hub-url" : "url");
 
   registry.servers[trimmedName] = {
     transport,
     url: normalizedUrl,
     safe: options.safe ?? true,
-    targets: Array.isArray(options.targets) && options.targets.length > 0
-      ? [...new Set(options.targets.map((value) => String(value).trim()).filter(Boolean))]
-      : ["claude", "gemini", "codex"],
+    targets:
+      Array.isArray(options.targets) && options.targets.length > 0
+        ? [
+            ...new Set(
+              options.targets
+                .map((value) => String(value).trim())
+                .filter(Boolean),
+            ),
+          ]
+        : ["claude", "gemini", "codex"],
     description: options.description || `${trimmedName} MCP 서버`,
   };
 
@@ -851,10 +955,13 @@ export function removeServerFromTargets(name, options = {}) {
   const trimmedName = String(name || "").trim();
   if (!trimmedName) throw new Error("server name is required");
 
-  const registry = options.registry || (inspectRegistry().valid ? loadRegistry() : cloneDefaultRegistry());
-  const targetsFilter = Array.isArray(options.targets) && options.targets.length > 0
-    ? new Set(options.targets)
-    : null;
+  const registry =
+    options.registry ||
+    (inspectRegistry().valid ? loadRegistry() : cloneDefaultRegistry());
+  const targetsFilter =
+    Array.isArray(options.targets) && options.targets.length > 0
+      ? new Set(options.targets)
+      : null;
   const actions = [];
 
   for (const target of listManagedConfigTargets(registry)) {
@@ -912,7 +1019,11 @@ export function syncRegistryTargets(options = {}) {
     }
 
     if (snapshot.stdioServers.length > 0) {
-      const remediation = remediate(target.filePath, snapshot.stdioServers, registry.policies);
+      const remediation = remediate(
+        target.filePath,
+        snapshot.stdioServers,
+        registry.policies,
+      );
       actions.push({
         type: "remediate",
         filePath: target.filePath,
@@ -927,8 +1038,12 @@ export function syncRegistryTargets(options = {}) {
 
   for (const target of listPrimaryConfigTargets(registry)) {
     const updates = Object.entries(registry.servers || {})
-      .filter(([, serverConfig]) => serverAppliesToClient(serverConfig, target.client))
-      .map(([name, serverConfig]) => buildDesiredServerRecord(name, serverConfig, target.filePath));
+      .filter(([, serverConfig]) =>
+        serverAppliesToClient(serverConfig, target.client),
+      )
+      .map(([name, serverConfig]) =>
+        buildDesiredServerRecord(name, serverConfig, target.filePath),
+      );
 
     if (updates.length === 0) continue;
 

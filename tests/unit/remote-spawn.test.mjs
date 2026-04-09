@@ -1,8 +1,8 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { describe, it } from "node:test";
 
 import { __remoteSpawnTest } from "../../scripts/remote-spawn.mjs";
 
@@ -59,10 +59,19 @@ describe("remote-spawn buildPromptContext()", () => {
         { includeTransferFiles: true },
       );
 
-      assert.equal(context.prompt, "Read ./prd.md first\n\n---\n\nthen continue");
+      assert.equal(
+        context.prompt,
+        "Read ./prd.md first\n\n---\n\nthen continue",
+      );
       assert.equal(context.transferCandidates.length, 2);
-      assert.equal(context.transferCandidates[0].localPath, resolve(handoffPath));
-      assert.equal(context.transferCandidates[1].localPath, resolve(transferPath));
+      assert.equal(
+        context.transferCandidates[0].localPath,
+        resolve(handoffPath),
+      );
+      assert.equal(
+        context.transferCandidates[1].localPath,
+        resolve(transferPath),
+      );
     });
   });
 
@@ -83,7 +92,10 @@ describe("remote-spawn buildPromptContext()", () => {
 
       assert.equal(context.prompt, "local handoff");
       assert.equal(context.transferCandidates.length, 1);
-      assert.equal(context.transferCandidates[0].localPath, resolve(handoffPath));
+      assert.equal(
+        context.transferCandidates[0].localPath,
+        resolve(handoffPath),
+      );
     });
   });
 });
@@ -116,7 +128,14 @@ describe("remote-spawn CLI fail-fast", () => {
       const missingPath = join(dir, `missing-${Date.now()}.md`);
       const result = spawnSync(
         process.execPath,
-        ["scripts/remote-spawn.mjs", "--host", "example-host", "--transfer", missingPath, "hello"],
+        [
+          "scripts/remote-spawn.mjs",
+          "--host",
+          "example-host",
+          "--transfer",
+          missingPath,
+          "hello",
+        ],
         { cwd: resolve("."), encoding: "utf8" },
       );
 
@@ -132,7 +151,14 @@ describe("remote-spawn CLI fail-fast", () => {
 
       const result = spawnSync(
         process.execPath,
-        ["scripts/remote-spawn.mjs", "--host", "example-host", "--transfer", largePath, "hello"],
+        [
+          "scripts/remote-spawn.mjs",
+          "--host",
+          "example-host",
+          "--transfer",
+          largePath,
+          "hello",
+        ],
         { cwd: resolve("."), encoding: "utf8" },
       );
 

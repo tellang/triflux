@@ -3,9 +3,9 @@
 // store.mjs의 기존 SQLite 연결(db)을 활용한다.
 // pipeline_state 테이블은 schema.sql에 정의.
 
-import { join } from 'node:path';
+import { join } from "node:path";
 
-import { TFX_STATE_DIR, ensureTfxDirs } from '../paths.mjs';
+import { ensureTfxDirs, TFX_STATE_DIR } from "../paths.mjs";
 
 /**
  * 파이프라인 상태 DB 경로를 계산한다.
@@ -13,7 +13,7 @@ import { TFX_STATE_DIR, ensureTfxDirs } from '../paths.mjs';
  * @returns {string}
  */
 export function getPipelineStateDbPath(baseDir) {
-  return join(baseDir, TFX_STATE_DIR, 'state.db');
+  return join(baseDir, TFX_STATE_DIR, "state.db");
 }
 
 /**
@@ -54,7 +54,7 @@ function getStatements(db) {
   if (s) return s;
 
   s = {
-    get: db.prepare('SELECT * FROM pipeline_state WHERE team_name = ?'),
+    get: db.prepare("SELECT * FROM pipeline_state WHERE team_name = ?"),
     insert: db.prepare(`
       INSERT INTO pipeline_state (team_name, phase, fix_attempt, fix_max, ralph_iteration, ralph_max, artifacts, phase_history, created_at, updated_at)
       VALUES (@team_name, @phase, @fix_attempt, @fix_max, @ralph_iteration, @ralph_max, @artifacts, @phase_history, @created_at, @updated_at)
@@ -71,8 +71,8 @@ function getStatements(db) {
         updated_at = @updated_at
       WHERE team_name = @team_name
     `),
-    remove: db.prepare('DELETE FROM pipeline_state WHERE team_name = ?'),
-    list: db.prepare('SELECT * FROM pipeline_state ORDER BY updated_at DESC'),
+    remove: db.prepare("DELETE FROM pipeline_state WHERE team_name = ?"),
+    list: db.prepare("SELECT * FROM pipeline_state ORDER BY updated_at DESC"),
   };
   STATEMENTS.set(db, s);
   return s;
@@ -82,15 +82,15 @@ function parseRow(row) {
   if (!row) return null;
   return {
     ...row,
-    artifacts: JSON.parse(row.artifacts || '{}'),
-    phase_history: JSON.parse(row.phase_history || '[]'),
+    artifacts: JSON.parse(row.artifacts || "{}"),
+    phase_history: JSON.parse(row.phase_history || "[]"),
   };
 }
 
 function serializeState(state) {
   return {
     team_name: state.team_name,
-    phase: state.phase || 'plan',
+    phase: state.phase || "plan",
     fix_attempt: state.fix_attempt ?? 0,
     fix_max: state.fix_max ?? 3,
     ralph_iteration: state.ralph_iteration ?? 0,
@@ -115,7 +115,7 @@ export function initPipelineState(db, teamName, opts = {}) {
     const now = Date.now();
     const state = {
       team_name: teamName,
-      phase: 'plan',
+      phase: "plan",
       fix_attempt: 0,
       fix_max: opts.fix_max ?? 3,
       ralph_iteration: 0,

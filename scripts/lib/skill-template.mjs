@@ -1,5 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  basename,
+  extname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 
 const IF_TAG_RE = /{{\s*(#if\s+([A-Za-z0-9_.-]+)|\/if)\s*}}/g;
 const PARTIAL_RE = /{{>\s*([A-Za-z0-9_./-]+)\s*}}/g;
@@ -187,7 +194,8 @@ function resolveIncludeContent(includeName, options) {
   const fullPath = resolve(baseDir, normalizedName);
   const relativePath = relative(baseDir, fullPath);
   const isInsideBaseDir =
-    relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+    relativePath === "" ||
+    (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 
   if (!isInsideBaseDir || !existsSync(fullPath)) {
     throw new Error(`Missing include: ${normalizedName}`);
@@ -223,9 +231,21 @@ function renderVariables(source, context) {
   });
 }
 
-function renderWithContext(source, context, partials, options, includeStack = []) {
+function renderWithContext(
+  source,
+  context,
+  partials,
+  options,
+  includeStack = [],
+) {
   const afterIf = evaluateConditionals(source, context);
-  const afterPartials = renderPartials(afterIf, context, partials, options, includeStack);
+  const afterPartials = renderPartials(
+    afterIf,
+    context,
+    partials,
+    options,
+    includeStack,
+  );
   const afterFileIncludes = renderFileIncludes(
     afterPartials,
     context,
@@ -239,8 +259,8 @@ function renderWithContext(source, context, partials, options, includeStack = []
 function readAllTemplateFiles(rootDir, currentDir = rootDir) {
   if (!rootDir || !existsSync(rootDir)) return [];
 
-  const entries = readdirSync(currentDir, { withFileTypes: true }).sort((left, right) =>
-    left.name.localeCompare(right.name),
+  const entries = readdirSync(currentDir, { withFileTypes: true }).sort(
+    (left, right) => left.name.localeCompare(right.name),
   );
   const files = [];
 
@@ -278,7 +298,10 @@ export function parseFrontmatter(source) {
   return { data, body };
 }
 
-export function buildSkillTemplateContext({ frontmatter = {}, skillDirName = "" } = {}) {
+export function buildSkillTemplateContext({
+  frontmatter = {},
+  skillDirName = "",
+} = {}) {
   const context = { ...frontmatter };
   const skillName = String(frontmatter.name || skillDirName || "").trim();
   const skillDescription = String(frontmatter.description || "").trim();

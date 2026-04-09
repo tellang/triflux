@@ -1,7 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
 
 import {
   CONTEXT_MONITOR_CACHE_PATH,
@@ -72,21 +71,24 @@ function normalizeUsage(usage) {
   const input = Number(usage.input_tokens ?? usage.inputTokens ?? 0);
   const output = Number(usage.output_tokens ?? usage.outputTokens ?? 0);
   const cacheCreation = Number(
-    usage.cache_creation_input_tokens
-      ?? usage.cacheCreationInputTokens
-      ?? usage.cache_creation_tokens
-      ?? 0,
+    usage.cache_creation_input_tokens ??
+      usage.cacheCreationInputTokens ??
+      usage.cache_creation_tokens ??
+      0,
   );
   const cacheRead = Number(
-    usage.cache_read_input_tokens
-      ?? usage.cacheReadInputTokens
-      ?? usage.cache_read_tokens
-      ?? 0,
+    usage.cache_read_input_tokens ??
+      usage.cacheReadInputTokens ??
+      usage.cache_read_tokens ??
+      0,
   );
-  const totalCandidate = Number(usage.total_tokens ?? usage.totalTokens ?? Number.NaN);
-  const total = Number.isFinite(totalCandidate) && totalCandidate > 0
-    ? totalCandidate
-    : input + output + cacheCreation + cacheRead;
+  const totalCandidate = Number(
+    usage.total_tokens ?? usage.totalTokens ?? Number.NaN,
+  );
+  const total =
+    Number.isFinite(totalCandidate) && totalCandidate > 0
+      ? totalCandidate
+      : input + output + cacheCreation + cacheRead;
   if (!Number.isFinite(total) || total <= 0) return null;
   return {
     input: Math.max(0, Math.round(input)),
@@ -159,7 +161,10 @@ function extractFileKeys(args) {
 function detectSkillHints(payloadText) {
   if (!payloadText) return [];
   const matches = payloadText.match(/\$[a-z0-9_-]+/gi) || [];
-  return Array.from(new Set(matches.map((m) => m.replace(/^\$/, "")))).slice(0, 5);
+  return Array.from(new Set(matches.map((m) => m.replace(/^\$/, "")))).slice(
+    0,
+    5,
+  );
 }
 
 export function estimateTokens(input) {
@@ -172,21 +177,34 @@ export function parseUsageFromPayload(payload) {
 
 export function classifyContextThreshold(percent) {
   const p = clampThresholdPercent(percent);
-  if (p >= WARNING_LEVELS.critical.min) return { level: "critical", message: WARNING_LEVELS.critical.message };
-  if (p >= WARNING_LEVELS.warn.min) return { level: "warn", message: WARNING_LEVELS.warn.message };
-  if (p >= WARNING_LEVELS.info.min) return { level: "info", message: WARNING_LEVELS.info.message };
+  if (p >= WARNING_LEVELS.critical.min)
+    return { level: "critical", message: WARNING_LEVELS.critical.message };
+  if (p >= WARNING_LEVELS.warn.min)
+    return { level: "warn", message: WARNING_LEVELS.warn.message };
+  if (p >= WARNING_LEVELS.info.min)
+    return { level: "info", message: WARNING_LEVELS.info.message };
   return { level: "ok", message: "" };
 }
 
 export function formatContextUsage(usedTokens, limitTokens, percent = null) {
   const used = Math.max(0, Math.round(Number(usedTokens) || 0));
-  const limit = Math.max(1, Math.round(Number(limitTokens) || DEFAULT_CONTEXT_LIMIT));
-  const pct = percent == null ? clampPercent((used / limit) * 100) : clampPercent(percent);
+  const limit = Math.max(
+    1,
+    Math.round(Number(limitTokens) || DEFAULT_CONTEXT_LIMIT),
+  );
+  const pct =
+    percent == null
+      ? clampPercent((used / limit) * 100)
+      : clampPercent(percent);
   return `${formatTokenCount(used)}/${formatTokenCount(limit)} (${pct}%)`;
 }
 
 export function readContextMonitorSnapshot() {
-  return readJsonMigrate(CONTEXT_MONITOR_CACHE_PATH, CONTEXT_MONITOR_LEGACY_PATH, null);
+  return readJsonMigrate(
+    CONTEXT_MONITOR_CACHE_PATH,
+    CONTEXT_MONITOR_LEGACY_PATH,
+    null,
+  );
 }
 
 function getStdinContextUsage(stdin) {
@@ -194,9 +212,10 @@ function getStdinContextUsage(stdin) {
   const nativePercent = Number(stdin?.context_window?.used_percentage);
   const usage = stdin?.context_window?.current_usage || {};
   const explicitUsed = Number(usage.total_tokens || 0);
-  const calculatedUsed = Number(usage.input_tokens || 0)
-    + Number(usage.cache_creation_input_tokens || 0)
-    + Number(usage.cache_read_input_tokens || 0);
+  const calculatedUsed =
+    Number(usage.input_tokens || 0) +
+    Number(usage.cache_creation_input_tokens || 0) +
+    Number(usage.cache_read_input_tokens || 0);
   const usedTokens = explicitUsed > 0 ? explicitUsed : calculatedUsed;
 
   if (limitTokens > 0 && usedTokens > 0) {
@@ -225,12 +244,11 @@ export function buildContextUsageView(stdin, snapshot = null) {
   const monitor = snapshot || readContextMonitorSnapshot();
   const fallbackLimit = Number(monitor?.limitTokens || DEFAULT_CONTEXT_LIMIT);
 
-  const usedTokens = stdinUsage?.usedTokens
-    ?? Number(monitor?.usedTokens || 0);
-  const limitTokens = stdinUsage?.limitTokens
-    ?? Math.max(1, fallbackLimit);
-  const percent = stdinUsage?.percent
-    ?? (limitTokens > 0 ? clampPercent((usedTokens / limitTokens) * 100) : 0);
+  const usedTokens = stdinUsage?.usedTokens ?? Number(monitor?.usedTokens || 0);
+  const limitTokens = stdinUsage?.limitTokens ?? Math.max(1, fallbackLimit);
+  const percent =
+    stdinUsage?.percent ??
+    (limitTokens > 0 ? clampPercent((usedTokens / limitTokens) * 100) : 0);
 
   const warning = classifyContextThreshold(percent);
   return {
@@ -240,10 +258,14 @@ export function buildContextUsageView(stdin, snapshot = null) {
     display: formatContextUsage(usedTokens, limitTokens, percent),
     warningLevel: warning.level,
     warningMessage: warning.message,
-    warningTag: warning.level === "warn" ? "⚠ 압축 권장"
-      : warning.level === "critical" ? "‼ 분할 권장"
-      : warning.level === "info" ? "ℹ 절반 이상 사용"
-      : "",
+    warningTag:
+      warning.level === "warn"
+        ? "⚠ 압축 권장"
+        : warning.level === "critical"
+          ? "‼ 분할 권장"
+          : warning.level === "info"
+            ? "ℹ 절반 이상 사용"
+            : "",
     source: stdinUsage?.source || (monitor ? "monitor" : "none"),
   };
 }
@@ -295,7 +317,10 @@ export function createContextMonitor(options = {}) {
     const percent = clampPercent((state.usedTokens / state.limitTokens) * 100);
     const warning = classifyContextThreshold(percent);
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const reportPath = join(logsDir, `context-usage-${state.sessionId}-${ts}.json`);
+    const reportPath = join(
+      logsDir,
+      `context-usage-${state.sessionId}-${ts}.json`,
+    );
     safeWriteJson(reportPath, {
       sessionId: state.sessionId,
       reason,
@@ -329,17 +354,31 @@ export function createContextMonitor(options = {}) {
     toolName = "",
   } = {}) => {
     const started = process.hrtime.bigint();
-    const reqObj = typeof requestBody === "object" ? requestBody : safeJsonParse(String(requestBody || ""));
-    const resObj = typeof responseBody === "object" ? responseBody : safeJsonParse(String(responseBody || ""));
+    const reqObj =
+      typeof requestBody === "object"
+        ? requestBody
+        : safeJsonParse(String(requestBody || ""));
+    const resObj =
+      typeof responseBody === "object"
+        ? responseBody
+        : safeJsonParse(String(responseBody || ""));
 
     const usage = parseUsageFromPayload(resObj);
-    const requestTokens = requestBytes > 0 ? toTokenEstimate(requestBytes) : toTokenEstimate(requestBody);
-    const responseTokens = usage?.total ?? (responseBytes > 0 ? toTokenEstimate(responseBytes) : toTokenEstimate(responseBody));
+    const requestTokens =
+      requestBytes > 0
+        ? toTokenEstimate(requestBytes)
+        : toTokenEstimate(requestBody);
+    const responseTokens =
+      usage?.total ??
+      (responseBytes > 0
+        ? toTokenEstimate(responseBytes)
+        : toTokenEstimate(responseBody));
     const totalTokens = Math.max(0, requestTokens + responseTokens);
 
     const method = reqObj?.method || reqObj?.params?.name || "";
     const name = toolName || reqObj?.params?.name || reqObj?.tool || "";
-    const args = reqObj?.params?.arguments || reqObj?.arguments || reqObj?.params || {};
+    const args =
+      reqObj?.params?.arguments || reqObj?.arguments || reqObj?.params || {};
     const payloadText = normalizeText(requestBody).slice(0, MAX_CAPTURE_BYTES);
     const skills = detectSkillHints(payloadText);
     const files = extractFileKeys(args);
@@ -383,7 +422,9 @@ export function createContextMonitor(options = {}) {
 
   if (registerExitHooks) {
     const flushOnExit = () => {
-      try { flush("process.exit"); } catch {}
+      try {
+        flush("process.exit");
+      } catch {}
     };
     process.once("exit", flushOnExit);
     process.once("SIGINT", flushOnExit);

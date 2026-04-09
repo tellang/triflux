@@ -1,10 +1,12 @@
 export function nudge(message) {
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      additionalContext: message,
-    },
-  }));
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        additionalContext: message,
+      },
+    }),
+  );
   process.exit(0);
 }
 

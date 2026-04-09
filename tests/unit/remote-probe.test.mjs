@@ -1,6 +1,7 @@
 // tests/unit/remote-probe.test.mjs — remote-probe.mjs 유닛 테스트
-import { describe, it, beforeEach } from "node:test";
+
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
   createRemoteProbe,
@@ -47,7 +48,9 @@ function makeSession(overrides = {}) {
 describe("remote-probe: sshCapturePane", () => {
   it("성공 시 마지막 N줄을 반환해야 한다", () => {
     const mock = mockExecFileSync("line1\nline2\nline3\n\nline4\nline5\n");
-    const result = sshCapturePane("host", "sess:0.0", 3, { execFileSync: mock });
+    const result = sshCapturePane("host", "sess:0.0", 3, {
+      execFileSync: mock,
+    });
     assert.equal(result, "line3\nline4\nline5");
   });
 
@@ -62,13 +65,17 @@ describe("remote-probe: sshCapturePane", () => {
 
   it("SSH 실패 시 null을 반환해야 한다", () => {
     const mock = mockExecFileSync(new Error("ssh failed"));
-    const result = sshCapturePane("host", "sess:0.0", 5, { execFileSync: mock });
+    const result = sshCapturePane("host", "sess:0.0", 5, {
+      execFileSync: mock,
+    });
     assert.equal(result, null);
   });
 
   it("빈 출력 시 빈 문자열을 반환해야 한다", () => {
     const mock = mockExecFileSync("\n\n\n");
-    const result = sshCapturePane("host", "sess:0.0", 5, { execFileSync: mock });
+    const result = sshCapturePane("host", "sess:0.0", 5, {
+      execFileSync: mock,
+    });
     assert.equal(result, "");
   });
 });
@@ -191,7 +198,7 @@ describe("remote-probe: L1 probe", () => {
       return "same output\n";
     };
     const probe = createRemoteProbe(makeSession(), {
-      ...probeOpts({ l1ThresholdMs: 0 }),  // 즉시 stall 판정
+      ...probeOpts({ l1ThresholdMs: 0 }), // 즉시 stall 판정
       deps: { execFileSync: mock },
     });
     // 첫 probe — hash 초기화
@@ -253,7 +260,7 @@ describe("remote-probe: L3 probe", () => {
   it("출력이 없고 timeout 초과 시 l3=timeout을 반환해야 한다", async () => {
     const mock = (cmd, args) => {
       if (args.some((a) => a.includes("has-session"))) return "";
-      return "\n\n";  // 빈 줄만
+      return "\n\n"; // 빈 줄만
     };
     const probe = createRemoteProbe(makeSession(), {
       ...probeOpts({ l3ThresholdMs: 0 }),
@@ -309,7 +316,7 @@ describe("remote-probe: start/stop", () => {
       deps: { execFileSync: mock },
     });
     probe.start();
-    probe.start();  // 중복 호출
+    probe.start(); // 중복 호출
     assert.equal(probe.started, true);
     probe.stop();
   });

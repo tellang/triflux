@@ -82,7 +82,9 @@ function inspectTarget(target, options = {}) {
 }
 
 export function verifyCaches(options = {}) {
-  const targets = options.targets?.length ? options.targets : Object.keys(CACHE_TARGETS);
+  const targets = options.targets?.length
+    ? options.targets
+    : Object.keys(CACHE_TARGETS);
   const results = targets.map((target) => inspectTarget(target, options));
   const issueCount = results.filter((result) => result.status !== "ok").length;
 
@@ -123,7 +125,9 @@ export async function fixCaches(options = {}) {
 
 function formatVerificationSummary(verification) {
   const label = verification.ok ? "cache-doctor: ok" : "cache-doctor: issues";
-  const details = verification.results.map((result) => `${result.target}:${result.status}`);
+  const details = verification.results.map(
+    (result) => `${result.target}:${result.status}`,
+  );
   return `${label} (${details.join(", ")})`;
 }
 
@@ -138,8 +142,11 @@ async function main() {
   }
 
   const repair = await fixCaches({ verification });
-  const repaired = repair.fixed.length > 0 ? `fixed:${repair.fixed.join(",")}` : "fixed:none";
-  const suffix = repair.summary.results.map((result) => `${result.target}:${result.status}`).join(", ");
+  const repaired =
+    repair.fixed.length > 0 ? `fixed:${repair.fixed.join(",")}` : "fixed:none";
+  const suffix = repair.summary.results
+    .map((result) => `${result.target}:${result.status}`)
+    .join(", ");
   console.log(`cache-doctor: fix (${repaired}${suffix ? `, ${suffix}` : ""})`);
   if (!repair.ok) process.exitCode = 1;
 }

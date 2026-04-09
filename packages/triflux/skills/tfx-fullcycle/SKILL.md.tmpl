@@ -1,0 +1,286 @@
+---
+internal: true
+name: tfx-fullcycle
+description: "여러 파일/모듈에 걸친 복잡한 기능을 처음부터 끝까지 자율 개발할 때 사용한다. 설계→계획→구현→QA→검증 전체 파이프라인이 필요한 작업, '처음부터 끝까지', '전체', '완전히', '풀 오토', 'full auto', '전체 파이프라인으로' 같은 수식어가 있을 때 사용. 단순 단일 작업은 tfx-autopilot이 더 빠릅니다."
+triggers:
+  - deep autopilot
+  - 풀 오토
+  - 처음부터 끝까지
+  - full auto
+argument-hint: "<구현할 기능 전체 설명>"
+---
+
+# {{SKILL_NAME}} — Full Development Pipeline with Tri-CLI Consensus
+
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
+> 5-Phase 파이프라인: Expansion → Planning → Execution → QA → Validation.
+> OMC autopilot + Superpowers TDD + MetaGPT SOP 영감. 처음부터 끝까지 자율 실행.
+> 실행 전 컨텍스트 grounding, deep-interview 산출물 재사용, phase-state/resume 계약을 포함한다.
+
+## PRE-CONTEXT GATE
+
+Phase 1 시작 전 아래 intake를 먼저 수행한다.
+
+1. task slug를 생성한다.
+2. 최근 관련 컨텍스트/산출물을 탐색한다.
+3. 현재 작업용 스냅샷을 생성한다.
+4. ambiguity가 높으면 `/deep-interview` 또는 기존 인터뷰 산출물 재사용을 우선 고려한다.
+
+**필수 스냅샷 필드**
+- task statement
+- desired outcome
+- known facts / evidence
+- constraints
+- unknowns / open questions
+- likely codebase touchpoints
+
+**권장 저장 경로**
+- `.tfx/fullcycle/{run-id}/context-snapshot.md`
+
+## STATE & ARTIFACT CONTRACT
+
+`tfx-fullcycle`은 phase별로 산출물과 상태를 남긴다.
+
+**기본 아티팩트 디렉토리**
+- `.tfx/fullcycle/{run-id}/`
+
+**최소 산출물**
+- `context-snapshot.md`
+- `expanded-spec.md`
+- `implementation-plan.md`
+- `execution-summary.md`
+- `qa-findings.md`
+- `validation-decision.md`
+- `state.json`
+
+**phase-state 필드**
+- current phase
+- started_at
+- last_successful_phase
+- retry_count
+- failure_reason
+
+**resume 규칙**
+- 재실행 시 전체를 처음부터 다시 돌리지 않는다.
+- `state.json`을 읽고 마지막 미완료 phase부터 resume한다.
+- QA / Validation 재시도는 해당 phase만 다시 실행한다.
+
+## HARD RULES
+
+> headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
+
+1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+2. Codex·Gemini 워커 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+3. Claude 워커 → `Agent(run_in_background=true)`
+4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
+
+## MODEL ROLES
+
+| Phase | 역할 | 담당 |
+|-------|------|------|
+| Phase 1: Expansion | 아키텍트 — 요구사항 분석, acceptance criteria 도출 | Claude Opus (Agent) |
+| Phase 2: Planning | 플래너 — 태스크 분해, TDD 전략 | Claude Opus (Agent, background) |
+| Phase 2: Planning | 아키텍트 — 기술 설계, 파일 구조, API 인터페이스 | Codex (tfx headless) |
+| Phase 2: Planning | 크리틱 — 리스크 분석, 엣지 케이스, 보안 | Gemini (tfx headless) |
+| Phase 3: Execution | 구현자 — 코드 작성, TDD RED→GREEN→REFACTOR | Codex (tfx headless) |
+| Phase 3: Execution | 문서/UI 작성자 | Gemini (tfx headless) |
+| Phase 4: QA | 기능 검증자 — acceptance criteria 충족 여부 | Claude (Agent, background) |
+| Phase 4: QA | 보안/성능 검증자 — OWASP, 병목, 에러 핸들링 | Codex (tfx headless) |
+| Phase 4: QA | UX/접근성 검증자 — 반응형, DX, 문서화 | Gemini (tfx headless) |
+| Phase 5: Validation | 합의 판정 — Consensus Score 계산 및 완료 결정 | Claude (직접 판단) |
+
+## EXECUTION STEPS
+
+### Phase 1: Expansion
+
+**Claude가 직접 실행한다.** Agent 호출 없이 Claude 자신이 아키텍트 역할을 수행한다.
+
+1. `.tfx/plans/interview-*.md` 산출물이 있으면 관련 문서를 먼저 탐색한다.
+2. 인터뷰 산출물이 충분히 명확하면 raw prompt에서 다시 시작하지 말고 해당 문서를 Expansion 입력으로 재사용한다.
+3. 인터뷰 산출물이 없거나 부족하면 사용자 요청에서 구현 범위, 영향 파일, 엣지 케이스, 암묵적 요구사항을 분석한다.
+4. 검증 가능한 acceptance criteria 목록을 도출한다.
+5. 모호한 점이 남아 있으면 AskUserQuestion 또는 `/deep-interview`로 명확화한다.
+6. 출력: `{expanded_requirements}`, `{acceptance_criteria}`
+7. 산출물 저장: `.tfx/fullcycle/{run-id}/expanded-spec.md`
+
+### Phase 2: Planning
+
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
+
+**Step 2-A: Claude Planner (Agent)**
+```
+Agent(
+  subagent_type="oh-my-claudecode:planner",
+  model="opus",
+  run_in_background=true,
+  prompt="다음 기능의 구현 계획을 수립하라.
+기능: {expanded_requirements}
+태스크 분해, 실행 순서, 의존성, TDD 전략을 포함하라.
+JSON 형식으로 출력하라: { tasks, order, dependencies, tdd_strategy, risks }"
+)
+```
+
+**Step 2-B: Codex Architect + Gemini Critic (Bash — 동시에 위 Agent와 같은 응답에서 호출)**
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:시니어 엔지니어로서 다음 기능의 기술적 설계를 작성하라. 기능: {expanded_requirements}. 파일 구조, API 인터페이스, 데이터 모델을 포함하라. JSON 형식: { design, file_changes, interfaces, test_plan }:architect' \
+  --assign 'gemini:QA 전문가로서 다음 기능 구현의 리스크를 분석하라. 기능: {expanded_requirements}. 엣지 케이스, 보안, 성능, 접근성 우려를 포함하라. JSON 형식: { edge_cases, security_risks, performance, accessibility, test_cases }:critic' \
+  --timeout 600")
+```
+
+**합의 판정:**
+- Consensus Score >= 70 → Phase 3 진행
+- Consensus Score < 70 → 3자 결과를 교차 공유 후 Round 2 재합의
+- Round 2 후에도 < 60 → AskUserQuestion으로 불일치 항목 제시 + 방향 결정 요청
+
+**산출물 저장**
+- `.tfx/fullcycle/{run-id}/implementation-plan.md`
+
+### Phase 3: Execution
+
+태스크를 라우팅 규칙에 따라 병렬 실행한다. 독립 태스크는 같은 응답에서 동시 호출한다.
+
+**라우팅 규칙:**
+- 코드 구현/수정/테스트 작성 → Codex (tfx headless)
+- UI/문서 → Gemini (tfx headless)
+
+**TDD 실행 순서 (Codex에 전달하는 프롬프트에 명시):**
+1. 테스트 먼저 작성 (RED)
+2. 테스트 실행하여 실패 확인
+3. 구현 코드 작성 (GREEN)
+4. 테스트 통과 확인
+5. 리팩터링 (REFACTOR)
+
+**병렬 실행 예시 (독립 태스크 A + B + 문서 동시 실행):**
+
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
+
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:TDD로 {모듈_A}를 구현하라. 테스트 먼저 작성(RED), 구현(GREEN), 리팩터링(REFACTOR) 순서로 진행하라. 계획: {task_A_spec}:implementer' \
+  --assign 'codex:TDD로 {모듈_B}를 구현하라. 테스트 먼저 작성(RED), 구현(GREEN), 리팩터링(REFACTOR) 순서로 진행하라. 계획: {task_B_spec}:implementer' \
+  --assign 'gemini:{문서_항목}을 작성하라. 변경된 API 인터페이스: {interfaces}:writer' \
+  --timeout 600")
+```
+
+각 태스크 완료 시 테스트 통과 여부를 확인하고 다음 태스크로 진행한다.
+
+**산출물 저장**
+- 변경 파일 목록과 태스크별 결과를 `.tfx/fullcycle/{run-id}/execution-summary.md`에 기록한다.
+
+### Phase 4: QA
+
+**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
+
+**Step 4-A: Claude 기능 검증 (Agent)**
+```
+Agent(
+  subagent_type="oh-my-claudecode:verifier",
+  model="opus",
+  run_in_background=true,
+  prompt="다음 변경사항이 acceptance criteria를 충족하는지 검증하라.
+criteria: {acceptance_criteria}
+변경 파일: {changed_files}
+각 criterion별 PASS/FAIL과 근거를 제시하라.
+엣지 케이스 테스트 시나리오를 제안하라.
+JSON 형식: { criteria_results, edge_case_findings, overall_pass }"
+)
+```
+
+**Step 4-B: Codex 보안/성능 + Gemini UX/접근성 (Bash — 동시에 위 Agent와 같은 응답에서 호출)**
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:보안/성능 관점에서 다음 변경사항을 리뷰하라. OWASP Top 10, 성능 병목, 에러 핸들링, 리소스 누수를 확인하라. 변경 파일: {changed_files}. JSON 형식: { security_findings, performance_findings, overall_pass }:verifier' \
+  --assign 'gemini:UX/접근성 관점에서 다음 변경사항을 리뷰하라. UI 변경: 접근성, 반응형, 사용성. API 변경: DX, 문서화, 일관성. 변경 파일: {changed_files}. JSON 형식: { ux_findings, accessibility_findings, overall_pass }:verifier' \
+  --timeout 600")
+```
+
+**QA 반복 규칙**
+- 동일한 실패 / 동일한 에러가 3회 반복되면 무한 루프를 중단한다.
+- 이 경우 `.tfx/fullcycle/{run-id}/qa-findings.md`에 근본 이슈 보고서를 남기고 사용자 판단을 요청한다.
+
+**산출물 저장**
+- `.tfx/fullcycle/{run-id}/qa-findings.md`
+
+### Phase 5: Validation
+
+Phase 4의 3자 결과에 Consensus 프로토콜을 적용한다.
+
+- Score >= 70 + Critical 0건 → 완료 확정
+- Score >= 70 + Critical 존재 → Critical만 수정 후 Phase 4 재실행
+- Score < 70 → 미합의 항목 수정 → Phase 4 재실행 (최대 2회)
+- 2회 재실행 후에도 < 70 → AskUserQuestion으로 현황 보고 + 사용자 판단 요청
+
+**산출물 저장**
+- `.tfx/fullcycle/{run-id}/validation-decision.md`
+
+### Final: 완료 보고
+
+```markdown
+# Deep Autopilot 완료: {feature}
+
+## Pipeline Summary
+| Phase | 상태 | 결과 |
+|-------|------|------|
+| Expansion | 완료 | {criteria_count}개 기준 도출 |
+| Planning | 완료 | Consensus {score}% (Round {n}) |
+| Execution | 완료 | {task_count}개 태스크, {file_count}개 파일 변경 |
+| QA | 완료 | 3자 독립 리뷰 완료 |
+| Validation | 완료 | Consensus {score}%, Critical 0건 |
+
+## 변경 사항
+| 파일 | 작업 | 설명 |
+|------|------|------|
+| {file} | 생성/수정 | {summary} |
+
+## Acceptance Criteria
+- [x] {criterion1} — 3/3 PASS
+- [x] {criterion2} — 2/3 PASS (Gemini: 조건부)
+
+## QA 결과
+- 보안: {findings_count}건 (모두 해결)
+- 성능: {findings_count}건 (모두 해결)
+- 테스트: {pass}/{total} 통과
+
+## 미합의 사항 (있으면)
+- {항목}: {각 CLI 입장}
+```
+
+## CLEANUP & CANCEL RULES
+
+- 성공 시 `state.json`을 complete 상태로 기록하고 orphan state가 남지 않도록 정리한다.
+- 취소/비정상 종료 시에도 마지막 phase, failure_reason, 재개 힌트를 남겨 다음 실행에서 resume 가능해야 한다.
+- cleanup은 상태를 무조건 삭제하는 것이 아니라, 성공/취소 여부가 판별되도록 메타데이터를 남긴 뒤 정리한다.
+
+## ERROR RECOVERY
+
+| 상황 | 대응 |
+|------|------|
+| tfx headless 타임아웃 | `--timeout` 값을 900으로 올려 재시도 |
+| Consensus 2회 연속 실패 | AskUserQuestion으로 미합의 항목 제시 + 사용자 판단 요청 |
+| 특정 Phase 결과 누락 | 해당 Phase만 단독 재실행 |
+| 빌드/테스트 실패 | Codex에 실패 로그 전달하여 수정 지시 |
+| 동일 QA 에러 3회 반복 | 루프 중단 + 근본 이슈 보고서 작성 + 사용자 판단 요청 |
+
+## TOKEN BUDGET
+
+| Phase | 토큰 |
+|-------|------|
+| Phase 1 (Expansion) | ~5K |
+| Phase 2 (Planning, 3자) | ~20K |
+| Phase 3 (Execution) | ~25K |
+| Phase 4 (QA, 3자) | ~18K |
+| Phase 5 (Validation) | ~5K |
+| 재시도 (필요 시) | +15K |
+| **총합** | **~73-88K** |
+
+## 사용 예
+
+```
+/tfx-fullcycle "JWT 인증 시스템 전체 구현. 로그인/로그아웃/리프레시/미들웨어/테스트"
+/tfx-fullcycle "풀 오토 — 결제 모듈을 Stripe에서 Toss Payments로 마이그레이션"
+/tfx-fullcycle "처음부터 끝까지 — REST API를 GraphQL로 점진적 전환, 기존 클라이언트 호환 유지"
+```

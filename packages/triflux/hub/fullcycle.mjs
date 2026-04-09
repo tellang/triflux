@@ -1,14 +1,21 @@
 // hub/fullcycle.mjs — tfx-fullcycle runtime artifact/state helpers
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { ensureTfxDirs, TFX_FULLCYCLE_DIR, TFX_PLANS_DIR } from './paths.mjs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
+import { ensureTfxDirs, TFX_FULLCYCLE_DIR, TFX_PLANS_DIR } from "./paths.mjs";
 
 function safeResolve(baseDir, relativePath) {
   const base = resolve(baseDir);
   const target = resolve(join(baseDir, relativePath));
   if (!target.startsWith(base)) {
-    throw new Error('Invalid fullcycle path: path traversal detected');
+    throw new Error("Invalid fullcycle path: path traversal detected");
   }
   return target;
 }
@@ -17,9 +24,9 @@ function safeResolve(baseDir, relativePath) {
 export function createFullcycleRunId(now = new Date()) {
   return now
     .toISOString()
-    .replace(/[:.]/g, '-')
-    .replace('T', '_')
-    .replace('Z', 'Z');
+    .replace(/[:.]/g, "-")
+    .replace("T", "_")
+    .replace("Z", "Z");
 }
 
 export function getFullcycleRunDir(runId, baseDir = process.cwd()) {
@@ -33,32 +40,41 @@ export function ensureFullcycleRunDir(runId, baseDir = process.cwd()) {
   return dir;
 }
 
-export function saveFullcycleArtifact(runId, filename, content, baseDir = process.cwd()) {
-  if (!filename || typeof filename !== 'string') {
-    throw new Error('Artifact filename is required');
+export function saveFullcycleArtifact(
+  runId,
+  filename,
+  content,
+  baseDir = process.cwd(),
+) {
+  if (!filename || typeof filename !== "string") {
+    throw new Error("Artifact filename is required");
   }
 
   const dir = ensureFullcycleRunDir(runId, baseDir);
   const path = safeResolve(dir, filename);
-  writeFileSync(path, content, 'utf8');
+  writeFileSync(path, content, "utf8");
   return path;
 }
 
-export function readFullcycleArtifact(runId, filename, baseDir = process.cwd()) {
+export function readFullcycleArtifact(
+  runId,
+  filename,
+  baseDir = process.cwd(),
+) {
   const dir = getFullcycleRunDir(runId, baseDir);
   const path = safeResolve(dir, filename);
   if (!existsSync(path)) return null;
-  return readFileSync(path, 'utf8');
+  return readFileSync(path, "utf8");
 }
 
 export function writeFullcycleState(runId, state, baseDir = process.cwd()) {
-  const payload = typeof state === 'object' && state !== null ? state : {};
+  const payload = typeof state === "object" && state !== null ? state : {};
   const serialized = JSON.stringify(payload, null, 2);
-  return saveFullcycleArtifact(runId, 'state.json', serialized, baseDir);
+  return saveFullcycleArtifact(runId, "state.json", serialized, baseDir);
 }
 
 export function readFullcycleState(runId, baseDir = process.cwd()) {
-  const content = readFullcycleArtifact(runId, 'state.json', baseDir);
+  const content = readFullcycleArtifact(runId, "state.json", baseDir);
   if (!content) return null;
   try {
     return JSON.parse(content);
@@ -87,7 +103,7 @@ export function shouldStopQaLoop(failureHistory = [], maxRepeats = 3) {
   if (!Array.isArray(failureHistory) || maxRepeats <= 1) return false;
 
   const normalized = failureHistory
-    .map((entry) => String(entry ?? '').trim())
+    .map((entry) => String(entry ?? "").trim())
     .filter(Boolean);
 
   if (normalized.length < maxRepeats) return false;

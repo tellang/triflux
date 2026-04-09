@@ -1,6 +1,6 @@
 // tests/unit/skill-template.test.mjs — skill-template.mjs 단위 테스트
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -52,7 +52,7 @@ describe("parseFrontmatter", () => {
   });
 
   it("quoted 문자열 값을 언래핑한다", () => {
-    const source = '---\nname: "tfx-find"\ntag: \'single\'\n---\nbody';
+    const source = "---\nname: \"tfx-find\"\ntag: 'single'\n---\nbody";
     const { data } = parseFrontmatter(source);
     assert.equal(data.name, "tfx-find");
     assert.equal(data.tag, "single");
@@ -250,13 +250,20 @@ describe("renderSkillTemplate", () => {
         "utf8",
       );
 
-      const output = renderSkillTemplate("{{#include shared/telemetry-segment.md}}", {
-        SKILL_NAME: "tfx-auto",
-      }, {
-        includeBaseDir: root,
-      });
+      const output = renderSkillTemplate(
+        "{{#include shared/telemetry-segment.md}}",
+        {
+          SKILL_NAME: "tfx-auto",
+        },
+        {
+          includeBaseDir: root,
+        },
+      );
 
-      assert.equal(output, ["> **Telemetry**", ">", "> - Skill: `tfx-auto`"].join("\n"));
+      assert.equal(
+        output,
+        ["> **Telemetry**", ">", "> - Skill: `tfx-auto`"].join("\n"),
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -303,9 +310,13 @@ describe("renderSkillTemplate", () => {
     try {
       assert.throws(
         () =>
-          renderSkillTemplate("{{#include shared/missing.md}}", {}, {
-            includeBaseDir: root,
-          }),
+          renderSkillTemplate(
+            "{{#include shared/missing.md}}",
+            {},
+            {
+              includeBaseDir: root,
+            },
+          ),
         /Missing include: shared\/missing\.md/,
       );
     } finally {
@@ -342,7 +353,11 @@ describe("renderSkillTemplate", () => {
   it("자기 자신을 include하는 partial도 순환 에러를 던진다", () => {
     assert.throws(
       () =>
-        renderSkillTemplate("{{> self}}", {}, { partials: { self: "{{> self}}" } }),
+        renderSkillTemplate(
+          "{{> self}}",
+          {},
+          { partials: { self: "{{> self}}" } },
+        ),
       /Circular partial include/,
     );
   });

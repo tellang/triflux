@@ -13,22 +13,37 @@ function normalizeMarkdownTarget(raw) {
 function sanitizeToken(raw) {
   let token = String(raw || "").trim();
   if (!token) return "";
-  token = token.replace(/^[<(]+/u, "").replace(/[)>.,;:!?]+$/u, "").trim();
+  token = token
+    .replace(/^[<(]+/u, "")
+    .replace(/[)>.,;:!?]+$/u, "")
+    .trim();
   return token;
 }
 
 function isLikelyPathToken(token) {
   if (!token || URL_LIKE_RE.test(token)) return false;
-  if (token.startsWith("app://") || token.startsWith("plugin://") || token.startsWith("mention://")) return false;
+  if (
+    token.startsWith("app://") ||
+    token.startsWith("plugin://") ||
+    token.startsWith("mention://")
+  )
+    return false;
   if (token === "~") return false;
 
   const hasPathSeparator = token.includes("/") || token.includes("\\");
-  const hasDotPrefix = token.startsWith("./") || token.startsWith("../") || token.startsWith(".");
+  const hasDotPrefix =
+    token.startsWith("./") || token.startsWith("../") || token.startsWith(".");
   const isHomeRelative = token.startsWith("~/") || token.startsWith("~\\");
   const isWindowsAbs = WINDOWS_ABS_RE.test(token);
   const hasFileLikeSuffix = /\.[a-zA-Z0-9]{1,16}$/u.test(token);
 
-  return hasPathSeparator || hasDotPrefix || isHomeRelative || isWindowsAbs || hasFileLikeSuffix;
+  return (
+    hasPathSeparator ||
+    hasDotPrefix ||
+    isHomeRelative ||
+    isWindowsAbs ||
+    hasFileLikeSuffix
+  );
 }
 
 export function extractExplicitFileTokens(text) {
@@ -67,7 +82,9 @@ function validateTransferFile(filePath, maxBytes) {
     throw new Error(`referenced path is not a file: ${filePath}`);
   }
   if (stats.size > maxBytes) {
-    throw new Error(`referenced file too large: ${stats.size} bytes (max ${maxBytes}) for ${filePath}`);
+    throw new Error(
+      `referenced file too large: ${stats.size} bytes (max ${maxBytes}) for ${filePath}`,
+    );
   }
   return stats.size;
 }
@@ -132,16 +149,23 @@ export function buildRemoteTransferPlan(options = {}) {
   validateTransferFile(absoluteHandoffPath, maxBytes);
   const handoffContent = readFileSync(absoluteHandoffPath, "utf8").trim();
 
-  const stagedHandoffPath = toRemotePath(remoteStageRoot, `handoff/${basename(absoluteHandoffPath)}`);
-  const transfers = [{
-    localPath: absoluteHandoffPath,
-    remotePath: stagedHandoffPath,
-    type: "handoff",
-  }];
+  const stagedHandoffPath = toRemotePath(
+    remoteStageRoot,
+    `handoff/${basename(absoluteHandoffPath)}`,
+  );
+  const transfers = [
+    {
+      localPath: absoluteHandoffPath,
+      remotePath: stagedHandoffPath,
+      type: "handoff",
+    },
+  ];
 
   const tokens = extractExplicitFileTokens(handoffContent);
   if (tokens.length > maxReferenceFiles) {
-    throw new Error(`too many referenced files: ${tokens.length} (max ${maxReferenceFiles})`);
+    throw new Error(
+      `too many referenced files: ${tokens.length} (max ${maxReferenceFiles})`,
+    );
   }
 
   const stagedByLocalPath = new Map();
@@ -166,7 +190,10 @@ export function buildRemoteTransferPlan(options = {}) {
       });
     }
 
-    replacements.push({ token, stagedPath: stagedByLocalPath.get(resolvedPath) });
+    replacements.push({
+      token,
+      stagedPath: stagedByLocalPath.get(resolvedPath),
+    });
   }
 
   const replacementEntries = Array.from(
@@ -189,7 +216,10 @@ export function buildRemoteTransferPlan(options = {}) {
 
   return {
     prompt,
-    replacements: replacementEntries.map(([token, stagedPath]) => ({ stagedPath, token })),
+    replacements: replacementEntries.map(([token, stagedPath]) => ({
+      stagedPath,
+      token,
+    })),
     stagedHandoffPath,
     transfers,
   };

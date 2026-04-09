@@ -1,11 +1,12 @@
 // hub/store.mjs — SQLite 감사 로그/메타데이터 저장소
 // 실시간 배달 큐는 router/pipe가 담당하고, SQLite는 재생/감사 용도로만 유지한다.
-import { recalcConfidence } from '@triflux/core/hub/reflexion.mjs';
-import { readFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { uuidv7 } from '@triflux/core/hub/lib/uuidv7.mjs';
+
+import { mkdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { uuidv7 } from "@triflux/core/hub/lib/uuidv7.mjs";
+import { recalcConfidence } from "@triflux/core/hub/reflexion.mjs";
 
 export { uuidv7 };
 
@@ -14,7 +15,11 @@ const require = createRequire(import.meta.url);
 
 function parseJson(str, fallback = null) {
   if (str == null) return fallback;
-  try { return JSON.parse(str); } catch { return fallback; }
+  try {
+    return JSON.parse(str);
+  } catch {
+    return fallback;
+  }
 }
 
 function parseAgentRow(row) {
@@ -60,7 +65,7 @@ function parseReflexionRow(row) {
   const { context_json, adaptive_state_json, ...rest } = row;
   return {
     ...rest,
-    type: rest.type || 'reflexion',
+    type: rest.type || "reflexion",
     context: parseJson(context_json, {}),
     adaptive_state: parseJson(adaptive_state_json, {}),
   };
@@ -81,13 +86,13 @@ function ensureColumn(db, tableName, columnName, definition) {
  * @param {string} dbPath
  */
 export async function importBetterSqlite3() {
-  const mod = await import('better-sqlite3');
+  const mod = await import("better-sqlite3");
   return mod.default ?? mod;
 }
 
 function resolveBetterSqlite3(options = {}) {
   if (options.DatabaseCtor) return options.DatabaseCtor;
-  const mod = require('better-sqlite3');
+  const mod = require("better-sqlite3");
   return mod.default ?? mod;
 }
 
@@ -96,18 +101,26 @@ export function createStore(dbPath, options = {}) {
   const Database = resolveBetterSqlite3(options);
   const db = new Database(dbPath);
 
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
-  db.pragma('wal_autocheckpoint = 1000');
+  db.pragma("journal_mode = WAL");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("foreign_keys = ON");
+  db.pragma("busy_timeout = 5000");
+  db.pragma("wal_autocheckpoint = 1000");
 
-  const schemaSQL = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
-  db.exec("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)");
-  const SCHEMA_VERSION = '4';
+  const schemaSQL = readFileSync(join(__dirname, "schema.sql"), "utf8");
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)",
+  );
+  const SCHEMA_VERSION = "4";
   const curVer = (() => {
-    try { return db.prepare("SELECT value FROM _meta WHERE key='schema_version'").pluck().get(); }
-    catch { return null; }
+    try {
+      return db
+        .prepare("SELECT value FROM _meta WHERE key='schema_version'")
+        .pluck()
+        .get();
+    } catch {
+      return null;
+    }
   })();
   // 마이그레이션 전략: 스키마 버전이 다르면 schema.sql을 재실행한다.
   // schema.sql은 CREATE TABLE IF NOT EXISTS 패턴을 사용하므로 멱등하게 적용된다.
@@ -115,13 +128,27 @@ export function createStore(dbPath, options = {}) {
   if (curVer !== SCHEMA_VERSION) {
     if (curVer != null) {
       // 이미 버전이 기록된 DB에서 버전 불일치가 발생한 경우 경고한다.
-      console.warn(`[store] schema version mismatch: found=${curVer} expected=${SCHEMA_VERSION}. Applying schema.sql (idempotent).`);
+      console.warn(
+        `[store] schema version mismatch: found=${curVer} expected=${SCHEMA_VERSION}. Applying schema.sql (idempotent).`,
+      );
     }
     db.exec(schemaSQL);
-    db.prepare("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)").run(SCHEMA_VERSION);
+    db.prepare(
+      "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)",
+    ).run(SCHEMA_VERSION);
   }
-  ensureColumn(db, 'reflexion_entries', 'type', "TEXT NOT NULL DEFAULT 'reflexion'");
-  ensureColumn(db, 'reflexion_entries', 'adaptive_state_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(
+    db,
+    "reflexion_entries",
+    "type",
+    "TEXT NOT NULL DEFAULT 'reflexion'",
+  );
+  ensureColumn(
+    db,
+    "reflexion_entries",
+    "adaptive_state_json",
+    "TEXT NOT NULL DEFAULT '{}'",
+  );
 
   const S = {
     upsertAgent: db.prepare(`
@@ -136,23 +163,37 @@ export function createStore(dbPath, options = {}) {
         lease_expires_ms=excluded.lease_expires_ms,
         status=excluded.status,
         metadata_json=excluded.metadata_json`),
-    getAgent: db.prepare('SELECT * FROM agents WHERE agent_id = ?'),
-    setAgentTopics: db.prepare('UPDATE agents SET topics_json=?, last_seen_ms=? WHERE agent_id=?'),
-    heartbeat: db.prepare("UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=?"),
-    setAgentStatus: db.prepare('UPDATE agents SET status=? WHERE agent_id=?'),
+    getAgent: db.prepare("SELECT * FROM agents WHERE agent_id = ?"),
+    setAgentTopics: db.prepare(
+      "UPDATE agents SET topics_json=?, last_seen_ms=? WHERE agent_id=?",
+    ),
+    heartbeat: db.prepare(
+      "UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=?",
+    ),
+    setAgentStatus: db.prepare("UPDATE agents SET status=? WHERE agent_id=?"),
     onlineAgents: db.prepare("SELECT * FROM agents WHERE status != 'offline'"),
-    allAgents: db.prepare('SELECT * FROM agents'),
-    agentsByTopic: db.prepare("SELECT a.* FROM agents a, json_each(a.topics_json) t WHERE t.value=? AND a.status != 'offline'"),
-    markStale: db.prepare("UPDATE agents SET status='stale' WHERE status='online' AND lease_expires_ms < ?"),
-    markOffline: db.prepare("UPDATE agents SET status='offline' WHERE status='stale' AND lease_expires_ms < ? - 300000"),
+    allAgents: db.prepare("SELECT * FROM agents"),
+    agentsByTopic: db.prepare(
+      "SELECT a.* FROM agents a, json_each(a.topics_json) t WHERE t.value=? AND a.status != 'offline'",
+    ),
+    markStale: db.prepare(
+      "UPDATE agents SET status='stale' WHERE status='online' AND lease_expires_ms < ?",
+    ),
+    markOffline: db.prepare(
+      "UPDATE agents SET status='offline' WHERE status='stale' AND lease_expires_ms < ? - 300000",
+    ),
 
     insertAuditMessage: db.prepare(`
       INSERT INTO messages (id, type, from_agent, to_agent, topic, priority, ttl_ms, created_at_ms, expires_at_ms, correlation_id, trace_id, payload_json, status)
       VALUES (@id, @type, @from_agent, @to_agent, @topic, @priority, @ttl_ms, @created_at_ms, @expires_at_ms, @correlation_id, @trace_id, @payload_json, @status)`),
-    getMsg: db.prepare('SELECT * FROM messages WHERE id=?'),
-    getResponse: db.prepare("SELECT * FROM messages WHERE correlation_id=? AND type='response' ORDER BY created_at_ms DESC LIMIT 1"),
-    getMsgsByTrace: db.prepare('SELECT * FROM messages WHERE trace_id=? ORDER BY created_at_ms'),
-    setMsgStatus: db.prepare('UPDATE messages SET status=? WHERE id=?'),
+    getMsg: db.prepare("SELECT * FROM messages WHERE id=?"),
+    getResponse: db.prepare(
+      "SELECT * FROM messages WHERE correlation_id=? AND type='response' ORDER BY created_at_ms DESC LIMIT 1",
+    ),
+    getMsgsByTrace: db.prepare(
+      "SELECT * FROM messages WHERE trace_id=? ORDER BY created_at_ms",
+    ),
+    setMsgStatus: db.prepare("UPDATE messages SET status=? WHERE id=?"),
     recentAgentMessages: db.prepare(`
       SELECT * FROM messages
       WHERE to_agent=?
@@ -171,13 +212,21 @@ export function createStore(dbPath, options = {}) {
     insertHR: db.prepare(`
       INSERT INTO human_requests (request_id, requester_agent, kind, prompt, schema_json, state, deadline_ms, default_action, correlation_id, trace_id, response_json)
       VALUES (@request_id, @requester_agent, @kind, @prompt, @schema_json, @state, @deadline_ms, @default_action, @correlation_id, @trace_id, @response_json)`),
-    getHR: db.prepare('SELECT * FROM human_requests WHERE request_id=?'),
-    updateHR: db.prepare('UPDATE human_requests SET state=?, response_json=? WHERE request_id=?'),
+    getHR: db.prepare("SELECT * FROM human_requests WHERE request_id=?"),
+    updateHR: db.prepare(
+      "UPDATE human_requests SET state=?, response_json=? WHERE request_id=?",
+    ),
     pendingHR: db.prepare("SELECT * FROM human_requests WHERE state='pending'"),
-    expireHR: db.prepare("UPDATE human_requests SET state='timed_out' WHERE state='pending' AND deadline_ms < ?"),
+    expireHR: db.prepare(
+      "UPDATE human_requests SET state='timed_out' WHERE state='pending' AND deadline_ms < ?",
+    ),
 
-    insertDL: db.prepare('INSERT OR REPLACE INTO dead_letters (message_id, reason, failed_at_ms, last_error) VALUES (?,?,?,?)'),
-    getDL: db.prepare('SELECT * FROM dead_letters ORDER BY failed_at_ms DESC LIMIT ?'),
+    insertDL: db.prepare(
+      "INSERT OR REPLACE INTO dead_letters (message_id, reason, failed_at_ms, last_error) VALUES (?,?,?,?)",
+    ),
+    getDL: db.prepare(
+      "SELECT * FROM dead_letters ORDER BY failed_at_ms DESC LIMIT ?",
+    ),
 
     insertAssign: db.prepare(`
       INSERT INTO assign_jobs (
@@ -191,7 +240,7 @@ export function createStore(dbPath, options = {}) {
         @trace_id, @correlation_id, @last_message_id, @result_json, @error_json,
         @created_at_ms, @updated_at_ms, @started_at_ms, @completed_at_ms, @last_retry_at_ms
       )`),
-    getAssign: db.prepare('SELECT * FROM assign_jobs WHERE job_id = ?'),
+    getAssign: db.prepare("SELECT * FROM assign_jobs WHERE job_id = ?"),
     updateAssign: db.prepare(`
       UPDATE assign_jobs SET
         supervisor_agent=@supervisor_agent,
@@ -218,29 +267,61 @@ export function createStore(dbPath, options = {}) {
         last_retry_at_ms=@last_retry_at_ms
       WHERE job_id=@job_id`),
 
-    findExpired: db.prepare("SELECT id FROM messages WHERE status='queued' AND expires_at_ms < ?"),
-    urgentDepth: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority >= 7"),
-    normalDepth: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority < 7"),
-    onlineCount: db.prepare("SELECT COUNT(*) as cnt FROM agents WHERE status='online'"),
-    msgCount: db.prepare('SELECT COUNT(*) as cnt FROM messages'),
-    dlqDepth: db.prepare('SELECT COUNT(*) as cnt FROM dead_letters'),
-    ackedRecent: db.prepare("SELECT COUNT(*) as cnt FROM messages WHERE status='acked' AND created_at_ms > ? - 300000"),
-    assignCountByStatus: db.prepare('SELECT COUNT(*) as cnt FROM assign_jobs WHERE status = ?'),
-    activeAssignCount: db.prepare("SELECT COUNT(*) as cnt FROM assign_jobs WHERE status IN ('queued','running')"),
+    findExpired: db.prepare(
+      "SELECT id FROM messages WHERE status='queued' AND expires_at_ms < ?",
+    ),
+    urgentDepth: db.prepare(
+      "SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority >= 7",
+    ),
+    normalDepth: db.prepare(
+      "SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority < 7",
+    ),
+    onlineCount: db.prepare(
+      "SELECT COUNT(*) as cnt FROM agents WHERE status='online'",
+    ),
+    msgCount: db.prepare("SELECT COUNT(*) as cnt FROM messages"),
+    dlqDepth: db.prepare("SELECT COUNT(*) as cnt FROM dead_letters"),
+    ackedRecent: db.prepare(
+      "SELECT COUNT(*) as cnt FROM messages WHERE status='acked' AND created_at_ms > ? - 300000",
+    ),
+    assignCountByStatus: db.prepare(
+      "SELECT COUNT(*) as cnt FROM assign_jobs WHERE status = ?",
+    ),
+    activeAssignCount: db.prepare(
+      "SELECT COUNT(*) as cnt FROM assign_jobs WHERE status IN ('queued','running')",
+    ),
 
     // reflexion
     insertReflexion: db.prepare(`
       INSERT INTO reflexion_entries (id, type, error_pattern, error_message, context_json, solution, solution_code, adaptive_state_json, confidence, hit_count, success_count, last_hit_ms, created_at_ms, updated_at_ms)
       VALUES (@id, @type, @error_pattern, @error_message, @context_json, @solution, @solution_code, @adaptive_state_json, @confidence, @hit_count, @success_count, @last_hit_ms, @created_at_ms, @updated_at_ms)`),
-    getReflexionById: db.prepare('SELECT * FROM reflexion_entries WHERE id = ?'),
-    findReflexionExact: db.prepare('SELECT * FROM reflexion_entries WHERE error_pattern = ? ORDER BY confidence DESC'),
-    findReflexionLike: db.prepare("SELECT * FROM reflexion_entries WHERE error_pattern LIKE ? ESCAPE '\\' ORDER BY confidence DESC LIMIT 10"),
-    updateReflexionHitSuccess: db.prepare('UPDATE reflexion_entries SET hit_count = hit_count + 1, success_count = success_count + 1, last_hit_ms = ?, updated_at_ms = ? WHERE id = ?'),
-    updateReflexionHitOnly: db.prepare('UPDATE reflexion_entries SET hit_count = hit_count + 1, last_hit_ms = ?, updated_at_ms = ? WHERE id = ?'),
-    updateReflexionConfidence: db.prepare('UPDATE reflexion_entries SET confidence = ?, updated_at_ms = ? WHERE id = ?'),
-    pruneReflexionEntries: db.prepare('DELETE FROM reflexion_entries WHERE updated_at_ms < ? AND confidence < ?'),
-    listReflexionEntries: db.prepare('SELECT * FROM reflexion_entries ORDER BY confidence DESC, updated_at_ms DESC'),
-    deleteReflexionEntry: db.prepare('DELETE FROM reflexion_entries WHERE id = ?'),
+    getReflexionById: db.prepare(
+      "SELECT * FROM reflexion_entries WHERE id = ?",
+    ),
+    findReflexionExact: db.prepare(
+      "SELECT * FROM reflexion_entries WHERE error_pattern = ? ORDER BY confidence DESC",
+    ),
+    findReflexionLike: db.prepare(
+      "SELECT * FROM reflexion_entries WHERE error_pattern LIKE ? ESCAPE '\\' ORDER BY confidence DESC LIMIT 10",
+    ),
+    updateReflexionHitSuccess: db.prepare(
+      "UPDATE reflexion_entries SET hit_count = hit_count + 1, success_count = success_count + 1, last_hit_ms = ?, updated_at_ms = ? WHERE id = ?",
+    ),
+    updateReflexionHitOnly: db.prepare(
+      "UPDATE reflexion_entries SET hit_count = hit_count + 1, last_hit_ms = ?, updated_at_ms = ? WHERE id = ?",
+    ),
+    updateReflexionConfidence: db.prepare(
+      "UPDATE reflexion_entries SET confidence = ?, updated_at_ms = ? WHERE id = ?",
+    ),
+    pruneReflexionEntries: db.prepare(
+      "DELETE FROM reflexion_entries WHERE updated_at_ms < ? AND confidence < ?",
+    ),
+    listReflexionEntries: db.prepare(
+      "SELECT * FROM reflexion_entries ORDER BY confidence DESC, updated_at_ms DESC",
+    ),
+    deleteReflexionEntry: db.prepare(
+      "DELETE FROM reflexion_entries WHERE id = ?",
+    ),
   };
 
   const assignStatusListeners = new Set();
@@ -257,7 +338,9 @@ export function createStore(dbPath, options = {}) {
   function notifyAssignStatusListeners(row) {
     const event = buildAssignCallbackEvent(row);
     for (const listener of Array.from(assignStatusListeners)) {
-      try { listener(event, row); } catch {}
+      try {
+        listener(event, row);
+      } catch {}
     }
   }
 
@@ -287,7 +370,15 @@ export function createStore(dbPath, options = {}) {
       db.close();
     },
 
-    registerAgent({ agent_id, cli, pid, capabilities = [], topics = [], heartbeat_ttl_ms = 30000, metadata = {} }) {
+    registerAgent({
+      agent_id,
+      cli,
+      pid,
+      capabilities = [],
+      topics = [],
+      heartbeat_ttl_ms = 30000,
+      metadata = {},
+    }) {
       const now = Date.now();
       const leaseExpires = now + heartbeat_ttl_ms;
       S.upsertAgent.run({
@@ -298,10 +389,15 @@ export function createStore(dbPath, options = {}) {
         topics_json: JSON.stringify(topics),
         last_seen_ms: now,
         lease_expires_ms: leaseExpires,
-        status: 'online',
+        status: "online",
         metadata_json: JSON.stringify(metadata),
       });
-      return { agent_id, lease_id: uuidv7(), lease_expires_ms: leaseExpires, server_time_ms: now };
+      return {
+        agent_id,
+        lease_id: uuidv7(),
+        lease_expires_ms: leaseExpires,
+        server_time_ms: now,
+      };
     },
 
     getAgent(id) {
@@ -311,12 +407,18 @@ export function createStore(dbPath, options = {}) {
     refreshLease(agentId, ttlMs = 30000) {
       const now = Date.now();
       S.heartbeat.run(now, now + ttlMs, agentId);
-      return { agent_id: agentId, lease_expires_ms: now + ttlMs, server_time_ms: now };
+      return {
+        agent_id: agentId,
+        lease_expires_ms: now + ttlMs,
+        server_time_ms: now,
+      };
     },
 
     updateAgentTopics(agentId, topics = []) {
       const now = Date.now();
-      return S.setAgentTopics.run(JSON.stringify(topics), now, agentId).changes > 0;
+      return (
+        S.setAgentTopics.run(JSON.stringify(topics), now, agentId).changes > 0
+      );
     },
 
     listOnlineAgents() {
@@ -343,7 +445,18 @@ export function createStore(dbPath, options = {}) {
       return S.setAgentStatus.run(status, agentId).changes > 0;
     },
 
-    auditLog({ type, from, to, topic, priority = 5, ttl_ms = 300000, payload = {}, trace_id, correlation_id, status = 'queued' }) {
+    auditLog({
+      type,
+      from,
+      to,
+      topic,
+      priority = 5,
+      ttl_ms = 300000,
+      payload = {},
+      trace_id,
+      correlation_id,
+      status = "queued",
+    }) {
       const now = Date.now();
       const row = {
         id: uuidv7(),
@@ -385,14 +498,22 @@ export function createStore(dbPath, options = {}) {
       return S.setMsgStatus.run(status, id).changes > 0;
     },
 
-    getAuditMessagesForAgent(agentId, { max_messages = 20, include_topics = null } = {}) {
+    getAuditMessagesForAgent(
+      agentId,
+      { max_messages = 20, include_topics = null } = {},
+    ) {
       const limit = clampMaxMessages(max_messages);
-      const topics = Array.isArray(include_topics) && include_topics.length
-        ? include_topics
-        : (store.getAgent(agentId)?.topics || []);
+      const topics =
+        Array.isArray(include_topics) && include_topics.length
+          ? include_topics
+          : store.getAgent(agentId)?.topics || [];
 
       const rows = topics.length
-        ? S.recentAgentMessagesWithTopics.all(agentId, JSON.stringify(topics), limit)
+        ? S.recentAgentMessagesWithTopics.all(
+            agentId,
+            JSON.stringify(topics),
+            limit,
+          )
         : S.recentAgentMessages.all(agentId, limit);
 
       return rows.map(parseMessageRow);
@@ -419,7 +540,16 @@ export function createStore(dbPath, options = {}) {
       return 0;
     },
 
-    insertHumanRequest({ requester_agent, kind, prompt, requested_schema = {}, deadline_ms, default_action, correlation_id, trace_id }) {
+    insertHumanRequest({
+      requester_agent,
+      kind,
+      prompt,
+      requested_schema = {},
+      deadline_ms,
+      default_action,
+      correlation_id,
+      trace_id,
+    }) {
       const requestId = uuidv7();
       const now = Date.now();
       const deadlineAt = now + deadline_ms;
@@ -429,14 +559,18 @@ export function createStore(dbPath, options = {}) {
         kind,
         prompt,
         schema_json: JSON.stringify(requested_schema),
-        state: 'pending',
+        state: "pending",
         deadline_ms: deadlineAt,
         default_action,
         correlation_id: correlation_id || uuidv7(),
         trace_id: trace_id || uuidv7(),
         response_json: null,
       });
-      return { request_id: requestId, state: 'pending', deadline_ms: deadlineAt };
+      return {
+        request_id: requestId,
+        state: "pending",
+        deadline_ms: deadlineAt,
+      };
     },
 
     getHumanRequest(id) {
@@ -444,7 +578,10 @@ export function createStore(dbPath, options = {}) {
     },
 
     updateHumanRequest(id, state, resp = null) {
-      return S.updateHR.run(state, resp ? JSON.stringify(resp) : null, id).changes > 0;
+      return (
+        S.updateHR.run(state, resp ? JSON.stringify(resp) : null, id).changes >
+        0
+      );
     },
 
     getPendingHumanRequests() {
@@ -457,7 +594,7 @@ export function createStore(dbPath, options = {}) {
 
     moveToDeadLetter(messageId, reason, lastError = null) {
       db.transaction(() => {
-        S.setMsgStatus.run('dead_letter', messageId);
+        S.setMsgStatus.run("dead_letter", messageId);
         S.insertDL.run(messageId, reason, Date.now(), lastError);
       })();
       return true;
@@ -471,10 +608,10 @@ export function createStore(dbPath, options = {}) {
       job_id,
       supervisor_agent,
       worker_agent,
-      topic = 'assign.job',
-      task = '',
+      topic = "assign.job",
+      task = "",
       payload = {},
-      status = 'queued',
+      status = "queued",
       attempt = 1,
       retry_count = 0,
       max_retries = 0,
@@ -494,8 +631,8 @@ export function createStore(dbPath, options = {}) {
         job_id: job_id || uuidv7(),
         supervisor_agent,
         worker_agent,
-        topic: String(topic || 'assign.job'),
-        task: String(task || ''),
+        topic: String(topic || "assign.job"),
+        task: String(task || ""),
         payload_json: JSON.stringify(payload || {}),
         status,
         attempt: Math.max(1, Number(attempt) || 1),
@@ -514,8 +651,10 @@ export function createStore(dbPath, options = {}) {
         error_json: error == null ? null : JSON.stringify(error),
         created_at_ms: now,
         updated_at_ms: now,
-        started_at_ms: status === 'running' ? now : null,
-        completed_at_ms: ['succeeded', 'failed', 'timed_out'].includes(status) ? now : null,
+        started_at_ms: status === "running" ? now : null,
+        completed_at_ms: ["succeeded", "failed", "timed_out"].includes(status)
+          ? now
+          : null,
         last_retry_at_ms: retry_count > 0 ? now : null,
       };
       S.insertAssign.run(row);
@@ -534,8 +673,13 @@ export function createStore(dbPath, options = {}) {
 
       const now = Date.now();
       const nextStatus = status || current.status;
-      const isTerminal = ['succeeded', 'failed', 'timed_out'].includes(nextStatus);
-      const nextTimeout = clampDuration(patch.timeout_ms ?? current.timeout_ms, current.timeout_ms);
+      const isTerminal = ["succeeded", "failed", "timed_out"].includes(
+        nextStatus,
+      );
+      const nextTimeout = clampDuration(
+        patch.timeout_ms ?? current.timeout_ms,
+        current.timeout_ms,
+      );
       const nextRow = {
         job_id: current.job_id,
         supervisor_agent: patch.supervisor_agent ?? current.supervisor_agent,
@@ -544,39 +688,69 @@ export function createStore(dbPath, options = {}) {
         task: patch.task ?? current.task,
         payload_json: JSON.stringify(patch.payload ?? current.payload ?? {}),
         status: nextStatus,
-        attempt: Math.max(1, Number(patch.attempt ?? current.attempt) || current.attempt || 1),
-        retry_count: Math.max(0, Number(patch.retry_count ?? current.retry_count) || 0),
-        max_retries: Math.max(0, Number(patch.max_retries ?? current.max_retries) || 0),
-        priority: clampPriority(patch.priority ?? current.priority, current.priority || 5),
-        ttl_ms: clampDuration(patch.ttl_ms ?? current.ttl_ms, current.ttl_ms || nextTimeout),
+        attempt: Math.max(
+          1,
+          Number(patch.attempt ?? current.attempt) || current.attempt || 1,
+        ),
+        retry_count: Math.max(
+          0,
+          Number(patch.retry_count ?? current.retry_count) || 0,
+        ),
+        max_retries: Math.max(
+          0,
+          Number(patch.max_retries ?? current.max_retries) || 0,
+        ),
+        priority: clampPriority(
+          patch.priority ?? current.priority,
+          current.priority || 5,
+        ),
+        ttl_ms: clampDuration(
+          patch.ttl_ms ?? current.ttl_ms,
+          current.ttl_ms || nextTimeout,
+        ),
         timeout_ms: nextTimeout,
         deadline_ms: (() => {
-          if (Object.hasOwn(patch, 'deadline_ms')) {
-            return patch.deadline_ms == null ? null : Math.trunc(Number(patch.deadline_ms));
+          if (Object.hasOwn(patch, "deadline_ms")) {
+            return patch.deadline_ms == null
+              ? null
+              : Math.trunc(Number(patch.deadline_ms));
           }
           if (isTerminal) return null;
-          if (nextStatus === 'running' && !current.deadline_ms) return now + nextTimeout;
+          if (nextStatus === "running" && !current.deadline_ms)
+            return now + nextTimeout;
           return current.deadline_ms;
         })(),
         trace_id: patch.trace_id ?? current.trace_id,
         correlation_id: patch.correlation_id ?? current.correlation_id,
-        last_message_id: Object.hasOwn(patch, 'last_message_id')
+        last_message_id: Object.hasOwn(patch, "last_message_id")
           ? patch.last_message_id
           : current.last_message_id,
-        result_json: Object.hasOwn(patch, 'result')
-          ? (patch.result == null ? null : JSON.stringify(patch.result))
-          : (current.result == null ? null : JSON.stringify(current.result)),
-        error_json: Object.hasOwn(patch, 'error')
-          ? (patch.error == null ? null : JSON.stringify(patch.error))
-          : (current.error == null ? null : JSON.stringify(current.error)),
+        result_json: Object.hasOwn(patch, "result")
+          ? patch.result == null
+            ? null
+            : JSON.stringify(patch.result)
+          : current.result == null
+            ? null
+            : JSON.stringify(current.result),
+        error_json: Object.hasOwn(patch, "error")
+          ? patch.error == null
+            ? null
+            : JSON.stringify(patch.error)
+          : current.error == null
+            ? null
+            : JSON.stringify(current.error),
         updated_at_ms: now,
-        started_at_ms: Object.hasOwn(patch, 'started_at_ms')
+        started_at_ms: Object.hasOwn(patch, "started_at_ms")
           ? patch.started_at_ms
-          : (nextStatus === 'running' ? (current.started_at_ms || now) : current.started_at_ms),
-        completed_at_ms: Object.hasOwn(patch, 'completed_at_ms')
+          : nextStatus === "running"
+            ? current.started_at_ms || now
+            : current.started_at_ms,
+        completed_at_ms: Object.hasOwn(patch, "completed_at_ms")
           ? patch.completed_at_ms
-          : (isTerminal ? (current.completed_at_ms || now) : current.completed_at_ms),
-        last_retry_at_ms: Object.hasOwn(patch, 'last_retry_at_ms')
+          : isTerminal
+            ? current.completed_at_ms || now
+            : current.completed_at_ms,
+        last_retry_at_ms: Object.hasOwn(patch, "last_retry_at_ms")
           ? patch.last_retry_at_ms
           : current.last_retry_at_ms,
       };
@@ -602,32 +776,35 @@ export function createStore(dbPath, options = {}) {
       const values = [];
 
       if (supervisor_agent) {
-        clauses.push('supervisor_agent = ?');
+        clauses.push("supervisor_agent = ?");
         values.push(supervisor_agent);
       }
       if (worker_agent) {
-        clauses.push('worker_agent = ?');
+        clauses.push("worker_agent = ?");
         values.push(worker_agent);
       }
       if (trace_id) {
-        clauses.push('trace_id = ?');
+        clauses.push("trace_id = ?");
         values.push(trace_id);
       }
       if (correlation_id) {
-        clauses.push('correlation_id = ?');
+        clauses.push("correlation_id = ?");
         values.push(correlation_id);
       }
 
-      const statusList = Array.isArray(statuses) && statuses.length
-        ? statuses
-        : (status ? [status] : []);
+      const statusList =
+        Array.isArray(statuses) && statuses.length
+          ? statuses
+          : status
+            ? [status]
+            : [];
       if (statusList.length) {
-        clauses.push(`status IN (${statusList.map(() => '?').join(',')})`);
+        clauses.push(`status IN (${statusList.map(() => "?").join(",")})`);
         values.push(...statusList);
       }
 
       if (Number.isFinite(Number(active_before_ms))) {
-        clauses.push('deadline_ms IS NOT NULL AND deadline_ms <= ?');
+        clauses.push("deadline_ms IS NOT NULL AND deadline_ms <= ?");
         values.push(Math.trunc(Number(active_before_ms)));
       }
 
@@ -637,21 +814,33 @@ export function createStore(dbPath, options = {}) {
       // 이 함수는 hot path(heartbeat/poll)가 아닌 관리/조회 경로에서만 호출되므로 허용한다.
       const sql = `
         SELECT * FROM assign_jobs
-        ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
+        ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
         ORDER BY updated_at_ms DESC
         LIMIT ?`;
       values.push(clampMaxMessages(limit, 50));
-      return db.prepare(sql).all(...values).map(parseAssignRow);
+      return db
+        .prepare(sql)
+        .all(...values)
+        .map(parseAssignRow);
     },
 
     retryAssign(jobId, patch = {}) {
       const current = store.getAssign(jobId);
       if (!current) return null;
 
-      const nextRetryCount = Math.max(0, Number(patch.retry_count ?? current.retry_count + 1) || 0);
-      const nextAttempt = Math.max(current.attempt + 1, Number(patch.attempt ?? current.attempt + 1) || 1);
-      const nextTimeout = clampDuration(patch.timeout_ms ?? current.timeout_ms, current.timeout_ms);
-      return store.updateAssignStatus(jobId, 'queued', {
+      const nextRetryCount = Math.max(
+        0,
+        Number(patch.retry_count ?? current.retry_count + 1) || 0,
+      );
+      const nextAttempt = Math.max(
+        current.attempt + 1,
+        Number(patch.attempt ?? current.attempt + 1) || 1,
+      );
+      const nextTimeout = clampDuration(
+        patch.timeout_ms ?? current.timeout_ms,
+        current.timeout_ms,
+      );
+      return store.updateAssignStatus(jobId, "queued", {
         retry_count: nextRetryCount,
         attempt: nextAttempt,
         timeout_ms: nextTimeout,
@@ -661,7 +850,7 @@ export function createStore(dbPath, options = {}) {
         started_at_ms: null,
         last_retry_at_ms: Date.now(),
         result: patch.result ?? null,
-        error: Object.hasOwn(patch, 'error') ? patch.error : current.error,
+        error: Object.hasOwn(patch, "error") ? patch.error : current.error,
         last_message_id: null,
       });
     },
@@ -671,8 +860,8 @@ export function createStore(dbPath, options = {}) {
       return db.transaction(() => {
         const expired = S.findExpired.all(now);
         for (const { id } of expired) {
-          S.setMsgStatus.run('dead_letter', id);
-          S.insertDL.run(id, 'ttl_expired', now, null);
+          S.setMsgStatus.run("dead_letter", id);
+          S.insertDL.run(id, "ttl_expired", now, null);
         }
         const humanRequests = S.expireHR.run(now).changes;
         return { messages: expired.length, human_requests: humanRequests };
@@ -688,7 +877,7 @@ export function createStore(dbPath, options = {}) {
     },
 
     onAssignStatusChange(listener) {
-      if (typeof listener !== 'function') {
+      if (typeof listener !== "function") {
         return () => {};
       }
       assignStatusListeners.add(listener);
@@ -718,17 +907,17 @@ export function createStore(dbPath, options = {}) {
         online_agents: S.onlineCount.get().cnt,
         total_messages: S.msgCount.get().cnt,
         dlq: S.dlqDepth.get().cnt,
-        assign_queued: S.assignCountByStatus.get('queued').cnt,
-        assign_running: S.assignCountByStatus.get('running').cnt,
-        assign_failed: S.assignCountByStatus.get('failed').cnt,
-        assign_timed_out: S.assignCountByStatus.get('timed_out').cnt,
+        assign_queued: S.assignCountByStatus.get("queued").cnt,
+        assign_running: S.assignCountByStatus.get("running").cnt,
+        assign_failed: S.assignCountByStatus.get("failed").cnt,
+        assign_timed_out: S.assignCountByStatus.get("timed_out").cnt,
       };
     },
 
     // --- Reflexion CRUD ---
 
     addReflexion({
-      type = 'reflexion',
+      type = "reflexion",
       error_pattern,
       error_message,
       context = {},
@@ -768,14 +957,16 @@ export function createStore(dbPath, options = {}) {
     },
 
     findReflexion(errorPattern, context = {}) {
-      const ctxKeys = Object.keys(context).filter(k => context[k] != null);
-      const ctxWhere = ctxKeys.map(k => ` AND json_extract(context_json, '$.${k}') = ?`).join('');
-      const ctxVals = ctxKeys.map(k => context[k]);
+      const ctxKeys = Object.keys(context).filter((k) => context[k] != null);
+      const ctxWhere = ctxKeys
+        .map((k) => ` AND json_extract(context_json, '$.${k}') = ?`)
+        .join("");
+      const ctxVals = ctxKeys.map((k) => context[k]);
 
       if (ctxKeys.length === 0) {
         let rows = S.findReflexionExact.all(errorPattern);
         if (rows.length) return rows.map(parseReflexionRow);
-        const escaped = errorPattern.replace(/[%_\\]/g, '\\$&');
+        const escaped = errorPattern.replace(/[%_\\]/g, "\\$&");
         rows = S.findReflexionLike.all(`%${escaped.slice(0, 100)}%`);
         return rows.map(parseReflexionRow);
       }
@@ -784,7 +975,7 @@ export function createStore(dbPath, options = {}) {
       let rows = db.prepare(exactSql).all(errorPattern, ...ctxVals);
       if (rows.length) return rows.map(parseReflexionRow);
 
-      const escaped = errorPattern.replace(/[%_\\]/g, '\\$&');
+      const escaped = errorPattern.replace(/[%_\\]/g, "\\$&");
       const likeSql = `SELECT * FROM reflexion_entries WHERE error_pattern LIKE ? ESCAPE '\\'${ctxWhere} ORDER BY confidence DESC LIMIT 10`;
       rows = db.prepare(likeSql).all(`%${escaped.slice(0, 100)}%`, ...ctxVals);
       return rows.map(parseReflexionRow);
@@ -800,18 +991,30 @@ export function createStore(dbPath, options = {}) {
       const entry = store.getReflexion(id);
       if (entry && entry.hit_count > 0) {
         const conf = recalcConfidence(entry);
-        S.updateReflexionConfidence.run(Math.max(0, Math.min(1, conf)), now, id);
+        S.updateReflexionConfidence.run(
+          Math.max(0, Math.min(1, conf)),
+          now,
+          id,
+        );
       }
       return store.getReflexion(id);
     },
 
     listReflexion(filters = {}) {
-      const { type, minConfidence = Number.NEGATIVE_INFINITY, projectSlug } = filters;
-      return S.listReflexionEntries.all()
+      const {
+        type,
+        minConfidence = Number.NEGATIVE_INFINITY,
+        projectSlug,
+      } = filters;
+      return S.listReflexionEntries
+        .all()
         .map(parseReflexionRow)
         .filter((entry) => !type || entry.type === type)
         .filter((entry) => entry.confidence >= minConfidence)
-        .filter((entry) => !projectSlug || entry.adaptive_state?.project_slug === projectSlug);
+        .filter(
+          (entry) =>
+            !projectSlug || entry.adaptive_state?.project_slug === projectSlug,
+        );
     },
 
     patchReflexion(id, patch = {}) {
@@ -825,20 +1028,20 @@ export function createStore(dbPath, options = {}) {
         updated_at_ms: patch.updated_at_ms ?? Date.now(),
       };
       const sets = [
-        ['type', next.type],
-        ['error_pattern', next.error_pattern],
-        ['error_message', next.error_message],
-        ['context_json', JSON.stringify(next.context ?? {})],
-        ['solution', next.solution],
-        ['solution_code', next.solution_code ?? null],
-        ['adaptive_state_json', JSON.stringify(next.adaptive_state ?? {})],
-        ['confidence', next.confidence],
-        ['hit_count', next.hit_count],
-        ['success_count', next.success_count],
-        ['last_hit_ms', next.last_hit_ms],
-        ['updated_at_ms', next.updated_at_ms],
+        ["type", next.type],
+        ["error_pattern", next.error_pattern],
+        ["error_message", next.error_message],
+        ["context_json", JSON.stringify(next.context ?? {})],
+        ["solution", next.solution],
+        ["solution_code", next.solution_code ?? null],
+        ["adaptive_state_json", JSON.stringify(next.adaptive_state ?? {})],
+        ["confidence", next.confidence],
+        ["hit_count", next.hit_count],
+        ["success_count", next.success_count],
+        ["last_hit_ms", next.last_hit_ms],
+        ["updated_at_ms", next.updated_at_ms],
       ];
-      const sql = `UPDATE reflexion_entries SET ${sets.map(([key]) => `${key} = ?`).join(', ')} WHERE id = ?`;
+      const sql = `UPDATE reflexion_entries SET ${sets.map(([key]) => `${key} = ?`).join(", ")} WHERE id = ?`;
       db.prepare(sql).run(...sets.map(([, value]) => value), id);
       return store.getReflexion(id);
     },

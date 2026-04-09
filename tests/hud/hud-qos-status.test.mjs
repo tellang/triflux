@@ -1,9 +1,15 @@
-import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { join, dirname } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hudScriptPath = join(__dirname, "../../hud/hud-qos-status.mjs");
@@ -26,50 +32,69 @@ before(() => {
   // Setup mock data for richer HUD output (colors, percentages, alignment)
   const fakeFutureDate = "2026-12-31T23:59:59Z";
   const fakeTimestampMs = Date.now() + 86400000;
-  
+
   // Claude Usage
-  writeFileSync(join(mockClaudeCacheDir, "claude-usage-cache.json"), JSON.stringify({
-    timestamp: Date.now(),
-    data: {
-      fiveHourPercent: 65,
-      weeklyPercent: 30,
-      fiveHourResetsAt: fakeFutureDate,
-      weeklyResetsAt: fakeFutureDate
-    }
-  }));
+  writeFileSync(
+    join(mockClaudeCacheDir, "claude-usage-cache.json"),
+    JSON.stringify({
+      timestamp: Date.now(),
+      data: {
+        fiveHourPercent: 65,
+        weeklyPercent: 30,
+        fiveHourResetsAt: fakeFutureDate,
+        weeklyResetsAt: fakeFutureDate,
+      },
+    }),
+  );
 
   // Codex Rate Limits
-  writeFileSync(join(mockClaudeCacheDir, "codex-rate-limits-cache.json"), JSON.stringify({
-    timestamp: Date.now(),
-    buckets: {
-      codex: {
-        primary: { used_percent: 88, resets_at: Math.floor(fakeTimestampMs / 1000) },
-        secondary: { used_percent: 45, resets_at: Math.floor(fakeTimestampMs / 1000) },
-        tokens: { total_tokens: 50000 }
-      }
-    }
-  }));
+  writeFileSync(
+    join(mockClaudeCacheDir, "codex-rate-limits-cache.json"),
+    JSON.stringify({
+      timestamp: Date.now(),
+      buckets: {
+        codex: {
+          primary: {
+            used_percent: 88,
+            resets_at: Math.floor(fakeTimestampMs / 1000),
+          },
+          secondary: {
+            used_percent: 45,
+            resets_at: Math.floor(fakeTimestampMs / 1000),
+          },
+          tokens: { total_tokens: 50000 },
+        },
+      },
+    }),
+  );
 
   // Gemini Quota
-  writeFileSync(join(mockClaudeCacheDir, "gemini-quota-cache.json"), JSON.stringify({
-    timestamp: Date.now(),
-    buckets: [
-      { modelId: "gemini-3-flash-preview", remainingFraction: 0.1 }
-    ]
-  }));
+  writeFileSync(
+    join(mockClaudeCacheDir, "gemini-quota-cache.json"),
+    JSON.stringify({
+      timestamp: Date.now(),
+      buckets: [{ modelId: "gemini-3-flash-preview", remainingFraction: 0.1 }],
+    }),
+  );
 
   // Gemini Session
-  writeFileSync(join(mockClaudeCacheDir, "gemini-session-cache.json"), JSON.stringify({
-    timestamp: Date.now(),
-    session: { total: 120000, model: "gemini-3-flash-preview" }
-  }));
+  writeFileSync(
+    join(mockClaudeCacheDir, "gemini-session-cache.json"),
+    JSON.stringify({
+      timestamp: Date.now(),
+      session: { total: 120000, model: "gemini-3-flash-preview" },
+    }),
+  );
 
   // Savings / Context mapping
-  writeFileSync(join(mockOmcStateDir, "sv-accumulator.json"), JSON.stringify({
-    codex: { tokens: 100000 },
-    gemini: { tokens: 200000 },
-    totalCostSaved: 12.50
-  }));
+  writeFileSync(
+    join(mockOmcStateDir, "sv-accumulator.json"),
+    JSON.stringify({
+      codex: { tokens: 100000 },
+      gemini: { tokens: 200000 },
+      totalCostSaved: 12.5,
+    }),
+  );
 });
 
 after(() => {
@@ -81,7 +106,7 @@ after(() => {
 function runHudWithDimensions(cols, rows, extraEnv = {}) {
   try {
     const input = JSON.stringify({
-      context_window: { used_percentage: 25, context_window_size: 200000 }
+      context_window: { used_percentage: 25, context_window_size: 200000 },
     });
     const output = execSync(`node "${hudScriptPath}"`, {
       input,
@@ -106,12 +131,16 @@ function runHudWithDimensions(cols, rows, extraEnv = {}) {
 
 function matchSnapshot(name, actualContent) {
   const snapshotFile = join(snapshotDir, `${name}.snap`);
-  
+
   if (process.env.UPDATE_SNAPSHOTS === "1" || !existsSync(snapshotFile)) {
     writeFileSync(snapshotFile, actualContent, "utf-8");
   } else {
     const expectedContent = readFileSync(snapshotFile, "utf-8");
-    assert.equal(actualContent, expectedContent, `Snapshot mismatch for ${name}`);
+    assert.equal(
+      actualContent,
+      expectedContent,
+      `Snapshot mismatch for ${name}`,
+    );
   }
 }
 
@@ -151,14 +180,20 @@ describe("HUD Breakpoints", () => {
   });
 
   it("renders 'nano' tier correctly (lines == 1)", () => {
-    writeFileSync(join(mockOmcConfigDir, "hud.json"), JSON.stringify({ lines: 1 }));
+    writeFileSync(
+      join(mockOmcConfigDir, "hud.json"),
+      JSON.stringify({ lines: 1 }),
+    );
     const output = runHudWithDimensions(120, 1);
     matchSnapshot("nano_tier_lines", normalizeOutput(output));
     rmSync(join(mockOmcConfigDir, "hud.json"));
   });
 
   it("respects explicit tier flags in hud.json (forced compact)", () => {
-    writeFileSync(join(mockOmcConfigDir, "hud.json"), JSON.stringify({ tier: "compact" }));
+    writeFileSync(
+      join(mockOmcConfigDir, "hud.json"),
+      JSON.stringify({ tier: "compact" }),
+    );
     const output = runHudWithDimensions(150, 40); // Even with large cols, it should be compact
     matchSnapshot("forced_compact_tier", normalizeOutput(output));
     rmSync(join(mockOmcConfigDir, "hud.json"));

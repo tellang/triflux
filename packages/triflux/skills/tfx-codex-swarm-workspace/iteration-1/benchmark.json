@@ -4,24 +4,66 @@
   "configurations": [
     {
       "name": "with_skill",
-      "pass_rate": {"mean": 1.0, "stddev": 0.0},
-      "total_tokens": {"mean": 30953, "stddev": 6089},
-      "duration_seconds": {"mean": 166.8, "stddev": 10.2},
+      "pass_rate": { "mean": 1.0, "stddev": 0.0 },
+      "total_tokens": { "mean": 30953, "stddev": 6089 },
+      "duration_seconds": { "mean": 166.8, "stddev": 10.2 },
       "per_eval": [
-        {"eval_name": "full-swarm-all-prds", "pass_rate": 1.0, "assertions_passed": 7, "assertions_total": 7, "tokens": 37789, "duration_s": 178.4},
-        {"eval_name": "selective-spawn-with-override", "pass_rate": 1.0, "assertions_passed": 4, "assertions_total": 4, "tokens": 29085, "duration_s": 163.1},
-        {"eval_name": "implicit-swarm-no-keywords", "pass_rate": 1.0, "assertions_passed": 5, "assertions_total": 5, "tokens": 25984, "duration_s": 158.8}
+        {
+          "eval_name": "full-swarm-all-prds",
+          "pass_rate": 1.0,
+          "assertions_passed": 7,
+          "assertions_total": 7,
+          "tokens": 37789,
+          "duration_s": 178.4
+        },
+        {
+          "eval_name": "selective-spawn-with-override",
+          "pass_rate": 1.0,
+          "assertions_passed": 4,
+          "assertions_total": 4,
+          "tokens": 29085,
+          "duration_s": 163.1
+        },
+        {
+          "eval_name": "implicit-swarm-no-keywords",
+          "pass_rate": 1.0,
+          "assertions_passed": 5,
+          "assertions_total": 5,
+          "tokens": 25984,
+          "duration_s": 158.8
+        }
       ]
     },
     {
       "name": "without_skill",
-      "pass_rate": {"mean": 0.875, "stddev": 0.144},
-      "total_tokens": {"mean": 53786, "stddev": 10873},
-      "duration_seconds": {"mean": 264.4, "stddev": 49.3},
+      "pass_rate": { "mean": 0.875, "stddev": 0.144 },
+      "total_tokens": { "mean": 53786, "stddev": 10873 },
+      "duration_seconds": { "mean": 264.4, "stddev": 49.3 },
       "per_eval": [
-        {"eval_name": "full-swarm-all-prds", "pass_rate": 1.0, "assertions_passed": 7, "assertions_total": 7, "tokens": 50555, "duration_s": 218.2},
-        {"eval_name": "selective-spawn-with-override", "pass_rate": 1.0, "assertions_passed": 4, "assertions_total": 4, "tokens": 65928, "duration_s": 259.5},
-        {"eval_name": "implicit-swarm-no-keywords", "pass_rate": 0.6, "assertions_passed": 3, "assertions_total": 5, "tokens": 44875, "duration_s": 315.5}
+        {
+          "eval_name": "full-swarm-all-prds",
+          "pass_rate": 1.0,
+          "assertions_passed": 7,
+          "assertions_total": 7,
+          "tokens": 50555,
+          "duration_s": 218.2
+        },
+        {
+          "eval_name": "selective-spawn-with-override",
+          "pass_rate": 1.0,
+          "assertions_passed": 4,
+          "assertions_total": 4,
+          "tokens": 65928,
+          "duration_s": 259.5
+        },
+        {
+          "eval_name": "implicit-swarm-no-keywords",
+          "pass_rate": 0.6,
+          "assertions_passed": 3,
+          "assertions_total": 5,
+          "tokens": 44875,
+          "duration_s": 315.5
+        }
       ]
     }
   ],

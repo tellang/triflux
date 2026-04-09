@@ -11,12 +11,7 @@
       "skill": null,
       "action": "suppress_all",
       "priority": 0,
-      "supersedes": [
-        "tfx-multi",
-        "tfx-unified",
-        "tfx-codex",
-        "tfx-gemini"
-      ],
+      "supersedes": ["tfx-multi", "tfx-unified", "tfx-codex", "tfx-gemini"],
       "exclusive": true,
       "state": null,
       "mcp_route": null
@@ -62,9 +57,7 @@
       ],
       "skill": "tfx-swarm",
       "priority": 1,
-      "supersedes": [
-        "tfx-codex"
-      ],
+      "supersedes": ["tfx-codex"],
       "exclusive": false,
       "state": null,
       "mcp_route": null
@@ -80,7 +73,10 @@
         { "source": "(?:분석해|계획|설계해)", "flags": "i" },
         { "source": "(?:찾아봐|조사해|검색해)", "flags": "i" },
         { "source": "(?:정리해|슬롭|클린업)", "flags": "i" },
-        { "source": "\\b(?:implement|build|fix|review|test|plan|analyze)\\b", "flags": "i" }
+        {
+          "source": "\\b(?:implement|build|fix|review|test|plan|analyze)\\b",
+          "flags": "i"
+        }
       ],
       "skill": "tfx-auto",
       "priority": 2,

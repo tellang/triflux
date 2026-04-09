@@ -1,13 +1,22 @@
-import { createWtSession } from "../../../session.mjs";
 import { buildCliCommand } from "../../../pane.mjs";
+import { createWtSession } from "../../../session.mjs";
+import { warn } from "../../render.mjs";
 import { toAgentId } from "../../services/member-selector.mjs";
 import { buildTasks } from "../../services/task-model.mjs";
-import { warn } from "../../render.mjs";
 
-export async function startWtTeam({ sessionId, task, lead, agents, subtasks, layout, hubUrl }) {
+export async function startWtTeam({
+  sessionId,
+  task,
+  lead,
+  agents,
+  subtasks,
+  layout,
+  hubUrl,
+}) {
   const paneCount = agents.length + 1;
   const effectiveLayout = layout === "Nx1" ? "Nx1" : "1xN";
-  if (layout !== effectiveLayout) warn(`wt 모드에서 ${layout} 레이아웃은 미지원 — ${effectiveLayout}로 대체`);
+  if (layout !== effectiveLayout)
+    warn(`wt 모드에서 ${layout} 레이아웃은 미지원 — ${effectiveLayout}로 대체`);
   console.log(`  레이아웃: ${effectiveLayout} (${paneCount} panes)`);
 
   const session = createWtSession(sessionId, {
@@ -52,14 +61,22 @@ export async function startWtTeam({ sessionId, task, lead, agents, subtasks, lay
     startedAt: Date.now(),
     hubUrl,
     members,
-    panes: Object.fromEntries(members.map((member) => [member.pane, {
-      role: member.role,
-      name: member.name,
-      cli: member.cli,
-      agentId: member.agentId,
-      subtask: member.subtask || null,
-    }])),
-    tasks: buildTasks(subtasks, members.filter((member) => member.role === "worker")),
+    panes: Object.fromEntries(
+      members.map((member) => [
+        member.pane,
+        {
+          role: member.role,
+          name: member.name,
+          cli: member.cli,
+          agentId: member.agentId,
+          subtask: member.subtask || null,
+        },
+      ]),
+    ),
+    tasks: buildTasks(
+      subtasks,
+      members.filter((member) => member.role === "worker"),
+    ),
     wt: {
       windowId: 0,
       layout: effectiveLayout,

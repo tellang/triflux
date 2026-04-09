@@ -10,10 +10,8 @@ const DEFAULT_TTL_MS = 0; // 0 = no expiry
  * @returns {object} Queue API
  */
 export function createMessageQueue(opts = {}) {
-  const {
-    maxQueueSize = DEFAULT_MAX_QUEUE_SIZE,
-    ttlMs = DEFAULT_TTL_MS,
-  } = opts;
+  const { maxQueueSize = DEFAULT_MAX_QUEUE_SIZE, ttlMs = DEFAULT_TTL_MS } =
+    opts;
 
   /** @type {Map<string, Array<{ message: object, enqueuedAt: number }>>} */
   const queues = new Map();
@@ -39,7 +37,7 @@ export function createMessageQueue(opts = {}) {
    */
   function purgeExpired(q, now) {
     if (ttlMs <= 0) return;
-    while (q.length > 0 && (now - q[0].enqueuedAt) > ttlMs) {
+    while (q.length > 0 && now - q[0].enqueuedAt > ttlMs) {
       q.shift();
     }
   }

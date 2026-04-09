@@ -1,6 +1,6 @@
-import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
+import { beforeEach, describe, it } from "node:test";
 
 import {
   checkCli,
@@ -11,12 +11,13 @@ import {
 
 function makeAsyncResolver(delayMs, paths = {}) {
   const calls = [];
-  const resolver = (name) => new Promise((resolve) => {
-    calls.push(name);
-    setTimeout(() => {
-      resolve(Object.hasOwn(paths, name) ? paths[name] : `/usr/bin/${name}`);
-    }, delayMs);
-  });
+  const resolver = (name) =>
+    new Promise((resolve) => {
+      calls.push(name);
+      setTimeout(() => {
+        resolve(Object.hasOwn(paths, name) ? paths[name] : `/usr/bin/${name}`);
+      }, delayMs);
+    });
   return { calls, resolver };
 }
 
@@ -26,7 +27,9 @@ describe("env-probe parallel CLI probing", () => {
   });
 
   it("probeClis는 Promise.all로 병렬 probe 결과를 모은다", async () => {
-    const { calls, resolver } = makeAsyncResolver(40, { gemini: "/opt/gemini" });
+    const { calls, resolver } = makeAsyncResolver(40, {
+      gemini: "/opt/gemini",
+    });
     const startedAt = performance.now();
     const result = await probeClis(["codex", "gemini", "claude"], {
       whichCommandAsyncFn: resolver,
@@ -39,15 +42,19 @@ describe("env-probe parallel CLI probing", () => {
       claude: { ok: true, path: "/usr/bin/claude" },
     });
     assert.deepEqual(calls.sort(), ["claude", "codex", "gemini"]);
-    assert.ok(elapsedMs < 100, `expected parallel probe under 100ms, got ${elapsedMs}ms`);
+    assert.ok(
+      elapsedMs < 100,
+      `expected parallel probe under 100ms, got ${elapsedMs}ms`,
+    );
   });
 
   it("checkCli는 동일 CLI의 동시 요청을 하나의 in-flight probe로 합친다", async () => {
     let callCount = 0;
-    const resolver = (name) => new Promise((resolve) => {
-      callCount += 1;
-      setTimeout(() => resolve(`/bin/${name}`), 25);
-    });
+    const resolver = (name) =>
+      new Promise((resolve) => {
+        callCount += 1;
+        setTimeout(() => resolve(`/bin/${name}`), 25);
+      });
 
     const [first, second] = await Promise.all([
       checkCli("codex", { whichCommandAsyncFn: resolver }),

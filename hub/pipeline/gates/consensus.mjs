@@ -14,8 +14,9 @@ export const STAGE_THRESHOLDS = {
 
 /** 환경변수 기반 기본 임계값 (기본 75) */
 function getDefaultThreshold() {
-  const env = typeof process !== 'undefined' && process.env?.TRIFLUX_CONSENSUS_THRESHOLD;
-  if (env != null && env !== '') {
+  const env =
+    typeof process !== "undefined" && process.env?.TRIFLUX_CONSENSUS_THRESHOLD;
+  if (env != null && env !== "") {
     const parsed = Number(env);
     if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 100) return parsed;
   }
@@ -30,14 +31,19 @@ function getDefaultThreshold() {
  * @param {string} [mode] - 실행 모드 ('supervised' | 기타)
  * @returns {'proceed' | 'proceed_warn' | 'retry' | 'escalate' | 'abort'}
  */
-export function evaluateQualityBranch(successRate, retryCount, maxRetries, mode) {
-  if (successRate >= 90) return 'proceed';
-  if (successRate >= 75) return 'proceed_warn';
+export function evaluateQualityBranch(
+  successRate,
+  retryCount,
+  maxRetries,
+  mode,
+) {
+  if (successRate >= 90) return "proceed";
+  if (successRate >= 75) return "proceed_warn";
 
   // <75%: 재시도 가능 여부에 따라 분기
-  if (retryCount < maxRetries) return 'retry';
-  if (mode === 'supervised') return 'escalate';
-  return 'abort';
+  if (retryCount < maxRetries) return "retry";
+  if (mode === "supervised") return "escalate";
+  return "abort";
 }
 
 /**
@@ -56,8 +62,8 @@ export function evaluateConsensus(results, options = {}) {
     return {
       successRate: 0,
       threshold: options.threshold ?? getDefaultThreshold(),
-      decision: 'abort',
-      reasoning: '평가 대상 결과가 없습니다.',
+      decision: "abort",
+      reasoning: "평가 대상 결과가 없습니다.",
       results: [],
     };
   }
@@ -67,14 +73,20 @@ export function evaluateConsensus(results, options = {}) {
   const mode = options.mode;
 
   // 임계값 결정: 직접 지정 > stage별 > 환경변수 > 기본 75
-  const threshold = options.threshold
-    ?? (options.stage && STAGE_THRESHOLDS[options.stage])
-    ?? getDefaultThreshold();
+  const threshold =
+    options.threshold ??
+    (options.stage && STAGE_THRESHOLDS[options.stage]) ??
+    getDefaultThreshold();
 
-  const successCount = results.filter(r => r.success).length;
+  const successCount = results.filter((r) => r.success).length;
   const successRate = Math.round((successCount / results.length) * 100);
 
-  const decision = evaluateQualityBranch(successRate, retryCount, maxRetries, mode);
+  const decision = evaluateQualityBranch(
+    successRate,
+    retryCount,
+    maxRetries,
+    mode,
+  );
 
   const reasoningMap = {
     proceed: `합의율 ${successRate}% (>= 90%): 전원 합의. 진행.`,

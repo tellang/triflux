@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
 
 import {
   buildRemoteTransferPlan,
@@ -22,7 +22,10 @@ describe("remote-spawn transfer plan", () => {
 
     const tokens = extractExplicitFileTokens(source);
 
-    assert.deepEqual(tokens.sort(), ["./notes.txt", ".omx/plans/prd.md", "docs/spec.md"].sort());
+    assert.deepEqual(
+      tokens.sort(),
+      ["./notes.txt", ".omx/plans/prd.md", "docs/spec.md"].sort(),
+    );
   });
 
   it("handoff + 참조 파일 전송 계획과 프롬프트 재작성", () => {
@@ -34,7 +37,7 @@ describe("remote-spawn transfer plan", () => {
       writeFileSync(
         join(root, "handoff.md"),
         [
-          "Open \"./prd.md\" before anything else.",
+          'Open "./prd.md" before anything else.',
           "Then inspect `docs/spec.md` and [again](docs/spec.md).",
         ].join("\n"),
         "utf8",
@@ -53,9 +56,15 @@ describe("remote-spawn transfer plan", () => {
       assert.equal(plan.transfers[1].type, "reference");
       assert.equal(plan.transfers[2].type, "reference");
 
-      assert.match(plan.prompt, /Staged handoff file: \/remote\/stage\/abc123\/handoff\/handoff\.md/);
+      assert.match(
+        plan.prompt,
+        /Staged handoff file: \/remote\/stage\/abc123\/handoff\/handoff\.md/,
+      );
       assert.match(plan.prompt, /\/remote\/stage\/abc123\/refs\/\d{2}-prd\.md/);
-      assert.match(plan.prompt, /\/remote\/stage\/abc123\/refs\/\d{2}-spec\.md/);
+      assert.match(
+        plan.prompt,
+        /\/remote\/stage\/abc123\/refs\/\d{2}-spec\.md/,
+      );
       assert.equal(plan.prompt.includes("./prd.md"), false);
       assert.equal(plan.prompt.includes("docs/spec.md"), false);
       assert.match(plan.prompt, /---\n\ncontinue with execution$/);
@@ -69,12 +78,13 @@ describe("remote-spawn transfer plan", () => {
     try {
       writeFileSync(join(root, "handoff.md"), "Read `./missing.md`", "utf8");
       assert.throws(
-        () => buildRemoteTransferPlan({
-          cwd: root,
-          handoffPath: "handoff.md",
-          maxBytes: 1024 * 1024,
-          remoteStageRoot: "/remote/stage/abc123",
-        }),
+        () =>
+          buildRemoteTransferPlan({
+            cwd: root,
+            handoffPath: "handoff.md",
+            maxBytes: 1024 * 1024,
+            remoteStageRoot: "/remote/stage/abc123",
+          }),
         /referenced file not found:/,
       );
     } finally {
@@ -89,12 +99,13 @@ describe("remote-spawn transfer plan", () => {
       writeFileSync(join(root, "handoff.md"), "Open ./big-ref.txt", "utf8");
 
       assert.throws(
-        () => buildRemoteTransferPlan({
-          cwd: root,
-          handoffPath: "handoff.md",
-          maxBytes: 16,
-          remoteStageRoot: "/remote/stage/abc123",
-        }),
+        () =>
+          buildRemoteTransferPlan({
+            cwd: root,
+            handoffPath: "handoff.md",
+            maxBytes: 16,
+            remoteStageRoot: "/remote/stage/abc123",
+          }),
         /referenced file too large:/,
       );
     } finally {

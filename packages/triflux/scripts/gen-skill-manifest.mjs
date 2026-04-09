@@ -23,7 +23,8 @@ function extractManifest(skillMdContent) {
   if (data.description) manifest.description = data.description;
   if (data.triggers) manifest.triggers = data.triggers;
   if (data["argument-hint"]) manifest.argument_hint = data["argument-hint"];
-  if (data.internal === true || data.internal === "true") manifest.internal = true;
+  if (data.internal === true || data.internal === "true")
+    manifest.internal = true;
 
   return manifest;
 }

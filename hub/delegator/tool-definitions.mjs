@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from "node:fs";
 
-import { DELEGATOR_SCHEMA_URL } from './contracts.mjs';
+import { DELEGATOR_SCHEMA_URL } from "./contracts.mjs";
 
 let schemaBundleCache = null;
 
@@ -14,15 +14,15 @@ export function loadDelegatorSchemaBundle() {
     return schemaBundleCache;
   }
 
-  schemaBundleCache = JSON.parse(readFileSync(DELEGATOR_SCHEMA_URL, 'utf8'));
+  schemaBundleCache = JSON.parse(readFileSync(DELEGATOR_SCHEMA_URL, "utf8"));
   return schemaBundleCache;
 }
 
 export function getDelegatorMcpToolDefinitions() {
   const bundle = loadDelegatorSchemaBundle();
   const defs = bundle.$defs || {};
-  const tools = Array.isArray(bundle['x-triflux-mcp-tools'])
-    ? bundle['x-triflux-mcp-tools']
+  const tools = Array.isArray(bundle["x-triflux-mcp-tools"])
+    ? bundle["x-triflux-mcp-tools"]
     : [];
 
   return tools.map((tool) => ({

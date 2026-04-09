@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 describe("smoke: 주요 모듈 import 검증", () => {
   it("scripts/lib/keyword-rules.mjs — 순수 함수 export", async () => {

@@ -1,9 +1,29 @@
 {
   "expectations": [
-    {"text": "3-paths-recognized", "passed": true, "evidence": "auth-refactor, api-v2, cache-layer 모두 classification.md에 등장"},
-    {"text": "filename-classification", "passed": true, "evidence": "auth-refactor=리팩터링, api-v2=구현, cache-layer=구현"},
-    {"text": "profile-routing-applied", "passed": true, "evidence": "모두 codex53_high 라우팅"},
-    {"text": "worktree-isolation", "passed": true, "evidence": "3개 git worktree add 명령"},
-    {"text": "psmux-and-wt", "passed": true, "evidence": "psmux 세션 + WT 탭 명령 존재"}
+    {
+      "text": "3-paths-recognized",
+      "passed": true,
+      "evidence": "auth-refactor, api-v2, cache-layer 모두 classification.md에 등장"
+    },
+    {
+      "text": "filename-classification",
+      "passed": true,
+      "evidence": "auth-refactor=리팩터링, api-v2=구현, cache-layer=구현"
+    },
+    {
+      "text": "profile-routing-applied",
+      "passed": true,
+      "evidence": "모두 codex53_high 라우팅"
+    },
+    {
+      "text": "worktree-isolation",
+      "passed": true,
+      "evidence": "3개 git worktree add 명령"
+    },
+    {
+      "text": "psmux-and-wt",
+      "passed": true,
+      "evidence": "psmux 세션 + WT 탭 명령 존재"
+    }
   ]
 }

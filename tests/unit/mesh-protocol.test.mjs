@@ -1,11 +1,11 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
-  MSG_TYPES,
   createMessage,
-  serialize,
   deserialize,
+  MSG_TYPES,
+  serialize,
   validate,
 } from "../../mesh/mesh-protocol.mjs";
 
@@ -25,7 +25,9 @@ describe("mesh/mesh-protocol.mjs", () => {
 
   describe("createMessage()", () => {
     it("필수 필드를 가진 메시지를 생성한다", () => {
-      const msg = createMessage(MSG_TYPES.REQUEST, "agent-a", "agent-b", { data: 1 });
+      const msg = createMessage(MSG_TYPES.REQUEST, "agent-a", "agent-b", {
+        data: 1,
+      });
       assert.equal(msg.type, "request");
       assert.equal(msg.from, "agent-a");
       assert.equal(msg.to, "agent-b");
@@ -45,24 +47,15 @@ describe("mesh/mesh-protocol.mjs", () => {
     });
 
     it("잘못된 type으로 생성하면 TypeError를 던진다", () => {
-      assert.throws(
-        () => createMessage("invalid", "a", "b"),
-        TypeError,
-      );
+      assert.throws(() => createMessage("invalid", "a", "b"), TypeError);
     });
 
     it("from이 비어 있으면 TypeError를 던진다", () => {
-      assert.throws(
-        () => createMessage(MSG_TYPES.REQUEST, "", "b"),
-        TypeError,
-      );
+      assert.throws(() => createMessage(MSG_TYPES.REQUEST, "", "b"), TypeError);
     });
 
     it("to가 비어 있으면 TypeError를 던진다", () => {
-      assert.throws(
-        () => createMessage(MSG_TYPES.REQUEST, "a", ""),
-        TypeError,
-      );
+      assert.throws(() => createMessage(MSG_TYPES.REQUEST, "a", ""), TypeError);
     });
 
     it("각 메시지마다 고유한 correlationId를 갖는다", () => {
@@ -115,18 +108,38 @@ describe("mesh/mesh-protocol.mjs", () => {
     });
 
     it("type이 없으면 오류를 반환한다", () => {
-      const result = validate({ type: "bad", from: "a", to: "b", timestamp: "t", correlationId: "c" });
+      const result = validate({
+        type: "bad",
+        from: "a",
+        to: "b",
+        timestamp: "t",
+        correlationId: "c",
+      });
       assert.equal(result.valid, false);
-      assert.ok(result.errors.some((e) => e.includes("type") || e.includes("Invalid")));
+      assert.ok(
+        result.errors.some((e) => e.includes("type") || e.includes("Invalid")),
+      );
     });
 
     it("from이 없으면 오류를 반환한다", () => {
-      const result = validate({ type: "request", from: "", to: "b", timestamp: "t", correlationId: "c" });
+      const result = validate({
+        type: "request",
+        from: "",
+        to: "b",
+        timestamp: "t",
+        correlationId: "c",
+      });
       assert.equal(result.valid, false);
     });
 
     it("to가 없으면 오류를 반환한다", () => {
-      const result = validate({ type: "request", from: "a", to: "", timestamp: "t", correlationId: "c" });
+      const result = validate({
+        type: "request",
+        from: "a",
+        to: "",
+        timestamp: "t",
+        correlationId: "c",
+      });
       assert.equal(result.valid, false);
     });
 

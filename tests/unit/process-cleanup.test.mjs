@@ -1,11 +1,12 @@
 // tests/unit/process-cleanup.test.mjs — process-cleanup.mjs 유닛 테스트
 // mock Get-CimInstance 출력을 사용해 실제 프로세스를 kill하지 않는다.
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
-  findOrphanProcesses,
   createProcessCleanup,
+  findOrphanProcesses,
 } from "../../hub/team/process-cleanup.mjs";
 
 // ── 헬퍼 ────────────────────────────────────────────────────────────────────
@@ -28,7 +29,10 @@ function makeMockExecFile(procs, sessionPids = {}) {
 
     // Get-CimInstance CreationDate 쿼리 (age)
     if (cmdStr.includes("Win32_Process") && cmdStr.includes("CreationDate")) {
-      return { stdout: new Date(Date.now() - 60_000).toISOString(), stderr: "" };
+      return {
+        stdout: new Date(Date.now() - 60_000).toISOString(),
+        stderr: "",
+      };
     }
 
     // psmux list-sessions
@@ -64,9 +68,7 @@ function cimProc(overrides) {
 
 describe("findOrphanProcesses — 기본 고아 감지", () => {
   it("부모가 없는 node 프로세스를 고아로 감지한다", async () => {
-    const procs = [
-      cimProc({ ProcessId: 100, ParentProcessId: 9999 }),
-    ];
+    const procs = [cimProc({ ProcessId: 100, ParentProcessId: 9999 })];
     const result = await findOrphanProcesses({
       execFileFn: makeMockExecFile(procs),
       skipPsmuxCheck: true,
@@ -80,7 +82,12 @@ describe("findOrphanProcesses — 기본 고아 감지", () => {
   it("부모가 살아있는 node 프로세스는 고아로 분류하지 않는다", async () => {
     const procs = [
       cimProc({ ProcessId: 200, ParentProcessId: 300 }),
-      cimProc({ ProcessId: 300, ParentProcessId: 1, Name: "pwsh.exe", CommandLine: "pwsh" }),
+      cimProc({
+        ProcessId: 300,
+        ParentProcessId: 1,
+        Name: "pwsh.exe",
+        CommandLine: "pwsh",
+      }),
     ];
     const result = await findOrphanProcesses({
       execFileFn: makeMockExecFile(procs),
@@ -99,7 +106,9 @@ describe("findOrphanProcesses — 기본 고아 감지", () => {
   });
 
   it("execFileFn 실패 시 빈 배열을 반환한다 (에러 전파 없음)", async () => {
-    const failExec = async () => { throw new Error("pwsh not found"); };
+    const failExec = async () => {
+      throw new Error("pwsh not found");
+    };
     const result = await findOrphanProcesses({
       execFileFn: failExec,
       skipPsmuxCheck: true,
@@ -129,7 +138,11 @@ describe("findOrphanProcesses — 기본 고아 감지", () => {
 describe("findOrphanProcesses — 화이트리스트", () => {
   it("프로세스명 claude는 화이트리스트 처리한다", async () => {
     const procs = [
-      cimProc({ ProcessId: 600, Name: "claude.exe", CommandLine: "claude --dangerously-skip-permissions" }),
+      cimProc({
+        ProcessId: 600,
+        Name: "claude.exe",
+        CommandLine: "claude --dangerously-skip-permissions",
+      }),
     ];
     const result = await findOrphanProcesses({
       execFileFn: makeMockExecFile(procs),
@@ -140,7 +153,10 @@ describe("findOrphanProcesses — 화이트리스트", () => {
 
   it("cmdLine에 oh-my-claudecode 포함 시 화이트리스트 처리한다", async () => {
     const procs = [
-      cimProc({ ProcessId: 700, CommandLine: "node oh-my-claudecode/bridge.mjs" }),
+      cimProc({
+        ProcessId: 700,
+        CommandLine: "node oh-my-claudecode/bridge.mjs",
+      }),
     ];
     const result = await findOrphanProcesses({
       execFileFn: makeMockExecFile(procs),
@@ -151,7 +167,10 @@ describe("findOrphanProcesses — 화이트리스트", () => {
 
   it("cmdLine에 triflux/hub/s 포함 시 화이트리스트 처리한다", async () => {
     const procs = [
-      cimProc({ ProcessId: 800, CommandLine: "node C:/path/triflux/hub/server.mjs" }),
+      cimProc({
+        ProcessId: 800,
+        CommandLine: "node C:/path/triflux/hub/server.mjs",
+      }),
     ];
     const result = await findOrphanProcesses({
       execFileFn: makeMockExecFile(procs),
@@ -164,20 +183,38 @@ describe("findOrphanProcesses — 화이트리스트", () => {
     const procs = [
       // CCXProcess 자체 (대상 프로세스명이 아니므로 필터 통과 전에 제외되지만
       // pid는 ccxParentPids에 들어간다)
-      { ProcessId: 900, Name: "CCXProcess.exe", ParentProcessId: 1, CommandLine: "CCXProcess.exe", WorkingSetSize: 0 },
+      {
+        ProcessId: 900,
+        Name: "CCXProcess.exe",
+        ParentProcessId: 1,
+        CommandLine: "CCXProcess.exe",
+        WorkingSetSize: 0,
+      },
       // CCXProcess의 자식 node 프로세스
-      cimProc({ ProcessId: 901, ParentProcessId: 900, CommandLine: "node /adobe/helper.js" }),
+      cimProc({
+        ProcessId: 901,
+        ParentProcessId: 900,
+        CommandLine: "node /adobe/helper.js",
+      }),
     ];
     const result = await findOrphanProcesses({
       execFileFn: makeMockExecFile(procs),
       skipPsmuxCheck: true,
     });
-    assert.equal(result.length, 0, "Adobe CC 자식 node는 고아 후보에 포함되면 안 된다");
+    assert.equal(
+      result.length,
+      0,
+      "Adobe CC 자식 node는 고아 후보에 포함되면 안 된다",
+    );
   });
 
   it("화이트리스트에 해당하지 않는 고아는 정상 감지한다", async () => {
     const procs = [
-      cimProc({ ProcessId: 999, CommandLine: "node /tmp/random-orphan.mjs", ParentProcessId: 77777 }),
+      cimProc({
+        ProcessId: 999,
+        CommandLine: "node /tmp/random-orphan.mjs",
+        ParentProcessId: 77777,
+      }),
     ];
     const result = await findOrphanProcesses({
       execFileFn: makeMockExecFile(procs),
@@ -192,9 +229,7 @@ describe("findOrphanProcesses — 화이트리스트", () => {
 
 describe("findOrphanProcesses — psmux 교차검증", () => {
   it("활성 psmux 세션 소속 PID는 고아 목록에서 제외한다", async () => {
-    const procs = [
-      cimProc({ ProcessId: 1100, ParentProcessId: 9999 }),
-    ];
+    const procs = [cimProc({ ProcessId: 1100, ParentProcessId: 9999 })];
     // psmux session "my-session"의 pane pid = 1100
     const sessionPids = { "my-session": [1100] };
     const result = await findOrphanProcesses({
@@ -205,16 +240,20 @@ describe("findOrphanProcesses — psmux 교차검증", () => {
   });
 
   it("psmux 미설치 시 에러 없이 빈 교차검증 결과(= 모두 후보 유지)로 동작한다", async () => {
-    const procs = [
-      cimProc({ ProcessId: 1200, ParentProcessId: 9999 }),
-    ];
+    const procs = [cimProc({ ProcessId: 1200, ParentProcessId: 9999 })];
     const mockExec = async (_cmd, args, _opts) => {
       const cmdStr = Array.isArray(args) ? args.join(" ") : String(args);
-      if (cmdStr.includes("Win32_Process") && cmdStr.includes("ConvertTo-Json")) {
+      if (
+        cmdStr.includes("Win32_Process") &&
+        cmdStr.includes("ConvertTo-Json")
+      ) {
         return { stdout: JSON.stringify(procs), stderr: "" };
       }
       if (cmdStr.includes("Win32_Process") && cmdStr.includes("CreationDate")) {
-        return { stdout: new Date(Date.now() - 30_000).toISOString(), stderr: "" };
+        return {
+          stdout: new Date(Date.now() - 30_000).toISOString(),
+          stderr: "",
+        };
       }
       // psmux 관련 모두 실패
       throw new Error("psmux: command not found");
@@ -234,9 +273,7 @@ describe("findOrphanProcesses — psmux 교차검증", () => {
 
 describe("createProcessCleanup — scan/kill/getOrphans", () => {
   it("scan()이 고아 목록을 반환하고 getOrphans()로 재조회 가능하다", async () => {
-    const procs = [
-      cimProc({ ProcessId: 2000, ParentProcessId: 9999 }),
-    ];
+    const procs = [cimProc({ ProcessId: 2000, ParentProcessId: 9999 })];
     const cleanup = createProcessCleanup({
       execFileFn: makeMockExecFile(procs),
       skipPsmuxCheck: true,
@@ -250,9 +287,7 @@ describe("createProcessCleanup — scan/kill/getOrphans", () => {
   });
 
   it("dryRun=true이면 kill()이 실제 프로세스를 종료하지 않고 목록만 반환한다", async () => {
-    const procs = [
-      cimProc({ ProcessId: 2100, ParentProcessId: 9999 }),
-    ];
+    const procs = [cimProc({ ProcessId: 2100, ParentProcessId: 9999 })];
     const cleanup = createProcessCleanup({
       execFileFn: makeMockExecFile(procs),
       skipPsmuxCheck: true,

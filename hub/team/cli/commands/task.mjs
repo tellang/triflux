@@ -1,8 +1,11 @@
 import { DIM, RESET, WHITE } from "../../shared.mjs";
+import { ok } from "../render.mjs";
 import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState, saveTeamState } from "../services/state-store.mjs";
-import { normalizeTaskStatus, updateTaskStatus } from "../services/task-model.mjs";
-import { ok } from "../render.mjs";
+import {
+  normalizeTaskStatus,
+  updateTaskStatus,
+} from "../services/task-model.mjs";
 
 export function teamTaskUpdate(args = []) {
   const state = loadTeamState();
@@ -14,7 +17,9 @@ export function teamTaskUpdate(args = []) {
   const nextStatus = normalizeTaskStatus(args[0]);
   const taskId = String(args[1] || "").toUpperCase();
   if (!nextStatus || !taskId) {
-    console.log(`\n  사용법: ${WHITE}tfx multi task <pending|progress|done> <T1>${RESET}\n`);
+    console.log(
+      `\n  사용법: ${WHITE}tfx multi task <pending|progress|done> <T1>${RESET}\n`,
+    );
     return;
   }
 

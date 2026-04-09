@@ -6,9 +6,9 @@ export {
   DELEGATOR_PROVIDERS,
   DELEGATOR_SCHEMA_URL,
   DELEGATOR_TOOL_NAMES,
-} from './contracts.mjs';
-export { DelegatorService } from './service.mjs';
+} from "./contracts.mjs";
+export { DelegatorService } from "./service.mjs";
 export {
   getDelegatorMcpToolDefinitions,
   loadDelegatorSchemaBundle,
-} from './tool-definitions.mjs';
+} from "./tool-definitions.mjs";

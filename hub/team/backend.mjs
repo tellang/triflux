@@ -10,8 +10,12 @@ const _require = createRequire(import.meta.url);
 // ── 백엔드 클래스 ──────────────────────────────────────────────────────────
 
 export class CodexBackend {
-  name() { return "codex"; }
-  command() { return "codex"; }
+  name() {
+    return "codex";
+  }
+  command() {
+    return "codex";
+  }
 
   /**
    * @param {string} prompt — 프롬프트 (프롬프트 파일 경로가 아닌 PowerShell 표현식)
@@ -23,36 +27,50 @@ export class CodexBackend {
     return buildExecArgs({ prompt, resultFile, ...opts });
   }
 
-  env() { return {}; }
+  env() {
+    return {};
+  }
 }
 
 export class GeminiBackend {
-  name() { return "gemini"; }
-  command() { return "gemini"; }
+  name() {
+    return "gemini";
+  }
+  command() {
+    return "gemini";
+  }
 
   buildArgs(prompt, resultFile, opts = {}) {
     return `gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
   }
 
-  env() { return {}; }
+  env() {
+    return {};
+  }
 }
 
 export class ClaudeBackend {
-  name() { return "claude"; }
-  command() { return "claude"; }
+  name() {
+    return "claude";
+  }
+  command() {
+    return "claude";
+  }
 
   buildArgs(prompt, resultFile, opts = {}) {
     return `claude --print ${prompt} --output-format text > '${resultFile}' 2>&1`;
   }
 
-  env() { return {}; }
+  env() {
+    return {};
+  }
 }
 
 // ── 레지스트리 ─────────────────────────────────────────────────────────────
 
 /** @type {Map<string, CodexBackend|GeminiBackend|ClaudeBackend>} */
 const backends = new Map([
-  ["codex",  new CodexBackend()],
+  ["codex", new CodexBackend()],
   ["gemini", new GeminiBackend()],
   ["claude", new ClaudeBackend()],
 ]);

@@ -1,11 +1,9 @@
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
-
+import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
 import { buildLeadPrompt, buildPrompt } from "../../orchestrator.mjs";
 import { HUB_PID_DIR, PKG_ROOT } from "./state-store.mjs";
-
-import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
 
 export function buildNativeCliCommand(cli) {
   switch (cli) {
@@ -20,9 +18,19 @@ export function buildNativeCliCommand(cli) {
   }
 }
 
-export async function startNativeSupervisor({ sessionId, task, lead, agents, subtasks, hubUrl }) {
+export async function startNativeSupervisor({
+  sessionId,
+  task,
+  lead,
+  agents,
+  subtasks,
+  hubUrl,
+}) {
   const configPath = join(HUB_PID_DIR, `team-native-${sessionId}.config.json`);
-  const runtimePath = join(HUB_PID_DIR, `team-native-${sessionId}.runtime.json`);
+  const runtimePath = join(
+    HUB_PID_DIR,
+    `team-native-${sessionId}.runtime.json`,
+  );
   const logsDir = join(HUB_PID_DIR, "team-logs", sessionId);
   mkdirSync(logsDir, { recursive: true });
 
@@ -57,25 +65,44 @@ export async function startNativeSupervisor({ sessionId, task, lead, agents, sub
     },
     ...workers.map((worker) => ({
       ...worker,
-      prompt: buildPrompt(worker.subtask, { cli: worker.cli, agentId: worker.agentId, hubUrl }),
+      prompt: buildPrompt(worker.subtask, {
+        cli: worker.cli,
+        agentId: worker.agentId,
+        hubUrl,
+      }),
     })),
   ];
 
-  writeFileSync(configPath, JSON.stringify({
-    sessionName: sessionId,
-    hubUrl,
-    startupDelayMs: 3000,
-    logsDir,
-    runtimeFile: runtimePath,
-    members,
-  }, null, 2) + "\n");
+  writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        sessionName: sessionId,
+        hubUrl,
+        startupDelayMs: 3000,
+        logsDir,
+        runtimeFile: runtimePath,
+        members,
+      },
+      null,
+      2,
+    ) + "\n",
+  );
 
-  const child = spawn(process.execPath, [join(PKG_ROOT, "hub", "team", "native-supervisor.mjs"), "--config", configPath], {
-    detached: true,
-    stdio: "ignore",
-    env: { ...process.env },
-    windowsHide: true,
-  });
+  const child = spawn(
+    process.execPath,
+    [
+      join(PKG_ROOT, "hub", "team", "native-supervisor.mjs"),
+      "--config",
+      configPath,
+    ],
+    {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env },
+      windowsHide: true,
+    },
+  );
   child.unref();
 
   const deadline = Date.now() + 5000;

@@ -2,14 +2,17 @@
 // register/status/publish/ask/poll/handoff/HITL + team proxy
 // 모든 도구 응답: { ok: boolean, error?: { code, message }, data?: ... }
 
-import { createPipeline, ensurePipelineTable } from "@triflux/core/hub/pipeline/index.mjs";
+import {
+  createPipeline,
+  ensurePipelineTable,
+} from "@triflux/core/hub/pipeline/index.mjs";
 import {
   initPipelineState,
   listPipelineStates,
   readPipelineState,
 } from "@triflux/core/hub/pipeline/state.mjs";
-import { sendInputToConductorSession } from "./team/conductor-registry.mjs";
 import { getTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
+import { sendInputToConductorSession } from "./team/conductor-registry.mjs";
 
 const TEAM_BRIDGE_NOT_REGISTERED = "bridge_not_registered";
 

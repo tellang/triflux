@@ -10,14 +10,18 @@
  * 각 요청에 correlationId를 할당하고, 응답 완료 시 구조화 로그를 남긴다.
  * health/status 체크는 로깅을 건너뛴다.
  */
-import { withRequestContext, getCorrelationId } from '../../scripts/lib/context.mjs';
-import { createModuleLogger } from '../../scripts/lib/logger.mjs';
-import { createContextMonitor } from '../../hud/context-monitor.mjs';
 
-const log = createModuleLogger('hub');
+import { createContextMonitor } from "../../hud/context-monitor.mjs";
+import {
+  getCorrelationId,
+  withRequestContext,
+} from "../../scripts/lib/context.mjs";
+import { createModuleLogger } from "../../scripts/lib/logger.mjs";
+
+const log = createModuleLogger("hub");
 const contextMonitor = createContextMonitor();
 
-const SKIP_PATHS = new Set(['/health', '/healthz', '/status', '/ready']);
+const SKIP_PATHS = new Set(["/health", "/healthz", "/status", "/ready"]);
 const MAX_CAPTURE_BYTES = 256 * 1024;
 
 /**
@@ -35,8 +39,8 @@ export function wrapRequestHandler(handler) {
     }
 
     const correlationId =
-      req.headers['x-correlation-id'] ||
-      req.headers['x-request-id'] ||
+      req.headers["x-correlation-id"] ||
+      req.headers["x-request-id"] ||
       undefined; // withRequestContext will generate one
 
     withRequestContext(
@@ -51,9 +55,11 @@ export function wrapRequestHandler(handler) {
         let reqBytes = 0;
         let reqOverflow = false;
 
-        req.on('data', (chunk) => {
+        req.on("data", (chunk) => {
           if (reqOverflow) return;
-          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+          const buf = Buffer.isBuffer(chunk)
+            ? chunk
+            : Buffer.from(String(chunk));
           reqBytes += buf.length;
           if (reqBytes > MAX_CAPTURE_BYTES) {
             reqOverflow = true;
@@ -72,7 +78,9 @@ export function wrapRequestHandler(handler) {
 
         function captureResponseChunk(chunk) {
           if (resOverflow || chunk == null) return;
-          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+          const buf = Buffer.isBuffer(chunk)
+            ? chunk
+            : Buffer.from(String(chunk));
           resBytes += buf.length;
           if (resBytes > MAX_CAPTURE_BYTES) {
             resOverflow = true;
@@ -94,28 +102,38 @@ export function wrapRequestHandler(handler) {
 
         // 응답 헤더에 상관 ID 포함
         const cid = getCorrelationId();
-        if (cid) res.setHeader('X-Correlation-ID', cid);
+        if (cid) res.setHeader("X-Correlation-ID", cid);
 
         // 응답 완료 시 로깅
-        res.on('finish', () => {
-          const duration = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-          const level = res.statusCode >= 500 ? 'error'
-            : res.statusCode >= 400 ? 'warn'
-            : 'info';
-          const reqBodyText = reqOverflow ? '' : Buffer.concat(reqChunks).toString('utf8');
-          const resBodyText = resOverflow ? '' : Buffer.concat(resChunks).toString('utf8');
+        res.on("finish", () => {
+          const duration =
+            Number(process.hrtime.bigint() - startTime) / 1_000_000;
+          const level =
+            res.statusCode >= 500
+              ? "error"
+              : res.statusCode >= 400
+                ? "warn"
+                : "info";
+          const reqBodyText = reqOverflow
+            ? ""
+            : Buffer.concat(reqChunks).toString("utf8");
+          const resBodyText = resOverflow
+            ? ""
+            : Buffer.concat(resChunks).toString("utf8");
           const tokenSummary = contextMonitor.record({
             requestBody: reqBodyText,
-            requestBytes: reqBytes || Number(req.headers['content-length'] || 0),
+            requestBytes:
+              reqBytes || Number(req.headers["content-length"] || 0),
             responseBody: resBodyText,
-            responseBytes: resBytes || Number(res.getHeader('content-length') || 0),
+            responseBytes:
+              resBytes || Number(res.getHeader("content-length") || 0),
           });
 
           log[level](
             {
               status: res.statusCode,
               duration: Math.round(duration * 100) / 100,
-              contentLength: res.getHeader('content-length') || 0,
+              contentLength: res.getHeader("content-length") || 0,
               tokenUsage: {
                 request: tokenSummary.requestTokens,
                 response: tokenSummary.responseTokens,
@@ -125,23 +143,32 @@ export function wrapRequestHandler(handler) {
                 overheadMs: tokenSummary.overheadMs,
               },
             },
-            'http.response',
+            "http.response",
           );
 
-          if (tokenSummary.warningLevel === 'critical') {
+          if (tokenSummary.warningLevel === "critical") {
             log.error(
-              { context: tokenSummary.display, message: tokenSummary.warningMessage },
-              'context.critical',
+              {
+                context: tokenSummary.display,
+                message: tokenSummary.warningMessage,
+              },
+              "context.critical",
             );
-          } else if (tokenSummary.warningLevel === 'warn') {
+          } else if (tokenSummary.warningLevel === "warn") {
             log.warn(
-              { context: tokenSummary.display, message: tokenSummary.warningMessage },
-              'context.warn',
+              {
+                context: tokenSummary.display,
+                message: tokenSummary.warningMessage,
+              },
+              "context.warn",
             );
-          } else if (tokenSummary.warningLevel === 'info') {
+          } else if (tokenSummary.warningLevel === "info") {
             log.info(
-              { context: tokenSummary.display, message: tokenSummary.warningMessage },
-              'context.info',
+              {
+                context: tokenSummary.display,
+                message: tokenSummary.warningMessage,
+              },
+              "context.info",
             );
           }
         });
@@ -152,10 +179,10 @@ export function wrapRequestHandler(handler) {
   };
 }
 
-function getRequestPath(url = '/') {
+function getRequestPath(url = "/") {
   try {
-    return new URL(url, 'http://127.0.0.1').pathname;
+    return new URL(url, "http://127.0.0.1").pathname;
   } catch {
-    return String(url).replace(/\?.*/, '') || '/';
+    return String(url).replace(/\?.*/, "") || "/";
   }
 }

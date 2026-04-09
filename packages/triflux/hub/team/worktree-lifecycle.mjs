@@ -3,24 +3,29 @@
 // Convention: .codex-swarm/wt-{slug} paths, swarm/{runId}/{slug} branches.
 // Remote support: host option → SSH-based git operations via remote-session.mjs.
 
-import { execFile } from 'node:child_process';
-import { resolve, normalize, join } from 'node:path';
-import { mkdir, rm, access, readdir } from 'node:fs/promises';
-import { remoteGit, validateHost } from './remote-session.mjs';
+import { execFile } from "node:child_process";
+import { access, mkdir, readdir, rm } from "node:fs/promises";
+import { join, normalize, resolve } from "node:path";
+import { remoteGit, validateHost } from "./remote-session.mjs";
 
-const SWARM_ROOT = '.codex-swarm';
+const SWARM_ROOT = ".codex-swarm";
 const SLEEP_MS = 2000; // WT race-guard (MEMORY.md: wt-attach-spacing)
 
 function git(args, cwd) {
   return new Promise((res, rej) => {
-    execFile('git', args, { cwd, windowsHide: true, timeout: 30_000 }, (err, stdout, stderr) => {
-      if (err) {
-        const msg = `git ${args[0]} failed: ${stderr?.trim() || err.message}`;
-        rej(new Error(msg));
-      } else {
-        res(stdout.trim());
-      }
-    });
+    execFile(
+      "git",
+      args,
+      { cwd, windowsHide: true, timeout: 30_000 },
+      (err, stdout, stderr) => {
+        if (err) {
+          const msg = `git ${args[0]} failed: ${stderr?.trim() || err.message}`;
+          rej(new Error(msg));
+        } else {
+          res(stdout.trim());
+        }
+      },
+    );
   });
 }
 
@@ -30,7 +35,7 @@ function sleep(ms) {
 
 /** Normalize path for Windows compatibility. */
 function normPath(p) {
-  return normalize(p).replace(/\\/g, '/');
+  return normalize(p).replace(/\\/g, "/");
 }
 
 /**
@@ -45,22 +50,45 @@ function normPath(p) {
  * @param {object} [opts.remoteEnv] — remote environment from probeRemoteEnv()
  * @returns {Promise<{ worktreePath: string, branchName: string, remote: boolean }>}
  */
-export async function ensureWorktree({ slug, runId, rootDir = process.cwd(), baseBranch = 'main', host, remoteEnv }) {
+export async function ensureWorktree({
+  slug,
+  runId,
+  rootDir = process.cwd(),
+  baseBranch = "main",
+  host,
+  remoteEnv,
+}) {
   const branchName = `swarm/${runId}/${slug}`;
 
   // ── Remote path: SSH-based worktree creation ──
   if (host && remoteEnv) {
-    const remoteRoot = rootDir.replace(/\\/g, '/');
+    const remoteRoot = rootDir.replace(/\\/g, "/");
     const remoteWtDir = `${remoteRoot}/${SWARM_ROOT}/wt-${slug}`;
 
-    try { remoteGit(host, remoteEnv, ['worktree', 'prune'], remoteRoot); } catch { /* best-effort */ }
+    try {
+      remoteGit(host, remoteEnv, ["worktree", "prune"], remoteRoot);
+    } catch {
+      /* best-effort */
+    }
 
     try {
-      remoteGit(host, remoteEnv, ['worktree', 'add', remoteWtDir, '-b', branchName, baseBranch], remoteRoot);
+      remoteGit(
+        host,
+        remoteEnv,
+        ["worktree", "add", remoteWtDir, "-b", branchName, baseBranch],
+        remoteRoot,
+      );
     } catch {
       try {
-        remoteGit(host, remoteEnv, ['worktree', 'add', remoteWtDir, branchName], remoteRoot);
-      } catch { /* already exists — acceptable */ }
+        remoteGit(
+          host,
+          remoteEnv,
+          ["worktree", "add", remoteWtDir, branchName],
+          remoteRoot,
+        );
+      } catch {
+        /* already exists — acceptable */
+      }
     }
 
     return { worktreePath: remoteWtDir, branchName, remote: true };
@@ -74,27 +102,36 @@ export async function ensureWorktree({ slug, runId, rootDir = process.cwd(), bas
   // Check if worktree already exists
   try {
     await access(wtDir);
-    await git(['rev-parse', '--is-inside-work-tree'], wtDir);
+    await git(["rev-parse", "--is-inside-work-tree"], wtDir);
     return { worktreePath: normPath(wtDir), branchName, remote: false };
   } catch {
     // Doesn't exist or invalid — create fresh
   }
 
   try {
-    await git(['worktree', 'prune'], rootDir);
-  } catch { /* best-effort */ }
+    await git(["worktree", "prune"], rootDir);
+  } catch {
+    /* best-effort */
+  }
 
   await sleep(SLEEP_MS);
 
   try {
-    await git(['worktree', 'add', wtDir, '-b', branchName, baseBranch], rootDir);
+    await git(
+      ["worktree", "add", wtDir, "-b", branchName, baseBranch],
+      rootDir,
+    );
   } catch {
-    await git(['worktree', 'add', wtDir, branchName], rootDir);
+    await git(["worktree", "add", wtDir, branchName], rootDir);
   }
 
   // #34 L2: worktree에 복사된 .claude-plugin 제거 (하네스가 PLUGIN_ROOT를 오인하는 것 방지)
-  const pluginDir = join(wtDir, '.claude-plugin');
-  try { await rm(pluginDir, { recursive: true, force: true }); } catch { /* absent → ok */ }
+  const pluginDir = join(wtDir, ".claude-plugin");
+  try {
+    await rm(pluginDir, { recursive: true, force: true });
+  } catch {
+    /* absent → ok */
+  }
 
   return { worktreePath: normPath(wtDir), branchName, remote: false };
 }
@@ -108,18 +145,22 @@ export async function ensureWorktree({ slug, runId, rootDir = process.cwd(), bas
  * @param {string} [opts.rootDir=process.cwd()]
  * @returns {Promise<{ integrationBranch: string, baseCommit: string }>}
  */
-export async function prepareIntegrationBranch({ runId, baseBranch, rootDir = process.cwd() }) {
+export async function prepareIntegrationBranch({
+  runId,
+  baseBranch,
+  rootDir = process.cwd(),
+}) {
   const integrationBranch = `swarm/${runId}/merge`;
 
   // Record base commit for rollback
-  const baseCommit = await git(['rev-parse', baseBranch], rootDir);
+  const baseCommit = await git(["rev-parse", baseBranch], rootDir);
 
   // Create integration branch from base
   try {
-    await git(['branch', integrationBranch, baseBranch], rootDir);
+    await git(["branch", integrationBranch, baseBranch], rootDir);
   } catch {
     // Branch may already exist — reset to base
-    await git(['branch', '-f', integrationBranch, baseBranch], rootDir);
+    await git(["branch", "-f", integrationBranch, baseBranch], rootDir);
   }
 
   return { integrationBranch, baseCommit };
@@ -135,25 +176,41 @@ export async function prepareIntegrationBranch({ runId, baseBranch, rootDir = pr
  * @param {string} [opts.rootDir=process.cwd()]
  * @returns {Promise<{ ok: boolean, headCommit?: string, error?: string }>}
  */
-export async function rebaseShardOntoIntegration({ shardBranch, integrationBranch, rootDir = process.cwd() }) {
+export async function rebaseShardOntoIntegration({
+  shardBranch,
+  integrationBranch,
+  rootDir = process.cwd(),
+}) {
   // Backup integration HEAD for rollback
-  const backupCommit = await git(['rev-parse', integrationBranch], rootDir);
+  const backupCommit = await git(["rev-parse", integrationBranch], rootDir);
 
   try {
     // Rebase shard onto integration
-    await git(['rebase', integrationBranch, shardBranch], rootDir);
+    await git(["rebase", integrationBranch, shardBranch], rootDir);
 
     // Fast-forward integration to include shard changes
-    await git(['checkout', integrationBranch], rootDir);
-    await git(['merge', '--ff-only', shardBranch], rootDir);
+    await git(["checkout", integrationBranch], rootDir);
+    await git(["merge", "--ff-only", shardBranch], rootDir);
 
-    const headCommit = await git(['rev-parse', 'HEAD'], rootDir);
+    const headCommit = await git(["rev-parse", "HEAD"], rootDir);
     return { ok: true, headCommit };
   } catch (err) {
     // Abort rebase and restore integration branch
-    try { await git(['rebase', '--abort'], rootDir); } catch { /* already clean */ }
-    try { await git(['checkout', integrationBranch], rootDir); } catch { /* best-effort */ }
-    try { await git(['reset', '--hard', backupCommit], rootDir); } catch { /* best-effort */ }
+    try {
+      await git(["rebase", "--abort"], rootDir);
+    } catch {
+      /* already clean */
+    }
+    try {
+      await git(["checkout", integrationBranch], rootDir);
+    } catch {
+      /* best-effort */
+    }
+    try {
+      await git(["reset", "--hard", backupCommit], rootDir);
+    } catch {
+      /* best-effort */
+    }
 
     return { ok: false, error: err.message };
   }
@@ -169,18 +226,30 @@ export async function rebaseShardOntoIntegration({ shardBranch, integrationBranc
  * @param {string} [opts.rootDir=process.cwd()]
  * @param {boolean} [opts.force=false]
  */
-export async function pruneWorktree({ worktreePath, branchName, rootDir = process.cwd(), force = false }) {
-  const forceFlag = force ? '--force' : '';
+export async function pruneWorktree({
+  worktreePath,
+  branchName,
+  rootDir = process.cwd(),
+  force = false,
+}) {
+  const forceFlag = force ? "--force" : "";
 
   // Remove worktree (with retry for Windows file handle issues — E5)
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await git(['worktree', 'remove', worktreePath, ...(forceFlag ? [forceFlag] : [])], rootDir);
+      await git(
+        ["worktree", "remove", worktreePath, ...(forceFlag ? [forceFlag] : [])],
+        rootDir,
+      );
       break;
     } catch (_err) {
       if (attempt === 2) {
         // Last resort: rm the directory and prune
-        try { await rm(worktreePath, { recursive: true, force: true }); } catch { /* ignore */ }
+        try {
+          await rm(worktreePath, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
       }
       await sleep(SLEEP_MS);
     }
@@ -188,11 +257,19 @@ export async function pruneWorktree({ worktreePath, branchName, rootDir = proces
 
   // Prune stale worktree references
   await sleep(SLEEP_MS);
-  try { await git(['worktree', 'prune'], rootDir); } catch { /* best-effort */ }
+  try {
+    await git(["worktree", "prune"], rootDir);
+  } catch {
+    /* best-effort */
+  }
 
   // Delete branch if specified
   if (branchName) {
-    try { await git(['branch', '-D', branchName], rootDir); } catch { /* may not exist */ }
+    try {
+      await git(["branch", "-D", branchName], rootDir);
+    } catch {
+      /* may not exist */
+    }
   }
 }
 
@@ -216,17 +293,18 @@ export async function pruneOrphanWorktrees({ rootDir = process.cwd() } = {}) {
     return removed; // .codex-swarm/ doesn't exist → nothing to clean
   }
 
-  const wtDirs = entries.filter(e => e.startsWith('wt-'));
+  const wtDirs = entries.filter((e) => e.startsWith("wt-"));
   if (wtDirs.length === 0) return removed;
 
   // Get registered worktree paths from git
   let registeredPaths;
   try {
-    const raw = await git(['worktree', 'list', '--porcelain'], rootDir);
+    const raw = await git(["worktree", "list", "--porcelain"], rootDir);
     registeredPaths = new Set(
-      raw.split('\n')
-        .filter(l => l.startsWith('worktree '))
-        .map(l => normPath(l.slice('worktree '.length))),
+      raw
+        .split("\n")
+        .filter((l) => l.startsWith("worktree "))
+        .map((l) => normPath(l.slice("worktree ".length))),
     );
   } catch {
     return removed; // git worktree list failed → don't remove anything
@@ -239,13 +317,19 @@ export async function pruneOrphanWorktrees({ rootDir = process.cwd() } = {}) {
       try {
         await rm(fullPath, { recursive: true, force: true });
         removed.push(dir);
-      } catch { /* best-effort */ }
+      } catch {
+        /* best-effort */
+      }
     }
   }
 
   // Prune stale git references
   if (removed.length > 0) {
-    try { await git(['worktree', 'prune'], rootDir); } catch { /* best-effort */ }
+    try {
+      await git(["worktree", "prune"], rootDir);
+    } catch {
+      /* best-effort */
+    }
   }
 
   return removed;
@@ -265,24 +349,34 @@ export async function pruneOrphanWorktrees({ rootDir = process.cwd() } = {}) {
  * @param {string} [opts.rootDir=process.cwd()] — local repo root
  * @returns {Promise<{ ok: boolean, localRef?: string, error?: string }>}
  */
-export async function fetchRemoteShard({ host, sshUser, remoteRepoPath, branchName, rootDir = process.cwd() }) {
+export async function fetchRemoteShard({
+  host,
+  sshUser,
+  remoteRepoPath,
+  branchName,
+  rootDir = process.cwd(),
+}) {
   validateHost(host);
 
   const remoteName = `_swarm-${host}-${Date.now()}`;
   const sshUrl = `ssh://${sshUser}@${host}${remoteRepoPath}`;
 
   try {
-    await git(['remote', 'add', remoteName, sshUrl], rootDir);
+    await git(["remote", "add", remoteName, sshUrl], rootDir);
 
-    await git(['fetch', remoteName, branchName, '--no-tags'], rootDir);
+    await git(["fetch", remoteName, branchName, "--no-tags"], rootDir);
 
     const localRef = `${remoteName}/${branchName}`;
-    const headCommit = await git(['rev-parse', `FETCH_HEAD`], rootDir);
+    const headCommit = await git(["rev-parse", `FETCH_HEAD`], rootDir);
 
     return { ok: true, localRef, headCommit };
   } catch (err) {
     return { ok: false, error: err.message };
   } finally {
-    try { await git(['remote', 'remove', remoteName], rootDir); } catch { /* cleanup */ }
+    try {
+      await git(["remote", "remove", remoteName], rootDir);
+    } catch {
+      /* cleanup */
+    }
   }
 }

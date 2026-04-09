@@ -2,51 +2,111 @@
 // 터미널 감지 / 4-Tier 적응형 렌더링
 // ============================================================================
 import { execSync } from "node:child_process";
-import { DIM, RESET, GAUGE_WIDTH, coloredBar } from "./colors.mjs";
+import { coloredBar, DIM, GAUGE_WIDTH, RESET } from "./colors.mjs";
+import {
+  COMPACT_COLS_THRESHOLD,
+  HUD_CONFIG_PATH,
+  MINIMAL_COLS_THRESHOLD,
+} from "./constants.mjs";
 import { readJson } from "./utils.mjs";
-import { HUD_CONFIG_PATH, COMPACT_COLS_THRESHOLD, MINIMAL_COLS_THRESHOLD } from "./constants.mjs";
 
 let _cachedColumns = 0;
 export function getTerminalColumns() {
   if (_cachedColumns > 0) return _cachedColumns;
   const envCols = Number(process.env.COLUMNS);
-  if (envCols > 0) { _cachedColumns = envCols; return _cachedColumns; }
-  if (process.stdout.columns) { _cachedColumns = process.stdout.columns; return _cachedColumns; }
-  if (process.stderr.columns) { _cachedColumns = process.stderr.columns; return _cachedColumns; }
+  if (envCols > 0) {
+    _cachedColumns = envCols;
+    return _cachedColumns;
+  }
+  if (process.stdout.columns) {
+    _cachedColumns = process.stdout.columns;
+    return _cachedColumns;
+  }
+  if (process.stderr.columns) {
+    _cachedColumns = process.stderr.columns;
+    return _cachedColumns;
+  }
   try {
     if (process.platform === "win32") {
-      const raw = execSync("mode con", { timeout: 2000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }).toString();
-      const m = raw.match(/Columns[^:]*:\s*(\d+)/i) || raw.match(/열[^:]*:\s*(\d+)/);
-      if (m) { _cachedColumns = Number(m[1]); return _cachedColumns; }
+      const raw = execSync("mode con", {
+        timeout: 2000,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      }).toString();
+      const m =
+        raw.match(/Columns[^:]*:\s*(\d+)/i) || raw.match(/열[^:]*:\s*(\d+)/);
+      if (m) {
+        _cachedColumns = Number(m[1]);
+        return _cachedColumns;
+      }
     } else {
-      const raw = execSync("tput cols 2>/dev/null || stty size 2>/dev/null | awk '{print $2}'", {
-        timeout: 2000, stdio: ["pipe", "pipe", "pipe"],
-      }).toString().trim();
-      if (raw && !isNaN(Number(raw))) { _cachedColumns = Number(raw); return _cachedColumns; }
+      const raw = execSync(
+        "tput cols 2>/dev/null || stty size 2>/dev/null | awk '{print $2}'",
+        {
+          timeout: 2000,
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      )
+        .toString()
+        .trim();
+      if (raw && !Number.isNaN(Number(raw))) {
+        _cachedColumns = Number(raw);
+        return _cachedColumns;
+      }
     }
-  } catch { /* 감지 실패 */ }
+  } catch {
+    /* 감지 실패 */
+  }
   return 0;
 }
 
 let _cachedRows = 0;
 export function getTerminalRows() {
   if (_cachedRows > 0) return _cachedRows;
-  if (process.stdout.rows) { _cachedRows = process.stdout.rows; return _cachedRows; }
-  if (process.stderr.rows) { _cachedRows = process.stderr.rows; return _cachedRows; }
+  if (process.stdout.rows) {
+    _cachedRows = process.stdout.rows;
+    return _cachedRows;
+  }
+  if (process.stderr.rows) {
+    _cachedRows = process.stderr.rows;
+    return _cachedRows;
+  }
   const envLines = Number(process.env.LINES);
-  if (envLines > 0) { _cachedRows = envLines; return _cachedRows; }
+  if (envLines > 0) {
+    _cachedRows = envLines;
+    return _cachedRows;
+  }
   try {
     if (process.platform === "win32") {
-      const raw = execSync("mode con", { timeout: 2000, stdio: ["pipe", "pipe", "pipe"], windowsHide: true }).toString();
-      const m = raw.match(/Lines[^:]*:\s*(\d+)/i) || raw.match(/줄[^:]*:\s*(\d+)/);
-      if (m) { _cachedRows = Number(m[1]); return _cachedRows; }
+      const raw = execSync("mode con", {
+        timeout: 2000,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      }).toString();
+      const m =
+        raw.match(/Lines[^:]*:\s*(\d+)/i) || raw.match(/줄[^:]*:\s*(\d+)/);
+      if (m) {
+        _cachedRows = Number(m[1]);
+        return _cachedRows;
+      }
     } else {
-      const raw = execSync("tput lines 2>/dev/null || stty size 2>/dev/null | awk '{print $1}'", {
-        timeout: 2000, stdio: ["pipe", "pipe", "pipe"],
-      }).toString().trim();
-      if (raw && !isNaN(Number(raw))) { _cachedRows = Number(raw); return _cachedRows; }
+      const raw = execSync(
+        "tput lines 2>/dev/null || stty size 2>/dev/null | awk '{print $1}'",
+        {
+          timeout: 2000,
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      )
+        .toString()
+        .trim();
+      if (raw && !Number.isNaN(Number(raw))) {
+        _cachedRows = Number(raw);
+        return _cachedRows;
+      }
     }
-  } catch { /* 감지 실패 */ }
+  } catch {
+    /* 감지 실패 */
+  }
   return 0;
 }
 
@@ -60,12 +120,15 @@ export function detectCompactMode() {
   if (process.env.OMC_HUD_COMPACT === "0") return false;
   // 3. 설정 파일 (~/.omc/config/hud.json)
   const hudConfig = readJson(HUD_CONFIG_PATH, null);
-  if (hudConfig?.compact === true || hudConfig?.compact === "always") return true;
-  if (hudConfig?.compact === false || hudConfig?.compact === "never") return false;
+  if (hudConfig?.compact === true || hudConfig?.compact === "always")
+    return true;
+  if (hudConfig?.compact === false || hudConfig?.compact === "never")
+    return false;
   // 4. maxLines < 3이면 자동 컴팩트 (알림 배너 공존 대응)
   if (Number(hudConfig?.lines) > 0 && Number(hudConfig?.lines) < 3) return true;
   // 5. 터미널 폭 자동 감지 (TTY 있을 때만 유효)
-  const threshold = Number(hudConfig?.compactThreshold) || COMPACT_COLS_THRESHOLD;
+  const threshold =
+    Number(hudConfig?.compactThreshold) || COMPACT_COLS_THRESHOLD;
   const cols = getTerminalColumns();
   if (cols > 0 && cols < threshold) return true;
   return false;
@@ -95,7 +158,8 @@ export function selectTier(stdin, claudeUsage = null) {
 
   // 1) 명시적 tier 강제 설정
   const forcedTier = hudConfig?.tier;
-  if (["full", "compact", "minimal", "micro", "nano"].includes(forcedTier)) return forcedTier;
+  if (["full", "compact", "minimal", "micro", "nano"].includes(forcedTier))
+    return forcedTier;
 
   // 1.5) maxLines=1 → nano (1줄 모드: 알림 배너/분할화면 대응)
   if (Number(hudConfig?.lines) === 1) return "nano";
@@ -123,14 +187,20 @@ export function selectTier(stdin, claudeUsage = null) {
 
 // full tier 전용: 게이지 바 접두사 (normal 이하 tier에서는 빈 문자열)
 export function tierBar(currentTier, percent, baseColor = null) {
-  return currentTier === "full" ? coloredBar(percent, GAUGE_WIDTH, baseColor) + " " : "";
+  return currentTier === "full"
+    ? coloredBar(percent, GAUGE_WIDTH, baseColor) + " "
+    : "";
 }
 export function tierDimBar(currentTier) {
-  return currentTier === "full" ? DIM + "░".repeat(GAUGE_WIDTH) + RESET + " " : "";
+  return currentTier === "full"
+    ? DIM + "░".repeat(GAUGE_WIDTH) + RESET + " "
+    : "";
 }
 // Gemini ∞% 전용: 무한 쿼터이므로 dim 회색 바
 export function tierInfBar(currentTier) {
-  return currentTier === "full" ? DIM + "█".repeat(GAUGE_WIDTH) + RESET + " " : "";
+  return currentTier === "full"
+    ? DIM + "█".repeat(GAUGE_WIDTH) + RESET + " "
+    : "";
 }
 
 // 테스트 지원: 캐시 초기화

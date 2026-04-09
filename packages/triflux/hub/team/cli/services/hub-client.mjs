@@ -1,10 +1,20 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { spawn } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 
 import { publishLeadControl as publishLeadControlBridge } from "../../lead-control.mjs";
-import { getTeamStatus as fetchTeamStatus, subscribeToLeadCommands as pullLeadCommands } from "../../session-sync.mjs";
+import {
+  getTeamStatus as fetchTeamStatus,
+  subscribeToLeadCommands as pullLeadCommands,
+} from "../../session-sync.mjs";
 import { HUB_PID_DIR, PKG_ROOT } from "./state-store.mjs";
+
 export { nativeGetStatus } from "./native-control.mjs";
 
 const HUB_PID_FILE = join(HUB_PID_DIR, "hub.pid");
@@ -67,7 +77,9 @@ export async function getHubInfo() {
         ...(status ? {} : { degraded: true }),
       };
     } catch {
-      try { unlinkSync(HUB_PID_FILE); } catch {}
+      try {
+        unlinkSync(HUB_PID_FILE);
+      } catch {}
     }
   }
 
@@ -86,7 +98,10 @@ export async function getHubInfo() {
     if (Number.isFinite(recovered.pid) && recovered.pid > 0) {
       try {
         mkdirSync(HUB_PID_DIR, { recursive: true });
-        writeFileSync(HUB_PID_FILE, JSON.stringify({ ...recovered, started: Date.now() }));
+        writeFileSync(
+          HUB_PID_FILE,
+          JSON.stringify({ ...recovered, started: Date.now() }),
+        );
       } catch {}
     }
     return recovered;
@@ -159,7 +174,9 @@ export async function ensureHubAlive(maxRetries = 3) {
     }
   }
 
-  const error = new Error(`Hub 재시작 ${maxRetries}회 모두 실패${lastError ? `: ${lastError.message}` : ""}`);
+  const error = new Error(
+    `Hub 재시작 ${maxRetries}회 모두 실패${lastError ? `: ${lastError.message}` : ""}`,
+  );
   error.code = "HUB_RESTART_FAILED";
   error.cause = lastError;
   throw error;
@@ -178,16 +195,24 @@ export async function fetchHubTaskList(state) {
       signal: AbortSignal.timeout(2000),
     });
     const data = await res.json();
-    return data?.ok ? (data.data?.tasks || []) : [];
+    return data?.ok ? data.data?.tasks || [] : [];
   } catch {
     return [];
   }
 }
 
-export async function publishLeadControl(state, targetMember, command, reason = "") {
+export async function publishLeadControl(
+  state,
+  targetMember,
+  command,
+  reason = "",
+) {
   const hubBase = (state?.hubUrl || getDefaultHubUrl()).replace(/\/mcp$/, "");
-  const leadAgent = (state?.members || []).find((member) => member.role === "lead")?.agentId || "lead";
-  const targetAgent = typeof targetMember === "string" ? targetMember : targetMember?.agentId;
+  const leadAgent =
+    (state?.members || []).find((member) => member.role === "lead")?.agentId ||
+    "lead";
+  const targetAgent =
+    typeof targetMember === "string" ? targetMember : targetMember?.agentId;
 
   const result = await publishLeadControlBridge({
     hubUrl: hubBase,
@@ -206,10 +231,13 @@ export async function publishLeadControl(state, targetMember, command, reason = 
 
 export async function subscribeToLeadCommands(state, member, options = {}) {
   const hubBase = (state?.hubUrl || getDefaultHubUrl()).replace(/\/mcp$/, "");
-  const fallbackAgentId = (state?.members || []).find((candidate) => candidate.role === "lead")?.agentId || null;
-  const agentId = typeof member === "string"
-    ? member
-    : member?.agentId || options?.agentId || fallbackAgentId;
+  const fallbackAgentId =
+    (state?.members || []).find((candidate) => candidate.role === "lead")
+      ?.agentId || null;
+  const agentId =
+    typeof member === "string"
+      ? member
+      : member?.agentId || options?.agentId || fallbackAgentId;
 
   return await pullLeadCommands({
     hubUrl: hubBase,

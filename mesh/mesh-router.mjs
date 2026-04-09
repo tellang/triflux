@@ -23,9 +23,7 @@ export function routeMessage(message, registry) {
   // Broadcast
   if (to === "*") {
     const all = registry.listAll();
-    const targets = all
-      .map((a) => a.agentId)
-      .filter((id) => id !== from);
+    const targets = all.map((a) => a.agentId).filter((id) => id !== from);
     if (targets.length === 0) {
       return { routed: false, reason: "broadcast: no agents registered" };
     }
@@ -40,7 +38,10 @@ export function routeMessage(message, registry) {
     }
     const targets = registry.discover(capability);
     if (targets.length === 0) {
-      return { routed: false, reason: `capability: no agents with "${capability}"` };
+      return {
+        routed: false,
+        reason: `capability: no agents with "${capability}"`,
+      };
     }
     return { routed: true, targets };
   }

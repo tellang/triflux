@@ -19,10 +19,10 @@
  *     log.info('result.processed'); // correlationId 자동 포함
  *   }
  */
-import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 
-import { logger } from './logger.mjs';
+import { logger } from "./logger.mjs";
 
 /** @type {AsyncLocalStorage<{logger: import('pino').Logger, correlationId: string}>} */
 export const asyncLocalStorage = new AsyncLocalStorage();

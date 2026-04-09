@@ -45,7 +45,9 @@ export function box(title, width = 50) {
   const left = Math.floor((inner - padded.length) / 2);
   const right = inner - left - padded.length;
   console.log(`  ${DIM}┌${"─".repeat(inner)}┐${RESET}`);
-  console.log(`  ${DIM}│${RESET}${" ".repeat(left)}${BOLD}${AMBER}${padded}${RESET}${" ".repeat(right)}${DIM}│${RESET}`);
+  console.log(
+    `  ${DIM}│${RESET}${" ".repeat(left)}${BOLD}${AMBER}${padded}${RESET}${" ".repeat(right)}${DIM}│${RESET}`,
+  );
   console.log(`  ${DIM}└${"─".repeat(inner)}┘${RESET}`);
 }
 
@@ -58,8 +60,8 @@ export function table(headers, rows, { indent = 2 } = {}) {
   const widths = headers.map((h, i) =>
     Math.max(
       stripAnsi(h).length,
-      ...rows.map((r) => stripAnsi(String(r[i] ?? "")).length)
-    )
+      ...rows.map((r) => stripAnsi(String(r[i] ?? "")).length),
+    ),
   );
 
   const top = widths.map((w) => "─".repeat(w + 2)).join("┬");
@@ -84,10 +86,18 @@ export function table(headers, rows, { indent = 2 } = {}) {
   console.log(`${pad}└${bot}┘`);
 }
 
-export function ok(msg) { console.log(`  ${GREEN}✓${RESET} ${msg}`); }
-export function warn(msg) { console.log(`  ${YELLOW}⚠${RESET} ${msg}`); }
-export function fail(msg) { console.log(`  ${RED}✗${RESET} ${msg}`); }
-export function info(msg) { console.log(`  ${CYAN}ℹ${RESET} ${msg}`); }
+export function ok(msg) {
+  console.log(`  ${GREEN}✓${RESET} ${msg}`);
+}
+export function warn(msg) {
+  console.log(`  ${YELLOW}⚠${RESET} ${msg}`);
+}
+export function fail(msg) {
+  console.log(`  ${RED}✗${RESET} ${msg}`);
+}
+export function info(msg) {
+  console.log(`  ${CYAN}ℹ${RESET} ${msg}`);
+}
 
 export function label(key, value) {
   console.log(`  ${DIM}${key}:${RESET} ${BOLD}${value}${RESET}`);
@@ -102,9 +112,14 @@ export async function select(title, options, { initial = 0 } = {}) {
       const o = typeof options[i] === "string" ? options[i] : options[i].label;
       console.log(`  ${DIM}${i + 1}.${RESET} ${o}`);
     }
-    const answer = await input(`선택 (1-${options.length})`, String(initial + 1));
+    const answer = await input(
+      `선택 (1-${options.length})`,
+      String(initial + 1),
+    );
     const idx = parseInt(answer, 10) - 1;
-    return idx >= 0 && idx < options.length ? { index: idx, value: options[idx] } : null;
+    return idx >= 0 && idx < options.length
+      ? { index: idx, value: options[idx] }
+      : null;
   }
 
   readline.emitKeypressEvents(process.stdin);
@@ -116,7 +131,8 @@ export async function select(title, options, { initial = 0 } = {}) {
   const total = options.length;
 
   const getLabel = (o) => (typeof o === "string" ? o : o.label);
-  const getHint = (o) => (typeof o === "object" && o.hint ? ` ${DIM}${o.hint}${RESET}` : "");
+  const getHint = (o) =>
+    typeof o === "object" && o.hint ? ` ${DIM}${o.hint}${RESET}` : "";
 
   const render = (first = false) => {
     if (!first) moveUp(total);
@@ -167,8 +183,13 @@ export async function select(title, options, { initial = 0 } = {}) {
 // ── Input: Confirm ──
 
 export async function confirm(message, defaultYes = true) {
-  const hint = defaultYes ? `${BOLD}Y${RESET}${DIM}/n${RESET}` : `${DIM}y/${RESET}${BOLD}N${RESET}`;
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const hint = defaultYes
+    ? `${BOLD}Y${RESET}${DIM}/n${RESET}`
+    : `${DIM}y/${RESET}${BOLD}N${RESET}`;
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
   return new Promise((resolve) => {
     rl.question(`  ${CYAN}?${RESET} ${message} [${hint}] `, (answer) => {
@@ -184,7 +205,10 @@ export async function confirm(message, defaultYes = true) {
 
 export async function input(message, defaultValue = "") {
   const hint = defaultValue ? ` ${DIM}(${defaultValue})${RESET}` : "";
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
   return new Promise((resolve) => {
     rl.question(`  ${CYAN}?${RESET} ${message}${hint}: `, (answer) => {
@@ -202,7 +226,9 @@ export function spinner(message) {
   hideCursor();
   const id = setInterval(() => {
     clearLine();
-    process.stdout.write(`  ${CYAN}${frames[i++ % frames.length]}${RESET} ${message}`);
+    process.stdout.write(
+      `  ${CYAN}${frames[i++ % frames.length]}${RESET} ${message}`,
+    );
   }, 80);
 
   return {
@@ -230,7 +256,11 @@ export function sleep(ms) {
 
 // graceful exit
 export function onExit(fn) {
-  const handler = () => { showCursor(); fn?.(); process.exit(0); };
+  const handler = () => {
+    showCursor();
+    fn?.();
+    process.exit(0);
+  };
   process.on("SIGINT", handler);
   process.on("SIGTERM", handler);
 }

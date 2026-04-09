@@ -6,7 +6,7 @@
 //   node hub/team/dashboard.mjs --session <세션이름> [--interval 2]
 //   node hub/team/dashboard.mjs --team <팀이름> [--interval 2]
 import { get } from "node:http";
-import { AMBER, GREEN, RED, GRAY, DIM, BOLD, RESET } from "./shared.mjs";
+import { AMBER, BOLD, DIM, GRAY, GREEN, RED, RESET } from "./shared.mjs";
 
 /**
  * HTTP GET JSON
@@ -19,11 +19,18 @@ function fetchJson(url) {
       let data = "";
       res.on("data", (chunk) => (data += chunk));
       res.on("end", () => {
-        try { resolve(JSON.parse(data)); } catch { resolve(null); }
+        try {
+          resolve(JSON.parse(data));
+        } catch {
+          resolve(null);
+        }
       });
     });
     req.on("error", () => resolve(null));
-    req.on("timeout", () => { req.destroy(); resolve(null); });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(null);
+    });
   });
 }
 
@@ -77,10 +84,14 @@ function formatUptime(ms) {
  */
 function statusIcon(status) {
   switch (status) {
-    case "completed": return `${GREEN}✓${RESET}`;
-    case "in_progress": return `${AMBER}●${RESET}`;
-    case "failed": return `${RED}✗${RESET}`;
-    default: return `${GRAY}○${RESET}`;
+    case "completed":
+      return `${GREEN}✓${RESET}`;
+    case "in_progress":
+      return `${AMBER}●${RESET}`;
+    case "failed":
+      return `${RED}✗${RESET}`;
+    default:
+      return `${GRAY}○${RESET}`;
   }
 }
 
@@ -118,7 +129,12 @@ function buildMemberList(hubTasks, supervisorMembers, teamState) {
       members.push({
         name: m.name,
         cli: m.cli || "",
-        status: m.status === "running" ? "in_progress" : m.status === "exited" ? "completed" : m.status,
+        status:
+          m.status === "running"
+            ? "in_progress"
+            : m.status === "exited"
+              ? "completed"
+              : m.status,
         subject: "",
         preview: m.lastPreview || "",
       });
@@ -128,7 +144,9 @@ function buildMemberList(hubTasks, supervisorMembers, teamState) {
 
   // teamState 폴백 (하위 호환)
   const panes = teamState?.panes || {};
-  for (const [, paneInfo] of Object.entries(panes).filter(([, v]) => v.role !== "dashboard" && v.role !== "lead")) {
+  for (const [, paneInfo] of Object.entries(panes).filter(
+    ([, v]) => v.role !== "dashboard" && v.role !== "lead",
+  )) {
     members.push({
       name: paneInfo.agentId || paneInfo.name || "?",
       cli: paneInfo.cli || "",
@@ -162,27 +180,41 @@ export async function renderDashboard(sessionName, opts = {}) {
   // 데이터 수집 (병렬)
   const [hubStatus, taskListRes, supervisorRes] = await Promise.all([
     fetchJson(`${hubUrl}/status`),
-    teamName ? fetchPost(`${hubUrl}/bridge/team/task-list`, { team_name: teamName }) : null,
+    teamName
+      ? fetchPost(`${hubUrl}/bridge/team/task-list`, { team_name: teamName })
+      : null,
     supervisorUrl ? fetchJson(`${supervisorUrl}/status`) : null,
   ]);
 
   const hubOnline = !!hubStatus;
-  const hubState = hubOnline ? `${GREEN}● online${RESET}` : `${RED}● offline${RESET}`;
-  const uptime = hubStatus?.hub?.uptime ? formatUptime(hubStatus.hub.uptime) : "-";
+  const hubState = hubOnline
+    ? `${GREEN}● online${RESET}`
+    : `${RED}● offline${RESET}`;
+  const uptime = hubStatus?.hub?.uptime
+    ? formatUptime(hubStatus.hub.uptime)
+    : "-";
   const queueSize = hubStatus?.hub?.queue_depth ?? 0;
 
   // Hub task 데이터
-  const hubTasks = taskListRes?.ok ? (taskListRes.data?.tasks || []) : [];
-  const completedCount = hubTasks.filter((t) => t.status === "completed").length;
+  const hubTasks = taskListRes?.ok ? taskListRes.data?.tasks || [] : [];
+  const completedCount = hubTasks.filter(
+    (t) => t.status === "completed",
+  ).length;
   const totalCount = hubTasks.length;
 
   // Supervisor 멤버 데이터
-  const supervisorMembers = supervisorRes?.ok ? (supervisorRes.data?.members || []) : [];
+  const supervisorMembers = supervisorRes?.ok
+    ? supervisorRes.data?.members || []
+    : [];
 
   // 헤더
   const progress = totalCount > 0 ? ` ${completedCount}/${totalCount}` : "";
-  console.log(`${AMBER}┌─ ${sessionName}${progress} ${GRAY}${"─".repeat(Math.max(0, W - sessionName.length - progress.length - 3))}${AMBER}┐${RESET}`);
-  console.log(`${AMBER}│${RESET} Hub: ${hubState}  Uptime: ${DIM}${uptime}${RESET}  Queue: ${DIM}${queueSize}${RESET}`);
+  console.log(
+    `${AMBER}┌─ ${sessionName}${progress} ${GRAY}${"─".repeat(Math.max(0, W - sessionName.length - progress.length - 3))}${AMBER}┐${RESET}`,
+  );
+  console.log(
+    `${AMBER}│${RESET} Hub: ${hubState}  Uptime: ${DIM}${uptime}${RESET}  Queue: ${DIM}${queueSize}${RESET}`,
+  );
   console.log(`${AMBER}│${RESET}`);
 
   // 멤버/워커 렌더링
@@ -194,20 +226,29 @@ export async function renderDashboard(sessionName, opts = {}) {
     for (const m of members) {
       const icon = statusIcon(m.status);
       const label = `[${m.name}]`;
-      const cliTag = m.cli ? m.cli.charAt(0).toUpperCase() + m.cli.slice(1) : "";
+      const cliTag = m.cli
+        ? m.cli.charAt(0).toUpperCase() + m.cli.slice(1)
+        : "";
 
       // 진행률 추정
-      const pct = m.status === "completed" ? 100
-        : m.status === "in_progress" ? 50
-        : m.status === "failed" ? 100
-        : 0;
+      const pct =
+        m.status === "completed"
+          ? 100
+          : m.status === "in_progress"
+            ? 50
+            : m.status === "failed"
+              ? 100
+              : 0;
 
-      console.log(`${AMBER}│${RESET}  ${BOLD}${label}${RESET} ${cliTag}  ${icon} ${m.status || "pending"}  ${progressBar(pct)}`);
+      console.log(
+        `${AMBER}│${RESET}  ${BOLD}${label}${RESET} ${cliTag}  ${icon} ${m.status || "pending"}  ${progressBar(pct)}`,
+      );
 
       // 미리보기: supervisor lastPreview > task subject
       const preview = m.preview || m.subject || "";
       if (preview) {
-        const truncated = preview.length > W - 8 ? preview.slice(0, W - 11) + "..." : preview;
+        const truncated =
+          preview.length > W - 8 ? preview.slice(0, W - 11) + "..." : preview;
         console.log(`${AMBER}│${RESET}    ${DIM}> ${truncated}${RESET}`);
       }
       console.log(`${AMBER}│${RESET}`);
@@ -228,10 +269,12 @@ async function loadTeamState() {
     const sessionId = process.env.CLAUDE_SESSION_ID;
     if (sessionId) {
       const sessionPath = join(hubDir, `team-state-${sessionId}.json`);
-      if (existsSync(sessionPath)) return JSON.parse(readFileSync(sessionPath, "utf8"));
+      if (existsSync(sessionPath))
+        return JSON.parse(readFileSync(sessionPath, "utf8"));
     }
     const legacyPath = join(hubDir, "team-state.json");
-    if (existsSync(legacyPath)) return JSON.parse(readFileSync(legacyPath, "utf8"));
+    if (existsSync(legacyPath))
+      return JSON.parse(readFileSync(legacyPath, "utf8"));
     return {};
   } catch {
     return {};
@@ -244,11 +287,16 @@ if (process.argv[1]?.includes("dashboard.mjs")) {
   const teamIdx = process.argv.indexOf("--team");
   const sessionName = sessionIdx !== -1 ? process.argv[sessionIdx + 1] : null;
   const teamName = teamIdx !== -1 ? process.argv[teamIdx + 1] : null;
-  const intervalSec = parseInt(process.argv[process.argv.indexOf("--interval") + 1] || "2", 10);
+  const intervalSec = parseInt(
+    process.argv[process.argv.indexOf("--interval") + 1] || "2",
+    10,
+  );
 
   const displayName = sessionName || teamName;
   if (!displayName) {
-    console.error("사용법: node dashboard.mjs --session <세션이름> [--team <팀이름>] [--interval 2]");
+    console.error(
+      "사용법: node dashboard.mjs --session <세션이름> [--team <팀이름>] [--interval 2]",
+    );
     process.exit(1);
   }
 

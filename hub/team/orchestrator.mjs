@@ -52,9 +52,10 @@ export function decomposeTask(taskDescription, agentCount) {
 export function buildLeadPrompt(taskDescription, config) {
   const { agentId, teammateMode = "tmux", workers = [] } = config;
 
-  const roster = workers
-    .map((w, i) => `${i + 1}. ${w.agentId} (${w.cli}) — ${w.subtask}`)
-    .join("\n") || "- (워커 없음)";
+  const roster =
+    workers
+      .map((w, i) => `${i + 1}. ${w.agentId} (${w.cli}) — ${w.subtask}`)
+      .join("\n") || "- (워커 없음)";
 
   const workerIds = workers.map((w) => w.agentId).join(", ");
 
@@ -142,7 +143,11 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
       agentId: leadAgentId,
       hubUrl,
       teammateMode,
-      workers: workers.map((w) => ({ agentId: w.agentId, cli: w.cli, subtask: w.subtask })),
+      workers: workers.map((w) => ({
+        agentId: w.agentId,
+        cli: w.cli,
+        subtask: w.subtask,
+      })),
     });
     injectPrompt(lead.target, leadPrompt, { useFileRef: true });
     await new Promise((r) => setTimeout(r, 100));

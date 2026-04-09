@@ -1,7 +1,8 @@
 // tests/unit/tui-viewer.test.mjs — tui-viewer.mjs 내부 로직 단위 테스트
 // psmux / 파일시스템 의존성은 순수 함수 추출 패턴으로 테스트
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 // ── 순수 함수 재구현 (tui-viewer.mjs 내부 로직 미러) ──
 // 파일을 직접 import할 수 없으므로 (CLI 진입점) 로직을 인라인으로 재현한다.
@@ -48,21 +49,25 @@ function extractFindings(lines, verdict = "") {
     .filter(Boolean)
     .filter(
       (l) =>
-        !/^(status|lead_action|confidence|files_changed|detail|risk|error_stage|retryable|partial_output)\s*:/i.test(l),
+        !/^(status|lead_action|confidence|files_changed|detail|risk|error_stage|retryable|partial_output)\s*:/i.test(
+          l,
+        ),
     )
     .filter((l) => l !== verdict)
     .slice(-2);
 }
 
-const PHASE_WEIGHTS = { plan: 0.10, research: 0.40, exec: 0.90, verify: 1.00 };
+const PHASE_WEIGHTS = { plan: 0.1, research: 0.4, exec: 0.9, verify: 1.0 };
 
 function estimateProgress(lines, context = {}) {
   if (context.done) return 1;
   const text = lines.join("\n").toLowerCase();
   let phase = "plan";
   if (/verify|assert|test|check|confirm/.test(text)) phase = "verify";
-  else if (/edit|patch|implement|write|update|fix|refactor/.test(text)) phase = "exec";
-  else if (/search|read|inspect|analy|review|research/.test(text)) phase = "research";
+  else if (/edit|patch|implement|write|update|fix|refactor/.test(text))
+    phase = "exec";
+  else if (/search|read|inspect|analy|review|research/.test(text))
+    phase = "research";
   let ratio = PHASE_WEIGHTS[phase];
   if (lines.length < 2) ratio = Math.min(ratio, 0.12);
   if (context.tokens) ratio = Math.max(ratio, 0.88);
@@ -72,7 +77,10 @@ function estimateProgress(lines, context = {}) {
 
 function splitHandoff(handoff) {
   if (!handoff) return { status: "pending", lead_action: null };
-  return { status: handoff.status || "pending", lead_action: handoff.lead_action || null };
+  return {
+    status: handoff.status || "pending",
+    lead_action: handoff.lead_action || null,
+  };
 }
 
 // ── filterCodeBlocks / toFilteredBody ──
@@ -271,7 +279,10 @@ describe("estimateProgress", () => {
     ];
     for (const lines of cases) {
       const r = estimateProgress(lines, {});
-      assert.ok(r >= 0 && r <= 0.97, `범위 초과: ${r} for lines=${JSON.stringify(lines)}`);
+      assert.ok(
+        r >= 0 && r <= 0.97,
+        `범위 초과: ${r} for lines=${JSON.stringify(lines)}`,
+      );
     }
   });
 });
@@ -349,7 +360,10 @@ describe("raw_body / filtered_body 10KB 제한", () => {
     const result = truncateBody(body);
     assert.equal(result.length, MAX_BODY_BYTES);
     // 마지막 부분이 보존되어야 함
-    assert.ok(result.includes("new line"), "최신 내용(new line)이 보존되어야 함");
+    assert.ok(
+      result.includes("new line"),
+      "최신 내용(new line)이 보존되어야 함",
+    );
   });
 
   it("정확히 10KB는 truncate 없음", () => {

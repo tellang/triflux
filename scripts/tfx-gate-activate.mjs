@@ -9,7 +9,7 @@
  * 자동 만료: 30분
  */
 
-import { writeFileSync, existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -42,8 +42,13 @@ async function main() {
 
   // 모든 tfx CLI 라우팅 스킬에 gate 적용
   const TFX_ROUTING_SKILLS = new Set([
-    "tfx-multi", "tfx-team", "tfx-auto", "tfx-auto-codex",
-    "tfx-codex", "tfx-gemini", "tfx-autoresearch",
+    "tfx-multi",
+    "tfx-team",
+    "tfx-auto",
+    "tfx-auto-codex",
+    "tfx-codex",
+    "tfx-gemini",
+    "tfx-autoresearch",
   ]);
 
   if (TFX_ROUTING_SKILLS.has(skill)) {
@@ -64,7 +69,7 @@ async function main() {
           hookEventName: "PreToolUse",
           additionalContext:
             "[tfx-multi] gate 활성화됨. CLI 작업은 headless로 dispatch 필수:\n" +
-            'Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign \'codex:프롬프트:역할\' --timeout 600")',
+            "Bash(\"tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:프롬프트:역할' --timeout 600\")",
         },
       }),
     );

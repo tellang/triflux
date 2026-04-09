@@ -1,14 +1,29 @@
 import { resolve } from "node:path";
-import { normalizeLayout, normalizeTeammateMode } from "../../services/runtime-mode.mjs";
-import { parseDashboardLayout } from "../../../dashboard-layout.mjs";
 import { parseDashboardAnchor } from "../../../dashboard-anchor.mjs";
+import { parseDashboardLayout } from "../../../dashboard-layout.mjs";
+import {
+  normalizeLayout,
+  normalizeTeammateMode,
+} from "../../services/runtime-mode.mjs";
 
 // --assign 파싱 시 마지막 콜론 뒤를 role로 인식할 알려진 역할/CLI 이름
 const KNOWN_ROLES = new Set([
-  "codex", "gemini", "claude",
-  "executor", "architect", "planner", "analyst", "critic",
-  "debugger", "verifier", "code-reviewer", "security-reviewer",
-  "test-engineer", "designer", "writer", "scientist",
+  "codex",
+  "gemini",
+  "claude",
+  "executor",
+  "architect",
+  "planner",
+  "analyst",
+  "critic",
+  "debugger",
+  "verifier",
+  "code-reviewer",
+  "security-reviewer",
+  "test-engineer",
+  "designer",
+  "writer",
+  "scientist",
 ]);
 
 /**
@@ -29,7 +44,10 @@ function parseAssignValue(raw) {
 
   const lastColon = rest.lastIndexOf(":");
   if (lastColon > 0) {
-    const candidate = rest.slice(lastColon + 1).trim().toLowerCase();
+    const candidate = rest
+      .slice(lastColon + 1)
+      .trim()
+      .toLowerCase();
     if (KNOWN_ROLES.has(candidate)) {
       return { cli, prompt: rest.slice(0, lastColon).trim(), role: candidate };
     }
@@ -51,7 +69,7 @@ export function parseTeamArgs(args = []) {
   let verbose = false;
   let dashboard = true;
   let dashboardLayout = "lite";
-  let dashboardSize = 0.40;
+  let dashboardSize = 0.4;
   let dashboardAnchor = "window";
   let mcpProfile = "";
   let model = "";
@@ -60,12 +78,18 @@ export function parseTeamArgs(args = []) {
   for (let index = 0; index < args.length; index += 1) {
     const current = args[index];
     if (current === "--agents" && args[index + 1]) {
-      agents = args[++index].split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
+      agents = args[++index]
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
     } else if (current === "--lead" && args[index + 1]) {
       lead = args[++index].trim().toLowerCase();
     } else if (current === "--layout" && args[index + 1]) {
       layout = args[++index];
-    } else if ((current === "--teammate-mode" || current === "--mode") && args[index + 1]) {
+    } else if (
+      (current === "--teammate-mode" || current === "--mode") &&
+      args[index + 1]
+    ) {
       teammateMode = args[++index];
     } else if (current === "--assign" && args[index + 1]) {
       const parsed = parseAssignValue(args[++index]);
@@ -83,7 +107,10 @@ export function parseTeamArgs(args = []) {
     } else if (current === "--dashboard-layout" && args[index + 1]) {
       dashboardLayout = parseDashboardLayout(args[++index]);
     } else if (current === "--dashboard-size" && args[index + 1]) {
-      dashboardSize = Math.min(0.8, Math.max(0.2, parseFloat(args[++index]) || 0.50));
+      dashboardSize = Math.min(
+        0.8,
+        Math.max(0.2, parseFloat(args[++index]) || 0.5),
+      );
     } else if (current === "--dashboard-anchor" && args[index + 1]) {
       dashboardAnchor = parseDashboardAnchor(args[++index]);
     } else if (current === "--no-progressive") {

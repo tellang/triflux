@@ -1,10 +1,11 @@
 // tests/unit/headless-stall.test.mjs — waitForCompletionWithStallDetect 단위 테스트
 // _deps DI로 psmux 함수를 mock하여 실제 함수를 호출한다.
-import { describe, it, beforeEach, afterEach } from "node:test";
+
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { waitForCompletionWithStallDetect } from "../../hub/team/headless.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-stall-test");
@@ -31,7 +32,13 @@ function createDeps(overrides = {}) {
 
 describe("waitForCompletionWithStallDetect", () => {
   beforeEach(() => mkdirSync(RESULT_DIR, { recursive: true }));
-  afterEach(() => { try { rmSync(RESULT_DIR, { recursive: true, force: true }); } catch { /* */ } });
+  afterEach(() => {
+    try {
+      rmSync(RESULT_DIR, { recursive: true, force: true });
+    } catch {
+      /* */
+    }
+  });
 
   it("completion 토큰 감지 시 즉시 반환한다", async () => {
     let call = 0;
@@ -43,13 +50,18 @@ describe("waitForCompletionWithStallDetect", () => {
       },
     });
 
-    const result = await waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
-      token: "tok1",
-      pollInterval: 20,
-      stallTimeout: 500,
-      completionTimeout: 3000,
-      _deps: deps,
-    });
+    const result = await waitForCompletionWithStallDetect(
+      "sess",
+      "0.1",
+      "/tmp/r.txt",
+      {
+        token: "tok1",
+        pollInterval: 20,
+        stallTimeout: 500,
+        completionTimeout: 3000,
+        _deps: deps,
+      },
+    );
 
     assert.equal(result.matched, true);
     assert.equal(result.exitCode, 0);
@@ -68,13 +80,18 @@ describe("waitForCompletionWithStallDetect", () => {
       },
     });
 
-    const result = await waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
-      token: "t2",
-      pollInterval: 20,
-      stallTimeout: 80, // 80ms — 폴링 4회 분량
-      completionTimeout: 3000,
-      _deps: deps,
-    });
+    const result = await waitForCompletionWithStallDetect(
+      "sess",
+      "0.1",
+      "/tmp/r.txt",
+      {
+        token: "t2",
+        pollInterval: 20,
+        stallTimeout: 80, // 80ms — 폴링 4회 분량
+        completionTimeout: 3000,
+        _deps: deps,
+      },
+    );
 
     assert.equal(result.matched, true);
     assert.equal(result.stallDetected, false);
@@ -95,13 +112,18 @@ describe("waitForCompletionWithStallDetect", () => {
       readFileSync: () => "task completed",
     });
 
-    const result = await waitForCompletionWithStallDetect("sess", "0.1", resultFile, {
-      token: "t3",
-      pollInterval: 20,
-      stallTimeout: 500,
-      completionTimeout: 3000,
-      _deps: deps,
-    });
+    const result = await waitForCompletionWithStallDetect(
+      "sess",
+      "0.1",
+      resultFile,
+      {
+        token: "t3",
+        pollInterval: 20,
+        stallTimeout: 500,
+        completionTimeout: 3000,
+        _deps: deps,
+      },
+    );
 
     assert.equal(result.matched, true);
     assert.equal(result.exitCode, 0);
@@ -120,22 +142,32 @@ describe("waitForCompletionWithStallDetect", () => {
         return "frozen";
       },
       psmuxExec: (args) => {
-        if (args[0] === "kill-pane") { killCalls++; return ""; }
+        if (args[0] === "kill-pane") {
+          killCalls++;
+          return "";
+        }
         if (args[0] === "split-window") return "tfx:0.3";
         return "";
       },
-      dispatchCommand: () => { dispatchCalls++; },
+      dispatchCommand: () => {
+        dispatchCalls++;
+      },
     });
 
-    const result = await waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
-      token: "t4",
-      command: "codex --prompt test",
-      pollInterval: 10,
-      stallTimeout: 50, // 50ms 무변화 → stall
-      completionTimeout: 5000,
-      maxRestarts: 3, // 3 cycles needed: cycle 1(1-5), cycle 2(6-10), cycle 3(11+ → done)
-      _deps: deps,
-    });
+    const result = await waitForCompletionWithStallDetect(
+      "sess",
+      "0.1",
+      "/tmp/r.txt",
+      {
+        token: "t4",
+        command: "codex --prompt test",
+        pollInterval: 10,
+        stallTimeout: 50, // 50ms 무변화 → stall
+        completionTimeout: 5000,
+        maxRestarts: 3, // 3 cycles needed: cycle 1(1-5), cycle 2(6-10), cycle 3(11+ → done)
+        _deps: deps,
+      },
+    );
 
     assert.equal(result.matched, true);
     assert.equal(result.stallDetected, true);
@@ -148,15 +180,16 @@ describe("waitForCompletionWithStallDetect", () => {
     const deps = createDeps(); // frozen output → stall 유발
 
     await assert.rejects(
-      () => waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
-        token: "t5",
-        command: "codex --prompt test",
-        pollInterval: 10,
-        stallTimeout: 40,
-        completionTimeout: 5000,
-        maxRestarts: 1,
-        _deps: deps,
-      }),
+      () =>
+        waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
+          token: "t5",
+          command: "codex --prompt test",
+          pollInterval: 10,
+          stallTimeout: 40,
+          completionTimeout: 5000,
+          maxRestarts: 1,
+          _deps: deps,
+        }),
       (err) => {
         assert.equal(err.code, "STALL_EXHAUSTED");
         assert.equal(err.category, "transient");
@@ -173,13 +206,18 @@ describe("waitForCompletionWithStallDetect", () => {
       capturePsmuxPane: () => `changing-${call++}`, // 출력 변화 → stall 방지
     });
 
-    const result = await waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
-      token: "t6",
-      pollInterval: 15,
-      stallTimeout: 500,
-      completionTimeout: 60, // 60ms 전체 타임아웃
-      _deps: deps,
-    });
+    const result = await waitForCompletionWithStallDetect(
+      "sess",
+      "0.1",
+      "/tmp/r.txt",
+      {
+        token: "t6",
+        pollInterval: 15,
+        stallTimeout: 500,
+        completionTimeout: 60, // 60ms 전체 타임아웃
+        _deps: deps,
+      },
+    );
 
     assert.equal(result.matched, false);
     assert.equal(result.timedOut, true);
@@ -201,7 +239,9 @@ describe("waitForCompletionWithStallDetect", () => {
       pollInterval: 15,
       stallTimeout: 500,
       completionTimeout: 3000,
-      onPoll: () => { pollCount++; },
+      onPoll: () => {
+        pollCount++;
+      },
       _deps: deps,
     });
 
@@ -214,23 +254,29 @@ describe("waitForCompletionWithStallDetect", () => {
 
     const deps = createDeps({
       psmuxExec: (args) => {
-        if (args[0] === "kill-pane") { killCalls++; return ""; }
+        if (args[0] === "kill-pane") {
+          killCalls++;
+          return "";
+        }
         if (args[0] === "split-window") return "tfx:0.4";
         return "";
       },
-      dispatchCommand: () => { dispatchCalls++; },
+      dispatchCommand: () => {
+        dispatchCalls++;
+      },
     });
 
     await assert.rejects(
-      () => waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
-        // command 없음
-        token: "t8",
-        pollInterval: 10,
-        stallTimeout: 40,
-        completionTimeout: 5000,
-        maxRestarts: 1,
-        _deps: deps,
-      }),
+      () =>
+        waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
+          // command 없음
+          token: "t8",
+          pollInterval: 10,
+          stallTimeout: 40,
+          completionTimeout: 5000,
+          maxRestarts: 1,
+          _deps: deps,
+        }),
       (err) => {
         assert.equal(err.code, "STALL_EXHAUSTED");
         return true;
@@ -252,13 +298,18 @@ describe("waitForCompletionWithStallDetect", () => {
       },
     });
 
-    const result = await waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
-      token: specialToken,
-      pollInterval: 15,
-      stallTimeout: 500,
-      completionTimeout: 3000,
-      _deps: deps,
-    });
+    const result = await waitForCompletionWithStallDetect(
+      "sess",
+      "0.1",
+      "/tmp/r.txt",
+      {
+        token: specialToken,
+        pollInterval: 15,
+        stallTimeout: 500,
+        completionTimeout: 3000,
+        _deps: deps,
+      },
+    );
 
     assert.equal(result.matched, true);
     assert.equal(result.exitCode, 42);

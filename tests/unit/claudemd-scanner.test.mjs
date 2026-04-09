@@ -1,14 +1,21 @@
-import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 
 import {
-  TFX_END,
-  TFX_START,
   findAllClaudeMdPaths,
   migrateClaudeMd,
+  TFX_END,
+  TFX_START,
   writeSection,
 } from "../../scripts/lib/claudemd-scanner.mjs";
 
@@ -76,14 +83,18 @@ describe("writeSection()", () => {
   it("기존 TFX 블록이 있으면 내용만 교체한다", () => {
     const root = createTempDir("triflux-claudemd-write-update-");
     const target = join(root, "CLAUDE.md");
-    writeFileSync(target, [
-      "# header",
-      TFX_START,
-      "<!-- TFX:VERSION:0.1.0 -->",
-      "old-body",
-      TFX_END,
-      "# footer",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      target,
+      [
+        "# header",
+        TFX_START,
+        "<!-- TFX:VERSION:0.1.0 -->",
+        "old-body",
+        TFX_END,
+        "# footer",
+      ].join("\n"),
+      "utf8",
+    );
 
     const result = writeSection(target, {
       version: "2.0.0",
@@ -104,14 +115,18 @@ describe("migrateClaudeMd()", () => {
   it("레거시 user_cli_routing 블록을 제거하고 TFX 블록으로 마이그레이션한다", () => {
     const root = createTempDir("triflux-claudemd-migrate-");
     const target = join(root, "CLAUDE.md");
-    writeFileSync(target, [
-      "# intro",
-      "<!-- USER OVERRIDES -->",
-      "<user_cli_routing>",
-      "- legacy route",
-      "</user_cli_routing>",
-      "# end",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      target,
+      [
+        "# intro",
+        "<!-- USER OVERRIDES -->",
+        "<user_cli_routing>",
+        "- legacy route",
+        "</user_cli_routing>",
+        "# end",
+      ].join("\n"),
+      "utf8",
+    );
 
     const result = migrateClaudeMd(target, {
       version: "9.9.9",

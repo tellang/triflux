@@ -23,7 +23,12 @@ const DEFAULT_TFX_TEMPLATE = [
 ].join("\n");
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_TEMPLATE_PATH = join(SCRIPT_DIR, "..", "templates", "claudemd-tfx-section.md");
+const DEFAULT_TEMPLATE_PATH = join(
+  SCRIPT_DIR,
+  "..",
+  "templates",
+  "claudemd-tfx-section.md",
+);
 
 function resolveVersion(version) {
   if (version) return version;

@@ -1,8 +1,14 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
 const MODULE_URL = new URL("../../hooks/lib/resolve-root.mjs", import.meta.url);
@@ -20,7 +26,11 @@ function importFreshModule() {
 function createValidPluginRoot(baseDir, name) {
   const root = join(baseDir, name);
   mkdirSync(join(root, "hooks"), { recursive: true });
-  writeFileSync(join(root, "hooks", "hook-orchestrator.mjs"), "// sentinel\n", "utf8");
+  writeFileSync(
+    join(root, "hooks", "hook-orchestrator.mjs"),
+    "// sentinel\n",
+    "utf8",
+  );
   return root;
 }
 
@@ -50,7 +60,8 @@ describe("resolve-root", () => {
     if (prevUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = prevUserProfile;
 
-    if (prevClaudePluginRoot === undefined) delete process.env.CLAUDE_PLUGIN_ROOT;
+    if (prevClaudePluginRoot === undefined)
+      delete process.env.CLAUDE_PLUGIN_ROOT;
     else process.env.CLAUDE_PLUGIN_ROOT = prevClaudePluginRoot;
 
     rmSync(tempDir, { recursive: true, force: true });
@@ -60,8 +71,15 @@ describe("resolve-root", () => {
     const breadcrumbRoot = createValidPluginRoot(tempDir, "breadcrumb-root");
     process.env.CLAUDE_PLUGIN_ROOT = join(tempDir, "invalid-env");
 
-    const breadcrumbPath = join(process.env.HOME, ".claude", "scripts", ".tfx-pkg-root");
-    mkdirSync(join(process.env.HOME, ".claude", "scripts"), { recursive: true });
+    const breadcrumbPath = join(
+      process.env.HOME,
+      ".claude",
+      "scripts",
+      ".tfx-pkg-root",
+    );
+    mkdirSync(join(process.env.HOME, ".claude", "scripts"), {
+      recursive: true,
+    });
     writeFileSync(breadcrumbPath, breadcrumbRoot, "utf8");
 
     const { PLUGIN_ROOT } = await importFreshModule();
@@ -79,7 +97,9 @@ describe("resolve-root", () => {
   it("breadcrumb/env가 모두 실패하면 callerUrl 기반 fallback을 사용한다", async () => {
     process.env.CLAUDE_PLUGIN_ROOT = join(tempDir, "invalid-env");
     const callerRoot = createValidPluginRoot(tempDir, "caller-root");
-    const callerUrl = pathToFileURL(join(callerRoot, "hooks", "pipeline-stop.mjs")).href;
+    const callerUrl = pathToFileURL(
+      join(callerRoot, "hooks", "pipeline-stop.mjs"),
+    ).href;
 
     const { resolvePluginRoot } = await importFreshModule();
     const resolved = resolvePluginRoot(callerUrl);
@@ -100,7 +120,9 @@ describe("resolve-root", () => {
     };
 
     try {
-      const resolved = resolvePluginRoot(pathToFileURL(join(tempDir, "no-hooks", "file.mjs")).href);
+      const resolved = resolvePluginRoot(
+        pathToFileURL(join(tempDir, "no-hooks", "file.mjs")).href,
+      );
       assert.ok(existsSync(join(resolved, "hooks", "hook-orchestrator.mjs")));
       assert.match(stderr, /resolve-root/i);
     } finally {

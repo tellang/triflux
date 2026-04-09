@@ -1,45 +1,56 @@
 // hub/router.mjs — 실시간 라우팅/수신함 상태 관리자
 // SQLite는 감사 로그만 담당하고, 실제 배달 상태는 메모리에서 관리한다.
-import { EventEmitter, once } from 'node:events';
-import { uuidv7 } from './lib/uuidv7.mjs';
+import { EventEmitter, once } from "node:events";
+import { uuidv7 } from "./lib/uuidv7.mjs";
 
-const ASSIGN_PENDING_STATUSES = new Set(['queued', 'running']);
+const ASSIGN_PENDING_STATUSES = new Set(["queued", "running"]);
 
 function uniqueStrings(values = []) {
-  return Array.from(new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean)));
+  return Array.from(
+    new Set(
+      (values || []).map((value) => String(value || "").trim()).filter(Boolean),
+    ),
+  );
 }
 
-function clampAssignDuration(value, fallback = 600000, min = 1000, max = 86400000) {
+function clampAssignDuration(
+  value,
+  fallback = 600000,
+  min = 1000,
+  max = 86400000,
+) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(min, Math.min(Math.trunc(num), max));
 }
 
 function normalizeAssignTerminalStatus(input, metadata = {}) {
-  const status = String(input || '').trim().toLowerCase();
+  const status = String(input || "")
+    .trim()
+    .toLowerCase();
   const resultTag = String(
-    metadata?.result
-    ?? metadata?.status
-    ?? metadata?.outcome
-    ?? '',
-  ).trim().toLowerCase();
+    metadata?.result ?? metadata?.status ?? metadata?.outcome ?? "",
+  )
+    .trim()
+    .toLowerCase();
 
-  if (status === 'queued') return 'queued';
-  if (status === 'running' || status === 'in_progress') return 'running';
-  if (status === 'timed_out' || status === 'timeout') return 'timed_out';
-  if (status === 'failed' || status === 'error') return 'failed';
-  if (status === 'succeeded' || status === 'success') return 'succeeded';
+  if (status === "queued") return "queued";
+  if (status === "running" || status === "in_progress") return "running";
+  if (status === "timed_out" || status === "timeout") return "timed_out";
+  if (status === "failed" || status === "error") return "failed";
+  if (status === "succeeded" || status === "success") return "succeeded";
 
-  if (status === 'completed') {
-    if (resultTag === 'failed' || resultTag === 'error') return 'failed';
-    if (resultTag === 'timed_out' || resultTag === 'timeout') return 'timed_out';
-    return 'succeeded';
+  if (status === "completed") {
+    if (resultTag === "failed" || resultTag === "error") return "failed";
+    if (resultTag === "timed_out" || resultTag === "timeout")
+      return "timed_out";
+    return "succeeded";
   }
 
-  if (resultTag === 'failed' || resultTag === 'error') return 'failed';
-  if (resultTag === 'timed_out' || resultTag === 'timeout') return 'timed_out';
-  if (resultTag === 'succeeded' || resultTag === 'success') return 'succeeded';
-  return 'succeeded';
+  if (resultTag === "failed" || resultTag === "error") return "failed";
+  if (resultTag === "timed_out" || resultTag === "timeout") return "timed_out";
+  if (resultTag === "succeeded" || resultTag === "success") return "succeeded";
+  return "succeeded";
 }
 
 function normalizeAgentTopics(store, agentId, runtimeTopics) {
@@ -84,7 +95,9 @@ export function createRouter(store) {
 
   function upsertRuntimeTopics(agentId, topics, { replace = true } = {}) {
     const normalized = uniqueStrings(topics);
-    const current = replace ? new Set() : new Set(runtimeTopics.get(agentId) || []);
+    const current = replace
+      ? new Set()
+      : new Set(runtimeTopics.get(agentId) || []);
     for (const topic of normalized) current.add(topic);
     runtimeTopics.set(agentId, current);
     store.updateAgentTopics(agentId, Array.from(current));
@@ -124,12 +137,12 @@ export function createRouter(store) {
       delivered_at_ms: null,
       acked_at_ms: null,
     });
-    deliveryEmitter.emit('message', agentId, message);
+    deliveryEmitter.emit("message", agentId, message);
   }
 
   function resolveRecipients(msg) {
     const to = msg.to_agent ?? msg.to;
-    if (!to?.startsWith('topic:')) {
+    if (!to?.startsWith("topic:")) {
       return [to];
     }
 
@@ -144,7 +157,10 @@ export function createRouter(store) {
     return Array.from(recipients);
   }
 
-  function sortedPending(agentId, { max_messages = 20, include_topics = null } = {}) {
+  function sortedPending(
+    agentId,
+    { max_messages = 20, include_topics = null } = {},
+  ) {
     const queue = ensureAgentQueue(agentId);
     const topicFilter = include_topics?.length ? new Set(include_topics) : null;
     const now = Date.now();
@@ -173,8 +189,8 @@ export function createRouter(store) {
     delivery.attempts += 1;
     if (!delivery.delivered_at_ms) {
       delivery.delivered_at_ms = Date.now();
-      record.message.status = 'delivered';
-      store.updateMessageStatus(messageId, 'delivered');
+      record.message.status = "delivered";
+      store.updateMessageStatus(messageId, "delivered");
       recordLatency(delivery.delivered_at_ms - record.message.created_at_ms);
       return true;
     }
@@ -195,8 +211,8 @@ export function createRouter(store) {
       count += 1;
 
       if (record.ackedBy.size >= record.recipients.size) {
-        record.message.status = 'acked';
-        store.updateMessageStatus(id, 'acked');
+        record.message.status = "acked";
+        store.updateMessageStatus(id, "acked");
         removeMessage(id);
       }
     }
@@ -204,7 +220,17 @@ export function createRouter(store) {
     return count;
   }
 
-  function dispatchMessage({ type, from, to, topic, priority = 5, ttl_ms = 300000, payload = {}, trace_id, correlation_id }) {
+  function dispatchMessage({
+    type,
+    from,
+    to,
+    topic,
+    priority = 5,
+    ttl_ms = 300000,
+    payload = {},
+    trace_id,
+    correlation_id,
+  }) {
     const msg = store.auditLog({
       type,
       from,
@@ -222,10 +248,10 @@ export function createRouter(store) {
       for (const agentId of recipients) {
         queueMessage(agentId, msg);
       }
-      msg.status = 'delivered';
-      store.updateMessageStatus(msg.id, 'delivered');
+      msg.status = "delivered";
+      store.updateMessageStatus(msg.id, "delivered");
     }
-    if (msg.type === 'response') {
+    if (msg.type === "response") {
       responseEmitter.emit(msg.correlation_id, msg.payload);
     }
     return { msg, recipients };
@@ -259,10 +285,10 @@ export function createRouter(store) {
   function notifyAssignSupervisor(job, event, extra = {}) {
     if (!job?.supervisor_agent) return null;
     const { msg } = dispatchMessage({
-      type: 'event',
-      from: job.worker_agent || 'assign-router',
+      type: "event",
+      from: job.worker_agent || "assign-router",
       to: job.supervisor_agent,
-      topic: 'assign.result',
+      topic: "assign.result",
       priority: Math.max(5, job.priority || 5),
       ttl_ms: job.ttl_ms || job.timeout_ms || 600000,
       payload: {
@@ -276,16 +302,16 @@ export function createRouter(store) {
     return msg;
   }
 
-  function dispatchAssignJob(job, reason = 'dispatch') {
+  function dispatchAssignJob(job, reason = "dispatch") {
     const { msg, recipients } = dispatchMessage({
-      type: 'handoff',
+      type: "handoff",
       from: job.supervisor_agent,
       to: job.worker_agent,
-      topic: job.topic || 'assign.job',
+      topic: job.topic || "assign.job",
       priority: job.priority || 5,
       ttl_ms: job.ttl_ms || job.timeout_ms || 600000,
       payload: {
-        kind: 'assign.job',
+        kind: "assign.job",
         reason,
         assign_job_id: job.job_id,
         attempt: job.attempt,
@@ -307,15 +333,23 @@ export function createRouter(store) {
     return { job: updated || job, recipients, message_id: msg.id };
   }
 
-  function scheduleAssignRetry(job, reason, error = null, requested_by = 'system') {
+  function scheduleAssignRetry(
+    job,
+    reason,
+    error = null,
+    requested_by = "system",
+  ) {
     if (!job) {
-      return { ok: false, error: { code: 'ASSIGN_NOT_FOUND', message: 'assign job not found' } };
+      return {
+        ok: false,
+        error: { code: "ASSIGN_NOT_FOUND", message: "assign job not found" },
+      };
     }
     if (job.retry_count >= job.max_retries) {
       return {
         ok: false,
         error: {
-          code: 'ASSIGN_RETRY_EXHAUSTED',
+          code: "ASSIGN_RETRY_EXHAUSTED",
           message: `retry exhausted for ${job.job_id}`,
         },
       };
@@ -326,8 +360,8 @@ export function createRouter(store) {
       timeout_ms: job.timeout_ms,
       ttl_ms: job.ttl_ms,
     });
-    const dispatched = dispatchAssignJob(queued, 'retry');
-    notifyAssignSupervisor(dispatched.job, 'retry_scheduled', {
+    const dispatched = dispatchAssignJob(queued, "retry");
+    notifyAssignSupervisor(dispatched.job, "retry_scheduled", {
       retry_reason: reason,
       requested_by,
     });
@@ -344,18 +378,26 @@ export function createRouter(store) {
   }
 
   function handleAssignTimeout(job) {
-    const timedOut = store.updateAssignStatus(job.job_id, 'timed_out', {
-      error: job.error ?? { message: 'assign job timed out' },
+    const timedOut = store.updateAssignStatus(job.job_id, "timed_out", {
+      error: job.error ?? { message: "assign job timed out" },
     });
 
     if (timedOut.retry_count < timedOut.max_retries) {
-      return scheduleAssignRetry(timedOut, 'timed_out', timedOut.error, 'sweeper');
+      return scheduleAssignRetry(
+        timedOut,
+        "timed_out",
+        timedOut.error,
+        "sweeper",
+      );
     }
 
-    notifyAssignSupervisor(timedOut, 'completed', {
-      completion_reason: 'timed_out',
+    notifyAssignSupervisor(timedOut, "completed", {
+      completion_reason: "timed_out",
     });
-    return { ok: true, data: buildAssignSnapshot(timedOut, { completion_reason: 'timed_out' }) };
+    return {
+      ok: true,
+      data: buildAssignSnapshot(timedOut, { completion_reason: "timed_out" }),
+    };
   }
 
   const router = {
@@ -382,7 +424,7 @@ export function createRouter(store) {
     },
 
     updateAgentStatus(agentId, status) {
-      if (status === 'offline') {
+      if (status === "offline") {
         runtimeTopics.delete(agentId);
       }
       return store.updateAgentStatus(agentId, status);
@@ -397,7 +439,7 @@ export function createRouter(store) {
       for (const agentId of recipients) {
         queueMessage(agentId, msg);
       }
-      store.updateMessageStatus(msg.id, 'delivered');
+      store.updateMessageStatus(msg.id, "delivered");
       return recipients.length;
     },
 
@@ -421,13 +463,19 @@ export function createRouter(store) {
       return markDelivered(agentId, messageId);
     },
 
-    drainAgent(agentId, { max_messages = 20, include_topics = null, auto_ack = false } = {}) {
+    drainAgent(
+      agentId,
+      { max_messages = 20, include_topics = null, auto_ack = false } = {},
+    ) {
       const messages = sortedPending(agentId, { max_messages, include_topics });
       for (const message of messages) {
         markDelivered(agentId, message.id);
       }
       if (auto_ack && messages.length) {
-        ackMessages(messages.map((message) => message.id), agentId);
+        ackMessages(
+          messages.map((message) => message.id),
+          agentId,
+        );
       }
       return messages;
     },
@@ -437,15 +485,23 @@ export function createRouter(store) {
     },
 
     async handleAsk({
-      from, to, topic, question, context_refs,
-      payload = {}, priority = 5, ttl_ms = 300000,
-      await_response_ms = 0, trace_id, correlation_id,
+      from,
+      to,
+      topic,
+      question,
+      context_refs,
+      payload = {},
+      priority = 5,
+      ttl_ms = 300000,
+      await_response_ms = 0,
+      trace_id,
+      correlation_id,
     }) {
       const cid = correlation_id || uuidv7();
       const tid = trace_id || uuidv7();
 
       const { msg } = dispatchMessage({
-        type: 'request',
+        type: "request",
         from,
         to,
         topic,
@@ -459,7 +515,12 @@ export function createRouter(store) {
       if (await_response_ms <= 0) {
         return {
           ok: true,
-          data: { request_message_id: msg.id, correlation_id: cid, trace_id: tid, state: 'queued' },
+          data: {
+            request_message_id: msg.id,
+            correlation_id: cid,
+            trace_id: tid,
+            state: "queued",
+          },
         };
       }
 
@@ -469,28 +530,52 @@ export function createRouter(store) {
         });
         return {
           ok: true,
-          data: { request_message_id: msg.id, correlation_id: cid, trace_id: tid, state: 'answered', response },
+          data: {
+            request_message_id: msg.id,
+            correlation_id: cid,
+            trace_id: tid,
+            state: "answered",
+            response,
+          },
         };
       } catch {
         const resp = store.getResponseByCorrelation(cid);
         if (resp) {
           return {
             ok: true,
-            data: { request_message_id: msg.id, correlation_id: cid, trace_id: tid, state: 'answered', response: resp.payload },
+            data: {
+              request_message_id: msg.id,
+              correlation_id: cid,
+              trace_id: tid,
+              state: "answered",
+              response: resp.payload,
+            },
           };
         }
         return {
           ok: true,
-          data: { request_message_id: msg.id, correlation_id: cid, trace_id: tid, state: 'delivered' },
+          data: {
+            request_message_id: msg.id,
+            correlation_id: cid,
+            trace_id: tid,
+            state: "delivered",
+          },
         };
       }
     },
 
     handlePublish({
-      from, to, topic, priority = 5, ttl_ms = 300000,
-      payload = {}, trace_id, correlation_id, message_type,
+      from,
+      to,
+      topic,
+      priority = 5,
+      ttl_ms = 300000,
+      payload = {},
+      trace_id,
+      correlation_id,
+      message_type,
     }) {
-      const type = message_type || (correlation_id ? 'response' : 'event');
+      const type = message_type || (correlation_id ? "response" : "event");
       const { msg, recipients } = dispatchMessage({
         type,
         from,
@@ -513,11 +598,19 @@ export function createRouter(store) {
     },
 
     handleHandoff({
-      from, to, topic, task, acceptance_criteria, context_refs,
-      priority = 5, ttl_ms = 600000, trace_id, correlation_id,
+      from,
+      to,
+      topic,
+      task,
+      acceptance_criteria,
+      context_refs,
+      priority = 5,
+      ttl_ms = 600000,
+      trace_id,
+      correlation_id,
     }) {
       const { msg } = dispatchMessage({
-        type: 'handoff',
+        type: "handoff",
         from,
         to,
         topic,
@@ -529,15 +622,15 @@ export function createRouter(store) {
       });
       return {
         ok: true,
-        data: { handoff_message_id: msg.id, state: 'queued', assigned_to: to },
+        data: { handoff_message_id: msg.id, state: "queued", assigned_to: to },
       };
     },
 
     assignAsync({
       supervisor_agent,
       worker_agent,
-      topic = 'assign.job',
-      task = '',
+      topic = "assign.job",
+      task = "",
       payload = {},
       priority = 5,
       ttl_ms = 600000,
@@ -559,7 +652,7 @@ export function createRouter(store) {
         trace_id,
         correlation_id,
       });
-      const dispatched = dispatchAssignJob(job, 'create');
+      const dispatched = dispatchAssignJob(job, "create");
       return {
         ok: true,
         data: {
@@ -583,20 +676,26 @@ export function createRouter(store) {
       if (!job) {
         return {
           ok: false,
-          error: { code: 'ASSIGN_NOT_FOUND', message: `assign job not found: ${job_id}` },
+          error: {
+            code: "ASSIGN_NOT_FOUND",
+            message: `assign job not found: ${job_id}`,
+          },
         };
       }
       if (worker_agent && worker_agent !== job.worker_agent) {
         return {
           ok: false,
-          error: { code: 'ASSIGN_WORKER_MISMATCH', message: `worker mismatch: ${worker_agent}` },
+          error: {
+            code: "ASSIGN_WORKER_MISMATCH",
+            message: `worker mismatch: ${worker_agent}`,
+          },
         };
       }
       if (Number.isFinite(Number(attempt)) && Number(attempt) !== job.attempt) {
         return {
           ok: false,
           error: {
-            code: 'ASSIGN_ATTEMPT_MISMATCH',
+            code: "ASSIGN_ATTEMPT_MISMATCH",
             message: `stale assign result for attempt ${attempt} (current ${job.attempt})`,
           },
         };
@@ -610,17 +709,20 @@ export function createRouter(store) {
         status || payload?.status,
         mergedMetadata,
       );
-      const nextResult = result ?? (Object.hasOwn(payload || {}, 'result') ? payload.result : payload);
+      const nextResult =
+        result ??
+        (Object.hasOwn(payload || {}, "result") ? payload.result : payload);
       const nextError = error ?? payload?.error ?? null;
 
-      if (normalizedStatus === 'running') {
-        const running = store.updateAssignStatus(job.job_id, 'running', {
+      if (normalizedStatus === "running") {
+        const running = store.updateAssignStatus(job.job_id, "running", {
           started_at_ms: job.started_at_ms || Date.now(),
-          deadline_ms: Date.now() + clampAssignDuration(job.timeout_ms, job.timeout_ms),
+          deadline_ms:
+            Date.now() + clampAssignDuration(job.timeout_ms, job.timeout_ms),
           result: nextResult,
           error: nextError,
         });
-        notifyAssignSupervisor(running, 'progress');
+        notifyAssignSupervisor(running, "progress");
         return { ok: true, data: buildAssignSnapshot(running) };
       }
 
@@ -629,12 +731,19 @@ export function createRouter(store) {
         error: nextError,
       });
 
-      if ((normalizedStatus === 'failed' || normalizedStatus === 'timed_out')
-        && finalized.retry_count < finalized.max_retries) {
-        return scheduleAssignRetry(finalized, normalizedStatus, nextError, worker_agent || finalized.worker_agent);
+      if (
+        (normalizedStatus === "failed" || normalizedStatus === "timed_out") &&
+        finalized.retry_count < finalized.max_retries
+      ) {
+        return scheduleAssignRetry(
+          finalized,
+          normalizedStatus,
+          nextError,
+          worker_agent || finalized.worker_agent,
+        );
       }
 
-      notifyAssignSupervisor(finalized, 'completed');
+      notifyAssignSupervisor(finalized, "completed");
       return { ok: true, data: buildAssignSnapshot(finalized) };
     },
 
@@ -643,22 +752,33 @@ export function createRouter(store) {
         const job = store.getAssign(job_id);
         return job
           ? { ok: true, data: buildAssignSnapshot(job) }
-          : { ok: false, error: { code: 'ASSIGN_NOT_FOUND', message: `assign job not found: ${job_id}` } };
+          : {
+              ok: false,
+              error: {
+                code: "ASSIGN_NOT_FOUND",
+                message: `assign job not found: ${job_id}`,
+              },
+            };
       }
       return {
         ok: true,
         data: {
-          assigns: store.listAssigns(filters).map((job) => buildAssignSnapshot(job)),
+          assigns: store
+            .listAssigns(filters)
+            .map((job) => buildAssignSnapshot(job)),
         },
       };
     },
 
-    retryAssign(job_id, { reason = 'manual', requested_by = 'manual' } = {}) {
+    retryAssign(job_id, { reason = "manual", requested_by = "manual" } = {}) {
       const job = store.getAssign(job_id);
       if (!job) {
         return {
           ok: false,
-          error: { code: 'ASSIGN_NOT_FOUND', message: `assign job not found: ${job_id}` },
+          error: {
+            code: "ASSIGN_NOT_FOUND",
+            message: `assign job not found: ${job_id}`,
+          },
         };
       }
       return scheduleAssignRetry(job, reason, job.error, requested_by);
@@ -669,7 +789,7 @@ export function createRouter(store) {
       let expired = 0;
       for (const [messageId, record] of Array.from(liveMessages.entries())) {
         if (record.message.expires_at_ms > now) continue;
-        store.moveToDeadLetter(messageId, 'ttl_expired', null);
+        store.moveToDeadLetter(messageId, "ttl_expired", null);
         removeMessage(messageId);
         expired += 1;
       }
@@ -703,15 +823,23 @@ export function createRouter(store) {
         } catch {}
       }, 10000);
       staleTimer = setInterval(() => {
-        try { store.sweepStaleAgents(); } catch {}
+        try {
+          store.sweepStaleAgents();
+        } catch {}
       }, 120000);
       sweepTimer.unref();
       staleTimer.unref();
     },
 
     stopSweeper() {
-      if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
-      if (staleTimer) { clearInterval(staleTimer); staleTimer = null; }
+      if (sweepTimer) {
+        clearInterval(sweepTimer);
+        sweepTimer = null;
+      }
+      if (staleTimer) {
+        clearInterval(staleTimer);
+        staleTimer = null;
+      }
     },
 
     getQueueDepths() {
@@ -730,22 +858,27 @@ export function createRouter(store) {
         return { total_deliveries: 0, avg_delivery_ms: 0 };
       }
       const filled = Math.min(latencyIdx, MAX_LATENCY_SAMPLES);
-      const total = deliveryLatencies.slice(0, filled).reduce((sum, ms) => sum + ms, 0);
+      const total = deliveryLatencies
+        .slice(0, filled)
+        .reduce((sum, ms) => sum + ms, 0);
       return {
         total_deliveries: latencyIdx,
         avg_delivery_ms: Math.round(total / filled),
       };
     },
 
-    getStatus(scope = 'hub', { agent_id, trace_id, include_metrics = true } = {}) {
+    getStatus(
+      scope = "hub",
+      { agent_id, trace_id, include_metrics = true } = {},
+    ) {
       const data = {};
 
-      if (scope === 'hub' || scope === 'queue') {
+      if (scope === "hub" || scope === "queue") {
         data.hub = {
-          state: 'healthy',
-          uptime_ms: process.uptime() * 1000 | 0,
-          realtime_transport: 'named-pipe',
-          audit_store: store.type || 'sqlite',
+          state: "healthy",
+          uptime_ms: (process.uptime() * 1000) | 0,
+          realtime_transport: "named-pipe",
+          audit_store: store.type || "sqlite",
         };
         if (include_metrics) {
           const depths = router.getQueueDepths();
@@ -766,7 +899,7 @@ export function createRouter(store) {
         }
       }
 
-      if (scope === 'agent' && agent_id) {
+      if (scope === "agent" && agent_id) {
         const agent = store.getAgent(agent_id);
         if (agent) {
           data.agent = {
@@ -779,7 +912,7 @@ export function createRouter(store) {
         }
       }
 
-      if (scope === 'trace' && trace_id) {
+      if (scope === "trace" && trace_id) {
         data.trace = store.getMessagesByTrace(trace_id);
       }
 

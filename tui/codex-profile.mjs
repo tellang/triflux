@@ -1,32 +1,56 @@
 #!/usr/bin/env node
 // tui/codex-profile.mjs — Interactive Codex Profile Manager
-import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import {
-  clear, box, table, divider, label, ok, warn, fail, info,
-  select, confirm, input, spinner,
-  RESET, DIM, BOLD, CYAN, AMBER, GREEN, RED, YELLOW, WHITE, GRAY,
-  onExit, showCursor,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import {
+  BOLD,
+  box,
+  CYAN,
+  clear,
+  confirm,
+  DIM,
+  divider,
+  fail,
+  GREEN,
+  info,
+  input,
+  label,
+  ok,
+  onExit,
+  RED,
+  RESET,
+  select,
+  showCursor,
+  table,
+  WHITE,
+  warn,
+  YELLOW,
 } from "./core.mjs";
 
 const CODEX_DIR = join(homedir(), ".codex");
 const CONFIG_PATH = join(CODEX_DIR, "config.toml");
 
 const KNOWN_MODELS = [
-  { label: "gpt-5.4",            hint: "최신 플래그십" },
-  { label: "gpt-5.3-codex",      hint: "코딩 특화" },
+  { label: "gpt-5.4", hint: "최신 플래그십" },
+  { label: "gpt-5.3-codex", hint: "코딩 특화" },
   { label: "gpt-5.1-codex-mini", hint: "경량 Spark" },
-  { label: "o3",                  hint: "추론 특화" },
-  { label: "o4-mini",             hint: "추론 경량" },
-  { label: "직접 입력",            hint: "" },
+  { label: "o3", hint: "추론 특화" },
+  { label: "o4-mini", hint: "추론 경량" },
+  { label: "직접 입력", hint: "" },
 ];
 
 const EFFORT_LEVELS = [
-  { label: "low",    hint: "빠른 응답, 최소 추론" },
+  { label: "low", hint: "빠른 응답, 최소 추론" },
   { label: "medium", hint: "균형 잡힌 추론" },
-  { label: "high",   hint: "깊은 추론" },
-  { label: "xhigh",  hint: "최대 추론 (느림)" },
+  { label: "high", hint: "깊은 추론" },
+  { label: "xhigh", hint: "최대 추론 (느림)" },
 ];
 
 // ── TOML Parsing ──
@@ -175,7 +199,10 @@ function showStatus(config) {
 
   console.log();
   label("기본 모델", `${WHITE}${defaults.model || "미설정"}${RESET}`);
-  label("기본 Effort", `${WHITE}${defaults.model_reasoning_effort || "미설정"}${RESET}`);
+  label(
+    "기본 Effort",
+    `${WHITE}${defaults.model_reasoning_effort || "미설정"}${RESET}`,
+  );
   console.log();
 
   if (profiles.length === 0) {
@@ -208,7 +235,9 @@ function effortColor(effort) {
 
 async function pickModel(current) {
   const idx = KNOWN_MODELS.findIndex((m) => m.label === current);
-  const choice = await select("모델 선택", KNOWN_MODELS, { initial: Math.max(0, idx) });
+  const choice = await select("모델 선택", KNOWN_MODELS, {
+    initial: Math.max(0, idx),
+  });
   if (!choice) return null;
   if (choice.value.label === "직접 입력") {
     return await input("모델 ID", current || "");
@@ -218,7 +247,9 @@ async function pickModel(current) {
 
 async function pickEffort(current) {
   const idx = EFFORT_LEVELS.findIndex((e) => e.label === current);
-  const choice = await select("Reasoning Effort 선택", EFFORT_LEVELS, { initial: Math.max(0, idx) });
+  const choice = await select("Reasoning Effort 선택", EFFORT_LEVELS, {
+    initial: Math.max(0, idx),
+  });
   if (!choice) return null;
   return choice.value.label;
 }
@@ -240,7 +271,9 @@ async function editProfile(config) {
 
   const profile = profiles[picked.index];
   console.log();
-  info(`현재: ${BOLD}${profile.name}${RESET} → ${profile.model} / ${profile.model_reasoning_effort}`);
+  info(
+    `현재: ${BOLD}${profile.name}${RESET} → ${profile.model} / ${profile.model_reasoning_effort}`,
+  );
 
   const newModel = await pickModel(profile.model);
   if (newModel === null) return config;
@@ -249,7 +282,9 @@ async function editProfile(config) {
   if (newEffort === null) return config;
 
   console.log();
-  info(`변경: ${profile.model} → ${BOLD}${newModel}${RESET}, ${profile.model_reasoning_effort} → ${BOLD}${newEffort}${RESET}`);
+  info(
+    `변경: ${profile.model} → ${BOLD}${newModel}${RESET}, ${profile.model_reasoning_effort} → ${BOLD}${newEffort}${RESET}`,
+  );
 
   if (!(await confirm("저장하시겠습니까?"))) return config;
 
@@ -259,7 +294,7 @@ async function editProfile(config) {
     if (!["name", "model", "model_reasoning_effort"].includes(k)) props[k] = v;
   }
 
-  let raw = writeProfile(config.raw, profile.name, props);
+  const raw = writeProfile(config.raw, profile.name, props);
   save(raw);
   ok(`${profile.name} 프로파일 저장 완료`);
   return readConfig();
@@ -268,7 +303,9 @@ async function editProfile(config) {
 async function editDefault(config) {
   const { defaults } = config;
   info(`현재 기본 모델: ${BOLD}${defaults.model || "미설정"}${RESET}`);
-  info(`현재 기본 Effort: ${BOLD}${defaults.model_reasoning_effort || "미설정"}${RESET}`);
+  info(
+    `현재 기본 Effort: ${BOLD}${defaults.model_reasoning_effort || "미설정"}${RESET}`,
+  );
 
   const newModel = await pickModel(defaults.model);
   if (newModel === null) return config;
@@ -277,7 +314,9 @@ async function editDefault(config) {
   if (newEffort === null) return config;
 
   console.log();
-  info(`변경: ${defaults.model} → ${BOLD}${newModel}${RESET}, ${defaults.model_reasoning_effort} → ${BOLD}${newEffort}${RESET}`);
+  info(
+    `변경: ${defaults.model} → ${BOLD}${newModel}${RESET}, ${defaults.model_reasoning_effort} → ${BOLD}${newEffort}${RESET}`,
+  );
 
   if (!(await confirm("저장하시겠습니까?"))) return config;
 
@@ -307,7 +346,10 @@ async function addProfile(config) {
   info(`추가: ${BOLD}${name}${RESET} → ${model} / ${effort}`);
   if (!(await confirm("저장하시겠습니까?"))) return config;
 
-  const raw = writeProfile(config.raw, name, { model, model_reasoning_effort: effort });
+  const raw = writeProfile(config.raw, name, {
+    model,
+    model_reasoning_effort: effort,
+  });
   save(raw);
   ok(`${name} 프로파일 추가 완료`);
   return readConfig();
@@ -325,7 +367,12 @@ async function removeProfile(config) {
   if (!picked) return config;
 
   const name = profiles[picked.index].name;
-  if (!(await confirm(`${RED}${name}${RESET} 프로파일을 삭제하시겠습니까?`, false))) {
+  if (
+    !(await confirm(
+      `${RED}${name}${RESET} 프로파일을 삭제하시겠습니까?`,
+      false,
+    ))
+  ) {
     return config;
   }
 
@@ -350,11 +397,11 @@ function save(content) {
 // ── Main Loop ──
 
 const MENU = [
-  { label: "프로파일 모델 변경",   hint: "모델/effort 수정" },
-  { label: "기본 모델 변경",       hint: "top-level default" },
-  { label: "프로파일 추가",        hint: "새 프로파일 생성" },
-  { label: "프로파일 삭제",        hint: "기존 프로파일 제거" },
-  { label: "종료",                hint: "Ctrl+C" },
+  { label: "프로파일 모델 변경", hint: "모델/effort 수정" },
+  { label: "기본 모델 변경", hint: "top-level default" },
+  { label: "프로파일 추가", hint: "새 프로파일 생성" },
+  { label: "프로파일 삭제", hint: "기존 프로파일 제거" },
+  { label: "종료", hint: "Ctrl+C" },
 ];
 
 async function main() {
@@ -384,10 +431,18 @@ async function main() {
 
     console.log();
     switch (choice.index) {
-      case 0: config = await editProfile(config); break;
-      case 1: config = await editDefault(config); break;
-      case 2: config = await addProfile(config); break;
-      case 3: config = await removeProfile(config); break;
+      case 0:
+        config = await editProfile(config);
+        break;
+      case 1:
+        config = await editDefault(config);
+        break;
+      case 2:
+        config = await addProfile(config);
+        break;
+      case 3:
+        config = await removeProfile(config);
+        break;
     }
 
     console.log();

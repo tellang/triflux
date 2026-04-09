@@ -1,10 +1,37 @@
-import { altScreenOff, altScreenOn, BG, bold, box, clearScreen, clearToEnd, color, cursorHide, cursorHome, cursorShow, dim, eraseBelow, FG, MOCHA, moveTo, padRight, progressBar, statusBadge, stripAnsi, truncate, wcswidth } from "./ansi.mjs";
+import {
+  altScreenOff,
+  altScreenOn,
+  BG,
+  bold,
+  box,
+  clearScreen,
+  clearToEnd,
+  color,
+  cursorHide,
+  cursorHome,
+  cursorShow,
+  dim,
+  eraseBelow,
+  FG,
+  MOCHA,
+  moveTo,
+  padRight,
+  progressBar,
+  statusBadge,
+  stripAnsi,
+  truncate,
+  wcswidth,
+} from "./ansi.mjs";
 
-const FALLBACK_COLUMNS = 100, FALLBACK_ROWS = 24;
+const FALLBACK_COLUMNS = 100,
+  FALLBACK_ROWS = 24;
 const VALID_TABS = new Set(["log", "detail", "files"]);
 
 let VERSION = "lite";
-try { const { createRequire } = await import("node:module"); VERSION = createRequire(import.meta.url)("../../package.json").version; } catch {}
+try {
+  const { createRequire } = await import("node:module");
+  VERSION = createRequire(import.meta.url)("../../package.json").version;
+} catch {}
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -76,39 +103,87 @@ function wrap(text, width) {
   return lines;
 }
 
-const runtimeStatus = (worker) => worker?.handoff?.status || worker?.status || "pending";
+const runtimeStatus = (worker) =>
+  worker?.handoff?.status || worker?.status || "pending";
 
 function normalizeWorkerState(existing = {}, state = {}) {
-  const handoff = state.handoff === undefined
-    ? existing.handoff
-    : {
-        ...(existing.handoff || {}),
-        ...(state.handoff || {}),
-        verdict: state.handoff?.verdict !== undefined ? sanitizeOneLine(state.handoff.verdict) : existing.handoff?.verdict,
-        confidence: state.handoff?.confidence !== undefined ? sanitizeOneLine(state.handoff.confidence) : existing.handoff?.confidence,
-        status: state.handoff?.status !== undefined ? sanitizeOneLine(state.handoff.status) : existing.handoff?.status,
-        files_changed: state.handoff?.files_changed !== undefined ? sanitizeFiles(state.handoff.files_changed) : existing.handoff?.files_changed,
-      };
+  const handoff =
+    state.handoff === undefined
+      ? existing.handoff
+      : {
+          ...(existing.handoff || {}),
+          ...(state.handoff || {}),
+          verdict:
+            state.handoff?.verdict !== undefined
+              ? sanitizeOneLine(state.handoff.verdict)
+              : existing.handoff?.verdict,
+          confidence:
+            state.handoff?.confidence !== undefined
+              ? sanitizeOneLine(state.handoff.confidence)
+              : existing.handoff?.confidence,
+          status:
+            state.handoff?.status !== undefined
+              ? sanitizeOneLine(state.handoff.status)
+              : existing.handoff?.status,
+          files_changed:
+            state.handoff?.files_changed !== undefined
+              ? sanitizeFiles(state.handoff.files_changed)
+              : existing.handoff?.files_changed,
+        };
   return {
     ...existing,
     ...state,
-    cli: state.cli !== undefined ? sanitizeOneLine(state.cli, existing.cli || "codex") : (existing.cli || "codex"),
-    status: state.status !== undefined ? sanitizeOneLine(state.status, existing.status || "pending") : (existing.status || "pending"),
-    snapshot: state.snapshot !== undefined ? sanitizeBlock(state.snapshot) : existing.snapshot,
-    summary: state.summary !== undefined ? sanitizeBlock(state.summary) : existing.summary,
-    detail: state.detail !== undefined ? sanitizeBlock(state.detail) : existing.detail,
-    findings: state.findings !== undefined ? sanitizeFiles(state.findings) : existing.findings,
-    files_changed: state.files_changed !== undefined ? sanitizeFiles(state.files_changed) : existing.files_changed,
-    confidence: state.confidence !== undefined ? sanitizeOneLine(state.confidence) : existing.confidence,
-    tokens: state.tokens !== undefined ? normalizeTokens(state.tokens) : existing.tokens,
-    progress: state.progress !== undefined ? clamp(Number(state.progress) || 0, 0, 1) : existing.progress,
+    cli:
+      state.cli !== undefined
+        ? sanitizeOneLine(state.cli, existing.cli || "codex")
+        : existing.cli || "codex",
+    status:
+      state.status !== undefined
+        ? sanitizeOneLine(state.status, existing.status || "pending")
+        : existing.status || "pending",
+    snapshot:
+      state.snapshot !== undefined
+        ? sanitizeBlock(state.snapshot)
+        : existing.snapshot,
+    summary:
+      state.summary !== undefined
+        ? sanitizeBlock(state.summary)
+        : existing.summary,
+    detail:
+      state.detail !== undefined
+        ? sanitizeBlock(state.detail)
+        : existing.detail,
+    findings:
+      state.findings !== undefined
+        ? sanitizeFiles(state.findings)
+        : existing.findings,
+    files_changed:
+      state.files_changed !== undefined
+        ? sanitizeFiles(state.files_changed)
+        : existing.files_changed,
+    confidence:
+      state.confidence !== undefined
+        ? sanitizeOneLine(state.confidence)
+        : existing.confidence,
+    tokens:
+      state.tokens !== undefined
+        ? normalizeTokens(state.tokens)
+        : existing.tokens,
+    progress:
+      state.progress !== undefined
+        ? clamp(Number(state.progress) || 0, 0, 1)
+        : existing.progress,
     handoff,
   };
 }
 
 function frame(lines, width, border = MOCHA.border) {
   const body = lines.length ? lines : [dim("내용 없음")];
-  const rendered = box(body.map((line) => padRight(truncate(line, width - 4), width - 4)), width, border);
+  const rendered = box(
+    body.map((line) => padRight(truncate(line, width - 4), width - 4)),
+    width,
+    border,
+  );
   return [rendered.top, ...rendered.body, rendered.bot];
 }
 
@@ -128,9 +203,10 @@ function buildHeader(width, names, workers, pipeline, startedAt) {
     else if (status === "running" || status === "in_progress") counts.running++;
   }
   const elapsed = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
-  const line1 = color(` triflux ${VERSION} `, FG.white, BG.header)
-    + ` ${bold(`phase ${pipeline.phase || "exec"}`)}`
-    + ` ${dim(`+${elapsed}s`)} ${names.length} workers`;
+  const line1 =
+    color(` triflux ${VERSION} `, FG.white, BG.header) +
+    ` ${bold(`phase ${pipeline.phase || "exec"}`)}` +
+    ` ${dim(`+${elapsed}s`)} ${names.length} workers`;
   const line2 = `${color(`ok ${counts.ok}`, MOCHA.ok)}  ${color(`partial ${counts.partial}`, MOCHA.partial)}  ${color(`failed ${counts.failed}`, MOCHA.fail)}  ${color(`running ${counts.running}`, MOCHA.executing)}`;
   return [padRight(line1, width), padRight(line2, width)];
 }
@@ -140,9 +216,14 @@ function buildWorkerRail(names, workers, selectedWorker, width) {
     ? names.map((name, index) => {
         const worker = workers.get(name);
         const status = runtimeStatus(worker);
-        const pct = Math.round(((worker?.progress ?? (status === "completed" ? 1 : 0)) || 0) * 100);
-        const token = worker?.tokens ? ` tok ${formatTokens(worker.tokens)}` : "";
-        const prefix = name === selectedWorker ? color("▶", MOCHA.blue) : dim("·");
+        const pct = Math.round(
+          ((worker?.progress ?? (status === "completed" ? 1 : 0)) || 0) * 100,
+        );
+        const token = worker?.tokens
+          ? ` tok ${formatTokens(worker.tokens)}`
+          : "";
+        const prefix =
+          name === selectedWorker ? color("▶", MOCHA.blue) : dim("·");
         return `${prefix} ${index + 1}.${name} ${stripAnsi(statusBadge(status))} ${pct}%${token}`;
       })
     : [dim("workers 없음")];
@@ -175,12 +256,27 @@ function buildDetail(workerName, worker, width, tab, helpVisible) {
     `verdict ${worker.handoff?.verdict || worker.summary || worker.snapshot || "-"}`,
   ];
   if (tab === "files") {
-    const files = [...sanitizeFiles(worker.handoff?.files_changed), ...sanitizeFiles(worker.files_changed)];
-    detailLines.push(...(files.length ? files.map((file) => `files ${file}`) : ["files 없음"]));
+    const files = [
+      ...sanitizeFiles(worker.handoff?.files_changed),
+      ...sanitizeFiles(worker.files_changed),
+    ];
+    detailLines.push(
+      ...(files.length ? files.map((file) => `files ${file}`) : ["files 없음"]),
+    );
   } else if (tab === "detail") {
-    detailLines.push(...wrap(worker.detail || worker.summary || worker.snapshot || "", width - 4));
+    detailLines.push(
+      ...wrap(
+        worker.detail || worker.summary || worker.snapshot || "",
+        width - 4,
+      ),
+    );
   } else {
-    detailLines.push(...wrap(worker.summary || worker.snapshot || worker.detail || "", width - 4));
+    detailLines.push(
+      ...wrap(
+        worker.summary || worker.snapshot || worker.detail || "",
+        width - 4,
+      ),
+    );
   }
   return frame(detailLines, width, MOCHA.thinking);
 }
@@ -214,11 +310,21 @@ export function createLiteDashboard(opts = {}) {
   let inputAttached = false;
   let rawModeEnabled = false;
 
-  const write = (text) => { if (!closed) stream.write(text); };
+  const write = (text) => {
+    if (!closed) stream.write(text);
+  };
   const workerNames = () => [...workers.keys()].sort();
-  const viewportColumns = () => Math.max(48, columns || stream?.columns || process.stdout?.columns || FALLBACK_COLUMNS);
-  const viewportRows = () => Math.max(10, rows || stream?.rows || process.stdout?.rows || FALLBACK_ROWS);
-  const ensureSelection = (names) => { if (names.length && (!selectedWorker || !workers.has(selectedWorker))) selectedWorker = names[0]; };
+  const viewportColumns = () =>
+    Math.max(
+      48,
+      columns || stream?.columns || process.stdout?.columns || FALLBACK_COLUMNS,
+    );
+  const viewportRows = () =>
+    Math.max(10, rows || stream?.rows || process.stdout?.rows || FALLBACK_ROWS);
+  const ensureSelection = (names) => {
+    if (names.length && (!selectedWorker || !workers.has(selectedWorker)))
+      selectedWorker = names[0];
+  };
 
   function selectRelative(offset) {
     const names = workerNames();
@@ -229,9 +335,18 @@ export function createLiteDashboard(opts = {}) {
   }
 
   function triggerOpenSelected() {
-    if (typeof onOpenSelectedWorker !== "function" || !selectedWorker || !workers.has(selectedWorker)) return;
+    if (
+      typeof onOpenSelectedWorker !== "function" ||
+      !selectedWorker ||
+      !workers.has(selectedWorker)
+    )
+      return;
     try {
-      const result = onOpenSelectedWorker(selectedWorker, workers.get(selectedWorker), new Map(workers));
+      const result = onOpenSelectedWorker(
+        selectedWorker,
+        workers.get(selectedWorker),
+        new Map(workers),
+      );
       if (result && typeof result.catch === "function") result.catch(() => {});
     } catch {}
   }
@@ -239,7 +354,11 @@ export function createLiteDashboard(opts = {}) {
   function triggerOpenAll() {
     if (typeof onOpenAllWorkers !== "function") return;
     try {
-      const result = onOpenAllWorkers(selectedWorker, workers.get(selectedWorker), new Map(workers));
+      const result = onOpenAllWorkers(
+        selectedWorker,
+        workers.get(selectedWorker),
+        new Map(workers),
+      );
       if (result && typeof result.catch === "function") result.catch(() => {});
     } catch {}
   }
@@ -265,7 +384,11 @@ export function createLiteDashboard(opts = {}) {
       return;
     }
     if (key === "\r" || key === "\n") {
-      if (typeof onOpenSelectedWorker === "function" && selectedWorker && workers.has(selectedWorker)) {
+      if (
+        typeof onOpenSelectedWorker === "function" &&
+        selectedWorker &&
+        workers.has(selectedWorker)
+      ) {
         triggerOpenSelected();
       } else {
         // 콜백 없거나 선택 워커 없으면 탭 순환
@@ -275,7 +398,12 @@ export function createLiteDashboard(opts = {}) {
       render();
       return;
     }
-    if (key === "\x1b[13;2u" || key === "\x1b[27;13;2~" || key === "\x1b\r" || key === "\x1b\n") {
+    if (
+      key === "\x1b[13;2u" ||
+      key === "\x1b[27;13;2~" ||
+      key === "\x1b\r" ||
+      key === "\x1b\n"
+    ) {
       triggerOpenAll();
       return;
     }
@@ -322,20 +450,53 @@ export function createLiteDashboard(opts = {}) {
     const width = viewportColumns();
     const height = viewportRows();
     const header = buildHeader(width, names, workers, pipeline, startedAt);
-    const railOnly = !detailExpanded || names.length <= 1 || width < 100 || layout === "single";
+    const railOnly =
+      !detailExpanded ||
+      names.length <= 1 ||
+      width < 100 ||
+      layout === "single";
     if (railOnly) {
-      const sections = [header, ...buildWorkerRail(names, workers, selectedWorker, width)];
-      if (detailExpanded) sections.push(...buildDetail(selectedWorker, workers.get(selectedWorker), width, focusTab, helpVisible));
+      const sections = [
+        header,
+        ...buildWorkerRail(names, workers, selectedWorker, width),
+      ];
+      if (detailExpanded)
+        sections.push(
+          ...buildDetail(
+            selectedWorker,
+            workers.get(selectedWorker),
+            width,
+            focusTab,
+            helpVisible,
+          ),
+        );
       return fitHeight(sections, width, height);
     }
     const railWidth = Math.max(28, Math.floor(width * 0.32));
     const detailWidth = width - railWidth - 1;
     const bodyHeight = Math.max(6, height - header.length);
-    const rail = fitHeight(buildWorkerRail(names, workers, selectedWorker, railWidth), railWidth, bodyHeight);
-    const detail = fitHeight(buildDetail(selectedWorker, workers.get(selectedWorker), detailWidth, focusTab, helpVisible), detailWidth, bodyHeight);
+    const rail = fitHeight(
+      buildWorkerRail(names, workers, selectedWorker, railWidth),
+      railWidth,
+      bodyHeight,
+    );
+    const detail = fitHeight(
+      buildDetail(
+        selectedWorker,
+        workers.get(selectedWorker),
+        detailWidth,
+        focusTab,
+        helpVisible,
+      ),
+      detailWidth,
+      bodyHeight,
+    );
     return [
       ...header,
-      ...Array.from({ length: bodyHeight }, (_, index) => `${rail[index]}${dim("│")}${detail[index]}`),
+      ...Array.from(
+        { length: bodyHeight },
+        (_, index) => `${rail[index]}${dim("│")}${detail[index]}`,
+      ),
     ];
   }
 
@@ -350,7 +511,11 @@ export function createLiteDashboard(opts = {}) {
       // Full redraw on first frame or terminal resize to avoid artifacts
       if (prevFrame.length === 0 || width !== prevWidth) {
         prevWidth = width;
-        write(cursorHome + padded.map((l) => l + clearToEnd).join("\n") + eraseBelow);
+        write(
+          cursorHome +
+            padded.map((l) => l + clearToEnd).join("\n") +
+            eraseBelow,
+        );
         prevFrame = padded;
         return;
       }
@@ -372,8 +537,10 @@ export function createLiteDashboard(opts = {}) {
   function close() {
     if (closed) return;
     if (timer) clearInterval(timer);
-    if (inputAttached && typeof input?.off === "function") input.off("data", handleInput);
-    if (rawModeEnabled && typeof input?.setRawMode === "function") input.setRawMode(false);
+    if (inputAttached && typeof input?.off === "function")
+      input.off("data", handleInput);
+    if (rawModeEnabled && typeof input?.setRawMode === "function")
+      input.setRawMode(false);
     if (inputAttached && typeof input?.pause === "function") input.pause();
     if (isTTY) write(cursorShow + altScreenOff);
     prevFrame = [];
@@ -387,22 +554,53 @@ export function createLiteDashboard(opts = {}) {
   }
 
   return {
-    updateWorker(name, state) { workers.set(name, normalizeWorkerState(workers.get(name), state)); ensureSelection(workerNames()); },
-    updatePipeline(state) { pipeline = { ...pipeline, ...state }; },
-    setStartTime(ms) { startedAt = ms; },
-    selectWorker(name) { if (workers.has(name)) selectedWorker = name; },
-    toggleDetail(force) { detailExpanded = typeof force === "boolean" ? force : !detailExpanded; },
+    updateWorker(name, state) {
+      workers.set(name, normalizeWorkerState(workers.get(name), state));
+      ensureSelection(workerNames());
+    },
+    updatePipeline(state) {
+      pipeline = { ...pipeline, ...state };
+    },
+    setStartTime(ms) {
+      startedAt = ms;
+    },
+    selectWorker(name) {
+      if (workers.has(name)) selectedWorker = name;
+    },
+    toggleDetail(force) {
+      detailExpanded = typeof force === "boolean" ? force : !detailExpanded;
+    },
     render,
-    getWorkers() { return new Map(workers); },
-    getFrameCount() { return frameCount; },
-    getPipelineState() { return { ...pipeline }; },
-    getSelectedWorker() { return selectedWorker; },
-    isDetailExpanded() { return detailExpanded; },
-    getFocusTab() { return focusTab; },
-    setFocusTab(tab) { if (VALID_TABS.has(tab)) focusTab = tab; },
-    getLayout() { return layout; },
-    toggleHelp(force) { helpVisible = typeof force === "boolean" ? force : !helpVisible; },
-    isHelpVisible() { return helpVisible; },
+    getWorkers() {
+      return new Map(workers);
+    },
+    getFrameCount() {
+      return frameCount;
+    },
+    getPipelineState() {
+      return { ...pipeline };
+    },
+    getSelectedWorker() {
+      return selectedWorker;
+    },
+    isDetailExpanded() {
+      return detailExpanded;
+    },
+    getFocusTab() {
+      return focusTab;
+    },
+    setFocusTab(tab) {
+      if (VALID_TABS.has(tab)) focusTab = tab;
+    },
+    getLayout() {
+      return layout;
+    },
+    toggleHelp(force) {
+      helpVisible = typeof force === "boolean" ? force : !helpVisible;
+    },
+    isHelpVisible() {
+      return helpVisible;
+    },
     close,
   };
 }

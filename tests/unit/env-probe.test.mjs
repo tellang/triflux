@@ -1,9 +1,9 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Buffer } from "node:buffer";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, it } from "node:test";
 
 import {
   detectCodexAuthState,
@@ -15,26 +15,38 @@ function makeTempHome() {
 }
 
 function makeJwt(plan = "pro", extra = {}) {
-  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
-  const payload = Buffer.from(JSON.stringify({
-    sub: "user-1",
-    exp: 1_900_000_000,
-    "https://api.openai.com/auth": {
-      chatgpt_plan_type: plan,
-    },
-    ...extra,
-  })).toString("base64url");
+  const header = Buffer.from(
+    JSON.stringify({ alg: "none", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      sub: "user-1",
+      exp: 1_900_000_000,
+      "https://api.openai.com/auth": {
+        chatgpt_plan_type: plan,
+      },
+      ...extra,
+    }),
+  ).toString("base64url");
   return `${header}.${payload}.sig`;
 }
 
 function writeChatgptAuth(homeDir, plan = "pro", extra = {}) {
   mkdirSync(join(homeDir, ".codex"), { recursive: true });
-  writeFileSync(join(homeDir, ".codex", "auth.json"), JSON.stringify({
-    auth_mode: "chatgpt",
-    tokens: {
-      id_token: makeJwt(plan, extra),
-    },
-  }, null, 2), "utf8");
+  writeFileSync(
+    join(homeDir, ".codex", "auth.json"),
+    JSON.stringify(
+      {
+        auth_mode: "chatgpt",
+        tokens: {
+          id_token: makeJwt(plan, extra),
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 }
 
 describe("env-probe detectCodexAuthState", () => {

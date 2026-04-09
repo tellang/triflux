@@ -22,7 +22,11 @@ const GIT_BASH_CANDIDATES = [
 function findGitBashExe() {
   for (const p of GIT_BASH_CANDIDATES) {
     try {
-      execSync(`"${p}" --version`, { stdio: "ignore", timeout: 3000, windowsHide: true });
+      execSync(`"${p}" --version`, {
+        stdio: "ignore",
+        timeout: 3000,
+        windowsHide: true,
+      });
       return p;
     } catch {
       // 다음 후보
@@ -35,7 +39,11 @@ function findGitBashExe() {
 export function hasWindowsTerminal() {
   if (process.platform !== "win32") return false;
   try {
-    execSync("where wt.exe", { stdio: "ignore", timeout: 3000, windowsHide: true });
+    execSync("where wt.exe", {
+      stdio: "ignore",
+      timeout: 3000,
+      windowsHide: true,
+    });
     return true;
   } catch {
     return false;
@@ -60,7 +68,11 @@ function hasTmux() {
 /** WSL2 내 tmux 사용 가능 여부 (Windows 전용) */
 function hasWslTmux() {
   try {
-    execSync("wsl tmux -V", { stdio: "ignore", timeout: 5000, windowsHide: true });
+    execSync("wsl tmux -V", {
+      stdio: "ignore",
+      timeout: 5000,
+      windowsHide: true,
+    });
     return true;
   } catch {
     return false;
@@ -91,10 +103,22 @@ function hasGitBashTmux() {
 let _cachedMux;
 export function detectMultiplexer() {
   if (_cachedMux !== undefined) return _cachedMux;
-  if (hasPsmux()) { _cachedMux = "psmux"; return _cachedMux; }
-  if (hasTmux()) { _cachedMux = "tmux"; return _cachedMux; }
-  if (process.platform === "win32" && hasGitBashTmux()) { _cachedMux = "git-bash-tmux"; return _cachedMux; }
-  if (process.platform === "win32" && hasWslTmux()) { _cachedMux = "wsl-tmux"; return _cachedMux; }
+  if (hasPsmux()) {
+    _cachedMux = "psmux";
+    return _cachedMux;
+  }
+  if (hasTmux()) {
+    _cachedMux = "tmux";
+    return _cachedMux;
+  }
+  if (process.platform === "win32" && hasGitBashTmux()) {
+    _cachedMux = "git-bash-tmux";
+    return _cachedMux;
+  }
+  if (process.platform === "win32" && hasWslTmux()) {
+    _cachedMux = "wsl-tmux";
+    return _cachedMux;
+  }
   _cachedMux = null;
   return _cachedMux;
 }
@@ -110,15 +134,15 @@ function tmux(args, opts = {}) {
   if (!mux) {
     throw new Error(
       "tmux/psmux 미발견.\n\n" +
-      "tfx multi은 tmux 계열 멀티플렉서가 필요합니다:\n" +
-      "  Windows: psmux 설치 또는 WSL2 tmux 사용\n" +
-      "  WSL2:   wsl sudo apt install tmux\n" +
-      "  macOS:  brew install tmux\n" +
-      "  Linux:  apt install tmux\n\n" +
-      "Windows에서는 WSL2를 권장합니다:\n" +
-      "  1. wsl --install\n" +
-      "  2. wsl sudo apt install tmux\n" +
-      "  3. tfx multi \"작업\"  (자동으로 WSL tmux 사용)"
+        "tfx multi은 tmux 계열 멀티플렉서가 필요합니다:\n" +
+        "  Windows: psmux 설치 또는 WSL2 tmux 사용\n" +
+        "  WSL2:   wsl sudo apt install tmux\n" +
+        "  macOS:  brew install tmux\n" +
+        "  Linux:  apt install tmux\n\n" +
+        "Windows에서는 WSL2를 권장합니다:\n" +
+        "  1. wsl --install\n" +
+        "  2. wsl sudo apt install tmux\n" +
+        '  3. tfx multi "작업"  (자동으로 WSL tmux 사용)',
     );
   }
   if (mux === "psmux") {
@@ -272,7 +296,17 @@ export function createWtSession(sessionName, opts = {}) {
     const cwd = pane.cwd || process.cwd();
     if (!command) continue;
 
-    wt(["-w", "0", "sp", splitFlag, "--title", title, "-d", cwd, ...buildWtCmdArgs(command)]);
+    wt([
+      "-w",
+      "0",
+      "sp",
+      splitFlag,
+      "--title",
+      title,
+      "-d",
+      cwd,
+      ...buildWtCmdArgs(command),
+    ]);
     panes.push(`wt:${i}`);
     titles.push(title);
   }
@@ -305,7 +339,11 @@ export function focusWtPane(paneIndex, opts = {}) {
 
   // 앵커로 최대한 복귀
   for (let i = 0; i < 10; i++) {
-    try { wt(["-w", "0", "move-focus", backDir]); } catch { break; }
+    try {
+      wt(["-w", "0", "move-focus", backDir]);
+    } catch {
+      break;
+    }
   }
 
   for (let i = 0; i <= idx; i++) {
@@ -334,7 +372,11 @@ export function closeWtSession(opts = {}) {
 
   // 앵커(원래 tfx 실행 pane)로 최대한 복귀
   for (let i = 0; i < 10; i++) {
-    try { wt(["-w", "0", "move-focus", backDir]); } catch { break; }
+    try {
+      wt(["-w", "0", "move-focus", backDir]);
+    } catch {
+      break;
+    }
   }
 
   for (let i = 0; i < paneCount; i++) {
@@ -424,7 +466,9 @@ export function focusPane(target, opts = {}) {
   const { zoom = false } = opts;
   tmux(`select-pane -t ${target}`);
   if (zoom) {
-    try { tmux(`resize-pane -t ${target} -Z`); } catch {}
+    try {
+      tmux(`resize-pane -t ${target} -Z`);
+    } catch {}
   }
 }
 
@@ -461,29 +505,49 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
 
   if (inProcess) {
     // 단일 뷰(zoom) 상태에서 팀메이트 순환
-    tmux(`bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`);
-    tmux(`bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`);
+    tmux(
+      `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
+    );
+    tmux(
+      `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
+    );
   } else {
     // 분할 뷰에서 팀메이트 순환
-    tmux(`bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`);
-    tmux(`bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`);
+    tmux(
+      `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
+    );
+    tmux(
+      `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
+    );
   }
 
   // 대체 키: 일부 환경에서 S-Up이 누락될 때 사용
-  tmux(`bind-key -T root -n S-Right if-shell -F '${cond}' ${bindNext} 'send-keys S-Right'`);
-  tmux(`bind-key -T root -n S-Left if-shell -F '${cond}' ${bindPrev} 'send-keys S-Left'`);
-  tmux(`bind-key -T root -n BTab if-shell -F '${cond}' ${bindPrev} 'send-keys BTab'`);
+  tmux(
+    `bind-key -T root -n S-Right if-shell -F '${cond}' ${bindNext} 'send-keys S-Right'`,
+  );
+  tmux(
+    `bind-key -T root -n S-Left if-shell -F '${cond}' ${bindPrev} 'send-keys S-Left'`,
+  );
+  tmux(
+    `bind-key -T root -n BTab if-shell -F '${cond}' ${bindPrev} 'send-keys BTab'`,
+  );
 
   // 현재 활성 pane 인터럽트
-  tmux(`bind-key -T root -n Escape if-shell -F '${cond}' 'send-keys C-c' 'send-keys Escape'`);
+  tmux(
+    `bind-key -T root -n Escape if-shell -F '${cond}' 'send-keys C-c' 'send-keys Escape'`,
+  );
 
   // 태스크 목록 토글 (tmux 3.2+ popup 우선, 실패 시 안내 메시지)
   if (taskListCommand) {
     const escaped = taskListCommand.replace(/'/g, "'\\''");
     try {
-      tmux(`bind-key -T root -n C-t if-shell -F '${cond}' "display-popup -E '${escaped}'" "send-keys C-t"`);
+      tmux(
+        `bind-key -T root -n C-t if-shell -F '${cond}' "display-popup -E '${escaped}'" "send-keys C-t"`,
+      );
     } catch {
-      tmux(`bind-key -T root -n C-t if-shell -F '${cond}' 'display-message "tfx multi tasks 명령으로 태스크 확인"' 'send-keys C-t'`);
+      tmux(
+        `bind-key -T root -n C-t if-shell -F '${cond}' 'display-message "tfx multi tasks 명령으로 태스크 확인"' 'send-keys C-t'`,
+      );
     }
   }
 }
@@ -558,9 +622,7 @@ export function listSessions() {
 
   try {
     const output = tmux('list-sessions -F "#{session_name}"');
-    return output
-      .split("\n")
-      .filter((s) => s.startsWith("tfx-multi-"));
+    return output.split("\n").filter((s) => s.startsWith("tfx-multi-"));
   } catch {
     return [];
   }
@@ -577,7 +639,9 @@ export function getSessionAttachedCount(sessionName) {
   }
 
   try {
-    const output = tmux('list-sessions -F "#{session_name} #{session_attached}"');
+    const output = tmux(
+      'list-sessions -F "#{session_name} #{session_attached}"',
+    );
     const line = output
       .split("\n")
       .find((l) => l.startsWith(`${sessionName} `));

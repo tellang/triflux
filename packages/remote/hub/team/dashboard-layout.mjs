@@ -12,7 +12,9 @@ const DASHBOARD_LAYOUTS = new Set([
 ]);
 
 export function normalizeDashboardLayout(value, { allowAuto = true } = {}) {
-  const normalized = String(value ?? "").trim().toLowerCase();
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!normalized) return "single";
   if (normalized === "auto" && !allowAuto) return "single";
   return DASHBOARD_LAYOUTS.has(normalized) ? normalized : "single";

@@ -13,9 +13,17 @@
 //   6. CLI 이슈 자동 수집
 //   7. 구조화된 결과 출력 (=== TFX-ROUTE RESULT ===)
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
-import { join } from "path";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { homedir } from "os";
+import { join } from "path";
 
 const HOME = homedir();
 const CACHE_DIR = join(HOME, ".claude", "cache");
@@ -171,7 +179,10 @@ function extractCodexSessionId(rawOutput, stderrContent = "") {
 
 function appendCodexResumeHint(output, rawOutput, stderrContent = "") {
   const normalizedOutput = String(output || "").trim();
-  if (/Codex session ID:/i.test(normalizedOutput) || /codex resume\s+/i.test(normalizedOutput)) {
+  if (
+    /Codex session ID:/i.test(normalizedOutput) ||
+    /codex resume\s+/i.test(normalizedOutput)
+  ) {
     return normalizedOutput;
   }
 
@@ -184,7 +195,11 @@ function appendCodexResumeHint(output, rawOutput, stderrContent = "") {
   return normalizedOutput ? `${normalizedOutput}\n\n${hint}` : hint;
 }
 
-function prepareCliOutput(rawOutput, cliType, { cleanTui = true, stderrContent = "" } = {}) {
+function prepareCliOutput(
+  rawOutput,
+  cliType,
+  { cleanTui = true, stderrContent = "" } = {},
+) {
   let prepared = cliType === "codex" ? filterCodexOutput(rawOutput) : rawOutput;
   if (cleanTui && process.env.TFX_CLEAN_TUI !== "0") {
     prepared = cleanTuiArtifacts(prepared, cliType);
@@ -214,7 +229,9 @@ function cleanTuiArtifacts(output, cliType) {
       .replace(/^\s*codex\s*$/gm, "")
       .replace(/^[^\S\n]*[›❯]\s*Applied.*$/gm, "");
   } else if (normalizedCliType.startsWith("gemini")) {
-    cleaned = cleaned.replace(/^[^\S\n]*[╭╮╰╯│─═].*$/gm, "").replace(/^[^\S\n]*>\s*$/gm, "");
+    cleaned = cleaned
+      .replace(/^[^\S\n]*[╭╮╰╯│─═].*$/gm, "")
+      .replace(/^[^\S\n]*>\s*$/gm, "");
   } else if (normalizedCliType.startsWith("claude")) {
     cleaned = cleaned.replace(/^[^\S\n]*[━─]{5,}.*$/gm, "");
   }
@@ -285,7 +302,10 @@ function recordBatchEvent(result, agent) {
   const eventsFile = join(CACHE_DIR, "batch-events.jsonl");
   try {
     mkdirSync(CACHE_DIR, { recursive: true });
-    appendFileSync(eventsFile, JSON.stringify({ ts: Date.now(), agent, result }) + "\n");
+    appendFileSync(
+      eventsFile,
+      JSON.stringify({ ts: Date.now(), agent, result }) + "\n",
+    );
 
     // 자동 회전: 200줄 초과 시 최근 100줄 유지
     const content = readFileSync(eventsFile, "utf-8").trim();
@@ -301,12 +321,42 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
   if (!stderrText && exitCode === 0) return;
 
   const patterns = [
-    { regex: /sandbox image.*missing/i, pattern: "sandbox_missing", msg: "Docker sandbox image not found", severity: "warn" },
-    { regex: /rate.limit|429|too many requests/i, pattern: "rate_limit", msg: "API rate limit exceeded", severity: "warn" },
-    { regex: /ECONNREFUSED|ENOTFOUND|network/i, pattern: "network_error", msg: "Network connection failed", severity: "error" },
-    { regex: /deprecated/i, pattern: "deprecated_flag", msg: "Deprecated flag/feature detected", severity: "warn" },
-    { regex: /API_KEY.*not.set|auth.*fail|unauthorized|401/i, pattern: "auth_error", msg: "Authentication failed", severity: "error" },
-    { regex: /ENOMEM|out of memory|heap/i, pattern: "oom", msg: "Out of memory", severity: "error" },
+    {
+      regex: /sandbox image.*missing/i,
+      pattern: "sandbox_missing",
+      msg: "Docker sandbox image not found",
+      severity: "warn",
+    },
+    {
+      regex: /rate.limit|429|too many requests/i,
+      pattern: "rate_limit",
+      msg: "API rate limit exceeded",
+      severity: "warn",
+    },
+    {
+      regex: /ECONNREFUSED|ENOTFOUND|network/i,
+      pattern: "network_error",
+      msg: "Network connection failed",
+      severity: "error",
+    },
+    {
+      regex: /deprecated/i,
+      pattern: "deprecated_flag",
+      msg: "Deprecated flag/feature detected",
+      severity: "warn",
+    },
+    {
+      regex: /API_KEY.*not.set|auth.*fail|unauthorized|401/i,
+      pattern: "auth_error",
+      msg: "Authentication failed",
+      severity: "error",
+    },
+    {
+      regex: /ENOMEM|out of memory|heap/i,
+      pattern: "oom",
+      msg: "Out of memory",
+      severity: "error",
+    },
   ];
 
   let matched = null;
@@ -318,7 +368,11 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
   }
 
   if (!matched && exitCode !== 0 && exitCode !== 124) {
-    matched = { pattern: "unknown_error", msg: `Exit code ${exitCode}`, severity: "warn" };
+    matched = {
+      pattern: "unknown_error",
+      msg: `Exit code ${exitCode}`,
+      severity: "warn",
+    };
   }
 
   if (!matched) return;
@@ -329,21 +383,30 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
 
     // 중복 방지: 같은 패턴+cli가 최근 5분 내 기록됐으면 건너뜀
     if (existsSync(issuesFile)) {
-      const lines = readFileSync(issuesFile, "utf-8").trim().split("\n").slice(-5);
+      const lines = readFileSync(issuesFile, "utf-8")
+        .trim()
+        .split("\n")
+        .slice(-5);
       const now = Date.now();
       for (const line of lines) {
         try {
           const entry = JSON.parse(line);
-          if (entry.pattern === matched.pattern && entry.cli === cliType && now - entry.ts < 300000) return;
+          if (
+            entry.pattern === matched.pattern &&
+            entry.cli === cliType &&
+            now - entry.ts < 300000
+          )
+            return;
         } catch {}
       }
     }
 
     const snippet = stderrText.substring(0, 200).replace(/\n/g, " ");
 
-    const retryCount = (matched.pattern === "rate_limit" && cliType === "gemini")
-      ? parseInt(process.env.TFX_GEMINI_429_RETRIES || "0", 10)
-      : undefined;
+    const retryCount =
+      matched.pattern === "rate_limit" && cliType === "gemini"
+        ? parseInt(process.env.TFX_GEMINI_429_RETRIES || "0", 10)
+        : undefined;
 
     const issueEntry = {
       ts: Date.now(),
@@ -440,7 +503,8 @@ function main() {
   if (exitCode === 0) accumulateTokens(cliType, tokens);
 
   // 5. AIMD 배치 이벤트
-  const aimdResult = exitCode === 0 ? "success" : exitCode === 124 ? "timeout" : "failed";
+  const aimdResult =
+    exitCode === 0 ? "success" : exitCode === 124 ? "timeout" : "failed";
   recordBatchEvent(aimdResult, agent);
 
   // 6. CLI 이슈 추적
@@ -462,7 +526,9 @@ function main() {
   if (exitCode === 0) {
     if (stderrContent) {
       console.log("status: success_with_warnings");
-      console.log(`warnings: ${stderrContent.split("\n").slice(0, 3).join(" ")}`);
+      console.log(
+        `warnings: ${stderrContent.split("\n").slice(0, 3).join(" ")}`,
+      );
     } else {
       console.log("status: success");
     }
@@ -498,6 +564,7 @@ function main() {
 }
 
 import { fileURLToPath } from "url";
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main();
 }

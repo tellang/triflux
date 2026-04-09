@@ -11,11 +11,8 @@ let getPipelineStateDbPath;
 let ensurePipelineTable;
 let listPipelineStates;
 try {
-  ({
-    getPipelineStateDbPath,
-    ensurePipelineTable,
-    listPipelineStates,
-  } = await import("../hub/pipeline/state.mjs"));
+  ({ getPipelineStateDbPath, ensurePipelineTable, listPipelineStates } =
+    await import("../hub/pipeline/state.mjs"));
 } catch {
   // hub/pipeline 모듈 없으면 훅 무동작
   process.exit(0);
@@ -53,7 +50,7 @@ try {
   // 활성 파이프라인 발견 → 구조화 decision으로 block
   const lines = active.map(
     (s) =>
-      `  - 팀 ${s.team_name}: ${s.phase} 단계 (fix: ${s.fix_attempt}/${s.fix_max}, ralph: ${s.ralph_iteration}/${s.ralph_max})`
+      `  - 팀 ${s.team_name}: ${s.phase} 단계 (fix: ${s.fix_attempt}/${s.fix_max}, ralph: ${s.ralph_iteration}/${s.ralph_max})`,
   );
 
   const reason =

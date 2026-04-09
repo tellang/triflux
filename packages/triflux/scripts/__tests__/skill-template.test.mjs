@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-
+import { generateSkillDocs } from "../gen-skill-docs.mjs";
 import {
   buildSkillTemplateContext,
   loadSkillManifest,
@@ -12,7 +12,6 @@ import {
   parseFrontmatterWithManifest,
   renderSkillTemplate,
 } from "../lib/skill-template.mjs";
-import { generateSkillDocs } from "../gen-skill-docs.mjs";
 
 function makeTempDir() {
   return mkdtempSync(join(tmpdir(), "tfx-skill-template-"));
@@ -30,16 +29,20 @@ describe("skill-template engine", () => {
       "name={{SKILL_NAME}}",
     ].join("\n");
 
-    const output = renderSkillTemplate(template, {
-      SKILL_NAME: "tfx-deep-plan",
-      SKILL_DESCRIPTION: "consensus planner",
-      DEEP: true,
-    }, {
-      partials: {
-        base: "desc={{SKILL_DESCRIPTION}}",
-        deep: "deep-enabled",
+    const output = renderSkillTemplate(
+      template,
+      {
+        SKILL_NAME: "tfx-deep-plan",
+        SKILL_DESCRIPTION: "consensus planner",
+        DEEP: true,
       },
-    });
+      {
+        partials: {
+          base: "desc={{SKILL_DESCRIPTION}}",
+          deep: "deep-enabled",
+        },
+      },
+    );
 
     assert.match(output, /desc=consensus planner/);
     assert.match(output, /deep-enabled/);
@@ -48,7 +51,11 @@ describe("skill-template engine", () => {
 
   it("조건부가 false면 블록을 제거한다", () => {
     const template = "start\n{{#if DEEP}}hidden{{/if}}\nend";
-    const output = renderSkillTemplate(template, { DEEP: false }, { partials: {} });
+    const output = renderSkillTemplate(
+      template,
+      { DEEP: false },
+      { partials: {} },
+    );
     assert.equal(output, "start\n\nend");
   });
 
@@ -94,7 +101,11 @@ describe("skill-template engine", () => {
     try {
       mkdirSync(join(root, "nested"), { recursive: true });
       writeFileSync(join(root, "base.md"), "base-partial", "utf8");
-      writeFileSync(join(root, "nested", "telemetry.md"), "telemetry-partial", "utf8");
+      writeFileSync(
+        join(root, "nested", "telemetry.md"),
+        "telemetry-partial",
+        "utf8",
+      );
 
       const partials = loadTemplatePartials(root);
       assert.equal(partials.base, "base-partial");
@@ -108,12 +119,16 @@ describe("skill-template engine", () => {
   it("순환 partial include를 감지한다", () => {
     assert.throws(
       () =>
-        renderSkillTemplate("{{> A}}", {}, {
-          partials: {
-            A: "A -> {{> B}}",
-            B: "B -> {{> A}}",
+        renderSkillTemplate(
+          "{{> A}}",
+          {},
+          {
+            partials: {
+              A: "A -> {{> B}}",
+              B: "B -> {{> A}}",
+            },
           },
-        }),
+        ),
       /Circular partial include: A -> B -> A/,
     );
   });
@@ -125,35 +140,48 @@ describe("skill-template engine", () => {
   });
 
   it("중복 frontmatter 키는 마지막 값을 우선한다", () => {
-    const parsed = parseFrontmatter([
-      "---",
-      "name: first",
-      "name: second",
-      "---",
-      "x",
-    ].join("\n"));
+    const parsed = parseFrontmatter(
+      ["---", "name: first", "name: second", "---", "x"].join("\n"),
+    );
     assert.equal(parsed.data.name, "second");
   });
 
   it("특수문자 변수 키(점/하이픈)를 치환한다", () => {
-    const output = renderSkillTemplate("{{FOO.BAR}}/{{FOO-BAR}}", {
-      "FOO.BAR": "dot",
-      "FOO-BAR": "dash",
-    }, { partials: {} });
+    const output = renderSkillTemplate(
+      "{{FOO.BAR}}/{{FOO-BAR}}",
+      {
+        "FOO.BAR": "dot",
+        "FOO-BAR": "dash",
+      },
+      { partials: {} },
+    );
     assert.equal(output, "dot/dash");
   });
 
   it("중첩 조건 블록을 안쪽 조건값에 따라 렌더링한다", () => {
     const template = "{{#if A}}open-{{#if B}}inner{{/if}}-close{{/if}}";
-    assert.equal(renderSkillTemplate(template, { A: true, B: true }, { partials: {} }), "open-inner-close");
-    assert.equal(renderSkillTemplate(template, { A: true, B: false }, { partials: {} }), "open--close");
-    assert.equal(renderSkillTemplate(template, { A: false, B: true }, { partials: {} }), "");
+    assert.equal(
+      renderSkillTemplate(template, { A: true, B: true }, { partials: {} }),
+      "open-inner-close",
+    );
+    assert.equal(
+      renderSkillTemplate(template, { A: true, B: false }, { partials: {} }),
+      "open--close",
+    );
+    assert.equal(
+      renderSkillTemplate(template, { A: false, B: true }, { partials: {} }),
+      "",
+    );
   });
 
   it("1000줄 이상 대형 템플릿도 렌더링한다", () => {
     const lines = Array.from({ length: 1_200 }, (_v, i) => `line-${i}`);
     const template = `${lines.join("\n")}\nname={{SKILL_NAME}}`;
-    const output = renderSkillTemplate(template, { SKILL_NAME: "big-template" }, { partials: {} });
+    const output = renderSkillTemplate(
+      template,
+      { SKILL_NAME: "big-template" },
+      { partials: {} },
+    );
 
     const renderedLines = output.split("\n");
     assert.equal(renderedLines.length, 1_201);
@@ -166,13 +194,21 @@ describe("skill-template engine", () => {
     try {
       const sharedDir = join(root, "shared");
       mkdirSync(sharedDir, { recursive: true });
-      writeFileSync(join(sharedDir, "telemetry.md"), "TEL={{SKILL_NAME}}", "utf8");
+      writeFileSync(
+        join(sharedDir, "telemetry.md"),
+        "TEL={{SKILL_NAME}}",
+        "utf8",
+      );
 
       const template = "before\n{{#include shared/telemetry.md}}\nafter";
-      const output = renderSkillTemplate(template, { SKILL_NAME: "test-skill" }, {
-        partials: {},
-        includeBaseDir: root,
-      });
+      const output = renderSkillTemplate(
+        template,
+        { SKILL_NAME: "test-skill" },
+        {
+          partials: {},
+          includeBaseDir: root,
+        },
+      );
 
       assert.match(output, /before/);
       assert.match(output, /TEL=test-skill/);
@@ -185,11 +221,15 @@ describe("skill-template engine", () => {
   it("loadSkillManifest는 skill.json이 있으면 파싱한다", () => {
     const root = makeTempDir();
     try {
-      writeFileSync(join(root, "skill.json"), JSON.stringify({
-        name: "tfx-test",
-        description: "test skill",
-        triggers: ["test"],
-      }), "utf8");
+      writeFileSync(
+        join(root, "skill.json"),
+        JSON.stringify({
+          name: "tfx-test",
+          description: "test skill",
+          triggers: ["test"],
+        }),
+        "utf8",
+      );
 
       const manifest = loadSkillManifest(root);
       assert.equal(manifest.name, "tfx-test");
@@ -211,11 +251,15 @@ describe("skill-template engine", () => {
   it("parseFrontmatterWithManifest는 skill.json 우선으로 병합한다", () => {
     const root = makeTempDir();
     try {
-      writeFileSync(join(root, "skill.json"), JSON.stringify({
-        name: "manifest-name",
-        description: "manifest-desc",
-        internal: true,
-      }), "utf8");
+      writeFileSync(
+        join(root, "skill.json"),
+        JSON.stringify({
+          name: "manifest-name",
+          description: "manifest-desc",
+          internal: true,
+        }),
+        "utf8",
+      );
 
       const source = [
         "---",
@@ -258,7 +302,11 @@ describe("skill-template engine", () => {
       mkdirSync(templatesDir, { recursive: true });
       mkdirSync(skillDir, { recursive: true });
 
-      writeFileSync(join(templatesDir, "base.md"), "base={{SKILL_NAME}}", "utf8");
+      writeFileSync(
+        join(templatesDir, "base.md"),
+        "base={{SKILL_NAME}}",
+        "utf8",
+      );
       writeFileSync(
         join(skillDir, "SKILL.md.tmpl"),
         [

@@ -2,21 +2,22 @@
 // scripts/lib/mcp-filter.mjs
 // 역할/컨텍스트 기반 MCP 도구 노출 정책의 단일 소스.
 
-import { readFileSync } from 'node:fs';
-import process from 'node:process';
-import { fileURLToPath } from 'node:url';
-
+import { readFileSync } from "node:fs";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+import { CORE_SERVERS, readManifest } from "./mcp-manifest.mjs";
 import {
   DOMAIN_TAG_KEYWORDS,
   MCP_SERVER_TOOL_CATALOG,
+  normalizeServerMetadata,
   SEARCH_SERVER_ORDER,
   SERVER_EXPLICIT_KEYWORDS,
-  normalizeServerMetadata,
   uniqueStrings,
-} from './mcp-server-catalog.mjs';
-import { readManifest, CORE_SERVERS } from './mcp-manifest.mjs';
+} from "./mcp-server-catalog.mjs";
 
-export const KNOWN_MCP_SERVERS = Object.freeze(Object.keys(MCP_SERVER_TOOL_CATALOG));
+export const KNOWN_MCP_SERVERS = Object.freeze(
+  Object.keys(MCP_SERVER_TOOL_CATALOG),
+);
 
 const SEARCH_INTENT_PATTERNS = Object.freeze([
   /\b(search|web|browse|look ?up|find|latest|recent|news|current|today|release(?: note)?s?|changelog|announcement|pricing|status|verify|fact[- ]?check)\b/i,
@@ -25,102 +26,129 @@ const SEARCH_INTENT_PATTERNS = Object.freeze([
 
 const PROFILE_DEFINITIONS = Object.freeze({
   default: Object.freeze({
-    description: '보수적 기본 프로필. 문서 조회 + 최소 검색만 허용',
-    allowedServers: Object.freeze(['context7', 'brave-search']),
-    alwaysOnServers: Object.freeze(['context7']),
+    description: "보수적 기본 프로필. 문서 조회 + 최소 검색만 허용",
+    allowedServers: Object.freeze(["context7", "brave-search"]),
+    alwaysOnServers: Object.freeze(["context7"]),
     maxSearchServers: 1,
     allowedToolsByServer: Object.freeze({
-      context7: Object.freeze(['resolve-library-id', 'query-docs']),
-      'brave-search': Object.freeze(['brave_web_search', 'brave_news_search']),
+      context7: Object.freeze(["resolve-library-id", "query-docs"]),
+      "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
     }),
   }),
   executor: Object.freeze({
-    description: '구현 워커용. 문서/검색/브라우징 보조 MCP 허용',
-    allowedServers: Object.freeze(['context7', 'playwright', 'brave-search', 'tavily', 'exa']),
-    alwaysOnServers: Object.freeze(['context7']),
+    description: "구현 워커용. 문서/검색/브라우징 보조 MCP 허용",
+    allowedServers: Object.freeze([
+      "context7",
+      "playwright",
+      "brave-search",
+      "tavily",
+      "exa",
+    ]),
+    alwaysOnServers: Object.freeze(["context7"]),
     maxSearchServers: 2,
     allowedToolsByServer: Object.freeze({
-      context7: Object.freeze(['resolve-library-id', 'query-docs']),
-      'brave-search': Object.freeze(['brave_web_search', 'brave_news_search']),
-      exa: Object.freeze(['web_search_exa', 'get_code_context_exa']),
-      tavily: Object.freeze(['tavily_search', 'tavily_extract']),
+      context7: Object.freeze(["resolve-library-id", "query-docs"]),
+      "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
+      exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
+      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
       playwright: Object.freeze([
-        'browser_navigate',
-        'browser_navigate_back',
-        'browser_snapshot',
-        'browser_take_screenshot',
-        'browser_wait_for',
+        "browser_navigate",
+        "browser_navigate_back",
+        "browser_snapshot",
+        "browser_take_screenshot",
+        "browser_wait_for",
       ]),
     }),
   }),
   designer: Object.freeze({
-    description: '디자인/UI 워커용. 브라우저 관찰 + 문서 조회 중심 MCP 허용',
-    allowedServers: Object.freeze(['context7', 'playwright', 'tavily', 'exa', 'brave-search']),
-    alwaysOnServers: Object.freeze(['context7']),
+    description: "디자인/UI 워커용. 브라우저 관찰 + 문서 조회 중심 MCP 허용",
+    allowedServers: Object.freeze([
+      "context7",
+      "playwright",
+      "tavily",
+      "exa",
+      "brave-search",
+    ]),
+    alwaysOnServers: Object.freeze(["context7"]),
     maxSearchServers: 2,
     allowedToolsByServer: Object.freeze({
-      context7: Object.freeze(['resolve-library-id', 'query-docs']),
-      'brave-search': Object.freeze(['brave_web_search', 'brave_news_search']),
-      exa: Object.freeze(['web_search_exa', 'get_code_context_exa']),
-      tavily: Object.freeze(['tavily_search', 'tavily_extract']),
+      context7: Object.freeze(["resolve-library-id", "query-docs"]),
+      "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
+      exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
+      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
       playwright: Object.freeze([
-        'browser_navigate',
-        'browser_navigate_back',
-        'browser_snapshot',
-        'browser_take_screenshot',
-        'browser_wait_for',
+        "browser_navigate",
+        "browser_navigate_back",
+        "browser_snapshot",
+        "browser_take_screenshot",
+        "browser_wait_for",
       ]),
     }),
   }),
   analyze: Object.freeze({
-    description: '분석/설계 워커용. 추론 + 검색 MCP 허용',
-    allowedServers: Object.freeze(['context7', 'brave-search', 'tavily', 'exa', 'sequential-thinking']),
-    alwaysOnServers: Object.freeze(['context7', 'sequential-thinking']),
+    description: "분석/설계 워커용. 추론 + 검색 MCP 허용",
+    allowedServers: Object.freeze([
+      "context7",
+      "brave-search",
+      "tavily",
+      "exa",
+      "sequential-thinking",
+    ]),
+    alwaysOnServers: Object.freeze(["context7", "sequential-thinking"]),
     maxSearchServers: 2,
     allowedToolsByServer: Object.freeze({
-      context7: Object.freeze(['resolve-library-id', 'query-docs']),
-      'brave-search': Object.freeze(['brave_web_search', 'brave_news_search']),
-      exa: Object.freeze(['web_search_exa', 'get_code_context_exa']),
-      tavily: Object.freeze(['tavily_search', 'tavily_extract']),
-      'sequential-thinking': Object.freeze(['sequentialthinking']),
+      context7: Object.freeze(["resolve-library-id", "query-docs"]),
+      "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
+      exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
+      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
+      "sequential-thinking": Object.freeze(["sequentialthinking"]),
     }),
   }),
   explore: Object.freeze({
-    description: '탐색/리서치 워커용. 읽기/검색 중심 MCP만 허용',
-    allowedServers: Object.freeze(['context7', 'brave-search', 'tavily', 'exa']),
-    alwaysOnServers: Object.freeze(['context7']),
+    description: "탐색/리서치 워커용. 읽기/검색 중심 MCP만 허용",
+    allowedServers: Object.freeze([
+      "context7",
+      "brave-search",
+      "tavily",
+      "exa",
+    ]),
+    alwaysOnServers: Object.freeze(["context7"]),
     maxSearchServers: 2,
     allowedToolsByServer: Object.freeze({
-      context7: Object.freeze(['resolve-library-id', 'query-docs']),
-      'brave-search': Object.freeze(['brave_web_search', 'brave_news_search']),
-      exa: Object.freeze(['web_search_exa', 'get_code_context_exa']),
-      tavily: Object.freeze(['tavily_search', 'tavily_extract']),
+      context7: Object.freeze(["resolve-library-id", "query-docs"]),
+      "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
+      exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
+      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
     }),
   }),
   reviewer: Object.freeze({
-    description: '리뷰 워커용. 문서 조회 + 분석 전용 MCP만 허용',
-    allowedServers: Object.freeze(['context7', 'brave-search', 'sequential-thinking']),
-    alwaysOnServers: Object.freeze(['context7', 'sequential-thinking']),
+    description: "리뷰 워커용. 문서 조회 + 분석 전용 MCP만 허용",
+    allowedServers: Object.freeze([
+      "context7",
+      "brave-search",
+      "sequential-thinking",
+    ]),
+    alwaysOnServers: Object.freeze(["context7", "sequential-thinking"]),
     maxSearchServers: 1,
     allowedToolsByServer: Object.freeze({
-      context7: Object.freeze(['resolve-library-id', 'query-docs']),
-      'brave-search': Object.freeze(['brave_web_search']),
-      'sequential-thinking': Object.freeze(['sequentialthinking']),
+      context7: Object.freeze(["resolve-library-id", "query-docs"]),
+      "brave-search": Object.freeze(["brave_web_search"]),
+      "sequential-thinking": Object.freeze(["sequentialthinking"]),
     }),
   }),
   writer: Object.freeze({
-    description: '문서/작성 워커용. 공식 문서와 최소 검색 MCP만 허용',
-    allowedServers: Object.freeze(['context7', 'brave-search', 'exa']),
-    alwaysOnServers: Object.freeze(['context7']),
+    description: "문서/작성 워커용. 공식 문서와 최소 검색 MCP만 허용",
+    allowedServers: Object.freeze(["context7", "brave-search", "exa"]),
+    alwaysOnServers: Object.freeze(["context7"]),
     maxSearchServers: 2,
     allowedToolsByServer: Object.freeze({
-      context7: Object.freeze(['resolve-library-id', 'query-docs']),
-      'brave-search': Object.freeze(['brave_web_search', 'brave_news_search']),
-      exa: Object.freeze(['web_search_exa']),
+      context7: Object.freeze(["resolve-library-id", "query-docs"]),
+      "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
+      exa: Object.freeze(["web_search_exa"]),
     }),
   }),
   none: Object.freeze({
-    description: '모든 선택적 MCP 서버 비활성화',
+    description: "모든 선택적 MCP 서버 비활성화",
     allowedServers: Object.freeze([]),
     alwaysOnServers: Object.freeze([]),
     maxSearchServers: 0,
@@ -134,110 +162,111 @@ const PROFILE_DEFINITIONS = Object.freeze({
  */
 export const PHASE_OVERRIDES = Object.freeze({
   plan: Object.freeze({
-    description: '계획 단계: 읽기 전용 탐색만 허용',
-    allowedServers: Object.freeze(['context7']),
-    blockedServers: Object.freeze(['playwright', 'tavily', 'exa']),
+    description: "계획 단계: 읽기 전용 탐색만 허용",
+    allowedServers: Object.freeze(["context7"]),
+    blockedServers: Object.freeze(["playwright", "tavily", "exa"]),
   }),
   prd: Object.freeze({
-    description: 'PRD 단계: 읽기 전용 탐색 + 문서 조회',
-    allowedServers: Object.freeze(['context7', 'brave-search']),
-    blockedServers: Object.freeze(['playwright']),
+    description: "PRD 단계: 읽기 전용 탐색 + 문서 조회",
+    allowedServers: Object.freeze(["context7", "brave-search"]),
+    blockedServers: Object.freeze(["playwright"]),
   }),
   exec: Object.freeze({
-    description: '실행 단계: 프로필 기반 전체 허용 (제한 없음)',
+    description: "실행 단계: 프로필 기반 전체 허용 (제한 없음)",
   }),
   verify: Object.freeze({
-    description: '검증 단계: 읽기 전용 + 분석 도구',
-    allowedServers: Object.freeze(['context7', 'brave-search', 'exa']),
-    blockedServers: Object.freeze(['playwright']),
+    description: "검증 단계: 읽기 전용 + 분석 도구",
+    allowedServers: Object.freeze(["context7", "brave-search", "exa"]),
+    blockedServers: Object.freeze(["playwright"]),
   }),
 });
 
 export const LEGACY_PROFILE_ALIASES = Object.freeze({
-  implement: 'executor',
-  analyze: 'analyze',
-  review: 'reviewer',
-  docs: 'writer',
-  minimal: 'default',
+  implement: "executor",
+  analyze: "analyze",
+  review: "reviewer",
+  docs: "writer",
+  minimal: "default",
 });
 
 export const SUPPORTED_MCP_PROFILES = Object.freeze([
-  'auto',
+  "auto",
   ...Object.keys(PROFILE_DEFINITIONS),
   ...Object.keys(LEGACY_PROFILE_ALIASES),
 ]);
 
-function normalizeTaskText(taskText = '') {
-  if (typeof taskText !== 'string') return '';
-  return taskText.replace(/\s+/g, ' ').trim();
+function normalizeTaskText(taskText = "") {
+  if (typeof taskText !== "string") return "";
+  return taskText.replace(/\s+/g, " ").trim();
 }
 
 function normalizeProfileName(profile) {
-  const raw = typeof profile === 'string' && profile.trim() ? profile.trim() : 'auto';
-  if (raw === 'auto') return raw;
+  const raw =
+    typeof profile === "string" && profile.trim() ? profile.trim() : "auto";
+  if (raw === "auto") return raw;
   if (PROFILE_DEFINITIONS[raw]) return raw;
   if (LEGACY_PROFILE_ALIASES[raw]) return LEGACY_PROFILE_ALIASES[raw];
   // graceful fallback: --flag나 잘못된 프로필 → 'auto'로 폴백 (hard crash 방지)
-  if (raw.startsWith('-') || raw.startsWith('/')) return 'auto';
+  if (raw.startsWith("-") || raw.startsWith("/")) return "auto";
   console.error(`[mcp-filter] 경고: 알 수 없는 프로필 '${raw}', 'auto'로 폴백`);
-  return 'auto';
+  return "auto";
 }
 
-function resolveAutoProfile(agentType = '') {
+function resolveAutoProfile(agentType = "") {
   switch (agentType) {
-    case 'executor':
-    case 'build-fixer':
-    case 'debugger':
-    case 'deep-executor':
-      return 'executor';
-    case 'test-engineer':
-    case 'qa-tester':
-      return 'none';
-    case 'designer':
-      return 'designer';
-    case 'architect':
-    case 'planner':
-    case 'critic':
-    case 'analyst':
-      return 'analyze';
-    case 'scientist':
-    case 'scientist-deep':
-    case 'document-specialist':
-    case 'explore':
-      return 'explore';
-    case 'code-reviewer':
-    case 'security-reviewer':
-    case 'quality-reviewer':
-    case 'verifier':
-      return 'reviewer';
-    case 'writer':
-      return 'writer';
+    case "executor":
+    case "build-fixer":
+    case "debugger":
+    case "deep-executor":
+      return "executor";
+    case "test-engineer":
+    case "qa-tester":
+      return "none";
+    case "designer":
+      return "designer";
+    case "architect":
+    case "planner":
+    case "critic":
+    case "analyst":
+      return "analyze";
+    case "scientist":
+    case "scientist-deep":
+    case "document-specialist":
+    case "explore":
+      return "explore";
+    case "code-reviewer":
+    case "security-reviewer":
+    case "quality-reviewer":
+    case "verifier":
+      return "reviewer";
+    case "writer":
+      return "writer";
     default:
-      return 'default';
+      return "default";
   }
 }
 
 function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function countKeywordMatches(text, keywords = []) {
   let matches = 0;
   for (const keyword of keywords) {
-    const source = String(keyword || '').trim();
+    const source = String(keyword || "").trim();
     if (!source) continue;
     const pattern = /^[a-z0-9- ]+$/i.test(source)
-      ? new RegExp(`\\b${escapeRegExp(source)}\\b`, 'i')
-      : new RegExp(escapeRegExp(source), 'iu');
+      ? new RegExp(`\\b${escapeRegExp(source)}\\b`, "i")
+      : new RegExp(escapeRegExp(source), "iu");
     if (pattern.test(text)) matches += 1;
   }
   return matches;
 }
 
-function loadInventory(inventoryFile = '') {
-  if (typeof inventoryFile !== 'string' || !inventoryFile.trim()) return null;
+function loadInventory(inventoryFile = "") {
+  if (typeof inventoryFile !== "string" || !inventoryFile.trim()) return null;
   try {
-    return JSON.parse(readFileSync(inventoryFile, 'utf8'));
+    return JSON.parse(readFileSync(inventoryFile, "utf8"));
   } catch {
     return null;
   }
@@ -245,12 +274,15 @@ function loadInventory(inventoryFile = '') {
 
 function buildInventoryIndex(inventory = null) {
   const index = new Map();
-  if (!inventory || typeof inventory !== 'object') return index;
+  if (!inventory || typeof inventory !== "object") return index;
 
-  for (const client of ['codex', 'gemini']) {
-    const servers = Array.isArray(inventory[client]?.servers) ? inventory[client].servers : [];
+  for (const client of ["codex", "gemini"]) {
+    const servers = Array.isArray(inventory[client]?.servers)
+      ? inventory[client].servers
+      : [];
     for (const server of servers) {
-      if (!server || typeof server.name !== 'string' || !server.name.trim()) continue;
+      if (!server || typeof server.name !== "string" || !server.name.trim())
+        continue;
       const name = server.name.trim();
       const previous = index.get(name) || {};
       index.set(name, {
@@ -278,7 +310,7 @@ function getServerMetadata(server, inventoryIndex) {
   });
 }
 
-function scoreServer(server, taskText = '', inventoryIndex = new Map()) {
+function scoreServer(server, taskText = "", inventoryIndex = new Map()) {
   const normalized = normalizeTaskText(taskText);
   const metadata = getServerMetadata(server, inventoryIndex);
   if (!normalized) {
@@ -294,14 +326,20 @@ function scoreServer(server, taskText = '', inventoryIndex = new Map()) {
   let score = 0;
   const matchedTags = [];
   for (const tag of metadata.domain_tags) {
-    const matches = countKeywordMatches(normalized, DOMAIN_TAG_KEYWORDS[tag] || []);
+    const matches = countKeywordMatches(
+      normalized,
+      DOMAIN_TAG_KEYWORDS[tag] || [],
+    );
     if (matches > 0) {
       matchedTags.push(tag);
       score += matches * 2;
     }
   }
 
-  const explicitMatches = countKeywordMatches(normalized, SERVER_EXPLICIT_KEYWORDS[server] || []);
+  const explicitMatches = countKeywordMatches(
+    normalized,
+    SERVER_EXPLICIT_KEYWORDS[server] || [],
+  );
   if (explicitMatches > 0) {
     score += explicitMatches * 4;
   }
@@ -325,61 +363,86 @@ function compareRankedServers(left, right, workerIndex, availableOrder = []) {
     return Number(right.explicitMatch) - Number(left.explicitMatch);
   }
   if (right.score !== left.score) return right.score - left.score;
-  if (left.toolCount !== right.toolCount) return left.toolCount - right.toolCount;
+  if (left.toolCount !== right.toolCount)
+    return left.toolCount - right.toolCount;
 
-  if (Number.isInteger(workerIndex) && workerIndex > 0 && availableOrder.length > 1) {
+  if (
+    Number.isInteger(workerIndex) &&
+    workerIndex > 0 &&
+    availableOrder.length > 1
+  ) {
     const offset = (workerIndex - 1) % availableOrder.length;
-    const rotated = availableOrder.slice(offset).concat(availableOrder.slice(0, offset));
+    const rotated = availableOrder
+      .slice(offset)
+      .concat(availableOrder.slice(0, offset));
     return rotated.indexOf(left.server) - rotated.indexOf(right.server);
   }
 
-  return availableOrder.indexOf(left.server) - availableOrder.indexOf(right.server);
+  return (
+    availableOrder.indexOf(left.server) - availableOrder.indexOf(right.server)
+  );
 }
 
 function rankServers(servers = [], options = {}) {
-  const inventoryIndex = options.inventoryIndex instanceof Map
-    ? options.inventoryIndex
-    : buildInventoryIndex(options.inventory);
+  const inventoryIndex =
+    options.inventoryIndex instanceof Map
+      ? options.inventoryIndex
+      : buildInventoryIndex(options.inventory);
   return servers
     .map((server) => scoreServer(server, options.taskText, inventoryIndex))
-    .sort((left, right) => compareRankedServers(left, right, options.workerIndex, servers));
+    .sort((left, right) =>
+      compareRankedServers(left, right, options.workerIndex, servers),
+    );
 }
 
 function hasContextSignals(servers = [], options = {}) {
   return rankServers(servers, options).some((server) => server.score > 0);
 }
 
-function inferPreferredSearchTool(taskText = '', inventoryIndex = new Map(), allowedServers = SEARCH_SERVER_ORDER) {
+function inferPreferredSearchTool(
+  taskText = "",
+  inventoryIndex = new Map(),
+  allowedServers = SEARCH_SERVER_ORDER,
+) {
   const ranked = rankServers(
     SEARCH_SERVER_ORDER.filter((server) => allowedServers.includes(server)),
     { taskText, inventoryIndex },
   );
-  return ranked.find((server) => server.score > 0)?.server || '';
+  return ranked.find((server) => server.score > 0)?.server || "";
 }
 
 function selectContextualServers(baseServers, profile, options = {}) {
   const taskText = normalizeTaskText(options.taskText);
   if (!taskText || !baseServers.length) return [...baseServers];
 
-  const inventoryIndex = options.inventoryIndex instanceof Map
-    ? options.inventoryIndex
-    : buildInventoryIndex(options.inventory);
-  if (!hasContextSignals(baseServers, { ...options, inventoryIndex })) return [...baseServers];
+  const inventoryIndex =
+    options.inventoryIndex instanceof Map
+      ? options.inventoryIndex
+      : buildInventoryIndex(options.inventory);
+  if (!hasContextSignals(baseServers, { ...options, inventoryIndex }))
+    return [...baseServers];
 
   const selected = new Set(
-    (profile.alwaysOnServers || []).filter((server) => baseServers.includes(server)),
+    (profile.alwaysOnServers || []).filter((server) =>
+      baseServers.includes(server),
+    ),
   );
-  const wantsBrowserObservation = (
-    baseServers.includes('playwright')
-    && /(?:browser|screenshot|layout|responsive|visual|screen|page|ui|ux|regression|캡처|스크린샷|레이아웃|반응형|화면|브라우저)/iu.test(taskText)
-  );
+  const wantsBrowserObservation =
+    baseServers.includes("playwright") &&
+    /(?:browser|screenshot|layout|responsive|visual|screen|page|ui|ux|regression|캡처|스크린샷|레이아웃|반응형|화면|브라우저)/iu.test(
+      taskText,
+    );
   if (wantsBrowserObservation) {
-    selected.add('playwright');
+    selected.add("playwright");
   }
-  const requestedSearchTool = typeof options.searchTool === 'string' ? options.searchTool : '';
+  const requestedSearchTool =
+    typeof options.searchTool === "string" ? options.searchTool : "";
 
   const rankedServers = rankServers(
-    baseServers.filter((server) => !SEARCH_SERVER_ORDER.includes(server) && !selected.has(server)),
+    baseServers.filter(
+      (server) =>
+        !SEARCH_SERVER_ORDER.includes(server) && !selected.has(server),
+    ),
     { ...options, inventoryIndex },
   );
   for (const ranked of rankedServers) {
@@ -399,11 +462,13 @@ function selectContextualServers(baseServers, profile, options = {}) {
     taskText,
     { inventoryIndex },
   );
-  const rankedSearchSet = new Set(orderedSearchServers.filter((server) => {
-    if (requestedSearchTool === server) return true;
-    const ranked = scoreServer(server, taskText, inventoryIndex);
-    return ranked.score > 0 || ranked.explicitMatch;
-  }));
+  const rankedSearchSet = new Set(
+    orderedSearchServers.filter((server) => {
+      if (requestedSearchTool === server) return true;
+      const ranked = scoreServer(server, taskText, inventoryIndex);
+      return ranked.score > 0 || ranked.explicitMatch;
+    }),
+  );
   const maxSearchServers = Number.isInteger(profile.maxSearchServers)
     ? profile.maxSearchServers
     : orderedSearchServers.length;
@@ -419,12 +484,22 @@ function selectContextualServers(baseServers, profile, options = {}) {
     selected.add(server);
   }
 
-  const alwaysOnServers = baseServers.filter((server) => selected.has(server) && (profile.alwaysOnServers || []).includes(server));
+  const alwaysOnServers = baseServers.filter(
+    (server) =>
+      selected.has(server) && (profile.alwaysOnServers || []).includes(server),
+  );
   const contextualNonSearch = rankServers(
-    baseServers.filter((server) => selected.has(server) && !SEARCH_SERVER_ORDER.includes(server) && !alwaysOnServers.includes(server)),
+    baseServers.filter(
+      (server) =>
+        selected.has(server) &&
+        !SEARCH_SERVER_ORDER.includes(server) &&
+        !alwaysOnServers.includes(server),
+    ),
     { ...options, inventoryIndex },
   ).map((entry) => entry.server);
-  const contextualSearch = orderedSearchServers.filter((server) => selected.has(server));
+  const contextualSearch = orderedSearchServers.filter((server) =>
+    selected.has(server),
+  );
   const contextualServers = uniqueStrings([
     ...alwaysOnServers,
     ...contextualNonSearch,
@@ -433,34 +508,53 @@ function selectContextualServers(baseServers, profile, options = {}) {
   return contextualServers.length ? contextualServers : [...baseServers];
 }
 
-export function resolveMcpProfile(agentType = '', requestedProfile = 'auto') {
+export function resolveMcpProfile(agentType = "", requestedProfile = "auto") {
   const normalized = normalizeProfileName(requestedProfile);
-  return normalized === 'auto' ? resolveAutoProfile(agentType) : normalized;
+  return normalized === "auto" ? resolveAutoProfile(agentType) : normalized;
 }
 
-export function parseAvailableServers(rawAvailableServers = '') {
-  if (Array.isArray(rawAvailableServers)) return uniqueStrings(rawAvailableServers);
-  if (typeof rawAvailableServers !== 'string' || !rawAvailableServers.trim()) return [];
+export function parseAvailableServers(rawAvailableServers = "") {
+  if (Array.isArray(rawAvailableServers))
+    return uniqueStrings(rawAvailableServers);
+  if (typeof rawAvailableServers !== "string" || !rawAvailableServers.trim())
+    return [];
   return uniqueStrings(rawAvailableServers.split(/[,\s]+/));
 }
 
-export function resolveSearchToolOrder(searchTool = '', workerIndex, allowedServers = SEARCH_SERVER_ORDER, taskText = '', options = {}) {
-  const available = SEARCH_SERVER_ORDER.filter((tool) => allowedServers.includes(tool));
+export function resolveSearchToolOrder(
+  searchTool = "",
+  workerIndex,
+  allowedServers = SEARCH_SERVER_ORDER,
+  taskText = "",
+  options = {},
+) {
+  const available = SEARCH_SERVER_ORDER.filter((tool) =>
+    allowedServers.includes(tool),
+  );
   if (!available.length) return [];
 
-  const inventoryIndex = options.inventoryIndex instanceof Map
-    ? options.inventoryIndex
-    : buildInventoryIndex(options.inventory);
-  const preferredSearchTool = searchTool && available.includes(searchTool)
-    ? searchTool
-    : inferPreferredSearchTool(taskText, inventoryIndex, available);
+  const inventoryIndex =
+    options.inventoryIndex instanceof Map
+      ? options.inventoryIndex
+      : buildInventoryIndex(options.inventory);
+  const preferredSearchTool =
+    searchTool && available.includes(searchTool)
+      ? searchTool
+      : inferPreferredSearchTool(taskText, inventoryIndex, available);
 
-  const ranked = rankServers(available, { taskText, workerIndex, inventoryIndex }).map((entry) => entry.server);
+  const ranked = rankServers(available, {
+    taskText,
+    workerIndex,
+    inventoryIndex,
+  }).map((entry) => entry.server);
   if (!preferredSearchTool || !available.includes(preferredSearchTool)) {
     return ranked;
   }
 
-  return [preferredSearchTool, ...ranked.filter((tool) => tool !== preferredSearchTool)];
+  return [
+    preferredSearchTool,
+    ...ranked.filter((tool) => tool !== preferredSearchTool),
+  ];
 }
 
 function getProfileDefinition(resolvedProfile) {
@@ -476,27 +570,43 @@ function applyManifestFilter(servers) {
 }
 
 export function resolveAllowedServers(options = {}) {
-  const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
+  const resolvedProfile = resolveMcpProfile(
+    options.agentType,
+    options.requestedProfile,
+  );
   const profile = getProfileDefinition(resolvedProfile);
   const availableServers = parseAvailableServers(options.availableServers);
   const inventory = options.inventory || loadInventory(options.inventoryFile);
   const inventoryIndex = buildInventoryIndex(inventory);
   const baseServers = availableServers.length
-    ? profile.allowedServers.filter((server) => availableServers.includes(server))
+    ? profile.allowedServers.filter((server) =>
+        availableServers.includes(server),
+      )
     : [...profile.allowedServers];
   const manifestFiltered = availableServers.length
     ? baseServers
     : applyManifestFilter(baseServers);
-  return selectContextualServers(manifestFiltered, profile, { ...options, inventory, inventoryIndex });
+  return selectContextualServers(manifestFiltered, profile, {
+    ...options,
+    inventory,
+    inventoryIndex,
+  });
 }
 
 export function buildPromptHint(options = {}) {
-  const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
-  if (resolvedProfile === 'none') return '';
+  const resolvedProfile = resolveMcpProfile(
+    options.agentType,
+    options.requestedProfile,
+  );
+  if (resolvedProfile === "none") return "";
 
   const inventory = options.inventory || loadInventory(options.inventoryFile);
   const inventoryIndex = buildInventoryIndex(inventory);
-  const allowedServers = resolveAllowedServers({ ...options, inventory, inventoryIndex });
+  const allowedServers = resolveAllowedServers({
+    ...options,
+    inventory,
+    inventoryIndex,
+  });
   const orderedTools = resolveSearchToolOrder(
     options.searchTool,
     Number.isInteger(options.workerIndex) ? options.workerIndex : undefined,
@@ -505,28 +615,40 @@ export function buildPromptHint(options = {}) {
     { inventory, inventoryIndex },
   );
   const has = (server) => allowedServers.includes(server);
-  const orderedSearchHint = orderedTools.length > 1
-    ? `웹 검색 우선순위: ${orderedTools.join(', ')}.`
-    : orderedTools[0]
-      ? `웹 검색은 ${orderedTools[0]}를 사용하세요.`
-      : '';
-  const searchFallbackHint = orderedTools.length > 1
-    ? '검색 도구 실패 시 402, 429, 432, 433, quota 에러에서 재시도하지 말고 다음 도구로 전환하세요.'
-    : '';
+  const orderedSearchHint =
+    orderedTools.length > 1
+      ? `웹 검색 우선순위: ${orderedTools.join(", ")}.`
+      : orderedTools[0]
+        ? `웹 검색은 ${orderedTools[0]}를 사용하세요.`
+        : "";
+  const searchFallbackHint =
+    orderedTools.length > 1
+      ? "검색 도구 실패 시 402, 429, 432, 433, quota 에러에서 재시도하지 말고 다음 도구로 전환하세요."
+      : "";
   return [
-    has('context7') ? 'context7으로 관련 문서를 조회하세요.' : '',
-    has('playwright')
-      ? resolvedProfile === 'designer'
-        ? '화면/레이아웃 확인은 playwright를 우선 사용하세요.'
-        : '브라우저/UI 검증이 필요하면 playwright를 사용하세요.'
-      : '',
-    has('sequential-thinking') ? 'sequential-thinking으로 체계적으로 분석하세요.' : '',
-    resolvedProfile === 'reviewer' && orderedTools[0] ? `외부 근거가 더 필요하면 ${orderedTools[0]}를 사용하세요.` : '',
-    resolvedProfile !== 'reviewer' ? orderedSearchHint : '',
-    resolvedProfile !== 'reviewer' ? searchFallbackHint : '',
-    resolvedProfile === 'explore' ? '검색 깊이를 제한하고 읽기 전용 조사에 집중하세요.' : '',
-    resolvedProfile === 'writer' ? '검색 결과의 출처 URL을 함께 제시하세요.' : '',
-  ].filter(Boolean).join(' ');
+    has("context7") ? "context7으로 관련 문서를 조회하세요." : "",
+    has("playwright")
+      ? resolvedProfile === "designer"
+        ? "화면/레이아웃 확인은 playwright를 우선 사용하세요."
+        : "브라우저/UI 검증이 필요하면 playwright를 사용하세요."
+      : "",
+    has("sequential-thinking")
+      ? "sequential-thinking으로 체계적으로 분석하세요."
+      : "",
+    resolvedProfile === "reviewer" && orderedTools[0]
+      ? `외부 근거가 더 필요하면 ${orderedTools[0]}를 사용하세요.`
+      : "",
+    resolvedProfile !== "reviewer" ? orderedSearchHint : "",
+    resolvedProfile !== "reviewer" ? searchFallbackHint : "",
+    resolvedProfile === "explore"
+      ? "검색 깊이를 제한하고 읽기 전용 조사에 집중하세요."
+      : "",
+    resolvedProfile === "writer"
+      ? "검색 결과의 출처 URL을 함께 제시하세요."
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function getGeminiAllowedServers(options = {}) {
@@ -535,7 +657,10 @@ export function getGeminiAllowedServers(options = {}) {
 
 export function getCodexMcpConfig(options = {}) {
   const allowedServers = new Set(resolveAllowedServers(options));
-  const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
+  const resolvedProfile = resolveMcpProfile(
+    options.agentType,
+    options.requestedProfile,
+  );
   // Codex에 실제 등록된 서버만 대상으로 config override 생성.
   // 미등록 서버에 enabled=false를 보내면 "invalid transport" 에러 발생.
   const registeredServers = parseAvailableServers(options.availableServers);
@@ -546,14 +671,15 @@ export function getCodexMcpConfig(options = {}) {
   }
   const targetServers = registeredServers;
 
-  if (resolvedProfile === 'none') {
+  if (resolvedProfile === "none") {
     // Codex 0.115+: transport 없는 서버에 enabled=false를 보내면 "invalid transport" 에러.
     // 비허용 서버는 override에서 제외하고, 허용 서버만 명시적으로 설정한다.
     return { mcp_servers: {} };
   }
 
   const config = { mcp_servers: {} };
-  const allowedToolsByServer = getProfileDefinition(resolvedProfile).allowedToolsByServer;
+  const allowedToolsByServer =
+    getProfileDefinition(resolvedProfile).allowedToolsByServer;
   for (const server of targetServers) {
     // Codex 0.115+: transport 없는 서버에 enabled=false를 보내면 "invalid transport" 에러.
     // 비허용 서버는 override에서 제외한다 (Codex 기본 설정이 유지됨).
@@ -571,15 +697,16 @@ export function getCodexMcpConfig(options = {}) {
 
 function toTomlLiteral(value) {
   if (Array.isArray(value)) {
-    return `[${value.map((item) => toTomlLiteral(item)).join(',')}]`;
+    return `[${value.map((item) => toTomlLiteral(item)).join(",")}]`;
   }
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   throw new Error(`지원하지 않는 TOML 값 타입: ${typeof value}`);
 }
 
 function flattenConfig(prefix, value, output) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
     for (const [key, nestedValue] of Object.entries(value)) {
       flattenConfig(prefix ? `${prefix}.${key}` : key, nestedValue, output);
     }
@@ -591,7 +718,7 @@ function flattenConfig(prefix, value, output) {
 export function getCodexConfigOverrides(options = {}) {
   const config = getCodexMcpConfig(options);
   const overrides = [];
-  flattenConfig('', config, overrides);
+  flattenConfig("", config, overrides);
   return overrides;
 }
 
@@ -599,7 +726,10 @@ export function buildMcpPolicy(options = {}) {
   const inventory = options.inventory || loadInventory(options.inventoryFile);
   const inventoryIndex = buildInventoryIndex(inventory);
   const resolvedOptions = { ...options, inventory, inventoryIndex };
-  const resolvedProfile = resolveMcpProfile(options.agentType, options.requestedProfile);
+  const resolvedProfile = resolveMcpProfile(
+    options.agentType,
+    options.requestedProfile,
+  );
   let allowedServers = resolveAllowedServers(resolvedOptions);
   const hint = buildPromptHint(resolvedOptions);
 
@@ -612,9 +742,10 @@ export function buildMcpPolicy(options = {}) {
   }
 
   return {
-    requestedProfile: typeof options.requestedProfile === 'string' && options.requestedProfile
-      ? options.requestedProfile
-      : 'auto',
+    requestedProfile:
+      typeof options.requestedProfile === "string" && options.requestedProfile
+        ? options.requestedProfile
+        : "auto",
     resolvedProfile,
     resolvedPhase: phase || null,
     allowedServers,
@@ -630,7 +761,7 @@ function shellEscape(value) {
 }
 
 function shellArray(name, values) {
-  return `${name}=(${values.map((value) => shellEscape(value)).join(' ')})`;
+  return `${name}=(${values.map((value) => shellEscape(value)).join(" ")})`;
 }
 
 export function toShellExports(policy) {
@@ -638,30 +769,33 @@ export function toShellExports(policy) {
     `MCP_PROFILE_REQUESTED=${shellEscape(policy.requestedProfile)}`,
     `MCP_RESOLVED_PROFILE=${shellEscape(policy.resolvedProfile)}`,
     `MCP_HINT=${shellEscape(policy.hint)}`,
-    shellArray('GEMINI_ALLOWED_SERVERS', policy.geminiAllowedServers),
-    shellArray('CODEX_CONFIG_FLAGS', policy.codexConfigOverrides.flatMap((override) => ['-c', override])),
+    shellArray("GEMINI_ALLOWED_SERVERS", policy.geminiAllowedServers),
+    shellArray(
+      "CODEX_CONFIG_FLAGS",
+      policy.codexConfigOverrides.flatMap((override) => ["-c", override]),
+    ),
     `CODEX_CONFIG_JSON=${shellEscape(JSON.stringify(policy.codexConfig))}`,
   ];
   if (policy.resolvedPhase) {
     lines.push(`MCP_PIPELINE_PHASE=${shellEscape(policy.resolvedPhase)}`);
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function parseCliArgs(argv) {
   const args = {
-    command: 'json',
-    agentType: '',
-    requestedProfile: 'auto',
+    command: "json",
+    agentType: "",
+    requestedProfile: "auto",
     availableServers: [],
-    inventoryFile: '',
-    searchTool: '',
-    taskText: '',
+    inventoryFile: "",
+    searchTool: "",
+    taskText: "",
     workerIndex: undefined,
   };
 
-  const [first = 'json'] = argv;
-  if (!first.startsWith('--')) {
+  const [first = "json"] = argv;
+  if (!first.startsWith("--")) {
     args.command = first;
     argv = argv.slice(1);
   }
@@ -676,28 +810,28 @@ function parseCliArgs(argv) {
     };
 
     switch (token) {
-      case '--agent':
+      case "--agent":
         args.agentType = next();
         break;
-      case '--profile':
+      case "--profile":
         args.requestedProfile = next();
         break;
-      case '--available':
+      case "--available":
         args.availableServers = parseAvailableServers(next());
         break;
-      case '--inventory-file':
+      case "--inventory-file":
         args.inventoryFile = next();
         break;
-      case '--search-tool':
+      case "--search-tool":
         args.searchTool = next();
         break;
-      case '--task-text':
+      case "--task-text":
         args.taskText = next();
         break;
-      case '--worker-index':
+      case "--worker-index":
         args.workerIndex = Number.parseInt(next(), 10);
         break;
-      case '--phase':
+      case "--phase":
         args.phase = next();
         break;
       default:
@@ -713,7 +847,9 @@ export async function runCli(argv = process.argv.slice(2)) {
   try {
     args = parseCliArgs(argv);
   } catch (error) {
-    console.error(`[mcp-filter] ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[mcp-filter] ${error instanceof Error ? error.message : String(error)}`,
+    );
     process.exitCode = 64;
     return;
   }
@@ -722,11 +858,13 @@ export async function runCli(argv = process.argv.slice(2)) {
   try {
     policy = buildMcpPolicy(args);
   } catch (error) {
-    console.error(`[mcp-filter] ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[mcp-filter] ${error instanceof Error ? error.message : String(error)}`,
+    );
     process.exitCode = 65;
     return;
   }
-  if (args.command === 'shell') {
+  if (args.command === "shell") {
     process.stdout.write(`${toShellExports(policy)}\n`);
     return;
   }

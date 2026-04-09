@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -22,7 +29,11 @@ describe("gen-skill-docs", () => {
       mkdirSync(templatesDir, { recursive: true });
       mkdirSync(skillDir, { recursive: true });
 
-      writeFileSync(join(templatesDir, "base.md"), "BASE {{SKILL_NAME}}", "utf8");
+      writeFileSync(
+        join(templatesDir, "base.md"),
+        "BASE {{SKILL_NAME}}",
+        "utf8",
+      );
       writeFileSync(join(templatesDir, "deep.md"), "DEEP BLOCK", "utf8");
 
       writeFileSync(
@@ -40,7 +51,11 @@ describe("gen-skill-docs", () => {
         "utf8",
       );
 
-      const result = generateSkillDocs({ skillsDir, templatesDir, write: true });
+      const result = generateSkillDocs({
+        skillsDir,
+        templatesDir,
+        write: true,
+      });
       assert.equal(result.count, 1);
 
       const output = readFileSync(join(skillDir, "SKILL.md"), "utf8");
@@ -62,7 +77,11 @@ describe("gen-skill-docs", () => {
       mkdirSync(skillDir, { recursive: true });
 
       writeFileSync(join(templatesDir, "base.md"), "BASE", "utf8");
-      writeFileSync(join(templatesDir, "deep.md"), "DEEP {{SKILL_NAME}}", "utf8");
+      writeFileSync(
+        join(templatesDir, "deep.md"),
+        "DEEP {{SKILL_NAME}}",
+        "utf8",
+      );
       writeFileSync(
         join(skillDir, "SKILL.md.tmpl"),
         [
@@ -99,14 +118,22 @@ describe("gen-skill-docs", () => {
       mkdirSync(skillDir, { recursive: true });
 
       writeFileSync(join(sharedDir, "args.md"), "ARGS={{SKILL_NAME}}", "utf8");
-      writeFileSync(join(templatesDir, "base.md"), "{{#include shared/args.md}}", "utf8");
+      writeFileSync(
+        join(templatesDir, "base.md"),
+        "{{#include shared/args.md}}",
+        "utf8",
+      );
       writeFileSync(
         join(skillDir, "SKILL.md.tmpl"),
         "---\nname: tfx-inc\ndescription: inc test\n---\n{{> base}}\nend",
         "utf8",
       );
 
-      const result = generateSkillDocs({ skillsDir, templatesDir, write: true });
+      const result = generateSkillDocs({
+        skillsDir,
+        templatesDir,
+        write: true,
+      });
       assert.equal(result.count, 1);
 
       const output = readFileSync(join(skillDir, "SKILL.md"), "utf8");
@@ -145,7 +172,9 @@ describe("gen-skill-manifest", () => {
       const result = generateSkillManifests({ skillsDir, write: true });
       assert.equal(result.count, 1);
 
-      const manifest = JSON.parse(readFileSync(join(skillDir, "skill.json"), "utf8"));
+      const manifest = JSON.parse(
+        readFileSync(join(skillDir, "skill.json"), "utf8"),
+      );
       assert.equal(manifest.name, "tfx-manifest-test");
       assert.equal(manifest.description, "test manifest");
       assert.deepEqual(manifest.triggers, ["test", "manifest"]);

@@ -27,17 +27,17 @@
  *   error  — 작업 실패 (CLI 실행 실패, MCP 연결 끊김)
  *   fatal  — 프로세스 위협 (DB 연결 불가, 포트 충돌)
  */
-import pino from 'pino';
+import pino from "pino";
 
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = process.env.NODE_ENV !== "production";
 
 export const logger = pino({
-  level: process.env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
+  level: process.env.LOG_LEVEL || (isDev ? "debug" : "info"),
 
   // 모든 로그에 포함되는 기본 필드
   base: {
-    service: process.env.SERVICE_NAME || 'triflux',
-    env: process.env.NODE_ENV || 'development',
+    service: process.env.SERVICE_NAME || "triflux",
+    env: process.env.NODE_ENV || "development",
   },
 
   // 레벨을 대문자로 출력 (AI 파싱 용이)
@@ -51,18 +51,18 @@ export const logger = pino({
   // 민감정보 자동 필터링
   redact: {
     paths: [
-      'password',
-      'token',
-      'apiKey',
-      'secret',
-      'authorization',
-      '*.password',
-      '*.token',
-      '*.apiKey',
-      '*.secret',
-      'req.headers.authorization',
-      'req.headers.cookie',
-      'hubToken',
+      "password",
+      "token",
+      "apiKey",
+      "secret",
+      "authorization",
+      "*.password",
+      "*.token",
+      "*.apiKey",
+      "*.secret",
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "hubToken",
     ],
     remove: true,
   },
@@ -70,11 +70,11 @@ export const logger = pino({
   // 개발 환경: 컬러 콘솔 출력
   transport: isDev
     ? {
-        target: 'pino-pretty',
+        target: "pino-pretty",
         options: {
           colorize: true,
-          translateTime: 'yyyy-mm-dd HH:MM:ss',
-          ignore: 'pid,hostname',
+          translateTime: "yyyy-mm-dd HH:MM:ss",
+          ignore: "pid,hostname",
         },
       }
     : undefined,
@@ -92,14 +92,14 @@ export function createModuleLogger(module) {
 }
 
 // 정상 종료 시 버퍼 flush 보장
-process.on('uncaughtException', (err) => {
-  logger.fatal({ err }, 'process.uncaught_exception');
+process.on("uncaughtException", (err) => {
+  logger.fatal({ err }, "process.uncaught_exception");
   logger.flush();
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason) => {
-  logger.fatal({ reason: String(reason) }, 'process.unhandled_rejection');
+process.on("unhandledRejection", (reason) => {
+  logger.fatal({ reason: String(reason) }, "process.unhandled_rejection");
   logger.flush();
   process.exit(1);
 });

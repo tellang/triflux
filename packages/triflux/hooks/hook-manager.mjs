@@ -12,8 +12,8 @@
 //
 // Claude 대화에서 AskUserQuestion으로 UI를 제공하며 내부적으로 이 명령들을 호출합니다.
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
 
@@ -27,7 +27,11 @@ const REGISTRY_PATH = join(HOME, ".claude", "cache", "hook-registry.json");
 function ensureUserRegistry() {
   if (!existsSync(REGISTRY_PATH) && existsSync(BUNDLED_REGISTRY_PATH)) {
     mkdirSync(dirname(REGISTRY_PATH), { recursive: true });
-    writeFileSync(REGISTRY_PATH, readFileSync(BUNDLED_REGISTRY_PATH, "utf8"), "utf8");
+    writeFileSync(
+      REGISTRY_PATH,
+      readFileSync(BUNDLED_REGISTRY_PATH, "utf8"),
+      "utf8",
+    );
   }
 }
 
@@ -56,7 +60,11 @@ function scan() {
   ensureUserRegistry();
   const settings = loadJSON(SETTINGS_PATH);
   if (!settings?.hooks) {
-    return { status: "no_hooks", message: "settings.json에 훅이 없습니다.", events: {} };
+    return {
+      status: "no_hooks",
+      message: "settings.json에 훅이 없습니다.",
+      events: {},
+    };
   }
 
   const registry = loadJSON(REGISTRY_PATH);
@@ -81,7 +89,7 @@ function scan() {
         // 레지스트리에서 매칭 찾기
         if (registry?.events?.[event]) {
           const match = registry.events[event].find(
-            (r) => normalizeCmd(resolveVars(r.command)) === normalizeCmd(cmd)
+            (r) => normalizeCmd(resolveVars(r.command)) === normalizeCmd(cmd),
           );
           if (match) {
             hookInfo.registryMatch = { id: match.id, priority: match.priority };
@@ -100,7 +108,8 @@ function scan() {
 }
 
 function identifySource(cmd) {
-  if (/triflux/i.test(cmd) || /\$\{?CLAUDE_PLUGIN_ROOT\}?/i.test(cmd)) return "triflux";
+  if (/triflux/i.test(cmd) || /\$\{?CLAUDE_PLUGIN_ROOT\}?/i.test(cmd))
+    return "triflux";
   if (/oh-my-claudecode|omc/i.test(cmd)) return "omc";
   if (/session-vault/i.test(cmd)) return "session-vault";
   if (/compact-helper/i.test(cmd)) return "compact-helper";
@@ -110,7 +119,12 @@ function identifySource(cmd) {
 }
 
 function normalizeCmd(cmd) {
-  return cmd.replace(/["']/g, "").replace(/\\/g, "/").replace(/\s+/g, " ").trim().toLowerCase();
+  return cmd
+    .replace(/["']/g, "")
+    .replace(/\\/g, "/")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function resolveVars(cmd) {
@@ -140,11 +154,21 @@ function diff() {
     const currentHooks = settings.hooks[event] || [];
     const registryHooks = registry.events[event] || [];
 
-    const currentCount = currentHooks.reduce((n, m) => n + (m.hooks?.length || 0), 0);
-    const registryCount = registryHooks.filter((h) => h.enabled !== false).length;
+    const currentCount = currentHooks.reduce(
+      (n, m) => n + (m.hooks?.length || 0),
+      0,
+    );
+    const registryCount = registryHooks.filter(
+      (h) => h.enabled !== false,
+    ).length;
 
     if (currentCount === 1 && isOrchestrator(currentHooks)) {
-      changes.push({ event, action: "already_orchestrated", currentCount, registryCount });
+      changes.push({
+        event,
+        action: "already_orchestrated",
+        currentCount,
+        registryCount,
+      });
     } else if (currentCount > 0 || registryCount > 0) {
       changes.push({
         event,
@@ -162,7 +186,10 @@ function diff() {
 function isOrchestrator(matchers) {
   if (!matchers || matchers.length !== 1) return false;
   const hooks = matchers[0]?.hooks || [];
-  return hooks.length === 1 && (hooks[0]?.command || "").includes("hook-orchestrator");
+  return (
+    hooks.length === 1 &&
+    (hooks[0]?.command || "").includes("hook-orchestrator")
+  );
 }
 
 // ── apply: 오케스트레이터 적용 ──────────────────────────────
@@ -170,14 +197,22 @@ function isOrchestrator(matchers) {
 function apply() {
   ensureUserRegistry();
   const settings = loadJSON(SETTINGS_PATH);
-  if (!settings) return { status: "error", message: "settings.json을 찾을 수 없습니다." };
+  if (!settings)
+    return { status: "error", message: "settings.json을 찾을 수 없습니다." };
 
   const registry = loadJSON(REGISTRY_PATH);
-  if (!registry) return { status: "error", message: "hook-registry.json을 찾을 수 없습니다." };
+  if (!registry)
+    return {
+      status: "error",
+      message: "hook-registry.json을 찾을 수 없습니다.",
+    };
 
   // 백업
   if (settings.hooks && !existsSync(BACKUP_PATH)) {
-    saveJSON(BACKUP_PATH, { hooks: settings.hooks, backedUpAt: new Date().toISOString() });
+    saveJSON(BACKUP_PATH, {
+      hooks: settings.hooks,
+      backedUpAt: new Date().toISOString(),
+    });
   }
 
   // 오케스트레이터 명령 생성
@@ -201,7 +236,8 @@ function apply() {
     if (enabledEntries.length > 0) {
       // 레지스트리에 있으면 → 오케스트레이터로 교체
       // 가장 큰 timeout을 기준으로 오케스트레이터 timeout 설정
-      const maxTimeout = Math.max(...enabledEntries.map((h) => h.timeout || 10)) + 5;
+      const maxTimeout =
+        Math.max(...enabledEntries.map((h) => h.timeout || 10)) + 5;
 
       newHooks[event] = [
         {
@@ -238,7 +274,10 @@ function apply() {
 
 function restore() {
   if (!existsSync(BACKUP_PATH)) {
-    return { status: "no_backup", message: "백업 파일이 없습니다. apply 전에는 복원할 수 없습니다." };
+    return {
+      status: "no_backup",
+      message: "백업 파일이 없습니다. apply 전에는 복원할 수 없습니다.",
+    };
   }
 
   const backup = loadJSON(BACKUP_PATH);
@@ -247,7 +286,8 @@ function restore() {
   }
 
   const settings = loadJSON(SETTINGS_PATH);
-  if (!settings) return { status: "error", message: "settings.json을 찾을 수 없습니다." };
+  if (!settings)
+    return { status: "error", message: "settings.json을 찾을 수 없습니다." };
 
   settings.hooks = backup.hooks;
   saveJSON(SETTINGS_PATH, settings);
@@ -263,10 +303,12 @@ function restore() {
 function setPriority(hookId, priority) {
   ensureUserRegistry();
   const registry = loadJSON(REGISTRY_PATH);
-  if (!registry) return { status: "error", message: "레지스트리를 찾을 수 없습니다." };
+  if (!registry)
+    return { status: "error", message: "레지스트리를 찾을 수 없습니다." };
 
   const numPriority = parseInt(priority, 10);
-  if (isNaN(numPriority)) return { status: "error", message: "priority는 숫자여야 합니다." };
+  if (Number.isNaN(numPriority))
+    return { status: "error", message: "priority는 숫자여야 합니다." };
 
   let found = false;
   for (const hooks of Object.values(registry.events)) {
@@ -278,10 +320,17 @@ function setPriority(hookId, priority) {
     }
   }
 
-  if (!found) return { status: "not_found", message: `훅 '${hookId}'를 찾을 수 없습니다.` };
+  if (!found)
+    return {
+      status: "not_found",
+      message: `훅 '${hookId}'를 찾을 수 없습니다.`,
+    };
 
   saveJSON(REGISTRY_PATH, registry);
-  return { status: "ok", message: `${hookId}의 우선순위가 ${numPriority}로 변경되었습니다.` };
+  return {
+    status: "ok",
+    message: `${hookId}의 우선순위가 ${numPriority}로 변경되었습니다.`,
+  };
 }
 
 // ── toggle: 활성/비활성 토글 ────────────────────────────────
@@ -289,7 +338,8 @@ function setPriority(hookId, priority) {
 function toggle(hookId) {
   ensureUserRegistry();
   const registry = loadJSON(REGISTRY_PATH);
-  if (!registry) return { status: "error", message: "레지스트리를 찾을 수 없습니다." };
+  if (!registry)
+    return { status: "error", message: "레지스트리를 찾을 수 없습니다." };
 
   let found = false;
   let newState = false;
@@ -303,10 +353,17 @@ function toggle(hookId) {
     }
   }
 
-  if (!found) return { status: "not_found", message: `훅 '${hookId}'를 찾을 수 없습니다.` };
+  if (!found)
+    return {
+      status: "not_found",
+      message: `훅 '${hookId}'를 찾을 수 없습니다.`,
+    };
 
   saveJSON(REGISTRY_PATH, registry);
-  return { status: "ok", message: `${hookId}: ${newState ? "활성화" : "비활성화"}` };
+  return {
+    status: "ok",
+    message: `${hookId}: ${newState ? "활성화" : "비활성화"}`,
+  };
 }
 
 // ── status: 현재 적용 상태 ──────────────────────────────────
@@ -318,7 +375,7 @@ function status() {
   let orchestrated = 0;
   let individual = 0;
 
-  for (const [event, matchers] of Object.entries(settings.hooks)) {
+  for (const [_event, matchers] of Object.entries(settings.hooks)) {
     if (isOrchestrator(matchers)) {
       orchestrated++;
     } else {
@@ -333,9 +390,10 @@ function status() {
     orchestratedEvents: orchestrated,
     individualEvents: individual,
     hasBackup,
-    message: orchestrated > 0
-      ? `오케스트레이터 적용 중: ${orchestrated}개 이벤트 통합, ${individual}개 개별 유지`
-      : `오케스트레이터 미적용. ${individual}개 이벤트가 개별 훅으로 실행 중`,
+    message:
+      orchestrated > 0
+        ? `오케스트레이터 적용 중: ${orchestrated}개 이벤트 통합, ${individual}개 개별 유지`
+        : `오케스트레이터 미적용. ${individual}개 이벤트가 개별 훅으로 실행 중`,
   };
 }
 
@@ -354,10 +412,13 @@ const commands = {
 };
 
 if (!command || !commands[command]) {
-  console.log(JSON.stringify({
-    error: "사용법: node hook-manager.mjs <scan|diff|apply|restore|set-priority|toggle|status>",
-    commands: Object.keys(commands),
-  }));
+  console.log(
+    JSON.stringify({
+      error:
+        "사용법: node hook-manager.mjs <scan|diff|apply|restore|set-priority|toggle|status>",
+      commands: Object.keys(commands),
+    }),
+  );
   process.exit(1);
 }
 

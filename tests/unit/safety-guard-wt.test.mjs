@@ -1,6 +1,6 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { describe, it } from "node:test";
 
 function runGuard(command) {
   const input = JSON.stringify({ tool_name: "Bash", tool_input: { command } });
@@ -37,7 +37,9 @@ describe("safety-guard wt rules", () => {
   });
 
   it("Start-Process wt 차단", () => {
-    const result = runGuard("Start-Process wt -ArgumentList '-w', '0', 'new-tab'");
+    const result = runGuard(
+      "Start-Process wt -ArgumentList '-w', '0', 'new-tab'",
+    );
 
     assert.equal(result.status, 2);
     assert.match(result.stderr, /wt\.exe 직접 호출 차단됨/);
@@ -52,10 +54,16 @@ describe("safety-guard wt rules", () => {
   });
 
   it("git commit 메시지 안의 wt 문자열은 허용", () => {
-    assert.equal(runGuard('git commit -m "docs: mention wt.exe new-tab rule"').status, 0);
+    assert.equal(
+      runGuard('git commit -m "docs: mention wt.exe new-tab rule"').status,
+      0,
+    );
   });
 
   it("heredoc 본문 안의 wt 문자열은 허용", () => {
-    assert.equal(runGuard("cat <<'EOF'\nwt.exe new-tab is blocked\nEOF").status, 0);
+    assert.equal(
+      runGuard("cat <<'EOF'\nwt.exe new-tab is blocked\nEOF").status,
+      0,
+    );
   });
 });

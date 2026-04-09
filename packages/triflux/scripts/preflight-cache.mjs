@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // scripts/preflight-cache.mjs — 세션 시작 시 preflight 점검 캐싱
 
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkHub, detectCodexPlan, probeClis } from "./lib/env-probe.mjs";
 
@@ -66,4 +66,4 @@ if (process.argv[1]?.endsWith("preflight-cache.mjs")) {
   console.log(details.length ? `${summary} (${details.join(", ")})` : summary);
 }
 
-export { runPreflight, CACHE_FILE, CACHE_TTL_MS };
+export { CACHE_FILE, CACHE_TTL_MS, runPreflight };

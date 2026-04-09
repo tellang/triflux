@@ -1,11 +1,11 @@
 // tests/unit/high-fixes.test.mjs — HIGH 수정사항 regression guard
 // 소스 파일 읽기 기반 + 런타임 검증 혼합 패턴
 
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
@@ -118,7 +118,9 @@ describe("plugin.json 버전 동기화", () => {
 // 5. truncate ANSI 안전
 // ========================================================================
 describe("truncate: ANSI 색상 문자열 안전 처리", async () => {
-  const { truncate, color, FG, stripAnsi } = await import("../../hub/team/ansi.mjs");
+  const { truncate, color, FG, stripAnsi } = await import(
+    "../../hub/team/ansi.mjs"
+  );
 
   it("ANSI 색상 문자열을 truncate해도 깨진 escape가 없어야 함", () => {
     const colored = color("Hello World Test", FG.red);
@@ -162,7 +164,9 @@ describe("truncate: ANSI 색상 문자열 안전 처리", async () => {
 // 6. token-mode: expand 후 isCompactMode 리셋
 // ========================================================================
 describe("token-mode: compactify/expand 상태 전환", async () => {
-  const { compactify, expand, isCompactMode } = await import("../../hub/token-mode.mjs");
+  const { compactify, expand, isCompactMode } = await import(
+    "../../hub/token-mode.mjs"
+  );
 
   it("compactify 후 isCompactMode가 true여야 함", () => {
     compactify("test configuration string");
@@ -173,7 +177,11 @@ describe("token-mode: compactify/expand 상태 전환", async () => {
     compactify("test implementation string");
     assert.equal(isCompactMode(), true, "compactify 직후 true 확인");
     expand("test impl string");
-    assert.equal(isCompactMode(), false, "expand 후 compact 모드가 해제되어야 함");
+    assert.equal(
+      isCompactMode(),
+      false,
+      "expand 후 compact 모드가 해제되어야 함",
+    );
   });
 
   it("compactify -> expand 순환 후 isCompactMode가 false", () => {

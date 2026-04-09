@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import { __remoteSpawnTest } from "../remote-spawn.mjs";
 
@@ -25,7 +25,9 @@ describe("remote-spawn watcher", () => {
       getPaneStatus: () => statuses[Math.min(pollIndex++, statuses.length - 1)],
       killSession: (name) => killed.push(name),
       now: () => nowMs,
-      sleep: async (ms) => { nowMs += ms; },
+      sleep: async (ms) => {
+        nowMs += ms;
+      },
     });
 
     assert.equal(result.cleaned, true);
@@ -43,9 +45,13 @@ describe("remote-spawn watcher", () => {
       maxWaitMs: 250,
       sessionExists: () => true,
       getPaneStatus: () => ({ isDead: false, exitCode: null }),
-      killSession: () => { killCount += 1; },
+      killSession: () => {
+        killCount += 1;
+      },
       now: () => nowMs,
-      sleep: async (ms) => { nowMs += ms; },
+      sleep: async (ms) => {
+        nowMs += ms;
+      },
     });
 
     assert.equal(result.cleaned, false);

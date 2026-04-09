@@ -2,8 +2,20 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["bin/*.mjs", "scripts/*.mjs", "hub/**/*.mjs", "hud/**/*.mjs", "hooks/**/*.mjs"],
-      "project": ["bin/**/*.mjs", "scripts/**/*.mjs", "hub/**/*.mjs", "hooks/**/*.mjs", "hud/**/*.mjs"]
+      "entry": [
+        "bin/*.mjs",
+        "scripts/*.mjs",
+        "hub/**/*.mjs",
+        "hud/**/*.mjs",
+        "hooks/**/*.mjs"
+      ],
+      "project": [
+        "bin/**/*.mjs",
+        "scripts/**/*.mjs",
+        "hub/**/*.mjs",
+        "hooks/**/*.mjs",
+        "hud/**/*.mjs"
+      ]
     },
     "packages/core": {
       "entry": ["hub/**/*.mjs", "hud/**/*.mjs"],
@@ -15,7 +27,12 @@
     },
     "packages/triflux": {
       "entry": ["bin/*.mjs", "scripts/*.mjs", "hub/**/*.mjs", "hooks/**/*.mjs"],
-      "project": ["bin/**/*.mjs", "scripts/**/*.mjs", "hub/**/*.mjs", "hooks/**/*.mjs"]
+      "project": [
+        "bin/**/*.mjs",
+        "scripts/**/*.mjs",
+        "hub/**/*.mjs",
+        "hooks/**/*.mjs"
+      ]
     }
   },
   "ignore": ["research/**", "tests/**", "skills/**"]

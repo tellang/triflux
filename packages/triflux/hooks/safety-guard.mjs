@@ -8,23 +8,51 @@
 //   BLOCK (exit 2)  — 복구 불가능한 파괴적 명령
 //   WARN  (allow + context) — 주의가 필요한 명령
 
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // ── 차단 규칙 ──────────────────────────────────────────────
 const BLOCK_RULES = [
-  { pattern: /\brm\s+(-[^\s]*)?-rf?\s+[/~](?!tmp\b)(?!\S*node_modules)/i, reason: "루트/홈 디렉토리 rm -rf 차단" },
-  { pattern: /\brm\s+(-[^\s]*)?-rf?\s+\.\s*$/i, reason: "현재 디렉토리 rm -rf . 차단" },
-  { pattern: /\bgit\s+push\s+.*--force\s+.*\b(main|master)\b/i, reason: "main/master force push 차단" },
-  { pattern: /\bgit\s+push\s+--force\s*$/i, reason: "대상 미지정 force push 차단" },
-  { pattern: /\bgit\s+reset\s+--hard\s+origin\//i, reason: "remote reset --hard 차단 — 로컬 작업 소실 위험" },
+  {
+    pattern: /\brm\s+(-[^\s]*)?-rf?\s+[/~](?!tmp\b)(?!\S*node_modules)/i,
+    reason: "루트/홈 디렉토리 rm -rf 차단",
+  },
+  {
+    pattern: /\brm\s+(-[^\s]*)?-rf?\s+\.\s*$/i,
+    reason: "현재 디렉토리 rm -rf . 차단",
+  },
+  {
+    pattern: /\bgit\s+push\s+.*--force\s+.*\b(main|master)\b/i,
+    reason: "main/master force push 차단",
+  },
+  {
+    pattern: /\bgit\s+push\s+--force\s*$/i,
+    reason: "대상 미지정 force push 차단",
+  },
+  {
+    pattern: /\bgit\s+reset\s+--hard\s+origin\//i,
+    reason: "remote reset --hard 차단 — 로컬 작업 소실 위험",
+  },
   { pattern: /\bdrop\s+(table|database|schema)\b/i, reason: "SQL DROP 차단" },
   { pattern: /\btruncate\s+table\b/i, reason: "SQL TRUNCATE 차단" },
   { pattern: /\bformat\s+[a-z]:/i, reason: "디스크 포맷 차단" },
   { pattern: /\b(del|rmdir)\s+\/[sq]\b/i, reason: "Windows 재귀 삭제 차단" },
-  { pattern: /\bgit\s+clean\s+.*-fd/i, reason: "git clean -fd 차단 — 추적되지 않은 파일 소실 위험" },
-  { pattern: /\bpsmux\s+kill-session\b/i, reason: "raw psmux kill-session 차단 — WT ConPTY 프리징 위험. 안전 경로: node hub/team/psmux.mjs kill --session <name>", skipIfGit: true },
-  { pattern: /\bpsmux\s+kill-server\b/i, reason: "psmux kill-server 차단 — 모든 세션이 즉시 종료됩니다. node hub/team/psmux.mjs kill-swarm 사용", skipIfGit: true },
+  {
+    pattern: /\bgit\s+clean\s+.*-fd/i,
+    reason: "git clean -fd 차단 — 추적되지 않은 파일 소실 위험",
+  },
+  {
+    pattern: /\bpsmux\s+kill-session\b/i,
+    reason:
+      "raw psmux kill-session 차단 — WT ConPTY 프리징 위험. 안전 경로: node hub/team/psmux.mjs kill --session <name>",
+    skipIfGit: true,
+  },
+  {
+    pattern: /\bpsmux\s+kill-server\b/i,
+    reason:
+      "psmux kill-server 차단 — 모든 세션이 즉시 종료됩니다. node hub/team/psmux.mjs kill-swarm 사용",
+    skipIfGit: true,
+  },
 ];
 
 const WT_DIRECT_PATTERNS = [
@@ -42,12 +70,12 @@ const WT_DIRECT_BLOCK_MESSAGE =
 // ── SSH+PowerShell bash 문법 차단 ────────────────────────────
 // 원격 기본 셸이 PowerShell인 호스트에 bash redirect/glob을 보내면 오동작
 const BASH_SYNTAX_IN_SSH = [
-  /2>\/dev\/null/,          // 2>/dev/null → PowerShell에서 Out-File C:\dev\null
-  />\s*\/dev\/null/,        // >/dev/null
-  /&>\s*\/dev\/null/,       // &>/dev/null
-  /\$\(/,                   // $(cmd) → PowerShell에서 다른 의미
-  /\bsource\s+/,            // source → PowerShell에 없음
-  /\bexport\s+\w+=/,        // export VAR= → PowerShell에 없음
+  /2>\/dev\/null/, // 2>/dev/null → PowerShell에서 Out-File C:\dev\null
+  />\s*\/dev\/null/, // >/dev/null
+  /&>\s*\/dev\/null/, // &>/dev/null
+  /\$\(/, // $(cmd) → PowerShell에서 다른 의미
+  /\bsource\s+/, // source → PowerShell에 없음
+  /\bexport\s+\w+=/, // export VAR= → PowerShell에 없음
 ];
 
 const SSH_POWERSHELL_HINT =
@@ -56,28 +84,59 @@ const SSH_POWERSHELL_HINT =
 
 // ── 경고 규칙 ──────────────────────────────────────────────
 const WARN_RULES = [
-  { pattern: /\bgit\s+push\b(?!.*--force)/i, warn: "git push 감지. 원격 저장소에 반영됩니다." },
-  { pattern: /\bgit\s+rebase\b/i, warn: "git rebase 감지. 커밋 히스토리가 변경됩니다." },
+  {
+    pattern: /\bgit\s+push\b(?!.*--force)/i,
+    warn: "git push 감지. 원격 저장소에 반영됩니다.",
+  },
+  {
+    pattern: /\bgit\s+rebase\b/i,
+    warn: "git rebase 감지. 커밋 히스토리가 변경됩니다.",
+  },
   { pattern: /\bgit\s+branch\s+-[dD]\b/i, warn: "브랜치 삭제 감지." },
-  { pattern: /\bnpm\s+publish\b/i, warn: "npm publish 감지. 공개 레지스트리에 배포됩니다." },
-  { pattern: /\brm\s+(-[^\s]*)?-rf?\s/i, warn: "재귀 삭제 감지. 대상을 확인하세요." },
-  { pattern: /--no-verify\b/i, warn: "--no-verify 감지. 훅 건너뛰기는 권장하지 않습니다." },
+  {
+    pattern: /\bnpm\s+publish\b/i,
+    warn: "npm publish 감지. 공개 레지스트리에 배포됩니다.",
+  },
+  {
+    pattern: /\brm\s+(-[^\s]*)?-rf?\s/i,
+    warn: "재귀 삭제 감지. 대상을 확인하세요.",
+  },
+  {
+    pattern: /--no-verify\b/i,
+    warn: "--no-verify 감지. 훅 건너뛰기는 권장하지 않습니다.",
+  },
   { pattern: /\bchmod\s+777\b/i, warn: "chmod 777 감지. 보안 위험." },
-  { pattern: /\bcurl\s.*\|\s*(bash|sh)\b/i, warn: "curl | sh 감지. 원격 스크립트 실행 주의." },
+  {
+    pattern: /\bcurl\s.*\|\s*(bash|sh)\b/i,
+    warn: "curl | sh 감지. 원격 스크립트 실행 주의.",
+  },
 ];
 
 // ── reflexion 적응형 패널티 로드 ──────────────────────────────
 function loadReflexionPenalties() {
   try {
     const home = process.env.HOME || process.env.USERPROFILE || "";
-    const penaltyFile = join(home, ".triflux", "reflexion", "pending-penalties.jsonl");
+    const penaltyFile = join(
+      home,
+      ".triflux",
+      "reflexion",
+      "pending-penalties.jsonl",
+    );
     if (!existsSync(penaltyFile)) return [];
     return readFileSync(penaltyFile, "utf8")
       .split("\n")
       .filter(Boolean)
-      .map(line => { try { return JSON.parse(line); } catch { return null; } })
+      .map((line) => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
       .filter(Boolean);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 function readStdin() {
@@ -89,7 +148,11 @@ function readStdin() {
 }
 
 function shouldSkipSegment(segment) {
-  return !segment || segment.startsWith("#") || /^\s*(echo|printf|grep|git\s+commit)\b/i.test(segment);
+  return (
+    !segment ||
+    segment.startsWith("#") ||
+    /^\s*(echo|printf|grep|git\s+commit)\b/i.test(segment)
+  );
 }
 
 function hasSegmentInvocation(cmd, patterns) {
@@ -122,7 +185,7 @@ function blockCommand(message, command) {
   process.stderr.write(
     `${message}\n` +
       `명령어: ${command.slice(0, 120)}${command.length > 120 ? "..." : ""}\n` +
-      "이 명령은 실행할 수 없습니다. 안전한 대안을 사용하세요."
+      "이 명령은 실행할 수 없습니다. 안전한 대안을 사용하세요.",
   );
   process.exit(2);
 }
@@ -161,7 +224,15 @@ function main() {
   const penalties = loadReflexionPenalties();
   if (penalties.length > 0) {
     for (const penalty of penalties) {
-      if (penalty.error_pattern && new RegExp(penalty.error_pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").slice(0, 80), "i").test(command)) {
+      if (
+        penalty.error_pattern &&
+        new RegExp(
+          penalty.error_pattern
+            .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+            .slice(0, 80),
+          "i",
+        ).test(command)
+      ) {
         const output = {
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
@@ -186,7 +257,7 @@ function main() {
       const sshMatch = seg.trim().match(/^ssh\s+\S+\s+(.*)/s);
       if (!sshMatch) continue;
       const sshPayload = sshMatch[1];
-      const bashSyntax = BASH_SYNTAX_IN_SSH.find(p => p.test(sshPayload));
+      const bashSyntax = BASH_SYNTAX_IN_SSH.find((p) => p.test(sshPayload));
       if (bashSyntax) {
         blockCommand(
           `[safety-guard] SSH 명령에 bash 전용 문법 감지: ${bashSyntax}. ${SSH_POWERSHELL_HINT}`,

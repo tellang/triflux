@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 // remote-spawn.mjs — 로컬/원격 Claude 세션 실행 유틸리티
 //
 // Usage:
@@ -9,11 +10,24 @@
 //   node remote-spawn.mjs --attach <session>
 //   node remote-spawn.mjs --probe <ssh-host>
 
-import { randomUUID } from "crypto";
 import { execFileSync, execSync, spawn } from "child_process";
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
-import { homedir, platform as getPlatform, tmpdir } from "os";
-import { basename, join, posix as posixPath, resolve, win32 as win32Path } from "path";
+import { randomUUID } from "crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
+import { platform as getPlatform, homedir, tmpdir } from "os";
+import {
+  basename,
+  join,
+  posix as posixPath,
+  resolve,
+  win32 as win32Path,
+} from "path";
 import { fileURLToPath } from "url";
 import {
   attachPsmuxSession,
@@ -81,7 +95,9 @@ function sleepMs(ms) {
 }
 
 function sleepMsAsync(ms) {
-  return new Promise((resolveSleep) => setTimeout(resolveSleep, Math.max(0, ms)));
+  return new Promise((resolveSleep) =>
+    setTimeout(resolveSleep, Math.max(0, ms)),
+  );
 }
 
 function parsePositiveInt(value, fallback) {
@@ -113,15 +129,31 @@ export function buildRemoteClaudeCommand(env, permissionFlags = "") {
   return `${shellQuote(env.claudePath)}${permissionFlags ? ` ${permissionFlags}` : ""}; ${buildPosixExitTail()}`;
 }
 
-export function resolveCleanupWatcherTimingOptions(source = {}, env = process.env) {
+export function resolveCleanupWatcherTimingOptions(
+  source = {},
+  env = process.env,
+) {
   return Object.freeze({
-    graceMs: parsePositiveInt(source.graceMs ?? env.TFX_SPAWN_CLEANUP_GRACE_MS, DEFAULT_CLEANUP_WATCH_GRACE_MS),
-    maxMs: parsePositiveInt(source.maxMs ?? env.TFX_SPAWN_CLEANUP_MAX_MS, DEFAULT_CLEANUP_WATCH_MAX_MS),
-    pollMs: parsePositiveInt(source.pollMs ?? env.TFX_SPAWN_CLEANUP_POLL_MS, DEFAULT_CLEANUP_WATCH_POLL_MS),
+    graceMs: parsePositiveInt(
+      source.graceMs ?? env.TFX_SPAWN_CLEANUP_GRACE_MS,
+      DEFAULT_CLEANUP_WATCH_GRACE_MS,
+    ),
+    maxMs: parsePositiveInt(
+      source.maxMs ?? env.TFX_SPAWN_CLEANUP_MAX_MS,
+      DEFAULT_CLEANUP_WATCH_MAX_MS,
+    ),
+    pollMs: parsePositiveInt(
+      source.pollMs ?? env.TFX_SPAWN_CLEANUP_POLL_MS,
+      DEFAULT_CLEANUP_WATCH_POLL_MS,
+    ),
   });
 }
 
-export function buildSpawnCleanupWatcherArgs(sessionName, paneId, timingOptions = {}) {
+export function buildSpawnCleanupWatcherArgs(
+  sessionName,
+  paneId,
+  timingOptions = {},
+) {
   const timings = resolveCleanupWatcherTimingOptions(timingOptions);
   return [
     SELF_SCRIPT_PATH,
@@ -159,11 +191,15 @@ function buildSessionSlug(customName) {
     }).trim();
     if (branch) {
       // feature/swarm-hypervisor → swarm-hypervisor
-      const stripped = branch.includes("/") ? branch.split("/").slice(1).join("-") : branch;
+      const stripped = branch.includes("/")
+        ? branch.split("/").slice(1).join("-")
+        : branch;
       const slug = toSlug(stripped);
       if (slug) return slug;
     }
-  } catch { /* git not available */ }
+  } catch {
+    /* git not available */
+  }
   return randomUUID().slice(0, 8);
 }
 
@@ -176,7 +212,9 @@ function deduplicateSessionName(baseName) {
       const candidate = `${baseName}-${i}`;
       if (!existing.includes(candidate)) return candidate;
     }
-  } catch { /* psmux not available */ }
+  } catch {
+    /* psmux not available */
+  }
   return `${baseName}-${randomUUID().slice(0, 4)}`;
 }
 
@@ -323,7 +361,8 @@ function parseArgs(argv) {
     promptParts.push(arg);
   }
 
-  const mergedPrompt = prompt ?? (promptParts.length > 0 ? promptParts.join(" ") : null);
+  const mergedPrompt =
+    prompt ?? (promptParts.length > 0 ? promptParts.join(" ") : null);
   return {
     command,
     dir,
@@ -345,7 +384,11 @@ function parseArgs(argv) {
 function parseVersion(versionStr) {
   const match = /(\d+)\.(\d+)\.(\d+)/.exec(versionStr);
   if (!match) return null;
-  return [parseInt(match[1], 10), parseInt(match[2], 10), parseInt(match[3], 10)];
+  return [
+    parseInt(match[1], 10),
+    parseInt(match[2], 10),
+    parseInt(match[3], 10),
+  ];
 }
 
 function compareVersions(a, b) {
@@ -360,12 +403,16 @@ function probeVersion(binPath) {
     if (/\.(cmd|bat)$/iu.test(binPath)) {
       // .cmd/.bat → execSync로 shell 경유 (execFileSync EINVAL 회피)
       const out = execSync(`"${binPath}" --version`, {
-        encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+        encoding: "utf8",
+        timeout: 3000,
+        stdio: ["ignore", "pipe", "ignore"],
       });
       return parseVersion(out);
     }
     const out = execFileSync(binPath, ["--version"], {
-      encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
     });
     return parseVersion(out);
   } catch {
@@ -378,7 +425,15 @@ function detectClaudePath() {
 
   const candidates = [];
 
-  const wingetPath = join(homedir(), "AppData", "Local", "Microsoft", "WinGet", "Links", "claude.exe");
+  const wingetPath = join(
+    homedir(),
+    "AppData",
+    "Local",
+    "Microsoft",
+    "WinGet",
+    "Links",
+    "claude.exe",
+  );
   if (existsSync(wingetPath)) candidates.push(wingetPath);
 
   const npmPath = join(process.env.APPDATA || "", "npm", "claude.cmd");
@@ -386,7 +441,10 @@ function detectClaudePath() {
 
   try {
     const command = IS_WINDOWS_LOCAL ? "where" : "which";
-    const result = execFileSync(command, ["claude"], { encoding: "utf8", timeout: 5000 }).trim();
+    const result = execFileSync(command, ["claude"], {
+      encoding: "utf8",
+      timeout: 5000,
+    }).trim();
     if (result) {
       for (const line of result.split(/\r?\n/u)) {
         const p = line.trim();
@@ -415,7 +473,9 @@ function detectClaudePath() {
 }
 
 function getPermissionFlag() {
-  return process.env.TFX_CLAUDE_SAFE_MODE === "1" ? [] : ["--dangerously-skip-permissions"];
+  return process.env.TFX_CLAUDE_SAFE_MODE === "1"
+    ? []
+    : ["--dangerously-skip-permissions"];
 }
 
 function failFast(message) {
@@ -463,7 +523,10 @@ function buildPromptContext(args, options = {}) {
   let content = "";
 
   if (args.handoff) {
-    const handoffCandidate = validateTransferCandidate(args.handoff, "handoff file");
+    const handoffCandidate = validateTransferCandidate(
+      args.handoff,
+      "handoff file",
+    );
     content = readFileSync(handoffCandidate.localPath, "utf8").trim();
     candidates.push(handoffCandidate);
   }
@@ -558,7 +621,11 @@ function spawnLocalFallback(args, claudePath, prompt) {
   }
 
   try {
-    spawn("wt.exe", wtArgs, { detached: true, stdio: "ignore", windowsHide: false }).unref();
+    spawn("wt.exe", wtArgs, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    }).unref();
     console.log(`spawned local Claude in WT tab → ${dir}`);
   } catch (error) {
     console.error("wt.exe spawn failed:", error.message);
@@ -579,13 +646,21 @@ function spawnRemoteFallback(args, promptContext) {
 
   let remoteHome;
   try {
-    remoteHome = execFileSync("ssh", [host, "echo", "$env:USERPROFILE"], { encoding: "utf8", timeout: 5000 }).trim();
+    remoteHome = execFileSync("ssh", [host, "echo", "$env:USERPROFILE"], {
+      encoding: "utf8",
+      timeout: 5000,
+    }).trim();
   } catch {
     try {
-      remoteHome = execFileSync("ssh", [host, "echo", "$HOME"], { encoding: "utf8", timeout: 5000 }).trim();
+      remoteHome = execFileSync("ssh", [host, "echo", "$HOME"], {
+        encoding: "utf8",
+        timeout: 5000,
+      }).trim();
     } catch {
       // 원격 홈 감지 실패 시 transfer 기능을 사용할 수 없음
-      console.warn(`[tfx] 원격 홈 디렉토리 감지 실패 (${host}) — file transfer 비활성화`);
+      console.warn(
+        `[tfx] 원격 홈 디렉토리 감지 실패 (${host}) — file transfer 비활성화`,
+      );
       remoteHome = null;
     }
   }
@@ -594,24 +669,33 @@ function spawnRemoteFallback(args, promptContext) {
     try {
       const fallbackEnv = { home: remoteHome, os: "win32", shell: "pwsh" };
       const stageId = `spawn-${randomUUID().slice(0, 8)}`;
-      const { stagedFiles } = stageRemotePromptFiles(host, fallbackEnv, promptContext.transferCandidates, stageId);
+      const { stagedFiles } = stageRemotePromptFiles(
+        host,
+        fallbackEnv,
+        promptContext.transferCandidates,
+        stageId,
+      );
       prompt = rewritePromptPaths(prompt, stagedFiles);
     } catch (error) {
-      failFast(`failed to stage remote files: ${error?.message || String(error)}`);
+      failFast(
+        `failed to stage remote files: ${error?.message || String(error)}`,
+      );
     }
   } else if (promptContext.transferCandidates.length > 0) {
     console.warn("[tfx] 원격 홈 미감지 — --transfer 파일이 무시됩니다");
   }
 
-  const scriptLines = [
-    `cd '${dir.replace(/'/g, "''")}'`,
-  ];
+  const scriptLines = [`cd '${dir.replace(/'/g, "''")}'`];
 
   if (prompt) {
     const safePrompt = prompt.replace(/'/g, "''");
-    scriptLines.push(`& "$env:USERPROFILE\\.local\\bin\\claude.exe" ${permFlags.join(" ")} '${safePrompt}'`);
+    scriptLines.push(
+      `& "$env:USERPROFILE\\.local\\bin\\claude.exe" ${permFlags.join(" ")} '${safePrompt}'`,
+    );
   } else {
-    scriptLines.push(`& "$env:USERPROFILE\\.local\\bin\\claude.exe" ${permFlags.join(" ")}`);
+    scriptLines.push(
+      `& "$env:USERPROFILE\\.local\\bin\\claude.exe" ${permFlags.join(" ")}`,
+    );
   }
 
   const scriptContent = scriptLines.join("\n");
@@ -619,7 +703,10 @@ function spawnRemoteFallback(args, promptContext) {
   writeFileSync(localScript, scriptContent, "utf8");
 
   try {
-    execFileSync("scp", [localScript, `${host}:tfx-remote-spawn.ps1`], { timeout: 10000, stdio: "pipe" });
+    execFileSync("scp", [localScript, `${host}:tfx-remote-spawn.ps1`], {
+      timeout: 10000,
+      stdio: "pipe",
+    });
   } catch (error) {
     console.error("failed to copy script to remote:", error.message);
     process.exit(1);
@@ -641,14 +728,20 @@ function spawnRemoteFallback(args, promptContext) {
       remoteCmd,
     ];
     try {
-      spawn("wt.exe", wtArgs, { detached: true, stdio: "ignore", windowsHide: false }).unref();
+      spawn("wt.exe", wtArgs, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+      }).unref();
       console.log(`spawned remote Claude → ${host}:${dir}`);
     } catch (error) {
       console.error("wt.exe spawn failed:", error.message);
       process.exit(1);
     }
   } else {
-    const child = spawn("ssh", ["-t", "--", host, remoteCmd], { stdio: "inherit" });
+    const child = spawn("ssh", ["-t", "--", host, remoteCmd], {
+      stdio: "inherit",
+    });
     child.on("exit", (code) => process.exit(code || 0));
   }
 }
@@ -689,7 +782,8 @@ function normalizePwshProbeEnv(host, parsed) {
   }
 
   return Object.freeze({
-    claudePath: (!parsed.claude || parsed.claude === "notfound") ? null : parsed.claude,
+    claudePath:
+      !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
     home: parsed.home,
     os: "win32",
     shell: "pwsh",
@@ -697,13 +791,15 @@ function normalizePwshProbeEnv(host, parsed) {
 }
 
 function normalizePosixProbeEnv(host, parsed) {
-  const os = parsed.os === "darwin" ? "darwin" : parsed.os === "linux" ? "linux" : null;
+  const os =
+    parsed.os === "darwin" ? "darwin" : parsed.os === "linux" ? "linux" : null;
   if (!os || !parsed.home) {
     return null;
   }
 
   return Object.freeze({
-    claudePath: (!parsed.claude || parsed.claude === "notfound") ? null : parsed.claude,
+    claudePath:
+      !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
     home: parsed.home,
     os,
     shell: parsed.shell === "zsh" ? "zsh" : "bash",
@@ -730,10 +826,10 @@ function readRemoteEnvCache(host) {
 
 function isRemoteEnvCacheFresh(cacheEntry) {
   return Boolean(
-    cacheEntry
-    && typeof cacheEntry.cachedAt === "number"
-    && cacheEntry.env
-    && (Date.now() - cacheEntry.cachedAt) < REMOTE_ENV_TTL_MS,
+    cacheEntry &&
+      typeof cacheEntry.cachedAt === "number" &&
+      cacheEntry.env &&
+      Date.now() - cacheEntry.cachedAt < REMOTE_ENV_TTL_MS,
   );
 }
 
@@ -751,7 +847,7 @@ function probeRemoteEnvViaPwsh(host) {
     "Write-Output 'shell=pwsh'",
     'Write-Output "home=$env:USERPROFILE"',
     'if (Test-Path "$env:USERPROFILE\\.local\\bin\\claude.exe") { Write-Output "claude=$env:USERPROFILE\\.local\\bin\\claude.exe" } elseif (Get-Command claude -ErrorAction SilentlyContinue) { Write-Output "claude=$((Get-Command claude).Source)" } else { Write-Output \'claude=notfound\' }',
-    'Write-Output "os=$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) ? \'win32\' : \'other\')"',
+    "Write-Output \"os=$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) ? 'win32' : 'other')\"",
   ].join("; ");
 
   let output;
@@ -825,13 +921,15 @@ function resolveRemoteDir(dir, env) {
   if (env.os === "win32") {
     const winDir = requestedDir.replace(/\//g, "\\");
     if (winDir === "~") return env.home;
-    if (/^~[\\/]/u.test(winDir)) return win32Path.join(env.home, winDir.slice(2));
+    if (/^~[\\/]/u.test(winDir))
+      return win32Path.join(env.home, winDir.slice(2));
     if (isWindowsAbsolutePath(winDir)) return winDir;
     return win32Path.join(env.home, winDir);
   }
 
   if (requestedDir === "~") return env.home;
-  if (requestedDir.startsWith("~/")) return posixPath.join(env.home, requestedDir.slice(2));
+  if (requestedDir.startsWith("~/"))
+    return posixPath.join(env.home, requestedDir.slice(2));
   if (requestedDir.startsWith("/")) return requestedDir;
   return posixPath.join(env.home, requestedDir);
 }
@@ -845,20 +943,30 @@ function ensureRemoteStageDir(host, env, remoteStageDir) {
   if (env.os === "win32") {
     const safePath = escapePwshSingleQuoted(remoteStageDir);
     const command = `New-Item -ItemType Directory -Path '${safePath}' -Force | Out-Null`;
-    execFileSync("ssh", [host, "pwsh", "-NoProfile", "-Command", command], { timeout: 10000, stdio: "pipe" });
+    execFileSync("ssh", [host, "pwsh", "-NoProfile", "-Command", command], {
+      timeout: 10000,
+      stdio: "pipe",
+    });
     return;
   }
 
-  execFileSync("ssh", [host, "sh", "-lc", `mkdir -p ${shellQuote(remoteStageDir)}`], {
-    timeout: 10000,
-    stdio: "pipe",
-  });
+  execFileSync(
+    "ssh",
+    [host, "sh", "-lc", `mkdir -p ${shellQuote(remoteStageDir)}`],
+    {
+      timeout: 10000,
+      stdio: "pipe",
+    },
+  );
 }
 
 function uploadFileToRemote(host, localPath, remotePath) {
   // scp는 remote path를 셸 확장 없이 직접 전달 — shellQuote 불필요
   // Windows 원격에서 쿼트가 리터럴 문자로 해석되어 경로 오류 발생
-  execFileSync("scp", [localPath, `${host}:${remotePath}`], { timeout: 15000, stdio: "pipe" });
+  execFileSync("scp", [localPath, `${host}:${remotePath}`], {
+    timeout: 15000,
+    stdio: "pipe",
+  });
 }
 
 function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
@@ -896,14 +1004,17 @@ function listSessionNamesFromRawOutput(output) {
 }
 
 function listSpawnSessions() {
-  const helperSessions = listPsmuxSessions().filter((name) => name.startsWith("tfx-spawn-"));
+  const helperSessions = listPsmuxSessions().filter((name) =>
+    name.startsWith("tfx-spawn-"),
+  );
   if (helperSessions.length > 0) {
     return helperSessions;
   }
 
   try {
-    return listSessionNamesFromRawOutput(psmuxExec(["list-sessions"]))
-      .filter((name) => name.startsWith("tfx-spawn-"));
+    return listSessionNamesFromRawOutput(psmuxExec(["list-sessions"])).filter(
+      (name) => name.startsWith("tfx-spawn-"),
+    );
   } catch {
     return [];
   }
@@ -912,9 +1023,23 @@ function listSpawnSessions() {
 function openAttachTab(sessionName, title = null) {
   if (IS_WINDOWS_LOCAL) {
     const wtArgs = title
-      ? ["new-tab", "--title", title, "--suppressApplicationTitle", "--", "psmux", "attach", "-t", sessionName]
+      ? [
+          "new-tab",
+          "--title",
+          title,
+          "--suppressApplicationTitle",
+          "--",
+          "psmux",
+          "attach",
+          "-t",
+          sessionName,
+        ]
       : ["new-tab", "--", "psmux", "attach", "-t", sessionName];
-    spawn("wt.exe", wtArgs, { detached: true, stdio: "ignore", windowsHide: false }).unref();
+    spawn("wt.exe", wtArgs, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    }).unref();
     return;
   }
 
@@ -951,14 +1076,25 @@ async function waitForRemotePrompt(sessionName, paneId) {
     }
   }
 
-  throw new Error(`ssh prompt wait timed out for ${sessionName}: ${capturePsmuxPane(paneId, 20)}`);
+  throw new Error(
+    `ssh prompt wait timed out for ${sessionName}: ${capturePsmuxPane(paneId, 20)}`,
+  );
 }
 
 /** @returns {boolean|null} true=dead, false=alive, null=probe 실패 */
 function isPrimaryPaneDead(paneId) {
   try {
-    const output = psmuxExec(["list-panes", "-t", paneId, "-F", "#{pane_dead}"]);
-    const lines = output.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+    const output = psmuxExec([
+      "list-panes",
+      "-t",
+      paneId,
+      "-F",
+      "#{pane_dead}",
+    ]);
+    const lines = output
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean);
     if (lines.some((line) => line === "1")) return true;
     return false;
   } catch {
@@ -968,20 +1104,36 @@ function isPrimaryPaneDead(paneId) {
 
 async function watchSpawnSessionExit(sessionName, options = {}) {
   const paneId = options.paneId || `${sessionName}:0.0`;
-  const pollMs = parsePositiveInt(options.pollMs, DEFAULT_CLEANUP_WATCH_POLL_MS);
-  const graceMs = parsePositiveInt(options.graceMs, DEFAULT_CLEANUP_WATCH_GRACE_MS);
-  const maxWaitMs = parsePositiveInt(options.maxWaitMs, DEFAULT_CLEANUP_WATCH_MAX_MS);
-  const sessionExists = typeof options.sessionExists === "function"
-    ? options.sessionExists
-    : psmuxSessionExists;
-  const getPaneStatus = typeof options.getPaneStatus === "function"
-    ? options.getPaneStatus
-    : (targetPaneId) => ({ isDead: isPrimaryPaneDead(targetPaneId), exitCode: null });
-  const killSession = typeof options.killSession === "function"
-    ? options.killSession
-    : killPsmuxSession;
+  const pollMs = parsePositiveInt(
+    options.pollMs,
+    DEFAULT_CLEANUP_WATCH_POLL_MS,
+  );
+  const graceMs = parsePositiveInt(
+    options.graceMs,
+    DEFAULT_CLEANUP_WATCH_GRACE_MS,
+  );
+  const maxWaitMs = parsePositiveInt(
+    options.maxWaitMs,
+    DEFAULT_CLEANUP_WATCH_MAX_MS,
+  );
+  const sessionExists =
+    typeof options.sessionExists === "function"
+      ? options.sessionExists
+      : psmuxSessionExists;
+  const getPaneStatus =
+    typeof options.getPaneStatus === "function"
+      ? options.getPaneStatus
+      : (targetPaneId) => ({
+          isDead: isPrimaryPaneDead(targetPaneId),
+          exitCode: null,
+        });
+  const killSession =
+    typeof options.killSession === "function"
+      ? options.killSession
+      : killPsmuxSession;
   const now = typeof options.now === "function" ? options.now : Date.now;
-  const sleep = typeof options.sleep === "function" ? options.sleep : sleepMsAsync;
+  const sleep =
+    typeof options.sleep === "function" ? options.sleep : sleepMsAsync;
   const startedAt = now();
   let consecutiveErrors = 0;
 
@@ -1045,7 +1197,8 @@ function startSpawnExitWatcher(sessionName, options = {}) {
     pollMs: options.pollMs,
   });
   args[0] = options.scriptPath || args[0];
-  const spawnFn = typeof options.spawnFn === "function" ? options.spawnFn : spawn;
+  const spawnFn =
+    typeof options.spawnFn === "function" ? options.spawnFn : spawn;
   const child = spawnFn(options.execPath || process.execPath, args, {
     detached: true,
     stdio: "ignore",
@@ -1057,9 +1210,17 @@ function startSpawnExitWatcher(sessionName, options = {}) {
   return true;
 }
 
-function startSpawnSessionCleanupWatcher(sessionName, paneId, timingOptions = {}) {
+function startSpawnSessionCleanupWatcher(
+  sessionName,
+  paneId,
+  timingOptions = {},
+) {
   try {
-    startSpawnExitWatcher(sessionName, { ...timingOptions, force: true, paneId });
+    startSpawnExitWatcher(sessionName, {
+      ...timingOptions,
+      force: true,
+      paneId,
+    });
   } catch {
     // watcher 시작 실패는 spawn 자체 실패로 보지 않는다.
   }
@@ -1096,7 +1257,9 @@ function spawnLocal(args, claudePath, prompt) {
       // 1단계: 프롬프트를 Get-Content -Raw → claude -p (one-shot), 세션 ID 추출
       // 2단계: --resume으로 인터랙티브 세션 이어붙이기
       const tmpFileNorm = normalizeCommandPath(tmpFile);
-      const flags = getPermissionFlag().map((f) => `'${escapePwshSingleQuoted(f)}'`).join(", ");
+      const flags = getPermissionFlag()
+        .map((f) => `'${escapePwshSingleQuoted(f)}'`)
+        .join(", ");
       const scriptContent = [
         `$ErrorActionPreference = 'SilentlyContinue'`,
         `$t = '${escapePwshSingleQuoted(tmpFileNorm)}'`,
@@ -1109,9 +1272,15 @@ function spawnLocal(args, claudePath, prompt) {
         `$trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }`,
         `exit $trifluxExit`,
       ].join("\n");
-      const scriptFile = join(tmpdir(), `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`);
+      const scriptFile = join(
+        tmpdir(),
+        `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`,
+      );
       writeFileSync(scriptFile, scriptContent, { encoding: "utf8" });
-      sendKeysToPane(paneId, `pwsh -NoProfile -File '${escapePwshSingleQuoted(normalizeCommandPath(scriptFile))}'; ${buildPwshExitTail()}`);
+      sendKeysToPane(
+        paneId,
+        `pwsh -NoProfile -File '${escapePwshSingleQuoted(normalizeCommandPath(scriptFile))}'; ${buildPwshExitTail()}`,
+      );
     } else {
       const command = buildLocalClaudeCommand(claudePathNorm, permissionFlags);
       sendKeysToPane(paneId, command);
@@ -1121,7 +1290,9 @@ function spawnLocal(args, claudePath, prompt) {
     openAttachTab(sessionName, `local:${slug}`);
     console.log(sessionName);
   } catch (err) {
-    try { killPsmuxSession(sessionName); } catch {}
+    try {
+      killPsmuxSession(sessionName);
+    } catch {}
     throw err;
   }
 }
@@ -1140,7 +1311,9 @@ async function spawnRemote(args, promptContext) {
 
   const env = probeRemoteEnv(host);
   if (!env.claudePath) {
-    console.error(`claude not found on ${host}. Install Claude Code on the remote host first.`);
+    console.error(
+      `claude not found on ${host}. Install Claude Code on the remote host first.`,
+    );
     process.exit(1);
   }
   const resolvedDir = resolveRemoteDir(args.dir, env);
@@ -1151,10 +1324,17 @@ async function spawnRemote(args, promptContext) {
   let prompt = promptContext.prompt;
 
   try {
-    const { stagedFiles } = stageRemotePromptFiles(host, env, promptContext.transferCandidates, sessionName);
+    const { stagedFiles } = stageRemotePromptFiles(
+      host,
+      env,
+      promptContext.transferCandidates,
+      sessionName,
+    );
     prompt = rewritePromptPaths(prompt, stagedFiles);
   } catch (error) {
-    failFast(`failed to stage remote files: ${error?.message || String(error)}`);
+    failFast(
+      `failed to stage remote files: ${error?.message || String(error)}`,
+    );
   }
 
   createPsmuxSession(sessionName, { layout: "1xN", paneCount: 1 });
@@ -1174,11 +1354,18 @@ async function spawnRemote(args, promptContext) {
       const stageDir = resolveRemoteStageDir(env, sessionName);
       ensureRemoteStageDir(host, env, stageDir);
 
-      const localPromptFile = join(tmpdir(), `tfx-prompt-${randomUUID().slice(0, 8)}.md`);
+      const localPromptFile = join(
+        tmpdir(),
+        `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
+      );
       writeFileSync(localPromptFile, prompt, { encoding: "utf8" });
       const remotePromptFile = `${stageDir}/prompt.md`;
       uploadFileToRemote(host, localPromptFile, remotePromptFile);
-      try { unlinkSync(localPromptFile); } catch { /* cleanup best-effort */ }
+      try {
+        unlinkSync(localPromptFile);
+      } catch {
+        /* cleanup best-effort */
+      }
 
       if (env.shell === "pwsh") {
         const remotePromptWin = remotePromptFile.replace(/\//g, "\\");
@@ -1193,16 +1380,29 @@ async function spawnRemote(args, promptContext) {
           `$trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }`,
           `exit $trifluxExit`,
         ].join("\n");
-        const localScript = join(tmpdir(), `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`);
+        const localScript = join(
+          tmpdir(),
+          `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`,
+        );
         writeFileSync(localScript, scriptContent, { encoding: "utf8" });
         const remoteScript = `${stageDir}/launch.ps1`;
         uploadFileToRemote(host, localScript, remoteScript);
-        try { unlinkSync(localScript); } catch { /* cleanup best-effort */ }
+        try {
+          unlinkSync(localScript);
+        } catch {
+          /* cleanup best-effort */
+        }
 
         const remoteScriptWin = remoteScript.replace(/\//g, "\\");
-        sendKeysToPane(paneId, `pwsh -NoProfile -File '${escapePwshSingleQuoted(remoteScriptWin)}'`);
+        sendKeysToPane(
+          paneId,
+          `pwsh -NoProfile -File '${escapePwshSingleQuoted(remoteScriptWin)}'`,
+        );
       } else {
-        sendKeysToPane(paneId, `${shellQuote(env.claudePath)} ${permissionFlags} < ${shellQuote(remotePromptFile)} && rm -f ${shellQuote(remotePromptFile)}; ${buildPosixExitTail()}`);
+        sendKeysToPane(
+          paneId,
+          `${shellQuote(env.claudePath)} ${permissionFlags} < ${shellQuote(remotePromptFile)} && rm -f ${shellQuote(remotePromptFile)}; ${buildPosixExitTail()}`,
+        );
       }
     } else {
       const claudeCommand = buildRemoteClaudeCommand(env, permissionFlags);
@@ -1213,7 +1413,9 @@ async function spawnRemote(args, promptContext) {
     openAttachTab(sessionName, `${host}:${slug}`);
     console.log(sessionName);
   } catch (err) {
-    try { killPsmuxSession(sessionName); } catch {}
+    try {
+      killPsmuxSession(sessionName);
+    } catch {}
     throw err;
   }
 }
@@ -1253,13 +1455,19 @@ async function waitForClaudeReady(sessionName, timeoutSec = 60) {
 
   while (Date.now() <= deadline) {
     const snapshot = capturePsmuxPane(paneId, 5);
-    const lastLine = snapshot.split(/\r?\n/).filter((l) => l.trim()).at(-1) || "";
+    const lastLine =
+      snapshot
+        .split(/\r?\n/)
+        .filter((l) => l.trim())
+        .at(-1) || "";
     if (readyPattern.test(lastLine)) {
       return true;
     }
     sleepMs(1000);
   }
-  throw new Error(`claude ready wait timed out after ${timeoutSec}s for ${sessionName}`);
+  throw new Error(
+    `claude ready wait timed out after ${timeoutSec}s for ${sessionName}`,
+  );
 }
 
 async function main() {
@@ -1299,7 +1507,9 @@ async function main() {
       console.error("--probe requires a host");
       process.exit(1);
     }
-    console.log(JSON.stringify(probeRemoteEnv(args.probeHost, { force: true }), null, 2));
+    console.log(
+      JSON.stringify(probeRemoteEnv(args.probeHost, { force: true }), null, 2),
+    );
     return;
   }
 
@@ -1328,7 +1538,9 @@ async function main() {
   const prompt = promptContext.prompt;
 
   if (args.local && args.transferFiles.length > 0) {
-    console.warn("[tfx] --transfer는 원격 모드에서만 사용 가능합니다 (--local에서는 무시됨)");
+    console.warn(
+      "[tfx] --transfer는 원격 모드에서만 사용 가능합니다 (--local에서는 무시됨)",
+    );
   }
 
   if (args.command === "send") {
@@ -1357,7 +1569,9 @@ async function main() {
   await spawnRemote(args, promptContext);
 }
 
-const selfRun = process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+const selfRun =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1]);
 if (selfRun) {
   main().catch((error) => {
     console.error(error?.message || String(error));

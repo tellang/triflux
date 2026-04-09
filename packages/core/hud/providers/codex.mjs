@@ -1,16 +1,21 @@
 // ============================================================================
 // Codex rate limits 추출 / 캐싱
 // ============================================================================
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+
+import { spawn } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
 import {
-  CODEX_AUTH_PATH, CODEX_QUOTA_CACHE_PATH, CODEX_QUOTA_STALE_MS,
-  CODEX_MIN_BUCKETS, CODEX_REFRESH_FLAG,
-  CODEX_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS,
+  CODEX_AUTH_PATH,
+  CODEX_MIN_BUCKETS,
+  CODEX_QUOTA_CACHE_PATH,
+  CODEX_QUOTA_STALE_MS,
+  CODEX_REFRESH_FLAG,
+  CODEX_REFRESH_LOCK_PATH,
+  SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
-import { readJson, writeJsonSafe, decodeJwtEmail } from "../utils.mjs";
+import { decodeJwtEmail, readJson, writeJsonSafe } from "../utils.mjs";
 
 // window_minutes 기반 5h/1w 슬롯 분류
 export function classifyBucket(bucket) {
@@ -37,7 +42,9 @@ export function getCodexEmail() {
   try {
     const auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, "utf-8"));
     return decodeJwtEmail(auth?.tokens?.id_token);
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // resets_at이 지난 윈도우의 used_percent를 0으로 보정
@@ -46,13 +53,22 @@ export function expireStaleCodexBuckets(buckets) {
   const nowSec = Math.floor(Date.now() / 1000);
   const result = {};
   for (const [key, bucket] of Object.entries(buckets)) {
-    if (!bucket) { result[key] = bucket; continue; }
+    if (!bucket) {
+      result[key] = bucket;
+      continue;
+    }
     let updated = bucket;
     if (bucket.primary?.resets_at && bucket.primary.resets_at <= nowSec) {
-      updated = { ...updated, primary: { ...updated.primary, used_percent: 0 } };
+      updated = {
+        ...updated,
+        primary: { ...updated.primary, used_percent: 0 },
+      };
     }
     if (bucket.secondary?.resets_at && bucket.secondary.resets_at <= nowSec) {
-      updated = { ...updated, secondary: { ...updated.secondary, used_percent: 0 } };
+      updated = {
+        ...updated,
+        secondary: { ...updated.secondary, used_percent: 0 },
+      };
     }
     result[key] = updated;
   }
@@ -73,15 +89,23 @@ export function getCodexRateLimits() {
   for (let dayOffset = 0; dayOffset <= 6; dayOffset++) {
     const d = new Date(now.getTime() - dayOffset * 86_400_000);
     const sessDir = join(
-      homedir(), ".codex", "sessions",
+      homedir(),
+      ".codex",
+      "sessions",
       String(d.getFullYear()),
       String(d.getMonth() + 1).padStart(2, "0"),
       String(d.getDate()).padStart(2, "0"),
     );
     if (!existsSync(sessDir)) continue;
     let files;
-    try { files = readdirSync(sessDir).filter((f) => f.endsWith(".jsonl")).sort().reverse(); }
-    catch { continue; }
+    try {
+      files = readdirSync(sessDir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .sort()
+        .reverse();
+    } catch {
+      continue;
+    }
 
     const mergedBuckets = {};
     for (const file of files) {
@@ -96,33 +120,47 @@ export function getCodexRateLimits() {
               // window_minutes 기준으로 5h/1w 슬롯 정규화
               const { primary, secondary } = normalizeBuckets(rl);
               mergedBuckets[rl.limit_id] = {
-                limitId: rl.limit_id, limitName: rl.limit_name,
-                primary, secondary,
+                limitId: rl.limit_id,
+                limitName: rl.limit_name,
+                primary,
+                secondary,
                 credits: rl.credits,
                 tokens: evt.payload?.info?.total_token_usage,
                 contextWindow: evt.payload?.info?.model_context_window,
                 timestamp: evt.timestamp,
               };
-            } else if (dayOffset <= 1 && !rl && evt?.payload?.info?.total_token_usage && !syntheticBucket) {
+            } else if (
+              dayOffset <= 1 &&
+              !rl &&
+              evt?.payload?.info?.total_token_usage &&
+              !syntheticBucket
+            ) {
               // 2일 이내 token_count: 합성 버킷 (rate_limits가 null일 때 행 활성화용, stale 방지)
               syntheticBucket = {
-                limitId: "codex", limitName: "codex-session",
-                primary: null, secondary: null,
+                limitId: "codex",
+                limitName: "codex-session",
+                primary: null,
+                secondary: null,
                 credits: null,
                 tokens: evt.payload.info.total_token_usage,
                 contextWindow: evt.payload.info.model_context_window,
                 timestamp: evt.timestamp,
               };
             }
-          } catch { /* 라인 파싱 실패 무시 */ }
+          } catch {
+            /* 라인 파싱 실패 무시 */
+          }
           if (Object.keys(mergedBuckets).length >= CODEX_MIN_BUCKETS) break;
         }
-      } catch { /* 파일 읽기 실패 무시 */ }
+      } catch {
+        /* 파일 읽기 실패 무시 */
+      }
     }
     // 실제 rate_limits 발견 → 토큰 데이터 병합 후 즉시 반환
     if (Object.keys(mergedBuckets).length > 0) {
       if (syntheticBucket) {
-        const main = mergedBuckets.codex || mergedBuckets[Object.keys(mergedBuckets)[0]];
+        const main =
+          mergedBuckets.codex || mergedBuckets[Object.keys(mergedBuckets)[0]];
         if (main && !main.tokens) main.tokens = syntheticBucket.tokens;
       }
       expireStaleCodexBuckets(mergedBuckets);
@@ -163,7 +201,9 @@ export function scheduleCodexRateLimitRefresh() {
       if (lockAge < SPAWN_LOCK_TTL_MS) return;
     }
     writeJsonSafe(CODEX_REFRESH_LOCK_PATH, { t: Date.now() });
-  } catch { /* 락 실패 무시 — 스폰 진행 */ }
+  } catch {
+    /* 락 실패 무시 — 스폰 진행 */
+  }
 
   try {
     const child = spawn(process.execPath, [scriptPath, CODEX_REFRESH_FLAG], {

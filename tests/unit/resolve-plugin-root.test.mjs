@@ -1,19 +1,32 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const RESOLVE_ROOT_MODULE_URL = new URL("../../hooks/lib/resolve-root.mjs", import.meta.url);
-const EXPECTED_FALLBACK_ROOT = normalizePath(fileURLToPath(new URL("../..", RESOLVE_ROOT_MODULE_URL)));
+const RESOLVE_ROOT_MODULE_URL = new URL(
+  "../../hooks/lib/resolve-root.mjs",
+  import.meta.url,
+);
+const EXPECTED_FALLBACK_ROOT = normalizePath(
+  fileURLToPath(new URL("../..", RESOLVE_ROOT_MODULE_URL)),
+);
 
 const TEMP_DIRS = [];
 let originalEnv;
 let originalCwd;
 
 function normalizePath(value) {
-  return resolve(String(value || "")).replace(/\\/g, "/").replace(/\/+$/u, "");
+  return resolve(String(value || ""))
+    .replace(/\\/g, "/")
+    .replace(/\/+$/u, "");
 }
 
 function restoreProcessEnv(snapshot) {
@@ -57,11 +70,17 @@ async function loadResolvePluginRoot() {
   const cacheBuster = `test=${Date.now()}-${Math.random().toString(16).slice(2)}`;
   try {
     const mod = await import(`${RESOLVE_ROOT_MODULE_URL.href}?${cacheBuster}`);
-    assert.equal(typeof mod.resolvePluginRoot, "function", "resolvePluginRoot export must be a function");
+    assert.equal(
+      typeof mod.resolvePluginRoot,
+      "function",
+      "resolvePluginRoot export must be a function",
+    );
     return mod.resolvePluginRoot;
   } catch (error) {
     if (error && error.code === "ERR_MODULE_NOT_FOUND") {
-      assert.fail("hooks/lib/resolve-root.mjs is missing. Add module implementation to run this test suite.");
+      assert.fail(
+        "hooks/lib/resolve-root.mjs is missing. Add module implementation to run this test suite.",
+      );
     }
     throw error;
   }
@@ -71,7 +90,9 @@ beforeEach(() => {
   originalEnv = { ...process.env };
   originalCwd = process.cwd();
 
-  const sandboxDir = mkdtempSync(join(tmpdir(), "triflux-resolve-plugin-root-"));
+  const sandboxDir = mkdtempSync(
+    join(tmpdir(), "triflux-resolve-plugin-root-"),
+  );
   TEMP_DIRS.push(sandboxDir);
 
   const homeDir = join(sandboxDir, "home");
@@ -119,8 +140,14 @@ describe("resolvePluginRoot", () => {
 
   it("TC2: CLAUDE_PLUGIN_ROOT가 worktree 무효 경로면 breadcrumb 유효값을 반환한다", async () => {
     const sandboxDir = process.cwd();
-    const invalidWorktreeRoot = createInvalidPluginRoot(sandboxDir, ".codex-swarm/wt-hook-integration");
-    const validBreadcrumbRoot = createValidPluginRoot(sandboxDir, "stable-plugin-root");
+    const invalidWorktreeRoot = createInvalidPluginRoot(
+      sandboxDir,
+      ".codex-swarm/wt-hook-integration",
+    );
+    const validBreadcrumbRoot = createValidPluginRoot(
+      sandboxDir,
+      "stable-plugin-root",
+    );
 
     process.env.CLAUDE_PLUGIN_ROOT = invalidWorktreeRoot;
     writeBreadcrumb(validBreadcrumbRoot);
@@ -133,7 +160,10 @@ describe("resolvePluginRoot", () => {
 
   it("TC3: breadcrumb이 존재하고 유효하면 breadcrumb 값을 반환한다", async () => {
     const sandboxDir = process.cwd();
-    const validBreadcrumbRoot = createValidPluginRoot(sandboxDir, "breadcrumb-root");
+    const validBreadcrumbRoot = createValidPluginRoot(
+      sandboxDir,
+      "breadcrumb-root",
+    );
 
     writeBreadcrumb(validBreadcrumbRoot);
 
@@ -152,8 +182,14 @@ describe("resolvePluginRoot", () => {
 
   it("TC5: 모든 후보가 무효여도 throw하지 않고 fallback으로 동작한다", async () => {
     const sandboxDir = process.cwd();
-    const invalidEnvRoot = createInvalidPluginRoot(sandboxDir, "invalid-env-root");
-    const invalidBreadcrumbRoot = createInvalidPluginRoot(sandboxDir, "invalid-breadcrumb-root");
+    const invalidEnvRoot = createInvalidPluginRoot(
+      sandboxDir,
+      "invalid-env-root",
+    );
+    const invalidBreadcrumbRoot = createInvalidPluginRoot(
+      sandboxDir,
+      "invalid-breadcrumb-root",
+    );
 
     process.env.CLAUDE_PLUGIN_ROOT = invalidEnvRoot;
     writeBreadcrumb(invalidBreadcrumbRoot);
@@ -166,7 +202,10 @@ describe("resolvePluginRoot", () => {
 
   it("TC6: CLAUDE_PLUGIN_ROOT가 path traversal 문자열이면 검증 실패 후 breadcrumb/fallback으로 처리한다", async () => {
     const sandboxDir = process.cwd();
-    const validBreadcrumbRoot = createValidPluginRoot(sandboxDir, "breadcrumb-root-for-traversal");
+    const validBreadcrumbRoot = createValidPluginRoot(
+      sandboxDir,
+      "breadcrumb-root-for-traversal",
+    );
 
     process.env.CLAUDE_PLUGIN_ROOT = "../../etc/passwd";
     writeBreadcrumb(validBreadcrumbRoot);

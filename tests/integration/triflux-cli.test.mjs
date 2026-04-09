@@ -1,16 +1,28 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
 const CLI_PATH = join(PROJECT_ROOT, "bin", "triflux.mjs");
-const THROW_UNDEFINED_CODEX_CONFIG_FIXTURE = join(PROJECT_ROOT, "tests", "fixtures", "throw-undefined-codex-config.cjs")
-  .replace(/\\/g, "/");
+const THROW_UNDEFINED_CODEX_CONFIG_FIXTURE = join(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "throw-undefined-codex-config.cjs",
+).replace(/\\/g, "/");
 
 function createHomeDir() {
   const homeDir = mkdtempSync(join(tmpdir(), "triflux-cli-"));
@@ -44,7 +56,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
   it("CLI startup should sweep stale triflux-cli temp dirs without deleting the active HOME dir", () => {
     const activeHomeDir = createHomeDir();
     const staleHomeDir = createHomeDir();
-    const staleDate = new Date(Date.now() - (2 * 24 * 60 * 60 * 1000));
+    const staleDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
 
     try {
       utimesSync(activeHomeDir, staleDate, staleDate);
@@ -54,8 +66,16 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       const payload = parseStdoutJson(result);
 
       assert.ok(payload.triflux);
-      assert.equal(existsSync(activeHomeDir), true, "active HOME dir should be preserved");
-      assert.equal(existsSync(staleHomeDir), false, "stale triflux-cli dir should be swept on startup");
+      assert.equal(
+        existsSync(activeHomeDir),
+        true,
+        "active HOME dir should be preserved",
+      );
+      assert.equal(
+        existsSync(staleHomeDir),
+        false,
+        "stale triflux-cli dir should be swept on startup",
+      );
     } finally {
       rmSync(activeHomeDir, { recursive: true, force: true });
       rmSync(staleHomeDir, { recursive: true, force: true });
@@ -88,30 +108,50 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.equal(payload.dry_run, true);
     assert.ok(payload.actions.length > 0);
     assert.ok(payload.actions.some((action) => action.type === "sync"));
-    assert.ok(payload.actions.some((action) => action.label === "skill-alias:tfx-autopilot"));
-    assert.ok(payload.actions.some((action) => action.label === "headless-guard-fast.sh"));
-    assert.ok(payload.actions.some((action) => action.label === "hub/team/agent-map.json"));
+    assert.ok(
+      payload.actions.some(
+        (action) => action.label === "skill-alias:tfx-autopilot",
+      ),
+    );
+    assert.ok(
+      payload.actions.some(
+        (action) => action.label === "headless-guard-fast.sh",
+      ),
+    );
+    assert.ok(
+      payload.actions.some(
+        (action) => action.label === "hub/team/agent-map.json",
+      ),
+    );
   });
 
   it("setup --dry-run은 stale Codex 프로필도 update로 보고해야 한다", () => {
     const homeDir = createHomeDir();
-    writeFileSync(join(homeDir, ".codex", "config.toml"), [
-      "[profiles.codex53_high]",
-      'model = "legacy-model"',
-      'model_reasoning_effort = "low"',
-      "",
-      "[profiles.codex53_xhigh]",
-      'model = "legacy-model"',
-      'model_reasoning_effort = "medium"',
-      "",
-      "[profiles.spark53_low]",
-      'model = "legacy-spark"',
-      'model_reasoning_effort = "high"',
-      "",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      join(homeDir, ".codex", "config.toml"),
+      [
+        "[profiles.codex53_high]",
+        'model = "legacy-model"',
+        'model_reasoning_effort = "low"',
+        "",
+        "[profiles.codex53_xhigh]",
+        'model = "legacy-model"',
+        'model_reasoning_effort = "medium"',
+        "",
+        "[profiles.spark53_low]",
+        'model = "legacy-spark"',
+        'model_reasoning_effort = "high"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
 
-    const payload = parseStdoutJson(runCli(["setup", "--dry-run"], { homeDir }));
-    const codexProfiles = payload.actions.find((action) => action.type === "codex-profiles");
+    const payload = parseStdoutJson(
+      runCli(["setup", "--dry-run"], { homeDir }),
+    );
+    const codexProfiles = payload.actions.find(
+      (action) => action.type === "codex-profiles",
+    );
 
     assert.ok(codexProfiles, "codex-profiles action missing");
     assert.equal(codexProfiles.change, "update");
@@ -139,16 +179,22 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
 
   it("doctor --json은 Serena MCP project binding / timeout 진단을 포함해야 한다", () => {
     const homeDir = createHomeDir();
-    writeFileSync(join(homeDir, ".codex", "config.toml"), [
-      "[mcp_servers.serena]",
-      'command = "uvx"',
-      'args = ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--context", "codex"]',
-      'startup_timeout_sec = 10',
-      "",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      join(homeDir, ".codex", "config.toml"),
+      [
+        "[mcp_servers.serena]",
+        'command = "uvx"',
+        'args = ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--context", "codex"]',
+        "startup_timeout_sec = 10",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
 
     const payload = parseStdoutJson(runCli(["doctor", "--json"], { homeDir }));
-    const serenaCheck = payload.checks.find((check) => check.name === "serena-mcp");
+    const serenaCheck = payload.checks.find(
+      (check) => check.name === "serena-mcp",
+    );
     assert.ok(serenaCheck, "serena-mcp check missing");
     assert.equal(serenaCheck.status, "issues");
     assert.equal(serenaCheck.project_binding, false);
@@ -165,15 +211,40 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
   it("setup은 tfx-auto의 별칭 스킬(autopilot, persist, fullcycle)을 동기화해야 한다", () => {
     const homeDir = createHomeDir();
     const setupResult = runCli(["setup"], { homeDir });
-    assert.equal(setupResult.status, 0, setupResult.stderr || setupResult.stdout);
+    assert.equal(
+      setupResult.status,
+      0,
+      setupResult.stderr || setupResult.stdout,
+    );
 
-    const autopilotPath = join(homeDir, ".claude", "skills", "tfx-autopilot", "SKILL.md");
-    const sourcePath = join(homeDir, ".claude", "skills", "tfx-auto", "SKILL.md");
-    assert.equal(existsSync(autopilotPath), true, `alias missing: ${autopilotPath}`);
+    const autopilotPath = join(
+      homeDir,
+      ".claude",
+      "skills",
+      "tfx-autopilot",
+      "SKILL.md",
+    );
+    const sourcePath = join(
+      homeDir,
+      ".claude",
+      "skills",
+      "tfx-auto",
+      "SKILL.md",
+    );
+    assert.equal(
+      existsSync(autopilotPath),
+      true,
+      `alias missing: ${autopilotPath}`,
+    );
     assert.equal(existsSync(sourcePath), true, `source missing: ${sourcePath}`);
-    assert.match(readFileSync(autopilotPath, "utf8"), /^name:\s*tfx-autopilot$/m);
+    assert.match(
+      readFileSync(autopilotPath, "utf8"),
+      /^name:\s*tfx-autopilot$/m,
+    );
 
-    const listPayload = parseStdoutJson(runCli(["list", "--json"], { homeDir }));
+    const listPayload = parseStdoutJson(
+      runCli(["list", "--json"], { homeDir }),
+    );
     assert.deepEqual(listPayload.skill_aliases, [
       { alias: "tfx-autopilot", source: "tfx-auto", installed: true },
       { alias: "tfx-persist", source: "tfx-auto", installed: true },
@@ -185,23 +256,39 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
   it("setup은 기존 Codex 프로필을 공유 로직으로 보정해야 한다", () => {
     const homeDir = createHomeDir();
     const codexConfigPath = join(homeDir, ".codex", "config.toml");
-    writeFileSync(codexConfigPath, [
-      "[profiles.codex53_high]",
-      'model = "legacy-model"',
-      "",
-      "[profiles.spark53_low]",
-      'model = "legacy-spark"',
-      "",
-    ].join("\n"), "utf8");
+    writeFileSync(
+      codexConfigPath,
+      [
+        "[profiles.codex53_high]",
+        'model = "legacy-model"',
+        "",
+        "[profiles.spark53_low]",
+        'model = "legacy-spark"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
 
     const result = runCli(["setup"], { homeDir });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.doesNotMatch(result.stdout, /Codex profiles 설정 실패|Codex Profiles 자동 복구 실패/);
+    assert.doesNotMatch(
+      result.stdout,
+      /Codex profiles 설정 실패|Codex Profiles 자동 복구 실패/,
+    );
 
     const updated = readFileSync(codexConfigPath, "utf8");
-    assert.match(updated, /\[profiles\.codex53_high\]\nmodel = "gpt-5\.3-codex"\nmodel_reasoning_effort = "high"/);
-    assert.match(updated, /\[profiles\.codex53_xhigh\]\nmodel = "gpt-5\.3-codex"\nmodel_reasoning_effort = "xhigh"/);
-    assert.match(updated, /\[profiles\.spark53_low\]\nmodel = "gpt-5\.3-codex-spark"\nmodel_reasoning_effort = "low"/);
+    assert.match(
+      updated,
+      /\[profiles\.codex53_high\]\nmodel = "gpt-5\.3-codex"\nmodel_reasoning_effort = "high"/,
+    );
+    assert.match(
+      updated,
+      /\[profiles\.codex53_xhigh\]\nmodel = "gpt-5\.3-codex"\nmodel_reasoning_effort = "xhigh"/,
+    );
+    assert.match(
+      updated,
+      /\[profiles\.spark53_low\]\nmodel = "gpt-5\.3-codex-spark"\nmodel_reasoning_effort = "low"/,
+    );
 
     if (process.platform === "win32") {
       assert.match(updated, /\[windows\]\nsandbox = "elevated"/);
@@ -234,9 +321,16 @@ describe("triflux CLI exit codes", { timeout: 30000 }, () => {
 
   it("손상된 settings.json은 setup에서 EXIT_CONFIG_ERROR(5)로 종료해야 한다", () => {
     const homeDir = createHomeDir();
-    writeFileSync(join(homeDir, ".claude", "settings.json"), "{broken-json", "utf8");
+    writeFileSync(
+      join(homeDir, ".claude", "settings.json"),
+      "{broken-json",
+      "utf8",
+    );
     const result = runCli(["setup"], { homeDir });
     assert.equal(result.status, 5, `${result.stdout}\n${result.stderr}`);
-    assert.match(`${result.stdout}\n${result.stderr}`, /settings\.json 처리 실패|fix:/);
+    assert.match(
+      `${result.stdout}\n${result.stderr}`,
+      /settings\.json 처리 실패|fix:/,
+    );
   });
 });

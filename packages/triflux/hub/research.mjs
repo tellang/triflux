@@ -1,9 +1,9 @@
 // hub/research.mjs — 자율 웹 리서치 엔진 코어
 // 검색 쿼리 생성 → 결과 정규화 → 보고서 빌드 → 저장
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { TFX_REPORTS_DIR } from './paths.mjs';
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { TFX_REPORTS_DIR } from "./paths.mjs";
 
 /**
  * @experimental 런타임 미연결 — 향후 통합 예정
@@ -14,13 +14,13 @@ import { TFX_REPORTS_DIR } from './paths.mjs';
  * @param {'ko'|'en'|'auto'} [lang='auto'] - 언어 힌트
  * @returns {string[]} 검색 쿼리 배열
  */
-export function generateQueries(topic, lang = 'auto') {
-  if (!topic || typeof topic !== 'string' || !topic.trim()) return [];
+export function generateQueries(topic, lang = "auto") {
+  if (!topic || typeof topic !== "string" || !topic.trim()) return [];
 
   const t = topic.trim();
-  const detectedLang = lang === 'auto' ? detectLang(t) : lang;
+  const detectedLang = lang === "auto" ? detectLang(t) : lang;
 
-  if (detectedLang === 'ko') {
+  if (detectedLang === "ko") {
     return [
       `${t} 정리`,
       `${t} 비교 분석`,
@@ -50,10 +50,10 @@ export function normalizeResults(rawResults) {
   const out = [];
 
   for (const r of rawResults) {
-    if (!r || typeof r !== 'object') continue;
-    const url = (r.url || r.link || '').trim();
-    const title = (r.title || r.name || '').trim();
-    const snippet = (r.snippet || r.description || r.content || '').trim();
+    if (!r || typeof r !== "object") continue;
+    const url = (r.url || r.link || "").trim();
+    const title = (r.title || r.name || "").trim();
+    const snippet = (r.snippet || r.description || r.content || "").trim();
 
     if (!url || seen.has(url)) continue;
     seen.add(url);
@@ -71,13 +71,16 @@ export function normalizeResults(rawResults) {
  * @returns {string} 마크다운 문자열
  */
 export function buildReport(topic, findings, sources) {
-  const date = new Date().toISOString().split('T')[0];
+  const date = new Date().toISOString().split("T")[0];
   const findingsSection = (findings || [])
     .map((f, i) => `${i + 1}. ${f}`)
-    .join('\n');
+    .join("\n");
   const sourcesSection = (sources || [])
-    .map((s) => `- [${s.title || s.url}](${s.url})${s.snippet ? ` — ${s.snippet}` : ''}`)
-    .join('\n');
+    .map(
+      (s) =>
+        `- [${s.title || s.url}](${s.url})${s.snippet ? ` — ${s.snippet}` : ""}`,
+    )
+    .join("\n");
 
   return `# Research: ${topic}
 Date: ${date}
@@ -86,13 +89,13 @@ Date: ${date}
 ${topic}에 대한 자동 리서치 결과입니다.
 
 ## Key Findings
-${findingsSection || '_발견 없음_'}
+${findingsSection || "_발견 없음_"}
 
 ## Actionable Recommendations
 리서치 결과를 바탕으로 다음 단계를 검토하세요.
 
 ## Sources
-${sourcesSection || '_출처 없음_'}
+${sourcesSection || "_출처 없음_"}
 `;
 }
 
@@ -108,20 +111,24 @@ export function saveReport(topic, content, baseDir = process.cwd()) {
   const resolvedDir = resolve(dir);
   const expectedBase = resolve(baseDir || TFX_REPORTS_DIR);
   if (!resolvedDir.startsWith(expectedBase)) {
-    throw new Error('Invalid report directory: path traversal detected');
+    throw new Error("Invalid report directory: path traversal detected");
   }
   mkdirSync(dir, { recursive: true });
 
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
-  const slug = (topic || 'untitled')
-    .replace(/[^a-zA-Z0-9가-힣\s-]/g, '')
-    .replace(/\s+/g, '-')
+  const ts = new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")
+    .replace("T", "_")
+    .slice(0, 19);
+  const slug = (topic || "untitled")
+    .replace(/[^a-zA-Z0-9가-힣\s-]/g, "")
+    .replace(/\s+/g, "-")
     .slice(0, 40)
     .toLowerCase();
   const filename = `research-${ts}-${slug}.md`;
   const filepath = join(dir, filename);
 
-  writeFileSync(filepath, content, 'utf-8');
+  writeFileSync(filepath, content, "utf-8");
   return filepath;
 }
 
@@ -133,7 +140,7 @@ export function saveReport(topic, content, baseDir = process.cwd()) {
  * @returns {'ko'|'en'}
  */
 function detectLang(text) {
-  return /[가-힣]/.test(text) ? 'ko' : 'en';
+  return /[가-힣]/.test(text) ? "ko" : "en";
 }
 
 /**
@@ -143,6 +150,6 @@ function detectLang(text) {
  * @returns {string}
  */
 function toEnglishQuery(text) {
-  const eng = text.replace(/[가-힣\s]+/g, ' ').trim();
+  const eng = text.replace(/[가-힣\s]+/g, " ").trim();
   return eng || text;
 }

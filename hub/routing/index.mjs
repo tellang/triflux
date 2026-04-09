@@ -2,16 +2,16 @@
 // Q-Learning 동적 라우팅 + agent-map.json 정적 폴백
 // 환경변수 TRIFLUX_DYNAMIC_ROUTING=true 로 옵트인 (기본 false)
 
-import { createRequire } from 'node:module';
-import { QLearningRouter } from './q-learning.mjs';
-import { scoreComplexity } from './complexity.mjs';
+import { createRequire } from "node:module";
+import { scoreComplexity } from "./complexity.mjs";
+import { QLearningRouter } from "./q-learning.mjs";
 
 const _require = createRequire(import.meta.url);
 
 /** agent-map.json 정적 매핑 */
 let AGENT_MAP;
 try {
-  AGENT_MAP = _require('../team/agent-map.json');
+  AGENT_MAP = _require("../team/agent-map.json");
 } catch {
   AGENT_MAP = {};
 }
@@ -37,7 +37,7 @@ function getRouter() {
  */
 function isDynamicRoutingEnabled() {
   const env = process.env.TRIFLUX_DYNAMIC_ROUTING;
-  return env === 'true' || env === '1';
+  return env === "true" || env === "1";
 }
 
 /**
@@ -48,19 +48,19 @@ function isDynamicRoutingEnabled() {
  * @param {string} [taskDescription=''] — 작업 설명 (동적 라우팅용)
  * @returns {{ cliType: string, source: 'dynamic' | 'static', confidence: number, complexity: number }}
  */
-export function resolveRoute(agentType, taskDescription = '') {
+export function resolveRoute(agentType, taskDescription = "") {
   // 정적 기본값
   const staticCli = AGENT_MAP[agentType] || agentType;
   const { score: complexity } = scoreComplexity(taskDescription);
 
   // 동적 라우팅 비활성화 시 정적 매핑 반환
   if (!isDynamicRoutingEnabled()) {
-    return { cliType: staticCli, source: 'static', confidence: 1, complexity };
+    return { cliType: staticCli, source: "static", confidence: 1, complexity };
   }
 
   // 작업 설명 없으면 정적 폴백
   if (!taskDescription || taskDescription.trim().length === 0) {
-    return { cliType: staticCli, source: 'static', confidence: 1, complexity };
+    return { cliType: staticCli, source: "static", confidence: 1, complexity };
   }
 
   const router = getRouter();
@@ -68,12 +68,17 @@ export function resolveRoute(agentType, taskDescription = '') {
 
   // 신뢰도 기준 미달 시 정적 폴백
   if (prediction.confidence < 0.6) {
-    return { cliType: staticCli, source: 'static', confidence: prediction.confidence, complexity };
+    return {
+      cliType: staticCli,
+      source: "static",
+      confidence: prediction.confidence,
+      complexity,
+    };
   }
 
   return {
     cliType: prediction.action,
-    source: 'dynamic',
+    source: "dynamic",
     confidence: prediction.confidence,
     complexity,
   };
@@ -113,5 +118,5 @@ export function routerStatus() {
 }
 
 // re-export for convenience
-export { scoreComplexity } from './complexity.mjs';
-export { QLearningRouter, ACTIONS } from './q-learning.mjs';
+export { scoreComplexity } from "./complexity.mjs";
+export { ACTIONS, QLearningRouter } from "./q-learning.mjs";

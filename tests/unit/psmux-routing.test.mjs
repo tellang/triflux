@@ -19,10 +19,11 @@
  * This is stronger than mock-based tests: it catches both logic errors AND
  * source-level regressions (e.g., someone changing "headless" back to "psmux").
  */
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { dirname, resolve } from "node:path";
+import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,7 +37,10 @@ const PROJECT_ROOT = resolve(__dirname, "../..");
  * If the real source diverges from this, the "source structure parity" test
  * in section D will catch it.
  */
-function normalizeTeammateMode(mode = "auto", { detectMultiplexer, tmuxEnv } = {}) {
+function normalizeTeammateMode(
+  mode = "auto",
+  { detectMultiplexer, tmuxEnv } = {},
+) {
   const raw = String(mode).toLowerCase();
   if (raw === "inline" || raw === "native") return "in-process";
   if (raw === "headless" || raw === "hl") return "headless";
@@ -85,7 +89,9 @@ describe("normalizeTeammateMode — psmux routing fix", () => {
   // Test 4: explicit "headless" override
   it('explicit "headless" → "headless" (no detectMultiplexer call needed)', () => {
     const result = normalizeTeammateMode("headless", {
-      detectMultiplexer: () => { throw new Error("should not be called"); },
+      detectMultiplexer: () => {
+        throw new Error("should not be called");
+      },
     });
     assert.equal(result, "headless");
   });
@@ -195,14 +201,18 @@ describe("normalizeTeammateMode — psmux routing fix", () => {
 // B. Routing integration: effectiveMode → correct start function
 // ---------------------------------------------------------------------------
 describe("teamStart routing — effectiveMode dispatches correct start function", () => {
-  const startIndexPath = resolve(PROJECT_ROOT, "hub/team/cli/commands/start/index.mjs");
+  const startIndexPath = resolve(
+    PROJECT_ROOT,
+    "hub/team/cli/commands/start/index.mjs",
+  );
 
   // Test 10: headless → startHeadlessTeam
   it('effectiveMode "headless" → calls startHeadlessTeam (not startMuxTeam)', () => {
     const src = readFileSync(startIndexPath, "utf8");
 
     // The ternary chain must check for "headless" before falling through to startMuxTeam
-    const headlessCheck = /effectiveMode\s*===\s*"headless"\s*\n?\s*\?\s*await\s+startHeadlessTeam/;
+    const headlessCheck =
+      /effectiveMode\s*===\s*"headless"\s*\n?\s*\?\s*await\s+startHeadlessTeam/;
     assert.ok(
       headlessCheck.test(src),
       'routing must have effectiveMode === "headless" → startHeadlessTeam',
@@ -210,7 +220,7 @@ describe("teamStart routing — effectiveMode dispatches correct start function"
 
     // Confirm startHeadlessTeam is imported
     assert.ok(
-      src.includes('import { startHeadlessTeam }'),
+      src.includes("import { startHeadlessTeam }"),
       "startHeadlessTeam must be imported",
     );
   });
@@ -241,7 +251,8 @@ describe("teamStart routing — effectiveMode dispatches correct start function"
   it('effectiveMode "in-process" → calls startInProcessTeam', () => {
     const src = readFileSync(startIndexPath, "utf8");
 
-    const inProcessCheck = /effectiveMode\s*===\s*"in-process"\s*\n?\s*\?\s*await\s+startInProcessTeam/;
+    const inProcessCheck =
+      /effectiveMode\s*===\s*"in-process"\s*\n?\s*\?\s*await\s+startInProcessTeam/;
     assert.ok(
       inProcessCheck.test(src),
       'routing must have effectiveMode === "in-process" → startInProcessTeam',
@@ -270,7 +281,9 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
   it('tfx-multi SKILL.md Phase 3 contains "MANDATORY" keyword', () => {
     const content = readFileSync(multiSkillPath, "utf8");
     // Extract Phase 3 section
-    const phase3Match = content.match(/### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^\#])/);
+    const phase3Match = content.match(
+      /### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^#])/,
+    );
     assert.ok(phase3Match, "Phase 3 section must exist in SKILL.md");
     assert.ok(
       phase3Match[0].includes("MANDATORY"),
@@ -281,7 +294,9 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
   // Test 14: SKILL.md Phase 3 contains concrete Bash("tfx multi") invocation
   it('tfx-multi SKILL.md Phase 3 contains Bash("tfx multi --teammate-mode headless") invocation', () => {
     const content = readFileSync(multiSkillPath, "utf8");
-    const phase3Match = content.match(/### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^\#])/);
+    const phase3Match = content.match(
+      /### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^#])/,
+    );
     assert.ok(phase3Match, "Phase 3 section must exist");
 
     const phase3 = phase3Match[0];
@@ -307,19 +322,23 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
   // Test 15: SKILL.md Phase 3 does NOT have runHeadlessInteractive() as Lead pattern
   it("tfx-multi SKILL.md Phase 3 does NOT contain runHeadlessInteractive() as Lead orchestration pattern", () => {
     const content = readFileSync(multiSkillPath, "utf8");
-    const phase3Match = content.match(/### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^\#])/);
+    const phase3Match = content.match(
+      /### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^#])/,
+    );
     assert.ok(phase3Match, "Phase 3 section must exist");
 
     const phase3 = phase3Match[0];
     // runHeadlessInteractive should NOT appear as a Lead-callable pattern
-    const hasRunHeadless = /Lead.*runHeadlessInteractive|runHeadlessInteractive.*Lead/i.test(phase3);
+    const hasRunHeadless =
+      /Lead.*runHeadlessInteractive|runHeadlessInteractive.*Lead/i.test(phase3);
     assert.ok(
       !hasRunHeadless,
       "Phase 3 must NOT present runHeadlessInteractive() as a Lead-callable pattern",
     );
 
     // Phase 3 should not instruct Lead to call JS API directly
-    const jsApiAsInstruction = /Lead가.*호출.*runHeadless|Lead.*call.*runHeadless/i.test(phase3);
+    const jsApiAsInstruction =
+      /Lead가.*호출.*runHeadless|Lead.*call.*runHeadless/i.test(phase3);
     assert.ok(
       !jsApiAsInstruction,
       "Phase 3 must NOT instruct Lead to call runHeadlessInteractive() directly",
@@ -343,14 +362,16 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
       content.includes("2개+") && content.includes("headless");
     assert.ok(
       has2PlusRule,
-      'tfx-auto SKILL.md must contain rule for 2+ subtasks requiring headless engine',
+      "tfx-auto SKILL.md must contain rule for 2+ subtasks requiring headless engine",
     );
   });
 
   // Extra: Phase 3 example has proper --assign format
   it("tfx-multi SKILL.md Phase 3 example uses --assign 'cli:prompt:role' format", () => {
     const content = readFileSync(multiSkillPath, "utf8");
-    const phase3Match = content.match(/### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^\#])/);
+    const phase3Match = content.match(
+      /### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^#])/,
+    );
     assert.ok(phase3Match, "Phase 3 section must exist");
 
     const phase3 = phase3Match[0];
@@ -375,20 +396,25 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
 // D. runtime-mode.mjs — source code regression guard
 // ---------------------------------------------------------------------------
 describe("runtime-mode.mjs — source code regression guard", () => {
-  const runtimeModePath = resolve(PROJECT_ROOT, "hub/team/cli/services/runtime-mode.mjs");
+  const runtimeModePath = resolve(
+    PROJECT_ROOT,
+    "hub/team/cli/services/runtime-mode.mjs",
+  );
 
   it("auto+psmux branch returns 'headless' not 'psmux' (THE FIX)", () => {
     const src = readFileSync(runtimeModePath, "utf8");
 
     // The fix: detectMultiplexer() === "psmux" ? "headless" : "in-process"
-    const fixedPattern = /detectMultiplexer\(\)\s*===\s*"psmux"\s*\?\s*"headless"/;
+    const fixedPattern =
+      /detectMultiplexer\(\)\s*===\s*"psmux"\s*\?\s*"headless"/;
     assert.ok(
       fixedPattern.test(src),
       'auto branch must map psmux detection to "headless" return value',
     );
 
     // Regression guard: must NOT return "psmux" in the auto branch
-    const regressedPattern = /detectMultiplexer\(\)\s*===\s*"psmux"\s*\?\s*"psmux"/;
+    const regressedPattern =
+      /detectMultiplexer\(\)\s*===\s*"psmux"\s*\?\s*"psmux"/;
     assert.ok(
       !regressedPattern.test(src),
       'REGRESSION: auto branch must NOT return "psmux" when psmux is detected',
@@ -399,7 +425,8 @@ describe("runtime-mode.mjs — source code regression guard", () => {
     const src = readFileSync(runtimeModePath, "utf8");
 
     // psmux should map to "headless": if (raw === "psmux") return "headless";
-    const psmuxToHeadless = /if\s*\(raw\s*===\s*"psmux"\)\s*return\s+"headless"/;
+    const psmuxToHeadless =
+      /if\s*\(raw\s*===\s*"psmux"\)\s*return\s+"headless"/;
     assert.ok(
       psmuxToHeadless.test(src),
       'explicit "psmux" input must map to "headless" (not identity pass-through)',
@@ -411,27 +438,48 @@ describe("runtime-mode.mjs — source code regression guard", () => {
 
     // Verify all expected branches exist in the normalizeTeammateMode function
     // Extract the function body
-    const fnMatch = src.match(/export function normalizeTeammateMode[\s\S]*?^}/m);
+    const fnMatch = src.match(
+      /export function normalizeTeammateMode[\s\S]*?^}/m,
+    );
     assert.ok(fnMatch, "normalizeTeammateMode function must exist");
     const fn = fnMatch[0];
 
     // Branch: inline/native → in-process
-    assert.ok(fn.includes('"inline"') && fn.includes('"native"'), "inline/native branch exists");
+    assert.ok(
+      fn.includes('"inline"') && fn.includes('"native"'),
+      "inline/native branch exists",
+    );
     // Branch: headless/hl → headless
-    assert.ok(fn.includes('"headless"') && fn.includes('"hl"'), "headless/hl branch exists");
+    assert.ok(
+      fn.includes('"headless"') && fn.includes('"hl"'),
+      "headless/hl branch exists",
+    );
     // Branch: identity pass-through (in-process, tmux, wt, psmux)
-    assert.ok(fn.includes('"in-process"') && fn.includes('"tmux"') && fn.includes('"wt"'), "identity pass-through branch exists");
+    assert.ok(
+      fn.includes('"in-process"') &&
+        fn.includes('"tmux"') &&
+        fn.includes('"wt"'),
+      "identity pass-through branch exists",
+    );
     // Branch: windows-terminal aliases
-    assert.ok(fn.includes('"windows-terminal"') && fn.includes('"windows_terminal"'), "windows-terminal aliases exist");
+    assert.ok(
+      fn.includes('"windows-terminal"') && fn.includes('"windows_terminal"'),
+      "windows-terminal aliases exist",
+    );
     // Branch: auto with TMUX check first
     assert.ok(fn.includes("process.env.TMUX"), "auto branch checks TMUX env");
     // Final fallback
-    assert.ok(fn.includes('return "in-process"'), "final fallback returns in-process");
+    assert.ok(
+      fn.includes('return "in-process"'),
+      "final fallback returns in-process",
+    );
   });
 
   it("auto branch checks TMUX env BEFORE detectMultiplexer", () => {
     const src = readFileSync(runtimeModePath, "utf8");
-    const fnMatch = src.match(/export function normalizeTeammateMode[\s\S]*?^}/m);
+    const fnMatch = src.match(
+      /export function normalizeTeammateMode[\s\S]*?^}/m,
+    );
     assert.ok(fnMatch);
     const fn = fnMatch[0];
 

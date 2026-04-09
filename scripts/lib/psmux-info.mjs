@@ -8,9 +8,7 @@ export const PSMUX_REQUIRED_COMMANDS = [
   "capture-pane",
 ];
 
-export const PSMUX_OPTIONAL_COMMANDS = [
-  "detach-client",
-];
+export const PSMUX_OPTIONAL_COMMANDS = ["detach-client"];
 
 export const PSMUX_INSTALL_COMMANDS = [
   "winget install marlocarlo.psmux",
@@ -26,7 +24,10 @@ export const PSMUX_UPDATE_COMMANDS = [
   "cargo install psmux --force",
 ];
 
-export function formatPsmuxCommandList(commands = PSMUX_INSTALL_COMMANDS, indent = "") {
+export function formatPsmuxCommandList(
+  commands = PSMUX_INSTALL_COMMANDS,
+  indent = "",
+) {
   return commands.map((command) => `${indent}${command}`).join("\n");
 }
 
@@ -44,8 +45,12 @@ export function parsePsmuxVersion(output = "") {
 }
 
 export function compareSemver(a, b) {
-  const left = String(a || "").split(".").map((part) => Number.parseInt(part, 10) || 0);
-  const right = String(b || "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const left = String(a || "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+  const right = String(b || "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
   for (let index = 0; index < 3; index += 1) {
     if (left[index] > right[index]) return 1;
     if (left[index] < right[index]) return -1;

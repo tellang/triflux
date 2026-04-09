@@ -22,7 +22,8 @@ export function normalizeTeammateMode(mode = "auto") {
 export function normalizeLayout(layout = "2x2") {
   const raw = String(layout).toLowerCase();
   if (raw === "2x2" || raw === "grid") return "2x2";
-  if (raw === "1xn" || raw === "1x3" || raw === "vertical" || raw === "columns") return "1xN";
+  if (raw === "1xn" || raw === "1x3" || raw === "vertical" || raw === "columns")
+    return "1xN";
   if (raw === "nx1" || raw === "horizontal" || raw === "rows") return "Nx1";
   return "2x2";
 }

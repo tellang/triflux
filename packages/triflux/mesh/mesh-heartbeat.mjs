@@ -48,7 +48,7 @@ export function createHeartbeatMonitor(registry, opts = {}) {
 
     for (const agent of registered) {
       const lastBeat = heartbeats.get(agent.agentId);
-      if (lastBeat === undefined || (now - lastBeat) >= threshold) {
+      if (lastBeat === undefined || now - lastBeat >= threshold) {
         stale.push(agent.agentId);
       }
     }

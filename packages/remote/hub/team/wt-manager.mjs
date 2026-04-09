@@ -61,8 +61,8 @@ function buildWrappedCommand(pidFile, command) {
  * CreateProcess 이중 쿼팅 문제를 완전히 회피한다.
  */
 function encodeForPowerShell(script) {
-  const buf = Buffer.from(script, 'utf16le');
-  return buf.toString('base64');
+  const buf = Buffer.from(script, "utf16le");
+  return buf.toString("base64");
 }
 
 function matchesTitlePattern(title, pattern) {
@@ -316,29 +316,35 @@ export function createWtManager(opts = {}) {
    * @param {number} [opts.size] — 퍼센트 (0-100)
    */
   async function splitPane(opts = {}) {
-    const direction = opts.direction === 'H' ? '-H' : '-V';
-    const args = ['-w', windowName, 'sp', direction];
+    const direction = opts.direction === "H" ? "-H" : "-V";
+    const args = ["-w", windowName, "sp", direction];
 
     if (opts.title) {
-      args.push('--title', String(opts.title));
+      args.push("--title", String(opts.title));
     }
     if (opts.profile) {
-      args.push('--profile', String(opts.profile));
+      args.push("--profile", String(opts.profile));
     }
     if (opts.size && Number.isFinite(opts.size)) {
-      args.push('-s', String(opts.size / 100));
+      args.push("-s", String(opts.size / 100));
     }
     if (opts.cwd) {
-      args.push('-d', String(opts.cwd));
+      args.push("-d", String(opts.cwd));
     }
     if (opts.command) {
       const script = opts.command;
-      args.push('--', 'powershell.exe', '-NoExit', '-EncodedCommand', encodeForPowerShell(script));
+      args.push(
+        "--",
+        "powershell.exe",
+        "-NoExit",
+        "-EncodedCommand",
+        encodeForPowerShell(script),
+      );
     }
 
-    const child = spawnFn('wt.exe', args, {
+    const child = spawnFn("wt.exe", args, {
       detached: true,
-      stdio: 'ignore',
+      stdio: "ignore",
     });
     child?.unref?.();
 
@@ -355,12 +361,16 @@ export function createWtManager(opts = {}) {
 
     // 첫 번째는 새 탭으로 생성
     const first = panes[0];
-    await createTab({ title: first.title, command: first.command, profile: first.profile });
+    await createTab({
+      title: first.title,
+      command: first.command,
+      profile: first.profile,
+    });
 
     // 나머지는 split-pane으로 분할
     for (let i = 1; i < panes.length; i++) {
       await splitPane({
-        direction: panes[i].direction || 'V',
+        direction: panes[i].direction || "V",
         title: panes[i].title,
         command: panes[i].command,
         profile: panes[i].profile,

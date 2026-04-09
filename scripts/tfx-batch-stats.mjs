@@ -11,8 +11,8 @@
 //   node tfx-batch-stats.mjs agent <name>          특정 에이전트 통계
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 const CACHE_DIR = join(homedir(), ".claude", "cache");
 const EVENTS_FILE = join(CACHE_DIR, "batch-events.jsonl");
@@ -21,18 +21,30 @@ const EVENTS_FILE = join(CACHE_DIR, "batch-events.jsonl");
 const AIMD_INITIAL = 3;
 const AIMD_MIN = 1;
 const AIMD_MAX = 10;
-const AIMD_INC = 1;        // 성공 시 +1
-const AIMD_DEC = 0.5;      // 실패 시 ×0.5
+const AIMD_INC = 1; // 성공 시 +1
+const AIMD_DEC = 0.5; // 실패 시 ×0.5
 const WINDOW_MS = 30 * 60 * 1000; // 30분 윈도우
 
 // ── 이벤트 읽기 ──
 export function readBatchEvents(opts = {}) {
   const { sinceMs = 0, agent = null } = opts;
   try {
-    const lines = readFileSync(EVENTS_FILE, "utf-8").trim().split("\n").filter(Boolean);
+    const lines = readFileSync(EVENTS_FILE, "utf-8")
+      .trim()
+      .split("\n")
+      .filter(Boolean);
     return lines
-      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
-      .filter((e) => e && (!sinceMs || e.ts >= sinceMs) && (!agent || e.agent === agent));
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
+      .filter(
+        (e) =>
+          e && (!sinceMs || e.ts >= sinceMs) && (!agent || e.agent === agent),
+      );
   } catch {
     return [];
   }
@@ -44,9 +56,11 @@ export function getAgentStats(opts = {}) {
   const stats = {};
 
   for (const ev of events) {
-    if (!stats[ev.agent]) stats[ev.agent] = { success: 0, fail: 0, timeout: 0, total: 0 };
+    if (!stats[ev.agent])
+      stats[ev.agent] = { success: 0, fail: 0, timeout: 0, total: 0 };
     const s = stats[ev.agent];
-    if (ev.result === "success" || ev.result === "success_with_warnings") s.success++;
+    if (ev.result === "success" || ev.result === "success_with_warnings")
+      s.success++;
     else if (ev.result === "timeout") s.timeout++;
     else s.fail++;
     s.total++;
@@ -85,11 +99,18 @@ if (scriptName.endsWith("tfx-batch-stats.mjs")) {
   const sinceMs = recent ? Date.now() - WINDOW_MS : 0;
 
   if (cmd === "batch") {
-    console.log(JSON.stringify({ batchSize: getAimdBatchSize(), window: "30m" }));
+    console.log(
+      JSON.stringify({ batchSize: getAimdBatchSize(), window: "30m" }),
+    );
   } else if (cmd === "agent") {
     const name = process.argv[3];
-    if (!name) { console.error("에이전트명 필수: node tfx-batch-stats.mjs agent executor"); process.exit(1); }
-    console.log(JSON.stringify(getAgentStats({ sinceMs, agent: name }), null, 2));
+    if (!name) {
+      console.error("에이전트명 필수: node tfx-batch-stats.mjs agent executor");
+      process.exit(1);
+    }
+    console.log(
+      JSON.stringify(getAgentStats({ sinceMs, agent: name }), null, 2),
+    );
   } else {
     console.log(JSON.stringify(getAgentStats({ sinceMs }), null, 2));
   }

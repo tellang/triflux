@@ -18,7 +18,9 @@ function runCommand(command, cwd, executor = execSync) {
 }
 
 function parseStatusLines(statusText) {
-  const lines = String(statusText || "").split(/\r?\n/u).filter(Boolean);
+  const lines = String(statusText || "")
+    .split(/\r?\n/u)
+    .filter(Boolean);
   const changedFiles = [];
   const status = [];
 
@@ -28,7 +30,9 @@ function parseStatusLines(statusText) {
 
     const rawStatus = normalized.slice(0, 2).trim() || "??";
     const rawPath = normalized.slice(3).trim();
-    const filePath = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1)?.trim() : rawPath;
+    const filePath = rawPath.includes(" -> ")
+      ? rawPath.split(" -> ").at(-1)?.trim()
+      : rawPath;
     if (!filePath) continue;
 
     changedFiles.push(filePath);
@@ -82,22 +86,30 @@ function formatAheadBehind(value) {
 
 export function collectHandoffContext(options = {}) {
   const cwd = resolve(options.cwd || process.cwd());
-  const executor = typeof options.commandRunner === "function" ? options.commandRunner : execSync;
+  const executor =
+    typeof options.commandRunner === "function"
+      ? options.commandRunner
+      : execSync;
   const target = options.target === "local" ? "local" : "remote";
   const decisions = normalizeDecisions(options.decisions, options.decisionFile);
   const generatedAt = options.generatedAt || new Date().toISOString();
   const claudeMdPaths = Array.isArray(options.claudeMdPaths)
     ? options.claudeMdPaths
     : findAllClaudeMdPaths({
-      cwd,
-      homeDir: options.homeDir,
-    });
+        cwd,
+        homeDir: options.homeDir,
+      });
 
   const gitRoot = runCommand("git rev-parse --show-toplevel", cwd, executor);
-  const branch = runCommand("git rev-parse --abbrev-ref HEAD", cwd, executor) || null;
+  const branch =
+    runCommand("git rev-parse --abbrev-ref HEAD", cwd, executor) || null;
   const shortStatus = runCommand("git status --short", cwd, executor);
   const diffStat = runCommand("git diff --stat --no-color", cwd, executor);
-  const upstreamRaw = runCommand("git rev-list --left-right --count @{upstream}...HEAD", cwd, executor);
+  const upstreamRaw = runCommand(
+    "git rev-list --left-right --count @{upstream}...HEAD",
+    cwd,
+    executor,
+  );
   const parsedStatus = parseStatusLines(shortStatus);
 
   return {
@@ -122,15 +134,19 @@ export function buildHandoffPrompt(context) {
   const upstream = safeContext.upstream
     ? `ahead ${safeContext.upstream.ahead}, behind ${safeContext.upstream.behind}`
     : "unknown";
-  const changedFiles = safeContext.changedFiles.length > 0
-    ? safeContext.changedFiles.map((file) => `- ${file}`).join("\n")
-    : "- 변경 파일 없음";
-  const decisions = safeContext.decisions.length > 0
-    ? safeContext.decisions.map((decision) => `- ${decision}`).join("\n")
-    : "- 명시된 결정사항 없음";
-  const claudeMdList = Array.isArray(safeContext.claudeMdPaths) && safeContext.claudeMdPaths.length > 0
-    ? safeContext.claudeMdPaths.map((path) => `- ${path}`).join("\n")
-    : "- 자동 탐지된 CLAUDE.md 없음";
+  const changedFiles =
+    safeContext.changedFiles.length > 0
+      ? safeContext.changedFiles.map((file) => `- ${file}`).join("\n")
+      : "- 변경 파일 없음";
+  const decisions =
+    safeContext.decisions.length > 0
+      ? safeContext.decisions.map((decision) => `- ${decision}`).join("\n")
+      : "- 명시된 결정사항 없음";
+  const claudeMdList =
+    Array.isArray(safeContext.claudeMdPaths) &&
+    safeContext.claudeMdPaths.length > 0
+      ? safeContext.claudeMdPaths.map((path) => `- ${path}`).join("\n")
+      : "- 자동 탐지된 CLAUDE.md 없음";
   const diffStat = safeContext.diffStat || "(diff stat 없음)";
 
   return [

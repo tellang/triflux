@@ -6,24 +6,77 @@ import { join } from "node:path";
 
 export const VERSION = "2.0";
 
-export const QOS_PATH = join(homedir(), ".omc", "state", "cli_qos_profile.json");
-export const ACCOUNTS_CONFIG_PATH = join(homedir(), ".omc", "router", "accounts.json");
-export const ACCOUNTS_STATE_PATH = join(homedir(), ".omc", "state", "cli_accounts_state.json");
+export const QOS_PATH = join(
+  homedir(),
+  ".omc",
+  "state",
+  "cli_qos_profile.json",
+);
+export const ACCOUNTS_CONFIG_PATH = join(
+  homedir(),
+  ".omc",
+  "router",
+  "accounts.json",
+);
+export const ACCOUNTS_STATE_PATH = join(
+  homedir(),
+  ".omc",
+  "state",
+  "cli_accounts_state.json",
+);
 
 // tfx-multi 상태 (v2.2 HUD 통합)
-export const TEAM_STATE_PATH = join(homedir(), ".claude", "cache", "tfx-hub", "team-state.json");
-export const CONTEXT_MONITOR_CACHE_PATH = join(homedir(), ".claude", "cache", "tfx-hub", "context-monitor.json");
-export const CONTEXT_MONITOR_LEGACY_PATH = join(homedir(), ".omc", "state", "context-monitor.json");
+export const TEAM_STATE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "tfx-hub",
+  "team-state.json",
+);
+export const CONTEXT_MONITOR_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "tfx-hub",
+  "context-monitor.json",
+);
+export const CONTEXT_MONITOR_LEGACY_PATH = join(
+  homedir(),
+  ".omc",
+  "state",
+  "context-monitor.json",
+);
 export const CONTEXT_MONITOR_LOG_DIR = join(homedir(), ".omc", "logs");
 
 // 원격 프로브 캐시 (tfx-remote-spawn)
-export const REMOTE_ENV_CACHE_DIR = join(homedir(), ".claude", "cache", "tfx-hub", "remote-env");
+export const REMOTE_ENV_CACHE_DIR = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "tfx-hub",
+  "remote-env",
+);
 export const REMOTE_ENV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24시간
 
 // Claude OAuth Usage API (api.anthropic.com/api/oauth/usage)
-export const CLAUDE_CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
-export const CLAUDE_USAGE_CACHE_PATH = join(homedir(), ".claude", "cache", "claude-usage-cache.json");
-export const OMC_PLUGIN_USAGE_CACHE_PATH = join(homedir(), ".claude", "plugins", "oh-my-claudecode", ".usage-cache.json");
+export const CLAUDE_CREDENTIALS_PATH = join(
+  homedir(),
+  ".claude",
+  ".credentials.json",
+);
+export const CLAUDE_USAGE_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "claude-usage-cache.json",
+);
+export const OMC_PLUGIN_USAGE_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "plugins",
+  "oh-my-claudecode",
+  ".usage-cache.json",
+);
 export const CLAUDE_USAGE_STALE_MS_SOLO = 5 * 60 * 1000; // OMC 없을 때: 5분 캐시
 export const CLAUDE_USAGE_STALE_MS_WITH_OMC = 15 * 60 * 1000; // OMC 있을 때: 15분 (OMC가 30초마다 갱신)
 export const CLAUDE_USAGE_429_BACKOFF_MS = 10 * 60 * 1000; // 429 에러 시 10분 backoff
@@ -38,30 +91,105 @@ export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 export const CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
-export const CODEX_QUOTA_CACHE_PATH = join(homedir(), ".claude", "cache", "codex-rate-limits-cache.json");
+export const CODEX_QUOTA_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "codex-rate-limits-cache.json",
+);
 export const CODEX_QUOTA_STALE_MS = 30 * 1000; // 30초
 export const CODEX_MIN_BUCKETS = 2;
 
 // Spawn lock (중복 refresh 방지)
-export const CLAUDE_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".claude-refresh-lock");
-export const CODEX_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".codex-refresh-lock");
-export const GEMINI_QUOTA_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".gemini-quota-refresh-lock");
-export const GEMINI_SESSION_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".gemini-session-refresh-lock");
+export const CLAUDE_REFRESH_LOCK_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  ".claude-refresh-lock",
+);
+export const CODEX_REFRESH_LOCK_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  ".codex-refresh-lock",
+);
+export const GEMINI_QUOTA_REFRESH_LOCK_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  ".gemini-quota-refresh-lock",
+);
+export const GEMINI_SESSION_REFRESH_LOCK_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  ".gemini-session-refresh-lock",
+);
 export const SPAWN_LOCK_TTL_MS = 30 * 1000; // 30초 spawn dedup
 
 // Gemini 쿼터 API 관련
 export const GEMINI_OAUTH_PATH = join(homedir(), ".gemini", "oauth_creds.json");
-export const GEMINI_QUOTA_CACHE_PATH = join(homedir(), ".claude", "cache", "gemini-quota-cache.json");
-export const GEMINI_PROJECT_CACHE_PATH = join(homedir(), ".claude", "cache", "gemini-project-id.json");
-export const GEMINI_SESSION_CACHE_PATH = join(homedir(), ".claude", "cache", "gemini-session-cache.json");
-export const GEMINI_RPM_TRACKER_PATH = join(homedir(), ".claude", "cache", "gemini-rpm-tracker.json");
-export const SV_ACCUMULATOR_PATH = join(homedir(), ".claude", "cache", "sv-accumulator.json");
+export const GEMINI_QUOTA_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "gemini-quota-cache.json",
+);
+export const GEMINI_PROJECT_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "gemini-project-id.json",
+);
+export const GEMINI_SESSION_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "gemini-session-cache.json",
+);
+export const GEMINI_RPM_TRACKER_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "gemini-rpm-tracker.json",
+);
+export const SV_ACCUMULATOR_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "sv-accumulator.json",
+);
 // 이전 .omc/ 경로 fallback (기존 환경 호환)
-export const LEGACY_GEMINI_QUOTA_CACHE = join(homedir(), ".omc", "state", "gemini_quota_cache.json");
-export const LEGACY_GEMINI_PROJECT_CACHE = join(homedir(), ".omc", "state", "gemini_project_id.json");
-export const LEGACY_GEMINI_SESSION_CACHE = join(homedir(), ".omc", "state", "gemini_session_tokens_cache.json");
-export const LEGACY_GEMINI_RPM_TRACKER = join(homedir(), ".omc", "state", "gemini_rpm_tracker.json");
-export const LEGACY_SV_ACCUMULATOR = join(homedir(), ".omc", "state", "sv-accumulator.json");
+export const LEGACY_GEMINI_QUOTA_CACHE = join(
+  homedir(),
+  ".omc",
+  "state",
+  "gemini_quota_cache.json",
+);
+export const LEGACY_GEMINI_PROJECT_CACHE = join(
+  homedir(),
+  ".omc",
+  "state",
+  "gemini_project_id.json",
+);
+export const LEGACY_GEMINI_SESSION_CACHE = join(
+  homedir(),
+  ".omc",
+  "state",
+  "gemini_session_tokens_cache.json",
+);
+export const LEGACY_GEMINI_RPM_TRACKER = join(
+  homedir(),
+  ".omc",
+  "state",
+  "gemini_rpm_tracker.json",
+);
+export const LEGACY_SV_ACCUMULATOR = join(
+  homedir(),
+  ".omc",
+  "state",
+  "sv-accumulator.json",
+);
 
 export const GEMINI_RPM_WINDOW_MS = 60 * 1000; // 60초 슬라이딩 윈도우
 export const GEMINI_QUOTA_STALE_MS = 5 * 60 * 1000; // 5분
@@ -91,5 +219,12 @@ export const ROWS_BUDGET_MEDIUM = 28;
 export const ROWS_BUDGET_SMALL = 22;
 
 // Gemini Pro 풀 공유 그룹: 같은 remainingFraction을 공유하는 모델 ID들
-export const GEMINI_PRO_POOL = new Set(["gemini-2.5-pro", "gemini-3-pro-preview", "gemini-3.1-pro-preview"]);
-export const GEMINI_FLASH_POOL = new Set(["gemini-2.5-flash", "gemini-3-flash-preview"]);
+export const GEMINI_PRO_POOL = new Set([
+  "gemini-2.5-pro",
+  "gemini-3-pro-preview",
+  "gemini-3.1-pro-preview",
+]);
+export const GEMINI_FLASH_POOL = new Set([
+  "gemini-2.5-flash",
+  "gemini-3-flash-preview",
+]);

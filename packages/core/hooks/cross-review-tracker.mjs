@@ -9,9 +9,9 @@
 //   2. 일정 수(REVIEW_THRESHOLD) 이상 미검증 파일이 쌓이면 nudge 메시지 주입
 //   3. git commit 전 미검증 파일 경고
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
 
 const STATE_DIR = join(tmpdir(), "tfx-cross-review");
 const STATE_FILE = join(STATE_DIR, "pending-review.json");
@@ -20,9 +20,24 @@ const EXPIRE_MS = 60 * 60 * 1000; // 1시간 후 자동 만료
 
 // 코드 파일만 추적 (설정/문서/빌드 산출물 제외)
 const CODE_EXTENSIONS = new Set([
-  ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
-  ".py", ".rs", ".go", ".java", ".c", ".cpp", ".h",
-  ".vue", ".svelte", ".sh", ".bash", ".ps1",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".jsx",
+  ".py",
+  ".rs",
+  ".go",
+  ".java",
+  ".c",
+  ".cpp",
+  ".h",
+  ".vue",
+  ".svelte",
+  ".sh",
+  ".bash",
+  ".ps1",
 ]);
 
 function isCodeFile(filePath) {
@@ -93,9 +108,7 @@ function main() {
   saveState(state);
 
   // 미검증 파일 수 체크
-  const unreviewed = Object.entries(state.files).filter(
-    ([, v]) => !v.reviewed
-  );
+  const unreviewed = Object.entries(state.files).filter(([, v]) => !v.reviewed);
   const count = unreviewed.length;
 
   if (count >= REVIEW_THRESHOLD) {

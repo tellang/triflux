@@ -26,7 +26,9 @@ function clamp(value, min, max) {
 
 function pad(text, width) {
   const value = String(text ?? "");
-  return value.length >= width ? value : value + " ".repeat(width - value.length);
+  return value.length >= width
+    ? value
+    : value + " ".repeat(width - value.length);
 }
 
 function formatElapsed(ms) {
@@ -34,7 +36,8 @@ function formatElapsed(ms) {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
-  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  if (hours > 0)
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
@@ -49,20 +52,25 @@ function escapePs(value) {
 }
 
 function sanitizeTitle(value, fallback = "agent") {
-  const safe = String(value || "").replace(/[\r\n<>:"/\\|?*\x00-\x1f]/g, " ").trim();
+  const safe = String(value || "")
+    .replace(/[\r\n<>:"/\\|?*\x00-\x1f]/g, " ")
+    .trim();
   return safe || fallback;
 }
 
 function stripUnsafeText(value) {
-  return String(value || "").replace(/[\r\n\t]+/g, " ").trim();
+  return String(value || "")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim();
 }
 
 function buildOpenCommand(agent) {
   const sessionName = escapePs(agent.agent || "");
   const pid = Number(agent.pid) || 0;
-  const processInfo = pid > 0
-    ? `Get-Process -Id ${pid} -ErrorAction SilentlyContinue | Format-List Id,ProcessName,StartTime`
-    : "Write-Host 'PID 정보가 없습니다.'";
+  const processInfo =
+    pid > 0
+      ? `Get-Process -Id ${pid} -ErrorAction SilentlyContinue | Format-List Id,ProcessName,StartTime`
+      : "Write-Host 'PID 정보가 없습니다.'";
   return [
     "$ErrorActionPreference = 'Continue'",
     `if (Get-Command psmux -ErrorAction SilentlyContinue) { try { psmux attach-session -t '${sessionName}' } catch { Write-Host 'psmux attach 실패:' $_.Exception.Message } }`,
@@ -79,7 +87,9 @@ function resolveRatio(agent, maxElapsed) {
 export function createMonitor(opts = {}) {
   const stream = opts.stream || process.stdout;
   const input = opts.input || process.stdin;
-  const refreshMs = Number.isFinite(opts.refreshMs) ? Math.max(0, opts.refreshMs) : 1000;
+  const refreshMs = Number.isFinite(opts.refreshMs)
+    ? Math.max(0, opts.refreshMs)
+    : 1000;
   const deps = {
     pollAgents,
     fetchHubStatus,
@@ -116,25 +126,45 @@ export function createMonitor(opts = {}) {
       return false;
     }
 
-    const title = sanitizeTitle(`tfx ${agent.agent || agent.cli || agent.pid}`, "tfx-agent");
+    const title = sanitizeTitle(
+      `tfx ${agent.agent || agent.cli || agent.pid}`,
+      "tfx-agent",
+    );
     const command = buildOpenCommand(agent);
 
     try {
       try {
-        const { createWtManager } = await deps.importModule("../hub/team/wt-manager.mjs");
+        const { createWtManager } = await deps.importModule(
+          "../hub/team/wt-manager.mjs",
+        );
         const manager = createWtManager();
-        await manager.createTab({ title, command, cwd: process.cwd(), profile: "triflux" });
-      } catch {
-        const child = deps.spawn("wt.exe", [
-          "-w", "new", "nt",
-          "--title", title,
-          "--",
-          "powershell.exe", "-NoExit", "-Command", command,
-        ], {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: false,
+        await manager.createTab({
+          title,
+          command,
+          cwd: process.cwd(),
+          profile: "triflux",
         });
+      } catch {
+        const child = deps.spawn(
+          "wt.exe",
+          [
+            "-w",
+            "new",
+            "nt",
+            "--title",
+            title,
+            "--",
+            "powershell.exe",
+            "-NoExit",
+            "-Command",
+            command,
+          ],
+          {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: false,
+          },
+        );
         child?.unref?.();
       }
       statusMessage = `${GREEN}${stripUnsafeText(agent.agent || "agent")} 열기 시도 완료${RESET}`;
@@ -152,11 +182,17 @@ export function createMonitor(opts = {}) {
     ]);
 
     agents = Array.isArray(nextAgents) ? nextAgents : [];
-    hubStatus = nextHubStatus && typeof nextHubStatus === "object" ? nextHubStatus : { online: false };
+    hubStatus =
+      nextHubStatus && typeof nextHubStatus === "object"
+        ? nextHubStatus
+        : { online: false };
     syncCursor();
 
     const width = viewportWidth();
-    const maxElapsed = agents.reduce((max, agent) => Math.max(max, Number(agent.elapsed) || 0), 0);
+    const maxElapsed = agents.reduce(
+      (max, agent) => Math.max(max, Number(agent.elapsed) || 0),
+      0,
+    );
     const hubLabel = hubStatus.online
       ? `${GREEN}online${RESET}`
       : `${RED}offline${RESET}`;
@@ -177,10 +213,14 @@ export function createMonitor(opts = {}) {
         const cli = stripUnsafeText(agent.cli || "unknown");
         const name = stripUnsafeText(agent.agent || `pid:${agent.pid || "?"}`);
         const elapsed = formatElapsed(agent.elapsed);
-        const alive = agent.alive ? `${GREEN}alive${RESET}` : `${RED}dead${RESET}`;
+        const alive = agent.alive
+          ? `${GREEN}alive${RESET}`
+          : `${RED}dead${RESET}`;
         const left = `${marker} ${colorCli(cli)}${cli}${RESET} ${BOLD}${name}${RESET} ${GRAY}${elapsed}${RESET}`;
         if (hubStatus.online) {
-          lines.push(`${left} ${BLUE}${progressBar(resolveRatio(agent, maxElapsed))}${RESET}`);
+          lines.push(
+            `${left} ${BLUE}${progressBar(resolveRatio(agent, maxElapsed))}${RESET}`,
+          );
         } else {
           lines.push(`${left} ${alive}`);
         }
@@ -198,7 +238,10 @@ export function createMonitor(opts = {}) {
     }
 
     if (statusMessage) lines.push("", statusMessage);
-    lines.push("", `${DIM}[Enter] open [j/k] select [r] refresh [h] help [q] quit${RESET}`);
+    lines.push(
+      "",
+      `${DIM}[Enter] open [j/k] select [r] refresh [h] help [q] quit${RESET}`,
+    );
 
     write("\x1b[H");
     write(lines.join("\n"));
@@ -210,7 +253,8 @@ export function createMonitor(opts = {}) {
     const name = key?.name || "";
     if (str === "j" || name === "down") {
       syncCursor();
-      cursor = agents.length === 0 ? 0 : Math.min(cursor + 1, agents.length - 1);
+      cursor =
+        agents.length === 0 ? 0 : Math.min(cursor + 1, agents.length - 1);
       await renderFrame();
       return;
     }

@@ -1,21 +1,18 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { Buffer } from "node:buffer";
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Buffer } from "node:buffer";
+import { join } from "node:path";
+import { describe, it } from "node:test";
 
-import {
-  buildAll,
-  resolveTargetPath,
-} from "../../scripts/cache-warmup.mjs";
+import { buildAll, resolveTargetPath } from "../../scripts/cache-warmup.mjs";
 
 function makeTempDir(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -25,59 +22,106 @@ function setupFixture() {
   const homeDir = makeTempDir("tfx-cache-warmup-home-");
   const cwd = makeTempDir("tfx-cache-warmup-project-");
 
-  mkdirSync(join(homeDir, ".codex", "skills", "custom-plan"), { recursive: true });
-  writeFileSync(join(homeDir, ".codex", "skills", "custom-plan", "SKILL.md"), `---
+  mkdirSync(join(homeDir, ".codex", "skills", "custom-plan"), {
+    recursive: true,
+  });
+  writeFileSync(
+    join(homeDir, ".codex", "skills", "custom-plan", "SKILL.md"),
+    `---
 name: custom-plan
 description: plan the work
 ---
-`, "utf8");
+`,
+    "utf8",
+  );
 
   mkdirSync(join(homeDir, ".claude", "cache"), { recursive: true });
-  writeFileSync(join(homeDir, ".claude", "cache", "mcp-inventory.json"), JSON.stringify({
-    codex: {
-      servers: [
-        { name: "brave-search", status: "enabled", tool_count: 2, domain_tags: ["search", "web"] },
-      ],
-    },
-  }, null, 2), "utf8");
+  writeFileSync(
+    join(homeDir, ".claude", "cache", "mcp-inventory.json"),
+    JSON.stringify(
+      {
+        codex: {
+          servers: [
+            {
+              name: "brave-search",
+              status: "enabled",
+              tool_count: 2,
+              domain_tags: ["search", "web"],
+            },
+          ],
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 
   mkdirSync(join(cwd, ".claude"), { recursive: true });
-  writeFileSync(join(cwd, ".claude", "mcp.json"), JSON.stringify({
-    mcpServers: {
-      tavily: { url: "http://example.test" },
-    },
-  }, null, 2), "utf8");
+  writeFileSync(
+    join(cwd, ".claude", "mcp.json"),
+    JSON.stringify(
+      {
+        mcpServers: {
+          tavily: { url: "http://example.test" },
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 
-  writeFileSync(join(cwd, "package.json"), JSON.stringify({
-    name: "warmup-fixture",
-    description: "fixture project",
-    scripts: { test: "node --test" },
-  }, null, 2), "utf8");
+  writeFileSync(
+    join(cwd, "package.json"),
+    JSON.stringify(
+      {
+        name: "warmup-fixture",
+        description: "fixture project",
+        scripts: { test: "node --test" },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 
   return { homeDir, cwd };
 }
 
 function makeJwt(plan = "pro", extra = {}) {
-  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url");
-  const payload = Buffer.from(JSON.stringify({
-    sub: "user-1",
-    exp: 1_900_000_000,
-    "https://api.openai.com/auth": {
-      chatgpt_plan_type: plan,
-    },
-    ...extra,
-  })).toString("base64url");
+  const header = Buffer.from(
+    JSON.stringify({ alg: "none", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      sub: "user-1",
+      exp: 1_900_000_000,
+      "https://api.openai.com/auth": {
+        chatgpt_plan_type: plan,
+      },
+      ...extra,
+    }),
+  ).toString("base64url");
   return `${header}.${payload}.sig`;
 }
 
 function writeAuth(homeDir, plan = "pro", extra = {}) {
   mkdirSync(join(homeDir, ".codex"), { recursive: true });
-  writeFileSync(join(homeDir, ".codex", "auth.json"), JSON.stringify({
-    auth_mode: "chatgpt",
-    tokens: {
-      id_token: makeJwt(plan, extra),
-    },
-  }, null, 2), "utf8");
+  writeFileSync(
+    join(homeDir, ".codex", "auth.json"),
+    JSON.stringify(
+      {
+        auth_mode: "chatgpt",
+        tokens: {
+          id_token: makeJwt(plan, extra),
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 }
 
 function cleanupFixture({ homeDir, cwd }) {
@@ -88,7 +132,8 @@ function cleanupFixture({ homeDir, cwd }) {
 function execSyncStub(command) {
   if (command.startsWith("git rev-parse")) return `${process.cwd()}\n`;
   if (command.startsWith("psmux --version")) return "psmux 1.0.0\n";
-  if (command.startsWith("where wt.exe")) return "C:\\Windows\\System32\\wt.exe\n";
+  if (command.startsWith("where wt.exe"))
+    return "C:\\Windows\\System32\\wt.exe\n";
   throw new Error(`unexpected command: ${command}`);
 }
 
@@ -114,11 +159,24 @@ describe("cache-warmup", () => {
       assert.equal(first.ok, true);
       assert.equal(first.built, 4);
 
-      for (const target of ["codexSkills", "tierEnvironment", "projectMeta", "searchEngines"]) {
-        assert.equal(existsSync(resolveTargetPath(target, { cwd: fixture.cwd })), true);
+      for (const target of [
+        "codexSkills",
+        "tierEnvironment",
+        "projectMeta",
+        "searchEngines",
+      ]) {
+        assert.equal(
+          existsSync(resolveTargetPath(target, { cwd: fixture.cwd })),
+          true,
+        );
       }
 
-      const searchPayload = JSON.parse(readFileSync(resolveTargetPath("searchEngines", { cwd: fixture.cwd }), "utf8"));
+      const searchPayload = JSON.parse(
+        readFileSync(
+          resolveTargetPath("searchEngines", { cwd: fixture.cwd }),
+          "utf8",
+        ),
+      );
       assert.equal(searchPayload.primary_engine, "brave-search");
 
       const second = buildAll({
@@ -177,7 +235,10 @@ describe("cache-warmup", () => {
       assert.equal(changed.built, 3);
       assert.equal(changed.skipped, 1);
       assert.deepEqual(
-        changed.results.filter((result) => result.status === "built").map((result) => result.target).sort(),
+        changed.results
+          .filter((result) => result.status === "built")
+          .map((result) => result.target)
+          .sort(),
         ["codexSkills", "searchEngines", "tierEnvironment"],
       );
     } finally {

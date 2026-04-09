@@ -10,7 +10,15 @@
   },
   "files": {
     "includes": ["**/*.mjs", "**/*.js", "**/*.cjs", "**/*.json"],
-    "experimentalScannerIgnores": ["research/**", "node_modules/**", "**/skills/**", "**/public/**", ".claude/**", "packages/**", "docs/**"]
+    "experimentalScannerIgnores": [
+      "research/**",
+      "node_modules/**",
+      "**/skills/**",
+      "**/public/**",
+      ".claude/**",
+      "packages/**",
+      "docs/**"
+    ]
   },
   "linter": {
     "enabled": true,

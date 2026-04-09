@@ -1,13 +1,13 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
 
 import { progressBar } from "../../hub/team/ansi.mjs";
 import {
-  loadRules,
   compileRules,
+  loadRules,
   matchRules,
 } from "../../scripts/lib/keyword-rules.mjs";
 
@@ -82,21 +82,36 @@ describe("keyword-rules: Korean keyword matching", () => {
   const compiled = compileRules(rawRules);
 
   it("matches handoff-route on Korean input", () => {
-    const matches = matchRules(compiled, "\ud578\ub4dc\uc624\ud504 \uc0dd\uc131");
+    const matches = matchRules(
+      compiled,
+      "\ud578\ub4dc\uc624\ud504 \uc0dd\uc131",
+    );
     const ids = matches.map((r) => r.id);
-    assert.ok(ids.includes("handoff-route"), `handoff-route expected in: ${JSON.stringify(ids)}`);
+    assert.ok(
+      ids.includes("handoff-route"),
+      `handoff-route expected in: ${JSON.stringify(ids)}`,
+    );
   });
 
   it("matches canva-route on Korean input", () => {
     const matches = matchRules(compiled, "\uce94\ubc14 \ub514\uc790\uc778");
     const ids = matches.map((r) => r.id);
-    assert.ok(ids.includes("canva-route"), `canva-route expected in: ${JSON.stringify(ids)}`);
+    assert.ok(
+      ids.includes("canva-route"),
+      `canva-route expected in: ${JSON.stringify(ids)}`,
+    );
   });
 
   it("matches playwright-route on Korean input", () => {
-    const matches = matchRules(compiled, "\ube0c\ub77c\uc6b0\uc800 \ud14c\uc2a4\ud2b8 \uc2e4\ud589");
+    const matches = matchRules(
+      compiled,
+      "\ube0c\ub77c\uc6b0\uc800 \ud14c\uc2a4\ud2b8 \uc2e4\ud589",
+    );
     const ids = matches.map((r) => r.id);
-    assert.ok(ids.includes("playwright-route"), `playwright-route expected in: ${JSON.stringify(ids)}`);
+    assert.ok(
+      ids.includes("playwright-route"),
+      `playwright-route expected in: ${JSON.stringify(ids)}`,
+    );
   });
 });
 
@@ -108,17 +123,21 @@ describe("hub/server.mjs: timing-safe token comparison", () => {
     const src = readFileSync(join(ROOT, "hub/server.mjs"), "utf8");
     assert.ok(
       src.includes("timingSafeEqual"),
-      "timingSafeEqual should be present in server.mjs"
+      "timingSafeEqual should be present in server.mjs",
     );
   });
 
   it("uses timingSafeEqual in authorization check", () => {
     const src = readFileSync(join(ROOT, "hub/server.mjs"), "utf8");
     // Verify it appears in an authorization context, not just as an import
-    const importLine = src.includes("import") && src.includes("timingSafeEqual");
+    const importLine =
+      src.includes("import") && src.includes("timingSafeEqual");
     const usageLine = /timingSafeEqual\(\w+,\s*\w+\)/.test(src);
     assert.ok(importLine, "timingSafeEqual should be imported");
-    assert.ok(usageLine, "timingSafeEqual should be called for token comparison");
+    assert.ok(
+      usageLine,
+      "timingSafeEqual should be called for token comparison",
+    );
   });
 });
 
@@ -127,23 +146,29 @@ describe("hub/server.mjs: timing-safe token comparison", () => {
 // ========================================================================
 describe("native-supervisor.mjs: child process error handler", () => {
   it("registers an error handler on spawned child processes", () => {
-    const src = readFileSync(join(ROOT, "hub/team/native-supervisor.mjs"), "utf8");
+    const src = readFileSync(
+      join(ROOT, "hub/team/native-supervisor.mjs"),
+      "utf8",
+    );
     assert.ok(
       src.includes('child.on("error"'),
-      'child.on("error") handler should be present in native-supervisor.mjs'
+      'child.on("error") handler should be present in native-supervisor.mjs',
     );
   });
 
   it("sets status to exited on spawn error", () => {
-    const src = readFileSync(join(ROOT, "hub/team/native-supervisor.mjs"), "utf8");
+    const src = readFileSync(
+      join(ROOT, "hub/team/native-supervisor.mjs"),
+      "utf8",
+    );
     // The error handler should mark the process as exited
     const errorBlock = src.slice(
       src.indexOf('child.on("error"'),
-      src.indexOf('child.on("error"') + 300
+      src.indexOf('child.on("error"') + 300,
     );
     assert.ok(
       errorBlock.includes('"exited"'),
-      "error handler should set status to exited"
+      "error handler should set status to exited",
     );
   });
 });
@@ -156,7 +181,7 @@ describe("headless.mjs: prompt file-based injection", () => {
     const src = readFileSync(join(ROOT, "hub/team/headless.mjs"), "utf8");
     assert.ok(
       src.includes("Get-Content -Raw"),
-      "headless.mjs should use Get-Content -Raw to read prompt from file"
+      "headless.mjs should use Get-Content -Raw to read prompt from file",
     );
   });
 
@@ -164,7 +189,7 @@ describe("headless.mjs: prompt file-based injection", () => {
     const src = readFileSync(join(ROOT, "hub/team/headless.mjs"), "utf8");
     assert.ok(
       /writeFileSync\([^)]*prompt/i.test(src),
-      "headless.mjs should write prompt to a temp file via writeFileSync"
+      "headless.mjs should write prompt to a temp file via writeFileSync",
     );
   });
 });

@@ -1,8 +1,6 @@
 {
   "name": "tfx-remote-setup",
   "description": "원격 호스트 설정 위저드. AskUserQuestion 기반 인터랙티브 UI로 Tailscale 네트워크 감지, SSH 연결 확인, Claude 설치 프로브, hosts.json 관리를 수행합니다. Use when: remote setup, 원격 설정, 호스트 추가, hosts.json, 원격 환경, remote config, tailscale, 테일스케일",
-  "triggers": [
-    "tfx-remote-setup"
-  ],
+  "triggers": ["tfx-remote-setup"],
   "argument_hint": "[--add|--edit|--probe-all|--diagnose]"
 }

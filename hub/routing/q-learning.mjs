@@ -2,44 +2,84 @@
 // agent-map.json 폴백을 유지하면서, 작업 결과 피드백으로 가중치를 학습한다.
 // 외부 의존성 없음 (fs, path, crypto만 사용)
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { createHash } from 'node:crypto';
-import { createRequire } from 'node:module';
-import { homedir } from 'node:os';
-import { scoreComplexity } from './complexity.mjs';
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { scoreComplexity } from "./complexity.mjs";
 
 const _require = createRequire(import.meta.url);
 
 /** agent-map.json 정적 매핑 (폴백용) */
 let AGENT_MAP;
 try {
-  AGENT_MAP = _require('../team/agent-map.json');
+  AGENT_MAP = _require("../team/agent-map.json");
 } catch {
   AGENT_MAP = {};
 }
 
 /** 사용 가능한 CLI 액션 */
-const ACTIONS = ['codex', 'gemini', 'claude', 'haiku', 'sonnet'];
+const ACTIONS = ["codex", "gemini", "claude", "haiku", "sonnet"];
 
 /** 특성 벡터 키워드 (48차원, 에이전트 타입 기반) */
 const FEATURE_KEYWORDS = [
   // 실행/구현 (codex 친화)
-  'implement', 'execute', 'build', 'fix', 'debug', 'code', 'refactor', 'test',
+  "implement",
+  "execute",
+  "build",
+  "fix",
+  "debug",
+  "code",
+  "refactor",
+  "test",
   // 분석/설계 (claude/sonnet 친화)
-  'analyze', 'architect', 'plan', 'review', 'security', 'optimize', 'research', 'evaluate',
+  "analyze",
+  "architect",
+  "plan",
+  "review",
+  "security",
+  "optimize",
+  "research",
+  "evaluate",
   // 디자인/문서 (gemini 친화)
-  'design', 'ui', 'ux', 'frontend', 'visual', 'document', 'write', 'explain',
+  "design",
+  "ui",
+  "ux",
+  "frontend",
+  "visual",
+  "document",
+  "write",
+  "explain",
   // 간단/빠른 (haiku 친화)
-  'simple', 'quick', 'trivial', 'rename', 'format', 'lint', 'typo', 'minor',
+  "simple",
+  "quick",
+  "trivial",
+  "rename",
+  "format",
+  "lint",
+  "typo",
+  "minor",
   // 한국어 — 실행/구현 (codex 친화)
-  '구현', '빌드', '수정', '디버깅', '리팩터링', '테스트',
+  "구현",
+  "빌드",
+  "수정",
+  "디버깅",
+  "리팩터링",
+  "테스트",
   // 한국어 — 분석/설계 (claude/sonnet 친화)
-  '분석', '아키텍처', '설계', '검토', '보안', '최적화',
+  "분석",
+  "아키텍처",
+  "설계",
+  "검토",
+  "보안",
+  "최적화",
   // 한국어 — 디자인/문서 (gemini 친화)
-  '디자인', '문서화',
+  "디자인",
+  "문서화",
   // 한국어 — 간단/빠른 (haiku 친화)
-  '간단', '사소한',
+  "간단",
+  "사소한",
 ];
 
 /**
@@ -66,7 +106,7 @@ function extractFeatures(text) {
  * @returns {string}
  */
 function stateKey(features) {
-  const hash = createHash('sha256').update(features.join(',')).digest('hex');
+  const hash = createHash("sha256").update(features.join(",")).digest("hex");
   return hash.slice(0, 16);
 }
 
@@ -131,9 +171,11 @@ export class QLearningRouter {
     this._epsilon = opts.epsilon ?? 0.3;
     this._epsilonDecay = opts.epsilonDecay ?? 0.995;
     // epsilon=0 시에도 최소 탐색 보장 (pure-exploit 방지)
-    this._epsilonMin = opts.epsilonMin ?? Math.max(0.01, Math.min(0.05, this._epsilon));
+    this._epsilonMin =
+      opts.epsilonMin ?? Math.max(0.01, Math.min(0.05, this._epsilon));
     this._minConfidence = opts.minConfidence ?? 0.6;
-    this._modelPath = opts.modelPath ?? join(homedir(), '.omc', 'routing-model.json');
+    this._modelPath =
+      opts.modelPath ?? join(homedir(), ".omc", "routing-model.json");
 
     /** @type {Map<string, Map<string, number>>} state -> (action -> Q-value) */
     this._qTable = new Map();
@@ -200,13 +242,16 @@ export class QLearningRouter {
     }
 
     // 신뢰도 계산: 방문 횟수 기반 (최소 10회 이상이면 안정)
-    const confidence = visits >= 10
-      ? Math.min(visits / 50, 1)
-      : visits / 10;
+    const confidence = visits >= 10 ? Math.min(visits / 50, 1) : visits / 10;
 
     const { score: complexity } = scoreComplexity(taskDescription);
 
-    const result = { action, confidence, exploration: isExploration, complexity };
+    const result = {
+      action,
+      confidence,
+      exploration: isExploration,
+      complexity,
+    };
     // 탐색(랜덤) 결과는 캐싱하지 않음 — 매번 새로운 랜덤 액션 생성
     if (!isExploration) this._cache.set(state, result);
     return result;
@@ -241,7 +286,10 @@ export class QLearningRouter {
     this._totalUpdates++;
 
     // 엡실론 감쇠
-    this._epsilon = Math.max(this._epsilonMin, this._epsilon * this._epsilonDecay);
+    this._epsilon = Math.max(
+      this._epsilonMin,
+      this._epsilon * this._epsilonDecay,
+    );
 
     // 캐시 무효화 (해당 상태)
     this._cache.clear();
@@ -251,7 +299,7 @@ export class QLearningRouter {
    * Q-table을 JSON 파일로 영속화
    */
   save() {
-    const dir = join(this._modelPath, '..');
+    const dir = join(this._modelPath, "..");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     const data = {
@@ -269,7 +317,7 @@ export class QLearningRouter {
       data.visitCounts[state] = count;
     }
 
-    writeFileSync(this._modelPath, JSON.stringify(data, null, 2), 'utf8');
+    writeFileSync(this._modelPath, JSON.stringify(data, null, 2), "utf8");
   }
 
   /**
@@ -280,7 +328,7 @@ export class QLearningRouter {
     if (!existsSync(this._modelPath)) return false;
 
     try {
-      const raw = readFileSync(this._modelPath, 'utf8');
+      const raw = readFileSync(this._modelPath, "utf8");
       const data = JSON.parse(raw);
       if (data.version !== 1) return false;
 
@@ -333,4 +381,4 @@ export class QLearningRouter {
 }
 
 // 모듈 레벨 export
-export { ACTIONS, FEATURE_KEYWORDS, extractFeatures, stateKey, LRUCache };
+export { ACTIONS, extractFeatures, FEATURE_KEYWORDS, LRUCache, stateKey };

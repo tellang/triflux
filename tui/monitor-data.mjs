@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
 import { get as httpGet } from "node:http";
+import { join } from "node:path";
 
 const HUB_URL = "http://127.0.0.1:27888";
 const AGENT_FILE_PREFIX = "tfx-agent-";
@@ -126,10 +126,14 @@ function fetchHubStatus(hubUrl = HUB_URL, deps = {}) {
       const req = get(buildStatusUrl(hubUrl), (res) => {
         let body = "";
         res.setEncoding?.("utf8");
-        res.on("data", (chunk) => { body += chunk; });
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
         res.on("end", () => {
           try {
-            finish(res.statusCode === 200 ? parseStatus(body) : { online: false });
+            finish(
+              res.statusCode === 200 ? parseStatus(body) : { online: false },
+            );
           } catch {
             finish({ online: false });
           }
@@ -145,4 +149,4 @@ function fetchHubStatus(hubUrl = HUB_URL, deps = {}) {
   });
 }
 
-export { pollAgents, fetchHubStatus };
+export { fetchHubStatus, pollAgents };

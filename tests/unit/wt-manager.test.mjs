@@ -18,7 +18,7 @@ function extractWrappedCommand(args) {
   const encIdx = args.lastIndexOf("-EncodedCommand");
   if (encIdx >= 0) {
     const b64 = args[encIdx + 1];
-    return Buffer.from(b64, 'base64').toString('utf16le');
+    return Buffer.from(b64, "base64").toString("utf16le");
   }
   const cmdIdx = args.lastIndexOf("-Command");
   return cmdIdx >= 0 ? args[cmdIdx + 1] : "";

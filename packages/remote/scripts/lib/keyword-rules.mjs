@@ -28,21 +28,31 @@ function normalizeRule(rule) {
   if (!rule || typeof rule !== "object") return null;
   if (typeof rule.id !== "string" || !rule.id.trim()) return null;
   if (!Array.isArray(rule.patterns) || rule.patterns.length === 0) return null;
-  if (typeof rule.priority !== "number" || !Number.isFinite(rule.priority)) return null;
+  if (typeof rule.priority !== "number" || !Number.isFinite(rule.priority))
+    return null;
 
   const patterns = rule.patterns.map(normalizePattern).filter(Boolean);
   if (patterns.length === 0) return null;
 
-  const skill = typeof rule.skill === "string" && rule.skill.trim() ? rule.skill.trim() : null;
-  const action = typeof rule.action === "string" && rule.action.trim() ? rule.action.trim() : null;
-  const mcpRoute = typeof rule.mcp_route === "string" && VALID_MCP_ROUTES.has(rule.mcp_route)
-    ? rule.mcp_route
-    : null;
+  const skill =
+    typeof rule.skill === "string" && rule.skill.trim()
+      ? rule.skill.trim()
+      : null;
+  const action =
+    typeof rule.action === "string" && rule.action.trim()
+      ? rule.action.trim()
+      : null;
+  const mcpRoute =
+    typeof rule.mcp_route === "string" && VALID_MCP_ROUTES.has(rule.mcp_route)
+      ? rule.mcp_route
+      : null;
 
   if (!skill && !mcpRoute && !action) return null;
 
   const supersedes = Array.isArray(rule.supersedes)
-    ? rule.supersedes.filter((id) => typeof id === "string" && id.trim()).map((id) => id.trim())
+    ? rule.supersedes
+        .filter((id) => typeof id === "string" && id.trim())
+        .map((id) => id.trim())
     : [];
 
   const state = normalizeState(rule.state);
@@ -57,7 +67,7 @@ function normalizeRule(rule) {
     supersedes,
     exclusive: rule.exclusive === true,
     state,
-    mcp_route: mcpRoute
+    mcp_route: mcpRoute,
   };
 }
 
@@ -81,26 +91,40 @@ export function loadRules(rulesPath) {
 
 // pattern.source / flags를 RegExp로 컴파일
 export function compileRules(rules) {
-  return rules.map((rule) => {
-    try {
-      return { ...rule, compiledPatterns: rule.patterns.map((p) => new RegExp(p.source, p.flags)) };
-    } catch (error) {
-      logRuleError(`정규식 컴파일 실패: ${rule.id}`, error);
-      return null;
-    }
-  }).filter(Boolean);
+  return rules
+    .map((rule) => {
+      try {
+        return {
+          ...rule,
+          compiledPatterns: rule.patterns.map(
+            (p) => new RegExp(p.source, p.flags),
+          ),
+        };
+      } catch (error) {
+        logRuleError(`정규식 컴파일 실패: ${rule.id}`, error);
+        return null;
+      }
+    })
+    .filter(Boolean);
 }
 
 // 입력 텍스트에서 매칭된 규칙 목록 반환
 export function matchRules(compiledRules, cleanText) {
-  if (!Array.isArray(compiledRules) || typeof cleanText !== "string" || !cleanText) {
+  if (
+    !Array.isArray(compiledRules) ||
+    typeof cleanText !== "string" ||
+    !cleanText
+  ) {
     return [];
   }
 
   const matches = [];
 
   for (const rule of compiledRules) {
-    if (!Array.isArray(rule.compiledPatterns) || rule.compiledPatterns.length === 0) {
+    if (
+      !Array.isArray(rule.compiledPatterns) ||
+      rule.compiledPatterns.length === 0
+    ) {
       continue;
     }
 
@@ -119,7 +143,7 @@ export function matchRules(compiledRules, cleanText) {
       supersedes: rule.supersedes || [],
       exclusive: rule.exclusive === true,
       state: rule.state || null,
-      mcp_route: rule.mcp_route || null
+      mcp_route: rule.mcp_route || null,
     });
   }
 

@@ -1,10 +1,9 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
-  detectInputWait,
   createHealthProbe,
-  PROBE_LEVELS,
+  detectInputWait,
   PROBE_DEFAULTS,
 } from "../../hub/team/health-probe.mjs";
 
@@ -48,9 +47,12 @@ describe("health-probe: detectInputWait", () => {
 
   it("마지막 5줄만 검사해야 한다 (오래된 질문 무시)", () => {
     const output = [
-      "Do you want to continue?",  // 오래된 질문 (6번째 줄 이전)
-      "line 1", "line 2", "line 3", "line 4",
-      "Processing complete.",       // 최근 줄은 정상
+      "Do you want to continue?", // 오래된 질문 (6번째 줄 이전)
+      "line 1",
+      "line 2",
+      "line 3",
+      "line 4",
+      "Processing complete.", // 최근 줄은 정상
     ].join("\n");
     const result = detectInputWait(output);
     assert.equal(result.detected, false);
@@ -59,7 +61,7 @@ describe("health-probe: detectInputWait", () => {
 
 describe("health-probe: createHealthProbe", () => {
   it("probe()는 L0/L1/L2/L3 결과를 반환해야 한다", async () => {
-    let outputBytes = 100;
+    const outputBytes = 100;
     const session = {
       pid: 9999,
       alive: true,
@@ -91,7 +93,7 @@ describe("health-probe: createHealthProbe", () => {
   });
 
   it("output이 threshold 동안 변하지 않으면 L1이 stall이어야 한다", async () => {
-    let bytes = 50;
+    const bytes = 50;
     const session = {
       pid: 1,
       alive: true,
@@ -110,7 +112,7 @@ describe("health-probe: createHealthProbe", () => {
   });
 
   it("output이 없지만 질문 패턴이면 L1이 input_wait이어야 한다", async () => {
-    let bytes = 50;
+    const bytes = 50;
     const session = {
       pid: 1,
       alive: true,

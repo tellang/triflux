@@ -49,10 +49,28 @@ describe("createMonitor", () => {
       refreshMs: 0,
       _deps: {
         pollAgents: () => [
-          { pid: 101, cli: "codex", agent: "worker-a", started: 0, elapsed: 4_000, alive: true },
-          { pid: 202, cli: "gemini", agent: "worker-b", started: 0, elapsed: 8_000, alive: true },
+          {
+            pid: 101,
+            cli: "codex",
+            agent: "worker-a",
+            started: 0,
+            elapsed: 4_000,
+            alive: true,
+          },
+          {
+            pid: 202,
+            cli: "gemini",
+            agent: "worker-b",
+            started: 0,
+            elapsed: 8_000,
+            alive: true,
+          },
         ],
-        fetchHubStatus: async () => ({ online: true, queueDepth: 2, agents: 2 }),
+        fetchHubStatus: async () => ({
+          online: true,
+          queueDepth: 2,
+          agents: 2,
+        }),
       },
     });
 
@@ -71,8 +89,22 @@ describe("createMonitor", () => {
       refreshMs: 0,
       _deps: {
         pollAgents: () => [
-          { pid: 1, cli: "codex", agent: "worker-a", started: 0, elapsed: 1_000, alive: true },
-          { pid: 2, cli: "claude", agent: "worker-b", started: 0, elapsed: 2_000, alive: true },
+          {
+            pid: 1,
+            cli: "codex",
+            agent: "worker-a",
+            started: 0,
+            elapsed: 1_000,
+            alive: true,
+          },
+          {
+            pid: 2,
+            cli: "claude",
+            agent: "worker-b",
+            started: 0,
+            elapsed: 2_000,
+            alive: true,
+          },
         ],
         fetchHubStatus: async () => ({ online: false }),
       },

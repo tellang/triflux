@@ -1,12 +1,13 @@
 #!/usr/bin/env node
+
 // SessionStart 훅에서 호출되는 Hub 보장 스크립트.
 // - /status 기반 헬스체크
 // - 비정상 시 Hub를 detached로 기동
 
-import { existsSync, readFileSync } from "fs";
-import { join, dirname } from "path";
-import { homedir } from "os";
 import { spawn } from "child_process";
+import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -23,7 +24,8 @@ function buildHubBaseUrl(host, port) {
 
 function resolveHubTarget() {
   const envPortRaw = Number(process.env.TFX_HUB_PORT || "");
-  const envPort = Number.isFinite(envPortRaw) && envPortRaw > 0 ? envPortRaw : null;
+  const envPort =
+    Number.isFinite(envPortRaw) && envPortRaw > 0 ? envPortRaw : null;
   const target = {
     host: "127.0.0.1",
     port: envPort || 27888,
@@ -70,11 +72,15 @@ function startHubDetached(port) {
     if (process.platform === "win32") {
       // Windows: cmd.exe /c start /b → 완전 독립 프로세스 트리 생성
       // hook timeout 시 프로세스 트리 킬에서 살아남음
-      const child = spawn("cmd.exe", ["/c", "start", "/b", "", process.execPath, serverPath], {
-        env,
-        stdio: "ignore",
-        windowsHide: true,
-      });
+      const child = spawn(
+        "cmd.exe",
+        ["/c", "start", "/b", "", process.execPath, serverPath],
+        {
+          env,
+          stdio: "ignore",
+          windowsHide: true,
+        },
+      );
       child.unref();
     } else {
       const child = spawn(process.execPath, [serverPath], {

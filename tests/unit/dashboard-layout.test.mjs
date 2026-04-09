@@ -1,12 +1,11 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-
+import { describe, it } from "node:test";
+import { parseTeamArgs } from "../../hub/team/cli/commands/start/parse-args.mjs";
+import { parseDashboardAnchor } from "../../hub/team/dashboard-anchor.mjs";
 import {
   parseDashboardLayout,
   resolveDashboardLayout,
 } from "../../hub/team/dashboard-layout.mjs";
-import { parseDashboardAnchor } from "../../hub/team/dashboard-anchor.mjs";
-import { parseTeamArgs } from "../../hub/team/cli/commands/start/parse-args.mjs";
 import { createLogDashboard } from "../../hub/team/tui.mjs";
 
 describe("dashboard-layout", () => {

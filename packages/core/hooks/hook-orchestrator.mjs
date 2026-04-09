@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 // hooks/hook-orchestrator.mjs — 범용 훅 체이닝 엔진
 //
 // settings.json에 이벤트당 하나만 등록. stdin JSON에서 이벤트명+툴명을 읽고
@@ -19,10 +20,10 @@
 //   CLAUDE_PLUGIN_ROOT    — ${PLUGIN_ROOT} 치환용
 //   HOME / USERPROFILE    — ${HOME} 치환용
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { execFile, execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execFileSync, execFile } from "node:child_process";
 import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -84,7 +85,8 @@ function executeHook(hook, stdinData) {
   // "bash script.sh" → ["bash", ["script.sh"]]
   // 따옴표 처리 포함
   const parts = parseCommand(cmd);
-  if (parts.length === 0) return { code: 1, stdout: "", stderr: "empty command" };
+  if (parts.length === 0)
+    return { code: 1, stdout: "", stderr: "empty command" };
 
   const [executable, ...args] = parts;
 
@@ -114,20 +116,35 @@ function executeHookAsync(hook, stdinData) {
     const cmd = resolveCommand(hook.command);
     const timeout = (hook.timeout || 10) * 1000;
     const parts = parseCommand(cmd);
-    if (parts.length === 0) { resolve({ code: 1, stdout: "", stderr: "empty command" }); return; }
+    if (parts.length === 0) {
+      resolve({ code: 1, stdout: "", stderr: "empty command" });
+      return;
+    }
     const [executable, ...args] = parts;
-    const child = execFile(executable, args, {
-      timeout,
-      encoding: "utf8",
-      windowsHide: true,
-      cwd: process.cwd(),
-      env: { ...process.env },
-    }, (err, stdout, stderr) => {
-      if (err) resolve({ code: err.status ?? 1, stdout: stdout || "", stderr: stderr || "" });
-      else resolve({ code: 0, stdout: stdout || "", stderr: "" });
-    });
-    if (stdinData) { child.stdin.write(stdinData); child.stdin.end(); }
-    else child.stdin.end();
+    const child = execFile(
+      executable,
+      args,
+      {
+        timeout,
+        encoding: "utf8",
+        windowsHide: true,
+        cwd: process.cwd(),
+        env: { ...process.env },
+      },
+      (err, stdout, stderr) => {
+        if (err)
+          resolve({
+            code: err.status ?? 1,
+            stdout: stdout || "",
+            stderr: stderr || "",
+          });
+        else resolve({ code: 0, stdout: stdout || "", stderr: "" });
+      },
+    );
+    if (stdinData) {
+      child.stdin.write(stdinData);
+      child.stdin.end();
+    } else child.stdin.end();
   });
 }
 
@@ -170,11 +187,19 @@ function mergeOutputs(accumulated, newOutput) {
 
     // hookSpecificOutput 머지 — additionalContext는 누적, 나머지는 덮어쓰기
     if (parsed.hookSpecificOutput) {
-      if (accumulated.hookSpecificOutput?.additionalContext && parsed.hookSpecificOutput.additionalContext) {
+      if (
+        accumulated.hookSpecificOutput?.additionalContext &&
+        parsed.hookSpecificOutput.additionalContext
+      ) {
         parsed.hookSpecificOutput.additionalContext =
-          accumulated.hookSpecificOutput.additionalContext + "\n" + parsed.hookSpecificOutput.additionalContext;
+          accumulated.hookSpecificOutput.additionalContext +
+          "\n" +
+          parsed.hookSpecificOutput.additionalContext;
       }
-      accumulated.hookSpecificOutput = { ...accumulated.hookSpecificOutput, ...parsed.hookSpecificOutput };
+      accumulated.hookSpecificOutput = {
+        ...accumulated.hookSpecificOutput,
+        ...parsed.hookSpecificOutput,
+      };
     }
     // systemMessage는 누적
     if (parsed.systemMessage) {
@@ -220,7 +245,12 @@ function recordRouteOutcome(slug, mode, outcome) {
 
   const weights = existsSync(weightsPath)
     ? JSON.parse(readFileSync(weightsPath, "utf8"))
-    : { updated_at: null, total_routes: 0, overrides: 0, weights: { mode_bias: {}, profile_bias: {}, depth_bias: {} } };
+    : {
+        updated_at: null,
+        total_routes: 0,
+        overrides: 0,
+        weights: { mode_bias: {}, profile_bias: {}, depth_bias: {} },
+      };
 
   weights.total_routes++;
   weights.updated_at = new Date().toISOString();
@@ -326,7 +356,9 @@ async function main() {
       }
     } else {
       // 같은 priority 다중 훅 — 비동기 병렬 실행
-      const results = await Promise.all(group.hooks.map((h) => executeHookAsync(h, stdinRaw)));
+      const results = await Promise.all(
+        group.hooks.map((h) => executeHookAsync(h, stdinRaw)),
+      );
       for (const result of results) {
         if (result.code === 2) {
           if (result.stderr) process.stderr.write(result.stderr);
@@ -345,13 +377,15 @@ async function main() {
     try {
       const input = JSON.parse(stdinRaw);
       const skillName = input.tool_input?.skill || "";
-      if (skillName && skillName.startsWith("tfx-")) {
+      if (skillName?.startsWith("tfx-")) {
         const mode = skillName.replace(/^tfx-/, "");
         const gitRoot = process.env.GIT_WORK_TREE || process.cwd();
         const slug = gitRoot.split(/[\\/]/).pop() || "unknown";
         recordRouteOutcome(slug, mode, "completion");
       }
-    } catch { /* 가중치 기록 실패 무시 */ }
+    } catch {
+      /* 가중치 기록 실패 무시 */
+    }
   }
 
   // 결과 출력

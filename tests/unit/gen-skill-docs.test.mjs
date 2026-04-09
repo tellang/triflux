@@ -1,8 +1,8 @@
 // tests/unit/gen-skill-docs.test.mjs — gen-skill-docs.mjs 단위 테스트
 import assert from "node:assert/strict";
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -62,7 +62,11 @@ describe("generateSkillDocs", () => {
         { "base.md": "base-partial" },
       );
 
-      const result = generateSkillDocs({ skillsDir, templatesDir, write: true });
+      const result = generateSkillDocs({
+        skillsDir,
+        templatesDir,
+        write: true,
+      });
       assert.equal(result.count, 1);
 
       const output = readFileSync(
@@ -93,7 +97,11 @@ describe("generateSkillDocs", () => {
         {},
       );
 
-      const result = generateSkillDocs({ skillsDir, templatesDir, write: true });
+      const result = generateSkillDocs({
+        skillsDir,
+        templatesDir,
+        write: true,
+      });
       const output = readFileSync(
         join(skillsDir, "tfx-deep-test", "SKILL.md"),
         "utf8",
@@ -180,7 +188,11 @@ describe("generateSkillDocs", () => {
         {},
       );
 
-      const result = generateSkillDocs({ skillsDir, templatesDir, write: true });
+      const result = generateSkillDocs({
+        skillsDir,
+        templatesDir,
+        write: true,
+      });
       assert.equal(result.count, 2);
       assert.deepEqual(
         result.generated.map((entry) => entry.relativeTemplatePath),
@@ -210,7 +222,11 @@ describe("generateSkillDocs", () => {
         "utf8",
       );
 
-      const result = generateSkillDocs({ skillsDir, templatesDir, write: false });
+      const result = generateSkillDocs({
+        skillsDir,
+        templatesDir,
+        write: false,
+      });
       assert.equal(result.count, 0);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -259,9 +275,14 @@ describe("generateSkillDocs", () => {
   });
 
   it("실제 tfx-find, tfx-index 템플릿 dry-run 결과가 체크인된 SKILL.md와 일치한다", () => {
-    const result = generateSkillDocs({ skillsDir: repoSkillsDir, write: false });
+    const result = generateSkillDocs({
+      skillsDir: repoSkillsDir,
+      write: false,
+    });
     const selected = result.generated.filter((entry) =>
-      ["tfx-find/SKILL.md.tmpl", "tfx-index/SKILL.md.tmpl"].includes(entry.relativeTemplatePath),
+      ["tfx-find/SKILL.md.tmpl", "tfx-index/SKILL.md.tmpl"].includes(
+        entry.relativeTemplatePath,
+      ),
     );
 
     assert.equal(selected.length, 2);

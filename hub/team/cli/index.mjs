@@ -1,5 +1,3 @@
-import { renderTeamHelp } from "./help.mjs";
-import { resolveTeamCommand } from "./manifest.mjs";
 import { teamAttach } from "./commands/attach.mjs";
 import { teamControl } from "./commands/control.mjs";
 import { teamDebug } from "./commands/debug.mjs";
@@ -13,6 +11,8 @@ import { teamStatus } from "./commands/status.mjs";
 import { teamStop } from "./commands/stop.mjs";
 import { teamTaskUpdate } from "./commands/task.mjs";
 import { teamTasks } from "./commands/tasks.mjs";
+import { renderTeamHelp } from "./help.mjs";
+import { resolveTeamCommand } from "./manifest.mjs";
 
 const handlers = {
   attach: teamAttach,

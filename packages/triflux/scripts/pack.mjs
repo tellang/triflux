@@ -4,9 +4,17 @@
 //
 // Usage: node scripts/pack.mjs [core|remote|triflux|all]
 
-import { cpSync, existsSync, mkdirSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
-import { join, dirname, relative, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, normalize, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -14,76 +22,67 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const CORE_FILES = [
   // hub root — core modules
-  'hub/cli-adapter-base.mjs',
-  'hub/codex-adapter.mjs',
-  'hub/codex-compat.mjs',
-  'hub/codex-preflight.mjs',
-  'hub/gemini-adapter.mjs',
-  'hub/team-bridge.mjs',
-  'hub/paths.mjs',
-  'hub/platform.mjs',
-  'hub/state.mjs',
-  'hub/intent.mjs',
-  'hub/token-mode.mjs',
-  'hub/router.mjs',
-  'hub/hitl.mjs',
-  'hub/assign-callbacks.mjs',
-  'hub/fullcycle.mjs',
-  'hub/bridge.mjs',
-  'hub/reflexion.mjs',
-  'hub/research.mjs',
-  'hub/session-fingerprint.mjs',
+  "hub/cli-adapter-base.mjs",
+  "hub/codex-adapter.mjs",
+  "hub/codex-compat.mjs",
+  "hub/codex-preflight.mjs",
+  "hub/gemini-adapter.mjs",
+  "hub/team-bridge.mjs",
+  "hub/paths.mjs",
+  "hub/platform.mjs",
+  "hub/state.mjs",
+  "hub/intent.mjs",
+  "hub/token-mode.mjs",
+  "hub/router.mjs",
+  "hub/hitl.mjs",
+  "hub/assign-callbacks.mjs",
+  "hub/fullcycle.mjs",
+  "hub/bridge.mjs",
+  "hub/reflexion.mjs",
+  "hub/research.mjs",
+  "hub/session-fingerprint.mjs",
   // Neural Memory (Lake 2 Phase 1)
-  'hub/adaptive.mjs',
-  'hub/adaptive-diagnostic.mjs',
-  'hub/adaptive-inject.mjs',
-  'hub/adaptive-memory.mjs',
-  'hub/memory-doctor.mjs',
-  'hub/account-broker.mjs',
+  "hub/adaptive.mjs",
+  "hub/adaptive-diagnostic.mjs",
+  "hub/adaptive-inject.mjs",
+  "hub/adaptive-memory.mjs",
+  "hub/memory-doctor.mjs",
+  "hub/account-broker.mjs",
 ];
 
 const CORE_DIRS = [
-  'hub/pipeline',
-  'hub/routing',
-  'hub/quality',
-  'hub/delegator',
-  'hub/lib',
-  'hub/middleware',
-  'hub/workers/worker-utils.mjs', // shared utility
+  "hub/pipeline",
+  "hub/routing",
+  "hub/quality",
+  "hub/delegator",
+  "hub/lib",
+  "hub/middleware",
+  "hub/workers/worker-utils.mjs", // shared utility
 ];
 
 const REMOTE_FILES = [
-  'hub/server.mjs',
-  'hub/store.mjs',
-  'hub/store-adapter.mjs',
-  'hub/pipe.mjs',
-  'hub/tools.mjs',
-  'hub/tray.mjs',
+  "hub/server.mjs",
+  "hub/store.mjs",
+  "hub/store-adapter.mjs",
+  "hub/pipe.mjs",
+  "hub/tools.mjs",
+  "hub/tray.mjs",
 ];
 
-const REMOTE_DIRS = [
-  'hub/team',
-  'hub/workers',
-  'hub/public',
-];
+const REMOTE_DIRS = ["hub/team", "hub/workers", "hub/public"];
 
 const TRIFLUX_DIRS = [
-  'bin',
-  'skills',
-  'hooks',
-  'hud',
-  'scripts',
-  'hub',
-  'mesh',
-  'references',
+  "bin",
+  "skills",
+  "hooks",
+  "hud",
+  "scripts",
+  "hub",
+  "mesh",
+  "references",
 ];
 
-const TRIFLUX_FILES = [
-  'README.md',
-  'README.ko.md',
-  'LICENSE',
-  'CLAUDE.md',
-];
+const TRIFLUX_FILES = ["README.md", "README.ko.md", "LICENSE", "CLAUDE.md"];
 
 // ── 복사 유틸 ───────────────────────────────────────────────────
 
@@ -100,14 +99,15 @@ function copyItem(src, dest) {
 }
 
 function cleanDist(pkgDir) {
-  const dirs = ['hub', 'bin', 'skills', 'scripts', 'hooks', 'hud'];
+  const dirs = ["hub", "bin", "skills", "scripts", "hooks", "hud"];
   for (const d of dirs) {
     const target = join(pkgDir, d);
     if (existsSync(target)) rmSync(target, { recursive: true, force: true });
   }
-  for (const f of ['README.md', 'README.ko.md', 'LICENSE']) {
+  for (const f of ["README.md", "README.ko.md", "LICENSE"]) {
     const target = join(pkgDir, f);
-    if (existsSync(target) && target !== join(ROOT, f)) rmSync(target, { force: true });
+    if (existsSync(target) && target !== join(ROOT, f))
+      rmSync(target, { force: true });
   }
 }
 
@@ -119,7 +119,7 @@ function walkMjs(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) files.push(...walkMjs(full));
-    else if (entry.name.endsWith('.mjs')) files.push(full);
+    else if (entry.name.endsWith(".mjs")) files.push(full);
   }
   return files;
 }
@@ -142,7 +142,7 @@ function rewriteRemoteImports(remotePkgDir, corePkgDir) {
   let totalRewrites = 0;
 
   for (const filePath of walkMjs(remotePkgDir)) {
-    let content = readFileSync(filePath, 'utf8');
+    let content = readFileSync(filePath, "utf8");
     let changed = false;
 
     content = content.replace(
@@ -152,7 +152,10 @@ function rewriteRemoteImports(remotePkgDir, corePkgDir) {
         // import 대상이 remote 패키지 내에 있으면 그대로 유지
         if (existsSync(resolved)) return match;
         // core 패키지에 동일 상대경로로 존재하는지 확인
-        const relToRemote = relative(remotePkgDir, resolved).replace(/\\/g, '/');
+        const relToRemote = relative(remotePkgDir, resolved).replace(
+          /\\/g,
+          "/",
+        );
         const coreEquiv = normalize(join(corePkgDir, relToRemote));
         if (coreFiles.has(coreEquiv)) {
           changed = true;
@@ -160,7 +163,7 @@ function rewriteRemoteImports(remotePkgDir, corePkgDir) {
           return `${pre}@triflux/core/${relToRemote}${post}`;
         }
         return match;
-      }
+      },
     );
 
     if (changed) writeFileSync(filePath, content);
@@ -231,65 +234,67 @@ export { ensureWorktree, prepareIntegrationBranch, rebaseShardOntoIntegration, p
 `;
 
 function writeIndex(dest, content) {
-  const indexPath = join(dest, 'hub', 'index.mjs');
+  const indexPath = join(dest, "hub", "index.mjs");
   writeFileSync(indexPath, content);
-  console.log('  WRITE hub/index.mjs');
+  console.log("  WRITE hub/index.mjs");
 }
 
 // ── Pack 함수 ───────────────────────────────────────────────────
 
 function packCore() {
-  const dest = join(ROOT, 'packages', 'core');
-  console.log('\n@triflux/core');
+  const dest = join(ROOT, "packages", "core");
+  console.log("\n@triflux/core");
   cleanDist(dest);
   for (const f of CORE_FILES) copyItem(f, dest);
   for (const d of CORE_DIRS) copyItem(d, dest);
   // shared scripts/lib for logger, context
-  copyItem('scripts/lib', dest);
-  copyItem('hooks', dest);
-  copyItem('hud', dest);
+  copyItem("scripts/lib", dest);
+  copyItem("hooks", dest);
+  copyItem("hud", dest);
   writeIndex(dest, CORE_INDEX);
-  console.log('  DONE');
+  console.log("  DONE");
 }
 
 function packRemote() {
-  const dest = join(ROOT, 'packages', 'remote');
-  const coreDest = join(ROOT, 'packages', 'core');
-  console.log('\n@triflux/remote');
+  const dest = join(ROOT, "packages", "remote");
+  const coreDest = join(ROOT, "packages", "core");
+  console.log("\n@triflux/remote");
   cleanDist(dest);
   for (const f of REMOTE_FILES) copyItem(f, dest);
   for (const d of REMOTE_DIRS) copyItem(d, dest);
   // shared scripts/lib needed by delegator-mcp.mjs (dynamic resolve)
-  copyItem('scripts/lib', dest);
+  copyItem("scripts/lib", dest);
   writeIndex(dest, REMOTE_INDEX);
   const rewrites = rewriteRemoteImports(dest, coreDest);
   console.log(`  REWROTE ${rewrites} cross-package imports → @triflux/core`);
-  console.log('  DONE');
+  console.log("  DONE");
 }
 
 function packTriflux() {
-  const dest = join(ROOT, 'packages', 'triflux');
-  console.log('\ntriflux (meta)');
+  const dest = join(ROOT, "packages", "triflux");
+  console.log("\ntriflux (meta)");
   cleanDist(dest);
   // clean extra dirs that triflux now includes
-  for (const d of ['hooks', 'hud', 'scripts', 'hub', 'mesh', 'references']) {
+  for (const d of ["hooks", "hud", "scripts", "hub", "mesh", "references"]) {
     const target = join(dest, d);
     if (existsSync(target)) rmSync(target, { recursive: true, force: true });
   }
   for (const f of TRIFLUX_FILES) copyItem(f, dest);
   for (const d of TRIFLUX_DIRS) copyItem(d, dest);
-  console.log('  DONE');
+  console.log("  DONE");
 }
 
 // ── Main ────────────────────────────────────────────────────────
 
-const target = process.argv[2] || 'all';
+const target = process.argv[2] || "all";
 
 console.log(`pack: assembling packages (target=${target})`);
 console.log(`root: ${ROOT}`);
 
-if (target === 'core' || target === 'all') packCore();
-if (target === 'remote' || target === 'all') packRemote();
-if (target === 'triflux' || target === 'all') packTriflux();
+if (target === "core" || target === "all") packCore();
+if (target === "remote" || target === "all") packRemote();
+if (target === "triflux" || target === "all") packTriflux();
 
-console.log('\nPack complete. Run `npm pack` in each package to create tarballs.');
+console.log(
+  "\nPack complete. Run `npm pack` in each package to create tarballs.",
+);

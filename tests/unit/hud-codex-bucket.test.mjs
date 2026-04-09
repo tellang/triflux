@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 // providers/codex.mjs에서 내부 함수를 테스트하기 위해 동적 import
 // normalizeBuckets/classifyBucket은 모듈 내부 함수이므로,
@@ -49,7 +49,11 @@ describe("Codex bucket normalization", () => {
 
   it("weekly-only: primary(10080m) → secondary, primary=null", () => {
     const rl = {
-      primary: { used_percent: 14, window_minutes: 10080, resets_at: 1776069834 },
+      primary: {
+        used_percent: 14,
+        window_minutes: 10080,
+        resets_at: 1776069834,
+      },
       secondary: null,
     };
     const { primary, secondary } = normalizeBuckets(rl);
@@ -85,7 +89,11 @@ describe("Codex bucket normalization", () => {
     };
     const { primary, secondary } = normalizeBuckets(rl);
     assert.equal(primary.used_percent, 50, "5h slot should have 300m bucket");
-    assert.equal(secondary.used_percent, 20, "1w slot should have 10080m bucket");
+    assert.equal(
+      secondary.used_percent,
+      20,
+      "1w slot should have 10080m bucket",
+    );
   });
 
   it("neither: both null → both null", () => {

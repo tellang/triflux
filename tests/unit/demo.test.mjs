@@ -1,7 +1,13 @@
-import { describe, it, mock, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
-import { checkPsmux, createDemoSession, simulateWorker, showSummary, cleanup } from "../../scripts/demo.mjs";
+import { afterEach, describe, it, mock } from "node:test";
+import {
+  checkPsmux,
+  cleanup,
+  createDemoSession,
+  showSummary,
+  simulateWorker,
+} from "../../scripts/demo.mjs";
 
 // --- helpers ---
 
@@ -62,10 +68,12 @@ describe("simulateWorker dry-run output", () => {
     console.log = (...args) => logged.push(args.join(" "));
 
     try {
-      simulateWorker(1, "gemini", [
-        "[gemini] Let's test quotes",
-        "[gemini] Done ✓",
-      ], { dryRun: true });
+      simulateWorker(
+        1,
+        "gemini",
+        ["[gemini] Let's test quotes", "[gemini] Done ✓"],
+        { dryRun: true },
+      );
     } finally {
       console.log = originalLog;
     }
@@ -92,9 +100,24 @@ describe("full dry-run flow", () => {
       const opts = { dryRun: true };
       assert.equal(checkPsmux(opts), false);
       createDemoSession("triflux-demo", opts);
-      simulateWorker(0, "codex", ["[codex] Analyzing auth module...", "[codex] Done ✓"], opts);
-      simulateWorker(1, "gemini", ["[gemini] Reviewing UI components...", "[gemini] Done ✓"], opts);
-      simulateWorker(2, "claude", ["[claude] Security audit in progress...", "[claude] Done ✓"], opts);
+      simulateWorker(
+        0,
+        "codex",
+        ["[codex] Analyzing auth module...", "[codex] Done ✓"],
+        opts,
+      );
+      simulateWorker(
+        1,
+        "gemini",
+        ["[gemini] Reviewing UI components...", "[gemini] Done ✓"],
+        opts,
+      );
+      simulateWorker(
+        2,
+        "claude",
+        ["[claude] Security audit in progress...", "[claude] Done ✓"],
+        opts,
+      );
       showSummary();
       cleanup("triflux-demo", opts);
     } finally {

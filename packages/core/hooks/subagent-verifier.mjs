@@ -29,7 +29,8 @@ function main() {
 
   const agentType = input.agent_type || input.subagent_type || "unknown";
   const result = input.tool_output || input.result || "";
-  const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+  const resultStr =
+    typeof result === "string" ? result : JSON.stringify(result);
 
   const issues = [];
 
@@ -37,7 +38,7 @@ function main() {
   if (!resultStr.trim() || resultStr.trim().length < 20) {
     issues.push(
       `서브에이전트(${agentType})가 거의 빈 결과를 반환했습니다. ` +
-        "프롬프트를 더 구체적으로 작성하거나, 다른 subagent_type을 시도하세요."
+        "프롬프트를 더 구체적으로 작성하거나, 다른 subagent_type을 시도하세요.",
     );
   }
 
@@ -50,7 +51,7 @@ function main() {
   if (hasError && resultStr.length > 50) {
     issues.push(
       `서브에이전트(${agentType}) 결과에 에러 신호가 감지되었습니다. ` +
-        "결과를 검토하고, 필요 시 다른 접근 방식을 사용하세요."
+        "결과를 검토하고, 필요 시 다른 접근 방식을 사용하세요.",
     );
   }
 
@@ -58,7 +59,7 @@ function main() {
   if (resultStr.length > 15000) {
     issues.push(
       `서브에이전트(${agentType}) 결과가 ${Math.round(resultStr.length / 1000)}K 자입니다. ` +
-        "핵심만 추출하여 컨텍스트 윈도우를 절약하세요."
+        "핵심만 추출하여 컨텍스트 윈도우를 절약하세요.",
     );
   }
 

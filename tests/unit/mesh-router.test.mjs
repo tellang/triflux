@@ -1,8 +1,7 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-
-import { createRegistry } from "../../mesh/mesh-registry.mjs";
+import { describe, it } from "node:test";
 import { createMessage, MSG_TYPES } from "../../mesh/mesh-protocol.mjs";
+import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { routeMessage, routeOrDeadLetter } from "../../mesh/mesh-router.mjs";
 
 function makeMsg(from, to) {

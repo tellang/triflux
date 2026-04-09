@@ -10,42 +10,126 @@ const COMPLEXITY_INDICATORS = {
   // 높은 복잡도 (0.7-1.0)
   high: {
     keywords: [
-      'refactor', 'architecture', 'security', 'migration', 'distributed',
-      'concurrent', 'parallel', 'optimization', 'performance', 'scalability',
-      'cryptograph', 'encryption', 'authentication', 'authorization',
-      'database schema', 'data model', 'state machine', 'event-driven',
-      'microservice', 'orchestrat', 'pipeline', 'workflow',
+      "refactor",
+      "architecture",
+      "security",
+      "migration",
+      "distributed",
+      "concurrent",
+      "parallel",
+      "optimization",
+      "performance",
+      "scalability",
+      "cryptograph",
+      "encryption",
+      "authentication",
+      "authorization",
+      "database schema",
+      "data model",
+      "state machine",
+      "event-driven",
+      "microservice",
+      "orchestrat",
+      "pipeline",
+      "workflow",
       // 한국어
-      '리팩터링', '리팩토링', '아키텍처', '보안', '마이그레이션', '분산',
-      '동시성', '병렬', '최적화', '성능', '확장성',
-      '암호화', '인증', '인가', '데이터베이스 스키마', '데이터 모델',
-      '상태 머신', '이벤트 드리븐', '마이크로서비스', '오케스트레이션',
+      "리팩터링",
+      "리팩토링",
+      "아키텍처",
+      "보안",
+      "마이그레이션",
+      "분산",
+      "동시성",
+      "병렬",
+      "최적화",
+      "성능",
+      "확장성",
+      "암호화",
+      "인증",
+      "인가",
+      "데이터베이스 스키마",
+      "데이터 모델",
+      "상태 머신",
+      "이벤트 드리븐",
+      "마이크로서비스",
+      "오케스트레이션",
     ],
     weight: 0.85,
   },
   // 중간 복잡도 (0.4-0.7)
   medium: {
     keywords: [
-      'implement', 'integrate', 'api', 'endpoint', 'middleware',
-      'validation', 'error handling', 'testing', 'debug', 'fix bug',
-      'configuration', 'deploy', 'ci/cd', 'docker', 'container',
-      'cache', 'queue', 'webhook', 'notification', 'logging',
+      "implement",
+      "integrate",
+      "api",
+      "endpoint",
+      "middleware",
+      "validation",
+      "error handling",
+      "testing",
+      "debug",
+      "fix bug",
+      "configuration",
+      "deploy",
+      "ci/cd",
+      "docker",
+      "container",
+      "cache",
+      "queue",
+      "webhook",
+      "notification",
+      "logging",
       // 한국어
-      '구현', '통합', '엔드포인트', '미들웨어', '유효성 검사',
-      '에러 처리', '오류 처리', '테스트', '디버깅', '버그 수정',
-      '설정', '배포', '컨테이너', '캐시', '알림', '로깅',
+      "구현",
+      "통합",
+      "엔드포인트",
+      "미들웨어",
+      "유효성 검사",
+      "에러 처리",
+      "오류 처리",
+      "테스트",
+      "디버깅",
+      "버그 수정",
+      "설정",
+      "배포",
+      "컨테이너",
+      "캐시",
+      "알림",
+      "로깅",
     ],
     weight: 0.55,
   },
   // 낮은 복잡도 (0.1-0.4)
   low: {
     keywords: [
-      'readme', 'comment', 'typo', 'rename', 'format', 'lint',
-      'update version', 'bump', 'add dependency', 'install',
-      'simple', 'trivial', 'minor', 'small change', 'one-liner',
+      "readme",
+      "comment",
+      "typo",
+      "rename",
+      "format",
+      "lint",
+      "update version",
+      "bump",
+      "add dependency",
+      "install",
+      "simple",
+      "trivial",
+      "minor",
+      "small change",
+      "one-liner",
       // 한국어
-      '문서화', '주석', '오타', '이름 변경', '포맷', '버전 업데이트',
-      '의존성 추가', '설치', '간단', '사소한', '소규모', '한 줄',
+      "문서화",
+      "주석",
+      "오타",
+      "이름 변경",
+      "포맷",
+      "버전 업데이트",
+      "의존성 추가",
+      "설치",
+      "간단",
+      "사소한",
+      "소규모",
+      "한 줄",
     ],
     weight: 0.2,
   },
@@ -98,7 +182,7 @@ function semanticDepth(text) {
  * @returns {number} 0-1
  */
 function taskScope(text) {
-  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+  const lines = text.split("\n").filter((l) => l.trim().length > 0);
   const sentences = text.split(/[.!?]+/).filter((s) => s.trim().length > 0);
   const fileRefs = (text.match(/[\w\-/]+\.\w{1,5}/g) || []).length;
 
@@ -118,9 +202,22 @@ function taskScope(text) {
 function uncertainty(text) {
   const lower = text.toLowerCase();
   const uncertainWords = [
-    'maybe', 'perhaps', 'might', 'could', 'possibly', 'unclear',
-    'not sure', 'investigate', 'explore', 'research', 'try',
-    'consider', 'evaluate', 'assess', 'determine', 'figure out',
+    "maybe",
+    "perhaps",
+    "might",
+    "could",
+    "possibly",
+    "unclear",
+    "not sure",
+    "investigate",
+    "explore",
+    "research",
+    "try",
+    "consider",
+    "evaluate",
+    "assess",
+    "determine",
+    "figure out",
   ];
   let count = 0;
   for (const w of uncertainWords) {
@@ -138,11 +235,17 @@ function uncertainty(text) {
  * @returns {{ score: number, breakdown: { lexical: number, semantic: number, scope: number, uncertainty: number } }}
  */
 export function scoreComplexity(taskDescription) {
-  if (!taskDescription || typeof taskDescription !== 'string') {
-    return { score: 0, breakdown: { lexical: 0, semantic: 0, scope: 0, uncertainty: 0 } };
+  if (!taskDescription || typeof taskDescription !== "string") {
+    return {
+      score: 0,
+      breakdown: { lexical: 0, semantic: 0, scope: 0, uncertainty: 0 },
+    };
   }
 
-  const words = taskDescription.toLowerCase().split(/\s+/).filter((w) => w.length > 0);
+  const words = taskDescription
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
   const lexical = lexicalComplexity(words);
   const semantic = semanticDepth(taskDescription);
   const scope = taskScope(taskDescription);
@@ -150,7 +253,7 @@ export function scoreComplexity(taskDescription) {
 
   // 가중 합산: 어휘(20%) + 시맨틱(35%) + 범위(25%) + 불확실성(20%)
   const score = Math.min(
-    lexical * 0.20 + semantic * 0.35 + scope * 0.25 + uncertain * 0.20,
+    lexical * 0.2 + semantic * 0.35 + scope * 0.25 + uncertain * 0.2,
     1,
   );
 

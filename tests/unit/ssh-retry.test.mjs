@@ -1,22 +1,29 @@
 // tests/unit/ssh-retry.test.mjs
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 import { isTransientSshError } from "../../hub/lib/ssh-retry.mjs";
 
 describe("ssh-retry", () => {
   describe("isTransientSshError", () => {
     it("connection reset 감지", () => {
-      const err = new Error("ssh: connect to host 100.110.136.64: Connection reset by peer");
+      const err = new Error(
+        "ssh: connect to host 100.110.136.64: Connection reset by peer",
+      );
       assert.ok(isTransientSshError(err));
     });
 
     it("connection refused 감지", () => {
-      const err = new Error("ssh: connect to host 192.168.1.1: Connection refused");
+      const err = new Error(
+        "ssh: connect to host 192.168.1.1: Connection refused",
+      );
       assert.ok(isTransientSshError(err));
     });
 
     it("connection timed out 감지", () => {
-      const err = new Error("ssh: connect to host example.com: Connection timed out");
+      const err = new Error(
+        "ssh: connect to host example.com: Connection timed out",
+      );
       assert.ok(isTransientSshError(err));
     });
 
@@ -26,7 +33,9 @@ describe("ssh-retry", () => {
     });
 
     it("network unreachable 감지", () => {
-      const err = new Error("ssh: connect to host 10.0.0.1: Network is unreachable");
+      const err = new Error(
+        "ssh: connect to host 10.0.0.1: Network is unreachable",
+      );
       assert.ok(isTransientSshError(err));
     });
 

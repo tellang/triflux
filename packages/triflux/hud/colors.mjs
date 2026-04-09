@@ -12,15 +12,33 @@ export const CLAUDE_ORANGE = "\x1b[38;2;232;112;64m"; // #E87040 (Claude 공식 
 export const CODEX_WHITE = "\x1b[97m"; // bright white (SGR 37은 Windows Terminal에서 연회색 매핑)
 export const GEMINI_BLUE = "\x1b[38;5;39m";
 
-export function green(t) { return `${GREEN}${t}${RESET}`; }
-export function yellow(t) { return `${YELLOW}${t}${RESET}`; }
-export function red(t) { return `${RED}${t}${RESET}`; }
-export function cyan(t) { return `${CYAN}${t}${RESET}`; }
-export function dim(t) { return `${DIM}${t}${RESET}`; }
-export function bold(t) { return `${BOLD}${t}${RESET}`; }
-export function claudeOrange(t) { return `${CLAUDE_ORANGE}${t}${RESET}`; }
-export function codexWhite(t) { return `${CODEX_WHITE}${t}${RESET}`; }
-export function geminiBlue(t) { return `${GEMINI_BLUE}${t}${RESET}`; }
+export function green(t) {
+  return `${GREEN}${t}${RESET}`;
+}
+export function yellow(t) {
+  return `${YELLOW}${t}${RESET}`;
+}
+export function red(t) {
+  return `${RED}${t}${RESET}`;
+}
+export function cyan(t) {
+  return `${CYAN}${t}${RESET}`;
+}
+export function dim(t) {
+  return `${DIM}${t}${RESET}`;
+}
+export function bold(t) {
+  return `${BOLD}${t}${RESET}`;
+}
+export function claudeOrange(t) {
+  return `${CLAUDE_ORANGE}${t}${RESET}`;
+}
+export function codexWhite(t) {
+  return `${CODEX_WHITE}${t}${RESET}`;
+}
+export function geminiBlue(t) {
+  return `${GEMINI_BLUE}${t}${RESET}`;
+}
 
 export function colorByPercent(value, text) {
   if (value >= 85) return red(text);

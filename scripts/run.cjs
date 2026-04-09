@@ -7,9 +7,11 @@ const { dirname, isAbsolute, join, resolve } = require("path");
 const { homedir } = require("os");
 
 function isValidPluginRoot(candidate) {
-  return typeof candidate === "string"
-    && candidate.trim().length > 0
-    && existsSync(join(candidate.trim(), "hooks", "hook-orchestrator.mjs"));
+  return (
+    typeof candidate === "string" &&
+    candidate.trim().length > 0 &&
+    existsSync(join(candidate.trim(), "hooks", "hook-orchestrator.mjs"))
+  );
 }
 
 function resolvePluginRoot() {
@@ -23,7 +25,8 @@ function resolvePluginRoot() {
     }
   }
 
-  if (isValidPluginRoot(process.env.CLAUDE_PLUGIN_ROOT)) return process.env.CLAUDE_PLUGIN_ROOT;
+  if (isValidPluginRoot(process.env.CLAUDE_PLUGIN_ROOT))
+    return process.env.CLAUDE_PLUGIN_ROOT;
   return dirname(__dirname);
 }
 
@@ -68,7 +71,7 @@ try {
     env: process.env,
     stdio: ["pipe", "inherit", "inherit"],
     input: stdinBuffer,
-    windowsHide: true
+    windowsHide: true,
   });
   process.exit(0);
 } catch (error) {

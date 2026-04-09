@@ -28,7 +28,9 @@ describe("remote-watcher: listSpawnSessions", () => {
       ].join("\n");
     });
 
-    const sessions = listSpawnSessions({ deps: { execFileSync: stub.execFileSync } });
+    const sessions = listSpawnSessions({
+      deps: { execFileSync: stub.execFileSync },
+    });
 
     assert.deepEqual(sessions, ["tfx-spawn-alpha", "tfx-spawn-beta"]);
     assert.equal(stub.calls.length, 1);
@@ -53,7 +55,7 @@ describe("remote-watcher: listSpawnSessions", () => {
 
 describe("remote-watcher: createRemoteWatcher", () => {
   it("completion token(exit=0)을 감지하면 sessionCompleted를 emit해야 한다", () => {
-    let nowMs = 1_000;
+    const nowMs = 1_000;
     let intervalCallback = null;
     const stub = createExecStub(({ command, args }) => {
       assert.equal(command, "psmux");
@@ -89,7 +91,10 @@ describe("remote-watcher: createRemoteWatcher", () => {
     assert.equal(events[0].reason, "completion_token");
     assert.equal(status.sessions["tfx-spawn-alpha"].state, "completed");
     assert.equal(status.sessions["tfx-spawn-alpha"].exitCode, 0);
-    assert.equal(status.sessions["tfx-spawn-alpha"].lastProbeLevel, "prompt_ack");
+    assert.equal(
+      status.sessions["tfx-spawn-alpha"].lastProbeLevel,
+      "prompt_ack",
+    );
   });
 
   it("completion token(exit!=0)을 감지하면 sessionFailed를 emit해야 한다", () => {
@@ -120,7 +125,10 @@ describe("remote-watcher: createRemoteWatcher", () => {
     assert.equal(events[0].sessionName, "tfx-spawn-failed");
     assert.equal(events[0].reason, "completion_token_nonzero");
     assert.equal(events[0].exitCode, 7);
-    assert.equal(watcher.getStatus().sessions["tfx-spawn-failed"].state, "failed");
+    assert.equal(
+      watcher.getStatus().sessions["tfx-spawn-failed"].state,
+      "failed",
+    );
   });
 
   it("detectInputWait 패턴을 감지하면 sessionInputWait를 emit해야 한다", () => {
@@ -151,7 +159,10 @@ describe("remote-watcher: createRemoteWatcher", () => {
     assert.equal(events[0].sessionName, "tfx-spawn-wait");
     assert.equal(events[0].reason, "input_wait");
     assert.equal(events[0].inputWaitPattern.includes("y\\/n"), true);
-    assert.equal(watcher.getStatus().sessions["tfx-spawn-wait"].state, "input_wait");
+    assert.equal(
+      watcher.getStatus().sessions["tfx-spawn-wait"].state,
+      "input_wait",
+    );
   });
 
   it("status snapshot은 immutable이어야 한다", () => {

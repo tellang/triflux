@@ -3,8 +3,8 @@
 // Lock state is kept in-memory (single-process hypervisor) with optional
 // JSON persistence to .triflux/swarm-locks.json for crash recovery.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname, resolve, relative } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 
 const LOCK_TTL_MS = 10 * 60_000; // 10 minutes default TTL
 
@@ -17,11 +17,7 @@ const LOCK_TTL_MS = 10 * 60_000; // 10 minutes default TTL
  * @returns {SwarmLockManager}
  */
 export function createSwarmLocks(opts = {}) {
-  const {
-    repoRoot = process.cwd(),
-    persistPath,
-    ttlMs = LOCK_TTL_MS,
-  } = opts;
+  const { repoRoot = process.cwd(), persistPath, ttlMs = LOCK_TTL_MS } = opts;
 
   /** @type {Map<string, LockEntry>} normalized relative path → lock */
   const locks = new Map();
@@ -30,7 +26,7 @@ export function createSwarmLocks(opts = {}) {
 
   function normalizePath(filePath) {
     const abs = resolve(repoRoot, filePath);
-    return relative(repoRoot, abs).replace(/\\/g, '/');
+    return relative(repoRoot, abs).replace(/\\/g, "/");
   }
 
   function now() {
@@ -56,21 +52,25 @@ export function createSwarmLocks(opts = {}) {
       const data = Object.fromEntries(
         [...locks].map(([k, v]) => [k, { ...v }]),
       );
-      writeFileSync(persistPath, JSON.stringify(data, null, 2), 'utf8');
-    } catch { /* best-effort */ }
+      writeFileSync(persistPath, JSON.stringify(data, null, 2), "utf8");
+    } catch {
+      /* best-effort */
+    }
   }
 
   function restore() {
     if (!persistPath || !existsSync(persistPath)) return;
     try {
-      const data = JSON.parse(readFileSync(persistPath, 'utf8'));
+      const data = JSON.parse(readFileSync(persistPath, "utf8"));
       const ts = now();
       for (const [path, entry] of Object.entries(data)) {
         if (ts - entry.acquiredAt <= ttlMs) {
           locks.set(path, entry);
         }
       }
-    } catch { /* corrupted file — start fresh */ }
+    } catch {
+      /* corrupted file — start fresh */
+    }
   }
 
   // restore on creation
@@ -199,6 +199,8 @@ export function createSwarmLocks(opts = {}) {
     validateChanges,
     snapshot,
     releaseAll,
-    get size() { return locks.size; },
+    get size() {
+      return locks.size;
+    },
   });
 }

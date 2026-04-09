@@ -3,7 +3,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compileRules, loadRules, matchRules, resolveConflicts } from "./lib/keyword-rules.mjs";
+import {
+  compileRules,
+  loadRules,
+  matchRules,
+  resolveConflicts,
+} from "./lib/keyword-rules.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = dirname(SCRIPT_DIR);
@@ -33,7 +38,10 @@ export function extractPrompt(payload) {
     return payload.prompt;
   }
 
-  if (typeof payload.message?.content === "string" && payload.message.content.trim()) {
+  if (
+    typeof payload.message?.content === "string" &&
+    payload.message.content.trim()
+  ) {
     return payload.message.content;
   }
 
@@ -87,8 +95,8 @@ function createHookOutput(additionalContext) {
     continue: true,
     hookSpecificOutput: {
       hookEventName: "UserPromptSubmit",
-      additionalContext
-    }
+      additionalContext,
+    },
   };
 }
 
@@ -144,17 +152,19 @@ function isSkipRequested() {
 }
 
 function activateState(baseDir, stateConfig, prompt, payload) {
-  if (!stateConfig || stateConfig.activate !== true || !stateConfig.name) return;
+  if (!stateConfig || stateConfig.activate !== true || !stateConfig.name)
+    return;
 
   try {
     const stateRoot = join(baseDir, ".triflux", "state");
     mkdirSync(stateRoot, { recursive: true });
 
-    const sessionId = typeof payload?.session_id === "string"
-      ? payload.session_id
-      : typeof payload?.sessionId === "string"
-        ? payload.sessionId
-        : "";
+    const sessionId =
+      typeof payload?.session_id === "string"
+        ? payload.session_id
+        : typeof payload?.sessionId === "string"
+          ? payload.sessionId
+          : "";
 
     let stateDir = stateRoot;
     if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
@@ -167,12 +177,14 @@ function activateState(baseDir, stateConfig, prompt, payload) {
       active: true,
       name: stateConfig.name,
       started_at: new Date().toISOString(),
-      original_prompt: prompt
+      original_prompt: prompt,
     };
 
     writeFileSync(statePath, JSON.stringify(statePayload, null, 2), "utf8");
   } catch (error) {
-    console.error(`[triflux-keyword-detector] 상태 저장 실패: ${error.message}`);
+    console.error(
+      `[triflux-keyword-detector] 상태 저장 실패: ${error.message}`,
+    );
   }
 }
 
@@ -238,26 +250,35 @@ function main() {
   }
 
   const selected = resolvedMatches[0];
-  const baseDir = typeof payload.cwd === "string" && payload.cwd
-    ? payload.cwd
-    : typeof payload.directory === "string" && payload.directory
-      ? payload.directory
-      : process.cwd();
+  const baseDir =
+    typeof payload.cwd === "string" && payload.cwd
+      ? payload.cwd
+      : typeof payload.directory === "string" && payload.directory
+        ? payload.directory
+        : process.cwd();
 
   activateState(baseDir, selected.state, prompt, payload);
 
   if (selected.action === "suppress_omc") {
-    console.log(JSON.stringify(createHookOutput(createSuppressOmcContext(selected, prompt))));
+    console.log(
+      JSON.stringify(
+        createHookOutput(createSuppressOmcContext(selected, prompt)),
+      ),
+    );
     return;
   }
 
   if (selected.skill) {
-    console.log(JSON.stringify(createHookOutput(createSkillContext(selected, prompt))));
+    console.log(
+      JSON.stringify(createHookOutput(createSkillContext(selected, prompt))),
+    );
     return;
   }
 
   if (selected.mcp_route) {
-    console.log(JSON.stringify(createHookOutput(createMcpRouteContext(selected, prompt))));
+    console.log(
+      JSON.stringify(createHookOutput(createMcpRouteContext(selected, prompt))),
+    );
     return;
   }
 

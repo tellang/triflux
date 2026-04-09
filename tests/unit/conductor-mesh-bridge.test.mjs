@@ -1,9 +1,8 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-
-import { createRegistry } from "../../mesh/mesh-registry.mjs";
+import { describe, it } from "node:test";
 import { createConductorMeshBridge } from "../../hub/team/conductor-mesh-bridge.mjs";
+import { createRegistry } from "../../mesh/mesh-registry.mjs";
 
 function createMockConductor() {
   const emitter = new EventEmitter();
@@ -43,7 +42,10 @@ describe("hub/team/conductor-mesh-bridge.mjs", () => {
       bridge.attach();
       bridge.attach(); // 두 번째 attach
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "init", to: "starting", reason: "test",
+        sessionId: "s1",
+        from: "init",
+        to: "starting",
+        reason: "test",
       });
       // 한 번만 처리됨
       assert.equal(messages.length, 1);
@@ -58,7 +60,10 @@ describe("hub/team/conductor-mesh-bridge.mjs", () => {
       bridge.attach();
 
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "init", to: "starting", reason: "initial",
+        sessionId: "s1",
+        from: "init",
+        to: "starting",
+        reason: "initial",
       });
 
       const agent = reg.getAgent("session:s1");
@@ -73,10 +78,16 @@ describe("hub/team/conductor-mesh-bridge.mjs", () => {
       bridge.attach();
 
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "init", to: "starting", reason: "initial",
+        sessionId: "s1",
+        from: "init",
+        to: "starting",
+        reason: "initial",
       });
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "failed", to: "dead", reason: "maxRestarts",
+        sessionId: "s1",
+        from: "failed",
+        to: "dead",
+        reason: "maxRestarts",
       });
 
       assert.equal(reg.getAgent("session:s1"), null);
@@ -89,10 +100,16 @@ describe("hub/team/conductor-mesh-bridge.mjs", () => {
       bridge.attach();
 
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "init", to: "starting", reason: "initial",
+        sessionId: "s1",
+        from: "init",
+        to: "starting",
+        reason: "initial",
       });
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "healthy", to: "completed", reason: "exit_0",
+        sessionId: "s1",
+        from: "healthy",
+        to: "completed",
+        reason: "exit_0",
       });
 
       assert.equal(reg.getAgent("session:s1"), null);
@@ -110,7 +127,10 @@ describe("hub/team/conductor-mesh-bridge.mjs", () => {
       bridge.attach();
 
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "init", to: "starting", reason: "test",
+        sessionId: "s1",
+        from: "init",
+        to: "starting",
+        reason: "test",
       });
 
       assert.equal(messages.length, 1);
@@ -161,10 +181,16 @@ describe("hub/team/conductor-mesh-bridge.mjs", () => {
       bridge.attach();
 
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "init", to: "starting", reason: "test",
+        sessionId: "s1",
+        from: "init",
+        to: "starting",
+        reason: "test",
       });
       conductor.emit("stateChange", {
-        sessionId: "s2", from: "init", to: "starting", reason: "test",
+        sessionId: "s2",
+        from: "init",
+        to: "starting",
+        reason: "test",
       });
 
       assert.ok(reg.getAgent("session:s1") !== null);
@@ -187,7 +213,10 @@ describe("hub/team/conductor-mesh-bridge.mjs", () => {
       bridge.detach();
 
       conductor.emit("stateChange", {
-        sessionId: "s1", from: "init", to: "starting", reason: "test",
+        sessionId: "s1",
+        from: "init",
+        to: "starting",
+        reason: "test",
       });
 
       assert.equal(messages.length, 0);

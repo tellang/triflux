@@ -4,10 +4,10 @@
 // tui.mjs updateWorker() 호환 형식으로 변환한다.
 // 완료/실패 시 notify.mjs 자동 호출.
 
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { EventEmitter } from "node:events";
 
 import { STATES } from "./conductor.mjs";
 
@@ -90,9 +90,8 @@ function mapConductorStateToStatus(conductorState) {
 function buildWorkerData(entry, watcherSession, hostsData) {
   const host = entry.host || resolveHostFromSessionName(entry.id);
   const snapshot = watcherSession?.lastOutput || "";
-  const probeLevel = entry.health?.level
-    || watcherSession?.lastProbeLevel
-    || null;
+  const probeLevel =
+    entry.health?.level || watcherSession?.lastProbeLevel || null;
 
   return Object.freeze({
     cli: entry.agent || "claude",
@@ -115,15 +114,18 @@ function buildWorkerData(entry, watcherSession, hostsData) {
  * remote-watcher 전용 엔트리 → TUI 워커 데이터 (conductor 미등록 세션).
  */
 function buildWatcherOnlyWorkerData(watcherRecord, hostsData) {
-  const host = watcherRecord.host
-    || resolveHostFromSessionName(watcherRecord.sessionName);
+  const host =
+    watcherRecord.host || resolveHostFromSessionName(watcherRecord.sessionName);
 
   return Object.freeze({
     cli: "claude",
     role: resolveRole(null, watcherRecord.sessionName),
-    status: watcherRecord.state === "completed" ? "completed"
-      : watcherRecord.state === "failed" ? "failed"
-        : "running",
+    status:
+      watcherRecord.state === "completed"
+        ? "completed"
+        : watcherRecord.state === "failed"
+          ? "failed"
+          : "running",
     host: host || "unknown",
     remote: true,
     sshUser: resolveSshUser(hostsData, host),
@@ -321,7 +323,9 @@ export function createRemoteAdapter(opts = {}) {
     // watcher-only 세션 (conductor 미등록)
     if (watcher) {
       const watcherStatus = watcher.getStatus();
-      for (const [sessionName, record] of Object.entries(watcherStatus.sessions || {})) {
+      for (const [sessionName, record] of Object.entries(
+        watcherStatus.sessions || {},
+      )) {
         if (conductorSessionIds.has(sessionName)) continue;
         const paneName = buildPaneName(sessionName);
         const workerData = buildWatcherOnlyWorkerData(record, hostsData);

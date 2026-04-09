@@ -21,7 +21,11 @@ const TRANSIENT_RE =
  * @returns {string|Buffer} ssh stdout
  */
 export function execSshWithRetry(args, opts = {}) {
-  const { maxRetries = DEFAULT_MAX_RETRIES, baseDelayMs = DEFAULT_BASE_DELAY_MS, ...execOpts } = opts;
+  const {
+    maxRetries = DEFAULT_MAX_RETRIES,
+    baseDelayMs = DEFAULT_BASE_DELAY_MS,
+    ...execOpts
+  } = opts;
 
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {

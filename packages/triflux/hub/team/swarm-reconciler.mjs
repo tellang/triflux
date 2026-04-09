@@ -2,7 +2,7 @@
 // For critical shards: launches primary + verifier sessions, compares results,
 // applies conservative adoption (fewer changes wins) or HITL fallback.
 
-import { execFile } from 'node:child_process';
+import { execFile } from "node:child_process";
 
 /**
  * Compare two shard results and decide which to accept.
@@ -21,14 +21,23 @@ export async function reconcile(primaryResult, verifierResult, opts = {}) {
   const { rootDir = process.cwd(), maxDivergenceFiles = 5 } = opts;
 
   // If either failed, pick the one that succeeded
-  if (primaryResult.status !== 'completed' && verifierResult.status === 'completed') {
-    return decision('verifier', 'primary_failed', verifierResult);
+  if (
+    primaryResult.status !== "completed" &&
+    verifierResult.status === "completed"
+  ) {
+    return decision("verifier", "primary_failed", verifierResult);
   }
-  if (verifierResult.status !== 'completed' && primaryResult.status === 'completed') {
-    return decision('primary', 'verifier_failed', primaryResult);
+  if (
+    verifierResult.status !== "completed" &&
+    primaryResult.status === "completed"
+  ) {
+    return decision("primary", "verifier_failed", primaryResult);
   }
-  if (primaryResult.status !== 'completed' && verifierResult.status !== 'completed') {
-    return decision('none', 'both_failed', null);
+  if (
+    primaryResult.status !== "completed" &&
+    verifierResult.status !== "completed"
+  ) {
+    return decision("none", "both_failed", null);
   }
 
   // Both completed — compare diffs
@@ -37,29 +46,37 @@ export async function reconcile(primaryResult, verifierResult, opts = {}) {
 
   // Identical diffs → accept primary (no divergence)
   if (primaryDiff.hash === verifierDiff.hash) {
-    return decision('primary', 'identical', primaryResult);
+    return decision("primary", "identical", primaryResult);
   }
 
   // Compute divergence
-  const divergence = Math.abs(primaryDiff.filesChanged - verifierDiff.filesChanged);
+  const divergence = Math.abs(
+    primaryDiff.filesChanged - verifierDiff.filesChanged,
+  );
 
   // High divergence → HITL
   if (divergence > maxDivergenceFiles) {
     return {
-      selected: 'hitl',
+      selected: "hitl",
       reason: `divergence_too_high (${divergence} files differ)`,
       result: null,
       requiresManualReview: true,
-      primary: { filesChanged: primaryDiff.filesChanged, linesChanged: primaryDiff.linesChanged },
-      verifier: { filesChanged: verifierDiff.filesChanged, linesChanged: verifierDiff.linesChanged },
+      primary: {
+        filesChanged: primaryDiff.filesChanged,
+        linesChanged: primaryDiff.linesChanged,
+      },
+      verifier: {
+        filesChanged: verifierDiff.filesChanged,
+        linesChanged: verifierDiff.linesChanged,
+      },
     };
   }
 
   // Conservative adoption: fewer changes wins
   if (primaryDiff.linesChanged <= verifierDiff.linesChanged) {
-    return decision('primary', 'conservative_adoption', primaryResult);
+    return decision("primary", "conservative_adoption", primaryResult);
   }
-  return decision('verifier', 'conservative_adoption', verifierResult);
+  return decision("verifier", "conservative_adoption", verifierResult);
 }
 
 function decision(selected, reason, result) {
@@ -67,7 +84,7 @@ function decision(selected, reason, result) {
     selected,
     reason,
     result,
-    requiresManualReview: selected === 'hitl' || selected === 'none',
+    requiresManualReview: selected === "hitl" || selected === "none",
     primary: null,
     verifier: null,
   };
@@ -82,8 +99,11 @@ function decision(selected, reason, result) {
  */
 async function getDiffStat(branch, cwd) {
   try {
-    const stat = await gitExec(['diff', '--stat', '--numstat', `${branch}~1..${branch}`], cwd);
-    const lines = stat.split('\n').filter(Boolean);
+    const stat = await gitExec(
+      ["diff", "--stat", "--numstat", `${branch}~1..${branch}`],
+      cwd,
+    );
+    const lines = stat.split("\n").filter(Boolean);
     let filesChanged = 0;
     let linesChanged = 0;
 
@@ -96,20 +116,25 @@ async function getDiffStat(branch, cwd) {
     }
 
     // Get tree hash for identity comparison
-    const hash = await gitExec(['rev-parse', `${branch}^{tree}`], cwd);
+    const hash = await gitExec(["rev-parse", `${branch}^{tree}`], cwd);
 
     return { filesChanged, linesChanged, hash: hash.trim() };
   } catch {
-    return { filesChanged: 0, linesChanged: 0, hash: '' };
+    return { filesChanged: 0, linesChanged: 0, hash: "" };
   }
 }
 
 function gitExec(args, cwd) {
   return new Promise((res, rej) => {
-    execFile('git', args, { cwd, windowsHide: true, timeout: 15_000 }, (err, stdout) => {
-      if (err) rej(err);
-      else res(stdout);
-    });
+    execFile(
+      "git",
+      args,
+      { cwd, windowsHide: true, timeout: 15_000 },
+      (err, stdout) => {
+        if (err) rej(err);
+        else res(stdout);
+      },
+    );
   });
 }
 

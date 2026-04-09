@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 import _SysTrayModule from "systray2";
+
 const SysTray = _SysTrayModule.default || _SysTrayModule;
+
 import { exec } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -13,7 +15,8 @@ const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
 const DEFAULT_HUB_PORT = "27888";
 
 function getHubBaseUrl() {
-  if (process.env.TFX_HUB_URL) return process.env.TFX_HUB_URL.replace(/\/+$/, "");
+  if (process.env.TFX_HUB_URL)
+    return process.env.TFX_HUB_URL.replace(/\/+$/, "");
   try {
     const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
     if (info.port) return `http://${info.host || "127.0.0.1"}:${info.port}`;
@@ -42,7 +45,8 @@ const CODEX_RATE_LIMITS_FILE = join(CACHE_DIR, "codex-rate-limits-cache.json");
 const GEMINI_QUOTA_FILE = join(CACHE_DIR, "gemini-quota-cache.json");
 const CLAUDE_USAGE_FILE = join(CACHE_DIR, "claude-usage-cache.json");
 
-const TRAY_ICON_BASE64 = "AAABAAEAICAAAAEAIAADAQAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgGAAAAc3p69AAAAMpJREFUeJzV1UEKgzAQheEcwnXP4a17gl6n6yy7U1IIqDSTeW/m0TYwK8X/E6OW8m9rWW5Pa74SlWLYeBgRDcOQ7V42a+SIGSALkwKIQKDnroJQmy4bAgO8EDnAA4EBkV3do7VWeAOfAO0Cx/EC+vnMG2QCLND12Pp4vUcK+DQ9fBxqI47uDI23oV7F2fNVxF2A64zCTBwCWGE2Pv0WzKKp8ba8wWg4DIiGKUBWdBjP+i+E4z8BUCJccRUCimdC6HAGIiWOYiRR5doBauXshzcEs0UAAAAASUVORK5CYII=";
+const TRAY_ICON_BASE64 =
+  "AAABAAEAICAAAAEAIAADAQAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgGAAAAc3p69AAAAMpJREFUeJzV1UEKgzAQheEcwnXP4a17gl6n6yy7U1IIqDSTeW/m0TYwK8X/E6OW8m9rWW5Pa74SlWLYeBgRDcOQ7V42a+SIGSALkwKIQKDnroJQmy4bAgO8EDnAA4EBkV3do7VWeAOfAO0Cx/EC+vnMG2QCLND12Pp4vUcK+DQ9fBxqI47uDI23oV7F2fNVxF2A64zCTBwCWGE2Pv0WzKKp8ba8wWg4DIiGKUBWdBjP+i+E4z8BUCJccRUCimdC6HAGIiWOYiRR5doBauXshzcEs0UAAAAASUVORK5CYII=";
 
 function clampPercent(value) {
   if (!Number.isFinite(Number(value))) return null;
@@ -96,8 +100,10 @@ function getAimdBatchSize(now = Date.now()) {
 
 function getCodexPercent() {
   const data = readJson(CODEX_RATE_LIMITS_FILE);
-  const buckets = data?.buckets && typeof data.buckets === "object" ? data.buckets : null;
-  const primaryBucket = buckets?.codex ?? Object.values(buckets ?? {})[0] ?? null;
+  const buckets =
+    data?.buckets && typeof data.buckets === "object" ? data.buckets : null;
+  const primaryBucket =
+    buckets?.codex ?? Object.values(buckets ?? {})[0] ?? null;
   return clampPercent(primaryBucket?.primary?.used_percent);
 }
 
@@ -117,7 +123,10 @@ function pickGeminiBucket(data) {
     if (match) return match;
   }
 
-  return buckets.find((bucket) => String(bucket?.modelId ?? "").includes("flash")) ?? buckets[0];
+  return (
+    buckets.find((bucket) => String(bucket?.modelId ?? "").includes("flash")) ??
+    buckets[0]
+  );
 }
 
 function getGeminiPercent() {
@@ -140,8 +149,11 @@ async function getHubStatusLabel() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const data = await response.json();
-    const state = typeof data?.hub?.state === "string" ? data.hub.state : "connected";
-    const sessions = Number.isFinite(Number(data?.sessions)) ? Number(data.sessions) : null;
+    const state =
+      typeof data?.hub?.state === "string" ? data.hub.state : "connected";
+    const sessions = Number.isFinite(Number(data?.sessions))
+      ? Number(data.sessions)
+      : null;
     return sessions == null ? `Hub: ${state}` : `Hub: ${state} | S:${sessions}`;
   } catch {
     return "Hub 미연결";
@@ -167,12 +179,32 @@ function buildUsageTitle(snapshot) {
 
 function findChromePath() {
   const candidates = [
-    join(process.env.ProgramFiles || "", "Google", "Chrome", "Application", "chrome.exe"),
-    join(process.env["ProgramFiles(x86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
-    join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+    join(
+      process.env.ProgramFiles || "",
+      "Google",
+      "Chrome",
+      "Application",
+      "chrome.exe",
+    ),
+    join(
+      process.env["ProgramFiles(x86)"] || "",
+      "Google",
+      "Chrome",
+      "Application",
+      "chrome.exe",
+    ),
+    join(
+      process.env.LOCALAPPDATA || "",
+      "Google",
+      "Chrome",
+      "Application",
+      "chrome.exe",
+    ),
   ];
   for (const p of candidates) {
-    try { if (existsSync(p)) return p; } catch {}
+    try {
+      if (existsSync(p)) return p;
+    } catch {}
   }
   return null;
 }
@@ -183,11 +215,15 @@ function openDashboard() {
   const chrome = findChromePath();
   if (chrome) {
     // Chrome --app: 주소바/탭 없는 앱 윈도우로 열기
-    exec(`start "" "${chrome}" "--app=${url}"`, { shell, windowsHide: true }, (err) => {
-      if (err) {
-        exec(`start "" "${url}"`, { shell, windowsHide: true }, () => {});
-      }
-    });
+    exec(
+      `start "" "${chrome}" "--app=${url}"`,
+      { shell, windowsHide: true },
+      (err) => {
+        if (err) {
+          exec(`start "" "${url}"`, { shell, windowsHide: true }, () => {});
+        }
+      },
+    );
   } else {
     exec(`start "" "${url}"`, { shell, windowsHide: true }, () => {});
   }
@@ -277,17 +313,22 @@ async function refreshMenu() {
     await systray.sendAction({ type: "update-item", item: aimdItem });
     await systray.sendAction({ type: "update-item", item: quotaItem });
     await systray.sendAction({ type: "update-item", item: hubItem });
-    await systray.sendAction({ type: "update-item-and-title", item: { title: buildTooltip(snapshot) } });
+    await systray.sendAction({
+      type: "update-item-and-title",
+      item: { title: buildTooltip(snapshot) },
+    });
   }
 }
 
 function scheduleRefresh() {
   if (refreshPromise) return refreshPromise;
-  refreshPromise = refreshMenu().catch((error) => {
-    console.error(`[tfx-tray] refresh failed: ${error.message}`);
-  }).finally(() => {
-    refreshPromise = null;
-  });
+  refreshPromise = refreshMenu()
+    .catch((error) => {
+      console.error(`[tfx-tray] refresh failed: ${error.message}`);
+    })
+    .finally(() => {
+      refreshPromise = null;
+    });
   return refreshPromise;
 }
 
@@ -366,7 +407,9 @@ export async function startTray() {
   };
 }
 
-const selfRun = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+const selfRun =
+  process.argv[1] &&
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (selfRun) {
   startTray().catch((error) => {

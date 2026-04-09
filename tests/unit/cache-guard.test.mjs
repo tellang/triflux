@@ -1,11 +1,20 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, it } from "node:test";
 
-import { checkNetworkAvailability, validateRuntimeCachePaths } from "../../hub/lib/cache-guard.mjs";
+import {
+  checkNetworkAvailability,
+  validateRuntimeCachePaths,
+} from "../../hub/lib/cache-guard.mjs";
 
 function makeTempDir(prefix) {
   return mkdtempSync(join(tmpdir(), prefix));
@@ -24,7 +33,9 @@ async function withServer(handler, callback) {
     assert.ok(address && typeof address === "object");
     await callback(`http://127.0.0.1:${address.port}`);
   } finally {
-    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 }
 
@@ -40,8 +51,16 @@ describe("cache-guard", () => {
     const cacheDir = makeTempDir("tfx-cache-guard-valid-");
     try {
       mkdirSync(join(cacheDir, "nested"), { recursive: true });
-      writeFileSync(join(cacheDir, "runtime.json"), JSON.stringify({ ok: true }), "utf8");
-      writeFileSync(join(cacheDir, "nested", "meta.json"), JSON.stringify({ version: 1 }), "utf8");
+      writeFileSync(
+        join(cacheDir, "runtime.json"),
+        JSON.stringify({ ok: true }),
+        "utf8",
+      );
+      writeFileSync(
+        join(cacheDir, "nested", "meta.json"),
+        JSON.stringify({ version: 1 }),
+        "utf8",
+      );
 
       const result = validateRuntimeCachePaths(cacheDir);
 
@@ -70,24 +89,36 @@ describe("cache-guard", () => {
   });
 
   it("도달 가능한 URL과 실패 URL을 함께 구분한다", async () => {
-    await withServer((request, response) => {
-      response.writeHead(request.method === "HEAD" ? 204 : 200);
-      response.end();
-    }, async (reachableUrl) => {
-      const status = await checkNetworkAvailability([reachableUrl, "http://127.0.0.1:1"]);
+    await withServer(
+      (request, response) => {
+        response.writeHead(request.method === "HEAD" ? 204 : 200);
+        response.end();
+      },
+      async (reachableUrl) => {
+        const status = await checkNetworkAvailability([
+          reachableUrl,
+          "http://127.0.0.1:1",
+        ]);
 
-      assert.equal(status.online, false);
-      assert.deepEqual(status.reachable, [reachableUrl]);
-      assert.deepEqual(status.unreachable, ["http://127.0.0.1:1"]);
-    });
+        assert.equal(status.online, false);
+        assert.deepEqual(status.reachable, [reachableUrl]);
+        assert.deepEqual(status.unreachable, ["http://127.0.0.1:1"]);
+      },
+    );
   });
 
   it("CLI update 경로가 async 캐시 가드를 사용하도록 연결돼 있다", () => {
-    const source = readFileSync(join(process.cwd(), "bin", "triflux.mjs"), "utf8");
+    const source = readFileSync(
+      join(process.cwd(), "bin", "triflux.mjs"),
+      "utf8",
+    );
 
     assert.match(source, /async function cmdUpdate\(\)/);
     assert.match(source, /await checkNetworkAvailability\(networkTargets\)/);
-    assert.match(source, /validateRuntimeCachePaths\(join\(CLAUDE_DIR, "cache"\)\)/);
+    assert.match(
+      source,
+      /validateRuntimeCachePaths\(join\(CLAUDE_DIR, "cache"\)\)/,
+    );
     assert.match(source, /case "update":[\s\S]*await cmdUpdate\(\);/);
   });
 });

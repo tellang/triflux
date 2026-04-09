@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+
 // session-vault 태그 빈도 기반으로 keyword-rules.json 확장 후보를 제안하는 스크립트
 
-import Database from "better-sqlite3";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = dirname(SCRIPT_DIR);
@@ -25,7 +26,7 @@ const MCP_SERVICE_ROUTE_MAP = {
   gmail: "gemini",
   email: "gemini",
   github: "codex",
-  figma: "gemini"
+  figma: "gemini",
 };
 
 const MCP_SERVICE_NAMES = new Set([
@@ -37,7 +38,7 @@ const MCP_SERVICE_NAMES = new Set([
   "asana",
   "drive",
   "sheets",
-  "docs"
+  "docs",
 ]);
 
 function printUsage() {
@@ -54,7 +55,7 @@ function parseArgs(argv) {
     apply: false,
     threshold: DEFAULT_THRESHOLD,
     dbPath: DEFAULT_DB_PATH,
-    help: false
+    help: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -202,7 +203,7 @@ function aggregateByNormalizedTag(rows) {
         normalized,
         frequency: 0,
         variants: new Set(),
-        sources: new Set()
+        sources: new Set(),
       });
     }
 
@@ -230,8 +231,11 @@ function readRulesDocument(rulesPath) {
 }
 
 function extractLiteralWords(patternSource) {
-  const words = patternSource.toLowerCase().match(/[a-z0-9][a-z0-9-]{1,}/g) || [];
-  return words.filter((word) => !["true", "false", "null", "route", "skill"].includes(word));
+  const words =
+    patternSource.toLowerCase().match(/[a-z0-9][a-z0-9-]{1,}/g) || [];
+  return words.filter(
+    (word) => !["true", "false", "null", "route", "skill"].includes(word),
+  );
 }
 
 function buildRuleIndex(rules) {
@@ -243,16 +247,24 @@ function buildRuleIndex(rules) {
 
     const ruleId = typeof rule.id === "string" ? rule.id.trim() : "";
     const skill = typeof rule.skill === "string" ? rule.skill.trim() : "";
-    const route = typeof rule.mcp_route === "string" ? rule.mcp_route.trim() : "";
+    const route =
+      typeof rule.mcp_route === "string" ? rule.mcp_route.trim() : "";
 
     if (ruleId) aliases.add(normalizeKeyword(ruleId));
-    if (ruleId.endsWith("-route")) aliases.add(normalizeKeyword(ruleId.slice(0, -"-route".length)));
-    if (ruleId.endsWith("-skill")) aliases.add(normalizeKeyword(ruleId.slice(0, -"-skill".length)));
+    if (ruleId.endsWith("-route"))
+      aliases.add(normalizeKeyword(ruleId.slice(0, -"-route".length)));
+    if (ruleId.endsWith("-skill"))
+      aliases.add(normalizeKeyword(ruleId.slice(0, -"-skill".length)));
     if (skill) aliases.add(normalizeKeyword(skill));
     if (route) aliases.add(normalizeKeyword(route));
 
     for (const pattern of Array.isArray(rule.patterns) ? rule.patterns : []) {
-      if (!pattern || typeof pattern.source !== "string" || typeof pattern.flags !== "string") continue;
+      if (
+        !pattern ||
+        typeof pattern.source !== "string" ||
+        typeof pattern.flags !== "string"
+      )
+        continue;
       try {
         regexes.push(new RegExp(pattern.source, pattern.flags));
       } catch {
@@ -267,7 +279,7 @@ function buildRuleIndex(rules) {
     indexed.push({
       id: ruleId || "(unknown-rule)",
       aliases,
-      regexes
+      regexes,
     });
   }
 
@@ -300,7 +312,7 @@ function classifyCandidate(keyword) {
       type: "skill",
       label: "skill 규칙 후보",
       skill: normalized,
-      mcpRoute: null
+      mcpRoute: null,
     };
   }
 
@@ -309,7 +321,7 @@ function classifyCandidate(keyword) {
       type: "mcp_route",
       label: "mcp_route 규칙 후보",
       skill: null,
-      mcpRoute: MCP_SERVICE_ROUTE_MAP[normalized] || "gemini"
+      mcpRoute: MCP_SERVICE_ROUTE_MAP[normalized] || "gemini",
     };
   }
 
@@ -317,7 +329,7 @@ function classifyCandidate(keyword) {
     type: "general",
     label: "분류 미정",
     skill: null,
-    mcpRoute: null
+    mcpRoute: null,
   };
 }
 
@@ -353,15 +365,15 @@ function buildRuleFromCandidate(candidate, existingIds) {
       patterns: [
         {
           source: createPatternSource(candidate.keyword),
-          flags: "i"
-        }
+          flags: "i",
+        },
       ],
       skill: candidate.classification.skill,
       priority: 20,
       supersedes: [],
       exclusive: false,
       state: null,
-      mcp_route: null
+      mcp_route: null,
     };
   }
 
@@ -373,15 +385,15 @@ function buildRuleFromCandidate(candidate, existingIds) {
       patterns: [
         {
           source: createPatternSource(candidate.keyword),
-          flags: "i"
-        }
+          flags: "i",
+        },
       ],
       skill: null,
       priority: 20,
       supersedes: [],
       exclusive: false,
       state: null,
-      mcp_route: candidate.classification.mcpRoute
+      mcp_route: candidate.classification.mcpRoute,
     };
   }
 
@@ -405,7 +417,7 @@ function printAnalysis({
   coveredCount,
   threshold,
   candidates,
-  covered
+  covered,
 }) {
   console.log("=== keyword-rules-expander 분석 결과 ===");
   console.log("");
@@ -419,7 +431,9 @@ function printAnalysis({
     console.log("  (없음)");
   } else {
     for (const item of candidates) {
-      console.log(`  ${item.keyword} (${item.frequency}회) → ${item.classification.label}`);
+      console.log(
+        `  ${item.keyword} (${item.frequency}회) → ${item.classification.label}`,
+      );
     }
   }
 
@@ -429,7 +443,9 @@ function printAnalysis({
     console.log("  (없음)");
   } else {
     for (const item of covered) {
-      console.log(`  ${item.keyword} (${item.frequency}회) → ${item.ruleId} 규칙 있음`);
+      console.log(
+        `  ${item.keyword} (${item.frequency}회) → ${item.ruleId} 규칙 있음`,
+      );
     }
   }
 }
@@ -458,7 +474,7 @@ function main() {
       covered.push({
         keyword: tag.keyword,
         frequency: tag.frequency,
-        ruleId: matchedRuleId
+        ruleId: matchedRuleId,
       });
       continue;
     }
@@ -469,7 +485,7 @@ function main() {
       keyword: tag.keyword,
       normalized: tag.normalized,
       frequency: tag.frequency,
-      classification: classifyCandidate(tag.keyword)
+      classification: classifyCandidate(tag.keyword),
     });
   }
 
@@ -480,7 +496,7 @@ function main() {
     coveredCount: covered.length,
     threshold: args.threshold,
     candidates,
-    covered
+    covered,
   });
 
   if (!args.apply) return;
@@ -488,10 +504,12 @@ function main() {
   const existingIds = new Set(
     rulesDoc.rules
       .map((rule) => (typeof rule.id === "string" ? rule.id.trim() : ""))
-      .filter(Boolean)
+      .filter(Boolean),
   );
 
-  const autoApplicable = candidates.filter((item) => item.classification.type !== "general");
+  const autoApplicable = candidates.filter(
+    (item) => item.classification.type !== "general",
+  );
   const manualReviewCount = candidates.length - autoApplicable.length;
 
   const newRules = autoApplicable
@@ -518,4 +536,3 @@ try {
   console.error(`[keyword-rules-expander] 오류: ${error.message}`);
   process.exit(1);
 }
-

@@ -1,15 +1,32 @@
 #!/usr/bin/env node
 // tui/doctor.mjs — Interactive triflux doctor TUI
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync, readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  clear, box, table, divider, label, ok, warn, fail, info,
-  select, confirm, spinner, sleep,
-  RESET, DIM, BOLD, CYAN, AMBER, GREEN, RED, YELLOW, WHITE, GRAY,
-  onExit, showCursor,
+  BOLD,
+  box,
+  clear,
+  confirm,
+  DIM,
+  divider,
+  fail,
+  GRAY,
+  GREEN,
+  info,
+  label,
+  ok,
+  onExit,
+  RED,
+  RESET,
+  select,
+  showCursor,
+  spinner,
+  table,
+  warn,
+  YELLOW,
 } from "./core.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -75,8 +92,12 @@ function showReport(report) {
   }
 
   console.log();
-  const statusColor = report.issue_count === 0 ? GREEN : report.issue_count <= 2 ? YELLOW : RED;
-  label("상태", `${statusColor}${report.issue_count === 0 ? "정상" : `${report.issue_count}개 이슈`}${RESET}`);
+  const statusColor =
+    report.issue_count === 0 ? GREEN : report.issue_count <= 2 ? YELLOW : RED;
+  label(
+    "상태",
+    `${statusColor}${report.issue_count === 0 ? "정상" : `${report.issue_count}개 이슈`}${RESET}`,
+  );
   label("모드", report.mode);
   console.log();
 
@@ -84,12 +105,17 @@ function showReport(report) {
   const rows = (report.checks || []).map((c) => {
     let note = "";
     if (c.version) note = `v${c.version}`;
-    if (c.missing_profiles?.length) note = `누락: ${c.missing_profiles.join(", ")}`;
+    if (c.missing_profiles?.length)
+      note = `누락: ${c.missing_profiles.join(", ")}`;
     if (c.fix) note += note ? ` → ${c.fix}` : c.fix;
     if (c.path && !c.fix) note = c.path;
 
-    const icon = c.status === "ok" ? statusIcon("ok") :
-                 c.optional ? statusIcon("optional_missing") : statusIcon(c.status);
+    const icon =
+      c.status === "ok"
+        ? statusIcon("ok")
+        : c.optional
+          ? statusIcon("optional_missing")
+          : statusIcon(c.status);
 
     return [
       `${icon} ${c.name}`,
@@ -105,8 +131,11 @@ function showReport(report) {
     console.log();
     info(`수행된 작업: ${report.actions.length}개`);
     for (const action of report.actions) {
-      const icon = action.status === "ok" ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`;
-      console.log(`    ${icon} ${action.type}: ${action.name || action.path || ""}`);
+      const icon =
+        action.status === "ok" ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`;
+      console.log(
+        `    ${icon} ${action.type}: ${action.name || action.path || ""}`,
+      );
     }
   }
 }
@@ -119,12 +148,16 @@ function getCacheStatus() {
     const fp = join(CACHE_DIR, name);
     if (existsSync(fp)) {
       let size = 0;
-      try { size = readFileSync(fp).length; } catch {}
+      try {
+        size = readFileSync(fp).length;
+      } catch {}
       let hasError = false;
       try {
         const parsed = JSON.parse(readFileSync(fp, "utf8"));
         hasError = !!parsed.error;
-      } catch { hasError = true; }
+      } catch {
+        hasError = true;
+      }
       results.push({ name, desc, exists: true, size, hasError });
     } else {
       results.push({ name, desc, exists: false, size: 0, hasError: false });
@@ -187,7 +220,8 @@ async function selectiveReset() {
 
   if (targets.length === 0) return;
 
-  if (!(await confirm(`${targets.length}개 캐시 파일을 삭제하시겠습니까?`))) return;
+  if (!(await confirm(`${targets.length}개 캐시 파일을 삭제하시겠습니까?`)))
+    return;
 
   let deleted = 0;
   for (const c of targets) {
@@ -227,9 +261,15 @@ async function checkOrphanTeams() {
     const spin = spinner("팀 정리 중...");
     try {
       // Delegate to triflux's cleanup
-      execFileSync(process.execPath, [join(PKG_ROOT, "bin", "triflux.mjs"), "doctor", "--fix"], {
-        timeout: 30000, stdio: "ignore", windowsHide: true,
-      });
+      execFileSync(
+        process.execPath,
+        [join(PKG_ROOT, "bin", "triflux.mjs"), "doctor", "--fix"],
+        {
+          timeout: 30000,
+          stdio: "ignore",
+          windowsHide: true,
+        },
+      );
       spin.stop();
       ok("팀 정리 완료");
     } catch {
@@ -242,12 +282,12 @@ async function checkOrphanTeams() {
 // ── Main Menu ──
 
 const MENU = [
-  { label: "진단 (Diagnose)",       hint: "읽기 전용 검사" },
-  { label: "수정 (Fix)",            hint: "자동 수정 + 진단" },
-  { label: "캐시 관리 (Cache)",     hint: "캐시 조회/선택 삭제" },
-  { label: "팀 세션 정리 (Teams)",  hint: "잔존 팀 감지/정리" },
-  { label: "전체 초기화 (Reset)",   hint: "캐시 전체 삭제 + 재생성" },
-  { label: "종료",                  hint: "Ctrl+C" },
+  { label: "진단 (Diagnose)", hint: "읽기 전용 검사" },
+  { label: "수정 (Fix)", hint: "자동 수정 + 진단" },
+  { label: "캐시 관리 (Cache)", hint: "캐시 조회/선택 삭제" },
+  { label: "팀 세션 정리 (Teams)", hint: "잔존 팀 감지/정리" },
+  { label: "전체 초기화 (Reset)", hint: "캐시 전체 삭제 + 재생성" },
+  { label: "종료", hint: "Ctrl+C" },
 ];
 
 async function main() {
@@ -299,12 +339,19 @@ async function main() {
       }
 
       case 4: {
-        if (!(await confirm(`${RED}전체 캐시를 초기화${RESET}하시겠습니까?`, false))) break;
+        if (
+          !(await confirm(
+            `${RED}전체 캐시를 초기화${RESET}하시겠습니까?`,
+            false,
+          ))
+        )
+          break;
         const spin = spinner("초기화 + 재생성 중...");
         try {
-          execFileSync(process.execPath,
+          execFileSync(
+            process.execPath,
             [join(PKG_ROOT, "bin", "triflux.mjs"), "doctor", "--reset"],
-            { timeout: 60000, encoding: "utf8", windowsHide: true }
+            { timeout: 60000, encoding: "utf8", windowsHide: true },
           );
           spin.stop();
           ok("전체 초기화 + 재생성 완료");

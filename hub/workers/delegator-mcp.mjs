@@ -1,30 +1,32 @@
 #!/usr/bin/env node
 // hub/workers/delegator-mcp.mjs — triflux 위임용 MCP stdio 서버
 
-import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
-import process from 'node:process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+import process from "node:process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import * as z from 'zod';
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import * as z from "zod";
 
-import { CodexMcpWorker } from './codex-mcp.mjs';
-import { GeminiWorker } from './gemini-worker.mjs';
+import { CodexMcpWorker } from "./codex-mcp.mjs";
+import { GeminiWorker } from "./gemini-worker.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 // mcp-filter.mjs 동적 해석 — 프로젝트(hub/workers/)와 배포(scripts/hub/workers/) 양쪽 대응
 const MCP_FILTER_CANDIDATES = [
-  resolve(SCRIPT_DIR, '../../scripts/lib/mcp-filter.mjs'), // 프로젝트 원본
-  resolve(SCRIPT_DIR, '../../lib/mcp-filter.mjs'),         // 배포 (~/.claude/scripts/)
+  resolve(SCRIPT_DIR, "../../scripts/lib/mcp-filter.mjs"), // 프로젝트 원본
+  resolve(SCRIPT_DIR, "../../lib/mcp-filter.mjs"), // 배포 (~/.claude/scripts/)
 ];
 const mcpFilterPath = MCP_FILTER_CANDIDATES.find((p) => existsSync(p));
 if (!mcpFilterPath) {
-  throw new Error(`mcp-filter.mjs not found. candidates: ${MCP_FILTER_CANDIDATES.join(', ')}`);
+  throw new Error(
+    `mcp-filter.mjs not found. candidates: ${MCP_FILTER_CANDIDATES.join(", ")}`,
+  );
 }
 const {
   buildPromptHint,
@@ -32,74 +34,77 @@ const {
   getGeminiAllowedServers,
   SUPPORTED_MCP_PROFILES,
 } = await import(pathToFileURL(mcpFilterPath).href);
-const SERVER_INFO = { name: 'triflux-delegator', version: '1.0.0' };
+const SERVER_INFO = { name: "triflux-delegator", version: "1.0.0" };
 const DEFAULT_CONTEXT_BYTES = 32 * 1024;
 const DEFAULT_ROUTE_TIMEOUT_SEC = 120;
 const DIRECT_PROGRESS_START = 5;
 const DIRECT_PROGRESS_RUNNING = 60;
 const DIRECT_PROGRESS_DONE = 100;
-const SEARCH_ENGINE_CACHE_PATH = ['.omc', 'state', 'search-engines.json'];
+const SEARCH_ENGINE_CACHE_PATH = [".omc", "state", "search-engines.json"];
 
 const AGENT_TIMEOUT_SEC = Object.freeze({
   executor: 1080,
-  'build-fixer': 540,
+  "build-fixer": 540,
   debugger: 900,
-  'deep-executor': 3600,
+  "deep-executor": 3600,
   architect: 3600,
   planner: 3600,
   critic: 3600,
   analyst: 3600,
-  'code-reviewer': 1800,
-  'security-reviewer': 1800,
-  'quality-reviewer': 1800,
+  "code-reviewer": 1800,
+  "security-reviewer": 1800,
+  "quality-reviewer": 1800,
   scientist: 1440,
-  'scientist-deep': 3600,
-  'document-specialist': 1440,
+  "scientist-deep": 3600,
+  "document-specialist": 1440,
   designer: 900,
   writer: 900,
   explore: 300,
   verifier: 1200,
-  'test-engineer': 300,
-  'qa-tester': 300,
+  "test-engineer": 300,
+  "qa-tester": 300,
   spark: 180,
 });
 
 const CODEX_PROFILE_BY_AGENT = Object.freeze({
-  executor: 'codex53_high',
-  'build-fixer': 'codex53_low',
-  debugger: 'codex53_high',
-  'deep-executor': 'gpt54_xhigh',
-  architect: 'gpt54_xhigh',
-  planner: 'gpt54_xhigh',
-  critic: 'gpt54_xhigh',
-  analyst: 'gpt54_xhigh',
-  'code-reviewer': 'codex53_high',
-  'security-reviewer': 'codex53_high',
-  'quality-reviewer': 'codex53_high',
-  scientist: 'codex53_high',
-  'scientist-deep': 'gpt54_high',
-  'document-specialist': 'codex53_high',
-  verifier: 'codex53_high',
-  designer: 'gpt54_xhigh',  // Gemini primary, codex fallback — UI/UX는 5.4 에이전틱
-  writer: 'codex53_high',    // Gemini primary, codex fallback용
-  spark: 'spark53_low',
+  executor: "codex53_high",
+  "build-fixer": "codex53_low",
+  debugger: "codex53_high",
+  "deep-executor": "gpt54_xhigh",
+  architect: "gpt54_xhigh",
+  planner: "gpt54_xhigh",
+  critic: "gpt54_xhigh",
+  analyst: "gpt54_xhigh",
+  "code-reviewer": "codex53_high",
+  "security-reviewer": "codex53_high",
+  "quality-reviewer": "codex53_high",
+  scientist: "codex53_high",
+  "scientist-deep": "gpt54_high",
+  "document-specialist": "codex53_high",
+  verifier: "codex53_high",
+  designer: "gpt54_xhigh", // Gemini primary, codex fallback — UI/UX는 5.4 에이전틱
+  writer: "codex53_high", // Gemini primary, codex fallback용
+  spark: "spark53_low",
 });
 
 const GEMINI_MODEL_BY_AGENT = Object.freeze({
-  'build-fixer': 'gemini-3-flash-preview',
-  writer: 'gemini-3-flash-preview',
-  spark: 'gemini-3-flash-preview',
+  "build-fixer": "gemini-3-flash-preview",
+  writer: "gemini-3-flash-preview",
+  spark: "gemini-3-flash-preview",
 });
 
 const REVIEW_INSTRUCTION_BY_AGENT = Object.freeze({
-  'code-reviewer': '코드 리뷰 모드로 동작하라. 버그, 리스크, 회귀, 테스트 누락을 우선 식별하라.',
-  'security-reviewer': '보안 리뷰 모드로 동작하라. 취약점, 권한 경계, 비밀정보 노출 가능성을 우선 식별하라.',
-  'quality-reviewer': '품질 리뷰 모드로 동작하라. 로직 결함, 유지보수성 저하, 테스트 누락을 우선 식별하라.',
+  "code-reviewer":
+    "코드 리뷰 모드로 동작하라. 버그, 리스크, 회귀, 테스트 누락을 우선 식별하라.",
+  "security-reviewer":
+    "보안 리뷰 모드로 동작하라. 취약점, 권한 경계, 비밀정보 노출 가능성을 우선 식별하라.",
+  "quality-reviewer":
+    "품질 리뷰 모드로 동작하라. 로직 결함, 유지보수성 저하, 테스트 누락을 우선 식별하라.",
 });
 
 function cloneEnv(env = process.env) {
   return Object.fromEntries(
-    Object.entries(env).filter(([, value]) => typeof value === 'string'),
+    Object.entries(env).filter(([, value]) => typeof value === "string"),
   );
 }
 
@@ -108,7 +113,7 @@ function parseJsonArray(raw, fallback = []) {
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
-      ? parsed.map((item) => String(item ?? '')).filter(Boolean)
+      ? parsed.map((item) => String(item ?? "")).filter(Boolean)
       : [...fallback];
   } catch {
     return [...fallback];
@@ -117,7 +122,9 @@ function parseJsonArray(raw, fallback = []) {
 
 function resolveCandidatePath(candidate, cwd = process.cwd()) {
   if (!candidate) return null;
-  const normalized = isAbsolute(candidate) ? candidate : resolve(cwd, candidate);
+  const normalized = isAbsolute(candidate)
+    ? candidate
+    : resolve(cwd, candidate);
   return existsSync(normalized) ? normalized : null;
 }
 
@@ -126,8 +133,8 @@ function resolveRouteScript(explicitPath, cwd = process.cwd()) {
     explicitPath,
     process.env.TFX_DELEGATOR_ROUTE_SCRIPT,
     process.env.TFX_ROUTE_SCRIPT,
-    resolve(SCRIPT_DIR, '..', '..', 'scripts', 'tfx-route.sh'),
-    resolve(cwd, 'scripts', 'tfx-route.sh'),
+    resolve(SCRIPT_DIR, "..", "..", "scripts", "tfx-route.sh"),
+    resolve(cwd, "scripts", "tfx-route.sh"),
   ];
 
   for (const candidate of candidates) {
@@ -139,11 +146,11 @@ function resolveRouteScript(explicitPath, cwd = process.cwd()) {
 }
 
 function resolveCodexProfile(agentType) {
-  return CODEX_PROFILE_BY_AGENT[agentType] || 'high';
+  return CODEX_PROFILE_BY_AGENT[agentType] || "high";
 }
 
 function resolveGeminiModel(agentType) {
-  return GEMINI_MODEL_BY_AGENT[agentType] || 'gemini-3.1-pro-preview';
+  return GEMINI_MODEL_BY_AGENT[agentType] || "gemini-3.1-pro-preview";
 }
 
 function resolveTimeoutMs(agentType, timeoutMs) {
@@ -161,13 +168,13 @@ function resolveTimeoutSec(agentType, timeoutMs) {
 }
 
 function loadContextFromFile(contextFile) {
-  if (!contextFile) return '';
+  if (!contextFile) return "";
   const resolved = resolveCandidatePath(contextFile);
-  if (!resolved) return '';
+  if (!resolved) return "";
   try {
-    return readFileSync(resolved, 'utf8').slice(0, DEFAULT_CONTEXT_BYTES);
+    return readFileSync(resolved, "utf8").slice(0, DEFAULT_CONTEXT_BYTES);
   } catch {
-    return '';
+    return "";
   }
 }
 
@@ -183,7 +190,9 @@ function withPromptHint(prompt, args) {
     agentType: args.agentType,
     requestedProfile: args.mcpProfile,
     searchTool: args.searchTool,
-    workerIndex: Number.isInteger(args.workerIndex) ? args.workerIndex : undefined,
+    workerIndex: Number.isInteger(args.workerIndex)
+      ? args.workerIndex
+      : undefined,
     taskText: promptWithContext,
   });
   if (!hint) return promptWithContext;
@@ -192,8 +201,8 @@ function withPromptHint(prompt, args) {
 
 function joinInstructions(...values) {
   return values
-    .filter((value) => typeof value === 'string' && value.trim())
-    .join('\n')
+    .filter((value) => typeof value === "string" && value.trim())
+    .join("\n")
     .trim();
 }
 
@@ -202,36 +211,40 @@ function _loadAvailableServersFromSearchEngineCache(cwd = process.cwd()) {
   if (!existsSync(cacheFile)) return null;
 
   try {
-    const parsed = JSON.parse(readFileSync(cacheFile, 'utf8'));
+    const parsed = JSON.parse(readFileSync(cacheFile, "utf8"));
     if (!Array.isArray(parsed?.engines)) return null;
     return parsed.engines
-      .filter((engine) => engine?.status === 'available')
-      .map((engine) => (typeof engine?.name === 'string' ? engine.name.trim() : ''))
+      .filter((engine) => engine?.status === "available")
+      .map((engine) =>
+        typeof engine?.name === "string" ? engine.name.trim() : "",
+      )
       .filter(Boolean);
   } catch {
     return null;
   }
 }
 
-function parseRouteType(stderr = '') {
+function parseRouteType(stderr = "") {
   const match = stderr.match(/type=([a-z-]+)/);
   if (!match) return null;
-  if (match[1] === 'codex') return 'codex';
-  if (match[1] === 'gemini') return 'gemini';
+  if (match[1] === "codex") return "codex";
+  if (match[1] === "gemini") return "gemini";
   return match[1];
 }
 
 function summarizePayload(payload) {
-  if (typeof payload.output === 'string' && payload.output.trim()) return payload.output.trim();
-  if (payload.mode === 'async' && payload.job_id) return `비동기 위임이 시작되었습니다. jobId=${payload.job_id}`;
+  if (typeof payload.output === "string" && payload.output.trim())
+    return payload.output.trim();
+  if (payload.mode === "async" && payload.job_id)
+    return `비동기 위임이 시작되었습니다. jobId=${payload.job_id}`;
   if (payload.job_id) return `jobId=${payload.job_id} 상태=${payload.status}`;
   if (payload.status) return `상태=${payload.status}`;
-  return payload.ok ? '완료되었습니다.' : '실패했습니다.';
+  return payload.ok ? "완료되었습니다." : "실패했습니다.";
 }
 
 function createToolResponse(payload, { isError = false } = {}) {
   return {
-    content: [{ type: 'text', text: summarizePayload(payload) }],
+    content: [{ type: "text", text: summarizePayload(payload) }],
     structuredContent: payload,
     isError,
   };
@@ -240,55 +253,95 @@ function createToolResponse(payload, { isError = false } = {}) {
 function createErrorPayload(message, extras = {}) {
   return {
     ok: false,
-    status: 'failed',
+    status: "failed",
     error: message,
     ...extras,
   };
 }
 
 const DelegateInputSchema = z.object({
-  prompt: z.string().min(1).describe('위임할 프롬프트'),
-  provider: z.enum(['auto', 'codex', 'gemini']).default('auto').describe('사용할 provider'),
-  mode: z.enum(['sync', 'async']).default('sync').describe('동기 또는 비동기 실행'),
-  agentType: z.string().default('executor').describe('tfx-route 역할명 또는 direct 실행 역할'),
-  cwd: z.string().optional().describe('작업 디렉터리'),
-  timeoutMs: z.number().int().positive().optional().describe('요청 타임아웃(ms)'),
-  sessionKey: z.string().optional().describe('Codex warm session 재사용 키'),
-  resetSession: z.boolean().optional().describe('기존 Codex 세션 초기화 여부'),
-  mcpProfile: z.enum(SUPPORTED_MCP_PROFILES).default('auto'),
-  contextFile: z.string().optional().describe('tfx-route prior_context 파일 경로'),
-  availableServers: z.array(z.string()).optional().describe('Codex에 등록된 MCP 서버 이름 목록 (config override 대상)'),
-  searchTool: z.enum(['brave-search', 'tavily', 'exa']).optional().describe('검색 우선 도구'),
-  workerIndex: z.number().int().positive().optional().describe('병렬 워커 인덱스'),
-  model: z.string().optional().describe('직접 실행 시 모델 오버라이드'),
-  developerInstructions: z.string().optional().describe('직접 실행 시 추가 개발자 지침'),
-  compactPrompt: z.string().optional().describe('Codex compact prompt'),
-  threadId: z.string().optional().describe('Codex 직접 실행 시 기존 threadId'),
-  codexTransport: z.enum(['auto', 'mcp', 'exec']).optional().describe('route 경로용 Codex transport'),
-  noClaudeNative: z.boolean().optional().describe('route 경로용 TFX_NO_CLAUDE_NATIVE'),
-  teamName: z.string().optional().describe('TFX_TEAM_NAME'),
-  teamTaskId: z.string().optional().describe('TFX_TEAM_TASK_ID'),
-  teamAgentName: z.string().optional().describe('TFX_TEAM_AGENT_NAME'),
-  teamLeadName: z.string().optional().describe('TFX_TEAM_LEAD_NAME'),
-  hubUrl: z.string().optional().describe('TFX_HUB_URL'),
+  prompt: z.string().min(1).describe("위임할 프롬프트"),
+  provider: z
+    .enum(["auto", "codex", "gemini"])
+    .default("auto")
+    .describe("사용할 provider"),
+  mode: z
+    .enum(["sync", "async"])
+    .default("sync")
+    .describe("동기 또는 비동기 실행"),
+  agentType: z
+    .string()
+    .default("executor")
+    .describe("tfx-route 역할명 또는 direct 실행 역할"),
+  cwd: z.string().optional().describe("작업 디렉터리"),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("요청 타임아웃(ms)"),
+  sessionKey: z.string().optional().describe("Codex warm session 재사용 키"),
+  resetSession: z.boolean().optional().describe("기존 Codex 세션 초기화 여부"),
+  mcpProfile: z.enum(SUPPORTED_MCP_PROFILES).default("auto"),
+  contextFile: z
+    .string()
+    .optional()
+    .describe("tfx-route prior_context 파일 경로"),
+  availableServers: z
+    .array(z.string())
+    .optional()
+    .describe("Codex에 등록된 MCP 서버 이름 목록 (config override 대상)"),
+  searchTool: z
+    .enum(["brave-search", "tavily", "exa"])
+    .optional()
+    .describe("검색 우선 도구"),
+  workerIndex: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("병렬 워커 인덱스"),
+  model: z.string().optional().describe("직접 실행 시 모델 오버라이드"),
+  developerInstructions: z
+    .string()
+    .optional()
+    .describe("직접 실행 시 추가 개발자 지침"),
+  compactPrompt: z.string().optional().describe("Codex compact prompt"),
+  threadId: z.string().optional().describe("Codex 직접 실행 시 기존 threadId"),
+  codexTransport: z
+    .enum(["auto", "mcp", "exec"])
+    .optional()
+    .describe("route 경로용 Codex transport"),
+  noClaudeNative: z
+    .boolean()
+    .optional()
+    .describe("route 경로용 TFX_NO_CLAUDE_NATIVE"),
+  teamName: z.string().optional().describe("TFX_TEAM_NAME"),
+  teamTaskId: z.string().optional().describe("TFX_TEAM_TASK_ID"),
+  teamAgentName: z.string().optional().describe("TFX_TEAM_AGENT_NAME"),
+  teamLeadName: z.string().optional().describe("TFX_TEAM_LEAD_NAME"),
+  hubUrl: z.string().optional().describe("TFX_HUB_URL"),
 });
 
 const DelegateStatusInputSchema = z.object({
-  jobId: z.string().min(1).describe('조회할 비동기 job ID'),
+  jobId: z.string().min(1).describe("조회할 비동기 job ID"),
 });
 
 const DelegateReplyInputSchema = z.object({
-  job_id: z.string().min(1).describe('후속 응답을 보낼 기존 delegate job ID'),
-  reply: z.string().min(1).describe('후속 사용자 응답'),
-  done: z.boolean().default(false).describe('true이면 응답 처리 후 대화를 종료'),
+  job_id: z.string().min(1).describe("후속 응답을 보낼 기존 delegate job ID"),
+  reply: z.string().min(1).describe("후속 사용자 응답"),
+  done: z
+    .boolean()
+    .default(false)
+    .describe("true이면 응답 처리 후 대화를 종료"),
 });
 
 const DelegateOutputSchema = z.object({
   ok: z.boolean(),
   jobId: z.string().optional(),
   job_id: z.string().optional(),
-  mode: z.enum(['sync', 'async']).optional(),
-  status: z.enum(['running', 'completed', 'failed']).optional(),
+  mode: z.enum(["sync", "async"]).optional(),
+  status: z.enum(["running", "completed", "failed"]).optional(),
   error: z.string().optional(),
   providerRequested: z.string().optional(),
   providerResolved: z.string().nullable().optional(),
@@ -308,29 +361,33 @@ const DelegateOutputSchema = z.object({
 
 function isTeamRouteRequested(args) {
   return Boolean(
-    args.teamName
-    || args.teamTaskId
-    || args.teamAgentName
-    || args.teamLeadName
-    || args.hubUrl
+    args.teamName ||
+      args.teamTaskId ||
+      args.teamAgentName ||
+      args.teamLeadName ||
+      args.hubUrl,
   );
 }
 
 function pickRouteMode(provider) {
-  return provider === 'auto' ? 'auto' : provider;
+  return provider === "auto" ? "auto" : provider;
 }
 
 function sanitizeDelegateArgs(args = {}) {
   return {
-    provider: args.provider || 'auto',
-    agentType: args.agentType || 'executor',
+    provider: args.provider || "auto",
+    agentType: args.agentType || "executor",
     cwd: args.cwd || null,
-    timeoutMs: Number.isFinite(Number(args.timeoutMs)) ? Math.trunc(Number(args.timeoutMs)) : null,
+    timeoutMs: Number.isFinite(Number(args.timeoutMs))
+      ? Math.trunc(Number(args.timeoutMs))
+      : null,
     sessionKey: args.sessionKey || null,
     resetSession: Boolean(args.resetSession),
-    mcpProfile: args.mcpProfile || 'auto',
+    mcpProfile: args.mcpProfile || "auto",
     contextFile: args.contextFile || null,
-    availableServers: Array.isArray(args.availableServers) ? args.availableServers : null,
+    availableServers: Array.isArray(args.availableServers)
+      ? args.availableServers
+      : null,
     searchTool: args.searchTool || null,
     workerIndex: Number.isInteger(args.workerIndex) ? args.workerIndex : null,
     model: args.model || null,
@@ -348,21 +405,21 @@ function sanitizeDelegateArgs(args = {}) {
 }
 
 function formatConversationTranscript(turns = []) {
-  return turns.map((turn, index) => {
-    const parts = [
-      `Turn ${index + 1} user:\n${turn.user}`,
-    ];
-    if (typeof turn.assistant === 'string' && turn.assistant.trim()) {
-      parts.push(`Turn ${index + 1} assistant:\n${turn.assistant}`);
-    }
-    return parts.join('\n\n');
-  }).join('\n\n');
+  return turns
+    .map((turn, index) => {
+      const parts = [`Turn ${index + 1} user:\n${turn.user}`];
+      if (typeof turn.assistant === "string" && turn.assistant.trim()) {
+        parts.push(`Turn ${index + 1} assistant:\n${turn.assistant}`);
+      }
+      return parts.join("\n\n");
+    })
+    .join("\n\n");
 }
 
 async function emitProgress(extra, progress, total, message) {
   if (extra?._meta?.progressToken === undefined) return;
   await extra.sendNotification({
-    method: 'notifications/progress',
+    method: "notifications/progress",
     params: {
       progressToken: extra._meta.progressToken,
       progress,
@@ -373,34 +430,39 @@ async function emitProgress(extra, progress, total, message) {
 }
 
 export class DelegatorMcpWorker {
-  type = 'delegator';
+  type = "delegator";
 
   constructor(options = {}) {
     this.cwd = options.cwd || process.cwd();
     this.env = cloneEnv({ ...cloneEnv(process.env), ...cloneEnv(options.env) });
     this.routeScript = resolveRouteScript(options.routeScript, this.cwd);
-    this.bashCommand = options.bashCommand
-      || this.env.TFX_DELEGATOR_BASH_COMMAND
-      || this.env.BASH_BIN
-      || 'bash';
+    this.bashCommand =
+      options.bashCommand ||
+      this.env.TFX_DELEGATOR_BASH_COMMAND ||
+      this.env.BASH_BIN ||
+      "bash";
 
     this.codexWorker = new CodexMcpWorker({
-      command: options.codexCommand
-        || this.env.TFX_DELEGATOR_CODEX_COMMAND
-        || this.env.CODEX_BIN
-        || 'codex',
-      args: Array.isArray(options.codexArgs) && options.codexArgs.length
-        ? options.codexArgs
-        : parseJsonArray(this.env.TFX_DELEGATOR_CODEX_ARGS_JSON, []),
+      command:
+        options.codexCommand ||
+        this.env.TFX_DELEGATOR_CODEX_COMMAND ||
+        this.env.CODEX_BIN ||
+        "codex",
+      args:
+        Array.isArray(options.codexArgs) && options.codexArgs.length
+          ? options.codexArgs
+          : parseJsonArray(this.env.TFX_DELEGATOR_CODEX_ARGS_JSON, []),
       cwd: this.cwd,
       env: this.env,
       clientInfo: { name: SERVER_INFO.name, version: SERVER_INFO.version },
     });
 
-    this.geminiCommand = options.geminiCommand || this.env.GEMINI_BIN || 'gemini';
-    this.geminiCommandArgs = Array.isArray(options.geminiArgs) && options.geminiArgs.length
-      ? [...options.geminiArgs]
-      : parseJsonArray(this.env.GEMINI_BIN_ARGS_JSON, []);
+    this.geminiCommand =
+      options.geminiCommand || this.env.GEMINI_BIN || "gemini";
+    this.geminiCommandArgs =
+      Array.isArray(options.geminiArgs) && options.geminiArgs.length
+        ? [...options.geminiArgs]
+        : parseJsonArray(this.env.GEMINI_BIN_ARGS_JSON, []);
 
     this.server = null;
     this.transport = null;
@@ -424,32 +486,48 @@ export class DelegatorMcpWorker {
       capabilities: { logging: {} },
     });
 
-    server.registerTool('triflux-delegate', {
-      description: '새 위임을 실행합니다. codex/gemini direct 경로와 tfx-route 기반 auto 라우팅을 모두 지원합니다.',
-      inputSchema: DelegateInputSchema,
-      outputSchema: DelegateOutputSchema,
-    }, async (args, extra) => {
-      const payload = await this.delegate(args, extra);
-      return createToolResponse(payload, { isError: payload.ok === false && payload.mode !== 'async' });
-    });
+    server.registerTool(
+      "triflux-delegate",
+      {
+        description:
+          "새 위임을 실행합니다. codex/gemini direct 경로와 tfx-route 기반 auto 라우팅을 모두 지원합니다.",
+        inputSchema: DelegateInputSchema,
+        outputSchema: DelegateOutputSchema,
+      },
+      async (args, extra) => {
+        const payload = await this.delegate(args, extra);
+        return createToolResponse(payload, {
+          isError: payload.ok === false && payload.mode !== "async",
+        });
+      },
+    );
 
-    server.registerTool('triflux-delegate-status', {
-      description: '비동기 위임 job 상태를 조회합니다.',
-      inputSchema: DelegateStatusInputSchema,
-      outputSchema: DelegateOutputSchema,
-    }, async ({ jobId }, extra) => {
-      const payload = await this.getJobStatus(jobId, extra);
-      return createToolResponse(payload, { isError: payload.ok === false });
-    });
+    server.registerTool(
+      "triflux-delegate-status",
+      {
+        description: "비동기 위임 job 상태를 조회합니다.",
+        inputSchema: DelegateStatusInputSchema,
+        outputSchema: DelegateOutputSchema,
+      },
+      async ({ jobId }, extra) => {
+        const payload = await this.getJobStatus(jobId, extra);
+        return createToolResponse(payload, { isError: payload.ok === false });
+      },
+    );
 
-    server.registerTool('triflux-delegate-reply', {
-      description: '기존 delegate job에 후속 응답을 보내고, Gemini direct job이면 multi-turn 대화를 이어갑니다.',
-      inputSchema: DelegateReplyInputSchema,
-      outputSchema: DelegateOutputSchema,
-    }, async (args, extra) => {
-      const payload = await this.reply(args, extra);
-      return createToolResponse(payload, { isError: payload.ok === false });
-    });
+    server.registerTool(
+      "triflux-delegate-reply",
+      {
+        description:
+          "기존 delegate job에 후속 응답을 보내고, Gemini direct job이면 multi-turn 대화를 이어갑니다.",
+        inputSchema: DelegateReplyInputSchema,
+        outputSchema: DelegateOutputSchema,
+      },
+      async (args, extra) => {
+        const payload = await this.reply(args, extra);
+        return createToolResponse(payload, { isError: payload.ok === false });
+      },
+    );
 
     this.server = server;
     this.ready = true;
@@ -467,7 +545,9 @@ export class DelegatorMcpWorker {
     this.ready = false;
 
     for (const child of this.routeChildren) {
-      try { child.kill(); } catch {}
+      try {
+        child.kill();
+      } catch {}
     }
     this.routeChildren.clear();
 
@@ -496,7 +576,7 @@ export class DelegatorMcpWorker {
   async execute(prompt, options = {}) {
     const result = await this._executeDirect({ prompt, ...options });
     return {
-      output: result.output || result.error || '',
+      output: result.output || result.error || "",
       exitCode: result.exitCode ?? (result.ok ? 0 : 1),
       threadId: result.threadId || null,
       sessionKey: result.sessionKey || null,
@@ -505,7 +585,7 @@ export class DelegatorMcpWorker {
   }
 
   async delegate(args, extra) {
-    if (args.mode === 'async') {
+    if (args.mode === "async") {
       return this._startAsyncJob(args, extra);
     }
     return this._runSyncJob(args, extra);
@@ -518,11 +598,11 @@ export class DelegatorMcpWorker {
     }
 
     const payload = this._serializeJob(job);
-    if (job.status === 'running') {
+    if (job.status === "running") {
       await emitProgress(extra, 25, 100, `job ${jobId} 실행 중`);
-    } else if (job.status === 'completed') {
+    } else if (job.status === "completed") {
       await emitProgress(extra, DIRECT_PROGRESS_DONE, 100, `job ${jobId} 완료`);
-    } else if (job.status === 'failed') {
+    } else if (job.status === "failed") {
       await emitProgress(extra, DIRECT_PROGRESS_DONE, 100, `job ${jobId} 실패`);
     }
     return payload;
@@ -531,28 +611,51 @@ export class DelegatorMcpWorker {
   async reply({ job_id, reply, done = false }, extra) {
     const job = this.jobs.get(job_id);
     if (!job) {
-      return createErrorPayload(`알 수 없는 jobId: ${job_id}`, { jobId: job_id, job_id });
+      return createErrorPayload(`알 수 없는 jobId: ${job_id}`, {
+        jobId: job_id,
+        job_id,
+      });
     }
-    if (job.status === 'running') {
-      return createErrorPayload(`job ${job_id}가 아직 실행 중입니다.`, { jobId: job_id, job_id });
+    if (job.status === "running") {
+      return createErrorPayload(`job ${job_id}가 아직 실행 중입니다.`, {
+        jobId: job_id,
+        job_id,
+      });
     }
-    if (job.providerRequested !== 'gemini' || job.transport !== 'gemini-worker') {
-      return createErrorPayload('delegate-reply는 현재 direct Gemini job에만 지원됩니다.', {
+    if (
+      job.providerRequested !== "gemini" ||
+      job.transport !== "gemini-worker"
+    ) {
+      return createErrorPayload(
+        "delegate-reply는 현재 direct Gemini job에만 지원됩니다.",
+        {
+          jobId: job_id,
+          job_id,
+        },
+      );
+    }
+
+    const conversation = this.geminiConversations.get(job_id);
+    if (!conversation) {
+      return createErrorPayload(`Gemini 대화 컨텍스트가 없습니다: ${job_id}`, {
+        jobId: job_id,
+        job_id,
+      });
+    }
+    if (conversation.closed) {
+      return createErrorPayload(`이미 종료된 대화입니다: ${job_id}`, {
         jobId: job_id,
         job_id,
       });
     }
 
-    const conversation = this.geminiConversations.get(job_id);
-    if (!conversation) {
-      return createErrorPayload(`Gemini 대화 컨텍스트가 없습니다: ${job_id}`, { jobId: job_id, job_id });
-    }
-    if (conversation.closed) {
-      return createErrorPayload(`이미 종료된 대화입니다: ${job_id}`, { jobId: job_id, job_id });
-    }
-
-    await emitProgress(extra, DIRECT_PROGRESS_START, 100, `job ${job_id} 후속 응답을 시작합니다.`);
-    job.status = 'running';
+    await emitProgress(
+      extra,
+      DIRECT_PROGRESS_START,
+      100,
+      `job ${job_id} 후속 응답을 시작합니다.`,
+    );
+    job.status = "running";
     job.updatedAt = new Date().toISOString();
 
     const worker = this._createGeminiWorker();
@@ -564,8 +667,10 @@ export class DelegatorMcpWorker {
         cwd: job.requestArgs.cwd || this.cwd,
         timeoutMs: resolveTimeoutMs(job.agentType, job.requestArgs.timeoutMs),
         model: job.requestArgs.model || resolveGeminiModel(job.agentType),
-        approvalMode: 'yolo',
-        allowedMcpServerNames: getGeminiAllowedServers(this._getMcpPolicyOptions(job.requestArgs)),
+        approvalMode: "yolo",
+        allowedMcpServerNames: getGeminiAllowedServers(
+          this._getMcpPolicyOptions(job.requestArgs),
+        ),
       });
 
       conversation.turns.push({
@@ -580,26 +685,34 @@ export class DelegatorMcpWorker {
 
       this._applyJobResult(job, {
         ok: result.exitCode === 0,
-        status: result.exitCode === 0 ? 'completed' : 'failed',
-        providerRequested: 'gemini',
-        providerResolved: 'gemini',
+        status: result.exitCode === 0 ? "completed" : "failed",
+        providerRequested: "gemini",
+        providerResolved: "gemini",
         agentType: job.agentType,
-        transport: 'gemini-worker',
+        transport: "gemini-worker",
         exitCode: result.exitCode,
         output: result.output,
         sessionKey: result.sessionKey || job.sessionKey || null,
       });
-      await emitProgress(extra, DIRECT_PROGRESS_DONE, 100, `job ${job_id} 후속 응답이 완료되었습니다.`);
+      await emitProgress(
+        extra,
+        DIRECT_PROGRESS_DONE,
+        100,
+        `job ${job_id} 후속 응답이 완료되었습니다.`,
+      );
       return this._serializeJob(job);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this._applyJobResult(job, createErrorPayload(message, {
-        mode: job.mode,
-        providerRequested: 'gemini',
-        providerResolved: 'gemini',
-        agentType: job.agentType,
-        transport: 'gemini-worker',
-      }));
+      this._applyJobResult(
+        job,
+        createErrorPayload(message, {
+          mode: job.mode,
+          providerRequested: "gemini",
+          providerResolved: "gemini",
+          agentType: job.agentType,
+          transport: "gemini-worker",
+        }),
+      );
       return this._serializeJob(job);
     } finally {
       await worker.stop().catch(() => {});
@@ -617,15 +730,17 @@ export class DelegatorMcpWorker {
   }
 
   _buildDirectPrompt(args) {
-    return withContext(String(args.prompt ?? ''), args.contextFile);
+    return withContext(String(args.prompt ?? ""), args.contextFile);
   }
 
   _buildDirectPromptWithHint(args) {
-    return withPromptHint(String(args.prompt ?? ''), {
-      agentType: args.agentType || 'executor',
-      mcpProfile: args.mcpProfile || 'auto',
+    return withPromptHint(String(args.prompt ?? ""), {
+      agentType: args.agentType || "executor",
+      mcpProfile: args.mcpProfile || "auto",
       searchTool: args.searchTool,
-      workerIndex: Number.isInteger(args.workerIndex) ? args.workerIndex : undefined,
+      workerIndex: Number.isInteger(args.workerIndex)
+        ? args.workerIndex
+        : undefined,
       contextFile: args.contextFile,
     });
   }
@@ -633,26 +748,30 @@ export class DelegatorMcpWorker {
   _buildGeminiReplyPrompt(conversation, reply) {
     const transcript = formatConversationTranscript(conversation.turns);
     return [
-      'Continue the conversation using the prior transcript below.',
-      '',
-      '<conversation_history>',
+      "Continue the conversation using the prior transcript below.",
+      "",
+      "<conversation_history>",
       transcript,
-      '</conversation_history>',
-      '',
-      '<latest_user_reply>',
+      "</conversation_history>",
+      "",
+      "<latest_user_reply>",
       reply,
-      '</latest_user_reply>',
-    ].join('\n');
+      "</latest_user_reply>",
+    ].join("\n");
   }
 
   _getMcpPolicyOptions(args) {
     return {
-      agentType: args.agentType || 'executor',
-      requestedProfile: args.mcpProfile || 'auto',
+      agentType: args.agentType || "executor",
+      requestedProfile: args.mcpProfile || "auto",
       searchTool: args.searchTool,
-      workerIndex: Number.isInteger(args.workerIndex) ? args.workerIndex : undefined,
-      taskText: withContext(String(args.prompt ?? ''), args.contextFile),
-      availableServers: Array.isArray(args.availableServers) ? args.availableServers : undefined,
+      workerIndex: Number.isInteger(args.workerIndex)
+        ? args.workerIndex
+        : undefined,
+      taskText: withContext(String(args.prompt ?? ""), args.contextFile),
+      availableServers: Array.isArray(args.availableServers)
+        ? args.availableServers
+        : undefined,
     };
   }
 
@@ -661,11 +780,16 @@ export class DelegatorMcpWorker {
   }
 
   _shouldUseRoute(args) {
-    return args.provider === 'auto' || isTeamRouteRequested(args);
+    return args.provider === "auto" || isTeamRouteRequested(args);
   }
 
   async _executeDirect(args, extra = null) {
-    await emitProgress(extra, DIRECT_PROGRESS_START, 100, '위임 실행을 시작합니다.');
+    await emitProgress(
+      extra,
+      DIRECT_PROGRESS_START,
+      100,
+      "위임 실행을 시작합니다.",
+    );
 
     const runViaRoute = this._shouldUseRoute(args);
 
@@ -674,50 +798,63 @@ export class DelegatorMcpWorker {
         ? await this._executeRoute(args, extra)
         : await this._executeWorker(args, extra);
 
-      await emitProgress(extra, DIRECT_PROGRESS_DONE, 100, '위임이 완료되었습니다.');
+      await emitProgress(
+        extra,
+        DIRECT_PROGRESS_DONE,
+        100,
+        "위임이 완료되었습니다.",
+      );
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return createErrorPayload(message, {
-        mode: 'sync',
+        mode: "sync",
         providerRequested: args.provider,
         agentType: args.agentType,
-        transport: runViaRoute ? 'route-script' : `${args.provider}-worker`,
+        transport: runViaRoute ? "route-script" : `${args.provider}-worker`,
       });
     }
   }
 
   async _executeWorker(args, extra) {
-    await emitProgress(extra, DIRECT_PROGRESS_RUNNING, 100, '직접 워커 경로로 실행 중입니다.');
+    await emitProgress(
+      extra,
+      DIRECT_PROGRESS_RUNNING,
+      100,
+      "직접 워커 경로로 실행 중입니다.",
+    );
 
-    if (args.provider === 'codex') {
-      const result = await this.codexWorker.execute(this._buildDirectPrompt(args), {
-        cwd: args.cwd || this.cwd,
-        timeoutMs: resolveTimeoutMs(args.agentType, args.timeoutMs),
-        sessionKey: args.sessionKey,
-        threadId: args.threadId,
-        resetSession: args.resetSession,
-        profile: resolveCodexProfile(args.agentType),
-        sandbox: 'danger-full-access',
-        approvalPolicy: 'never',
-        developerInstructions: joinInstructions(
-          REVIEW_INSTRUCTION_BY_AGENT[args.agentType],
-          this._buildPromptHintInstruction(args),
-          args.developerInstructions,
-        ),
-        config: getCodexMcpConfig(this._getMcpPolicyOptions(args)),
-        compactPrompt: args.compactPrompt,
-        model: args.model,
-      });
+    if (args.provider === "codex") {
+      const result = await this.codexWorker.execute(
+        this._buildDirectPrompt(args),
+        {
+          cwd: args.cwd || this.cwd,
+          timeoutMs: resolveTimeoutMs(args.agentType, args.timeoutMs),
+          sessionKey: args.sessionKey,
+          threadId: args.threadId,
+          resetSession: args.resetSession,
+          profile: resolveCodexProfile(args.agentType),
+          sandbox: "danger-full-access",
+          approvalPolicy: "never",
+          developerInstructions: joinInstructions(
+            REVIEW_INSTRUCTION_BY_AGENT[args.agentType],
+            this._buildPromptHintInstruction(args),
+            args.developerInstructions,
+          ),
+          config: getCodexMcpConfig(this._getMcpPolicyOptions(args)),
+          compactPrompt: args.compactPrompt,
+          model: args.model,
+        },
+      );
 
       return {
         ok: result.exitCode === 0,
-        mode: 'sync',
-        status: result.exitCode === 0 ? 'completed' : 'failed',
-        providerRequested: 'codex',
-        providerResolved: 'codex',
+        mode: "sync",
+        status: result.exitCode === 0 ? "completed" : "failed",
+        providerRequested: "codex",
+        providerResolved: "codex",
         agentType: args.agentType,
-        transport: 'codex-mcp',
+        transport: "codex-mcp",
         exitCode: result.exitCode,
         output: result.output,
         sessionKey: result.sessionKey,
@@ -725,7 +862,7 @@ export class DelegatorMcpWorker {
       };
     }
 
-    if (args.provider === 'gemini') {
+    if (args.provider === "gemini") {
       const worker = this._createGeminiWorker();
       const prompt = this._buildDirectPromptWithHint(args);
       try {
@@ -733,18 +870,20 @@ export class DelegatorMcpWorker {
           cwd: args.cwd || this.cwd,
           timeoutMs: resolveTimeoutMs(args.agentType, args.timeoutMs),
           model: args.model || resolveGeminiModel(args.agentType),
-          approvalMode: 'yolo',
-          allowedMcpServerNames: getGeminiAllowedServers(this._getMcpPolicyOptions(args)),
+          approvalMode: "yolo",
+          allowedMcpServerNames: getGeminiAllowedServers(
+            this._getMcpPolicyOptions(args),
+          ),
         });
 
         return {
           ok: result.exitCode === 0,
-          mode: 'sync',
-          status: result.exitCode === 0 ? 'completed' : 'failed',
-          providerRequested: 'gemini',
-          providerResolved: 'gemini',
+          mode: "sync",
+          status: result.exitCode === 0 ? "completed" : "failed",
+          providerRequested: "gemini",
+          providerResolved: "gemini",
           agentType: args.agentType,
-          transport: 'gemini-worker',
+          transport: "gemini-worker",
           exitCode: result.exitCode,
           output: result.output,
           sessionKey: result.sessionKey,
@@ -755,34 +894,42 @@ export class DelegatorMcpWorker {
       }
     }
 
-    return createErrorPayload(`지원하지 않는 direct provider: ${args.provider}`, {
-      mode: 'sync',
-      providerRequested: args.provider,
-      agentType: args.agentType,
-      transport: 'direct-worker',
-    });
+    return createErrorPayload(
+      `지원하지 않는 direct provider: ${args.provider}`,
+      {
+        mode: "sync",
+        providerRequested: args.provider,
+        agentType: args.agentType,
+        transport: "direct-worker",
+      },
+    );
   }
 
   async _executeRoute(args, extra) {
     if (!this.routeScript) {
-      return createErrorPayload('tfx-route.sh 경로를 찾지 못했습니다.', {
-        mode: 'sync',
+      return createErrorPayload("tfx-route.sh 경로를 찾지 못했습니다.", {
+        mode: "sync",
         providerRequested: args.provider,
         agentType: args.agentType,
-        transport: 'route-script',
+        transport: "route-script",
       });
     }
 
-    await emitProgress(extra, DIRECT_PROGRESS_RUNNING, 100, 'tfx-route.sh 경로로 실행 중입니다.');
+    await emitProgress(
+      extra,
+      DIRECT_PROGRESS_RUNNING,
+      100,
+      "tfx-route.sh 경로로 실행 중입니다.",
+    );
     const result = await this._spawnRoute(args);
     return {
       ok: result.exitCode === 0,
-      mode: 'sync',
-      status: result.exitCode === 0 ? 'completed' : 'failed',
+      mode: "sync",
+      status: result.exitCode === 0 ? "completed" : "failed",
       providerRequested: args.provider,
       providerResolved: parseRouteType(result.stderr) || args.provider,
       agentType: args.agentType,
-      transport: 'route-script',
+      transport: "route-script",
       exitCode: result.exitCode,
       output: result.stdout.trim() || result.stderr.trim(),
       stderr: result.stderr.trim(),
@@ -790,10 +937,15 @@ export class DelegatorMcpWorker {
   }
 
   async _startAsyncJob(args, extra) {
-    const job = this._createJob(args, 'async');
+    const job = this._createJob(args, "async");
     this.jobs.set(job.jobId, job);
 
-    await emitProgress(extra, DIRECT_PROGRESS_START, 100, `비동기 job ${job.jobId}를 시작합니다.`);
+    await emitProgress(
+      extra,
+      DIRECT_PROGRESS_START,
+      100,
+      `비동기 job ${job.jobId}를 시작합니다.`,
+    );
 
     void (async () => {
       try {
@@ -802,15 +954,20 @@ export class DelegatorMcpWorker {
           : await this._runAsyncWorker(args, job);
         this._applyJobResult(job, result);
       } catch (error) {
-        this._applyJobResult(job, createErrorPayload(
-          error instanceof Error ? error.message : String(error),
-          {
-            mode: 'async',
-            providerRequested: args.provider,
-            agentType: args.agentType,
-            transport: this._shouldUseRoute(args) ? 'route-script' : `${args.provider}-worker`,
-          },
-        ));
+        this._applyJobResult(
+          job,
+          createErrorPayload(
+            error instanceof Error ? error.message : String(error),
+            {
+              mode: "async",
+              providerRequested: args.provider,
+              agentType: args.agentType,
+              transport: this._shouldUseRoute(args)
+                ? "route-script"
+                : `${args.provider}-worker`,
+            },
+          ),
+        );
       } finally {
         if (job.worker) {
           await job.worker.stop().catch(() => {});
@@ -824,29 +981,32 @@ export class DelegatorMcpWorker {
   }
 
   async _runAsyncWorker(args, job) {
-    if (args.provider === 'codex') {
-      const result = await this.codexWorker.execute(this._buildDirectPrompt(args), {
-        cwd: args.cwd || this.cwd,
-        timeoutMs: resolveTimeoutMs(args.agentType, args.timeoutMs),
-        sessionKey: args.sessionKey,
-        threadId: args.threadId,
-        resetSession: args.resetSession,
-        profile: resolveCodexProfile(args.agentType),
-        sandbox: 'danger-full-access',
-        approvalPolicy: 'never',
-        developerInstructions: joinInstructions(
-          REVIEW_INSTRUCTION_BY_AGENT[args.agentType],
-          this._buildPromptHintInstruction(args),
-          args.developerInstructions,
-        ),
-        config: getCodexMcpConfig(this._getMcpPolicyOptions(args)),
-        compactPrompt: args.compactPrompt,
-        model: args.model,
-      });
+    if (args.provider === "codex") {
+      const result = await this.codexWorker.execute(
+        this._buildDirectPrompt(args),
+        {
+          cwd: args.cwd || this.cwd,
+          timeoutMs: resolveTimeoutMs(args.agentType, args.timeoutMs),
+          sessionKey: args.sessionKey,
+          threadId: args.threadId,
+          resetSession: args.resetSession,
+          profile: resolveCodexProfile(args.agentType),
+          sandbox: "danger-full-access",
+          approvalPolicy: "never",
+          developerInstructions: joinInstructions(
+            REVIEW_INSTRUCTION_BY_AGENT[args.agentType],
+            this._buildPromptHintInstruction(args),
+            args.developerInstructions,
+          ),
+          config: getCodexMcpConfig(this._getMcpPolicyOptions(args)),
+          compactPrompt: args.compactPrompt,
+          model: args.model,
+        },
+      );
 
       return {
         ok: result.exitCode === 0,
-        providerResolved: 'codex',
+        providerResolved: "codex",
         output: result.output,
         exitCode: result.exitCode,
         threadId: result.threadId,
@@ -854,7 +1014,7 @@ export class DelegatorMcpWorker {
       };
     }
 
-    if (args.provider === 'gemini') {
+    if (args.provider === "gemini") {
       const worker = this._createGeminiWorker();
       job.worker = worker;
       const prompt = this._buildDirectPromptWithHint(args);
@@ -862,13 +1022,15 @@ export class DelegatorMcpWorker {
         cwd: args.cwd || this.cwd,
         timeoutMs: resolveTimeoutMs(args.agentType, args.timeoutMs),
         model: args.model || resolveGeminiModel(args.agentType),
-        approvalMode: 'yolo',
-        allowedMcpServerNames: getGeminiAllowedServers(this._getMcpPolicyOptions(args)),
+        approvalMode: "yolo",
+        allowedMcpServerNames: getGeminiAllowedServers(
+          this._getMcpPolicyOptions(args),
+        ),
       });
 
       return {
         ok: result.exitCode === 0,
-        providerResolved: 'gemini',
+        providerResolved: "gemini",
         output: result.output,
         exitCode: result.exitCode,
         sessionKey: result.sessionKey,
@@ -887,7 +1049,7 @@ export class DelegatorMcpWorker {
       env.TFX_CODEX_TRANSPORT = args.codexTransport;
     }
     if (args.noClaudeNative === true) {
-      env.TFX_NO_CLAUDE_NATIVE = '1';
+      env.TFX_NO_CLAUDE_NATIVE = "1";
     }
     if (args.searchTool) {
       env.TFX_SEARCH_TOOL = args.searchTool;
@@ -905,19 +1067,19 @@ export class DelegatorMcpWorker {
   }
 
   async _spawnRoute(args, job = null) {
-    const prompt = withContext(String(args.prompt ?? ''), args.contextFile);
+    const prompt = withContext(String(args.prompt ?? ""), args.contextFile);
     const childArgs = [
       this.routeScript,
-      args.agentType || 'executor',
+      args.agentType || "executor",
       prompt,
-      args.mcpProfile || 'auto',
+      args.mcpProfile || "auto",
       String(resolveTimeoutSec(args.agentType, args.timeoutMs)),
     ];
 
     const child = spawn(this.bashCommand, childArgs, {
       cwd: args.cwd || this.cwd,
       env: this._buildRouteEnv(args),
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
 
@@ -931,16 +1093,16 @@ export class DelegatorMcpWorker {
       const stdoutChunks = [];
       const stderrChunks = [];
 
-      child.stdout.on('data', (chunk) => stdoutChunks.push(Buffer.from(chunk)));
-      child.stderr.on('data', (chunk) => stderrChunks.push(Buffer.from(chunk)));
-      child.once('error', (error) => {
+      child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.from(chunk)));
+      child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
+      child.once("error", (error) => {
         this.routeChildren.delete(child);
         rejectPromise(error);
       });
-      child.once('close', (code) => {
+      child.once("close", (code) => {
         this.routeChildren.delete(child);
-        const stdout = Buffer.concat(stdoutChunks).toString('utf8');
-        const stderr = Buffer.concat(stderrChunks).toString('utf8');
+        const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+        const stderr = Buffer.concat(stderrChunks).toString("utf8");
         resolvePromise({
           ok: code === 0,
           providerResolved: parseRouteType(stderr) || args.provider,
@@ -957,7 +1119,7 @@ export class DelegatorMcpWorker {
     return {
       ok: job.ok,
       job_id: job.jobId,
-      mode: job.mode || 'async',
+      mode: job.mode || "async",
       status: job.status,
       provider_requested: job.providerRequested,
       provider_resolved: job.providerResolved,
@@ -969,7 +1131,7 @@ export class DelegatorMcpWorker {
       completed_at: job.completedAt,
       output: job.output,
       stderr: job.stderr,
-      error: '',
+      error: "",
       thread_id: job.threadId,
       session_key: job.sessionKey,
       conversation_open: this.geminiConversations.has(job.jobId),
@@ -983,17 +1145,19 @@ export class DelegatorMcpWorker {
       ok: true,
       jobId,
       mode,
-      status: 'running',
+      status: "running",
       providerRequested: args.provider,
       providerResolved: null,
       agentType: args.agentType,
-      transport: this._shouldUseRoute(args) ? 'route-script' : `${args.provider}-worker`,
+      transport: this._shouldUseRoute(args)
+        ? "route-script"
+        : `${args.provider}-worker`,
       createdAt: now,
       startedAt: now,
       updatedAt: now,
       completedAt: null,
-      output: '',
-      stderr: '',
+      output: "",
+      stderr: "",
       exitCode: null,
       threadId: null,
       sessionKey: args.sessionKey || null,
@@ -1005,28 +1169,34 @@ export class DelegatorMcpWorker {
 
   _applyJobResult(job, result = {}) {
     job.ok = result.ok !== false;
-    job.status = job.ok ? 'completed' : 'failed';
+    job.status = job.ok ? "completed" : "failed";
     job.providerResolved = result.providerResolved || job.providerRequested;
     job.transport = result.transport || job.transport;
-    job.output = result.output || '';
-    job.stderr = result.stderr || result.error || '';
+    job.output = result.output || "";
+    job.stderr = result.stderr || result.error || "";
     job.exitCode = result.exitCode ?? (job.ok ? 0 : 1);
     job.threadId = result.threadId || job.threadId || null;
     job.sessionKey = result.sessionKey || job.sessionKey || null;
     job.completedAt = new Date().toISOString();
     job.updatedAt = job.completedAt;
 
-    if (job.providerRequested === 'gemini'
-      && job.transport === 'gemini-worker'
-      && typeof result._geminiPrompt === 'string') {
-      this._storeGeminiConversation(job, result._geminiPrompt, result.output || '');
+    if (
+      job.providerRequested === "gemini" &&
+      job.transport === "gemini-worker" &&
+      typeof result._geminiPrompt === "string"
+    ) {
+      this._storeGeminiConversation(
+        job,
+        result._geminiPrompt,
+        result.output || "",
+      );
     }
   }
 
   _storeGeminiConversation(job, userPrompt, assistantReply) {
     const existing = this.geminiConversations.get(job.jobId);
     if (existing) {
-      if (typeof assistantReply === 'string') {
+      if (typeof assistantReply === "string") {
         const lastTurn = existing.turns.at(-1);
         if (lastTurn && lastTurn.assistant !== assistantReply) {
           lastTurn.assistant = assistantReply;
@@ -1040,15 +1210,17 @@ export class DelegatorMcpWorker {
       jobId: job.jobId,
       closed: false,
       updatedAt: new Date().toISOString(),
-      turns: [{
-        user: userPrompt,
-        assistant: assistantReply,
-      }],
+      turns: [
+        {
+          user: userPrompt,
+          assistant: assistantReply,
+        },
+      ],
     });
   }
 
   async _runSyncJob(args, extra) {
-    const job = this._createJob(args, 'sync');
+    const job = this._createJob(args, "sync");
     this.jobs.set(job.jobId, job);
     const result = await this._executeDirect(args, extra);
     this._applyJobResult(job, result);
@@ -1065,7 +1237,9 @@ export async function runDelegatorMcpCli() {
   try {
     await worker.serveStdio();
   } catch (error) {
-    console.error(`[delegator-mcp] ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[delegator-mcp] ${error instanceof Error ? error.message : String(error)}`,
+    );
     process.exitCode = 1;
   }
 }

@@ -1,17 +1,34 @@
 #!/usr/bin/env node
 // tui/setup.mjs — Interactive triflux setup wizard TUI
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  clear, box, table, divider, label, ok, warn, fail, info,
-  select, confirm, spinner, sleep,
-  RESET, DIM, BOLD, CYAN, AMBER, GREEN, RED, YELLOW, WHITE, GRAY,
-  onExit, showCursor,
-} from "./core.mjs";
 import { DEFAULT_GEMINI_PROFILES } from "../scripts/lib/gemini-profiles.mjs";
+import {
+  AMBER,
+  BOLD,
+  box,
+  CYAN,
+  clear,
+  confirm,
+  DIM,
+  divider,
+  fail,
+  GRAY,
+  GREEN,
+  info,
+  ok,
+  onExit,
+  RESET,
+  select,
+  showCursor,
+  spinner,
+  table,
+  warn,
+  YELLOW,
+} from "./core.mjs";
 
 const PKG_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -22,21 +39,30 @@ const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 // ── Step Definitions ──
 
 const STEPS = [
-  { id: "sync",     name: "파일 동기화",      desc: "스크립트/HUD/스킬을 ~/.claude/에 배포" },
-  { id: "hud",      name: "HUD 설정",         desc: "settings.json에 statusLine 등록" },
-  { id: "profiles", name: "Codex 프로파일",   desc: "필수 프로파일 생성/확인" },
-  { id: "gemini-profiles", name: "Gemini 프로필", desc: "triflux-profiles.json 생성/확인" },
-  { id: "cli",      name: "CLI 진단",         desc: "Codex/Gemini/Claude CLI 확인" },
-  { id: "mcp",      name: "MCP 서버 확인",    desc: "MCP 서버 인벤토리 점검" },
+  {
+    id: "sync",
+    name: "파일 동기화",
+    desc: "스크립트/HUD/스킬을 ~/.claude/에 배포",
+  },
+  { id: "hud", name: "HUD 설정", desc: "settings.json에 statusLine 등록" },
+  { id: "profiles", name: "Codex 프로파일", desc: "필수 프로파일 생성/확인" },
+  {
+    id: "gemini-profiles",
+    name: "Gemini 프로필",
+    desc: "triflux-profiles.json 생성/확인",
+  },
+  { id: "cli", name: "CLI 진단", desc: "Codex/Gemini/Claude CLI 확인" },
+  { id: "mcp", name: "MCP 서버 확인", desc: "MCP 서버 인벤토리 점검" },
 ];
 
 // ── Step Implementations ──
 
 function stepSync() {
   try {
-    const out = execFileSync(process.execPath,
+    const _out = execFileSync(
+      process.execPath,
       [join(PKG_ROOT, "bin", "triflux.mjs"), "setup", "--json"],
-      { timeout: 30000, encoding: "utf8", windowsHide: true }
+      { timeout: 30000, encoding: "utf8", windowsHide: true },
     );
     return { ok: true, detail: "파일 동기화 완료" };
   } catch (e) {
@@ -52,7 +78,9 @@ function stepHud() {
 
     const raw = readFileSync(SETTINGS_PATH, "utf8");
     let settings;
-    try { settings = JSON.parse(raw); } catch {
+    try {
+      settings = JSON.parse(raw);
+    } catch {
       return { ok: false, detail: "settings.json 파싱 실패", action: "fix" };
     }
 
@@ -61,12 +89,18 @@ function stepHud() {
 
     // Check if statusLine already configured correctly
     if (settings.statusLine?.command?.includes("hud-qos-status")) {
-      return { ok: true, detail: "statusLine 이미 설정됨", current: settings.statusLine };
+      return {
+        ok: true,
+        detail: "statusLine 이미 설정됨",
+        current: settings.statusLine,
+      };
     }
 
     return {
       ok: false,
-      detail: settings.statusLine ? "statusLine이 다른 HUD를 가리킴" : "statusLine 미설정",
+      detail: settings.statusLine
+        ? "statusLine이 다른 HUD를 가리킴"
+        : "statusLine 미설정",
       action: "configure",
       current: settings.statusLine || null,
       target: {
@@ -96,14 +130,23 @@ function stepProfiles() {
     return { ok: true, detail: `필수 프로파일 ${required.length}개 확인됨` };
   }
 
-  return { ok: false, detail: `누락: ${missing.join(", ")}`, missing, action: "create" };
+  return {
+    ok: false,
+    detail: `누락: ${missing.join(", ")}`,
+    missing,
+    action: "create",
+  };
 }
 
 function stepGeminiProfiles() {
   const configPath = join(GEMINI_DIR, "triflux-profiles.json");
   if (!existsSync(configPath)) {
     if (!existsSync(GEMINI_DIR)) mkdirSync(GEMINI_DIR, { recursive: true });
-    writeFileSync(configPath, JSON.stringify(DEFAULT_GEMINI_PROFILES, null, 2) + "\n", "utf8");
+    writeFileSync(
+      configPath,
+      JSON.stringify(DEFAULT_GEMINI_PROFILES, null, 2) + "\n",
+      "utf8",
+    );
     return {
       ok: true,
       detail: `기본 프로필 ${Object.keys(DEFAULT_GEMINI_PROFILES.profiles).length}개 자동 생성됨`,
@@ -119,9 +162,17 @@ function stepGeminiProfiles() {
       const count = Object.keys(cfg.profiles || {}).length;
       return { ok: true, detail: `프로필 ${count}개 확인됨` };
     }
-    return { ok: false, detail: `누락: ${missing.join(", ")}`, action: "update" };
+    return {
+      ok: false,
+      detail: `누락: ${missing.join(", ")}`,
+      action: "update",
+    };
   } catch {
-    return { ok: false, detail: "triflux-profiles.json 파싱 실패", action: "recreate" };
+    return {
+      ok: false,
+      detail: "triflux-profiles.json 파싱 실패",
+      action: "recreate",
+    };
   }
 }
 
@@ -134,7 +185,9 @@ function stepCli() {
   ]) {
     try {
       execFileSync(process.platform === "win32" ? "where" : "which", [name], {
-        timeout: 5000, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
+        timeout: 5000,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "pipe"],
       });
       results.push({ name, found: true });
     } catch {
@@ -142,7 +195,11 @@ function stepCli() {
     }
   }
   const allFound = results.every((r) => r.found);
-  return { ok: allFound, results, detail: allFound ? "모든 CLI 확인됨" : "일부 CLI 미설치" };
+  return {
+    ok: allFound,
+    results,
+    detail: allFound ? "모든 CLI 확인됨" : "일부 CLI 미설치",
+  };
 }
 
 function stepMcp() {
@@ -159,7 +216,14 @@ function stepMcp() {
   }
 }
 
-const STEP_RUNNERS = { sync: stepSync, hud: stepHud, profiles: stepProfiles, "gemini-profiles": stepGeminiProfiles, cli: stepCli, mcp: stepMcp };
+const STEP_RUNNERS = {
+  sync: stepSync,
+  hud: stepHud,
+  profiles: stepProfiles,
+  "gemini-profiles": stepGeminiProfiles,
+  cli: stepCli,
+  mcp: stepMcp,
+};
 
 // ── UI ──
 
@@ -182,7 +246,9 @@ async function runWizard() {
     const step = STEPS[i];
     const progress = `${DIM}[${i + 1}/${STEPS.length}]${RESET}`;
 
-    console.log(`  ${progress} ${BOLD}${step.name}${RESET} ${DIM}— ${step.desc}${RESET}`);
+    console.log(
+      `  ${progress} ${BOLD}${step.name}${RESET} ${DIM}— ${step.desc}${RESET}`,
+    );
 
     const spin = spinner(`${step.name} 실행 중...`);
     const result = STEP_RUNNERS[step.id]();
@@ -208,7 +274,8 @@ async function handleStepFix(step, result) {
       if (result.action === "configure") {
         if (result.current) {
           warn(`현재 statusLine: ${JSON.stringify(result.current)}`);
-          if (!(await confirm("triflux HUD로 덮어쓰시겠습니까?", false))) return;
+          if (!(await confirm("triflux HUD로 덮어쓰시겠습니까?", false)))
+            return;
         } else {
           if (!(await confirm("statusLine을 설정하시겠습니까?"))) return;
         }
@@ -216,7 +283,11 @@ async function handleStepFix(step, result) {
           const raw = readFileSync(SETTINGS_PATH, "utf8");
           const settings = JSON.parse(raw);
           settings.statusLine = result.target;
-          writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2), "utf8");
+          writeFileSync(
+            SETTINGS_PATH,
+            JSON.stringify(settings, null, 2),
+            "utf8",
+          );
           ok("statusLine 설정 완료");
         } catch (e) {
           fail(`설정 실패: ${e.message}`);
@@ -227,11 +298,16 @@ async function handleStepFix(step, result) {
 
     case "profiles": {
       if (result.action === "create" && result.missing) {
-        if (await confirm(`누락된 프로파일 ${result.missing.length}개를 생성하시겠습니까?`)) {
+        if (
+          await confirm(
+            `누락된 프로파일 ${result.missing.length}개를 생성하시겠습니까?`,
+          )
+        ) {
           try {
-            execFileSync(process.execPath,
+            execFileSync(
+              process.execPath,
               [join(PKG_ROOT, "bin", "triflux.mjs"), "setup"],
-              { timeout: 15000, stdio: "ignore", windowsHide: true }
+              { timeout: 15000, stdio: "ignore", windowsHide: true },
             );
             ok("프로파일 생성 완료");
           } catch {
@@ -248,7 +324,11 @@ async function handleStepFix(step, result) {
           const mcpCheck = join(PKG_ROOT, "scripts", "mcp-check.mjs");
           if (existsSync(mcpCheck)) {
             try {
-              execFileSync(process.execPath, [mcpCheck], { timeout: 15000, stdio: "ignore", windowsHide: true });
+              execFileSync(process.execPath, [mcpCheck], {
+                timeout: 15000,
+                stdio: "ignore",
+                windowsHide: true,
+              });
               ok("MCP 인벤토리 재생성 완료");
             } catch {
               warn("MCP 인벤토리 재생성 실패 — 다음 세션에서 자동 재시도");
@@ -326,14 +406,18 @@ async function starRequest() {
   let ghOk = false;
   try {
     execFileSync("gh", ["auth", "status"], {
-      timeout: 5000, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
+      timeout: 5000,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
     });
     ghOk = true;
   } catch {}
 
   if (!ghOk) {
     console.log();
-    info(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`);
+    info(
+      `${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`,
+    );
     console.log();
     return;
   }
@@ -342,7 +426,9 @@ async function starRequest() {
   let alreadyStarred = false;
   try {
     execFileSync("gh", ["api", "user/starred/tellang/triflux"], {
-      timeout: 5000, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"],
+      timeout: 5000,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
     });
     alreadyStarred = true;
   } catch {}
@@ -357,9 +443,14 @@ async function starRequest() {
 
   if (await confirm(`${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다.`, false)) {
     try {
-      execFileSync("gh", ["api", "-X", "PUT", "/user/starred/tellang/triflux"], {
-        timeout: 5000, stdio: ["pipe", "pipe", "pipe"],
-      });
+      execFileSync(
+        "gh",
+        ["api", "-X", "PUT", "/user/starred/tellang/triflux"],
+        {
+          timeout: 5000,
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
       ok(`함께해 주셔서 감사합니다. ${AMBER}⭐${RESET}`);
     } catch {
       info(`${CYAN}https://github.com/tellang/triflux${RESET}`);
@@ -373,10 +464,10 @@ async function starRequest() {
 // ── Main Menu ──
 
 const MENU = [
-  { label: "전체 설정 (Full Setup)",   hint: "6단계 순서 실행" },
-  { label: "단계별 선택 (Selective)",   hint: "특정 단계만 실행" },
-  { label: "현재 상태 확인 (Status)",   hint: "설정 없이 진단만" },
-  { label: "종료",                      hint: "Ctrl+C" },
+  { label: "전체 설정 (Full Setup)", hint: "6단계 순서 실행" },
+  { label: "단계별 선택 (Selective)", hint: "특정 단계만 실행" },
+  { label: "현재 상태 확인 (Status)", hint: "설정 없이 진단만" },
+  { label: "종료", hint: "Ctrl+C" },
 ];
 
 async function main() {

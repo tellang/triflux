@@ -33,7 +33,9 @@ function collectSkillTemplateFiles(skillsDir) {
     .filter((file) => file.endsWith("SKILL.md.tmpl"))
     .filter(
       (file) =>
-        !relative(skillsDir, file).replace(/\\/g, "/").startsWith("_templates/"),
+        !relative(skillsDir, file)
+          .replace(/\\/g, "/")
+          .startsWith("_templates/"),
     )
     .sort((left, right) => left.localeCompare(right));
 }
@@ -78,7 +80,10 @@ export function generateSkillDocs({
     generated.push({
       templatePath,
       outputPath,
-      relativeTemplatePath: relative(skillsDir, templatePath).replace(/\\/g, "/"),
+      relativeTemplatePath: relative(skillsDir, templatePath).replace(
+        /\\/g,
+        "/",
+      ),
       context,
       rendered,
     });

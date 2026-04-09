@@ -1,11 +1,39 @@
 {
   "expectations": [
-    {"text": "all-7-prds-found", "passed": true, "evidence": "classification.md에 issue 24~30 모두 나열됨"},
-    {"text": "correct-type-classification", "passed": true, "evidence": "25,30=investigate, 24,26,27,28,29=implement 정확"},
-    {"text": "profile-routing-varies", "passed": true, "evidence": "implement→codex53_high, investigate→gpt54_high"},
-    {"text": "worktree-per-task", "passed": true, "evidence": "commands.sh에 git worktree add 7개 확인"},
-    {"text": "psmux-sessions", "passed": true, "evidence": "7개 psmux new-session + send-keys with codex"},
-    {"text": "single-wt-window", "passed": true, "evidence": "wt-new-window 1회 + wt-tab 6회"},
-    {"text": "omx-skill-mapping", "passed": true, "evidence": "implement=$plan→$autopilot, investigate=$plan"}
+    {
+      "text": "all-7-prds-found",
+      "passed": true,
+      "evidence": "classification.md에 issue 24~30 모두 나열됨"
+    },
+    {
+      "text": "correct-type-classification",
+      "passed": true,
+      "evidence": "25,30=investigate, 24,26,27,28,29=implement 정확"
+    },
+    {
+      "text": "profile-routing-varies",
+      "passed": true,
+      "evidence": "implement→codex53_high, investigate→gpt54_high"
+    },
+    {
+      "text": "worktree-per-task",
+      "passed": true,
+      "evidence": "commands.sh에 git worktree add 7개 확인"
+    },
+    {
+      "text": "psmux-sessions",
+      "passed": true,
+      "evidence": "7개 psmux new-session + send-keys with codex"
+    },
+    {
+      "text": "single-wt-window",
+      "passed": true,
+      "evidence": "wt-new-window 1회 + wt-tab 6회"
+    },
+    {
+      "text": "omx-skill-mapping",
+      "passed": true,
+      "evidence": "implement=$plan→$autopilot, investigate=$plan"
+    }
   ]
 }

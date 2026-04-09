@@ -1,9 +1,16 @@
-import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 
 const TRACKER_PATH = join(process.cwd(), "scripts", "cross-review-tracker.mjs");
 const GATE_PATH = join(process.cwd(), "scripts", "cross-review-gate.mjs");
@@ -53,12 +60,16 @@ afterEach(() => {
 describe("cross-review tracker", () => {
   it("Edit/Write 파일을 author=claude, reviewed=false로 기록한다", () => {
     const projectDir = makeTempProject();
-    const result = runScript(TRACKER_PATH, {
-      tool_name: "Edit",
-      tool_input: {
-        file_path: "src/foo.mjs",
+    const result = runScript(
+      TRACKER_PATH,
+      {
+        tool_name: "Edit",
+        tool_input: {
+          file_path: "src/foo.mjs",
+        },
       },
-    }, { cwd: projectDir });
+      { cwd: projectDir },
+    );
 
     assert.equal(result.status, 0, result.stderr);
 
@@ -79,10 +90,14 @@ describe("cross-review tracker", () => {
     ];
 
     for (const filePath of excludedPaths) {
-      const result = runScript(TRACKER_PATH, {
-        tool_name: "Write",
-        tool_input: { file_path: filePath },
-      }, { cwd: projectDir });
+      const result = runScript(
+        TRACKER_PATH,
+        {
+          tool_name: "Write",
+          tool_input: { file_path: filePath },
+        },
+        { cwd: projectDir },
+      );
       assert.equal(result.status, 0, result.stderr);
     }
 
@@ -92,16 +107,26 @@ describe("cross-review tracker", () => {
 
   it("Bash 결과의 cli: codex를 감지하면 claude 작성 파일을 reviewed=true로 전환한다", () => {
     const projectDir = makeTempProject();
-    runScript(TRACKER_PATH, {
-      tool_name: "Edit",
-      tool_input: { file_path: "src/feature.mjs" },
-    }, { cwd: projectDir });
+    runScript(
+      TRACKER_PATH,
+      {
+        tool_name: "Edit",
+        tool_input: { file_path: "src/feature.mjs" },
+      },
+      { cwd: projectDir },
+    );
 
-    const reviewResult = runScript(TRACKER_PATH, {
-      tool_name: "Bash",
-      tool_input: { command: "echo review" },
-      tool_response: { stdout: "=== TFX-ROUTE RESULT ===\ncli: codex\nstatus: success" },
-    }, { cwd: projectDir });
+    const reviewResult = runScript(
+      TRACKER_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: { command: "echo review" },
+        tool_response: {
+          stdout: "=== TFX-ROUTE RESULT ===\ncli: codex\nstatus: success",
+        },
+      },
+      { cwd: projectDir },
+    );
 
     assert.equal(reviewResult.status, 0, reviewResult.stderr);
 
@@ -113,11 +138,20 @@ describe("cross-review tracker", () => {
   it("Bash 이벤트에 파일 경로가 있으면 cli actor를 author로 기록한다", () => {
     const projectDir = makeTempProject();
 
-    const result = runScript(TRACKER_PATH, {
-      tool_name: "Bash",
-      tool_input: { command: "bash scripts/tfx-route.sh", file_path: "src/from-codex.mjs" },
-      tool_response: { stdout: "=== TFX-ROUTE RESULT ===\ncli: codex\nstatus: success" },
-    }, { cwd: projectDir });
+    const result = runScript(
+      TRACKER_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command: "bash scripts/tfx-route.sh",
+          file_path: "src/from-codex.mjs",
+        },
+        tool_response: {
+          stdout: "=== TFX-ROUTE RESULT ===\ncli: codex\nstatus: success",
+        },
+      },
+      { cwd: projectDir },
+    );
 
     assert.equal(result.status, 0, result.stderr);
     const state = readState(projectDir);
@@ -136,16 +170,26 @@ describe("cross-review gate", () => {
       },
     });
 
-    const result = runScript(GATE_PATH, {
-      tool_name: "Bash",
-      tool_input: { command: "git commit -m test" },
-    }, { cwd: projectDir });
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit -m test" },
+      },
+      { cwd: projectDir },
+    );
 
     assert.equal(result.status, 0, result.stderr);
     const output = JSON.parse(result.stdout.trim());
     assert.equal(output?.hookSpecificOutput?.hookEventName, "PreToolUse");
-    assert.match(output?.hookSpecificOutput?.additionalContext || "", /src\/foo\.mjs/u);
-    assert.match(output?.hookSpecificOutput?.additionalContext || "", /reviewer=codex/u);
+    assert.match(
+      output?.hookSpecificOutput?.additionalContext || "",
+      /src\/foo\.mjs/u,
+    );
+    assert.match(
+      output?.hookSpecificOutput?.additionalContext || "",
+      /reviewer=codex/u,
+    );
   });
 
   it("self-approve 상태면 commit을 deny(exit 2)한다", () => {
@@ -153,14 +197,23 @@ describe("cross-review gate", () => {
     writeState(projectDir, {
       session_start: Math.floor(Date.now() / 1000),
       files: {
-        "src/foo.mjs": { author: "claude", ts: 1711843200, reviewed: true, reviewer: "claude" },
+        "src/foo.mjs": {
+          author: "claude",
+          ts: 1711843200,
+          reviewed: true,
+          reviewer: "claude",
+        },
       },
     });
 
-    const result = runScript(GATE_PATH, {
-      tool_name: "Bash",
-      tool_input: { command: "git commit -m test" },
-    }, { cwd: projectDir });
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit -m test" },
+      },
+      { cwd: projectDir },
+    );
 
     assert.equal(result.status, 2);
     assert.match(result.stderr, /self-approve/u);
@@ -169,17 +222,21 @@ describe("cross-review gate", () => {
   it("세션이 30분 넘게 지난 상태 파일은 만료되어 commit을 통과시킨다", () => {
     const projectDir = makeTempProject();
     writeState(projectDir, {
-      session_start: Math.floor(Date.now() / 1000) - (31 * 60),
+      session_start: Math.floor(Date.now() / 1000) - 31 * 60,
       files: {
         "src/foo.mjs": { author: "claude", ts: 1711843200, reviewed: false },
       },
     });
 
     const statePath = join(projectDir, ".omc", "state", "cross-review.json");
-    const result = runScript(GATE_PATH, {
-      tool_name: "Bash",
-      tool_input: { command: "git commit -m test" },
-    }, { cwd: projectDir });
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit -m test" },
+      },
+      { cwd: projectDir },
+    );
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), "");
@@ -195,13 +252,17 @@ describe("cross-review gate", () => {
       },
     });
 
-    const result = runScript(GATE_PATH, {
-      tool_name: "Bash",
-      tool_input: { command: "git commit -m test" },
-    }, {
-      cwd: projectDir,
-      env: { TFX_SKIP_CROSS_REVIEW: "1" },
-    });
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: { command: "git commit -m test" },
+      },
+      {
+        cwd: projectDir,
+        env: { TFX_SKIP_CROSS_REVIEW: "1" },
+      },
+    );
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), "");

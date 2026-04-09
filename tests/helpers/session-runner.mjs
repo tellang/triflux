@@ -6,32 +6,32 @@
  * NDJSON output for real-time progress, scans for tfx errors.
  */
 
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const TFX_EVAL_DIR = path.join(os.homedir(), '.claude', 'cache', 'tfx-eval');
-const HEARTBEAT_PATH = path.join(TFX_EVAL_DIR, 'e2e-live.json');
+const TFX_EVAL_DIR = path.join(os.homedir(), ".claude", "cache", "tfx-eval");
+const HEARTBEAT_PATH = path.join(TFX_EVAL_DIR, "e2e-live.json");
 const PROJECT_DIR = TFX_EVAL_DIR;
 
 /**
  * 테스트 이름을 파일 이름으로 사용할 수 있도록 정제합니다.
  * 앞부분의 슬래시를 제거하고 중간의 슬래시를 하이픈(-)으로 교체합니다.
- * 
+ *
  * @param {string} name - 정제할 테스트 이름
  * @returns {string} 정제된 이름
  */
 export function sanitizeTestName(name) {
-  return name.replace(/^\/+/, '').replace(/\//g, '-');
+  return name.replace(/^\/+/, "").replace(/\//g, "-");
 }
 
 /** Atomic write: write to .tmp then rename. Non-fatal on error. */
 function atomicWriteSync(filePath, data) {
-  const tmp = filePath + '.tmp';
+  const tmp = filePath + ".tmp";
   fs.writeFileSync(tmp, data);
   fs.renameSync(tmp, filePath);
 }
@@ -59,30 +59,32 @@ export function parseNDJSON(lines) {
       transcript.push(event);
 
       // Track turns and tool calls from assistant events
-      if (event.type === 'assistant') {
+      if (event.type === "assistant") {
         turnCount++;
         const content = event.message?.content || [];
         for (const item of content) {
-          if (item.type === 'tool_use') {
+          if (item.type === "tool_use") {
             toolCallCount++;
             toolCalls.push({
-              tool: item.name || 'unknown',
+              tool: item.name || "unknown",
               input: item.input || {},
-              output: '',
+              output: "",
             });
           }
         }
       }
 
-      if (event.type === 'result') resultLine = event;
-    } catch { /* skip malformed lines */ }
+      if (event.type === "result") resultLine = event;
+    } catch {
+      /* skip malformed lines */
+    }
   }
 
   return { transcript, resultLine, turnCount, toolCallCount, toolCalls };
 }
 
 function truncate(s, max) {
-  return s.length > max ? s.slice(0, max) + '…' : s;
+  return s.length > max ? s.slice(0, max) + "…" : s;
 }
 
 const TFX_ERROR_PATTERNS = [
@@ -97,7 +99,7 @@ const TFX_ERROR_PATTERNS = [
  * Claude CLI 하위 프로세스를 실행하여 스킬 E2E 테스트를 수행합니다.
  * `claude -p`를 독립된 프로세스로 실행하고 stdin으로 프롬프트를 전달하며,
  * NDJSON 출력을 실시간으로 파싱하여 진행 상황을 추적하고 tfx 오류를 검사합니다.
- * 
+ *
  * @param {object} options - 실행 옵션
  * @param {string} options.prompt - 실행할 프롬프트
  * @param {string} options.workingDirectory - 작업 디렉토리
@@ -125,12 +127,12 @@ export async function runSkillTest(options) {
     prompt,
     workingDirectory,
     maxTurns = 15,
-    allowedTools = ['Bash', 'Read', 'Write'],
+    allowedTools = ["Bash", "Read", "Write"],
     timeout = 120_000,
     testName,
     runId,
   } = options;
-  const model = options.model ?? process.env.EVALS_MODEL ?? 'claude-sonnet-4-6';
+  const model = options.model ?? process.env.EVALS_MODEL ?? "claude-sonnet-4-6";
 
   const startTime = Date.now();
   const startedAt = new Date().toISOString();
@@ -140,21 +142,27 @@ export async function runSkillTest(options) {
   const safeName = testName ? sanitizeTestName(testName) : null;
   if (runId) {
     try {
-      runDir = path.join(PROJECT_DIR, 'e2e-runs', runId);
+      runDir = path.join(PROJECT_DIR, "e2e-runs", runId);
       fs.mkdirSync(runDir, { recursive: true });
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
   }
 
   // Spawn claude -p with streaming NDJSON output. Prompt piped via stdin to
   // avoid shell escaping issues. --verbose is required for stream-json mode.
   const args = [
-    '-p',
-    '--model', model,
-    '--output-format', 'stream-json',
-    '--verbose',
-    '--dangerously-skip-permissions',
-    '--max-turns', String(maxTurns),
-    '--allowed-tools', ...allowedTools,
+    "-p",
+    "--model",
+    model,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--dangerously-skip-permissions",
+    "--max-turns",
+    String(maxTurns),
+    "--allowed-tools",
+    ...allowedTools,
   ];
 
   // Write prompt to a temp file OUTSIDE workingDirectory to avoid race conditions
@@ -162,19 +170,19 @@ export async function runSkillTest(options) {
   // with --concurrent --retry). Using os.tmpdir() + unique suffix keeps it stable.
   const promptFile = path.join(
     os.tmpdir(),
-    `.prompt-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    `.prompt-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
   );
   fs.writeFileSync(promptFile, prompt);
 
-  const shellCmd = `cat "${promptFile}" | claude ${args.map(a => `"${a}"`).join(' ')}`;
-  const proc = spawn('sh', ['-c', shellCmd], {
+  const shellCmd = `cat "${promptFile}" | claude ${args.map((a) => `"${a}"`).join(" ")}`;
+  const proc = spawn("sh", ["-c", shellCmd], {
     cwd: workingDirectory,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   // Race against timeout
-  let stderrChunks = [];
-  let exitReason = 'unknown';
+  const stderrChunks = [];
+  let exitReason = "unknown";
   let timedOut = false;
 
   const timeoutId = setTimeout(() => {
@@ -183,10 +191,14 @@ export async function runSkillTest(options) {
   }, timeout);
 
   // Collect stderr
-  proc.stderr.on('data', chunk => stderrChunks.push(chunk));
-  const stderrPromise = new Promise(resolve => {
-    proc.stderr.on('end', () => resolve(Buffer.concat(stderrChunks).toString('utf8')));
-    proc.stderr.on('error', () => resolve(Buffer.concat(stderrChunks).toString('utf8')));
+  proc.stderr.on("data", (chunk) => stderrChunks.push(chunk));
+  const stderrPromise = new Promise((resolve) => {
+    proc.stderr.on("end", () =>
+      resolve(Buffer.concat(stderrChunks).toString("utf8")),
+    );
+    proc.stderr.on("error", () =>
+      resolve(Buffer.concat(stderrChunks).toString("utf8")),
+    );
   });
 
   // Stream NDJSON from stdout for real-time progress
@@ -198,13 +210,13 @@ export async function runSkillTest(options) {
   let maxInterTurnMs = 0;
 
   const stdoutDone = new Promise((resolve, reject) => {
-    let buf = '';
+    let buf = "";
     const decoder = new TextDecoder();
 
-    proc.stdout.on('data', chunk => {
+    proc.stdout.on("data", (chunk) => {
       buf += decoder.decode(chunk, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() || '';
+      const lines = buf.split("\n");
+      buf = lines.pop() || "";
       for (const line of lines) {
         if (!line.trim()) continue;
         collectedLines.push(line);
@@ -212,11 +224,11 @@ export async function runSkillTest(options) {
         // Real-time progress to stderr + persistent logs
         try {
           const event = JSON.parse(line);
-          if (event.type === 'assistant') {
+          if (event.type === "assistant") {
             liveTurnCount++;
             const content = event.message?.content || [];
             for (const item of content) {
-              if (item.type === 'tool_use') {
+              if (item.type === "tool_use") {
                 liveToolCount++;
                 const now = Date.now();
                 const elapsed = Math.round((now - startTime) / 1000);
@@ -232,68 +244,99 @@ export async function runSkillTest(options) {
 
                 // Persist progress.log
                 if (runDir) {
-                  try { fs.appendFileSync(path.join(runDir, 'progress.log'), progressLine); } catch { /* non-fatal */ }
+                  try {
+                    fs.appendFileSync(
+                      path.join(runDir, "progress.log"),
+                      progressLine,
+                    );
+                  } catch {
+                    /* non-fatal */
+                  }
                 }
 
                 // Write heartbeat (atomic)
                 if (runId && testName) {
                   try {
                     const toolDesc = `${item.name}(${truncate(JSON.stringify(item.input || {}), 60)})`;
-                    atomicWriteSync(HEARTBEAT_PATH, JSON.stringify({
-                      runId,
-                      pid: proc.pid,
-                      startedAt,
-                      currentTest: testName,
-                      status: 'running',
-                      turn: liveTurnCount,
-                      toolCount: liveToolCount,
-                      lastTool: toolDesc,
-                      lastToolAt: new Date().toISOString(),
-                      elapsedSec: elapsed,
-                    }, null, 2) + '\n');
-                  } catch { /* non-fatal */ }
+                    atomicWriteSync(
+                      HEARTBEAT_PATH,
+                      JSON.stringify(
+                        {
+                          runId,
+                          pid: proc.pid,
+                          startedAt,
+                          currentTest: testName,
+                          status: "running",
+                          turn: liveTurnCount,
+                          toolCount: liveToolCount,
+                          lastTool: toolDesc,
+                          lastToolAt: new Date().toISOString(),
+                          elapsedSec: elapsed,
+                        },
+                        null,
+                        2,
+                      ) + "\n",
+                    );
+                  } catch {
+                    /* non-fatal */
+                  }
                 }
               }
             }
           }
-        } catch { /* skip — parseNDJSON will handle it later */ }
+        } catch {
+          /* skip — parseNDJSON will handle it later */
+        }
 
         // Append raw NDJSON line to per-test transcript file
         if (runDir && safeName) {
-          try { fs.appendFileSync(path.join(runDir, `${safeName}.ndjson`), line + '\n'); } catch { /* non-fatal */ }
+          try {
+            fs.appendFileSync(
+              path.join(runDir, `${safeName}.ndjson`),
+              line + "\n",
+            );
+          } catch {
+            /* non-fatal */
+          }
         }
       }
     });
 
-    proc.stdout.on('end', () => {
+    proc.stdout.on("end", () => {
       // Flush remaining buffer
       if (buf.trim()) collectedLines.push(buf);
       resolve();
     });
 
-    proc.stdout.on('error', reject);
+    proc.stdout.on("error", reject);
   });
 
   // Wait for exit
-  const exitCodePromise = new Promise(resolve => {
-    proc.on('close', code => resolve(code ?? 1));
-    proc.on('error', () => resolve(1));
+  const exitCodePromise = new Promise((resolve) => {
+    proc.on("close", (code) => resolve(code ?? 1));
+    proc.on("error", () => resolve(1));
   });
 
   try {
     await stdoutDone;
-  } catch { /* stream read error — fall through to exit code handling */ }
+  } catch {
+    /* stream read error — fall through to exit code handling */
+  }
 
   const stderr = await stderrPromise;
   const exitCode = await exitCodePromise;
   clearTimeout(timeoutId);
 
-  try { fs.unlinkSync(promptFile); } catch { /* non-fatal */ }
+  try {
+    fs.unlinkSync(promptFile);
+  } catch {
+    /* non-fatal */
+  }
 
   if (timedOut) {
-    exitReason = 'timeout';
+    exitReason = "timeout";
   } else if (exitCode === 0) {
-    exitReason = 'success';
+    exitReason = "success";
   } else {
     exitReason = `exit_code_${exitCode}`;
   }
@@ -306,7 +349,8 @@ export async function runSkillTest(options) {
   const tfxErrors = [];
 
   // Scan transcript + stderr for tfx errors
-  const allText = transcript.map(e => JSON.stringify(e)).join('\n') + '\n' + stderr;
+  const allText =
+    transcript.map((e) => JSON.stringify(e)).join("\n") + "\n" + stderr;
   for (const pattern of TFX_ERROR_PATTERNS) {
     const match = allText.match(pattern);
     if (match) {
@@ -318,47 +362,69 @@ export async function runSkillTest(options) {
   if (resultLine) {
     if (resultLine.is_error) {
       // claude -p can return subtype=success with is_error=true (e.g. API connection failure)
-      exitReason = 'error_api';
-    } else if (resultLine.subtype === 'success') {
-      exitReason = 'success';
+      exitReason = "error_api";
+    } else if (resultLine.subtype === "success") {
+      exitReason = "success";
     } else if (resultLine.subtype) {
       exitReason = resultLine.subtype;
     }
   }
 
   // Save failure transcript to persistent run directory (or fallback to workingDirectory)
-  if (tfxErrors.length > 0 || exitReason !== 'success') {
+  if (tfxErrors.length > 0 || exitReason !== "success") {
     try {
-      const failureDir = runDir || path.join(workingDirectory, '.claude', 'cache', 'tfx-eval', 'test-transcripts');
+      const failureDir =
+        runDir ||
+        path.join(
+          workingDirectory,
+          ".claude",
+          "cache",
+          "tfx-eval",
+          "test-transcripts",
+        );
       fs.mkdirSync(failureDir, { recursive: true });
       const failureName = safeName
         ? `${safeName}-failure.json`
-        : `e2e-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+        : `e2e-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
       fs.writeFileSync(
         path.join(failureDir, failureName),
-        JSON.stringify({
-          prompt: prompt.slice(0, 500),
-          testName: testName || 'unknown',
-          exitReason,
-          tfxErrors,
-          duration,
-          turnAtTimeout: timedOut ? liveTurnCount : undefined,
-          lastToolCall: liveToolCount > 0 ? `tool #${liveToolCount}` : undefined,
-          stderr: stderr.slice(0, 2000),
-          result: resultLine ? { type: resultLine.type, subtype: resultLine.subtype, result: resultLine.result?.slice?.(0, 500) } : null,
-        }, null, 2),
+        JSON.stringify(
+          {
+            prompt: prompt.slice(0, 500),
+            testName: testName || "unknown",
+            exitReason,
+            tfxErrors,
+            duration,
+            turnAtTimeout: timedOut ? liveTurnCount : undefined,
+            lastToolCall:
+              liveToolCount > 0 ? `tool #${liveToolCount}` : undefined,
+            stderr: stderr.slice(0, 2000),
+            result: resultLine
+              ? {
+                  type: resultLine.type,
+                  subtype: resultLine.subtype,
+                  result: resultLine.result?.slice?.(0, 500),
+                }
+              : null,
+          },
+          null,
+          2,
+        ),
       );
-    } catch { /* non-fatal */ }
+    } catch {
+      /* non-fatal */
+    }
   }
 
   // Cost from result line (exact) or estimate from chars
   const turnsUsed = resultLine?.num_turns || 0;
   const estimatedCost = resultLine?.total_cost_usd || 0;
   const inputChars = prompt.length;
-  const outputChars = (resultLine?.result || '').length;
-  const estimatedTokens = (resultLine?.usage?.input_tokens || 0)
-    + (resultLine?.usage?.output_tokens || 0)
-    + (resultLine?.usage?.cache_read_input_tokens || 0);
+  const outputChars = (resultLine?.result || "").length;
+  const estimatedTokens =
+    (resultLine?.usage?.input_tokens || 0) +
+    (resultLine?.usage?.output_tokens || 0) +
+    (resultLine?.usage?.cache_read_input_tokens || 0);
 
   const costEstimate = {
     inputChars,
@@ -368,5 +434,16 @@ export async function runSkillTest(options) {
     turnsUsed,
   };
 
-  return { toolCalls, tfxErrors, exitReason, duration, output: resultLine?.result || '', costEstimate, transcript, model, firstResponseMs, maxInterTurnMs };
+  return {
+    toolCalls,
+    tfxErrors,
+    exitReason,
+    duration,
+    output: resultLine?.result || "",
+    costEstimate,
+    transcript,
+    model,
+    firstResponseMs,
+    maxInterTurnMs,
+  };
 }

@@ -1,8 +1,7 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-
-import { createRegistry } from "../../mesh/mesh-registry.mjs";
+import { describe, it } from "node:test";
 import { createHeartbeatMonitor } from "../../mesh/mesh-heartbeat.mjs";
+import { createRegistry } from "../../mesh/mesh-registry.mjs";
 
 describe("mesh/mesh-heartbeat.mjs", () => {
   describe("recordHeartbeat / getStaleAgents", () => {
@@ -98,7 +97,9 @@ describe("mesh/mesh-heartbeat.mjs", () => {
       let count = 0;
       const hb = createHeartbeatMonitor(reg, {
         thresholdMs: 0,
-        onStale: () => { count++; },
+        onStale: () => {
+          count++;
+        },
       });
 
       hb.start(20);

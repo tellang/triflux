@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 // scripts/test-lock.mjs — 테스트 러너 싱글톤 lockfile 가드
 //
 // npm test 동시 실행 방지. conductor 같은 child-spawn 테스트가
@@ -6,9 +7,9 @@
 //
 // 사용: node scripts/test-lock.mjs [-- ...node --test args]
 
-import { writeFileSync, readFileSync, unlinkSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 const LOCK_DIR = join(import.meta.dirname, "..", ".test-lock");
 const LOCK_FILE = join(LOCK_DIR, "pid.lock");
@@ -31,8 +32,12 @@ function acquireLock() {
     // Windows에서 process.kill(pid,0)이 git-bash PID를 못 잡음.
     // 단순하게: lockfile이 있고 STALE_THRESHOLD 이내면 거부.
     if (age >= 0 && age < STALE_THRESHOLD_MS) {
-      console.error(`\x1b[31m✗ 테스트 이미 실행 중 (PID ${existing.pid}, ${Math.round(age / 1000)}초 전 시작)\x1b[0m`);
-      console.error(`  동시 실행은 WT 메모리 폭발을 유발합니다. 기다리거나 PID를 kill하세요.`);
+      console.error(
+        `\x1b[31m✗ 테스트 이미 실행 중 (PID ${existing.pid}, ${Math.round(age / 1000)}초 전 시작)\x1b[0m`,
+      );
+      console.error(
+        `  동시 실행은 WT 메모리 폭발을 유발합니다. 기다리거나 PID를 kill하세요.`,
+      );
       console.error(`  강제 해제: rm ${LOCK_FILE}`);
       process.exit(1);
     }
@@ -46,7 +51,9 @@ function releaseLock() {
   try {
     const lock = readLock();
     if (lock && lock.pid === process.pid) unlinkSync(LOCK_FILE);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── main ──
@@ -55,8 +62,14 @@ acquireLock();
 
 // cleanup on exit
 process.on("exit", releaseLock);
-process.on("SIGINT", () => { releaseLock(); process.exit(130); });
-process.on("SIGTERM", () => { releaseLock(); process.exit(143); });
+process.on("SIGINT", () => {
+  releaseLock();
+  process.exit(130);
+});
+process.on("SIGTERM", () => {
+  releaseLock();
+  process.exit(143);
+});
 
 // forward args after -- to node --test
 const args = process.argv.slice(2);

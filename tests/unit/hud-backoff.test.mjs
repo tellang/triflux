@@ -1,9 +1,9 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
-  computeClaudeUsagePollState,
   CLAUDE_USAGE_POLL_BASE_MS,
+  computeClaudeUsagePollState,
 } from "../../hud/providers/claude.mjs";
 import { getClaudeRows } from "../../hud/renderers.mjs";
 import { stripAnsi } from "../../hud/utils.mjs";
@@ -23,23 +23,43 @@ describe("hud usage backoff", () => {
 
   it("escalates 429 backoff through 10s, 30s, 60s, then caps at 120s", () => {
     assert.equal(
-      computeClaudeUsagePollState({ consecutive429s: 0, outcome: "rate_limit", random: () => 0.5 }).baseDelayMs,
+      computeClaudeUsagePollState({
+        consecutive429s: 0,
+        outcome: "rate_limit",
+        random: () => 0.5,
+      }).baseDelayMs,
       10_000,
     );
     assert.equal(
-      computeClaudeUsagePollState({ consecutive429s: 1, outcome: "rate_limit", random: () => 0.5 }).baseDelayMs,
+      computeClaudeUsagePollState({
+        consecutive429s: 1,
+        outcome: "rate_limit",
+        random: () => 0.5,
+      }).baseDelayMs,
       30_000,
     );
     assert.equal(
-      computeClaudeUsagePollState({ consecutive429s: 2, outcome: "rate_limit", random: () => 0.5 }).baseDelayMs,
+      computeClaudeUsagePollState({
+        consecutive429s: 2,
+        outcome: "rate_limit",
+        random: () => 0.5,
+      }).baseDelayMs,
       60_000,
     );
     assert.equal(
-      computeClaudeUsagePollState({ consecutive429s: 3, outcome: "rate_limit", random: () => 0.5 }).baseDelayMs,
+      computeClaudeUsagePollState({
+        consecutive429s: 3,
+        outcome: "rate_limit",
+        random: () => 0.5,
+      }).baseDelayMs,
       120_000,
     );
     assert.equal(
-      computeClaudeUsagePollState({ consecutive429s: 99, outcome: "rate_limit", random: () => 0.5 }).baseDelayMs,
+      computeClaudeUsagePollState({
+        consecutive429s: 99,
+        outcome: "rate_limit",
+        random: () => 0.5,
+      }).baseDelayMs,
       120_000,
     );
   });

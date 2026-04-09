@@ -1,7 +1,13 @@
 // hub/team/native-supervisor.mjs — tmux 없이 멀티 CLI를 직접 띄우는 네이티브 팀 런타임
+
+import { execSync as execSyncSupervisor, spawn } from "node:child_process";
+import {
+  createWriteStream,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
-import { spawn, execSync as execSyncSupervisor } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync, createWriteStream } from "node:fs";
 import { dirname, join } from "node:path";
 import { verifySlimWrapperRouteExecution } from "./native.mjs";
 import { forceCleanupTeam } from "./nativeProxy.mjs";
@@ -130,12 +136,14 @@ const SAFE_COMMAND_RE = /^[a-zA-Z0-9 _./:@"'=\-\\]+$/;
 
 function validateMemberCommand(command, memberName) {
   if (typeof command !== "string" || command.trim().length === 0) {
-    throw new Error(`member "${memberName}": command must be a non-empty string`);
+    throw new Error(
+      `member "${memberName}": command must be a non-empty string`,
+    );
   }
   if (!SAFE_COMMAND_RE.test(command)) {
     throw new Error(
       `member "${memberName}": command contains disallowed characters — ` +
-      `shell metacharacters (;&|$\`()<>{}\\n\\r) are not permitted`
+        `shell metacharacters (;&|$\`()<>{}\\n\\r) are not permitted`,
     );
   }
 }
@@ -153,7 +161,10 @@ function spawnMember(member) {
     shell: true,
     env: {
       ...process.env,
-      TERM: process.env.TERM && process.env.TERM !== "dumb" ? process.env.TERM : "xterm-256color",
+      TERM:
+        process.env.TERM && process.env.TERM !== "dumb"
+          ? process.env.TERM
+          : "xterm-256color",
     },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -176,7 +187,8 @@ function spawnMember(member) {
     const txt = safeText(buf).trim();
     if (txt) {
       const lines = txt.split(/\r?\n/).filter(Boolean);
-      if (lines.length) state.lastPreview = lines[lines.length - 1].slice(0, 280);
+      if (lines.length)
+        state.lastPreview = lines[lines.length - 1].slice(0, 280);
     }
   });
 
@@ -185,7 +197,8 @@ function spawnMember(member) {
     const txt = safeText(buf).trim();
     if (txt) {
       const lines = txt.split(/\r?\n/).filter(Boolean);
-      if (lines.length) state.lastPreview = `[err] ${lines[lines.length - 1].slice(0, 260)}`;
+      if (lines.length)
+        state.lastPreview = `[err] ${lines[lines.length - 1].slice(0, 260)}`;
     }
   });
 
@@ -193,8 +206,12 @@ function spawnMember(member) {
     state.status = "exited";
     state.exitCode = code;
     finalizeRouteVerification(state);
-    try { outWs.end(); } catch {}
-    try { errWs.end(); } catch {}
+    try {
+      outWs.end();
+    } catch {}
+    try {
+      errWs.end();
+    } catch {}
     maybeAutoShutdown();
   });
 
@@ -202,8 +219,12 @@ function spawnMember(member) {
     state.status = "exited";
     state.exitCode = -1;
     state.lastPreview = `[spawn error] ${err.message}`;
-    try { outWs.end(); } catch {}
-    try { errWs.end(); } catch {}
+    try {
+      outWs.end();
+    } catch {}
+    try {
+      errWs.end();
+    } catch {}
     maybeAutoShutdown();
   });
 
@@ -213,7 +234,8 @@ function spawnMember(member) {
 function sendInput(memberName, text) {
   const state = processMap.get(memberName);
   if (!state) return { ok: false, error: "member_not_found" };
-  if (state.status !== "running") return { ok: false, error: "member_not_running" };
+  if (state.status !== "running")
+    return { ok: false, error: "member_not_running" };
   try {
     state.child.stdin.write(`${safeText(text)}\n`);
     return { ok: true };
@@ -225,7 +247,8 @@ function sendInput(memberName, text) {
 function interruptMember(memberName) {
   const state = processMap.get(memberName);
   if (!state) return { ok: false, error: "member_not_found" };
-  if (state.status !== "running") return { ok: false, error: "member_not_running" };
+  if (state.status !== "running")
+    return { ok: false, error: "member_not_running" };
 
   let signaled = false;
   try {
@@ -250,7 +273,9 @@ let isShuttingDown = false;
 
 function maybeAutoShutdown() {
   if (isShuttingDown) return;
-  const allExited = [...processMap.values()].every((s) => s.status === "exited");
+  const allExited = [...processMap.values()].every(
+    (s) => s.status === "exited",
+  );
   if (!allExited) return;
   shutdown();
 }
@@ -261,11 +286,19 @@ async function shutdown() {
 
   for (const state of processMap.values()) {
     if (state.status === "running") {
-      try { state.child.stdin.write("exit\n"); } catch {}
-      try { state.child.kill("SIGTERM"); } catch {}
+      try {
+        state.child.stdin.write("exit\n");
+      } catch {}
+      try {
+        state.child.kill("SIGTERM");
+      } catch {}
     }
-    try { state.outWs.end(); } catch {}
-    try { state.errWs.end(); } catch {}
+    try {
+      state.outWs.end();
+    } catch {}
+    try {
+      state.errWs.end();
+    } catch {}
   }
 
   try {
@@ -278,9 +311,17 @@ async function shutdown() {
         const pid = state.child?.pid;
         if (process.platform === "win32" && Number.isInteger(pid) && pid > 0) {
           // Windows: 프로세스 트리 전체 강제 종료 (손자 MCP 서버 포함)
-          try { execSyncSupervisor(`taskkill /T /F /PID ${pid}`, { stdio: "pipe", windowsHide: true, timeout: 5000 }); } catch {}
+          try {
+            execSyncSupervisor(`taskkill /T /F /PID ${pid}`, {
+              stdio: "pipe",
+              windowsHide: true,
+              timeout: 5000,
+            });
+          } catch {}
         } else {
-          try { state.child.kill("SIGKILL"); } catch {}
+          try {
+            state.child.kill("SIGKILL");
+          } catch {}
         }
       }
     }
@@ -321,7 +362,10 @@ const server = createServer(async (req, res) => {
     let totalLen = 0;
     for await (const c of req) {
       totalLen += c.length;
-      if (totalLen > MAX_BODY) { send(413, { ok: false, error: "payload_too_large" }); return; }
+      if (totalLen > MAX_BODY) {
+        send(413, { ok: false, error: "payload_too_large" });
+        return;
+      }
       chunks.push(c);
     }
     const raw = Buffer.concat(chunks).toString("utf8") || "{}";

@@ -15,31 +15,55 @@
 export function resolveRoutingStrategy({ subtasks, graph_type, thorough }) {
   const N = subtasks.length;
   if (N === 0) {
-    const dagContext = { dag_width: 0, levels: {}, edges: [], max_complexity: 'S', taskResults: {} };
-    return { strategy: 'quick_single', reason: 'empty_subtasks', dag_width: 0, max_complexity: 'S', dagContext };
+    const dagContext = {
+      dag_width: 0,
+      levels: {},
+      edges: [],
+      max_complexity: "S",
+      taskResults: {},
+    };
+    return {
+      strategy: "quick_single",
+      reason: "empty_subtasks",
+      dag_width: 0,
+      max_complexity: "S",
+      dagContext,
+    };
   }
 
-  const { width: dag_width, levels, edges } = computeDagInfo(subtasks, graph_type);
+  const {
+    width: dag_width,
+    levels,
+    edges,
+  } = computeDagInfo(subtasks, graph_type);
   const max_complexity = getMaxComplexity(subtasks);
-  const dagContext = { dag_width, levels, edges, max_complexity, taskResults: {} };
-  const isHighComplexity = ['L', 'XL'].includes(max_complexity);
+  const dagContext = {
+    dag_width,
+    levels,
+    edges,
+    max_complexity,
+    taskResults: {},
+  };
+  const isHighComplexity = ["L", "XL"].includes(max_complexity);
   const allSameAgent = new Set(subtasks.map((s) => s.agent)).size === 1;
-  const allSmall = subtasks.every((s) => normalizeComplexity(s.complexity) === 'S');
+  const allSmall = subtasks.every(
+    (s) => normalizeComplexity(s.complexity) === "S",
+  );
 
   // N==1: 단일 태스크
   if (N === 1) {
     if (thorough || isHighComplexity) {
       return {
-        strategy: 'thorough_single',
-        reason: 'single_high_complexity',
+        strategy: "thorough_single",
+        reason: "single_high_complexity",
         dag_width,
         max_complexity,
         dagContext,
       };
     }
     return {
-      strategy: 'quick_single',
-      reason: 'single_low_complexity',
+      strategy: "quick_single",
+      reason: "single_low_complexity",
       dag_width,
       max_complexity,
       dagContext,
@@ -50,16 +74,16 @@ export function resolveRoutingStrategy({ subtasks, graph_type, thorough }) {
   if (dag_width === 1) {
     if (thorough || isHighComplexity) {
       return {
-        strategy: 'thorough_single',
-        reason: 'sequential_chain',
+        strategy: "thorough_single",
+        reason: "sequential_chain",
         dag_width,
         max_complexity,
         dagContext,
       };
     }
     return {
-      strategy: 'quick_single',
-      reason: 'sequential_chain',
+      strategy: "quick_single",
+      reason: "sequential_chain",
       dag_width,
       max_complexity,
       dagContext,
@@ -69,8 +93,8 @@ export function resolveRoutingStrategy({ subtasks, graph_type, thorough }) {
   // 동일 에이전트 + 모두 S: 프롬프트 병합 -> batch single
   if (allSameAgent && allSmall) {
     return {
-      strategy: 'batch_single',
-      reason: 'same_agent_small_batch',
+      strategy: "batch_single",
+      reason: "same_agent_small_batch",
       dag_width,
       max_complexity,
       dagContext,
@@ -80,16 +104,16 @@ export function resolveRoutingStrategy({ subtasks, graph_type, thorough }) {
   // dag_width >= 2: 팀
   if (thorough || isHighComplexity) {
     return {
-      strategy: 'thorough_team',
-      reason: 'parallel_high_complexity',
+      strategy: "thorough_team",
+      reason: "parallel_high_complexity",
       dag_width,
       max_complexity,
       dagContext,
     };
   }
   return {
-    strategy: 'quick_team',
-    reason: 'parallel_low_complexity',
+    strategy: "quick_team",
+    reason: "parallel_low_complexity",
     dag_width,
     max_complexity,
     dagContext,
@@ -103,7 +127,7 @@ export function resolveRoutingStrategy({ subtasks, graph_type, thorough }) {
  * @returns {{ width: number, levels: Record<number, string[]>, edges: Array<{from:string, to:string}> }}
  */
 function computeDagInfo(subtasks, graph_type) {
-  if (graph_type === 'SEQUENTIAL') {
+  if (graph_type === "SEQUENTIAL") {
     const levels = {};
     const edges = [];
     subtasks.forEach((t, i) => {
@@ -112,7 +136,7 @@ function computeDagInfo(subtasks, graph_type) {
     });
     return { width: 1, levels, edges };
   }
-  if (graph_type === 'INDEPENDENT') {
+  if (graph_type === "INDEPENDENT") {
     const levels = { 0: subtasks.map((t) => t.id) };
     return { width: subtasks.length, levels, edges: [] };
   }
@@ -173,7 +197,9 @@ function computeDagInfo(subtasks, graph_type) {
 export function getUpstreamResults(taskId, pipelineState) {
   const ctx = pipelineState?.dagContext;
   if (!ctx) return {};
-  const upstreamIds = ctx.edges.filter((e) => e.to === taskId).map((e) => e.from);
+  const upstreamIds = ctx.edges
+    .filter((e) => e.to === taskId)
+    .map((e) => e.from);
   const results = {};
   for (const id of upstreamIds) {
     if (id in (ctx.taskResults || {})) {
@@ -205,7 +231,7 @@ export function updateTaskResult(taskId, result, pipelineState) {
  */
 function getMaxComplexity(subtasks) {
   const order = { S: 0, M: 1, L: 2, XL: 3 };
-  let max = 'S';
+  let max = "S";
   for (const s of subtasks) {
     const complexity = normalizeComplexity(s.complexity);
     if (order[complexity] > order[max]) max = complexity;
@@ -219,5 +245,5 @@ function getMaxComplexity(subtasks) {
  * @returns {"S" | "M" | "L" | "XL"}
  */
 function normalizeComplexity(complexity) {
-  return ['S', 'M', 'L', 'XL'].includes(complexity) ? complexity : 'M';
+  return ["S", "M", "L", "XL"].includes(complexity) ? complexity : "M";
 }

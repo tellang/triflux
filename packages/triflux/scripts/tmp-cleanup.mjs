@@ -4,9 +4,9 @@
  * 7일 이상 된 파일을 삭제한다.
  * SessionStart 훅 또는 독립 실행으로 사용.
  */
-import { existsSync, readdirSync, statSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7일
 const TRIFLUX_CLI_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1일
@@ -50,7 +50,11 @@ export async function cleanupTmpFiles({ protectPaths = [] } = {}) {
 
   // 1) tmpdir() 직하위의 관리 대상 항목 정리
   let topEntries;
-  try { topEntries = readdirSync(tmp); } catch { topEntries = []; }
+  try {
+    topEntries = readdirSync(tmp);
+  } catch {
+    topEntries = [];
+  }
 
   for (const entry of topEntries) {
     const rule = TOP_LEVEL_RULES.find(({ prefix }) => entry.startsWith(prefix));
@@ -66,14 +70,20 @@ export async function cleanupTmpFiles({ protectPaths = [] } = {}) {
         rmSync(full, { recursive: true, force: true });
         cleaned++;
       }
-    } catch { /* 권한 에러 등 무시 */ }
+    } catch {
+      /* 권한 에러 등 무시 */
+    }
   }
 
   // 2) tfx-headless/ 내 오래된 결과 파일 정리 (디렉터리 자체는 유지)
   const headlessDir = join(tmp, "tfx-headless");
   if (existsSync(headlessDir)) {
     let entries;
-    try { entries = readdirSync(headlessDir); } catch { entries = []; }
+    try {
+      entries = readdirSync(headlessDir);
+    } catch {
+      entries = [];
+    }
 
     for (const entry of entries) {
       if (SKIP_FILES.has(entry)) continue;
@@ -84,7 +94,9 @@ export async function cleanupTmpFiles({ protectPaths = [] } = {}) {
           rmSync(full, { recursive: true, force: true });
           cleaned++;
         }
-      } catch { /* 권한 에러 등 무시 */ }
+      } catch {
+        /* 권한 에러 등 무시 */
+      }
     }
   }
 
@@ -97,7 +109,9 @@ if (process.argv[1]) {
   if (fileURLToPath(import.meta.url) === process.argv[1]) {
     const cleaned = await cleanupTmpFiles();
     if (cleaned > 0) {
-      process.stdout.write(JSON.stringify({ message: `tfx-cleanup: ${cleaned} files removed` }));
+      process.stdout.write(
+        JSON.stringify({ message: `tfx-cleanup: ${cleaned} files removed` }),
+      );
     }
   }
 }

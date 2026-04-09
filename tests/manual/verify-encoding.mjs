@@ -7,8 +7,14 @@
  * 3. capture log에서 UTF-8 정상 여부 확인
  * 4. 세션 정리
  */
-import { createPsmuxSession, dispatchCommand, waitForCompletion, killPsmuxSession } from "../../hub/team/psmux.mjs";
+
 import { readFileSync } from "node:fs";
+import {
+  createPsmuxSession,
+  dispatchCommand,
+  killPsmuxSession,
+  waitForCompletion,
+} from "../../hub/team/psmux.mjs";
 
 const SESSION_NAME = "tfx-encoding-test";
 const TIMEOUT_SEC = 60;
@@ -21,14 +27,16 @@ async function main() {
   let session;
   try {
     session = createPsmuxSession(SESSION_NAME, { paneCount: 1, layout: "1xN" });
-    console.log(`  세션: ${session.sessionName}, panes: ${session.panes.length}`);
+    console.log(
+      `  세션: ${session.sessionName}, panes: ${session.panes.length}`,
+    );
   } catch (err) {
     console.error("  세션 생성 실패:", err.message);
     process.exit(1);
   }
 
   // 2초 대기 — 인코딩 초기화 명령이 pane에서 실행될 시간
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise((r) => setTimeout(r, 2000));
 
   // 2. Gemini로 non-ASCII 출력 유도
   const prompt = "다음 문장을 그대로 출력해: 한글 테스트 成功 emoji 🎉 done";
@@ -39,7 +47,7 @@ async function main() {
     dispatch = dispatchCommand(
       SESSION_NAME,
       session.panes[0],
-      `gemini -y -p "${prompt}"`
+      `gemini -y -p "${prompt}"`,
     );
     console.log(`  token: ${dispatch.token}`);
     console.log(`  logPath: ${dispatch.logPath}`);
@@ -56,7 +64,7 @@ async function main() {
       SESSION_NAME,
       session.panes[0],
       dispatch.token,
-      TIMEOUT_SEC
+      TIMEOUT_SEC,
     );
     console.log(`  exit code: ${result.exitCode}`);
   } catch (err) {
@@ -80,7 +88,9 @@ async function main() {
     const hasGeminiOutput = /done|emoji|테스트/.test(log);
 
     console.log(`  로그 크기: ${rawBytes.length} bytes`);
-    console.log(`  null 바이트 (UTF-16LE 징후): ${hasNullBytes ? "❌ 발견 — 인코딩 깨짐!" : "✅ 없음"}`);
+    console.log(
+      `  null 바이트 (UTF-16LE 징후): ${hasNullBytes ? "❌ 발견 — 인코딩 깨짐!" : "✅ 없음"}`,
+    );
     console.log(`  한글 포함: ${hasKorean ? "✅" : "⚠️  미포함"}`);
     console.log(`  한자 포함: ${hasChinese ? "✅" : "⚠️  미포함"}`);
     console.log(`  Gemini 출력 감지: ${hasGeminiOutput ? "✅" : "⚠️  미감지"}`);
@@ -88,7 +98,11 @@ async function main() {
     if (hasNullBytes) {
       console.log("\n  ⚠️  UTF-16LE 바이트 샘플:");
       const sample = rawBytes.slice(0, 100);
-      console.log(`  ${Array.from(sample).map(b => b.toString(16).padStart(2, "0")).join(" ")}`);
+      console.log(
+        `  ${Array.from(sample)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join(" ")}`,
+      );
     }
 
     // 최종 판정

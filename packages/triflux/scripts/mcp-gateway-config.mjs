@@ -3,37 +3,63 @@
 // Usage: node mcp-gateway-config.mjs --enable   # stdio → SSE
 //        node mcp-gateway-config.mjs --disable  # SSE → stdio (복원)
 
-import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
-import { isServerEnabled } from './lib/mcp-manifest.mjs';
+import { execSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { isServerEnabled } from "./lib/mcp-manifest.mjs";
 
-const BACKUP_FILE = join(homedir(), '.claude', 'cache', 'mcp-pre-gateway.json');
+const BACKUP_FILE = join(homedir(), ".claude", "cache", "mcp-pre-gateway.json");
 
 export const GATEWAY_SERVERS = [
-  { name: 'context7',     port: 8100, stdioCmd: 'cmd /c npx -y @upstash/context7-mcp@latest' },
-  { name: 'brave-search', port: 8101, stdioCmd: 'cmd /c npx -y @brave/brave-search-mcp-server' },
-  { name: 'exa',          port: 8102, stdioCmd: 'cmd /c npx -y exa-mcp-server' },
-  { name: 'tavily',       port: 8103, stdioCmd: 'cmd /c npx -y tavily-mcp@latest' },
-  { name: 'jira',         port: 8104, stdioCmd: 'cmd /c npx -y mcp-jira-cloud@latest' },
-  { name: 'serena',       port: 8105, stdioCmd: 'uvx --from git+https://github.com/oraios/serena serena start-mcp-server' },
-  { name: 'notion',       port: 8106, stdioCmd: 'cmd /c npx -y @notionhq/notion-mcp-server' },
-  { name: 'notion-guest', port: 8107, stdioCmd: 'cmd /c npx -y @notionhq/notion-mcp-server' },
+  {
+    name: "context7",
+    port: 8100,
+    stdioCmd: "cmd /c npx -y @upstash/context7-mcp@latest",
+  },
+  {
+    name: "brave-search",
+    port: 8101,
+    stdioCmd: "cmd /c npx -y @brave/brave-search-mcp-server",
+  },
+  { name: "exa", port: 8102, stdioCmd: "cmd /c npx -y exa-mcp-server" },
+  { name: "tavily", port: 8103, stdioCmd: "cmd /c npx -y tavily-mcp@latest" },
+  { name: "jira", port: 8104, stdioCmd: "cmd /c npx -y mcp-jira-cloud@latest" },
+  {
+    name: "serena",
+    port: 8105,
+    stdioCmd:
+      "uvx --from git+https://github.com/oraios/serena serena start-mcp-server",
+  },
+  {
+    name: "notion",
+    port: 8106,
+    stdioCmd: "cmd /c npx -y @notionhq/notion-mcp-server",
+  },
+  {
+    name: "notion-guest",
+    port: 8107,
+    stdioCmd: "cmd /c npx -y @notionhq/notion-mcp-server",
+  },
 ];
 
 const SKIP_SERVERS = new Set([
-  'playwright',
-  'claude.ai Notion',
-  'plugin:oh-my-claudecode:t',
+  "playwright",
+  "claude.ai Notion",
+  "plugin:oh-my-claudecode:t",
 ]);
 
 // Git Bash에서 /c → C:/ 경로 변환 방지
-const EXEC_ENV = { ...process.env, MSYS_NO_PATHCONV: '1' };
+const EXEC_ENV = { ...process.env, MSYS_NO_PATHCONV: "1" };
 
 function run(cmd) {
   try {
-    execSync(cmd, { stdio: 'pipe', encoding: 'utf8', timeout: 15000, env: EXEC_ENV });
+    execSync(cmd, {
+      stdio: "pipe",
+      encoding: "utf8",
+      timeout: 15000,
+      env: EXEC_ENV,
+    });
     return true;
   } catch {
     return false;
@@ -54,16 +80,22 @@ function captureCurrentMcpState() {
     // claude mcp get으로 현재 등록 상태 확인
     try {
       const out = execSync(`claude mcp get "${name}" -s user`, {
-        stdio: 'pipe', encoding: 'utf8', timeout: 5000, env: EXEC_ENV,
+        stdio: "pipe",
+        encoding: "utf8",
+        timeout: 5000,
+        env: EXEC_ENV,
       }).trim();
-      servers[name] = { scope: 'user', raw: out };
+      servers[name] = { scope: "user", raw: out };
     } catch {
       // user에 없으면 local 확인
       try {
         const out = execSync(`claude mcp get "${name}" -s local`, {
-          stdio: 'pipe', encoding: 'utf8', timeout: 5000, env: EXEC_ENV,
+          stdio: "pipe",
+          encoding: "utf8",
+          timeout: 5000,
+          env: EXEC_ENV,
         }).trim();
-        servers[name] = { scope: 'local', raw: out };
+        servers[name] = { scope: "local", raw: out };
       } catch {
         servers[name] = null; // 기존에 없었음
       }
@@ -83,14 +115,16 @@ function saveBackup(servers) {
 function loadBackup() {
   if (!existsSync(BACKUP_FILE)) return null;
   try {
-    return JSON.parse(readFileSync(BACKUP_FILE, 'utf8'));
-  } catch { return null; }
+    return JSON.parse(readFileSync(BACKUP_FILE, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 // ── enable: 스냅샷 → remove → SSE add (실패 시 rollback) ──
 
 function enableSse() {
-  console.log('Switching MCP servers to SSE mode...\n');
+  console.log("Switching MCP servers to SSE mode...\n");
 
   // 1) 현재 상태 스냅샷
   const snapshot = captureCurrentMcpState();
@@ -108,7 +142,9 @@ function enableSse() {
 
     removeMcp(name);
     const url = `http://localhost:${port}/sse`;
-    const success = run(`claude mcp add --transport sse -s user "${name}" ${url}`);
+    const success = run(
+      `claude mcp add --transport sse -s user "${name}" ${url}`,
+    );
 
     if (success) {
       console.log(`  [SSE] ${name} → ${url}`);
@@ -119,9 +155,11 @@ function enableSse() {
       const orig = snapshot[name];
       if (orig) {
         // H1 fix: orig.raw를 shell-escape하여 injection 방지
-      const safeRaw = (orig.raw || '').replace(/[;`$(){}|&<>]/g, '');
-      const restored = safeRaw ? run(`claude mcp add "${name}" -s ${orig.scope} -- ${safeRaw}`) : false;
-        console.error(`  [ROLLBACK] ${name}: ${restored ? 'ok' : 'FAIL'}`);
+        const safeRaw = (orig.raw || "").replace(/[;`$(){}|&<>]/g, "");
+        const restored = safeRaw
+          ? run(`claude mcp add "${name}" -s ${orig.scope} -- ${safeRaw}`)
+          : false;
+        console.error(`  [ROLLBACK] ${name}: ${restored ? "ok" : "FAIL"}`);
       }
       fail++;
     }
@@ -133,12 +171,14 @@ function enableSse() {
 // ── disable: 백업에서 서버별 원복 ──
 
 function disableSse() {
-  console.log('Restoring MCP servers from backup...\n');
+  console.log("Restoring MCP servers from backup...\n");
   const backup = loadBackup();
 
   // C1 fix: 백업 없으면 전체 삭제 방지
   if (!backup) {
-    console.error('No backup found — cannot restore. Run --enable first to create a backup.');
+    console.error(
+      "No backup found — cannot restore. Run --enable first to create a backup.",
+    );
     process.exit(1);
   }
 
@@ -160,9 +200,11 @@ function disableSse() {
 
     // H2 fix: 백업의 scope/raw를 사용하여 원본 복원, fallback으로 stdioCmd
     removeMcp(name);
-    const restoreScope = orig.scope || 'user';
+    const restoreScope = orig.scope || "user";
     const restoreCmd = orig.raw?.trim() ? orig.raw.trim() : stdioCmd;
-    const success = run(`claude mcp add "${name}" -s ${restoreScope} -- ${restoreCmd}`);
+    const success = run(
+      `claude mcp add "${name}" -s ${restoreScope} -- ${restoreCmd}`,
+    );
 
     if (success) {
       console.log(`  [RESTORE] ${name} → scope=${restoreScope}`);
@@ -171,7 +213,9 @@ function disableSse() {
       // fallback: stdioCmd로 재시도
       const fallback = run(`claude mcp add "${name}" -s user -- ${stdioCmd}`);
       if (fallback) {
-        console.log(`  [FALLBACK] ${name} → stdio (원본 복원 실패, 기본값 사용)`);
+        console.log(
+          `  [FALLBACK] ${name} → stdio (원본 복원 실패, 기본값 사용)`,
+        );
         ok++;
       } else {
         console.error(`  [FAIL] ${name}`);
@@ -190,16 +234,16 @@ function printUsage() {
   --enable   Switch Claude Code MCP servers from stdio to SSE (supergateway)
   --disable  Restore Claude Code MCP servers to original stdio mode
 
-Servers managed: ${GATEWAY_SERVERS.map((s) => s.name).join(', ')}
-Servers skipped: ${[...SKIP_SERVERS].join(', ')}`);
+Servers managed: ${GATEWAY_SERVERS.map((s) => s.name).join(", ")}
+Servers skipped: ${[...SKIP_SERVERS].join(", ")}`);
 }
 
 // ── main ──
 const flag = process.argv[2];
 
-if (flag === '--enable') {
+if (flag === "--enable") {
   enableSse();
-} else if (flag === '--disable') {
+} else if (flag === "--disable") {
   disableSse();
 } else {
   printUsage();

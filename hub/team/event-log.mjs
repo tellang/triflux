@@ -2,8 +2,8 @@
 // Conductor 세션 lifecycle 이벤트를 JSONL 파일에 기록한다.
 // 기존 hub/server.mjs의 batch-events.jsonl(MCP 이벤트)과 독립. 공존.
 
-import { createWriteStream, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { createWriteStream, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 /**
  * JSONL event log 팩토리.
@@ -16,7 +16,7 @@ export function createEventLog(filePath, opts = {}) {
   const { sessionId } = opts;
 
   mkdirSync(dirname(filePath), { recursive: true });
-  const stream = createWriteStream(filePath, { flags: 'a' });
+  const stream = createWriteStream(filePath, { flags: "a" });
 
   let closed = false;
   let pending = 0;
@@ -35,7 +35,9 @@ export function createEventLog(filePath, opts = {}) {
       ...data,
     };
     pending += 1;
-    stream.write(JSON.stringify(entry) + '\n', () => { pending -= 1; });
+    stream.write(JSON.stringify(entry) + "\n", () => {
+      pending -= 1;
+    });
   }
 
   /**
@@ -45,9 +47,9 @@ export function createEventLog(filePath, opts = {}) {
   function flush() {
     if (closed) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      stream.once('error', reject);
-      stream.write('', () => {
-        stream.removeListener('error', reject);
+      stream.once("error", reject);
+      stream.write("", () => {
+        stream.removeListener("error", reject);
         resolve();
       });
     });
@@ -69,8 +71,14 @@ export function createEventLog(filePath, opts = {}) {
     append,
     flush,
     close,
-    get filePath() { return filePath; },
-    get pending() { return pending; },
-    get closed() { return closed; },
+    get filePath() {
+      return filePath;
+    },
+    get pending() {
+      return pending;
+    },
+    get closed() {
+      return closed;
+    },
   });
 }

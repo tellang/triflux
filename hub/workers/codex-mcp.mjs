@@ -1,17 +1,17 @@
 // hub/workers/codex-mcp.mjs — Codex MCP 서버 래퍼
-import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 import {
   CODEX_MCP_EXECUTION_EXIT_CODE,
   CODEX_MCP_TRANSPORT_EXIT_CODE,
-} from '../cli-adapter-base.mjs';
-import { withRetry } from './worker-utils.mjs';
+} from "../cli-adapter-base.mjs";
+import { withRetry } from "./worker-utils.mjs";
 
-const REQUIRED_TOOLS = ['codex', 'codex-reply'];
+const REQUIRED_TOOLS = ["codex", "codex-reply"];
 
 export { CODEX_MCP_EXECUTION_EXIT_CODE, CODEX_MCP_TRANSPORT_EXIT_CODE };
 export const DEFAULT_CODEX_MCP_TIMEOUT_MS = 10 * 60 * 1000;
@@ -29,36 +29,38 @@ export class CodexMcpTransportError extends Error {
    */
   constructor(message, options = {}) {
     super(message, { cause: options.cause });
-    this.name = 'CodexMcpTransportError';
-    this.stderr = options.stderr || '';
+    this.name = "CodexMcpTransportError";
+    this.stderr = options.stderr || "";
   }
 }
 
 function cloneEnv(env = process.env) {
   return Object.fromEntries(
-    Object.entries(env).filter(([, value]) => typeof value === 'string'),
+    Object.entries(env).filter(([, value]) => typeof value === "string"),
   );
 }
 
 function collectTextContent(content = []) {
   return content
-    .filter((item) => item?.type === 'text' && typeof item.text === 'string')
+    .filter((item) => item?.type === "text" && typeof item.text === "string")
     .map((item) => item.text)
-    .join('\n')
+    .join("\n")
     .trim();
 }
 
-function normalizeStructuredContent(structuredContent, fallbackText = '') {
-  if (!structuredContent || typeof structuredContent !== 'object') {
+function normalizeStructuredContent(structuredContent, fallbackText = "") {
+  if (!structuredContent || typeof structuredContent !== "object") {
     return { threadId: null, content: fallbackText };
   }
 
-  const threadId = typeof structuredContent.threadId === 'string'
-    ? structuredContent.threadId
-    : null;
-  const content = typeof structuredContent.content === 'string'
-    ? structuredContent.content
-    : fallbackText;
+  const threadId =
+    typeof structuredContent.threadId === "string"
+      ? structuredContent.threadId
+      : null;
+  const content =
+    typeof structuredContent.content === "string"
+      ? structuredContent.content
+      : fallbackText;
 
   return { threadId, content };
 }
@@ -66,29 +68,34 @@ function normalizeStructuredContent(structuredContent, fallbackText = '') {
 function buildCodexArguments(prompt, opts = {}) {
   const args = { prompt };
 
-  if (typeof opts.cwd === 'string' && opts.cwd) args.cwd = opts.cwd;
-  if (typeof opts.model === 'string' && opts.model) args.model = opts.model;
-  if (typeof opts.profile === 'string' && opts.profile) args.profile = opts.profile;
-  if (typeof opts.approvalPolicy === 'string' && opts.approvalPolicy) {
-    args['approval-policy'] = opts.approvalPolicy;
+  if (typeof opts.cwd === "string" && opts.cwd) args.cwd = opts.cwd;
+  if (typeof opts.model === "string" && opts.model) args.model = opts.model;
+  if (typeof opts.profile === "string" && opts.profile)
+    args.profile = opts.profile;
+  if (typeof opts.approvalPolicy === "string" && opts.approvalPolicy) {
+    args["approval-policy"] = opts.approvalPolicy;
   }
-  if (typeof opts.sandbox === 'string' && opts.sandbox) args.sandbox = opts.sandbox;
-  if (opts.config && typeof opts.config === 'object') args.config = opts.config;
-  if (typeof opts.baseInstructions === 'string' && opts.baseInstructions) {
-    args['base-instructions'] = opts.baseInstructions;
+  if (typeof opts.sandbox === "string" && opts.sandbox)
+    args.sandbox = opts.sandbox;
+  if (opts.config && typeof opts.config === "object") args.config = opts.config;
+  if (typeof opts.baseInstructions === "string" && opts.baseInstructions) {
+    args["base-instructions"] = opts.baseInstructions;
   }
-  if (typeof opts.developerInstructions === 'string' && opts.developerInstructions) {
-    args['developer-instructions'] = opts.developerInstructions;
+  if (
+    typeof opts.developerInstructions === "string" &&
+    opts.developerInstructions
+  ) {
+    args["developer-instructions"] = opts.developerInstructions;
   }
-  if (typeof opts.compactPrompt === 'string' && opts.compactPrompt) {
-    args['compact-prompt'] = opts.compactPrompt;
+  if (typeof opts.compactPrompt === "string" && opts.compactPrompt) {
+    args["compact-prompt"] = opts.compactPrompt;
   }
 
   return args;
 }
 
 function pickToolName(threadId) {
-  return threadId ? 'codex-reply' : 'codex';
+  return threadId ? "codex-reply" : "codex";
 }
 
 function withTimeout(promise, timeoutMs, message) {
@@ -110,27 +117,38 @@ function withTimeout(promise, timeoutMs, message) {
 }
 
 function normalizeRetryOptions(retryOptions) {
-  if (!retryOptions || typeof retryOptions !== 'object') {
+  if (!retryOptions || typeof retryOptions !== "object") {
     return Object.freeze({});
   }
   return Object.freeze({ ...retryOptions });
 }
 
 function isCodexRetryable(error) {
-  return error instanceof CodexMcpTransportError
-    || error?.code === 'ETIMEDOUT'
-    || error?.cause?.code === 'ETIMEDOUT';
+  return (
+    error instanceof CodexMcpTransportError ||
+    error?.code === "ETIMEDOUT" ||
+    error?.cause?.code === "ETIMEDOUT"
+  );
 }
 
-function detectWorkerCategory(error, fallbackCategory = 'transient') {
-  const combined = `${error?.message || ''}\n${error?.stderr || ''}`.toLowerCase();
+function detectWorkerCategory(error, fallbackCategory = "transient") {
+  const combined =
+    `${error?.message || ""}\n${error?.stderr || ""}`.toLowerCase();
 
-  if (error?.code === 'INVALID_INPUT') return 'input';
-  if (/(unauthorized|forbidden|auth|login|token|credential|apikey|api key)/i.test(combined)) {
-    return 'auth';
+  if (error?.code === "INVALID_INPUT") return "input";
+  if (
+    /(unauthorized|forbidden|auth|login|token|credential|apikey|api key)/i.test(
+      combined,
+    )
+  ) {
+    return "auth";
   }
-  if (/(config|unknown option|invalid option|missing|필수 mcp 도구 누락)/i.test(combined)) {
-    return 'config';
+  if (
+    /(config|unknown option|invalid option|missing|필수 mcp 도구 누락)/i.test(
+      combined,
+    )
+  ) {
+    return "config";
   }
 
   return fallbackCategory;
@@ -138,20 +156,25 @@ function detectWorkerCategory(error, fallbackCategory = 'transient') {
 
 function buildCodexErrorInfo(error, attempts) {
   const retryable = isCodexRetryable(error);
-  const code = error instanceof CodexMcpTransportError
-    ? 'CODEX_TRANSPORT_ERROR'
-    : (error?.code || 'CODEX_EXECUTION_ERROR');
-  const category = detectWorkerCategory(error, retryable ? 'transient' : 'config');
+  const code =
+    error instanceof CodexMcpTransportError
+      ? "CODEX_TRANSPORT_ERROR"
+      : error?.code || "CODEX_EXECUTION_ERROR";
+  const category = detectWorkerCategory(
+    error,
+    retryable ? "transient" : "config",
+  );
 
-  let recovery = 'Review the Codex worker error output and retry after correcting the issue.';
-  if (code === 'INVALID_INPUT') {
-    recovery = 'Provide a non-empty prompt before invoking the Codex worker.';
+  let recovery =
+    "Review the Codex worker error output and retry after correcting the issue.";
+  if (code === "INVALID_INPUT") {
+    recovery = "Provide a non-empty prompt before invoking the Codex worker.";
   } else if (retryable) {
-    recovery = 'Retry after reconnecting the Codex MCP transport.';
-  } else if (category === 'auth') {
-    recovery = 'Refresh the Codex authentication state and retry.';
-  } else if (category === 'config') {
-    recovery = 'Check the Codex MCP configuration and available tools.';
+    recovery = "Retry after reconnecting the Codex MCP transport.";
+  } else if (category === "auth") {
+    recovery = "Refresh the Codex authentication state and retry.";
+  } else if (category === "config") {
+    recovery = "Check the Codex MCP configuration and available tools.";
   }
 
   return Object.freeze({
@@ -167,7 +190,7 @@ function buildCodexErrorInfo(error, attempts) {
  * Codex MCP 워커
  */
 export class CodexMcpWorker {
-  type = 'codex';
+  type = "codex";
 
   /**
    * @param {object} [options]
@@ -179,13 +202,17 @@ export class CodexMcpWorker {
    * @param {number} [options.bootstrapTimeoutMs]
    */
   constructor(options = {}) {
-    this.command = options.command || process.env.CODEX_BIN || 'codex';
-    this.args = Array.isArray(options.args) && options.args.length
-      ? [...options.args]
-      : ['mcp-server'];
+    this.command = options.command || process.env.CODEX_BIN || "codex";
+    this.args =
+      Array.isArray(options.args) && options.args.length
+        ? [...options.args]
+        : ["mcp-server"];
     this.cwd = options.cwd || process.cwd();
     this.env = cloneEnv({ ...cloneEnv(process.env), ...cloneEnv(options.env) });
-    this.clientInfo = options.clientInfo || { name: 'triflux-codex-mcp', version: '1.0.0' };
+    this.clientInfo = options.clientInfo || {
+      name: "triflux-codex-mcp",
+      version: "1.0.0",
+    };
     this.bootstrapTimeoutMs = Number.isFinite(options.bootstrapTimeoutMs)
       ? options.bootstrapTimeoutMs
       : DEFAULT_CODEX_MCP_BOOTSTRAP_TIMEOUT_MS;
@@ -196,7 +223,7 @@ export class CodexMcpWorker {
     this.ready = false;
     this.availableTools = new Set();
     this.threadIds = new Map();
-    this.serverStderr = '';
+    this.serverStderr = "";
   }
 
   isReady() {
@@ -227,12 +254,12 @@ export class CodexMcpWorker {
       args: this.args,
       cwd: this.cwd,
       env: this.env,
-      stderr: 'pipe',
+      stderr: "pipe",
     });
     const client = new Client(this.clientInfo, { capabilities: {} });
 
-    this.serverStderr = '';
-    transport.stderr?.on('data', (chunk) => {
+    this.serverStderr = "";
+    transport.stderr?.on("data", (chunk) => {
       this.serverStderr += String(chunk);
       if (this.serverStderr.length > 16000) {
         this.serverStderr = this.serverStderr.slice(-16000);
@@ -240,17 +267,23 @@ export class CodexMcpWorker {
     });
 
     try {
-      await withTimeout((async () => {
-        await client.connect(transport);
-        const tools = await client.listTools(undefined, { timeout: this.bootstrapTimeoutMs });
-        this.availableTools = new Set(tools.tools.map((tool) => tool.name));
+      await withTimeout(
+        (async () => {
+          await client.connect(transport);
+          const tools = await client.listTools(undefined, {
+            timeout: this.bootstrapTimeoutMs,
+          });
+          this.availableTools = new Set(tools.tools.map((tool) => tool.name));
 
-        for (const requiredTool of REQUIRED_TOOLS) {
-          if (!this.availableTools.has(requiredTool)) {
-            throw new Error(`필수 MCP 도구 누락: ${requiredTool}`);
+          for (const requiredTool of REQUIRED_TOOLS) {
+            if (!this.availableTools.has(requiredTool)) {
+              throw new Error(`필수 MCP 도구 누락: ${requiredTool}`);
+            }
           }
-        }
-      })(), this.bootstrapTimeoutMs, `Codex MCP bootstrap timeout (${this.bootstrapTimeoutMs}ms)`);
+        })(),
+        this.bootstrapTimeoutMs,
+        `Codex MCP bootstrap timeout (${this.bootstrapTimeoutMs}ms)`,
+      );
     } catch (error) {
       await client.close().catch(() => {});
       transport.stderr?.destroy?.();
@@ -289,62 +322,78 @@ export class CodexMcpWorker {
    * @returns {Promise<import('./interface.mjs').WorkerResult>}
    */
   async execute(prompt, opts = {}) {
-    if (typeof prompt !== 'string' || !prompt.trim()) {
+    if (typeof prompt !== "string" || !prompt.trim()) {
       return {
-        output: 'prompt는 비어 있을 수 없습니다.',
+        output: "prompt는 비어 있을 수 없습니다.",
         exitCode: CODEX_MCP_EXECUTION_EXIT_CODE,
         threadId: null,
         sessionKey: opts.sessionKey || null,
-        error: buildCodexErrorInfo({ code: 'INVALID_INPUT', message: 'prompt는 비어 있을 수 없습니다.' }, 0),
+        error: buildCodexErrorInfo(
+          { code: "INVALID_INPUT", message: "prompt는 비어 있을 수 없습니다." },
+          0,
+        ),
         raw: null,
       };
     }
 
-    const sessionKey = typeof opts.sessionKey === 'string' && opts.sessionKey
-      ? opts.sessionKey
-      : null;
+    const sessionKey =
+      typeof opts.sessionKey === "string" && opts.sessionKey
+        ? opts.sessionKey
+        : null;
 
     if (opts.resetSession && sessionKey) {
       this.clearThread(sessionKey);
     }
 
-    const threadId = typeof opts.threadId === 'string' && opts.threadId
-      ? opts.threadId
-      : (sessionKey ? this.getThreadId(sessionKey) : null);
-    const timeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : DEFAULT_CODEX_MCP_TIMEOUT_MS;
+    const threadId =
+      typeof opts.threadId === "string" && opts.threadId
+        ? opts.threadId
+        : sessionKey
+          ? this.getThreadId(sessionKey)
+          : null;
+    const timeoutMs = Number.isFinite(opts.timeoutMs)
+      ? opts.timeoutMs
+      : DEFAULT_CODEX_MCP_TIMEOUT_MS;
     let attempts = 0;
     let activeThreadId = threadId;
 
     try {
-      const { rawResult, normalized } = await withRetry(async () => {
-        attempts += 1;
-        if (attempts === 1) {
-          await this.start();
-        } else {
-          await this.stop();
-          await this.start();
-        }
+      const { rawResult, normalized } = await withRetry(
+        async () => {
+          attempts += 1;
+          if (attempts === 1) {
+            await this.start();
+          } else {
+            await this.stop();
+            await this.start();
+          }
 
-        const toolName = pickToolName(activeThreadId);
-        const toolArguments = toolName === 'codex-reply'
-          ? { prompt, threadId: activeThreadId }
-          : buildCodexArguments(prompt, opts);
+          const toolName = pickToolName(activeThreadId);
+          const toolArguments =
+            toolName === "codex-reply"
+              ? { prompt, threadId: activeThreadId }
+              : buildCodexArguments(prompt, opts);
 
-        const nextRawResult = await this.client.callTool(
-          { name: toolName, arguments: toolArguments },
-          undefined,
-          { timeout: timeoutMs },
-        );
+          const nextRawResult = await this.client.callTool(
+            { name: toolName, arguments: toolArguments },
+            undefined,
+            { timeout: timeoutMs },
+          );
 
-        const textContent = collectTextContent(nextRawResult.content);
-        const nextNormalized = normalizeStructuredContent(nextRawResult.structuredContent, textContent);
-        activeThreadId = nextNormalized.threadId || activeThreadId;
+          const textContent = collectTextContent(nextRawResult.content);
+          const nextNormalized = normalizeStructuredContent(
+            nextRawResult.structuredContent,
+            textContent,
+          );
+          activeThreadId = nextNormalized.threadId || activeThreadId;
 
-        return { rawResult: nextRawResult, normalized: nextNormalized };
-      }, {
-        ...this.retryOptions,
-        shouldRetry: (error) => isCodexRetryable(error),
-      });
+          return { rawResult: nextRawResult, normalized: nextNormalized };
+        },
+        {
+          ...this.retryOptions,
+          shouldRetry: (error) => isCodexRetryable(error),
+        },
+      );
 
       if (sessionKey && normalized.threadId) {
         this.setThreadId(sessionKey, normalized.threadId);
@@ -357,7 +406,7 @@ export class CodexMcpWorker {
           threadId: normalized.threadId,
           sessionKey,
           error: buildCodexErrorInfo(
-            { code: 'CODEX_TOOL_ERROR', message: normalized.content },
+            { code: "CODEX_TOOL_ERROR", message: normalized.content },
             attempts,
           ),
           raw: rawResult,
@@ -391,7 +440,7 @@ export function createCodexMcpWorker(options = {}) {
 
 function parseCliArgs(argv) {
   const options = {
-    command: process.env.CODEX_BIN || 'codex',
+    command: process.env.CODEX_BIN || "codex",
     cwd: process.cwd(),
     timeoutMs: DEFAULT_CODEX_MCP_TIMEOUT_MS,
   };
@@ -408,49 +457,49 @@ function parseCliArgs(argv) {
     };
 
     switch (token) {
-      case '--prompt':
+      case "--prompt":
         options.prompt = next();
         break;
-      case '--thread-id':
+      case "--thread-id":
         options.threadId = next();
         break;
-      case '--session-key':
+      case "--session-key":
         options.sessionKey = next();
         break;
-      case '--cwd':
+      case "--cwd":
         options.cwd = next();
         break;
-      case '--profile':
+      case "--profile":
         options.profile = next();
         break;
-      case '--model':
+      case "--model":
         options.model = next();
         break;
-      case '--approval-policy':
+      case "--approval-policy":
         options.approvalPolicy = next();
         break;
-      case '--sandbox':
+      case "--sandbox":
         options.sandbox = next();
         break;
-      case '--base-instructions':
+      case "--base-instructions":
         options.baseInstructions = next();
         break;
-      case '--developer-instructions':
+      case "--developer-instructions":
         options.developerInstructions = next();
         break;
-      case '--compact-prompt':
+      case "--compact-prompt":
         options.compactPrompt = next();
         break;
-      case '--timeout-ms':
+      case "--timeout-ms":
         options.timeoutMs = Number.parseInt(next(), 10);
         break;
-      case '--config-json':
+      case "--config-json":
         options.config = JSON.parse(next());
         break;
-      case '--codex-command':
+      case "--codex-command":
         options.command = next();
         break;
-      case '--reset-session':
+      case "--reset-session":
         options.resetSession = true;
         break;
       default:
@@ -458,8 +507,8 @@ function parseCliArgs(argv) {
     }
   }
 
-  if (typeof options.prompt !== 'string' || !options.prompt) {
-    throw new Error('--prompt는 필수입니다.');
+  if (typeof options.prompt !== "string" || !options.prompt) {
+    throw new Error("--prompt는 필수입니다.");
   }
 
   return options;
@@ -470,7 +519,9 @@ export async function runCodexMcpCli(argv = process.argv.slice(2)) {
   try {
     options = parseCliArgs(argv);
   } catch (error) {
-    console.error(`[codex-mcp] ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `[codex-mcp] ${error instanceof Error ? error.message : String(error)}`,
+    );
     process.exitCode = 64;
     return;
   }
@@ -484,8 +535,8 @@ export async function runCodexMcpCli(argv = process.argv.slice(2)) {
     const result = await worker.execute(options.prompt, options);
     if (result.output) {
       process.stdout.write(result.output);
-      if (!result.output.endsWith('\n')) {
-        process.stdout.write('\n');
+      if (!result.output.endsWith("\n")) {
+        process.stdout.write("\n");
       }
     }
     process.exitCode = result.exitCode;
@@ -494,7 +545,7 @@ export async function runCodexMcpCli(argv = process.argv.slice(2)) {
     if (error instanceof CodexMcpTransportError && error.stderr) {
       lines.push(error.stderr);
     }
-    console.error(`[codex-mcp] ${lines.join('\n')}`);
+    console.error(`[codex-mcp] ${lines.join("\n")}`);
     process.exitCode = CODEX_MCP_TRANSPORT_EXIT_CODE;
   } finally {
     await worker.stop();

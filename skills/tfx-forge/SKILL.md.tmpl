@@ -1,0 +1,187 @@
+---
+name: tfx-forge
+description: "새 스킬을 만들거나 기존 스킬을 수정할 때 사용한다. 'forge', '스킬 만들기', 'create skill', '새 스킬', '스킬 생성', 'SKILL.md 작성' 같은 요청에 반드시 사용. 반복 작업을 스킬로 자동화하고 싶을 때 적극 활용."
+triggers:
+  - forge
+  - 스킬 만들기
+  - create skill
+  - 스킬 생성
+  - new skill
+argument-hint: "[스킬 이름 또는 설명]"
+---
+
+# {{SKILL_NAME}} — Skill Authoring Meta-Skill
+
+> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
+> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+
+
+> Superpowers skill authoring 오마주. 스킬을 만드는 스킬.
+> "메타 레벨에서 자동화하라."
+
+## 용도
+
+- 새 tfx 스킬의 SKILL.md를 대화형으로 생성
+- 기존 스킬 형식과 품질 기준을 자동 준수
+- YAML frontmatter + 본문 구조를 일관되게 유지
+- 스킬 작성 시행착오 최소화
+
+## 워크플로우
+
+### Step 1: 요구사항 수집 (대화형)
+
+AskUserQuestion으로 필수 정보를 순서대로 수집한다. 사용자가 초기 입력에 일부 정보를 포함했으면 해당 항목은 건너뛴다.
+
+**먼저 스킬 유형을 선택받는다:**
+
+```
+AskUserQuestion:
+  "스킬 유형을 선택하세요:"
+  1. Light (경량, 단일 CLI, 토큰 절약)
+  2. Deep (딥, 3-CLI 합의, 정확도 우선)
+  3. Core (인프라, 다른 스킬이 내부 호출)
+```
+
+선택된 유형에 따라 이후 수집 항목과 템플릿이 달라진다:
+- **Light**: 단일 CLI 워크플로우, 낮은 토큰 예산
+- **Deep**: 3-CLI 병렬 + tfx-consensus 통합, 높은 토큰 예산
+- **Core**: 외부 호출 인터페이스 정의, 내부 API 문서화 포함
+
+**이후 나머지 정보를 순서대로 수집한다:**
+
+```
+수집 항목 (순서대로):
+
+1. 이름 (name)
+   "스킬 이름은? (예: tfx-myskill)"
+   → 접두사 'tfx-' 자동 부여 (없으면)
+
+2. 한줄 설명 (description)
+   "이 스킬이 무엇을 하는지 한 문장으로?"
+
+3. 트리거 (triggers)
+   "어떤 키워드로 이 스킬을 호출? (쉼표 구분)"
+
+4. 토큰 예산
+   "예상 토큰 예산은? (예: ~10K)"
+
+5. 핵심 워크플로우
+   "주요 단계를 간략히 설명해주세요. (3-5 단계)"
+
+6. 사용 예시
+   "사용 예시 1-3개를 알려주세요."
+```
+
+### Step 2: 기존 스킬 분석
+
+프로젝트 내 기존 SKILL.md를 참조하여 형식과 품질 기준을 확인한다:
+
+```
+Glob("skills/**/SKILL.md")로 기존 스킬 목록 수집
+→ 유사한 타입(Deep/Light)의 스킬 1-2개를 Read하여 형식 참조
+→ YAML frontmatter 구조, 본문 섹션 패턴, 토큰 예산 표 형식 추출
+```
+
+### Step 3: SKILL.md 생성
+
+수집된 정보로 SKILL.md를 자동 생성한다:
+
+```yaml
+# YAML Frontmatter 템플릿
+---
+name: {name}
+description: {description}
+triggers:
+  - {trigger_1}
+  - {trigger_2}
+  - ...
+argument-hint: "{hint}"
+---
+```
+
+```markdown
+# 본문 템플릿
+
+# {name} — {short_title}
+
+> {한줄 설명 또는 오마주}
+
+## 용도
+
+- {use_case_1}
+- {use_case_2}
+- {use_case_3}
+
+## 워크플로우
+
+### Step 1: {step_title}
+{step_description}
+
+### Step 2: {step_title}
+{step_description}
+
+...
+
+## 토큰 예산
+
+| 단계 | 토큰 |
+|------|------|
+| {step} | ~{N}K |
+| **총합** | **~{total}K** |
+
+## 사용 예
+
+```
+/{name} "{example_1}"
+/{name} "{example_2}"
+```
+```
+
+### Step 4: 디렉토리 생성 및 저장
+
+```
+mkdir -p skills/{name}/
+Write → skills/{name}/SKILL.md
+```
+
+### Step 5: 검증
+
+생성된 파일을 읽어 검증한다:
+
+```
+검증 항목:
+  - [ ] YAML frontmatter 파싱 가능
+  - [ ] name, description, triggers 필수 필드 존재
+  - [ ] 본문에 용도, 워크플로우, 토큰 예산, 사용 예 섹션 존재
+  - [ ] 파일 크기 < 800줄
+  - [ ] 기존 스킬과 트리거 충돌 없음
+```
+
+충돌 발견 시 AskUserQuestion으로 트리거 조정 요청.
+
+## 동작 규칙
+
+1. 사용자가 이름만 제공해도 나머지는 대화형으로 수집한다.
+2. 사용자가 상세 설명을 한꺼번에 제공하면 확인만 받고 즉시 생성한다.
+3. Deep 타입 선택 시 tfx-consensus 통합 포인트를 본문에 자동 포함한다.
+4. 생성 후 반드시 사용자에게 결과를 보여주고 수정 요청을 받는다.
+5. 기존 SKILL.md가 있으면 덮어쓰기 전 사용자 확인을 받는다.
+
+## 토큰 예산
+
+| 단계 | 토큰 |
+|------|------|
+| 요구사항 수집 | ~2K |
+| 기존 스킬 분석 | ~3K |
+| SKILL.md 생성 | ~3K |
+| 검증 | ~2K |
+| **총합** | **~10K** |
+
+## 사용 예
+
+```
+/tfx-forge
+/tfx-forge tfx-myskill
+/tfx-forge "CI/CD 파이프라인 자동 생성 스킬"
+/스킬 만들기 "코드 마이그레이션 도우미"
+```

@@ -2,17 +2,17 @@
 
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { nudge, deny } from "./lib/hook-utils.mjs";
 import {
-  readStdin,
-  parseJson,
-  nowSec,
-  resolveBaseDir,
-  shouldTrackPath,
   expectedReviewer,
+  nowSec,
+  parseJson,
+  readStdin,
+  resolveBaseDir,
   SESSION_TTL_SEC,
   STATE_REL_PATH,
+  shouldTrackPath,
 } from "./lib/cross-review-utils.mjs";
+import { deny, nudge } from "./lib/hook-utils.mjs";
 
 function loadState(statePath) {
   if (!existsSync(statePath)) return null;
@@ -84,17 +84,37 @@ async function main() {
 
     // tracker가 설정한 self_approved 플래그 명시적 체크
     if (meta.self_approved === true) {
-      selfApproved.push({ path, author, reviewer: meta.reviewer || author, expectedReviewer: requiredReviewer });
+      selfApproved.push({
+        path,
+        author,
+        reviewer: meta.reviewer || author,
+        expectedReviewer: requiredReviewer,
+      });
       continue;
     }
 
     if (reviewed && reviewer && reviewer === author) {
-      selfApproved.push({ path, author, reviewer, expectedReviewer: requiredReviewer });
+      selfApproved.push({
+        path,
+        author,
+        reviewer,
+        expectedReviewer: requiredReviewer,
+      });
       continue;
     }
 
-    if (reviewed && requiredReviewer && reviewer && reviewer !== requiredReviewer) {
-      selfApproved.push({ path, author, reviewer, expectedReviewer: requiredReviewer });
+    if (
+      reviewed &&
+      requiredReviewer &&
+      reviewer &&
+      reviewer !== requiredReviewer
+    ) {
+      selfApproved.push({
+        path,
+        author,
+        reviewer,
+        expectedReviewer: requiredReviewer,
+      });
       continue;
     }
 
@@ -105,18 +125,21 @@ async function main() {
 
   if (selfApproved.length > 0) {
     const lines = selfApproved
-      .map((item) => `  * ${item.path} (author=${item.author}, reviewer=${item.reviewer}, required=${item.expectedReviewer || "n/a"})`)
+      .map(
+        (item) =>
+          `  * ${item.path} (author=${item.author}, reviewer=${item.reviewer}, required=${item.expectedReviewer || "n/a"})`,
+      )
       .join("\n");
     deny(
       `[cross-review] self-approve 차단: 동일/비허용 reviewer가 감지되었습니다.\n${lines}\n` +
-      "규칙: author=claude -> reviewer=codex, author=codex -> reviewer=claude",
+        "규칙: author=claude -> reviewer=codex, author=codex -> reviewer=claude",
     );
   }
 
   if (pending.length > 0) {
     nudge(
       `[cross-review] git commit 전에 교차 검증이 필요합니다.\n${summarizePending(pending)}\n` +
-      "규칙: author=claude -> reviewer=codex, author=codex -> reviewer=claude",
+        "규칙: author=claude -> reviewer=codex, author=codex -> reviewer=claude",
     );
   }
 

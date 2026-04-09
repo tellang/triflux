@@ -128,7 +128,8 @@ class AccountBroker extends EventEmitter {
     const withinWindow =
       acct.circuitOpenedAt && now - acct.circuitOpenedAt < CIRCUIT_WINDOW_MS;
     if (withinWindow) return { state: "open", failures: validFailures };
-    if (acct.circuitOpenedAt) return { state: "half-open", failures: validFailures };
+    if (acct.circuitOpenedAt)
+      return { state: "half-open", failures: validFailures };
     return { state: "closed", failures: validFailures };
   }
 
@@ -190,18 +191,20 @@ class AccountBroker extends EventEmitter {
     // filter: not busy, not in cooldown, circuit not blocked
     const available = accounts.filter(
       (a) =>
-        !a.busy &&
-        a.cooldownUntil <= now &&
-        !this.#isCircuitBlocked(a, now),
+        !a.busy && a.cooldownUntil <= now && !this.#isCircuitBlocked(a, now),
     );
 
     if (!available.length) {
       // check if any accounts exist but all are blocked by circuit
       const circuitBlocked = accounts.filter(
-        (a) => !a.busy && a.cooldownUntil <= now && this.#isCircuitBlocked(a, now),
+        (a) =>
+          !a.busy && a.cooldownUntil <= now && this.#isCircuitBlocked(a, now),
       );
       if (circuitBlocked.length) {
-        this.emit("noAvailableAccounts", { provider, count: circuitBlocked.length });
+        this.emit("noAvailableAccounts", {
+          provider,
+          count: circuitBlocked.length,
+        });
       }
       return null;
     }
@@ -223,7 +226,9 @@ class AccountBroker extends EventEmitter {
     if ((TIER_PRIORITY[bestTier] ?? 2) > highestTier) {
       this.emit("tierFallback", {
         provider,
-        from: Object.entries(TIER_PRIORITY).find(([, v]) => v === highestTier)?.[0],
+        from: Object.entries(TIER_PRIORITY).find(
+          ([, v]) => v === highestTier,
+        )?.[0],
         to: bestTier,
       });
     }
@@ -252,14 +257,22 @@ class AccountBroker extends EventEmitter {
       circuitTrialInFlight: isHalfOpen ? true : acct.circuitTrialInFlight,
     });
 
-    this.emit("lease", { id: acct.id, provider, tier: acct.tier, halfOpen: isHalfOpen });
+    this.emit("lease", {
+      id: acct.id,
+      provider,
+      tier: acct.tier,
+      halfOpen: isHalfOpen,
+    });
 
     // path traversal guard for authFile
     let authFile;
     if (acct.mode === "auth") {
       const resolved = join(AUTH_BASE_PATH, acct.authFile);
       if (!resolved.startsWith(AUTH_BASE_PATH + sep)) {
-        this.emit("securityViolation", { id: acct.id, authFile: acct.authFile });
+        this.emit("securityViolation", {
+          id: acct.id,
+          authFile: acct.authFile,
+        });
         // undo the lease — path traversal blocked
         this.#state.set(acct.id, {
           ...this.#state.get(acct.id),
@@ -287,7 +300,7 @@ class AccountBroker extends EventEmitter {
 
   release(accountId, result) {
     const acct = this.#state.get(accountId);
-    if (!acct || !acct.busy) return;
+    if (!acct?.busy) return;
 
     const now = Date.now();
     const ok = result?.ok === true;
@@ -303,7 +316,10 @@ class AccountBroker extends EventEmitter {
     } else {
       circuitUpdate = this.#recordCircuitFailure(acct, isHalfOpen, now);
       if (circuitUpdate.circuitOpenedAt !== acct.circuitOpenedAt) {
-        this.emit("circuitOpen", { id: accountId, failures: circuitUpdate.failureTimestamps.length });
+        this.emit("circuitOpen", {
+          id: accountId,
+          failures: circuitUpdate.failureTimestamps.length,
+        });
       }
     }
 
@@ -318,9 +334,7 @@ class AccountBroker extends EventEmitter {
       busy: false,
       leasedAt: null,
       ...circuitUpdate,
-      cooldownUntil: shouldCooldown
-        ? now + cooldownMs
-        : acct.cooldownUntil,
+      cooldownUntil: shouldCooldown ? now + cooldownMs : acct.cooldownUntil,
     };
 
     this.#state.set(accountId, updated);
@@ -396,7 +410,10 @@ function loadConfig() {
   try {
     return JSON.parse(readFileSync(configPath, "utf8"));
   } catch (err) {
-    console.error("[account-broker] Failed to parse accounts.json:", err.message);
+    console.error(
+      "[account-broker] Failed to parse accounts.json:",
+      err.message,
+    );
     return null;
   }
 }

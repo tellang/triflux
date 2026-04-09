@@ -10,7 +10,9 @@ import {
 } from "./session.mjs";
 
 function sanitizeWindowTitle(value, fallback = "triflux") {
-  const text = String(value || "").replace(/[\r\n]+/g, " ").trim();
+  const text = String(value || "")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
   return text || fallback;
 }
 
@@ -19,7 +21,9 @@ function sanitizeSessionName(value) {
 }
 
 function sanitizeWorkingDirectory(value) {
-  const text = String(value || "").replace(/[\r\n\x00-\x1f]/g, "").trim();
+  const text = String(value || "")
+    .replace(/[\r\n\x00-\x1f]/g, "")
+    .trim();
   return text || process.cwd();
 }
 
@@ -32,7 +36,10 @@ export function parseWorkerNumber(value) {
   return null;
 }
 
-export function decideDashboardOpenMode({ openAll = false, hasWtSession = !!process.env.WT_SESSION } = {}) {
+export function decideDashboardOpenMode({
+  openAll = false,
+  hasWtSession = !!process.env.WT_SESSION,
+} = {}) {
   if (openAll) return hasWtSession ? "tab" : "window";
   return hasWtSession ? "split" : "window";
 }
@@ -44,19 +51,32 @@ function spawnWindowsTerminal(spec, opts = {}) {
     mode = "window",
     title = "triflux",
     cwd = process.cwd(),
-    split = { orientation: "H", size: 0.50 },
+    split = { orientation: "H", size: 0.5 },
   } = opts;
 
   const safeTitle = sanitizeWindowTitle(title);
   const safeCwd = sanitizeWorkingDirectory(cwd);
   const orientation = split?.orientation === "V" ? "V" : "H";
-  const size = Number.isFinite(split?.size) ? Math.min(0.8, Math.max(0.2, split.size)) : 0.50;
-  const baseArgs = ["--profile", "triflux", "--title", safeTitle, "-d", safeCwd, "--", spec.command, ...spec.args];
-  const args = mode === "split"
-    ? ["-w", "0", "sp", `-${orientation}`, "-s", String(size), ...baseArgs]
-    : mode === "tab"
-      ? ["-w", "0", "nt", ...baseArgs]
-      : ["-w", "new", ...baseArgs];
+  const size = Number.isFinite(split?.size)
+    ? Math.min(0.8, Math.max(0.2, split.size))
+    : 0.5;
+  const baseArgs = [
+    "--profile",
+    "triflux",
+    "--title",
+    safeTitle,
+    "-d",
+    safeCwd,
+    "--",
+    spec.command,
+    ...spec.args,
+  ];
+  const args =
+    mode === "split"
+      ? ["-w", "0", "sp", `-${orientation}`, "-s", String(size), ...baseArgs]
+      : mode === "tab"
+        ? ["-w", "0", "nt", ...baseArgs]
+        : ["-w", "new", ...baseArgs];
 
   const child = spawn("wt.exe", args, {
     detached: true,
@@ -78,7 +98,8 @@ export function focusManagedPane(target, opts = {}) {
 
   if (!paneRef) return false;
   try {
-    if (detectMultiplexer() === "psmux") psmuxExec(["select-pane", "-t", paneRef]);
+    if (detectMultiplexer() === "psmux")
+      psmuxExec(["select-pane", "-t", paneRef]);
     else tmuxExec(`select-pane -t ${paneRef}`);
     return true;
   } catch {
@@ -87,12 +108,7 @@ export function focusManagedPane(target, opts = {}) {
 }
 
 export function openHeadlessDashboardTarget(sessionName, opts = {}) {
-  const {
-    worker = null,
-    openAll = false,
-    cwd = process.cwd(),
-    title,
-  } = opts;
+  const { worker = null, openAll = false, cwd = process.cwd(), title } = opts;
 
   const safeSession = sanitizeSessionName(sessionName);
   const workerNumber = worker == null ? null : parseWorkerNumber(worker);
@@ -136,12 +152,16 @@ export function openDashboardRuntimeTarget(runtime, opts = {}) {
     });
   }
 
-  if ((teammateMode === "wt" || String(targetPane).startsWith("wt:")) && !openAll) {
+  if (
+    (teammateMode === "wt" || String(targetPane).startsWith("wt:")) &&
+    !openAll
+  ) {
     return focusManagedPane(targetPane, { teammateMode: "wt", layout });
   }
 
   try {
-    if (!openAll && targetPane) focusManagedPane(targetPane, { teammateMode, layout });
+    if (!openAll && targetPane)
+      focusManagedPane(targetPane, { teammateMode, layout });
     return spawnWindowsTerminal(resolveAttachCommand(sessionName), {
       mode: decideDashboardOpenMode({ openAll }),
       title: title || `▲ ${sanitizeSessionName(sessionName)}`,

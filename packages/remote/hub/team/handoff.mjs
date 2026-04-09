@@ -44,8 +44,7 @@ Rules:
 /**
  * CLI 프롬프트 길이 제한을 고려한 축약 HANDOFF 지시
  */
-export const HANDOFF_INSTRUCTION_SHORT =
-`After completing, output this block at the end:
+export const HANDOFF_INSTRUCTION_SHORT = `After completing, output this block at the end:
 --- HANDOFF ---
 status: ok | partial | failed
 lead_action: accept | needs_read | retry | reassign
@@ -71,13 +70,20 @@ export function parseHandoff(rawText) {
   const endIdx = rest.indexOf("\n---");
   const block = endIdx === -1 ? rest : rest.slice(0, endIdx);
 
-  const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = block
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
   const parsed = {};
 
   for (const line of lines) {
     const colonIdx = line.indexOf(":");
     if (colonIdx === -1) continue;
-    const key = line.slice(0, colonIdx).trim().toLowerCase().replace(/\s+/g, "_");
+    const key = line
+      .slice(0, colonIdx)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
     const value = line.slice(colonIdx + 1).trim();
     if (key && value) parsed[key] = value;
   }
@@ -169,14 +175,18 @@ export function validateHandoff(parsed, context = {}) {
   if (h.status === "failed" || h.status === "partial") {
     if (h.error_stage) {
       const v = validateEnum(h.error_stage, ERROR_STAGE_VALUES);
-      if (!v) { warnings.push(`error_stage: "${h.error_stage}" invalid`); delete h.error_stage; }
-      else h.error_stage = v;
+      if (!v) {
+        warnings.push(`error_stage: "${h.error_stage}" invalid`);
+        delete h.error_stage;
+      } else h.error_stage = v;
     }
     for (const f of ["retryable", "partial_output"]) {
       if (h[f]) {
         const v = validateEnum(h[f], YES_NO);
-        if (!v) { warnings.push(`${f}: "${h[f]}" invalid`); delete h[f]; }
-        else h[f] = v;
+        if (!v) {
+          warnings.push(`${f}: "${h[f]}" invalid`);
+          delete h[f];
+        } else h[f] = v;
       }
     }
   }
@@ -204,7 +214,9 @@ export function validateHandoff(parsed, context = {}) {
       const rest = h.files_changed.length - 3;
       h.files_changed = [...h.files_changed.slice(0, 3), `+${rest} more`];
     }
-    warnings.push(`token cap exceeded (${tokens} > ${TOKEN_HARD_CAP}), trimmed`);
+    warnings.push(
+      `token cap exceeded (${tokens} > ${TOKEN_HARD_CAP}), trimmed`,
+    );
   }
 
   const missingCore = coreRequired.filter((f) => !h[f]);
@@ -232,10 +244,12 @@ export function buildFallbackHandoff(exitCode, resultFile, cli) {
     confidence: "low",
     risk: "low",
     detail: resultFile || "none",
-    ...(ok ? {} : {
-      error_stage: exitCode === 124 ? "timeout" : "execution",
-      retryable: exitCode === 124 ? "no" : "yes",
-    }),
+    ...(ok
+      ? {}
+      : {
+          error_stage: exitCode === 124 ? "timeout" : "execution",
+          retryable: exitCode === 124 ? "no" : "yes",
+        }),
     _fallback: true,
   };
 }
@@ -248,8 +262,10 @@ export function buildFallbackHandoff(exitCode, resultFile, cli) {
 export function formatHandoffForLead(handoff) {
   const h = handoff;
   const files = Array.isArray(h.files_changed)
-    ? (h.files_changed.length > 0 ? h.files_changed.join(", ") : "none")
-    : (h.files_changed || "none");
+    ? h.files_changed.length > 0
+      ? h.files_changed.join(", ")
+      : "none"
+    : h.files_changed || "none";
 
   const lines = [
     `[HANDOFF] status=${h.status || "?"} action=${h.lead_action || "?"} confidence=${h.confidence || "?"}`,

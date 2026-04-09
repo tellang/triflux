@@ -9,9 +9,16 @@
  *   node token-snapshot.mjs report <session-id|all>
  */
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, statSync } from "node:fs";
-import { join, dirname } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HOME = homedir();
@@ -25,13 +32,13 @@ const PRICING = {
   claude_sonnet: { input: 3, output: 15 },
   claude_opus: { input: 15, output: 75 },
   codex: { input: 0, output: 0 },
-  gemini_flash: { input: 0.10, output: 0.40 },
+  gemini_flash: { input: 0.1, output: 0.4 },
 };
 
 // Claude 캐시 가격 ($/MTok) — 오케스트레이션 비용 정밀 계산용
 const CLAUDE_CACHE_PRICING = {
-  claude_sonnet: { cache_write: 3.75, cache_read: 0.30 },
-  claude_opus: { cache_write: 18.75, cache_read: 1.50 },
+  claude_sonnet: { cache_write: 3.75, cache_read: 0.3 },
+  claude_opus: { cache_write: 18.75, cache_read: 1.5 },
 };
 
 // 에이전트 → Claude 대체 모델
@@ -62,15 +69,20 @@ const CLI_COST_MAP = {
 // ── 유틸리티 ──
 function readJson(filePath, fallback = null) {
   if (!existsSync(filePath)) return fallback;
-  try { return JSON.parse(readFileSync(filePath, "utf-8")); }
-  catch { return fallback; }
+  try {
+    return JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch {
+    return fallback;
+  }
 }
 
 function writeJsonSafe(filePath, data) {
   try {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, JSON.stringify(data, null, 2));
-  } catch (e) { console.error(`[token-snapshot] 쓰기 실패: ${e.message}`); }
+  } catch (e) {
+    console.error(`[token-snapshot] 쓰기 실패: ${e.message}`);
+  }
 }
 
 function formatTokenCount(n) {
@@ -85,7 +97,9 @@ function formatCost(dollars) {
 }
 
 function calcCost(tokens, pricing) {
-  return (tokens.input * pricing.input + tokens.output * pricing.output) / 1_000_000;
+  return (
+    (tokens.input * pricing.input + tokens.output * pricing.output) / 1_000_000
+  );
 }
 
 // ── Codex 세션 스캔 ──
@@ -107,8 +121,11 @@ function scanCodexSessions() {
     if (!existsSync(dayDir)) continue;
 
     let files;
-    try { files = readdirSync(dayDir).filter(f => f.endsWith(".jsonl")); }
-    catch { continue; }
+    try {
+      files = readdirSync(dayDir).filter((f) => f.endsWith(".jsonl"));
+    } catch {
+      continue;
+    }
 
     for (const file of files) {
       const filepath = join(dayDir, file);
@@ -124,18 +141,31 @@ function scanCodexSessions() {
               sessions[filepath] = {
                 input: t.input_tokens || t.input || 0,
                 output: t.output_tokens || t.output || 0,
-                total: t.total_tokens || t.total || ((t.input_tokens || t.input || 0) + (t.output_tokens || t.output || 0)),
+                total:
+                  t.total_tokens ||
+                  t.total ||
+                  (t.input_tokens || t.input || 0) +
+                    (t.output_tokens || t.output || 0),
                 timestamp: evt.timestamp || stat.mtimeMs,
               };
               break;
             }
-          } catch { /* 라인 파싱 실패 */ }
+          } catch {
+            /* 라인 파싱 실패 */
+          }
         }
         // 토큰 이벤트 없는 파일도 기록 (존재 추적용)
         if (!sessions[filepath]) {
-          sessions[filepath] = { input: 0, output: 0, total: 0, timestamp: stat.mtimeMs };
+          sessions[filepath] = {
+            input: 0,
+            output: 0,
+            total: 0,
+            timestamp: stat.mtimeMs,
+          };
         }
-      } catch { /* 파일 읽기 실패 */ }
+      } catch {
+        /* 파일 읽기 실패 */
+      }
     }
   }
   return sessions;
@@ -155,14 +185,19 @@ function scanGeminiSessions() {
       if (!existsSync(chatsDir)) continue;
 
       let files;
-      try { files = readdirSync(chatsDir).filter(f => f.endsWith(".json")); }
-      catch { continue; }
+      try {
+        files = readdirSync(chatsDir).filter((f) => f.endsWith(".json"));
+      } catch {
+        continue;
+      }
 
       for (const file of files) {
         const filepath = join(chatsDir, file);
         try {
           const data = JSON.parse(readFileSync(filepath, "utf-8"));
-          let input = 0, output = 0, model = "unknown";
+          let input = 0,
+            output = 0,
+            model = "unknown";
           for (const msg of data.messages || []) {
             if (msg.tokens) {
               input += msg.tokens.input || 0;
@@ -171,13 +206,20 @@ function scanGeminiSessions() {
             if (msg.model) model = msg.model;
           }
           sessions[filepath] = {
-            input, output, total: input + output,
-            model, lastUpdated: data.lastUpdated || null,
+            input,
+            output,
+            total: input + output,
+            model,
+            lastUpdated: data.lastUpdated || null,
           };
-        } catch { /* 무시 */ }
+        } catch {
+          /* 무시 */
+        }
       }
     }
-  } catch { /* 무시 */ }
+  } catch {
+    /* 무시 */
+  }
   return sessions;
 }
 
@@ -193,12 +235,19 @@ function scanClaudeSessions() {
     for (const proj of projects) {
       const projDir = join(projectsDir, proj);
       let stat;
-      try { stat = statSync(projDir); } catch { continue; }
+      try {
+        stat = statSync(projDir);
+      } catch {
+        continue;
+      }
       if (!stat.isDirectory()) continue;
 
       let files;
-      try { files = readdirSync(projDir).filter(f => f.endsWith(".jsonl")); }
-      catch { continue; }
+      try {
+        files = readdirSync(projDir).filter((f) => f.endsWith(".jsonl"));
+      } catch {
+        continue;
+      }
 
       for (const file of files) {
         const filepath = join(projDir, file);
@@ -231,11 +280,16 @@ function scanClaudeSessions() {
                 cache_creation: msg.usage.cache_creation_input_tokens || 0,
                 cache_read: msg.usage.cache_read_input_tokens || 0,
               };
-            } catch { /* 라인 파싱 실패 */ }
+            } catch {
+              /* 라인 파싱 실패 */
+            }
           }
 
           // requestId별 usage 합산
-          let input = 0, output = 0, cache_creation = 0, cache_read = 0;
+          let input = 0,
+            output = 0,
+            cache_creation = 0,
+            cache_read = 0;
           for (const u of Object.values(reqUsage)) {
             input += u.input;
             output += u.output;
@@ -246,16 +300,24 @@ function scanClaudeSessions() {
           const total = input + output + cache_creation + cache_read;
           if (total > 0) {
             sessions[filepath] = {
-              input, output, cache_creation, cache_read,
-              total, model,
+              input,
+              output,
+              cache_creation,
+              cache_read,
+              total,
+              model,
               timestamp: fileStat.mtimeMs,
               requests: Object.keys(reqUsage).length,
             };
           }
-        } catch { /* 파일 읽기 실패 */ }
+        } catch {
+          /* 파일 읽기 실패 */
+        }
       }
     }
-  } catch { /* 무시 */ }
+  } catch {
+    /* 무시 */
+  }
   return sessions;
 }
 
@@ -283,9 +345,15 @@ function takeSnapshot(label) {
   const outPath = join(SNAPSHOTS_DIR, `${label}.json`);
   writeJsonSafe(outPath, snapshot);
   console.log(`[snapshot] ${label} 저장 완료`);
-  console.log(`  Codex: ${snapshot.summary.codex_files}파일, ${formatTokenCount(snapshot.summary.codex_total)} tokens`);
-  console.log(`  Gemini: ${snapshot.summary.gemini_files}파일, ${formatTokenCount(snapshot.summary.gemini_total)} tokens`);
-  console.log(`  Claude: ${snapshot.summary.claude_files}파일, ${formatTokenCount(snapshot.summary.claude_total)} tokens`);
+  console.log(
+    `  Codex: ${snapshot.summary.codex_files}파일, ${formatTokenCount(snapshot.summary.codex_total)} tokens`,
+  );
+  console.log(
+    `  Gemini: ${snapshot.summary.gemini_files}파일, ${formatTokenCount(snapshot.summary.gemini_total)} tokens`,
+  );
+  console.log(
+    `  Claude: ${snapshot.summary.claude_files}파일, ${formatTokenCount(snapshot.summary.claude_total)} tokens`,
+  );
   return snapshot;
 }
 
@@ -298,12 +366,23 @@ function computeDiff(preLabel, postLabel, options = {}) {
     process.exit(1);
   }
 
-  const delta = { codex: {}, gemini: {}, claude: {}, total: { input: 0, output: 0, total: 0 } };
+  const delta = {
+    codex: {},
+    gemini: {},
+    claude: {},
+    total: { input: 0, output: 0, total: 0 },
+  };
 
   // Claude diff — 오케스트레이션 오버헤드 측정
   const preClaude = pre.claude || {};
   const postClaude = post.claude || {};
-  const claudeOverhead = { input: 0, output: 0, cache_creation: 0, cache_read: 0, total: 0 };
+  const claudeOverhead = {
+    input: 0,
+    output: 0,
+    cache_creation: 0,
+    cache_read: 0,
+    total: 0,
+  };
   for (const [fp, postData] of Object.entries(postClaude)) {
     const preData = preClaude[fp];
     if (!preData) {
@@ -319,7 +398,8 @@ function computeDiff(preLabel, postLabel, options = {}) {
       const d = {
         input: (postData.input || 0) - (preData.input || 0),
         output: (postData.output || 0) - (preData.output || 0),
-        cache_creation: (postData.cache_creation || 0) - (preData.cache_creation || 0),
+        cache_creation:
+          (postData.cache_creation || 0) - (preData.cache_creation || 0),
         cache_read: (postData.cache_read || 0) - (preData.cache_read || 0),
         total: postData.total - preData.total,
         type: "increased",
@@ -389,7 +469,10 @@ function computeDiff(preLabel, postLabel, options = {}) {
   const savings = estimateSavings(delta.total, agent, cli, claudeOverhead);
 
   const result = {
-    preLabel, postLabel, agent, cli,
+    preLabel,
+    postLabel,
+    agent,
+    cli,
     timestamp: new Date().toISOString(),
     delta,
     savings,
@@ -400,7 +483,12 @@ function computeDiff(preLabel, postLabel, options = {}) {
 
   // 누적 절약액 업데이트 (HUD ts: 표시용)
   const accPath = join(STATE_DIR, "savings-total.json");
-  const acc = readJson(accPath, { totalSaved: 0, totalClaudeCost: 0, totalActualCost: 0, diffCount: 0 });
+  const acc = readJson(accPath, {
+    totalSaved: 0,
+    totalClaudeCost: 0,
+    totalActualCost: 0,
+    diffCount: 0,
+  });
   acc.totalSaved += savings.saved;
   acc.totalClaudeCost += savings.claudeCost;
   acc.totalActualCost += savings.actualCost;
@@ -410,10 +498,16 @@ function computeDiff(preLabel, postLabel, options = {}) {
 
   console.log(`[diff] ${preLabel} → ${postLabel}`);
   console.log(`  Agent: ${agent} (${cli})`);
-  console.log(`  외부 CLI 토큰: ${formatTokenCount(delta.total.input)} input, ${formatTokenCount(delta.total.output)} output`);
-  console.log(`  Claude 오케스트레이션: ${formatTokenCount(claudeOverhead.total)} tokens (오버헤드 ${formatCost(savings.overheadCost)})`);
+  console.log(
+    `  외부 CLI 토큰: ${formatTokenCount(delta.total.input)} input, ${formatTokenCount(delta.total.output)} output`,
+  );
+  console.log(
+    `  Claude 오케스트레이션: ${formatTokenCount(claudeOverhead.total)} tokens (오버헤드 ${formatCost(savings.overheadCost)})`,
+  );
   console.log(`  Claude-only 비용(추정): ${formatCost(savings.claudeCost)}`);
-  console.log(`  실제 비용: ${formatCost(savings.actualCost)} (외부 CLI ${formatCost(savings.cliCost)} + 오케스트레이션 ${formatCost(savings.overheadCost)})`);
+  console.log(
+    `  실제 비용: ${formatCost(savings.actualCost)} (외부 CLI ${formatCost(savings.cliCost)} + 오케스트레이션 ${formatCost(savings.overheadCost)})`,
+  );
   console.log(`  순절약: ${formatCost(savings.saved)}`);
   return result;
 }
@@ -440,9 +534,12 @@ function estimateSavings(tokens, agent, cli, claudeOverhead = null) {
       claudePricing,
     );
     // 캐시 비용 (cache_creation은 write 가격, cache_read는 read 가격)
-    const cachePricing = CLAUDE_CACHE_PRICING[claudeModel] || CLAUDE_CACHE_PRICING.claude_sonnet;
-    overheadCost += (claudeOverhead.cache_creation * cachePricing.cache_write) / 1_000_000;
-    overheadCost += (claudeOverhead.cache_read * cachePricing.cache_read) / 1_000_000;
+    const cachePricing =
+      CLAUDE_CACHE_PRICING[claudeModel] || CLAUDE_CACHE_PRICING.claude_sonnet;
+    overheadCost +=
+      (claudeOverhead.cache_creation * cachePricing.cache_write) / 1_000_000;
+    overheadCost +=
+      (claudeOverhead.cache_read * cachePricing.cache_read) / 1_000_000;
   }
 
   // 실제 총비용 = 외부 CLI 비용 + Claude 오케스트레이션 비용
@@ -468,7 +565,7 @@ function generateReport(sessionId) {
     process.exit(1);
   }
 
-  const files = readdirSync(DIFFS_DIR).filter(f => f.endsWith(".json"));
+  const files = readdirSync(DIFFS_DIR).filter((f) => f.endsWith(".json"));
   const diffs = [];
   for (const file of files) {
     const data = readJson(join(DIFFS_DIR, file));
@@ -483,7 +580,10 @@ function generateReport(sessionId) {
     return null;
   }
 
-  let totalClaudeCost = 0, totalActualCost = 0, totalSaved = 0, totalOverhead = 0;
+  let totalClaudeCost = 0,
+    totalActualCost = 0,
+    totalSaved = 0,
+    totalOverhead = 0;
   const rows = diffs.map((d, i) => {
     const s = d.savings;
     totalClaudeCost += s.claudeCost;
@@ -509,11 +609,17 @@ function generateReport(sessionId) {
   const reportData = {
     sessionId,
     timestamp: new Date().toISOString(),
-    diffs: diffs.map(d => ({
-      ...d.savings, agent: d.agent, cli: d.cli,
+    diffs: diffs.map((d) => ({
+      ...d.savings,
+      agent: d.agent,
+      cli: d.cli,
       labels: `${d.preLabel}→${d.postLabel}`,
     })),
-    totals: { claudeCost: totalClaudeCost, actualCost: totalActualCost, saved: totalSaved },
+    totals: {
+      claudeCost: totalClaudeCost,
+      actualCost: totalActualCost,
+      saved: totalSaved,
+    },
     markdown: report,
   };
   writeJsonSafe(join(REPORTS_DIR, `${sessionId}.json`), reportData);
@@ -521,48 +627,62 @@ function generateReport(sessionId) {
 }
 
 // ── Named exports (파이프라인 벤치마크 훅용) ──
-export { takeSnapshot, computeDiff, estimateSavings, formatTokenCount, formatCost, DIFFS_DIR, STATE_DIR };
+export {
+  computeDiff,
+  DIFFS_DIR,
+  estimateSavings,
+  formatCost,
+  formatTokenCount,
+  STATE_DIR,
+  takeSnapshot,
+};
 
 // ── CLI 핸들러 (직접 실행 시에만) ──
 const __filename = fileURLToPath(import.meta.url);
-const isDirectRun = process.argv[1] && join(dirname(process.argv[1])) === dirname(__filename)
-  && process.argv[1].endsWith("token-snapshot.mjs");
+const isDirectRun =
+  process.argv[1] &&
+  join(dirname(process.argv[1])) === dirname(__filename) &&
+  process.argv[1].endsWith("token-snapshot.mjs");
 
 if (!isDirectRun) {
   // imported as module — skip CLI
 } else {
+  const [, , command, ...args] = process.argv;
 
-const [,, command, ...args] = process.argv;
-
-switch (command) {
-  case "snapshot": {
-    const label = args[0];
-    if (!label) { console.error("사용법: token-snapshot.mjs snapshot <label>"); process.exit(1); }
-    takeSnapshot(label);
-    break;
-  }
-  case "diff": {
-    const [preLabel, postLabel, ...rest] = args;
-    if (!preLabel || !postLabel) {
-      console.error("사용법: token-snapshot.mjs diff <pre> <post> [--agent X] [--cli Y] [--id Z]");
-      process.exit(1);
+  switch (command) {
+    case "snapshot": {
+      const label = args[0];
+      if (!label) {
+        console.error("사용법: token-snapshot.mjs snapshot <label>");
+        process.exit(1);
+      }
+      takeSnapshot(label);
+      break;
     }
-    const options = {};
-    for (let i = 0; i < rest.length; i++) {
-      if (rest[i] === "--agent" && rest[i + 1]) options.agent = rest[++i];
-      else if (rest[i] === "--cli" && rest[i + 1]) options.cli = rest[++i];
-      else if (rest[i] === "--id" && rest[i + 1]) options.id = rest[++i];
+    case "diff": {
+      const [preLabel, postLabel, ...rest] = args;
+      if (!preLabel || !postLabel) {
+        console.error(
+          "사용법: token-snapshot.mjs diff <pre> <post> [--agent X] [--cli Y] [--id Z]",
+        );
+        process.exit(1);
+      }
+      const options = {};
+      for (let i = 0; i < rest.length; i++) {
+        if (rest[i] === "--agent" && rest[i + 1]) options.agent = rest[++i];
+        else if (rest[i] === "--cli" && rest[i + 1]) options.cli = rest[++i];
+        else if (rest[i] === "--id" && rest[i + 1]) options.id = rest[++i];
+      }
+      computeDiff(preLabel, postLabel, options);
+      break;
     }
-    computeDiff(preLabel, postLabel, options);
-    break;
-  }
-  case "report": {
-    const sessionId = args[0] || "all";
-    generateReport(sessionId);
-    break;
-  }
-  default:
-    console.log(`cx-auto Token Savings Tracker
+    case "report": {
+      const sessionId = args[0] || "all";
+      generateReport(sessionId);
+      break;
+    }
+    default:
+      console.log(`cx-auto Token Savings Tracker
 
 사용법:
   node token-snapshot.mjs snapshot <label>     스냅샷 캡처
@@ -570,6 +690,5 @@ switch (command) {
     [--agent <agent>] [--cli <cli>] [--id <id>]
   node token-snapshot.mjs report <session-id>  종합 보고서 생성
     (session-id 대신 "all"로 전체 보고서)`);
-}
-
+  }
 } // end isDirectRun guard

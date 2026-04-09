@@ -1,13 +1,13 @@
 // tests/unit/tui-remote-adapter.test.mjs — tui-remote-adapter.mjs 유닛 테스트
-import { describe, it, beforeEach, afterEach } from "node:test";
-import assert from "node:assert/strict";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { EventEmitter } from "node:events";
 
-import { createRemoteAdapter } from "../../hub/team/tui-remote-adapter.mjs";
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { STATES } from "../../hub/team/conductor.mjs";
+import { createRemoteAdapter } from "../../hub/team/tui-remote-adapter.mjs";
 
 // ── 헬퍼 ────────────────────────────────────────────────────────────────────
 
@@ -29,10 +29,14 @@ function mockConductor(snapshots = []) {
   let currentSnapshots = snapshots;
   return {
     getSnapshot: () => [...currentSnapshots],
-    setSnapshots(next) { currentSnapshots = next; },
+    setSnapshots(next) {
+      currentSnapshots = next;
+    },
     on: emitter.on.bind(emitter),
     off: emitter.off.bind(emitter),
-    emitStateChange(payload) { emitter.emit("stateChange", payload); },
+    emitStateChange(payload) {
+      emitter.emit("stateChange", payload);
+    },
   };
 }
 
@@ -41,13 +45,24 @@ function mockWatcher(sessions = {}) {
   const emitter = new EventEmitter();
   let currentStatus = { sessions, running: true };
   return {
-    getStatus: () => ({ ...currentStatus, sessions: { ...currentStatus.sessions } }),
-    setStatus(next) { currentStatus = next; },
+    getStatus: () => ({
+      ...currentStatus,
+      sessions: { ...currentStatus.sessions },
+    }),
+    setStatus(next) {
+      currentStatus = next;
+    },
     on: emitter.on.bind(emitter),
     off: emitter.off.bind(emitter),
-    emitCompleted(payload) { emitter.emit("sessionCompleted", payload); },
-    emitFailed(payload) { emitter.emit("sessionFailed", payload); },
-    emitInputWait(payload) { emitter.emit("sessionInputWait", payload); },
+    emitCompleted(payload) {
+      emitter.emit("sessionCompleted", payload);
+    },
+    emitFailed(payload) {
+      emitter.emit("sessionFailed", payload);
+    },
+    emitInputWait(payload) {
+      emitter.emit("sessionInputWait", payload);
+    },
   };
 }
 
@@ -55,7 +70,10 @@ function mockWatcher(sessions = {}) {
 function mockNotifier() {
   const calls = [];
   return {
-    notify(event) { calls.push({ ...event }); return Promise.resolve(); },
+    notify(event) {
+      calls.push({ ...event });
+      return Promise.resolve();
+    },
     calls,
   };
 }
@@ -103,7 +121,11 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  try {
+    rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* ignore */
+  }
 });
 
 // ── 1. 생성 + 라이프사이클 ──────────────────────────────────────────────────
@@ -218,9 +240,7 @@ describe("tui-remote-adapter: sshUser", () => {
   });
 
   it("호스트 미등록 시 sshUser=null", () => {
-    const conductor = mockConductor([
-      remoteSnapshot({ host: "unknown-host" }),
-    ]);
+    const conductor = mockConductor([remoteSnapshot({ host: "unknown-host" })]);
     const adapter = createRemoteAdapter({
       conductor,
       hostsJsonPath: hostsPath,
@@ -381,7 +401,15 @@ describe("tui-remote-adapter: conductor → notify 이벤트 변환", () => {
 
   it("비-원격 세션의 stateChange는 무시", () => {
     const conductor = mockConductor([
-      { id: "local-session", agent: "codex", state: STATES.COMPLETED, remote: false, host: null, restarts: 0, health: null },
+      {
+        id: "local-session",
+        agent: "codex",
+        state: STATES.COMPLETED,
+        remote: false,
+        host: null,
+        restarts: 0,
+        health: null,
+      },
     ]);
     const notifier = mockNotifier();
     const adapter = createRemoteAdapter({
@@ -409,7 +437,7 @@ describe("tui-remote-adapter: conductor → notify 이벤트 변환", () => {
 
 describe("tui-remote-adapter: watcher supplemental 이벤트", () => {
   it("conductor 미등록 세션의 sessionCompleted → notify", () => {
-    const conductor = mockConductor([]);  // conductor에 없음
+    const conductor = mockConductor([]); // conductor에 없음
     const watcher = mockWatcher({});
     const notifier = mockNotifier();
     const adapter = createRemoteAdapter({
@@ -448,7 +476,11 @@ describe("tui-remote-adapter: watcher supplemental 이벤트", () => {
     });
     adapter.start();
 
-    watcher.emitCompleted({ sessionName: sessionId, exitCode: 0, host: "ultra4" });
+    watcher.emitCompleted({
+      sessionName: sessionId,
+      exitCode: 0,
+      host: "ultra4",
+    });
 
     assert.equal(notifier.calls.length, 0);
 
@@ -638,7 +670,9 @@ describe("tui-remote-adapter: notify 실패 허용", () => {
       remoteSnapshot({ id: sessionId, state: STATES.COMPLETED }),
     ]);
     const badNotifier = {
-      notify() { throw new Error("toast failed"); },
+      notify() {
+        throw new Error("toast failed");
+      },
     };
     const adapter = createRemoteAdapter({
       conductor,

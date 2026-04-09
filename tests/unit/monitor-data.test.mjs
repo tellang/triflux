@@ -1,9 +1,9 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { join } from "node:path";
+import { describe, it } from "node:test";
 
-import { pollAgents, fetchHubStatus } from "../../tui/monitor-data.mjs";
+import { fetchHubStatus, pollAgents } from "../../tui/monitor-data.mjs";
 
 // fs mock 의존성을 쉽게 만들기 위한 헬퍼다.
 function makeFsDeps(overrides = {}) {
@@ -63,27 +63,36 @@ describe("pollAgents", () => {
   it("파일이 있으면 살아있는 에이전트 목록과 elapsed를 반환한다", () => {
     const env = { TMPDIR: "C:/temp" };
     const filePath = join(env.TMPDIR, "tfx-agent-101.json");
-    const agents = pollAgents(makeFsDeps({
-      env,
-      now: () => 25_000_000,
-      readdirSync: (dir) => {
-        assert.equal(dir, env.TMPDIR);
-        return ["tfx-agent-101.json", "ignore.txt"];
-      },
-      readFileSync: (target) => {
-        assert.equal(target, filePath);
-        return JSON.stringify({ pid: 101, cli: "codex", agent: "worker-a", started: 5_000 });
-      },
-    }));
+    const agents = pollAgents(
+      makeFsDeps({
+        env,
+        now: () => 25_000_000,
+        readdirSync: (dir) => {
+          assert.equal(dir, env.TMPDIR);
+          return ["tfx-agent-101.json", "ignore.txt"];
+        },
+        readFileSync: (target) => {
+          assert.equal(target, filePath);
+          return JSON.stringify({
+            pid: 101,
+            cli: "codex",
+            agent: "worker-a",
+            started: 5_000,
+          });
+        },
+      }),
+    );
 
-    assert.deepEqual(agents, [{
-      pid: 101,
-      cli: "codex",
-      agent: "worker-a",
-      started: 5_000,
-      elapsed: 20_000,
-      alive: true,
-    }]);
+    assert.deepEqual(agents, [
+      {
+        pid: 101,
+        cli: "codex",
+        agent: "worker-a",
+        started: 5_000,
+        elapsed: 20_000,
+        alive: true,
+      },
+    ]);
   });
 
   it("파일이 없으면 빈 배열을 반환한다", () => {
@@ -93,11 +102,15 @@ describe("pollAgents", () => {
 
   it("JSON이 깨진 파일은 무시한다", () => {
     let killCalled = false;
-    const agents = pollAgents(makeFsDeps({
-      readdirSync: () => ["tfx-agent-bad.json"],
-      readFileSync: () => "{broken-json",
-      kill: () => { killCalled = true; },
-    }));
+    const agents = pollAgents(
+      makeFsDeps({
+        readdirSync: () => ["tfx-agent-bad.json"],
+        readFileSync: () => "{broken-json",
+        kill: () => {
+          killCalled = true;
+        },
+      }),
+    );
 
     assert.deepEqual(agents, []);
     assert.equal(killCalled, false);
@@ -108,8 +121,11 @@ describe("pollAgents", () => {
     const deps = makeFsDeps({
       env: { TMPDIR: "/tmp/test" },
       readdirSync: () => ["tfx-agent-dead.json"],
-      readFileSync: () => JSON.stringify({ pid: 404, cli: "claude", agent: "ghost", started: 1 }),
-      kill: () => { throw new Error("ESRCH"); },
+      readFileSync: () =>
+        JSON.stringify({ pid: 404, cli: "claude", agent: "ghost", started: 1 }),
+      kill: () => {
+        throw new Error("ESRCH");
+      },
       unlinkSync: (target) => removed.push(target),
     });
 
@@ -124,12 +140,19 @@ describe("fetchHubStatus", () => {
     const get = makeOnlineGet({ uptime: 12, queueDepth: 3, agents: 7 });
     const status = await fetchHubStatus("http://127.0.0.1:27888", { get });
 
-    assert.deepEqual(status, { online: true, uptime: 12, queueDepth: 3, agents: 7 });
+    assert.deepEqual(status, {
+      online: true,
+      uptime: 12,
+      queueDepth: 3,
+      agents: 7,
+    });
     assert.deepEqual(get.calls, ["http://127.0.0.1:27888/status"]);
   });
 
   it("offline 또는 요청 실패면 online=false를 반환한다", async () => {
-    const status = await fetchHubStatus("http://127.0.0.1:27888", { get: makeOfflineGet() });
+    const status = await fetchHubStatus("http://127.0.0.1:27888", {
+      get: makeOfflineGet(),
+    });
     assert.deepEqual(status, { online: false });
   });
 });

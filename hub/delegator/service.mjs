@@ -1,11 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from "node:crypto";
 
 import {
   DELEGATOR_JOB_STATUSES,
   DELEGATOR_MODES,
   DELEGATOR_PROVIDERS,
-} from './contracts.mjs';
-import { getDelegatorMcpToolDefinitions } from './tool-definitions.mjs';
+} from "./contracts.mjs";
+import { getDelegatorMcpToolDefinitions } from "./tool-definitions.mjs";
 
 function deepClone(value) {
   if (value == null) return value;
@@ -39,28 +39,28 @@ export class DelegatorService {
   createJobSnapshot(input = {}) {
     const timestamp = this.now().toISOString();
     const jobId = input.job_id || this.idFactory();
-    const mode = input.mode || 'sync';
-    const providerRequested = input.provider || 'auto';
+    const mode = input.mode || "sync";
+    const providerRequested = input.provider || "auto";
 
-    assertKnown(DELEGATOR_MODES, mode, 'mode');
-    assertKnown(DELEGATOR_PROVIDERS, providerRequested, 'provider');
+    assertKnown(DELEGATOR_MODES, mode, "mode");
+    assertKnown(DELEGATOR_PROVIDERS, providerRequested, "provider");
 
     return {
       ok: true,
       job_id: jobId,
-      status: 'queued',
+      status: "queued",
       mode,
       provider_requested: providerRequested,
       provider_resolved: null,
-      agent_type: input.agent_type || 'executor',
-      transport: 'resident-pending',
+      agent_type: input.agent_type || "executor",
+      transport: "resident-pending",
       created_at: timestamp,
       started_at: null,
       updated_at: timestamp,
       completed_at: null,
-      output: '',
-      stderr: '',
-      error: '',
+      output: "",
+      stderr: "",
+      error: "",
       thread_id: input.thread_id || null,
       session_key: input.session_key || null,
       conversation_open: false,
@@ -69,9 +69,9 @@ export class DelegatorService {
 
   recordJob(snapshot) {
     if (!snapshot?.job_id) {
-      throw new Error('job_id is required');
+      throw new Error("job_id is required");
     }
-    assertKnown(DELEGATOR_JOB_STATUSES, snapshot.status, 'status');
+    assertKnown(DELEGATOR_JOB_STATUSES, snapshot.status, "status");
     this.jobs.set(snapshot.job_id, deepClone(snapshot));
     return this.getStatusSnapshot(snapshot.job_id);
   }
@@ -86,19 +86,20 @@ export class DelegatorService {
   _normalizeInput(input = {}) {
     return {
       prompt: input.prompt,
-      provider: input.provider || 'auto',
-      mode: input.mode || 'sync',
-      agent_type: input.agent_type || input.agentType || 'executor',
+      provider: input.provider || "auto",
+      mode: input.mode || "sync",
+      agent_type: input.agent_type || input.agentType || "executor",
       cwd: input.cwd || null,
       timeout_ms: input.timeout_ms || input.timeoutMs || null,
       session_key: input.session_key || input.sessionKey || null,
       thread_id: input.thread_id || input.threadId || null,
       reset_session: input.reset_session ?? input.resetSession ?? false,
-      mcp_profile: input.mcp_profile || input.mcpProfile || 'auto',
+      mcp_profile: input.mcp_profile || input.mcpProfile || "auto",
       search_tool: input.search_tool || input.searchTool || null,
       context_file: input.context_file || input.contextFile || null,
       model: input.model || null,
-      developer_instructions: input.developer_instructions || input.developerInstructions || null,
+      developer_instructions:
+        input.developer_instructions || input.developerInstructions || null,
       compact_prompt: input.compact_prompt || input.compactPrompt || null,
     };
   }
@@ -131,18 +132,22 @@ export class DelegatorService {
     const ok = workerResult.ok !== false;
 
     snapshot.ok = ok;
-    snapshot.status = workerResult.status || (ok ? 'completed' : 'failed');
-    snapshot.provider_resolved = workerResult.providerResolved || workerResult.provider_resolved || null;
+    snapshot.status = workerResult.status || (ok ? "completed" : "failed");
+    snapshot.provider_resolved =
+      workerResult.providerResolved || workerResult.provider_resolved || null;
     snapshot.transport = workerResult.transport || snapshot.transport;
-    snapshot.output = workerResult.output || '';
-    snapshot.stderr = workerResult.stderr || '';
-    snapshot.error = workerResult.error || '';
-    snapshot.thread_id = workerResult.threadId || workerResult.thread_id || null;
-    snapshot.session_key = workerResult.sessionKey || workerResult.session_key || null;
-    snapshot.conversation_open = workerResult.conversationOpen ?? workerResult.conversation_open ?? false;
+    snapshot.output = workerResult.output || "";
+    snapshot.stderr = workerResult.stderr || "";
+    snapshot.error = workerResult.error || "";
+    snapshot.thread_id =
+      workerResult.threadId || workerResult.thread_id || null;
+    snapshot.session_key =
+      workerResult.sessionKey || workerResult.session_key || null;
+    snapshot.conversation_open =
+      workerResult.conversationOpen ?? workerResult.conversation_open ?? false;
     snapshot.started_at = snapshot.started_at || timestamp;
     snapshot.updated_at = timestamp;
-    if (snapshot.status === 'completed' || snapshot.status === 'failed') {
+    if (snapshot.status === "completed" || snapshot.status === "failed") {
       snapshot.completed_at = timestamp;
     }
 
@@ -155,7 +160,7 @@ export class DelegatorService {
     if (snapshot) {
       const timestamp = this.now().toISOString();
       snapshot.ok = false;
-      snapshot.status = 'failed';
+      snapshot.status = "failed";
       snapshot.error = error;
       snapshot.updated_at = timestamp;
       snapshot.completed_at = timestamp;
@@ -169,19 +174,19 @@ export class DelegatorService {
     const timestamp = this.now().toISOString();
     return {
       ok: false,
-      job_id: jobId || 'unknown',
-      status: 'failed',
-      mode: 'sync',
-      provider_requested: 'auto',
+      job_id: jobId || "unknown",
+      status: "failed",
+      mode: "sync",
+      provider_requested: "auto",
       provider_resolved: null,
-      agent_type: 'executor',
-      transport: 'resident-pending',
+      agent_type: "executor",
+      transport: "resident-pending",
       created_at: timestamp,
       started_at: null,
       updated_at: timestamp,
       completed_at: timestamp,
-      output: '',
-      stderr: '',
+      output: "",
+      stderr: "",
       error,
       thread_id: null,
       session_key: null,
@@ -194,15 +199,19 @@ export class DelegatorService {
   async delegate(input = {}) {
     const normalized = this._normalizeInput(input);
 
-    if (!normalized.prompt || typeof normalized.prompt !== 'string' || !normalized.prompt.trim()) {
-      return this._errorSnapshot(null, 'prompt is required');
+    if (
+      !normalized.prompt ||
+      typeof normalized.prompt !== "string" ||
+      !normalized.prompt.trim()
+    ) {
+      return this._errorSnapshot(null, "prompt is required");
     }
 
     const snapshot = this.createJobSnapshot(normalized);
     this.recordJob(snapshot);
 
     if (!this.worker) {
-      return this._failJob(snapshot.job_id, 'worker가 설정되지 않았습니다');
+      return this._failJob(snapshot.job_id, "worker가 설정되지 않았습니다");
     }
 
     const workerArgs = this._toWorkerArgs(normalized);
@@ -218,44 +227,53 @@ export class DelegatorService {
 
       return this._applyWorkerResult(snapshot.job_id, workerResult);
     } catch (err) {
-      return this._failJob(snapshot.job_id, err instanceof Error ? err.message : String(err));
+      return this._failJob(
+        snapshot.job_id,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
   async reply(input = {}) {
     const jobId = input.job_id || input.jobId;
     if (!jobId) {
-      return this._errorSnapshot('unknown', 'job_id is required');
+      return this._errorSnapshot("unknown", "job_id is required");
     }
 
     const snapshot = this.jobs.get(jobId);
     if (!snapshot) {
-      return this._errorSnapshot(jobId, 'job not found');
+      return this._errorSnapshot(jobId, "job not found");
     }
 
     if (!snapshot.conversation_open) {
-      return this._failJob(jobId, 'conversation is not open');
+      return this._failJob(jobId, "conversation is not open");
     }
 
     if (!this.worker) {
-      return this._failJob(jobId, 'worker가 설정되지 않았습니다');
+      return this._failJob(jobId, "worker가 설정되지 않았습니다");
     }
 
     const workerJobId = this._workerJobMap.get(jobId);
     if (!workerJobId) {
-      return this._failJob(jobId, 'worker job 매핑을 찾을 수 없습니다');
+      return this._failJob(jobId, "worker job 매핑을 찾을 수 없습니다");
     }
 
     try {
-      const workerResult = await this.worker.reply({
-        job_id: workerJobId,
-        reply: input.reply,
-        done: input.done ?? false,
-      }, null);
+      const workerResult = await this.worker.reply(
+        {
+          job_id: workerJobId,
+          reply: input.reply,
+          done: input.done ?? false,
+        },
+        null,
+      );
 
       return this._applyWorkerResult(jobId, workerResult);
     } catch (err) {
-      return this._failJob(jobId, err instanceof Error ? err.message : String(err));
+      return this._failJob(
+        jobId,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
@@ -267,20 +285,20 @@ export class DelegatorService {
       const timestamp = this.now().toISOString();
       return {
         ok: false,
-        job_id: resolvedId || 'unknown-job',
-        status: 'failed',
-        mode: 'async',
-        provider_requested: 'auto',
+        job_id: resolvedId || "unknown-job",
+        status: "failed",
+        mode: "async",
+        provider_requested: "auto",
         provider_resolved: null,
-        agent_type: 'executor',
-        transport: 'resident-pending',
+        agent_type: "executor",
+        transport: "resident-pending",
         created_at: timestamp,
         started_at: null,
         updated_at: timestamp,
         completed_at: null,
-        output: '',
-        stderr: '',
-        error: 'job not found',
+        output: "",
+        stderr: "",
+        error: "job not found",
         thread_id: null,
         session_key: null,
         conversation_open: false,
@@ -288,11 +306,17 @@ export class DelegatorService {
     }
 
     // running/queued 상태이면 worker에서 최신 상태 갱신
-    if (this.worker && (snapshot.status === 'running' || snapshot.status === 'queued')) {
+    if (
+      this.worker &&
+      (snapshot.status === "running" || snapshot.status === "queued")
+    ) {
       const workerJobId = this._workerJobMap.get(resolvedId);
       if (workerJobId) {
         try {
-          const workerResult = await this.worker.getJobStatus(workerJobId, null);
+          const workerResult = await this.worker.getJobStatus(
+            workerJobId,
+            null,
+          );
           if (workerResult && workerResult.ok !== undefined) {
             return this._applyWorkerResult(resolvedId, workerResult);
           }

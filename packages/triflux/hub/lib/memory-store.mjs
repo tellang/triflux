@@ -1,6 +1,7 @@
 // hub/lib/memory-store.mjs — In-memory store (SQLite-free fallback for @triflux/core)
-import { uuidv7 } from './uuidv7.mjs';
-import { recalcConfidence } from '../reflexion.mjs';
+
+import { recalcConfidence } from "../reflexion.mjs";
+import { uuidv7 } from "./uuidv7.mjs";
 
 export function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -55,8 +56,8 @@ export function clampRetentionMs(value, fallback = 30 * 24 * 3600 * 1000) {
 }
 
 export function normalizeAdaptiveRuleIdentity(projectSlug, pattern) {
-  const normalizedProject = String(projectSlug || '');
-  const normalizedPattern = String(pattern || '');
+  const normalizedProject = String(projectSlug || "");
+  const normalizedPattern = String(pattern || "");
   if (!normalizedProject || !normalizedPattern) return null;
   return { project_slug: normalizedProject, pattern: normalizedPattern };
 }
@@ -75,16 +76,19 @@ export function buildAdaptiveRuleRow({
   const identity = normalizeAdaptiveRuleIdentity(project_slug, pattern);
   if (!identity) return null;
   const createdAt = coerceTimestamp(created_ms);
-  const lastSeenAt = Math.max(createdAt, coerceTimestamp(last_seen_ms, createdAt));
+  const lastSeenAt = Math.max(
+    createdAt,
+    coerceTimestamp(last_seen_ms, createdAt),
+  );
   return {
     ...identity,
     confidence: clampConfidence(confidence, 0.5),
     hit_count: clampHitCount(hit_count, 1),
     last_seen_ms: lastSeenAt,
     created_ms: createdAt,
-    error_message: typeof error_message === 'string' ? error_message : null,
-    solution: typeof solution === 'string' ? solution : null,
-    context: typeof context === 'string' ? context : null,
+    error_message: typeof error_message === "string" ? error_message : null,
+    solution: typeof solution === "string" ? solution : null,
+    context: typeof context === "string" ? context : null,
   };
 }
 
@@ -100,7 +104,7 @@ function buildAssignCallbackEvent(row) {
 /**
  * 인메모리 방식의 데이터 저장소를 생성합니다.
  * SQLite를 사용할 수 없는 환경에서 폴백(fallback)으로 사용됩니다.
- * 
+ *
  * @returns {object} 인메모리 스토어 객체
  */
 export function createMemoryStore() {
@@ -120,12 +124,16 @@ export function createMemoryStore() {
   function notifyAssignStatusListeners(row) {
     const event = buildAssignCallbackEvent(row);
     for (const listener of Array.from(assignStatusListeners)) {
-      try { listener(event, clone(row)); } catch {}
+      try {
+        listener(event, clone(row));
+      } catch {}
     }
   }
 
   function getRecentMessages() {
-    return Array.from(messages.values()).sort((left, right) => right.created_at_ms - left.created_at_ms);
+    return Array.from(messages.values()).sort(
+      (left, right) => right.created_at_ms - left.created_at_ms,
+    );
   }
 
   function upsertMessage(message) {
@@ -134,13 +142,21 @@ export function createMemoryStore() {
   }
 
   const store = {
-    type: 'memory',
+    type: "memory",
     db: null,
     uuidv7,
 
     close() {},
 
-    registerAgent({ agent_id, cli, pid, capabilities = [], topics = [], heartbeat_ttl_ms = 30000, metadata = {} }) {
+    registerAgent({
+      agent_id,
+      cli,
+      pid,
+      capabilities = [],
+      topics = [],
+      heartbeat_ttl_ms = 30000,
+      metadata = {},
+    }) {
       const now = Date.now();
       const current = agents.get(agent_id) || {};
       const next = {
@@ -152,11 +168,16 @@ export function createMemoryStore() {
         topics: clone(topics),
         last_seen_ms: now,
         lease_expires_ms: now + heartbeat_ttl_ms,
-        status: 'online',
+        status: "online",
         metadata: clone(metadata),
       };
       agents.set(agent_id, next);
-      return { agent_id, lease_id: uuidv7(), lease_expires_ms: next.lease_expires_ms, server_time_ms: now };
+      return {
+        agent_id,
+        lease_id: uuidv7(),
+        lease_expires_ms: next.lease_expires_ms,
+        server_time_ms: now,
+      };
     },
 
     getAgent(id) {
@@ -165,12 +186,21 @@ export function createMemoryStore() {
 
     refreshLease(agentId, ttlMs = 30000) {
       const current = agents.get(agentId);
-      if (!current) return { agent_id: agentId, lease_expires_ms: Date.now() + ttlMs, server_time_ms: Date.now() };
+      if (!current)
+        return {
+          agent_id: agentId,
+          lease_expires_ms: Date.now() + ttlMs,
+          server_time_ms: Date.now(),
+        };
       const now = Date.now();
       current.last_seen_ms = now;
       current.lease_expires_ms = now + ttlMs;
-      current.status = 'online';
-      return { agent_id: agentId, lease_expires_ms: current.lease_expires_ms, server_time_ms: now };
+      current.status = "online";
+      return {
+        agent_id: agentId,
+        lease_expires_ms: current.lease_expires_ms,
+        server_time_ms: now,
+      };
     },
 
     updateAgentTopics(agentId, topics = []) {
@@ -183,7 +213,7 @@ export function createMemoryStore() {
 
     listOnlineAgents() {
       return Array.from(agents.values())
-        .filter((agent) => agent.status !== 'offline')
+        .filter((agent) => agent.status !== "offline")
         .map((agent) => clone(agent));
     },
 
@@ -193,7 +223,12 @@ export function createMemoryStore() {
 
     getAgentsByTopic(topic) {
       return Array.from(agents.values())
-        .filter((agent) => agent.status !== 'offline' && Array.isArray(agent.topics) && agent.topics.includes(topic))
+        .filter(
+          (agent) =>
+            agent.status !== "offline" &&
+            Array.isArray(agent.topics) &&
+            agent.topics.includes(topic),
+        )
         .map((agent) => clone(agent));
     },
 
@@ -202,11 +237,14 @@ export function createMemoryStore() {
       let stale = 0;
       let offline = 0;
       for (const agent of agents.values()) {
-        if (agent.status === 'online' && agent.lease_expires_ms < now) {
-          agent.status = 'stale';
+        if (agent.status === "online" && agent.lease_expires_ms < now) {
+          agent.status = "stale";
           stale += 1;
-        } else if (agent.status === 'stale' && agent.lease_expires_ms < now - 300000) {
-          agent.status = 'offline';
+        } else if (
+          agent.status === "stale" &&
+          agent.lease_expires_ms < now - 300000
+        ) {
+          agent.status = "offline";
           offline += 1;
         }
       }
@@ -220,7 +258,18 @@ export function createMemoryStore() {
       return true;
     },
 
-    auditLog({ type, from, to, topic, priority = 5, ttl_ms = 300000, payload = {}, trace_id, correlation_id, status = 'queued' }) {
+    auditLog({
+      type,
+      from,
+      to,
+      topic,
+      priority = 5,
+      ttl_ms = 300000,
+      payload = {},
+      trace_id,
+      correlation_id,
+      status = "queued",
+    }) {
       const now = Date.now();
       const row = {
         id: uuidv7(),
@@ -249,7 +298,12 @@ export function createMemoryStore() {
     },
 
     getResponseByCorrelation(cid) {
-      return getRecentMessages().find((message) => message.correlation_id === cid && message.type === 'response') || null;
+      return (
+        getRecentMessages().find(
+          (message) =>
+            message.correlation_id === cid && message.type === "response",
+        ) || null
+      );
     },
 
     getMessagesByTrace(tid) {
@@ -266,17 +320,23 @@ export function createMemoryStore() {
       return true;
     },
 
-    getAuditMessagesForAgent(agentId, { max_messages = 20, include_topics = null } = {}) {
+    getAuditMessagesForAgent(
+      agentId,
+      { max_messages = 20, include_topics = null } = {},
+    ) {
       const limit = clampMaxMessages(max_messages);
-      const topics = Array.isArray(include_topics) && include_topics.length
-        ? include_topics
-        : (agents.get(agentId)?.topics || []);
+      const topics =
+        Array.isArray(include_topics) && include_topics.length
+          ? include_topics
+          : agents.get(agentId)?.topics || [];
       const topicSet = new Set(topics);
       return getRecentMessages()
-        .filter((message) => (
-          message.to_agent === agentId
-          || (String(message.to_agent || '').startsWith('topic:') && topicSet.has(message.topic))
-        ))
+        .filter(
+          (message) =>
+            message.to_agent === agentId ||
+            (String(message.to_agent || "").startsWith("topic:") &&
+              topicSet.has(message.topic)),
+        )
         .slice(0, limit)
         .map((message) => clone(message));
     },
@@ -291,14 +351,26 @@ export function createMemoryStore() {
     },
 
     pollForAgent(agentId, { max_messages = 20, include_topics = null } = {}) {
-      return store.getAuditMessagesForAgent(agentId, { max_messages, include_topics });
+      return store.getAuditMessagesForAgent(agentId, {
+        max_messages,
+        include_topics,
+      });
     },
 
     ackMessages() {
       return 0;
     },
 
-    insertHumanRequest({ requester_agent, kind, prompt, requested_schema = {}, deadline_ms, default_action, correlation_id, trace_id }) {
+    insertHumanRequest({
+      requester_agent,
+      kind,
+      prompt,
+      requested_schema = {},
+      deadline_ms,
+      default_action,
+      correlation_id,
+      trace_id,
+    }) {
       const requestId = uuidv7();
       const now = Date.now();
       const row = {
@@ -307,7 +379,7 @@ export function createMemoryStore() {
         kind,
         prompt,
         schema: clone(requested_schema),
-        state: 'pending',
+        state: "pending",
         deadline_ms: now + deadline_ms,
         default_action,
         correlation_id: correlation_id || uuidv7(),
@@ -315,7 +387,11 @@ export function createMemoryStore() {
         response: null,
       };
       humanRequests.set(requestId, row);
-      return { request_id: requestId, state: 'pending', deadline_ms: row.deadline_ms };
+      return {
+        request_id: requestId,
+        state: "pending",
+        deadline_ms: row.deadline_ms,
+      };
     },
 
     getHumanRequest(id) {
@@ -332,7 +408,7 @@ export function createMemoryStore() {
 
     getPendingHumanRequests() {
       return Array.from(humanRequests.values())
-        .filter((request) => request.state === 'pending')
+        .filter((request) => request.state === "pending")
         .map((request) => clone(request));
     },
 
@@ -340,8 +416,8 @@ export function createMemoryStore() {
       let changed = 0;
       const now = Date.now();
       for (const request of humanRequests.values()) {
-        if (request.state === 'pending' && request.deadline_ms < now) {
-          request.state = 'timed_out';
+        if (request.state === "pending" && request.deadline_ms < now) {
+          request.state = "timed_out";
           changed += 1;
         }
       }
@@ -350,7 +426,7 @@ export function createMemoryStore() {
 
     moveToDeadLetter(messageId, reason, lastError = null) {
       const current = messages.get(messageId);
-      if (current) current.status = 'dead_letter';
+      if (current) current.status = "dead_letter";
       deadLetters.set(messageId, {
         message_id: messageId,
         reason,
@@ -371,10 +447,10 @@ export function createMemoryStore() {
       job_id,
       supervisor_agent,
       worker_agent,
-      topic = 'assign.job',
-      task = '',
+      topic = "assign.job",
+      task = "",
       payload = {},
-      status = 'queued',
+      status = "queued",
       attempt = 1,
       retry_count = 0,
       max_retries = 0,
@@ -394,8 +470,8 @@ export function createMemoryStore() {
         job_id: job_id || uuidv7(),
         supervisor_agent,
         worker_agent,
-        topic: String(topic || 'assign.job'),
-        task: String(task || ''),
+        topic: String(topic || "assign.job"),
+        task: String(task || ""),
         payload: clone(payload || {}),
         status,
         attempt: Math.max(1, Number(attempt) || 1),
@@ -414,8 +490,10 @@ export function createMemoryStore() {
         error: error == null ? null : clone(error),
         created_at_ms: now,
         updated_at_ms: now,
-        started_at_ms: status === 'running' ? now : null,
-        completed_at_ms: ['succeeded', 'failed', 'timed_out'].includes(status) ? now : null,
+        started_at_ms: status === "running" ? now : null,
+        completed_at_ms: ["succeeded", "failed", "timed_out"].includes(status)
+          ? now
+          : null,
         last_retry_at_ms: retry_count > 0 ? now : null,
       };
       assignJobs.set(row.job_id, row);
@@ -434,8 +512,13 @@ export function createMemoryStore() {
       const snapshot = clone(current);
       const now = Date.now();
       const nextStatus = status || current.status;
-      const isTerminal = ['succeeded', 'failed', 'timed_out'].includes(nextStatus);
-      const nextTimeout = clampDuration(patch.timeout_ms ?? current.timeout_ms, current.timeout_ms);
+      const isTerminal = ["succeeded", "failed", "timed_out"].includes(
+        nextStatus,
+      );
+      const nextTimeout = clampDuration(
+        patch.timeout_ms ?? current.timeout_ms,
+        current.timeout_ms,
+      );
       const nextRow = {
         ...current,
         supervisor_agent: patch.supervisor_agent ?? current.supervisor_agent,
@@ -444,39 +527,65 @@ export function createMemoryStore() {
         task: patch.task ?? current.task,
         payload: clone(patch.payload ?? current.payload ?? {}),
         status: nextStatus,
-        attempt: Math.max(1, Number(patch.attempt ?? current.attempt) || current.attempt || 1),
-        retry_count: Math.max(0, Number(patch.retry_count ?? current.retry_count) || 0),
-        max_retries: Math.max(0, Number(patch.max_retries ?? current.max_retries) || 0),
-        priority: clampPriority(patch.priority ?? current.priority, current.priority || 5),
-        ttl_ms: clampDuration(patch.ttl_ms ?? current.ttl_ms, current.ttl_ms || nextTimeout),
+        attempt: Math.max(
+          1,
+          Number(patch.attempt ?? current.attempt) || current.attempt || 1,
+        ),
+        retry_count: Math.max(
+          0,
+          Number(patch.retry_count ?? current.retry_count) || 0,
+        ),
+        max_retries: Math.max(
+          0,
+          Number(patch.max_retries ?? current.max_retries) || 0,
+        ),
+        priority: clampPriority(
+          patch.priority ?? current.priority,
+          current.priority || 5,
+        ),
+        ttl_ms: clampDuration(
+          patch.ttl_ms ?? current.ttl_ms,
+          current.ttl_ms || nextTimeout,
+        ),
         timeout_ms: nextTimeout,
         deadline_ms: (() => {
-          if (Object.hasOwn(patch, 'deadline_ms')) {
-            return patch.deadline_ms == null ? null : Math.trunc(Number(patch.deadline_ms));
+          if (Object.hasOwn(patch, "deadline_ms")) {
+            return patch.deadline_ms == null
+              ? null
+              : Math.trunc(Number(patch.deadline_ms));
           }
           if (isTerminal) return null;
-          if (nextStatus === 'running' && !current.deadline_ms) return now + nextTimeout;
+          if (nextStatus === "running" && !current.deadline_ms)
+            return now + nextTimeout;
           return current.deadline_ms;
         })(),
         trace_id: patch.trace_id ?? current.trace_id,
         correlation_id: patch.correlation_id ?? current.correlation_id,
-        last_message_id: Object.hasOwn(patch, 'last_message_id')
+        last_message_id: Object.hasOwn(patch, "last_message_id")
           ? patch.last_message_id
           : current.last_message_id,
-        result: Object.hasOwn(patch, 'result')
-          ? (patch.result == null ? null : clone(patch.result))
+        result: Object.hasOwn(patch, "result")
+          ? patch.result == null
+            ? null
+            : clone(patch.result)
           : current.result,
-        error: Object.hasOwn(patch, 'error')
-          ? (patch.error == null ? null : clone(patch.error))
+        error: Object.hasOwn(patch, "error")
+          ? patch.error == null
+            ? null
+            : clone(patch.error)
           : current.error,
         updated_at_ms: now,
-        started_at_ms: Object.hasOwn(patch, 'started_at_ms')
+        started_at_ms: Object.hasOwn(patch, "started_at_ms")
           ? patch.started_at_ms
-          : (nextStatus === 'running' ? (current.started_at_ms || now) : current.started_at_ms),
-        completed_at_ms: Object.hasOwn(patch, 'completed_at_ms')
+          : nextStatus === "running"
+            ? current.started_at_ms || now
+            : current.started_at_ms,
+        completed_at_ms: Object.hasOwn(patch, "completed_at_ms")
           ? patch.completed_at_ms
-          : (isTerminal ? (current.completed_at_ms || now) : current.completed_at_ms),
-        last_retry_at_ms: Object.hasOwn(patch, 'last_retry_at_ms')
+          : isTerminal
+            ? current.completed_at_ms || now
+            : current.completed_at_ms,
+        last_retry_at_ms: Object.hasOwn(patch, "last_retry_at_ms")
           ? patch.last_retry_at_ms
           : current.last_retry_at_ms,
       };
@@ -497,17 +606,29 @@ export function createMemoryStore() {
       active_before_ms,
       limit = 50,
     } = {}) {
-      const statusList = Array.isArray(statuses) && statuses.length
-        ? statuses
-        : (status ? [status] : []);
+      const statusList =
+        Array.isArray(statuses) && statuses.length
+          ? statuses
+          : status
+            ? [status]
+            : [];
       return Array.from(assignJobs.values())
-        .filter((job) => !supervisor_agent || job.supervisor_agent === supervisor_agent)
+        .filter(
+          (job) =>
+            !supervisor_agent || job.supervisor_agent === supervisor_agent,
+        )
         .filter((job) => !worker_agent || job.worker_agent === worker_agent)
         .filter((job) => !trace_id || job.trace_id === trace_id)
-        .filter((job) => !correlation_id || job.correlation_id === correlation_id)
+        .filter(
+          (job) => !correlation_id || job.correlation_id === correlation_id,
+        )
         .filter((job) => !statusList.length || statusList.includes(job.status))
-        .filter((job) => !Number.isFinite(Number(active_before_ms))
-          || (job.deadline_ms != null && job.deadline_ms <= Number(active_before_ms)))
+        .filter(
+          (job) =>
+            !Number.isFinite(Number(active_before_ms)) ||
+            (job.deadline_ms != null &&
+              job.deadline_ms <= Number(active_before_ms)),
+        )
         .sort((left, right) => right.updated_at_ms - left.updated_at_ms)
         .slice(0, clampMaxMessages(limit, 50))
         .map((job) => clone(job));
@@ -516,10 +637,19 @@ export function createMemoryStore() {
     retryAssign(jobId, patch = {}) {
       const current = assignJobs.get(jobId);
       if (!current) return null;
-      const nextRetryCount = Math.max(0, Number(patch.retry_count ?? current.retry_count + 1) || 0);
-      const nextAttempt = Math.max(current.attempt + 1, Number(patch.attempt ?? current.attempt + 1) || 1);
-      const nextTimeout = clampDuration(patch.timeout_ms ?? current.timeout_ms, current.timeout_ms);
-      return store.updateAssignStatus(jobId, 'queued', {
+      const nextRetryCount = Math.max(
+        0,
+        Number(patch.retry_count ?? current.retry_count + 1) || 0,
+      );
+      const nextAttempt = Math.max(
+        current.attempt + 1,
+        Number(patch.attempt ?? current.attempt + 1) || 1,
+      );
+      const nextTimeout = clampDuration(
+        patch.timeout_ms ?? current.timeout_ms,
+        current.timeout_ms,
+      );
+      return store.updateAssignStatus(jobId, "queued", {
         retry_count: nextRetryCount,
         attempt: nextAttempt,
         timeout_ms: nextTimeout,
@@ -529,7 +659,7 @@ export function createMemoryStore() {
         started_at_ms: null,
         last_retry_at_ms: Date.now(),
         result: patch.result ?? null,
-        error: Object.hasOwn(patch, 'error') ? patch.error : current.error,
+        error: Object.hasOwn(patch, "error") ? patch.error : current.error,
         last_message_id: null,
       });
     },
@@ -538,11 +668,11 @@ export function createMemoryStore() {
       const now = Date.now();
       let expiredMessages = 0;
       for (const message of messages.values()) {
-        if (message.status === 'queued' && message.expires_at_ms < now) {
-          message.status = 'dead_letter';
+        if (message.status === "queued" && message.expires_at_ms < now) {
+          message.status = "dead_letter";
           deadLetters.set(message.id, {
             message_id: message.id,
-            reason: 'ttl_expired',
+            reason: "ttl_expired",
             failed_at_ms: now,
             last_error: null,
           });
@@ -550,14 +680,18 @@ export function createMemoryStore() {
         }
       }
       const humanRequestsExpired = store.expireHumanRequests();
-      return { messages: expiredMessages, human_requests: humanRequestsExpired };
+      return {
+        messages: expiredMessages,
+        human_requests: humanRequestsExpired,
+      };
     },
 
     getQueueDepths() {
       const depths = { urgent: 0, normal: 0, dlq: deadLetters.size };
       const now = Date.now();
       for (const message of messages.values()) {
-        if (message.status !== 'queued' || message.expires_at_ms < now) continue;
+        if (message.status !== "queued" || message.expires_at_ms < now)
+          continue;
         if (message.priority >= 7) depths.urgent += 1;
         else depths.normal += 1;
       }
@@ -565,7 +699,7 @@ export function createMemoryStore() {
     },
 
     onAssignStatusChange(listener) {
-      if (typeof listener !== 'function') {
+      if (typeof listener !== "function") {
         return () => {};
       }
       assignStatusListeners.add(listener);
@@ -574,36 +708,46 @@ export function createMemoryStore() {
 
     getDeliveryStats() {
       const cutoff = Date.now() - 300000;
-      const totalDeliveries = Array.from(messages.values())
-        .filter((message) => message.status === 'acked' && message.created_at_ms > cutoff)
-        .length;
+      const totalDeliveries = Array.from(messages.values()).filter(
+        (message) =>
+          message.status === "acked" && message.created_at_ms > cutoff,
+      ).length;
       return { total_deliveries: totalDeliveries, avg_delivery_ms: 0 };
     },
 
     getHubStats() {
       return {
-        online_agents: Array.from(agents.values()).filter((agent) => agent.status === 'online').length,
+        online_agents: Array.from(agents.values()).filter(
+          (agent) => agent.status === "online",
+        ).length,
         total_messages: messages.size,
-        active_assign_jobs: Array.from(assignJobs.values()).filter((job) => ['queued', 'running'].includes(job.status)).length,
+        active_assign_jobs: Array.from(assignJobs.values()).filter((job) =>
+          ["queued", "running"].includes(job.status),
+        ).length,
         ...store.getQueueDepths(),
       };
     },
 
     getAuditStats() {
-      const countByStatus = (targetStatus) => Array.from(assignJobs.values()).filter((job) => job.status === targetStatus).length;
+      const countByStatus = (targetStatus) =>
+        Array.from(assignJobs.values()).filter(
+          (job) => job.status === targetStatus,
+        ).length;
       return {
-        online_agents: Array.from(agents.values()).filter((agent) => agent.status === 'online').length,
+        online_agents: Array.from(agents.values()).filter(
+          (agent) => agent.status === "online",
+        ).length,
         total_messages: messages.size,
         dlq: deadLetters.size,
-        assign_queued: countByStatus('queued'),
-        assign_running: countByStatus('running'),
-        assign_failed: countByStatus('failed'),
-        assign_timed_out: countByStatus('timed_out'),
+        assign_queued: countByStatus("queued"),
+        assign_running: countByStatus("running"),
+        assign_failed: countByStatus("failed"),
+        assign_timed_out: countByStatus("timed_out"),
       };
     },
 
     addReflexion({
-      type = 'reflexion',
+      type = "reflexion",
       error_pattern,
       error_message,
       context = {},
@@ -644,8 +788,17 @@ export function createMemoryStore() {
 
     findReflexion(errorPattern, context = {}) {
       const entries = Array.from(reflexionEntries.values())
-        .filter((entry) => entry.error_pattern === errorPattern || entry.error_pattern.includes(errorPattern) || errorPattern.includes(entry.error_pattern))
-        .filter((entry) => Object.entries(context).every(([key, value]) => value == null || entry.context?.[key] === value))
+        .filter(
+          (entry) =>
+            entry.error_pattern === errorPattern ||
+            entry.error_pattern.includes(errorPattern) ||
+            errorPattern.includes(entry.error_pattern),
+        )
+        .filter((entry) =>
+          Object.entries(context).every(
+            ([key, value]) => value == null || entry.context?.[key] === value,
+          ),
+        )
         .sort((left, right) => right.confidence - left.confidence);
       return entries.map((entry) => clone(entry));
     },
@@ -663,11 +816,18 @@ export function createMemoryStore() {
     },
 
     listReflexion(filters = {}) {
-      const { type, minConfidence = Number.NEGATIVE_INFINITY, projectSlug } = filters;
+      const {
+        type,
+        minConfidence = Number.NEGATIVE_INFINITY,
+        projectSlug,
+      } = filters;
       return Array.from(reflexionEntries.values())
         .filter((entry) => !type || entry.type === type)
         .filter((entry) => entry.confidence >= minConfidence)
-        .filter((entry) => !projectSlug || entry.adaptive_state?.project_slug === projectSlug)
+        .filter(
+          (entry) =>
+            !projectSlug || entry.adaptive_state?.project_slug === projectSlug,
+        )
         .sort((left, right) => right.confidence - left.confidence)
         .map((entry) => clone(entry));
     },
@@ -679,7 +839,9 @@ export function createMemoryStore() {
         ...current,
         ...clone(patch),
         context: patch.context ? clone(patch.context) : current.context,
-        adaptive_state: patch.adaptive_state ? clone(patch.adaptive_state) : current.adaptive_state,
+        adaptive_state: patch.adaptive_state
+          ? clone(patch.adaptive_state)
+          : current.adaptive_state,
         updated_at_ms: patch.updated_at_ms ?? Date.now(),
       };
       reflexionEntries.set(id, next);
@@ -709,7 +871,9 @@ export function createMemoryStore() {
       const current = adaptiveRules.get(key);
       adaptiveRules.set(key, {
         ...next,
-        created_ms: current ? Math.min(current.created_ms, next.created_ms) : next.created_ms,
+        created_ms: current
+          ? Math.min(current.created_ms, next.created_ms)
+          : next.created_ms,
       });
       return clone(adaptiveRules.get(key));
     },
@@ -717,7 +881,11 @@ export function createMemoryStore() {
     findAdaptiveRule(projectSlug, pattern) {
       const identity = normalizeAdaptiveRuleIdentity(projectSlug, pattern);
       if (!identity) return null;
-      return clone(adaptiveRules.get(getAdaptiveRuleKey(identity.project_slug, identity.pattern)) || null);
+      return clone(
+        adaptiveRules.get(
+          getAdaptiveRuleKey(identity.project_slug, identity.pattern),
+        ) || null,
+      );
     },
 
     updateRuleConfidence(projectSlug, pattern, confidence, options = {}) {
@@ -726,18 +894,23 @@ export function createMemoryStore() {
       const next = {
         ...current,
         confidence: clampConfidence(confidence, current.confidence),
-        hit_count: current.hit_count + clampHitIncrement(options.hit_count_increment, 1),
+        hit_count:
+          current.hit_count + clampHitIncrement(options.hit_count_increment, 1),
         last_seen_ms: Math.max(
           current.last_seen_ms,
           coerceTimestamp(options.last_seen_ms, Date.now()),
         ),
       };
-      adaptiveRules.set(getAdaptiveRuleKey(current.project_slug, current.pattern), next);
+      adaptiveRules.set(
+        getAdaptiveRuleKey(current.project_slug, current.pattern),
+        next,
+      );
       return clone(next);
     },
 
     pruneStaleRules(maxAge_ms = 30 * 24 * 3600 * 1000, minConfidence = 0.2) {
-      const cutoff = Date.now() - clampRetentionMs(maxAge_ms, 30 * 24 * 3600 * 1000);
+      const cutoff =
+        Date.now() - clampRetentionMs(maxAge_ms, 30 * 24 * 3600 * 1000);
       let removed = 0;
       for (const [key, rule] of Array.from(adaptiveRules.entries())) {
         if (rule.last_seen_ms < cutoff && rule.confidence < minConfidence) {
@@ -761,10 +934,11 @@ export function createMemoryStore() {
     deleteAdaptiveRule(projectSlug, pattern) {
       const identity = normalizeAdaptiveRuleIdentity(projectSlug, pattern);
       if (!identity) return false;
-      return adaptiveRules.delete(getAdaptiveRuleKey(identity.project_slug, identity.pattern));
+      return adaptiveRules.delete(
+        getAdaptiveRuleKey(identity.project_slug, identity.pattern),
+      );
     },
   };
 
   return store;
 }
-

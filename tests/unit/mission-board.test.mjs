@@ -1,8 +1,8 @@
-import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it } from "node:test";
 
 import { getMissionBoardState } from "../../hud/mission-board.mjs";
 import { renderMissionBoard } from "../../hud/renderers.mjs";
@@ -10,7 +10,10 @@ import { renderMissionBoard } from "../../hud/renderers.mjs";
 const TEMP_DIRS = [];
 
 function makeTempDir() {
-  const dir = join(tmpdir(), `triflux-mb-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const dir = join(
+    tmpdir(),
+    `triflux-mb-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
   mkdirSync(dir, { recursive: true });
   TEMP_DIRS.push(dir);
   return dir;
@@ -31,7 +34,9 @@ afterEach(() => {
 
 describe("getMissionBoardState", () => {
   it("세션 디렉토리가 없으면 null을 반환한다", async () => {
-    const result = await getMissionBoardState("/nonexistent/path/that/does/not/exist");
+    const result = await getMissionBoardState(
+      "/nonexistent/path/that/does/not/exist",
+    );
     assert.equal(result, null);
   });
 
@@ -93,8 +98,16 @@ describe("getMissionBoardState", () => {
 
   it("totalProgress는 에이전트 평균 progress를 반올림한 값이다", async () => {
     const dir = makeTempDir();
-    writeJson(join(dir, "a.json"), { name: "a", status: "done", progress: 100 });
-    writeJson(join(dir, "b.json"), { name: "b", status: "active", progress: 50 });
+    writeJson(join(dir, "a.json"), {
+      name: "a",
+      status: "done",
+      progress: 100,
+    });
+    writeJson(join(dir, "b.json"), {
+      name: "b",
+      status: "active",
+      progress: 50,
+    });
     writeJson(join(dir, "c.json"), { name: "c", status: "idle", progress: 0 });
 
     const result = await getMissionBoardState(dir);
@@ -106,7 +119,11 @@ describe("getMissionBoardState", () => {
   it("json이 아닌 파일은 무시한다", async () => {
     const dir = makeTempDir();
     writeFileSync(join(dir, "notes.txt"), "not json", "utf8");
-    writeJson(join(dir, "exec.json"), { name: "exec", status: "done", progress: 100 });
+    writeJson(join(dir, "exec.json"), {
+      name: "exec",
+      status: "done",
+      progress: 100,
+    });
 
     const result = await getMissionBoardState(dir);
     assert.ok(result !== null);
@@ -149,9 +166,7 @@ describe("renderMissionBoard", () => {
 
   it("failed 상태 아이콘이 올바르게 렌더링된다", () => {
     const state = {
-      agents: [
-        { name: "worker", status: "failed", progress: 0 },
-      ],
+      agents: [{ name: "worker", status: "failed", progress: 0 }],
       dagLevel: 0,
       totalProgress: 0,
     };

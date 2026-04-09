@@ -14,17 +14,17 @@
 //   - prompt: |
 //       multi-line prompt text
 
-import { readFileSync } from 'node:fs';
+import { readFileSync } from "node:fs";
 
 /** Shard schema defaults */
 const SHARD_DEFAULTS = Object.freeze({
-  agent: 'codex',
+  agent: "codex",
   files: [],
   mcp: [],
   depends: [],
   critical: false,
-  prompt: '',
-  host: '',
+  prompt: "",
+  host: "",
 });
 
 /**
@@ -41,7 +41,7 @@ export function parseShards(content) {
 
   function flushPrompt() {
     if (current && promptLines.length > 0) {
-      current.prompt = promptLines.join('\n').trim();
+      current.prompt = promptLines.join("\n").trim();
       promptLines = [];
     }
     inPrompt = false;
@@ -91,26 +91,35 @@ export function parseShards(content) {
     const value = rawValue.trim();
 
     switch (key.toLowerCase()) {
-      case 'agent':
+      case "agent":
         current.agent = value.toLowerCase();
         break;
-      case 'files':
-        current.files = value.split(/,\s*/).map((f) => f.trim()).filter(Boolean);
+      case "files":
+        current.files = value
+          .split(/,\s*/)
+          .map((f) => f.trim())
+          .filter(Boolean);
         break;
-      case 'mcp':
-        current.mcp = value.split(/,\s*/).map((s) => s.trim()).filter(Boolean);
+      case "mcp":
+        current.mcp = value
+          .split(/,\s*/)
+          .map((s) => s.trim())
+          .filter(Boolean);
         break;
-      case 'depends':
-        current.depends = value.split(/,\s*/).map((d) => d.trim()).filter(Boolean);
+      case "depends":
+        current.depends = value
+          .split(/,\s*/)
+          .map((d) => d.trim())
+          .filter(Boolean);
         break;
-      case 'critical':
+      case "critical":
         current.critical = /^(true|yes|1)$/i.test(value);
         break;
-      case 'host':
+      case "host":
         current.host = value;
         break;
-      case 'prompt':
-        if (value && !value.startsWith('|')) {
+      case "prompt":
+        if (value && !value.startsWith("|")) {
           current.prompt = value;
         } else {
           inPrompt = true;
@@ -178,8 +187,8 @@ export function buildMcpManifest(shards) {
  */
 export function computeMergeOrder(shards) {
   const nameSet = new Set(shards.map((s) => s.name));
-  const adj = new Map();    // name → [dependents]
-  const inDeg = new Map();  // name → number
+  const adj = new Map(); // name → [dependents]
+  const inDeg = new Map(); // name → number
 
   for (const shard of shards) {
     adj.set(shard.name, []);
@@ -234,11 +243,13 @@ export function computeMergeOrder(shards) {
  * @returns {SwarmPlan}
  */
 export function planSwarm(prdPath, opts = {}) {
-  const content = opts.content || readFileSync(prdPath, 'utf8');
+  const content = opts.content || readFileSync(prdPath, "utf8");
   const shards = parseShards(content);
 
   if (shards.length === 0) {
-    throw new Error('No shards found in PRD. Expected "## Shard: <name>" sections.');
+    throw new Error(
+      'No shards found in PRD. Expected "## Shard: <name>" sections.',
+    );
   }
 
   const { leaseMap, conflicts } = buildFileLeaseMap(shards);
@@ -246,7 +257,7 @@ export function planSwarm(prdPath, opts = {}) {
   const { order: mergeOrder, cycles } = computeMergeOrder(shards);
 
   if (cycles.length > 0) {
-    throw new Error(`Dependency cycle detected: ${cycles[0].join(' → ')}`);
+    throw new Error(`Dependency cycle detected: ${cycles[0].join(" → ")}`);
   }
 
   return Object.freeze({

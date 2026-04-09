@@ -1,14 +1,13 @@
 // tests/unit/mcp-guard-fallback.test.mjs — loadRegistryOrDefault + removeRegistryServer fallback 테스트
-import { describe, it, beforeEach, afterEach } from "node:test";
+
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   inspectRegistry,
   loadRegistryOrDefault,
   removeRegistryServer,
-  saveRegistry,
-  createDefaultRegistry,
 } from "../../scripts/lib/mcp-guard-engine.mjs";
 
 const REGISTRY_PATH = inspectRegistry().path;

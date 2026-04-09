@@ -1,18 +1,25 @@
 // tests/unit/mcp-gateway.test.mjs — mcp-gateway-* 스크립트 단위 테스트
-import { describe, it, before, after } from "node:test";
+
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, existsSync, unlinkSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 
 // ── 동적 임포트: start.mjs와 config.mjs는 main()을 즉시 실행하므로
 //   process.argv를 패치하여 main 분기를 건너뛴다.
-const origArgv = process.argv.slice();
+const _origArgv = process.argv.slice();
 
 // ── 소스 경로 ──
 const ROOT = join(process.cwd());
-const START_PATH  = join(ROOT, "scripts", "mcp-gateway-start.mjs");
+const START_PATH = join(ROOT, "scripts", "mcp-gateway-start.mjs");
 const CONFIG_PATH = join(ROOT, "scripts", "mcp-gateway-config.mjs");
 const VERIFY_PATH = join(ROOT, "scripts", "mcp-gateway-verify.mjs");
 
@@ -68,9 +75,15 @@ import { createConnection } from "node:net";
 function isPortInUse(port) {
   return new Promise((resolve) => {
     const sock = createConnection({ host: "127.0.0.1", port });
-    sock.once("connect", () => { sock.destroy(); resolve(true); });
+    sock.once("connect", () => {
+      sock.destroy();
+      resolve(true);
+    });
     sock.once("error", () => resolve(false));
-    sock.setTimeout(1000, () => { sock.destroy(); resolve(false); });
+    sock.setTimeout(1000, () => {
+      sock.destroy();
+      resolve(false);
+    });
   });
 }
 
@@ -78,8 +91,8 @@ function isPortInUse(port) {
 // 1. 포트 일관성 — SERVERS vs GATEWAY_SERVERS
 // ─────────────────────────────────────────────
 describe("port consistency across files", () => {
-  const servers      = parseServersFromSource(START_PATH,  "SERVERS");
-  const gateways     = parseServersFromSource(CONFIG_PATH, "GATEWAY_SERVERS");
+  const servers = parseServersFromSource(START_PATH, "SERVERS");
+  const gateways = parseServersFromSource(CONFIG_PATH, "GATEWAY_SERVERS");
 
   it("SERVERS and GATEWAY_SERVERS have the same number of entries", () => {
     assert.strictEqual(servers.length, gateways.length);
@@ -88,7 +101,10 @@ describe("port consistency across files", () => {
   it("every SERVERS name exists in GATEWAY_SERVERS", () => {
     const gwNames = new Set(gateways.map((g) => g.name));
     for (const s of servers) {
-      assert.ok(gwNames.has(s.name), `name '${s.name}' missing from GATEWAY_SERVERS`);
+      assert.ok(
+        gwNames.has(s.name),
+        `name '${s.name}' missing from GATEWAY_SERVERS`,
+      );
     }
   });
 
@@ -105,30 +121,44 @@ describe("port consistency across files", () => {
       assert.strictEqual(
         s.port,
         gwByName[s.name],
-        `port mismatch for '${s.name}': start=${s.port}, config=${gwByName[s.name]}`
+        `port mismatch for '${s.name}': start=${s.port}, config=${gwByName[s.name]}`,
       );
     }
   });
 
   it("all ports are in the 8100-8107 range", () => {
     for (const s of servers) {
-      assert.ok(s.port >= 8100 && s.port <= 8107, `port ${s.port} out of range for '${s.name}'`);
+      assert.ok(
+        s.port >= 8100 && s.port <= 8107,
+        `port ${s.port} out of range for '${s.name}'`,
+      );
     }
     for (const g of gateways) {
-      assert.ok(g.port >= 8100 && g.port <= 8107, `port ${g.port} out of range for '${g.name}'`);
+      assert.ok(
+        g.port >= 8100 && g.port <= 8107,
+        `port ${g.port} out of range for '${g.name}'`,
+      );
     }
   });
 
   it("no duplicate ports in SERVERS", () => {
     const ports = servers.map((s) => s.port);
     const unique = new Set(ports);
-    assert.strictEqual(unique.size, ports.length, "duplicate ports found in SERVERS");
+    assert.strictEqual(
+      unique.size,
+      ports.length,
+      "duplicate ports found in SERVERS",
+    );
   });
 
   it("no duplicate ports in GATEWAY_SERVERS", () => {
     const ports = gateways.map((g) => g.port);
     const unique = new Set(ports);
-    assert.strictEqual(unique.size, ports.length, "duplicate ports found in GATEWAY_SERVERS");
+    assert.strictEqual(
+      unique.size,
+      ports.length,
+      "duplicate ports found in GATEWAY_SERVERS",
+    );
   });
 });
 
@@ -136,7 +166,7 @@ describe("port consistency across files", () => {
 // 2. SERVERS vs ENDPOINTS (verify.mjs) 일관성
 // ─────────────────────────────────────────────
 describe("port consistency: SERVERS vs verify ENDPOINTS", () => {
-  const servers   = parseServersFromSource(START_PATH,  "SERVERS");
+  const servers = parseServersFromSource(START_PATH, "SERVERS");
   const endpoints = parseServersFromSource(VERIFY_PATH, "ENDPOINTS");
 
   it("ENDPOINTS count matches SERVERS count", () => {
@@ -156,7 +186,7 @@ describe("port consistency: SERVERS vs verify ENDPOINTS", () => {
       assert.strictEqual(
         s.port,
         epByName[s.name],
-        `port mismatch for '${s.name}': start=${s.port}, verify=${epByName[s.name]}`
+        `port mismatch for '${s.name}': start=${s.port}, verify=${epByName[s.name]}`,
       );
     }
   });
@@ -206,18 +236,29 @@ describe("loadManifest", () => {
   });
 
   after(() => {
-    try { unlinkSync(pidFile); } catch { /* 무시 */ }
+    try {
+      unlinkSync(pidFile);
+    } catch {
+      /* 무시 */
+    }
   });
 
   it("returns empty array when pid file does not exist", () => {
     // 파일 없음을 보장
-    try { unlinkSync(pidFile); } catch { /* 이미 없음 */ }
+    try {
+      unlinkSync(pidFile);
+    } catch {
+      /* 이미 없음 */
+    }
     const result = loadManifest(pidFile);
     assert.deepStrictEqual(result, []);
   });
 
   it("returns parsed array for valid JSON file", () => {
-    const data = [{ name: "context7", port: 8100 }, { name: "exa", port: 8102 }];
+    const data = [
+      { name: "context7", port: 8100 },
+      { name: "exa", port: 8102 },
+    ];
     writeFileSync(pidFile, JSON.stringify(data));
     const result = loadManifest(pidFile);
     assert.deepStrictEqual(result, data);
@@ -253,7 +294,7 @@ describe("GATEWAY_SERVERS stdioCmd fields", () => {
     for (const e of entries) {
       assert.ok(
         typeof e.stdioCmd === "string" && e.stdioCmd.length > 0,
-        `stdioCmd is missing or empty for '${e.name}'`
+        `stdioCmd is missing or empty for '${e.name}'`,
       );
     }
   });
@@ -261,29 +302,45 @@ describe("GATEWAY_SERVERS stdioCmd fields", () => {
   it("stdioCmd for context7 references the correct npm package", () => {
     const entry = entries.find((e) => e.name === "context7");
     assert.ok(entry, "context7 entry not found");
-    assert.ok(entry.stdioCmd.includes("context7-mcp"), "context7 stdioCmd should reference context7-mcp");
+    assert.ok(
+      entry.stdioCmd.includes("context7-mcp"),
+      "context7 stdioCmd should reference context7-mcp",
+    );
   });
 
   it("stdioCmd for serena uses uvx (not npx)", () => {
     const entry = entries.find((e) => e.name === "serena");
     assert.ok(entry, "serena entry not found");
-    assert.ok(entry.stdioCmd.startsWith("uvx"), `serena stdioCmd should start with uvx, got: ${entry.stdioCmd}`);
+    assert.ok(
+      entry.stdioCmd.startsWith("uvx"),
+      `serena stdioCmd should start with uvx, got: ${entry.stdioCmd}`,
+    );
   });
 
   it("stdioCmd for notion and notion-guest reference the same package", () => {
-    const notion      = entries.find((e) => e.name === "notion");
+    const notion = entries.find((e) => e.name === "notion");
     const notionGuest = entries.find((e) => e.name === "notion-guest");
-    assert.ok(notion,      "notion entry not found");
+    assert.ok(notion, "notion entry not found");
     assert.ok(notionGuest, "notion-guest entry not found");
     // Both should share the same underlying package
     const pkg = "@notionhq/notion-mcp-server";
-    assert.ok(notion.stdioCmd.includes(pkg),      `notion stdioCmd should reference ${pkg}`);
-    assert.ok(notionGuest.stdioCmd.includes(pkg), `notion-guest stdioCmd should reference ${pkg}`);
+    assert.ok(
+      notion.stdioCmd.includes(pkg),
+      `notion stdioCmd should reference ${pkg}`,
+    );
+    assert.ok(
+      notionGuest.stdioCmd.includes(pkg),
+      `notion-guest stdioCmd should reference ${pkg}`,
+    );
   });
 
   it("no stdioCmd is an empty string", () => {
     for (const e of entries) {
-      assert.notStrictEqual(e.stdioCmd.trim(), "", `stdioCmd is blank for '${e.name}'`);
+      assert.notStrictEqual(
+        e.stdioCmd.trim(),
+        "",
+        `stdioCmd is blank for '${e.name}'`,
+      );
     }
   });
 });
@@ -294,39 +351,63 @@ describe("GATEWAY_SERVERS stdioCmd fields", () => {
 describe("source file structural integrity", () => {
   it("mcp-gateway-start.mjs exports SERVERS", () => {
     const src = readFileSync(START_PATH, "utf8");
-    assert.ok(src.includes("export { SERVERS }"), "SERVERS must be exported from start.mjs");
+    assert.ok(
+      src.includes("export { SERVERS }"),
+      "SERVERS must be exported from start.mjs",
+    );
   });
 
   it("mcp-gateway-config.mjs exports GATEWAY_SERVERS", () => {
     const src = readFileSync(CONFIG_PATH, "utf8");
-    assert.ok(src.includes("export const GATEWAY_SERVERS"), "GATEWAY_SERVERS must be exported from config.mjs");
+    assert.ok(
+      src.includes("export const GATEWAY_SERVERS"),
+      "GATEWAY_SERVERS must be exported from config.mjs",
+    );
   });
 
   it("mcp-gateway-start.mjs defines isPortInUse function", () => {
     const src = readFileSync(START_PATH, "utf8");
-    assert.ok(src.includes("function isPortInUse"), "isPortInUse must be defined in start.mjs");
+    assert.ok(
+      src.includes("function isPortInUse"),
+      "isPortInUse must be defined in start.mjs",
+    );
   });
 
   it("mcp-gateway-start.mjs defines loadManifest function", () => {
     const src = readFileSync(START_PATH, "utf8");
-    assert.ok(src.includes("function loadManifest"), "loadManifest must be defined in start.mjs");
+    assert.ok(
+      src.includes("function loadManifest"),
+      "loadManifest must be defined in start.mjs",
+    );
   });
 
   it("mcp-gateway-verify.mjs defines ENDPOINTS constant", () => {
     const src = readFileSync(VERIFY_PATH, "utf8");
-    assert.ok(src.includes("const ENDPOINTS"), "ENDPOINTS must be defined in verify.mjs");
+    assert.ok(
+      src.includes("const ENDPOINTS"),
+      "ENDPOINTS must be defined in verify.mjs",
+    );
   });
 
   it("mcp-gateway-start.mjs PID_FILE uses tmpdir", () => {
     const src = readFileSync(START_PATH, "utf8");
     assert.ok(src.includes("tmpdir()"), "PID_FILE path should use tmpdir()");
-    assert.ok(src.includes("tfx-gateway-pids.json"), "PID_FILE should be named tfx-gateway-pids.json");
+    assert.ok(
+      src.includes("tfx-gateway-pids.json"),
+      "PID_FILE should be named tfx-gateway-pids.json",
+    );
   });
 
   it("mcp-gateway-start.mjs loadManifest handles missing file by returning []", () => {
     const src = readFileSync(START_PATH, "utf8");
     // 반드시 existsSync 가드와 catch [] 반환이 존재해야 한다
-    assert.ok(src.includes("existsSync(PID_FILE)"), "loadManifest must guard with existsSync");
-    assert.ok(src.includes("return []"), "loadManifest must return [] on error/missing");
+    assert.ok(
+      src.includes("existsSync(PID_FILE)"),
+      "loadManifest must guard with existsSync",
+    );
+    assert.ok(
+      src.includes("return []"),
+      "loadManifest must return [] on error/missing",
+    );
   });
 });

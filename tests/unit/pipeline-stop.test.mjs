@@ -1,10 +1,10 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
 
 import Database from "better-sqlite3";
 
@@ -15,12 +15,18 @@ import {
   updatePipelineState,
 } from "../../hub/pipeline/state.mjs";
 
-const HOOK_PATH = fileURLToPath(new URL("../../hooks/pipeline-stop.mjs", import.meta.url));
+const HOOK_PATH = fileURLToPath(
+  new URL("../../hooks/pipeline-stop.mjs", import.meta.url),
+);
 
 function createValidPluginRoot(baseDir, name = "plugin-root") {
   const root = join(baseDir, name);
   mkdirSync(join(root, "hooks"), { recursive: true });
-  writeFileSync(join(root, "hooks", "hook-orchestrator.mjs"), "// sentinel\n", "utf8");
+  writeFileSync(
+    join(root, "hooks", "hook-orchestrator.mjs"),
+    "// sentinel\n",
+    "utf8",
+  );
   return root;
 }
 

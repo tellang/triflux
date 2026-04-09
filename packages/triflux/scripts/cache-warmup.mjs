@@ -1,25 +1,35 @@
 #!/usr/bin/env node
 
+import { execSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { execSync } from "node:child_process";
-import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import {
+  checkCliSync,
+  checkHub,
+  detectCodexAuthState,
+} from "./lib/env-probe.mjs";
+import {
+  MCP_SERVER_DOMAIN_TAGS,
+  SEARCH_SERVER_ORDER,
+} from "./lib/mcp-server-catalog.mjs";
 import { readPreflightCache } from "./preflight-cache.mjs";
-import { checkCliSync, checkHub, detectCodexAuthState } from "./lib/env-probe.mjs";
-import { SEARCH_SERVER_ORDER, MCP_SERVER_DOMAIN_TAGS } from "./lib/mcp-server-catalog.mjs";
 
 export const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const WARMUP_METADATA_FILE = ["state", "warmup-metadata.json"];
-const AUTH_SENSITIVE_TARGETS = new Set(["codexSkills", "tierEnvironment", "searchEngines"]);
+const AUTH_SENSITIVE_TARGETS = new Set([
+  "codexSkills",
+  "tierEnvironment",
+  "searchEngines",
+]);
 
 export const CACHE_TARGETS = Object.freeze({
   codexSkills: Object.freeze({
@@ -118,7 +128,7 @@ function isFresh(target, options = {}) {
     const ttlMs = resolveTtlMs(target, options);
     const now = options.now ?? Date.now();
     const stat = statSync(filePath);
-    return ttlMs > 0 && (now - stat.mtimeMs) < ttlMs;
+    return ttlMs > 0 && now - stat.mtimeMs < ttlMs;
   } catch {
     return false;
   }
@@ -138,7 +148,8 @@ function parseSkillFrontmatter(content) {
 
   const frontmatter = match[1];
   const name = frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim() || null;
-  const description = frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim() || null;
+  const description =
+    frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim() || null;
   return name ? { name, description } : null;
 }
 
@@ -179,10 +190,18 @@ export function scanCodexSkills(options = {}) {
   }
 
   const builtinSkills = [
-    { name: "web-clone", role: "general", description: "Clone and analyze web pages" },
+    {
+      name: "web-clone",
+      role: "general",
+      description: "Clone and analyze web pages",
+    },
     { name: "help", role: "general", description: "Show available commands" },
     { name: "note", role: "general", description: "Save notes during session" },
-    { name: "worker", role: "auto", description: "Spawn background worker for tasks" },
+    {
+      name: "worker",
+      role: "auto",
+      description: "Spawn background worker for tasks",
+    },
   ];
 
   for (const builtin of builtinSkills) {
@@ -207,15 +226,21 @@ export function probeTierEnvironment(options = {}) {
   const execSyncFn = options.execSyncFn || execSync;
   const codexAuth = preflight?.codex_plan ?? detectCodexAuthState({ homeDir });
 
-  const codexCheck = preflight?.codex || checkCliSync("codex", { whichCommandFn: options.whichCommandFn });
-  const geminiCheck = preflight?.gemini || checkCliSync("gemini", { whichCommandFn: options.whichCommandFn });
-  const hubCheck = preflight?.hub || checkHub({
-    pkgRoot: options.pkgRoot,
-    restart: options.hubRestart === true,
-    requestTimeoutMs: options.hubTimeoutMs ?? 1000,
-    pollAttempts: options.hubRestart === true ? 8 : 0,
-    execSyncFn,
-  });
+  const codexCheck =
+    preflight?.codex ||
+    checkCliSync("codex", { whichCommandFn: options.whichCommandFn });
+  const geminiCheck =
+    preflight?.gemini ||
+    checkCliSync("gemini", { whichCommandFn: options.whichCommandFn });
+  const hubCheck =
+    preflight?.hub ||
+    checkHub({
+      pkgRoot: options.pkgRoot,
+      restart: options.hubRestart === true,
+      requestTimeoutMs: options.hubTimeoutMs ?? 1000,
+      pollAttempts: options.hubRestart === true ? 8 : 0,
+      execSyncFn,
+    });
   const checks = {
     psmux: false,
     hub: !!hubCheck?.ok,
@@ -246,7 +271,8 @@ export function probeTierEnvironment(options = {}) {
 
   let tier = "minimal";
   if (checks.codex || checks.gemini) tier = "standard";
-  if (checks.psmux && checks.hub && (checks.codex || checks.gemini)) tier = "full";
+  if (checks.psmux && checks.hub && (checks.codex || checks.gemini))
+    tier = "full";
 
   const agents = ["claude"];
   if (checks.codex) agents.push("codex");
@@ -257,9 +283,10 @@ export function probeTierEnvironment(options = {}) {
     tier,
     checks,
     available_agents: agents,
-    codex_plan: codexAuth.source == null
-      ? { plan: codexAuth.plan }
-      : { plan: codexAuth.plan, source: codexAuth.source },
+    codex_plan:
+      codexAuth.source == null
+        ? { plan: codexAuth.plan }
+        : { plan: codexAuth.plan, source: codexAuth.source },
     source: {
       preflight: !!preflight,
       home_dir: homeDir,
@@ -272,13 +299,15 @@ function getCodexAuthFingerprint(options = {}) {
   if (typeof options.preflight?.codex_plan?.fingerprint === "string") {
     return options.preflight.codex_plan.fingerprint;
   }
-  return detectCodexAuthState({ homeDir: resolveHomeDir(options.homeDir) }).fingerprint;
+  return detectCodexAuthState({ homeDir: resolveHomeDir(options.homeDir) })
+    .fingerprint;
 }
 
 function hasAuthFingerprintChanged(target, options = {}) {
   if (!AUTH_SENSITIVE_TARGETS.has(target)) return false;
   const nextFingerprint = getCodexAuthFingerprint(options);
-  const previousFingerprint = readWarmupMetadata(options)?.codex_auth_fingerprint || null;
+  const previousFingerprint =
+    readWarmupMetadata(options)?.codex_auth_fingerprint || null;
   if (previousFingerprint === null) return false;
   return previousFingerprint !== nextFingerprint;
 }
@@ -314,7 +343,10 @@ export function extractProjectMeta(options = {}) {
       testCmd = pkg.scripts?.test || null;
       lang = "JavaScript/ESM (Node.js)";
     } catch {}
-  } else if (existsSync(join(cwd, "pyproject.toml")) || existsSync(join(cwd, "setup.py"))) {
+  } else if (
+    existsSync(join(cwd, "pyproject.toml")) ||
+    existsSync(join(cwd, "setup.py"))
+  ) {
     lang = "Python";
   } else if (existsSync(join(cwd, "Cargo.toml"))) {
     lang = "Rust";
@@ -333,7 +365,12 @@ export function extractProjectMeta(options = {}) {
 }
 
 function loadMcpInventory(options = {}) {
-  const inventoryPath = join(resolveHomeDir(options.homeDir), ".claude", "cache", "mcp-inventory.json");
+  const inventoryPath = join(
+    resolveHomeDir(options.homeDir),
+    ".claude",
+    "cache",
+    "mcp-inventory.json",
+  );
   try {
     return JSON.parse(readFileSync(inventoryPath, "utf8"));
   } catch {
@@ -372,7 +409,8 @@ function loadMcpConfigs(options = {}) {
 
 export function checkSearchEngines(options = {}) {
   const inventory = options.inventory ?? loadMcpInventory(options);
-  const configuredServers = options.configuredServers ?? loadMcpConfigs(options);
+  const configuredServers =
+    options.configuredServers ?? loadMcpConfigs(options);
   const engines = [];
 
   const knownSearchServers = [...SEARCH_SERVER_ORDER, "context7"];
@@ -383,8 +421,13 @@ export function checkSearchEngines(options = {}) {
       const scopeData = inventory[scope];
       if (!scopeData?.servers) continue;
       for (const server of scopeData.servers) {
-        const tags = server.domain_tags || MCP_SERVER_DOMAIN_TAGS[server.name] || [];
-        if (tags.includes("search") || tags.includes("web") || tags.includes("research")) {
+        const tags =
+          server.domain_tags || MCP_SERVER_DOMAIN_TAGS[server.name] || [];
+        if (
+          tags.includes("search") ||
+          tags.includes("web") ||
+          tags.includes("research")
+        ) {
           allServerNames.add(server.name);
         }
       }
@@ -393,7 +436,11 @@ export function checkSearchEngines(options = {}) {
 
   for (const name of Object.keys(configuredServers)) {
     const tags = MCP_SERVER_DOMAIN_TAGS[name] || [];
-    if (tags.includes("search") || tags.includes("web") || knownSearchServers.includes(name)) {
+    if (
+      tags.includes("search") ||
+      tags.includes("web") ||
+      knownSearchServers.includes(name)
+    ) {
       allServerNames.add(name);
     }
   }
@@ -405,7 +452,9 @@ export function checkSearchEngines(options = {}) {
     let inventoryStatus = null;
     if (inventory) {
       for (const scope of ["codex", "gemini", "claude"]) {
-        const server = inventory[scope]?.servers?.find((item) => item.name === name);
+        const server = inventory[scope]?.servers?.find(
+          (item) => item.name === name,
+        );
         if (server) {
           inventoryStatus = {
             scope,
@@ -418,7 +467,10 @@ export function checkSearchEngines(options = {}) {
     }
 
     let status = "unavailable";
-    if (inventoryStatus?.status === "enabled" || inventoryStatus?.status === "configured") {
+    if (
+      inventoryStatus?.status === "enabled" ||
+      inventoryStatus?.status === "configured"
+    ) {
       status = "available";
     } else if (configured) {
       status = "configured";
@@ -456,13 +508,18 @@ export function checkSearchEngines(options = {}) {
 
 function buildTarget(target, options = {}) {
   const filePath = resolveTargetPath(target, options);
-  if (!options.force && isFresh(target, options) && !hasAuthFingerprintChanged(target, options)) {
+  if (
+    !options.force &&
+    isFresh(target, options) &&
+    !hasAuthFingerprintChanged(target, options)
+  ) {
     return { target, status: "skipped", file: filePath, reason: "fresh" };
   }
 
   let payload;
   if (target === "codexSkills") payload = scanCodexSkills(options);
-  else if (target === "tierEnvironment") payload = probeTierEnvironment(options);
+  else if (target === "tierEnvironment")
+    payload = probeTierEnvironment(options);
   else if (target === "projectMeta") payload = extractProjectMeta(options);
   else if (target === "searchEngines") payload = checkSearchEngines(options);
   else throw new Error(`unknown cache target: ${target}`);
@@ -508,7 +565,9 @@ export function buildAll(options = {}) {
   }
 
   const built = results.filter((result) => result.status === "built").length;
-  const skipped = results.filter((result) => result.status === "skipped").length;
+  const skipped = results.filter(
+    (result) => result.status === "skipped",
+  ).length;
   const failed = results.filter((result) => result.status === "failed").length;
   const authFingerprint = getCodexAuthFingerprint(options);
 

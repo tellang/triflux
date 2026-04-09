@@ -1,5 +1,5 @@
-import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { describe, it } from "node:test";
 
 import {
   buildLauncher,
@@ -74,7 +74,11 @@ describe("launcher-template: buildLauncher", () => {
   });
 
   it("profile이 있으면 codex env에 CODEX_PROFILE이 포함되어야 한다", () => {
-    const result = buildLauncher({ agent: "codex", prompt: "test", profile: "myprof" });
+    const result = buildLauncher({
+      agent: "codex",
+      prompt: "test",
+      profile: "myprof",
+    });
     assert.equal(result.env.CODEX_PROFILE, "myprof");
   });
 

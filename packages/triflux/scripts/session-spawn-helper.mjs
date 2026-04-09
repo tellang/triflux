@@ -1,14 +1,36 @@
 #!/usr/bin/env node
-import { spawn, execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 const SESSION_PREFIX = "tfx-isolated";
 const DEFAULT_ATTACH_PROFILE = "triflux";
 const SESSION_EXPIRE_MS = 30 * 60 * 1000;
 
 const STOP_WORDS = new Set([
-  "a", "an", "and", "as", "at", "be", "by", "for", "from", "in",
-  "is", "it", "of", "on", "or", "that", "the", "to", "with",
-  "작업", "요청", "합니다", "그리고", "에서", "으로",
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "be",
+  "by",
+  "for",
+  "from",
+  "in",
+  "is",
+  "it",
+  "of",
+  "on",
+  "or",
+  "that",
+  "the",
+  "to",
+  "with",
+  "작업",
+  "요청",
+  "합니다",
+  "그리고",
+  "에서",
+  "으로",
 ]);
 
 // ── psmux helpers ──
@@ -17,7 +39,9 @@ function hasPsmux() {
   try {
     execFileSync("psmux", ["-V"], { timeout: 2000, stdio: "ignore" });
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 function psmux(...args) {
@@ -27,16 +51,24 @@ function psmux(...args) {
 function psmuxCapture(sessionName) {
   try {
     return execFileSync("psmux", ["capture-pane", "-t", sessionName, "-p"], {
-      timeout: 5000, encoding: "utf8",
+      timeout: 5000,
+      encoding: "utf8",
     }).trim();
-  } catch { return ""; }
+  } catch {
+    return "";
+  }
 }
 
 function psmuxHasSession(sessionName) {
   try {
-    execFileSync("psmux", ["has-session", "-t", sessionName], { timeout: 2000, stdio: "ignore" });
+    execFileSync("psmux", ["has-session", "-t", sessionName], {
+      timeout: 2000,
+      stdio: "ignore",
+    });
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 // ── core functions ──
@@ -58,7 +90,13 @@ export function createIsolatedSession(options = {}) {
   // send prompt as claude command
   if (options.prompt) {
     const safePrompt = options.prompt.replace(/'/g, "'\\''");
-    psmux("send-keys", "-t", sessionName, `claude --prompt '${safePrompt}'`, "Enter");
+    psmux(
+      "send-keys",
+      "-t",
+      sessionName,
+      `claude --prompt '${safePrompt}'`,
+      "Enter",
+    );
   }
 
   return { sessionName };
@@ -70,8 +108,23 @@ export function attachWithWindowsTerminal(sessionName, options = {}) {
   const spawnFn = options.spawnFn || spawn;
 
   // sp (split-pane), not new-tab
-  const wtArgs = ["sp", "-p", profile, "--title", title, "--", "psmux", "attach-session", "-t", sessionName];
-  const child = spawnFn("wt.exe", wtArgs, { detached: true, stdio: "ignore", windowsHide: false });
+  const wtArgs = [
+    "sp",
+    "-p",
+    profile,
+    "--title",
+    title,
+    "--",
+    "psmux",
+    "attach-session",
+    "-t",
+    sessionName,
+  ];
+  const child = spawnFn("wt.exe", wtArgs, {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: false,
+  });
   child.unref();
   return wtArgs;
 }
@@ -86,7 +139,9 @@ export function waitForCompletion(sessionName, opts = {}) {
       if (!psmuxHasSession(sessionName) || Date.now() - start > maxMs) {
         const output = psmuxCapture(sessionName);
         // cleanup expired session
-        try { psmux("kill-session", "-t", sessionName); } catch {}
+        try {
+          psmux("kill-session", "-t", sessionName);
+        } catch {}
         res({ sessionName, output, expired: Date.now() - start > maxMs });
         return;
       }
@@ -99,34 +154,60 @@ export function waitForCompletion(sessionName, opts = {}) {
 // ── context drift (kept from codex) ──
 
 function tokenize(text) {
-  return String(text || "").toLowerCase()
+  return String(text || "")
+    .toLowerCase()
     .split(/[^\p{L}\p{N}_-]+/u)
     .filter((t) => t.length >= 2 && !STOP_WORDS.has(t));
 }
 
 export function evaluateContextDrift(input = {}) {
   const taskTokens = Array.from(new Set(tokenize(input.taskPrompt)));
-  if (!taskTokens.length) return { drift: false, overlapRatio: 1, reason: "task-token-empty" };
+  if (!taskTokens.length)
+    return { drift: false, overlapRatio: 1, reason: "task-token-empty" };
 
   const outputTokens = new Set(tokenize(input.latestOutput));
   const matched = taskTokens.filter((t) => outputTokens.has(t));
   const ratio = matched.length / taskTokens.length;
   const threshold = input.minOverlapRatio ?? 0.2;
 
-  return { drift: ratio < threshold, overlapRatio: ratio, reason: ratio < threshold ? "token-overlap-low" : "token-overlap-ok" };
+  return {
+    drift: ratio < threshold,
+    overlapRatio: ratio,
+    reason: ratio < threshold ? "token-overlap-low" : "token-overlap-ok",
+  };
 }
 
 // ── CLI ──
 
 function parseArgs(argv) {
-  const a = { spawn: false, prompt: "", attach: false, background: false, name: "" };
+  const a = {
+    spawn: false,
+    prompt: "",
+    attach: false,
+    background: false,
+    name: "",
+  };
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--spawn") { a.spawn = true; continue; }
-    if (arg === "--attach") { a.attach = true; continue; }
-    if (arg === "--background") { a.background = true; continue; }
-    if ((arg === "--prompt" || arg === "-p") && argv[i + 1]) { a.prompt = argv[++i]; continue; }
-    if ((arg === "--name" || arg === "-n") && argv[i + 1]) { a.name = argv[++i]; }
+    if (arg === "--spawn") {
+      a.spawn = true;
+      continue;
+    }
+    if (arg === "--attach") {
+      a.attach = true;
+      continue;
+    }
+    if (arg === "--background") {
+      a.background = true;
+      continue;
+    }
+    if ((arg === "--prompt" || arg === "-p") && argv[i + 1]) {
+      a.prompt = argv[++i];
+      continue;
+    }
+    if ((arg === "--name" || arg === "-n") && argv[i + 1]) {
+      a.name = argv[++i];
+    }
   }
   return a;
 }
@@ -135,25 +216,29 @@ async function main() {
   const args = parseArgs(process.argv);
 
   if (!args.spawn) {
-    process.stdout.write([
-      "session-spawn-helper: psmux 격리 세션 생성 도구",
-      "",
-      "사용법:",
-      "  node scripts/session-spawn-helper.mjs --spawn --prompt '작업 내용' [--attach] [--background] [--name 세션명]",
-      "",
-      "옵션:",
-      "  --spawn        세션 생성 (필수)",
-      "  --prompt TEXT   Claude에 전달할 프롬프트",
-      "  --attach        WT split-pane으로 attach",
-      "  --background    attach 없이 실행, 완료 시 결과 출력",
-      "  --name NAME     세션 이름 (기본: tfx-isolated-{ts})",
-      "",
-    ].join("\n"));
+    process.stdout.write(
+      [
+        "session-spawn-helper: psmux 격리 세션 생성 도구",
+        "",
+        "사용법:",
+        "  node scripts/session-spawn-helper.mjs --spawn --prompt '작업 내용' [--attach] [--background] [--name 세션명]",
+        "",
+        "옵션:",
+        "  --spawn        세션 생성 (필수)",
+        "  --prompt TEXT   Claude에 전달할 프롬프트",
+        "  --attach        WT split-pane으로 attach",
+        "  --background    attach 없이 실행, 완료 시 결과 출력",
+        "  --name NAME     세션 이름 (기본: tfx-isolated-{ts})",
+        "",
+      ].join("\n"),
+    );
     process.exit(0);
   }
 
   if (!hasPsmux()) {
-    process.stderr.write("ERROR: psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)\n");
+    process.stderr.write(
+      "ERROR: psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)\n",
+    );
     process.exit(1);
   }
 
@@ -174,10 +259,15 @@ async function main() {
     process.stdout.write(`[session-spawn] 백그라운드 대기 중...\n`);
     const result = await waitForCompletion(sessionName);
     const preview = (result.output || "(no output)").slice(0, 200);
-    process.stdout.write(`[session-spawn] 완료: ${sessionName} | expired=${result.expired} | preview=${preview}\n`);
+    process.stdout.write(
+      `[session-spawn] 완료: ${sessionName} | expired=${result.expired} | preview=${preview}\n`,
+    );
   }
 }
 
 if (process.argv[1]?.endsWith("session-spawn-helper.mjs")) {
-  main().catch((e) => { process.stderr.write(`${e.message}\n`); process.exit(1); });
+  main().catch((e) => {
+    process.stderr.write(`${e.message}\n`);
+    process.exit(1);
+  });
 }

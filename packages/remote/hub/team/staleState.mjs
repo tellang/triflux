@@ -1,13 +1,19 @@
 // hub/team/staleState.mjs
 // .omc/state 아래에 남은 stale team 상태를 탐지/정리한다.
 
-import { existsSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { homedir } from "node:os";
-
-import { forceCleanupTeam } from "./nativeProxy.mjs";
+import { dirname, join, resolve } from "node:path";
 import { isPidAlive } from "@triflux/core/hub/lib/process-utils.mjs";
+import { forceCleanupTeam } from "./nativeProxy.mjs";
 
 export const TEAM_STATE_FILE_NAME = "team-state.json";
 export const STALE_TEAM_MAX_AGE_MS = 60 * 60 * 1000;
@@ -99,7 +105,9 @@ function normalizeProcessEntries(processEntries = []) {
 
   return processEntries.map((entry) => ({
     pid: Number(entry?.pid ?? entry?.ProcessId ?? 0),
-    command: String(entry?.command ?? entry?.CommandLine ?? entry?.Name ?? "").toLowerCase(),
+    command: String(
+      entry?.command ?? entry?.CommandLine ?? entry?.Name ?? "",
+    ).toLowerCase(),
   }));
 }
 
@@ -166,9 +174,11 @@ function resolveLiveness(state, sessionId, liveSessionNames, processEntries) {
 
   const processTokens = findProcessTokens(state, sessionId);
   if (processTokens.length > 0) {
-    const matched = processEntries.find((entry) => (
-      entry.pid > 0 && processTokens.some((token) => entry.command.includes(token))
-    ));
+    const matched = processEntries.find(
+      (entry) =>
+        entry.pid > 0 &&
+        processTokens.some((token) => entry.command.includes(token)),
+    );
     if (matched) {
       return { active: true, reason: `command:${matched.pid}` };
     }
@@ -258,14 +268,23 @@ export function findNearestOmcStateDir(startDir = process.cwd()) {
 }
 
 export function inspectStaleOmcTeams(options = {}) {
-  const stateRoot = options.stateRoot !== undefined ? options.stateRoot : findNearestOmcStateDir(options.startDir || process.cwd());
+  const stateRoot =
+    options.stateRoot !== undefined
+      ? options.stateRoot
+      : findNearestOmcStateDir(options.startDir || process.cwd());
   const requestedTeamsRoot = options.teamsRoot || CLAUDE_TEAMS_ROOT;
-  const teamsRoot = safeStat(requestedTeamsRoot)?.isDirectory() ? requestedTeamsRoot : null;
+  const teamsRoot = safeStat(requestedTeamsRoot)?.isDirectory()
+    ? requestedTeamsRoot
+    : null;
 
   const liveSessionNames = new Set(options.liveSessionNames || []);
-  const processEntries = normalizeProcessEntries(options.processEntries || readProcessEntries());
+  const processEntries = normalizeProcessEntries(
+    options.processEntries || readProcessEntries(),
+  );
   const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
-  const maxAgeMs = Number.isFinite(options.maxAgeMs) ? options.maxAgeMs : STALE_TEAM_MAX_AGE_MS;
+  const maxAgeMs = Number.isFinite(options.maxAgeMs)
+    ? options.maxAgeMs
+    : STALE_TEAM_MAX_AGE_MS;
   const targets = [
     ...(stateRoot ? collectTeamStateTargets(stateRoot) : []),
     ...collectClaudeTeamTargets(teamsRoot),
@@ -291,25 +310,48 @@ export function inspectStaleOmcTeams(options = {}) {
 
     const fileStat = safeStat(target.stateFile);
     const teamDirStat = target.teamDir ? safeStat(target.teamDir) : null;
-    const createdAtMs = Number.isFinite(state?.createdAt) ? state.createdAt : null;
-    const startedAtMs = parseStartedAtMs(state?.started_at)
-      ?? parseStartedAtMs(state?.startedAt)
-      ?? createdAtMs
-      ?? fileStat?.mtimeMs
-      ?? teamDirStat?.mtimeMs
-      ?? null;
+    const createdAtMs = Number.isFinite(state?.createdAt)
+      ? state.createdAt
+      : null;
+    const startedAtMs =
+      parseStartedAtMs(state?.started_at) ??
+      parseStartedAtMs(state?.startedAt) ??
+      createdAtMs ??
+      fileStat?.mtimeMs ??
+      teamDirStat?.mtimeMs ??
+      null;
     const ageMs = startedAtMs == null ? null : Math.max(0, nowMs - startedAtMs);
-    const teamName = state?.teamName || state?.team_name || state?.native?.teamName || state?.name || target.teamName || null;
-    const livenessState = target.scope === "claude_team"
-      ? {
-          ...(state || {}),
-          name: teamName,
-          teamName,
-          sessionName: state?.leadSessionId || state?.lead_session_id || state?.sessionName || target.sessionId,
-          sessionId: state?.leadSessionId || state?.lead_session_id || state?.sessionId || target.sessionId,
-        }
-      : state;
-    const liveness = resolveLiveness(livenessState, target.sessionId, liveSessionNames, processEntries);
+    const teamName =
+      state?.teamName ||
+      state?.team_name ||
+      state?.native?.teamName ||
+      state?.name ||
+      target.teamName ||
+      null;
+    const livenessState =
+      target.scope === "claude_team"
+        ? {
+            ...(state || {}),
+            name: teamName,
+            teamName,
+            sessionName:
+              state?.leadSessionId ||
+              state?.lead_session_id ||
+              state?.sessionName ||
+              target.sessionId,
+            sessionId:
+              state?.leadSessionId ||
+              state?.lead_session_id ||
+              state?.sessionId ||
+              target.sessionId,
+          }
+        : state;
+    const liveness = resolveLiveness(
+      livenessState,
+      target.sessionId,
+      liveSessionNames,
+      processEntries,
+    );
     const stale = ageMs != null && ageMs >= maxAgeMs && !liveness.active;
 
     entries.push({

@@ -9,9 +9,11 @@
 
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-
+import {
+  detectHostOs,
+  shellQuoteForHost,
+} from "@triflux/core/hub/lib/ssh-command.mjs";
 import { detectInputWait, PROBE_LEVELS } from "./health-probe.mjs";
-import { shellQuoteForHost, detectHostOs } from "@triflux/core/hub/lib/ssh-command.mjs";
 
 export const REMOTE_WATCHER_STATES = Object.freeze({
   WATCHING: "watching",
@@ -62,7 +64,10 @@ function freezeStatus(status) {
     Object.fromEntries(
       Object.entries(status.sessions || {})
         .sort(([left], [right]) => left.localeCompare(right))
-        .map(([sessionName, record]) => [sessionName, freezeSessionRecord(record)]),
+        .map(([sessionName, record]) => [
+          sessionName,
+          freezeSessionRecord(record),
+        ]),
     ),
   );
 
@@ -117,7 +122,9 @@ function hasMeaningfulActivity(captured) {
 }
 
 function detectCompletion(captured) {
-  const matches = Array.from(String(captured || "").matchAll(COMPLETION_TOKEN_RE));
+  const matches = Array.from(
+    String(captured || "").matchAll(COMPLETION_TOKEN_RE),
+  );
   const match = matches.at(-1);
   if (!match) {
     return {
@@ -128,7 +135,8 @@ function detectCompletion(captured) {
     };
   }
 
-  const parsedExitCode = match[2] == null ? null : Number.parseInt(match[2], 10);
+  const parsedExitCode =
+    match[2] == null ? null : Number.parseInt(match[2], 10);
   return {
     detected: true,
     exitCode: Number.isFinite(parsedExitCode) ? parsedExitCode : null,
@@ -143,7 +151,10 @@ function parseSessionNames(rawOutput, sessionPrefix) {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => line.split(":")[0]?.trim())
-    .filter((sessionName) => Boolean(sessionName) && sessionName.startsWith(sessionPrefix));
+    .filter(
+      (sessionName) =>
+        Boolean(sessionName) && sessionName.startsWith(sessionPrefix),
+    );
 }
 
 function buildExecOptions(config) {
@@ -187,7 +198,9 @@ function captureSpawnSession(sessionName, config) {
   );
   return {
     paneTarget,
-    captured: String(output || "").replace(/\r/g, "").trimEnd(),
+    captured: String(output || "")
+      .replace(/\r/g, "")
+      .trimEnd(),
   };
 }
 
@@ -221,7 +234,10 @@ function createSessionRecord(sessionName, config, now) {
 }
 
 function isTerminalState(state) {
-  return state === REMOTE_WATCHER_STATES.COMPLETED || state === REMOTE_WATCHER_STATES.FAILED;
+  return (
+    state === REMOTE_WATCHER_STATES.COMPLETED ||
+    state === REMOTE_WATCHER_STATES.FAILED
+  );
 }
 
 export function createRemoteWatcher(opts = {}) {
@@ -252,26 +268,30 @@ export function createRemoteWatcher(opts = {}) {
   }
 
   function emitSessionEvent(eventName, nextRecord, now) {
-    emitter.emit(eventName, Object.freeze({
-      exitCode: nextRecord.exitCode,
-      host: nextRecord.host,
-      inputWaitPattern: nextRecord.inputWaitPattern,
-      output: nextRecord.lastOutput,
-      paneTarget: nextRecord.paneTarget,
-      probeLevel: nextRecord.lastProbeLevel,
-      promptIdlePattern: nextRecord.promptIdlePattern,
-      reason: nextRecord.reason,
-      sessionName: nextRecord.sessionName,
-      state: nextRecord.state,
-      ts: now,
-    }));
+    emitter.emit(
+      eventName,
+      Object.freeze({
+        exitCode: nextRecord.exitCode,
+        host: nextRecord.host,
+        inputWaitPattern: nextRecord.inputWaitPattern,
+        output: nextRecord.lastOutput,
+        paneTarget: nextRecord.paneTarget,
+        probeLevel: nextRecord.lastProbeLevel,
+        promptIdlePattern: nextRecord.promptIdlePattern,
+        reason: nextRecord.reason,
+        sessionName: nextRecord.sessionName,
+        state: nextRecord.state,
+        ts: now,
+      }),
+    );
   }
 
   function classifySession(previousRecord, captured, now) {
     const completion = detectCompletion(captured);
     const inputWait = detectInputWait(captured);
     const promptIdle = detectPromptIdle(captured);
-    const hasActivity = previousRecord.hasActivity || hasMeaningfulActivity(captured);
+    const hasActivity =
+      previousRecord.hasActivity || hasMeaningfulActivity(captured);
 
     let nextState = REMOTE_WATCHER_STATES.WATCHING;
     let reason = "watching";
@@ -292,9 +312,9 @@ export function createRemoteWatcher(opts = {}) {
         eventName = "sessionCompleted";
       }
     } else if (
-      promptIdle.detected
-      && hasActivity
-      && (!inputWait.detected || inputWait.pattern === BARE_INPUT_WAIT_PATTERN)
+      promptIdle.detected &&
+      hasActivity &&
+      (!inputWait.detected || inputWait.pattern === BARE_INPUT_WAIT_PATTERN)
     ) {
       nextState = REMOTE_WATCHER_STATES.COMPLETED;
       reason = "prompt_idle";
@@ -325,10 +345,10 @@ export function createRemoteWatcher(opts = {}) {
     };
 
     if (
-      eventName
-      && previousRecord.state === nextRecord.state
-      && previousRecord.reason === nextRecord.reason
-      && previousRecord.exitCode === nextRecord.exitCode
+      eventName &&
+      previousRecord.state === nextRecord.state &&
+      previousRecord.reason === nextRecord.reason &&
+      previousRecord.exitCode === nextRecord.exitCode
     ) {
       return { eventName: null, nextRecord };
     }
@@ -375,7 +395,10 @@ export function createRemoteWatcher(opts = {}) {
           : createSessionRecord(sessionName, config, now);
 
         try {
-          const { paneTarget, captured } = captureSpawnSession(sessionName, config);
+          const { paneTarget, captured } = captureSpawnSession(
+            sessionName,
+            config,
+          );
           const { eventName, nextRecord } = classifySession(
             { ...previousRecord, paneTarget },
             captured,
@@ -396,7 +419,10 @@ export function createRemoteWatcher(opts = {}) {
             state: REMOTE_WATCHER_STATES.FAILED,
           };
           nextSessions[sessionName] = failedRecord;
-          queuedEvents.push({ eventName: "sessionFailed", record: failedRecord });
+          queuedEvents.push({
+            eventName: "sessionFailed",
+            record: failedRecord,
+          });
           setStatus({
             ...status,
             lastError: toErrorRecord(error),
@@ -407,9 +433,14 @@ export function createRemoteWatcher(opts = {}) {
         }
       }
 
-      for (const [sessionName, previousRecord] of Object.entries(status.sessions)) {
+      for (const [sessionName, previousRecord] of Object.entries(
+        status.sessions,
+      )) {
         if (activeSet.has(sessionName)) continue;
-        const { eventName, nextRecord } = markMissingSession(previousRecord, now);
+        const { eventName, nextRecord } = markMissingSession(
+          previousRecord,
+          now,
+        );
         nextSessions[sessionName] = nextRecord;
         if (eventName) {
           queuedEvents.push({ eventName, record: nextRecord });

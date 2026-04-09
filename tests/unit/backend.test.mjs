@@ -1,14 +1,15 @@
 // tests/unit/backend.test.mjs — Backend 인터페이스 단위 테스트
-import { describe, it } from "node:test";
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
 
 import {
+  ClaudeBackend,
   CodexBackend,
   GeminiBackend,
-  ClaudeBackend,
   getBackend,
   getBackendForAgent,
   listBackends,
@@ -32,7 +33,10 @@ describe("CodexBackend", () => {
   });
 
   it("buildArgs — codex exec ... --color never 포함", () => {
-    const cmd = backend.buildArgs("(Get-Content -Raw '/tmp/p.txt')", "/tmp/r.txt");
+    const cmd = backend.buildArgs(
+      "(Get-Content -Raw '/tmp/p.txt')",
+      "/tmp/r.txt",
+    );
     assert.ok(cmd.includes("codex exec"), `codex exec 포함: ${cmd}`);
     assert.ok(cmd.includes("--color never"), `--color never 포함: ${cmd}`);
     assert.ok(cmd.includes("/tmp/r.txt"), `resultFile 포함: ${cmd}`);
@@ -55,9 +59,15 @@ describe("GeminiBackend", () => {
   });
 
   it("buildArgs — gemini --prompt ... --output-format text > result 포함", () => {
-    const cmd = backend.buildArgs("(Get-Content -Raw '/tmp/p.txt')", "/tmp/r.txt");
+    const cmd = backend.buildArgs(
+      "(Get-Content -Raw '/tmp/p.txt')",
+      "/tmp/r.txt",
+    );
     assert.ok(cmd.includes("gemini --prompt"), `gemini --prompt 포함: ${cmd}`);
-    assert.ok(cmd.includes("--output-format text"), `--output-format text 포함: ${cmd}`);
+    assert.ok(
+      cmd.includes("--output-format text"),
+      `--output-format text 포함: ${cmd}`,
+    );
     assert.ok(cmd.includes("> '/tmp/r.txt'"), `> result 포함: ${cmd}`);
   });
 
@@ -78,9 +88,15 @@ describe("ClaudeBackend", () => {
   });
 
   it("buildArgs — claude --print ... --output-format text 포함", () => {
-    const cmd = backend.buildArgs("(Get-Content -Raw '/tmp/p.txt')", "/tmp/r.txt");
+    const cmd = backend.buildArgs(
+      "(Get-Content -Raw '/tmp/p.txt')",
+      "/tmp/r.txt",
+    );
     assert.ok(cmd.includes("claude --print"), `claude --print 포함: ${cmd}`);
-    assert.ok(cmd.includes("--output-format text"), `--output-format text 포함: ${cmd}`);
+    assert.ok(
+      cmd.includes("--output-format text"),
+      `--output-format text 포함: ${cmd}`,
+    );
     assert.ok(cmd.includes("/tmp/r.txt"), `resultFile 포함: ${cmd}`);
   });
 
@@ -155,7 +171,10 @@ describe("getBackendForAgent: 에이전트명 → Backend", () => {
   });
 
   it("알 수 없는 에이전트명 → throw (지원하지 않는)", () => {
-    assert.throws(() => getBackendForAgent("nonexistent-agent-xyz"), /지원하지 않는/);
+    assert.throws(
+      () => getBackendForAgent("nonexistent-agent-xyz"),
+      /지원하지 않는/,
+    );
   });
 });
 
@@ -180,14 +199,16 @@ describe("listBackends", () => {
 // 5. agent-map.json 정합성 — 모든 에이전트가 유효한 백엔드로 해석됨
 // ========================================================================
 describe("agent-map.json 정합성", () => {
-  const agentMap = JSON.parse(readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"));
+  const agentMap = JSON.parse(
+    readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"),
+  );
   const validCliNames = ["codex", "gemini", "claude"];
 
   it("agent-map.json의 모든 값이 유효한 CLI 이름", () => {
     for (const [agent, cli] of Object.entries(agentMap)) {
       assert.ok(
         validCliNames.includes(cli),
-        `agent-map.json["${agent}"] = "${cli}" — 유효하지 않은 CLI 이름`
+        `agent-map.json["${agent}"] = "${cli}" — 유효하지 않은 CLI 이름`,
       );
     }
   });
@@ -196,8 +217,14 @@ describe("agent-map.json 정합성", () => {
     for (const agent of Object.keys(agentMap)) {
       const b = getBackendForAgent(agent);
       assert.ok(b, `getBackendForAgent("${agent}") 반환값 있어야 함`);
-      assert.ok(typeof b.name === "function", `"${agent}" 백엔드에 name() 메서드 필요`);
-      assert.ok(typeof b.buildArgs === "function", `"${agent}" 백엔드에 buildArgs() 메서드 필요`);
+      assert.ok(
+        typeof b.name === "function",
+        `"${agent}" 백엔드에 name() 메서드 필요`,
+      );
+      assert.ok(
+        typeof b.buildArgs === "function",
+        `"${agent}" 백엔드에 buildArgs() 메서드 필요`,
+      );
     }
   });
 });

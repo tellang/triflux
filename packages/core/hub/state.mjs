@@ -1,20 +1,34 @@
-import { execSync } from 'node:child_process';
-import { mkdirSync, openSync, closeSync, unlinkSync, writeFileSync, readFileSync, renameSync, existsSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { execSync } from "node:child_process";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
-const PID_FILE_NAME = 'hub.pid';
-const LEGACY_STATE_FILE_NAME = 'hub-state.json';
-const LOCK_FILE_NAME = 'hub-start.lock';
+const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const PID_FILE_NAME = "hub.pid";
+const LEGACY_STATE_FILE_NAME = "hub-state.json";
+const LOCK_FILE_NAME = "hub-start.lock";
 
 let heldLockPath = null;
 let heldLockFd = null;
 let cachedVersionHash = null;
 
 function getStateDir(options = {}) {
-  return options.stateDir || process.env.TFX_HUB_STATE_DIR?.trim() || join(homedir(), '.claude', 'cache', 'tfx-hub');
+  return (
+    options.stateDir ||
+    process.env.TFX_HUB_STATE_DIR?.trim() ||
+    join(homedir(), ".claude", "cache", "tfx-hub")
+  );
 }
 
 function getStatePath(options = {}) {
@@ -55,25 +69,32 @@ function safeReplaceFile(tempPath, targetPath) {
   try {
     renameSync(tempPath, targetPath);
   } catch (error) {
-    if (!['EEXIST', 'EPERM', 'EACCES'].includes(error?.code)) {
-      try { unlinkSync(tempPath); } catch {}
+    if (!["EEXIST", "EPERM", "EACCES"].includes(error?.code)) {
+      try {
+        unlinkSync(tempPath);
+      } catch {}
       throw error;
     }
-    try { unlinkSync(targetPath); } catch {}
+    try {
+      unlinkSync(targetPath);
+    } catch {}
     renameSync(tempPath, targetPath);
   }
 }
 
 function writeJsonFile(targetPath, payload) {
   const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
   safeReplaceFile(tempPath, targetPath);
 }
 
 function readJsonFile(filePath) {
   try {
     if (!existsSync(filePath)) return null;
-    return parseJson(readFileSync(filePath, 'utf8'), null);
+    return parseJson(readFileSync(filePath, "utf8"), null);
   } catch {
     return null;
   }
@@ -82,7 +103,7 @@ function readJsonFile(filePath) {
 /**
  * 허브의 현재 상태(PID, 포트, 버전 등)를 파일에 기록합니다.
  * 원자적(atomic) 쓰기를 위해 임시 파일을 생성한 후 교체하는 방식을 사용합니다.
- * 
+ *
  * @param {object} payload - 상태 데이터
  * @param {number} payload.pid - 허브 프로세스 ID
  * @param {number} payload.port - 허브 서버 포트
@@ -93,31 +114,39 @@ function readJsonFile(filePath) {
  * @param {string} [options.stateDir] - 상태 파일이 저장될 디렉토리
  * @returns {object} 기록된 상태 데이터
  */
-export function writeState({ pid, port, version, sessionId, startedAt, ...rest }, options = {}) {
+export function writeState(
+  { pid, port, version, sessionId, startedAt, ...rest },
+  options = {},
+) {
   const stateDir = getStateDir(options);
   const statePath = getStatePath(options);
   const payload = { pid, port, version, sessionId, startedAt, ...rest };
 
   mkdirSync(stateDir, { recursive: true });
   writeJsonFile(statePath, payload);
-  try { unlinkSync(getLegacyStatePath(options)); } catch {}
+  try {
+    unlinkSync(getLegacyStatePath(options));
+  } catch {}
   return payload;
 }
 
 /**
  * 파일로부터 허브의 현재 상태를 읽어옵니다.
- * 
+ *
  * @param {object} [options] - 옵션
  * @param {string} [options.stateDir] - 상태 파일이 저장된 디렉토리
  * @returns {object|null} 읽어온 상태 데이터 또는 실패 시 null
  */
 export function readState(options = {}) {
-  return readJsonFile(getStatePath(options)) ?? readJsonFile(getLegacyStatePath(options));
+  return (
+    readJsonFile(getStatePath(options)) ??
+    readJsonFile(getLegacyStatePath(options))
+  );
 }
 
 /**
  * 지정된 포트에서 실행 중인 허브 서버의 헬스 체크를 수행합니다.
- * 
+ *
  * @param {number|string} port - 서버 포트
  * @param {object} [options] - 옵션
  * @param {number} [options.timeoutMs=1000] - 요청 타임아웃
@@ -133,7 +162,7 @@ export async function isServerHealthy(port, options = {}) {
 
   try {
     const response = await fetch(`${baseUrl}/health`, {
-      method: 'GET',
+      method: "GET",
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) return false;
@@ -147,7 +176,7 @@ export async function isServerHealthy(port, options = {}) {
 /**
  * 현재 프로젝트의 버전 해시를 생성합니다.
  * package.json의 버전과 Git commit SHA를 조합합니다.
- * 
+ *
  * @param {object} [options] - 옵션
  * @param {boolean} [options.force=false] - 캐시를 무시하고 새로 생성할지 여부
  * @returns {string} 버전 해시 문자열
@@ -155,21 +184,21 @@ export async function isServerHealthy(port, options = {}) {
 export function getVersionHash(options = {}) {
   if (cachedVersionHash && !options.force) return cachedVersionHash;
 
-  const packageJsonPath = join(PROJECT_ROOT, 'package.json');
-  const pkg = parseJson(readFileSync(packageJsonPath, 'utf8'), {});
-  const version = String(pkg?.version || '0.0.0').trim();
+  const packageJsonPath = join(PROJECT_ROOT, "package.json");
+  const pkg = parseJson(readFileSync(packageJsonPath, "utf8"), {});
+  const version = String(pkg?.version || "0.0.0").trim();
 
-  let sha = String(process.env.TFX_HUB_GIT_SHA || '').trim();
+  let sha = String(process.env.TFX_HUB_GIT_SHA || "").trim();
   if (!sha) {
     try {
-      sha = execSync('git rev-parse --short HEAD', {
+      sha = execSync("git rev-parse --short HEAD", {
         cwd: PROJECT_ROOT,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
         windowsHide: true,
       }).trim();
     } catch {
-      sha = '';
+      sha = "";
     }
   }
 
@@ -180,7 +209,7 @@ export function getVersionHash(options = {}) {
 /**
  * 허브 시작 시 중복 실행을 방지하기 위한 잠금(lock)을 획득합니다.
  * 이미 실행 중인 다른 프로세스가 있는지 확인하고 유효한 잠금을 획득할 때까지 재시도합니다.
- * 
+ *
  * @param {object} [options] - 옵션
  * @param {number} [options.timeoutMs=3000] - 최대 대기 시간
  * @param {number} [options.pollMs=50] - 재시도 간격
@@ -202,27 +231,37 @@ export async function acquireLock(options = {}) {
 
   while (Date.now() <= deadline) {
     try {
-      const fd = openSync(lockPath, 'wx', 0o600);
-      writeFileSync(fd, `${JSON.stringify({
-        pid: process.pid,
-        createdAt: new Date().toISOString(),
-      }, null, 2)}\n`, 'utf8');
+      const fd = openSync(lockPath, "wx", 0o600);
+      writeFileSync(
+        fd,
+        `${JSON.stringify(
+          {
+            pid: process.pid,
+            createdAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
       heldLockFd = fd;
       heldLockPath = lockPath;
       return { path: lockPath };
     } catch (error) {
-      if (error?.code !== 'EEXIST') {
+      if (error?.code !== "EEXIST") {
         throw error;
       }
 
       try {
-        const raw = readFileSync(lockPath, 'utf8');
+        const raw = readFileSync(lockPath, "utf8");
         const data = parseJson(raw, {});
         const stats = statSync(lockPath);
         const staleByPid = !isPidAlive(data?.pid);
         const staleByAge = Date.now() - stats.mtimeMs > timeoutMs;
         if (staleByPid || staleByAge) {
-          try { unlinkSync(lockPath); } catch {}
+          try {
+            unlinkSync(lockPath);
+          } catch {}
           continue;
         }
       } catch {}
@@ -236,7 +275,7 @@ export async function acquireLock(options = {}) {
 
 /**
  * 획득했던 잠금을 해제합니다. 잠금 파일을 삭제하고 관련 리소스를 정리합니다.
- * 
+ *
  * @param {object} [options] - 옵션
  * @param {string} [options.lockPath] - 명시적인 잠금 파일 경로
  */
@@ -244,7 +283,9 @@ export function releaseLock(options = {}) {
   const lockPath = options.lockPath || heldLockPath || getLockPath(options);
 
   if (heldLockFd !== null) {
-    try { closeSync(heldLockFd); } catch {}
+    try {
+      closeSync(heldLockFd);
+    } catch {}
     heldLockFd = null;
   }
 

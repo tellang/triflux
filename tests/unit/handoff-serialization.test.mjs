@@ -1,10 +1,14 @@
-import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { afterEach, describe, it } from "node:test";
 
-import { buildHandoffPrompt, collectHandoffContext, serializeHandoff } from "../../scripts/lib/handoff.mjs";
+import {
+  buildHandoffPrompt,
+  collectHandoffContext,
+  serializeHandoff,
+} from "../../scripts/lib/handoff.mjs";
 
 const tempDirs = [];
 
@@ -53,8 +57,10 @@ describe("collectHandoffContext()", () => {
       commandRunner: createCommandRunner({
         "git rev-parse --show-toplevel": "/repo/triflux\n",
         "git rev-parse --abbrev-ref HEAD": "feature/lake3\n",
-        "git status --short": " M bin/triflux.mjs\n?? scripts/lib/handoff.mjs\nR  old.mjs -> new.mjs\n",
-        "git diff --stat --no-color": " bin/triflux.mjs | 10 +++++-----\n 1 file changed, 5 insertions(+), 5 deletions(-)\n",
+        "git status --short":
+          " M bin/triflux.mjs\n?? scripts/lib/handoff.mjs\nR  old.mjs -> new.mjs\n",
+        "git diff --stat --no-color":
+          " bin/triflux.mjs | 10 +++++-----\n 1 file changed, 5 insertions(+), 5 deletions(-)\n",
         "git rev-list --left-right --count @{upstream}...HEAD": "1 3\n",
       }),
     });
@@ -62,7 +68,11 @@ describe("collectHandoffContext()", () => {
     assert.equal(context.repository, "triflux");
     assert.equal(context.branch, "feature/lake3");
     assert.deepEqual(context.upstream, { ahead: 3, behind: 1 });
-    assert.deepEqual(context.changedFiles, ["bin/triflux.mjs", "scripts/lib/handoff.mjs", "new.mjs"]);
+    assert.deepEqual(context.changedFiles, [
+      "bin/triflux.mjs",
+      "scripts/lib/handoff.mjs",
+      "new.mjs",
+    ]);
     assert.deepEqual(context.decisions, ["API 경로 유지", "테스트 우선"]);
   });
 
@@ -109,7 +119,9 @@ describe("collectHandoffContext()", () => {
     const context = collectHandoffContext({
       cwd,
       generatedAt: "2026-04-04T10:00:00.000Z",
-      commandRunner: () => { throw new Error("no git"); },
+      commandRunner: () => {
+        throw new Error("no git");
+      },
     });
     assert.equal(context.repository, basename(resolve(cwd)));
   });
@@ -154,7 +166,10 @@ describe("collectHandoffContext()", () => {
       generatedAt: "2026-04-04T10:00:00.000Z",
       commandRunner: makeGitRunner(),
     });
-    assert.deepEqual(context.claudeMdPaths, ["/custom/CLAUDE.md", "/other/CLAUDE.md"]);
+    assert.deepEqual(context.claudeMdPaths, [
+      "/custom/CLAUDE.md",
+      "/other/CLAUDE.md",
+    ]);
   });
 
   it("빈 git status는 빈 changedFiles/fileStatus를 반환한다", () => {
@@ -400,7 +415,11 @@ describe("serializeHandoff()", () => {
   it("결정사항 파일을 읽어 프롬프트를 생성한다", () => {
     const cwd = createTempDir("triflux-handoff-prompt-");
     const decisionFile = join(cwd, "decisions.md");
-    writeFileSync(decisionFile, "- DB 스키마 동결\n- API 응답 필드 유지\n", "utf8");
+    writeFileSync(
+      decisionFile,
+      "- DB 스키마 동결\n- API 응답 필드 유지\n",
+      "utf8",
+    );
 
     const result = serializeHandoff({
       cwd,
@@ -410,14 +429,18 @@ describe("serializeHandoff()", () => {
         "git rev-parse --show-toplevel": "/repo/triflux\n",
         "git rev-parse --abbrev-ref HEAD": "main\n",
         "git status --short": " M docs/prd/lake3-remote-handoff.md\n",
-        "git diff --stat --no-color": " docs/prd/lake3-remote-handoff.md | 3 ++-\n",
+        "git diff --stat --no-color":
+          " docs/prd/lake3-remote-handoff.md | 3 ++-\n",
         "git rev-list --left-right --count @{upstream}...HEAD": "0 0\n",
       }),
     });
 
     assert.equal(result.prompt.includes("## TFX Remote Handoff"), true);
     assert.equal(result.prompt.includes("- DB 스키마 동결"), true);
-    assert.equal(result.prompt.includes("docs/prd/lake3-remote-handoff.md"), true);
+    assert.equal(
+      result.prompt.includes("docs/prd/lake3-remote-handoff.md"),
+      true,
+    );
     assert.equal(result.prompt.includes("branch: main"), true);
   });
 

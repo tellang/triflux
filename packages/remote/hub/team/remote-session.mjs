@@ -2,13 +2,18 @@
 // Extracted from scripts/remote-spawn.mjs for reuse by swarm-hypervisor.
 // Pure functions + SSH operations. No psmux, no WT, no CLI arg parsing.
 
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join, posix as posixPath, win32 as win32Path } from 'node:path';
-import { execSshWithRetry } from '@triflux/core/hub/lib/ssh-retry.mjs';
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  basename,
+  join,
+  posix as posixPath,
+  win32 as win32Path,
+} from "node:path";
+import { execSshWithRetry } from "@triflux/core/hub/lib/ssh-retry.mjs";
 
 const REMOTE_ENV_TTL_MS = 86_400_000; // 24h
-const REMOTE_STAGE_ROOT = 'tfx-remote';
+const REMOTE_STAGE_ROOT = "tfx-remote";
 const SAFE_HOST_RE = /^[a-zA-Z0-9._-]+$/;
 
 // ── Shell quoting utilities ─────────────────────────────────────
@@ -22,11 +27,11 @@ export function escapePwshSingleQuoted(value) {
 }
 
 export function escapePwshDoubleQuoted(value) {
-  return String(value).replace(/`/g, '``').replace(/"/g, '`"');
+  return String(value).replace(/`/g, "``").replace(/"/g, '`"');
 }
 
 function normalizeCommandPath(value) {
-  return String(value).replace(/\\/g, '/');
+  return String(value).replace(/\\/g, "/");
 }
 
 // ── Validation ──────────────────────────────────────────────────
@@ -47,7 +52,7 @@ function parseProbeLines(text) {
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const idx = line.indexOf('=');
+        const idx = line.indexOf("=");
         return idx === -1 ? null : [line.slice(0, idx), line.slice(idx + 1)];
       })
       .filter(Boolean),
@@ -55,24 +60,27 @@ function parseProbeLines(text) {
 }
 
 function normalizePwshProbeEnv(parsed) {
-  if (parsed.shell !== 'pwsh' || parsed.os !== 'win32') return null;
+  if (parsed.shell !== "pwsh" || parsed.os !== "win32") return null;
   if (!parsed.home) return null;
   return Object.freeze({
-    claudePath: (!parsed.claude || parsed.claude === 'notfound') ? null : parsed.claude,
+    claudePath:
+      !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
     home: parsed.home,
-    os: 'win32',
-    shell: 'pwsh',
+    os: "win32",
+    shell: "pwsh",
   });
 }
 
 function normalizePosixProbeEnv(parsed) {
-  const os = parsed.os === 'darwin' ? 'darwin' : parsed.os === 'linux' ? 'linux' : null;
+  const os =
+    parsed.os === "darwin" ? "darwin" : parsed.os === "linux" ? "linux" : null;
   if (!os || !parsed.home) return null;
   return Object.freeze({
-    claudePath: (!parsed.claude || parsed.claude === 'notfound') ? null : parsed.claude,
+    claudePath:
+      !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
     home: parsed.home,
     os,
-    shell: parsed.shell === 'zsh' ? 'zsh' : 'bash',
+    shell: parsed.shell === "zsh" ? "zsh" : "bash",
   });
 }
 
@@ -81,14 +89,20 @@ function probeRemoteEnvViaPwsh(host) {
     "Write-Output 'shell=pwsh'",
     'Write-Output "home=$env:USERPROFILE"',
     'if (Test-Path "$env:USERPROFILE\\.local\\bin\\claude.exe") { Write-Output "claude=$env:USERPROFILE\\.local\\bin\\claude.exe" } elseif (Get-Command claude -ErrorAction SilentlyContinue) { Write-Output "claude=$((Get-Command claude).Source)" } else { Write-Output \'claude=notfound\' }',
-    'Write-Output "os=$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) ? \'win32\' : \'other\')"',
-  ].join('; ');
+    "Write-Output \"os=$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) ? 'win32' : 'other')\"",
+  ].join("; ");
 
   try {
-    const output = execSshWithRetry([host, 'pwsh', '-NoProfile', '-Command', command], {
-      encoding: 'utf8', timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'],
-      maxRetries: 2, baseDelayMs: 1000,
-    });
+    const output = execSshWithRetry(
+      [host, "pwsh", "-NoProfile", "-Command", command],
+      {
+        encoding: "utf8",
+        timeout: 15000,
+        stdio: ["pipe", "pipe", "pipe"],
+        maxRetries: 2,
+        baseDelayMs: 1000,
+      },
+    );
     return normalizePwshProbeEnv(parseProbeLines(output));
   } catch {
     return null;
@@ -97,16 +111,19 @@ function probeRemoteEnvViaPwsh(host) {
 
 function probeRemoteEnvViaPosix(host) {
   const script = [
-    'echo shell=$(basename $SHELL)',
-    'echo home=$HOME',
-    'command -v claude >/dev/null 2>&1 && echo claude=$(command -v claude) || echo claude=notfound',
-    'echo os=$(uname -s | tr A-Z a-z)',
-  ].join('\n');
+    "echo shell=$(basename $SHELL)",
+    "echo home=$HOME",
+    "command -v claude >/dev/null 2>&1 && echo claude=$(command -v claude) || echo claude=notfound",
+    "echo os=$(uname -s | tr A-Z a-z)",
+  ].join("\n");
 
   try {
-    const output = execSshWithRetry([host, 'sh'], {
-      encoding: 'utf8', timeout: 15000, input: script,
-      maxRetries: 2, baseDelayMs: 1000,
+    const output = execSshWithRetry([host, "sh"], {
+      encoding: "utf8",
+      timeout: 15000,
+      input: script,
+      maxRetries: 2,
+      baseDelayMs: 1000,
     });
     return normalizePosixProbeEnv(parseProbeLines(output));
   } catch {
@@ -124,8 +141,8 @@ function readEnvCache(host, cacheDir) {
   const cachePath = getEnvCachePath(host, cacheDir);
   if (!existsSync(cachePath)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(cachePath, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    const parsed = JSON.parse(readFileSync(cachePath, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : null;
   } catch {
     return null;
   }
@@ -133,16 +150,20 @@ function readEnvCache(host, cacheDir) {
 
 function isEnvCacheFresh(entry) {
   return Boolean(
-    entry
-    && typeof entry.cachedAt === 'number'
-    && entry.env
-    && (Date.now() - entry.cachedAt) < REMOTE_ENV_TTL_MS,
+    entry &&
+      typeof entry.cachedAt === "number" &&
+      entry.env &&
+      Date.now() - entry.cachedAt < REMOTE_ENV_TTL_MS,
   );
 }
 
 function writeEnvCache(host, env, cacheDir) {
   mkdirSync(cacheDir, { recursive: true });
-  writeFileSync(getEnvCachePath(host, cacheDir), JSON.stringify({ cachedAt: Date.now(), env }, null, 2), 'utf8');
+  writeFileSync(
+    getEnvCachePath(host, cacheDir),
+    JSON.stringify({ cachedAt: Date.now(), env }, null, 2),
+    "utf8",
+  );
 }
 
 /**
@@ -158,7 +179,7 @@ function writeEnvCache(host, env, cacheDir) {
 export function probeRemoteEnv(host, opts = {}) {
   validateHost(host);
   const force = opts.force === true;
-  const cacheDir = opts.cacheDir || join('.omc', 'state', 'remote-env');
+  const cacheDir = opts.cacheDir || join(".omc", "state", "remote-env");
 
   if (!force) {
     const cached = readEnvCache(host, cacheDir);
@@ -166,10 +187,16 @@ export function probeRemoteEnv(host, opts = {}) {
   }
 
   const pwshEnv = probeRemoteEnvViaPwsh(host);
-  if (pwshEnv) { writeEnvCache(host, pwshEnv, cacheDir); return pwshEnv; }
+  if (pwshEnv) {
+    writeEnvCache(host, pwshEnv, cacheDir);
+    return pwshEnv;
+  }
 
   const posixEnv = probeRemoteEnvViaPosix(host);
-  if (posixEnv) { writeEnvCache(host, posixEnv, cacheDir); return posixEnv; }
+  if (posixEnv) {
+    writeEnvCache(host, posixEnv, cacheDir);
+    return posixEnv;
+  }
 
   throw new Error(`remote probe failed for ${host}`);
 }
@@ -177,7 +204,7 @@ export function probeRemoteEnv(host, opts = {}) {
 // ── Remote directory resolution ─────────────────────────────────
 
 function isWindowsAbsolutePath(value) {
-  return /^[a-zA-Z]:[\\/]/u.test(value) || value.startsWith('\\\\');
+  return /^[a-zA-Z]:[\\/]/u.test(value) || value.startsWith("\\\\");
 }
 
 /**
@@ -191,17 +218,19 @@ function isWindowsAbsolutePath(value) {
 export function resolveRemoteDir(dir, env) {
   const requestedDir = dir || env.home;
 
-  if (env.os === 'win32') {
-    const winDir = requestedDir.replace(/\//g, '\\');
-    if (winDir === '~') return env.home;
-    if (/^~[\\/]/u.test(winDir)) return win32Path.join(env.home, winDir.slice(2));
+  if (env.os === "win32") {
+    const winDir = requestedDir.replace(/\//g, "\\");
+    if (winDir === "~") return env.home;
+    if (/^~[\\/]/u.test(winDir))
+      return win32Path.join(env.home, winDir.slice(2));
     if (isWindowsAbsolutePath(winDir)) return winDir;
     return win32Path.join(env.home, winDir);
   }
 
-  if (requestedDir === '~') return env.home;
-  if (requestedDir.startsWith('~/')) return posixPath.join(env.home, requestedDir.slice(2));
-  if (requestedDir.startsWith('/')) return requestedDir;
+  if (requestedDir === "~") return env.home;
+  if (requestedDir.startsWith("~/"))
+    return posixPath.join(env.home, requestedDir.slice(2));
+  if (requestedDir.startsWith("/")) return requestedDir;
   return posixPath.join(env.home, requestedDir);
 }
 
@@ -224,12 +253,26 @@ export function resolveRemoteStageDir(env, stageId) {
  * @param {string} remoteStageDir
  */
 export function ensureRemoteStageDir(host, env, remoteStageDir) {
-  if (env.os === 'win32') {
+  if (env.os === "win32") {
     const safePath = escapePwshSingleQuoted(remoteStageDir);
-    execFileSync('ssh', [host, 'pwsh', '-NoProfile', '-Command', `New-Item -ItemType Directory -Path '${safePath}' -Force | Out-Null`], { timeout: 10000, stdio: 'pipe' });
+    execFileSync(
+      "ssh",
+      [
+        host,
+        "pwsh",
+        "-NoProfile",
+        "-Command",
+        `New-Item -ItemType Directory -Path '${safePath}' -Force | Out-Null`,
+      ],
+      { timeout: 10000, stdio: "pipe" },
+    );
     return;
   }
-  execFileSync('ssh', [host, 'sh', '-lc', `mkdir -p ${shellQuote(remoteStageDir)}`], { timeout: 10000, stdio: 'pipe' });
+  execFileSync(
+    "ssh",
+    [host, "sh", "-lc", `mkdir -p ${shellQuote(remoteStageDir)}`],
+    { timeout: 10000, stdio: "pipe" },
+  );
 }
 
 /**
@@ -239,7 +282,10 @@ export function ensureRemoteStageDir(host, env, remoteStageDir) {
  * @param {string} remotePath
  */
 export function uploadFileToRemote(host, localPath, remotePath) {
-  execFileSync('scp', [localPath, `${host}:${remotePath}`], { timeout: 15000, stdio: 'pipe' });
+  execFileSync("scp", [localPath, `${host}:${remotePath}`], {
+    timeout: 15000,
+    stdio: "pipe",
+  });
 }
 
 /**
@@ -283,17 +329,29 @@ export function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
  * @returns {string} stdout
  */
 export function remoteGit(host, env, gitArgs, cwd) {
-  const gitCmd = ['git', ...gitArgs].map((a) => shellQuote(a)).join(' ');
+  const gitCmd = ["git", ...gitArgs].map((a) => shellQuote(a)).join(" ");
 
-  if (env.os === 'win32') {
+  if (env.os === "win32") {
     const cdPath = escapePwshSingleQuoted(cwd);
     const command = `Set-Location '${cdPath}'; ${gitCmd}`;
-    return execFileSync('ssh', [host, 'pwsh', '-NoProfile', '-Command', command], {
-      encoding: 'utf8', timeout: 30_000, stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    return execFileSync(
+      "ssh",
+      [host, "pwsh", "-NoProfile", "-Command", command],
+      {
+        encoding: "utf8",
+        timeout: 30_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    ).trim();
   }
 
-  return execFileSync('ssh', [host, 'sh', '-lc', `cd ${shellQuote(cwd)} && ${gitCmd}`], {
-    encoding: 'utf8', timeout: 30_000, stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
+  return execFileSync(
+    "ssh",
+    [host, "sh", "-lc", `cd ${shellQuote(cwd)} && ${gitCmd}`],
+    {
+      encoding: "utf8",
+      timeout: 30_000,
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  ).trim();
 }

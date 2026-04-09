@@ -1,7 +1,7 @@
 import { DIM, RESET } from "../../shared.mjs";
+import { renderTasks } from "../render.mjs";
 import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState } from "../services/state-store.mjs";
-import { renderTasks } from "../render.mjs";
 
 export function teamTasks() {
   const state = loadTeamState();
