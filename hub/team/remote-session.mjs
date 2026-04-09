@@ -118,7 +118,8 @@ function probeRemoteEnvViaPwsh(host) {
 
 function probeRemoteEnvViaPosix(host) {
   const script = [
-    "export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:$PATH",
+    '[ -f "$HOME/.zshenv" ] && . "$HOME/.zshenv" 2>/dev/null || true',
+    "export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | sort -V | tail -1)/bin:$PATH 2>/dev/null",
     "echo shell=$(basename $SHELL)",
     "echo home=$HOME",
     "command -v claude >/dev/null 2>&1 && echo claude=$(command -v claude) || echo claude=notfound",
