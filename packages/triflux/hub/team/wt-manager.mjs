@@ -1,4 +1,4 @@
-import childProcess from "node:child_process";
+import * as childProcess from "../lib/spawn-trace.mjs";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { platform as osPlatform, tmpdir } from "node:os";
 import { join } from "node:path";

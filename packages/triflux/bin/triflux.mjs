@@ -133,7 +133,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   doctor: {
-    usage: "tfx doctor [--fix] [--reset] [--audit] [--json]",
+    usage: "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--json]",
     description: "설치 상태 진단 및 자동 복구",
     options: [
       {
@@ -150,6 +150,11 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--audit",
         type: "boolean",
         description: "설정 보안/성능 정적 감사",
+      },
+      {
+        name: "--diagnose",
+        type: "boolean",
+        description: "진단 번들(zip) 생성: spawn-trace + hook timing + system info",
       },
       {
         name: "--json",
@@ -5166,6 +5171,19 @@ async function main() {
         } catch (e) {
           process.stdout.write(e.stdout || "");
           if (e.stderr) process.stderr.write(e.stderr);
+        }
+        return;
+      }
+      if (cmdArgs.includes("--diagnose")) {
+        const { diagnose } = await import("../scripts/doctor-diagnose.mjs");
+        const result = await diagnose({ json: JSON_OUTPUT });
+        if (!JSON_OUTPUT) {
+          if (result.ok) {
+            console.log(`\n  ${GREEN_BRIGHT}✓${RESET} 진단 번들 생성: ${result.zipPath}`);
+            console.log(`  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`);
+          } else {
+            console.log(`\n  ${RED}✗${RESET} 진단 실패: ${result.error}\n`);
+          }
         }
         return;
       }
