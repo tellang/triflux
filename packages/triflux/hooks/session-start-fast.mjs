@@ -16,6 +16,7 @@ import { createModuleLogger } from "../scripts/lib/logger.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = join(__dirname, "..", "scripts");
+const importMod = (p) => import(pathToFileURL(p).href);
 
 const log = createModuleLogger("session-start-fast");
 
@@ -31,7 +32,7 @@ async function runBlocking(stdinData) {
   // 1. setup.runCritical — 환경 초기화 필수
   try {
     const t0 = performance.now();
-    const setup = await import(join(SCRIPTS, "setup.mjs"));
+    const setup = await importMod(join(SCRIPTS, "setup.mjs"));
     const result = await setup.runCritical(stdinData);
     const dur = performance.now() - t0;
     timings.push({ hook: "setup.critical", dur_ms: Math.round(dur) });
@@ -45,7 +46,7 @@ async function runBlocking(stdinData) {
   // 2. mcp-safety-guard.run — EPERM 방지
   try {
     const t0 = performance.now();
-    const guard = await import(join(SCRIPTS, "mcp-safety-guard.mjs"));
+    const guard = await importMod(join(SCRIPTS, "mcp-safety-guard.mjs"));
     guard.run();
     const dur = performance.now() - t0;
     timings.push({ hook: "mcp-safety-guard", dur_ms: Math.round(dur) });
@@ -67,21 +68,21 @@ function runDeferred(stdinData) {
     {
       name: "hub-ensure",
       fn: async () => {
-        const mod = await import(join(SCRIPTS, "hub-ensure.mjs"));
+        const mod = await importMod(join(SCRIPTS, "hub-ensure.mjs"));
         return mod.run(stdinData);
       },
     },
     {
       name: "mcp-gateway-ensure",
       fn: async () => {
-        const mod = await import(join(SCRIPTS, "mcp-gateway-ensure.mjs"));
+        const mod = await importMod(join(SCRIPTS, "mcp-gateway-ensure.mjs"));
         return mod.run(stdinData);
       },
     },
     {
       name: "setup.deferred",
       fn: async () => {
-        const mod = await import(join(SCRIPTS, "setup.mjs"));
+        const mod = await importMod(join(SCRIPTS, "setup.mjs"));
         return mod.runDeferred(stdinData);
       },
     },
@@ -107,7 +108,7 @@ function runDeferred(stdinData) {
  */
 function runBackground(stdinData) {
   // preflight-cache
-  import(join(SCRIPTS, "preflight-cache.mjs"))
+  importMod(join(SCRIPTS, "preflight-cache.mjs"))
     .then((mod) => mod.run(stdinData))
     .catch(() => {}); // 완전 무시
 
