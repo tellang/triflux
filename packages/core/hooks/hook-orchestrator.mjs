@@ -315,6 +315,32 @@ async function main() {
 
   if (!eventName) process.exit(0);
 
+  // ── SessionStart fast-path ──
+  // TRIFLUX_HOOK_FAST_PATH=false로 비활성화 가능 (rollback)
+  if (eventName === "SessionStart" && process.env.TRIFLUX_HOOK_FAST_PATH !== "false") {
+    try {
+      const { execute } = await import("./session-start-fast.mjs");
+      const result = await execute(stdinRaw);
+      if (result.stdout?.trim()) {
+        const output = { additionalContext: result.stdout.trim() };
+        process.stdout.write(JSON.stringify(output));
+      }
+
+      // external source 훅 (session-vault 등)은 기존 방식으로 실행
+      const allHooks = registry.events.SessionStart || [];
+      const externalHooks = allHooks.filter((h) => h.enabled !== false && h.source !== "triflux");
+      for (const hook of externalHooks) {
+        const hookResult = executeHookAsync(hook, stdinRaw);
+        hookResult.catch(() => {}); // fire-and-forget for external hooks
+      }
+
+      process.exit(0);
+    } catch (err) {
+      // fast-path 실패 시 기존 방식으로 폴백
+      process.stderr.write(`[orchestrator] fast-path failed, falling back: ${err.message}\n`);
+    }
+  }
+
   // 이벤트에 해당하는 훅 목록
   const hooks = registry.events[eventName];
   if (!hooks || hooks.length === 0) process.exit(0);

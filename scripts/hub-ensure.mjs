@@ -70,8 +70,6 @@ function startHubDetached(port) {
   try {
     const env = { ...process.env, TFX_HUB_PORT: String(port) };
     if (process.platform === "win32") {
-      // Windows: cmd.exe /c start /b → 완전 독립 프로세스 트리 생성
-      // hook timeout 시 프로세스 트리 킬에서 살아남음
       const child = spawn(
         "cmd.exe",
         ["/c", "start", "/b", "", process.execPath, serverPath],
@@ -96,31 +94,46 @@ function startHubDetached(port) {
   }
 }
 
-/** Hub 기동 후 ready 상태까지 대기 (최대 maxWaitMs) */
 async function waitForHubReady(host, port, maxWaitMs = 5000) {
   const interval = 250;
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
     if (await isHubHealthy(host, port)) return true;
-    await new Promise((r) => setTimeout(r, interval));
+    await new Promise((resolve) => setTimeout(resolve, interval));
   }
   return false;
 }
 
-const { host, port } = resolveHubTarget();
-if (!(await isHubHealthy(host, port))) {
-  const started = startHubDetached(port);
-  if (started) {
-    const ready = await waitForHubReady(host, port, 3000);
-    if (ready) {
-      process.stdout.write("hub: ok");
-    } else {
-      // fire-and-forget: hub이 아직 기동 중일 수 있음 — 에러가 아닌 경고
-      process.stdout.write("hub: starting");
-    }
-  } else {
-    process.stderr.write("[hub-ensure] hub 시작 실패");
+export async function run(stdinData) {
+  void stdinData;
+
+  const { host, port } = resolveHubTarget();
+  if (await isHubHealthy(host, port)) {
+    return { code: 0, stdout: "hub: ok", stderr: "" };
   }
-} else {
-  process.stdout.write("hub: ok");
+
+  const started = startHubDetached(port);
+  if (!started) {
+    return { code: 0, stdout: "", stderr: "[hub-ensure] hub 시작 실패" };
+  }
+
+  const ready = await waitForHubReady(host, port, 3000);
+  return {
+    code: 0,
+    stdout: ready ? "hub: ok" : "hub: starting",
+    stderr: "",
+  };
+}
+
+const isMain =
+  process.argv[1] &&
+  import.meta.url.endsWith(
+    process.argv[1].replace(/\\/g, "/").split("/").pop(),
+  );
+
+if (isMain) {
+  const result = await run();
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exit(result.code);
 }

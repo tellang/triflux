@@ -1,6 +1,6 @@
 // hub/team/psmux.mjs — Windows psmux 세션/키바인딩/캡처/steering 관리
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
-import childProcess from "node:child_process";
+import * as childProcess from "../lib/spawn-trace.mjs";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";

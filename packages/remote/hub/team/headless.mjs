@@ -4,7 +4,8 @@
 // v6.0.0: Lead-direct 모드 (runHeadlessInteractive, autoAttachTerminal)
 // 의존성: psmux.mjs (Node.js 내장 모듈만 사용)
 
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
+import { spawn } from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,

@@ -14,42 +14,64 @@ import {
 
 const GEMINI_SETTINGS = join(homedir(), ".gemini", "settings.json");
 
-function run() {
+export async function run(stdinData) {
+  void stdinData;
+
   let registry;
   try {
     registry = loadRegistry();
   } catch {
-    return;
+    return { code: 0, stdout: "", stderr: "" };
   }
 
   const stdioServers = scanForStdioServers(GEMINI_SETTINGS);
 
-  if (stdioServers.length === 0) return; // 모두 안전
+  if (stdioServers.length === 0) {
+    return { code: 0, stdout: "", stderr: "" };
+  }
 
   const result = remediate(GEMINI_SETTINGS, stdioServers, registry.policies);
   const names = stdioServers.map((server) => server.name).join(", ");
+  const stdout = [];
 
   if (result.modified) {
     const actionLabel = result.replacement ? "자동 치환" : "자동 제거";
-    console.log(
+    stdout.push(
       `[mcp-safety] ${stdioServers.length}개 stdio MCP ${actionLabel}: ${names}`,
     );
     if (result.replacement?.name && result.replacement?.url) {
-      console.log(
+      stdout.push(
         `[mcp-safety] 대체 서버: ${result.replacement.name} -> ${result.replacement.url}`,
       );
     }
     if (result.backupPath) {
-      console.log(`[mcp-safety] 백업: ${result.backupPath}`);
+      stdout.push(`[mcp-safety] 백업: ${result.backupPath}`);
     }
-    console.log(
+    stdout.push(
       "[mcp-safety] Gemini는 Hub URL만 사용합니다. stdio MCP는 spawn EPERM을 유발합니다.",
     );
   }
 
   for (const warning of result.warnings || []) {
-    console.log(warning);
+    stdout.push(warning);
   }
+
+  return {
+    code: 0,
+    stdout: stdout.length > 0 ? `${stdout.join("\n")}\n` : "",
+    stderr: "",
+  };
 }
 
-run();
+const isMain =
+  process.argv[1] &&
+  import.meta.url.endsWith(
+    process.argv[1].replace(/\\/g, "/").split("/").pop(),
+  );
+
+if (isMain) {
+  const result = await run();
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exit(result.code);
+}

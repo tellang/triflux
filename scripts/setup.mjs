@@ -44,6 +44,8 @@ function detectDevMode(root = PLUGIN_ROOT) {
 }
 
 const BREADCRUMB_PATH = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
+const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
+const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 
 const REQUIRED_CODEX_PROFILES = [
   {
@@ -601,6 +603,255 @@ function syncClaudeRoutingSections() {
   }
 }
 
+function createCommandIo() {
+  const stdout = [];
+  const stderr = [];
+
+  return {
+    log(message = "") {
+      stdout.push(`${message}\n`);
+    },
+    writeStdout(message = "") {
+      stdout.push(message);
+    },
+    writeStderr(message = "") {
+      stderr.push(message);
+    },
+    result(code = 0) {
+      return { code, stdout: stdout.join(""), stderr: stderr.join("") };
+    },
+  };
+}
+
+function getSetupArgv(stdinData) {
+  return Array.isArray(stdinData?.argv) ? stdinData.argv : [];
+}
+
+function loadSettings() {
+  if (!existsSync(SETTINGS_PATH)) return {};
+
+  try {
+    return JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function persistSettings(settings) {
+  writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
+}
+
+function applyStatusLine(settings) {
+  if (!existsSync(HUD_PATH)) return false;
+  const currentCmd = settings.statusLine?.command || "";
+  if (currentCmd.includes("hud-qos-status.mjs")) return false;
+
+  const nodePath = process.execPath.replace(/\\/g, "/");
+  const hudForward = HUD_PATH.replace(/\\/g, "/");
+  const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
+  const hudRef = hudForward.includes(" ") ? `"${hudForward}"` : hudForward;
+
+  settings.statusLine = { type: "command", command: `${nodeRef} ${hudRef}` };
+  return true;
+}
+
+function applyAgentTeams(settings) {
+  if (!settings.env) settings.env = {};
+  let changed = false;
+
+  if (settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS !== "1") {
+    settings.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
+    changed = true;
+  }
+  if (!settings.teammateMode) {
+    settings.teammateMode = "auto";
+    changed = true;
+  }
+  return changed;
+}
+
+function applyRemoteControl(settings) {
+  if (settings.remoteControlAtStartup === true) return false;
+  if (process.env.TFX_REMOTE_CONTROL !== "1" && !detectDevMode()) return false;
+  settings.remoteControlAtStartup = true;
+  return true;
+}
+
+function applyHooks(settings) {
+  if (!settings.hooks) settings.hooks = {};
+  let changed = false;
+
+  if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
+
+  const hasTrifluxHooks = settings.hooks.SessionStart.some(
+    (entry) =>
+      Array.isArray(entry.hooks) &&
+      entry.hooks.some(
+        (hook) => typeof hook.command === "string" && hook.command.includes("triflux"),
+      ),
+  );
+
+  if (!hasTrifluxHooks) {
+    const nodePath = process.execPath.replace(/\\/g, "/");
+    const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
+    const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
+
+    settings.hooks.SessionStart.push({
+      matcher: "*",
+      hooks: [
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/setup.mjs"`,
+          timeout: 10,
+        },
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/hub-ensure.mjs"`,
+          timeout: 8,
+        },
+        {
+          type: "command",
+          command: `${nodeRef} "${pluginRoot}/scripts/preflight-cache.mjs"`,
+          timeout: 5,
+        },
+      ],
+    });
+    changed = true;
+  }
+
+  if (!Array.isArray(settings.hooks.PreToolUse)) settings.hooks.PreToolUse = [];
+
+  const guardScriptPath = join(
+    CLAUDE_DIR,
+    "scripts",
+    "headless-guard-fast.sh",
+  ).replace(/\\/g, "/");
+  const hasGuardHook = settings.hooks.PreToolUse.some(
+    (entry) =>
+      Array.isArray(entry.hooks) &&
+      entry.hooks.some(
+        (hook) =>
+          typeof hook.command === "string" &&
+          hook.command.includes("headless-guard"),
+      ),
+  );
+
+  if (!hasGuardHook && existsSync(guardScriptPath.replace(/\//g, "\\"))) {
+    settings.hooks.PreToolUse.push({
+      matcher: "Bash|Agent",
+      hooks: [
+        {
+          type: "command",
+          command: `bash "${guardScriptPath}"`,
+          timeout: 3,
+        },
+      ],
+    });
+    changed = true;
+  } else if (hasGuardHook) {
+    for (const entry of settings.hooks.PreToolUse) {
+      if (!Array.isArray(entry.hooks)) continue;
+      for (const hook of entry.hooks) {
+        if (
+          typeof hook.command === "string" &&
+          hook.command.includes("headless-guard") &&
+          !hook.command.includes(guardScriptPath)
+        ) {
+          hook.command = `bash "${guardScriptPath}"`;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  const gateScriptPath = join(
+    CLAUDE_DIR,
+    "scripts",
+    "tfx-gate-activate.mjs",
+  ).replace(/\\/g, "/");
+  const hasGateHook = settings.hooks.PreToolUse.some(
+    (entry) =>
+      Array.isArray(entry.hooks) &&
+      entry.hooks.some(
+        (hook) =>
+          typeof hook.command === "string" &&
+          hook.command.includes("tfx-gate-activate"),
+      ),
+  );
+
+  if (!hasGateHook && existsSync(gateScriptPath.replace(/\//g, "\\"))) {
+    settings.hooks.PreToolUse.push({
+      matcher: "Skill",
+      hooks: [
+        {
+          type: "command",
+          command: `node "${gateScriptPath}"`,
+          timeout: 2,
+        },
+      ],
+    });
+    changed = true;
+  } else if (hasGateHook) {
+    for (const entry of settings.hooks.PreToolUse) {
+      if (!Array.isArray(entry.hooks)) continue;
+      for (const hook of entry.hooks) {
+        if (
+          typeof hook.command === "string" &&
+          hook.command.includes("tfx-gate-activate") &&
+          !hook.command.includes(gateScriptPath)
+        ) {
+          hook.command = `node "${gateScriptPath}"`;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  return changed;
+}
+
+function ensureCriticalSetup() {
+  const settings = loadSettings();
+  let settingsChanged = false;
+
+  try {
+    if (applyStatusLine(settings)) settingsChanged = true;
+  } catch {}
+  try {
+    if (applyAgentTeams(settings)) settingsChanged = true;
+  } catch {}
+  try {
+    if (applyRemoteControl(settings)) settingsChanged = true;
+  } catch {}
+  try {
+    if (applyHooks(settings)) settingsChanged = true;
+  } catch {}
+
+  if (settingsChanged) {
+    try {
+      persistSettings(settings);
+    } catch {}
+  }
+
+  try {
+    const pkgRootForward = PLUGIN_ROOT.replace(/\\/g, "/");
+    const currentBreadcrumb = existsSync(BREADCRUMB_PATH)
+      ? readFileSync(BREADCRUMB_PATH, "utf8").trim()
+      : "";
+    if (currentBreadcrumb !== pkgRootForward) {
+      const breadcrumbDir = dirname(BREADCRUMB_PATH);
+      if (!existsSync(breadcrumbDir)) {
+        mkdirSync(breadcrumbDir, { recursive: true });
+      }
+      writeFileSync(BREADCRUMB_PATH, pkgRootForward + "\n", "utf8");
+    }
+  } catch {}
+
+  try {
+    ensureCodexProfiles();
+  } catch {}
+}
+
 export {
   BREADCRUMB_PATH,
   CLAUDE_DIR,
@@ -627,17 +878,41 @@ export {
   writeMarker,
 };
 
-async function main() {
-  const isSync = process.argv.includes("--sync");
-  const isForce = process.argv.includes("--force");
+export async function runCritical(stdinData) {
+  const io = createCommandIo();
+  const argv = getSetupArgv(stdinData);
+  const isSync = argv.includes("--sync");
   const isDev = detectDevMode();
 
+  // version check remains part of the critical path for in-process callers.
+  getPackageVersion();
+  readMarker();
+
   if (isDev) {
-    console.log("  [dev] \uB85C\uCEEC \uAC1C\uBC1C \uBAA8\uB4DC \uAC10\uC9C0");
+    io.log("  [dev] 로컬 개발 모드 감지");
   }
 
   if (isSync) {
-    console.log(
+    io.log("  [sync] 명시적 재동기화 실행");
+  }
+
+  ensureCriticalSetup();
+  return io.result(0);
+}
+
+export async function runDeferred(stdinData) {
+  const io = createCommandIo();
+  const argv = getSetupArgv(stdinData);
+  const isSync = argv.includes("--sync");
+  const isForce = argv.includes("--force");
+  const isDev = detectDevMode();
+
+  if (isDev) {
+    io.log("  [dev] \uB85C\uCEEC \uAC1C\uBC1C \uBAA8\uB4DC \uAC10\uC9C0");
+  }
+
+  if (isSync) {
+    io.log(
       "  [sync] \uBA85\uC2DC\uC801 \uC7AC\uB3D9\uAE30\uD654 \uC2E4\uD589",
     );
   }
@@ -650,13 +925,13 @@ async function main() {
   ).length;
   if (pkgVersion && marker?.version === pkgVersion && !isForce) {
     if (claudeRoutingChangedCount > 0) {
-      console.log(
+      io.log(
         `setup: skip core sync (v${pkgVersion} already synced, CLAUDE.md ${claudeRoutingChangedCount}건 반영)`,
       );
     } else {
-      console.log(`setup: skip (v${pkgVersion} already synced)`);
+      io.log(`setup: skip (v${pkgVersion} already synced)`);
     }
-    process.exit(0);
+    return io.result(0);
   }
 
   let synced = claudeRoutingChangedCount;
@@ -684,14 +959,14 @@ async function main() {
         );
         if (p0Auto.length > 0) {
           doctor.fixAll({ severity: "P0" });
-          console.log(
+          io.log(
             `  memory-doctor: ${p0Auto.length}건 P0 자동 수정 (health: ${healthScore})`,
           );
           synced += p0Auto.length;
         }
       }
     } catch (err) {
-      console.log(`  memory-doctor: skip (${err.message})`);
+      io.log(`  memory-doctor: skip (${err.message})`);
     }
   }
 
@@ -724,7 +999,7 @@ async function main() {
     const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
     if (claudeGuide.changed) synced++;
   } catch (e) {
-    console.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 라우팅: ${e.message}`);
+    io.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 라우팅: ${e.message}`);
   }
 
   // ── Worker 의존성 동기화 (MCP SDK + transitive deps) ──
@@ -1114,7 +1389,7 @@ async function main() {
         /* pre-warm 실패 무시 */
       }
     }
-    console.log("  \x1b[32m✓\x1b[0m HUD cache pre-warm (background)");
+    io.log("  \x1b[32m✓\x1b[0m HUD cache pre-warm (background)");
   }
 
   // ── Stale PID 파일 정리 (hub 좀비 방지) ──
@@ -1139,7 +1414,7 @@ async function main() {
       execFileSync("where", ["psmux"], { stdio: "ignore" });
     } catch {
       // psmux 미설치 — winget으로 자동 설치 시도
-      console.log("  psmux 미설치 — winget으로 설치 중...");
+      io.log("  psmux 미설치 — winget으로 설치 중...");
       try {
         execFileSync(
           "winget",
@@ -1155,10 +1430,10 @@ async function main() {
             timeout: 60000,
           },
         );
-        console.log("  \x1b[32m✓\x1b[0m psmux 설치 완료");
+        io.log("  \x1b[32m✓\x1b[0m psmux 설치 완료");
         synced++;
       } catch {
-        console.log(
+        io.log(
           "  \x1b[33m⚠\x1b[0m psmux 자동 설치 실패 — 수동 설치: winget install psmux",
         );
       }
@@ -1244,20 +1519,20 @@ async function main() {
       routingTable,
     );
     if (projectResult.action !== "unchanged") {
-      console.log(
+      io.log(
         `  \x1b[32m✓\x1b[0m CLAUDE.md (project): ${projectResult.action}`,
       );
       synced++;
     }
     const globalResult = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
     if (globalResult.action !== "unchanged") {
-      console.log(
+      io.log(
         `  \x1b[32m✓\x1b[0m CLAUDE.md (global): ${globalResult.action}`,
       );
       synced++;
     }
   } catch (error) {
-    console.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 동기화 실패: ${error.message}`);
+    io.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 동기화 실패: ${error.message}`);
   }
   // ── MCP 인벤토리 백그라운드 갱신 ──
 
@@ -1292,14 +1567,14 @@ async function main() {
       const installedVer = parsed?.dependencies?.triflux?.version;
       if (installedVer && installedVer !== pkgVersion) {
         const tag = pkgVersion.includes("alpha") ? "alpha" : "latest";
-        console.log(
+        io.log(
           `  npm: triflux global ${installedVer} → ${pkgVersion} (npm i -g triflux@${tag})`,
         );
       }
     } catch {
       // npm list 실패 = 글로벌 미설치. 안내만 출력.
       if (pkgVersion.includes("alpha")) {
-        console.log(
+        io.log(
           "  npm: triflux global 미설치 (npm i -g triflux@alpha 로 설치 가능)",
         );
       }
@@ -1324,7 +1599,7 @@ async function main() {
       return pkgVersion || "?";
     })();
 
-    console.log(`
+    io.log(`
 ${B}╔═══════════════════════════════════════════════╗${R}
 ${B}║${R}  ${C}triflux${R} ${D}v${ver}${R} ${B}— Setup Complete${R}             ${B}║${R}
 ${B}╚═══════════════════════════════════════════════╝${R}
@@ -1358,9 +1633,18 @@ ${D}https://github.com/tellang/triflux${R}
 `);
   }
 
-  process.exit(0);
+  return io.result(0);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  main();
+const isMain =
+  process.argv[1] &&
+  import.meta.url.endsWith(
+    process.argv[1].replace(/\\/g, "/").split("/").pop(),
+  );
+
+if (isMain) {
+  const result = await runDeferred({ argv: process.argv.slice(2) });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exit(result.code);
 }

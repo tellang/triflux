@@ -32,17 +32,15 @@ async function runPreflight() {
   };
   result.ok = result.hub.ok && result.route.ok;
 
-  // CLI 가용성 → available_agents (triage에서 참조)
   const agents = [];
   if (result.codex.ok) agents.push("codex");
   if (result.gemini.ok) agents.push("gemini");
-  agents.push("claude"); // claude는 항상 가용
+  agents.push("claude");
   result.available_agents = agents;
 
   return result;
 }
 
-// 캐시 읽기 (TTL 검증 포함)
 export function readPreflightCache() {
   try {
     const data = JSON.parse(readFileSync(CACHE_FILE, "utf8"));
@@ -51,19 +49,38 @@ export function readPreflightCache() {
   return null;
 }
 
-// 메인 실행
-if (process.argv[1]?.endsWith("preflight-cache.mjs")) {
+export async function run(stdinData) {
+  void stdinData;
+
   const result = await runPreflight();
   mkdirSync(CACHE_DIR, { recursive: true });
   writeFileSync(CACHE_FILE, JSON.stringify(result, null, 2));
-  // 간결 출력 (hook stdout)
+
   const summary = result.ok ? "preflight: ok" : "preflight: FAIL";
   const details = [];
   if (!result.hub.ok) details.push("hub:" + result.hub.state);
   else if (result.hub.restarted) details.push("hub:restarted");
   if (!result.route.ok) details.push("route:missing");
   if (result.available_agents.length === 1) details.push("agents:claude-only");
-  console.log(details.length ? `${summary} (${details.join(", ")})` : summary);
+
+  return {
+    code: 0,
+    stdout: `${details.length ? `${summary} (${details.join(", ")})` : summary}\n`,
+    stderr: "",
+  };
+}
+
+const isMain =
+  process.argv[1] &&
+  import.meta.url.endsWith(
+    process.argv[1].replace(/\\/g, "/").split("/").pop(),
+  );
+
+if (isMain) {
+  const result = await run();
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  process.exit(result.code);
 }
 
 export { CACHE_FILE, CACHE_TTL_MS, runPreflight };

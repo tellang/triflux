@@ -8,7 +8,7 @@
 // 3. Auto-restart (maxRestarts=3)
 // 4. JSONL event log (블랙박스 리코더)
 
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn } from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { EventEmitter } from "node:events";
 import {
   copyFileSync,
@@ -183,7 +183,7 @@ export function createConductor(opts = {}) {
     execFn(
       "ssh",
       [`${sshUser}@${sshIp}`, "psmux", "kill-session", "-t", session.id],
-      { timeout: 10_000 },
+      { timeout: 10_000, reason: "conductor:killRemoteSession" },
       () => {},
     );
     eventLog.append("remote_kill", {
@@ -379,6 +379,7 @@ export function createConductor(opts = {}) {
       child = spawn(launcher.command, {
         shell: true,
         env: { ...process.env, ...launcher.env, ...(session.config.env || {}) },
+        reason: `conductor:respawnSession:${session.id}`,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
       });
