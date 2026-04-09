@@ -2,6 +2,27 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.7.0] - 2026-04-09
+
+### Added
+- `tfx doctor --diagnose`: 진단 번들(zip) 생성 — spawn-trace JSONL, process report, hook timing, spawn stats, system info 수집
+- `spawn-trace.mjs`: child_process 드롭인 래퍼 — JSONL 트레이스, rate limit(10/sec), WT 탭 캡(8), opt-in dedupe
+- `session-start-fast.mjs`: SessionStart 6개 훅을 1개 node 프로세스에서 실행 (콜드스타트 7회→1회)
+- `context compact nudge`, `config audit`, `coverage threshold` 기능
+
+### Changed
+- 5개 SessionStart 훅에 `export run()` 분리 — in-process 실행 지원
+- headless, psmux, conductor, wt-manager, remote-spawn, session-spawn-helper, dashboard-open, tui를 spawn-trace 경유로 전환
+- 모든 wt.exe spawn 경로에 MAX_WT_TABS=8 가드 적용 (탭 폭주 방지)
+
+### Fixed
+- legacy Gemini path 제거 + platform-aware process cleanup
+- stale tfx-multi state 세션 시작 시 정리
+- `npm run pack`에서 누락되던 ROOT 소스 동기화 문제 해결
+
+### Removed
+- `run_legacy_gemini`, `gemini_with_retry`, `_gemini_run_once` 함수 삭제
+
 ## [10.5.0] - 2026-04-09
 
 ### Changed
