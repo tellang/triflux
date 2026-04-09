@@ -28,8 +28,6 @@ describe("spawn-trace", () => {
 
   it("exports guard constants", async () => {
     const mod = await import("../../hub/lib/spawn-trace.mjs");
-    assert.equal(typeof mod.MAX_WT_TABS, "number");
-    assert.ok(mod.MAX_WT_TABS > 0);
     assert.equal(typeof mod.MAX_SPAWN_PER_SEC, "number");
     assert.equal(typeof mod.MAX_TOTAL_DESCENDANTS, "number");
   });
@@ -97,6 +95,6 @@ describe("spawn-trace", () => {
     assert.equal(typeof mod.default.spawn, "function");
     assert.equal(typeof mod.default.execFile, "function");
     assert.equal(typeof mod.default.execFileSync, "function");
-    assert.equal(typeof mod.default.MAX_WT_TABS, "number");
+    assert.equal(typeof mod.default.MAX_SPAWN_PER_SEC, "number");
   });
 });

@@ -26,6 +26,10 @@ import {
 } from "../../hub/team/ansi.mjs";
 
 import { createLogDashboard } from "../../hub/team/tui.mjs";
+import {
+  buildDashboardAttachRequest as buildAttachRequest,
+  createTransientTabLimiter as createAttachLimiter,
+} from "../../hub/team/tui.mjs";
 
 // ── ansi.mjs ──
 
@@ -130,6 +134,78 @@ describe("ansi.mjs", () => {
   });
 });
 
+describe("tui attach helpers", () => {
+  it("buildDashboardAttachRequest는 로컬/원격 attach 인자를 구성한다", () => {
+    const local = buildAttachRequest(
+      { sessionName: "alpha-1", role: "lead" },
+      {
+        resolveAttachCommand: (sessionName) => ({
+          command: "psmux",
+          args: ["attach-session", "-t", sessionName],
+        }),
+      },
+    );
+
+    assert.equal(local.kind, "local");
+    assert.deepEqual(local.args.slice(0, 6), [
+      "-w",
+      "0",
+      "nt",
+      "--title",
+      "lead",
+      "--",
+    ]);
+    assert.deepEqual(local.args.slice(-4), [
+      "psmux",
+      "attach-session",
+      "-t",
+      "alpha-1",
+    ]);
+
+    const remote = buildAttachRequest({
+      sessionName: "beta.2",
+      role: "worker",
+      remote: true,
+      sshUser: "alice",
+      host: "ryzen",
+    });
+
+    assert.equal(remote.kind, "remote");
+    assert.ok(remote.args.includes("ssh"));
+    assert.ok(remote.args.includes("alice@ryzen"));
+    assert.ok(remote.args.includes("psmux attach-session -t beta.2"));
+    assert.throws(
+      () => buildAttachRequest({ sessionName: "bad;name", role: "lead" }),
+      /invalid attach session name/i,
+    );
+  });
+
+  it("createTransientTabLimiter는 로컬/원격 cap과 TTL을 분리 적용한다", () => {
+    let now = 0;
+    const limiter = createAttachLimiter({
+      now: () => now,
+      ttlMs: 30_000,
+      limits: { local: 2, remote: 1 },
+    });
+
+    assert.equal(limiter.acquire("local").ok, true);
+    assert.equal(limiter.acquire("local").ok, true);
+
+    const blockedLocal = limiter.acquire("local");
+    assert.equal(blockedLocal.ok, false);
+    assert.equal(blockedLocal.limit, 2);
+
+    assert.equal(limiter.acquire("remote").ok, true);
+    const blockedRemote = limiter.acquire("remote");
+    assert.equal(blockedRemote.ok, false);
+    assert.equal(blockedRemote.limit, 1);
+
+    now = 30_001;
+    assert.equal(limiter.acquire("local").ok, true);
+    assert.equal(limiter.snapshot().remote, 0);
+  });
+});
+
 // ── tui.mjs ──
 
 describe("createLogDashboard", () => {
@@ -219,6 +295,108 @@ describe("createLogDashboard", () => {
     const before = output;
     tui.render();
     assert.equal(output, before); // close 후 추가 출력 없음
+  });
+
+  it("attachWorker는 실패한 spawn 시 transient slot을 즉시 해제한다", async () => {
+    let now = 0;
+    let openAttempts = 0;
+    const fakeStream = {
+      write: () => {},
+      columns: 80,
+      isTTY: false,
+    };
+    const fakeInput = {
+      isTTY: false,
+    };
+    const tui = createLogDashboard({
+      stream: fakeStream,
+      input: fakeInput,
+      refreshMs: 0,
+      deps: {
+        now: () => now,
+        setTimeout: (fn) => {
+          fn();
+          return 0;
+        },
+        clearTimeout: () => {},
+        openTab: async () => {
+          openAttempts += 1;
+          const error = new Error("rate limit");
+          error.reasonCode = "rate_limit";
+          throw error;
+        },
+      },
+    });
+    tui.updateWorker("w1", { sessionName: "alpha-1", role: "lead" });
+
+    await tui.attachWorker("w1");
+    await tui.attachWorker("w1");
+
+    assert.equal(openAttempts, 2);
+    tui.close();
+  });
+
+  it("attachWorker는 로컬 8 / 원격 4 transient cap을 별도로 적용한다", async () => {
+    let now = 0;
+    const opened = [];
+    const fakeStream = {
+      write: () => {},
+      columns: 80,
+      isTTY: false,
+    };
+    const fakeInput = {
+      isTTY: false,
+      pause() {},
+      resume() {},
+      setRawMode() {},
+    };
+    const tui = createLogDashboard({
+      stream: fakeStream,
+      input: fakeInput,
+      refreshMs: 0,
+      deps: {
+        now: () => now,
+        setTimeout: (fn) => {
+          fn();
+          return 0;
+        },
+        clearTimeout: () => {},
+        openTab: async (request) => {
+          opened.push(request.kind);
+        },
+      },
+    });
+    tui.updateWorker("local", { sessionName: "alpha-1", role: "lead" });
+    tui.updateWorker("remote", {
+      sessionName: "beta-1",
+      role: "reviewer",
+      remote: true,
+      sshUser: "alice",
+      host: "ryzen",
+    });
+
+    for (let i = 0; i < 8; i += 1) {
+      await tui.attachWorker("local");
+    }
+    await tui.attachWorker("local");
+
+    for (let i = 0; i < 4; i += 1) {
+      await tui.attachWorker("remote");
+    }
+    await tui.attachWorker("remote");
+
+    assert.deepEqual(
+      opened.reduce(
+        (acc, kind) => ({ ...acc, [kind]: (acc[kind] || 0) + 1 }),
+        {},
+      ),
+      { local: 8, remote: 4 },
+    );
+
+    now = 30_001;
+    await tui.attachWorker("remote");
+    assert.equal(opened.filter((kind) => kind === "remote").length, 5);
+    tui.close();
   });
 
   it("코드 블록은 제거하고 verdict/metadata만 남긴다", () => {

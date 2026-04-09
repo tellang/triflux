@@ -27,6 +27,7 @@ import {
   truncate,
   wcswidth,
 } from "./ansi.mjs";
+import { resolveAttachCommand } from "./session.mjs";
 
 // package.json에서 동적 로드 (실패 시 fallback)
 let VERSION = "7.x";
@@ -41,6 +42,156 @@ try {
 const FALLBACK_COLUMNS = 100;
 const FALLBACK_ROWS = 30;
 const MIN_CARD_WIDTH = 28;
+const ATTACH_SESSION_NAME_PATTERN = /^[a-zA-Z0-9_.-]+$/u;
+const DEFAULT_ATTACH_TAB_TTL_MS = 30_000;
+const DEFAULT_ATTACH_LIMITS = Object.freeze({ local: 8, remote: 4 });
+
+function sanitizeAttachTitle(value, fallback) {
+  const text = String(value || "")
+    .replace(/[\r\n]+/gu, " ")
+    .trim();
+  return text || fallback;
+}
+
+function assertAttachSessionName(value) {
+  const sessionName = String(value || "").trim();
+  if (!ATTACH_SESSION_NAME_PATTERN.test(sessionName)) {
+    throw new Error(`invalid attach session name: ${sessionName || "<empty>"}`);
+  }
+  return sessionName;
+}
+
+export function createTransientTabLimiter(opts = {}) {
+  const now = opts.now || Date.now;
+  const ttlMs = Number.isFinite(opts.ttlMs)
+    ? Math.max(1, Math.trunc(opts.ttlMs))
+    : DEFAULT_ATTACH_TAB_TTL_MS;
+  const limits = {
+    local: Number.isFinite(opts.limits?.local)
+      ? Math.max(1, Math.trunc(opts.limits.local))
+      : DEFAULT_ATTACH_LIMITS.local,
+    remote: Number.isFinite(opts.limits?.remote)
+      ? Math.max(1, Math.trunc(opts.limits.remote))
+      : DEFAULT_ATTACH_LIMITS.remote,
+  };
+  const buckets = {
+    local: [],
+    remote: [],
+  };
+  let nextId = 0;
+
+  function normalizeKind(kind) {
+    return kind === "remote" ? "remote" : "local";
+  }
+
+  function prune(kind) {
+    const normalized = normalizeKind(kind);
+    const nowAt = now();
+    buckets[normalized] = buckets[normalized].filter(
+      (entry) => entry.expiresAt > nowAt,
+    );
+    return buckets[normalized];
+  }
+
+  function acquire(kind) {
+    const normalized = normalizeKind(kind);
+    const active = prune(normalized);
+    const limit = limits[normalized];
+    if (active.length >= limit) {
+      const retryAfterMs =
+        active.length > 0 ? Math.max(0, active[0].expiresAt - now()) : ttlMs;
+      return Object.freeze({
+        ok: false,
+        kind: normalized,
+        limit,
+        active: active.length,
+        retryAfterMs,
+      });
+    }
+
+    const entry = Object.freeze({
+      id: ++nextId,
+      expiresAt: now() + ttlMs,
+    });
+    buckets[normalized] = [...active, entry];
+
+    return Object.freeze({
+      ok: true,
+      kind: normalized,
+      limit,
+      release() {
+        buckets[normalized] = buckets[normalized].filter(
+          (candidate) => candidate.id !== entry.id,
+        );
+      },
+    });
+  }
+
+  function snapshot() {
+    return Object.freeze({
+      local: prune("local").length,
+      remote: prune("remote").length,
+      ttlMs,
+      limits: Object.freeze({ ...limits }),
+    });
+  }
+
+  return Object.freeze({
+    acquire,
+    snapshot,
+  });
+}
+
+export function buildDashboardAttachRequest(worker, opts = {}) {
+  const resolveAttach = opts.resolveAttachCommand || resolveAttachCommand;
+  const sessionName = assertAttachSessionName(
+    worker?.sessionName || worker?.paneName,
+  );
+
+  if (worker?.remote && worker?.sshUser) {
+    const host = String(worker.host || "unknown");
+    const ip = String(worker._sshIp || host);
+    const title = sanitizeAttachTitle(
+      `${host}:${worker.role || sessionName}`,
+      `${host}:${sessionName}`,
+    );
+    return Object.freeze({
+      kind: "remote",
+      sessionName,
+      title,
+      args: Object.freeze([
+        "-w",
+        "0",
+        "nt",
+        "--title",
+        title,
+        "--",
+        "ssh",
+        `${worker.sshUser}@${ip}`,
+        "-t",
+        `psmux attach-session -t ${sessionName}`,
+      ]),
+    });
+  }
+
+  const attachSpec = resolveAttach(sessionName);
+  const title = sanitizeAttachTitle(worker?.role || sessionName, sessionName);
+  return Object.freeze({
+    kind: "local",
+    sessionName,
+    title,
+    args: Object.freeze([
+      "-w",
+      "0",
+      "nt",
+      "--title",
+      title,
+      "--",
+      attachSpec.command,
+      ...attachSpec.args,
+    ]),
+  });
+}
 
 // ✻ heartbeat — Claude Code 리버스 엔지니어링 기반 breathing animation
 // 프레임: ["·","✢","✳","✶","✻","✽"] + 역재생 = 12프레임 왕복
@@ -1028,6 +1179,7 @@ function normalizeWorkerState(existing, state) {
  * @returns {LogDashboardHandle}
  */
 export function createLogDashboard(opts = {}) {
+  const deps = opts.deps || {};
   const {
     stream = process.stdout,
     input = process.stdin,
@@ -1038,10 +1190,35 @@ export function createLogDashboard(opts = {}) {
   } = opts;
 
   const isTTY = forceTTY || !!stream?.isTTY;
+  const now = deps.now || Date.now;
+  const setTimeoutFn = deps.setTimeout || setTimeout;
+  const clearTimeoutFn = deps.clearTimeout || clearTimeout;
+  const execFileFn = deps.execFile || _execFile;
+  const openTab =
+    deps.openTab ||
+    ((request) =>
+      new Promise((resolve, reject) => {
+        execFileFn(
+          "wt.exe",
+          request.args,
+          { detached: true, stdio: "ignore", windowsHide: false },
+          (error) => {
+            if (error) reject(error);
+            else resolve();
+          },
+        );
+      }));
+  const attachLimiter =
+    deps.attachLimiter ||
+    createTransientTabLimiter({
+      now,
+      ttlMs: deps.attachTabTtlMs,
+      limits: deps.attachLimits,
+    });
 
   const workers = new Map();
   let pipeline = { phase: "exec", fix_attempt: 0 };
-  let startedAt = Date.now();
+  let startedAt = now();
   let timer = null;
   let closed = false;
   let frameCount = 0;
@@ -1070,7 +1247,7 @@ export function createLogDashboard(opts = {}) {
   }
 
   function nowElapsedSec() {
-    return Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+    return Math.max(0, Math.round((now() - startedAt) / 1000));
   }
 
   function getViewportColumns() {
@@ -1302,62 +1479,42 @@ export function createLogDashboard(opts = {}) {
   }
 
   // ── Enter→attach (k9s 패턴) ───────────────────────────────────────────
-  function attachToSession(worker) {
-    const execFileFn = opts.deps?.execFile || _execFile;
-    // 1. rawMode 해제 + input 일시정지 (키 이벤트 차단)
-    if (rawModeEnabled && typeof input?.setRawMode === "function")
-      input.setRawMode(false);
-    if (typeof input?.pause === "function") input.pause();
-    // 2. altScreen 퇴장
-    exitAltScreen();
-
-    const sessionName = worker.sessionName || worker.paneName;
-    if (worker.remote && worker.sshUser) {
-      // 원격: SSH + psmux attach in new WT tab
-      const host = worker.host || "unknown";
-      const ip = worker._sshIp || host;
-      const title = `${host}:${worker.role || sessionName}`;
-      execFileFn(
-        "wt.exe",
-        [
-          "-w",
-          "0",
-          "nt",
-          "--title",
-          title,
-          "--",
-          "ssh",
-          `${worker.sshUser}@${ip}`,
-          "-t",
-          `psmux attach -t ${sessionName}`,
-        ],
-        { detached: true, stdio: "ignore", windowsHide: false },
-        () => {},
-      );
-    } else {
-      // 로컬: psmux attach in new WT tab
-      const title = worker.role || sessionName;
-      execFileFn(
-        "wt.exe",
-        [
-          "-w",
-          "0",
-          "nt",
-          "--title",
-          title,
-          "--",
-          "psmux",
-          "attach",
-          "-t",
-          sessionName,
-        ],
-        { detached: true, stdio: "ignore", windowsHide: false },
-        () => {},
-      );
+  async function attachToSession(worker) {
+    let request;
+    try {
+      request = buildDashboardAttachRequest(worker);
+    } catch (error) {
+      showFlash(`[attach] ${error.message}`);
+      return false;
     }
 
-    // 3. 200ms 후 altScreen 복귀 + rawMode 재활성화
-    setTimeout(() => {
+    const lease = attachLimiter.acquire(request.kind);
+    if (!lease.ok) {
+      const seconds = Math.max(1, Math.ceil(lease.retryAfterMs / 1000));
+      const label = lease.kind === "remote" ? "원격" : "로컬";
+      showFlash(
+        `[attach] ${label} 탭 제한(${lease.limit}/30초) — ${seconds}초 후 다시 시도`,
+      );
+      return false;
+    }
+
+    try {
+      await openTab(request);
+    } catch (error) {
+      lease.release?.();
+      const reason = error?.reasonCode || error?.message || "unknown";
+      showFlash(`[attach] 탭 열기 실패: ${reason}`);
+      return false;
+    }
+
+    if (rawModeEnabled && typeof input?.setRawMode === "function") {
+      input.setRawMode(false);
+      rawModeEnabled = false;
+    }
+    if (typeof input?.pause === "function") input.pause();
+    exitAltScreen();
+
+    setTimeoutFn(() => {
       enterAltScreen();
       if (typeof input?.setRawMode === "function") {
         input.setRawMode(true);
@@ -1366,6 +1523,7 @@ export function createLogDashboard(opts = {}) {
       if (typeof input?.resume === "function") input.resume();
       render();
     }, 200);
+    return true;
   }
 
   // ── flash 메시지 (완료/실패 알림용) ────────────────────────────────────
@@ -1373,8 +1531,8 @@ export function createLogDashboard(opts = {}) {
   let flashTimer = null;
   function showFlash(msg, durationMs = 5000) {
     flashMessage = msg;
-    if (flashTimer) clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => {
+    if (flashTimer) clearTimeoutFn(flashTimer);
+    flashTimer = setTimeoutFn(() => {
       flashMessage = "";
       render();
     }, durationMs);
@@ -1719,7 +1877,8 @@ export function createLogDashboard(opts = {}) {
 
     attachWorker(name) {
       const w = workers.get(name);
-      if (w) attachToSession(w);
+      if (!w) return false;
+      return attachToSession(w);
     },
 
     close() {

@@ -2,18 +2,11 @@ import * as childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createWriteStream, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 const LOG_DIR = join(homedir(), ".triflux", "logs");
 const DEDUPE_WINDOW_MS = 5_000;
 const RATE_WINDOW_MS = 1_000;
-const WINDOWS_TERMINAL_COMMANDS = new Set([
-  "wt",
-  "wt.exe",
-  "windowsterminal.exe",
-]);
-
-export const MAX_WT_TABS = 8;
 export const MAX_SPAWN_PER_SEC = resolvePositiveInteger(
   process.env.TRIFLUX_MAX_SPAWN_RATE,
   10,
@@ -30,7 +23,6 @@ let traceSequence = 0;
 const recentSpawnTimes = [];
 const dedupeEntries = new Map();
 const activeChildren = new Map();
-const activeWtChildren = new Set();
 
 function resolvePositiveInteger(...values) {
   for (const value of values) {
@@ -149,14 +141,6 @@ function getCwd(options) {
   return options.cwd || process.cwd();
 }
 
-function getCommandBasename(command) {
-  return basename(String(command || "")).toLowerCase();
-}
-
-function isWindowsTerminalSpawn(command) {
-  return WINDOWS_TERMINAL_COMMANDS.has(getCommandBasename(command));
-}
-
 function createPolicyError(reasonCode, message, meta = {}) {
   const error = new Error(message);
   error.code = "TRIFLUX_SPAWN_BLOCKED";
@@ -212,14 +196,6 @@ function enforceGuards(command, args, options) {
     );
   }
 
-  if (isWindowsTerminalSpawn(command) && activeWtChildren.size >= MAX_WT_TABS) {
-    return createPolicyError(
-      "wt_tab_cap",
-      `spawn-trace Windows Terminal cap exceeded (${MAX_WT_TABS})`,
-      { maxWtTabs: MAX_WT_TABS },
-    );
-  }
-
   recentSpawnTimes.push(now);
   if (dedupeKey) {
     dedupeEntries.set(dedupeKey, now);
@@ -234,9 +210,6 @@ function trackChild(child, meta) {
   }
 
   activeChildren.set(child, meta);
-  if (meta.isWindowsTerminalSpawn) {
-    activeWtChildren.add(child);
-  }
 
   let finalized = false;
   const finalize = (event, payload = {}) => {
@@ -246,7 +219,6 @@ function trackChild(child, meta) {
 
     finalized = true;
     activeChildren.delete(child);
-    activeWtChildren.delete(child);
 
     appendTrace({
       event,
@@ -381,7 +353,6 @@ export function spawn(command, args, options) {
     args: argsList,
     cwd: getCwd(normalizedOptions),
     reason: getReason(normalizedOptions),
-    isWindowsTerminalSpawn: isWindowsTerminalSpawn(command),
   });
 }
 
@@ -432,7 +403,6 @@ export function execFile(file, args, options, callback) {
     args: normalized.argsList,
     cwd: getCwd(normalized.options),
     reason: getReason(normalized.options),
-    isWindowsTerminalSpawn: isWindowsTerminalSpawn(file),
   });
 }
 
@@ -521,7 +491,6 @@ export default {
   spawn,
   execFile,
   execFileSync,
-  MAX_WT_TABS,
   MAX_SPAWN_PER_SEC,
   MAX_TOTAL_DESCENDANTS,
 };
