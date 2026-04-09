@@ -22,6 +22,7 @@
 
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
@@ -370,6 +371,29 @@ async function main() {
         }
       }
     }
+  }
+
+  // ── PostToolUse: 컨텍스트 압축 nudge (인라인, 프로세스 추가 없음) ──
+  if (eventName === "PostToolUse" && !blocked) {
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const snapshotPath = join(home, ".claude", "cache", "tfx-hub", "context-monitor.json");
+      const nudgeMarker = join(tmpdir(), "tfx-compact-nudge-sent");
+      if (existsSync(snapshotPath) && !existsSync(nudgeMarker)) {
+        const snap = JSON.parse(readFileSync(snapshotPath, "utf8"));
+        const percent = Number(snap.percent || 0);
+        if (percent >= 80) {
+          const level = percent >= 90 ? "critical" : "warn";
+          const msg = level === "critical"
+            ? `[context ${percent}%] 컨텍스트 ${percent}% 사용. /compact 또는 에이전트 분할을 강력 권장합니다.`
+            : `[context ${percent}%] 컨텍스트 ${percent}% 사용. 마일스톤이면 /compact를 권장합니다.`;
+          mergedOutput = mergeOutputs(mergedOutput, JSON.stringify({ systemMessage: msg }));
+          if (level === "warn") {
+            writeFileSync(nudgeMarker, new Date().toISOString());
+          }
+        }
+      }
+    } catch { /* 컨텍스트 모니터 읽기 실패 무시 */ }
   }
 
   // ── PostToolUse:Skill 완료 시 라우팅 가중치 기록 ──
