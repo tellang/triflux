@@ -226,8 +226,10 @@ async function main() {
     // 복합 명령(&&, ||, ;, |) 분리 후 각 세그먼트의 커맨드 위치만 검사 (args/quotes 안의 codex는 무시)
     // NOTE: || 는 | 보다 먼저 매칭되므로 logical OR이 단일 pipe로 잘못 분리되지 않음
     // #37 Bug4: gh/git 명령은 본문에 codex/gemini 문자열이 있어도 차단하지 않음
+    // #38 Bug5: heredoc 블록 내 codex/gemini 텍스트는 명령이 아님 → 검사 전 제거
+    const cmdSanitized = cmd.replace(/<<['"]?(\w+)['"]?[\s\S]*?\n\1\b/g, "");
     const SAFE_CMD_RE = /^\s*(?:[\w_]+=\S+\s+)*\s*(gh|git)\b/;
-    const cmdParts = cmd.split(/\s*(?:&&|\|\||\||;)\s*/);
+    const cmdParts = cmdSanitized.split(/\s*(?:&&|\|\||\||;)\s*/);
     let hasDirectCli = cmdParts.some((part) => {
       // gh/git 세그먼트는 건너뜀 (이슈 본문/커밋 메시지 내 codex/gemini 언급은 정상)
       if (SAFE_CMD_RE.test(part)) return false;
@@ -256,12 +258,12 @@ async function main() {
         // gh/git 전용: $(codex exec ...) 직접 명령 치환만 차단
         // $(cat <<'EOF'\n...codex exec text...\nEOF) 같은 heredoc 텍스트는 허용
         hasDirectCli = /\$\(\s*(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
-          cmd,
+          cmdSanitized,
         );
       } else {
         hasDirectCli =
-          /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd) ||
-          /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd);
+          /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmdSanitized) ||
+          /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmdSanitized);
       }
     }
 
