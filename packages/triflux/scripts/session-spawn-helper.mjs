@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { spawn } from "../hub/lib/spawn-trace.mjs";
 
 const SESSION_PREFIX = "tfx-isolated";
 const DEFAULT_ATTACH_PROFILE = "triflux";

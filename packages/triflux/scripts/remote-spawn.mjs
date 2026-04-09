@@ -10,7 +10,8 @@
 //   node remote-spawn.mjs --attach <session>
 //   node remote-spawn.mjs --probe <ssh-host>
 
-import { execFileSync, execSync, spawn } from "child_process";
+import { execFileSync, execSync } from "child_process";
+import { spawn } from "../hub/lib/spawn-trace.mjs";
 import { randomUUID } from "crypto";
 import {
   existsSync,

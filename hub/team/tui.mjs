@@ -2,7 +2,7 @@
 // virtual row buffer 기반. dirty-row만 갱신. isTTY 아닐 때 append-only fallback.
 // Tier1(상단 고정) / Tier2(worker rail) / Tier3(focus pane) 3단 계층.
 
-import { execFile as _execFile } from "node:child_process";
+import { execFile as _execFile } from "../lib/spawn-trace.mjs";
 import {
   altScreenOff,
   altScreenOn,

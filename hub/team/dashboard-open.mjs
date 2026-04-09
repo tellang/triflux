@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn } from "../lib/spawn-trace.mjs";
 
 import { psmuxExec } from "./psmux.mjs";
 import {
