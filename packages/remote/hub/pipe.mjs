@@ -12,8 +12,8 @@ import {
   readPipelineState,
 } from "@triflux/core/hub/pipeline/state.mjs";
 import { IS_WINDOWS, pipePath } from "@triflux/core/hub/platform.mjs";
-import { getTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
 import { sendInputToConductorSession } from "./team/conductor-registry.mjs";
+import { getTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
 import { safeJsonParse } from "./workers/worker-utils.mjs";
 
 const DEFAULT_HEARTBEAT_TTL_MS = 60000;

@@ -133,7 +133,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   doctor: {
-    usage: "tfx doctor [--fix] [--reset] [--json]",
+    usage: "tfx doctor [--fix] [--reset] [--audit] [--json]",
     description: "설치 상태 진단 및 자동 복구",
     options: [
       {
@@ -145,6 +145,11 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--reset",
         type: "boolean",
         description: "캐시 초기화 후 재생성",
+      },
+      {
+        name: "--audit",
+        type: "boolean",
+        description: "설정 보안/성능 정적 감사",
       },
       {
         name: "--json",
@@ -5150,6 +5155,20 @@ async function main() {
       cmdSetup({ dryRun: cmdArgs.includes("--dry-run") });
       return;
     case "doctor": {
+      if (cmdArgs.includes("--audit")) {
+        const auditScript = join(PKG_ROOT, "scripts", "config-audit.mjs");
+        const auditArgs = JSON_OUTPUT ? ["--json"] : [];
+        try {
+          const out = execFileSync(process.execPath, [auditScript, ...auditArgs], {
+            timeout: 15000, encoding: "utf8", windowsHide: true,
+          });
+          process.stdout.write(out);
+        } catch (e) {
+          process.stdout.write(e.stdout || "");
+          if (e.stderr) process.stderr.write(e.stderr);
+        }
+        return;
+      }
       const fix = cmdArgs.includes("--fix");
       const reset = cmdArgs.includes("--reset");
       await cmdDoctor({ fix, reset, json: JSON_OUTPUT });

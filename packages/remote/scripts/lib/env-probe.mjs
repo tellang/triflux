@@ -4,10 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  whichCommand,
-  whichCommandAsync,
-} from "@triflux/core/hub/platform.mjs";
+import { whichCommand, whichCommandAsync } from "@triflux/core/hub/platform.mjs";
 
 const DEFAULT_STATUS_URL = "http://127.0.0.1:27888/status";
 const _sab = new Int32Array(new SharedArrayBuffer(4));

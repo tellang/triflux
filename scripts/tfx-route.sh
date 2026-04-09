@@ -56,6 +56,37 @@ resolve_tmp_dir() {
 
 TFX_TMP="$(resolve_tmp_dir)"
 
+# ── Worker PID 추적 (EXIT trap에서 정리) ──
+_PID_TRACK="${TFX_TMP}/tfx-route-$$-pids"
+
+track_worker_pid() {
+  echo "$1" >> "$_PID_TRACK"
+}
+
+cleanup_workers() {
+  deregister_agent 2>/dev/null || true
+  [[ ! -f "$_PID_TRACK" ]] && return
+  while IFS= read -r pid; do
+    [[ -z "$pid" ]] && continue
+    kill -0 "$pid" 2>/dev/null || continue
+    case "$(uname -s)" in
+      MINGW*|MSYS*)
+        # Windows: taskkill /T /F로 프로세스 트리 전체 종료
+        MSYS_NO_PATHCONV=1 cmd.exe //c "taskkill /T /F /PID $pid" 2>/dev/null || true ;;
+      *)
+        # Unix: 프로세스 그룹 kill
+        local pgid
+        pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
+        if [[ -n "$pgid" && "$pgid" != "0" ]]; then
+          kill -- "-$pgid" 2>/dev/null || true
+        else
+          kill "$pid" 2>/dev/null || true
+        fi ;;
+    esac
+  done < "$_PID_TRACK"
+  rm -f "$_PID_TRACK"
+}
+
 # ── config.toml sandbox/approval_mode 감지 ──
 # config.toml에 이미 설정되어 있으면 CLI 플래그 중복 시 Codex가 에러를 던짐
 _CODEX_CONFIG="${HOME}/.codex/config.toml"
@@ -1375,6 +1406,7 @@ run_stream_worker() {
     printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
+  track_worker_pid "$worker_pid"
 
   heartbeat_monitor "$worker_pid" &
   hb_pid=$!
@@ -1382,125 +1414,6 @@ run_stream_worker() {
   wait "$worker_pid" || exit_code_local=$?
   kill "$hb_pid" 2>/dev/null; wait "$hb_pid" 2>/dev/null
   return "$exit_code_local"
-}
-
-# Gemini 429 지수 백오프 재시도 래퍼
-# 사용: gemini_with_retry <use_tee_flag> <gemini_args_array_name> <prompt>
-# 429/rate limit 감지 시 최대 3회 재시도 (2→4→8초 백오프)
-_gemini_run_once() {
-  local use_tee_flag="$1"
-  local prompt="$2"
-  shift 2
-  local -a g_args=("$@")
-
-  if [[ "$use_tee_flag" == "true" ]]; then
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${g_args[@]}" "$prompt" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
-  else
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${g_args[@]}" "$prompt" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-  fi
-  GEMINI_RUN_PID=$!
-}
-
-gemini_with_retry() {
-  local use_tee_flag="$1"
-  local prompt="$2"
-  shift 2
-  local -a g_args=("$@")
-
-  local max_retries=3
-  local attempt=0
-  local delay=2
-  local exit_code_local=0
-
-  while (( attempt < max_retries )); do
-    exit_code_local=0
-    local pid
-    _gemini_run_once "$use_tee_flag" "$prompt" "${g_args[@]}"
-    pid="${GEMINI_RUN_PID:-}"
-    if [[ -z "$pid" ]]; then
-      echo "[tfx-route] Gemini: worker pid 획득 실패" >&2
-      return 1
-    fi
-
-    local health_ok=true
-    local intervals=(1 2 3 5 8)
-    for wait_sec in "${intervals[@]}"; do
-      sleep "$wait_sec"
-      if [[ -s "$STDOUT_LOG" ]] || [[ -s "$STDERR_LOG" ]]; then
-        break
-      fi
-      if ! kill -0 "$pid" 2>/dev/null; then
-        health_ok=false
-        echo "[tfx-route] Gemini: 출력 없이 프로세스 종료 (${wait_sec}초 체크)" >&2
-        break
-      fi
-    done
-
-    local hb_pid
-    if [[ "$health_ok" == "false" ]]; then
-      wait "$pid" 2>/dev/null
-    else
-      heartbeat_monitor "$pid" &
-      hb_pid=$!
-      wait "$pid" || exit_code_local=$?
-      kill "$hb_pid" 2>/dev/null; wait "$hb_pid" 2>/dev/null
-    fi
-
-    # 성공 시 즉시 반환
-    if [[ $exit_code_local -eq 0 ]]; then
-      return 0
-    fi
-
-    # 429 / rate limit 감지
-    if grep -qiE '429|rate.limit|too many requests' "$STDERR_LOG" 2>/dev/null; then
-      attempt=$(( attempt + 1 ))
-      if (( attempt < max_retries )); then
-        echo "[tfx-route] Gemini 429 감지. ${delay}초 후 재시도 ($attempt/$max_retries)..." >&2
-        kill "$pid" 2>/dev/null
-        wait "$pid" 2>/dev/null
-        sleep "$delay"
-        delay=$(( delay * 2 ))
-        : > "$STDOUT_LOG"
-        : > "$STDERR_LOG"
-        continue
-      else
-        echo "[tfx-route] Gemini 429: ${max_retries}회 재시도 실패" >&2
-      fi
-    fi
-
-    # 비-429 에러 또는 최대 재시도 초과 시 즉시 반환
-    return "$exit_code_local"
-  done
-
-  return "$exit_code_local"
-}
-
-run_legacy_gemini() {
-  local prompt="$1"
-  local use_tee_flag="$2"
-  local -a gemini_args=()
-  read -r -a gemini_args <<< "$CLI_ARGS"
-
-  if [[ ${#GEMINI_ALLOWED_SERVERS[@]} -gt 0 ]]; then
-    local gemini_mcp_filter prompt_index=-1
-    gemini_mcp_filter=$(IFS=,; echo "${GEMINI_ALLOWED_SERVERS[*]}")
-    for i in "${!gemini_args[@]}"; do
-      if [[ "${gemini_args[$i]}" == "--prompt" ]]; then
-        prompt_index="$i"
-        break
-      fi
-    done
-    if [[ "$prompt_index" -ge 0 ]]; then
-      gemini_args=(
-        "${gemini_args[@]:0:$prompt_index}"
-        "--allowed-mcp-server-names" "$gemini_mcp_filter"
-        "${gemini_args[@]:$prompt_index}"
-      )
-      echo "[tfx-route] Gemini MCP 필터: $gemini_mcp_filter" >&2
-    fi
-  fi
-
-  gemini_with_retry "$use_tee_flag" "$prompt" "${gemini_args[@]}"
 }
 
 resolve_codex_mcp_script() {
@@ -1547,6 +1460,7 @@ run_codex_exec() {
     "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
+  track_worker_pid "$worker_pid"
 
   heartbeat_monitor "$worker_pid" &
   hb_pid=$!
@@ -1641,6 +1555,7 @@ run_codex_mcp() {
     "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$node_bin" "${mcp_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
+  track_worker_pid "$worker_pid"
 
   heartbeat_monitor "$worker_pid" &
   hb_pid=$!
@@ -1665,8 +1580,8 @@ run_codex_mcp() {
 
 # ── 메인 실행 ──
 main() {
-  # 종료 시 per-process 에이전트 파일 자동 삭제
-  trap 'deregister_agent' EXIT
+  # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
+  trap 'cleanup_workers' EXIT
 
   route_agent "$AGENT_TYPE"
   apply_cli_mode
@@ -1847,11 +1762,13 @@ FALLBACK_EOF
 
     run_stream_worker "gemini" "$FULL_PROMPT" "$use_tee" "${gemini_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}). legacy CLI 경로로 fallback합니다." >&2
-      : > "$STDOUT_LOG"
+      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}). claude-native fallback." >&2
+      cat > "$STDOUT_LOG" <<EOF
+$(emit_claude_native_metadata)
+EOF
       : > "$STDERR_LOG"
       exit_code=0
-      run_legacy_gemini "$FULL_PROMPT" "$use_tee" || exit_code=$?
+      CLI_TYPE="claude-native"
     fi
 
   elif [[ "$CLI_TYPE" == "claude" ]]; then

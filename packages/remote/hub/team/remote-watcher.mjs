@@ -9,10 +9,7 @@
 
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import {
-  detectHostOs,
-  shellQuoteForHost,
-} from "@triflux/core/hub/lib/ssh-command.mjs";
+import { detectHostOs, shellQuoteForHost } from "@triflux/core/hub/lib/ssh-command.mjs";
 import { detectInputWait, PROBE_LEVELS } from "./health-probe.mjs";
 
 export const REMOTE_WATCHER_STATES = Object.freeze({

@@ -4,8 +4,8 @@ import childProcess from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
+import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 
 const PSMUX_BIN = (() => {
   if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
