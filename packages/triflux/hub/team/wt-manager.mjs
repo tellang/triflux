@@ -1,4 +1,4 @@
-import childProcess from "node:child_process";
+import * as childProcess from "../lib/spawn-trace.mjs";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { platform as osPlatform, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { sendKeysToPane } from "./psmux.mjs";
 
 const DEFAULT_WINDOW_NAME = "triflux";
-const DEFAULT_MAX_TABS = 8;
 const DEFAULT_TAB_CREATE_DELAY_MS = 500;
 const DEFAULT_WAIT_TIMEOUT_MS = 5_000;
 const DEFAULT_WAIT_POLL_MS = 300;
@@ -138,8 +137,8 @@ export function createWtManager(opts = {}) {
     resolvePositiveInteger(
       opts.maxTabs,
       process.env.WTM_MAX_TABS,
-      DEFAULT_MAX_TABS,
-    ) || DEFAULT_MAX_TABS;
+      childProcess.MAX_WT_TABS,
+    ) || childProcess.MAX_WT_TABS;
   const pidDir = String(opts.pidDir || join(tmpdir(), "wt-manager-pids"));
   const tabCreateDelayMs =
     resolvePositiveInteger(
@@ -243,6 +242,7 @@ export function createWtManager(opts = {}) {
 
     const child = spawnFn("wt.exe", args, {
       detached: true,
+      reason: "wt-manager:createTab",
       stdio: "ignore",
     });
     child?.unref?.();
@@ -344,6 +344,7 @@ export function createWtManager(opts = {}) {
 
     const child = spawnFn("wt.exe", args, {
       detached: true,
+      reason: "wt-manager:splitPane",
       stdio: "ignore",
     });
     child?.unref?.();
