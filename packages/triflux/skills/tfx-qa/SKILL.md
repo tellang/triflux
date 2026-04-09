@@ -1,7 +1,11 @@
 ---
-internal: true
 name: tfx-qa
-description: "테스트 실행하고 실패하면 수정해서 통과시켜야 할 때 사용한다. 'qa', '검증해', '테스트 돌려', 'test-fix', '테스트 통과시켜' 같은 요청에 반드시 사용. 테스트 실패를 반복 수정하여 전부 통과시켜야 할 때 적극 활용."
+description: >
+  테스트 스위트(unit/integration)를 실행하고, 실패한 테스트의 출력을 파싱하여
+  원인을 진단한 뒤, 구현 코드(또는 잘못된 테스트)를 수정하고 재실행하여
+  전체 통과시키는 반복 수정 사이클. 'qa', '검증해', '테스트 돌려',
+  'test-fix', '테스트 통과시켜', 'run tests and fix' 같은 요청에 사용.
+  일반 디버깅이 아닌 자동화된 테스트 스위트 수정에 특화.
 triggers:
   - qa
   - 검증
@@ -10,123 +14,77 @@ triggers:
 argument-hint: "[테스트 명령 또는 파일 경로]"
 ---
 
-# tfx-qa — Light Test-Fix Cycle
+# tfx-qa -- Light Test-Fix Cycle
 
-> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
-> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+> **Deep version**: tfx-deep-qa. Escalate with "제대로/꼼꼼히" modifier.
 
-> **Telemetry**
->
-> - Skill: `tfx-qa`
-> - Description: `테스트 실행하고 실패하면 수정해서 통과시켜야 할 때 사용한다. 'qa', '검증해', '테스트 돌려', 'test-fix', '테스트 통과시켜' 같은 요청에 반드시 사용. 테스트 실패를 반복 수정하여 전부 통과시켜야 할 때 적극 활용.`
-> - Session: 요청별 식별자를 유지해 단계별 실행 로그를 추적한다.
-> - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
+## Workflow
 
+### Step 1: Detect test runner
 
-
-
-> **Deep 버전**: tfx-deep-qa. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
-> 테스트 실행 → 실패 분석 → 자동 수정 → 재실행. 최대 3회. OMC ultraqa 영감.
-
-## 용도
-
-- 테스트 실행 후 실패 자동 수정
-- CI 실패 빠른 해결
-- 리팩터링 후 회귀 검증 + 수정
-- "테스트 돌려서 깨진 거 고쳐" 류의 요청
-
-## 워크플로우
-
-### Step 1: 테스트 대상 식별
-
-```
-우선순위:
-  1. 사용자가 테스트 명령 지정 → 그대로 실행
-  2. 사용자가 파일 지정 → 해당 파일의 테스트 탐색
-  3. 지정 없음 → 프로젝트 테스트 전체 (npm test / pytest 등 자동 감지)
-
-자동 감지:
-  package.json의 "test" 스크립트 → npm test
-  pytest.ini / pyproject.toml → pytest
-  Makefile의 test 타깃 → make test
-```
-
-### Step 2: 테스트 실행 (Round 1)
+Use the user-provided command if given. Otherwise auto-detect:
 
 ```bash
-bash ~/.claude/scripts/tfx-route.sh codex \
-  "다음 테스트를 실행하고 결과를 보고하라:
-   명령: {test_command}
-
-   출력 형식:
-   - 총 테스트 수
-   - 통과/실패/스킵 수
-   - 실패한 테스트 목록 (파일:테스트명:에러 메시지)
-   - 실패 원인 분석 (각 실패별)" implement
+if [ -f package.json ] && grep -q '"test"' package.json; then TEST_CMD="npm test"
+elif [ -f pytest.ini ] || grep -q '\[tool\.pytest' pyproject.toml 2>/dev/null; then TEST_CMD="pytest"
+elif grep -q '^test:' Makefile 2>/dev/null; then TEST_CMD="make test"
+fi
 ```
 
-### Step 3: 실패 수정 + 재실행 루프
+If a file path is given instead, scope with Glob: `Glob("**/*{filename}*.test.*")`.
 
-```
-MAX_RETRIES = 3
-retry = 0
+### Step 2: Execute and parse
 
-WHILE (failures > 0 AND retry < MAX_RETRIES):
-  retry++
+Run the test command via Bash and capture output. Claude directly parses the results:
 
-  Codex로 실패 수정:
-    bash ~/.claude/scripts/tfx-route.sh codex \
-    "다음 테스트 실패를 수정하라:
-     실패 목록: {failures}
-
-     규칙:
-     - 테스트 코드가 아닌 구현 코드를 수정하라 (테스트가 정확한 경우)
-     - 테스트 자체가 잘못된 경우만 테스트를 수정하라
-     - 수정 후 해당 테스트를 다시 실행하여 확인하라" implement
-
-  재실행하여 결과 확인
-
-END WHILE
+```bash
+Bash("{TEST_CMD} 2>&1")
 ```
 
-### Step 4: 결과 보고
+Extract failures from output using framework-specific patterns:
+- **Jest/Vitest**: lines matching `FAIL` + stack traces between `●` markers
+- **pytest**: lines after `FAILURES` header, each `FAILED` line = `file::test -- reason`
+- **make/generic**: non-zero exit + stderr lines containing `Error`/`FAIL`/`assert`
+
+Build a structured failure list:
+
+```
+failures = [
+  { file: "src/auth.ts", test: "should validate token", error: "Expected true, got false", line: 42 },
+  ...
+]
+```
+
+If zero failures, skip to Step 4.
+
+### Step 3: Fix-and-rerun (max 3 rounds)
+
+For each round while `failures` is non-empty:
+
+1. **Locate**: for each failure, `Read(file, offset=line-10, limit=20)` to get surrounding context.
+2. **Diagnose**: identify whether the bug is in implementation code or the test assertion.
+3. **Fix**: use `Edit(file, old_string, new_string)` to patch the implementation code. Only edit test code when the assertion itself is provably wrong.
+4. **Re-run**: `Bash("{TEST_CMD} 2>&1")` and re-parse failures as in Step 2.
+5. **Check**: if all pass, exit loop. Otherwise continue to next round.
+
+After 3 rounds, collect any unresolved failures for the report.
+
+### Step 4: Report
 
 ```markdown
-## QA 결과: {test_target}
+## QA Results: {target}
 
-### 실행 요약
-| 라운드 | 통과 | 실패 | 수정 |
-|--------|------|------|------|
-| Round 1 | {n} | {n} | — |
-| Round 2 | {n} | {n} | {수정 내용} |
-| Round 3 | {n} | {n} | {수정 내용} |
+| Round | Pass | Fail | Fixes Applied |
+|-------|------|------|---------------|
+| 1 | {n} | {n} | -- |
+| 2 | {n} | {n} | {summary} |
 
-### 최종 결과
-- 테스트: {pass}/{total} 통과
-- 수정된 파일: {list}
-- 미해결 실패: {list, 있으면}
+### Final: {pass}/{total} passing
+- Modified: {file list}
+- Unresolved: {failures, if any + root cause analysis}
 
-### 수정 상세
-- `{file}:{line}` — {무엇을 왜 수정했는지}
+### Fix Details
+- `{file}:{line}` -- {what and why}
 ```
 
-3회 후에도 실패가 남으면 미해결 목록 + 원인 분석을 사용자에게 보고.
-
-## 토큰 예산
-
-| 단계 | 토큰 |
-|------|------|
-| Step 1 (식별) | ~300 |
-| Step 2 (실행) | ~1.5K |
-| Step 3 (수정, 회당) | ~1.5K |
-| Step 4 (보고) | ~500 |
-| **총합 (최대 3회)** | **~5K** |
-
-## 사용 예
-
-```
-/tfx-qa
-/tfx-qa "npm test -- --grep auth"
-/tfx-qa "pytest tests/test_api.py -v"
-/tfx-qa "깨진 테스트 고쳐줘"
-```
+Unresolved failures after 3 rounds get root cause analysis and manual investigation suggestions.
