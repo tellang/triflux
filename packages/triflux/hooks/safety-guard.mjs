@@ -69,6 +69,7 @@ const WT_DIRECT_BLOCK_MESSAGE =
 
 // ── SSH+PowerShell bash 문법 차단 ────────────────────────────
 // 원격 기본 셸이 PowerShell인 호스트에 bash redirect/glob을 보내면 오동작
+// macOS/Linux 대상 SSH에는 bash 문법이 정상이므로 hosts.json OS를 확인한다.
 const BASH_SYNTAX_IN_SSH = [
   /2>\/dev\/null/, // 2>/dev/null → PowerShell에서 Out-File C:\dev\null
   />\s*\/dev\/null/, // >/dev/null
@@ -81,6 +82,48 @@ const BASH_SYNTAX_IN_SSH = [
 const SSH_POWERSHELL_HINT =
   "원격 셸이 PowerShell입니다. bash 문법 직접 전달 금지. scp + pwsh -File 패턴 사용. " +
   "2>/dev/null → 2>$null, $() → $(), export → $env:, source → . (dot-source)";
+
+/** hosts.json에서 Windows 호스트 식별자 집합을 구축한다. */
+function getWindowsHostIds() {
+  const ids = new Set();
+  try {
+    const paths = [
+      join(process.cwd(), "references", "hosts.json"),
+      join(process.cwd(), "packages", "triflux", "references", "hosts.json"),
+    ];
+    let hostsConfig = null;
+    for (const p of paths) {
+      if (existsSync(p)) {
+        hostsConfig = JSON.parse(readFileSync(p, "utf8"));
+        break;
+      }
+    }
+    if (!hostsConfig?.hosts) return ids;
+    for (const [name, cfg] of Object.entries(hostsConfig.hosts)) {
+      if (cfg.os !== "windows") continue;
+      ids.add(name);
+      if (cfg.tailscale?.ip) ids.add(cfg.tailscale.ip);
+      if (cfg.tailscale?.dns) ids.add(cfg.tailscale.dns);
+      if (cfg.ssh_user) {
+        ids.add(`${cfg.ssh_user}@${name}`);
+        if (cfg.tailscale?.ip) ids.add(`${cfg.ssh_user}@${cfg.tailscale.ip}`);
+      }
+    }
+  } catch {
+    // hosts.json 로드 실패 시 빈 집합 → 차단 안 함 (POSIX 기본)
+  }
+  return ids;
+}
+
+/** SSH 명령의 대상이 Windows 호스트인지 판별한다. */
+function isSshTargetWindows(command) {
+  const winIds = getWindowsHostIds();
+  if (winIds.size === 0) return false; // Windows 호스트 없으면 POSIX 가정
+  for (const id of winIds) {
+    if (command.includes(id)) return true;
+  }
+  return false;
+}
 
 // ── 경고 규칙 ──────────────────────────────────────────────
 const WARN_RULES = [
@@ -248,10 +291,9 @@ function main() {
     }
   }
 
-  // 0.5. SSH → PowerShell 호스트에 bash 문법 전달 차단
-  // 세그먼트 시작 위치에서 ssh 명령인 경우만 (문자열/코드 안의 ssh는 무시)
-  if (hasSegmentInvocation(command, [/^\s*ssh\s+/i])) {
-    // 세그먼트 분리 후 ssh로 시작하는 세그먼트의 payload만 검사
+  // 0.5. SSH → Windows(PowerShell) 호스트에만 bash 문법 전달 차단
+  // macOS/Linux 대상은 bash/zsh이므로 허용. hosts.json OS로 판별.
+  if (hasSegmentInvocation(command, [/^\s*ssh\s+/i]) && isSshTargetWindows(command)) {
     const segments = command.split(/\s*(?:&&|;|\|\||\|)\s*/);
     for (const seg of segments) {
       const sshMatch = seg.trim().match(/^ssh\s+\S+\s+(.*)/s);

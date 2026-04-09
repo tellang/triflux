@@ -78,9 +78,16 @@ function normalizePosixProbeEnv(parsed) {
   return Object.freeze({
     claudePath:
       !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
+    codexPath:
+      !parsed.codex || parsed.codex === "notfound" ? null : parsed.codex,
+    geminiPath:
+      !parsed.gemini || parsed.gemini === "notfound" ? null : parsed.gemini,
     home: parsed.home,
     os,
     shell: parsed.shell === "zsh" ? "zsh" : "bash",
+    node: parsed.node || null,
+    cores: parsed.cores ? Number(parsed.cores) : null,
+    ramGb: parsed.ram_gb ? Number(parsed.ram_gb) : null,
   });
 }
 
@@ -111,10 +118,16 @@ function probeRemoteEnvViaPwsh(host) {
 
 function probeRemoteEnvViaPosix(host) {
   const script = [
+    "export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:$PATH",
     "echo shell=$(basename $SHELL)",
     "echo home=$HOME",
     "command -v claude >/dev/null 2>&1 && echo claude=$(command -v claude) || echo claude=notfound",
+    "command -v codex >/dev/null 2>&1 && echo codex=$(command -v codex) || echo codex=notfound",
+    "command -v gemini >/dev/null 2>&1 && echo gemini=$(command -v gemini) || echo gemini=notfound",
     "echo os=$(uname -s | tr A-Z a-z)",
+    "node --version 2>/dev/null && echo node=$(node --version) || echo node=notfound",
+    // darwin: sysctl, linux: nproc + /proc/meminfo
+    "if [ $(uname -s) = Darwin ]; then echo cores=$(sysctl -n hw.ncpu); echo ram_gb=$(($(sysctl -n hw.memsize) / 1073741824)); else echo cores=$(nproc 2>/dev/null || echo 0); echo ram_gb=$(($(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}') / 1048576)); fi",
   ].join("\n");
 
   try {
