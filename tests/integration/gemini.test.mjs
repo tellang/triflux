@@ -3,7 +3,7 @@
 // TFX_CLI_MODE=gemini 환경의 시나리오:
 //   - Gemini 모델 리매핑 검증 (Pro / Flash 분기)
 //   - GEMINI_ALLOWED_SERVERS MCP 필터링 동작
-//   - run_legacy_gemini() 지수 백오프 및 크래시 자동 재시도
+//   - Gemini stream wrapper 실패 시 claude-native fallback
 //   - Gemini health check 동작
 
 import assert from "node:assert/strict";
@@ -268,36 +268,22 @@ describe("tfx-route.sh — Gemini stream worker 429 재시도", {
   });
 });
 
-// ── run_legacy_gemini() 지수 백오프 및 크래시 자동 재시도 ──
+// ── Gemini stream wrapper 실패 시 claude-native fallback ──
+// run_legacy_gemini는 좀비 프로세스 원인으로 제거됨 (#62 후속).
+// stream wrapper 실패 시 claude-native metadata를 반환한다.
 
-describe("tfx-route.sh — Gemini health check 지수 백오프", {
+describe("tfx-route.sh — Gemini stream wrapper fallback", {
   concurrency: 1,
 }, () => {
-  it("정상 Gemini 실행에서 health check가 출력 감지 후 통과해야 한다", () => {
-    // FAKE_GEMINI_LEGACY_OK=1로 정상 출력 가능
-    // 현재는 stream wrapper가 정상 동작하면 그대로 성공하고,
-    // wrapper가 불가한 환경에서는 legacy fallback으로도 성공해야 한다.
+  it("stream wrapper 실패 시 claude-native fallback metadata를 반환해야 한다", () => {
+    // stream wrapper가 실패하면 (TFX_ROUTE_WORKER_RUNNER 미존재)
+    // run_legacy_gemini 대신 claude-native metadata로 fallback
     const result = runBash(
-      `GEMINI_BIN=gemini FAKE_GEMINI_LEGACY_OK=1 TFX_ROUTE_WORKER_RUNNER=__nonexistent__ bash "${ROUTE_SCRIPT}" designer 'health-check-ok' auto 2>&1 || true`,
+      `GEMINI_BIN=gemini TFX_ROUTE_WORKER_RUNNER=__nonexistent__ bash "${ROUTE_SCRIPT}" designer 'fallback-test' auto 2>&1 || true`,
       fixtureEnv(),
     );
     const output = out(result);
-    // 어떤 경로든 crash 감지 없이 정상 완료
-    assert.doesNotMatch(output, /crash 감지/);
-    assert.doesNotMatch(output, /출력 없이 프로세스 종료/);
-    // Gemini가 정상적으로 응답을 생성함
-    assert.match(output, /gemini:health-check-ok/);
-  });
-
-  it("Gemini 무출력 크래시 시 재시도 메시지가 출력되어야 한다", () => {
-    // FAKE_GEMINI_SILENT_CRASH=1로 stdout/stderr 모두 비어 있는 채 즉시 종료
-    // health check가 "출력 없이 프로세스 종료"를 감지하고 재시도 경로 진입
-    const result = runBash(
-      `GEMINI_BIN=gemini FAKE_GEMINI_SILENT_CRASH=1 TFX_ROUTE_WORKER_RUNNER=__nonexistent__ bash "${ROUTE_SCRIPT}" designer 'health-check-crash' auto 2>&1 || true`,
-      fixtureEnv(),
-    );
-    // legacy 경로에서 무출력 크래시 감지 + 재시도 메시지가 있어야 함
-    assert.match(out(result), /crash 감지|재시도|출력 없이 프로세스 종료/);
+    assert.match(output, /claude-native fallback|ROUTE_TYPE=claude-native/);
   });
 });
 

@@ -881,6 +881,47 @@ describe("#62: session-stale-cleanup (runtime)", () => {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
   });
+
+  it("죽은 세션의 orphan PID 파일을 삭제한다", () => {
+    const sandboxDir = mkdtempSync(join(tmpdir(), "tfx-cleanup-pids-"));
+    const pidFile = join(sandboxDir, "tfx-route-99999999-pids");
+
+    try {
+      writeFileSync(pidFile, "99999998\n99999997\n", "utf8");
+
+      spawnSync(process.execPath, [CLEANUP_PATH], {
+        encoding: "utf8",
+        timeout: 5000,
+        env: { ...process.env, TMPDIR: sandboxDir, TEMP: sandboxDir },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      assert.equal(existsSync(pidFile), false, "orphan PID 파일 삭제됨");
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("살아있는 세션의 PID 파일은 유지한다", () => {
+    const sandboxDir = mkdtempSync(join(tmpdir(), "tfx-cleanup-pids-alive-"));
+    // process.pid = 현재 테스트 프로세스 (살아있음)
+    const pidFile = join(sandboxDir, `tfx-route-${process.pid}-pids`);
+
+    try {
+      writeFileSync(pidFile, "99999998\n", "utf8");
+
+      spawnSync(process.execPath, [CLEANUP_PATH], {
+        encoding: "utf8",
+        timeout: 5000,
+        env: { ...process.env, TMPDIR: sandboxDir, TEMP: sandboxDir },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      assert.equal(existsSync(pidFile), true, "살아있는 세션의 PID 파일 유지됨");
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("parseRouteCommand 소스 패리티", () => {
