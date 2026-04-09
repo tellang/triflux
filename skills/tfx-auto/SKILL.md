@@ -40,6 +40,7 @@ argument-hint: "<command|task> [args...]"
 > - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
 
 
+
 ### Step 0: 스마트 라우팅 (tfx-auto 진입 시 자동 실행)
 
 preamble에서 routing-weights.json을 읽고, 사용자 입력을 분석하여 dispatch 결정.

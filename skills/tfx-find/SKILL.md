@@ -28,6 +28,7 @@ argument-hint: "<검색 패턴 또는 질문>"
 > - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
 
 
+
 > OMC explore agent 오마주. Haiku의 속도 + Glob/Grep/Read의 정밀도.
 > "찾는 건 빠르게, 읽는 건 정확하게."
 

@@ -26,6 +26,7 @@ argument-hint: "[--update] [경로]"
 > - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
 
 
+
 > SuperClaude index-repo 오마주. 1회 2K 토큰으로 인덱스 생성, 이후 세션마다 55K 토큰 절감.
 
 > **Gemini 위임**: 스캔 + 인덱스 생성 작업은 Gemini CLI에 위임한다. Claude는 모드 선택(Step 0)과 파일 쓰기만 담당. Claude 토큰 소비 ~500 tokens으로 줄어든다.
