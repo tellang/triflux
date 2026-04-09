@@ -968,6 +968,29 @@ if (settingsChanged) {
   }
 }
 
+// ── HUD 캐시 pre-warm (백그라운드) ──
+
+const preWarmHudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
+if (existsSync(preWarmHudPath)) {
+  const refreshFlags = [
+    ["--refresh-claude-usage"],
+    ["--refresh-codex-rate-limits"],
+    ["--refresh-gemini-quota", "--account", "gemini-main"],
+    ["--refresh-gemini-session"],
+  ];
+  for (const args of refreshFlags) {
+    try {
+      const child = spawn(process.execPath, [preWarmHudPath, ...args], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      child.unref();
+    } catch { /* pre-warm 실패 무시 */ }
+  }
+  console.log("  \x1b[32m✓\x1b[0m HUD cache pre-warm (background)");
+}
+
 // ── Stale PID 파일 정리 (hub 좀비 방지) ──
 
 const HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");

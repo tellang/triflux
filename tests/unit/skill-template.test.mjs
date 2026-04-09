@@ -430,3 +430,27 @@ describe("loadTemplatePartials", () => {
     }
   });
 });
+
+describe("edge cases — PRD lake4d 잔여", () => {
+  it("frontmatter 중복 키는 마지막 값이 우선한다", () => {
+    const src = "---\nname: first\nname: second\n---\nbody";
+    const { data, body } = parseFrontmatter(src);
+    assert.equal(data.name, "second");
+    assert.equal(body, "body");
+  });
+
+  it("특수문자 포함 변수(FOO-BAR, FOO.BAR)를 치환한다", () => {
+    const ctx = { "FOO-BAR": "dash", "FOO.BAR": "dot" };
+    assert.equal(renderSkillTemplate("{{FOO-BAR}}", ctx), "dash");
+    assert.equal(renderSkillTemplate("{{FOO.BAR}}", ctx), "dot");
+  });
+
+  it("1000줄 이상 템플릿을 에러 없이 렌더링한다", () => {
+    const lines = Array.from({ length: 1200 }, (_, i) => `line ${i}: {{NAME}}`);
+    const tmpl = lines.join("\n");
+    const result = renderSkillTemplate(tmpl, { NAME: "ok" });
+    assert.ok(result.includes("line 0: ok"));
+    assert.ok(result.includes("line 1199: ok"));
+    assert.equal(result.split("\n").length, 1200);
+  });
+});

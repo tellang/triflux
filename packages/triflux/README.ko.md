@@ -39,6 +39,14 @@
 
 ### 1. 설치
 
+**Claude Code 플러그인** (권장):
+
+```bash
+claude plugin add triflux
+```
+
+**npm 글로벌**:
+
 ```bash
 npm install -g triflux
 ```
@@ -285,6 +293,14 @@ graph TD
 ## 빠른 시작
 
 ### 1. 설치
+
+**Claude Code 플러그인** (권장):
+
+```bash
+claude plugin add triflux
+```
+
+**npm 글로벌**:
 
 ```bash
 npm install -g triflux

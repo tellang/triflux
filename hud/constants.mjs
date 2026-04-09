@@ -43,6 +43,7 @@ export const CODEX_QUOTA_STALE_MS = 30 * 1000; // 30초
 export const CODEX_MIN_BUCKETS = 2;
 
 // Spawn lock (중복 refresh 방지)
+export const CLAUDE_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".claude-refresh-lock");
 export const CODEX_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".codex-refresh-lock");
 export const GEMINI_QUOTA_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".gemini-quota-refresh-lock");
 export const GEMINI_SESSION_REFRESH_LOCK_PATH = join(homedir(), ".claude", "cache", ".gemini-session-refresh-lock");

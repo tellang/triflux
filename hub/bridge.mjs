@@ -342,7 +342,6 @@ async function pipeQuery(action, payload, timeoutMs = 3000) {
 export function parseArgs(argv) {
   const { values, positionals } = nodeParseArgs({
     args: argv,
-    allowPositionals: true,
     options: {
       agent: { type: "string" },
       cli: { type: "string" },

@@ -77,13 +77,12 @@ describe("claudemd-manager: ensureTfxSection", () => {
 });
 
 describe("claudemd-manager: ensureGlobalClaudeRoutingSection", () => {
-  it("글로벌 CLAUDE.md가 없으면 skipped를 반환한다", () => {
+  it("global routing sync가 비활성화되어 항상 skipped를 반환한다", () => {
     const claudeDir = join(TMP_ROOT, "home", ".claude");
     mkdirSync(claudeDir, { recursive: true });
-    // CLAUDE.md가 없는 디렉토리
     const result = ensureGlobalClaudeRoutingSection(claudeDir);
 
     assert.equal(result.skipped, true);
-    assert.equal(result.reason, "missing_file");
+    assert.equal(result.reason, "global_sync_disabled");
   });
 });

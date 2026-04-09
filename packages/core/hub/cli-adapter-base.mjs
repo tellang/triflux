@@ -137,6 +137,10 @@ export function appendWarnings(stderr, warnings = []) {
 
 // ── Circuit breaker factory ─────────────────────────────────────
 
+/**
+ * @deprecated Use per-account circuit breakers in account-broker.mjs instead.
+ * Kept for backward compatibility with code that hasn't migrated yet.
+ */
 export function createCircuitBreaker(opts = {}) {
   const state = {
     failures: [],
@@ -193,6 +197,79 @@ export function createCircuitBreaker(opts = {}) {
   }
 
   return { getState, recordFailure, reset, canExecute, clearTrial };
+}
+
+// ── Broker-integrated execution ─────────────────────────────────
+
+/**
+ * Shared execute() logic that uses account-broker for per-account circuit
+ * breaking instead of a global breaker.
+ *
+ * @param {object} params
+ * @param {string} params.provider — 'codex' | 'gemini'
+ * @param {(prompt: string, workdir: string, preflight: object, attempt: object) => Promise<object>} params.runFn
+ * @param {(opts: object) => Promise<object>} params.preflightFn
+ * @param {(opts: object, preflight: object) => object[]} params.buildAttemptsFn
+ * @param {object} params.opts — caller-supplied execute options
+ * @returns {Promise<object>} createResult-shaped result
+ */
+export async function executeWithCircuitBroker({ provider, runFn, preflightFn, buildAttemptsFn, opts = {} }) {
+  // late-import to avoid circular dependency at module load time
+  const brokerMod = await import('./account-broker.mjs');
+  const { withRetry } = await import('./workers/worker-utils.mjs');
+
+  // access broker as live binding property (not destructured) so reloadBroker() propagates
+  const lease = brokerMod.broker?.lease({ provider });
+  if (!lease) {
+    return createResult(false, { fellBack: true, failureMode: 'circuit_open' });
+  }
+
+  const preflight = await preflightFn(opts);
+  if (!preflight.ok) {
+    brokerMod.broker.release(lease.id, { ok: false });
+    return createResult(false, {
+      stderr: appendWarnings('', preflight.warnings),
+      fellBack: opts.fallbackToClaude !== false,
+      failureMode: 'crash',
+    });
+  }
+
+  const attempts = buildAttemptsFn(opts, preflight);
+  let attemptIndex = 0;
+  let lastResult = createResult(false);
+
+  try {
+    lastResult = await withRetry(async () => {
+      const result = await runFn(opts.prompt || '', opts.workdir || process.cwd(), preflight, attempts[attemptIndex]);
+      const current = { ...result, stderr: appendWarnings(result.stderr, preflight.warnings), retried: attemptIndex > 0 };
+      const canRetry = !current.ok && attemptIndex < attempts.length - 1;
+      attemptIndex += 1;
+      if (!canRetry) return current;
+      const error = new Error('retry');
+      error.retryable = true;
+      error.result = current;
+      throw error;
+    }, {
+      maxAttempts: attempts.length,
+      baseDelayMs: 250,
+      maxDelayMs: 750,
+      shouldRetry: (error) => error?.retryable === true,
+    });
+  } catch (error) {
+    lastResult = error?.result || createResult(false, { stderr: String(error?.message || error) });
+  }
+
+  if (lastResult.ok) {
+    brokerMod.broker.release(lease.id, { ok: true });
+    return lastResult;
+  }
+
+  brokerMod.broker.release(lease.id, { ok: false });
+  return {
+    ...lastResult,
+    retried: attempts.length > 1,
+    fellBack: opts.fallbackToClaude !== false,
+  };
 }
 
 // ── Process termination ─────────────────────────────────────────

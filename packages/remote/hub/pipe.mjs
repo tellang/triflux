@@ -1,38 +1,37 @@
 // hub/pipe.mjs — Named Pipe/Unix socket 제어 채널
 // NDJSON 프로토콜로 에이전트 실시간 제어/이벤트 푸시를 처리한다.
 
-import net from 'node:net';
-import { existsSync, unlinkSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { getTeamBridge } from '@triflux/core/hub/team-bridge.mjs';
-import { createPipeline } from '@triflux/core/hub/pipeline/index.mjs';
+import { randomUUID } from "node:crypto";
+import { existsSync, unlinkSync } from "node:fs";
+import net from "node:net";
+import { createPipeline } from "@triflux/core/hub/pipeline/index.mjs";
 import {
   ensurePipelineTable,
   initPipelineState,
   listPipelineStates,
   readPipelineState,
-} from '@triflux/core/hub/pipeline/state.mjs';
-import { IS_WINDOWS, pipePath } from '@triflux/core/hub/platform.mjs';
-import { safeJsonParse } from './workers/worker-utils.mjs';
+} from "@triflux/core/hub/pipeline/state.mjs";
+import { IS_WINDOWS, pipePath } from "@triflux/core/hub/platform.mjs";
+import { sendInputToConductorSession } from "./team/conductor-registry.mjs";
+import { getTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
+import { safeJsonParse } from "./workers/worker-utils.mjs";
 
 const DEFAULT_HEARTBEAT_TTL_MS = 60000;
-const TEAM_BRIDGE_NOT_REGISTERED = 'bridge_not_registered';
+const TEAM_BRIDGE_NOT_REGISTERED = "bridge_not_registered";
 
 /** 플랫폼별 pipe 경로 계산 */
 export function getPipePath(sessionId = process.pid) {
-  return pipePath('triflux', sessionId);
+  return pipePath("triflux", sessionId);
 }
 
 function normalizeTopics(topics) {
   if (!Array.isArray(topics)) return [];
-  return topics
-    .map((topic) => String(topic || '').trim())
-    .filter(Boolean);
+  return topics.map((topic) => String(topic || "").trim()).filter(Boolean);
 }
 
 function getTeamBridgeMethod(methodName) {
   const method = getTeamBridge()?.[methodName];
-  return typeof method === 'function' ? method : null;
+  return typeof method === "function" ? method : null;
 }
 
 function teamInfoFallback(payload = {}) {
@@ -101,7 +100,7 @@ function teamSendMessageFallback(payload = {}) {
     ok: true,
     data: {
       message_id: null,
-      recipient: payload.to ?? 'team-lead',
+      recipient: payload.to ?? "team-lead",
       inbox_file: null,
       queued_at: null,
       unread_count: 0,
@@ -125,9 +124,10 @@ export function createPipeServer({
   sessionId = process.pid,
   heartbeatTtlMs = DEFAULT_HEARTBEAT_TTL_MS,
   delegatorService = null,
+  hitlManager = null,
 } = {}) {
   if (!router) {
-    throw new Error('router is required');
+    throw new Error("router is required");
   }
 
   const pipePath = getPipePath(sessionId);
@@ -146,14 +146,20 @@ export function createPipeServer({
   }
 
   function sendResponse(client, requestId, result) {
-    return sendFrame(client, { type: 'response', request_id: requestId, ...result });
+    return sendFrame(client, {
+      type: "response",
+      request_id: requestId,
+      ...result,
+    });
   }
 
   function closeClient(client) {
     if (!client || client.closed) return;
     client.closed = true;
     clients.delete(client.id);
-    try { client.socket.destroy(); } catch {}
+    try {
+      client.socket.destroy();
+    } catch {}
   }
 
   function touchClient(client) {
@@ -163,7 +169,7 @@ export function createPipeServer({
   function resolveAgentId(client, payload) {
     const agentId = payload?.agent_id || client?.agentId;
     if (!agentId) {
-      throw new Error('agent_id required');
+      throw new Error("agent_id required");
     }
     return agentId;
   }
@@ -172,11 +178,13 @@ export function createPipeServer({
     let delivered = false;
     for (const client of clients.values()) {
       if (client.agentId !== agentId) continue;
-      if (sendFrame(client, {
-        type: 'event',
-        event: 'message',
-        payload: { agent_id: agentId, message },
-      })) {
+      if (
+        sendFrame(client, {
+          type: "event",
+          event: "message",
+          payload: { agent_id: agentId, message },
+        })
+      ) {
         delivered = true;
       }
     }
@@ -199,18 +207,20 @@ export function createPipeServer({
 
   async function processCommand(client, action, payload = {}) {
     switch (action) {
-      case 'register': {
+      case "register": {
         const result = router.registerAgent(payload);
         if (client) {
           client.agentId = payload.agent_id;
-          client.subscriptions = new Set(router.getSubscribedTopics(client.agentId));
+          client.subscriptions = new Set(
+            router.getSubscribedTopics(client.agentId),
+          );
           touchClient(client);
           pushPendingMessages(client.agentId);
         }
         return { ok: true, data: { ...result, pipe_path: pipePath } };
       }
 
-      case 'subscribe': {
+      case "subscribe": {
         const agentId = resolveAgentId(client, payload);
         const topics = normalizeTopics(payload.topics);
         const result = router.subscribeAgent(agentId, topics, {
@@ -228,55 +238,61 @@ export function createPipeServer({
         };
       }
 
-      case 'ack': {
+      case "ack": {
         const agentId = resolveAgentId(client, payload);
-        const acked = router.ackMessages(payload.message_ids || payload.ack_ids || [], agentId);
+        const acked = router.ackMessages(
+          payload.message_ids || payload.ack_ids || [],
+          agentId,
+        );
         if (client) touchClient(client);
         return { ok: true, data: { agent_id: agentId, acked_count: acked } };
       }
 
-      case 'heartbeat': {
+      case "heartbeat": {
         const agentId = resolveAgentId(client, payload);
-        const result = router.refreshAgentLease(agentId, payload.heartbeat_ttl_ms || heartbeatTtlMs);
+        const result = router.refreshAgentLease(
+          agentId,
+          payload.heartbeat_ttl_ms || heartbeatTtlMs,
+        );
         if (client) touchClient(client);
         return { ok: true, data: result };
       }
 
-      case 'publish': {
+      case "publish": {
         const result = router.handlePublish(payload);
         if (client) touchClient(client);
         return result;
       }
 
-      case 'handoff': {
+      case "handoff": {
         const result = router.handleHandoff(payload);
         if (client) touchClient(client);
         return result;
       }
 
-      case 'assign': {
+      case "assign": {
         const result = router.assignAsync(payload);
         if (client) touchClient(client);
         return result;
       }
 
-      case 'assign_result': {
+      case "assign_result": {
         const result = router.reportAssignResult(payload);
         if (client) touchClient(client);
         return result;
       }
 
-      case 'assign_retry': {
+      case "assign_retry": {
         const result = router.retryAssign(payload.job_id, payload);
         if (client) touchClient(client);
         return result;
       }
 
-      case 'result': {
+      case "result": {
         const result = router.handlePublish({
           from: payload.agent_id,
-          to: `topic:${payload.topic || 'task.result'}`,
-          topic: payload.topic || 'task.result',
+          to: `topic:${payload.topic || "task.result"}`,
+          topic: payload.topic || "task.result",
           payload: payload.payload || {},
           priority: 5,
           ttl_ms: 3600000,
@@ -287,19 +303,22 @@ export function createPipeServer({
         return result;
       }
 
-      case 'control': {
+      case "control": {
         const result = router.handlePublish({
-          from: payload.from_agent || 'lead',
+          from: payload.from_agent || "lead",
           to: payload.to_agent,
-          topic: 'lead.control',
+          topic: "lead.control",
           payload: {
             command: payload.command,
-            reason: payload.reason || '',
+            reason: payload.reason || "",
             ...(payload.payload || {}),
             issued_at: Date.now(),
           },
           priority: 8,
-          ttl_ms: Math.max(1000, Math.min(Number(payload.ttl_ms) || 3600000, 86400000)),
+          ttl_ms: Math.max(
+            1000,
+            Math.min(Number(payload.ttl_ms) || 3600000, 86400000),
+          ),
           trace_id: payload.trace_id,
           correlation_id: payload.correlation_id,
         });
@@ -307,18 +326,23 @@ export function createPipeServer({
         return result;
       }
 
-      case 'deregister': {
+      case "deregister": {
         const agentId = resolveAgentId(client, payload);
-        router.updateAgentStatus(agentId, 'offline');
+        router.updateAgentStatus(agentId, "offline");
         if (client) touchClient(client);
         return {
           ok: true,
-          data: { agent_id: agentId, status: 'offline' },
+          data: { agent_id: agentId, status: "offline" },
         };
       }
 
-      case 'team_task_update': {
-        const teamTaskUpdate = getTeamBridgeMethod('teamTaskUpdate');
+      case "send_input": {
+        if (client) touchClient(client);
+        return sendInputToConductorSession(payload.session_id, payload.text);
+      }
+
+      case "team_task_update": {
+        const teamTaskUpdate = getTeamBridgeMethod("teamTaskUpdate");
         const result = teamTaskUpdate
           ? await teamTaskUpdate(payload)
           : teamTaskUpdateFallback(payload);
@@ -326,8 +350,8 @@ export function createPipeServer({
         return result;
       }
 
-      case 'team_send_message': {
-        const teamSendMessage = getTeamBridgeMethod('teamSendMessage');
+      case "team_send_message": {
+        const teamSendMessage = getTeamBridgeMethod("teamSendMessage");
         const result = teamSendMessage
           ? await teamSendMessage(payload)
           : teamSendMessageFallback(payload);
@@ -335,20 +359,20 @@ export function createPipeServer({
         return result;
       }
 
-      case 'pipeline_advance': {
+      case "pipeline_advance": {
         if (client) touchClient(client);
         if (!store?.db) {
-          return { ok: false, error: 'hub_db_not_found' };
+          return { ok: false, error: "hub_db_not_found" };
         }
         ensurePipelineTable(store.db);
         const pipeline = createPipeline(store.db, payload.team_name);
         return pipeline.advance(payload.phase);
       }
 
-      case 'pipeline_init': {
+      case "pipeline_init": {
         if (client) touchClient(client);
         if (!store?.db) {
-          return { ok: false, error: 'hub_db_not_found' };
+          return { ok: false, error: "hub_db_not_found" };
         }
         ensurePipelineTable(store.db);
         const state = initPipelineState(store.db, payload.team_name, {
@@ -358,18 +382,46 @@ export function createPipeServer({
         return { ok: true, data: state };
       }
 
-      case 'delegator_delegate': {
+      case "hitl_request": {
+        if (!hitlManager) {
+          return { ok: false, error: "hitl not available" };
+        }
+        if (client) touchClient(client);
+        return hitlManager.requestHumanInput(payload);
+      }
+
+      case "hitl_submit": {
+        if (!hitlManager) {
+          return { ok: false, error: "hitl not available" };
+        }
+        if (client) touchClient(client);
+        return hitlManager.submitHumanInput(payload);
+      }
+
+      case "delegator_delegate": {
         if (!delegatorService) {
-          return { ok: false, error: { code: 'DELEGATOR_NOT_AVAILABLE', message: 'Delegator service가 초기화되지 않았습니다' } };
+          return {
+            ok: false,
+            error: {
+              code: "DELEGATOR_NOT_AVAILABLE",
+              message: "Delegator service가 초기화되지 않았습니다",
+            },
+          };
         }
         if (client) touchClient(client);
         const result = await delegatorService.delegate(payload);
         return { ok: result?.ok !== false, data: result };
       }
 
-      case 'delegator_reply': {
+      case "delegator_reply": {
         if (!delegatorService) {
-          return { ok: false, error: { code: 'DELEGATOR_NOT_AVAILABLE', message: 'Delegator service가 초기화되지 않았습니다' } };
+          return {
+            ok: false,
+            error: {
+              code: "DELEGATOR_NOT_AVAILABLE",
+              message: "Delegator service가 초기화되지 않았습니다",
+            },
+          };
         }
         if (client) touchClient(client);
         const result = await delegatorService.reply(payload);
@@ -379,13 +431,19 @@ export function createPipeServer({
       default:
         return {
           ok: false,
-          error: { code: 'UNKNOWN_PIPE_COMMAND', message: `지원하지 않는 command: ${action}` },
+          error: {
+            code: "UNKNOWN_PIPE_COMMAND",
+            message: `지원하지 않는 command: ${action}`,
+          },
         };
     }
   }
 
   function buildReplayMessages(agentId, payload = {}) {
-    const maxMessages = Math.max(1, Math.min(Number(payload.max_messages) || 20, 100));
+    const maxMessages = Math.max(
+      1,
+      Math.min(Number(payload.max_messages) || 20, 100),
+    );
     const pending = router.getPendingMessages(agentId, {
       max_messages: maxMessages,
       include_topics: payload.topics,
@@ -410,7 +468,7 @@ export function createPipeServer({
 
   async function processQuery(client, action, payload = {}) {
     switch (action) {
-      case 'drain': {
+      case "drain": {
         const agentId = resolveAgentId(client, payload);
         const messages = router.drainAgent(agentId, {
           max_messages: payload.max_messages,
@@ -420,69 +478,95 @@ export function createPipeServer({
         if (client) touchClient(client);
         return {
           ok: true,
-          data: { messages, count: messages.length, server_time_ms: Date.now() },
+          data: {
+            messages,
+            count: messages.length,
+            server_time_ms: Date.now(),
+          },
         };
       }
 
-      case 'context': {
+      case "context": {
         const agentId = resolveAgentId(client, payload);
         const messages = buildReplayMessages(agentId, payload);
         if (client) touchClient(client);
         return {
           ok: true,
-          data: { messages, count: messages.length, server_time_ms: Date.now() },
+          data: {
+            messages,
+            count: messages.length,
+            server_time_ms: Date.now(),
+          },
         };
       }
 
-      case 'status': {
-        const scope = payload.scope || 'hub';
+      case "status": {
+        const scope = payload.scope || "hub";
         if (client) touchClient(client);
         return router.getStatus(scope, payload);
       }
 
-      case 'assign_status': {
+      case "assign_status": {
         if (client) touchClient(client);
         return router.getAssignStatus(payload);
       }
 
-      case 'team_info': {
-        const teamInfo = getTeamBridgeMethod('teamInfo');
-        const result = teamInfo ? await teamInfo(payload) : teamInfoFallback(payload);
+      case "team_info": {
+        const teamInfo = getTeamBridgeMethod("teamInfo");
+        const result = teamInfo
+          ? await teamInfo(payload)
+          : teamInfoFallback(payload);
         if (client) touchClient(client);
         return result;
       }
 
-      case 'team_task_list': {
-        const teamTaskList = getTeamBridgeMethod('teamTaskList');
-        const result = teamTaskList ? await teamTaskList(payload) : teamTaskListFallback(payload);
+      case "team_task_list": {
+        const teamTaskList = getTeamBridgeMethod("teamTaskList");
+        const result = teamTaskList
+          ? await teamTaskList(payload)
+          : teamTaskListFallback(payload);
         if (client) touchClient(client);
         return result;
       }
 
-      case 'pipeline_state': {
+      case "pipeline_state": {
         if (client) touchClient(client);
         if (!store?.db) {
-          return { ok: false, error: 'hub_db_not_found' };
+          return { ok: false, error: "hub_db_not_found" };
         }
         ensurePipelineTable(store.db);
         const state = readPipelineState(store.db, payload.team_name);
         return state
           ? { ok: true, data: state }
-          : { ok: false, error: 'pipeline_not_found' };
+          : { ok: false, error: "pipeline_not_found" };
       }
 
-      case 'pipeline_list': {
+      case "pipeline_list": {
         if (client) touchClient(client);
         if (!store?.db) {
-          return { ok: false, error: 'hub_db_not_found' };
+          return { ok: false, error: "hub_db_not_found" };
         }
         ensurePipelineTable(store.db);
         return { ok: true, data: listPipelineStates(store.db) };
       }
 
-      case 'delegator_status': {
+      case "hitl_pending": {
+        if (client) touchClient(client);
+        if (!hitlManager) {
+          return { ok: false, error: "hitl not available" };
+        }
+        return { ok: true, data: hitlManager.getPendingRequests() };
+      }
+
+      case "delegator_status": {
         if (!delegatorService) {
-          return { ok: false, error: { code: 'DELEGATOR_NOT_AVAILABLE', message: 'Delegator service가 초기화되지 않았습니다' } };
+          return {
+            ok: false,
+            error: {
+              code: "DELEGATOR_NOT_AVAILABLE",
+              message: "Delegator service가 초기화되지 않았습니다",
+            },
+          };
         }
         if (client) touchClient(client);
         const result = await delegatorService.status(payload);
@@ -492,7 +576,10 @@ export function createPipeServer({
       default:
         return {
           ok: false,
-          error: { code: 'UNKNOWN_PIPE_QUERY', message: `지원하지 않는 query: ${action}` },
+          error: {
+            code: "UNKNOWN_PIPE_QUERY",
+            message: `지원하지 않는 query: ${action}`,
+          },
         };
     }
   }
@@ -507,41 +594,56 @@ export function createPipeServer({
   }
 
   async function handleFrame(client, frame) {
-    if (!frame || typeof frame !== 'object') {
+    if (!frame || typeof frame !== "object") {
       return sendResponse(client, null, {
         ok: false,
-        error: { code: 'INVALID_FRAME', message: 'JSON object frame required' },
+        error: { code: "INVALID_FRAME", message: "JSON object frame required" },
       });
     }
 
     if (!frame.type) {
       return sendResponse(client, frame.request_id || null, {
         ok: false,
-        error: { code: 'INVALID_FRAME', message: 'type required' },
+        error: { code: "INVALID_FRAME", message: "type required" },
       });
     }
 
     touchClient(client);
 
     try {
-      if (frame.type === 'command') {
+      if (frame.type === "command") {
         const action = frame.payload?.action || frame.payload?.command;
-        const result = await processCommand(client, action, frame.payload || {});
-        return sendResponse(client, frame.payload?.request_id || frame.request_id || null, result);
+        const result = await processCommand(
+          client,
+          action,
+          frame.payload || {},
+        );
+        return sendResponse(
+          client,
+          frame.payload?.request_id || frame.request_id || null,
+          result,
+        );
       }
-      if (frame.type === 'query') {
+      if (frame.type === "query") {
         const action = frame.payload?.action || frame.payload?.query;
         const result = await processQuery(client, action, frame.payload || {});
-        return sendResponse(client, frame.payload?.request_id || frame.request_id || null, result);
+        return sendResponse(
+          client,
+          frame.payload?.request_id || frame.request_id || null,
+          result,
+        );
       }
       return sendResponse(client, frame.request_id || null, {
         ok: false,
-        error: { code: 'INVALID_FRAME_TYPE', message: `지원하지 않는 type: ${frame.type}` },
+        error: {
+          code: "INVALID_FRAME_TYPE",
+          message: `지원하지 않는 type: ${frame.type}`,
+        },
       });
     } catch (error) {
       return sendResponse(client, frame.request_id || null, {
         ok: false,
-        error: { code: 'PIPE_REQUEST_FAILED', message: error.message },
+        error: { code: "PIPE_REQUEST_FAILED", message: error.message },
       });
     }
   }
@@ -550,7 +652,7 @@ export function createPipeServer({
     const client = {
       id: randomUUID(),
       socket,
-      buffer: '',
+      buffer: "",
       agentId: null,
       subscriptions: new Set(),
       lastHeartbeatMs: Date.now(),
@@ -558,10 +660,10 @@ export function createPipeServer({
     };
     clients.set(client.id, client);
 
-    socket.setEncoding('utf8');
-    socket.on('data', async (chunk) => {
+    socket.setEncoding("utf8");
+    socket.on("data", async (chunk) => {
       client.buffer += chunk;
-      let newlineIndex = client.buffer.indexOf('\n');
+      let newlineIndex = client.buffer.indexOf("\n");
       while (newlineIndex >= 0) {
         const line = client.buffer.slice(0, newlineIndex).trim();
         client.buffer = client.buffer.slice(newlineIndex + 1);
@@ -569,27 +671,30 @@ export function createPipeServer({
           const frame = safeJsonParse(line);
           await handleFrame(client, frame);
         }
-        newlineIndex = client.buffer.indexOf('\n');
+        newlineIndex = client.buffer.indexOf("\n");
       }
     });
 
-    socket.on('close', () => closeClient(client));
-    socket.on('error', () => closeClient(client));
+    socket.on("close", () => closeClient(client));
+    socket.on("error", () => closeClient(client));
   }
 
   function startHeartbeatMonitor() {
-    heartbeatTimer = setInterval(() => {
-      const now = Date.now();
-      for (const client of clients.values()) {
-        if (now - client.lastHeartbeatMs <= heartbeatTtlMs) continue;
-        sendFrame(client, {
-          type: 'event',
-          event: 'disconnect',
-          payload: { reason: 'heartbeat_timeout' },
-        });
-        closeClient(client);
-      }
-    }, Math.max(1000, Math.floor(heartbeatTtlMs / 2)));
+    heartbeatTimer = setInterval(
+      () => {
+        const now = Date.now();
+        for (const client of clients.values()) {
+          if (now - client.lastHeartbeatMs <= heartbeatTtlMs) continue;
+          sendFrame(client, {
+            type: "event",
+            event: "disconnect",
+            payload: { reason: "heartbeat_timeout" },
+          });
+          closeClient(client);
+        }
+      },
+      Math.max(1000, Math.floor(heartbeatTtlMs / 2)),
+    );
     heartbeatTimer.unref();
   }
 
@@ -600,16 +705,18 @@ export function createPipeServer({
       if (server) return { path: pipePath };
 
       if (!IS_WINDOWS && existsSync(pipePath)) {
-        try { unlinkSync(pipePath); } catch {}
+        try {
+          unlinkSync(pipePath);
+        } catch {}
       }
 
       server = net.createServer(attachSocket);
-      router.deliveryEmitter.on('message', onMessage);
+      router.deliveryEmitter.on("message", onMessage);
 
       await new Promise((resolve, reject) => {
-        server.once('error', reject);
+        server.once("error", reject);
         server.listen(pipePath, () => {
-          server.off('error', reject);
+          server.off("error", reject);
           resolve();
         });
       });
@@ -624,7 +731,7 @@ export function createPipeServer({
         heartbeatTimer = null;
       }
 
-      router.deliveryEmitter.off('message', onMessage);
+      router.deliveryEmitter.off("message", onMessage);
 
       for (const client of clients.values()) {
         closeClient(client);
@@ -637,14 +744,16 @@ export function createPipeServer({
       }
 
       if (!IS_WINDOWS && existsSync(pipePath)) {
-        try { unlinkSync(pipePath); } catch {}
+        try {
+          unlinkSync(pipePath);
+        } catch {}
       }
     },
 
     getStatus() {
       return {
         path: pipePath,
-        protocol: 'ndjson',
+        protocol: "ndjson",
         clients: clients.size,
         pending_messages: Array.from(clients.values()).reduce((sum, client) => {
           if (!client.agentId) return sum;

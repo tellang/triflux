@@ -3,14 +3,6 @@
 import childProcess from "node:child_process";
 import { parseArgs } from "node:util";
 
-const { values: flags } = parseArgs({
-  options: {
-    "dry-run": { type: "boolean", default: false },
-    keep: { type: "boolean", default: false },
-  },
-  strict: false,
-});
-
 const SESSION_NAME = "triflux-demo";
 
 const WORKERS = [

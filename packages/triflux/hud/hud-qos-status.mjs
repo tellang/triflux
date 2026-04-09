@@ -16,6 +16,7 @@ import {
   readJson, readStdinJson, getProviderAccountId, getCliArgValue,
 } from "./utils.mjs";
 import { selectTier } from "./terminal.mjs";
+import { getMissionBoardState } from "./mission-board.mjs";
 
 // Claude provider
 import {
@@ -41,7 +42,7 @@ import {
 // Renderers
 import {
   getClaudeRows, getProviderRow, getTeamRow,
-  renderAlignedRows, getMicroLine,
+  renderAlignedRows, getMicroLine, renderMissionBoard,
   readLatestBenchmarkDiff, formatTokenSummary,
   readTokenSavings, readSvAccumulator,
 } from "./renderers.mjs";
@@ -103,11 +104,15 @@ async function main() {
   // 실측 데이터 추출
   const stdin = await stdinPromise;
   const contextView = buildContextUsageView(stdin, contextSnapshot);
+  const claudeUsage = claudeUsageSnapshot.isStale
+    ? { ...(claudeUsageSnapshot.data || {}), stale: true }
+    : claudeUsageSnapshot.data;
   const codexEmail = getCodexEmail();
   const geminiEmail = getGeminiEmail();
   const codexBuckets = codexSnapshot.buckets;
   const geminiSession = geminiSessionSnapshot.session;
   const geminiQuota = geminiQuotaSnapshot.quota;
+  const missionBoardState = await getMissionBoardState();
 
   // 누적 절약 데이터 읽기
   const svSavings = readTokenSavings();
@@ -149,7 +154,7 @@ async function main() {
 
   // nano tier: 1줄 모드 (극소 폭 또는 알림 배너 대응)
   if (CURRENT_TIER === "nano") {
-    const microLine = getMicroLine(contextView, claudeUsageSnapshot.data, codexBuckets,
+    const microLine = getMicroLine(contextView, claudeUsage, codexBuckets,
       geminiSession, geminiBucket, combinedSvPct);
     process.stdout.write(`\x1b[0m${microLine}\n`);
     return;
@@ -164,7 +169,7 @@ async function main() {
   };
 
   const rows = [
-    ...getClaudeRows(CURRENT_TIER, contextView, claudeUsageSnapshot.data, combinedSvPct),
+    ...getClaudeRows(CURRENT_TIER, contextView, claudeUsage, combinedSvPct),
     getProviderRow(CURRENT_TIER, "codex", "x", codexWhite, qosProfile, accountsConfig, accountsState,
       codexQuotaData, codexEmail, codexSv, null),
     getProviderRow(CURRENT_TIER, "gemini", "g", geminiBlue, qosProfile, accountsConfig, accountsState,
@@ -174,6 +179,15 @@ async function main() {
   // tfx-multi 활성 시 팀 상태 행 추가 (v2.2)
   const teamRow = getTeamRow(CURRENT_TIER);
   if (teamRow) rows.push(teamRow);
+
+  const missionBoard = renderMissionBoard(missionBoardState);
+  if (missionBoard) {
+    rows.push({
+      prefix: bold(claudeOrange("\u25B2")),
+      left: missionBoard,
+      right: "",
+    });
+  }
 
   // 최근 벤치마크 diff → 토큰 요약 행 추가
   const latestDiff = readLatestBenchmarkDiff();

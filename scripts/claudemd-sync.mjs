@@ -132,15 +132,7 @@ export function ensureTfxCrown(claudeMdPath, options = {}) {
 }
 
 export function ensureGlobalClaudeRoutingSection(claudeDir) {
+  // routing은 프로젝트 CLAUDE.md에만 유지. global 중복 주입 중단.
   const claudeMdPath = join(claudeDir, "CLAUDE.md");
-  if (!existsSync(claudeMdPath)) {
-    return toSkippedResult(claudeMdPath, "missing_file");
-  }
-
-  try {
-    return ensureTfxSection(claudeMdPath, getLatestRoutingTable());
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "routing_table_unavailable";
-    return toSkippedResult(claudeMdPath, reason);
-  }
+  return { action: "unchanged", path: claudeMdPath, skipped: true, reason: "global_sync_disabled" };
 }

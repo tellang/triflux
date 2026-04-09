@@ -14,6 +14,7 @@ import {
   GEMINI_RPM_WINDOW_MS, GEMINI_QUOTA_STALE_MS, GEMINI_SESSION_STALE_MS,
   GEMINI_API_TIMEOUT_MS,
   GEMINI_REFRESH_FLAG, GEMINI_SESSION_REFRESH_FLAG,
+  GEMINI_QUOTA_REFRESH_LOCK_PATH, GEMINI_SESSION_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
 import {
   readJson, writeJsonSafe, readJsonMigrate, makeHash, clampPercent,
@@ -233,6 +234,16 @@ export function readGeminiQuotaSnapshot(accountId, authContext) {
 export function scheduleGeminiQuotaRefresh(accountId) {
   const scriptPath = process.argv[1];
   if (!scriptPath) return;
+
+  // 스폰 락: 30초 내 이미 스폰했으면 중복 방지
+  try {
+    if (existsSync(GEMINI_QUOTA_REFRESH_LOCK_PATH)) {
+      const lockAge = Date.now() - readJson(GEMINI_QUOTA_REFRESH_LOCK_PATH, {}).t;
+      if (lockAge < SPAWN_LOCK_TTL_MS) return;
+    }
+    writeJsonSafe(GEMINI_QUOTA_REFRESH_LOCK_PATH, { t: Date.now() });
+  } catch { /* 락 실패 무시 — 스폰 진행 */ }
+
   try {
     const child = spawn(
       process.execPath,
@@ -275,6 +286,16 @@ export function refreshGeminiSessionCache() {
 export function scheduleGeminiSessionRefresh() {
   const scriptPath = process.argv[1];
   if (!scriptPath) return;
+
+  // 스폰 락: 30초 내 이미 스폰했으면 중복 방지
+  try {
+    if (existsSync(GEMINI_SESSION_REFRESH_LOCK_PATH)) {
+      const lockAge = Date.now() - readJson(GEMINI_SESSION_REFRESH_LOCK_PATH, {}).t;
+      if (lockAge < SPAWN_LOCK_TTL_MS) return;
+    }
+    writeJsonSafe(GEMINI_SESSION_REFRESH_LOCK_PATH, { t: Date.now() });
+  } catch { /* 락 실패 무시 — 스폰 진행 */ }
+
   try {
     const child = spawn(process.execPath, [scriptPath, GEMINI_SESSION_REFRESH_FLAG], {
       detached: true,

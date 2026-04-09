@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getHostConfig } from "../lib/ssh-command.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
+import { ensureConductorRegistry } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { probeRemoteEnv, resolveRemoteDir } from "./remote-session.mjs";
 import { createSwarmLocks } from "./swarm-locks.mjs";
@@ -122,6 +123,7 @@ export function createSwarmHypervisor(opts) {
   if (!logsDir) throw new Error("logsDir is required");
 
   mkdirSync(logsDir, { recursive: true });
+  ensureConductorRegistry();
 
   const createConductorImpl = _deps.createConductor || createConductor;
   const createRegistryImpl = _deps.createRegistry || importedCreateRegistry;

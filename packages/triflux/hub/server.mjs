@@ -21,7 +21,6 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
-import { AccountBroker } from "./account-broker.mjs";
 import { createAdaptiveEngine } from "./adaptive.mjs";
 import { createAssignCallbackServer } from "./assign-callbacks.mjs";
 import { DelegatorService } from "./delegator/index.mjs";
@@ -705,24 +704,6 @@ export async function startHub({
 
       if (path === "/api/qos-stats" && req.method === "GET") {
         return writeJson(res, 200, getQosStatsPayload());
-      }
-
-      // ── Broker reload ────────────────────────────────────────────
-      if (path === "/broker/reload" && req.method === "POST") {
-        try {
-          const { reloadBroker } = await import("./account-broker.mjs");
-          const result = reloadBroker();
-          if (!result.ok) {
-            return writeJson(res, 500, result);
-          }
-          const accounts = result.broker.snapshot().length;
-          return writeJson(res, 200, { ok: true, accounts });
-        } catch (err) {
-          return writeJson(res, 500, {
-            ok: false,
-            error: err?.message ?? "reload failed",
-          });
-        }
       }
 
       if (path.startsWith("/bridge")) {

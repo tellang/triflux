@@ -12,6 +12,7 @@ import {
   CLAUDE_USAGE_429_BACKOFF_MS, CLAUDE_USAGE_ERROR_BACKOFF_MS,
   CLAUDE_API_TIMEOUT_MS, FIVE_HOUR_MS, SEVEN_DAY_MS,
   DEFAULT_OAUTH_CLIENT_ID, CLAUDE_REFRESH_FLAG,
+  CLAUDE_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
 import { readJson, writeJsonSafe, clampPercent, advanceToNextCycle } from "../utils.mjs";
 import { readContextMonitorSnapshot } from "../context-monitor.mjs";
@@ -360,13 +361,12 @@ export function scheduleClaudeUsageRefresh() {
   } catch { /* 무시 */ }
 
   // 스폰 락: 30초 내 이미 스폰했으면 중복 방지 (첫 설치 시 429 방지)
-  const lockPath = join(homedir(), ".claude", "cache", ".claude-refresh-lock");
   try {
-    if (existsSync(lockPath)) {
-      const lockAge = Date.now() - readJson(lockPath, {}).t;
-      if (lockAge < 1000) return; // 짧은 중복 스폰만 억제, 실제 폴링 주기는 nextRefreshAt가 제어
+    if (existsSync(CLAUDE_REFRESH_LOCK_PATH)) {
+      const lockAge = Date.now() - readJson(CLAUDE_REFRESH_LOCK_PATH, {}).t;
+      if (lockAge < SPAWN_LOCK_TTL_MS) return;
     }
-    writeJsonSafe(lockPath, { t: Date.now() });
+    writeJsonSafe(CLAUDE_REFRESH_LOCK_PATH, { t: Date.now() });
   } catch { /* 락 실패 무시 — 스폰 진행 */ }
 
   try {

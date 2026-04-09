@@ -43,7 +43,6 @@ import { nativeProxy } from "./team/nativeProxy.mjs";
 import { registerTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
 import { createTools } from "./tools.mjs";
 import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
-import { AccountBroker } from "@triflux/core/hub/account-broker.mjs";
 
 registerTeamBridge(nativeProxy);
 
@@ -705,26 +704,6 @@ export async function startHub({
 
       if (path === "/api/qos-stats" && req.method === "GET") {
         return writeJson(res, 200, getQosStatsPayload());
-      }
-
-      // ── Broker reload ────────────────────────────────────────────
-      if (path === "/broker/reload" && req.method === "POST") {
-        try {
-          const { reloadBroker } = await import(
-            "@triflux/core/hub/account-broker.mjs"
-          );
-          const result = reloadBroker();
-          if (!result.ok) {
-            return writeJson(res, 500, result);
-          }
-          const accounts = result.broker.snapshot().length;
-          return writeJson(res, 200, { ok: true, accounts });
-        } catch (err) {
-          return writeJson(res, 500, {
-            ok: false,
-            error: err?.message ?? "reload failed",
-          });
-        }
       }
 
       if (path.startsWith("/bridge")) {

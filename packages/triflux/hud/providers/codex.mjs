@@ -8,8 +8,30 @@ import { spawn } from "node:child_process";
 import {
   CODEX_AUTH_PATH, CODEX_QUOTA_CACHE_PATH, CODEX_QUOTA_STALE_MS,
   CODEX_MIN_BUCKETS, CODEX_REFRESH_FLAG,
+  CODEX_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
 import { readJson, writeJsonSafe, decodeJwtEmail } from "../utils.mjs";
+
+// window_minutes 기반 5h/1w 슬롯 분류
+export function classifyBucket(bucket) {
+  if (!bucket?.window_minutes) return null;
+  if (bucket.window_minutes <= 360) return "five_hour";
+  if (bucket.window_minutes >= 1440) return "weekly";
+  return null;
+}
+
+// primary/secondary를 window_minutes 기준으로 정규화
+// HUD 규약: primary=5h, secondary=1w
+export function normalizeBuckets(rl) {
+  let primary = null;
+  let secondary = null;
+  for (const bucket of [rl.primary, rl.secondary].filter(Boolean)) {
+    const kind = classifyBucket(bucket);
+    if (kind === "five_hour") primary = bucket;
+    else if (kind === "weekly") secondary = bucket;
+  }
+  return { primary, secondary };
+}
 
 export function getCodexEmail() {
   try {
@@ -71,10 +93,11 @@ export function getCodexRateLimits() {
             const evt = JSON.parse(line);
             const rl = evt?.payload?.rate_limits;
             if (rl?.limit_id && !mergedBuckets[rl.limit_id]) {
-              // 실제 rate_limits: limit_id별 최신 이벤트만 기록
+              // window_minutes 기준으로 5h/1w 슬롯 정규화
+              const { primary, secondary } = normalizeBuckets(rl);
               mergedBuckets[rl.limit_id] = {
                 limitId: rl.limit_id, limitName: rl.limit_name,
-                primary: rl.primary, secondary: rl.secondary,
+                primary, secondary,
                 credits: rl.credits,
                 tokens: evt.payload?.info?.total_token_usage,
                 contextWindow: evt.payload?.info?.model_context_window,
@@ -132,6 +155,16 @@ export function refreshCodexRateLimitsCache() {
 export function scheduleCodexRateLimitRefresh() {
   const scriptPath = process.argv[1];
   if (!scriptPath) return;
+
+  // 스폰 락: 30초 내 이미 스폰했으면 중복 방지
+  try {
+    if (existsSync(CODEX_REFRESH_LOCK_PATH)) {
+      const lockAge = Date.now() - readJson(CODEX_REFRESH_LOCK_PATH, {}).t;
+      if (lockAge < SPAWN_LOCK_TTL_MS) return;
+    }
+    writeJsonSafe(CODEX_REFRESH_LOCK_PATH, { t: Date.now() });
+  } catch { /* 락 실패 무시 — 스폰 진행 */ }
+
   try {
     const child = spawn(process.execPath, [scriptPath, CODEX_REFRESH_FLAG], {
       detached: true,

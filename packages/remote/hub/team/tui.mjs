@@ -1148,15 +1148,19 @@ export function createLogDashboard(opts = {}) {
     }
 
     // 하단 상태바
-    const statusBar = truncate(
-      color(`  세션 종료됨 — 아무 키나 누르면 닫힘`, MOCHA.subtext),
-      totalCols,
-    );
+    const allDone = names.every((n) => {
+      const s = runtimeStatus(workers.get(n));
+      return s === "ok" || s === "completed" || s === "failed";
+    });
+    const statusText = allDone
+      ? "  Enter: attach • q: 종료"
+      : "  Enter: attach • Tab: 포커스 • j/k: 이동 • h: 도움말";
+    const statusBar = truncate(color(statusText, MOCHA.subtext), totalCols);
 
     return [...tier1, ...composedRows, statusBar];
   }
 
-  // ── altScreen diff render ─────────────────────────────────────────────
+  // ── altScreen diff render (batched single write → 깜빡임 방지) ───────
   function renderAltScreen() {
     const newRows = buildRows();
     rowBuf.set(newRows);
@@ -1165,16 +1169,16 @@ export function createLogDashboard(opts = {}) {
 
     if (dirty.length === 0 && newRows.length === prevLen) return;
 
-    const toErase = prevLen > newRows.length
-      ? Array.from({ length: prevLen - newRows.length }, (_, i) => newRows.length + i)
-      : [];
-
+    let buf = "";
     for (const i of dirty) {
-      write(moveTo(i + 1, 1) + clearLine + (newRows[i] || ""));
+      buf += moveTo(i + 1, 1) + clearLine + (newRows[i] || "");
     }
-    for (const i of toErase) {
-      write(moveTo(i + 1, 1) + clearLine);
+    if (prevLen > newRows.length) {
+      for (let i = newRows.length; i < prevLen; i++) {
+        buf += moveTo(i + 1, 1) + clearLine;
+      }
     }
+    if (buf) write(buf);
 
     rowBuf.commit();
   }

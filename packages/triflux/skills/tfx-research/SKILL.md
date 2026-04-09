@@ -26,6 +26,7 @@ argument-hint: "<검색 주제>"
 
 
 
+
 > **Deep 버전**: tfx-deep-research. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > 빠른 단일 소스 검색 + 요약. **검색 자체를 Gemini에 위임**해 Claude 토큰 최소화. Gemini CLI의 네이티브 Google Search로 검색+요약을 한 번에 처리.
 

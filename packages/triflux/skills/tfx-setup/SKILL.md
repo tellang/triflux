@@ -130,6 +130,118 @@ Bash("triflux setup")
       description: "나중에 /tfx-profile --gemini로 관리"
   ```
 
+#### 단계 3.6: Codex MCP Gateway 싱글톤 전환
+
+Codex CLI가 매 호출마다 MCP 서버를 stdio로 spawn하면 좀비 Node.js 프로세스가 생긴다.
+gateway SSE 싱글톤을 사용하도록 config.toml을 전환한다.
+
+```bash
+node scripts/codex-mcp-gateway-sync.mjs --status
+```
+
+- 전부 `sse` → ✅ 이미 전환됨
+- `stdio` 또는 `missing` 있으면 → AskUserQuestion:
+  ```
+  question: "Codex MCP 서버를 gateway 싱글톤(SSE)으로 전환하시겠습니까? 매 호출마다 MCP를 새로 spawn하는 대신, 영속 gateway 데몬을 공유합니다. (좀비 Node.js 방지)"
+  header: "MCP Gateway"
+  options:
+    - label: "전환 (Recommended)"
+      description: "stdio → SSE URL 전환. 좀비 프로세스 방지"
+    - label: "건너뛰기"
+      description: "현재 stdio 방식 유지"
+  ```
+  "전환" 선택 시:
+  1. gateway 데몬이 안 떠 있으면 먼저 기동: `node scripts/mcp-gateway-start.mjs`
+  2. config.toml 전환: `node scripts/codex-mcp-gateway-sync.mjs --enable`
+  3. 결과 확인: `node scripts/codex-mcp-gateway-sync.mjs --status`
+
+#### 단계 3.7: Codex config.toml 충돌 감지
+
+`~/.codex/config.toml`을 Read 도구로 읽어 `approval_mode`와 `sandbox` 설정을 확인한다.
+
+**충돌 감지 규칙:**
+- `approval_mode = "full-auto"` 가 config.toml에 있으면 → CLI에서 `--full-auto` 플래그 중복 사용 금지
+- `sandbox = "elevated"` 가 config.toml에 있으면 → CLI에서 sandbox 플래그 중복 사용 금지
+- 프로파일별 설정과 기본 설정이 충돌하면 → 경고 표시
+
+결과 표시:
+```
+## Codex config.toml 분석
+
+| 설정 | 값 | CLI 주의사항 |
+|------|-----|-------------|
+| approval_mode | full-auto | --full-auto 플래그 생략 필수 |
+| sandbox | elevated | sandbox 플래그 생략 필수 |
+| model | codex-mini-latest | 프로파일별 오버라이드 가능 |
+```
+
+충돌 발견 시 AskUserQuestion:
+```
+question: "config.toml에 approval_mode=full-auto가 설정되어 있습니다. triflux의 headless 실행에서 CLI 플래그 중복을 방지하려면 이 설정을 유지하는 것이 좋습니다. 현재 설정을 유지할까요?"
+header: "Codex Config"
+options:
+  - label: "유지 (Recommended)"
+    description: "config.toml 기본값 사용, CLI 플래그 자동 생략"
+  - label: "수정"
+    description: "config.toml을 편집하여 직접 조정"
+```
+
+**CLAUDE.md 주입 (필수):** 감지된 config.toml 설정을 프로젝트 CLAUDE.md의 `<codex-config>` 섹션에 반영한다.
+이렇게 해야 훅(headless-guard, safety-guard)이 명령을 차단했을 때, Claude가 차단 메시지를 읽고 "왜 차단됐는지" + "어떻게 수정해야 하는지"를 CLAUDE.md에서 찾아서 올바르게 재시도할 수 있다.
+
+주입 예시 (Edit 도구로 `<codex-config>` 섹션 업데이트):
+```markdown
+<codex-config>
+## Codex config.toml
+
+config.toml에 이미 설정된 값은 CLI 플래그로 중복 지정하지 않는다.
+
+| config.toml에 있으면 | CLI에서 생략 |
+|---------------------|-------------|
+| `approval_mode = "full-auto"` | `--full-auto` |
+| `sandbox = "elevated"` | `--full-auto` |
+
+안전 패턴: config.toml에 기본값을 두고, CLI에서는 `--profile` 선택만 한다.
+</codex-config>
+```
+
+차단 → 수정 흐름:
+1. headless-guard가 `codex exec --full-auto` 차단
+2. 차단 메시지: "config.toml에 approval_mode=full-auto 있으므로 --full-auto 중복"
+3. Claude가 CLAUDE.md `<codex-config>` 읽음 → `--full-auto` 제거 후 재실행
+4. 동일 실수 반복 방지
+
+#### 단계 3.8: 원격 기기 프로빙 (Swarm Multi-Machine)
+
+`references/hosts.json` 또는 `~/.triflux/hosts.json` 존재 여부 확인.
+
+- 파일 없음 → AskUserQuestion:
+  ```
+  question: "원격 기기에서 스웜을 실행할 계획이 있나요? (tfx-swarm의 다중 기기 기능)"
+  header: "Remote"
+  options:
+    - label: "네, 원격 설정"
+      description: "SSH 호스트를 감지하고 연결 테스트합니다"
+    - label: "나중에"
+      description: "로컬만 사용. 나중에 /tfx-remote-setup으로 설정"
+  ```
+  "네" 선택 시 → `/tfx-remote-setup` 스킬 호출하여 호스트 위저드 실행
+
+- 파일 있음 → 등록된 호스트 각각에 대해 SSH 연결 + Claude 설치 프로브:
+  ```bash
+  ssh -o ConnectTimeout=5 <host> echo ok 2>/dev/null && echo "REACHABLE" || echo "UNREACHABLE"
+  ```
+  결과 표시:
+  ```
+  ## 원격 기기 상태
+
+  | 호스트 | SSH | Claude | 스웜 사용 |
+  |--------|-----|--------|----------|
+  | ryzen5-7600 | ✅ | ✅ v1.0.30 | 가능 |
+  | m2 | ✅ | ⚠ 미설치 | 불가 (Claude 설치 필요) |
+  | ultra4 | ❌ 연결 실패 | — | 불가 |
+  ```
+
 #### 단계 4: CLI 진단
 
 `triflux doctor --json`에는 psmux 설치 여부뿐 아니라 **버전/capability preflight**도 포함된다.
@@ -354,14 +466,26 @@ options:
 | 파일 동기화 | ✅ |
 | HUD 설정 | ✅ statusLine 등록됨 |
 | Codex 프로파일 | ✅ 3개 확인 |
+| Codex config.toml | ✅ approval_mode=full-auto (CLI 플래그 자동 생략) |
 | Codex CLI | ✅ |
 | Gemini CLI | ⚠ 미설치 (선택) |
+| 원격 기기 | ✅ 2대 사용 가능 (ryzen5-7600, m2) / ❌ 1대 연결 실패 |
 | MCP 인벤토리 | ✅ N개 서버 |
 | 검색 MCP | ✅ Exa, Tavily / ⏭ Brave (키 없음) |
+
+### 스웜 기능 수준
+
+| 기능 | 상태 | 필요 조건 |
+|------|------|----------|
+| 로컬 단일 모델 | ✅ | Codex CLI |
+| 로컬 다중 모델 | ✅ | Codex CLI + Gemini CLI |
+| 다중 기기 스웜 | ✅ 2대 | SSH 호스트 + Claude 설치 |
+| 전체 (다중 기기 x 다중 모델) | ✅ | 위 전부 |
 
 ### 다음 단계
 - Codex 미설치 시: `npm install -g @openai/codex`
 - Gemini 미설치 시: `npm install -g @google/gemini-cli`
+- 원격 호스트 추가: `/tfx-remote-setup`
 - 검색 MCP 추가/변경: `/tfx-setup` → 단계별 선택 → 검색 MCP
 - 세션 재시작하면 HUD + 검색 MCP가 활성화됩니다
 ```

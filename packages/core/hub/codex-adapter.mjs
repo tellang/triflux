@@ -3,18 +3,13 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { runPreflight } from './codex-preflight.mjs';
-import { withRetry } from './workers/worker-utils.mjs';
 import {
-  createCircuitBreaker,
-  createResult,
-  appendWarnings,
+  executeWithCircuitBroker,
   buildExecCommand,
   normalizePathForShell,
   shellQuote,
   runProcess,
 } from './cli-adapter-base.mjs';
-
-const breaker = createCircuitBreaker();
 
 // ── Codex-specific stall inference ──────────────────────────────
 
@@ -139,61 +134,19 @@ async function runCodex(prompt, workdir, preflight, attempt) {
 
 // ── Public API ──────────────────────────────────────────────────
 
-export function getCircuitState(now) {
-  return breaker.getState(now);
+export async function getCircuitState() {
+  const brokerMod = await import('./account-broker.mjs');
+  if (!brokerMod.broker) return { state: 'closed', failures: [] };
+  const snap = brokerMod.broker.snapshot().filter((a) => a.provider === 'codex');
+  return snap.length ? { state: snap[0].circuitState, accounts: snap } : { state: 'closed', failures: [] };
 }
 
-export async function execute(opts = {}) {
-  const entry = breaker.canExecute();
-  if (!entry.allowed) {
-    return createResult(false, { fellBack: true, failureMode: 'circuit_open' });
-  }
-
-  const preflight = await runPreflight({ mcpServers: opts.mcpServers, subcommand: 'exec' });
-  if (!preflight.ok) {
-    breaker.clearTrial();
-    breaker.recordFailure(entry.halfOpen);
-    return createResult(false, {
-      stderr: appendWarnings('', preflight.warnings),
-      fellBack: opts.fallbackToClaude !== false,
-      failureMode: 'crash',
-    });
-  }
-
-  const attempts = buildAttempts(opts, preflight);
-  let attemptIndex = 0;
-  let lastResult = createResult(false);
-
-  try {
-    lastResult = await withRetry(async () => {
-      const result = await runCodex(opts.prompt || '', opts.workdir || process.cwd(), preflight, attempts[attemptIndex]);
-      const current = { ...result, stderr: appendWarnings(result.stderr, preflight.warnings), retried: attemptIndex > 0 };
-      const canRetry = !current.ok && attemptIndex < attempts.length - 1;
-      attemptIndex += 1;
-      if (!canRetry) return current;
-      const error = new Error('retry');
-      error.retryable = true;
-      error.result = current;
-      throw error;
-    }, {
-      maxAttempts: attempts.length,
-      baseDelayMs: 250,
-      maxDelayMs: 750,
-      shouldRetry: (error) => error?.retryable === true,
-    });
-  } catch (error) {
-    lastResult = error?.result || createResult(false, { stderr: String(error?.message || error) });
-  }
-
-  if (lastResult.ok) {
-    breaker.reset();
-    return lastResult;
-  }
-
-  breaker.recordFailure(entry.halfOpen);
-  return {
-    ...lastResult,
-    retried: attempts.length > 1,
-    fellBack: opts.fallbackToClaude !== false,
-  };
+export function execute(opts = {}) {
+  return executeWithCircuitBroker({
+    provider: 'codex',
+    runFn: runCodex,
+    preflightFn: (o) => runPreflight({ mcpServers: o.mcpServers, subcommand: 'exec' }),
+    buildAttemptsFn: buildAttempts,
+    opts,
+  });
 }

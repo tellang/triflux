@@ -265,12 +265,12 @@ export function createLiteDashboard(opts = {}) {
       return;
     }
     if (key === "\r" || key === "\n") {
-      if (typeof onOpenSelectedWorker !== "function") {
-        // 콜백 없으면 탭 순환 (기본 동작)
+      if (typeof onOpenSelectedWorker === "function" && selectedWorker && workers.has(selectedWorker)) {
+        triggerOpenSelected();
+      } else {
+        // 콜백 없거나 선택 워커 없으면 탭 순환
         const tabs = ["log", "detail", "files"];
         focusTab = tabs[(tabs.indexOf(focusTab) + 1) % tabs.length];
-      } else {
-        triggerOpenSelected();
       }
       render();
       return;

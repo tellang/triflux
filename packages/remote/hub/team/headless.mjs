@@ -3,35 +3,48 @@
 // v5.2.0: 기본 headless 엔진 (runHeadless, runHeadlessWithCleanup)
 // v6.0.0: Lead-direct 모드 (runHeadlessInteractive, autoAttachTerminal)
 // 의존성: psmux.mjs (Node.js 내장 모듈만 사용)
-import { join } from "node:path";
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+
 import { execSync, spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
-import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
 import {
-  createPsmuxSession,
-  killPsmuxSession,
-  psmuxSessionExists,
-  dispatchCommand,
-  waitForCompletion,
-  capturePsmuxPane,
-  startCapture,
-  psmuxExec,
-} from "./psmux.mjs";
-import { HANDOFF_INSTRUCTION_SHORT, processHandoff } from "./handoff.mjs";
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { requestJson } from "@triflux/core/hub/bridge.mjs";
+import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
 import { getBackend } from "./backend.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
+import { HANDOFF_INSTRUCTION_SHORT, processHandoff } from "./handoff.mjs";
+import {
+  capturePsmuxPane,
+  createPsmuxSession,
+  dispatchCommand,
+  killPsmuxSession,
+  psmuxExec,
+  psmuxSessionExists,
+  startCapture,
+  waitForCompletion,
+} from "./psmux.mjs";
 import { createLogDashboard } from "./tui.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
 
 /** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
 const CLI_BRAND = {
-  codex:  { emoji: "\u{26AA}", label: "Codex",  ansi: "\x1b[97m" },   // ⚪ bright white (codexWhite)
+  codex: { emoji: "\u{26AA}", label: "Codex", ansi: "\x1b[97m" }, // ⚪ bright white (codexWhite)
   gemini: { emoji: "\u{1F535}", label: "Gemini", ansi: "\x1b[38;5;39m" }, // 🔵 geminiBlue
-  claude: { emoji: "\u{1F7E0}", label: "Claude", ansi: "\x1b[38;2;232;112;64m" }, // 🟠 claudeOrange
+  claude: {
+    emoji: "\u{1F7E0}",
+    label: "Claude",
+    ansi: "\x1b[38;2;232;112;64m",
+  }, // 🟠 claudeOrange
 };
 const _ANSI_RESET = "\x1b[0m";
 const _ANSI_DIM = "\x1b[2m";
@@ -50,12 +63,68 @@ export function resolveCliType(agentOrCli) {
   return AGENT_TO_CLI[agentOrCli] || agentOrCli;
 }
 
+export function getHeadlessWorkerAgentId(sessionName, index) {
+  return `headless-${sessionName}-${index}`;
+}
+
+export function getHeadlessLeadAgentId(sessionName) {
+  return `headless-${sessionName}-lead`;
+}
+
+export async function registerHeadlessWorker(
+  sessionName,
+  index,
+  cli,
+  requestJsonFn = requestJson,
+) {
+  await requestJsonFn("/bridge/register", {
+    body: {
+      agentId: getHeadlessWorkerAgentId(sessionName, index),
+      topics: ["headless.worker"],
+      capabilities: [cli],
+    },
+  }).catch(() => {});
+}
+
+export async function publishHeadlessResult(
+  sessionName,
+  workerId,
+  status,
+  handoff,
+  requestJsonFn = requestJson,
+) {
+  await requestJsonFn("/bridge/publish", {
+    body: {
+      from: getHeadlessLeadAgentId(sessionName),
+      to: "topic:headless.results",
+      type: "event",
+      payload: { workerId, status, handoff },
+    },
+  }).catch(() => {});
+}
+
+export async function deregisterHeadlessWorkers(
+  sessionName,
+  workerCount,
+  requestJsonFn = requestJson,
+) {
+  await Promise.all(
+    Array.from({ length: workerCount }, (_, index) =>
+      requestJsonFn("/bridge/deregister", {
+        body: { agentId: getHeadlessWorkerAgentId(sessionName, index) },
+      }).catch(() => {}),
+    ),
+  );
+}
+
 /** MCP 프로필별 프롬프트 힌트 (tfx-route.sh resolve_mcp_policy의 경량 미러) */
 const MCP_PROFILE_HINTS = {
-  implement: "You have full filesystem read/write access. Implement changes directly.",
-  analyze:   "Focus on reading and analyzing the codebase. Prefer analysis over modification.",
-  review:    "Review the code for quality, security, and correctness.",
-  docs:      "Focus on documentation and explanation tasks.",
+  implement:
+    "You have full filesystem read/write access. Implement changes directly.",
+  analyze:
+    "Focus on reading and analyzing the codebase. Prefer analysis over modification.",
+  review: "Review the code for quality, security, and correctness.",
+  docs: "Focus on documentation and explanation tasks.",
 };
 
 /**
@@ -85,22 +154,34 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
     }
   }
 
-  const mcpHint = mcp && MCP_PROFILE_HINTS[mcp] ? ` [MCP: ${mcp}] ${MCP_PROFILE_HINTS[mcp]}` : "";
+  const mcpHint =
+    mcp && MCP_PROFILE_HINTS[mcp]
+      ? ` [MCP: ${mcp}] ${MCP_PROFILE_HINTS[mcp]}`
+      : "";
   // P2: HANDOFF 지시를 프롬프트에 삽입 (워커가 구조화된 handoff 블록을 출력하도록)
   const handoffHint = handoff ? `\n\n${HANDOFF_INSTRUCTION_SHORT}` : "";
   const fullPrompt = `${contextPrefix}${prompt}${mcpHint}${handoffHint}`;
 
   // 보안: 프롬프트를 임시 파일에 쓰고 파일 참조로 전달 (셸 주입 방지)
   if (!existsSync(RESULT_DIR)) mkdirSync(RESULT_DIR, { recursive: true });
-  const promptFile = join(RESULT_DIR, "prompt-" + randomUUID().slice(0, 8) + ".txt").replace(/\\/g, "/");
+  const promptFile = join(
+    RESULT_DIR,
+    "prompt-" + randomUUID().slice(0, 8) + ".txt",
+  ).replace(/\\/g, "/");
   writeFileSync(promptFile, fullPrompt, "utf8");
 
   const backend = getBackend(resolvedCli);
   const promptExpr = `(Get-Content -Raw '${promptFile}')`;
-  const backendCommand = backend.buildArgs(promptExpr, resultFile, { ...opts, model });
-  const safeCwd = typeof cwd === "string" ? cwd.trim().replace(/[\r\n\x00-\x1f]/g, "") : "";
+  const backendCommand = backend.buildArgs(promptExpr, resultFile, {
+    ...opts,
+    model,
+  });
+  const safeCwd =
+    typeof cwd === "string" ? cwd.trim().replace(/[\r\n\x00-\x1f]/g, "") : "";
   if (safeCwd && (safeCwd.startsWith("\\\\") || safeCwd.startsWith("//"))) {
-    throw new Error("[headless] UNC 경로는 cwd로 사용할 수 없습니다: " + safeCwd);
+    throw new Error(
+      "[headless] UNC 경로는 cwd로 사용할 수 없습니다: " + safeCwd,
+    );
   }
   if (!safeCwd) return backendCommand;
 
@@ -139,7 +220,10 @@ export const STALL_DEFAULTS = Object.freeze({
 
 /** CLI pane stall 감지 에러 (STALL_EXHAUSTED | COMPLETION_TIMEOUT) */
 export class StallError extends Error {
-  constructor(message, { code = "STALL_DETECTED", category = "transient", recovery = "" } = {}) {
+  constructor(
+    message,
+    { code = "STALL_DETECTED", category = "transient", recovery = "" } = {},
+  ) {
     super(message);
     this.name = "StallError";
     this.code = code;
@@ -163,13 +247,21 @@ export function createStallMonitor(paneId, resultFile, config, deps = {}) {
   let lastMtime = 0;
   let lastChangeAt = Date.now();
 
-  try { lastMtime = stat(resultFile).mtimeMs; } catch { /* not created yet */ }
+  try {
+    lastMtime = stat(resultFile).mtimeMs;
+  } catch {
+    /* not created yet */
+  }
 
   return Object.freeze({
     poll() {
       const snapshot = capture(paneId, 50);
       let currentMtime = 0;
-      try { currentMtime = stat(resultFile).mtimeMs; } catch { /* ignore */ }
+      try {
+        currentMtime = stat(resultFile).mtimeMs;
+      } catch {
+        /* ignore */
+      }
 
       const outputChanged = snapshot !== lastSnapshot;
       const mtimeChanged = currentMtime > 0 && currentMtime !== lastMtime;
@@ -208,7 +300,12 @@ export function createStallMonitor(paneId, resultFile, config, deps = {}) {
  * @param {(snapshot: string) => void} [opts.onPoll] — 폴링 콜백
  * @returns {Promise<{ matched: boolean, exitCode: number|null, restarts: number, stallDetected: boolean }>}
  */
-export async function waitForCompletionWithStallDetect(sessionName, paneId, resultFile, opts = {}) {
+export async function waitForCompletionWithStallDetect(
+  sessionName,
+  paneId,
+  resultFile,
+  opts = {},
+) {
   const {
     pollInterval = 5000,
     stallTimeout = 120000,
@@ -254,7 +351,9 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
     // 초기 resultFile mtime
     try {
       if (_exists(resultFile)) lastMtime = _stat(resultFile).mtimeMs;
-    } catch { /* 무시 */ }
+    } catch {
+      /* 무시 */
+    }
 
     while (true) {
       await new Promise((r) => setTimeout(r, pollInterval));
@@ -262,19 +361,34 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
 
       // 전체 타임아웃
       if (now - startedAt > completionTimeout) {
-        return { matched: false, exitCode: null, restarts, stallDetected, timedOut: true };
+        return {
+          matched: false,
+          exitCode: null,
+          restarts,
+          stallDetected,
+          timedOut: true,
+        };
       }
 
       // 1) capture-pane 출력 확인
       const currentOutput = _capture(currentPaneId, 50);
-      if (onPoll) { try { onPoll(currentOutput); } catch { /* 삼킴 */ } }
+      if (onPoll) {
+        try {
+          onPoll(currentOutput);
+        } catch {
+          /* 삼킴 */
+        }
+      }
 
       // 2) completion 토큰 감지
       const completionMatch = completionRe.exec(currentOutput);
       if (completionMatch) {
         return {
           matched: true,
-          exitCode: Number.parseInt((completionMatch.slice(1).find(Boolean) || '0'), 10),
+          exitCode: Number.parseInt(
+            completionMatch.slice(1).find(Boolean) || "0",
+            10,
+          ),
           restarts,
           stallDetected,
           timedOut: false,
@@ -285,7 +399,9 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
       let currentMtime = 0;
       try {
         if (_exists(resultFile)) currentMtime = _stat(resultFile).mtimeMs;
-      } catch { /* 무시 */ }
+      } catch {
+        /* 무시 */
+      }
 
       // 4) 변화 감지 → stallTimer 리셋
       const outputChanged = currentOutput !== lastOutput;
@@ -302,9 +418,17 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
         try {
           const content = _readFile(resultFile, "utf8").trim();
           if (content.length > 0) {
-            return { matched: true, exitCode: 0, restarts, stallDetected, timedOut: false };
+            return {
+              matched: true,
+              exitCode: 0,
+              restarts,
+              stallDetected,
+              timedOut: false,
+            };
           }
-        } catch { /* 무시 */ }
+        } catch {
+          /* 무시 */
+        }
       }
 
       // 5) stall 판정
@@ -321,12 +445,20 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
         }
 
         // kill pane → re-dispatch
-        try { _exec(["kill-pane", "-t", currentPaneId]); } catch { /* 이미 종료 */ }
+        try {
+          _exec(["kill-pane", "-t", currentPaneId]);
+        } catch {
+          /* 이미 종료 */
+        }
 
         if (command) {
           // 새 pane split + 동일 command re-dispatch
           const newPaneId = _exec([
-            "split-window", "-t", sessionName, "-P", "-F",
+            "split-window",
+            "-t",
+            sessionName,
+            "-P",
+            "-F",
             "#{session_name}:#{window_index}.#{pane_index}",
           ]);
           _startCapture(sessionName, newPaneId);
@@ -343,12 +475,11 @@ export async function waitForCompletionWithStallDetect(sessionName, paneId, resu
 
 /** progressive 스플릿 모드: lead pane만 생성 후, 워커를 하나씩 추가하며 dispatch */
 async function dispatchProgressive(sessionName, assignments, opts = {}) {
-  const {
-    layout,
-    safeProgress,
-    dashboardLayout = "single",
-  } = opts;
-  const resolvedDashboardLayout = resolveDashboardLayout(dashboardLayout, assignments.length);
+  const { layout, safeProgress, dashboardLayout = "single" } = opts;
+  const resolvedDashboardLayout = resolveDashboardLayout(
+    dashboardLayout,
+    assignments.length,
+  );
   const session = createPsmuxSession(sessionName, { layout, paneCount: 1 });
   applyTrifluxTheme(sessionName);
   if (safeProgress) {
@@ -367,8 +498,13 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
   for (let i = 0; i < assignments.length; i++) {
     const assignment = assignments[i];
     const paneName = `worker-${i + 1}`;
+    const workerId = getHeadlessWorkerAgentId(sessionName, i);
     const resolvedCli = resolveCliType(assignment.cli);
-    const brand = CLI_BRAND[resolvedCli] || { emoji: "\u{25CF}", label: resolvedCli, ansi: "" };
+    const brand = CLI_BRAND[resolvedCli] || {
+      emoji: "\u{25CF}",
+      label: resolvedCli,
+      ansi: "",
+    };
     const paneTitle = assignment.role
       ? `${brand.emoji} ${resolvedCli} (${assignment.role})`
       : `${brand.emoji} ${resolvedCli}-${i + 1}`;
@@ -377,30 +513,67 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     // 모든 워커를 split-window로 생성 (lead pane index 0은 비워둠)
     // tui-viewer가 index 0을 건너뛰므로, 워커는 항상 index >= 1에 배치
     newPaneId = psmuxExec([
-      "split-window", "-t", sessionName, "-P", "-F",
+      "split-window",
+      "-t",
+      sessionName,
+      "-P",
+      "-F",
       "#{session_name}:#{window_index}.#{pane_index}",
     ]);
 
     // 타이틀 설정 (이모지 포함)
-    try { psmuxExec(["select-pane", "-t", newPaneId, "-T", paneTitle]); } catch { /* 무시 */ }
+    try {
+      psmuxExec(["select-pane", "-t", newPaneId, "-T", paneTitle]);
+    } catch {
+      /* 무시 */
+    }
+    await registerHeadlessWorker(sessionName, i, assignment.cli);
 
-    if (safeProgress) safeProgress({ type: "worker_added", paneName, cli: assignment.cli, paneTitle });
+    if (safeProgress)
+      safeProgress({
+        type: "worker_added",
+        paneName,
+        cli: assignment.cli,
+        paneTitle,
+      });
 
     // 캡처 시작 + 컬러 배너 + 명령 dispatch
-    const resultFile = join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
-    const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile, { mcp: assignment.mcp, model: assignment.model });
+    const resultFile = join(
+      RESULT_DIR,
+      `${sessionName}-${paneName}.txt`,
+    ).replace(/\\/g, "/");
+    const cmd = buildHeadlessCommand(
+      assignment.cli,
+      assignment.prompt,
+      resultFile,
+      { mcp: assignment.mcp, model: assignment.model },
+    );
     startCapture(sessionName, newPaneId);
     // pane 간 pipe-pane EBUSY 방지 — 이벤트 루프 해방하며 순차 대기
-    if (i > 0) await new Promise(r => setTimeout(r, 300));
+    if (i > 0) await new Promise((r) => setTimeout(r, 300));
     const dispatch = dispatchCommand(sessionName, newPaneId, cmd);
 
-    if (safeProgress) safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
+    if (safeProgress)
+      safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
 
-    dispatches.push({ ...dispatch, paneId: newPaneId, paneName, resultFile, cli: assignment.cli, role: assignment.role, command: cmd });
+    dispatches.push({
+      ...dispatch,
+      paneId: newPaneId,
+      paneName,
+      resultFile,
+      cli: assignment.cli,
+      role: assignment.role,
+      command: cmd,
+      workerId,
+    });
   }
 
   // 모든 split 완료 후 레이아웃 한 번만 정렬 (깜빡임 방지)
-  try { psmuxExec(["select-layout", "-t", sessionName, "tiled"]); } catch { /* 무시 */ }
+  try {
+    psmuxExec(["select-layout", "-t", sessionName, "tiled"]);
+  } catch {
+    /* 무시 */
+  }
 
   // v7.1.3: psmux 내부 대시보드 pane 제거 — WT 스플릿에서 tui-viewer 직접 실행
 
@@ -408,17 +581,19 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
 }
 
 /** 기존 batch 모드: 모든 pane을 한 번에 생성하여 dispatch */
-function dispatchBatch(sessionName, assignments, opts = {}) {
-  const {
-    layout,
-    safeProgress,
-    dashboardLayout = "single",
-  } = opts;
+async function dispatchBatch(sessionName, assignments, opts = {}) {
+  const { layout, safeProgress, dashboardLayout = "single" } = opts;
   const paneCount = assignments.length + 1;
-  const resolvedDashboardLayout = resolveDashboardLayout(dashboardLayout, assignments.length);
+  const resolvedDashboardLayout = resolveDashboardLayout(
+    dashboardLayout,
+    assignments.length,
+  );
   // A2b fix: 2x2 레이아웃은 최대 4 pane — 초과 시 tiled로 자동 전환
-  const effectiveLayout = (layout === "2x2" && paneCount > 4) ? "tiled" : layout;
-  const session = createPsmuxSession(sessionName, { layout: effectiveLayout, paneCount });
+  const effectiveLayout = layout === "2x2" && paneCount > 4 ? "tiled" : layout;
+  const session = createPsmuxSession(sessionName, {
+    layout: effectiveLayout,
+    paneCount,
+  });
   applyTrifluxTheme(sessionName);
   if (safeProgress) {
     safeProgress({
@@ -429,21 +604,45 @@ function dispatchBatch(sessionName, assignments, opts = {}) {
     });
   }
 
-  return assignments.map((assignment, i) => {
-    const paneName = `worker-${i + 1}`;
-    const resultFile = join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
-    const cmd = buildHeadlessCommand(assignment.cli, assignment.prompt, resultFile, { mcp: assignment.mcp, model: assignment.model });
-    const scriptDir = join(RESULT_DIR, sessionName);
-    const dispatch = dispatchCommand(sessionName, paneName, cmd, { scriptDir, scriptName: paneName });
+  return await Promise.all(
+    assignments.map(async (assignment, i) => {
+      const paneName = `worker-${i + 1}`;
+      const workerId = getHeadlessWorkerAgentId(sessionName, i);
+      const resultFile = join(
+        RESULT_DIR,
+        `${sessionName}-${paneName}.txt`,
+      ).replace(/\\/g, "/");
+      const cmd = buildHeadlessCommand(
+        assignment.cli,
+        assignment.prompt,
+        resultFile,
+        { mcp: assignment.mcp, model: assignment.model },
+      );
+      const scriptDir = join(RESULT_DIR, sessionName);
+      await registerHeadlessWorker(sessionName, i, assignment.cli);
+      const dispatch = dispatchCommand(sessionName, paneName, cmd, {
+        scriptDir,
+        scriptName: paneName,
+      });
 
-    // P1 fix: 비-progressive에서는 pane 리네임 금지 — 캡처 로그 경로가 타이틀 기반이므로
-    // 리네임하면 waitForCompletion이 "codex (role).log"를 찾지만 실제는 "worker-N.log"로 불일치
-    // progressive 모드에서는 split-window 시 새 pane에 바로 타이틀이 설정되므로 문제없음
+      // P1 fix: 비-progressive에서는 pane 리네임 금지 — 캡처 로그 경로가 타이틀 기반이므로
+      // 리네임하면 waitForCompletion이 "codex (role).log"를 찾지만 실제는 "worker-N.log"로 불일치
+      // progressive 모드에서는 split-window 시 새 pane에 바로 타이틀이 설정되므로 문제없음
 
-    if (safeProgress) safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
+      if (safeProgress)
+        safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
 
-    return { ...dispatch, paneName, resultFile, cli: assignment.cli, role: assignment.role, command: cmd };
-  });
+      return {
+        ...dispatch,
+        paneName,
+        resultFile,
+        cli: assignment.cli,
+        role: assignment.role,
+        command: cmd,
+        workerId,
+      };
+    }),
+  );
 }
 
 /**
@@ -455,102 +654,121 @@ function dispatchBatch(sessionName, assignments, opts = {}) {
  * @param {number} progressIntervalSec
  * @returns {Promise<Array<{d, completion, output}>>}
  */
-async function awaitAll(sessionName, dispatches, timeoutSec, safeProgress, progressIntervalSec, stallOpts) {
+async function awaitAll(
+  sessionName,
+  dispatches,
+  timeoutSec,
+  safeProgress,
+  progressIntervalSec,
+  stallOpts,
+) {
   // 병렬 대기 (Promise.all — 모든 pane 동시 폴링, 총 시간 = max(개별 시간))
-  return Promise.all(dispatches.map(async (d) => {
-    // onPoll → onProgress 변환 (throttle by progressIntervalSec)
-    const pollOpts = {};
-    if (safeProgress && progressIntervalSec > 0) {
-      let lastProgressAt = 0;
-      const intervalMs = progressIntervalSec * 1000;
-      pollOpts.onPoll = ({ content }) => {
-        const now = Date.now();
-        if (now - lastProgressAt >= intervalMs) {
-          lastProgressAt = now;
-          safeProgress({
-            type: "progress",
-            paneName: d.paneName,
-            cli: d.cli,
-            snapshot: content.split("\n").slice(-15).join("\n"), // 마지막 15줄
-          });
+  return Promise.all(
+    dispatches.map(async (d) => {
+      // onPoll → onProgress 변환 (throttle by progressIntervalSec)
+      const pollOpts = {};
+      if (safeProgress && progressIntervalSec > 0) {
+        let lastProgressAt = 0;
+        const intervalMs = progressIntervalSec * 1000;
+        pollOpts.onPoll = ({ content }) => {
+          const now = Date.now();
+          if (now - lastProgressAt >= intervalMs) {
+            lastProgressAt = now;
+            safeProgress({
+              type: "progress",
+              paneName: d.paneName,
+              cli: d.cli,
+              snapshot: content.split("\n").slice(-15).join("\n"), // 마지막 15줄
+            });
+          }
+        };
+      }
+
+      let completion;
+      if (stallOpts?.enabled) {
+        // 하이브리드 stall detection 모드
+        try {
+          const stallPollCb =
+            safeProgress && progressIntervalSec > 0
+              ? (snapshot) => {
+                  try {
+                    safeProgress({
+                      type: "progress",
+                      paneName: d.paneName,
+                      cli: d.cli,
+                      snapshot: snapshot.split("\n").slice(-15).join("\n"),
+                    });
+                  } catch {
+                    /* 삼킴 */
+                  }
+                }
+              : undefined;
+
+          const stallResult = await waitForCompletionWithStallDetect(
+            sessionName,
+            d.paneId || d.paneName,
+            d.resultFile,
+            {
+              pollInterval: stallOpts.pollInterval,
+              stallTimeout: stallOpts.stallTimeout,
+              completionTimeout:
+                stallOpts.completionTimeout ?? timeoutSec * 1000,
+              maxRestarts: stallOpts.maxRestarts,
+              command: d.command,
+              token: d.token,
+              onPoll: stallPollCb,
+            },
+          );
+          completion = {
+            matched: stallResult.matched,
+            exitCode: stallResult.exitCode,
+            stallDetected: stallResult.stallDetected,
+            restarts: stallResult.restarts,
+          };
+        } catch (stallErr) {
+          if (stallErr.code === "STALL_EXHAUSTED") {
+            completion = {
+              matched: false,
+              exitCode: null,
+              stallExhausted: true,
+              restarts: stallErr.restarts,
+            };
+          } else {
+            throw stallErr;
+          }
         }
-      };
-    }
-
-    let completion;
-    if (stallOpts?.enabled) {
-      // 하이브리드 stall detection 모드
-      try {
-        const stallPollCb = safeProgress && progressIntervalSec > 0
-          ? (snapshot) => {
-              try {
-                safeProgress({
-                  type: "progress",
-                  paneName: d.paneName,
-                  cli: d.cli,
-                  snapshot: snapshot.split("\n").slice(-15).join("\n"),
-                });
-              } catch { /* 삼킴 */ }
-            }
-          : undefined;
-
-        const stallResult = await waitForCompletionWithStallDetect(
+      } else {
+        // 기존 waitForCompletion 경로
+        if (d.logPath) pollOpts.logPath = d.logPath;
+        completion = await waitForCompletion(
           sessionName,
           d.paneId || d.paneName,
-          d.resultFile,
-          {
-            pollInterval: stallOpts.pollInterval,
-            stallTimeout: stallOpts.stallTimeout,
-            completionTimeout: stallOpts.completionTimeout ?? timeoutSec * 1000,
-            maxRestarts: stallOpts.maxRestarts,
-            command: d.command,
-            token: d.token,
-            onPoll: stallPollCb,
-          },
+          d.token,
+          timeoutSec,
+          pollOpts,
         );
-        completion = {
-          matched: stallResult.matched,
-          exitCode: stallResult.exitCode,
-          stallDetected: stallResult.stallDetected,
-          restarts: stallResult.restarts,
-        };
-      } catch (stallErr) {
-        if (stallErr.code === "STALL_EXHAUSTED") {
-          completion = {
-            matched: false,
-            exitCode: null,
-            stallExhausted: true,
-            restarts: stallErr.restarts,
-          };
-        } else {
-          throw stallErr;
-        }
       }
-    } else {
-      // 기존 waitForCompletion 경로
-      if (d.logPath) pollOpts.logPath = d.logPath;
-      completion = await waitForCompletion(sessionName, d.paneId || d.paneName, d.token, timeoutSec, pollOpts);
-    }
 
-    const output = completion.matched
-      ? readResult(d.resultFile, d.paneId)
-      : "";
+      const output = completion.matched
+        ? readResult(d.resultFile, d.paneId)
+        : "";
 
-    if (safeProgress) {
-      safeProgress({
-        type: "completed",
-        paneName: d.paneName,
-        cli: d.cli,
-        matched: completion.matched,
-        exitCode: completion.exitCode,
-        sessionDead: completion.sessionDead || false,
-        stallDetected: completion.stallDetected || false,
-        stallExhausted: completion.stallExhausted || false,
-      });
-    }
+      if (safeProgress) {
+        safeProgress({
+          type: "completed",
+          paneName: d.paneName,
+          cli: d.cli,
+          matched: completion.matched,
+          exitCode: completion.exitCode,
+          sessionDead: completion.sessionDead || false,
+          stallDetected: completion.stallDetected || false,
+          stallExhausted: completion.stallExhausted || false,
+        });
+      }
 
-    return { d, completion, output };
-  }));
+      return { d, completion, output };
+    }),
+  );
 }
 
 /**
@@ -558,39 +776,59 @@ async function awaitAll(sessionName, dispatches, timeoutSec, safeProgress, progr
  * @param {Array<{d, completion, output}>} results
  * @returns {Array}
  */
-function collectResults(results) {
+async function collectResults(sessionName, results) {
   // B3 fix: git diff를 루프 밖에서 1회만 실행 (워커 수만큼 중복 방지)
   let gitDiffFiles;
   try {
-    const diffOut = execSync("git diff --name-only HEAD", { encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] });
+    const diffOut = execSync("git diff --name-only HEAD", {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     gitDiffFiles = diffOut.trim().split("\n").filter(Boolean);
-  } catch { /* git 미설치 또는 non-repo — 무시 */ }
+  } catch {
+    /* git 미설치 또는 non-repo — 무시 */
+  }
 
   // handoff 파이프라인: parse → validate → format (각 워커 결과에 적용)
-  return results.map(({ d, completion, output }) => {
-    const handoffResult = processHandoff(output, {
-      exitCode: completion.exitCode,
-      resultFile: d.resultFile,
-      cli: d.cli,
-      gitDiffFiles,
-    });
+  return await Promise.all(
+    results.map(async ({ d, completion, output }) => {
+      const handoffResult = processHandoff(output, {
+        exitCode: completion.exitCode,
+        resultFile: d.resultFile,
+        cli: d.cli,
+        gitDiffFiles,
+      });
+      const status =
+        handoffResult.handoff?.status ||
+        (completion.matched && completion.exitCode === 0
+          ? "completed"
+          : "failed");
+      await publishHeadlessResult(
+        sessionName,
+        d.workerId,
+        status,
+        handoffResult.handoff,
+      );
 
-    return {
-      cli: d.cli,
-      paneName: d.paneName,
-      paneId: d.paneId,
-      role: d.role,
-      matched: completion.matched,
-      exitCode: completion.exitCode,
-      output,
-      resultFile: d.resultFile,
-      sessionDead: completion.sessionDead || false,
-      handoff: handoffResult.handoff,
-      handoffFormatted: handoffResult.formatted,
-      handoffValid: handoffResult.valid,
-      handoffFallback: handoffResult.fallback,
-    };
-  });
+      return {
+        cli: d.cli,
+        paneName: d.paneName,
+        paneId: d.paneId,
+        workerId: d.workerId,
+        role: d.role,
+        matched: completion.matched,
+        exitCode: completion.exitCode,
+        output,
+        resultFile: d.resultFile,
+        sessionDead: completion.sessionDead || false,
+        handoff: handoffResult.handoff,
+        handoffFormatted: handoffResult.formatted,
+        handoffValid: handoffResult.valid,
+        handoffFallback: handoffResult.fallback,
+      };
+    }),
+  );
 }
 
 /**
@@ -623,7 +861,10 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   // in-process TUI: dashboard=true이고 stdout이 TTY일 때 직접 구동
   let tui = null;
-  const resolvedLayout = resolveDashboardLayout(dashboardLayout, assignments.length);
+  const resolvedLayout = resolveDashboardLayout(
+    dashboardLayout,
+    assignments.length,
+  );
   if (dashboard && process.stdout.isTTY) {
     tui = createLogDashboard({
       stream: process.stdout,
@@ -678,16 +919,43 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
     feedTui(event);
-    if (onProgress) { try { onProgress(event); } catch { /* 콜백 예외 삼킴 */ } }
+    if (onProgress) {
+      try {
+        onProgress(event);
+      } catch {
+        /* 콜백 예외 삼킴 */
+      }
+    }
   };
-  const safeProgress = (event) => { try { combinedProgress(event); } catch { /* 삼킴 */ } };
+  const safeProgress = (event) => {
+    try {
+      combinedProgress(event);
+    } catch {
+      /* 삼킴 */
+    }
+  };
 
   const dispatches = progressive
-    ? await dispatchProgressive(sessionName, assignments, { layout, safeProgress, dashboardLayout })
-    : dispatchBatch(sessionName, assignments, { layout, safeProgress, dashboardLayout });
+    ? await dispatchProgressive(sessionName, assignments, {
+        layout,
+        safeProgress,
+        dashboardLayout,
+      })
+    : await dispatchBatch(sessionName, assignments, {
+        layout,
+        safeProgress,
+        dashboardLayout,
+      });
 
-  const results = await awaitAll(sessionName, dispatches, timeoutSec, safeProgress, progressIntervalSec, stallDetect);
-  const collected = collectResults(results);
+  const results = await awaitAll(
+    sessionName,
+    dispatches,
+    timeoutSec,
+    safeProgress,
+    progressIntervalSec,
+    stallDetect,
+  );
+  const collected = await collectResults(sessionName, results);
 
   // 완료 시 TUI에 최종 상태 반영 후 닫기
   if (tui) {
@@ -700,7 +968,9 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
         summary: r.handoff?.verdict || (r.matched ? "completed" : "failed"),
         detail: r.output,
         progress: 1,
-        elapsed: Math.round((Date.now() - (tui._startedAt || Date.now())) / 1000),
+        elapsed: Math.round(
+          (Date.now() - (tui._startedAt || Date.now())) / 1000,
+        ),
       });
     }
     tui.render();
@@ -727,7 +997,12 @@ export async function runHeadlessWithCleanup(assignments, opts = {}) {
   try {
     return await runHeadless(sessionName, assignments, runOpts);
   } finally {
-    try { killPsmuxSession(sessionName); } catch { /* 무시 */ }
+    await deregisterHeadlessWorkers(sessionName, assignments.length);
+    try {
+      killPsmuxSession(sessionName);
+    } catch {
+      /* 무시 */
+    }
     // WT split pane은 psmux 종료 시 셸이 끝나면서 자동으로 닫힘
     // 수동 close-pane 불필요 (레이스 컨디션으로 WT 에러 발생)
   }
@@ -747,7 +1022,10 @@ export function applyTrifluxTheme(sessionName) {
     ["status-style", "bg=#1e1e2e,fg=#cdd6f4"],
     ["status-left", " #[fg=#89b4fa,bold]▲ triflux#[default] "],
     ["status-left-length", "20"],
-    ["status-right", " #[fg=#a6adc8]#{pane_title}#[default] │ #[fg=#f9e2af]%H:%M#[default] "],
+    [
+      "status-right",
+      " #[fg=#a6adc8]#{pane_title}#[default] │ #[fg=#f9e2af]%H:%M#[default] ",
+    ],
     ["status-right-length", "40"],
     // Pane border — active/inactive 구분
     ["pane-active-border-style", "fg=#89b4fa"],
@@ -758,7 +1036,11 @@ export function applyTrifluxTheme(sessionName) {
     ["allow-rename", "off"],
   ];
   for (const [key, value] of opts) {
-    try { psmuxExec(["set-option", "-t", sessionName, key, value]); } catch { /* 무시 */ }
+    try {
+      psmuxExec(["set-option", "-t", sessionName, key, value]);
+    } catch {
+      /* 무시 */
+    }
   }
 }
 
@@ -774,19 +1056,34 @@ export function applyTrifluxTheme(sessionName) {
  */
 function getWtDefaultFontSize() {
   const settingsPaths = [
-    join(process.env.LOCALAPPDATA || "", "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"),
-    join(process.env.LOCALAPPDATA || "", "Microsoft/Windows Terminal/settings.json"),
+    join(
+      process.env.LOCALAPPDATA || "",
+      "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
+    ),
+    join(
+      process.env.LOCALAPPDATA || "",
+      "Microsoft/Windows Terminal/settings.json",
+    ),
   ];
   for (const p of settingsPaths) {
     if (!existsSync(p)) continue;
     try {
-      const settings = JSON.parse(readFileSync(p, "utf8").replace(/^\s*\/\/.*$/gm, ""));
+      const settings = JSON.parse(
+        readFileSync(p, "utf8").replace(/^\s*\/\/.*$/gm, ""),
+      );
       // 기본 프로필 or 첫 프로필의 폰트
       const defaultGuid = settings.defaultProfile;
       const profiles = settings.profiles?.list || [];
-      const defaultProfile = profiles.find(pr => pr.guid === defaultGuid) || profiles[0];
-      return defaultProfile?.font?.size || settings.profiles?.defaults?.font?.size || 12;
-    } catch { /* 다음 */ }
+      const defaultProfile =
+        profiles.find((pr) => pr.guid === defaultGuid) || profiles[0];
+      return (
+        defaultProfile?.font?.size ||
+        settings.profiles?.defaults?.font?.size ||
+        12
+      );
+    } catch {
+      /* 다음 */
+    }
   }
   return 12;
 }
@@ -803,7 +1100,11 @@ function atomicWriteSync(filePath, data) {
     writeFileSync(tmpPath, data, "utf8");
     renameSync(tmpPath, filePath);
   } catch (err) {
-    try { writeFileSync(tmpPath.replace(/\.tmp$/, ".tmp.del"), ""); } catch { /* 무시 */ }
+    try {
+      writeFileSync(tmpPath.replace(/\.tmp$/, ".tmp.del"), "");
+    } catch {
+      /* 무시 */
+    }
     throw err;
   }
 }
@@ -813,21 +1114,31 @@ function sanitizeSessionName(value) {
 }
 
 function sanitizeWindowTitle(value, fallback = "triflux") {
-  const text = String(value || "").replace(/[\r\n]+/g, " ").trim();
+  const text = String(value || "")
+    .replace(/[\r\n]+/g, " ")
+    .trim();
   return text || fallback;
 }
 
 function buildWtAttachPaneArgs(sessionName, title) {
   const safeSession = sanitizeSessionName(sessionName);
   return [
-    "--profile", "triflux",
-    "--title", sanitizeWindowTitle(title, `▲ ${safeSession}`),
-    "--", "psmux", "attach-session", "-t", safeSession,
+    "--profile",
+    "triflux",
+    "--title",
+    sanitizeWindowTitle(title, `▲ ${safeSession}`),
+    "--",
+    "psmux",
+    "attach-session",
+    "-t",
+    safeSession,
   ];
 }
 
 function joinWtCommands(commands) {
-  return commands.flatMap((command, index) => (index === 0 ? command : [";", ...command]));
+  return commands.flatMap((command, index) =>
+    index === 0 ? command : [";", ...command],
+  );
 }
 
 function buildAttachTitle(sessionName, suffix = "") {
@@ -835,40 +1146,85 @@ function buildAttachTitle(sessionName, suffix = "") {
   return suffix ? `${base} ${suffix}` : base;
 }
 
-export function buildDashboardAttachArgs(sessionName, dashboardLayout = "single", workerCount = 2, anchor = "window") {
+export function buildDashboardAttachArgs(
+  sessionName,
+  dashboardLayout = "single",
+  workerCount = 2,
+  anchor = "window",
+) {
   const safeSession = sanitizeSessionName(sessionName);
   const resolvedLayout = resolveDashboardLayout(dashboardLayout, workerCount);
-  const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
+  const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(
+    /\\/g,
+    "/",
+  );
   const prefix = anchor === "tab" ? ["-w", "0", "nt"] : ["-w", "new"];
   return [
     ...prefix,
-    "--profile", "triflux",
-    "--title", buildAttachTitle(safeSession, "dashboard"),
-    "--", "node", viewerPath,
-    "--session", safeSession,
-    "--result-dir", RESULT_DIR,
-    "--layout", resolvedLayout,
+    "--profile",
+    "triflux",
+    "--title",
+    buildAttachTitle(safeSession, "dashboard"),
+    "--",
+    "node",
+    viewerPath,
+    "--session",
+    safeSession,
+    "--result-dir",
+    RESULT_DIR,
+    "--layout",
+    resolvedLayout,
   ];
 }
 
 export function buildWtAttachArgs(sessionName, workerCount = 1) {
   const safeSession = sanitizeSessionName(sessionName);
-  const count = Number.isFinite(workerCount) ? Math.max(1, Math.trunc(workerCount)) : 1;
+  const count = Number.isFinite(workerCount)
+    ? Math.max(1, Math.trunc(workerCount))
+    : 1;
   if (count >= 5) return buildDashboardAttachArgs(safeSession, "single", count);
 
-  const pane1 = ["nt", ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession))];
+  const pane1 = [
+    "nt",
+    ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession)),
+  ];
   if (count === 1) return ["-w", "0", ...pane1];
 
-  const pane2 = ["sp", count >= 3 ? "-V" : "-H", ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "2"))];
+  const pane2 = [
+    "sp",
+    count >= 3 ? "-V" : "-H",
+    ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "2")),
+  ];
   if (count === 2) return ["-w", "0", ...joinWtCommands([pane1, pane2])];
 
-  const pane3 = ["sp", "-H", ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "3"))];
-  if (count === 3) return ["-w", "0", ...joinWtCommands([pane1, pane2, ["move-focus", "left"], pane3])];
+  const pane3 = [
+    "sp",
+    "-H",
+    ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "3")),
+  ];
+  if (count === 3)
+    return [
+      "-w",
+      "0",
+      ...joinWtCommands([pane1, pane2, ["move-focus", "left"], pane3]),
+    ];
 
-  const pane4 = ["sp", "-H", ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "4"))];
+  const pane4 = [
+    "sp",
+    "-H",
+    ...buildWtAttachPaneArgs(safeSession, buildAttachTitle(safeSession, "4")),
+  ];
   return [
-    "-w", "0",
-    ...joinWtCommands([pane1, pane2, ["move-focus", "left"], pane3, ["move-focus", "right"], pane4]),
+    "-w",
+    "0",
+    ...joinWtCommands([
+      pane1,
+      pane2,
+      ["move-focus", "left"],
+      pane3,
+      ["move-focus", "right"],
+      pane4,
+    ]),
   ];
 }
 
@@ -883,8 +1239,14 @@ function spawnDetachedWt(args) {
 
 export function ensureWtProfile(workerCount = 2) {
   const settingsPaths = [
-    join(process.env.LOCALAPPDATA || "", "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json"),
-    join(process.env.LOCALAPPDATA || "", "Microsoft/Windows Terminal/settings.json"),
+    join(
+      process.env.LOCALAPPDATA || "",
+      "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
+    ),
+    join(
+      process.env.LOCALAPPDATA || "",
+      "Microsoft/Windows Terminal/settings.json",
+    ),
   ];
 
   for (const settingsPath of settingsPaths) {
@@ -896,7 +1258,9 @@ export function ensureWtProfile(workerCount = 2) {
       const settings = JSON.parse(cleaned);
       if (!settings.profiles?.list) continue;
 
-      const existing = settings.profiles.list.findIndex(p => p.name === "triflux");
+      const existing = settings.profiles.list.findIndex(
+        (p) => p.name === "triflux",
+      );
       const profile = {
         name: "triflux",
         commandline: "psmux",
@@ -907,20 +1271,30 @@ export function ensureWtProfile(workerCount = 2) {
         useAcrylic: true,
         unfocusedAppearance: { opacity: 20 },
         colorScheme: "One Half Dark",
-        font: { size: Math.max(6, getWtDefaultFontSize() - 1 - Math.floor(workerCount / 2)) },
+        font: {
+          size: Math.max(
+            6,
+            getWtDefaultFontSize() - 1 - Math.floor(workerCount / 2),
+          ),
+        },
         closeOnExit: "always",
         hidden: true, // 프로필 목록에는 숨김 (triflux에서만 사용)
       };
 
       if (existing >= 0) {
-        settings.profiles.list[existing] = { ...settings.profiles.list[existing], ...profile };
+        settings.profiles.list[existing] = {
+          ...settings.profiles.list[existing],
+          ...profile,
+        };
       } else {
         settings.profiles.list.push(profile);
       }
 
       atomicWriteSync(settingsPath, JSON.stringify(settings, null, 2));
       return true;
-    } catch { /* 파싱 실패 — 다음 경로 */ }
+    } catch {
+      /* 파싱 실패 — 다음 경로 */
+    }
   }
   return false;
 }
@@ -938,15 +1312,27 @@ export function ensureWtProfile(workerCount = 2) {
  */
 export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
   if (!process.env.WT_SESSION) return false;
-  try { execSync("where wt.exe", { stdio: "ignore" }); } catch { return false; }
+  try {
+    execSync("where wt.exe", { stdio: "ignore" });
+  } catch {
+    return false;
+  }
   ensureWtProfile(workerCount);
   try {
-    const args = workerCount >= 5
-      ? buildDashboardAttachArgs(sessionName, opts.dashboardLayout, workerCount, opts.dashboardAnchor)
-      : buildWtAttachArgs(sessionName, workerCount);
+    const args =
+      workerCount >= 5
+        ? buildDashboardAttachArgs(
+            sessionName,
+            opts.dashboardLayout,
+            workerCount,
+            opts.dashboardAnchor,
+          )
+        : buildWtAttachArgs(sessionName, workerCount);
     spawnDetachedWt(args);
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -958,15 +1344,32 @@ export function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
  * @param {string} [dashboardAnchor='window'] — window | tab
  * @returns {boolean}
  */
-export function attachDashboardTab(sessionName, workerCount = 2, dashboardLayout = "single", dashboardSize = 0.40, dashboardAnchor = "window") {
-  try { execSync("where wt.exe", { stdio: "ignore" }); } catch { return false; }
+export function attachDashboardTab(
+  sessionName,
+  workerCount = 2,
+  dashboardLayout = "single",
+  dashboardSize = 0.4,
+  dashboardAnchor = "window",
+) {
+  try {
+    execSync("where wt.exe", { stdio: "ignore" });
+  } catch {
+    return false;
+  }
   ensureWtProfile(workerCount);
   try {
-    const args = buildDashboardAttachArgs(sessionName, dashboardLayout, workerCount, dashboardAnchor);
+    const args = buildDashboardAttachArgs(
+      sessionName,
+      dashboardLayout,
+      workerCount,
+      dashboardAnchor,
+    );
     void dashboardSize;
     spawnDetachedWt(args);
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1017,11 +1420,15 @@ export function getProgressSnapshots(sessionName, dispatches, lines = 15) {
  *   kill: () => void,
  * }>}
  */
-export async function runHeadlessInteractive(sessionName, assignments, opts = {}) {
+export async function runHeadlessInteractive(
+  sessionName,
+  assignments,
+  opts = {},
+) {
   const {
     autoAttach = false,
     dashboard = false,
-    dashboardSize = 0.40,
+    dashboardSize = 0.4,
     dashboardAnchor = "window",
     signal,
     maxIdleSec = 0,
@@ -1042,12 +1449,20 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
         attachDashboardTab(
           sessionName,
           assignments.length,
-          event.dashboardLayout || resolveDashboardLayout(headlessOpts.dashboardLayout, assignments.length),
+          event.dashboardLayout ||
+            resolveDashboardLayout(
+              headlessOpts.dashboardLayout,
+              assignments.length,
+            ),
           dashboardSize,
           dashboardAnchor,
         );
       } else {
-        autoAttachTerminal(sessionName, { dashboardLayout: headlessOpts.dashboardLayout, dashboardAnchor }, assignments.length);
+        autoAttachTerminal(
+          sessionName,
+          { dashboardLayout: headlessOpts.dashboardLayout, dashboardAnchor },
+          assignments.length,
+        );
       }
     }
     if (userOnProgress) userOnProgress(event);
@@ -1055,7 +1470,11 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
   const interactiveRunOpts = { ...headlessOpts, onProgress };
 
   // Phase 1: 세션 생성 → 즉시 터미널 팝업 → dispatch → 대기 → 결과 수집
-  const { results } = await runHeadless(sessionName, assignments, interactiveRunOpts);
+  const { results } = await runHeadless(
+    sessionName,
+    assignments,
+    interactiveRunOpts,
+  );
 
   // Phase 2: 세션을 유지하고 interactive handle 반환
   // Fix P2: paneId를 dispatches에 포함 (snapshots에서 필요)
@@ -1085,7 +1504,11 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
     /** 특정 pane에 후속 명령 dispatch (캡처 자동 재시작) */
     dispatch(paneName, command) {
       if (this._killed) throw new Error("세션이 이미 종료되었습니다.");
-      try { startCapture(sessionName, paneName); } catch { /* 이미 활성 — 무시 */ }
+      try {
+        startCapture(sessionName, paneName);
+      } catch {
+        /* 이미 활성 — 무시 */
+      }
       resetIdleTimer();
       return dispatchCommand(sessionName, paneName, command);
     },
@@ -1111,7 +1534,13 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
     async waitFor(paneName, token, timeoutSec = 300, waitOpts = {}) {
       if (this._killed) return { matched: false, sessionDead: true };
       resetIdleTimer();
-      return waitForCompletion(sessionName, paneName, token, timeoutSec, waitOpts);
+      return waitForCompletion(
+        sessionName,
+        paneName,
+        token,
+        timeoutSec,
+        waitOpts,
+      );
     },
 
     /** 세션 생존 확인 */
@@ -1124,7 +1553,12 @@ export async function runHeadlessInteractive(sessionName, assignments, opts = {}
     kill() {
       if (this._killed) return;
       this._killed = true;
-      try { killPsmuxSession(sessionName); } catch { /* 무시 */ }
+      void deregisterHeadlessWorkers(sessionName, assignments.length);
+      try {
+        killPsmuxSession(sessionName);
+      } catch {
+        /* 무시 */
+      }
       // WT split pane은 psmux 종료 → 셸 종료 → 자동 닫힘
       // 수동 close-pane 불필요 (레이스 컨디션으로 WT 0x80070002 에러 발생)
     },

@@ -24,6 +24,7 @@ argument-hint: "<구현할 기능 설명>"
 
 
 
+
 > **Deep 버전**: tfx-deep-plan. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
 > Gemini 위임 빠른 계획 — Claude는 컨텍스트 수집·출력 포맷만, 핵심 계획 수립은 Gemini에 위임.
 

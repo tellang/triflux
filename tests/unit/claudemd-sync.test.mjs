@@ -105,22 +105,21 @@ describe("ensureTfxSection()", () => {
 });
 
 describe("ensureGlobalClaudeRoutingSection()", () => {
-  it("~/.claude/CLAUDE.md가 있으면 현재 라우팅 섹션으로 갱신한다", () => {
+  it("global routing sync가 비활성화되어 항상 skipped를 반환한다", () => {
     const root = makeTempDir("triflux-claudemd-sync-global-");
     const claudeDir = join(root, ".claude");
     const globalClaudeMdPath = join(claudeDir, "CLAUDE.md");
-    const routingTable = getLatestRoutingTable();
     mkdirSync(claudeDir, { recursive: true });
     writeFileSync(globalClaudeMdPath, "# Global\n\n## Notes\n- keep\n", "utf8");
 
     const result = ensureGlobalClaudeRoutingSection(claudeDir);
     const saved = readFileSync(globalClaudeMdPath, "utf8");
 
-    assert.deepEqual(result, { action: "created", path: globalClaudeMdPath });
-    assert.equal(saved, `# Global\n\n## Notes\n- keep\n\n${routingTable}\n`);
+    assert.deepEqual(result, { action: "unchanged", path: globalClaudeMdPath, skipped: true, reason: "global_sync_disabled" });
+    assert.equal(saved, "# Global\n\n## Notes\n- keep\n", "파일이 수정되지 않아야 한다");
   });
 
-  it("글로벌 CLAUDE.md가 없으면 생성하지 않고 skip 처리한다", () => {
+  it("글로벌 CLAUDE.md가 없어도 skipped를 반환한다", () => {
     const root = makeTempDir("triflux-claudemd-sync-global-missing-");
     const claudeDir = join(root, ".claude");
     mkdirSync(claudeDir, { recursive: true });
@@ -131,7 +130,7 @@ describe("ensureGlobalClaudeRoutingSection()", () => {
       action: "unchanged",
       path: join(claudeDir, "CLAUDE.md"),
       skipped: true,
-      reason: "missing_file",
+      reason: "global_sync_disabled",
     });
   });
 });

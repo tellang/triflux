@@ -1,10 +1,12 @@
 // hub/account-broker.mjs — Multi-account CLI pool broker
-// Manages lease/release/cooldown for Codex and Gemini accounts.
+// Manages lease/release/cooldown/circuit-breaker for Codex and Gemini accounts.
+// Per-account circuit breaker: one bad account does not block others.
 // Singleton export. All state changes create new objects (immutable pattern).
 
+import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import * as z from "zod";
 
 // ── Zod schema ───────────────────────────────────────────────────
@@ -45,6 +47,8 @@ const ConfigSchema = z.object({
 const DEFAULT_COOLDOWN_MS = 300_000; // 5 minutes
 const TIER_PRIORITY = { pro: 0, plus: 1, unknown: 2, free: 3 };
 const LEASE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CIRCUIT_WINDOW_MS = 10 * 60_000; // 10 minutes
+const CIRCUIT_MAX_FAILURES = 3;
 const AUTH_BASE_PATH = join(homedir(), ".claude", "cache", "tfx-hub");
 
 // ── env var resolution ───────────────────────────────────────────
@@ -74,12 +78,13 @@ function getRemainingLeaseMs(account, now) {
 
 // ── AccountBroker ────────────────────────────────────────────────
 
-class AccountBroker {
+class AccountBroker extends EventEmitter {
   #config;
   #state; // Map<accountId, accountState>
   #roundRobinIndex; // Map<provider, number>
 
   constructor(config) {
+    super();
     const parsed = ConfigSchema.parse(config);
     this.#config = parsed;
 
@@ -104,11 +109,56 @@ class AccountBroker {
         busy: false,
         leasedAt: null,
         cooldownUntil: 0,
-        failures: 0,
+        // per-account circuit breaker state
+        failureTimestamps: [], // timestamp array for window-based decay
+        circuitOpenedAt: 0,
+        circuitTrialInFlight: false,
         lastUsedAt: 0,
         totalSessions: 0,
       });
     }
+  }
+
+  // ── per-account circuit breaker ─────────────────────────────────
+
+  #getCircuitState(acct, now) {
+    const validFailures = acct.failureTimestamps.filter(
+      (ts) => now - ts < CIRCUIT_WINDOW_MS,
+    );
+    const withinWindow =
+      acct.circuitOpenedAt && now - acct.circuitOpenedAt < CIRCUIT_WINDOW_MS;
+    if (withinWindow) return { state: "open", failures: validFailures };
+    if (acct.circuitOpenedAt) return { state: "half-open", failures: validFailures };
+    return { state: "closed", failures: validFailures };
+  }
+
+  #isCircuitBlocked(acct, now) {
+    const circuit = this.#getCircuitState(acct, now);
+    if (circuit.state === "open") return true;
+    if (circuit.state === "half-open" && acct.circuitTrialInFlight) return true;
+    return false;
+  }
+
+  #recordCircuitFailure(acct, isHalfOpen, now) {
+    const validFailures = [
+      ...acct.failureTimestamps.filter((ts) => now - ts < CIRCUIT_WINDOW_MS),
+      now,
+    ];
+    const shouldOpen =
+      isHalfOpen || validFailures.length >= CIRCUIT_MAX_FAILURES;
+    return {
+      failureTimestamps: validFailures,
+      circuitOpenedAt: shouldOpen ? now : acct.circuitOpenedAt,
+      circuitTrialInFlight: false,
+    };
+  }
+
+  #resetCircuit() {
+    return {
+      failureTimestamps: [],
+      circuitOpenedAt: 0,
+      circuitTrialInFlight: false,
+    };
   }
 
   // ── lease TTL pruning ──────────────────────────────────────────
@@ -137,9 +187,24 @@ class AccountBroker {
     );
     if (!accounts.length) return null;
 
-    // group available accounts by tier, preserving insertion order within each tier
-    const available = accounts.filter((a) => !a.busy && a.cooldownUntil <= now);
-    if (!available.length) return null;
+    // filter: not busy, not in cooldown, circuit not blocked
+    const available = accounts.filter(
+      (a) =>
+        !a.busy &&
+        a.cooldownUntil <= now &&
+        !this.#isCircuitBlocked(a, now),
+    );
+
+    if (!available.length) {
+      // check if any accounts exist but all are blocked by circuit
+      const circuitBlocked = accounts.filter(
+        (a) => !a.busy && a.cooldownUntil <= now && this.#isCircuitBlocked(a, now),
+      );
+      if (circuitBlocked.length) {
+        this.emit("noAvailableAccounts", { provider, count: circuitBlocked.length });
+      }
+      return null;
+    }
 
     // sort by tier priority; stable sort preserves original order within same priority
     const sorted = [...available].sort(
@@ -149,6 +214,19 @@ class AccountBroker {
     // pick the best tier, then apply round-robin within that tier's accounts
     const bestTier = sorted[0].tier;
     const sameTierAccounts = sorted.filter((a) => a.tier === bestTier);
+
+    // detect tier fallback
+    const highestTier = accounts.reduce(
+      (best, a) => Math.min(best, TIER_PRIORITY[a.tier] ?? 2),
+      Infinity,
+    );
+    if ((TIER_PRIORITY[bestTier] ?? 2) > highestTier) {
+      this.emit("tierFallback", {
+        provider,
+        from: Object.entries(TIER_PRIORITY).find(([, v]) => v === highestTier)?.[0],
+        to: bestTier,
+      });
+    }
 
     // use a per-provider+tier round-robin key to distribute within the tier
     const rrKey = `${provider}:${bestTier}:${wantsRemote ? "remote" : "local"}`;
@@ -160,6 +238,10 @@ class AccountBroker {
     // advance round-robin index for this tier
     this.#roundRobinIndex.set(rrKey, (idx + 1) % tierCount);
 
+    // mark half-open trial if applicable
+    const circuit = this.#getCircuitState(acct, now);
+    const isHalfOpen = circuit.state === "half-open";
+
     // update state (immutable)
     this.#state.set(acct.id, {
       ...acct,
@@ -167,17 +249,37 @@ class AccountBroker {
       leasedAt: now,
       lastUsedAt: now,
       totalSessions: acct.totalSessions + 1,
+      circuitTrialInFlight: isHalfOpen ? true : acct.circuitTrialInFlight,
     });
+
+    this.emit("lease", { id: acct.id, provider, tier: acct.tier, halfOpen: isHalfOpen });
+
+    // path traversal guard for authFile
+    let authFile;
+    if (acct.mode === "auth") {
+      const resolved = join(AUTH_BASE_PATH, acct.authFile);
+      if (!resolved.startsWith(AUTH_BASE_PATH + sep)) {
+        this.emit("securityViolation", { id: acct.id, authFile: acct.authFile });
+        // undo the lease — path traversal blocked
+        this.#state.set(acct.id, {
+          ...this.#state.get(acct.id),
+          busy: false,
+          leasedAt: null,
+        });
+        return null;
+      }
+      authFile = resolved;
+    }
 
     return {
       id: acct.id,
       mode: acct.mode,
       remote: isRemoteAccount(acct),
       host: acct.host,
+      halfOpen: isHalfOpen,
       profile: acct.mode === "profile" ? acct.profile : undefined,
       env: acct.mode === "env" ? resolveEnvValues(acct.env) : undefined,
-      authFile:
-        acct.mode === "auth" ? join(AUTH_BASE_PATH, acct.authFile) : undefined,
+      authFile,
     };
   }
 
@@ -185,26 +287,44 @@ class AccountBroker {
 
   release(accountId, result) {
     const acct = this.#state.get(accountId);
-    if (!acct || acct.busy === false) return;
+    if (!acct || !acct.busy) return;
 
+    const now = Date.now();
     const ok = result?.ok === true;
-    const newFailures = ok ? 0 : acct.failures + 1;
+    const circuit = this.#getCircuitState(acct, now);
+    const isHalfOpen = circuit.state === "half-open";
+
+    let circuitUpdate;
+    if (ok) {
+      circuitUpdate = this.#resetCircuit();
+      if (isHalfOpen) {
+        this.emit("circuitClose", { id: accountId });
+      }
+    } else {
+      circuitUpdate = this.#recordCircuitFailure(acct, isHalfOpen, now);
+      if (circuitUpdate.circuitOpenedAt !== acct.circuitOpenedAt) {
+        this.emit("circuitOpen", { id: accountId, failures: circuitUpdate.failureTimestamps.length });
+      }
+    }
+
     const cooldownMs = this.#config.defaults?.cooldownMs ?? DEFAULT_COOLDOWN_MS;
+
+    // rate-limit style cooldown: if circuit just opened, also set cooldown
+    const shouldCooldown =
+      !ok && circuitUpdate.circuitOpenedAt !== acct.circuitOpenedAt;
 
     const updated = {
       ...acct,
       busy: false,
       leasedAt: null,
-      failures: newFailures,
+      ...circuitUpdate,
+      cooldownUntil: shouldCooldown
+        ? now + cooldownMs
+        : acct.cooldownUntil,
     };
 
-    // consecutive failure guard: 3+ failures → auto-cooldown
-    if (newFailures >= 3) {
-      updated.cooldownUntil = Date.now() + cooldownMs;
-      updated.failures = 0; // reset after cooldown triggered
-    }
-
     this.#state.set(accountId, updated);
+    this.emit("release", { id: accountId, ok });
   }
 
   // ── markRateLimited ───────────────────────────────────────────
@@ -227,7 +347,9 @@ class AccountBroker {
     this.#pruneExpiredLeases(now);
     return [...this.#state.values()].map((acct) => ({
       ...acct,
+      failureTimestamps: [...acct.failureTimestamps],
       remainingMs: getRemainingLeaseMs(acct, now),
+      circuitState: this.#getCircuitState(acct, now).state,
     }));
   }
 
@@ -273,7 +395,8 @@ function loadConfig() {
   if (!existsSync(configPath)) return null;
   try {
     return JSON.parse(readFileSync(configPath, "utf8"));
-  } catch {
+  } catch (err) {
+    console.error("[account-broker] Failed to parse accounts.json:", err.message);
     return null;
   }
 }
@@ -285,10 +408,23 @@ function createBroker() {
   if (!config) return null;
   try {
     return new AccountBroker(config);
-  } catch {
+  } catch (err) {
+    console.error("[account-broker] Failed to create broker:", err.message);
     return null;
   }
 }
 
-export const broker = createBroker();
-export { AccountBroker };
+/** Re-read config and replace the module-level singleton. ESM live binding propagates to all importers. */
+function reloadBroker() {
+  const config = loadConfig();
+  if (!config) return { ok: false, error: "Config not found or invalid" };
+  try {
+    broker = new AccountBroker(config);
+    return { ok: true, broker };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+export let broker = createBroker();
+export { AccountBroker, reloadBroker };
