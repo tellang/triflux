@@ -1336,7 +1336,7 @@ export function createLogDashboard(opts = {}) {
   // ── 키 입력 ──────────────────────────────────────────────────────────
   function handleInput(chunk) {
     const key = String(chunk);
-    if (key === "\u0003") return; // Ctrl-C
+    if (key === "\u0003") { doClose(); return; }
 
     // Help overlay: 아무 키나 누르면 닫기
     if (helpOverlay) {
@@ -1351,7 +1351,7 @@ export function createLogDashboard(opts = {}) {
       const w = workers.get(selectedWorker);
       if (!w) return;
       const sessionTarget = w.sessionName || w.paneName;
-      if (!sessionTarget) return;
+      if (!sessionTarget) { showFlash("세션 정보 없음 — 아직 준비 중"); return; }
       attachToSession(w);
       return;
     }
