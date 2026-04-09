@@ -2,6 +2,16 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.7.1] - 2026-04-09
+
+### Added
+- swarm-planner auto-remote suggestion: hosts.json 기반 원격 호스트 자동 분배 제안
+- safety-guard OS-aware SSH: macOS/Linux 대상은 bash 문법 허용, Windows만 차단
+- macOS 원격 지원: remote-probe 확장, CLAUDE.md SSH 패턴 OS별 분기
+
+### Fixed
+- session-start-fast.mjs `pathToFileURL` 래퍼 추가 — Windows에서 `import(join(...))` 경로 깨짐 수정
+
 ## [10.7.0] - 2026-04-09
 
 ### Added
