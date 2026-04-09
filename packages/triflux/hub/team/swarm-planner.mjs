@@ -15,6 +15,7 @@
 //       multi-line prompt text
 
 import { readFileSync } from "node:fs";
+import { selectHostForCapability } from "../lib/ssh-command.mjs";
 
 /** Shard schema defaults */
 const SHARD_DEFAULTS = Object.freeze({
@@ -260,6 +261,10 @@ export function planSwarm(prdPath, opts = {}) {
     throw new Error(`Dependency cycle detected: ${cycles[0].join(" → ")}`);
   }
 
+  // Auto-remote suggestion: PRD에 host 미지정 shard가 있고,
+  // hosts.json에 가용 원격 호스트가 있으면 제안 데이터를 생성한다.
+  const remoteSuggestion = buildRemoteSuggestion(shards, opts.repoRoot);
+
   return Object.freeze({
     shards: Object.freeze(shards.map((s) => Object.freeze({ ...s }))),
     leaseMap,
@@ -267,5 +272,74 @@ export function planSwarm(prdPath, opts = {}) {
     mergeOrder,
     conflicts,
     criticalShards: shards.filter((s) => s.critical).map((s) => s.name),
+    remoteSuggestion,
+  });
+}
+
+/**
+ * PRD shard에 host가 없고 원격 호스트가 가용하면 분배 제안을 생성한다.
+ * 실제 AskUserQuestion 호출은 스킬(tfx-swarm)에서 수행. 여기는 데이터만.
+ * @param {Shard[]} shards
+ * @param {string} [repoRoot]
+ * @returns {object|null} 제안 데이터 또는 null (제안 없음)
+ */
+function buildRemoteSuggestion(shards, repoRoot) {
+  const localShards = shards.filter((s) => !s.host);
+  if (localShards.length === 0) return null; // 모든 shard에 host 지정됨
+
+  // 각 shard의 agent에 대해 가용 원격 호스트 조회
+  const agentTypes = [...new Set(localShards.map((s) => s.agent))];
+  const availableHosts = [];
+
+  for (const agent of agentTypes) {
+    try {
+      const hosts = selectHostForCapability(agent, repoRoot);
+      for (const h of hosts) {
+        if (!availableHosts.find((ah) => ah.name === h.name)) {
+          availableHosts.push(h);
+        }
+      }
+    } catch {
+      // hosts.json 없거나 파싱 실패 → 무시
+    }
+  }
+
+  if (availableHosts.length === 0) return null;
+
+  // 분배 제안: 로컬 shard 중 절반(내림)을 원격에 배치
+  const remoteCount = Math.min(
+    Math.floor(localShards.length / 2),
+    availableHosts.length,
+  );
+  if (remoteCount === 0) return null;
+
+  // 의존성 없는 shard를 우선 원격 후보로 선택
+  const candidates = localShards
+    .filter((s) => s.depends.length === 0)
+    .concat(localShards.filter((s) => s.depends.length > 0));
+
+  const suggested = [];
+  for (let i = 0; i < remoteCount && i < candidates.length; i++) {
+    const shard = candidates[i];
+    const host = availableHosts[i % availableHosts.length];
+    suggested.push({
+      shardName: shard.name,
+      host: host.name,
+      hostDescription: host.config.description,
+      specs: host.specs,
+    });
+  }
+
+  return Object.freeze({
+    localCount: localShards.length - remoteCount,
+    remoteCount,
+    totalShards: shards.length,
+    availableHosts: availableHosts.map((h) => ({
+      name: h.name,
+      description: h.config.description,
+      specs: h.specs,
+      capabilities: h.config.capabilities,
+    })),
+    suggested: Object.freeze(suggested),
   });
 }

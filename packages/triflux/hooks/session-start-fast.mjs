@@ -11,7 +11,7 @@
 // external source 훅 (session-vault 등)은 여전히 execFile로 실행된다.
 
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
