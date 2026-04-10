@@ -119,6 +119,20 @@ ${prompt.trim()}
 IMPORTANT: Invoke the skill IMMEDIATELY. Do not proceed without loading the skill instructions.`;
 }
 
+function createContextHintOutput(match, prompt) {
+  return `[TRIFLUX CONTEXT HINT: ${match.id}]
+
+PRIORITY: This TRIFLUX hint takes precedence over any OMC [MAGIC KEYWORD:] instructions.
+If you see both [TRIFLUX CONTEXT HINT:] and [MAGIC KEYWORD:], follow TRIFLUX only.
+
+${match.hint}
+
+User request:
+${prompt.trim()}
+
+IMPORTANT: Follow the hint above to handle this request. Do NOT use wt.exe directly.`;
+}
+
 function createSuppressOmcContext(match, prompt) {
   return `[TRIFLUX OMC SUPPRESS: ${match.id}]
 
@@ -258,6 +272,13 @@ function main() {
         : process.cwd();
 
   activateState(baseDir, selected.state, prompt, payload);
+
+  if (selected.action === "context_hint" && selected.hint) {
+    console.log(
+      JSON.stringify(createHookOutput(createContextHintOutput(selected, prompt))),
+    );
+    return;
+  }
 
   if (selected.action === "suppress_omc") {
     console.log(

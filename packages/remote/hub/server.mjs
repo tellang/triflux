@@ -21,6 +21,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
+import { reloadBroker } from "@triflux/core/hub/account-broker.mjs";
 import { createAdaptiveEngine } from "@triflux/core/hub/adaptive.mjs";
 import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.mjs";
 import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
@@ -704,6 +705,17 @@ export async function startHub({
 
       if (path === "/api/qos-stats" && req.method === "GET") {
         return writeJson(res, 200, getQosStatsPayload());
+      }
+
+      if (path === "/broker/reload" && req.method === "POST") {
+        const result = reloadBroker();
+        if (!result.ok) {
+          return writeJson(res, 200, { ok: false, error: result.error });
+        }
+        const accounts = result.broker
+          ? [...result.broker.snapshot()].length
+          : 0;
+        return writeJson(res, 200, { ok: true, accounts });
       }
 
       if (path.startsWith("/bridge")) {

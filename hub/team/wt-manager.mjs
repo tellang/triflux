@@ -1,8 +1,15 @@
-import * as childProcess from "../lib/spawn-trace.mjs";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { platform as osPlatform, tmpdir } from "node:os";
 import { join } from "node:path";
-
+import { getEnvironment } from "../lib/env-detect.mjs";
+import * as childProcess from "../lib/spawn-trace.mjs";
 import { sendKeysToPane } from "./psmux.mjs";
 
 const DEFAULT_WINDOW_NAME = "triflux";
@@ -100,6 +107,60 @@ function defaultIsPidAlive(pid, execFileSyncFn = childProcess.execFileSync) {
 }
 
 /**
+ * WT 기본 프로필의 폰트 크기를 읽는다.
+ */
+function getWtDefaultFontSize() {
+  const settingsPaths = [
+    join(
+      process.env.LOCALAPPDATA || "",
+      "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
+    ),
+    join(
+      process.env.LOCALAPPDATA || "",
+      "Microsoft/Windows Terminal/settings.json",
+    ),
+  ];
+  for (const p of settingsPaths) {
+    if (!existsSync(p)) continue;
+    try {
+      const settings = JSON.parse(
+        readFileSync(p, "utf8").replace(/^\s*\/\/.*$/gm, ""),
+      );
+      const defaultGuid = settings.defaultProfile;
+      const profiles = settings.profiles?.list || [];
+      const defaultProfile =
+        profiles.find((pr) => pr.guid === defaultGuid) || profiles[0];
+      return (
+        defaultProfile?.font?.size ||
+        settings.profiles?.defaults?.font?.size ||
+        12
+      );
+    } catch {
+      /* 다음 */
+    }
+  }
+  return 12;
+}
+
+/**
+ * 파일을 원자적으로 쓴다.
+ */
+function atomicWriteSync(filePath, data) {
+  const tmpPath = `${filePath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmpPath, data, "utf8");
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    try {
+      rmSync(tmpPath, { force: true });
+    } catch {
+      /* 무시 */
+    }
+    throw err;
+  }
+}
+
+/**
  * Windows Terminal 탭/세션 라이프사이클 관리자.
  *
  * @param {object} [opts]
@@ -123,6 +184,7 @@ export function createWtManager(opts = {}) {
   const execFileSyncFn = deps.execFileSync || childProcess.execFileSync;
   const killFn = deps.kill || ((pid) => process.kill(pid));
   const sendKeysFn = deps.sendKeysToPane || sendKeysToPane;
+  const getEnvironmentFn = deps.getEnvironment || getEnvironment;
   const isPidAlive =
     deps.isPidAlive || ((pid) => defaultIsPidAlive(pid, execFileSyncFn));
   const ensureDir =
@@ -130,6 +192,7 @@ export function createWtManager(opts = {}) {
   const exists = deps.exists || existsSync;
   const readText =
     deps.readText || ((filePath) => readFileSync(filePath, "utf8"));
+  const renameFile = deps.renameFile || renameSync;
   const removeFile =
     deps.removeFile || ((filePath) => rmSync(filePath, { force: true }));
 
@@ -200,11 +263,83 @@ export function createWtManager(opts = {}) {
     throw new Error(`WT tab ready timeout: ${title}`);
   }
 
+  function ensureWtProfile(workerCount = 2) {
+    const settingsPaths = [
+      join(
+        process.env.LOCALAPPDATA || "",
+        "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
+      ),
+      join(
+        process.env.LOCALAPPDATA || "",
+        "Microsoft/Windows Terminal/settings.json",
+      ),
+    ];
+
+    for (const settingsPath of settingsPaths) {
+      if (!exists(settingsPath)) continue;
+      try {
+        const raw = readText(settingsPath);
+        const cleaned = raw.replace(/^\s*\/\/.*$/gm, "");
+        const settings = JSON.parse(cleaned);
+        if (!settings.profiles?.list) continue;
+
+        const existing = settings.profiles.list.findIndex(
+          (p) => p.name === "triflux",
+        );
+        const profile = {
+          name: "triflux",
+          commandline: "psmux",
+          icon: "\u{1F53A}",
+          tabTitle: "triflux",
+          suppressApplicationTitle: true,
+          opacity: 40,
+          useAcrylic: true,
+          unfocusedAppearance: { opacity: 20 },
+          colorScheme: "One Half Dark",
+          font: {
+            size: Math.max(
+              6,
+              getWtDefaultFontSize() - 1 - Math.floor(workerCount / 2),
+            ),
+          },
+          closeOnExit: "always",
+          hidden: true,
+        };
+
+        if (existing >= 0) {
+          settings.profiles.list[existing] = {
+            ...settings.profiles.list[existing],
+            ...profile,
+          };
+        } else {
+          settings.profiles.list.push(profile);
+        }
+
+        atomicWriteSync(settingsPath, JSON.stringify(settings, null, 2));
+        return true;
+      } catch {
+        /* 파싱 실패 */
+      }
+    }
+    return false;
+  }
+
   async function createTab(tab = {}) {
     const title = String(tab.title || "").trim();
     if (!title) {
       throw new Error("title is required");
     }
+
+    const env = getEnvironmentFn();
+    if (env?.terminal?.hasWt === false) {
+      return Object.freeze({
+        success: false,
+        reason: "wt-not-installed",
+        installHint: env.terminal.installHint || null,
+      });
+    }
+
+    const shellPath = String(opts.profile || env?.shell?.path || "pwsh.exe");
 
     pruneDeadTabs();
 
@@ -235,7 +370,7 @@ export function createWtManager(opts = {}) {
     const script = buildWrappedCommand(pidFile, tab.command);
     args.push(
       "--",
-      "powershell.exe",
+      shellPath,
       "-NoExit",
       "-EncodedCommand",
       encodeForPowerShell(script),
@@ -255,6 +390,69 @@ export function createWtManager(opts = {}) {
       pidFile,
     });
     tabs.set(title, entry);
+    return Object.freeze({
+      success: true,
+      title,
+      pid: entry.pid,
+      createdAt: entry.createdAt,
+      pidFile: entry.pidFile,
+    });
+  }
+
+  function renameTab({ oldTitle, newTitle } = {}) {
+    const previousTitle = String(oldTitle || "").trim();
+    const nextTitle = String(newTitle || "").trim();
+    if (!previousTitle) {
+      throw new Error("oldTitle is required");
+    }
+    if (!nextTitle) {
+      throw new Error("newTitle is required");
+    }
+
+    pruneDeadTabs();
+
+    const entry = tabs.get(previousTitle);
+    if (!entry) {
+      return false;
+    }
+    if (previousTitle === nextTitle) {
+      return Object.freeze({
+        success: true,
+        title: nextTitle,
+        pid: entry.pid,
+        createdAt: entry.createdAt,
+        pidFile: entry.pidFile,
+      });
+    }
+    if (tabs.has(nextTitle)) {
+      throw new Error(`WT tab already exists: ${nextTitle}`);
+    }
+
+    const nextPidFile = buildPidFilePath(pidDir, nextTitle);
+    try {
+      removeFile(nextPidFile);
+    } catch {
+      /* ignore */
+    }
+    renameFile(entry.pidFile, nextPidFile);
+
+    tabs.delete(previousTitle);
+    const nextEntry = Object.freeze({
+      ...entry,
+      pidFile: nextPidFile,
+    });
+    tabs.set(nextTitle, nextEntry);
+    return Object.freeze({
+      success: true,
+      title: nextTitle,
+      pid: nextEntry.pid,
+      createdAt: nextEntry.createdAt,
+      pidFile: nextEntry.pidFile,
+    });
+  }
+
+  function getEnvironmentInfo() {
+    return getEnvironmentFn();
   }
 
   async function closeTab(title) {
@@ -315,27 +513,29 @@ export function createWtManager(opts = {}) {
    * @param {string} [opts.command] — pane에서 실행할 명령
    * @param {number} [opts.size] — 퍼센트 (0-100)
    */
-  async function splitPane(opts = {}) {
-    const direction = opts.direction === "H" ? "-H" : "-V";
+  async function splitPane(splitOpts = {}) {
+    const direction = splitOpts.direction === "H" ? "-H" : "-V";
     const args = ["-w", windowName, "sp", direction];
 
-    if (opts.title) {
-      args.push("--title", String(opts.title));
+    if (splitOpts.title) {
+      args.push("--title", String(splitOpts.title));
     }
-    if (opts.profile) {
-      args.push("--profile", String(opts.profile));
+    if (splitOpts.profile) {
+      args.push("--profile", String(splitOpts.profile));
     }
-    if (opts.size && Number.isFinite(opts.size)) {
-      args.push("-s", String(opts.size / 100));
+    if (splitOpts.size && Number.isFinite(splitOpts.size)) {
+      args.push("-s", String(splitOpts.size / 100));
     }
-    if (opts.cwd) {
-      args.push("-d", String(opts.cwd));
+    if (splitOpts.cwd) {
+      args.push("-d", String(splitOpts.cwd));
     }
-    if (opts.command) {
-      const script = opts.command;
+    if (splitOpts.command) {
+      const env = getEnvironmentFn();
+      const shellPath = String(opts.profile || env?.shell?.path || "pwsh.exe");
+      const script = splitOpts.command;
       args.push(
         "--",
-        "powershell.exe",
+        shellPath,
         "-NoExit",
         "-EncodedCommand",
         encodeForPowerShell(script),
@@ -361,11 +561,14 @@ export function createWtManager(opts = {}) {
 
     // 첫 번째는 새 탭으로 생성
     const first = panes[0];
-    await createTab({
+    const createResult = await createTab({
       title: first.title,
       command: first.command,
       profile: first.profile,
     });
+    if (createResult?.success === false) {
+      return createResult;
+    }
 
     // 나머지는 split-pane으로 분할
     for (let i = 1; i < panes.length; i++) {
@@ -377,6 +580,8 @@ export function createWtManager(opts = {}) {
         size: panes[i].size,
       });
     }
+
+    return createResult;
   }
 
   async function createSession(sessionOpts = {}) {
@@ -395,8 +600,12 @@ export function createWtManager(opts = {}) {
       throw new Error("command is required");
     }
 
-    await createTab(tab);
+    const createResult = await createTab(tab);
+    if (createResult?.success === false) {
+      return createResult;
+    }
     sendKeysFn(String(sessionOpts.pane), String(sessionOpts.command), true);
+    return createResult;
   }
 
   function getTabCount() {
@@ -405,13 +614,16 @@ export function createWtManager(opts = {}) {
   }
 
   return Object.freeze({
+    ensureWtProfile,
     createTab,
+    renameTab,
     closeTab,
     listTabs,
     closeStale,
     createSession,
     splitPane,
     applySplitLayout,
+    getEnvironmentInfo,
     getTabCount,
   });
 }

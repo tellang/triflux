@@ -147,20 +147,10 @@ describe("tui attach helpers", () => {
     );
 
     assert.equal(local.kind, "local");
-    assert.deepEqual(local.args.slice(0, 6), [
-      "-w",
-      "0",
-      "nt",
-      "--title",
-      "lead",
-      "--",
-    ]);
-    assert.deepEqual(local.args.slice(-4), [
-      "psmux",
-      "attach-session",
-      "-t",
-      "alpha-1",
-    ]);
+    assert.equal(local.title, "lead");
+    assert.ok(local.command.includes("psmux"));
+    assert.ok(local.command.includes("attach-session"));
+    assert.ok(local.command.includes("alpha-1"));
 
     const remote = buildAttachRequest({
       sessionName: "beta.2",
@@ -171,9 +161,9 @@ describe("tui attach helpers", () => {
     });
 
     assert.equal(remote.kind, "remote");
-    assert.ok(remote.args.includes("ssh"));
-    assert.ok(remote.args.includes("alice@ryzen"));
-    assert.ok(remote.args.includes("psmux attach-session -t beta.2"));
+    assert.ok(remote.command.includes("ssh"));
+    assert.ok(remote.command.includes("alice@ryzen"));
+    assert.ok(remote.command.includes("psmux attach-session -t beta.2"));
     assert.throws(
       () => buildAttachRequest({ sessionName: "bad;name", role: "lead" }),
       /invalid attach session name/i,

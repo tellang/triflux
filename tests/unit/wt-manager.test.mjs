@@ -40,9 +40,16 @@ function createHarness(options = {}) {
   const killCalls = [];
   const sendKeysCalls = [];
   const sleepCalls = [];
+  const environment = options.environment || {
+    shell: { name: "pwsh", path: "pwsh.exe", version: null },
+    terminal: { name: "windows-terminal", hasWt: true, installHint: null },
+    multiplexer: { name: "none", path: null },
+    platform: options.platform || "win32",
+  };
 
   const deps = {
     platform: () => options.platform || "win32",
+    getEnvironment: () => environment,
     now: () => currentTime,
     sleep: async (ms) => {
       sleepCalls.push(ms);
@@ -84,6 +91,7 @@ function createHarness(options = {}) {
 
   return {
     deps,
+    environment,
     spawnCalls,
     killCalls,
     sendKeysCalls,
@@ -116,10 +124,12 @@ describe("wt-manager: createWtManager", () => {
 
     assert.ok(Object.isFrozen(manager));
     assert.equal(typeof manager.createTab, "function");
+    assert.equal(typeof manager.renameTab, "function");
     assert.equal(typeof manager.closeTab, "function");
     assert.equal(typeof manager.listTabs, "function");
     assert.equal(typeof manager.closeStale, "function");
     assert.equal(typeof manager.createSession, "function");
+    assert.equal(typeof manager.getEnvironmentInfo, "function");
     assert.equal(typeof manager.getTabCount, "function");
   });
 });
@@ -134,7 +144,7 @@ describe("wt-manager: createTab", () => {
       deps: harness.deps,
     });
 
-    await manager.createTab({
+    const result = await manager.createTab({
       title: "lead",
       command: 'Write-Host "ready"',
       profile: "triflux",
@@ -155,10 +165,13 @@ describe("wt-manager: createTab", () => {
     assert.ok(call.args.includes("-d"));
     assert.ok(call.args.includes("C:/repo/triflux"));
     assert.deepEqual(call.args.slice(-4, -1), [
-      "powershell.exe",
+      harness.environment.shell.path,
       "-NoExit",
       "-EncodedCommand",
     ]);
+    assert.equal(result.success, true);
+    assert.equal(result.title, "lead");
+    assert.equal(result.pid, call.pid);
 
     const wrapped = extractWrappedCommand(call.args);
     const pidFile = extractPidFile(call.args);
@@ -201,6 +214,62 @@ describe("wt-manager: createTab", () => {
     assert.deepEqual(harness.sleepCalls, [500]);
     assert.equal(harness.spawnCalls[0].at, 0);
     assert.equal(harness.spawnCalls[1].at, 500);
+  });
+
+  it("WT 미설치면 graceful failure를 반환한다", async () => {
+    const harness = createHarness({
+      environment: {
+        shell: { name: "pwsh", path: "pwsh.exe", version: null },
+        terminal: {
+          name: "unknown",
+          hasWt: false,
+          installHint: "wt.exe: winget install Microsoft.WindowsTerminal",
+        },
+        multiplexer: { name: "none", path: null },
+        platform: "win32",
+      },
+    });
+    const manager = createWtManager({
+      pidDir: createTempPidDir(),
+      deps: harness.deps,
+    });
+
+    const result = await manager.createTab({ title: "lead" });
+
+    assert.deepEqual(result, {
+      success: false,
+      reason: "wt-not-installed",
+      installHint: "wt.exe: winget install Microsoft.WindowsTerminal",
+    });
+    assert.equal(harness.spawnCalls.length, 0);
+    assert.equal(manager.getTabCount(), 0);
+  });
+
+  it("env.shell.path를 사용해 셸 실행 파일을 선택한다", async () => {
+    const harness = createHarness({
+      environment: {
+        shell: {
+          name: "powershell",
+          path: "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          version: "5.1",
+        },
+        terminal: { name: "windows-terminal", hasWt: true, installHint: null },
+        multiplexer: { name: "none", path: null },
+        platform: "win32",
+      },
+    });
+    const manager = createWtManager({
+      pidDir: createTempPidDir(),
+      deps: harness.deps,
+    });
+
+    await manager.createTab({ title: "custom-shell" });
+
+    assert.deepEqual(harness.spawnCalls[0].args.slice(-4, -1), [
+      harness.environment.shell.path,
+      "-NoExit",
+      "-EncodedCommand",
+    ]);
   });
 });
 
@@ -269,5 +338,42 @@ describe("wt-manager: lifecycle helpers", () => {
         submit: true,
       },
     ]);
+  });
+
+  it("renameTab은 pid 파일과 메모리 인덱스를 함께 갱신한다", async () => {
+    const pidDir = createTempPidDir();
+    const harness = createHarness();
+    const manager = createWtManager({
+      pidDir,
+      deps: harness.deps,
+    });
+
+    const created = await manager.createTab({ title: "old-title" });
+    const renamed = manager.renameTab({
+      oldTitle: "old-title",
+      newTitle: "new-title",
+    });
+
+    assert.equal(renamed.success, true);
+    assert.equal(renamed.pid, created.pid);
+    assert.equal(manager.listTabs()[0].title, "new-title");
+    assert.equal(readFileSync(renamed.pidFile, "utf8"), String(created.pid));
+  });
+
+  it("getEnvironmentInfo는 env-detect 결과를 노출한다", () => {
+    const harness = createHarness({
+      environment: {
+        shell: { name: "pwsh", path: "pwsh.exe", version: "7.5" },
+        terminal: { name: "windows-terminal", hasWt: true, installHint: null },
+        multiplexer: { name: "tmux", path: "C:/tmux.exe" },
+        platform: "win32",
+      },
+    });
+    const manager = createWtManager({
+      pidDir: createTempPidDir(),
+      deps: harness.deps,
+    });
+
+    assert.deepEqual(manager.getEnvironmentInfo(), harness.environment);
   });
 });

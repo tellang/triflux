@@ -65,7 +65,13 @@ const WT_DIRECT_PATTERNS = [
 ];
 
 const WT_DIRECT_BLOCK_MESSAGE =
-  "[safety-guard] wt.exe 직접 호출 차단됨. → hub/team/wt-manager.mjs의 createTab() / splitPane() / applySplitLayout()을 사용하세요.";
+  "[safety-guard] wt.exe 직접 호출 차단됨.\n" +
+  "→ hub/team/wt-manager.mjs의 createWtManager() 팩토리 사용:\n" +
+  "  wt.createTab({ title, command, profile, cwd })  — 새 탭\n" +
+  "  wt.splitPane({ direction: 'H'|'V', title, command })  — 패인 분할\n" +
+  "  wt.applySplitLayout([{ title, command, direction }])  — 다중 배치\n" +
+  '사용법: node -e "import(\'./hub/team/wt-manager.mjs\').then(m => { const wt = m.createWtManager(); wt.createTab({ title: \'제목\', command: \'pwsh\' }); })"';
+
 
 // ── SSH+PowerShell bash 문법 차단 ────────────────────────────
 // 원격 기본 셸이 PowerShell인 호스트에 bash redirect/glob을 보내면 오동작

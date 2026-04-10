@@ -49,6 +49,11 @@ function normalizeRule(rule) {
 
   if (!skill && !mcpRoute && !action) return null;
 
+  const hint =
+    typeof rule.hint === "string" && rule.hint.trim()
+      ? rule.hint.trim()
+      : null;
+
   const supersedes = Array.isArray(rule.supersedes)
     ? rule.supersedes
         .filter((id) => typeof id === "string" && id.trim())
@@ -63,6 +68,7 @@ function normalizeRule(rule) {
     patterns,
     skill,
     action,
+    hint,
     priority: rule.priority,
     supersedes,
     exclusive: rule.exclusive === true,
@@ -139,6 +145,7 @@ export function matchRules(compiledRules, cleanText) {
       id: rule.id,
       skill: rule.skill,
       action: rule.action,
+      hint: rule.hint || null,
       priority: rule.priority,
       supersedes: rule.supersedes || [],
       exclusive: rule.exclusive === true,

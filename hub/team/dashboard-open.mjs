@@ -1,5 +1,3 @@
-import { spawn } from "../lib/spawn-trace.mjs";
-
 import { psmuxExec } from "./psmux.mjs";
 import {
   detectMultiplexer,
@@ -8,6 +6,7 @@ import {
   resolveAttachCommand,
   tmuxExec,
 } from "./session.mjs";
+import { createWtManager } from "./wt-manager.mjs";
 
 function sanitizeWindowTitle(value, fallback = "triflux") {
   const text = String(value || "")
@@ -44,9 +43,10 @@ export function decideDashboardOpenMode({
   return hasWtSession ? "split" : "window";
 }
 
-function spawnWindowsTerminal(spec, opts = {}) {
+async function spawnWindowsTerminal(spec, opts = {}) {
   if (!hasWindowsTerminal()) return false;
 
+  const wt = createWtManager();
   const {
     mode = "window",
     title = "triflux",
@@ -56,35 +56,29 @@ function spawnWindowsTerminal(spec, opts = {}) {
 
   const safeTitle = sanitizeWindowTitle(title);
   const safeCwd = sanitizeWorkingDirectory(cwd);
-  const orientation = split?.orientation === "V" ? "V" : "H";
-  const size = Number.isFinite(split?.size)
-    ? Math.min(0.8, Math.max(0.2, split.size))
-    : 0.5;
-  const baseArgs = [
-    "--profile",
-    "triflux",
-    "--title",
-    safeTitle,
-    "-d",
-    safeCwd,
-    "--",
-    spec.command,
-    ...spec.args,
-  ];
-  const args =
-    mode === "split"
-      ? ["-w", "0", "sp", `-${orientation}`, "-s", String(size), ...baseArgs]
-      : mode === "tab"
-        ? ["-w", "0", "nt", ...baseArgs]
-        : ["-w", "new", ...baseArgs];
 
-  const child = spawn("wt.exe", args, {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: false,
-  });
-  child.unref();
-  return true;
+  try {
+    if (mode === "split") {
+      await wt.splitPane({
+        direction: split?.orientation === "V" ? "V" : "H",
+        size: (split?.size || 0.5) * 100,
+        title: safeTitle,
+        cwd: safeCwd,
+        command: spec.args ? `${spec.command} ${spec.args.join(" ")}` : spec.command,
+        profile: "triflux",
+      });
+    } else {
+      await wt.createTab({
+        title: safeTitle,
+        cwd: safeCwd,
+        command: spec.args ? `${spec.command} ${spec.args.join(" ")}` : spec.command,
+        profile: "triflux",
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function focusManagedPane(target, opts = {}) {
@@ -122,7 +116,7 @@ export function openHeadlessDashboardTarget(sessionName, opts = {}) {
   }
 
   // 전체 열기 (Shift+Enter) → 새 WT 창으로 세션 attach
-  return spawnWindowsTerminal(
+  void spawnWindowsTerminal(
     { command: "psmux", args: ["attach-session", "-t", safeSession] },
     {
       mode: decideDashboardOpenMode({ openAll }),
@@ -130,6 +124,7 @@ export function openHeadlessDashboardTarget(sessionName, opts = {}) {
       cwd,
     },
   );
+  return true;
 }
 
 export function openDashboardRuntimeTarget(runtime, opts = {}) {
@@ -162,11 +157,12 @@ export function openDashboardRuntimeTarget(runtime, opts = {}) {
   try {
     if (!openAll && targetPane)
       focusManagedPane(targetPane, { teammateMode, layout });
-    return spawnWindowsTerminal(resolveAttachCommand(sessionName), {
+    void spawnWindowsTerminal(resolveAttachCommand(sessionName), {
       mode: decideDashboardOpenMode({ openAll }),
       title: title || `▲ ${sanitizeSessionName(sessionName)}`,
       cwd,
     });
+    return true;
   } catch {
     return false;
   }
