@@ -2,6 +2,22 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.9.2] - 2026-04-11
+
+### Fixed
+- **Hub idle timeout**: Named Pipe 활동이 idle timer를 갱신하지 않아 10분 후 Hub 종료되는 문제 수정
+- **Hub startup**: hub-ensure를 DEFERRED → BLOCKING으로 승격하여 세션 시작 전 Hub 준비 보장
+- **Hub startup**: 실패 시 code:0 → code:1 반환, 타임아웃 시 code:2 반환
+- **Windows spawn**: `cmd.exe /c start /b` → native `detached:true` spawn으로 교체
+- **Hub crash recovery**: `unhandledRejection`/`uncaughtException` 핸들러 추가 + PID 파일 정리
+- **Health check**: hub-ensure의 `/status` → `/health` 엔드포인트로 state.mjs와 통일
+- **Lock staleness**: 락 stale 판정 임계값 3초 → 60초 (느린 시작 시 락 깨짐 방지)
+- **global_sync warning**: `global_sync_disabled`는 의도적 비활성이므로 경고 제거
+
+### Changed
+- **Codex transport**: `TFX_CODEX_TRANSPORT` 기본값 `exec` → `auto` (MCP 양방향 통신 기본)
+- **tfx-auto default**: 기본 모드를 `--quick` → `--thorough`로 전환 (Opus 자동 경량화 포함)
+
 ## [10.7.1] - 2026-04-09
 
 ### Added
