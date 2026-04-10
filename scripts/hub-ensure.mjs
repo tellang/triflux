@@ -52,12 +52,12 @@ function resolveHubTarget() {
 
 async function isHubHealthy(host, port) {
   try {
-    const res = await fetch(`${buildHubBaseUrl(host, port)}/status`, {
+    const res = await fetch(`${buildHubBaseUrl(host, port)}/health`, {
       signal: AbortSignal.timeout(1000),
     });
     if (!res.ok) return false;
     const data = await res.json();
-    return data?.hub?.state === "healthy";
+    return data?.ok === true;
   } catch {
     return false;
   }

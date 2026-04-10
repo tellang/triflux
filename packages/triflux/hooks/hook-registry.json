@@ -167,8 +167,8 @@
         "priority": 2,
         "enabled": true,
         "timeout": 8,
-        "blocking": false,
-        "description": "tfx-hub 서비스 헬스체크 및 시작"
+        "blocking": true,
+        "description": "tfx-hub 서비스 헬스체크 및 시작 (BLOCKING — 세션 시작 전 Hub 준비 보장)"
       },
       {
         "id": "tfx-preflight-cache",

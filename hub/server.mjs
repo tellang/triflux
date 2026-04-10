@@ -1661,6 +1661,23 @@ if (selfRun) {
   const port = parseInt(process.env.TFX_HUB_PORT || "27888", 10);
   const dbPath = process.env.TFX_HUB_DB || undefined;
 
+  const cleanupPidFile = () => {
+    try {
+      unlinkSync(PID_FILE);
+    } catch {}
+  };
+
+  process.on("unhandledRejection", (err) => {
+    hubLog.fatal({ err }, "hub.unhandledRejection");
+    cleanupPidFile();
+    process.exit(1);
+  });
+  process.on("uncaughtException", (err) => {
+    hubLog.fatal({ err }, "hub.uncaughtException");
+    cleanupPidFile();
+    process.exit(1);
+  });
+
   startHub({ port, dbPath })
     .then((info) => {
       const shutdown = async (signal) => {
@@ -1679,6 +1696,7 @@ if (selfRun) {
     })
     .catch((error) => {
       hubLog.fatal({ err: error }, "hub.start_failed");
+      cleanupPidFile();
       process.exit(1);
     });
 }

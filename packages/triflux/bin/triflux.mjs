@@ -1047,14 +1047,13 @@ function cmdSetup(options = {}) {
   }
   {
     const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-    if (claudeGuide.skipped)
+    if (claudeGuide.skipped && claudeGuide.reason !== "global_sync_disabled")
       warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
     else if (
       claudeGuide.action === "created" ||
       claudeGuide.action === "updated"
     )
       ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
-    else ok("CLAUDE.md: 전역 triflux 라우팅 요약 유지");
   }
 
   // 스킬 동기화 (~/.claude/skills/{name}/SKILL.md)
@@ -1847,7 +1846,7 @@ async function cmdDoctor(options = {}) {
       }
       {
         const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-        if (claudeGuide.skipped)
+        if (claudeGuide.skipped && claudeGuide.reason !== "global_sync_disabled")
           warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
         else if (
           claudeGuide.action === "created" ||
