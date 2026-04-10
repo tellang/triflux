@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   detectMultiplexer,
   hasWindowsTerminal,
@@ -29,5 +31,25 @@ describe("session.mjs", () => {
   it("hasWindowsTerminal()은 boolean을 반환해야 한다", () => {
     const hasWt = hasWindowsTerminal();
     assert.equal(typeof hasWt, "boolean");
+  });
+});
+
+const sessionSrc = readFileSync(
+  join(import.meta.dirname, "../../hub/team/session.mjs"),
+  "utf8",
+);
+
+describe("session.mjs wt-manager migration", () => {
+  it("hasWindowsTerminal이 env-detect의 getEnvironment를 사용한다", () => {
+    assert.ok(sessionSrc.includes("getEnvironment"));
+    assert.ok(sessionSrc.includes(".terminal.hasWt"));
+  });
+
+  it("createWtManager를 import한다", () => {
+    assert.ok(sessionSrc.includes('from "./wt-manager.mjs"'));
+  });
+
+  it("wt.exe 직접 호출이 없다", () => {
+    assert.ok(!sessionSrc.match(/(?:spawn|execFile(?:Sync)?)\s*\(\s*["']wt\.exe/));
   });
 });

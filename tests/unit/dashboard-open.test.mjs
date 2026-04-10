@@ -39,3 +39,21 @@ describe("dashboard-open", () => {
     assert.equal(parseWorkerNumber("lead"), null);
   });
 });
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const dashSrc = readFileSync(
+  join(import.meta.dirname, "../../hub/team/dashboard-open.mjs"),
+  "utf8",
+);
+
+describe("dashboard-open wt-manager migration", () => {
+  it("createWtManager를 import한다", () => {
+    assert.ok(dashSrc.includes('from "./wt-manager.mjs"'));
+  });
+
+  it("wt.exe 직접 spawn이 없다", () => {
+    assert.ok(!dashSrc.match(/(?:spawn|execFile(?:Sync)?)\s*\(\s*["']wt\.exe/));
+  });
+});
