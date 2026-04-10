@@ -138,9 +138,7 @@ async function main() {
   // 실측 데이터 추출
   const stdin = await stdinPromise;
   const contextView = buildContextUsageView(stdin, contextSnapshot);
-  const claudeUsage = claudeUsageSnapshot.isStale
-    ? { ...(claudeUsageSnapshot.data || {}), stale: true }
-    : claudeUsageSnapshot.data;
+  const claudeUsage = claudeUsageSnapshot.data;
   const codexEmail = getCodexEmail();
   const geminiEmail = getGeminiEmail();
   const codexBuckets = codexSnapshot.buckets;

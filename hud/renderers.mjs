@@ -263,8 +263,6 @@ export function getMicroLine(
   combinedSvPct,
 ) {
   const ctxView = contextView || buildContextUsageView({}, null);
-  const staleMarker = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
-
   // Claude 5h/1w
   const cF =
     claudeUsage?.fiveHourPercent != null
@@ -319,7 +317,7 @@ export function getMicroLine(
     `${bold(codexWhite("x"))}${dim(":")}${xVal} ` +
     `${bold(geminiBlue("g"))}${dim(":")}${gVal} ` +
     `${dim("sv:")}${sv} ` +
-    `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${staleMarker}`;
+    `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
   return truncateAnsi(line, cols);
 }
 
@@ -334,8 +332,6 @@ export function getClaudeRows(
 ) {
   const ctxView = contextView || buildContextUsageView({}, null);
   const prefix = `${bold(claudeOrange("c"))}:`;
-  const staleMarker = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
-
   // 절약 퍼센트
   const svStr = formatSvPct(combinedSvPct || 0);
   const svSuffix = `${dim("sv:")}${svStr}`;
@@ -388,18 +384,18 @@ export function getClaudeRows(
       hasData && weeklyPercent != null
         ? colorByProvider(weeklyPercent, `${weeklyPercent}%`, claudeOrange)
         : dim("--");
-    const quotaSection = `${fShort}${dim("/")}${wShort}${staleMarker}`;
+    const quotaSection = `${fShort}${dim("/")}${wShort}`;
     return [{ prefix, left: quotaSection, right: "" }];
   }
 
   if (currentTier === "minimal") {
-    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${staleMarker}`;
+    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}`;
     const right = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
     return [{ prefix, left: quotaSection, right }];
   }
 
   if (currentTier === "compact") {
-    const quotaSection = `${dim("5h:")}${fStr} ${dim(fTime)} ${dim("1w:")}${wStr} ${dim(wTime)}${staleMarker}`;
+    const quotaSection = `${dim("5h:")}${fStr} ${dim(fTime)} ${dim("1w:")}${wStr} ${dim(wTime)}`;
     const warning = ctxView.warningTag
       ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
       : "";
@@ -408,7 +404,7 @@ export function getClaudeRows(
   }
 
   // full tier (>= 120 cols)
-  const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}${staleMarker}`;
+  const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}`;
   const warning = ctxView.warningTag
     ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
     : "";
