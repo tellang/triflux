@@ -341,6 +341,11 @@ export function createWtManager(opts = {}) {
 
     const shellPath = String(opts.profile || env?.shell?.path || "pwsh.exe");
 
+    // 프로필이 지정된 경우 WT settings.json에 존재하는지 보장
+    if (tab.profile) {
+      try { ensureWtProfile(); } catch { /* 프로필 보장 실패해도 진행 */ }
+    }
+
     pruneDeadTabs();
 
     if (tabs.has(title)) {
@@ -514,6 +519,11 @@ export function createWtManager(opts = {}) {
    * @param {number} [opts.size] — 퍼센트 (0-100)
    */
   async function splitPane(splitOpts = {}) {
+    // 프로필이 지정된 경우 WT settings.json에 존재하는지 보장
+    if (splitOpts.profile) {
+      try { ensureWtProfile(); } catch { /* 프로필 보장 실패해도 진행 */ }
+    }
+
     const direction = splitOpts.direction === "H" ? "-H" : "-V";
     const args = ["-w", windowName, "sp", direction];
 
