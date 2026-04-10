@@ -1,70 +1,124 @@
 ---
 name: tfx-hub
 description: >
-  tfx-hub MCP 메시지 버스 관리. CLI 에이전트 간 실시간 통신 허브를 시작/중지/상태확인하고,
-  hub 도메인의 자유형 작업도 처리합니다.
+  tfx-hub MCP 메시지 버스 관리. AskUserQuestion 기반 인터랙티브 UI로
+  허브 시작/중지/상태확인, MCP 서버 관리, 에이전트 조회, 파이프라인 조회를 수행합니다.
   Use when: hub, 허브, 메시지 버스, message bus, 브릿지, bridge, MCP 서버 관리, 에이전트 통신
 triggers:
   - tfx-hub
-argument-hint: "<start|stop|status|자유형 작업 설명>"
+argument-hint: "<start|stop|status|mcp|자유형 작업 설명>"
 ---
 
-# tfx-hub — MCP 메시지 버스 관리 + 개방형 작업
+# tfx-hub — MCP 메시지 버스 관리
 
-> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
-> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
-
-
-> **인프라**: 다른 스킬이 내부적으로 사용. 직접 호출할 필요 없음.
-> CLI 에이전트(Codex/Gemini/Claude) 간 실시간 메시지 허브를 관리합니다.
-> **커맨드 매칭 + fallthrough**: start/stop/status에 매칭되면 즉시 실행,
-> 매칭 안 되면 **hub 도메인 컨텍스트를 활용한 범용 작업**으로 처리합니다.
+> **ARGUMENTS 처리**: `ARGUMENTS: <값>`과 함께 호출되면 해당 값을 입력으로 사용한다.
+> start/stop/status/mcp에 매칭되면 즉시 실행, 나머지는 메인 메뉴를 표시한다.
 
 ## 입력 해석 규칙
 
 ```
-/tfx-hub start          → 커맨드 매칭 → 허브 시작
-/tfx-hub stop           → 커맨드 매칭 → 허브 중지
-/tfx-hub status         → 커맨드 매칭 → 상태 확인
-/tfx-hub 테스트해줘      → fallthrough → hub 관련 범용 작업으로 처리
-/tfx-hub 문서 저장해     → fallthrough → hub 관련 범용 작업으로 처리
-/tfx-hub 브릿지 분석해   → fallthrough → hub 관련 범용 작업으로 처리
+/tfx-hub start   → 즉시 실행: 허브 시작
+/tfx-hub stop    → 즉시 실행: 허브 중지
+/tfx-hub status  → 즉시 실행: 상태 확인
+/tfx-hub mcp     → 즉시 실행: MCP 서버 목록
+/tfx-hub         → 메인 메뉴 표시
+/tfx-hub 뭔가    → fallthrough: hub 도메인 범용 작업
 ```
 
-**fallthrough 규칙**: 인자가 start/stop/status/--port 등 커맨드 키워드에 매칭되지 않으면,
-사용자의 입력을 **hub/브릿지/메시지버스 도메인의 자유형 작업**으로 해석한다.
+## 워크플로우
 
-fallthrough 라우팅:
+### Step 0: 허브 상태 사전 확인
+
+메뉴 표시 전 허브 실행 상태를 먼저 확인한다:
+
 ```bash
-# tfx-route.sh 경유 (권장)
-Bash("bash ~/.claude/scripts/tfx-route.sh {에이전트} '{hub 컨텍스트 + 작업}' {mcp_profile}")
-
-# codex 직접 호출 시 — 반드시 exec 서브커맨드 포함
-Bash("codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check '{작업}'")
-Bash("codex --profile gpt54_xhigh exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check '{작업}'")
-#          ↑ --profile은 exec 앞에, --skip-git-repo-check은 exec 뒤에
-
-# Claude 네이티브 (탐색/검증)
-Agent(subagent_type="oh-my-claudecode:explore", prompt="{작업}")
+Bash("curl -sf http://127.0.0.1:27888/status 2>/dev/null | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log(JSON.stringify({running:true, uptime_ms:d.hub.uptime_ms, sessions:d.sessions, queues:d.queues, assigns:d.assigns}))\" 2>/dev/null || echo '{\"running\":false}'")
 ```
 
-## 커맨드
+결과를 `hubState` 변수로 저장한다.
 
-### start — 허브 시작
+### Step 1: 메인 메뉴 (AskUserQuestion)
+
+```
+question: "tfx-hub 관리 — 어떤 작업을 수행하시겠습니까?"
+header: "tfx-hub {hubState.running ? '● 실행 중' : '○ 중지됨'} | 세션: {sessions} | 큐: urgent {queues.urgent_depth} / normal {queues.normal_depth} / DLQ {queues.dlq_depth}"
+options:
+  - label: "허브 상태 보기"
+    description: "상세 상태 — 에이전트, 큐, 파이프라인, assign 현황"
+  - label: "허브 시작"
+    description: "MCP 서버를 :27888에서 시작"
+  - label: "허브 중지"
+    description: "실행 중인 허브 프로세스 종료"
+  - label: "MCP 서버 관리"
+    description: "등록된 MCP 서버 목록 조회, 추가, 제거"
+  - label: "파이프라인 조회"
+    description: "활성 파이프라인 목록 + 상태"
+  - label: "Assign 작업 조회"
+    description: "비동기 작업 목록 + 상태"
+  - label: "DLQ 관리"
+    description: "Dead Letter Queue 조회 + 재시도/삭제"
+```
+
+허브가 중지됨 상태라면 "허브 시작" 외 항목 선택 시 "허브가 실행 중이 아닙니다. 먼저 시작하시겠습니까?" 확인을 표시한다.
+
+### Step 2: 선택에 따른 분기
+
+#### "허브 상태 보기"
+
+```bash
+Bash("curl -s http://127.0.0.1:27888/status 2>/dev/null || echo '{\"error\":\"hub 미실행\"}'")
+```
+
+결과를 파싱하여 표시:
+
+```markdown
+## Hub Status
+
+| 항목 | 값 |
+|------|-----|
+| 상태 | ● healthy |
+| Uptime | 22m 3s |
+| PID | 24504 |
+| 포트 | 27888 |
+| 인증 | localhost-only |
+| 세션 | 0 |
+
+### 큐
+| urgent | normal | DLQ |
+|--------|--------|-----|
+| 0      | 0      | 10  |
+
+### Assign
+| queued | running | failed | timed_out |
+|--------|---------|--------|-----------|
+| 0      | 0       | 0      | 1         |
+```
+
+표시 후 메인 메뉴로 돌아갈지 AskUserQuestion:
+```
+question: "추가 작업이 있으십니까?"
+options:
+  - label: "메인 메뉴로"
+  - label: "종료"
+```
+
+#### "허브 시작"
 
 ```bash
 Bash("node hub/server.mjs", run_in_background=true)
 ```
 
-- Streamable HTTP MCP 서버를 `http://127.0.0.1:27888/mcp` 에서 시작
-- SQLite WAL DB: `~/.claude/cache/tfx-hub/state.db`
-- PID 파일: `~/.claude/cache/tfx-hub/hub.pid`
-- 환경변수: `TFX_HUB_PORT` (포트), `TFX_HUB_DB` (DB 경로)
+시작 후 2초 대기하여 상태 확인:
+```bash
+Bash("sleep 2 && curl -sf http://127.0.0.1:27888/status >/dev/null 2>&1 && echo 'OK' || echo 'FAIL'")
+```
 
-### stop — 허브 중지
+- OK → "허브가 시작되었습니다. http://127.0.0.1:27888"
+- FAIL → "허브 시작에 실패했습니다. `node hub/server.mjs`를 직접 실행해 보세요."
+
+#### "허브 중지"
 
 ```bash
-# PID 파일에서 프로세스 ID 읽어서 종료
 Bash("node -e \"
   const fs = require('fs');
   const path = require('path');
@@ -79,31 +133,179 @@ Bash("node -e \"
 \"")
 ```
 
-### status — 상태 확인
+#### "MCP 서버 관리"
+
+먼저 현재 등록된 MCP 서버 목록을 수집:
 
 ```bash
-# HTTP 상태 엔드포인트 조회
-Bash("curl -s http://127.0.0.1:27888/status 2>/dev/null || echo '{\"error\":\"hub 미실행\"}'")
+Bash("claude mcp list 2>/dev/null")
 ```
 
-## 각 CLI 등록 방법
+결과를 파싱하여 테이블로 표시:
+
+```markdown
+## 등록된 MCP 서버
+
+| # | 이름 | 상태 | 명령어 |
+|---|------|------|--------|
+| 1 | context7 | ✓ Connected | cmd /c npx -y @upstash/context7-mcp@latest |
+| 2 | exa | ✓ Connected | cmd /c npx -y exa-mcp-server |
+| 3 | powerpoint | ✓ Connected | uvx ppt-mcp |
+| ... | ... | ... | ... |
+```
+
+그 후 AskUserQuestion:
+```
+question: "MCP 서버 관리 — 어떤 작업을 하시겠습니까?"
+header: "MCP Servers ({connected}개 연결 / {failed}개 실패 / {disabled}개 비활성)"
+options:
+  - label: "서버 제거"
+    description: "등록된 서버를 선택하여 제거"
+  - label: "서버 추가"
+    description: "새 MCP 서버 등록"
+  - label: "실패한 서버 재시작"
+    description: "연결 실패 서버를 재시작 시도"
+  - label: "뒤로"
+    description: "메인 메뉴로 돌아가기"
+```
+
+##### "서버 제거" 선택 시
+
+AskUserQuestion (multiSelect):
+```
+question: "제거할 서버를 선택하세요"
+header: "MCP 서버 제거"
+options:
+  (등록된 서버를 각각 옵션으로 나열)
+  - label: "powerpoint"
+    description: "[local] uvx ppt-mcp — ✓ Connected"
+  - label: "stability-ai"
+    description: "[local] npx -y mcp-server-stability-ai — ✘ Failed"
+  ...
+multiSelect: true
+```
+
+선택된 서버들을 제거:
+```bash
+Bash("claude mcp remove '{서버명}' -s {scope}")
+```
+
+제거 후 결과 표시.
+
+##### "서버 추가" 선택 시
+
+AskUserQuestion:
+```
+question: "추가할 서버 유형을 선택하세요"
+header: "MCP 서버 추가"
+options:
+  - label: "stdio (npx/uvx)"
+    description: "npx, uvx 등 stdio 기반 서버"
+  - label: "SSE/HTTP"
+    description: "URL 기반 원격 서버"
+```
+
+stdio 선택 시 AskUserQuestion:
+```
+question: "서버 이름과 명령어를 입력하세요 (예: myserver -- cmd /c npx -y my-mcp-server)"
+header: "stdio 서버 추가"
+```
+
+입력값을 파싱하여:
+```bash
+Bash("claude mcp add '{name}' -s local -- {command}")
+```
+
+SSE/HTTP 선택 시 AskUserQuestion:
+```
+question: "서버 이름과 URL을 입력하세요 (예: myserver http://localhost:8080/mcp)"
+header: "HTTP 서버 추가"
+```
+
+입력값을 파싱하여:
+```bash
+Bash("claude mcp add --transport http '{name}' '{url}' -s local")
+```
+
+##### "실패한 서버 재시작" 선택 시
+
+`claude mcp list` 결과에서 Failed 서버만 필터:
+
+```
+question: "재시작할 서버를 선택하세요"
+header: "실패한 MCP 서버"
+options:
+  (Failed 서버만 나열)
+multiSelect: true
+```
+
+선택된 서버를 제거 후 재등록하여 재시작.
+
+#### "파이프라인 조회"
+
+```bash
+Bash("curl -s http://127.0.0.1:27888/bridge/pipeline/list -X POST -H 'Content-Type: application/json' -d '{}' 2>/dev/null || echo '{\"error\":\"hub 미실행\"}'")
+```
+
+결과를 테이블로 표시.
+
+#### "Assign 작업 조회"
+
+```bash
+Bash("curl -s http://127.0.0.1:27888/bridge/assign/status -X POST -H 'Content-Type: application/json' -d '{\"list\":true}' 2>/dev/null || echo '{\"error\":\"hub 미실행\"}'")
+```
+
+결과를 테이블로 표시. 실패 작업이 있으면 재시도 옵션 제공.
+
+#### "DLQ 관리"
+
+```bash
+Bash("curl -s http://127.0.0.1:27888/status 2>/dev/null | node -e \"const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')); console.log('DLQ depth: '+d.queues.dlq_depth)\"")
+```
+
+DLQ가 비어있으면 "DLQ가 비어있습니다." 표시.
+내용이 있으면 AskUserQuestion:
+```
+question: "DLQ 처리 — 어떻게 하시겠습니까?"
+header: "Dead Letter Queue ({count}건)"
+options:
+  - label: "전체 조회"
+    description: "DLQ 메시지 목록 표시"
+  - label: "전체 재시도"
+    description: "모든 DLQ 메시지를 다시 큐에 넣기"
+  - label: "전체 삭제"
+    description: "DLQ 비우기"
+  - label: "뒤로"
+```
+
+## fallthrough 라우팅
+
+메인 메뉴 항목에 매칭되지 않는 자유형 입력은 hub 도메인 컨텍스트 범용 작업으로 처리:
+
+```bash
+# tfx-route.sh 경유 (권장)
+Bash("bash ~/.claude/scripts/tfx-route.sh {에이전트} '{hub 컨텍스트 + 작업}' {mcp_profile}")
+
+# Claude 네이티브 (탐색/검증)
+Agent(subagent_type="oh-my-claudecode:explore", prompt="{작업}")
+```
+
+## CLI 등록 방법
 
 허브 시작 후 각 CLI에 MCP 서버로 등록:
 
 ```bash
-# Codex (수동 opt-in 예시)
-# triflux는 config.json을 자동 관리하며, standalone Codex 노이즈 방지를 위해
-# 사전 등록은 disabled로 두고 `tfx hub start` 이후에만 enabled로 전환한다.
+# Claude
+claude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp
+
+# Codex
 codex mcp add tfx-hub --url http://127.0.0.1:27888/mcp
 
 # Gemini (settings.json)
 # mcpServers.tfx-hub.url = "http://127.0.0.1:27888/mcp"
-
-# Claude
-claude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp
 ```
 
-## MCP 도구 (20개)
+## MCP 도구 레퍼런스 (20개)
 
 ### Core — 기본 통신
 
@@ -150,14 +352,25 @@ claude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp
 | `request_human_input` | 사용자 입력 요청 (CAPTCHA/승인/자격증명/선택/텍스트) |
 | `submit_human_input` | 사용자 입력 응답 (accept/decline/cancel) |
 
-## 브릿지 REST 엔드포인트 (4개)
+## CLI 대응
 
-| 엔드포인트 | 설명 |
-|-----------|------|
-| `POST /bridge/register` | 에이전트 등록 (프로세스 수명 기반 lease) |
-| `POST /bridge/result` | 결과 발행 (topic fanout) |
-| `POST /bridge/context` | 선행 컨텍스트 폴링 (auto_ack) |
-| `POST /bridge/deregister` | 에이전트 offline 마킹 |
+| 스킬 UI | CLI 명령 |
+|---------|---------|
+| 허브 상태 보기 | `curl http://127.0.0.1:27888/status` |
+| 허브 시작 | `node hub/server.mjs` |
+| 허브 중지 | PID 파일에서 kill |
+| MCP 서버 목록 | `claude mcp list` |
+| MCP 서버 추가 | `claude mcp add ...` |
+| MCP 서버 제거 | `claude mcp remove ...` |
+
+## 에러 처리
+
+| 상황 | 처리 |
+|------|------|
+| 허브 미실행 상태에서 조회 | "허브가 실행 중이 아닙니다. 시작하시겠습니까?" AskUserQuestion |
+| curl 타임아웃 | "허브가 응답하지 않습니다. PID 파일을 확인하세요." |
+| MCP 서버 추가 실패 | 에러 메시지 표시 + "다시 시도" 옵션 |
+| PID 파일 없음 | "허브가 실행 중이 아닙니다." |
 
 ## 프로젝트 구조
 
@@ -170,41 +383,16 @@ hub/
 ├── hitl.mjs              # Human-in-the-Loop 매니저
 ├── bridge.mjs            # tfx-route.sh ↔ hub 브릿지 CLI
 ├── schema.sql            # DB 스키마
-├── paths.mjs             # 경로 상수 (PID 파일, DB 경로 등)
-├── pipe.mjs              # Named Pipe 서버 (push 구독 채널)
-├── assign-callbacks.mjs  # assign job 콜백 처리
-├── intent.mjs            # 인텐트 파싱
-├── reflexion.mjs         # reflexion 루프
-├── research.mjs          # 리서치 프록시
-├── token-mode.mjs        # 토큰 모드 관리
+├── paths.mjs             # 경로 상수
+├── pipe.mjs              # Named Pipe 서버
+├── assign-callbacks.mjs  # assign job 콜백
 ├── pipeline/             # 파이프라인 엔진
-│   ├── index.mjs         # createPipeline() 팩토리
-│   ├── state.mjs         # 파이프라인 상태 CRUD
-│   ├── transitions.mjs   # 전이 규칙
-│   └── gates/            # HITL 게이트 (selfcheck, confidence)
 ├── delegator/            # 작업 위임 레이어
-│   ├── index.mjs
-│   ├── service.mjs
-│   ├── contracts.mjs
-│   └── tool-definitions.mjs
 ├── team/                 # Claude Native Teams 통합
-│   ├── nativeProxy.mjs   # Teams MCP 프록시
-│   ├── orchestrator.mjs  # 팀 오케스트레이터
-│   ├── session.mjs       # 세션 관리
-│   ├── dashboard.mjs     # TUI 대시보드
-│   ├── tui.mjs           # TUI 렌더러
-│   └── cli/              # tfx team CLI 커맨드
 ├── workers/              # CLI 워커 어댑터
-│   ├── factory.mjs
-│   ├── claude-worker.mjs
-│   ├── codex-mcp.mjs
-│   ├── gemini-worker.mjs
-│   └── delegator-mcp.mjs
-├── middleware/           # 요청 미들웨어
-│   └── request-logger.mjs
+├── middleware/            # 요청 미들웨어
 ├── quality/              # 품질 검사
-│   └── deslop.mjs
-└── public/               # 정적 자산 (대시보드 HTML, 트레이 아이콘)
+└── public/               # 정적 자산
 ```
 
 ## 상태
