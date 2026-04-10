@@ -37,27 +37,22 @@
 
 ## 빠른 시작
 
-### 1. 설치
+**Claude Code** (권장):
 
-**Claude Code 플러그인** (권장):
-
-```bash
-claude plugin add triflux
+```
+/plugin marketplace add tellang/triflux
+/plugin install triflux@tellang
 ```
 
-**npm 글로벌**:
+**npm**:
 
 ```bash
 npm install -g triflux
 ```
 
-### 2. 설정
+`tfx setup`으로 환경을 설정하세요.
 
-```bash
-tfx setup
-```
-
-### 3. 사용법
+### 사용법
 
 ```bash
 # Light — 단일 모델로 빠르게 실행
@@ -292,27 +287,22 @@ graph TD
 
 ## 빠른 시작
 
-### 1. 설치
+**Claude Code** (권장):
 
-**Claude Code 플러그인** (권장):
-
-```bash
-claude plugin add triflux
+```
+/plugin marketplace add tellang/triflux
+/plugin install triflux@tellang
 ```
 
-**npm 글로벌**:
+**npm**:
 
 ```bash
 npm install -g triflux
 ```
 
-### 2. 설정
+`tfx setup`으로 환경을 설정하세요.
 
-```bash
-tfx setup
-```
-
-### 3. 사용법
+### 사용법
 
 ```bash
 # Light — 단일 모델로 빠르게 실행
