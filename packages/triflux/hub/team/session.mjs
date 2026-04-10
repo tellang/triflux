@@ -244,53 +244,6 @@ export function closeWtSession(opts = {}) {
 }
 
 /**
- * Windows Terminal 독립 모드 세션 생성 (비동기)
- * @param {string} sessionName
- * @param {object} opts
- * @param {'1xN'|'Nx1'} opts.layout
- * @param {Array<{title:string,command:string,cwd?:string}>} opts.paneCommands
- * @returns {Promise<{ sessionName: string, panes: string[], titles: string[], layout: '1xN'|'Nx1', paneCount: number, anchorPane: string }>}
- */
-export async function createWtSession(sessionName, opts = {}) {
-  const { layout = "1xN", paneCommands = [] } = opts;
-
-  if (!hasWindowsTerminalSession()) {
-    throw new Error("WT_SESSION 미감지");
-  }
-  if (!getEnvironment().terminal.hasWt) {
-    throw new Error("wt.exe 미발견");
-  }
-  if (!Array.isArray(paneCommands) || paneCommands.length === 0) {
-    throw new Error("paneCommands가 비어 있음");
-  }
-
-  const wtManager = createWtManager();
-  const panes = [];
-  const titles = [];
-
-  for (let i = 0; i < paneCommands.length; i++) {
-    const pane = paneCommands[i] || {};
-    const title = pane.title || `${sessionName}-${i + 1}`;
-    const command = String(pane.command || "").trim();
-    const cwd = pane.cwd || process.cwd();
-    if (!command) continue;
-
-    await wtManager.createTab({ title, command, cwd });
-    panes.push(`wt:${i}`);
-    titles.push(title);
-  }
-
-  return {
-    sessionName,
-    panes,
-    titles,
-    layout: layout === "Nx1" ? "Nx1" : "1xN",
-    paneCount: panes.length,
-    anchorPane: "wt:anchor",
-  };
-}
-
-/**
  * tmux 세션 생성 + 레이아웃 분할
  * @param {string} sessionName — 세션 이름
  * @param {object} opts

@@ -1,7 +1,7 @@
 // hub/team/session.mjs — tmux/psmux/wt 세션 생명주기 관리
 // 의존성: child_process (Node.js 내장)만 사용
 import { execSync, spawnSync } from "node:child_process";
-import { getEnvironment } from "../lib/env-detect.mjs";
+import { getEnvironment } from "@triflux/core/hub/lib/env-detect.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 import {
   attachPsmuxSession,
@@ -241,53 +241,6 @@ export function focusWtPane(paneIndex, opts = {}) {
 export function closeWtSession(opts = {}) {
   // wt() 제거로 인해 일시 비활성화 (탭 기반 전환 필요)
   return 0;
-}
-
-/**
- * Windows Terminal 독립 모드 세션 생성 (비동기)
- * @param {string} sessionName
- * @param {object} opts
- * @param {'1xN'|'Nx1'} opts.layout
- * @param {Array<{title:string,command:string,cwd?:string}>} opts.paneCommands
- * @returns {Promise<{ sessionName: string, panes: string[], titles: string[], layout: '1xN'|'Nx1', paneCount: number, anchorPane: string }>}
- */
-export async function createWtSession(sessionName, opts = {}) {
-  const { layout = "1xN", paneCommands = [] } = opts;
-
-  if (!hasWindowsTerminalSession()) {
-    throw new Error("WT_SESSION 미감지");
-  }
-  if (!getEnvironment().terminal.hasWt) {
-    throw new Error("wt.exe 미발견");
-  }
-  if (!Array.isArray(paneCommands) || paneCommands.length === 0) {
-    throw new Error("paneCommands가 비어 있음");
-  }
-
-  const wtManager = createWtManager();
-  const panes = [];
-  const titles = [];
-
-  for (let i = 0; i < paneCommands.length; i++) {
-    const pane = paneCommands[i] || {};
-    const title = pane.title || `${sessionName}-${i + 1}`;
-    const command = String(pane.command || "").trim();
-    const cwd = pane.cwd || process.cwd();
-    if (!command) continue;
-
-    await wtManager.createTab({ title, command, cwd });
-    panes.push(`wt:${i}`);
-    titles.push(title);
-  }
-
-  return {
-    sessionName,
-    panes,
-    titles,
-    layout: layout === "Nx1" ? "Nx1" : "1xN",
-    paneCount: panes.length,
-    anchorPane: "wt:anchor",
-  };
 }
 
 /**

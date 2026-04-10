@@ -19,7 +19,7 @@ export async function startWtTeam({
     warn(`wt 모드에서 ${layout} 레이아웃은 미지원 — ${effectiveLayout}로 대체`);
   console.log(`  레이아웃: ${effectiveLayout} (${paneCount} panes)`);
 
-  const session = createWtSession(sessionId, {
+  const session = await createWtSession(sessionId, {
     layout: effectiveLayout,
     paneCommands: [
       { title: `${sessionId}-lead`, command: buildCliCommand(lead) },

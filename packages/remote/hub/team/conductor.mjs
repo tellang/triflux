@@ -28,7 +28,7 @@ import {
 } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
-import { buildLauncher } from "./launcher-template.mjs";
+import { buildLauncher, getAdapter } from "./launcher-template.mjs";
 import { createRemoteProbe } from "./remote-probe.mjs";
 
 /** 세션 상태 */
@@ -335,7 +335,11 @@ export function createConductor(opts = {}) {
       const backoffMs = Math.min(1000 * 2 ** (session.restarts - 1), 30_000);
       session._respawnTimer = setTimeout(() => {
         session._respawnTimer = null;
-        void respawnSession(session);
+        if (session.config.remote) {
+          startRemoteSession(session);
+        } else {
+          void respawnSession(session);
+        }
       }, backoffMs);
     } else {
       transition(session, STATES.DEAD, `maxRestarts(${maxRestarts})_exceeded`);
@@ -399,6 +403,10 @@ export function createConductor(opts = {}) {
     session.child = child;
     session.outPath = outPath;
     session.errPath = errPath;
+
+    // 로컬 세션: 프롬프트는 CLI args로 전달되므로 stdin 즉시 닫기
+    // (codex가 stdin pipe 감지 시 "Reading additional input..." 대기 방지)
+    if (child.stdin) child.stdin.end();
 
     eventLog.append("spawn", {
       session: session.id,
@@ -510,40 +518,159 @@ export function createConductor(opts = {}) {
   }
 
   /**
-   * 원격 세션 시작 — child process 대신 SSH capture-pane 폴링.
-   * 원격 세션은 remote-spawn.mjs가 이미 psmux 세션을 생성한 상태를 가정.
+   * 원격 세션 시작 — SSH child process로 직접 실행.
+   * psmux 불필요. 원격 호스트에서 claude -p 를 SSH 경유로 실행하고
+   * 로컬 child process로 관리한다.
    */
   function startRemoteSession(session) {
     transition(session, STATES.STARTING, "remote_initial");
 
-    const { host, paneTarget, sessionName } = session.config;
-    const resolvedPane = paneTarget || `${sessionName || session.id}:0.0`;
-    const resolvedSessionName = sessionName || session.id;
+    const { host, prompt, agent, workdir: remoteWorkdir } = session.config;
+
+    // SSH args를 배열로 구성하여 셸 이스케이프 문제 회피
+    const cdPrefix = remoteWorkdir ? `cd ${remoteWorkdir} && ` : "";
+
+    let remoteBin;
+    if (agent === "claude") {
+      remoteBin = "claude --output-format text";
+    } else if (agent === "gemini") {
+      remoteBin = "gemini -y";
+    } else {
+      remoteBin = "codex exec -s danger-full-access --dangerously-bypass-approvals-and-sandbox";
+    }
+
+    // prompt는 stdin으로 전달 — 셸 이스케이프 문제 완전 회피
+    const sshArgs = [
+      "-o", "ConnectTimeout=30",
+      "-o", "BatchMode=yes",
+      host,
+      `${cdPrefix}${remoteBin}`,
+    ];
+
+    const sshCmd = `ssh ${sshArgs.join(" ")}`;
 
     eventLog.append("remote_start", {
       session: session.id,
       host,
-      paneTarget: resolvedPane,
-      sessionName: resolvedSessionName,
+      command: sshCmd,
     });
 
+    const outPath = join(logsDir, `${session.id}.out.log`);
+    const errPath = join(logsDir, `${session.id}.err.log`);
+    const outWs = createWriteStream(outPath, { flags: "a" });
+    const errWs = createWriteStream(errPath, { flags: "a" });
+
+    let child;
+    try {
+      child = spawn("ssh", sshArgs, {
+        env: process.env,
+        reason: `conductor:remoteSession:${session.id}`,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      });
+    } catch (err) {
+      eventLog.append("spawn_error", {
+        session: session.id,
+        error: err.message,
+      });
+      handleFailure(session, `spawn_error:${err.message}`);
+      return;
+    }
+
+    session.child = child;
+    session.outPath = outPath;
+    session.errPath = errPath;
     session.alive = true;
 
-    // Remote health probe 설정
-    session.probe?.stop();
-    const probe = createRemoteProbe(
-      {
+    // stdin으로 프롬프트 전달 — 셸 이스케이프 완전 우회
+    if (child.stdin) {
+      child.stdin.write(prompt);
+      child.stdin.end();
+    }
+
+    eventLog.append("spawn", {
+      session: session.id,
+      agent,
+      pid: child.pid,
+      command: sshCmd,
+      remote: true,
+      host,
+    });
+
+    // stdout/stderr 추적
+    let outputBytes = 0;
+    const trackOutput = (buf) => {
+      outputBytes += buf.length;
+    };
+
+    child.stdout?.on("data", (buf) => {
+      trackOutput(buf);
+      outWs.write(buf);
+    });
+    child.stderr?.on("data", (buf) => {
+      trackOutput(buf);
+      errWs.write(buf);
+    });
+
+    // 상태를 healthy로 전이
+    transition(session, STATES.HEALTHY, "remote_ssh_spawned");
+
+    // Health probe — 주기적으로 출력 변화 체크 (F3 stall 감지)
+    let lastBytes = 0;
+    let stallChecks = 0;
+    const stallThreshold = probeOpts.stallChecks || 8; // 8 * intervalMs = stall
+    const healthInterval = setInterval(() => {
+      if (TERMINAL_STATES.has(session.state)) {
+        clearInterval(healthInterval);
+        return;
+      }
+      if (outputBytes > lastBytes) {
+        lastBytes = outputBytes;
+        stallChecks = 0;
+        if (session.state !== STATES.HEALTHY) {
+          transition(session, STATES.HEALTHY, "output_advancing");
+        }
+      } else {
+        stallChecks++;
+        if (stallChecks >= stallThreshold && session.state === STATES.HEALTHY) {
+          transition(session, STATES.STALLED, "remote_no_output");
+        }
+      }
+    }, probeOpts.intervalMs || 5000);
+
+    // exit 핸들러
+    child.once("exit", (code) => {
+      clearInterval(healthInterval);
+      outWs.end();
+      errWs.end();
+      session.alive = false;
+
+      eventLog.append("remote_exit", {
+        session: session.id,
+        code,
+        outputBytes,
         host,
-        paneTarget: resolvedPane,
-        sessionName: resolvedSessionName,
-      },
-      {
-        ...probeOpts,
-        onProbe: (result) => handleProbeResult(session, result),
-      },
-    );
-    session.probe = probe;
-    probe.start();
+      });
+
+      if (code === 0) {
+        transition(session, STATES.COMPLETED, `exit_${code}`);
+        emitter.emit("completed", { sessionId: session.id });
+        maybeAutoShutdown();
+      } else {
+        handleFailure(session, `remote_exit_${code}`);
+      }
+    });
+
+    child.once("error", (err) => {
+      clearInterval(healthInterval);
+      outWs.end();
+      errWs.end();
+      eventLog.append("spawn_error", {
+        session: session.id,
+        error: err.message,
+      });
+      handleFailure(session, `spawn_error:${err.message}`);
+    });
   }
 
   /**

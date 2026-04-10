@@ -2,7 +2,8 @@
 // virtual row buffer 기반. dirty-row만 갱신. isTTY 아닐 때 append-only fallback.
 // Tier1(상단 고정) / Tier2(worker rail) / Tier3(focus pane) 3단 계층.
 
-import { execFile as _execFile } from "../lib/spawn-trace.mjs";
+import { createWtManager } from "./wt-manager.mjs";
+import { getEnvironment } from "../lib/env-detect.mjs";
 import {
   altScreenOff,
   altScreenOn,
@@ -155,41 +156,23 @@ export function buildDashboardAttachRequest(worker, opts = {}) {
       `${host}:${worker.role || sessionName}`,
       `${host}:${sessionName}`,
     );
+    const command = `ssh ${worker.sshUser}@${ip} -t "psmux attach-session -t ${sessionName}"`;
     return Object.freeze({
       kind: "remote",
       sessionName,
       title,
-      args: Object.freeze([
-        "-w",
-        "0",
-        "nt",
-        "--title",
-        title,
-        "--",
-        "ssh",
-        `${worker.sshUser}@${ip}`,
-        "-t",
-        `psmux attach-session -t ${sessionName}`,
-      ]),
+      command,
     });
   }
 
   const attachSpec = resolveAttach(sessionName);
   const title = sanitizeAttachTitle(worker?.role || sessionName, sessionName);
+  const commandParts = [attachSpec.command, ...attachSpec.args];
   return Object.freeze({
     kind: "local",
     sessionName,
     title,
-    args: Object.freeze([
-      "-w",
-      "0",
-      "nt",
-      "--title",
-      title,
-      "--",
-      attachSpec.command,
-      ...attachSpec.args,
-    ]),
+    command: commandParts.join(" "),
   });
 }
 
@@ -1193,21 +1176,12 @@ export function createLogDashboard(opts = {}) {
   const now = deps.now || Date.now;
   const setTimeoutFn = deps.setTimeout || setTimeout;
   const clearTimeoutFn = deps.clearTimeout || clearTimeout;
-  const execFileFn = deps.execFile || _execFile;
   const openTab =
     deps.openTab ||
-    ((request) =>
-      new Promise((resolve, reject) => {
-        execFileFn(
-          "wt.exe",
-          request.args,
-          { detached: true, stdio: "ignore", windowsHide: false },
-          (error) => {
-            if (error) reject(error);
-            else resolve();
-          },
-        );
-      }));
+    ((request) => {
+      const wtm = createWtManager();
+      return wtm.createTab({ title: request.title, command: request.command });
+    });
   const attachLimiter =
     deps.attachLimiter ||
     createTransientTabLimiter({

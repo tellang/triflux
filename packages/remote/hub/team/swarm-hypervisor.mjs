@@ -21,6 +21,15 @@ import { probeRemoteEnv, resolveRemoteDir } from "./remote-session.mjs";
 import { createSwarmLocks } from "./swarm-locks.mjs";
 import { fetchRemoteShard } from "./worktree-lifecycle.mjs";
 
+let ensureHubAliveFn = null;
+try {
+  ({ ensureHubAlive: ensureHubAliveFn } = await import(
+    "./cli/services/hub-client.mjs"
+  ));
+} catch {
+  // hub-client 미설치 환경 — Hub 수동 관리 필요
+}
+
 let importedCreateRegistry = null;
 let meshRegistryImportError = null;
 try {
@@ -169,15 +178,15 @@ export function createSwarmHypervisor(opts) {
       mcpServers: shard.mcp,
     };
 
-    // Remote shard: add conductor remote fields
+    // Remote shard: use host's default_dir from hosts.json
     if (shard.host && shard._remoteEnv) {
-      const remoteDir = resolveRemoteDir(workdir, shard._remoteEnv);
+      const hostConfig = getHostConfig(shard.host);
+      const remoteSrc = hostConfig?.default_dir || workdir;
+      const remoteDir = resolveRemoteDir(remoteSrc, shard._remoteEnv);
       return {
         ...config,
         remote: true,
         host: shard.host,
-        sessionName: `swarm-${shard.name}-${Date.now()}`,
-        paneTarget: `swarm-${shard.name}-${Date.now()}:0.0`,
         workdir: remoteDir,
       };
     }
@@ -186,6 +195,9 @@ export function createSwarmHypervisor(opts) {
   }
 
   function launchShard(shard, isRedundant = false) {
+    // Clone frozen shard so we can attach mutable runtime state (_remoteEnv)
+    shard = { ...shard };
+
     const shardLogsDir = join(
       logsDir,
       isRedundant ? `${shard.name}-redundant` : shard.name,
@@ -615,12 +627,54 @@ export function createSwarmHypervisor(opts) {
    * @param {SwarmPlan} swarmPlan — from planSwarm()
    * @returns {SwarmStatus}
    */
+  /** Hub keepalive — 스웜 실행 중 Hub idle timeout 방지 */
+  let hubKeepaliveTimer = null;
+  function startHubKeepalive() {
+    // 5분마다 Hub /status 핑 (idle timeout 기본 10분)
+    hubKeepaliveTimer = setInterval(async () => {
+      try {
+        const resp = await fetch("http://127.0.0.1:27888/status");
+        if (!resp.ok && ensureHubAliveFn) {
+          eventLog.append("hub_keepalive_restart", {});
+          await ensureHubAliveFn();
+        }
+      } catch {
+        // Hub 다운 — 재시작 시도
+        if (ensureHubAliveFn) {
+          eventLog.append("hub_keepalive_restart", { reason: "fetch_failed" });
+          try {
+            await ensureHubAliveFn();
+          } catch {
+            eventLog.append("hub_restart_failed", {});
+          }
+        }
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  function stopHubKeepalive() {
+    if (hubKeepaliveTimer) {
+      clearInterval(hubKeepaliveTimer);
+      hubKeepaliveTimer = null;
+    }
+  }
+
   function launch(swarmPlan) {
     if (state !== SWARM_STATES.PLANNING) {
       throw new Error(`Cannot launch in state "${state}"`);
     }
 
     plan = swarmPlan;
+
+    // Hub alive 확인 — 죽어있으면 재시작
+    if (ensureHubAliveFn) {
+      ensureHubAliveFn().then((hub) => {
+        eventLog.append("hub_ensured", { port: hub?.port });
+      }).catch((err) => {
+        eventLog.append("hub_ensure_failed", { error: err.message });
+        emitter.emit("warning", { type: "hub_unavailable", error: err.message });
+      });
+    }
 
     // Warn about file conflicts but don't block
     if (plan.conflicts.length > 0) {
@@ -636,6 +690,9 @@ export function createSwarmHypervisor(opts) {
       repoRoot: workdir,
       persistPath: join(workdir, ".triflux", "swarm-locks.json"),
     });
+
+    // Hub keepalive 시작
+    startHubKeepalive();
 
     setState(SWARM_STATES.LAUNCHING, `${plan.shards.length} shards`);
 
@@ -687,6 +744,7 @@ export function createSwarmHypervisor(opts) {
    * @param {string} [reason]
    */
   async function shutdown(reason = "shutdown") {
+    stopHubKeepalive();
     eventLog.append("swarm_shutdown", { reason, state });
 
     const shutdowns = [];
