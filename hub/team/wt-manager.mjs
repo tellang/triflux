@@ -209,12 +209,19 @@ export function createWtManager(opts = {}) {
       opts.tabCreateDelayMs,
       DEFAULT_TAB_CREATE_DELAY_MS,
     ) || DEFAULT_TAB_CREATE_DELAY_MS;
+  const waitTimeoutMs =
+    resolvePositiveInteger(
+      opts.waitTimeoutMs,
+      process.env.WTM_WAIT_TIMEOUT_MS,
+      DEFAULT_WAIT_TIMEOUT_MS,
+    ) || DEFAULT_WAIT_TIMEOUT_MS;
 
   ensureDir(pidDir);
 
   /** @type {Map<string, { pid: number, createdAt: number, pidFile: string }>} */
   const tabs = new Map();
   let lastTabCreateAt = null;
+  let _profileEnsured = false;
 
   function forgetTab(title) {
     const entry = tabs.get(title);
@@ -316,6 +323,7 @@ export function createWtManager(opts = {}) {
         }
 
         atomicWriteSync(settingsPath, JSON.stringify(settings, null, 2));
+        _profileEnsured = true;
         return true;
       } catch {
         /* 파싱 실패 */
@@ -342,7 +350,8 @@ export function createWtManager(opts = {}) {
     const shellPath = String(opts.profile || env?.shell?.path || "pwsh.exe");
 
     // 프로필이 지정된 경우 WT settings.json에 존재하는지 보장
-    if (tab.profile) {
+    // headless가 workerCount 기반으로 이미 호출한 경우 _profileEnsured로 skip
+    if (tab.profile && !_profileEnsured) {
       try { ensureWtProfile(); } catch { /* 프로필 보장 실패해도 진행 */ }
     }
 
@@ -520,7 +529,7 @@ export function createWtManager(opts = {}) {
    */
   async function splitPane(splitOpts = {}) {
     // 프로필이 지정된 경우 WT settings.json에 존재하는지 보장
-    if (splitOpts.profile) {
+    if (splitOpts.profile && !_profileEnsured) {
       try { ensureWtProfile(); } catch { /* 프로필 보장 실패해도 진행 */ }
     }
 
