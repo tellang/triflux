@@ -125,6 +125,7 @@ export function createPipeServer({
   heartbeatTtlMs = DEFAULT_HEARTBEAT_TTL_MS,
   delegatorService = null,
   hitlManager = null,
+  onActivity = null,
 } = {}) {
   if (!router) {
     throw new Error("router is required");
@@ -164,6 +165,7 @@ export function createPipeServer({
 
   function touchClient(client) {
     client.lastHeartbeatMs = Date.now();
+    if (onActivity) onActivity();
   }
 
   function resolveAgentId(client, payload) {

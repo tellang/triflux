@@ -580,6 +580,7 @@ export async function startHub({
     sessionId,
     delegatorService,
     hitlManager: hitl,
+    onActivity: markRequestActivity,
   });
   const assignCallbacks = createAssignCallbackServer({ store, sessionId });
   const tools = createTools(store, router, hitl, pipe);

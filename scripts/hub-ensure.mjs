@@ -69,25 +69,13 @@ function startHubDetached(port) {
 
   try {
     const env = { ...process.env, TFX_HUB_PORT: String(port) };
-    if (process.platform === "win32") {
-      const child = spawn(
-        "cmd.exe",
-        ["/c", "start", "/b", "", process.execPath, serverPath],
-        {
-          env,
-          stdio: "ignore",
-          windowsHide: true,
-        },
-      );
-      child.unref();
-    } else {
-      const child = spawn(process.execPath, [serverPath], {
-        env,
-        detached: true,
-        stdio: "ignore",
-      });
-      child.unref();
-    }
+    const child = spawn(process.execPath, [serverPath], {
+      env,
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
     return true;
   } catch {
     return false;
@@ -114,13 +102,13 @@ export async function run(stdinData) {
 
   const started = startHubDetached(port);
   if (!started) {
-    return { code: 0, stdout: "", stderr: "[hub-ensure] hub 시작 실패" };
+    return { code: 1, stdout: "", stderr: "[hub-ensure] hub 시작 실패" };
   }
 
-  const ready = await waitForHubReady(host, port, 3000);
+  const ready = await waitForHubReady(host, port, 5000);
   return {
-    code: 0,
-    stdout: ready ? "hub: ok" : "hub: starting",
+    code: ready ? 0 : 2,
+    stdout: ready ? "hub: ok" : "hub: starting (timeout)",
     stderr: "",
   };
 }

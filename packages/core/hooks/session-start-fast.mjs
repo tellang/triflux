@@ -4,8 +4,8 @@
 // 6개 훅을 1개 node 프로세스 안에서 실행하여 콜드스타트 7회 → 1회로 줄인다.
 //
 // 분류:
-//   BLOCKING  (직렬, stdout 반환 전 완료): setup.runCritical, mcp-safety-guard.run
-//   DEFERRED  (병렬, 실패해도 안 죽음):   hub-ensure.run, mcp-gateway-ensure.run, setup.runDeferred
+//   BLOCKING  (직렬, stdout 반환 전 완료): setup.runCritical, mcp-safety-guard.run, hub-ensure.run
+//   DEFERRED  (병렬, 실패해도 안 죽음):   mcp-gateway-ensure.run, setup.runDeferred
 //   BACKGROUND (fire-and-forget):          preflight-cache.run
 //
 // external source 훅 (session-vault 등)은 여전히 execFile로 실행된다.
@@ -55,6 +55,24 @@ async function runBlocking(stdinData) {
     log.error({ hook: "mcp-safety-guard", err: String(err.message || err) }, "hook.failed");
   }
 
+  // 3. hub-ensure — Hub 필수 인프라, BLOCKING으로 실행
+  try {
+    const t0 = performance.now();
+    const hubMod = await importMod(join(SCRIPTS, "hub-ensure.mjs"));
+    const result = await hubMod.run(stdinData);
+    const dur = performance.now() - t0;
+    timings.push({ hook: "hub-ensure", dur_ms: Math.round(dur) });
+    if (result?.stdout) output.stdout += result.stdout + "\n";
+    if (result?.stderr) output.stderr += result.stderr + "\n";
+    if (result?.code !== 0) {
+      log.warn({ hook: "hub-ensure", dur_ms: Math.round(dur), code: result?.code }, "hook.warn");
+    } else {
+      log.info({ hook: "hub-ensure", dur_ms: Math.round(dur) }, "hook.completed");
+    }
+  } catch (err) {
+    log.error({ hook: "hub-ensure", err: String(err.message || err) }, "hook.failed");
+  }
+
   return { ...output, timings };
 }
 
@@ -65,13 +83,6 @@ async function runBlocking(stdinData) {
  */
 function runDeferred(stdinData) {
   const tasks = [
-    {
-      name: "hub-ensure",
-      fn: async () => {
-        const mod = await importMod(join(SCRIPTS, "hub-ensure.mjs"));
-        return mod.run(stdinData);
-      },
-    },
     {
       name: "mcp-gateway-ensure",
       fn: async () => {
@@ -134,7 +145,7 @@ export async function execute(stdinData, externalHooks = []) {
   runBackground(stdinData);
 
   const totalDur = performance.now() - totalStart;
-  log.info({ total_ms: Math.round(totalDur), blocking_count: 2, deferred_count: 3, bg_count: 1 }, "session-start.done");
+  log.info({ total_ms: Math.round(totalDur), blocking_count: 3, deferred_count: 2, bg_count: 1 }, "session-start.done");
 
   return {
     stdout: blocking.stdout,
