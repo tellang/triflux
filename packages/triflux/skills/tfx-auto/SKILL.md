@@ -93,21 +93,22 @@ dispatch 시 해당 스킬을 Skill 도구로 호출하고 **이 워크플로우
 > 2. **비용**: Codex 우선 → Gemini → Claude 최후 수단. `claude` 선택 전 "Codex로 가능한가?" 재확인.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
 > 4. **트리아지**: Codex `exec --full-auto` 분류 + Opus 인라인 분해. Agent 스폰 금지.
-> 5. **thorough**: `-t`/`--thorough` 시 파이프라인 init 필수. 커맨드 숏컷은 항상 quick.
+> 5. **thorough 기본**: `--thorough`가 기본. Opus가 규모(S/M)·커맨드 숏컷 판단 시 자동 경량화 가능. `--quick`은 명시적 옵트아웃.
 > 6. **직접 수정 금지**: implement/review/analyze 등 커맨드 숏컷 실행 시 절대로 Edit/Write 도구로 직접 코드를 수정하지 마라. 반드시 Bash(tfx-route.sh)를 통해 Codex/Gemini에 위임하라. 작업이 아무리 사소해도 예외 없음.
 
 ## 모드
 
 | 입력 형식 | 모드 | 트리아지 |
 |-----------|------|----------|
-| `/implement JWT 추가` | 커맨드 숏컷 (quick) | 없음 (즉시 실행) |
-| `/tfx-auto "리팩터링 + UI"` | 자동 (quick) | Codex 분류 → Opus 분해 |
-| `/tfx-auto -t "리팩터링 + UI"` | 자동 (thorough) | Codex 분류 → Opus 분해 → Pipeline |
-| `/tfx-auto --thorough "리팩터링"` | 자동 (thorough) | `-t` 동일 |
-| `/tfx-auto 3:codex "리뷰"` | 수동 (quick) | Opus 분해만 |
+| `/implement JWT 추가` | 커맨드 숏컷 (thorough) | Opus 판단 → 규모 S면 자동 경량화 |
+| `/tfx-auto "리팩터링 + UI"` | 자동 (thorough) | Codex 분류 → Opus 분해 → Pipeline |
+| `/tfx-auto -q "빠르게 수정"` | 자동 (quick) | Opus 분해만, plan/verify 생략 |
+| `/tfx-auto --quick "빠르게"` | 자동 (quick) | `-q` 동일 |
+| `/tfx-auto 3:codex "리뷰"` | 수동 (thorough) | Opus 분해 + Pipeline |
 
-> **tfx-auto는 `--quick`이 기본.** 커맨드 숏컷·단일 실행에서 plan/verify 오버헤드가 불필요하기 때문.
-> 멀티 태스크 시 tfx-multi로 전환되면 tfx-multi의 기본값(`--thorough`)이 적용된다.
+> **tfx-auto는 `--thorough`가 기본.** 모든 작업에 plan/verify 파이프라인을 적용한다.
+> Opus가 규모(S)·단순 커맨드 숏컷으로 판단하면 자동 경량화(plan/verify 생략)한다.
+> 명시적 `--quick`/`-q`로 강제 경량화 가능.
 
 ## 커맨드 숏컷
 
@@ -168,16 +169,16 @@ dispatch 시 해당 스킬을 Skill 도구로 호출하고 **이 워크플로우
 
 **수동 모드 (`N:agent_type`):** Codex 분류 건너뜀 → Opus가 N개 서브태스크 분해. N > 10 거부.
 
-## --thorough 모드
+## 파이프라인 (기본: thorough)
 
-`-t` 또는 `--thorough` 플래그 시 파이프라인 기반 실행. 커맨드 숏컷에서는 무시된다.
+`--thorough`가 기본. `--quick`/`-q` 명시 시 경량화. Opus가 규모 S·단순 숏컷으로 판단 시 자동 경량화.
 
 ```
 분기점은 "실행 전략"이지 "계획"이 아님:
 
 TRIAGE
   │
-  ├─ [thorough] → PIPELINE INIT(plan) → PLAN → PRD → [APPROVAL]
+  ├─ [기본/thorough] → PIPELINE INIT(plan) → PLAN → PRD → [APPROVAL]
   │                                                      │
   │                                      ┌───────────────┤
   │                                      │               │
@@ -189,8 +190,10 @@ TRIAGE
   │                                              │
   │                                          VERIFY → FIX loop → COMPLETE
   │
-  └─ [quick] → [1 task] → fire-and-forget
-               [2+ tasks] → TEAM EXEC → COLLECT → CLEANUP
+  ├─ [Opus 자동 경량화] → 규모 S + 단일 파일 → fire-and-forget (plan/verify 생략)
+  │
+  └─ [--quick 명시] → [1 task] → fire-and-forget
+                      [2+ tasks] → TEAM EXEC → COLLECT → CLEANUP
 ```
 
 ### 단일 태스크 thorough
@@ -216,10 +219,11 @@ Plan/PRD/Approval은 tfx-auto에서 실행, 그 후 tfx-multi Phase 3로 전환.
 
 | 조건 | 실행 경로 | 엔진 |
 |------|----------|------|
-| 1개 + quick | tfx-auto 직접 실행 (fire-and-forget) | tfx-route.sh |
-| 1개 + thorough | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
-| 2개+ + quick | **headless 직접 실행** (WT 자동 팝업) | headless.mjs |
-| 2개+ + thorough | Plan/PRD/Approval 후 → headless + verify/fix | headless.mjs |
+| 1개 (기본 thorough) | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
+| 1개 + Opus 자동 경량화 | tfx-auto 직접 실행 (fire-and-forget) | tfx-route.sh |
+| 1개 + `--quick` 명시 | tfx-auto 직접 실행 (fire-and-forget) | tfx-route.sh |
+| 2개+ (기본 thorough) | Plan/PRD/Approval 후 → headless + verify/fix | headless.mjs |
+| 2개+ + `--quick` 명시 | **headless 직접 실행** (WT 자동 팝업) | headless.mjs |
 | psmux 미설치 fallback | Native Teams (Agent slim wrapper) | native.mjs |
 
 > **MANDATORY: 2개+ 서브태스크 시 headless 엔진 필수**
@@ -229,19 +233,19 @@ Plan/PRD/Approval은 tfx-auto에서 실행, 그 후 tfx-multi Phase 3로 전환.
 **전환 방법:**
 
 ```
-thorough = args에 -t 또는 --thorough 포함
+quick = args에 -q 또는 --quick 명시, 또는 Opus 자동 경량화 판단
 
 if subtasks.length >= 2:
   if psmux 설치됨:
     → Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:prompt:role' ...")
-    → if thorough: verify → fix loop
+    → if !quick: verify → fix loop
   else:
     → fallback: tfx-multi Phase 3 Native Teams (Agent slim wrapper)
 else:
-  if thorough:
-    → Pipeline init → Plan → PRD → Approval → 직접 실행 → Verify → Fix loop
+  if quick:
+    → tfx-auto 직접 실행 (fire-and-forget)
   else:
-    → tfx-auto 직접 실행 (아래)
+    → Pipeline init → Plan → PRD → Approval → 직접 실행 → Verify → Fix loop
 ```
 
 ## 실행
