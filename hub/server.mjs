@@ -1486,6 +1486,17 @@ export async function startHub({
           "hub.public_dir",
         );
 
+        /**
+         * Hub 서버 정지 함수.
+         *
+         * Trade-off (F01 — 영구 poisoning 허용):
+         * 첫 정지 호출에서 cleanup 파이프라인이 실패하면 stopPromise는 실패 상태로
+         * 고정되고, 이후 모든 호출은 동일한 실패 promise를 반환합니다. stopPromise를
+         * null로 리셋하면 재시도가 가능하지만, router sweeper / transports / pipe 등이
+         * 이미 부분 해제된 상태에서 두 번째 close가 실행되면 use-after-close 및
+         * race condition을 유발합니다. 실패한 stopFn은 프로세스 전체 재시작으로 복구해야
+         * 하며, 이 동작은 의도된 설계입니다.
+         */
         const stopFn = async () => {
           if (stopPromise) return stopPromise;
 

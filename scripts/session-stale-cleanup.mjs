@@ -20,19 +20,11 @@ import {
 } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
+import { isProcessAlive } from "./lib/process-utils.mjs";
 
 const MULTI_STATE_FILE = join(tmpdir(), "tfx-multi-state.json");
 const EXPIRE_MS = 30 * 60 * 1000; // 30분
 const PID_FILE_RE = /^tfx-route-(\d+)-pids$/;
-
-function isProcessAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function treeKill(pid) {
   try {

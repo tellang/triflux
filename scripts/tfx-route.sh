@@ -897,8 +897,9 @@ TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
 # Preflight 캐시 일괄 로드 — CLI/Hub 가용성 + Codex 요금제를 환경변수로 내보냄
 # 하위 프로세스(스킬 포함)가 TFX_CODEX_OK, TFX_GEMINI_OK, TFX_HUB_OK로 즉시 참조 가능
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
-  # eval 제거 — pipe-delimited read로 인젝션 위험 차단
-  IFS='|' read -r _pf_codex _pf_gemini _pf_hub _pf_plan _pf_agents < <(
+  # eval 제거 — \x1e (ASCII 30, Record Separator) delimited read로 인젝션 위험 차단
+  # F05: `|`에서 `\x1e`로 변경 — 계정 tier/agent 이름 등 값에 `|` 포함 시 필드 분리 오류 방지
+  IFS=$'\x1e' read -r _pf_codex _pf_gemini _pf_hub _pf_plan _pf_agents < <(
     "$NODE_BIN" -e '
       try {
         const c = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(),".claude","cache","tfx-preflight.json"),"utf8"));
@@ -909,8 +910,8 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
           (c?.codex_plan?.plan && c.codex_plan.plan !== "unknown" && c.codex_plan.plan !== "api") ? c.codex_plan.plan : "",
           Array.isArray(c?.available_agents) ? c.available_agents.join(",") : ""
         ];
-        process.stdout.write(parts.join("|"));
-      } catch { process.stdout.write("0|0|0||"); }
+        process.stdout.write(parts.join("\x1e"));
+      } catch { process.stdout.write("0\x1e0\x1e0\x1e\x1e"); }
     ' 2>/dev/null
   ) || true
   export TFX_CODEX_OK="${_pf_codex:-0}"

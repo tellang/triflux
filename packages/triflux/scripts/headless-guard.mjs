@@ -30,6 +30,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deny, nudge } from "./lib/hook-utils.mjs";
+import { isProcessAlive } from "./lib/process-utils.mjs";
 import { probePsmuxSupport } from "./lib/psmux-info.mjs";
 
 const CACHE_FILE = join(tmpdir(), "tfx-psmux-check.json");
@@ -40,16 +41,6 @@ const MULTI_STATE_FILE = join(tmpdir(), "tfx-multi-state.json");
 const MULTI_EXPIRE_MS = 30 * 60 * 1000; // 30분 자동 만료
 const GATE_THRESHOLD = 2; // A: dispatch 전 허용할 Agent 호출 수
 const NUDGE_THRESHOLD = 4; // B: dispatch 후 nudge 트리거 횟수
-
-function isOwnerAlive(pid) {
-  if (!pid || typeof pid !== "number") return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function readMultiState() {
   try {
@@ -66,7 +57,7 @@ function readMultiState() {
       return null;
     }
     // ownerPid 생존 체크 — 소유 세션이 죽었으면 stale (#62)
-    if (state.ownerPid && !isOwnerAlive(state.ownerPid)) {
+    if (state.ownerPid && !isProcessAlive(state.ownerPid)) {
       try {
         unlinkSync(MULTI_STATE_FILE);
       } catch {
