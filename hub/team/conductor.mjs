@@ -67,12 +67,44 @@ const DEFAULT_MAX_RESTARTS = 3;
 const DEFAULT_GRACE_MS = 10_000;
 
 /**
+ * Auth 파일을 lease 소스에서 CLI 대상 경로로 복사.
+ * @param {object} lease — broker lease 객체 (mode, authFile 필수)
+ * @param {'codex'|'gemini'} agent
+ * @param {string} sessionId — 로깅용
+ * @param {object} eventLog — createEventLog 인스턴스
+ */
+function swapAuthFile(lease, agent, sessionId, eventLog) {
+  if (lease?.mode !== "auth" || !lease.authFile) return;
+  const dests =
+    agent === "codex"
+      ? [join(homedir(), ".codex", "auth.json")]
+      : [
+          join(homedir(), ".gemini", "oauth_creds.json"),
+          join(homedir(), ".gemini", "gemini-credentials.json"),
+        ];
+  for (const dest of dests) {
+    try {
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(lease.authFile, dest);
+      eventLog.append("auth_copy", { session: sessionId, agent, dest });
+    } catch (err) {
+      eventLog.append("auth_copy_error", {
+        session: sessionId,
+        dest,
+        error: err.message,
+      });
+    }
+  }
+}
+
+/**
  * Conductor 팩토리.
  * @param {object} opts
  * @param {string} opts.logsDir — 이벤트 로그 디렉토리
  * @param {number} [opts.maxRestarts=3]
  * @param {number} [opts.graceMs=10000] — shutdown grace period
  * @param {object} [opts.probeOpts] — health-probe 옵션 오버라이드
+ * @param {object} [opts.broker] — AccountBroker 인스턴스 (tierFallback 구독용)
  * @returns {Conductor}
  */
 export function createConductor(opts = {}) {
@@ -81,6 +113,7 @@ export function createConductor(opts = {}) {
     maxRestarts = DEFAULT_MAX_RESTARTS,
     graceMs = DEFAULT_GRACE_MS,
     probeOpts = {},
+    broker: optsBroker,
   } = opts;
 
   if (!logsDir) throw new Error("logsDir is required");
@@ -739,32 +772,7 @@ export function createConductor(opts = {}) {
       : config;
 
     // auth file copy — broker resolved absolute path, conductor does the actual copy
-    if (lease?.mode === "auth" && lease.authFile) {
-      const dests =
-        config.agent === "codex"
-          ? [join(homedir(), ".codex", "auth.json")]
-          : [
-              join(homedir(), ".gemini", "oauth_creds.json"),
-              join(homedir(), ".gemini", "gemini-credentials.json"),
-            ];
-      for (const dest of dests) {
-        try {
-          mkdirSync(dirname(dest), { recursive: true });
-          copyFileSync(lease.authFile, dest);
-          eventLog.append("auth_copy", {
-            session: config.id,
-            agent: config.agent,
-            dest,
-          });
-        } catch (err) {
-          eventLog.append("auth_copy_error", {
-            session: config.id,
-            dest,
-            error: err.message,
-          });
-        }
-      }
-    }
+    swapAuthFile(lease, config.agent, config.id, eventLog);
 
     // 원격 세션은 launcher 불필요 (이미 원격에서 실행 중)
     const launcher = resolvedConfig.remote
@@ -892,10 +900,40 @@ export function createConductor(opts = {}) {
       });
 
     await Promise.allSettled(cleanups);
+    if (brokerInstance && onTierFallback) {
+      brokerInstance.removeListener("tierFallback", onTierFallback);
+    }
     if (conductor._meshBridge) conductor._meshBridge.detach();
     await eventLog.flush();
     await eventLog.close();
     emitter.emit("shutdown");
+  }
+
+  // ── broker tierFallback 구독 ──────────────────────────────────
+  // 토큰 만료 등으로 상위 tier 계정이 불가능해지면, 활성 세션의 auth를 새 lease로 교체.
+  const brokerInstance = optsBroker ?? null;
+  const onTierFallback = brokerInstance
+    ? ({ provider }) => {
+        for (const session of sessions.values()) {
+          if (TERMINAL_STATES.has(session.state)) continue;
+          if (session.config.agent !== provider) continue;
+          if (session.config.remote) continue;
+
+          const newLease = broker.lease({ provider });
+          if (!newLease) continue;
+
+          swapAuthFile(newLease, provider, session.id, eventLog);
+          eventLog.append("tier_fallback_swap", {
+            session: session.id,
+            agent: provider,
+            newAccount: newLease.id,
+          });
+        }
+      }
+    : null;
+
+  if (brokerInstance && onTierFallback) {
+    brokerInstance.on("tierFallback", onTierFallback);
   }
 
   // Shutdown traps
