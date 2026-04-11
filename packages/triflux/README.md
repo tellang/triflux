@@ -61,7 +61,7 @@ You don't need to memorize commands. Say what you want in natural language — t
 
 ## Quick Start
 
-**Claude Code** (recommended):
+**Claude Code** (recommended) — run inside a Claude Code session:
 
 ```
 /plugin marketplace add tellang/triflux

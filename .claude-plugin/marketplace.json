@@ -8,8 +8,8 @@
   "plugins": [
     {
       "name": "triflux",
-      "description": "CLI-first multi-model orchestrator for Claude Code. Routes tasks to Codex, Gemini, and Claude CLIs with automatic triage, DAG-based parallel execution, headless psmux sessions, and cost-optimized routing. Includes 41 skills, HUD status bar, hook orchestrator, and shell-based CLI routing.",
-      "version": "10.9.3",
+      "description": "Tri-CLI orchestrator for Claude Code. Routes tasks across Claude + Codex + Gemini with consensus intelligence, natural language routing, 42 skills, and cross-model review.",
+      "version": "10.9.4",
       "author": {
         "name": "tellang"
       },
@@ -30,5 +30,5 @@
       ]
     }
   ],
-  "version": "10.3.2"
+  "version": "10.9.4"
 }

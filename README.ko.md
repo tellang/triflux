@@ -37,7 +37,7 @@
 
 ## 빠른 시작
 
-**Claude Code** (권장):
+**Claude Code** (권장) — Claude Code 세션 안에서 실행:
 
 ```
 /plugin marketplace add tellang/triflux
@@ -287,7 +287,7 @@ graph TD
 
 ## 빠른 시작
 
-**Claude Code** (권장):
+**Claude Code** (권장) — Claude Code 세션 안에서 실행:
 
 ```
 /plugin marketplace add tellang/triflux
