@@ -2,6 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.9.15] - 2026-04-12
+
+### Added
+- `/synapse/sessions` GET, `/synapse/locks` GET, `/synapse/preflight` POST HTTP 엔드포인트
+- synapseEmitter 4개 이벤트 hubLog 리스너 (started, heartbeat, stale, removed)
+- preflight op whitelist 검증 (6개 유효 op만 허용, 나머지 400)
+
+### Fixed
+- `schedulePersist()` destroyed guard — destroy 후 새 타이머 생성 방지 (callback 내 이중 체크)
+- hono + @hono/node-server CVE 2건 패치 (serveStatic path traversal, cookie name validation)
+
 ## [10.9.2] - 2026-04-11
 
 ### Fixed
