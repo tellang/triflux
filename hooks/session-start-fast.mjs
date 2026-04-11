@@ -84,6 +84,23 @@ async function runBlocking(stdinData) {
 function runDeferred(stdinData) {
   const tasks = [
     {
+      name: "session-stale-cleanup",
+      fn: async () => {
+        const mod = await importMod(join(SCRIPTS, "session-stale-cleanup.mjs"));
+        if (typeof mod.main === "function") mod.main();
+      },
+    },
+    {
+      name: "claude-login-detect",
+      fn: async () => {
+        const mod = await importMod(join(SCRIPTS, "claude-login-detect.mjs"));
+        const result = mod.run?.();
+        if (result?.changed) {
+          return { stdout: `[claude-login] HUD 캐시 ${result.cleared}개 초기화됨\n` };
+        }
+      },
+    },
+    {
       name: "mcp-gateway-ensure",
       fn: async () => {
         const mod = await importMod(join(SCRIPTS, "mcp-gateway-ensure.mjs"));
