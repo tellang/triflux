@@ -10,6 +10,10 @@ import { beforeEach, describe, it } from "node:test";
 import { createGitPreflight } from "../../hub/team/git-preflight.mjs";
 import { createSwarmLocks } from "../../hub/team/swarm-locks.mjs";
 import { createSynapseRegistry } from "../../hub/team/synapse-registry.mjs";
+import {
+  pruneWorktree,
+  rebaseShardOntoIntegration,
+} from "../../hub/team/worktree-lifecycle.mjs";
 
 function makeTmpDir() {
   const dir = join(
@@ -102,5 +106,57 @@ describe("synapse-v1 e2e", () => {
     );
     assert.equal(decision.allowed, true);
     assert.equal(decision.reason, "hub_unavailable_fail_open");
+  });
+
+  it("rebaseShardOntoIntegration short-circuits when preflight blocks", async () => {
+    // Fake preflight that always blocks — no git commands should run.
+    const blockingPreflight = {
+      checkRebase: () => ({
+        allowed: false,
+        reason: "overlap_with_active_session",
+        conflicts: [
+          { file: "foo.mjs", activeSession: "other", activeTask: "wip" },
+        ],
+        recommendation: "wait for other",
+      }),
+    };
+
+    const result = await rebaseShardOntoIntegration({
+      shardBranch: "shard/x",
+      integrationBranch: "integration",
+      rootDir: tmpDir, // not a git repo — proves git wasn't called
+      preflight: blockingPreflight,
+      sessionContext: { sessionId: "me", workerId: "me" },
+    });
+
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes("git-preflight blocked"));
+    assert.equal(result.preflight.allowed, false);
+    assert.equal(result.preflight.conflicts.length, 1);
+  });
+
+  it("pruneWorktree short-circuits when preflight blocks", async () => {
+    const blockingPreflight = {
+      checkWorktreeRemove: () => ({
+        allowed: false,
+        reason: "active_worktree",
+        conflicts: [
+          { file: "/repo/wt-a", activeSession: "other", activeTask: "wip" },
+        ],
+        recommendation: "finish other first",
+      }),
+    };
+
+    const result = await pruneWorktree({
+      worktreePath: "/repo/wt-a",
+      branchName: "shard/x",
+      rootDir: tmpDir,
+      preflight: blockingPreflight,
+      sessionContext: { sessionId: "me", workerId: "me" },
+    });
+
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes("git-preflight blocked"));
+    assert.equal(result.preflight.reason, "active_worktree");
   });
 });
