@@ -282,6 +282,9 @@ export async function executeWithCircuitBroker({
     const coolMs = parseRetryAfterMs(text, provider);
     brokerMod.broker.markRateLimited(lease.id, coolMs);
     brokerMod.broker.emit("cooldown", { id: lease.id, provider, coolMs, reason: "quota_exhausted" });
+  } else if (lastResult.failureMode === "crash") {
+    // 인프라 에러(모듈 누락, 서버 에러 등)는 계정 문제가 아님 → circuit/cooldown 건너뜀
+    brokerMod.broker.release(lease.id, { ok: false, skipCircuit: true });
   } else {
     brokerMod.broker.release(lease.id, { ok: false });
   }

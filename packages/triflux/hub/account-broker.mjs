@@ -354,6 +354,13 @@ class AccountBroker extends EventEmitter {
       if (isHalfOpen) {
         this.emit("circuitClose", { id: accountId });
       }
+    } else if (result?.skipCircuit) {
+      // 인프라 에러 — circuit/cooldown에 카운트하지 않음
+      circuitUpdate = {
+        failureTimestamps: acct.failureTimestamps,
+        circuitOpenedAt: acct.circuitOpenedAt,
+        circuitTrialInFlight: acct.circuitTrialInFlight,
+      };
     } else {
       circuitUpdate = this.#recordCircuitFailure(acct, isHalfOpen, now);
       if (circuitUpdate.circuitOpenedAt !== acct.circuitOpenedAt) {

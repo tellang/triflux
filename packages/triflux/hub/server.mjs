@@ -1682,7 +1682,7 @@ function cleanupStaleSpawnSessions(log) {
 const QUOTA_CACHE_PATH = join(CACHE_DIR, "broker-quota-cache.json");
 
 async function checkSingleAccountQuota(acct) {
-  const authPath = join(AUTH_BASE_PATH, acct.authFile);
+  const authPath = join(PID_DIR, acct.authFile);
   if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
   try {
     const auth = JSON.parse(readFileSync(authPath, "utf8"));
