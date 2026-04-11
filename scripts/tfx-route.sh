@@ -105,17 +105,14 @@ if [[ -f "$_CODEX_CONFIG" ]] && awk '
 fi
 
 build_codex_base() {
-  # Escape hatch: TFX_FORCE_CODEX_BYPASS=1이면 감지 결과와 무관하게 항상 bypass.
-  # CI/디버깅/긴급 상황에서 config.toml 상태에 상관없이 non-TTY codex exec를 보장.
-  if [[ "${TFX_FORCE_CODEX_BYPASS:-0}" == "1" ]]; then
-    echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
-    return
-  fi
-  if [[ -n "$_CODEX_HAS_SANDBOX" ]]; then
-    echo "--skip-git-repo-check"
-  else
-    echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
-  fi
+  # codex exec는 항상 non-TTY subprocess에서 실행되므로 --dangerously-bypass 필수.
+  # --dangerously-bypass는 config.toml의 approval_mode/sandbox와 충돌하지 않음
+  # (--full-auto와 달리 bypass는 config 값을 override할 뿐 에러를 던지지 않음).
+  # 검증: approval_mode="auto" config에서 --dangerously-bypass 동시 사용 → exit 0 확인.
+  #
+  # Note: 위의 _CODEX_HAS_SANDBOX awk 감지는 현재 미사용이지만, 향후 codex가
+  # bypass와 config.toml 충돌을 감지하면 분기 로직을 재활성화할 수 있으므로 유지.
+  echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
 }
 
 # ── Async Job 디렉토리 ──
