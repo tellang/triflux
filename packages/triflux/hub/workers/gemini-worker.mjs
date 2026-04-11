@@ -349,7 +349,11 @@ export class GeminiWorker {
     }
 
     if (exitCode !== 0) {
-      throw createWorkerError(`Gemini worker exited with code ${exitCode}`, {
+      // Build a descriptive message when stderr is empty to aid debugging
+      const errMsg = result.stderr
+        ? `Gemini worker exited with code ${exitCode}`
+        : `Gemini worker exited with code ${exitCode} (stderr empty, signal=${exitSignal ?? "none"}, events=${events.length}, stdout=${result.stdout.length}B)`;
+      throw createWorkerError(errMsg, {
         code: "WORKER_EXIT",
         result,
         stderr: result.stderr,
