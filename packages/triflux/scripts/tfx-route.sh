@@ -88,14 +88,29 @@ cleanup_workers() {
 }
 
 # ── config.toml sandbox/approval_mode 감지 ──
-# config.toml에 이미 설정되어 있으면 CLI 플래그 중복 시 Codex가 에러를 던짐
+# config.toml에 이미 설정되어 있으면 CLI 플래그 중복 시 Codex가 에러를 던짐.
+# 단, [mcp_servers.*.tools.*] 섹션 내부의 approval_mode는 tool 단위 승인 설정으로
+# top-level sandbox/approval_mode와 의미가 다르다. 이 값이 "approve"이면
+# codex exec이 non-TTY subprocess에서 승인 대기로 stall하므로 감지 대상에서 제외.
+# (refs: tellang/triflux#66, Yeachan-Heo/oh-my-codex#1478)
 _CODEX_CONFIG="${HOME}/.codex/config.toml"
 _CODEX_HAS_SANDBOX=""
-if [[ -f "$_CODEX_CONFIG" ]] && grep -qE '^\s*(sandbox|approval_mode)\s*=' "$_CODEX_CONFIG" 2>/dev/null; then
+if [[ -f "$_CODEX_CONFIG" ]] && awk '
+  /^\[{1,2}mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
+  /^\[/ { in_mcp_tool=0; next }
+  !in_mcp_tool && /^[[:space:]]*(sandbox|approval_mode)[[:space:]]*=/ { found=1; exit }
+  END { exit !found }
+' "$_CODEX_CONFIG" 2>/dev/null; then
   _CODEX_HAS_SANDBOX="1"
 fi
 
 build_codex_base() {
+  # Escape hatch: TFX_FORCE_CODEX_BYPASS=1이면 감지 결과와 무관하게 항상 bypass.
+  # CI/디버깅/긴급 상황에서 config.toml 상태에 상관없이 non-TTY codex exec를 보장.
+  if [[ "${TFX_FORCE_CODEX_BYPASS:-0}" == "1" ]]; then
+    echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+    return
+  fi
   if [[ -n "$_CODEX_HAS_SANDBOX" ]]; then
     echo "--skip-git-repo-check"
   else
@@ -1700,7 +1715,14 @@ FALLBACK_EOF
 
     run_stream_worker "gemini" "$FULL_PROMPT" "$use_tee" "${gemini_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}). claude-native fallback." >&2
+      # stderr 내용을 fallback 전에 보존하여 디버깅 가능하게 함
+      local gemini_stderr_bytes=0
+      [[ -f "$STDERR_LOG" ]] && gemini_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
+      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}, stderr=${gemini_stderr_bytes}B). claude-native fallback." >&2
+      if [[ "$gemini_stderr_bytes" -gt 0 ]]; then
+        echo "[tfx-route] Gemini stderr 보존:" >&2
+        tail -c 2048 "$STDERR_LOG" >&2
+      fi
       cat > "$STDOUT_LOG" <<EOF
 $(emit_claude_native_metadata)
 EOF
@@ -1722,7 +1744,13 @@ EOF
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-      echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}). native metadata로 fallback합니다." >&2
+      local claude_stderr_bytes=0
+      [[ -f "$STDERR_LOG" ]] && claude_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
+      echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}, stderr=${claude_stderr_bytes}B). native metadata로 fallback합니다." >&2
+      if [[ "$claude_stderr_bytes" -gt 0 ]]; then
+        echo "[tfx-route] Claude stderr 보존:" >&2
+        tail -c 2048 "$STDERR_LOG" >&2
+      fi
       cat > "$STDOUT_LOG" <<EOF
 $(emit_claude_native_metadata)
 EOF
