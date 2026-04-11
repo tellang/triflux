@@ -220,6 +220,9 @@ CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo codex)}"
 GEMINI_BIN="${GEMINI_BIN:-$(command -v gemini 2>/dev/null || echo gemini)}"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo claude)}"
 GEMINI_BIN_ARGS_JSON="${GEMINI_BIN_ARGS_JSON:-[]}"
+# ── Gemini 확장 플래그 (issue #64) ──
+TFX_GEMINI_EXTENSIONS="${TFX_GEMINI_EXTENSIONS:-}"
+TFX_GEMINI_FLAGS="${TFX_GEMINI_FLAGS:-}"
 CLAUDE_BIN_ARGS_JSON="${CLAUDE_BIN_ARGS_JSON:-[]}"
 
 # ── Gemini 프로필 경로 (Codex config.toml 대칭) ──
@@ -1758,6 +1761,27 @@ FALLBACK_EOF
       for server_name in "${GEMINI_ALLOWED_SERVERS[@]}"; do
         gemini_worker_args+=("--allowed-mcp-server-name" "$server_name")
       done
+    fi
+
+    # ── Gemini extensions (-e) 주입 (issue #64) ──
+    if [[ -n "$TFX_GEMINI_EXTENSIONS" ]]; then
+      local ext
+      IFS="," read -ra _gemini_exts <<< "$TFX_GEMINI_EXTENSIONS"
+      for ext in "${_gemini_exts[@]}"; do
+        ext=$(echo "$ext" | xargs)  # trim whitespace
+        [[ -n "$ext" ]] && gemini_worker_args+=("--extra-arg" "-e" "--extra-arg" "$ext")
+      done
+      echo "[tfx-route] Gemini extensions: ${TFX_GEMINI_EXTENSIONS}" >&2
+    fi
+
+    # ── Gemini 추가 플래그 주입 (issue #64) ──
+    if [[ -n "$TFX_GEMINI_FLAGS" ]]; then
+      local flag
+      read -ra _gemini_flags <<< "$TFX_GEMINI_FLAGS"
+      for flag in "${_gemini_flags[@]}"; do
+        [[ -n "$flag" ]] && gemini_worker_args+=("--extra-arg" "$flag")
+      done
+      echo "[tfx-route] Gemini extra flags: ${TFX_GEMINI_FLAGS}" >&2
     fi
 
     run_stream_worker "gemini" "$FULL_PROMPT" "$use_tee" "${gemini_worker_args[@]}" || exit_code=$?
