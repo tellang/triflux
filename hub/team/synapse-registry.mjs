@@ -68,6 +68,8 @@ export function createSynapseRegistry(opts = {}) {
     return session.isRemote ? remoteTimeoutMs : localTimeoutMs;
   }
 
+  let persistTimer = null;
+
   function persist() {
     if (!persistPath) return;
     try {
@@ -79,6 +81,15 @@ export function createSynapseRegistry(opts = {}) {
     } catch {
       /* best-effort */
     }
+  }
+
+  function schedulePersist() {
+    if (persistTimer) return;
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      persist();
+    }, 200);
+    if (typeof persistTimer.unref === "function") persistTimer.unref();
   }
 
   function restore() {
@@ -137,9 +148,10 @@ export function createSynapseRegistry(opts = {}) {
 
       const elapsedMs = now() - current.lastHeartbeat;
       if (elapsedMs > timeoutFor(current) && current.status !== "stale") {
-        current.status = "stale";
-        persist();
-        notifyStale(current);
+        const staled = { ...current, status: "stale" };
+        sessions.set(sessionId, staled);
+        schedulePersist();
+        notifyStale(staled);
       }
     }, intervalFor(session));
 
@@ -194,33 +206,33 @@ export function createSynapseRegistry(opts = {}) {
     if (!session) return false;
 
     const wasRemote = session.isRemote;
-
-    session.lastHeartbeat = now();
-    session.status = "active";
+    const updated = { ...session, lastHeartbeat: now(), status: "active" };
 
     if (partialMeta && typeof partialMeta === "object") {
-      if (typeof partialMeta.host === "string") session.host = partialMeta.host;
+      if (typeof partialMeta.host === "string") updated.host = partialMeta.host;
       if (typeof partialMeta.worktreePath === "string") {
-        session.worktreePath = partialMeta.worktreePath;
+        updated.worktreePath = partialMeta.worktreePath;
       }
-      if (typeof partialMeta.branch === "string") session.branch = partialMeta.branch;
+      if (typeof partialMeta.branch === "string") updated.branch = partialMeta.branch;
       if (Array.isArray(partialMeta.dirtyFiles)) {
-        session.dirtyFiles = [...partialMeta.dirtyFiles];
+        updated.dirtyFiles = [...partialMeta.dirtyFiles];
       }
       if (typeof partialMeta.taskSummary === "string") {
-        session.taskSummary = partialMeta.taskSummary;
+        updated.taskSummary = partialMeta.taskSummary;
       }
       if (typeof partialMeta.isRemote === "boolean") {
-        session.isRemote = partialMeta.isRemote;
+        updated.isRemote = partialMeta.isRemote;
       }
     }
 
-    if (session.isRemote !== wasRemote) {
+    sessions.set(normalized, updated);
+
+    if (updated.isRemote !== wasRemote) {
       startMonitor(normalized);
     }
 
-    persist();
-    emitter?.emit("synapse.session.heartbeat", { sessionId: normalized, partial: partialMeta });
+    schedulePersist();
+    emitter?.emit("synapse.session.heartbeat", { sessionId: normalized, session: cloneSession(updated), partial: partialMeta });
     return true;
   }
 
@@ -260,6 +272,10 @@ export function createSynapseRegistry(opts = {}) {
   function destroy() {
     for (const sessionId of monitors.keys()) {
       stopMonitor(sessionId);
+    }
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
     }
     persist();
   }
