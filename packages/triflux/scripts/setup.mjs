@@ -159,6 +159,16 @@ const SYNC_MAP = [
     dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "factory.mjs"),
     label: "hub/workers/factory.mjs",
   },
+  {
+    src: join(PLUGIN_ROOT, "hub", "cli-adapter-base.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "cli-adapter-base.mjs"),
+    label: "hub/cli-adapter-base.mjs",
+  },
+  {
+    src: join(PLUGIN_ROOT, "hub", "platform.mjs"),
+    dst: join(CLAUDE_DIR, "scripts", "hub", "platform.mjs"),
+    label: "hub/platform.mjs",
+  },
   ...scanHudFiles(PLUGIN_ROOT, CLAUDE_DIR),
   {
     src: join(PLUGIN_ROOT, "scripts", "notion-read.mjs"),

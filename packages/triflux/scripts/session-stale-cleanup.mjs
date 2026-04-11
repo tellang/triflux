@@ -115,9 +115,15 @@ function cleanupOrphanPidFiles() {
   }
 }
 
-function main() {
+export function main() {
   cleanupMultiState();
   cleanupOrphanPidFiles();
 }
 
-main();
+const isDirectRun =
+  process.argv[1] &&
+  import.meta.url.endsWith(
+    process.argv[1].replace(/\\/g, "/").split("/").pop(),
+  );
+
+if (isDirectRun) main();

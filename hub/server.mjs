@@ -1499,8 +1499,8 @@ export async function startHub({
             httpServer.closeAllConnections();
             await new Promise((resolveClose) => httpServer.close(resolveClose));
           })().catch((error) => {
-            stopPromise = null;
-            throw error;
+            hubLog.error({ err: String(error?.message || error) }, "hub.stop_error");
+            // stopPromise를 null로 리셋하지 않음 — double-close 방지
           });
 
           return stopPromise;

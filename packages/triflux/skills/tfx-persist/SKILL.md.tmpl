@@ -47,7 +47,13 @@ psmux --version 2>/dev/null && \
 IF claude -p (one-shot 모드):
   → Tier 3 즉시 fallback
 
-IF psmux 없음 OR Hub 미응답:
+IF psmux 없음:
+  → Tier 3
+
+IF Hub 미응답:
+  → hub-ensure 자동 재시작 시도: Bash("node ~/.claude/scripts/hub-ensure.mjs")
+  → 재시작 성공(exit 0) → Tier 판정 재시도
+  → 재시작 실패 → Tier 3
   → Tier 3
 
 IF Codex 없음 AND Gemini 없음:

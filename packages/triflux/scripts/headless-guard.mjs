@@ -41,6 +41,16 @@ const MULTI_EXPIRE_MS = 30 * 60 * 1000; // 30분 자동 만료
 const GATE_THRESHOLD = 2; // A: dispatch 전 허용할 Agent 호출 수
 const NUDGE_THRESHOLD = 4; // B: dispatch 후 nudge 트리거 횟수
 
+function isOwnerAlive(pid) {
+  if (!pid || typeof pid !== "number") return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readMultiState() {
   try {
     if (!existsSync(MULTI_STATE_FILE)) return null;
@@ -48,6 +58,15 @@ function readMultiState() {
     if (!state.active) return null;
     // 자동 만료
     if (Date.now() - state.activatedAt > MULTI_EXPIRE_MS) {
+      try {
+        unlinkSync(MULTI_STATE_FILE);
+      } catch {
+        /* ignore */
+      }
+      return null;
+    }
+    // ownerPid 생존 체크 — 소유 세션이 죽었으면 stale (#62)
+    if (state.ownerPid && !isOwnerAlive(state.ownerPid)) {
       try {
         unlinkSync(MULTI_STATE_FILE);
       } catch {

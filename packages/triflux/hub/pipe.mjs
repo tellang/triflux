@@ -670,8 +670,12 @@ export function createPipeServer({
         const line = client.buffer.slice(0, newlineIndex).trim();
         client.buffer = client.buffer.slice(newlineIndex + 1);
         if (line) {
-          const frame = safeJsonParse(line);
-          await handleFrame(client, frame);
+          try {
+            const frame = safeJsonParse(line);
+            await handleFrame(client, frame);
+          } catch (err) {
+            pipeLog.error({ clientId: client.id, err: String(err?.message || err) }, "pipe.frame_handler_error");
+          }
         }
         newlineIndex = client.buffer.indexOf("\n");
       }
