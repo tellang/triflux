@@ -2,6 +2,7 @@
 
 import { execSync as execSyncHub } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { EventEmitter } from "node:events";
 import {
   existsSync,
   mkdirSync,
@@ -577,9 +578,11 @@ export async function startHub({
   const delegatorService = new DelegatorService({ worker: delegatorWorker });
 
   // Synapse Layer 4: session registry + git preflight + swarm locks
+  const synapseEmitter = new EventEmitter();
+  synapseEmitter.setMaxListeners(50);
   const synapseRegistry = createSynapseRegistry({
     persistPath: join(CACHE_DIR, "tfx-hub", "synapse-sessions.json"),
-    emitter: router.deliveryEmitter,
+    emitter: synapseEmitter,
   });
   const swarmLocks = createSwarmLocks({
     repoRoot: PROJECT_ROOT,

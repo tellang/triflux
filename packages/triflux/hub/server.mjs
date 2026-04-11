@@ -2,6 +2,7 @@
 
 import { execSync as execSyncHub } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { EventEmitter } from "node:events";
 import {
   existsSync,
   mkdirSync,
@@ -40,7 +41,10 @@ import {
   writeState,
 } from "./state.mjs";
 import { createStoreAdapter } from "./store-adapter.mjs";
+import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
+import { createSwarmLocks } from "./team/swarm-locks.mjs";
+import { createSynapseRegistry } from "./team/synapse-registry.mjs";
 import { registerTeamBridge } from "./team-bridge.mjs";
 import { createTools } from "./tools.mjs";
 import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
@@ -572,6 +576,22 @@ export async function startHub({
     throw error;
   }
   const delegatorService = new DelegatorService({ worker: delegatorWorker });
+
+  // Synapse Layer 4: session registry + git preflight + swarm locks
+  const synapseEmitter = new EventEmitter();
+  synapseEmitter.setMaxListeners(50);
+  const synapseRegistry = createSynapseRegistry({
+    persistPath: join(CACHE_DIR, "tfx-hub", "synapse-sessions.json"),
+    emitter: synapseEmitter,
+  });
+  const swarmLocks = createSwarmLocks({
+    repoRoot: PROJECT_ROOT,
+    persistPath: join(CACHE_DIR, "tfx-hub", "swarm-locks.json"),
+  });
+  const gitPreflight = createGitPreflight({
+    registry: synapseRegistry,
+    locks: swarmLocks,
+  });
 
   const hitl = createHitlManager(store, router);
   const pipe = createPipeServer({
@@ -1521,6 +1541,7 @@ export async function startHub({
             await pipe.stop();
             await assignCallbacks.stop();
             await delegatorWorker.stop().catch(() => {});
+            try { synapseRegistry.destroy(); } catch {}
             store.close();
             try {
               unlinkSync(PID_FILE);
