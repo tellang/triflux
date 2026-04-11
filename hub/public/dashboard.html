@@ -47,6 +47,17 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
 .legend-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
 
 .placeholder{text-align:center;padding:24px;color:#8b949e;font-size:.85rem}
+.btn{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:4px 12px;border-radius:6px;font-size:.78rem;cursor:pointer;transition:background .2s}
+.btn:hover{background:#30363d}
+.btn:active{background:#3b414a}
+.btn.ok{border-color:#3fb950;color:#3fb950}
+.guide{display:none;max-width:1200px;margin:0 auto 16px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;font-size:.82rem;line-height:1.7;color:#8b949e}
+.guide.open{display:block}
+.guide h3{color:#c9d1d9;font-size:.9rem;margin:12px 0 6px}
+.guide h3:first-child{margin-top:0}
+.guide code{background:#0d1117;padding:1px 5px;border-radius:3px;font-size:.78rem;color:#d19a66}
+.guide ul{padding-left:18px;margin:4px 0}
+.actions{display:flex;gap:8px;align-items:center}
 </style>
 </head>
 <body>
@@ -57,7 +68,33 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
     <span class="status-dot" id="statusDot"></span>
     <span id="statusText">연결 중...</span>
     <span id="lastUpdate" class="sub"></span>
+    <div class="actions">
+      <button class="btn" id="guideBtn" title="도움말">?</button>
+      <button class="btn" id="reloadBtn" title="계정 브로커 리로드">Reload</button>
+      <a href="/broker/dashboard" target="_blank" class="btn" style="text-decoration:none">Broker</a>
+    </div>
   </div>
+</div>
+
+<div class="guide" id="guidePanel">
+  <h3>AIMD 동시 워커</h3>
+  <p>AIMD(Additive Increase / Multiplicative Decrease) 알고리즘으로 최적 동시 워커 수를 자동 조절합니다. 게이지가 <code>10/10</code>에 가까우면 시스템이 포화 상태입니다.</p>
+  <h3>CLI 쿼터 사용률</h3>
+  <ul>
+    <li><strong>Claude</strong> — 5시간/주간 사용량. 80% 이상이면 빨간색 경고.</li>
+    <li><strong>Codex</strong> — Primary/Secondary 버킷별 사용률. 리셋 시간이 표시됩니다.</li>
+    <li><strong>Gemini</strong> — 남은 비율 기반 사용률. RPM/RPD 제한 포함.</li>
+  </ul>
+  <h3>호출 이력 타임라인</h3>
+  <p>최근 CLI 호출의 성공/실패/타임아웃을 시간순으로 표시합니다. <span style="color:#3fb950">녹색</span>=성공, <span style="color:#f85149">빨강</span>=실패, <span style="color:#d29922">노랑</span>=타임아웃.</p>
+  <h3>토큰 누적 현황</h3>
+  <p>CLI별 누적 토큰 사용량과 호출 횟수입니다. 세션 시작 이후의 합계입니다.</p>
+  <h3>조작</h3>
+  <ul>
+    <li><strong>Reload</strong> — <code>POST /broker/reload</code> 호출. accounts.json을 핫리로드합니다.</li>
+    <li><strong>Broker</strong> — 계정 브로커 대시보드(별도 페이지)를 엽니다.</li>
+    <li>데이터는 <strong>5초</strong>마다 자동 갱신됩니다.</li>
+  </ul>
 </div>
 
 <div class="grid">
@@ -346,6 +383,30 @@ body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-s
     clearTimeout(rTimer);
     rTimer = setTimeout(function() { drawEvents(cachedEvents); }, 150);
   });
+
+  /* ── 가이드 토글 ── */
+  document.getElementById('guideBtn').onclick = function() {
+    var p = document.getElementById('guidePanel');
+    p.classList.toggle('open');
+    this.classList.toggle('ok');
+  };
+
+  /* ── 브로커 리로드 ── */
+  document.getElementById('reloadBtn').onclick = function() {
+    var btn = this;
+    btn.textContent = '...';
+    fetch('/broker/reload', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        btn.textContent = d.ok ? 'OK (' + (d.accounts || 0) + ')' : 'Fail';
+        btn.classList.toggle('ok', d.ok);
+        setTimeout(function() { btn.textContent = 'Reload'; btn.classList.remove('ok'); }, 3000);
+      })
+      .catch(function() {
+        btn.textContent = 'Error';
+        setTimeout(function() { btn.textContent = 'Reload'; }, 3000);
+      });
+  };
 
   poll();
   setInterval(poll, POLL);
