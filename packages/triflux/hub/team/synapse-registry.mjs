@@ -69,6 +69,7 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   let persistTimer = null;
+  let destroyed = false;
 
   function persist() {
     if (!persistPath) return;
@@ -84,10 +85,10 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function schedulePersist() {
-    if (persistTimer) return;
+    if (destroyed || persistTimer) return;
     persistTimer = setTimeout(() => {
       persistTimer = null;
-      persist();
+      if (!destroyed) persist();
     }, 200);
     if (typeof persistTimer.unref === "function") persistTimer.unref();
   }
@@ -277,6 +278,7 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function destroy() {
+    destroyed = true;
     for (const sessionId of monitors.keys()) {
       stopMonitor(sessionId);
     }

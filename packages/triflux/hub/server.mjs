@@ -593,6 +593,20 @@ export async function startHub({
     locks: swarmLocks,
   });
 
+  // Synapse Layer 5: emitter subscribers — bridge events to hub logging
+  synapseEmitter.on("synapse.session.started", ({ sessionId }) => {
+    hubLog.info({ sessionId }, "synapse.session.started");
+  });
+  synapseEmitter.on("synapse.session.heartbeat", ({ sessionId }) => {
+    hubLog.debug({ sessionId }, "synapse.session.heartbeat");
+  });
+  synapseEmitter.on("synapse.session.stale", ({ sessionId }) => {
+    hubLog.warn({ sessionId }, "synapse.session.stale");
+  });
+  synapseEmitter.on("synapse.session.removed", ({ sessionId }) => {
+    hubLog.info({ sessionId }, "synapse.session.removed");
+  });
+
   const hitl = createHitlManager(store, router);
   const pipe = createPipeServer({
     router,
@@ -758,6 +772,33 @@ export async function startHub({
           ? [...result.broker.snapshot()].length
           : 0;
         return writeJson(res, 200, { ok: true, accounts });
+      }
+
+      // ── Synapse Layer 5: session registry + locks + preflight routes ──
+      if (path === "/synapse/sessions" && req.method === "GET") {
+        return writeJson(res, 200, { ok: true, ...synapseRegistry.snapshot(), ts: Date.now() });
+      }
+
+      if (path === "/synapse/locks" && req.method === "GET") {
+        return writeJson(res, 200, { ok: true, locks: swarmLocks.snapshot(), ts: Date.now() });
+      }
+
+      if (path === "/synapse/preflight" && req.method === "POST") {
+        const VALID_OPS = new Set(["checkout", "rebase", "cherry-pick", "reset", "stash-pop", "worktree-remove"]);
+        try {
+          const body = await parseBody(req);
+          const { op, args = {}, sessionContext = {} } = body;
+          if (!op || typeof op !== "string") {
+            return writeJson(res, 400, { ok: false, error: "op 필수" });
+          }
+          if (!VALID_OPS.has(op)) {
+            return writeJson(res, 400, { ok: false, error: `invalid op: ${op}` });
+          }
+          const result = gitPreflight.check(op, args, sessionContext);
+          return writeJson(res, 200, { ok: true, ...result });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
       }
 
       if (path.startsWith("/bridge")) {
