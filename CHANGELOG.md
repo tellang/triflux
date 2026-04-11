@@ -2,6 +2,13 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **CodexAppServerWorker** (`hub/workers/codex-app-server-worker.mjs`) — Real-time streaming worker using codex 0.119.0 EXPERIMENTAL app-server JSON-RPC 2.0 protocol. Emits 12 distinct `kind` events (thread/turn/item status, text/thinking/plan/exec/file deltas, tool progress, approval review, error) via `/bridge/publish`. See `docs/workers/codex-app-server.md`.
+- **JsonRpcStdioClient** (`hub/workers/lib/jsonrpc-stdio.mjs`) — Minimal JSON-RPC 2.0 stdio client with AC18 max line size cap (1MB) for DoS defense.
+- **Factory transport dispatch**: `createWorker('codex', { transport: 'app-server' })` or `createWorker('codex-app-server')` routes to new real-time worker with default `publishCallback` wired to `/bridge/publish`.
+
 ## [10.9.2] - 2026-04-11
 
 ### Fixed
