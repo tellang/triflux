@@ -42,6 +42,7 @@ function sanitizeSession(raw, fallbackSessionId = "") {
 export function createSynapseRegistry(opts = {}) {
   const {
     persistPath,
+    emitter = null,
     localHeartbeatIntervalMs = DEFAULT_LOCAL_HEARTBEAT_INTERVAL_MS,
     localTimeoutMs = DEFAULT_LOCAL_TIMEOUT_MS,
     remoteHeartbeatIntervalMs = DEFAULT_REMOTE_HEARTBEAT_INTERVAL_MS,
@@ -101,10 +102,11 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function notifyStale(session) {
-    // TODO: emit synapse.session.stale via Hub deliveryEmitter
+    const clone = cloneSession(session);
+    emitter?.emit("synapse.session.stale", { sessionId: session.sessionId, session: clone });
     for (const callback of staleCallbacks) {
       try {
-        callback(cloneSession(session));
+        callback(clone);
       } catch {
         /* no-op */
       }
@@ -112,10 +114,11 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function notifyRemoved(session) {
-    // TODO: emit synapse.session.removed via Hub deliveryEmitter
+    const clone = cloneSession(session);
+    emitter?.emit("synapse.session.removed", { sessionId: session.sessionId, session: clone });
     for (const callback of removedCallbacks) {
       try {
-        callback(cloneSession(session));
+        callback(clone);
       } catch {
         /* no-op */
       }
@@ -135,6 +138,7 @@ export function createSynapseRegistry(opts = {}) {
       const elapsedMs = now() - current.lastHeartbeat;
       if (elapsedMs > timeoutFor(current) && current.status !== "stale") {
         current.status = "stale";
+        persist();
         notifyStale(current);
       }
     }, intervalFor(session));
@@ -168,7 +172,7 @@ export function createSynapseRegistry(opts = {}) {
     startMonitor(sessionId);
     persist();
 
-    // TODO: emit synapse.session.started via Hub deliveryEmitter
+    emitter?.emit("synapse.session.started", { sessionId, session: cloneSession(session) });
     return { ok: true, sessionId };
   }
 
@@ -216,7 +220,7 @@ export function createSynapseRegistry(opts = {}) {
     }
 
     persist();
-    // TODO: emit synapse.session.heartbeat via Hub deliveryEmitter
+    emitter?.emit("synapse.session.heartbeat", { sessionId: normalized, partial: partialMeta });
     return true;
   }
 
