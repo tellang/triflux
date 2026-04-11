@@ -6,7 +6,7 @@ import { createWtManager } from "../../hub/team/wt-manager.mjs";
  * Windows Terminal 프로필 실행 및 관리 통합 테스트
  * 실제 Windows 환경에서 wt.exe가 설치되어 있어야 정상 동작함.
  */
-describe("wt-profile-launch integration", { skip: process.platform !== "win32" }, () => {
+describe("wt-profile-launch integration", { skip: process.platform !== "win32" || !process.env.TFX_INTEGRATION_TESTS }, () => {
   const wt = createWtManager();
   const testTitle = `tfx-test-${Date.now()}`;
 
