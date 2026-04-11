@@ -64,6 +64,43 @@ const REQUIRED_CODEX_PROFILES = [
 
 const HUD_SYNC_EXCLUDES = new Set(["omc-hud.mjs", "omc-hud.mjs.bak"]);
 
+/**
+ * hub/workers/*.mjs + hub/ 루트의 worker 의존성 파일을 자동 스캔.
+ * 수동 리스트 대신 glob으로 탐색하여 파일 추가 시 sync 누락 방지.
+ */
+function scanHubWorkerFiles(pluginRoot, claudeDir) {
+  const results = [];
+  const hubRoot = join(pluginRoot, "hub");
+  if (!existsSync(hubRoot)) return results;
+
+  // hub/workers/*.mjs 전체
+  const workersDir = join(hubRoot, "workers");
+  if (existsSync(workersDir)) {
+    for (const f of readdirSync(workersDir).sort()) {
+      if (!f.endsWith(".mjs")) continue;
+      results.push({
+        src: join(workersDir, f),
+        dst: join(claudeDir, "scripts", "hub", "workers", f),
+        label: `hub/workers/${f}`,
+      });
+    }
+  }
+
+  // hub/ 루트: worker가 import하는 의존성 (cli-adapter-base, platform 등)
+  const hubRootDeps = ["cli-adapter-base.mjs", "platform.mjs", "account-broker.mjs"];
+  for (const f of hubRootDeps) {
+    if (existsSync(join(hubRoot, f))) {
+      results.push({
+        src: join(hubRoot, f),
+        dst: join(claudeDir, "scripts", "hub", f),
+        label: `hub/${f}`,
+      });
+    }
+  }
+
+  return results;
+}
+
 function scanHudFiles(pluginRoot, claudeDir) {
   const hudRoot = join(pluginRoot, "hud");
   if (!existsSync(hudRoot)) return [];
@@ -124,51 +161,7 @@ const SYNC_MAP = [
     dst: join(CLAUDE_DIR, "scripts", "tfx-route-worker.mjs"),
     label: "tfx-route-worker.mjs",
   },
-  {
-    src: join(PLUGIN_ROOT, "hub", "workers", "codex-mcp.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "codex-mcp.mjs"),
-    label: "hub/workers/codex-mcp.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hub", "workers", "delegator-mcp.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "delegator-mcp.mjs"),
-    label: "hub/workers/delegator-mcp.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hub", "workers", "interface.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "interface.mjs"),
-    label: "hub/workers/interface.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hub", "workers", "gemini-worker.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "gemini-worker.mjs"),
-    label: "hub/workers/gemini-worker.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hub", "workers", "claude-worker.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "claude-worker.mjs"),
-    label: "hub/workers/claude-worker.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hub", "workers", "worker-utils.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "worker-utils.mjs"),
-    label: "hub/workers/worker-utils.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hub", "workers", "factory.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "workers", "factory.mjs"),
-    label: "hub/workers/factory.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hub", "cli-adapter-base.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "cli-adapter-base.mjs"),
-    label: "hub/cli-adapter-base.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "hub", "platform.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "hub", "platform.mjs"),
-    label: "hub/platform.mjs",
-  },
+  ...scanHubWorkerFiles(PLUGIN_ROOT, CLAUDE_DIR),
   ...scanHudFiles(PLUGIN_ROOT, CLAUDE_DIR),
   {
     src: join(PLUGIN_ROOT, "scripts", "notion-read.mjs"),
