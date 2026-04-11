@@ -237,7 +237,14 @@ export async function executeWithCircuitBroker({
     return lastResult;
   }
 
-  brokerMod.broker.release(lease.id, { ok: false });
+  if (lastResult.failureMode === "rate_limited") {
+    const quotaCooldowns = { codex: 5 * 60 * 60_000, gemini: 24 * 60 * 60_000 };
+    const coolMs = quotaCooldowns[provider] || 5 * 60 * 60_000;
+    brokerMod.broker.markRateLimited(lease.id, coolMs);
+    brokerMod.broker.emit("cooldown", { id: lease.id, provider, coolMs, reason: "quota_exhausted" });
+  } else {
+    brokerMod.broker.release(lease.id, { ok: false });
+  }
   return {
     ...lastResult,
     retried: attempts.length > 1,

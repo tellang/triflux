@@ -45,6 +45,10 @@ const ConfigSchema = z.object({
 });
 
 const DEFAULT_COOLDOWN_MS = 300_000; // 5 minutes
+const QUOTA_COOLDOWN_MS = {
+  codex: 5 * 60 * 60_000, // 5 hours
+  gemini: 24 * 60 * 60_000, // 24 hours
+};
 const TIER_PRIORITY = { pro: 0, plus: 1, unknown: 2, free: 3 };
 const LEASE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CIRCUIT_WINDOW_MS = 10 * 60_000; // 10 minutes
