@@ -61,27 +61,22 @@ You don't need to memorize commands. Say what you want in natural language — t
 
 ## Quick Start
 
-### 1. Install
+**Claude Code** (recommended):
 
-**Claude Code Plugin** (recommended):
-
-```bash
-claude plugin add triflux
+```
+/plugin marketplace add tellang/triflux
+/plugin install triflux@tellang
 ```
 
-**npm global**:
+**npm**:
 
 ```bash
 npm install -g triflux
 ```
 
-### 2. Setup
+Then run `tfx setup` to configure your environment.
 
-```bash
-tfx setup
-```
-
-### 3. Use
+### Use
 
 ```bash
 # 3-party consensus — three models argue, only consensus survives

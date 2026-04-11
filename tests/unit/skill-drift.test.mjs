@@ -164,11 +164,11 @@ describe("tfx-hub SKILL.md — hub 모듈 참조", () => {
     );
   });
 
-  it("브릿지 엔드포인트 섹션 존재", () => {
+  it("CLI 대응 섹션 존재", () => {
     const content = readSkill("tfx-hub");
     assert.ok(
-      /##\s+브릿지\s+REST\s+엔드포인트/.test(content),
-      "브릿지 REST 엔드포인트 섹션이 없음",
+      /##\s+CLI\s+대응/.test(content),
+      "CLI 대응 섹션이 없음",
     );
   });
 
