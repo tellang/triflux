@@ -1711,9 +1711,9 @@ function cleanupStaleSpawnSessions(log) {
 const QUOTA_CACHE_PATH = join(CACHE_DIR, "broker-quota-cache.json");
 
 async function checkSingleAccountQuota(acct) {
-  const authPath = join(PID_DIR, acct.authFile);
-  if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
   try {
+    const authPath = join(PID_DIR, acct.authFile);
+    if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
     const auth = JSON.parse(readFileSync(authPath, "utf8"));
     if (acct.provider === "codex") {
       const token = auth.tokens?.access_token || auth.OPENAI_API_KEY || "";
@@ -1741,7 +1741,12 @@ async function checkSingleAccountQuota(acct) {
 async function refreshAllAccountQuotas() {
   const snap = brokerInstance?.snapshot() || [];
   const checks = snap.filter(a => a.authFile).map(a => checkSingleAccountQuota(a));
-  const results = await Promise.all(checks);
+  const settled = await Promise.allSettled(checks);
+  const results = settled.map((s, i) =>
+    s.status === "fulfilled"
+      ? s.value
+      : { id: snap.filter(a => a.authFile)[i]?.id ?? "unknown", status: "error", message: String(s.reason?.message || s.reason).substring(0, 60) },
+  );
   // 캐시 저장
   try {
     writeFileSync(QUOTA_CACHE_PATH, JSON.stringify({ ts: Date.now(), results }));
