@@ -256,8 +256,9 @@ export async function acquireLock(options = {}) {
         const raw = readFileSync(lockPath, "utf8");
         const data = parseJson(raw, {});
         const stats = statSync(lockPath);
+        const STALE_LOCK_AGE_MS = 60_000;
         const staleByPid = !isPidAlive(data?.pid);
-        const staleByAge = Date.now() - stats.mtimeMs > timeoutMs;
+        const staleByAge = Date.now() - stats.mtimeMs > STALE_LOCK_AGE_MS;
         if (staleByPid || staleByAge) {
           try {
             unlinkSync(lockPath);
