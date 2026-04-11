@@ -1795,6 +1795,12 @@ EOF
       team_complete_task "success" "$output_preview"
     elif [[ "$exit_code" -eq 124 ]]; then
       team_complete_task "timeout" "타임아웃 (${TIMEOUT_SEC}초)"
+    elif [[ "$exit_code" -eq 143 ]]; then
+      team_complete_task "timeout" "외부 시그널로 종료 (SIGTERM, ${TIMEOUT_SEC}초)"
+    elif [[ "$exit_code" -eq 137 ]]; then
+      team_complete_task "timeout" "외부 시그널로 종료 (SIGKILL, ${TIMEOUT_SEC}초)"
+    elif [[ "$exit_code" -eq 130 ]]; then
+      team_complete_task "failed" "사용자 인터럽트 (SIGINT)"
     else
       local err_preview
       err_preview=$(tail -c 1024 "$STDERR_LOG" 2>/dev/null || echo "에러 정보 없음")
