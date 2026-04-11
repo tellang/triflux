@@ -39,6 +39,15 @@ describe("doctor-diagnose: 진단 번들 생성", () => {
     assert.equal(typeof result.hookTimingCount, "number");
   });
 
+  it("codexMcpApproval 진단 결과 포함", () => {
+    assert.ok(result.codexMcpApproval, "codexMcpApproval 필드 누락");
+    assert.equal(typeof result.codexMcpApproval.found, "boolean");
+    if (result.codexMcpApproval.found) {
+      assert.ok(Array.isArray(result.codexMcpApproval.tools));
+      assert.ok(result.codexMcpApproval.tools.length > 0);
+    }
+  });
+
   after(() => {
     // 테스트 생성 zip 정리
     if (result?.zipPath && existsSync(result.zipPath)) {

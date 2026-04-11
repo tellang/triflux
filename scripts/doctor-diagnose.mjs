@@ -18,6 +18,7 @@ import { join } from "node:path";
 const TRIFLUX_DIR = join(homedir(), ".triflux");
 const LOGS_DIR = join(TRIFLUX_DIR, "logs");
 const DIAG_DIR = join(TRIFLUX_DIR, "diagnostics");
+const CODEX_CONFIG_PATH = join(homedir(), ".codex", "config.toml");
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
 function collectSpawnTraces(cutoffMs = ONE_HOUR_MS) {
@@ -82,6 +83,47 @@ function computeSpawnStats(traces) {
     peakRatePerSec: peakRate,
     maxConcurrent,
     blocked: blockedEvents.length,
+  };
+}
+
+/**
+ * ~/.codex/config.toml에서 [mcp_servers.*.tools.*] 섹션 내부의
+ * approval_mode = "approve"를 감지한다. 이 값이 있으면 codex exec가
+ * non-TTY subprocess에서 승인 대기로 stall한다.
+ * refs: tellang/triflux#66, Yeachan-Heo/oh-my-codex#1478
+ */
+function checkCodexMcpApproval() {
+  if (!existsSync(CODEX_CONFIG_PATH)) {
+    return { found: false, reason: "config.toml not found" };
+  }
+
+  let content;
+  try {
+    content = readFileSync(CODEX_CONFIG_PATH, "utf8");
+  } catch {
+    return { found: false, reason: "config.toml unreadable" };
+  }
+
+  const badTools = [];
+  let inMcpTool = false;
+  let currentSection = "";
+
+  for (const line of content.split("\n")) {
+    const sectionMatch = line.match(/^\[(.+)\]/);
+    if (sectionMatch) {
+      currentSection = sectionMatch[1];
+      inMcpTool = /^mcp_servers\..+\.tools\./.test(currentSection);
+      continue;
+    }
+    if (inMcpTool && /^\s*approval_mode\s*=\s*"approve"/.test(line)) {
+      badTools.push(currentSection);
+    }
+  }
+
+  return {
+    found: badTools.length > 0,
+    tools: badTools,
+    fix: 'sed -i \'s/approval_mode = "approve"/approval_mode = "auto"/g\' ~/.codex/config.toml',
   };
 }
 
@@ -165,8 +207,27 @@ function generateSummary(stats, sysInfo, hookTimings, traceCount) {
     `blocked:           ${stats.blocked}`,
     `trace entries:     ${traceCount}`,
     "",
-    "--- Hook Timings (last 1h) ---",
+    "--- Codex MCP Approval Check ---",
   ];
+
+  const mcpCheck = checkCodexMcpApproval();
+  if (!mcpCheck.found && mcpCheck.reason) {
+    lines.push(`  ${mcpCheck.reason}`);
+  } else if (mcpCheck.found) {
+    lines.push(`  ⚠ ${mcpCheck.tools.length}개 MCP tool에 approval_mode="approve" 감지`);
+    lines.push(`    codex exec non-TTY stall 위험 (refs: triflux#66)`);
+    for (const tool of mcpCheck.tools) {
+      lines.push(`    - [${tool}]`);
+    }
+    lines.push(`    fix: ${mcpCheck.fix}`);
+  } else {
+    lines.push("  ✔ MCP tool approval_mode 정상");
+  }
+
+  lines.push(
+    "",
+    "--- Hook Timings (last 1h) ---",
+  );
 
   if (hookTimings.length === 0) {
     lines.push("no hook timing data found");
@@ -248,6 +309,8 @@ export async function diagnose({ json = false } = {}) {
     rmSync(bundleDir, { recursive: true, force: true });
   } catch { /* leave it */ }
 
+  const mcpApprovalCheck = checkCodexMcpApproval();
+
   const result = {
     ok: true,
     zipPath,
@@ -255,6 +318,7 @@ export async function diagnose({ json = false } = {}) {
     sysInfo,
     traceCount: traces.length,
     hookTimingCount: hookTimings.length,
+    codexMcpApproval: mcpApprovalCheck,
   };
 
   if (json) {
