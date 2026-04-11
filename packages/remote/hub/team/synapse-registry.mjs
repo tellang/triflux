@@ -165,8 +165,12 @@ export function createSynapseRegistry(opts = {}) {
     startMonitor(sessionId);
   }
 
-  function register(meta) {
-    const sessionId = normalizeSessionId(meta?.sessionId);
+  function register(sessionIdOrMeta, meta = null) {
+    const normalizedMeta =
+      meta && typeof meta === "object"
+        ? { ...meta, sessionId: sessionIdOrMeta }
+        : sessionIdOrMeta;
+    const sessionId = normalizeSessionId(normalizedMeta?.sessionId);
     if (!sessionId) {
       return { ok: false, sessionId, reason: "invalid_id" };
     }
@@ -178,7 +182,7 @@ export function createSynapseRegistry(opts = {}) {
 
     const session = sanitizeSession(
       {
-        ...meta,
+        ...normalizedMeta,
         sessionId,
         status: "active",
         lastHeartbeat: now(),

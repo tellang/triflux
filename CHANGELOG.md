@@ -2,6 +2,18 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.9.16] - 2026-04-12
+
+### Added
+- `/synapse/register`, `/synapse/heartbeat`, `/synapse/unregister` HTTP 엔드포인트
+- `synapse-http.mjs` fire-and-forget 헬퍼 — hub HTTP API 호출
+- `conductor.mjs` 상태 전이 시 자동 synapse register/heartbeat/unregister (HEALTHY→COMPLETED/DEAD)
+- `headless.mjs` runHeadless 워커별 synapse 세션 등록/해제 + 진행 heartbeat
+- 단위 테스트: synapse-http, synapse-wiring
+
+### Fixed
+- tfx-route.sh: exit 143/137/130 시그널 해석 (SIGTERM/SIGKILL/SIGINT 구분)
+
 ## [10.9.15] - 2026-04-12
 
 ### Added

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it, mock } from "node:test";
-import { join } from "node:path";
-import { mkdirSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, it } from "node:test";
 
 const TEST_LOG_DIR = join(tmpdir(), `spawn-trace-test-${Date.now()}`);
 
@@ -12,7 +12,11 @@ describe("spawn-trace", () => {
   });
 
   after(() => {
-    try { rmSync(TEST_LOG_DIR, { recursive: true, force: true }); } catch { /* ignore */ }
+    try {
+      rmSync(TEST_LOG_DIR, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
   });
 
   it("exports child_process-compatible API surface", async () => {
@@ -30,6 +34,28 @@ describe("spawn-trace", () => {
     const mod = await import("../../hub/lib/spawn-trace.mjs");
     assert.equal(typeof mod.MAX_SPAWN_PER_SEC, "number");
     assert.equal(typeof mod.MAX_TOTAL_DESCENDANTS, "number");
+    assert.equal(typeof mod.getMaxSpawnPerSec, "function");
+    assert.equal(typeof mod.reload, "function");
+  });
+
+  it("reload re-evaluates TRIFLUX_MAX_SPAWN_RATE", async () => {
+    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const original = process.env.TRIFLUX_MAX_SPAWN_RATE;
+
+    try {
+      process.env.TRIFLUX_MAX_SPAWN_RATE = "7";
+      assert.equal(mod.reload(), 7);
+      assert.equal(mod.getMaxSpawnPerSec(), 7);
+      assert.equal(mod.MAX_SPAWN_PER_SEC, 7);
+      assert.equal(mod.default.MAX_SPAWN_PER_SEC, 7);
+    } finally {
+      if (original == null) {
+        delete process.env.TRIFLUX_MAX_SPAWN_RATE;
+      } else {
+        process.env.TRIFLUX_MAX_SPAWN_RATE = original;
+      }
+      mod.reload();
+    }
   });
 
   it("spawn returns a ChildProcess-like object", async () => {
@@ -46,10 +72,14 @@ describe("spawn-trace", () => {
 
   it("execFileSync returns stdout buffer", async () => {
     const mod = await import("../../hub/lib/spawn-trace.mjs");
-    const result = mod.execFileSync("node", ["-e", 'process.stdout.write("hello")'], {
-      encoding: "utf8",
-      windowsHide: true,
-    });
+    const result = mod.execFileSync(
+      "node",
+      ["-e", 'process.stdout.write("hello")'],
+      {
+        encoding: "utf8",
+        windowsHide: true,
+      },
+    );
     assert.equal(result.trim(), "hello");
   });
 
@@ -81,12 +111,16 @@ describe("spawn-trace", () => {
   it("strips trace-specific options before passing to child_process", async () => {
     const mod = await import("../../hub/lib/spawn-trace.mjs");
     // reason and dedupe should not cause child_process to error
-    const result = mod.execFileSync("node", ["-e", 'process.stdout.write("ok")'], {
-      encoding: "utf8",
-      windowsHide: true,
-      reason: "test:strip-options",
-      dedupe: "test-key",
-    });
+    const result = mod.execFileSync(
+      "node",
+      ["-e", 'process.stdout.write("ok")'],
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        reason: "test:strip-options",
+        dedupe: "test-key",
+      },
+    );
     assert.equal(result.trim(), "ok");
   });
 
@@ -96,5 +130,7 @@ describe("spawn-trace", () => {
     assert.equal(typeof mod.default.execFile, "function");
     assert.equal(typeof mod.default.execFileSync, "function");
     assert.equal(typeof mod.default.MAX_SPAWN_PER_SEC, "number");
+    assert.equal(typeof mod.default.getMaxSpawnPerSec, "function");
+    assert.equal(typeof mod.default.reload, "function");
   });
 });

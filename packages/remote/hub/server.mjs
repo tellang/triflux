@@ -27,6 +27,7 @@ import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.m
 import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
 import { createHitlManager } from "@triflux/core/hub/hitl.mjs";
 import { cleanupOrphanNodeProcesses } from "@triflux/core/hub/lib/process-utils.mjs";
+import * as spawnTrace from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { wrapRequestHandler } from "@triflux/core/hub/middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
 import { createRouter } from "@triflux/core/hub/router.mjs";
@@ -738,6 +739,13 @@ export async function startHub({
           ? [...result.broker.snapshot()].length
           : 0;
         return writeJson(res, 200, { ok: true, accounts });
+      }
+
+      if (path === "/spawn-trace/reload" && req.method === "POST") {
+        return writeJson(res, 200, {
+          ok: true,
+          max_spawn_per_sec: spawnTrace.reload(),
+        });
       }
 
       if (path.startsWith("/bridge")) {

@@ -163,6 +163,106 @@ describe("startHub() 라이프사이클", () => {
     });
   });
 
+  describe("POST /spawn-trace/reload", () => {
+    it("환경변수를 다시 읽고 새 rate limit을 반환해야 한다", async () => {
+      const spawnTrace = await import("../../hub/lib/spawn-trace.mjs");
+      const original = process.env.TRIFLUX_MAX_SPAWN_RATE;
+
+      try {
+        process.env.TRIFLUX_MAX_SPAWN_RATE = "17";
+        const res = await fetch(`${baseUrl}/spawn-trace/reload`, {
+          method: "POST",
+          headers: bridgeHeaders(),
+        });
+        assert.equal(res.status, 200);
+
+        const body = await res.json();
+        assert.deepEqual(body, { ok: true, max_spawn_per_sec: 17 });
+        assert.equal(spawnTrace.getMaxSpawnPerSec(), 17);
+      } finally {
+        if (original == null) {
+          delete process.env.TRIFLUX_MAX_SPAWN_RATE;
+        } else {
+          process.env.TRIFLUX_MAX_SPAWN_RATE = original;
+        }
+        spawnTrace.reload();
+      }
+    });
+  });
+
+  describe("POST /synapse/register|heartbeat|unregister", () => {
+    it("세션 등록, heartbeat 갱신, 해제를 처리해야 한다", async () => {
+      const sessionId = `synapse-http-${randomUUID().slice(0, 8)}`;
+
+      const registerRes = await fetch(`${baseUrl}/synapse/register`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({
+          sessionId,
+          host: "127.0.0.1",
+          worktreePath: "/tmp/triflux-worktree",
+          branch: "feature/synapse-endpoints",
+          dirtyFiles: ["hub/server.mjs"],
+          taskSummary: "register session",
+          isRemote: false,
+        }),
+      });
+      assert.equal(registerRes.status, 200);
+      assert.deepEqual(await registerRes.json(), { ok: true, sessionId });
+
+      const heartbeatRes = await fetch(`${baseUrl}/synapse/heartbeat`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({
+          sessionId,
+          partial: {
+            branch: "feature/synapse-heartbeat",
+            dirtyFiles: ["hub/server.mjs", "tests/integration/hub-server.test.mjs"],
+            taskSummary: "heartbeat update",
+          },
+        }),
+      });
+      assert.equal(heartbeatRes.status, 200);
+      assert.deepEqual(await heartbeatRes.json(), { ok: true });
+
+      const sessionsRes = await fetch(`${baseUrl}/synapse/sessions`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      assert.equal(sessionsRes.status, 200);
+      const sessionsBody = await sessionsRes.json();
+      const session = sessionsBody.sessions.find((entry) => entry.sessionId === sessionId);
+      assert.ok(session);
+      assert.equal(session.branch, "feature/synapse-heartbeat");
+      assert.deepEqual(session.dirtyFiles, [
+        "hub/server.mjs",
+        "tests/integration/hub-server.test.mjs",
+      ]);
+      assert.equal(session.taskSummary, "heartbeat update");
+
+      const unregisterRes = await fetch(`${baseUrl}/synapse/unregister`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({ sessionId }),
+      });
+      assert.equal(unregisterRes.status, 200);
+      assert.deepEqual(await unregisterRes.json(), { ok: true });
+    });
+
+    it("없는 세션 heartbeat는 400을 반환해야 한다", async () => {
+      const res = await fetch(`${baseUrl}/synapse/heartbeat`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({
+          sessionId: `missing-${randomUUID().slice(0, 8)}`,
+          partial: { taskSummary: "missing" },
+        }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.ok, false);
+    });
+  });
+
   // ── OPTIONS (CORS preflight) ──
 
   describe("OPTIONS 요청", () => {

@@ -28,6 +28,7 @@ import { createAssignCallbackServer } from "./assign-callbacks.mjs";
 import { DelegatorService } from "./delegator/index.mjs";
 import { createHitlManager } from "./hitl.mjs";
 import { cleanupOrphanNodeProcesses } from "./lib/process-utils.mjs";
+import * as spawnTrace from "./lib/spawn-trace.mjs";
 import { wrapRequestHandler } from "./middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
 import { createRouter } from "./router.mjs";
@@ -774,9 +775,58 @@ export async function startHub({
         return writeJson(res, 200, { ok: true, accounts });
       }
 
+      if (path === "/spawn-trace/reload" && req.method === "POST") {
+        return writeJson(res, 200, {
+          ok: true,
+          max_spawn_per_sec: spawnTrace.reload(),
+        });
+      }
+
       // ── Synapse Layer 5: session registry + locks + preflight routes ──
       if (path === "/synapse/sessions" && req.method === "GET") {
         return writeJson(res, 200, { ok: true, ...synapseRegistry.snapshot(), ts: Date.now() });
+      }
+
+      if (path === "/synapse/register" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId } = body || {};
+          const result = synapseRegistry.register(sessionId, body);
+          if (!result?.ok) {
+            throw new Error(result?.reason || "register failed");
+          }
+          return writeJson(res, 200, { ok: true, sessionId: result.sessionId || sessionId });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      if (path === "/synapse/heartbeat" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId, partial } = body || {};
+          const ok = synapseRegistry.heartbeat(sessionId, partial);
+          if (!ok) {
+            throw new Error("heartbeat failed");
+          }
+          return writeJson(res, 200, { ok: true });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      if (path === "/synapse/unregister" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId } = body || {};
+          const ok = synapseRegistry.unregister(sessionId);
+          if (!ok) {
+            throw new Error("unregister failed");
+          }
+          return writeJson(res, 200, { ok: true });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
       }
 
       if (path === "/synapse/locks" && req.method === "GET") {

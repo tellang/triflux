@@ -7,7 +7,7 @@ import { join } from "node:path";
 const LOG_DIR = join(homedir(), ".triflux", "logs");
 const DEDUPE_WINDOW_MS = 5_000;
 const RATE_WINDOW_MS = 1_000;
-export const MAX_SPAWN_PER_SEC = resolvePositiveInteger(
+export let MAX_SPAWN_PER_SEC = resolvePositiveInteger(
   process.env.TRIFLUX_MAX_SPAWN_RATE,
   30,
 );
@@ -149,6 +149,18 @@ function createPolicyError(reasonCode, message, meta = {}) {
   return error;
 }
 
+export function getMaxSpawnPerSec() {
+  return MAX_SPAWN_PER_SEC;
+}
+
+export function reload() {
+  MAX_SPAWN_PER_SEC = resolvePositiveInteger(
+    process.env.TRIFLUX_MAX_SPAWN_RATE,
+    30,
+  );
+  return getMaxSpawnPerSec();
+}
+
 function logBlocked(traceId, command, args, options, error, extra = {}) {
   appendTrace({
     event: "blocked",
@@ -167,6 +179,7 @@ function enforceGuards(command, args, options) {
   const now = Date.now();
   trimRecentSpawnTimes(now);
   trimDedupeEntries(now);
+  const maxSpawnPerSec = getMaxSpawnPerSec();
 
   const dedupeKey = getDedupeKey(options);
   if (dedupeKey) {
@@ -180,11 +193,11 @@ function enforceGuards(command, args, options) {
     }
   }
 
-  if (recentSpawnTimes.length >= MAX_SPAWN_PER_SEC) {
+  if (recentSpawnTimes.length >= maxSpawnPerSec) {
     return createPolicyError(
       "rate_limit",
-      `spawn-trace rate limit exceeded (${MAX_SPAWN_PER_SEC}/sec)`,
-      { maxPerSec: MAX_SPAWN_PER_SEC },
+      `spawn-trace rate limit exceeded (${maxSpawnPerSec}/sec)`,
+      { maxPerSec: maxSpawnPerSec },
     );
   }
 
@@ -365,7 +378,13 @@ export function execFile(file, args, options, callback) {
     normalized.options,
   );
   if (blockedError) {
-    logBlocked(traceId, file, normalized.argsList, normalized.options, blockedError);
+    logBlocked(
+      traceId,
+      file,
+      normalized.argsList,
+      normalized.options,
+      blockedError,
+    );
     if (typeof normalized.callback === "function") {
       queueMicrotask(() => normalized.callback(blockedError, "", ""));
       return createRejectedChild(file, normalized.argsList, blockedError);
@@ -417,9 +436,16 @@ export function execFileSync(file, args, options) {
     normalized.options,
   );
   if (blockedError) {
-    logBlocked(traceId, file, normalized.argsList, normalized.options, blockedError, {
-      sync: true,
-    });
+    logBlocked(
+      traceId,
+      file,
+      normalized.argsList,
+      normalized.options,
+      blockedError,
+      {
+        sync: true,
+      },
+    );
     throw blockedError;
   }
 
@@ -491,6 +517,10 @@ export default {
   spawn,
   execFile,
   execFileSync,
-  MAX_SPAWN_PER_SEC,
+  get MAX_SPAWN_PER_SEC() {
+    return MAX_SPAWN_PER_SEC;
+  },
   MAX_TOTAL_DESCENDANTS,
+  getMaxSpawnPerSec,
+  reload,
 };

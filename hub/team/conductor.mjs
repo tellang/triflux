@@ -8,7 +8,6 @@
 // 3. Auto-restart (maxRestarts=3)
 // 4. JSONL event log (블랙박스 리코더)
 
-import { execFile, spawn } from "../lib/spawn-trace.mjs";
 import { EventEmitter } from "node:events";
 import {
   copyFileSync,
@@ -20,6 +19,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
+import { execFile, spawn } from "../lib/spawn-trace.mjs";
 import { killProcess } from "../platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
 import {
@@ -28,8 +28,13 @@ import {
 } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
-import { buildLauncher, getAdapter } from "./launcher-template.mjs";
-import { createRemoteProbe } from "./remote-probe.mjs";
+import { buildLauncher } from "./launcher-template.mjs";
+import {
+  buildSynapseTaskSummary,
+  heartbeatSynapseSession,
+  registerSynapseSession,
+  unregisterSynapseSession,
+} from "./synapse-http.mjs";
 
 /** 세션 상태 */
 export const STATES = Object.freeze({
@@ -126,6 +131,25 @@ export function createConductor(opts = {}) {
   const sessions = new Map();
   let shuttingDown = false;
   const publicApi = null;
+  const synapseOpts = {
+    baseUrl: opts.synapseBaseUrl,
+    fetchImpl: opts.synapseFetch,
+  };
+
+  function buildSynapseMeta(session, state = session.state, reason = "") {
+    return {
+      sessionId: session.id,
+      host:
+        typeof session.config.host === "string" &&
+        session.config.host.length > 0
+          ? session.config.host
+          : "local",
+      taskSummary: buildSynapseTaskSummary(session.config.prompt),
+      status: state,
+      reason,
+      isRemote: Boolean(session.config.remote),
+    };
+  }
 
   // 공유 event log (모든 세션 이벤트를 하나의 JSONL에)
   const eventLog = createEventLog(join(logsDir, "conductor-events.jsonl"));
@@ -165,6 +189,21 @@ export function createConductor(opts = {}) {
       to: nextState,
       reason,
     });
+
+    if (nextState === STATES.HEALTHY) {
+      registerSynapseSession(
+        buildSynapseMeta(session, nextState, reason),
+        synapseOpts,
+      );
+    }
+    heartbeatSynapseSession(
+      session.id,
+      buildSynapseMeta(session, nextState, reason),
+      synapseOpts,
+    );
+    if (nextState === STATES.COMPLETED || nextState === STATES.DEAD) {
+      unregisterSynapseSession(session.id, synapseOpts);
+    }
 
     // Terminal state cleanup
     if (TERMINAL_STATES.has(nextState)) {
@@ -572,13 +611,16 @@ export function createConductor(opts = {}) {
     } else if (agent === "gemini") {
       remoteBin = "gemini -y";
     } else {
-      remoteBin = "codex exec -s danger-full-access --dangerously-bypass-approvals-and-sandbox";
+      remoteBin =
+        "codex exec -s danger-full-access --dangerously-bypass-approvals-and-sandbox";
     }
 
     // prompt는 stdin으로 전달 — 셸 이스케이프 문제 완전 회피
     const sshArgs = [
-      "-o", "ConnectTimeout=30",
-      "-o", "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=30",
+      "-o",
+      "BatchMode=yes",
       host,
       `${cdPrefix}${remoteBin}`,
     ];

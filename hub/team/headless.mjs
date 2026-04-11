@@ -5,7 +5,6 @@
 // 의존성: psmux.mjs (Node.js 내장 모듈만 사용)
 
 import { execSync } from "node:child_process";
-import { spawn } from "../lib/spawn-trace.mjs";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -33,6 +32,11 @@ import {
   startCapture,
   waitForCompletion,
 } from "./psmux.mjs";
+import {
+  buildSynapseTaskSummary,
+  registerSynapseSession,
+  unregisterSynapseSession,
+} from "./synapse-http.mjs";
 import { createLogDashboard } from "./tui.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
@@ -117,6 +121,18 @@ export async function deregisterHeadlessWorkers(
       }).catch(() => {}),
     ),
   );
+}
+
+function registerHeadlessSynapseWorker(workerId, prompt) {
+  registerSynapseSession({
+    sessionId: workerId,
+    host: "local",
+    taskSummary: buildSynapseTaskSummary(prompt),
+  });
+}
+
+function unregisterHeadlessSynapseWorker(workerId) {
+  unregisterSynapseSession(workerId);
 }
 
 /** MCP 프로필별 프롬프트 힌트 (tfx-route.sh resolve_mcp_policy의 경량 미러) */
@@ -554,6 +570,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     // pane 간 pipe-pane EBUSY 방지 — 이벤트 루프 해방하며 순차 대기
     if (i > 0) await new Promise((r) => setTimeout(r, 300));
     const dispatch = dispatchCommand(sessionName, newPaneId, cmd);
+    registerHeadlessSynapseWorker(workerId, assignment.prompt);
 
     if (safeProgress)
       safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
@@ -626,6 +643,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         scriptDir,
         scriptName: paneName,
       });
+      registerHeadlessSynapseWorker(workerId, assignment.prompt);
 
       // P1 fix: 비-progressive에서는 pane 리네임 금지 — 캡처 로그 경로가 타이틀 기반이므로
       // 리네임하면 waitForCompletion이 "codex (role).log"를 찾지만 실제는 "worker-N.log"로 불일치
@@ -754,6 +772,7 @@ async function awaitAll(
       const output = completion.matched
         ? readResult(d.resultFile, d.paneId)
         : "";
+      unregisterHeadlessSynapseWorker(d.workerId);
 
       if (safeProgress) {
         safeProgress({
@@ -861,6 +880,22 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   mkdirSync(RESULT_DIR, { recursive: true });
 
+  // Synapse: 세션 registration (fire-and-forget, hub 미응답 시 무시)
+  const synapseIds = assignments.map((_, i) => `${sessionName}-worker-${i + 1}`);
+  for (let i = 0; i < assignments.length; i++) {
+    const a = assignments[i];
+    requestJson("/synapse/register", {
+      method: "POST",
+      body: {
+        sessionId: synapseIds[i],
+        host: "local",
+        taskSummary: String(a.prompt || "").slice(0, 100),
+        isRemote: false,
+      },
+      timeoutMs: 1000,
+    }).catch(() => {});
+  }
+
   // in-process TUI: dashboard=true이고 stdout이 TTY일 때 직접 구동
   let tui = null;
   const resolvedLayout = resolveDashboardLayout(
@@ -918,9 +953,25 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     }
   }
 
+  // Synapse heartbeat: progress 이벤트마다 해당 워커의 세션 갱신
+  const feedSynapse = (event) => {
+    if (!event?.paneName) return;
+    const match = event.paneName.match(/worker-(\d+)/);
+    if (!match) return;
+    const idx = parseInt(match[1], 10) - 1;
+    const sid = synapseIds[idx];
+    if (!sid) return;
+    requestJson("/synapse/heartbeat", {
+      method: "POST",
+      body: { sessionId: sid, partial: { taskSummary: (event.snapshot || "").slice(0, 100) } },
+      timeoutMs: 500,
+    }).catch(() => {});
+  };
+
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
     feedTui(event);
+    feedSynapse(event);
     if (onProgress) {
       try {
         onProgress(event);
@@ -981,6 +1032,15 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     tui.close();
   }
 
+  // Synapse: 세션 unregister (fire-and-forget)
+  for (const sid of synapseIds) {
+    requestJson("/synapse/unregister", {
+      method: "POST",
+      body: { sessionId: sid },
+      timeoutMs: 1000,
+    }).catch(() => {});
+  }
+
   return { sessionName, results: collected };
 }
 
@@ -999,6 +1059,11 @@ export async function runHeadlessWithCleanup(assignments, opts = {}) {
   try {
     return await runHeadless(sessionName, assignments, runOpts);
   } finally {
+    for (let index = 0; index < assignments.length; index++) {
+      unregisterHeadlessSynapseWorker(
+        getHeadlessWorkerAgentId(sessionName, index),
+      );
+    }
     await deregisterHeadlessWorkers(sessionName, assignments.length);
     try {
       killPsmuxSession(sessionName);
@@ -1056,7 +1121,7 @@ export function applyTrifluxTheme(sessionName) {
  * WT 기본 프로필의 폰트 크기를 읽는다.
  * @returns {number} 기본 폰트 크기 (못 읽으면 12)
  */
-function getWtDefaultFontSize() {
+function _getWtDefaultFontSize() {
   const settingsPaths = [
     join(
       process.env.LOCALAPPDATA || "",
@@ -1096,7 +1161,7 @@ function getWtDefaultFontSize() {
  * @param {string} filePath — 대상 파일 경로
  * @param {string} data — 쓸 내용
  */
-function atomicWriteSync(filePath, data) {
+function _atomicWriteSync(filePath, data) {
   const tmpPath = `${filePath}.${process.pid}.tmp`;
   try {
     writeFileSync(tmpPath, data, "utf8");
@@ -1131,7 +1196,11 @@ function buildAttachTitle(sessionName, suffix = "") {
  * @param {number} [workerCount=2]
  * @returns {Promise<boolean>} 성공 여부
  */
-export async function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
+export async function autoAttachTerminal(
+  sessionName,
+  opts = {},
+  workerCount = 2,
+) {
   if (!process.env.WT_SESSION) return false;
   try {
     execSync("where wt.exe", { stdio: "ignore" });
@@ -1145,8 +1214,14 @@ export async function autoAttachTerminal(sessionName, opts = {}, workerCount = 2
   try {
     const safeSession = sanitizeSessionName(sessionName);
     if (workerCount >= 5) {
-      const resolvedLayout = resolveDashboardLayout(opts.dashboardLayout || "single", workerCount);
-      const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
+      const resolvedLayout = resolveDashboardLayout(
+        opts.dashboardLayout || "single",
+        workerCount,
+      );
+      const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(
+        /\\/g,
+        "/",
+      );
       await wt.createTab({
         title: buildAttachTitle(safeSession, "dashboard"),
         profile: "triflux",
@@ -1220,7 +1295,10 @@ export async function attachDashboardTab(
   try {
     const safeSession = sanitizeSessionName(sessionName);
     const resolvedLayout = resolveDashboardLayout(dashboardLayout, workerCount);
-    const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
+    const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(
+      /\\/g,
+      "/",
+    );
 
     await wt.createTab({
       title: buildAttachTitle(safeSession, "dashboard"),
@@ -1232,7 +1310,6 @@ export async function attachDashboardTab(
     return false;
   }
 }
-
 
 /**
  * 모든 워커 pane의 현재 스냅샷을 수집한다.
@@ -1415,6 +1492,11 @@ export async function runHeadlessInteractive(
     kill() {
       if (this._killed) return;
       this._killed = true;
+      for (let index = 0; index < assignments.length; index++) {
+        unregisterHeadlessSynapseWorker(
+          getHeadlessWorkerAgentId(sessionName, index),
+        );
+      }
       void deregisterHeadlessWorkers(sessionName, assignments.length);
       try {
         killPsmuxSession(sessionName);

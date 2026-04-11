@@ -53,6 +53,21 @@ describe("synapse-registry", () => {
     reg.destroy();
   });
 
+  it("register supports split sessionId + meta arguments", () => {
+    const reg = createSynapseRegistry({ persistPath });
+    const meta = baseMeta({
+      sessionId: "session-split",
+      branch: "feature/split-register",
+    });
+    const res = reg.register(meta.sessionId, meta);
+
+    assert.equal(res.ok, true);
+    assert.equal(res.sessionId, "session-split");
+    assert.equal(reg.getSession("session-split")?.branch, "feature/split-register");
+
+    reg.destroy();
+  });
+
   it("heartbeat updates lastHeartbeat and partial meta", () => {
     const reg = createSynapseRegistry({ persistPath });
     reg.register(baseMeta());
