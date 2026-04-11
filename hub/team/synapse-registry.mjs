@@ -151,7 +151,7 @@ export function createSynapseRegistry(opts = {}) {
         const staled = { ...current, status: "stale" };
         sessions.set(sessionId, staled);
         schedulePersist();
-        notifyStale(staled);
+        setImmediate(() => notifyStale(staled));
       }
     }, intervalFor(session));
 
@@ -166,8 +166,13 @@ export function createSynapseRegistry(opts = {}) {
 
   function register(meta) {
     const sessionId = normalizeSessionId(meta?.sessionId);
-    if (!sessionId || sessions.has(sessionId)) {
-      return { ok: false, sessionId };
+    if (!sessionId) {
+      return { ok: false, sessionId, reason: "invalid_id" };
+    }
+
+    if (sessions.has(sessionId)) {
+      console.warn("[synapse-registry] duplicate registration rejected:", sessionId);
+      return { ok: false, sessionId, reason: "duplicate" };
     }
 
     const session = sanitizeSession(
@@ -215,7 +220,9 @@ export function createSynapseRegistry(opts = {}) {
       }
       if (typeof partialMeta.branch === "string") updated.branch = partialMeta.branch;
       if (Array.isArray(partialMeta.dirtyFiles)) {
-        updated.dirtyFiles = [...partialMeta.dirtyFiles];
+        updated.dirtyFiles = partialMeta.dirtyFiles.filter(
+          (f) => typeof f === "string" && f.length > 0,
+        );
       }
       if (typeof partialMeta.taskSummary === "string") {
         updated.taskSummary = partialMeta.taskSummary;
