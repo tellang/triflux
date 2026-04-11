@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tfx-route.sh v2.6 — CLI 라우팅 래퍼 (triflux)
+# tfx-route.sh v2.7 — CLI 라우팅 래퍼 (triflux)
 #
 # v1.x: cli-route.sh (jq+python3+node 혼재, 동기 후처리 ~1s)
 # v2.0: tfx-route.sh 리네임
@@ -9,7 +9,7 @@
 #   - Gemini health check 지수 백오프 (30×1s → 5×exp)
 #   - 컨텍스트 파일 5번째 인자 지원
 #
-VERSION="2.6"
+VERSION="2.7"
 #
 # 사용법:
 #   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
