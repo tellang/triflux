@@ -21,7 +21,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
-import { reloadBroker } from "./account-broker.mjs";
+import { broker as brokerInstance, reloadBroker } from "./account-broker.mjs";
 import { createAdaptiveEngine } from "./adaptive.mjs";
 import { createAssignCallbackServer } from "./assign-callbacks.mjs";
 import { DelegatorService } from "./delegator/index.mjs";
@@ -706,6 +706,17 @@ export async function startHub({
 
       if (path === "/api/qos-stats" && req.method === "GET") {
         return writeJson(res, 200, getQosStatsPayload());
+      }
+
+      if (path === "/broker/snapshot" && req.method === "GET") {
+        const snap = brokerInstance?.snapshot() || [];
+        return writeJson(res, 200, { ok: true, accounts: snap, ts: Date.now() });
+      }
+
+      if (path === "/broker/dashboard" && req.method === "GET") {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(renderBrokerDashboard());
+        return;
       }
 
       if (path === "/broker/reload" && req.method === "POST") {
@@ -1654,6 +1665,71 @@ function cleanupStaleSpawnSessions(log) {
   }
 
   return killed;
+}
+
+// ── Broker Dashboard HTML ──────────────────────────────────────
+
+function renderBrokerDashboard() {
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<title>Account Broker Dashboard</title>
+<meta http-equiv="refresh" content="30">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0b;color:#e8e8ec;font:14px/1.6 'SF Mono',Consolas,monospace;padding:24px}
+h1{font-size:18px;color:#a8b1ff;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+.card{background:#141416;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px}
+.card.available{border-left:3px solid #34d399}
+.card.busy{border-left:3px solid #fbbf24}
+.card.cooldown{border-left:3px solid #f87171}
+.card.circuit-open{border-left:3px solid #ef4444;opacity:0.7}
+.provider{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#888}
+.id{font-size:13px;color:#c8c8d0;margin:4px 0}
+.status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:4px;display:inline-block}
+.status.available{background:#064e3b;color:#34d399}
+.status.busy{background:#451a03;color:#fbbf24}
+.status.cooldown{background:#450a0a;color:#f87171}
+.status.circuit-open{background:#450a0a;color:#ef4444}
+.meta{margin-top:8px;font-size:11px;color:#666;line-height:1.8}
+.meta b{color:#999}
+.timer{color:#f87171;font-weight:600}
+.refresh{color:#555;font-size:11px;margin-top:16px}
+</style></head><body>
+<h1>🔑 Account Broker Dashboard</h1>
+<div id="grid" class="grid"></div>
+<p class="refresh">auto-refresh: 10s | <a href="/broker/snapshot" style="color:#666">JSON API</a></p>
+<script>
+function fmt(ms){if(ms<=0)return'-';const s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);if(d>0)return d+'d '+h%24+'h';if(h>0)return h+'h '+m%60+'m';if(m>0)return m+'m '+s%60+'s';return s+'s'}
+async function refresh(){
+  try{
+    const r=await fetch('/broker/snapshot');
+    const d=await r.json();
+    if(!d.ok)return;
+    const now=d.ts;
+    const grid=document.getElementById('grid');
+    grid.innerHTML=d.accounts.map(a=>{
+      const cd=a.cooldownUntil>now?a.cooldownUntil-now:0;
+      const rm=a.remainingMs||0;
+      let st='available',sl='Available';
+      if(a.circuitState==='open'){st='circuit-open';sl='Circuit Open'}
+      else if(cd>0){st='cooldown';sl='Cooldown'}
+      else if(a.busy){st='busy';sl='Busy ('+fmt(rm)+')'}
+      return '<div class="card '+st+'">'+
+        '<div class="provider">'+a.provider+' / '+(a.tier||'unknown')+'</div>'+
+        '<div class="id">'+a.id+'</div>'+
+        '<span class="status '+st+'">'+sl+'</span>'+
+        (cd>0?'<span class="timer" style="margin-left:8px">'+fmt(cd)+' remaining</span>':'')+
+        '<div class="meta">'+
+        '<b>Sessions:</b> '+a.totalSessions+
+        (a.lastUsedAt?' | <b>Last:</b> '+new Date(a.lastUsedAt).toLocaleTimeString():'')+
+        (a.failureTimestamps?.length?' | <b>Failures:</b> '+a.failureTimestamps.length:'')+
+        (a.circuitState!=='closed'?' | <b>Circuit:</b> '+a.circuitState:'')+
+        '</div></div>'
+    }).join('');
+  }catch(e){console.error('refresh failed',e)}
+}
+refresh();setInterval(refresh,10000);
+</script></body></html>`;
 }
 
 const selfRun = process.argv[1]?.replace(/\\/g, "/").endsWith("hub/server.mjs");

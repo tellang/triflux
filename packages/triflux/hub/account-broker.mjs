@@ -46,7 +46,8 @@ const ConfigSchema = z.object({
 
 const DEFAULT_COOLDOWN_MS = 300_000; // 5 minutes
 const QUOTA_COOLDOWN_MS = {
-  codex: 5 * 60 * 60_000, // 5 hours
+  codex: 5 * 60 * 60_000, // 5 hours (단기 쿼터)
+  codex_weekly: 7 * 24 * 60 * 60_000, // 7 days (주간 쿼터)
   gemini: 24 * 60 * 60_000, // 24 hours
 };
 const TIER_PRIORITY = { pro: 0, plus: 1, unknown: 2, free: 3 };
