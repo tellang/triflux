@@ -492,3 +492,30 @@ describe("tfx-route.sh — executor 라우팅 회귀 방지", { timeout: 180000 
     assert.ok(hasWarning || hasMetadata, `expected warning or metadata:\n${combined}`);
   });
 });
+
+// ── TFX_FORCE_CODEX_BYPASS escape hatch 회귀 방지 (deep-review L3) ──
+
+describe("tfx-route.sh — TFX_FORCE_CODEX_BYPASS escape hatch", { timeout: 180000 }, () => {
+  it("TFX_FORCE_CODEX_BYPASS=1 → 라우팅 정상 동작 + type=codex 유지", () => {
+    // escape hatch가 활성이어도 라우팅이 깨지지 않아야 한다.
+    // 실제 --dangerously-bypass 플래그 방출은 awk edge case 테스트에서 검증.
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
+      fixtureEnv({ TFX_FORCE_CODEX_BYPASS: "1", FAKE_CODEX_MODE: "exec" }),
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /type=codex/, out(result));
+    assert.match(out(result), /agent=executor/, out(result));
+  });
+
+  it("TFX_FORCE_CODEX_BYPASS=0 → 정상 경로로 라우팅, type=codex 유지", () => {
+    // escape hatch 비활성 시에도 동일하게 type=codex로 라우팅되어야 한다.
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
+      fixtureEnv({ TFX_FORCE_CODEX_BYPASS: "0", FAKE_CODEX_MODE: "exec" }),
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /type=codex/, out(result));
+    assert.match(out(result), /agent=executor/, out(result));
+  });
+});

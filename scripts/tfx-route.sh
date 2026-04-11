@@ -96,7 +96,7 @@ cleanup_workers() {
 _CODEX_CONFIG="${HOME}/.codex/config.toml"
 _CODEX_HAS_SANDBOX=""
 if [[ -f "$_CODEX_CONFIG" ]] && awk '
-  /^\[mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
+  /^\[{1,2}mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
   /^\[/ { in_mcp_tool=0; next }
   !in_mcp_tool && /^[[:space:]]*(sandbox|approval_mode)[[:space:]]*=/ { found=1; exit }
   END { exit !found }
@@ -1715,7 +1715,14 @@ FALLBACK_EOF
 
     run_stream_worker "gemini" "$FULL_PROMPT" "$use_tee" "${gemini_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}). claude-native fallback." >&2
+      # stderr 내용을 fallback 전에 보존하여 디버깅 가능하게 함
+      local gemini_stderr_bytes=0
+      [[ -f "$STDERR_LOG" ]] && gemini_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
+      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}, stderr=${gemini_stderr_bytes}B). claude-native fallback." >&2
+      if [[ "$gemini_stderr_bytes" -gt 0 ]]; then
+        echo "[tfx-route] Gemini stderr 보존:" >&2
+        tail -c 2048 "$STDERR_LOG" >&2
+      fi
       cat > "$STDOUT_LOG" <<EOF
 $(emit_claude_native_metadata)
 EOF
@@ -1737,7 +1744,13 @@ EOF
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-      echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}). native metadata로 fallback합니다." >&2
+      local claude_stderr_bytes=0
+      [[ -f "$STDERR_LOG" ]] && claude_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
+      echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}, stderr=${claude_stderr_bytes}B). native metadata로 fallback합니다." >&2
+      if [[ "$claude_stderr_bytes" -gt 0 ]]; then
+        echo "[tfx-route] Claude stderr 보존:" >&2
+        tail -c 2048 "$STDERR_LOG" >&2
+      fi
       cat > "$STDOUT_LOG" <<EOF
 $(emit_claude_native_metadata)
 EOF
