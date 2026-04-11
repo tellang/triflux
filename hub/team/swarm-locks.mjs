@@ -33,6 +33,34 @@ export function createSwarmLocks(opts = {}) {
     return Date.now();
   }
 
+  function normalizeLeaseType(leaseType) {
+    return leaseType === "shared-read" ? "shared-read" : "exclusive";
+  }
+
+  function normalizeSessionMeta(sessionMeta) {
+    return sessionMeta ?? null;
+  }
+
+  function normalizeEntry(entry) {
+    return {
+      workerId: entry.workerId,
+      acquiredAt: entry.acquiredAt,
+      leaseType: normalizeLeaseType(entry.leaseType),
+      sessionMeta: normalizeSessionMeta(entry.sessionMeta),
+    };
+  }
+
+  function hasConflict(existing, requesterId, requestedLeaseType) {
+    if (!existing || existing.workerId === requesterId) return false;
+    if (
+      existing.leaseType === "shared-read" &&
+      requestedLeaseType === "shared-read"
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   function isExpired(entry) {
     return now() - entry.acquiredAt > ttlMs;
   }
@@ -65,7 +93,7 @@ export function createSwarmLocks(opts = {}) {
       const ts = now();
       for (const [path, entry] of Object.entries(data)) {
         if (ts - entry.acquiredAt <= ttlMs) {
-          locks.set(path, entry);
+          locks.set(path, normalizeEntry(entry));
         }
       }
     } catch {
@@ -82,23 +110,42 @@ export function createSwarmLocks(opts = {}) {
    * Acquire file leases for a worker.
    * @param {string} workerId — worker/shard identifier
    * @param {string[]} files — file paths to lock
+   * @param {{ leaseType?: "exclusive" | "shared-read", sessionMeta?: { sessionId: string, host: string, taskSummary: string } }} [opts]
    * @returns {{ ok: boolean, acquired: string[], conflicts: Array<{ file: string, holder: string }> }}
    */
-  function acquire(workerId, files) {
+  function acquire(workerId, files, opts = {}) {
     pruneExpired();
 
+    const leaseType = normalizeLeaseType(opts.leaseType);
+    const sessionMeta = normalizeSessionMeta(opts.sessionMeta);
     const normalized = files.map((f) => normalizePath(f));
     const conflicts = [];
     const toAcquire = [];
+    const allowedSharedRead = [];
 
     for (let i = 0; i < normalized.length; i++) {
       const path = normalized[i];
       const existing = locks.get(path);
 
-      if (existing && existing.workerId !== workerId && !isExpired(existing)) {
+      if (!existing || isExpired(existing)) {
+        toAcquire.push(path);
+        continue;
+      }
+
+      if (hasConflict(existing, workerId, leaseType)) {
         conflicts.push({ file: files[i], holder: existing.workerId });
       } else {
-        toAcquire.push(path);
+        if (
+          !(
+            existing.workerId !== workerId &&
+            existing.leaseType === "shared-read" &&
+            leaseType === "shared-read"
+          )
+        ) {
+          toAcquire.push(path);
+        } else {
+          allowedSharedRead.push(path);
+        }
       }
     }
 
@@ -108,11 +155,15 @@ export function createSwarmLocks(opts = {}) {
 
     const ts = now();
     for (const path of toAcquire) {
-      locks.set(path, { workerId, acquiredAt: ts });
+      locks.set(path, { workerId, acquiredAt: ts, leaseType, sessionMeta });
     }
 
     persist();
-    return { ok: true, acquired: toAcquire, conflicts: [] };
+    return {
+      ok: true,
+      acquired: [...toAcquire, ...allowedSharedRead],
+      conflicts: [],
+    };
   }
 
   /**
@@ -136,15 +187,18 @@ export function createSwarmLocks(opts = {}) {
    * Check if a file write would violate any lease.
    * @param {string} workerId — the worker attempting the write
    * @param {string} filePath — the file being written
+   * @param {"exclusive" | "shared-read"} [leaseType="exclusive"] — requested lease type
    * @returns {{ allowed: boolean, holder?: string }}
    */
-  function check(workerId, filePath) {
+  function check(workerId, filePath, leaseType = "exclusive") {
     pruneExpired();
     const path = normalizePath(filePath);
     const entry = locks.get(path);
+    const normalizedLeaseType = normalizeLeaseType(leaseType);
 
     if (!entry || isExpired(entry)) return { allowed: true };
-    if (entry.workerId === workerId) return { allowed: true };
+    if (!hasConflict(entry, workerId, normalizedLeaseType))
+      return { allowed: true };
     return { allowed: false, holder: entry.workerId };
   }
 
@@ -173,7 +227,7 @@ export function createSwarmLocks(opts = {}) {
 
   /**
    * Get snapshot of all active locks.
-   * @returns {Array<{ file: string, workerId: string, acquiredAt: number }>}
+   * @returns {Array<{ file: string, workerId: string, acquiredAt: number, leaseType: "exclusive" | "shared-read", sessionMeta: { sessionId: string, host: string, taskSummary: string } | null }>}
    */
   function snapshot() {
     pruneExpired();
@@ -181,6 +235,8 @@ export function createSwarmLocks(opts = {}) {
       file,
       workerId: entry.workerId,
       acquiredAt: entry.acquiredAt,
+      leaseType: normalizeLeaseType(entry.leaseType),
+      sessionMeta: normalizeSessionMeta(entry.sessionMeta),
     }));
   }
 

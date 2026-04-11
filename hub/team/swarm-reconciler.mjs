@@ -1,8 +1,12 @@
 // hub/team/swarm-reconciler.mjs — Redundant execution + result reconciliation
 // For critical shards: launches primary + verifier sessions, compares results,
 // applies conservative adoption (fewer changes wins) or HITL fallback.
+// v2 (Synapse): parses X-Intent trailers to route complementary/contradictory
+// commits through intent-aware paths before falling back to conservative logic.
 
 import { execFile } from "node:child_process";
+
+import { classifyIntentPair, parseIntentTrailer } from "./swarm-intent.mjs";
 
 /**
  * Compare two shard results and decide which to accept.
@@ -49,6 +53,66 @@ export async function reconcile(primaryResult, verifierResult, opts = {}) {
     return decision("primary", "identical", primaryResult);
   }
 
+  // Intent-aware classification: parse X-Intent trailers from both commits.
+  // When both commits carry an intent, route contradictory pairs to HITL and
+  // complementary (non-overlapping) pairs to a merge-friendly path. Missing or
+  // malformed trailers fall through to the existing divergence/conservative
+  // adoption logic below.
+  const [primaryMsg, verifierMsg] = await Promise.all([
+    getCommitMessage(primaryResult.branchName, rootDir),
+    getCommitMessage(verifierResult.branchName, rootDir),
+  ]);
+
+  const primaryIntent = parseIntentTrailer(primaryMsg);
+  const verifierIntent = parseIntentTrailer(verifierMsg);
+
+  if (primaryIntent && verifierIntent) {
+    const classification = classifyIntentPair(primaryIntent, verifierIntent);
+
+    if (classification.relation === "contradictory") {
+      return {
+        selected: "hitl",
+        reason: `intent_contradictory: ${classification.reason}`,
+        result: null,
+        requiresManualReview: true,
+        intentClassification: classification,
+        primaryIntent,
+        verifierIntent,
+        primary: {
+          filesChanged: primaryDiff.filesChanged,
+          linesChanged: primaryDiff.linesChanged,
+        },
+        verifier: {
+          filesChanged: verifierDiff.filesChanged,
+          linesChanged: verifierDiff.linesChanged,
+        },
+      };
+    }
+
+    if (classification.relation === "complementary") {
+      return {
+        selected: "complementary",
+        reason: `intent_complementary: ${classification.reason}`,
+        result: { primary: primaryResult, verifier: verifierResult },
+        requiresManualReview: false,
+        intentClassification: classification,
+        primaryIntent,
+        verifierIntent,
+        shouldAttemptMerge: true,
+        primary: {
+          filesChanged: primaryDiff.filesChanged,
+          linesChanged: primaryDiff.linesChanged,
+        },
+        verifier: {
+          filesChanged: verifierDiff.filesChanged,
+          linesChanged: verifierDiff.linesChanged,
+        },
+      };
+    }
+
+    // complementary-risky / independent → fall through to existing logic.
+  }
+
   // Compute divergence
   const divergence = Math.abs(
     primaryDiff.filesChanged - verifierDiff.filesChanged,
@@ -88,6 +152,22 @@ function decision(selected, reason, result) {
     primary: null,
     verifier: null,
   };
+}
+
+/**
+ * Read the HEAD commit message of a branch.
+ *
+ * @param {string} branch
+ * @param {string} cwd
+ * @returns {Promise<string>}
+ */
+async function getCommitMessage(branch, cwd) {
+  try {
+    const msg = await gitExec(["log", "-1", "--format=%B", branch], cwd);
+    return msg;
+  } catch {
+    return "";
+  }
 }
 
 /**
