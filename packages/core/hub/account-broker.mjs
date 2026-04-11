@@ -4,7 +4,7 @@
 // Singleton export. All state changes create new objects (immutable pattern).
 
 import { EventEmitter } from "node:events";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 import * as z from "zod";
@@ -45,11 +45,49 @@ const ConfigSchema = z.object({
 });
 
 const DEFAULT_COOLDOWN_MS = 300_000; // 5 minutes
+const QUOTA_COOLDOWN_MS = {
+  codex: 5 * 60 * 60_000, // 5 hours (단기 쿼터)
+  codex_weekly: 7 * 24 * 60 * 60_000, // 7 days (주간 쿼터)
+  gemini: 24 * 60 * 60_000, // 24 hours
+};
 const TIER_PRIORITY = { pro: 0, plus: 1, unknown: 2, free: 3 };
 const LEASE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CIRCUIT_WINDOW_MS = 10 * 60_000; // 10 minutes
 const CIRCUIT_MAX_FAILURES = 3;
 const AUTH_BASE_PATH = join(homedir(), ".claude", "cache", "tfx-hub");
+const STATE_PERSIST_PATH = join(AUTH_BASE_PATH, "broker-state.json");
+
+// ── State persistence ────────────────────────────────────────────
+
+function persistState(stateMap) {
+  try {
+    const now = Date.now();
+    const entries = {};
+    for (const [id, acct] of stateMap) {
+      // 활성 쿨다운 또는 circuit open만 저장 (불필요한 데이터 제거)
+      if (acct.cooldownUntil > now || acct.circuitOpenedAt > 0 || acct.totalSessions > 0) {
+        entries[id] = {
+          cooldownUntil: acct.cooldownUntil,
+          circuitOpenedAt: acct.circuitOpenedAt,
+          failureTimestamps: acct.failureTimestamps,
+          totalSessions: acct.totalSessions,
+          lastUsedAt: acct.lastUsedAt,
+        };
+      }
+    }
+    mkdirSync(AUTH_BASE_PATH, { recursive: true });
+    writeFileSync(STATE_PERSIST_PATH, JSON.stringify({ ts: now, entries }));
+  } catch { /* best-effort */ }
+}
+
+function loadPersistedState() {
+  try {
+    if (!existsSync(STATE_PERSIST_PATH)) return null;
+    return JSON.parse(readFileSync(STATE_PERSIST_PATH, "utf8"));
+  } catch {
+    return null;
+  }
+}
 
 // ── env var resolution ───────────────────────────────────────────
 
@@ -96,7 +134,11 @@ class AccountBroker extends EventEmitter {
       ...(parsed.gemini || []).map((a) => ({ ...a, provider: "gemini" })),
     ];
 
+    const persisted = loadPersistedState();
+    const pEntries = persisted?.entries || {};
+
     for (const account of allAccounts) {
+      const saved = pEntries[account.id];
       this.#state.set(account.id, {
         id: account.id,
         provider: account.provider,
@@ -108,13 +150,12 @@ class AccountBroker extends EventEmitter {
         tier: account.tier ?? "unknown",
         busy: false,
         leasedAt: null,
-        cooldownUntil: 0,
-        // per-account circuit breaker state
-        failureTimestamps: [], // timestamp array for window-based decay
-        circuitOpenedAt: 0,
+        cooldownUntil: saved?.cooldownUntil ?? 0,
+        failureTimestamps: saved?.failureTimestamps ?? [],
+        circuitOpenedAt: saved?.circuitOpenedAt ?? 0,
         circuitTrialInFlight: false,
-        lastUsedAt: 0,
-        totalSessions: 0,
+        lastUsedAt: saved?.lastUsedAt ?? 0,
+        totalSessions: saved?.totalSessions ?? 0,
       });
     }
   }
@@ -313,6 +354,13 @@ class AccountBroker extends EventEmitter {
       if (isHalfOpen) {
         this.emit("circuitClose", { id: accountId });
       }
+    } else if (result?.skipCircuit) {
+      // 인프라 에러 — circuit/cooldown에 카운트하지 않음
+      circuitUpdate = {
+        failureTimestamps: acct.failureTimestamps,
+        circuitOpenedAt: acct.circuitOpenedAt,
+        circuitTrialInFlight: acct.circuitTrialInFlight,
+      };
     } else {
       circuitUpdate = this.#recordCircuitFailure(acct, isHalfOpen, now);
       if (circuitUpdate.circuitOpenedAt !== acct.circuitOpenedAt) {
@@ -338,6 +386,7 @@ class AccountBroker extends EventEmitter {
     };
 
     this.#state.set(accountId, updated);
+    persistState(this.#state);
     this.emit("release", { id: accountId, ok });
   }
 
@@ -352,6 +401,7 @@ class AccountBroker extends EventEmitter {
       leasedAt: null,
       cooldownUntil: Date.now() + coolMs,
     });
+    persistState(this.#state);
   }
 
   // ── snapshot ──────────────────────────────────────────────────

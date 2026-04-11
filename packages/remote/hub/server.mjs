@@ -21,7 +21,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
-import { reloadBroker } from "@triflux/core/hub/account-broker.mjs";
+import { broker as brokerInstance, reloadBroker } from "@triflux/core/hub/account-broker.mjs";
 import { createAdaptiveEngine } from "@triflux/core/hub/adaptive.mjs";
 import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.mjs";
 import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
@@ -706,6 +706,27 @@ export async function startHub({
 
       if (path === "/api/qos-stats" && req.method === "GET") {
         return writeJson(res, 200, getQosStatsPayload());
+      }
+
+      if (path === "/broker/snapshot" && req.method === "GET") {
+        const snap = brokerInstance?.snapshot() || [];
+        return writeJson(res, 200, { ok: true, accounts: snap, ts: Date.now() });
+      }
+
+      if (path === "/broker/dashboard" && req.method === "GET") {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(renderBrokerDashboard());
+        return;
+      }
+
+      if (path === "/broker/quota-refresh" && (req.method === "POST" || req.method === "GET")) {
+        try {
+          const results = await refreshAllAccountQuotas();
+          return writeJson(res, 200, { ok: true, results, ts: Date.now() });
+        } catch (err) {
+          hubLog.error({ err: String(err?.message || err) }, "broker.quota_refresh_error");
+          return writeJson(res, 200, { ok: false, error: String(err?.message || err) });
+        }
       }
 
       if (path === "/broker/reload" && req.method === "POST") {
@@ -1465,6 +1486,17 @@ export async function startHub({
           "hub.public_dir",
         );
 
+        /**
+         * Hub 서버 정지 함수.
+         *
+         * Trade-off (F01 — 영구 poisoning 허용):
+         * 첫 정지 호출에서 cleanup 파이프라인이 실패하면 stopPromise는 실패 상태로
+         * 고정되고, 이후 모든 호출은 동일한 실패 promise를 반환합니다. stopPromise를
+         * null로 리셋하면 재시도가 가능하지만, router sweeper / transports / pipe 등이
+         * 이미 부분 해제된 상태에서 두 번째 close가 실행되면 use-after-close 및
+         * race condition을 유발합니다. 실패한 stopFn은 프로세스 전체 재시작으로 복구해야
+         * 하며, 이 동작은 의도된 설계입니다.
+         */
         const stopFn = async () => {
           if (stopPromise) return stopPromise;
 
@@ -1499,8 +1531,8 @@ export async function startHub({
             httpServer.closeAllConnections();
             await new Promise((resolveClose) => httpServer.close(resolveClose));
           })().catch((error) => {
-            stopPromise = null;
-            throw error;
+            hubLog.error({ err: String(error?.message || error) }, "hub.stop_error");
+            // stopPromise를 null로 리셋하지 않음 — double-close 방지
           });
 
           return stopPromise;
@@ -1654,6 +1686,207 @@ function cleanupStaleSpawnSessions(log) {
   }
 
   return killed;
+}
+
+// ── Quota check for all accounts ───────────────────────────────
+
+const QUOTA_CACHE_PATH = join(CACHE_DIR, "broker-quota-cache.json");
+
+async function checkSingleAccountQuota(acct) {
+  const authPath = join(PID_DIR, acct.authFile);
+  if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
+  try {
+    const auth = JSON.parse(readFileSync(authPath, "utf8"));
+    if (acct.provider === "codex") {
+      const token = auth.tokens?.access_token || auth.OPENAI_API_KEY || "";
+      if (!token) return { id: acct.id, status: "no_token" };
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST", signal: AbortSignal.timeout(8000),
+        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "gpt-4.1-nano", messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+      });
+      const hdrs = Object.fromEntries([...r.headers.entries()].filter(([k]) => /ratelimit/i.test(k)));
+      if (r.status === 429) return { id: acct.id, status: "quota_hit", http: 429, headers: hdrs };
+      if (r.status === 401) {
+        // 401이어도 ratelimit 헤더가 있으면 쿼터 정보 추출 가능
+        return { id: acct.id, status: "auth_error", http: 401, headers: hdrs };
+      }
+      return { id: acct.id, status: r.ok ? "ok" : "error", http: r.status, headers: hdrs };
+    }
+    // gemini — OAuth token refresh needed for accurate check
+    return { id: acct.id, status: "oauth_check_needed" };
+  } catch (e) {
+    return { id: acct.id, status: "error", message: e.message?.substring(0, 60) };
+  }
+}
+
+async function refreshAllAccountQuotas() {
+  const snap = brokerInstance?.snapshot() || [];
+  const checks = snap.filter(a => a.authFile).map(a => checkSingleAccountQuota(a));
+  const results = await Promise.all(checks);
+  // 캐시 저장
+  try {
+    writeFileSync(QUOTA_CACHE_PATH, JSON.stringify({ ts: Date.now(), results }));
+  } catch { /* best-effort */ }
+  return results;
+}
+
+function loadQuotaCache() {
+  try {
+    if (!existsSync(QUOTA_CACHE_PATH)) return null;
+    return JSON.parse(readFileSync(QUOTA_CACHE_PATH, "utf8"));
+  } catch { return null; }
+}
+
+// ── Broker Dashboard HTML ──────────────────────────────────────
+
+function renderBrokerDashboard() {
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<title>Account Broker Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0b;color:#e8e8ec;font:14px/1.6 'SF Mono',Consolas,monospace;padding:24px}
+h1{font-size:18px;color:#a8b1ff;margin-bottom:8px}
+.toolbar{margin-bottom:16px;display:flex;gap:8px;align-items:center}
+.toolbar button{background:#1a1a2e;color:#a8b1ff;border:1px solid rgba(255,255,255,0.1);border-radius:4px;padding:4px 12px;cursor:pointer;font:12px inherit}
+.toolbar button:hover{background:#252547}
+.toolbar .status-text{font-size:11px;color:#555}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px}
+.card{background:#141416;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px}
+.card.available{border-left:3px solid #34d399}
+.card.busy{border-left:3px solid #fbbf24}
+.card.cooldown{border-left:3px solid #f87171}
+.card.circuit-open{border-left:3px solid #ef4444;opacity:0.7}
+.provider{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#888}
+.id{font-size:13px;color:#c8c8d0;margin:4px 0}
+.status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:4px;display:inline-block}
+.status.available{background:#064e3b;color:#34d399}
+.status.busy{background:#451a03;color:#fbbf24}
+.status.cooldown{background:#450a0a;color:#f87171}
+.status.circuit-open{background:#450a0a;color:#ef4444}
+.gauge{margin-top:8px}
+.gauge-row{display:flex;align-items:center;gap:8px;margin:3px 0}
+.gauge-label{font-size:10px;color:#888;width:28px;text-align:right}
+.gauge-bar{flex:1;height:8px;background:#1a1a1e;border-radius:4px;overflow:hidden}
+.gauge-fill{height:100%;border-radius:4px;transition:width .3s}
+.gauge-fill.green{background:linear-gradient(90deg,#34d399,#059669)}
+.gauge-fill.yellow{background:linear-gradient(90deg,#fbbf24,#d97706)}
+.gauge-fill.red{background:linear-gradient(90deg,#f87171,#dc2626)}
+.gauge-pct{font-size:10px;color:#999;width:32px}
+.gauge-reset{font-size:9px;color:#555}
+.meta{margin-top:6px;font-size:11px;color:#666;line-height:1.8}
+.meta b{color:#999}
+.timer{color:#f87171;font-weight:600}
+.refresh-bar{color:#555;font-size:11px;margin-top:16px}
+</style></head><body>
+<h1>Account Broker Dashboard</h1>
+<div class="toolbar">
+  <button onclick="checkQuotas()">Check All Quotas</button>
+  <button onclick="reloadBroker()">Reload Broker</button>
+  <span id="toolbar-status" class="status-text"></span>
+</div>
+<div id="grid" class="grid"></div>
+<p class="refresh-bar">auto-refresh: 10s | <a href="/broker/snapshot" style="color:#666">JSON</a> | <a href="/broker/quota-refresh" style="color:#666">Quota API</a></p>
+<script>
+let quotaData={};
+function fmt(ms){if(ms<=0)return'-';const s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);if(d>0)return d+'d '+h%24+'h';if(h>0)return h+'h '+m%60+'m';if(m>0)return m+'m '+s%60+'s';return s+'s'}
+
+function gaugeColor(pct){return pct<60?'green':pct<85?'yellow':'red'}
+
+function renderGauge(label,pct,resetTs){
+  if(pct==null)return '';
+  const now=Date.now()/1000;
+  const resetIn=resetTs>now?fmt((resetTs-now)*1000):'';
+  return '<div class="gauge-row"><span class="gauge-label">'+label+'</span>'+
+    '<div class="gauge-bar"><div class="gauge-fill '+gaugeColor(pct)+'" style="width:'+pct+'%"></div></div>'+
+    '<span class="gauge-pct">'+pct+'%</span>'+
+    (resetIn?'<span class="gauge-reset">reset '+resetIn+'</span>':'')+
+    '</div>';
+}
+
+function renderQuotaGauges(acctId){
+  const q=quotaData[acctId];
+  if(!q)return '<div class="gauge"><div class="gauge-row"><span style="font-size:10px;color:#444">quota: click Check All Quotas</span></div></div>';
+  if(q.status==='quota_hit')return '<div class="gauge"><div class="gauge-row"><span style="font-size:10px;color:#f87171">QUOTA EXHAUSTED</span></div></div>';
+  if(q.status==='auth_error'||q.status==='no_token'||q.status==='oauth_check_needed'){
+    // 401이어도 ratelimit 헤더가 있으면 표시
+    const h=q.headers||{};
+    const limReq=h['x-ratelimit-limit-requests'],remReq=h['x-ratelimit-remaining-requests'];
+    const limTok=h['x-ratelimit-limit-tokens'],remTok=h['x-ratelimit-remaining-tokens'];
+    if(limReq){
+      const pctReq=Math.round((1-remReq/limReq)*100);
+      const pctTok=limTok?Math.round((1-remTok/limTok)*100):null;
+      return '<div class="gauge">'+renderGauge('req',pctReq,0)+(pctTok!=null?renderGauge('tok',pctTok,0):'')+'</div>';
+    }
+    return '<div class="gauge"><div class="gauge-row"><span style="font-size:10px;color:#fbbf24">'+(q.status==='oauth_check_needed'?'OAuth refresh needed':'auth: token refresh needed')+'</span></div></div>';
+  }
+  if(q.status==='ok'||q.status==='error'){
+    const h=q.headers||{};
+    const limReq=h['x-ratelimit-limit-requests'],remReq=h['x-ratelimit-remaining-requests'];
+    const limTok=h['x-ratelimit-limit-tokens'],remTok=h['x-ratelimit-remaining-tokens'];
+    const resetReq=h['x-ratelimit-reset-requests'],resetTok=h['x-ratelimit-reset-tokens'];
+    if(!limReq)return '';
+    const pctReq=Math.round((1-remReq/limReq)*100);
+    const pctTok=limTok?Math.round((1-remTok/limTok)*100):null;
+    return '<div class="gauge">'+renderGauge('req',pctReq,0)+(pctTok!=null?renderGauge('tok',pctTok,0):'')+'</div>';
+  }
+  return '';
+}
+
+async function refresh(){
+  try{
+    const r=await fetch('/broker/snapshot');
+    const d=await r.json();
+    if(!d.ok)return;
+    const now=d.ts;
+    const grid=document.getElementById('grid');
+    grid.innerHTML=d.accounts.map(a=>{
+      const cd=a.cooldownUntil>now?a.cooldownUntil-now:0;
+      const rm=a.remainingMs||0;
+      let st='available',sl='Available';
+      if(a.circuitState==='open'){st='circuit-open';sl='Circuit Open'}
+      else if(cd>0){st='cooldown';sl='Cooldown'}
+      else if(a.busy){st='busy';sl='Busy ('+fmt(rm)+')'}
+      return '<div class="card '+st+'">'+
+        '<div class="provider">'+a.provider+' / '+(a.tier||'unknown')+'</div>'+
+        '<div class="id">'+a.id+'</div>'+
+        '<span class="status '+st+'">'+sl+'</span>'+
+        (cd>0?'<span class="timer" style="margin-left:8px">'+fmt(cd)+' remaining</span>':'')+
+        renderQuotaGauges(a.id)+
+        '<div class="meta">'+
+        '<b>Sessions:</b> '+a.totalSessions+
+        (a.lastUsedAt?' | <b>Last:</b> '+new Date(a.lastUsedAt).toLocaleTimeString():'')+
+        (a.failureTimestamps?.length?' | <b>Failures:</b> '+a.failureTimestamps.length:'')+
+        (a.circuitState!=='closed'?' | <b>Circuit:</b> '+a.circuitState:'')+
+        '</div></div>'
+    }).join('');
+  }catch(e){console.error('refresh failed',e)}
+}
+
+async function checkQuotas(){
+  const el=document.getElementById('toolbar-status');
+  el.textContent='checking quotas...';
+  try{
+    const r=await fetch('/broker/quota-refresh',{method:'POST'});
+    const d=await r.json();
+    if(d.ok){
+      d.results.forEach(q=>{quotaData[q.id]=q});
+      el.textContent='updated '+d.results.length+' accounts ('+new Date().toLocaleTimeString()+')';
+      refresh();
+    }else{el.textContent='error';}
+  }catch(e){el.textContent='failed: '+e.message;}
+}
+
+async function reloadBroker(){
+  await fetch('/broker/reload',{method:'POST'});
+  document.getElementById('toolbar-status').textContent='broker reloaded';
+  refresh();
+}
+
+// 캐시에서 초기 로드
+fetch('/broker/quota-refresh').catch(()=>{});
+refresh();setInterval(refresh,10000);
+</script></body></html>`;
 }
 
 const selfRun = process.argv[1]?.replace(/\\/g, "/").endsWith("hub/server.mjs");

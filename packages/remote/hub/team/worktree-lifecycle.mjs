@@ -170,17 +170,42 @@ export async function prepareIntegrationBranch({
  * Rebase a shard branch onto the integration branch.
  * Uses rebase + fast-forward only (no merge commits).
  *
+ * Synapse v1: when a `preflight` checker + `sessionContext` are provided,
+ * the rebase is pre-flighted against active sessions' dirty files/leases.
+ * Blocked rebases return `{ ok: false, preflight: decision }` without touching
+ * any branch. If preflight is omitted, behavior is unchanged.
+ *
  * @param {object} opts
  * @param {string} opts.shardBranch — the shard's branch name
  * @param {string} opts.integrationBranch — target integration branch
  * @param {string} [opts.rootDir=process.cwd()]
- * @returns {Promise<{ ok: boolean, headCommit?: string, error?: string }>}
+ * @param {{ checkRebase: Function } | null} [opts.preflight=null] — git-preflight instance
+ * @param {{ sessionId: string, workerId?: string } | null} [opts.sessionContext=null]
+ * @returns {Promise<{ ok: boolean, headCommit?: string, error?: string, preflight?: object }>}
  */
 export async function rebaseShardOntoIntegration({
   shardBranch,
   integrationBranch,
   rootDir = process.cwd(),
+  preflight = null,
+  sessionContext = null,
 }) {
+  // Synapse v1 pre-flight: bail out before mutating branches when another
+  // session claims overlapping files.
+  if (preflight && sessionContext) {
+    const decision = preflight.checkRebase(
+      { branch: integrationBranch },
+      sessionContext,
+    );
+    if (!decision.allowed) {
+      return {
+        ok: false,
+        error: `git-preflight blocked rebase: ${decision.reason || "overlap"}`,
+        preflight: decision,
+      };
+    }
+  }
+
   // Backup integration HEAD for rollback
   const backupCommit = await git(["rev-parse", integrationBranch], rootDir);
 
@@ -220,18 +245,40 @@ export async function rebaseShardOntoIntegration({
  * Remove a worktree and its branch.
  * Follows WT race-guard: sleep between operations.
  *
+ * Synapse v1: when `preflight` + `sessionContext` are provided, the removal
+ * is pre-flighted against active sessions — blocked if another session is
+ * still registered to this worktree path.
+ *
  * @param {object} opts
  * @param {string} opts.worktreePath
  * @param {string} [opts.branchName] — optional branch to delete
  * @param {string} [opts.rootDir=process.cwd()]
  * @param {boolean} [opts.force=false]
+ * @param {{ checkWorktreeRemove: Function } | null} [opts.preflight=null]
+ * @param {{ sessionId: string, workerId?: string } | null} [opts.sessionContext=null]
  */
 export async function pruneWorktree({
   worktreePath,
   branchName,
   rootDir = process.cwd(),
   force = false,
+  preflight = null,
+  sessionContext = null,
 }) {
+  if (preflight && sessionContext) {
+    const decision = preflight.checkWorktreeRemove(
+      { worktreePath },
+      sessionContext,
+    );
+    if (!decision.allowed) {
+      return {
+        ok: false,
+        error: `git-preflight blocked worktree-remove: ${decision.reason || "active_worktree"}`,
+        preflight: decision,
+      };
+    }
+  }
+
   const forceFlag = force ? "--force" : "";
 
   // Remove worktree (with retry for Windows file handle issues — E5)

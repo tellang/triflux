@@ -289,6 +289,41 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     },
   },
+  synapse: {
+    usage: "tfx synapse status [--json] [--registry <path>]",
+    description: "Synapse v1 세션 레지스트리 조회 (활성 스웜 세션 목록)",
+    subcommands: {
+      status: "활성 세션 테이블 표시 (host/branch/dirty/state/task)",
+    },
+    options: [
+      {
+        name: "--json",
+        type: "boolean",
+        description: "구조화된 JSON 출력",
+      },
+      {
+        name: "--registry",
+        type: "string",
+        description: "registry 파일 경로 오버라이드",
+      },
+    ],
+  },
+  why: {
+    usage: "tfx why <path> [--json]",
+    description: "해당 경로의 마지막 커밋에서 X-Intent 트레일러 추출",
+    options: [
+      {
+        name: "path",
+        type: "string",
+        description: "intent를 조회할 파일 경로",
+      },
+      {
+        name: "--json",
+        type: "boolean",
+        description: "구조화된 JSON 출력",
+      },
+    ],
+  },
   hub: {
     usage: "tfx hub <start|stop|status|ensure> [--port N] [--json]",
     description: "tfx-hub 프로세스 제어",
@@ -5304,6 +5339,26 @@ async function main() {
       } catch (e) {
         if (e.status) process.exitCode = e.status;
       }
+      return;
+    }
+    case "synapse": {
+      const { cmdSynapseStatus } = await import(
+        "../hub/team/synapse-cli.mjs"
+      );
+      const sub = cmdArgs[0] || "status";
+      if (sub !== "status") {
+        throw createCliError(`synapse 서브커맨드 미지원: ${sub}`, {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx synapse status [--json] [--registry <path>]",
+        });
+      }
+      await cmdSynapseStatus(cmdArgs.slice(1), { json: JSON_OUTPUT });
+      return;
+    }
+    case "why": {
+      const { cmdSynapseWhy } = await import("../hub/team/synapse-cli.mjs");
+      await cmdSynapseWhy(cmdArgs, { json: JSON_OUTPUT });
       return;
     }
     case "version":

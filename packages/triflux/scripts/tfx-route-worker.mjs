@@ -51,6 +51,7 @@ if (!createWorker) {
 function parseArgs(argv) {
   const args = {
     allowedMcpServerNames: [],
+    extraArgs: [],
     mcpConfig: [],
   };
 
@@ -92,6 +93,10 @@ function parseArgs(argv) {
         break;
       case "--allowed-mcp-server-name":
         args.allowedMcpServerNames.push(next);
+        index += 1;
+        break;
+      case "--extra-arg":
+        args.extraArgs.push(next);
         index += 1;
         break;
       case "--mcp-config":
@@ -202,6 +207,7 @@ const worker = createWorker(args.type, {
   permissionMode: args.permissionMode,
   allowDangerouslySkipPermissions: args.allowDangerouslySkipPermissions,
   allowedMcpServerNames: args.allowedMcpServerNames,
+  extraArgs: args.extraArgs,
   mcpConfig:
     args.type === "claude" && args.mcpConfig.length === 0
       ? resolveDefaultMcpConfig(args.cwd || process.cwd())
