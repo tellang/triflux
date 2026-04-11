@@ -74,7 +74,7 @@ const DEFAULT_GRACE_MS = 10_000;
  * @param {object} eventLog — createEventLog 인스턴스
  */
 function swapAuthFile(lease, agent, sessionId, eventLog) {
-  if (lease?.mode !== "auth" || !lease.authFile) return;
+  if (lease?.mode !== "auth" || !lease.authFile) return true;
   const dests =
     agent === "codex"
       ? [join(homedir(), ".codex", "auth.json")]
@@ -82,12 +82,14 @@ function swapAuthFile(lease, agent, sessionId, eventLog) {
           join(homedir(), ".gemini", "oauth_creds.json"),
           join(homedir(), ".gemini", "gemini-credentials.json"),
         ];
+  let allOk = true;
   for (const dest of dests) {
     try {
       mkdirSync(dirname(dest), { recursive: true });
       copyFileSync(lease.authFile, dest);
       eventLog.append("auth_copy", { session: sessionId, agent, dest });
     } catch (err) {
+      allOk = false;
       eventLog.append("auth_copy_error", {
         session: sessionId,
         dest,
@@ -95,6 +97,7 @@ function swapAuthFile(lease, agent, sessionId, eventLog) {
       });
     }
   }
+  return allOk;
 }
 
 /**
@@ -900,6 +903,8 @@ export function createConductor(opts = {}) {
       });
 
     await Promise.allSettled(cleanups);
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
     if (brokerInstance && onTierFallback) {
       brokerInstance.removeListener("tierFallback", onTierFallback);
     }

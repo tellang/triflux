@@ -9,7 +9,7 @@ const DEDUPE_WINDOW_MS = 5_000;
 const RATE_WINDOW_MS = 1_000;
 export const MAX_SPAWN_PER_SEC = resolvePositiveInteger(
   process.env.TRIFLUX_MAX_SPAWN_RATE,
-  10,
+  30,
 );
 export const MAX_TOTAL_DESCENDANTS = resolvePositiveInteger(
   process.env.TRIFLUX_MAX_DESCENDANTS,
