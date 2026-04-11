@@ -919,7 +919,7 @@ export function createConductor(opts = {}) {
           if (session.config.agent !== provider) continue;
           if (session.config.remote) continue;
 
-          const newLease = broker.lease({ provider });
+          const newLease = brokerInstance.lease({ provider });
           if (!newLease) continue;
 
           swapAuthFile(newLease, provider, session.id, eventLog);
