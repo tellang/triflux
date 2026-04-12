@@ -172,6 +172,23 @@ export function createSwarmHypervisor(opts) {
 
   const results = new Map(); // shardName → validated result
   const failures = new Map(); // shardName → failure info
+  let integrationResult = null;
+  let resolveIntegrationPromise = null;
+  let integrationPromiseState = {
+    state: "idle",
+    startedAt: null,
+    settledAt: null,
+    partial: false,
+    integrated: [],
+    failed: [],
+    integrationFailures: [],
+    skipped: [],
+    integrationBranch: null,
+    error: null,
+  };
+  const integrationPromise = new Promise((resolve) => {
+    resolveIntegrationPromise = resolve;
+  });
 
   if (meshRegistryFallback) {
     eventLog.append("mesh_registry_fallback", { reason: meshRegistryFallback });
@@ -184,6 +201,52 @@ export function createSwarmHypervisor(opts) {
     state = next;
     eventLog.append("swarm_state", { from: prev, to: next, reason });
     emitter.emit("stateChange", { from: prev, to: next, reason });
+  }
+
+  function markIntegrationPromisePending() {
+    if (integrationPromiseState.state !== "idle") return;
+    integrationPromiseState = {
+      ...integrationPromiseState,
+      state: "pending",
+      startedAt: Date.now(),
+    };
+  }
+
+  function settleIntegrationPromise(payload) {
+    if (integrationPromiseState.state === "fulfilled" && integrationResult) {
+      return integrationResult;
+    }
+
+    integrationResult = Object.freeze({
+      integrated: Object.freeze([...(payload.integrated || [])]),
+      failed: Object.freeze([...(payload.failed || [])]),
+      integrationFailures: Object.freeze([
+        ...(payload.integrationFailures || []),
+      ]),
+      skipped: Object.freeze([...(payload.skipped || [])]),
+      integrationBranch: payload.integrationBranch || null,
+      results: Object.freeze([...(payload.results || [])]),
+      partial:
+        payload.partial ??
+        (Array.isArray(payload.failed) && payload.failed.length > 0),
+      error: payload.error || null,
+    });
+
+    integrationPromiseState = {
+      state: "fulfilled",
+      startedAt: integrationPromiseState.startedAt ?? Date.now(),
+      settledAt: Date.now(),
+      partial: integrationResult.partial,
+      integrated: [...integrationResult.integrated],
+      failed: [...integrationResult.failed],
+      integrationFailures: [...integrationResult.integrationFailures],
+      skipped: [...integrationResult.skipped],
+      integrationBranch: integrationResult.integrationBranch,
+      error: integrationResult.error,
+    };
+
+    resolveIntegrationPromise?.(integrationResult);
+    return integrationResult;
   }
 
   // ── Worker lifecycle ────────────────────────────────────────
@@ -516,114 +579,163 @@ export function createSwarmHypervisor(opts) {
 
     const integrated = [];
     const integrationFailures = [];
-    const { integrationBranch } = await prepareIntegrationBranchImpl({
-      runId,
-      baseBranch,
-      rootDir: workdir,
-    });
+    const preIntegrationFailures = [...failures.keys()];
+    let integrationBranch = null;
 
-    for (const shardName of plan.mergeOrder) {
-      if (failures.has(shardName)) {
-        eventLog.append("skip_failed_shard", { shard: shardName });
-        continue;
-      }
+    try {
+      ({ integrationBranch } = await prepareIntegrationBranchImpl({
+        runId,
+        baseBranch,
+        rootDir: workdir,
+      }));
 
-      const worker = workers.get(shardName);
-      if (!worker) continue;
+      for (const shardName of plan.mergeOrder) {
+        if (failures.has(shardName)) {
+          eventLog.append("skip_failed_shard", { shard: shardName });
+          continue;
+        }
 
-      // Fetch remote shard branch to local (push-blocked hosts like Ultra4)
-      const shard = plan.shards.find((s) => s.name === shardName);
-      if (shard?.host && shard._remoteEnv) {
-        const hostConfig = getHostConfig(shard.host, workdir);
-        const sshUser = hostConfig?.ssh_user || shard.host;
-        const remoteRepoPath = resolveRemoteDir(
-          workdir,
-          shard._remoteEnv,
-        );
-        const fetchResult = await fetchRemoteShard({
-          host: shard.host,
-          sshUser,
-          remoteRepoPath,
-          branchName: worker.branchName || `swarm/${runId}/${shardName}`,
-          rootDir: workdir,
-        });
+        const worker = workers.get(shardName);
+        if (!worker) continue;
 
-        if (!fetchResult.ok) {
-          eventLog.append("remote_fetch_failed", {
+        // Fetch remote shard branch to local (push-blocked hosts like Ultra4)
+        const shard = plan.shards.find((s) => s.name === shardName);
+        if (shard?.host && shard._remoteEnv) {
+          const hostConfig = getHostConfig(shard.host, workdir);
+          const sshUser = hostConfig?.ssh_user || shard.host;
+          const remoteRepoPath = resolveRemoteDir(
+            workdir,
+            shard._remoteEnv,
+          );
+          const fetchResult = await fetchRemoteShard({
+            host: shard.host,
+            sshUser,
+            remoteRepoPath,
+            branchName: worker.branchName || `swarm/${runId}/${shardName}`,
+            rootDir: workdir,
+          });
+
+          if (!fetchResult.ok) {
+            eventLog.append("remote_fetch_failed", {
+              shard: shardName,
+              error: fetchResult.error,
+            });
+            await maybeCleanupWorktree(shardName, worker, shard);
+            integrationFailures.push(shardName);
+            continue;
+          }
+          eventLog.append("remote_fetch_ok", {
             shard: shardName,
-            error: fetchResult.error,
+            headCommit: fetchResult.headCommit,
+          });
+        }
+
+        // Read shard output log for changed files
+        const changedFiles = detectChangedFiles(shardName, worker);
+
+        // Validate against lease map
+        const validation = validateResult(shardName, changedFiles);
+        if (!validation.ok) {
+          failures.set(shardName, {
+            mode: FAILURE_MODES.F4_LEASE_VIOLATION,
+            violations: validation.violations,
+          });
+          eventLog.append("lease_violation_revert", {
+            shard: shardName,
+            violations: validation.violations,
           });
           await maybeCleanupWorktree(shardName, worker, shard);
           integrationFailures.push(shardName);
           continue;
         }
-        eventLog.append("remote_fetch_ok", {
-          shard: shardName,
-          headCommit: fetchResult.headCommit,
-        });
-      }
 
-      // Read shard output log for changed files
-      const changedFiles = detectChangedFiles(shardName, worker);
-
-      // Validate against lease map
-      const validation = validateResult(shardName, changedFiles);
-      if (!validation.ok) {
-        failures.set(shardName, {
-          mode: FAILURE_MODES.F4_LEASE_VIOLATION,
-          violations: validation.violations,
-        });
-        eventLog.append("lease_violation_revert", {
-          shard: shardName,
-          violations: validation.violations,
-        });
-        await maybeCleanupWorktree(shardName, worker, shard);
-        integrationFailures.push(shardName);
-        continue;
-      }
-
-      const shardBranch = worker.branchName || `swarm/${runId}/${shardName}`;
-      const rebaseResult = await rebaseShardOntoIntegrationImpl({
-        shardBranch,
-        integrationBranch,
-        rootDir: workdir,
-      });
-      if (!rebaseResult.ok) {
-        eventLog.append("integration_rebase_failed", {
-          shard: shardName,
+        const shardBranch = worker.branchName || `swarm/${runId}/${shardName}`;
+        const rebaseResult = await rebaseShardOntoIntegrationImpl({
           shardBranch,
           integrationBranch,
-          error: rebaseResult.error,
+          rootDir: workdir,
         });
-        await maybeCleanupWorktree(shardName, worker, shard);
-        integrationFailures.push(shardName);
-        continue;
+        if (!rebaseResult.ok) {
+          eventLog.append("integration_rebase_failed", {
+            shard: shardName,
+            shardBranch,
+            integrationBranch,
+            error: rebaseResult.error,
+          });
+          await maybeCleanupWorktree(shardName, worker, shard);
+          integrationFailures.push(shardName);
+          continue;
+        }
+
+        results.set(shardName, {
+          shard: shardName,
+          changedFiles,
+          branchName: shardBranch,
+          worktreePath: worker.worktreePath || null,
+          integrationBranch,
+          headCommit: rebaseResult.headCommit,
+          completedAt: Date.now(),
+        });
+        integrated.push(shardName);
+
+        await maybeCleanupWorktree(shardName, worker, shard, shardBranch);
       }
+    } catch (err) {
+      const unresolved = plan.mergeOrder.filter(
+        (name) =>
+          !integrated.includes(name) &&
+          !preIntegrationFailures.includes(name) &&
+          !integrationFailures.includes(name),
+      );
+      const failed = [
+        ...new Set([
+          ...preIntegrationFailures,
+          ...integrationFailures,
+          ...unresolved,
+        ]),
+      ];
+      const skipped = preIntegrationFailures.filter(
+        (name) => !integrationFailures.includes(name),
+      );
 
-      results.set(shardName, {
-        shard: shardName,
-        changedFiles,
-        branchName: shardBranch,
-        worktreePath: worker.worktreePath || null,
+      eventLog.append("integration_complete", {
+        integrated,
+        failed,
+        integrationFailures,
         integrationBranch,
-        headCommit: rebaseResult.headCommit,
-        completedAt: Date.now(),
+        skipped,
+        error: err.message,
       });
-      integrated.push(shardName);
 
-      await maybeCleanupWorktree(shardName, worker, shard, shardBranch);
+      setState(SWARM_STATES.FAILED, "integration_error");
+      const payload = settleIntegrationPromise({
+        integrated,
+        failed,
+        integrationFailures,
+        integrationBranch,
+        skipped,
+        results: [...results.values()],
+        partial: true,
+        error: err.message,
+      });
+      emitter.emit("integrationComplete", payload);
+      return payload;
     }
+
+    const skipped = preIntegrationFailures.filter(
+      (name) => !integrationFailures.includes(name),
+    );
+    const failed = [...new Set([...skipped, ...integrationFailures])];
 
     eventLog.append("integration_complete", {
       integrated,
-      failed: integrationFailures,
+      failed,
+      integrationFailures,
       integrationBranch,
-      skipped: [...failures.keys()].filter(
-        (n) => !integrationFailures.includes(n),
-      ),
+      skipped,
     });
 
-    if (integrationFailures.length > 0 && integrated.length === 0) {
+    if (failed.length > 0 && integrated.length === 0) {
       setState(SWARM_STATES.FAILED, "all_shards_failed_integration");
     } else {
       setState(
@@ -632,12 +744,17 @@ export function createSwarmHypervisor(opts) {
       );
     }
 
-    emitter.emit("integrationComplete", {
+    const payload = settleIntegrationPromise({
       integrated,
-      failed: integrationFailures,
+      failed,
+      integrationFailures,
       integrationBranch,
+      skipped,
       results: [...results.values()],
+      partial: failed.length > 0,
     });
+    emitter.emit("integrationComplete", payload);
+    return payload;
   }
 
   async function maybeCleanupWorktree(
@@ -758,6 +875,18 @@ export function createSwarmHypervisor(opts) {
       mergeOrder: plan?.mergeOrder || [],
       criticalShards: plan?.criticalShards || [],
       locks: lockManager?.snapshot() || [],
+      integrationPromise: Object.freeze({
+        state: integrationPromiseState.state,
+        startedAt: integrationPromiseState.startedAt,
+        settledAt: integrationPromiseState.settledAt,
+        partial: integrationPromiseState.partial,
+        integrated: [...integrationPromiseState.integrated],
+        failed: [...integrationPromiseState.failed],
+        integrationFailures: [...integrationPromiseState.integrationFailures],
+        skipped: [...integrationPromiseState.skipped],
+        integrationBranch: integrationPromiseState.integrationBranch,
+        error: integrationPromiseState.error,
+      }),
     });
   }
 
@@ -806,6 +935,7 @@ export function createSwarmHypervisor(opts) {
     }
 
     plan = swarmPlan;
+    markIntegrationPromisePending();
 
     // Hub alive 확인 — 죽어있으면 재시작
     if (ensureHubAliveFn) {
@@ -914,6 +1044,9 @@ export function createSwarmHypervisor(opts) {
     launch,
     shutdown,
     getStatus,
+    integrationComplete() {
+      return integrationPromise;
+    },
     getMeshRegistry() {
       return sharedRegistry;
     },

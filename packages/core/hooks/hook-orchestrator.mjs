@@ -21,7 +21,14 @@
 //   HOME / USERPROFILE    — ${HOME} 치환용
 
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +37,13 @@ import { PLUGIN_ROOT } from "./lib/resolve-root.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REGISTRY_PATH =
   process.env.TRIFLUX_HOOK_REGISTRY || join(__dirname, "hook-registry.json");
+const HOOK_CACHE_DIR =
+  process.env.TRIFLUX_HOOK_CACHE_DIR ||
+  join(tmpdir(), "triflux-hook-orchestrator-cache");
+const HOOK_CACHE_TTL_MS = Math.max(
+  0,
+  Number.parseInt(process.env.TRIFLUX_HOOK_CACHE_TTL_MS || "1500", 10) || 1500,
+);
 
 // ── stdin 읽기 ──────────────────────────────────────────────
 function readStdin() {
@@ -75,6 +89,57 @@ function matchesMatcher(hookMatcher, toolName, eventInput) {
       return p === toolName;
     }
   });
+}
+
+function shouldDedupePreToolUseBash(eventName, toolName) {
+  return eventName === "PreToolUse" && toolName === "Bash";
+}
+
+function buildHookCachePath(stdinData) {
+  const digest = createHash("sha1").update(stdinData).digest("hex");
+  return join(HOOK_CACHE_DIR, `pretool-bash-${digest}.json`);
+}
+
+function readHookCache(stdinData) {
+  if (HOOK_CACHE_TTL_MS <= 0) return null;
+
+  const cachePath = buildHookCachePath(stdinData);
+  if (!existsSync(cachePath)) return null;
+
+  try {
+    const cached = JSON.parse(readFileSync(cachePath, "utf8"));
+    const ageMs = Date.now() - Number(cached?.ts || 0);
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > HOOK_CACHE_TTL_MS) {
+      unlinkSync(cachePath);
+      return null;
+    }
+    return cached;
+  } catch {
+    try {
+      unlinkSync(cachePath);
+    } catch {}
+    return null;
+  }
+}
+
+function writeHookCache(stdinData, payload) {
+  if (HOOK_CACHE_TTL_MS <= 0) return;
+
+  try {
+    mkdirSync(HOOK_CACHE_DIR, { recursive: true });
+    writeFileSync(
+      buildHookCachePath(stdinData),
+      JSON.stringify({ ts: Date.now(), ...payload }),
+      "utf8",
+    );
+  } catch {
+    // 캐시 실패는 훅 실행에 영향 주지 않음
+  }
+}
+
+function shouldShortCircuitPreToolUseBash(result) {
+  if (!result || result.code === 2) return true;
+  return result.code === 0 && Boolean(result.stdout?.trim());
 }
 
 // ── 단일 훅 실행 ────────────────────────────────────────────
@@ -315,9 +380,23 @@ async function main() {
 
   if (!eventName) process.exit(0);
 
+  const dedupePreToolUseBash = shouldDedupePreToolUseBash(eventName, toolName);
+  if (dedupePreToolUseBash) {
+    const cached = readHookCache(stdinRaw);
+    if (cached?.stderr) process.stderr.write(cached.stderr);
+    if (cached?.blocked) process.exit(2);
+    if (cached?.mergedOutput) {
+      process.stdout.write(JSON.stringify(cached.mergedOutput));
+    }
+    if (cached) process.exit(0);
+  }
+
   // ── SessionStart fast-path ──
   // TRIFLUX_HOOK_FAST_PATH=false로 비활성화 가능 (rollback)
-  if (eventName === "SessionStart" && process.env.TRIFLUX_HOOK_FAST_PATH !== "false") {
+  if (
+    eventName === "SessionStart" &&
+    process.env.TRIFLUX_HOOK_FAST_PATH !== "false"
+  ) {
     try {
       const { execute } = await import("./session-start-fast.mjs");
       const result = await execute(stdinRaw);
@@ -328,7 +407,9 @@ async function main() {
 
       // external source 훅 (session-vault 등)은 기존 방식으로 실행
       const allHooks = registry.events.SessionStart || [];
-      const externalHooks = allHooks.filter((h) => h.enabled !== false && h.source !== "triflux");
+      const externalHooks = allHooks.filter(
+        (h) => h.enabled !== false && h.source !== "triflux",
+      );
       for (const hook of externalHooks) {
         const hookResult = executeHookAsync(hook, stdinRaw);
         hookResult.catch(() => {}); // fire-and-forget for external hooks
@@ -337,7 +418,9 @@ async function main() {
       process.exit(0);
     } catch (err) {
       // fast-path 실패 시 기존 방식으로 폴백
-      process.stderr.write(`[orchestrator] fast-path failed, falling back: ${err.message}\n`);
+      process.stderr.write(
+        `[orchestrator] fast-path failed, falling back: ${err.message}\n`,
+      );
     }
   }
 
@@ -366,34 +449,55 @@ async function main() {
 
   let mergedOutput = null;
   let blocked = false;
+  let blockingStderr = "";
 
-  for (const group of groups) {
-    if (blocked) break;
-
-    if (group.hooks.length === 1) {
-      // 단일 훅 — 기존 동기 실행
-      const result = executeHook(group.hooks[0], stdinRaw);
+  if (dedupePreToolUseBash) {
+    for (const hook of matched) {
+      const result = executeHook(hook, stdinRaw);
       if (result.code === 2) {
-        if (result.stderr) process.stderr.write(result.stderr);
+        blockingStderr = result.stderr || "";
+        if (blockingStderr) process.stderr.write(blockingStderr);
         blocked = true;
         break;
       }
       if (result.code === 0 && result.stdout.trim()) {
         mergedOutput = mergeOutputs(mergedOutput, result.stdout.trim());
       }
-    } else {
-      // 같은 priority 다중 훅 — 비동기 병렬 실행
-      const results = await Promise.all(
-        group.hooks.map((h) => executeHookAsync(h, stdinRaw)),
-      );
-      for (const result of results) {
+      if (shouldShortCircuitPreToolUseBash(result)) {
+        break;
+      }
+    }
+  } else {
+    for (const group of groups) {
+      if (blocked) break;
+
+      if (group.hooks.length === 1) {
+        // 단일 훅 — 기존 동기 실행
+        const result = executeHook(group.hooks[0], stdinRaw);
         if (result.code === 2) {
-          if (result.stderr) process.stderr.write(result.stderr);
+          blockingStderr = result.stderr || "";
+          if (blockingStderr) process.stderr.write(blockingStderr);
           blocked = true;
           break;
         }
         if (result.code === 0 && result.stdout.trim()) {
           mergedOutput = mergeOutputs(mergedOutput, result.stdout.trim());
+        }
+      } else {
+        // 같은 priority 다중 훅 — 비동기 병렬 실행
+        const results = await Promise.all(
+          group.hooks.map((h) => executeHookAsync(h, stdinRaw)),
+        );
+        for (const result of results) {
+          if (result.code === 2) {
+            blockingStderr = result.stderr || "";
+            if (blockingStderr) process.stderr.write(blockingStderr);
+            blocked = true;
+            break;
+          }
+          if (result.code === 0 && result.stdout.trim()) {
+            mergedOutput = mergeOutputs(mergedOutput, result.stdout.trim());
+          }
         }
       }
     }
@@ -403,23 +507,35 @@ async function main() {
   if (eventName === "PostToolUse" && !blocked) {
     try {
       const home = process.env.HOME || process.env.USERPROFILE || "";
-      const snapshotPath = join(home, ".claude", "cache", "tfx-hub", "context-monitor.json");
+      const snapshotPath = join(
+        home,
+        ".claude",
+        "cache",
+        "tfx-hub",
+        "context-monitor.json",
+      );
       const nudgeMarker = join(tmpdir(), "tfx-compact-nudge-sent");
       if (existsSync(snapshotPath) && !existsSync(nudgeMarker)) {
         const snap = JSON.parse(readFileSync(snapshotPath, "utf8"));
         const percent = Number(snap.percent || 0);
         if (percent >= 80) {
           const level = percent >= 90 ? "critical" : "warn";
-          const msg = level === "critical"
-            ? `[context ${percent}%] 컨텍스트 ${percent}% 사용. /compact 또는 에이전트 분할을 강력 권장합니다.`
-            : `[context ${percent}%] 컨텍스트 ${percent}% 사용. 마일스톤이면 /compact를 권장합니다.`;
-          mergedOutput = mergeOutputs(mergedOutput, JSON.stringify({ systemMessage: msg }));
+          const msg =
+            level === "critical"
+              ? `[context ${percent}%] 컨텍스트 ${percent}% 사용. /compact 또는 에이전트 분할을 강력 권장합니다.`
+              : `[context ${percent}%] 컨텍스트 ${percent}% 사용. 마일스톤이면 /compact를 권장합니다.`;
+          mergedOutput = mergeOutputs(
+            mergedOutput,
+            JSON.stringify({ systemMessage: msg }),
+          );
           if (level === "warn") {
             writeFileSync(nudgeMarker, new Date().toISOString());
           }
         }
       }
-    } catch { /* 컨텍스트 모니터 읽기 실패 무시 */ }
+    } catch {
+      /* 컨텍스트 모니터 읽기 실패 무시 */
+    }
   }
 
   // ── PostToolUse:Skill 완료 시 라우팅 가중치 기록 ──
@@ -440,7 +556,22 @@ async function main() {
 
   // 결과 출력
   if (blocked) {
+    if (dedupePreToolUseBash) {
+      writeHookCache(stdinRaw, {
+        blocked: true,
+        mergedOutput: null,
+        stderr: blockingStderr,
+      });
+    }
     process.exit(2);
+  }
+
+  if (dedupePreToolUseBash) {
+    writeHookCache(stdinRaw, {
+      blocked: false,
+      mergedOutput,
+      stderr: "",
+    });
   }
 
   if (mergedOutput) {

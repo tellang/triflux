@@ -403,6 +403,81 @@ describe("swarm-hypervisor", () => {
         },
       ]);
     });
+
+    it("exposes an awaitable integrationComplete promise", async () => {
+      const plan = planSwarm(null, { content: SINGLE_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "awaitable-success",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/awaitable-success/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardBranch }) => ({
+            ok: true,
+            headCommit: `head:${shardBranch}`,
+          }),
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      const integrationDone = hv.integrationComplete();
+
+      await hv.launch(plan);
+      assert.equal(hv.getStatus().integrationPromise.state, "pending");
+
+      conductors[0].complete();
+
+      const result = await integrationDone;
+      assert.deepEqual(result.integrated, ["worker-a"]);
+      assert.deepEqual(result.failed, []);
+      assert.equal(result.partial, false);
+      assert.equal(hv.getStatus().integrationPromise.state, "fulfilled");
+    });
+
+    it("resolves integrationComplete with partial results when a shard fails", async () => {
+      const plan = planSwarm(null, { content: PARALLEL_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "awaitable-partial",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/awaitable-partial/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardBranch }) => ({
+            ok: true,
+            headCommit: `head:${shardBranch}`,
+          }),
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].fail("worker crashed");
+      conductors[1].complete();
+
+      const result = await hv.integrationComplete();
+      assert.deepEqual(result.integrated, ["worker-b"]);
+      assert.deepEqual(result.failed, ["worker-a"]);
+      assert.equal(result.partial, true);
+      assert.equal(hv.getStatus().integrationPromise.partial, true);
+    });
   });
 
   describe("getStatus", () => {
@@ -418,6 +493,7 @@ describe("swarm-hypervisor", () => {
       assert.ok(Array.isArray(status.workers));
       assert.ok(Array.isArray(status.mergeOrder));
       assert.ok(Array.isArray(status.locks));
+      assert.equal(status.integrationPromise.state, "pending");
     });
   });
 
@@ -434,7 +510,7 @@ describe("swarm-hypervisor", () => {
     });
 
     it("detects violations when worker modifies other shard files", async () => {
-      const plan = planSwarm(null, { content: SIMPLE_PRD });
+      const plan = planSwarm(null, { content: PARALLEL_PRD });
       ({ hv } = createTestHypervisor(workdir, logsDir));
 
       await hv.launch(plan);

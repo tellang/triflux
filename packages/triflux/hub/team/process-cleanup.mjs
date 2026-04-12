@@ -1,7 +1,7 @@
 // hub/team/process-cleanup.mjs — 고아 node/python 프로세스 감지 및 정리
 // Windows: Get-CimInstance Win32_Process로 parent PID + cmdLine 접근
 // Unix: ps aux 파싱
-import { execFile as nodeExecFile } from "node:child_process";
+import { execFile as nodeExecFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { IS_WINDOWS } from "../platform.mjs";
 
@@ -11,6 +11,28 @@ const execFileAsync = promisify(nodeExecFile);
 
 const TARGET_PROCESS_NAMES = ["node", "python", "python3"];
 const SIGTERM_GRACE_MS = 5000;
+
+function forceKillPid(pid) {
+  if (IS_WINDOWS) {
+    try {
+      execFileSync("taskkill", ["/F", "/PID", String(pid)], {
+        stdio: "ignore",
+        timeout: 5000,
+        windowsHide: true,
+      });
+      return;
+    } catch (taskkillError) {
+      try {
+        process.kill(pid);
+        return;
+      } catch {
+        throw taskkillError;
+      }
+    }
+  }
+
+  process.kill(pid, "SIGKILL");
+}
 
 // cmdLine 패턴 기반 화이트리스트 (고아 후보에서 제외)
 const WHITELIST_CMDLINE = [/oh-my-claudecode/i, /triflux[\\/]hub[\\/]s/i];
@@ -293,7 +315,7 @@ export function createProcessCleanup(opts = {}) {
   /**
    * 마지막 scan 결과의 프로세스를 kill한다.
    * dryRun=true이면 kill 없이 목록만 반환한다.
-   * SIGTERM → 5s 대기 → SIGKILL 순서.
+   * SIGTERM → 5s 대기 → 강제 종료(taskkill/SIGKILL) 순서.
    * @returns {Promise<Array<{pid,name,killed,error}>>}
    */
   async function kill() {
@@ -312,14 +334,14 @@ export function createProcessCleanup(opts = {}) {
           // SIGTERM
           process.kill(p.pid, "SIGTERM");
 
-          // 5초 대기 후 살아있으면 SIGKILL
+          // 5초 대기 후 살아있으면 강제 종료
           await new Promise((resolve) => setTimeout(resolve, SIGTERM_GRACE_MS));
 
           try {
             // 프로세스가 아직 살아있는지 확인 (signal 0)
             process.kill(p.pid, 0);
-            // 여전히 살아있음 → SIGKILL
-            process.kill(p.pid, "SIGKILL");
+            // 여전히 살아있음 → Windows는 taskkill/process.kill, 그 외는 SIGKILL
+            forceKillPid(p.pid);
           } catch {
             // ESRCH: 이미 종료됨 — 정상
           }
