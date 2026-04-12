@@ -9,6 +9,10 @@ import {
 } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
+import {
+  ensureBashScriptExecution,
+  resolveBashExecutable,
+} from "../lib/bash-path.mjs";
 import { verifySlimWrapperRouteExecution } from "./native.mjs";
 import { forceCleanupTeam } from "./nativeProxy.mjs";
 
@@ -149,7 +153,10 @@ function validateMemberCommand(command, memberName) {
 }
 
 function spawnMember(member) {
-  validateMemberCommand(member.command, member.name);
+  const command = ensureBashScriptExecution(member.command, {
+    bashCommand: resolveBashExecutable(),
+  });
+  validateMemberCommand(command, member.name);
 
   const outPath = join(logsDir, `${member.name}.out.log`);
   const errPath = join(logsDir, `${member.name}.err.log`);
@@ -157,7 +164,7 @@ function spawnMember(member) {
   const outWs = createWriteStream(outPath, { flags: "a" });
   const errWs = createWriteStream(errPath, { flags: "a" });
 
-  const child = spawn(member.command, {
+  const child = spawn(command, {
     shell: true,
     env: {
       ...process.env,
