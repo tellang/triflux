@@ -1007,7 +1007,7 @@ export function createSwarmHypervisor(opts) {
       `${launched.size} launched, ${pending.size} pending deps`,
     );
 
-    return getStatus();
+    return { ...getStatus(), done: integrationPromise };
   }
 
   /**

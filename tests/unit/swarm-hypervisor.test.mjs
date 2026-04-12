@@ -274,6 +274,14 @@ describe("swarm-hypervisor", () => {
       assert.ok(status.mergeOrder.length > 0);
     });
 
+    it("returns done promise for awaiting integration completion", async () => {
+      const plan = planSwarm(null, { content: PARALLEL_PRD });
+      ({ hv } = createTestHypervisor(workdir, logsDir));
+
+      const status = await hv.launch(plan);
+      assert.equal(typeof status.done?.then, "function", "done은 Promise여야 함");
+    });
+
     it("launches dependent shard only after prerequisite completion", async () => {
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       const setup = createTestHypervisor(workdir, logsDir);

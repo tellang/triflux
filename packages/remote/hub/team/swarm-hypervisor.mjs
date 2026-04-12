@@ -13,13 +13,19 @@
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { getHostConfig } from "@triflux/core/hub/lib/ssh-command.mjs";
+import { getHostConfig } from "../lib/ssh-command.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
 import { ensureConductorRegistry } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { probeRemoteEnv, resolveRemoteDir } from "./remote-session.mjs";
 import { createSwarmLocks } from "./swarm-locks.mjs";
-import { fetchRemoteShard } from "./worktree-lifecycle.mjs";
+import {
+  ensureWorktree,
+  fetchRemoteShard,
+  prepareIntegrationBranch,
+  pruneWorktree,
+  rebaseShardOntoIntegration,
+} from "./worktree-lifecycle.mjs";
 
 let ensureHubAliveFn = null;
 try {
@@ -110,6 +116,8 @@ function createSharedRegistry(factory) {
  * @param {object} opts
  * @param {string} opts.workdir — repository root / working directory
  * @param {string} opts.logsDir — base directory for all logs
+ * @param {string} [opts.baseBranch='main'] — base branch for shard worktrees
+ * @param {string} [opts.runId=`swarm-${Date.now()}`] — logical swarm run id
  * @param {number} [opts.maxRestarts=2] — per-shard max restarts
  * @param {number} [opts.graceMs=10000] — conductor shutdown grace period
  * @param {number} [opts.integrationTimeoutMs=60000] — max time for integration phase
@@ -121,6 +129,8 @@ export function createSwarmHypervisor(opts) {
   const {
     workdir,
     logsDir,
+    baseBranch = "main",
+    runId = `swarm-${Date.now()}`,
     maxRestarts = 2,
     graceMs = 10_000,
     _integrationTimeoutMs = 60_000,
@@ -136,6 +146,12 @@ export function createSwarmHypervisor(opts) {
 
   const createConductorImpl = _deps.createConductor || createConductor;
   const createRegistryImpl = _deps.createRegistry || importedCreateRegistry;
+  const ensureWorktreeImpl = _deps.ensureWorktree || ensureWorktree;
+  const prepareIntegrationBranchImpl =
+    _deps.prepareIntegrationBranch || prepareIntegrationBranch;
+  const rebaseShardOntoIntegrationImpl =
+    _deps.rebaseShardOntoIntegration || rebaseShardOntoIntegration;
+  const cleanupWorktreeImpl = _deps.cleanupWorktree || pruneWorktree;
   const emitter = new EventEmitter();
   const eventLog = createEventLog(join(logsDir, "swarm-events.jsonl"));
   const { registry: sharedRegistry, fallbackReason: meshRegistryFallback } =
@@ -151,8 +167,28 @@ export function createSwarmHypervisor(opts) {
   /** @type {Map<string, { conductor, shardConfig }>} redundant workers for critical shards */
   const redundantWorkers = new Map();
 
+  /** @type {Set<string>} shards that have fully completed (not just launched) */
+  const completedShards = new Set();
+
   const results = new Map(); // shardName → validated result
   const failures = new Map(); // shardName → failure info
+  let integrationResult = null;
+  let resolveIntegrationPromise = null;
+  let integrationPromiseState = {
+    state: "idle",
+    startedAt: null,
+    settledAt: null,
+    partial: false,
+    integrated: [],
+    failed: [],
+    integrationFailures: [],
+    skipped: [],
+    integrationBranch: null,
+    error: null,
+  };
+  const integrationPromise = new Promise((resolve) => {
+    resolveIntegrationPromise = resolve;
+  });
 
   if (meshRegistryFallback) {
     eventLog.append("mesh_registry_fallback", { reason: meshRegistryFallback });
@@ -167,6 +203,52 @@ export function createSwarmHypervisor(opts) {
     emitter.emit("stateChange", { from: prev, to: next, reason });
   }
 
+  function markIntegrationPromisePending() {
+    if (integrationPromiseState.state !== "idle") return;
+    integrationPromiseState = {
+      ...integrationPromiseState,
+      state: "pending",
+      startedAt: Date.now(),
+    };
+  }
+
+  function settleIntegrationPromise(payload) {
+    if (integrationPromiseState.state === "fulfilled" && integrationResult) {
+      return integrationResult;
+    }
+
+    integrationResult = Object.freeze({
+      integrated: Object.freeze([...(payload.integrated || [])]),
+      failed: Object.freeze([...(payload.failed || [])]),
+      integrationFailures: Object.freeze([
+        ...(payload.integrationFailures || []),
+      ]),
+      skipped: Object.freeze([...(payload.skipped || [])]),
+      integrationBranch: payload.integrationBranch || null,
+      results: Object.freeze([...(payload.results || [])]),
+      partial:
+        payload.partial ??
+        (Array.isArray(payload.failed) && payload.failed.length > 0),
+      error: payload.error || null,
+    });
+
+    integrationPromiseState = {
+      state: "fulfilled",
+      startedAt: integrationPromiseState.startedAt ?? Date.now(),
+      settledAt: Date.now(),
+      partial: integrationResult.partial,
+      integrated: [...integrationResult.integrated],
+      failed: [...integrationResult.failed],
+      integrationFailures: [...integrationResult.integrationFailures],
+      skipped: [...integrationResult.skipped],
+      integrationBranch: integrationResult.integrationBranch,
+      error: integrationResult.error,
+    };
+
+    resolveIntegrationPromise?.(integrationResult);
+    return integrationResult;
+  }
+
   // ── Worker lifecycle ────────────────────────────────────────
 
   function buildSessionConfig(shard) {
@@ -174,9 +256,21 @@ export function createSwarmHypervisor(opts) {
       id: `swarm-${shard.name}-${Date.now()}`,
       agent: shard.agent,
       prompt: shard.prompt,
-      workdir,
+      workdir: shard.worktreePath || workdir,
       mcpServers: shard.mcp,
+      worktreePath: shard.worktreePath || null,
+      branchName: shard.branchName || null,
     };
+
+    if (shard.worktreePath) {
+      return shard.host
+        ? {
+            ...config,
+            remote: true,
+            host: shard.host,
+          }
+        : config;
+    }
 
     // Remote shard: use host's default_dir from hosts.json
     if (shard.host && shard._remoteEnv) {
@@ -194,7 +288,7 @@ export function createSwarmHypervisor(opts) {
     return config;
   }
 
-  function launchShard(shard, isRedundant = false) {
+  async function launchShard(shard, isRedundant = false) {
     // Clone frozen shard so we can attach mutable runtime state (_remoteEnv)
     shard = { ...shard };
 
@@ -204,100 +298,148 @@ export function createSwarmHypervisor(opts) {
     );
     mkdirSync(shardLogsDir, { recursive: true });
 
-    // Remote shard: probe environment before conductor creation
-    if (shard.host && !shard._remoteEnv) {
-      try {
-        shard._remoteEnv = probeRemoteEnv(shard.host);
-        if (!shard._remoteEnv.claudePath) {
-          eventLog.append("remote_probe_no_claude", {
+    try {
+      // Remote shard: probe environment before conductor creation
+      if (shard.host && !shard._remoteEnv) {
+        try {
+          shard._remoteEnv = probeRemoteEnv(shard.host);
+          if (!shard._remoteEnv.claudePath) {
+            eventLog.append("remote_probe_no_claude", {
+              shard: shard.name,
+              host: shard.host,
+            });
+            if (!isRedundant) {
+              failures.set(shard.name, {
+                mode: FAILURE_MODES.F1_CRASH,
+                reason: `claude not found on ${shard.host}`,
+              });
+            }
+            return null;
+          }
+          eventLog.append("remote_probe_ok", {
             shard: shard.name,
             host: shard.host,
+            env: shard._remoteEnv,
+          });
+        } catch (err) {
+          eventLog.append("remote_probe_failed", {
+            shard: shard.name,
+            host: shard.host,
+            error: err.message,
+          });
+          if (!isRedundant) {
+            failures.set(shard.name, {
+              mode: FAILURE_MODES.F1_CRASH,
+              reason: `remote probe failed: ${err.message}`,
+            });
+          }
+          return null;
+        }
+      }
+
+      // Acquire file leases
+      if (!isRedundant) {
+        const leaseResult = lockManager.acquire(shard.name, shard.files);
+        if (!leaseResult.ok) {
+          eventLog.append("lease_denied", {
+            shard: shard.name,
+            conflicts: leaseResult.conflicts,
           });
           failures.set(shard.name, {
-            mode: FAILURE_MODES.F1_CRASH,
-            reason: `claude not found on ${shard.host}`,
+            mode: FAILURE_MODES.F4_LEASE_VIOLATION,
+            conflicts: leaseResult.conflicts,
           });
           return null;
         }
-        eventLog.append("remote_probe_ok", {
-          shard: shard.name,
-          host: shard.host,
-          env: shard._remoteEnv,
-        });
-      } catch (err) {
-        eventLog.append("remote_probe_failed", {
-          shard: shard.name,
-          host: shard.host,
-          error: err.message,
-        });
+      }
+
+      const worktreeMeta = await ensureWorktreeImpl({
+        slug: isRedundant ? `${shard.name}-redundant` : shard.name,
+        runId,
+        rootDir: workdir,
+        baseBranch,
+        host: shard.host,
+        remoteEnv: shard._remoteEnv,
+      });
+      shard.worktreePath = worktreeMeta.worktreePath;
+      shard.branchName = worktreeMeta.branchName;
+
+      const conductor = createConductorImpl({
+        logsDir: shardLogsDir,
+        maxRestarts,
+        graceMs,
+        probeOpts,
+        meshRegistry: sharedRegistry,
+        enableMesh: true,
+        onCompleted: (sessionId) =>
+          handleShardCompleted(shard.name, sessionId, isRedundant),
+      });
+
+      const sessionConfig = buildSessionConfig(shard);
+      conductor.spawnSession(sessionConfig);
+
+      eventLog.append("shard_launched", {
+        shard: shard.name,
+        agent: shard.agent,
+        sessionId: sessionConfig.id,
+        isRedundant,
+        files: shard.files,
+        remote: Boolean(shard.host),
+        host: shard.host || null,
+        worktreePath: sessionConfig.worktreePath,
+        branchName: sessionConfig.branchName,
+      });
+
+      const entry = {
+        conductor,
+        shardConfig: shard,
+        sessionConfig,
+        startedAt: Date.now(),
+        worktreePath: sessionConfig.worktreePath,
+        branchName: sessionConfig.branchName,
+      };
+
+      if (isRedundant) {
+        redundantWorkers.set(shard.name, entry);
+      } else {
+        workers.set(shard.name, entry);
+      }
+
+      // Listen for dead events (F1/F2/F3)
+      conductor.on("dead", ({ sessionId, reason }) => {
+        handleShardFailed(shard.name, sessionId, reason, isRedundant);
+      });
+
+      return entry;
+    } catch (err) {
+      eventLog.append("shard_launch_failed", {
+        shard: shard.name,
+        isRedundant,
+        error: err.message,
+      });
+      if (!isRedundant) {
         failures.set(shard.name, {
           mode: FAILURE_MODES.F1_CRASH,
-          reason: `remote probe failed: ${err.message}`,
+          reason: err.message,
         });
-        return null;
       }
-    }
-
-    const conductor = createConductorImpl({
-      logsDir: shardLogsDir,
-      maxRestarts,
-      graceMs,
-      probeOpts,
-      meshRegistry: sharedRegistry,
-      enableMesh: true,
-      onCompleted: (sessionId) =>
-        handleShardCompleted(shard.name, sessionId, isRedundant),
-    });
-
-    const sessionConfig = buildSessionConfig(shard);
-
-    // Acquire file leases
-    if (!isRedundant) {
-      const leaseResult = lockManager.acquire(shard.name, shard.files);
-      if (!leaseResult.ok) {
-        eventLog.append("lease_denied", {
-          shard: shard.name,
-          conflicts: leaseResult.conflicts,
-        });
-        failures.set(shard.name, {
-          mode: FAILURE_MODES.F4_LEASE_VIOLATION,
-          conflicts: leaseResult.conflicts,
-        });
-        return null;
+      if (!isRedundant) {
+        lockManager.release(shard.name);
       }
+      if (shard.worktreePath) {
+        try {
+          await cleanupWorktreeImpl({
+            worktreePath: shard.worktreePath,
+            branchName: shard.branchName,
+            rootDir: workdir,
+            force: true,
+          });
+        } catch {
+          /* best-effort */
+        }
+      }
+      return null;
     }
-
-    conductor.spawnSession(sessionConfig);
-
-    eventLog.append("shard_launched", {
-      shard: shard.name,
-      agent: shard.agent,
-      sessionId: sessionConfig.id,
-      isRedundant,
-      files: shard.files,
-      remote: Boolean(shard.host),
-      host: shard.host || null,
-    });
-
-    const entry = {
-      conductor,
-      shardConfig: shard,
-      sessionConfig,
-      startedAt: Date.now(),
-    };
-
-    if (isRedundant) {
-      redundantWorkers.set(shard.name, entry);
-    } else {
-      workers.set(shard.name, entry);
-    }
-
-    // Listen for dead events (F1/F2/F3)
-    conductor.on("dead", ({ sessionId, reason }) => {
-      handleShardFailed(shard.name, sessionId, reason, isRedundant);
-    });
-
-    return entry;
   }
 
   // ── Completion handling ─────────────────────────────────────
@@ -309,9 +451,16 @@ export function createSwarmHypervisor(opts) {
       isRedundant,
     });
 
+    completedShards.add(shardName);
+
     if (isRedundant) {
       // Redundant worker completed first — kill primary if still running
       const primary = workers.get(shardName);
+      const redundant = redundantWorkers.get(shardName);
+      if (redundant) {
+        workers.set(shardName, redundant);
+        redundantWorkers.delete(shardName);
+      }
       if (primary && !isTerminal(primary)) {
         eventLog.append("redundant_wins", { shard: shardName });
         void primary.conductor.shutdown("redundant_completed_first");
@@ -354,7 +503,7 @@ export function createSwarmHypervisor(opts) {
           });
           const fallbackShard = { ...shard, agent: fallbackAgent };
           lockManager.release(shardName);
-          launchShard(fallbackShard);
+          void launchShard(fallbackShard);
           return;
         }
       }
@@ -430,82 +579,163 @@ export function createSwarmHypervisor(opts) {
 
     const integrated = [];
     const integrationFailures = [];
+    const preIntegrationFailures = [...failures.keys()];
+    let integrationBranch = null;
 
-    for (const shardName of plan.mergeOrder) {
-      if (failures.has(shardName)) {
-        eventLog.append("skip_failed_shard", { shard: shardName });
-        continue;
-      }
+    try {
+      ({ integrationBranch } = await prepareIntegrationBranchImpl({
+        runId,
+        baseBranch,
+        rootDir: workdir,
+      }));
 
-      const worker = workers.get(shardName);
-      if (!worker) continue;
+      for (const shardName of plan.mergeOrder) {
+        if (failures.has(shardName)) {
+          eventLog.append("skip_failed_shard", { shard: shardName });
+          continue;
+        }
 
-      // Fetch remote shard branch to local (push-blocked hosts like Ultra4)
-      const shard = plan.shards.find((s) => s.name === shardName);
-      if (shard?.host && shard._remoteEnv) {
-        const hostConfig = getHostConfig(shard.host, config.rootDir);
-        const sshUser = hostConfig?.ssh_user || shard.host;
-        const remoteRepoPath = resolveRemoteDir(
-          config.rootDir || process.cwd(),
-          shard._remoteEnv,
-        );
-        const fetchResult = await fetchRemoteShard({
-          host: shard.host,
-          sshUser,
-          remoteRepoPath,
-          branchName: worker.branchName || `swarm/${config.runId}/${shardName}`,
-          rootDir: config.rootDir || process.cwd(),
-        });
+        const worker = workers.get(shardName);
+        if (!worker) continue;
 
-        if (!fetchResult.ok) {
-          eventLog.append("remote_fetch_failed", {
-            shard: shardName,
-            error: fetchResult.error,
+        // Fetch remote shard branch to local (push-blocked hosts like Ultra4)
+        const shard = plan.shards.find((s) => s.name === shardName);
+        if (shard?.host && shard._remoteEnv) {
+          const hostConfig = getHostConfig(shard.host, workdir);
+          const sshUser = hostConfig?.ssh_user || shard.host;
+          const remoteRepoPath = resolveRemoteDir(
+            workdir,
+            shard._remoteEnv,
+          );
+          const fetchResult = await fetchRemoteShard({
+            host: shard.host,
+            sshUser,
+            remoteRepoPath,
+            branchName: worker.branchName || `swarm/${runId}/${shardName}`,
+            rootDir: workdir,
           });
+
+          if (!fetchResult.ok) {
+            eventLog.append("remote_fetch_failed", {
+              shard: shardName,
+              error: fetchResult.error,
+            });
+            await maybeCleanupWorktree(shardName, worker, shard);
+            integrationFailures.push(shardName);
+            continue;
+          }
+          eventLog.append("remote_fetch_ok", {
+            shard: shardName,
+            headCommit: fetchResult.headCommit,
+          });
+        }
+
+        // Read shard output log for changed files
+        const changedFiles = detectChangedFiles(shardName, worker);
+
+        // Validate against lease map
+        const validation = validateResult(shardName, changedFiles);
+        if (!validation.ok) {
+          failures.set(shardName, {
+            mode: FAILURE_MODES.F4_LEASE_VIOLATION,
+            violations: validation.violations,
+          });
+          eventLog.append("lease_violation_revert", {
+            shard: shardName,
+            violations: validation.violations,
+          });
+          await maybeCleanupWorktree(shardName, worker, shard);
           integrationFailures.push(shardName);
           continue;
         }
-        eventLog.append("remote_fetch_ok", {
+
+        const shardBranch = worker.branchName || `swarm/${runId}/${shardName}`;
+        const rebaseResult = await rebaseShardOntoIntegrationImpl({
+          shardBranch,
+          integrationBranch,
+          rootDir: workdir,
+        });
+        if (!rebaseResult.ok) {
+          eventLog.append("integration_rebase_failed", {
+            shard: shardName,
+            shardBranch,
+            integrationBranch,
+            error: rebaseResult.error,
+          });
+          await maybeCleanupWorktree(shardName, worker, shard);
+          integrationFailures.push(shardName);
+          continue;
+        }
+
+        results.set(shardName, {
           shard: shardName,
-          headCommit: fetchResult.headCommit,
+          changedFiles,
+          branchName: shardBranch,
+          worktreePath: worker.worktreePath || null,
+          integrationBranch,
+          headCommit: rebaseResult.headCommit,
+          completedAt: Date.now(),
         });
+        integrated.push(shardName);
+
+        await maybeCleanupWorktree(shardName, worker, shard, shardBranch);
       }
+    } catch (err) {
+      const unresolved = plan.mergeOrder.filter(
+        (name) =>
+          !integrated.includes(name) &&
+          !preIntegrationFailures.includes(name) &&
+          !integrationFailures.includes(name),
+      );
+      const failed = [
+        ...new Set([
+          ...preIntegrationFailures,
+          ...integrationFailures,
+          ...unresolved,
+        ]),
+      ];
+      const skipped = preIntegrationFailures.filter(
+        (name) => !integrationFailures.includes(name),
+      );
 
-      // Read shard output log for changed files
-      const changedFiles = detectChangedFiles(shardName, worker);
-
-      // Validate against lease map
-      const validation = validateResult(shardName, changedFiles);
-      if (!validation.ok) {
-        failures.set(shardName, {
-          mode: FAILURE_MODES.F4_LEASE_VIOLATION,
-          violations: validation.violations,
-        });
-        eventLog.append("lease_violation_revert", {
-          shard: shardName,
-          violations: validation.violations,
-        });
-        integrationFailures.push(shardName);
-        continue;
-      }
-
-      results.set(shardName, {
-        shard: shardName,
-        changedFiles,
-        completedAt: Date.now(),
+      eventLog.append("integration_complete", {
+        integrated,
+        failed,
+        integrationFailures,
+        integrationBranch,
+        skipped,
+        error: err.message,
       });
-      integrated.push(shardName);
+
+      setState(SWARM_STATES.FAILED, "integration_error");
+      const payload = settleIntegrationPromise({
+        integrated,
+        failed,
+        integrationFailures,
+        integrationBranch,
+        skipped,
+        results: [...results.values()],
+        partial: true,
+        error: err.message,
+      });
+      emitter.emit("integrationComplete", payload);
+      return payload;
     }
+
+    const skipped = preIntegrationFailures.filter(
+      (name) => !integrationFailures.includes(name),
+    );
+    const failed = [...new Set([...skipped, ...integrationFailures])];
 
     eventLog.append("integration_complete", {
       integrated,
-      failed: integrationFailures,
-      skipped: [...failures.keys()].filter(
-        (n) => !integrationFailures.includes(n),
-      ),
+      failed,
+      integrationFailures,
+      integrationBranch,
+      skipped,
     });
 
-    if (integrationFailures.length > 0 && integrated.length === 0) {
+    if (failed.length > 0 && integrated.length === 0) {
       setState(SWARM_STATES.FAILED, "all_shards_failed_integration");
     } else {
       setState(
@@ -514,11 +744,39 @@ export function createSwarmHypervisor(opts) {
       );
     }
 
-    emitter.emit("integrationComplete", {
+    const payload = settleIntegrationPromise({
       integrated,
-      failed: integrationFailures,
+      failed,
+      integrationFailures,
+      integrationBranch,
+      skipped,
       results: [...results.values()],
+      partial: failed.length > 0,
     });
+    emitter.emit("integrationComplete", payload);
+    return payload;
+  }
+
+  async function maybeCleanupWorktree(
+    shardName,
+    worker,
+    shard,
+    branchName = worker?.branchName,
+  ) {
+    if (!worker?.worktreePath || shard?.host) return;
+    try {
+      await cleanupWorktreeImpl({
+        worktreePath: worker.worktreePath,
+        branchName,
+        rootDir: workdir,
+      });
+    } catch (err) {
+      eventLog.append("worktree_cleanup_failed", {
+        shard: shardName,
+        worktreePath: worker.worktreePath,
+        error: err.message,
+      });
+    }
   }
 
   /**
@@ -611,12 +869,24 @@ export function createSwarmHypervisor(opts) {
     return Object.freeze({
       state,
       totalShards: plan?.shards.length || 0,
-      completedShards: results.size,
+      completedShards: completedShards.size,
       failedShards: failures.size,
       workers: workerStatuses,
       mergeOrder: plan?.mergeOrder || [],
       criticalShards: plan?.criticalShards || [],
       locks: lockManager?.snapshot() || [],
+      integrationPromise: Object.freeze({
+        state: integrationPromiseState.state,
+        startedAt: integrationPromiseState.startedAt,
+        settledAt: integrationPromiseState.settledAt,
+        partial: integrationPromiseState.partial,
+        integrated: [...integrationPromiseState.integrated],
+        failed: [...integrationPromiseState.failed],
+        integrationFailures: [...integrationPromiseState.integrationFailures],
+        skipped: [...integrationPromiseState.skipped],
+        integrationBranch: integrationPromiseState.integrationBranch,
+        error: integrationPromiseState.error,
+      }),
     });
   }
 
@@ -625,7 +895,7 @@ export function createSwarmHypervisor(opts) {
   /**
    * Launch the swarm from a pre-built plan.
    * @param {SwarmPlan} swarmPlan — from planSwarm()
-   * @returns {SwarmStatus}
+   * @returns {Promise<SwarmStatus>}
    */
   /** Hub keepalive — 스웜 실행 중 Hub idle timeout 방지 */
   let hubKeepaliveTimer = null;
@@ -659,12 +929,13 @@ export function createSwarmHypervisor(opts) {
     }
   }
 
-  function launch(swarmPlan) {
+  async function launch(swarmPlan) {
     if (state !== SWARM_STATES.PLANNING) {
       throw new Error(`Cannot launch in state "${state}"`);
     }
 
     plan = swarmPlan;
+    markIntegrationPromisePending();
 
     // Hub alive 확인 — 죽어있으면 재시작
     if (ensureHubAliveFn) {
@@ -700,18 +971,18 @@ export function createSwarmHypervisor(opts) {
     const launched = new Set();
     const pending = new Set(plan.mergeOrder);
 
-    function launchReady() {
+    async function launchReady() {
       for (const name of pending) {
         const shard = plan.shards.find((s) => s.name === name);
         if (!shard) continue;
 
-        // Check all dependencies are launched (not necessarily completed)
-        const depsReady = shard.depends.every((d) => launched.has(d));
+        // Check all dependencies are completed (not just launched)
+        const depsReady = shard.depends.every((d) => completedShards.has(d));
         if (!depsReady) continue;
 
         pending.delete(name);
         launched.add(name);
-        launchShard(shard);
+        await launchShard(shard);
 
         // Launch redundant worker for critical shards
         if (shard.critical) {
@@ -719,16 +990,16 @@ export function createSwarmHypervisor(opts) {
             ...shard,
             agent: FALLBACK_AGENTS[shard.agent] || shard.agent,
           };
-          launchShard(redundantShard, true);
+          await launchShard(redundantShard, true);
         }
       }
     }
 
-    launchReady();
+    await launchReady();
 
     // Re-check pending on each shard completion (dependency chains)
     emitter.on("shardCompleted", () => {
-      if (pending.size > 0) launchReady();
+      if (pending.size > 0) void launchReady();
     });
 
     setState(
@@ -736,7 +1007,7 @@ export function createSwarmHypervisor(opts) {
       `${launched.size} launched, ${pending.size} pending deps`,
     );
 
-    return getStatus();
+    return { ...getStatus(), done: integrationPromise };
   }
 
   /**
@@ -773,6 +1044,9 @@ export function createSwarmHypervisor(opts) {
     launch,
     shutdown,
     getStatus,
+    integrationComplete() {
+      return integrationPromise;
+    },
     getMeshRegistry() {
       return sharedRegistry;
     },
