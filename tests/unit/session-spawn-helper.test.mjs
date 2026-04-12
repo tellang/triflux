@@ -21,15 +21,8 @@ describe("session-spawn-helper createIsolatedSessionName()", () => {
 });
 
 describe("session-spawn-helper attachWithWindowsTerminal()", () => {
-  it("is async and delegates to wt-manager splitPane", async () => {
-    const result = attachWithWindowsTerminal("tfx-isolated-1735689600123", {
-      profile: "triflux",
-      title: "tfx-isolated-1735689600123",
-    });
-    // wt-manager splitPane will throw in test env (no WT), but the function is async
-    assert.equal(typeof result.then, "function");
-    // suppress unhandled rejection from missing WT
-    await result.catch(() => {});
+  it("is an async function (wt-manager delegate)", () => {
+    assert.equal(attachWithWindowsTerminal.constructor.name, "AsyncFunction");
   });
 });
 
