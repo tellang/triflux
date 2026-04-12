@@ -48,6 +48,12 @@ import {
   wrapLine,
   wrapText as wrapTextAll,
 } from "./tui-core.mjs";
+import {
+  createPanelResizer,
+  createSearchState,
+  createTokenTracker,
+  createVimMotion,
+} from "./tui-widgets.mjs";
 
 const VERSION = await loadVersion();
 
@@ -512,7 +518,7 @@ function buildTier1(
     width,
   );
   const keysHint = color(
-    "Tab:focus • j/k/↑↓:nav • f:follow • r:raw • l:tab • n:recent • 1-9:jump",
+    "Tab:focus • j/k:nav • gg/G:jump • /:search • n/N:next • H/L:resize • f:follow • l:tab",
     MOCHA.subtext,
   );
   const hintWidth = wcswidth(stripAnsi(keysHint));
@@ -866,7 +872,7 @@ function buildSummaryBar(
   );
   const keysLine = truncate(
     color(
-      "Tab:focus • j/k/↑↓:nav • f:follow • r:raw • l:tab • n:recent • 1-9:jump",
+      "Tab:focus • j/k:nav • gg/G:jump • /:search • n/N:next • H/L:resize • f:follow • l:tab",
       MOCHA.subtext,
     ),
     width - 4,
@@ -996,6 +1002,14 @@ export function createLogDashboard(opts = {}) {
   let inputAttached = false;
   let rawModeEnabled = false;
 
+  // UX 위젯 (ISSUE-14)
+  const tokenTracker = createTokenTracker();
+  const searchState = createSearchState();
+  const vimMotion = createVimMotion();
+  const panelResizer = createPanelResizer({
+    initialRatio: focus === "detail" ? 0.2 : 0.3,
+  });
+
   // virtual row buffer (altScreen 전용)
   const rowBuf = new RowBuffer();
 
@@ -1100,6 +1114,14 @@ export function createLogDashboard(opts = {}) {
     const key = String(chunk);
     if (key === "\u0003") { doClose(); return; }
 
+    // 검색 모드 활성 중: 키를 검색 상태에 위임
+    if (searchState.active) {
+      if (searchState.handleKey(key)) {
+        render();
+        return;
+      }
+    }
+
     // Help overlay: 아무 키나 누르면 닫기
     if (helpOverlay) {
       helpOverlay = false;
@@ -1167,20 +1189,33 @@ export function createLogDashboard(opts = {}) {
       }
     }
 
-    // g: focus pane 상단 점프
-    if (key === "g") {
-      followTail = false;
-      detailScrollOffset = 0;
+    // vim 모션: gg(첫 워커/상단), G(마지막 워커/하단)
+    const motion = vimMotion.handleKey(key);
+    if (motion === "gg") {
+      if (focus === "detail") {
+        followTail = false;
+        detailScrollOffset = 0;
+      } else {
+        const names = visibleWorkerNames();
+        if (names.length > 0) setSelectedWorker(names[0]);
+      }
       render();
       return;
     }
-    // G: focus pane 하단 점프
-    if (key === "G") {
-      followTail = true;
-      detailScrollOffset = 0;
+    if (motion === "G") {
+      if (focus === "detail") {
+        followTail = true;
+        detailScrollOffset = 0;
+      } else {
+        const names = visibleWorkerNames();
+        if (names.length > 0) setSelectedWorker(names[names.length - 1]);
+      }
       render();
       return;
     }
+    // 단일 g는 vimMotion 대기 → return하지 않음 (이전 동작 유지)
+    if (key === "g") return;
+
     // PgUp/PgDn: 페이지 단위 스크롤
     const pageSize = Math.max(1, Math.floor(getViewportRows() / 2));
     if (key === "\x1b[5~") {
@@ -1212,9 +1247,52 @@ export function createLogDashboard(opts = {}) {
       render();
       return;
     }
-    // n: 가장 최근 상태 변경 워커로 이동
+    // /: 검색 모드 활성화 (vim 패턴)
+    if (key === "/") {
+      searchState.activate();
+      render();
+      return;
+    }
+    // n: 검색 결과 다음 / 최근 변경 워커
     if (key === "n") {
-      selectMostRecentChangedWorker();
+      if (searchState.query) {
+        const names = visibleWorkerNames();
+        const idx = names.indexOf(selectedWorker);
+        const match = searchState.findMatch(names, idx, 1);
+        if (match >= 0) {
+          setSelectedWorker(names[match]);
+          render();
+        } else {
+          showFlash(`검색 결과 없음: ${searchState.query}`);
+        }
+      } else {
+        selectMostRecentChangedWorker();
+      }
+      return;
+    }
+    // N: 검색 결과 이전
+    if (key === "N") {
+      if (searchState.query) {
+        const names = visibleWorkerNames();
+        const idx = names.indexOf(selectedWorker);
+        const match = searchState.findMatch(names, idx, -1);
+        if (match >= 0) {
+          setSelectedWorker(names[match]);
+          render();
+        }
+      }
+      return;
+    }
+    // H: rail 축소 (패널 리사이즈)
+    if (key === "H") {
+      panelResizer.shrinkRail();
+      render();
+      return;
+    }
+    // L: rail 확대 (패널 리사이즈)
+    if (key === "L") {
+      panelResizer.expandRail();
+      render();
       return;
     }
     // h/?: 도움말 오버레이 토글
@@ -1364,6 +1442,11 @@ export function createLogDashboard(opts = {}) {
         truncate(` ${color("▸", MOCHA.green)} ${flashMessage}`, totalCols),
       );
     }
+    // 검색 프롬프트 (/ 모드)
+    const searchPrompt = searchState.renderPrompt(totalCols);
+    if (searchPrompt) {
+      tier1.push(truncate(searchPrompt, totalCols));
+    }
 
     // 레이아웃 결정
     let effectiveLayout = layoutHint;
@@ -1402,13 +1485,11 @@ export function createLogDashboard(opts = {}) {
       return [...tier1, ...summaryBar, ...focusPane];
     }
 
-    // 좌우 분할: Left Rail (30%) | Right Focus (70%)
-    // 목업: Tier2 Left Rail + Tier3 Focus 나란히 렌더링
+    // 좌우 분할: Left Rail | Right Focus (H/L로 비율 조정 가능)
     const GAP = 1; // rail과 focus 사이 구분선
-    const railRatio = focus === "detail" ? 0.2 : 0.3;
     const railWidth = Math.max(
       MIN_CARD_WIDTH,
-      Math.floor(totalCols * railRatio),
+      Math.floor(totalCols * panelResizer.ratio),
     );
     const focusWidth = totalCols - railWidth - GAP;
     const bodyHeight = Math.max(6, totalRows - tier1.length - 1); // -1 for status bar
@@ -1565,6 +1646,8 @@ export function createLogDashboard(opts = {}) {
           ? existing._logSec
           : (explicitElapsed ?? nowElapsedSec());
       workers.set(paneName, merged);
+      // 토큰 히스토리 추적 (스파크라인용)
+      if (merged.tokens !== undefined) tokenTracker.record(paneName, merged.tokens);
       ensureSelectedWorker(visibleWorkerNames());
       // follow-tail: 새 데이터 → 자동 scroll 재계산
       if (followTail) detailScrollOffset = 0;
