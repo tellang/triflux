@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "10.9.18",
+  "version": "10.9.19",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -42,8 +42,8 @@
     "setup": "node scripts/setup.mjs",
     "preinstall": "node scripts/preinstall.mjs",
     "postinstall": "node scripts/setup.mjs",
-    "lint": "biome check .",
-    "lint:fix": "biome check --fix .",
+    "lint": "biome check bin config hooks hub hud mesh scripts tests .claude-plugin .github package.json package-lock.json biome.json",
+    "lint:fix": "biome check --write bin config hooks hub hud mesh scripts tests .claude-plugin .github package.json package-lock.json biome.json",
     "health": "npm test && npm run lint",
     "test": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
     "test:unit": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/unit/**/*.test.mjs",
