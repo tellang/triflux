@@ -29,19 +29,29 @@ import {
   wcswidth,
 } from "./ansi.mjs";
 import { resolveAttachCommand } from "./session.mjs";
+import {
+  clamp,
+  cliColor,
+  countStatuses,
+  FALLBACK_COLUMNS,
+  FALLBACK_ROWS,
+  formatTokens,
+  loadVersion,
+  normalizeWorkerState as coreNormalizeWorkerState,
+  runtimeStatus,
+  sanitizeFiles,
+  sanitizeFindings,
+  sanitizeOneLine,
+  sanitizeTextBlock,
+  statusColor,
+  stripCodeBlocks,
+  wrapLine,
+  wrapText as wrapTextAll,
+} from "./tui-core.mjs";
 
-// package.json에서 동적 로드 (실패 시 fallback)
-let VERSION = "7.x";
-try {
-  const { createRequire } = await import("node:module");
-  const require = createRequire(import.meta.url);
-  VERSION = require("../../package.json").version;
-} catch {
-  /* fallback */
-}
+const VERSION = await loadVersion();
 
-const FALLBACK_COLUMNS = 100;
-const FALLBACK_ROWS = 30;
+// FALLBACK_COLUMNS, FALLBACK_ROWS → tui-core.mjs에서 import
 const MIN_CARD_WIDTH = 28;
 const ATTACH_SESSION_NAME_PATTERN = /^[a-zA-Z0-9_.-]+$/u;
 const DEFAULT_ATTACH_TAB_TTL_MS = 30_000;
@@ -308,96 +318,7 @@ function _autoColumnCount(totalCols, workerCount) {
   return 1;
 }
 
-// ── 문자열 유틸 ──────────────────────────────────────────────────────────
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function stripCodeBlocks(text) {
-  return (
-    String(text || "")
-      .replace(/\r/g, "")
-      // fenced code blocks
-      .replace(/```[\s\S]*?(?:```|$)/g, "\n")
-      .replace(/^\s*```.*$/gm, "")
-      // indented code blocks (4+ spaces or tab at line start)
-      .replace(/^(?: {4}|\t).+$/gm, "")
-      // shell prompts: PS C:\...>, >, $
-      .replace(/^(?:PS\s+\S[^\n]*?>|>\s+|\$\s+)[^\n]*/gm, "")
-      .trim()
-  );
-}
-
-function sanitizeTextBlock(text, rawMode = false) {
-  const normalized = rawMode
-    ? String(text || "").replace(/\r/g, "")
-    : stripCodeBlocks(text);
-  return normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => line !== "--- HANDOFF ---")
-    .join("\n")
-    .trim();
-}
-
-function sanitizeOneLine(text, fallback = "") {
-  const normalized = sanitizeTextBlock(text).replace(/\s+/g, " ").trim();
-  return normalized || fallback;
-}
-
-function sanitizeFiles(files) {
-  if (!files) return [];
-  const raw = Array.isArray(files) ? files : String(files).split(",");
-  return raw.map((e) => sanitizeOneLine(e)).filter(Boolean);
-}
-
-function sanitizeFindings(findings) {
-  if (!findings) return [];
-  const raw = Array.isArray(findings)
-    ? findings
-    : sanitizeTextBlock(findings).split("\n");
-  return raw.map((e) => sanitizeOneLine(e)).filter(Boolean);
-}
-
-function normalizeTokens(tokens) {
-  if (tokens === null || tokens === undefined) return "";
-  if (typeof tokens === "number" && Number.isFinite(tokens)) return tokens;
-  const raw = sanitizeOneLine(tokens);
-  if (!raw) return "";
-  const match = raw.match(/(\d+(?:[.,]\d+)?\s*[kKmM]?)/);
-  return match ? match[1].replace(/\s+/g, "").toLowerCase() : raw;
-}
-
-function formatTokens(tokens) {
-  if (tokens === null || tokens === undefined || tokens === "") return "n/a";
-  if (typeof tokens === "number" && Number.isFinite(tokens)) {
-    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
-    if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
-    return `${tokens}`;
-  }
-  return String(tokens);
-}
-
-// ── 색상 헬퍼 ─────────────────────────────────────────────────────────────
-function cliColor(cli) {
-  if (cli === "gemini") return FG.gemini;
-  if (cli === "claude") return FG.claude;
-  if (cli === "codex") return FG.codex;
-  return FG.white;
-}
-
-function runtimeStatus(st) {
-  return st?.handoff?.status || st?.status || "pending";
-}
-
-function statusColor(status) {
-  if (status === "ok" || status === "completed") return MOCHA.ok;
-  if (status === "partial") return MOCHA.partial;
-  if (status === "failed") return MOCHA.fail;
-  if (status === "running" || status === "in_progress") return MOCHA.executing;
-  return FG.muted;
-}
+// 텍스트/상태/색상 유틸은 tui-core.mjs에서 import (위 참조)
 
 // ── MOCHA RGB (gradual fade 보간용) ──
 const MOCHA_RGB = {
@@ -505,37 +426,7 @@ function dedupeRole(role, name, cli) {
   return r;
 }
 
-// ── 텍스트 래핑 ──────────────────────────────────────────────────────────
-function wrapLine(text, width) {
-  const limit = Math.max(8, width);
-  const source = String(text || "").trim();
-  if (!source) return [""];
-  const words = source.split(/\s+/);
-  const lines = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (wcswidth(candidate) <= limit) {
-      current = candidate;
-      continue;
-    }
-    if (current) {
-      lines.push(current);
-      current = "";
-    }
-    if (wcswidth(word) <= limit) {
-      current = word;
-      continue;
-    }
-    let offset = 0;
-    while (offset < word.length) {
-      lines.push(word.slice(offset, offset + limit));
-      offset += limit;
-    }
-  }
-  if (current) lines.push(current);
-  return lines.length > 0 ? lines : [source.slice(0, limit)];
-}
+// wrapLine, wrapTextAll → tui-core.mjs에서 import
 
 function _wrapText(
   text,
@@ -555,16 +446,6 @@ function _wrapText(
     ...wrapped.slice(0, maxLines - 1),
     truncate(wrapped[wrapped.length - 1], width),
   ];
-}
-
-// 스크롤 없이 전체 줄 반환 (focus pane용)
-function wrapTextAll(text, width, rawMode = false) {
-  const input = sanitizeTextBlock(text, rawMode);
-  if (!input) return [];
-  return input
-    .split("\n")
-    .flatMap((line) => wrapLine(line, width))
-    .filter(Boolean);
 }
 
 // ── virtual row buffer ────────────────────────────────────────────────────
@@ -600,22 +481,7 @@ class RowBuffer {
   }
 }
 
-// ── 상태 집계 ─────────────────────────────────────────────────────────────
-function countStatuses(names, workers) {
-  let ok = 0,
-    partial = 0,
-    failed = 0,
-    running = 0;
-  for (const name of names) {
-    const st = workers.get(name);
-    const s = runtimeStatus(st);
-    if (s === "ok" || s === "completed") ok++;
-    else if (s === "partial") partial++;
-    else if (s === "failed") failed++;
-    else if (s === "running" || s === "in_progress") running++;
-  }
-  return { ok, partial, failed, running };
-}
+// countStatuses → tui-core.mjs에서 import
 
 // ── Tier1: 상단 고정 1행 ─────────────────────────────────────────────────
 function phaseColor(phase, time = Date.now()) {
@@ -1067,87 +933,9 @@ function _joinColumns(blocks, gap = GRID_GAP) {
 
 // ── normalizeWorkerState ──────────────────────────────────────────────────
 function normalizeWorkerState(existing, state) {
-  const nextHandoff =
-    state.handoff === undefined
-      ? existing.handoff
-      : {
-          ...(existing.handoff || {}),
-          ...(state.handoff || {}),
-          verdict:
-            state.handoff?.verdict !== undefined
-              ? sanitizeOneLine(state.handoff.verdict)
-              : existing.handoff?.verdict,
-          files_changed:
-            state.handoff?.files_changed !== undefined
-              ? sanitizeFiles(state.handoff.files_changed)
-              : existing.handoff?.files_changed,
-          confidence:
-            state.handoff?.confidence !== undefined
-              ? sanitizeOneLine(state.handoff.confidence)
-              : existing.handoff?.confidence,
-          status:
-            state.handoff?.status !== undefined
-              ? sanitizeOneLine(state.handoff.status)
-              : existing.handoff?.status,
-        };
-
-  return {
-    ...existing,
-    ...state,
-    cli:
-      state.cli !== undefined
-        ? sanitizeOneLine(state.cli, existing.cli || "codex")
-        : existing.cli || "codex",
-    role:
-      state.role !== undefined ? sanitizeOneLine(state.role) : existing.role,
-    status:
-      state.status !== undefined
-        ? sanitizeOneLine(state.status, existing.status || "pending")
-        : existing.status || "pending",
-    snapshot:
-      state.snapshot !== undefined
-        ? sanitizeTextBlock(state.snapshot)
-        : existing.snapshot,
-    summary:
-      state.summary !== undefined
-        ? sanitizeTextBlock(state.summary)
-        : existing.summary,
-    detail:
-      state.detail !== undefined
-        ? sanitizeTextBlock(state.detail)
-        : existing.detail,
-    findings:
-      state.findings !== undefined
-        ? sanitizeFindings(state.findings)
-        : existing.findings,
-    files_changed:
-      state.files_changed !== undefined
-        ? sanitizeFiles(state.files_changed)
-        : existing.files_changed,
-    confidence:
-      state.confidence !== undefined
-        ? sanitizeOneLine(state.confidence)
-        : existing.confidence,
-    tokens:
-      state.tokens !== undefined
-        ? normalizeTokens(state.tokens)
-        : existing.tokens,
-    progress:
-      state.progress !== undefined
-        ? clamp(Number(state.progress) || 0, 0, 1)
-        : existing.progress,
-    handoff: nextHandoff,
-    _prevStatus:
-      state.status !== undefined &&
-      sanitizeOneLine(state.status) !== existing.status
-        ? existing.status
-        : existing._prevStatus,
-    _statusChangedAt:
-      state.status !== undefined &&
-      sanitizeOneLine(state.status) !== existing.status
-        ? Date.now()
-        : existing._statusChangedAt || 0,
-  };
+  return coreNormalizeWorkerState(existing || { cli: "codex", status: "pending" }, state, {
+    trackChanges: true,
+  });
 }
 
 // ── createLogDashboard ────────────────────────────────────────────────────
