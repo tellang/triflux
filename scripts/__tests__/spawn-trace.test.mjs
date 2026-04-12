@@ -2,9 +2,20 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { after, before, describe, it } from "node:test";
 
 const TEST_LOG_DIR = join(tmpdir(), `spawn-trace-test-${Date.now()}`);
+let importSequence = 0;
+
+async function loadSpawnTraceModule() {
+  importSequence += 1;
+  return import(`../../hub/lib/spawn-trace.mjs?test=${importSequence}`);
+}
+
+function waitForClose(child) {
+  return new Promise((resolve) => child.once("close", resolve));
+}
 
 describe("spawn-trace", () => {
   before(() => {
@@ -20,8 +31,9 @@ describe("spawn-trace", () => {
   });
 
   it("exports child_process-compatible API surface", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     assert.equal(typeof mod.spawn, "function");
+    assert.equal(typeof mod.spawnWithBackoff, "function");
     assert.equal(typeof mod.execFile, "function");
     assert.equal(typeof mod.execFileSync, "function");
     assert.equal(typeof mod.exec, "function");
@@ -31,7 +43,7 @@ describe("spawn-trace", () => {
   });
 
   it("exports guard constants", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     assert.equal(typeof mod.MAX_SPAWN_PER_SEC, "number");
     assert.equal(typeof mod.MAX_TOTAL_DESCENDANTS, "number");
     assert.equal(typeof mod.getMaxSpawnPerSec, "function");
@@ -39,7 +51,7 @@ describe("spawn-trace", () => {
   });
 
   it("reload re-evaluates TRIFLUX_MAX_SPAWN_RATE", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     const original = process.env.TRIFLUX_MAX_SPAWN_RATE;
 
     try {
@@ -59,7 +71,7 @@ describe("spawn-trace", () => {
   });
 
   it("spawn returns a ChildProcess-like object", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     const child = mod.spawn("node", ["-e", "process.exit(0)"], {
       windowsHide: true,
     });
@@ -71,7 +83,7 @@ describe("spawn-trace", () => {
   });
 
   it("execFileSync returns stdout buffer", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     const result = mod.execFileSync(
       "node",
       ["-e", 'process.stdout.write("hello")'],
@@ -84,7 +96,7 @@ describe("spawn-trace", () => {
   });
 
   it("execFileSync throws on non-zero exit", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     assert.throws(() => {
       mod.execFileSync("node", ["-e", "process.exit(1)"], {
         windowsHide: true,
@@ -93,7 +105,7 @@ describe("spawn-trace", () => {
   });
 
   it("execFile with callback receives stdout", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     const result = await new Promise((resolve, reject) => {
       mod.execFile(
         "node",
@@ -109,7 +121,7 @@ describe("spawn-trace", () => {
   });
 
   it("strips trace-specific options before passing to child_process", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     // reason and dedupe should not cause child_process to error
     const result = mod.execFileSync(
       "node",
@@ -125,12 +137,117 @@ describe("spawn-trace", () => {
   });
 
   it("default export includes spawn/execFile/execFileSync", async () => {
-    const mod = await import("../../hub/lib/spawn-trace.mjs");
+    const mod = await loadSpawnTraceModule();
     assert.equal(typeof mod.default.spawn, "function");
+    assert.equal(typeof mod.default.spawnWithBackoff, "function");
     assert.equal(typeof mod.default.execFile, "function");
     assert.equal(typeof mod.default.execFileSync, "function");
     assert.equal(typeof mod.default.MAX_SPAWN_PER_SEC, "number");
     assert.equal(typeof mod.default.getMaxSpawnPerSec, "function");
     assert.equal(typeof mod.default.reload, "function");
+  });
+
+  it("waits for RATE_WINDOW_MS and retries once after a rate limit error", async () => {
+    const original = process.env.TRIFLUX_MAX_SPAWN_RATE;
+    process.env.TRIFLUX_MAX_SPAWN_RATE = "1";
+
+    try {
+      const mod = await loadSpawnTraceModule();
+      const blocker = mod.spawn(
+        "node",
+        ["-e", "setTimeout(() => process.exit(0), 1500)"],
+        { windowsHide: true },
+      );
+
+      const startedAt = performance.now();
+      const child = await mod.spawnWithBackoff(
+        "node",
+        ["-e", "process.exit(0)"],
+        { windowsHide: true },
+      );
+      const elapsedMs = performance.now() - startedAt;
+
+      assert.ok(elapsedMs >= 900, `expected retry delay, got ${elapsedMs}ms`);
+      assert.equal(typeof child.pid, "number");
+
+      await waitForClose(child);
+      await waitForClose(blocker);
+    } finally {
+      if (original == null) {
+        delete process.env.TRIFLUX_MAX_SPAWN_RATE;
+      } else {
+        process.env.TRIFLUX_MAX_SPAWN_RATE = original;
+      }
+    }
+  });
+
+  it("rethrows the original rate limit error when the retry also hits the limit", async () => {
+    const originalEnv = process.env.TRIFLUX_MAX_SPAWN_RATE;
+    const originalDateNow = Date.now;
+    process.env.TRIFLUX_MAX_SPAWN_RATE = "1";
+    Date.now = () => 1_000;
+
+    try {
+      const mod = await loadSpawnTraceModule();
+      const blocker = mod.spawn(
+        "node",
+        ["-e", "setTimeout(() => process.exit(0), 1500)"],
+        { windowsHide: true },
+      );
+
+      const startedAt = performance.now();
+      await assert.rejects(
+        () =>
+          mod.spawnWithBackoff("node", ["-e", "process.exit(0)"], {
+            windowsHide: true,
+          }),
+        (error) => {
+          assert.equal(error?.reasonCode, "rate_limit");
+          assert.equal(error?.maxPerSec, 1);
+          return true;
+        },
+      );
+      const elapsedMs = performance.now() - startedAt;
+      assert.ok(elapsedMs >= 900, `expected retry delay, got ${elapsedMs}ms`);
+
+      blocker.kill();
+      await waitForClose(blocker);
+    } finally {
+      Date.now = originalDateNow;
+      if (originalEnv == null) {
+        delete process.env.TRIFLUX_MAX_SPAWN_RATE;
+      } else {
+        process.env.TRIFLUX_MAX_SPAWN_RATE = originalEnv;
+      }
+    }
+  });
+
+  it("throws non-rate-limit guard errors immediately", async () => {
+    const mod = await loadSpawnTraceModule();
+    const blocker = mod.spawn(
+      "node",
+      ["-e", "setTimeout(() => process.exit(0), 250)"],
+      { dedupe: "same-key", windowsHide: true },
+    );
+
+    const startedAt = performance.now();
+    await assert.rejects(
+      () =>
+        mod.spawnWithBackoff("node", ["-e", "process.exit(0)"], {
+          dedupe: "same-key",
+          windowsHide: true,
+        }),
+      (error) => {
+        assert.equal(error?.reasonCode, "dedupe");
+        return true;
+      },
+    );
+    const elapsedMs = performance.now() - startedAt;
+    assert.ok(
+      elapsedMs < 500,
+      `expected immediate failure, got ${elapsedMs}ms`,
+    );
+
+    await waitForClose(blocker);
   });
 });

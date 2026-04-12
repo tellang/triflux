@@ -41,7 +41,7 @@ export class GeminiBackend {
   }
 
   buildArgs(prompt, resultFile, opts = {}) {
-    return `gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
+    return `$null | gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
   }
 
   env() {

@@ -18,6 +18,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { requestJson } from "../bridge.mjs";
+import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import { getBackend } from "./backend.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
@@ -879,6 +880,19 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   } = opts;
 
   mkdirSync(RESULT_DIR, { recursive: true });
+
+  // Hub version skew pre-flight (fail-open, best-effort)
+  requestJson("/status", { method: "GET", timeoutMs: 500 })
+    .then((status) => {
+      const hubRate = status?.spawn_trace?.max_per_sec;
+      const localRate = getMaxSpawnPerSec();
+      if (typeof hubRate === "number" && hubRate !== localRate) {
+        console.warn(
+          `[headless] Hub version skew detected: hub spawn rate=${hubRate}/s, local=${localRate}/s. Restart hub to sync.`,
+        );
+      }
+    })
+    .catch(() => {});
 
   // Synapse: 세션 registration (fire-and-forget, hub 미응답 시 무시)
   const synapseIds = assignments.map((_, i) => `${sessionName}-worker-${i + 1}`);

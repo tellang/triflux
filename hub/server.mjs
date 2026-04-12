@@ -719,6 +719,11 @@ export async function startHub({
           pipe: pipe.getStatus(),
           assign_callback_pipe_path: assignCallbacks.path,
           assign_callback_pipe: assignCallbacks.getStatus(),
+          spawn_trace: {
+            max_per_sec: spawnTrace.getMaxSpawnPerSec(),
+            max_total_descendants: spawnTrace.MAX_TOTAL_DESCENDANTS,
+          },
+          version,
         });
       }
 

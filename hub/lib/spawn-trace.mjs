@@ -331,6 +331,10 @@ function normalizeExecFileArgs(args, options, callback) {
   };
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function spawn(command, args, options) {
   const { argsList, options: normalizedOptions } = normalizeSpawnArgs(
     args,
@@ -367,6 +371,32 @@ export function spawn(command, args, options) {
     cwd: getCwd(normalizedOptions),
     reason: getReason(normalizedOptions),
   });
+}
+
+export async function spawnWithBackoff(command, args, options, maxRetries = 1) {
+  const retryLimit =
+    Number.isInteger(maxRetries) && maxRetries >= 0 ? maxRetries : 1;
+  let originalRateLimitError = null;
+
+  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+    try {
+      return spawn(command, args, options);
+    } catch (error) {
+      if (error?.reasonCode !== "rate_limit") {
+        throw error;
+      }
+
+      originalRateLimitError ??= error;
+
+      if (attempt >= retryLimit) {
+        throw originalRateLimitError;
+      }
+
+      await wait(RATE_WINDOW_MS);
+    }
+  }
+
+  throw originalRateLimitError;
 }
 
 export function execFile(file, args, options, callback) {
@@ -515,6 +545,7 @@ export const spawnSync = childProcess.spawnSync;
 export default {
   ...childProcess,
   spawn,
+  spawnWithBackoff,
   execFile,
   execFileSync,
   get MAX_SPAWN_PER_SEC() {
