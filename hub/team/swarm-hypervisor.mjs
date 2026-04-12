@@ -10,6 +10,7 @@
 //   F4: File lease violation  → revert worker changes, flag shard as failed
 //   F5: Merge conflict        → retry integration with conflict resolution
 
+import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -66,6 +67,7 @@ const FAILURE_MODES = Object.freeze({
   F3_STALL: "F3_stall",
   F4_LEASE_VIOLATION: "F4_lease_violation",
   F5_MERGE_CONFLICT: "F5_merge_conflict",
+  F6_NO_COMMIT: "F6_no_commit",
 });
 
 const FALLBACK_AGENTS = Object.freeze({
@@ -247,6 +249,138 @@ export function createSwarmHypervisor(opts) {
 
     resolveIntegrationPromise?.(integrationResult);
     return integrationResult;
+  }
+
+  function git(args, cwd = workdir) {
+    return new Promise((resolve, reject) => {
+      execFile(
+        "git",
+        args,
+        { cwd, windowsHide: true, timeout: 30_000 },
+        (err, stdout, stderr) => {
+          if (err) {
+            reject(
+              new Error(
+                `git ${args[0]} failed: ${stderr?.trim() || err.message}`,
+              ),
+            );
+            return;
+          }
+          resolve(stdout.trim());
+        },
+      );
+    });
+  }
+
+  function computeAuthoritativeStatus(shardName, workerEntry, sessions) {
+    const failureInfo = failures.get(shardName) || null;
+    if (failureInfo) {
+      return {
+        status: "failed",
+        reason: failureInfo.mode || failureInfo.reason || "failed",
+      };
+    }
+
+    if (results.has(shardName)) {
+      return { status: "done", reason: "integrated" };
+    }
+
+    if (!sessions.length) {
+      if (completedShards.has(shardName)) {
+        return { status: "done", reason: "awaiting_integration" };
+      }
+      return { status: "running", reason: "no_sessions" };
+    }
+
+    const states = sessions.map((session) => session.state);
+    if (states.every((stateValue) => stateValue === STATES.COMPLETED)) {
+      return { status: "done", reason: "awaiting_integration" };
+    }
+    if (states.some((stateValue) => stateValue === STATES.INPUT_WAIT)) {
+      return { status: "blocked", reason: "user_input" };
+    }
+    if (states.some((stateValue) => stateValue === STATES.STALLED)) {
+      return { status: "stalled", reason: "health_probe_stall" };
+    }
+    if (
+      states.some(
+        (stateValue) =>
+          stateValue === STATES.FAILED || stateValue === STATES.DEAD,
+      )
+    ) {
+      return { status: "failed", reason: "session_terminal" };
+    }
+    if (
+      states.some(
+        (stateValue) =>
+          stateValue === STATES.STARTING ||
+          stateValue === STATES.RESTARTING ||
+          stateValue === STATES.INIT,
+      )
+    ) {
+      return { status: "running", reason: "starting" };
+    }
+
+    return { status: "running", reason: "healthy" };
+  }
+
+  async function collectCommitEvidence(worker, integrationBranch) {
+    const branchName = worker?.branchName || null;
+    const evidence = {
+      branchName,
+      integrationBranch,
+      commitsAhead: 0,
+      dirty: false,
+      dirtyFiles: [],
+      headCommit: null,
+      ok: false,
+      error: null,
+    };
+
+    if (!branchName) {
+      evidence.error = "missing_branch_name";
+      return evidence;
+    }
+
+    try {
+      evidence.commitsAhead =
+        Number.parseInt(
+          await git([
+            "rev-list",
+            "--count",
+            `${integrationBranch}..${branchName}`,
+          ]),
+          10,
+        ) || 0;
+    } catch (err) {
+      evidence.error = err.message;
+      return evidence;
+    }
+
+    try {
+      evidence.headCommit = await git(["rev-parse", branchName]);
+    } catch {
+      /* best-effort */
+    }
+
+    if (worker?.worktreePath && !worker?.shardConfig?.host) {
+      try {
+        const rawStatus = await git(["status", "--short"], worker.worktreePath);
+        evidence.dirtyFiles = rawStatus
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => line.slice(2).trim())
+          .filter(Boolean);
+        evidence.dirty = evidence.dirtyFiles.length > 0;
+      } catch (err) {
+        evidence.error = evidence.error || err.message;
+        return evidence;
+      }
+    }
+
+    evidence.ok = evidence.commitsAhead > 0 && evidence.dirty === false;
+    return evidence;
   }
 
   // ── Worker lifecycle ────────────────────────────────────────
@@ -523,6 +657,7 @@ export function createSwarmHypervisor(opts) {
     if (/stall|l1_stall|timeout/u.test(r)) return FAILURE_MODES.F3_STALL;
     if (/lease|violation/u.test(r)) return FAILURE_MODES.F4_LEASE_VIOLATION;
     if (/merge|conflict/u.test(r)) return FAILURE_MODES.F5_MERGE_CONFLICT;
+    if (/no.?commit|dirty_worktree/u.test(r)) return FAILURE_MODES.F6_NO_COMMIT;
     return FAILURE_MODES.F1_CRASH;
   }
 
@@ -603,10 +738,7 @@ export function createSwarmHypervisor(opts) {
         if (shard?.host && shard._remoteEnv) {
           const hostConfig = getHostConfig(shard.host, workdir);
           const sshUser = hostConfig?.ssh_user || shard.host;
-          const remoteRepoPath = resolveRemoteDir(
-            workdir,
-            shard._remoteEnv,
-          );
+          const remoteRepoPath = resolveRemoteDir(workdir, shard._remoteEnv);
           const fetchResult = await fetchRemoteShard({
             host: shard.host,
             sshUser,
@@ -628,6 +760,38 @@ export function createSwarmHypervisor(opts) {
             shard: shardName,
             headCommit: fetchResult.headCommit,
           });
+        }
+
+        // Read shard output log for changed files
+        const commitEvidence = await collectCommitEvidence(
+          worker,
+          integrationBranch,
+        );
+        worker.commitEvidence = commitEvidence;
+        eventLog.append("commit_evidence", {
+          shard: shardName,
+          ...commitEvidence,
+        });
+
+        const expectsCommitEvidence =
+          Array.isArray(shard?.files) && shard.files.length > 0;
+        if (expectsCommitEvidence && !commitEvidence.ok) {
+          failures.set(shardName, {
+            mode: FAILURE_MODES.F6_NO_COMMIT,
+            reason: commitEvidence.error
+              ? `no_commit_evidence:${commitEvidence.error}`
+              : commitEvidence.dirty
+                ? "dirty_worktree_without_commit"
+                : "no_commit_evidence",
+            commitEvidence,
+          });
+          eventLog.append("no_commit_guard_failed", {
+            shard: shardName,
+            ...commitEvidence,
+          });
+          await maybeCleanupWorktree(shardName, worker, shard);
+          integrationFailures.push(shardName);
+          continue;
         }
 
         // Read shard output log for changed files
@@ -856,6 +1020,7 @@ export function createSwarmHypervisor(opts) {
 
     for (const [name, w] of workers) {
       const snap = w.conductor.getSnapshot();
+      const authoritative = computeAuthoritativeStatus(name, w, snap);
       workerStatuses.push({
         shard: name,
         agent: w.shardConfig.agent,
@@ -863,6 +1028,9 @@ export function createSwarmHypervisor(opts) {
         failed: failures.has(name),
         failureInfo: failures.get(name) || null,
         integrated: results.has(name),
+        authoritativeStatus: authoritative.status,
+        authoritativeReason: authoritative.reason,
+        commitEvidence: w.commitEvidence || null,
       });
     }
 
@@ -901,25 +1069,30 @@ export function createSwarmHypervisor(opts) {
   let hubKeepaliveTimer = null;
   function startHubKeepalive() {
     // 5분마다 Hub /status 핑 (idle timeout 기본 10분)
-    hubKeepaliveTimer = setInterval(async () => {
-      try {
-        const resp = await fetch("http://127.0.0.1:27888/status");
-        if (!resp.ok && ensureHubAliveFn) {
-          eventLog.append("hub_keepalive_restart", {});
-          await ensureHubAliveFn();
-        }
-      } catch {
-        // Hub 다운 — 재시작 시도
-        if (ensureHubAliveFn) {
-          eventLog.append("hub_keepalive_restart", { reason: "fetch_failed" });
-          try {
+    hubKeepaliveTimer = setInterval(
+      async () => {
+        try {
+          const resp = await fetch("http://127.0.0.1:27888/status");
+          if (!resp.ok && ensureHubAliveFn) {
+            eventLog.append("hub_keepalive_restart", {});
             await ensureHubAliveFn();
-          } catch {
-            eventLog.append("hub_restart_failed", {});
+          }
+        } catch {
+          // Hub 다운 — 재시작 시도
+          if (ensureHubAliveFn) {
+            eventLog.append("hub_keepalive_restart", {
+              reason: "fetch_failed",
+            });
+            try {
+              await ensureHubAliveFn();
+            } catch {
+              eventLog.append("hub_restart_failed", {});
+            }
           }
         }
-      }
-    }, 5 * 60 * 1000);
+      },
+      5 * 60 * 1000,
+    );
   }
 
   function stopHubKeepalive() {
@@ -939,12 +1112,17 @@ export function createSwarmHypervisor(opts) {
 
     // Hub alive 확인 — 죽어있으면 재시작
     if (ensureHubAliveFn) {
-      ensureHubAliveFn().then((hub) => {
-        eventLog.append("hub_ensured", { port: hub?.port });
-      }).catch((err) => {
-        eventLog.append("hub_ensure_failed", { error: err.message });
-        emitter.emit("warning", { type: "hub_unavailable", error: err.message });
-      });
+      ensureHubAliveFn()
+        .then((hub) => {
+          eventLog.append("hub_ensured", { port: hub?.port });
+        })
+        .catch((err) => {
+          eventLog.append("hub_ensure_failed", { error: err.message });
+          emitter.emit("warning", {
+            type: "hub_unavailable",
+            error: err.message,
+          });
+        });
     }
 
     // Warn about file conflicts but don't block
