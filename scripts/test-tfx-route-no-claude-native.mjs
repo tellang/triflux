@@ -4,12 +4,14 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { resolveBashExecutable } from "../hub/lib/bash-path.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..");
+const BASH_EXE = resolveBashExecutable();
 
 function runBash(command) {
-  return spawnSync("bash", ["-lc", command], {
+  return spawnSync(BASH_EXE, ["-lc", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
     env: {
@@ -39,7 +41,7 @@ test("gemini 모드에서는 no-claude-native 강제 치환이 적용되지 않�
 
 test("auto 모드 + no-claude-native=1이면 explore가 codex로 치환된다", () => {
   const result = runBash(
-    "TFX_CLI_MODE=auto TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=true bash scripts/tfx-route.sh explore 'test-case' minimal 5",
+    "TFX_CLI_MODE=auto TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=echo bash scripts/tfx-route.sh explore 'test-case' minimal 5",
   );
 
   assert.equal(result.status, 0, out(result));

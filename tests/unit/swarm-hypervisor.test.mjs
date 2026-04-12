@@ -81,6 +81,33 @@ const SINGLE_PRD = `
 - prompt: echo test a
 `;
 
+const SIMPLE_NO_FILES_PRD = `
+## Shard: worker-a
+- agent: claude
+- prompt: echo test a
+
+## Shard: worker-b
+- agent: claude
+- depends: worker-a
+- prompt: echo test b
+`;
+
+const PARALLEL_NO_FILES_PRD = `
+## Shard: worker-a
+- agent: claude
+- prompt: echo test a
+
+## Shard: worker-b
+- agent: claude
+- prompt: echo test b
+`;
+
+const SINGLE_NO_FILES_PRD = `
+## Shard: worker-a
+- agent: claude
+- prompt: echo test a
+`;
+
 function createMockConductorFactory() {
   const conductors = [];
   const createConductor = (opts) => {
@@ -279,7 +306,11 @@ describe("swarm-hypervisor", () => {
       ({ hv } = createTestHypervisor(workdir, logsDir));
 
       const status = await hv.launch(plan);
-      assert.equal(typeof status.done?.then, "function", "done은 Promise여야 함");
+      assert.equal(
+        typeof status.done?.then,
+        "function",
+        "done은 Promise여야 함",
+      );
     });
 
     it("launches dependent shard only after prerequisite completion", async () => {
@@ -299,7 +330,7 @@ describe("swarm-hypervisor", () => {
     });
 
     it("tracks launched, completed, and integrated shards as separate states", async () => {
-      const plan = planSwarm(null, { content: SIMPLE_PRD });
+      const plan = planSwarm(null, { content: SIMPLE_NO_FILES_PRD });
       const { createConductor, conductors } = createMockConductorFactory();
       let releaseIntegration = () => {};
       const integrationGate = new Promise((resolve) => {
@@ -345,11 +376,13 @@ describe("swarm-hypervisor", () => {
       status = hv.getStatus();
       assert.equal(status.completedShards, 1);
       assert.equal(
-        status.workers.find((worker) => worker.shard === "worker-a")?.integrated,
+        status.workers.find((worker) => worker.shard === "worker-a")
+          ?.integrated,
         false,
       );
       assert.equal(
-        status.workers.find((worker) => worker.shard === "worker-b")?.integrated,
+        status.workers.find((worker) => worker.shard === "worker-b")
+          ?.integrated,
         false,
       );
 
@@ -435,7 +468,7 @@ describe("swarm-hypervisor", () => {
     });
 
     it("rebases shard branches onto the integration branch and cleans up worktrees", async () => {
-      const plan = planSwarm(null, { content: SINGLE_PRD });
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
       const { createConductor, conductors } = createMockConductorFactory();
       const rebaseCalls = [];
       const cleanupCalls = [];
@@ -490,7 +523,7 @@ describe("swarm-hypervisor", () => {
     });
 
     it("exposes an awaitable integrationComplete promise", async () => {
-      const plan = planSwarm(null, { content: SINGLE_PRD });
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
       const { createConductor, conductors } = createMockConductorFactory();
       hv = createSwarmHypervisor({
         workdir,
@@ -529,7 +562,7 @@ describe("swarm-hypervisor", () => {
     });
 
     it("resolves integrationComplete with partial results when a shard fails", async () => {
-      const plan = planSwarm(null, { content: PARALLEL_PRD });
+      const plan = planSwarm(null, { content: PARALLEL_NO_FILES_PRD });
       const { createConductor, conductors } = createMockConductorFactory();
       hv = createSwarmHypervisor({
         workdir,
@@ -580,6 +613,38 @@ describe("swarm-hypervisor", () => {
       assert.ok(Array.isArray(status.locks));
       assert.equal(status.integrationPromise.state, "pending");
     });
+
+    it("synthesizes authoritative worker status from conductor sessions", async () => {
+      const plan = planSwarm(null, { content: SINGLE_PRD });
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        _deps: {
+          createConductor: () => ({
+            spawnSession() {},
+            on() {},
+            getSnapshot() {
+              return [
+                {
+                  state: "input_wait",
+                  outPath: null,
+                  health: { l1: "input_wait" },
+                },
+              ];
+            },
+            shutdown() {
+              return Promise.resolve();
+            },
+          }),
+        },
+      });
+
+      await hv.launch(plan);
+      const status = hv.getStatus();
+
+      assert.equal(status.workers[0].authoritativeStatus, "blocked");
+      assert.equal(status.workers[0].authoritativeReason, "user_input");
+    });
   });
 
   describe("validateResult", () => {
@@ -604,6 +669,44 @@ describe("swarm-hypervisor", () => {
       const result = hv.validateResult("worker-a", ["src/b.mjs"]);
       assert.equal(result.ok, false);
       assert.equal(result.violations.length, 1);
+    });
+
+    it("fails integration when a code-changing shard has no commit evidence", async () => {
+      const plan = planSwarm(null, { content: SINGLE_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      let rebaseCalled = false;
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "no-commit-guard",
+        _deps: {
+          createConductor,
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/no-commit-guard/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async () => {
+            rebaseCalled = true;
+            return { ok: true, headCommit: "should-not-happen" };
+          },
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].complete();
+
+      const result = await hv.integrationComplete();
+      const status = hv.getStatus();
+
+      assert.equal(rebaseCalled, false);
+      assert.deepEqual(result.integrated, []);
+      assert.deepEqual(result.failed, ["worker-a"]);
+      assert.equal(result.partial, true);
+      assert.equal(status.workers[0].failureInfo?.mode, "F6_no_commit");
+      assert.equal(status.workers[0].authoritativeStatus, "failed");
+      assert.equal(status.workers[0].commitEvidence?.commitsAhead, 0);
     });
   });
 

@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod";
-
+import { resolveBashExecutable } from "../lib/bash-path.mjs";
 import { CodexMcpWorker } from "./codex-mcp.mjs";
 import { GeminiWorker } from "./gemini-worker.mjs";
 
@@ -440,7 +440,7 @@ export class DelegatorMcpWorker {
       options.bashCommand ||
       this.env.TFX_DELEGATOR_BASH_COMMAND ||
       this.env.BASH_BIN ||
-      "bash";
+      resolveBashExecutable();
 
     this.codexWorker = new CodexMcpWorker({
       command:
