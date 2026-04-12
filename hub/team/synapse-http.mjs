@@ -57,3 +57,32 @@ export function heartbeatSynapseSession(
 export function unregisterSynapseSession(sessionId, opts = {}) {
   return fireAndForgetSynapse("/synapse/unregister", { sessionId }, opts);
 }
+
+/**
+ * Synapse 이벤트 수신 (GET /synapse/events)
+ * @param {object} [opts]
+ * @param {number} [opts.since=0] - 이 ID 이후의 이벤트만 반환
+ * @param {function} [opts.fetchImpl] - fetch 구현
+ * @param {string} [opts.baseUrl] - Synapse 서버 URL
+ * @returns {Promise<{events: object[]}|null>}
+ */
+export async function fetchSynapseEvents(opts = {}) {
+  const fetchImpl = resolveSynapseFetch(opts.fetchImpl);
+  if (!fetchImpl) return null;
+
+  try {
+    const url = new URL(
+      "/synapse/events",
+      opts.baseUrl || DEFAULT_SYNAPSE_BASE_URL,
+    );
+    url.searchParams.set("since", String(opts.since || 0));
+    const res = await fetchImpl(url.toString(), {
+      method: "GET",
+      headers: { accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
