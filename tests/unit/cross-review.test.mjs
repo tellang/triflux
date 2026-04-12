@@ -243,6 +243,56 @@ describe("cross-review gate", () => {
     assert.equal(existsSync(statePath), false);
   });
 
+  it("Co-Authored-By 트레일러가 포함된 커밋을 deny한다", () => {
+    const projectDir = makeTempProject();
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command:
+            'git commit -m "feat: add feature\n\nCo-Authored-By: bot <bot@example.com>"',
+        },
+      },
+      { cwd: projectDir },
+    );
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Co-Authored-By/u);
+  });
+
+  it("co-authored-by 소문자 변형도 차단한다", () => {
+    const projectDir = makeTempProject();
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command:
+            'git commit -m "fix: stuff\n\nco-authored-by: ai <ai@x.com>"',
+        },
+      },
+      { cwd: projectDir },
+    );
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Co-Authored-By/u);
+  });
+
+  it("Co-Authored-By 없는 일반 커밋은 통과한다", () => {
+    const projectDir = makeTempProject();
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: { command: 'git commit -m "feat: normal commit"' },
+      },
+      { cwd: projectDir },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+  });
+
   it("TFX_SKIP_CROSS_REVIEW=1이면 게이트를 우회한다", () => {
     const projectDir = makeTempProject();
     writeState(projectDir, {
