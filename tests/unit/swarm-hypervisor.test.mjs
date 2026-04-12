@@ -290,6 +290,83 @@ describe("swarm-hypervisor", () => {
       assert.equal(runningStatus.completedShards, 1);
     });
 
+    it("tracks launched, completed, and integrated shards as separate states", async () => {
+      const plan = planSwarm(null, { content: SIMPLE_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      let releaseIntegration = () => {};
+      const integrationGate = new Promise((resolve) => {
+        releaseIntegration = resolve;
+      });
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "issue-8",
+        _deps: {
+          createConductor,
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/issue-8/merge",
+            baseCommit: "base123",
+          }),
+          rebaseShardOntoIntegration: async () => {
+            await integrationGate;
+            return { ok: true, headCommit: "head123" };
+          },
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      const integrationDone = new Promise((resolve) => {
+        hv.on("integrationComplete", resolve);
+      });
+
+      await hv.launch(plan);
+
+      let status = hv.getStatus();
+      assert.equal(status.completedShards, 0);
+      assert.deepEqual(
+        status.workers.map((worker) => worker.shard),
+        ["worker-a"],
+        "only ready shards should be launched before dependencies complete",
+      );
+      assert.equal(status.workers[0].integrated, false);
+
+      conductors[0].complete();
+      await waitForCondition(() => conductors.length === 2, 6000);
+
+      status = hv.getStatus();
+      assert.equal(status.completedShards, 1);
+      assert.equal(
+        status.workers.find((worker) => worker.shard === "worker-a")?.integrated,
+        false,
+      );
+      assert.equal(
+        status.workers.find((worker) => worker.shard === "worker-b")?.integrated,
+        false,
+      );
+
+      conductors[1].complete();
+      await waitForCondition(() => hv.state === SWARM_STATES.INTEGRATING, 6000);
+
+      status = hv.getStatus();
+      assert.equal(status.completedShards, 2);
+      assert.ok(
+        status.workers.every((worker) => worker.integrated === false),
+        "integration should remain separate from shard completion",
+      );
+
+      releaseIntegration();
+      await integrationDone;
+
+      status = hv.getStatus();
+      assert.equal(status.state, SWARM_STATES.COMPLETED);
+      assert.equal(status.completedShards, 2);
+      assert.ok(
+        status.workers.every((worker) => worker.integrated === true),
+        "integrated flag should flip only after integration succeeds",
+      );
+    });
+
     it("prevents double launch", async () => {
       const plan = planSwarm(null, { content: PARALLEL_PRD });
       ({ hv } = createTestHypervisor(workdir, logsDir));
@@ -499,7 +576,7 @@ describe("swarm-hypervisor", () => {
 
   describe("validateResult", () => {
     it("passes when worker modifies only its leased files", async () => {
-      const plan = planSwarm(null, { content: SIMPLE_PRD });
+      const plan = planSwarm(null, { content: PARALLEL_PRD });
       ({ hv } = createTestHypervisor(workdir, logsDir));
 
       await hv.launch(plan);
