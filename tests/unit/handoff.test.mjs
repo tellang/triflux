@@ -136,6 +136,23 @@ describe("validateHandoff()", () => {
     assert.equal(handoff.lead_action, "accept");
   });
 
+  it("files_changed가 비어 있으면 accept를 needs_read로 강등해야 한다", () => {
+    const parsed = {
+      status: "ok",
+      lead_action: "accept",
+      verdict: "done",
+      task: "review",
+      confidence: "high",
+      risk: "low",
+      detail: "/tmp/out.json",
+      files_changed: [],
+    };
+    const { handoff, warnings } = validateHandoff(parsed);
+
+    assert.equal(handoff.lead_action, "needs_read");
+    assert.ok(warnings.some((w) => w.includes("files_changed empty")));
+  });
+
   it("7. 누락 필드를 context로 자동 삽입하고 warnings에 추론 내역을 기록해야 한다", () => {
     const parsed = {
       lead_action: "accept",
@@ -272,10 +289,10 @@ describe("validateHandoff()", () => {
 // ── buildFallbackHandoff ──
 
 describe("buildFallbackHandoff()", () => {
-  it('10. exitCode=0 일 때 status: "ok", lead_action: "accept"를 반환해야 한다', () => {
+  it('10. exitCode=0 이고 artifact가 없을 때 lead_action: "needs_read"를 반환해야 한다', () => {
     const fb = buildFallbackHandoff(0, "/tmp/result.json", "codex");
     assert.equal(fb.status, "ok");
-    assert.equal(fb.lead_action, "accept");
+    assert.equal(fb.lead_action, "needs_read");
     assert.equal(fb.confidence, "low");
     assert.equal(fb.risk, "low");
     assert.equal(fb.detail, "/tmp/result.json");
@@ -287,6 +304,14 @@ describe("buildFallbackHandoff()", () => {
     // 성공 시 error 관련 필드 없음
     assert.equal(fb.error_stage, undefined);
     assert.equal(fb.retryable, undefined);
+  });
+
+  it('성공 fallback에 filesChanged가 있으면 lead_action: "accept"를 유지해야 한다', () => {
+    const fb = buildFallbackHandoff(0, "/tmp/result.json", "codex", {
+      filesChanged: ["src/app.mjs"],
+    });
+    assert.equal(fb.lead_action, "accept");
+    assert.deepEqual(fb.files_changed, ["src/app.mjs"]);
   });
 
   it('11. exitCode=1 일 때 status: "failed", lead_action: "retry"를 반환해야 한다', () => {
@@ -371,6 +396,18 @@ verdict: done
     assert.equal(result.fallback, false);
     assert.equal(result.handoff.status, "ok");
     assert.equal(result.handoff.detail, "/tmp/x.json");
+  });
+
+  it("HANDOFF 블록이 없어도 worker-local diff가 있으면 fallback accept가 가능해야 한다", () => {
+    const result = processHandoff(NO_HANDOFF, {
+      exitCode: 0,
+      resultFile: "/tmp/r.json",
+      cli: "codex",
+      gitDiffFiles: ["src/app.mjs"],
+    });
+    assert.equal(result.fallback, true);
+    assert.equal(result.handoff.lead_action, "accept");
+    assert.deepEqual(result.handoff.files_changed, ["src/app.mjs"]);
   });
 });
 

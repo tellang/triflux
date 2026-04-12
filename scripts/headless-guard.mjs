@@ -321,7 +321,7 @@ async function main() {
         parts.push(`--assign '${parsed.agent}:${safePrompt}:${parsed.agent}'`);
         if (parsed.mcp && VALID_MCP.has(parsed.mcp))
           parts.push(`--mcp-profile ${parsed.mcp}`);
-        parts.push(`--timeout ${f.timeout || 600}`);
+        parts.push(`--timeout ${f.timeout ? Math.max(f.timeout, 300) : 300}`);
 
         const builtCmd = parts.join(" ");
         autoRoute(

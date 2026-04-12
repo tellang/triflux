@@ -1531,7 +1531,7 @@ main() {
     deep-executor|architect|planner|critic|analyst) MIN_TIMEOUT=900 ;;
     document-specialist|scientist|scientist-deep) MIN_TIMEOUT=900 ;;
     code-reviewer|security-reviewer|quality-reviewer) MIN_TIMEOUT=600 ;;
-    executor|debugger) MIN_TIMEOUT=300 ;;
+    executor|debugger) MIN_TIMEOUT=300 ;;  # 기본값 300s
     *) MIN_TIMEOUT=120 ;;
   esac
 

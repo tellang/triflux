@@ -176,6 +176,58 @@ describe("waitForCompletionWithStallDetect", () => {
     assert.ok(dispatchCalls >= 1, "re-dispatch 호출됨");
   });
 
+  it("재시작 후 _dispatch 반환 token/pane lineage를 재채택한다", async () => {
+    let killCalls = 0;
+    let restartedPolls = 0;
+
+    const deps = createDeps({
+      capturePsmuxPane: (paneId) => {
+        if (paneId === "0.1") return "frozen";
+        restartedPolls++;
+        if (paneId === "tfx:0.9" && restartedPolls >= 2) {
+          return "progress\nTFX_DONE_t-new:7";
+        }
+        return "still-running";
+      },
+      psmuxExec: (args) => {
+        if (args[0] === "kill-pane") {
+          killCalls++;
+          return "";
+        }
+        if (args[0] === "split-window") return "tfx:0.9";
+        return "";
+      },
+      dispatchCommand: () => ({
+        paneId: "tfx:0.9",
+        token: "t-new",
+        logPath: "/tmp/new.log",
+      }),
+    });
+
+    const result = await waitForCompletionWithStallDetect(
+      "sess",
+      "0.1",
+      "/tmp/r.txt",
+      {
+        token: "t-old",
+        command: "codex --prompt test",
+        pollInterval: 10,
+        stallTimeout: 40,
+        completionTimeout: 5000,
+        maxRestarts: 2,
+        _deps: deps,
+      },
+    );
+
+    assert.equal(result.matched, true);
+    assert.equal(result.exitCode, 7);
+    assert.equal(result.paneId, "tfx:0.9");
+    assert.equal(result.token, "t-new");
+    assert.equal(result.logPath, "/tmp/new.log");
+    assert.ok(result.restarts >= 1, "재시작이 발생해야 함");
+    assert.ok(killCalls >= 1, "stall 시 pane kill 수행");
+  });
+
   it("maxRestarts 초과 시 STALL_EXHAUSTED 에러를 throw한다", async () => {
     const deps = createDeps(); // frozen output → stall 유발
 

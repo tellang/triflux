@@ -219,6 +219,14 @@ export function validateHandoff(parsed, context = {}) {
     );
   }
 
+  const filesChangedCount = Array.isArray(h.files_changed)
+    ? h.files_changed.filter(Boolean).length
+    : 0;
+  if (filesChangedCount === 0 && h.lead_action === "accept") {
+    h.lead_action = "needs_read";
+    warnings.push("files_changed empty: accept → needs_read");
+  }
+
   const missingCore = coreRequired.filter((f) => !h[f]);
   const missingRouting = routingRequired.filter((f) => !h[f]);
   const valid = missingCore.length === 0 && missingRouting.length === 0;
@@ -231,15 +239,20 @@ export function validateHandoff(parsed, context = {}) {
  * @param {number} exitCode
  * @param {string} resultFile
  * @param {string} [cli]
+ * @param {object} [context]
+ * @param {string[]} [context.filesChanged]
  * @returns {object}
  */
-export function buildFallbackHandoff(exitCode, resultFile, cli) {
+export function buildFallbackHandoff(exitCode, resultFile, cli, context = {}) {
   const ok = exitCode === 0;
+  const filesChanged = Array.isArray(context.filesChanged)
+    ? context.filesChanged.filter(Boolean)
+    : [];
   return {
     status: ok ? "ok" : "failed",
-    lead_action: ok ? "accept" : "retry",
+    lead_action: ok && filesChanged.length > 0 ? "accept" : ok ? "needs_read" : "retry",
     task: "unknown",
-    files_changed: [],
+    files_changed: filesChanged,
     verdict: `${cli || "worker"} completed (exit ${exitCode})`,
     confidence: "low",
     risk: "low",
@@ -298,6 +311,7 @@ export function processHandoff(rawText, context = {}) {
       context.exitCode ?? 1,
       context.resultFile || "none",
       context.cli,
+      { filesChanged: context.gitDiffFiles },
     );
     return {
       handoff: fb,

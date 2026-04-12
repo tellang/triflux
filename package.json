@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "10.9.17",
+  "version": "10.9.18",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -52,7 +52,13 @@
     "test:contract": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/contract/**/*.test.mjs",
     "test:coverage": "node --experimental-test-coverage --test-coverage-lines=60 --test-coverage-functions=60 --test --test-force-exit --test-concurrency=8 \"tests/**/*.test.mjs\"",
     "gen:skill-docs": "node scripts/gen-skill-docs.mjs",
-    "gen:skill-manifest": "node scripts/gen-skill-manifest.mjs"
+    "gen:skill-manifest": "node scripts/gen-skill-manifest.mjs",
+    "release:check-sync": "node scripts/release/check-sync.mjs",
+    "release:check-sync:fix": "node scripts/release/check-sync.mjs --fix",
+    "release:bump": "node scripts/release/bump-version.mjs",
+    "release:prepare": "node scripts/release/prepare.mjs",
+    "release:publish": "node scripts/release/publish.mjs",
+    "release:verify": "node scripts/release/verify.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -1273,6 +1273,7 @@ export async function waitForPattern(
 
 /**
  * 완료 토큰이 찍힐 때까지 대기하고 exit code를 파싱한다.
+ * NOTE: 주 채널은 headless.waitForCompletionWithStallDetect이며, 본 함수는 fallback 채널이다.
  * @param {string} sessionName
  * @param {string} paneNameOrTarget
  * @param {string} token

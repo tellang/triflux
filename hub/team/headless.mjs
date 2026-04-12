@@ -22,7 +22,11 @@ import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import { getBackend } from "./backend.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
-import { HANDOFF_INSTRUCTION_SHORT, processHandoff } from "./handoff.mjs";
+import {
+  formatHandoffForLead,
+  HANDOFF_INSTRUCTION_SHORT,
+  processHandoff,
+} from "./handoff.mjs";
 import {
   capturePsmuxPane,
   createPsmuxSession,
@@ -317,7 +321,7 @@ export function createStallMonitor(paneId, resultFile, config, deps = {}) {
  * @param {string} [opts.command] — re-dispatch용 원본 명령
  * @param {string} [opts.token] — completion token
  * @param {(snapshot: string) => void} [opts.onPoll] — 폴링 콜백
- * @returns {Promise<{ matched: boolean, exitCode: number|null, restarts: number, stallDetected: boolean }>}
+ * @returns {Promise<{ matched: boolean, exitCode: number|null, restarts: number, stallDetected: boolean, paneId: string, token?: string, logPath?: string|null }>}
  */
 export async function waitForCompletionWithStallDetect(
   sessionName,
@@ -347,19 +351,23 @@ export async function waitForCompletionWithStallDetect(
   const _startCapture = deps.startCapture || startCapture;
 
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const completionPatterns = [
-    token
-      ? `${esc("__TRIFLUX_DONE__:")}${esc(token)}:(\\d+)`
-      : `${esc("__TRIFLUX_DONE__:")}\\S+:(\\d+)`,
-    token
-      ? `${esc("TFX_DONE_")}${esc(token)}:(\\d+)`
-      : `${esc("TFX_DONE_")}\\S+:(\\d+)`,
-  ];
-  const completionRe = new RegExp(completionPatterns.join("|"), "m");
+  const buildCompletionRegex = (activeToken) => {
+    const completionPatterns = [
+      activeToken
+        ? `${esc("__TRIFLUX_DONE__:")}${esc(activeToken)}:(\\d+)`
+        : `${esc("__TRIFLUX_DONE__:")}\\S+:(\\d+)`,
+      activeToken
+        ? `${esc("TFX_DONE_")}${esc(activeToken)}:(\\d+)`
+        : `${esc("TFX_DONE_")}\\S+:(\\d+)`,
+    ];
+    return new RegExp(completionPatterns.join("|"), "m");
+  };
 
   let restarts = 0;
   let currentPaneId = paneId;
   let stallDetected = false;
+  let currentToken = token;
+  let currentLogPath = opts.logPath || null;
 
   while (true) {
     let lastOutput = "";
@@ -386,6 +394,9 @@ export async function waitForCompletionWithStallDetect(
           restarts,
           stallDetected,
           timedOut: true,
+          paneId: currentPaneId,
+          token: currentToken,
+          logPath: currentLogPath,
         };
       }
 
@@ -400,6 +411,7 @@ export async function waitForCompletionWithStallDetect(
       }
 
       // 2) completion 토큰 감지
+      const completionRe = buildCompletionRegex(currentToken);
       const completionMatch = completionRe.exec(currentOutput);
       if (completionMatch) {
         return {
@@ -411,6 +423,9 @@ export async function waitForCompletionWithStallDetect(
           restarts,
           stallDetected,
           timedOut: false,
+          paneId: currentPaneId,
+          token: currentToken,
+          logPath: currentLogPath,
         };
       }
 
@@ -443,6 +458,9 @@ export async function waitForCompletionWithStallDetect(
               restarts,
               stallDetected,
               timedOut: false,
+              paneId: currentPaneId,
+              token: currentToken,
+              logPath: currentLogPath,
             };
           }
         } catch {
@@ -481,8 +499,10 @@ export async function waitForCompletionWithStallDetect(
             "#{session_name}:#{window_index}.#{pane_index}",
           ]);
           _startCapture(sessionName, newPaneId);
-          _dispatch(sessionName, newPaneId, command);
-          currentPaneId = newPaneId;
+          const redispatch = _dispatch(sessionName, newPaneId, command);
+          currentPaneId = redispatch?.paneId || newPaneId;
+          if (redispatch?.token) currentToken = redispatch.token;
+          if (redispatch?.logPath) currentLogPath = redispatch.logPath;
         }
 
         restarts++;
@@ -565,7 +585,11 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       assignment.cli,
       assignment.prompt,
       resultFile,
-      { mcp: assignment.mcp, model: assignment.model },
+      {
+        mcp: assignment.mcp,
+        model: assignment.model,
+        cwd: assignment.cwd || assignment.workdir,
+      },
     );
     startCapture(sessionName, newPaneId);
     // pane 간 pipe-pane EBUSY 방지 — 이벤트 루프 해방하며 순차 대기
@@ -585,6 +609,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       role: assignment.role,
       command: cmd,
       workerId,
+      cwd: assignment.cwd || assignment.workdir,
     });
   }
 
@@ -636,7 +661,11 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         assignment.cli,
         assignment.prompt,
         resultFile,
-        { mcp: assignment.mcp, model: assignment.model },
+        {
+          mcp: assignment.mcp,
+          model: assignment.model,
+          cwd: assignment.cwd || assignment.workdir,
+        },
       );
       const scriptDir = join(RESULT_DIR, sessionName);
       await registerHeadlessWorker(sessionName, i, assignment.cli);
@@ -661,6 +690,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         role: assignment.role,
         command: cmd,
         workerId,
+        cwd: assignment.cwd || assignment.workdir,
       };
     }),
   );
@@ -740,6 +770,9 @@ async function awaitAll(
               onPoll: stallPollCb,
             },
           );
+          if (stallResult.paneId) d.paneId = stallResult.paneId;
+          if (stallResult.token) d.token = stallResult.token;
+          if (stallResult.logPath) d.logPath = stallResult.logPath;
           completion = {
             matched: stallResult.matched,
             exitCode: stallResult.exitCode,
@@ -799,28 +832,27 @@ async function awaitAll(
  * @returns {Array}
  */
 async function collectResults(sessionName, results) {
-  // B3 fix: git diff를 루프 밖에서 1회만 실행 (워커 수만큼 중복 방지)
-  let gitDiffFiles;
-  try {
-    const diffOut = execSync("git diff --name-only HEAD", {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    gitDiffFiles = diffOut.trim().split("\n").filter(Boolean);
-  } catch {
-    /* git 미설치 또는 non-repo — 무시 */
-  }
-
   // handoff 파이프라인: parse → validate → format (각 워커 결과에 적용)
   return await Promise.all(
     results.map(async ({ d, completion, output }) => {
+      const workerGitDiffFiles = collectGitDiffFiles(d.cwd);
       const handoffResult = processHandoff(output, {
         exitCode: completion.exitCode,
         resultFile: d.resultFile,
         cli: d.cli,
-        gitDiffFiles,
+        gitDiffFiles: workerGitDiffFiles,
       });
+      if (
+        completion.exitCode === 0 &&
+        workerGitDiffFiles.length === 0 &&
+        handoffResult.handoff?.lead_action === "accept"
+      ) {
+        handoffResult.handoff = {
+          ...handoffResult.handoff,
+          lead_action: "needs_read",
+        };
+        handoffResult.formatted = formatHandoffForLead(handoffResult.handoff);
+      }
       const status =
         handoffResult.handoff?.status ||
         (completion.matched && completion.exitCode === 0
@@ -843,6 +875,7 @@ async function collectResults(sessionName, results) {
         exitCode: completion.exitCode,
         output,
         resultFile: d.resultFile,
+        workerGitDiffFiles,
         sessionDead: completion.sessionDead || false,
         handoff: handoffResult.handoff,
         handoffFormatted: handoffResult.formatted,
@@ -851,6 +884,20 @@ async function collectResults(sessionName, results) {
       };
     }),
   );
+}
+
+function collectGitDiffFiles(cwd) {
+  try {
+    const diffOut = execSync("git diff --name-only HEAD", {
+      cwd,
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return diffOut.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 /**
