@@ -1,0 +1,47 @@
+name: Release cut
+description: Track the exact work required to ship a new triflux version
+labels:
+  - release
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Target version
+      placeholder: 10.9.18
+    validations:
+      required: true
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      options:
+        - stable
+        - canary
+    validations:
+      required: true
+  - type: textarea
+    id: highlights
+    attributes:
+      label: Highlights
+      description: User-facing changes worth calling out.
+    validations:
+      required: true
+  - type: checkboxes
+    id: gates
+    attributes:
+      label: Required gates
+      options:
+        - label: Version sync passes
+        - label: Test suite passes
+        - label: Lint passes
+        - label: npm pack dry-run passes
+        - label: Release notes draft exists
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback / retry notes
+      description: What to do if npm publish succeeds but downstream steps fail?
+    validations:
+      required: true

@@ -1,0 +1,52 @@
+name: Feature request
+description: New capability or operator workflow improvement
+labels:
+  - feature
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User or operator problem
+      description: Who needs this and what pain does it remove?
+      placeholder: Maintainer has to remember release steps across npm, GitHub, and marketplace by hand.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the end state, not just the implementation detail.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Bullets of what must be true when this lands.
+      placeholder: |
+        - Version sync command fails on drift
+        - Release workflow is documented
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - docs only
+        - scripts + docs
+        - workflow + scripts + docs
+        - broad / needs PRD
+    validations:
+      required: true
+  - type: dropdown
+    id: release-impact
+    attributes:
+      label: Release impact
+      options:
+        - patch
+        - minor
+        - major
+        - no release
+    validations:
+      required: true
