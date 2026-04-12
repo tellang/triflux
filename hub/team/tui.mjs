@@ -54,6 +54,11 @@ import {
   createTokenTracker,
   createVimMotion,
 } from "./tui-widgets.mjs";
+import {
+  createMetricsCollector,
+  createSynapseEventStream,
+  renderMetricsTier1,
+} from "./tui-synapse.mjs";
 
 const VERSION = await loadVersion();
 
@@ -1010,6 +1015,17 @@ export function createLogDashboard(opts = {}) {
     initialRatio: focus === "detail" ? 0.2 : 0.3,
   });
 
+  // Synapse 실시간 관제 (Phase 3)
+  const synapseMetrics = deps.synapseMetrics || createMetricsCollector();
+  const synapseStream = deps.synapseStream || createSynapseEventStream({
+    onEvent(event) {
+      synapseMetrics.ingest(event);
+    },
+    fetchImpl: deps.synapseFetch,
+  });
+  // Synapse 자동 시작 (옵트인: deps.enableSynapse)
+  if (deps.enableSynapse) synapseStream.start();
+
   // virtual row buffer (altScreen 전용)
   const rowBuf = new RowBuffer();
 
@@ -1100,6 +1116,7 @@ export function createLogDashboard(opts = {}) {
   function doClose() {
     if (closed) return;
     if (timer) clearInterval(timer);
+    synapseStream.stop();
     if (inputAttached && typeof input?.off === "function")
       input.off("data", handleInput);
     if (rawModeEnabled && typeof input?.setRawMode === "function")
@@ -1442,6 +1459,11 @@ export function createLogDashboard(opts = {}) {
         truncate(` ${color("▸", MOCHA.green)} ${flashMessage}`, totalCols),
       );
     }
+    // Synapse 실시간 메트릭 (활성 시)
+    if (synapseStream.isRunning) {
+      const metricsSnap = synapseMetrics.snapshot();
+      tier1.push(truncate(renderMetricsTier1(metricsSnap, totalCols), totalCols));
+    }
     // 검색 프롬프트 (/ 모드)
     const searchPrompt = searchState.renderPrompt(totalCols);
     if (searchPrompt) {
@@ -1724,6 +1746,17 @@ export function createLogDashboard(opts = {}) {
       const w = workers.get(name);
       if (!w) return false;
       return attachToSession(w);
+    },
+
+    // Synapse 관제 API
+    startSynapse() {
+      synapseStream.start();
+    },
+    stopSynapse() {
+      synapseStream.stop();
+    },
+    getSynapseMetrics() {
+      return synapseMetrics.snapshot();
     },
 
     close() {
