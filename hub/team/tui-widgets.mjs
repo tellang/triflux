@@ -1,7 +1,7 @@
 // hub/team/tui-widgets.mjs — UX 리뉴얼 위젯 (ISSUE-14)
 // k9s/lazygit/btop 스타일 위젯: 스파크라인, 검색, 패널 리사이즈
 
-import { color, dim, FG, MOCHA, stripAnsi, wcswidth } from "./ansi.mjs";
+import { color, dim, MOCHA } from "./ansi.mjs";
 
 // ── 스파크라인 ────────────────────────────────────────────────────────────
 // Unicode block elements for sparkline rendering
