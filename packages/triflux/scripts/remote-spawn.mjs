@@ -606,27 +606,19 @@ function spawnLocalFallback(args, claudePath, prompt) {
     return;
   }
 
-  const wtArgs = ["new-tab", "-d", dir, "--"];
   const claudeForward = claudePath.replace(/\\/g, "/");
+  let command;
 
   if (prompt) {
     const psQuoted = `'${prompt.replace(/'/g, "''")}'`;
-    wtArgs.push(
-      "pwsh",
-      "-NoProfile",
-      "-Command",
-      `& '${claudeForward}' ${getPermissionFlag().join(" ")} ${psQuoted}`,
-    );
+    command = `pwsh -NoProfile -Command "& '${claudeForward}' ${getPermissionFlag().join(" ")} ${psQuoted}"`;
   } else {
-    wtArgs.push(claudeForward, ...getPermissionFlag());
+    command = `${claudeForward} ${getPermissionFlag().join(" ")}`;
   }
 
   try {
-    spawn("wt.exe", wtArgs, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: false,
-    }).unref();
+    const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
+    await wt.createTab({ title: "Claude", command, cwd: dir });
     console.log(`spawned local Claude in WT tab → ${dir}`);
   } catch (error) {
     console.error("wt.exe spawn failed:", error.message);
@@ -717,23 +709,9 @@ function spawnRemoteFallback(args, promptContext) {
   const remoteCmd = `pwsh -NoExit -File ${remoteScript}`;
 
   if (IS_WINDOWS_LOCAL) {
-    const wtArgs = [
-      "new-tab",
-      "--title",
-      `Claude@${host}`,
-      "--",
-      "ssh",
-      "-t",
-      "--",
-      host,
-      remoteCmd,
-    ];
     try {
-      spawn("wt.exe", wtArgs, {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: false,
-      }).unref();
+      const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
+      await wt.createTab({ title: `Claude@${host}`, command: `ssh -t -- ${host} ${remoteCmd}` });
       console.log(`spawned remote Claude → ${host}:${dir}`);
     } catch (error) {
       console.error("wt.exe spawn failed:", error.message);
@@ -1024,23 +1002,10 @@ function listSpawnSessions() {
 function openAttachTab(sessionName, title = null) {
   if (IS_WINDOWS_LOCAL) {
     const wtArgs = title
-      ? [
-          "new-tab",
-          "--title",
-          title,
-          "--suppressApplicationTitle",
-          "--",
-          "psmux",
-          "attach",
-          "-t",
-          sessionName,
-        ]
-      : ["new-tab", "--", "psmux", "attach", "-t", sessionName];
-    spawn("wt.exe", wtArgs, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: false,
-    }).unref();
+    try {
+      const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
+      await wt.createTab({ title: title || sessionName, command: `psmux attach -t ${sessionName}` });
+    } catch { /* fallback below */ }
     return;
   }
 
