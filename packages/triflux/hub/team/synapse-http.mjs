@@ -1,6 +1,7 @@
 const DEFAULT_SYNAPSE_BASE_URL = "http://127.0.0.1:27888";
 
 function resolveSynapseFetch(fetchImpl) {
+  if (fetchImpl === null) return null;
   if (typeof fetchImpl === "function") return fetchImpl;
   if (typeof globalThis.fetch === "function") {
     return globalThis.fetch.bind(globalThis);
