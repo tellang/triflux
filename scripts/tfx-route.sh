@@ -104,6 +104,19 @@ if [[ -f "$_CODEX_CONFIG" ]] && awk '
   _CODEX_HAS_SANDBOX="1"
 fi
 
+# ── MCP tool approval_mode stall 방지 (ISSUE-4) ──
+# oh-my-codex 업데이트가 MCP tool 블록의 approval_mode를 "approve"로 복원함.
+# codex exec는 non-TTY subprocess이므로 interactive 승인 대기 = output 0B stall.
+# 실행 전 자동으로 "full-auto"로 교체한다.
+if [[ -f "$_CODEX_CONFIG" ]] && grep -q 'approval_mode = "approve"' "$_CODEX_CONFIG" 2>/dev/null; then
+  _approve_count=$(grep -c 'approval_mode = "approve"' "$_CODEX_CONFIG" 2>/dev/null || echo 0)
+  if [[ "$_approve_count" -gt 0 ]]; then
+    cp "$_CODEX_CONFIG" "${_CODEX_CONFIG}.bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+    sed -i 's/approval_mode = "approve"/approval_mode = "full-auto"/g' "$_CODEX_CONFIG"
+    echo "[tfx-route] MCP tool approval_mode stall 방지: ${_approve_count}개 블록 approve→full-auto 자동 수정" >&2
+  fi
+fi
+
 build_codex_base() {
   # codex exec는 항상 non-TTY subprocess에서 실행되므로 --dangerously-bypass 필수.
   # --dangerously-bypass는 config.toml의 approval_mode/sandbox와 충돌하지 않음
