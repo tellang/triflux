@@ -1,11 +1,5 @@
 import { psmuxExec } from "./psmux.mjs";
-import {
-  detectMultiplexer,
-  focusWtPane,
-  hasWindowsTerminal,
-  resolveAttachCommand,
-  tmuxExec,
-} from "./session.mjs";
+import { hasWindowsTerminal } from "./session.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
 function sanitizeWindowTitle(value, fallback = "triflux") {
@@ -81,26 +75,6 @@ async function spawnWindowsTerminal(spec, opts = {}) {
   }
 }
 
-export function focusManagedPane(target, opts = {}) {
-  const { teammateMode = "", layout = "1xN" } = opts;
-  const paneRef = String(target || "");
-
-  if (teammateMode === "wt" || paneRef.startsWith("wt:")) {
-    const paneIndex = parseWorkerNumber(paneRef);
-    return paneIndex != null && focusWtPane(paneIndex, { layout });
-  }
-
-  if (!paneRef) return false;
-  try {
-    if (detectMultiplexer() === "psmux")
-      psmuxExec(["select-pane", "-t", paneRef]);
-    else tmuxExec(`select-pane -t ${paneRef}`);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function openHeadlessDashboardTarget(sessionName, opts = {}) {
   const { worker = null, openAll = false, cwd = process.cwd(), title } = opts;
 
@@ -125,45 +99,4 @@ export function openHeadlessDashboardTarget(sessionName, opts = {}) {
     },
   );
   return true;
-}
-
-export function openDashboardRuntimeTarget(runtime, opts = {}) {
-  const {
-    teammateMode = "",
-    sessionName = "",
-    targetPane = "",
-    layout = "1xN",
-    openAll = false,
-    cwd = process.cwd(),
-    title = "",
-  } = { ...runtime, ...opts };
-
-  if (teammateMode === "headless") {
-    return openHeadlessDashboardTarget(sessionName, {
-      worker: openAll ? null : targetPane,
-      openAll,
-      cwd,
-      title,
-    });
-  }
-
-  if (
-    (teammateMode === "wt" || String(targetPane).startsWith("wt:")) &&
-    !openAll
-  ) {
-    return focusManagedPane(targetPane, { teammateMode: "wt", layout });
-  }
-
-  try {
-    if (!openAll && targetPane)
-      focusManagedPane(targetPane, { teammateMode, layout });
-    void spawnWindowsTerminal(resolveAttachCommand(sessionName), {
-      mode: decideDashboardOpenMode({ openAll }),
-      title: title || `▲ ${sanitizeSessionName(sessionName)}`,
-      cwd,
-    });
-    return true;
-  } catch {
-    return false;
-  }
 }
