@@ -4,9 +4,32 @@ import { describe, it } from "node:test";
 import {
   ensureBashScriptExecution,
   resolveBashExecutable,
+  resolveGitBashExecutable,
 } from "../../hub/lib/bash-path.mjs";
 
 describe("resolveBashExecutable", () => {
+  it("returns a concrete Git Bash path on Windows when available", () => {
+    const result = resolveGitBashExecutable({
+      platform: "win32",
+      exists(path) {
+        return path === "C:/Program Files/Git/usr/bin/bash.exe";
+      },
+    });
+
+    assert.equal(result, "C:/Program Files/Git/usr/bin/bash.exe");
+  });
+
+  it("returns null for Git Bash lookup on non-Windows platforms", () => {
+    const result = resolveGitBashExecutable({
+      platform: "linux",
+      exists() {
+        return true;
+      },
+    });
+
+    assert.equal(result, null);
+  });
+
   it("prefers Git Bash on Windows when available", () => {
     const result = resolveBashExecutable({
       platform: "win32",
