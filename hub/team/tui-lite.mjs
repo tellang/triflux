@@ -24,11 +24,11 @@ import {
 } from "./ansi.mjs";
 import {
   clamp,
-  FALLBACK_COLUMNS,
-  FALLBACK_ROWS,
   formatTokens,
   loadVersion,
   normalizeWorkerState as coreNormalizeWorkerState,
+  resolveViewportColumns,
+  resolveViewportRows,
   runtimeStatus,
   sanitizeFiles,
   sanitizeOneLine,
@@ -185,13 +185,8 @@ export function createLiteDashboard(opts = {}) {
     if (!closed) stream.write(text);
   };
   const workerNames = () => [...workers.keys()].sort();
-  const viewportColumns = () =>
-    Math.max(
-      48,
-      columns || stream?.columns || process.stdout?.columns || FALLBACK_COLUMNS,
-    );
-  const viewportRows = () =>
-    Math.max(10, rows || stream?.rows || process.stdout?.rows || FALLBACK_ROWS);
+  const viewportColumns = () => resolveViewportColumns({ columns, stream });
+  const viewportRows = () => resolveViewportRows({ rows, stream });
   const ensureSelection = (names) => {
     if (names.length && (!selectedWorker || !workers.has(selectedWorker)))
       selectedWorker = names[0];
