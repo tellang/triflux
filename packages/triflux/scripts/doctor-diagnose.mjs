@@ -139,14 +139,13 @@ function collectSystemInfo() {
     freeMemMB: Math.round(freemem() / 1024 / 1024),
   };
 
-  // Windows Terminal version
+  // Windows Terminal version (wt.exe --version은 GUI 다이얼로그를 띄우므로 AppxPackage로 조회)
   try {
-    const wtVer = execSync("wt.exe --version 2>&1", {
-      encoding: "utf8",
-      timeout: 5000,
-      windowsHide: true,
-    }).trim();
-    info.wtVersion = wtVer;
+    const wtVer = execSync(
+      'powershell.exe -NoProfile -NoLogo -Command "(Get-AppxPackage Microsoft.WindowsTerminal).Version"',
+      { encoding: "utf8", timeout: 5000, windowsHide: true },
+    ).trim();
+    info.wtVersion = wtVer || "not found";
   } catch {
     info.wtVersion = "not found";
   }
