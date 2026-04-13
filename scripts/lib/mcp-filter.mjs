@@ -672,18 +672,22 @@ export function getCodexMcpConfig(options = {}) {
   const targetServers = registeredServers;
 
   if (resolvedProfile === "none") {
-    // Codex 0.115+: transport 없는 서버에 enabled=false를 보내면 "invalid transport" 에러.
-    // 비허용 서버는 override에서 제외하고, 허용 서버만 명시적으로 설정한다.
-    return { mcp_servers: {} };
+    // 등록된 서버를 전부 enabled=false로 비활성화.
+    // 미등록 서버에 보내면 "invalid transport" 에러지만, registeredServers는 등록 확인 완료.
+    const config = { mcp_servers: {} };
+    for (const server of targetServers) {
+      config.mcp_servers[server] = { enabled: false };
+    }
+    return config;
   }
 
   const config = { mcp_servers: {} };
   const allowedToolsByServer =
     getProfileDefinition(resolvedProfile).allowedToolsByServer;
   for (const server of targetServers) {
-    // Codex 0.115+: transport 없는 서버에 enabled=false를 보내면 "invalid transport" 에러.
-    // 비허용 서버는 override에서 제외한다 (Codex 기본 설정이 유지됨).
     if (!allowedServers.has(server)) {
+      // 비허용 서버는 명시적으로 비활성화하여 MCP 시작 자체를 방지.
+      config.mcp_servers[server] = { enabled: false };
       continue;
     }
 

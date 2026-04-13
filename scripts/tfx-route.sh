@@ -1193,12 +1193,14 @@ resolve_mcp_policy() {
   fi
 
   available_servers=$(get_cached_servers "$CLI_TYPE")
-  if [[ "$CLI_TYPE" == "codex" && "${TFX_CODEX_TRANSPORT:-auto}" != "mcp" ]]; then
-    available_servers=""
+  # Codex exec 모드에서도 config.toml의 MCP 서버를 전부 시작하므로,
+  # transport 모드와 관계없이 registered servers를 전달하여 불필요한 서버를
+  # enabled=false로 비활성화해야 한다.
+  # 캐시가 비어있으면 config.toml에서 직접 서버 목록을 추출한다.
+  if [[ -z "$available_servers" && "$CLI_TYPE" == "codex" && -f "$_CODEX_CONFIG" ]]; then
+    available_servers=$(sed -n 's/^\[mcp_servers\.\([^].]*\)\]$/\1/p' "$_CODEX_CONFIG" 2>/dev/null \
+      | sort -u | tr '\n' ',' | sed 's/,$//')
   fi
-  # Codex 0.115+: 미등록 서버에 config override(enabled=true/false 모두)를 보내면
-  # "invalid transport" 에러 발생. 캐시 비어있으면 빈 문자열이 유지되어
-  # mcp-filter가 override를 생성하지 않는다.
 
   local -a cmd=(
     "$NODE_BIN" "$filter_script" shell
