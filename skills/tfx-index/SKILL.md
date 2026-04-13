@@ -63,7 +63,7 @@ AskUserQuestion:
 Claude는 프로젝트 경로와 모드를 Gemini에 전달하고, Gemini가 파일 트리 스캔·메타데이터 추출·인덱스 생성을 모두 수행한다.
 
 ```
-Bash("bash scripts/tfx-route.sh gemini exec 'Scan the project at {path}. For each source file, extract: exports, imports, line count, file type. Exclude node_modules/, .git/, dist/, build/, coverage/, *.lock, *.log, *.map. Generate both PROJECT_INDEX.md and PROJECT_INDEX.json following this format:
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Scan the project at {path}. For each source file, extract: exports, imports, line count, file type. Exclude node_modules/, .git/, dist/, build/, coverage/, *.lock, *.log, *.map. Generate both PROJECT_INDEX.md and PROJECT_INDEX.json following this format:
 
 PROJECT_INDEX.md:
 # PROJECT_INDEX.md

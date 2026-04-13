@@ -60,7 +60,7 @@ Claude 토큰을 절약하기 위해 분석 작업은 Gemini CLI에 위임합니
 **단계 진입 시 Gemini 위임:**
 
 ```
-Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 1: Clarify. Topic: {topic}. Previous answers: none. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Deep interview Stage 1: Clarify. Topic: {topic}. Previous answers: none. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
 ```
 
 Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
@@ -80,7 +80,7 @@ Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 
 **단계 진입 시 Gemini 위임:**
 
 ```
-Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 2: Decompose. Topic: {topic}. Previous answers: {stage1_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Deep interview Stage 2: Decompose. Topic: {topic}. Previous answers: {stage1_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
 ```
 
 Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
@@ -100,7 +100,7 @@ Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 
 **단계 진입 시 Gemini 위임:**
 
 ```
-Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 3: Challenge. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Deep interview Stage 3: Challenge. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
 ```
 
 Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
@@ -120,7 +120,7 @@ Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 
 **단계 진입 시 Gemini 위임:**
 
 ```
-Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 4: Alternatives. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers} {stage3_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Deep interview Stage 4: Alternatives. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers} {stage3_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
 ```
 
 Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
@@ -140,7 +140,7 @@ Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 
 **단계 진입 시 Gemini 위임:**
 
 ```
-Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview Stage 5: Synthesize. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers} {stage3_answers} {stage4_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Deep interview Stage 5: Synthesize. Topic: {topic}. Previous answers: {stage1_answers} {stage2_answers} {stage3_answers} {stage4_answers}. Generate 3 probing questions for this stage and analyze prior responses. Return JSON: {analysis, questions, key_insights}'")
 ```
 
 Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 제시합니다.
@@ -158,7 +158,7 @@ Gemini가 반환한 `questions` 배열을 AskUserQuestion으로 사용자에게 
 **산출물 생성 Gemini 위임:**
 
 ```
-Bash("bash scripts/tfx-route.sh gemini exec 'Deep interview complete. Topic: {topic}. All answers: {all_answers}. Generate a structured requirements document draft. Return the full markdown document.'")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Deep interview complete. Topic: {topic}. All answers: {all_answers}. Generate a structured requirements document draft. Return the full markdown document.'")
 ```
 
 Gemini 실패 시 Claude가 직접 아래 형식으로 문서를 작성합니다.

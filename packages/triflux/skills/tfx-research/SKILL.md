@@ -71,7 +71,7 @@ AskUserQuestion:
 최적화된 쿼리를 Gemini CLI로 전달한다. Gemini는 네이티브 Google Search를 사용해 검색과 요약을 모두 수행한다:
 
 ```
-Bash("bash scripts/tfx-route.sh gemini 'Research the following topic. Use Google Search to find current information. Return a structured markdown summary with sources: {optimized_query}' auto 120")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini 'Research the following topic. Use Google Search to find current information. Return a structured markdown summary with sources: {optimized_query}' auto 120")
 ```
 
 Gemini가 반환하는 결과에는 검색 결과, 출처 URL, 핵심 요약이 포함된다. Claude는 이 단계에서 토큰을 소비하지 않는다.
