@@ -1,13 +1,23 @@
 // tests/unit/account-broker.test.mjs — AccountBroker unit tests
 
 import assert from "node:assert/strict";
+import { existsSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { beforeEach, describe, it } from "node:test";
 
-import { AccountBroker } from "../../hub/account-broker.mjs";
+import { AccountBroker as _AccountBroker } from "../../hub/account-broker.mjs";
+
+// Wrap: always skip persistence in tests
+function AccountBroker(config, opts = {}) {
+  return new _AccountBroker(config, { _skipPersistence: true, ...opts });
+}
 
 // ── helpers ──────────────────────────────────────────────────────
+
+function makeBroker(overrides = {}) {
+  return AccountBroker(makeConfig(overrides));
+}
 
 function makeConfig(overrides = {}) {
   return {
@@ -32,7 +42,7 @@ function makeConfig(overrides = {}) {
 
 describe("AccountBroker", () => {
   it("round-robin distributes leases across accounts", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     const lease1 = broker.lease({ provider: "codex" });
     assert.ok(lease1, "first lease should be non-null");
@@ -53,7 +63,7 @@ describe("AccountBroker", () => {
   });
 
   it("skips account in cooldown", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     broker.markRateLimited("codex-a", 60_000); // 1 minute cooldown
 
@@ -63,7 +73,7 @@ describe("AccountBroker", () => {
   });
 
   it("returns null when all accounts are in cooldown + provides ETA", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     broker.markRateLimited("codex-a", 60_000);
     broker.markRateLimited("codex-b", 120_000);
@@ -77,7 +87,7 @@ describe("AccountBroker", () => {
   });
 
   it("lease TTL 30min auto-release: expired leases are pruned on next lease()", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     // manually acquire and then manipulate leasedAt to simulate TTL expiry
     const lease1 = broker.lease({ provider: "codex" });
@@ -149,7 +159,7 @@ describe("AccountBroker", () => {
     process.env.GOOGLE_API_KEY_ALT1 = "test-key-value";
 
     try {
-      const broker = new AccountBroker(makeConfig());
+      const broker = makeBroker();
 
       // skip gemini-a (profile mode), force to gemini-b (env mode)
       broker.markRateLimited("gemini-a", 60_000);
@@ -202,20 +212,20 @@ describe("AccountBroker", () => {
   });
 
   it("returns null for unknown provider", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
     const lease = broker.lease({ provider: "unknown_cli" });
     assert.equal(lease, null);
   });
 
   it("nextAvailableEta returns null when an account is available", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
     // codex-a is available (not busy, no cooldown)
     const eta = broker.nextAvailableEta("codex");
     assert.equal(eta, null, "should return null when accounts are available");
   });
 
   it("snapshot returns all account states", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
     const snap = broker.snapshot();
     assert.equal(snap.length, 4, "should have 4 accounts total");
     assert.ok(snap.every((a) => typeof a.id === "string"));
@@ -225,7 +235,7 @@ describe("AccountBroker", () => {
   });
 
   it("release is a no-op for idle accounts", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     broker.release("codex-a", { ok: false });
 
@@ -236,7 +246,7 @@ describe("AccountBroker", () => {
   });
 
   it("busy account is skipped and not double-leased", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     const lease1 = broker.lease({ provider: "codex" });
     assert.ok(lease1);
@@ -253,7 +263,7 @@ describe("AccountBroker", () => {
   });
 
   it("profile lease returns profile, no env", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
     const lease = broker.lease({ provider: "codex" });
     assert.ok(lease);
     assert.equal(lease.mode, "profile");
@@ -427,7 +437,7 @@ describe("AccountBroker", () => {
 
   it("snapshot includes remaining lease time", () => {
     const realNow = Date.now;
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     try {
       Date.now = () => 1_000;
@@ -485,7 +495,7 @@ describe("AccountBroker", () => {
   });
 
   it("release() busy guard: release without prior lease is no-op", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     // release codex-a without leasing first
     broker.release("codex-a", { ok: false });
@@ -501,7 +511,7 @@ describe("AccountBroker", () => {
   });
 
   it("markRateLimited() with unknown ID does not throw", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     // should silently return without throwing
     assert.doesNotThrow(() => {
@@ -517,7 +527,7 @@ describe("AccountBroker", () => {
   });
 
   it("nextAvailableEta() returns null for empty/unknown provider", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     const eta = broker.nextAvailableEta("unknown_provider");
     assert.equal(eta, null, "should return null for provider with no accounts");
@@ -637,7 +647,7 @@ describe("AccountBroker", () => {
   });
 
   it("EventEmitter emits lease and release events", () => {
-    const broker = new AccountBroker(makeConfig());
+    const broker = makeBroker();
 
     const leaseEvents = [];
     const releaseEvents = [];

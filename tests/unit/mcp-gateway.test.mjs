@@ -40,7 +40,7 @@ function parseServersFromSource(filePath, varName) {
 
   // 각 줄에서 name과 port를 간단히 정규식으로 추출
   const entries = [];
-  const lineRe = /name:\s*'([^']+)'.*?port:\s*(\d+)/g;
+  const lineRe = /name:\s*["']([^"']+)["'].*?port:\s*(\d+)/gs;
   let m;
   while ((m = lineRe.exec(block)) !== null) {
     entries.push({ name: m[1], port: parseInt(m[2], 10) });
@@ -51,7 +51,7 @@ function parseServersFromSource(filePath, varName) {
 function parseStdioCmdsFromSource(filePath) {
   const src = readFileSync(filePath, "utf8");
   const results = [];
-  const re = /name:\s*'([^']+)'.*?port:\s*(\d+).*?stdioCmd:\s*'([^']+)'/gs;
+  const re = /name:\s*["']([^"']+)["'].*?port:\s*(\d+).*?stdioCmd:\s*\n?\s*["']([^"']+)["']/gs;
   let m;
   while ((m = re.exec(src)) !== null) {
     results.push({ name: m[1], port: parseInt(m[2], 10), stdioCmd: m[3] });
@@ -218,7 +218,7 @@ describe("isPortInUse", () => {
   it("returns false for a port that is not listening", async () => {
     // 포트 1 은 bind되지 않는다; 임의의 높은 미사용 포트를 고른다
     // server가 닫힌 후의 포트를 재사용
-    const unusedPort = boundPort + 1000;
+    const unusedPort = Math.min(boundPort + 1000, 65530);
     const result = await isPortInUse(unusedPort);
     assert.strictEqual(result, false);
   });

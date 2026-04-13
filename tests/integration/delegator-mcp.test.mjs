@@ -266,8 +266,11 @@ describe("delegator-mcp stdio server", () => {
       });
 
       const config = JSON.parse(result.structuredContent.output);
-      const allowedMcpServers = Object.keys(config.mcp_servers).sort();
-      assert.deepEqual(allowedMcpServers, ["context7", "playwright"]);
+      const enabledServers = Object.entries(config.mcp_servers)
+        .filter(([, v]) => v.enabled !== false)
+        .map(([k]) => k)
+        .sort();
+      assert.deepEqual(enabledServers, ["context7", "playwright"]);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       await closeClient(client, transport);

@@ -161,6 +161,16 @@ const MCP_PROFILE_HINTS = {
  * @param {string} [opts.contextFile] — 컨텍스트 파일 경로 (최대 32KB, UTF-8 안전 절단)
  * @returns {string} PowerShell 명령
  */
+// ── Dashboard attach args for WT ────────────────────────────────
+
+export function buildDashboardAttachArgs(sessionName, layout, workerCount, anchor = "window") {
+  const safeName = String(sessionName).replace(/[^a-zA-Z0-9_-]/g, "");
+  const base = anchor === "tab"
+    ? ["-w", "0", "nt"]
+    : ["-w", "new"];
+  return [...base, "--session", safeName, "--layout", layout, "--workers", String(workerCount)];
+}
+
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveCliType(cli);

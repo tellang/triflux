@@ -107,6 +107,23 @@ test("execute opens the circuit after repeated crashes", async () => {
   await withSandbox(async ({ root }) => {
     process.env.FAKE_GEMINI_FAIL = "1";
 
+    // set up HOME + accounts.json so broker tracks gemini circuit
+    const home = join(root, "home");
+    const brokerDir = join(home, ".claude", "cache", "tfx-hub");
+    mkdirSync(brokerDir, { recursive: true });
+    writeFileSync(
+      join(brokerDir, "accounts.json"),
+      JSON.stringify({ gemini: [{ id: "test-gemini", mode: "profile", profile: "default" }] }),
+      "utf8",
+    );
+    const prevHome = process.env.HOME;
+    const prevUserProfile = process.env.USERPROFILE;
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+
+    const brokerMod = await import("../../hub/account-broker.mjs");
+    brokerMod.reloadBroker();
+
     const { execute, getCircuitState } = await importFresh(
       "../../hub/gemini-adapter.mjs",
     );
@@ -122,7 +139,7 @@ test("execute opens the circuit after repeated crashes", async () => {
       assert.equal(result.failureMode, "crash");
     }
 
-    assert.equal(getCircuitState().state, "open");
+    assert.equal((await getCircuitState()).state, "open");
     const blocked = await execute({
       prompt: "blocked",
       workdir: root,
@@ -131,5 +148,10 @@ test("execute opens the circuit after repeated crashes", async () => {
     assert.equal(blocked.ok, false);
     assert.equal(blocked.fellBack, true);
     assert.equal(blocked.failureMode, "circuit_open");
+
+    // restore HOME
+    process.env.HOME = prevHome;
+    process.env.USERPROFILE = prevUserProfile;
+    brokerMod.reloadBroker();
   });
 });
