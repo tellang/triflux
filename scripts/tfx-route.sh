@@ -1400,6 +1400,53 @@ resolve_codex_mcp_script() {
     "$sd/hub/workers/codex-mcp.mjs" "$sd/../hub/workers/codex-mcp.mjs"
 }
 
+## ── Config Swap: 프로필별 MCP 서버 필터링 ──
+# codex exec는 -c flag로 MCP enabled/disabled를 제어할 수 없다.
+# config.toml을 원자적으로 교체하여 불필요한 서버 시작을 방지한다.
+_codex_config_swap() {
+  local action="$1"  # "filter" or "restore"
+  local config="$_CODEX_CONFIG"
+  local backup="${config}.pre-exec"
+
+  if [[ "$action" == "filter" && -f "$config" ]]; then
+    # MCP 프로필에서 허용된 서버 목록 추출
+    local allowed_pat=""
+    for flag in "${CODEX_CONFIG_FLAGS[@]}"; do
+      if [[ "$flag" =~ mcp_servers\.([^.]+)\.enabled=true ]]; then
+        [[ -n "$allowed_pat" ]] && allowed_pat="${allowed_pat}|"
+        allowed_pat="${allowed_pat}${BASH_REMATCH[1]}"
+      fi
+    done
+
+    # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 건드리지 않음)
+    if [[ -f "$backup" ]]; then
+      echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중" >&2
+      return 0
+    fi
+    cp "$config" "$backup"
+
+    # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지
+    awk -v keep="$allowed_pat" '
+      BEGIN { skip=0 }
+      /^\[mcp_servers\./ {
+        name=$0; gsub(/^\[mcp_servers\./, "", name); gsub(/[\].].*/, "", name)
+        if (keep == "" || name !~ "^(" keep ")$") { skip=1; next }
+        else { skip=0 }
+      }
+      /^\[/ && !/^\[mcp_servers\./ { skip=0 }
+      !skip { print }
+    ' "$backup" > "$config"
+
+    local kept=0
+    [[ -n "$allowed_pat" ]] && kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
+    echo "[tfx-route] config.toml swap: ${kept}개 MCP 서버만 활성" >&2
+
+  elif [[ "$action" == "restore" && -f "$backup" ]]; then
+    mv "$backup" "$config" 2>/dev/null
+    echo "[tfx-route] config.toml 복원 완료" >&2
+  fi
+}
+
 run_codex_exec() {
   local prompt="$1"
   local use_tee_flag="$2"
@@ -1407,9 +1454,8 @@ run_codex_exec() {
   local worker_pid
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
-  if [[ ${#CODEX_CONFIG_FLAGS[@]} -gt 0 ]]; then
-    codex_args+=("${CODEX_CONFIG_FLAGS[@]}")
-  fi
+  # -c flags는 codex exec에서 MCP enabled 제어 불가 — config swap으로 대체
+  # config swap은 codex 블록 최상단(_codex_config_swap "filter")에서 실행됨
 
   if [[ "$use_tee_flag" == "true" ]]; then
     "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
@@ -1658,6 +1704,12 @@ FALLBACK_EOF
   fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
+    # Config swap: 프로필에 맞는 MCP 서버만 남긴 임시 config 적용
+    # run_codex_mcp / run_codex_exec 어느 경로든 적용되도록 최상단에서 실행
+    _codex_config_swap "filter"
+    # swap 후 config override 플래그 클리어 — 제거된 서버에 override 보내면 "invalid transport" 에러
+    CODEX_CONFIG_FLAGS=()
+    CODEX_CONFIG_JSON="{}"
     codex_transport_effective="exec"
     if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
       run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
@@ -1678,6 +1730,8 @@ FALLBACK_EOF
       codex_transport_effective="exec"
     fi
     echo "[tfx-route] codex_transport_effective=$codex_transport_effective" >&2
+    # Config swap 복원 (성공/실패 관계없이)
+    _codex_config_swap "restore"
 
   elif [[ "$CLI_TYPE" == "gemini" ]]; then
     local gemini_model
