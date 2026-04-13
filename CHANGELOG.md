@@ -2,6 +2,25 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.9.22] - 2026-04-13
+
+### Fixed
+- 테스트 35건 실패 전면 수정 (2428/2429 pass) — constants 누락, regex, async, broker 격리 등 16파일
+- Codex MCP stall 근본 수정 — config.toml 원자적 swap으로 비허용 서버 비활성화
+- wt.exe --version GUI 다이얼로그 팝업 제거
+- env-detect: 쉘 경로/버전/installHint 리팩터 + 레이지 캐싱
+- cli-adapter-base: broker null 안전 처리, crash circuit breaker 반영
+- cross-review: .omc→.triflux 상태 경로 동기화
+
+### Added
+- headless: buildDashboardAttachArgs WT 연결 인자 빌더
+- hud renderers: [stale] 마커 지원
+- account-broker: _skipPersistence 테스트 격리 옵션
+
+### Changed
+- OMC 의존성 분리 + setup.mjs lib 동적 스캔 (18개 자동 동기화)
+- Hub idle timeout 기본 비활성화 (영구 실행)
+
 ## [10.9.16] - 2026-04-12
 
 ### Added
