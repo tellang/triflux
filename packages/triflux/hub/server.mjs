@@ -80,7 +80,7 @@ const AIMD_WINDOW_MS = 30 * 60 * 1000;
 const AIMD_INITIAL_BATCH_SIZE = 3;
 const AIMD_MIN_BATCH_SIZE = 1;
 const AIMD_MAX_BATCH_SIZE = 10;
-const HUB_IDLE_TIMEOUT_DEFAULT_MS = 10 * 60 * 1000;
+const HUB_IDLE_TIMEOUT_DEFAULT_MS = 0; // 0 = 영구 실행 (idle shutdown 비활성). TFX_HUB_IDLE_TIMEOUT_MS 환경변수로 오버라이드 가능
 const HUB_IDLE_SWEEP_DEFAULT_MS = 60 * 1000;
 const STATIC_CONTENT_TYPES = Object.freeze({
   ".html": "text/html",
@@ -1655,21 +1655,23 @@ export async function startHub({
           return stopPromise;
         };
 
-        idleTimer = setInterval(() => {
-          const idleMs = Date.now() - lastRequestAt;
-          if (idleMs < hubIdleTimeoutMs) return;
-          hubLog.warn(
-            { idleMs, idleTimeoutMs: hubIdleTimeoutMs, port },
-            "hub.idle_timeout_shutdown",
-          );
-          void stopFn().catch((error) => {
-            hubLog.error(
-              { err: error, idleMs, idleTimeoutMs: hubIdleTimeoutMs, port },
-              "hub.idle_timeout_shutdown_failed",
+        if (hubIdleTimeoutMs > 0) {
+          idleTimer = setInterval(() => {
+            const idleMs = Date.now() - lastRequestAt;
+            if (idleMs < hubIdleTimeoutMs) return;
+            hubLog.warn(
+              { idleMs, idleTimeoutMs: hubIdleTimeoutMs, port },
+              "hub.idle_timeout_shutdown",
             );
-          });
-        }, hubIdleSweepMs);
-        idleTimer.unref();
+            void stopFn().catch((error) => {
+              hubLog.error(
+                { err: error, idleMs, idleTimeoutMs: hubIdleTimeoutMs, port },
+                "hub.idle_timeout_shutdown_failed",
+              );
+            });
+          }, hubIdleSweepMs);
+          idleTimer.unref();
+        }
 
         resolveHub({
           reused: false,

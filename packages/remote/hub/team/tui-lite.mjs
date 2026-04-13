@@ -24,7 +24,7 @@ import {
 } from "./ansi.mjs";
 
 const FALLBACK_COLUMNS = 100,
-  FALLBACK_ROWS = 24;
+  FALLBACK_ROWS = 30;
 const VALID_TABS = new Set(["log", "detail", "files"]);
 
 let VERSION = "lite";

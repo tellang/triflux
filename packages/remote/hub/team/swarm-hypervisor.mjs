@@ -897,10 +897,10 @@ export function createSwarmHypervisor(opts) {
    * @param {SwarmPlan} swarmPlan — from planSwarm()
    * @returns {Promise<SwarmStatus>}
    */
-  /** Hub keepalive — 스웜 실행 중 Hub idle timeout 방지 */
+  /** Hub keepalive — Hub crash recovery (idle timeout은 기본 비활성이므로 crash 복구 용도) */
   let hubKeepaliveTimer = null;
   function startHubKeepalive() {
-    // 5분마다 Hub /status 핑 (idle timeout 기본 10분)
+    // 5분마다 Hub /status 핑 — crash 감지 시 ensureHubAlive로 재시작
     hubKeepaliveTimer = setInterval(async () => {
       try {
         const resp = await fetch("http://127.0.0.1:27888/status");
