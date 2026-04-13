@@ -8,6 +8,24 @@ const GIT_BASH_PATHS = Object.freeze([
 ]);
 
 /**
+ * Resolve a concrete Git Bash executable on Windows.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.platform=process.platform]
+ * @param {(path: string) => boolean} [opts.exists=existsSync]
+ * @returns {string | null}
+ */
+export function resolveGitBashExecutable(opts = {}) {
+  const { platform = process.platform, exists = existsSync } = opts;
+
+  if (platform !== "win32") {
+    return null;
+  }
+
+  return GIT_BASH_PATHS.find((candidate) => exists(candidate)) || null;
+}
+
+/**
  * Resolve a Windows-safe bash executable.
  * On Windows we prefer Git Bash over bare `bash`, which may resolve to WSL.
  *
@@ -17,13 +35,7 @@ const GIT_BASH_PATHS = Object.freeze([
  * @returns {string}
  */
 export function resolveBashExecutable(opts = {}) {
-  const { platform = process.platform, exists = existsSync } = opts;
-
-  if (platform !== "win32") {
-    return "bash";
-  }
-
-  return GIT_BASH_PATHS.find((candidate) => exists(candidate)) || "bash";
+  return resolveGitBashExecutable(opts) || "bash";
 }
 
 function shellQuote(command) {

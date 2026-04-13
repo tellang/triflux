@@ -171,6 +171,36 @@ describe("native-supervisor.mjs: child process error handler", () => {
       "error handler should set status to exited",
     );
   });
+
+  it("normalizes raw script commands through the bash-path helper", () => {
+    const src = readFileSync(
+      join(ROOT, "hub/team/native-supervisor.mjs"),
+      "utf8",
+    );
+    assert.ok(
+      src.includes("ensureBashScriptExecution"),
+      "native-supervisor should import ensureBashScriptExecution",
+    );
+    assert.ok(
+      src.includes("const command = ensureBashScriptExecution(member.command"),
+      "native-supervisor should normalize member.command before spawn",
+    );
+  });
+
+  it("packages/remote native-supervisor uses the same bash normalization", () => {
+    const src = readFileSync(
+      join(ROOT, "packages/remote/hub/team/native-supervisor.mjs"),
+      "utf8",
+    );
+    assert.ok(
+      src.includes("ensureBashScriptExecution"),
+      "remote native-supervisor should import ensureBashScriptExecution",
+    );
+    assert.ok(
+      src.includes("const command = ensureBashScriptExecution(member.command"),
+      "remote native-supervisor should normalize member.command before spawn",
+    );
+  });
 });
 
 // ========================================================================
@@ -191,5 +221,19 @@ describe("headless.mjs: prompt file-based injection", () => {
       /writeFileSync\([^)]*prompt/i.test(src),
       "headless.mjs should write prompt to a temp file via writeFileSync",
     );
+  });
+});
+
+describe("psmux/session use shared Git Bash resolution", () => {
+  it("session.mjs no longer keeps local Git Bash candidate arrays", () => {
+    const src = readFileSync(join(ROOT, "hub/team/session.mjs"), "utf8");
+    assert.ok(src.includes("resolveGitBashExecutable"));
+    assert.ok(!src.includes("GIT_BASH_CANDIDATES"));
+  });
+
+  it("psmux.mjs no longer keeps local Git Bash candidate arrays", () => {
+    const src = readFileSync(join(ROOT, "hub/team/psmux.mjs"), "utf8");
+    assert.ok(src.includes("resolveGitBashExecutable"));
+    assert.ok(!src.includes("Program Files\\\\Git\\\\usr\\\\bin\\\\bash.exe"));
   });
 });
