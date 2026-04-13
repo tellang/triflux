@@ -6,7 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
 import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
-import * as childProcess from "../lib/spawn-trace.mjs";
+import childProcess from "../lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 
 const PSMUX_BIN = (() => {
