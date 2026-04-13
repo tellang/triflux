@@ -37,13 +37,13 @@ function runScript(scriptPath, payload, options = {}) {
 }
 
 function readState(projectDir) {
-  const statePath = join(projectDir, ".omc", "state", "cross-review.json");
+  const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
   const text = readFileSync(statePath, "utf8");
   return JSON.parse(text);
 }
 
 function writeState(projectDir, state) {
-  const statePath = join(projectDir, ".omc", "state", "cross-review.json");
+  const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
@@ -101,7 +101,7 @@ describe("cross-review tracker", () => {
       assert.equal(result.status, 0, result.stderr);
     }
 
-    const statePath = join(projectDir, ".omc", "state", "cross-review.json");
+    const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
     assert.equal(existsSync(statePath), false);
   });
 
@@ -228,7 +228,7 @@ describe("cross-review gate", () => {
       },
     });
 
-    const statePath = join(projectDir, ".omc", "state", "cross-review.json");
+    const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
     const result = runScript(
       GATE_PATH,
       {

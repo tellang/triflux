@@ -86,8 +86,10 @@ export const PLUGIN_USAGE_CACHE_PATH = join(
   "tfx-hub",
   "plugin-usage-cache.json",
 );
+export const OMC_PLUGIN_USAGE_CACHE_PATH = PLUGIN_USAGE_CACHE_PATH; // OMC alias
 export const CLAUDE_USAGE_STALE_MS_SOLO = 5 * 60 * 1000; // 플러그인 없을 때: 5분 캐시
 export const CLAUDE_USAGE_STALE_MS_WITH_PLUGIN = 15 * 60 * 1000; // 플러그인 있을 때: 15분
+export const CLAUDE_USAGE_STALE_MS_WITH_OMC = CLAUDE_USAGE_STALE_MS_WITH_PLUGIN; // OMC alias
 export const CLAUDE_USAGE_429_BACKOFF_MS = 10 * 60 * 1000; // 429 에러 시 10분 backoff
 export const GEMINI_429_BASE_DELAY_MS = 2000;
 export const GEMINI_429_MAX_RETRIES = 3;
