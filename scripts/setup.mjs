@@ -65,6 +65,23 @@ const REQUIRED_CODEX_PROFILES = [
 const HUD_SYNC_EXCLUDES = new Set(["omc-hud.mjs", "omc-hud.mjs.bak"]);
 
 /**
+ * scripts/lib/*.mjs 자동 스캔.
+ * 수동 리스트 대신 glob으로 탐색하여 lib 파일 추가 시 sync 누락 방지.
+ */
+function scanLibFiles(pluginRoot, claudeDir) {
+  const libDir = join(pluginRoot, "scripts", "lib");
+  if (!existsSync(libDir)) return [];
+  return readdirSync(libDir)
+    .sort()
+    .filter((f) => f.endsWith(".mjs"))
+    .map((f) => ({
+      src: join(libDir, f),
+      dst: join(claudeDir, "scripts", "lib", f),
+      label: `lib/${f}`,
+    }));
+}
+
+/**
  * hub/workers/*.mjs + hub/ 루트의 worker 의존성 파일을 자동 스캔.
  * 수동 리스트 대신 glob으로 탐색하여 파일 추가 시 sync 누락 방지.
  */
@@ -173,21 +190,7 @@ const SYNC_MAP = [
     dst: join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
     label: "tfx-batch-stats.mjs",
   },
-  {
-    src: join(PLUGIN_ROOT, "scripts", "lib", "mcp-filter.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-filter.mjs"),
-    label: "lib/mcp-filter.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "scripts", "lib", "mcp-server-catalog.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "lib", "mcp-server-catalog.mjs"),
-    label: "lib/mcp-server-catalog.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "scripts", "lib", "keyword-rules.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "lib", "keyword-rules.mjs"),
-    label: "lib/keyword-rules.mjs",
-  },
+  ...scanLibFiles(PLUGIN_ROOT, CLAUDE_DIR),
   {
     src: join(PLUGIN_ROOT, "hub", "team", "agent-map.json"),
     dst: join(CLAUDE_DIR, "hub", "team", "agent-map.json"),
