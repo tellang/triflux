@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import childProcess from "node:child_process";
+import childProcess from "../../hub/lib/spawn-trace.mjs";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
