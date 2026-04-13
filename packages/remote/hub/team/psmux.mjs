@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import * as childProcess from "@triflux/core/hub/lib/spawn-trace.mjs";
+import childProcess from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
 import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
