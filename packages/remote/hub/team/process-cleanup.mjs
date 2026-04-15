@@ -58,7 +58,7 @@ async function queryWindowsProcesses(execFileFn) {
 async function queryUnixProcesses(execFileFn) {
   const { stdout } = await execFileFn(
     "ps",
-    ["-eo", "pid,ppid,rss,comm,args", "--no-headers"],
+    ["-eo", "pid=,ppid=,rss=,comm=,args="],
     { encoding: "utf8", timeout: 10_000 },
   );
 
