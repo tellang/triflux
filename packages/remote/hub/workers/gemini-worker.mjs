@@ -21,7 +21,7 @@ function toStringList(value) {
  * 빈 문자열은 ""로, 특수문자 포함 시 큰따옴표로 감싼다.
  */
 function quoteWindowsCmdArg(value) {
-  const raw = String(value ?? "");
+  const raw = String(value ?? "").replace(/[\r\n]/g, " ");
   if (raw.length === 0) return '""';
   if (!/[\s"()^&|<>%!]/.test(raw)) return raw;
   const escaped = raw
@@ -55,7 +55,7 @@ function buildSpawnSpec(command, args) {
 
   if (/\.(cmd|bat)$/i.test(resolved)) {
     const line = [resolved, ...args].map(quoteWindowsCmdArg).join(" ");
-    return { command: "cmd.exe", args: ["/d", "/s", "/c", line], shell: false };
+    return { command: "cmd.exe", args: ["/d", "/s", "/v:off", "/c", line], shell: false };
   }
 
   return { command: resolved, args, shell: false };
