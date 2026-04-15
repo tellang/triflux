@@ -133,39 +133,49 @@ export function createMonitor(opts = {}) {
     const command = buildOpenCommand(agent);
 
     try {
-      try {
-        const { createWtManager } = await deps.importModule(
-          "../hub/team/wt-manager.mjs",
-        );
-        const manager = createWtManager();
-        await manager.createTab({
-          title,
-          command,
-          cwd: process.cwd(),
-          profile: "triflux",
-        });
-      } catch {
-        const child = deps.spawn(
-          "wt.exe",
-          [
-            "-w",
-            "new",
-            "nt",
-            "--title",
+      if (process.platform === "win32") {
+        try {
+          const { createWtManager } = await deps.importModule(
+            "../hub/team/wt-manager.mjs",
+          );
+          const manager = createWtManager();
+          await manager.createTab({
             title,
-            "--",
-            "powershell.exe",
-            "-NoExit",
-            "-Command",
             command,
-          ],
-          {
-            detached: true,
-            stdio: "ignore",
-            windowsHide: false,
-          },
-        );
-        child?.unref?.();
+            cwd: process.cwd(),
+            profile: "triflux",
+          });
+        } catch {
+          const child = deps.spawn(
+            "wt.exe",
+            [
+              "-w",
+              "new",
+              "nt",
+              "--title",
+              title,
+              "--",
+              "powershell.exe",
+              "-NoExit",
+              "-Command",
+              command,
+            ],
+            {
+              detached: true,
+              stdio: "ignore",
+              windowsHide: false,
+            },
+          );
+          child?.unref?.();
+        }
+      } else {
+        // macOS/Linux: tmux new-window 시도
+        try {
+          const { execSync } = await deps.importModule("node:child_process");
+          execSync(`tmux new-window -n "${title}" "${command}"`, { timeout: 5000, stdio: "ignore" });
+        } catch {
+          // tmux 없으면 무시 (statusMessage만 업데이트)
+        }
       }
       statusMessage = `${GREEN}${stripUnsafeText(agent.agent || "agent")} 열기 시도 완료${RESET}`;
       return true;
