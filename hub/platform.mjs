@@ -174,7 +174,16 @@ export function killProcess(pid, options = {}) {
       return true;
     }
 
-    process.kill(numericPid, signal);
+    // macOS/Linux: tree 옵션이면 프로세스 그룹 kill 시도
+    if (tree) {
+      try {
+        process.kill(-numericPid, signal); // 프로세스 그룹 kill (negative PID)
+      } catch {
+        process.kill(numericPid, signal); // 그룹 kill 실패 시 단일 PID
+      }
+    } else {
+      process.kill(numericPid, signal);
+    }
     return true;
   } catch {
     return false;

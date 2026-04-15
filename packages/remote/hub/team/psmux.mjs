@@ -1,7 +1,7 @@
 // hub/team/psmux.mjs — Windows psmux 세션/키바인딩/캡처/steering 관리
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import childProcess from "@triflux/core/hub/lib/spawn-trace.mjs";
@@ -71,7 +71,10 @@ const PSMUX_TIMEOUT_MS = 10000;
 const COMPLETION_PREFIX = "__TRIFLUX_DONE__:";
 const CAPTURE_ROOT =
   process.env.PSMUX_CAPTURE_ROOT || join(tmpdir(), "psmux-steering");
-const CAPTURE_HELPER_PATH = join(CAPTURE_ROOT, "pipe-pane-capture.ps1");
+const CAPTURE_HELPER_PATH = join(
+  CAPTURE_ROOT,
+  IS_WINDOWS ? "pipe-pane-capture.ps1" : "pipe-pane-capture.sh",
+);
 const POLL_INTERVAL_MS = (() => {
   const ms = Number.parseInt(process.env.PSMUX_POLL_INTERVAL_MS || "", 10);
   if (Number.isFinite(ms) && ms > 0) return ms;
@@ -210,34 +213,44 @@ function getCaptureLogPath(sessionName, paneName) {
 
 function ensureCaptureHelper() {
   mkdirSync(CAPTURE_ROOT, { recursive: true });
-  writeFileSync(
-    CAPTURE_HELPER_PATH,
-    [
-      "param(",
-      "  [Parameter(Mandatory = $true)][string]$Path",
-      ")",
-      "",
-      "$parent = Split-Path -Parent $Path",
-      "if ($parent) {",
-      "  New-Item -ItemType Directory -Force -Path $parent | Out-Null",
-      "}",
-      "",
-      "# Force UTF-8 encoding — CP949 등 non-UTF-8 codepage에서 Gemini stdout 캡처 실패 방지",
-      "# InputEncoding: pipe-pane에서 읽어들이는 바이트 해석",
-      "# OutputEncoding: 네이티브 명령(gemini/codex CLI)의 stdout 디코딩",
-      "# $OutputEncoding: PowerShell 파이프라인 기본 인코딩 (BOM 없는 UTF-8)",
-      "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
-      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-      "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-      "",
-      "$reader = [Console]::In",
-      "while (($line = $reader.ReadLine()) -ne $null) {",
-      "  Add-Content -LiteralPath $Path -Value $line -Encoding utf8",
-      "}",
-      "",
-    ].join("\n"),
-    "utf8",
-  );
+  if (IS_WINDOWS) {
+    writeFileSync(
+      CAPTURE_HELPER_PATH,
+      [
+        "param(",
+        "  [Parameter(Mandatory = $true)][string]$Path",
+        ")",
+        "",
+        "$parent = Split-Path -Parent $Path",
+        "if ($parent) {",
+        "  New-Item -ItemType Directory -Force -Path $parent | Out-Null",
+        "}",
+        "",
+        "# Force UTF-8 encoding — CP949 등 non-UTF-8 codepage에서 Gemini stdout 캡처 실패 방지",
+        "# InputEncoding: pipe-pane에서 읽어들이는 바이트 해석",
+        "# OutputEncoding: 네이티브 명령(gemini/codex CLI)의 stdout 디코딩",
+        "# $OutputEncoding: PowerShell 파이프라인 기본 인코딩 (BOM 없는 UTF-8)",
+        "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+        "",
+        "$reader = [Console]::In",
+        "while (($line = $reader.ReadLine()) -ne $null) {",
+        "  Add-Content -LiteralPath $Path -Value $line -Encoding utf8",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+  } else {
+    // macOS/Linux: bash 스크립트로 pipe-pane 캡처
+    writeFileSync(
+      CAPTURE_HELPER_PATH,
+      ["#!/bin/bash", 'exec tee -a "$1"', ""].join("\n"),
+      "utf8",
+    );
+    chmodSync(CAPTURE_HELPER_PATH, 0o755);
+  }
   return CAPTURE_HELPER_PATH;
 }
 
@@ -627,7 +640,17 @@ function collectPanePids(sessionName) {
  * @param {number} pid
  */
 function killProcessTree(pid) {
-  if (!IS_WINDOWS || !pid) return;
+  if (!pid) return;
+  if (!IS_WINDOWS) {
+    // macOS/Linux: 자식 프로세스 먼저 종료 후 부모 종료
+    try {
+      childProcess.execFileSync("pkill", ["-P", String(pid)], { timeout: 5000, stdio: "ignore" });
+    } catch { /* 자식 없으면 에러 — 무시 */ }
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch { /* 이미 죽었으면 무시 */ }
+    return;
+  }
   try {
     childProcess.execSync(`taskkill /T /F /PID ${pid}`, {
       stdio: "ignore",
@@ -660,7 +683,13 @@ function disableAllPipeCaptures(sessionName, paneIds) {
  * @param {string} sessionName
  */
 function killOrphanPipeHelpers(sessionName) {
-  if (!IS_WINDOWS) return;
+  if (!IS_WINDOWS) {
+    // macOS/Linux: pkill -f로 고아 pipe-pane 헬퍼 종료
+    try {
+      childProcess.execFileSync("pkill", ["-f", "pipe-pane-capture"], { timeout: 5000, stdio: "ignore" });
+    } catch { /* 프로세스 없으면 무시 */ }
+    return;
+  }
   const safeSession = sanitizePathPart(sessionName);
   try {
     const output = childProcess.execSync(
@@ -691,7 +720,13 @@ function killOrphanPipeHelpers(sessionName) {
  * @param {string} sessionName
  */
 function killOrphanMcpProcesses(sessionName) {
-  if (!IS_WINDOWS) return;
+  if (!IS_WINDOWS) {
+    // macOS/Linux: pkill -f로 고아 MCP 서버 프로세스 종료
+    try {
+      childProcess.execFileSync("pkill", ["-f", "mcp-server"], { timeout: 5000, stdio: "ignore" });
+    } catch { /* 프로세스 없으면 무시 */ }
+    return;
+  }
   const safeSession = sanitizePathPart(sessionName);
 
   // Hub PID 보호 — Hub 프로세스를 고아로 잘못 식별하지 않도록
@@ -1013,12 +1048,10 @@ export function startCapture(sessionName, paneNameOrTarget) {
   writeFileSync(logPath, "", "utf8");
 
   disablePipeCapture(pane.paneId);
-  psmuxExec([
-    "pipe-pane",
-    "-t",
-    pane.paneId,
-    `powershell.exe -NoLogo -NoProfile -File ${quoteArg(helperPath)} ${quoteArg(logPath)}`,
-  ]);
+  const pipePaneCmd = IS_WINDOWS
+    ? `powershell.exe -NoLogo -NoProfile -File ${quoteArg(helperPath)} ${quoteArg(logPath)}`
+    : `${quoteArg(helperPath)} ${quoteArg(logPath)}`;
+  psmuxExec(["pipe-pane", "-t", pane.paneId, pipePaneCmd]);
 
   refreshCaptureSnapshot(sessionName, pane.paneId);
   return { paneId: pane.paneId, paneName, logPath };
@@ -1095,10 +1128,17 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
   }
 
   const token = randomToken(paneName);
-  const safeCommand = wrapCliForBash(commandText);
-  // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout이 깨지는 문제 방지 (belt-and-suspenders)
-  const chcpPrefix = IS_WINDOWS ? "chcp 65001 > $null; " : "";
-  const wrapped = `${chcpPrefix}try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
+  const safeCommand = IS_WINDOWS ? wrapCliForBash(commandText) : commandText;
+
+  let wrapped;
+  if (IS_WINDOWS) {
+    // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout이 깨지는 문제 방지 (belt-and-suspenders)
+    const chcpPrefix = "chcp 65001 > $null; ";
+    wrapped = `${chcpPrefix}try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
+  } else {
+    // macOS/Linux: bash 구문으로 완료 토큰 출력
+    wrapped = `(${safeCommand}; echo "${COMPLETION_PREFIX}${token}:$?") || echo "${COMPLETION_PREFIX}${token}:1"`;
+  }
 
   sendLiteralToPane(pane.paneId, wrapped, true);
 
