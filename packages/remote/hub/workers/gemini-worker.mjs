@@ -2,7 +2,7 @@
 // ADR-006: --output-format stream-json 기반 단발 실행 워커.
 
 import { spawn } from "node:child_process";
-import { isAbsolute } from "node:path";
+import { existsSync } from "node:fs";
 import readline from "node:readline";
 
 import { extractText, terminateChild, withRetry } from "./worker-utils.mjs";
@@ -13,6 +13,38 @@ const DEFAULT_KILL_GRACE_MS = 1000;
 function toStringList(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+// cmd.exe용 인자 이스케이프. 공백/특수문자 포함 시 큰따옴표로 감싸고
+// 내부 `"`와 trailing `\`를 올바르게 처리한다. 빈 문자열은 `""`로 보존된다.
+export function escapeCmdArg(arg) {
+  if (arg === "") return '""';
+  if (!/[\s"()^&|<>%!]/.test(arg)) return arg;
+  return `"${arg.replace(/(\\*)("|$)/g, (_, slashes, quote) =>
+    quote === '"' ? `${slashes}${slashes}\\"` : `${slashes}${slashes}`,
+  )}"`;
+}
+
+// Windows npm shim은 `.cmd` 확장자가 필요하지만 `command -v`는 확장자 없이 반환한다.
+// `.cmd`/`.bat`는 Node 20+ 이후 CVE-2024-27980 대응으로 `shell: false` spawn이 차단되므로,
+// cross-spawn 방식으로 `cmd.exe /d /s /c` 경유 + 수동 quoting하여 넘긴다.
+// `.exe`는 shell 없이 직접 실행 가능.
+export function resolveWindowsCommand(command, args) {
+  if (process.platform !== "win32") return { command, args, shell: false };
+  let resolved = command;
+  if (!/\.(cmd|bat|exe|ps1)$/i.test(resolved)) {
+    for (const ext of [".exe", ".cmd", ".bat"]) {
+      if (existsSync(resolved + ext)) {
+        resolved = resolved + ext;
+        break;
+      }
+    }
+  }
+  if (/\.(cmd|bat)$/i.test(resolved)) {
+    const line = [resolved, ...args].map(escapeCmdArg).join(" ");
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", line], shell: false };
+  }
+  return { command: resolved, args, shell: false };
 }
 
 function safeJsonParse(line) {
@@ -223,12 +255,14 @@ export class GeminiWorker {
       }),
     ];
 
-    const child = spawn(this.command, args, {
+    const { command: spawnCommand, args: spawnArgs, shell: useShell } =
+      resolveWindowsCommand(this.command, args);
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd: options.cwd || this.cwd,
       env: { ...this.env, ...(options.env || {}) },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-      shell: process.platform === "win32" && !isAbsolute(this.command),
+      shell: useShell,
     });
 
     this.child = child;
