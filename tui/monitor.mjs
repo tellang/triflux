@@ -144,28 +144,9 @@ export function createMonitor(opts = {}) {
           cwd: process.cwd(),
           profile: "triflux",
         });
-      } catch {
-        const child = deps.spawn(
-          "wt.exe",
-          [
-            "-w",
-            "new",
-            "nt",
-            "--title",
-            title,
-            "--",
-            "powershell.exe",
-            "-NoExit",
-            "-Command",
-            command,
-          ],
-          {
-            detached: true,
-            stdio: "ignore",
-            windowsHide: false,
-          },
-        );
-        child?.unref?.();
+      } catch (wtErr) {
+        statusMessage = `${RED}WT 탭 열기 실패: ${stripUnsafeText(wtErr?.message || "unknown")}${RESET}`;
+        return false;
       }
       statusMessage = `${GREEN}${stripUnsafeText(agent.agent || "agent")} 열기 시도 완료${RESET}`;
       return true;

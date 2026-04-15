@@ -2,6 +2,49 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.9.28] - 2026-04-15
+
+### Fixed
+- **[CRITICAL]** synapse heartbeat HTTP 라우트 필드명 불일치 수정 — partial 메타데이터 업데이트 정상 동작
+- conductor stdin write-after-end 방지 — writable 체크 추가
+- conductor 원격 세션 onCompleted 콜백 누락 수정 — swarm integration 정상 트리거
+- packages/remote quota-refresh `Promise.all` → `Promise.allSettled` 동기화 — 단일 계정 실패 시 Hub 크래시 방지
+- tui/monitor.mjs wt.exe 직접 spawn fallback 제거 — wt-manager 정책 준수
+- packages/triflux 3파일 동기화 (headless, cli-adapter-base, tfx-route.sh)
+- plugin.json, marketplace.json 버전 동기화
+
+### Changed
+- stale 문서 정리: .omc handoff 35건, docs/ 구버전 문서 삭제
+- CHANGELOG v10.9.23-27 누락분 보충
+
+## [10.9.27] - 2026-04-15
+
+### Fixed
+- cmd.exe /v:off delayed expansion 비활성화 (보안)
+- newline 제거로 명령 주입 방지
+- CWD factory 경로 로드 순서 보안 강화
+
+## [10.9.26] - 2026-04-15
+
+### Fixed
+- codex exec fallback 제거 — MCP transport 전용으로 전환
+- codex-mcp bootstrap timeout 60s → 120s
+
+## [10.9.25] - 2026-04-15
+
+### Fixed
+- codex-mcp bootstrap timeout 10s → 60s
+
+## [10.9.24] - 2026-04-15
+
+### Fixed
+- gemini-worker Windows .cmd shim spawn ENOENT 복원 (buildSpawnSpec)
+- gemini-worker quoteWindowsCmdArg %% 이스케이프 추가
+- tfx-route-worker CWD 기반 factory 경로 추가
+
+### Added
+- delegator psmux 멀티워커 실행 경로 + MCP executor stall 수정
+
 ## [10.9.22] - 2026-04-13
 
 ### Fixed
