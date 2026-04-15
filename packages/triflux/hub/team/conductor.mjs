@@ -733,6 +733,9 @@ export function createConductor(opts = {}) {
       if (code === 0) {
         transition(session, STATES.COMPLETED, `exit_${code}`);
         emitter.emit("completed", { sessionId: session.id });
+        if (typeof session.config.onCompleted === "function") {
+          session.config.onCompleted({ sessionId: session.id });
+        }
         maybeAutoShutdown();
       } else {
         handleFailure(session, `remote_exit_${code}`);
@@ -891,6 +894,7 @@ export function createConductor(opts = {}) {
     }
 
     if (!session.child) return false;
+    if (!session.child.stdin?.writable) return false;
     try {
       session.child.stdin.write(`${text}\n`);
       eventLog.append("stdin", { session: id, text: text.slice(0, 100) });
