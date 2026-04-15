@@ -24,7 +24,10 @@ function quoteWindowsCmdArg(value) {
   const raw = String(value ?? "");
   if (raw.length === 0) return '""';
   if (!/[\s"()^&|<>%!]/.test(raw)) return raw;
-  const escaped = raw.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, "$1$1");
+  const escaped = raw
+    .replace(/%/g, "%%")
+    .replace(/(\\*)"/g, '$1$1\\"')
+    .replace(/(\\+)$/g, "$1$1");
   return `"${escaped}"`;
 }
 
