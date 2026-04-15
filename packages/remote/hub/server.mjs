@@ -1733,7 +1733,12 @@ async function checkSingleAccountQuota(acct) {
 async function refreshAllAccountQuotas() {
   const snap = brokerInstance?.snapshot() || [];
   const checks = snap.filter(a => a.authFile).map(a => checkSingleAccountQuota(a));
-  const results = await Promise.all(checks);
+  const settled = await Promise.allSettled(checks);
+  const results = settled.map((s, i) =>
+    s.status === "fulfilled"
+      ? s.value
+      : { id: snap.filter(a => a.authFile)[i]?.id ?? "unknown", status: "error", message: String(s.reason?.message || s.reason).substring(0, 60) },
+  );
   // 캐시 저장
   try {
     writeFileSync(QUOTA_CACHE_PATH, JSON.stringify({ ts: Date.now(), results }));
