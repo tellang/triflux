@@ -809,7 +809,7 @@ export async function startHub({
       if (path === "/synapse/heartbeat" && req.method === "POST") {
         try {
           const body = await parseBody(req);
-          const { sessionId, partial } = body || {};
+          const { sessionId, ...partial } = body || {};
           const ok = synapseRegistry.heartbeat(sessionId, partial);
           if (!ok) {
             throw new Error("heartbeat failed");
