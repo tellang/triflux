@@ -133,20 +133,30 @@ export function createMonitor(opts = {}) {
     const command = buildOpenCommand(agent);
 
     try {
-      try {
-        const { createWtManager } = await deps.importModule(
-          "../hub/team/wt-manager.mjs",
-        );
-        const manager = createWtManager();
-        await manager.createTab({
-          title,
-          command,
-          cwd: process.cwd(),
-          profile: "triflux",
-        });
-      } catch (wtErr) {
-        statusMessage = `${RED}WT 탭 열기 실패: ${stripUnsafeText(wtErr?.message || "unknown")}${RESET}`;
-        return false;
+      if (process.platform === "win32") {
+        try {
+          const { createWtManager } = await deps.importModule(
+            "../hub/team/wt-manager.mjs",
+          );
+          const manager = createWtManager();
+          await manager.createTab({
+            title,
+            command,
+            cwd: process.cwd(),
+            profile: "triflux",
+          });
+        } catch (wtErr) {
+          statusMessage = `${RED}WT 탭 열기 실패: ${stripUnsafeText(wtErr?.message || "unknown")}${RESET}`;
+          return false;
+        }
+      } else {
+        // macOS/Linux: tmux new-window 시도
+        try {
+          const { execSync } = await deps.importModule("node:child_process");
+          execSync(`tmux new-window -n "${title}" "${command}"`, { timeout: 5000, stdio: "ignore" });
+        } catch {
+          // tmux 없으면 무시
+        }
       }
       statusMessage = `${GREEN}${stripUnsafeText(agent.agent || "agent")} 열기 시도 완료${RESET}`;
       return true;
