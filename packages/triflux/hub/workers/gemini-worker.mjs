@@ -2,7 +2,8 @@
 // ADR-006: --output-format stream-json 기반 단발 실행 워커.
 
 import { spawn } from "node:child_process";
-import { isAbsolute } from "node:path";
+import { existsSync } from "node:fs";
+import { extname } from "node:path";
 import readline from "node:readline";
 
 import { extractText, terminateChild, withRetry } from "./worker-utils.mjs";
@@ -13,6 +14,48 @@ const DEFAULT_KILL_GRACE_MS = 1000;
 function toStringList(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+/**
+ * Windows에서 cmd.exe에 전달할 인자를 안전하게 quoting한다.
+ * 빈 문자열은 ""로, 특수문자 포함 시 큰따옴표로 감싼다.
+ */
+function quoteWindowsCmdArg(value) {
+  const raw = String(value ?? "");
+  if (raw.length === 0) return '""';
+  if (!/[\s"()^&|<>%!]/.test(raw)) return raw;
+  const escaped = raw.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, "$1$1");
+  return `"${escaped}"`;
+}
+
+/**
+ * Windows npm shim(.cmd) spawn 문제를 해결한다.
+ * - command -v가 확장자 없는 경로를 반환하면 .exe → .cmd → .bat 순으로 탐색
+ * - .cmd/.bat는 CVE-2024-27980 이후 shell:false에서 실행 불가하므로 cmd.exe /d /s /c 경유
+ * - .exe는 직접 실행
+ * - non-Windows는 그대로 통과
+ */
+function buildSpawnSpec(command, args) {
+  if (process.platform !== "win32") {
+    return { command, args, shell: false };
+  }
+
+  let resolved = command;
+  if (!extname(resolved)) {
+    for (const ext of [".exe", ".cmd", ".bat"]) {
+      if (existsSync(resolved + ext)) {
+        resolved = resolved + ext;
+        break;
+      }
+    }
+  }
+
+  if (/\.(cmd|bat)$/i.test(resolved)) {
+    const line = [resolved, ...args].map(quoteWindowsCmdArg).join(" ");
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", line], shell: false };
+  }
+
+  return { command: resolved, args, shell: false };
 }
 
 function safeJsonParse(line) {
@@ -223,12 +266,17 @@ export class GeminiWorker {
       }),
     ];
 
-    const child = spawn(this.command, args, {
+    const {
+      command: spawnCmd,
+      args: spawnArgs,
+      shell,
+    } = buildSpawnSpec(this.command, args);
+    const child = spawn(spawnCmd, spawnArgs, {
       cwd: options.cwd || this.cwd,
       env: { ...this.env, ...(options.env || {}) },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-      shell: process.platform === "win32" && !isAbsolute(this.command),
+      shell,
     });
 
     this.child = child;
