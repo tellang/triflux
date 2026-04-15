@@ -1716,12 +1716,8 @@ FALLBACK_EOF
       if [[ "$exit_code" -eq 0 ]]; then
         codex_transport_effective="mcp"
       elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
-        echo "[tfx-route] Codex MCP bootstrap 실패(exit=${exit_code}). legacy exec 경로로 fallback합니다." >&2
-        : > "$STDOUT_LOG"
-        : > "$STDERR_LOG"
-        exit_code=0
-        run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-        codex_transport_effective="exec-fallback"
+        echo "[tfx-route] Codex MCP bootstrap 실패(exit=${exit_code}). exec fallback 비활성(stdin 블록 위험)." >&2
+        codex_transport_effective="mcp-failed"
       else
         codex_transport_effective="mcp"
       fi
