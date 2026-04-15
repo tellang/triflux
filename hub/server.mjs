@@ -80,6 +80,7 @@ const AIMD_WINDOW_MS = 30 * 60 * 1000;
 const AIMD_INITIAL_BATCH_SIZE = 3;
 const AIMD_MIN_BATCH_SIZE = 1;
 const AIMD_MAX_BATCH_SIZE = 10;
+const SYNAPSE_VALID_OPS = new Set(["checkout", "rebase", "cherry-pick", "reset", "stash-pop", "worktree-remove"]);
 const HUB_IDLE_TIMEOUT_DEFAULT_MS = 0; // 0 = 영구 실행 (idle shutdown 비활성). TFX_HUB_IDLE_TIMEOUT_MS 환경변수로 오버라이드 가능
 const HUB_IDLE_SWEEP_DEFAULT_MS = 60 * 1000;
 const STATIC_CONTENT_TYPES = Object.freeze({
@@ -839,14 +840,13 @@ export async function startHub({
       }
 
       if (path === "/synapse/preflight" && req.method === "POST") {
-        const VALID_OPS = new Set(["checkout", "rebase", "cherry-pick", "reset", "stash-pop", "worktree-remove"]);
         try {
           const body = await parseBody(req);
           const { op, args = {}, sessionContext = {} } = body;
           if (!op || typeof op !== "string") {
             return writeJson(res, 400, { ok: false, error: "op 필수" });
           }
-          if (!VALID_OPS.has(op)) {
+          if (!SYNAPSE_VALID_OPS.has(op)) {
             return writeJson(res, 400, { ok: false, error: `invalid op: ${op}` });
           }
           const result = gitPreflight.check(op, args, sessionContext);
@@ -1814,6 +1814,7 @@ const QUOTA_CACHE_PATH = join(CACHE_DIR, "broker-quota-cache.json");
 async function checkSingleAccountQuota(acct) {
   try {
     const authPath = join(PID_DIR, acct.authFile);
+    if (!authPath.startsWith(PID_DIR + sep)) return { id: acct.id, status: "path_blocked" };
     if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
     const auth = JSON.parse(readFileSync(authPath, "utf8"));
     if (acct.provider === "codex") {
