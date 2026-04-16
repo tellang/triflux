@@ -2,6 +2,7 @@
 
 import { execSync as execSyncHub } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { EventEmitter } from "node:events";
 import {
   existsSync,
   mkdirSync,
@@ -41,7 +42,10 @@ import {
   writeState,
 } from "@triflux/core/hub/state.mjs";
 import { createStoreAdapter } from "./store-adapter.mjs";
+import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
+import { createSwarmLocks } from "./team/swarm-locks.mjs";
+import { createSynapseRegistry } from "./team/synapse-registry.mjs";
 import { registerTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
 import { createTools } from "./tools.mjs";
 import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
@@ -76,6 +80,7 @@ const AIMD_WINDOW_MS = 30 * 60 * 1000;
 const AIMD_INITIAL_BATCH_SIZE = 3;
 const AIMD_MIN_BATCH_SIZE = 1;
 const AIMD_MAX_BATCH_SIZE = 10;
+const SYNAPSE_VALID_OPS = new Set(["checkout", "rebase", "cherry-pick", "reset", "stash-pop", "worktree-remove"]);
 const HUB_IDLE_TIMEOUT_DEFAULT_MS = 0; // 0 = 영구 실행 (idle shutdown 비활성). TFX_HUB_IDLE_TIMEOUT_MS 환경변수로 오버라이드 가능
 const HUB_IDLE_SWEEP_DEFAULT_MS = 60 * 1000;
 const STATIC_CONTENT_TYPES = Object.freeze({
@@ -574,6 +579,36 @@ export async function startHub({
   }
   const delegatorService = new DelegatorService({ worker: delegatorWorker });
 
+  // Synapse Layer 4: session registry + git preflight + swarm locks
+  const synapseEmitter = new EventEmitter();
+  synapseEmitter.setMaxListeners(50);
+  const synapseRegistry = createSynapseRegistry({
+    persistPath: join(CACHE_DIR, "tfx-hub", "synapse-sessions.json"),
+    emitter: synapseEmitter,
+  });
+  const swarmLocks = createSwarmLocks({
+    repoRoot: PROJECT_ROOT,
+    persistPath: join(CACHE_DIR, "tfx-hub", "swarm-locks.json"),
+  });
+  const gitPreflight = createGitPreflight({
+    registry: synapseRegistry,
+    locks: swarmLocks,
+  });
+
+  // Synapse Layer 5: emitter subscribers — bridge events to hub logging
+  synapseEmitter.on("synapse.session.started", ({ sessionId }) => {
+    hubLog.info({ sessionId }, "synapse.session.started");
+  });
+  synapseEmitter.on("synapse.session.heartbeat", ({ sessionId }) => {
+    hubLog.debug({ sessionId }, "synapse.session.heartbeat");
+  });
+  synapseEmitter.on("synapse.session.stale", ({ sessionId }) => {
+    hubLog.warn({ sessionId }, "synapse.session.stale");
+  });
+  synapseEmitter.on("synapse.session.removed", ({ sessionId }) => {
+    hubLog.info({ sessionId }, "synapse.session.removed");
+  });
+
   const hitl = createHitlManager(store, router);
   const pipe = createPipeServer({
     router,
@@ -685,6 +720,11 @@ export async function startHub({
           pipe: pipe.getStatus(),
           assign_callback_pipe_path: assignCallbacks.path,
           assign_callback_pipe: assignCallbacks.getStatus(),
+          spawn_trace: {
+            max_per_sec: spawnTrace.getMaxSpawnPerSec(),
+            max_total_descendants: spawnTrace.MAX_TOTAL_DESCENDANTS,
+          },
+          version,
         });
       }
 
@@ -746,6 +786,74 @@ export async function startHub({
           ok: true,
           max_spawn_per_sec: spawnTrace.reload(),
         });
+      }
+
+      // ── Synapse Layer 5: session registry + locks + preflight routes ──
+      if (path === "/synapse/sessions" && req.method === "GET") {
+        return writeJson(res, 200, { ok: true, ...synapseRegistry.snapshot(), ts: Date.now() });
+      }
+
+      if (path === "/synapse/register" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId } = body || {};
+          const result = synapseRegistry.register(sessionId, body);
+          if (!result?.ok) {
+            throw new Error(result?.reason || "register failed");
+          }
+          return writeJson(res, 200, { ok: true, sessionId: result.sessionId || sessionId });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      if (path === "/synapse/heartbeat" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId, ...partial } = body || {};
+          const ok = synapseRegistry.heartbeat(sessionId, partial);
+          if (!ok) {
+            throw new Error("heartbeat failed");
+          }
+          return writeJson(res, 200, { ok: true });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      if (path === "/synapse/unregister" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId } = body || {};
+          const ok = synapseRegistry.unregister(sessionId);
+          if (!ok) {
+            throw new Error("unregister failed");
+          }
+          return writeJson(res, 200, { ok: true });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      if (path === "/synapse/locks" && req.method === "GET") {
+        return writeJson(res, 200, { ok: true, locks: swarmLocks.snapshot(), ts: Date.now() });
+      }
+
+      if (path === "/synapse/preflight" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { op, args = {}, sessionContext = {} } = body;
+          if (!op || typeof op !== "string") {
+            return writeJson(res, 400, { ok: false, error: "op 필수" });
+          }
+          if (!SYNAPSE_VALID_OPS.has(op)) {
+            return writeJson(res, 400, { ok: false, error: `invalid op: ${op}` });
+          }
+          const result = gitPreflight.check(op, args, sessionContext);
+          return writeJson(res, 200, { ok: true, ...result });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
       }
 
       if (path.startsWith("/bridge")) {
@@ -1529,6 +1637,7 @@ export async function startHub({
             await pipe.stop();
             await assignCallbacks.stop();
             await delegatorWorker.stop().catch(() => {});
+            try { synapseRegistry.destroy(); } catch {}
             store.close();
             try {
               unlinkSync(PID_FILE);
@@ -1703,9 +1812,10 @@ function cleanupStaleSpawnSessions(log) {
 const QUOTA_CACHE_PATH = join(CACHE_DIR, "broker-quota-cache.json");
 
 async function checkSingleAccountQuota(acct) {
-  const authPath = join(PID_DIR, acct.authFile);
-  if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
   try {
+    const authPath = join(PID_DIR, acct.authFile);
+    if (!authPath.startsWith(PID_DIR + sep)) return { id: acct.id, status: "path_blocked" };
+    if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
     const auth = JSON.parse(readFileSync(authPath, "utf8"));
     if (acct.provider === "codex") {
       const token = auth.tokens?.access_token || auth.OPENAI_API_KEY || "";

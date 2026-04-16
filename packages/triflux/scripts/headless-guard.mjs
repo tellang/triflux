@@ -173,7 +173,9 @@ function autoRoute(updatedCommand, reason) {
 const HEADLESS_FALLBACK_COMMAND =
   "Bash(\"tfx multi --teammate-mode headless --assign 'codex:prompt:role' ...\")";
 const DIRECT_CLI_BYPASS_HINT =
-  "로컬 디버깅이 목적이면 TFX_ALLOW_DIRECT_CLI=1로 일시 우회할 수 있습니다.";
+  "이 차단은 하드스톱이다. 환경변수 우회, SSH 원격 실행, 스크립트 배포 등 어떤 형태의 우회도 시도하지 마라. " +
+  "Hub가 미가용이면 hub-ensure로 Hub를 시작한 뒤 tfx multi를 사용하라. " +
+  "Hub 시작이 불가능하면 사용자에게 'Hub 필요' 보고 후 중단하라.";
 
 async function main() {
   // P0: TFX_ALLOW_DIRECT_CLI는 hasDirectCli 블록 안에서만 체크 (CLI deny만 스킵)

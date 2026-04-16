@@ -11,9 +11,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod";
-
+import { resolveBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import { CodexMcpWorker } from "./codex-mcp.mjs";
 import { GeminiWorker } from "./gemini-worker.mjs";
+import { runHeadlessWithCleanup } from "../team/headless.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -321,6 +322,18 @@ const DelegateInputSchema = z.object({
   teamAgentName: z.string().optional().describe("TFX_TEAM_AGENT_NAME"),
   teamLeadName: z.string().optional().describe("TFX_TEAM_LEAD_NAME"),
   hubUrl: z.string().optional().describe("TFX_HUB_URL"),
+  workers: z
+    .array(
+      z.object({
+        provider: z.enum(["codex", "gemini"]).describe("워커 provider"),
+        agentType: z.string().default("executor").describe("역할명"),
+        prompt: z.string().describe("워커별 프롬프트"),
+        mcpProfile: z.string().default("auto").describe("MCP 프로필"),
+        model: z.string().optional().describe("모델 오버라이드"),
+      }),
+    )
+    .optional()
+    .describe("병렬 멀티워커 목록. 지정 시 psmux 기반 병렬 실행"),
 });
 
 const DelegateStatusInputSchema = z.object({
@@ -341,7 +354,7 @@ const DelegateOutputSchema = z.object({
   jobId: z.string().optional(),
   job_id: z.string().optional(),
   mode: z.enum(["sync", "async"]).optional(),
-  status: z.enum(["running", "completed", "failed"]).optional(),
+  status: z.enum(["running", "completed", "failed", "partial"]).optional(),
   error: z.string().optional(),
   providerRequested: z.string().optional(),
   providerResolved: z.string().nullable().optional(),
@@ -357,6 +370,20 @@ const DelegateOutputSchema = z.object({
   threadId: z.string().nullable().optional(),
   sessionKey: z.string().nullable().optional(),
   conversationOpen: z.boolean().optional(),
+  workerResults: z
+    .array(
+      z.object({
+        cli: z.string(),
+        role: z.string().optional(),
+        paneName: z.string(),
+        matched: z.boolean(),
+        exitCode: z.number().nullable(),
+        output: z.string(),
+      }),
+    )
+    .optional()
+    .describe("멀티워커 개별 결과"),
+  sessionName: z.string().optional().describe("psmux 세션명"),
 });
 
 function isTeamRouteRequested(args) {
@@ -440,7 +467,7 @@ export class DelegatorMcpWorker {
       options.bashCommand ||
       this.env.TFX_DELEGATOR_BASH_COMMAND ||
       this.env.BASH_BIN ||
-      "bash";
+      resolveBashExecutable();
 
     this.codexWorker = new CodexMcpWorker({
       command:
@@ -791,6 +818,23 @@ export class DelegatorMcpWorker {
       "위임 실행을 시작합니다.",
     );
 
+    // 멀티워커 분기: workers 배열이 있으면 headless psmux 병렬 실행
+    if (Array.isArray(args.workers) && args.workers.length > 0) {
+      try {
+        const result = await this._executeMultiWorker(args, extra);
+        await emitProgress(extra, DIRECT_PROGRESS_DONE, 100, "위임이 완료되었습니다.");
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return createErrorPayload(message, {
+          mode: "sync",
+          providerRequested: "multi",
+          agentType: args.agentType,
+          transport: "headless-psmux",
+        });
+      }
+    }
+
     const runViaRoute = this._shouldUseRoute(args);
 
     try {
@@ -812,6 +856,90 @@ export class DelegatorMcpWorker {
         providerRequested: args.provider,
         agentType: args.agentType,
         transport: runViaRoute ? "route-script" : `${args.provider}-worker`,
+      });
+    }
+  }
+
+  async _executeMultiWorker(args, extra) {
+    await emitProgress(
+      extra,
+      DIRECT_PROGRESS_START,
+      100,
+      "멀티워커 psmux 병렬 실행을 시작합니다.",
+    );
+
+    // workers 배열을 headless assignments 형식으로 변환
+    const assignments = args.workers.map((w) => {
+      // provider를 CLI 이름으로 매핑 (codex/gemini 그대로)
+      const cli = w.provider;
+      const role = w.agentType || "executor";
+      // buildDirectPrompt와 동일한 context 처리
+      const prompt = withContext(String(w.prompt || ""), args.contextFile);
+      return { cli, prompt, role };
+    });
+
+    // 타임아웃: 워커 중 가장 긴 타임아웃 사용
+    const maxTimeoutSec = Math.max(
+      ...args.workers.map((w) =>
+        Math.ceil(resolveTimeoutMs(w.agentType || "executor", args.timeoutMs) / 1000),
+      ),
+      300,
+    );
+
+    try {
+      const { results, sessionName } = await runHeadlessWithCleanup(assignments, {
+        sessionPrefix: "dlg",
+        timeoutSec: maxTimeoutSec,
+        layout: assignments.length <= 2 ? "even-horizontal" : "2x2",
+        progressive: true,
+        dashboard: true,
+        dashboardLayout: "single",
+      });
+
+      await emitProgress(
+        extra,
+        DIRECT_PROGRESS_DONE,
+        100,
+        `멀티워커 실행 완료: ${results.length}개 워커`,
+      );
+
+      // 전체 성공 판단: 모든 워커가 matched && exitCode === 0
+      const allOk = results.every((r) => r.matched && r.exitCode === 0);
+      // 개별 출력을 합산
+      const combinedOutput = results
+        .map(
+          (r, i) =>
+            `=== Worker ${i + 1} (${r.cli}/${assignments[i].role}) ===\n${r.output || "(no output)"}`,
+        )
+        .join("\n\n");
+
+      return {
+        ok: allOk,
+        mode: "sync",
+        status: allOk ? "completed" : "partial",
+        providerRequested: "multi",
+        providerResolved: "multi",
+        agentType: args.agentType || "executor",
+        transport: "headless-psmux",
+        exitCode: allOk ? 0 : 1,
+        output: combinedOutput,
+        workerResults: results.map((r) => ({
+          cli: r.cli,
+          role: r.role || "",
+          paneName: r.paneName,
+          matched: r.matched,
+          exitCode: r.exitCode,
+          output: r.output || "",
+        })),
+        sessionName,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return createErrorPayload(message, {
+        mode: "sync",
+        providerRequested: "multi",
+        agentType: args.agentType || "executor",
+        transport: "headless-psmux",
       });
     }
   }
