@@ -121,4 +121,15 @@ describe("buildSpawnSpec", () => {
     });
     assert.deepEqual(calls, ["C:/tools/gemini.exe", "C:/tools/gemini.cmd"]);
   });
+
+  it("Windows에서 확장자 탐색이 전부 실패하면 원래 command를 그대로 반환한다", () => {
+    setPlatform("win32");
+    mockExistsSync(() => false);
+
+    assert.deepEqual(buildSpawnSpec("C:/tools/gemini", ["--help"]), {
+      command: "C:/tools/gemini",
+      args: ["--help"],
+      shell: false,
+    });
+  });
 });

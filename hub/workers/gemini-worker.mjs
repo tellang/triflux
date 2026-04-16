@@ -173,8 +173,6 @@ function buildGeminiErrorInfo(error, attempts) {
 /**
  * Gemini stream-json 래퍼
  */
-export { quoteWindowsCmdArg, buildSpawnSpec };
-
 export class GeminiWorker {
   type = "gemini";
 
@@ -460,3 +458,6 @@ export class GeminiWorker {
     }
   }
 }
+
+/** @visibleForTesting — 테스트 전용 export. 외부 소비 금지. */
+export { quoteWindowsCmdArg, buildSpawnSpec };
