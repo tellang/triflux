@@ -323,7 +323,8 @@ function parsePaneDetails(output) {
       const parts = line.split("\t");
       // tmux는 마지막 필드가 빈 문자열이면 trailing tab을 생략할 수 있음 (4개 필드)
       // psmux는 항상 5개 필드를 반환
-      const hasPaneIndex = parts.length >= 4 && /^\d+$/.test(parts[0]);
+      // paneId 패턴(session:N.N)이 parts[2]에 있으면 pane_index 포함 형식
+      const hasPaneIndex = parts.length >= 4 && /\S+:\d+\.\d+$/.test(parts[2]);
       const [
         paneIndexText = "",
         title = "",
@@ -609,7 +610,11 @@ export function createPsmuxSession(sessionName, opts = {}) {
 
   const panes = collectSessionPanes(sessionName).slice(0, limitedPaneCount);
   panes.forEach((pane, index) => {
-    psmuxExec(["select-pane", "-t", pane, "-T", toPaneTitle(index)]);
+    try {
+      psmuxExec(["select-pane", "-t", pane, "-T", toPaneTitle(index)]);
+    } catch {
+      // tmux 2.6 미만: select-pane -T 미지원 — pane title 없이 계속 진행
+    }
   });
 
   // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout 깨짐 방지:
@@ -662,7 +667,7 @@ function collectPanePids(sessionName) {
 function killProcessTree(pid) {
   if (!pid) return;
   if (!IS_WINDOWS) {
-    // macOS/Linux: 재귀적 자식 수집 → SIGTERM → SIGKILL 에스컬레이션
+    // macOS/Linux: BFS로 전체 자손 수집 → SIGTERM → SIGKILL 에스컬레이션
     const collectChildren = (parentPid) => {
       try {
         return childProcess.execFileSync("pgrep", ["-P", String(parentPid)], {
@@ -670,9 +675,19 @@ function killProcessTree(pid) {
         }).trim().split("\n").filter(Boolean).map(Number);
       } catch { return []; }
     };
-    const children = collectChildren(pid);
-    const grandchildren = children.flatMap(collectChildren);
-    const allDesc = [...new Set([...grandchildren, ...children])];
+    const allDesc = [];
+    const queue = [pid];
+    const seen = new Set([pid]);
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      for (const child of collectChildren(cur)) {
+        if (!seen.has(child)) {
+          seen.add(child);
+          allDesc.push(child);
+          queue.push(child);
+        }
+      }
+    }
     // SIGTERM 먼저
     for (const c of allDesc) { try { process.kill(c, "SIGTERM"); } catch {} }
     try { process.kill(pid, "SIGTERM"); } catch {}
@@ -718,7 +733,7 @@ function killOrphanPipeHelpers(sessionName) {
     // macOS/Linux: 세션별 스코핑으로 고아 pipe-pane 헬퍼 종료
     const safeSessionUnix = sanitizePathPart(sessionName);
     try {
-      const pids = childProcess.execFileSync("pgrep", ["-f", `pipe-pane-capture.*${safeSessionUnix}`], {
+      const pids = childProcess.execFileSync("pgrep", ["-f", `pipe-pane-capture.*[/ ]${safeSessionUnix}([ /]|$)`], {
         encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
       }).trim();
       if (pids) {
@@ -771,7 +786,7 @@ function killOrphanMcpProcesses(sessionName) {
       }
     } catch {}
     try {
-      const pids = childProcess.execFileSync("pgrep", ["-f", `mcp.*${safeSessionUnix}`], {
+      const pids = childProcess.execFileSync("pgrep", ["-f", `mcp.*[/ ]${safeSessionUnix}([ /]|$)`], {
         encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
       }).trim();
       if (pids) {
@@ -1467,7 +1482,11 @@ export function spawnWorker(sessionName, workerName, cmd) {
       "#{session_name}:#{window_index}.#{pane_index}",
       shellCmd,
     ]);
-    psmuxExec(["select-pane", "-t", paneTarget, "-T", workerName]);
+    try {
+      psmuxExec(["select-pane", "-t", paneTarget, "-T", workerName]);
+    } catch {
+      // tmux 2.6 미만: select-pane -T 미지원 — 무시
+    }
     return { paneId: paneTarget, workerName };
   } catch (err) {
     throw new Error(
