@@ -540,11 +540,12 @@ export function createPsmuxSession(sessionName, opts = {}) {
     "55",
   ];
   // Windows: psmux 기본 셸이 cmd.exe일 수 있으므로 PowerShell 강제
-  if (PWSH_BIN) newSessionArgs.push(PWSH_BIN, "-NoLogo", "-NoProfile");
+  // macOS/Linux: 기본 셸 사용 (PowerShell 플래그 불필요)
+  if (PWSH_BIN && IS_WINDOWS) newSessionArgs.push(PWSH_BIN, "-NoLogo", "-NoProfile");
   const leadPane = psmuxExec(newSessionArgs);
 
-  // split-window로 생성되는 pane도 동일 셸 사용
-  if (PWSH_BIN) {
+  // split-window로 생성되는 pane도 동일 셸 사용 (Windows: PowerShell 강제)
+  if (PWSH_BIN && IS_WINDOWS) {
     try {
       psmuxExec([
         "set-option",
