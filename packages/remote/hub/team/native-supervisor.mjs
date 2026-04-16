@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import {
   ensureBashScriptExecution,
   resolveBashExecutable,
-} from "../lib/bash-path.mjs";
+} from "@triflux/core/hub/lib/bash-path.mjs";
 import { verifySlimWrapperRouteExecution } from "./native.mjs";
 import { forceCleanupTeam } from "./nativeProxy.mjs";
 

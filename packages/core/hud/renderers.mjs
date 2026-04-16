@@ -389,7 +389,8 @@ export function getClaudeRows(
   }
 
   if (currentTier === "minimal") {
-    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}`;
+    const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
+    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${staleTag}`;
     const right = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
     return [{ prefix, left: quotaSection, right }];
   }

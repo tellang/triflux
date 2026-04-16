@@ -29,19 +29,40 @@ import {
   wcswidth,
 } from "./ansi.mjs";
 import { resolveAttachCommand } from "./session.mjs";
+import {
+  clamp,
+  cliColor,
+  countStatuses,
+  FALLBACK_COLUMNS,
+  FALLBACK_ROWS,
+  formatTokens,
+  loadVersion,
+  normalizeWorkerState as coreNormalizeWorkerState,
+  runtimeStatus,
+  sanitizeFiles,
+  sanitizeFindings,
+  sanitizeOneLine,
+  sanitizeTextBlock,
+  statusColor,
+  stripCodeBlocks,
+  wrapLine,
+  wrapText as wrapTextAll,
+} from "./tui-core.mjs";
+import {
+  createPanelResizer,
+  createSearchState,
+  createTokenTracker,
+  createVimMotion,
+} from "./tui-widgets.mjs";
+import {
+  createMetricsCollector,
+  createSynapseEventStream,
+  renderMetricsTier1,
+} from "./tui-synapse.mjs";
 
-// package.json에서 동적 로드 (실패 시 fallback)
-let VERSION = "7.x";
-try {
-  const { createRequire } = await import("node:module");
-  const require = createRequire(import.meta.url);
-  VERSION = require("../../package.json").version;
-} catch {
-  /* fallback */
-}
+const VERSION = await loadVersion();
 
-const FALLBACK_COLUMNS = 100;
-const FALLBACK_ROWS = 30;
+// FALLBACK_COLUMNS, FALLBACK_ROWS → tui-core.mjs에서 import
 const MIN_CARD_WIDTH = 28;
 const ATTACH_SESSION_NAME_PATTERN = /^[a-zA-Z0-9_.-]+$/u;
 const DEFAULT_ATTACH_TAB_TTL_MS = 30_000;
@@ -308,96 +329,7 @@ function _autoColumnCount(totalCols, workerCount) {
   return 1;
 }
 
-// ── 문자열 유틸 ──────────────────────────────────────────────────────────
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function stripCodeBlocks(text) {
-  return (
-    String(text || "")
-      .replace(/\r/g, "")
-      // fenced code blocks
-      .replace(/```[\s\S]*?(?:```|$)/g, "\n")
-      .replace(/^\s*```.*$/gm, "")
-      // indented code blocks (4+ spaces or tab at line start)
-      .replace(/^(?: {4}|\t).+$/gm, "")
-      // shell prompts: PS C:\...>, >, $
-      .replace(/^(?:PS\s+\S[^\n]*?>|>\s+|\$\s+)[^\n]*/gm, "")
-      .trim()
-  );
-}
-
-function sanitizeTextBlock(text, rawMode = false) {
-  const normalized = rawMode
-    ? String(text || "").replace(/\r/g, "")
-    : stripCodeBlocks(text);
-  return normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => line !== "--- HANDOFF ---")
-    .join("\n")
-    .trim();
-}
-
-function sanitizeOneLine(text, fallback = "") {
-  const normalized = sanitizeTextBlock(text).replace(/\s+/g, " ").trim();
-  return normalized || fallback;
-}
-
-function sanitizeFiles(files) {
-  if (!files) return [];
-  const raw = Array.isArray(files) ? files : String(files).split(",");
-  return raw.map((e) => sanitizeOneLine(e)).filter(Boolean);
-}
-
-function sanitizeFindings(findings) {
-  if (!findings) return [];
-  const raw = Array.isArray(findings)
-    ? findings
-    : sanitizeTextBlock(findings).split("\n");
-  return raw.map((e) => sanitizeOneLine(e)).filter(Boolean);
-}
-
-function normalizeTokens(tokens) {
-  if (tokens === null || tokens === undefined) return "";
-  if (typeof tokens === "number" && Number.isFinite(tokens)) return tokens;
-  const raw = sanitizeOneLine(tokens);
-  if (!raw) return "";
-  const match = raw.match(/(\d+(?:[.,]\d+)?\s*[kKmM]?)/);
-  return match ? match[1].replace(/\s+/g, "").toLowerCase() : raw;
-}
-
-function formatTokens(tokens) {
-  if (tokens === null || tokens === undefined || tokens === "") return "n/a";
-  if (typeof tokens === "number" && Number.isFinite(tokens)) {
-    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
-    if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
-    return `${tokens}`;
-  }
-  return String(tokens);
-}
-
-// ── 색상 헬퍼 ─────────────────────────────────────────────────────────────
-function cliColor(cli) {
-  if (cli === "gemini") return FG.gemini;
-  if (cli === "claude") return FG.claude;
-  if (cli === "codex") return FG.codex;
-  return FG.white;
-}
-
-function runtimeStatus(st) {
-  return st?.handoff?.status || st?.status || "pending";
-}
-
-function statusColor(status) {
-  if (status === "ok" || status === "completed") return MOCHA.ok;
-  if (status === "partial") return MOCHA.partial;
-  if (status === "failed") return MOCHA.fail;
-  if (status === "running" || status === "in_progress") return MOCHA.executing;
-  return FG.muted;
-}
+// 텍스트/상태/색상 유틸은 tui-core.mjs에서 import (위 참조)
 
 // ── MOCHA RGB (gradual fade 보간용) ──
 const MOCHA_RGB = {
@@ -505,37 +437,7 @@ function dedupeRole(role, name, cli) {
   return r;
 }
 
-// ── 텍스트 래핑 ──────────────────────────────────────────────────────────
-function wrapLine(text, width) {
-  const limit = Math.max(8, width);
-  const source = String(text || "").trim();
-  if (!source) return [""];
-  const words = source.split(/\s+/);
-  const lines = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (wcswidth(candidate) <= limit) {
-      current = candidate;
-      continue;
-    }
-    if (current) {
-      lines.push(current);
-      current = "";
-    }
-    if (wcswidth(word) <= limit) {
-      current = word;
-      continue;
-    }
-    let offset = 0;
-    while (offset < word.length) {
-      lines.push(word.slice(offset, offset + limit));
-      offset += limit;
-    }
-  }
-  if (current) lines.push(current);
-  return lines.length > 0 ? lines : [source.slice(0, limit)];
-}
+// wrapLine, wrapTextAll → tui-core.mjs에서 import
 
 function _wrapText(
   text,
@@ -555,16 +457,6 @@ function _wrapText(
     ...wrapped.slice(0, maxLines - 1),
     truncate(wrapped[wrapped.length - 1], width),
   ];
-}
-
-// 스크롤 없이 전체 줄 반환 (focus pane용)
-function wrapTextAll(text, width, rawMode = false) {
-  const input = sanitizeTextBlock(text, rawMode);
-  if (!input) return [];
-  return input
-    .split("\n")
-    .flatMap((line) => wrapLine(line, width))
-    .filter(Boolean);
 }
 
 // ── virtual row buffer ────────────────────────────────────────────────────
@@ -600,22 +492,7 @@ class RowBuffer {
   }
 }
 
-// ── 상태 집계 ─────────────────────────────────────────────────────────────
-function countStatuses(names, workers) {
-  let ok = 0,
-    partial = 0,
-    failed = 0,
-    running = 0;
-  for (const name of names) {
-    const st = workers.get(name);
-    const s = runtimeStatus(st);
-    if (s === "ok" || s === "completed") ok++;
-    else if (s === "partial") partial++;
-    else if (s === "failed") failed++;
-    else if (s === "running" || s === "in_progress") running++;
-  }
-  return { ok, partial, failed, running };
-}
+// countStatuses → tui-core.mjs에서 import
 
 // ── Tier1: 상단 고정 1행 ─────────────────────────────────────────────────
 function phaseColor(phase, time = Date.now()) {
@@ -646,7 +523,7 @@ function buildTier1(
     width,
   );
   const keysHint = color(
-    "Tab:focus • j/k/↑↓:nav • f:follow • r:raw • l:tab • n:recent • 1-9:jump",
+    "Tab:focus • j/k:nav • gg/G:jump • /:search • n/N:next • H/L:resize • f:follow • l:tab",
     MOCHA.subtext,
   );
   const hintWidth = wcswidth(stripAnsi(keysHint));
@@ -1000,7 +877,7 @@ function buildSummaryBar(
   );
   const keysLine = truncate(
     color(
-      "Tab:focus • j/k/↑↓:nav • f:follow • r:raw • l:tab • n:recent • 1-9:jump",
+      "Tab:focus • j/k:nav • gg/G:jump • /:search • n/N:next • H/L:resize • f:follow • l:tab",
       MOCHA.subtext,
     ),
     width - 4,
@@ -1067,87 +944,9 @@ function _joinColumns(blocks, gap = GRID_GAP) {
 
 // ── normalizeWorkerState ──────────────────────────────────────────────────
 function normalizeWorkerState(existing, state) {
-  const nextHandoff =
-    state.handoff === undefined
-      ? existing.handoff
-      : {
-          ...(existing.handoff || {}),
-          ...(state.handoff || {}),
-          verdict:
-            state.handoff?.verdict !== undefined
-              ? sanitizeOneLine(state.handoff.verdict)
-              : existing.handoff?.verdict,
-          files_changed:
-            state.handoff?.files_changed !== undefined
-              ? sanitizeFiles(state.handoff.files_changed)
-              : existing.handoff?.files_changed,
-          confidence:
-            state.handoff?.confidence !== undefined
-              ? sanitizeOneLine(state.handoff.confidence)
-              : existing.handoff?.confidence,
-          status:
-            state.handoff?.status !== undefined
-              ? sanitizeOneLine(state.handoff.status)
-              : existing.handoff?.status,
-        };
-
-  return {
-    ...existing,
-    ...state,
-    cli:
-      state.cli !== undefined
-        ? sanitizeOneLine(state.cli, existing.cli || "codex")
-        : existing.cli || "codex",
-    role:
-      state.role !== undefined ? sanitizeOneLine(state.role) : existing.role,
-    status:
-      state.status !== undefined
-        ? sanitizeOneLine(state.status, existing.status || "pending")
-        : existing.status || "pending",
-    snapshot:
-      state.snapshot !== undefined
-        ? sanitizeTextBlock(state.snapshot)
-        : existing.snapshot,
-    summary:
-      state.summary !== undefined
-        ? sanitizeTextBlock(state.summary)
-        : existing.summary,
-    detail:
-      state.detail !== undefined
-        ? sanitizeTextBlock(state.detail)
-        : existing.detail,
-    findings:
-      state.findings !== undefined
-        ? sanitizeFindings(state.findings)
-        : existing.findings,
-    files_changed:
-      state.files_changed !== undefined
-        ? sanitizeFiles(state.files_changed)
-        : existing.files_changed,
-    confidence:
-      state.confidence !== undefined
-        ? sanitizeOneLine(state.confidence)
-        : existing.confidence,
-    tokens:
-      state.tokens !== undefined
-        ? normalizeTokens(state.tokens)
-        : existing.tokens,
-    progress:
-      state.progress !== undefined
-        ? clamp(Number(state.progress) || 0, 0, 1)
-        : existing.progress,
-    handoff: nextHandoff,
-    _prevStatus:
-      state.status !== undefined &&
-      sanitizeOneLine(state.status) !== existing.status
-        ? existing.status
-        : existing._prevStatus,
-    _statusChangedAt:
-      state.status !== undefined &&
-      sanitizeOneLine(state.status) !== existing.status
-        ? Date.now()
-        : existing._statusChangedAt || 0,
-  };
+  return coreNormalizeWorkerState(existing || { cli: "codex", status: "pending" }, state, {
+    trackChanges: true,
+  });
 }
 
 // ── createLogDashboard ────────────────────────────────────────────────────
@@ -1207,6 +1006,25 @@ export function createLogDashboard(opts = {}) {
   let helpOverlay = false;
   let inputAttached = false;
   let rawModeEnabled = false;
+
+  // UX 위젯 (ISSUE-14)
+  const tokenTracker = createTokenTracker();
+  const searchState = createSearchState();
+  const vimMotion = createVimMotion();
+  const panelResizer = createPanelResizer({
+    initialRatio: focus === "detail" ? 0.2 : 0.3,
+  });
+
+  // Synapse 실시간 관제 (Phase 3)
+  const synapseMetrics = deps.synapseMetrics || createMetricsCollector();
+  const synapseStream = deps.synapseStream || createSynapseEventStream({
+    onEvent(event) {
+      synapseMetrics.ingest(event);
+    },
+    fetchImpl: deps.synapseFetch,
+  });
+  // Synapse 자동 시작 (옵트인: deps.enableSynapse)
+  if (deps.enableSynapse) synapseStream.start();
 
   // virtual row buffer (altScreen 전용)
   const rowBuf = new RowBuffer();
@@ -1298,6 +1116,7 @@ export function createLogDashboard(opts = {}) {
   function doClose() {
     if (closed) return;
     if (timer) clearInterval(timer);
+    synapseStream.stop();
     if (inputAttached && typeof input?.off === "function")
       input.off("data", handleInput);
     if (rawModeEnabled && typeof input?.setRawMode === "function")
@@ -1311,6 +1130,14 @@ export function createLogDashboard(opts = {}) {
   function handleInput(chunk) {
     const key = String(chunk);
     if (key === "\u0003") { doClose(); return; }
+
+    // 검색 모드 활성 중: 키를 검색 상태에 위임
+    if (searchState.active) {
+      if (searchState.handleKey(key)) {
+        render();
+        return;
+      }
+    }
 
     // Help overlay: 아무 키나 누르면 닫기
     if (helpOverlay) {
@@ -1379,20 +1206,33 @@ export function createLogDashboard(opts = {}) {
       }
     }
 
-    // g: focus pane 상단 점프
-    if (key === "g") {
-      followTail = false;
-      detailScrollOffset = 0;
+    // vim 모션: gg(첫 워커/상단), G(마지막 워커/하단)
+    const motion = vimMotion.handleKey(key);
+    if (motion === "gg") {
+      if (focus === "detail") {
+        followTail = false;
+        detailScrollOffset = 0;
+      } else {
+        const names = visibleWorkerNames();
+        if (names.length > 0) setSelectedWorker(names[0]);
+      }
       render();
       return;
     }
-    // G: focus pane 하단 점프
-    if (key === "G") {
-      followTail = true;
-      detailScrollOffset = 0;
+    if (motion === "G") {
+      if (focus === "detail") {
+        followTail = true;
+        detailScrollOffset = 0;
+      } else {
+        const names = visibleWorkerNames();
+        if (names.length > 0) setSelectedWorker(names[names.length - 1]);
+      }
       render();
       return;
     }
+    // 단일 g는 vimMotion 대기 → return하지 않음 (이전 동작 유지)
+    if (key === "g") return;
+
     // PgUp/PgDn: 페이지 단위 스크롤
     const pageSize = Math.max(1, Math.floor(getViewportRows() / 2));
     if (key === "\x1b[5~") {
@@ -1424,9 +1264,52 @@ export function createLogDashboard(opts = {}) {
       render();
       return;
     }
-    // n: 가장 최근 상태 변경 워커로 이동
+    // /: 검색 모드 활성화 (vim 패턴)
+    if (key === "/") {
+      searchState.activate();
+      render();
+      return;
+    }
+    // n: 검색 결과 다음 / 최근 변경 워커
     if (key === "n") {
-      selectMostRecentChangedWorker();
+      if (searchState.query) {
+        const names = visibleWorkerNames();
+        const idx = names.indexOf(selectedWorker);
+        const match = searchState.findMatch(names, idx, 1);
+        if (match >= 0) {
+          setSelectedWorker(names[match]);
+          render();
+        } else {
+          showFlash(`검색 결과 없음: ${searchState.query}`);
+        }
+      } else {
+        selectMostRecentChangedWorker();
+      }
+      return;
+    }
+    // N: 검색 결과 이전
+    if (key === "N") {
+      if (searchState.query) {
+        const names = visibleWorkerNames();
+        const idx = names.indexOf(selectedWorker);
+        const match = searchState.findMatch(names, idx, -1);
+        if (match >= 0) {
+          setSelectedWorker(names[match]);
+          render();
+        }
+      }
+      return;
+    }
+    // H: rail 축소 (패널 리사이즈)
+    if (key === "H") {
+      panelResizer.shrinkRail();
+      render();
+      return;
+    }
+    // L: rail 확대 (패널 리사이즈)
+    if (key === "L") {
+      panelResizer.expandRail();
+      render();
       return;
     }
     // h/?: 도움말 오버레이 토글
@@ -1576,6 +1459,16 @@ export function createLogDashboard(opts = {}) {
         truncate(` ${color("▸", MOCHA.green)} ${flashMessage}`, totalCols),
       );
     }
+    // Synapse 실시간 메트릭 (활성 시)
+    if (synapseStream.isRunning) {
+      const metricsSnap = synapseMetrics.snapshot();
+      tier1.push(truncate(renderMetricsTier1(metricsSnap, totalCols), totalCols));
+    }
+    // 검색 프롬프트 (/ 모드)
+    const searchPrompt = searchState.renderPrompt(totalCols);
+    if (searchPrompt) {
+      tier1.push(truncate(searchPrompt, totalCols));
+    }
 
     // 레이아웃 결정
     let effectiveLayout = layoutHint;
@@ -1614,13 +1507,11 @@ export function createLogDashboard(opts = {}) {
       return [...tier1, ...summaryBar, ...focusPane];
     }
 
-    // 좌우 분할: Left Rail (30%) | Right Focus (70%)
-    // 목업: Tier2 Left Rail + Tier3 Focus 나란히 렌더링
+    // 좌우 분할: Left Rail | Right Focus (H/L로 비율 조정 가능)
     const GAP = 1; // rail과 focus 사이 구분선
-    const railRatio = focus === "detail" ? 0.2 : 0.3;
     const railWidth = Math.max(
       MIN_CARD_WIDTH,
-      Math.floor(totalCols * railRatio),
+      Math.floor(totalCols * panelResizer.ratio),
     );
     const focusWidth = totalCols - railWidth - GAP;
     const bodyHeight = Math.max(6, totalRows - tier1.length - 1); // -1 for status bar
@@ -1777,6 +1668,8 @@ export function createLogDashboard(opts = {}) {
           ? existing._logSec
           : (explicitElapsed ?? nowElapsedSec());
       workers.set(paneName, merged);
+      // 토큰 히스토리 추적 (스파크라인용)
+      if (merged.tokens !== undefined) tokenTracker.record(paneName, merged.tokens);
       ensureSelectedWorker(visibleWorkerNames());
       // follow-tail: 새 데이터 → 자동 scroll 재계산
       if (followTail) detailScrollOffset = 0;
@@ -1853,6 +1746,17 @@ export function createLogDashboard(opts = {}) {
       const w = workers.get(name);
       if (!w) return false;
       return attachToSession(w);
+    },
+
+    // Synapse 관제 API
+    startSynapse() {
+      synapseStream.start();
+    },
+    stopSynapse() {
+      synapseStream.stop();
+    },
+    getSynapseMetrics() {
+      return synapseMetrics.snapshot();
     },
 
     close() {
