@@ -1273,11 +1273,6 @@ export async function autoAttachTerminal(
   workerCount = 2,
 ) {
   if (!process.env.WT_SESSION) return false;
-  try {
-    execSync("where wt.exe", { stdio: "ignore" });
-  } catch {
-    return false;
-  }
 
   const wt = createWtManager();
   wt.ensureWtProfile(workerCount);
@@ -1354,13 +1349,9 @@ export async function attachDashboardTab(
   dashboardSize = 0.4,
   dashboardAnchor = "window",
 ) {
-  try {
-    execSync("where wt.exe", { stdio: "ignore" });
-  } catch {
-    return false;
-  }
-
   const wt = createWtManager();
+  const envInfo = wt.getEnvironmentInfo?.() || {};
+  if (!envInfo.hasWindowsTerminal) return false;
   wt.ensureWtProfile(workerCount);
 
   try {
