@@ -11,7 +11,7 @@ import { IS_WINDOWS } from "../platform.mjs";
 
 const PSMUX_BIN = (() => {
   if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
-  // PATH에서 찾기
+  // PATH에서 psmux 찾기
   try {
     childProcess.execFileSync("psmux", ["-V"], {
       stdio: "ignore",
@@ -34,14 +34,26 @@ const PSMUX_BIN = (() => {
       if (existsSync(p)) return p;
     }
   }
+  // macOS/Linux: psmux 없으면 tmux로 fallback (psmux는 tmux 호환 클론)
+  if (!IS_WINDOWS) {
+    try {
+      childProcess.execFileSync("tmux", ["-V"], {
+        stdio: "ignore",
+        timeout: 2000,
+      });
+      return "tmux";
+    } catch {
+      /* tmux도 없음 */
+    }
+  }
   return "psmux"; // 최종 fallback — 원래대로
 })();
 const GIT_BASH =
   process.env.GIT_BASH_PATH || resolveGitBashExecutable() || "bash";
 
-/** Windows psmux 세션의 기본 셸을 PowerShell로 강제한다 (pwsh7 우선, ps5 fallback). */
+/** 세션의 기본 셸. Windows: PowerShell, macOS/Linux: $SHELL 또는 /bin/zsh */
 const PWSH_BIN = (() => {
-  if (!IS_WINDOWS) return "";
+  if (!IS_WINDOWS) return process.env.SHELL || "/bin/zsh";
   if (process.env.PSMUX_SHELL) return process.env.PSMUX_SHELL;
   // pwsh 7 우선
   try {
@@ -478,6 +490,11 @@ export function hasPsmux() {
   } catch {
     return false;
   }
+}
+
+/** PSMUX_BIN이 tmux로 fallback되었는지 여부 */
+export function isTmuxFallback() {
+  return PSMUX_BIN === "tmux";
 }
 
 /**
