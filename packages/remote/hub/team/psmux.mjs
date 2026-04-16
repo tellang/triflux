@@ -51,9 +51,9 @@ const PSMUX_BIN = (() => {
 const GIT_BASH =
   process.env.GIT_BASH_PATH || resolveGitBashExecutable() || "bash";
 
-/** 세션의 기본 셸. Windows: PowerShell, macOS/Linux: $SHELL 또는 /bin/zsh */
+/** Windows psmux 세션의 기본 셸을 PowerShell로 강제한다 (pwsh7 우선, ps5 fallback). */
 const PWSH_BIN = (() => {
-  if (!IS_WINDOWS) return process.env.SHELL || "/bin/zsh";
+  if (!IS_WINDOWS) return "";
   if (process.env.PSMUX_SHELL) return process.env.PSMUX_SHELL;
   // pwsh 7 우선
   try {
@@ -259,8 +259,9 @@ function ensureCaptureHelper() {
     writeFileSync(
       CAPTURE_HELPER_PATH,
       ["#!/bin/bash", 'mkdir -p "$(dirname "$1")" 2>/dev/null', 'exec tee -a "$1"', ""].join("\n"),
-      { encoding: "utf8", mode: 0o755 },
+      "utf8",
     );
+    chmodSync(CAPTURE_HELPER_PATH, 0o755);
   }
   return CAPTURE_HELPER_PATH;
 }
@@ -1193,7 +1194,7 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
     wrapped = `${chcpPrefix}try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
   } else {
     // macOS/Linux: bash 구문으로 완료 토큰 출력
-    wrapped = `(${safeCommand}; __ec=$?; echo "${COMPLETION_PREFIX}${token}:$__ec"; exit $__ec) || echo "${COMPLETION_PREFIX}${token}:1"`;
+    wrapped = `{ ${safeCommand}; __ec=$?; echo "${COMPLETION_PREFIX}${token}:$__ec"; }`;
   }
 
   sendLiteralToPane(pane.paneId, wrapped, true);
