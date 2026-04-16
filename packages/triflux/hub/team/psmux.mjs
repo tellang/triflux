@@ -320,7 +320,9 @@ function parsePaneDetails(output) {
     .filter(Boolean)
     .map((line) => {
       const parts = line.split("\t");
-      const hasPaneIndex = parts.length >= 5;
+      // tmux는 마지막 필드가 빈 문자열이면 trailing tab을 생략할 수 있음 (4개 필드)
+      // psmux는 항상 5개 필드를 반환
+      const hasPaneIndex = parts.length >= 4 && /^\d+$/.test(parts[0]);
       const [
         paneIndexText = "",
         title = "",
