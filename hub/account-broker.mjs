@@ -77,7 +77,7 @@ function persistState(stateMap) {
     }
     mkdirSync(AUTH_BASE_PATH, { recursive: true });
     writeFileSync(STATE_PERSIST_PATH, JSON.stringify({ ts: now, entries }));
-  } catch { /* best-effort */ }
+  } catch (err) { try { console.error("[account-broker] persistState failed:", err.message); } catch {} }
 }
 
 function loadPersistedState() {

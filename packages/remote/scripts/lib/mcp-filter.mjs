@@ -36,28 +36,12 @@ const PROFILE_DEFINITIONS = Object.freeze({
     }),
   }),
   executor: Object.freeze({
-    description: "구현 워커용. 문서/검색/브라우징 보조 MCP 허용",
-    allowedServers: Object.freeze([
-      "context7",
-      "playwright",
-      "brave-search",
-      "tavily",
-      "exa",
-    ]),
+    description: "구현 워커용. 문서 조회 전용 MCP만 허용 (검색/브라우징은 Codex stall 유발)",
+    allowedServers: Object.freeze(["context7"]),
     alwaysOnServers: Object.freeze(["context7"]),
-    maxSearchServers: 2,
+    maxSearchServers: 0,
     allowedToolsByServer: Object.freeze({
       context7: Object.freeze(["resolve-library-id", "query-docs"]),
-      "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
-      exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
-      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
-      playwright: Object.freeze([
-        "browser_navigate",
-        "browser_navigate_back",
-        "browser_snapshot",
-        "browser_take_screenshot",
-        "browser_wait_for",
-      ]),
     }),
   }),
   designer: Object.freeze({
@@ -768,6 +752,19 @@ function shellArray(name, values) {
   return `${name}=(${values.map((value) => shellEscape(value)).join(" ")})`;
 }
 
+export function toDelimited(policy) {
+  const RS = "\x1e";
+  return [
+    policy.requestedProfile,
+    policy.resolvedProfile,
+    policy.hint,
+    policy.geminiAllowedServers.join(","),
+    policy.codexConfigOverrides.flatMap((o) => ["-c", o]).join(","),
+    JSON.stringify(policy.codexConfig),
+    policy.resolvedPhase || "",
+  ].join(RS);
+}
+
 export function toShellExports(policy) {
   const lines = [
     `MCP_PROFILE_REQUESTED=${shellEscape(policy.requestedProfile)}`,
@@ -870,6 +867,10 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
   if (args.command === "shell") {
     process.stdout.write(`${toShellExports(policy)}\n`);
+    return;
+  }
+  if (args.command === "delimited") {
+    process.stdout.write(toDelimited(policy));
     return;
   }
 

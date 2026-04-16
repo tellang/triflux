@@ -557,6 +557,7 @@
     },
     {
       "id": "gstack-ship",
+      "disabled": true,
       "patterns": [
         {
           "source": "(?:배포해|PR\\s*만들|릴리스\\s*해|머지하고\\s*배포)",

@@ -1,8 +1,8 @@
 // hub/team/session.mjs — tmux/psmux/wt 세션 생명주기 관리
 // 의존성: child_process (Node.js 내장)만 사용
 import { execSync, spawnSync } from "node:child_process";
+import { resolveGitBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import { getEnvironment } from "@triflux/core/hub/lib/env-detect.mjs";
-import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
 import {
   attachPsmuxSession,
   capturePsmuxPane,

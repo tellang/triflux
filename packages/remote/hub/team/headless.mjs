@@ -5,7 +5,6 @@
 // 의존성: psmux.mjs (Node.js 내장 모듈만 사용)
 
 import { execSync } from "node:child_process";
-import { spawn } from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
@@ -19,10 +18,15 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { requestJson } from "@triflux/core/hub/bridge.mjs";
+import { getMaxSpawnPerSec } from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
 import { getBackend } from "./backend.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
-import { HANDOFF_INSTRUCTION_SHORT, processHandoff } from "./handoff.mjs";
+import {
+  formatHandoffForLead,
+  HANDOFF_INSTRUCTION_SHORT,
+  processHandoff,
+} from "./handoff.mjs";
 import {
   capturePsmuxPane,
   createPsmuxSession,
@@ -33,6 +37,11 @@ import {
   startCapture,
   waitForCompletion,
 } from "./psmux.mjs";
+import {
+  buildSynapseTaskSummary,
+  registerSynapseSession,
+  unregisterSynapseSession,
+} from "./synapse-http.mjs";
 import { createLogDashboard } from "./tui.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
@@ -119,6 +128,18 @@ export async function deregisterHeadlessWorkers(
   );
 }
 
+function registerHeadlessSynapseWorker(workerId, prompt) {
+  registerSynapseSession({
+    sessionId: workerId,
+    host: "local",
+    taskSummary: buildSynapseTaskSummary(prompt),
+  });
+}
+
+function unregisterHeadlessSynapseWorker(workerId) {
+  unregisterSynapseSession(workerId);
+}
+
 /** MCP 프로필별 프롬프트 힌트 (tfx-route.sh resolve_mcp_policy의 경량 미러) */
 const MCP_PROFILE_HINTS = {
   implement:
@@ -140,6 +161,16 @@ const MCP_PROFILE_HINTS = {
  * @param {string} [opts.contextFile] — 컨텍스트 파일 경로 (최대 32KB, UTF-8 안전 절단)
  * @returns {string} PowerShell 명령
  */
+// ── Dashboard attach args for WT ────────────────────────────────
+
+export function buildDashboardAttachArgs(sessionName, layout, workerCount, anchor = "window") {
+  const safeName = String(sessionName).replace(/[^a-zA-Z0-9_-]/g, "");
+  const base = anchor === "tab"
+    ? ["-w", "0", "nt"]
+    : ["-w", "new"];
+  return [...base, "--session", safeName, "--layout", layout, "--workers", String(workerCount)];
+}
+
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveCliType(cli);
@@ -300,7 +331,7 @@ export function createStallMonitor(paneId, resultFile, config, deps = {}) {
  * @param {string} [opts.command] — re-dispatch용 원본 명령
  * @param {string} [opts.token] — completion token
  * @param {(snapshot: string) => void} [opts.onPoll] — 폴링 콜백
- * @returns {Promise<{ matched: boolean, exitCode: number|null, restarts: number, stallDetected: boolean }>}
+ * @returns {Promise<{ matched: boolean, exitCode: number|null, restarts: number, stallDetected: boolean, paneId: string, token?: string, logPath?: string|null }>}
  */
 export async function waitForCompletionWithStallDetect(
   sessionName,
@@ -330,19 +361,23 @@ export async function waitForCompletionWithStallDetect(
   const _startCapture = deps.startCapture || startCapture;
 
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const completionPatterns = [
-    token
-      ? `${esc("__TRIFLUX_DONE__:")}${esc(token)}:(\\d+)`
-      : `${esc("__TRIFLUX_DONE__:")}\\S+:(\\d+)`,
-    token
-      ? `${esc("TFX_DONE_")}${esc(token)}:(\\d+)`
-      : `${esc("TFX_DONE_")}\\S+:(\\d+)`,
-  ];
-  const completionRe = new RegExp(completionPatterns.join("|"), "m");
+  const buildCompletionRegex = (activeToken) => {
+    const completionPatterns = [
+      activeToken
+        ? `${esc("__TRIFLUX_DONE__:")}${esc(activeToken)}:(\\d+)`
+        : `${esc("__TRIFLUX_DONE__:")}\\S+:(\\d+)`,
+      activeToken
+        ? `${esc("TFX_DONE_")}${esc(activeToken)}:(\\d+)`
+        : `${esc("TFX_DONE_")}\\S+:(\\d+)`,
+    ];
+    return new RegExp(completionPatterns.join("|"), "m");
+  };
 
   let restarts = 0;
   let currentPaneId = paneId;
   let stallDetected = false;
+  let currentToken = token;
+  let currentLogPath = opts.logPath || null;
 
   while (true) {
     let lastOutput = "";
@@ -369,6 +404,9 @@ export async function waitForCompletionWithStallDetect(
           restarts,
           stallDetected,
           timedOut: true,
+          paneId: currentPaneId,
+          token: currentToken,
+          logPath: currentLogPath,
         };
       }
 
@@ -383,6 +421,7 @@ export async function waitForCompletionWithStallDetect(
       }
 
       // 2) completion 토큰 감지
+      const completionRe = buildCompletionRegex(currentToken);
       const completionMatch = completionRe.exec(currentOutput);
       if (completionMatch) {
         return {
@@ -394,6 +433,9 @@ export async function waitForCompletionWithStallDetect(
           restarts,
           stallDetected,
           timedOut: false,
+          paneId: currentPaneId,
+          token: currentToken,
+          logPath: currentLogPath,
         };
       }
 
@@ -426,6 +468,9 @@ export async function waitForCompletionWithStallDetect(
               restarts,
               stallDetected,
               timedOut: false,
+              paneId: currentPaneId,
+              token: currentToken,
+              logPath: currentLogPath,
             };
           }
         } catch {
@@ -464,8 +509,10 @@ export async function waitForCompletionWithStallDetect(
             "#{session_name}:#{window_index}.#{pane_index}",
           ]);
           _startCapture(sessionName, newPaneId);
-          _dispatch(sessionName, newPaneId, command);
-          currentPaneId = newPaneId;
+          const redispatch = _dispatch(sessionName, newPaneId, command);
+          currentPaneId = redispatch?.paneId || newPaneId;
+          if (redispatch?.token) currentToken = redispatch.token;
+          if (redispatch?.logPath) currentLogPath = redispatch.logPath;
         }
 
         restarts++;
@@ -548,12 +595,17 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       assignment.cli,
       assignment.prompt,
       resultFile,
-      { mcp: assignment.mcp, model: assignment.model },
+      {
+        mcp: assignment.mcp,
+        model: assignment.model,
+        cwd: assignment.cwd || assignment.workdir,
+      },
     );
     startCapture(sessionName, newPaneId);
     // pane 간 pipe-pane EBUSY 방지 — 이벤트 루프 해방하며 순차 대기
     if (i > 0) await new Promise((r) => setTimeout(r, 300));
     const dispatch = dispatchCommand(sessionName, newPaneId, cmd);
+    registerHeadlessSynapseWorker(workerId, assignment.prompt);
 
     if (safeProgress)
       safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
@@ -567,6 +619,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       role: assignment.role,
       command: cmd,
       workerId,
+      cwd: assignment.cwd || assignment.workdir,
     });
   }
 
@@ -618,7 +671,11 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         assignment.cli,
         assignment.prompt,
         resultFile,
-        { mcp: assignment.mcp, model: assignment.model },
+        {
+          mcp: assignment.mcp,
+          model: assignment.model,
+          cwd: assignment.cwd || assignment.workdir,
+        },
       );
       const scriptDir = join(RESULT_DIR, sessionName);
       await registerHeadlessWorker(sessionName, i, assignment.cli);
@@ -626,6 +683,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         scriptDir,
         scriptName: paneName,
       });
+      registerHeadlessSynapseWorker(workerId, assignment.prompt);
 
       // P1 fix: 비-progressive에서는 pane 리네임 금지 — 캡처 로그 경로가 타이틀 기반이므로
       // 리네임하면 waitForCompletion이 "codex (role).log"를 찾지만 실제는 "worker-N.log"로 불일치
@@ -642,6 +700,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         role: assignment.role,
         command: cmd,
         workerId,
+        cwd: assignment.cwd || assignment.workdir,
       };
     }),
   );
@@ -721,6 +780,9 @@ async function awaitAll(
               onPoll: stallPollCb,
             },
           );
+          if (stallResult.paneId) d.paneId = stallResult.paneId;
+          if (stallResult.token) d.token = stallResult.token;
+          if (stallResult.logPath) d.logPath = stallResult.logPath;
           completion = {
             matched: stallResult.matched,
             exitCode: stallResult.exitCode,
@@ -754,6 +816,7 @@ async function awaitAll(
       const output = completion.matched
         ? readResult(d.resultFile, d.paneId)
         : "";
+      unregisterHeadlessSynapseWorker(d.workerId);
 
       if (safeProgress) {
         safeProgress({
@@ -779,28 +842,27 @@ async function awaitAll(
  * @returns {Array}
  */
 async function collectResults(sessionName, results) {
-  // B3 fix: git diff를 루프 밖에서 1회만 실행 (워커 수만큼 중복 방지)
-  let gitDiffFiles;
-  try {
-    const diffOut = execSync("git diff --name-only HEAD", {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    gitDiffFiles = diffOut.trim().split("\n").filter(Boolean);
-  } catch {
-    /* git 미설치 또는 non-repo — 무시 */
-  }
-
   // handoff 파이프라인: parse → validate → format (각 워커 결과에 적용)
   return await Promise.all(
     results.map(async ({ d, completion, output }) => {
+      const workerGitDiffFiles = collectGitDiffFiles(d.cwd);
       const handoffResult = processHandoff(output, {
         exitCode: completion.exitCode,
         resultFile: d.resultFile,
         cli: d.cli,
-        gitDiffFiles,
+        gitDiffFiles: workerGitDiffFiles,
       });
+      if (
+        completion.exitCode === 0 &&
+        workerGitDiffFiles.length === 0 &&
+        handoffResult.handoff?.lead_action === "accept"
+      ) {
+        handoffResult.handoff = {
+          ...handoffResult.handoff,
+          lead_action: "needs_read",
+        };
+        handoffResult.formatted = formatHandoffForLead(handoffResult.handoff);
+      }
       const status =
         handoffResult.handoff?.status ||
         (completion.matched && completion.exitCode === 0
@@ -823,6 +885,7 @@ async function collectResults(sessionName, results) {
         exitCode: completion.exitCode,
         output,
         resultFile: d.resultFile,
+        workerGitDiffFiles,
         sessionDead: completion.sessionDead || false,
         handoff: handoffResult.handoff,
         handoffFormatted: handoffResult.formatted,
@@ -831,6 +894,20 @@ async function collectResults(sessionName, results) {
       };
     }),
   );
+}
+
+function collectGitDiffFiles(cwd) {
+  try {
+    const diffOut = execSync("git diff --name-only HEAD", {
+      cwd,
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return diffOut.trim().split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -860,6 +937,35 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   } = opts;
 
   mkdirSync(RESULT_DIR, { recursive: true });
+
+  // Hub version skew pre-flight (fail-open, best-effort)
+  requestJson("/status", { method: "GET", timeoutMs: 500 })
+    .then((status) => {
+      const hubRate = status?.spawn_trace?.max_per_sec;
+      const localRate = getMaxSpawnPerSec();
+      if (typeof hubRate === "number" && hubRate !== localRate) {
+        console.warn(
+          `[headless] Hub version skew detected: hub spawn rate=${hubRate}/s, local=${localRate}/s. Restart hub to sync.`,
+        );
+      }
+    })
+    .catch(() => {});
+
+  // Synapse: 세션 registration (fire-and-forget, hub 미응답 시 무시)
+  const synapseIds = assignments.map((_, i) => `${sessionName}-worker-${i + 1}`);
+  for (let i = 0; i < assignments.length; i++) {
+    const a = assignments[i];
+    requestJson("/synapse/register", {
+      method: "POST",
+      body: {
+        sessionId: synapseIds[i],
+        host: "local",
+        taskSummary: String(a.prompt || "").slice(0, 100),
+        isRemote: false,
+      },
+      timeoutMs: 1000,
+    }).catch(() => {});
+  }
 
   // in-process TUI: dashboard=true이고 stdout이 TTY일 때 직접 구동
   let tui = null;
@@ -918,9 +1024,25 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     }
   }
 
+  // Synapse heartbeat: progress 이벤트마다 해당 워커의 세션 갱신
+  const feedSynapse = (event) => {
+    if (!event?.paneName) return;
+    const match = event.paneName.match(/worker-(\d+)/);
+    if (!match) return;
+    const idx = parseInt(match[1], 10) - 1;
+    const sid = synapseIds[idx];
+    if (!sid) return;
+    requestJson("/synapse/heartbeat", {
+      method: "POST",
+      body: { sessionId: sid, partial: { taskSummary: (event.snapshot || "").slice(0, 100) } },
+      timeoutMs: 500,
+    }).catch(() => {});
+  };
+
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
     feedTui(event);
+    feedSynapse(event);
     if (onProgress) {
       try {
         onProgress(event);
@@ -981,6 +1103,15 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     tui.close();
   }
 
+  // Synapse: 세션 unregister (fire-and-forget)
+  for (const sid of synapseIds) {
+    requestJson("/synapse/unregister", {
+      method: "POST",
+      body: { sessionId: sid },
+      timeoutMs: 1000,
+    }).catch(() => {});
+  }
+
   return { sessionName, results: collected };
 }
 
@@ -999,6 +1130,11 @@ export async function runHeadlessWithCleanup(assignments, opts = {}) {
   try {
     return await runHeadless(sessionName, assignments, runOpts);
   } finally {
+    for (let index = 0; index < assignments.length; index++) {
+      unregisterHeadlessSynapseWorker(
+        getHeadlessWorkerAgentId(sessionName, index),
+      );
+    }
     await deregisterHeadlessWorkers(sessionName, assignments.length);
     try {
       killPsmuxSession(sessionName);
@@ -1056,7 +1192,7 @@ export function applyTrifluxTheme(sessionName) {
  * WT 기본 프로필의 폰트 크기를 읽는다.
  * @returns {number} 기본 폰트 크기 (못 읽으면 12)
  */
-function getWtDefaultFontSize() {
+function _getWtDefaultFontSize() {
   const settingsPaths = [
     join(
       process.env.LOCALAPPDATA || "",
@@ -1096,7 +1232,7 @@ function getWtDefaultFontSize() {
  * @param {string} filePath — 대상 파일 경로
  * @param {string} data — 쓸 내용
  */
-function atomicWriteSync(filePath, data) {
+function _atomicWriteSync(filePath, data) {
   const tmpPath = `${filePath}.${process.pid}.tmp`;
   try {
     writeFileSync(tmpPath, data, "utf8");
@@ -1131,7 +1267,11 @@ function buildAttachTitle(sessionName, suffix = "") {
  * @param {number} [workerCount=2]
  * @returns {Promise<boolean>} 성공 여부
  */
-export async function autoAttachTerminal(sessionName, opts = {}, workerCount = 2) {
+export async function autoAttachTerminal(
+  sessionName,
+  opts = {},
+  workerCount = 2,
+) {
   if (!process.env.WT_SESSION) return false;
   try {
     execSync("where wt.exe", { stdio: "ignore" });
@@ -1145,8 +1285,14 @@ export async function autoAttachTerminal(sessionName, opts = {}, workerCount = 2
   try {
     const safeSession = sanitizeSessionName(sessionName);
     if (workerCount >= 5) {
-      const resolvedLayout = resolveDashboardLayout(opts.dashboardLayout || "single", workerCount);
-      const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
+      const resolvedLayout = resolveDashboardLayout(
+        opts.dashboardLayout || "single",
+        workerCount,
+      );
+      const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(
+        /\\/g,
+        "/",
+      );
       await wt.createTab({
         title: buildAttachTitle(safeSession, "dashboard"),
         profile: "triflux",
@@ -1220,7 +1366,10 @@ export async function attachDashboardTab(
   try {
     const safeSession = sanitizeSessionName(sessionName);
     const resolvedLayout = resolveDashboardLayout(dashboardLayout, workerCount);
-    const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(/\\/g, "/");
+    const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(
+      /\\/g,
+      "/",
+    );
 
     await wt.createTab({
       title: buildAttachTitle(safeSession, "dashboard"),
@@ -1232,7 +1381,6 @@ export async function attachDashboardTab(
     return false;
   }
 }
-
 
 /**
  * 모든 워커 pane의 현재 스냅샷을 수집한다.
@@ -1415,6 +1563,11 @@ export async function runHeadlessInteractive(
     kill() {
       if (this._killed) return;
       this._killed = true;
+      for (let index = 0; index < assignments.length; index++) {
+        unregisterHeadlessSynapseWorker(
+          getHeadlessWorkerAgentId(sessionName, index),
+        );
+      }
       void deregisterHeadlessWorkers(sessionName, assignments.length);
       try {
         killPsmuxSession(sessionName);

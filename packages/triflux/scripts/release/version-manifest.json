@@ -1,0 +1,26 @@
+{
+  "canonicalFile": "package.json",
+  "canonicalPath": ["version"],
+  "targets": [
+    {
+      "file": "package.json",
+      "paths": [["version"]]
+    },
+    {
+      "file": "packages/triflux/package.json",
+      "paths": [["version"]]
+    },
+    {
+      "file": ".claude-plugin/plugin.json",
+      "paths": [["version"]]
+    },
+    {
+      "file": ".claude-plugin/marketplace.json",
+      "paths": [["version"], ["plugins", 0, "version"]]
+    },
+    {
+      "file": "package-lock.json",
+      "paths": [["version"], ["packages", "", "version"]]
+    }
+  ]
+}
