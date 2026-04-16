@@ -152,7 +152,7 @@ export function createSynapseRegistry(opts = {}) {
         const staled = { ...current, status: "stale" };
         sessions.set(sessionId, staled);
         schedulePersist();
-        setImmediate(() => notifyStale(staled));
+        setImmediate(() => { if (!destroyed) notifyStale(staled); });
       }
     }, intervalFor(session));
 

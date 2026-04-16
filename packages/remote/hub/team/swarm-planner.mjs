@@ -111,7 +111,8 @@ export function parseShards(content) {
         current.depends = value
           .split(/,\s*/)
           .map((d) => d.trim())
-          .filter(Boolean);
+          .filter(Boolean)
+          .filter((d) => !["none", "-", "—", "n/a", "없음"].includes(d.toLowerCase()));
         break;
       case "critical":
         current.critical = /^(true|yes|1)$/i.test(value);

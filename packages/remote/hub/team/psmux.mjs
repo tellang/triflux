@@ -4,10 +4,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
+import { resolveGitBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import childProcess from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
-import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
-import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
 
 const PSMUX_BIN = (() => {
   if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
@@ -1265,6 +1265,7 @@ export async function waitForPattern(
 
 /**
  * 완료 토큰이 찍힐 때까지 대기하고 exit code를 파싱한다.
+ * NOTE: 주 채널은 headless.waitForCompletionWithStallDetect이며, 본 함수는 fallback 채널이다.
  * @param {string} sessionName
  * @param {string} paneNameOrTarget
  * @param {string} token

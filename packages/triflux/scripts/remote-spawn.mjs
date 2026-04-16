@@ -591,7 +591,7 @@ function rewritePromptPaths(prompt, stagedFiles) {
   return rewritten;
 }
 
-function spawnLocalFallback(args, claudePath, prompt) {
+async function spawnLocalFallback(args, claudePath, prompt) {
   const dir = args.dir ? resolve(args.dir) : process.cwd();
 
   if (!IS_WINDOWS_LOCAL) {
@@ -626,7 +626,7 @@ function spawnLocalFallback(args, claudePath, prompt) {
   }
 }
 
-function spawnRemoteFallback(args, promptContext) {
+async function spawnRemoteFallback(args, promptContext) {
   const { host } = args;
   if (!host) {
     console.error("--host required for remote spawn");
@@ -999,7 +999,7 @@ function listSpawnSessions() {
   }
 }
 
-function openAttachTab(sessionName, title = null) {
+async function openAttachTab(sessionName, title = null) {
   if (IS_WINDOWS_LOCAL) {
     const wtArgs = title
     try {

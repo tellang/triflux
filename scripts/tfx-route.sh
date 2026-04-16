@@ -64,6 +64,7 @@ track_worker_pid() {
 }
 
 cleanup_workers() {
+  _codex_config_swap "restore" 2>/dev/null || true
   deregister_agent 2>/dev/null || true
   [[ ! -f "$_PID_TRACK" ]] && return
   while IFS= read -r pid; do
@@ -1203,7 +1204,7 @@ resolve_mcp_policy() {
   fi
 
   local -a cmd=(
-    "$NODE_BIN" "$filter_script" shell
+    "$NODE_BIN" "$filter_script" delimited
     "--agent" "$AGENT_TYPE"
     "--profile" "$MCP_PROFILE"
     "--available" "$available_servers"
@@ -1213,13 +1214,18 @@ resolve_mcp_policy() {
   [[ -n "$TFX_SEARCH_TOOL" ]] && cmd+=("--search-tool" "$TFX_SEARCH_TOOL")
   [[ -n "$TFX_WORKER_INDEX" ]] && cmd+=("--worker-index" "$TFX_WORKER_INDEX")
 
-  local shell_exports
-  if ! shell_exports="$("${cmd[@]}")"; then
+  local _raw
+  if ! _raw="$("${cmd[@]}")"; then
     echo "[tfx-route] ERROR: MCP 정책 계산 실패" >&2
     return 1
   fi
 
-  eval "$shell_exports"
+  local _gemini_servers _codex_flags _phase
+  IFS=$'\x1e' read -r MCP_PROFILE_REQUESTED MCP_RESOLVED_PROFILE MCP_HINT \
+    _gemini_servers _codex_flags CODEX_CONFIG_JSON _phase <<< "$_raw"
+  IFS=',' read -r -a GEMINI_ALLOWED_SERVERS <<< "$_gemini_servers"
+  IFS=',' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
+  [[ -n "$_phase" ]] && MCP_PIPELINE_PHASE="$_phase"
 }
 
 get_claude_model() {
