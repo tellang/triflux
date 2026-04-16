@@ -414,6 +414,15 @@ describe("killPsmuxSession cleanup", () => {
       const argv = Array.isArray(args) ? [...args] : [];
       calls.push({ file, args: argv });
 
+      // pgrep/pkill 호출 처리 (macOS 프로세스 트리 kill)
+      if (file === "pgrep") {
+        if (argv[0] === "-P") return "9001\n9002"; // 자식 PID mock
+        if (argv[0] === "-f") return "9003"; // 패턴 매칭 PID mock
+        return "";
+      }
+      if (file === "pkill") return "";
+      if (file === "sleep") return "";
+
       switch (argv[0]) {
         case "-V":
           return "psmux 3.3.0";
@@ -467,7 +476,7 @@ describe("killPsmuxSession cleanup", () => {
       `pipe-pane 해제가 2회 이상 호출되어야 함 (실제: ${pipePaneCalls.length})`,
     );
 
-    // 프로세스 트리 종료 호출 확인 (Windows: taskkill via execSync, macOS: pkill via execFileSync)
+    // 프로세스 트리 종료 호출 확인 (Windows: taskkill via execSync, macOS: pgrep+process.kill via execFileSync)
     const treeKillCalls = process.platform === "win32"
       ? calls.filter(
           (c) =>
@@ -476,10 +485,9 @@ describe("killPsmuxSession cleanup", () => {
             c.args[0].includes("taskkill"),
         )
       : calls.filter(
-          (c) => c.file === "pkill" || (c.file === "execFileSync" && c.args?.[0] === "pkill"),
+          (c) => c.file === "pgrep" && c.args?.[0] === "-P",
         );
-    // macOS에서는 pkill이 execFileSync("pkill", ["-P", pid])로 호출되므로 file이 "pkill"
-    const killLabel = process.platform === "win32" ? "taskkill" : "pkill";
+    const killLabel = process.platform === "win32" ? "taskkill" : "pgrep -P (tree kill)";
     assert.ok(
       treeKillCalls.length >= 1,
       `${killLabel}이 1회 이상 호출되어야 함 (실제: ${treeKillCalls.length})`,
@@ -525,7 +533,7 @@ describe("killPsmuxSession cleanup", () => {
     const firstTreeKillIdx = calls.findIndex(
       (c) => {
         const allArgs = [c.file, ...(c.args || [])].join(" ");
-        return allArgs.includes("taskkill") || allArgs.includes("pkill");
+        return allArgs.includes("taskkill") || allArgs.includes("pkill") || allArgs.includes("pgrep");
       },
     );
     assert.ok(

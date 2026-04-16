@@ -208,8 +208,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   // 플랫폼 분기: PowerShell은 Get-Content, bash/zsh는 cat
   const promptExpr = IS_WINDOWS
     ? `(Get-Content -Raw '${promptFile}')`
-    : `"$(cat '${promptFile}')"`;
-  const backendCommand = backend.buildArgs(promptExpr, resultFile, {
+    : `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;  const backendCommand = backend.buildArgs(promptExpr, resultFile, {
     ...opts,
     model,
   });

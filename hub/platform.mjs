@@ -174,16 +174,13 @@ export function killProcess(pid, options = {}) {
       return true;
     }
 
-    // macOS/Linux: tree 옵션이면 프로세스 그룹 kill 시도
+    // macOS/Linux: tree 옵션이면 pkill -P로 자식 프로세스 먼저 종료
     if (tree) {
       try {
-        process.kill(-numericPid, signal); // 프로세스 그룹 kill (negative PID)
-      } catch {
-        process.kill(numericPid, signal); // 그룹 kill 실패 시 단일 PID
-      }
-    } else {
-      process.kill(numericPid, signal);
+        execSync(`pkill -P ${numericPid}`, { stdio: "ignore", timeout: 3000 });
+      } catch { /* 자식 없으면 무시 */ }
     }
+    process.kill(numericPid, signal);
     return true;
   } catch {
     return false;
