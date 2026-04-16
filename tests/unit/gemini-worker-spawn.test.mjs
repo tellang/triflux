@@ -1,24 +1,124 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { afterEach, describe, it } from "node:test";
 
-// quoteWindowsCmdArg와 buildSpawnSpec은 module-private이므로
-// gemini-worker.mjs에서 export하지 않는다.
-// 대신 GeminiWorker의 실제 동작을 간접 테스트한다.
-// 단, quoteWindowsCmdArg 단위 테스트를 위해 별도 추출이 필요하면
-// worker-utils.mjs로 이동을 고려한다.
+import {
+  buildSpawnSpec,
+  quoteWindowsCmdArg,
+} from "../../hub/workers/gemini-worker.mjs";
 
-describe("gemini-worker Windows spawn", () => {
-  it("GeminiWorker가 import 가능하다", async () => {
-    const mod = await import("../../hub/workers/gemini-worker.mjs");
-    assert.ok(mod.GeminiWorker, "GeminiWorker 클래스가 export되어야 한다");
+const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+const originalExistsSync = fs.existsSync;
+
+function setPlatform(value) {
+  Object.defineProperty(process, "platform", {
+    configurable: true,
+    value,
+  });
+}
+
+function mockExistsSync(implementation) {
+  fs.existsSync = implementation;
+  syncBuiltinESMExports();
+}
+
+afterEach(() => {
+  Object.defineProperty(process, "platform", originalPlatform);
+  fs.existsSync = originalExistsSync;
+  syncBuiltinESMExports();
+});
+
+describe("quoteWindowsCmdArg", () => {
+  it("빈 문자열은 큰따옴표 쌍으로 감싼다", () => {
+    assert.equal(quoteWindowsCmdArg(""), '""');
   });
 
-  it("GeminiWorker 인스턴스를 생성할 수 있다", async () => {
-    const { GeminiWorker } = await import(
-      "../../hub/workers/gemini-worker.mjs"
+  it("특수문자가 없으면 그대로 반환한다", () => {
+    assert.equal(quoteWindowsCmdArg("gemini-cli"), "gemini-cli");
+  });
+
+  it("퍼센트 문자를 이스케이프한다", () => {
+    assert.equal(quoteWindowsCmdArg("%PATH%"), '"%%PATH%%"');
+  });
+
+  it("공백이 있으면 큰따옴표로 감싼다", () => {
+    assert.equal(quoteWindowsCmdArg("hello world"), '"hello world"');
+  });
+
+  it("줄바꿈은 공백으로 치환한다", () => {
+    assert.equal(quoteWindowsCmdArg("hello\nworld"), '"hello world"');
+  });
+
+  it("큰따옴표를 이스케이프한다", () => {
+    assert.equal(quoteWindowsCmdArg('say"hi'), '"say\\"hi"');
+  });
+});
+
+describe("buildSpawnSpec", () => {
+  it("non-Windows에서는 command/args를 그대로 유지한다", () => {
+    setPlatform("linux");
+
+    assert.deepEqual(buildSpawnSpec("gemini", ["--version"]), {
+      command: "gemini",
+      args: ["--version"],
+      shell: false,
+    });
+  });
+
+  it("Windows에서 .exe는 직접 실행한다", () => {
+    setPlatform("win32");
+
+    assert.deepEqual(buildSpawnSpec("C:/tools/gemini.exe", ["--version"]), {
+      command: "C:/tools/gemini.exe",
+      args: ["--version"],
+      shell: false,
+    });
+  });
+
+  it("Windows에서 .cmd는 cmd.exe를 경유한다", () => {
+    setPlatform("win32");
+
+    assert.deepEqual(
+      buildSpawnSpec("C:/tools/gemini.cmd", ["--prompt", "hello world"]),
+      {
+        command: "cmd.exe",
+        args: [
+          "/d",
+          "/s",
+          "/v:off",
+          "/c",
+          'C:/tools/gemini.cmd --prompt "hello world"',
+        ],
+        shell: false,
+      },
     );
-    const worker = new GeminiWorker({ command: "gemini" });
-    assert.ok(worker, "인스턴스 생성 가능");
-    assert.equal(worker.state, "idle");
+  });
+
+  it("Windows에서 .bat도 cmd.exe를 경유한다", () => {
+    setPlatform("win32");
+
+    assert.deepEqual(buildSpawnSpec("C:/tools/gemini.bat", ["--flag"]), {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/v:off", "/c", "C:/tools/gemini.bat --flag"],
+      shell: false,
+    });
+  });
+
+  it("Windows에서 확장자가 없으면 .exe/.cmd/.bat 순서로 탐색한다", () => {
+    setPlatform("win32");
+    const calls = [];
+
+    mockExistsSync((candidate) => {
+      calls.push(candidate);
+      return candidate === "C:/tools/gemini.cmd";
+    });
+
+    assert.deepEqual(buildSpawnSpec("C:/tools/gemini", ["--help"]), {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/v:off", "/c", "C:/tools/gemini.cmd --help"],
+      shell: false,
+    });
+    assert.deepEqual(calls, ["C:/tools/gemini.exe", "C:/tools/gemini.cmd"]);
   });
 });
