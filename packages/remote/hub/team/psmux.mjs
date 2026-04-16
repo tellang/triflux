@@ -4,10 +4,10 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import childProcess from "@triflux/core/hub/lib/spawn-trace.mjs";
-import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
 import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
+import childProcess from "../lib/spawn-trace.mjs";
+import { IS_WINDOWS } from "../platform.mjs";
 
 const PSMUX_BIN = (() => {
   if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
@@ -246,10 +246,9 @@ function ensureCaptureHelper() {
     // macOS/Linux: bash 스크립트로 pipe-pane 캡처
     writeFileSync(
       CAPTURE_HELPER_PATH,
-      ["#!/bin/bash", 'exec tee -a "$1"', ""].join("\n"),
-      "utf8",
+      ["#!/bin/bash", 'mkdir -p "$(dirname "$1")" 2>/dev/null', 'exec tee -a "$1"', ""].join("\n"),
+      { encoding: "utf8", mode: 0o755 },
     );
-    chmodSync(CAPTURE_HELPER_PATH, 0o755);
   }
   return CAPTURE_HELPER_PATH;
 }
@@ -642,13 +641,24 @@ function collectPanePids(sessionName) {
 function killProcessTree(pid) {
   if (!pid) return;
   if (!IS_WINDOWS) {
-    // macOS/Linux: 자식 프로세스 먼저 종료 후 부모 종료
-    try {
-      childProcess.execFileSync("pkill", ["-P", String(pid)], { timeout: 5000, stdio: "ignore" });
-    } catch { /* 자식 없으면 에러 — 무시 */ }
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch { /* 이미 죽었으면 무시 */ }
+    // macOS/Linux: 재귀적 자식 수집 → SIGTERM → SIGKILL 에스컬레이션
+    const collectChildren = (parentPid) => {
+      try {
+        return childProcess.execFileSync("pgrep", ["-P", String(parentPid)], {
+          encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
+        }).trim().split("\n").filter(Boolean).map(Number);
+      } catch { return []; }
+    };
+    const children = collectChildren(pid);
+    const grandchildren = children.flatMap(collectChildren);
+    const allDesc = [...new Set([...grandchildren, ...children])];
+    // SIGTERM 먼저
+    for (const c of allDesc) { try { process.kill(c, "SIGTERM"); } catch {} }
+    try { process.kill(pid, "SIGTERM"); } catch {}
+    // 1초 대기 후 생존자 SIGKILL
+    try { childProcess.execFileSync("sleep", ["1"], { timeout: 2000, stdio: "ignore" }); } catch {}
+    for (const c of allDesc) { try { process.kill(c, "SIGKILL"); } catch {} }
+    try { process.kill(pid, "SIGKILL"); } catch {}
     return;
   }
   try {
@@ -684,10 +694,18 @@ function disableAllPipeCaptures(sessionName, paneIds) {
  */
 function killOrphanPipeHelpers(sessionName) {
   if (!IS_WINDOWS) {
-    // macOS/Linux: pkill -f로 고아 pipe-pane 헬퍼 종료
+    // macOS/Linux: 세션별 스코핑으로 고아 pipe-pane 헬퍼 종료
+    const safeSessionUnix = sanitizePathPart(sessionName);
     try {
-      childProcess.execFileSync("pkill", ["-f", "pipe-pane-capture"], { timeout: 5000, stdio: "ignore" });
-    } catch { /* 프로세스 없으면 무시 */ }
+      const pids = childProcess.execFileSync("pgrep", ["-f", `pipe-pane-capture.*${safeSessionUnix}`], {
+        encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (pids) {
+        for (const p of pids.split("\n").filter(Boolean)) {
+          try { process.kill(Number(p), "SIGTERM"); } catch {}
+        }
+      }
+    } catch { /* 프로세스 없으면 pgrep exit 1 — 무시 */ }
     return;
   }
   const safeSession = sanitizePathPart(sessionName);
@@ -721,10 +739,28 @@ function killOrphanPipeHelpers(sessionName) {
  */
 function killOrphanMcpProcesses(sessionName) {
   if (!IS_WINDOWS) {
-    // macOS/Linux: pkill -f로 고아 MCP 서버 프로세스 종료
+    // macOS/Linux: 세션별 스코핑 + Hub PID 보호
+    const safeSessionUnix = sanitizePathPart(sessionName);
+    let hubPidUnix = 0;
     try {
-      childProcess.execFileSync("pkill", ["-f", "mcp-server"], { timeout: 5000, stdio: "ignore" });
-    } catch { /* 프로세스 없으면 무시 */ }
+      const hubPidFile = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
+      if (existsSync(hubPidFile)) {
+        const info = JSON.parse(readFileSync(hubPidFile, "utf8"));
+        hubPidUnix = Number(info.pid) || 0;
+      }
+    } catch {}
+    try {
+      const pids = childProcess.execFileSync("pgrep", ["-f", `mcp.*${safeSessionUnix}`], {
+        encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+      if (pids) {
+        for (const p of pids.split("\n").filter(Boolean)) {
+          const numPid = Number(p);
+          if (numPid === hubPidUnix || numPid <= 0) continue;
+          try { process.kill(numPid, "SIGTERM"); } catch {}
+        }
+      }
+    } catch {}
     return;
   }
   const safeSession = sanitizePathPart(sessionName);
@@ -1137,7 +1173,7 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
     wrapped = `${chcpPrefix}try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
   } else {
     // macOS/Linux: bash 구문으로 완료 토큰 출력
-    wrapped = `(${safeCommand}; echo "${COMPLETION_PREFIX}${token}:$?") || echo "${COMPLETION_PREFIX}${token}:1"`;
+    wrapped = `(${safeCommand}; __ec=$?; echo "${COMPLETION_PREFIX}${token}:$__ec"; exit $__ec) || echo "${COMPLETION_PREFIX}${token}:1"`;
   }
 
   sendLiteralToPane(pane.paneId, wrapped, true);
@@ -1305,6 +1341,7 @@ export async function waitForPattern(
 
 /**
  * 완료 토큰이 찍힐 때까지 대기하고 exit code를 파싱한다.
+ * NOTE: 주 채널은 headless.waitForCompletionWithStallDetect이며, 본 함수는 fallback 채널이다.
  * @param {string} sessionName
  * @param {string} paneNameOrTarget
  * @param {string} token
