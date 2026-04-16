@@ -9,6 +9,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FACTORY_CANDIDATES = [
   resolve(SCRIPT_DIR, "../hub/workers/factory.mjs"),
   resolve(SCRIPT_DIR, "./hub/workers/factory.mjs"),
+  resolve(process.cwd(), "hub/workers/factory.mjs"),
 ];
 
 // MCP transport 실패 시 tfx-route.sh가 exec fallback을 수행할 수 있도록

@@ -215,18 +215,19 @@ describe("parseRouteCommand", () => {
 });
 
 describe("headless-guard decision matrix (runtime)", () => {
-  it("psmux 설치 + direct codex exec는 deny되고 fallback+bypass 힌트를 함께 제공한다", () => {
+  it("psmux 설치 + direct codex exec는 deny되고 하드스톱 메시지를 제공한다", () => {
     const result = runGuardWithBashCommand("codex exec 'hello'");
     assert.equal(result.status, 2);
     assert.match(result.stderr, /--teammate-mode headless/u);
-    assert.match(result.stderr, /TFX_ALLOW_DIRECT_CLI=1/u);
+    assert.match(result.stderr, /하드스톱/u);
+    assert.match(result.stderr, /우회도 시도하지 마라/u);
   });
 
-  it("psmux 설치 + direct gemini --prompt는 deny되고 fallback+bypass 힌트를 함께 제공한다", () => {
+  it("psmux 설치 + direct gemini --prompt는 deny되고 하드스톱 메시지를 제공한다", () => {
     const result = runGuardWithBashCommand("gemini --prompt 'hello'");
     assert.equal(result.status, 2);
     assert.match(result.stderr, /--teammate-mode headless/u);
-    assert.match(result.stderr, /TFX_ALLOW_DIRECT_CLI=1/u);
+    assert.match(result.stderr, /하드스톱/u);
   });
 
   it("TFX_ALLOW_DIRECT_CLI=1이면 direct CLI deny를 우회한다", () => {

@@ -752,6 +752,19 @@ function shellArray(name, values) {
   return `${name}=(${values.map((value) => shellEscape(value)).join(" ")})`;
 }
 
+export function toDelimited(policy) {
+  const RS = "\x1e";
+  return [
+    policy.requestedProfile,
+    policy.resolvedProfile,
+    policy.hint,
+    policy.geminiAllowedServers.join(","),
+    policy.codexConfigOverrides.flatMap((o) => ["-c", o]).join(","),
+    JSON.stringify(policy.codexConfig),
+    policy.resolvedPhase || "",
+  ].join(RS);
+}
+
 export function toShellExports(policy) {
   const lines = [
     `MCP_PROFILE_REQUESTED=${shellEscape(policy.requestedProfile)}`,
@@ -854,6 +867,10 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
   if (args.command === "shell") {
     process.stdout.write(`${toShellExports(policy)}\n`);
+    return;
+  }
+  if (args.command === "delimited") {
+    process.stdout.write(toDelimited(policy));
     return;
   }
 
