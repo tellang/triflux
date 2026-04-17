@@ -2504,6 +2504,86 @@ async function cmdDoctor(options = {}) {
       addDoctorCheck(report, { name: "stale-skills", status: "ok" });
     }
 
+    // 8.5 Dev 의존성 (npm link 환경에서 node_modules 누락 감지 — Issue #101)
+    section("Dev Dependencies");
+    try {
+      const pkgJsonPath = join(PKG_ROOT, "package.json");
+      const nodeModulesPath = join(PKG_ROOT, "node_modules");
+      const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+      const runtimeDeps = Object.keys(pkgJson.dependencies || {});
+      const isLinkedDev = (() => {
+        try {
+          const stat = statSync(nodeModulesPath);
+          return stat.isDirectory();
+        } catch {
+          return false;
+        }
+      })();
+      const missingDeps = [];
+      if (!isLinkedDev) {
+        // node_modules 전체 누락 — 전역 install 또는 미압축 릴리즈일 가능성
+        if (runtimeDeps.length > 0) {
+          missingDeps.push(...runtimeDeps);
+        }
+      } else {
+        for (const dep of runtimeDeps) {
+          const depPath = join(nodeModulesPath, ...dep.split("/"));
+          if (!existsSync(depPath)) missingDeps.push(dep);
+        }
+      }
+      if (missingDeps.length === 0) {
+        ok(
+          `의존성 ${runtimeDeps.length}개 설치됨${
+            isLinkedDev ? ` ${DIM}(dev)${RESET}` : ""
+          }`,
+        );
+        addDoctorCheck(report, {
+          name: "dev-deps",
+          status: "ok",
+          total: runtimeDeps.length,
+          linkedDev: isLinkedDev,
+        });
+      } else {
+        const head = missingDeps.slice(0, 5);
+        const tail = missingDeps.length > 5 ? `+${missingDeps.length - 5}` : "";
+        warn(
+          `누락 의존성 ${missingDeps.length}개: ${head.join(", ")}${tail ? ` ${tail}` : ""}`,
+        );
+        info("수정: tfx doctor --fix 또는 `npm install` (PKG_ROOT 내)");
+        addDoctorCheck(report, {
+          name: "dev-deps",
+          status: "missing",
+          missing: missingDeps,
+          linkedDev: isLinkedDev,
+          pkgRoot: PKG_ROOT,
+          fix: "tfx doctor --fix",
+        });
+        issues++;
+        if (fix) {
+          // --fix 모드: npm install 실행 (Windows 호환 shell: true)
+          info(`npm install 실행 중 (${PKG_ROOT})...`);
+          try {
+            const { execFileSync } = await import("node:child_process");
+            execFileSync("npm", ["install", "--no-audit", "--no-fund"], {
+              cwd: PKG_ROOT,
+              stdio: "inherit",
+              shell: process.platform === "win32",
+            });
+            ok("npm install 완료 — 의존성 복구됨");
+          } catch (err) {
+            warn(`npm install 실패: ${err?.message || err}`);
+          }
+        }
+      }
+    } catch (err) {
+      warn(`dev 의존성 체크 실패: ${err?.message || err}`);
+      addDoctorCheck(report, {
+        name: "dev-deps",
+        status: "error",
+        error: String(err?.message || err),
+      });
+    }
+
     // 9. 플러그인 등록
     section("Plugin");
     const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
