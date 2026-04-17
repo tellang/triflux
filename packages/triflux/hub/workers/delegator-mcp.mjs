@@ -14,6 +14,7 @@ import * as z from "zod";
 import { resolveBashExecutable } from "../lib/bash-path.mjs";
 import { CodexMcpWorker } from "./codex-mcp.mjs";
 import { GeminiWorker } from "./gemini-worker.mjs";
+import { whichCommand } from "../platform.mjs";
 import { runHeadlessWithCleanup } from "../team/headless.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -748,8 +749,10 @@ export class DelegatorMcpWorker {
   }
 
   _createGeminiWorker() {
+    const resolved =
+      whichCommand(this.geminiCommand) || this.geminiCommand;
     return new GeminiWorker({
-      command: this.geminiCommand,
+      command: resolved,
       commandArgs: this.geminiCommandArgs,
       cwd: this.cwd,
       env: this.env,

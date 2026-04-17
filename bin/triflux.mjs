@@ -525,6 +525,10 @@ function whichInShell(cmd, shell) {
       ["-c", `source ~/.bashrc 2>/dev/null && command -v "${cmd}" 2>/dev/null`],
     ],
     cmd: ["cmd", ["/c", "where", cmd]],
+    zsh: [
+      "zsh",
+      ["-c", `source ~/.zshrc 2>/dev/null && command -v "${cmd}" 2>/dev/null`],
+    ],
     pwsh: [
       "pwsh",
       [
@@ -852,7 +856,7 @@ function getClaudeRoutingSyncSummary(results) {
 
 function checkCliCrossShell(cmd, installHint) {
   const shells =
-    process.platform === "win32" ? ["bash", "cmd", "pwsh"] : ["bash"];
+    process.platform === "win32" ? ["bash", "cmd", "pwsh"] : ["bash", "zsh"];
   let anyFound = false;
   let bashMissing = false;
   const shellResults = [];
@@ -1183,6 +1187,21 @@ function cmdSetup(options = {}) {
       }
     } catch {
       /* psmux 서버 미실행 — 무시 */
+    }
+  }
+
+  // ── tmux 기본 셸 확인 (macOS/Linux) ──
+  if (process.platform !== "win32" && which("tmux")) {
+    try {
+      const shellOut = execSync("tmux show-options -g default-shell 2>/dev/null", {
+        encoding: "utf8",
+        timeout: 3000,
+      }).trim();
+      if (shellOut) {
+        ok(`tmux 기본 셸: ${shellOut.split(/\s+/).pop() || "확인 완료"}`);
+      }
+    } catch {
+      /* tmux 서버 미실행 — 무시 */
     }
   }
 

@@ -458,3 +458,6 @@ export class GeminiWorker {
     }
   }
 }
+
+/** @visibleForTesting — 테스트 전용 export. 외부 소비 금지. */
+export { quoteWindowsCmdArg, buildSpawnSpec };

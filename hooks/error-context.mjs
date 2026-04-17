@@ -16,7 +16,7 @@ const ERROR_HINTS = [
   },
   {
     pattern: /EACCES.*permission denied/i,
-    hint: "권한 부족. Windows에서는 관리자 권한, Unix에서는 chmod/sudo를 확인하세요.",
+    hint: "권한 부족. macOS/Linux에서는 chmod/sudo, Windows에서는 관리자 권한을 확인하세요.",
   },
   {
     pattern: /EADDRINUSE/i,
