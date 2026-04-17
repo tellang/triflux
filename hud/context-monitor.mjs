@@ -23,14 +23,25 @@ const MODEL_HINT_1M_PREFIXES = [
   "claude-sonnet-4-6",
 ];
 
+function normalizeModelId(modelId) {
+  if (!modelId) return "";
+  return String(modelId).toLowerCase();
+}
+
 function resolveModelLimit(modelId) {
-  if (!modelId) return DEFAULT_CONTEXT_LIMIT;
-  const id = String(modelId).toLowerCase();
+  const id = normalizeModelId(modelId);
+  if (!id) return DEFAULT_CONTEXT_LIMIT;
   if (id.includes("[1m]")) return MILLION_CONTEXT_LIMIT;
   for (const prefix of MODEL_HINT_1M_PREFIXES) {
     if (id.startsWith(prefix)) return MILLION_CONTEXT_LIMIT;
   }
   return DEFAULT_CONTEXT_LIMIT;
+}
+
+export function shouldSuppressInfoOnlyContextStatus(modelId) {
+  const id = normalizeModelId(modelId);
+  if (!id) return false;
+  return id.startsWith("claude-opus-4-7") || id.includes("[1m]");
 }
 
 const WARNING_LEVELS = Object.freeze({
@@ -268,7 +279,8 @@ export function deriveContextLimit(stdin) {
 export function buildContextUsageView(stdin, snapshot = null) {
   const stdinUsage = getStdinContextUsage(stdin);
   const monitor = snapshot || readContextMonitorSnapshot();
-  const modelHintLimit = resolveModelLimit(stdin?.model?.id ?? stdin?.model);
+  const modelId = stdin?.model?.id ?? stdin?.model;
+  const modelHintLimit = resolveModelLimit(modelId);
   const fallbackLimit = Math.max(
     modelHintLimit,
     Number(monitor?.limitTokens || 0),
@@ -281,15 +293,19 @@ export function buildContextUsageView(stdin, snapshot = null) {
     (limitTokens > 0 ? clampPercent((usedTokens / limitTokens) * 100) : 0);
 
   const warning = classifyContextThreshold(percent);
+  const showInfoOnlyStatus = !(
+    warning.level === "info" && shouldSuppressInfoOnlyContextStatus(modelId)
+  );
   return {
     usedTokens,
     limitTokens,
     percent,
     display: formatContextUsage(usedTokens, limitTokens, percent),
     warningLevel: warning.level,
-    warningMessage: warning.message,
-    warningTag:
-      warning.level === "warn"
+    warningMessage: showInfoOnlyStatus ? warning.message : "",
+    warningTag: !showInfoOnlyStatus
+      ? ""
+      : warning.level === "warn"
         ? "⚠ 압축 권장"
         : warning.level === "critical"
           ? "‼ 분할 권장"
