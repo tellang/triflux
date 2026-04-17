@@ -2,6 +2,25 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.9.32] - 2026-04-18
+
+### Fixed
+- **[#88]** HUD DEFAULT_CONTEXT_LIMIT 200K 하드코드 → 모델 ID 기반 동적 한도 추정. Opus 4.7/4.6 + Sonnet 4.6 = 1M, [1m] suffix opt-in 지원. stale monitor cache 는 `Math.max(modelHint, cache)` 로 자동 오버라이드
+- **[#76]** PreToolUse hook 2배 발화 제거. `scripts/setup.mjs` 가 orchestrator `*` entry 존재 시 직접 등록된 `Bash|Agent` / `Skill` entry 를 prune, orchestrator 부재 시에만 legacy ADD 유지
+- **[#77]** Opus 4.7 native progress update 와 triflux info-only 상태 태그 중복 제거. `shouldSuppressInfoOnlyContextStatus` helper 로 60~80% info 구간만 suppress, 80% warn/critical 은 유지
+- **[#67]** Windows Codex/MCP 고아 프로세스 누락 수정. `taskkill /T` 로 자식 프로세스 트리 일괄 정리, `hub/team/process-cleanup.mjs` 에 Windows 분기 추가
+
+### Added
+- **[#81]** Codex `~/.codex/config.toml` `[mcp_servers.tfx-hub]` url 자동 동기화. `syncCodexHubUrl` TOML 전용 함수 신설, hub/server + hub-ensure 성공 경로에서 JSON/TOML 동시 호출
+- **[#90]** `hooks/safety-guard.mjs` 에 Codex PRD 실행 중 main 브랜치 직접 commit 방지 가드. `CODEX_PRD_ACTIVE=1` 환경변수 + branch=main 에서 `git commit` 감지 시 exit 2
+
+### Tests
+- **[#91]** hub-quota 비차단성 + 실패 로깅 구조 회귀 테스트 (`tests/integration/hub-quota-nonblocking.test.mjs`)
+- **[#92]** synapse debounce (burst 합치기 + 경계 순서 보존) + persist 복구 (정상 flush + 손상 파일 clean start) 회귀 테스트
+
+### Chore
+- packages/core, packages/triflux, packages/remote 미러 2회 재동기화 (v10.9.31 수정 + 이번 shards 후)
+
 ## [10.9.28] - 2026-04-15
 
 ### Fixed
