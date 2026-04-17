@@ -351,4 +351,21 @@ describe("JsonRpcStdioClient", () => {
       `expected JsonRpcProtocolError, got: ${errors.map((e) => e.name).join(",")}`,
     );
   });
+
+  it("stdin 'error' rejects pending requests with JsonRpcTransportError", async () => {
+    const errors = [];
+    const { client, stdin } = makePair({
+      onError: (err) => errors.push(err),
+    });
+    const pending = client.request("ping", null, 999_999);
+    await new Promise((resolve) => setImmediate(resolve));
+    const epipe = Object.assign(new Error("EPIPE"), { code: "EPIPE" });
+    stdin.emit("error", epipe);
+    await assert.rejects(pending, /closed|JSON-RPC stream error|EPIPE/i);
+    assert.ok(
+      errors.some((e) => e.name === "JsonRpcTransportError" && /stdin/.test(e.message)),
+      `expected JsonRpcTransportError on stdin, got: ${errors.map((e) => `${e.name}:${e.message}`).join(",")}`,
+    );
+    assert.equal(client.getState(), "closed");
+  });
 });

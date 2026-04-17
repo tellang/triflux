@@ -116,8 +116,23 @@ export class JsonRpcStdioClient {
     this._onStdinData = (chunk) => this._trackRawBytes(chunk);
     this._stdin.on("data", this._onStdinData);
 
+    // Without these handlers, an EPIPE/ERR_STREAM_DESTROYED on either pipe
+    // would bubble up as an unhandled 'error' and take down the hub process.
+    this._onStdinError = (err) => this._handleStreamError("stdin", err);
+    this._onStdoutError = (err) => this._handleStreamError("stdout", err);
+    if (typeof this._stdin.on === "function") {
+      this._stdin.on("error", this._onStdinError);
+    }
+    if (typeof this._stdout.on === "function") {
+      this._stdout.on("error", this._onStdoutError);
+    }
+
     this._rl = createInterface({ input: this._stdin, crlfDelay: Infinity });
     this._rl.on("line", (line) => this._handleLine(line));
+    // readline re-emits the input stream 'error' on itself; the raw stdin
+    // handler above already converts it into a JsonRpcTransportError, so
+    // suppress the re-emit to avoid an unhandled 'error' on the Interface.
+    this._rl.on("error", () => {});
     this._rl.on("close", () => {
       // P1 #3 fail-fast: EOF during `running` is a transport error. Pending
       // requests are rejected with JsonRpcTransportError. EOF during `closing`
@@ -285,8 +300,33 @@ export class JsonRpcStdioClient {
   }
 
   _writeFrame(frame) {
+    if (this._state === "closed") return;
     const line = `${JSON.stringify(frame)}\n`;
-    this._stdout.write(line);
+    try {
+      this._stdout.write(line, (err) => {
+        if (err) this._handleStreamError("stdout-write", err);
+      });
+    } catch (err) {
+      this._handleStreamError("stdout-write", err);
+    }
+  }
+
+  /**
+   * Convert a raw stream error into a JsonRpcTransportError, emit it to the
+   * error sink, and close the client so pending requests are rejected.
+   * Idempotent: repeated errors after close are swallowed.
+   * @param {string} which identifier for the originating pipe/operation
+   * @param {unknown} err raw error from the stream
+   */
+  _handleStreamError(which, err) {
+    if (this._state === "closed") return;
+    const base = err instanceof Error ? err : new Error(String(err));
+    const wrapped = new JsonRpcTransportError(
+      `JSON-RPC stream error on ${which}: ${base.message}`,
+    );
+    wrapped.cause = base;
+    this._emitError(wrapped);
+    this._closeWith("closed", wrapped);
   }
 
   _trackRawBytes(chunk) {
