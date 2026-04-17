@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -167,6 +167,13 @@ function createTestHypervisor(workdir, logsDir, overrides = {}) {
     },
   });
   return { hv, conductors };
+}
+
+function readEventLog(filePath) {
+  return readFileSync(filePath, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 async function waitForCondition(check, timeoutMs = 1000) {
@@ -518,6 +525,7 @@ describe("swarm-hypervisor", () => {
           worktreePath: `${workdir}/.codex-swarm/wt-worker-a`,
           branchName: "swarm/issue-4/worker-a",
           rootDir: workdir,
+          force: false,
         },
       ]);
     });
@@ -711,6 +719,98 @@ describe("swarm-hypervisor", () => {
   });
 
   describe("shutdown", () => {
+    it("auto-cleans failed shard worktrees on shutdown by default", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const cleanupCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "failed-cleanup",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          cleanupWorktree: async (opts) => {
+            cleanupCalls.push(opts);
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].fail("worker crashed");
+      await waitForCondition(() => hv.getStatus().failedShards === 1);
+      await hv.shutdown("test_failure_cleanup");
+
+      assert.deepEqual(cleanupCalls, [
+        {
+          worktreePath: `${workdir}/.codex-swarm/wt-worker-a`,
+          branchName: "swarm/failed-cleanup/worker-a",
+          rootDir: workdir,
+          force: true,
+        },
+      ]);
+
+      const autoCleanupEvent = readEventLog(hv.eventLogPath).find(
+        (entry) => entry.event === "worktree_auto_cleanup",
+      );
+      assert.deepEqual(
+        autoCleanupEvent && {
+          shard: autoCleanupEvent.shard,
+          worktreePath: autoCleanupEvent.worktreePath,
+          reason: autoCleanupEvent.reason,
+        },
+        {
+          shard: "worker-a",
+          worktreePath: `${workdir}/.codex-swarm/wt-worker-a`,
+          reason: "F1_crash",
+        },
+      );
+
+      hv = null;
+    });
+
+    it("preserves failed shard worktrees when keepFailedWorktrees=true", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const cleanupCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "failed-keep",
+        keepFailedWorktrees: true,
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          cleanupWorktree: async (opts) => {
+            cleanupCalls.push(opts);
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].fail("worker crashed");
+      await waitForCondition(() => hv.getStatus().failedShards === 1);
+      await hv.shutdown("test_keep_failed");
+
+      assert.deepEqual(cleanupCalls, []);
+      assert.equal(
+        readEventLog(hv.eventLogPath).some(
+          (entry) => entry.event === "worktree_auto_cleanup",
+        ),
+        false,
+      );
+
+      hv = null;
+    });
+
     it("transitions to FAILED state on early shutdown", async () => {
       const plan = planSwarm(null, { content: SIMPLE_PRD });
       ({ hv } = createTestHypervisor(workdir, logsDir));
