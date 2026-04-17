@@ -1,9 +1,11 @@
 // tests/unit/conductor.test.mjs — conductor.mjs 상태 머신 유닛 테스트
 
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { createConductor, STATES } from "../../hub/team/conductor.mjs";
@@ -23,8 +25,39 @@ function makeTmpDir() {
   return dir;
 }
 
-/** 테스트 conductor 팩토리 — grace/probe 값을 짧게 설정해 빠른 종료 보장 */
-function makeConductor(logsDir) {
+/**
+ * 실제 claude/codex CLI를 호출하지 않는 spawn mock.
+ * ~/.claude/projects에 세션 jsonl 쓰레기 생성을 차단한다.
+ * 기본: spawn 직후 setImmediate로 즉시 exit(0) — "claude -p echo_test 빠르게 종료"와 동일 타이밍.
+ */
+function makeMockSpawn({ exitCode = 0, exitSignal = null, exitDelayMs = 0 } = {}) {
+  return function mockSpawn() {
+    const child = new EventEmitter();
+    child.pid = Math.floor(Math.random() * 1_000_000) + 1;
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin = new PassThrough();
+    child.kill = () => {
+      setImmediate(() => {
+        child.stdout.end();
+        child.stderr.end();
+        child.emit("exit", null, "SIGTERM");
+      });
+      return true;
+    };
+    const fire = () => {
+      child.stdout.end();
+      child.stderr.end();
+      child.emit("exit", exitCode, exitSignal);
+    };
+    if (exitDelayMs > 0) setTimeout(fire, exitDelayMs);
+    else setImmediate(fire);
+    return child;
+  };
+}
+
+/** 테스트 conductor 팩토리 — grace/probe 값을 짧게 + spawn mock 기본 주입 */
+function makeConductor(logsDir, overrides = {}) {
   return createConductor({
     logsDir,
     maxRestarts: 1,
@@ -34,10 +67,15 @@ function makeConductor(logsDir) {
       l1ThresholdMs: 999_999,
       l3ThresholdMs: 999_999,
     },
+    ...overrides,
+    deps: {
+      spawn: makeMockSpawn(),
+      ...(overrides.deps || {}),
+    },
   });
 }
 
-/** spawnSession에 사용하는 최소 유효 config (claude -p "x"는 빠르게 실패/종료) */
+/** spawnSession에 사용하는 최소 유효 config (mock spawn이 즉시 exit(0)) */
 function minConfig(overrides = {}) {
   return {
     id: `test-session-${Date.now()}-${Math.random().toString(36).slice(2)}`,

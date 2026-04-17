@@ -139,7 +139,15 @@ function swapAuthFile(lease, agent, sessionId, eventLog) {
  * @param {object} [opts.broker] — AccountBroker 인스턴스 (tierFallback 구독용)
  * @returns {Conductor}
  */
+/**
+ * Conductor 생성.
+ * @param {object} [opts]
+ * @param {object} [opts.deps] — 의존성 주입 (테스트용 mock 지원)
+ * @param {Function} [opts.deps.execFile] — execFile 오버라이드
+ * @param {Function} [opts.deps.spawn] — spawn 오버라이드 (로컬/원격 child process 모두)
+ */
 export function createConductor(opts = {}) {
+  const spawnFn = opts.deps?.spawn || spawn;
   const {
     logsDir,
     maxRestarts = DEFAULT_MAX_RESTARTS,
@@ -515,7 +523,7 @@ export function createConductor(opts = {}) {
 
     let child;
     try {
-      child = spawn(launcher.command, {
+      child = spawnFn(launcher.command, {
         shell: true,
         cwd: spawnCwd,
         env: {
@@ -705,7 +713,7 @@ export function createConductor(opts = {}) {
 
     let child;
     try {
-      child = spawn("ssh", sshArgs, {
+      child = spawnFn("ssh", sshArgs, {
         env: process.env,
         reason: `conductor:remoteSession:${session.id}`,
         stdio: ["pipe", "pipe", "pipe"],
