@@ -5,7 +5,7 @@
 
 import { execFile } from "node:child_process";
 import { access, mkdir, readdir, rm } from "node:fs/promises";
-import { join, normalize, resolve } from "node:path";
+import { join, normalize, relative, resolve } from "node:path";
 import { remoteGit, validateHost } from "./remote-session.mjs";
 
 const SWARM_ROOT = ".codex-swarm";
@@ -36,6 +36,50 @@ function sleep(ms) {
 /** Normalize path for Windows compatibility. */
 function normPath(p) {
   return normalize(p).replace(/\\/g, "/");
+}
+
+function resolveCleanupTarget(worktreePath, rootDir) {
+  const resolvedRoot = resolve(rootDir);
+  const resolvedWorktree = resolve(worktreePath);
+  const normalizedRoot = normPath(resolvedRoot).replace(/\/+$/u, "");
+  const normalizedWorktree = normPath(resolvedWorktree).replace(/\/+$/u, "");
+
+  if (normalizedWorktree === normalizedRoot) {
+    throw new Error("refusing to cleanup the main working tree");
+  }
+
+  const rel = normPath(relative(resolvedRoot, resolvedWorktree));
+  if (
+    !rel ||
+    rel === "." ||
+    rel === ".." ||
+    rel.startsWith("../") ||
+    rel.includes("/../")
+  ) {
+    throw new Error(`refusing to cleanup path outside rootDir: ${worktreePath}`);
+  }
+
+  const allowed =
+    rel.startsWith(".codex-swarm/wt-") || rel.startsWith(".triflux/");
+  if (!allowed) {
+    throw new Error(`refusing to cleanup unsafe path: ${worktreePath}`);
+  }
+
+  return {
+    resolvedRoot,
+    resolvedWorktree,
+    normalizedWorktree,
+  };
+}
+
+async function branchExists(branchName, rootDir) {
+  if (!branchName) return false;
+  try {
+    const listed = await git(["branch", "--list", branchName], rootDir);
+    return listed.trim().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -242,6 +286,60 @@ export async function rebaseShardOntoIntegration({
 }
 
 /**
+ * Safely remove a worktree directory and delete its branch.
+ * Refuses to touch the main working tree or paths outside known swarm state.
+ *
+ * @param {object} opts
+ * @param {string} opts.worktreePath
+ * @param {string} [opts.branchName]
+ * @param {string} [opts.rootDir=process.cwd()]
+ * @param {boolean} [opts.force=false]
+ */
+export async function cleanupWorktree({
+  worktreePath,
+  branchName,
+  rootDir = process.cwd(),
+  force = false,
+}) {
+  const { resolvedWorktree } = resolveCleanupTarget(worktreePath, rootDir);
+  const forceArgs = force ? ["--force"] : [];
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await git(
+        ["worktree", "remove", ...forceArgs, resolvedWorktree],
+        rootDir,
+      );
+      break;
+    } catch (_err) {
+      if (attempt === 2) {
+        try {
+          await rm(resolvedWorktree, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+      }
+      await sleep(SLEEP_MS);
+    }
+  }
+
+  await sleep(SLEEP_MS);
+  try {
+    await git(["worktree", "prune"], rootDir);
+  } catch {
+    /* best-effort */
+  }
+
+  if (branchName && (await branchExists(branchName, rootDir))) {
+    try {
+      await git(["branch", "-D", branchName], rootDir);
+    } catch {
+      /* branch may already be gone */
+    }
+  }
+}
+
+/**
  * Remove a worktree and its branch.
  * Follows WT race-guard: sleep between operations.
  *
@@ -279,45 +377,14 @@ export async function pruneWorktree({
     }
   }
 
-  const forceFlag = force ? "--force" : "";
+  await cleanupWorktree({
+    worktreePath,
+    branchName,
+    rootDir,
+    force,
+  });
 
-  // Remove worktree (with retry for Windows file handle issues — E5)
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      await git(
-        ["worktree", "remove", worktreePath, ...(forceFlag ? [forceFlag] : [])],
-        rootDir,
-      );
-      break;
-    } catch (_err) {
-      if (attempt === 2) {
-        // Last resort: rm the directory and prune
-        try {
-          await rm(worktreePath, { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
-      }
-      await sleep(SLEEP_MS);
-    }
-  }
-
-  // Prune stale worktree references
-  await sleep(SLEEP_MS);
-  try {
-    await git(["worktree", "prune"], rootDir);
-  } catch {
-    /* best-effort */
-  }
-
-  // Delete branch if specified
-  if (branchName) {
-    try {
-      await git(["branch", "-D", branchName], rootDir);
-    } catch {
-      /* may not exist */
-    }
-  }
+  return { ok: true };
 }
 
 /**

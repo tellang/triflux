@@ -21,6 +21,7 @@ import { createEventLog } from "./event-log.mjs";
 import { probeRemoteEnv, resolveRemoteDir } from "./remote-session.mjs";
 import { createSwarmLocks } from "./swarm-locks.mjs";
 import {
+  cleanupWorktree,
   ensureWorktree,
   fetchRemoteShard,
   prepareIntegrationBranch,
@@ -123,6 +124,7 @@ function createSharedRegistry(factory) {
  * @param {number} [opts.maxRestarts=2] — per-shard max restarts
  * @param {number} [opts.graceMs=10000] — conductor shutdown grace period
  * @param {number} [opts.integrationTimeoutMs=60000] — max time for integration phase
+ * @param {boolean} [opts.keepFailedWorktrees=false] — preserve failed shard worktrees for debugging
  * @param {object} [opts.probeOpts] — health probe overrides
  * @param {object} [opts.deps] — dependency injection for testing
  * @returns {SwarmHypervisor}
@@ -135,6 +137,7 @@ export function createSwarmHypervisor(opts) {
     runId = `swarm-${Date.now()}`,
     maxRestarts = 2,
     graceMs = 10_000,
+    keepFailedWorktrees = false,
     _integrationTimeoutMs = 60_000,
     probeOpts = {},
     _deps = {},
@@ -153,7 +156,8 @@ export function createSwarmHypervisor(opts) {
     _deps.prepareIntegrationBranch || prepareIntegrationBranch;
   const rebaseShardOntoIntegrationImpl =
     _deps.rebaseShardOntoIntegration || rebaseShardOntoIntegration;
-  const cleanupWorktreeImpl = _deps.cleanupWorktree || pruneWorktree;
+  const cleanupWorktreeImpl =
+    _deps.cleanupWorktree || cleanupWorktree || pruneWorktree;
   const emitter = new EventEmitter();
   const eventLog = createEventLog(join(logsDir, "swarm-events.jsonl"));
   const { registry: sharedRegistry, fallbackReason: meshRegistryFallback } =
@@ -171,6 +175,7 @@ export function createSwarmHypervisor(opts) {
 
   /** @type {Set<string>} shards that have fully completed (not just launched) */
   const completedShards = new Set();
+  const cleanedWorktreePaths = new Set();
 
   const results = new Map(); // shardName → validated result
   const failures = new Map(); // shardName → failure info
@@ -563,16 +568,19 @@ export function createSwarmHypervisor(opts) {
         lockManager.release(shard.name);
       }
       if (shard.worktreePath) {
-        try {
-          await cleanupWorktreeImpl({
+        await maybeCleanupWorktree(
+          shard.name,
+          {
             worktreePath: shard.worktreePath,
             branchName: shard.branchName,
-            rootDir: workdir,
+          },
+          shard,
+          {
+            branchName: shard.branchName,
             force: true,
-          });
-        } catch {
-          /* best-effort */
-        }
+            failureReason: `launch_failed:${err.message}`,
+          },
+        );
       }
       return null;
     }
@@ -754,7 +762,10 @@ export function createSwarmHypervisor(opts) {
               shard: shardName,
               error: fetchResult.error,
             });
-            await maybeCleanupWorktree(shardName, worker, shard);
+            await maybeCleanupWorktree(shardName, worker, shard, {
+              force: true,
+              failureReason: "remote_fetch_failed",
+            });
             integrationFailures.push(shardName);
             continue;
           }
@@ -791,7 +802,10 @@ export function createSwarmHypervisor(opts) {
             shard: shardName,
             ...commitEvidence,
           });
-          await maybeCleanupWorktree(shardName, worker, shard);
+          await maybeCleanupWorktree(shardName, worker, shard, {
+            force: true,
+            failureReason: failures.get(shardName)?.mode || "no_commit_evidence",
+          });
           integrationFailures.push(shardName);
           continue;
         }
@@ -810,7 +824,11 @@ export function createSwarmHypervisor(opts) {
             shard: shardName,
             violations: validation.violations,
           });
-          await maybeCleanupWorktree(shardName, worker, shard);
+          await maybeCleanupWorktree(shardName, worker, shard, {
+            force: true,
+            failureReason:
+              failures.get(shardName)?.mode || "lease_violation_revert",
+          });
           integrationFailures.push(shardName);
           continue;
         }
@@ -828,7 +846,10 @@ export function createSwarmHypervisor(opts) {
             integrationBranch,
             error: rebaseResult.error,
           });
-          await maybeCleanupWorktree(shardName, worker, shard);
+          await maybeCleanupWorktree(shardName, worker, shard, {
+            force: true,
+            failureReason: rebaseResult.error || FAILURE_MODES.F5_MERGE_CONFLICT,
+          });
           integrationFailures.push(shardName);
           continue;
         }
@@ -844,7 +865,9 @@ export function createSwarmHypervisor(opts) {
         });
         integrated.push(shardName);
 
-        await maybeCleanupWorktree(shardName, worker, shard, shardBranch);
+        await maybeCleanupWorktree(shardName, worker, shard, {
+          branchName: shardBranch,
+        });
       }
     } catch (err) {
       const unresolved = plan.mergeOrder.filter(
@@ -927,19 +950,35 @@ export function createSwarmHypervisor(opts) {
     shardName,
     worker,
     shard,
-    branchName = worker?.branchName,
+    {
+      branchName = worker?.branchName,
+      force = false,
+      failureReason = null,
+    } = {},
   ) {
     if (!worker?.worktreePath || shard?.host) return;
+    if (failureReason && keepFailedWorktrees) return;
+    if (cleanedWorktreePaths.has(worker.worktreePath)) return;
     try {
       await cleanupWorktreeImpl({
         worktreePath: worker.worktreePath,
         branchName,
         rootDir: workdir,
+        force,
       });
+      cleanedWorktreePaths.add(worker.worktreePath);
+      if (failureReason) {
+        eventLog.append("worktree_auto_cleanup", {
+          shard: shardName,
+          worktreePath: worker.worktreePath,
+          reason: failureReason,
+        });
+      }
     } catch (err) {
       eventLog.append("worktree_cleanup_failed", {
         shard: shardName,
         worktreePath: worker.worktreePath,
+        reason: failureReason || null,
         error: err.message,
       });
     }
@@ -1207,6 +1246,18 @@ export function createSwarmHypervisor(opts) {
     }
 
     await Promise.allSettled(shutdowns);
+
+    if (!keepFailedWorktrees) {
+      for (const [shardName, failureInfo] of failures) {
+        const worker = workers.get(shardName);
+        const shard =
+          worker?.shardConfig || plan?.shards.find((item) => item.name === shardName);
+        await maybeCleanupWorktree(shardName, worker, shard, {
+          force: true,
+          failureReason: failureInfo?.mode || failureInfo?.reason || reason,
+        });
+      }
+    }
 
     sharedRegistry.clear();
     lockManager?.releaseAll();
