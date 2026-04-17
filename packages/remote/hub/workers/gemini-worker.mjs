@@ -55,7 +55,11 @@ function buildSpawnSpec(command, args) {
 
   if (/\.(cmd|bat)$/i.test(resolved)) {
     const line = [resolved, ...args].map(quoteWindowsCmdArg).join(" ");
-    return { command: "cmd.exe", args: ["/d", "/s", "/v:off", "/c", line], shell: false };
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/v:off", "/c", line],
+      shell: false,
+    };
   }
 
   return { command: resolved, args, shell: false };
@@ -460,4 +464,4 @@ export class GeminiWorker {
 }
 
 /** @visibleForTesting — 테스트 전용 export. 외부 소비 금지. */
-export { quoteWindowsCmdArg, buildSpawnSpec };
+export { buildSpawnSpec, quoteWindowsCmdArg };

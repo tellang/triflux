@@ -1,7 +1,13 @@
 // hub/team/psmux.mjs — Windows psmux 세션/키바인딩/캡처/steering 관리
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
@@ -266,7 +272,12 @@ function ensureCaptureHelper() {
     // macOS/Linux: bash 스크립트로 pipe-pane 캡처
     writeFileSync(
       CAPTURE_HELPER_PATH,
-      ["#!/bin/bash", 'mkdir -p "$(dirname "$1")" 2>/dev/null', 'exec tee -a "$1"', ""].join("\n"),
+      [
+        "#!/bin/bash",
+        'mkdir -p "$(dirname "$1")" 2>/dev/null',
+        'exec tee -a "$1"',
+        "",
+      ].join("\n"),
       "utf8",
     );
     chmodSync(CAPTURE_HELPER_PATH, 0o755);
@@ -634,7 +645,8 @@ export function createPsmuxSession(sessionName, opts = {}) {
   ];
   // Windows: psmux 기본 셸이 cmd.exe일 수 있으므로 PowerShell 강제
   // macOS/Linux: 기본 셸 사용 (PowerShell 플래그 불필요)
-  if (PWSH_BIN && IS_WINDOWS) newSessionArgs.push(PWSH_BIN, "-NoLogo", "-NoProfile");
+  if (PWSH_BIN && IS_WINDOWS)
+    newSessionArgs.push(PWSH_BIN, "-NoLogo", "-NoProfile");
   const leadPane = psmuxExec(newSessionArgs);
 
   // split-window로 생성되는 pane도 동일 셸 사용 (Windows: PowerShell 강제)
@@ -759,10 +771,19 @@ function killProcessTree(pid) {
     // macOS/Linux: BFS로 전체 자손 수집 → SIGTERM → SIGKILL 에스컬레이션
     const collectChildren = (parentPid) => {
       try {
-        return childProcess.execFileSync("pgrep", ["-P", String(parentPid)], {
-          encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"],
-        }).trim().split("\n").filter(Boolean).map(Number);
-      } catch { return []; }
+        return childProcess
+          .execFileSync("pgrep", ["-P", String(parentPid)], {
+            encoding: "utf8",
+            timeout: 3000,
+            stdio: ["ignore", "pipe", "ignore"],
+          })
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map(Number);
+      } catch {
+        return [];
+      }
     };
     const allDesc = [];
     const queue = [pid];
@@ -778,12 +799,29 @@ function killProcessTree(pid) {
       }
     }
     // SIGTERM 먼저
-    for (const c of allDesc) { try { process.kill(c, "SIGTERM"); } catch {} }
-    try { process.kill(pid, "SIGTERM"); } catch {}
+    for (const c of allDesc) {
+      try {
+        process.kill(c, "SIGTERM");
+      } catch {}
+    }
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {}
     // 1초 대기 후 생존자 SIGKILL
-    try { childProcess.execFileSync("sleep", ["1"], { timeout: 2000, stdio: "ignore" }); } catch {}
-    for (const c of allDesc) { try { process.kill(c, "SIGKILL"); } catch {} }
-    try { process.kill(pid, "SIGKILL"); } catch {}
+    try {
+      childProcess.execFileSync("sleep", ["1"], {
+        timeout: 2000,
+        stdio: "ignore",
+      });
+    } catch {}
+    for (const c of allDesc) {
+      try {
+        process.kill(c, "SIGKILL");
+      } catch {}
+    }
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
     return;
   }
   try {
@@ -823,15 +861,27 @@ function killOrphanPipeHelpers(sessionName) {
     // `<CAPTURE_ROOT>/<session>/<pane>.log`, so anchor on `/<session>/`.
     const safeSessionUnix = escapeRegex(sanitizePathPart(sessionName));
     try {
-      const pids = childProcess.execFileSync("pgrep", ["-f", `pipe-pane-capture.*/${safeSessionUnix}/`], {
-        encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
+      const pids = childProcess
+        .execFileSync(
+          "pgrep",
+          ["-f", `pipe-pane-capture.*/${safeSessionUnix}/`],
+          {
+            encoding: "utf8",
+            timeout: 5000,
+            stdio: ["ignore", "pipe", "ignore"],
+          },
+        )
+        .trim();
       if (pids) {
         for (const p of pids.split("\n").filter(Boolean)) {
-          try { process.kill(Number(p), "SIGTERM"); } catch {}
+          try {
+            process.kill(Number(p), "SIGTERM");
+          } catch {}
         }
       }
-    } catch { /* 프로세스 없으면 pgrep exit 1 — 무시 */ }
+    } catch {
+      /* 프로세스 없으면 pgrep exit 1 — 무시 */
+    }
     return;
   }
   // Windows: escape regex metacharacters and require a trailing path
@@ -871,7 +921,13 @@ function killOrphanMcpProcesses(sessionName) {
     const safeSessionUnix = sanitizePathPart(sessionName);
     let hubPidUnix = 0;
     try {
-      const hubPidFile = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
+      const hubPidFile = join(
+        homedir(),
+        ".claude",
+        "cache",
+        "tfx-hub",
+        "hub.pid",
+      );
       if (existsSync(hubPidFile)) {
         const info = JSON.parse(readFileSync(hubPidFile, "utf8"));
         hubPidUnix = Number(info.pid) || 0;
@@ -883,14 +939,20 @@ function killOrphanMcpProcesses(sessionName) {
       // killing sibling sessions whose names share a prefix
       // (e.g. `<session>2-worker-1.txt`).
       const escSession = escapeRegex(safeSessionUnix);
-      const pids = childProcess.execFileSync("pgrep", ["-f", `tfx-headless/${escSession}[-/.]`], {
-        encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
+      const pids = childProcess
+        .execFileSync("pgrep", ["-f", `tfx-headless/${escSession}[-/.]`], {
+          encoding: "utf8",
+          timeout: 5000,
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+        .trim();
       if (pids) {
         for (const p of pids.split("\n").filter(Boolean)) {
           const numPid = Number(p);
           if (numPid === hubPidUnix || numPid <= 0) continue;
-          try { process.kill(numPid, "SIGTERM"); } catch {}
+          try {
+            process.kill(numPid, "SIGTERM");
+          } catch {}
         }
       }
     } catch {}

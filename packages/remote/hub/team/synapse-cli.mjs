@@ -61,12 +61,16 @@ function formatStatus(sessions) {
   }
   const rows = [];
   rows.push("SESSION                HOST    BRANCH    DIRTY   STATE    TASK");
-  rows.push("─────────────────────  ──────  ────────  ──────  ───────  ─────────────");
+  rows.push(
+    "─────────────────────  ──────  ────────  ──────  ───────  ─────────────",
+  );
   for (const s of sessions) {
     const id = (s.sessionId || "?").padEnd(21).slice(0, 21);
     const host = (s.host || "?").padEnd(6).slice(0, 6);
     const branch = (s.branch || "?").padEnd(8).slice(0, 8);
-    const dirty = String((s.dirtyFiles || []).length).padEnd(6).slice(0, 6);
+    const dirty = String((s.dirtyFiles || []).length)
+      .padEnd(6)
+      .slice(0, 6);
     const state = (s.status || "active").padEnd(7).slice(0, 7);
     const task = (s.taskSummary || "").slice(0, 40);
     rows.push(`${id}  ${host}  ${branch}  ${dirty}  ${state}  ${task}`);
@@ -85,7 +89,11 @@ export async function cmdSynapseStatus(args = [], opts = {}) {
 
   if (jsonOut) {
     process.stdout.write(
-      JSON.stringify({ registry: path, count: sessions.length, sessions }, null, 2) + "\n",
+      JSON.stringify(
+        { registry: path, count: sessions.length, sessions },
+        null,
+        2,
+      ) + "\n",
     );
     return;
   }
@@ -178,7 +186,11 @@ export async function cmdSynapseWhy(args = [], opts = {}) {
 
   if (jsonOut) {
     process.stdout.write(
-      JSON.stringify({ path: target, commit: { sha, ...meta }, intent }, null, 2) + "\n",
+      JSON.stringify(
+        { path: target, commit: { sha, ...meta }, intent },
+        null,
+        2,
+      ) + "\n",
     );
     return;
   }
@@ -193,7 +205,9 @@ export async function cmdSynapseWhy(args = [], opts = {}) {
     process.stdout.write(`  intent.action:     ${intent.action || "-"}\n`);
     process.stdout.write(`  intent.reason:     ${intent.reason || "-"}\n`);
     if (Array.isArray(intent.touches) && intent.touches.length) {
-      process.stdout.write(`  intent.touches:    ${intent.touches.join(", ")}\n`);
+      process.stdout.write(
+        `  intent.touches:    ${intent.touches.join(", ")}\n`,
+      );
     }
     if (intent.invariant) {
       process.stdout.write(`  intent.invariant:  ${intent.invariant}\n`);

@@ -1,7 +1,7 @@
 // hub/team/process-cleanup.mjs — 고아 node/python 프로세스 감지 및 정리
 // Windows: Get-CimInstance Win32_Process로 parent PID + cmdLine 접근
 // Unix: ps aux 파싱
-import { execFile as nodeExecFile, execFileSync } from "node:child_process";
+import { execFileSync, execFile as nodeExecFile } from "node:child_process";
 import { promisify } from "node:util";
 import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 

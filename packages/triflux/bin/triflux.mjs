@@ -154,7 +154,8 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--diagnose",
         type: "boolean",
-        description: "진단 번들(zip) 생성: spawn-trace + hook timing + system info",
+        description:
+          "진단 번들(zip) 생성: spawn-trace + hook timing + system info",
       },
       {
         name: "--json",
@@ -1229,10 +1230,13 @@ function cmdSetup(options = {}) {
   // ── tmux 기본 셸 확인 (macOS/Linux) ──
   if (process.platform !== "win32" && which("tmux")) {
     try {
-      const shellOut = execSync("tmux show-options -g default-shell 2>/dev/null", {
-        encoding: "utf8",
-        timeout: 3000,
-      }).trim();
+      const shellOut = execSync(
+        "tmux show-options -g default-shell 2>/dev/null",
+        {
+          encoding: "utf8",
+          timeout: 3000,
+        },
+      ).trim();
       if (shellOut) {
         ok(`tmux 기본 셸: ${shellOut.split(/\s+/).pop() || "확인 완료"}`);
       }
@@ -1936,7 +1940,10 @@ async function cmdDoctor(options = {}) {
       }
       {
         const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-        if (claudeGuide.skipped && claudeGuide.reason !== "global_sync_disabled")
+        if (
+          claudeGuide.skipped &&
+          claudeGuide.reason !== "global_sync_disabled"
+        )
           warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
         else if (
           claudeGuide.action === "created" ||
@@ -2502,6 +2509,86 @@ async function cmdDoctor(options = {}) {
       issues++;
     } else {
       addDoctorCheck(report, { name: "stale-skills", status: "ok" });
+    }
+
+    // 8.5 Dev 의존성 (npm link 환경에서 node_modules 누락 감지 — Issue #101)
+    section("Dev Dependencies");
+    try {
+      const pkgJsonPath = join(PKG_ROOT, "package.json");
+      const nodeModulesPath = join(PKG_ROOT, "node_modules");
+      const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+      const runtimeDeps = Object.keys(pkgJson.dependencies || {});
+      const isLinkedDev = (() => {
+        try {
+          const stat = statSync(nodeModulesPath);
+          return stat.isDirectory();
+        } catch {
+          return false;
+        }
+      })();
+      const missingDeps = [];
+      if (!isLinkedDev) {
+        // node_modules 전체 누락 — 전역 install 또는 미압축 릴리즈일 가능성
+        if (runtimeDeps.length > 0) {
+          missingDeps.push(...runtimeDeps);
+        }
+      } else {
+        for (const dep of runtimeDeps) {
+          const depPath = join(nodeModulesPath, ...dep.split("/"));
+          if (!existsSync(depPath)) missingDeps.push(dep);
+        }
+      }
+      if (missingDeps.length === 0) {
+        ok(
+          `의존성 ${runtimeDeps.length}개 설치됨${
+            isLinkedDev ? ` ${DIM}(dev)${RESET}` : ""
+          }`,
+        );
+        addDoctorCheck(report, {
+          name: "dev-deps",
+          status: "ok",
+          total: runtimeDeps.length,
+          linkedDev: isLinkedDev,
+        });
+      } else {
+        const head = missingDeps.slice(0, 5);
+        const tail = missingDeps.length > 5 ? `+${missingDeps.length - 5}` : "";
+        warn(
+          `누락 의존성 ${missingDeps.length}개: ${head.join(", ")}${tail ? ` ${tail}` : ""}`,
+        );
+        info("수정: tfx doctor --fix 또는 `npm install` (PKG_ROOT 내)");
+        addDoctorCheck(report, {
+          name: "dev-deps",
+          status: "missing",
+          missing: missingDeps,
+          linkedDev: isLinkedDev,
+          pkgRoot: PKG_ROOT,
+          fix: "tfx doctor --fix",
+        });
+        issues++;
+        if (fix) {
+          // --fix 모드: npm install 실행 (Windows 호환 shell: true)
+          info(`npm install 실행 중 (${PKG_ROOT})...`);
+          try {
+            const { execFileSync } = await import("node:child_process");
+            execFileSync("npm", ["install", "--no-audit", "--no-fund"], {
+              cwd: PKG_ROOT,
+              stdio: "inherit",
+              shell: process.platform === "win32",
+            });
+            ok("npm install 완료 — 의존성 복구됨");
+          } catch (err) {
+            warn(`npm install 실패: ${err?.message || err}`);
+          }
+        }
+      }
+    } catch (err) {
+      warn(`dev 의존성 체크 실패: ${err?.message || err}`);
+      addDoctorCheck(report, {
+        name: "dev-deps",
+        status: "error",
+        error: String(err?.message || err),
+      });
     }
 
     // 9. 플러그인 등록
@@ -4849,13 +4936,35 @@ async function cmdHub(args = [], options = {}) {
         });
       }
 
+      // Issue #102: spawn stderr 를 임시 파일로 캡처해 실패 시 root cause 노출.
+      // detached spawn 은 pipe 유지가 까다로우니 fd 리다이렉트로 접근.
+      const { openSync: _openSync, closeSync: _closeSync } = await import(
+        "node:fs"
+      );
+      const { tmpdir: _tmpdir } = await import("node:os");
+      const startupErrPath = join(
+        _tmpdir(),
+        `tfx-hub-start-${Date.now()}-${process.pid}.err`,
+      );
+      let errFd;
+      try {
+        errFd = _openSync(startupErrPath, "w");
+      } catch {
+        errFd = undefined;
+      }
+
       const child = spawn(process.execPath, [serverPath], {
         env: { ...process.env, TFX_HUB_PORT: port },
-        stdio: "ignore",
+        stdio: ["ignore", "ignore", errFd ?? "ignore"],
         detached: true,
         windowsHide: true,
       });
       child.unref();
+      if (errFd !== undefined) {
+        try {
+          _closeSync(errFd);
+        } catch {}
+      }
 
       // PID 파일 확인 (최대 3초 대기, 100ms 폴링)
       let started = false;
@@ -4879,13 +4988,46 @@ async function cmdHub(args = [], options = {}) {
         console.log("");
         autoRegisterMcp(hubInfo.url, { codexEnabled: true });
         console.log("");
+        // 성공했으면 임시 stderr 파일 정리
+        try {
+          unlinkSync(startupErrPath);
+        } catch {}
       } else {
-        // 직접 포그라운드 모드로 안내
+        // Issue #102: 캡처된 stderr 에서 root cause 추출
+        let rootCause = "";
+        try {
+          rootCause = readFileSync(startupErrPath, "utf8").trim();
+        } catch {}
+
+        console.log(`\n  ${YELLOW}⚠${RESET} 백그라운드 시작 실패`);
+
+        if (rootCause) {
+          // 가장 유용한 에러 라인 강조 (ERR_*, Error:, throw)
+          const highlight = rootCause
+            .split(/\r?\n/)
+            .find((line) => /ERR_[A-Z_]+|^Error:|cannot find/i.test(line));
+          if (highlight) {
+            console.log(`    ${RED}▸ ${highlight.trim()}${RESET}`);
+          }
+          console.log(`\n  ${DIM}전체 로그: ${startupErrPath}${RESET}`);
+          // 원인별 실전 힌트
+          if (/Cannot find package/i.test(rootCause)) {
+            console.log(
+              `  ${DIM}힌트: \`cd ${PKG_ROOT} && npm install\` 로 의존성 복구 (특히 \`npm link\` 환경).${RESET}`,
+            );
+          } else if (/EADDRINUSE/i.test(rootCause)) {
+            console.log(
+              `  ${DIM}힌트: 포트 ${port} 이 이미 사용 중. \`tfx hub stop\` 후 재시도.${RESET}`,
+            );
+          }
+        } else {
+          console.log(
+            `    ${DIM}stderr 캡처 실패 — 아래 명령으로 포그라운드 실행해 원인 확인:${RESET}`,
+          );
+        }
+
         console.log(
-          `\n  ${YELLOW}⚠${RESET} 백그라운드 시작 실패 — 포그라운드로 실행:`,
-        );
-        console.log(
-          `    ${DIM}TFX_HUB_PORT=${port} node ${serverPath}${RESET}\n`,
+          `\n  ${DIM}포그라운드 실행: TFX_HUB_PORT=${port} node ${serverPath}${RESET}\n`,
         );
       }
       break;
@@ -5253,9 +5395,15 @@ async function main() {
         const auditScript = join(PKG_ROOT, "scripts", "config-audit.mjs");
         const auditArgs = JSON_OUTPUT ? ["--json"] : [];
         try {
-          const out = execFileSync(process.execPath, [auditScript, ...auditArgs], {
-            timeout: 15000, encoding: "utf8", windowsHide: true,
-          });
+          const out = execFileSync(
+            process.execPath,
+            [auditScript, ...auditArgs],
+            {
+              timeout: 15000,
+              encoding: "utf8",
+              windowsHide: true,
+            },
+          );
           process.stdout.write(out);
         } catch (e) {
           process.stdout.write(e.stdout || "");
@@ -5268,8 +5416,12 @@ async function main() {
         const result = await diagnose({ json: JSON_OUTPUT });
         if (!JSON_OUTPUT) {
           if (result.ok) {
-            console.log(`\n  ${GREEN_BRIGHT}✓${RESET} 진단 번들 생성: ${result.zipPath}`);
-            console.log(`  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`);
+            console.log(
+              `\n  ${GREEN_BRIGHT}✓${RESET} 진단 번들 생성: ${result.zipPath}`,
+            );
+            console.log(
+              `  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`,
+            );
           } else {
             console.log(`\n  ${RED}✗${RESET} 진단 실패: ${result.error}\n`);
           }
@@ -5397,9 +5549,7 @@ async function main() {
       return;
     }
     case "synapse": {
-      const { cmdSynapseStatus } = await import(
-        "../hub/team/synapse-cli.mjs"
-      );
+      const { cmdSynapseStatus } = await import("../hub/team/synapse-cli.mjs");
       const sub = cmdArgs[0] || "status";
       if (sub !== "status") {
         throw createCliError(`synapse 서브커맨드 미지원: ${sub}`, {

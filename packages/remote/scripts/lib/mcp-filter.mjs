@@ -36,7 +36,8 @@ const PROFILE_DEFINITIONS = Object.freeze({
     }),
   }),
   executor: Object.freeze({
-    description: "구현 워커용. 문서 조회 전용 MCP만 허용 (검색/브라우징은 Codex stall 유발)",
+    description:
+      "구현 워커용. 문서 조회 전용 MCP만 허용 (검색/브라우징은 Codex stall 유발)",
     allowedServers: Object.freeze(["context7"]),
     alwaysOnServers: Object.freeze(["context7"]),
     maxSearchServers: 0,

@@ -11,7 +11,6 @@
 //   node remote-spawn.mjs --probe <ssh-host>
 
 import { execFileSync, execSync } from "child_process";
-import { spawn } from "../hub/lib/spawn-trace.mjs";
 import { randomUUID } from "crypto";
 import {
   existsSync,
@@ -30,6 +29,7 @@ import {
   win32 as win32Path,
 } from "path";
 import { fileURLToPath } from "url";
+import { spawn } from "../hub/lib/spawn-trace.mjs";
 import {
   attachPsmuxSession,
   capturePsmuxPane,
@@ -711,7 +711,10 @@ async function spawnRemoteFallback(args, promptContext) {
   if (IS_WINDOWS_LOCAL) {
     try {
       const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
-      await wt.createTab({ title: `Claude@${host}`, command: `ssh -t -- ${host} ${remoteCmd}` });
+      await wt.createTab({
+        title: `Claude@${host}`,
+        command: `ssh -t -- ${host} ${remoteCmd}`,
+      });
       console.log(`spawned remote Claude → ${host}:${dir}`);
     } catch (error) {
       console.error("wt.exe spawn failed:", error.message);
@@ -1001,11 +1004,16 @@ function listSpawnSessions() {
 
 async function openAttachTab(sessionName, title = null) {
   if (IS_WINDOWS_LOCAL) {
-    const wtArgs = title
+    const wtArgs = title;
     try {
       const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
-      await wt.createTab({ title: title || sessionName, command: `psmux attach -t ${sessionName}` });
-    } catch { /* fallback below */ }
+      await wt.createTab({
+        title: title || sessionName,
+        command: `psmux attach -t ${sessionName}`,
+      });
+    } catch {
+      /* fallback below */
+    }
     return;
   }
 

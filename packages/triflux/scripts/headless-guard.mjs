@@ -274,8 +274,12 @@ async function main() {
         );
       } else {
         hasDirectCli =
-          /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmdSanitized) ||
-          /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmdSanitized);
+          /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
+            cmdSanitized,
+          ) ||
+          /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
+            cmdSanitized,
+          );
       }
     }
 

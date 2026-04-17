@@ -50,9 +50,7 @@ function normalizeRule(rule) {
   if (!skill && !mcpRoute && !action) return null;
 
   const hint =
-    typeof rule.hint === "string" && rule.hint.trim()
-      ? rule.hint.trim()
-      : null;
+    typeof rule.hint === "string" && rule.hint.trim() ? rule.hint.trim() : null;
 
   const supersedes = Array.isArray(rule.supersedes)
     ? rule.supersedes

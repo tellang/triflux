@@ -104,7 +104,11 @@ function scanHubWorkerFiles(pluginRoot, claudeDir) {
   }
 
   // hub/ 루트: worker가 import하는 의존성 (cli-adapter-base, platform 등)
-  const hubRootDeps = ["cli-adapter-base.mjs", "platform.mjs", "account-broker.mjs"];
+  const hubRootDeps = [
+    "cli-adapter-base.mjs",
+    "platform.mjs",
+    "account-broker.mjs",
+  ];
   for (const f of hubRootDeps) {
     if (existsSync(join(hubRoot, f))) {
       results.push({
@@ -644,7 +648,11 @@ function loadSettings() {
 }
 
 function persistSettings(settings) {
-  writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
+  writeFileSync(
+    SETTINGS_PATH,
+    JSON.stringify(settings, null, 2) + "\n",
+    "utf8",
+  );
 }
 
 function applyStatusLine(settings) {
@@ -687,13 +695,15 @@ function applyHooks(settings) {
   if (!settings.hooks) settings.hooks = {};
   let changed = false;
 
-  if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
+  if (!Array.isArray(settings.hooks.SessionStart))
+    settings.hooks.SessionStart = [];
 
   const hasTrifluxHooks = settings.hooks.SessionStart.some(
     (entry) =>
       Array.isArray(entry.hooks) &&
       entry.hooks.some(
-        (hook) => typeof hook.command === "string" && hook.command.includes("triflux"),
+        (hook) =>
+          typeof hook.command === "string" && hook.command.includes("triflux"),
       ),
   );
 
@@ -918,9 +928,7 @@ export async function runDeferred(stdinData) {
   }
 
   if (isSync) {
-    io.log(
-      "  [sync] \uBA85\uC2DC\uC801 \uC7AC\uB3D9\uAE30\uD654 \uC2E4\uD589",
-    );
+    io.log("  [sync] \uBA85\uC2DC\uC801 \uC7AC\uB3D9\uAE30\uD654 \uC2E4\uD589");
   }
 
   const pkgVersion = getPackageVersion();
@@ -1525,16 +1533,12 @@ export async function runDeferred(stdinData) {
       routingTable,
     );
     if (projectResult.action !== "unchanged") {
-      io.log(
-        `  \x1b[32m✓\x1b[0m CLAUDE.md (project): ${projectResult.action}`,
-      );
+      io.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (project): ${projectResult.action}`);
       synced++;
     }
     const globalResult = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
     if (globalResult.action !== "unchanged") {
-      io.log(
-        `  \x1b[32m✓\x1b[0m CLAUDE.md (global): ${globalResult.action}`,
-      );
+      io.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (global): ${globalResult.action}`);
       synced++;
     }
   } catch (error) {

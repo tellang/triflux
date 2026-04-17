@@ -4,9 +4,9 @@ import {
   psmuxSessionExists,
 } from "./psmux.mjs";
 import {
-  tmuxExec,
-  listSessions,
   killSession as killTmuxSession,
+  listSessions,
+  tmuxExec,
 } from "./session.mjs";
 
 /**

@@ -24,17 +24,17 @@ import {
 } from "./ansi.mjs";
 import {
   clamp,
+  normalizeWorkerState as coreNormalizeWorkerState,
   formatTokens,
   loadVersion,
-  normalizeWorkerState as coreNormalizeWorkerState,
   resolveViewportColumns,
   resolveViewportRows,
   runtimeStatus,
   sanitizeFiles,
   sanitizeOneLine,
   sanitizeTextBlock,
-  wrapText as wrapTextFull,
   VALID_TABS as VALID_TABS_ARRAY,
+  wrapText as wrapTextFull,
 } from "./tui-core.mjs";
 
 const VERSION = await loadVersion("lite");

@@ -12,10 +12,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod";
 import { resolveBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
-import { CodexMcpWorker } from "./codex-mcp.mjs";
-import { GeminiWorker } from "./gemini-worker.mjs";
 import { whichCommand } from "@triflux/core/hub/platform.mjs";
 import { runHeadlessWithCleanup } from "../team/headless.mjs";
+import { CodexMcpWorker } from "./codex-mcp.mjs";
+import { GeminiWorker } from "./gemini-worker.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -749,8 +749,7 @@ export class DelegatorMcpWorker {
   }
 
   _createGeminiWorker() {
-    const resolved =
-      whichCommand(this.geminiCommand) || this.geminiCommand;
+    const resolved = whichCommand(this.geminiCommand) || this.geminiCommand;
     return new GeminiWorker({
       command: resolved,
       commandArgs: this.geminiCommandArgs,
@@ -825,7 +824,12 @@ export class DelegatorMcpWorker {
     if (Array.isArray(args.workers) && args.workers.length > 0) {
       try {
         const result = await this._executeMultiWorker(args, extra);
-        await emitProgress(extra, DIRECT_PROGRESS_DONE, 100, "위임이 완료되었습니다.");
+        await emitProgress(
+          extra,
+          DIRECT_PROGRESS_DONE,
+          100,
+          "위임이 완료되었습니다.",
+        );
         return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -884,20 +888,25 @@ export class DelegatorMcpWorker {
     // 타임아웃: 워커 중 가장 긴 타임아웃 사용
     const maxTimeoutSec = Math.max(
       ...args.workers.map((w) =>
-        Math.ceil(resolveTimeoutMs(w.agentType || "executor", args.timeoutMs) / 1000),
+        Math.ceil(
+          resolveTimeoutMs(w.agentType || "executor", args.timeoutMs) / 1000,
+        ),
       ),
       300,
     );
 
     try {
-      const { results, sessionName } = await runHeadlessWithCleanup(assignments, {
-        sessionPrefix: "dlg",
-        timeoutSec: maxTimeoutSec,
-        layout: assignments.length <= 2 ? "even-horizontal" : "2x2",
-        progressive: true,
-        dashboard: true,
-        dashboardLayout: "single",
-      });
+      const { results, sessionName } = await runHeadlessWithCleanup(
+        assignments,
+        {
+          sessionPrefix: "dlg",
+          timeoutSec: maxTimeoutSec,
+          layout: assignments.length <= 2 ? "even-horizontal" : "2x2",
+          progressive: true,
+          dashboard: true,
+          dashboardLayout: "single",
+        },
+      );
 
       await emitProgress(
         extra,

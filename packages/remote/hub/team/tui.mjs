@@ -2,7 +2,6 @@
 // virtual row buffer 기반. dirty-row만 갱신. isTTY 아닐 때 append-only fallback.
 // Tier1(상단 고정) / Tier2(worker rail) / Tier3(focus pane) 3단 계층.
 
-import { createWtManager } from "./wt-manager.mjs";
 import { getEnvironment } from "@triflux/core/hub/lib/env-detect.mjs";
 import {
   altScreenOff,
@@ -32,12 +31,12 @@ import { resolveAttachCommand } from "./session.mjs";
 import {
   clamp,
   cliColor,
+  normalizeWorkerState as coreNormalizeWorkerState,
   countStatuses,
   FALLBACK_COLUMNS,
   FALLBACK_ROWS,
   formatTokens,
   loadVersion,
-  normalizeWorkerState as coreNormalizeWorkerState,
   runtimeStatus,
   sanitizeFiles,
   sanitizeFindings,
@@ -49,16 +48,17 @@ import {
   wrapText as wrapTextAll,
 } from "./tui-core.mjs";
 import {
+  createMetricsCollector,
+  createSynapseEventStream,
+  renderMetricsTier1,
+} from "./tui-synapse.mjs";
+import {
   createPanelResizer,
   createSearchState,
   createTokenTracker,
   createVimMotion,
 } from "./tui-widgets.mjs";
-import {
-  createMetricsCollector,
-  createSynapseEventStream,
-  renderMetricsTier1,
-} from "./tui-synapse.mjs";
+import { createWtManager } from "./wt-manager.mjs";
 
 const VERSION = await loadVersion();
 
@@ -944,9 +944,13 @@ function _joinColumns(blocks, gap = GRID_GAP) {
 
 // ── normalizeWorkerState ──────────────────────────────────────────────────
 function normalizeWorkerState(existing, state) {
-  return coreNormalizeWorkerState(existing || { cli: "codex", status: "pending" }, state, {
-    trackChanges: true,
-  });
+  return coreNormalizeWorkerState(
+    existing || { cli: "codex", status: "pending" },
+    state,
+    {
+      trackChanges: true,
+    },
+  );
 }
 
 // ── createLogDashboard ────────────────────────────────────────────────────
@@ -1017,12 +1021,14 @@ export function createLogDashboard(opts = {}) {
 
   // Synapse 실시간 관제 (Phase 3)
   const synapseMetrics = deps.synapseMetrics || createMetricsCollector();
-  const synapseStream = deps.synapseStream || createSynapseEventStream({
-    onEvent(event) {
-      synapseMetrics.ingest(event);
-    },
-    fetchImpl: deps.synapseFetch,
-  });
+  const synapseStream =
+    deps.synapseStream ||
+    createSynapseEventStream({
+      onEvent(event) {
+        synapseMetrics.ingest(event);
+      },
+      fetchImpl: deps.synapseFetch,
+    });
   // Synapse 자동 시작 (옵트인: deps.enableSynapse)
   if (deps.enableSynapse) synapseStream.start();
 
@@ -1129,7 +1135,10 @@ export function createLogDashboard(opts = {}) {
   // ── 키 입력 ──────────────────────────────────────────────────────────
   function handleInput(chunk) {
     const key = String(chunk);
-    if (key === "\u0003") { doClose(); return; }
+    if (key === "\u0003") {
+      doClose();
+      return;
+    }
 
     // 검색 모드 활성 중: 키를 검색 상태에 위임
     if (searchState.active) {
@@ -1152,7 +1161,10 @@ export function createLogDashboard(opts = {}) {
       const w = workers.get(selectedWorker);
       if (!w) return;
       const sessionTarget = w.sessionName || w.paneName;
-      if (!sessionTarget) { showFlash("세션 정보 없음 — 아직 준비 중"); return; }
+      if (!sessionTarget) {
+        showFlash("세션 정보 없음 — 아직 준비 중");
+        return;
+      }
       attachToSession(w);
       return;
     }
@@ -1462,7 +1474,9 @@ export function createLogDashboard(opts = {}) {
     // Synapse 실시간 메트릭 (활성 시)
     if (synapseStream.isRunning) {
       const metricsSnap = synapseMetrics.snapshot();
-      tier1.push(truncate(renderMetricsTier1(metricsSnap, totalCols), totalCols));
+      tier1.push(
+        truncate(renderMetricsTier1(metricsSnap, totalCols), totalCols),
+      );
     }
     // 검색 프롬프트 (/ 모드)
     const searchPrompt = searchState.renderPrompt(totalCols);
@@ -1669,7 +1683,8 @@ export function createLogDashboard(opts = {}) {
           : (explicitElapsed ?? nowElapsedSec());
       workers.set(paneName, merged);
       // 토큰 히스토리 추적 (스파크라인용)
-      if (merged.tokens !== undefined) tokenTracker.record(paneName, merged.tokens);
+      if (merged.tokens !== undefined)
+        tokenTracker.record(paneName, merged.tokens);
       ensureSelectedWorker(visibleWorkerNames());
       // follow-tail: 새 데이터 → 자동 scroll 재계산
       if (followTail) detailScrollOffset = 0;

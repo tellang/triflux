@@ -12,12 +12,7 @@
  */
 
 import { execSync } from "node:child_process";
-import {
-  existsSync,
-  readFileSync,
-  readdirSync,
-  unlinkSync,
-} from "node:fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { isProcessAlive } from "./lib/process-utils.mjs";
@@ -50,7 +45,11 @@ function cleanupMultiState() {
   try {
     state = JSON.parse(readFileSync(MULTI_STATE_FILE, "utf8"));
   } catch {
-    try { unlinkSync(MULTI_STATE_FILE); } catch { /* ignore */ }
+    try {
+      unlinkSync(MULTI_STATE_FILE);
+    } catch {
+      /* ignore */
+    }
     return;
   }
 
@@ -66,7 +65,11 @@ function cleanupMultiState() {
     );
   }
 
-  try { unlinkSync(MULTI_STATE_FILE); } catch { /* ignore */ }
+  try {
+    unlinkSync(MULTI_STATE_FILE);
+  } catch {
+    /* ignore */
+  }
 }
 
 // ── 2. orphan PID tracking 파일 정리 ──
@@ -95,7 +98,9 @@ function cleanupOrphanPidFiles() {
 
       for (const pid of pids) {
         if (pid > 0 && isProcessAlive(pid)) {
-          console.error(`[session-stale-cleanup] orphan worker kill: pid=${pid} (from ${f})`);
+          console.error(
+            `[session-stale-cleanup] orphan worker kill: pid=${pid} (from ${f})`,
+          );
           treeKill(pid);
         }
       }
@@ -103,7 +108,11 @@ function cleanupOrphanPidFiles() {
       /* 읽기 실패 무시 */
     }
 
-    try { unlinkSync(filePath); } catch { /* ignore */ }
+    try {
+      unlinkSync(filePath);
+    } catch {
+      /* ignore */
+    }
   }
 }
 

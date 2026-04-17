@@ -11,12 +11,7 @@
       "skill": null,
       "action": "suppress_all",
       "priority": 0,
-      "supersedes": [
-        "tfx-multi",
-        "tfx-unified",
-        "tfx-codex",
-        "tfx-gemini"
-      ],
+      "supersedes": ["tfx-multi", "tfx-unified", "tfx-codex", "tfx-gemini"],
       "exclusive": true,
       "state": null,
       "mcp_route": null
@@ -62,9 +57,7 @@
       ],
       "skill": "tfx-swarm",
       "priority": 1,
-      "supersedes": [
-        "tfx-codex"
-      ],
+      "supersedes": ["tfx-codex"],
       "exclusive": false,
       "state": null,
       "mcp_route": null
@@ -111,9 +104,7 @@
       ],
       "skill": "tfx-auto",
       "priority": 2,
-      "supersedes": [
-        "tfx-auto-codex"
-      ],
+      "supersedes": ["tfx-auto-codex"],
       "exclusive": false,
       "state": null,
       "mcp_route": null
@@ -249,9 +240,7 @@
       ],
       "skill": "tfx-wt",
       "priority": 1,
-      "supersedes": [
-        "tfx-unified"
-      ],
+      "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
       "mcp_route": null
@@ -270,9 +259,7 @@
       ],
       "skill": "tfx-wt",
       "priority": 1,
-      "supersedes": [
-        "tfx-unified"
-      ],
+      "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
       "mcp_route": null
@@ -291,9 +278,7 @@
       ],
       "skill": "tfx-wt",
       "priority": 1,
-      "supersedes": [
-        "tfx-unified"
-      ],
+      "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
       "mcp_route": null
@@ -312,9 +297,7 @@
       ],
       "skill": "tfx-wt",
       "priority": 1,
-      "supersedes": [
-        "tfx-unified"
-      ],
+      "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
       "mcp_route": null

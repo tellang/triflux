@@ -6,9 +6,9 @@
 //
 // 출력: JSON (--json) 또는 마크다운 테이블
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, basename } from "node:path";
+import { basename, join } from "node:path";
 
 const HOME = homedir();
 const CLAUDE_DIR = join(HOME, ".claude");
@@ -40,7 +40,12 @@ function auditSettings() {
   // 권한 모드
   const mode = settings.permissions?.defaultMode;
   if (mode === "bypassPermissions" || mode === "acceptEdits") {
-    addFinding("settings", "warn", `defaultMode: "${mode}" — 도구 승인 없이 실행됨`, "보안 리뷰 시 주의");
+    addFinding(
+      "settings",
+      "warn",
+      `defaultMode: "${mode}" — 도구 승인 없이 실행됨`,
+      "보안 리뷰 시 주의",
+    );
   }
 
   // 환경 변수 내 시크릿 패턴
@@ -54,7 +59,12 @@ function auditSettings() {
   for (const [key, value] of Object.entries(env)) {
     for (const pattern of SECRET_PATTERNS) {
       if (pattern.test(key) || pattern.test(String(value))) {
-        addFinding("settings", "critical", `env에 시크릿 패턴 감지: ${key}`, "환경변수로 분리 권장");
+        addFinding(
+          "settings",
+          "critical",
+          `env에 시크릿 패턴 감지: ${key}`,
+          "환경변수로 분리 권장",
+        );
         break;
       }
     }
@@ -70,13 +80,23 @@ function auditSettings() {
         totalHooks++;
         if (hook.timeout && hook.timeout > 15) {
           longTimeouts++;
-          addFinding("hooks", "warn", `${event} 훅 timeout ${hook.timeout}s (>15s)`, hook.command?.slice(0, 80));
+          addFinding(
+            "hooks",
+            "warn",
+            `${event} 훅 timeout ${hook.timeout}s (>15s)`,
+            hook.command?.slice(0, 80),
+          );
         }
       }
     }
   }
   if (totalHooks > 10) {
-    addFinding("hooks", "info", `settings.json에 훅 ${totalHooks}개 등록`, "SessionStart 성능에 영향 가능");
+    addFinding(
+      "hooks",
+      "info",
+      `settings.json에 훅 ${totalHooks}개 등록`,
+      "SessionStart 성능에 영향 가능",
+    );
   }
 }
 
@@ -92,7 +112,9 @@ function auditClaudeMd() {
     let content;
     try {
       content = readFileSync(mdPath, "utf8");
-    } catch { continue; }
+    } catch {
+      continue;
+    }
 
     const SECRET_LINE_PATTERNS = [
       /(?:api[_-]?key|secret|password)\s*[:=]\s*["']?\S{8,}/i,
@@ -104,7 +126,12 @@ function auditClaudeMd() {
     for (let i = 0; i < lines.length; i++) {
       for (const pattern of SECRET_LINE_PATTERNS) {
         if (pattern.test(lines[i])) {
-          addFinding("claude-md", "critical", `CLAUDE.md:${i + 1} 시크릿 패턴 감지`, basename(mdPath));
+          addFinding(
+            "claude-md",
+            "critical",
+            `CLAUDE.md:${i + 1} 시크릿 패턴 감지`,
+            basename(mdPath),
+          );
           break;
         }
       }
@@ -113,7 +140,12 @@ function auditClaudeMd() {
     // 길이 경고
     const tokenEstimate = Math.ceil(Buffer.byteLength(content, "utf8") / 4);
     if (tokenEstimate > 3000) {
-      addFinding("claude-md", "warn", `CLAUDE.md ~${tokenEstimate} 토큰 (>3000)`, `${basename(mdPath)} — 컨텍스트 로트 위험`);
+      addFinding(
+        "claude-md",
+        "warn",
+        `CLAUDE.md ~${tokenEstimate} 토큰 (>3000)`,
+        `${basename(mdPath)} — 컨텍스트 로트 위험`,
+      );
     }
   }
 }
@@ -134,7 +166,9 @@ function auditMcp() {
     let config;
     try {
       config = JSON.parse(readFileSync(mcpPath, "utf8"));
-    } catch { continue; }
+    } catch {
+      continue;
+    }
 
     const servers = config.mcpServers || config.servers || config;
     for (const [name, def] of Object.entries(servers)) {
@@ -148,16 +182,31 @@ function auditMcp() {
       // 위험 패턴: 쉘 실행, eval, 알 수 없는 npx 패키지
       const cmd = String(def.command || "");
       if (/\beval\b|\bexec\b.*sh\b|\bcurl\b.*\|\s*(?:bash|sh)\b/i.test(cmd)) {
-        addFinding("mcp", "critical", `MCP "${name}": 위험한 명령 패턴`, cmd.slice(0, 100));
+        addFinding(
+          "mcp",
+          "critical",
+          `MCP "${name}": 위험한 명령 패턴`,
+          cmd.slice(0, 100),
+        );
       }
     }
   }
 
   if (totalServers > 10) {
-    addFinding("mcp", "warn", `MCP 서버 ${totalServers}개 등록 (>10)`, "컨텍스트 윈도우 압박 가능");
+    addFinding(
+      "mcp",
+      "warn",
+      `MCP 서버 ${totalServers}개 등록 (>10)`,
+      "컨텍스트 윈도우 압박 가능",
+    );
   }
   if (stdioCount > 5) {
-    addFinding("mcp", "info", `stdio MCP ${stdioCount}개 — 프로세스 spawn 부하`, "불필요한 서버 비활성화 권장");
+    addFinding(
+      "mcp",
+      "info",
+      `stdio MCP ${stdioCount}개 — 프로세스 spawn 부하`,
+      "불필요한 서버 비활성화 권장",
+    );
   }
 }
 
@@ -169,7 +218,9 @@ function auditHookRegistry() {
   let registry;
   try {
     registry = JSON.parse(readFileSync(registryPath, "utf8"));
-  } catch { return; }
+  } catch {
+    return;
+  }
 
   const events = registry.events || {};
   let blockingCount = 0;
@@ -184,17 +235,32 @@ function auditHookRegistry() {
       if (hook.source !== "triflux") {
         const cmd = String(hook.command || "");
         if (/\brm\b|\bdel\b|\bformat\b|\bgit\s+push\b/i.test(cmd)) {
-          addFinding("hooks", "warn", `외부 훅 "${hook.id}": 위험 명령 패턴`, cmd.slice(0, 80));
+          addFinding(
+            "hooks",
+            "warn",
+            `외부 훅 "${hook.id}": 위험 명령 패턴`,
+            cmd.slice(0, 80),
+          );
         }
       }
     }
   }
 
   if (blockingCount > 5) {
-    addFinding("hooks", "info", `blocking 훅 ${blockingCount}개 — 도구 실행 지연 가능`, "불필요한 blocking 해제 검토");
+    addFinding(
+      "hooks",
+      "info",
+      `blocking 훅 ${blockingCount}개 — 도구 실행 지연 가능`,
+      "불필요한 blocking 해제 검토",
+    );
   }
   if (externalCount > 0) {
-    addFinding("hooks", "info", `외부 훅 ${externalCount}개 등록`, "출처 확인 권장");
+    addFinding(
+      "hooks",
+      "info",
+      `외부 훅 ${externalCount}개 등록`,
+      "출처 확인 권장",
+    );
   }
 }
 
@@ -207,9 +273,9 @@ auditHookRegistry();
 // ── 출력 ──
 const summary = {
   total: findings.length,
-  critical: findings.filter(f => f.severity === "critical").length,
-  warn: findings.filter(f => f.severity === "warn").length,
-  info: findings.filter(f => f.severity === "info").length,
+  critical: findings.filter((f) => f.severity === "critical").length,
+  warn: findings.filter((f) => f.severity === "warn").length,
+  info: findings.filter((f) => f.severity === "info").length,
 };
 
 if (JSON_OUTPUT) {
@@ -223,9 +289,13 @@ if (JSON_OUTPUT) {
     console.log(`  | 심각도 | 카테고리 | 이슈 | 상세 |`);
     console.log(`  |--------|----------|------|------|`);
     for (const f of findings) {
-      console.log(`  | ${SEVERITY_ICON[f.severity] || "⚪"} ${f.severity} | ${f.category} | ${f.message} | ${f.detail} |`);
+      console.log(
+        `  | ${SEVERITY_ICON[f.severity] || "⚪"} ${f.severity} | ${f.category} | ${f.message} | ${f.detail} |`,
+      );
     }
-    console.log(`\n  합계: critical=${summary.critical} warn=${summary.warn} info=${summary.info}\n`);
+    console.log(
+      `\n  합계: critical=${summary.critical} warn=${summary.warn} info=${summary.info}\n`,
+    );
   }
 }
 

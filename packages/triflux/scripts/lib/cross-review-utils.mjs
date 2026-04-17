@@ -39,7 +39,12 @@ export function shouldTrackPath(filePath) {
   if (typeof filePath !== "string" || !filePath.trim()) return false;
 
   const lower = filePath.toLowerCase();
-  if (lower.startsWith(".triflux/") || lower.startsWith(".omc/") || lower.startsWith(".claude/")) return false;
+  if (
+    lower.startsWith(".triflux/") ||
+    lower.startsWith(".omc/") ||
+    lower.startsWith(".claude/")
+  )
+    return false;
   if (lower === "package-lock.json" || lower.endsWith("/package-lock.json"))
     return false;
   if (/\.(md|lock|yml|yaml)$/i.test(lower)) return false;
