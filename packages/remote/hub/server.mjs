@@ -21,17 +21,17 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import {
-  broker as brokerInstance,
-  reloadBroker,
-} from "@triflux/core/hub/account-broker.mjs";
+import { createModuleLogger } from "../scripts/lib/logger.mjs";
+import { broker as brokerInstance, reloadBroker } from "@triflux/core/hub/account-broker.mjs";
 import { createAdaptiveEngine } from "@triflux/core/hub/adaptive.mjs";
 import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.mjs";
 import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
 import { createHitlManager } from "@triflux/core/hub/hitl.mjs";
 import { cleanupOrphanNodeProcesses } from "@triflux/core/hub/lib/process-utils.mjs";
 import * as spawnTrace from "@triflux/core/hub/lib/spawn-trace.mjs";
+import { logQuotaRefreshFailures } from "@triflux/core/hub/middleware/quota-middleware.mjs";
 import { wrapRequestHandler } from "@triflux/core/hub/middleware/request-logger.mjs";
+import { createPipeServer } from "./pipe.mjs";
 import { createRouter } from "@triflux/core/hub/router.mjs";
 import { createAdaptiveFingerprintService } from "@triflux/core/hub/session-fingerprint.mjs";
 import {
@@ -42,14 +42,12 @@ import {
   releaseLock,
   writeState,
 } from "@triflux/core/hub/state.mjs";
-import { registerTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
-import { createModuleLogger } from "../scripts/lib/logger.mjs";
-import { createPipeServer } from "./pipe.mjs";
 import { createStoreAdapter } from "./store-adapter.mjs";
 import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
 import { createSwarmLocks } from "./team/swarm-locks.mjs";
 import { createSynapseRegistry } from "./team/synapse-registry.mjs";
+import { registerTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
 import { createTools } from "./tools.mjs";
 import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
 
@@ -994,6 +992,7 @@ export async function startHub({
       ) {
         try {
           const results = await refreshAllAccountQuotas();
+          logQuotaRefreshFailures(hubLog, results);
           return writeJson(res, 200, { ok: true, results, ts: Date.now() });
         } catch (err) {
           hubLog.error(

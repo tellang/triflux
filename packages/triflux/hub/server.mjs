@@ -29,6 +29,7 @@ import { DelegatorService } from "./delegator/index.mjs";
 import { createHitlManager } from "./hitl.mjs";
 import { cleanupOrphanNodeProcesses } from "./lib/process-utils.mjs";
 import * as spawnTrace from "./lib/spawn-trace.mjs";
+import { logQuotaRefreshFailures } from "./middleware/quota-middleware.mjs";
 import { wrapRequestHandler } from "./middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
 import { createRouter } from "./router.mjs";
@@ -991,6 +992,7 @@ export async function startHub({
       ) {
         try {
           const results = await refreshAllAccountQuotas();
+          logQuotaRefreshFailures(hubLog, results);
           return writeJson(res, 200, { ok: true, results, ts: Date.now() });
         } catch (err) {
           hubLog.error(
