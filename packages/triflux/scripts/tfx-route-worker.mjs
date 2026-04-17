@@ -9,6 +9,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FACTORY_CANDIDATES = [
   resolve(SCRIPT_DIR, "../hub/workers/factory.mjs"),
   resolve(SCRIPT_DIR, "./hub/workers/factory.mjs"),
+  resolve(process.cwd(), "hub/workers/factory.mjs"),
 ];
 
 // MCP transport 실패 시 tfx-route.sh가 exec fallback을 수행할 수 있도록
@@ -222,11 +223,31 @@ try {
     if (!result.response.endsWith("\n")) process.stdout.write("\n");
   }
 } catch (error) {
+  // Always emit error.message first for quick identification
+  process.stderr.write(`[tfx-route-worker] ${error.message}\n`);
+
+  // Emit captured stderr from the child process (may be empty)
   if (error.stderr) {
     process.stderr.write(String(error.stderr));
     if (!String(error.stderr).endsWith("\n")) process.stderr.write("\n");
   }
-  process.stderr.write(`${error.message}\n`);
+
+  // When stderr is empty, surface diagnostic details from error.result
+  // so the caller can debug silent failures
+  if (!error.stderr && error.result) {
+    const r = error.result;
+    const diag = [
+      `[tfx-route-worker] diagnostics: exitCode=${r.exitCode ?? "null"} signal=${r.exitSignal ?? "none"} timedOut=${r.timedOut ?? false}`,
+      r.events?.length
+        ? `[tfx-route-worker] events(${r.events.length}): ${JSON.stringify(r.events.slice(-3))}`
+        : "[tfx-route-worker] events: none",
+      r.stdout
+        ? `[tfx-route-worker] child stdout(${r.stdout.length}B): ${r.stdout.slice(0, 512)}`
+        : "[tfx-route-worker] child stdout: empty",
+    ];
+    process.stderr.write(diag.join("\n") + "\n");
+  }
+
   process.exitCode = error.code === "ETIMEDOUT" ? 124 : 1;
 } finally {
   try {

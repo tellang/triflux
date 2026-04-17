@@ -133,39 +133,30 @@ export function createMonitor(opts = {}) {
     const command = buildOpenCommand(agent);
 
     try {
-      try {
-        const { createWtManager } = await deps.importModule(
-          "../hub/team/wt-manager.mjs",
-        );
-        const manager = createWtManager();
-        await manager.createTab({
-          title,
-          command,
-          cwd: process.cwd(),
-          profile: "triflux",
-        });
-      } catch {
-        const child = deps.spawn(
-          "wt.exe",
-          [
-            "-w",
-            "new",
-            "nt",
-            "--title",
+      if (process.platform === "win32") {
+        try {
+          const { createWtManager } = await deps.importModule(
+            "../hub/team/wt-manager.mjs",
+          );
+          const manager = createWtManager();
+          await manager.createTab({
             title,
-            "--",
-            "powershell.exe",
-            "-NoExit",
-            "-Command",
             command,
-          ],
-          {
-            detached: true,
-            stdio: "ignore",
-            windowsHide: false,
-          },
-        );
-        child?.unref?.();
+            cwd: process.cwd(),
+            profile: "triflux",
+          });
+        } catch (wtErr) {
+          statusMessage = `${RED}WT 탭 열기 실패: ${stripUnsafeText(wtErr?.message || "unknown")}${RESET}`;
+          return false;
+        }
+      } else {
+        try {
+          const { execSync } = await deps.importModule("node:child_process");
+          execSync(`tmux new-window -n "${title}" "${command}"`, { timeout: 5000, stdio: "ignore" });
+        } catch (tmuxErr) {
+          statusMessage = `${RED}tmux 새 창 열기 실패: ${stripUnsafeText(tmuxErr?.message || "unknown")}${RESET}`;
+          return false;
+        }
       }
       statusMessage = `${GREEN}${stripUnsafeText(agent.agent || "agent")} 열기 시도 완료${RESET}`;
       return true;

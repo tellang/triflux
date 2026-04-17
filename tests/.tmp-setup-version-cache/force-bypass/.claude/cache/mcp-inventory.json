@@ -1,0 +1,176 @@
+{
+  "timestamp": "2026-04-15T12:04:29.761Z",
+  "codex": {
+    "available": true,
+    "servers": [
+      {
+        "name": "brave-search",
+        "status": "enabled",
+        "tool_count": 2,
+        "domain_tags": [
+          "web",
+          "search",
+          "news",
+          "current"
+        ]
+      },
+      {
+        "name": "chrome-devtools",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "context7",
+        "status": "enabled",
+        "tool_count": 2,
+        "domain_tags": [
+          "docs",
+          "reference",
+          "api",
+          "sdk",
+          "library"
+        ]
+      },
+      {
+        "name": "exa",
+        "status": "enabled",
+        "tool_count": 2,
+        "domain_tags": [
+          "code",
+          "repository",
+          "examples",
+          "search"
+        ]
+      },
+      {
+        "name": "jira",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "notion",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "omx_code_intel",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": [
+          "code"
+        ]
+      },
+      {
+        "name": "omx_memory",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "omx_state",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "omx_team_run",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "omx_trace",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "playwright",
+        "status": "enabled",
+        "tool_count": 5,
+        "domain_tags": [
+          "browser",
+          "ui",
+          "visual",
+          "e2e"
+        ]
+      },
+      {
+        "name": "serena",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "tavily",
+        "status": "enabled",
+        "tool_count": 2,
+        "domain_tags": [
+          "research",
+          "search",
+          "news",
+          "verification",
+          "current"
+        ]
+      },
+      {
+        "name": "Name",
+        "status": "unknown",
+        "tool_count": 0,
+        "domain_tags": []
+      },
+      {
+        "name": "tfx-hub",
+        "status": "enabled",
+        "tool_count": 0,
+        "domain_tags": []
+      }
+    ]
+  },
+  "gemini": {
+    "available": false,
+    "servers": []
+  },
+  "claude": {
+    "available": true,
+    "servers": [
+      {
+        "name": "brave-search",
+        "status": "available",
+        "tool_count": 2,
+        "domain_tags": [
+          "web",
+          "search",
+          "news",
+          "current"
+        ]
+      },
+      {
+        "name": "exa",
+        "status": "available",
+        "tool_count": 2,
+        "domain_tags": [
+          "code",
+          "repository",
+          "examples",
+          "search"
+        ]
+      },
+      {
+        "name": "context7",
+        "status": "available",
+        "tool_count": 2,
+        "domain_tags": [
+          "docs",
+          "reference",
+          "api",
+          "sdk",
+          "library"
+        ]
+      }
+    ]
+  }
+}

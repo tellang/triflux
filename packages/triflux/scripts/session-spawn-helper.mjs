@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { spawn } from "../hub/lib/spawn-trace.mjs";
+import { createWtManager } from "../hub/team/wt-manager.mjs";
 
 const SESSION_PREFIX = "tfx-isolated";
 const DEFAULT_ATTACH_PROFILE = "triflux";
@@ -103,31 +104,17 @@ export function createIsolatedSession(options = {}) {
   return { sessionName };
 }
 
-export function attachWithWindowsTerminal(sessionName, options = {}) {
+export async function attachWithWindowsTerminal(sessionName, options = {}) {
   const profile = options.profile || DEFAULT_ATTACH_PROFILE;
   const title = options.title || sessionName;
-  const spawnFn = options.spawnFn || spawn;
 
-  // sp (split-pane), not new-tab
-  const wtArgs = [
-    "sp",
-    "-p",
-    profile,
-    "--title",
+  const wt = createWtManager();
+  await wt.splitPane({
+    direction: "H",
     title,
-    "--",
-    "psmux",
-    "attach-session",
-    "-t",
-    sessionName,
-  ];
-  const child = spawnFn("wt.exe", wtArgs, {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: false,
+    profile,
+    command: `psmux attach-session -t ${sessionName}`,
   });
-  child.unref();
-  return wtArgs;
 }
 
 export function waitForCompletion(sessionName, opts = {}) {
@@ -252,7 +239,7 @@ async function main() {
   process.stdout.write(`[session-spawn] 세션 생성: ${sessionName}\n`);
 
   if (args.attach) {
-    attachWithWindowsTerminal(sessionName);
+    await attachWithWindowsTerminal(sessionName);
     process.stdout.write(`[session-spawn] WT split-pane attach 완료\n`);
   }
 

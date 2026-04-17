@@ -147,7 +147,10 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
       parts.push("--output-last-message", resultFile);
     }
     if (FEATURES.colorNever) parts.push("--color", "never");
-    if (cwd) parts.push("--cwd", `'${escapePwshSingleQuoted(cwd)}'`);
+    // NOTE: `codex exec`는 --cwd 플래그를 지원하지 않는다. Node spawn의 cwd
+    // 옵션으로 child process의 working directory를 제어한다 (conductor.mjs 참조).
+    // opts.cwd는 기록용으로만 받아두고 CLI command에는 반영하지 않는다.
+    // (이전 커밋에서 잘못 추가되어 shard 전체가 exit 2로 크래시한 회귀 #94 후속 이슈)
     if (Array.isArray(mcpServers)) {
       for (const server of mcpServers) {
         parts.push("-c", `mcp_servers.${server}.enabled=true`);
@@ -218,14 +221,15 @@ export async function executeWithCircuitBroker({
   const { withRetry } = await import("./workers/worker-utils.mjs");
 
   // access broker as live binding property (not destructured) so reloadBroker() propagates
-  const lease = brokerMod.broker?.lease({ provider });
-  if (!lease) {
+  const hasBroker = brokerMod.broker != null;
+  const lease = hasBroker ? brokerMod.broker.lease({ provider }) : null;
+  if (hasBroker && !lease) {
     return createResult(false, { fellBack: true, failureMode: "circuit_open" });
   }
 
   const preflight = await preflightFn(opts);
   if (!preflight.ok) {
-    brokerMod.broker.release(lease.id, { ok: false });
+    if (lease) brokerMod.broker.release(lease.id, { ok: false });
     return createResult(false, {
       stderr: appendWarnings("", preflight.warnings),
       fellBack: opts.fallbackToClaude !== false,
@@ -273,20 +277,19 @@ export async function executeWithCircuitBroker({
   }
 
   if (lastResult.ok) {
-    brokerMod.broker.release(lease.id, { ok: true });
+    if (lease) brokerMod.broker.release(lease.id, { ok: true });
     return lastResult;
   }
 
-  if (lastResult.failureMode === "rate_limited") {
-    const text = `${lastResult.output || ""}\n${lastResult.stderr || ""}`;
-    const coolMs = parseRetryAfterMs(text, provider);
-    brokerMod.broker.markRateLimited(lease.id, coolMs);
-    brokerMod.broker.emit("cooldown", { id: lease.id, provider, coolMs, reason: "quota_exhausted" });
-  } else if (lastResult.failureMode === "crash") {
-    // 인프라 에러(모듈 누락, 서버 에러 등)는 계정 문제가 아님 → circuit/cooldown 건너뜀
-    brokerMod.broker.release(lease.id, { ok: false, skipCircuit: true });
-  } else {
-    brokerMod.broker.release(lease.id, { ok: false });
+  if (lease) {
+    if (lastResult.failureMode === "rate_limited") {
+      const text = `${lastResult.output || ""}\n${lastResult.stderr || ""}`;
+      const coolMs = parseRetryAfterMs(text, provider);
+      brokerMod.broker.markRateLimited(lease.id, coolMs);
+      brokerMod.broker.emit("cooldown", { id: lease.id, provider, coolMs, reason: "quota_exhausted" });
+    } else {
+      brokerMod.broker.release(lease.id, { ok: false });
+    }
   }
   return {
     ...lastResult,

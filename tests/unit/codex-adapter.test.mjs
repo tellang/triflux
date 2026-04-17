@@ -173,7 +173,19 @@ test("execute opens the circuit after repeated crashes", async () => {
       'approval_mode = "full-auto"\n',
       "utf8",
     );
+    // broker needs accounts.json to enable circuit breaker
+    const brokerDir = join(home, ".claude", "cache", "tfx-hub");
+    mkdirSync(brokerDir, { recursive: true });
+    writeFileSync(
+      join(brokerDir, "accounts.json"),
+      JSON.stringify({ codex: [{ id: "test-codex", mode: "profile", profile: "default" }] }),
+      "utf8",
+    );
     process.env.FAKE_CODEX_FAIL = "1";
+
+    // reload broker in the CACHED module (same instance executeWithCircuitBroker uses)
+    const brokerMod = await import("../../hub/account-broker.mjs");
+    brokerMod.reloadBroker();
 
     const { execute, getCircuitState } = await importFresh(
       "../../hub/codex-adapter.mjs",
@@ -190,7 +202,7 @@ test("execute opens the circuit after repeated crashes", async () => {
       assert.equal(result.failureMode, "crash");
     }
 
-    assert.equal(getCircuitState().state, "open");
+    assert.equal((await getCircuitState()).state, "open");
     const blocked = await execute({
       prompt: "blocked",
       workdir: root,

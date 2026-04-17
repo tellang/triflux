@@ -460,3 +460,62 @@ describe("tfx-route.sh — 라우팅 테이블 메타데이터", () => {
     assert.match(out(result), /agent=designer/);
   });
 });
+
+// ── executor 라우팅 회귀 방지 (근본 원인: OMC executor agent는 Claude Sonnet, route.sh 경유 안 함) ──
+
+describe("tfx-route.sh — executor 라우팅 회귀 방지", { timeout: 180000 }, () => {
+  it("executor + TFX_NO_CLAUDE_NATIVE=1 + fixture codex → type=codex 유지", () => {
+    // CODEX_BIN이 가용한 상태에서 executor는 기본적으로 codex로 라우팅된다.
+    // TFX_NO_CLAUDE_NATIVE=1은 이 경로에서 no-op (apply_no_claude_native_mode는
+    // CLI_TYPE이 이미 claude-native일 때만 동작). executor가 codex로 라우팅됨을 확인.
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
+      fixtureEnv({ TFX_NO_CLAUDE_NATIVE: "1", FAKE_CODEX_MODE: "exec" }),
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /type=codex/, out(result));
+    assert.match(out(result), /agent=executor/, out(result));
+  });
+
+  it("executor + TFX_NO_CLAUDE_NATIVE=1 + CODEX_BIN 미설치 → 종료 코드 0, 경고 또는 폴백", () => {
+    // codex/gemini 모두 미검출이면 route.sh는 claude-native로 fallback하고
+    // TFX_NO_CLAUDE_NATIVE=1 이라도 'codex를 찾지 못해 claude-native 유지' 경고만 낸다.
+    // 에러로 종료되지 않아야 하고 (exit 0), 메타데이터가 출력되어야 한다.
+    const result = runBash(
+      `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=__nonexistent_codex__ GEMINI_BIN=__nonexistent_gemini__ bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
+    );
+    assert.equal(result.status, 0, out(result));
+    // 경고 메시지 또는 ROUTE_TYPE 메타데이터 중 하나는 반드시 출력됨
+    const combined = out(result);
+    const hasWarning = /claude-native 유지|claude-native fallback/.test(combined);
+    const hasMetadata = /ROUTE_TYPE=/.test(combined);
+    assert.ok(hasWarning || hasMetadata, `expected warning or metadata:\n${combined}`);
+  });
+});
+
+// ── TFX_FORCE_CODEX_BYPASS escape hatch 회귀 방지 (deep-review L3) ──
+
+describe("tfx-route.sh — TFX_FORCE_CODEX_BYPASS escape hatch", { timeout: 180000 }, () => {
+  it("TFX_FORCE_CODEX_BYPASS=1 → 라우팅 정상 동작 + type=codex 유지", () => {
+    // escape hatch가 활성이어도 라우팅이 깨지지 않아야 한다.
+    // 실제 --dangerously-bypass 플래그 방출은 awk edge case 테스트에서 검증.
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
+      fixtureEnv({ TFX_FORCE_CODEX_BYPASS: "1", FAKE_CODEX_MODE: "exec" }),
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /type=codex/, out(result));
+    assert.match(out(result), /agent=executor/, out(result));
+  });
+
+  it("TFX_FORCE_CODEX_BYPASS=0 → 정상 경로로 라우팅, type=codex 유지", () => {
+    // escape hatch 비활성 시에도 동일하게 type=codex로 라우팅되어야 한다.
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
+      fixtureEnv({ TFX_FORCE_CODEX_BYPASS: "0", FAKE_CODEX_MODE: "exec" }),
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /type=codex/, out(result));
+    assert.match(out(result), /agent=executor/, out(result));
+  });
+});

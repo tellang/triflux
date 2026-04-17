@@ -1,0 +1,49 @@
+name: Bug report
+description: Reproducible bug that needs triage and a fix branch
+labels:
+  - bug
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What broke?
+      description: Describe the user-visible failure plainly.
+      placeholder: CLI exits 1 when /tfx-review runs from a clean repo.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Exact steps and commands.
+      placeholder: |
+        1. npm install -g triflux
+        2. run /tfx-review
+        3. observe failure
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      placeholder: The command completes and prints the review summary.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Paste logs, screenshots, stack traces, or failing commit SHA.
+    validations:
+      required: true
+  - type: dropdown
+    id: release-impact
+    attributes:
+      label: Release impact
+      options:
+        - patch
+        - minor
+        - major
+        - no release
+    validations:
+      required: true

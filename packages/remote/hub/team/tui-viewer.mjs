@@ -74,6 +74,9 @@ const INTERNAL_PATTERNS = [
   /\.err\b/,
   /completion[-_]token/i,
   /^---\s*HANDOFF\s*---$/i,
+  /Get-Content/,
+  /-color\s+never/,
+  /AppData[\\/]Local[\\/]Temp[\\/]tfx-headless/,
 ];
 
 function isInternalLine(line) {

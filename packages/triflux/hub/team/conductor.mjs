@@ -8,7 +8,6 @@
 // 3. Auto-restart (maxRestarts=3)
 // 4. JSONL event log (블랙박스 리코더)
 
-import { execFile, spawn } from "../lib/spawn-trace.mjs";
 import { EventEmitter } from "node:events";
 import {
   copyFileSync,
@@ -20,6 +19,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
+import { execFile, spawn } from "../lib/spawn-trace.mjs";
 import { killProcess } from "../platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
 import {
@@ -28,8 +28,13 @@ import {
 } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
-import { buildLauncher, getAdapter } from "./launcher-template.mjs";
-import { createRemoteProbe } from "./remote-probe.mjs";
+import { buildLauncher } from "./launcher-template.mjs";
+import {
+  buildSynapseTaskSummary,
+  heartbeatSynapseSession,
+  registerSynapseSession,
+  unregisterSynapseSession,
+} from "./synapse-http.mjs";
 
 /** 세션 상태 */
 export const STATES = Object.freeze({
@@ -67,12 +72,47 @@ const DEFAULT_MAX_RESTARTS = 3;
 const DEFAULT_GRACE_MS = 10_000;
 
 /**
+ * Auth 파일을 lease 소스에서 CLI 대상 경로로 복사.
+ * @param {object} lease — broker lease 객체 (mode, authFile 필수)
+ * @param {'codex'|'gemini'} agent
+ * @param {string} sessionId — 로깅용
+ * @param {object} eventLog — createEventLog 인스턴스
+ */
+function swapAuthFile(lease, agent, sessionId, eventLog) {
+  if (lease?.mode !== "auth" || !lease.authFile) return true;
+  const dests =
+    agent === "codex"
+      ? [join(homedir(), ".codex", "auth.json")]
+      : [
+          join(homedir(), ".gemini", "oauth_creds.json"),
+          join(homedir(), ".gemini", "gemini-credentials.json"),
+        ];
+  let allOk = true;
+  for (const dest of dests) {
+    try {
+      mkdirSync(dirname(dest), { recursive: true });
+      copyFileSync(lease.authFile, dest);
+      eventLog.append("auth_copy", { session: sessionId, agent, dest });
+    } catch (err) {
+      allOk = false;
+      eventLog.append("auth_copy_error", {
+        session: sessionId,
+        dest,
+        error: err.message,
+      });
+    }
+  }
+  return allOk;
+}
+
+/**
  * Conductor 팩토리.
  * @param {object} opts
  * @param {string} opts.logsDir — 이벤트 로그 디렉토리
  * @param {number} [opts.maxRestarts=3]
  * @param {number} [opts.graceMs=10000] — shutdown grace period
  * @param {object} [opts.probeOpts] — health-probe 옵션 오버라이드
+ * @param {object} [opts.broker] — AccountBroker 인스턴스 (tierFallback 구독용)
  * @returns {Conductor}
  */
 export function createConductor(opts = {}) {
@@ -81,6 +121,7 @@ export function createConductor(opts = {}) {
     maxRestarts = DEFAULT_MAX_RESTARTS,
     graceMs = DEFAULT_GRACE_MS,
     probeOpts = {},
+    broker: optsBroker,
   } = opts;
 
   if (!logsDir) throw new Error("logsDir is required");
@@ -90,6 +131,25 @@ export function createConductor(opts = {}) {
   const sessions = new Map();
   let shuttingDown = false;
   const publicApi = null;
+  const synapseOpts = {
+    baseUrl: opts.synapseBaseUrl,
+    fetchImpl: opts.synapseFetch,
+  };
+
+  function buildSynapseMeta(session, state = session.state, reason = "") {
+    return {
+      sessionId: session.id,
+      host:
+        typeof session.config.host === "string" &&
+        session.config.host.length > 0
+          ? session.config.host
+          : "local",
+      taskSummary: buildSynapseTaskSummary(session.config.prompt),
+      status: state,
+      reason,
+      isRemote: Boolean(session.config.remote),
+    };
+  }
 
   // 공유 event log (모든 세션 이벤트를 하나의 JSONL에)
   const eventLog = createEventLog(join(logsDir, "conductor-events.jsonl"));
@@ -129,6 +189,21 @@ export function createConductor(opts = {}) {
       to: nextState,
       reason,
     });
+
+    if (nextState === STATES.HEALTHY) {
+      registerSynapseSession(
+        buildSynapseMeta(session, nextState, reason),
+        synapseOpts,
+      );
+    }
+    heartbeatSynapseSession(
+      session.id,
+      buildSynapseMeta(session, nextState, reason),
+      synapseOpts,
+    );
+    if (nextState === STATES.COMPLETED || nextState === STATES.DEAD) {
+      unregisterSynapseSession(session.id, synapseOpts);
+    }
 
     // Terminal state cleanup
     if (TERMINAL_STATES.has(nextState)) {
@@ -536,13 +611,16 @@ export function createConductor(opts = {}) {
     } else if (agent === "gemini") {
       remoteBin = "gemini -y";
     } else {
-      remoteBin = "codex exec -s danger-full-access --dangerously-bypass-approvals-and-sandbox";
+      remoteBin =
+        "codex exec -s danger-full-access --dangerously-bypass-approvals-and-sandbox";
     }
 
     // prompt는 stdin으로 전달 — 셸 이스케이프 문제 완전 회피
     const sshArgs = [
-      "-o", "ConnectTimeout=30",
-      "-o", "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=30",
+      "-o",
+      "BatchMode=yes",
       host,
       `${cdPrefix}${remoteBin}`,
     ];
@@ -597,10 +675,13 @@ export function createConductor(opts = {}) {
       host,
     });
 
-    // stdout/stderr 추적
+    // stdout/stderr 추적 (recentOutput으로 rate_limit 패턴 감지 가능)
     let outputBytes = 0;
+    let recentOutput = "";
     const trackOutput = (buf) => {
       outputBytes += buf.length;
+      const text = buf.toString("utf8");
+      recentOutput = (recentOutput + text).slice(-2000);
     };
 
     child.stdout?.on("data", (buf) => {
@@ -652,9 +733,14 @@ export function createConductor(opts = {}) {
         host,
       });
 
+      // 원격 세션은 broker lease를 사용하지 않으므로 release 불필요
+      // (spawnSession에서 config.remote === true일 때 lease 건너뜀)
       if (code === 0) {
         transition(session, STATES.COMPLETED, `exit_${code}`);
         emitter.emit("completed", { sessionId: session.id });
+        if (typeof session.config.onCompleted === "function") {
+          session.config.onCompleted({ sessionId: session.id });
+        }
         maybeAutoShutdown();
       } else {
         handleFailure(session, `remote_exit_${code}`);
@@ -739,32 +825,7 @@ export function createConductor(opts = {}) {
       : config;
 
     // auth file copy — broker resolved absolute path, conductor does the actual copy
-    if (lease?.mode === "auth" && lease.authFile) {
-      const dests =
-        config.agent === "codex"
-          ? [join(homedir(), ".codex", "auth.json")]
-          : [
-              join(homedir(), ".gemini", "oauth_creds.json"),
-              join(homedir(), ".gemini", "gemini-credentials.json"),
-            ];
-      for (const dest of dests) {
-        try {
-          mkdirSync(dirname(dest), { recursive: true });
-          copyFileSync(lease.authFile, dest);
-          eventLog.append("auth_copy", {
-            session: config.id,
-            agent: config.agent,
-            dest,
-          });
-        } catch (err) {
-          eventLog.append("auth_copy_error", {
-            session: config.id,
-            dest,
-            error: err.message,
-          });
-        }
-      }
-    }
+    swapAuthFile(lease, config.agent, config.id, eventLog);
 
     // 원격 세션은 launcher 불필요 (이미 원격에서 실행 중)
     const launcher = resolvedConfig.remote
@@ -838,6 +899,7 @@ export function createConductor(opts = {}) {
     }
 
     if (!session.child) return false;
+    if (!session.child.stdin?.writable) return false;
     try {
       session.child.stdin.write(`${text}\n`);
       eventLog.append("stdin", { session: id, text: text.slice(0, 100) });
@@ -892,10 +954,42 @@ export function createConductor(opts = {}) {
       });
 
     await Promise.allSettled(cleanups);
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+    if (brokerInstance && onTierFallback) {
+      brokerInstance.removeListener("tierFallback", onTierFallback);
+    }
     if (conductor._meshBridge) conductor._meshBridge.detach();
     await eventLog.flush();
     await eventLog.close();
     emitter.emit("shutdown");
+  }
+
+  // ── broker tierFallback 구독 ──────────────────────────────────
+  // 토큰 만료 등으로 상위 tier 계정이 불가능해지면, 활성 세션의 auth를 새 lease로 교체.
+  const brokerInstance = optsBroker ?? null;
+  const onTierFallback = brokerInstance
+    ? ({ provider }) => {
+        for (const session of sessions.values()) {
+          if (TERMINAL_STATES.has(session.state)) continue;
+          if (session.config.agent !== provider) continue;
+          if (session.config.remote) continue;
+
+          const newLease = brokerInstance.lease({ provider });
+          if (!newLease) continue;
+
+          swapAuthFile(newLease, provider, session.id, eventLog);
+          eventLog.append("tier_fallback_swap", {
+            session: session.id,
+            agent: provider,
+            newAccount: newLease.id,
+          });
+        }
+      }
+    : null;
+
+  if (brokerInstance && onTierFallback) {
+    brokerInstance.on("tierFallback", onTierFallback);
   }
 
   // Shutdown traps

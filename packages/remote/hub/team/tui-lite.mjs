@@ -22,159 +22,30 @@ import {
   truncate,
   wcswidth,
 } from "./ansi.mjs";
+import {
+  clamp,
+  formatTokens,
+  loadVersion,
+  normalizeWorkerState as coreNormalizeWorkerState,
+  resolveViewportColumns,
+  resolveViewportRows,
+  runtimeStatus,
+  sanitizeFiles,
+  sanitizeOneLine,
+  sanitizeTextBlock,
+  wrapText as wrapTextFull,
+  VALID_TABS as VALID_TABS_ARRAY,
+} from "./tui-core.mjs";
 
-const FALLBACK_COLUMNS = 100,
-  FALLBACK_ROWS = 24;
-const VALID_TABS = new Set(["log", "detail", "files"]);
-
-let VERSION = "lite";
-try {
-  const { createRequire } = await import("node:module");
-  VERSION = createRequire(import.meta.url)("../../package.json").version;
-} catch {}
-
-const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-
-function sanitizeBlock(text, rawMode = false) {
-  const value = String(text || "").replace(/\r/g, "");
-  const cleaned = rawMode
-    ? value
-    : value
-        .replace(/```[\s\S]*?(?:```|$)/g, "\n")
-        .replace(/^\s*```.*$/gm, "")
-        .replace(/^(?:PS\s+\S[^\n]*?>|>\s+|\$\s+)[^\n]*/gm, "");
-  return cleaned
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => line !== "--- HANDOFF ---")
-    .join("\n")
-    .trim();
-}
-
-function sanitizeOneLine(text, fallback = "") {
-  return sanitizeBlock(text).replace(/\s+/g, " ").trim() || fallback;
-}
-
-function sanitizeFiles(files) {
-  const list = Array.isArray(files) ? files : String(files || "").split(",");
-  return list.map((entry) => sanitizeOneLine(entry)).filter(Boolean);
-}
-
-function normalizeTokens(tokens) {
-  if (tokens === null || tokens === undefined || tokens === "") return "";
-  if (typeof tokens === "number" && Number.isFinite(tokens)) return tokens;
-  const raw = sanitizeOneLine(tokens);
-  const match = raw.match(/(\d+(?:[.,]\d+)?\s*[kKmM]?)/);
-  return match ? match[1].replace(/\s+/g, "").toLowerCase() : raw;
-}
-
-function formatTokens(tokens) {
-  if (!tokens && tokens !== 0) return "n/a";
-  if (typeof tokens === "number") {
-    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}m`;
-    if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  }
-  return String(tokens);
-}
+const VERSION = await loadVersion("lite");
+const VALID_TABS = new Set(VALID_TABS_ARRAY);
 
 function wrap(text, width) {
-  const limit = Math.max(8, width);
-  const lines = [];
-  for (const rawLine of sanitizeBlock(text).split("\n")) {
-    const words = rawLine.split(/\s+/).filter(Boolean);
-    if (words.length === 0) continue;
-    let current = "";
-    for (const word of words) {
-      const next = current ? `${current} ${word}` : word;
-      if (wcswidth(next) <= limit) {
-        current = next;
-        continue;
-      }
-      if (current) lines.push(current);
-      current = word;
-      while (wcswidth(current) > limit) {
-        lines.push(current.slice(0, limit));
-        current = current.slice(limit);
-      }
-    }
-    if (current) lines.push(current);
-  }
-  return lines;
+  return wrapTextFull(text, width);
 }
 
-const runtimeStatus = (worker) =>
-  worker?.handoff?.status || worker?.status || "pending";
-
 function normalizeWorkerState(existing = {}, state = {}) {
-  const handoff =
-    state.handoff === undefined
-      ? existing.handoff
-      : {
-          ...(existing.handoff || {}),
-          ...(state.handoff || {}),
-          verdict:
-            state.handoff?.verdict !== undefined
-              ? sanitizeOneLine(state.handoff.verdict)
-              : existing.handoff?.verdict,
-          confidence:
-            state.handoff?.confidence !== undefined
-              ? sanitizeOneLine(state.handoff.confidence)
-              : existing.handoff?.confidence,
-          status:
-            state.handoff?.status !== undefined
-              ? sanitizeOneLine(state.handoff.status)
-              : existing.handoff?.status,
-          files_changed:
-            state.handoff?.files_changed !== undefined
-              ? sanitizeFiles(state.handoff.files_changed)
-              : existing.handoff?.files_changed,
-        };
-  return {
-    ...existing,
-    ...state,
-    cli:
-      state.cli !== undefined
-        ? sanitizeOneLine(state.cli, existing.cli || "codex")
-        : existing.cli || "codex",
-    status:
-      state.status !== undefined
-        ? sanitizeOneLine(state.status, existing.status || "pending")
-        : existing.status || "pending",
-    snapshot:
-      state.snapshot !== undefined
-        ? sanitizeBlock(state.snapshot)
-        : existing.snapshot,
-    summary:
-      state.summary !== undefined
-        ? sanitizeBlock(state.summary)
-        : existing.summary,
-    detail:
-      state.detail !== undefined
-        ? sanitizeBlock(state.detail)
-        : existing.detail,
-    findings:
-      state.findings !== undefined
-        ? sanitizeFiles(state.findings)
-        : existing.findings,
-    files_changed:
-      state.files_changed !== undefined
-        ? sanitizeFiles(state.files_changed)
-        : existing.files_changed,
-    confidence:
-      state.confidence !== undefined
-        ? sanitizeOneLine(state.confidence)
-        : existing.confidence,
-    tokens:
-      state.tokens !== undefined
-        ? normalizeTokens(state.tokens)
-        : existing.tokens,
-    progress:
-      state.progress !== undefined
-        ? clamp(Number(state.progress) || 0, 0, 1)
-        : existing.progress,
-    handoff,
-  };
+  return coreNormalizeWorkerState(existing, state);
 }
 
 function frame(lines, width, border = MOCHA.border) {
@@ -314,13 +185,8 @@ export function createLiteDashboard(opts = {}) {
     if (!closed) stream.write(text);
   };
   const workerNames = () => [...workers.keys()].sort();
-  const viewportColumns = () =>
-    Math.max(
-      48,
-      columns || stream?.columns || process.stdout?.columns || FALLBACK_COLUMNS,
-    );
-  const viewportRows = () =>
-    Math.max(10, rows || stream?.rows || process.stdout?.rows || FALLBACK_ROWS);
+  const viewportColumns = () => resolveViewportColumns({ columns, stream });
+  const viewportRows = () => resolveViewportRows({ rows, stream });
   const ensureSelection = (names) => {
     if (names.length && (!selectedWorker || !workers.has(selectedWorker)))
       selectedWorker = names[0];

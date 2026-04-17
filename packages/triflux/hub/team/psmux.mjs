@@ -1,10 +1,12 @@
 // hub/team/psmux.mjs — Windows psmux 세션/키바인딩/캡처/steering 관리
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
-import * as childProcess from "../lib/spawn-trace.mjs";
+
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
+import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
+import childProcess from "../lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 
 const PSMUX_BIN = (() => {
@@ -35,7 +37,7 @@ const PSMUX_BIN = (() => {
   return "psmux"; // 최종 fallback — 원래대로
 })();
 const GIT_BASH =
-  process.env.GIT_BASH_PATH || "C:\\Program Files\\Git\\bin\\bash.exe";
+  process.env.GIT_BASH_PATH || resolveGitBashExecutable() || "bash";
 
 /** Windows psmux 세션의 기본 셸을 PowerShell로 강제한다 (pwsh7 우선, ps5 fallback). */
 const PWSH_BIN = (() => {
@@ -1041,17 +1043,7 @@ export function startCapture(sessionName, paneNameOrTarget) {
 // WSL bash에서는 /c/Users/... 경로가 유효하지 않아 exit 127 발생.
 // psmux pane 용 (PowerShell → bash 실행): & "path" 형식
 // Node.js execSync 용 (직접 실행): "path" 형식
-const _gitBashPath = (() => {
-  if (!IS_WINDOWS) return null;
-  const candidates = [
-    "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
-    "C:\\Program Files (x86)\\Git\\usr\\bin\\bash.exe",
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-  return null;
-})();
+const _gitBashPath = IS_WINDOWS ? resolveGitBashExecutable() : null;
 // PowerShell call operator(&)가 필요: & "C:\...\bash.exe" -c '...'
 const GIT_BASH_BIN_PS = _gitBashPath ? `& "${_gitBashPath}"` : "bash";
 // Node.js execSync에서 직접 실행할 때는 따옴표만
@@ -1273,6 +1265,7 @@ export async function waitForPattern(
 
 /**
  * 완료 토큰이 찍힐 때까지 대기하고 exit code를 파싱한다.
+ * NOTE: 주 채널은 headless.waitForCompletionWithStallDetect이며, 본 함수는 fallback 채널이다.
  * @param {string} sessionName
  * @param {string} paneNameOrTarget
  * @param {string} token

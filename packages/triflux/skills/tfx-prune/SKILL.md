@@ -84,7 +84,7 @@ argument-hint: "[파일 경로 또는 git diff 범위]"
 Claude (Agent, background):
 ```
 Agent(
-  subagent_type="claude-sonnet-4-5",
+  subagent_type="general-purpose",
   model="opus",
   run_in_background=true,
   prompt="다음 파일에서 AI 슬롭을 감지하세요. 코드 품질 관점으로 분석합니다.

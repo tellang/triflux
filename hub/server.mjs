@@ -2,6 +2,7 @@
 
 import { execSync as execSyncHub } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { EventEmitter } from "node:events";
 import {
   existsSync,
   mkdirSync,
@@ -21,12 +22,16 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
-import { broker as brokerInstance, reloadBroker } from "./account-broker.mjs";
+import {
+  broker as brokerInstance,
+  reloadBroker,
+} from "./account-broker.mjs";
 import { createAdaptiveEngine } from "./adaptive.mjs";
 import { createAssignCallbackServer } from "./assign-callbacks.mjs";
 import { DelegatorService } from "./delegator/index.mjs";
 import { createHitlManager } from "./hitl.mjs";
 import { cleanupOrphanNodeProcesses } from "./lib/process-utils.mjs";
+import * as spawnTrace from "./lib/spawn-trace.mjs";
 import { wrapRequestHandler } from "./middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
 import { createRouter } from "./router.mjs";
@@ -40,7 +45,10 @@ import {
   writeState,
 } from "./state.mjs";
 import { createStoreAdapter } from "./store-adapter.mjs";
+import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
+import { createSwarmLocks } from "./team/swarm-locks.mjs";
+import { createSynapseRegistry } from "./team/synapse-registry.mjs";
 import { registerTeamBridge } from "./team-bridge.mjs";
 import { createTools } from "./tools.mjs";
 import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
@@ -63,6 +71,7 @@ const ALLOWED_ORIGIN_RE =
 const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PUBLIC_DIR = resolve(join(PROJECT_ROOT, "hub", "public"));
 const CACHE_DIR = join(homedir(), ".claude", "cache");
+const HUB_DEFAULT_PORT = 27888;
 const BATCH_EVENTS_PATH = join(CACHE_DIR, "batch-events.jsonl");
 const SV_ACCUMULATOR_PATH = join(CACHE_DIR, "sv-accumulator.json");
 const CODEX_RATE_LIMITS_CACHE_PATH = join(
@@ -75,7 +84,8 @@ const AIMD_WINDOW_MS = 30 * 60 * 1000;
 const AIMD_INITIAL_BATCH_SIZE = 3;
 const AIMD_MIN_BATCH_SIZE = 1;
 const AIMD_MAX_BATCH_SIZE = 10;
-const HUB_IDLE_TIMEOUT_DEFAULT_MS = 10 * 60 * 1000;
+const SYNAPSE_VALID_OPS = new Set(["checkout", "rebase", "cherry-pick", "reset", "stash-pop", "worktree-remove"]);
+const HUB_IDLE_TIMEOUT_DEFAULT_MS = 0; // 0 = 영구 실행 (idle shutdown 비활성). TFX_HUB_IDLE_TIMEOUT_MS 환경변수로 오버라이드 가능
 const HUB_IDLE_SWEEP_DEFAULT_MS = 60 * 1000;
 const STATIC_CONTENT_TYPES = Object.freeze({
   ".html": "text/html",
@@ -177,6 +187,171 @@ async function parseBody(req) {
 const PID_DIR = join(homedir(), ".claude", "cache", "tfx-hub");
 const PID_FILE = join(PID_DIR, "hub.pid");
 const TOKEN_FILE = join(homedir(), ".claude", ".tfx-hub-token");
+
+function readHubPidFile(
+  pidFilePath = PID_FILE,
+  { exists = existsSync, readFile = readFileSync } = {},
+) {
+  if (!exists(pidFilePath)) {
+    return { exists: false, info: null, error: null };
+  }
+
+  try {
+    return {
+      exists: true,
+      info: JSON.parse(readFile(pidFilePath, "utf8")),
+      error: null,
+    };
+  } catch (error) {
+    return { exists: true, info: null, error };
+  }
+}
+
+export function resolveHubPort(env = process.env) {
+  const parsed = Number.parseInt(String(env?.TFX_HUB_PORT ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : HUB_DEFAULT_PORT;
+}
+
+export function detectLivePeer(
+  pidFilePath = PID_FILE,
+  {
+    exists = existsSync,
+    readFile = readFileSync,
+    killFn = process.kill,
+  } = {},
+) {
+  const state = readHubPidFile(pidFilePath, { exists, readFile });
+  const info = state.info ?? null;
+  const pid = Number(info?.pid);
+  const port = Number(info?.port);
+  const base = {
+    alive: false,
+    pid: Number.isFinite(pid) && pid > 0 ? pid : undefined,
+    port: Number.isFinite(port) && port > 0 ? port : undefined,
+    version: typeof info?.version === "string" ? info.version : undefined,
+    host: typeof info?.host === "string" ? info.host : undefined,
+    url: typeof info?.url === "string" ? info.url : undefined,
+    reason: "missing",
+  };
+
+  if (!state.exists) return base;
+  if (state.error) return { ...base, reason: "invalid_json" };
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return { ...base, reason: "invalid_pid" };
+  }
+
+  if (isPidAlive(pid, killFn)) {
+    return {
+      alive: true,
+      pid,
+      port: base.port,
+      version: base.version,
+      host: base.host,
+      url: base.url,
+      reason: "alive",
+    };
+  }
+
+  return { ...base, reason: "dead" };
+}
+
+export function cleanStaleHubPid(
+  pidFilePath = PID_FILE,
+  {
+    exists = existsSync,
+    readFile = readFileSync,
+    unlink = unlinkSync,
+    killFn = process.kill,
+  } = {},
+) {
+  const peer = detectLivePeer(pidFilePath, { exists, readFile, killFn });
+  if (peer.alive) {
+    return { cleaned: false, reason: "alive", pid: peer.pid };
+  }
+  if (peer.reason === "missing") {
+    return { cleaned: false, reason: "missing" };
+  }
+
+  try {
+    unlink(pidFilePath);
+    return {
+      cleaned: true,
+      reason: peer.reason === "dead" ? "stale_pid" : peer.reason,
+      pid: peer.pid,
+    };
+  } catch (error) {
+    return {
+      cleaned: false,
+      reason: "unlink_failed",
+      pid: peer.pid,
+      error,
+    };
+  }
+}
+
+async function syncHubMcpSettingsIfAvailable({ hubUrl }) {
+  try {
+    const mod = await import(
+      new URL("../scripts/sync-hub-mcp-settings.mjs", import.meta.url)
+    );
+    if (typeof mod?.syncHubMcpSettings !== "function") {
+      hubLog.warn({ hubUrl }, "hub.mcp_sync_missing_export");
+      return;
+    }
+    await mod.syncHubMcpSettings({ hubUrl });
+  } catch (error) {
+    const message = error?.message || String(error);
+    if (error?.code === "ERR_MODULE_NOT_FOUND") {
+      hubLog.warn({ hubUrl, err: message }, "hub.mcp_sync_missing");
+      return;
+    }
+    hubLog.warn({ hubUrl, err: message }, "hub.mcp_sync_skipped");
+  }
+}
+
+async function resolvePortInUse({
+  port,
+  host,
+  version,
+  pidFilePath = PID_FILE,
+  detectPeer = detectLivePeer,
+  cleanPid = cleanStaleHubPid,
+} = {}) {
+  const peer = detectPeer(pidFilePath);
+  if (peer.alive) {
+    const peerPort = Number(peer.port);
+    const sameHub =
+      peerPort === Number(port) &&
+      typeof peer.version === "string" &&
+      peer.version === version;
+    if (sameHub) {
+      return {
+        action: "reuse",
+        peer,
+        url: peer.url ?? buildHubUrl(peer.host || host, peerPort),
+      };
+    }
+
+    const peerDetails = [
+      `pid=${peer.pid ?? "unknown"}`,
+      `version=${peer.version ?? "unknown"}`,
+    ].join(", ");
+    return {
+      action: "error",
+      message: `포트 ${port}이 다른 Hub(${peerDetails})에 의해 점유됨. \`tfx hub stop\` 후 재시도`,
+    };
+  }
+
+  const cleaned = cleanPid(pidFilePath);
+  if (cleaned.cleaned) {
+    return { action: "retry", cleaned, peer };
+  }
+
+  return {
+    action: "error",
+    message: `Hub 포트 ${port}이(가) 이미 사용 중입니다. 다른 프로세스가 점유 중일 수 있습니다. \`tfx hub stop\` 후 재시도하세요. (PID file: ${pidFilePath})`,
+  };
+}
 
 function isPublicPath(path) {
   return (
@@ -390,6 +565,40 @@ function getQosStatsPayload() {
   };
 }
 
+function syncBrokerAuthCache(currentBroker, logger = hubLog) {
+  if (!currentBroker?.snapshot || typeof currentBroker.syncAuthFromSource !== "function") {
+    return [];
+  }
+
+  const authAccounts = currentBroker
+    .snapshot()
+    .filter((account) => account.provider === "codex" && account.mode === "auth");
+
+  return authAccounts.map((account) => {
+    try {
+      const result = currentBroker.syncAuthFromSource(account.id);
+      if (result?.copied) {
+        logger.info(
+          {
+            accountId: account.id,
+            reason: result.reason,
+            sourcePath: result.sourcePath,
+            cachePath: result.cachePath,
+          },
+          "broker.auth_sync_from_source",
+        );
+      }
+      return result;
+    } catch (error) {
+      logger.warn(
+        { accountId: account.id, err: error?.message || String(error) },
+        "broker.auth_sync_from_source_failed",
+      );
+      return { ok: false, accountId: account.id, reason: error?.message || String(error) };
+    }
+  });
+}
+
 function resolvePublicFilePath(path) {
   let relativePath = null;
   if (path === "/dashboard") {
@@ -457,10 +666,16 @@ export async function startHub({
   sessionId = process.pid,
   createDelegatorWorker = createDelegatorMcpWorker,
 } = {}) {
-  const port = portOpt ?? parseInt(process.env.TFX_HUB_PORT || "27888", 10);
+  const resolvedPort = Number.parseInt(String(portOpt ?? ""), 10);
+  const port =
+    Number.isFinite(resolvedPort) && resolvedPort > 0
+      ? resolvedPort
+      : resolveHubPort(process.env);
 
   const existingHub = await tryReuseExistingHub({ port, host });
   if (existingHub) return existingHub;
+
+  syncBrokerAuthCache(brokerInstance);
 
   const hubIdleTimeoutMs = parsePositiveInt(
     process.env.TFX_HUB_IDLE_TIMEOUT_MS,
@@ -573,6 +788,36 @@ export async function startHub({
   }
   const delegatorService = new DelegatorService({ worker: delegatorWorker });
 
+  // Synapse Layer 4: session registry + git preflight + swarm locks
+  const synapseEmitter = new EventEmitter();
+  synapseEmitter.setMaxListeners(50);
+  const synapseRegistry = createSynapseRegistry({
+    persistPath: join(CACHE_DIR, "tfx-hub", "synapse-sessions.json"),
+    emitter: synapseEmitter,
+  });
+  const swarmLocks = createSwarmLocks({
+    repoRoot: PROJECT_ROOT,
+    persistPath: join(CACHE_DIR, "tfx-hub", "swarm-locks.json"),
+  });
+  const gitPreflight = createGitPreflight({
+    registry: synapseRegistry,
+    locks: swarmLocks,
+  });
+
+  // Synapse Layer 5: emitter subscribers — bridge events to hub logging
+  synapseEmitter.on("synapse.session.started", ({ sessionId }) => {
+    hubLog.info({ sessionId }, "synapse.session.started");
+  });
+  synapseEmitter.on("synapse.session.heartbeat", ({ sessionId }) => {
+    hubLog.debug({ sessionId }, "synapse.session.heartbeat");
+  });
+  synapseEmitter.on("synapse.session.stale", ({ sessionId }) => {
+    hubLog.warn({ sessionId }, "synapse.session.stale");
+  });
+  synapseEmitter.on("synapse.session.removed", ({ sessionId }) => {
+    hubLog.info({ sessionId }, "synapse.session.removed");
+  });
+
   const hitl = createHitlManager(store, router);
   const pipe = createPipeServer({
     router,
@@ -684,6 +929,11 @@ export async function startHub({
           pipe: pipe.getStatus(),
           assign_callback_pipe_path: assignCallbacks.path,
           assign_callback_pipe: assignCallbacks.getStatus(),
+          spawn_trace: {
+            max_per_sec: spawnTrace.getMaxSpawnPerSec(),
+            max_total_descendants: spawnTrace.MAX_TOTAL_DESCENDANTS,
+          },
+          version,
         });
       }
 
@@ -734,10 +984,86 @@ export async function startHub({
         if (!result.ok) {
           return writeJson(res, 200, { ok: false, error: result.error });
         }
+        syncBrokerAuthCache(result.broker);
         const accounts = result.broker
           ? [...result.broker.snapshot()].length
           : 0;
         return writeJson(res, 200, { ok: true, accounts });
+      }
+
+      if (path === "/spawn-trace/reload" && req.method === "POST") {
+        return writeJson(res, 200, {
+          ok: true,
+          max_spawn_per_sec: spawnTrace.reload(),
+        });
+      }
+
+      // ── Synapse Layer 5: session registry + locks + preflight routes ──
+      if (path === "/synapse/sessions" && req.method === "GET") {
+        return writeJson(res, 200, { ok: true, ...synapseRegistry.snapshot(), ts: Date.now() });
+      }
+
+      if (path === "/synapse/register" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId } = body || {};
+          const result = synapseRegistry.register(sessionId, body);
+          if (!result?.ok) {
+            throw new Error(result?.reason || "register failed");
+          }
+          return writeJson(res, 200, { ok: true, sessionId: result.sessionId || sessionId });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      if (path === "/synapse/heartbeat" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId, ...partial } = body || {};
+          const ok = synapseRegistry.heartbeat(sessionId, partial);
+          if (!ok) {
+            throw new Error("heartbeat failed");
+          }
+          return writeJson(res, 200, { ok: true });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      if (path === "/synapse/unregister" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { sessionId } = body || {};
+          const ok = synapseRegistry.unregister(sessionId);
+          if (!ok) {
+            throw new Error("unregister failed");
+          }
+          return writeJson(res, 200, { ok: true });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
+      }
+
+      if (path === "/synapse/locks" && req.method === "GET") {
+        return writeJson(res, 200, { ok: true, locks: swarmLocks.snapshot(), ts: Date.now() });
+      }
+
+      if (path === "/synapse/preflight" && req.method === "POST") {
+        try {
+          const body = await parseBody(req);
+          const { op, args = {}, sessionContext = {} } = body;
+          if (!op || typeof op !== "string") {
+            return writeJson(res, 400, { ok: false, error: "op 필수" });
+          }
+          if (!SYNAPSE_VALID_OPS.has(op)) {
+            return writeJson(res, 400, { ok: false, error: `invalid op: ${op}` });
+          }
+          const result = gitPreflight.check(op, args, sessionContext);
+          return writeJson(res, 200, { ok: true, ...result });
+        } catch (err) {
+          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+        }
       }
 
       if (path.startsWith("/bridge")) {
@@ -1360,41 +1686,7 @@ export async function startHub({
 
   mkdirSync(PID_DIR, { recursive: true });
 
-  // Stale PID 파일 정리 — 이전 Hub 프로세스가 비정상 종료된 경우
-  if (existsSync(PID_FILE)) {
-    try {
-      const prevInfo = JSON.parse(readFileSync(PID_FILE, "utf8"));
-      const prevPid = Number(prevInfo?.pid);
-      if (Number.isFinite(prevPid) && prevPid > 0) {
-        try {
-          process.kill(prevPid, 0); // alive 체크만
-          // 프로세스가 살아있으면 포트 충돌 가능성 — 기존 Hub 재사용 안내
-          if (Number(prevInfo.port) === Number(port)) {
-            hubLog.warn(
-              { prevPid, port },
-              "hub.stale_pid: previous hub still alive on same port",
-            );
-          }
-        } catch {
-          // 프로세스 죽음 → stale PID 파일 삭제
-          try {
-            unlinkSync(PID_FILE);
-          } catch {}
-          hubLog.info({ prevPid }, "hub.stale_pid_cleaned");
-        }
-      } else {
-        try {
-          unlinkSync(PID_FILE);
-        } catch {}
-      }
-    } catch {
-      try {
-        unlinkSync(PID_FILE);
-      } catch {}
-    }
-  }
-
-  const cleanupStartupFailure = async () => {
+  const cleanupStartupFailure = async ({ preserveTokenFile = false } = {}) => {
     try {
       router.stopSweeper();
     } catch {}
@@ -1410,9 +1702,11 @@ export async function startHub({
     try {
       store.close();
     } catch {}
-    try {
-      unlinkSync(TOKEN_FILE);
-    } catch {}
+    if (!preserveTokenFile) {
+      try {
+        unlinkSync(TOKEN_FILE);
+      } catch {}
+    }
     releaseStartupLock();
   };
 
@@ -1425,169 +1719,229 @@ export async function startHub({
   }
 
   return await new Promise((resolveHub, reject) => {
-    httpServer.listen(port, host, () => {
-      try {
-        let idleTimer = null;
-        let stopPromise = null;
+    let bindAttempts = 0;
 
-        const info = {
-          port,
-          host,
-          dbPath,
-          pid: process.pid,
-          hubToken: HUB_TOKEN,
-          authMode: HUB_TOKEN ? "token-required" : "localhost-only",
-          url: buildHubUrl(host, port),
-          pipe_path: pipe.path,
-          pipePath: pipe.path,
-          assign_callback_pipe_path: assignCallbacks.path,
-          assignCallbackPipePath: assignCallbacks.path,
-          version,
-          storeType: store.type || "sqlite",
-          idleTimeoutMs: hubIdleTimeoutMs,
-        };
+    const listenOnce = () => {
+      const onError = (err) => {
+        void (async () => {
+          if (err.code !== "EADDRINUSE") {
+            await cleanupStartupFailure();
+            reject(err);
+            return;
+          }
 
-        writeState({
-          pid: process.pid,
-          port,
-          host,
-          auth_mode: HUB_TOKEN ? "token-required" : "localhost-only",
-          url: info.url,
-          pipe_path: pipe.path,
-          pipePath: pipe.path,
-          assign_callback_pipe_path: assignCallbacks.path,
-          assignCallbackPipePath: assignCallbacks.path,
-          authMode: HUB_TOKEN ? "token-required" : "localhost-only",
-          startedAt,
-          started: startedAtMs,
-          version,
-          sessionId,
-          session_id: sessionId,
-        });
-        releaseStartupLock();
-
-        hubLog.info(
-          {
-            url: info.url,
-            pipePath: pipe.path,
-            assignCallbackPath: assignCallbacks.path,
-            pid: process.pid,
-            storeType: info.storeType,
+          const conflict = await resolvePortInUse({
+            port,
+            host,
             version,
-          },
-          "hub.started",
-        );
-        hubLog.debug(
-          {
-            publicDir: PUBLIC_DIR,
-            exists: existsSync(PUBLIC_DIR),
-            hasDashboard: existsSync(resolve(PUBLIC_DIR, "dashboard.html")),
-          },
-          "hub.public_dir",
-        );
-
-        /**
-         * Hub 서버 정지 함수.
-         *
-         * Trade-off (F01 — 영구 poisoning 허용):
-         * 첫 정지 호출에서 cleanup 파이프라인이 실패하면 stopPromise는 실패 상태로
-         * 고정되고, 이후 모든 호출은 동일한 실패 promise를 반환합니다. stopPromise를
-         * null로 리셋하면 재시도가 가능하지만, router sweeper / transports / pipe 등이
-         * 이미 부분 해제된 상태에서 두 번째 close가 실행되면 use-after-close 및
-         * race condition을 유발합니다. 실패한 stopFn은 프로세스 전체 재시작으로 복구해야
-         * 하며, 이 동작은 의도된 설계입니다.
-         */
-        const stopFn = async () => {
-          if (stopPromise) return stopPromise;
-
-          stopPromise = (async () => {
-            router.stopSweeper();
-            clearInterval(hitlTimer);
-            clearInterval(sessionTimer);
-            clearInterval(rateLimitTimer);
-            clearInterval(orphanCleanupTimer);
-            if (idleTimer) {
-              clearInterval(idleTimer);
-            }
-            for (const [, session] of transports) {
-              try {
-                await session.mcp.close();
-              } catch {}
-              try {
-                await session.transport.close();
-              } catch {}
-            }
-            transports.clear();
-            await pipe.stop();
-            await assignCallbacks.stop();
-            await delegatorWorker.stop().catch(() => {});
-            store.close();
-            try {
-              unlinkSync(PID_FILE);
-            } catch {}
-            try {
-              unlinkSync(TOKEN_FILE);
-            } catch {}
-            httpServer.closeAllConnections();
-            await new Promise((resolveClose) => httpServer.close(resolveClose));
-          })().catch((error) => {
-            hubLog.error({ err: String(error?.message || error) }, "hub.stop_error");
-            // stopPromise를 null로 리셋하지 않음 — double-close 방지
           });
-
-          return stopPromise;
-        };
-
-        idleTimer = setInterval(() => {
-          const idleMs = Date.now() - lastRequestAt;
-          if (idleMs < hubIdleTimeoutMs) return;
-          hubLog.warn(
-            { idleMs, idleTimeoutMs: hubIdleTimeoutMs, port },
-            "hub.idle_timeout_shutdown",
-          );
-          void stopFn().catch((error) => {
-            hubLog.error(
-              { err: error, idleMs, idleTimeoutMs: hubIdleTimeoutMs, port },
-              "hub.idle_timeout_shutdown_failed",
+          if (conflict.action === "retry" && bindAttempts < 1) {
+            bindAttempts += 1;
+            hubLog.warn(
+              { port, reason: conflict.cleaned?.reason },
+              "hub.port_in_use_retry_after_stale_pid_cleanup",
             );
-          });
-        }, hubIdleSweepMs);
-        idleTimer.unref();
+            listenOnce();
+            return;
+          }
 
-        resolveHub({
-          reused: false,
-          external: false,
-          ...info,
-          httpServer,
-          store,
-          router,
-          hitl,
-          pipe,
-          assignCallbacks,
-          delegatorService,
-          delegatorWorker,
-          stop: stopFn,
-        });
-      } catch (error) {
-        void cleanupStartupFailure().finally(() => reject(error));
-      }
-    });
-    httpServer.on("error", (err) => {
-      void cleanupStartupFailure();
-      if (err.code === "EADDRINUSE") {
-        hubLog.error(
-          { port, host },
-          "hub.port_in_use: port already occupied — check for existing hub or other service",
-        );
-        const wrapped = new Error(
-          `Hub 포트 ${port}이(가) 이미 사용 중입니다. 기존 Hub 프로세스를 확인하세요. (PID file: ${PID_FILE})`,
-        );
-        wrapped.code = "EADDRINUSE";
-        reject(wrapped);
-      } else {
-        reject(err);
-      }
-    });
+          await cleanupStartupFailure({ preserveTokenFile: true });
+          if (conflict.action === "reuse") {
+            hubLog.info(
+              {
+                port,
+                pid: conflict.peer?.pid,
+                version: conflict.peer?.version,
+                url: conflict.url,
+              },
+              "hub.already_running",
+            );
+            resolveHub({
+              reused: true,
+              external: true,
+              port,
+              pid: conflict.peer?.pid,
+              url: conflict.url,
+              stop: async () => false,
+            });
+            return;
+          }
+
+          hubLog.error({ port, host }, "hub.port_in_use");
+          const wrapped = new Error(conflict.message);
+          wrapped.code = "EADDRINUSE";
+          reject(wrapped);
+        })();
+      };
+
+      httpServer.once("error", onError);
+      httpServer.listen(port, host, () => {
+        httpServer.off("error", onError);
+        try {
+          let idleTimer = null;
+          let stopPromise = null;
+
+          const info = {
+            port,
+            host,
+            dbPath,
+            pid: process.pid,
+            hubToken: HUB_TOKEN,
+            authMode: HUB_TOKEN ? "token-required" : "localhost-only",
+            url: buildHubUrl(host, port),
+            pipe_path: pipe.path,
+            pipePath: pipe.path,
+            assign_callback_pipe_path: assignCallbacks.path,
+            assignCallbackPipePath: assignCallbacks.path,
+            version,
+            storeType: store.type || "sqlite",
+            idleTimeoutMs: hubIdleTimeoutMs,
+          };
+
+          writeState({
+            pid: process.pid,
+            port,
+            host,
+            auth_mode: HUB_TOKEN ? "token-required" : "localhost-only",
+            url: info.url,
+            pipe_path: pipe.path,
+            pipePath: pipe.path,
+            assign_callback_pipe_path: assignCallbacks.path,
+            assignCallbackPipePath: assignCallbacks.path,
+            authMode: HUB_TOKEN ? "token-required" : "localhost-only",
+            startedAt,
+            started: startedAtMs,
+            version,
+            sessionId,
+            session_id: sessionId,
+          });
+          releaseStartupLock();
+          void syncHubMcpSettingsIfAvailable({ hubUrl: info.url });
+
+          hubLog.info(
+            {
+              url: info.url,
+              pipePath: pipe.path,
+              assignCallbackPath: assignCallbacks.path,
+              pid: process.pid,
+              storeType: info.storeType,
+              version,
+            },
+            "hub.started",
+          );
+          hubLog.debug(
+            {
+              publicDir: PUBLIC_DIR,
+              exists: existsSync(PUBLIC_DIR),
+              hasDashboard: existsSync(resolve(PUBLIC_DIR, "dashboard.html")),
+            },
+            "hub.public_dir",
+          );
+
+          /**
+           * Hub 서버 정지 함수.
+           *
+           * Trade-off (F01 — 영구 poisoning 허용):
+           * 첫 정지 호출에서 cleanup 파이프라인이 실패하면 stopPromise는 실패 상태로
+           * 고정되고, 이후 모든 호출은 동일한 실패 promise를 반환합니다. stopPromise를
+           * null로 리셋하면 재시도가 가능하지만, router sweeper / transports / pipe 등이
+           * 이미 부분 해제된 상태에서 두 번째 close가 실행되면 use-after-close 및
+           * race condition을 유발합니다. 실패한 stopFn은 프로세스 전체 재시작으로 복구해야
+           * 하며, 이 동작은 의도된 설계입니다.
+           */
+          const stopFn = async () => {
+            if (stopPromise) return stopPromise;
+
+            stopPromise = (async () => {
+              router.stopSweeper();
+              clearInterval(hitlTimer);
+              clearInterval(sessionTimer);
+              clearInterval(rateLimitTimer);
+              clearInterval(orphanCleanupTimer);
+              if (idleTimer) {
+                clearInterval(idleTimer);
+              }
+              for (const [, session] of transports) {
+                try {
+                  await session.mcp.close();
+                } catch {}
+                try {
+                  await session.transport.close();
+                } catch {}
+              }
+              transports.clear();
+              await pipe.stop();
+              await assignCallbacks.stop();
+              await delegatorWorker.stop().catch(() => {});
+              try {
+                synapseRegistry.destroy();
+              } catch {}
+              store.close();
+              try {
+                unlinkSync(PID_FILE);
+              } catch {}
+              try {
+                unlinkSync(TOKEN_FILE);
+              } catch {}
+              httpServer.closeAllConnections();
+              await new Promise((resolveClose) =>
+                httpServer.close(resolveClose),
+              );
+            })().catch((error) => {
+              hubLog.error(
+                { err: String(error?.message || error) },
+                "hub.stop_error",
+              );
+              // stopPromise를 null로 리셋하지 않음 — double-close 방지
+            });
+
+            return stopPromise;
+          };
+
+          if (hubIdleTimeoutMs > 0) {
+            idleTimer = setInterval(() => {
+              const idleMs = Date.now() - lastRequestAt;
+              if (idleMs < hubIdleTimeoutMs) return;
+              hubLog.warn(
+                { idleMs, idleTimeoutMs: hubIdleTimeoutMs, port },
+                "hub.idle_timeout_shutdown",
+              );
+              void stopFn().catch((error) => {
+                hubLog.error(
+                  {
+                    err: error,
+                    idleMs,
+                    idleTimeoutMs: hubIdleTimeoutMs,
+                    port,
+                  },
+                  "hub.idle_timeout_shutdown_failed",
+                );
+              });
+            }, hubIdleSweepMs);
+            idleTimer.unref();
+          }
+
+          resolveHub({
+            reused: false,
+            external: false,
+            ...info,
+            httpServer,
+            store,
+            router,
+            hitl,
+            pipe,
+            assignCallbacks,
+            delegatorService,
+            delegatorWorker,
+            stop: stopFn,
+          });
+        } catch (error) {
+          void cleanupStartupFailure().finally(() => reject(error));
+        }
+      });
+    };
+
+    listenOnce();
   });
 }
 
@@ -1693,9 +2047,10 @@ function cleanupStaleSpawnSessions(log) {
 const QUOTA_CACHE_PATH = join(CACHE_DIR, "broker-quota-cache.json");
 
 async function checkSingleAccountQuota(acct) {
-  const authPath = join(PID_DIR, acct.authFile);
-  if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
   try {
+    const authPath = join(PID_DIR, acct.authFile);
+    if (!authPath.startsWith(PID_DIR + sep)) return { id: acct.id, status: "path_blocked" };
+    if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
     const auth = JSON.parse(readFileSync(authPath, "utf8"));
     if (acct.provider === "codex") {
       const token = auth.tokens?.access_token || auth.OPENAI_API_KEY || "";
@@ -1723,7 +2078,12 @@ async function checkSingleAccountQuota(acct) {
 async function refreshAllAccountQuotas() {
   const snap = brokerInstance?.snapshot() || [];
   const checks = snap.filter(a => a.authFile).map(a => checkSingleAccountQuota(a));
-  const results = await Promise.all(checks);
+  const settled = await Promise.allSettled(checks);
+  const results = settled.map((s, i) =>
+    s.status === "fulfilled"
+      ? s.value
+      : { id: snap.filter(a => a.authFile)[i]?.id ?? "unknown", status: "error", message: String(s.reason?.message || s.reason).substring(0, 60) },
+  );
   // 캐시 저장
   try {
     writeFileSync(QUOTA_CACHE_PATH, JSON.stringify({ ts: Date.now(), results }));
@@ -1731,7 +2091,7 @@ async function refreshAllAccountQuotas() {
   return results;
 }
 
-function loadQuotaCache() {
+function _loadQuotaCache() {
   try {
     if (!existsSync(QUOTA_CACHE_PATH)) return null;
     return JSON.parse(readFileSync(QUOTA_CACHE_PATH, "utf8"));
@@ -1891,7 +2251,7 @@ refresh();setInterval(refresh,10000);
 
 const selfRun = process.argv[1]?.replace(/\\/g, "/").endsWith("hub/server.mjs");
 if (selfRun) {
-  const port = parseInt(process.env.TFX_HUB_PORT || "27888", 10);
+  const port = resolveHubPort(process.env);
   const dbPath = process.env.TFX_HUB_DB || undefined;
 
   const cleanupPidFile = () => {
@@ -1913,6 +2273,14 @@ if (selfRun) {
 
   startHub({ port, dbPath })
     .then((info) => {
+      if (info?.reused && info?.external) {
+        hubLog.info(
+          { pid: info.pid, port: info.port, url: info.url },
+          "hub.already_running_exit",
+        );
+        process.exit(0);
+        return;
+      }
       const shutdown = async (signal) => {
         hubLog.info({ signal }, "hub.stopping");
         try {

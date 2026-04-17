@@ -7,9 +7,9 @@ import { join } from "node:path";
 const LOG_DIR = join(homedir(), ".triflux", "logs");
 const DEDUPE_WINDOW_MS = 5_000;
 const RATE_WINDOW_MS = 1_000;
-export const MAX_SPAWN_PER_SEC = resolvePositiveInteger(
+export let MAX_SPAWN_PER_SEC = resolvePositiveInteger(
   process.env.TRIFLUX_MAX_SPAWN_RATE,
-  10,
+  30,
 );
 export const MAX_TOTAL_DESCENDANTS = resolvePositiveInteger(
   process.env.TRIFLUX_MAX_DESCENDANTS,
@@ -149,6 +149,18 @@ function createPolicyError(reasonCode, message, meta = {}) {
   return error;
 }
 
+export function getMaxSpawnPerSec() {
+  return MAX_SPAWN_PER_SEC;
+}
+
+export function reload() {
+  MAX_SPAWN_PER_SEC = resolvePositiveInteger(
+    process.env.TRIFLUX_MAX_SPAWN_RATE,
+    30,
+  );
+  return getMaxSpawnPerSec();
+}
+
 function logBlocked(traceId, command, args, options, error, extra = {}) {
   appendTrace({
     event: "blocked",
@@ -167,6 +179,7 @@ function enforceGuards(command, args, options) {
   const now = Date.now();
   trimRecentSpawnTimes(now);
   trimDedupeEntries(now);
+  const maxSpawnPerSec = getMaxSpawnPerSec();
 
   const dedupeKey = getDedupeKey(options);
   if (dedupeKey) {
@@ -180,11 +193,11 @@ function enforceGuards(command, args, options) {
     }
   }
 
-  if (recentSpawnTimes.length >= MAX_SPAWN_PER_SEC) {
+  if (recentSpawnTimes.length >= maxSpawnPerSec) {
     return createPolicyError(
       "rate_limit",
-      `spawn-trace rate limit exceeded (${MAX_SPAWN_PER_SEC}/sec)`,
-      { maxPerSec: MAX_SPAWN_PER_SEC },
+      `spawn-trace rate limit exceeded (${maxSpawnPerSec}/sec)`,
+      { maxPerSec: maxSpawnPerSec },
     );
   }
 
@@ -318,6 +331,10 @@ function normalizeExecFileArgs(args, options, callback) {
   };
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export function spawn(command, args, options) {
   const { argsList, options: normalizedOptions } = normalizeSpawnArgs(
     args,
@@ -356,6 +373,32 @@ export function spawn(command, args, options) {
   });
 }
 
+export async function spawnWithBackoff(command, args, options, maxRetries = 1) {
+  const retryLimit =
+    Number.isInteger(maxRetries) && maxRetries >= 0 ? maxRetries : 1;
+  let originalRateLimitError = null;
+
+  for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+    try {
+      return spawn(command, args, options);
+    } catch (error) {
+      if (error?.reasonCode !== "rate_limit") {
+        throw error;
+      }
+
+      originalRateLimitError ??= error;
+
+      if (attempt >= retryLimit) {
+        throw originalRateLimitError;
+      }
+
+      await wait(RATE_WINDOW_MS);
+    }
+  }
+
+  throw originalRateLimitError;
+}
+
 export function execFile(file, args, options, callback) {
   const normalized = normalizeExecFileArgs(args, options, callback);
   const traceId = nextTraceId();
@@ -365,7 +408,13 @@ export function execFile(file, args, options, callback) {
     normalized.options,
   );
   if (blockedError) {
-    logBlocked(traceId, file, normalized.argsList, normalized.options, blockedError);
+    logBlocked(
+      traceId,
+      file,
+      normalized.argsList,
+      normalized.options,
+      blockedError,
+    );
     if (typeof normalized.callback === "function") {
       queueMicrotask(() => normalized.callback(blockedError, "", ""));
       return createRejectedChild(file, normalized.argsList, blockedError);
@@ -417,9 +466,16 @@ export function execFileSync(file, args, options) {
     normalized.options,
   );
   if (blockedError) {
-    logBlocked(traceId, file, normalized.argsList, normalized.options, blockedError, {
-      sync: true,
-    });
+    logBlocked(
+      traceId,
+      file,
+      normalized.argsList,
+      normalized.options,
+      blockedError,
+      {
+        sync: true,
+      },
+    );
     throw blockedError;
   }
 
@@ -489,8 +545,13 @@ export const spawnSync = childProcess.spawnSync;
 export default {
   ...childProcess,
   spawn,
+  spawnWithBackoff,
   execFile,
   execFileSync,
-  MAX_SPAWN_PER_SEC,
+  get MAX_SPAWN_PER_SEC() {
+    return MAX_SPAWN_PER_SEC;
+  },
   MAX_TOTAL_DESCENDANTS,
+  getMaxSpawnPerSec,
+  reload,
 };

@@ -15,7 +15,7 @@ const REQUIRED_TOOLS = ["codex", "codex-reply"];
 
 export { CODEX_MCP_EXECUTION_EXIT_CODE, CODEX_MCP_TRANSPORT_EXIT_CODE };
 export const DEFAULT_CODEX_MCP_TIMEOUT_MS = 10 * 60 * 1000;
-export const DEFAULT_CODEX_MCP_BOOTSTRAP_TIMEOUT_MS = 10 * 1000;
+export const DEFAULT_CODEX_MCP_BOOTSTRAP_TIMEOUT_MS = 120 * 1000;
 
 /**
  * Codex MCP transport/bootstrap 계층 오류

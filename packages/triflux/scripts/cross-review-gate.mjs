@@ -38,6 +38,11 @@ function isGitCommitCommand(command) {
   return /\bgit\s+commit\b/i.test(command);
 }
 
+function hasCoAuthoredByTrailer(command) {
+  if (typeof command !== "string") return false;
+  return /co-authored-by\s*:/i.test(command);
+}
+
 function summarizePending(entries) {
   return entries
     .map((item) => {
@@ -63,6 +68,14 @@ async function main() {
 
   if (toolName !== "Bash") process.exit(0);
   if (!isGitCommitCommand(toolInput.command || "")) process.exit(0);
+
+  // ISSUE-9: Co-Authored-By 트레일러 차단
+  if (hasCoAuthoredByTrailer(toolInput.command || "")) {
+    deny(
+      "[co-author-guard] Co-Authored-By 트레일러가 감지되었습니다. " +
+        "커밋 메시지에서 Co-Authored-By 줄을 제거하세요.",
+    );
+  }
 
   // cwd 전파: tracker와 동일한 resolveBaseDir 사용
   const baseDir = resolveBaseDir(payload);

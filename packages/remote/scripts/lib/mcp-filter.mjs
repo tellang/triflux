@@ -36,28 +36,12 @@ const PROFILE_DEFINITIONS = Object.freeze({
     }),
   }),
   executor: Object.freeze({
-    description: "구현 워커용. 문서/검색/브라우징 보조 MCP 허용",
-    allowedServers: Object.freeze([
-      "context7",
-      "playwright",
-      "brave-search",
-      "tavily",
-      "exa",
-    ]),
+    description: "구현 워커용. 문서 조회 전용 MCP만 허용 (검색/브라우징은 Codex stall 유발)",
+    allowedServers: Object.freeze(["context7"]),
     alwaysOnServers: Object.freeze(["context7"]),
-    maxSearchServers: 2,
+    maxSearchServers: 0,
     allowedToolsByServer: Object.freeze({
       context7: Object.freeze(["resolve-library-id", "query-docs"]),
-      "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
-      exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
-      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
-      playwright: Object.freeze([
-        "browser_navigate",
-        "browser_navigate_back",
-        "browser_snapshot",
-        "browser_take_screenshot",
-        "browser_wait_for",
-      ]),
     }),
   }),
   designer: Object.freeze({
@@ -672,18 +656,22 @@ export function getCodexMcpConfig(options = {}) {
   const targetServers = registeredServers;
 
   if (resolvedProfile === "none") {
-    // Codex 0.115+: transport 없는 서버에 enabled=false를 보내면 "invalid transport" 에러.
-    // 비허용 서버는 override에서 제외하고, 허용 서버만 명시적으로 설정한다.
-    return { mcp_servers: {} };
+    // 등록된 서버를 전부 enabled=false로 비활성화.
+    // 미등록 서버에 보내면 "invalid transport" 에러지만, registeredServers는 등록 확인 완료.
+    const config = { mcp_servers: {} };
+    for (const server of targetServers) {
+      config.mcp_servers[server] = { enabled: false };
+    }
+    return config;
   }
 
   const config = { mcp_servers: {} };
   const allowedToolsByServer =
     getProfileDefinition(resolvedProfile).allowedToolsByServer;
   for (const server of targetServers) {
-    // Codex 0.115+: transport 없는 서버에 enabled=false를 보내면 "invalid transport" 에러.
-    // 비허용 서버는 override에서 제외한다 (Codex 기본 설정이 유지됨).
     if (!allowedServers.has(server)) {
+      // 비허용 서버는 명시적으로 비활성화하여 MCP 시작 자체를 방지.
+      config.mcp_servers[server] = { enabled: false };
       continue;
     }
 
@@ -762,6 +750,19 @@ function shellEscape(value) {
 
 function shellArray(name, values) {
   return `${name}=(${values.map((value) => shellEscape(value)).join(" ")})`;
+}
+
+export function toDelimited(policy) {
+  const RS = "\x1e";
+  return [
+    policy.requestedProfile,
+    policy.resolvedProfile,
+    policy.hint,
+    policy.geminiAllowedServers.join(","),
+    policy.codexConfigOverrides.flatMap((o) => ["-c", o]).join(","),
+    JSON.stringify(policy.codexConfig),
+    policy.resolvedPhase || "",
+  ].join(RS);
 }
 
 export function toShellExports(policy) {
@@ -866,6 +867,10 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
   if (args.command === "shell") {
     process.stdout.write(`${toShellExports(policy)}\n`);
+    return;
+  }
+  if (args.command === "delimited") {
+    process.stdout.write(toDelimited(policy));
     return;
   }
 

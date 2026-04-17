@@ -54,7 +54,7 @@ describe("mcp-filter", () => {
     );
   });
 
-  it("executor 프로필은 코드 구현 문맥에서 context7 + exa로 축소된다", () => {
+  it("executor 프로필은 코드 구현 문맥에서 context7만 허용한다 (검색/브라우징 stall 방지)", () => {
     const policy = buildMcpPolicy({
       agentType: "executor",
       requestedProfile: "auto",
@@ -69,9 +69,9 @@ describe("mcp-filter", () => {
         "Implement CLI parser, fix failing unit test, and check the package API docs.",
     });
 
-    assert.deepEqual(policy.allowedServers, ["context7", "exa"]);
-    assert.strictEqual(policy.codexConfig.mcp_servers.playwright, undefined);
-    assert.strictEqual(policy.codexConfig.mcp_servers.tavily, undefined);
+    assert.deepEqual(policy.allowedServers, ["context7"]);
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, { enabled: false });
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.tavily, { enabled: false });
   });
 
   it("designer 프로필은 브라우저/UI 문맥에서 playwright를 남기고 일반 검색 서버를 줄인다", () => {
@@ -112,7 +112,7 @@ describe("mcp-filter", () => {
       "brave-search",
       "sequential-thinking",
     ]);
-    assert.strictEqual(policy.codexConfig.mcp_servers.playwright, undefined);
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, { enabled: false });
     assert.deepEqual(
       policy.codexConfig.mcp_servers["sequential-thinking"].enabled_tools,
       ["sequentialthinking"],
@@ -130,7 +130,7 @@ describe("mcp-filter", () => {
     assert.ok(
       overrides.includes('mcp_servers.exa.enabled_tools=["web_search_exa"]'),
     );
-    assert.ok(!overrides.includes("mcp_servers.tavily.enabled=false"));
+    assert.ok(overrides.includes("mcp_servers.tavily.enabled=false"));
   });
 
   it("search server top-k 정렬은 inventory tool_count를 tie-break에 사용한다", () => {
@@ -181,9 +181,9 @@ describe("mcp-filter", () => {
       },
     });
 
-    assert.deepEqual(policy.allowedServers, ["context7", "exa"]);
-    assert.strictEqual(policy.codexConfig.mcp_servers.playwright, undefined);
-    assert.strictEqual(policy.codexConfig.mcp_servers.tavily, undefined);
+    assert.deepEqual(policy.allowedServers, ["context7"]);
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, { enabled: false });
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.tavily, { enabled: false });
   });
 
   it("hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다", () => {
@@ -195,12 +195,9 @@ describe("mcp-filter", () => {
         "Verify the latest pricing status and current release announcement.",
     });
 
-    assert.deepEqual(policy.allowedServers, [
-      "context7",
-      "tavily",
-      "brave-search",
-    ]);
-    assert.match(policy.hint, /웹 검색 우선순위: tavily, brave-search\./);
+    // executor는 context7만 허용 — 검색 서버는 maxSearchServers=0으로 제외
+    assert.deepEqual(policy.allowedServers, ["context7"]);
+    assert.match(policy.hint, /context7으로 관련 문서를 조회하세요/);
   });
 });
 

@@ -64,6 +64,7 @@ track_worker_pid() {
 }
 
 cleanup_workers() {
+  _codex_config_swap "restore" 2>/dev/null || true
   deregister_agent 2>/dev/null || true
   [[ ! -f "$_PID_TRACK" ]] && return
   while IFS= read -r pid; do
@@ -88,19 +89,44 @@ cleanup_workers() {
 }
 
 # ── config.toml sandbox/approval_mode 감지 ──
-# config.toml에 이미 설정되어 있으면 CLI 플래그 중복 시 Codex가 에러를 던짐
+# config.toml에 이미 설정되어 있으면 CLI 플래그 중복 시 Codex가 에러를 던짐.
+# 단, [mcp_servers.*.tools.*] 섹션 내부의 approval_mode는 tool 단위 승인 설정으로
+# top-level sandbox/approval_mode와 의미가 다르다. 이 값이 "approve"이면
+# codex exec이 non-TTY subprocess에서 승인 대기로 stall하므로 감지 대상에서 제외.
+# (refs: tellang/triflux#66, Yeachan-Heo/oh-my-codex#1478)
 _CODEX_CONFIG="${HOME}/.codex/config.toml"
 _CODEX_HAS_SANDBOX=""
-if [[ -f "$_CODEX_CONFIG" ]] && grep -qE '^\s*(sandbox|approval_mode)\s*=' "$_CODEX_CONFIG" 2>/dev/null; then
+if [[ -f "$_CODEX_CONFIG" ]] && awk '
+  /^\[{1,2}mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
+  /^\[/ { in_mcp_tool=0; next }
+  !in_mcp_tool && /^[[:space:]]*(sandbox|approval_mode)[[:space:]]*=/ { found=1; exit }
+  END { exit !found }
+' "$_CODEX_CONFIG" 2>/dev/null; then
   _CODEX_HAS_SANDBOX="1"
 fi
 
-build_codex_base() {
-  if [[ -n "$_CODEX_HAS_SANDBOX" ]]; then
-    echo "--skip-git-repo-check"
-  else
-    echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+# ── MCP tool approval_mode stall 방지 (ISSUE-4) ──
+# oh-my-codex 업데이트가 MCP tool 블록의 approval_mode를 "approve"로 복원함.
+# codex exec는 non-TTY subprocess이므로 interactive 승인 대기 = output 0B stall.
+# 실행 전 자동으로 "full-auto"로 교체한다.
+if [[ -f "$_CODEX_CONFIG" ]] && grep -q 'approval_mode = "approve"' "$_CODEX_CONFIG" 2>/dev/null; then
+  _approve_count=$(grep -c 'approval_mode = "approve"' "$_CODEX_CONFIG" 2>/dev/null || echo 0)
+  if [[ "$_approve_count" -gt 0 ]]; then
+    cp "$_CODEX_CONFIG" "${_CODEX_CONFIG}.bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+    sed -i 's/approval_mode = "approve"/approval_mode = "full-auto"/g' "$_CODEX_CONFIG"
+    echo "[tfx-route] MCP tool approval_mode stall 방지: ${_approve_count}개 블록 approve→full-auto 자동 수정" >&2
   fi
+fi
+
+build_codex_base() {
+  # codex exec는 항상 non-TTY subprocess에서 실행되므로 --dangerously-bypass 필수.
+  # --dangerously-bypass는 config.toml의 approval_mode/sandbox와 충돌하지 않음
+  # (--full-auto와 달리 bypass는 config 값을 override할 뿐 에러를 던지지 않음).
+  # 검증: approval_mode="auto" config에서 --dangerously-bypass 동시 사용 → exit 0 확인.
+  #
+  # Note: 위의 _CODEX_HAS_SANDBOX awk 감지는 현재 미사용이지만, 향후 codex가
+  # bypass와 config.toml 충돌을 감지하면 분기 로직을 재활성화할 수 있으므로 유지.
+  echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
 }
 
 # ── Async Job 디렉토리 ──
@@ -1168,15 +1194,17 @@ resolve_mcp_policy() {
   fi
 
   available_servers=$(get_cached_servers "$CLI_TYPE")
-  if [[ "$CLI_TYPE" == "codex" && "${TFX_CODEX_TRANSPORT:-auto}" != "mcp" ]]; then
-    available_servers=""
+  # Codex exec 모드에서도 config.toml의 MCP 서버를 전부 시작하므로,
+  # transport 모드와 관계없이 registered servers를 전달하여 불필요한 서버를
+  # enabled=false로 비활성화해야 한다.
+  # 캐시가 비어있으면 config.toml에서 직접 서버 목록을 추출한다.
+  if [[ -z "$available_servers" && "$CLI_TYPE" == "codex" && -f "$_CODEX_CONFIG" ]]; then
+    available_servers=$(sed -n 's/^\[mcp_servers\.\([^].]*\)\]$/\1/p' "$_CODEX_CONFIG" 2>/dev/null \
+      | sort -u | tr '\n' ',' | sed 's/,$//')
   fi
-  # Codex 0.115+: 미등록 서버에 config override(enabled=true/false 모두)를 보내면
-  # "invalid transport" 에러 발생. 캐시 비어있으면 빈 문자열이 유지되어
-  # mcp-filter가 override를 생성하지 않는다.
 
   local -a cmd=(
-    "$NODE_BIN" "$filter_script" shell
+    "$NODE_BIN" "$filter_script" delimited
     "--agent" "$AGENT_TYPE"
     "--profile" "$MCP_PROFILE"
     "--available" "$available_servers"
@@ -1186,13 +1214,18 @@ resolve_mcp_policy() {
   [[ -n "$TFX_SEARCH_TOOL" ]] && cmd+=("--search-tool" "$TFX_SEARCH_TOOL")
   [[ -n "$TFX_WORKER_INDEX" ]] && cmd+=("--worker-index" "$TFX_WORKER_INDEX")
 
-  local shell_exports
-  if ! shell_exports="$("${cmd[@]}")"; then
+  local _raw
+  if ! _raw="$("${cmd[@]}")"; then
     echo "[tfx-route] ERROR: MCP 정책 계산 실패" >&2
     return 1
   fi
 
-  eval "$shell_exports"
+  local _gemini_servers _codex_flags _phase
+  IFS=$'\x1e' read -r MCP_PROFILE_REQUESTED MCP_RESOLVED_PROFILE MCP_HINT \
+    _gemini_servers _codex_flags CODEX_CONFIG_JSON _phase <<< "$_raw"
+  IFS=',' read -r -a GEMINI_ALLOWED_SERVERS <<< "$_gemini_servers"
+  IFS=',' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
+  [[ -n "$_phase" ]] && MCP_PIPELINE_PHASE="$_phase"
 }
 
 get_claude_model() {
@@ -1373,6 +1406,53 @@ resolve_codex_mcp_script() {
     "$sd/hub/workers/codex-mcp.mjs" "$sd/../hub/workers/codex-mcp.mjs"
 }
 
+## ── Config Swap: 프로필별 MCP 서버 필터링 ──
+# codex exec는 -c flag로 MCP enabled/disabled를 제어할 수 없다.
+# config.toml을 원자적으로 교체하여 불필요한 서버 시작을 방지한다.
+_codex_config_swap() {
+  local action="$1"  # "filter" or "restore"
+  local config="$_CODEX_CONFIG"
+  local backup="${config}.pre-exec"
+
+  if [[ "$action" == "filter" && -f "$config" ]]; then
+    # MCP 프로필에서 허용된 서버 목록 추출
+    local allowed_pat=""
+    for flag in "${CODEX_CONFIG_FLAGS[@]}"; do
+      if [[ "$flag" =~ mcp_servers\.([^.]+)\.enabled=true ]]; then
+        [[ -n "$allowed_pat" ]] && allowed_pat="${allowed_pat}|"
+        allowed_pat="${allowed_pat}${BASH_REMATCH[1]}"
+      fi
+    done
+
+    # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 건드리지 않음)
+    if [[ -f "$backup" ]]; then
+      echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중" >&2
+      return 0
+    fi
+    cp "$config" "$backup"
+
+    # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지
+    awk -v keep="$allowed_pat" '
+      BEGIN { skip=0 }
+      /^\[mcp_servers\./ {
+        name=$0; gsub(/^\[mcp_servers\./, "", name); gsub(/[\].].*/, "", name)
+        if (keep == "" || name !~ "^(" keep ")$") { skip=1; next }
+        else { skip=0 }
+      }
+      /^\[/ && !/^\[mcp_servers\./ { skip=0 }
+      !skip { print }
+    ' "$backup" > "$config"
+
+    local kept=0
+    [[ -n "$allowed_pat" ]] && kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
+    echo "[tfx-route] config.toml swap: ${kept}개 MCP 서버만 활성" >&2
+
+  elif [[ "$action" == "restore" && -f "$backup" ]]; then
+    mv "$backup" "$config" 2>/dev/null
+    echo "[tfx-route] config.toml 복원 완료" >&2
+  fi
+}
+
 run_codex_exec() {
   local prompt="$1"
   local use_tee_flag="$2"
@@ -1380,9 +1460,8 @@ run_codex_exec() {
   local worker_pid
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
-  if [[ ${#CODEX_CONFIG_FLAGS[@]} -gt 0 ]]; then
-    codex_args+=("${CODEX_CONFIG_FLAGS[@]}")
-  fi
+  # -c flags는 codex exec에서 MCP enabled 제어 불가 — config swap으로 대체
+  # config swap은 codex 블록 최상단(_codex_config_swap "filter")에서 실행됨
 
   if [[ "$use_tee_flag" == "true" ]]; then
     "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
@@ -1519,7 +1598,7 @@ main() {
     deep-executor|architect|planner|critic|analyst) MIN_TIMEOUT=900 ;;
     document-specialist|scientist|scientist-deep) MIN_TIMEOUT=900 ;;
     code-reviewer|security-reviewer|quality-reviewer) MIN_TIMEOUT=600 ;;
-    executor|debugger) MIN_TIMEOUT=300 ;;
+    executor|debugger) MIN_TIMEOUT=300 ;;  # 기본값 300s
     *) MIN_TIMEOUT=120 ;;
   esac
 
@@ -1631,18 +1710,20 @@ FALLBACK_EOF
   fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
+    # Config swap: 프로필에 맞는 MCP 서버만 남긴 임시 config 적용
+    # run_codex_mcp / run_codex_exec 어느 경로든 적용되도록 최상단에서 실행
+    _codex_config_swap "filter"
+    # swap 후 config override 플래그 클리어 — 제거된 서버에 override 보내면 "invalid transport" 에러
+    CODEX_CONFIG_FLAGS=()
+    CODEX_CONFIG_JSON="{}"
     codex_transport_effective="exec"
     if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
       run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
       if [[ "$exit_code" -eq 0 ]]; then
         codex_transport_effective="mcp"
       elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
-        echo "[tfx-route] Codex MCP bootstrap 실패(exit=${exit_code}). legacy exec 경로로 fallback합니다." >&2
-        : > "$STDOUT_LOG"
-        : > "$STDERR_LOG"
-        exit_code=0
-        run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-        codex_transport_effective="exec-fallback"
+        echo "[tfx-route] Codex MCP bootstrap 실패(exit=${exit_code}). exec fallback 비활성(stdin 블록 위험)." >&2
+        codex_transport_effective="mcp-failed"
       else
         codex_transport_effective="mcp"
       fi
@@ -1651,6 +1732,8 @@ FALLBACK_EOF
       codex_transport_effective="exec"
     fi
     echo "[tfx-route] codex_transport_effective=$codex_transport_effective" >&2
+    # Config swap 복원 (성공/실패 관계없이)
+    _codex_config_swap "restore"
 
   elif [[ "$CLI_TYPE" == "gemini" ]]; then
     local gemini_model
@@ -1700,7 +1783,14 @@ FALLBACK_EOF
 
     run_stream_worker "gemini" "$FULL_PROMPT" "$use_tee" "${gemini_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}). claude-native fallback." >&2
+      # stderr 내용을 fallback 전에 보존하여 디버깅 가능하게 함
+      local gemini_stderr_bytes=0
+      [[ -f "$STDERR_LOG" ]] && gemini_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
+      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}, stderr=${gemini_stderr_bytes}B). claude-native fallback." >&2
+      if [[ "$gemini_stderr_bytes" -gt 0 ]]; then
+        echo "[tfx-route] Gemini stderr 보존:" >&2
+        tail -c 2048 "$STDERR_LOG" >&2
+      fi
       cat > "$STDOUT_LOG" <<EOF
 $(emit_claude_native_metadata)
 EOF
@@ -1722,7 +1812,13 @@ EOF
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-      echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}). native metadata로 fallback합니다." >&2
+      local claude_stderr_bytes=0
+      [[ -f "$STDERR_LOG" ]] && claude_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
+      echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}, stderr=${claude_stderr_bytes}B). native metadata로 fallback합니다." >&2
+      if [[ "$claude_stderr_bytes" -gt 0 ]]; then
+        echo "[tfx-route] Claude stderr 보존:" >&2
+        tail -c 2048 "$STDERR_LOG" >&2
+      fi
       cat > "$STDOUT_LOG" <<EOF
 $(emit_claude_native_metadata)
 EOF
@@ -1770,6 +1866,12 @@ EOF
       team_complete_task "success" "$output_preview"
     elif [[ "$exit_code" -eq 124 ]]; then
       team_complete_task "timeout" "타임아웃 (${TIMEOUT_SEC}초)"
+    elif [[ "$exit_code" -eq 143 ]]; then
+      team_complete_task "timeout" "외부 시그널로 종료 (SIGTERM, ${TIMEOUT_SEC}초)"
+    elif [[ "$exit_code" -eq 137 ]]; then
+      team_complete_task "timeout" "외부 시그널로 종료 (SIGKILL, ${TIMEOUT_SEC}초)"
+    elif [[ "$exit_code" -eq 130 ]]; then
+      team_complete_task "failed" "사용자 인터럽트 (SIGINT)"
     else
       local err_preview
       err_preview=$(tail -c 1024 "$STDERR_LOG" 2>/dev/null || echo "에러 정보 없음")

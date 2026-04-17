@@ -2,12 +2,90 @@
 
 All notable changes to triflux will be documented in this file.
 
-## [Unreleased]
+## [10.9.28] - 2026-04-15
+
+### Fixed
+- **[CRITICAL]** synapse heartbeat HTTP 라우트 필드명 불일치 수정 — partial 메타데이터 업데이트 정상 동작
+- conductor stdin write-after-end 방지 — writable 체크 추가
+- conductor 원격 세션 onCompleted 콜백 누락 수정 — swarm integration 정상 트리거
+- packages/remote quota-refresh `Promise.all` → `Promise.allSettled` 동기화 — 단일 계정 실패 시 Hub 크래시 방지
+- tui/monitor.mjs wt.exe 직접 spawn fallback 제거 — wt-manager 정책 준수
+- packages/triflux 3파일 동기화 (headless, cli-adapter-base, tfx-route.sh)
+- plugin.json, marketplace.json 버전 동기화
+
+### Changed
+- stale 문서 정리: .omc handoff 35건, docs/ 구버전 문서 삭제
+- CHANGELOG v10.9.23-27 누락분 보충
+
+## [10.9.27] - 2026-04-15
+
+### Fixed
+- cmd.exe /v:off delayed expansion 비활성화 (보안)
+- newline 제거로 명령 주입 방지
+- CWD factory 경로 로드 순서 보안 강화
+
+## [10.9.26] - 2026-04-15
+
+### Fixed
+- codex exec fallback 제거 — MCP transport 전용으로 전환
+- codex-mcp bootstrap timeout 60s → 120s
+
+## [10.9.25] - 2026-04-15
+
+### Fixed
+- codex-mcp bootstrap timeout 10s → 60s
+
+## [10.9.24] - 2026-04-15
+
+### Fixed
+- gemini-worker Windows .cmd shim spawn ENOENT 복원 (buildSpawnSpec)
+- gemini-worker quoteWindowsCmdArg %% 이스케이프 추가
+- tfx-route-worker CWD 기반 factory 경로 추가
 
 ### Added
-- **CodexAppServerWorker** (`hub/workers/codex-app-server-worker.mjs`) — Real-time streaming worker using codex 0.119.0 EXPERIMENTAL app-server JSON-RPC 2.0 protocol. Emits 12 distinct `kind` events (thread/turn/item status, text/thinking/plan/exec/file deltas, tool progress, approval review, error) via `/bridge/publish`. See `docs/workers/codex-app-server.md`.
-- **JsonRpcStdioClient** (`hub/workers/lib/jsonrpc-stdio.mjs`) — Minimal JSON-RPC 2.0 stdio client with AC18 max line size cap (1MB) for DoS defense.
-- **Factory transport dispatch**: `createWorker('codex', { transport: 'app-server' })` or `createWorker('codex-app-server')` routes to new real-time worker with default `publishCallback` wired to `/bridge/publish`.
+- delegator psmux 멀티워커 실행 경로 + MCP executor stall 수정
+
+## [10.9.22] - 2026-04-13
+
+### Fixed
+- 테스트 35건 실패 전면 수정 (2428/2429 pass) — constants 누락, regex, async, broker 격리 등 16파일
+- Codex MCP stall 근본 수정 — config.toml 원자적 swap으로 비허용 서버 비활성화
+- wt.exe --version GUI 다이얼로그 팝업 제거
+- env-detect: 쉘 경로/버전/installHint 리팩터 + 레이지 캐싱
+- cli-adapter-base: broker null 안전 처리, crash circuit breaker 반영
+- cross-review: .omc→.triflux 상태 경로 동기화
+
+### Added
+- headless: buildDashboardAttachArgs WT 연결 인자 빌더
+- hud renderers: [stale] 마커 지원
+- account-broker: _skipPersistence 테스트 격리 옵션
+
+### Changed
+- OMC 의존성 분리 + setup.mjs lib 동적 스캔 (18개 자동 동기화)
+- Hub idle timeout 기본 비활성화 (영구 실행)
+
+## [10.9.16] - 2026-04-12
+
+### Added
+- `/synapse/register`, `/synapse/heartbeat`, `/synapse/unregister` HTTP 엔드포인트
+- `synapse-http.mjs` fire-and-forget 헬퍼 — hub HTTP API 호출
+- `conductor.mjs` 상태 전이 시 자동 synapse register/heartbeat/unregister (HEALTHY→COMPLETED/DEAD)
+- `headless.mjs` runHeadless 워커별 synapse 세션 등록/해제 + 진행 heartbeat
+- 단위 테스트: synapse-http, synapse-wiring
+
+### Fixed
+- tfx-route.sh: exit 143/137/130 시그널 해석 (SIGTERM/SIGKILL/SIGINT 구분)
+
+## [10.9.15] - 2026-04-12
+
+### Added
+- `/synapse/sessions` GET, `/synapse/locks` GET, `/synapse/preflight` POST HTTP 엔드포인트
+- synapseEmitter 4개 이벤트 hubLog 리스너 (started, heartbeat, stale, removed)
+- preflight op whitelist 검증 (6개 유효 op만 허용, 나머지 400)
+
+### Fixed
+- `schedulePersist()` destroyed guard — destroy 후 새 타이머 생성 방지 (callback 내 이중 체크)
+- hono + @hono/node-server CVE 2건 패치 (serveStatic path traversal, cookie name validation)
 
 ## [10.9.2] - 2026-04-11
 

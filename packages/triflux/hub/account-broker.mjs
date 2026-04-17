@@ -77,7 +77,7 @@ function persistState(stateMap) {
     }
     mkdirSync(AUTH_BASE_PATH, { recursive: true });
     writeFileSync(STATE_PERSIST_PATH, JSON.stringify({ ts: now, entries }));
-  } catch { /* best-effort */ }
+  } catch (err) { try { console.error("[account-broker] persistState failed:", err.message); } catch {} }
 }
 
 function loadPersistedState() {
@@ -120,11 +120,13 @@ class AccountBroker extends EventEmitter {
   #config;
   #state; // Map<accountId, accountState>
   #roundRobinIndex; // Map<provider, number>
+  #persist; // boolean — disable persistence for tests
 
-  constructor(config) {
+  constructor(config, { _skipPersistence = false } = {}) {
     super();
     const parsed = ConfigSchema.parse(config);
     this.#config = parsed;
+    this.#persist = !_skipPersistence;
 
     this.#state = new Map();
     this.#roundRobinIndex = new Map();
@@ -134,7 +136,7 @@ class AccountBroker extends EventEmitter {
       ...(parsed.gemini || []).map((a) => ({ ...a, provider: "gemini" })),
     ];
 
-    const persisted = loadPersistedState();
+    const persisted = this.#persist ? loadPersistedState() : null;
     const pEntries = persisted?.entries || {};
 
     for (const account of allAccounts) {
@@ -386,7 +388,7 @@ class AccountBroker extends EventEmitter {
     };
 
     this.#state.set(accountId, updated);
-    persistState(this.#state);
+    if (this.#persist) persistState(this.#state);
     this.emit("release", { id: accountId, ok });
   }
 
@@ -401,7 +403,7 @@ class AccountBroker extends EventEmitter {
       leasedAt: null,
       cooldownUntil: Date.now() + coolMs,
     });
-    persistState(this.#state);
+    if (this.#persist) persistState(this.#state);
   }
 
   // ── snapshot ──────────────────────────────────────────────────

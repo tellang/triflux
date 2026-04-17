@@ -37,13 +37,13 @@ function runScript(scriptPath, payload, options = {}) {
 }
 
 function readState(projectDir) {
-  const statePath = join(projectDir, ".omc", "state", "cross-review.json");
+  const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
   const text = readFileSync(statePath, "utf8");
   return JSON.parse(text);
 }
 
 function writeState(projectDir, state) {
-  const statePath = join(projectDir, ".omc", "state", "cross-review.json");
+  const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
@@ -101,7 +101,7 @@ describe("cross-review tracker", () => {
       assert.equal(result.status, 0, result.stderr);
     }
 
-    const statePath = join(projectDir, ".omc", "state", "cross-review.json");
+    const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
     assert.equal(existsSync(statePath), false);
   });
 
@@ -228,7 +228,7 @@ describe("cross-review gate", () => {
       },
     });
 
-    const statePath = join(projectDir, ".omc", "state", "cross-review.json");
+    const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
     const result = runScript(
       GATE_PATH,
       {
@@ -241,6 +241,56 @@ describe("cross-review gate", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), "");
     assert.equal(existsSync(statePath), false);
+  });
+
+  it("Co-Authored-By 트레일러가 포함된 커밋을 deny한다", () => {
+    const projectDir = makeTempProject();
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command:
+            'git commit -m "feat: add feature\n\nCo-Authored-By: bot <bot@example.com>"',
+        },
+      },
+      { cwd: projectDir },
+    );
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Co-Authored-By/u);
+  });
+
+  it("co-authored-by 소문자 변형도 차단한다", () => {
+    const projectDir = makeTempProject();
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: {
+          command:
+            'git commit -m "fix: stuff\n\nco-authored-by: ai <ai@x.com>"',
+        },
+      },
+      { cwd: projectDir },
+    );
+
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /Co-Authored-By/u);
+  });
+
+  it("Co-Authored-By 없는 일반 커밋은 통과한다", () => {
+    const projectDir = makeTempProject();
+    const result = runScript(
+      GATE_PATH,
+      {
+        tool_name: "Bash",
+        tool_input: { command: 'git commit -m "feat: normal commit"' },
+      },
+      { cwd: projectDir },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
   });
 
   it("TFX_SKIP_CROSS_REVIEW=1이면 게이트를 우회한다", () => {

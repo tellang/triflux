@@ -218,14 +218,15 @@ export async function executeWithCircuitBroker({
   const { withRetry } = await import("./workers/worker-utils.mjs");
 
   // access broker as live binding property (not destructured) so reloadBroker() propagates
-  const lease = brokerMod.broker?.lease({ provider });
-  if (!lease) {
+  const hasBroker = brokerMod.broker != null;
+  const lease = hasBroker ? brokerMod.broker.lease({ provider }) : null;
+  if (hasBroker && !lease) {
     return createResult(false, { fellBack: true, failureMode: "circuit_open" });
   }
 
   const preflight = await preflightFn(opts);
   if (!preflight.ok) {
-    brokerMod.broker.release(lease.id, { ok: false });
+    if (lease) brokerMod.broker.release(lease.id, { ok: false });
     return createResult(false, {
       stderr: appendWarnings("", preflight.warnings),
       fellBack: opts.fallbackToClaude !== false,
@@ -273,20 +274,19 @@ export async function executeWithCircuitBroker({
   }
 
   if (lastResult.ok) {
-    brokerMod.broker.release(lease.id, { ok: true });
+    if (lease) brokerMod.broker.release(lease.id, { ok: true });
     return lastResult;
   }
 
-  if (lastResult.failureMode === "rate_limited") {
-    const text = `${lastResult.output || ""}\n${lastResult.stderr || ""}`;
-    const coolMs = parseRetryAfterMs(text, provider);
-    brokerMod.broker.markRateLimited(lease.id, coolMs);
-    brokerMod.broker.emit("cooldown", { id: lease.id, provider, coolMs, reason: "quota_exhausted" });
-  } else if (lastResult.failureMode === "crash") {
-    // 인프라 에러(모듈 누락, 서버 에러 등)는 계정 문제가 아님 → circuit/cooldown 건너뜀
-    brokerMod.broker.release(lease.id, { ok: false, skipCircuit: true });
-  } else {
-    brokerMod.broker.release(lease.id, { ok: false });
+  if (lease) {
+    if (lastResult.failureMode === "rate_limited") {
+      const text = `${lastResult.output || ""}\n${lastResult.stderr || ""}`;
+      const coolMs = parseRetryAfterMs(text, provider);
+      brokerMod.broker.markRateLimited(lease.id, coolMs);
+      brokerMod.broker.emit("cooldown", { id: lease.id, provider, coolMs, reason: "quota_exhausted" });
+    } else {
+      brokerMod.broker.release(lease.id, { ok: false });
+    }
   }
   return {
     ...lastResult,

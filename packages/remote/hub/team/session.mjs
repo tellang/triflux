@@ -1,8 +1,8 @@
 // hub/team/session.mjs — tmux/psmux/wt 세션 생명주기 관리
 // 의존성: child_process (Node.js 내장)만 사용
 import { execSync, spawnSync } from "node:child_process";
+import { resolveGitBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import { getEnvironment } from "@triflux/core/hub/lib/env-detect.mjs";
-import { createWtManager } from "./wt-manager.mjs";
 import {
   attachPsmuxSession,
   capturePsmuxPane,
@@ -15,27 +15,7 @@ import {
   psmuxExec,
   psmuxSessionExists,
 } from "./psmux.mjs";
-
-const GIT_BASH_CANDIDATES = [
-  "C:/Program Files/Git/bin/bash.exe",
-  "C:/Program Files/Git/usr/bin/bash.exe",
-];
-
-function findGitBashExe() {
-  for (const p of GIT_BASH_CANDIDATES) {
-    try {
-      execSync(`"${p}" --version`, {
-        stdio: "ignore",
-        timeout: 3000,
-        windowsHide: true,
-      });
-      return p;
-    } catch {
-      // 다음 후보
-    }
-  }
-  return null;
-}
+import { createWtManager } from "./wt-manager.mjs";
 
 /** Windows Terminal 실행 파일 존재 여부 */
 export function hasWindowsTerminal() {
@@ -73,7 +53,7 @@ function hasWslTmux() {
 
 /** Git Bash 내 tmux 사용 가능 여부 (Windows 전용) */
 function hasGitBashTmux() {
-  const bash = findGitBashExe();
+  const bash = resolveGitBashExecutable();
   if (!bash) return false;
   try {
     const r = spawnSync(bash, ["-lc", "tmux -V"], {
@@ -184,8 +164,8 @@ export function tmuxExec(args, opts = {}) {
  * @param {string} sessionName
  * @returns {{ command: string, args: string[] }}
  */
-export function resolveAttachCommand(sessionName) {
-  const mux = detectMultiplexer();
+export function resolveAttachCommand(sessionName, opts = {}) {
+  const mux = opts.mux || detectMultiplexer();
   if (!mux) {
     throw new Error("tmux/psmux 미발견");
   }
@@ -198,7 +178,7 @@ export function resolveAttachCommand(sessionName) {
   }
 
   if (mux === "git-bash-tmux") {
-    const bash = findGitBashExe();
+    const bash = opts.bashCommand || resolveGitBashExecutable();
     if (!bash) throw new Error("git-bash-tmux 감지 실패");
     return {
       command: bash,

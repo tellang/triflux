@@ -41,7 +41,7 @@ Claude는 최소 컨텍스트만 수집한다.
 
 수집 후 Gemini에 위임:
 ```
-Bash("bash scripts/tfx-route.sh gemini exec '소프트웨어 아키텍트로서 다음 기능의 구현 계획을 수립하라.\n기능: {feature}\n프로젝트 컨텍스트: {context}\n관련 파일: {file_list}\n\n출력 형식:\n1. 영향 범위 (수정할 파일 목록)\n2. 태스크 분해 (순서대로, 각 태스크에 검증 방법 포함)\n3. 리스크 및 의존성\n4. 예상 복잡도 (low/medium/high)'")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '소프트웨어 아키텍트로서 다음 기능의 구현 계획을 수립하라.\n기능: {feature}\n프로젝트 컨텍스트: {context}\n관련 파일: {file_list}\n\n출력 형식:\n1. 영향 범위 (수정할 파일 목록)\n2. 태스크 분해 (순서대로, 각 태스크에 검증 방법 포함)\n3. 리스크 및 의존성\n4. 예상 복잡도 (low/medium/high)'")
 ```
 
 Claude는 Gemini 출력을 받아 아래 출력 형식으로 포맷팅만 수행한다.

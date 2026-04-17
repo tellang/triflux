@@ -3,68 +3,101 @@ import { execFileSync } from "node:child_process";
 import { platform as osPlatform } from "node:os";
 
 let _cached = null;
+let _shellCache = null;
+let _terminalCache = null;
+let _multiplexerCache = null;
+
+const PIPE_OPTS = { encoding: "utf8", timeout: 3000, stdio: "pipe" };
 
 /**
  * 기본 쉘 감지
- * Windows: pwsh → powershell
- * Unix: $SHELL → /bin/sh
+ * Windows: pwsh → powershell (full path + version)
+ * Unix: $SHELL → /bin/sh (+ version)
  */
 export function detectShell() {
+  if (_shellCache) return _shellCache;
+
   const platform = osPlatform();
+
   if (platform === "win32") {
     try {
-      execFileSync("where", ["pwsh.exe"], { stdio: "ignore", timeout: 3000 });
-      return { name: "pwsh", path: "pwsh.exe", version: null };
+      const path = execFileSync("where", ["pwsh.exe"], PIPE_OPTS).trim().split(/\r?\n/)[0];
+      let version = null;
+      try {
+        version = execFileSync(path, ["-NoLogo", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], PIPE_OPTS).trim();
+      } catch {}
+      _shellCache = { name: "pwsh", path, version };
     } catch {
       try {
-        execFileSync("where", ["powershell.exe"], { stdio: "ignore", timeout: 3000 });
-        return { name: "powershell", path: "powershell.exe", version: null };
+        const path = execFileSync("where", ["powershell.exe"], PIPE_OPTS).trim().split(/\r?\n/)[0];
+        _shellCache = { name: "powershell", path, version: null };
       } catch {
-        return { name: "cmd", path: "cmd.exe", version: null, installHint: "pwsh: winget install Microsoft.PowerShell" };
+        _shellCache = { name: "powershell", path: "", version: null, installHint: "pwsh: winget install Microsoft.PowerShell" };
       }
     }
+    return _shellCache;
   }
 
   const shellPath = process.env.SHELL || "/bin/sh";
   const name = shellPath.split("/").pop() || "sh";
-  return { name, path: shellPath, version: null };
+  let version = null;
+  try {
+    version = execFileSync(shellPath, ["--version"], PIPE_OPTS).trim();
+  } catch {}
+  _shellCache = { name, path: shellPath, version };
+  return _shellCache;
 }
 
 /**
  * 터미널 에뮬레이터 감지
  */
 export function detectTerminal() {
+  if (_terminalCache) return _terminalCache;
+
   const platform = osPlatform();
   if (platform === "win32") {
     try {
-      execFileSync("where", ["wt.exe"], { stdio: "ignore", timeout: 3000 });
-      return { name: "windows-terminal", hasWt: true };
+      execFileSync("where", ["wt.exe"], PIPE_OPTS);
+      _terminalCache = { name: "windows-terminal", hasWt: true };
     } catch {
-      return { name: "conhost", hasWt: false, installHint: "Windows Terminal: winget install Microsoft.WindowsTerminal" };
+      _terminalCache = { name: "unknown", hasWt: false, installHint: "wt: winget install Microsoft.WindowsTerminal" };
     }
+    return _terminalCache;
   }
 
-  if (process.env.TERM_PROGRAM === "iTerm.app") {
-    return { name: "iterm2", hasWt: false };
+  if (process.env.TERM_PROGRAM === "WarpTerminal") {
+    _terminalCache = { name: "warp", hasWt: false };
+  } else if (process.env.TERM_PROGRAM === "Alacritty") {
+    _terminalCache = { name: "alacritty", hasWt: false };
+  } else if (process.env.KITTY_WINDOW_ID) {
+    _terminalCache = { name: "kitty", hasWt: false };
+  } else if (process.env.TERM_PROGRAM === "iTerm.app") {
+    _terminalCache = { name: "iterm2", hasWt: false };
+  } else if (process.env.TERM_PROGRAM === "Apple_Terminal") {
+    _terminalCache = { name: "terminal-app", hasWt: false };
+  } else {
+    _terminalCache = { name: "unknown", hasWt: false };
   }
-  if (process.env.TERM_PROGRAM === "Apple_Terminal") {
-    return { name: "terminal-app", hasWt: false };
-  }
-
-  return { name: "unknown", hasWt: false };
+  return _terminalCache;
 }
 
 /**
  * 멀티플렉서 감지 (tmux)
  */
 export function detectMultiplexer() {
+  if (_multiplexerCache) return _multiplexerCache;
+
   try {
     const cmd = osPlatform() === "win32" ? "where" : "which";
-    const path = execFileSync(cmd, ["tmux"], { encoding: "utf8", timeout: 3000, stdio: ["ignore", "pipe", "ignore"] }).trim();
-    return { name: "tmux", path };
+    const path = execFileSync(cmd, ["tmux"], PIPE_OPTS).trim();
+    _multiplexerCache = { name: "tmux", path };
   } catch {
-    return { name: "none", path: null };
+    const hint = osPlatform() === "win32"
+      ? "tmux: install tmux in WSL or MSYS2"
+      : undefined;
+    _multiplexerCache = { name: "none", path: null, ...(hint ? { installHint: hint } : {}) };
   }
+  return _multiplexerCache;
 }
 
 /**

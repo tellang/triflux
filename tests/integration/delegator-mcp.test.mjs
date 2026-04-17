@@ -14,6 +14,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { DelegatorMcpWorker } from "../../hub/workers/delegator-mcp.mjs";
 import { BASH_EXE } from "../helpers/bash-path.mjs";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -266,8 +267,11 @@ describe("delegator-mcp stdio server", () => {
       });
 
       const config = JSON.parse(result.structuredContent.output);
-      const allowedMcpServers = Object.keys(config.mcp_servers).sort();
-      assert.deepEqual(allowedMcpServers, ["context7", "playwright"]);
+      const enabledServers = Object.entries(config.mcp_servers)
+        .filter(([, v]) => v.enabled !== false)
+        .map(([k]) => k)
+        .sort();
+      assert.deepEqual(enabledServers, ["context7", "playwright"]);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
       await closeClient(client, transport);
@@ -453,5 +457,65 @@ describe("delegator-mcp stdio server", () => {
     } finally {
       await closeClient(client, transport);
     }
+  });
+});
+
+describe("DelegatorMcpWorker multi-worker branch", () => {
+  it("_executeMultiWorker 메서드가 존재해야 한다", () => {
+    const worker = new DelegatorMcpWorker({ cwd: PROJECT_ROOT });
+    assert.equal(typeof worker._executeMultiWorker, "function");
+  });
+
+  it("workers 배열이 있으면 _executeDirect가 _executeMultiWorker를 호출해야 한다", async () => {
+    const worker = new DelegatorMcpWorker({ cwd: PROJECT_ROOT });
+    let called = false;
+
+    worker._executeMultiWorker = async () => {
+      called = true;
+      return { ok: true, mode: "sync", status: "completed", output: "multi" };
+    };
+    worker._executeWorker = async () => {
+      throw new Error("_executeWorker should not be called");
+    };
+    worker._executeRoute = async () => {
+      throw new Error("_executeRoute should not be called");
+    };
+
+    const result = await worker._executeDirect({
+      provider: "codex",
+      agentType: "executor",
+      prompt: "run",
+      workers: [{ provider: "codex", agentType: "executor", prompt: "w1" }],
+    });
+
+    assert.equal(called, true);
+    assert.equal(result.ok, true);
+    assert.equal(result.output, "multi");
+  });
+
+  it("workers 배열이 없으면 기존 _executeWorker 경로를 유지해야 한다", async () => {
+    const worker = new DelegatorMcpWorker({ cwd: PROJECT_ROOT });
+    let workerCalled = false;
+    let routeCalled = false;
+
+    worker._shouldUseRoute = () => false;
+    worker._executeWorker = async () => {
+      workerCalled = true;
+      return { ok: true, mode: "sync", status: "completed", output: "single" };
+    };
+    worker._executeRoute = async () => {
+      routeCalled = true;
+      return { ok: true, mode: "sync", status: "completed", output: "route" };
+    };
+
+    const result = await worker._executeDirect({
+      provider: "codex",
+      agentType: "executor",
+      prompt: "single path",
+    });
+
+    assert.equal(workerCalled, true);
+    assert.equal(routeCalled, false);
+    assert.equal(result.output, "single");
   });
 });

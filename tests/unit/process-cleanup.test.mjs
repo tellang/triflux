@@ -19,20 +19,33 @@ import {
  * @param {object} [sessionPids] - session→pids 맵 (psmux list-panes mock)
  */
 function makeMockExecFile(procs, sessionPids = {}) {
-  return async (_cmd, args, _opts) => {
+  return async (cmd, args, _opts) => {
     const cmdStr = Array.isArray(args) ? args.join(" ") : String(args);
 
-    // Get-CimInstance Win32_Process 쿼리
+    // Get-CimInstance Win32_Process 쿼리 (Windows)
     if (cmdStr.includes("Win32_Process") && cmdStr.includes("ConvertTo-Json")) {
       return { stdout: JSON.stringify(procs), stderr: "" };
     }
 
-    // Get-CimInstance CreationDate 쿼리 (age)
+    // Get-CimInstance CreationDate 쿼리 (age, Windows)
     if (cmdStr.includes("Win32_Process") && cmdStr.includes("CreationDate")) {
       return {
         stdout: new Date(Date.now() - 60_000).toISOString(),
         stderr: "",
       };
+    }
+
+    // Unix ps 쿼리 (macOS/Linux)
+    if (cmd === "ps" && cmdStr.includes("pid=")) {
+      const lines = procs.map((p) => {
+        const pid = p.ProcessId || 0;
+        const ppid = p.ParentProcessId || 0;
+        const rss = Math.round((p.WorkingSetSize || 0) / 1024); // bytes → KB
+        const name = (p.Name || "").replace(/\.exe$/i, "");
+        const cmdLine = p.CommandLine || "";
+        return `${pid} ${ppid} ${rss} ${name} ${cmdLine}`;
+      });
+      return { stdout: lines.join("\n"), stderr: "" };
     }
 
     // psmux list-sessions
@@ -241,7 +254,7 @@ describe("findOrphanProcesses — psmux 교차검증", () => {
 
   it("psmux 미설치 시 에러 없이 빈 교차검증 결과(= 모두 후보 유지)로 동작한다", async () => {
     const procs = [cimProc({ ProcessId: 1200, ParentProcessId: 9999 })];
-    const mockExec = async (_cmd, args, _opts) => {
+    const mockExec = async (cmd, args, _opts) => {
       const cmdStr = Array.isArray(args) ? args.join(" ") : String(args);
       if (
         cmdStr.includes("Win32_Process") &&
@@ -254,6 +267,18 @@ describe("findOrphanProcesses — psmux 교차검증", () => {
           stdout: new Date(Date.now() - 30_000).toISOString(),
           stderr: "",
         };
+      }
+      // Unix ps 쿼리 (macOS/Linux)
+      if (cmd === "ps" && cmdStr.includes("pid=")) {
+        const lines = procs.map((p) => {
+          const pid = p.ProcessId || 0;
+          const ppid = p.ParentProcessId || 0;
+          const rss = Math.round((p.WorkingSetSize || 0) / 1024);
+          const name = (p.Name || "").replace(/\.exe$/i, "");
+          const cmdLine = p.CommandLine || "";
+          return `${pid} ${ppid} ${rss} ${name} ${cmdLine}`;
+        });
+        return { stdout: lines.join("\n"), stderr: "" };
       }
       // psmux 관련 모두 실패
       throw new Error("psmux: command not found");

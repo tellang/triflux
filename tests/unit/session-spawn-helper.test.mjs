@@ -21,25 +21,8 @@ describe("session-spawn-helper createIsolatedSessionName()", () => {
 });
 
 describe("session-spawn-helper attachWithWindowsTerminal()", () => {
-  it("returns current WT split-pane attach args", () => {
-    const args = attachWithWindowsTerminal("tfx-isolated-1735689600123", {
-      profile: "triflux",
-      title: "tfx-isolated-1735689600123",
-      spawnFn: () => ({ unref() {} }),
-    });
-
-    assert.deepEqual(args, [
-      "sp",
-      "-p",
-      "triflux",
-      "--title",
-      "tfx-isolated-1735689600123",
-      "--",
-      "psmux",
-      "attach-session",
-      "-t",
-      "tfx-isolated-1735689600123",
-    ]);
+  it("is an async function (wt-manager delegate)", () => {
+    assert.equal(attachWithWindowsTerminal.constructor.name, "AsyncFunction");
   });
 });
 

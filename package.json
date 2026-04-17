@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "10.9.12",
+  "version": "10.9.29",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
   "type": "module",
   "bin": {
@@ -42,8 +42,8 @@
     "setup": "node scripts/setup.mjs",
     "preinstall": "node scripts/preinstall.mjs",
     "postinstall": "node scripts/setup.mjs",
-    "lint": "biome check .",
-    "lint:fix": "biome check --fix .",
+    "lint": "biome check bin config hooks hub hud mesh scripts tests .claude-plugin .github package.json package-lock.json biome.json",
+    "lint:fix": "biome check --write bin config hooks hub hud mesh scripts tests .claude-plugin .github package.json package-lock.json biome.json",
     "health": "npm test && npm run lint",
     "test": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
     "test:unit": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/unit/**/*.test.mjs",
@@ -52,7 +52,13 @@
     "test:contract": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/contract/**/*.test.mjs",
     "test:coverage": "node --experimental-test-coverage --test-coverage-lines=60 --test-coverage-functions=60 --test --test-force-exit --test-concurrency=8 \"tests/**/*.test.mjs\"",
     "gen:skill-docs": "node scripts/gen-skill-docs.mjs",
-    "gen:skill-manifest": "node scripts/gen-skill-manifest.mjs"
+    "gen:skill-manifest": "node scripts/gen-skill-manifest.mjs",
+    "release:check-sync": "node scripts/release/check-sync.mjs",
+    "release:check-sync:fix": "node scripts/release/check-sync.mjs --fix",
+    "release:bump": "node scripts/release/bump-version.mjs",
+    "release:prepare": "node scripts/release/prepare.mjs",
+    "release:publish": "node scripts/release/publish.mjs",
+    "release:verify": "node scripts/release/verify.mjs"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -65,7 +71,7 @@
   "author": "tellang",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.6.2",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",

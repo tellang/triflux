@@ -42,6 +42,7 @@ function sanitizeSession(raw, fallbackSessionId = "") {
 export function createSynapseRegistry(opts = {}) {
   const {
     persistPath,
+    emitter = null,
     localHeartbeatIntervalMs = DEFAULT_LOCAL_HEARTBEAT_INTERVAL_MS,
     localTimeoutMs = DEFAULT_LOCAL_TIMEOUT_MS,
     remoteHeartbeatIntervalMs = DEFAULT_REMOTE_HEARTBEAT_INTERVAL_MS,
@@ -67,6 +68,9 @@ export function createSynapseRegistry(opts = {}) {
     return session.isRemote ? remoteTimeoutMs : localTimeoutMs;
   }
 
+  let persistTimer = null;
+  let destroyed = false;
+
   function persist() {
     if (!persistPath) return;
     try {
@@ -78,6 +82,15 @@ export function createSynapseRegistry(opts = {}) {
     } catch {
       /* best-effort */
     }
+  }
+
+  function schedulePersist() {
+    if (destroyed || persistTimer) return;
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      if (!destroyed) persist();
+    }, 200);
+    if (typeof persistTimer.unref === "function") persistTimer.unref();
   }
 
   function restore() {
@@ -101,10 +114,11 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function notifyStale(session) {
-    // TODO: emit synapse.session.stale via Hub deliveryEmitter
+    const clone = cloneSession(session);
+    emitter?.emit("synapse.session.stale", { sessionId: session.sessionId, session: clone });
     for (const callback of staleCallbacks) {
       try {
-        callback(cloneSession(session));
+        callback(clone);
       } catch {
         /* no-op */
       }
@@ -112,10 +126,11 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function notifyRemoved(session) {
-    // TODO: emit synapse.session.removed via Hub deliveryEmitter
+    const clone = cloneSession(session);
+    emitter?.emit("synapse.session.removed", { sessionId: session.sessionId, session: clone });
     for (const callback of removedCallbacks) {
       try {
-        callback(cloneSession(session));
+        callback(clone);
       } catch {
         /* no-op */
       }
@@ -134,8 +149,10 @@ export function createSynapseRegistry(opts = {}) {
 
       const elapsedMs = now() - current.lastHeartbeat;
       if (elapsedMs > timeoutFor(current) && current.status !== "stale") {
-        current.status = "stale";
-        notifyStale(current);
+        const staled = { ...current, status: "stale" };
+        sessions.set(sessionId, staled);
+        schedulePersist();
+        setImmediate(() => { if (!destroyed) notifyStale(staled); });
       }
     }, intervalFor(session));
 
@@ -148,15 +165,24 @@ export function createSynapseRegistry(opts = {}) {
     startMonitor(sessionId);
   }
 
-  function register(meta) {
-    const sessionId = normalizeSessionId(meta?.sessionId);
-    if (!sessionId || sessions.has(sessionId)) {
-      return { ok: false, sessionId };
+  function register(sessionIdOrMeta, meta = null) {
+    const normalizedMeta =
+      meta && typeof meta === "object"
+        ? { ...meta, sessionId: sessionIdOrMeta }
+        : sessionIdOrMeta;
+    const sessionId = normalizeSessionId(normalizedMeta?.sessionId);
+    if (!sessionId) {
+      return { ok: false, sessionId, reason: "invalid_id" };
+    }
+
+    if (sessions.has(sessionId)) {
+      console.warn("[synapse-registry] duplicate registration rejected:", sessionId);
+      return { ok: false, sessionId, reason: "duplicate" };
     }
 
     const session = sanitizeSession(
       {
-        ...meta,
+        ...normalizedMeta,
         sessionId,
         status: "active",
         lastHeartbeat: now(),
@@ -168,7 +194,7 @@ export function createSynapseRegistry(opts = {}) {
     startMonitor(sessionId);
     persist();
 
-    // TODO: emit synapse.session.started via Hub deliveryEmitter
+    emitter?.emit("synapse.session.started", { sessionId, session: cloneSession(session) });
     return { ok: true, sessionId };
   }
 
@@ -190,33 +216,35 @@ export function createSynapseRegistry(opts = {}) {
     if (!session) return false;
 
     const wasRemote = session.isRemote;
-
-    session.lastHeartbeat = now();
-    session.status = "active";
+    const updated = { ...session, lastHeartbeat: now(), status: "active" };
 
     if (partialMeta && typeof partialMeta === "object") {
-      if (typeof partialMeta.host === "string") session.host = partialMeta.host;
+      if (typeof partialMeta.host === "string") updated.host = partialMeta.host;
       if (typeof partialMeta.worktreePath === "string") {
-        session.worktreePath = partialMeta.worktreePath;
+        updated.worktreePath = partialMeta.worktreePath;
       }
-      if (typeof partialMeta.branch === "string") session.branch = partialMeta.branch;
+      if (typeof partialMeta.branch === "string") updated.branch = partialMeta.branch;
       if (Array.isArray(partialMeta.dirtyFiles)) {
-        session.dirtyFiles = [...partialMeta.dirtyFiles];
+        updated.dirtyFiles = partialMeta.dirtyFiles.filter(
+          (f) => typeof f === "string" && f.length > 0,
+        );
       }
       if (typeof partialMeta.taskSummary === "string") {
-        session.taskSummary = partialMeta.taskSummary;
+        updated.taskSummary = partialMeta.taskSummary;
       }
       if (typeof partialMeta.isRemote === "boolean") {
-        session.isRemote = partialMeta.isRemote;
+        updated.isRemote = partialMeta.isRemote;
       }
     }
 
-    if (session.isRemote !== wasRemote) {
+    sessions.set(normalized, updated);
+
+    if (updated.isRemote !== wasRemote) {
       startMonitor(normalized);
     }
 
-    persist();
-    // TODO: emit synapse.session.heartbeat via Hub deliveryEmitter
+    schedulePersist();
+    emitter?.emit("synapse.session.heartbeat", { sessionId: normalized, session: cloneSession(updated), partial: partialMeta });
     return true;
   }
 
@@ -254,8 +282,13 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function destroy() {
+    destroyed = true;
     for (const sessionId of monitors.keys()) {
       stopMonitor(sessionId);
+    }
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
     }
     persist();
   }
