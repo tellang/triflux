@@ -93,7 +93,10 @@ test("cli-adapter-base exports the shared codex exec builder and codex-compat re
     assert.match(command, /--skip-git-repo-check/);
     assert.match(command, /--output-last-message \/tmp\/result\.txt/);
     assert.match(command, /--color never/);
-    assert.match(command, /--cwd 'C:\/work\/it''s-me'/);
+    assert.ok(
+      !command.includes("--cwd"),
+      `codex exec should not receive --cwd directly: ${command}`,
+    );
     assert.ok(command.endsWith('"hello"'));
 
     assert.equal(base.escapePwshSingleQuoted("it's"), "it''s");

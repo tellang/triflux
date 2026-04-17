@@ -44,15 +44,23 @@ describe("headless cwd propagation parity", () => {
         cmd.startsWith(`Set-Location -LiteralPath '${expectedCwd}';`),
         `headless cwd preamble (Windows): ${cmd}`,
       );
+      assert.ok(
+        cmd.includes(`Set-Location -LiteralPath '${expectedCwd}'`),
+        `headless cwd fragment (Windows): ${cmd}`,
+      );
     } else {
       assert.ok(
         cmd.startsWith(`cd '${expectedCwd}' && `),
         `headless cwd preamble (Unix): ${cmd}`,
       );
+      assert.ok(
+        cmd.includes(`cd '${expectedCwd}' && `),
+        `headless cwd fragment (Unix): ${cmd}`,
+      );
     }
     assert.ok(
-      cmd.includes(`--cwd '${expectedCwd}'`),
-      `headless codex cwd flag: ${cmd}`,
+      !cmd.includes(" --cwd "),
+      `headless command should rely on cwd preamble, not codex --cwd: ${cmd}`,
     );
     assert.ok(
       routeSource.includes('"--cwd" "$PWD"'),
