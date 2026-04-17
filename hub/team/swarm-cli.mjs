@@ -131,14 +131,20 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
     baseBranch: flags.baseBranch,
   });
 
-  hyper.on("shardLaunched", ({ shard, sessionId, remote }) => {
+  hyper.on("shardLaunched", ({ shardName, sessionId, remote }) => {
     const tag = remote ? ` ${GRAY}(remote)${RESET}` : "";
-    console.log(`  ${GREEN}▸${RESET} launched: ${shard}${tag} [${sessionId}]`);
+    console.log(
+      `  ${GREEN}▸${RESET} launched: ${shardName}${tag} [${sessionId}]`,
+    );
   });
-  hyper.on("shardCompleted", ({ shard, success, reason }) => {
-    const mark = success ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`;
+  hyper.on("shardCompleted", ({ shardName, sessionId, isRedundant }) => {
+    const tag = isRedundant ? ` ${GRAY}(redundant)${RESET}` : "";
+    console.log(`  ${GREEN}✓${RESET} ${shardName}${tag} [${sessionId}]`);
+  });
+  hyper.on("shardFailed", ({ shardName, failureMode, reason }) => {
     const reasonStr = reason ? ` ${GRAY}(${reason})${RESET}` : "";
-    console.log(`  ${mark} ${shard}${reasonStr}`);
+    const modeStr = failureMode ? ` ${GRAY}[${failureMode}]${RESET}` : "";
+    console.log(`  ${RED}✗${RESET} ${shardName}${modeStr}${reasonStr}`);
   });
   hyper.on("warning", ({ type, ...rest }) => {
     console.error(

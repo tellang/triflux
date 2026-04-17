@@ -604,6 +604,43 @@ describe("swarm-hypervisor", () => {
       assert.equal(result.partial, true);
       assert.equal(hv.getStatus().integrationPromise.partial, true);
     });
+
+    it("cascades dep failure to dependents so integration can complete", async () => {
+      const plan = planSwarm(null, { content: SIMPLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "cascade-dep",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/cascade-dep/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardBranch }) => ({
+            ok: true,
+            headCommit: `head:${shardBranch}`,
+          }),
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      // worker-b depends on worker-a; if worker-a dies, worker-b never launches.
+      // Without cascade, allDone would never be true → integration hangs.
+      conductors[0].fail("worker-a crashed");
+
+      const result = await hv.integrationComplete();
+      assert.deepEqual(result.integrated, []);
+      assert.deepEqual([...result.failed].sort(), ["worker-a", "worker-b"]);
+      assert.equal(result.partial, true);
+      assert.equal(hv.getStatus().failedShards, 2);
+    });
   });
 
   describe("getStatus", () => {
