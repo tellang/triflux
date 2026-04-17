@@ -95,7 +95,7 @@ argument-hint: "<토론 주제>"
 Claude (Agent, background):
 ```
 Agent(
-  subagent_type="claude-sonnet-4-5",
+  subagent_type="oh-my-claudecode:architect",
   model="opus",
   run_in_background=true,
   prompt="당신은 {claude_expert_1}({role_1})과 {claude_expert_2}({role_2})입니다.
