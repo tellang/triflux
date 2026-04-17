@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import childProcess from "../../hub/lib/spawn-trace.mjs";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
+import childProcess from "../../hub/lib/spawn-trace.mjs";
 
 const ORIGINAL_ENV = {
   PSMUX_CAPTURE_ROOT: process.env.PSMUX_CAPTURE_ROOT,
@@ -340,7 +340,11 @@ describe("psmux.mjs steering", () => {
           call.args[1] === "-t" &&
           call.args[2] === "tfx-test:0.1" &&
           typeof call.args[3] === "string" &&
-          call.args[3].includes(process.platform === "win32" ? "pipe-pane-capture.ps1" : "pipe-pane-capture.sh"),
+          call.args[3].includes(
+            process.platform === "win32"
+              ? "pipe-pane-capture.ps1"
+              : "pipe-pane-capture.sh",
+          ),
       ),
     );
   });
@@ -477,17 +481,17 @@ describe("killPsmuxSession cleanup", () => {
     );
 
     // 프로세스 트리 종료 호출 확인 (Windows: taskkill via execSync, macOS: pgrep+process.kill via execFileSync)
-    const treeKillCalls = process.platform === "win32"
-      ? calls.filter(
-          (c) =>
-            c.file === "execSync" &&
-            typeof c.args[0] === "string" &&
-            c.args[0].includes("taskkill"),
-        )
-      : calls.filter(
-          (c) => c.file === "pgrep" && c.args?.[0] === "-P",
-        );
-    const killLabel = process.platform === "win32" ? "taskkill" : "pgrep -P (tree kill)";
+    const treeKillCalls =
+      process.platform === "win32"
+        ? calls.filter(
+            (c) =>
+              c.file === "execSync" &&
+              typeof c.args[0] === "string" &&
+              c.args[0].includes("taskkill"),
+          )
+        : calls.filter((c) => c.file === "pgrep" && c.args?.[0] === "-P");
+    const killLabel =
+      process.platform === "win32" ? "taskkill" : "pgrep -P (tree kill)";
     assert.ok(
       treeKillCalls.length >= 1,
       `${killLabel}이 1회 이상 호출되어야 함 (실제: ${treeKillCalls.length})`,
@@ -501,12 +505,10 @@ describe("killPsmuxSession cleanup", () => {
 
     // 고아 프로세스 정리 호출 확인 (pipe-pane-capture)
     // Windows: execSync("... pipe-pane-capture ..."), macOS: execFileSync("pkill", ["-f", "pipe-pane-capture"])
-    const orphanCalls = calls.filter(
-      (c) => {
-        const allArgs = [c.file, ...(c.args || [])].join(" ");
-        return allArgs.includes("pipe-pane-capture");
-      },
-    );
+    const orphanCalls = calls.filter((c) => {
+      const allArgs = [c.file, ...(c.args || [])].join(" ");
+      return allArgs.includes("pipe-pane-capture");
+    });
     assert.ok(
       orphanCalls.length >= 1,
       "고아 pipe-pane 헬퍼 정리가 호출되어야 함",
@@ -530,12 +532,14 @@ describe("killPsmuxSession cleanup", () => {
     );
 
     // 순서 검증: pipe-pane 해제가 프로세스 종료(taskkill/pkill)보다 먼저
-    const firstTreeKillIdx = calls.findIndex(
-      (c) => {
-        const allArgs = [c.file, ...(c.args || [])].join(" ");
-        return allArgs.includes("taskkill") || allArgs.includes("pkill") || allArgs.includes("pgrep");
-      },
-    );
+    const firstTreeKillIdx = calls.findIndex((c) => {
+      const allArgs = [c.file, ...(c.args || [])].join(" ");
+      return (
+        allArgs.includes("taskkill") ||
+        allArgs.includes("pkill") ||
+        allArgs.includes("pgrep")
+      );
+    });
     assert.ok(
       firstPipePaneIdx < firstTreeKillIdx,
       "pipe-pane 해제가 taskkill보다 먼저 실행되어야 함",
@@ -559,48 +563,43 @@ describe("killPsmuxSession cleanup", () => {
     );
   });
 
-  it(
-    "macOS 고아 pgrep 패턴은 tfx-headless path anchor를 쓰고 세션명을 regex-escape한다",
-    { skip: process.platform === "win32" },
-    async () => {
-      createTempCaptureRoot("psmux-regex-");
-      const { calls } = mockForKillSession();
-      const { killPsmuxSession } = await importFreshPsmux();
+  it("macOS 고아 pgrep 패턴은 tfx-headless path anchor를 쓰고 세션명을 regex-escape한다", {
+    skip: process.platform === "win32",
+  }, async () => {
+    createTempCaptureRoot("psmux-regex-");
+    const { calls } = mockForKillSession();
+    const { killPsmuxSession } = await importFreshPsmux();
 
-      // session name with regex metacharacters
-      killPsmuxSession("tfx.session+v2");
+    // session name with regex metacharacters
+    killPsmuxSession("tfx.session+v2");
 
-      const pgrepF = calls.filter(
-        (c) => c.file === "pgrep" && c.args?.[0] === "-f",
-      );
-      assert.ok(
-        pgrepF.length >= 1,
-        "pgrep -f가 최소 1회 호출되어야 한다",
-      );
+    const pgrepF = calls.filter(
+      (c) => c.file === "pgrep" && c.args?.[0] === "-f",
+    );
+    assert.ok(pgrepF.length >= 1, "pgrep -f가 최소 1회 호출되어야 한다");
 
-      const mcpPat = pgrepF
-        .map((c) => c.args[1] || "")
-        .find((p) => p.includes("tfx-headless"));
-      assert.ok(
-        mcpPat,
-        `MCP 정리 pgrep은 tfx-headless path anchor를 사용해야 한다: ${pgrepF.map((c) => c.args[1]).join(" | ")}`,
-      );
-      assert.ok(
-        mcpPat.includes("tfx\\.session\\+v2"),
-        `세션명의 '.'와 '+'가 regex-escape 되어야 한다: ${mcpPat}`,
-      );
-      assert.ok(
-        !/mcp\.\*\[\/ \]/.test(mcpPat),
-        `legacy 'mcp.*[/ ]...' 패턴이 남아 있으면 안 된다: ${mcpPat}`,
-      );
-      // prefix collision 방지: 세션명 뒤에 boundary가 강제되어야 한다
-      assert.ok(
-        /tfx\.session\\\+v2\[[^\]]*-[^\]]*\]/.test(mcpPat) ||
-          /tfx\.session\\\+v2[-.\/]/.test(mcpPat),
-        `세션명 뒤 boundary (e.g. [-/.]) 가 있어야 prefix 충돌을 막는다: ${mcpPat}`,
-      );
-    },
-  );
+    const mcpPat = pgrepF
+      .map((c) => c.args[1] || "")
+      .find((p) => p.includes("tfx-headless"));
+    assert.ok(
+      mcpPat,
+      `MCP 정리 pgrep은 tfx-headless path anchor를 사용해야 한다: ${pgrepF.map((c) => c.args[1]).join(" | ")}`,
+    );
+    assert.ok(
+      mcpPat.includes("tfx\\.session\\+v2"),
+      `세션명의 '.'와 '+'가 regex-escape 되어야 한다: ${mcpPat}`,
+    );
+    assert.ok(
+      !/mcp\.\*\[\/ \]/.test(mcpPat),
+      `legacy 'mcp.*[/ ]...' 패턴이 남아 있으면 안 된다: ${mcpPat}`,
+    );
+    // prefix collision 방지: 세션명 뒤에 boundary가 강제되어야 한다
+    assert.ok(
+      /tfx\.session\\\+v2\[[^\]]*-[^\]]*\]/.test(mcpPat) ||
+        /tfx\.session\\\+v2[-./]/.test(mcpPat),
+      `세션명 뒤 boundary (e.g. [-/.]) 가 있어야 prefix 충돌을 막는다: ${mcpPat}`,
+    );
+  });
 });
 
 describe("escapeRegex helper", () => {

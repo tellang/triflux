@@ -21,18 +21,36 @@ export function detectShell() {
 
   if (platform === "win32") {
     try {
-      const path = execFileSync("where", ["pwsh.exe"], PIPE_OPTS).trim().split(/\r?\n/)[0];
+      const path = execFileSync("where", ["pwsh.exe"], PIPE_OPTS)
+        .trim()
+        .split(/\r?\n/)[0];
       let version = null;
       try {
-        version = execFileSync(path, ["-NoLogo", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], PIPE_OPTS).trim();
+        version = execFileSync(
+          path,
+          [
+            "-NoLogo",
+            "-NoProfile",
+            "-Command",
+            "$PSVersionTable.PSVersion.ToString()",
+          ],
+          PIPE_OPTS,
+        ).trim();
       } catch {}
       _shellCache = { name: "pwsh", path, version };
     } catch {
       try {
-        const path = execFileSync("where", ["powershell.exe"], PIPE_OPTS).trim().split(/\r?\n/)[0];
+        const path = execFileSync("where", ["powershell.exe"], PIPE_OPTS)
+          .trim()
+          .split(/\r?\n/)[0];
         _shellCache = { name: "powershell", path, version: null };
       } catch {
-        _shellCache = { name: "powershell", path: "", version: null, installHint: "pwsh: winget install Microsoft.PowerShell" };
+        _shellCache = {
+          name: "powershell",
+          path: "",
+          version: null,
+          installHint: "pwsh: winget install Microsoft.PowerShell",
+        };
       }
     }
     return _shellCache;
@@ -60,7 +78,11 @@ export function detectTerminal() {
       execFileSync("where", ["wt.exe"], PIPE_OPTS);
       _terminalCache = { name: "windows-terminal", hasWt: true };
     } catch {
-      _terminalCache = { name: "unknown", hasWt: false, installHint: "wt: winget install Microsoft.WindowsTerminal" };
+      _terminalCache = {
+        name: "unknown",
+        hasWt: false,
+        installHint: "wt: winget install Microsoft.WindowsTerminal",
+      };
     }
     return _terminalCache;
   }
@@ -92,10 +114,15 @@ export function detectMultiplexer() {
     const path = execFileSync(cmd, ["tmux"], PIPE_OPTS).trim();
     _multiplexerCache = { name: "tmux", path };
   } catch {
-    const hint = osPlatform() === "win32"
-      ? "tmux: install tmux in WSL or MSYS2"
-      : undefined;
-    _multiplexerCache = { name: "none", path: null, ...(hint ? { installHint: hint } : {}) };
+    const hint =
+      osPlatform() === "win32"
+        ? "tmux: install tmux in WSL or MSYS2"
+        : undefined;
+    _multiplexerCache = {
+      name: "none",
+      path: null,
+      ...(hint ? { installHint: hint } : {}),
+    };
   }
   return _multiplexerCache;
 }

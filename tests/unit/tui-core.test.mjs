@@ -90,20 +90,30 @@ describe("tui-core: 워커 상태", () => {
   });
 
   it("normalizeWorkerState: 기본 정규화", () => {
-    const result = normalizeWorkerState({}, { cli: "gemini", status: "running", progress: 0.5 });
+    const result = normalizeWorkerState(
+      {},
+      { cli: "gemini", status: "running", progress: 0.5 },
+    );
     assert.equal(result.cli, "gemini");
     assert.equal(result.status, "running");
     assert.equal(result.progress, 0.5);
   });
 
   it("normalizeWorkerState: 코드블록 제거", () => {
-    const result = normalizeWorkerState({}, { snapshot: "text\n```js\ncode\n```\nmore" });
+    const result = normalizeWorkerState(
+      {},
+      { snapshot: "text\n```js\ncode\n```\nmore" },
+    );
     assert.ok(!result.snapshot.includes("code"));
   });
 
   it("normalizeWorkerState: trackChanges 옵션", () => {
     const existing = { status: "pending" };
-    const result = normalizeWorkerState(existing, { status: "running" }, { trackChanges: true });
+    const result = normalizeWorkerState(
+      existing,
+      { status: "running" },
+      { trackChanges: true },
+    );
     assert.equal(result._prevStatus, "pending");
     assert.ok(result._statusChangedAt > 0);
   });
@@ -115,7 +125,9 @@ describe("tui-core: 워커 상태", () => {
 
   it("normalizeWorkerState: handoff 병합", () => {
     const existing = { handoff: { verdict: "partial", confidence: "low" } };
-    const result = normalizeWorkerState(existing, { handoff: { verdict: "done" } });
+    const result = normalizeWorkerState(existing, {
+      handoff: { verdict: "done" },
+    });
     assert.equal(result.handoff.verdict, "done");
     assert.equal(result.handoff.confidence, "low");
   });

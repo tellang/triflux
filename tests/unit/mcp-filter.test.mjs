@@ -70,8 +70,12 @@ describe("mcp-filter", () => {
     });
 
     assert.deepEqual(policy.allowedServers, ["context7"]);
-    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, { enabled: false });
-    assert.deepStrictEqual(policy.codexConfig.mcp_servers.tavily, { enabled: false });
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, {
+      enabled: false,
+    });
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.tavily, {
+      enabled: false,
+    });
   });
 
   it("designer 프로필은 브라우저/UI 문맥에서 playwright를 남기고 일반 검색 서버를 줄인다", () => {
@@ -112,7 +116,9 @@ describe("mcp-filter", () => {
       "brave-search",
       "sequential-thinking",
     ]);
-    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, { enabled: false });
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, {
+      enabled: false,
+    });
     assert.deepEqual(
       policy.codexConfig.mcp_servers["sequential-thinking"].enabled_tools,
       ["sequentialthinking"],
@@ -182,8 +188,12 @@ describe("mcp-filter", () => {
     });
 
     assert.deepEqual(policy.allowedServers, ["context7"]);
-    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, { enabled: false });
-    assert.deepStrictEqual(policy.codexConfig.mcp_servers.tavily, { enabled: false });
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.playwright, {
+      enabled: false,
+    });
+    assert.deepStrictEqual(policy.codexConfig.mcp_servers.tavily, {
+      enabled: false,
+    });
   });
 
   it("hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다", () => {

@@ -51,7 +51,8 @@ function parseServersFromSource(filePath, varName) {
 function parseStdioCmdsFromSource(filePath) {
   const src = readFileSync(filePath, "utf8");
   const results = [];
-  const re = /name:\s*["']([^"']+)["'].*?port:\s*(\d+).*?stdioCmd:\s*\n?\s*["']([^"']+)["']/gs;
+  const re =
+    /name:\s*["']([^"']+)["'].*?port:\s*(\d+).*?stdioCmd:\s*\n?\s*["']([^"']+)["']/gs;
   let m;
   while ((m = re.exec(src)) !== null) {
     results.push({ name: m[1], port: parseInt(m[2], 10), stdioCmd: m[3] });

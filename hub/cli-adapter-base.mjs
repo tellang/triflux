@@ -17,18 +17,28 @@ const FALLBACK_COOLDOWN_MS = { codex: 5 * 3600_000, gemini: 86400_000 };
  */
 export function parseRetryAfterMs(text, provider) {
   // 1. ISO timestamp: "try again at 2026-04-11T10:00:00"
-  const isoMatch = text.match(/(?:try again|retry|available|resets?)\s+(?:at|after)\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/i);
+  const isoMatch = text.match(
+    /(?:try again|retry|available|resets?)\s+(?:at|after)\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/i,
+  );
   if (isoMatch) {
     const target = new Date(isoMatch[1]).getTime();
     if (target > Date.now()) return target - Date.now();
   }
 
   // 2. Duration: "N seconds/minutes/hours/days"
-  const durMatch = text.match(/(?:retry|wait|resets?|again)\s+(?:in\s+|after\s+)?(\d+)\s*(second|minute|hour|day|week)/i);
+  const durMatch = text.match(
+    /(?:retry|wait|resets?|again)\s+(?:in\s+|after\s+)?(\d+)\s*(second|minute|hour|day|week)/i,
+  );
   if (durMatch) {
     const n = Number(durMatch[1]);
     const unit = durMatch[2].toLowerCase();
-    const multipliers = { second: 1000, minute: 60_000, hour: 3600_000, day: 86400_000, week: 604800_000 };
+    const multipliers = {
+      second: 1000,
+      minute: 60_000,
+      hour: 3600_000,
+      day: 86400_000,
+      week: 604800_000,
+    };
     return n * (multipliers[unit] || 3600_000);
   }
 
@@ -37,7 +47,12 @@ export function parseRetryAfterMs(text, provider) {
   if (standaloneMatch) {
     const n = Number(standaloneMatch[1]);
     const unit = standaloneMatch[2].toLowerCase();
-    const multipliers = { minute: 60_000, hour: 3600_000, day: 86400_000, week: 604800_000 };
+    const multipliers = {
+      minute: 60_000,
+      hour: 3600_000,
+      day: 86400_000,
+      week: 604800_000,
+    };
     const parsed = n * (multipliers[unit] || 3600_000);
     if (parsed >= 3600_000) return parsed; // 1시간 이상만 신뢰
   }
@@ -286,7 +301,12 @@ export async function executeWithCircuitBroker({
       const text = `${lastResult.output || ""}\n${lastResult.stderr || ""}`;
       const coolMs = parseRetryAfterMs(text, provider);
       brokerMod.broker.markRateLimited(lease.id, coolMs);
-      brokerMod.broker.emit("cooldown", { id: lease.id, provider, coolMs, reason: "quota_exhausted" });
+      brokerMod.broker.emit("cooldown", {
+        id: lease.id,
+        provider,
+        coolMs,
+        reason: "quota_exhausted",
+      });
     } else {
       brokerMod.broker.release(lease.id, { ok: false });
     }

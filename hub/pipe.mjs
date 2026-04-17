@@ -674,7 +674,10 @@ export function createPipeServer({
             const frame = safeJsonParse(line);
             await handleFrame(client, frame);
           } catch (err) {
-            pipeLog.error({ clientId: client.id, err: String(err?.message || err) }, "pipe.frame_handler_error");
+            pipeLog.error(
+              { clientId: client.id, err: String(err?.message || err) },
+              "pipe.frame_handler_error",
+            );
           }
         }
         newlineIndex = client.buffer.indexOf("\n");

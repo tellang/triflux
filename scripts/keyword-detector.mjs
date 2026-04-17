@@ -275,7 +275,9 @@ function main() {
 
   if (selected.action === "context_hint" && selected.hint) {
     console.log(
-      JSON.stringify(createHookOutput(createContextHintOutput(selected, prompt))),
+      JSON.stringify(
+        createHookOutput(createContextHintOutput(selected, prompt)),
+      ),
     );
     return;
   }

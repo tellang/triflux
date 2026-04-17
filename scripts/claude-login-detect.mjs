@@ -6,12 +6,25 @@
  * SessionStart 훅에서 import하여 사용.
  */
 
-import { existsSync, statSync, unlinkSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 const CREDS_PATH = join(homedir(), ".claude", ".credentials.json");
-const STATE_PATH = join(homedir(), ".claude", "cache", "tfx-hub", "claude-login-mtime.json");
+const STATE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "tfx-hub",
+  "claude-login-mtime.json",
+);
 const HUD_CACHES = [
   join(homedir(), ".claude", "cache", "claude-usage-cache.json"),
   join(homedir(), ".claude", "cache", "codex-rate-limits-cache.json"),
@@ -31,7 +44,9 @@ function writeLastMtime(mtime) {
   try {
     mkdirSync(dirname(STATE_PATH), { recursive: true });
     writeFileSync(STATE_PATH, JSON.stringify({ mtime, updatedAt: Date.now() }));
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 }
 
 export function run() {
@@ -55,7 +70,9 @@ export function run() {
         unlinkSync(cachePath);
         cleared++;
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   writeLastMtime(currentMtime);
@@ -71,6 +88,8 @@ const isDirectRun =
 if (isDirectRun) {
   const result = run();
   if (result.changed) {
-    console.error(`[claude-login-detect] credentials 변경 감지 — HUD 캐시 ${result.cleared}개 삭제`);
+    console.error(
+      `[claude-login-detect] credentials 변경 감지 — HUD 캐시 ${result.cleared}개 삭제`,
+    );
   }
 }

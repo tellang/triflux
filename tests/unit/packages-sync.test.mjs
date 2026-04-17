@@ -46,15 +46,13 @@ describe("packages/* sync — PRD-4 gate", () => {
       const rootExists = existsSync(rootAbs);
       const rootHash = rootExists ? sha256File(rootAbs) : null;
 
-      it(
-        "root file exists (PRD-1/2 landed)",
-        { skip: rootExists ? false : "root file missing; PRD-1/2 not yet landed" },
-        () => {
-          assert.equal(rootExists, true);
-          assert.equal(typeof rootHash, "string");
-          assert.equal(rootHash.length, 64);
-        },
-      );
+      it("root file exists (PRD-1/2 landed)", {
+        skip: rootExists ? false : "root file missing; PRD-1/2 not yet landed",
+      }, () => {
+        assert.equal(rootExists, true);
+        assert.equal(typeof rootHash, "string");
+        assert.equal(rootHash.length, 64);
+      });
 
       for (const pkg of PACKAGES) {
         const pkgAbs = resolve(PROJECT_ROOT, "packages", pkg, rel);
@@ -69,22 +67,20 @@ describe("packages/* sync — PRD-4 gate", () => {
             ? `packages/${pkg}/${rel} missing — run \`npm run pack\` to sync`
             : false;
 
-        it(
-          `packages/${pkg}/${rel} matches root sha256`,
-          { skip: skipReason },
-          () => {
-            assert.equal(pkgExists, true);
-            const pkgHash = sha256File(pkgAbs);
-            assert.equal(
-              pkgHash,
-              rootHash,
-              `packages/${pkg}/${rel} sha256 drift from root:\n` +
-                `  root: ${rootHash}\n` +
-                `  pkg:  ${pkgHash}\n` +
-                "Run `npm run pack` to re-sync.",
-            );
-          },
-        );
+        it(`packages/${pkg}/${rel} matches root sha256`, {
+          skip: skipReason,
+        }, () => {
+          assert.equal(pkgExists, true);
+          const pkgHash = sha256File(pkgAbs);
+          assert.equal(
+            pkgHash,
+            rootHash,
+            `packages/${pkg}/${rel} sha256 drift from root:\n` +
+              `  root: ${rootHash}\n` +
+              `  pkg:  ${pkgHash}\n` +
+              "Run `npm run pack` to re-sync.",
+          );
+        });
       }
     });
   }

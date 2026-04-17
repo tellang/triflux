@@ -178,7 +178,9 @@ test("execute opens the circuit after repeated crashes", async () => {
     mkdirSync(brokerDir, { recursive: true });
     writeFileSync(
       join(brokerDir, "accounts.json"),
-      JSON.stringify({ codex: [{ id: "test-codex", mode: "profile", profile: "default" }] }),
+      JSON.stringify({
+        codex: [{ id: "test-codex", mode: "profile", profile: "default" }],
+      }),
       "utf8",
     );
     process.env.FAKE_CODEX_FAIL = "1";

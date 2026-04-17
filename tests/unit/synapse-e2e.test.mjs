@@ -36,7 +36,10 @@ describe("synapse-v1 e2e", () => {
     const locksPath = join(tmpDir, "locks.json");
 
     const registry = createSynapseRegistry({ persistPath: registryPath });
-    const locks = createSwarmLocks({ repoRoot: tmpDir, persistPath: locksPath });
+    const locks = createSwarmLocks({
+      repoRoot: tmpDir,
+      persistPath: locksPath,
+    });
     const preflight = createGitPreflight({ registry, locks });
 
     // Session A starts hardening auth.mjs, claims exclusive lease

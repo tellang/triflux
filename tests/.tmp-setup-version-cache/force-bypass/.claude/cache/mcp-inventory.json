@@ -7,12 +7,7 @@
         "name": "brave-search",
         "status": "enabled",
         "tool_count": 2,
-        "domain_tags": [
-          "web",
-          "search",
-          "news",
-          "current"
-        ]
+        "domain_tags": ["web", "search", "news", "current"]
       },
       {
         "name": "chrome-devtools",
@@ -24,24 +19,13 @@
         "name": "context7",
         "status": "enabled",
         "tool_count": 2,
-        "domain_tags": [
-          "docs",
-          "reference",
-          "api",
-          "sdk",
-          "library"
-        ]
+        "domain_tags": ["docs", "reference", "api", "sdk", "library"]
       },
       {
         "name": "exa",
         "status": "enabled",
         "tool_count": 2,
-        "domain_tags": [
-          "code",
-          "repository",
-          "examples",
-          "search"
-        ]
+        "domain_tags": ["code", "repository", "examples", "search"]
       },
       {
         "name": "jira",
@@ -59,9 +43,7 @@
         "name": "omx_code_intel",
         "status": "enabled",
         "tool_count": 0,
-        "domain_tags": [
-          "code"
-        ]
+        "domain_tags": ["code"]
       },
       {
         "name": "omx_memory",
@@ -91,12 +73,7 @@
         "name": "playwright",
         "status": "enabled",
         "tool_count": 5,
-        "domain_tags": [
-          "browser",
-          "ui",
-          "visual",
-          "e2e"
-        ]
+        "domain_tags": ["browser", "ui", "visual", "e2e"]
       },
       {
         "name": "serena",
@@ -108,13 +85,7 @@
         "name": "tavily",
         "status": "enabled",
         "tool_count": 2,
-        "domain_tags": [
-          "research",
-          "search",
-          "news",
-          "verification",
-          "current"
-        ]
+        "domain_tags": ["research", "search", "news", "verification", "current"]
       },
       {
         "name": "Name",
@@ -141,35 +112,19 @@
         "name": "brave-search",
         "status": "available",
         "tool_count": 2,
-        "domain_tags": [
-          "web",
-          "search",
-          "news",
-          "current"
-        ]
+        "domain_tags": ["web", "search", "news", "current"]
       },
       {
         "name": "exa",
         "status": "available",
         "tool_count": 2,
-        "domain_tags": [
-          "code",
-          "repository",
-          "examples",
-          "search"
-        ]
+        "domain_tags": ["code", "repository", "examples", "search"]
       },
       {
         "name": "context7",
         "status": "available",
         "tool_count": 2,
-        "domain_tags": [
-          "docs",
-          "reference",
-          "api",
-          "sdk",
-          "library"
-        ]
+        "domain_tags": ["docs", "reference", "api", "sdk", "library"]
       }
     ]
   }

@@ -34,7 +34,9 @@ export function parseFlags(args) {
     else if (a === "--base") {
       const v = args[++i];
       if (!v || /\s/.test(v)) {
-        throw new Error("--base requires a non-empty branch name without whitespace");
+        throw new Error(
+          "--base requires a non-empty branch name without whitespace",
+        );
       }
       flags.baseBranch = v;
     } else if (a.startsWith("--")) {
@@ -67,9 +69,7 @@ function planToJson(plan) {
 }
 
 function printPlan(plan) {
-  console.log(
-    `\n  ${BOLD}Swarm plan${RESET}: ${plan.shards.length} shards`,
-  );
+  console.log(`\n  ${BOLD}Swarm plan${RESET}: ${plan.shards.length} shards`);
   for (const s of plan.shards) {
     const hostStr = s.host ? `@${s.host}` : "";
     const critStr = s.critical ? ` ${YELLOW}[critical]${RESET}` : "";
@@ -78,9 +78,7 @@ function printPlan(plan) {
       `    - ${BOLD}${s.name}${RESET} [${s.agent}${hostStr}] files=${s.files.length}${critStr}${depsStr}`,
     );
   }
-  console.log(
-    `\n  ${GRAY}Merge order:${RESET} ${plan.mergeOrder.join(" → ")}`,
-  );
+  console.log(`\n  ${GRAY}Merge order:${RESET} ${plan.mergeOrder.join(" → ")}`);
   if (plan.criticalShards.length > 0) {
     console.log(
       `  ${GRAY}Critical (redundant):${RESET} ${plan.criticalShards.join(", ")}`,

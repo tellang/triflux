@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { after, describe, it } from "node:test";
 import { existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
+import { after, describe, it } from "node:test";
 
 describe("doctor-diagnose: 진단 번들 생성", () => {
   let result;
@@ -51,7 +51,11 @@ describe("doctor-diagnose: 진단 번들 생성", () => {
   after(() => {
     // 테스트 생성 zip 정리
     if (result?.zipPath && existsSync(result.zipPath)) {
-      try { rmSync(result.zipPath); } catch { /* ignore */ }
+      try {
+        rmSync(result.zipPath);
+      } catch {
+        /* ignore */
+      }
     }
   });
 });

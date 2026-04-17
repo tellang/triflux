@@ -217,7 +217,10 @@ describe("startHub() 라이프사이클", () => {
           sessionId,
           partial: {
             branch: "feature/synapse-heartbeat",
-            dirtyFiles: ["hub/server.mjs", "tests/integration/hub-server.test.mjs"],
+            dirtyFiles: [
+              "hub/server.mjs",
+              "tests/integration/hub-server.test.mjs",
+            ],
             taskSummary: "heartbeat update",
           },
         }),
@@ -230,7 +233,9 @@ describe("startHub() 라이프사이클", () => {
       });
       assert.equal(sessionsRes.status, 200);
       const sessionsBody = await sessionsRes.json();
-      const session = sessionsBody.sessions.find((entry) => entry.sessionId === sessionId);
+      const session = sessionsBody.sessions.find(
+        (entry) => entry.sessionId === sessionId,
+      );
       assert.ok(session);
       assert.equal(session.branch, "feature/synapse-heartbeat");
       assert.deepEqual(session.dirtyFiles, [

@@ -117,8 +117,16 @@ describe("JsonRpcStdioClient", () => {
     });
     assert.equal(typeof unsubscribe, "function");
 
-    pushLine(stdin, { jsonrpc: "2.0", method: "progress", params: { pct: 25 } });
-    pushLine(stdin, { jsonrpc: "2.0", method: "progress", params: { pct: 50 } });
+    pushLine(stdin, {
+      jsonrpc: "2.0",
+      method: "progress",
+      params: { pct: 25 },
+    });
+    pushLine(stdin, {
+      jsonrpc: "2.0",
+      method: "progress",
+      params: { pct: 50 },
+    });
     pushLine(stdin, { jsonrpc: "2.0", method: "other", params: { pct: 999 } });
 
     await new Promise((resolve) => setImmediate(resolve));
@@ -126,7 +134,11 @@ describe("JsonRpcStdioClient", () => {
     assert.deepEqual(received, [{ pct: 25 }, { pct: 50 }]);
 
     unsubscribe();
-    pushLine(stdin, { jsonrpc: "2.0", method: "progress", params: { pct: 75 } });
+    pushLine(stdin, {
+      jsonrpc: "2.0",
+      method: "progress",
+      params: { pct: 75 },
+    });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(received.length, 2);
 
@@ -363,7 +375,9 @@ describe("JsonRpcStdioClient", () => {
     stdin.emit("error", epipe);
     await assert.rejects(pending, /closed|JSON-RPC stream error|EPIPE/i);
     assert.ok(
-      errors.some((e) => e.name === "JsonRpcTransportError" && /stdin/.test(e.message)),
+      errors.some(
+        (e) => e.name === "JsonRpcTransportError" && /stdin/.test(e.message),
+      ),
       `expected JsonRpcTransportError on stdin, got: ${errors.map((e) => `${e.name}:${e.message}`).join(",")}`,
     );
     assert.equal(client.getState(), "closed");

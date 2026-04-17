@@ -30,7 +30,11 @@ function makeTmpDir() {
  * ~/.claude/projects에 세션 jsonl 쓰레기 생성을 차단한다.
  * 기본: spawn 직후 setImmediate로 즉시 exit(0) — "claude -p echo_test 빠르게 종료"와 동일 타이밍.
  */
-function makeMockSpawn({ exitCode = 0, exitSignal = null, exitDelayMs = 0 } = {}) {
+function makeMockSpawn({
+  exitCode = 0,
+  exitSignal = null,
+  exitDelayMs = 0,
+} = {}) {
   return function mockSpawn() {
     const child = new EventEmitter();
     child.pid = Math.floor(Math.random() * 1_000_000) + 1;

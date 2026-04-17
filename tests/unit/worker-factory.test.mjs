@@ -95,7 +95,11 @@ describe("worker factory — AC-10 publishCallback wiring", () => {
     };
     await worker.publishCallback(publishMessage);
 
-    assert.equal(calls.length, 1, "default callback must call requestJsonFn exactly once");
+    assert.equal(
+      calls.length,
+      1,
+      "default callback must call requestJsonFn exactly once",
+    );
     assert.equal(calls[0].path, "/bridge/publish");
     assert.deepEqual(calls[0].body, publishMessage);
   });
@@ -109,8 +113,8 @@ describe("worker factory — AC-10 publishCallback wiring", () => {
     });
 
     // Must not throw — publish failures must never crash worker logic.
-    await assert.doesNotReject(
-      () => worker.publishCallback({ from: "x", to: "topic:y", payload: {} }),
+    await assert.doesNotReject(() =>
+      worker.publishCallback({ from: "x", to: "topic:y", payload: {} }),
     );
   });
 });
@@ -149,8 +153,7 @@ describe("worker factory — Issue #95 P1 #4 approvalPolicy validation", () => {
 
   it("13. app-server transport + approvalPolicy='untrusted' throws", () => {
     assert.throws(
-      () =>
-        createWorker("codex-app-server", { approvalPolicy: "untrusted" }),
+      () => createWorker("codex-app-server", { approvalPolicy: "untrusted" }),
       /approvalPolicy='never'/,
     );
   });
