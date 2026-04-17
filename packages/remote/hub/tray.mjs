@@ -211,15 +211,6 @@ function findChromePath() {
 
 function openDashboard() {
   const url = getDashboardUrl();
-  if (process.platform === "darwin") {
-    exec(`open "${url}"`, { timeout: 5000 }, () => {});
-    return;
-  }
-  if (process.platform === "linux") {
-    exec(`xdg-open "${url}"`, { timeout: 5000 }, () => {});
-    return;
-  }
-  // Windows
   const shell = process.env.ComSpec || "cmd.exe";
   const chrome = findChromePath();
   if (chrome) {
@@ -364,16 +355,7 @@ async function shutdown(reason = "shutdown") {
 
 export async function startTray() {
   if (!IS_WINDOWS) {
-    // macOS/Linux: tray 미지원 → 브라우저에서 대시보드 열기 fallback
-    console.warn("[tfx-tray] 시스템 트레이는 Windows에서만 지원됩니다. 대시보드를 브라우저로 엽니다.");
-    const url = getDashboardUrl();
-    if (process.platform === "darwin") {
-      exec(`open "${url}"`, { timeout: 5000 }, () => {});
-    } else {
-      exec(`xdg-open "${url}"`, { timeout: 5000 }, () => {});
-    }
-    // 프로세스를 유지하지 않음 — 즉시 반환
-    return;
+    throw new Error("tray command is only supported on Windows.");
   }
 
   systray = new SysTray({

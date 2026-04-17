@@ -64,6 +64,7 @@ track_worker_pid() {
 }
 
 cleanup_workers() {
+  _codex_config_swap "restore" 2>/dev/null || true
   deregister_agent 2>/dev/null || true
   [[ ! -f "$_PID_TRACK" ]] && return
   while IFS= read -r pid; do
@@ -1193,15 +1194,17 @@ resolve_mcp_policy() {
   fi
 
   available_servers=$(get_cached_servers "$CLI_TYPE")
-  if [[ "$CLI_TYPE" == "codex" && "${TFX_CODEX_TRANSPORT:-auto}" != "mcp" ]]; then
-    available_servers=""
+  # Codex exec 모드에서도 config.toml의 MCP 서버를 전부 시작하므로,
+  # transport 모드와 관계없이 registered servers를 전달하여 불필요한 서버를
+  # enabled=false로 비활성화해야 한다.
+  # 캐시가 비어있으면 config.toml에서 직접 서버 목록을 추출한다.
+  if [[ -z "$available_servers" && "$CLI_TYPE" == "codex" && -f "$_CODEX_CONFIG" ]]; then
+    available_servers=$(sed -n 's/^\[mcp_servers\.\([^].]*\)\]$/\1/p' "$_CODEX_CONFIG" 2>/dev/null \
+      | sort -u | tr '\n' ',' | sed 's/,$//')
   fi
-  # Codex 0.115+: 미등록 서버에 config override(enabled=true/false 모두)를 보내면
-  # "invalid transport" 에러 발생. 캐시 비어있으면 빈 문자열이 유지되어
-  # mcp-filter가 override를 생성하지 않는다.
 
   local -a cmd=(
-    "$NODE_BIN" "$filter_script" shell
+    "$NODE_BIN" "$filter_script" delimited
     "--agent" "$AGENT_TYPE"
     "--profile" "$MCP_PROFILE"
     "--available" "$available_servers"
@@ -1211,13 +1214,18 @@ resolve_mcp_policy() {
   [[ -n "$TFX_SEARCH_TOOL" ]] && cmd+=("--search-tool" "$TFX_SEARCH_TOOL")
   [[ -n "$TFX_WORKER_INDEX" ]] && cmd+=("--worker-index" "$TFX_WORKER_INDEX")
 
-  local shell_exports
-  if ! shell_exports="$("${cmd[@]}")"; then
+  local _raw
+  if ! _raw="$("${cmd[@]}")"; then
     echo "[tfx-route] ERROR: MCP 정책 계산 실패" >&2
     return 1
   fi
 
-  eval "$shell_exports"
+  local _gemini_servers _codex_flags _phase
+  IFS=$'\x1e' read -r MCP_PROFILE_REQUESTED MCP_RESOLVED_PROFILE MCP_HINT \
+    _gemini_servers _codex_flags CODEX_CONFIG_JSON _phase <<< "$_raw"
+  IFS=',' read -r -a GEMINI_ALLOWED_SERVERS <<< "$_gemini_servers"
+  IFS=',' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
+  [[ -n "$_phase" ]] && MCP_PIPELINE_PHASE="$_phase"
 }
 
 get_claude_model() {
@@ -1398,6 +1406,53 @@ resolve_codex_mcp_script() {
     "$sd/hub/workers/codex-mcp.mjs" "$sd/../hub/workers/codex-mcp.mjs"
 }
 
+## ── Config Swap: 프로필별 MCP 서버 필터링 ──
+# codex exec는 -c flag로 MCP enabled/disabled를 제어할 수 없다.
+# config.toml을 원자적으로 교체하여 불필요한 서버 시작을 방지한다.
+_codex_config_swap() {
+  local action="$1"  # "filter" or "restore"
+  local config="$_CODEX_CONFIG"
+  local backup="${config}.pre-exec"
+
+  if [[ "$action" == "filter" && -f "$config" ]]; then
+    # MCP 프로필에서 허용된 서버 목록 추출
+    local allowed_pat=""
+    for flag in "${CODEX_CONFIG_FLAGS[@]}"; do
+      if [[ "$flag" =~ mcp_servers\.([^.]+)\.enabled=true ]]; then
+        [[ -n "$allowed_pat" ]] && allowed_pat="${allowed_pat}|"
+        allowed_pat="${allowed_pat}${BASH_REMATCH[1]}"
+      fi
+    done
+
+    # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 건드리지 않음)
+    if [[ -f "$backup" ]]; then
+      echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중" >&2
+      return 0
+    fi
+    cp "$config" "$backup"
+
+    # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지
+    awk -v keep="$allowed_pat" '
+      BEGIN { skip=0 }
+      /^\[mcp_servers\./ {
+        name=$0; gsub(/^\[mcp_servers\./, "", name); gsub(/[\].].*/, "", name)
+        if (keep == "" || name !~ "^(" keep ")$") { skip=1; next }
+        else { skip=0 }
+      }
+      /^\[/ && !/^\[mcp_servers\./ { skip=0 }
+      !skip { print }
+    ' "$backup" > "$config"
+
+    local kept=0
+    [[ -n "$allowed_pat" ]] && kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
+    echo "[tfx-route] config.toml swap: ${kept}개 MCP 서버만 활성" >&2
+
+  elif [[ "$action" == "restore" && -f "$backup" ]]; then
+    mv "$backup" "$config" 2>/dev/null
+    echo "[tfx-route] config.toml 복원 완료" >&2
+  fi
+}
+
 run_codex_exec() {
   local prompt="$1"
   local use_tee_flag="$2"
@@ -1405,9 +1460,8 @@ run_codex_exec() {
   local worker_pid
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
-  if [[ ${#CODEX_CONFIG_FLAGS[@]} -gt 0 ]]; then
-    codex_args+=("${CODEX_CONFIG_FLAGS[@]}")
-  fi
+  # -c flags는 codex exec에서 MCP enabled 제어 불가 — config swap으로 대체
+  # config swap은 codex 블록 최상단(_codex_config_swap "filter")에서 실행됨
 
   if [[ "$use_tee_flag" == "true" ]]; then
     "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
@@ -1656,18 +1710,20 @@ FALLBACK_EOF
   fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
+    # Config swap: 프로필에 맞는 MCP 서버만 남긴 임시 config 적용
+    # run_codex_mcp / run_codex_exec 어느 경로든 적용되도록 최상단에서 실행
+    _codex_config_swap "filter"
+    # swap 후 config override 플래그 클리어 — 제거된 서버에 override 보내면 "invalid transport" 에러
+    CODEX_CONFIG_FLAGS=()
+    CODEX_CONFIG_JSON="{}"
     codex_transport_effective="exec"
     if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
       run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
       if [[ "$exit_code" -eq 0 ]]; then
         codex_transport_effective="mcp"
       elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
-        echo "[tfx-route] Codex MCP bootstrap 실패(exit=${exit_code}). legacy exec 경로로 fallback합니다." >&2
-        : > "$STDOUT_LOG"
-        : > "$STDERR_LOG"
-        exit_code=0
-        run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-        codex_transport_effective="exec-fallback"
+        echo "[tfx-route] Codex MCP bootstrap 실패(exit=${exit_code}). exec fallback 비활성(stdin 블록 위험)." >&2
+        codex_transport_effective="mcp-failed"
       else
         codex_transport_effective="mcp"
       fi
@@ -1676,6 +1732,8 @@ FALLBACK_EOF
       codex_transport_effective="exec"
     fi
     echo "[tfx-route] codex_transport_effective=$codex_transport_effective" >&2
+    # Config swap 복원 (성공/실패 관계없이)
+    _codex_config_swap "restore"
 
   elif [[ "$CLI_TYPE" == "gemini" ]]; then
     local gemini_model

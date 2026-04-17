@@ -1,4 +1,5 @@
 import { psmuxExec } from "./psmux.mjs";
+import { detectMultiplexer, tmuxExec } from "./session.mjs";
 import { hasWindowsTerminal } from "./session.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
@@ -75,6 +76,24 @@ async function spawnWindowsTerminal(spec, opts = {}) {
   }
 }
 
+async function spawnMacTerminal(spec, opts = {}) {
+  const mux = detectMultiplexer();
+  if (mux === "tmux") {
+    try {
+      const title = sanitizeWindowTitle(opts.title);
+      const command = spec.args ? `${spec.command} ${spec.args.join(" ")}` : spec.command;
+      tmuxExec(`new-window -n "${title}" "${command}"`);
+      return true;
+    } catch { return false; }
+  }
+  // tmux 없으면 기본 터미널
+  try {
+    const { exec } = await import("node:child_process");
+    exec(`open -a Terminal`, { timeout: 5000 });
+    return true;
+  } catch { return false; }
+}
+
 export function openHeadlessDashboardTarget(sessionName, opts = {}) {
   const { worker = null, openAll = false, cwd = process.cwd(), title } = opts;
 
@@ -84,19 +103,31 @@ export function openHeadlessDashboardTarget(sessionName, opts = {}) {
   // 선택 워커 → pane focus만 (새 창 열지 않음)
   if (!openAll && workerNumber != null) {
     try {
-      psmuxExec(["select-pane", "-t", `${safeSession}:0.${workerNumber}`]);
+      const mux = detectMultiplexer();
+      if (mux === "psmux") {
+        psmuxExec(["select-pane", "-t", `${safeSession}:0.${workerNumber}`]);
+      } else if (mux === "tmux" || mux === "wsl-tmux" || mux === "git-bash-tmux") {
+        tmuxExec(`select-pane -t ${safeSession}:0.${workerNumber}`);
+      }
     } catch {}
     return true;
   }
 
-  // 전체 열기 (Shift+Enter) → 새 WT 창으로 세션 attach
-  void spawnWindowsTerminal(
-    { command: "psmux", args: ["attach-session", "-t", safeSession] },
-    {
-      mode: decideDashboardOpenMode({ openAll }),
-      title: title || `▲ ${safeSession}`,
-      cwd,
-    },
-  );
+  // 전체 열기 (Shift+Enter) → 새 창으로 세션 attach
+  if (process.platform === "win32") {
+    void spawnWindowsTerminal(
+      { command: "psmux", args: ["attach-session", "-t", safeSession] },
+      {
+        mode: decideDashboardOpenMode({ openAll }),
+        title: title || `▲ ${safeSession}`,
+        cwd,
+      },
+    );
+  } else {
+    void spawnMacTerminal(
+      { command: "tmux", args: ["attach-session", "-t", safeSession] },
+      { title: title || `▲ ${safeSession}`, cwd },
+    );
+  }
   return true;
 }

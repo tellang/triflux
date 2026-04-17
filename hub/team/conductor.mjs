@@ -675,10 +675,13 @@ export function createConductor(opts = {}) {
       host,
     });
 
-    // stdout/stderr 추적
+    // stdout/stderr 추적 (recentOutput으로 rate_limit 패턴 감지 가능)
     let outputBytes = 0;
+    let recentOutput = "";
     const trackOutput = (buf) => {
       outputBytes += buf.length;
+      const text = buf.toString("utf8");
+      recentOutput = (recentOutput + text).slice(-2000);
     };
 
     child.stdout?.on("data", (buf) => {
@@ -730,9 +733,14 @@ export function createConductor(opts = {}) {
         host,
       });
 
+      // 원격 세션은 broker lease를 사용하지 않으므로 release 불필요
+      // (spawnSession에서 config.remote === true일 때 lease 건너뜀)
       if (code === 0) {
         transition(session, STATES.COMPLETED, `exit_${code}`);
         emitter.emit("completed", { sessionId: session.id });
+        if (typeof session.config.onCompleted === "function") {
+          session.config.onCompleted({ sessionId: session.id });
+        }
         maybeAutoShutdown();
       } else {
         handleFailure(session, `remote_exit_${code}`);
@@ -891,6 +899,7 @@ export function createConductor(opts = {}) {
     }
 
     if (!session.child) return false;
+    if (!session.child.stdin?.writable) return false;
     try {
       session.child.stdin.write(`${text}\n`);
       eventLog.append("stdin", { session: id, text: text.slice(0, 100) });
