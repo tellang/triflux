@@ -340,7 +340,7 @@ describe("psmux.mjs steering", () => {
           call.args[1] === "-t" &&
           call.args[2] === "tfx-test:0.1" &&
           typeof call.args[3] === "string" &&
-          call.args[3].includes("pipe-pane-capture.ps1"),
+          call.args[3].includes(process.platform === "win32" ? "pipe-pane-capture.ps1" : "pipe-pane-capture.sh"),
       ),
     );
   });
@@ -414,6 +414,15 @@ describe("killPsmuxSession cleanup", () => {
       const argv = Array.isArray(args) ? [...args] : [];
       calls.push({ file, args: argv });
 
+      // pgrep/pkill 호출 처리 (macOS 프로세스 트리 kill)
+      if (file === "pgrep") {
+        if (argv[0] === "-P") return "9001\n9002"; // 자식 PID mock
+        if (argv[0] === "-f") return "9003"; // 패턴 매칭 PID mock
+        return "";
+      }
+      if (file === "pkill") return "";
+      if (file === "sleep") return "";
+
       switch (argv[0]) {
         case "-V":
           return "psmux 3.3.0";
@@ -467,16 +476,21 @@ describe("killPsmuxSession cleanup", () => {
       `pipe-pane 해제가 2회 이상 호출되어야 함 (실제: ${pipePaneCalls.length})`,
     );
 
-    // taskkill 호출 확인
-    const taskkillCalls = calls.filter(
-      (c) =>
-        c.file === "execSync" &&
-        typeof c.args[0] === "string" &&
-        c.args[0].includes("taskkill"),
-    );
+    // 프로세스 트리 종료 호출 확인 (Windows: taskkill via execSync, macOS: pgrep+process.kill via execFileSync)
+    const treeKillCalls = process.platform === "win32"
+      ? calls.filter(
+          (c) =>
+            c.file === "execSync" &&
+            typeof c.args[0] === "string" &&
+            c.args[0].includes("taskkill"),
+        )
+      : calls.filter(
+          (c) => c.file === "pgrep" && c.args?.[0] === "-P",
+        );
+    const killLabel = process.platform === "win32" ? "taskkill" : "pgrep -P (tree kill)";
     assert.ok(
-      taskkillCalls.length >= 2,
-      `taskkill이 2회 이상 호출되어야 함 (실제: ${taskkillCalls.length})`,
+      treeKillCalls.length >= 1,
+      `${killLabel}이 1회 이상 호출되어야 함 (실제: ${treeKillCalls.length})`,
     );
 
     // kill-session 호출 확인
@@ -485,12 +499,13 @@ describe("killPsmuxSession cleanup", () => {
     );
     assert.equal(killSessionCalls.length, 1, "kill-session은 1회 호출");
 
-    // 고아 프로세스 정리 호출 확인 (pipe-pane-capture + node.exe)
+    // 고아 프로세스 정리 호출 확인 (pipe-pane-capture)
+    // Windows: execSync("... pipe-pane-capture ..."), macOS: execFileSync("pkill", ["-f", "pipe-pane-capture"])
     const orphanCalls = calls.filter(
-      (c) =>
-        c.file === "execSync" &&
-        typeof c.args[0] === "string" &&
-        c.args[0].includes("pipe-pane-capture"),
+      (c) => {
+        const allArgs = [c.file, ...(c.args || [])].join(" ");
+        return allArgs.includes("pipe-pane-capture");
+      },
     );
     assert.ok(
       orphanCalls.length >= 1,
@@ -514,15 +529,15 @@ describe("killPsmuxSession cleanup", () => {
       "detach-client가 pipe-pane 해제보다 먼저 실행되어야 함",
     );
 
-    // 순서 검증: pipe-pane 해제가 taskkill보다 먼저
-    const firstTaskkillIdx = calls.findIndex(
-      (c) =>
-        c.file === "execSync" &&
-        typeof c.args[0] === "string" &&
-        c.args[0].includes("taskkill"),
+    // 순서 검증: pipe-pane 해제가 프로세스 종료(taskkill/pkill)보다 먼저
+    const firstTreeKillIdx = calls.findIndex(
+      (c) => {
+        const allArgs = [c.file, ...(c.args || [])].join(" ");
+        return allArgs.includes("taskkill") || allArgs.includes("pkill") || allArgs.includes("pgrep");
+      },
     );
     assert.ok(
-      firstPipePaneIdx < firstTaskkillIdx,
+      firstPipePaneIdx < firstTreeKillIdx,
       "pipe-pane 해제가 taskkill보다 먼저 실행되어야 함",
     );
   });
