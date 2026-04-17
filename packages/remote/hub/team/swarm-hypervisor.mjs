@@ -535,6 +535,15 @@ export function createSwarmHypervisor(opts) {
         branchName: sessionConfig.branchName,
       });
 
+      emitter.emit("shardLaunched", {
+        shardName: shard.name,
+        sessionId: sessionConfig.id,
+        agent: shard.agent,
+        isRedundant,
+        remote: Boolean(shard.host),
+        host: shard.host || null,
+      });
+
       const entry = {
         conductor,
         shardConfig: shard,
@@ -661,7 +670,45 @@ export function createSwarmHypervisor(opts) {
     lockManager.release(shardName);
 
     emitter.emit("shardFailed", { shardName, failureMode, reason });
+
+    // Cascade failure to dependents so they do not hold integration hostage
+    // (BFS over plan.shards). Without this, a dead shard keeps dependents in
+    // `pending` forever and integrateResults is never reachable.
+    cascadeDependencyFailure(shardName);
+
     checkAllShardsCompleted();
+  }
+
+  function cascadeDependencyFailure(rootFailedShard) {
+    const queue = [rootFailedShard];
+    const visited = new Set([rootFailedShard]);
+    while (queue.length > 0) {
+      const failedName = queue.shift();
+      for (const candidate of plan.shards) {
+        if (visited.has(candidate.name)) continue;
+        if (failures.has(candidate.name)) continue;
+        if (completedShards.has(candidate.name)) continue;
+        if (!candidate.depends?.includes(failedName)) continue;
+
+        visited.add(candidate.name);
+        failures.set(candidate.name, {
+          mode: FAILURE_MODES.F1_CRASH,
+          reason: `dep_failed:${failedName}`,
+          sessionId: null,
+        });
+        lockManager.release(candidate.name);
+        eventLog.append("shard_blocked", {
+          shard: candidate.name,
+          failedDep: failedName,
+        });
+        emitter.emit("shardFailed", {
+          shardName: candidate.name,
+          failureMode: FAILURE_MODES.F1_CRASH,
+          reason: `dep_failed:${failedName}`,
+        });
+        queue.push(candidate.name);
+      }
+    }
   }
 
   function classifyFailure(reason) {
@@ -687,10 +734,16 @@ export function createSwarmHypervisor(opts) {
   function checkAllShardsCompleted() {
     if (state !== SWARM_STATES.RUNNING) return;
 
-    const allDone = plan.mergeOrder.every((name) => {
-      const w = workers.get(name);
-      return (w && isTerminal(w)) || failures.has(name);
-    });
+    // `completedShards` + `failures` are set synchronously inside
+    // handleShardCompleted / handleShardFailed, so they are the authoritative
+    // terminal signal. `isTerminal(w)` queries conductor.getSnapshot() which
+    // lags because the snapshot state transition is applied asynchronously
+    // after the onCompleted callback chain that invoked this check. Using the
+    // snapshot here races with its own producer and leaves integrateResults
+    // unreachable (2026-04-17 swarm hang — required manual cherry-pick).
+    const allDone = plan.mergeOrder.every(
+      (name) => completedShards.has(name) || failures.has(name),
+    );
 
     if (allDone) {
       void integrateResults();

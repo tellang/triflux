@@ -126,6 +126,9 @@ describe("release governance scripts", () => {
       });
       assert.equal(prepare.ok, true);
       assert.equal(prepare.commands.length, 3);
+      assert.equal(prepare.steps[0].name, "npm-test");
+      assert.equal(prepare.steps[0].timeoutMs, 10 * 60 * 1000);
+      assert.equal(prepare.previousTag, "v1.2.2");
 
       const publish = await publishRelease({
         rootDir: root,
@@ -141,6 +144,59 @@ describe("release governance scripts", () => {
       });
       assert.equal(verify.ok, true);
       assert.equal(verify.checks[1].name, "npm-view");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prepareRelease supports skip-tests and non-interactive test execution", async () => {
+    const root = makeRepo();
+    try {
+      assertVersionSync({ rootDir: root, fix: true });
+      const calls = [];
+      const execStub = (command, args, options = {}) => {
+        calls.push({ command, args, options });
+        if (command === "git" && args[0] === "status") return "";
+        if (command === "git" && args[0] === "describe") return "v1.2.2";
+        if (command === "git" && args[0] === "log")
+          return "abc1234 feat: sample\n";
+        return "";
+      };
+
+      const skipped = await prepareRelease({
+        rootDir: root,
+        version: "1.2.3",
+        allowDirty: true,
+        dryRun: false,
+        skipTests: true,
+        execFileSyncFn: execStub,
+      });
+      assert.equal(skipped.skipTests, true);
+      assert.equal(skipped.commands.includes("npm test"), false);
+      assert.equal(
+        calls.some(
+          (call) => call.command === "npm" && call.args.join(" ") === "test",
+        ),
+        false,
+      );
+
+      calls.length = 0;
+
+      const executed = await prepareRelease({
+        rootDir: root,
+        version: "1.2.3",
+        allowDirty: true,
+        dryRun: false,
+        execFileSyncFn: execStub,
+      });
+      assert.equal(executed.skipTests, false);
+
+      const testCall = calls.find(
+        (call) => call.command === "npm" && call.args.join(" ") === "test",
+      );
+      assert.ok(testCall);
+      assert.deepEqual(testCall.options.stdio, ["ignore", "pipe", "pipe"]);
+      assert.equal(testCall.options.timeout, 10 * 60 * 1000);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
