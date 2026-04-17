@@ -9,9 +9,9 @@ $ErrorActionPreference = 'SilentlyContinue'
 # + omc bridge
 Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" |
   Where-Object { $_.CommandLine -match 'npx-cli|oh-my-codex[\\/]dist[\\/]mcp|omc.*bridge.*mcp-server' } |
-  ForEach-Object { taskkill /F /PID $_.ProcessId 2>$null }
+  ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null }
 
 # serena (uvx) + python MCP orphans
 Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='uvx.exe'" |
   Where-Object { $_.CommandLine -match 'serena|uv[\\/](cache|python)' } |
-  ForEach-Object { taskkill /F /PID $_.ProcessId 2>$null }
+  ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null }
