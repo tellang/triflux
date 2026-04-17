@@ -80,6 +80,8 @@ const POLL_INTERVAL_MS = (() => {
     ? Math.max(100, Math.trunc(sec * 1000))
     : 1000;
 })();
+const PSMUX_SESSION_LIST_FORMAT =
+  "#{session_name}\t#{session_created}\t#{session_activity}\t#{session_attached}";
 
 function quoteArg(value) {
   const str = String(value);
@@ -262,16 +264,43 @@ function parsePaneList(output) {
     .map((entry) => entry.target);
 }
 
-function parseSessionSummaries(output) {
+function parsePsmuxEpoch(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const numeric = Number.parseInt(raw, 10);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric >= 1_000_000_000_000 ? numeric : numeric * 1000;
+}
+
+function normalizeOlderThanMs(value, fallback = 0) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.trunc(value));
+}
+
+function toTitleMatcher(pattern) {
+  if (!pattern) return () => true;
+  if (pattern instanceof RegExp) return (title) => pattern.test(title);
+
+  const raw = String(pattern).trim();
+  if (!raw) return () => true;
+  const regexMatch = raw.match(/^\/(.+)\/([a-z]*)$/i);
+  if (regexMatch) {
+    const [, source, flags] = regexMatch;
+    const regex = new RegExp(source, flags);
+    return (title) => regex.test(title);
+  }
+
+  return (title) => String(title).startsWith(raw);
+}
+
+function parseLegacySessionInventory(output) {
   return output
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
       const colonIndex = line.indexOf(":");
-      if (colonIndex === -1) {
-        return null;
-      }
+      if (colonIndex === -1) return null;
 
       const sessionName = line.slice(0, colonIndex).trim();
       const flags = [...line.matchAll(/\(([^)]*)\)/g)]
@@ -279,14 +308,68 @@ function parseSessionSummaries(output) {
         .join(", ");
       const attachedMatch = flags.match(/(\d+)\s+attached/);
       const attachedCount = attachedMatch
-        ? parseInt(attachedMatch[1], 10)
+        ? Number.parseInt(attachedMatch[1], 10)
         : /\battached\b/.test(flags)
           ? 1
           : 0;
 
-      return sessionName ? { sessionName, attachedCount } : null;
+      if (!sessionName) return null;
+      return Object.freeze({
+        sessionName,
+        title: sessionName,
+        createdAt: null,
+        lastActivityAt: null,
+        attachedCount: Number.isFinite(attachedCount) ? attachedCount : 0,
+        isAttached: Number.isFinite(attachedCount) ? attachedCount > 0 : false,
+        ageMs: null,
+        idleMs: null,
+      });
     })
     .filter(Boolean);
+}
+
+function parseSessionInventory(output, now = Date.now()) {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [
+        sessionName = "",
+        createdText = "",
+        activityText = "",
+        attached = "0",
+      ] = line.split("\t");
+      const createdAt = parsePsmuxEpoch(createdText);
+      const lastActivityAt = parsePsmuxEpoch(activityText) ?? createdAt;
+      const attachedCount = Number.parseInt(attached, 10);
+      const ageMs = createdAt == null ? null : Math.max(0, now - createdAt);
+      const idleMs =
+        lastActivityAt == null ? ageMs : Math.max(0, now - lastActivityAt);
+
+      if (!sessionName) return null;
+      return Object.freeze({
+        sessionName,
+        title: sessionName,
+        createdAt,
+        lastActivityAt,
+        attachedCount: Number.isFinite(attachedCount) ? attachedCount : 0,
+        isAttached: Number.isFinite(attachedCount) ? attachedCount > 0 : false,
+        ageMs,
+        idleMs,
+      });
+    })
+    .filter(Boolean);
+}
+
+function listSessionInventoryRaw() {
+  const output = psmuxExec(["list-sessions", "-F", PSMUX_SESSION_LIST_FORMAT]);
+  const hasStructuredRows = output
+    .split("\n")
+    .some((line) => line.trim().includes("\t"));
+  return hasStructuredRows
+    ? parseSessionInventory(output)
+    : parseLegacySessionInventory(output);
 }
 
 function parsePaneDetails(output) {
@@ -801,6 +884,94 @@ export function killPsmuxSession(sessionName) {
 }
 
 /**
+ * 활성 psmux 세션 메타데이터 조회
+ * @param {object} [opts]
+ * @param {string|RegExp} [opts.filterTitle] - 세션명 prefix 또는 /regex/flags
+ * @param {number} [opts.olderThanMs] - 생성 후 경과 시간 필터
+ * @returns {Array<{sessionName: string, title: string, createdAt: number|null, lastActivityAt: number|null, attachedCount: number, isAttached: boolean, ageMs: number|null, idleMs: number|null}>}
+ */
+export function listSessions(opts = {}) {
+  ensurePsmuxInstalled();
+  const matcher = toTitleMatcher(opts.filterTitle);
+  const olderThanMs = normalizeOlderThanMs(opts.olderThanMs, 0);
+
+  return listSessionInventoryRaw().filter((session) => {
+    if (!matcher(session.title)) return false;
+    if (olderThanMs <= 0) return true;
+    return Number.isFinite(session.ageMs) && session.ageMs >= olderThanMs;
+  });
+}
+
+/**
+ * 세션명 prefix/regex 역조회 후 세션 종료
+ * @param {string|RegExp} titlePattern
+ * @returns {{ matchedCount: number, killedCount: number, sessions: string[] }}
+ */
+export function killSessionByTitle(titlePattern) {
+  ensurePsmuxInstalled();
+  const sessions = listSessions({ filterTitle: titlePattern });
+  const killed = [];
+  for (const session of sessions) {
+    psmuxExec(["kill-session", "-t", session.sessionName], { stdio: "ignore" });
+    killed.push(session.sessionName);
+  }
+  return {
+    matchedCount: sessions.length,
+    killedCount: killed.length,
+    sessions: killed,
+  };
+}
+
+/**
+ * 오래 idle 상태인 detached 세션 일괄 정리
+ * @param {object} [opts]
+ * @param {number} [opts.olderThanMs=3600000]
+ * @param {boolean} [opts.dryRun=false]
+ * @returns {{ dryRun: boolean, matchedCount: number, killedCount: number, sessions: string[] }}
+ */
+export function pruneStale(opts = {}) {
+  ensurePsmuxInstalled();
+  const olderThanMs = normalizeOlderThanMs(opts.olderThanMs, 3600000);
+  const dryRun = opts.dryRun === true;
+  const sessions = listSessionInventoryRaw().filter((session) => {
+    if (session.isAttached) return false;
+    return Number.isFinite(session.idleMs) && session.idleMs >= olderThanMs;
+  });
+
+  if (dryRun) {
+    return {
+      dryRun: true,
+      matchedCount: sessions.length,
+      killedCount: 0,
+      sessions: sessions.map((session) => session.sessionName),
+    };
+  }
+
+  if (sessions.length === 0) {
+    return {
+      dryRun: false,
+      matchedCount: 0,
+      killedCount: 0,
+      sessions: [],
+    };
+  }
+
+  const result = killSessionByTitle(
+    new RegExp(
+      `^(?:${sessions
+        .map((session) => escapeRegExp(session.title))
+        .join("|")})$`,
+    ),
+  );
+  return {
+    dryRun: false,
+    matchedCount: sessions.length,
+    killedCount: result.killedCount,
+    sessions: result.sessions,
+  };
+}
+
+/**
  * psmux 세션 존재 확인
  * @param {string} sessionName
  * @returns {boolean}
@@ -820,7 +991,7 @@ export function psmuxSessionExists(sessionName) {
  */
 export function listPsmuxSessions() {
   try {
-    return parseSessionSummaries(psmuxExec(["list-sessions"]))
+    return listSessionInventoryRaw()
       .map((session) => session.sessionName)
       .filter((sessionName) => sessionName.startsWith("tfx-multi-"));
   } catch {
@@ -870,7 +1041,7 @@ export function attachPsmuxSession(sessionName) {
  */
 export function getPsmuxSessionAttachedCount(sessionName) {
   try {
-    const session = parseSessionSummaries(psmuxExec(["list-sessions"])).find(
+    const session = listSessionInventoryRaw().find(
       (entry) => entry.sessionName === sessionName,
     );
     return session ? session.attachedCount : null;
@@ -1531,7 +1702,10 @@ export function captureWorkerOutput(sessionName, workerName, lines = 50) {
 
 if (process.argv[1]?.endsWith("psmux.mjs")) {
   (async () => {
-    const [, , cmd, ...args] = process.argv;
+    const rawArgs = process.argv.slice(2);
+    const internalMode = rawArgs[0] === "--internal";
+    const cmd = internalMode ? rawArgs[1] : rawArgs[0];
+    const args = internalMode ? rawArgs.slice(2) : rawArgs.slice(1);
 
     // CLI 인자 파싱 헬퍼
     function getArg(name) {
@@ -1540,6 +1714,70 @@ if (process.argv[1]?.endsWith("psmux.mjs")) {
     }
 
     try {
+      if (internalMode) {
+        switch (cmd) {
+          case "list": {
+            const olderThanMs = getArg("olderThanMs");
+            const filterTitle = getArg("filterTitle");
+            console.log(
+              JSON.stringify(
+                listSessions({
+                  filterTitle,
+                  olderThanMs:
+                    olderThanMs == null
+                      ? undefined
+                      : Number.parseInt(olderThanMs, 10),
+                }),
+                null,
+                2,
+              ),
+            );
+            break;
+          }
+          case "kill-by-title": {
+            const pattern = args[0];
+            if (!pattern) {
+              console.error(
+                "사용법: node psmux.mjs --internal kill-by-title <title-prefix|/regex/>",
+              );
+              process.exit(1);
+            }
+            console.log(JSON.stringify(killSessionByTitle(pattern), null, 2));
+            break;
+          }
+          case "prune-stale": {
+            const olderThanMs = getArg("olderThanMs");
+            const dryRun = args.includes("--dry-run");
+            console.log(
+              JSON.stringify(
+                pruneStale({
+                  olderThanMs:
+                    olderThanMs == null
+                      ? undefined
+                      : Number.parseInt(olderThanMs, 10),
+                  dryRun,
+                }),
+                null,
+                2,
+              ),
+            );
+            break;
+          }
+          default:
+            console.error(
+              "사용법: node psmux.mjs --internal list [--filterTitle <prefix|/regex/>] [--olderThanMs <ms>]",
+            );
+            console.error(
+              "    또는: node psmux.mjs --internal kill-by-title <prefix|/regex/>",
+            );
+            console.error(
+              "    또는: node psmux.mjs --internal prune-stale [--olderThanMs <ms>] [--dry-run]",
+            );
+            process.exit(1);
+        }
+        return;
+      }
+
       switch (cmd) {
         case "spawn": {
           const session = getArg("session");
