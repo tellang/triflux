@@ -37,8 +37,11 @@ describe("safety-guard psmux rules", () => {
     assert.equal(runGuard('grep -r "psmux kill-session" hooks/'), 0);
   });
 
-  it("safe wrapper는 통과", () => {
-    assert.equal(runGuard("node hub/team/psmux.mjs kill --session foo"), 0);
+  it("internal wrapper는 통과", () => {
+    assert.equal(
+      runGuard("node hub/team/psmux.mjs --internal kill-by-title tfx-spawn-"),
+      0,
+    );
   });
 
   it("psmux kill-server 차단", () => {
