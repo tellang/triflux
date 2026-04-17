@@ -22,6 +22,22 @@ function buildHubBaseUrl(host, port) {
   return `http://${formatHostForUrl(host)}:${port}`;
 }
 
+async function syncHubConfigsIfAvailable({ hubUrl }) {
+  try {
+    const mod = await import(
+      new URL("./sync-hub-mcp-settings.mjs", import.meta.url)
+    );
+    if (typeof mod?.syncHubMcpSettings === "function") {
+      await mod.syncHubMcpSettings({ hubUrl });
+    }
+    if (typeof mod?.syncCodexHubUrl === "function") {
+      await mod.syncCodexHubUrl({ hubUrl });
+    }
+  } catch {
+    // sync는 best-effort이며 hub-ensure 성공/실패를 좌우하지 않는다.
+  }
+}
+
 function resolveHubTarget() {
   const envPortRaw = Number(process.env.TFX_HUB_PORT || "");
   const envPort =
@@ -96,7 +112,9 @@ export async function run(stdinData) {
   void stdinData;
 
   const { host, port } = resolveHubTarget();
+  const hubUrl = `${buildHubBaseUrl(host, port)}/mcp`;
   if (await isHubHealthy(host, port)) {
+    await syncHubConfigsIfAvailable({ hubUrl });
     return { code: 0, stdout: "hub: ok", stderr: "" };
   }
 
@@ -106,6 +124,9 @@ export async function run(stdinData) {
   }
 
   const ready = await waitForHubReady(host, port, 5000);
+  if (ready) {
+    await syncHubConfigsIfAvailable({ hubUrl });
+  }
   return {
     code: ready ? 0 : 2,
     stdout: ready ? "hub: ok" : "hub: starting (timeout)",
