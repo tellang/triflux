@@ -26,7 +26,10 @@ import {
   GEMINI_SESSION_REFRESH_FLAG,
   QOS_PATH,
 } from "./constants.mjs";
-import { buildContextUsageView } from "./context-monitor.mjs";
+import {
+  buildContextUsageView,
+  deriveContextLimit,
+} from "./context-monitor.mjs";
 import { getMissionBoardState } from "./mission-board.mjs";
 // Claude provider
 import {
@@ -153,7 +156,7 @@ async function main() {
     svSavings?.totalSaved || svAccumulator?.totalCostSaved || 0;
 
   // 세션/누적 토큰 → context 대비 절약 배수 (개별 provider sv%)
-  const ctxCapacity = stdin?.context_window?.context_window_size || 200000;
+  const ctxCapacity = deriveContextLimit(stdin);
   let codexSv = null;
   if (svAccumulator?.codex?.tokens > 0) {
     codexSv = svAccumulator.codex.tokens / ctxCapacity;
