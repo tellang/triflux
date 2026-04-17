@@ -108,6 +108,12 @@ function sanitizePathPart(value) {
   return String(value).replace(/[<>:"/\\|?*\u0000-\u001f']/gu, "_");
 }
 
+// session names retain regex metacharacters (`.`, `-`, `+`, …) even after
+// sanitizePathPart, so escape before embedding into a pgrep regex.
+export function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function toPaneTitle(index) {
   return index === 0 ? "lead" : `worker-${index}`;
 }
@@ -813,10 +819,11 @@ function disableAllPipeCaptures(sessionName, paneIds) {
  */
 function killOrphanPipeHelpers(sessionName) {
   if (!IS_WINDOWS) {
-    // macOS/Linux: 세션별 스코핑으로 고아 pipe-pane 헬퍼 종료
-    const safeSessionUnix = sanitizePathPart(sessionName);
+    // macOS/Linux: pipe-pane helper cmdline contains
+    // `<CAPTURE_ROOT>/<session>/<pane>.log`, so anchor on `/<session>/`.
+    const safeSessionUnix = escapeRegex(sanitizePathPart(sessionName));
     try {
-      const pids = childProcess.execFileSync("pgrep", ["-f", `pipe-pane-capture.*[/ ]${safeSessionUnix}([ /]|$)`], {
+      const pids = childProcess.execFileSync("pgrep", ["-f", `pipe-pane-capture.*/${safeSessionUnix}/`], {
         encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
       }).trim();
       if (pids) {
@@ -869,7 +876,10 @@ function killOrphanMcpProcesses(sessionName) {
       }
     } catch {}
     try {
-      const pids = childProcess.execFileSync("pgrep", ["-f", `mcp.*[/ ]${safeSessionUnix}([ /]|$)`], {
+      // MCP/result files live under `tfx-headless/<session>-<pane>.txt`, so
+      // match `tfx-headless/<session>` (same structure as the Windows branch).
+      const escSession = escapeRegex(safeSessionUnix);
+      const pids = childProcess.execFileSync("pgrep", ["-f", `tfx-headless/${escSession}`], {
         encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
       }).trim();
       if (pids) {

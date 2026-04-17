@@ -558,6 +558,56 @@ describe("killPsmuxSession cleanup", () => {
       "unattached session에는 detach-client가 불필요",
     );
   });
+
+  it(
+    "macOS 고아 pgrep 패턴은 tfx-headless path anchor를 쓰고 세션명을 regex-escape한다",
+    { skip: process.platform === "win32" },
+    async () => {
+      createTempCaptureRoot("psmux-regex-");
+      const { calls } = mockForKillSession();
+      const { killPsmuxSession } = await importFreshPsmux();
+
+      // session name with regex metacharacters
+      killPsmuxSession("tfx.session+v2");
+
+      const pgrepF = calls.filter(
+        (c) => c.file === "pgrep" && c.args?.[0] === "-f",
+      );
+      assert.ok(
+        pgrepF.length >= 1,
+        "pgrep -f가 최소 1회 호출되어야 한다",
+      );
+
+      const mcpPat = pgrepF
+        .map((c) => c.args[1] || "")
+        .find((p) => p.includes("tfx-headless"));
+      assert.ok(
+        mcpPat,
+        `MCP 정리 pgrep은 tfx-headless path anchor를 사용해야 한다: ${pgrepF.map((c) => c.args[1]).join(" | ")}`,
+      );
+      assert.ok(
+        mcpPat.includes("tfx\\.session\\+v2"),
+        `세션명의 '.'와 '+'가 regex-escape 되어야 한다: ${mcpPat}`,
+      );
+      assert.ok(
+        !/mcp\.\*\[\/ \]/.test(mcpPat),
+        `legacy 'mcp.*[/ ]...' 패턴이 남아 있으면 안 된다: ${mcpPat}`,
+      );
+    },
+  );
+});
+
+describe("escapeRegex helper", () => {
+  it("regex 메타문자를 모두 escape한다", async () => {
+    const { escapeRegex } = await importFreshPsmux();
+    assert.equal(escapeRegex("plain"), "plain");
+    assert.equal(escapeRegex("a.b"), "a\\.b");
+    assert.equal(escapeRegex("a+b*c"), "a\\+b\\*c");
+    assert.equal(escapeRegex("a(b)c"), "a\\(b\\)c");
+    assert.equal(escapeRegex("a[b]c^d$"), "a\\[b\\]c\\^d\\$");
+    assert.equal(escapeRegex("a|b?c{d}"), "a\\|b\\?c\\{d\\}");
+    assert.equal(escapeRegex("a\\b"), "a\\\\b");
+  });
 });
 
 describe("killWorker focus-safe cleanup", () => {
