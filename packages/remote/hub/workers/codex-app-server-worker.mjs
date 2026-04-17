@@ -240,7 +240,8 @@ function buildThreadStartParams(opts = {}) {
   if (typeof opts.profile === "string" && opts.profile) {
     params.serviceName = opts.profile;
   }
-  if (opts.config && typeof opts.config === "object") params.config = opts.config;
+  if (opts.config && typeof opts.config === "object")
+    params.config = opts.config;
   if (typeof opts.cwd === "string" && opts.cwd) params.cwd = opts.cwd;
   if (typeof opts.baseInstructions === "string" && opts.baseInstructions) {
     params.baseInstructions = opts.baseInstructions;
@@ -350,8 +351,7 @@ export class CodexAppServerWorker {
         ? options.jsonRpcClientClass
         : JsonRpcStdioClient;
     this.redactSensitive =
-      options.redactSensitive === true ||
-      process.env.TFX_CODEX_REDACT === "1";
+      options.redactSensitive === true || process.env.TFX_CODEX_REDACT === "1";
     this.unknownMethodWarnThreshold = Number.isFinite(
       options.unknownMethodWarnThreshold,
     )
@@ -690,199 +690,198 @@ export class CodexAppServerWorker {
     let timer = null;
 
     try {
-
-    const pushPublish = (method, params) => {
-      if (!this.publishCallback) return;
-      const msg = this._buildPublishMessage(
-        method,
-        params,
-        threadId,
-        sessionKey,
-      );
-      // Fire-and-forget with 64-cap drop-oldest backpressure.
-      if (this._publishQueue.length >= this._publishMaxQueue) {
-        this._publishQueue.shift();
-      }
-      this._publishQueue.push(msg);
-      try {
-        const ret = this.publishCallback(msg);
-        if (ret && typeof ret.then === "function") {
-          ret.catch(() => {});
+      const pushPublish = (method, params) => {
+        if (!this.publishCallback) return;
+        const msg = this._buildPublishMessage(
+          method,
+          params,
+          threadId,
+          sessionKey,
+        );
+        // Fire-and-forget with 64-cap drop-oldest backpressure.
+        if (this._publishQueue.length >= this._publishMaxQueue) {
+          this._publishQueue.shift();
         }
-      } catch {}
-    };
+        this._publishQueue.push(msg);
+        try {
+          const ret = this.publishCallback(msg);
+          if (ret && typeof ret.then === "function") {
+            ret.catch(() => {});
+          }
+        } catch {}
+      };
 
-    const handleNotification = (method, params) => {
-      // AC5 defense: opt-out should already be filtered server-side.
-      if (OPT_OUT_METHODS.includes(method)) return;
+      const handleNotification = (method, params) => {
+        // AC5 defense: opt-out should already be filtered server-side.
+        if (OPT_OUT_METHODS.includes(method)) return;
 
-      if (!SUBSCRIBED_METHODS.has(method)) {
-        // AC6 / AC14 / AC16 — unknown method handling
-        unknownMethodsThisTurn.add(method);
-        if (!this._warnedUnknown.has(method)) {
-          this._warnedUnknown.add(method);
-          this._warn("unknown notification method", { method });
-          this._onUnknownMethod?.(method);
+        if (!SUBSCRIBED_METHODS.has(method)) {
+          // AC6 / AC14 / AC16 — unknown method handling
+          unknownMethodsThisTurn.add(method);
+          if (!this._warnedUnknown.has(method)) {
+            this._warnedUnknown.add(method);
+            this._warn("unknown notification method", { method });
+            this._onUnknownMethod?.(method);
+          }
+          if (
+            !protocolMismatchWarned &&
+            unknownMethodsThisTurn.size > this.unknownMethodWarnThreshold
+          ) {
+            protocolMismatchWarned = true;
+            this._warn("protocol_version_mismatch", {
+              count: unknownMethodsThisTurn.size,
+              threshold: this.unknownMethodWarnThreshold,
+            });
+          }
+          return;
         }
-        if (
-          !protocolMismatchWarned &&
-          unknownMethodsThisTurn.size > this.unknownMethodWarnThreshold
-        ) {
-          protocolMismatchWarned = true;
-          this._warn("protocol_version_mismatch", {
-            count: unknownMethodsThisTurn.size,
-            threshold: this.unknownMethodWarnThreshold,
-          });
+
+        // Thread id can arrive on thread/started before thread/start resolves.
+        if (method === "thread/started") {
+          const tid = extractThreadIdFromStartedNotif(params);
+          if (tid && !threadId) threadId = tid;
         }
-        return;
-      }
 
-      // Thread id can arrive on thread/started before thread/start resolves.
-      if (method === "thread/started") {
-        const tid = extractThreadIdFromStartedNotif(params);
-        if (tid && !threadId) threadId = tid;
-      }
+        // Agent text accumulation (AC3)
+        if (method === "item/agentMessage/delta") {
+          const delta = typeof params?.delta === "string" ? params.delta : "";
+          outputParts.push(delta);
+        }
 
-      // Agent text accumulation (AC3)
-      if (method === "item/agentMessage/delta") {
-        const delta = typeof params?.delta === "string" ? params.delta : "";
-        outputParts.push(delta);
-      }
+        pushPublish(method, params);
 
-      pushPublish(method, params);
+        if (method === "turn/completed") {
+          const status = params?.turn?.status;
+          if (status === "completed") {
+            finish({
+              output: outputParts.join(""),
+              exitCode: 0,
+              threadId,
+              sessionKey,
+              raw: { turn: params?.turn ?? null },
+            });
+          } else {
+            const msg =
+              params?.turn?.error?.message || `turn ${status || "unknown"}`;
+            finish({
+              output: outputParts.join(""),
+              exitCode: CODEX_APP_SERVER_EXECUTION_EXIT_CODE,
+              threadId,
+              sessionKey,
+              error: buildWorkerError("CODEX_APP_SERVER_EXECUTION_ERROR", msg),
+              raw: { turn: params?.turn ?? null },
+            });
+          }
+          return;
+        }
 
-      if (method === "turn/completed") {
-        const status = params?.turn?.status;
-        if (status === "completed") {
-          finish({
-            output: outputParts.join(""),
-            exitCode: 0,
-            threadId,
-            sessionKey,
-            raw: { turn: params?.turn ?? null },
-          });
-        } else {
-          const msg =
-            params?.turn?.error?.message ||
-            `turn ${status || "unknown"}`;
+        if (method === "error") {
+          const msg = params?.message || "codex app-server error";
           finish({
             output: outputParts.join(""),
             exitCode: CODEX_APP_SERVER_EXECUTION_EXIT_CODE,
             threadId,
             sessionKey,
             error: buildWorkerError("CODEX_APP_SERVER_EXECUTION_ERROR", msg),
-            raw: { turn: params?.turn ?? null },
+            raw: { error: params ?? null },
           });
         }
-        return;
-      }
-
-      if (method === "error") {
-        const msg = params?.message || "codex app-server error";
-        finish({
-          output: outputParts.join(""),
-          exitCode: CODEX_APP_SERVER_EXECUTION_EXIT_CODE,
-          threadId,
-          sessionKey,
-          error: buildWorkerError("CODEX_APP_SERVER_EXECUTION_ERROR", msg),
-          raw: { error: params ?? null },
-        });
-      }
-    };
-
-    // NOTE: JsonRpcStdioClient wildcard subscribers receive (params, method).
-    // Match that contract here; targeted subscribers (cb(params)) are unchanged.
-    const catchAll = (params, method) => handleNotification(method, params);
-    unsubscribers.push(client.onNotification("*", catchAll));
-
-    // Send thread/start (no prompt) then turn/start (prompt)
-    let threadStartResponse;
-    try {
-      threadStartResponse = await client.request(
-        "thread/start",
-        buildThreadStartParams(opts),
-        this.bootstrapTimeoutMs,
-      );
-    } catch (error) {
-      return {
-        output: error instanceof Error ? error.message : String(error),
-        exitCode: CODEX_APP_SERVER_TRANSPORT_EXIT_CODE,
-        threadId,
-        sessionKey,
-        error: buildWorkerError(
-          "CODEX_APP_SERVER_TRANSPORT_ERROR",
-          error instanceof Error ? error.message : String(error),
-        ),
-        raw: null,
       };
-    }
-    const respThreadId = extractThreadIdFromStartResponse(threadStartResponse);
-    if (respThreadId && !threadId) threadId = respThreadId;
-    if (!threadId) {
-      return {
-        output: "thread id를 추출하지 못했습니다.",
-        exitCode: CODEX_APP_SERVER_EXECUTION_EXIT_CODE,
-        threadId: null,
-        sessionKey,
-        error: buildWorkerError(
-          "CODEX_APP_SERVER_EXECUTION_ERROR",
-          "thread id missing",
-        ),
-        raw: { threadStart: threadStartResponse },
-      };
-    }
-    this.activeThreadId = threadId;
 
-    try {
-      await client.request(
-        "turn/start",
-        buildTurnStartParams(threadId, prompt),
-        this.bootstrapTimeoutMs,
-      );
-    } catch (error) {
-      return {
-        output: error instanceof Error ? error.message : String(error),
-        exitCode: CODEX_APP_SERVER_TRANSPORT_EXIT_CODE,
-        threadId,
-        sessionKey,
-        error: buildWorkerError(
-          "CODEX_APP_SERVER_TRANSPORT_ERROR",
-          error instanceof Error ? error.message : String(error),
-        ),
-        raw: null,
-      };
-    }
+      // NOTE: JsonRpcStdioClient wildcard subscribers receive (params, method).
+      // Match that contract here; targeted subscribers (cb(params)) are unchanged.
+      const catchAll = (params, method) => handleNotification(method, params);
+      unsubscribers.push(client.onNotification("*", catchAll));
 
-    // Timeout: SIGTERM + partial WorkerResult (AC8)
-    const timeoutMs = Number.isFinite(opts.timeoutMs)
-      ? opts.timeoutMs
-      : DEFAULT_CODEX_APP_SERVER_EXECUTION_TIMEOUT_MS;
-    // Capture current child so a stale timer (post-result) cannot SIGTERM a
-    // later reused worker's child process.
-    const capturedChild = this.child;
-    const timeoutPromise = new Promise((resolve) => {
-      timer = setTimeout(() => {
-        this._warn("execution timeout", { timeoutMs });
-        try {
-          capturedChild?.kill?.("SIGTERM");
-        } catch {}
-        resolve({
-          output: outputParts.join(""),
-          exitCode: CODEX_APP_SERVER_TIMEOUT_EXIT_CODE,
+      // Send thread/start (no prompt) then turn/start (prompt)
+      let threadStartResponse;
+      try {
+        threadStartResponse = await client.request(
+          "thread/start",
+          buildThreadStartParams(opts),
+          this.bootstrapTimeoutMs,
+        );
+      } catch (error) {
+        return {
+          output: error instanceof Error ? error.message : String(error),
+          exitCode: CODEX_APP_SERVER_TRANSPORT_EXIT_CODE,
           threadId,
           sessionKey,
           error: buildWorkerError(
-            "CODEX_APP_SERVER_TIMEOUT",
-            `codex app-server timeout (${timeoutMs}ms)`,
+            "CODEX_APP_SERVER_TRANSPORT_ERROR",
+            error instanceof Error ? error.message : String(error),
           ),
           raw: null,
-        });
-      }, timeoutMs);
-      timer.unref?.();
-    });
+        };
+      }
+      const respThreadId =
+        extractThreadIdFromStartResponse(threadStartResponse);
+      if (respThreadId && !threadId) threadId = respThreadId;
+      if (!threadId) {
+        return {
+          output: "thread id를 추출하지 못했습니다.",
+          exitCode: CODEX_APP_SERVER_EXECUTION_EXIT_CODE,
+          threadId: null,
+          sessionKey,
+          error: buildWorkerError(
+            "CODEX_APP_SERVER_EXECUTION_ERROR",
+            "thread id missing",
+          ),
+          raw: { threadStart: threadStartResponse },
+        };
+      }
+      this.activeThreadId = threadId;
 
-    const result = await Promise.race([resultPromise, timeoutPromise]);
-    return result;
+      try {
+        await client.request(
+          "turn/start",
+          buildTurnStartParams(threadId, prompt),
+          this.bootstrapTimeoutMs,
+        );
+      } catch (error) {
+        return {
+          output: error instanceof Error ? error.message : String(error),
+          exitCode: CODEX_APP_SERVER_TRANSPORT_EXIT_CODE,
+          threadId,
+          sessionKey,
+          error: buildWorkerError(
+            "CODEX_APP_SERVER_TRANSPORT_ERROR",
+            error instanceof Error ? error.message : String(error),
+          ),
+          raw: null,
+        };
+      }
+
+      // Timeout: SIGTERM + partial WorkerResult (AC8)
+      const timeoutMs = Number.isFinite(opts.timeoutMs)
+        ? opts.timeoutMs
+        : DEFAULT_CODEX_APP_SERVER_EXECUTION_TIMEOUT_MS;
+      // Capture current child so a stale timer (post-result) cannot SIGTERM a
+      // later reused worker's child process.
+      const capturedChild = this.child;
+      const timeoutPromise = new Promise((resolve) => {
+        timer = setTimeout(() => {
+          this._warn("execution timeout", { timeoutMs });
+          try {
+            capturedChild?.kill?.("SIGTERM");
+          } catch {}
+          resolve({
+            output: outputParts.join(""),
+            exitCode: CODEX_APP_SERVER_TIMEOUT_EXIT_CODE,
+            threadId,
+            sessionKey,
+            error: buildWorkerError(
+              "CODEX_APP_SERVER_TIMEOUT",
+              `codex app-server timeout (${timeoutMs}ms)`,
+            ),
+            raw: null,
+          });
+        }, timeoutMs);
+        timer.unref?.();
+      });
+
+      const result = await Promise.race([resultPromise, timeoutPromise]);
+      return result;
     } finally {
       if (timer !== null) {
         clearTimeout(timer);

@@ -38,9 +38,15 @@ async function runBlocking(stdinData) {
     timings.push({ hook: "setup.critical", dur_ms: Math.round(dur) });
     if (result?.stdout) output.stdout += result.stdout + "\n";
     if (result?.stderr) output.stderr += result.stderr + "\n";
-    log.info({ hook: "setup.critical", dur_ms: Math.round(dur) }, "hook.completed");
+    log.info(
+      { hook: "setup.critical", dur_ms: Math.round(dur) },
+      "hook.completed",
+    );
   } catch (err) {
-    log.error({ hook: "setup.critical", err: String(err.message || err) }, "hook.failed");
+    log.error(
+      { hook: "setup.critical", err: String(err.message || err) },
+      "hook.failed",
+    );
   }
 
   // 2. mcp-safety-guard.run — EPERM 방지
@@ -50,9 +56,15 @@ async function runBlocking(stdinData) {
     guard.run();
     const dur = performance.now() - t0;
     timings.push({ hook: "mcp-safety-guard", dur_ms: Math.round(dur) });
-    log.info({ hook: "mcp-safety-guard", dur_ms: Math.round(dur) }, "hook.completed");
+    log.info(
+      { hook: "mcp-safety-guard", dur_ms: Math.round(dur) },
+      "hook.completed",
+    );
   } catch (err) {
-    log.error({ hook: "mcp-safety-guard", err: String(err.message || err) }, "hook.failed");
+    log.error(
+      { hook: "mcp-safety-guard", err: String(err.message || err) },
+      "hook.failed",
+    );
   }
 
   // 3. hub-ensure — Hub 필수 인프라, BLOCKING으로 실행
@@ -65,12 +77,21 @@ async function runBlocking(stdinData) {
     if (result?.stdout) output.stdout += result.stdout + "\n";
     if (result?.stderr) output.stderr += result.stderr + "\n";
     if (result?.code !== 0) {
-      log.warn({ hook: "hub-ensure", dur_ms: Math.round(dur), code: result?.code }, "hook.warn");
+      log.warn(
+        { hook: "hub-ensure", dur_ms: Math.round(dur), code: result?.code },
+        "hook.warn",
+      );
     } else {
-      log.info({ hook: "hub-ensure", dur_ms: Math.round(dur) }, "hook.completed");
+      log.info(
+        { hook: "hub-ensure", dur_ms: Math.round(dur) },
+        "hook.completed",
+      );
     }
   } catch (err) {
-    log.error({ hook: "hub-ensure", err: String(err.message || err) }, "hook.failed");
+    log.error(
+      { hook: "hub-ensure", err: String(err.message || err) },
+      "hook.failed",
+    );
   }
 
   return { ...output, timings };
@@ -96,7 +117,9 @@ function runDeferred(stdinData) {
         const mod = await importMod(join(SCRIPTS, "claude-login-detect.mjs"));
         const result = mod.run?.();
         if (result?.changed) {
-          return { stdout: `[claude-login] HUD 캐시 ${result.cleared}개 초기화됨\n` };
+          return {
+            stdout: `[claude-login] HUD 캐시 ${result.cleared}개 초기화됨\n`,
+          };
         }
       },
     },
@@ -118,14 +141,25 @@ function runDeferred(stdinData) {
 
   for (const task of tasks) {
     const t0 = performance.now();
-    task.fn()
+    task
+      .fn()
       .then((result) => {
         const dur = performance.now() - t0;
-        log.info({ hook: task.name, dur_ms: Math.round(dur), code: result?.code }, "deferred.completed");
+        log.info(
+          { hook: task.name, dur_ms: Math.round(dur), code: result?.code },
+          "deferred.completed",
+        );
       })
       .catch((err) => {
         const dur = performance.now() - t0;
-        log.error({ hook: task.name, dur_ms: Math.round(dur), err: String(err.message || err) }, "deferred.failed");
+        log.error(
+          {
+            hook: task.name,
+            dur_ms: Math.round(dur),
+            err: String(err.message || err),
+          },
+          "deferred.failed",
+        );
       });
   }
 }
@@ -162,7 +196,15 @@ export async function execute(stdinData, externalHooks = []) {
   runBackground(stdinData);
 
   const totalDur = performance.now() - totalStart;
-  log.info({ total_ms: Math.round(totalDur), blocking_count: 3, deferred_count: 2, bg_count: 1 }, "session-start.done");
+  log.info(
+    {
+      total_ms: Math.round(totalDur),
+      blocking_count: 3,
+      deferred_count: 2,
+      bg_count: 1,
+    },
+    "session-start.done",
+  );
 
   return {
     stdout: blocking.stdout,

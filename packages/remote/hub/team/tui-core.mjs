@@ -29,15 +29,13 @@ export function clamp(value, min, max) {
 
 // ── 텍스트 정규화 ─────────────────────────────────────────────────────────
 export function stripCodeBlocks(text) {
-  return (
-    String(text || "")
-      .replace(/\r/g, "")
-      .replace(/```[\s\S]*?(?:```|$)/g, "\n")
-      .replace(/^\s*```.*$/gm, "")
-      .replace(/^(?: {4}|\t).+$/gm, "")
-      .replace(/^(?:PS\s+\S[^\n]*?>|>\s+|\$\s+)[^\n]*/gm, "")
-      .trim()
-  );
+  return String(text || "")
+    .replace(/\r/g, "")
+    .replace(/```[\s\S]*?(?:```|$)/g, "\n")
+    .replace(/^\s*```.*$/gm, "")
+    .replace(/^(?: {4}|\t).+$/gm, "")
+    .replace(/^(?:PS\s+\S[^\n]*?>|>\s+|\$\s+)[^\n]*/gm, "")
+    .trim();
 }
 
 export function sanitizeTextBlock(text, rawMode = false) {
@@ -182,9 +180,7 @@ export function normalizeWorkerState(existing = {}, state = {}, opts = {}) {
     const statusChanged =
       state.status !== undefined &&
       sanitizeOneLine(state.status) !== existing.status;
-    merged._prevStatus = statusChanged
-      ? existing.status
-      : existing._prevStatus;
+    merged._prevStatus = statusChanged ? existing.status : existing._prevStatus;
     merged._statusChangedAt = statusChanged
       ? now()
       : existing._statusChangedAt || 0;

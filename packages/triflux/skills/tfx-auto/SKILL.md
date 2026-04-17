@@ -93,22 +93,21 @@ dispatch 시 해당 스킬을 Skill 도구로 호출하고 **이 워크플로우
 > 2. **비용**: Codex 우선 → Gemini → Claude 최후 수단. `claude` 선택 전 "Codex로 가능한가?" 재확인.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
 > 4. **트리아지**: Codex `exec --full-auto` 분류 + Opus 인라인 분해. Agent 스폰 금지.
-> 5. **thorough 기본**: `--thorough`가 기본. Opus가 규모(S/M)·커맨드 숏컷 판단 시 자동 경량화 가능. `--quick`은 명시적 옵트아웃.
+> 5. **thorough**: `-t`/`--thorough` 시 파이프라인 init 필수. 커맨드 숏컷은 항상 quick.
 > 6. **직접 수정 금지**: implement/review/analyze 등 커맨드 숏컷 실행 시 절대로 Edit/Write 도구로 직접 코드를 수정하지 마라. 반드시 Bash(tfx-route.sh)를 통해 Codex/Gemini에 위임하라. 작업이 아무리 사소해도 예외 없음.
 
 ## 모드
 
 | 입력 형식 | 모드 | 트리아지 |
 |-----------|------|----------|
-| `/implement JWT 추가` | 커맨드 숏컷 (thorough) | Opus 판단 → 규모 S면 자동 경량화 |
-| `/tfx-auto "리팩터링 + UI"` | 자동 (thorough) | Codex 분류 → Opus 분해 → Pipeline |
-| `/tfx-auto -q "빠르게 수정"` | 자동 (quick) | Opus 분해만, plan/verify 생략 |
-| `/tfx-auto --quick "빠르게"` | 자동 (quick) | `-q` 동일 |
-| `/tfx-auto 3:codex "리뷰"` | 수동 (thorough) | Opus 분해 + Pipeline |
+| `/implement JWT 추가` | 커맨드 숏컷 (quick) | 없음 (즉시 실행) |
+| `/tfx-auto "리팩터링 + UI"` | 자동 (quick) | Codex 분류 → Opus 분해 |
+| `/tfx-auto -t "리팩터링 + UI"` | 자동 (thorough) | Codex 분류 → Opus 분해 → Pipeline |
+| `/tfx-auto --thorough "리팩터링"` | 자동 (thorough) | `-t` 동일 |
+| `/tfx-auto 3:codex "리뷰"` | 수동 (quick) | Opus 분해만 |
 
-> **tfx-auto는 `--thorough`가 기본.** 모든 작업에 plan/verify 파이프라인을 적용한다.
-> Opus가 규모(S)·단순 커맨드 숏컷으로 판단하면 자동 경량화(plan/verify 생략)한다.
-> 명시적 `--quick`/`-q`로 강제 경량화 가능.
+> **tfx-auto는 `--quick`이 기본.** 커맨드 숏컷·단일 실행에서 plan/verify 오버헤드가 불필요하기 때문.
+> 멀티 태스크 시 tfx-multi로 전환되면 tfx-multi의 기본값(`--thorough`)이 적용된다.
 
 ## 커맨드 숏컷
 
@@ -169,16 +168,16 @@ dispatch 시 해당 스킬을 Skill 도구로 호출하고 **이 워크플로우
 
 **수동 모드 (`N:agent_type`):** Codex 분류 건너뜀 → Opus가 N개 서브태스크 분해. N > 10 거부.
 
-## 파이프라인 (기본: thorough)
+## --thorough 모드
 
-`--thorough`가 기본. `--quick`/`-q` 명시 시 경량화. Opus가 규모 S·단순 숏컷으로 판단 시 자동 경량화.
+`-t` 또는 `--thorough` 플래그 시 파이프라인 기반 실행. 커맨드 숏컷에서는 무시된다.
 
 ```
 분기점은 "실행 전략"이지 "계획"이 아님:
 
 TRIAGE
   │
-  ├─ [기본/thorough] → PIPELINE INIT(plan) → PLAN → PRD → [APPROVAL]
+  ├─ [thorough] → PIPELINE INIT(plan) → PLAN → PRD → [APPROVAL]
   │                                                      │
   │                                      ┌───────────────┤
   │                                      │               │
@@ -190,10 +189,8 @@ TRIAGE
   │                                              │
   │                                          VERIFY → FIX loop → COMPLETE
   │
-  ├─ [Opus 자동 경량화] → 규모 S + 단일 파일 → fire-and-forget (plan/verify 생략)
-  │
-  └─ [--quick 명시] → [1 task] → fire-and-forget
-                      [2+ tasks] → TEAM EXEC → COLLECT → CLEANUP
+  └─ [quick] → [1 task] → fire-and-forget
+               [2+ tasks] → TEAM EXEC → COLLECT → CLEANUP
 ```
 
 ### 단일 태스크 thorough
@@ -209,68 +206,42 @@ TRIAGE
 
 ### 멀티 태스크 thorough
 
-Plan/PRD/Approval은 tfx-auto에서 실행한다. 이후 2개 이상 서브태스크는 아래 라우팅 규칙으로 dispatch 엔진을 결정한다.
-- 읽기 전용 shard만 있으면 `tfx-multi` Phase 3로 전환한다.
-- 코드 변경 shard가 하나라도 있으면 `tfx-swarm`으로 전환한다.
-- 서브태스크 배열 + `thorough: true` 신호를 함께 전달하여 선택된 엔진에서 verify/fix를 수행한다.
+Plan/PRD/Approval은 tfx-auto에서 실행, 그 후 tfx-multi Phase 3로 전환.
+서브태스크 배열 + `thorough: true` 신호를 함께 전달하여 multi 측에서 verify/fix를 수행.
 
 ## 멀티 태스크 라우팅 (트리아지 후)
 
-> **트리아지 결과에 따라 2개 이상 서브태스크는 읽기 전용이면 `tfx-multi`, 코드 변경이 포함되면 `tfx-swarm`으로 dispatch한다.**
-> `--quick` 명시 시에도 엔진 선택 규칙은 동일하며, 차이는 plan/verify 생략 여부뿐이다.
+> **트리아지 결과에 따라 실행 경로 결정.**
+> v6.0.0부터 CLI 워커는 **Lead-Direct Headless** (psmux)가 기본. Agent 래퍼 불필요.
 
-| 입력 특성 | 실행 경로 | 엔진 |
-|-----------|-----------|------|
-| 1 태스크 S | tfx-auto 직접 실행 (fire-and-forget 가능) | 직접 실행 |
-| 1 태스크 M+ | Plan/PRD/Approval → 직접 실행 → verify/fix loop | pipeline |
-| 2+ 태스크 + 코드 변경 없음 | Plan/PRD/Approval 후 읽기 전용 병렬 실행 | tfx-multi |
-| 2+ 태스크 + 코드 변경 포함 | Plan/PRD/Approval 후 편집 shard 병렬 실행 | tfx-swarm |
-| 원격 + 코드 변경 | Plan/PRD/Approval 후 host별 shard 분리 실행 | tfx-swarm (shard host:) |
+| 조건 | 실행 경로 | 엔진 |
+|------|----------|------|
+| 1개 + quick | tfx-auto 직접 실행 (fire-and-forget) | tfx-route.sh |
+| 1개 + thorough | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
+| 2개+ + quick | **headless 직접 실행** (WT 자동 팝업) | headless.mjs |
+| 2개+ + thorough | Plan/PRD/Approval 후 → headless + verify/fix | headless.mjs |
+| psmux 미설치 fallback | Native Teams (Agent slim wrapper) | native.mjs |
 
-### 판정 기준
-
-- `shard.files`에 `src/`, `hub/`, `bin/`, `packages/`, `tests/` 중 하나라도 매치하면 `code_change=true`로 간주하고 swarm 경로를 우선한다.
-- shard의 agent가 `executor`, `build-fixer`, `spark`, `debugger` 중 하나면 편집 계열로 간주하고 swarm을 강제한다.
-- 사용자 입력에 `"multi"` 또는 `"multi로"`가 명시되면 위 기준보다 우선하여 `tfx-multi`를 유지한다.
-- 원격 shard(`host:` prefix 포함)가 코드 변경을 포함하면 항상 `tfx-swarm`으로 묶고 `shard host:` 단위로 dispatch한다.
-
-### 예제
-
-- **swarm 선택**: `"A, B, C 각각 다른 모듈 수정해"` → 2개 이상 + 코드 변경 포함 → `tfx-swarm`
-- **multi 유지**: `"파일 3개 read-only로 분석해"` → 2개 이상 + 코드 변경 없음 → `tfx-multi`
-- **사용자 override**: `"multi로 병렬 리뷰"` → 명시 override → `tfx-multi`
-
-> **MANDATORY: 2개+ 서브태스크 시 dispatch 엔진을 먼저 판정한다.**
-> 읽기 전용이면 `tfx-multi`, 코드 변경이 포함되면 `tfx-swarm`으로 위임한다. 단일 엔진으로 강제 고정하지 않는다.
+> **MANDATORY: 2개+ 서브태스크 시 headless 엔진 필수**
+> `Agent()` 백그라운드나 `Bash(tfx-route.sh)` 개별 호출로 대체 금지.
+> 반드시 아래 `Bash("tfx multi ...")` 명령으로 headless 엔진에 위임한다.
 
 **전환 방법:**
 
 ```
-quick = args에 -q 또는 --quick 명시, 또는 Opus 자동 경량화 판단
-force_multi = user_input에 "multi" 또는 "multi로" 포함
-has_code_change = any(
-  shard.agent in ["executor", "build-fixer", "spark", "debugger"] ||
-  shard.files matches /(src|hub|bin|packages|tests)\//
-)
-has_remote_edit = any(shard.host && has_code_change)
+thorough = args에 -t 또는 --thorough 포함
 
 if subtasks.length >= 2:
-  if force_multi:
-    → Bash("tfx multi ...")
-  else if has_remote_edit:
-    → Skill("tfx-swarm") with shard host: dispatch
-  else if has_code_change:
-    → Skill("tfx-swarm")
+  if psmux 설치됨:
+    → Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:prompt:role' ...")
+    → if thorough: verify → fix loop
   else:
-    → Bash("tfx multi ...")
+    → fallback: tfx-multi Phase 3 Native Teams (Agent slim wrapper)
 else:
-  if quick or size == "S":
-    → tfx-auto 직접 실행 (fire-and-forget)
-  else:
+  if thorough:
     → Pipeline init → Plan → PRD → Approval → 직접 실행 → Verify → Fix loop
-
-if quick and subtasks.length >= 2:
-  → 선택된 엔진에서 quick 모드로 실행 (plan/verify 생략)
+  else:
+    → tfx-auto 직접 실행 (아래)
 ```
 
 ## 실행

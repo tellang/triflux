@@ -512,11 +512,15 @@ export function createSwarmHypervisor(opts) {
         probeOpts,
         meshRegistry: sharedRegistry,
         enableMesh: true,
-        onCompleted: (sessionId) =>
-          handleShardCompleted(shard.name, sessionId, isRedundant),
       });
 
+      // NOTE: conductor 는 `session.config.onCompleted({ sessionId })` 형태로
+      // 세션별 콜백만 호출한다 (factory 옵션은 무시). 따라서 sessionConfig 에
+      // 직접 주입해야 shardCompleted 이벤트가 발화된다. 2026-04-17 세션에서
+      // follow-up swarm 이 여기서 hang 했던 원인.
       const sessionConfig = buildSessionConfig(shard);
+      sessionConfig.onCompleted = ({ sessionId }) =>
+        handleShardCompleted(shard.name, sessionId, isRedundant);
       conductor.spawnSession(sessionConfig);
 
       eventLog.append("shard_launched", {
@@ -804,7 +808,8 @@ export function createSwarmHypervisor(opts) {
           });
           await maybeCleanupWorktree(shardName, worker, shard, {
             force: true,
-            failureReason: failures.get(shardName)?.mode || "no_commit_evidence",
+            failureReason:
+              failures.get(shardName)?.mode || "no_commit_evidence",
           });
           integrationFailures.push(shardName);
           continue;
@@ -848,7 +853,8 @@ export function createSwarmHypervisor(opts) {
           });
           await maybeCleanupWorktree(shardName, worker, shard, {
             force: true,
-            failureReason: rebaseResult.error || FAILURE_MODES.F5_MERGE_CONFLICT,
+            failureReason:
+              rebaseResult.error || FAILURE_MODES.F5_MERGE_CONFLICT,
           });
           integrationFailures.push(shardName);
           continue;
@@ -1251,7 +1257,8 @@ export function createSwarmHypervisor(opts) {
       for (const [shardName, failureInfo] of failures) {
         const worker = workers.get(shardName);
         const shard =
-          worker?.shardConfig || plan?.shards.find((item) => item.name === shardName);
+          worker?.shardConfig ||
+          plan?.shards.find((item) => item.name === shardName);
         await maybeCleanupWorktree(shardName, worker, shard, {
           force: true,
           failureReason: failureInfo?.mode || failureInfo?.reason || reason,

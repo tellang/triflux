@@ -56,7 +56,9 @@ function resolveCleanupTarget(worktreePath, rootDir) {
     rel.startsWith("../") ||
     rel.includes("/../")
   ) {
-    throw new Error(`refusing to cleanup path outside rootDir: ${worktreePath}`);
+    throw new Error(
+      `refusing to cleanup path outside rootDir: ${worktreePath}`,
+    );
   }
 
   const allowed =

@@ -6,7 +6,7 @@
 // 중지: kill $(pgrep -f hub-watchdog.mjs)  (또는 별도 pid 파일)
 
 import { spawn } from "node:child_process";
-import { writeFileSync, existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const HUB_URL = "http://127.0.0.1:27888/status";

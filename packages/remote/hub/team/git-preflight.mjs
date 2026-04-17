@@ -102,9 +102,7 @@ export function createGitPreflight(opts = {}) {
     if (!conflicts.length) return "";
     const first = conflicts[0];
     const owner = first.leaseHolder || first.activeSession;
-    const task = first.activeTask
-      ? ` Active task: '${first.activeTask}'`
-      : "";
+    const task = first.activeTask ? ` Active task: '${first.activeTask}'` : "";
     return `Wait for '${owner}' to finish, or coordinate via HITL.${task}`;
   }
 
@@ -247,15 +245,17 @@ export function createGitPreflight(opts = {}) {
       case "worktree-remove": {
         const active = safeGetActive();
         if (active == null) return failOpenDecision(op);
-        const target = typeof args.worktreePath === "string"
-          ? args.worktreePath.replace(/\\/g, "/")
-          : "";
+        const target =
+          typeof args.worktreePath === "string"
+            ? args.worktreePath.replace(/\\/g, "/")
+            : "";
         if (!target) return allowedDecision();
         const conflicts = [];
         for (const session of otherActiveSessions(active, sessionId)) {
-          const sessionPath = typeof session.worktreePath === "string"
-            ? session.worktreePath.replace(/\\/g, "/")
-            : "";
+          const sessionPath =
+            typeof session.worktreePath === "string"
+              ? session.worktreePath.replace(/\\/g, "/")
+              : "";
           if (sessionPath && sessionPath === target) {
             conflicts.push({
               file: target,

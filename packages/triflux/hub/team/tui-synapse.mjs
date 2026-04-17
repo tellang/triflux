@@ -95,9 +95,9 @@ export function createMetricsCollector(opts = {}) {
   const { maxSamples = MAX_METRIC_SAMPLES } = opts;
 
   const metrics = {
-    tokenRates: [],     // 초당 토큰 소비율
-    latencies: [],      // 요청 지연시간 (ms)
-    successRates: [],   // 성공률 (0-1)
+    tokenRates: [], // 초당 토큰 소비율
+    latencies: [], // 요청 지연시간 (ms)
+    successRates: [], // 성공률 (0-1)
     eventCount: 0,
     lastEventAt: 0,
   };
@@ -127,7 +127,8 @@ export function createMetricsCollector(opts = {}) {
 
       // 성공률 (이벤트별 ok/fail)
       if (event.status) {
-        const ok = event.status === "ok" || event.status === "completed" ? 1 : 0;
+        const ok =
+          event.status === "ok" || event.status === "completed" ? 1 : 0;
         pushSample(metrics.successRates, ok);
       }
     },
@@ -136,7 +137,8 @@ export function createMetricsCollector(opts = {}) {
     snapshot() {
       const avgLatency =
         metrics.latencies.length > 0
-          ? metrics.latencies.reduce((a, b) => a + b, 0) / metrics.latencies.length
+          ? metrics.latencies.reduce((a, b) => a + b, 0) /
+            metrics.latencies.length
           : 0;
       const avgSuccessRate =
         metrics.successRates.length > 0
@@ -187,22 +189,30 @@ export function renderMetricsTier1(snapshot, width = 60) {
   // 토큰 스파크라인
   if (snapshot.tokenRates.length > 0) {
     const spark = sparkline(snapshot.tokenRates, 8, MOCHA.executing);
-    parts.push(`tok/s ${spark} ${color(String(snapshot.lastTokenRate), MOCHA.executing)}`);
+    parts.push(
+      `tok/s ${spark} ${color(String(snapshot.lastTokenRate), MOCHA.executing)}`,
+    );
   }
 
   // 지연시간
   if (snapshot.latencies.length > 0) {
     const latColor =
-      snapshot.avgLatency > 1000 ? MOCHA.fail :
-      snapshot.avgLatency > 500 ? MOCHA.partial : MOCHA.ok;
+      snapshot.avgLatency > 1000
+        ? MOCHA.fail
+        : snapshot.avgLatency > 500
+          ? MOCHA.partial
+          : MOCHA.ok;
     parts.push(`lat ${color(`${snapshot.avgLatency}ms`, latColor)}`);
   }
 
   // 성공률
   if (snapshot.successRates.length > 0) {
     const srColor =
-      snapshot.avgSuccessRate < 80 ? MOCHA.fail :
-      snapshot.avgSuccessRate < 95 ? MOCHA.partial : MOCHA.ok;
+      snapshot.avgSuccessRate < 80
+        ? MOCHA.fail
+        : snapshot.avgSuccessRate < 95
+          ? MOCHA.partial
+          : MOCHA.ok;
     parts.push(`ok ${color(`${snapshot.avgSuccessRate}%`, srColor)}`);
   }
 

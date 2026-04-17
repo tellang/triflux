@@ -352,7 +352,11 @@ export function createWtManager(opts = {}) {
     // 프로필이 지정된 경우 WT settings.json에 존재하는지 보장
     // headless가 workerCount 기반으로 이미 호출한 경우 _profileEnsured로 skip
     if (tab.profile && !_profileEnsured) {
-      try { ensureWtProfile(); } catch { /* 프로필 보장 실패해도 진행 */ }
+      try {
+        ensureWtProfile();
+      } catch {
+        /* 프로필 보장 실패해도 진행 */
+      }
     }
 
     pruneDeadTabs();
@@ -530,7 +534,11 @@ export function createWtManager(opts = {}) {
   async function splitPane(splitOpts = {}) {
     // 프로필이 지정된 경우 WT settings.json에 존재하는지 보장
     if (splitOpts.profile && !_profileEnsured) {
-      try { ensureWtProfile(); } catch { /* 프로필 보장 실패해도 진행 */ }
+      try {
+        ensureWtProfile();
+      } catch {
+        /* 프로필 보장 실패해도 진행 */
+      }
     }
 
     const direction = splitOpts.direction === "H" ? "-H" : "-V";

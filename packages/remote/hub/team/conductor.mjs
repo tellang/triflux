@@ -496,11 +496,12 @@ export function createConductor(opts = {}) {
     // cwd fallback으로 main working tree에 떨어진 경우 차단.
     if (session.config.branchGuard && spawnCwd) {
       try {
-        const r = spawnSync(
-          "git",
-          ["rev-parse", "--abbrev-ref", "HEAD"],
-          { cwd: spawnCwd, encoding: "utf8", windowsHide: true, timeout: 5_000 },
-        );
+        const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+          cwd: spawnCwd,
+          encoding: "utf8",
+          windowsHide: true,
+          timeout: 5_000,
+        });
         const curBranch = String(r.stdout || "").trim();
         if (curBranch === "main" || curBranch === "master") {
           eventLog.append("branch_guard_refused", {

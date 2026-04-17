@@ -1,6 +1,5 @@
 import { psmuxExec } from "./psmux.mjs";
-import { detectMultiplexer, tmuxExec } from "./session.mjs";
-import { hasWindowsTerminal } from "./session.mjs";
+import { detectMultiplexer, hasWindowsTerminal, tmuxExec } from "./session.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
 function sanitizeWindowTitle(value, fallback = "triflux") {
@@ -59,14 +58,18 @@ async function spawnWindowsTerminal(spec, opts = {}) {
         size: (split?.size || 0.5) * 100,
         title: safeTitle,
         cwd: safeCwd,
-        command: spec.args ? `${spec.command} ${spec.args.join(" ")}` : spec.command,
+        command: spec.args
+          ? `${spec.command} ${spec.args.join(" ")}`
+          : spec.command,
         profile: "triflux",
       });
     } else {
       await wt.createTab({
         title: safeTitle,
         cwd: safeCwd,
-        command: spec.args ? `${spec.command} ${spec.args.join(" ")}` : spec.command,
+        command: spec.args
+          ? `${spec.command} ${spec.args.join(" ")}`
+          : spec.command,
         profile: "triflux",
       });
     }
@@ -81,17 +84,23 @@ async function spawnMacTerminal(spec, opts = {}) {
   if (mux === "tmux") {
     try {
       const title = sanitizeWindowTitle(opts.title);
-      const command = spec.args ? `${spec.command} ${spec.args.join(" ")}` : spec.command;
+      const command = spec.args
+        ? `${spec.command} ${spec.args.join(" ")}`
+        : spec.command;
       tmuxExec(`new-window -n "${title}" "${command}"`);
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   }
   // tmux 없으면 기본 터미널
   try {
     const { exec } = await import("node:child_process");
     exec(`open -a Terminal`, { timeout: 5000 });
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 export function openHeadlessDashboardTarget(sessionName, opts = {}) {
@@ -106,7 +115,11 @@ export function openHeadlessDashboardTarget(sessionName, opts = {}) {
       const mux = detectMultiplexer();
       if (mux === "psmux") {
         psmuxExec(["select-pane", "-t", `${safeSession}:0.${workerNumber}`]);
-      } else if (mux === "tmux" || mux === "wsl-tmux" || mux === "git-bash-tmux") {
+      } else if (
+        mux === "tmux" ||
+        mux === "wsl-tmux" ||
+        mux === "git-bash-tmux"
+      ) {
         tmuxExec(`select-pane -t ${safeSession}:0.${workerNumber}`);
       }
     } catch {}

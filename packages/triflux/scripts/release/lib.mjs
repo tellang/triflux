@@ -291,13 +291,19 @@ export function buildReleaseNotes({
   ].join("\n");
 }
 
+// Windows 에서 `npm`, `gh` 같은 shim 스크립트를 `execFileSync` 로 직접 부르면
+// `.cmd` 확장자 미해석으로 ENOENT 가 발생한다. `shell: true` 로 실행하면
+// PATHEXT 가 자동 적용되어 모든 플랫폼에서 동일한 호출 시그니처가 유지된다.
+const IS_WINDOWS = process.platform === "win32";
+
 export function runCommand(
   command,
   args,
   { cwd = ROOT, execFileSyncFn = execFileSync } = {},
 ) {
-  execFileSyncFn(command, args, {
-    cwd,
-    stdio: "inherit",
-  });
+  const opts = { cwd, stdio: "inherit" };
+  if (IS_WINDOWS) {
+    opts.shell = true;
+  }
+  execFileSyncFn(command, args, opts);
 }
