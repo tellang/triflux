@@ -16,6 +16,21 @@
  * @property {string} [developerInstructions] - 개발자 지침
  * @property {string} [compactPrompt] - 컴팩션 프롬프트
  * @property {number} [timeoutMs] - MCP 요청 타임아웃(ms)
+ * @property {'mcp'|'app-server'} [transport] - Codex 전송 계층 선택 (팩토리 전용)
+ */
+
+/**
+ * Codex 워커 생성 옵션 (팩토리 레벨)
+ * @typedef {object} CodexWorkerFactoryOptions
+ * @property {'mcp'|'app-server'} [transport] - 'mcp' (기본) 또는 'app-server'
+ * @property {(publishMessage: object) => void|Promise<void>} [publishCallback] - app-server 전용 publish 후크
+ * @property {(path: string, opts?: object) => Promise<unknown>} [requestJsonFn] - 테스트/리팩터용 requestJson 주입
+ * @property {string} [command] - codex 실행 바이너리 경로
+ * @property {string[]} [args] - codex CLI 인자 배열
+ * @property {string} [cwd] - 워커 작업 디렉터리
+ * @property {Record<string, string>} [env] - 추가 환경 변수
+ * @property {{ name: string, version: string }} [clientInfo] - MCP/JSON-RPC clientInfo
+ * @property {number} [bootstrapTimeoutMs] - 핸드셰이크 타임아웃(ms)
  */
 
 /**
@@ -46,11 +61,12 @@
  * @property {() => Promise<void>} start
  * @property {() => Promise<void>} stop
  * @property {() => boolean} isReady
- * @property {string} type - 'codex' | 'gemini' | 'claude' | 'delegator'
+ * @property {'codex'|'codex-app-server'|'gemini'|'claude'|'delegator'} type
  */
 
 export const WORKER_TYPES = Object.freeze([
   "codex",
+  "codex-app-server",
   "gemini",
   "claude",
   "delegator",
