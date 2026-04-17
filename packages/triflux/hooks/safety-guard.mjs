@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 // hooks/safety-guard.mjs — PreToolUse:Bash 훅
 //
 // 위험한 Bash 명령을 사전 차단(exit 2)하거나 경고(additionalContext)한다.
@@ -8,6 +9,7 @@
 //   BLOCK (exit 2)  — 복구 불가능한 파괴적 명령
 //   WARN  (allow + context) — 주의가 필요한 명령
 
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -251,6 +253,60 @@ function hasSegmentInvocation(cmd, patterns) {
   });
 }
 
+function isGitCommitInvocation(command) {
+  const lines = command.split(/\n/);
+  let heredocDelimiter = null;
+  return lines.some((line) => {
+    if (heredocDelimiter !== null) {
+      if (line.trim() === heredocDelimiter) heredocDelimiter = null;
+      return false;
+    }
+
+    const heredocMatch = line.match(/<<['"]?(\w+)['"]?/);
+    if (heredocMatch) {
+      heredocDelimiter = heredocMatch[1];
+    }
+
+    return line
+      .split(/\s*(?:&&|;|\|\|)\s*/)
+      .some((segment) => /^\s*git\s+commit\b/i.test(segment.trim()));
+  });
+}
+
+function resolveHookCwd(input) {
+  return String(
+    input?.cwd ||
+      input?.tool_input?.cwd ||
+      process.env.CLAUDE_CWD ||
+      process.cwd() ||
+      process.env.PWD,
+  );
+}
+
+function getCurrentGitBranch(cwd) {
+  try {
+    const result = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (result.status !== 0) return "";
+    return String(result.stdout || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function isProtectedMainBranch(branch) {
+  return /^(main|master)$/i.test(String(branch || "").trim());
+}
+
+function isSwarmWorktreeCwd(cwd) {
+  return /(?:^|\/)\.codex-swarm\/wt-[^/]+(?:\/|$)/.test(
+    String(cwd || "").replace(/\\/g, "/"),
+  );
+}
+
 function blockCommand(message, command) {
   process.stderr.write(
     `${message}\n` +
@@ -275,6 +331,7 @@ function main() {
 
   const command = (input.tool_input?.command || "").trim();
   if (!command) process.exit(0);
+  const hookCwd = resolveHookCwd(input);
 
   // psmux 명령이 실제 CLI 호출인지 판별 (오탐 방지)
   // git commit 메시지, echo, grep, cat, heredoc 안의 텍스트는 무시
@@ -296,6 +353,20 @@ function main() {
 
   if (isAllowedPsmuxWrapperInvocation(command)) {
     process.exit(0);
+  }
+
+  const codexPrdActive = process.env.CODEX_PRD_ACTIVE === "1";
+  if (codexPrdActive && isGitCommitInvocation(command)) {
+    const branch = getCurrentGitBranch(hookCwd);
+    if (isProtectedMainBranch(branch)) {
+      const locationHint = isSwarmWorktreeCwd(hookCwd)
+        ? "swarm worktree 내부에서도 main/master 직접 commit은 금지됩니다."
+        : "현재 PWD가 swarm worktree가 아닙니다.";
+      blockCommand(
+        `[safety-guard] Codex PRD 실행 중 ${branch} 직접 commit 차단됨. ${locationHint}`,
+        command,
+      );
+    }
   }
 
   // 0.1. reflexion 적응형 패널티 — 이전 세션에서 차단된 패턴 사전 경고
