@@ -2,13 +2,24 @@
 // Minimal line-delimited JSON-RPC 2.0 client over stdio.
 // Replaces vscode-jsonrpc for the codex app-server transport.
 //
-// Contract (LOCKED for PRD-2):
+// Wire format (Issue #95 P1 #1): OpenAI App Server JSONL variant omits the
+// top-level `"jsonrpc": "2.0"` header on outbound frames. Inbound decode is
+// lenient — frames with or without the header are accepted for forward compat.
+//
+// Contract:
 //   new JsonRpcStdioClient({ stdin, stdout, onError, maxLineSize })
 //   request(method, params, timeoutMs=60000) -> Promise<result>
 //   notify(method, params) -> void
 //   onNotification(method, cb) -> unsubscribe()      ('*' = catch-all)
-//   close() -> void (idempotent)
+//   close(reason) -> void (idempotent; optional reason marks closing state)
 //   isOpen() -> boolean
+//
+// Lifecycle (Issue #95 P1 #3):
+//   State machine: running | closing | closed
+//   - `running` is the default. Parse/EOF/max-line errors reject in-flight
+//     requests and transition to `closed`.
+//   - `closing` is entered via `close("closing")` before a graceful shutdown;
+//     EOF in `closing` is a normal termination and does NOT fail-fast.
 //
 // AC18: any single line whose raw-byte length would exceed maxLineSize is
 // rejected at the stream layer (before readline emits it) to defend against
@@ -32,6 +43,29 @@ export class MaxLineSizeExceededError extends Error {
     this.name = "MaxLineSizeExceededError";
     this.size = size;
     this.max = max;
+  }
+}
+
+/**
+ * Thrown (and used to reject in-flight execute()) when the peer emits a
+ * malformed frame or the transport layer hits a structural error.
+ */
+export class JsonRpcProtocolError extends Error {
+  /** @param {string} message @param {{ cause?: unknown }} [options] */
+  constructor(message, options = {}) {
+    super(message, { cause: options.cause });
+    this.name = "JsonRpcProtocolError";
+  }
+}
+
+/**
+ * Thrown when the underlying stream closes unexpectedly (EOF outside `closing`).
+ */
+export class JsonRpcTransportError extends Error {
+  /** @param {string} message @param {{ cause?: unknown }} [options] */
+  constructor(message, options = {}) {
+    super(message, { cause: options.cause });
+    this.name = "JsonRpcTransportError";
   }
 }
 
@@ -66,9 +100,10 @@ export class JsonRpcStdioClient {
       ? maxLineSize
       : DEFAULT_MAX_LINE_SIZE;
 
-    this._open = true;
+    /** @type {'running'|'closing'|'closed'} */
+    this._state = "running";
     this._nextRequestId = 1;
-    /** @type {Map<number, { resolve: Function, reject: Function, timer: any }>} */
+    /** @type {Map<number, { resolve: Function, reject: Function, timer: any, method: string }>} */
     this._pendingRequests = new Map();
     /** @type {Map<string, Set<Function>>} */
     this._notificationHandlers = new Map();
@@ -84,9 +119,18 @@ export class JsonRpcStdioClient {
     this._rl = createInterface({ input: this._stdin, crlfDelay: Infinity });
     this._rl.on("line", (line) => this._handleLine(line));
     this._rl.on("close", () => {
-      // stdin EOF: stop accepting new requests but keep pending rejected by close().
-      if (this._open) {
-        this.close();
+      // P1 #3 fail-fast: EOF during `running` is a transport error. Pending
+      // requests are rejected with JsonRpcTransportError. EOF during `closing`
+      // is a normal shutdown — pending requests are rejected with the generic
+      // CLOSED_MESSAGE via close().
+      if (this._state === "running") {
+        const err = new JsonRpcTransportError(
+          "JSON-RPC stream closed unexpectedly (EOF during running state)",
+        );
+        this._emitError(err);
+        this._closeWith("closed", err);
+      } else if (this._state !== "closed") {
+        this._closeWith("closed");
       }
     });
   }
@@ -100,12 +144,14 @@ export class JsonRpcStdioClient {
    * @returns {Promise<any>}
    */
   request(method, params, timeoutMs = 60000) {
-    if (!this._open) {
+    if (this._state !== "running") {
       return Promise.reject(new Error(CLOSED_MESSAGE));
     }
 
     const id = this._nextRequestId++;
-    const frame = { jsonrpc: "2.0", id, method };
+    // P1 #1 wire framing: omit `jsonrpc: "2.0"` on outbound. Peer decode remains
+    // lenient (OpenAI App Server JSONL variant spec).
+    const frame = { id, method };
     if (params !== undefined) frame.params = params;
 
     return new Promise((resolve, reject) => {
@@ -120,7 +166,7 @@ export class JsonRpcStdioClient {
         if (typeof timer.unref === "function") timer.unref();
       }
 
-      this._pendingRequests.set(id, { resolve, reject, timer });
+      this._pendingRequests.set(id, { resolve, reject, timer, method });
 
       try {
         this._writeFrame(frame);
@@ -134,13 +180,14 @@ export class JsonRpcStdioClient {
 
   /**
    * Send a JSON-RPC notification (no id, no response expected).
-   * Silently drops if the client is closed.
+   * Silently drops if the client is not in `running`.
    * @param {string} method
    * @param {unknown} [params]
    */
   notify(method, params) {
-    if (!this._open) return;
-    const frame = { jsonrpc: "2.0", method };
+    if (this._state !== "running") return;
+    // P1 #1 wire framing: omit jsonrpc header (outbound).
+    const frame = { method };
     if (params !== undefined) frame.params = params;
     try {
       this._writeFrame(frame);
@@ -177,14 +224,51 @@ export class JsonRpcStdioClient {
   /**
    * Close the client: reject all pending requests, stop tracking input,
    * and release the readline interface. Idempotent.
+   *
+   * Optional `reason` = `"closing"` transitions to the intermediate `closing`
+   * state *without* terminating the readline loop, so a graceful shutdown can
+   * issue a final request (e.g. `thread/unsubscribe`) before EOF triggers
+   * full closure. Any subsequent EOF in `closing` is treated as normal.
+   *
+   * @param {string} [reason]
    */
-  close() {
-    if (!this._open) return;
-    this._open = false;
+  close(reason) {
+    if (this._state === "closed") return;
+
+    if (reason === "closing" && this._state === "running") {
+      this._state = "closing";
+      return;
+    }
+    this._closeWith("closed");
+  }
+
+  /**
+   * @returns {boolean} True if the client accepts new requests.
+   */
+  isOpen() {
+    return this._state === "running";
+  }
+
+  /**
+   * @returns {'running'|'closing'|'closed'}
+   */
+  getState() {
+    return this._state;
+  }
+
+  // --- internals ---------------------------------------------------------
+
+  _closeWith(target, rejectReason = null) {
+    if (this._state === "closed") return;
+    this._state = target;
+
+    const rejectErr = rejectReason instanceof Error
+      ? rejectReason
+      : new Error(CLOSED_MESSAGE);
 
     for (const [, pending] of this._pendingRequests) {
       if (pending.timer) clearTimeout(pending.timer);
-      pending.reject(new Error(CLOSED_MESSAGE));
+      pending.reject(rejectErr);
     }
     this._pendingRequests.clear();
 
@@ -200,22 +284,13 @@ export class JsonRpcStdioClient {
     }
   }
 
-  /**
-   * @returns {boolean} True if the client accepts new requests.
-   */
-  isOpen() {
-    return this._open;
-  }
-
-  // --- internals ---------------------------------------------------------
-
   _writeFrame(frame) {
     const line = `${JSON.stringify(frame)}\n`;
     this._stdout.write(line);
   }
 
   _trackRawBytes(chunk) {
-    if (this._oversized || !this._open) return;
+    if (this._oversized || this._state === "closed") return;
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     for (let i = 0; i < buf.length; i++) {
       if (buf[i] === 0x0a /* \n */) {
@@ -230,28 +305,37 @@ export class JsonRpcStdioClient {
           this._maxLineSize,
         );
         this._emitError(err);
-        this.close();
+        // P1 #3 fail-fast: oversized line → reject pending with the actual error
+        this._closeWith("closed", err);
         return;
       }
     }
   }
 
   _handleLine(line) {
-    if (!this._open) return;
+    if (this._state === "closed") return;
     if (line.length === 0) return;
 
     let frame;
     try {
       frame = JSON.parse(line);
     } catch (err) {
-      this._emitError(
-        new Error(`JSON-RPC parse error: ${err instanceof Error ? err.message : String(err)}`),
+      const pErr = new JsonRpcProtocolError(
+        `JSON-RPC parse error: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
+      this._emitError(pErr);
+      // P1 #3 fail-fast: malformed frame during running → reject in-flight + close
+      if (this._state === "running") this._closeWith("closed", pErr);
       return;
     }
 
     if (!frame || typeof frame !== "object") {
-      this._emitError(new Error("JSON-RPC protocol error: frame is not an object"));
+      const pErr = new JsonRpcProtocolError(
+        "JSON-RPC protocol error: frame is not an object",
+      );
+      this._emitError(pErr);
+      if (this._state === "running") this._closeWith("closed", pErr);
       return;
     }
 
@@ -270,8 +354,13 @@ export class JsonRpcStdioClient {
       return;
     }
 
-    // Unknown / malformed envelope — surface but keep loop alive.
-    this._emitError(new Error("JSON-RPC protocol error: unrecognized frame shape"));
+    // Unknown / malformed envelope — surface but keep loop alive during running.
+    // Fail-fast only on structural errors (JSON parse, EOF, max-line).
+    this._emitError(
+      new JsonRpcProtocolError(
+        "JSON-RPC protocol error: unrecognized frame shape",
+      ),
+    );
   }
 
   _dispatchResponse(frame) {

@@ -126,3 +126,47 @@ describe("worker factory — AC-11 regression", () => {
     assert.throws(() => createWorker("nonexistent"), /Unknown worker type/);
   });
 });
+
+describe("worker factory — Issue #95 P1 #4 approvalPolicy validation", () => {
+  it("11. app-server transport + approvalPolicy='never' is accepted", () => {
+    const worker = createWorker("codex", {
+      transport: "app-server",
+      approvalPolicy: "never",
+    });
+    assert.ok(worker instanceof CodexAppServerWorker);
+  });
+
+  it("12. app-server transport + approvalPolicy='on-failure' throws", () => {
+    assert.throws(
+      () =>
+        createWorker("codex", {
+          transport: "app-server",
+          approvalPolicy: "on-failure",
+        }),
+      /approvalPolicy='never'/,
+    );
+  });
+
+  it("13. app-server transport + approvalPolicy='untrusted' throws", () => {
+    assert.throws(
+      () =>
+        createWorker("codex-app-server", { approvalPolicy: "untrusted" }),
+      /approvalPolicy='never'/,
+    );
+  });
+
+  it("14. app-server transport + undefined approvalPolicy defaults OK", () => {
+    const worker = createWorker("codex", { transport: "app-server" });
+    assert.ok(worker instanceof CodexAppServerWorker);
+  });
+
+  it("15. mcp transport with non-never approvalPolicy is NOT blocked (no regression)", () => {
+    // The restriction only applies to the app-server transport; the legacy MCP
+    // path continues to accept any approvalPolicy value.
+    const worker = createWorker("codex", {
+      transport: "mcp",
+      approvalPolicy: "on-failure",
+    });
+    assert.ok(worker instanceof CodexMcpWorker);
+  });
+});

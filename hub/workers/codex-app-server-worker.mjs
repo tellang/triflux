@@ -12,7 +12,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import process from "node:process";
 
-import { JsonRpcStdioClient } from "./lib/jsonrpc-stdio.mjs";
+import {
+  JsonRpcProtocolError,
+  JsonRpcStdioClient,
+  JsonRpcTransportError,
+} from "./lib/jsonrpc-stdio.mjs";
 
 // ── Exit codes ──────────────────────────────────────────────────
 // Reuse codex-mcp convention so factory + retry logic can stay uniform.
@@ -23,6 +27,11 @@ export const CODEX_APP_SERVER_TIMEOUT_EXIT_CODE = 124;
 export const DEFAULT_CODEX_APP_SERVER_BOOTSTRAP_TIMEOUT_MS = 10_000;
 export const DEFAULT_CODEX_APP_SERVER_EXECUTION_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_UNKNOWN_METHOD_WARN_THRESHOLD = 5;
+/**
+ * How long stop() waits for `thread/unsubscribe` response before forcing
+ * SIGTERM. Keep small — unsubscribe is a best-effort unload signal.
+ */
+export const UNSUBSCRIBE_DEADLINE_MS = 2_000;
 
 // ── Error classes ───────────────────────────────────────────────
 
@@ -375,6 +384,16 @@ export class CodexAppServerWorker {
     this._publishMaxQueue = 64;
     /** @type {Function | null} */
     this._rejectBootstrap = null;
+    /**
+     * Issue #95 P1 #2 — in-flight execute fail-fast registry.
+     * Each execute() registers `(err) => void` here; child `exit`/`error`
+     * and JsonRpcTransport/ProtocolError hook drain this to reject immediately
+     * instead of waiting for timeoutMs.
+     * @type {Set<(err: Error) => void>}
+     */
+    this._inflightRejectors = new Set();
+    /** Unsubscribe for child exit/error listeners wired in start(). */
+    this._detachChildLifecycle = null;
   }
 
   isReady() {
@@ -460,6 +479,21 @@ export class CodexAppServerWorker {
       stdout: child.stdin,
       onError: (err) => {
         this._warn("jsonrpc error", { message: err?.message || String(err) });
+        // P1 #2 / P1 #3 fail-fast: structural protocol/transport errors during
+        // an active turn must reject in-flight execute() immediately instead of
+        // silently hanging until timeoutMs. Parse noise without in-flight work
+        // stays warn-only via _warn above.
+        if (
+          (err instanceof JsonRpcProtocolError ||
+            err instanceof JsonRpcTransportError) &&
+          this._inflightRejectors.size > 0
+        ) {
+          const transportErr = new CodexAppServerTransportError(
+            `codex app-server transport error: ${err.message}`,
+            { cause: err, stderr: this.serverStderr },
+          );
+          this._drainInflight(transportErr);
+        }
       },
     });
 
@@ -496,7 +530,56 @@ export class CodexAppServerWorker {
       );
     }
 
+    // P1 #2: post-bootstrap lifecycle listeners. Once the handshake succeeds
+    // (`ready=true`) the spawn-time `once("exit"/"error")` handlers are
+    // consumed by `_rejectBootstrap` — we now install long-lived listeners so
+    // that a mid-turn child crash rejects in-flight execute() immediately.
+    const onPostBootstrapError = (err) => {
+      const transportErr = new CodexAppServerTransportError(
+        `codex app-server 프로세스 오류 (mid-turn): ${err?.message || err}`,
+        { cause: err, stderr: this.serverStderr },
+      );
+      this._drainInflight(transportErr);
+    };
+    const onPostBootstrapExit = (code, signal) => {
+      this.ready = false;
+      if (this._inflightRejectors.size === 0) return;
+      const transportErr = new CodexAppServerTransportError(
+        `codex app-server 프로세스가 턴 중 종료됨 (code=${code}, signal=${signal || ""})`,
+        { stderr: this.serverStderr },
+      );
+      this._drainInflight(transportErr);
+    };
+    child.on("error", onPostBootstrapError);
+    child.on("exit", onPostBootstrapExit);
+    this._detachChildLifecycle = () => {
+      try {
+        child.removeListener("error", onPostBootstrapError);
+      } catch {}
+      try {
+        child.removeListener("exit", onPostBootstrapExit);
+      } catch {}
+    };
+
     this.ready = true;
+  }
+
+  /**
+   * Fail-fast hook: reject every registered in-flight execute() with `err`.
+   * Called on child exit/error, transport/protocol error, or stop().
+   * @param {Error} err
+   */
+  _drainInflight(err) {
+    if (this._inflightRejectors.size === 0) return;
+    const rejectors = [...this._inflightRejectors];
+    this._inflightRejectors.clear();
+    for (const reject of rejectors) {
+      try {
+        reject(err);
+      } catch {
+        /* never throw out of fail-fast path */
+      }
+    }
   }
 
   /**
@@ -575,6 +658,23 @@ export class CodexAppServerWorker {
       resolveResult = null;
       f(result);
     };
+
+    // P1 #2 fail-fast: register ourselves so transport/child lifecycle errors
+    // can reject the in-flight turn immediately.
+    const inflightReject = (err) => {
+      finish({
+        output: outputParts.join(""),
+        exitCode: CODEX_APP_SERVER_TRANSPORT_EXIT_CODE,
+        threadId,
+        sessionKey,
+        error: buildWorkerError(
+          "CODEX_APP_SERVER_TRANSPORT_ERROR",
+          err instanceof Error ? err.message : String(err),
+        ),
+        raw: null,
+      });
+    };
+    this._inflightRejectors.add(inflightReject);
 
     const unsubscribers = [];
     const offAll = () => {
@@ -778,12 +878,18 @@ export class CodexAppServerWorker {
 
     const result = await Promise.race([resultPromise, timeoutPromise]);
     offAll();
+    this._inflightRejectors.delete(inflightReject);
     return result;
   }
 
   /**
-   * Graceful shutdown — best-effort thread/unsubscribe, close JSON-RPC client,
-   * SIGTERM the child then SIGKILL after 1 s.
+   * Graceful shutdown — best-effort thread/unsubscribe (request, with timeout),
+   * close JSON-RPC client, SIGTERM the child then SIGKILL after 1 s.
+   *
+   * P1 #1 wire framing: `thread/unsubscribe` is sent as a **request** per the
+   * OpenAI App Server API overview (was notification in the original PR #86).
+   * P1 #2 lifecycle: we wait up to `UNSUBSCRIBE_DEADLINE_MS` for the response
+   * before proceeding to SIGTERM so the server can flush unload work.
    * @returns {Promise<void>}
    */
   async stop() {
@@ -794,6 +900,20 @@ export class CodexAppServerWorker {
     this.child = null;
     this.client = null;
     this.activeThreadId = null;
+
+    if (this._detachChildLifecycle) {
+      try {
+        this._detachChildLifecycle();
+      } catch {}
+      this._detachChildLifecycle = null;
+    }
+    // Reject any still-registered in-flight execute() with a generic transport
+    // error so callers don't hang past stop().
+    this._drainInflight(
+      new CodexAppServerTransportError("codex app-server stop() 호출됨", {
+        stderr: this.serverStderr,
+      }),
+    );
 
     if (this._rejectBootstrap) {
       try {
@@ -808,7 +928,25 @@ export class CodexAppServerWorker {
       if (activeThread) {
         try {
           if (client.isOpen()) {
-            client.notify("thread/unsubscribe", { threadId: activeThread });
+            // Enter `closing` state so the EOF that follows `close()` doesn't
+            // trip the fail-fast path. Send unsubscribe as a request and race
+            // it against a hard deadline — some servers (and test fakes) may
+            // never respond, and we must not hang stop().
+            const unsubPromise = client
+              .request(
+                "thread/unsubscribe",
+                { threadId: activeThread },
+                UNSUBSCRIBE_DEADLINE_MS,
+              )
+              .catch(() => {
+                /* best-effort; fall through to close + SIGTERM below */
+              });
+            client.close("closing");
+            const deadline = new Promise((resolve) => {
+              const t = setTimeout(resolve, UNSUBSCRIBE_DEADLINE_MS);
+              t.unref?.();
+            });
+            await Promise.race([unsubPromise, deadline]);
           }
         } catch {}
       }

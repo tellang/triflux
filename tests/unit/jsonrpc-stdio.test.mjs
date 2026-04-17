@@ -65,7 +65,9 @@ describe("JsonRpcStdioClient", () => {
 
     assert.equal(sentFrames.length, 1);
     const frame = sentFrames[0];
-    assert.equal(frame.jsonrpc, "2.0");
+    // Issue #95 P1 #1: outbound frames omit `jsonrpc` header (OpenAI App Server
+    // JSONL variant). Inbound decode remains lenient.
+    assert.equal("jsonrpc" in frame, false);
     assert.equal(frame.method, "ping");
     assert.deepEqual(frame.params, { hello: "world" });
     assert.equal(typeof frame.id, "number");
@@ -155,7 +157,11 @@ describe("JsonRpcStdioClient", () => {
     client.close();
   });
 
-  it("5. malformed JSON line → onError called once + client still operational", async () => {
+  it("5. malformed JSON line (no in-flight) → onError + close (fail-fast)", async () => {
+    // Issue #95 P1 #3: parse error during `running` now fails fast — the
+    // original contract ("keep loop alive") silently hung callers when the
+    // peer emitted garbage. New behavior: surface the error and close.
+    // (See P1#3 test above for the in-flight rejection path.)
     const { client, stdin, errors } = makePair();
 
     stdin.write("this-is-not-json\n");
@@ -164,15 +170,8 @@ describe("JsonRpcStdioClient", () => {
     assert.equal(errors.length, 1);
     assert.ok(errors[0] instanceof Error);
     assert.ok(/json|parse/i.test(errors[0].message));
-    assert.equal(client.isOpen(), true);
-
-    // Client still handles subsequent valid request/response
-    const pending = client.request("ping", {});
-    await new Promise((resolve) => setImmediate(resolve));
-    pushLine(stdin, { jsonrpc: "2.0", id: 1, result: "ok" });
-    assert.equal(await pending, "ok");
-
-    client.close();
+    // Client closes on structural parse failure.
+    assert.equal(client.isOpen(), false);
   });
 
   it("6. close() rejects all pending requests with CLOSED error", async () => {
@@ -241,7 +240,10 @@ describe("JsonRpcStdioClient", () => {
 
     const outcome = await pendingResult;
     assert.equal(outcome.kind, "rejected");
-    assert.match(outcome.err.message, /closed|max.*line/i);
+    // P1 #3 fail-fast: oversized line rejects pending with the concrete
+    // MaxLineSizeExceededError (not the generic CLOSED_MESSAGE) so callers
+    // can distinguish transport faults from clean shutdown.
+    assert.match(outcome.err.message, /max.*size|exceed/i);
   });
 
   it("9. per-request timeout → reject + pending entry cleaned", async () => {
@@ -267,17 +269,86 @@ describe("JsonRpcStdioClient", () => {
 
     assert.equal(sentFrames.length, 1);
     const frame = sentFrames[0];
-    assert.equal(frame.jsonrpc, "2.0");
+    // Issue #95 P1 #1: outbound notification omits `jsonrpc` header.
+    assert.equal("jsonrpc" in frame, false);
     assert.equal(frame.method, "event");
     assert.deepEqual(frame.params, { hello: "world" });
     assert.equal("id" in frame, false);
 
     // Server sending a stray response with any id must not throw or leak.
+    // Inbound with `jsonrpc` header is still accepted (lenient decode).
     pushLine(stdin, { jsonrpc: "2.0", id: 999, result: "ignored" });
     await new Promise((resolve) => setImmediate(resolve));
 
     // close() should resolve synchronously with no pending rejections
     client.close();
     assert.equal(client.isOpen(), false);
+  });
+
+  // ─── Issue #95 regression tests ─────────────────────────────────
+  it("P1#1 inbound frames without `jsonrpc` header are accepted (lenient)", async () => {
+    const { client, stdin, sentFrames } = makePair();
+    const pending = client.request("ping");
+    await new Promise((resolve) => setImmediate(resolve));
+    const frame = sentFrames[0];
+    // Inbound response with NO jsonrpc header
+    pushLine(stdin, { id: frame.id, result: { lenient: true } });
+    const result = await pending;
+    assert.deepEqual(result, { lenient: true });
+    client.close();
+  });
+
+  it("P1#3 EOF during `running` rejects pending + surfaces TransportError", async () => {
+    const errors = [];
+    const { client, stdin } = makePair({
+      onError: (err) => errors.push(err),
+    });
+    const pending = client.request("ping", null, 999_999);
+    await new Promise((resolve) => setImmediate(resolve));
+    // Simulate peer EOF without sending a response
+    stdin.emit("end");
+    stdin.emit("close");
+    await assert.rejects(pending, /closed/i);
+    assert.ok(
+      errors.some((e) => e.name === "JsonRpcTransportError"),
+      `expected JsonRpcTransportError, got: ${errors.map((e) => e.name).join(",")}`,
+    );
+    assert.equal(client.isOpen(), false);
+  });
+
+  it("P1#3 EOF during `closing` does NOT produce TransportError", async () => {
+    const errors = [];
+    const { client, stdin } = makePair({
+      onError: (err) => errors.push(err),
+    });
+    // Mark client closing BEFORE EOF
+    client.close("closing");
+    assert.equal(client.getState(), "closing");
+    stdin.emit("end");
+    stdin.emit("close");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      errors.filter((e) => e.name === "JsonRpcTransportError").length,
+      0,
+      "no TransportError expected during closing",
+    );
+    assert.equal(client.isOpen(), false);
+    assert.equal(client.getState(), "closed");
+  });
+
+  it("P1#3 parse error during `running` fails-fast on pending request", async () => {
+    const errors = [];
+    const { client, stdin } = makePair({
+      onError: (err) => errors.push(err),
+    });
+    const pending = client.request("ping", null, 999_999);
+    await new Promise((resolve) => setImmediate(resolve));
+    // Malformed JSON line
+    stdin.push("this is not json\n");
+    await assert.rejects(pending, /closed|parse/i);
+    assert.ok(
+      errors.some((e) => e.name === "JsonRpcProtocolError"),
+      `expected JsonRpcProtocolError, got: ${errors.map((e) => e.name).join(",")}`,
+    );
   });
 });

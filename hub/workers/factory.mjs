@@ -40,12 +40,28 @@ function defaultPublishCallback(requestJsonFn = requestJson) {
 /**
  * Construct a CodexAppServerWorker with a default publishCallback wired to
  * `requestJson('/bridge/publish', ...)` unless the caller supplied one.
+ *
+ * Issue #95 P1 #4 validation: the app-server transport does not yet implement
+ * the server-initiated approval / `tool/requestUserInput` round-trip. Any
+ * `approvalPolicy !== 'never'` would cause a codex turn to hang waiting for
+ * an approval response the worker cannot produce. Reject such configs at
+ * factory time with a clear, actionable message.
+ *
  * @param {object} [opts]
  */
 function createCodexWorker(opts = {}) {
   const { transport, requestJsonFn, publishCallback, ...rest } = opts;
 
   if (transport === "app-server") {
+    const policy = rest.approvalPolicy;
+    if (policy !== undefined && policy !== null && policy !== "never") {
+      throw new Error(
+        `codex app-server transport currently requires approvalPolicy='never' (got '${policy}'). ` +
+          "The server-initiated approval / tool/requestUserInput round-trip is not yet implemented. " +
+          "Set approvalPolicy='never' or use transport='mcp'. " +
+          "Tracked in follow-up issue.",
+      );
+    }
     return new CodexAppServerWorker({
       ...rest,
       publishCallback:
