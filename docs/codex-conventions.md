@@ -79,3 +79,12 @@ psmux kill-session -t "$s" 2>/dev/null
 | 브랜치 | `codex/{slug}` |
 | 정리 | 머지 완료 후 `git worktree remove` + `git worktree prune` |
 | 충돌 | 브랜치 존재 시 재사용, 경로 존재 시 `-v{timestamp}` suffix |
+
+## 4. MCP tool approval
+
+- **증상**: `codex exec`가 시작된 뒤 끝나지 않고 멈춘다. 특히 MCP tool 호출이 필요한 프롬프트에서 무응답 stall로 보인다.
+- **원인**: oh-my-codex 업데이트/재설치 후 `~/.codex/config.toml`의 `[mcp_servers.*.tools.*]` 블록이 `approval_mode = "approve"`로 복원될 수 있다. top-level `approval_mode`와 별개로, 이 per-tool 승인 대기는 `codex exec` subprocess에서 interactive approval을 기다리며 멈출 수 있다.
+- **워크어라운드**:
+  - 권장: 해당 MCP tool 블록의 `approval_mode`를 `auto`로 되돌린다.
+  - 즉시 우회: `codex exec ... --dangerously-bypass-approvals-and-sandbox`
+- **참고**: 자세한 재현, 검증, 복구 절차는 `docs/troubleshooting/issue-66-codex-mcp-approval.md` 참고.
