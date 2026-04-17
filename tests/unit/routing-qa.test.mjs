@@ -280,10 +280,18 @@ describe("headless: buildHeadlessCommand", async () => {
 
   it("프롬프트를 임시 파일에 저장 (셸 주입 방지)", () => {
     const cmd = buildHeadlessCommand("codex", "it's a test", "/tmp/r.txt");
-    assert.ok(
-      cmd.includes("Get-Content -Raw"),
-      `프롬프트가 파일에서 읽혀야 함: ${cmd}`,
-    );
+    // 플랫폼별 프롬프트 읽기 표현식 검증
+    if (process.platform === "win32") {
+      assert.ok(
+        cmd.includes("Get-Content -Raw"),
+        `프롬프트가 파일에서 읽혀야 함 (Windows): ${cmd}`,
+      );
+    } else {
+      assert.ok(
+        cmd.includes('$(cat '),
+        `프롬프트가 파일에서 읽혀야 함 (Unix): ${cmd}`,
+      );
+    }
     assert.ok(
       cmd.includes("prompt-"),
       `프롬프트 파일 경로가 포함되어야 함: ${cmd}`,

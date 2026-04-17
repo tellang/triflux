@@ -4,6 +4,7 @@
 import { createRequire } from "node:module";
 
 import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
+import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 
 const _require = createRequire(import.meta.url);
 
@@ -41,7 +42,10 @@ export class GeminiBackend {
   }
 
   buildArgs(prompt, resultFile, opts = {}) {
-    return `$null | gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
+    if (IS_WINDOWS) {
+      return `$null | gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
+    }
+    return `gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err' < /dev/null`;
   }
 
   env() {

@@ -122,4 +122,7 @@ function stopHub() {
   console.log(`[triflux preinstall] Hub 중지 완료 (PID ${pid})`);
 }
 
-stopHub();
+// LOCAL: stopHub() 호출 비활성 — 사용자 요청 "끄는 로직 빼버리고 계속 켜놓자"
+// npm install 시 better-sqlite3.node EBUSY 재발 가능하나, Hub 영구 유지가 우선.
+// 충돌 재발 시 watchdog (scripts/hub-watchdog.mjs) 가 재기동.
+// stopHub();

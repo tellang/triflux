@@ -174,6 +174,12 @@ export function killProcess(pid, options = {}) {
       return true;
     }
 
+    // macOS/Linux: tree 옵션이면 pkill -P로 자식 프로세스 먼저 종료
+    if (tree) {
+      try {
+        execSync(`pkill -P ${numericPid}`, { stdio: "ignore", timeout: 3000 });
+      } catch { /* 자식 없으면 무시 */ }
+    }
     process.kill(numericPid, signal);
     return true;
   } catch {

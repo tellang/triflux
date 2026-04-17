@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { requestJson } from "@triflux/core/hub/bridge.mjs";
 import { getMaxSpawnPerSec } from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
+import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 import { getBackend } from "./backend.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
@@ -204,8 +205,10 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   writeFileSync(promptFile, fullPrompt, "utf8");
 
   const backend = getBackend(resolvedCli);
-  const promptExpr = `(Get-Content -Raw '${promptFile}')`;
-  const backendCommand = backend.buildArgs(promptExpr, resultFile, {
+  // 플랫폼 분기: PowerShell은 Get-Content, bash/zsh는 cat
+  const promptExpr = IS_WINDOWS
+    ? `(Get-Content -Raw '${promptFile}')`
+    : `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;  const backendCommand = backend.buildArgs(promptExpr, resultFile, {
     ...opts,
     model,
   });
@@ -218,7 +221,11 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   }
   if (!safeCwd) return backendCommand;
 
-  return `Set-Location -LiteralPath '${escapePwshSingleQuoted(safeCwd)}'; ${backendCommand}`;
+  // 플랫폼 분기: PowerShell은 Set-Location, bash/zsh는 cd
+  if (IS_WINDOWS) {
+    return `Set-Location -LiteralPath '${escapePwshSingleQuoted(safeCwd)}'; ${backendCommand}`;
+  }
+  return `cd '${safeCwd.replace(/'/g, "'\\''")}' && ${backendCommand}`;
 }
 
 /**
