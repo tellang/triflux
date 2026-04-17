@@ -13,7 +13,7 @@ const RED = "\u001b[91m";
 const YELLOW = "\u001b[93m";
 const GRAY = "\u001b[90m";
 
-function parseFlags(args) {
+export function parseFlags(args) {
   const flags = {
     dryRun: false,
     planOnly: false,
@@ -21,6 +21,7 @@ function parseFlags(args) {
     filter: null,
     maxRestarts: 2,
     logsDir: null,
+    baseBranch: "main",
   };
   const positional = [];
   for (let i = 0; i < args.length; i++) {
@@ -30,7 +31,13 @@ function parseFlags(args) {
     else if (a === "--filter") flags.filter = args[++i];
     else if (a === "--max-restarts") flags.maxRestarts = Number(args[++i]) || 2;
     else if (a === "--logs-dir") flags.logsDir = args[++i];
-    else if (a.startsWith("--")) {
+    else if (a === "--base") {
+      const v = args[++i];
+      if (!v || /\s/.test(v)) {
+        throw new Error("--base requires a non-empty branch name without whitespace");
+      }
+      flags.baseBranch = v;
+    } else if (a.startsWith("--")) {
       // ignore unknown flags silently
     } else {
       positional.push(a);
@@ -97,7 +104,7 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
   const prdPath = positional[0];
   if (!prdPath) {
     throw new Error(
-      "PRD path required. Usage: tfx swarm <prd-path> [--dry-run] [--filter <shard>] [--json]",
+      "PRD path required. Usage: tfx swarm <prd-path> [--dry-run] [--filter <shard>] [--json] [--base <branch>]",
     );
   }
   const absPrd = resolve(prdPath);
@@ -123,6 +130,7 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
     workdir: process.cwd(),
     logsDir,
     maxRestarts: flags.maxRestarts,
+    baseBranch: flags.baseBranch,
   });
 
   hyper.on("shardLaunched", ({ shard, sessionId, remote }) => {
