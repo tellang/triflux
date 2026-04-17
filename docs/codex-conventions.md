@@ -31,7 +31,7 @@ codex exec "$PROMPT" --dangerously-bypass-approvals-and-sandbox
 | interactive `codex` | config.toml `approval_mode` 존중 |
 | `codex exec` | config.toml 무시 → `--dangerously-bypass-approvals-and-sandbox` 필수 |
 | `--full-auto` 플래그 | 사용 금지. config.toml `sandbox`와 충돌 |
-| `--profile` | interactive만 지원. `codex exec`는 미지원 |
+| `--profile` | interactive + `codex exec` 모두 지원 (codex 0.121.0 기준, `-p, --profile <CONFIG_PROFILE>`). `tfx-route.sh` 가 실제로 `exec --profile` 사용 중 |
 
 ## 3. PRD 작성 규칙
 
