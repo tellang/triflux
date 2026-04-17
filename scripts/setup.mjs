@@ -1237,7 +1237,12 @@ export async function runDeferred(stdinData) {
       changed = true;
     }
 
-    // ── PreToolUse 훅: headless-guard (auto-route) ──
+    // ── PreToolUse 훅: headless-guard + tfx-gate-activate ──
+    // orchestrator 가 registry 기반으로 omc-headless-guard / omc-tfx-gate-activate 를
+    // 이미 디스패치하므로, `*` orchestrator entry 와 별도로 등록된 직접 entry 는
+    // 2배 발화를 유발한다 (#76). 이 블록은 orchestrator 유무에 따라 다르게 동작한다:
+    //   - orchestrator 가 있으면: 직접 등록된 중복 entry 를 제거 (prune).
+    //   - orchestrator 가 없으면: legacy ADD 경로로 직접 entry 주입 (구 설치 fallback).
     if (!Array.isArray(s.hooks.PreToolUse)) s.hooks.PreToolUse = [];
 
     const guardScriptPath = join(
@@ -1245,85 +1250,110 @@ export async function runDeferred(stdinData) {
       "scripts",
       "headless-guard-fast.sh",
     ).replace(/\\/g, "/");
-    const hasGuardHook = s.hooks.PreToolUse.some(
-      (entry) =>
-        Array.isArray(entry.hooks) &&
-        entry.hooks.some(
-          (h) =>
-            typeof h.command === "string" &&
-            h.command.includes("headless-guard"),
-        ),
-    );
-
-    if (!hasGuardHook && existsSync(guardScriptPath.replace(/\//g, "\\"))) {
-      s.hooks.PreToolUse.push({
-        matcher: "Bash|Agent",
-        hooks: [
-          {
-            type: "command",
-            command: `bash "${guardScriptPath}"`,
-            timeout: 3,
-          },
-        ],
-      });
-      changed = true;
-    } else if (hasGuardHook) {
-      // 기존 훅 경로를 동기화된 경로로 업데이트
-      for (const entry of s.hooks.PreToolUse) {
-        if (!Array.isArray(entry.hooks)) continue;
-        for (const h of entry.hooks) {
-          if (
-            typeof h.command === "string" &&
-            h.command.includes("headless-guard") &&
-            !h.command.includes(guardScriptPath)
-          ) {
-            h.command = `bash "${guardScriptPath}"`;
-            changed = true;
-          }
-        }
-      }
-    }
-
-    // ── PreToolUse 훅: tfx-gate-activate (Skill 감지 → A+B gate) ──
     const gateScriptPath = join(
       CLAUDE_DIR,
       "scripts",
       "tfx-gate-activate.mjs",
     ).replace(/\\/g, "/");
-    const hasGateHook = s.hooks.PreToolUse.some(
+
+    const hasPreToolUseOrchestrator = s.hooks.PreToolUse.some(
       (entry) =>
+        entry.matcher === "*" &&
         Array.isArray(entry.hooks) &&
         entry.hooks.some(
           (h) =>
             typeof h.command === "string" &&
-            h.command.includes("tfx-gate-activate"),
+            h.command.includes("hook-orchestrator.mjs"),
         ),
     );
 
-    if (!hasGateHook && existsSync(gateScriptPath.replace(/\//g, "\\"))) {
-      s.hooks.PreToolUse.push({
-        matcher: "Skill",
-        hooks: [
-          {
-            type: "command",
-            command: `node "${gateScriptPath}"`,
-            timeout: 2,
-          },
-        ],
-      });
-      changed = true;
-    } else if (hasGateHook) {
-      for (const entry of s.hooks.PreToolUse) {
-        if (!Array.isArray(entry.hooks)) continue;
-        for (const h of entry.hooks) {
-          if (
+    if (hasPreToolUseOrchestrator) {
+      // prune: 직접 등록된 headless-guard / tfx-gate-activate 전용 entry 제거
+      const DUP_MARKERS = ["headless-guard", "tfx-gate-activate"];
+      const before = s.hooks.PreToolUse.length;
+      s.hooks.PreToolUse = s.hooks.PreToolUse.filter((entry) => {
+        if (entry.matcher === "*") return true;
+        if (!Array.isArray(entry.hooks) || entry.hooks.length === 0)
+          return true;
+        const allDup = entry.hooks.every(
+          (h) =>
             typeof h.command === "string" &&
-            h.command.includes("tfx-gate-activate") &&
-            !h.command.includes(gateScriptPath)
-          ) {
-            h.command = `node "${gateScriptPath}"`;
-            changed = true;
-          }
+            !h.command.includes("hook-orchestrator") &&
+            DUP_MARKERS.some((m) => h.command.includes(m)),
+        );
+        return !allDup;
+      });
+      if (s.hooks.PreToolUse.length !== before) changed = true;
+    } else {
+      // legacy: orchestrator 부재 시 직접 entry 주입
+      const hasGuardHook = s.hooks.PreToolUse.some(
+        (entry) =>
+          Array.isArray(entry.hooks) &&
+          entry.hooks.some(
+            (h) =>
+              typeof h.command === "string" &&
+              h.command.includes("headless-guard"),
+          ),
+      );
+
+      if (!hasGuardHook && existsSync(guardScriptPath.replace(/\//g, "\\"))) {
+        s.hooks.PreToolUse.push({
+          matcher: "Bash|Agent",
+          hooks: [
+            {
+              type: "command",
+              command: `bash "${guardScriptPath}"`,
+              timeout: 3,
+            },
+          ],
+        });
+        changed = true;
+      }
+
+      const hasGateHook = s.hooks.PreToolUse.some(
+        (entry) =>
+          Array.isArray(entry.hooks) &&
+          entry.hooks.some(
+            (h) =>
+              typeof h.command === "string" &&
+              h.command.includes("tfx-gate-activate"),
+          ),
+      );
+
+      if (!hasGateHook && existsSync(gateScriptPath.replace(/\//g, "\\"))) {
+        s.hooks.PreToolUse.push({
+          matcher: "Skill",
+          hooks: [
+            {
+              type: "command",
+              command: `node "${gateScriptPath}"`,
+              timeout: 2,
+            },
+          ],
+        });
+        changed = true;
+      }
+    }
+
+    // 남아있는 직접 entry 경로 동기화 (legacy 또는 외부 등록 대응)
+    for (const entry of s.hooks.PreToolUse) {
+      if (!Array.isArray(entry.hooks)) continue;
+      for (const h of entry.hooks) {
+        if (typeof h.command !== "string") continue;
+        if (h.command.includes("hook-orchestrator")) continue;
+        if (
+          h.command.includes("headless-guard") &&
+          !h.command.includes(guardScriptPath)
+        ) {
+          h.command = `bash "${guardScriptPath}"`;
+          changed = true;
+        }
+        if (
+          h.command.includes("tfx-gate-activate") &&
+          !h.command.includes(gateScriptPath)
+        ) {
+          h.command = `node "${gateScriptPath}"`;
+          changed = true;
         }
       }
     }
