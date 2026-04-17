@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
-import { syncHubMcpSettings } from "../../scripts/sync-hub-mcp-settings.mjs";
+import {
+  syncCodexHubUrl,
+  syncHubMcpSettings,
+} from "../../scripts/sync-hub-mcp-settings.mjs";
 
 const HUB_URL = "http://127.0.0.1:27888/mcp";
 
@@ -241,5 +244,161 @@ describe("sync-hub-mcp-settings", () => {
       trust: ["project-a"],
       timeout: 15000,
     });
+  });
+});
+
+describe("syncCodexHubUrl", () => {
+  const originalHome = process.env.HOME;
+  let homeDir;
+
+  function codexPath(...segments) {
+    return join(homeDir, ...segments);
+  }
+
+  beforeEach(() => {
+    homeDir = mkdtempSync(join(tmpdir(), "tfx-codex-sync-"));
+    process.env.HOME = homeDir;
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+
+    if (homeDir && existsSync(homeDir)) {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("case 1: config.toml이 없으면 생성하지 않고 skip한다", async () => {
+    const configPath = codexPath(".codex", "config.toml");
+    const result = await syncCodexHubUrl({
+      hubUrl: HUB_URL,
+      codexConfigPath: configPath,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, []);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.skipped, [configPath]);
+    assert.equal(existsSync(configPath), false);
+  });
+
+  it("case 2: tfx-hub.url이 이미 일치하면 skipped에 포함한다", async () => {
+    const configPath = codexPath(".codex", "config.toml");
+    writeRaw(
+      configPath,
+      `[mcp_servers.tfx-hub]\nurl = "${HUB_URL}"\nenabled = true\n`,
+    );
+
+    const before = readFileSync(configPath, "utf8");
+    const result = await syncCodexHubUrl({
+      hubUrl: HUB_URL,
+      codexConfigPath: configPath,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, []);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.skipped, [configPath]);
+    assert.equal(readFileSync(configPath, "utf8"), before);
+  });
+
+  it("case 3: tfx-hub.url이 다르면 해당 라인만 갱신하고 다른 설정은 보존한다", async () => {
+    const configPath = codexPath(".codex", "config.toml");
+    writeRaw(
+      configPath,
+      [
+        "[mcp_servers.tfx-hub]",
+        'url = "http://127.0.0.1:39999/mcp" # stale port',
+        "enabled = true",
+        "",
+        "[profiles.default]",
+        'model = "gpt-5.4"',
+        "",
+      ].join("\n"),
+    );
+
+    const result = await syncCodexHubUrl({
+      hubUrl: HUB_URL,
+      codexConfigPath: configPath,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, [configPath]);
+    assert.deepEqual(result.errors, []);
+    assert.equal(
+      readFileSync(configPath, "utf8"),
+      [
+        "[mcp_servers.tfx-hub]",
+        `url = "${HUB_URL}" # stale port`,
+        "enabled = true",
+        "",
+        "[profiles.default]",
+        'model = "gpt-5.4"',
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("case 4: dryRun=true면 updated에는 포함되지만 파일은 실제로 바뀌지 않는다", async () => {
+    const configPath = codexPath(".codex", "config.toml");
+    writeRaw(
+      configPath,
+      `[mcp_servers.tfx-hub]\nurl = "http://127.0.0.1:18888/mcp"\n`,
+    );
+
+    const before = readFileSync(configPath, "utf8");
+    const result = await syncCodexHubUrl({
+      hubUrl: HUB_URL,
+      codexConfigPath: configPath,
+      dryRun: true,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, [configPath]);
+    assert.deepEqual(result.errors, []);
+    assert.equal(readFileSync(configPath, "utf8"), before);
+  });
+
+  it("case 5: tfx-hub 섹션이 없으면 생성하지 않고 skip한다", async () => {
+    const configPath = codexPath(".codex", "config.toml");
+    writeRaw(
+      configPath,
+      `[mcp_servers.other]\nurl = "http://127.0.0.1:3000/mcp"\n`,
+    );
+
+    const before = readFileSync(configPath, "utf8");
+    const result = await syncCodexHubUrl({
+      hubUrl: HUB_URL,
+      codexConfigPath: configPath,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, []);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.skipped, [configPath]);
+    assert.equal(readFileSync(configPath, "utf8"), before);
+  });
+
+  it("case 6: tfx-hub.url 라인이 없으면 errors에 기록하고 원본 파일을 보존한다", async () => {
+    const configPath = codexPath(".codex", "config.toml");
+    writeRaw(configPath, `[mcp_servers.tfx-hub]\nenabled = true\n`);
+
+    const before = readFileSync(configPath, "utf8");
+    const result = await syncCodexHubUrl({
+      hubUrl: HUB_URL,
+      codexConfigPath: configPath,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, []);
+    assert.deepEqual(result.errors, [
+      { path: configPath, reason: "missing tfx-hub url" },
+    ]);
+    assert.deepEqual(result.skipped, []);
+    assert.equal(readFileSync(configPath, "utf8"), before);
   });
 });

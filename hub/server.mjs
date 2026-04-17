@@ -299,6 +299,9 @@ async function syncHubMcpSettingsIfAvailable({ hubUrl }) {
       return;
     }
     await mod.syncHubMcpSettings({ hubUrl });
+    if (typeof mod?.syncCodexHubUrl === "function") {
+      await mod.syncCodexHubUrl({ hubUrl });
+    }
   } catch (error) {
     const message = error?.message || String(error);
     if (error?.code === "ERR_MODULE_NOT_FOUND") {
