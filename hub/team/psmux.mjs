@@ -834,10 +834,12 @@ function killOrphanPipeHelpers(sessionName) {
     } catch { /* 프로세스 없으면 pgrep exit 1 — 무시 */ }
     return;
   }
-  const safeSession = sanitizePathPart(sessionName);
+  // Windows: escape regex metacharacters and require a trailing path
+  // boundary so sibling sessions (e.g. `<session>2-...`) don't match.
+  const safeSession = escapeRegex(sanitizePathPart(sessionName));
   try {
     const output = childProcess.execSync(
-      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'pipe-pane-capture' -and $_.CommandLine -match 'tfx-headless[/\\\\]${safeSession}' } | Select-Object -ExpandProperty ProcessId"`,
+      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'pipe-pane-capture' -and $_.CommandLine -match 'tfx-headless[/\\\\]${safeSession}[-./\\\\]' } | Select-Object -ExpandProperty ProcessId"`,
       {
         encoding: "utf8",
         timeout: 8000,
@@ -894,7 +896,8 @@ function killOrphanMcpProcesses(sessionName) {
     } catch {}
     return;
   }
-  const safeSession = sanitizePathPart(sessionName);
+  // Windows: escape + trailing boundary (mirror of the macOS branch).
+  const safeSession = escapeRegex(sanitizePathPart(sessionName));
 
   // Hub PID 보호 — Hub 프로세스를 고아로 잘못 식별하지 않도록
   let hubPid = null;
@@ -915,7 +918,7 @@ function killOrphanMcpProcesses(sessionName) {
   try {
     // 세션 결과 디렉토리 패턴으로 MCP 서버 프로세스 식별
     const output = childProcess.execSync(
-      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'tfx-headless[/\\\\]${safeSession}' } | Select-Object -ExpandProperty ProcessId"`,
+      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'tfx-headless[/\\\\]${safeSession}[-./\\\\]' } | Select-Object -ExpandProperty ProcessId"`,
       {
         encoding: "utf8",
         timeout: 8000,
