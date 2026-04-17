@@ -71,7 +71,7 @@
   "author": "tellang",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.6.2",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
