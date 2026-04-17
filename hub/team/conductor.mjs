@@ -81,6 +81,29 @@ const DEFAULT_GRACE_MS = 10_000;
  */
 function swapAuthFile(lease, agent, sessionId, eventLog) {
   if (lease?.mode !== "auth" || !lease.authFile) return true;
+  if (
+    agent === "codex" &&
+    lease.id &&
+    broker &&
+    typeof broker.syncAuthToSource === "function"
+  ) {
+    const result = broker.syncAuthToSource(lease.id);
+    if (result?.copied || result?.reason === "up_to_date") {
+      eventLog.append("auth_copy", {
+        session: sessionId,
+        agent,
+        dest: result.sourcePath,
+        reason: result.reason,
+      });
+      return true;
+    }
+    eventLog.append("auth_copy_error", {
+      session: sessionId,
+      dest: result?.sourcePath || join(homedir(), ".codex", "auth.json"),
+      error: result?.reason || "sync_failed",
+    });
+    return false;
+  }
   const dests =
     agent === "codex"
       ? [join(homedir(), ".codex", "auth.json")]
