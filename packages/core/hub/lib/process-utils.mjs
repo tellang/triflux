@@ -102,7 +102,11 @@ function killWithEscalation(orphanPids, procMap) {
           }
         }
       }
-      killProcess(pid, { signal: "SIGKILL", force: true });
+      killProcess(pid, {
+        signal: "SIGKILL",
+        force: true,
+        tree: IS_WINDOWS,
+      });
     }
     if (!isPidAlive(pid)) killed++;
   }

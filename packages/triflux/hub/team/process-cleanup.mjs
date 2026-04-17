@@ -12,10 +12,17 @@ const execFileAsync = promisify(nodeExecFile);
 const TARGET_PROCESS_NAMES = ["node", "python", "python3"];
 const SIGTERM_GRACE_MS = 5000;
 
-function forceKillPid(pid) {
-  if (IS_WINDOWS) {
+export function forceKillPid(
+  pid,
+  {
+    isWindows = IS_WINDOWS,
+    execFileSyncFn = execFileSync,
+    killFn = process.kill,
+  } = {},
+) {
+  if (isWindows) {
     try {
-      execFileSync("taskkill", ["/F", "/PID", String(pid)], {
+      execFileSyncFn("taskkill", ["/F", "/T", "/PID", String(pid)], {
         stdio: "ignore",
         timeout: 5000,
         windowsHide: true,
@@ -23,7 +30,7 @@ function forceKillPid(pid) {
       return;
     } catch (taskkillError) {
       try {
-        process.kill(pid);
+        killFn(pid);
         return;
       } catch {
         throw taskkillError;
@@ -31,7 +38,7 @@ function forceKillPid(pid) {
     }
   }
 
-  process.kill(pid, "SIGKILL");
+  killFn(pid, "SIGKILL");
 }
 
 // cmdLine 패턴 기반 화이트리스트 (고아 후보에서 제외)
@@ -296,6 +303,12 @@ export async function findOrphanProcesses(opts = {}) {
 export function createProcessCleanup(opts = {}) {
   const execFileFn = opts.execFileFn ?? execFileAsync;
   const dryRun = opts.dryRun ?? false;
+  const isWindows = opts.isWindows ?? IS_WINDOWS;
+  const execFileSyncFn = opts.execFileSyncFn ?? execFileSync;
+  const killFn = opts.killFn ?? process.kill;
+  const sleepFn =
+    opts.sleepFn ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const sigtermGraceMs = opts.sigtermGraceMs ?? SIGTERM_GRACE_MS;
 
   let lastOrphans = [];
 
@@ -332,16 +345,16 @@ export function createProcessCleanup(opts = {}) {
       lastOrphans.map(async (p) => {
         try {
           // SIGTERM
-          process.kill(p.pid, "SIGTERM");
+          killFn(p.pid, "SIGTERM");
 
           // 5초 대기 후 살아있으면 강제 종료
-          await new Promise((resolve) => setTimeout(resolve, SIGTERM_GRACE_MS));
+          await sleepFn(sigtermGraceMs);
 
           try {
             // 프로세스가 아직 살아있는지 확인 (signal 0)
-            process.kill(p.pid, 0);
+            killFn(p.pid, 0);
             // 여전히 살아있음 → Windows는 taskkill/process.kill, 그 외는 SIGKILL
-            forceKillPid(p.pid);
+            forceKillPid(p.pid, { isWindows, execFileSyncFn, killFn });
           } catch {
             // ESRCH: 이미 종료됨 — 정상
           }
