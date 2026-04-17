@@ -65,7 +65,13 @@ export function detectTerminal() {
     return _terminalCache;
   }
 
-  if (process.env.TERM_PROGRAM === "iTerm.app") {
+  if (process.env.TERM_PROGRAM === "WarpTerminal") {
+    _terminalCache = { name: "warp", hasWt: false };
+  } else if (process.env.TERM_PROGRAM === "Alacritty") {
+    _terminalCache = { name: "alacritty", hasWt: false };
+  } else if (process.env.KITTY_WINDOW_ID) {
+    _terminalCache = { name: "kitty", hasWt: false };
+  } else if (process.env.TERM_PROGRAM === "iTerm.app") {
     _terminalCache = { name: "iterm2", hasWt: false };
   } else if (process.env.TERM_PROGRAM === "Apple_Terminal") {
     _terminalCache = { name: "terminal-app", hasWt: false };

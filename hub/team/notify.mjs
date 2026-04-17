@@ -209,11 +209,30 @@ function buildToastScript(title, body) {
 async function sendToast(event, config, deps) {
   if (!config.enabled)
     return createResult("toast", "skipped", { reason: "disabled" });
+  const execFileFn = deps.execFile || execFile;
+
+  // macOS: osascript 네이티브 알림
+  if ((deps.platform || process.platform) === "darwin") {
+    const title = formatEventTitle(event);
+    const body = formatEventBody(event);
+    const safeTitle = title.replace(/\\/g, '\\\\').replace(/'/g, "'\"'\"'");
+    const safeBody = body.replace(/\\/g, '\\\\').replace(/'/g, "'\"'\"'");
+    try {
+      await execFileAsync(
+        "osascript",
+        ["-e", `display notification "${safeBody}" with title "${safeTitle}"`],
+        { timeout: config.timeoutMs || 5000 },
+        execFileFn,
+      );
+      return createResult("toast", "sent", { command: "osascript" });
+    } catch (error) {
+      return createResult("toast", "failed", { error: error.message });
+    }
+  }
+
   if ((deps.platform || process.platform) !== "win32") {
     return createResult("toast", "skipped", { reason: "unsupported-platform" });
   }
-
-  const execFileFn = deps.execFile || execFile;
   const candidates = config.command
     ? [config.command]
     : Array.isArray(deps.powerShellCandidates) &&
