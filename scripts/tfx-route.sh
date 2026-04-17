@@ -1230,7 +1230,14 @@ resolve_mcp_policy() {
     _gemini_servers _codex_flags CODEX_CONFIG_JSON _phase <<< "$_raw"
   IFS=',' read -r -a GEMINI_ALLOWED_SERVERS <<< "$_gemini_servers"
   IFS=',' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
-  [[ -n "$_phase" ]] && MCP_PIPELINE_PHASE="$_phase"
+  # set -e 환경에서 함수 마지막 명령이 `[[ ... ]] && ...` 이면
+  # 조건 불일치(= phase 없음)만으로 함수 전체가 실패 처리되어 route가 즉시 종료된다.
+  # implement/default 같은 일반 경로는 phase를 비우는 것이 정상이다.
+  if [[ -n "$_phase" ]]; then
+    MCP_PIPELINE_PHASE="$_phase"
+  fi
+
+  return 0
 }
 
 get_claude_model() {
