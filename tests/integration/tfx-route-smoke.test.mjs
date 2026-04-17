@@ -199,6 +199,20 @@ describe("tfx-route.sh — TFX_NO_CLAUDE_NATIVE 유효성 검증", () => {
 });
 
 describe("tfx-route.sh — Codex MCP transport", () => {
+  it("codex alias + implement(long prompt)에서도 empty phase 때문에 조기 종료되면 안 된다", () => {
+    const longPrompt = `echo hi ${"x".repeat(1800)}`;
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" codex '${longPrompt}' implement`,
+      fixtureEnv({ FAKE_CODEX_MODE: "exec" }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /resolved_profile=executor/);
+    assert.match(out(result), /type=codex/);
+    assert.match(out(result), /agent=codex/);
+    assert.match(out(result), /EXEC:echo hi/);
+  });
+
   it("TFX_CODEX_TRANSPORT=auto 기본값에서 MCP가 가능하면 MCP 경로를 우선 사용한다", () => {
     const result = runBash(
       `TFX_CODEX_TRANSPORT=auto bash "${ROUTE_SCRIPT}" executor 'hello-mcp' minimal`,
@@ -463,7 +477,9 @@ describe("tfx-route.sh — 라우팅 테이블 메타데이터", () => {
 
 // ── executor 라우팅 회귀 방지 (근본 원인: OMC executor agent는 Claude Sonnet, route.sh 경유 안 함) ──
 
-describe("tfx-route.sh — executor 라우팅 회귀 방지", { timeout: 180000 }, () => {
+describe("tfx-route.sh — executor 라우팅 회귀 방지", {
+  timeout: 180000,
+}, () => {
   it("executor + TFX_NO_CLAUDE_NATIVE=1 + fixture codex → type=codex 유지", () => {
     // CODEX_BIN이 가용한 상태에서 executor는 기본적으로 codex로 라우팅된다.
     // TFX_NO_CLAUDE_NATIVE=1은 이 경로에서 no-op (apply_no_claude_native_mode는
@@ -487,15 +503,22 @@ describe("tfx-route.sh — executor 라우팅 회귀 방지", { timeout: 180000 
     assert.equal(result.status, 0, out(result));
     // 경고 메시지 또는 ROUTE_TYPE 메타데이터 중 하나는 반드시 출력됨
     const combined = out(result);
-    const hasWarning = /claude-native 유지|claude-native fallback/.test(combined);
+    const hasWarning = /claude-native 유지|claude-native fallback/.test(
+      combined,
+    );
     const hasMetadata = /ROUTE_TYPE=/.test(combined);
-    assert.ok(hasWarning || hasMetadata, `expected warning or metadata:\n${combined}`);
+    assert.ok(
+      hasWarning || hasMetadata,
+      `expected warning or metadata:\n${combined}`,
+    );
   });
 });
 
 // ── TFX_FORCE_CODEX_BYPASS escape hatch 회귀 방지 (deep-review L3) ──
 
-describe("tfx-route.sh — TFX_FORCE_CODEX_BYPASS escape hatch", { timeout: 180000 }, () => {
+describe("tfx-route.sh — TFX_FORCE_CODEX_BYPASS escape hatch", {
+  timeout: 180000,
+}, () => {
   it("TFX_FORCE_CODEX_BYPASS=1 → 라우팅 정상 동작 + type=codex 유지", () => {
     // escape hatch가 활성이어도 라우팅이 깨지지 않아야 한다.
     // 실제 --dangerously-bypass 플래그 방출은 awk edge case 테스트에서 검증.
