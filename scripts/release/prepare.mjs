@@ -6,18 +6,32 @@ import {
   assertVersionSync,
   buildReleaseNotes,
   ensureGitClean,
+  getPreviousTag,
   parseArgs,
   ROOT,
   runCommand,
 } from "./lib.mjs";
+
+const TEST_TIMEOUT_MS = 10 * 60 * 1000;
+
+function createStepLogger() {
+  const startedAt = Date.now();
+  return function logStep(step) {
+    const elapsedMs = Date.now() - startedAt;
+    console.error(`[prepare] step=${step} t=${elapsedMs}ms`);
+  };
+}
 
 export async function prepareRelease({
   version,
   rootDir = ROOT,
   allowDirty = false,
   dryRun = true,
+  skipTests = false,
   execFileSyncFn,
 } = {}) {
+  const logStep = createStepLogger();
+  logStep("version-sync");
   const sync = assertVersionSync({ rootDir });
   if (!sync.ok) {
     throw new Error(
@@ -25,6 +39,7 @@ export async function prepareRelease({
     );
   }
 
+  logStep("git-clean");
   const gitState = ensureGitClean({ rootDir, execFileSyncFn });
   if (!gitState.clean && !allowDirty) {
     throw new Error(
@@ -33,18 +48,53 @@ export async function prepareRelease({
   }
 
   const releaseVersion = version || sync.rootVersion;
-  const commands = [
-    ["npm", ["test"]],
-    ["npm", ["run", "lint"]],
-    ["npm", ["pack", "--dry-run"]],
+  const previousTag = getPreviousTag({ rootDir, execFileSyncFn });
+  const steps = [
+    {
+      name: "npm-test",
+      command: "npm",
+      args: ["test"],
+      skip: skipTests,
+      // Windows background execution can stall when `npm test` inherits the
+      // parent's console handles through nested shell/spawn layers. Run the
+      // heavy test step non-interactively and fail fast if it never returns.
+      options: {
+        stdio: ["ignore", "pipe", "pipe"],
+        timeoutMs: TEST_TIMEOUT_MS,
+      },
+    },
+    {
+      name: "npm-lint",
+      command: "npm",
+      args: ["run", "lint"],
+    },
+    {
+      name: "npm-pack-dry-run",
+      command: "npm",
+      args: ["pack", "--dry-run"],
+    },
   ];
 
   if (!dryRun) {
-    for (const [command, args] of commands) {
-      runCommand(command, args, { cwd: rootDir, execFileSyncFn });
+    for (const step of steps) {
+      if (step.skip) {
+        logStep(`${step.name}:skipped`);
+        continue;
+      }
+      logStep(step.name);
+      runCommand(step.command, step.args, {
+        cwd: rootDir,
+        execFileSyncFn,
+        ...step.options,
+      });
+    }
+  } else {
+    for (const step of steps) {
+      logStep(step.skip ? `${step.name}:skipped` : `${step.name}:planned`);
     }
   }
 
+  logStep("release-notes");
   const notes = buildReleaseNotes({
     version: releaseVersion,
     rootDir,
@@ -61,10 +111,20 @@ export async function prepareRelease({
   return {
     ok: true,
     version: releaseVersion,
+    previousTag,
     clean: gitState.clean,
     allowDirty,
     dryRun,
-    commands: commands.map(([command, args]) => [command, ...args].join(" ")),
+    skipTests,
+    steps: steps.map((step) => ({
+      name: step.name,
+      command: [step.command, ...step.args].join(" "),
+      skipped: Boolean(step.skip),
+      timeoutMs: step.options?.timeoutMs ?? null,
+    })),
+    commands: steps
+      .filter((step) => !step.skip)
+      .map((step) => [step.command, ...step.args].join(" ")),
     releaseNotesPath: notesPath,
   };
 }
@@ -75,6 +135,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     version: args.version,
     rootDir: args.root,
     allowDirty: Boolean(args["allow-dirty"]),
+    skipTests: Boolean(args["skip-tests"]),
     dryRun: !args.execute,
   });
   if (args.json) {

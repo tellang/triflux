@@ -296,14 +296,49 @@ export function buildReleaseNotes({
 // PATHEXT 가 자동 적용되어 모든 플랫폼에서 동일한 호출 시그니처가 유지된다.
 const IS_WINDOWS = process.platform === "win32";
 
+function isPipedStdio(stdio) {
+  if (stdio === "pipe" || stdio === "overlapped") return true;
+  return Array.isArray(stdio)
+    ? stdio
+        .slice(0, 3)
+        .some((entry) => entry === "pipe" || entry === "overlapped")
+    : false;
+}
+
 export function runCommand(
   command,
   args,
-  { cwd = ROOT, execFileSyncFn = execFileSync } = {},
+  {
+    cwd = ROOT,
+    execFileSyncFn = execFileSync,
+    stdio = "inherit",
+    timeoutMs,
+    shell,
+    detached,
+  } = {},
 ) {
-  const opts = { cwd, stdio: "inherit" };
-  if (IS_WINDOWS) {
+  const opts = { cwd, stdio };
+  if (timeoutMs != null) {
+    opts.timeout = timeoutMs;
+  }
+  if (detached != null) {
+    opts.detached = detached;
+  }
+  if (shell !== undefined) {
+    opts.shell = shell;
+  } else if (IS_WINDOWS) {
     opts.shell = true;
   }
-  execFileSyncFn(command, args, opts);
+  if (isPipedStdio(stdio)) {
+    opts.encoding = "utf8";
+  }
+
+  try {
+    return execFileSyncFn(command, args, opts);
+  } catch (error) {
+    if (timeoutMs != null && error?.code === "ETIMEDOUT") {
+      error.message = `Command timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}`;
+    }
+    throw error;
+  }
 }
