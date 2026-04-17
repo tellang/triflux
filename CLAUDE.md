@@ -210,3 +210,75 @@ tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-consensus, t
 - `routing-weights.json` + Q-table로 스킬 선택 최적화
 - 기본 비활성
 </routing>
+
+<execution-skill-map>
+## 실행 스킬 맵 — tfx-auto 중심
+
+### 멘탈 모델
+
+사용자는 `tfx-auto`만 알아도 된다. auto가 내부에서 multi/swarm을 자동 선택한다. 명시 오버라이드는 magic keyword: "스웜", "멀티".
+
+### 내부 라우팅 (auto가 판정)
+
+| 입력 특성 | auto가 dispatch할 엔진 |
+|-----------|---------------------|
+| 1 태스크 + 작음 (S) | 직접 실행 (fire-and-forget) |
+| 1 태스크 + 큼 (M+) | pipeline (plan → PRD → exec → verify) |
+| 2+ 태스크 + 코드 변경 **없음** | **tfx-multi** (로컬 headless 병렬) |
+| 2+ 태스크 + 코드 변경 **포함** | **tfx-swarm** (worktree 격리 필수) |
+| 원격 + 코드 변경 | **tfx-swarm** (shard `host:`) |
+| 원격 + 탐색/대화형 | **tfx-remote-spawn** (세션 관리 + resume) |
+
+### 엔진 역할
+
+| 엔진 | 역할 | 호출 경로 |
+|------|------|----------|
+| tfx-multi | 로컬 headless 병렬 (cwd 공유, worktree 불필요) | auto 내부 dispatch 또는 `/tfx-multi` |
+| tfx-swarm | 격리 + 다기기 + auto merge (로컬/원격) | auto 내부 dispatch 또는 `/tfx-swarm` |
+| tfx-remote-spawn | 단일 세션 관리 (list/attach/send/resume/탐색) | 직접 `/tfx-remote-spawn` |
+| tfx-codex-swarm | **DEPRECATED** — tfx-swarm으로 통합됨 | 사용 금지 |
+
+### 핵심 차이 (격리 기준)
+
+| 항목 | tfx-swarm | tfx-remote-spawn | tfx-multi |
+|------|-----------|------------------|-----------|
+| Working tree 격리 | **YES** (shard별 `.codex-swarm/wt-*`) | NO (cwd 공유) | NO (cwd 공유) |
+| 원격 지원 | shard별 `host:` 자동 분배 (격리 유지) | SSH 단일 세션 | 로컬 전용 |
+| 자동 merge | YES | NO | NO |
+| 입력 | PRD 파일 | 자연어 프롬프트 | `--assign 'cli:prompt:role'` |
+
+### 안티패턴 (실제 사고)
+
+- ❌ PR conflict 해결을 `tfx-remote-spawn`으로 실행 → WT 세션 `git checkout feat/X` → 메인 세션 working tree도 함께 전환 → race (2026-04-17 PR #72 사고)
+- ❌ 단일 파일 수정을 `tfx-swarm`으로 → PRD + worktree 오버헤드 과잉 → `tfx-autopilot` 사용
+- ❌ `tfx-multi`로 코드 수정 병렬 → cwd 공유 파일 race → `tfx-swarm`
+
+### 핵심 룰
+
+> **코드 변경 = tfx-swarm만** (로컬/원격 동일). remote-spawn은 원격 대화형/탐색 전용. multi는 로컬 headless 병렬 (worktree 불필요 read-only 작업).
+
+### 알려진 한계
+
+현재 `tfx-auto`는 2+ 태스크를 만나면 **multi로만 dispatch**한다. 코드 변경 포함 시 자동 swarm dispatch 로직은 Issue #87 (auto 라우터 강화)에서 추적.
+</execution-skill-map>
+
+<update-logic>
+## 업데이트 로직
+
+| 도구 | 감지 | 갱신 방법 |
+|------|------|----------|
+| **triflux (자체)** | `tfx --version` vs `gh release list --repo tellang/triflux` | `npm i -g triflux` 또는 `claude plugin update triflux` |
+| **OMC (oh-my-claudecode)** | 세션 시작 훅 `[OMC VERSION DRIFT]` / `[OMC UPDATE AVAILABLE]` | `omc update` — plugin/npm CLI/CLAUDE.md 3곳 동시 동기화 |
+| **gstack** | `~/.gstack/last-update-check` 훅 / 세션 시작 배너 | `/gstack-upgrade` 스킬 (git install이면 `git merge --ff-only origin/main` + `./setup` + migrations) |
+| **Codex CLI** | `codex --version` / `~/.codex/auth.json` mtime | `npm i -g @openai/codex` / 토큰 만료 시 `codex login` (인터랙티브) + 메시지 한 번 날려 refresh 트리거 |
+| **Gemini CLI** | `gemini --version` | `npm i -g @google/gemini-cli` |
+| **Hub MCP URL 동기화** | Hub 시작 시 hub.pid의 port vs settings의 tfx-hub.url | PR #82 자동화 (`scripts/sync-hub-mcp-settings.mjs`의 `syncHubMcpSettings({hubUrl})`를 server startup에서 호출) |
+| **Codex auth 캐시** (pte1024 등) | 병렬 codex exec 시 `refresh_token_reused` | `cp ~/.codex/auth.json ~/.claude/cache/tfx-hub/codex-auth-<account>.json` 수동 (Issue #78 자동화 대기) |
+
+### 주의
+
+- `git reset --hard`는 safety-guard가 차단 → `git merge --ff-only`로 우회
+- OMC drift 감지 시 plugin/npm/CLAUDE.md 3개 컴포넌트를 **반드시 함께** 갱신 (한쪽만 새 버전이면 훅/라우팅 호환성 깨짐)
+- gstack 업그레이드 후 `~/.gstack/just-upgraded-from`을 체크해서 CHANGELOG 하이라이트 표시
+- 원격 머신 업그레이드 전파는 `tfx-remote-spawn` + SSH scp로 수동 (자동화 예정)
+</update-logic>
