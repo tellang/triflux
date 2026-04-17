@@ -113,8 +113,10 @@ export function buildExecArgs(opts = {}) {
 
   let result;
   const quotedPrompt = JSON.stringify(prompt);
+  // PowerShell: (Get-Content -Raw '...'), bash: "$(cat '...')"
   if (
-    /^\(Get-Content\b[\s\S]*\)$/u.test(prompt) &&
+    (/^\(Get-Content\b[\s\S]*\)$/u.test(prompt) ||
+      /^"\$\(cat\b[\s\S]*\)"$/u.test(prompt)) &&
     command.endsWith(quotedPrompt)
   ) {
     result = `${command.slice(0, -quotedPrompt.length)}${prompt}`;

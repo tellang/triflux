@@ -33,9 +33,14 @@ set -euo pipefail
 if command -v /usr/bin/timeout >/dev/null 2>&1; then
   TIMEOUT_BIN="/usr/bin/timeout"
 elif command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_BIN="gtimeout"  # macOS homebrew
-else
+  TIMEOUT_BIN="gtimeout"  # macOS homebrew coreutils
+elif command -v timeout >/dev/null 2>&1; then
   TIMEOUT_BIN="timeout"   # Linux 기본
+else
+  echo "[tfx-route] WARNING: timeout 명령을 찾을 수 없습니다. macOS: brew install coreutils (gtimeout 제공)" >&2
+  # timeout 없이 실행 — 첫 인자(초)를 무시하고 나머지 명령을 그대로 실행
+  _no_timeout() { shift; "$@"; }
+  TIMEOUT_BIN="_no_timeout"
 fi
 
 # ── 임시 디렉토리 정규화 ──

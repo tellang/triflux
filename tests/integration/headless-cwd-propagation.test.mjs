@@ -39,10 +39,17 @@ describe("headless cwd propagation parity", () => {
     );
 
     assert.equal(parsed.cwd, expectedCwd);
-    assert.ok(
-      cmd.startsWith(`Set-Location -LiteralPath '${expectedCwd}';`),
-      `headless cwd preamble: ${cmd}`,
-    );
+    if (process.platform === "win32") {
+      assert.ok(
+        cmd.startsWith(`Set-Location -LiteralPath '${expectedCwd}';`),
+        `headless cwd preamble (Windows): ${cmd}`,
+      );
+    } else {
+      assert.ok(
+        cmd.startsWith(`cd '${expectedCwd}' && `),
+        `headless cwd preamble (Unix): ${cmd}`,
+      );
+    }
     assert.ok(
       cmd.includes(`--cwd '${expectedCwd}'`),
       `headless codex cwd flag: ${cmd}`,
