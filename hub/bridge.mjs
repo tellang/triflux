@@ -25,6 +25,7 @@ import { getPipelineStateDbPath } from "./pipeline/state.mjs";
 const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
 const HUB_TOKEN_FILE = join(homedir(), ".claude", ".tfx-hub-token");
 const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const HUB_DEFAULT_PORT = 27888;
 
 function normalizeToken(raw) {
   if (raw == null) return null;
@@ -50,13 +51,18 @@ export function getHubUrl() {
   if (existsSync(HUB_PID_FILE)) {
     try {
       const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-      return `http://${info.host || "127.0.0.1"}:${info.port || 27888}`;
+      const pidPort = Number.parseInt(String(info?.port ?? ""), 10);
+      const port =
+        Number.isFinite(pidPort) && pidPort > 0 ? pidPort : HUB_DEFAULT_PORT;
+      return `http://${info.host || "127.0.0.1"}:${port}`;
     } catch {
       // 무시
     }
   }
 
-  const port = process.env.TFX_HUB_PORT || "27888";
+  const envPort = Number.parseInt(String(process.env.TFX_HUB_PORT ?? ""), 10);
+  const port =
+    Number.isFinite(envPort) && envPort > 0 ? envPort : HUB_DEFAULT_PORT;
   return `http://127.0.0.1:${port}`;
 }
 
