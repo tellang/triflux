@@ -10,8 +10,28 @@ import {
 import { clampPercent, formatTokenCount, readJsonMigrate } from "./utils.mjs";
 
 const DEFAULT_CONTEXT_LIMIT = 200_000;
+const MILLION_CONTEXT_LIMIT = 1_000_000;
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const MAX_TOP_KEYS = 20;
+
+// stdin 이 context_window_size 를 제공하지 않을 때 모델 ID 로 한도를 추정한다.
+// Anthropic 공식 문서(2026-04 기준): Opus 4.7 / Opus 4.6 / Sonnet 4.6 = 1M,
+// Sonnet 4.5 / Haiku 4.5 = 200K. 그 외 모델은 [1m] suffix 로 opt-in 가능.
+const MODEL_HINT_1M_PREFIXES = [
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+];
+
+function resolveModelLimit(modelId) {
+  if (!modelId) return DEFAULT_CONTEXT_LIMIT;
+  const id = String(modelId).toLowerCase();
+  if (id.includes("[1m]")) return MILLION_CONTEXT_LIMIT;
+  for (const prefix of MODEL_HINT_1M_PREFIXES) {
+    if (id.startsWith(prefix)) return MILLION_CONTEXT_LIMIT;
+  }
+  return DEFAULT_CONTEXT_LIMIT;
+}
 
 const WARNING_LEVELS = Object.freeze({
   ok: { min: 0, message: "" },
@@ -239,10 +259,20 @@ function getStdinContextUsage(stdin) {
   return null;
 }
 
+export function deriveContextLimit(stdin) {
+  const explicit = Number(stdin?.context_window?.context_window_size || 0);
+  if (explicit > 0) return explicit;
+  return resolveModelLimit(stdin?.model?.id ?? stdin?.model);
+}
+
 export function buildContextUsageView(stdin, snapshot = null) {
   const stdinUsage = getStdinContextUsage(stdin);
   const monitor = snapshot || readContextMonitorSnapshot();
-  const fallbackLimit = Number(monitor?.limitTokens || DEFAULT_CONTEXT_LIMIT);
+  const modelHintLimit = resolveModelLimit(stdin?.model?.id ?? stdin?.model);
+  const fallbackLimit = Math.max(
+    modelHintLimit,
+    Number(monitor?.limitTokens || 0),
+  );
 
   const usedTokens = stdinUsage?.usedTokens ?? Number(monitor?.usedTokens || 0);
   const limitTokens = stdinUsage?.limitTokens ?? Math.max(1, fallbackLimit);
