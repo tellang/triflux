@@ -14,7 +14,9 @@ function normalizeSessionId(sessionId) {
 function cloneSession(session) {
   return {
     ...session,
-    dirtyFiles: Array.isArray(session.dirtyFiles) ? [...session.dirtyFiles] : [],
+    dirtyFiles: Array.isArray(session.dirtyFiles)
+      ? [...session.dirtyFiles]
+      : [],
   };
 }
 
@@ -115,7 +117,10 @@ export function createSynapseRegistry(opts = {}) {
 
   function notifyStale(session) {
     const clone = cloneSession(session);
-    emitter?.emit("synapse.session.stale", { sessionId: session.sessionId, session: clone });
+    emitter?.emit("synapse.session.stale", {
+      sessionId: session.sessionId,
+      session: clone,
+    });
     for (const callback of staleCallbacks) {
       try {
         callback(clone);
@@ -127,7 +132,10 @@ export function createSynapseRegistry(opts = {}) {
 
   function notifyRemoved(session) {
     const clone = cloneSession(session);
-    emitter?.emit("synapse.session.removed", { sessionId: session.sessionId, session: clone });
+    emitter?.emit("synapse.session.removed", {
+      sessionId: session.sessionId,
+      session: clone,
+    });
     for (const callback of removedCallbacks) {
       try {
         callback(clone);
@@ -152,7 +160,9 @@ export function createSynapseRegistry(opts = {}) {
         const staled = { ...current, status: "stale" };
         sessions.set(sessionId, staled);
         schedulePersist();
-        setImmediate(() => { if (!destroyed) notifyStale(staled); });
+        setImmediate(() => {
+          if (!destroyed) notifyStale(staled);
+        });
       }
     }, intervalFor(session));
 
@@ -176,7 +186,10 @@ export function createSynapseRegistry(opts = {}) {
     }
 
     if (sessions.has(sessionId)) {
-      console.warn("[synapse-registry] duplicate registration rejected:", sessionId);
+      console.warn(
+        "[synapse-registry] duplicate registration rejected:",
+        sessionId,
+      );
       return { ok: false, sessionId, reason: "duplicate" };
     }
 
@@ -194,7 +207,10 @@ export function createSynapseRegistry(opts = {}) {
     startMonitor(sessionId);
     persist();
 
-    emitter?.emit("synapse.session.started", { sessionId, session: cloneSession(session) });
+    emitter?.emit("synapse.session.started", {
+      sessionId,
+      session: cloneSession(session),
+    });
     return { ok: true, sessionId };
   }
 
@@ -223,7 +239,8 @@ export function createSynapseRegistry(opts = {}) {
       if (typeof partialMeta.worktreePath === "string") {
         updated.worktreePath = partialMeta.worktreePath;
       }
-      if (typeof partialMeta.branch === "string") updated.branch = partialMeta.branch;
+      if (typeof partialMeta.branch === "string")
+        updated.branch = partialMeta.branch;
       if (Array.isArray(partialMeta.dirtyFiles)) {
         updated.dirtyFiles = partialMeta.dirtyFiles.filter(
           (f) => typeof f === "string" && f.length > 0,
@@ -244,7 +261,11 @@ export function createSynapseRegistry(opts = {}) {
     }
 
     schedulePersist();
-    emitter?.emit("synapse.session.heartbeat", { sessionId: normalized, session: cloneSession(updated), partial: partialMeta });
+    emitter?.emit("synapse.session.heartbeat", {
+      sessionId: normalized,
+      session: cloneSession(updated),
+      partial: partialMeta,
+    });
     return true;
   }
 

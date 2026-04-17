@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
 
 const tempDirs = [];
@@ -98,9 +104,16 @@ function createHarness(options = {}) {
 }
 
 async function loadInstrumentedCreateWtManager() {
-  const wtManagerUrl = new URL("../../hub/team/wt-manager.mjs", import.meta.url);
-  const envDetectUrl = new URL("../../hub/lib/env-detect.mjs", import.meta.url).href;
-  const spawnTraceUrl = new URL("../../hub/lib/spawn-trace.mjs", import.meta.url).href;
+  const wtManagerUrl = new URL(
+    "../../hub/team/wt-manager.mjs",
+    import.meta.url,
+  );
+  const envDetectUrl = new URL("../../hub/lib/env-detect.mjs", import.meta.url)
+    .href;
+  const spawnTraceUrl = new URL(
+    "../../hub/lib/spawn-trace.mjs",
+    import.meta.url,
+  ).href;
   const psmuxUrl = new URL("../../hub/team/psmux.mjs", import.meta.url).href;
 
   let source = readFileSync(wtManagerUrl, "utf8");

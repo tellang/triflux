@@ -215,8 +215,8 @@ async function sendToast(event, config, deps) {
   if ((deps.platform || process.platform) === "darwin") {
     const title = formatEventTitle(event);
     const body = formatEventBody(event);
-    const safeTitle = title.replace(/\\/g, '\\\\').replace(/'/g, "'\"'\"'");
-    const safeBody = body.replace(/\\/g, '\\\\').replace(/'/g, "'\"'\"'");
+    const safeTitle = title.replace(/\\/g, "\\\\").replace(/'/g, "'\"'\"'");
+    const safeBody = body.replace(/\\/g, "\\\\").replace(/'/g, "'\"'\"'");
     try {
       await execFileAsync(
         "osascript",

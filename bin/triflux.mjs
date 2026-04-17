@@ -154,7 +154,8 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--diagnose",
         type: "boolean",
-        description: "진단 번들(zip) 생성: spawn-trace + hook timing + system info",
+        description:
+          "진단 번들(zip) 생성: spawn-trace + hook timing + system info",
       },
       {
         name: "--json",
@@ -1229,10 +1230,13 @@ function cmdSetup(options = {}) {
   // ── tmux 기본 셸 확인 (macOS/Linux) ──
   if (process.platform !== "win32" && which("tmux")) {
     try {
-      const shellOut = execSync("tmux show-options -g default-shell 2>/dev/null", {
-        encoding: "utf8",
-        timeout: 3000,
-      }).trim();
+      const shellOut = execSync(
+        "tmux show-options -g default-shell 2>/dev/null",
+        {
+          encoding: "utf8",
+          timeout: 3000,
+        },
+      ).trim();
       if (shellOut) {
         ok(`tmux 기본 셸: ${shellOut.split(/\s+/).pop() || "확인 완료"}`);
       }
@@ -1936,7 +1940,10 @@ async function cmdDoctor(options = {}) {
       }
       {
         const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-        if (claudeGuide.skipped && claudeGuide.reason !== "global_sync_disabled")
+        if (
+          claudeGuide.skipped &&
+          claudeGuide.reason !== "global_sync_disabled"
+        )
           warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
         else if (
           claudeGuide.action === "created" ||
@@ -4992,9 +4999,7 @@ async function cmdHub(args = [], options = {}) {
           rootCause = readFileSync(startupErrPath, "utf8").trim();
         } catch {}
 
-        console.log(
-          `\n  ${YELLOW}⚠${RESET} 백그라운드 시작 실패`,
-        );
+        console.log(`\n  ${YELLOW}⚠${RESET} 백그라운드 시작 실패`);
 
         if (rootCause) {
           // 가장 유용한 에러 라인 강조 (ERR_*, Error:, throw)
@@ -5004,9 +5009,7 @@ async function cmdHub(args = [], options = {}) {
           if (highlight) {
             console.log(`    ${RED}▸ ${highlight.trim()}${RESET}`);
           }
-          console.log(
-            `\n  ${DIM}전체 로그: ${startupErrPath}${RESET}`,
-          );
+          console.log(`\n  ${DIM}전체 로그: ${startupErrPath}${RESET}`);
           // 원인별 실전 힌트
           if (/Cannot find package/i.test(rootCause)) {
             console.log(
@@ -5392,9 +5395,15 @@ async function main() {
         const auditScript = join(PKG_ROOT, "scripts", "config-audit.mjs");
         const auditArgs = JSON_OUTPUT ? ["--json"] : [];
         try {
-          const out = execFileSync(process.execPath, [auditScript, ...auditArgs], {
-            timeout: 15000, encoding: "utf8", windowsHide: true,
-          });
+          const out = execFileSync(
+            process.execPath,
+            [auditScript, ...auditArgs],
+            {
+              timeout: 15000,
+              encoding: "utf8",
+              windowsHide: true,
+            },
+          );
           process.stdout.write(out);
         } catch (e) {
           process.stdout.write(e.stdout || "");
@@ -5407,8 +5416,12 @@ async function main() {
         const result = await diagnose({ json: JSON_OUTPUT });
         if (!JSON_OUTPUT) {
           if (result.ok) {
-            console.log(`\n  ${GREEN_BRIGHT}✓${RESET} 진단 번들 생성: ${result.zipPath}`);
-            console.log(`  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`);
+            console.log(
+              `\n  ${GREEN_BRIGHT}✓${RESET} 진단 번들 생성: ${result.zipPath}`,
+            );
+            console.log(
+              `  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`,
+            );
           } else {
             console.log(`\n  ${RED}✗${RESET} 진단 실패: ${result.error}\n`);
           }
@@ -5536,9 +5549,7 @@ async function main() {
       return;
     }
     case "synapse": {
-      const { cmdSynapseStatus } = await import(
-        "../hub/team/synapse-cli.mjs"
-      );
+      const { cmdSynapseStatus } = await import("../hub/team/synapse-cli.mjs");
       const sub = cmdArgs[0] || "status";
       if (sub !== "status") {
         throw createCliError(`synapse 서브커맨드 미지원: ${sub}`, {

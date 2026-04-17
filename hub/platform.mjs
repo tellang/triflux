@@ -178,7 +178,9 @@ export function killProcess(pid, options = {}) {
     if (tree) {
       try {
         execSync(`pkill -P ${numericPid}`, { stdio: "ignore", timeout: 3000 });
-      } catch { /* 자식 없으면 무시 */ }
+      } catch {
+        /* 자식 없으면 무시 */
+      }
     }
     process.kill(numericPid, signal);
     return true;

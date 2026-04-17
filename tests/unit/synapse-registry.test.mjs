@@ -63,7 +63,10 @@ describe("synapse-registry", () => {
 
     assert.equal(res.ok, true);
     assert.equal(res.sessionId, "session-split");
-    assert.equal(reg.getSession("session-split")?.branch, "feature/split-register");
+    assert.equal(
+      reg.getSession("session-split")?.branch,
+      "feature/split-register",
+    );
 
     reg.destroy();
   });
@@ -131,7 +134,9 @@ describe("synapse-registry", () => {
 
   it("persists and restores session state", () => {
     const reg1 = createSynapseRegistry({ persistPath });
-    reg1.register(baseMeta({ sessionId: "session-x", taskSummary: "persist me" }));
+    reg1.register(
+      baseMeta({ sessionId: "session-x", taskSummary: "persist me" }),
+    );
     reg1.destroy();
 
     assert.equal(existsSync(persistPath), true);

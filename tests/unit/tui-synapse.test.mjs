@@ -2,13 +2,12 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import { stripAnsi } from "../../hub/team/ansi.mjs";
 import {
   createMetricsCollector,
   createSynapseEventStream,
   renderMetricsTier1,
 } from "../../hub/team/tui-synapse.mjs";
-import { stripAnsi } from "../../hub/team/ansi.mjs";
 
 describe("createMetricsCollector", () => {
   it("이벤트 수집 후 스냅샷 반환", () => {
@@ -71,7 +70,12 @@ describe("createSynapseEventStream", () => {
     const events = [];
     const mockFetch = async () => ({
       ok: true,
-      json: async () => ({ events: [{ id: 1, type: "heartbeat" }, { id: 2, type: "status" }] }),
+      json: async () => ({
+        events: [
+          { id: 1, type: "heartbeat" },
+          { id: 2, type: "status" },
+        ],
+      }),
     });
 
     const stream = createSynapseEventStream({
@@ -92,7 +96,10 @@ describe("createSynapseEventStream", () => {
       callCount++;
       const since = new URL(url).searchParams.get("since");
       if (since === "0") {
-        return { ok: true, json: async () => ({ events: [{ id: 5, type: "a" }] }) };
+        return {
+          ok: true,
+          json: async () => ({ events: [{ id: 5, type: "a" }] }),
+        };
       }
       return { ok: true, json: async () => ({ events: [] }) };
     };
@@ -111,7 +118,9 @@ describe("createSynapseEventStream", () => {
 
   it("fetch 에러 시 onError 호출", async () => {
     const errors = [];
-    const mockFetch = async () => { throw new Error("network"); };
+    const mockFetch = async () => {
+      throw new Error("network");
+    };
 
     const stream = createSynapseEventStream({
       fetchImpl: mockFetch,
@@ -124,7 +133,9 @@ describe("createSynapseEventStream", () => {
   });
 
   it("start/stop 제어", () => {
-    const stream = createSynapseEventStream({ fetchImpl: async () => ({ ok: false }) });
+    const stream = createSynapseEventStream({
+      fetchImpl: async () => ({ ok: false }),
+    });
     assert.equal(stream.isRunning, false);
     stream.start();
     assert.equal(stream.isRunning, true);

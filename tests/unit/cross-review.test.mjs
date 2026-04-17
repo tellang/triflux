@@ -101,7 +101,12 @@ describe("cross-review tracker", () => {
       assert.equal(result.status, 0, result.stderr);
     }
 
-    const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
+    const statePath = join(
+      projectDir,
+      ".triflux",
+      "state",
+      "cross-review.json",
+    );
     assert.equal(existsSync(statePath), false);
   });
 
@@ -228,7 +233,12 @@ describe("cross-review gate", () => {
       },
     });
 
-    const statePath = join(projectDir, ".triflux", "state", "cross-review.json");
+    const statePath = join(
+      projectDir,
+      ".triflux",
+      "state",
+      "cross-review.json",
+    );
     const result = runScript(
       GATE_PATH,
       {

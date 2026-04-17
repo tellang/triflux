@@ -433,9 +433,7 @@ describe("CodexAppServerWorker — AC-5 opt-out defense", () => {
     emitAgentDeltas(FakeClientBase.last, ["data"]);
     emitTurnCompleted(FakeClientBase.last, "completed");
     await p;
-    const fsPublish = publishes.find(
-      (m) => m.payload.method === "fs/changed",
-    );
+    const fsPublish = publishes.find((m) => m.payload.method === "fs/changed");
     assert.equal(fsPublish, undefined);
     await worker.stop();
   });

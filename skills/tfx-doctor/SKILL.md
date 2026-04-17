@@ -27,8 +27,6 @@ options:
     description: "읽기 전용 전체 검사 — 아무것도 수정하지 않음"
   - label: "수정 (Fix)"
     description: "파일 동기화 + 캐시 정리 후 진단 실행"
-  - label: "보안 감사 (Audit)"
-    description: "settings.json, CLAUDE.md, MCP, 훅 설정의 보안/성능 정적 분석"
   - label: "캐시 관리 (Cache)"
     description: "캐시 파일별 상태 조회, 선택적 삭제"
   - label: "전체 초기화 (Reset)"
@@ -67,25 +65,6 @@ options:
   - label: "건너뛰기"
     description: "수정 없이 결과만 확인"
 ```
-
-#### 보안 감사 모드
-
-```bash
-Bash("triflux doctor --audit")
-```
-
-4개 카테고리를 정적 분석:
-
-| 카테고리 | 검사 항목 |
-|----------|-----------|
-| settings | 권한 모드, env 시크릿 패턴, 훅 timeout |
-| claude-md | 시크릿 노출, CLAUDE.md 크기 (>3000토큰 경고) |
-| mcp | 서버 수 (>10), stdio 수, 위험 명령 패턴 |
-| hooks | blocking 훅 수, 외부 훅, 위험 명령 패턴 |
-
-심각도: critical (즉시 수정), warn (검토 필요), info (참고)
-
-JSON 출력: `Bash("triflux doctor --audit --json")`
 
 #### 수정 모드
 

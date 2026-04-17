@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { describe, it, after } from "node:test";
+import { after, describe, it } from "node:test";
 import { createWtManager } from "../../hub/team/wt-manager.mjs";
 
 /**
  * Windows Terminal 프로필 실행 및 관리 통합 테스트
  * 실제 Windows 환경에서 wt.exe가 설치되어 있어야 정상 동작함.
  */
-describe("wt-profile-launch integration", { skip: process.platform !== "win32" || !process.env.TFX_INTEGRATION_TESTS }, () => {
+describe("wt-profile-launch integration", {
+  skip: process.platform !== "win32" || !process.env.TFX_INTEGRATION_TESTS,
+}, () => {
   const wt = createWtManager();
   const testTitle = `tfx-test-${Date.now()}`;
 
@@ -28,10 +30,21 @@ describe("wt-profile-launch integration", { skip: process.platform !== "win32" |
       command: "echo 'Triflux Profile Test'; Start-Sleep -Seconds 2",
     });
 
-    assert.strictEqual(result.success, true, "탭 생성 결과가 success: true여야 함");
-    assert.strictEqual(result.title, testTitle, "반환된 타이틀이 요청한 타이틀과 일치해야 함");
-    assert.ok(typeof result.pid === "number" && result.pid > 0, "유효한 프로세스 PID가 반환되어야 함");
-    
+    assert.strictEqual(
+      result.success,
+      true,
+      "탭 생성 결과가 success: true여야 함",
+    );
+    assert.strictEqual(
+      result.title,
+      testTitle,
+      "반환된 타이틀이 요청한 타이틀과 일치해야 함",
+    );
+    assert.ok(
+      typeof result.pid === "number" && result.pid > 0,
+      "유효한 프로세스 PID가 반환되어야 함",
+    );
+
     // 탭 목록에 포함되어 있는지 확인
     const tabs = wt.listTabs();
     const found = tabs.find((t) => t.title === testTitle);
@@ -44,6 +57,10 @@ describe("wt-profile-launch integration", { skip: process.platform !== "win32" |
     // 탭 목록에서 제거되었는지 확인
     const tabs = wt.listTabs();
     const found = tabs.find((t) => t.title === testTitle);
-    assert.strictEqual(found, undefined, "closeTab 후에는 탭이 목록에서 제거되어야 함");
+    assert.strictEqual(
+      found,
+      undefined,
+      "closeTab 후에는 탭이 목록에서 제거되어야 함",
+    );
   });
 });

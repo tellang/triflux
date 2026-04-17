@@ -918,7 +918,11 @@ describe("#62: session-stale-cleanup (runtime)", () => {
         stdio: ["pipe", "pipe", "pipe"],
       });
 
-      assert.equal(existsSync(pidFile), true, "살아있는 세션의 PID 파일 유지됨");
+      assert.equal(
+        existsSync(pidFile),
+        true,
+        "살아있는 세션의 PID 파일 유지됨",
+      );
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
     }

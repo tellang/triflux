@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { describe, it } from "node:test";
 
 const headlessSrc = readFileSync(
   join(import.meta.dirname, "../../hub/team/headless.mjs"),
@@ -32,6 +32,8 @@ describe("headless wt-manager migration", () => {
 
   it("wt.exe 직접 spawn이 없다", () => {
     // execFileSync("wt.exe" 또는 spawn("wt.exe" 패턴이 없어야 함
-    assert.ok(!headlessSrc.match(/(?:spawn|execFile(?:Sync)?)\s*\(\s*["']wt\.exe/));
+    assert.ok(
+      !headlessSrc.match(/(?:spawn|execFile(?:Sync)?)\s*\(\s*["']wt\.exe/),
+    );
   });
 });

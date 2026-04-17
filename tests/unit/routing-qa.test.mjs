@@ -288,7 +288,7 @@ describe("headless: buildHeadlessCommand", async () => {
       );
     } else {
       assert.ok(
-        cmd.includes('$(cat '),
+        cmd.includes("$(cat "),
         `프롬프트가 파일에서 읽혀야 함 (Unix): ${cmd}`,
       );
     }

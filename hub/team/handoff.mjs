@@ -250,7 +250,8 @@ export function buildFallbackHandoff(exitCode, resultFile, cli, context = {}) {
     : [];
   return {
     status: ok ? "ok" : "failed",
-    lead_action: ok && filesChanged.length > 0 ? "accept" : ok ? "needs_read" : "retry",
+    lead_action:
+      ok && filesChanged.length > 0 ? "accept" : ok ? "needs_read" : "retry",
     task: "unknown",
     files_changed: filesChanged,
     verdict: `${cli || "worker"} completed (exit ${exitCode})`,

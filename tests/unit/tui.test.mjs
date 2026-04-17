@@ -24,11 +24,10 @@ import {
   truncate,
   wcswidth,
 } from "../../hub/team/ansi.mjs";
-
-import { createLogDashboard } from "../../hub/team/tui.mjs";
 import {
   buildDashboardAttachRequest as buildAttachRequest,
   createTransientTabLimiter as createAttachLimiter,
+  createLogDashboard,
 } from "../../hub/team/tui.mjs";
 
 // ── ansi.mjs ──
@@ -288,7 +287,7 @@ describe("createLogDashboard", () => {
   });
 
   it("attachWorker는 실패한 spawn 시 transient slot을 즉시 해제한다", async () => {
-    let now = 0;
+    const now = 0;
     let openAttempts = 0;
     const fakeStream = {
       write: () => {},

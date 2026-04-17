@@ -166,10 +166,7 @@ describe("tfx-hub SKILL.md — hub 모듈 참조", () => {
 
   it("CLI 대응 섹션 존재", () => {
     const content = readSkill("tfx-hub");
-    assert.ok(
-      /##\s+CLI\s+대응/.test(content),
-      "CLI 대응 섹션이 없음",
-    );
+    assert.ok(/##\s+CLI\s+대응/.test(content), "CLI 대응 섹션이 없음");
   });
 
   it("false positive 방지: hub가 단순 URL이나 변수명이 아닌 섹션 제목에 존재", () => {

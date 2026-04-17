@@ -22,10 +22,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
-import {
-  broker as brokerInstance,
-  reloadBroker,
-} from "./account-broker.mjs";
+import { broker as brokerInstance, reloadBroker } from "./account-broker.mjs";
 import { createAdaptiveEngine } from "./adaptive.mjs";
 import { createAssignCallbackServer } from "./assign-callbacks.mjs";
 import { DelegatorService } from "./delegator/index.mjs";
@@ -84,7 +81,14 @@ const AIMD_WINDOW_MS = 30 * 60 * 1000;
 const AIMD_INITIAL_BATCH_SIZE = 3;
 const AIMD_MIN_BATCH_SIZE = 1;
 const AIMD_MAX_BATCH_SIZE = 10;
-const SYNAPSE_VALID_OPS = new Set(["checkout", "rebase", "cherry-pick", "reset", "stash-pop", "worktree-remove"]);
+const SYNAPSE_VALID_OPS = new Set([
+  "checkout",
+  "rebase",
+  "cherry-pick",
+  "reset",
+  "stash-pop",
+  "worktree-remove",
+]);
 const HUB_IDLE_TIMEOUT_DEFAULT_MS = 0; // 0 = 영구 실행 (idle shutdown 비활성). TFX_HUB_IDLE_TIMEOUT_MS 환경변수로 오버라이드 가능
 const HUB_IDLE_SWEEP_DEFAULT_MS = 60 * 1000;
 const STATIC_CONTENT_TYPES = Object.freeze({
@@ -214,11 +218,7 @@ export function resolveHubPort(env = process.env) {
 
 export function detectLivePeer(
   pidFilePath = PID_FILE,
-  {
-    exists = existsSync,
-    readFile = readFileSync,
-    killFn = process.kill,
-  } = {},
+  { exists = existsSync, readFile = readFileSync, killFn = process.kill } = {},
 ) {
   const state = readHubPidFile(pidFilePath, { exists, readFile });
   const info = state.info ?? null;
@@ -566,13 +566,18 @@ function getQosStatsPayload() {
 }
 
 function syncBrokerAuthCache(currentBroker, logger = hubLog) {
-  if (!currentBroker?.snapshot || typeof currentBroker.syncAuthFromSource !== "function") {
+  if (
+    !currentBroker?.snapshot ||
+    typeof currentBroker.syncAuthFromSource !== "function"
+  ) {
     return [];
   }
 
   const authAccounts = currentBroker
     .snapshot()
-    .filter((account) => account.provider === "codex" && account.mode === "auth");
+    .filter(
+      (account) => account.provider === "codex" && account.mode === "auth",
+    );
 
   return authAccounts.map((account) => {
     try {
@@ -594,7 +599,11 @@ function syncBrokerAuthCache(currentBroker, logger = hubLog) {
         { accountId: account.id, err: error?.message || String(error) },
         "broker.auth_sync_from_source_failed",
       );
-      return { ok: false, accountId: account.id, reason: error?.message || String(error) };
+      return {
+        ok: false,
+        accountId: account.id,
+        reason: error?.message || String(error),
+      };
     }
   });
 }
@@ -960,7 +969,11 @@ export async function startHub({
 
       if (path === "/broker/snapshot" && req.method === "GET") {
         const snap = brokerInstance?.snapshot() || [];
-        return writeJson(res, 200, { ok: true, accounts: snap, ts: Date.now() });
+        return writeJson(res, 200, {
+          ok: true,
+          accounts: snap,
+          ts: Date.now(),
+        });
       }
 
       if (path === "/broker/dashboard" && req.method === "GET") {
@@ -969,13 +982,22 @@ export async function startHub({
         return;
       }
 
-      if (path === "/broker/quota-refresh" && (req.method === "POST" || req.method === "GET")) {
+      if (
+        path === "/broker/quota-refresh" &&
+        (req.method === "POST" || req.method === "GET")
+      ) {
         try {
           const results = await refreshAllAccountQuotas();
           return writeJson(res, 200, { ok: true, results, ts: Date.now() });
         } catch (err) {
-          hubLog.error({ err: String(err?.message || err) }, "broker.quota_refresh_error");
-          return writeJson(res, 200, { ok: false, error: String(err?.message || err) });
+          hubLog.error(
+            { err: String(err?.message || err) },
+            "broker.quota_refresh_error",
+          );
+          return writeJson(res, 200, {
+            ok: false,
+            error: String(err?.message || err),
+          });
         }
       }
 
@@ -1000,7 +1022,11 @@ export async function startHub({
 
       // ── Synapse Layer 5: session registry + locks + preflight routes ──
       if (path === "/synapse/sessions" && req.method === "GET") {
-        return writeJson(res, 200, { ok: true, ...synapseRegistry.snapshot(), ts: Date.now() });
+        return writeJson(res, 200, {
+          ok: true,
+          ...synapseRegistry.snapshot(),
+          ts: Date.now(),
+        });
       }
 
       if (path === "/synapse/register" && req.method === "POST") {
@@ -1011,9 +1037,15 @@ export async function startHub({
           if (!result?.ok) {
             throw new Error(result?.reason || "register failed");
           }
-          return writeJson(res, 200, { ok: true, sessionId: result.sessionId || sessionId });
+          return writeJson(res, 200, {
+            ok: true,
+            sessionId: result.sessionId || sessionId,
+          });
         } catch (err) {
-          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+          return writeJson(res, 400, {
+            ok: false,
+            error: String(err?.message || err),
+          });
         }
       }
 
@@ -1027,7 +1059,10 @@ export async function startHub({
           }
           return writeJson(res, 200, { ok: true });
         } catch (err) {
-          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+          return writeJson(res, 400, {
+            ok: false,
+            error: String(err?.message || err),
+          });
         }
       }
 
@@ -1041,12 +1076,19 @@ export async function startHub({
           }
           return writeJson(res, 200, { ok: true });
         } catch (err) {
-          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+          return writeJson(res, 400, {
+            ok: false,
+            error: String(err?.message || err),
+          });
         }
       }
 
       if (path === "/synapse/locks" && req.method === "GET") {
-        return writeJson(res, 200, { ok: true, locks: swarmLocks.snapshot(), ts: Date.now() });
+        return writeJson(res, 200, {
+          ok: true,
+          locks: swarmLocks.snapshot(),
+          ts: Date.now(),
+        });
       }
 
       if (path === "/synapse/preflight" && req.method === "POST") {
@@ -1057,12 +1099,18 @@ export async function startHub({
             return writeJson(res, 400, { ok: false, error: "op 필수" });
           }
           if (!SYNAPSE_VALID_OPS.has(op)) {
-            return writeJson(res, 400, { ok: false, error: `invalid op: ${op}` });
+            return writeJson(res, 400, {
+              ok: false,
+              error: `invalid op: ${op}`,
+            });
           }
           const result = gitPreflight.check(op, args, sessionContext);
           return writeJson(res, 200, { ok: true, ...result });
         } catch (err) {
-          return writeJson(res, 400, { ok: false, error: String(err?.message || err) });
+          return writeJson(res, 400, {
+            ok: false,
+            error: String(err?.message || err),
+          });
         }
       }
 
@@ -2049,45 +2097,77 @@ const QUOTA_CACHE_PATH = join(CACHE_DIR, "broker-quota-cache.json");
 async function checkSingleAccountQuota(acct) {
   try {
     const authPath = join(PID_DIR, acct.authFile);
-    if (!authPath.startsWith(PID_DIR + sep)) return { id: acct.id, status: "path_blocked" };
+    if (!authPath.startsWith(PID_DIR + sep))
+      return { id: acct.id, status: "path_blocked" };
     if (!existsSync(authPath)) return { id: acct.id, status: "no_auth" };
     const auth = JSON.parse(readFileSync(authPath, "utf8"));
     if (acct.provider === "codex") {
       const token = auth.tokens?.access_token || auth.OPENAI_API_KEY || "";
       if (!token) return { id: acct.id, status: "no_token" };
       const r = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST", signal: AbortSignal.timeout(8000),
-        headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "gpt-4.1-nano", messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+        method: "POST",
+        signal: AbortSignal.timeout(8000),
+        headers: {
+          Authorization: "Bearer " + token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4.1-nano",
+          messages: [{ role: "user", content: "hi" }],
+          max_tokens: 1,
+        }),
       });
-      const hdrs = Object.fromEntries([...r.headers.entries()].filter(([k]) => /ratelimit/i.test(k)));
-      if (r.status === 429) return { id: acct.id, status: "quota_hit", http: 429, headers: hdrs };
+      const hdrs = Object.fromEntries(
+        [...r.headers.entries()].filter(([k]) => /ratelimit/i.test(k)),
+      );
+      if (r.status === 429)
+        return { id: acct.id, status: "quota_hit", http: 429, headers: hdrs };
       if (r.status === 401) {
         // 401이어도 ratelimit 헤더가 있으면 쿼터 정보 추출 가능
         return { id: acct.id, status: "auth_error", http: 401, headers: hdrs };
       }
-      return { id: acct.id, status: r.ok ? "ok" : "error", http: r.status, headers: hdrs };
+      return {
+        id: acct.id,
+        status: r.ok ? "ok" : "error",
+        http: r.status,
+        headers: hdrs,
+      };
     }
     // gemini — OAuth token refresh needed for accurate check
     return { id: acct.id, status: "oauth_check_needed" };
   } catch (e) {
-    return { id: acct.id, status: "error", message: e.message?.substring(0, 60) };
+    return {
+      id: acct.id,
+      status: "error",
+      message: e.message?.substring(0, 60),
+    };
   }
 }
 
 async function refreshAllAccountQuotas() {
   const snap = brokerInstance?.snapshot() || [];
-  const checks = snap.filter(a => a.authFile).map(a => checkSingleAccountQuota(a));
+  const checks = snap
+    .filter((a) => a.authFile)
+    .map((a) => checkSingleAccountQuota(a));
   const settled = await Promise.allSettled(checks);
   const results = settled.map((s, i) =>
     s.status === "fulfilled"
       ? s.value
-      : { id: snap.filter(a => a.authFile)[i]?.id ?? "unknown", status: "error", message: String(s.reason?.message || s.reason).substring(0, 60) },
+      : {
+          id: snap.filter((a) => a.authFile)[i]?.id ?? "unknown",
+          status: "error",
+          message: String(s.reason?.message || s.reason).substring(0, 60),
+        },
   );
   // 캐시 저장
   try {
-    writeFileSync(QUOTA_CACHE_PATH, JSON.stringify({ ts: Date.now(), results }));
-  } catch { /* best-effort */ }
+    writeFileSync(
+      QUOTA_CACHE_PATH,
+      JSON.stringify({ ts: Date.now(), results }),
+    );
+  } catch {
+    /* best-effort */
+  }
   return results;
 }
 
@@ -2095,7 +2175,9 @@ function _loadQuotaCache() {
   try {
     if (!existsSync(QUOTA_CACHE_PATH)) return null;
     return JSON.parse(readFileSync(QUOTA_CACHE_PATH, "utf8"));
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // ── Broker Dashboard HTML ──────────────────────────────────────

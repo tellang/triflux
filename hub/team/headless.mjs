@@ -18,8 +18,8 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { requestJson } from "../bridge.mjs";
-import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
+import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 import { getBackend } from "./backend.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
@@ -164,12 +164,23 @@ const MCP_PROFILE_HINTS = {
  */
 // ── Dashboard attach args for WT ────────────────────────────────
 
-export function buildDashboardAttachArgs(sessionName, layout, workerCount, anchor = "window") {
+export function buildDashboardAttachArgs(
+  sessionName,
+  layout,
+  workerCount,
+  anchor = "window",
+) {
   const safeName = String(sessionName).replace(/[^a-zA-Z0-9_-]/g, "");
-  const base = anchor === "tab"
-    ? ["-w", "0", "nt"]
-    : ["-w", "new"];
-  return [...base, "--session", safeName, "--layout", layout, "--workers", String(workerCount)];
+  const base = anchor === "tab" ? ["-w", "0", "nt"] : ["-w", "new"];
+  return [
+    ...base,
+    "--session",
+    safeName,
+    "--layout",
+    layout,
+    "--workers",
+    String(workerCount),
+  ];
 }
 
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
@@ -208,7 +219,8 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   // 플랫폼 분기: PowerShell은 Get-Content, bash/zsh는 cat
   const promptExpr = IS_WINDOWS
     ? `(Get-Content -Raw '${promptFile}')`
-    : `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;  const backendCommand = backend.buildArgs(promptExpr, resultFile, {
+    : `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
+  const backendCommand = backend.buildArgs(promptExpr, resultFile, {
     ...opts,
     model,
   });
@@ -959,7 +971,9 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     .catch(() => {});
 
   // Synapse: 세션 registration (fire-and-forget, hub 미응답 시 무시)
-  const synapseIds = assignments.map((_, i) => `${sessionName}-worker-${i + 1}`);
+  const synapseIds = assignments.map(
+    (_, i) => `${sessionName}-worker-${i + 1}`,
+  );
   for (let i = 0; i < assignments.length; i++) {
     const a = assignments[i];
     requestJson("/synapse/register", {
@@ -1041,7 +1055,10 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     if (!sid) return;
     requestJson("/synapse/heartbeat", {
       method: "POST",
-      body: { sessionId: sid, partial: { taskSummary: (event.snapshot || "").slice(0, 100) } },
+      body: {
+        sessionId: sid,
+        partial: { taskSummary: (event.snapshot || "").slice(0, 100) },
+      },
       timeoutMs: 500,
     }).catch(() => {});
   };

@@ -12,7 +12,15 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { arch, cpus, freemem, homedir, platform, release, totalmem } from "node:os";
+import {
+  arch,
+  cpus,
+  freemem,
+  homedir,
+  platform,
+  release,
+  totalmem,
+} from "node:os";
 import { join } from "node:path";
 
 const TRIFLUX_DIR = join(homedir(), ".triflux");
@@ -37,7 +45,9 @@ function collectSpawnTraces(cutoffMs = ONE_HOUR_MS) {
         const entry = JSON.parse(line);
         const ts = new Date(entry.ts).getTime();
         if (now - ts <= cutoffMs) entries.push(entry);
-      } catch { /* skip malformed */ }
+      } catch {
+        /* skip malformed */
+      }
     }
   }
 
@@ -50,7 +60,9 @@ function computeSpawnStats(traces) {
   }
 
   const spawnEvents = traces.filter((t) => t.event === "spawn");
-  const exitEvents = traces.filter((t) => t.event === "exit" || t.event === "error");
+  const exitEvents = traces.filter(
+    (t) => t.event === "exit" || t.event === "error",
+  );
   const blockedEvents = traces.filter((t) => t.event === "blocked");
 
   // peak rate per second
@@ -156,7 +168,9 @@ function collectSystemInfo() {
     if (existsSync(pkgPath)) {
       info.trifluxVersion = JSON.parse(readFileSync(pkgPath, "utf8")).version;
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   return info;
 }
@@ -179,9 +193,13 @@ function collectHookTimings() {
           const entry = JSON.parse(line);
           const ts = new Date(entry.ts || entry.time).getTime();
           if (now - ts <= ONE_HOUR_MS) timings.push(entry);
-        } catch { /* skip */ }
+        } catch {
+          /* skip */
+        }
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
   return timings;
 }
@@ -213,7 +231,9 @@ function generateSummary(stats, sysInfo, hookTimings, traceCount) {
   if (!mcpCheck.found && mcpCheck.reason) {
     lines.push(`  ${mcpCheck.reason}`);
   } else if (mcpCheck.found) {
-    lines.push(`  ⚠ ${mcpCheck.tools.length}개 MCP tool에 approval_mode="approve" 감지`);
+    lines.push(
+      `  ⚠ ${mcpCheck.tools.length}개 MCP tool에 approval_mode="approve" 감지`,
+    );
     lines.push(`    codex exec non-TTY stall 위험 (refs: triflux#66)`);
     for (const tool of mcpCheck.tools) {
       lines.push(`    - [${tool}]`);
@@ -223,10 +243,7 @@ function generateSummary(stats, sysInfo, hookTimings, traceCount) {
     lines.push("  ✔ MCP tool approval_mode 정상");
   }
 
-  lines.push(
-    "",
-    "--- Hook Timings (last 1h) ---",
-  );
+  lines.push("", "--- Hook Timings (last 1h) ---");
 
   if (hookTimings.length === 0) {
     lines.push("no hook timing data found");
@@ -257,15 +274,24 @@ export async function diagnose({ json = false } = {}) {
 
   // 2. process report
   try {
-    const reportPath = process.report.writeReport(join(bundleDir, "process-report.json"));
+    const reportPath = process.report.writeReport(
+      join(bundleDir, "process-report.json"),
+    );
     // writeReport returns the path it wrote to
     if (reportPath && reportPath !== join(bundleDir, "process-report.json")) {
       // move if written elsewhere
       const { renameSync } = await import("node:fs");
-      try { renameSync(reportPath, join(bundleDir, "process-report.json")); } catch { /* ignore */ }
+      try {
+        renameSync(reportPath, join(bundleDir, "process-report.json"));
+      } catch {
+        /* ignore */
+      }
     }
   } catch {
-    writeFileSync(join(bundleDir, "process-report.json"), JSON.stringify({ error: "report generation failed" }));
+    writeFileSync(
+      join(bundleDir, "process-report.json"),
+      JSON.stringify({ error: "report generation failed" }),
+    );
   }
 
   // 3. hook timings
@@ -277,11 +303,17 @@ export async function diagnose({ json = false } = {}) {
 
   // 4. spawn stats
   const stats = computeSpawnStats(traces);
-  writeFileSync(join(bundleDir, "spawn-stats.json"), JSON.stringify(stats, null, 2));
+  writeFileSync(
+    join(bundleDir, "spawn-stats.json"),
+    JSON.stringify(stats, null, 2),
+  );
 
   // 5. system info
   const sysInfo = collectSystemInfo();
-  writeFileSync(join(bundleDir, "system-info.json"), JSON.stringify(sysInfo, null, 2));
+  writeFileSync(
+    join(bundleDir, "system-info.json"),
+    JSON.stringify(sysInfo, null, 2),
+  );
 
   // 6. summary
   const summary = generateSummary(stats, sysInfo, hookTimings, traces.length);
@@ -290,10 +322,16 @@ export async function diagnose({ json = false } = {}) {
   // 7. zip via PowerShell Compress-Archive
   const zipPath = `${bundleDir}.zip`;
   try {
-    execFileSync("powershell.exe", [
-      "-NoProfile", "-NonInteractive", "-Command",
-      `Compress-Archive -Path '${bundleDir}\\*' -DestinationPath '${zipPath}' -Force`,
-    ], { timeout: 30000, windowsHide: true });
+    execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Compress-Archive -Path '${bundleDir}\\*' -DestinationPath '${zipPath}' -Force`,
+      ],
+      { timeout: 30000, windowsHide: true },
+    );
   } catch (err) {
     // fallback: leave the directory unzipped
     if (json) {
@@ -306,7 +344,9 @@ export async function diagnose({ json = false } = {}) {
   try {
     const { rmSync } = await import("node:fs");
     rmSync(bundleDir, { recursive: true, force: true });
-  } catch { /* leave it */ }
+  } catch {
+    /* leave it */
+  }
 
   const mcpApprovalCheck = checkCodexMcpApproval();
 
@@ -338,7 +378,9 @@ if (isMain) {
   if (!json) {
     if (result.ok) {
       console.log(`\n  진단 번들 생성: ${result.zipPath}`);
-      console.log(`  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`);
+      console.log(
+        `  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`,
+      );
     } else {
       console.error(`  진단 실패: ${result.error}`);
       process.exit(1);

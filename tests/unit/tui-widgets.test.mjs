@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-
+import { stripAnsi } from "../../hub/team/ansi.mjs";
 import {
   createPanelResizer,
   createSearchState,
@@ -10,7 +10,6 @@ import {
   createVimMotion,
   sparkline,
 } from "../../hub/team/tui-widgets.mjs";
-import { stripAnsi } from "../../hub/team/ansi.mjs";
 
 describe("sparkline", () => {
   it("빈 값 배열 → 대시 문자열", () => {
@@ -168,7 +167,11 @@ describe("createPanelResizer", () => {
   });
 
   it("minRatio/maxRatio 준수", () => {
-    const resizer = createPanelResizer({ minRatio: 0.2, maxRatio: 0.4, step: 0.5 });
+    const resizer = createPanelResizer({
+      minRatio: 0.2,
+      maxRatio: 0.4,
+      step: 0.5,
+    });
     resizer.shrinkRail();
     assert.equal(resizer.ratio, 0.2);
     resizer.expandRail();

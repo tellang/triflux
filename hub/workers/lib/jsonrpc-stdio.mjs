@@ -80,12 +80,7 @@ export class JsonRpcStdioClient {
    * @param {(err: Error) => void} [options.onError] Protocol error sink.
    * @param {number} [options.maxLineSize] Max bytes per inbound line.
    */
-  constructor({
-    stdin,
-    stdout,
-    onError,
-    maxLineSize = DEFAULT_MAX_LINE_SIZE,
-  }) {
+  constructor({ stdin, stdout, onError, maxLineSize = DEFAULT_MAX_LINE_SIZE }) {
     if (!stdin || typeof stdin.on !== "function") {
       throw new TypeError("JsonRpcStdioClient requires a readable stdin");
     }
@@ -96,9 +91,10 @@ export class JsonRpcStdioClient {
     this._stdin = stdin;
     this._stdout = stdout;
     this._onError = typeof onError === "function" ? onError : null;
-    this._maxLineSize = Number.isFinite(maxLineSize) && maxLineSize > 0
-      ? maxLineSize
-      : DEFAULT_MAX_LINE_SIZE;
+    this._maxLineSize =
+      Number.isFinite(maxLineSize) && maxLineSize > 0
+        ? maxLineSize
+        : DEFAULT_MAX_LINE_SIZE;
 
     /** @type {'running'|'closing'|'closed'} */
     this._state = "running";
@@ -176,7 +172,11 @@ export class JsonRpcStdioClient {
           const pending = this._pendingRequests.get(id);
           if (!pending) return;
           this._pendingRequests.delete(id);
-          reject(new Error(`JSON-RPC request timed out after ${timeoutMs}ms: ${method}`));
+          reject(
+            new Error(
+              `JSON-RPC request timed out after ${timeoutMs}ms: ${method}`,
+            ),
+          );
         }, timeoutMs);
         if (typeof timer.unref === "function") timer.unref();
       }
@@ -277,9 +277,8 @@ export class JsonRpcStdioClient {
     if (this._state === "closed") return;
     this._state = target;
 
-    const rejectErr = rejectReason instanceof Error
-      ? rejectReason
-      : new Error(CLOSED_MESSAGE);
+    const rejectErr =
+      rejectReason instanceof Error ? rejectReason : new Error(CLOSED_MESSAGE);
 
     for (const [, pending] of this._pendingRequests) {
       if (pending.timer) clearTimeout(pending.timer);
@@ -380,16 +379,17 @@ export class JsonRpcStdioClient {
     }
 
     // Response: has id + (result | error)
-    if (Object.prototype.hasOwnProperty.call(frame, "id") && frame.id !== null &&
-        (Object.prototype.hasOwnProperty.call(frame, "result") ||
-         Object.prototype.hasOwnProperty.call(frame, "error"))) {
+    if (
+      Object.hasOwn(frame, "id") &&
+      frame.id !== null &&
+      (Object.hasOwn(frame, "result") || Object.hasOwn(frame, "error"))
+    ) {
       this._dispatchResponse(frame);
       return;
     }
 
     // Notification: method + no id (or id === null for responses we treated above)
-    if (typeof frame.method === "string" &&
-        !Object.prototype.hasOwnProperty.call(frame, "id")) {
+    if (typeof frame.method === "string" && !Object.hasOwn(frame, "id")) {
       this._dispatchNotification(frame);
       return;
     }
@@ -412,7 +412,7 @@ export class JsonRpcStdioClient {
     this._pendingRequests.delete(frame.id);
     if (pending.timer) clearTimeout(pending.timer);
 
-    if (Object.prototype.hasOwnProperty.call(frame, "error") && frame.error) {
+    if (Object.hasOwn(frame, "error") && frame.error) {
       const { code, message, data } = frame.error;
       const err = new Error(
         `JSON-RPC error${typeof code === "number" ? ` ${code}` : ""}: ${message || "unknown"}`,

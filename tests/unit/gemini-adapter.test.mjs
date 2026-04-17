@@ -113,7 +113,9 @@ test("execute opens the circuit after repeated crashes", async () => {
     mkdirSync(brokerDir, { recursive: true });
     writeFileSync(
       join(brokerDir, "accounts.json"),
-      JSON.stringify({ gemini: [{ id: "test-gemini", mode: "profile", profile: "default" }] }),
+      JSON.stringify({
+        gemini: [{ id: "test-gemini", mode: "profile", profile: "default" }],
+      }),
       "utf8",
     );
     const prevHome = process.env.HOME;
