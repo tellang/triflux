@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import {
+  cleanupWorktree,
   ensureWorktree,
   prepareIntegrationBranch,
   pruneOrphanWorktrees,
@@ -203,5 +204,18 @@ describe("worktree-lifecycle", () => {
   it("W-06: pruneOrphanWorktrees — .codex-swarm 없으면 빈 배열 반환", async () => {
     const removed = await pruneOrphanWorktrees({ rootDir: repoDir });
     assert.deepEqual(removed, []);
+  });
+
+  it("W-07: cleanupWorktree — main working tree 삭제를 차단한다", async () => {
+    await assert.rejects(
+      () =>
+        cleanupWorktree({
+          worktreePath: repoDir,
+          branchName: "main",
+          rootDir: repoDir,
+          force: true,
+        }),
+      /main working tree/,
+    );
   });
 });
