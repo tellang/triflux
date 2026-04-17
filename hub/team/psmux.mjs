@@ -877,9 +877,11 @@ function killOrphanMcpProcesses(sessionName) {
     } catch {}
     try {
       // MCP/result files live under `tfx-headless/<session>-<pane>.txt`, so
-      // match `tfx-headless/<session>` (same structure as the Windows branch).
+      // match `tfx-headless/<session>` with a trailing boundary to avoid
+      // killing sibling sessions whose names share a prefix
+      // (e.g. `<session>2-worker-1.txt`).
       const escSession = escapeRegex(safeSessionUnix);
-      const pids = childProcess.execFileSync("pgrep", ["-f", `tfx-headless/${escSession}`], {
+      const pids = childProcess.execFileSync("pgrep", ["-f", `tfx-headless/${escSession}[-/.]`], {
         encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
       }).trim();
       if (pids) {

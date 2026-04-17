@@ -593,6 +593,12 @@ describe("killPsmuxSession cleanup", () => {
         !/mcp\.\*\[\/ \]/.test(mcpPat),
         `legacy 'mcp.*[/ ]...' 패턴이 남아 있으면 안 된다: ${mcpPat}`,
       );
+      // prefix collision 방지: 세션명 뒤에 boundary가 강제되어야 한다
+      assert.ok(
+        /tfx\.session\\\+v2\[[^\]]*-[^\]]*\]/.test(mcpPat) ||
+          /tfx\.session\\\+v2[-.\/]/.test(mcpPat),
+        `세션명 뒤 boundary (e.g. [-/.]) 가 있어야 prefix 충돌을 막는다: ${mcpPat}`,
+      );
     },
   );
 });
