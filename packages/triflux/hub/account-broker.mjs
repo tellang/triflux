@@ -4,10 +4,22 @@
 // Singleton export. All state changes create new objects (immutable pattern).
 
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  constants as fsConstants,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join } from "node:path";
 import * as z from "zod";
+
+import { isPathWithin } from "./platform.mjs";
 
 // ── Zod schema ───────────────────────────────────────────────────
 
@@ -45,7 +57,7 @@ const ConfigSchema = z.object({
 });
 
 const DEFAULT_COOLDOWN_MS = 300_000; // 5 minutes
-const QUOTA_COOLDOWN_MS = {
+const _QUOTA_COOLDOWN_MS = {
   codex: 5 * 60 * 60_000, // 5 hours (단기 쿼터)
   codex_weekly: 7 * 24 * 60 * 60_000, // 7 days (주간 쿼터)
   gemini: 24 * 60 * 60_000, // 24 hours
@@ -55,7 +67,12 @@ const LEASE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CIRCUIT_WINDOW_MS = 10 * 60_000; // 10 minutes
 const CIRCUIT_MAX_FAILURES = 3;
 const AUTH_BASE_PATH = join(homedir(), ".claude", "cache", "tfx-hub");
+const CODEX_AUTH_SOURCE_PATH = join(homedir(), ".codex", "auth.json");
 const STATE_PERSIST_PATH = join(AUTH_BASE_PATH, "broker-state.json");
+const AUTH_SYNC_LOCK_TIMEOUT_MS = 5_000;
+const AUTH_SYNC_LOCK_RETRY_MS = 25;
+const AUTH_SYNC_LOCK_STALE_MS = 30_000;
+const AUTH_SYNC_SAB = new Int32Array(new SharedArrayBuffer(4));
 
 // ── State persistence ────────────────────────────────────────────
 
@@ -65,7 +82,11 @@ function persistState(stateMap) {
     const entries = {};
     for (const [id, acct] of stateMap) {
       // 활성 쿨다운 또는 circuit open만 저장 (불필요한 데이터 제거)
-      if (acct.cooldownUntil > now || acct.circuitOpenedAt > 0 || acct.totalSessions > 0) {
+      if (
+        acct.cooldownUntil > now ||
+        acct.circuitOpenedAt > 0 ||
+        acct.totalSessions > 0
+      ) {
         entries[id] = {
           cooldownUntil: acct.cooldownUntil,
           circuitOpenedAt: acct.circuitOpenedAt,
@@ -77,7 +98,11 @@ function persistState(stateMap) {
     }
     mkdirSync(AUTH_BASE_PATH, { recursive: true });
     writeFileSync(STATE_PERSIST_PATH, JSON.stringify({ ts: now, entries }));
-  } catch (err) { try { console.error("[account-broker] persistState failed:", err.message); } catch {} }
+  } catch (err) {
+    try {
+      console.error("[account-broker] persistState failed:", err.message);
+    } catch {}
+  }
 }
 
 function loadPersistedState() {
@@ -114,6 +139,104 @@ function getRemainingLeaseMs(account, now) {
   return Math.max(0, LEASE_TTL_MS - (now - account.leasedAt));
 }
 
+function sleepSync(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return;
+  Atomics.wait(AUTH_SYNC_SAB, 0, 0, ms);
+}
+
+function statOrNull(filePath) {
+  try {
+    return statSync(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function readAuthPayload(filePath) {
+  const buffer = readFileSync(filePath);
+  const parsed = JSON.parse(buffer.toString("utf8"));
+  return {
+    buffer,
+    parsed,
+    accountId:
+      parsed?.tokens?.account_id ??
+      parsed?.account_id ??
+      parsed?.accountId ??
+      null,
+  };
+}
+
+function createSyncResult({
+  accountId,
+  direction,
+  sourcePath,
+  cachePath,
+  copied = false,
+  skipped = false,
+  reason = "ok",
+}) {
+  return {
+    ok: !skipped || reason === "up_to_date",
+    accountId,
+    direction,
+    sourcePath,
+    cachePath,
+    copied,
+    skipped,
+    reason,
+  };
+}
+
+function withLockFile(lockPath, opts, task) {
+  const retryMs = opts.retryMs ?? AUTH_SYNC_LOCK_RETRY_MS;
+  const timeoutMs = opts.timeoutMs ?? AUTH_SYNC_LOCK_TIMEOUT_MS;
+  const staleMs = opts.staleMs ?? AUTH_SYNC_LOCK_STALE_MS;
+  const start = Date.now();
+
+  while (true) {
+    let fd;
+    try {
+      mkdirSync(dirname(lockPath), { recursive: true });
+      fd = openSync(
+        lockPath,
+        fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL,
+        0o600,
+      );
+      writeFileSync(fd, `${process.pid}\n${Date.now()}`, "utf8");
+      try {
+        return task();
+      } finally {
+        closeSync(fd);
+        try {
+          unlinkSync(lockPath);
+        } catch {}
+      }
+    } catch (error) {
+      if (fd !== undefined) {
+        try {
+          closeSync(fd);
+        } catch {}
+      }
+      if (error?.code !== "EEXIST") throw error;
+
+      const lockStat = statOrNull(lockPath);
+      if (lockStat && Date.now() - lockStat.mtimeMs > staleMs) {
+        try {
+          unlinkSync(lockPath);
+          continue;
+        } catch {}
+      }
+
+      if (Date.now() - start >= timeoutMs) {
+        return { lockTimeout: true };
+      }
+
+      sleepSync(retryMs);
+    }
+  }
+}
+
 // ── AccountBroker ────────────────────────────────────────────────
 
 class AccountBroker extends EventEmitter {
@@ -121,12 +244,35 @@ class AccountBroker extends EventEmitter {
   #state; // Map<accountId, accountState>
   #roundRobinIndex; // Map<provider, number>
   #persist; // boolean — disable persistence for tests
+  #authBasePath;
+  #codexAuthSourcePath;
+  #authSyncLockOpts;
+  #syncCopyDelayMs;
 
-  constructor(config, { _skipPersistence = false } = {}) {
+  constructor(
+    config,
+    {
+      _skipPersistence = false,
+      _authBasePath = AUTH_BASE_PATH,
+      _codexAuthSourcePath = CODEX_AUTH_SOURCE_PATH,
+      _authSyncLockTimeoutMs = AUTH_SYNC_LOCK_TIMEOUT_MS,
+      _authSyncLockRetryMs = AUTH_SYNC_LOCK_RETRY_MS,
+      _authSyncLockStaleMs = AUTH_SYNC_LOCK_STALE_MS,
+      _syncCopyDelayMs = 0,
+    } = {},
+  ) {
     super();
     const parsed = ConfigSchema.parse(config);
     this.#config = parsed;
     this.#persist = !_skipPersistence;
+    this.#authBasePath = _authBasePath;
+    this.#codexAuthSourcePath = _codexAuthSourcePath;
+    this.#authSyncLockOpts = {
+      timeoutMs: _authSyncLockTimeoutMs,
+      retryMs: _authSyncLockRetryMs,
+      staleMs: _authSyncLockStaleMs,
+    };
+    this.#syncCopyDelayMs = _syncCopyDelayMs;
 
     this.#state = new Map();
     this.#roundRobinIndex = new Map();
@@ -160,6 +306,232 @@ class AccountBroker extends EventEmitter {
         totalSessions: saved?.totalSessions ?? 0,
       });
     }
+  }
+
+  #resolveCacheAuthPath(acct) {
+    if (!acct?.authFile) return null;
+    const resolved = join(this.#authBasePath, acct.authFile);
+    if (
+      !isPathWithin(resolved, this.#authBasePath) ||
+      resolved === this.#authBasePath
+    ) {
+      return null;
+    }
+    return resolved;
+  }
+
+  #getSourceAuthPath(acct) {
+    if (!acct || acct.mode !== "auth") return null;
+    if (acct.provider === "codex") return this.#codexAuthSourcePath;
+    return null;
+  }
+
+  #getLockPath(acct) {
+    return join(this.#authBasePath, `codex-auth-sync-${acct.id}.lock`);
+  }
+
+  #copyAuthPayload(sourcePath, destPath) {
+    const payload = readFileSync(sourcePath);
+    if (this.#syncCopyDelayMs > 0) {
+      sleepSync(this.#syncCopyDelayMs);
+    }
+    mkdirSync(dirname(destPath), { recursive: true });
+    writeFileSync(destPath, payload);
+  }
+
+  #syncAuth(accountId, direction) {
+    const acct = this.#state.get(accountId);
+    const sourcePath = this.#getSourceAuthPath(acct);
+    const cachePath = this.#resolveCacheAuthPath(acct);
+
+    if (!acct || acct.mode !== "auth" || acct.provider !== "codex") {
+      return createSyncResult({
+        accountId,
+        direction,
+        sourcePath,
+        cachePath,
+        skipped: true,
+        reason: "unsupported_account",
+      });
+    }
+
+    if (!cachePath) {
+      this.emit("securityViolation", {
+        id: acct.id,
+        authFile: acct.authFile,
+      });
+      return createSyncResult({
+        accountId,
+        direction,
+        sourcePath,
+        cachePath,
+        skipped: true,
+        reason: "invalid_cache_path",
+      });
+    }
+
+    if (!sourcePath) {
+      return createSyncResult({
+        accountId,
+        direction,
+        sourcePath,
+        cachePath,
+        skipped: true,
+        reason: "unsupported_source",
+      });
+    }
+
+    const locked = withLockFile(
+      this.#getLockPath(acct),
+      this.#authSyncLockOpts,
+      () => {
+        try {
+          if (direction === "from-source") {
+            const sourceStat = statOrNull(sourcePath);
+            if (!sourceStat) {
+              return createSyncResult({
+                accountId,
+                direction,
+                sourcePath,
+                cachePath,
+                skipped: true,
+                reason: "source_missing",
+              });
+            }
+
+            const sourceAuth = readAuthPayload(sourcePath);
+            if (!sourceAuth.accountId) {
+              return createSyncResult({
+                accountId,
+                direction,
+                sourcePath,
+                cachePath,
+                skipped: true,
+                reason: "source_account_unknown",
+              });
+            }
+            if (sourceAuth.accountId !== accountId) {
+              return createSyncResult({
+                accountId,
+                direction,
+                sourcePath,
+                cachePath,
+                skipped: true,
+                reason: "source_account_mismatch",
+              });
+            }
+
+            const cacheStat = statOrNull(cachePath);
+            if (cacheStat && sourceStat.mtimeMs <= cacheStat.mtimeMs) {
+              return createSyncResult({
+                accountId,
+                direction,
+                sourcePath,
+                cachePath,
+                skipped: true,
+                reason: "up_to_date",
+              });
+            }
+
+            this.#copyAuthPayload(sourcePath, cachePath);
+            return createSyncResult({
+              accountId,
+              direction,
+              sourcePath,
+              cachePath,
+              copied: true,
+              reason: cacheStat ? "cache_updated" : "cache_created",
+            });
+          }
+
+          const cacheStat = statOrNull(cachePath);
+          if (!cacheStat) {
+            return createSyncResult({
+              accountId,
+              direction,
+              sourcePath,
+              cachePath,
+              skipped: true,
+              reason: "cache_missing",
+            });
+          }
+
+          const cacheAuth = readAuthPayload(cachePath);
+          if (!cacheAuth.accountId) {
+            return createSyncResult({
+              accountId,
+              direction,
+              sourcePath,
+              cachePath,
+              skipped: true,
+              reason: "cache_account_unknown",
+            });
+          }
+          if (cacheAuth.accountId !== accountId) {
+            return createSyncResult({
+              accountId,
+              direction,
+              sourcePath,
+              cachePath,
+              skipped: true,
+              reason: "cache_account_mismatch",
+            });
+          }
+
+          const sourceStat = statOrNull(sourcePath);
+          if (sourceStat && cacheStat.mtimeMs <= sourceStat.mtimeMs) {
+            return createSyncResult({
+              accountId,
+              direction,
+              sourcePath,
+              cachePath,
+              skipped: true,
+              reason: "up_to_date",
+            });
+          }
+
+          this.#copyAuthPayload(cachePath, sourcePath);
+          return createSyncResult({
+            accountId,
+            direction,
+            sourcePath,
+            cachePath,
+            copied: true,
+            reason: sourceStat ? "source_updated" : "source_created",
+          });
+        } catch (error) {
+          return createSyncResult({
+            accountId,
+            direction,
+            sourcePath,
+            cachePath,
+            skipped: true,
+            reason: error?.code === "ENOENT" ? "file_missing" : "read_error",
+          });
+        }
+      },
+    );
+
+    if (locked?.lockTimeout) {
+      return createSyncResult({
+        accountId,
+        direction,
+        sourcePath,
+        cachePath,
+        skipped: true,
+        reason: "lock_timeout",
+      });
+    }
+
+    return locked;
+  }
+
+  syncAuthFromSource(accountId) {
+    return this.#syncAuth(accountId, "from-source");
+  }
+
+  syncAuthToSource(accountId) {
+    return this.#syncAuth(accountId, "to-source");
   }
 
   // ── per-account circuit breaker ─────────────────────────────────
@@ -221,7 +593,7 @@ class AccountBroker extends EventEmitter {
 
   // ── lease ─────────────────────────────────────────────────────
 
-  lease({ provider, remote = false } = {}) {
+  lease({ provider, remote = false, autoSync = true } = {}) {
     const now = Date.now();
     this.#pruneExpiredLeases(now);
 
@@ -286,6 +658,31 @@ class AccountBroker extends EventEmitter {
     // advance round-robin index for this tier
     this.#roundRobinIndex.set(rrKey, (idx + 1) % tierCount);
 
+    let authFile;
+    if (acct.mode === "auth") {
+      const resolved = this.#resolveCacheAuthPath(acct);
+      if (!resolved) {
+        this.emit("securityViolation", {
+          id: acct.id,
+          authFile: acct.authFile,
+        });
+        return null;
+      }
+      authFile = resolved;
+      if (autoSync !== false) {
+        try {
+          const syncResult = this.syncAuthFromSource(acct.id);
+          this.emit("authSync", syncResult);
+        } catch (error) {
+          this.emit("authSyncError", {
+            accountId: acct.id,
+            direction: "from-source",
+            error: error?.message || String(error),
+          });
+        }
+      }
+    }
+
     // mark half-open trial if applicable
     const circuit = this.#getCircuitState(acct, now);
     const isHalfOpen = circuit.state === "half-open";
@@ -306,26 +703,6 @@ class AccountBroker extends EventEmitter {
       tier: acct.tier,
       halfOpen: isHalfOpen,
     });
-
-    // path traversal guard for authFile
-    let authFile;
-    if (acct.mode === "auth") {
-      const resolved = join(AUTH_BASE_PATH, acct.authFile);
-      if (!resolved.startsWith(AUTH_BASE_PATH + sep)) {
-        this.emit("securityViolation", {
-          id: acct.id,
-          authFile: acct.authFile,
-        });
-        // undo the lease — path traversal blocked
-        this.#state.set(acct.id, {
-          ...this.#state.get(acct.id),
-          busy: false,
-          leasedAt: null,
-        });
-        return null;
-      }
-      authFile = resolved;
-    }
 
     return {
       id: acct.id,

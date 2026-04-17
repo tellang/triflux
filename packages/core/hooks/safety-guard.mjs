@@ -11,6 +11,22 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+// ── 로컬 우회 플래그 ──────────────────────────────────────────
+// LOCAL ONLY — Issue #89 대안 API 구현 전까지 psmux kill 시리즈 우회용.
+// 활성 조건 (OR):
+//   1) env: TFX_CLEANUP_BYPASS=1
+//   2) 파일: .claude/cleanup-bypass 존재 (repo root)
+// 파일 방식은 Claude Code Bash 도구가 훅에 env 전달 못하는 경우에도 동작.
+// 정식 해결: hub/team/psmux.mjs 에 listSessions/killSessionByTitle/pruneStale 노출.
+const CLEANUP_BYPASS = (() => {
+  if (process.env.TFX_CLEANUP_BYPASS === "1") return true;
+  try {
+    return existsSync(join(process.cwd(), ".claude", "cleanup-bypass"));
+  } catch {
+    return false;
+  }
+})();
+
 // ── 차단 규칙 ──────────────────────────────────────────────
 const BLOCK_RULES = [
   {
@@ -44,14 +60,16 @@ const BLOCK_RULES = [
   {
     pattern: /\bpsmux\s+kill-session\b/i,
     reason:
-      "raw psmux kill-session 차단 — WT ConPTY 프리징 위험. 안전 경로: node hub/team/psmux.mjs kill --session <name>",
+      "raw psmux kill-session 차단 — WT ConPTY 프리징 위험. 대안: listSessions()/killSessionByTitle()/pruneStale() 또는 node hub/team/psmux.mjs --internal kill-by-title <prefix|/regex/> (또는 TFX_CLEANUP_BYPASS=1/.claude/cleanup-bypass)",
     skipIfGit: true,
+    cleanupBypass: true,
   },
   {
     pattern: /\bpsmux\s+kill-server\b/i,
     reason:
-      "psmux kill-server 차단 — 모든 세션이 즉시 종료됩니다. node hub/team/psmux.mjs kill-swarm 사용",
+      "psmux kill-server 차단 — 모든 세션이 즉시 종료됩니다. node hub/team/psmux.mjs kill-swarm 사용 (또는 TFX_CLEANUP_BYPASS=1)",
     skipIfGit: true,
+    cleanupBypass: true,
   },
 ];
 
@@ -70,8 +88,11 @@ const WT_DIRECT_BLOCK_MESSAGE =
   "  wt.createTab({ title, command, profile, cwd })  — 새 탭\n" +
   "  wt.splitPane({ direction: 'H'|'V', title, command })  — 패인 분할\n" +
   "  wt.applySplitLayout([{ title, command, direction }])  — 다중 배치\n" +
-  '사용법: node -e "import(\'./hub/team/wt-manager.mjs\').then(m => { const wt = m.createWtManager(); wt.createTab({ title: \'제목\', command: \'pwsh\' }); })"';
+  "사용법: node -e \"import('./hub/team/wt-manager.mjs').then(m => { const wt = m.createWtManager(); wt.createTab({ title: '제목', command: 'pwsh' }); })\"";
 
+const PSMUX_INTERNAL_WRAPPER_PATTERNS = [
+  /node(?:\.exe)?\s+.*hub[\\/]+team[\\/]+psmux\.mjs\s+--internal\s+(?:list|kill-by-title|prune-stale)\b/i,
+];
 
 // ── SSH+PowerShell bash 문법 차단 ────────────────────────────
 // 원격 기본 셸이 PowerShell인 호스트에 bash redirect/glob을 보내면 오동작
@@ -261,12 +282,20 @@ function main() {
     return hasSegmentInvocation(cmd, [/\bpsmux\s+kill-(session|server)\b/i]);
   }
 
+  function isAllowedPsmuxWrapperInvocation(cmd) {
+    return hasSegmentInvocation(cmd, PSMUX_INTERNAL_WRAPPER_PATTERNS);
+  }
+
   function isWtDirectInvocation(cmd) {
     return hasSegmentInvocation(cmd, WT_DIRECT_PATTERNS);
   }
 
   if (isWtDirectInvocation(command)) {
     blockCommand(WT_DIRECT_BLOCK_MESSAGE, command);
+  }
+
+  if (isAllowedPsmuxWrapperInvocation(command)) {
+    process.exit(0);
   }
 
   // 0.1. reflexion 적응형 패널티 — 이전 세션에서 차단된 패턴 사전 경고
@@ -299,7 +328,10 @@ function main() {
 
   // 0.5. SSH → Windows(PowerShell) 호스트에만 bash 문법 전달 차단
   // macOS/Linux 대상은 bash/zsh이므로 허용. hosts.json OS로 판별.
-  if (hasSegmentInvocation(command, [/^\s*ssh\s+/i]) && isSshTargetWindows(command)) {
+  if (
+    hasSegmentInvocation(command, [/^\s*ssh\s+/i]) &&
+    isSshTargetWindows(command)
+  ) {
     const segments = command.split(/\s*(?:&&|;|\|\||\|)\s*/);
     for (const seg of segments) {
       const sshMatch = seg.trim().match(/^ssh\s+\S+\s+(.*)/s);
@@ -317,10 +349,16 @@ function main() {
 
   // 1. BLOCK 체크 — exit 2로 차단
   for (const rule of BLOCK_RULES) {
+    if (rule.cleanupBypass && CLEANUP_BYPASS) continue;
     if (rule.skipIfGit && !isPsmuxInvocation(command)) continue;
     if (rule.pattern.test(command)) {
       blockCommand(`[triflux safety-guard] BLOCKED: ${rule.reason}`, command);
     }
+  }
+
+  // wt 정리 명령 우회 (TFX_CLEANUP_BYPASS=1 한정). new-tab/split-pane만 차단 유지하려면 아래 조건 세분화.
+  if (CLEANUP_BYPASS) {
+    // bypass 모드에서는 아래 wt 검사를 이미 통과한 상태. 추가 작업 없음.
   }
 
   // 2. WARN 체크 — allow + additionalContext

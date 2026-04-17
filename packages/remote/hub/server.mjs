@@ -22,7 +22,10 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
-import { broker as brokerInstance, reloadBroker } from "@triflux/core/hub/account-broker.mjs";
+import {
+  broker as brokerInstance,
+  reloadBroker,
+} from "@triflux/core/hub/account-broker.mjs";
 import { createAdaptiveEngine } from "@triflux/core/hub/adaptive.mjs";
 import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.mjs";
 import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
@@ -562,6 +565,40 @@ function getQosStatsPayload() {
   };
 }
 
+function syncBrokerAuthCache(currentBroker, logger = hubLog) {
+  if (!currentBroker?.snapshot || typeof currentBroker.syncAuthFromSource !== "function") {
+    return [];
+  }
+
+  const authAccounts = currentBroker
+    .snapshot()
+    .filter((account) => account.provider === "codex" && account.mode === "auth");
+
+  return authAccounts.map((account) => {
+    try {
+      const result = currentBroker.syncAuthFromSource(account.id);
+      if (result?.copied) {
+        logger.info(
+          {
+            accountId: account.id,
+            reason: result.reason,
+            sourcePath: result.sourcePath,
+            cachePath: result.cachePath,
+          },
+          "broker.auth_sync_from_source",
+        );
+      }
+      return result;
+    } catch (error) {
+      logger.warn(
+        { accountId: account.id, err: error?.message || String(error) },
+        "broker.auth_sync_from_source_failed",
+      );
+      return { ok: false, accountId: account.id, reason: error?.message || String(error) };
+    }
+  });
+}
+
 function resolvePublicFilePath(path) {
   let relativePath = null;
   if (path === "/dashboard") {
@@ -637,6 +674,8 @@ export async function startHub({
 
   const existingHub = await tryReuseExistingHub({ port, host });
   if (existingHub) return existingHub;
+
+  syncBrokerAuthCache(brokerInstance);
 
   const hubIdleTimeoutMs = parsePositiveInt(
     process.env.TFX_HUB_IDLE_TIMEOUT_MS,
@@ -945,6 +984,7 @@ export async function startHub({
         if (!result.ok) {
           return writeJson(res, 200, { ok: false, error: result.error });
         }
+        syncBrokerAuthCache(result.broker);
         const accounts = result.broker
           ? [...result.broker.snapshot()].length
           : 0;
@@ -2051,7 +2091,7 @@ async function refreshAllAccountQuotas() {
   return results;
 }
 
-function loadQuotaCache() {
+function _loadQuotaCache() {
   try {
     if (!existsSync(QUOTA_CACHE_PATH)) return null;
     return JSON.parse(readFileSync(QUOTA_CACHE_PATH, "utf8"));

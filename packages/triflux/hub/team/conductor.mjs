@@ -8,6 +8,7 @@
 // 3. Auto-restart (maxRestarts=3)
 // 4. JSONL event log (블랙박스 리코더)
 
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
   copyFileSync,
@@ -80,6 +81,29 @@ const DEFAULT_GRACE_MS = 10_000;
  */
 function swapAuthFile(lease, agent, sessionId, eventLog) {
   if (lease?.mode !== "auth" || !lease.authFile) return true;
+  if (
+    agent === "codex" &&
+    lease.id &&
+    broker &&
+    typeof broker.syncAuthToSource === "function"
+  ) {
+    const result = broker.syncAuthToSource(lease.id);
+    if (result?.copied || result?.reason === "up_to_date") {
+      eventLog.append("auth_copy", {
+        session: sessionId,
+        agent,
+        dest: result.sourcePath,
+        reason: result.reason,
+      });
+      return true;
+    }
+    eventLog.append("auth_copy_error", {
+      session: sessionId,
+      dest: result?.sourcePath || join(homedir(), ".codex", "auth.json"),
+      error: result?.reason || "sync_failed",
+    });
+    return false;
+  }
   const dests =
     agent === "codex"
       ? [join(homedir(), ".codex", "auth.json")]
@@ -115,7 +139,15 @@ function swapAuthFile(lease, agent, sessionId, eventLog) {
  * @param {object} [opts.broker] — AccountBroker 인스턴스 (tierFallback 구독용)
  * @returns {Conductor}
  */
+/**
+ * Conductor 생성.
+ * @param {object} [opts]
+ * @param {object} [opts.deps] — 의존성 주입 (테스트용 mock 지원)
+ * @param {Function} [opts.deps.execFile] — execFile 오버라이드
+ * @param {Function} [opts.deps.spawn] — spawn 오버라이드 (로컬/원격 child process 모두)
+ */
 export function createConductor(opts = {}) {
+  const spawnFn = opts.deps?.spawn || spawn;
   const {
     logsDir,
     maxRestarts = DEFAULT_MAX_RESTARTS,
@@ -457,11 +489,51 @@ export function createConductor(opts = {}) {
     let outputBytes = 0;
     let recentOutput = "";
 
+    const spawnCwd = session.config.workdir || launcher.cwd || undefined;
+
+    // #90 branch guard: shard spawn cwd가 main 브랜치면 즉시 abort.
+    // swarm shard는 반드시 shard 전용 worktree 브랜치에서 실행되어야 한다.
+    // cwd fallback으로 main working tree에 떨어진 경우 차단.
+    if (session.config.branchGuard && spawnCwd) {
+      try {
+        const r = spawnSync(
+          "git",
+          ["rev-parse", "--abbrev-ref", "HEAD"],
+          { cwd: spawnCwd, encoding: "utf8", windowsHide: true, timeout: 5_000 },
+        );
+        const curBranch = String(r.stdout || "").trim();
+        if (curBranch === "main" || curBranch === "master") {
+          eventLog.append("branch_guard_refused", {
+            session: session.id,
+            cwd: spawnCwd,
+            branch: curBranch,
+          });
+          handleFailure(session, `branch_guard:${curBranch}_refused`);
+          return;
+        }
+      } catch (err) {
+        eventLog.append("branch_guard_probe_failed", {
+          session: session.id,
+          cwd: spawnCwd,
+          error: err.message,
+        });
+        // 프로브 실패는 비차단 — git 미설치/non-repo 환경 대응
+      }
+    }
+
     let child;
     try {
-      child = spawn(launcher.command, {
+      child = spawnFn(launcher.command, {
         shell: true,
-        env: { ...process.env, ...launcher.env, ...(session.config.env || {}) },
+        cwd: spawnCwd,
+        env: {
+          ...process.env,
+          ...launcher.env,
+          ...(session.config.env || {}),
+          ...(session.config.branchGuard
+            ? { TRIFLUX_GIT_BRANCH_GUARD: "1" }
+            : {}),
+        },
         reason: `conductor:respawnSession:${session.id}`,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
@@ -470,6 +542,7 @@ export function createConductor(opts = {}) {
       eventLog.append("spawn_error", {
         session: session.id,
         error: err.message,
+        cwd: spawnCwd || null,
       });
       handleFailure(session, `spawn_error:${err.message}`);
       return;
@@ -640,7 +713,7 @@ export function createConductor(opts = {}) {
 
     let child;
     try {
-      child = spawn("ssh", sshArgs, {
+      child = spawnFn("ssh", sshArgs, {
         env: process.env,
         reason: `conductor:remoteSession:${session.id}`,
         stdio: ["pipe", "pipe", "pipe"],

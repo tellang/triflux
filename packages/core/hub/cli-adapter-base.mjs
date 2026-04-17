@@ -147,7 +147,10 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
       parts.push("--output-last-message", resultFile);
     }
     if (FEATURES.colorNever) parts.push("--color", "never");
-    if (cwd) parts.push("--cwd", `'${escapePwshSingleQuoted(cwd)}'`);
+    // NOTE: `codex exec`는 --cwd 플래그를 지원하지 않는다. Node spawn의 cwd
+    // 옵션으로 child process의 working directory를 제어한다 (conductor.mjs 참조).
+    // opts.cwd는 기록용으로만 받아두고 CLI command에는 반영하지 않는다.
+    // (이전 커밋에서 잘못 추가되어 shard 전체가 exit 2로 크래시한 회귀 #94 후속 이슈)
     if (Array.isArray(mcpServers)) {
       for (const server of mcpServers) {
         parts.push("-c", `mcp_servers.${server}.enabled=true`);
