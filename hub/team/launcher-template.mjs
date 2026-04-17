@@ -76,6 +76,7 @@ export function buildLauncher(opts) {
     model,
     resultFile,
     workdir,
+    cwd: workdir,
     mcpServers,
   });
 
@@ -86,6 +87,7 @@ export function buildLauncher(opts) {
     command,
     env,
     agent,
+    cwd: workdir || null,
   });
 }
 

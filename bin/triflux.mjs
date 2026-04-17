@@ -308,6 +308,42 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     ],
   },
+  swarm: {
+    usage: "tfx swarm <prd-path> [--dry-run|--json|--filter <shard>]",
+    description: "PRD 기반 멀티모델 x 멀티기기 스웜 실행 (#93)",
+    subcommands: {
+      plan: "tfx swarm plan <prd-path> [--json] — 실행 없이 계획만 출력",
+      list: "tfx swarm list [--json] — 활성 스웜 세션 조회 (synapse status)",
+      status: "tfx swarm status [--json] — list alias",
+    },
+    options: [
+      {
+        name: "--dry-run",
+        type: "boolean",
+        description: "PRD 분석만 수행, shard를 실행하지 않음",
+      },
+      {
+        name: "--json",
+        type: "boolean",
+        description: "구조화된 JSON 출력",
+      },
+      {
+        name: "--filter",
+        type: "string",
+        description: "특정 shard만 실행 (이름 매칭)",
+      },
+      {
+        name: "--max-restarts",
+        type: "number",
+        description: "shard별 최대 재시작 횟수 (기본 2)",
+      },
+      {
+        name: "--logs-dir",
+        type: "string",
+        description: "이벤트 로그 출력 디렉토리 오버라이드",
+      },
+    ],
+  },
   why: {
     usage: "tfx why <path> [--json]",
     description: "해당 경로의 마지막 커밋에서 X-Intent 트레일러 추출",
@@ -5373,6 +5409,30 @@ async function main() {
         });
       }
       await cmdSynapseStatus(cmdArgs.slice(1), { json: JSON_OUTPUT });
+      return;
+    }
+    case "swarm": {
+      await checkHubRunning();
+      const { cmdSwarmRun, cmdSwarmPlan, cmdSwarmList } = await import(
+        "../hub/team/swarm-cli.mjs"
+      );
+      const sub = cmdArgs[0] || "";
+      if (sub === "list" || sub === "status") {
+        await cmdSwarmList(cmdArgs.slice(1), { json: JSON_OUTPUT });
+        return;
+      }
+      if (sub === "plan") {
+        await cmdSwarmPlan(cmdArgs.slice(1), { json: JSON_OUTPUT });
+        return;
+      }
+      if (!sub || sub.startsWith("--")) {
+        throw createCliError("PRD 경로가 필요합니다", {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx swarm <prd-path> [--dry-run|--json|--filter <shard>]",
+        });
+      }
+      await cmdSwarmRun(cmdArgs, { json: JSON_OUTPUT });
       return;
     }
     case "why": {

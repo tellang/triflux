@@ -394,6 +394,8 @@ export function createSwarmHypervisor(opts) {
       mcpServers: shard.mcp,
       worktreePath: shard.worktreePath || null,
       branchName: shard.branchName || null,
+      // #90: shard는 worktree 격리가 본질. main 직접 커밋 방지 가드 env 주입.
+      branchGuard: true,
     };
 
     if (shard.worktreePath) {

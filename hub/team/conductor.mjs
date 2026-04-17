@@ -8,6 +8,7 @@
 // 3. Auto-restart (maxRestarts=3)
 // 4. JSONL event log (블랙박스 리코더)
 
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
   copyFileSync,
@@ -457,11 +458,51 @@ export function createConductor(opts = {}) {
     let outputBytes = 0;
     let recentOutput = "";
 
+    const spawnCwd = session.config.workdir || launcher.cwd || undefined;
+
+    // #90 branch guard: shard spawn cwd가 main 브랜치면 즉시 abort.
+    // swarm shard는 반드시 shard 전용 worktree 브랜치에서 실행되어야 한다.
+    // cwd fallback으로 main working tree에 떨어진 경우 차단.
+    if (session.config.branchGuard && spawnCwd) {
+      try {
+        const r = spawnSync(
+          "git",
+          ["rev-parse", "--abbrev-ref", "HEAD"],
+          { cwd: spawnCwd, encoding: "utf8", windowsHide: true, timeout: 5_000 },
+        );
+        const curBranch = String(r.stdout || "").trim();
+        if (curBranch === "main" || curBranch === "master") {
+          eventLog.append("branch_guard_refused", {
+            session: session.id,
+            cwd: spawnCwd,
+            branch: curBranch,
+          });
+          handleFailure(session, `branch_guard:${curBranch}_refused`);
+          return;
+        }
+      } catch (err) {
+        eventLog.append("branch_guard_probe_failed", {
+          session: session.id,
+          cwd: spawnCwd,
+          error: err.message,
+        });
+        // 프로브 실패는 비차단 — git 미설치/non-repo 환경 대응
+      }
+    }
+
     let child;
     try {
       child = spawn(launcher.command, {
         shell: true,
-        env: { ...process.env, ...launcher.env, ...(session.config.env || {}) },
+        cwd: spawnCwd,
+        env: {
+          ...process.env,
+          ...launcher.env,
+          ...(session.config.env || {}),
+          ...(session.config.branchGuard
+            ? { TRIFLUX_GIT_BRANCH_GUARD: "1" }
+            : {}),
+        },
         reason: `conductor:respawnSession:${session.id}`,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
@@ -470,6 +511,7 @@ export function createConductor(opts = {}) {
       eventLog.append("spawn_error", {
         session: session.id,
         error: err.message,
+        cwd: spawnCwd || null,
       });
       handleFailure(session, `spawn_error:${err.message}`);
       return;
