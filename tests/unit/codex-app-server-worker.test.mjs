@@ -639,3 +639,68 @@ describe("CodexAppServerWorker — thread id race", () => {
     await worker.stop();
   });
 });
+
+describe("CodexAppServerWorker — inflightRejectors & stale timer", () => {
+  it("inflightRejectors set is drained after thread/start failures (no leak)", async () => {
+    class RejectingThreadStart extends FakeClientBase {
+      request(method, params, timeoutMs) {
+        this.sent.push({ method, params });
+        if (method === "initialize") {
+          return Promise.resolve({
+            userAgent: "f",
+            codexHome: "/",
+            platformFamily: "u",
+            platformOs: "l",
+          });
+        }
+        if (method === "thread/start") {
+          return Promise.reject(new Error("thread/start boom"));
+        }
+        return new Promise(() => {});
+      }
+    }
+    const { worker } = makeWorker({ clientClass: RejectingThreadStart });
+    await worker.start();
+    for (let i = 0; i < 5; i += 1) {
+      const r = await worker.execute(`p${i}`);
+      assert.equal(r.exitCode, CODEX_APP_SERVER_TRANSPORT_EXIT_CODE);
+      assert.equal(r.error.code, "CODEX_APP_SERVER_TRANSPORT_ERROR");
+    }
+    assert.equal(
+      worker._inflightRejectors.size,
+      0,
+      "failed execute() must not leave stale rejectors behind",
+    );
+    await worker.stop();
+  });
+
+  it("stale timeout timer does not SIGTERM the child after prior execute completed", async () => {
+    const { worker, childRef } = makeWorker({ clientClass: PrimedFake });
+    await worker.start();
+    const client = FakeClientBase.last;
+
+    // A: short timeoutMs; completes well before the timer fires
+    const a = worker.execute("A", { timeoutMs: 40 });
+    await tick();
+    emitTurnCompleted(client, "completed");
+    const resultA = await a;
+    assert.equal(resultA.exitCode, 0);
+
+    // Wait past A's original timeout: stale timer (pre-fix) would fire here
+    await new Promise((r) => setTimeout(r, 80));
+
+    // B: long timeoutMs, uses the same child
+    const b = worker.execute("B", { timeoutMs: 10_000 });
+    await tick();
+    emitTurnCompleted(client, "completed");
+    const resultB = await b;
+    assert.equal(resultB.exitCode, 0);
+
+    assert.deepEqual(
+      childRef.child.signals,
+      [],
+      "no SIGTERM should be issued after A completes normally",
+    );
+    await worker.stop();
+  });
+});

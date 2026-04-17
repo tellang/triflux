@@ -686,6 +686,11 @@ export class CodexAppServerWorker {
       }
     };
 
+    /** @type {ReturnType<typeof setTimeout> | null} */
+    let timer = null;
+
+    try {
+
     const pushPublish = (method, params) => {
       if (!this.publishCallback) return;
       const msg = this._buildPublishMessage(
@@ -799,7 +804,6 @@ export class CodexAppServerWorker {
         this.bootstrapTimeoutMs,
       );
     } catch (error) {
-      offAll();
       return {
         output: error instanceof Error ? error.message : String(error),
         exitCode: CODEX_APP_SERVER_TRANSPORT_EXIT_CODE,
@@ -815,7 +819,6 @@ export class CodexAppServerWorker {
     const respThreadId = extractThreadIdFromStartResponse(threadStartResponse);
     if (respThreadId && !threadId) threadId = respThreadId;
     if (!threadId) {
-      offAll();
       return {
         output: "thread id를 추출하지 못했습니다.",
         exitCode: CODEX_APP_SERVER_EXECUTION_EXIT_CODE,
@@ -837,7 +840,6 @@ export class CodexAppServerWorker {
         this.bootstrapTimeoutMs,
       );
     } catch (error) {
-      offAll();
       return {
         output: error instanceof Error ? error.message : String(error),
         exitCode: CODEX_APP_SERVER_TRANSPORT_EXIT_CODE,
@@ -855,11 +857,14 @@ export class CodexAppServerWorker {
     const timeoutMs = Number.isFinite(opts.timeoutMs)
       ? opts.timeoutMs
       : DEFAULT_CODEX_APP_SERVER_EXECUTION_TIMEOUT_MS;
+    // Capture current child so a stale timer (post-result) cannot SIGTERM a
+    // later reused worker's child process.
+    const capturedChild = this.child;
     const timeoutPromise = new Promise((resolve) => {
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         this._warn("execution timeout", { timeoutMs });
         try {
-          this.child?.kill?.("SIGTERM");
+          capturedChild?.kill?.("SIGTERM");
         } catch {}
         resolve({
           output: outputParts.join(""),
@@ -877,9 +882,15 @@ export class CodexAppServerWorker {
     });
 
     const result = await Promise.race([resultPromise, timeoutPromise]);
-    offAll();
-    this._inflightRejectors.delete(inflightReject);
     return result;
+    } finally {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      offAll();
+      this._inflightRejectors.delete(inflightReject);
+    }
   }
 
   /**
