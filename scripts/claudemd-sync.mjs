@@ -7,9 +7,11 @@ import { OMC_END, TFX_START, writeSection } from "./lib/claudemd-scanner.mjs";
 const PKG_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GLOBAL_CLAUDE_MD_PATH = join(homedir(), ".claude", "CLAUDE.md");
 const PKG_CLAUDE_MD_PATH = join(PKG_ROOT, "CLAUDE.md");
+// Phase 2 이후 source of truth: .claude/rules/tfx-routing.md
+const ROUTING_RULE_PATH = join(PKG_ROOT, ".claude", "rules", "tfx-routing.md");
 const ROUTING_TAG_OPEN = "<routing>";
 const ROUTING_TAG_CLOSE = "</routing>";
-// Legacy heading fallback
+// Legacy heading fallback (Phase 2 이전 CLAUDE.md 인라인 스타일)
 const ROUTING_SECTION_HEADING = "## triflux CLI 라우팅";
 
 function findRoutingSection(markdown) {
@@ -86,15 +88,19 @@ function toSkippedResult(path, reason) {
 }
 
 export function getLatestRoutingTable() {
-  // 1차: 사용자 글로벌 ~/.claude/CLAUDE.md (어디서든 접근 가능한 공통 경로)
+  // 1차: .claude/rules/tfx-routing.md (Phase 2 이후 source of truth)
+  if (existsSync(ROUTING_RULE_PATH)) {
+    const body = readFileSync(ROUTING_RULE_PATH, "utf8").trim();
+    if (body) return `${ROUTING_TAG_OPEN}\n${body}\n${ROUTING_TAG_CLOSE}`;
+  }
+  // 2차 legacy: CLAUDE.md 인라인 <routing> 태그 또는 ## 헤딩
   for (const candidate of [GLOBAL_CLAUDE_MD_PATH, PKG_CLAUDE_MD_PATH]) {
     if (!existsSync(candidate)) continue;
     const section = findRoutingSection(readFileSync(candidate, "utf8"));
     if (section.found) return section.section.trim();
   }
-  // 2차 fallback: 패키지 CLAUDE.md도 없으면 에러
   throw new Error(
-    `routing section not found in: ${GLOBAL_CLAUDE_MD_PATH} or ${PKG_CLAUDE_MD_PATH}`,
+    `routing section not found in: ${ROUTING_RULE_PATH}, ${GLOBAL_CLAUDE_MD_PATH}, or ${PKG_CLAUDE_MD_PATH}`,
   );
 }
 
