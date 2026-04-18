@@ -2,6 +2,37 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [Unreleased]
+
+### Added — Phase 3: true ralph / auto-escalate / --lead (#112)
+
+- **[#112 Phase 3 Step A]** `hub/team/retry-state-machine.mjs` — true ralph + auto-escalate 상태 머신. 3 모드 (bounded/ralph/auto-escalate), stuck detector (동일 failureReason 3회 중단), 4단계 escalation 체인 (codex:gpt-5-mini → codex:gpt-5 → claude:sonnet-4-6 → claude:opus-4-7), EventEmitter on("transition") 연동 (retry-state-machine.test.mjs 12건)
+- **[#112 Phase 3 Step B]** `hub/lib/tfx-route-args.mjs` — tfx-auto ARGUMENTS 파서. Phase 3 신규 플래그 3개 (`--lead {claude|codex}`, `--no-claude-native`, `--max-iterations <N>`) + `--retry` 값 확장 (`ralph`, `auto-escalate`) + 조합 validation (`--parallel 1 + --isolation worktree` force none, `--remote + non-swarm` warn) + `--flag=value` 및 `--flag value` 두 형태 지원 (tfx-route-args.test.mjs 16건)
+- **[#112 Phase 3 Step C2]** `hub/bridge.mjs retry-run` / `retry-status` 서브커맨드 — multi-process safe state machine bridge. snapshot JSON 파일을 통해 Claude orchestration 이 매 iteration 마다 state 조회/전이. serialize/applySnapshot round-trip + loadSnapshot/saveSnapshot 파일 I/O + version gate (v1) (bridge-retry.test.mjs 3건, retry-state-machine round-trip 4건)
+- **[#112 Phase 3 Step D]** `.claude/rules/tfx-escalation-chain.md` 신규 — DEFAULT_ESCALATION_CHAIN 4단계 규약 + 프로젝트 override (`.triflux/config/escalation-chain.json`). `.gitignore` 에 `!.claude/rules/*.md` 예외 추가 — 기존 `tfx-routing.md` / `tfx-execution-skill-map.md` / `tfx-update-logic.md` 3파일도 함께 tracked (Phase 2 source/installed drift 해결)
+- **[#112 Phase 3 Step F]** integration 테스트 2건 — ralph compaction survive (5 iteration 독립 프로세스 counter 유지, snapshot 외부 수정 후 복원, DONE idempotent resume), auto-escalate chain (체인 2단계 전이, 끝까지 소진 BUDGET_EXCEEDED, 중간 verify-success DONE, stuck 은 체인과 독립)
+
+### Changed
+
+- **[#112 Phase 3 Step C1]** `skills/tfx-auto/SKILL.md` 플래그 오버라이드 테이블 5줄 추가 (`--retry ralph`/`auto-escalate`, `--lead claude|codex`, `--no-claude-native`, `--max-iterations N`). Legacy 매핑 3건 갱신:
+  - `tfx-autoroute`: `--cli auto --retry 1` → `--retry auto-escalate`
+  - `tfx-persist`: `--mode deep --retry ralph` (⚠ degrade) → `--retry ralph` (Phase 3 unlimited)
+  - `tfx-auto-codex`: `--cli codex + env` → `--cli codex --lead codex --no-claude-native`
+- **[#112 Phase 3 Step C1]** 3 thin alias 본문 재작성 (`tfx-auto-codex`, `tfx-persist`, `tfx-autoroute`) — Phase 3 플래그로 "완전 표현" 됨을 반영. `tfx-persist` 는 state machine 전이 다이어그램 + `.omc/state/retry-<sid>.json` 복원 경로 명시, `tfx-autoroute` 는 DEFAULT_ESCALATION_CHAIN 4단계 + `.claude/rules/tfx-escalation-chain.md` override crosslink
+- **[#112 Phase 3 Step D]** `.claude/rules/tfx-routing.md` "깊이 수정자" 표 — "반복" → `--retry ralph` 매핑, "승격" 신규 행 추가 (`--retry auto-escalate`). `.claude/rules/tfx-execution-skill-map.md` 에 "Retry 정책 (Phase 3+)" 섹션 추가
+
+### Fixed
+
+- **[lint]** biome 2.4.10 drift 일괄 정리 — `noUnusedImports` / `noUnusedVariables` / `useOptionalChain` 17파일. `String.raw` (Windows path) 보존 검증. 기존 pre-existing 30 test fail 은 `{ todo: ... }` 마커로 전환 (Phase 2 Step B thin alias 이관 회귀, Phase 3 Step E 복원 예정)
+- **[packages]** `pack.mjs` 미러 동기화 — 02dd3aa lint drift 17파일 + #108 체인 마지막 (49e0979) 이후 누락된 `codex-app-server-worker.mjs` sha256 복원. packages-sync PRD-4 gate 2건 pass
+- **[test]** `safety-guard-psmux.test.mjs` cwd/env 격리 — `.claude/cleanup-bypass` 로컬 우회 마커가 테스트 cwd 에 있으면 runGuard 가 통과로 오판. `cwd: tmpdir()` + `TFX_CLEANUP_BYPASS` env 제거 + 가드 스크립트 절대경로 해석으로 격리
+- **[claudemd-sync]** `.claude/rules/tfx-routing.md` 를 source of truth 로 — Phase 2 Step A 이후 CLAUDE.md 에서 `<routing>` 태그가 없어 "routing section not found" 5건 fail. `getLatestRoutingTable()` 가 새 source 먼저 읽고 CLAUDE.md 인라인/heading 은 legacy fallback 유지
+
+### Known Issues
+
+- **[#113]** `claudemd-sync` 가 세션 중 프로젝트 `CLAUDE.md` 에 `<routing>` 블록 자동 주입하는 경로 미식별 — Phase 2 Step A 의 축소 의도와 상충. 재발생 시 `git checkout -- CLAUDE.md` 로 revert 필요
+- **[skill-drift]** skill-drift.test.mjs 17건 + deep-interview.test.mjs 3건 `todo` 마커 유지 — Phase 2 Step B thin alias 축소 시 유실된 규칙 (CLEANUP & CANCEL RULES, 5 Stage 헤더, 산출물 경로 등) 의 본체 복원은 Phase 3 Step E 로 이관
+
 ## [10.10.0] - 2026-04-18
 
 ### Added
