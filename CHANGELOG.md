@@ -4,6 +4,8 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.12.0] - 2026-04-18
+
 ### Added — Phase 4: ensemble fold + remote consolidate
 
 - **Phase 4a** `skills/tfx-auto/SKILL.md` 에 `--shape {consensus|debate|panel}` 플래그 추가 — `--mode consensus` 의 출력 shape + orchestration policy 분기. `hub/team/consensus-meta.mjs` 신규 (표준 `meta_judgment` 스키마 유틸: severity_classification/consensus_vs_dispute/recommended_action/followup_issues). `tfx-debate`/`tfx-consensus`/`tfx-panel` 3 스킬 thin alias 축소
