@@ -209,7 +209,7 @@ export function createWtManager(opts = {}) {
       opts.tabCreateDelayMs,
       DEFAULT_TAB_CREATE_DELAY_MS,
     ) || DEFAULT_TAB_CREATE_DELAY_MS;
-  const waitTimeoutMs =
+  const _waitTimeoutMs =
     resolvePositiveInteger(
       opts.waitTimeoutMs,
       process.env.WTM_WAIT_TIMEOUT_MS,

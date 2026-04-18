@@ -2,7 +2,6 @@
 // virtual row buffer 기반. dirty-row만 갱신. isTTY 아닐 때 append-only fallback.
 // Tier1(상단 고정) / Tier2(worker rail) / Tier3(focus pane) 3단 계층.
 
-import { getEnvironment } from "../lib/env-detect.mjs";
 import {
   altScreenOff,
   altScreenOn,
@@ -39,11 +38,9 @@ import {
   loadVersion,
   runtimeStatus,
   sanitizeFiles,
-  sanitizeFindings,
   sanitizeOneLine,
   sanitizeTextBlock,
   statusColor,
-  stripCodeBlocks,
   wrapLine,
   wrapText as wrapTextAll,
 } from "./tui-core.mjs";

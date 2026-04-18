@@ -428,7 +428,7 @@ export class CodexAppServerWorker {
       );
     }
 
-    if (!child || !child.stdin || !child.stdout) {
+    if (!child?.stdin || !child.stdout) {
       throw new CodexAppServerTransportError(
         "codex app-server 자식 프로세스의 stdio 핸들을 가져오지 못했습니다.",
       );

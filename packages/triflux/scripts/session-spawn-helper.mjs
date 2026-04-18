@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { spawn } from "../hub/lib/spawn-trace.mjs";
 import { createWtManager } from "../hub/team/wt-manager.mjs";
 
 const SESSION_PREFIX = "tfx-isolated";
