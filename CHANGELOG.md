@@ -4,6 +4,23 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+### Added — Phase 4: ensemble fold + remote consolidate
+
+- **Phase 4a** `skills/tfx-auto/SKILL.md` 에 `--shape {consensus|debate|panel}` 플래그 추가 — `--mode consensus` 의 출력 shape + orchestration policy 분기. `hub/team/consensus-meta.mjs` 신규 (표준 `meta_judgment` 스키마 유틸: severity_classification/consensus_vs_dispute/recommended_action/followup_issues). `tfx-debate`/`tfx-consensus`/`tfx-panel` 3 스킬 thin alias 축소
+- **Phase 4b** `skills/tfx-remote/SKILL.md` 신설 — 기존 `tfx-remote-setup` + `tfx-remote-spawn` 2스킬을 단일 subcommand 인터페이스로 축소 (setup/spawn/list/attach/send/resume/kill/probe). `hub/lib/hosts-compat.mjs` 신규 — hosts.json v1/v2 호환 adapter (safety-guard/ssh-command 기존 소비자 보존)
+- **Phase 4b** `skills/tfx-psmux-rules` → `.claude/rules/tfx-psmux.md` 이관 + `AGENTS.md` 복제 (Codex `@import` 미지원 대응). 스킬 → 강제 규약 재분류
+
+### Changed
+
+- `.claude/rules/tfx-routing.md` — ensemble/debate/consensus/panel 자연어 라우팅을 `tfx-auto --mode consensus --shape …` 로 통합
+- legacy alias 6개 (tfx-debate, tfx-consensus, tfx-panel, tfx-remote-setup, tfx-remote-spawn, tfx-psmux-rules) stderr 경고 + stdout `[DEPRECATED]` 마커 + `.omc/state/alias-usage.log` append 규약 적용
+- `README.md` + `README.ko.md` — 스킬 수 badge (42 → 21 core + 23 aliases) + Phase 3/4 플래그 본문 반영 + `tfx-remote` 통합 예시
+
+### Fixed
+
+- `scripts/sync-hub-mcp-settings.mjs` — tfx-hub 엔트리에 `type:"http"` 자동 백필 + 검증. Claude Code MCP schema violation 회귀 방지 (user `.claude.json`, project `.mcp.json`, `.gemini/settings.json` 공통)
+- `tests/unit/sync-hub-mcp-settings.test.mjs` — type 백필 로직 반영 (case 2/8)
+
 ## [10.11.0] - 2026-04-18
 
 ### Added — Phase 3: true ralph / auto-escalate / --lead (#112)
