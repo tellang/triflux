@@ -80,12 +80,12 @@ export function createGitPreflight(opts = {}) {
   }
 
   function otherActiveSessions(active, sessionId) {
-    return active.filter((s) => s && s.sessionId && s.sessionId !== sessionId);
+    return active.filter((s) => s?.sessionId && s.sessionId !== sessionId);
   }
 
   function otherLeases(snapshot, workerId) {
     return snapshot.filter(
-      (entry) => entry && entry.workerId && entry.workerId !== workerId,
+      (entry) => entry?.workerId && entry.workerId !== workerId,
     );
   }
 

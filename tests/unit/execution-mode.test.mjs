@@ -170,8 +170,7 @@ test("resolveCliExecutable: win32 prefers .cmd over .exe", () => {
     platform: "win32",
     resolveCommand: () => String.raw`C:\npm\codex`,
     existsSyncFn: (p) =>
-      p === String.raw`C:\npm\codex.cmd` ||
-      p === String.raw`C:\npm\codex.exe`,
+      p === String.raw`C:\npm\codex.cmd` || p === String.raw`C:\npm\codex.exe`,
   });
   assert.equal(result, String.raw`C:\npm\codex.cmd`);
 });

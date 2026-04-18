@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, test } from "node:test";
 
-import { createConductor, STATES } from "../../hub/team/conductor.mjs";
+import { createConductor } from "../../hub/team/conductor.mjs";
 
 function makeTmpDir() {
   const dir = join(tmpdir(), `tfx-conductor-win-quote-${Date.now()}`);
@@ -137,7 +137,9 @@ test("conductor launches quoted prompts through argv without shell quoting on Wi
   assert.notEqual(spawnCalls[0].exitCode, 255);
   assert.equal(spawnCalls[0].args.at(-1), prompt);
   assert.ok(
-    !spawnCalls[0].args.some((arg) => String(arg).includes('\\"hello world\\"')),
+    !spawnCalls[0].args.some((arg) =>
+      String(arg).includes('\\"hello world\\"'),
+    ),
     `prompt should be passed as a raw argv item: ${JSON.stringify(spawnCalls[0].args)}`,
   );
 });

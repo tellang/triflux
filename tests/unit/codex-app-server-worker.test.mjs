@@ -278,7 +278,7 @@ describe("CodexAppServerWorker — constants", () => {
     // Spot-check known mappings
     assert.equal(KIND_MAP["item/agentMessage/delta"], "text_delta");
     assert.equal(KIND_MAP["turn/completed"], "turn_status");
-    assert.equal(KIND_MAP["error"], "error");
+    assert.equal(KIND_MAP.error, "error");
     assert.equal(KIND_MAP["item/fileChange/outputDelta"], "file_delta");
   });
 });

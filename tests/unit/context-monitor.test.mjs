@@ -98,7 +98,10 @@ describe("hud/context-monitor.mjs", () => {
   });
 
   it("알 수 없는 모델 + stdin size 없음 + monitor 없음 = 기본 200K", () => {
-    const view = buildContextUsageView({ model: { id: "unknown-model" } }, null);
+    const view = buildContextUsageView(
+      { model: { id: "unknown-model" } },
+      null,
+    );
     assert.equal(view.limitTokens, 200_000);
   });
 
