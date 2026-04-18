@@ -154,41 +154,44 @@ test("buildCommandForMode: gemini is always prompt headless", () => {
 });
 
 // ── resolveCliExecutable: Windows .cmd/.exe fallback (#108 follow-up) ──
+// String.raw: biome auto-fix 가 "redundant escape" 로 판단해 \\n / \\c 를 파괴하는 것을 방지.
 
 test("resolveCliExecutable: win32 appends .cmd when resolved path has no extension", () => {
   const result = resolveCliExecutable("codex", {
     platform: "win32",
-    resolveCommand: () => "C:\npm\codex",
-    existsSyncFn: (p) => p === "C:\npm\codex.cmd",
+    resolveCommand: () => String.raw`C:\npm\codex`,
+    existsSyncFn: (p) => p === String.raw`C:\npm\codex.cmd`,
   });
-  assert.equal(result, "C:\npm\codex.cmd");
+  assert.equal(result, String.raw`C:\npm\codex.cmd`);
 });
 
 test("resolveCliExecutable: win32 prefers .cmd over .exe", () => {
   const result = resolveCliExecutable("codex", {
     platform: "win32",
-    resolveCommand: () => "C:\npm\codex",
-    existsSyncFn: (p) => p === "C:\npm\codex.cmd" || p === "C:\npm\codex.exe",
+    resolveCommand: () => String.raw`C:\npm\codex`,
+    existsSyncFn: (p) =>
+      p === String.raw`C:\npm\codex.cmd` ||
+      p === String.raw`C:\npm\codex.exe`,
   });
-  assert.equal(result, "C:\npm\codex.cmd");
+  assert.equal(result, String.raw`C:\npm\codex.cmd`);
 });
 
 test("resolveCliExecutable: win32 falls back to .exe if .cmd missing", () => {
   const result = resolveCliExecutable("codex", {
     platform: "win32",
-    resolveCommand: () => "C:\tools\mytool",
-    existsSyncFn: (p) => p === "C:\tools\mytool.exe",
+    resolveCommand: () => String.raw`C:\tools\mytool`,
+    existsSyncFn: (p) => p === String.raw`C:\tools\mytool.exe`,
   });
-  assert.equal(result, "C:\tools\mytool.exe");
+  assert.equal(result, String.raw`C:\tools\mytool.exe`);
 });
 
 test("resolveCliExecutable: win32 keeps path if already has extension", () => {
   const result = resolveCliExecutable("codex", {
     platform: "win32",
-    resolveCommand: () => "C:\npm\codex.cmd",
+    resolveCommand: () => String.raw`C:\npm\codex.cmd`,
     existsSyncFn: () => true,
   });
-  assert.equal(result, "C:\npm\codex.cmd");
+  assert.equal(result, String.raw`C:\npm\codex.cmd`);
 });
 
 test("resolveCliExecutable: non-win32 platform leaves path as-is", () => {
@@ -203,8 +206,8 @@ test("resolveCliExecutable: non-win32 platform leaves path as-is", () => {
 test("resolveCliExecutable: win32 returns extensionless if no extension variant exists", () => {
   const result = resolveCliExecutable("weirdtool", {
     platform: "win32",
-    resolveCommand: () => "C:\npm\weirdtool",
+    resolveCommand: () => String.raw`C:\npm\weirdtool`,
     existsSyncFn: () => false,
   });
-  assert.equal(result, "C:\npm\weirdtool");
+  assert.equal(result, String.raw`C:\npm\weirdtool`);
 });

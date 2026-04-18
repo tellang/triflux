@@ -147,7 +147,6 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
     profile,
     skipGitRepoCheck = true,
     sandboxBypass = true,
-    cwd,
     mcpServers,
   } = opts;
 
