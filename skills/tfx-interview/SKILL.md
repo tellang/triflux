@@ -1,9 +1,14 @@
 ---
 internal: true
 name: tfx-interview
-description: "요구사항이 모호하거나 구현 전 명확화가 필요할 때 사용한다. 'interview', '인터뷰', '요구사항 정리', '뭘 만들어야 하는지 모르겠어', '명확하게 해줘' 같은 요청에 반드시 사용. 구현 시작 전 스펙을 확정하고 싶을 때 적극 활용."
+description: "요구사항이 모호하거나 구현 전 명확화가 필요할 때 사용한다. 'interview', 'deep-interview', '딥인터뷰', '소크라테스', '깊이 탐색', '요구사항 분석', '인터뷰', '요구사항 정리', '뭘 만들어야 하는지 모르겠어', '명확하게 해줘' 같은 요청에 반드시 사용. 구현 시작 전 스펙을 확정하고 싶을 때 적극 활용."
 triggers:
   - interview
+  - deep-interview
+  - 딥인터뷰
+  - 소크라테스
+  - 깊이 탐색
+  - 요구사항 분석
   - 인터뷰
   - 요구사항 탐색
   - tfx-interview
@@ -114,6 +119,12 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 1 response analysis
 응답 후: Gemini JSON에서 goal 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
+**질문 템플릿 (Gemini 실패 시 Fallback):**
+
+1. "이 작업의 핵심 목표를 한 문장으로 설명해주세요."
+2. "완료 후 어떤 상태가 되어야 성공인가요?"
+3. "현재 상태에서 가장 큰 문제점은 무엇인가요?"
+
 #### Stage 2: Decompose (분해) — constraints 개선
 
 ```
@@ -131,6 +142,12 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 2 response analysis
 ```
 응답 후: Gemini JSON에서 constraints 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
+
+**질문 템플릿 (Gemini 실패 시 Fallback):**
+
+1. "이 작업을 3-5개의 독립된 단계로 나눈다면?"
+2. "각 단계 사이에 의존성이 있나요?"
+3. "가장 먼저 해결해야 할 핵심 문제는 무엇인가요?"
 
 #### Stage 3: Challenge (반론) — 숨은 제약 발견
 
@@ -150,6 +167,12 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 3 response analysis
 응답 후: Gemini JSON에서 constraints + criteria 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
+**질문 템플릿 (Gemini 실패 시 Fallback):**
+
+1. "이 방식이 실패할 수 있는 시나리오는 무엇인가요?"
+2. "6개월 후 유지보수할 때 문제가 될 부분은 무엇인가요?"
+3. "이 접근이 다른 시스템에 미치는 영향은 무엇인가요?"
+
 #### Stage 4: Alternatives (대안) — criteria 정밀화
 
 ```
@@ -168,6 +191,12 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 4 response analysis
 응답 후: Gemini JSON에서 criteria 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
+**질문 템플릿 (Gemini 실패 시 Fallback):**
+
+1. "같은 목표를 달성할 수 있는 완전히 다른 접근은 무엇인가요?"
+2. "시간이 절반밖에 없다면 어떤 방식을 택하겠습니까?"
+3. "이 기술 대신 다른 것을 사용하면 어떤 trade-off가 있나요?"
+
 #### Stage 5: Synthesize (종합) — 최종 확인
 
 ```
@@ -185,6 +214,12 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 5 response analysis
 ```
 응답 후: Gemini JSON에서 전체 점수 읽기 → 최종 ambiguity score 사용자에게 표시
 ```
+
+**질문 템플릿 (Gemini 실패 시 Fallback):**
+
+1. "지금까지의 논의를 종합하면, 최적의 접근 방식은 무엇인가요?"
+2. "첫 번째 단계로 무엇을 실행하시겠습니까?"
+3. "이 결정에 대해 확신하는 정도는 어느 정도인가요? (1-10)"
 
 ### Step 3: 조기 종료 판단
 
@@ -212,7 +247,7 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Generate a structured int
 
 Claude는 Gemini가 반환한 마크다운을 Write 도구로 저장한다.
 
-저장 위치: `.omc/plans/interview-{timestamp}.md`
+저장 위치: `.tfx/plans/interview-{timestamp}.md`
 
 산출물 형식:
 

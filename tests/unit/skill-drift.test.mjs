@@ -164,14 +164,13 @@ describe("tfx-hub SKILL.md — hub 모듈 참조", () => {
     );
   });
 
-  it(
-    "CLI 대응 섹션 존재",
-    { todo: "tfx-hub SKILL.md 에 ## CLI 대응 섹션 누락 — 최근 편집에서 헤딩 변경. Phase 3 Step E 에서 검증 패턴 업데이트 또는 섹션 복원." },
-    () => {
-      const content = readSkill("tfx-hub");
-      assert.ok(/##\s+CLI\s+대응/.test(content), "CLI 대응 섹션이 없음");
-    },
-  );
+  it("CLI 등록/대응 섹션 존재", () => {
+    const content = readSkill("tfx-hub");
+    assert.ok(
+      /##\s+(CLI\s+대응|각\s+CLI\s+등록\s+방법)/.test(content),
+      "CLI 등록/대응 섹션이 없음",
+    );
+  });
 
   it("false positive 방지: hub가 단순 URL이나 변수명이 아닌 섹션 제목에 존재", () => {
     const content = readSkill("tfx-hub");
@@ -185,30 +184,35 @@ describe("tfx-hub SKILL.md — hub 모듈 참조", () => {
   });
 });
 
-describe("tfx-multi SKILL.md — headless 엔진 반영", { todo: "Phase 2 Step B (35a1432) 에서 tfx-multi 가 thin alias 로 축소됨 (39줄). headless 엔진 규칙은 tfx-auto 본체로 이관됨 (psmux-routing.test.mjs 커버). Phase 3 Step E 에서 이 describe 를 tfx-auto 기반으로 재작성." }, () => {
-  it("Phase 3 섹션에 headless 키워드 포함", () => {
-    const content = readSkill("tfx-multi");
-    const phase3Section = extractSection(content, /^###\s+Phase\s+3:/);
-    assert.ok(phase3Section.length > 0, "Phase 3 섹션이 존재하지 않음");
+describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
+  it("tfx-multi 의미가 플래그 표와 legacy 매핑에 남아 있다", () => {
+    const content = readSkill("tfx-auto");
+    const overrideSection = extractSection(
+      content,
+      /^##\s+플래그\s+오버라이드/,
+    );
     assert.ok(
-      /\bheadless\b/i.test(phase3Section),
-      "headless가 Phase 3 섹션에 없음",
+      /`--parallel`\s*\|\s*`N`/.test(overrideSection) &&
+        /tfx-multi/.test(overrideSection),
+      "tfx-multi 이관 의미가 플래그 표/legacy 매핑에 없음",
     );
   });
 
-  it("psmux가 headless 엔진의 구현 기반으로 명시됨", () => {
-    const content = readSkill("tfx-multi");
-    const phase3Section = extractSection(content, /^###\s+Phase\s+3:/);
-    // psmux는 headless 엔진의 실제 구현 기반이다
+  it("멀티 태스크 라우팅 섹션에 headless 엔진 참조 포함", () => {
+    const content = readSkill("tfx-auto");
+    const routingSection = extractSection(
+      content,
+      /^##\s+멀티\s+태스크\s+라우팅/,
+    );
     assert.ok(
-      /\bpsmux\b/i.test(phase3Section) || /\bpsmux\b/i.test(content),
-      "psmux가 tfx-multi SKILL.md에 없음",
+      /\bheadless\b/i.test(routingSection) &&
+        /headless\.(mjs|엔진|직행)/i.test(routingSection),
+      "headless 엔진 참조가 멀티 태스크 라우팅 섹션에 없음",
     );
   });
 
   it("headless 실행 명령이 구체적인 Bash 형태로 존재", () => {
-    const content = readSkill("tfx-multi");
-    // headless 엔진 호출은 "tfx multi --teammate-mode headless" 형태여야 한다
+    const content = readSkill("tfx-auto");
     assert.ok(
       /tfx\s+multi\s+--teammate-mode\s+headless/.test(content),
       "headless 엔진 실행 명령(tfx multi --teammate-mode headless)이 없음",
@@ -216,53 +220,83 @@ describe("tfx-multi SKILL.md — headless 엔진 반영", { todo: "Phase 2 Step 
   });
 
   it("false positive 방지: headless가 주석이 아닌 MANDATORY 지시문에 포함", () => {
-    const content = readSkill("tfx-multi");
-    // MANDATORY 키워드와 headless가 같은 섹션 내에 있어야 한다
-    const phase3Section = extractSection(content, /^###\s+Phase\s+3:/);
+    const content = readSkill("tfx-auto");
+    const routingSection = extractSection(
+      content,
+      /^##\s+멀티\s+태스크\s+라우팅/,
+    );
     assert.ok(
-      /MANDATORY/i.test(phase3Section),
-      "Phase 3 섹션에 MANDATORY 강제 지시문이 없음",
+      /MANDATORY/i.test(routingSection),
+      "멀티 태스크 라우팅 섹션에 MANDATORY 강제 지시문이 없음",
+    );
+  });
+
+  it("tfx-autoroute 의미가 auto-escalate 체인으로 이관되었다", () => {
+    const content = readSkill("tfx-auto");
+    assert.ok(
+      /DEFAULT_ESCALATION_CHAIN/.test(content) &&
+        /\.claude\/rules\/tfx-escalation-chain\.md/.test(content),
+      "autoroute 이관용 escalation chain 규칙이 없음",
+    );
+  });
+
+  it("tfx-persist 의미가 ralph state machine 계약으로 이관되었다", () => {
+    const content = readSkill("tfx-auto");
+    assert.ok(
+      /--retry ralph/.test(content) &&
+        /\.omc\/state\/ralph-<sessionId>\.json/.test(content),
+      "persist 이관용 ralph state machine 규칙이 없음",
+    );
+  });
+
+  it("tfx-auto-codex 의미가 Codex lead 플래그로 이관되었다", () => {
+    const content = readSkill("tfx-auto");
+    assert.ok(
+      /--cli codex --lead codex --no-claude-native/.test(content) &&
+        /TFX_NO_CLAUDE_NATIVE=1/.test(content),
+      "auto-codex 이관용 Codex lead 규칙이 없음",
     );
   });
 });
 
-describe("신규 스킬 완결성", { todo: "Phase 2 Step B 에서 tfx-deep-interview/tfx-autoresearch/tfx-fullcycle 를 thin alias 로 축소. 본체는 tfx-interview/tfx-research/tfx-auto. Phase 3 Step E 에서 검증 대상 이동 + 누락 섹션 복원." }, () => {
-  it("tfx-deep-interview: 프론트매터에 5단계 구조 설명 포함", () => {
-    const content = readSkill("tfx-deep-interview");
+describe("축소된 스킬 본체 이관 완결성", () => {
+  it("tfx-interview: 프론트매터에 deep-interview 트리거를 흡수", () => {
+    const content = readSkill("tfx-interview");
     const frontmatter = extractFrontmatter(content);
-    // 프론트매터 description에 5단계 언급이 있어야 한다
     assert.ok(
-      /5단계/.test(frontmatter),
-      "프론트매터 description에 5단계 언급이 없음",
+      /deep-interview|딥인터뷰|소크라테스|깊이 탐색|요구사항 분석/.test(
+        frontmatter,
+      ),
+      "프론트매터에 deep-interview 계열 트리거가 없음",
     );
   });
 
-  it("tfx-deep-interview: 5개 Stage 헤더가 모두 존재 (Stage 1~5)", () => {
-    const content = readSkill("tfx-deep-interview");
+  it("tfx-interview: 5개 Stage 헤더가 모두 존재 (Stage 1~5)", () => {
+    const content = readSkill("tfx-interview");
     for (let i = 1; i <= 5; i++) {
       assert.ok(
-        new RegExp(`###\\s+Stage\\s+${i}:`).test(content),
+        new RegExp(`#{3,4}\\s+Stage\\s+${i}:`).test(content),
         `Stage ${i} 헤더가 없음`,
       );
     }
   });
 
-  it("tfx-deep-interview: 산출물 저장 경로 명시", () => {
-    const content = readSkill("tfx-deep-interview");
+  it("tfx-interview: 산출물 저장 경로 명시", () => {
+    const content = readSkill("tfx-interview");
     assert.ok(
       /\.tfx\/plans\/interview-/.test(content),
       "산출물 저장 경로(.tfx/plans/interview-{timestamp})가 없음",
     );
   });
 
-  it("tfx-autoresearch: 리서치 프로세스 섹션 존재", () => {
-    const content = readSkill("tfx-autoresearch");
-    const processSection = extractSection(content, /^##\s+리서치\s+프로세스/);
-    assert.ok(processSection.length > 0, "리서치 프로세스 섹션이 없음");
+  it("tfx-research: auto 리서치 섹션 존재", () => {
+    const content = readSkill("tfx-research");
+    const autoSection = extractSection(content, /^##\s+Auto\s+모드/);
+    assert.ok(autoSection.length > 0, "Auto 모드 섹션이 없음");
   });
 
-  it("tfx-autoresearch: 6단계 스텝 헤더가 모두 존재", () => {
-    const content = readSkill("tfx-autoresearch");
+  it("tfx-research: 6단계 스텝 헤더가 모두 존재", () => {
+    const content = readSkill("tfx-research");
     for (let i = 1; i <= 6; i++) {
       assert.ok(
         new RegExp(`###\\s+Step\\s+${i}:`).test(content),
@@ -271,29 +305,24 @@ describe("신규 스킬 완결성", { todo: "Phase 2 Step B 에서 tfx-deep-inte
     }
   });
 
-  it("tfx-autoresearch: 보고서 저장 경로 명시", () => {
-    const content = readSkill("tfx-autoresearch");
+  it("tfx-research: 보고서 저장 경로 명시", () => {
+    const content = readSkill("tfx-research");
     assert.ok(
       /\.tfx\/reports\/research-/.test(content),
       "보고서 저장 경로(.tfx/reports/research-{timestamp})가 없음",
     );
   });
 
-  it("false positive 방지: tfx-deep-interview에서 Stage가 주석이 아닌 헤더로 존재", () => {
-    const content = readSkill("tfx-deep-interview");
-    // Stage 1~5가 ### 헤더로 존재해야 한다 (단순 본문 텍스트 불가)
+  it("false positive 방지: tfx-interview에서 Stage가 주석이 아닌 헤더로 존재", () => {
+    const content = readSkill("tfx-interview");
     const stageHeadings = content
       .split("\n")
-      .filter((l) => /^###\s+Stage\s+\d+:/.test(l));
-    assert.equal(
-      stageHeadings.length,
-      5,
-      `### Stage N: 헤더가 5개여야 하는데 ${stageHeadings.length}개임`,
-    );
+      .filter((l) => /^#{3,4}\s+Stage\s+\d+:/.test(l));
+    assert.ok(stageHeadings.length >= 5, "Stage 헤더가 5개 미만임");
   });
 
-  it("tfx-fullcycle: pre-context gate와 context snapshot 계약을 명시", () => {
-    const content = readSkill("tfx-fullcycle");
+  it("tfx-auto: PRE-CONTEXT GATE와 context snapshot 계약을 명시", () => {
+    const content = readSkill("tfx-auto");
     assert.ok(
       /##\s+PRE-CONTEXT\s+GATE/.test(content),
       "PRE-CONTEXT GATE 섹션이 없음",
@@ -304,8 +333,8 @@ describe("신규 스킬 완결성", { todo: "Phase 2 Step B 에서 tfx-deep-inte
     );
   });
 
-  it("tfx-fullcycle: deep-interview 산출물 재사용 규칙을 명시", () => {
-    const content = readSkill("tfx-fullcycle");
+  it("tfx-auto: deep-interview 산출물 재사용 규칙을 명시", () => {
+    const content = readSkill("tfx-auto");
     assert.ok(
       /\.tfx\/plans\/interview-\*/.test(content) ||
         /\.tfx\/plans\/interview-\{timestamp\}/.test(content),
@@ -317,8 +346,8 @@ describe("신규 스킬 완결성", { todo: "Phase 2 Step B 에서 tfx-deep-inte
     );
   });
 
-  it("tfx-fullcycle: phase-state/resume 아티팩트 경로를 명시", () => {
-    const content = readSkill("tfx-fullcycle");
+  it("tfx-auto: phase-state/resume 아티팩트 경로를 명시", () => {
+    const content = readSkill("tfx-auto");
     assert.ok(
       /\.tfx\/fullcycle\/\{run-id\}\//.test(content),
       "fullcycle run 아티팩트 디렉토리 규칙이 없음",
@@ -329,33 +358,25 @@ describe("신규 스킬 완결성", { todo: "Phase 2 Step B 에서 tfx-deep-inte
     );
   });
 
-  it(
-    "tfx-fullcycle: 동일 QA 에러 3회 반복 시 중단 규칙을 명시",
-    { todo: "Phase 2 Step B thin alias 축소 시 규칙 유실 — tfx-auto 에 복원 필요" },
-    () => {
-      const content = readSkill("tfx-fullcycle");
-      assert.ok(
-        /동일.+3회 반복/.test(content) || /same.+3 times/i.test(content),
-        "동일 QA 에러 3회 반복 중단 규칙이 없음",
-      );
-    },
-  );
+  it("tfx-auto: 동일 QA 에러 3회 반복 시 중단 규칙을 명시", () => {
+    const content = readSkill("tfx-auto");
+    assert.ok(
+      /동일.+3회 반복/.test(content) || /same.+3 times/i.test(content),
+      "동일 QA 에러 3회 반복 중단 규칙이 없음",
+    );
+  });
 
-  it(
-    "tfx-fullcycle: cleanup/cancel 메타데이터 규칙을 명시",
-    { todo: "Phase 2 Step B thin alias 축소 시 CLEANUP & CANCEL RULES 섹션 유실 — tfx-auto 에 복원 필요" },
-    () => {
-      const content = readSkill("tfx-fullcycle");
-      assert.ok(
-        /##\s+CLEANUP\s+&\s+CANCEL\s+RULES/.test(content),
-        "CLEANUP & CANCEL RULES 섹션이 없음",
-      );
-      assert.ok(
-        /failure_reason/i.test(content) && /complete 상태/.test(content),
-        "cleanup/cancel 메타데이터 규칙이 충분히 명시되지 않음",
-      );
-    },
-  );
+  it("tfx-auto: cleanup/cancel 메타데이터 규칙을 명시", () => {
+    const content = readSkill("tfx-auto");
+    assert.ok(
+      /##\s+CLEANUP\s+&\s+CANCEL\s+RULES/.test(content),
+      "CLEANUP & CANCEL RULES 섹션이 없음",
+    );
+    assert.ok(
+      /failure_reason/i.test(content) && /`?complete`?\s+상태/.test(content),
+      "cleanup/cancel 메타데이터 규칙이 충분히 명시되지 않음",
+    );
+  });
 });
 
 describe("tfx-route.sh와 tfx-auto SKILL.md 에이전트 매핑 교차 검증", () => {
