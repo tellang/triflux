@@ -1,8 +1,8 @@
 ---
 name: tfx-persist
 description: >
-  DEPRECATED — tfx-auto 로 통합됨. `/tfx-auto --mode deep --retry ralph` 로 리다이렉트.
-  ⚠ --retry ralph 는 Phase 2 현 구현에서 bounded retry 3회로 degrade 된다 (완전한 ralph state machine 은 Phase 3+).
+  DEPRECATED — tfx-auto 로 통합됨. `/tfx-auto --retry ralph` 로 리다이렉트.
+  Phase 3 부터 true ralph state machine (unlimited, stuck detector 3회 중단, state file 복원) 이 동작한다.
   Phase 5 (v11) 에 물리 삭제 예정.
 deprecated: true
 superseded-by: tfx-auto
@@ -17,28 +17,41 @@ argument-hint: "<작업 설명 — tfx-auto 로 passthrough>"
 
 # tfx-persist (DEPRECATED → tfx-auto alias)
 
-> DEPRECATED. `/tfx-auto --mode deep --retry ralph` 로 리다이렉트.
-> ⚠ --retry ralph 는 현재 bounded 3회로 degrade. 완전한 ralph state machine 은 Phase 3+.
+> DEPRECATED. `/tfx-auto --retry ralph` 로 리다이렉트.
+> Phase 3 부터 **true ralph state machine** — hub/team/retry-state-machine.mjs.
 
 ## 동작
 
 1. stderr 에 1회 경고 출력:
    ```
-   [deprecated] tfx-persist -> use: tfx-auto --mode deep --retry ralph
+   [deprecated] tfx-persist -> use: tfx-auto --retry ralph
    ```
-2. ARGUMENTS 전체 앞에 `--mode deep --retry ralph` 를 prepend 하여 `Skill("tfx-auto")` 호출.
-3. tfx-auto 의 플래그 오버라이드 로직이 나머지 처리 (ralph 는 bounded degrade + stderr 경고).
+2. ARGUMENTS 전체 앞에 `--retry ralph` 를 prepend 하여 `Skill("tfx-auto")` 호출.
+3. 스킬 경유 시 기본 `--max-iterations 0` (unlimited) 로 진입. CLI 직접 호출 시 bounded 1 로 진입 (임시 합의안, Phase 3 Open question #2).
 
 ## 등가 플래그
 
-`--mode deep --retry ralph`
+`--retry ralph` (Phase 3)
+
+deep mode 이 필요한 경우에만 `--mode deep --retry ralph`. 기존 `--mode deep` 강제는 제거 — ralph 의미는 plan/PRD 오버헤드와 독립.
 
 ## 이 alias 의 의미
 
-tfx-persist 는 이름상 ralph/persist 이지만 실제 구현은 bounded verify/fix 3회 루프였다. --retry ralph 로 **의도** 를 표현하되, Phase 2 단계에서는 여전히 bounded 로 동작하고 stderr 에 degrade 경고가 나간다. 진짜 ralph state machine (종료 조건, 상태 저장, 중단/재개) 은 Phase 3+ 에 별도 구현.
+tfx-persist 는 "끝까지, 멈추지 마" (ralph) 의미. Phase 2 까지는 bounded verify/fix 3회 루프로 degrade 되었으나, **Phase 3 에서 true state machine 도입으로 의미 회복**.
+
+Phase 3 상태 전이:
+```
+PLANNING → EXECUTING → (VERIFY.fail) → DIAGNOSING → EXECUTING …
+                    → (VERIFY.success) → DONE
+                    → stuckCounter ≥ 3 → STUCK (동일 failureReason 3회 연속 시 중단)
+                    → iterations ≥ max → BUDGET_EXCEEDED (max_iterations 0 이면 비활성)
+```
+
+상태는 `.omc/state/ralph-<sessionId>.json` 에 jsonl append 로 저장 — compaction survive. `resumeFromStateFile()` 로 재개 가능.
 
 ## 마이그레이션 가이드
 
 | 기존 호출 | 새 호출 |
 |----------|---------|
-| `/tfx-persist "작업"` | `/tfx-auto "작업" --mode deep --retry ralph` |
+| `/tfx-persist "작업"` | `/tfx-auto "작업" --retry ralph` |
+| `/tfx-persist "작업" --max 10` | `/tfx-auto "작업" --retry ralph --max-iterations 10` |

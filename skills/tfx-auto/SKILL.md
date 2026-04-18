@@ -139,18 +139,26 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--parallel` | `swarm` | worktree 격리 + 다기기 | `tfx swarm` (PRD 필요) |
 | `--retry` | `0` | 자동 재시도 없음 | — |
 | `--retry` | `1` (기본) | bounded verify → fix loop 3회 | — |
-| `--retry` | `ralph` | Phase 2 미구현 — bounded 3회 degrade + stderr 경고 | Phase 3+ |
+| `--retry` | `ralph` | **Phase 3** — true ralph state machine (unlimited, stuck detector 3회 중단) | retry-state-machine.mjs |
+| `--retry` | `auto-escalate` | **Phase 3** — 체인 승격 (codex:mini → codex:gpt-5 → claude:sonnet → claude:opus) | retry-state-machine.mjs |
 | `--isolation` | `none` (기본) | cwd 공유 | — |
 | `--isolation` | `worktree` | shard별 `.codex-swarm/wt-*/` 격리 | `--parallel swarm` 자동 강제 |
 | `--remote` | `none` (기본) | 로컬만 | — |
 | `--remote` | `<host>` | hosts.json 의 host 로 shard 분배 | `--parallel swarm` 전용 |
+| `--lead` | `claude` (기본) | 분류·메타판단을 Claude 가 담당 | tfx-auto 내장 |
+| `--lead` | `codex` | 분류·메타판단을 Codex 에 위임 (tfx-auto-codex 의미 일부 흡수) | tfx-route.sh |
+| `--no-claude-native` | false (기본) | Claude native sub-agent 경로 유지 | — |
+| `--no-claude-native` | true | Claude native 경로 disable, CLI 기반 worker 강제 | tfx-route.sh |
+| `--max-iterations` | `0` (기본, unlimited) | `--retry ralph`/`auto-escalate` 상한 | retry-state-machine.mjs |
 
 ### 플래그 검증
 
 - `--parallel swarm` + PRD 없음 → PRD 자동 생성 또는 사용자에게 경로 질의
 - `--parallel 1` + `--isolation worktree` → warning, isolation=none 으로 강제
 - `--remote <host>` + `--parallel != swarm` → warning, remote 무시
-- `--retry ralph` → stderr 경고 + bounded 3회 degrade
+- `--retry ralph` → true ralph state machine (Phase 3, retry-state-machine.mjs)
+- `--retry auto-escalate` → CLI 승격 체인 (Phase 3)
+- `--max-iterations N` (N>0) → ralph/auto-escalate 에 상한 부여
 
 ### 사용 예시
 
@@ -166,12 +174,12 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | legacy 스킬 | `tfx-auto` 등가 플래그 |
 |------------|----------------------|
 | `tfx-autopilot` | `(기본)` |
-| `tfx-autoroute` | `--cli auto --retry 1` (escalation 정책은 내부 유지) |
+| `tfx-autoroute` | `--retry auto-escalate` (Phase 3) |
 | `tfx-fullcycle` | `--mode deep --parallel 1` |
-| `tfx-persist` | `--mode deep --retry ralph` (⚠ degrade) |
+| `tfx-persist` | `--retry ralph` (Phase 3, unlimited) |
 | `tfx-codex` | `--cli codex` |
 | `tfx-gemini` | `--cli gemini` |
-| `tfx-auto-codex` | `--cli codex` + `TFX_NO_CLAUDE_NATIVE=1` |
+| `tfx-auto-codex` | `--cli codex --lead codex --no-claude-native` (Phase 3) |
 | `tfx-multi` | `--parallel N --mode deep` |
 | `tfx-swarm` | `--parallel swarm --mode consensus --isolation worktree` |
 | `tfx-codex-swarm` | `--parallel swarm --cli codex --isolation worktree` |
