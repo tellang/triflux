@@ -59,24 +59,35 @@ export function resolveCliExecutable(cli, opts = {}) {
 export function buildSpawnSpecForMode(mode, opts = {}) {
   const cli = opts.cli || "codex";
   const prompt = asPrompt(opts.prompt);
-  const command = resolveCliExecutable(cli, opts);
+  const resolvedCommand = resolveCliExecutable(cli, opts);
+  const platform = opts.platform || process.platform;
+
+  // Node v20.12+ (CVE-2024-27980) rejects spawn of .cmd/.bat files with shell:false
+  // (EINVAL). npm-installed Windows wrappers (e.g. codex.cmd) hit this. Wrap via
+  // cmd.exe /c to keep shell:false while still launching the batch wrapper.
+  const needsCmdWrap =
+    platform === "win32" && /\.(cmd|bat)$/i.test(resolvedCommand);
+  const wrap = (args) =>
+    needsCmdWrap
+      ? { command: "cmd", args: ["/c", resolvedCommand, ...args] }
+      : { command: resolvedCommand, args };
 
   if (cli === "gemini") {
     const args = [];
     pushFlag(args, "--model", opts.model);
     args.push("--yolo", "--prompt", prompt, "--output-format", "text");
-    return { command, args, useExec: true, shell: false };
+    return { ...wrap(args), useExec: true, shell: false };
   }
 
   if (mode === MODES.INTERACTIVE || mode === MODES.AUTO) {
-    return { command, args: [], useExec: false, shell: false };
+    return { ...wrap([]), useExec: false, shell: false };
   }
 
   if (cli === "claude") {
     const args = [];
     pushFlag(args, "--model", opts.model);
     args.push("-p", prompt);
-    return { command, args, useExec: true, shell: false };
+    return { ...wrap(args), useExec: true, shell: false };
   }
 
   const args = [];
@@ -94,7 +105,7 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
     }
   }
   args.push(prompt);
-  return { command, args, useExec: true, shell: false };
+  return { ...wrap(args), useExec: true, shell: false };
 }
 
 /**

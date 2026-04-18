@@ -108,16 +108,33 @@ test("conductor launches quoted prompts through argv without shell quoting on Wi
   await waitFor(() => spawnCalls[0]?.exitCode !== null);
 
   assert.equal(id, "windows-quote-regression");
-  assert.equal(spawnCalls[0].command, "C:\\tools\\codex.cmd");
+
+  // On Windows, .cmd files must go through `cmd /c <path>` wrapper (Node CVE-2024-27980).
+  // On POSIX, the resolved path is used directly. Either way, shell:false is preserved.
+  const isWin = process.platform === "win32";
+  if (isWin) {
+    assert.equal(spawnCalls[0].command, "cmd");
+    assert.equal(spawnCalls[0].args[0], "/c");
+    assert.equal(spawnCalls[0].args[1], "C:\\tools\\codex.cmd");
+    assert.deepEqual(spawnCalls[0].args.slice(2, 7), [
+      "exec",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--skip-git-repo-check",
+      "--color",
+      "never",
+    ]);
+  } else {
+    assert.equal(spawnCalls[0].command, "C:\\tools\\codex.cmd");
+    assert.deepEqual(spawnCalls[0].args.slice(0, 5), [
+      "exec",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--skip-git-repo-check",
+      "--color",
+      "never",
+    ]);
+  }
   assert.equal(spawnCalls[0].options.shell, false);
   assert.notEqual(spawnCalls[0].exitCode, 255);
-  assert.deepEqual(spawnCalls[0].args.slice(0, 5), [
-    "exec",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--skip-git-repo-check",
-    "--color",
-    "never",
-  ]);
   assert.equal(spawnCalls[0].args.at(-1), prompt);
   assert.ok(
     !spawnCalls[0].args.some((arg) => String(arg).includes('\\"hello world\\"')),
