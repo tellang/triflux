@@ -1,189 +1,59 @@
 ---
-internal: true
 name: tfx-panel
-description: "여러 전문가의 의견이 필요한 복잡한 결정에 사용한다. 'panel', '패널', '전문가 의견', 'expert panel', '다양한 관점', '전문가한테 물어봐' 같은 요청에 반드시 사용. 아키텍처, 보안, 비즈니스 전략 등 전문가 시뮬레이션이 필요할 때 적극 활용."
+description: >
+  DEPRECATED — tfx-auto consensus shape 로 통합됨. `/tfx-auto --mode consensus --shape panel` 로 리다이렉트.
+  Phase 4a 부터 panel 은 별도 패널 엔진이 아니라 consensus family 내부의 전문가 시뮬레이션 shape 다.
+  Phase 5 (v11) 에 물리 삭제 예정.
+deprecated: true
+superseded-by: tfx-auto
 triggers:
   - panel
   - 패널
   - 전문가 토론
   - expert panel
   - 전문가 패널
-argument-hint: "<토론 주제>"
+argument-hint: "<토론 주제 — tfx-auto 로 passthrough>"
 ---
 
-# tfx-panel — Virtual Expert Panel Simulation
+# tfx-panel (DEPRECATED → tfx-auto alias)
 
-> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
-> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+> DEPRECATED. `/tfx-auto --mode consensus --shape panel` 로 리다이렉트.
+> panel 은 이제 독립 스킬이 아니라 `tfx-auto` consensus family 의 전문가 시뮬레이션 shape 다.
 
+## 동작
 
-> SuperClaude spec-panel + business-panel 오마주. 실제 전문가 5-10명의 관점을 시뮬레이션하여 다각적 분석.
-> "한 사람의 시야는 좁다. 패널의 시야는 넓다."
+1. stderr 에 1회 경고 출력:
+   ```
+   [deprecated] tfx-panel -> use: tfx-auto --mode consensus --shape panel
+   ```
+2. stdout 머리부에 `[DEPRECATED]` 마커를 출력한다.
+3. `.omc/state/alias-usage.log` 에 아래 형식으로 append 한다:
+   ```
+   2026-04-18T12:34:56Z tfx-panel -> tfx-auto --mode consensus --shape panel
+   ```
+4. ARGUMENTS 전체 앞에 `--mode consensus --shape panel` 를 prepend 하여 `Skill("tfx-auto")` 호출.
+5. `--experts`, `--cli-set`, `--analysis-prompt-file` 같은 panel 전용 인자는 그대로 passthrough 한다.
 
-## HARD RULES
+## 등가 플래그
 
-> headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
+`--mode consensus --shape panel`
 
-1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
-2. Codex·Gemini → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
-3. Claude → `Agent(run_in_background=true)`
-4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
+전문가 shape 입력:
+- `--experts "claude:Martin Fowler|Kent Beck;codex:Sam Newman|Gregor Hohpe;gemini:Michael Porter|Karl Wiegers"`
+- 명시 roster 가 없으면 `tfx-auto` 가 주제 기반 기본 roster 를 선택한다.
 
-## MODEL ROLES
+## 이 alias 의 의미
 
-| CLI | 역할 | 담당 전문가 유형 |
-|-----|------|----------------|
-| Claude (Opus) | 패널 모더레이터 + 인문/전략 전문가 | 리팩터링, 점진적 설계, 요구사항 |
-| Codex | 기술 구현 전문가 | 아키텍처, 마이크로서비스, 클라우드 |
-| Gemini | 통합/비즈니스 전문가 | 통합 패턴, 경쟁 전략, 프로덕트 |
+tfx-panel 의 본질은 "패널 전용 orchestration" 이 아니라 "전문가 roster 를 주입한 뒤 panel 보고서로 렌더링하는 shape" 였다. Phase 4a 부터 공통 합의 루프는 `--mode consensus` 아래에 남기고, 전문가 분배와 panel renderer 만 `--shape panel` 이 책임진다.
 
-## 전문가 풀
+공통 규약:
+- participants 기본값은 `triad`
+- 공통 `meta_judgment` 는 `mode_specific_meta.panel_size`, `mode_specific_meta.expert_distribution` 만 shape 확장으로 추가한다
+- artifact 경로는 `.omc/artifacts/consensus/<session-id>/panel.{md,json}` 로 통일한다
 
-주제에 따라 5-10명을 자동 선정한다. 고정 풀이 아니라 주제 맥락에서 최적 전문가를 결정한다.
+## 마이그레이션 가이드
 
-### 기술 전문가 (예시)
-
-| 전문가 | 전문 분야 | 관점 |
-|--------|----------|------|
-| Martin Fowler | 리팩터링, 패턴 | 코드 설계 품질, 기술 부채 |
-| Sam Newman | 마이크로서비스 | 서비스 경계, 분산 시스템 |
-| Kent Beck | TDD, XP | 테스트, 점진적 설계 |
-| Gregor Hohpe | 통합 패턴 | 메시징, 이벤트 아키텍처 |
-| Brendan Burns | 클라우드 네이티브 | 컨테이너, 오케스트레이션 |
-
-### 비즈니스/전략 전문가 (예시)
-
-| 전문가 | 전문 분야 | 관점 |
-|--------|----------|------|
-| Michael Porter | 경쟁 전략 | 시장 포지셔닝, 가치 사슬 |
-| Karl Wiegers | 요구사항 공학 | 요구사항 완전성, 우선순위 |
-| Eric Ries | 린 스타트업 | MVP, 검증된 학습 |
-| Marty Cagan | 프로덕트 | 가치, 실현 가능성, 비즈니스 |
-
-## EXECUTION STEPS
-
-### Step 0: 패널 도메인 선택
-
-주제 인자가 없으면 사용자에게 도메인을 선택받는다:
-
-```
-1. 소프트웨어 아키텍처 (Fowler, Newman, Vernon, Evans)
-2. 보안 (OWASP, Trail of Bits, Schneier)
-3. 비즈니스 전략 (Porter, Christensen, Drucker)
-4. DevOps/SRE (Humble, Kim, Forsgren)
-5. 프론트엔드/UX (Nielsen, Cooper, Krug)
-6. 직접 구성
-```
-
-"직접 구성" 선택 시 사용자가 전문가 이름/역할을 직접 지정한다.
-
-### Step 1: 주제 분석 및 전문가 선정
-
-사용자 입력에서 주제를 파싱하고 관련 도메인을 식별한다. 5-10명의 전문가를 선정하여 3개 CLI에 분배한다.
-
-분배 예시 (`"우리 모놀리스를 마이크로서비스로 전환해야 할까?"`):
-- Claude 담당: Martin Fowler (리팩터링), Kent Beck (점진적 설계)
-- Codex 담당: Sam Newman (마이크로서비스), Michael Porter (전략)
-- Gemini 담당: Gregor Hohpe (통합 패턴), Karl Wiegers (요구사항)
-
-주제가 모호하면 AskUserQuestion으로 명확화한다.
-
-### Step 2: 독립 분석 (Anti-Herding)
-
-**아래 2개 도구를 반드시 같은 응답에서 동시에 호출하라.**
-
-Claude (Agent, background):
-```
-Agent(
-  subagent_type="general-purpose",
-  model="opus",
-  run_in_background=true,
-  prompt="당신은 {claude_expert_1}({role_1})과 {claude_expert_2}({role_2})입니다.
-주제: {topic}
-각 전문가의 고유 관점에서 독립적으로 분석하세요. 상대 전문가의 입장을 참조하지 마세요.
-JSON 형식으로 응답:
-{ 'experts': [{ 'name': string, 'position': string, 'reasoning': string, 'concerns': string[], 'recommendation': string, 'confidence': number }] }"
-)
-```
-
-Codex + Gemini (Bash, background):
-```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
-  --assign 'codex:당신은 {codex_expert_1}({role_3})과 {codex_expert_2}({role_4})입니다. 주제: {topic}. 각 전문가의 고유 관점에서 독립 분석. 상호 참조 금지. JSON: {experts:[{name,position,reasoning,concerns,recommendation,confidence}]}:analyst' \
-  --assign 'gemini:당신은 {gemini_expert_1}({role_5})과 {gemini_expert_2}({role_6})입니다. 주제: {topic}. 각 전문가의 고유 관점에서 독립 분석. 상호 참조 금지. JSON: {experts:[{name,position,reasoning,concerns,recommendation,confidence}]}:analyst' \
-  --timeout 600")
-```
-
-### Step 3: 패널 토론 시뮬레이션
-
-3개 CLI 결과 수집 후 Claude Opus가 패널 모더레이터로 교차 토론을 시뮬레이션한다:
-
-1. 각 전문가 의견 정리 — 합의점 / 분쟁점 식별
-2. 분쟁점에 대해 가상 반론 생성:
-   - "{expert_A}은 {position_A}를 주장하지만, {expert_B}는 {position_B}를 권고합니다. {expert_A}의 반론은? {expert_B}의 재반론은?"
-3. 2차 라운드: 반론을 반영한 수정 의견 도출
-
-### Step 4: 합의 종합
-
-tfx-consensus 프로토콜 적용:
-
-- 과반(50%+) 합의 → "패널 합의" (근거 포함)
-- 소수 의견 → "소수 견해" (근거 포함)
-- 대립 → "미해결 쟁점" (양측 근거 병기)
-
-### Step 5: 최종 패널 보고서 출력
-
-```markdown
-## 전문가 패널 보고서: {topic}
-
-### 패널 구성
-| # | 전문가 | 역할 | 핵심 입장 |
-|---|--------|------|----------|
-| 1 | {name} | {role} | {position} |
-
-### 패널 합의 (Consensus Score: {score}%)
-- [합의 1] — {N}/{total} 합의
-- [합의 2] — {N}/{total} 합의
-
-### 소수 견해
-- {expert}: {dissenting_view} — 근거: {reason}
-
-### 핵심 추천
-{패널 종합 추천}
-
-### 리스크 및 완화 방안
-{전문가들이 식별한 리스크와 대응책}
-
-### 미해결 쟁점
-{패널 내 해소되지 않은 논쟁}
-
-### 다음 단계 (Action Items)
-1. {action_1}
-2. {action_2}
-```
-
-## ERROR RECOVERY
-
-- Codex/Gemini 타임아웃(600s 초과) → Claude Agent로 해당 전문가 재분석
-- 결과 파싱 실패 → 원문 그대로 Step 3에 투입하여 모더레이터가 정리
-- 전문가 선정 불확실 → AskUserQuestion으로 사용자 확인 후 진행
-
-## TOKEN BUDGET
-
-| 단계 | 토큰 |
-|------|------|
-| Step 1 (주제 분석 + 선정) | ~2K |
-| Step 2 (3x 독립 분석) | ~15K |
-| Step 3 (패널 토론) | ~8K |
-| Step 4 (합의 종합) | ~2K |
-| Step 5 (보고서) | ~3K |
-| **총합** | **~30K** |
-
-## 사용 예
-
-```
-/tfx-panel "우리 모놀리스를 마이크로서비스로 전환해야 할까?"
-/tfx-panel "React vs Svelte vs Solid for our next frontend"
-/tfx-panel "이 레거시 시스템의 리팩터링 전략"
-/tfx-panel "B2B SaaS 가격 모델: 사용량 기반 vs 티어 기반"
-```
+| 기존 호출 | 새 호출 |
+|----------|---------|
+| `/tfx-panel "모놀리스 분해 전략"` | `/tfx-auto "모놀리스 분해 전략" --mode consensus --shape panel` |
+| `/tfx-panel "가격 전략" --experts "claude:Porter;codex:Wiegers;gemini:Cagan"` | `/tfx-auto "가격 전략" --mode consensus --shape panel --experts "claude:Porter;codex:Wiegers;gemini:Cagan"` |
