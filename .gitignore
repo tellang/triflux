@@ -6,6 +6,8 @@
 .claude/**
 !.claude/agents/
 !.claude/agents/*.md
+!.claude/rules/
+!.claude/rules/*.md
 .codex/
 .gemini/
 .serena/
