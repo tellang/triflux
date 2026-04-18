@@ -1,10 +1,14 @@
 // tests/unit/ssh-command.test.mjs
 
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import {
   buildSshArgs,
   commandJoin,
+  detectHostOs,
   getHostConfig,
   nullDevice,
   resetHostsCache,
@@ -15,6 +19,16 @@ import {
   suppressStderr,
   validateCommandForOs,
 } from "../../hub/lib/ssh-command.mjs";
+
+function createTempRepo(hosts) {
+  const repoDir = mkdtempSync(join(tmpdir(), "tfx-ssh-command-"));
+  mkdirSync(join(repoDir, "references"), { recursive: true });
+  writeFileSync(
+    join(repoDir, "references", "hosts.json"),
+    JSON.stringify({ hosts }, null, 2),
+  );
+  return repoDir;
+}
 
 describe("ssh-command", () => {
   beforeEach(() => resetHostsCache());
@@ -165,6 +179,44 @@ describe("ssh-command", () => {
 
     it("없는 호스트는 null 반환", () => {
       assert.equal(getHostConfig("nonexistent"), null);
+    });
+
+    it("nested ssh.user shape도 normalized config로 반환", () => {
+      const repoDir = createTempRepo({
+        winbox: {
+          os: "windows",
+          ssh: { user: "nested-user" },
+          tailscale: { ip: "100.64.0.9" },
+          capabilities_v2: { codex: true, high_memory: true },
+          specs: { cores: 12, ram_gb: 48 },
+        },
+      });
+
+      try {
+        const cfg = getHostConfig("winbox", repoDir);
+        assert.equal(cfg?.ssh.user, "nested-user");
+        assert.equal(cfg?.ssh_user, "nested-user");
+        assert.deepEqual(cfg?.capabilities, ["codex", "high-memory"]);
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("detectHostOs", () => {
+    it("normalized host registry를 통해 nested windows shape를 감지", () => {
+      const repoDir = createTempRepo({
+        winbox: {
+          os: "windows",
+          ssh: { user: "nested-user" },
+        },
+      });
+
+      try {
+        assert.equal(detectHostOs("winbox", repoDir), "windows");
+      } finally {
+        rmSync(repoDir, { recursive: true, force: true });
+      }
     });
   });
 
