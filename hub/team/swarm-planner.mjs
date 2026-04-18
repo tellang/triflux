@@ -256,6 +256,18 @@ export function planSwarm(prdPath, opts = {}) {
     );
   }
 
+  const emptyPromptShards = shards.filter(
+    (s) => !s.prompt || s.prompt.trim() === "",
+  );
+  if (emptyPromptShards.length > 0) {
+    const names = emptyPromptShards.map((s) => s.name).join(", ");
+    throw new Error(
+      `Shard(s) with empty prompt: ${names}. ` +
+        `Each shard must include a non-empty "- prompt: |" block. ` +
+        `See docs/prd/_template.md for PRD format.`,
+    );
+  }
+
   const { leaseMap, conflicts } = buildFileLeaseMap(shards);
   const mcpManifest = buildMcpManifest(shards);
   const { order: mergeOrder, cycles } = computeMergeOrder(shards);

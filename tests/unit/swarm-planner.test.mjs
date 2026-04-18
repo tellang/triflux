@@ -39,7 +39,36 @@ const SAMPLE_PRD = `
 - prompt: Create database schema and query layer.
 `;
 
+const EMPTY_PROMPT_PRD = `
+# Swarm PRD (missing prompt)
+
+## Shard: no-prompt
+- agent: codex
+- files: src/foo.mjs
+
+## Shard: whitespace-prompt
+- agent: codex
+- files: src/bar.mjs
+- prompt:
+`;
+
 describe("swarm-planner", () => {
+  describe("planSwarm — empty prompt validation", () => {
+    it("throws when any shard has empty prompt", () => {
+      assert.throws(
+        () => planSwarm(null, { content: EMPTY_PROMPT_PRD }),
+        /Shard\(s\) with empty prompt: no-prompt, whitespace-prompt/,
+      );
+    });
+
+    it("includes docs/prd/_template.md hint in error message", () => {
+      assert.throws(
+        () => planSwarm(null, { content: EMPTY_PROMPT_PRD }),
+        /docs\/prd\/_template\.md/,
+      );
+    });
+  });
+
   describe("parseShards", () => {
     it("parses all shards from PRD", () => {
       const shards = parseShards(SAMPLE_PRD);
