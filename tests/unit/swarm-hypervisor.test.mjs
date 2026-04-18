@@ -132,6 +132,7 @@ function createMockConductorFactory() {
       },
       complete(sessionId = sessionConfig?.id || "session") {
         completed = true;
+        sessionConfig?.onCompleted?.({ sessionId });
         opts.onCompleted?.(sessionId);
       },
       fail(reason = "failed", sessionId = sessionConfig?.id || "session") {
