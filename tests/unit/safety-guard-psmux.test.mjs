@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
+const GUARD_PATH = resolve(PROJECT_ROOT, "hooks", "safety-guard.mjs");
 
 function runGuard(command) {
   const input = JSON.stringify({ tool_name: "Bash", tool_input: { command } });
+  const { TFX_CLEANUP_BYPASS: _unused, ...envClean } = process.env;
   try {
-    execFileSync("node", ["hooks/safety-guard.mjs"], {
+    execFileSync("node", [GUARD_PATH], {
       input,
       encoding: "utf8",
       stdio: ["pipe", "pipe", "pipe"],
+      cwd: tmpdir(),
+      env: envClean,
     });
     return 0;
   } catch (e) {
