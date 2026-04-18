@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.0.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
   "assist": {
     "enabled": true,
     "actions": {
@@ -9,15 +9,18 @@
     }
   },
   "files": {
-    "includes": ["**/*.mjs", "**/*.js", "**/*.cjs", "**/*.json"],
-    "experimentalScannerIgnores": [
-      "research/**",
-      "node_modules/**",
-      "**/skills/**",
-      "**/public/**",
-      ".claude/**",
-      "packages/**",
-      "docs/**"
+    "includes": [
+      "**/*.mjs",
+      "**/*.js",
+      "**/*.cjs",
+      "**/*.json",
+      "!**/research",
+      "!**/node_modules",
+      "!**/skills",
+      "!**/public",
+      "!**/.claude",
+      "!**/packages",
+      "!**/docs"
     ]
   },
   "linter": {

@@ -2,6 +2,30 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.10.0] - 2026-04-18
+
+### Added
+- **[#112 Phase 2 Step A]** `tfx-auto` 플래그 오버라이드 front door — `--cli {auto|codex|gemini|claude}`, `--mode {quick|deep|consensus}`, `--parallel {1|N|swarm}`, `--retry {0|1|ralph}`, `--isolation {none|worktree}`, `--remote <host>` 플래그로 11개 legacy 실행 스킬의 단일 진입점 제공
+- **[skill]** `tfx-ship` 신규 — triflux 전용 릴리즈 자동화. 기존 `scripts/release/*` 래퍼 + AskUserQuestion 기반 버전 선택 + CHANGELOG 편집 게이트. Co-Authored-By / AI trailer 하드 차단. `--skip-tests` / `--no-publish` / `--dry-run` 플래그 지원
+- **[hook]** tfx-ship 매직 키워드 자동 라우팅 — `배포`, `릴리즈`, `릴리스`, `release`, `publish`, `쉽하자`, `tfx-ship`, `/ship` 등 자연어 감지 시 `tfx-ship` 스킬 자동 invoke (`hooks/keyword-rules.json`)
+
+### Changed
+- **[#112 Phase 2 Step B]** 9개 legacy 실행 스킬을 `tfx-auto` thin alias 로 축소 (backward compatible, muscle memory 보존). 본문 100~286줄 → 38~45줄. 각 스킬은 stderr deprecation 경고 후 `/tfx-auto <flags>` 로 리다이렉트. 대상: `tfx-autopilot`, `tfx-autoroute`, `tfx-fullcycle`, `tfx-persist`, `tfx-codex`, `tfx-gemini`, `tfx-auto-codex`, `tfx-multi`, `tfx-swarm`. Phase 5 (v11) 물리 삭제 예정
+- **[refactor]** Phase 1 drift migration — 이전 세션에서 `~/.claude/skills/` (installed) 에만 적용된 Phase 1 스킬 통합 12개 파일을 `skills/` (source) 로 복원. 다음 `npm i -g triflux` 에서 자동 동기화 유지
+
+### Fixed — Windows codex spawn 버그 체인 (#108)
+- **[#108]** Windows cmd quote bug — `shell: true` + `JSON.stringify` wrap 조합에서 cmd.exe 가 embedded `\"` 를 오파싱 → exit 255 "The filename, directory name, or volume label syntax is incorrect." 증상. args 배열 + `shell: false` 로 dispatch 변경. 회귀 테스트 1건 추가
+- **[#108-followup]** swarm-planner 가 빈 prompt shard 를 조기 reject — 누락된 `- prompt: |` 블록으로 인한 silent swarm failure 방지. 에러 메시지에 해당 shard 이름 + `docs/prd/_template.md` 힌트 포함
+- **[#108-followup]** Windows `.cmd` resolver fallback — `whichCommand("codex")` 가 extensionless 경로 반환 시 `.cmd`/`.exe`/`.bat`/`.ps1` 순차 탐색. Git Bash 스타일 npm wrapper 대신 Windows batch wrapper 선택
+- **[#108-followup]** Windows `.cmd` spawn EINVAL (Node CVE-2024-27980 보안 패치 영향) — `shell: false` 로 `.cmd`/`.bat` spawn 불가. `cmd.exe /c <path>` wrapper 로 우회하면서 `shell: false` 유지 (cmd quote 버그 재발 방지)
+
+### Tests
+- **[#110]** `swarm-hypervisor.test.mjs` hang 수정 — mock conductor 가 `sessionConfig.onCompleted` 콜백 체인에 정렬되도록 `ensureWorktree` mock 보강
+- 20+ 신규 회귀 테스트 — `execution-mode` Windows `.cmd` fallback 6건, `swarm-planner` empty prompt validation 2건, `conductor` argv dispatch 1건
+
+### Chore
+- `pack.mjs` 미러 동기화 (packages/core + packages/triflux + packages/remote)
+
 ## [10.9.32] - 2026-04-18
 
 ### Fixed

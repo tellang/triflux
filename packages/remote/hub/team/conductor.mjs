@@ -23,12 +23,12 @@ import { broker } from "@triflux/core/hub/account-broker.mjs";
 import { execFile, spawn } from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { killProcess } from "@triflux/core/hub/platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
-import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
 import {
   ensureConductorRegistry,
   getConductorRegistry,
 } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
+import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
 import {

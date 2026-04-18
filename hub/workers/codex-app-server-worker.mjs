@@ -361,7 +361,6 @@ export class CodexAppServerWorker {
       typeof options.warn === "function"
         ? options.warn
         : (label, payload) => {
-            // biome-ignore lint/suspicious/noConsole: defensive warn-once path
             console.warn(`[codex-app-server] ${label}`, payload);
           };
     this._onUnknownMethod =
