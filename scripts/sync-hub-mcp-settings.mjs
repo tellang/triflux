@@ -186,7 +186,10 @@ async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
       return { kind: "error", path: filePath, reason };
     }
 
-    if (hubServer.url === hubUrl) {
+    const typeOk = hubServer.type === "http";
+    const urlOk = hubServer.url === hubUrl;
+
+    if (typeOk && urlOk) {
       log(logger, "info", `[mcp-sync] skipped: ${filePath}`);
       return { kind: "skipped", path: filePath };
     }
@@ -194,11 +197,12 @@ async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
     log(
       logger,
       "debug",
-      `[mcp-sync] ${filePath} url: ${String(hubServer.url)} -> ${hubUrl}`,
+      `[mcp-sync] ${filePath} type:${String(hubServer.type)} url:${String(hubServer.url)} -> type:http url:${hubUrl}`,
     );
 
     if (!dryRun) {
       try {
+        hubServer.type = "http";
         hubServer.url = hubUrl;
         await writeJsonAtomic(filePath, settings);
       } catch (error) {
