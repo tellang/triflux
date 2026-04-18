@@ -1,6 +1,10 @@
 // hub/team/execution-mode.mjs — headless vs interactive execution mode selection
 
+import { existsSync } from "node:fs";
+
 import { whichCommand } from "../platform.mjs";
+
+const WIN32_EXT_PRECEDENCE = [".cmd", ".exe", ".bat", ".ps1"];
 
 export const MODES = Object.freeze({
   HEADLESS: "headless",
@@ -25,7 +29,31 @@ function pushFlag(args, flag, value) {
 export function resolveCliExecutable(cli, opts = {}) {
   const name = String(cli || "codex");
   const resolveCommand = opts.resolveCommand || whichCommand;
-  return resolveCommand(name) || name;
+  const resolved = resolveCommand(name) || name;
+
+  // Windows: Node spawn({ shell: false }) calls CreateProcess directly and does NOT
+  // search PATHEXT. npm-installed CLIs (codex, gemini) live at `<npm>/codex` (Git Bash
+  // shell script) alongside `<npm>/codex.cmd` (Windows batch wrapper). whichCommand
+  // returns the extensionless path, which Windows cannot execute → ENOENT "The system
+  // cannot find the file specified." Append the correct extension when the resolved
+  // path has none.
+  const platform = opts.platform || process.platform;
+  if (platform === "win32" && resolved) {
+    const hasExt = /\.[^\\/.]+$/.test(resolved);
+    if (!hasExt) {
+      const existsFn = opts.existsSyncFn || existsSync;
+      for (const ext of WIN32_EXT_PRECEDENCE) {
+        const candidate = `${resolved}${ext}`;
+        try {
+          if (existsFn(candidate)) return candidate;
+        } catch {
+          // ignore stat failures, try next extension
+        }
+      }
+    }
+  }
+
+  return resolved;
 }
 
 export function buildSpawnSpecForMode(mode, opts = {}) {

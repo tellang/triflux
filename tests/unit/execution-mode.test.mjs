@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildCommandForMode,
   MODES,
+  resolveCliExecutable,
   selectExecutionMode,
 } from "../../hub/team/execution-mode.mjs";
 
@@ -150,4 +151,60 @@ test("buildCommandForMode: gemini is always prompt headless", () => {
     command: 'gemini -p "summarize logs"',
     useExec: true,
   });
+});
+
+// ── resolveCliExecutable: Windows .cmd/.exe fallback (#108 follow-up) ──
+
+test("resolveCliExecutable: win32 appends .cmd when resolved path has no extension", () => {
+  const result = resolveCliExecutable("codex", {
+    platform: "win32",
+    resolveCommand: () => "C:\npm\codex",
+    existsSyncFn: (p) => p === "C:\npm\codex.cmd",
+  });
+  assert.equal(result, "C:\npm\codex.cmd");
+});
+
+test("resolveCliExecutable: win32 prefers .cmd over .exe", () => {
+  const result = resolveCliExecutable("codex", {
+    platform: "win32",
+    resolveCommand: () => "C:\npm\codex",
+    existsSyncFn: (p) => p === "C:\npm\codex.cmd" || p === "C:\npm\codex.exe",
+  });
+  assert.equal(result, "C:\npm\codex.cmd");
+});
+
+test("resolveCliExecutable: win32 falls back to .exe if .cmd missing", () => {
+  const result = resolveCliExecutable("codex", {
+    platform: "win32",
+    resolveCommand: () => "C:\tools\mytool",
+    existsSyncFn: (p) => p === "C:\tools\mytool.exe",
+  });
+  assert.equal(result, "C:\tools\mytool.exe");
+});
+
+test("resolveCliExecutable: win32 keeps path if already has extension", () => {
+  const result = resolveCliExecutable("codex", {
+    platform: "win32",
+    resolveCommand: () => "C:\npm\codex.cmd",
+    existsSyncFn: () => true,
+  });
+  assert.equal(result, "C:\npm\codex.cmd");
+});
+
+test("resolveCliExecutable: non-win32 platform leaves path as-is", () => {
+  const result = resolveCliExecutable("codex", {
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/codex",
+    existsSyncFn: () => true,
+  });
+  assert.equal(result, "/usr/local/bin/codex");
+});
+
+test("resolveCliExecutable: win32 returns extensionless if no extension variant exists", () => {
+  const result = resolveCliExecutable("weirdtool", {
+    platform: "win32",
+    resolveCommand: () => "C:\npm\weirdtool",
+    existsSyncFn: () => false,
+  });
+  assert.equal(result, "C:\npm\weirdtool");
 });
