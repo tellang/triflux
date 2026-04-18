@@ -281,10 +281,8 @@ export function buildContextUsageView(stdin, snapshot = null) {
   const monitor = snapshot || readContextMonitorSnapshot();
   const modelId = stdin?.model?.id ?? stdin?.model;
   const modelHintLimit = resolveModelLimit(modelId);
-  const fallbackLimit = Math.max(
-    modelHintLimit,
-    Number(monitor?.limitTokens || 0),
-  );
+  const monitorLimit = Number(monitor?.limitTokens || 0);
+  const fallbackLimit = monitorLimit > 0 ? monitorLimit : modelHintLimit;
 
   const usedTokens = stdinUsage?.usedTokens ?? Number(monitor?.usedTokens || 0);
   const limitTokens = stdinUsage?.limitTokens ?? Math.max(1, fallbackLimit);
