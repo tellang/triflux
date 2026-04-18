@@ -160,6 +160,34 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 - `--retry auto-escalate` → CLI 승격 체인 (Phase 3)
 - `--max-iterations N` (N>0) → ralph/auto-escalate 에 상한 부여
 
+### Retry state machine 계약 (legacy autoroute / persist 이관)
+
+`--retry ralph` 와 `--retry auto-escalate` 는 모두 `hub/team/retry-state-machine.mjs` 를 사용한다.
+
+- `--retry ralph` 는 **true ralph state machine** 으로 동작한다. 기본값 `--max-iterations 0` 은 unlimited 의미다.
+- 실행 상태는 `.omc/state/ralph-<sessionId>.json` 에 append 저장한다. `resumeFromStateFile()` 로 재개 가능해야 한다.
+- 동일 `failureReason` 이 3회 연속 반복되면 `stuckCounter` 가 올라가고 `STUCK` 으로 중단한다.
+- `--retry auto-escalate` 는 `DEFAULT_ESCALATION_CHAIN` 을 기본으로 사용한다. 커스텀 체인이 필요하면 `.claude/rules/tfx-escalation-chain.md` 로 override 한다.
+
+`DEFAULT_ESCALATION_CHAIN`
+1. codex : gpt-5-mini
+2. codex : gpt-5
+3. claude : sonnet-4-6
+4. claude : opus-4-7
+
+체인 규칙:
+- 각 단계에서 `max-iterations` 를 모두 소진하면 다음 CLI/모델로 전이한다.
+- 체인 끝까지 소진하면 `BUDGET_EXCEEDED` 와 `reason: "escalation-chain-exhausted"` 를 기록한다.
+
+### Codex lead 계약 (legacy auto-codex 이관)
+
+`--cli codex --lead codex --no-claude-native` 조합이 `tfx-auto-codex` 의 canonical 표현이다.
+
+- `--cli codex` 는 CLI 워커를 Codex 로 고정한다.
+- `--lead codex` 는 분류·메타판단도 Codex 가 담당하게 한다.
+- `--no-claude-native` 는 Claude native sub-agent 경로를 끄고 CLI 기반 worker 만 허용한다.
+- 하위 호환 env `TFX_NO_CLAUDE_NATIVE=1` 는 계속 읽되, 플래그가 우선한다.
+
 ### 사용 예시
 
 ```
@@ -294,6 +322,39 @@ TRIAGE
 
 Plan/PRD/Approval은 tfx-auto에서 실행, 그 후 tfx-multi Phase 3로 전환.
 서브태스크 배열 + `thorough: true` 신호를 함께 전달하여 multi 측에서 verify/fix를 수행.
+
+## PRE-CONTEXT GATE
+
+legacy `tfx-fullcycle` 가 맡던 deep/fullcycle 계약은 `tfx-auto --mode deep --parallel 1` 로 이관되었다. Phase 1 시작 전 아래 intake 를 먼저 수행한다.
+
+1. task slug 를 생성한다.
+2. 최근 관련 컨텍스트와 산출물을 탐색한다.
+3. 현재 작업용 `context-snapshot.md` 를 생성한다.
+4. ambiguity 가 높으면 `.tfx/plans/interview-*` 산출물을 우선 재사용한다.
+
+권장 저장 경로:
+- `.tfx/fullcycle/{run-id}/context-snapshot.md`
+
+## STATE & ARTIFACT CONTRACT
+
+deep/fullcycle 경로는 phase 별 산출물과 상태를 남긴다.
+
+- 기본 아티팩트 디렉토리: `.tfx/fullcycle/{run-id}/`
+- 최소 산출물: `context-snapshot.md`, `expanded-spec.md`, `implementation-plan.md`, `execution-summary.md`, `qa-findings.md`, `validation-decision.md`, `state.json`
+- `state.json` 최소 필드: current phase, started_at, last_successful_phase, retry_count, failure_reason
+- 재실행 시 전체를 처음부터 다시 돌리지 않는다. `state.json` 을 읽고 마지막 미완료 phase 부터 resume 한다.
+- QA / Validation 재시도는 해당 phase 만 다시 실행한다.
+
+deep/fullcycle 추가 규칙:
+- `task slug` 와 `context-snapshot.md` 는 항상 같이 생성한다.
+- `/deep-interview` 또는 기존 `.tfx/plans/interview-{timestamp}.md` 산출물이 있으면 raw prompt 대신 재사용한다.
+- 동일한 실패 / 동일한 에러가 3회 반복되면 무한 루프를 중단하고 근본 이슈 보고서를 남긴다.
+
+## CLEANUP & CANCEL RULES
+
+- 성공 시 `state.json` 을 `complete` 상태로 기록하고 orphan state 가 남지 않도록 정리한다.
+- 취소/비정상 종료 시에도 마지막 phase, `failure_reason`, 재개 힌트를 남겨 다음 실행에서 resume 가능해야 한다.
+- cleanup 은 상태를 무조건 삭제하는 것이 아니라, 성공/취소 여부가 판별되도록 메타데이터를 남긴 뒤 정리한다.
 
 ## 멀티 태스크 라우팅 (트리아지 후)
 
