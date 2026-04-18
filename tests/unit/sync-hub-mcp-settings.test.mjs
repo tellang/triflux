@@ -76,12 +76,13 @@ describe("sync-hub-mcp-settings", () => {
     ]);
   });
 
-  it("case 2: tfx-hub.url이 이미 일치하면 skipped에 포함한다", async () => {
+  it("case 2: tfx-hub.url과 type이 이미 일치하면 skipped에 포함한다", async () => {
     const geminiPath = settingsPath(".gemini", "settings.json");
     writeJson(geminiPath, {
       mcpServers: {
         "tfx-hub": {
           url: HUB_URL,
+          type: "http",
           enabled: false,
         },
       },
@@ -243,6 +244,7 @@ describe("sync-hub-mcp-settings", () => {
       enabled: true,
       trust: ["project-a"],
       timeout: 15000,
+      type: "http",
     });
   });
 });
