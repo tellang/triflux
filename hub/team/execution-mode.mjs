@@ -1,5 +1,7 @@
 // hub/team/execution-mode.mjs — headless vs interactive execution mode selection
 
+import { whichCommand } from "../platform.mjs";
+
 export const MODES = Object.freeze({
   HEADLESS: "headless",
   INTERACTIVE: "interactive",
@@ -8,6 +10,63 @@ export const MODES = Object.freeze({
 
 function quotePrompt(prompt) {
   return JSON.stringify(typeof prompt === "string" ? prompt : "");
+}
+
+function asPrompt(prompt) {
+  return typeof prompt === "string" ? prompt : "";
+}
+
+function pushFlag(args, flag, value) {
+  if (typeof value === "string" && value.length > 0) {
+    args.push(flag, value);
+  }
+}
+
+export function resolveCliExecutable(cli, opts = {}) {
+  const name = String(cli || "codex");
+  const resolveCommand = opts.resolveCommand || whichCommand;
+  return resolveCommand(name) || name;
+}
+
+export function buildSpawnSpecForMode(mode, opts = {}) {
+  const cli = opts.cli || "codex";
+  const prompt = asPrompt(opts.prompt);
+  const command = resolveCliExecutable(cli, opts);
+
+  if (cli === "gemini") {
+    const args = [];
+    pushFlag(args, "--model", opts.model);
+    args.push("--yolo", "--prompt", prompt, "--output-format", "text");
+    return { command, args, useExec: true, shell: false };
+  }
+
+  if (mode === MODES.INTERACTIVE || mode === MODES.AUTO) {
+    return { command, args: [], useExec: false, shell: false };
+  }
+
+  if (cli === "claude") {
+    const args = [];
+    pushFlag(args, "--model", opts.model);
+    args.push("-p", prompt);
+    return { command, args, useExec: true, shell: false };
+  }
+
+  const args = [];
+  pushFlag(args, "--profile", opts.profile);
+  args.push(
+    "exec",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--skip-git-repo-check",
+    "--color",
+    "never",
+  );
+  if (Array.isArray(opts.mcpServers)) {
+    for (const server of opts.mcpServers) {
+      args.push("-c", `mcp_servers.${server}.enabled=true`);
+    }
+  }
+  args.push(prompt);
+  return { command, args, useExec: true, shell: false };
 }
 
 /**
