@@ -17,9 +17,15 @@ function candidatePaths(repoRoot) {
 }
 
 function canonicalOs(rawOs) {
-  const value = String(rawOs || "").trim().toLowerCase();
+  const value = String(rawOs || "")
+    .trim()
+    .toLowerCase();
   if (!value) return "linux";
-  if (value === "win32" || value === "windows" || value.startsWith("windows-")) {
+  if (
+    value === "win32" ||
+    value === "windows" ||
+    value.startsWith("windows-")
+  ) {
     return "windows";
   }
   if (value === "macos" || value === "darwin" || value.includes("darwin")) {
@@ -64,16 +70,13 @@ function normalizeLastProbe(rawProbe) {
   const probe = {};
   if (typeof rawProbe.ok === "boolean") probe.ok = rawProbe.ok;
   if (rawProbe.ts) probe.ts = String(rawProbe.ts);
-  if (Number.isFinite(rawProbe.latency_ms)) probe.latency_ms = rawProbe.latency_ms;
+  if (Number.isFinite(rawProbe.latency_ms))
+    probe.latency_ms = rawProbe.latency_ms;
   return Object.keys(probe).length > 0 ? probe : null;
 }
 
 export function normalizeHost(rawHost = {}, name = "") {
-  const sshUser =
-    rawHost.ssh_user ||
-    rawHost.ssh?.user ||
-    rawHost.user ||
-    null;
+  const sshUser = rawHost.ssh_user || rawHost.ssh?.user || rawHost.user || null;
   const tailscale = {
     ip: rawHost.tailscale?.ip || null,
     dns: rawHost.tailscale?.dns || null,
@@ -92,7 +95,13 @@ export function normalizeHost(rawHost = {}, name = "") {
     name,
     description: rawHost.description || name,
     aliases: Array.isArray(rawHost.aliases)
-      ? [...new Set(rawHost.aliases.map((alias) => String(alias).trim()).filter(Boolean))]
+      ? [
+          ...new Set(
+            rawHost.aliases
+              .map((alias) => String(alias).trim())
+              .filter(Boolean),
+          ),
+        ]
       : [],
     default_dir: rawHost.default_dir || "~",
     os: canonicalOs(rawHost.os),
@@ -106,7 +115,9 @@ export function normalizeHost(rawHost = {}, name = "") {
     capabilities_v2,
     last_probe: normalizeLastProbe(rawHost.last_probe),
     specs:
-      rawHost.specs && typeof rawHost.specs === "object" ? { ...rawHost.specs } : {},
+      rawHost.specs && typeof rawHost.specs === "object"
+        ? { ...rawHost.specs }
+        : {},
     raw: { ...rawHost },
   };
 }
@@ -161,8 +172,12 @@ export function resolveHost(nameOrAlias, repoRoot) {
       host.tailscale.ip,
       host.tailscale.dns,
       host.ssh_user ? `${host.ssh_user}@${name}` : null,
-      host.ssh_user && host.tailscale.ip ? `${host.ssh_user}@${host.tailscale.ip}` : null,
-      host.ssh_user && host.tailscale.dns ? `${host.ssh_user}@${host.tailscale.dns}` : null,
+      host.ssh_user && host.tailscale.ip
+        ? `${host.ssh_user}@${host.tailscale.ip}`
+        : null,
+      host.ssh_user && host.tailscale.dns
+        ? `${host.ssh_user}@${host.tailscale.dns}`
+        : null,
     ]);
     for (const alias of aliases) {
       if (alias && String(alias).toLowerCase() === lowered) {
@@ -198,7 +213,11 @@ export function selfTestFixtures() {
       default_dir: "~/projects",
       os: "darwin kernel",
       ssh: { user: "tellang" },
-      tailscale: { ip: "100.64.0.2", dns: "mac.ts.net", ssh_mode: "ssh-over-vpn" },
+      tailscale: {
+        ip: "100.64.0.2",
+        dns: "mac.ts.net",
+        ssh_mode: "ssh-over-vpn",
+      },
       capabilities_v2: { codex: true, claude: true, high_memory: true },
       last_probe: { ok: true, ts: "2026-04-18T12:34:56Z", latency_ms: 143 },
     },
