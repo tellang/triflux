@@ -15,6 +15,7 @@ All notable changes to triflux will be documented in this file.
 - `.claude/rules/tfx-routing.md` — ensemble/debate/consensus/panel 자연어 라우팅을 `tfx-auto --mode consensus --shape …` 로 통합
 - legacy alias 6개 (tfx-debate, tfx-consensus, tfx-panel, tfx-remote-setup, tfx-remote-spawn, tfx-psmux-rules) stderr 경고 + stdout `[DEPRECATED]` 마커 + `.omc/state/alias-usage.log` append 규약 적용
 - `README.md` + `README.ko.md` — 스킬 수 badge (42 → 21 core + 23 aliases) + Phase 3/4 플래그 본문 반영 + `tfx-remote` 통합 예시
+- Unreleased 점검 기준 Phase 4 커밋 5건 중 실제 기능 변경 4건 (`7885c5f`, `498a5f7`, `005c22c`, `0724fe1`) 반영 확인. `c28e102` 는 본 changelog 동기화 커밋
 
 ### Fixed
 

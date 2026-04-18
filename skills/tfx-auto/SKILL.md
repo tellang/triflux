@@ -339,8 +339,256 @@ shape 별 `shape_input`:
   - `shape=panel`: `전문가 패널 보고서`, `패널 구성`, `패널 합의`, `소수 견해`, `핵심 추천`, `미해결 쟁점`, `다음 단계`, `meta judgment`
 
 - artifact 경로:
-  - markdown: `.omc/artifacts/consensus/<session-id>/<shape>.md`
-  - json: `.omc/artifacts/consensus/<session-id>/<shape>.json`
+- markdown: `.omc/artifacts/consensus/<session-id>/<shape>.md`
+- json: `.omc/artifacts/consensus/<session-id>/<shape>.json`
+
+shape 별 orchestration 정책:
+
+#### `shape=consensus`
+
+정책:
+
+- 목적: 각 participant 의 findings 를 합의/충돌 항목으로 압축하고 `FIX_FIRST` / `merge` / `defer` 같은 실행 결정을 빠르게 내린다.
+- 수집 단위: 옵션 비교가 아니라 finding/assertion 단위다. 동일 결론이라도 근거가 다르면 separate evidence 로 보존한다.
+- 합의 판정: 3자 중 2자 이상이 같은 remediation 또는 risk assessment 를 지지하면 provisional agreement 로 분류하고, Claude 가 최종 `resolved_items` 승격 여부를 결정한다.
+- 충돌 승격: P1/P2 급 충돌은 score 와 무관하게 `user_decision_needed` 또는 `FIX_FIRST` 로 승격한다. score 가 높아도 안전 이슈를 묻지 않는다.
+- degrade: `no-gemini` 또는 partial timeout 시 2자 합의를 허용하되 root meta 의 `status=partial` 과 누락 participant 이유를 반드시 남긴다.
+
+출력 schema 예시:
+
+```json
+{
+  "mode": "consensus",
+  "shape": "consensus",
+  "topic": "Phase 5 alias removal readiness",
+  "cli_set": "triad",
+  "participants": [
+    { "name": "claude", "status": "success" },
+    { "name": "codex", "status": "success" },
+    { "name": "gemini", "status": "success" }
+  ],
+  "status": "complete",
+  "shape_output": {
+    "consensus_score": 82,
+    "consensus_items": [
+      "15 legacy alias can be removed after usage reaches zero",
+      "alias usage gate must be verified before physical deletion"
+    ],
+    "disputed_items": [
+      {
+        "item": "Delete tfx-psmux-rules in same PR as remote aliases",
+        "positions": {
+          "claude": "defer",
+          "codex": "proceed",
+          "gemini": "defer"
+        },
+        "severity": "p2"
+      }
+    ],
+    "resolved_items": [
+      "Delete consensus/debate/panel aliases after routing docs are updated"
+    ],
+    "user_decision_needed": [],
+    "meta_judgment": {
+      "severity_classification": {
+        "p1": [],
+        "p2": [
+          "Remote alias removal ordering still disputed"
+        ],
+        "p3": []
+      },
+      "consensus_vs_dispute": {
+        "agreements": [
+          "Phase 5 requires zero alias usage before deletion"
+        ],
+        "conflicts": [
+          "Remote alias deletion bundling"
+        ]
+      },
+      "recommended_action": "FIX_FIRST",
+      "followup_issues": [
+        "Confirm remote migration docs before deleting remote aliases"
+      ],
+      "mode_specific_meta": {
+        "threshold_passed": true,
+        "needs_resolution_round": false
+      }
+    }
+  }
+}
+```
+
+#### `shape=debate`
+
+정책:
+
+- 목적: 2개 이상 옵션을 criteria 기반으로 비교하고 최종 추천안 1개를 만든다.
+- 수집 단위: option x criterion matrix 다. participant 자유서술을 그대로 합치지 말고 각 옵션의 장단점/score 를 정규화한다.
+- 라운드 운영: 1차 독립 평가 후 상위 2개 옵션 간 반론 라운드 1회를 허용한다. `--max-rounds` 로 늘리더라도 기본은 2라운드 이하로 제한한다.
+- 추천 규칙: 단순 다수결이 아니라 weighted ranking 을 사용하되, P1 risk 가 있는 옵션은 총점이 높아도 최종 추천에서 제외 가능하다.
+- criteria 누락: 사용자가 criteria 를 주지 않으면 latency, implementation complexity, operability, migration risk 를 기본 축으로 채운다.
+
+출력 schema 예시:
+
+```json
+{
+  "mode": "consensus",
+  "shape": "debate",
+  "topic": "REST vs GraphQL for triflux remote control API",
+  "cli_set": "triad",
+  "participants": [
+    { "name": "claude", "status": "success" },
+    { "name": "codex", "status": "success" },
+    { "name": "gemini", "status": "success" }
+  ],
+  "status": "complete",
+  "shape_output": {
+    "options": [
+      "REST",
+      "GraphQL"
+    ],
+    "criteria": [
+      "latency",
+      "complexity",
+      "operability",
+      "migration_risk"
+    ],
+    "scorecard": [
+      {
+        "option": "REST",
+        "total_score": 84,
+        "criterion_scores": {
+          "latency": 86,
+          "complexity": 88,
+          "operability": 83,
+          "migration_risk": 79
+        }
+      },
+      {
+        "option": "GraphQL",
+        "total_score": 68,
+        "criterion_scores": {
+          "latency": 64,
+          "complexity": 55,
+          "operability": 70,
+          "migration_risk": 83
+        }
+      }
+    ],
+    "agreements": [
+      "REST is simpler to roll out incrementally"
+    ],
+    "disputes": [
+      "GraphQL may reduce future overfetching but adds current operational complexity"
+    ],
+    "recommendation": {
+      "winner": "REST",
+      "decision_type": "majority_with_risk_adjustment",
+      "why": "REST wins on complexity and operability while avoiding a new query layer"
+    },
+    "meta_judgment": {
+      "severity_classification": {
+        "p1": [],
+        "p2": [
+          "GraphQL rollout would widen migration scope"
+        ],
+        "p3": []
+      },
+      "consensus_vs_dispute": {
+        "agreements": [
+          "REST is lower risk for the current phase"
+        ],
+        "conflicts": [
+          "Long-term schema flexibility payoff"
+        ]
+      },
+      "recommended_action": "merge",
+      "followup_issues": [
+        "Re-evaluate GraphQL after remote surface stabilizes"
+      ],
+      "mode_specific_meta": {
+        "rounds_run": 2,
+        "winning_margin": 16
+      }
+    }
+  }
+}
+```
+
+#### `shape=panel`
+
+정책:
+
+- 목적: 전문가 roster 기반으로 관점이 다른 조언을 구조화하고 majority/minority view 를 명시한다.
+- roster 규칙: `--experts` 미지정 시 기본 roster 를 채우되 각 CLI 가 서로 다른 전문성을 대표하도록 배분한다. 동일 전문가를 중복 배정하지 않는다.
+- 발언 구조: participant raw answer 를 그대로 이어붙이지 말고 `expert -> thesis -> supporting evidence -> concern -> recommendation` 구조로 정리한다.
+- 합의 규칙: panel 은 unanimity 보다 "majority view + minority view + open questions" 보존이 중요하다. minority 가 P1/P2 를 제기하면 별도 `open_questions` 로 승격한다.
+- moderator 역할: Claude 는 moderator 로서 panel synthesis 를 담당하지만, 자기 의견을 추가 participant 처럼 중복 집계하지 않는다.
+
+출력 schema 예시:
+
+```json
+{
+  "mode": "consensus",
+  "shape": "panel",
+  "topic": "How should triflux remove 15 legacy aliases in Phase 5?",
+  "cli_set": "triad",
+  "participants": [
+    { "name": "claude", "status": "success" },
+    { "name": "codex", "status": "success" },
+    { "name": "gemini", "status": "success" }
+  ],
+  "status": "complete",
+  "shape_output": {
+    "panelists": [
+      { "cli": "claude", "experts": ["Martin Fowler", "Kent Beck"] },
+      { "cli": "codex", "experts": ["Sam Newman", "Gregor Hohpe"] },
+      { "cli": "gemini", "experts": ["Michael Porter", "Karl Wiegers"] }
+    ],
+    "majority_view": "Delete routing aliases first, then consensus family, then remote aliases after usage and docs converge",
+    "minority_views": [
+      {
+        "position": "Delete remote aliases together with consensus family in one release",
+        "supporters": ["Sam Newman"],
+        "severity": "p3"
+      }
+    ],
+    "open_questions": [
+      "Should tfx-psmux-rules be deleted in the same PR as tfx-remote-setup/spawn?"
+    ],
+    "action_items": [
+      "Verify alias-usage.log aggregate is zero",
+      "Update README and routing docs before physical deletion"
+    ],
+    "meta_judgment": {
+      "severity_classification": {
+        "p1": [],
+        "p2": [
+          "Docs drift would make remote alias deletion unsafe"
+        ],
+        "p3": []
+      },
+      "consensus_vs_dispute": {
+        "agreements": [
+          "Usage-zero gate is mandatory"
+        ],
+        "conflicts": [
+          "Exact ordering of remote alias deletion"
+        ]
+      },
+      "recommended_action": "split",
+      "followup_issues": [
+        "Run a repo-wide reference-zero audit before remote alias deletion"
+      ],
+      "mode_specific_meta": {
+        "panel_size": 6,
+        "moderator": "claude",
+        "majority_strength": "5/6"
+      }
+    }
+  }
+}
+```
 
 ### Legacy 스킬 매핑
 
