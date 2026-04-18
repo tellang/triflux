@@ -10,13 +10,15 @@
 
 <p align="center">
   <strong>Consensus Intelligence 기반 Tri-CLI 오케스트레이션</strong><br>
-  <em>Claude + Codex + Gemini — 자연어 라우팅, 교차 모델 리뷰, Deep/Light 변형을 갖춘 38개 스킬.</em>
+  <em>Claude + Codex + Gemini — 21개 코어 스킬, 23개 thin alias, 자연어 라우팅, 교차 모델 리뷰.</em>
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
+  <img src="https://img.shields.io/badge/skills-21_core-F5C242?style=flat-square" alt="21개 코어 스킬">
+  <sub>+ 23개 thin alias</sub>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -27,7 +29,7 @@
 <p align="center">
   <a href="#빠른-시작">빠른 시작</a> ·
   <a href="#tri-cli-합의-엔진">Tri-CLI 합의 엔진</a> ·
-  <a href="#38개-스킬">38개 스킬</a> ·
+  <a href="#전체-21개-스킬-23개-thin-alias-포함">전체 21개 스킬</a> ·
   <a href="#아키텍처">아키텍처</a> ·
   <a href="#deep-vs-light">Deep vs Light</a> ·
   <a href="#보안">보안</a>
@@ -68,33 +70,31 @@ npm install -g triflux
 # Debate — 3개의 독립적인 의견을 확보
 /tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
 
-# Persistence — 완료될 때까지 멈추지 않음
-/tfx-persist "implement full auth flow with tests"
-# 호환 별칭
-/tfx-ralph "implement full auth flow with tests"
+# Persistence — 또는 단일 진입점에서 직접 호출
+/tfx-auto "implement full auth flow with tests" --retry ralph
 
 # Team — Multi-CLI 병렬 오케스트레이션
 /tfx-multi "refactor auth + update UI + add tests"
 
-# Remote — 원격 머신에 Claude 세션 생성
+# Remote — setup, spawn, attach, resume를 하나의 표면으로
 /tfx-remote-setup                              # 인터랙티브 호스트 설정 위저드 (Tailscale + SSH)
-/tfx-remote-spawn "울트라에서 보안 리뷰 해"      # 원격 호스트에서 세션 실행
+/tfx-remote spawn ultra4 "보안 리뷰 실행"       # 원격 호스트에서 세션 실행
 ```
 
 ---
 
-## v9의 새로운 기능
+## v10.11.0의 새로운 기능
 
-**triflux v9**은 **하네스 네이티브 인텔리전스**를 도입합니다. 자연어로 말하면 적절한 스킬로 자동 라우팅되고, 교차 모델 리뷰로 동일 모델의 self-approve를 차단합니다.
+**triflux v10.11.0**은 **하나의 front door + 플래그 기반 라우팅**으로 정리됩니다. 자연어 입력은 계속 지원되고, Phase 3/4에서 legacy 표면은 `tfx-auto`와 `tfx-remote` 뒤로 접히며, 기존 스킬명은 thin alias로 계속 동작합니다.
 
-### v9 주요 특징
+### v10.11.0 주요 특징
 
 - **자연어 라우팅** — "리뷰해줘"라고 말하면 `/tfx-review`가 자동 호출. "제대로/꼼꼼히" 수정자로 Deep 변형 자동 에스컬레이션
 - **교차 모델 리뷰** — Claude가 작성하면 Codex가 리뷰, Codex가 작성하면 Claude가 리뷰. 동일 모델 self-approve 차단. 커밋 전 미검증 파일 nudge
-- **맥락 격리** — 현재 맥락과 무관한 요청을 감지하면 별도 psmux 세션으로 분리 제안
-- **38개 스킬** — Light 14개 + Deep 10개 + Infrastructure 14개, 10개 도메인으로 구성
-- **Codex Swarm 강화** — PowerShell `.ps1` 런처, 프로파일 기반 실행, `/merge-worktree`로 결과 자동 수집
-- **스킬 메타데이터** — 모든 스킬에 래퍼/인프라/Light-Deep 관계 표기. 트리거 충돌 해소
+- **정확한 카탈로그** — 44개 스킬 파일 기준 `21 core + 23 thin alias`
+- **Phase 3** — `--retry ralph`, `--retry auto-escalate`, `--lead codex`, `--max-iterations N`, 4단계 `DEFAULT_ESCALATION_CHAIN`
+- **Phase 4** — `tfx-auto --shape debate|panel|consensus`, `tfx-remote` 단일 진입점, `tfx-psmux-rules`는 `.claude/rules/tfx-psmux.md`로 이동
+- **하위 호환성 유지** — `tfx-persist`, `tfx-debate`, `tfx-multi`, `tfx-remote-spawn` 같은 기존 이름은 thin alias로 계속 지원
 
 ### v8 기반 (계속 유지)
 
@@ -134,93 +134,98 @@ Phase 3: Resolution (합의율 < 70%일 경우)
 
 **결과**: 단일 모델 리뷰 대비 오탐(false positive) 87% 감소 (Calimero 합의 연구 기반).
 
+Phase 4 이후에는 `tfx-auto`가 하나의 front door 역할을 맡습니다. legacy 스킬명은 그대로 받아들이되, 실제 의미는 플래그로 표현됩니다:
+
+- `--retry ralph` / `--retry auto-escalate` (Phase 3)
+- `--lead codex` / `--no-claude-native` (Phase 3)
+- `--shape debate|panel|consensus` (Phase 4)
+
 ---
 
-## 38개 스킬
+## 전체 21개 스킬 (23개 thin alias 포함)
 
 ### 리서치
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-research` | Light | Exa/Brave/Tavily 자동 선택을 통한 빠른 웹 검색 | ~5K |
-| `tfx-deep-research` | Deep | 다중 소스 병렬 검색 + 3-CLI 교차 검증 | ~50K |
-| `tfx-codebase-search` | Light | Haiku 에이전트를 활용한 빠른 코드베이스 탐색 | ~3K |
-| `tfx-autoresearch` | Light | 자율 웹 리서치 후 구조화된 리포트 생성 | ~15K |
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| `tfx-research` | Active | Exa/Brave/Tavily 자동 선택을 통한 빠른 웹 검색 |
+| `tfx-find` | Active | 파일, 심볼, 패턴 중심의 빠른 코드베이스 탐색 |
 
-### 분석
+Aliases (fold into `tfx-auto` flags): `tfx-deep-research`, `tfx-autoresearch`
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-analysis` | Light | Codex를 통한 빠른 코드/아키텍처 분석 | ~8K |
-| `tfx-deep-analysis` | Deep | 3자 관점 분석 + Tri-Debate 합의 도출 | ~30K |
+### 분석 및 계획
+
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| `tfx-analysis` | Active | 빠른 코드/아키텍처 분석 |
+| `tfx-plan` | Active | 빠른 구현 계획 수립 |
+| `tfx-interview` | Active | 소크라테스식 요구사항 탐색 |
+
+Aliases (fold into `tfx-auto` flags): `tfx-deep-analysis`, `tfx-deep-plan`, `tfx-deep-interview`
 
 ### 실행
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-autopilot` | Light | 단순 자율 작업 실행 | ~10K |
-| `tfx-deep-autopilot` | Deep | 5단계 전체 파이프라인: Expand → Plan → Execute → QA → Validate | ~80K |
-| `tfx-auto` | — | 명령어 단축키를 갖춘 통합 CLI 오케스트레이터 | 가변 |
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| `tfx-auto` | Active | 플래그 기반 라우팅과 legacy surface folding을 담당하는 통합 CLI 오케스트레이터 |
 
-### QA 및 검증
+Aliases (fold into `tfx-auto` flags): `tfx-autopilot`, `tfx-fullcycle`, `tfx-codex`, `tfx-gemini`
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-qa` | Light | Test → Fix → Retest 순환 (최대 3회) | ~5K |
-| `tfx-deep-qa` | Deep | 3-CLI 독립 검증 + 합의 점수 산출 | ~25K |
+### 리뷰 및 QA
 
-### 계획
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| `tfx-review` | Active | 빠른 코드 리뷰 |
+| `tfx-qa` | Active | Test → Fix → Retest 순환 (최대 3회) |
+| `tfx-prune` | Active | AI slop 제거, dead code 및 과한 추상화 정리 |
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-plan` | Light | Opus를 통한 빠른 구현 계획 수립 | ~8K |
-| `tfx-deep-plan` | Deep | Planner + Architect + Critic 합의 기반 계획 | ~20K |
+Aliases (fold into `tfx-auto` flags): `tfx-deep-review`, `tfx-deep-qa`
 
-### 리뷰
+### 토론 및 의사결정
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-review` | Light | Codex를 통한 빠른 코드 리뷰 | ~8K |
-| `tfx-deep-review` | Deep | 3-CLI 독립 리뷰, 합의 항목만 리포팅 | ~25K |
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| _독립 active 표면 없음_ | — | debate, consensus, panel은 이제 `tfx-auto --mode consensus`의 출력 shape로 통합 |
 
-### 토론 및 패널
+Aliases (fold into `tfx-auto` flags): `tfx-consensus`, `tfx-debate`, `tfx-panel`
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-debate` | Deep | 모든 주제에 대한 구조화된 3자 토론 | ~20K |
-| `tfx-panel` | Deep | 가상 전문가 패널 시뮬레이션 | ~30K |
+### 지속 실행 및 라우팅
 
-### 지속 실행
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| `tfx-index` | Active | 프로젝트 인덱싱으로 94% 토큰 절감 (58K→3K) |
+| `tfx-hooks` | Active | Claude Code hook priority 관리 |
+| `tfx-profile` | Active | Codex/Gemini CLI 프로필 관리 |
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-persist` | Deep | 완료될 때까지 3자 검증 기반 반복 실행 (`/tfx-ralph` 호환 별칭) | 가변 |
-| `tfx-sisyphus` | Light | 모델 에스컬레이션을 갖춘 자동 라우팅 실행 | 가변 |
+Aliases (fold into `tfx-auto` flags): `tfx-persist`, `tfx-ralph`, `tfx-autoroute`, `tfx-auto-codex`
 
-### 메타 및 유틸리티
+### 오케스트레이션
 
-| 스킬 | 유형 | 설명 | 토큰 |
-|------|------|------|------|
-| `tfx-index` | Light | 프로젝트 인덱싱으로 94% 토큰 절감 (58K→3K) | ~2K |
-| `tfx-forge` | Light | 대화형 스킬 생성 | ~10K |
-| `tfx-interview` | Light | 소크라테스식 요구사항 탐색 | ~15K |
-| `tfx-deslop` | Deep | 3자 합의 기반 AI slop 제거 | ~10K |
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| `tfx-hub` | Active | MCP 메시지 버스 관리 |
+| `tfx-codex-swarm` | Active | Codex swarm 실행 표면 |
+| `merge-worktree` | Active | swarm 결과용 worktree merge helper |
 
-### 인프라
+Aliases (fold into active surfaces): `tfx-multi`, `tfx-swarm`
 
-| 스킬 | 설명 |
-|------|------|
-| `tfx-consensus` | 핵심 합의 엔진 (내부용, 모든 Deep 스킬이 사용) |
-| `tfx-hub` | MCP 메시지 버스 관리 |
-| `tfx-multi` | Multi-CLI 팀 오케스트레이션 |
-| `tfx-setup` | 초기 설정 마법사 |
-| `tfx-doctor` | 진단 및 자동 복구 |
-| `tfx-profile` | Codex CLI 프로필 관리 |
-| `tfx-codex` | Codex 전용 오케스트레이터 |
-| `tfx-gemini` | Gemini 전용 오케스트레이터 |
-| `tfx-auto-codex` | Codex 주도 오케스트레이터 |
-| `tfx-remote-spawn` | psmux를 통한 원격 세션 관리 |
-| `tfx-remote-setup` | 원격 호스트 설정 위저드 (Tailscale + SSH) |
+### 원격
+
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| `tfx-remote` | Active | setup, spawn, list, attach, send, resume, probe, rules를 묶는 원격 command family |
+
+Aliases (fold into active surfaces): `tfx-remote-spawn`, `tfx-remote-setup`, `tfx-psmux-rules` — Phase 4에서 `.claude/rules/tfx-psmux.md`로 이동
+
+### 메타
+
+| 스킬 | 상태 | 설명 |
+|------|------|------|
+| `tfx-forge` | Active | 대화형 스킬 생성 |
+| `tfx-setup` | Active | 초기 설정 마법사 |
+| `tfx-doctor` | Active | 진단 및 자동 복구 |
+| `tfx-ship` | Active | ship workflow orchestration |
+| `star-prompt` | Active | postinstall GitHub star prompt |
 
 ---
 
@@ -231,6 +236,12 @@ Phase 3: Resolution (합의율 < 70%일 경우)
 <p align="center">
   <img src="docs/assets/deep-vs-light.svg" alt="Deep vs Light 비교" width="680">
 </p>
+
+Phase 매핑:
+
+- `--mode deep` 는 Phase 2의 직접적인 Light → Deep 스위치
+- `--retry ralph` / `--retry auto-escalate` 는 Phase 3의 persistence / escalation 시맨틱
+- `--shape consensus|debate|panel` 은 Phase 4의 consensus output shape 라우팅
 
 | 항목 | Light | Deep |
 |------|-------|------|
@@ -318,13 +329,16 @@ npm install -g triflux
 # Debate — 3개의 독립적인 의견을 확보
 /tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
 
-# Persistence — 완료될 때까지 멈추지 않음
-/tfx-persist "implement full auth flow with tests"  # /tfx-ralph도 동작
+# Persistence — front door에서 직접 호출 가능
+/tfx-auto "implement full auth flow with tests" --retry ralph --max-iterations 10
 
 # Team — Multi-CLI 병렬 오케스트레이션
 /tfx-multi "refactor auth + update UI + add tests"
+
+# Remote — 단일 진입점
+/tfx-remote spawn ultra4 "보안 리뷰 실행"
 ```
-> **참고**: Deep 스킬(`/tfx-deep-*`, `/tfx-persist`, `/tfx-ralph`)은 완전한 Tri-CLI 합의(Tier 1)를 위해 **psmux**(또는 tmux), **triflux Hub**, **Codex CLI**, **Gemini CLI**가 필요합니다. 전제조건이 충족되지 않으면 Tier 3(Claude 단독, single-model) 모드로 자동 전환됩니다. `tfx doctor`로 환경을 확인하세요.
+> **참고**: Deep 스킬과 `tfx-auto --mode consensus`, `--retry ralph`, `--shape ...` 경로는 완전한 Tri-CLI 합의(Tier 1)를 위해 **psmux**(또는 tmux), **triflux Hub**, **Codex CLI**, **Gemini CLI**가 필요합니다. 전제조건이 충족되지 않으면 Tier 3(Claude 단독, single-model) 모드로 자동 전환됩니다. `tfx doctor`로 환경을 확인하세요.
 >
 > **Serena 참고**: Serena MCP는 stateful합니다. 따라서 **같은 프로젝트**를 다루는 에이전트끼리만 하나의 Serena 인스턴스를 공유하는 것이 안전합니다. 서로 다른 프로젝트를 병렬로 작업할 때는 Serena 인스턴스를 분리하세요. Serena가 `No active project`를 보고하면 Codex Serena 설정의 `--project-from-cwd`(또는 `--project <path>`)를 확인하고 `tfx doctor`를 다시 실행하세요.
 
