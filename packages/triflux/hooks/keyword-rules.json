@@ -664,6 +664,45 @@
       "exclusive": false,
       "state": null,
       "mcp_route": null
+    },
+    {
+      "id": "tfx-ship",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?ship\\b",
+          "flags": "i"
+        },
+        {
+          "source": "/ship\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\brelease\\b",
+          "flags": "i"
+        },
+        {
+          "source": "\\bpublish\\b",
+          "flags": "i"
+        },
+        {
+          "source": "배포(?!자|사|장|처)",
+          "flags": ""
+        },
+        {
+          "source": "릴리[즈스]",
+          "flags": ""
+        },
+        {
+          "source": "쉽\\s*(?:해|하자|가자|쳐)",
+          "flags": ""
+        }
+      ],
+      "skill": "tfx-ship",
+      "priority": 3,
+      "supersedes": ["gstack-ship"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
     }
   ]
 }
