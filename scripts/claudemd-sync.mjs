@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { OMC_END, TFX_START, writeSection } from "./lib/claudemd-scanner.mjs";
 
@@ -110,6 +110,28 @@ export function ensureTfxSection(claudeMdPath, routingTable) {
   }
 
   const currentMarkdown = readFileSync(claudeMdPath, "utf8");
+  const rulesFile = join(
+    dirname(claudeMdPath),
+    ".claude",
+    "rules",
+    "tfx-routing.md",
+  );
+
+  if (existsSync(rulesFile)) {
+    const existing = findRoutingSection(currentMarkdown);
+    if (!existing.found) {
+      return toSkippedResult(claudeMdPath, "rules_file_source_of_truth");
+    }
+    const before = currentMarkdown.slice(0, existing.startIndex).trimEnd();
+    const after = currentMarkdown.slice(existing.endIndex).replace(/^\n+/, "");
+    const cleaned = `${before}${after ? `\n\n${after}` : "\n"}`;
+    if (cleaned === currentMarkdown) {
+      return { action: "unchanged", path: claudeMdPath };
+    }
+    writeFileSync(claudeMdPath, cleaned, "utf8");
+    return { action: "removed", path: claudeMdPath };
+  }
+
   const nextMarkdown = buildNextMarkdown(currentMarkdown, routingTable);
 
   if (nextMarkdown === currentMarkdown) {

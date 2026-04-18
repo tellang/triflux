@@ -935,7 +935,10 @@ export async function runDeferred(stdinData) {
   const marker = readMarker();
   const claudeRoutingResults = syncClaudeRoutingSections();
   const claudeRoutingChangedCount = claudeRoutingResults.filter(
-    (result) => result.action === "created" || result.action === "updated",
+    (result) =>
+      result.action === "created" ||
+      result.action === "updated" ||
+      result.action === "removed",
   ).length;
   if (pkgVersion && marker?.version === pkgVersion && !isForce) {
     if (claudeRoutingChangedCount > 0) {

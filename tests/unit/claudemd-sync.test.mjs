@@ -119,6 +119,49 @@ describe("ensureTfxSection()", () => {
       reason: "missing_file",
     });
   });
+
+  it("인접 .claude/rules/tfx-routing.md 가 있으면 injection 을 skip 한다 (#113)", () => {
+    const root = makeTempDir("triflux-claudemd-sync-rules-guard-");
+    const target = join(root, "CLAUDE.md");
+    mkdirSync(join(root, ".claude", "rules"), { recursive: true });
+    writeFileSync(
+      join(root, ".claude", "rules", "tfx-routing.md"),
+      "# routing rules\n",
+      "utf8",
+    );
+    writeFileSync(target, "# Intro\n\n## Existing\n- keep\n", "utf8");
+
+    const result = ensureTfxSection(target, getLatestRoutingTable());
+    const saved = readFileSync(target, "utf8");
+
+    assert.deepEqual(result, {
+      action: "unchanged",
+      path: target,
+      skipped: true,
+      reason: "rules_file_source_of_truth",
+    });
+    assert.equal(saved, "# Intro\n\n## Existing\n- keep\n");
+  });
+
+  it("rules 파일이 있으면 기존 inline <routing> 블록을 제거한다 (#113)", () => {
+    const root = makeTempDir("triflux-claudemd-sync-rules-cleanup-");
+    const target = join(root, "CLAUDE.md");
+    mkdirSync(join(root, ".claude", "rules"), { recursive: true });
+    writeFileSync(
+      join(root, ".claude", "rules", "tfx-routing.md"),
+      "# routing rules\n",
+      "utf8",
+    );
+    const withInline = `# Intro\n\n<routing>\nstale body\n</routing>\n\n## Preserve\n- untouched\n`;
+    writeFileSync(target, withInline, "utf8");
+
+    const result = ensureTfxSection(target, getLatestRoutingTable());
+    const saved = readFileSync(target, "utf8");
+
+    assert.deepEqual(result, { action: "removed", path: target });
+    assert.equal(saved.includes("<routing>"), false);
+    assert.equal(saved.includes("## Preserve"), true);
+  });
 });
 
 describe("ensureGlobalClaudeRoutingSection()", () => {

@@ -882,7 +882,11 @@ function getClaudeRoutingSyncSummary(results) {
     (summary, result) => ({
       changed:
         summary.changed +
-        (result.action === "created" || result.action === "updated" ? 1 : 0),
+        (result.action === "created" ||
+        result.action === "updated" ||
+        result.action === "removed"
+          ? 1
+          : 0),
       skipped: summary.skipped + (result.skipped ? 1 : 0),
     }),
     { changed: 0, skipped: 0 },
