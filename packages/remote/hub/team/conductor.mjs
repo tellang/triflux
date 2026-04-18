@@ -23,6 +23,7 @@ import { broker } from "@triflux/core/hub/account-broker.mjs";
 import { execFile, spawn } from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { killProcess } from "@triflux/core/hub/platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
+import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
 import {
   ensureConductorRegistry,
   getConductorRegistry,
@@ -490,6 +491,14 @@ export function createConductor(opts = {}) {
     let recentOutput = "";
 
     const spawnCwd = session.config.workdir || launcher.cwd || undefined;
+    const spawnSpec = buildSpawnSpecForMode(MODES.HEADLESS, {
+      cli: session.config.agent,
+      prompt: session.config.prompt,
+      profile: session.config.profile,
+      model: session.config.model,
+      mcpServers: session.config.mcpServers,
+      resolveCommand: opts.deps?.resolveCliExecutable,
+    });
 
     // #90 branch guard: shard spawn cwd가 main 브랜치면 즉시 abort.
     // swarm shard는 반드시 shard 전용 worktree 브랜치에서 실행되어야 한다.
@@ -524,8 +533,8 @@ export function createConductor(opts = {}) {
 
     let child;
     try {
-      child = spawnFn(launcher.command, {
-        shell: true,
+      child = spawnFn(spawnSpec.command, spawnSpec.args, {
+        shell: false,
         cwd: spawnCwd,
         env: {
           ...process.env,
@@ -544,6 +553,7 @@ export function createConductor(opts = {}) {
         session: session.id,
         error: err.message,
         cwd: spawnCwd || null,
+        command: spawnSpec.command,
       });
       handleFailure(session, `spawn_error:${err.message}`);
       return;
@@ -561,7 +571,9 @@ export function createConductor(opts = {}) {
       session: session.id,
       agent: session.config.agent,
       pid: child.pid,
-      command: launcher.command,
+      command: spawnSpec.command,
+      args: spawnSpec.args,
+      legacyCommand: launcher.command,
       restart: session.restarts,
     });
 
