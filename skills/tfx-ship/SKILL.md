@@ -29,11 +29,28 @@ argument-hint: "[patch|minor|major|<version>] [--skip-tests] [--no-publish] [--d
 > 4. `git reset --hard`, `git push --force`, `git clean -f` 는 사용자 명시 승인 후에만
 > 5. 버전 동기화: `package.json` + `.claude-plugin/marketplace.json` 둘 다 갱신 (`release:check-sync` 가 강제)
 
+## 배포 채널 (3개 현행 + 1개 future)
+
+triflux 는 아래 3채널로 동시 배포. 각 채널의 버전은 반드시 동기화 상태 유지.
+
+| # | 채널 | 명령 | 우선순위 |
+|---|------|------|---------|
+| 1 | **GitHub Releases** | `gh release create vX.Y.Z --notes-file <notes>` | 공지 + changelog 공식 소스 |
+| 2 | **npm registry** | `cd packages/triflux && npm publish --access public` | primary distribution |
+| 3 | **Claude Code marketplace** | `.claude-plugin/marketplace.json` (`source: npm` 참조) | `claude plugin add triflux` |
+| 4 | **pypi** (future, 비활성) | 현재 `pyproject.toml` 없음 | 활성화 시 Step 10.5 신설 |
+
+- marketplace 는 자체 publish 명령이 없음. marketplace.json 의 version 만 갱신하면 git push 로 반영됨 (GitHub 호스팅).
+- `release:check-sync` 가 package.json + marketplace.json + package-lock.json 3곳 version 일치를 강제한다.
+- pypi 는 triflux 가 Python 모듈을 가지게 되면 활성화. 현 단계는 플레이스홀더.
+
+자세한 채널 구조는 MEMORY `reference_triflux_distribution.md` 참조.
+
 ## 전제 조건
 
 - `~/.claude/scripts/tfx-route.sh` 불필요 (CLI 워커 호출 없음)
 - `gh` CLI 인증됨 (`gh auth status`)
-- `npm` 사용 가능
+- `npm` 사용 가능 + npm login 완료
 - 현재 브랜치: `main` (feature 브랜치에서는 차단)
 - `origin/main` 과 동기화된 상태 (behind 면 먼저 pull)
 
@@ -211,16 +228,32 @@ cd packages/triflux
 npm publish --access public
 ```
 
-### Step 11 — 사후 검증
+### Step 10.5 — pypi publish (future, 현재 비활성)
+
+triflux 가 Python 모듈을 가지게 되면 이 단계를 활성화:
+
+```bash
+# pyproject.toml 존재 시에만 실행
+if [ -f pyproject.toml ]; then
+  python -m build
+  twine upload dist/*
+fi
+```
+
+현 단계는 `pyproject.toml` 없음 → skip. 플레이스홀더만 유지.
+
+### Step 11 — 사후 검증 (3채널 전부)
 
 ```bash
 npm run release:verify
 ```
 
-확인:
-- GitHub tag 존재
-- npm registry 에 새 버전 게시됨
-- 릴리즈 노트 공개됨
+확인 항목:
+- GitHub tag 존재 (`git ls-remote --tags origin | grep "v${TARGET_VERSION}"`)
+- npm registry 에 새 버전 게시됨 (`npm view triflux@${TARGET_VERSION} version`)
+- marketplace.json version 일치 (`release:check-sync`)
+- 릴리즈 노트 공개됨 (`gh release view v${TARGET_VERSION}`)
+- (future) pypi 는 pyproject.toml 있을 때만 체크
 
 ### Step 12 — 사용자 알림
 
