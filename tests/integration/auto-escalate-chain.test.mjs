@@ -67,13 +67,7 @@ function seedChainSnapshot(snapshot, chain, maxIterations = 2) {
 }
 
 function failIteration(snapshot, reason) {
-  bridgeRun([
-    "retry-run",
-    "--snapshot",
-    snapshot,
-    "--event",
-    "start",
-  ]);
+  bridgeRun(["retry-run", "--snapshot", snapshot, "--event", "start"]);
   return bridgeRun([
     "retry-run",
     "--snapshot",
@@ -150,13 +144,7 @@ describe("auto-escalate CLI 체인 승격 — Phase 3 Step F", () => {
     );
 
     failIteration(snapshot, "first-fail");
-    bridgeRun([
-      "retry-run",
-      "--snapshot",
-      snapshot,
-      "--event",
-      "start",
-    ]);
+    bridgeRun(["retry-run", "--snapshot", snapshot, "--event", "start"]);
     const done = bridgeRun([
       "retry-run",
       "--snapshot",

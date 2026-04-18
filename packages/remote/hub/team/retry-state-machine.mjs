@@ -202,7 +202,8 @@ export function createRetryStateMachine(options = {}) {
     }
     if (snapshot.mode) state.mode = snapshot.mode;
     if (snapshot.sessionId !== undefined) state.sessionId = snapshot.sessionId;
-    if (Array.isArray(snapshot.history)) state.history = snapshot.history.slice();
+    if (Array.isArray(snapshot.history))
+      state.history = snapshot.history.slice();
   }
 
   return {

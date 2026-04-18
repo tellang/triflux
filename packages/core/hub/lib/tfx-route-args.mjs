@@ -53,7 +53,9 @@ const VALUE_FLAGS = new Set([
 const BOOL_FLAGS = new Set(["--no-claude-native"]);
 
 export function parseArgs(input) {
-  const tokens = Array.isArray(input) ? input.slice() : tokenize(String(input || ""));
+  const tokens = Array.isArray(input)
+    ? input.slice()
+    : tokenize(String(input || ""));
   const opts = { ...DEFAULT_OPTIONS };
   const warnings = [];
   const taskTokens = [];
@@ -211,7 +213,9 @@ function validate(opts, warnings) {
     opts.isolation = "none";
   }
   if (opts.remote !== "none" && opts.parallel !== "swarm") {
-    warnings.push(`--remote ${opts.remote} ignored (requires --parallel swarm)`);
+    warnings.push(
+      `--remote ${opts.remote} ignored (requires --parallel swarm)`,
+    );
   }
 }
 

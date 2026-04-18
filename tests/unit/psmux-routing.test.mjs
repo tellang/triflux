@@ -314,7 +314,9 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
   it("tfx-auto SKILL.md 가 Lead 의 runHeadlessInteractive() 직접 호출 패턴을 제시하지 않는다", () => {
     const content = readFileSync(autoSkillPath, "utf8");
     const hasRunHeadlessAsLead =
-      /Lead.*runHeadlessInteractive|runHeadlessInteractive.*Lead/i.test(content);
+      /Lead.*runHeadlessInteractive|runHeadlessInteractive.*Lead/i.test(
+        content,
+      );
     assert.ok(
       !hasRunHeadlessAsLead,
       "tfx-auto 는 Lead 가 runHeadlessInteractive() 를 호출하는 패턴을 제시하지 않아야 함",
