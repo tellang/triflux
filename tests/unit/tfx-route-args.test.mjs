@@ -41,7 +41,9 @@ describe("tfx-route-args — parseArgs", () => {
 
   describe("Phase 3 신규 — --lead / --no-claude-native", () => {
     it("--cli codex --no-claude-native 조합 (tfx-auto-codex 등가)", () => {
-      const r = parseArgs("JWT 리팩터링 --cli codex --lead codex --no-claude-native");
+      const r = parseArgs(
+        "JWT 리팩터링 --cli codex --lead codex --no-claude-native",
+      );
       assert.equal(r.cli, "codex");
       assert.equal(r.lead, "codex");
       assert.equal(r.noClaudeNative, true);
@@ -84,10 +86,12 @@ describe("tfx-route-args — parseArgs", () => {
     });
 
     it("VALID_VALUES.retry 는 0/1/ralph/auto-escalate 4개", () => {
-      assert.deepEqual(
-        [...VALID_VALUES.retry].sort(),
-        ["0", "1", "auto-escalate", "ralph"],
-      );
+      assert.deepEqual([...VALID_VALUES.retry].sort(), [
+        "0",
+        "1",
+        "auto-escalate",
+        "ralph",
+      ]);
     });
   });
 
@@ -102,9 +106,7 @@ describe("tfx-route-args — parseArgs", () => {
 
     it("--remote host + --parallel 1 → warning (remote 무시)", () => {
       const r = parseArgs("work --remote host1 --parallel 1");
-      assert.ok(
-        r.warnings.some((w) => w.includes("--remote host1 ignored")),
-      );
+      assert.ok(r.warnings.some((w) => w.includes("--remote host1 ignored")));
     });
 
     it("--parallel swarm + --remote host 는 warning 없음", () => {
@@ -119,7 +121,9 @@ describe("tfx-route-args — parseArgs", () => {
 
     it("unknown flag 는 warning + task 에 포함되지 않음", () => {
       const r = parseArgs("work --unknown-flag extra text");
-      assert.ok(r.warnings.some((w) => w.includes("unknown flag: --unknown-flag")));
+      assert.ok(
+        r.warnings.some((w) => w.includes("unknown flag: --unknown-flag")),
+      );
       assert.equal(r.task, "work extra text");
     });
 

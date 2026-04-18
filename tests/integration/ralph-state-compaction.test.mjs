@@ -7,12 +7,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -79,11 +74,7 @@ describe("ralph state machine compaction survive — Phase 3 Step F", () => {
     }
 
     // status 로 최종 확인 (transition 없음)
-    const status = bridgeRun([
-      "retry-status",
-      "--snapshot",
-      snapshot,
-    ]);
+    const status = bridgeRun(["retry-status", "--snapshot", snapshot]);
     assert.equal(status.exists, true);
     assert.equal(status.iterations, 5);
     assert.equal(status.current, "DIAGNOSING");
@@ -160,11 +151,7 @@ describe("ralph state machine compaction survive — Phase 3 Step F", () => {
     assert.equal(done.current, "DONE");
     assert.equal(done.shouldStop, true);
 
-    const status = bridgeRun([
-      "retry-status",
-      "--snapshot",
-      snapshot,
-    ]);
+    const status = bridgeRun(["retry-status", "--snapshot", snapshot]);
     assert.equal(status.current, "DONE");
     assert.equal(status.shouldStop, true);
   });
