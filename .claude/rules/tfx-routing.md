@@ -15,7 +15,9 @@
 | 리서치 (자율) | 자율 리서치, 검색하고 정리해, research and plan | tfx-autoresearch |
 | 테스트 | 테스트, 검증, 돌려봐, QA | tfx-qa |
 | 정리 | 정리해, 슬롭 제거, 클린업 | tfx-prune |
-| 토론 | 뭐가 나을까, 비교해, A vs B | tfx-debate |
+| 토론/비교 | 뭐가 나을까, 비교해, A vs B | tfx-auto (`--mode consensus --shape debate`) |
+| 합의 | 합의로 분석해, 3자 합의, consensus | tfx-auto (`--mode consensus`) |
+| 패널 | panel, 패널, 전문가 의견, expert panel | tfx-auto (`--mode consensus --shape panel`) |
 
 ## 깊이 수정자
 
@@ -23,7 +25,7 @@
 |--------|------|------|
 | 기본 | (없음), 빠르게, 간단히 | Light 스킬 |
 | 깊이 | 제대로, 꼼꼼히, 철저히 | Deep 스킬 (tfx-deep-*). 예외: tfx-deep-interview는 Gemini 단독 |
-| 합의 | 3자, 교차, 다각도 | consensus 프로토콜 |
+| 합의 | 3자, 교차, 다각도 | `tfx-auto --mode consensus` |
 | 반복 | 끝까지, 멈추지마, ralph | `--retry ralph` (Phase 3 true state machine, `.claude/rules/tfx-escalation-chain.md` 참조) |
 | 승격 | 알아서 승격, 안 되면 더 강한 모델 | `--retry auto-escalate` (Phase 3 CLI 체인 승격) |
 | 자율 | 알아서, 자동으로, autopilot | autopilot 모드 |
@@ -44,7 +46,13 @@ headless-guard가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. t
 
 **Layer 2 — Deep** (headless 3-CLI 합의)
 
-tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-consensus, tfx-debate, tfx-panel, tfx-fullcycle, tfx-persist
+tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-auto (`--mode consensus --shape consensus|debate|panel`), tfx-fullcycle, tfx-persist
+
+호환 alias:
+- `tfx-consensus` → `tfx-auto --mode consensus`
+- `tfx-debate` → `tfx-auto --mode consensus --shape debate`
+- `tfx-panel` → `tfx-auto --mode consensus --shape panel`
+- 위 3개 alias 는 deprecated 이며 stderr 경고 + stdout `[DEPRECATED]` + `.omc/state/alias-usage.log` append 규약을 따른다
 
 **Layer 3 — Remote/병렬**
 
@@ -64,6 +72,7 @@ tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-consensus, t
 - "auto" 단독 → tfx-auto. "알아서 해" → tfx-autopilot
 - "코드에서 찾아" → tfx-find. "알아봐" → tfx-research
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto → cross-review hook
+- "합의해서 비교해" 류 요청은 alias 대신 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
 
 ## Q-Learning 동적 라우팅 (실험적)
 

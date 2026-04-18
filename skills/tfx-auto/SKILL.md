@@ -3,8 +3,9 @@ name: tfx-auto
 description: >
   통합 CLI 오케스트레이터 + 실행 스킬 front door. 커맨드 숏컷(단일) + 자동 분류/분해(병렬)
   + 수동 병렬 + 명시 플래그 오버라이드. tfx-route.sh 기반. `--cli`, `--mode`, `--parallel`,
-  `--retry`, `--isolation`, `--remote` 플래그로 legacy tfx-codex/gemini/multi/swarm/fullcycle/
-  persist/autopilot/autoroute/auto-codex 동작을 직접 제어. legacy 스킬은 thin alias (Phase 5 v11 삭제 예정).
+  `--retry`, `--isolation`, `--remote`, `--shape`, `--cli-set` 플래그로 legacy tfx-codex/gemini/
+  multi/swarm/fullcycle/persist/autopilot/autoroute/auto-codex 와 consensus/debate/panel 동작을 직접 제어.
+  legacy 스킬은 thin alias (Phase 5 v11 삭제 예정).
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
   구현/수정 요청에 사용.
 triggers:
@@ -27,7 +28,7 @@ triggers:
   - spec-panel
   - business-panel
   - index-repo
-argument-hint: "<command|task> [args...] [--cli auto|codex|gemini|claude] [--mode quick|deep|consensus] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none]"
+argument-hint: "<command|task> [args...] [--cli auto|codex|gemini|claude] [--mode quick|deep|consensus] [--shape consensus|debate|panel] [--cli-set triad|no-gemini|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none]"
 ---
 
 # tfx-auto — 통합 CLI 오케스트레이터
@@ -65,11 +66,12 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 판단 기준 (우선순위 순):
 
-0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--parallel`/`--retry`/`--isolation`/`--remote` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
+0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--shape`/`--cli-set`/`--parallel`/`--retry`/`--isolation`/`--remote` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
    - `--parallel swarm` → tfx-swarm 엔진 위임 (PRD 필요)
    - `--parallel N` → tfx-multi 엔진 위임 (headless)
    - `--cli codex|gemini` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
+   - `--mode consensus --shape debate|panel` → prompt ensemble fold 경로
    - `--retry ralph` → stderr 경고 후 bounded 3회 degrade (Phase 2 미구현)
 
 1. **사용자 명시 키워드** (플래그 없을 때):
@@ -133,7 +135,17 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--cli` | `claude` | Claude native 에이전트만 (CLI 호출 없음) | Agent() |
 | `--mode` | `quick` (기본) | fire-and-forget, plan/verify 오버헤드 없음 | 직접 실행 |
 | `--mode` | `deep` | pipeline init → plan → PRD → verify → fix loop | `-t/--thorough` 동일 |
-| `--mode` | `consensus` | 3-CLI 합의 실행 | tfx-consensus 경로 |
+| `--mode` | `consensus` | 3-CLI 합의 family 실행 | tfx-auto consensus root |
+| `--shape` | `consensus` (기본) | findings 합의/충돌 판정 | consensus renderer |
+| `--shape` | `debate` | 옵션 비교 + 점수화 + 최종 추천 | debate renderer |
+| `--shape` | `panel` | 전문가 roster 기반 시뮬레이션 | panel renderer |
+| `--cli-set` | `triad` (기본) | Claude + Codex + Gemini | consensus participants |
+| `--cli-set` | `no-gemini` | Claude + Codex partial degrade | consensus participants |
+| `--cli-set` | `custom` | 기존 3 CLI 내부 subset/repetition 만 허용 | consensus participants |
+| `--options` | `"A|B|C"` | debate 비교 대상 | debate normalizer |
+| `--criteria` | `"latency|complexity|operability"` | debate 평가 기준 | debate normalizer |
+| `--experts` | `"claude:...;codex:...;gemini:..."` | panel roster override | panel normalizer |
+| `--analysis-prompt-file` | `<path>` | consensus family 공통 분석 프롬프트 주입 | consensus normalizer |
 | `--parallel` | `1` (기본) | 단일 워커 | tfx-route.sh |
 | `--parallel` | `N` | 로컬 headless 병렬 (cwd 공유) | `tfx multi` |
 | `--parallel` | `swarm` | worktree 격리 + 다기기 | `tfx swarm` (PRD 필요) |
@@ -156,6 +168,9 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 - `--parallel swarm` + PRD 없음 → PRD 자동 생성 또는 사용자에게 경로 질의
 - `--parallel 1` + `--isolation worktree` → warning, isolation=none 으로 강제
 - `--remote <host>` + `--parallel != swarm` → warning, remote 무시
+- `--shape` 미지정 + `--mode consensus` → `shape=consensus`
+- `--shape` 지정 + `--mode != consensus` → warning 또는 error. shape 는 consensus family 에서만 유효
+- `--cli-set custom` + 기존 3 CLI 외 participant 지정 → 즉시 error. silent fallback 금지
 - `--retry ralph` → true ralph state machine (Phase 3, retry-state-machine.mjs)
 - `--retry auto-escalate` → CLI 승격 체인 (Phase 3)
 - `--max-iterations N` (N>0) → ralph/auto-escalate 에 상한 부여
@@ -195,7 +210,137 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 /tfx-auto "구현" --cli codex                   # = legacy tfx-codex
 /tfx-auto "병렬" --parallel N --mode deep      # = legacy tfx-multi 기본값
 /tfx-auto "PRD 실행" --parallel swarm          # = legacy tfx-swarm
+/tfx-auto "REST vs GraphQL" --mode consensus --shape debate
+/tfx-auto "모놀리스 분해 전략" --mode consensus --shape panel --experts "claude:Fowler|Beck;codex:Newman|Hohpe;gemini:Porter|Wiegers"
 ```
+
+### Consensus shape 계약 (Phase 4a — ensemble fold)
+
+`--mode consensus` 는 orchestration family 를 뜻하고, `--shape` 는 그 family 내부의 출력/해석 surface 를 뜻한다.
+
+- `--mode consensus --shape consensus` → 기존 `tfx-consensus`
+- `--mode consensus --shape debate` → 기존 `tfx-debate`
+- `--mode consensus --shape panel` → 기존 `tfx-panel`
+
+canonical 호출:
+
+```bash
+tfx-auto \
+  "<task or topic>" \
+  --mode consensus \
+  --shape consensus|debate|panel \
+  --cli-set triad|no-gemini|custom \
+  [--experts "..."] \
+  [--options "..."] \
+  [--criteria "..."] \
+  [--analysis-prompt-file <path>]
+```
+
+shape 의미:
+
+| `--shape` | 의미 | orchestration 차이 |
+|-----------|------|-------------------|
+| `consensus` | 3-CLI findings 합의/충돌 판정 | 기존 `tfx-consensus` 의미 |
+| `debate` | 옵션 비교 + ranking/recommendation | 옵션/criteria renderer |
+| `panel` | 전문가 역할 시뮬레이션 | expert roster + panel renderer |
+
+`--cli-set` 규약:
+
+| 값 | 의미 | 비고 |
+|----|------|------|
+| `triad` | Claude + Codex + Gemini | 기본값 |
+| `no-gemini` | Claude + Codex | Gemini 미가용 degrade |
+| `custom` | 기존 3 CLI 내부 subset/repetition 만 허용 | 신규 provider 추가 금지 |
+
+shape 입력 정규화:
+
+```json
+{
+  "mode": "consensus",
+  "shape": "consensus|debate|panel",
+  "topic": "...",
+  "cli_set": "triad",
+  "participants": ["claude", "codex", "gemini"],
+  "context": "...",
+  "analysis_prompt": "...",
+  "shape_input": {}
+}
+```
+
+shape 별 `shape_input`:
+
+```json
+{
+  "consensus": {
+    "analysis_prompt_file": "optional-path",
+    "resolution_threshold": 70
+  },
+  "debate": {
+    "options": ["A", "B", "C"],
+    "criteria": ["latency", "complexity", "operability"]
+  },
+  "panel": {
+    "experts": {
+      "claude": ["Martin Fowler", "Kent Beck"],
+      "codex": ["Sam Newman", "Gregor Hohpe"],
+      "gemini": ["Michael Porter", "Karl Wiegers"]
+    }
+  }
+}
+```
+
+공통 orchestration 루프:
+
+1. ARGUMENTS + 플래그 파싱
+2. `--mode consensus` 확인
+3. `--shape` 기본값 보정 (`consensus`)
+4. shape 별 payload 정규화
+5. Claude native + headless Codex/Gemini 동시 dispatch
+6. 결과 수집
+7. 공통 `meta_judgment` 생성
+8. shape renderer 로 markdown/json 출력
+9. artifact 저장
+
+공통 메타/렌더링 계약:
+
+- 공통 유틸: `hub/team/consensus-meta.mjs`
+- 공통 `meta_judgment` 스키마:
+
+```json
+{
+  "severity_classification": { "p1": [], "p2": [], "p3": [] },
+  "consensus_vs_dispute": { "agreements": [], "conflicts": [] },
+  "recommended_action": "merge|FIX_FIRST|close|defer|split",
+  "followup_issues": [],
+  "mode_specific_meta": {}
+}
+```
+
+- 공통 root 메타:
+
+```json
+{
+  "mode": "consensus",
+  "shape": "consensus|debate|panel",
+  "topic": "...",
+  "cli_set": "triad",
+  "participants": [
+    { "name": "claude", "status": "success" },
+    { "name": "codex", "status": "success" },
+    { "name": "gemini", "status": "timeout" }
+  ],
+  "status": "complete|partial|needs_user_input"
+}
+```
+
+- 필수 markdown 섹션:
+  - `shape=consensus`: `합의 결과`, `Consensus Score`, `합의 항목`, `disputed items`, `resolved items`, `user decision needed`, `meta judgment`
+  - `shape=debate`: `토론 결과`, `비교 대상`, `평가 기준`, `합의 사항`, `최종 추천`, `리스크 및 완화 방안`, `meta judgment`
+  - `shape=panel`: `전문가 패널 보고서`, `패널 구성`, `패널 합의`, `소수 견해`, `핵심 추천`, `미해결 쟁점`, `다음 단계`, `meta judgment`
+
+- artifact 경로:
+  - markdown: `.omc/artifacts/consensus/<session-id>/<shape>.md`
+  - json: `.omc/artifacts/consensus/<session-id>/<shape>.json`
 
 ### Legacy 스킬 매핑
 
@@ -208,11 +353,19 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `tfx-codex` | `--cli codex` |
 | `tfx-gemini` | `--cli gemini` |
 | `tfx-auto-codex` | `--cli codex --lead codex --no-claude-native` (Phase 3) |
+| `tfx-consensus` | `--mode consensus` |
+| `tfx-debate` | `--mode consensus --shape debate` |
+| `tfx-panel` | `--mode consensus --shape panel` |
 | `tfx-multi` | `--parallel N --mode deep` |
 | `tfx-swarm` | `--parallel swarm --mode consensus --isolation worktree` |
 | `tfx-codex-swarm` | `--parallel swarm --cli codex --isolation worktree` |
 
-legacy 스킬은 thin alias 로 유지. 호출 시 stderr 에 `[deprecated] {legacy} -> use: tfx-auto --{flag} {value}` 1회 출력. Phase 5 (v11) 에 물리 삭제.
+legacy 스킬은 thin alias 로 유지. 호출 시 stderr 에 `[deprecated] {legacy} -> use: tfx-auto --{flag} {value}` 1회 출력, stdout 머리부에 `[DEPRECATED]` 마커를 남기고 `.omc/state/alias-usage.log` 에 usage 를 append 한다. Phase 5 (v11) 에 물리 삭제.
+
+Phase 5 삭제 게이트:
+- 코드 검색에서 alias 파일 자체만 남아야 함
+- integration + golden test 100% pass
+- `.omc/state/alias-usage.log` 7일 집계 0
 
 ### 파싱 규칙
 
