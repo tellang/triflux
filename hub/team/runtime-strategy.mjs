@@ -3,11 +3,7 @@ import {
   killPsmuxSession,
   psmuxSessionExists,
 } from "./psmux.mjs";
-import {
-  killSession as killTmuxSession,
-  listSessions,
-  tmuxExec,
-} from "./session.mjs";
+import { tmuxExec } from "./session.mjs";
 
 /**
  * @typedef {object} RuntimeStatus

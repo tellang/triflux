@@ -1,10 +1,9 @@
 // tests/unit/account-broker.test.mjs — AccountBroker unit tests
 
 import assert from "node:assert/strict";
-import { existsSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { beforeEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 
 import { AccountBroker as _AccountBroker } from "../../hub/account-broker.mjs";
 

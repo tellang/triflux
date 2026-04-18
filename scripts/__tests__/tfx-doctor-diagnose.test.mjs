@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { existsSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
 describe("doctor-diagnose: 진단 번들 생성", () => {

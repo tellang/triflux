@@ -1004,7 +1004,7 @@ function listSpawnSessions() {
 
 async function openAttachTab(sessionName, title = null) {
   if (IS_WINDOWS_LOCAL) {
-    const wtArgs = title;
+    const _wtArgs = title;
     try {
       const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
       await wt.createTab({

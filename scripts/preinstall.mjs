@@ -20,7 +20,7 @@ function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-function stopHub() {
+function _stopHub() {
   if (!existsSync(HUB_PID_FILE)) return;
 
   let info;

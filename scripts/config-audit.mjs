@@ -6,7 +6,7 @@
 //
 // 출력: JSON (--json) 또는 마크다운 테이블
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -73,13 +73,13 @@ function auditSettings() {
   // 훅 timeout 검사
   const hooks = settings.hooks || {};
   let totalHooks = 0;
-  let longTimeouts = 0;
+  let _longTimeouts = 0;
   for (const [event, matchers] of Object.entries(hooks)) {
     for (const matcher of Array.isArray(matchers) ? matchers : []) {
       for (const hook of matcher.hooks || []) {
         totalHooks++;
         if (hook.timeout && hook.timeout > 15) {
-          longTimeouts++;
+          _longTimeouts++;
           addFinding(
             "hooks",
             "warn",
@@ -226,7 +226,7 @@ function auditHookRegistry() {
   let blockingCount = 0;
   let externalCount = 0;
 
-  for (const [event, hooks] of Object.entries(events)) {
+  for (const [_event, hooks] of Object.entries(events)) {
     for (const hook of hooks) {
       if (hook.blocking) blockingCount++;
       if (hook.source !== "triflux" && hook.source !== "omc") externalCount++;
