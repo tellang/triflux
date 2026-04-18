@@ -277,71 +277,54 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
   const multiSkillPath = resolve(PROJECT_ROOT, "skills/tfx-multi/SKILL.md");
   const autoSkillPath = resolve(PROJECT_ROOT, "skills/tfx-auto/SKILL.md");
 
-  // Test 13: SKILL.md Phase 3 contains "MANDATORY"
-  it('tfx-multi SKILL.md Phase 3 contains "MANDATORY" keyword', () => {
-    const content = readFileSync(multiSkillPath, "utf8");
-    // Extract Phase 3 section
-    const phase3Match = content.match(
-      /### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^#])/,
-    );
-    assert.ok(phase3Match, "Phase 3 section must exist in SKILL.md");
+  // Phase 2 Step B (35a1432) 에서 tfx-multi 가 thin alias 로 축소됨 (39줄).
+  // 검증 대상을 tfx-auto 본체로 이동 — thin alias 는 내용 없음이 정상.
+
+  // Test 13: tfx-auto 가 MANDATORY 키워드를 포함 (headless 규칙 강제 표현)
+  it("tfx-auto SKILL.md 가 MANDATORY 키워드를 포함한다", () => {
+    const content = readFileSync(autoSkillPath, "utf8");
     assert.ok(
-      phase3Match[0].includes("MANDATORY"),
-      'Phase 3 must contain "MANDATORY" keyword',
+      content.includes("MANDATORY"),
+      'tfx-auto SKILL.md 가 "MANDATORY" 키워드를 명시해야 함',
     );
   });
 
-  // Test 14: SKILL.md Phase 3 contains concrete Bash("tfx multi") invocation
-  it('tfx-multi SKILL.md Phase 3 contains Bash("tfx multi --teammate-mode headless") invocation', () => {
-    const content = readFileSync(multiSkillPath, "utf8");
-    const phase3Match = content.match(
-      /### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^#])/,
-    );
-    assert.ok(phase3Match, "Phase 3 section must exist");
-
-    const phase3 = phase3Match[0];
-    // Must contain concrete Bash invocation pattern
+  // Test 14: tfx-auto 가 구체적 Bash("tfx multi ...") 호출을 명시
+  it('tfx-auto SKILL.md 가 Bash("tfx multi --teammate-mode headless") 호출 예시를 포함한다', () => {
+    const content = readFileSync(autoSkillPath, "utf8");
     assert.ok(
-      phase3.includes('Bash("tfx multi'),
-      'Phase 3 must contain Bash("tfx multi ...") invocation',
+      content.includes('Bash("tfx multi'),
+      'tfx-auto 는 Bash("tfx multi ...") 호출을 명시해야 함',
     );
     assert.ok(
-      phase3.includes("--teammate-mode headless"),
-      "Phase 3 must specify --teammate-mode headless",
+      content.includes("--teammate-mode headless"),
+      "tfx-auto 는 --teammate-mode headless 플래그를 명시해야 함",
     );
     assert.ok(
-      phase3.includes("--auto-attach"),
-      "Phase 3 must include --auto-attach flag",
+      content.includes("--auto-attach"),
+      "tfx-auto 는 --auto-attach 플래그를 포함해야 함",
     );
     assert.ok(
-      phase3.includes("--assign"),
-      "Phase 3 must include --assign parameter",
+      content.includes("--assign"),
+      "tfx-auto 는 --assign 파라미터를 포함해야 함",
     );
   });
 
-  // Test 15: SKILL.md Phase 3 does NOT have runHeadlessInteractive() as Lead pattern
-  it("tfx-multi SKILL.md Phase 3 does NOT contain runHeadlessInteractive() as Lead orchestration pattern", () => {
-    const content = readFileSync(multiSkillPath, "utf8");
-    const phase3Match = content.match(
-      /### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^#])/,
-    );
-    assert.ok(phase3Match, "Phase 3 section must exist");
-
-    const phase3 = phase3Match[0];
-    // runHeadlessInteractive should NOT appear as a Lead-callable pattern
-    const hasRunHeadless =
-      /Lead.*runHeadlessInteractive|runHeadlessInteractive.*Lead/i.test(phase3);
+  // Test 15: tfx-auto 가 Lead → runHeadlessInteractive 안티패턴을 제시하지 않음
+  it("tfx-auto SKILL.md 가 Lead 의 runHeadlessInteractive() 직접 호출 패턴을 제시하지 않는다", () => {
+    const content = readFileSync(autoSkillPath, "utf8");
+    const hasRunHeadlessAsLead =
+      /Lead.*runHeadlessInteractive|runHeadlessInteractive.*Lead/i.test(content);
     assert.ok(
-      !hasRunHeadless,
-      "Phase 3 must NOT present runHeadlessInteractive() as a Lead-callable pattern",
+      !hasRunHeadlessAsLead,
+      "tfx-auto 는 Lead 가 runHeadlessInteractive() 를 호출하는 패턴을 제시하지 않아야 함",
     );
 
-    // Phase 3 should not instruct Lead to call JS API directly
     const jsApiAsInstruction =
-      /Lead가.*호출.*runHeadless|Lead.*call.*runHeadless/i.test(phase3);
+      /Lead가.*호출.*runHeadless|Lead.*call.*runHeadless/i.test(content);
     assert.ok(
       !jsApiAsInstruction,
-      "Phase 3 must NOT instruct Lead to call runHeadlessInteractive() directly",
+      "tfx-auto 는 Lead 에게 runHeadlessInteractive() JS API 직접 호출을 지시하지 않아야 함",
     );
   });
 
@@ -366,19 +349,13 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
     );
   });
 
-  // Extra: Phase 3 example has proper --assign format
-  it("tfx-multi SKILL.md Phase 3 example uses --assign 'cli:prompt:role' format", () => {
-    const content = readFileSync(multiSkillPath, "utf8");
-    const phase3Match = content.match(
-      /### Phase 3:[\s\S]*?(?=### Phase [4-9]|## [^#])/,
-    );
-    assert.ok(phase3Match, "Phase 3 section must exist");
-
-    const phase3 = phase3Match[0];
+  // Extra: tfx-auto 예시가 --assign 'cli:prompt:role' 포맷을 사용
+  it("tfx-auto SKILL.md 가 --assign 'cli:prompt:role' 포맷 예시를 포함한다", () => {
+    const content = readFileSync(autoSkillPath, "utf8");
     const assignPattern = /--assign\s+'[^']*:[^']*:[^']*'/;
     assert.ok(
-      assignPattern.test(phase3),
-      "Phase 3 must contain --assign 'cli:prompt:role' example",
+      assignPattern.test(content),
+      "tfx-auto 는 --assign 'cli:prompt:role' 예시를 포함해야 함",
     );
   });
 

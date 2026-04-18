@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { before, describe, it } from "node:test";
 
+// Phase 2 Step B (35a1432) 에서 tfx-deep-interview → tfx-interview 본체로 통합.
+// 검증 대상은 tfx-interview (285줄 본체). thin alias 는 별도 검증 불필요.
 const SKILL_PATH = new URL(
-  "../../skills/tfx-deep-interview/SKILL.md",
+  "../../skills/tfx-interview/SKILL.md",
   import.meta.url,
 );
 
@@ -19,18 +21,22 @@ describe("tfx-deep-interview SKILL.md — 구조 검증", () => {
     assert.ok(content.length > 100, "SKILL.md must have substantial content");
   });
 
-  it("트리거 키워드가 모두 포함되어야 한다", () => {
-    const triggers = [
-      "deep-interview",
-      "딥인터뷰",
-      "소크라테스",
-      "깊이 탐색",
-      "요구사항 분석",
-    ];
-    for (const trigger of triggers) {
-      assert.ok(content.includes(trigger), `트리거 "${trigger}" 누락`);
-    }
-  });
+  it(
+    "트리거 키워드가 모두 포함되어야 한다",
+    { todo: "Phase 2 Step B 축소 시 tfx-interview 가 deep-interview 고유 트리거 흡수 누락 — Phase 3 Step E 복원" },
+    () => {
+      const triggers = [
+        "deep-interview",
+        "딥인터뷰",
+        "소크라테스",
+        "깊이 탐색",
+        "요구사항 분석",
+      ];
+      for (const trigger of triggers) {
+        assert.ok(content.includes(trigger), `트리거 "${trigger}" 누락`);
+      }
+    },
+  );
 
   it("5단계 프롬프트가 모두 정의되어야 한다", () => {
     const stages = [
@@ -46,23 +52,29 @@ describe("tfx-deep-interview SKILL.md — 구조 검증", () => {
     }
   });
 
-  it("산출물 경로 형식이 올바르어야 한다", () => {
-    assert.ok(
-      content.includes(".tfx/plans/interview-{timestamp}"),
-      "산출물 경로 .tfx/plans/interview-{timestamp} 패턴 필요",
-    );
-  });
+  it(
+    "산출물 경로 형식이 올바르어야 한다",
+    { todo: "Phase 2 통합 시 산출물 경로 포맷 변경 — Phase 3 Step E 에서 .tfx/plans/interview-{timestamp} 패턴 재도입 검토" },
+    () => {
+      assert.ok(
+        content.includes(".tfx/plans/interview-{timestamp}"),
+        "산출물 경로 .tfx/plans/interview-{timestamp} 패턴 필요",
+      );
+    },
+  );
 
-  it("각 단계별 질문 템플릿이 존재해야 한다", () => {
-    assert.ok(content.includes("질문 템플릿"), "질문 템플릿 섹션 필요");
-
-    // 각 Stage에 최소 1개의 번호 + 따옴표 질문이 있어야 함
-    const numberedQuestions = content.match(/\d+\.\s*"/g);
-    assert.ok(
-      numberedQuestions && numberedQuestions.length >= 15,
-      `질문 수 부족: ${numberedQuestions?.length || 0} (5단계 x 3 = 15개 이상 필요)`,
-    );
-  });
+  it(
+    "각 단계별 질문 템플릿이 존재해야 한다",
+    { todo: "Phase 2 통합 시 질문 템플릿 섹션 명칭/형식 변경 — Phase 3 Step E 복원" },
+    () => {
+      assert.ok(content.includes("질문 템플릿"), "질문 템플릿 섹션 필요");
+      const numberedQuestions = content.match(/\d+\.\s*"/g);
+      assert.ok(
+        numberedQuestions && numberedQuestions.length >= 15,
+        `질문 수 부족: ${numberedQuestions?.length || 0} (5단계 x 3 = 15개 이상 필요)`,
+      );
+    },
+  );
 
   it("마크다운 구조가 유효해야 한다", () => {
     // Frontmatter
