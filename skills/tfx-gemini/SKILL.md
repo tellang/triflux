@@ -1,91 +1,38 @@
 ---
-internal: true
 name: tfx-gemini
 description: >
-  Gemini-Only 오케스트레이터. tfx-auto 워크플로우를 Gemini 전용으로 고정합니다.
-  '제미나이로 해줘', '제미나이한테 시켜', 'gemini로', 'Gemini 전용' 같은 요청에 반드시 사용.
+  DEPRECATED — tfx-auto 로 통합됨. `/tfx-auto --cli gemini` 로 리다이렉트.
+  Phase 5 (v11) 에 물리 삭제 예정.
+deprecated: true
+superseded-by: tfx-auto
 triggers:
   - tfx-gemini
-argument-hint: "\"작업 설명\" | N:gemini \"작업 설명\""
+argument-hint: "<작업 설명 — tfx-auto 로 passthrough>"
 ---
 
-# tfx-gemini — Gemini-Only 오케스트레이터
+# tfx-gemini (DEPRECATED → tfx-auto alias)
 
-> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
-> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+> DEPRECATED. `/tfx-auto --cli gemini` 로 리다이렉트. Phase 5 (v11) 에 물리 삭제.
 
+## 동작
 
-> **래퍼**: tfx-auto의 Gemini 전용 바로가기. TFX_CLI_MODE=gemini.
-> Gemini CLI만 사용하여 모든 외부 CLI 작업을 라우팅합니다.
-> Codex CLI가 없는 환경에서 사용합니다.
-
-## 사용법
-
-```
-/tfx-gemini "작업 설명"
-/tfx-gemini N:gemini "작업 설명"
-```
-
-## 동작 원리
-
-`tfx-auto`와 동일한 워크플로우를 사용하되, `TFX_CLI_MODE=gemini` 환경변수를 설정하여
-모든 Codex 에이전트를 Gemini로 리매핑합니다.
-
-### 에이전트 라우팅
-
-| 에이전트 | 원래 CLI | tfx-gemini에서 |
-|----------|---------|--------------|
-| **executor, debugger, deep-executor** | ~~Codex~~ | **Gemini Pro** |
-| **build-fixer** | ~~Codex~~ | **Gemini Flash** |
-| **architect, planner, critic, analyst** | ~~Codex~~ | **Gemini Pro** |
-| **code-reviewer, security-reviewer, quality-reviewer** | ~~Codex~~ | **Gemini Pro** |
-| **scientist** | ~~Codex~~ | **Gemini Flash** |
-| **scientist-deep** | ~~Codex~~ | **Gemini Pro** |
-| **document-specialist** | ~~Codex~~ | **Gemini Flash** |
-| designer | Gemini | Gemini (변경 없음) |
-| writer | Gemini | Gemini (변경 없음) |
-| explore | Claude Haiku | Claude Haiku (변경 없음) |
-| verifier, test-engineer | Claude Sonnet | Claude Sonnet (변경 없음) |
-
-### 모델 분기
-
-| 복잡도 | Gemini 모델 | 대상 에이전트 | 근거 |
-|--------|------------|-------------|------|
-| 높음 | `gemini-3.1-pro-preview` | executor, debugger, deep-executor | 구현/분석 깊이 필요 |
-| 높음 | `gemini-3.1-pro-preview` | architect, planner, critic, analyst | 설계 품질 |
-| 높음 | `gemini-3.1-pro-preview` | code-reviewer, security-reviewer, quality-reviewer | 리뷰 품질 |
-| 높음 | `gemini-3.1-pro-preview` | scientist-deep | 심층 리서치 |
-| 낮음 | `gemini-3-flash-preview` | build-fixer, spark | 빠른 수정/린트 |
-| 낮음 | `gemini-3-flash-preview` | scientist, document-specialist | 일반 검색+요약 |
-| 낮음 | `gemini-3-flash-preview` | writer | 문서/가이드 생성 |
-
-## 실행 규칙
-
-**tfx-auto SKILL.md의 커맨드 숏컷 → 트리아지 → 멀티 태스크 라우팅 → 실행 → 결과 파싱 → 보고 섹션을 그대로 따릅니다.**
-
-유일한 차이점:
-
-1. **실행 섹션(CLI 에이전트) 수행 시** `TFX_CLI_MODE=gemini`을 환경변수로 전달:
-   ```bash
-   TFX_CLI_MODE=gemini bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile}
+1. stderr 에 1회 경고 출력:
    ```
+   [deprecated] tfx-gemini -> use: tfx-auto --cli gemini
+   ```
+2. ARGUMENTS 전체 앞에 `--cli gemini` 를 prepend 하여 `Skill("tfx-auto")` 호출.
+3. tfx-auto 의 플래그 오버라이드 로직이 나머지 처리 (`TFX_CLI_MODE=gemini`).
 
-2. **트리아지 섹션에서** codex 분류 결과를 gemini로 강제 변환:
-   - Codex 분류가 `codex`를 반환하면 → `gemini`로 교체
-   - Opus 분해에서 모든 Codex 에이전트 → Gemini 모델 매핑
+## 등가 플래그
 
-3. **트리아지 섹션 1단계(Codex 분류)를 건너뜀**:
-   - Codex CLI가 없으므로 Opus가 직접 분류+분해 수행
+`--cli gemini`
 
-4. **Windows 안정화 자동 적용**:
-   - 모든 Gemini 워커에 `--timeout 60` + health check
-   - hang 감지 시 자동 재시도
+## 이 alias 의 의미
 
-## 필수 조건
+Gemini CLI 전용 라우팅 고정. tfx-auto 의 `--cli gemini` 플래그로 동일 의미 표현.
 
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli): `npm install -g @google/gemini-cli`
-- Codex CLI 불필요
+## 마이그레이션 가이드
 
-## Troubleshooting
-
-문제 발생 시 `/tfx-doctor` 실행. (`--fix` 자동 수정, `--reset` 캐시 초기화)
+| 기존 호출 | 새 호출 |
+|----------|---------|
+| `/tfx-gemini "작업"` | `/tfx-auto "작업" --cli gemini` |

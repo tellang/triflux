@@ -1,228 +1,43 @@
 ---
 name: tfx-swarm
-description: "tfx-swarm — 다중 기기 x 다중 모델 스웜 오케스트레이션"
+description: >
+  DEPRECATED — tfx-auto 로 통합됨. `/tfx-auto --parallel swarm --mode consensus --isolation worktree` 로 리다이렉트.
+  실제 swarm 엔진 (PRD 파싱, shard 스케줄링, reconcile) 은 `tfx swarm` CLI 에 그대로 유지된다.
+  Phase 5 (v11) 에 물리 삭제 예정.
+deprecated: true
+superseded-by: tfx-auto
 triggers:
   - swarm
   - 스웜
   - 병렬 실행
   - codex-swarm
+argument-hint: "<PRD 경로 — tfx-auto 로 passthrough>"
 ---
 
-# tfx-swarm — 다중 기기 x 다중 모델 스웜 오케스트레이션
+# tfx-swarm (DEPRECATED → tfx-auto alias)
 
-> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
-> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+> DEPRECATED. `/tfx-auto --parallel swarm --mode consensus --isolation worktree` 로 리다이렉트.
+> Phase 5 (v11) 에 물리 삭제 예정.
 
-> **Telemetry**
->
-> - Skill: `tfx-swarm`
-> - Description: `tfx-swarm — 다중 기기 x 다중 모델 스웜 오케스트레이션`
-> - Session: 요청별 식별자를 유지해 단계별 실행 로그를 추적한다.
-> - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
+## 동작
 
+1. stderr 에 1회 경고 출력:
+   ```
+   [deprecated] tfx-swarm -> use: tfx-auto --parallel swarm --mode consensus --isolation worktree
+   ```
+2. ARGUMENTS 전체 앞에 `--parallel swarm --mode consensus --isolation worktree` 를 prepend 하여 `Skill("tfx-auto")` 호출.
+3. tfx-auto 의 플래그 오버라이드 로직이 `tfx swarm <prd>` CLI 를 호출한다 (실제 swarm 엔진은 변경 없음).
 
+## 등가 플래그
 
-> **Multi-Machine x Multi-Model Swarm.** PRD 하나로 로컬과 원격 머신에서
-> Claude + Codex + Gemini를 병렬 실행하고, file-lease로 충돌을 방지하며,
-> 결과를 자동 통합한다. triflux의 킬러 스킬.
+`--parallel swarm --mode consensus --isolation worktree`
 
-## 트리거
+## 이 alias 의 의미
 
-- `swarm`, `스웜`, `병렬 실행`, `다중 워커`, `PRD 실행`, `swarm launch`
-- `codex-swarm` (backward compat -> 이 스킬로 라우팅)
+tfx-swarm 의 "worktree 격리 + 다중 모델 + PRD 기반 오케스트레이션" 은 플래그 조합으로 entry semantics 를 표현한다. 실제 swarm 엔진 (`hub/team/swarm-planner.mjs`, `swarm-hypervisor.mjs`, file-lease, reconcile) 은 그대로 유지되고 tfx-auto 가 이 경로를 호출한다. PRD 포맷 예시는 `docs/prd/_template.md` 참조.
 
-## 핵심 기능
+## 마이그레이션 가이드
 
-| 기능 | 설명 |
-|------|------|
-| **다중 모델** | shard별 `agent: codex\|gemini\|claude` 지정. 작업 특성에 맞는 모델 배치 |
-| **다중 기기** | shard별 `host: <ssh-host>` 지정. 로컬/원격 혼합 실행 |
-| **File Lease** | shard별 파일 소유권. 동일 파일 동시 수정 방지 |
-| **Redundant Execution** | critical shard는 다른 모델로 이중 실행 후 reconcile |
-| **자동 통합** | 의존 순서대로 merge. 원격 shard는 SSH 경유 fetch |
-| **장애 폴백** | rate limit -> 다른 모델로 자동 전환 (codex<->gemini<->claude) |
-
-## 전제조건
-
-- psmux >= 3.3.0
-- Hub 실행 중 (`curl -sf http://127.0.0.1:27888/status`)
-- Codex CLI 또는 Gemini CLI (사용할 agent에 따라)
-- 원격 shard 사용 시: SSH 키 인증 + 원격 머신에 Claude Code 설치
-- 프로젝트에 `docs/prd/` 디렉토리 존재
-
-## 실행 흐름
-
-### Step 1: PRD 탐색
-
-```bash
-find docs/prd -name '*.md' -not -name '_template.md' -not -path '*/archived/*' | sort
-```
-
-AskUserQuestion으로 실행할 PRD 선택. 복수 선택 시 각각 독립 shard.
-
-### Step 2: 원격/모델 구성 확인
-
-PRD 파싱 후, shard에 `host:` 필드가 있으면 AskUserQuestion으로 원격 실행 여부를 확인한다.
-
-AskUserQuestion:
-
-> PRD에 원격 호스트가 지정된 shard가 있습니다:
-> - `{shard_name}` -> `{host}` ({agent})
->
-> 원격 실행을 어떻게 할까요?
-
-Options:
-- A) 원격 포함 실행 (PRD 그대로) — 로컬+원격 혼합
-- B) 전부 로컬에서 실행 — host 필드 무시
-- C) 원격만 실행 — 로컬 shard 건너뛰기
-
-PRD에 다중 agent가 지정된 경우에도 AskUserQuestion:
-
-> PRD에 여러 모델이 지정되어 있습니다:
-> - codex: {N}개 shard
-> - gemini: {N}개 shard
-> - claude: {N}개 shard
->
-> 모델 배치를 어떻게 할까요?
-
-Options:
-- A) PRD 그대로 — shard별 지정 모델 사용 (권장)
-- B) 전부 Codex로 — 단일 모델
-- C) 전부 Gemini로 — 단일 모델
-
-### Step 3: 계획 생성
-
-```javascript
-import { planSwarm } from '../../hub/team/swarm-planner.mjs';
-
-const swarmPlan = planSwarm(selectedPrdPath);
-```
-
-계획을 사용자에게 보여주고 승인 요청:
-- shard 수, 파일 배분, lease 맵, merge 순서
-- 원격 shard 표시 (host 정보)
-- 모델 배분 표시 (agent 정보)
-- critical shard 표시 (redundant execution 대상)
-
-### Step 4: Hypervisor 실행
-
-```javascript
-import { createSwarmHypervisor } from '../../hub/team/swarm-hypervisor.mjs';
-
-const hyper = createSwarmHypervisor({
-  workdir: process.cwd(),
-  logsDir: join(process.cwd(), '.triflux', 'swarm-logs'),
-  maxRestarts: 2,
-});
-
-const run = hyper.launch(swarmPlan);
-```
-
-실행 중 상태 모니터링:
-- `hyper.on('shardLaunched', ...)` -> 진행 표시
-- `hyper.on('shardCompleted', ...)` -> 완료/실패 표시
-- `hyper.on('warning', ...)` -> 경고 (파일 충돌 등)
-
-원격 shard 실행 시:
-1. `probeRemoteEnv(host)` -> 원격 환경 감지 (OS, shell, Claude 경로)
-2. conductor가 `remote: true` 설정으로 SSH 경유 세션 실행
-3. 완료 후 `fetchRemoteShard()`로 원격 브랜치를 로컬로 fetch
-
-### Step 5: 결과 검증 + 통합
-
-```javascript
-const status = hyper.getStatus();
-// status.completedShards, status.failedShards, status.workers
-```
-
-통합 결과를 사용자에게 보고:
-- 성공: merged shard 목록 (로컬/원격 구분 표시)
-- 실패: 충돌/실패 shard 목록 + 수동 해결 안내
-
-### Step 6: 정리
-
-```javascript
-await hyper.shutdown('completed');
-```
-
-## PRD 예제: 다중 기기 x 다중 모델
-
-```markdown
-## Shard: auth-refactor
-- agent: codex
-- files: src/auth.mjs, src/middleware/jwt.mjs
-- prompt: JWT 인증 미들웨어 리팩터링
-
-## Shard: ui-dashboard
-- agent: gemini
-- files: src/ui/dashboard.mjs, src/ui/charts.mjs
-- prompt: 대시보드 UI 개선
-
-## Shard: security-audit
-- agent: claude
-- host: ryzen5-7600
-- files: src/security.mjs
-- critical: true
-- prompt: 보안 취약점 감사
-
-## Shard: perf-optimization
-- agent: codex
-- host: m2
-- files: src/engine/optimizer.mjs
-- depends: auth-refactor
-- prompt: 성능 최적화 (auth 리팩터 완료 후)
-```
-
-위 PRD 하나로: Codex(로컬) + Gemini(로컬) + Claude(ryzen5-7600) + Codex(m2) 4개 워커가 병렬 실행된다.
-security-audit는 `critical: true`이므로 다른 모델로 이중 실행 후 reconcile.
-
-## PRD Shard 필드 레퍼런스
-
-| 필드 | 필수 | 기본값 | 설명 |
-|------|------|--------|------|
-| `agent` | - | `codex` | 실행 모델: `codex`, `gemini`, `claude` |
-| `host` | - | (로컬) | SSH 호스트. 미지정 시 로컬 실행 |
-| `files` | O | - | shard가 수정할 파일 목록 (file-lease 대상) |
-| `depends` | - | - | 의존하는 shard 이름. 해당 shard 완료 후 실행 |
-| `critical` | - | `false` | `true`면 다른 모델로 이중 실행 + reconcile |
-| `mcp` | - | - | 필요한 MCP 서버 목록 |
-| `prompt` | O | - | shard 실행 프롬프트. `\|`로 멀티라인 |
-
-## 제약
-
-- `codex exec` / `gemini -p` 직접 호출 금지 (headless-guard)
-- MAX_CONCURRENCY 기본 4 (WT 프리징 방지)
-- WT 조작 간 sleep 2s (race-guard)
-- config.toml과 CLI 플래그 중복 지정 금지
-
-## Redundant Execution
-
-critical shard (hard lease 또는 고위험 파일)에 대해:
-
-```javascript
-import { shouldRunRedundant, reconcile } from '../../hub/team/swarm-reconciler.mjs';
-
-if (shouldRunRedundant(shard)) {
-  // primary + verifier 이중 실행
-  const decision = await reconcile(primaryResult, verifierResult);
-  // decision.selected: 'primary' | 'verifier' | 'hitl'
-}
-```
-
-HITL fallback 시 AskUserQuestion으로 사용자에게 선택 요청.
-
-## 장애 처리
-
-| 장애 | 분류 | 대응 |
-|------|------|------|
-| 워커 크래시 | F1 | conductor auto-restart (최대 2회) |
-| Rate limit | F2 | 다른 모델로 자동 전환 (codex->gemini->claude) |
-| Stall | F3 | health probe 감지 -> kill -> restart |
-| File lease 위반 | F4 | 워커 변경 revert, shard 실패 처리 |
-| Merge 충돌 | F5 | 충돌 해결 재시도 |
-
-## 기존 스킬과의 관계
-
-- **tfx-codex-swarm**: deprecated. 이 스킬로 통합됨 (backward compat alias)
-- **tfx-remote-spawn**: 단독 원격 세션 관리(list, attach, send)용으로 유지. swarm은 다중 shard 병렬 관리
-- **tfx-multi**: Claude Native Teams 기반 로컬 오케스트레이션. swarm은 PRD 기반 worktree 분할
+| 기존 호출 | 새 호출 |
+|----------|---------|
+| `/tfx-swarm <PRD>` | `/tfx-auto <PRD> --parallel swarm --mode consensus --isolation worktree` |
