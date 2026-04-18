@@ -14,7 +14,13 @@
 //                       → iter≥max         → BUDGET_EXCEEDED (escalate 모드는 다음 CLI)
 
 import { EventEmitter } from "node:events";
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname } from "node:path";
 
 export const STATES = Object.freeze({
@@ -164,6 +170,41 @@ export function createRetryStateMachine(options = {}) {
     return () => emitter.off(event, listener);
   }
 
+  function serialize() {
+    return {
+      version: 1,
+      current: state.current,
+      iterations: state.iterations,
+      maxIterations: state.maxIterations,
+      stuckCounter: state.stuckCounter,
+      lastFailureReason: state.lastFailureReason,
+      cliIndex: state.cliIndex,
+      cliChain: state.cliChain.slice(),
+      mode: state.mode,
+      sessionId: state.sessionId,
+      history: state.history.slice(),
+    };
+  }
+
+  function applySnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return;
+    state.current = snapshot.current || STATES.PLANNING;
+    state.iterations = Number(snapshot.iterations) || 0;
+    state.maxIterations =
+      snapshot.maxIterations !== undefined
+        ? Number(snapshot.maxIterations)
+        : state.maxIterations;
+    state.stuckCounter = Number(snapshot.stuckCounter) || 0;
+    state.lastFailureReason = snapshot.lastFailureReason || null;
+    state.cliIndex = Number(snapshot.cliIndex) || 0;
+    if (Array.isArray(snapshot.cliChain) && snapshot.cliChain.length > 0) {
+      state.cliChain = snapshot.cliChain.slice();
+    }
+    if (snapshot.mode) state.mode = snapshot.mode;
+    if (snapshot.sessionId !== undefined) state.sessionId = snapshot.sessionId;
+    if (Array.isArray(snapshot.history)) state.history = snapshot.history.slice();
+  }
+
   return {
     STATES,
     MODES,
@@ -173,6 +214,8 @@ export function createRetryStateMachine(options = {}) {
     reportVerifyFail,
     escalate,
     on,
+    serialize,
+    applySnapshot,
   };
 }
 
@@ -189,6 +232,28 @@ export function resumeFromStateFile(stateFile) {
   const lines = raw.split("\n").filter(Boolean);
   if (lines.length === 0) return null;
   return JSON.parse(lines[lines.length - 1]);
+}
+
+// Full-snapshot 기반 stateFile I/O — bridge retry-run 에서 multi-process state 복원용.
+// transition event log (resumeFromStateFile) 와 별도 파일로 관리하는 것을 권장.
+export function loadSnapshot(snapshotFile) {
+  if (!existsSync(snapshotFile)) return null;
+  const raw = readFileSync(snapshotFile, "utf8").trim();
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== "object") return null;
+  if (parsed.version !== 1) {
+    throw new Error(
+      `unsupported snapshot version: ${parsed.version} (expected 1)`,
+    );
+  }
+  return parsed;
+}
+
+export function saveSnapshot(snapshotFile, snapshot) {
+  const dir = dirname(snapshotFile);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  writeFileSync(snapshotFile, JSON.stringify(snapshot), "utf8");
 }
 
 export { DEFAULT_ESCALATION_CHAIN, STUCK_THRESHOLD };

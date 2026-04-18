@@ -10,7 +10,9 @@ import { afterEach, describe, it } from "node:test";
 import {
   createRetryStateMachine,
   DEFAULT_ESCALATION_CHAIN,
+  loadSnapshot,
   resumeFromStateFile,
+  saveSnapshot,
   STATES,
 } from "../../hub/team/retry-state-machine.mjs";
 
@@ -194,6 +196,67 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       const dir = makeTempDir();
       const last = resumeFromStateFile(join(dir, "never-exists.jsonl"));
       assert.equal(last, null);
+    });
+  });
+
+  describe("full-snapshot serialize / applySnapshot — Phase 3 Step C2", () => {
+    it("serialize 결과를 새 SM 에 applySnapshot 하면 state 가 복원됨", () => {
+      const sm1 = createRetryStateMachine({
+        mode: "auto-escalate",
+        maxIterations: 3,
+        cliChain: [
+          { cli: "a", model: "1" },
+          { cli: "b", model: "2" },
+        ],
+      });
+      // A 단계 2회 fail
+      sm1.startIteration();
+      sm1.reportVerifyFail("boom");
+      sm1.startIteration();
+      sm1.reportVerifyFail("boom");
+
+      const snap = sm1.serialize();
+      assert.equal(snap.version, 1);
+      assert.equal(snap.stuckCounter, 2);
+      assert.equal(snap.lastFailureReason, "boom");
+
+      const sm2 = createRetryStateMachine({ mode: "auto-escalate" });
+      sm2.applySnapshot(snap);
+      const cur = sm2.getCurrent();
+      assert.equal(cur.current, snap.current);
+      assert.equal(cur.iterations, snap.iterations);
+      assert.equal(cur.stuckCounter, 2);
+      assert.equal(cur.lastFailureReason, "boom");
+      assert.equal(cur.cliIndex, snap.cliIndex);
+    });
+
+    it("saveSnapshot + loadSnapshot 으로 round-trip 성공", () => {
+      const dir = makeTempDir();
+      const file = join(dir, "snap.json");
+      const sm = createRetryStateMachine({
+        mode: "ralph",
+        maxIterations: 5,
+      });
+      sm.startIteration();
+      sm.reportVerifyFail("r1");
+      saveSnapshot(file, sm.serialize());
+
+      const loaded = loadSnapshot(file);
+      assert.equal(loaded.version, 1);
+      assert.equal(loaded.mode, "ralph");
+      assert.equal(loaded.current, STATES.DIAGNOSING);
+    });
+
+    it("loadSnapshot 존재하지 않는 파일은 null", () => {
+      const dir = makeTempDir();
+      assert.equal(loadSnapshot(join(dir, "none.json")), null);
+    });
+
+    it("loadSnapshot 지원 안 하는 version 은 throw", () => {
+      const dir = makeTempDir();
+      const file = join(dir, "bad.json");
+      saveSnapshot(file, { version: 99, current: "X" });
+      assert.throws(() => loadSnapshot(file), /unsupported snapshot version/);
     });
   });
 });
