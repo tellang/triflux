@@ -1,11 +1,7 @@
 ---
 internal: true
 name: tfx-autoresearch
-description: >
-  자율 웹 리서치 → 실행 가능 계획 도출.
-  주제를 받아 웹 검색 → 정보 수집 → 분석 → 구조화된 리서치 보고서 생성.
-  '알아봐', '조사해', '리서치해줘', '검색하고 정리해', 'research and plan' 같은 요청에 반드시 사용.
-  웹 검색 후 실행 가능한 계획까지 도출이 필요할 때 적극 활용.
+description: "DEPRECATED — tfx-research --auto 로 통합됨. 자율 웹 리서치는 이제 tfx-research 의 --auto 모드."
 triggers:
   - autoresearch
   - 자율 리서치
@@ -15,122 +11,14 @@ triggers:
   - 알아봐
   - research this
 argument-hint: "<topic>"
-source: GAP 분석 P2 #8
 ---
 
-# tfx-autoresearch — 자율 웹 리서치
+# tfx-autoresearch — DEPRECATED (→ tfx-research --auto)
 
-> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
-> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
-
-
-> 주제를 받아 자동으로 웹을 검색하고, 결과를 분석하여 구조화된 리서치 보고서를 생성합니다.
-> "조사는 AI가, 판단은 사람이."
-
-## 사용법
+> **deprecated.** 자율 쿼리생성 + 검색 + 구조화 보고서는 `/tfx-research --auto`.
 
 ```
-/autoresearch Next.js 15 App Router 변경점
-/리서치 Rust vs Go 백엔드 성능 비교
-/웹 리서치 2026 프론트엔드 프레임워크 트렌드
-/research this MCP protocol specification
+Skill(skill="tfx-research", args="--auto <원래 ARGUMENTS>")
 ```
 
-## 리서치 프로세스
-
-리서치는 아래 6단계를 순서대로 실행합니다.
-
-### Step 1: 주제 수집
-
-사용자로부터 리서치 주제를 수집합니다. 인자로 주어지지 않았으면 대화로 요청합니다.
-
-- 주제가 모호하면 범위를 좁히는 후속 질문을 합니다.
-- 리서치 목적(비교, 기술 선택, 트렌드 파악 등)을 확인합니다.
-
-### Step 2: 검색 쿼리 자동 생성
-
-주제에서 3-5개의 검색 쿼리를 자동 생성합니다.
-
-**규칙:**
-1. 한국어 주제 → 한국어 쿼리 2-3개 + 영어 쿼리 1-2개 생성
-2. 영어 주제 → 영어 쿼리 3-5개 생성
-3. 일반 쿼리 + 비교 쿼리 + 최신 동향 쿼리를 조합
-4. 각 쿼리는 검색 엔진 최적화를 위해 핵심 키워드 중심으로 구성
-
-**예시 (주제: "Next.js 15 변경점"):**
-```
-- "Next.js 15 주요 변경점 정리"
-- "Next.js 15 App Router 변경사항 2025"
-- "Next.js 15 breaking changes migration"
-- "Next.js 15 vs 14 comparison"
-```
-
-### Step 3: 웹 검색 실행
-
-brave-search MCP 또는 WebSearch 도구로 각 쿼리를 실행합니다.
-
-**규칙:**
-1. 사용 가능한 검색 도구를 자동 감지합니다 (brave-search MCP 우선, 없으면 WebSearch).
-2. 각 쿼리당 상위 5-10개 결과를 수집합니다.
-3. 중복 URL은 자동 제거합니다.
-4. 검색 실패 시 쿼리를 변형하여 재시도합니다.
-
-### Step 4: 핵심 정보 추출
-
-수집된 결과에서 핵심 정보를 추출합니다.
-
-**규칙:**
-1. 각 결과의 제목, URL, 스니펫을 정규화합니다.
-2. 주제와 관련성이 높은 정보를 우선 선별합니다.
-3. 사실(fact)과 의견(opinion)을 구분합니다.
-4. 날짜가 포함된 정보는 최신성을 기준으로 정렬합니다.
-
-### Step 5: 구조화된 리서치 보고서 생성
-
-수집-분석된 정보를 구조화된 마크다운 보고서로 작성합니다.
-
-### Step 6: 보고서 저장
-
-`.tfx/reports/research-{timestamp}.md`에 저장하고 경로를 사용자에게 알립니다.
-
-## 보고서 형식
-
-```markdown
-# Research: {topic}
-Date: {date}
-
-## Executive Summary
-{1-3문장 핵심 요약}
-
-## Key Findings
-1. {발견 1}
-2. {발견 2}
-3. {발견 3}
-...
-
-## Comparative Analysis
-| 항목 | A | B |
-|------|---|---|
-| ... | ... | ... |
-
-(비교 대상이 있을 때만 포함)
-
-## Actionable Recommendations
-1. {추천 1: 구체적이고 실행 가능한 다음 단계}
-2. {추천 2}
-3. {추천 3}
-
-## Sources
-- [{제목}]({URL}) — {한줄 요약}
-- ...
-```
-
-## 동작 규칙
-
-1. 검색 도구가 없으면 사용자에게 알리고 수동 리서치 모드로 전환합니다.
-2. 검색 결과가 부족하면 쿼리를 변형하여 추가 검색합니다.
-3. 모든 정보에 출처 URL을 반드시 표기합니다.
-4. 추천 사항은 "실행 가능"해야 합니다 (모호한 조언 금지).
-5. 보고서는 항상 `.tfx/reports/research-{timestamp}.md`에 저장합니다.
-6. 리서치 완료 후 보고서 경로와 핵심 요약을 사용자에게 보고합니다.
-7. 한국어 주제는 한국어 보고서, 영어 주제는 영어 보고서로 작성합니다.
+Issue #112 참조. v11 릴리즈 시 제거.
