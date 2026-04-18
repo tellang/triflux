@@ -1,9 +1,12 @@
 ---
 name: tfx-auto
 description: >
-  통합 CLI 오케스트레이터. 커맨드 숏컷(단일) + 자동 분류/분해(병렬) + 수동 병렬. tfx-route.sh 기반.
+  통합 CLI 오케스트레이터 + 실행 스킬 front door. 커맨드 숏컷(단일) + 자동 분류/분해(병렬)
+  + 수동 병렬 + 명시 플래그 오버라이드. tfx-route.sh 기반. `--cli`, `--mode`, `--parallel`,
+  `--retry`, `--isolation`, `--remote` 플래그로 legacy tfx-codex/gemini/multi/swarm/fullcycle/
+  persist/autopilot/autoroute/auto-codex 동작을 직접 제어. legacy 스킬은 thin alias (Phase 5 v11 삭제 예정).
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
-  구현/수정 요청에 사용. CLI 라우팅이 필요한 모든 작업에 적극 활용.
+  구현/수정 요청에 사용.
 triggers:
   - tfx-auto
   - implement
@@ -24,7 +27,7 @@ triggers:
   - spec-panel
   - business-panel
   - index-repo
-argument-hint: "<command|task> [args...]"
+argument-hint: "<command|task> [args...] [--cli auto|codex|gemini|claude] [--mode quick|deep|consensus] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none]"
 ---
 
 # tfx-auto — 통합 CLI 오케스트레이터
@@ -62,7 +65,14 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 판단 기준 (우선순위 순):
 
-1. **사용자 명시 키워드** (최우선):
+0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--parallel`/`--retry`/`--isolation`/`--remote` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
+   - `--parallel swarm` → tfx-swarm 엔진 위임 (PRD 필요)
+   - `--parallel N` → tfx-multi 엔진 위임 (headless)
+   - `--cli codex|gemini` → `TFX_CLI_MODE` 설정 + 단일 실행
+   - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
+   - `--retry ralph` → stderr 경고 후 bounded 3회 degrade (Phase 2 미구현)
+
+1. **사용자 명시 키워드** (플래그 없을 때):
    - "병렬", "swarm", "PRD 돌려" → `Skill("tfx-swarm")` dispatch
    - "꼼꼼히", "제대로", "deep" → 해당 `tfx-deep-*` dispatch
    - "끝까지", "멈추지마", "ralph" → `Skill("tfx-persist")` dispatch
@@ -108,6 +118,74 @@ dispatch 시 해당 스킬을 Skill 도구로 호출하고 **이 워크플로우
 
 > **tfx-auto는 `--quick`이 기본.** 커맨드 숏컷·단일 실행에서 plan/verify 오버헤드가 불필요하기 때문.
 > 멀티 태스크 시 tfx-multi로 전환되면 tfx-multi의 기본값(`--thorough`)이 적용된다.
+
+## 플래그 오버라이드 (명시 제어, Phase 2 v10.9.33+)
+
+ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부 추론을 건너뛰고 값대로 즉시 dispatch 한다. legacy tfx-codex/gemini/multi/swarm 등을 이 플래그로 표현할 수 있게 되어, 기존 11개 실행 스킬의 front door 역할을 tfx-auto 가 맡는다.
+
+### 플래그 표
+
+| 플래그 | 값 | 효과 | 위임 엔진 |
+|--------|-----|------|----------|
+| `--cli` | `auto` (기본) | Codex 분류 후 최적 CLI 선택 | 기존 라우팅 |
+| `--cli` | `codex` | Codex 전용 고정. `TFX_CLI_MODE=codex` | tfx-route.sh |
+| `--cli` | `gemini` | Gemini 전용 고정. `TFX_CLI_MODE=gemini` | tfx-route.sh |
+| `--cli` | `claude` | Claude native 에이전트만 (CLI 호출 없음) | Agent() |
+| `--mode` | `quick` (기본) | fire-and-forget, plan/verify 오버헤드 없음 | 직접 실행 |
+| `--mode` | `deep` | pipeline init → plan → PRD → verify → fix loop | `-t/--thorough` 동일 |
+| `--mode` | `consensus` | 3-CLI 합의 실행 | tfx-consensus 경로 |
+| `--parallel` | `1` (기본) | 단일 워커 | tfx-route.sh |
+| `--parallel` | `N` | 로컬 headless 병렬 (cwd 공유) | `tfx multi` |
+| `--parallel` | `swarm` | worktree 격리 + 다기기 | `tfx swarm` (PRD 필요) |
+| `--retry` | `0` | 자동 재시도 없음 | — |
+| `--retry` | `1` (기본) | bounded verify → fix loop 3회 | — |
+| `--retry` | `ralph` | Phase 2 미구현 — bounded 3회 degrade + stderr 경고 | Phase 3+ |
+| `--isolation` | `none` (기본) | cwd 공유 | — |
+| `--isolation` | `worktree` | shard별 `.codex-swarm/wt-*/` 격리 | `--parallel swarm` 자동 강제 |
+| `--remote` | `none` (기본) | 로컬만 | — |
+| `--remote` | `<host>` | hosts.json 의 host 로 shard 분배 | `--parallel swarm` 전용 |
+
+### 플래그 검증
+
+- `--parallel swarm` + PRD 없음 → PRD 자동 생성 또는 사용자에게 경로 질의
+- `--parallel 1` + `--isolation worktree` → warning, isolation=none 으로 강제
+- `--remote <host>` + `--parallel != swarm` → warning, remote 무시
+- `--retry ralph` → stderr 경고 + bounded 3회 degrade
+
+### 사용 예시
+
+```
+/tfx-auto "리팩터링" --mode deep               # = 기존 -t/--thorough
+/tfx-auto "구현" --cli codex                   # = legacy tfx-codex
+/tfx-auto "병렬" --parallel N --mode deep      # = legacy tfx-multi 기본값
+/tfx-auto "PRD 실행" --parallel swarm          # = legacy tfx-swarm
+```
+
+### Legacy 스킬 매핑
+
+| legacy 스킬 | `tfx-auto` 등가 플래그 |
+|------------|----------------------|
+| `tfx-autopilot` | `(기본)` |
+| `tfx-autoroute` | `--cli auto --retry 1` (escalation 정책은 내부 유지) |
+| `tfx-fullcycle` | `--mode deep --parallel 1` |
+| `tfx-persist` | `--mode deep --retry ralph` (⚠ degrade) |
+| `tfx-codex` | `--cli codex` |
+| `tfx-gemini` | `--cli gemini` |
+| `tfx-auto-codex` | `--cli codex` + `TFX_NO_CLAUDE_NATIVE=1` |
+| `tfx-multi` | `--parallel N --mode deep` |
+| `tfx-swarm` | `--parallel swarm --mode consensus --isolation worktree` |
+| `tfx-codex-swarm` | `--parallel swarm --cli codex --isolation worktree` |
+
+legacy 스킬은 thin alias 로 유지. 호출 시 stderr 에 `[deprecated] {legacy} -> use: tfx-auto --{flag} {value}` 1회 출력. Phase 5 (v11) 에 물리 삭제.
+
+### 파싱 규칙
+
+- 플래그는 ARGUMENTS 어느 위치에든 올 수 있다. 순서 자유.
+- 플래그 값은 공백 뒤 다음 토큰 (예: `--cli codex`). `=` 문법 (`--cli=codex`) 도 허용.
+- 알 수 없는 플래그는 무시 후 warning. 작업 설명으로 포함.
+- 플래그 제외한 나머지 텍스트를 작업 설명 `<task>` 로 추출.
+
+설계 근거: `.triflux/plans/phase2-tfx-run-design.md` (GitHub Issue `#112` umbrella Phase 2 산출물).
 
 ## 커맨드 숏컷
 
