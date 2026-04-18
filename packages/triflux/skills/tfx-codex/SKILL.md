@@ -1,83 +1,38 @@
 ---
-internal: true
 name: tfx-codex
 description: >
-  Codex-Only 오케스트레이터. tfx-auto 워크플로우를 Codex 전용으로 고정합니다.
-  '코덱스로 해줘', '코덱스한테 시켜', 'codex로', 'Codex 전용' 같은 요청에 반드시 사용.
+  DEPRECATED — tfx-auto 로 통합됨. `/tfx-auto --cli codex` 로 리다이렉트.
+  Phase 5 (v11) 에 물리 삭제 예정.
+deprecated: true
+superseded-by: tfx-auto
 triggers:
   - tfx-codex
-argument-hint: "\"작업 설명\" | N:codex \"작업 설명\""
+argument-hint: "<작업 설명 — tfx-auto 로 passthrough>"
 ---
 
-# tfx-codex — Codex-Only 오케스트레이터
+# tfx-codex (DEPRECATED → tfx-auto alias)
 
-> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
-> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+> DEPRECATED. `/tfx-auto --cli codex` 로 리다이렉트. Phase 5 (v11) 에 물리 삭제.
 
-> **Telemetry**
->
-> - Skill: `tfx-codex`
-> - Description: `Codex-Only 오케스트레이터. tfx-auto 워크플로우를 Codex 전용으로 고정합니다. '코덱스로 해줘', '코덱스한테 시켜', 'codex로', 'Codex 전용' 같은 요청에 반드시 사용.`
-> - Session: 요청별 식별자를 유지해 단계별 실행 로그를 추적한다.
-> - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
+## 동작
 
-
-
-
-> **래퍼**: tfx-auto의 Codex 전용 바로가기. TFX_CLI_MODE=codex.
-> **HARD RULE**: Claude는 이 스킬에서 Edit/Write를 사용하면 안 된다. 모든 코드 수정은 Codex CLI를 통해 수행한다.
-> Codex CLI만 사용하여 모든 외부 CLI 작업을 라우팅합니다.
-> Gemini CLI가 없는 환경에서 사용합니다.
-
-## 사용법
-
-```
-/tfx-codex "작업 설명"
-/tfx-codex N:codex "작업 설명"
-```
-
-## 동작 원리
-
-`tfx-auto`와 동일한 워크플로우를 사용하되, `TFX_CLI_MODE=codex` 환경변수를 설정하여
-모든 Gemini 에이전트(designer, writer)를 Codex로 리매핑합니다.
-
-### 에이전트 라우팅
-
-| 에이전트 | 원래 CLI | tfx-codex에서 |
-|----------|---------|-------------|
-| executor, build-fixer, debugger | Codex | Codex (변경 없음) |
-| architect, planner, critic, analyst | Codex | Codex (변경 없음) |
-| code-reviewer, security-reviewer | Codex | Codex (변경 없음) |
-| scientist, document-specialist | Codex | Codex (변경 없음) |
-| **designer** | ~~Gemini~~ | **Codex** (effort: codex53_high) — UI 코드 생성 |
-| **writer** | ~~Gemini~~ | **Codex Spark** (effort: spark53_low) — 경량 문서 |
-| explore | Claude Haiku | Claude Haiku (변경 없음) |
-| verifier, test-engineer | Claude Sonnet | Codex (변경 없음) |
-
-## 실행 규칙
-
-**tfx-auto SKILL.md의 커맨드 숏컷 → 트리아지 → 멀티 태스크 라우팅 → 실행 → 결과 파싱 → 보고 섹션을 그대로 따릅니다.**
-
-유일한 차이점:
-
-1. **실행 섹션(CLI 에이전트) 수행 시** `TFX_CLI_MODE=codex`를 환경변수로 전달:
-   ```bash
-   TFX_CLI_MODE=codex bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile}
+1. stderr 에 1회 경고 출력:
    ```
+   [deprecated] tfx-codex -> use: tfx-auto --cli codex
+   ```
+2. ARGUMENTS 전체 앞에 `--cli codex` 를 prepend 하여 `Skill("tfx-auto")` 호출.
+3. tfx-auto 의 플래그 오버라이드 로직이 나머지 처리 (`TFX_CLI_MODE=codex`).
 
-2. **트리아지 섹션에서** gemini 분류 결과를 codex로 강제 변환:
-   - Codex 분류가 `gemini`를 반환하면 → `codex`로 교체
-   - Opus 분해에서 designer/writer → Codex 에이전트 + implement/analyze MCP 프로필
+## 등가 플래그
 
-3. **MCP 프로필 조정**:
-   - designer: `implement` (코드 기반 UI 작업)
-   - writer: `analyze` (문서 기반 리서치+작성)
+`--cli codex`
 
-## 필수 조건
+## 이 alias 의 의미
 
-- [Codex CLI](https://github.com/openai/codex): `npm install -g @openai/codex`
-- Gemini CLI 불필요
+Codex CLI 전용 라우팅 고정. tfx-auto 의 `--cli codex` 플래그로 동일 의미 표현.
 
-## Troubleshooting
+## 마이그레이션 가이드
 
-문제 발생 시 `/tfx-doctor` 실행. (`--fix` 자동 수정, `--reset` 캐시 초기화)
+| 기존 호출 | 새 호출 |
+|----------|---------|
+| `/tfx-codex "작업"` | `/tfx-auto "작업" --cli codex` |

@@ -1,159 +1,220 @@
 ---
 internal: true
 name: tfx-research
-description: "빠른 웹 검색과 요약이 필요할 때 사용한다. '검색해줘', '찾아봐', '최신 정보', '이거 뭐야', 'search', '공식 문서 확인' 같은 요청에 반드시 사용. 라이브러리 문서, API 레퍼런스, 에러 해결, 최신 뉴스, 팩트 체크 등 외부 정보가 필요한 모든 상황에 적극 활용한다."
+description: "웹 검색/리서치가 필요할 때 사용한다. '검색해줘', '찾아봐', '최신 정보', '이거 뭐야', '심층 조사', '자세히 알아봐', 'deep research', '전면 리서치', '자율 리서치', '조사해', 'research and plan' 같은 요청에 반드시 사용. 기본값은 3-CLI 멀티소스(Exa+Brave+Tavily) 합의 딥 리서치. 빠른 Gemini Google Search 는 --quick. 자율 쿼리생성+보고서 모드는 --auto."
 triggers:
   - tfx-research
-  - 빠른 리서치
+  - 리서치
   - 검색
   - 찾아줘
   - search
   - web search
-argument-hint: "<검색 주제>"
+  - deep research
+  - 심층 리서치
+  - deep-research
+  - autoresearch
+  - 자율 리서치
+  - 조사해
+  - 알아봐
+argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 ---
 
-# tfx-research — Light Web Research
+# tfx-research — Web Research (Deep by Default)
 
-> **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
-> 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
+> **ARGUMENTS 처리**: `--quick` → Quick. `--auto` → Auto. 그 외 → Deep (기본).
 
-> **Telemetry**
->
-> - Skill: `tfx-research`
-> - Description: `빠른 웹 검색과 요약이 필요할 때 사용한다. '검색해줘', '찾아봐', '최신 정보', '이거 뭐야', 'search', '공식 문서 확인' 같은 요청에 반드시 사용. 라이브러리 문서, API 레퍼런스, 에러 해결, 최신 뉴스, 팩트 체크 등 외부 정보가 필요한 모든 상황에 적극 활용한다.`
-> - Session: 요청별 식별자를 유지해 단계별 실행 로그를 추적한다.
-> - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
+> AI makes completeness near-free. 기본은 Claude(Exa/학술) + Codex(Brave/실용) + Gemini(Tavily/DX) 3-CLI 멀티소스 교차검증 합의.
+> 빠른 단일 Google Search 는 `--quick`. 자율 쿼리생성+구조화 보고서 는 `--auto`.
 
+---
 
+## 모드 분기
 
+| 플래그 | 모드 | 특징 |
+|--------|------|------|
+| (없음) | **Deep** (기본) | 3-CLI 멀티소스 교차검증, consensus score |
+| `--quick` | Quick | Gemini 단일 Google Search |
+| `--auto` | Auto | 자율 쿼리생성(3-5개) + 검색 + 구조화 보고서 |
 
-> **Deep 버전**: tfx-deep-research. "제대로/꼼꼼히" 수정자로 자동 에스컬레이션.
-> 빠른 단일 소스 검색 + 요약. **검색 자체를 Gemini에 위임**해 Claude 토큰 최소화. Gemini CLI의 네이티브 Google Search로 검색+요약을 한 번에 처리.
+---
 
-## 용도
+## Deep 모드 (기본)
 
-- 빠른 팩트 체크
-- 라이브러리/프레임워크 최신 정보 확인
-- API 문서 검색
-- 에러 메시지 해결책 검색
-- 간단한 기술 질문 답변
+### HARD RULES
+1. `codex exec` / `gemini -p` 직접 호출 금지
+2. Codex/Gemini → `Bash("tfx multi ...")` 만
+3. Claude → `Agent(run_in_background=true)`
+4. Bash + Agent 동시 호출
 
-## 워크플로우
+### 모델/소스 역할
 
-### Step 1: 쿼리 최적화 (Claude — ~100 토큰)
+| CLI | MCP | 관점 |
+|-----|-----|------|
+| Claude | Exa (neural semantic) | 학술/기술 깊이, 공식 문서, 벤치마크 |
+| Codex | Brave Search | 실용/구현/산업 사례 |
+| Gemini | Tavily | 비용/운영/DX |
 
-사용자 입력을 검색에 최적화된 영문 키워드로 변환한다. 이 단계만 Claude가 처리한다:
+### Depth 모드 (`--depth` 플래그)
 
+| 모드 | 서브쿼리 | 소스/쿼리 | 라운드 | 토큰 | 시간 |
+|------|---------|----------|--------|------|------|
+| quick | 3 | 2 | 1 | ~20K | 2-3분 |
+| standard | 5 | 3 | 1-2 | ~40K | 5-8분 (기본) |
+| deep | 8-10 | 5 | 2-3 | ~80K | 10-15분 |
+
+### EXECUTION
+
+#### Pre-Phase: Depth 선택
+`--depth` 미지정 시 AskUserQuestion.
+
+#### Step 1: 주제 분석 및 쿼리 분해 (Claude Opus)
+- depth 에 따른 서브쿼리 생성
+- 각 쿼리에 관점(학술/실용/DX) 매핑
+
+#### Step 2: 3-CLI 독립 병렬 검색 (Anti-Herding) — Bash + Agent 동시 호출
+
+**Agent (Claude + Exa):**
 ```
-입력: "React 19에서 use() 훅 사용법"
-최적화: "React 19 use() hook usage API reference 2026"
+Agent(
+  subagent_type="claude",
+  model="opus",
+  run_in_background=true,
+  prompt="서브쿼리를 Exa web_search_exa 로 검색. 서브쿼리: {sub_queries}. 관점: 학술/기술. category='research paper' 우선, highlights=true, numResults=5. 각 결과 제목/URL/핵심 추출."
+)
 ```
 
-### Step 1.5: 검색 유형 선택 (인자 없이 호출 시)
+**Bash (Codex + Brave, Gemini + Tavily):**
+```
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+  --assign 'codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: {sub_queries}. 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:researcher' \
+  --assign 'gemini:서브쿼리를 Tavily 로 검색. {sub_queries}. 관점: 비용/운영/DX. tavily_search search_depth=advanced, max_results=5, include_raw_content=false. 구조화.:researcher' \
+  --timeout 600")
+```
 
-인자 없이 `/tfx-research`만 호출된 경우, AskUserQuestion으로 검색 유형을 선택받는다:
+#### Step 3: 결과 수집 및 교차검증
+
+교차검증 기준:
+1. 사실 일치
+2. 추천 일치
+3. 수치 일치 (벤치마크/가격/성능)
+4. 리스크 일치
+
+소스 가중치: 공식 1.0 / 논문 0.9 / 엔지니어링 블로그 0.7 / 일반 0.5. 날짜: 6개월 ×1.0 / 1년 ×0.8 / 2년 ×0.5.
+
+#### Step 4: 합의 종합 보고서
+
+```markdown
+# Deep Research Report: {topic}
+**Depth**: {depth} | **Consensus**: {score}% | **Sources**: {n}개
+
+## Executive Summary
+## Key Findings (consensus 기반)
+### 1. {finding} — 합의도: 3/3 또는 2/3
+## Comparative Analysis
+## 미합의 사항 (Disputed)
+## 추천
+## 소스 목록 (신뢰도 + MCP)
+```
+
+#### Step 5: Recursive Depth (deep 모드 전용)
+중요 하위 주제 발견 시 최대 3개까지 재귀 실행.
+
+### Token (Deep): quick ~18K / standard ~35K / deep ~80K
+
+---
+
+## Quick 모드 (`--quick`)
+
+### Step 1: 쿼리 최적화 (Claude ~100 토큰)
+사용자 입력 → 영문 검색 키워드.
+
+### Step 1.5: 검색 유형 선택 (인자 없을 때)
 
 ```
 AskUserQuestion:
-  "검색 유형을 선택하세요:"
-  1. 코드/라이브러리 문서 (context7)
+  1. 코드/라이브러리 (context7)
   2. 학술/논문 (Exa semantic)
-  3. 최신 뉴스/트렌드 (Brave)
-  4. 일반 웹 검색 (Tavily)
+  3. 뉴스/트렌드 (Brave)
+  4. 일반 웹 (Tavily)
   5. URL 콘텐츠 추출
 ```
 
-선택 결과에 따라 Step 2 Gemini 위임 시 프롬프트에 검색 유형 힌트를 추가한다.
-인자가 제공된 경우 이 단계를 건너뛰고 Step 2로 직행한다.
-
-### Step 2: Gemini에 검색+요약 위임 (검색 실행 전체를 Gemini가 처리)
-
-최적화된 쿼리를 Gemini CLI로 전달한다. Gemini는 네이티브 Google Search를 사용해 검색과 요약을 모두 수행한다:
+### Step 2: Gemini Google Search 위임
 
 ```
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini 'Research the following topic. Use Google Search to find current information. Return a structured markdown summary with sources: {optimized_query}' auto 120")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini 'Research: use Google Search, return structured markdown with sources. Query: {optimized_query}' auto 120")
 ```
 
-Gemini가 반환하는 결과에는 검색 결과, 출처 URL, 핵심 요약이 포함된다. Claude는 이 단계에서 토큰을 소비하지 않는다.
+**Fallback**: Gemini 실패 시 MCP 순서 — context7 → WebSearch → Brave → Exa → Tavily.
 
-**실패 시**: Gemini CLI가 응답하지 않거나 오류가 발생하면 → [Claude Fallback](#claude-fallback-gemini-실패-시) 으로 전환.
-
-### Step 3: 결과 포맷팅 (Claude — 경량, ~300 토큰)
-
-Gemini 출력을 표준 결과 템플릿으로 정리한다. 새로운 검색이나 요약 없이 포맷 변환만 수행:
+### Step 3: 결과 포맷팅 (Claude ~300 토큰)
 
 ```markdown
 ## 검색 결과: {query}
-
 ### 핵심 답변
-{Gemini 요약에서 추출한 1-3문장 직접 답변}
-
-### 상세 내용
-- **[출처 1 제목](URL)**: {하이라이트 요약}
-- **[출처 2 제목](URL)**: {하이라이트 요약}
-- **[출처 3 제목](URL)**: {하이라이트 요약}
-
+### 상세 내용 (출처 + 요약)
 ### 관련 키워드
-{추가 검색에 유용한 키워드}
 ```
 
-## 토큰 예산
-
-| 단계 | 담당 | 토큰 |
-|------|------|------|
-| 쿼리 최적화 | Claude | ~100 |
-| 검색 실행 + 요약 | Gemini | 0 (Claude 미소비) |
-| 결과 포맷팅 | Claude | ~300 |
-| **Claude 총합** | | **~500 (오케스트레이션만)** |
-
-> 기존 대비 Claude 토큰 ~90% 절감. 검색 품질은 Gemini의 Google Search 네이티브 연동으로 유지.
+### Token (Quick): ~500 (Claude), 0 (Gemini 외부)
 
 ---
 
-## Claude Fallback (Gemini 실패 시)
+## Auto 모드 (`--auto`)
 
-Gemini CLI가 실패하거나 응답이 없을 경우 Claude + MCP 원본 워크플로우로 폴백한다.
+> 자율 쿼리생성 → 검색 → 핵심 추출 → 구조화 보고서.
 
-### Fallback Step 2: MCP 소스 자동 선택
+### Step 1: 주제 수집
+인자로 받거나 대화로 요청. 모호하면 범위 좁히기 후속 질문.
 
-검색 유형에 따라 최적 MCP를 자동 선택한다:
+### Step 2: 검색 쿼리 자동 생성 (3-5개)
 
-| 유형 | 선택 MCP | 이유 |
-|------|----------|------|
-| 코드/라이브러리 문서 | context7 (resolve → query) | 공식 문서 최적화 |
-| 학술/심층 검색 | Exa (web_search_exa) | Neural semantic search |
-| 최신 뉴스/트렌드 | Brave (brave_web_search) | 독립 인덱스, freshness |
-| 일반 웹 검색 | Tavily (tavily_search) | 범용, 빠른 응답 |
-| URL 콘텐츠 추출 | Exa (crawling_exa) | Clean text extraction |
+규칙:
+1. 한국어 주제 → 한국어 2-3 + 영어 1-2
+2. 영어 주제 → 영어 3-5
+3. 일반 + 비교 + 최신 동향 조합
 
-**선택 로직:**
+예 ("Next.js 15 변경점"):
 ```
-if query matches library/framework name → context7
-elif query contains "논문", "research", "paper" → Exa (category: "research paper")
-elif query contains "뉴스", "news", "최신" → Brave (brave_news_search)
-elif query contains URL → Exa crawling
-else → Tavily (가장 범용적)
+- "Next.js 15 주요 변경점 정리"
+- "Next.js 15 App Router 변경사항 2026"
+- "Next.js 15 breaking changes migration"
+- "Next.js 15 vs 14 comparison"
 ```
 
-### Fallback Step 3: 검색 실행
+### Step 3: 웹 검색 실행
+brave-search MCP 우선, 없으면 WebSearch. 쿼리당 상위 5-10개, URL 중복 제거, 실패 시 쿼리 변형 재시도.
 
-선택된 MCP로 검색 실행. 결과를 토큰 효율적으로 포맷:
+### Step 4: 핵심 정보 추출
+- 제목/URL/스니펫 정규화
+- 관련성 높은 것 우선
+- 사실 vs 의견 구분
+- 날짜순 정렬
 
+### Step 5: 구조화 보고서 생성
+
+```markdown
+# Research: {topic}
+Date: {date}
+
+## Executive Summary
+## Key Findings (3-5개)
+## Comparative Analysis (비교 대상 있을 때)
+## Actionable Recommendations (실행 가능)
+## Sources (URL + 한줄 요약)
 ```
-검색 파라미터:
-  - numResults: 5 (토큰 절약)
-  - highlights: true (Exa — 전문 대신 하이라이트)
-  - maxCharacters: 500 (Tavily/Exa — 콘텐츠 제한)
-  - freshness: 상황에 따라 자동 설정
-```
 
-MCP 사용 불가 시 순서:
-1. context7 → 2. WebSearch (내장) → 3. Brave → 4. Exa → 5. Tavily
+### Step 6: 저장
+
+`.tfx/reports/research-{timestamp}.md`
+
+### Token (Auto): ~10-15K
 
 ## 사용 예
 
 ```
-/tfx-research "Next.js 15 Server Actions best practices"
-/tfx-research "pnpm workspace monorepo setup 2026"
-/tfx-research "ECONNREFUSED 에러 Node.js 해결"
+/tfx-research "2026 실시간 파이프라인 아키텍처 비교"      # Deep
+/tfx-research --depth deep "Claude vs Cursor vs Windsurf"  # Deep
+/tfx-research --quick "Next.js 15 Server Actions"          # Quick
+/tfx-research --auto "Rust vs Go 백엔드 성능 비교"          # Auto (쿼리생성+보고서)
 ```
