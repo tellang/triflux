@@ -107,9 +107,7 @@ describe("Phase 4a golden — tfx-auto consensus shapes", () => {
           },
           consensus_vs_dispute: {
             agreements: [{ summary: "shared conclusion" }],
-            conflicts: [
-              { summary: "open disagreement", parties: ["claude"] },
-            ],
+            conflicts: [{ summary: "open disagreement", parties: ["claude"] }],
           },
           recommended_action: "FIX_FIRST",
           followup_issues: ["document rollout"],

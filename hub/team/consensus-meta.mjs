@@ -1,5 +1,11 @@
 const VALID_SHAPES = new Set(["consensus", "debate", "panel"]);
-const VALID_ACTIONS = new Set(["merge", "FIX_FIRST", "close", "defer", "split"]);
+const VALID_ACTIONS = new Set([
+  "merge",
+  "FIX_FIRST",
+  "close",
+  "defer",
+  "split",
+]);
 const DEFAULT_SHAPE = "consensus";
 
 export const CONSENSUS_SHAPE_COMPLEXITY = Object.freeze({
@@ -54,7 +60,13 @@ function normalizeRecommendedAction(action) {
 }
 
 function normalizeStringList(items) {
-  return [...new Set(toArray(items).map((item) => String(item).trim()).filter(Boolean))];
+  return [
+    ...new Set(
+      toArray(items)
+        .map((item) => String(item).trim())
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function normalizeSeverityBucket(items) {
@@ -77,7 +89,9 @@ function buildConsensusVsDispute({ agreements = [], conflicts = [] } = {}) {
       typeof item === "string" ? { summary: item } : { ...item },
     ),
     conflicts: toArray(conflicts).map((item) =>
-      typeof item === "string" ? { summary: item, parties: [] } : { parties: [], ...item },
+      typeof item === "string"
+        ? { summary: item, parties: [] }
+        : { parties: [], ...item },
     ),
   };
 }
@@ -86,7 +100,8 @@ function inferStatus(participants) {
   const statuses = participants.map((participant) => participant.status);
   if (statuses.length === 0) return "needs_user_input";
   if (statuses.every((status) => status === "success")) return "complete";
-  if (statuses.some((status) => status === "needs_user_input")) return "needs_user_input";
+  if (statuses.some((status) => status === "needs_user_input"))
+    return "needs_user_input";
   return "partial";
 }
 
