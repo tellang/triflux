@@ -21,6 +21,12 @@ import { fileURLToPath } from "node:url";
 import { parseArgs as nodeParseArgs } from "node:util";
 
 import { getPipelineStateDbPath } from "./pipeline/state.mjs";
+import {
+  createRetryStateMachine,
+  DEFAULT_ESCALATION_CHAIN,
+  loadSnapshot,
+  saveSnapshot,
+} from "./team/retry-state-machine.mjs";
 
 const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
 const HUB_TOKEN_FILE = join(homedir(), ".claude", ".tfx-hub-token");
@@ -409,6 +415,10 @@ export function parseArgs(argv) {
       done: { type: "boolean" },
       "mcp-profile": { type: "string" },
       "session-key": { type: "string" },
+      snapshot: { type: "string" },
+      "snapshot-file": { type: "string" },
+      event: { type: "string" },
+      "max-iterations": { type: "string" },
     },
     allowPositionals: true,
     strict: false,
@@ -1079,6 +1089,124 @@ async function cmdHitlPending() {
   return emitJson(outcome?.result || unavailableResult());
 }
 
+// ---------------------------------------------------------------------------
+// retry-run / retry-status — Phase 3 Step C2 bridge 서브커맨드.
+// retry-state-machine.mjs 를 multi-process safe 하게 외부 호출용 wrap.
+// 사용자 워크플로우:
+//   1) 첫 호출: retry-run --snapshot X --mode ralph --event start
+//      → 새 SM 생성, PLANNING → EXECUTING transition, snapshot 저장
+//   2) verify 성공 시: retry-run --snapshot X --event verify-success
+//      → DONE, 종료 판단 반환
+//   3) verify 실패 시: retry-run --snapshot X --event verify-fail --reason R
+//      → DIAGNOSING 또는 STUCK/BUDGET_EXCEEDED, 종료 판단 반환
+//   4) 다음 iter 시작: retry-run --snapshot X --event start
+// 출력: {ok, current, iterations, done, shouldStop, reason?, cli?} JSON.
+// ---------------------------------------------------------------------------
+
+function buildRetrySmFromArgs(args, snapshot) {
+  const mode = args.mode || snapshot?.mode || "bounded";
+  const maxIterations =
+    args["max-iterations"] !== undefined
+      ? Number(args["max-iterations"])
+      : snapshot?.maxIterations;
+  const sessionId = args["session-id"] || snapshot?.sessionId || null;
+  const cliChain = snapshot?.cliChain;
+
+  const sm = createRetryStateMachine({
+    mode,
+    maxIterations,
+    sessionId,
+    cliChain,
+  });
+  if (snapshot) sm.applySnapshot(snapshot);
+  return sm;
+}
+
+async function cmdRetryRun(args) {
+  const snapshotFile = args.snapshot || args["snapshot-file"];
+  const event = args.event;
+  const reason = args.reason || "";
+
+  if (!snapshotFile) {
+    console.error("--snapshot <path> required");
+    return false;
+  }
+  if (!event) {
+    console.error("--event <start|verify-success|verify-fail> required");
+    return false;
+  }
+
+  const existing = loadSnapshot(snapshotFile);
+  const sm = buildRetrySmFromArgs(args, existing);
+
+  let result;
+  switch (event) {
+    case "start":
+      result = sm.startIteration();
+      break;
+    case "verify-success":
+      result = sm.reportVerifySuccess();
+      break;
+    case "verify-fail":
+      result = sm.reportVerifyFail(reason || "unspecified");
+      break;
+    default:
+      console.error(`unknown --event: ${event}`);
+      return false;
+  }
+
+  const snap = sm.serialize();
+  saveSnapshot(snapshotFile, snap);
+
+  const terminal = ["DONE", "STUCK", "BUDGET_EXCEEDED"].includes(snap.current);
+  const cli = snap.cliChain?.[snap.cliIndex] || null;
+  const out = {
+    ok: true,
+    current: snap.current,
+    iterations: snap.iterations,
+    cliIndex: snap.cliIndex,
+    cli,
+    done: snap.current === "DONE",
+    shouldStop: terminal,
+    stuckCounter: snap.stuckCounter,
+    lastFailureReason: snap.lastFailureReason,
+    transition: result,
+  };
+  console.log(JSON.stringify(out));
+  return true;
+}
+
+async function cmdRetryStatus(args) {
+  const snapshotFile = args.snapshot || args["snapshot-file"];
+  if (!snapshotFile) {
+    console.error("--snapshot <path> required");
+    return false;
+  }
+  const snap = loadSnapshot(snapshotFile);
+  if (!snap) {
+    console.log(JSON.stringify({ ok: true, exists: false }));
+    return true;
+  }
+  const terminal = ["DONE", "STUCK", "BUDGET_EXCEEDED"].includes(snap.current);
+  const cli = snap.cliChain?.[snap.cliIndex] || null;
+  console.log(
+    JSON.stringify({
+      ok: true,
+      exists: true,
+      current: snap.current,
+      iterations: snap.iterations,
+      maxIterations: snap.maxIterations,
+      cliIndex: snap.cliIndex,
+      cli,
+      mode: snap.mode,
+      shouldStop: terminal,
+      stuckCounter: snap.stuckCounter,
+      lastFailureReason: snap.lastFailureReason,
+    }),
+  );
+  return true;
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
@@ -1138,9 +1266,13 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdHitlSubmit(args);
     case "hitl-pending":
       return await cmdHitlPending(args);
+    case "retry-run":
+      return await cmdRetryRun(args);
+    case "retry-status":
+      return await cmdRetryStatus(args);
     default:
       console.error(
-        "사용법: bridge.mjs <register|result|control|handoff|publish|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending> [--옵션]",
+        "사용법: bridge.mjs <register|result|control|handoff|publish|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|retry-run|retry-status> [--옵션]",
       );
       process.exit(1);
   }

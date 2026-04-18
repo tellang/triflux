@@ -70,7 +70,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
    - `--parallel N` → tfx-multi 엔진 위임 (headless)
    - `--cli codex|gemini` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
-  - `--retry ralph` → true ralph state machine (Phase 3)
+   - `--retry ralph` → stderr 경고 후 bounded 3회 degrade (Phase 2 미구현)
 
 1. **사용자 명시 키워드** (플래그 없을 때):
    - "병렬", "swarm", "PRD 돌려" → `Skill("tfx-swarm")` dispatch
