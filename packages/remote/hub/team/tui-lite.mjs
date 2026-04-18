@@ -20,10 +20,8 @@ import {
   statusBadge,
   stripAnsi,
   truncate,
-  wcswidth,
 } from "./ansi.mjs";
 import {
-  clamp,
   normalizeWorkerState as coreNormalizeWorkerState,
   formatTokens,
   loadVersion,
@@ -31,8 +29,6 @@ import {
   resolveViewportRows,
   runtimeStatus,
   sanitizeFiles,
-  sanitizeOneLine,
-  sanitizeTextBlock,
   VALID_TABS as VALID_TABS_ARRAY,
   wrapText as wrapTextFull,
 } from "./tui-core.mjs";
