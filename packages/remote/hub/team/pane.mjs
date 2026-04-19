@@ -91,12 +91,17 @@ export function startCliInPane(target, command) {
 
 /**
  * psmux `@file` 참조 주입이 가능한 CLI인지 판정한다.
- * Codex TUI는 `@` 토큰을 파일 검색 팝업 트리거로 intercept하기 때문에
- * (`codex-rs/tui/src/bottom_pane/chat_composer.rs` sync_file_search_popup),
- * `@<path>` paste는 file picker 쿼리로 해석되고 Enter는 picker 선택/dismiss로 소비된다.
- * 또한 Codex TUI는 path를 content로 inject하는 공식 경로가 없다
- * (slash_commands/prompt_args/skill_popup 전수 확인, 2026-04-19).
- * Gemini CLI는 `@path`가 공식 client-side file content inject이므로 유지한다.
+ *
+ * Codex TUI는 `@` 입력이 있으면 sync_file_search_popup이 FileSearchPopup을
+ * 활성화한다 (`codex-rs/tui/src/bottom_pane/chat_composer.rs:3082`,
+ * `file_search_popup.rs:54-63`). 팝업이 떠 있는 동안의 Enter 처리는 같은
+ * 파일의 composer Enter handler에서 popup 선택 삽입 또는 dismiss로 분기하며,
+ * prompt submit으로는 넘어가지 않는다. Gemini CLI의 `@path`는 공식 client-side
+ * file-content inject이므로 유지. Codex TUI에서 `@path` 선택은 path 문자열을
+ * textarea에 insert할 뿐 Gemini처럼 파일 내용을 inject하지 않는다 — 별도
+ * file-injection slash command도 존재하지 않음 (slash_commands / prompt_args /
+ * skill_popup / command_popup 소스 전수 grep, 2026-04-19 검증).
+ *
  * @param {{ multiplexer: string, useFileRef: boolean, cli: string|null }} args
  */
 export function shouldUseFileRef({ multiplexer, useFileRef, cli }) {
