@@ -44,7 +44,7 @@
 | **#116-F** non-TTY dashboard UX | H_H | P3 | triflux | ✅ 로컬 fix `266aed2` |
 
 기존 유지:
-- **#114** in-process + bg 즉시 종료 — H_C → in-process deprecate 검토
+- **#114** in-process + bg 즉시 종료 — H_C → **deprecate 결정 (A: warn + auto-fallback to headless, 2026-04-19 session 5)**. 구현은 P1 headless opt-in 과 합침
 - **#117** tmux/mux prompt injection race — H_E → P2 관찰 후 fix
 
 **umbrella #116**: 위 sub-issue 링크 + 진행 상태 체크박스 (gh issue create 승인 대기)
@@ -56,8 +56,8 @@
 | Track | Crit | 대기 사유 |
 |---|---|---|
 | swarm-interactive-attach | M | Issue #115 (4). dashboard(단일 뷰) vs 인터랙티브(직접 pane 진입) 디자인 결정 필요. 사용자 인터뷰 후 진입 |
-| conductor-completion-payload-wiring | M | Issue #115 후속. swarm worker stdout JSON tail 파싱 → `onCompleted({completionPayload})` 배선. F7 실전 활성화 조건 |
-| prd-template-completion-protocol | L | Issue #115 PRD #5. worker prompt appendix 주입 vs docs/prd/_template.md 중 위치 결정 필요 |
+| conductor-completion-payload-wiring | M | **구현 완료 (2026-04-19 session 5)**: `hub/team/extract-completion-payload.mjs` pure helper (9 tests) + `conductor.mjs` 로컬/원격 exit(0) 경로 wiring. swarm-hypervisor F7 guard (validateWorkerCompletion) 와 end-to-end 연결 |
+| prd-template-completion-protocol | L | Issue #115 PRD #5. **위치 결정 완료 (2026-04-19 session 5)**: B-hybrid — `swarm-hypervisor.mjs:433` buildSessionConfig 에서 `shard.prompt + COMPLETION_PROTOCOL_APPENDIX` 런타임 주입 + `docs/prd/_template.md` 에 placeholder 주석만. 구현은 #7 conductor wiring 과 함께 |
 
 ---
 
