@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   syncCodexHubUrl,
   syncHubMcpSettings,
+  syncProjectMcpJson,
 } from "../../scripts/sync-hub-mcp-settings.mjs";
 
 const HUB_URL = "http://127.0.0.1:27888/mcp";
@@ -402,5 +403,108 @@ describe("syncCodexHubUrl", () => {
     ]);
     assert.deepEqual(result.skipped, []);
     assert.equal(readFileSync(configPath, "utf8"), before);
+  });
+});
+
+describe("syncProjectMcpJson", () => {
+  let projectRoot;
+
+  beforeEach(() => {
+    projectRoot = mkdtempSync(join(tmpdir(), "tfx-project-mcp-sync-"));
+  });
+
+  afterEach(() => {
+    if (projectRoot && existsSync(projectRoot)) {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("case 1: tfx-hub.url이 다르면 updated에 포함되고 파일이 실제로 바뀐다", async () => {
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    writeJson(projectMcpPath, {
+      mcpServers: {
+        "tfx-hub": {
+          type: "url",
+          url: "http://127.0.0.1:39999/mcp",
+        },
+      },
+    });
+
+    const result = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, [projectMcpPath]);
+    assert.deepEqual(result.skipped, []);
+    assert.deepEqual(result.errors, []);
+    assert.equal(
+      JSON.parse(readFileSync(projectMcpPath, "utf8")).mcpServers["tfx-hub"]
+        .url,
+      HUB_URL,
+    );
+  });
+
+  it("case 2: 동일 url이면 skipped에 포함한다", async () => {
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    writeJson(projectMcpPath, {
+      mcpServers: {
+        "tfx-hub": {
+          type: "url",
+          url: HUB_URL,
+        },
+      },
+    });
+
+    const before = readFileSync(projectMcpPath, "utf8");
+    const result = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, []);
+    assert.deepEqual(result.skipped, [projectMcpPath]);
+    assert.deepEqual(result.errors, []);
+    assert.equal(readFileSync(projectMcpPath, "utf8"), before);
+  });
+
+  it("case 3: 파일이 없으면 생성하지 않고 skipped에 포함한다", async () => {
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+
+    const result = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, []);
+    assert.deepEqual(result.skipped, [projectMcpPath]);
+    assert.deepEqual(result.errors, []);
+    assert.equal(existsSync(projectMcpPath), false);
+  });
+
+  it("case 4: tfx-hub 키가 없으면 생성하지 않고 skipped에 포함한다", async () => {
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    writeJson(projectMcpPath, {
+      mcpServers: {
+        other: {
+          url: "http://127.0.0.1:3000/mcp",
+        },
+      },
+    });
+
+    const before = readFileSync(projectMcpPath, "utf8");
+    const result = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, []);
+    assert.deepEqual(result.skipped, [projectMcpPath]);
+    assert.deepEqual(result.errors, []);
+    assert.equal(readFileSync(projectMcpPath, "utf8"), before);
   });
 });

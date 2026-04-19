@@ -295,13 +295,16 @@ async function syncHubMcpSettingsIfAvailable({ hubUrl }) {
     const mod = await import(
       new URL("../scripts/sync-hub-mcp-settings.mjs", import.meta.url)
     );
-    if (typeof mod?.syncHubMcpSettings !== "function") {
+    if (typeof mod?.syncHubMcpSettings === "function") {
+      await mod.syncHubMcpSettings({ hubUrl });
+    } else {
       hubLog.warn({ hubUrl }, "hub.mcp_sync_missing_export");
-      return;
     }
-    await mod.syncHubMcpSettings({ hubUrl });
     if (typeof mod?.syncCodexHubUrl === "function") {
       await mod.syncCodexHubUrl({ hubUrl });
+    }
+    if (typeof mod?.syncProjectMcpJson === "function") {
+      await mod.syncProjectMcpJson({ hubUrl, projectRoot: PROJECT_ROOT });
     }
   } catch (error) {
     const message = error?.message || String(error);
