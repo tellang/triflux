@@ -101,3 +101,37 @@ test("payload + `{ broken` 처럼 trailing dangling `{` 도 파싱", () => {
   assert.ok(result);
   assert.equal(result.payload.status, "ok");
 });
+
+// Codex review finding 3 (truncation): simulate conductor's slice(-16384) on an
+// oversized payload. Documents that head-truncation loses the outer `{` so the
+// extractor may return a partial inner object (which F7 / validateWorkerCompletion
+// will reject as missing `commits_made`), or null if no inner object is intact.
+// Sentinel framing is the proper fix — tracked as a follow-up issue.
+test("앞부분이 잘린 payload — 외부 `{` 손실 시 inner object 혹은 null", () => {
+  const shas = Array.from({ length: 500 }, (_, i) =>
+    String(i).padStart(40, "0"),
+  );
+  const inner = shas
+    .map((sha) => `{"sha":"${sha}","message":"m${sha.length}"}`)
+    .join(",");
+  const full = `{"status":"ok","commits_made":[${inner}]}`;
+  assert.ok(full.length > 16384, "test fixture must exceed buffer size");
+  const truncated = full.slice(-16384);
+  const result = extractCompletionPayload(truncated);
+  if (result) {
+    // 잘린 앞부분 탓에 outer status 는 없어야 함 — inner commit object 만 남음.
+    assert.equal(result.payload.status, undefined);
+    assert.ok(
+      typeof result.payload.sha === "string" ||
+        typeof result.payload.message === "string",
+    );
+  } else {
+    assert.equal(result, null);
+  }
+});
+
+// Codex review finding 3 (variant): tail-truncated tail (no closing `}`).
+test("끝부분이 잘린 payload — 마지막 `}` 없음 → null", () => {
+  const truncated = '{"status":"ok","commits_made":[{"sha":"abc"';
+  assert.equal(extractCompletionPayload(truncated), null);
+});
