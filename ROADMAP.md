@@ -18,19 +18,36 @@
 
 ## NOW — 즉시 착수 (Score 순, 동점 시 plan-readiness 순)
 
-| # | Track | Crit | Regr | Score | Issues | Plan | 근거 |
+| # | Track | Crit | Regr | Score | Issues | Plan | 상태 근거 |
 |---|---|---|---|---|---|---|---|
-| 1 | **tfx-multi-nontty-reliability** | H | Y | **5** | [#114](https://github.com/tellang/triflux/issues/114) · [#116](https://github.com/tellang/triflux/issues/116) · [#117](https://github.com/tellang/triflux/issues/117) | — (investigate 필요) | 백그라운드(non-TTY) `tfx multi/swarm` 6가지 경로 중 5개 실패, tmux 1개만 부분 성공. prompt 파일 미생성 + Enter 미전송 + gemini 텍스트 누락. 다른 사용자(majsoul-coach) 6단계 시도 후 폴백. 환경 조건부 회귀 |
-| 2 | **swarm-reliability** | H | N | 3 | [#115](https://github.com/tellang/triflux/issues/115) | [2026-04-19-issue-115-swarm-reliability.md](.triflux/plans/2026-04-19-issue-115-swarm-reliability.md) | worker commit 누락 + cleanup 손실. 11분 작업 silent 손실. plan + PRD 준비 완료 |
+| 1 | **tfx-multi-nontty-reliability** | H | Y | **5** | [#114](https://github.com/tellang/triflux/issues/114) · [#116](https://github.com/tellang/triflux/issues/116) · [#117](https://github.com/tellang/triflux/issues/117) | [2026-04-19-issue-116-tfx-multi-investigate.md](.triflux/plans/2026-04-19-issue-116-tfx-multi-investigate.md) | investigate ✅ dual-lane (debugger+tracer). 2 sub-issue fix 완료 (로컬). 4 sub-issue + #114 fix 는 probe/사용자 게이트 대기 |
+| 2 | **swarm-reliability** | H | N | 3 | [#115](https://github.com/tellang/triflux/issues/115) | [2026-04-19-issue-115-swarm-reliability.md](.triflux/plans/2026-04-19-issue-115-swarm-reliability.md) | ✅ **DONE** — Lane 1 (worker completion + F7) `1f339c4` + Lane 2 (recovery-store preservation) `2874074`. push 완료. 아카이브 후보 |
 | 3 | **codex-approval-stall** | M | Y | 4 | [#66](https://github.com/tellang/triflux/issues/66) | — | v10.9.31 workaround만. 근본 미해결 (OPEN). upstream/environment 성격 — 단독 대응 |
-| 4 | **phase3-step-e-wiring** | L | N | 1 | — | [.triflux/plans/phase3-step-e-plus-issue-113.md](.triflux/plans/phase3-step-e-plus-issue-113.md) | chain-file/bridge instruction 배선 미완. auto-escalate 옵트인 경로 없음 |
+| 4 | **phase3-step-e-wiring** | L | N | 1 | — | [phase3-step-e-plus-issue-113.md](.triflux/plans/phase3-step-e-plus-issue-113.md) | 실체는 skill-drift 20 todo 복원 + #113 CLAUDE.md 자동주입 차단. 소규모 wiring 아님 — 2 shard 격리 착수 필요 |
 
 ### 실행 순서 (병렬 OK)
 
-- **#1 과 #2 는 독립적** — 서로 다른 모듈 (`hub/team/` spawn 경로 vs `swarm-hypervisor.mjs` 로직). 병렬 가능
-- **#2 먼저 착수 가능** (plan+PRD 완료). #1 은 investigate phase 선행 필요 (재현 조건 정제)
+- **#2 완료** → NOW 슬롯 하나 비었음. #1 fix 단계 진입 가능
+- **#1 은 sub-issue 6건 분해** (#116-A~F). 상세는 `2026-04-19-issue-116-tfx-multi-investigate.md` 참조
 - **#3 은 별도 lane** (upstream/env)
-- **#4 는 #1/#2 완료 후**
+- **#4 는 codex/gemini 복귀 후** 병렬 가능. 현재 Claude native-only 유지 중
+
+### #1 sub-issue 분해 (상세)
+
+| 신규 Issue | 가설 | 우선순위 | fix 소유 | 상태 |
+|---|---|---|---|---|
+| **#116-A** codex kill before HANDOFF flush (timeout/flush) | H_A | P0 | triflux | probe 사용자 기계 필요 |
+| **#116-B** `tfx multi status` false-negative | H_B | P0 | triflux | ✅ 로컬 fix `ce48491` |
+| **#116-C** `tfx swarm` bg hang (lease) | H_D | P1 | triflux | Hub probe 선행 |
+| **#116-D** workdir config/instruction delta | H_F | P2 | upstream | drift 감지만 |
+| **#116-E** codex MCP approval drift regression | H_G | P2 | oh-my-codex | upstream |
+| **#116-F** non-TTY dashboard UX | H_H | P3 | triflux | ✅ 로컬 fix `266aed2` |
+
+기존 유지:
+- **#114** in-process + bg 즉시 종료 — H_C → in-process deprecate 검토
+- **#117** tmux/mux prompt injection race — H_E → P2 관찰 후 fix
+
+**umbrella #116**: 위 sub-issue 링크 + 진행 상태 체크박스 (gh issue create 승인 대기)
 
 ---
 
@@ -39,6 +56,8 @@
 | Track | Crit | 대기 사유 |
 |---|---|---|
 | swarm-interactive-attach | M | Issue #115 (4). dashboard(단일 뷰) vs 인터랙티브(직접 pane 진입) 디자인 결정 필요. 사용자 인터뷰 후 진입 |
+| conductor-completion-payload-wiring | M | Issue #115 후속. swarm worker stdout JSON tail 파싱 → `onCompleted({completionPayload})` 배선. F7 실전 활성화 조건 |
+| prd-template-completion-protocol | L | Issue #115 PRD #5. worker prompt appendix 주입 vs docs/prd/_template.md 중 위치 결정 필요 |
 
 ---
 
@@ -48,12 +67,13 @@
 |---|---|---|
 | lint-debt | carry-over from v10.9.30/31/32 체크포인트 | 배치성 cleanup PR 한 번에 |
 | .worktrees housekeeping | 부분 | `.gitignore` 이미 반영. 추가 정리 없음 |
+| 체크포인트 slug 통합 | `~/.gstack/projects/triflux/` 와 `tellang-triflux/` 병존. gstack-slug 출력 = `tellang-triflux` | 일원화 검토 |
 
 ---
 
-## DONE — 아카이브 후보 (체크포인트 11개)
+## DONE — 아카이브 후보 (체크포인트 11개 → 아카이브 이동 완료)
 
-실체 완료된 체크포인트. 다음 세션에서 `~/.gstack/projects/tellang-triflux/checkpoints/archived/` 로 일괄 이동 제안.
+실체 완료된 체크포인트. 2026-04-19 세션에서 `~/.gstack/projects/tellang-triflux/checkpoints/archived/` 로 일괄 이동 완료.
 
 | # | 체크포인트 | 완료 근거 |
 |---|---|---|
@@ -68,6 +88,10 @@
 | 17 | phase3-step-abc1-done-c2b-next | Step C/D/E/F 완료, v10.11.0 |
 | 20 | phase4-implemented-readme-rewritten | v10.12.0, Phase 5 cleanup |
 | 21 | native-bash-wrapper-hardening | `e7f1b12`, `09780b7` |
+
+새 아카이브 후보 (2026-04-19 세션 3):
+- `20260419-153817-issue-115-fix-backlog.md` — #115 Lane 1+2 완료로 해소
+- `20260419-171653-issue-115-lane12-done.md` — push `53f6771..2874074` 로 종결 가능 (후속 세션에서 판단)
 
 ---
 
@@ -93,13 +117,17 @@
 3. **3트랙 이상 동시 active 금지**. NOW 가 3 초과하면 NEXT로 밀어라. (오픈소스 1인 프로젝트 집중도 보호)
 4. **치명도 기준은 "개발 속도 영향"**. 사용자 편의성·미감은 Crit=L. 병렬/허브/CI 영향은 Crit=H.
 5. **회귀는 +2 보너스**. 한번 고친 것이 다시 터지면 근본 원인 미해결 신호.
+6. **병렬 실행 금지 조건**: `tfx-multi/tfx-swarm/tfx-auto --parallel` 은 #116 umbrella 해결 전까지 Claude native-only (Agent tool / TeamCreate + isolation=worktree) 로 우회.
 
 ---
 
-## 현재 결정 사항 (2026-04-19)
+## 현재 결정 사항 (2026-04-19 session 3+)
 
-- **NOW #2 swarm-reliability** 먼저 착수 (plan+PRD 준비 완료) → Lane 1/2 worktree swarm dispatch
-- **NOW #1 tfx-multi-nontty-reliability** 는 investigate 플랜 작성 후 병렬 진입 — #116 umbrella 이슈가 #114/#117 포함
-- **NEXT interactive-attach** 는 별도 인터뷰 턴에서 결정
-- **DONE 11개 체크포인트** 아카이브 이동 완료 (2026-04-19 세션)
-- **DROPPED 8개 체크포인트** `archived/dropped/` 격리 완료
+- **NOW #2 swarm-reliability (#115) ✅ 완료** — Lane 1 (`1f339c4`) + Lane 2 (`2874074`). push `53f6771..2874074`. 전체 `npm test` green.
+- **NOW #1 tfx-multi-nontty-reliability investigate 완료** — debugger + tracer dual-lane 보고서 + 통합 plan + sub-issue 분해 (#116-A~F). 2 fix 로컬 커밋 (#116-B `ce48491`, #116-F `266aed2`). 4 sub-issue 는 probe/사용자 게이트 대기.
+- **사용자 경계선 수립** — Claude 단독 실행 가능 작업 / 주의 완료 후 확인 / 사용자·외부 검증 필수 3-tier 분리. codex/gemini CLI 직접 호출 금지 (#116 까지).
+- **미push 로컬 commit 2개** — `ce48491` (#116-B), `266aed2` (#116-F). 사용자 게이트 push 대기.
+- **sub-issue 생성 미승인** — gh issue create × 6 (#116-A~F). umbrella #116 body 업데이트 필요.
+- **DONE 11개 체크포인트** `archived/` 이동 완료 (2026-04-19 세션 2).
+- **DROPPED 8개 체크포인트** `archived/dropped/` 격리 완료 (2026-04-19 세션 2).
+- **NOW #4 phase3-step-e** — plan 규모 확인 결과 "소규모 wiring" 아님. skill-drift 20 todo + #113 조사. 별도 세션 또는 Agent 위임 권장.
