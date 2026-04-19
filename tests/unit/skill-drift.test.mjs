@@ -54,14 +54,17 @@ function extractFrontmatter(content) {
 }
 
 describe("스킬 문서 존재 확인", () => {
+  // Phase 5 cleanup (b371043) removed tfx-deep-interview, tfx-autoresearch thin
+  // aliases. Their semantics were absorbed into tfx-interview / tfx-research
+  // main bodies. See `축소된 스킬 본체 이관 완결성` suite for the body-level checks.
   const expected = [
     "tfx-auto",
     "tfx-multi",
     "tfx-hub",
     "tfx-doctor",
     "tfx-setup",
-    "tfx-deep-interview",
-    "tfx-autoresearch",
+    "tfx-interview",
+    "tfx-research",
   ];
 
   for (const name of expected) {
