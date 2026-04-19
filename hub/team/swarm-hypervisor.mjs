@@ -18,8 +18,10 @@ import { getHostConfig } from "../lib/ssh-command.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
 import { ensureConductorRegistry } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
+import { preserveWorktreePatch } from "./recovery-store.mjs";
 import { probeRemoteEnv, resolveRemoteDir } from "./remote-session.mjs";
 import { createSwarmLocks } from "./swarm-locks.mjs";
+import { validateWorkerCompletion } from "./worker-completion-validator.mjs";
 import {
   cleanupWorktree,
   ensureWorktree,
@@ -69,6 +71,7 @@ const FAILURE_MODES = Object.freeze({
   F4_LEASE_VIOLATION: "F4_lease_violation",
   F5_MERGE_CONFLICT: "F5_merge_conflict",
   F6_NO_COMMIT: "F6_no_commit",
+  F7_WORKER_DID_NOT_COMMIT: "F7_worker_did_not_commit",
 });
 
 const FALLBACK_AGENTS = Object.freeze({
@@ -158,6 +161,8 @@ export function createSwarmHypervisor(opts) {
     _deps.rebaseShardOntoIntegration || rebaseShardOntoIntegration;
   const cleanupWorktreeImpl =
     _deps.cleanupWorktree || cleanupWorktree || pruneWorktree;
+  const preserveWorktreePatchImpl =
+    _deps.preserveWorktreePatch || preserveWorktreePatch;
   const emitter = new EventEmitter();
   const eventLog = createEventLog(join(logsDir, "swarm-events.jsonl"));
   const { registry: sharedRegistry, fallbackReason: meshRegistryFallback } =
@@ -550,8 +555,13 @@ export function createSwarmHypervisor(opts) {
       // 직접 주입해야 shardCompleted 이벤트가 발화된다. 2026-04-17 세션에서
       // follow-up swarm 이 여기서 hang 했던 원인.
       const sessionConfig = buildSessionConfig(shard);
-      sessionConfig.onCompleted = ({ sessionId }) =>
-        handleShardCompleted(shard.name, sessionId, isRedundant);
+      sessionConfig.onCompleted = ({ sessionId, completionPayload } = {}) =>
+        handleShardCompleted(
+          shard.name,
+          sessionId,
+          isRedundant,
+          completionPayload,
+        );
       conductor.spawnSession(sessionConfig);
 
       eventLog.append("shard_launched", {
@@ -632,12 +642,64 @@ export function createSwarmHypervisor(opts) {
 
   // ── Completion handling ─────────────────────────────────────
 
-  function handleShardCompleted(shardName, sessionId, isRedundant) {
+  function handleShardCompleted(
+    shardName,
+    sessionId,
+    isRedundant,
+    completionPayload,
+  ) {
     eventLog.append("shard_completed", {
       shard: shardName,
       sessionId,
       isRedundant,
+      hasPayload: completionPayload !== undefined,
     });
+
+    // F7 — worker self-reported completion must include commits_made.
+    // Only enforce when payload is actually provided; legacy workers that
+    // don't emit a structured payload keep the F6 integration-time guard.
+    if (!isRedundant && completionPayload !== undefined) {
+      const verdict = validateWorkerCompletion(completionPayload);
+      if (!verdict.ok) {
+        const reason = verdict.reason || "invalid_completion_payload";
+        eventLog.append("no_worker_commit_report", {
+          shard: shardName,
+          sessionId,
+          reason,
+        });
+        failures.set(shardName, {
+          mode: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
+          reason,
+          sessionId,
+          completionPayload,
+        });
+        lockManager.release(shardName);
+
+        const worker = workers.get(shardName);
+        const shard = plan?.shards.find((item) => item.name === shardName);
+        if (worker && shard) {
+          void maybeCleanupWorktree(shardName, worker, shard, {
+            force: true,
+            failureReason: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
+          });
+        }
+
+        const redundant = redundantWorkers.get(shardName);
+        if (redundant) {
+          void redundant.conductor.shutdown("primary_failed_f7");
+        }
+
+        emitter.emit("shardFailed", {
+          shardName,
+          failureMode: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
+          reason,
+        });
+
+        cascadeDependencyFailure(shardName);
+        checkAllShardsCompleted();
+        return;
+      }
+    }
 
     completedShards.add(shardName);
 
@@ -1049,6 +1111,30 @@ export function createSwarmHypervisor(opts) {
     if (!worker?.worktreePath || shard?.host) return;
     if (failureReason && keepFailedWorktrees) return;
     if (cleanedWorktreePaths.has(worker.worktreePath)) return;
+
+    // Best-effort: preserve any uncommitted worker changes before removing
+    // the worktree. Silent on failure — must not block cleanup or mask the
+    // original failure reason.
+    if (failureReason) {
+      try {
+        const preservation = await preserveWorktreePatchImpl({
+          worktreePath: worker.worktreePath,
+          shardId: shardName,
+          recoveryDir: join(workdir, ".codex-swarm", "recovery"),
+        });
+        if (preservation?.ok && !preservation.skipped) {
+          eventLog.append("recovery_patch_saved", {
+            shard: shardName,
+            worktreePath: worker.worktreePath,
+            patchPath: preservation.patchPath,
+            reason: failureReason,
+          });
+        }
+      } catch {
+        /* silent: preservation failures must not block cleanup */
+      }
+    }
+
     try {
       await cleanupWorktreeImpl({
         worktreePath: worker.worktreePath,
