@@ -272,8 +272,8 @@ function getStdinContextUsage(stdin) {
 
 export function deriveContextLimit(stdin) {
   const explicit = Number(stdin?.context_window?.context_window_size || 0);
-  if (explicit > 0) return explicit;
-  return resolveModelLimit(stdin?.model?.id ?? stdin?.model);
+  const modelHint = resolveModelLimit(stdin?.model?.id ?? stdin?.model);
+  return Math.max(explicit, modelHint);
 }
 
 export function buildContextUsageView(stdin, snapshot = null) {
@@ -282,13 +282,15 @@ export function buildContextUsageView(stdin, snapshot = null) {
   const modelId = stdin?.model?.id ?? stdin?.model;
   const modelHintLimit = resolveModelLimit(modelId);
   const monitorLimit = Number(monitor?.limitTokens || 0);
-  const fallbackLimit = monitorLimit > 0 ? monitorLimit : modelHintLimit;
+  // Trust the model ID as ground truth: Claude Code statusline occasionally
+  // reports a hard 200K for [1m] variants, and the monitor cache can carry
+  // a stale DEFAULT_CONTEXT_LIMIT from before model hint resolution.
+  const rawLimit = stdinUsage?.limitTokens ?? Math.max(monitorLimit, modelHintLimit);
+  const limitTokens = Math.max(1, rawLimit, modelHintLimit);
 
   const usedTokens = stdinUsage?.usedTokens ?? Number(monitor?.usedTokens || 0);
-  const limitTokens = stdinUsage?.limitTokens ?? Math.max(1, fallbackLimit);
   const percent =
-    stdinUsage?.percent ??
-    (limitTokens > 0 ? clampPercent((usedTokens / limitTokens) * 100) : 0);
+    limitTokens > 0 ? clampPercent((usedTokens / limitTokens) * 100) : 0;
 
   const warning = classifyContextThreshold(percent);
   const showInfoOnlyStatus = !(
