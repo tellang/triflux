@@ -8,31 +8,43 @@
 // semantically valid — this layer only handles extraction.
 
 /**
- * Try each `{` position in tail from latest to earliest; for each, attempt
- * to parse the substring through the last `}`. Returns the innermost/latest
- * object that parses as a plain JSON object.
+ * Scan the tail for every (openIdx, closeIdx) pair of `{`/`}` positions and
+ * return the latest `}` whose substring parses as a plain JSON object. This
+ * tolerates trailing noise that happens to contain `}` (e.g. log lines like
+ * `noise } more` after the completion payload).
  *
  * @param {string} tail raw stdout tail
  * @returns {{payload: object} | null}
  */
 export function extractCompletionPayload(tail) {
   if (typeof tail !== "string" || tail.length === 0) return null;
-  const lastClose = tail.lastIndexOf("}");
-  if (lastClose < 0) return null;
 
-  const openPositions = [];
-  for (let i = 0; i <= lastClose; i += 1) {
-    if (tail[i] === "{") openPositions.push(i);
+  const closes = [];
+  const opens = [];
+  for (let i = 0; i < tail.length; i += 1) {
+    const ch = tail[i];
+    if (ch === "}") closes.push(i);
+    else if (ch === "{") opens.push(i);
   }
-  for (let k = openPositions.length - 1; k >= 0; k -= 1) {
-    const candidate = tail.slice(openPositions[k], lastClose + 1);
-    try {
-      const parsed = JSON.parse(candidate);
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return { payload: parsed };
+  if (closes.length === 0 || opens.length === 0) return null;
+
+  // Iterate from the latest `}` backward. For each close, try every `{`
+  // that sits before it, starting from the nearest (which is cheap and
+  // typically the right match) and widening outward.
+  for (let c = closes.length - 1; c >= 0; c -= 1) {
+    const closeIdx = closes[c];
+    for (let o = opens.length - 1; o >= 0; o -= 1) {
+      const openIdx = opens[o];
+      if (openIdx >= closeIdx) continue;
+      const candidate = tail.slice(openIdx, closeIdx + 1);
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return { payload: parsed };
+        }
+      } catch {
+        // try an earlier `{` for this close, then an earlier `}`.
       }
-    } catch {
-      // try an earlier `{`
     }
   }
   return null;

@@ -76,3 +76,28 @@ test("string 내부의 `{}` 로 인한 오인식 없음", () => {
   assert.equal(result.payload.note, "this has { and } inside");
   assert.equal(result.payload.status, "ok");
 });
+
+// Codex review finding 1: trailing garbage with `}` must not cause false null.
+test("payload 뒤에 `} more` 처럼 dangling `}` 포함된 garbage 가 있어도 파싱", () => {
+  const tail =
+    'log line\n{"status":"ok","commits_made":[{"sha":"a"}]}\nnoise } more text';
+  const result = extractCompletionPayload(tail);
+  assert.ok(result);
+  assert.equal(result.payload.status, "ok");
+});
+
+// Codex review finding 1 (variant): multiple trailing `}` characters.
+test("payload 뒤에 dangling `}` 여러 개 있어도 파싱", () => {
+  const tail = '{"status":"ok","commits_made":[]}\n} } }';
+  const result = extractCompletionPayload(tail);
+  assert.ok(result);
+  assert.equal(result.payload.status, "ok");
+});
+
+// Codex review finding 1 (variant): payload immediately followed by broken brace.
+test("payload + `{ broken` 처럼 trailing dangling `{` 도 파싱", () => {
+  const tail = '{"status":"ok","commits_made":[]}\n{ broken';
+  const result = extractCompletionPayload(tail);
+  assert.ok(result);
+  assert.equal(result.payload.status, "ok");
+});
