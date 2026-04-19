@@ -1,7 +1,0 @@
-{
-  "name": "tfx-auto-codex",
-  "description": "Codex 리드형 tfx-auto. Claude 네이티브 역할을 Codex로 치환하고 Gemini 사용은 유지합니다. '코덱스 리드', '코덱스가 주도', 'codex lead' 같은 요청에 사용.",
-  "triggers": ["tfx-auto-codex"],
-  "argument_hint": "\\\"작업 설명\\\" | N:agent_type \\\"작업 설명\\\"",
-  "internal": true
-}
