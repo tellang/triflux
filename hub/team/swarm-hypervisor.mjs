@@ -208,6 +208,37 @@ export function createSwarmHypervisor(opts) {
     state = next;
     eventLog.append("swarm_state", { from: prev, to: next, reason });
     emitter.emit("stateChange", { from: prev, to: next, reason });
+    // Best-effort phase tracking via phase-manager
+    void writeSwarmPhaseSafely(
+      plan?.runId || plan?.id || `swarm-${Date.now()}`,
+      next,
+    );
+  }
+
+  async function writeSwarmPhaseSafely(runId, swarmState) {
+    if (!runId) return;
+    const mapping = {
+      [SWARM_STATES.LAUNCHING]: ["Execution", "active"],
+      [SWARM_STATES.RUNNING]: ["Execution", "active"],
+      [SWARM_STATES.INTEGRATING]: ["Validation", "active"],
+      [SWARM_STATES.VALIDATING]: ["Validation", "active"],
+      [SWARM_STATES.COMPLETED]: ["Validation", "complete"],
+      [SWARM_STATES.FAILED]: ["Validation", "failed"],
+    };
+    const target = mapping[swarmState];
+    if (!target) return;
+    try {
+      const mod = await import("../lib/phase-manager.mjs");
+      if (typeof mod?.writePhase === "function") {
+        await mod.writePhase(runId, target[0], target[1]);
+      }
+      if (typeof mod?.syncToGstack === "function") {
+        const slug = process.cwd().split(/[\\/]/).pop();
+        await mod.syncToGstack(runId, slug);
+      }
+    } catch {
+      /* silent — phase tracking is best-effort */
+    }
   }
 
   function markIntegrationPromisePending() {

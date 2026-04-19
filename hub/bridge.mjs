@@ -944,6 +944,47 @@ async function cmdPipelineState(args) {
   return emitJson(result || unavailableResult());
 }
 
+// Best-effort phase-manager bridge (silent on failure — pipeline 동작 영향 X)
+async function writePhaseSafely(runId, phase, status) {
+  if (!runId) return;
+  try {
+    const mod = await import("./lib/phase-manager.mjs");
+    if (typeof mod?.writePhase === "function") {
+      await mod.writePhase(runId, phase, status);
+    }
+    if (typeof mod?.syncToGstack === "function") {
+      const slug = process.cwd().split(/[\\/]/).pop();
+      await mod.syncToGstack(runId, slug);
+    }
+  } catch {
+    /* silent — phase tracking is best-effort */
+  }
+}
+
+async function writePhaseSafelyFromLegacy(runId, legacyStatus) {
+  if (!runId || !legacyStatus) return;
+  try {
+    const mod = await import("./lib/phase-manager.mjs");
+    if (typeof mod?.coerceLegacyPhase !== "function") return;
+    const coerced = mod.coerceLegacyPhase(legacyStatus);
+    if (!coerced) return;
+    if (coerced === "complete") {
+      const current =
+        typeof mod.readPhase === "function" ? await mod.readPhase(runId) : null;
+      const lastPhase = current?.phase || current?.lastPhase;
+      if (lastPhase) await mod.writePhase(runId, lastPhase, "complete");
+      return;
+    }
+    await mod.writePhase(runId, coerced, "active");
+    if (typeof mod?.syncToGstack === "function") {
+      const slug = process.cwd().split(/[\\/]/).pop();
+      await mod.syncToGstack(runId, slug);
+    }
+  } catch {
+    /* silent */
+  }
+}
+
 async function cmdPipelineAdvance(args) {
   const body = {
     team_name: args.team,
@@ -972,6 +1013,9 @@ async function cmdPipelineAdvance(args) {
     },
   );
   const result = outcome?.result;
+  if (args.team && args.status && result?.ok !== false) {
+    void writePhaseSafelyFromLegacy(args.team, args.status);
+  }
   return emitJson(result || unavailableResult());
 }
 
@@ -983,6 +1027,9 @@ async function cmdPipelineInit(args) {
       args["ralph-max"] != null ? Number(args["ralph-max"]) : undefined,
   });
   const result = outcome?.result;
+  if (args.team && result?.ok !== false) {
+    void writePhaseSafely(args.team, "Strategy", "active");
+  }
   return emitJson(result || unavailableResult());
 }
 
