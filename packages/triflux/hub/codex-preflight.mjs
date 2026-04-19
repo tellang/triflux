@@ -151,6 +151,53 @@ async function checkMcpHealth(mcpServers, configText) {
   return { excludeMcpServers, warnings };
 }
 
+/**
+ * Detects codex config drift between global (~/.codex/config.toml) and the
+ * target workdir. Covers:
+ *   1. workdir-local `.codex/config.toml` overriding global approval_mode/sandbox
+ *   2. instruction-file asymmetry (AGENTS.md vs CLAUDE.md)
+ *
+ * @param {string} [workdir] absolute path to the invocation workdir
+ * @param {string} [globalConfigText] already-read ~/.codex/config.toml content
+ * @returns {{ warnings: string[] }}
+ */
+export function detectWorkdirDrift(workdir, globalConfigText = "") {
+  if (!workdir || typeof workdir !== "string") return { warnings: [] };
+  const warnings = [];
+
+  const localCodexConfig = join(workdir, ".codex", "config.toml");
+  if (existsSync(localCodexConfig)) {
+    let localText = "";
+    try {
+      localText = readFileSync(localCodexConfig, "utf8");
+    } catch {
+      localText = "";
+    }
+    const keys = ["approval_mode", "sandbox", "model"];
+    for (const key of keys) {
+      const local = readTomlString(localText, key);
+      const global = readTomlString(globalConfigText, key);
+      if (local && local !== global) {
+        warnings.push(
+          `workdir '.codex/config.toml' overrides ${key}='${local}' (global='${global || "unset"}').`,
+        );
+      }
+    }
+  }
+
+  const hasAgentsMd = existsSync(join(workdir, "AGENTS.md"));
+  const hasClaudeMd = existsSync(join(workdir, "CLAUDE.md"));
+  if (hasAgentsMd !== hasClaudeMd) {
+    const present = hasAgentsMd ? "AGENTS.md" : "CLAUDE.md";
+    const missing = hasAgentsMd ? "CLAUDE.md" : "AGENTS.md";
+    warnings.push(
+      `workdir has ${present} but not ${missing}; codex and other CLIs may read different instruction sources.`,
+    );
+  }
+
+  return { warnings };
+}
+
 export async function runPreflight(opts = {}) {
   const install = await checkCodexInstalled();
   if (!install.ok) {
@@ -180,6 +227,9 @@ export async function runPreflight(opts = {}) {
 
   const mcp = await checkMcpHealth(opts.mcpServers, configText);
   warnings.push(...mcp.warnings);
+
+  const drift = detectWorkdirDrift(opts.workdir, configText);
+  warnings.push(...drift.warnings);
 
   return {
     codexPath: install.codexPath,

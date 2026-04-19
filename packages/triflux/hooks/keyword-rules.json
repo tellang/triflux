@@ -117,7 +117,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-codex",
+      "skill": "tfx-auto",
       "priority": 3,
       "supersedes": [],
       "exclusive": false,
@@ -132,7 +132,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-gemini",
+      "skill": "tfx-auto",
       "priority": 3,
       "supersedes": [],
       "exclusive": false,
@@ -192,7 +192,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-autoresearch",
+      "skill": "tfx-research",
       "priority": 2,
       "supersedes": [],
       "exclusive": false,
@@ -207,7 +207,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-deep-interview",
+      "skill": "tfx-interview",
       "priority": 2,
       "supersedes": [],
       "exclusive": false,

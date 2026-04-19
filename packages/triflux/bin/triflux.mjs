@@ -4580,10 +4580,7 @@ ${updateNotice}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
 
-    ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행${RESET}
-    ${WHITE_BRIGHT}/tfx-auto-codex${RESET} ${GRAY}Codex 리드 + Gemini 유지 (no-Claude-native)${RESET}
-    ${WHITE_BRIGHT}/tfx-codex${RESET}      ${GRAY}Codex 전용 모드${RESET}
-    ${BLUE}/tfx-gemini${RESET}     ${GRAY}Gemini 전용 모드${RESET}
+    ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행 (--cli codex|gemini, --parallel N|swarm)${RESET}
     ${AMBER}/tfx-setup${RESET}      ${GRAY}HUD 설정 + 진단${RESET}
     ${YELLOW}/tfx-doctor${RESET}     ${GRAY}진단 + 수리 + 캐시 초기화${RESET}
 

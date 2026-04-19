@@ -2,26 +2,21 @@
 // PowerShell 호스트에 bash 문법(2>/dev/null, &&, $())을 보내는 사고를 방지한다.
 // 모든 SSH 명령 생성 코드에서 이 유틸리티를 사용할 것.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readHosts } from "./hosts-compat.mjs";
 
 /** hosts.json 캐시 (프로세스 수명 동안 유지) */
 let hostsCache = null;
+let hostsCacheRoot = null;
 
 /**
  * hosts.json을 로드하여 캐시한다.
  * @param {string} [repoRoot] — 프로젝트 루트 경로
  */
 function loadHostsCache(repoRoot) {
-  if (hostsCache) return;
-  try {
-    const hostsPath = repoRoot
-      ? join(repoRoot, "references", "hosts.json")
-      : join(process.cwd(), "references", "hosts.json");
-    hostsCache = JSON.parse(readFileSync(hostsPath, "utf8"));
-  } catch {
-    hostsCache = { hosts: {} };
-  }
+  const cacheKey = repoRoot || process.cwd();
+  if (hostsCache && hostsCacheRoot === cacheKey) return;
+  hostsCache = readHosts(repoRoot);
+  hostsCacheRoot = cacheKey;
 }
 
 /**
@@ -183,7 +178,7 @@ export function resolveHostAlias(alias, repoRoot) {
   if (hostsCache.hosts?.[alias]) return alias;
 
   for (const [name, cfg] of Object.entries(hostsCache.hosts || {})) {
-    if (cfg.aliases?.includes(alias)) return name;
+    if (cfg.aliases.includes(alias)) return name;
   }
 
   return null;
@@ -238,4 +233,5 @@ export function selectHostByResources(capability, sortBy, repoRoot) {
 /** hosts.json 캐시 초기화 (테스트용) */
 export function resetHostsCache() {
   hostsCache = null;
+  hostsCacheRoot = null;
 }
