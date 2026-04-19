@@ -12,6 +12,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readHosts } from "../hub/lib/hosts-compat.mjs";
 
 // ── 로컬 우회 플래그 ──────────────────────────────────────────
 // LOCAL ONLY — Issue #89 대안 API 구현 전까지 psmux kill 시리즈 우회용.
@@ -116,26 +117,15 @@ const SSH_POWERSHELL_HINT =
 function getWindowsHostIds() {
   const ids = new Set();
   try {
-    const paths = [
-      join(process.cwd(), "references", "hosts.json"),
-      join(process.cwd(), "packages", "triflux", "references", "hosts.json"),
-    ];
-    let hostsConfig = null;
-    for (const p of paths) {
-      if (existsSync(p)) {
-        hostsConfig = JSON.parse(readFileSync(p, "utf8"));
-        break;
-      }
-    }
-    if (!hostsConfig?.hosts) return ids;
-    for (const [name, cfg] of Object.entries(hostsConfig.hosts)) {
+    const registry = readHosts(process.cwd());
+    for (const [name, cfg] of Object.entries(registry.hosts || {})) {
       if (cfg.os !== "windows") continue;
       ids.add(name);
       if (cfg.tailscale?.ip) ids.add(cfg.tailscale.ip);
       if (cfg.tailscale?.dns) ids.add(cfg.tailscale.dns);
-      if (cfg.ssh_user) {
-        ids.add(`${cfg.ssh_user}@${name}`);
-        if (cfg.tailscale?.ip) ids.add(`${cfg.ssh_user}@${cfg.tailscale.ip}`);
+      if (cfg.ssh?.user) {
+        ids.add(`${cfg.ssh.user}@${name}`);
+        if (cfg.tailscale?.ip) ids.add(`${cfg.ssh.user}@${cfg.tailscale.ip}`);
       }
     }
   } catch {

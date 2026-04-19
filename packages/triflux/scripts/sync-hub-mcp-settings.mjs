@@ -25,6 +25,13 @@ function getCodexConfigPath(codexConfigPath) {
   return join(home, ...CODEX_CONFIG_FILE);
 }
 
+function getProjectMcpJsonPath(projectRoot) {
+  if (typeof projectRoot === "string" && projectRoot.length > 0) {
+    return join(projectRoot, ".claude", "mcp.json");
+  }
+  return join(process.cwd(), ".claude", "mcp.json");
+}
+
 function getReason(error, fallback) {
   if (typeof error?.message === "string" && error.message.length > 0) {
     return error.message;
@@ -186,7 +193,10 @@ async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
       return { kind: "error", path: filePath, reason };
     }
 
-    if (hubServer.url === hubUrl) {
+    const typeOk = hubServer.type === "http";
+    const urlOk = hubServer.url === hubUrl;
+
+    if (typeOk && urlOk) {
       log(logger, "info", `[mcp-sync] skipped: ${filePath}`);
       return { kind: "skipped", path: filePath };
     }
@@ -194,11 +204,12 @@ async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
     log(
       logger,
       "debug",
-      `[mcp-sync] ${filePath} url: ${String(hubServer.url)} -> ${hubUrl}`,
+      `[mcp-sync] ${filePath} type:${String(hubServer.type)} url:${String(hubServer.url)} -> type:http url:${hubUrl}`,
     );
 
     if (!dryRun) {
       try {
+        hubServer.type = "http";
         hubServer.url = hubUrl;
         await writeJsonAtomic(filePath, settings);
       } catch (error) {
@@ -282,6 +293,78 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
   });
 }
 
+async function syncProjectMcpFile({ filePath, hubUrl, dryRun, logger }) {
+  return withFileLock(filePath, async () => {
+    if (!(await fileExists(filePath))) {
+      log(logger, "info", `[project-mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    let settings;
+    try {
+      settings = JSON.parse(await readFile(filePath, "utf8"));
+    } catch (error) {
+      const reason =
+        error?.name === "SyntaxError"
+          ? "invalid json"
+          : getReason(error, "read failed");
+      log(logger, "error", `[project-mcp-sync] error: ${filePath} (${reason})`);
+      return { kind: "error", path: filePath, reason };
+    }
+
+    const servers = settings?.mcpServers;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
+      log(logger, "info", `[project-mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    const hubServer = servers["tfx-hub"];
+    if (hubServer === undefined) {
+      log(logger, "info", `[project-mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    if (
+      !hubServer ||
+      typeof hubServer !== "object" ||
+      Array.isArray(hubServer)
+    ) {
+      const reason = "invalid tfx-hub entry";
+      log(logger, "error", `[project-mcp-sync] error: ${filePath} (${reason})`);
+      return { kind: "error", path: filePath, reason };
+    }
+
+    if (hubServer.url === hubUrl) {
+      log(logger, "info", `[project-mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    log(
+      logger,
+      "debug",
+      `[project-mcp-sync] ${filePath} url:${String(hubServer.url)} -> ${hubUrl}`,
+    );
+
+    if (!dryRun) {
+      try {
+        hubServer.url = hubUrl;
+        await writeJsonAtomic(filePath, settings);
+      } catch (error) {
+        const reason = getReason(error, "write failed");
+        log(
+          logger,
+          "error",
+          `[project-mcp-sync] error: ${filePath} (${reason})`,
+        );
+        return { kind: "error", path: filePath, reason };
+      }
+    }
+
+    log(logger, "info", `[project-mcp-sync] updated: ${filePath}`);
+    return { kind: "updated", path: filePath };
+  });
+}
+
 export async function syncHubMcpSettings({
   hubUrl,
   dryRun = false,
@@ -323,6 +406,36 @@ export async function syncCodexHubUrl({
 
   const outcome = await syncCodexConfigFile({
     filePath: getCodexConfigPath(codexConfigPath),
+    hubUrl,
+    dryRun,
+    logger,
+  });
+
+  if (outcome.kind === "updated") {
+    result.updated.push(outcome.path);
+  } else if (outcome.kind === "skipped") {
+    result.skipped.push(outcome.path);
+  } else {
+    result.errors.push({ path: outcome.path, reason: outcome.reason });
+  }
+
+  return result;
+}
+
+export async function syncProjectMcpJson({
+  hubUrl,
+  projectRoot,
+  dryRun = false,
+  logger = console,
+}) {
+  const result = {
+    updated: [],
+    skipped: [],
+    errors: [],
+  };
+
+  const outcome = await syncProjectMcpFile({
+    filePath: getProjectMcpJsonPath(projectRoot),
     hubUrl,
     dryRun,
     logger,

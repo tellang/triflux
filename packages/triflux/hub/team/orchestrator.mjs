@@ -1,6 +1,6 @@
 // hub/team/orchestrator.mjs — 작업 분배 + 프롬프트 구성
 // 의존성: pane.mjs만 사용
-import { injectPrompt } from "./pane.mjs";
+import { injectPrompt as defaultInjectPrompt } from "./pane.mjs";
 
 /**
  * 작업 분해 (LLM 없이 구분자 기반)
@@ -128,6 +128,7 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
     hubUrl = "http://127.0.0.1:27888/mcp",
     lead = null,
     teammateMode = "tmux",
+    injectPrompt = defaultInjectPrompt,
   } = opts;
 
   const workers = assignments.map(({ target, cli, subtask }) => ({
@@ -149,7 +150,10 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
         subtask: w.subtask,
       })),
     });
-    injectPrompt(lead.target, leadPrompt, { useFileRef: true });
+    injectPrompt(lead.target, leadPrompt, {
+      useFileRef: true,
+      cli: lead.cli,
+    });
     await new Promise((r) => setTimeout(r, 100));
   }
 
@@ -160,7 +164,10 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
       hubUrl,
       sessionName,
     });
-    injectPrompt(worker.target, prompt, { useFileRef: true });
+    injectPrompt(worker.target, prompt, {
+      useFileRef: true,
+      cli: worker.cli,
+    });
     await new Promise((r) => setTimeout(r, 100));
   }
 }
