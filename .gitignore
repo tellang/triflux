@@ -97,3 +97,5 @@ docs/research/*competitor*
 # git worktrees (PR-specific)
 .worktrees/
 .codex-swarm/
+# swarm preservation artifacts (covered by .codex-swarm/ above, listed explicitly)
+.codex-swarm/recovery/
