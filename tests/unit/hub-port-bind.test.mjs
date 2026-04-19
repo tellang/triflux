@@ -35,9 +35,18 @@ afterEach(() => {
 
 describe("hub port bind helpers", () => {
   it("TFX_HUB_PORT 미지정이면 27888을 사용한다", () => {
-    assert.equal(resolveHubPort({}), 27888);
-    assert.equal(resolveHubPort({ TFX_HUB_PORT: "not-a-number" }), 27888);
-    assert.equal(resolveHubPort({ TFX_HUB_PORT: "30001" }), 30001);
+    assert.equal(resolveHubPort({}, { preferLivePid: false }), 27888);
+    assert.equal(
+      resolveHubPort(
+        { TFX_HUB_PORT: "not-a-number" },
+        { preferLivePid: false },
+      ),
+      27888,
+    );
+    assert.equal(
+      resolveHubPort({ TFX_HUB_PORT: "30001" }, { preferLivePid: false }),
+      30001,
+    );
   });
 
   it("stale hub.pid 는 자동 정리되고 기본 포트는 27888로 유지된다", () => {
@@ -63,7 +72,7 @@ describe("hub port bind helpers", () => {
       pid: 999999,
     });
     assert.equal(existsSync(pidFile), false);
-    assert.equal(resolveHubPort({}), 27888);
+    assert.equal(resolveHubPort({}, { preferLivePid: false }), 27888);
   });
 
   it("live peer 는 signal 0 체크 결과를 반환해 graceful exit 분기를 가능하게 한다", () => {
