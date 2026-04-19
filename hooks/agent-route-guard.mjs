@@ -49,12 +49,12 @@ function getTfxMultiState() {
 function buildContext(agentType, prompt) {
   const parts = [];
 
-  // 1. tfx-multi 활성 상태 확인
+  // 1. tfx-auto routing 활성 상태 확인 (legacy state name: tfx-multi)
   const multiState = getTfxMultiState();
   if (multiState) {
     parts.push(
-      "[tfx-multi ACTIVE] headless dispatch 모드. " +
-        "CLI 작업은 Bash(tfx-route.sh)를 통해 실행하세요.",
+      "[tfx-auto ACTIVE — multi mode] headless dispatch 모드. " +
+        "CLI 작업은 /tfx-auto --parallel N|swarm 또는 Bash(tfx-route.sh)를 통해 실행하세요.",
     );
   }
 
