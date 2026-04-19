@@ -3,7 +3,7 @@ name: tfx-auto
 description: >
   통합 CLI 오케스트레이터 + 실행 스킬 front door. 커맨드 숏컷(단일) + 자동 분류/분해(병렬)
   + 수동 병렬 + 명시 플래그 오버라이드. tfx-route.sh 기반. `--cli`, `--mode`, `--parallel`,
-  `--retry`, `--isolation`, `--remote`, `--shape`, `--cli-set` 플래그로 legacy tfx-codex/gemini/
+  `--retry`, `--isolation`, `--remote`, `--shape`, `--cli-set`, `--risk-tier` 플래그로 legacy tfx-codex/gemini/
   multi/swarm/fullcycle/persist/autopilot/autoroute/auto-codex 와 consensus/debate/panel 동작을 직접 제어.
   legacy 스킬은 thin alias (Phase 5 v11 삭제 예정).
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
@@ -28,7 +28,7 @@ triggers:
   - spec-panel
   - business-panel
   - index-repo
-argument-hint: "<command|task> [args...] [--cli auto|codex|gemini|claude] [--mode quick|deep|consensus] [--shape consensus|debate|panel] [--cli-set triad|no-gemini|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none]"
+argument-hint: "<command|task> [args...] [--cli auto|codex|gemini|claude] [--mode quick|deep|consensus] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-gemini|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none]"
 ---
 
 # tfx-auto — 통합 CLI 오케스트레이터
@@ -66,11 +66,13 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 판단 기준 (우선순위 순):
 
-0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--shape`/`--cli-set`/`--parallel`/`--retry`/`--isolation`/`--remote` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
+0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--risk-tier`/`--shape`/`--cli-set`/`--parallel`/`--retry`/`--isolation`/`--remote` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
    - `--parallel swarm` → tfx-swarm 엔진 위임 (PRD 필요)
    - `--parallel N` → tfx-multi 엔진 위임 (headless)
    - `--cli codex|gemini` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
+   - `--risk-tier low|medium|high` → risk-tier 기준으로 verification 강도와 mode 결정
+   - `--mode ...` 명시 시 `--risk-tier` 는 무시 (mode 우선)
    - `--mode consensus --shape debate|panel` → prompt ensemble fold 경로
    - `--retry ralph` → stderr 경고 후 bounded 3회 degrade (Phase 2 미구현)
 
@@ -136,6 +138,10 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--mode` | `quick` (기본) | fire-and-forget, plan/verify 오버헤드 없음 | 직접 실행 |
 | `--mode` | `deep` | pipeline init → plan → PRD → verify → fix loop | `-t/--thorough` 동일 |
 | `--mode` | `consensus` | 3-CLI 합의 family 실행 | tfx-auto consensus root |
+| `--risk-tier` | `auto` (기본) | changed files 기준 자동 분류 후 mode/verify 강도 결정 | risk matrix |
+| `--risk-tier` | `low` | quick mode + verify skip | 기존 default 와 동일 |
+| `--risk-tier` | `medium` | quick mode + verify (lint + test 만) | bounded verify |
+| `--risk-tier` | `high` | deep mode + full verify/fix loop | pipeline + full verify |
 | `--shape` | `consensus` (기본) | findings 합의/충돌 판정 | consensus renderer |
 | `--shape` | `debate` | 옵션 비교 + 점수화 + 최종 추천 | debate renderer |
 | `--shape` | `panel` | 전문가 roster 기반 시뮬레이션 | panel renderer |
@@ -163,8 +169,31 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--no-claude-native` | true | Claude native 경로 disable, CLI 기반 worker 강제 | tfx-route.sh |
 | `--max-iterations` | `0` (기본, unlimited) | `--retry ralph`/`auto-escalate` 상한 | retry-state-machine.mjs |
 
+### `--risk-tier` 계약
+
+- 기본값은 `auto`.
+- `--mode` 가 명시되면 `--risk-tier` 는 무시된다. mode 가 최종 우선순위다.
+- `--risk-tier` 만 명시되면 tier 가 mode 를 자동 결정한다.
+- `low` → quick mode + verify skip.
+- `medium` → quick mode + verify (lint + test 만).
+- `high` → deep mode + full verify/fix loop.
+- `auto` → 아래 변경 분류 매트릭스로 tier 를 계산한다.
+- auto 분류 입력은 **staged + unstaged 전체 변경 파일** 기준이다. untracked 파일도 relative path 집합에 포함해 판정한다.
+
+### 자동 분류 매트릭스
+
+`hub/lib/risk-tier.mjs` 의 `classifyRiskTier({ changedFiles })` 계약을 기준으로 적용한다. 판정 순서는 **high → medium → low → default** 이다.
+
+| tier | 규칙 | 판정 기준 |
+|------|------|----------|
+| `high` | 아키텍처/배포/운영 핵심 경로 | `hub/`, `scripts/`, `.claude/rules/`, `bin/`, `.github/` prefix 중 하나라도 매칭 |
+| `medium` | 빌드/설정/런타임 영향 | 다중 파일 변경, `package.json`, `.yml/.yaml`, `.toml`, `config/`, `hooks/` 매칭 |
+| `low` | 문서/텍스트/테스트-only | 단일 파일 + non-config (`.md`/`.txt` 만) 또는 `.test` 파일만 |
+| default | 안전 fallback | 어떤 low/high 패턴에도 안 맞으면 `medium` |
+
 ### 플래그 검증
 
+- `--mode ...` + `--risk-tier ...` 동시 지정 → mode 우선. risk-tier 는 informational 로그만 남기고 실행 결정에는 사용하지 않음
 - `--parallel swarm` + PRD 없음 → PRD 자동 생성 또는 사용자에게 경로 질의
 - `--parallel 1` + `--isolation worktree` → warning, isolation=none 으로 강제
 - `--remote <host>` + `--parallel != swarm` → warning, remote 무시
@@ -208,6 +237,9 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 ```
 /tfx-auto "리팩터링" --mode deep               # = 기존 -t/--thorough
 /tfx-auto "구현" --cli codex                   # = legacy tfx-codex
+/tfx-auto "문서만 수정" --risk-tier low        # = quick + verify skip
+/tfx-auto "설정/빌드 손봄" --risk-tier medium  # = quick + lint/test verify
+/tfx-auto "hub 라우팅 개편" --risk-tier high   # = deep + full verify/fix loop
 /tfx-auto "병렬" --parallel N --mode deep      # = legacy tfx-multi 기본값
 /tfx-auto "PRD 실행" --parallel swarm          # = legacy tfx-swarm
 /tfx-auto "REST vs GraphQL" --mode consensus --shape debate
