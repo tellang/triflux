@@ -111,6 +111,11 @@ function buildHubUrl(host, port) {
   return `http://${formatHostForUrl(host || "127.0.0.1")}:${port}/mcp`;
 }
 
+function parseHubPort(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function isPidAlive(pid, killFn = process.kill) {
   const resolvedPid = Number(pid);
   if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return false;
@@ -122,16 +127,22 @@ function isPidAlive(pid, killFn = process.kill) {
   }
 }
 
-async function tryReuseExistingHub({
+export async function tryReuseExistingHub({
   port,
+  portSpecified = Number.isFinite(Number(port)) && Number(port) > 0,
   host = "127.0.0.1",
   readCurrentState = readState,
   readInfo = getHubInfo,
   checkHealth = isServerHealthy,
   killFn = process.kill,
+  detectPeer = detectLivePeer,
+  log = hubLog,
 } = {}) {
   const existing = readCurrentState();
   const existingPort = Number(existing?.port);
+  const requestedPort = parseHubPort(port);
+  const livePeer = detectPeer();
+  const livePidPort = parseHubPort(livePeer?.port);
   if (
     !isPidAlive(existing?.pid, killFn) ||
     !Number.isFinite(existingPort) ||
@@ -139,8 +150,21 @@ async function tryReuseExistingHub({
   ) {
     return null;
   }
-  if (Number.isFinite(Number(port)) && existingPort !== Number(port))
-    return null;
+  if (requestedPort && existingPort !== requestedPort) {
+    if (portSpecified) return null;
+    if (!livePeer?.alive || !livePidPort || existingPort !== livePidPort) {
+      return null;
+    }
+    log.warn(
+      {
+        requestedPort,
+        existingPort,
+        pid: livePeer.pid,
+        livePidPort,
+      },
+      "hub.port_mismatch_reusing_live_pid",
+    );
+  }
   if (!(await checkHealth(existingPort))) return null;
 
   const info = readInfo() ?? existing;
@@ -212,9 +236,20 @@ function readHubPidFile(
   }
 }
 
-export function resolveHubPort(env = process.env) {
-  const parsed = Number.parseInt(String(env?.TFX_HUB_PORT ?? ""), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : HUB_DEFAULT_PORT;
+export function resolveHubPort(env = process.env, opts = {}) {
+  const {
+    preferLivePid = true,
+    detectPeer = detectLivePeer,
+    pidFilePath = PID_FILE,
+  } = opts;
+  const envPort = parseHubPort(env?.TFX_HUB_PORT);
+  if (envPort) return envPort;
+  if (preferLivePid) {
+    const peer = detectPeer(pidFilePath);
+    const peerPort = parseHubPort(peer?.port);
+    if (peer?.alive && peerPort) return peerPort;
+  }
+  return HUB_DEFAULT_PORT;
 }
 
 export function detectLivePeer(
@@ -316,6 +351,56 @@ async function syncHubMcpSettingsIfAvailable({ hubUrl }) {
   }
 }
 
+function findListeningPidByPort(
+  port,
+  { platform = process.platform, execSync = execSyncHub } = {},
+) {
+  const targetPort = parseHubPort(port);
+  if (!targetPort) return null;
+
+  const execOptions = {
+    encoding: "utf8",
+    timeout: 5000,
+    stdio: ["ignore", "pipe", "ignore"],
+    windowsHide: true,
+  };
+
+  try {
+    if (platform === "win32") {
+      const output = execSync("netstat -ano -p tcp", execOptions);
+      for (const line of output.split(/\r?\n/)) {
+        const match = line
+          .trim()
+          .match(/^(TCP|UDP)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)$/i);
+        if (!match) continue;
+        const [, protocol, localAddress, , state, pidText] = match;
+        if (protocol.toUpperCase() !== "TCP") continue;
+        if (state.toUpperCase() !== "LISTENING") continue;
+        if (localAddress.split(":").pop() !== String(targetPort)) continue;
+        const pid = Number.parseInt(pidText, 10);
+        if (Number.isFinite(pid) && pid > 0) return pid;
+      }
+      return null;
+    }
+
+    try {
+      const output = execSync(
+        `lsof -nP -iTCP:${targetPort} -sTCP:LISTEN -t`,
+        execOptions,
+      );
+      const pid = Number.parseInt(output.trim().split(/\r?\n/)[0] ?? "", 10);
+      return Number.isFinite(pid) && pid > 0 ? pid : null;
+    } catch {
+      const output = execSync(`ss -ltnp 'sport = :${targetPort}'`, execOptions);
+      const match = output.match(/pid=(\d+)/);
+      const pid = Number.parseInt(match?.[1] ?? "", 10);
+      return Number.isFinite(pid) && pid > 0 ? pid : null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 async function resolvePortInUse({
   port,
   host,
@@ -323,8 +408,11 @@ async function resolvePortInUse({
   pidFilePath = PID_FILE,
   detectPeer = detectLivePeer,
   cleanPid = cleanStaleHubPid,
+  lookupListeningPid = findListeningPidByPort,
 } = {}) {
   const peer = detectPeer(pidFilePath);
+  const ownerPid = lookupListeningPid(port);
+  const ownerHint = `pid=${ownerPid ?? "unknown"}`;
   if (peer.alive) {
     const peerPort = Number(peer.port);
     const sameHub =
@@ -340,12 +428,14 @@ async function resolvePortInUse({
     }
 
     const peerDetails = [
-      `pid=${peer.pid ?? "unknown"}`,
-      `version=${peer.version ?? "unknown"}`,
+      `hub.pid pid=${peer.pid ?? "unknown"}`,
+      `hub.pid port=${peerPort || "unknown"}`,
+      `hub.pid version=${peer.version ?? "unknown"}`,
+      ownerHint,
     ].join(", ");
     return {
       action: "error",
-      message: `포트 ${port}이 다른 Hub(${peerDetails})에 의해 점유됨. \`tfx hub stop\` 후 재시도`,
+      message: `Hub 포트 ${port}이 이미 사용 중입니다 (${peerDetails}). fallback port는 허용되지 않습니다. \`tfx hub stop\` 후 재시도하세요.`,
     };
   }
 
@@ -356,7 +446,7 @@ async function resolvePortInUse({
 
   return {
     action: "error",
-    message: `Hub 포트 ${port}이(가) 이미 사용 중입니다. 다른 프로세스가 점유 중일 수 있습니다. \`tfx hub stop\` 후 재시도하세요. (PID file: ${pidFilePath})`,
+    message: `Hub 포트 ${port}이 이미 사용 중입니다 (${ownerHint}). fallback port는 허용되지 않습니다. \`tfx hub stop\` 후 재시도하세요. (PID file: ${pidFilePath})`,
   };
 }
 
@@ -682,13 +772,34 @@ export async function startHub({
   sessionId = process.pid,
   createDelegatorWorker = createDelegatorMcpWorker,
 } = {}) {
-  const resolvedPort = Number.parseInt(String(portOpt ?? ""), 10);
-  const port =
-    Number.isFinite(resolvedPort) && resolvedPort > 0
-      ? resolvedPort
-      : resolveHubPort(process.env);
+  const resolvedPort = parseHubPort(portOpt);
+  const portSpecified = Number.isFinite(resolvedPort) && resolvedPort > 0;
+  const livePeer = detectLivePeer();
+  const livePidPort = parseHubPort(livePeer?.port);
+  const port = portSpecified
+    ? resolvedPort
+    : resolveHubPort(process.env, {
+        preferLivePid: true,
+        detectPeer: () => livePeer,
+      });
 
-  const existingHub = await tryReuseExistingHub({ port, host });
+  if (portSpecified && livePeer.alive && livePidPort && port !== livePidPort) {
+    hubLog.warn(
+      {
+        requestedPort: port,
+        livePid: livePeer.pid,
+        livePidPort,
+      },
+      "hub.port_override_pid_mismatch",
+    );
+  }
+
+  const existingHub = await tryReuseExistingHub({
+    port,
+    portSpecified,
+    host,
+    detectPeer: () => livePeer,
+  });
   if (existingHub) return existingHub;
 
   syncBrokerAuthCache(brokerInstance);
@@ -728,7 +839,12 @@ export async function startHub({
     lockHeld = false;
   };
 
-  const lockedExistingHub = await tryReuseExistingHub({ port, host });
+  const lockedExistingHub = await tryReuseExistingHub({
+    port,
+    portSpecified,
+    host,
+    detectPeer: () => detectLivePeer(),
+  });
   if (lockedExistingHub) {
     releaseStartupLock();
     return lockedExistingHub;
