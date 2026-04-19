@@ -1012,6 +1012,16 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
         progress: 0,
       });
     }
+  } else if (dashboard) {
+    // Issue #116-F: --dashboard 요청이 non-TTY 환경에서 silent skip 되던 혼란 해소.
+    // stderr 로만 안내 (stdout 은 readHeadlessResult 파싱 대상이라 건드리지 않는다).
+    const logDir = join(tmpdir(), "tfx-headless");
+    process.stderr.write(
+      `\n⚠ --dashboard requested but stdout is not a TTY; dashboard is skipped.\n` +
+        `  Session is running in background. Worker logs:\n` +
+        `    ${logDir}${IS_WINDOWS ? "\\" : "/"}${sessionName}-worker-N.txt\n` +
+        `    ${logDir}${IS_WINDOWS ? "\\" : "/"}${sessionName}-worker-N.txt.err\n\n`,
+    );
   }
 
   // per-worker state feed: onProgress 이벤트 → tui.updateWorker()
