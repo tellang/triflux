@@ -594,7 +594,7 @@ export function createConductor(opts = {}) {
     child.stdout?.on("data", (buf) => {
       outWs.write(buf);
       trackOutput(buf);
-      stdoutTail = (stdoutTail + buf.toString("utf8")).slice(-8192);
+      stdoutTail = (stdoutTail + buf.toString("utf8")).slice(-16384);
     });
     child.stderr?.on("data", (buf) => {
       errWs.write(buf);
@@ -784,7 +784,7 @@ export function createConductor(opts = {}) {
     child.stdout?.on("data", (buf) => {
       trackOutput(buf);
       outWs.write(buf);
-      stdoutTail = (stdoutTail + buf.toString("utf8")).slice(-8192);
+      stdoutTail = (stdoutTail + buf.toString("utf8")).slice(-16384);
     });
     child.stderr?.on("data", (buf) => {
       trackOutput(buf);
