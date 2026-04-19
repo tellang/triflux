@@ -130,9 +130,9 @@ function createMockConductorFactory() {
         completed = true;
         return Promise.resolve();
       },
-      complete(sessionId = sessionConfig?.id || "session") {
+      complete(sessionId = sessionConfig?.id || "session", completionPayload) {
         completed = true;
-        sessionConfig?.onCompleted?.({ sessionId });
+        sessionConfig?.onCompleted?.({ sessionId, completionPayload });
         opts.onCompleted?.(sessionId);
       },
       fail(reason = "failed", sessionId = sessionConfig?.id || "session") {
@@ -754,6 +754,65 @@ describe("swarm-hypervisor", () => {
       assert.equal(status.workers[0].authoritativeStatus, "failed");
       assert.equal(status.workers[0].commitEvidence?.commitsAhead, 0);
     });
+
+    it("fails shard with F7 when worker completion omits commits_made", async () => {
+      const plan = planSwarm(null, { content: SINGLE_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      let rebaseCalled = false;
+      let collectCalled = false;
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "worker-enforce-f7",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/worker-enforce-f7/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async () => {
+            rebaseCalled = true;
+            return { ok: true, headCommit: "should-not-happen" };
+          },
+          cleanupWorktree: async () => {
+            collectCalled = true;
+          },
+        },
+      });
+
+      const events = [];
+      hv.on("shardFailed", (e) => events.push(e));
+
+      await hv.launch(plan);
+      // Worker reports status=ok but with no commits_made → F7 trip.
+      conductors[0].complete(undefined, { status: "ok" });
+
+      const result = await hv.integrationComplete();
+      const status = hv.getStatus();
+
+      assert.equal(rebaseCalled, false, "rebase must be skipped when F7 trips");
+      assert.equal(collectCalled, true, "worktree cleanup must run on F7");
+      assert.deepEqual(result.integrated, []);
+      assert.deepEqual(result.failed, ["worker-a"]);
+      assert.equal(result.partial, true);
+      assert.equal(
+        status.workers[0].failureInfo?.mode,
+        "F7_worker_did_not_commit",
+      );
+      assert.equal(
+        status.workers[0].failureInfo?.reason,
+        "missing_commits_made",
+      );
+      const f7Event = events.find(
+        (e) => e.failureMode === "F7_worker_did_not_commit",
+      );
+      assert.ok(f7Event, "shardFailed event with F7 failureMode expected");
+    });
   });
 
   describe("shutdown", () => {
@@ -806,6 +865,148 @@ describe("swarm-hypervisor", () => {
           worktreePath: `${workdir}/.codex-swarm/wt-worker-a`,
           reason: "F1_crash",
         },
+      );
+
+      hv = null;
+    });
+
+    it("saves a recovery patch for failed shard worktrees before cleanup", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const preserveCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "recovery-save",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          cleanupWorktree: async () => {},
+          preserveWorktreePatch: async (opts) => {
+            preserveCalls.push(opts);
+            return {
+              ok: true,
+              patchPath: `${opts.recoveryDir}/${opts.shardId}.patch`,
+              manifestPath: `${opts.recoveryDir}/manifest.json`,
+            };
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].fail("worker crashed");
+      await waitForCondition(() => hv.getStatus().failedShards === 1);
+      await hv.shutdown("test_preservation");
+
+      assert.equal(preserveCalls.length, 1, "preservation must be invoked");
+      assert.equal(preserveCalls[0].shardId, "worker-a");
+      assert.equal(
+        preserveCalls[0].worktreePath,
+        `${workdir}/.codex-swarm/wt-worker-a`,
+      );
+      assert.equal(
+        preserveCalls[0].recoveryDir,
+        join(workdir, ".codex-swarm", "recovery"),
+      );
+
+      const savedEvent = readEventLog(hv.eventLogPath).find(
+        (entry) => entry.event === "recovery_patch_saved",
+      );
+      assert.ok(savedEvent, "recovery_patch_saved event must be emitted");
+      assert.equal(savedEvent.shard, "worker-a");
+      assert.equal(
+        savedEvent.patchPath,
+        `${join(workdir, ".codex-swarm", "recovery")}/worker-a.patch`,
+      );
+      assert.equal(savedEvent.reason, "F1_crash");
+
+      hv = null;
+    });
+
+    it("continues cleanup when preservation throws", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const cleanupCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "recovery-throws",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          cleanupWorktree: async (opts) => {
+            cleanupCalls.push(opts);
+          },
+          preserveWorktreePatch: async () => {
+            throw new Error("simulated preservation failure");
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].fail("worker crashed");
+      await waitForCondition(() => hv.getStatus().failedShards === 1);
+      await hv.shutdown("test_preservation_failure");
+
+      assert.equal(
+        cleanupCalls.length,
+        1,
+        "cleanup must run even when preservation throws",
+      );
+      assert.equal(
+        readEventLog(hv.eventLogPath).some(
+          (entry) => entry.event === "recovery_patch_saved",
+        ),
+        false,
+        "no recovery_patch_saved event when preservation fails",
+      );
+
+      hv = null;
+    });
+
+    it("skips recovery patch emission for clean worktrees", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const preserveCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "recovery-skip",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          cleanupWorktree: async () => {},
+          preserveWorktreePatch: async (opts) => {
+            preserveCalls.push(opts);
+            return { ok: true, skipped: true };
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].fail("worker crashed");
+      await waitForCondition(() => hv.getStatus().failedShards === 1);
+      await hv.shutdown("test_preservation_skip");
+
+      assert.equal(preserveCalls.length, 1);
+      assert.equal(
+        readEventLog(hv.eventLogPath).some(
+          (entry) => entry.event === "recovery_patch_saved",
+        ),
+        false,
+        "clean worktree must not emit recovery_patch_saved",
       );
 
       hv = null;
