@@ -33,6 +33,9 @@ async function syncHubConfigsIfAvailable({ hubUrl }) {
     if (typeof mod?.syncCodexHubUrl === "function") {
       await mod.syncCodexHubUrl({ hubUrl });
     }
+    if (typeof mod?.syncProjectMcpJson === "function") {
+      await mod.syncProjectMcpJson({ hubUrl, projectRoot: PLUGIN_ROOT });
+    }
   } catch {
     // sync는 best-effort이며 hub-ensure 성공/실패를 좌우하지 않는다.
   }
