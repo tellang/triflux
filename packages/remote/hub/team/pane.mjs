@@ -92,15 +92,17 @@ export function startCliInPane(target, command) {
 /**
  * psmux `@file` 참조 주입이 가능한 CLI인지 판정한다.
  *
- * Codex TUI는 `@` 입력이 있으면 sync_file_search_popup이 FileSearchPopup을
- * 활성화한다 (`codex-rs/tui/src/bottom_pane/chat_composer.rs:3082`,
- * `file_search_popup.rs:54-63`). 팝업이 떠 있는 동안의 Enter 처리는 같은
- * 파일의 composer Enter handler에서 popup 선택 삽입 또는 dismiss로 분기하며,
- * prompt submit으로는 넘어가지 않는다. Gemini CLI의 `@path`는 공식 client-side
- * file-content inject이므로 유지. Codex TUI에서 `@path` 선택은 path 문자열을
- * textarea에 insert할 뿐 Gemini처럼 파일 내용을 inject하지 않는다 — 별도
- * file-injection slash command도 존재하지 않음 (slash_commands / prompt_args /
- * skill_popup / command_popup 소스 전수 grep, 2026-04-19 검증).
+ * Codex TUI는 `@` 입력이 있으면 sync_file_search_popup 경로로 FileSearchPopup을
+ * 활성화한다 (call-site `codex-rs/tui/src/bottom_pane/chat_composer.rs:3082`;
+ * 본체 L3271-3313 에서 `ActivePopup::File(popup)` 분기; 빈 query 상태는
+ * `file_search_popup.rs:54-63` 의 `set_empty_prompt()` 가 정의). 팝업이 떠 있는
+ * 동안의 Enter 처리는 같은 파일 composer의 Enter handler (`chat_composer.rs:1585-1645`
+ * 기준) 에서 popup 선택 path insert 또는 dismiss 로 분기하므로 prompt submit 으로
+ * 전달되지 않는다. Gemini CLI의 `@path`는 공식 client-side file-content inject
+ * 이므로 유지. Codex TUI에서 `@path` 선택은 path 문자열만 textarea에 insert할
+ * 뿐 Gemini처럼 파일 내용을 inject하지 않으며, 별도 file-injection slash
+ * command 도 존재하지 않음 (slash_commands / prompt_args / skill_popup /
+ * command_popup 소스 전수 grep 결과 0건, 2026-04-19 검증 — absence-based).
  *
  * @param {{ multiplexer: string, useFileRef: boolean, cli: string|null }} args
  */
