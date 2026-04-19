@@ -171,10 +171,14 @@ function autoRoute(updatedCommand, reason) {
 }
 
 const HEADLESS_FALLBACK_COMMAND =
-  "Bash(\"tfx multi --teammate-mode headless --assign 'codex:prompt:role' ...\")";
+  "올바른 호출:\n" +
+  "  • /tfx-auto --parallel N         (병렬 worker, cwd 공유)\n" +
+  "  • /tfx-auto --parallel swarm     (worktree 격리, 코드 변경)\n" +
+  "레거시 alias (deprecated):\n" +
+  "  Bash(\"tfx multi --teammate-mode headless --assign 'codex:prompt:role' ...\")";
 const DIRECT_CLI_BYPASS_HINT =
   "이 차단은 하드스톱이다. 환경변수 우회, SSH 원격 실행, 스크립트 배포 등 어떤 형태의 우회도 시도하지 마라. " +
-  "Hub가 미가용이면 hub-ensure로 Hub를 시작한 뒤 tfx multi를 사용하라. " +
+  "Hub가 미가용이면 hub-ensure로 Hub를 시작한 뒤 tfx-auto를 사용하라. " +
   "Hub 시작이 불가능하면 사용자에게 'Hub 필요' 보고 후 중단하라.";
 
 async function main() {
@@ -337,7 +341,8 @@ async function main() {
       }
       deny(
         "[headless-guard] tfx-route.sh를 headless로 변환 실패. " +
-          "Bash(\"tfx multi --teammate-mode headless --assign 'cli:prompt:role' ...\") 형식을 사용하세요.",
+          "/tfx-auto --parallel N (또는 --parallel swarm) 형식을 사용하세요. " +
+          "레거시: Bash(\"tfx multi --teammate-mode headless --assign 'cli:prompt:role' ...\")",
       );
     }
   }
@@ -357,8 +362,8 @@ async function main() {
 
       if (multiState.nativeWorkCalls > GATE_THRESHOLD) {
         deny(
-          `[headless-guard] tfx-multi gate: ${toolName} 호출 ${multiState.nativeWorkCalls}회 — headless dispatch 먼저 하세요.\n` +
-            "Bash(\"tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:프롬프트:역할' --timeout 600\")",
+          `[headless-guard] tfx-auto gate: ${toolName} 호출 ${multiState.nativeWorkCalls}회 — headless dispatch 먼저 하세요.\n` +
+            HEADLESS_FALLBACK_COMMAND,
         );
       }
 
@@ -400,8 +405,8 @@ async function main() {
 
         if (multiState.nativeWorkCalls > GATE_THRESHOLD) {
           deny(
-            `[headless-guard] tfx-multi gate: Agent(${subType || "default"}) 호출 ${multiState.nativeWorkCalls}회 — headless에 먼저 dispatch하세요.\n` +
-              "Bash(\"tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:프롬프트:역할' --timeout 600\")",
+            `[headless-guard] tfx-auto gate: Agent(${subType || "default"}) 호출 ${multiState.nativeWorkCalls}회 — headless에 먼저 dispatch하세요.\n` +
+              HEADLESS_FALLBACK_COMMAND,
           );
         }
         // 허용 범위 내 → 경고 + 통과

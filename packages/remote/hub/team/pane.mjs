@@ -90,27 +90,50 @@ export function startCliInPane(target, command) {
 }
 
 /**
- * pane에 프롬프트 주입 (load-buffer + paste-buffer 방식)
- * 멀티라인 + 특수문자 안전, 크기 제한 없음
- * @param {string} target — 예: tfx-multi-abc:0.1
- * @param {string} prompt — 주입할 텍스트
+ * psmux `@file` 참조 주입이 가능한 CLI인지 판정한다.
+ *
+ * Codex TUI는 `@` 입력이 있으면 sync_file_search_popup 경로로 FileSearchPopup을
+ * 활성화한다 (call-site `codex-rs/tui/src/bottom_pane/chat_composer.rs:3082`;
+ * 본체 L3271-3313 에서 `ActivePopup::File(popup)` 분기; 빈 query 상태는
+ * `file_search_popup.rs:54-63` 의 `set_empty_prompt()` 가 정의). 팝업이 떠 있는
+ * 동안의 Enter 처리는 같은 파일 composer의 Enter handler (`chat_composer.rs:1585-1645`
+ * 기준) 에서 popup 선택 path insert 또는 dismiss 로 분기하므로 prompt submit 으로
+ * 전달되지 않는다. Gemini CLI의 `@path`는 공식 client-side file-content inject
+ * 이므로 유지. Codex TUI에서 `@path` 선택은 path 문자열만 textarea에 insert할
+ * 뿐 Gemini처럼 파일 내용을 inject하지 않으며, 별도 file-injection slash
+ * command 도 존재하지 않음 (slash_commands / prompt_args / skill_popup /
+ * command_popup 소스 전수 grep 결과 0건, 2026-04-19 검증 — absence-based).
+ *
+ * @param {{ multiplexer: string, useFileRef: boolean, cli: string|null }} args
  */
+export function shouldUseFileRef({ multiplexer, useFileRef, cli }) {
+  return multiplexer === "psmux" && useFileRef && cli !== "codex";
+}
+
 /**
  * pane에 프롬프트 주입
  * @param {string} target — 예: tfx-multi-abc:0.1
  * @param {string} prompt — 주입할 텍스트
  * @param {object} [opts]
- * @param {boolean} [opts.useFileRef] — true면 TUI용 @file 참조 방식 (psmux 전용)
+ * @param {boolean} [opts.useFileRef] — true면 TUI용 @file 참조 방식 요청 (psmux 전용). Codex에서는 자동으로 paste-buffer 경로로 fallback.
+ * @param {'codex'|'gemini'|'claude'|null} [opts.cli] — 대상 CLI. Codex일 때 @ intercept를 회피하기 위해 paste-buffer 경로를 강제한다.
  */
-export function injectPrompt(target, prompt, { useFileRef = false } = {}) {
+export function injectPrompt(
+  target,
+  prompt,
+  { useFileRef = false, cli = null } = {},
+) {
   const tmpDir = join(tmpdir(), "tfx-multi");
   mkdirSync(tmpDir, { recursive: true });
 
   const safeTarget = target.replace(/[:.]/g, "-");
   const tmpFile = join(tmpDir, `prompt-${safeTarget}-${Date.now()}.txt`);
 
-  // psmux + TUI 앱: @file 참조로 주입 (paste-buffer는 TUI와 호환 안 됨)
-  if (detectMultiplexer() === "psmux" && useFileRef) {
+  const multiplexer = detectMultiplexer();
+
+  // psmux + TUI + CLI별 @file 지원: @path를 literal paste하고 Enter로 확정.
+  // Codex는 @가 file search popup을 intercept하므로 paste-buffer 경로로 fallback.
+  if (shouldUseFileRef({ multiplexer, useFileRef, cli })) {
     writeFileSync(tmpFile, prompt, "utf8");
     const filePath = tmpFile.replace(/\\/g, "/");
     psmuxExec(["select-pane", "-t", target]);

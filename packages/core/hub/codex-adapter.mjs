@@ -174,7 +174,11 @@ export function execute(opts = {}) {
     provider: "codex",
     runFn: runCodex,
     preflightFn: (o) =>
-      runPreflight({ mcpServers: o.mcpServers, subcommand: "exec" }),
+      runPreflight({
+        mcpServers: o.mcpServers,
+        subcommand: "exec",
+        workdir: o.workdir,
+      }),
     buildAttemptsFn: buildAttempts,
     opts,
   });

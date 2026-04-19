@@ -70,8 +70,10 @@ async function main() {
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           additionalContext:
-            "[tfx-multi] gate 활성화됨. CLI 작업은 headless로 dispatch 필수:\n" +
-            "Bash(\"tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:프롬프트:역할' --timeout 600\")",
+            "[tfx-auto] gate 활성화됨 (legacy state: tfx-multi). CLI 작업은 headless로 dispatch 필수:\n" +
+            "  • /tfx-auto --parallel N         (병렬 worker)\n" +
+            "  • /tfx-auto --parallel swarm     (worktree 격리, 코드 변경)\n" +
+            "레거시 alias: Bash(\"tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:프롬프트:역할' --timeout 600\")",
         },
       }),
     );
