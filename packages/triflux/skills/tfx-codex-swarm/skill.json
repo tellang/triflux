@@ -1,5 +1,0 @@
-{
-  "name": "tfx-codex-swarm",
-  "description": "DEPRECATED — tfx-swarm으로 통합됨. 'codex swarm', '코덱스 스웜' 요청은 tfx-swarm이 처리.",
-  "triggers": ["codex-swarm", "코덱스 스웜"]
-}
