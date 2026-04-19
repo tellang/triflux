@@ -149,7 +149,10 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
         subtask: w.subtask,
       })),
     });
-    injectPrompt(lead.target, leadPrompt, { useFileRef: true });
+    injectPrompt(lead.target, leadPrompt, {
+      useFileRef: true,
+      cli: lead.cli,
+    });
     await new Promise((r) => setTimeout(r, 100));
   }
 
@@ -160,7 +163,10 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
       hubUrl,
       sessionName,
     });
-    injectPrompt(worker.target, prompt, { useFileRef: true });
+    injectPrompt(worker.target, prompt, {
+      useFileRef: true,
+      cli: worker.cli,
+    });
     await new Promise((r) => setTimeout(r, 100));
   }
 }
