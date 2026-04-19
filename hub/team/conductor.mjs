@@ -29,6 +29,7 @@ import {
 } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
+import { extractCompletionPayload } from "./extract-completion-payload.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
 import {
@@ -489,6 +490,8 @@ export function createConductor(opts = {}) {
 
     let outputBytes = 0;
     let recentOutput = "";
+    // #115 F7 wiring: stdout-only tail for completion payload extraction.
+    let stdoutTail = "";
 
     const spawnCwd = session.config.workdir || launcher.cwd || undefined;
     const spawnSpec = buildSpawnSpecForMode(MODES.HEADLESS, {
@@ -591,6 +594,7 @@ export function createConductor(opts = {}) {
     child.stdout?.on("data", (buf) => {
       outWs.write(buf);
       trackOutput(buf);
+      stdoutTail = (stdoutTail + buf.toString("utf8")).slice(-8192);
     });
     child.stderr?.on("data", (buf) => {
       errWs.write(buf);
@@ -621,9 +625,14 @@ export function createConductor(opts = {}) {
 
       if (code === 0 && !signal) {
         transition(session, STATES.COMPLETED, "exit_0");
-        emitter.emit("completed", { sessionId: session.id });
+        const extracted = extractCompletionPayload(stdoutTail);
+        const completionPayload = extracted ? extracted.payload : undefined;
+        emitter.emit("completed", { sessionId: session.id, completionPayload });
         if (typeof session.config.onCompleted === "function") {
-          session.config.onCompleted({ sessionId: session.id });
+          session.config.onCompleted({
+            sessionId: session.id,
+            completionPayload,
+          });
         }
         if (broker && session.config.accountId) {
           broker.release(session.config.accountId, { ok: true });
@@ -764,6 +773,8 @@ export function createConductor(opts = {}) {
     // stdout/stderr 추적 (recentOutput으로 rate_limit 패턴 감지 가능)
     let outputBytes = 0;
     let recentOutput = "";
+    // #115 F7 wiring: stdout-only tail for completion payload extraction.
+    let stdoutTail = "";
     const trackOutput = (buf) => {
       outputBytes += buf.length;
       const text = buf.toString("utf8");
@@ -773,6 +784,7 @@ export function createConductor(opts = {}) {
     child.stdout?.on("data", (buf) => {
       trackOutput(buf);
       outWs.write(buf);
+      stdoutTail = (stdoutTail + buf.toString("utf8")).slice(-8192);
     });
     child.stderr?.on("data", (buf) => {
       trackOutput(buf);
@@ -823,9 +835,14 @@ export function createConductor(opts = {}) {
       // (spawnSession에서 config.remote === true일 때 lease 건너뜀)
       if (code === 0) {
         transition(session, STATES.COMPLETED, `exit_${code}`);
-        emitter.emit("completed", { sessionId: session.id });
+        const extracted = extractCompletionPayload(stdoutTail);
+        const completionPayload = extracted ? extracted.payload : undefined;
+        emitter.emit("completed", { sessionId: session.id, completionPayload });
         if (typeof session.config.onCompleted === "function") {
-          session.config.onCompleted({ sessionId: session.id });
+          session.config.onCompleted({
+            sessionId: session.id,
+            completionPayload,
+          });
         }
         maybeAutoShutdown();
       } else {
