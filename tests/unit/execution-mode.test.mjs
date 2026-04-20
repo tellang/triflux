@@ -270,7 +270,8 @@ test("buildSpawnSpecForMode: win32 + .cmd uses node + .js (cmd /c bypass)", () =
     platform: "win32",
     resolveCommand: () => String.raw`C:\npm\codex.cmd`,
     existsSyncFn: () => true,
-    unwrapCmdFn: () => String.raw`C:\npm\node_modules\@openai\codex\bin\codex.js`,
+    unwrapCmdFn: () =>
+      String.raw`C:\npm\node_modules\@openai\codex\bin\codex.js`,
     nodeExecPath: String.raw`C:\nodejs\node.exe`,
   });
   assert.equal(spec.command, String.raw`C:\nodejs\node.exe`);

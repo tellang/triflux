@@ -285,7 +285,8 @@ export function buildContextUsageView(stdin, snapshot = null) {
   // Trust the model ID as ground truth: Claude Code statusline occasionally
   // reports a hard 200K for [1m] variants, and the monitor cache can carry
   // a stale DEFAULT_CONTEXT_LIMIT from before model hint resolution.
-  const rawLimit = stdinUsage?.limitTokens ?? Math.max(monitorLimit, modelHintLimit);
+  const rawLimit =
+    stdinUsage?.limitTokens ?? Math.max(monitorLimit, modelHintLimit);
   const limitTokens = Math.max(1, rawLimit, modelHintLimit);
 
   const usedTokens = stdinUsage?.usedTokens ?? Number(monitor?.usedTokens || 0);

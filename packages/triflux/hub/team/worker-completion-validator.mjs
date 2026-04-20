@@ -60,7 +60,10 @@ function formatError(err, payload) {
   if (!err) return "schema_validation_failed";
 
   // Map Ajv keywords to short, actionable reasons.
-  if (err.keyword === "required" && err.params?.missingProperty === "commits_made") {
+  if (
+    err.keyword === "required" &&
+    err.params?.missingProperty === "commits_made"
+  ) {
     return "missing_commits_made";
   }
   if (err.keyword === "minItems" && err.instancePath === "/commits_made") {

@@ -1,9 +1,5 @@
 import { decomposeTask } from "../../../orchestrator.mjs";
 import {
-  hasWindowsTerminal,
-  hasWindowsTerminalSession,
-} from "../../../session.mjs";
-import {
   AMBER,
   BOLD,
   DIM,
@@ -18,7 +14,10 @@ import {
   getHubInfo,
   startHubDaemon,
 } from "../../services/hub-client.mjs";
-import { ensureTmuxOrExit } from "../../services/runtime-mode.mjs";
+import {
+  ensureTmuxOrExit,
+  resolveEffectiveMode,
+} from "../../services/runtime-mode.mjs";
 import { saveTeamState } from "../../services/state-store.mjs";
 import { parseTeamArgs } from "./parse-args.mjs";
 import { startHeadlessTeam } from "./start-headless.mjs";
@@ -129,17 +128,9 @@ export async function teamStart(args = []) {
   const sessionId = `tfx-multi-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
   const subtasks = decomposeTask(task, agents.length);
   const hubUrl = hub?.url || getDefaultHubUrl();
-  let effectiveMode = teammateMode;
-  if (effectiveMode === "wt" && !hasWindowsTerminal()) {
-    warn("wt.exe 미발견 — in-process 모드로 자동 fallback");
-    effectiveMode = "in-process";
-  }
-  if (effectiveMode === "wt" && !hasWindowsTerminalSession()) {
-    warn(
-      "WT_SESSION 미감지(Windows Terminal 외부) — in-process 모드로 자동 fallback",
-    );
-    effectiveMode = "in-process";
-  }
+  const { mode: effectiveMode, warnings: modeWarnings } =
+    resolveEffectiveMode(teammateMode);
+  for (const message of modeWarnings) warn(message);
 
   console.log(`  세션:  ${WHITE}${sessionId}${RESET}`);
   console.log(`  모드:  ${effectiveMode}`);

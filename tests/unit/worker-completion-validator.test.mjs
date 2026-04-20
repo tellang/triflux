@@ -25,9 +25,7 @@ describe("validateWorkerCompletion", () => {
     const result = validateWorkerCompletion({
       status: "ok",
       shard: "worker-a",
-      commits_made: [
-        { sha: "abc1234", message: "feat: add feature" },
-      ],
+      commits_made: [{ sha: "abc1234", message: "feat: add feature" }],
     });
     assert.equal(result.ok, true);
     assert.equal(result.reason, undefined);

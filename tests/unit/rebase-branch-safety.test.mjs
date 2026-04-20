@@ -6,12 +6,13 @@
 //
 // These tests spin up a disposable git repo in tmpdir to exercise the real
 // lifecycle without mocking execFile.
-import { test } from "node:test";
+
 import assert from "node:assert/strict";
 import { execFile as execFileCb } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { test } from "node:test";
 import { promisify } from "node:util";
 import { rebaseShardOntoIntegration } from "../../hub/team/worktree-lifecycle.mjs";
 

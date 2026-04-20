@@ -29,8 +29,10 @@ import {
 } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
+import { extractCompletionPayload } from "./extract-completion-payload.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
+import { createSentinelCapture } from "./sentinel-capture.mjs";
 import {
   buildSynapseTaskSummary,
   heartbeatSynapseSession,
@@ -489,6 +491,11 @@ export function createConductor(opts = {}) {
 
     let outputBytes = 0;
     let recentOutput = "";
+    // #115 F7 wiring: stdout-only tail for completion payload extraction.
+    let stdoutTail = "";
+    // #125: sentinel-framed capture (preferred over the 16 KiB tail; survives
+    // payloads larger than the sliding window).
+    const sentinelCapture = createSentinelCapture();
 
     const spawnCwd = session.config.workdir || launcher.cwd || undefined;
     const spawnSpec = buildSpawnSpecForMode(MODES.HEADLESS, {
@@ -591,6 +598,9 @@ export function createConductor(opts = {}) {
     child.stdout?.on("data", (buf) => {
       outWs.write(buf);
       trackOutput(buf);
+      const text = buf.toString("utf8");
+      stdoutTail = (stdoutTail + text).slice(-16384);
+      sentinelCapture.push(text);
     });
     child.stderr?.on("data", (buf) => {
       errWs.write(buf);
@@ -621,9 +631,24 @@ export function createConductor(opts = {}) {
 
       if (code === 0 && !signal) {
         transition(session, STATES.COMPLETED, "exit_0");
-        emitter.emit("completed", { sessionId: session.id });
+        // #125 Codex R1 MEDIUM: if sentinel capture overflowed past maxBytes
+        // and lost its BEGIN marker, do NOT fall back to stdoutTail/brace-scan
+        // — the worker tried sentinel protocol and the payload was clearly
+        // unbounded. Surface as "no payload" rather than silent partial.
+        let extracted;
+        if (sentinelCapture.isOverflow()) {
+          extracted = null;
+        } else {
+          const sentinelSnapshot = sentinelCapture.snapshot();
+          extracted = extractCompletionPayload(sentinelSnapshot || stdoutTail);
+        }
+        const completionPayload = extracted ? extracted.payload : undefined;
+        emitter.emit("completed", { sessionId: session.id, completionPayload });
         if (typeof session.config.onCompleted === "function") {
-          session.config.onCompleted({ sessionId: session.id });
+          session.config.onCompleted({
+            sessionId: session.id,
+            completionPayload,
+          });
         }
         if (broker && session.config.accountId) {
           broker.release(session.config.accountId, { ok: true });
@@ -764,6 +789,10 @@ export function createConductor(opts = {}) {
     // stdout/stderr 추적 (recentOutput으로 rate_limit 패턴 감지 가능)
     let outputBytes = 0;
     let recentOutput = "";
+    // #115 F7 wiring: stdout-only tail for completion payload extraction.
+    let stdoutTail = "";
+    // #125: sentinel-framed capture (preferred over the 16 KiB tail).
+    const sentinelCapture = createSentinelCapture();
     const trackOutput = (buf) => {
       outputBytes += buf.length;
       const text = buf.toString("utf8");
@@ -773,6 +802,9 @@ export function createConductor(opts = {}) {
     child.stdout?.on("data", (buf) => {
       trackOutput(buf);
       outWs.write(buf);
+      const text = buf.toString("utf8");
+      stdoutTail = (stdoutTail + text).slice(-16384);
+      sentinelCapture.push(text);
     });
     child.stderr?.on("data", (buf) => {
       trackOutput(buf);
@@ -823,9 +855,21 @@ export function createConductor(opts = {}) {
       // (spawnSession에서 config.remote === true일 때 lease 건너뜀)
       if (code === 0) {
         transition(session, STATES.COMPLETED, `exit_${code}`);
-        emitter.emit("completed", { sessionId: session.id });
+        // #125 Codex R1 MEDIUM: same overflow guard as the local exit path.
+        let extracted;
+        if (sentinelCapture.isOverflow()) {
+          extracted = null;
+        } else {
+          const sentinelSnapshot = sentinelCapture.snapshot();
+          extracted = extractCompletionPayload(sentinelSnapshot || stdoutTail);
+        }
+        const completionPayload = extracted ? extracted.payload : undefined;
+        emitter.emit("completed", { sessionId: session.id, completionPayload });
         if (typeof session.config.onCompleted === "function") {
-          session.config.onCompleted({ sessionId: session.id });
+          session.config.onCompleted({
+            sessionId: session.id,
+            completionPayload,
+          });
         }
         maybeAutoShutdown();
       } else {

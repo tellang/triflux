@@ -252,7 +252,11 @@ describe("worktree-lifecycle", () => {
       rootDir: repoDir,
     });
 
-    assert.equal(result.ok, true, `cherry-pick should succeed: ${result.error || ""}`);
+    assert.equal(
+      result.ok,
+      true,
+      `cherry-pick should succeed: ${result.error || ""}`,
+    );
     assert.ok(result.headCommit, "headCommit should be returned");
 
     const lsTree = execFileSync(
@@ -282,7 +286,10 @@ describe("worktree-lifecycle", () => {
     const wtPath = wt.worktreePath.replace(/\//g, "\\");
     writeFileSync(join(wtPath, "x.txt"), "x\n");
     execFileSync("git", ["add", "x.txt"], { cwd: wtPath, windowsHide: true });
-    execFileSync("git", ["commit", "-m", "x"], { cwd: wtPath, windowsHide: true });
+    execFileSync("git", ["commit", "-m", "x"], {
+      cwd: wtPath,
+      windowsHide: true,
+    });
 
     const integ = await prepareIntegrationBranch({
       runId: "test-run",

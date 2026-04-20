@@ -39,10 +39,7 @@ describe("detectWorkdirDrift — workdir config drift detection (#116-D)", () =>
       join(workdir, ".codex", "config.toml"),
       'approval_mode = "approve"\n',
     );
-    const result = detectWorkdirDrift(
-      workdir,
-      'approval_mode = "full-auto"\n',
-    );
+    const result = detectWorkdirDrift(workdir, 'approval_mode = "full-auto"\n');
     assert.equal(result.warnings.length, 1);
     assert.match(result.warnings[0], /approval_mode='approve'/u);
     assert.match(result.warnings[0], /global='full-auto'/u);
@@ -55,10 +52,7 @@ describe("detectWorkdirDrift — workdir config drift detection (#116-D)", () =>
       join(workdir, ".codex", "config.toml"),
       'sandbox = "read-only"\n',
     );
-    const result = detectWorkdirDrift(
-      workdir,
-      'sandbox = "workspace-write"\n',
-    );
+    const result = detectWorkdirDrift(workdir, 'sandbox = "workspace-write"\n');
     assert.equal(result.warnings.length, 1);
     assert.match(result.warnings[0], /sandbox='read-only'/u);
   });
@@ -96,10 +90,7 @@ describe("detectWorkdirDrift — workdir config drift detection (#116-D)", () =>
       join(workdir, ".codex", "config.toml"),
       'approval_mode = "full-auto"\n',
     );
-    const result = detectWorkdirDrift(
-      workdir,
-      'approval_mode = "full-auto"\n',
-    );
+    const result = detectWorkdirDrift(workdir, 'approval_mode = "full-auto"\n');
     assert.deepEqual(result, { warnings: [] });
   });
 
@@ -136,10 +127,7 @@ describe("detectWorkdirDrift — workdir config drift detection (#116-D)", () =>
       'approval_mode = "approve"\n',
     );
     writeFileSync(join(workdir, "AGENTS.md"), "# agents\n");
-    const result = detectWorkdirDrift(
-      workdir,
-      'approval_mode = "full-auto"\n',
-    );
+    const result = detectWorkdirDrift(workdir, 'approval_mode = "full-auto"\n');
     assert.equal(result.warnings.length, 2);
     const joined = result.warnings.join("\n");
     assert.match(joined, /approval_mode/u);

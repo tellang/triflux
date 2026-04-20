@@ -83,7 +83,9 @@ export function resolveEffectiveMode(teammateMode, deps = {}) {
   const hasWt = deps.hasWt || hasWindowsTerminal;
   const hasWtSession = deps.hasWtSession || hasWindowsTerminalSession;
   const isTTY =
-    typeof deps.isTTY === "boolean" ? deps.isTTY : Boolean(process.stdout.isTTY);
+    typeof deps.isTTY === "boolean"
+      ? deps.isTTY
+      : Boolean(process.stdout.isTTY);
   const env = deps.env || process.env;
 
   const warnings = [];

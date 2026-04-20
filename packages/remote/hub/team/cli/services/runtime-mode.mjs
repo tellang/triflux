@@ -61,3 +61,56 @@ export function ensureTmuxOrExit() {
   error.code = "TMUX_REQUIRED";
   throw error;
 }
+
+/**
+ * teammateMode + 환경 기반 effective mode 결정 (pure function).
+ *
+ * - wt → wt.exe 없으면 in-process
+ * - wt → WT_SESSION 없으면 in-process
+ * - in-process → non-TTY 감지 시 headless (#114: run_in_background 부모 종료 시 자식 SIGTERM 방지)
+ * - override: TFX_FORCE_IN_PROCESS=1 로 in-process 유지
+ *
+ * @param {string} teammateMode
+ * @param {{
+ *   hasWt?: () => boolean,
+ *   hasWtSession?: () => boolean,
+ *   isTTY?: boolean,
+ *   env?: Record<string,string|undefined>,
+ * }} [deps]
+ * @returns {{ mode: string, warnings: string[] }}
+ */
+export function resolveEffectiveMode(teammateMode, deps = {}) {
+  const hasWt = deps.hasWt || hasWindowsTerminal;
+  const hasWtSession = deps.hasWtSession || hasWindowsTerminalSession;
+  const isTTY =
+    typeof deps.isTTY === "boolean"
+      ? deps.isTTY
+      : Boolean(process.stdout.isTTY);
+  const env = deps.env || process.env;
+
+  const warnings = [];
+  let effective = teammateMode;
+
+  if (effective === "wt" && !hasWt()) {
+    warnings.push("wt.exe 미발견 — in-process 모드로 자동 fallback");
+    effective = "in-process";
+  }
+  if (effective === "wt" && !hasWtSession()) {
+    warnings.push(
+      "WT_SESSION 미감지(Windows Terminal 외부) — in-process 모드로 자동 fallback",
+    );
+    effective = "in-process";
+  }
+  if (
+    effective === "in-process" &&
+    !isTTY &&
+    env.TFX_FORCE_IN_PROCESS !== "1"
+  ) {
+    warnings.push(
+      "non-TTY 환경 감지 (run_in_background 등) — headless 모드로 자동 fallback (#114). 강제 유지: TFX_FORCE_IN_PROCESS=1",
+    );
+    effective = "headless";
+  }
+
+  return { mode: effective, warnings };
+}

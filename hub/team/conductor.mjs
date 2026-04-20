@@ -31,8 +31,8 @@ import { createEventLog } from "./event-log.mjs";
 import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
 import { extractCompletionPayload } from "./extract-completion-payload.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
-import { createSentinelCapture } from "./sentinel-capture.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
+import { createSentinelCapture } from "./sentinel-capture.mjs";
 import {
   buildSynapseTaskSummary,
   heartbeatSynapseSession,

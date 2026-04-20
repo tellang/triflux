@@ -1,8 +1,9 @@
 // packages-mirror — smoke test that check-packages-mirror.mjs reports
 // Mirror OK on a healthy tree. If this fails in CI, the dev forgot to
 // run `npm run release:check-mirror:fix` after editing hub/bin/scripts.
-import { test } from "node:test";
+
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import { compareMirror } from "../../scripts/release/check-packages-mirror.mjs";
 
 test("packages/triflux mirror is byte-identical to root", () => {

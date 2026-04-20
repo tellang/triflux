@@ -1,10 +1,30 @@
 // hub/team/execution-mode.mjs — headless vs interactive execution mode selection
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve as pathResolve } from "node:path";
 
 import { whichCommand } from "@triflux/core/hub/platform.mjs";
 
 const WIN32_EXT_PRECEDENCE = [".cmd", ".exe", ".bat", ".ps1"];
+
+// #128: parse npm-cmd-shim wrapper to extract the underlying .js entry point.
+// codex.cmd / gemini.cmd end with: "%_prog%" "%dp0%\node_modules\...\<cli>.js" %*
+// %* is cmd batch arg pass-through which mangles multi-line / fenced prompts.
+// Bypass cmd entirely by spawning node + the .js directly.
+export function unwrapCmdToJsScript(cmdPath, opts = {}) {
+  const readFile = opts.readFile || readFileSync;
+  const existsFn = opts.existsSyncFn || existsSync;
+  try {
+    const content = readFile(cmdPath, "utf8");
+    const match = content.match(/"%dp0%[\\/]([^"]+\.[cm]?js)"/i);
+    if (!match) return null;
+    const dir = dirname(cmdPath);
+    const jsPath = pathResolve(dir, match[1].replace(/\\/g, "/"));
+    return existsFn(jsPath) ? jsPath : null;
+  } catch {
+    return null;
+  }
+}
 
 export const MODES = Object.freeze({
   HEADLESS: "headless",
@@ -63,14 +83,28 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
   const platform = opts.platform || process.platform;
 
   // Node v20.12+ (CVE-2024-27980) rejects spawn of .cmd/.bat files with shell:false
-  // (EINVAL). npm-installed Windows wrappers (e.g. codex.cmd) hit this. Wrap via
-  // cmd.exe /c to keep shell:false while still launching the batch wrapper.
+  // (EINVAL). npm-installed Windows wrappers (e.g. codex.cmd) hit this.
+  //
+  // #128 (BUG-A): the cmd /c wrapper used to be the workaround, but cmd batch
+  // %* arg pass-through mangles multi-line and fenced (```bash) prompts before
+  // they reach the underlying .js. We now unwrap the .cmd to the node script
+  // it launches and spawn `node <script>` directly, bypassing cmd entirely.
+  // Falls back to cmd /c if the .cmd cannot be parsed.
   const needsCmdWrap =
     platform === "win32" && /\.(cmd|bat)$/i.test(resolvedCommand);
-  const wrap = (args) =>
-    needsCmdWrap
-      ? { command: "cmd", args: ["/c", resolvedCommand, ...args] }
-      : { command: resolvedCommand, args };
+  const unwrappedJs = needsCmdWrap
+    ? (opts.unwrapCmdFn || unwrapCmdToJsScript)(resolvedCommand)
+    : null;
+  const wrap = (args) => {
+    if (unwrappedJs) {
+      const nodeBin = opts.nodeExecPath || process.execPath;
+      return { command: nodeBin, args: [unwrappedJs, ...args] };
+    }
+    if (needsCmdWrap) {
+      return { command: "cmd", args: ["/c", resolvedCommand, ...args] };
+    }
+    return { command: resolvedCommand, args };
+  };
 
   if (cli === "gemini") {
     const args = [];

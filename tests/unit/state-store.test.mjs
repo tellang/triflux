@@ -8,11 +8,7 @@ describe("state-store — Issue #116-B auto-discover", () => {
   let tmpDir;
   const savedEnv = {};
 
-  const ENV_KEYS = [
-    "TFX_HUB_PID_DIR",
-    "CLAUDE_SESSION_ID",
-    "TFX_TEAM_PROFILE",
-  ];
+  const ENV_KEYS = ["TFX_HUB_PID_DIR", "CLAUDE_SESSION_ID", "TFX_TEAM_PROFILE"];
 
   beforeEach(() => {
     tmpDir = join(

@@ -4,6 +4,40 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.0] - 2026-04-21
+
+### Added
+
+- **[#125]** `feat(team): sentinel-framed completion payload` — `<<<TFX_COMPLETION_BEGIN/END>>>` sentinel framing via `sentinel-capture.mjs` + `build-worker-prompt.mjs` helpers. overflow guard + standalone-line matching. 세션 6 Codex R1 REQUEST_CHANGES → R2 APPROVE 로 수렴
+- **[#138]** `feat(review): tfx review --shard per-file for oversized diffs` — 32KB 초과 diff 에서도 per-file Codex 리뷰 가능. shard 별 순차 실행 (계정 broker 충돌 방지), `[i/N] reviewing <file>` stderr 진행 표시, 32KB 초과 개별 파일은 per-file gate 에서 skip
+
+### Fixed
+
+- **[#115]** harden completion payload extraction per Codex cross-review — head-truncation coverage + assertion tightening (3-round review 수렴)
+- **[#126]** `fix(team): surface swarm integration failure in CLI summary` — integration_failures + exit code 반영으로 silent loss 표면화
+- **[#127]** `fix(team): cherry-pick + restore HEAD in swarm integration` — BUG-E originalBranch finally restore 로 caller branch HEAD escape 방지
+- **[#128]** `fix(team): bypass cmd /c for npm-cmd-shim CLIs` — Windows `.cmd` shim 을 node `.js` 로 unwrap + 직접 spawn (BUG-A). 다중 줄 / fenced 프롬프트 mangling 해제
+- **[#130]** `fix(swarm): F7 validator rejects status=failed worker payload` — validator tighten, schema 유지. fail 상태 silent success 가짜 통과 차단 (BUG-G)
+- **[#133]** `fix(tfx-route): BUG-H _codex_config_swap fail-safe + doctor orphan cleanup` — async tfx-route 경로에서 MCP inventory 캐시 empty 일 때 codex config `[mcp_servers.*]` 전부 삭제되는 회귀 차단. `tfx doctor --fix` 가 cache orphan 자동 정리
+- **[#134]** `fix(swarm): BUG-I worktree intentional deletions vs F6 no_commit_guard` — 워커가 의도적으로 파일을 지운 경우 F6 guard false-positive 방지
+- **[#135]** `fix(swarm): BUG-J rebase catch block must not rewind caller branch` — `rebaseShardOntoIntegration` 실패 경로에서 caller branch HEAD 유지 (finally restore)
+- **[#136]** `fix(release): packages/triflux full mirror + tfx review subcommand` — 배포 미러 gap 해소 + `tfx review` CLI 서브커맨드 추가
+- **[#137]** `fix(review): 32KB prompt size gate + helper hardening` — review 대상 diff 가 32KB 초과 시 안전 truncate + per-file shard opt-in 안내
+- **[#139]** `fix(setup): recursive hub/workers/**/*.mjs sync` — top-level 만 스캔하던 `scanHubWorkerFiles` 를 재귀 walk 로 교체. `codex-app-server-worker.mjs` 가 의존하는 `lib/jsonrpc-stdio.mjs` 복구
+- **[#140]** `fix(gemini): add --yolo to GeminiBackend` — headless silent-hang 방지. stdin redirect 만으로는 tool-approval 대기에서 풀리지 않음. `buildGeminiCommand` pure helper + Windows/Unix 양 분기 test 커버
+- **[#141]** `fix(session-15): packages/remote --yolo + drop stale tfx-autoresearch SKILL test + routing-qa assertion + packages/remote mirror contract tests` — #140 mirror 공백 해소 (packages/remote 별도 패키지) + Phase 5 cleanup 이후 남은 stale SKILL test 제거 + routing-qa assertion 동기화 + structural contract 5 invariants
+
+### Tests
+
+- **[#115]** completion payload 캡처 truncation 커버리지 강화 (`5a69534`, `c12ff01`)
+- **[#140]** `buildGeminiCommand` pure helper 양 플랫폼 분기 test +4
+- **[#141]** packages/remote mirror contract test +5 (buildGeminiCommand export / Windows --yolo / Unix --yolo / wrapper 패턴 / Codex+ClaudeBackend 존재)
+- 전체 unit suite 2307/2310 pass (swarm-hypervisor #110 기존 hang 2건은 exclude, 3 skipped)
+
+### Docs
+
+- roadmap session 6~9 업데이트 (`f31925a`, `7f47807`, `4077c00`)
+
 ## [10.12.0] - 2026-04-18
 
 ### Added — Phase 4: ensemble fold + remote consolidate
