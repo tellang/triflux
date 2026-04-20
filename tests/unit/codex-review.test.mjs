@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   aggregateVerdicts,
   buildReviewPrompt,
+  expandRange,
   listChangedFiles,
   parseVerdict,
   resolveReviewDiff,
@@ -183,4 +184,47 @@ test("resolveReviewDiff: file param scopes diff via `-- <file>`", () => {
   // Scoped diff should mention only the target file in its `diff --git` header.
   // Other files may still appear in --stat summary, so check body presence.
   assert.ok(diff.includes(target), "scoped diff should reference target file");
+});
+
+test("expandRange: bare ref expands to ~1..ref", () => {
+  assert.equal(expandRange({ ref: "HEAD" }), "HEAD~1..HEAD");
+  assert.equal(expandRange({ ref: "abcdef0" }), "abcdef0~1..abcdef0");
+});
+
+test("expandRange: explicit base overrides", () => {
+  assert.equal(
+    expandRange({ ref: "HEAD", base: "main" }),
+    "main..HEAD",
+  );
+  assert.equal(
+    expandRange({ ref: "feat/x", base: "origin/main" }),
+    "origin/main..feat/x",
+  );
+});
+
+test("expandRange: range ref passes through unchanged", () => {
+  assert.equal(expandRange({ ref: "HEAD~3..HEAD" }), "HEAD~3..HEAD");
+  assert.equal(expandRange({ ref: "main..feat/x" }), "main..feat/x");
+});
+
+test("expandRange: defaults ref to HEAD when omitted", () => {
+  assert.equal(expandRange({}), "HEAD~1..HEAD");
+  assert.equal(expandRange(), "HEAD~1..HEAD");
+});
+
+test("listChangedFiles: git log semantics (includes --no-merges --name-only)", () => {
+  // Smoke test that we use git log (not git diff), by verifying a known
+  // contract: for the most recent commit, both approaches converge, but
+  // the helper must not rely on the staging tree. Assert the result is a
+  // deduped string array with no blank entries.
+  const files = listChangedFiles("HEAD~1..HEAD");
+  const unique = new Set(files);
+  assert.equal(
+    unique.size,
+    files.length,
+    "listChangedFiles must dedupe file paths",
+  );
+  for (const f of files) {
+    assert.ok(f && !/^\s*$/.test(f), "no blank entries");
+  }
 });

@@ -31,6 +31,24 @@ import { join } from "node:path";
 export const MAX_PROMPT_BYTES = 32_000;
 
 /**
+ * Expand a {ref, base} pair into a git range string.
+ * - `base` set → `base..ref`
+ * - `ref` already contains `..` → pass through
+ * - otherwise → `ref~1..ref` (single-commit review)
+ *
+ * Shared by single-mode `runCodexReview` and shard-mode
+ * `runCodexReviewSharded` so both interpret identical inputs identically.
+ *
+ * @param {{ ref?: string, base?: string }} opts
+ * @returns {string}
+ */
+export function expandRange({ ref = "HEAD", base } = {}) {
+  if (base) return `${base}..${ref}`;
+  if (ref.includes("..")) return ref;
+  return `${ref}~1..${ref}`;
+}
+
+/**
  * Resolve the diff payload for a given ref.
  * - `a..b` ranges pass through unchanged
  * - `<commit>` expands to `<commit>~1..<commit>` (single-commit review)
@@ -41,14 +59,7 @@ export const MAX_PROMPT_BYTES = 32_000;
  * @returns {{ diff: string, range: string, file?: string }}
  */
 export function resolveReviewDiff({ ref = "HEAD", base, file } = {}) {
-  let range;
-  if (base) {
-    range = `${base}..${ref}`;
-  } else if (ref.includes("..")) {
-    range = ref;
-  } else {
-    range = `${ref}~1..${ref}`;
-  }
+  const range = expandRange({ ref, base });
 
   const args = ["log", "-p", "--stat", "--no-color", range];
   if (file) {
@@ -63,8 +74,16 @@ export function resolveReviewDiff({ ref = "HEAD", base, file } = {}) {
 }
 
 /**
- * List files changed in a range via `git diff --name-only`.
- * Used by shard mode to enumerate per-file review targets.
+ * List files changed in a range via `git log --name-only`, matching
+ * the commit-log semantics used by `resolveReviewDiff`. Using
+ * `git diff --name-only` would report only the net tree diff and
+ * silently drop files changed then reverted within a multi-commit
+ * range — those files would then be invisible to shard-mode review
+ * even though `git log -p` still contains their edits.
+ *
+ * `--no-merges` skips merge commits (their content is reviewed via
+ * the branches that produced them). Output is de-duplicated since
+ * log output repeats a file for every commit that touches it.
  *
  * @param {string} range — e.g. "HEAD~1..HEAD" or "main..feature"
  * @returns {string[]}
@@ -72,13 +91,21 @@ export function resolveReviewDiff({ ref = "HEAD", base, file } = {}) {
 export function listChangedFiles(range) {
   const out = execFileSync(
     "git",
-    ["diff", "--name-only", range],
+    [
+      "log",
+      "--no-merges",
+      "--name-only",
+      "--pretty=format:",
+      range,
+    ],
     { encoding: "utf8", windowsHide: true, maxBuffer: 50 * 1024 * 1024 },
   );
-  return out
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const seen = new Set();
+  for (const line of out.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) seen.add(trimmed);
+  }
+  return [...seen];
 }
 
 /**
@@ -341,14 +368,7 @@ export async function runCodexReviewSharded({
   onFileStart,
   onFileDone,
 } = {}) {
-  let range;
-  if (base) {
-    range = `${base}..${ref}`;
-  } else if (ref.includes("..")) {
-    range = ref;
-  } else {
-    range = `${ref}~1..${ref}`;
-  }
+  const range = expandRange({ ref, base });
 
   let files;
   try {
