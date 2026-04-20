@@ -14,6 +14,7 @@ import {
   prepareIntegrationBranch,
   pruneOrphanWorktrees,
   pruneWorktree,
+  rebaseShardOntoIntegration,
 } from "../../hub/team/worktree-lifecycle.mjs";
 
 function makeTmpRepo() {
@@ -216,6 +217,150 @@ describe("worktree-lifecycle", () => {
           force: true,
         }),
       /main working tree/,
+    );
+  });
+
+  it("W-08 (#127): rebaseShardOntoIntegration — cherry-pick applies shard commits to integration", async () => {
+    const { writeFileSync } = await import("node:fs");
+    const wt = await ensureWorktree({
+      slug: "cp-basic",
+      runId: "test-run",
+      rootDir: repoDir,
+      baseBranch: "main",
+    });
+    const wtPath = wt.worktreePath.replace(/\//g, "\\");
+
+    writeFileSync(join(wtPath, "shard-file.txt"), "shard content\n");
+    execFileSync("git", ["add", "shard-file.txt"], {
+      cwd: wtPath,
+      windowsHide: true,
+    });
+    execFileSync("git", ["commit", "-m", "shard commit"], {
+      cwd: wtPath,
+      windowsHide: true,
+    });
+
+    const integ = await prepareIntegrationBranch({
+      runId: "test-run",
+      baseBranch: "main",
+      rootDir: repoDir,
+    });
+
+    const result = await rebaseShardOntoIntegration({
+      shardBranch: wt.branchName,
+      integrationBranch: integ.integrationBranch,
+      rootDir: repoDir,
+    });
+
+    assert.equal(result.ok, true, `cherry-pick should succeed: ${result.error || ""}`);
+    assert.ok(result.headCommit, "headCommit should be returned");
+
+    const lsTree = execFileSync(
+      "git",
+      ["ls-tree", "-r", "--name-only", integ.integrationBranch],
+      { cwd: repoDir, windowsHide: true },
+    )
+      .toString()
+      .trim();
+    assert.ok(
+      lsTree.split("\n").includes("shard-file.txt"),
+      "shard-file.txt must appear in integration tree",
+    );
+  });
+
+  it("W-10 (#127 BUG-E): rebaseShardOntoIntegration — restores caller HEAD, never escapes to integrationBranch", async () => {
+    // 회귀 방지: 함수 호출 후 main repo HEAD 가 integrationBranch 로 새어나가면
+    // 사용자의 다음 Edit/commit 이 swarm 임시 브랜치로 silently 들어감
+    // (2026-04-20 관찰 — probe + 후속 commit 들이 swarm/.../merge 에 갇혔던 사고).
+    const { writeFileSync } = await import("node:fs");
+    const wt = await ensureWorktree({
+      slug: "head-escape",
+      runId: "test-run",
+      rootDir: repoDir,
+      baseBranch: "main",
+    });
+    const wtPath = wt.worktreePath.replace(/\//g, "\\");
+    writeFileSync(join(wtPath, "x.txt"), "x\n");
+    execFileSync("git", ["add", "x.txt"], { cwd: wtPath, windowsHide: true });
+    execFileSync("git", ["commit", "-m", "x"], { cwd: wtPath, windowsHide: true });
+
+    const integ = await prepareIntegrationBranch({
+      runId: "test-run",
+      baseBranch: "main",
+      rootDir: repoDir,
+    });
+
+    const headBefore = execFileSync(
+      "git",
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: repoDir, windowsHide: true },
+    )
+      .toString()
+      .trim();
+    assert.equal(headBefore, "main", "precondition: HEAD must be main");
+
+    await rebaseShardOntoIntegration({
+      shardBranch: wt.branchName,
+      integrationBranch: integ.integrationBranch,
+      rootDir: repoDir,
+    });
+
+    const headAfter = execFileSync(
+      "git",
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: repoDir, windowsHide: true },
+    )
+      .toString()
+      .trim();
+    assert.equal(
+      headAfter,
+      "main",
+      "regression: rebaseShardOntoIntegration must restore caller HEAD",
+    );
+  });
+
+  it("W-09 (#127): rebaseShardOntoIntegration — succeeds even when shard branch is checked out by worktree", async () => {
+    // 회귀 방지: 이전엔 git rebase 가 'branch already used by worktree' 로 실패
+    const { writeFileSync } = await import("node:fs");
+    const wt = await ensureWorktree({
+      slug: "cp-contention",
+      runId: "test-run",
+      rootDir: repoDir,
+      baseBranch: "main",
+    });
+    const wtPath = wt.worktreePath.replace(/\//g, "\\");
+
+    writeFileSync(join(wtPath, "contention.txt"), "from worker\n");
+    execFileSync("git", ["add", "contention.txt"], {
+      cwd: wtPath,
+      windowsHide: true,
+    });
+    execFileSync("git", ["commit", "-m", "worker commit"], {
+      cwd: wtPath,
+      windowsHide: true,
+    });
+
+    const integ = await prepareIntegrationBranch({
+      runId: "test-run",
+      baseBranch: "main",
+      rootDir: repoDir,
+    });
+
+    // worktree alive 상태 — cleanup 안 함
+    const result = await rebaseShardOntoIntegration({
+      shardBranch: wt.branchName,
+      integrationBranch: integ.integrationBranch,
+      rootDir: repoDir,
+    });
+
+    assert.equal(
+      result.ok,
+      true,
+      `cherry-pick must not fail with worktree alive: ${result.error || ""}`,
+    );
+    assert.ok(
+      !/already used by worktree/i.test(result.error || ""),
+      "regression: rebase-style 'already used by worktree' must not appear",
     );
   });
 });
