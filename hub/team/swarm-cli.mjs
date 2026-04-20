@@ -164,16 +164,37 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
   }
 
   const status = hyper.getStatus();
+
+  // #126: surface integration outcome in summary + exit code so silent
+  // success failures (worker exit 0 + integration_failed) can't mask state.
+  const ip = status.integrationPromise || {};
+  const integratedCount = Array.isArray(ip.integrated) ? ip.integrated.length : 0;
+  const integrationFailureCount = Array.isArray(ip.integrationFailures)
+    ? ip.integrationFailures.length
+    : 0;
+  const finalState = status.state || "unknown";
+  const isFailure =
+    status.failedShards > 0 ||
+    integrationFailureCount > 0 ||
+    finalState === "failed";
+  const stateColor = isFailure ? RED : GREEN;
+
   console.log(
-    `\n  ${BOLD}Summary:${RESET} completed=${status.completedShards}/${status.totalShards} failed=${status.failedShards}`,
+    `\n  ${BOLD}Summary:${RESET} state=${stateColor}${finalState}${RESET} completed=${status.completedShards}/${status.totalShards} failed=${status.failedShards} integrated=${integratedCount} integration_failures=${integrationFailureCount}`,
   );
+
+  if (integrationFailureCount > 0) {
+    console.log(
+      `  ${RED}integration failures:${RESET} ${ip.integrationFailures.join(", ")}`,
+    );
+  }
 
   if (flags.json) {
     process.stdout.write(JSON.stringify(status, null, 2) + "\n");
   }
 
   await hyper.shutdown("completed");
-  if (status.failedShards > 0) process.exitCode = 1;
+  if (isFailure) process.exitCode = 1;
 }
 
 /**
