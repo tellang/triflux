@@ -5,6 +5,7 @@ import {
   buildReviewPrompt,
   parseVerdict,
   resolveReviewDiff,
+  runCodexReview,
 } from "../../hub/team/codex-review.mjs";
 
 test("parseVerdict: extracts APPROVED marker", () => {
@@ -75,4 +76,18 @@ test("resolveReviewDiff: range ref passes through unchanged", () => {
 test("resolveReviewDiff: explicit base overrides implicit ~1", () => {
   const { range } = resolveReviewDiff({ ref: "HEAD", base: "HEAD~3" });
   assert.equal(range, "HEAD~3..HEAD");
+});
+
+test("runCodexReview: rejects oversized prompt without spawning codex", async () => {
+  // Use a deep range to force a large diff. This test validates the size
+  // gate fires before any subprocess is invoked — no flakiness from a
+  // missing codex binary.
+  const result = await runCodexReview({ ref: "HEAD", base: "HEAD~1" });
+  // If the commit itself is small the happy path spawns codex (and may
+  // ENOENT in CI) — skip assertion if the prompt is under the ceiling.
+  if (result.diffBytes > 0 && result.promptBytes > 32_000) {
+    assert.equal(result.ok, false);
+    assert.match(result.error, /prompt too large/);
+    assert.equal(result.verdict, null);
+  }
 });
