@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   buildCommandForMode,
+  buildSpawnSpecForMode,
   MODES,
   resolveCliExecutable,
   selectExecutionMode,
+  unwrapCmdToJsScript,
 } from "../../hub/team/execution-mode.mjs";
 
 test("MODES exports stable mode names", () => {
@@ -209,4 +211,89 @@ test("resolveCliExecutable: win32 returns extensionless if no extension variant 
     existsSyncFn: () => false,
   });
   assert.equal(result, String.raw`C:\npm\weirdtool`);
+});
+
+// #128 BUG-A: cmd /c wrapper mangles multi-line/fenced prompts.
+// Bypass cmd by unwrapping .cmd to its underlying .js and spawning node directly.
+test("unwrapCmdToJsScript: extracts .js path from npm-cmd-shim", () => {
+  const fakeCmdContent = `@ECHO off
+GOTO start
+:find_dp0
+SET dp0=%~dp0
+EXIT /b
+:start
+SETLOCAL
+CALL :find_dp0
+
+IF EXIST "%dp0%\\node.exe" (
+  SET "_prog=%dp0%\\node.exe"
+) ELSE (
+  SET "_prog=node"
+)
+
+endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*
+`;
+  const result = unwrapCmdToJsScript(String.raw`C:\npm\codex.cmd`, {
+    readFile: () => fakeCmdContent,
+    existsSyncFn: () => true,
+  });
+  assert.ok(
+    result &&
+      result.toLowerCase().endsWith("codex.js") &&
+      result.toLowerCase().includes("@openai"),
+    `expected codex.js path, got: ${result}`,
+  );
+});
+
+test("unwrapCmdToJsScript: returns null when .cmd has no parsable .js", () => {
+  const result = unwrapCmdToJsScript(String.raw`C:\npm\foo.cmd`, {
+    readFile: () => "@echo unrelated content\n",
+    existsSyncFn: () => true,
+  });
+  assert.equal(result, null);
+});
+
+test("unwrapCmdToJsScript: returns null when .js does not exist on disk", () => {
+  const fakeCmdContent = `endLocal & ... "%dp0%\\node_modules\\foo\\bar.js" %*\n`;
+  const result = unwrapCmdToJsScript(String.raw`C:\npm\foo.cmd`, {
+    readFile: () => fakeCmdContent,
+    existsSyncFn: () => false,
+  });
+  assert.equal(result, null);
+});
+
+test("buildSpawnSpecForMode: win32 + .cmd uses node + .js (cmd /c bypass)", () => {
+  // 회귀 방지 #128 BUG-A: cmd /c wrap 경로가 prompt truncation 의 원인이었음
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "codex",
+    prompt: "no-op probe.\n\n```bash\necho ok\n```\n",
+    platform: "win32",
+    resolveCommand: () => String.raw`C:\npm\codex.cmd`,
+    existsSyncFn: () => true,
+    unwrapCmdFn: () => String.raw`C:\npm\node_modules\@openai\codex\bin\codex.js`,
+    nodeExecPath: String.raw`C:\nodejs\node.exe`,
+  });
+  assert.equal(spec.command, String.raw`C:\nodejs\node.exe`);
+  assert.equal(
+    spec.args[0],
+    String.raw`C:\npm\node_modules\@openai\codex\bin\codex.js`,
+  );
+  assert.ok(spec.args.includes("exec"), "exec arg must be present");
+  const lastArg = spec.args[spec.args.length - 1];
+  assert.ok(lastArg.includes("```bash"), "fenced bash block must survive");
+  assert.ok(lastArg.includes("\n"), "newline must survive in args");
+});
+
+test("buildSpawnSpecForMode: win32 + .cmd falls back to cmd /c when unwrap fails", () => {
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "codex",
+    prompt: "test",
+    platform: "win32",
+    resolveCommand: () => String.raw`C:\npm\codex.cmd`,
+    existsSyncFn: () => true,
+    unwrapCmdFn: () => null,
+  });
+  assert.equal(spec.command, "cmd");
+  assert.equal(spec.args[0], "/c");
+  assert.equal(spec.args[1], String.raw`C:\npm\codex.cmd`);
 });
