@@ -252,23 +252,44 @@ export async function rebaseShardOntoIntegration({
     }
   }
 
+  // #127 BUG-E: capture caller's branch BEFORE any checkout. Without
+  // restoring it in finally, this function leaks main repo HEAD onto
+  // integrationBranch and every subsequent Edit/commit lands on the swarm
+  // temp branch silently (observed 2026-04-20: probe + edits + commits all
+  // ended up on swarm/.../merge while user thought they were on main).
+  let originalBranch = null;
+  try {
+    const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
+    if (head && head !== "HEAD") originalBranch = head;
+  } catch {
+    /* detached HEAD or unknown — skip restore */
+  }
+
   // Backup integration HEAD for rollback
   const backupCommit = await git(["rev-parse", integrationBranch], rootDir);
 
+  // #127: cherry-pick instead of rebase. Rebase fails when shardBranch is
+  // already checked out by a swarm worktree ("branch already used by worktree").
+  // Cherry-pick reads the shard's commits without touching its branch ref,
+  // so worktree contention disappears. Memory: feedback_swarm_cherry_pick.
   try {
-    // Rebase shard onto integration
-    await git(["rebase", integrationBranch, shardBranch], rootDir);
+    const log = await git(
+      ["log", "--reverse", "--format=%H", `${integrationBranch}..${shardBranch}`],
+      rootDir,
+    );
+    const shaList = log.split("\n").map((s) => s.trim()).filter(Boolean);
 
-    // Fast-forward integration to include shard changes
     await git(["checkout", integrationBranch], rootDir);
-    await git(["merge", "--ff-only", shardBranch], rootDir);
+
+    for (const sha of shaList) {
+      await git(["cherry-pick", sha], rootDir);
+    }
 
     const headCommit = await git(["rev-parse", "HEAD"], rootDir);
     return { ok: true, headCommit };
   } catch (err) {
-    // Abort rebase and restore integration branch
     try {
-      await git(["rebase", "--abort"], rootDir);
+      await git(["cherry-pick", "--abort"], rootDir);
     } catch {
       /* already clean */
     }
@@ -284,6 +305,16 @@ export async function rebaseShardOntoIntegration({
     }
 
     return { ok: false, error: err.message };
+  } finally {
+    // Always restore caller's branch. Skip if originalBranch is null
+    // (detached HEAD case) or already on target.
+    if (originalBranch) {
+      try {
+        await git(["checkout", originalBranch], rootDir);
+      } catch {
+        /* best-effort — caller will see HEAD on integrationBranch */
+      }
+    }
   }
 }
 
