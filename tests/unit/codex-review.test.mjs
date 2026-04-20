@@ -268,3 +268,26 @@ test("parseChangedFilesFromLog: handles CRLF line endings", () => {
     "gamma",
   ]);
 });
+
+test("listChangedFiles: argv contract — does not pass --no-merges", () => {
+  // Regression guard: merges must be included so enumeration stays aligned
+  // with resolveReviewDiff's plain `git log -p`. Round 3 fix in PR #138.
+  let capturedCmd = "";
+  let capturedArgs = [];
+  const stubRunner = (cmd, args) => {
+    capturedCmd = cmd;
+    capturedArgs = args;
+    return "foo.mjs\nbar.mjs\n";
+  };
+  const result = listChangedFiles("HEAD~2..HEAD", stubRunner);
+  assert.equal(capturedCmd, "git");
+  assert.equal(capturedArgs[0], "log");
+  assert.ok(capturedArgs.includes("--name-only"));
+  assert.ok(capturedArgs.includes("--pretty=format:"));
+  assert.ok(capturedArgs.includes("HEAD~2..HEAD"));
+  assert.ok(
+    !capturedArgs.includes("--no-merges"),
+    "must not pass --no-merges",
+  );
+  assert.deepEqual(result.sort(), ["bar.mjs", "foo.mjs"]);
+});

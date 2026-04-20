@@ -105,15 +105,22 @@ export function parseChangedFilesFromLog(rawLogOutput) {
  * collapses paths that already appear in parent commits.
  *
  * @param {string} range — e.g. "HEAD~1..HEAD" or "main..feature"
+ * @param {(cmd: string, args: string[]) => string} [runner] — injectable
+ *   process runner. Default shells out to git; tests can pass a stub to
+ *   verify argv contract (e.g. absence of `--no-merges`) without spawning.
  * @returns {string[]}
  */
-export function listChangedFiles(range) {
-  const out = execFileSync(
-    "git",
-    ["log", "--name-only", "--pretty=format:", range],
-    { encoding: "utf8", windowsHide: true, maxBuffer: 50 * 1024 * 1024 },
-  );
+export function listChangedFiles(range, runner = _defaultGitRunner) {
+  const out = runner("git", ["log", "--name-only", "--pretty=format:", range]);
   return parseChangedFilesFromLog(out);
+}
+
+function _defaultGitRunner(cmd, args) {
+  return execFileSync(cmd, args, {
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 50 * 1024 * 1024,
+  });
 }
 
 /**
