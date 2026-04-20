@@ -1471,10 +1471,19 @@ _codex_config_swap() {
     echo "[tfx-route] config.toml swap: ${kept}개 MCP 서버만 활성" >&2
 
   elif [[ "$action" == "restore" && -f "$backup" ]]; then
-    # BUG-H (#132): mv 는 Windows lock/ACL 상황에서 조용히 실패할 수 있음.
-    # cat+rm 2단계로 나눠 복원 실패 시 backup 보존 → 다음 시도/수동 복구 가능.
-    if ! cat "$backup" > "$config"; then
-      echo "[tfx-route] 경고: config.toml 복원 실패 (write error). backup 보존: $backup" >&2
+    # BUG-H (#132) atomic rename: cp→tmp→mv 로 중간 실패 시 config 손상 방지.
+    # `cat > $config` 는 cat 실행 전에 dest 가 truncate 되어 mid-stream 실패 시
+    # 빈/부분 파일이 남는다. 같은 디렉토리 내 mv 는 POSIX 상 atomic 이므로
+    # 실패해도 기존 config 와 backup 모두 보존된다.
+    local tmp="${config}.restore.$$"
+    if ! cp "$backup" "$tmp"; then
+      echo "[tfx-route] 경고: config.toml 복원 실패 (temp copy). backup 보존: $backup" >&2
+      rm -f "$tmp" 2>/dev/null
+      return 1
+    fi
+    if ! mv "$tmp" "$config"; then
+      echo "[tfx-route] 경고: config.toml 복원 실패 (atomic rename). backup 보존: $backup" >&2
+      rm -f "$tmp" 2>/dev/null
       return 1
     fi
     if ! rm -f "$backup"; then
