@@ -57,7 +57,7 @@
 |---|---|---|
 | swarm-interactive-attach | M | Issue #115 (4). dashboard(단일 뷰) vs 인터랙티브(직접 pane 진입) 디자인 결정 필요. 사용자 인터뷰 후 진입 |
 | conductor-completion-payload-wiring | M | **구현 완료 (2026-04-19 session 5)**: `hub/team/extract-completion-payload.mjs` pure helper (9 tests) + `conductor.mjs` 로컬/원격 exit(0) 경로 wiring. swarm-hypervisor F7 guard (validateWorkerCompletion) 와 end-to-end 연결 |
-| prd-template-completion-protocol | L | Issue #115 PRD #5. **위치 결정 완료 (2026-04-19 session 5)**: B-hybrid — `swarm-hypervisor.mjs:433` buildSessionConfig 에서 `shard.prompt + COMPLETION_PROTOCOL_APPENDIX` 런타임 주입 + `docs/prd/_template.md` 에 placeholder 주석만. 구현은 #7 conductor wiring 과 함께 |
+| prd-template-completion-protocol | L | Issue #115 PRD #5. **위치 결정 완료 (2026-04-19 session 5)**: B-hybrid — `swarm-hypervisor.mjs:433` buildSessionConfig 에서 `shard.prompt + COMPLETION_PROTOCOL_APPENDIX` 런타임 주입 + `docs/prd/_template.md` 에 placeholder 주석만. **구현 완료 (2026-04-20 session 6, [#125](https://github.com/tellang/triflux/issues/125))**: sentinel framing (`<<<TFX_COMPLETION_BEGIN/END>>>`) → `sentinel-capture.mjs` + `build-worker-prompt.mjs` 신규 helper, +30 unit tests, Codex 2 라운드 (R1 REQUEST_CHANGES → R2 APPROVE). overflow guard + standalone-line matching RESOLVED |
 
 ---
 
