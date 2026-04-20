@@ -6,6 +6,7 @@ import {
   buildReviewPrompt,
   expandRange,
   listChangedFiles,
+  parseChangedFilesFromLog,
   parseVerdict,
   resolveReviewDiff,
   runCodexReview,
@@ -212,11 +213,11 @@ test("expandRange: defaults ref to HEAD when omitted", () => {
   assert.equal(expandRange(), "HEAD~1..HEAD");
 });
 
-test("listChangedFiles: git log semantics (includes --no-merges --name-only)", () => {
-  // Smoke test that we use git log (not git diff), by verifying a known
-  // contract: for the most recent commit, both approaches converge, but
-  // the helper must not rely on the staging tree. Assert the result is a
-  // deduped string array with no blank entries.
+test("listChangedFiles: git log semantics, deduped, no blanks", () => {
+  // Contract test on a known real range. For single-commit ranges both
+  // `git log` and `git diff --name-only` converge — regression coverage
+  // for the revert-within-range / merge semantics is done via
+  // parseChangedFilesFromLog below.
   const files = listChangedFiles("HEAD~1..HEAD");
   const unique = new Set(files);
   assert.equal(
@@ -227,4 +228,43 @@ test("listChangedFiles: git log semantics (includes --no-merges --name-only)", (
   for (const f of files) {
     assert.ok(f && !/^\s*$/.test(f), "no blank entries");
   }
+});
+
+test("parseChangedFilesFromLog: dedupes paths repeated across commits", () => {
+  // Simulates `git log --name-only --pretty=format:` output where commit A
+  // adds foo.mjs + bar.mjs, and commit B reverts bar.mjs. Both show up in
+  // log output but only once each in the result.
+  const canned = [
+    "", // first commit's blank format line
+    "foo.mjs",
+    "bar.mjs",
+    "", // second commit
+    "bar.mjs", // revert — appears twice in log
+    "",
+    "baz.mjs", // third commit
+  ].join("\n");
+  const result = parseChangedFilesFromLog(canned);
+  assert.deepEqual(result.sort(), ["bar.mjs", "baz.mjs", "foo.mjs"]);
+});
+
+test("parseChangedFilesFromLog: handles empty and whitespace-only input", () => {
+  assert.deepEqual(parseChangedFilesFromLog(""), []);
+  assert.deepEqual(parseChangedFilesFromLog("\n\n  \n\t\n"), []);
+  assert.deepEqual(parseChangedFilesFromLog(null), []);
+  assert.deepEqual(parseChangedFilesFromLog(undefined), []);
+});
+
+test("parseChangedFilesFromLog: preserves insertion order of first occurrence", () => {
+  // Same file in 3 commits; first occurrence wins insertion order.
+  const canned = "a\n\nb\na\nc\na\n";
+  assert.deepEqual(parseChangedFilesFromLog(canned), ["a", "b", "c"]);
+});
+
+test("parseChangedFilesFromLog: handles CRLF line endings", () => {
+  const canned = "alpha\r\nbeta\r\n\r\nalpha\r\ngamma\r\n";
+  assert.deepEqual(parseChangedFilesFromLog(canned), [
+    "alpha",
+    "beta",
+    "gamma",
+  ]);
 });

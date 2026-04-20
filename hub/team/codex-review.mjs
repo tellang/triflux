@@ -74,6 +74,24 @@ export function resolveReviewDiff({ ref = "HEAD", base, file } = {}) {
 }
 
 /**
+ * Parse the raw `git log --name-only --pretty=format:` output into a
+ * de-duplicated, non-blank file path array. Pure function — extracted
+ * so shard enumeration can be tested against canned log output without
+ * requiring a temp git repo fixture.
+ *
+ * @param {string|null|undefined} rawLogOutput
+ * @returns {string[]}
+ */
+export function parseChangedFilesFromLog(rawLogOutput) {
+  const seen = new Set();
+  for (const line of (rawLogOutput || "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) seen.add(trimmed);
+  }
+  return [...seen];
+}
+
+/**
  * List files changed in a range via `git log --name-only`, matching
  * the commit-log semantics used by `resolveReviewDiff`. Using
  * `git diff --name-only` would report only the net tree diff and
@@ -81,9 +99,10 @@ export function resolveReviewDiff({ ref = "HEAD", base, file } = {}) {
  * range — those files would then be invisible to shard-mode review
  * even though `git log -p` still contains their edits.
  *
- * `--no-merges` skips merge commits (their content is reviewed via
- * the branches that produced them). Output is de-duplicated since
- * log output repeats a file for every commit that touches it.
+ * Merge commits are included so enumeration stays aligned with
+ * `resolveReviewDiff`'s plain `git log -p`. Merges rarely introduce
+ * novel content but also rarely add noise since the dedupe Set
+ * collapses paths that already appear in parent commits.
  *
  * @param {string} range — e.g. "HEAD~1..HEAD" or "main..feature"
  * @returns {string[]}
@@ -91,21 +110,10 @@ export function resolveReviewDiff({ ref = "HEAD", base, file } = {}) {
 export function listChangedFiles(range) {
   const out = execFileSync(
     "git",
-    [
-      "log",
-      "--no-merges",
-      "--name-only",
-      "--pretty=format:",
-      range,
-    ],
+    ["log", "--name-only", "--pretty=format:", range],
     { encoding: "utf8", windowsHide: true, maxBuffer: 50 * 1024 * 1024 },
   );
-  const seen = new Set();
-  for (const line of out.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed) seen.add(trimmed);
-  }
-  return [...seen];
+  return parseChangedFilesFromLog(out);
 }
 
 /**
@@ -376,7 +384,7 @@ export async function runCodexReviewSharded({
   } catch (err) {
     return {
       ok: false,
-      error: `git diff --name-only failed: ${err.message}`,
+      error: `git log --name-only failed: ${err.message}`,
       verdict: "UNKNOWN",
       range,
       files: [],
