@@ -87,7 +87,7 @@ function scanLibFiles(pluginRoot, claudeDir) {
  * 누락 방지. 2026-04-20 `workers/lib/jsonrpc-stdio.mjs` 가 top-level 전용
  * 스캔 때문에 누락되어 codex app-server worker 기동 실패 → 수정.
  */
-function scanHubWorkerFiles(pluginRoot, claudeDir) {
+export function scanHubWorkerFiles(pluginRoot, claudeDir) {
   const results = [];
   const hubRoot = join(pluginRoot, "hub");
   if (!existsSync(hubRoot)) return results;
