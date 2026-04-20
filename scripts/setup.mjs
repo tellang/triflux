@@ -82,25 +82,39 @@ function scanLibFiles(pluginRoot, claudeDir) {
 }
 
 /**
- * hub/workers/*.mjs + hub/ 루트의 worker 의존성 파일을 자동 스캔.
- * 수동 리스트 대신 glob으로 탐색하여 파일 추가 시 sync 누락 방지.
+ * hub/workers/**\/*.mjs + hub/ 루트의 worker 의존성 파일을 자동 스캔.
+ * 수동 리스트 대신 재귀 walk로 탐색하여 파일/서브디렉토리 추가 시 sync
+ * 누락 방지. 2026-04-20 `workers/lib/jsonrpc-stdio.mjs` 가 top-level 전용
+ * 스캔 때문에 누락되어 codex app-server worker 기동 실패 → 수정.
  */
-function scanHubWorkerFiles(pluginRoot, claudeDir) {
+export function scanHubWorkerFiles(pluginRoot, claudeDir) {
   const results = [];
   const hubRoot = join(pluginRoot, "hub");
   if (!existsSync(hubRoot)) return results;
 
-  // hub/workers/*.mjs 전체
+  // hub/workers/**/*.mjs 전체 (서브디렉토리 포함)
   const workersDir = join(hubRoot, "workers");
   if (existsSync(workersDir)) {
-    for (const f of readdirSync(workersDir).sort()) {
-      if (!f.endsWith(".mjs")) continue;
-      results.push({
-        src: join(workersDir, f),
-        dst: join(claudeDir, "scripts", "hub", "workers", f),
-        label: `hub/workers/${f}`,
-      });
-    }
+    const walkWorkers = (currentDir) => {
+      const entries = readdirSync(currentDir, { withFileTypes: true }).sort(
+        (l, r) => l.name.localeCompare(r.name),
+      );
+      for (const entry of entries) {
+        const absPath = join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          walkWorkers(absPath);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith(".mjs")) continue;
+        const rel = relative(workersDir, absPath).replace(/\\/g, "/");
+        results.push({
+          src: absPath,
+          dst: join(claudeDir, "scripts", "hub", "workers", rel),
+          label: `hub/workers/${rel}`,
+        });
+      }
+    };
+    walkWorkers(workersDir);
   }
 
   // hub/ 루트: worker가 import하는 의존성 (cli-adapter-base, platform 등)
