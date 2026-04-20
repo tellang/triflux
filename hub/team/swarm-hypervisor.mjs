@@ -15,6 +15,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getHostConfig } from "../lib/ssh-command.mjs";
+import { buildWorkerPrompt } from "./build-worker-prompt.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
 import { ensureConductorRegistry } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
@@ -430,7 +431,9 @@ export function createSwarmHypervisor(opts) {
     const config = {
       id: `swarm-${shard.name}-${Date.now()}`,
       agent: shard.agent,
-      prompt: shard.prompt,
+      // #125: append Completion Protocol appendix so workers emit a
+      // sentinel-framed JSON payload that conductor can reliably capture.
+      prompt: buildWorkerPrompt(shard.prompt),
       workdir: shard.worktreePath || workdir,
       mcpServers: shard.mcp,
       worktreePath: shard.worktreePath || null,

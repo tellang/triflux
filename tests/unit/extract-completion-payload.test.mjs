@@ -5,6 +5,10 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import { extractCompletionPayload } from "../../hub/team/extract-completion-payload.mjs";
+import {
+  SENTINEL_BEGIN,
+  SENTINEL_END,
+} from "../../hub/team/sentinel-capture.mjs";
 
 test("빈 입력 → null", () => {
   assert.equal(extractCompletionPayload(""), null);
@@ -132,4 +136,108 @@ test("앞부분이 잘린 payload — 마지막 intact inner commit object 를 �
 test("끝부분이 잘린 payload — 마지막 `}` 없음 → null", () => {
   const truncated = '{"status":"ok","commits_made":[{"sha":"abc"';
   assert.equal(extractCompletionPayload(truncated), null);
+});
+
+// ── #125 sentinel-framed extraction ──────────────────────────────
+
+test("sentinel-framed payload → 파싱", () => {
+  const payload =
+    '{"shard":"s1","status":"ok","commits_made":[{"sha":"deadbeef"}]}';
+  const tail = `[log] starting\n${SENTINEL_BEGIN}\n${payload}\n${SENTINEL_END}\n[log] exiting`;
+  const result = extractCompletionPayload(tail);
+  assert.ok(result);
+  assert.equal(result.payload.shard, "s1");
+  assert.equal(result.payload.status, "ok");
+});
+
+test("sentinel BEGIN 만 있고 END 없음 → null (deterministic truncation reject)", () => {
+  // 핵심: BEGIN 이 보이면 fallback brace-scan 으로 떨어지지 않고 명확히 null.
+  // 그렇지 않으면 inner partial JSON 으로 silent incorrect extraction 위험.
+  const tail = `${SENTINEL_BEGIN}\n{"status":"ok","commits_made":[{"sha":"a"}`;
+  assert.equal(extractCompletionPayload(tail), null);
+});
+
+test("sentinel-framed + invalid JSON → null (fallback 진입 금지)", () => {
+  // worker 가 명시적으로 sentinel protocol 을 시도했으나 본문이 깨진 경우.
+  // 외부 brace 스캔으로 다른 무관한 JSON 을 잡지 않도록 즉시 null.
+  const tail =
+    '{"old":"unrelated"}\n' +
+    `${SENTINEL_BEGIN}\n{ broken json,,,\n${SENTINEL_END}\n`;
+  assert.equal(extractCompletionPayload(tail), null);
+});
+
+test("여러 sentinel 쌍 — 마지막 BEGIN 사용", () => {
+  const oldPayload = '{"status":"old","commits_made":[]}';
+  const newPayload = '{"status":"new","commits_made":[{"sha":"latest"}]}';
+  const tail = [
+    SENTINEL_BEGIN,
+    oldPayload,
+    SENTINEL_END,
+    "log line in between",
+    SENTINEL_BEGIN,
+    newPayload,
+    SENTINEL_END,
+  ].join("\n");
+  const result = extractCompletionPayload(tail);
+  assert.ok(result);
+  assert.equal(result.payload.status, "new");
+});
+
+test("sentinel-framed payload 뒤 trailing log 무시", () => {
+  const payload = '{"status":"ok","commits_made":[]}';
+  const tail = `${SENTINEL_BEGIN}\n${payload}\n${SENTINEL_END}\nshell prompt $ ls -la\n{"unrelated":"json"}`;
+  const result = extractCompletionPayload(tail);
+  assert.ok(result);
+  assert.equal(result.payload.status, "ok");
+  assert.deepEqual(result.payload.commits_made, []);
+});
+
+test("sentinel-framed payload — 16 KiB 보다 큰 payload 도 그대로 파싱", () => {
+  // 가장 중요한 회귀 방지: 기존 16 KiB tail 만으로는 head-truncation 발생하지만
+  // sentinel snapshot 은 무제한 (1 MiB cap) 이므로 온전히 들어와야 함.
+  const shas = Array.from({ length: 600 }, (_, i) =>
+    String(i).padStart(40, "0"),
+  );
+  const inner = shas
+    .map((sha) => `{"sha":"${sha}","message":"m"}`)
+    .join(",");
+  const payload = `{"status":"ok","commits_made":[${inner}]}`;
+  const tail = `${SENTINEL_BEGIN}\n${payload}\n${SENTINEL_END}\n`;
+  assert.ok(payload.length > 16384, "fixture must exceed legacy 16 KiB tail");
+  const result = extractCompletionPayload(tail);
+  assert.ok(result);
+  assert.equal(result.payload.status, "ok");
+  assert.equal(result.payload.commits_made.length, 600);
+});
+
+test("sentinel array body → null (object 만 허용)", () => {
+  const tail = `${SENTINEL_BEGIN}\n[1,2,3]\n${SENTINEL_END}`;
+  assert.equal(extractCompletionPayload(tail), null);
+});
+
+// ── Codex R1 LOW: standalone-line marker matching ─────────────────────
+
+test("inline marker (앞뒤 newline 없음) — Tier 1 미발동, brace-scan fallback", () => {
+  // 워커가 debug log 에 마커를 inline 으로 출력하면 Tier 1 트리거되면 안 됨.
+  // Tier 2 (brace-scan) 가 외부의 정상 JSON 을 추출.
+  const tail =
+    `[debug] saw ${SENTINEL_BEGIN} earlier\n` +
+    `{"status":"ok","commits_made":[{"sha":"abc"}]}\n`;
+  const result = extractCompletionPayload(tail);
+  assert.ok(result, "inline marker 무시하고 brace-scan 으로 정상 JSON 추출");
+  assert.equal(result.payload.status, "ok");
+});
+
+test("standalone-line BEGIN 만 있고 inline END 는 무시 → null (truncation reject)", () => {
+  // BEGIN 정상, END 는 인라인 (자기 줄 단독 아님) → END 인식 X → truncation.
+  const tail = `${SENTINEL_BEGIN}\n{"x":1}\nlog ${SENTINEL_END} suffix\n`;
+  assert.equal(extractCompletionPayload(tail), null);
+});
+
+test("Windows \\r\\n line endings — sentinel 정상 파싱", () => {
+  const payload = '{"status":"ok","commits_made":[]}';
+  const tail = `prefix\r\n${SENTINEL_BEGIN}\r\n${payload}\r\n${SENTINEL_END}\r\n`;
+  const result = extractCompletionPayload(tail);
+  assert.ok(result);
+  assert.equal(result.payload.status, "ok");
 });

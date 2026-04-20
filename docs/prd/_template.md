@@ -50,3 +50,11 @@ export function <name>(<args>)
    git commit -m "<type>: <설명>"
    ```
    커밋하지 않으면 작업이 유실됩니다. codex는 명시적 지시 없이 자동 커밋하지 않습니다.
+
+## Completion Protocol (자동 삽입됨)
+<!-- swarm hypervisor 가 이 섹션을 worker prompt 에 자동 주입합니다.
+     PRD 작성자는 이 섹션을 수정하지 마세요.
+     상세: hub/team/build-worker-prompt.mjs / sentinel-capture.mjs (#125). -->
+- worker 는 stdout 의 마지막에 `<<<TFX_COMPLETION_BEGIN>>>` / `<<<TFX_COMPLETION_END>>>` sentinel 사이에 단일 JSON object payload 를 출력해야 한다.
+- 미준수 시 conductor 는 16 KiB stdout tail 의 brace-scan fallback 으로 추출을 시도하지만, payload 가 16 KiB 를 초과하면 silent partial extraction 위험이 있다.
+- BEGIN 만 출력하고 END 누락 시 conductor 가 truncation 으로 명확히 reject (F7).
