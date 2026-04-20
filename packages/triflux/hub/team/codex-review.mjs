@@ -15,6 +15,9 @@
 // filter bypass in round 1 (session 11 PR #134).
 
 import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Resolve the diff payload for a given ref.
@@ -137,23 +140,55 @@ export async function runCodexReview({
   }
 
   const prompt = buildReviewPrompt(diff, { range });
+  const promptBytes = Buffer.byteLength(prompt, "utf8");
+
+  // OS arg-list ceiling. The whole chain (bash → codex.cmd → node) fails
+  // with ENAMETOOLONG / "Argument list too long" well below the documented
+  // 128KB on Windows. Observed breakage at 62KB diff (session 12 self-dogfood).
+  // 32KB is a safe ceiling that covers most single-commit swarm fixes.
+  // Larger ranges should be reviewed per-file or with --base narrowing.
+  const MAX_PROMPT_BYTES = 32_000;
+  if (promptBytes > MAX_PROMPT_BYTES) {
+    return {
+      ok: false,
+      error:
+        `prompt too large (${promptBytes} bytes > ${MAX_PROMPT_BYTES}). ` +
+        `Narrow the review with --base <sha> or split per-file. ` +
+        `Large-diff streaming is tracked as a follow-up.`,
+      verdict: null,
+      stdout: "",
+      stderr: "",
+      diffBytes,
+      promptBytes,
+      range,
+    };
+  }
+
+  // Prompt is a full git diff — often >10KB, regularly >60KB on swarm
+  // bugfixes. Windows cmd.exe caps command lines at ~8KB and node's
+  // `spawn(..., [promptArg])` route cannot exceed the OS arg limit
+  // (ENAMETOOLONG on Windows). Persist the prompt to a tmp file and let
+  // bash read it back — same pattern session 11 used manually
+  // (`codex exec "$(cat prompt.md)" ...`).
+  const tmpDir = mkdtempSync(join(tmpdir(), "tfx-review-"));
+  const promptFile = join(tmpDir, "prompt.md").replace(/\\/g, "/");
+  writeFileSync(promptFile, prompt);
+
+  const shellCmd = [
+    "codex",
+    "exec",
+    "-s",
+    sandbox,
+    "--dangerously-bypass-approvals-and-sandbox",
+    `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`,
+  ].join(" ");
 
   return new Promise((resolve) => {
-    const child = spawn(
-      "codex",
-      [
-        "exec",
-        "-s",
-        sandbox,
-        "--dangerously-bypass-approvals-and-sandbox",
-        prompt,
-      ],
-      {
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-        env,
-      },
-    );
+    const child = spawn("bash", ["-c", shellCmd], {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      env,
+    });
 
     let stdout = "";
     let stderr = "";
@@ -170,8 +205,17 @@ export async function runCodexReview({
     child.stderr.on("data", (d) => {
       stderr += d.toString();
     });
+    const cleanupTmp = () => {
+      try {
+        rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+    };
+
     child.on("error", (err) => {
       clearTimeout(timer);
+      cleanupTmp();
       resolve({
         ok: false,
         error: err.message,
@@ -184,6 +228,7 @@ export async function runCodexReview({
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      cleanupTmp();
       if (timedOut) {
         resolve({
           ok: false,
