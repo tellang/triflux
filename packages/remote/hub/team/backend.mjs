@@ -6,6 +6,16 @@ import { createRequire } from "node:module";
 import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
 import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 
+// --yolo is required: without it gemini waits on stdin for tool-call approval
+// even when stdin is redirected, producing a 0-byte 90s+ silent hang.
+// execution-mode.mjs:buildSpawnSpecForMode enforces the same flag.
+export function buildGeminiCommand(prompt, resultFile, { isWindows } = {}) {
+  if (isWindows) {
+    return `$null | gemini --yolo --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
+  }
+  return `gemini --yolo --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err' < /dev/null`;
+}
+
 const _require = createRequire(import.meta.url);
 
 // ── 백엔드 클래스 ──────────────────────────────────────────────────────────
@@ -42,10 +52,7 @@ export class GeminiBackend {
   }
 
   buildArgs(prompt, resultFile, opts = {}) {
-    if (IS_WINDOWS) {
-      return `$null | gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
-    }
-    return `gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err' < /dev/null`;
+    return buildGeminiCommand(prompt, resultFile, { isWindows: IS_WINDOWS });
   }
 
   env() {

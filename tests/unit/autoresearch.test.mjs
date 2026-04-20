@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import {
@@ -9,57 +9,10 @@ import {
   saveReport,
 } from "../../hub/research.mjs";
 
-// ── SKILL.md 구조 검증 ──
-
-const SKILL_PATH = new URL(
-  "../../skills/tfx-autoresearch/SKILL.md",
-  import.meta.url,
-);
-
-describe("tfx-autoresearch SKILL.md — 구조 검증", () => {
-  let content;
-
-  before(async () => {
-    content = await readFile(SKILL_PATH, "utf-8");
-  });
-
-  it("SKILL.md 파일이 존재하고 읽을 수 있어야 한다", () => {
-    assert.ok(content, "content must be non-empty");
-    assert.ok(content.length > 100, "SKILL.md must have substantial content");
-  });
-
-  it("트리거 키워드가 모두 포함되어야 한다", () => {
-    const triggers = [
-      "autoresearch",
-      "리서치",
-      "자동 리서치",
-      "웹 리서치",
-      "조사해",
-      "알아봐",
-      "research this",
-    ];
-    for (const trigger of triggers) {
-      assert.ok(content.includes(trigger), `트리거 "${trigger}" 누락`);
-    }
-  });
-
-  it("마크다운 구조가 유효해야 한다", () => {
-    assert.ok(content.startsWith("---"), "frontmatter 시작 --- 필요");
-    const secondDash = content.indexOf("---", 3);
-    assert.ok(secondDash > 0, "frontmatter 종료 --- 필요");
-
-    const frontmatter = content.substring(0, secondDash);
-    assert.ok(frontmatter.includes("name:"), "frontmatter name 필드 필요");
-    assert.ok(
-      frontmatter.includes("description:"),
-      "frontmatter description 필드 필요",
-    );
-    assert.ok(
-      frontmatter.includes("triggers:"),
-      "frontmatter triggers 필드 필요",
-    );
-  });
-});
+// Phase 5 cleanup (b371043) removed skills/tfx-autoresearch/ as thin alias.
+// tfx-research --auto 가 canonical entrypoint. 이 파일은 hub/research.mjs 의
+// pure helper (generateQueries / normalizeResults / buildReport / saveReport)
+// 만 검증한다.
 
 // ── generateQueries ──
 
