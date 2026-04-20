@@ -15,6 +15,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getHostConfig } from "../lib/ssh-command.mjs";
+import { buildWorkerPrompt } from "./build-worker-prompt.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
 import { ensureConductorRegistry } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
@@ -24,7 +25,9 @@ import { createSwarmLocks } from "./swarm-locks.mjs";
 import { validateWorkerCompletion } from "./worker-completion-validator.mjs";
 import {
   cleanupWorktree,
+  EXPECTED_WORKTREE_DELETIONS,
   ensureWorktree,
+  extractDirtyFiles,
   fetchRemoteShard,
   prepareIntegrationBranch,
   pruneWorktree,
@@ -407,12 +410,12 @@ export function createSwarmHypervisor(opts) {
     if (worker?.worktreePath && !worker?.shardConfig?.host) {
       try {
         const rawStatus = await git(["status", "--short"], worker.worktreePath);
-        evidence.dirtyFiles = rawStatus
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-          .map((line) => line.slice(2).trim())
-          .filter(Boolean);
+        // BUG-I: prepareWorktree 가 #34 L2 의도로 rm 한 tracked paths
+        // (EXPECTED_WORKTREE_DELETIONS) 는 dirty 판정에서 제외한다.
+        evidence.dirtyFiles = extractDirtyFiles(
+          rawStatus,
+          EXPECTED_WORKTREE_DELETIONS,
+        );
         evidence.dirty = evidence.dirtyFiles.length > 0;
       } catch (err) {
         evidence.error = evidence.error || err.message;
@@ -430,7 +433,9 @@ export function createSwarmHypervisor(opts) {
     const config = {
       id: `swarm-${shard.name}-${Date.now()}`,
       agent: shard.agent,
-      prompt: shard.prompt,
+      // #125: append Completion Protocol appendix so workers emit a
+      // sentinel-framed JSON payload that conductor can reliably capture.
+      prompt: buildWorkerPrompt(shard.prompt),
       workdir: shard.worktreePath || workdir,
       mcpServers: shard.mcp,
       worktreePath: shard.worktreePath || null,
