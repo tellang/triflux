@@ -133,6 +133,72 @@ test("rebaseShardOntoIntegration: ref-only rollback leaves integrationBranch at 
   });
 });
 
+test("rebaseShardOntoIntegration: cherry-pick conflict rewinds integrationBranch, preserves caller (BUG-J reset path)", async () => {
+  // Covers the `currentBranch === integrationBranch` branch of the catch
+  // block — the only case that actually runs `git reset --hard backupCommit`.
+  // Codex review of PR #135 flagged missing coverage here (2026-04-20).
+  await withTempRepo(async ({ repo }) => {
+    // Base file on main.
+    await writeFile(join(repo, "file.txt"), "base content\n");
+    await git(repo, ["add", "file.txt"]);
+    await git(repo, ["commit", "-q", "-m", "base file"]);
+
+    // integrationBranch — modifies file.txt one way.
+    await git(repo, ["checkout", "-q", "-b", "swarm/r/merge"]);
+    await writeFile(join(repo, "file.txt"), "integration line\n");
+    await git(repo, ["commit", "-q", "-am", "integration mod"]);
+    const integrationBackupSha = await git(repo, ["rev-parse", "HEAD"]);
+
+    // shardBranch — modifies same file.txt differently (conflict material).
+    await git(repo, ["checkout", "-q", "-b", "swarm/r/shard", "main"]);
+    await writeFile(join(repo, "file.txt"), "shard line\n");
+    await git(repo, ["commit", "-q", "-am", "shard mod"]);
+
+    // Caller has its own commit.
+    await git(repo, ["checkout", "-q", "-b", "caller", "main"]);
+    await writeFile(join(repo, "caller.txt"), "caller work\n");
+    await git(repo, ["add", "caller.txt"]);
+    await git(repo, ["commit", "-q", "-m", "caller work"]);
+    const callerSha = await git(repo, ["rev-parse", "HEAD"]);
+
+    const result = await rebaseShardOntoIntegration({
+      shardBranch: "swarm/r/shard",
+      integrationBranch: "swarm/r/merge",
+      rootDir: repo,
+    });
+
+    assert.equal(result.ok, false, "should fail — cherry-pick conflict");
+
+    // integrationBranch ref rewound to its backup (reset --hard path).
+    const afterMergeSha = await git(repo, ["rev-parse", "swarm/r/merge"]);
+    assert.equal(
+      afterMergeSha,
+      integrationBackupSha,
+      "integrationBranch rewound to backup after cherry-pick conflict",
+    );
+
+    // Caller branch ref untouched.
+    const afterCallerSha = await git(repo, ["rev-parse", "caller"]);
+    assert.equal(
+      afterCallerSha,
+      callerSha,
+      "caller branch SHA preserved across conflict path",
+    );
+
+    // HEAD restored to caller by the finally block.
+    const currentBranch = await git(repo, [
+      "rev-parse",
+      "--abbrev-ref",
+      "HEAD",
+    ]);
+    assert.equal(
+      currentBranch,
+      "caller",
+      "HEAD restored to caller after rollback",
+    );
+  });
+});
+
 test("rebaseShardOntoIntegration: happy path cherry-picks shard commits (regression guard)", async () => {
   await withTempRepo(async ({ repo }) => {
     // Shard branch with a real file commit we expect to land on integration.

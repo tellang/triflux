@@ -55,6 +55,8 @@
     "gen:skill-manifest": "node scripts/gen-skill-manifest.mjs",
     "release:check-sync": "node scripts/release/check-sync.mjs",
     "release:check-sync:fix": "node scripts/release/check-sync.mjs --fix",
+    "release:check-mirror": "node scripts/release/check-packages-mirror.mjs",
+    "release:check-mirror:fix": "node scripts/release/check-packages-mirror.mjs --fix",
     "release:bump": "node scripts/release/bump-version.mjs",
     "release:prepare": "node scripts/release/prepare.mjs",
     "release:publish": "node scripts/release/publish.mjs",
