@@ -146,10 +146,48 @@ test("scanHubWorkerFiles: dst path preserves nested structure under claudeDir", 
   }
 });
 
-test("scanHubWorkerFiles: empty hub/ returns empty array, no throw", () => {
+test("scanHubWorkerFiles: includes hub-root deps (cli-adapter-base, platform)", () => {
+  const { root, claude } = makeFixture();
+  try {
+    const results = scanHubWorkerFiles(root, claude);
+    const labels = results.map((r) => r.label);
+    assert.ok(
+      labels.includes("hub/cli-adapter-base.mjs"),
+      `expected hub/cli-adapter-base.mjs, got: ${labels.join(", ")}`,
+    );
+    assert.ok(
+      labels.includes("hub/platform.mjs"),
+      `expected hub/platform.mjs, got: ${labels.join(", ")}`,
+    );
+    const base = results.find((r) => r.label === "hub/cli-adapter-base.mjs");
+    assert.ok(
+      base.dst.endsWith(join("scripts", "hub", "cli-adapter-base.mjs")),
+      `hub-root dep dst must land under scripts/hub/, got: ${base.dst}`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(claude, { recursive: true, force: true });
+  }
+});
+
+test("scanHubWorkerFiles: missing hub/ returns empty array, no throw", () => {
+  // plugin root has no hub/ subtree at all (e.g. brand-new clone, pruned
+  // dist). Must degrade cleanly — not throw, not crash setup.
   const claude = mkdtempSync(join(tmpdir(), "tfx-scan-empty-"));
   const root = mkdtempSync(join(tmpdir(), "tfx-scan-noroot-"));
   try {
+    assert.deepEqual(scanHubWorkerFiles(root, claude), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(claude, { recursive: true, force: true });
+  }
+});
+
+test("scanHubWorkerFiles: existing but empty hub/ returns empty array", () => {
+  const root = mkdtempSync(join(tmpdir(), "tfx-scan-emptyhub-"));
+  const claude = mkdtempSync(join(tmpdir(), "tfx-scan-emptyhub-c-"));
+  try {
+    mkdirSync(join(root, "hub"), { recursive: true });
     assert.deepEqual(scanHubWorkerFiles(root, claude), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
