@@ -335,15 +335,38 @@ export async function rebaseShardOntoIntegration({
     } catch {
       /* already clean */
     }
+
+    // #129 BUG-J: Roll back integrationBranch without mutating whatever
+    // branch HEAD currently points at. The previous implementation did a
+    // blind `reset --hard backupCommit` on current HEAD — if the earlier
+    // `git checkout integrationBranch` inside the try block failed (e.g.
+    // integrationBranch was already checked out by a swarm worktree) the
+    // caller's branch silently rewound to integrationBranch's backup commit.
+    // Observed 2026-04-20: fix branch tree lost to main HEAD during swarm
+    // probe, requiring `git merge --ff-only origin/<branch>` recovery.
+    let currentBranch = null;
     try {
-      await git(["checkout", integrationBranch], rootDir);
+      const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
+      if (head && head !== "HEAD") currentBranch = head;
     } catch {
-      /* best-effort */
+      /* detached — fall through to ref-only update */
     }
-    try {
-      await git(["reset", "--hard", backupCommit], rootDir);
-    } catch {
-      /* best-effort */
+
+    if (currentBranch === integrationBranch) {
+      // HEAD is on integrationBranch — reset advances this branch only.
+      try {
+        await git(["reset", "--hard", backupCommit], rootDir);
+      } catch {
+        /* best-effort */
+      }
+    } else {
+      // HEAD is elsewhere (originalBranch, detached, or another branch).
+      // Update the integrationBranch ref directly; never touch current HEAD.
+      try {
+        await git(["branch", "-f", integrationBranch, backupCommit], rootDir);
+      } catch {
+        /* best-effort: branch may be checked out in another worktree */
+      }
     }
 
     return { ok: false, error: err.message };
