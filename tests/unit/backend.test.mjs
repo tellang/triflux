@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  buildGeminiCommand,
   ClaudeBackend,
   CodexBackend,
   GeminiBackend,
@@ -58,12 +59,15 @@ describe("GeminiBackend", () => {
     assert.equal(backend.command(), "gemini");
   });
 
-  it("buildArgs — gemini --prompt ... --output-format text > result 포함", () => {
+  it("buildArgs — gemini --yolo --prompt ... --output-format text > result 포함", () => {
     const cmd = backend.buildArgs(
       "(Get-Content -Raw '/tmp/p.txt')",
       "/tmp/r.txt",
     );
-    assert.ok(cmd.includes("gemini --prompt"), `gemini --prompt 포함: ${cmd}`);
+    assert.ok(
+      cmd.includes("gemini --yolo --prompt"),
+      `gemini --yolo --prompt 포함: ${cmd}`,
+    );
     assert.ok(
       cmd.includes("--output-format text"),
       `--output-format text 포함: ${cmd}`,
@@ -73,6 +77,66 @@ describe("GeminiBackend", () => {
 
   it("env() — 빈 객체 반환", () => {
     assert.deepEqual(backend.env(), {});
+  });
+});
+
+// ========================================================================
+// GeminiBackend — buildGeminiCommand pure helper (Windows/Unix 양 분기)
+// ========================================================================
+describe("buildGeminiCommand: platform-specific formatting", () => {
+  const prompt = "(Get-Content -Raw '/tmp/p.txt')";
+  const resultFile = "/tmp/r.txt";
+
+  it("Windows 분기 — $null | gemini --yolo --prompt ... (silent-hang 회귀 방지)", () => {
+    const cmd = buildGeminiCommand(prompt, resultFile, { isWindows: true });
+    assert.ok(
+      cmd.startsWith("$null | gemini --yolo --prompt "),
+      `Windows 분기 시작 prefix: ${cmd}`,
+    );
+    assert.ok(
+      /\bgemini\s+--yolo\s+--prompt\b/.test(cmd),
+      `--yolo 가 --prompt 앞에 위치: ${cmd}`,
+    );
+    assert.ok(
+      cmd.includes(`> '${resultFile}' 2>'${resultFile}.err'`),
+      `result/err 리다이렉트: ${cmd}`,
+    );
+    assert.ok(!cmd.includes("< /dev/null"), `Windows 는 /dev/null 미사용: ${cmd}`);
+  });
+
+  it("Unix 분기 — gemini --yolo --prompt ... < /dev/null (silent-hang 회귀 방지)", () => {
+    const cmd = buildGeminiCommand(prompt, resultFile, { isWindows: false });
+    assert.ok(
+      cmd.startsWith("gemini --yolo --prompt "),
+      `Unix 분기 시작 prefix: ${cmd}`,
+    );
+    assert.ok(
+      /\bgemini\s+--yolo\s+--prompt\b/.test(cmd),
+      `--yolo 가 --prompt 앞에 위치: ${cmd}`,
+    );
+    assert.ok(cmd.endsWith("< /dev/null"), `stdin redirect suffix: ${cmd}`);
+    assert.ok(!cmd.startsWith("$null"), `Unix 는 $null prefix 미사용: ${cmd}`);
+  });
+
+  it("양 분기 모두 --yolo 플래그 필수 (미누락 invariant)", () => {
+    const win = buildGeminiCommand(prompt, resultFile, { isWindows: true });
+    const unix = buildGeminiCommand(prompt, resultFile, { isWindows: false });
+    for (const cmd of [win, unix]) {
+      assert.ok(
+        /\bgemini\s+--yolo\b/.test(cmd),
+        `--yolo 플래그 누락: ${cmd}`,
+      );
+      assert.ok(
+        cmd.indexOf("--yolo") < cmd.indexOf("--prompt"),
+        `--yolo 는 --prompt 앞: ${cmd}`,
+      );
+    }
+  });
+
+  it("isWindows 생략 시 Unix 분기로 기본 동작", () => {
+    const cmd = buildGeminiCommand(prompt, resultFile);
+    assert.ok(cmd.startsWith("gemini --yolo"), `기본 Unix 포맷: ${cmd}`);
+    assert.ok(cmd.endsWith("< /dev/null"), `기본 /dev/null: ${cmd}`);
   });
 });
 
