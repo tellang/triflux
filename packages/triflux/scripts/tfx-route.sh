@@ -1436,31 +1436,59 @@ _codex_config_swap() {
       fi
     done
 
+    # BUG-H (#132) fail-safe: allowed_pat 이 비면 swap 스킵.
+    # 과거에는 awk 가 keep="" 에서 모든 [mcp_servers.*] 섹션을 제거하고
+    # restore 시 Windows mv 실패 → config.toml 영구 손상이 재발했다.
+    # 비허용 서버 비활성화는 mcp-filter.mjs 의 enabled=false override 가 담당한다.
+    if [[ -z "$allowed_pat" ]]; then
+      echo "[tfx-route] config.toml swap 스킵: 허용 서버 패턴 없음 (fail-safe)" >&2
+      return 0
+    fi
+
     # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 건드리지 않음)
     if [[ -f "$backup" ]]; then
-      echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중" >&2
+      echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중 ($backup)" >&2
       return 0
     fi
     cp "$config" "$backup"
 
-    # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지
+    # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지.
+    # keep="" 은 진입 가드에서 return 됐지만 defense-in-depth 유지.
     awk -v keep="$allowed_pat" '
       BEGIN { skip=0 }
       /^\[mcp_servers\./ {
+        if (keep == "") { skip=0; print; next }
         name=$0; gsub(/^\[mcp_servers\./, "", name); gsub(/[\].].*/, "", name)
-        if (keep == "" || name !~ "^(" keep ")$") { skip=1; next }
+        if (name !~ "^(" keep ")$") { skip=1; next }
         else { skip=0 }
       }
       /^\[/ && !/^\[mcp_servers\./ { skip=0 }
       !skip { print }
     ' "$backup" > "$config"
 
-    local kept=0
-    [[ -n "$allowed_pat" ]] && kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
+    local kept
+    kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
     echo "[tfx-route] config.toml swap: ${kept}개 MCP 서버만 활성" >&2
 
   elif [[ "$action" == "restore" && -f "$backup" ]]; then
-    mv "$backup" "$config" 2>/dev/null
+    # BUG-H (#132) atomic rename: cp→tmp→mv 로 중간 실패 시 config 손상 방지.
+    # `cat > $config` 는 cat 실행 전에 dest 가 truncate 되어 mid-stream 실패 시
+    # 빈/부분 파일이 남는다. 같은 디렉토리 내 mv 는 POSIX 상 atomic 이므로
+    # 실패해도 기존 config 와 backup 모두 보존된다.
+    local tmp="${config}.restore.$$"
+    if ! cp "$backup" "$tmp"; then
+      echo "[tfx-route] 경고: config.toml 복원 실패 (temp copy). backup 보존: $backup" >&2
+      rm -f "$tmp" 2>/dev/null
+      return 1
+    fi
+    if ! mv "$tmp" "$config"; then
+      echo "[tfx-route] 경고: config.toml 복원 실패 (atomic rename). backup 보존: $backup" >&2
+      rm -f "$tmp" 2>/dev/null
+      return 1
+    fi
+    if ! rm -f "$backup"; then
+      echo "[tfx-route] 경고: backup 삭제 실패: $backup (수동 정리 필요)" >&2
+    fi
     echo "[tfx-route] config.toml 복원 완료" >&2
   fi
 }

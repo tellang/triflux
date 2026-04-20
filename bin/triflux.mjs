@@ -12,6 +12,7 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -3396,6 +3397,76 @@ async function cmdDoctor(options = {}) {
         issues += invalidConfigs.length;
         issues += mismatchRows.length;
         issues += stdioRows.length;
+      }
+    }
+
+    // ── Codex Config Health (BUG-H #132) ──
+    // _codex_config_swap 의 restore 가 Windows lock/ACL 로 실패하면
+    // ~/.codex/config.toml.pre-exec 가 남아 [mcp_servers.*] 섹션이 영구 손실된다.
+    // orphan backup 을 감지하고 --fix 로 자동 복원한다.
+    section("Codex Config Health");
+    {
+      const codexConfig = join(CODEX_DIR, "config.toml");
+      const orphanBackup = `${codexConfig}.pre-exec`;
+      if (existsSync(orphanBackup)) {
+        addDoctorCheck(report, {
+          name: "codex-config-orphan-backup",
+          status: "issues",
+          path: orphanBackup,
+          fix: "tfx doctor --fix",
+        });
+        warn(`orphan config swap backup 감지: ${formatPathForDisplay(orphanBackup)}`);
+        info("이전 Codex 실행의 config swap 이 restore 에 실패했습니다.");
+        if (fix) {
+          // BUG-H (#132) ownership-claim + atomic rename:
+          // 1) orphan → claim (rename 으로 소유권 확보 — 동시 codex worker 가 건드릴 수 없음)
+          // 2) claim 읽어 tmp 로 write
+          // 3) tmp → codexConfig 로 atomic rename
+          // 4) claim 삭제
+          // 중간 실패 시 claim 을 orphan 경로로 되돌려 수동 복구 가능하게 한다.
+          const claimPath = `${orphanBackup}.doctor-claim-${process.pid}`;
+          const tmpPath = `${codexConfig}.doctor-tmp-${process.pid}`;
+          try {
+            renameSync(orphanBackup, claimPath);
+          } catch (error) {
+            fail(`복원 실패 (ownership claim): ${error.message}`);
+            info(`다른 프로세스가 backup 을 사용 중이거나 이미 정리됨: ${orphanBackup}`);
+            issues++;
+          }
+          if (existsSync(claimPath)) {
+            try {
+              const backupContent = readFileSync(claimPath, "utf8");
+              writeFileSync(tmpPath, backupContent);
+              renameSync(tmpPath, codexConfig);
+              unlinkSync(claimPath);
+              ok("config.toml 을 backup 에서 복원 + orphan 제거 완료");
+            } catch (error) {
+              fail(`복원 실패: ${error.message}`);
+              // 실패 시 claim 을 orphan 경로로 되돌려 사용자가 재시도 가능하게.
+              try {
+                renameSync(claimPath, orphanBackup);
+              } catch {
+                // claim 롤백 실패 — claim 그대로 남음. 경로 알려줌.
+                info(`claim 경로 보존: ${claimPath} (수동으로 ${orphanBackup} 로 이동 가능)`);
+              }
+              try {
+                unlinkSync(tmpPath);
+              } catch {
+                // tmp 가 아직 안 만들어진 경우 무시
+              }
+              issues++;
+            }
+          }
+        } else {
+          info("복원하려면 `tfx doctor --fix` 를 실행하세요.");
+          issues++;
+        }
+      } else {
+        addDoctorCheck(report, {
+          name: "codex-config-orphan-backup",
+          status: "ok",
+        });
+        ok("orphan config swap backup 없음");
       }
     }
 
