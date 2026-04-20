@@ -11,6 +11,37 @@ import { remoteGit, validateHost } from "./remote-session.mjs";
 const SWARM_ROOT = ".codex-swarm";
 const SLEEP_MS = 2000; // WT race-guard (MEMORY.md: wt-attach-spacing)
 
+// BUG-I: prepareWorktree 가 #34 L2 의도로 worktree 에서 rm 하는 tracked paths.
+// swarm-hypervisor 의 commit_evidence dirty 판정에서 이 경로들을 filter 해야
+// "의도된 삭제" 가 F6 no_commit_guard 를 잘못 trip 하는 것을 막을 수 있다.
+export const EXPECTED_WORKTREE_DELETIONS = Object.freeze([
+  ".claude-plugin/marketplace.json",
+  ".claude-plugin/plugin.json",
+]);
+
+/**
+ * Parse `git status --short` output into a dirty-file list, filtering out
+ * EXPECTED_WORKTREE_DELETIONS (paths the swarm intentionally removes from each
+ * worktree — see prepareWorktree #34 L2). Pure function for unit-testability.
+ *
+ * @param {string} rawStatus — stdout of `git status --short`
+ * @param {string[]} [expectedDeletions=EXPECTED_WORKTREE_DELETIONS] — paths to skip
+ * @returns {string[]} — remaining dirty paths after filtering
+ */
+export function extractDirtyFiles(
+  rawStatus,
+  expectedDeletions = EXPECTED_WORKTREE_DELETIONS,
+) {
+  const skip = new Set(expectedDeletions);
+  return String(rawStatus ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.slice(2).trim())
+    .filter(Boolean)
+    .filter((path) => !skip.has(path));
+}
+
 function git(args, cwd) {
   return new Promise((res, rej) => {
     execFile(
@@ -252,23 +283,44 @@ export async function rebaseShardOntoIntegration({
     }
   }
 
+  // #127 BUG-E: capture caller's branch BEFORE any checkout. Without
+  // restoring it in finally, this function leaks main repo HEAD onto
+  // integrationBranch and every subsequent Edit/commit lands on the swarm
+  // temp branch silently (observed 2026-04-20: probe + edits + commits all
+  // ended up on swarm/.../merge while user thought they were on main).
+  let originalBranch = null;
+  try {
+    const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
+    if (head && head !== "HEAD") originalBranch = head;
+  } catch {
+    /* detached HEAD or unknown — skip restore */
+  }
+
   // Backup integration HEAD for rollback
   const backupCommit = await git(["rev-parse", integrationBranch], rootDir);
 
+  // #127: cherry-pick instead of rebase. Rebase fails when shardBranch is
+  // already checked out by a swarm worktree ("branch already used by worktree").
+  // Cherry-pick reads the shard's commits without touching its branch ref,
+  // so worktree contention disappears. Memory: feedback_swarm_cherry_pick.
   try {
-    // Rebase shard onto integration
-    await git(["rebase", integrationBranch, shardBranch], rootDir);
+    const log = await git(
+      ["log", "--reverse", "--format=%H", `${integrationBranch}..${shardBranch}`],
+      rootDir,
+    );
+    const shaList = log.split("\n").map((s) => s.trim()).filter(Boolean);
 
-    // Fast-forward integration to include shard changes
     await git(["checkout", integrationBranch], rootDir);
-    await git(["merge", "--ff-only", shardBranch], rootDir);
+
+    for (const sha of shaList) {
+      await git(["cherry-pick", sha], rootDir);
+    }
 
     const headCommit = await git(["rev-parse", "HEAD"], rootDir);
     return { ok: true, headCommit };
   } catch (err) {
-    // Abort rebase and restore integration branch
     try {
-      await git(["rebase", "--abort"], rootDir);
+      await git(["cherry-pick", "--abort"], rootDir);
     } catch {
       /* already clean */
     }
@@ -284,6 +336,16 @@ export async function rebaseShardOntoIntegration({
     }
 
     return { ok: false, error: err.message };
+  } finally {
+    // Always restore caller's branch. Skip if originalBranch is null
+    // (detached HEAD case) or already on target.
+    if (originalBranch) {
+      try {
+        await git(["checkout", originalBranch], rootDir);
+      } catch {
+        /* best-effort — caller will see HEAD on integrationBranch */
+      }
+    }
   }
 }
 

@@ -11,6 +11,37 @@ import { remoteGit, validateHost } from "./remote-session.mjs";
 const SWARM_ROOT = ".codex-swarm";
 const SLEEP_MS = 2000; // WT race-guard (MEMORY.md: wt-attach-spacing)
 
+// BUG-I: prepareWorktree 가 #34 L2 의도로 worktree 에서 rm 하는 tracked paths.
+// swarm-hypervisor 의 commit_evidence dirty 판정에서 이 경로들을 filter 해야
+// "의도된 삭제" 가 F6 no_commit_guard 를 잘못 trip 하는 것을 막을 수 있다.
+export const EXPECTED_WORKTREE_DELETIONS = Object.freeze([
+  ".claude-plugin/marketplace.json",
+  ".claude-plugin/plugin.json",
+]);
+
+/**
+ * Parse `git status --short` output into a dirty-file list, filtering out
+ * EXPECTED_WORKTREE_DELETIONS (paths the swarm intentionally removes from each
+ * worktree — see prepareWorktree #34 L2). Pure function for unit-testability.
+ *
+ * @param {string} rawStatus — stdout of `git status --short`
+ * @param {string[]} [expectedDeletions=EXPECTED_WORKTREE_DELETIONS] — paths to skip
+ * @returns {string[]} — remaining dirty paths after filtering
+ */
+export function extractDirtyFiles(
+  rawStatus,
+  expectedDeletions = EXPECTED_WORKTREE_DELETIONS,
+) {
+  const skip = new Set(expectedDeletions);
+  return String(rawStatus ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.slice(2).trim())
+    .filter(Boolean)
+    .filter((path) => !skip.has(path));
+}
+
 function git(args, cwd) {
   return new Promise((res, rej) => {
     execFile(
