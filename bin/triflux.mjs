@@ -5633,6 +5633,30 @@ async function main() {
       await cmdSynapseStatus(cmdArgs.slice(1), { json: JSON_OUTPUT });
       return;
     }
+    case "review": {
+      const { runCodexReview } = await import("../hub/team/codex-review.mjs");
+      const ref = cmdArgs[0] && !cmdArgs[0].startsWith("--")
+        ? cmdArgs[0]
+        : "HEAD";
+      const baseIdx = cmdArgs.indexOf("--base");
+      const base = baseIdx >= 0 ? cmdArgs[baseIdx + 1] : undefined;
+      const timeoutIdx = cmdArgs.indexOf("--timeout");
+      const timeoutMs =
+        timeoutIdx >= 0 ? Number(cmdArgs[timeoutIdx + 1]) * 1000 : 180_000;
+      const result = await runCodexReview({ ref, base, timeoutMs });
+      if (JSON_OUTPUT) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        console.log("");
+        console.log(
+          `range=${result.range || ref} diffBytes=${result.diffBytes} verdict=${result.verdict || "n/a"}`,
+        );
+        if (result.error) console.log(`error: ${result.error}`);
+      }
+      process.exit(result.ok ? 0 : 1);
+    }
     case "swarm": {
       await checkHubRunning();
       const { cmdSwarmRun, cmdSwarmPlan, cmdSwarmList } = await import(
