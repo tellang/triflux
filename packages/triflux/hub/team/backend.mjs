@@ -42,10 +42,12 @@ export class GeminiBackend {
   }
 
   buildArgs(prompt, resultFile, opts = {}) {
+    // --yolo is required: without it gemini waits on stdin for tool-call approval
+    // even when stdin is redirected, producing a 0-byte 90s+ silent hang.
     if (IS_WINDOWS) {
-      return `$null | gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
+      return `$null | gemini --yolo --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
     }
-    return `gemini --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err' < /dev/null`;
+    return `gemini --yolo --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err' < /dev/null`;
   }
 
   env() {

@@ -58,17 +58,35 @@ describe("GeminiBackend", () => {
     assert.equal(backend.command(), "gemini");
   });
 
-  it("buildArgs — gemini --prompt ... --output-format text > result 포함", () => {
+  it("buildArgs — gemini --yolo --prompt ... --output-format text > result 포함", () => {
     const cmd = backend.buildArgs(
       "(Get-Content -Raw '/tmp/p.txt')",
       "/tmp/r.txt",
     );
-    assert.ok(cmd.includes("gemini --prompt"), `gemini --prompt 포함: ${cmd}`);
+    assert.ok(
+      cmd.includes("gemini --yolo --prompt"),
+      `gemini --yolo --prompt 포함: ${cmd}`,
+    );
     assert.ok(
       cmd.includes("--output-format text"),
       `--output-format text 포함: ${cmd}`,
     );
     assert.ok(cmd.includes("> '/tmp/r.txt'"), `> result 포함: ${cmd}`);
+  });
+
+  it("buildArgs — --yolo 플래그 누락 금지 (silent-hang 회귀 방지)", () => {
+    const cmd = backend.buildArgs(
+      "(Get-Content -Raw '/tmp/p.txt')",
+      "/tmp/r.txt",
+    );
+    assert.ok(
+      /\bgemini\s+--yolo\b/.test(cmd),
+      `--yolo 플래그 필수: ${cmd}`,
+    );
+    assert.ok(
+      cmd.indexOf("--yolo") < cmd.indexOf("--prompt"),
+      `--yolo 는 --prompt 앞에 위치: ${cmd}`,
+    );
   });
 
   it("env() — 빈 객체 반환", () => {
