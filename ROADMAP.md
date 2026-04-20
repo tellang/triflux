@@ -21,7 +21,7 @@
 | # | Track | Crit | Regr | Score | Issues | Plan | 상태 근거 |
 |---|---|---|---|---|---|---|---|
 | 1 | **tfx-multi-nontty-reliability** | H | Y | **5** | [#114](https://github.com/tellang/triflux/issues/114) · [#116](https://github.com/tellang/triflux/issues/116) · [#117](https://github.com/tellang/triflux/issues/117) | [2026-04-19-issue-116-tfx-multi-investigate.md](.triflux/plans/2026-04-19-issue-116-tfx-multi-investigate.md) | investigate ✅ dual-lane (debugger+tracer). 2 sub-issue fix 완료 (로컬). 4 sub-issue + #114 fix 는 probe/사용자 게이트 대기 |
-| 2 | **swarm-reliability** | H | N | 3 | [#115](https://github.com/tellang/triflux/issues/115) | [2026-04-19-issue-115-swarm-reliability.md](.triflux/plans/2026-04-19-issue-115-swarm-reliability.md) | ✅ **DONE** — Lane 1 (worker completion + F7) `1f339c4` + Lane 2 (recovery-store preservation) `2874074`. push 완료. 아카이브 후보 |
+| 2 | **swarm-reliability** | H | N | 3 | [#115](https://github.com/tellang/triflux/issues/115) · [#126](https://github.com/tellang/triflux/issues/126) · [#127](https://github.com/tellang/triflux/issues/127) · [#128](https://github.com/tellang/triflux/issues/128) | [2026-04-19-issue-115-swarm-reliability.md](.triflux/plans/2026-04-19-issue-115-swarm-reliability.md) | ✅ **DONE** — Lane 1 (`1f339c4`) + Lane 2 (`2874074`) + session 7 후속 fix: #126 (`87767de` summary state/integrated/exit code), #127 (`d79c915` cherry-pick+BUG-E HEAD restore), #128 (`b1a3073` cmd /c bypass). 아카이브 후보 |
 | 3 | **codex-approval-stall** | M | Y | 4 | [#66](https://github.com/tellang/triflux/issues/66) | — | v10.9.31 workaround만. 근본 미해결 (OPEN). upstream/environment 성격 — 단독 대응 |
 | 4 | **phase3-step-e-wiring** | L | N | 1 | — | [phase3-step-e-plus-issue-113.md](.triflux/plans/phase3-step-e-plus-issue-113.md) | 실체는 skill-drift 20 todo 복원 + #113 CLAUDE.md 자동주입 차단. 소규모 wiring 아님 — 2 shard 격리 착수 필요 |
 
@@ -58,6 +58,7 @@
 | swarm-interactive-attach | M | Issue #115 (4). dashboard(단일 뷰) vs 인터랙티브(직접 pane 진입) 디자인 결정 필요. 사용자 인터뷰 후 진입 |
 | conductor-completion-payload-wiring | M | **구현 완료 (2026-04-19 session 5)**: `hub/team/extract-completion-payload.mjs` pure helper (9 tests) + `conductor.mjs` 로컬/원격 exit(0) 경로 wiring. swarm-hypervisor F7 guard (validateWorkerCompletion) 와 end-to-end 연결 |
 | prd-template-completion-protocol | L | Issue #115 PRD #5. **위치 결정 완료 (2026-04-19 session 5)**: B-hybrid — `swarm-hypervisor.mjs:433` buildSessionConfig 에서 `shard.prompt + COMPLETION_PROTOCOL_APPENDIX` 런타임 주입 + `docs/prd/_template.md` 에 placeholder 주석만. **구현 완료 (2026-04-20 session 6, [#125](https://github.com/tellang/triflux/issues/125))**: sentinel framing (`<<<TFX_COMPLETION_BEGIN/END>>>`) → `sentinel-capture.mjs` + `build-worker-prompt.mjs` 신규 helper, +30 unit tests, Codex 2 라운드 (R1 REQUEST_CHANGES → R2 APPROVE). overflow guard + standalone-line matching RESOLVED |
+| swarm-worker-failure-surfacing | M | Session 7 발견 (2026-04-20). worker self-failure silent success: [#129](https://github.com/tellang/triflux/issues/129) (BUG-F, worker 가 PRD instruction 무시하고 sentinel 만 emit) + [#130](https://github.com/tellang/triflux/issues/130) (BUG-G, F7 validator 가 `status='failed'+commits_made=[]` 통과시켜 `integrated=1` 카운트). #126/#127/#128 fix 후속. probe-noop 재현 가능. fix 전략 미정 |
 
 ---
 
@@ -131,3 +132,12 @@
 - **DONE 11개 체크포인트** `archived/` 이동 완료 (2026-04-19 세션 2).
 - **DROPPED 8개 체크포인트** `archived/dropped/` 격리 완료 (2026-04-19 세션 2).
 - **NOW #4 phase3-step-e** — plan 규모 확인 결과 "소규모 wiring" 아님. skill-drift 20 todo + #113 조사. 별도 세션 또는 Agent 위임 권장.
+
+## 세션 7 (2026-04-20)
+
+- **swarm 신뢰성 회복 3건 fix + close** — #126 (`87767de` CLI summary state/integrated/integration_failures + exit code), #127 (`d79c915` rebase→cherry-pick + BUG-E originalBranch finally restore), #128 (`b1a3073` cmd /c bypass via `unwrapCmdToJsScript`). 모두 main push + close 완료.
+- **BUG-E root cause 확정** — `rebaseShardOntoIntegration` 이 main HEAD 를 swarm 임시 브랜치로 escape 후 복귀 안 함. 이전 세션부터 발생한 "변경이 사라진다" 사고의 근본 원인. originalBranch save → finally restore 패턴으로 해결.
+- **새 follow-up issue 2건** — [#129](https://github.com/tellang/triflux/issues/129) BUG-F (worker PRD instruction ignored), [#130](https://github.com/tellang/triflux/issues/130) BUG-G (F7 validator silent success). NEXT 의 swarm-worker-failure-surfacing 트랙으로 추적.
+- **운영 메모: `npm link` 필수** — `tfx` 는 npm global install (`/c/Users/tellang/AppData/Roaming/npm/node_modules/triflux/`). main 의 fix 가 즉시 활성화되려면 개발 환경에서 `npm link` 1회 실행 필요. 안 하면 다음 세션도 같은 사고 (main fix 가 global tfx 에 반영 안 됨) 재발.
+- **운영 메모: hub 조회 표준 = `tfx hub status`** — 직접 curl 또는 port hardcode 금지. 잘못된 hub 조회 (curl http://127.0.0.1:33797/health) 가 BUG-D/BUG-E trigger 의 시초였음. memory `feedback_hub_status_query` 추가.
+- **신규 unit test +8** — `worktree-lifecycle.test.mjs` (W-08, W-09, W-10) + `execution-mode.test.mjs` +5. 직접 영역 회귀 35/35 pass.
