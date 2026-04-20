@@ -20,12 +20,19 @@ export const EXPECTED_WORKTREE_DELETIONS = Object.freeze([
 ]);
 
 /**
- * Parse `git status --short` output into a dirty-file list, filtering out
- * EXPECTED_WORKTREE_DELETIONS (paths the swarm intentionally removes from each
- * worktree — see prepareWorktree #34 L2). Pure function for unit-testability.
+ * Parse `git status --short` output into a dirty-file list. Filters out paths
+ * in `expectedDeletions` only when the XY status code indicates a deletion
+ * (X='D' or Y='D'). Modifications / additions / untracked of the same paths
+ * remain dirty — otherwise a worker could silently corrupt those files and
+ * bypass F6 no_commit_guard (Codex review #134 round 2).
+ *
+ * git status --short XY codes reference:
+ *   ' D' unstaged delete, 'D ' staged delete, 'DD' both — filtered if path
+ *     is in expectedDeletions.
+ *   ' M'/'M '/'MM' modify, '??' untracked, 'A ' add, 'R ' rename — kept.
  *
  * @param {string} rawStatus — stdout of `git status --short`
- * @param {string[]} [expectedDeletions=EXPECTED_WORKTREE_DELETIONS] — paths to skip
+ * @param {string[]} [expectedDeletions=EXPECTED_WORKTREE_DELETIONS] — paths eligible for deletion-only skip
  * @returns {string[]} — remaining dirty paths after filtering
  */
 export function extractDirtyFiles(
@@ -33,13 +40,17 @@ export function extractDirtyFiles(
   expectedDeletions = EXPECTED_WORKTREE_DELETIONS,
 ) {
   const skip = new Set(expectedDeletions);
-  return String(rawStatus ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.slice(2).trim())
-    .filter(Boolean)
-    .filter((path) => !skip.has(path));
+  const out = [];
+  for (const raw of String(rawStatus ?? "").split(/\r?\n/)) {
+    if (raw.length < 3) continue;
+    const xy = raw.slice(0, 2);
+    const path = raw.slice(2).trim();
+    if (!path) continue;
+    const isDeletion = xy.includes("D");
+    if (isDeletion && skip.has(path)) continue;
+    out.push(path);
+  }
+  return out;
 }
 
 function git(args, cwd) {
