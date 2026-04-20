@@ -2,7 +2,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  aggregateVerdicts,
   buildReviewPrompt,
+  expandRange,
+  listChangedFiles,
+  parseChangedFilesFromLog,
   parseVerdict,
   resolveReviewDiff,
   runCodexReview,
@@ -90,4 +94,200 @@ test("runCodexReview: rejects oversized prompt without spawning codex", async ()
     assert.match(result.error, /prompt too large/);
     assert.equal(result.verdict, null);
   }
+});
+
+// ── shard-mode helpers ─────────────────────────────────────────
+
+test("aggregateVerdicts: empty list returns UNKNOWN", () => {
+  assert.equal(aggregateVerdicts([]), "UNKNOWN");
+});
+
+test("aggregateVerdicts: any REQUEST_CHANGES wins", () => {
+  const fileResults = [
+    { verdict: "APPROVED" },
+    { verdict: "COMMENT" },
+    { verdict: "REQUEST_CHANGES" },
+    { verdict: "APPROVED" },
+  ];
+  assert.equal(aggregateVerdicts(fileResults), "REQUEST_CHANGES");
+});
+
+test("aggregateVerdicts: COMMENT overrides APPROVED but loses to REQUEST_CHANGES", () => {
+  assert.equal(
+    aggregateVerdicts([{ verdict: "APPROVED" }, { verdict: "COMMENT" }]),
+    "COMMENT",
+  );
+});
+
+test("aggregateVerdicts: all APPROVED returns APPROVED", () => {
+  assert.equal(
+    aggregateVerdicts([
+      { verdict: "APPROVED" },
+      { verdict: "APPROVED" },
+    ]),
+    "APPROVED",
+  );
+});
+
+test("aggregateVerdicts: mixed APPROVED + UNKNOWN falls through to UNKNOWN", () => {
+  assert.equal(
+    aggregateVerdicts([{ verdict: "APPROVED" }, { verdict: "UNKNOWN" }]),
+    "UNKNOWN",
+  );
+});
+
+test("aggregateVerdicts: skipped entries are excluded from active set", () => {
+  const results = [
+    { verdict: "APPROVED", skipped: true },
+    { verdict: "APPROVED" },
+  ];
+  assert.equal(aggregateVerdicts(results), "APPROVED");
+});
+
+test("aggregateVerdicts: all skipped returns UNKNOWN", () => {
+  const results = [
+    { verdict: "APPROVED", skipped: true },
+    { verdict: "APPROVED", skipped: true },
+  ];
+  assert.equal(aggregateVerdicts(results), "UNKNOWN");
+});
+
+test("listChangedFiles: returns non-empty array for HEAD~1..HEAD", () => {
+  // Repo has at least 1 prior commit (session bootstrap). This asserts the
+  // shape, not a specific file list.
+  const files = listChangedFiles("HEAD~1..HEAD");
+  assert.ok(Array.isArray(files));
+  assert.ok(files.length > 0, "at least one file should differ");
+  for (const f of files) {
+    assert.equal(typeof f, "string");
+    assert.ok(f.length > 0);
+  }
+});
+
+test("listChangedFiles: empty range returns empty array", () => {
+  // HEAD..HEAD has no changes.
+  const files = listChangedFiles("HEAD..HEAD");
+  assert.deepEqual(files, []);
+});
+
+test("resolveReviewDiff: file param scopes diff via `-- <file>`", () => {
+  // Any file that changed in HEAD~1..HEAD. Use listChangedFiles to pick one.
+  const all = listChangedFiles("HEAD~1..HEAD");
+  if (all.length === 0) return; // nothing to scope — skip
+  const target = all[0];
+  const { diff, range, file } = resolveReviewDiff({
+    ref: "HEAD",
+    file: target,
+  });
+  assert.equal(range, "HEAD~1..HEAD");
+  assert.equal(file, target);
+  assert.ok(typeof diff === "string");
+  // Scoped diff should mention only the target file in its `diff --git` header.
+  // Other files may still appear in --stat summary, so check body presence.
+  assert.ok(diff.includes(target), "scoped diff should reference target file");
+});
+
+test("expandRange: bare ref expands to ~1..ref", () => {
+  assert.equal(expandRange({ ref: "HEAD" }), "HEAD~1..HEAD");
+  assert.equal(expandRange({ ref: "abcdef0" }), "abcdef0~1..abcdef0");
+});
+
+test("expandRange: explicit base overrides", () => {
+  assert.equal(
+    expandRange({ ref: "HEAD", base: "main" }),
+    "main..HEAD",
+  );
+  assert.equal(
+    expandRange({ ref: "feat/x", base: "origin/main" }),
+    "origin/main..feat/x",
+  );
+});
+
+test("expandRange: range ref passes through unchanged", () => {
+  assert.equal(expandRange({ ref: "HEAD~3..HEAD" }), "HEAD~3..HEAD");
+  assert.equal(expandRange({ ref: "main..feat/x" }), "main..feat/x");
+});
+
+test("expandRange: defaults ref to HEAD when omitted", () => {
+  assert.equal(expandRange({}), "HEAD~1..HEAD");
+  assert.equal(expandRange(), "HEAD~1..HEAD");
+});
+
+test("listChangedFiles: git log semantics, deduped, no blanks", () => {
+  // Contract test on a known real range. For single-commit ranges both
+  // `git log` and `git diff --name-only` converge — regression coverage
+  // for the revert-within-range / merge semantics is done via
+  // parseChangedFilesFromLog below.
+  const files = listChangedFiles("HEAD~1..HEAD");
+  const unique = new Set(files);
+  assert.equal(
+    unique.size,
+    files.length,
+    "listChangedFiles must dedupe file paths",
+  );
+  for (const f of files) {
+    assert.ok(f && !/^\s*$/.test(f), "no blank entries");
+  }
+});
+
+test("parseChangedFilesFromLog: dedupes paths repeated across commits", () => {
+  // Simulates `git log --name-only --pretty=format:` output where commit A
+  // adds foo.mjs + bar.mjs, and commit B reverts bar.mjs. Both show up in
+  // log output but only once each in the result.
+  const canned = [
+    "", // first commit's blank format line
+    "foo.mjs",
+    "bar.mjs",
+    "", // second commit
+    "bar.mjs", // revert — appears twice in log
+    "",
+    "baz.mjs", // third commit
+  ].join("\n");
+  const result = parseChangedFilesFromLog(canned);
+  assert.deepEqual(result.sort(), ["bar.mjs", "baz.mjs", "foo.mjs"]);
+});
+
+test("parseChangedFilesFromLog: handles empty and whitespace-only input", () => {
+  assert.deepEqual(parseChangedFilesFromLog(""), []);
+  assert.deepEqual(parseChangedFilesFromLog("\n\n  \n\t\n"), []);
+  assert.deepEqual(parseChangedFilesFromLog(null), []);
+  assert.deepEqual(parseChangedFilesFromLog(undefined), []);
+});
+
+test("parseChangedFilesFromLog: preserves insertion order of first occurrence", () => {
+  // Same file in 3 commits; first occurrence wins insertion order.
+  const canned = "a\n\nb\na\nc\na\n";
+  assert.deepEqual(parseChangedFilesFromLog(canned), ["a", "b", "c"]);
+});
+
+test("parseChangedFilesFromLog: handles CRLF line endings", () => {
+  const canned = "alpha\r\nbeta\r\n\r\nalpha\r\ngamma\r\n";
+  assert.deepEqual(parseChangedFilesFromLog(canned), [
+    "alpha",
+    "beta",
+    "gamma",
+  ]);
+});
+
+test("listChangedFiles: argv contract — does not pass --no-merges", () => {
+  // Regression guard: merges must be included so enumeration stays aligned
+  // with resolveReviewDiff's plain `git log -p`. Round 3 fix in PR #138.
+  let capturedCmd = "";
+  let capturedArgs = [];
+  const stubRunner = (cmd, args) => {
+    capturedCmd = cmd;
+    capturedArgs = args;
+    return "foo.mjs\nbar.mjs\n";
+  };
+  const result = listChangedFiles("HEAD~2..HEAD", stubRunner);
+  assert.equal(capturedCmd, "git");
+  assert.equal(capturedArgs[0], "log");
+  assert.ok(capturedArgs.includes("--name-only"));
+  assert.ok(capturedArgs.includes("--pretty=format:"));
+  assert.ok(capturedArgs.includes("HEAD~2..HEAD"));
+  assert.ok(
+    !capturedArgs.includes("--no-merges"),
+    "must not pass --no-merges",
+  );
+  assert.deepEqual(result.sort(), ["bar.mjs", "foo.mjs"]);
 });

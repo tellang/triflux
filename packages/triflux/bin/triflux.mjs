@@ -5634,7 +5634,6 @@ async function main() {
       return;
     }
     case "review": {
-      const { runCodexReview } = await import("../hub/team/codex-review.mjs");
       const ref = cmdArgs[0] && !cmdArgs[0].startsWith("--")
         ? cmdArgs[0]
         : "HEAD";
@@ -5643,6 +5642,49 @@ async function main() {
       const timeoutIdx = cmdArgs.indexOf("--timeout");
       const timeoutMs =
         timeoutIdx >= 0 ? Number(cmdArgs[timeoutIdx + 1]) * 1000 : 180_000;
+      const shardIdx = cmdArgs.indexOf("--shard");
+      const shard = shardIdx >= 0 ? cmdArgs[shardIdx + 1] : "off";
+
+      if (shard === "per-file") {
+        const { runCodexReviewSharded } = await import(
+          "../hub/team/codex-review.mjs"
+        );
+        const result = await runCodexReviewSharded({
+          ref,
+          base,
+          timeoutMs,
+          onFileStart: ({ file, index, total }) => {
+            if (!JSON_OUTPUT) {
+              process.stderr.write(
+                `[${index + 1}/${total}] reviewing ${file}\n`,
+              );
+            }
+          },
+        });
+        if (JSON_OUTPUT) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(
+            `=== per-file review (${result.files.length} files, range=${result.range}) ===`,
+          );
+          for (const r of result.perFile) {
+            console.log("");
+            console.log(
+              `--- ${r.file} (${r.diffBytes}b, verdict=${r.verdict || "n/a"}${r.skipped ? ", skipped" : ""}) ---`,
+            );
+            if (r.error) console.log(`  error: ${r.error}`);
+            if (r.stdout) process.stdout.write(r.stdout);
+          }
+          console.log("");
+          console.log(
+            `Aggregate: files=${result.files.length} verdict=${result.verdict}`,
+          );
+          if (result.error) console.log(`error: ${result.error}`);
+        }
+        process.exit(result.ok ? 0 : 1);
+      }
+
+      const { runCodexReview } = await import("../hub/team/codex-review.mjs");
       const result = await runCodexReview({ ref, base, timeoutMs });
       if (JSON_OUTPUT) {
         console.log(JSON.stringify(result, null, 2));
