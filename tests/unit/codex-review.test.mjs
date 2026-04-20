@@ -1,6 +1,7 @@
 // codex-review — pure helper tests (no actual Codex invocation).
-import { test } from "node:test";
+
 import assert from "node:assert/strict";
+import { test } from "node:test";
 import {
   aggregateVerdicts,
   buildReviewPrompt,
@@ -24,10 +25,7 @@ test("parseVerdict: extracts REQUEST_CHANGES marker", () => {
 });
 
 test("parseVerdict: extracts COMMENT marker", () => {
-  assert.equal(
-    parseVerdict("summary\n\nVERDICT: COMMENT\n"),
-    "COMMENT",
-  );
+  assert.equal(parseVerdict("summary\n\nVERDICT: COMMENT\n"), "COMMENT");
 });
 
 test("parseVerdict: falls back to REQUEST_CHANGES if keyword appears without marker", () => {
@@ -121,10 +119,7 @@ test("aggregateVerdicts: COMMENT overrides APPROVED but loses to REQUEST_CHANGES
 
 test("aggregateVerdicts: all APPROVED returns APPROVED", () => {
   assert.equal(
-    aggregateVerdicts([
-      { verdict: "APPROVED" },
-      { verdict: "APPROVED" },
-    ]),
+    aggregateVerdicts([{ verdict: "APPROVED" }, { verdict: "APPROVED" }]),
     "APPROVED",
   );
 });
@@ -193,10 +188,7 @@ test("expandRange: bare ref expands to ~1..ref", () => {
 });
 
 test("expandRange: explicit base overrides", () => {
-  assert.equal(
-    expandRange({ ref: "HEAD", base: "main" }),
-    "main..HEAD",
-  );
+  assert.equal(expandRange({ ref: "HEAD", base: "main" }), "main..HEAD");
   assert.equal(
     expandRange({ ref: "feat/x", base: "origin/main" }),
     "origin/main..feat/x",
@@ -285,9 +277,6 @@ test("listChangedFiles: argv contract — does not pass --no-merges", () => {
   assert.ok(capturedArgs.includes("--name-only"));
   assert.ok(capturedArgs.includes("--pretty=format:"));
   assert.ok(capturedArgs.includes("HEAD~2..HEAD"));
-  assert.ok(
-    !capturedArgs.includes("--no-merges"),
-    "must not pass --no-merges",
-  );
+  assert.ok(!capturedArgs.includes("--no-merges"), "must not pass --no-merges");
   assert.deepEqual(result.sort(), ["bar.mjs", "foo.mjs"]);
 });

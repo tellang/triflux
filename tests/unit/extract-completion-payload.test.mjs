@@ -122,7 +122,10 @@ test("앞부분이 잘린 payload — 마지막 intact inner commit object 를 �
   assert.ok(full.length > 16384, "test fixture must exceed buffer size");
   const truncated = full.slice(-16384);
   const result = extractCompletionPayload(truncated);
-  assert.ok(result, "head-truncated tail 에서 inner object 가 deterministic 하게 추출되어야 함");
+  assert.ok(
+    result,
+    "head-truncated tail 에서 inner object 가 deterministic 하게 추출되어야 함",
+  );
   // 외부 status/commits_made 는 손실되어 없어야 함.
   assert.equal(result.payload.status, undefined);
   assert.equal(result.payload.commits_made, undefined);
@@ -198,9 +201,7 @@ test("sentinel-framed payload — 16 KiB 보다 큰 payload 도 그대로 파싱
   const shas = Array.from({ length: 600 }, (_, i) =>
     String(i).padStart(40, "0"),
   );
-  const inner = shas
-    .map((sha) => `{"sha":"${sha}","message":"m"}`)
-    .join(",");
+  const inner = shas.map((sha) => `{"sha":"${sha}","message":"m"}`).join(",");
   const payload = `{"status":"ok","commits_made":[${inner}]}`;
   const tail = `${SENTINEL_BEGIN}\n${payload}\n${SENTINEL_END}\n`;
   assert.ok(payload.length > 16384, "fixture must exceed legacy 16 KiB tail");

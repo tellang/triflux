@@ -168,7 +168,9 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
   // #126: surface integration outcome in summary + exit code so silent
   // success failures (worker exit 0 + integration_failed) can't mask state.
   const ip = status.integrationPromise || {};
-  const integratedCount = Array.isArray(ip.integrated) ? ip.integrated.length : 0;
+  const integratedCount = Array.isArray(ip.integrated)
+    ? ip.integrated.length
+    : 0;
   const integrationFailureCount = Array.isArray(ip.integrationFailures)
     ? ip.integrationFailures.length
     : 0;

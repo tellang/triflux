@@ -13,8 +13,7 @@ import { fileURLToPath } from "node:url";
 
 export const PKG_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 export const HUB_PID_DIR =
-  process.env.TFX_HUB_PID_DIR ||
-  join(homedir(), ".claude", "cache", "tfx-hub");
+  process.env.TFX_HUB_PID_DIR || join(homedir(), ".claude", "cache", "tfx-hub");
 export const TEAM_PROFILE = (() => {
   const raw = String(process.env.TFX_TEAM_PROFILE || "team")
     .trim()

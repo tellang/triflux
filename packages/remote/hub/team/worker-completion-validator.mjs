@@ -35,18 +35,35 @@ export function validateWorkerCompletion(payload) {
   }
 
   const valid = compiled(payload);
-  if (valid) return { ok: true };
+  if (!valid) {
+    const firstError = compiled.errors?.[0];
+    const reason = formatError(firstError, payload);
+    return { ok: false, reason };
+  }
 
-  const firstError = compiled.errors?.[0];
-  const reason = formatError(firstError, payload);
-  return { ok: false, reason };
+  // BUG-G (#130): the schema's if-then only constrains commits_made when
+  // status='ok', so status='failed' payloads pass AJV vacuously. Without
+  // this guard the hypervisor F7 path treats a worker self-reported failure
+  // as a successful completion and integrates phantom shards.
+  if (payload.status === "failed") {
+    const detail =
+      typeof payload.reason === "string" && payload.reason.length > 0
+        ? payload.reason
+        : "unspecified";
+    return { ok: false, reason: `worker_self_reported_failure:${detail}` };
+  }
+
+  return { ok: true };
 }
 
 function formatError(err, payload) {
   if (!err) return "schema_validation_failed";
 
   // Map Ajv keywords to short, actionable reasons.
-  if (err.keyword === "required" && err.params?.missingProperty === "commits_made") {
+  if (
+    err.keyword === "required" &&
+    err.params?.missingProperty === "commits_made"
+  ) {
     return "missing_commits_made";
   }
   if (err.keyword === "minItems" && err.instancePath === "/commits_made") {

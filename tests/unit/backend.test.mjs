@@ -101,7 +101,10 @@ describe("buildGeminiCommand: platform-specific formatting", () => {
       cmd.includes(`> '${resultFile}' 2>'${resultFile}.err'`),
       `result/err 리다이렉트: ${cmd}`,
     );
-    assert.ok(!cmd.includes("< /dev/null"), `Windows 는 /dev/null 미사용: ${cmd}`);
+    assert.ok(
+      !cmd.includes("< /dev/null"),
+      `Windows 는 /dev/null 미사용: ${cmd}`,
+    );
   });
 
   it("Unix 분기 — gemini --yolo --prompt ... < /dev/null (silent-hang 회귀 방지)", () => {
@@ -122,10 +125,7 @@ describe("buildGeminiCommand: platform-specific formatting", () => {
     const win = buildGeminiCommand(prompt, resultFile, { isWindows: true });
     const unix = buildGeminiCommand(prompt, resultFile, { isWindows: false });
     for (const cmd of [win, unix]) {
-      assert.ok(
-        /\bgemini\s+--yolo\b/.test(cmd),
-        `--yolo 플래그 누락: ${cmd}`,
-      );
+      assert.ok(/\bgemini\s+--yolo\b/.test(cmd), `--yolo 플래그 누락: ${cmd}`);
       assert.ok(
         cmd.indexOf("--yolo") < cmd.indexOf("--prompt"),
         `--yolo 는 --prompt 앞: ${cmd}`,

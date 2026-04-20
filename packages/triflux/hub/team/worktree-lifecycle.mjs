@@ -316,10 +316,18 @@ export async function rebaseShardOntoIntegration({
   // so worktree contention disappears. Memory: feedback_swarm_cherry_pick.
   try {
     const log = await git(
-      ["log", "--reverse", "--format=%H", `${integrationBranch}..${shardBranch}`],
+      [
+        "log",
+        "--reverse",
+        "--format=%H",
+        `${integrationBranch}..${shardBranch}`,
+      ],
       rootDir,
     );
-    const shaList = log.split("\n").map((s) => s.trim()).filter(Boolean);
+    const shaList = log
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
 
     await git(["checkout", integrationBranch], rootDir);
 

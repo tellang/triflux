@@ -3415,7 +3415,9 @@ async function cmdDoctor(options = {}) {
           path: orphanBackup,
           fix: "tfx doctor --fix",
         });
-        warn(`orphan config swap backup 감지: ${formatPathForDisplay(orphanBackup)}`);
+        warn(
+          `orphan config swap backup 감지: ${formatPathForDisplay(orphanBackup)}`,
+        );
         info("이전 Codex 실행의 config swap 이 restore 에 실패했습니다.");
         if (fix) {
           // BUG-H (#132) ownership-claim + atomic rename:
@@ -3430,7 +3432,9 @@ async function cmdDoctor(options = {}) {
             renameSync(orphanBackup, claimPath);
           } catch (error) {
             fail(`복원 실패 (ownership claim): ${error.message}`);
-            info(`다른 프로세스가 backup 을 사용 중이거나 이미 정리됨: ${orphanBackup}`);
+            info(
+              `다른 프로세스가 backup 을 사용 중이거나 이미 정리됨: ${orphanBackup}`,
+            );
             issues++;
           }
           if (existsSync(claimPath)) {
@@ -3447,7 +3451,9 @@ async function cmdDoctor(options = {}) {
                 renameSync(claimPath, orphanBackup);
               } catch {
                 // claim 롤백 실패 — claim 그대로 남음. 경로 알려줌.
-                info(`claim 경로 보존: ${claimPath} (수동으로 ${orphanBackup} 로 이동 가능)`);
+                info(
+                  `claim 경로 보존: ${claimPath} (수동으로 ${orphanBackup} 로 이동 가능)`,
+                );
               }
               try {
                 unlinkSync(tmpPath);
@@ -5634,9 +5640,8 @@ async function main() {
       return;
     }
     case "review": {
-      const ref = cmdArgs[0] && !cmdArgs[0].startsWith("--")
-        ? cmdArgs[0]
-        : "HEAD";
+      const ref =
+        cmdArgs[0] && !cmdArgs[0].startsWith("--") ? cmdArgs[0] : "HEAD";
       const baseIdx = cmdArgs.indexOf("--base");
       const base = baseIdx >= 0 ? cmdArgs[baseIdx + 1] : undefined;
       const timeoutIdx = cmdArgs.indexOf("--timeout");
@@ -5698,6 +5703,7 @@ async function main() {
         if (result.error) console.log(`error: ${result.error}`);
       }
       process.exit(result.ok ? 0 : 1);
+      return;
     }
     case "swarm": {
       await checkHubRunning();

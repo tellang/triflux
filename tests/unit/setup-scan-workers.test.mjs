@@ -5,11 +5,11 @@
 // top-level `hub/workers/*.mjs`. This suite pins the recursive behavior so
 // a future refactor cannot silently re-break nested worker deps.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { test } from "node:test";
 
 import { scanHubWorkerFiles } from "../../scripts/setup.mjs";
 
@@ -17,7 +17,9 @@ function makeFixture() {
   const root = mkdtempSync(join(tmpdir(), "tfx-scan-test-"));
   const claude = mkdtempSync(join(tmpdir(), "tfx-scan-claude-"));
   mkdirSync(join(root, "hub", "workers", "lib"), { recursive: true });
-  mkdirSync(join(root, "hub", "workers", "deep", "nested"), { recursive: true });
+  mkdirSync(join(root, "hub", "workers", "deep", "nested"), {
+    recursive: true,
+  });
   // top-level workers
   writeFileSync(join(root, "hub", "workers", "factory.mjs"), "// factory");
   writeFileSync(
@@ -35,14 +37,8 @@ function makeFixture() {
     "// deep",
   );
   // non-mjs (should be skipped)
-  writeFileSync(
-    join(root, "hub", "workers", "README.md"),
-    "# readme",
-  );
-  writeFileSync(
-    join(root, "hub", "workers", "lib", "data.json"),
-    "{}",
-  );
+  writeFileSync(join(root, "hub", "workers", "README.md"), "# readme");
+  writeFileSync(join(root, "hub", "workers", "lib", "data.json"), "{}");
   // hub-root deps (test covers the existing branch too)
   writeFileSync(join(root, "hub", "cli-adapter-base.mjs"), "// base");
   writeFileSync(join(root, "hub", "platform.mjs"), "// platform");

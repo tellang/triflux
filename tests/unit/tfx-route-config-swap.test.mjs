@@ -12,8 +12,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { describe, it, before, after } from "node:test";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -80,7 +80,7 @@ describe("BUG-H _codex_config_swap fail-safe", () => {
   });
 
   const baseToml = [
-    "model = \"gpt-5.3\"",
+    'model = "gpt-5.3"',
     "",
     "[mcp_servers.tfx-hub]",
     'url = "http://127.0.0.1:27888/mcp"',

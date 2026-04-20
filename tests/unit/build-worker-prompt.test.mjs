@@ -20,7 +20,9 @@ test("appendix 는 두 sentinel 마커를 명시", () => {
 test("appendix 는 자동 삽입 표식 + PRD 작성자 안내 포함", () => {
   assert.ok(COMPLETION_PROTOCOL_APPENDIX.includes("자동 삽입됨"));
   assert.ok(
-    COMPLETION_PROTOCOL_APPENDIX.includes("PRD 작성자는 이 섹션을 수정하지 마세요"),
+    COMPLETION_PROTOCOL_APPENDIX.includes(
+      "PRD 작성자는 이 섹션을 수정하지 마세요",
+    ),
   );
 });
 
