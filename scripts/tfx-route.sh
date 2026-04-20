@@ -1436,31 +1436,50 @@ _codex_config_swap() {
       fi
     done
 
+    # BUG-H (#132) fail-safe: allowed_pat 이 비면 swap 스킵.
+    # 과거에는 awk 가 keep="" 에서 모든 [mcp_servers.*] 섹션을 제거하고
+    # restore 시 Windows mv 실패 → config.toml 영구 손상이 재발했다.
+    # 비허용 서버 비활성화는 mcp-filter.mjs 의 enabled=false override 가 담당한다.
+    if [[ -z "$allowed_pat" ]]; then
+      echo "[tfx-route] config.toml swap 스킵: 허용 서버 패턴 없음 (fail-safe)" >&2
+      return 0
+    fi
+
     # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 건드리지 않음)
     if [[ -f "$backup" ]]; then
-      echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중" >&2
+      echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중 ($backup)" >&2
       return 0
     fi
     cp "$config" "$backup"
 
-    # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지
+    # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지.
+    # keep="" 은 진입 가드에서 return 됐지만 defense-in-depth 유지.
     awk -v keep="$allowed_pat" '
       BEGIN { skip=0 }
       /^\[mcp_servers\./ {
+        if (keep == "") { skip=0; print; next }
         name=$0; gsub(/^\[mcp_servers\./, "", name); gsub(/[\].].*/, "", name)
-        if (keep == "" || name !~ "^(" keep ")$") { skip=1; next }
+        if (name !~ "^(" keep ")$") { skip=1; next }
         else { skip=0 }
       }
       /^\[/ && !/^\[mcp_servers\./ { skip=0 }
       !skip { print }
     ' "$backup" > "$config"
 
-    local kept=0
-    [[ -n "$allowed_pat" ]] && kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
+    local kept
+    kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
     echo "[tfx-route] config.toml swap: ${kept}개 MCP 서버만 활성" >&2
 
   elif [[ "$action" == "restore" && -f "$backup" ]]; then
-    mv "$backup" "$config" 2>/dev/null
+    # BUG-H (#132): mv 는 Windows lock/ACL 상황에서 조용히 실패할 수 있음.
+    # cat+rm 2단계로 나눠 복원 실패 시 backup 보존 → 다음 시도/수동 복구 가능.
+    if ! cat "$backup" > "$config"; then
+      echo "[tfx-route] 경고: config.toml 복원 실패 (write error). backup 보존: $backup" >&2
+      return 1
+    fi
+    if ! rm -f "$backup"; then
+      echo "[tfx-route] 경고: backup 삭제 실패: $backup (수동 정리 필요)" >&2
+    fi
     echo "[tfx-route] config.toml 복원 완료" >&2
   fi
 }

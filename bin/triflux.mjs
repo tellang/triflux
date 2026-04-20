@@ -3399,6 +3399,47 @@ async function cmdDoctor(options = {}) {
       }
     }
 
+    // ── Codex Config Health (BUG-H #132) ──
+    // _codex_config_swap 의 restore 가 Windows lock/ACL 로 실패하면
+    // ~/.codex/config.toml.pre-exec 가 남아 [mcp_servers.*] 섹션이 영구 손실된다.
+    // orphan backup 을 감지하고 --fix 로 자동 복원한다.
+    section("Codex Config Health");
+    {
+      const codexConfig = join(CODEX_DIR, "config.toml");
+      const orphanBackup = `${codexConfig}.pre-exec`;
+      if (existsSync(orphanBackup)) {
+        addDoctorCheck(report, {
+          name: "codex-config-orphan-backup",
+          status: "issues",
+          path: orphanBackup,
+          fix: "tfx doctor --fix",
+        });
+        warn(`orphan config swap backup 감지: ${formatPathForDisplay(orphanBackup)}`);
+        info("이전 Codex 실행의 config swap 이 restore 에 실패했습니다.");
+        if (fix) {
+          try {
+            const backupContent = readFileSync(orphanBackup, "utf8");
+            writeFileSync(codexConfig, backupContent);
+            unlinkSync(orphanBackup);
+            ok("config.toml 을 backup 에서 복원 + orphan 제거 완료");
+          } catch (error) {
+            fail(`복원 실패: ${error.message}`);
+            info(`수동 복구: mv "${orphanBackup}" "${codexConfig}"`);
+            issues++;
+          }
+        } else {
+          info("복원하려면 `tfx doctor --fix` 를 실행하세요.");
+          issues++;
+        }
+      } else {
+        addDoctorCheck(report, {
+          name: "codex-config-orphan-backup",
+          status: "ok",
+        });
+        ok("orphan config swap backup 없음");
+      }
+    }
+
     // ── Route Script 정합성 ──
     section("Route Script Sync");
     {
