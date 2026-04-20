@@ -260,7 +260,64 @@ describe("listBackends", () => {
 });
 
 // ========================================================================
-// 5. agent-map.json 정합성 — 모든 에이전트가 유효한 백엔드로 해석됨
+// 5. packages/remote mirror contract — 원격 실행 패키지도 동일 invariant
+//    (세션 15: 세션 14 #140 mirror 누락 회귀가 실제 발생했으므로 contract
+//    test 로 재발 방지)
+// ========================================================================
+describe("packages/remote/hub/team/backend.mjs — mirror contract", () => {
+  const REMOTE_BACKEND = readFileSync(
+    join(ROOT, "packages/remote/hub/team/backend.mjs"),
+    "utf8",
+  );
+
+  it("buildGeminiCommand helper 가 export 되어야 한다", () => {
+    assert.ok(
+      /export\s+function\s+buildGeminiCommand\s*\(/.test(REMOTE_BACKEND),
+      "buildGeminiCommand export 누락 (root backend.mjs 와 sync)",
+    );
+  });
+
+  it("Windows 분기에 --yolo 포함 (silent-hang 회귀 방지)", () => {
+    assert.ok(
+      /\$null\s*\|\s*gemini\s+--yolo\s+--prompt/.test(REMOTE_BACKEND),
+      "Windows 분기 --yolo 누락",
+    );
+  });
+
+  it("Unix 분기에 --yolo 포함 (silent-hang 회귀 방지)", () => {
+    assert.ok(
+      /gemini\s+--yolo\s+--prompt\s+\$\{prompt\}.*<\s*\/dev\/null/s.test(
+        REMOTE_BACKEND,
+      ),
+      "Unix 분기 --yolo 또는 /dev/null redirect 누락",
+    );
+  });
+
+  it("GeminiBackend.buildArgs 가 buildGeminiCommand 를 호출 (wrapper 패턴)", () => {
+    const geminiClass = REMOTE_BACKEND.match(
+      /class\s+GeminiBackend[\s\S]*?^\}/m,
+    );
+    assert.ok(geminiClass, "GeminiBackend class 누락");
+    assert.ok(
+      /buildGeminiCommand\s*\(/.test(geminiClass[0]),
+      "GeminiBackend.buildArgs 가 buildGeminiCommand 호출 안 함",
+    );
+  });
+
+  it("CodexBackend / ClaudeBackend 존재 (registry 계약 유지)", () => {
+    assert.ok(
+      /class\s+CodexBackend\b/.test(REMOTE_BACKEND),
+      "CodexBackend class 누락",
+    );
+    assert.ok(
+      /class\s+ClaudeBackend\b/.test(REMOTE_BACKEND),
+      "ClaudeBackend class 누락",
+    );
+  });
+});
+
+// ========================================================================
+// 6. agent-map.json 정합성 — 모든 에이전트가 유효한 백엔드로 해석됨
 // ========================================================================
 describe("agent-map.json 정합성", () => {
   const agentMap = JSON.parse(
