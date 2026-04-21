@@ -245,14 +245,28 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
  * 이전 run 의 stale .txt / .partial / .err 를 제거한다.
  * Issue #118 Codex review R1 HIGH: resultFile 경로 재사용 시 (워커 restart 또는
  * 동일 세션명 재실행) 이전 run 의 HANDOFF 가 새 run 결과로 오인될 수 있다.
+ *
+ * Issue #118 R2 MEDIUM: Windows 에서 locked/open 파일로 인한 삭제 실패를
+ * silent swallow 하면 stale artifact 가 살아남아 bug 가 non-deterministic 하게
+ * 재발한다. ENOENT 외 에러는 경고 로그 + 재시도(1회) 후 계속.
  * @param {string} resultFile
  */
 export function cleanStaleResultArtifacts(resultFile) {
   for (const suffix of ["", ".partial", ".err"]) {
-    try {
-      rmSync(`${resultFile}${suffix}`, { force: true });
-    } catch {
-      /* best-effort */
+    const path = `${resultFile}${suffix}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        rmSync(path);
+        break;
+      } catch (err) {
+        if (err?.code === "ENOENT") break; // 이미 없음 — 정상
+        if (attempt === 0) continue; // 1회 재시도
+        // 재시도도 실패: locked 파일일 수 있음. 경고 로그 후 계속 진행
+        // (dispatch 중단 시 워커 자체가 시작 못하므로 best-effort 유지)
+        console.warn(
+          `[headless] cleanStaleResultArtifacts: ${path} 삭제 실패 (${err?.code || "unknown"}). stale leak 가능.`,
+        );
+      }
     }
   }
 }

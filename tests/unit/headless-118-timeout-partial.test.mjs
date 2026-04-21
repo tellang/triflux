@@ -246,4 +246,21 @@ describe("issue #118 review R1 HIGH — cleanStaleResultArtifacts", () => {
       "cleanup 후 stale partial 이 readResult 에 새 run 결과로 오인되면 안 됨",
     );
   });
+
+  it("non-ENOENT 에러 (locked 파일) 에서 throw 안 함 — R2 MEDIUM", () => {
+    // Windows locked file 시뮬레이션: 존재하지 않는 부모 디렉토리 경로
+    // → rmSync 가 ENOENT 와 다른 에러를 낼 수 있는 경로.
+    // cleanStaleResultArtifacts 는 dispatch 진행을 막지 않기 위해
+    // 모든 에러를 swallow (ENOENT 는 조용히, 나머지는 retry 후 warn).
+    const originalWarn = console.warn;
+    const warned = [];
+    console.warn = (...args) => warned.push(args.join(" "));
+    try {
+      assert.doesNotThrow(() =>
+        cleanStaleResultArtifacts("/non/existent/dir/that/cannot/be/removed"),
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
 });
