@@ -57,8 +57,40 @@ const REQUIRED_CODEX_PROFILES = [
     lines: ['model = "gpt-5.3-codex"', 'model_reasoning_effort = "xhigh"'],
   },
   {
+    name: "codex53_med",
+    lines: ['model = "gpt-5.3-codex"', 'model_reasoning_effort = "medium"'],
+  },
+  {
     name: "spark53_low",
     lines: ['model = "gpt-5.3-codex-spark"', 'model_reasoning_effort = "low"'],
+  },
+  {
+    name: "spark53_med",
+    lines: ['model = "gpt-5.3-codex-spark"', 'model_reasoning_effort = "medium"'],
+  },
+  {
+    name: "gpt54_xhigh",
+    lines: ['model = "gpt-5.4"', 'model_reasoning_effort = "xhigh"'],
+  },
+  {
+    name: "gpt54_high",
+    lines: ['model = "gpt-5.4"', 'model_reasoning_effort = "high"'],
+  },
+  {
+    name: "gpt54_low",
+    lines: ['model = "gpt-5.4"', 'model_reasoning_effort = "low"'],
+  },
+  {
+    name: "mini54_low",
+    lines: ['model = "gpt-5.4-mini"', 'model_reasoning_effort = "low"'],
+  },
+  {
+    name: "mini54_med",
+    lines: ['model = "gpt-5.4-mini"', 'model_reasoning_effort = "medium"'],
+  },
+  {
+    name: "mini54_high",
+    lines: ['model = "gpt-5.4-mini"', 'model_reasoning_effort = "high"'],
   },
 ];
 
@@ -556,6 +588,15 @@ function ensureCodexHubServerConfig({
   }
 }
 
+// Top-level config.toml keys that must exist with these defaults.
+// Only injected when the key is completely absent — existing user values are
+// never overwritten, regardless of what value was set.
+const REQUIRED_TOP_LEVEL_SETTINGS = [
+  { key: "model", value: '"gpt-5.4"' },
+  { key: "model_reasoning_effort", value: '"high"' },
+  { key: "service_tier", value: '"fast"' },
+];
+
 function ensureCodexProfiles() {
   try {
     if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
@@ -564,9 +605,45 @@ function ensureCodexProfiles() {
       ? readFileSync(CODEX_CONFIG_PATH, "utf8")
       : "";
 
+    // Safety guard: if the file exists but is suspiciously small (< 100 bytes)
+    // skip all writes to avoid perpetuating a corrupted state.
+    if (original.length > 0 && original.length < 100) {
+      process.stderr.write(
+        `[tfx-setup] config.toml 크기 이상 (${original.length} bytes) — 쓰기 스킵. 수동 확인 필요: ${CODEX_CONFIG_PATH}\n`,
+      );
+      return { ok: false, changed: 0, message: "config too small, skipped" };
+    }
+
     let updated = original;
     let changed = 0;
 
+    // ── 1. top-level 필수 설정 주입 (없을 때만, 기존 값 보존) ──
+    // 파일 상단 [profiles.*] / [mcp_servers.*] 이전 영역만 검사한다.
+    // 프로필 섹션 내부의 동명 키(예: model = "gpt-5.3-codex")는 무시한다.
+    // 이미 존재하는 키는 절대 덮어쓰지 않는다.
+    for (const { key, value } of REQUIRED_TOP_LEVEL_SETTINGS) {
+      // top-level 영역 = 첫 번째 [profiles.*] / [mcp_servers.*] 헤더 이전
+      const firstSectionIdx = updated.search(/^\[(?:profiles|mcp_servers)\./m);
+      const topLevelRegion =
+        firstSectionIdx === -1 ? updated : updated.slice(0, firstSectionIdx);
+      const topLevelKeyRe = new RegExp(`^${key}\\s*=`, "m");
+      if (!topLevelKeyRe.test(topLevelRegion)) {
+        // firstSectionIdx already computed above for this iteration
+        const line = `${key} = ${value}\n`;
+        if (firstSectionIdx === -1) {
+          // 섹션이 없으면 파일 맨 앞에 추가
+          updated = line + updated;
+        } else {
+          updated =
+            updated.slice(0, firstSectionIdx) +
+            line +
+            updated.slice(firstSectionIdx);
+        }
+        changed++;
+      }
+    }
+
+    // ── 2. 필수 프로필 보장 ──
     for (const profile of REQUIRED_CODEX_PROFILES) {
       const desired = `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
 
@@ -898,6 +975,7 @@ export {
   LEGACY_CODEX_MODELS,
   PLUGIN_ROOT,
   REQUIRED_CODEX_PROFILES,
+  REQUIRED_TOP_LEVEL_SETTINGS,
   readMarker,
   replaceProfileSection,
   SETUP_MARKER_PATH,
