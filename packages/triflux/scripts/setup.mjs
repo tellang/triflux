@@ -13,6 +13,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -430,17 +431,15 @@ function cleanupStaleSkills(installedDir, pkgDir) {
     if (pkgNames.has(name)) continue;
 
     const skillPath = join(installedDir, name);
+    // #144: 재귀 삭제 필요 — 과거 구현은 파일만 unlink 하여 nested 디렉토리가 있는 스킬을
+    // 온전히 제거하지 못했다. `tfx-deep-*`, `tfx-codex-swarm` 같은 과거 잔재 디렉토리는
+    // workspace/snapshot 같은 하위 폴더를 가지므로 rmSync recursive 가 필수.
     try {
-      const entries = readdirSync(skillPath);
-      for (const f of entries) unlinkSync(join(skillPath, f));
-      // rmdir only works on empty dirs; ignore errors for nested
-      try {
-        readdirSync(skillPath).length === 0 && unlinkSync(skillPath);
-      } catch {}
+      rmSync(skillPath, { recursive: true, force: true });
+      removed.push(name);
     } catch {
-      /* best effort */
+      /* best effort — next setup/update cycle 에서 재시도 */
     }
-    removed.push(name);
   }
   return { count: removed.length, removed };
 }
