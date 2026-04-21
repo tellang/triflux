@@ -134,7 +134,8 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   doctor: {
-    usage: "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--json]",
+    usage:
+      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--json]",
     description: "설치 상태 진단 및 자동 복구",
     options: [
       {
@@ -157,6 +158,12 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "boolean",
         description:
           "진단 번들(zip) 생성: spawn-trace + hook timing + system info",
+      },
+      {
+        name: "--purge-logs",
+        type: "boolean",
+        description:
+          "--fix 와 함께 사용. cli-issues.jsonl 에서 7일 초과 항목 물리 삭제 (#144)",
       },
       {
         name: "--json",
@@ -1742,7 +1749,8 @@ function ensureValidRegistryState() {
 }
 
 async function cmdDoctor(options = {}) {
-  const { fix = false, reset = false, json = false } = options;
+  const { fix = false, reset = false, purgeLogs = false, json = false } =
+    options;
   const report = {
     status: "ok",
     mode: reset ? "reset" : fix ? "fix" : "check",
@@ -2357,9 +2365,20 @@ async function cmdDoctor(options = {}) {
           info(`업데이트 권장:\n${formatPsmuxUpdateGuidance("  ")}`);
         }
         if (psmuxSupport.missingOptionalCommands?.length > 0) {
+          // #144: 단순히 "detach-first hardening 경로에서만 사용" 만으로는 사용자가
+          // 영향 범위와 해결 방법을 알 수 없다. 각 capability 별 영향과 업그레이드 명령을 명시.
           info(
-            `선택 capability 미지원: ${psmuxSupport.missingOptionalCommands.join(", ")} (detach-first hardening 경로에서만 사용)`,
+            `선택 capability 미지원: ${psmuxSupport.missingOptionalCommands.join(", ")}`,
           );
+          if (psmuxSupport.missingOptionalCommands.includes("detach-client")) {
+            info(
+              "  detach-client: WT 1.24 ConPTY close-race 회피용. WT 기반 병렬 실행(swarm dashboard, tfx-multi wt 모드) 에서 pane freeze/ConPTY hang 위험 증가.",
+            );
+            info(
+              "  해결: psmux v3.4+ 로 업그레이드. 현재 psmux 업그레이드 명령:",
+            );
+            info(`${formatPsmuxUpdateGuidance("    ")}`);
+          }
         }
 
         // 기본 셸 확인: psmux 세션의 기본 셸이 PowerShell인지 cmd.exe인지
@@ -2771,6 +2790,10 @@ async function cmdDoctor(options = {}) {
           ).version;
           let cleaned = 0;
 
+          // #144: 오래된 로그 노이즈 완화 — 7일 초과 항목은 INFO 레벨로 downgrade.
+          // --fix --purge-logs 플래그가 있으면 해당 오래된 항목은 실제 삭제.
+          const STALE_AGE_MS = 7 * 24 * 3600 * 1000;
+          let purged = 0;
           for (const [key, g] of Object.entries(groups)) {
             const fixVer = KNOWN_FIXES[key];
             if (fixVer && semverGte(currentVer, fixVer)) {
@@ -2785,15 +2808,47 @@ async function cmdDoctor(options = {}) {
                 : age < 86400000
                   ? `${Math.round(age / 3600000)}시간 전`
                   : `${Math.round(age / 86400000)}일 전`;
-            const sev =
-              g.severity === "error"
+            const isStale = age >= STALE_AGE_MS;
+            if (isStale && fix && purgeLogs) {
+              purged += g.count;
+              continue;
+            }
+            const sev = isStale
+              ? `${CYAN}INFO${RESET}`
+              : g.severity === "error"
                 ? `${RED}ERROR${RESET}`
                 : `${YELLOW}WARN${RESET}`;
-            warn(`[${sev}] ${g.cli}/${g.pattern} x${g.count} (최근: ${ago})`);
+            const staleTag = isStale ? " [STALE]" : "";
+            if (isStale) {
+              info(`[${sev}]${staleTag} ${g.cli}/${g.pattern} x${g.count} (최근: ${ago})`);
+            } else {
+              warn(`[${sev}] ${g.cli}/${g.pattern} x${g.count} (최근: ${ago})`);
+            }
             if (g.snippet) info(`  ${g.snippet.substring(0, 120)}`);
             if (fixVer)
               info(`  해결: triflux >= v${fixVer} (npm update -g triflux)`);
-            issues++;
+            if (isStale && !purgeLogs) {
+              info(`  7일 초과 — 삭제: tfx doctor --fix --purge-logs`);
+            }
+            if (!isStale) issues++;
+          }
+
+          // --fix --purge-logs 로 stale 항목 물리 삭제
+          if (purged > 0) {
+            const remaining = entries.filter(
+              (e) => Date.now() - e.ts < STALE_AGE_MS,
+            );
+            writeFileSync(
+              issuesFile,
+              remaining.map((e) => JSON.stringify(e)).join("\n") +
+                (remaining.length ? "\n" : ""),
+            );
+            ok(`${purged}개 stale 로그 항목 삭제 (7일 초과)`);
+            report.actions.push({
+              name: "purge-stale-logs",
+              status: "applied",
+              count: purged,
+            });
           }
 
           // 해결된 이슈 자동 정리
@@ -3371,6 +3426,43 @@ async function cmdDoctor(options = {}) {
           warn(`${row.label}: ${row.name} URL 불일치`);
           info(`expected ${row.expectedUrl}`);
           if (row.actualUrl) info(`actual   ${row.actualUrl}`);
+        }
+
+        // #144: --fix 모드에서 tfx-hub URL 불일치를 hub status 기준으로 자동 갱신.
+        // Project MCP (.mcp.json) 와 Codex/Claude/Gemini settings 모두 대상.
+        if (fix && mismatchRows.some((r) => r.name === "tfx-hub")) {
+          try {
+            const hubUrl = mismatchRows.find((r) => r.name === "tfx-hub")?.expectedUrl;
+            if (hubUrl) {
+              const { syncHubMcpSettings, syncProjectMcpJson } = await import(
+                "../scripts/sync-hub-mcp-settings.mjs"
+              );
+              const settingsResult = await syncHubMcpSettings({ hubUrl, logger: { log() {}, warn() {}, error() {} } });
+              const projectResult = await syncProjectMcpJson({
+                hubUrl,
+                projectRoot: process.cwd(),
+                logger: { log() {}, warn() {}, error() {} },
+              });
+              const totalUpdated =
+                (settingsResult?.updated?.length || 0) +
+                (projectResult?.updated?.length || 0);
+              if (totalUpdated > 0) {
+                ok(`tfx-hub URL ${totalUpdated}개 파일 자동 갱신 (${hubUrl})`);
+                report.actions.push({
+                  name: "sync-hub-url",
+                  status: "applied",
+                  files: [
+                    ...(settingsResult?.updated || []),
+                    ...(projectResult?.updated || []),
+                  ],
+                });
+              } else {
+                info("tfx-hub URL 자동 갱신: 대상 파일 없음");
+              }
+            }
+          } catch (e) {
+            warn(`tfx-hub URL 자동 갱신 실패: ${e?.message?.split(/\r?\n/)[0] || e}`);
+          }
         }
 
         for (const row of missingFileRows) {
@@ -5508,7 +5600,8 @@ async function main() {
       }
       const fix = cmdArgs.includes("--fix");
       const reset = cmdArgs.includes("--reset");
-      await cmdDoctor({ fix, reset, json: JSON_OUTPUT });
+      const purgeLogs = cmdArgs.includes("--purge-logs");
+      await cmdDoctor({ fix, reset, purgeLogs, json: JSON_OUTPUT });
       return;
     }
     case "mcp":
