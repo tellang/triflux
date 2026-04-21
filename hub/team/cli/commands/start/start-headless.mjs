@@ -45,7 +45,7 @@ export async function startHeadlessTeam({
   ok(`headless ${assignments.length}워커 시작`);
 
   const handle = await runHeadlessInteractive(sessionId, assignments, {
-    timeoutSec: timeoutSec || 300,
+    timeoutSec: timeoutSec || 900,
     layout,
     autoAttach: !!autoAttach,
     dashboard: !!dashboard,

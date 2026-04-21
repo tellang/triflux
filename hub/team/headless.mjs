@@ -11,6 +11,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -241,14 +242,51 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
 }
 
 /**
+ * 이전 run 의 stale .txt / .partial / .err 를 제거한다.
+ * Issue #118 Codex review R1 HIGH: resultFile 경로 재사용 시 (워커 restart 또는
+ * 동일 세션명 재실행) 이전 run 의 HANDOFF 가 새 run 결과로 오인될 수 있다.
+ *
+ * Issue #118 R2 MEDIUM: Windows 에서 locked/open 파일로 인한 삭제 실패를
+ * silent swallow 하면 stale artifact 가 살아남아 bug 가 non-deterministic 하게
+ * 재발한다. ENOENT 외 에러는 경고 로그 + 재시도(1회) 후 계속.
+ * @param {string} resultFile
+ */
+export function cleanStaleResultArtifacts(resultFile) {
+  for (const suffix of ["", ".partial", ".err"]) {
+    const path = `${resultFile}${suffix}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        rmSync(path);
+        break;
+      } catch (err) {
+        if (err?.code === "ENOENT") break; // 이미 없음 — 정상
+        if (attempt === 0) continue; // 1회 재시도
+        // 재시도도 실패: locked 파일일 수 있음. 경고 로그 후 계속 진행
+        // (dispatch 중단 시 워커 자체가 시작 못하므로 best-effort 유지)
+        console.warn(
+          `[headless] cleanStaleResultArtifacts: ${path} 삭제 실패 (${err?.code || "unknown"}). stale leak 가능.`,
+        );
+      }
+    }
+  }
+}
+
+/**
  * 결과 파일 읽기 (없으면 capture-pane fallback)
+ * Issue #118 fallback chain: .txt → .partial ([partial] prefix) → .err → capture-pane
  * @param {string} resultFile
  * @param {string} paneId
  * @returns {string}
  */
-function readResult(resultFile, paneId) {
+export function readResult(resultFile, paneId) {
   if (existsSync(resultFile)) {
     return readFileSync(resultFile, "utf8").trim();
+  }
+  // Issue #118 fallback 0: timeout 직전 persist 된 부분 출력 (.partial)
+  const partialFile = `${resultFile}.partial`;
+  if (existsSync(partialFile)) {
+    const partial = readFileSync(partialFile, "utf8").trim();
+    if (partial) return `[partial] ${partial}`;
   }
   // fallback 1: stderr 파일 (codex 실패 시 원인 추적)
   const errFile = `${resultFile}.err`;
@@ -417,6 +455,17 @@ export async function waitForCompletionWithStallDetect(
 
       // 전체 타임아웃
       if (now - startedAt > completionTimeout) {
+        // Issue #118: timeout kill 전에 capture-pane 출력을 .partial 파일로 persist.
+        // resultFile(`.txt`)이 아직 생성되지 않았을 수 있으므로 readResult 가 fallback 으로 읽는다.
+        try {
+          const partialSnapshot = _capture(currentPaneId, 200);
+          if (partialSnapshot && partialSnapshot.trim().length > 0) {
+            const writer = deps.writeFileSync || writeFileSync;
+            writer(`${resultFile}.partial`, partialSnapshot, "utf8");
+          }
+        } catch {
+          /* best-effort, timeout 은 이미 확정 */
+        }
         return {
           matched: false,
           exitCode: null,
@@ -610,6 +659,8 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       RESULT_DIR,
       `${sessionName}-${paneName}.txt`,
     ).replace(/\\/g, "/");
+    // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
+    cleanStaleResultArtifacts(resultFile);
     const cmd = buildHeadlessCommand(
       assignment.cli,
       assignment.prompt,
@@ -686,6 +737,8 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         RESULT_DIR,
         `${sessionName}-${paneName}.txt`,
       ).replace(/\\/g, "/");
+      // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
+      cleanStaleResultArtifacts(resultFile);
       const cmd = buildHeadlessCommand(
         assignment.cli,
         assignment.prompt,
@@ -832,9 +885,20 @@ async function awaitAll(
         );
       }
 
-      const output = completion.matched
-        ? readResult(d.resultFile, d.paneId)
-        : "";
+      // Issue #118: matched=false(timeout kill) 에도 capture-pane 스냅샷을
+      // .partial 로 persist 하여 readResult fallback chain 이 복구할 수 있도록 한다.
+      if (!completion.matched) {
+        try {
+          const snap = capturePsmuxPane(d.paneId || d.paneName, 200);
+          if (snap && snap.trim().length > 0) {
+            writeFileSync(`${d.resultFile}.partial`, snap, "utf8");
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+
+      const output = readResult(d.resultFile, d.paneId);
       unregisterHeadlessSynapseWorker(d.workerId);
 
       if (safeProgress) {
@@ -945,7 +1009,7 @@ function collectGitDiffFiles(cwd) {
  */
 export async function runHeadless(sessionName, assignments, opts = {}) {
   const {
-    timeoutSec = 300,
+    timeoutSec = 900,
     layout = "2x2",
     onProgress,
     progressIntervalSec = 0,
