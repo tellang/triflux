@@ -4,6 +4,26 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.2] - 2026-04-21
+
+### Fixed
+
+- **[#144]** `fix(#144): doctor auto-fix gap — stale skills recursive + mcp url sync + psmux guidance + TTL` — `triflux doctor --fix` / `tfx update` 가 안내한 대로 자동 해결하지 않던 4개 gap. 근본 원인은 `cleanupStaleSkills()` 가 top-level 파일만 `unlinkSync` 하고 nested directory 를 재귀 삭제하지 않아 `tfx-deep-*` / `tfx-codex-swarm` 같은 과거 잔재가 영구 감지되는 UX bug. (1) `rmSync({recursive:true, force:true})` 로 교체. (2) `--fix` 모드에서 `tfx-hub` URL 불일치 감지 시 `syncHubMcpSettings` + `syncProjectMcpJson` 자동 호출. (3) psmux detach-client 미지원 메시지에 영향(WT 1.24 ConPTY race) + 해결(psmux v3.4+ 업그레이드) + 업그레이드 명령 명시. (4) cli-issues 7일 TTL — stale 항목 `[STALE]` INFO downgrade + issues++ 제외, `--purge-logs` 플래그로 물리 삭제. Codex review FIX_FIRST 2 P2 (log single-write, mismatch deduct) 반영. (`6700597`)
+- **`fix(tfx-route)`** stale `config.toml.pre-exec` cleanup + heartbeat `STALL_KILL` — Session 17 에서 `/tfx-auto --cli codex` 2회 연속 `output=0B` stall (900s timeout 대기) 근본 해결. (1) `_codex_config_swap` 에 owner-PID marker (`kill -0` 기반) stale detection 추가, stale 감지 시 backup → config 원본 복원 선행 (backup-loss guard). (2) `heartbeat_monitor` 에 `TFX_STALL_KILL` + `TFX_STALL_KILL_GRACE` 환경변수 기반 SIGTERM → 5s → SIGKILL/taskkill (MINGW/MSYS 경로 포함). Codex review FIX_FIRST P1 mtime 오탐 + P2 backup loss + P2 Windows taskkill 반영. (`24b7229`)
+
+### Tests
+
+- **+4** `scripts/__tests__/setup-cleanup-stale-skills.test.mjs` — #144 재귀 삭제 회귀 방지 (nested dir / top-level only / SKILL_ALIASES 보존 / tfx- prefix 필터)
+- **+10** `tests/unit/tfx-route-config-swap.test.mjs` + `tests/unit/tfx-route-stall-kill.test.mjs` — #145 owner-PID cleanup 6건 + STALL_KILL shape 3건 + integration 1건 (실제 child ~4.5s SIGTERM)
+
+### Docs
+
+- `.omc/artifacts/session-17-plan-20260421-130921.md` — 세션 17 미해결 이슈 전수조사 + Batch A~G 착수 순서 + upstream link-only close 판단 기록.
+
+### Issue closed
+
+- **[#144]** doctor auto-fix gap (PR #146 merge)
+
 ## [10.13.1] - 2026-04-21
 
 ### Fixed

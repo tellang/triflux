@@ -280,7 +280,11 @@ describe("#144/#66 stale lock owner-PID cleanup + backup-loss guard", () => {
     return { dir, config, backup, ownerFile };
   }
 
-  function runFilter({ backupContent = baseToml, ownerPid = null, usePrescript = "" }) {
+  function runFilter({
+    backupContent = baseToml,
+    ownerPid = null,
+    usePrescript = "",
+  }) {
     const { dir, config, backup, ownerFile } = setupBackup({
       backupContent,
       ownerPid,
@@ -305,7 +309,9 @@ _codex_config_swap filter
       stdout: result.stdout,
       config: existsSync(config) ? readFileSync(config, "utf8") : null,
       backup: existsSync(backup) ? readFileSync(backup, "utf8") : null,
-      owner: existsSync(ownerFile) ? readFileSync(ownerFile, "utf8").trim() : null,
+      owner: existsSync(ownerFile)
+        ? readFileSync(ownerFile, "utf8").trim()
+        : null,
       backupExists: existsSync(backup),
       dir,
     };

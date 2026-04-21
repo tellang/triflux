@@ -93,7 +93,10 @@ describe("#144 cleanupStaleSkills — 재귀 삭제", () => {
   it("tfx- 접두사 없는 디렉토리는 건드리지 않음", () => {
     const { installedDir, pkgDir } = setupFixture();
     mkdirSync(path.join(installedDir, "other-skill"), { recursive: true });
-    writeFileSync(path.join(installedDir, "other-skill", "SKILL.md"), "# other");
+    writeFileSync(
+      path.join(installedDir, "other-skill", "SKILL.md"),
+      "# other",
+    );
 
     const result = cleanupStaleSkills(installedDir, pkgDir);
     assert.equal(result.count, 0);

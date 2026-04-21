@@ -1749,8 +1749,12 @@ function ensureValidRegistryState() {
 }
 
 async function cmdDoctor(options = {}) {
-  const { fix = false, reset = false, purgeLogs = false, json = false } =
-    options;
+  const {
+    fix = false,
+    reset = false,
+    purgeLogs = false,
+    json = false,
+  } = options;
   const report = {
     status: "ok",
     mode: reset ? "reset" : fix ? "fix" : "check",
@@ -2820,7 +2824,9 @@ async function cmdDoctor(options = {}) {
                 : `${YELLOW}WARN${RESET}`;
             const staleTag = isStale ? " [STALE]" : "";
             if (isStale) {
-              info(`[${sev}]${staleTag} ${g.cli}/${g.pattern} x${g.count} (최근: ${ago})`);
+              info(
+                `[${sev}]${staleTag} ${g.cli}/${g.pattern} x${g.count} (최근: ${ago})`,
+              );
             } else {
               warn(`[${sev}] ${g.cli}/${g.pattern} x${g.count} (최근: ${ago})`);
             }
@@ -3432,12 +3438,17 @@ async function cmdDoctor(options = {}) {
         let autoFixedMismatches = 0;
         if (fix && mismatchRows.some((r) => r.name === "tfx-hub")) {
           try {
-            const hubUrl = mismatchRows.find((r) => r.name === "tfx-hub")?.expectedUrl;
+            const hubUrl = mismatchRows.find(
+              (r) => r.name === "tfx-hub",
+            )?.expectedUrl;
             if (hubUrl) {
               const { syncHubMcpSettings, syncProjectMcpJson } = await import(
                 "../scripts/sync-hub-mcp-settings.mjs"
               );
-              const settingsResult = await syncHubMcpSettings({ hubUrl, logger: { log() {}, warn() {}, error() {} } });
+              const settingsResult = await syncHubMcpSettings({
+                hubUrl,
+                logger: { log() {}, warn() {}, error() {} },
+              });
               const projectResult = await syncProjectMcpJson({
                 hubUrl,
                 projectRoot: process.cwd(),
@@ -3465,7 +3476,9 @@ async function cmdDoctor(options = {}) {
               }
             }
           } catch (e) {
-            warn(`tfx-hub URL 자동 갱신 실패: ${e?.message?.split(/\r?\n/)[0] || e}`);
+            warn(
+              `tfx-hub URL 자동 갱신 실패: ${e?.message?.split(/\r?\n/)[0] || e}`,
+            );
           }
         }
 
