@@ -2833,37 +2833,35 @@ async function cmdDoctor(options = {}) {
             if (!isStale) issues++;
           }
 
-          // --fix --purge-logs 로 stale 항목 물리 삭제
-          if (purged > 0) {
-            const remaining = entries.filter(
-              (e) => Date.now() - e.ts < STALE_AGE_MS,
-            );
-            writeFileSync(
-              issuesFile,
-              remaining.map((e) => JSON.stringify(e)).join("\n") +
-                (remaining.length ? "\n" : ""),
-            );
-            ok(`${purged}개 stale 로그 항목 삭제 (7일 초과)`);
-            report.actions.push({
-              name: "purge-stale-logs",
-              status: "applied",
-              count: purged,
-            });
-          }
-
-          // 해결된 이슈 자동 정리
-          if (cleaned > 0) {
+          // #144 Codex review P2: 두 filter (stale purge + KNOWN_FIXES) 가 각각 원본 entries 로
+          // write 하면 두 번째 write 가 첫 번째 결과를 되살린다. 단일 통합 필터로 한 번만 저장.
+          if (purged > 0 || cleaned > 0) {
+            const now = Date.now();
             const remaining = entries.filter((e) => {
+              // purge-logs 로 물리 삭제 대상: 7일 초과
+              if (purged > 0 && now - e.ts >= STALE_AGE_MS) return false;
+              // KNOWN_FIXES 해결된 이슈 제거
               const key = `${e.cli}:${e.pattern}`;
               const fixVer = KNOWN_FIXES[key];
-              return !(fixVer && semverGte(currentVer, fixVer));
+              if (fixVer && semverGte(currentVer, fixVer)) return false;
+              return true;
             });
             writeFileSync(
               issuesFile,
               remaining.map((e) => JSON.stringify(e)).join("\n") +
                 (remaining.length ? "\n" : ""),
             );
-            ok(`${cleaned}개 해결된 이슈 자동 정리됨`);
+            if (purged > 0) {
+              ok(`${purged}개 stale 로그 항목 삭제 (7일 초과)`);
+              report.actions.push({
+                name: "purge-stale-logs",
+                status: "applied",
+                count: purged,
+              });
+            }
+            if (cleaned > 0) {
+              ok(`${cleaned}개 해결된 이슈 자동 정리됨`);
+            }
           }
           addDoctorCheck(report, {
             name: "cli-issues",
@@ -3430,6 +3428,8 @@ async function cmdDoctor(options = {}) {
 
         // #144: --fix 모드에서 tfx-hub URL 불일치를 hub status 기준으로 자동 갱신.
         // Project MCP (.mcp.json) 와 Codex/Claude/Gemini settings 모두 대상.
+        // Codex review P2: fix 성공 시 issues 집계에서 차감해야 doctor 결과가 ok 로 반영됨.
+        let autoFixedMismatches = 0;
         if (fix && mismatchRows.some((r) => r.name === "tfx-hub")) {
           try {
             const hubUrl = mismatchRows.find((r) => r.name === "tfx-hub")?.expectedUrl;
@@ -3456,6 +3456,10 @@ async function cmdDoctor(options = {}) {
                     ...(projectResult?.updated || []),
                   ],
                 });
+                // fix 성공 — mismatchRows 중 tfx-hub 엔트리는 해결된 것으로 집계
+                autoFixedMismatches = mismatchRows.filter(
+                  (r) => r.name === "tfx-hub",
+                ).length;
               } else {
                 info("tfx-hub URL 자동 갱신: 대상 파일 없음");
               }
@@ -3487,7 +3491,7 @@ async function cmdDoctor(options = {}) {
         }
 
         issues += invalidConfigs.length;
-        issues += mismatchRows.length;
+        issues += Math.max(0, mismatchRows.length - autoFixedMismatches);
         issues += stdioRows.length;
       }
     }
