@@ -1445,6 +1445,14 @@ _codex_config_swap() {
       return 0
     fi
 
+    # Pre-validation: config.toml이 500 bytes 미만이면 이미 손상된 상태일 수 있음 — 스킵
+    local config_size
+    config_size=$(wc -c < "$config" 2>/dev/null | tr -d ' ') || config_size=0
+    if [[ "$config_size" -lt 500 ]]; then
+      echo "[tfx-route] 경고: config.toml 크기 ${config_size} bytes — 손상 의심, swap 스킵 (수동 확인 필요)" >&2
+      return 0
+    fi
+
     # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 건드리지 않음)
     if [[ -f "$backup" ]]; then
       echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중 ($backup)" >&2
@@ -1454,6 +1462,7 @@ _codex_config_swap() {
 
     # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지.
     # keep="" 은 진입 가드에서 return 됐지만 defense-in-depth 유지.
+    local tmp_filtered="${config}.filter.$$"
     awk -v keep="$allowed_pat" '
       BEGIN { skip=0 }
       /^\[mcp_servers\./ {
@@ -1464,7 +1473,26 @@ _codex_config_swap() {
       }
       /^\[/ && !/^\[mcp_servers\./ { skip=0 }
       !skip { print }
-    ' "$backup" > "$config"
+    ' "$backup" > "$tmp_filtered"
+
+    # Output sanity check: 필터 결과가 비었거나 백업의 30% 미만이면 적용 거부
+    local filtered_size backup_size threshold
+    filtered_size=$(wc -c < "$tmp_filtered" 2>/dev/null | tr -d ' ') || filtered_size=0
+    backup_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_size=1
+    threshold=$(( backup_size * 30 / 100 ))
+    if [[ "$filtered_size" -eq 0 || "$filtered_size" -lt "$threshold" ]]; then
+      echo "[tfx-route] 경고: 필터 결과 크기 ${filtered_size} bytes (백업 ${backup_size} bytes의 30% 미만) — 적용 거부, 백업에서 복원" >&2
+      rm -f "$tmp_filtered" 2>/dev/null
+      rm -f "$backup" 2>/dev/null
+      return 1
+    fi
+
+    # 검증 통과 — atomic rename으로 적용
+    if ! mv "$tmp_filtered" "$config"; then
+      echo "[tfx-route] 경고: 필터 결과 적용 실패 (atomic rename), 백업 보존: $backup" >&2
+      rm -f "$tmp_filtered" 2>/dev/null
+      return 1
+    fi
 
     local kept
     kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
@@ -1475,6 +1503,15 @@ _codex_config_swap() {
     # `cat > $config` 는 cat 실행 전에 dest 가 truncate 되어 mid-stream 실패 시
     # 빈/부분 파일이 남는다. 같은 디렉토리 내 mv 는 POSIX 상 atomic 이므로
     # 실패해도 기존 config 와 backup 모두 보존된다.
+
+    # Restore sanity check: 백업 자체가 비었거나 500 bytes 미만이면 복원 중단
+    local backup_restore_size
+    backup_restore_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_restore_size=0
+    if [[ "$backup_restore_size" -lt 500 ]]; then
+      echo "[tfx-route] 경고: backup 크기 ${backup_restore_size} bytes — 손상 의심, 복원 중단. 수동 확인 필요: $backup" >&2
+      return 1
+    fi
+
     local tmp="${config}.restore.$$"
     if ! cp "$backup" "$tmp"; then
       echo "[tfx-route] 경고: config.toml 복원 실패 (temp copy). backup 보존: $backup" >&2
