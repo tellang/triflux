@@ -142,3 +142,35 @@
 - **운영 메모: `npm link` 필수** — `tfx` 는 npm global install (`/c/Users/tellang/AppData/Roaming/npm/node_modules/triflux/`). main 의 fix 가 즉시 활성화되려면 개발 환경에서 `npm link` 1회 실행 필요. 안 하면 다음 세션도 같은 사고 (main fix 가 global tfx 에 반영 안 됨) 재발.
 - **운영 메모: hub 조회 표준 = `tfx hub status`** — 직접 curl 또는 port hardcode 금지. 잘못된 hub 조회 (curl http://127.0.0.1:33797/health) 가 BUG-D/BUG-E trigger 의 시초였음. memory `feedback_hub_status_query` 추가.
 - **신규 unit test +8** — `worktree-lifecycle.test.mjs` (W-08, W-09, W-10) + `execution-mode.test.mjs` +5. 직접 영역 회귀 35/35 pass.
+
+## 세션 8~16 (2026-04-20 ~ 2026-04-21)
+
+세션 7 이후 13 PR + 3 close + 1 release + 1 config 리셋 영구 fix 누적. 단일 블록으로 요약.
+
+### 릴리즈 및 PR
+
+- **v10.8.x~v10.13.0 (13 PR landed)** — 체크포인트 파일이 sessions 8~16 상세 기록. 주요:
+  - #131 (MCP recovery wrap), #133 (BUG-H), #134 (BUG-I), #135 (BUG-J), #136 (tfx review subcommand), #137/#138 (review shard per-file), #139 (recursive worker sync), #140 (gemini `--yolo`), #141 (packages/remote mirror + autoresearch stale + routing-qa), #142 (#118 BUG-A P0), #143 (config 리셋 영구 fix)
+  - **v10.13.0 published** (`4c7545e`) — GitHub Releases + npm + Claude Code marketplace 3채널 sync verified
+- **Issue close** — #108, #115 (mechanical close; fix 체인 전부 merged), #119, #123 (세션 14)
+
+### 핵심 성과
+
+- **BUG-A P0 해결 (#118, c0b59f1)** — `tfx multi --teammate-mode headless` timeout kill 경로 3 fix 지점. default timeoutSec 300→900, `.partial` capture-pane persist (stallDetect + else 경로 양쪽), readResult fallback chain 확장, stale artifact cleanup guard. 12/12 unit tests + 2 R codex review passed.
+- **Config 리셋 영구 방지 (ea13d90)** — `~/.codex/config.toml` 세션 시작마다 리셋되던 2중 손상 경로 (primary: `scripts/setup.mjs` REQUIRED 3개만 / secondary: `scripts/tfx-route.sh` awk 필터 unvalidated write) 근본 해결. REQUIRED_CODEX_PROFILES 3→11 확장, top-level key 보호 (`REQUIRED_TOP_LEVEL_SETTINGS`), size guard (<100 bytes skip, <500 bytes swap 거부, <30% post-filter 거부). 24/24 unit tests.
+- **gemini `--yolo` 누락 경로 완결 (#140+#141)** — root + packages/triflux + packages/remote 모든 backend 에 `--yolo` 전파. silent-hang 방지.
+- **Swarm 신뢰성 회복 완료** — #126 (CLI summary), #127 (cherry-pick + HEAD restore), #128 (cmd-shim bypass), #115 Lane 1/2 전부 merged.
+
+### 미해결 / carry-over
+
+- **#66, #121, #122** — upstream codex scope 또는 사용자 보류. 현 상태 유지.
+- **#109** — tfx swarm run/help UX. 소규모 PR 예정.
+- **#110** — swarm-hypervisor.test.mjs 2건 hang. `ensureWorktree` mock 재설계 필요.
+- **#112** — Umbrella skill sprawl 41→15 정리. 대규모 refactor.
+- **oh-my-codex MCP tool approval_mode 복원 이슈** — config 리셋 근본 fix 범위 밖. 별도 이슈로 추적 필요.
+
+### 운영 메모
+
+- **DISABLE_OMC=1** 설정 추가 (2026-04-21) — `~/.claude/settings.json env.DISABLE_OMC=1`. OMC plugin pre-tool-enforcer 의 hook context 노이즈 억제. 다음 세션부터 적용.
+- **session 15 ROADMAP drift** — 세션 7 이후 미반영 상태가 9 세션 누적됐던 교훈. 세션마다 ROADMAP 갱신 대신 3~5 세션마다 단일 블록 압축 기록으로 전환.
+- **체크포인트 세션 15-ext, 16 파일로 개별 추적 유지** — ROADMAP 은 높은 수준 요약, 체크포인트는 세션별 상세.
