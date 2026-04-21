@@ -250,6 +250,12 @@ function readResult(resultFile, paneId) {
   if (existsSync(resultFile)) {
     return readFileSync(resultFile, "utf8").trim();
   }
+  // Issue #118 fallback 0: timeout 직전 persist 된 부분 출력 (.partial)
+  const partialFile = `${resultFile}.partial`;
+  if (existsSync(partialFile)) {
+    const partial = readFileSync(partialFile, "utf8").trim();
+    if (partial) return `[partial] ${partial}`;
+  }
   // fallback 1: stderr 파일 (codex 실패 시 원인 추적)
   const errFile = `${resultFile}.err`;
   if (existsSync(errFile)) {
@@ -417,6 +423,17 @@ export async function waitForCompletionWithStallDetect(
 
       // 전체 타임아웃
       if (now - startedAt > completionTimeout) {
+        // Issue #118: timeout kill 전에 capture-pane 출력을 .partial 파일로 persist.
+        // resultFile(`.txt`)이 아직 생성되지 않았을 수 있으므로 readResult 가 fallback 으로 읽는다.
+        try {
+          const partialSnapshot = _capture(currentPaneId, 200);
+          if (partialSnapshot && partialSnapshot.trim().length > 0) {
+            const writer = deps.writeFileSync || writeFileSync;
+            writer(`${resultFile}.partial`, partialSnapshot, "utf8");
+          }
+        } catch {
+          /* best-effort, timeout 은 이미 확정 */
+        }
         return {
           matched: false,
           exitCode: null,
@@ -832,9 +849,20 @@ async function awaitAll(
         );
       }
 
-      const output = completion.matched
-        ? readResult(d.resultFile, d.paneId)
-        : "";
+      // Issue #118: matched=false(timeout kill) 에도 capture-pane 스냅샷을
+      // .partial 로 persist 하여 readResult fallback chain 이 복구할 수 있도록 한다.
+      if (!completion.matched) {
+        try {
+          const snap = capturePsmuxPane(d.paneId || d.paneName, 200);
+          if (snap && snap.trim().length > 0) {
+            writeFileSync(`${d.resultFile}.partial`, snap, "utf8");
+          }
+        } catch {
+          /* best-effort */
+        }
+      }
+
+      const output = readResult(d.resultFile, d.paneId);
       unregisterHeadlessSynapseWorker(d.workerId);
 
       if (safeProgress) {
@@ -945,7 +973,7 @@ function collectGitDiffFiles(cwd) {
  */
 export async function runHeadless(sessionName, assignments, opts = {}) {
   const {
-    timeoutSec = 300,
+    timeoutSec = 900,
     layout = "2x2",
     onProgress,
     progressIntervalSec = 0,
