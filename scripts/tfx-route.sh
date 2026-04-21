@@ -1348,6 +1348,24 @@ heartbeat_monitor() {
           echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=draining(${post_exit_checks}/${max_post_exit_checks})" >&2
         fi
       elif [[ "$stall_count" -ge "$stall_threshold" ]]; then
+        # STALL kill (#144/#66 regression guard): stall=threshold+grace 이상 지속 시 SIGTERM→SIGKILL.
+        # 기본 활성화. TFX_STALL_KILL=0 으로 opt-out. grace=30s (기본) 은 SSE/MCP 정상 handshake 여유.
+        local kill_on_stall="${TFX_STALL_KILL:-1}"
+        local kill_grace="${TFX_STALL_KILL_GRACE:-30}"
+        if [[ "$kill_on_stall" -eq 1 && "$stall_count" -ge $((stall_threshold + kill_grace)) ]]; then
+          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=STALL_KILL stall=${stall_count}s — SIGTERM" >&2
+          kill -TERM "$pid" 2>/dev/null || true
+          local _grace_waited=0
+          while kill -0 "$pid" 2>/dev/null && [[ "$_grace_waited" -lt 5 ]]; do
+            sleep 1
+            _grace_waited=$((_grace_waited + 1))
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "[tfx-heartbeat] pid=$pid SIGTERM 무시 — SIGKILL 강제" >&2
+            kill -KILL "$pid" 2>/dev/null || true
+          fi
+          break
+        fi
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=STALL stall=${stall_count}s" >&2
       else
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=quiet stall=${stall_count}s" >&2
@@ -1453,10 +1471,25 @@ _codex_config_swap() {
       return 0
     fi
 
-    # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 건드리지 않음)
+    # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 단, stale lock 은 자동 정리)
     if [[ -f "$backup" ]]; then
-      echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중 ($backup)" >&2
-      return 0
+      # Stale detection (#144/#66 regression guard): crash/stall 로 lock 이 남은 경우,
+      # 후속 워커가 무한정 MCP 없이 돌아가는 것을 막는다. 기본 5분, env override 가능.
+      local stale_min="${TFX_CONFIG_LOCK_STALE_MIN:-5}"
+      local now_epoch backup_mtime age_s
+      now_epoch=$(date +%s)
+      backup_mtime=$(stat -c %Y "$backup" 2>/dev/null || stat -f %m "$backup" 2>/dev/null || echo "$now_epoch")
+      age_s=$((now_epoch - backup_mtime))
+      if [[ "$age_s" -ge $((stale_min * 60)) ]]; then
+        echo "[tfx-route] stale config.toml.pre-exec 감지 (age=${age_s}s ≥ ${stale_min}m) — 자동 제거 후 swap 진행" >&2
+        if ! rm -f "$backup"; then
+          echo "[tfx-route] 경고: stale backup 제거 실패 — swap 스킵" >&2
+          return 0
+        fi
+      else
+        echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중 (age=${age_s}s, $backup)" >&2
+        return 0
+      fi
     fi
     cp "$config" "$backup"
 
