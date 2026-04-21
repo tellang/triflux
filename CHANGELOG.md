@@ -4,6 +4,28 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.1] - 2026-04-21
+
+### Fixed
+
+- **[#118]** `fix(#118): codex killed before HANDOFF flush` — BUG-A P0. `tfx multi --teammate-mode headless` 에서 codex timeout kill 시 `.txt` 미생성 + HANDOFF 유실로 인한 silent loss 해소. 3 fix 지점: default `timeoutSec` 300→900, `.partial` capture-pane persist (stallDetect + else 경로 양쪽), `readResult` fallback chain 확장 (`.partial` → `[partial]` prefix → `.err` → capture-pane). Codex R1 HIGH 대응으로 `cleanStaleResultArtifacts` 추가 (resultFile 경로 재사용 시 이전 run `.partial` 오인 차단), R2 MEDIUM 대응으로 `rmSync` 에러 핸들링 세분화 (ENOENT silent / 기타 retry + warn). 2R codex review 수렴. (`c0b59f1`)
+- **`fix(config)`** permanent guard against codex `config.toml` reset — `~/.codex/config.toml` 이 세션 시작마다 축소되던 2 경로 근본 해결. (1) `scripts/setup.mjs` `REQUIRED_CODEX_PROFILES` 3→11 확장 (gpt54/mini54/codex53_med/spark53_med 추가), `REQUIRED_TOP_LEVEL_SETTINGS` 상수로 top-level `model`/`service_tier` missing 시 주입 (기존 값 preserve). (2) `scripts/tfx-route.sh` `_codex_config_swap` awk 필터 결과 size validation (<100 bytes 전면 skip, <500 bytes swap 거부, <30% post-filter 거부) + tmp atomic mv. (`ea13d90`)
+
+### Tests
+
+- **+12** `tests/unit/headless-118-timeout-partial.test.mjs` — #118 3 fix 지점 + R1/R2 review 대응 (stale cleanup / real readResult / non-ENOENT rmSync)
+- **+24** `tests/unit/setup-codex-profiles.test.mjs` — `REQUIRED_CODEX_PROFILES` / `REQUIRED_TOP_LEVEL_SETTINGS` / top-level region detection / size guard 커버리지
+
+### Docs
+
+- `ROADMAP.md` — 세션 7 이후 9 세션 drift catch-up. 세션 8~16 단일 블록 압축 기록 (13 PR + 3 close + v10.13.0 release + BUG-A 해소 요약). (`93b2d74`)
+
+### Issue closed
+
+- **[#108]** Windows cmd quoting (mechanical, #108 fix 체인 full chain landed)
+- **[#115]** swarm 5중 결함 (mechanical, Lane 1/2 + #126/127/128 full chain landed)
+- **[#118]** BUG-A P0 codex timeout kill (PR #142 merge)
+
 ## [10.13.0] - 2026-04-21
 
 ### Added

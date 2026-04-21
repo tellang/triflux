@@ -23,7 +23,6 @@ import { parseArgs as nodeParseArgs } from "node:util";
 import { getPipelineStateDbPath } from "./pipeline/state.mjs";
 import {
   createRetryStateMachine,
-  DEFAULT_ESCALATION_CHAIN,
   loadSnapshot,
   saveSnapshot,
 } from "./team/retry-state-machine.mjs";

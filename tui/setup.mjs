@@ -406,7 +406,10 @@ const STAR_OWNER = "tellang";
 const STAR_REPO = "triflux";
 const STAR_URL = `https://github.com/${STAR_OWNER}/${STAR_REPO}`;
 const STAR_MARKER_DIR = join(homedir(), ".config", "star-prompt");
-const STAR_MARKER = join(STAR_MARKER_DIR, `${STAR_OWNER}-${STAR_REPO}.prompted`);
+const STAR_MARKER = join(
+  STAR_MARKER_DIR,
+  `${STAR_OWNER}-${STAR_REPO}.prompted`,
+);
 
 function markStarPrompted() {
   mkdirSync(STAR_MARKER_DIR, { recursive: true });
@@ -515,9 +518,7 @@ async function starRequest({ soft = false } = {}) {
     if (useSoft) {
       ok(`함께해 주셔서 감사합니다. ${AMBER}⭐${RESET}`);
     } else {
-      ok(
-        `감사합니다! 여러분의 ${AMBER}⭐${RESET}가 프로젝트를 성장시킵니다.`,
-      );
+      ok(`감사합니다! 여러분의 ${AMBER}⭐${RESET}가 프로젝트를 성장시킵니다.`);
     }
   } catch {
     info(`${CYAN}${STAR_URL}${RESET}`);

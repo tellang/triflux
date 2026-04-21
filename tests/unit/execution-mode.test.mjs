@@ -238,8 +238,7 @@ endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node
     existsSyncFn: () => true,
   });
   assert.ok(
-    result &&
-      result.toLowerCase().endsWith("codex.js") &&
+    result?.toLowerCase().endsWith("codex.js") &&
       result.toLowerCase().includes("@openai"),
     `expected codex.js path, got: ${result}`,
   );

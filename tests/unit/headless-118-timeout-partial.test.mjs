@@ -197,10 +197,7 @@ describe("issue #118 fix — readResult .partial fallback chain (real fn)", () =
   it(".partial 이 비어있으면 .err 로 fallback", () => {
     writeFileSync(`${RESULT_FILE}.partial`, "   \n   ", "utf8");
     writeFileSync(`${RESULT_FILE}.err`, "codex exit 1", "utf8");
-    assert.equal(
-      readResult(RESULT_FILE, PANE_EMPTY),
-      "[stderr] codex exit 1",
-    );
+    assert.equal(readResult(RESULT_FILE, PANE_EMPTY), "[stderr] codex exit 1");
   });
 });
 
