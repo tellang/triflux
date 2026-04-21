@@ -66,7 +66,10 @@ const REQUIRED_CODEX_PROFILES = [
   },
   {
     name: "spark53_med",
-    lines: ['model = "gpt-5.3-codex-spark"', 'model_reasoning_effort = "medium"'],
+    lines: [
+      'model = "gpt-5.3-codex-spark"',
+      'model_reasoning_effort = "medium"',
+    ],
   },
   {
     name: "gpt54_xhigh",

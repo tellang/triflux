@@ -152,7 +152,10 @@ export function createMonitor(opts = {}) {
       } else {
         try {
           const { execSync } = await deps.importModule("node:child_process");
-          execSync(`tmux new-window -n "${title}" "${command}"`, { timeout: 5000, stdio: "ignore" });
+          execSync(`tmux new-window -n "${title}" "${command}"`, {
+            timeout: 5000,
+            stdio: "ignore",
+          });
         } catch (tmuxErr) {
           statusMessage = `${RED}tmux 새 창 열기 실패: ${stripUnsafeText(tmuxErr?.message || "unknown")}${RESET}`;
           return false;

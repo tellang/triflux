@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -30,8 +30,11 @@ function cleanTmpDir() {
  * Patch the module-level CODEX paths so ensureCodexProfiles writes to a temp
  * directory instead of the real ~/.codex/config.toml.
  */
-function withTempCodex(configContent, fn) {
-  const fakeCodexDir = join(TMP_DIR, `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+function _withTempCodex(configContent, fn) {
+  const fakeCodexDir = join(
+    TMP_DIR,
+    `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
   mkdirSync(fakeCodexDir, { recursive: true });
   const configPath = join(fakeCodexDir, "config.toml");
   if (configContent !== null) {
@@ -66,8 +69,14 @@ describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
 
   it("각 프로필에 name과 lines 필드가 있어야 한다", () => {
     for (const p of REQUIRED_CODEX_PROFILES) {
-      assert.ok(typeof p.name === "string" && p.name.length > 0, `profile missing name`);
-      assert.ok(Array.isArray(p.lines) && p.lines.length > 0, `profile ${p.name} missing lines`);
+      assert.ok(
+        typeof p.name === "string" && p.name.length > 0,
+        `profile missing name`,
+      );
+      assert.ok(
+        Array.isArray(p.lines) && p.lines.length > 0,
+        `profile ${p.name} missing lines`,
+      );
     }
   });
 });
@@ -78,18 +87,29 @@ describe("REQUIRED_TOP_LEVEL_SETTINGS: 필수 top-level 설정 목록", () => {
   it("model, model_reasoning_effort, service_tier 가 포함되어야 한다", () => {
     const keys = REQUIRED_TOP_LEVEL_SETTINGS.map((s) => s.key);
     assert.ok(keys.includes("model"), "model missing");
-    assert.ok(keys.includes("model_reasoning_effort"), "model_reasoning_effort missing");
+    assert.ok(
+      keys.includes("model_reasoning_effort"),
+      "model_reasoning_effort missing",
+    );
     assert.ok(keys.includes("service_tier"), "service_tier missing");
   });
 
   it("model 기본값은 gpt-5.4", () => {
     const entry = REQUIRED_TOP_LEVEL_SETTINGS.find((s) => s.key === "model");
-    assert.ok(entry?.value.includes("gpt-5.4"), `unexpected model default: ${entry?.value}`);
+    assert.ok(
+      entry?.value.includes("gpt-5.4"),
+      `unexpected model default: ${entry?.value}`,
+    );
   });
 
   it("service_tier 기본값은 fast", () => {
-    const entry = REQUIRED_TOP_LEVEL_SETTINGS.find((s) => s.key === "service_tier");
-    assert.ok(entry?.value.includes("fast"), `unexpected service_tier default: ${entry?.value}`);
+    const entry = REQUIRED_TOP_LEVEL_SETTINGS.find(
+      (s) => s.key === "service_tier",
+    );
+    assert.ok(
+      entry?.value.includes("fast"),
+      `unexpected service_tier default: ${entry?.value}`,
+    );
   });
 });
 
@@ -102,7 +122,8 @@ describe("REQUIRED_TOP_LEVEL_SETTINGS: 필수 top-level 설정 목록", () => {
 
 describe("hasProfileSection: 프로필 섹션 감지", () => {
   it("존재하는 프로필 섹션을 감지한다", () => {
-    const content = '[profiles.gpt54_high]\nmodel = "gpt-5.4"\nmodel_reasoning_effort = "high"\n';
+    const content =
+      '[profiles.gpt54_high]\nmodel = "gpt-5.4"\nmodel_reasoning_effort = "high"\n';
     assert.equal(hasProfileSection(content, "gpt54_high"), true);
   });
 
@@ -124,23 +145,33 @@ describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", (
     const content = '[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
     // top-level 영역 = 첫 번째 [profiles.*] 헤더 이전
     const firstSectionIdx = content.search(/^\[(?:profiles|mcp_servers)\./m);
-    const topLevelRegion = firstSectionIdx === -1 ? content : content.slice(0, firstSectionIdx);
+    const topLevelRegion =
+      firstSectionIdx === -1 ? content : content.slice(0, firstSectionIdx);
     const topLevelKeyRe = /^model\s*=/m;
-    assert.equal(topLevelKeyRe.test(topLevelRegion), false,
-      "top-level region before first section should not contain model=");
+    assert.equal(
+      topLevelKeyRe.test(topLevelRegion),
+      false,
+      "top-level region before first section should not contain model=",
+    );
   });
 
   it("top-level model= 이 있으면 보존 대상으로 판정된다", () => {
-    const content = 'model = "gpt-5.4"\nservice_tier = "fast"\n\n[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
+    const content =
+      'model = "gpt-5.4"\nservice_tier = "fast"\n\n[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
     const topLevelKeyRe = /^model\s*=/m;
-    assert.equal(topLevelKeyRe.test(content), true, "should find top-level model=");
+    assert.equal(
+      topLevelKeyRe.test(content),
+      true,
+      "should find top-level model=",
+    );
   });
 
   it("프로필 내부 model= 은 top-level로 오인되지 않는다", () => {
     // 프로필 섹션 안의 model=은 top-level key 탐지에서 제외되어야 한다.
     // 현재 regex는 ^model\s*= (multiline)이므로 섹션 헤더 다음 줄도 매칭될 수 있다.
     // 이 테스트는 top-level에 model= 이 없고 프로필에만 있는 케이스를 문서화한다.
-    const contentWithoutTopLevel = '[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
+    const contentWithoutTopLevel =
+      '[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
     // regex matches any line starting with "model" — including inside profiles.
     // The injection logic relies on the caller to check BEFORE the first section header.
     // Here we just document the known behavior: the regex WILL match the profile-internal model=.
@@ -150,8 +181,11 @@ describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", (
     // The real protection is: inject only if the key is absent from the region BEFORE any section.
     const topLevelKeyRe = /^model\s*=/m;
     // This assertion documents that the regex matches inside profiles too (known behavior)
-    assert.equal(topLevelKeyRe.test(contentWithoutTopLevel), true,
-      "regex matches model= inside profiles — known limitation, acceptable since profiles come after top-level region");
+    assert.equal(
+      topLevelKeyRe.test(contentWithoutTopLevel),
+      true,
+      "regex matches model= inside profiles — known limitation, acceptable since profiles come after top-level region",
+    );
   });
 
   it("top-level 삽입 로직: 첫 섹션 앞에 키를 삽입한다", () => {
@@ -160,9 +194,16 @@ describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", (
     const value = '"fast"';
     const line = `${key} = ${value}\n`;
     const firstSectionIdx = content.search(/^\[(?:profiles|mcp_servers)\./m);
-    const injected = content.slice(0, firstSectionIdx) + line + content.slice(firstSectionIdx);
-    assert.ok(injected.startsWith(`${key} = ${value}`), "key should be inserted at top");
-    assert.ok(injected.includes('[profiles.codex53_high]'), "profile section preserved");
+    const injected =
+      content.slice(0, firstSectionIdx) + line + content.slice(firstSectionIdx);
+    assert.ok(
+      injected.startsWith(`${key} = ${value}`),
+      "key should be inserted at top",
+    );
+    assert.ok(
+      injected.includes("[profiles.codex53_high]"),
+      "profile section preserved",
+    );
   });
 });
 
@@ -177,6 +218,9 @@ describe("ensureCodexProfiles: 손상 파일 가드", () => {
   });
 
   it("REQUIRED_TOP_LEVEL_SETTINGS 리스트가 비어 있지 않다", () => {
-    assert.ok(REQUIRED_TOP_LEVEL_SETTINGS.length >= 3, "need at least 3 top-level settings");
+    assert.ok(
+      REQUIRED_TOP_LEVEL_SETTINGS.length >= 3,
+      "need at least 3 top-level settings",
+    );
   });
 });

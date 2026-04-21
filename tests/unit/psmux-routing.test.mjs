@@ -274,7 +274,7 @@ describe("teamStart routing — effectiveMode dispatches correct start function"
 // C. SKILL.md content verification
 // ---------------------------------------------------------------------------
 describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => {
-  const multiSkillPath = resolve(PROJECT_ROOT, "skills/tfx-multi/SKILL.md");
+  const _multiSkillPath = resolve(PROJECT_ROOT, "skills/tfx-multi/SKILL.md");
   const autoSkillPath = resolve(PROJECT_ROOT, "skills/tfx-auto/SKILL.md");
 
   // Phase 2 Step B (35a1432) 에서 tfx-multi 가 thin alias 로 축소됨 (39줄).
