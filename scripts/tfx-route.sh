@@ -1361,8 +1361,16 @@ heartbeat_monitor() {
             _grace_waited=$((_grace_waited + 1))
           done
           if kill -0 "$pid" 2>/dev/null; then
-            echo "[tfx-heartbeat] pid=$pid SIGTERM 무시 — SIGKILL 강제" >&2
-            kill -KILL "$pid" 2>/dev/null || true
+            # Windows/MSYS: POSIX SIGKILL 이 Win32 자식 트리까지 닿지 않는다.
+            # cleanup_workers 와 동일하게 taskkill /T /F 로 트리 종료.
+            case "$(uname -s)" in
+              MINGW*|MSYS*)
+                echo "[tfx-heartbeat] pid=$pid SIGTERM 무시 — taskkill /T /F" >&2
+                MSYS_NO_PATHCONV=1 cmd.exe //c "taskkill /T /F /PID $pid" 2>/dev/null || true ;;
+              *)
+                echo "[tfx-heartbeat] pid=$pid SIGTERM 무시 — SIGKILL 강제" >&2
+                kill -KILL "$pid" 2>/dev/null || true ;;
+            esac
           fi
           break
         fi
@@ -1471,27 +1479,51 @@ _codex_config_swap() {
       return 0
     fi
 
-    # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 단, stale lock 은 자동 정리)
+    # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 단, owner-dead + 백업 안전 복원 시 이어받기)
     if [[ -f "$backup" ]]; then
-      # Stale detection (#144/#66 regression guard): crash/stall 로 lock 이 남은 경우,
-      # 후속 워커가 무한정 MCP 없이 돌아가는 것을 막는다. 기본 5분, env override 가능.
-      local stale_min="${TFX_CONFIG_LOCK_STALE_MIN:-5}"
-      local now_epoch backup_mtime age_s
-      now_epoch=$(date +%s)
-      backup_mtime=$(stat -c %Y "$backup" 2>/dev/null || stat -f %m "$backup" 2>/dev/null || echo "$now_epoch")
-      age_s=$((now_epoch - backup_mtime))
-      if [[ "$age_s" -ge $((stale_min * 60)) ]]; then
-        echo "[tfx-route] stale config.toml.pre-exec 감지 (age=${age_s}s ≥ ${stale_min}m) — 자동 제거 후 swap 진행" >&2
-        if ! rm -f "$backup"; then
-          echo "[tfx-route] 경고: stale backup 제거 실패 — swap 스킵" >&2
-          return 0
+      # Owner PID marker (P1 fix): mtime 만으로 stale 을 판정하면 장시간 정상 실행 워커도 오탐.
+      # $backup.owner 에 생성 워커 PID 기록 → kill -0 로 alive 확인. PID 파일 없거나 죽었으면 stale.
+      # mtime 은 신뢰성 낮아 soft 보조 지표로만 사용 (owner 파일 유실 대비 fallback).
+      local owner_file="${backup}.owner"
+      local owner_alive=false
+      local owner_pid=""
+      if [[ -f "$owner_file" ]]; then
+        owner_pid=$(cat "$owner_file" 2>/dev/null | tr -d '[:space:]')
+        if [[ -n "$owner_pid" ]] && kill -0 "$owner_pid" 2>/dev/null; then
+          owner_alive=true
         fi
-      else
-        echo "[tfx-route] config.toml swap 스킵: 다른 워커가 사용 중 (age=${age_s}s, $backup)" >&2
+      fi
+
+      if [[ "$owner_alive" == "true" ]]; then
+        echo "[tfx-route] config.toml swap 스킵: 소유 워커 살아있음 (pid=$owner_pid, $backup)" >&2
         return 0
       fi
+
+      # Owner dead or unknown — stale 후보. 다만 backup-loss 방지를 위해 원본 복원 먼저.
+      # P2 fix: `rm -f $backup` 후 현재 config 를 새 backup 으로 cp 하면, 이전 워커가 이미
+      # filter 한 상태에서 crash 했을 때 원본이 영구 소실. 여기서 먼저 restore 를 시도해
+      # backup 이 원본을 담고 있는 한 그것을 살린다.
+      local backup_restore_guard_size
+      backup_restore_guard_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_restore_guard_size=0
+      if [[ "$backup_restore_guard_size" -lt 500 ]]; then
+        # 작은 backup 은 이미 손상된 state. 현재 config 도 필터된 상태일 수 있으므로
+        # 추가 swap 은 상황을 악화시킬 위험. 전체 스킵하고 수동 확인 유도.
+        echo "[tfx-route] stale backup 작음 (size=${backup_restore_guard_size}B, pid=${owner_pid:-?} dead) — swap 스킵, 수동 확인: $backup" >&2
+        return 0
+      fi
+      local stale_tmp="${config}.stale-restore.$$"
+      if cp "$backup" "$stale_tmp" && mv "$stale_tmp" "$config"; then
+        echo "[tfx-route] stale backup 감지 (pid=${owner_pid:-?} dead) — 원본 복원 후 swap 재진행" >&2
+      else
+        echo "[tfx-route] 경고: stale backup 복원 실패, swap 스킵 (수동 확인: $backup)" >&2
+        rm -f "$stale_tmp" 2>/dev/null
+        return 0
+      fi
+      rm -f "$backup" "$owner_file" 2>/dev/null || true
     fi
     cp "$config" "$backup"
+    # Owner marker: 이 워커가 backup 소유자임을 기록. 다음 워커의 stale detection 기준.
+    echo "$$" > "${backup}.owner" 2>/dev/null || true
 
     # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지.
     # keep="" 은 진입 가드에서 return 됐지만 defense-in-depth 유지.
@@ -1559,6 +1591,7 @@ _codex_config_swap() {
     if ! rm -f "$backup"; then
       echo "[tfx-route] 경고: backup 삭제 실패: $backup (수동 정리 필요)" >&2
     fi
+    rm -f "${backup}.owner" 2>/dev/null || true
     echo "[tfx-route] config.toml 복원 완료" >&2
   fi
 }

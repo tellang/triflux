@@ -8,7 +8,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -180,20 +179,29 @@ _codex_config_swap restore
     assert.match(restored.stderr, /복원 완료/);
   });
 
-  it("filter: backup 이 이미 있으면 swap 을 스킵한다 (double-swap 방지)", () => {
+  it("filter: backup + owner alive → swap 을 스킵한다 (double-swap 방지)", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "tfx-swap-"));
     cleanupDirs.push(dir);
     const config = path.join(dir, "config.toml");
     const backup = `${config}.pre-exec`;
+    const ownerFile = `${backup}.owner`;
     writeFileSync(config, baseToml);
     writeFileSync(backup, "existing-backup");
-
+    // 살아있는 owner: 현재 bash 가 shell 에서 kill -0 성공할 수 있는 PID 를 script 내부에서 확보
+    const bashConfig = config.replace(/\\/g, "/");
+    const bashOwner = ownerFile.replace(/\\/g, "/");
     const script = `
 set -u
-_CODEX_CONFIG='${config}'
+# 살아있는 helper process 를 fork → owner 파일에 그 PID 기록
+sleep 10 &
+OWNER_PID=$!
+echo "$OWNER_PID" > '${bashOwner}'
+_CODEX_CONFIG='${bashConfig}'
 CODEX_CONFIG_FLAGS=('mcp_servers.tfx-hub.enabled=true')
 ${extractSwapFunction()}
 _codex_config_swap filter
+kill "$OWNER_PID" 2>/dev/null || true
+wait "$OWNER_PID" 2>/dev/null || true
 `;
     const result = spawnSync("bash", ["-c", script], {
       encoding: "utf8",
@@ -203,18 +211,18 @@ _codex_config_swap filter
     assert.equal(
       readFileSync(config, "utf8"),
       baseToml,
-      "backup 존재 시 config 건드리지 않음",
+      "owner alive 시 config 건드리지 않음",
     );
     assert.equal(
       readFileSync(backup, "utf8"),
       "existing-backup",
       "기존 backup 보존",
     );
-    assert.match(result.stderr, /다른 워커가 사용 중/);
+    assert.match(result.stderr, /소유 워커 살아있음/);
   });
 });
 
-describe("#144/#66 stale lock auto-cleanup", () => {
+describe("#144/#66 stale lock owner-PID cleanup + backup-loss guard", () => {
   const cleanupDirs = [];
   after(() => {
     for (const d of cleanupDirs) {
@@ -259,28 +267,30 @@ describe("#144/#66 stale lock auto-cleanup", () => {
     "",
   ].join("\n");
 
-  function setupStaleBackup({ backupAgeSec }) {
+  function setupBackup({ backupContent = baseToml, ownerPid = null }) {
     const dir = mkdtempSync(path.join(tmpdir(), "tfx-stale-"));
     const config = path.join(dir, "config.toml");
     const backup = `${config}.pre-exec`;
+    const ownerFile = `${backup}.owner`;
     writeFileSync(config, baseToml);
-    writeFileSync(backup, "stale-backup-contents");
-    // mtime 을 과거로 강제 조정 (utimesSync sec-granular)
-    const mtimeSec = Math.floor(Date.now() / 1000) - backupAgeSec;
-    utimesSync(backup, mtimeSec, mtimeSec);
-    return { dir, config, backup };
+    writeFileSync(backup, backupContent);
+    if (ownerPid !== null) {
+      writeFileSync(ownerFile, String(ownerPid));
+    }
+    return { dir, config, backup, ownerFile };
   }
 
-  function runFilter({ backupAgeSec, envOverride = {} }) {
-    const { dir, config, backup } = setupStaleBackup({ backupAgeSec });
+  function runFilter({ backupContent = baseToml, ownerPid = null, usePrescript = "" }) {
+    const { dir, config, backup, ownerFile } = setupBackup({
+      backupContent,
+      ownerPid,
+    });
     cleanupDirs.push(dir);
-    const envExports = Object.entries(envOverride)
-      .map(([k, v]) => `export ${k}='${v}'`)
-      .join("\n");
+    const bashConfig = config.replace(/\\/g, "/");
     const script = `
 set -u
-${envExports}
-_CODEX_CONFIG='${config}'
+${usePrescript}
+_CODEX_CONFIG='${bashConfig}'
 CODEX_CONFIG_FLAGS=('mcp_servers.tfx-hub.enabled=true')
 ${extractSwapFunction()}
 _codex_config_swap filter
@@ -295,42 +305,97 @@ _codex_config_swap filter
       stdout: result.stdout,
       config: existsSync(config) ? readFileSync(config, "utf8") : null,
       backup: existsSync(backup) ? readFileSync(backup, "utf8") : null,
+      owner: existsSync(ownerFile) ? readFileSync(ownerFile, "utf8").trim() : null,
       backupExists: existsSync(backup),
       dir,
     };
   }
 
-  it("stale lock (age=10분, 기본 5분 threshold 초과) 감지 후 자동 제거하고 swap 진행", () => {
-    const r = runFilter({ backupAgeSec: 600 });
+  // owner alive test 는 BUG-H "filter: backup + owner alive" 에서 커버됨 (중복 제거).
+
+  it("owner PID dead + backup=원본 → 원본 복원 후 swap 재진행", () => {
+    // PID 999999 는 대개 존재하지 않음 (ephemeral). 존재 여부와 무관하게 dead 로 가정하는 보호 로직은
+    // kill -0 실패시 stale 분기. 만약 존재하면 skip (rare).
+    const deadPid = 999999;
+    const r = runFilter({ backupContent: baseToml, ownerPid: deadPid });
+    if (/소유 워커 살아있음/.test(r.stderr)) {
+      // very rare race: PID recycled to live process
+      return;
+    }
     assert.equal(r.exitCode, 0);
-    assert.match(r.stderr, /stale config\.toml\.pre-exec 감지/);
-    assert.match(r.stderr, /age=6\d\ds/); // 6xx seconds
-    assert.match(r.stderr, /자동 제거 후 swap 진행/);
-    // 새 backup 은 원본 config 로 재생성됨 (stale 된 "stale-backup-contents" 가 아님)
-    assert.notEqual(r.backup, "stale-backup-contents", "stale backup 은 교체돼야 함");
+    assert.match(r.stderr, /stale backup 감지.*dead/);
+    assert.match(r.stderr, /원본 복원 후 swap 재진행/);
+    // 새 backup 은 원본이어야 함 (복원 경로를 탔으므로)
     assert.match(r.backup, /\[mcp_servers\.tfx-hub\]/);
     // config 는 필터링되어 context7 제거됨
     assert.doesNotMatch(r.config, /\[mcp_servers\.context7\]/);
   });
 
-  it("fresh lock (age=1분) 은 건드리지 않고 기존 skip 동작 유지 (double-swap 방지)", () => {
-    const r = runFilter({ backupAgeSec: 60 });
+  it("owner file 없음 (legacy lock) + backup=원본 → 원본 복원 후 swap 진행", () => {
+    const r = runFilter({ backupContent: baseToml, ownerPid: null });
     assert.equal(r.exitCode, 0);
-    assert.match(r.stderr, /다른 워커가 사용 중/);
-    assert.match(r.stderr, /age=6\ds/);
-    // Backup 은 원본 그대로, config 도 건드리지 않음
-    assert.equal(r.backup, "stale-backup-contents");
-    assert.equal(r.config, baseToml);
-    assert.doesNotMatch(r.stderr, /stale config\.toml\.pre-exec 감지/);
+    assert.match(r.stderr, /stale backup 감지.*pid=\?/);
+    assert.match(r.stderr, /원본 복원 후 swap 재진행/);
+    assert.match(r.backup, /\[mcp_servers\.tfx-hub\]/);
+    assert.doesNotMatch(r.config, /\[mcp_servers\.context7\]/);
   });
 
-  it("TFX_CONFIG_LOCK_STALE_MIN=1 override: age=90초면 stale 로 간주", () => {
-    const r = runFilter({
-      backupAgeSec: 90,
-      envOverride: { TFX_CONFIG_LOCK_STALE_MIN: "1" },
-    });
+  it("owner file 없음 + backup 작음(<500B) → 원본 소실 위험, 전체 swap 스킵", () => {
+    const r = runFilter({ backupContent: "tiny", ownerPid: null });
     assert.equal(r.exitCode, 0);
-    assert.match(r.stderr, /stale config\.toml\.pre-exec 감지/);
-    assert.match(r.stderr, /≥ 1m/);
+    assert.match(r.stderr, /stale backup 작음/);
+    assert.match(r.stderr, /swap 스킵/);
+    // config 는 건드리지 않음 (안전), backup 도 수동 확인 유도
+    assert.equal(r.config, baseToml);
+    assert.equal(r.backup, "tiny", "작은 backup 은 수동 확인용으로 보존");
+  });
+
+  it("정상 swap 시 .owner 파일이 현재 PID 로 생성된다", () => {
+    // backup 이 없는 초기 상태에서 filter → backup 과 .owner 모두 생성
+    const dir = mkdtempSync(path.join(tmpdir(), "tfx-owner-"));
+    cleanupDirs.push(dir);
+    const config = path.join(dir, "config.toml");
+    writeFileSync(config, baseToml);
+    const bashConfig = config.replace(/\\/g, "/");
+    const script = `
+set -u
+_CODEX_CONFIG='${bashConfig}'
+CODEX_CONFIG_FLAGS=('mcp_servers.tfx-hub.enabled=true')
+${extractSwapFunction()}
+_codex_config_swap filter
+echo "OWNER=$(cat ${bashConfig}.pre-exec.owner 2>/dev/null || echo MISSING)"
+`;
+    const result = spawnSync("bash", ["-c", script], {
+      encoding: "utf8",
+      cwd: REPO_ROOT,
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /OWNER=\d+/, "owner 파일에 PID 기록");
+    assert.doesNotMatch(result.stdout, /OWNER=MISSING/);
+  });
+
+  it("restore 는 backup 과 .owner 를 같이 삭제한다", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "tfx-restore-"));
+    cleanupDirs.push(dir);
+    const config = path.join(dir, "config.toml");
+    const backup = `${config}.pre-exec`;
+    const ownerFile = `${backup}.owner`;
+    writeFileSync(config, baseToml);
+    const script = `
+set -u
+_CODEX_CONFIG='${config}'
+CODEX_CONFIG_FLAGS=('mcp_servers.tfx-hub.enabled=true')
+${extractSwapFunction()}
+_codex_config_swap filter
+_codex_config_swap restore
+`;
+    const result = spawnSync("bash", ["-c", script], {
+      encoding: "utf8",
+      cwd: REPO_ROOT,
+    });
+    assert.equal(result.status, 0);
+    assert.equal(existsSync(backup), false, "backup 삭제");
+    assert.equal(existsSync(ownerFile), false, ".owner 삭제");
+    assert.equal(readFileSync(config, "utf8"), baseToml);
   });
 });

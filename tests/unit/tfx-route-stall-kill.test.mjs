@@ -60,6 +60,13 @@ describe("#144/#66 heartbeat stall kill — shape", () => {
     assert.match(hb, /kill_on_stall="\$\{TFX_STALL_KILL:-1\}"/);
     assert.match(hb, /kill_grace="\$\{TFX_STALL_KILL_GRACE:-30\}"/);
   });
+
+  it("Windows(MINGW/MSYS) 에서는 taskkill /T /F 로 프로세스 트리를 종료한다", () => {
+    const hb = extractFunction("heartbeat_monitor");
+    assert.match(hb, /MINGW\*\|MSYS\*/, "Windows 감지 case 필요");
+    assert.match(hb, /taskkill \/T \/F/, "Windows 트리 종료 명령 필요");
+    assert.match(hb, /MSYS_NO_PATHCONV=1/, "MSYS 경로 변환 비활성화 필요");
+  });
 });
 
 describe("#144/#66 heartbeat stall kill — integration", () => {
