@@ -11,6 +11,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -241,12 +242,29 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
 }
 
 /**
+ * 이전 run 의 stale .txt / .partial / .err 를 제거한다.
+ * Issue #118 Codex review R1 HIGH: resultFile 경로 재사용 시 (워커 restart 또는
+ * 동일 세션명 재실행) 이전 run 의 HANDOFF 가 새 run 결과로 오인될 수 있다.
+ * @param {string} resultFile
+ */
+export function cleanStaleResultArtifacts(resultFile) {
+  for (const suffix of ["", ".partial", ".err"]) {
+    try {
+      rmSync(`${resultFile}${suffix}`, { force: true });
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+/**
  * 결과 파일 읽기 (없으면 capture-pane fallback)
+ * Issue #118 fallback chain: .txt → .partial ([partial] prefix) → .err → capture-pane
  * @param {string} resultFile
  * @param {string} paneId
  * @returns {string}
  */
-function readResult(resultFile, paneId) {
+export function readResult(resultFile, paneId) {
   if (existsSync(resultFile)) {
     return readFileSync(resultFile, "utf8").trim();
   }
@@ -627,6 +645,8 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       RESULT_DIR,
       `${sessionName}-${paneName}.txt`,
     ).replace(/\\/g, "/");
+    // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
+    cleanStaleResultArtifacts(resultFile);
     const cmd = buildHeadlessCommand(
       assignment.cli,
       assignment.prompt,
@@ -703,6 +723,8 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         RESULT_DIR,
         `${sessionName}-${paneName}.txt`,
       ).replace(/\\/g, "/");
+      // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
+      cleanStaleResultArtifacts(resultFile);
       const cmd = buildHeadlessCommand(
         assignment.cli,
         assignment.prompt,

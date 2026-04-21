@@ -16,7 +16,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { waitForCompletionWithStallDetect } from "../../hub/team/headless.mjs";
+import {
+  cleanStaleResultArtifacts,
+  readResult,
+  waitForCompletionWithStallDetect,
+} from "../../hub/team/headless.mjs";
 
 const TEST_DIR = join(tmpdir(), "tfx-118-partial-test");
 const RESULT_FILE = join(TEST_DIR, "worker-1.txt");
@@ -149,52 +153,14 @@ describe("issue #118 fix — .partial capture-pane fallback", () => {
   });
 });
 
-describe("issue #118 fix — readResult .partial fallback chain", () => {
-  // readResult 는 module-internal 이라 직접 import 불가 → 로직 재현 검증.
-  // 실제 구현과 순서/포맷을 동기화해야 한다.
-  function readResultLike(resultFile) {
-    if (existsSync(resultFile)) {
-      return readFileSync(resultFile, "utf8").trim();
-    }
-    const partialFile = `${resultFile}.partial`;
-    if (existsSync(partialFile)) {
-      const partial = readFileSync(partialFile, "utf8").trim();
-      if (partial) return `[partial] ${partial}`;
-    }
-    const errFile = `${resultFile}.err`;
-    if (existsSync(errFile)) {
-      const stderr = readFileSync(errFile, "utf8").trim();
-      if (stderr) return `[stderr] ${stderr}`;
-    }
-    return "";
-  }
+describe("issue #118 fix — readResult .partial fallback chain (real fn)", () => {
+  // Review R1 MEDIUM 반영: readResult 를 module export 로 바꾸고 실제 함수를 테스트.
+  // paneId 를 empty 로 주면 capturePsmuxPane 은 빈 문자열을 반환하도록 psmux.mjs 가 보장.
+  const PANE_EMPTY = "";
 
   beforeEach(() => {
     mkdirSync(TEST_DIR, { recursive: true });
-    [".", ".partial", ".err"].forEach((ext) => {
-      const p =
-        ext === "." ? RESULT_FILE : `${RESULT_FILE}${ext.replace(".", "")}`;
-      try {
-        rmSync(p);
-      } catch {
-        /* */
-      }
-    });
-    try {
-      rmSync(RESULT_FILE);
-    } catch {
-      /* */
-    }
-    try {
-      rmSync(`${RESULT_FILE}.partial`);
-    } catch {
-      /* */
-    }
-    try {
-      rmSync(`${RESULT_FILE}.err`);
-    } catch {
-      /* */
-    }
+    cleanStaleResultArtifacts(RESULT_FILE);
   });
 
   afterEach(() => {
@@ -208,7 +174,7 @@ describe("issue #118 fix — readResult .partial fallback chain", () => {
   it(".partial 존재 시 [partial] prefix 로 반환", () => {
     writeFileSync(`${RESULT_FILE}.partial`, "partial codex output", "utf8");
     assert.equal(
-      readResultLike(RESULT_FILE),
+      readResult(RESULT_FILE, PANE_EMPTY),
       "[partial] partial codex output",
     );
   });
@@ -216,18 +182,68 @@ describe("issue #118 fix — readResult .partial fallback chain", () => {
   it(".partial 이 .err 보다 우선한다 (더 풍부한 정보)", () => {
     writeFileSync(`${RESULT_FILE}.partial`, "meaningful partial", "utf8");
     writeFileSync(`${RESULT_FILE}.err`, "stderr noise", "utf8");
-    assert.equal(readResultLike(RESULT_FILE), "[partial] meaningful partial");
+    assert.equal(
+      readResult(RESULT_FILE, PANE_EMPTY),
+      "[partial] meaningful partial",
+    );
   });
 
   it("resultFile 이 있으면 .partial 을 무시한다 (정상 완료 경로)", () => {
     writeFileSync(RESULT_FILE, "completed output", "utf8");
     writeFileSync(`${RESULT_FILE}.partial`, "stale partial", "utf8");
-    assert.equal(readResultLike(RESULT_FILE), "completed output");
+    assert.equal(readResult(RESULT_FILE, PANE_EMPTY), "completed output");
   });
 
   it(".partial 이 비어있으면 .err 로 fallback", () => {
     writeFileSync(`${RESULT_FILE}.partial`, "   \n   ", "utf8");
     writeFileSync(`${RESULT_FILE}.err`, "codex exit 1", "utf8");
-    assert.equal(readResultLike(RESULT_FILE), "[stderr] codex exit 1");
+    assert.equal(
+      readResult(RESULT_FILE, PANE_EMPTY),
+      "[stderr] codex exit 1",
+    );
+  });
+});
+
+describe("issue #118 review R1 HIGH — cleanStaleResultArtifacts", () => {
+  beforeEach(() => mkdirSync(TEST_DIR, { recursive: true }));
+  afterEach(() => {
+    try {
+      rmSync(TEST_DIR, { recursive: true, force: true });
+    } catch {
+      /* */
+    }
+  });
+
+  it("이전 run 의 .txt / .partial / .err 를 모두 제거한다", () => {
+    writeFileSync(RESULT_FILE, "prev completed", "utf8");
+    writeFileSync(`${RESULT_FILE}.partial`, "prev partial", "utf8");
+    writeFileSync(`${RESULT_FILE}.err`, "prev stderr", "utf8");
+
+    cleanStaleResultArtifacts(RESULT_FILE);
+
+    assert.equal(existsSync(RESULT_FILE), false, ".txt 제거 확인");
+    assert.equal(
+      existsSync(`${RESULT_FILE}.partial`),
+      false,
+      ".partial 제거 확인",
+    );
+    assert.equal(existsSync(`${RESULT_FILE}.err`), false, ".err 제거 확인");
+  });
+
+  it("파일이 없어도 throw 하지 않는다 (fresh 세션)", () => {
+    assert.doesNotThrow(() => cleanStaleResultArtifacts(RESULT_FILE));
+  });
+
+  it("cleanup 후 readResult 는 empty capture-pane 으로 fallback (stale leak 없음)", () => {
+    // 이전 run 의 stale partial 이 있었는데 cleanup 후 새 run 시작
+    writeFileSync(`${RESULT_FILE}.partial`, "STALE from prev run", "utf8");
+    cleanStaleResultArtifacts(RESULT_FILE);
+    // paneId empty → capturePsmuxPane 빈 문자열. stale [partial] leak 되지 않아야 함
+    const result = readResult(RESULT_FILE, "");
+    assert.doesNotMatch(
+      result,
+      /STALE from prev run/,
+      "cleanup 후 stale partial 이 readResult 에 새 run 결과로 오인되면 안 됨",
+    );
   });
 });
