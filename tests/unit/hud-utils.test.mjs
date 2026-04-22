@@ -140,6 +140,37 @@ describe("hud/utils.mjs", () => {
     });
   });
 
+  it("advanceToNextCycle returns next reset (not now) at exact cycle boundary", () => {
+    const FIVE_H = 5 * 60 * 60 * 1000;
+    const SEVEN_D = 7 * 24 * 60 * 60 * 1000;
+    const nowMs = Date.parse("2026-04-22T00:00:00.000Z");
+
+    withMockedNow(nowMs, () => {
+      const epoch5h = new Date(nowMs - FIVE_H).toISOString();
+      const epoch7d = new Date(nowMs - SEVEN_D).toISOString();
+
+      // exact boundary: elapsed == cycleMs → 다음 reset = now + cycle
+      assert.equal(
+        formatResetRemaining(epoch5h, FIVE_H),
+        "5h00m",
+        "exact 5h boundary should display 5h00m, not n/a",
+      );
+      assert.equal(
+        formatResetRemainingDayHour(epoch7d, SEVEN_D),
+        "07d00h",
+        "exact 7d boundary should display 07d00h, not n/a",
+      );
+
+      // double boundary: elapsed == 2 * cycleMs → +1 cycle from now
+      const epoch10h = new Date(nowMs - 2 * FIVE_H).toISOString();
+      assert.equal(formatResetRemaining(epoch10h, FIVE_H), "5h00m");
+
+      // 1ms past boundary still works
+      const epoch5hPlus = new Date(nowMs - FIVE_H - 1).toISOString();
+      assert.equal(formatResetRemaining(epoch5hPlus, FIVE_H), "4h59m");
+    });
+  });
+
   it("decodeJwtEmail extracts email from the JWT payload and rejects malformed tokens", () => {
     const payload = Buffer.from(
       JSON.stringify({ email: "dev@example.com" }),
