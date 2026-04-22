@@ -143,7 +143,7 @@ function resolveDefaultMcpConfig(cwd) {
   const legacy = resolve(cwd, ".mcp.json");
   if (existsSync(legacy)) return [legacy];
   process.stderr.write(
-    "[tfx-route-worker] warning: no MCP config found, hub unavailable\n",
+    "[tfx-route-worker] warning: no project MCP config in cwd — hub status unaffected\n",
   );
   return [];
 }
