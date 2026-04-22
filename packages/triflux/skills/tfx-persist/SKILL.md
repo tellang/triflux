@@ -22,10 +22,16 @@ argument-hint: "<작업 설명 — tfx-auto 로 passthrough>"
 
 ## 동작
 
-1. stderr 에 1회 경고 출력:
-   ```
-   [deprecated] tfx-persist -> use: tfx-auto --retry ralph
-   ```
+canonical 위임 **이전** 에 아래 bash 블록을 한 번 실행한다. Phase 5 (v11) 물리 삭제 게이트는 `.omc/state/alias-usage.log` 의 7일 zero-usage 검증에 의존 — 이 logging 이 빠지면 게이트가 영영 열리지 않는다.
+
+```bash
+mkdir -p .omc/state
+echo "[deprecated] tfx-persist -> use: tfx-auto --retry ralph" >&2
+echo "[DEPRECATED] tfx-persist — see tfx-auto --retry ralph"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) tfx-persist -> tfx-auto --retry ralph" >> .omc/state/alias-usage.log
+```
+
+1. 위 bash 블록 실행 (stderr 경고 + stdout `[DEPRECATED]` 마커 + alias-usage.log append).
 2. ARGUMENTS 전체 앞에 `--retry ralph` 를 prepend 하여 `Skill("tfx-auto")` 호출.
 3. 스킬 경유 시 기본 `--max-iterations 0` (unlimited) 로 진입. CLI 직접 호출 시 bounded 1 로 진입 (임시 합의안, Phase 3 Open question #2).
 

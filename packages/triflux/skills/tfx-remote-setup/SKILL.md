@@ -11,6 +11,17 @@ argument-hint: "[--add|--edit|--probe-all|--diagnose]"
 
 이 스킬은 Phase 4b thin alias다. 새 표면은 `tfx-remote setup` 하나다.
 
+## Deprecation logging (alias 호출 즉시 실행 필수)
+
+canonical 위임 **이전** 에 아래 bash 블록을 한 번 실행한다. Phase 5 (v11) 물리 삭제 게이트는 `.omc/state/alias-usage.log` 의 7일 zero-usage 검증에 의존.
+
+```bash
+mkdir -p .omc/state
+echo "[deprecated] tfx-remote-setup -> use: tfx-remote setup" >&2
+echo "[DEPRECATED] tfx-remote-setup — see tfx-remote setup"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) tfx-remote-setup -> tfx-remote setup" >> .omc/state/alias-usage.log
+```
+
 ## Alias mapping
 
 - `tfx-remote-setup`

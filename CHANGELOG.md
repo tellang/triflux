@@ -4,6 +4,16 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.10] - 2026-04-23
+
+### Changed
+
+- **`chore(#112)`** Legacy alias deprecation logging 표준화 — Phase 5 (v11) 물리 삭제 게이트 활성화. 11개 DEPRECATED alias (tfx-autopilot / tfx-consensus / tfx-debate / tfx-fullcycle / tfx-multi / tfx-panel / tfx-persist / tfx-swarm / tfx-remote-setup / tfx-remote-spawn / tfx-psmux-rules) SKILL.md 에 **실행 가능한 bash 블록** 을 일관된 형식으로 주입: (1) stderr 에 `[deprecated] {name} -> use: {canonical}` 경고, (2) stdout 에 `[DEPRECATED] {name} — see {canonical}` 마커, (3) `.omc/state/alias-usage.log` 에 `ISO8601 {name} -> {canonical}` append (mkdir -p 선행). 이전에는 consensus/debate/panel 3개만 textual 3단계 절차를 가졌고 bash 실행문이 없었음. 나머지 8개는 stderr 경고 한 줄만 있거나 logging 규약 자체가 부재 → Phase 5 zero-usage 게이트가 측정 불가능한 상태였다. 이제 11개 전부 동일 패턴 + 측정 가능. 7일 누적 `alias-usage.log` 가 zero 이면 해당 alias 파일 물리 삭제 가능.
+
+### Tests
+
+- **+55** `tests/unit/legacy-alias-logging.test.mjs` (신규) — 11개 legacy SKILL.md 각각 5개 assertion (alias-usage.log append / stderr [deprecated] echo / stdout [DEPRECATED] marker echo / canonical entrypoint 언급 / mkdir -p .omc/state 선행). 회귀 시 Phase 5 게이트가 끊기는 것을 즉시 감지.
+
 ## [10.13.9] - 2026-04-23
 
 ### Fixed

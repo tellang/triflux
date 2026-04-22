@@ -21,10 +21,16 @@ argument-hint: "<PRD 경로 — tfx-auto 로 passthrough>"
 
 ## 동작
 
-1. stderr 에 1회 경고 출력:
-   ```
-   [deprecated] tfx-swarm -> use: tfx-auto --parallel swarm --mode consensus --isolation worktree
-   ```
+canonical 위임 **이전** 에 아래 bash 블록을 한 번 실행한다. Phase 5 (v11) 물리 삭제 게이트는 `.omc/state/alias-usage.log` 의 7일 zero-usage 검증에 의존 — 이 logging 이 빠지면 게이트가 영영 열리지 않는다.
+
+```bash
+mkdir -p .omc/state
+echo "[deprecated] tfx-swarm -> use: tfx-auto --parallel swarm --mode consensus --isolation worktree" >&2
+echo "[DEPRECATED] tfx-swarm — see tfx-auto --parallel swarm --mode consensus --isolation worktree"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) tfx-swarm -> tfx-auto --parallel swarm --mode consensus --isolation worktree" >> .omc/state/alias-usage.log
+```
+
+1. 위 bash 블록 실행 (stderr 경고 + stdout `[DEPRECATED]` 마커 + alias-usage.log append).
 2. ARGUMENTS 전체 앞에 `--parallel swarm --mode consensus --isolation worktree` 를 prepend 하여 `Skill("tfx-auto")` 호출.
 3. tfx-auto 의 플래그 오버라이드 로직이 `tfx swarm <prd>` CLI 를 호출한다 (실제 swarm 엔진은 변경 없음).
 
