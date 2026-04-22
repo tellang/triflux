@@ -225,12 +225,16 @@ export function parseClaudeUsageResponse(response) {
   if (!response || typeof response !== "object") return null;
   // five_hour/seven_day 키 자체가 없으면 비정상 응답
   if (!response.five_hour && !response.seven_day) return null;
-  const fiveHour = response.five_hour?.utilization;
-  const sevenDay = response.seven_day?.utilization;
-  // utilization이 null이면 0%로 처리 (API 200 성공 시 null = 사용량 없음)
+  // 키 자체가 부재하면 percent=null (HUD --% placeholder), utilization=null 만 0%로 처리
+  const fiveHourPresent = response.five_hour != null;
+  const sevenDayPresent = response.seven_day != null;
   return {
-    fiveHourPercent: clampPercent(fiveHour ?? 0),
-    weeklyPercent: clampPercent(sevenDay ?? 0),
+    fiveHourPercent: fiveHourPresent
+      ? clampPercent(response.five_hour.utilization ?? 0)
+      : null,
+    weeklyPercent: sevenDayPresent
+      ? clampPercent(response.seven_day.utilization ?? 0)
+      : null,
     fiveHourResetsAt: response.five_hour?.resets_at || null,
     weeklyResetsAt: response.seven_day?.resets_at || null,
   };
