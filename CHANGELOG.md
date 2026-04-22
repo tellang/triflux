@@ -4,6 +4,18 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.6] - 2026-04-22
+
+### Fixed
+
+- **`fix(hud)`** `parseClaudeUsageResponse` — Claude OAuth Usage API 응답에서 `five_hour` 또는 `seven_day` 키 자체가 부재할 때 `?? 0` 으로 collapse 되어 `fiveHourPercent: 0` 으로 표시되던 결함. utilization=null (사용량 없음) 과 키 부재 (API 응답 이상) 가 구분 안 돼 가짜 0% 가 표시됨. 키 존재 여부를 따로 검사해 부재 시 `null` 반환 → HUD 렌더러가 `--%` placeholder 표시. utilization=null 인 정상 케이스는 기존대로 0% 유지. `hud/providers/claude.mjs` + packages mirror.
+- **`fix(hud)`** Codex `classifyBucket` weekly window 임계 — `>= 1440min(24h)` 의 헐거운 lower bound 가 향후 24h/48h 등 중간 버킷 도입 시 모두 weekly 로 silent 오분류할 위험. 10080min(7d) 외 단일 weekly 값을 emit 하지 않는 현재 Codex 동작에 맞춰 `>= 7000min(~5d)` 로 좁힘. 알 수 없는 shape 는 `null` (미분류) 로 떨어져 slot 오할당 차단. `hud/providers/codex.mjs` + packages mirror.
+
+### Tests
+
+- **+6** `tests/unit/hud-claude-parse.test.mjs` (신규) — 키 부재 vs utilization=null vs clamping 6 케이스
+- **+2** `tests/unit/hud-codex-bucket.test.mjs` — 7000min lower bound + 1440min/6999min rejection (1440min weekly assertion 제거)
+
 ## [10.13.5] - 2026-04-22
 
 ### Fixed
