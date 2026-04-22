@@ -4,6 +4,22 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.5] - 2026-04-22
+
+### Fixed
+
+- **`fix(tfx-route)`** STALL_KILL orphan child — `heartbeat_monitor` 가 SIGTERM 으로 wrapper(bash) 를 종료한 뒤 `kill -0 $pid` 가 false 면 `taskkill /T /F` 분기를 skip 해 Codex 자식 프로세스가 별도 Win32 process 로 **orphan 생존**하던 결함. 사용자 보고(2026-04-22 세션): "tfx-route 래퍼 프로세스 exit 이후에도 실제 Codex 자식은 계속 running, stderr 191KB 까지 누적". SIGTERM 이전에 `_find_fork_pids` 로 자식 PID 스냅샷을 떠놓고, wrapper 정리 후 orphan sweep 루프로 살아있는 자식을 taskkill /T /F (Windows) / kill -KILL (POSIX) 로 tree kill. `scripts/tfx-route.sh` + packages mirror 동시 갱신.
+- **`fix(hud)`** `advanceToNextCycle` exact-cycle boundary glitch — `elapsed` 가 `cycleMs` 의 정수배일 때 `Math.ceil(elapsed/cycleMs)*cycleMs` 가 `target=now` 를 반환해 `diff=0` → `formatResetRemaining*` 이 빈 문자열 → HUD 5h/1w 컬럼이 정확한 reset 순간에 `n/a` 로 깜빡이던 결함. `Math.floor(elapsed/cycleMs)+1` 로 항상 다음 사이클을 가리키도록 교정. 5h 경계 `5h00m`, 7d 경계 `07d00h`, 1d Gemini 경계 동일 적용. `hud/utils.mjs` + packages mirror 동시 갱신.
+
+### Removed
+
+- **`chore(hud)`** dead alias 제거 (`hud/constants.mjs`) — `PLUGIN_USAGE_CACHE_PATH` 와 `CLAUDE_USAGE_STALE_MS_WITH_PLUGIN` 은 외부 import 0건의 `OMC_*` alias source 역할만. 정의 직접 인라인하고 base 이름 삭제. 동작 변경 없음.
+
+### Tests
+
+- **+1** `tests/unit/tfx-route-stall-kill.test.mjs` — "STALL_KILL 은 SIGTERM 전에 자식 PID 를 스냅샷하고 orphan sweep 을 수행한다" shape 테스트. `_stall_children=$(_find_fork_pids ...)` snapshot 라인 + `orphan children detected` 로그 + `for _cpid in $_orphan_alive` tree kill 루프 회귀 가드.
+- **+1** `tests/unit/hud-utils.test.mjs` — `advanceToNextCycle returns next reset (not now) at exact cycle boundary` 회귀 테스트. exact 5h / exact 7d / 2*5h / 1ms past boundary 4 케이스 커버.
+
 ## [10.13.3] - 2026-04-22
 
 ### Fixed
