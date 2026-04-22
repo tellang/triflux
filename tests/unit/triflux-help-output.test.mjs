@@ -31,4 +31,24 @@ describe("tfx --help 출력", () => {
     const out = stripAnsi(raw);
     assert.match(out, /PRD|shard|worktree/i);
   });
+
+  it("#109: Commands 섹션에 tfx synapse 포함", () => {
+    const raw = execSync(`node "${binPath}" --help`, { encoding: "utf8" });
+    const out = stripAnsi(raw);
+    assert.match(out, /tfx synapse/);
+  });
+
+  it("#109: Commands 섹션에 tfx why 포함", () => {
+    const raw = execSync(`node "${binPath}" --help`, { encoding: "utf8" });
+    const out = stripAnsi(raw);
+    assert.match(out, /tfx why\b/);
+  });
+
+  it("#109: tfx swarm --help 에 run 서브커맨드 노출", () => {
+    const raw = execSync(`node "${binPath}" swarm --help`, {
+      encoding: "utf8",
+    });
+    const out = stripAnsi(raw);
+    assert.match(out, /tfx swarm run/);
+  });
 });
