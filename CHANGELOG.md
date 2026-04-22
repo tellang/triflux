@@ -4,6 +4,16 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.9] - 2026-04-23
+
+### Fixed
+
+- **`fix(cli)`** `tfx swarm run <prd>` alias + `tfx --help` Commands 블록 누락 (#109) — v10.13.7 에서 `tfx swarm --help` sub-help 와 `tfx swarm` 한 줄 surface 는 추가했으나 (1) `tfx swarm run <prd>` verb alias 가 여전히 `run` 을 PRD 경로로 해석하고 (`PRD file not found: .../run`), (2) `tfx --help` Commands 블록에 `synapse` / `why` 가 누락된 채로 남아있던 3증상 중 2증상 잔존. `bin/triflux.mjs` swarm dispatch 에 `if (sub === "run") cmdSwarmRun(cmdArgs.slice(1))` 분기 추가 + `CLI_COMMAND_SCHEMAS.swarm.subcommands.run` 문서화 + sub-help Subcommands 블록 맨 위에 `tfx swarm run <prd>` 렌더 + Commands 블록에 `tfx synapse` / `tfx why` 두 줄 추가. `tfx swarm` 설명도 `(run/plan/list)` 힌트 포함.
+
+### Tests
+
+- **+3** `tests/unit/triflux-help-output.test.mjs` — Commands 블록 `tfx synapse` / `tfx why` 검증 2건 + sub-help `tfx swarm run` 검증 1건. 5/5 pass.
+
 ## [10.13.8] - 2026-04-22
 
 ### Fixed
