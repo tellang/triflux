@@ -212,11 +212,13 @@ export function getContextPercent(stdin) {
 }
 
 // 과거 리셋 시간 → 다음 주기로 순환하여 미래 시점 반환
+// elapsed가 cycleMs의 정수배일 때 ceil은 target=now를 반환해 diff=0이 되므로
+// floor+1로 항상 다음 사이클을 가리키도록 한다.
 export function advanceToNextCycle(epochMs, cycleMs) {
   const now = Date.now();
   if (epochMs >= now || !cycleMs) return epochMs;
   const elapsed = now - epochMs;
-  return epochMs + Math.ceil(elapsed / cycleMs) * cycleMs;
+  return epochMs + (Math.floor(elapsed / cycleMs) + 1) * cycleMs;
 }
 
 function parseResetDate(isoOrUnix) {
