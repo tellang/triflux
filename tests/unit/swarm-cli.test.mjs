@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { parseFlags } from "../../hub/team/swarm-cli.mjs";
+import { assertTtyForSwarm, parseFlags } from "../../hub/team/swarm-cli.mjs";
 
 describe("swarm-cli parseFlags — --base", () => {
   it("default baseBranch is 'main' when --base omitted", () => {
@@ -47,5 +47,62 @@ describe("swarm-cli parseFlags — --base", () => {
     assert.equal(flags.filter, "shard-a");
     assert.equal(flags.baseBranch, "release/v2");
     assert.deepEqual(positional, ["docs/prd/bar.md"]);
+  });
+});
+
+describe("swarm-cli assertTtyForSwarm — #116-C non-TTY fail-fast", () => {
+  it("passes when stdout is TTY", () => {
+    const result = assertTtyForSwarm({
+      stdoutIsTTY: true,
+      stdinIsTTY: false,
+      env: {},
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.optIn, false);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  it("passes when stdin is TTY (e.g. piped stdout only)", () => {
+    const result = assertTtyForSwarm({
+      stdoutIsTTY: false,
+      stdinIsTTY: true,
+      env: {},
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  it("fails with #116-C guidance when both stdout and stdin are non-TTY", () => {
+    const result = assertTtyForSwarm({
+      stdoutIsTTY: false,
+      stdinIsTTY: false,
+      env: {},
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.optIn, false);
+    assert.match(result.reason, /#116-C/);
+    assert.match(result.reason, /TFX_ALLOW_NON_TTY_SWARM=1/);
+    assert.match(result.reason, /tmux/);
+  });
+
+  it("opts in with warning when TFX_ALLOW_NON_TTY_SWARM=1", () => {
+    const result = assertTtyForSwarm({
+      stdoutIsTTY: false,
+      stdinIsTTY: false,
+      env: { TFX_ALLOW_NON_TTY_SWARM: "1" },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.optIn, true);
+    assert.equal(result.warnings.length, 1);
+    assert.match(result.warnings[0], /opt-in/);
+  });
+
+  it("does not opt in when TFX_ALLOW_NON_TTY_SWARM is set to other values", () => {
+    const result = assertTtyForSwarm({
+      stdoutIsTTY: false,
+      stdinIsTTY: false,
+      env: { TFX_ALLOW_NON_TTY_SWARM: "true" },
+    });
+    assert.equal(result.ok, false);
   });
 });
