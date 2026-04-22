@@ -1354,6 +1354,11 @@ heartbeat_monitor() {
         local kill_grace="${TFX_STALL_KILL_GRACE:-30}"
         if [[ "$kill_on_stall" -eq 1 && "$stall_count" -ge $((stall_threshold + kill_grace)) ]]; then
           echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=STALL_KILL stall=${stall_count}s — SIGTERM" >&2
+          # Snapshot child PIDs before SIGTERM — wrapper 가 SIGTERM 을 수용해 죽으면
+          # 부모 소멸 후 taskkill /T 가 자식 트리를 탐색하지 못해 codex 자식이 orphan 으로 남는다.
+          # 사용자 보고(2026-04-22): "tfx-route 래퍼 exit 이후에도 Codex 자식이 살아있음".
+          local _stall_children
+          _stall_children=$(_find_fork_pids "$pid" 2>/dev/null || echo "")
           kill -TERM "$pid" 2>/dev/null || true
           local _grace_waited=0
           while kill -0 "$pid" 2>/dev/null && [[ "$_grace_waited" -lt 5 ]]; do
@@ -1371,6 +1376,28 @@ heartbeat_monitor() {
                 echo "[tfx-heartbeat] pid=$pid SIGTERM 무시 — SIGKILL 강제" >&2
                 kill -KILL "$pid" 2>/dev/null || true ;;
             esac
+          fi
+          # Orphan sweep: wrapper 가 SIGTERM 을 수용해도 자식 codex 프로세스는 별도
+          # Win32 process 이므로 자동 종료되지 않는다. 스냅샷 PID 중 살아있는 것만 tree kill.
+          if [[ -n "$_stall_children" ]]; then
+            local _orphan_alive=""
+            local _cpid
+            for _cpid in $_stall_children; do
+              kill -0 "$_cpid" 2>/dev/null && _orphan_alive="$_orphan_alive $_cpid"
+            done
+            if [[ -n "$_orphan_alive" ]]; then
+              echo "[tfx-heartbeat] pid=$pid orphan children detected:$_orphan_alive — tree kill" >&2
+              case "$(uname -s)" in
+                MINGW*|MSYS*)
+                  for _cpid in $_orphan_alive; do
+                    MSYS_NO_PATHCONV=1 cmd.exe //c "taskkill /T /F /PID $_cpid" 2>/dev/null || true
+                  done ;;
+                *)
+                  for _cpid in $_orphan_alive; do
+                    kill -KILL "$_cpid" 2>/dev/null || true
+                  done ;;
+              esac
+            fi
           fi
           break
         fi
