@@ -18,10 +18,12 @@ import {
 import { decodeJwtEmail, readJson, writeJsonSafe } from "../utils.mjs";
 
 // window_minutes 기반 5h/1w 슬롯 분류
+// 5h: ≤360min (300min 표준, ±20% 허용)
+// weekly: ≥7000min (10080min 표준, ~5d 이상만 허용 — 24h/48h 등 중간 버킷 도입 시 silent 오분류 방지)
 export function classifyBucket(bucket) {
   if (!bucket?.window_minutes) return null;
   if (bucket.window_minutes <= 360) return "five_hour";
-  if (bucket.window_minutes >= 1440) return "weekly";
+  if (bucket.window_minutes >= 7000) return "weekly";
   return null;
 }
 

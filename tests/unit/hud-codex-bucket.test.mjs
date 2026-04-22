@@ -33,8 +33,16 @@ describe("Codex bucket normalization", () => {
     assert.equal(classifyBucket({ window_minutes: 10080 }), "weekly");
   });
 
-  it("classifies 1440min as weekly (lower bound)", () => {
-    assert.equal(classifyBucket({ window_minutes: 1440 }), "weekly");
+  it("classifies 7000min as weekly (lower bound)", () => {
+    assert.equal(classifyBucket({ window_minutes: 7000 }), "weekly");
+  });
+
+  it("returns null for 1440min (24h bucket — not weekly under tightened threshold)", () => {
+    assert.equal(classifyBucket({ window_minutes: 1440 }), null);
+  });
+
+  it("returns null for 6999min (just below weekly threshold)", () => {
+    assert.equal(classifyBucket({ window_minutes: 6999 }), null);
   });
 
   it("returns null for null bucket", () => {
