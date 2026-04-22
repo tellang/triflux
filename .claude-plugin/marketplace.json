@@ -9,7 +9,7 @@
     {
       "name": "triflux",
       "description": "Tri-CLI orchestrator for Claude Code. Routes tasks across Claude + Codex + Gemini with consensus intelligence, natural language routing, 42 skills, and cross-model review.",
-      "version": "10.13.5",
+      "version": "10.13.6",
       "author": {
         "name": "tellang"
       },
@@ -30,5 +30,5 @@
       ]
     }
   ],
-  "version": "10.13.5"
+  "version": "10.13.6"
 }
