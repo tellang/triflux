@@ -62,6 +62,28 @@ describe("#144/#66 heartbeat stall kill — shape", () => {
     assert.match(hb, /taskkill \/T \/F/, "Windows 트리 종료 명령 필요");
     assert.match(hb, /MSYS_NO_PATHCONV=1/, "MSYS 경로 변환 비활성화 필요");
   });
+
+  it("STALL_KILL 은 SIGTERM 전에 자식 PID 를 스냅샷하고 orphan sweep 을 수행한다", () => {
+    // 2026-04-22 사용자 보고: SIGTERM 으로 wrapper 가 조기 종료되면 taskkill /T 가
+    // 부모를 못 찾아 codex 자식이 orphan 으로 남음. SIGTERM 이전에 자식 PID 를
+    // 스냅샷해두고, wrapper 정리 후에도 살아있는 자식을 tree kill 해야 한다.
+    const hb = extractFunction("heartbeat_monitor");
+    assert.match(
+      hb,
+      /_stall_children=\$\(_find_fork_pids "\$pid"/,
+      "SIGTERM 이전에 _find_fork_pids 로 자식 PID 스냅샷이 필요",
+    );
+    assert.match(
+      hb,
+      /orphan children detected/,
+      "orphan sweep 로그 라인 필요 (stderr 진단용)",
+    );
+    assert.match(
+      hb,
+      /for _cpid in \$_orphan_alive/,
+      "살아있는 orphan 만 tree kill 하는 loop 필요",
+    );
+  });
 });
 
 describe("#144/#66 heartbeat stall kill — integration", () => {
