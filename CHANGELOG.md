@@ -4,6 +4,16 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.8] - 2026-04-22
+
+### Fixed
+
+- **`fix(swarm)`** `tfx swarm` non-TTY background hang (#116-C) — `run_in_background`, nohup, CI 러너 등 stdout/stdin 둘 다 non-TTY 환경에서 `cmdSwarmRun` 이 planning 까지만 성공하고 codex worker spawn 단계에서 무한 hang 하던 경로 (umbrella #116 의 마지막 sub-issue, v10.13.7 까지 잔존). `hub/team/swarm-cli.mjs` 에 pure function `assertTtyForSwarm()` 을 신설하고 `cmdSwarmRun` 의 planning 직후 / `hyper.launch()` 직전 gate 로 호출. non-TTY 감지 시 즉시 throw + 복구 경로 3안 안내 (터미널 직접 실행 / `tfx multi --teammate-mode tmux` / `TFX_ALLOW_NON_TTY_SWARM=1` opt-in). opt-in 경로는 경고만 출력하고 기존 launch 흐름 유지. `--dry-run` / `cmdSwarmPlan` 은 gate 이전에 return 하므로 영향 없음.
+
+### Tests
+
+- **+5** `tests/unit/swarm-cli.test.mjs` — `assertTtyForSwarm` pure function 커버리지 (stdout TTY pass / stdin TTY pass / 양측 non-TTY fail with #116-C guidance / opt-in env `=1` pass + warn / opt-in env 비 `1` 값은 fail). swarm-cli 전체 10/10 pass.
+
 ## [10.13.7] - 2026-04-22
 
 ### Fixed

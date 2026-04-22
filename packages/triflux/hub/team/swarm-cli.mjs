@@ -13,6 +13,54 @@ const RED = "\u001b[91m";
 const YELLOW = "\u001b[93m";
 const GRAY = "\u001b[90m";
 
+/**
+ * #116-C: non-TTY background 환경에서 `tfx swarm` 실행은 codex worker spawn 이
+ * 무한 hang 한다 (stdin TTY 대기 또는 hub MCP lease race).
+ *
+ * - stdout/stdin 모두 non-TTY 이면 fail-fast — 명시 복구 경로 안내.
+ * - `TFX_ALLOW_NON_TTY_SWARM=1` opt-in 시 경고만 남기고 통과 (테스트/CI).
+ * - pure function — 테스트하기 쉽게 deps 주입 가능.
+ *
+ * @param {{
+ *   stdoutIsTTY?: boolean,
+ *   stdinIsTTY?: boolean,
+ *   env?: Record<string,string|undefined>,
+ * }} [deps]
+ * @returns {{ ok: boolean, optIn: boolean, warnings: string[], reason?: string }}
+ */
+export function assertTtyForSwarm(deps = {}) {
+  const stdoutIsTTY =
+    typeof deps.stdoutIsTTY === "boolean"
+      ? deps.stdoutIsTTY
+      : Boolean(process.stdout.isTTY);
+  const stdinIsTTY =
+    typeof deps.stdinIsTTY === "boolean"
+      ? deps.stdinIsTTY
+      : Boolean(process.stdin.isTTY);
+  const env = deps.env || process.env;
+  const warnings = [];
+
+  if (stdoutIsTTY || stdinIsTTY) {
+    return { ok: true, optIn: false, warnings };
+  }
+
+  if (env.TFX_ALLOW_NON_TTY_SWARM === "1") {
+    warnings.push(
+      "non-TTY 환경 감지 — TFX_ALLOW_NON_TTY_SWARM=1 opt-in 으로 진행합니다. codex worker spawn hang 가능성 존재 (#116-C).",
+    );
+    return { ok: true, optIn: true, warnings };
+  }
+
+  const reason =
+    "tfx swarm 은 TTY 가 필요합니다 — non-TTY 환경 (run_in_background, nohup 등) 에서 codex worker spawn 이 hang 합니다 (#116-C).\n" +
+    "  복구 경로:\n" +
+    "    1) 터미널에서 직접 실행: tfx swarm <prd>\n" +
+    "    2) tmux 경로: tfx multi --teammate-mode tmux --auto-attach --dashboard --assign ...\n" +
+    "    3) opt-in (위험): TFX_ALLOW_NON_TTY_SWARM=1 tfx swarm <prd>";
+
+  return { ok: false, optIn: false, warnings, reason };
+}
+
 export function parseFlags(args) {
   const flags = {
     dryRun: false,
@@ -119,6 +167,14 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
       printPlan(plan);
     }
     return;
+  }
+
+  const ttyGate = assertTtyForSwarm();
+  for (const w of ttyGate.warnings) {
+    console.error(`  ${YELLOW}⚠${RESET} ${w}`);
+  }
+  if (!ttyGate.ok) {
+    throw new Error(ttyGate.reason);
   }
 
   const logsDir =
