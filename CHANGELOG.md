@@ -4,6 +4,12 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.3] - 2026-04-22
+
+### Fixed
+
+- **`fix(tfx-route-worker)`** misleading "hub unavailable" warning — `resolveDefaultMcpConfig` 가 cwd 에 `.claude/mcp.json` / `.mcp.json` 가 없을 때 찍던 `warning: no MCP config found, hub unavailable` 메시지가 실제로는 **프로젝트 MCP binding 부재**만을 뜻하는데도 hub server death 로 오독되어 "허브가 죽었다" 오진 유발. 다중 프로젝트 병렬 세션에서 특히 재현. 메시지를 `warning: no project MCP config in cwd — hub status unaffected` 로 교체해 실제 조건(cwd config 부재)과 영향 범위(hub 무관)를 명시. `scripts/tfx-route-worker.mjs` + mirror 동시 갱신.
+
 ## [10.13.2] - 2026-04-21
 
 ### Fixed
