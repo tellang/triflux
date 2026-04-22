@@ -17,17 +17,18 @@ argument-hint: "<분석 주제 또는 컨텍스트 — tfx-auto 로 passthrough>
 
 ## 동작
 
-1. stderr 에 1회 경고 출력:
-   ```
-   [deprecated] tfx-consensus -> use: tfx-auto --mode consensus
-   ```
-2. stdout 머리부에 `[DEPRECATED]` 마커를 출력한다.
-3. `.omc/state/alias-usage.log` 에 아래 형식으로 append 한다:
-   ```
-   2026-04-18T12:34:56Z tfx-consensus -> tfx-auto --mode consensus
-   ```
-4. ARGUMENTS 전체 앞에 `--mode consensus` 를 prepend 하여 `Skill("tfx-auto")` 호출.
-5. `--shape` 미지정 시 기본값은 `consensus` 다. `--analysis-prompt-file`, `--cli-set`, `--resolution-threshold` 같은 합의 인자는 그대로 passthrough 한다.
+canonical 위임 **이전** 에 아래 bash 블록을 한 번 실행한다. Phase 5 (v11) 물리 삭제 게이트는 `.omc/state/alias-usage.log` 의 7일 zero-usage 검증에 의존 — 이 logging 이 빠지면 게이트가 영영 열리지 않는다.
+
+```bash
+mkdir -p .omc/state
+echo "[deprecated] tfx-consensus -> use: tfx-auto --mode consensus" >&2
+echo "[DEPRECATED] tfx-consensus — see tfx-auto --mode consensus"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) tfx-consensus -> tfx-auto --mode consensus" >> .omc/state/alias-usage.log
+```
+
+1. 위 bash 블록 실행 (stderr 경고 + stdout `[DEPRECATED]` 마커 + alias-usage.log append).
+2. ARGUMENTS 전체 앞에 `--mode consensus` 를 prepend 하여 `Skill("tfx-auto")` 호출.
+3. `--shape` 미지정 시 기본값은 `consensus` 다. `--analysis-prompt-file`, `--cli-set`, `--resolution-threshold` 같은 합의 인자는 그대로 passthrough 한다.
 
 ## 등가 플래그
 

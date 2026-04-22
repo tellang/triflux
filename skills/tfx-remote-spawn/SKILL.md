@@ -12,6 +12,17 @@ argument-hint: "[spawn|list|attach|send|resume|kill|probe] ..."
 
 이 스킬은 Phase 4b thin alias다. 새 표면은 `tfx-remote` 명령군이다.
 
+## Deprecation logging (alias 호출 즉시 실행 필수)
+
+canonical 위임 **이전** 에 아래 bash 블록을 한 번 실행한다. Phase 5 (v11) 물리 삭제 게이트는 `.omc/state/alias-usage.log` 의 7일 zero-usage 검증에 의존.
+
+```bash
+mkdir -p .omc/state
+echo "[deprecated] tfx-remote-spawn -> use: tfx-remote" >&2
+echo "[DEPRECATED] tfx-remote-spawn — see tfx-remote"
+echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) tfx-remote-spawn -> tfx-remote" >> .omc/state/alias-usage.log
+```
+
 ## Alias mapping
 
 - `tfx-remote-spawn <host> [prompt]` → `tfx-remote spawn <host> [prompt]`
