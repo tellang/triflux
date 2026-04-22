@@ -82,6 +82,7 @@ docs/SESSION-*
 references/hosts.json
 .test-lock/
 .tmp-home-setup-check/
+tests/.tmp-setup-version-cache/
 *.codex-npm-test*.log
 docs/research/*reverse*
 docs/research/*competitor*

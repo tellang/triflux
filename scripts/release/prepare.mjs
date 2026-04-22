@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -13,6 +13,17 @@ import {
 } from "./lib.mjs";
 
 const TEST_TIMEOUT_MS = 10 * 60 * 1000;
+const STALE_LOCK = join(ROOT, ".test-lock", "pid.lock");
+
+export function cleanupStaleTestLock() {
+  if (!existsSync(STALE_LOCK)) return;
+  try {
+    rmSync(STALE_LOCK, { force: true });
+    console.log("[prepare] cleaned stale .test-lock/pid.lock");
+  } catch (e) {
+    console.warn(`[prepare] failed to clean test-lock: ${e.message}`);
+  }
+}
 
 function createStepLogger() {
   const startedAt = Date.now();
@@ -30,6 +41,7 @@ export async function prepareRelease({
   skipTests = false,
   execFileSyncFn,
 } = {}) {
+  cleanupStaleTestLock();
   const logStep = createStepLogger();
   logStep("version-sync");
   const sync = assertVersionSync({ rootDir });

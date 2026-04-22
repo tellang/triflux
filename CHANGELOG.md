@@ -4,6 +4,31 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.13.7] - 2026-04-22
+
+### Fixed
+
+- **`fix(hud)`** `buildContextUsageView` limit priority regression — stdin 이 명시한 `context_window_size` 가 modelHint fallback (DEFAULT 200K) 에 의해 override 되어 `600/1K (60%)` 기대값 대신 `600/200K (0%)` 로 떨어지던 lake4-integration 실패. stdin > (modelId present ? `Math.max(monitor,hint)` : `monitor||hint`) 우선순위로 재정렬. Opus 4.7 warn/critical 분류가 modelHint 우선 로직에 의존하므로 modelId 존재 여부로 분기 (opus-duplicate-status 3 cases + lake4-integration 2 cases 동시 만족). `hud/context-monitor.mjs` + packages mirror.
+- **`fix(release)`** `prepare.mjs` preflight stale test-lock cleanup — 이전 `release:prepare` 실행이 남긴 `.test-lock/pid.lock` 으로 인한 반복 실패 (MEMORY `feedback_test_lock_stale.md` 재확인, v10.13.6 ship 시 수동 `rm -f` 우회 필요했던 패턴). `prepareRelease()` 진입 직후 exported `cleanupStaleTestLock()` 호출로 lockfile 자동 제거. `rmSync` 실패 시 warn fallback (prepare 진행은 유지). `scripts/release/prepare.mjs` + packages mirror.
+
+### Added
+
+- **`feat(cli)`** `tfx swarm` CLI help surface (#109) — `tfx --help` Commands 섹션에 `tfx swarm` 한 줄 노출 + `tfx swarm --help` / `tfx swarm help` sub-help 렌더링 (description / usage / subcommands / options 를 `CLI_COMMAND_SCHEMAS.swarm` 스키마 기반으로 출력). `checkHubRunning()` 이전에 help 분기를 두어 hub 미실행 환경에서도 help 접근 가능. `bin/triflux.mjs` + packages mirror.
+
+### Chore
+
+- **`chore(gitignore)`** `tests/.tmp-setup-version-cache/` 추가 — setup-version cache 테스트 부산물이 매 실행마다 untracked 로 잡히던 노이즈 제거.
+
+### Tests
+
+- **+2** `tests/unit/hud-context-view.test.mjs` (신규) — stdin limit > modelHint 우선순위 회귀 케이스 2건
+- **+1** `tests/unit/release-prepare-testlock.test.mjs` (신규) — stale lock preflight cleanup 검증
+- **+2** `tests/unit/triflux-help-output.test.mjs` (신규) — `tfx --help` swarm surface + `tfx swarm --help` sub-help 검증
+
+### Housekeeping
+
+- GitHub 이슈 정리 (6건 closed): **#66** (Codex exec non-TTY stall, 24b7229 + `scripts/tfx-route.sh` MCP approval auto-swap 로 해결), **#110** (swarm-hypervisor 2 hang, v10.10.0 mock conductor 보강), **#111** (swarm shard blind run, `hub/team/swarm-cli.mjs` 이벤트 핸들러 구현), **#114** (teammate-mode non-TTY codex 즉시 종료, e0eeba0 `resolveEffectiveMode()` auto-fallback to headless), **#121** (workdir-dependent codex config delta, triflux side 감지 완료 + 수정은 codex/oh-my-codex upstream scope), **#122** (MCP approval drift, #66 duplicate). umbrella **#116** 은 sub-issue 전이 노트 추가 + #116-C (bg hang) 1건만 open 유지.
+
 ## [10.13.6] - 2026-04-22
 
 ### Fixed

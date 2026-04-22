@@ -4760,6 +4760,7 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx tray${RESET}       ${GRAY}Windows 시스템 트레이 실행${RESET}
     ${DIM}  --detach${RESET}      ${GRAY}백그라운드 트레이 프로세스로 분리${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
+    ${WHITE_BRIGHT}tfx swarm${RESET}       ${GRAY}PRD 기반 worktree 격리 병렬 실행${RESET}
     ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
@@ -5816,11 +5817,31 @@ async function main() {
       return;
     }
     case "swarm": {
+      const sub = cmdArgs[0] || "";
+      if (sub === "help" || sub === "--help" || sub === "-h") {
+        const s = CLI_COMMAND_SCHEMAS.swarm;
+        console.log(`
+  ${AMBER}${BOLD}⬡ tfx swarm${RESET}
+
+  ${GRAY}${s.description}${RESET}
+
+  ${BOLD}Usage${RESET}
+    ${WHITE_BRIGHT}${s.usage}${RESET}
+
+  ${BOLD}Subcommands${RESET}
+    ${WHITE_BRIGHT}tfx swarm plan <prd>${RESET}   ${GRAY}${s.subcommands.plan}${RESET}
+    ${WHITE_BRIGHT}tfx swarm list${RESET}         ${GRAY}${s.subcommands.list}${RESET}
+    ${WHITE_BRIGHT}tfx swarm status${RESET}       ${GRAY}${s.subcommands.status}${RESET}
+
+  ${BOLD}Options${RESET}
+${s.options.map((o) => `    ${DIM}${o.name.padEnd(16)}${RESET} ${GRAY}${o.description}${RESET}`).join("\n")}
+`);
+        return;
+      }
       await checkHubRunning();
       const { cmdSwarmRun, cmdSwarmPlan, cmdSwarmList } = await import(
         "../hub/team/swarm-cli.mjs"
       );
-      const sub = cmdArgs[0] || "";
       if (sub === "list" || sub === "status") {
         await cmdSwarmList(cmdArgs.slice(1), { json: JSON_OUTPUT });
         return;
