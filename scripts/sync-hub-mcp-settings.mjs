@@ -25,11 +25,12 @@ function getCodexConfigPath(codexConfigPath) {
   return join(home, ...CODEX_CONFIG_FILE);
 }
 
-function getProjectMcpJsonPath(projectRoot) {
-  if (typeof projectRoot === "string" && projectRoot.length > 0) {
-    return join(projectRoot, ".claude", "mcp.json");
-  }
-  return join(process.cwd(), ".claude", "mcp.json");
+function getProjectMcpJsonPaths(projectRoot) {
+  const root =
+    typeof projectRoot === "string" && projectRoot.length > 0
+      ? projectRoot
+      : process.cwd();
+  return [join(root, ".claude", "mcp.json"), join(root, ".mcp.json")];
 }
 
 function getReason(error, fallback) {
@@ -441,19 +442,21 @@ export async function syncProjectMcpJson({
     errors: [],
   };
 
-  const outcome = await syncProjectMcpFile({
-    filePath: getProjectMcpJsonPath(projectRoot),
-    hubUrl,
-    dryRun,
-    logger,
-  });
+  for (const filePath of getProjectMcpJsonPaths(projectRoot)) {
+    const outcome = await syncProjectMcpFile({
+      filePath,
+      hubUrl,
+      dryRun,
+      logger,
+    });
 
-  if (outcome.kind === "updated") {
-    result.updated.push(outcome.path);
-  } else if (outcome.kind === "skipped") {
-    result.skipped.push(outcome.path);
-  } else {
-    result.errors.push({ path: outcome.path, reason: outcome.reason });
+    if (outcome.kind === "updated") {
+      result.updated.push(outcome.path);
+    } else if (outcome.kind === "skipped") {
+      result.skipped.push(outcome.path);
+    } else {
+      result.errors.push({ path: outcome.path, reason: outcome.reason });
+    }
   }
 
   return result;

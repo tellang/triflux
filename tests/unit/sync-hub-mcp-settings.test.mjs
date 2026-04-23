@@ -421,6 +421,7 @@ describe("syncProjectMcpJson", () => {
 
   it("case 1: tfx-hub.url이 다르면 updated에 포함되고 파일이 실제로 바뀐다", async () => {
     const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
     writeJson(projectMcpPath, {
       mcpServers: {
         "tfx-hub": {
@@ -437,7 +438,7 @@ describe("syncProjectMcpJson", () => {
     });
 
     assert.deepEqual(result.updated, [projectMcpPath]);
-    assert.deepEqual(result.skipped, []);
+    assert.deepEqual(result.skipped, [rootMcpPath]);
     assert.deepEqual(result.errors, []);
     assert.equal(
       JSON.parse(readFileSync(projectMcpPath, "utf8")).mcpServers["tfx-hub"]
@@ -450,6 +451,7 @@ describe("syncProjectMcpJson", () => {
     // Claude Code 현재 스키마는 type:"http" 만 허용. 과거 type:"url" 는 parse 실패
     // → MCP 전체 단절. url 일치만으로 skip 하면 legacy 가 영원히 안 고쳐짐.
     const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
     writeJson(projectMcpPath, {
       mcpServers: {
         "tfx-hub": {
@@ -466,7 +468,7 @@ describe("syncProjectMcpJson", () => {
     });
 
     assert.deepEqual(result.updated, [projectMcpPath]);
-    assert.deepEqual(result.skipped, []);
+    assert.deepEqual(result.skipped, [rootMcpPath]);
     assert.deepEqual(result.errors, []);
     const after = JSON.parse(readFileSync(projectMcpPath, "utf8"));
     assert.equal(after.mcpServers["tfx-hub"].type, "http");
@@ -475,6 +477,7 @@ describe("syncProjectMcpJson", () => {
 
   it("case 2b: type:http + 동일 url이면 skipped에 포함한다 (true idempotent)", async () => {
     const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
     writeJson(projectMcpPath, {
       mcpServers: {
         "tfx-hub": {
@@ -492,13 +495,14 @@ describe("syncProjectMcpJson", () => {
     });
 
     assert.deepEqual(result.updated, []);
-    assert.deepEqual(result.skipped, [projectMcpPath]);
+    assert.deepEqual(result.skipped, [projectMcpPath, rootMcpPath]);
     assert.deepEqual(result.errors, []);
     assert.equal(readFileSync(projectMcpPath, "utf8"), before);
   });
 
   it("case 3: 파일이 없으면 생성하지 않고 skipped에 포함한다", async () => {
     const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
 
     const result = await syncProjectMcpJson({
       hubUrl: HUB_URL,
@@ -507,13 +511,15 @@ describe("syncProjectMcpJson", () => {
     });
 
     assert.deepEqual(result.updated, []);
-    assert.deepEqual(result.skipped, [projectMcpPath]);
+    assert.deepEqual(result.skipped, [projectMcpPath, rootMcpPath]);
     assert.deepEqual(result.errors, []);
     assert.equal(existsSync(projectMcpPath), false);
+    assert.equal(existsSync(rootMcpPath), false);
   });
 
   it("case 4: tfx-hub 키가 없으면 생성하지 않고 skipped에 포함한다", async () => {
     const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
     writeJson(projectMcpPath, {
       mcpServers: {
         other: {
@@ -530,8 +536,77 @@ describe("syncProjectMcpJson", () => {
     });
 
     assert.deepEqual(result.updated, []);
-    assert.deepEqual(result.skipped, [projectMcpPath]);
+    assert.deepEqual(result.skipped, [projectMcpPath, rootMcpPath]);
     assert.deepEqual(result.errors, []);
     assert.equal(readFileSync(projectMcpPath, "utf8"), before);
+  });
+
+  it("case 5: root-level .mcp.json 만 있을 때도 sync 된다 (#152)", async () => {
+    // Claude Code 는 `.mcp.json` (root) 과 `.claude/mcp.json` 두 곳을 모두 읽는다.
+    // 과거 구현은 `.claude/mcp.json` 만 봐서 research-fold7-terminal 처럼 root-only
+    // 레이아웃은 sync 가 작동하지 않았음. 이제 둘 다 처리한다.
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
+    writeJson(rootMcpPath, {
+      mcpServers: {
+        "tfx-hub": {
+          type: "url",
+          url: "http://127.0.0.1:39999/mcp",
+        },
+      },
+    });
+
+    const result = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, [rootMcpPath]);
+    assert.deepEqual(result.skipped, [projectMcpPath]);
+    assert.deepEqual(result.errors, []);
+    const after = JSON.parse(readFileSync(rootMcpPath, "utf8"));
+    assert.equal(after.mcpServers["tfx-hub"].type, "http");
+    assert.equal(after.mcpServers["tfx-hub"].url, HUB_URL);
+  });
+
+  it("case 6: 두 경로 모두 있으면 둘 다 업데이트된다 (#152)", async () => {
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
+    writeJson(projectMcpPath, {
+      mcpServers: {
+        "tfx-hub": {
+          type: "url",
+          url: "http://127.0.0.1:39999/mcp",
+        },
+      },
+    });
+    writeJson(rootMcpPath, {
+      mcpServers: {
+        "tfx-hub": {
+          type: "url",
+          url: "http://127.0.0.1:39999/mcp",
+        },
+      },
+    });
+
+    const result = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, [projectMcpPath, rootMcpPath]);
+    assert.deepEqual(result.skipped, []);
+    assert.deepEqual(result.errors, []);
+    assert.equal(
+      JSON.parse(readFileSync(projectMcpPath, "utf8")).mcpServers["tfx-hub"]
+        .url,
+      HUB_URL,
+    );
+    assert.equal(
+      JSON.parse(readFileSync(rootMcpPath, "utf8")).mcpServers["tfx-hub"].url,
+      HUB_URL,
+    );
   });
 });
