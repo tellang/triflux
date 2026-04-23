@@ -1487,6 +1487,96 @@ resolve_codex_mcp_script() {
     "$sd/hub/workers/codex-mcp.mjs" "$sd/../hub/workers/codex-mcp.mjs"
 }
 
+## ── MCP Preflight: dead 서버 감지 후 CODEX_CONFIG_FLAGS 에서 제거 ──
+# Session 18 체크포인트 P3 root-cause fix. dead MCP 가 allowed_pat 에 포함되면
+# _codex_config_swap 이 section 을 유지 → Codex 가 init 시도 → -32000 으로 죽는다.
+# Preflight 가 각 서버를 probe (initialize 요청) 한 뒤 응답 없는 서버의
+# enabled=true 플래그를 제거해서 swap 이 그 section 을 자동으로 drop 하게 만든다.
+# Opt-out: TFX_MCP_HEALTH_CHECK=0
+_mcp_preflight_filter_dead() {
+  local opt="${TFX_MCP_HEALTH_CHECK:-1}"
+  if [[ "$opt" == "0" || "$opt" == "false" || "$opt" == "off" ]]; then
+    return 0
+  fi
+  if [[ "${#CODEX_CONFIG_FLAGS[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  local sd; sd="$(_get_script_dir)"
+  local health_script
+  health_script="$(_resolve_script "${TFX_MCP_HEALTH_SCRIPT:-}" \
+    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/mcp-health.mjs"} \
+    "$sd/lib/mcp-health.mjs" "$sd/../scripts/lib/mcp-health.mjs")" || return 0
+  [[ -n "$health_script" && -f "$health_script" ]] || return 0
+  command -v "$NODE_BIN" &>/dev/null || return 0
+
+  # CODEX_CONFIG_FLAGS 에서 enabled=true 항목으로부터 후보 서버 이름 수집
+  local names=""
+  local i=0
+  local n="${#CODEX_CONFIG_FLAGS[@]}"
+  while (( i < n )); do
+    local flag="${CODEX_CONFIG_FLAGS[$i]}"
+    if [[ "$flag" == "-c" ]] && (( i + 1 < n )); then
+      local value="${CODEX_CONFIG_FLAGS[$((i+1))]}"
+      if [[ "$value" =~ ^mcp_servers\.([^.]+)\.enabled=true$ ]]; then
+        [[ -n "$names" ]] && names="${names},"
+        names="${names}${BASH_REMATCH[1]}"
+      fi
+      i=$((i+2))
+    else
+      i=$((i+1))
+    fi
+  done
+  [[ -z "$names" ]] && return 0
+
+  # Probe — TTL cache 로 재호출 부하 억제
+  local probe_output
+  if ! probe_output=$("$NODE_BIN" "$health_script" probe \
+      --names "$names" --format shell 2>/dev/null); then
+    echo "[tfx-route] MCP preflight probe 실패 — 스킵" >&2
+    return 0
+  fi
+
+  local dead_list=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^MCP_DEAD=\"(.*)\"$ ]]; then
+      dead_list="${BASH_REMATCH[1]}"
+    fi
+  done <<< "$probe_output"
+  [[ -z "$dead_list" ]] && return 0
+
+  # dead 서버의 모든 mcp_servers.<dead>.* override 를 CODEX_CONFIG_FLAGS 에서 제거
+  local -a dead_names=()
+  IFS=',' read -ra dead_names <<< "$dead_list"
+  local -a new_flags=()
+  i=0
+  while (( i < n )); do
+    local flag="${CODEX_CONFIG_FLAGS[$i]}"
+    if [[ "$flag" == "-c" ]] && (( i + 1 < n )); then
+      local value="${CODEX_CONFIG_FLAGS[$((i+1))]}"
+      local drop=false
+      local dead
+      for dead in "${dead_names[@]}"; do
+        [[ -z "$dead" ]] && continue
+        if [[ "$value" == "mcp_servers.${dead}."* ]]; then
+          drop=true
+          break
+        fi
+      done
+      if [[ "$drop" == "false" ]]; then
+        new_flags+=("-c" "$value")
+      fi
+      i=$((i+2))
+    else
+      new_flags+=("$flag")
+      i=$((i+1))
+    fi
+  done
+
+  CODEX_CONFIG_FLAGS=("${new_flags[@]}")
+  echo "[tfx-route] MCP preflight: ${#dead_names[@]}개 dead MCP 제외 (${dead_list})" >&2
+}
+
 ## ── Config Swap: 프로필별 MCP 서버 필터링 ──
 # codex exec는 -c flag로 MCP enabled/disabled를 제어할 수 없다.
 # config.toml을 원자적으로 교체하여 불필요한 서버 시작을 방지한다.
@@ -1898,6 +1988,10 @@ FALLBACK_EOF
   fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
+    # Preflight: dead MCP 감지 후 CODEX_CONFIG_FLAGS 에서 제거.
+    # swap 이 allowed_pat 을 이 배열에서 계산하므로, 여기서 제거하면
+    # dead section 이 config.toml 에서 자동으로 drop 된다.
+    _mcp_preflight_filter_dead
     # Config swap: 프로필에 맞는 MCP 서버만 남긴 임시 config 적용
     # run_codex_mcp / run_codex_exec 어느 경로든 적용되도록 최상단에서 실행
     _codex_config_swap "filter"
