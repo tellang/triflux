@@ -72,14 +72,113 @@ function parseTomlScalar(raw) {
   return v;
 }
 
+// 문자열 리터럴 밖의 `# ...` 은 라인 끝 주석. multiline buffer 에 누적하기
+// 전에 line 단위로 제거해야 parseTomlArrayLiteral 이 scalar 분기에서 주석 문자열을
+// item 으로 잘못 포함하지 않는다.
+function stripInlineComment(line) {
+  let inString = false;
+  let stringChar = null;
+  let escape = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\" && stringChar === '"') {
+        escape = true;
+        continue;
+      }
+      if (ch === stringChar) {
+        inString = false;
+        stringChar = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringChar = ch;
+      continue;
+    }
+    if (ch === "#") return line.slice(0, i).trimEnd();
+  }
+  return line;
+}
+
+// 문자열 리터럴 내부를 제외한 bracket depth. 음수는 over-close.
+// Review finding A1 (commit 9298fd6 cross-review): 멀티라인 array 값
+// (예: `args = [\n  "run",\n  "server.js"\n]`) 을 single-line 파서가 `"["`
+// 문자열로 오인해 probeStdio 가 args=[] 로 실행 → 정상 서버를 dead 로 오탐.
+// Inline comment 는 newline 전까지만 무시 — 멀티라인 buffer 에서 첫 `#` 이후
+// 전체가 drop 되면 안 됨.
+function countBracketDelta(str) {
+  let depth = 0;
+  let inString = false;
+  let stringChar = null;
+  let escape = false;
+  let inComment = false;
+  for (const ch of str) {
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (inComment) {
+      if (ch === "\n") inComment = false;
+      continue;
+    }
+    if (inString) {
+      if (ch === "\\" && stringChar === '"') {
+        escape = true;
+        continue;
+      }
+      if (ch === stringChar) {
+        inString = false;
+        stringChar = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringChar = ch;
+      continue;
+    }
+    if (ch === "#") {
+      inComment = true;
+      continue;
+    }
+    if (ch === "[") depth++;
+    else if (ch === "]") depth--;
+  }
+  return depth;
+}
+
 export function parseMcpServersFromToml(content = "") {
   const servers = {};
   const lines = content.split(/\r?\n/);
   let name = null;
   let scope = null; // "root" | "env"
+  let pendingKey = null;
+  let pendingBuffer = "";
+
+  function assign(key, value) {
+    if (scope === "env") servers[name].env[key] = String(value);
+    else servers[name][key] = value;
+  }
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/^\uFEFF/, "").trim();
+
+    if (pendingKey !== null) {
+      pendingBuffer += " " + stripInlineComment(line);
+      if (countBracketDelta(pendingBuffer) <= 0) {
+        assign(pendingKey, parseTomlScalar(pendingBuffer));
+        pendingKey = null;
+        pendingBuffer = "";
+      }
+      continue;
+    }
+
     if (!line || line.startsWith("#")) continue;
 
     const rootSection = line.match(/^\[mcp_servers\.([a-zA-Z0-9_.-]+)\]$/);
@@ -111,10 +210,15 @@ export function parseMcpServersFromToml(content = "") {
     const kv = line.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(.+)$/);
     if (!kv) continue;
     const [, key, rawValue] = kv;
-    const value = parseTomlScalar(rawValue);
+    const cleanValue = stripInlineComment(rawValue);
 
-    if (scope === "env") servers[name].env[key] = String(value);
-    else servers[name][key] = value;
+    if (countBracketDelta(cleanValue) > 0) {
+      pendingKey = key;
+      pendingBuffer = cleanValue;
+      continue;
+    }
+
+    assign(key, parseTomlScalar(cleanValue));
   }
 
   return servers;
@@ -233,6 +337,10 @@ export function probeStdio(def, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
   });
 }
 
+// Review finding A2 (commit 9298fd6 cross-review): 기존 구현은 status 2xx-4xx
+// 전부 alive 로 취급 — 404/401 HTML 오류 페이지를 healthy 로 오판. 실제 MCP
+// endpoint 는 200 + JSON-RPC body 를 돌려줘야 살아있는 것. 2xx + JSON-RPC
+// envelope (id 일치, result|error 존재) 둘 다 검증한다.
 export async function probeHttp(url, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
   const start = Date.now();
   try {
@@ -243,10 +351,38 @@ export async function probeHttp(url, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
       signal: AbortSignal.timeout(timeoutMs),
     });
     const ms = Date.now() - start;
-    if (res.status >= 200 && res.status < 500) {
-      return { alive: true, ms };
+    if (res.status < 200 || res.status >= 300) {
+      return { alive: false, reason: `http:${res.status}`, ms };
     }
-    return { alive: false, reason: `http:${res.status}`, ms };
+    let body;
+    try {
+      body = await res.text();
+    } catch {
+      return { alive: false, reason: "http:body-read-failed", ms };
+    }
+    // SSE / ndjson 환경 대비 — 첫 JSON-RPC envelope 하나만 찾으면 충분.
+    const envelope = body
+      .split(/\r?\n/)
+      .map((chunk) => chunk.replace(/^data:\s*/, "").trim())
+      .find((chunk) => chunk.startsWith("{"));
+    if (!envelope) {
+      return { alive: false, reason: "http:no-jsonrpc-body", ms };
+    }
+    try {
+      const msg = JSON.parse(envelope);
+      if (msg.jsonrpc !== "2.0") {
+        return { alive: false, reason: "http:not-jsonrpc", ms };
+      }
+      if (msg.id !== 1 && msg.id !== "1") {
+        return { alive: false, reason: "http:id-mismatch", ms };
+      }
+      if (msg.result === undefined && msg.error === undefined) {
+        return { alive: false, reason: "http:no-result", ms };
+      }
+      return { alive: true, ms };
+    } catch {
+      return { alive: false, reason: "http:invalid-json", ms };
+    }
   } catch (err) {
     const ms = Date.now() - start;
     const reason =

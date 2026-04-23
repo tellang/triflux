@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
   isCacheFresh,
   parseMcpServersFromToml,
+  probeHttp,
   probeServer,
   probeStdio,
   probeAll,
@@ -14,6 +15,7 @@ import {
   writeCache,
   readCache,
 } from "../../scripts/lib/mcp-health.mjs";
+import { createServer } from "node:http";
 
 const NODE_BIN = process.execPath;
 
@@ -80,6 +82,48 @@ command = "foo"
 `;
     const servers = parseMcpServersFromToml(toml);
     assert.equal(servers.foo.command, "foo");
+  });
+
+  it("regression A1: 멀티라인 args array 를 올바르게 배열로 파싱한다", () => {
+    // Codex config.toml 은 args 를 여러 줄로 포맷하는 게 일반적.
+    // 이전 버전은 `args = [` 만 읽고 `"["` 문자열로 처리 → probeStdio args=[]
+    // → 정상 서버를 dead 로 오탐. 이제는 `]` 까지 누적해서 array 로 만든다.
+    const toml = `
+[mcp_servers.foo]
+command = "node"
+args = [
+  "server.js",
+  "--flag",
+]
+`;
+    const servers = parseMcpServersFromToml(toml);
+    assert.deepEqual(servers.foo.args, ["server.js", "--flag"]);
+  });
+
+  it("regression A1: 멀티라인 array 에 인라인 주석이 섞여도 끝까지 누적한다", () => {
+    // bracket tracker 가 `#` 뒤 텍스트와 문자열 속 `]` 를 올바르게 무시하는지.
+    const toml = `
+[mcp_servers.bar]
+command = "run"
+args = [
+  "serve", # first arg
+  "--path", # second
+  "/tmp/data",
+]
+`;
+    const servers = parseMcpServersFromToml(toml);
+    assert.deepEqual(servers.bar.args, ["serve", "--path", "/tmp/data"]);
+  });
+
+  it("regression A1: 단일 줄 array 는 기존처럼 동일하게 파싱한다", () => {
+    // 회귀 확인 — 멀티라인 경로가 single-line 을 깨뜨리지 않는지.
+    const toml = `
+[mcp_servers.inline]
+command = "x"
+args = ["--one", "--two"]
+`;
+    const servers = parseMcpServersFromToml(toml);
+    assert.deepEqual(servers.inline.args, ["--one", "--two"]);
   });
 });
 
@@ -251,5 +295,116 @@ describe("mcp-health — probeAll orchestration", () => {
     // Cache should have been written.
     const cached = JSON.parse(readFileSync(cachePath, "utf8"));
     assert.ok(cached.results["exits-fast"]);
+  });
+});
+
+// Review finding A2 (commit 9298fd6 cross-review): 이전 구현은 status
+// 2xx-4xx 를 전부 alive 로 간주해 404/401 응답도 healthy 로 오판. 이제는
+// 200 + JSON-RPC envelope 둘 다 성립해야 alive 이며 나머지는 dead.
+describe("mcp-health — probeHttp validation (A2 regression)", () => {
+  function startMock(handler) {
+    return new Promise((resolve) => {
+      const server = createServer(handler);
+      server.listen(0, "127.0.0.1", () => {
+        const { port } = server.address();
+        resolve({ server, url: `http://127.0.0.1:${port}/mcp` });
+      });
+    });
+  }
+
+  function close(server) {
+    return new Promise((resolve) => server.close(resolve));
+  }
+
+  it("200 + valid JSON-RPC result 는 alive", async () => {
+    const { server, url } = await startMock((req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          result: { protocolVersion: "2024-11-05" },
+        }),
+      );
+    });
+    try {
+      const result = await probeHttp(url, 2000);
+      assert.equal(result.alive, true);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("404 는 dead (이전 구현은 alive 로 오판)", async () => {
+    const { server, url } = await startMock((req, res) => {
+      res.writeHead(404, { "content-type": "text/html" });
+      res.end("<html>not found</html>");
+    });
+    try {
+      const result = await probeHttp(url, 2000);
+      assert.equal(result.alive, false);
+      assert.match(result.reason, /^http:404/);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("200 + non-JSON body 는 dead", async () => {
+    const { server, url } = await startMock((req, res) => {
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("hello world");
+    });
+    try {
+      const result = await probeHttp(url, 2000);
+      assert.equal(result.alive, false);
+      assert.match(result.reason, /http:(no-jsonrpc-body|invalid-json)/);
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("200 + jsonrpc id 불일치 는 dead", async () => {
+    const { server, url } = await startMock((req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({ jsonrpc: "2.0", id: 999, result: {} }),
+      );
+    });
+    try {
+      const result = await probeHttp(url, 2000);
+      assert.equal(result.alive, false);
+      assert.equal(result.reason, "http:id-mismatch");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("200 + result/error 둘 다 없으면 dead", async () => {
+    const { server, url } = await startMock((req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: 1 }));
+    });
+    try {
+      const result = await probeHttp(url, 2000);
+      assert.equal(result.alive, false);
+      assert.equal(result.reason, "http:no-result");
+    } finally {
+      await close(server);
+    }
+  });
+
+  it("SSE (data: prefix) 로 감싼 JSON-RPC envelope 도 인식", async () => {
+    const { server, url } = await startMock((req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(
+        `data: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: {} })}\n\n`,
+      );
+    });
+    try {
+      const result = await probeHttp(url, 2000);
+      assert.equal(result.alive, true);
+    } finally {
+      await close(server);
+    }
   });
 });
