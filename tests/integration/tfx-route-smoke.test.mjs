@@ -44,6 +44,9 @@ function runBash(command, extraEnv = {}) {
       TFX_CODEX_TRANSPORT: "exec",
       TFX_WORKER_INDEX: "",
       TFX_SEARCH_TOOL: "",
+      // #148: 테스트 환경에서는 실제 MCP probe 가 모두 dead 로 나와 early-fail 발생.
+      // 라우팅/트랜스포트 검증이 목적이므로 preflight 자체를 스킵.
+      TFX_MCP_HEALTH_CHECK: "0",
       ...extraEnv,
     },
   });

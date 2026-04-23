@@ -1575,6 +1575,28 @@ _mcp_preflight_filter_dead() {
 
   CODEX_CONFIG_FLAGS=("${new_flags[@]}")
   echo "[tfx-route] MCP preflight: ${#dead_names[@]}개 dead MCP 제외 (${dead_list})" >&2
+
+  # #148: profile-allowed 전부 dead 인 all-dead 엣지케이스 조기 실패.
+  # 빈 allowed_pat 은 _codex_config_swap fail-safe (#132) 에 의해 원본 config
+  # 전체를 유지 → 비필요 MCP 까지 전부 spawn → 역효과.
+  # TFX_MCP_ALLOW_ALL_DEAD=1 로 명시적 opt-in 시 MCP 없이 진행 (degraded).
+  local remaining_alive=0
+  local rflag
+  for rflag in "${CODEX_CONFIG_FLAGS[@]}"; do
+    if [[ "$rflag" =~ ^mcp_servers\.[^.]+\.enabled=true$ ]]; then
+      remaining_alive=$((remaining_alive + 1))
+    fi
+  done
+
+  if [[ "$remaining_alive" -eq 0 ]]; then
+    if [[ "${TFX_MCP_ALLOW_ALL_DEAD:-0}" == "1" ]]; then
+      echo "[tfx-route] TFX_MCP_ALLOW_ALL_DEAD=1 — MCP 없이 계속 진행 (degraded)" >&2
+      return 0
+    fi
+    echo "[tfx-route] 조기 실패: profile 에서 허용한 MCP 전부 dead — Codex 호출 중단" >&2
+    echo "  복구: (1) dead MCP 복구 (2) TFX_MCP_HEALTH_CHECK=0 preflight 비활성 (3) TFX_MCP_ALLOW_ALL_DEAD=1 MCP 없이 진행" >&2
+    return 78
+  fi
 }
 
 ## ── Config Swap: 프로필별 MCP 서버 필터링 ──
@@ -1991,7 +2013,12 @@ FALLBACK_EOF
     # Preflight: dead MCP 감지 후 CODEX_CONFIG_FLAGS 에서 제거.
     # swap 이 allowed_pat 을 이 배열에서 계산하므로, 여기서 제거하면
     # dead section 이 config.toml 에서 자동으로 drop 된다.
-    _mcp_preflight_filter_dead
+    # #148: preflight 가 78 반환 시 all-dead → Codex 호출 중단 (early fail).
+    local _preflight_rc=0
+    _mcp_preflight_filter_dead || _preflight_rc=$?
+    if [[ "$_preflight_rc" -eq 78 ]]; then
+      exit 78
+    fi
     # Config swap: 프로필에 맞는 MCP 서버만 남긴 임시 config 적용
     # run_codex_mcp / run_codex_exec 어느 경로든 적용되도록 최상단에서 실행
     _codex_config_swap "filter"
