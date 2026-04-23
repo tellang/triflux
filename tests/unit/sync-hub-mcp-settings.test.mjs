@@ -609,4 +609,85 @@ describe("syncProjectMcpJson", () => {
       HUB_URL,
     );
   });
+
+  // Issue #155 — commit 657771a cross-review low finding (Codex). for-of + try/catch
+  // 구조가 실제로 per-file 격리를 보장하는지 테스트로 고정한다.
+  it("case 7: 한 경로 invalid JSON 이어도 다른 경로는 정상 처리 (per-file 격리)", async () => {
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
+    // .claude/mcp.json 은 깨진 JSON — 이 파일 때문에 .mcp.json 처리가 막히면 안 됨.
+    writeRaw(projectMcpPath, "{ invalid json");
+    writeJson(rootMcpPath, {
+      mcpServers: {
+        "tfx-hub": {
+          type: "url",
+          url: "http://127.0.0.1:39999/mcp",
+        },
+      },
+    });
+
+    const result = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+
+    // rootMcpPath 는 성공적으로 업데이트, projectMcpPath 는 errors 에 기록.
+    assert.deepEqual(result.updated, [rootMcpPath]);
+    assert.deepEqual(result.errors, [
+      { path: projectMcpPath, reason: "invalid json" },
+    ]);
+    assert.deepEqual(result.skipped, []);
+
+    // 깨진 파일은 보존 (rewrite 시도 없음).
+    assert.equal(readFileSync(projectMcpPath, "utf8"), "{ invalid json");
+    // 정상 경로는 type:http + 새 url 로 rewrite.
+    const after = JSON.parse(readFileSync(rootMcpPath, "utf8"));
+    assert.equal(after.mcpServers["tfx-hub"].type, "http");
+    assert.equal(after.mcpServers["tfx-hub"].url, HUB_URL);
+  });
+
+  it("case 8: 동기화된 상태에서 연속 2회 호출해도 updated 0 유지 (idempotent)", async () => {
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    const rootMcpPath = join(projectRoot, ".mcp.json");
+    // 두 경로 모두 이미 정상 상태 (type:http + 같은 url).
+    const canonicalEntry = {
+      mcpServers: {
+        "tfx-hub": {
+          type: "http",
+          url: HUB_URL,
+        },
+      },
+    };
+    writeJson(projectMcpPath, canonicalEntry);
+    writeJson(rootMcpPath, canonicalEntry);
+
+    const before = {
+      project: readFileSync(projectMcpPath, "utf8"),
+      root: readFileSync(rootMcpPath, "utf8"),
+    };
+
+    const first = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+    assert.deepEqual(first.updated, []);
+    assert.deepEqual(first.skipped, [projectMcpPath, rootMcpPath]);
+    assert.deepEqual(first.errors, []);
+
+    const second = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+    // 2회차도 동일하게 skipped — 진짜 idempotent.
+    assert.deepEqual(second.updated, []);
+    assert.deepEqual(second.skipped, [projectMcpPath, rootMcpPath]);
+    assert.deepEqual(second.errors, []);
+
+    // 파일도 byte-for-byte 동일.
+    assert.equal(readFileSync(projectMcpPath, "utf8"), before.project);
+    assert.equal(readFileSync(rootMcpPath, "utf8"), before.root);
+  });
 });
