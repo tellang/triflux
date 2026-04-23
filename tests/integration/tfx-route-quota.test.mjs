@@ -36,6 +36,9 @@ function runBash(command, extraEnv = {}) {
       ...process.env,
       TFX_TMP: os.tmpdir(),
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+      // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight early-fail.
+      // 라우팅/quota 검증이 목적이므로 preflight 스킵.
+      TFX_MCP_HEALTH_CHECK: "0",
       ...extraEnv,
     },
   });
