@@ -93,6 +93,22 @@ cleanup_workers() {
   rm -f "$_PID_TRACK"
 }
 
+# ── Preflight env vars (P0 prompt-dodge): git/npm/gh 자동 응답 ──
+# 워커가 dispatch 직후 git credential / npm install / gh auth prompt에서
+# stall하지 않도록 환경변수를 선주입한다. 사용자 값이 있으면 존중.
+export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
+export GIT_ASKPASS="${GIT_ASKPASS:-false}"
+export npm_config_yes="${npm_config_yes:-true}"
+
+_preflight_check_gh_auth() {
+  command -v gh >/dev/null 2>&1 || return 0
+  [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]] && return 0
+  if ! gh auth status >/dev/null 2>&1; then
+    echo "[tfx-route] 경고: gh 인증 미설정 (GH_TOKEN/GITHUB_TOKEN 미설정 + 'gh auth status' 실패). gh 명령 실행 시 prompt 발생 가능" >&2
+  fi
+}
+_preflight_check_gh_auth
+
 # ── config.toml sandbox/approval_mode 감지 ──
 # config.toml에 이미 설정되어 있으면 CLI 플래그 중복 시 Codex가 에러를 던짐.
 # 단, [mcp_servers.*.tools.*] 섹션 내부의 approval_mode는 tool 단위 승인 설정으로
@@ -1633,10 +1649,12 @@ run_codex_exec() {
   # -c flags는 codex exec에서 MCP enabled 제어 불가 — config swap으로 대체
   # config swap은 codex 블록 최상단(_codex_config_swap "filter")에서 실행됨
 
+  # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
+  # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
   if [[ "$use_tee_flag" == "true" ]]; then
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
   _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
@@ -1892,8 +1910,12 @@ FALLBACK_EOF
       if [[ "$exit_code" -eq 0 ]]; then
         codex_transport_effective="mcp"
       elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
-        echo "[tfx-route] Codex MCP bootstrap 실패(exit=${exit_code}). exec fallback 비활성(stdin 블록 위험)." >&2
-        codex_transport_effective="mcp-failed"
+        # MCP 실패 → exec fallback. run_codex_exec는 < /dev/null 로 stdin 블록 회피 (line 1639).
+        # 정책: codex/gemini 강건성 — MCP 가용 시 MCP, 실패 시 그래도 워커 자체는 굴러간다.
+        echo "[tfx-route] Codex MCP 실패(exit=${exit_code}). exec fallback 시도." >&2
+        exit_code=0
+        run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
+        codex_transport_effective="exec-fallback"
       else
         codex_transport_effective="mcp"
       fi
