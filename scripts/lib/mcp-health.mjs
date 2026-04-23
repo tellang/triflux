@@ -10,7 +10,9 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -234,6 +236,87 @@ export function readMcpServers(configPath = DEFAULT_CONFIG_PATH) {
   }
 }
 
+// ────────── Binary Fingerprint (Issue #149) ──────────
+// Cache staleness 방지: config.toml mtime 만 보면 `npm i -g <mcp-bin>` 설치/제거
+// 를 감지 못해 5분간 stale dead 판정이 유지된다. 서버별 fingerprint (command,
+// args, 해석된 binary path+mtime+size 또는 url) 을 cache 에 저장하고 일치할
+// 때만 hit 으로 판정한다.
+
+function statBinary(filePath) {
+  try {
+    const st = statSync(filePath);
+    if (!st.isFile()) return null;
+    return { path: filePath, mtime: Math.floor(st.mtimeMs), size: st.size };
+  } catch {
+    return null;
+  }
+}
+
+export function resolveBinaryPath(command) {
+  if (!command || typeof command !== "string") return null;
+  if (path.isAbsolute(command)) return statBinary(command);
+
+  const pathEntries = (process.env.PATH || "")
+    .split(path.delimiter)
+    .filter(Boolean);
+  const pathExts =
+    process.platform === "win32"
+      ? (process.env.PATHEXT || ".EXE;.CMD;.BAT;.COM")
+          .split(";")
+          .filter(Boolean)
+      : [""];
+  // command 에 이미 확장자가 있을 수도 있으니 빈 확장자도 시도.
+  const exts = pathExts.includes("") ? pathExts : ["", ...pathExts];
+
+  for (const dir of pathEntries) {
+    for (const ext of exts) {
+      const candidate = path.join(dir, command + ext);
+      const result = statBinary(candidate);
+      if (result) return result;
+    }
+  }
+  return null;
+}
+
+export function computeFingerprint(def) {
+  if (!def || typeof def !== "object") return { type: "none" };
+  if (typeof def.url === "string" && def.url) {
+    return { type: "http", url: def.url };
+  }
+  if (typeof def.command === "string" && def.command) {
+    return {
+      type: "stdio",
+      command: def.command,
+      args: Array.isArray(def.args) ? [...def.args] : [],
+      binary: resolveBinaryPath(def.command),
+    };
+  }
+  return { type: "unknown" };
+}
+
+export function fingerprintsEqual(a, b) {
+  if (!a || !b) return false;
+  if (a.type !== b.type) return false;
+  if (a.type === "http") return a.url === b.url;
+  if (a.type === "stdio") {
+    if (a.command !== b.command) return false;
+    const ax = Array.isArray(a.args) ? a.args : [];
+    const bx = Array.isArray(b.args) ? b.args : [];
+    if (ax.length !== bx.length) return false;
+    for (let i = 0; i < ax.length; i++) {
+      if (ax[i] !== bx[i]) return false;
+    }
+    if ((a.binary === null) !== (b.binary === null)) return false;
+    if (a.binary && b.binary) {
+      if (a.binary.path !== b.binary.path) return false;
+      if (a.binary.mtime !== b.binary.mtime) return false;
+      if (a.binary.size !== b.binary.size) return false;
+    }
+    return true;
+  }
+  return true; // "none"/"unknown" — 같은 type 이면 equal
+}
+
 // ────────── Probe ──────────
 
 function makeInitializeRequest() {
@@ -418,11 +501,23 @@ export function readCache(cachePath = DEFAULT_CACHE_PATH) {
 }
 
 export function writeCache(cache, cachePath = DEFAULT_CACHE_PATH) {
+  // Issue #154: writeFileSync 는 non-atomic 이라 swarm/병렬 tfx-route 가 동시
+  // write 하면 reader 가 partial JSON 을 받아 SyntaxError → null 반환. tmp 파일에
+  // 쓰고 rename 으로 교체하면 reader 는 항상 완전한 파일을 본다 (POSIX atomic,
+  // Windows MoveFileEx 도 target replace 지원). pid+timestamp 가 tmp 이름에
+  // 들어가 writer 끼리도 충돌하지 않는다.
+  const tmpPath = `${cachePath}.tmp.${process.pid}.${Date.now()}`;
   try {
     mkdirSync(path.dirname(cachePath), { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(cache, null, 2), "utf8");
+    writeFileSync(tmpPath, JSON.stringify(cache, null, 2), "utf8");
+    renameSync(tmpPath, cachePath);
     return true;
   } catch {
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      /* best effort */
+    }
     return false;
   }
 }
@@ -458,35 +553,54 @@ export async function probeAll({
       ? names.filter((n) => allNames.includes(n))
       : allNames;
 
-  const existingCache = useCache ? readCache(cachePath) : null;
-  const cacheFresh = isCacheFresh(existingCache, { now, configMtime });
+  // Issue #149: per-server fingerprint (binary path+mtime+size) 로 cache 를
+  // invalidate 한다. configMtime 은 여전히 meta 로 저장하지만 hit 판정에는
+  // 쓰지 않는다 — binary 설치/제거가 config.toml mtime 을 바꾸지 않기 때문.
+  const fingerprints = Object.fromEntries(
+    targets.map((name) => [name, computeFingerprint(servers[name])]),
+  );
 
-  if (
-    cacheFresh &&
+  const existingCache = useCache ? readCache(cachePath) : null;
+  const cachedResults = existingCache?.results || {};
+  const cacheWithinTtl =
     existingCache &&
-    targets.every((n) => existingCache.results?.[n])
-  ) {
-    return {
-      results: Object.fromEntries(
-        targets.map((n) => [n, existingCache.results[n]]),
-      ),
-      source: "cache",
-      configMtime,
-    };
+    typeof existingCache.checkedAt === "number" &&
+    typeof existingCache.ttlMs === "number" &&
+    now - existingCache.checkedAt < existingCache.ttlMs;
+
+  const hits = {};
+  const stale = [];
+  for (const name of targets) {
+    const prior = cachedResults[name];
+    if (
+      cacheWithinTtl &&
+      prior &&
+      prior.fingerprint &&
+      fingerprintsEqual(prior.fingerprint, fingerprints[name])
+    ) {
+      hits[name] = prior;
+    } else {
+      stale.push(name);
+    }
   }
 
-  const probes = targets.map(async (name) => {
+  if (stale.length === 0) {
+    return { results: hits, source: "cache", configMtime };
+  }
+
+  const probes = stale.map(async (name) => {
     const def = servers[name] || {};
     const result = await probeServer(def, timeoutMs);
-    return [name, result];
+    return [name, { ...result, fingerprint: fingerprints[name] }];
   });
   const settled = await Promise.all(probes);
-  const results = Object.fromEntries(settled);
+  const freshResults = Object.fromEntries(settled);
+
+  const allResults = { ...hits, ...freshResults };
 
   if (writeCacheFile) {
-    const merged = cacheFresh
-      ? { ...(existingCache?.results || {}), ...results }
-      : results;
+    // 이번에 probe 한 서버만 결과 갱신; 이전 cache 의 다른 서버 결과는 보존.
+    const merged = { ...cachedResults, ...freshResults };
     writeCache(
       {
         configMtime,
@@ -498,7 +612,7 @@ export async function probeAll({
     );
   }
 
-  return { results, source: "probe", configMtime };
+  return { results: allResults, source: "probe", configMtime };
 }
 
 export function splitHealthy(results) {
