@@ -1510,7 +1510,12 @@ _mcp_preflight_filter_dead() {
   [[ -n "$health_script" && -f "$health_script" ]] || return 0
   command -v "$NODE_BIN" &>/dev/null || return 0
 
-  # CODEX_CONFIG_FLAGS 에서 enabled=true 항목으로부터 후보 서버 이름 수집
+  # CODEX_CONFIG_FLAGS 에서 enabled=true 항목으로부터 후보 서버 이름 수집.
+  # #153: parseMcpServersFromToml 은 section 이름에 dot 을 허용 (`[a-zA-Z0-9_.-]+`).
+  # `[mcp_servers.foo.bar]` 같은 dotted 서버가 `mcp_servers.foo.bar.enabled=true`
+  # 플래그로 전달될 때 과거 `[^.]+` 정규식은 `foo` 만 captur 해 suffix 매치 실패
+  # → dotted 서버가 preflight candidate 에서 통째로 누락됐다. `\.enabled=true$`
+  # 로 끝 anchor 가 고정돼 있어 `(.+)` greedy 가 반복 보장한다.
   local names=""
   local i=0
   local n="${#CODEX_CONFIG_FLAGS[@]}"
@@ -1518,7 +1523,7 @@ _mcp_preflight_filter_dead() {
     local flag="${CODEX_CONFIG_FLAGS[$i]}"
     if [[ "$flag" == "-c" ]] && (( i + 1 < n )); then
       local value="${CODEX_CONFIG_FLAGS[$((i+1))]}"
-      if [[ "$value" =~ ^mcp_servers\.([^.]+)\.enabled=true$ ]]; then
+      if [[ "$value" =~ ^mcp_servers\.(.+)\.enabled=true$ ]]; then
         [[ -n "$names" ]] && names="${names},"
         names="${names}${BASH_REMATCH[1]}"
       fi
