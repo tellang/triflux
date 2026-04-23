@@ -334,7 +334,13 @@ async function syncProjectMcpFile({ filePath, hubUrl, dryRun, logger }) {
       return { kind: "error", path: filePath, reason };
     }
 
-    if (hubServer.url === hubUrl) {
+    // Claude Code 는 현재 type:"http" 만 허용. 과거 type:"url" 엔트리는 스키마 오류로
+    // project config parse 실패 → MCP 전체 연결 단절. url 일치만으로 skip 하면 legacy
+    // type 이 영원히 안 고쳐진다. syncSingleFile (user-level settings) 이 type+url
+    // 둘 다 보는 것과 동일 규약 적용.
+    const typeOk = hubServer.type === "http";
+    const urlOk = hubServer.url === hubUrl;
+    if (typeOk && urlOk) {
       log(logger, "info", `[project-mcp-sync] skipped: ${filePath}`);
       return { kind: "skipped", path: filePath };
     }
@@ -342,11 +348,12 @@ async function syncProjectMcpFile({ filePath, hubUrl, dryRun, logger }) {
     log(
       logger,
       "debug",
-      `[project-mcp-sync] ${filePath} url:${String(hubServer.url)} -> ${hubUrl}`,
+      `[project-mcp-sync] ${filePath} type:${String(hubServer.type)} url:${String(hubServer.url)} -> type:http url:${hubUrl}`,
     );
 
     if (!dryRun) {
       try {
+        hubServer.type = "http";
         hubServer.url = hubUrl;
         await writeJsonAtomic(filePath, settings);
       } catch (error) {

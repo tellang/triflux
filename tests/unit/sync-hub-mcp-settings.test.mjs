@@ -446,12 +446,39 @@ describe("syncProjectMcpJson", () => {
     );
   });
 
-  it("case 2: 동일 url이면 skipped에 포함한다", async () => {
+  it("case 2: url이 같아도 type이 legacy(url)이면 type:http로 rewrite한다", async () => {
+    // Claude Code 현재 스키마는 type:"http" 만 허용. 과거 type:"url" 는 parse 실패
+    // → MCP 전체 단절. url 일치만으로 skip 하면 legacy 가 영원히 안 고쳐짐.
     const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
     writeJson(projectMcpPath, {
       mcpServers: {
         "tfx-hub": {
           type: "url",
+          url: HUB_URL,
+        },
+      },
+    });
+
+    const result = await syncProjectMcpJson({
+      hubUrl: HUB_URL,
+      projectRoot,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.updated, [projectMcpPath]);
+    assert.deepEqual(result.skipped, []);
+    assert.deepEqual(result.errors, []);
+    const after = JSON.parse(readFileSync(projectMcpPath, "utf8"));
+    assert.equal(after.mcpServers["tfx-hub"].type, "http");
+    assert.equal(after.mcpServers["tfx-hub"].url, HUB_URL);
+  });
+
+  it("case 2b: type:http + 동일 url이면 skipped에 포함한다 (true idempotent)", async () => {
+    const projectMcpPath = join(projectRoot, ".claude", "mcp.json");
+    writeJson(projectMcpPath, {
+      mcpServers: {
+        "tfx-hub": {
+          type: "http",
           url: HUB_URL,
         },
       },
