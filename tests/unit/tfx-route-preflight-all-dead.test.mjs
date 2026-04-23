@@ -242,3 +242,88 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
     assert.doesNotMatch(result.stderr, /preflight/);
   });
 });
+
+// Issue #153 — parseMcpServersFromToml 은 section 이름에 dot 을 허용
+// (`[a-zA-Z0-9_.-]+`) 하지만 과거 preflight 정규식 `[^.]+` 는 첫 dot 에서
+// 끊어 `mcp_servers.foo.bar.enabled=true` 같은 dotted 서버를 candidate 에서
+// 누락시켰다. `(.+)\.enabled=true$` 로 suffix anchor 를 고정해 dotted 이름도
+// 정확히 캡처되도록 수정.
+describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
+  const cleanupDirs = [];
+  after(() => {
+    for (const d of cleanupDirs) {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("dotted dead 서버 (`foo.bar`) 가 candidate 로 추출되고 flag 가 제거된다", () => {
+    const result = runPreflight({
+      flags: [
+        "-c",
+        "mcp_servers.alive1.enabled=true",
+        "-c",
+        "mcp_servers.foo.bar.enabled=true",
+        "-c",
+        "mcp_servers.foo.bar.args=[]",
+      ],
+      deadList: "foo.bar",
+    });
+    cleanupDirs.push(result.dir);
+    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
+    // dotted 서버의 모든 override (enabled=true + args=[]) 가 drop 된다.
+    assert.deepEqual(result.remainingFlags, [
+      "-c",
+      "mcp_servers.alive1.enabled=true",
+    ]);
+    assert.match(result.stderr, /1개 dead MCP 제외 \(foo\.bar\)/);
+  });
+
+  it("dotted alive 서버는 flags 보존 (dead 아님 → 제외 안 됨)", () => {
+    const result = runPreflight({
+      flags: [
+        "-c",
+        "mcp_servers.foo.bar.enabled=true",
+        "-c",
+        "mcp_servers.baz.qux.enabled=true",
+      ],
+      deadList: "", // nothing dead
+    });
+    cleanupDirs.push(result.dir);
+    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
+    // 전부 alive 니까 flags 원본 유지.
+    assert.deepEqual(result.remainingFlags, [
+      "-c",
+      "mcp_servers.foo.bar.enabled=true",
+      "-c",
+      "mcp_servers.baz.qux.enabled=true",
+    ]);
+  });
+
+  it("dotted 서버 + all-dead → rc=78 조기 실패 (#148 과 동일 경로)", () => {
+    const result = runPreflight({
+      flags: [
+        "-c",
+        "mcp_servers.foo.bar.enabled=true",
+        "-c",
+        "mcp_servers.baz.qux.enabled=true",
+      ],
+      deadList: "foo.bar,baz.qux",
+    });
+    cleanupDirs.push(result.dir);
+    assert.equal(result.preflightRc, 78, `stderr: ${result.stderr}`);
+    assert.match(result.stderr, /조기 실패.*MCP 전부 dead/);
+  });
+
+  it("non-dotted 서버도 기존과 동일하게 동작 (회귀 없음)", () => {
+    const result = runPreflight({
+      flags: [
+        "-c",
+        "mcp_servers.simple.enabled=true",
+      ],
+      deadList: "simple",
+    });
+    cleanupDirs.push(result.dir);
+    assert.equal(result.preflightRc, 78, `stderr: ${result.stderr}`);
+    assert.match(result.stderr, /전부 dead/);
+  });
+});
