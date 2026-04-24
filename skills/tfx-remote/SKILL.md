@@ -41,6 +41,8 @@ argument-hint: "[setup|spawn|list|attach|send|resume|kill|probe] ..."
 - `setup --probe-all`
 - `setup --diagnose`
 
+`hosts.json` 을 Add/Edit/Diagnose 어떤 경로로든 수정할 때마다 triflux 소스 트리로 fan-out 해야 한다 (`skills/tfx-remote-spawn/references/hosts.json` 및 `packages/triflux/skills/tfx-remote-spawn/references/hosts.json`). 세부 절차는 `tfx-remote-setup` 플로우의 **2-7-b** 단계 참조. 임시 패치이며 근본 해결은 issue #178 (hosts.json 이전) 및 #179 (`tfx setup` user-state skip) 에서 추적.
+
 ### `tfx-remote spawn`
 
 기존 `tfx-remote-spawn` 플로우를 사용하되 아래 preflight를 먼저 수행한다.

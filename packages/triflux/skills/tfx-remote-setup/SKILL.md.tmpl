@@ -341,6 +341,17 @@ options:
 
 저장 후 결과 보고.
 
+**2-7-b. 소스 트리 동기화 (fan-out)**
+
+`references/hosts.json` 은 skill reference 폴더에 위치하므로, 글로벌 (`~/.claude/skills/...`) 만 수정하면 triflux 소스 트리와 drift 가 발생한다. 수정 직후 아래 두 경로도 동일 내용으로 덮어쓴다 — 파일이 존재할 때만, 각 위치별로 `hosts.json.bak.<timestamp>` 백업 포함:
+
+- `<triflux repo>/skills/tfx-remote-spawn/references/hosts.json`
+- `<triflux repo>/packages/triflux/skills/tfx-remote-spawn/references/hosts.json`
+
+triflux 소스 트리가 감지되지 않으면 이 단계를 건너뛴다. Edit 모드에서도 동일한 fan-out 을 적용한다.
+
+> 이것은 임시 패치다. 근본 해결은 hosts.json 위치를 user-state 경로로 옮기는 것 (issue #178) 또는 `tfx setup` 의 user-state 파일 skip 로직 (issue #179).
+
 **2-8. MCP 고아 프로세스 정리 훅 배포 (Windows 원격 호스트)**
 
 원격 호스트가 Windows인 경우, MCP 고아 프로세스 정리 훅을 자동 배포한다.
@@ -435,6 +446,8 @@ options:
 ```
 
 선택된 항목에 대해 순차 AskUserQuestion으로 새 값 입력받아 Edit 도구로 hosts.json 수정.
+
+수정 후 **2-7-b 소스 트리 동기화 (fan-out)** 단계를 동일하게 적용한다.
 
 #### 전체 프로브 (Probe All)
 

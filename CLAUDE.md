@@ -159,3 +159,11 @@ background로 실행한 headless 결과는 **반드시 task-notification 완료 
 | `.claude/rules/tfx-stack-coexistence.md` | gstack / superpowers / triflux 공존 원칙, 레이어 분리, 의존 방향, 충돌 해소 |
 
 Claude Code는 `.claude/rules/*.md` 를 자동 로드한다. Codex CLI는 `@import` 미지원이므로 필요 시 `AGENTS.md` 를 독립 유지한다.
+
+## GBrain Configuration (configured by /setup-gbrain)
+- Engine: pglite
+- Config file: ~/.gbrain/config.json (mode 0600)
+- Setup date: 2026-04-25
+- MCP registered: yes (user scope, absolute path)
+- Memory sync: artifacts-only (repo: github.com/tellang/gstack-brain-tellang)
+- Current repo policy: read-write (github.com/tellang/triflux)
