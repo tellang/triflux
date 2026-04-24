@@ -4,6 +4,27 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.14.0] - 2026-04-24
+
+### Added
+
+- **`feat(tfx-route)`** dead MCP preflight with health probe + TTL cache (9298fd6) — codex 호출 직전에 모든 MCP 서버에 initialize JSON-RPC probe 를 보내 응답 없는 서버를 감지하고 `enabled=true` flag 를 자동 제거. dead 서버 때문에 Codex 가 -32000 으로 죽던 패턴을 차단. probe 결과는 `~/.codex/mcp-health-cache.json` 에 TTL 5분 캐시. opt-out: `TFX_MCP_HEALTH_CHECK=0`. 후속 PR 들 (#147, #148, #149, #152, #153, #154, #155) 이 정확도와 안정성을 점진적으로 강화.
+- **`feat(codex-profiles)`** gpt-5.5 main 전환 + escalation chain 갱신 (4f26c24) — OpenAI gpt-5.5 출시 반영. `setup.mjs` 의 top-level model 기본값을 `gpt-5.4` → `gpt-5.5` 로 전환하고 `gpt55_xhigh` / `gpt55_high` / `gpt55_med` / `gpt55_low` 4 tier 프로필을 자동 주입한다. auto-escalate 체인은 step 1 `codex:gpt-5.4-mini`, step 2 `codex:gpt-5.5` 로 갱신. 5.5 mini 변종 부재로 mini 계층은 5.4-mini 유지. 기존 `gpt54_*`, `codex53_*`, `spark53_*`, `mini54_*` 프로필은 보존 (사용자 호환성).
+
+### Fixed
+
+- **`fix(tfx-route)` (#153)** preflight 정규식이 dotted server 이름 허용 (83b03fb) — `_mcp_preflight_filter_dead` 의 candidate 추출 정규식이 `[^.]+` 로 첫 dot 에서 끊어, `[mcp_servers.foo.bar]` 같은 dotted 서버는 probe/filter 대상에서 통째로 누락되던 문제. `(.+)\.enabled=true$` 로 변경해 end anchor 활용한 정확한 캡처. mcp-health.mjs 파서 (`[a-zA-Z0-9_.-]+`) 와 일관성 회복. drop 루프는 이미 prefix 매칭이라 dead 이름 그대로 받아 모든 override 제거.
+- **`fix(mcp-health)` (#149, #154)** binary fingerprint cache key + atomic cache write (02b792d) — (#149) 기존 cache 가 configMtime + TTL 만으로 fresh 판정해 `npm i -g <mcp-bin>` 설치/제거를 5분간 감지 못하던 문제. 서버별 fingerprint (resolved binary path+mtime+size 또는 url) 을 cache 에 포함하고 일치할 때만 hit 으로 판정. legacy cache (fingerprint 없음) 는 stale → 자동 migration. (#154) `writeCache` 가 비원자적 `writeFileSync` 라 swarm/병렬 실행 시 reader 가 partial JSON → null 받아 cache 효용 손실. tmp (`pid.timestamp` 이름) + `renameSync` atomic write 로 변경.
+- **`fix(tfx-route)` (#148)** all-dead preflight 조기 실패 (50ec35f) — profile-allowed MCP 가 전부 dead 일 때 BUG-H (#132) fail-safe 가 swap 을 skip → 원본 config.toml 전체가 Codex 에 전달되어 비필요 MCP 다수까지 spawn 되는 역효과. preflight 끝에서 남은 `enabled=true` 개수 검사 → 0 이면 `exit 78` 조기 실패. opt-in escape: `TFX_MCP_ALLOW_ALL_DEAD=1`.
+- **`fix(mcp-sync)` (#152)** support root-level `.mcp.json` alongside `.claude/mcp.json` (657771a) — Claude Code 는 두 경로 모두 읽지만 과거 sync 는 `.claude/mcp.json` 만 처리해 root-only 레이아웃 (research-fold7-terminal 등) 은 sync 가 작동하지 않았음. 이제 둘 다 처리.
+- **`fix(mcp-health)`** tighten preflight accuracy — multiline TOML args + HTTP validation (1f8d508) — (A1) 멀티라인 array 값 (`args = [\n  "run",\n  "server.js"\n]`) 을 single-line 파서가 `"["` 문자열로 오인해 정상 서버를 dead 로 오탐. bracket depth tracker 로 `]` 까지 누적해 array 로 파싱. (A2) HTTP probe 가 status 2xx-4xx 전부 alive 로 취급해 404/401 HTML 페이지를 healthy 로 오판. 200 + JSON-RPC envelope (id 일치, result|error 존재) 둘 다 검증.
+- **`fix(mcp-sync)`** project mcp.json type 필드도 rewrite (legacy url→http) (50b5f0d) — Claude Code 현재 스키마는 `type: "http"` 만 허용. 과거 `type: "url"` 는 parse 실패로 MCP 전체 단절. url 일치만으로 skip 하면 legacy 가 영원히 안 고쳐지던 문제. 이제 type 필드도 함께 rewrite.
+- **`fix(tfx-route)`** preflight env + codex MCP exec fallback (923aa1a) — preflight env 변수 누락 + codex MCP exec fallback 경로 보강.
+
+### Tests
+
+- **`test(sync-hub-mcp-settings)` (#155)** 부분 실패 격리 + 2회 idempotent regression (4b643e0) — `syncProjectMcpJson` 이 `.claude/mcp.json` 과 `.mcp.json` 두 경로를 for-of 루프 + per-file try/catch 로 처리하는 격리 동작과 2회 연속 idempotent 동작을 회귀 방어 테스트로 고정. (case 7) 한 경로 invalid JSON 이어도 다른 경로 정상 처리, (case 8) 두 경로 모두 canonical 상태에서 연속 호출 시 byte-for-byte 동일.
+
 ## [10.13.10] - 2026-04-23
 
 ### Changed
