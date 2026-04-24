@@ -316,10 +316,7 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
 
   it("non-dotted 서버도 기존과 동일하게 동작 (회귀 없음)", () => {
     const result = runPreflight({
-      flags: [
-        "-c",
-        "mcp_servers.simple.enabled=true",
-      ],
+      flags: ["-c", "mcp_servers.simple.enabled=true"],
       deadList: "simple",
     });
     cleanupDirs.push(result.dir);
