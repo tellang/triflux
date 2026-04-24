@@ -244,7 +244,8 @@ auto_reroute codex
 
       assert.notEqual(result.status, 0); // 에러로 인해 종료되어야 함
       // TFX_QUOTA_REROUTE=0 조건에 의해 auto_reroute로 넘어가지 않아야 함
-      assert.doesNotMatch(out(result), /자동 전환/);
+      // `[tfx-quota]` prefix 로 auto_reroute 메시지만 매칭 — `[tfx-route]` graceful degradation 은 제외
+      assert.doesNotMatch(out(result), /\[tfx-quota\].*자동 전환/);
     });
 
     it("3. TFX_REROUTED_FROM 설정 시 중복 재귀 전환 방지", () => {
@@ -273,7 +274,7 @@ auto_reroute codex
       fs.unlinkSync(fakeCodex);
 
       assert.notEqual(result.status, 0);
-      assert.doesNotMatch(out(result), /자동 전환/);
+      assert.doesNotMatch(out(result), /\[tfx-quota\].*자동 전환/);
     });
   });
 });
