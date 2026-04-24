@@ -290,6 +290,8 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
             TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
             TFX_CLI_MODE: "auto",
             TFX_NO_CLAUDE_NATIVE: "0",
+            // #148: real MCP probe 가 fixture 환경에서 dead 로 나와 exit 78 trigger
+            TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
           },
@@ -379,6 +381,8 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
             TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
             TFX_CLI_MODE: "auto",
             TFX_NO_CLAUDE_NATIVE: "0",
+            // #148: real MCP probe 가 fixture 환경에서 dead 로 나와 exit 78 trigger
+            TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
           },
@@ -469,6 +473,8 @@ if (cmd === 'team-task-update') {
             TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
             TFX_CLI_MODE: "auto",
             TFX_NO_CLAUDE_NATIVE: "0",
+            // #148: real MCP probe 가 fixture 환경에서 dead 로 나와 exit 78 trigger
+            TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
           },
@@ -569,6 +575,8 @@ if (cmd === 'team-task-update' && isClaim) {
             TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
             TFX_CLI_MODE: "auto",
             TFX_NO_CLAUDE_NATIVE: "0",
+            // #148: real MCP probe 가 fixture 환경에서 dead 로 나와 exit 78 trigger
+            TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
           },

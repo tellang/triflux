@@ -155,10 +155,24 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
 
     assert.ok(codexProfiles, "codex-profiles action missing");
     assert.equal(codexProfiles.change, "update");
+    // REQUIRED_CODEX_PROFILES 에 gpt55_* 4개 + 기존 11개 = 15개 모두 포함.
+    // fixture 에 3개만 stale 로 심어둬서 12개는 신규 생성, 3개는 갱신.
     assert.deepEqual(codexProfiles.profiles, [
+      "gpt55_xhigh",
+      "gpt55_high",
+      "gpt55_med",
+      "gpt55_low",
       "codex53_high",
       "codex53_xhigh",
+      "codex53_med",
       "spark53_low",
+      "spark53_med",
+      "gpt54_xhigh",
+      "gpt54_high",
+      "gpt54_low",
+      "mini54_low",
+      "mini54_med",
+      "mini54_high",
     ]);
     if (process.platform === "win32") {
       assert.equal(codexProfiles.windowsSandbox, true);
