@@ -517,4 +517,8 @@ describe("health-probe: PROBE_DEFAULTS", () => {
   it("probe 주기는 5초여야 한다", () => {
     assert.equal(PROBE_DEFAULTS.intervalMs, 5_000);
   });
+
+  it("#168 P3: enableL2 default 는 true (checkMcp 미주입 시 probeL2 가 skip 반환)", () => {
+    assert.equal(PROBE_DEFAULTS.enableL2, true);
+  });
 });
