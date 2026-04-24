@@ -86,6 +86,7 @@ async function writeTextAtomic(filePath, payload) {
   // 기존: rename 실패 시 원본을 먼저 rm → rename(tmp, dest) 이므로 2차 실패/프로세스 중단 시 원본 유실.
   // 개선: 원본을 backup 경로로 먼저 옮기고 (atomic rename), tmp → dest 성공 후에만 backup 삭제.
   //       tmp → dest 실패 시 backup 을 다시 dest 로 복원해 원자성 보장.
+  //       backup 복원 자체가 실패하면 backup 을 **절대 삭제하지 않는다** (수동 복구용 보존).
   const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   const backupPath = `${filePath}.bak-${process.pid}-${Date.now()}`;
   let hasBackup = false;
@@ -125,17 +126,25 @@ async function writeTextAtomic(filePath, payload) {
       hasBackup = false;
     }
   } catch (error) {
-    // 실패 — backup 복원 시도
+    // 실패 — backup 복원 시도. 복원 성공 시에만 hasBackup=false 로 내려 cleanup 경로 진입 허용.
+    // 복원 실패 시에는 hasBackup=true 유지 → finally 에서도 backup 을 **삭제하지 않아** 수동 복구 가능.
     if (hasBackup) {
-      await rename(backupPath, filePath).catch(() => {});
+      try {
+        await rename(backupPath, filePath);
+        hasBackup = false;
+      } catch (rollbackError) {
+        // eslint-disable-next-line no-console — 사용자가 backup 존재를 인지해야 복구 가능
+        console.warn(
+          `[sync-hub-mcp-settings] atomic write rollback failed for ${filePath}: ${rollbackError?.message || rollbackError}. ` +
+            `Original content preserved at: ${backupPath}`,
+        );
+      }
     }
     throw error;
   } finally {
+    // tmp 는 항상 정리. backup 은 성공 경로/복원 경로에서만 명시적으로 rm 한다
+    // (rollback 실패 시 hasBackup=true 상태로 남음 → 이 블록에서 절대 삭제하지 않음)
     await rm(tmpPath, { force: true }).catch(() => {});
-    // backup 이 남아있으면 (복원 실패 포함) 정리 — 원본이 살아있든 tmp 실패든 stale backup 은 지움
-    if (hasBackup) {
-      await rm(backupPath, { force: true }).catch(() => {});
-    }
   }
 }
 
