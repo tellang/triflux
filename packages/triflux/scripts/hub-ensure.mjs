@@ -35,7 +35,10 @@ async function syncHubConfigsIfAvailable({ hubUrl }) {
       await mod.syncCodexHubUrl({ hubUrl });
     }
     if (typeof mod?.syncProjectMcpJson === "function") {
-      await mod.syncProjectMcpJson({ hubUrl, projectRoot: PLUGIN_ROOT });
+      // 사용자 작업 디렉토리의 .mcp.json 을 sync 대상으로 한다.
+      // 이전에는 PLUGIN_ROOT(triflux 설치 경로)를 넘겨서 설치 경로의 .mcp.json
+      // 만 sync 되고 사용자 실제 프로젝트는 drift 되던 증상이 있었다.
+      await mod.syncProjectMcpJson({ hubUrl, projectRoot: process.cwd() });
     }
   } catch {
     // sync는 best-effort이며 hub-ensure 성공/실패를 좌우하지 않는다.

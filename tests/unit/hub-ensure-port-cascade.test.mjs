@@ -123,4 +123,24 @@ describe("resolveHubTarget — port cascade regression", () => {
     assert.equal(target.port, 27888);
     assert.equal(target.host, "127.0.0.1");
   });
+
+  it("treats TFX_HUB_PORT=0 as invalid, falls back to HUB_DEFAULT_PORT", () => {
+    // Port 0 은 TCP 에서 "OS 가 ephemeral port 할당" 의미지만 hub 에서는
+    // 사용 의도 없음. envPortRaw > 0 조건으로 reject 되어 default 27888 로 fallback.
+    process.env.TFX_HUB_PORT = "0";
+    const target = resolveHubTarget();
+    assert.equal(target.port, 27888);
+  });
+
+  it("treats TFX_HUB_PORT=<non-numeric> as invalid, falls back to default", () => {
+    process.env.TFX_HUB_PORT = "not-a-number";
+    const target = resolveHubTarget();
+    assert.equal(target.port, 27888);
+  });
+
+  it("treats TFX_HUB_PORT=<negative> as invalid, falls back to default", () => {
+    process.env.TFX_HUB_PORT = "-1";
+    const target = resolveHubTarget();
+    assert.equal(target.port, 27888);
+  });
 });
