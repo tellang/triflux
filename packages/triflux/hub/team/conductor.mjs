@@ -696,8 +696,10 @@ export function createConductor(opts = {}) {
       },
       {
         ...probeOpts,
+        // #165: default off → on. atomic write (#162) 로 race 제거됨.
+        // opt-out: TFX_PROBE_WRITE_STATE=0 명시.
         writeStateFile:
-          probeOpts.writeStateFile ?? process.env.TFX_PROBE_WRITE_STATE === "1",
+          probeOpts.writeStateFile ?? process.env.TFX_PROBE_WRITE_STATE !== "0",
         onProbe: (result) => handleProbeResult(session, result),
       },
     );
