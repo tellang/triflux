@@ -82,28 +82,87 @@ async function fileExists(filePath) {
 }
 
 async function writeTextAtomic(filePath, payload) {
+  // #164 MEDIUM 1: rename fallback 비원자성 개선.
+  // 기존: rename 실패 시 원본을 먼저 rm → rename(tmp, dest) 이므로 2차 실패/프로세스 중단 시 원본 유실.
+  // 개선: 원본을 backup 경로로 먼저 옮기고 (atomic rename), tmp → dest 성공 후에만 backup 삭제.
+  //       tmp → dest 실패 시 backup 을 다시 dest 로 복원해 원자성 보장.
+  //       backup 복원 자체가 실패하면 backup 을 **절대 삭제하지 않는다** (수동 복구용 보존).
   const tmpPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const backupPath = `${filePath}.bak-${process.pid}-${Date.now()}`;
+  let hasBackup = false;
 
   try {
     await writeFile(tmpPath, payload, "utf8");
 
+    // 1) 원본이 있으면 backup 으로 rename (원본 유실 위험 제거)
+    try {
+      await rename(filePath, backupPath);
+      hasBackup = true;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+
+    // 2) tmp → dest
     try {
       await rename(tmpPath, filePath);
     } catch (error) {
+      // Windows 에서 dest 에 stale lock 이 남아있으면 EEXIST/EPERM/EACCES 가 여전히 발생 가능.
+      // 이 경우 dest 를 제거한 뒤 재시도. backup 은 아직 살아있으므로 복원 가능.
       if (
-        error?.code !== "EEXIST" &&
-        error?.code !== "EPERM" &&
-        error?.code !== "EACCES"
+        error?.code === "EEXIST" ||
+        error?.code === "EPERM" ||
+        error?.code === "EACCES"
       ) {
+        await rm(filePath, { force: true }).catch(() => {});
+        await rename(tmpPath, filePath);
+      } else {
         throw error;
       }
-
-      await rm(filePath, { force: true });
-      await rename(tmpPath, filePath);
     }
+
+    // 3) 성공 — backup 정리
+    if (hasBackup) {
+      await rm(backupPath, { force: true }).catch(() => {});
+      hasBackup = false;
+    }
+  } catch (error) {
+    // 실패 — backup 복원 시도. 복원 성공 시에만 hasBackup=false 로 내려 cleanup 경로 진입 허용.
+    // 복원 실패 시에는 hasBackup=true 유지 → finally 에서도 backup 을 **삭제하지 않아** 수동 복구 가능.
+    if (hasBackup) {
+      try {
+        await rename(backupPath, filePath);
+        hasBackup = false;
+      } catch (rollbackError) {
+        // eslint-disable-next-line no-console — 사용자가 backup 존재를 인지해야 복구 가능
+        console.warn(
+          `[sync-hub-mcp-settings] atomic write rollback failed for ${filePath}: ${rollbackError?.message || rollbackError}. ` +
+            `Original content preserved at: ${backupPath}`,
+        );
+      }
+    }
+    throw error;
   } finally {
+    // tmp 는 항상 정리. backup 은 성공 경로/복원 경로에서만 명시적으로 rm 한다
+    // (rollback 실패 시 hasBackup=true 상태로 남음 → 이 블록에서 절대 삭제하지 않음)
     await rm(tmpPath, { force: true }).catch(() => {});
   }
+}
+
+// #164 MEDIUM 2: TOML write 후 유효성 검증.
+// write 직전 nextRaw 가 최소 구조 (섹션 헤더 + url= 키) 를 만족하는지 확인해
+// 깨진 TOML 을 filesystem 에 반영하지 않는다.
+function validateCodexTomlPayload(raw, sectionName) {
+  if (typeof raw !== "string" || raw.length === 0) {
+    return { ok: false, reason: "empty payload" };
+  }
+  const section = findMcpServerSection(raw, sectionName);
+  if (!section) {
+    return { ok: false, reason: "missing section header" };
+  }
+  if (!/^\s*url\s*=\s*.+$/m.test(section.body)) {
+    return { ok: false, reason: "missing url key" };
+  }
+  return { ok: true };
 }
 
 async function writeJsonAtomic(filePath, value) {
@@ -261,6 +320,16 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
       );
 
       if (!dryRun) {
+        const validation = validateCodexTomlPayload(nextRaw, TFX_HUB_SECTION);
+        if (!validation.ok) {
+          const reason = `invalid toml payload: ${validation.reason}`;
+          log(
+            logger,
+            "error",
+            `[codex-mcp-sync] error: ${filePath} (${reason})`,
+          );
+          return { kind: "error", path: filePath, reason };
+        }
         try {
           await writeTextAtomic(filePath, nextRaw);
         } catch (error) {
@@ -311,6 +380,12 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
     );
 
     if (!dryRun) {
+      const validation = validateCodexTomlPayload(nextRaw, TFX_HUB_SECTION);
+      if (!validation.ok) {
+        const reason = `invalid toml payload: ${validation.reason}`;
+        log(logger, "error", `[codex-mcp-sync] error: ${filePath} (${reason})`);
+        return { kind: "error", path: filePath, reason };
+      }
       try {
         await writeTextAtomic(filePath, nextRaw);
       } catch (error) {
