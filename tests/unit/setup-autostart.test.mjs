@@ -101,23 +101,25 @@ describe("#161 P3 — /TR 262자 제한 사전 검증", () => {
     );
   });
 
-  it("한글 경로는 char count 기준이라 /TR 검증에서 throw 되지 않아야 한다 (byte 오차단 방지)", () => {
-    if (process.platform !== "win32") return;
-    // 한글 60자 ≈ UTF-8 180 bytes. char count 로 측정하면 prefix 포함해도 ≪ 261.
-    // Codex Round 1 P1: 이전 byte 기반 검증은 정상 한글 경로를 오차단했다.
+  it("한글 경로는 char count 기준이라 /TR cap 미만 (byte 오차단 방지)", () => {
+    // 실제 schtasks 호출 없이 build 함수 결과의 char/byte count 만 비교 — hermetic.
+    // Codex Round 2 P1: ensureWindowsHubAutostart 직접 호출은 host 의 실제 task 를
+    // 건드리므로 buildWindowsHubAutostartCommand 단독으로 검증한다.
     const koreanRoot = `C:\\${"한".repeat(60)}`;
-    try {
-      ensureWindowsHubAutostart({
-        nodePath: "C:\\node\\node.exe",
-        pluginRoot: koreanRoot,
-      });
-    } catch (error) {
-      assert.doesNotMatch(
-        String(error?.message || ""),
-        /schtasks \/TR 인자가.*초과합니다/,
-        "한글 경로가 char count 아닌 byte count 로 잘못 차단됨",
-      );
-    }
+    const command = buildWindowsHubAutostartCommand({
+      nodePath: "C:\\node\\node.exe",
+      pluginRoot: koreanRoot,
+    });
+    const chars = command.length;
+    const utf8Bytes = Buffer.byteLength(command, "utf8");
+    assert.ok(
+      utf8Bytes > chars,
+      `multi-byte 경로라 UTF-8 bytes(${utf8Bytes}) > chars(${chars})`,
+    );
+    assert.ok(
+      chars <= SCHTASKS_TR_MAX_LENGTH,
+      `한글 경로 char count(${chars}) 가 limit(${SCHTASKS_TR_MAX_LENGTH}) 이하 — byte 기반이면 false positive`,
+    );
   });
 
   it("SCHTASKS_TR_MAX_LENGTH 상수는 의도된 값 (261)", () => {
