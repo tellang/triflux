@@ -49,6 +49,23 @@ const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 
 const REQUIRED_CODEX_PROFILES = [
+  // gpt-5.5 — 새 main 플래그십. xhigh/high/med/low 4 tier 전부 보장.
+  {
+    name: "gpt55_xhigh",
+    lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "xhigh"'],
+  },
+  {
+    name: "gpt55_high",
+    lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "high"'],
+  },
+  {
+    name: "gpt55_med",
+    lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "medium"'],
+  },
+  {
+    name: "gpt55_low",
+    lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "low"'],
+  },
   {
     name: "codex53_high",
     lines: ['model = "gpt-5.3-codex"', 'model_reasoning_effort = "high"'],
@@ -594,7 +611,7 @@ function ensureCodexHubServerConfig({
 // Only injected when the key is completely absent — existing user values are
 // never overwritten, regardless of what value was set.
 const REQUIRED_TOP_LEVEL_SETTINGS = [
-  { key: "model", value: '"gpt-5.4"' },
+  { key: "model", value: '"gpt-5.5"' },
   { key: "model_reasoning_effort", value: '"high"' },
   { key: "service_tier", value: '"fast"' },
 ];

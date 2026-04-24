@@ -94,10 +94,10 @@ describe("REQUIRED_TOP_LEVEL_SETTINGS: 필수 top-level 설정 목록", () => {
     assert.ok(keys.includes("service_tier"), "service_tier missing");
   });
 
-  it("model 기본값은 gpt-5.4", () => {
+  it("model 기본값은 gpt-5.5", () => {
     const entry = REQUIRED_TOP_LEVEL_SETTINGS.find((s) => s.key === "model");
     assert.ok(
-      entry?.value.includes("gpt-5.4"),
+      entry?.value.includes("gpt-5.5"),
       `unexpected model default: ${entry?.value}`,
     );
   });

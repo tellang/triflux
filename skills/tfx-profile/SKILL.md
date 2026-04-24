@@ -45,7 +45,7 @@ options:
 ```
 | 프로파일 | 모델 | Effort |
 |----------|------|--------|
-| fast | gpt-5.3-codex | low |
+| gpt55_high | gpt-5.5 | high |
 | ...  | ...           | ...  |
 ```
 
@@ -75,8 +75,10 @@ options:
 2. AskUserQuestion으로 모델 선택:
    ```
    options:
-     - label: "gpt-5.4"         → 최신 플래그십
-     - label: "gpt-5.3-codex"   → 코딩 특화 (Recommended)
+     - label: "gpt-5.5"         → 최신 플래그십 (Recommended)
+     - label: "gpt-5.4"         → 이전 플래그십
+     - label: "gpt-5.4-mini"    → 경량 (mini)
+     - label: "gpt-5.3-codex"   → 코딩 특화
      - label: "gpt-5.1-codex-mini" → 경량 Spark
      - label: "o3"              → 추론 특화
      - label: "o4-mini"         → 추론 경량
@@ -183,7 +185,9 @@ options:
 
 | 모델 | 용도 |
 |------|------|
-| gpt-5.4 | 최신 플래그십 |
+| gpt-5.5 | 최신 플래그십 (default) |
+| gpt-5.4 | 이전 플래그십 |
+| gpt-5.4-mini | 경량 (mini) |
 | gpt-5.3-codex | 코딩 특화 |
 | gpt-5.1-codex-mini | 경량 Spark |
 | o3 | 추론 특화 |

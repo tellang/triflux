@@ -39,8 +39,8 @@ export const MODES = Object.freeze({
 });
 
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
-  Object.freeze({ cli: "codex", model: "gpt-5-mini" }),
-  Object.freeze({ cli: "codex", model: "gpt-5" }),
+  Object.freeze({ cli: "codex", model: "gpt-5.4-mini" }),
+  Object.freeze({ cli: "codex", model: "gpt-5.5" }),
   Object.freeze({ cli: "claude", model: "sonnet-4-6" }),
   Object.freeze({ cli: "claude", model: "opus-4-7" }),
 ]);
