@@ -12,7 +12,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
@@ -25,6 +27,34 @@ const ROUTE_SCRIPT = toBashPath(
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
+
+function createRouteHome() {
+  const home = mkdtempSync(join(tmpdir(), "tfx-route-home-"));
+  const codexDir = join(home, ".codex");
+  mkdirSync(codexDir, { recursive: true });
+  writeFileSync(
+    join(codexDir, "config.toml"),
+    [
+      "[mcp_servers.context7]",
+      'command = "node"',
+      "",
+      "[mcp_servers.brave-search]",
+      'command = "node"',
+      "",
+      "[mcp_servers.exa]",
+      'command = "node"',
+      "",
+      "[mcp_servers.tavily]",
+      'command = "node"',
+      "",
+      "[mcp_servers.playwright]",
+      'command = "node"',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return home;
+}
 
 // bash 실행 헬퍼 — stdout + stderr 합산 반환
 function runBash(command, extraEnv = {}) {
@@ -68,9 +98,12 @@ function allowedMcpServers(result) {
 }
 
 function fixtureEnv(extraEnv = {}) {
+  const home = createRouteHome();
   return {
     ...extraEnv,
     PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+    HOME: home,
+    USERPROFILE: home,
   };
 }
 

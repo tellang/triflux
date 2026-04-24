@@ -262,7 +262,7 @@ if [[ "$MCP_PROFILE" == --* ]]; then
 fi
 
 # ── CLI 경로 해석 (Windows npm global 대응) ──
-NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || echo node)}"
+NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || command -v node.exe 2>/dev/null || echo node)}"
 CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo codex)}"
 GEMINI_BIN="${GEMINI_BIN:-$(command -v gemini 2>/dev/null || echo gemini)}"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo claude)}"
@@ -278,6 +278,50 @@ GEMINI_PROFILES_PATH="${GEMINI_PROFILES_PATH:-${HOME}/.gemini/triflux-profiles.j
 # ── 상수 ──
 MAX_STDOUT_BYTES=51200  # 50KB — Claude 컨텍스트 절약
 TIMESTAMP=$(date +%s)
+TFX_PROBE_DIR="${TFX_PROBE_DIR:-${TFX_TMP}/tfx-probe}"
+mkdir -p "$TFX_PROBE_DIR" 2>/dev/null || true
+
+estimate_expected_duration_sec() {
+  local agent="${1:-}" profile="${2:-}" prompt="${3:-}"
+  local text="${prompt,,}"
+  local expected=30
+
+  case "$agent" in
+    explore|style-reviewer) expected=30 ;;
+    writer|verifier|qa-tester) expected=90 ;;
+    executor|debugger|test-engineer) expected=300 ;;
+    code-reviewer|security-reviewer|architect|planner|critic|analyst) expected=600 ;;
+    scientist|scientist-deep|deep-executor|document-specialist) expected=900 ;;
+  esac
+
+  case "$profile" in
+    minimal|default) [[ "$expected" -lt 60 ]] && expected=60 ;;
+    analyze|review|full) [[ "$expected" -lt 300 ]] && expected=300 ;;
+    implement|executor) [[ "$expected" -lt 300 ]] && expected=300 ;;
+  esac
+
+  if [[ "$text" =~ (deep|research|analy[sz]e|분석|리서치|조사|전체|전부|싹다|comprehensive) ]]; then
+    [[ "$expected" -lt 600 ]] && expected=600
+  fi
+  if [[ "$text" =~ (refactor|migration|migrate|리팩터|마이그레이션|대규모|rewrite) ]]; then
+    [[ "$expected" -lt 900 ]] && expected=900
+  fi
+  if [[ "$text" =~ (test|lint|build|npm|pnpm|pytest|검증|테스트) ]]; then
+    [[ "$expected" -lt 180 ]] && expected=180
+  fi
+  if [[ "$text" =~ (mcp|browser|playwright|context7|exa|tavily|brave) ]]; then
+    [[ "$expected" -lt 120 ]] && expected=120
+  fi
+
+  printf '%s\n' "$expected"
+}
+
+read_probe_state() {
+  local pid="$1"
+  local state_file="${TFX_PROBE_STATE_FILE:-${TFX_PROBE_DIR}/${pid}.json}"
+  [[ -f "$state_file" ]] || return 1
+  sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | head -1
+}
 RUN_ID="${TIMESTAMP}-$$-${RANDOM}"
 STDERR_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stderr.log"
 STDOUT_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stdout.log"
@@ -833,7 +877,7 @@ route_agent() {
 
   # ── CLI_TYPE: 단일 소스 (agent-map.json) ──
   local _raw_type
-  _raw_type=$(node -e "
+  _raw_type=$("$NODE_BIN" -e "
     const p=require('path').resolve(process.argv[1]);
     const m=JSON.parse(require('fs').readFileSync(p,'utf8'));
     const t=m[process.argv[2]];
@@ -842,7 +886,7 @@ route_agent() {
 
   if [[ -z "$_raw_type" ]]; then
     echo "ERROR: 알 수 없는 에이전트 타입: $agent" >&2
-    echo "사용 가능: $(node -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync(require('path').resolve(process.argv[1]),'utf8'))).join(', '))" "$map_file" 2>/dev/null)" >&2
+    echo "사용 가능: $("$NODE_BIN" -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync(require('path').resolve(process.argv[1]),'utf8'))).join(', '))" "$map_file" 2>/dev/null)" >&2
     exit 1
   fi
 
@@ -1299,7 +1343,9 @@ heartbeat_monitor() {
   [[ "${TFX_HEARTBEAT:-1}" -eq 0 ]] && return 0
   local pid="$1"
   local interval="${2:-${TFX_HEARTBEAT_INTERVAL:-10}}"
-  local stall_threshold="${3:-${TFX_STALL_THRESHOLD:-60}}"
+  # 땜빵(PLANNING P4 구현 전): 60 → 300. MCP init/재시도 여유 + false STALL 감소.
+  local stall_threshold="${3:-${TFX_STALL_THRESHOLD:-300}}"
+  local expected_duration="${TFX_EXPECTED_DURATION_SEC:-}"
   local last_size=0 stall_count=0
   local pid_gone=false
   local post_exit_checks=0
@@ -1330,18 +1376,27 @@ heartbeat_monitor() {
     [[ -f "$STDERR_LOG" ]] && stderr_size=$(wc -c < "$STDERR_LOG" 2>/dev/null || echo 0)
     current_size=$((current_size + stderr_size))
     local elapsed=$(($(date +%s) - TIMESTAMP))
+    local expected_suffix=""
+    if [[ -n "$expected_duration" && "$expected_duration" =~ ^[0-9]+$ && "$expected_duration" -gt 0 ]]; then
+      expected_suffix=" expected=${expected_duration}s"
+      if [[ "$elapsed" -gt $((expected_duration * 2)) ]]; then
+        expected_suffix="${expected_suffix} anomaly=slow"
+      fi
+    fi
 
     if [[ "$current_size" -gt "$last_size" ]]; then
       stall_count=0
       if [[ "$pid_gone" == "true" ]]; then
         local _fi="forked"; [[ -n "$last_known_forks" ]] && _fi="forks:${last_known_forks// /,}"
-        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=active(${_fi})" >&2
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=active(${_fi})" >&2
         post_exit_checks=0  # reset — still producing output
       else
-        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=active" >&2
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=active" >&2
       fi
     else
       stall_count=$((stall_count + interval))
+      local probe_state=""
+      probe_state="$(read_probe_state "$pid" 2>/dev/null || true)"
       if [[ "$pid_gone" == "true" ]]; then
         if [[ -n "$last_known_forks" ]]; then
           # Direct fork tracking — terminate when all forks are dead
@@ -1350,26 +1405,30 @@ heartbeat_monitor() {
             kill -0 "$_fp" 2>/dev/null && _alive=true && break
           done
           if [[ "$_alive" == "false" ]]; then
-            echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=terminated(forks-exited)" >&2
+            echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=terminated(forks-exited)" >&2
             break
           fi
-          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=fork-idle(${last_known_forks// /,})" >&2
+          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=fork-idle(${last_known_forks// /,})" >&2
         else
           # Fallback: output-based drain (no fork PIDs found)
           post_exit_checks=$((post_exit_checks + 1))
           if [[ "$post_exit_checks" -ge "$max_post_exit_checks" ]]; then
-            echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=terminated(drain-done)" >&2
+            echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=terminated(drain-done)" >&2
             break
           fi
-          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=draining(${post_exit_checks}/${max_post_exit_checks})" >&2
+          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=draining(${post_exit_checks}/${max_post_exit_checks})" >&2
         fi
+      elif [[ "$probe_state" =~ ^(mcp_initializing|input_wait)$ ]]; then
+        stall_count=0
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=${probe_state}(probe-grace)" >&2
       elif [[ "$stall_count" -ge "$stall_threshold" ]]; then
         # STALL kill (#144/#66 regression guard): stall=threshold+grace 이상 지속 시 SIGTERM→SIGKILL.
-        # 기본 활성화. TFX_STALL_KILL=0 으로 opt-out. grace=30s (기본) 은 SSE/MCP 정상 handshake 여유.
-        local kill_on_stall="${TFX_STALL_KILL:-1}"
+        # 땜빵(PLANNING P4 구현 전): default 1 → 0. false kill >> true stuck 비용이 압도적이라
+        # opt-in 으로 전환. debug 필요 시 TFX_STALL_KILL=1 로 명시 활성화. classify mode는 차기.
+        local kill_on_stall="${TFX_STALL_KILL:-0}"
         local kill_grace="${TFX_STALL_KILL_GRACE:-30}"
         if [[ "$kill_on_stall" -eq 1 && "$stall_count" -ge $((stall_threshold + kill_grace)) ]]; then
-          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=STALL_KILL stall=${stall_count}s — SIGTERM" >&2
+          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL_KILL stall=${stall_count}s — SIGTERM" >&2
           # Snapshot child PIDs before SIGTERM — wrapper 가 SIGTERM 을 수용해 죽으면
           # 부모 소멸 후 taskkill /T 가 자식 트리를 탐색하지 못해 codex 자식이 orphan 으로 남는다.
           # 사용자 보고(2026-04-22): "tfx-route 래퍼 exit 이후에도 Codex 자식이 살아있음".
@@ -1417,9 +1476,9 @@ heartbeat_monitor() {
           fi
           break
         fi
-        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=STALL stall=${stall_count}s" >&2
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL stall=${stall_count}s" >&2
       else
-        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B status=quiet stall=${stall_count}s" >&2
+        echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=quiet stall=${stall_count}s" >&2
       fi
     fi
     last_size=$current_size
@@ -1922,6 +1981,9 @@ main() {
     TIMEOUT_SEC="$DEFAULT_TIMEOUT"
   fi
 
+  TFX_EXPECTED_DURATION_SEC="${TFX_EXPECTED_DURATION_SEC:-$(estimate_expected_duration_sec "$AGENT_TYPE" "$MCP_PROFILE" "$PROMPT")}"
+  export TFX_EXPECTED_DURATION_SEC
+
   # 컨텍스트 파일 → 프롬프트에 주입
   if [[ -n "$CONTEXT_FILE" && -f "$CONTEXT_FILE" ]]; then
     local ctx_content
@@ -2055,6 +2117,11 @@ FALLBACK_EOF
         # MCP 실패 → exec fallback. run_codex_exec는 < /dev/null 로 stdin 블록 회피 (line 1639).
         # 정책: codex/gemini 강건성 — MCP 가용 시 MCP, 실패 시 그래도 워커 자체는 굴러간다.
         echo "[tfx-route] Codex MCP 실패(exit=${exit_code}). exec fallback 시도." >&2
+        local _sd
+        _sd="$(_get_script_dir)"
+        if [[ -f "$_sd/hub-ensure.mjs" ]]; then
+          "$NODE_BIN" "$_sd/hub-ensure.mjs" >/dev/null 2>&1 || true
+        fi
         exit_code=0
         run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
         codex_transport_effective="exec-fallback"

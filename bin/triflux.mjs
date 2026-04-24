@@ -65,6 +65,7 @@ import {
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
   ensureHooksInSettings,
+  getWindowsHubAutostartStatus,
   extractManagedHookFilename,
   getManagedRegistryHooks,
   getVersion,
@@ -74,6 +75,7 @@ import {
   replaceProfileSection,
   SKILL_ALIASES,
   SYNC_MAP,
+  buildWindowsHubAutostartCommand,
   syncAliasedSkillDir,
 } from "../scripts/setup.mjs";
 import { cleanupTmpFiles } from "../scripts/tmp-cleanup.mjs";
@@ -123,13 +125,19 @@ const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
 
 const CLI_COMMAND_SCHEMAS = Object.freeze({
   setup: {
-    usage: "tfx setup [--dry-run]",
+    usage: "tfx setup [--dry-run] [--enable-hub-autostart]",
     description: "파일 동기화 + HUD/MCP 설정",
     options: [
       {
         name: "--dry-run",
         type: "boolean",
         description: "실제 변경 없이 예정 작업을 JSON으로 출력",
+      },
+      {
+        name: "--enable-hub-autostart",
+        type: "boolean",
+        description:
+          "Windows 로그인 시 tfx-hub를 보장하는 Task Scheduler 항목 등록",
       },
     ],
   },
@@ -1115,6 +1123,17 @@ function buildSetupDryRunPlan() {
   const defaultHubUrl = `http://127.0.0.1:${process.env.TFX_HUB_PORT || "27888"}/mcp`;
   actions.push(...previewMcpRegistrationActions(defaultHubUrl));
   actions.push(previewStatusLineAction());
+  const autostart = getWindowsHubAutostartStatus();
+  actions.push({
+    type: "hub-autostart",
+    platform: process.platform,
+    taskName: autostart.taskName,
+    change:
+      autostart.supported && !autostart.registered ? "available" : "noop",
+    registered: autostart.registered,
+    command: autostart.supported ? buildWindowsHubAutostartCommand() : null,
+    enableWith: "tfx setup --enable-hub-autostart",
+  });
 
   return {
     dry_run: true,
@@ -1123,7 +1142,12 @@ function buildSetupDryRunPlan() {
 }
 
 function cmdSetup(options = {}) {
-  const { dryRun = false, overrideVersion, skipClaudeMdSync = false } = options;
+  const {
+    dryRun = false,
+    overrideVersion,
+    skipClaudeMdSync = false,
+    enableHubAutostart = false,
+  } = options;
   if (dryRun) {
     printJson(buildSetupDryRunPlan());
     return;
@@ -1349,6 +1373,63 @@ function cmdSetup(options = {}) {
     autoRegisterMcp(defaultHubUrl, { codexEnabled: false });
     summary.push({ item: "Hub MCP", status: "✅", detail: "등록됨" });
     console.log("");
+  }
+
+  if (process.platform === "win32") {
+    const status = getWindowsHubAutostartStatus();
+    if (enableHubAutostart) {
+      try {
+        const script = join(PKG_ROOT, "scripts", "setup.mjs");
+        execFileSync(
+          process.execPath,
+          [script, "--enable-hub-autostart", "--sync"],
+          {
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 10000,
+            windowsHide: true,
+          },
+        );
+        // subprocess silent-catch 회귀 가드: schtasks /Query 로 실제 등록 재검증.
+        const verified = getWindowsHubAutostartStatus();
+        if (verified.registered) {
+          ok(`Hub autostart: ${verified.taskName} 등록됨`);
+          summary.push({
+            item: "Hub autostart",
+            status: "✅",
+            detail: `${verified.taskName} 등록됨`,
+          });
+        } else {
+          warn("Hub autostart 등록 실패: subprocess 성공했으나 /Query 에서 미발견");
+          summary.push({
+            item: "Hub autostart",
+            status: "⚠️",
+            detail: "등록 실패 (subprocess silent catch 의심)",
+          });
+        }
+      } catch (error) {
+        warn(`Hub autostart 등록 실패: ${renderErrorMessage(error.message)}`);
+        summary.push({
+          item: "Hub autostart",
+          status: "⚠️",
+          detail: "등록 실패",
+        });
+      }
+    } else if (status.registered) {
+      ok(`Hub autostart: ${status.taskName} 이미 등록됨`);
+      summary.push({
+        item: "Hub autostart",
+        status: "✅",
+        detail: "이미 등록됨",
+      });
+    } else {
+      warn("Hub autostart 미등록 — Codex 단독 시작 전 hub가 죽어 있으면 MCP가 실패할 수 있음");
+      info("등록: tfx setup --enable-hub-autostart");
+      summary.push({
+        item: "Hub autostart",
+        status: "⏭️",
+        detail: "미등록",
+      });
+    }
   }
 
   // HUD statusLine 설정
@@ -5579,7 +5660,10 @@ async function main() {
 
   switch (cmd) {
     case "setup":
-      cmdSetup({ dryRun: cmdArgs.includes("--dry-run") });
+      cmdSetup({
+        dryRun: cmdArgs.includes("--dry-run"),
+        enableHubAutostart: cmdArgs.includes("--enable-hub-autostart"),
+      });
       return;
     case "doctor": {
       if (cmdArgs.includes("--audit")) {

@@ -2,6 +2,10 @@
 // 기존 cli-adapter-base.mjs:stallThresholdMs(30s)와 headless.mjs:STALL_DEFAULTS(120s)를
 // 4단계 probe 모델로 교체. stdout+stderr 통합 스트림으로 평가 (F3 해결).
 
+import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
 /**
  * Health probe level 정의.
  * L0: Process alive (PID 존재 + exit code 없음)
@@ -25,6 +29,8 @@ export const PROBE_DEFAULTS = Object.freeze({
   l2ThresholdMs: 30_000,
   l3ThresholdMs: 120_000,
   enableL2: false,
+  writeStateFile: false,
+  stateDir: join(tmpdir(), "tfx-probe"),
 });
 
 /**
@@ -95,6 +101,49 @@ export function createHealthProbe(session, opts = {}) {
     lastProbeAt: null,
     inputWaitPattern: null,
   };
+
+  function getStateFilePath() {
+    if (typeof config.stateFile === "string" && config.stateFile.length > 0) {
+      return config.stateFile;
+    }
+    const pid = session.pid;
+    if (pid == null || pid <= 0) return null;
+    return join(config.stateDir, `${pid}.json`);
+  }
+
+  function deriveState(result) {
+    if (result.l0 === "fail") return "exited";
+    if (result.l1 === "input_wait") return "input_wait";
+    if (result.l2 === "fail") return "mcp_initializing";
+    if (result.l1 === "stall") return "stalled";
+    if (result.l3 === "timeout") return "reasoning";
+    return "active";
+  }
+
+  function writeState(result) {
+    if (!config.writeStateFile && !config.stateFile) return;
+    const stateFile = getStateFilePath();
+    if (!stateFile) return;
+    try {
+      mkdirSync(dirname(stateFile), { recursive: true });
+      writeFileSync(
+        stateFile,
+        JSON.stringify(
+          {
+            pid: session.pid ?? null,
+            state: deriveState(result),
+            result,
+            updatedAt: new Date(result.ts).toISOString(),
+          },
+          null,
+          2,
+        ) + "\n",
+        "utf8",
+      );
+    } catch {
+      // probe state is advisory only.
+    }
+  }
 
   /**
    * L0: Process alive check.
@@ -227,6 +276,7 @@ export function createHealthProbe(session, opts = {}) {
       ts: Date.now(),
     };
     status.lastProbeAt = result.ts;
+    writeState(result);
 
     if (typeof config.onProbe === "function") {
       config.onProbe(result);
@@ -258,6 +308,12 @@ export function createHealthProbe(session, opts = {}) {
     if (timer) {
       clearInterval(timer);
       timer = null;
+    }
+    if (config.writeStateFile || config.stateFile) {
+      try {
+        const stateFile = getStateFilePath();
+        if (stateFile) unlinkSync(stateFile);
+      } catch {}
     }
   }
 
