@@ -4,6 +4,16 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.14.1] - 2026-04-25
+
+### Fixed
+
+- **`fix(tfx-route)` (#170, #171)** MCP graceful degradation default — all-dead 시 stall 방지 (208ca66) — `TFX_MCP_ALLOW_ALL_DEAD=1` 가 preflight check 만 우회 → swap 은 fail-safe 로 스킵 → CODEX_CONFIG_FLAGS 클리어 후에도 transport=auto 분기는 `run_codex_mcp` 호출 → codex-mcp.mjs worker 가 dead MCP (context7/brave-search) 와 connect 시도 → quiet stall 250s+ → STALL_KILL 회귀. **Fix**: `_mcp_preflight_filter_dead` default 동작을 early-fail (#148, rc=78) → graceful degradation (rc=0 + `_TFX_MCP_DEGRADED=1` export) 로 전환. 옛 동작은 `TFX_MCP_FAIL_ON_ALL_DEAD=1` 명시 opt-in 으로만 활성. `TFX_MCP_ALLOW_ALL_DEAD=1` 호환 alias 유지. `run_codex_mcp` 분기에서 `_TFX_MCP_DEGRADED=1` 보면 `TFX_CODEX_TRANSPORT="exec"` 강제 (transport=mcp 명시 시 warning) + `FULL_PROMPT="$PROMPT"` 로 MCP_HINT 제거. 추가 P1 fix: `remaining_alive` 카운트 정규식 `[^.]+` → `.+` 로 dotted alive 서버도 카운트 (PR #171 Codex 교차 리뷰 finding 반영). 사용자 요구 ("MCP 있으면 쓰고 없으면 알아서") 와 일치하는 default 동작.
+
+### Tests
+
+- **+9** `tests/unit/tfx-route-preflight-all-dead.test.mjs` — graceful default rc=0 + `TFX_MCP_FAIL_ON_ALL_DEAD=1` opt-in + `TFX_MCP_ALLOW_ALL_DEAD=1` legacy alias + dotted server graceful + dotted alive survivor (P1-1 회귀 가드) + degraded transport=mcp 강제 (P1-2 회귀 가드) + source 분기 회귀 가드 + mirror byte-identical. 20/20 pass. `tfx-route-args/config-swap/stall-kill` 32/32 pass — 회귀 없음.
+
 ## [10.14.0] - 2026-04-24
 
 ### Added

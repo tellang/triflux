@@ -1056,6 +1056,7 @@ function ensureCriticalSetup() {
 
 export {
   BREADCRUMB_PATH,
+  buildWindowsHubAutostartCommand,
   CLAUDE_DIR,
   cleanupStaleSkills,
   DEPRECATED_SKILLS,
@@ -1078,10 +1079,9 @@ export {
   SETUP_MARKER_PATH,
   SKILL_ALIASES,
   SYNC_MAP,
-  WINDOWS_HUB_AUTOSTART_TASK,
-  buildWindowsHubAutostartCommand,
   scanHudFiles,
   syncAliasedSkillDir,
+  WINDOWS_HUB_AUTOSTART_TASK,
   writeMarker,
 };
 
@@ -1757,9 +1757,7 @@ export async function runDeferred(stdinData) {
     try {
       const result = ensureWindowsHubAutostart();
       if (result.registered) {
-        io.log(
-          `  \x1b[32m✓\x1b[0m Windows hub autostart: ${result.taskName}`,
-        );
+        io.log(`  \x1b[32m✓\x1b[0m Windows hub autostart: ${result.taskName}`);
         synced++;
       }
     } catch (error) {
