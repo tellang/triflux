@@ -408,3 +408,75 @@ describe("#170 transport degradation marker — source 분기 회귀 가드", ()
     assert.equal(main, mirror, "mirror drift — patch 가 한쪽에만 적용됨");
   });
 });
+
+// PR #171 review P1-1: dotted MCP alive 카운트 회귀 가드.
+// remaining_alive 정규식이 [^.]+ 면 dotted alive 만 남은 경우 false all-dead 판정.
+describe("#170 P1-1 dotted alive survivor — false degraded 방지", () => {
+  const cleanupDirs = [];
+  after(() => {
+    for (const d of cleanupDirs) {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("dead 1개 + dotted alive 1개 → rc=0 정상 통과 (degraded 아님)", () => {
+    // dotted alive 가 카운트 안 되면 remaining_alive=0 → degraded 로 빠짐.
+    // 정상 동작: dotted alive 도 +1 → remaining_alive>=1 → degraded marker 미설정.
+    const result = runPreflight({
+      flags: [
+        "-c",
+        "mcp_servers.dead1.enabled=true",
+        "-c",
+        "mcp_servers.foo.bar.enabled=true",
+      ],
+      deadList: "dead1",
+    });
+    cleanupDirs.push(result.dir);
+    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
+    assert.doesNotMatch(
+      result.stderr,
+      /graceful degradation/,
+      "dotted alive 1개 있는데도 degraded 로 빠짐 — 정규식 회귀",
+    );
+    // dotted alive flag 보존 + dead flag 제거 검증
+    assert.deepEqual(result.remainingFlags, [
+      "-c",
+      "mcp_servers.foo.bar.enabled=true",
+    ]);
+  });
+
+  it("source 의 remaining_alive 정규식이 dotted 허용 (`.+` 사용)", () => {
+    const source = readFileSync(SCRIPT_PATH, "utf8");
+    // [^.]+ 패턴이 remaining_alive 분기에 다시 나타나면 회귀
+    const remainingAliveBlock = source.match(
+      /remaining_alive=0[\s\S]{0,400}?for rflag/,
+    );
+    assert.ok(remainingAliveBlock, "remaining_alive 블록을 찾을 수 없음");
+    // 같은 분기 내 정규식 추출
+    const regexMatch = source.match(
+      /remaining_alive=\$\(\(remaining_alive[\s\S]{0,200}?fi\s+done/,
+    );
+    assert.ok(
+      !/\[\^\.\]\+/.test(regexMatch?.[0] || ""),
+      "remaining_alive 정규식이 [^.]+ 로 회귀 (dotted alive 카운트 누락 위험)",
+    );
+  });
+});
+
+// PR #171 review P1-2: degraded 시 user 명시 transport=mcp 도 exec 강제.
+describe("#170 P1-2 degraded transport mcp 강제 회귀 가드", () => {
+  it("source 분기가 transport=auto 외 mcp 도 exec 강제 (warning 포함)", () => {
+    const source = readFileSync(SCRIPT_PATH, "utf8");
+    // 옛 패턴: && "$TFX_CODEX_TRANSPORT" == "auto" — 회귀 시 P1-2 재발
+    assert.doesNotMatch(
+      source,
+      /_TFX_MCP_DEGRADED:-0.*?== "1"\s*&&\s*"\$TFX_CODEX_TRANSPORT"\s*==\s*"auto"/s,
+      "_TFX_MCP_DEGRADED 분기가 transport=auto 만 대상으로 회귀 — user 명시 mcp 시 stall 재발",
+    );
+    assert.match(
+      source,
+      /TFX_CODEX_TRANSPORT=mcp.*all-MCP-dead.*exec 강제/,
+      "transport=mcp + degraded 경고 메시지가 사라짐",
+    );
+  });
+});

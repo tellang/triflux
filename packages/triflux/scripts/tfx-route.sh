@@ -1649,7 +1649,10 @@ _mcp_preflight_filter_dead() {
   local remaining_alive=0
   local rflag
   for rflag in "${CODEX_CONFIG_FLAGS[@]}"; do
-    if [[ "$rflag" =~ ^mcp_servers\.[^.]+\.enabled=true$ ]]; then
+    # #153 + #170 P1: candidate 추출 정규식 (line 1607) 과 일관 — dotted server 이름
+    # (e.g. mcp_servers.foo.bar.enabled=true) 도 alive 로 카운트한다. `[^.]+` 는 첫 dot
+    # 에서 끊겨 dotted alive 만 남은 경우 false all-dead 판정 → 불필요 degraded.
+    if [[ "$rflag" =~ ^mcp_servers\..+\.enabled=true$ ]]; then
       remaining_alive=$((remaining_alive + 1))
     fi
   done
@@ -2111,11 +2114,16 @@ FALLBACK_EOF
     # swap 후 config override 플래그 클리어 — 제거된 서버에 override 보내면 "invalid transport" 에러
     CODEX_CONFIG_FLAGS=()
     CODEX_CONFIG_JSON="{}"
-    # #170 graceful degradation: MCP 전부 dead 면 transport=auto 라도 exec 강제.
+    # #170 graceful degradation: MCP 전부 dead 면 transport 무관 exec 강제.
     # _mcp_preflight_filter_dead 가 _TFX_MCP_DEGRADED=1 를 export 했으면 이미 stall 보장 안 됨.
+    # 사용자가 TFX_CODEX_TRANSPORT=mcp 명시했더라도 dead MCP 와 connect 시도 = stall →
+    # warning + exec 강제 (transport 명시는 사용자 의도지만 stall 회피가 우선).
     # MCP_HINT (e.g. "context7으로 조회하세요") 도 prompt 에서 제거 — degraded 환경에서
     # 모델이 사용 불가 도구를 시도하면 stall/실패 trigger.
-    if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
+    if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
+      if [[ "$TFX_CODEX_TRANSPORT" == "mcp" ]]; then
+        echo "[tfx-route] WARNING: TFX_CODEX_TRANSPORT=mcp + all-MCP-dead → exec 강제 (stall 회피)" >&2
+      fi
       TFX_CODEX_TRANSPORT="exec"
       FULL_PROMPT="$PROMPT"
     fi
