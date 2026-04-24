@@ -25,7 +25,7 @@ function getCodexConfigPath(codexConfigPath) {
   return join(home, ...CODEX_CONFIG_FILE);
 }
 
-function getProjectMcpJsonPaths(projectRoot) {
+export function getProjectMcpJsonPaths(projectRoot) {
   const root =
     typeof projectRoot === "string" && projectRoot.length > 0
       ? projectRoot
