@@ -1640,26 +1640,32 @@ _mcp_preflight_filter_dead() {
   CODEX_CONFIG_FLAGS=("${new_flags[@]}")
   echo "[tfx-route] MCP preflight: ${#dead_names[@]}개 dead MCP 제외 (${dead_list})" >&2
 
-  # #148: profile-allowed 전부 dead 인 all-dead 엣지케이스 조기 실패.
-  # 빈 allowed_pat 은 _codex_config_swap fail-safe (#132) 에 의해 원본 config
-  # 전체를 유지 → 비필요 MCP 까지 전부 spawn → 역효과.
-  # TFX_MCP_ALLOW_ALL_DEAD=1 로 명시적 opt-in 시 MCP 없이 진행 (degraded).
+  # #170 graceful degradation (회귀 fix):
+  # all-dead 시 default 는 exec mode 자동 fallback. TFX_MCP_FAIL_ON_ALL_DEAD=1 로
+  # 명시 opt-in 시만 #148 기존 동작 (early fail). TFX_MCP_ALLOW_ALL_DEAD=1 은 호환성
+  # 유지 (alias for graceful default). 단 transport 가 auto 인 채로 run_codex_mcp 를
+  # 호출하면 dead MCP 와 connect 시도 → stall → 본 fix 의 _TFX_MCP_DEGRADED=1 marker
+  # 가 호출자 에서 transport=exec 강제 + MCP_HINT 자동 주입 skip 을 유발한다.
   local remaining_alive=0
   local rflag
   for rflag in "${CODEX_CONFIG_FLAGS[@]}"; do
-    if [[ "$rflag" =~ ^mcp_servers\.[^.]+\.enabled=true$ ]]; then
+    # #153 + #170 P1: candidate 추출 정규식 (line 1607) 과 일관 — dotted server 이름
+    # (e.g. mcp_servers.foo.bar.enabled=true) 도 alive 로 카운트한다. `[^.]+` 는 첫 dot
+    # 에서 끊겨 dotted alive 만 남은 경우 false all-dead 판정 → 불필요 degraded.
+    if [[ "$rflag" =~ ^mcp_servers\..+\.enabled=true$ ]]; then
       remaining_alive=$((remaining_alive + 1))
     fi
   done
 
   if [[ "$remaining_alive" -eq 0 ]]; then
-    if [[ "${TFX_MCP_ALLOW_ALL_DEAD:-0}" == "1" ]]; then
-      echo "[tfx-route] TFX_MCP_ALLOW_ALL_DEAD=1 — MCP 없이 계속 진행 (degraded)" >&2
-      return 0
+    if [[ "${TFX_MCP_FAIL_ON_ALL_DEAD:-0}" == "1" ]]; then
+      echo "[tfx-route] 조기 실패: TFX_MCP_FAIL_ON_ALL_DEAD=1 + MCP 전부 dead — Codex 호출 중단" >&2
+      echo "  복구: (1) dead MCP 복구 (2) TFX_MCP_HEALTH_CHECK=0 preflight 비활성 (3) TFX_MCP_FAIL_ON_ALL_DEAD=0 graceful degradation" >&2
+      return 78
     fi
-    echo "[tfx-route] 조기 실패: profile 에서 허용한 MCP 전부 dead — Codex 호출 중단" >&2
-    echo "  복구: (1) dead MCP 복구 (2) TFX_MCP_HEALTH_CHECK=0 preflight 비활성 (3) TFX_MCP_ALLOW_ALL_DEAD=1 MCP 없이 진행" >&2
-    return 78
+    export _TFX_MCP_DEGRADED=1
+    echo "[tfx-route] graceful degradation: MCP 전부 dead → exec mode 자동 전환 (set TFX_MCP_FAIL_ON_ALL_DEAD=1 to revert to early-fail)" >&2
+    return 0
   fi
 }
 
@@ -2108,6 +2114,19 @@ FALLBACK_EOF
     # swap 후 config override 플래그 클리어 — 제거된 서버에 override 보내면 "invalid transport" 에러
     CODEX_CONFIG_FLAGS=()
     CODEX_CONFIG_JSON="{}"
+    # #170 graceful degradation: MCP 전부 dead 면 transport 무관 exec 강제.
+    # _mcp_preflight_filter_dead 가 _TFX_MCP_DEGRADED=1 를 export 했으면 이미 stall 보장 안 됨.
+    # 사용자가 TFX_CODEX_TRANSPORT=mcp 명시했더라도 dead MCP 와 connect 시도 = stall →
+    # warning + exec 강제 (transport 명시는 사용자 의도지만 stall 회피가 우선).
+    # MCP_HINT (e.g. "context7으로 조회하세요") 도 prompt 에서 제거 — degraded 환경에서
+    # 모델이 사용 불가 도구를 시도하면 stall/실패 trigger.
+    if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
+      if [[ "$TFX_CODEX_TRANSPORT" == "mcp" ]]; then
+        echo "[tfx-route] WARNING: TFX_CODEX_TRANSPORT=mcp + all-MCP-dead → exec 강제 (stall 회피)" >&2
+      fi
+      TFX_CODEX_TRANSPORT="exec"
+      FULL_PROMPT="$PROMPT"
+    fi
     codex_transport_effective="exec"
     if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
       run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
