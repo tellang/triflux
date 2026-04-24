@@ -28,7 +28,10 @@ export const PROBE_DEFAULTS = Object.freeze({
   l1ThresholdMs: 30_000,
   l2ThresholdMs: 30_000,
   l3ThresholdMs: 120_000,
-  enableL2: false,
+  // #168 P3: default off → on. checkMcp 미주입 시에도 probeL2 가 skip 반환하므로
+  // safe. conductor wiring 이 checkMcp 를 주입하면 실제 L2 판정이 활성화된다.
+  // opt-out: TFX_PROBE_L2=0 (conductor 에서 false 주입).
+  enableL2: true,
   writeStateFile: false,
   stateDir: join(tmpdir(), "tfx-probe"),
 });

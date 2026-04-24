@@ -22,6 +22,7 @@ import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
 import { execFile, spawn } from "../lib/spawn-trace.mjs";
 import { killProcess } from "../platform.mjs";
+import { createHubHealthChecker } from "./check-mcp-hub.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
 import {
   ensureConductorRegistry,
@@ -700,6 +701,16 @@ export function createConductor(opts = {}) {
         // opt-out: TFX_PROBE_WRITE_STATE=0 명시.
         writeStateFile:
           probeOpts.writeStateFile ?? process.env.TFX_PROBE_WRITE_STATE !== "0",
+        // #168 P3: L2 (hub /health) checker wiring. probeOpts 가 명시 주입하면
+        // 그걸 우선. 아니면 TFX_PROBE_L2=0 로 opt-out. 나머지 경우 hub URL 기반
+        // default checker 주입 → deriveState 가 `mcp_initializing` 라벨을 생산 →
+        // heartbeat (read_probe_state) 가 probe-grace 분기로 감.
+        enableL2: probeOpts.enableL2 ?? process.env.TFX_PROBE_L2 !== "0",
+        checkMcp:
+          probeOpts.checkMcp ||
+          (process.env.TFX_PROBE_L2 === "0"
+            ? undefined
+            : createHubHealthChecker({ hubUrl: process.env.TFX_HUB_URL })),
         onProbe: (result) => handleProbeResult(session, result),
       },
     );
