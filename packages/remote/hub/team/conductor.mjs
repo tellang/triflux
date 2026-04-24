@@ -19,9 +19,9 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRegistry } from "../../mesh/mesh-registry.mjs";
-import { broker } from "@triflux/core/hub/account-broker.mjs";
-import { execFile, spawn } from "@triflux/core/hub/lib/spawn-trace.mjs";
-import { killProcess } from "@triflux/core/hub/platform.mjs";
+import { broker } from "../account-broker.mjs";
+import { execFile, spawn } from "../lib/spawn-trace.mjs";
+import { killProcess } from "../platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
 import {
   ensureConductorRegistry,
@@ -696,8 +696,10 @@ export function createConductor(opts = {}) {
       },
       {
         ...probeOpts,
+        // #165: default off → on. atomic write (#162) 로 race 제거됨.
+        // opt-out: TFX_PROBE_WRITE_STATE=0 명시.
         writeStateFile:
-          probeOpts.writeStateFile ?? process.env.TFX_PROBE_WRITE_STATE === "1",
+          probeOpts.writeStateFile ?? process.env.TFX_PROBE_WRITE_STATE !== "0",
         onProbe: (result) => handleProbeResult(session, result),
       },
     );

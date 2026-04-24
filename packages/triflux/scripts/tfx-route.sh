@@ -1428,12 +1428,25 @@ heartbeat_monitor() {
         stall_count=0
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=${probe_state}(probe-grace)" >&2
       elif [[ "$stall_count" -ge "$stall_threshold" ]]; then
-        # STALL kill (#144/#66 regression guard): stall=threshold+grace 이상 지속 시 SIGTERM→SIGKILL.
-        # 땜빵(PLANNING P4 구현 전): default 1 → 0. false kill >> true stuck 비용이 압도적이라
-        # opt-in 으로 전환. debug 필요 시 TFX_STALL_KILL=1 로 명시 활성화. classify mode는 차기.
-        local kill_on_stall="${TFX_STALL_KILL:-0}"
+        # STALL 판정 modes (#165 PLANNING P4):
+        #   off  (alias: 0, disabled)  — silent. kill 안 함, STALL_CLASSIFY 로그도 없음
+        #   classify (default)          — kill 안 함. STALL_CLASSIFY 로그로 evidence 노출
+        #   kill (alias: 1, on)         — threshold+grace 초과 시 SIGTERM→SIGKILL
+        # PR #160 에서 default 1 → 0 으로 임시 후퇴 (false kill 방지). 본 PR(#165) 에서
+        # classify 로 승격 — evidence 는 남기되 false kill 리스크 없음.
+        local kill_on_stall="${TFX_STALL_KILL:-classify}"
+        [[ -z "$kill_on_stall" ]] && kill_on_stall="classify"
         local kill_grace="${TFX_STALL_KILL_GRACE:-30}"
-        if [[ "$kill_on_stall" -eq 1 && "$stall_count" -ge $((stall_threshold + kill_grace)) ]]; then
+        local _should_kill=0
+        case "$kill_on_stall" in
+          1|on|kill) _should_kill=1 ;;
+          classify|0|off|disabled) ;;
+          *)
+            echo "[tfx-heartbeat] pid=$pid warning TFX_STALL_KILL=$kill_on_stall unknown, fallback classify" >&2
+            kill_on_stall="classify"
+            ;;
+        esac
+        if [[ "$_should_kill" -eq 1 && "$stall_count" -ge $((stall_threshold + kill_grace)) ]]; then
           echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL_KILL stall=${stall_count}s — SIGTERM" >&2
           # Snapshot child PIDs before SIGTERM — wrapper 가 SIGTERM 을 수용해 죽으면
           # 부모 소멸 후 taskkill /T 가 자식 트리를 탐색하지 못해 codex 자식이 orphan 으로 남는다.
@@ -1481,6 +1494,9 @@ heartbeat_monitor() {
             fi
           fi
           break
+        fi
+        if [[ "$kill_on_stall" == "classify" && "$stall_count" -ge $((stall_threshold + kill_grace)) ]]; then
+          echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL_CLASSIFY stall=${stall_count}s (no-kill — TFX_STALL_KILL=classify)" >&2
         fi
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL stall=${stall_count}s" >&2
       else
