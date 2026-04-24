@@ -38,7 +38,9 @@ const CODEX_DIR = join(homedir(), ".codex");
 const CONFIG_PATH = join(CODEX_DIR, "config.toml");
 
 const KNOWN_MODELS = [
-  { label: "gpt-5.4", hint: "최신 플래그십" },
+  { label: "gpt-5.5", hint: "최신 플래그십" },
+  { label: "gpt-5.4", hint: "이전 플래그십" },
+  { label: "gpt-5.4-mini", hint: "경량 (mini)" },
   { label: "gpt-5.3-codex", hint: "코딩 특화" },
   { label: "gpt-5.1-codex-mini", hint: "경량 Spark" },
   { label: "o3", hint: "추론 특화" },

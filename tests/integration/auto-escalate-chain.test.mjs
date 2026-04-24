@@ -6,8 +6,9 @@
 // "escalation-chain-exhausted" 이유와 함께 종료한다. 매 bridge 호출은
 // 독립 프로세스이므로 snapshot 을 통한 state 복원 확인.
 //
-// Open question 임시 합의 #1: DEFAULT_ESCALATION_CHAIN 은 Codex:gpt-5-mini
-// 로 시작. 이 테스트는 custom chain 으로 빠른 검증.
+// Open question 임시 합의 #1: DEFAULT_ESCALATION_CHAIN 은 Codex:gpt-5.4-mini
+// → Codex:gpt-5.5 → claude:sonnet → claude:opus. 이 테스트는 custom chain
+// 으로 빠른 검증 (모델 이름 변경에 비의존적).
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

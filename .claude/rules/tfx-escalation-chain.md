@@ -9,8 +9,8 @@
 
 | # | CLI | 모델 | 이유 |
 |---|-----|------|------|
-| 1 | codex | gpt-5-mini | 비용 최저, 단순 태스크 대부분 해결 |
-| 2 | codex | gpt-5 | Codex 상위 효과성, 여전히 Anthropic 보다 저렴 |
+| 1 | codex | gpt-5.4-mini | 비용 최저, 단순 태스크 대부분 해결. (gpt-5.5 mini 변종 부재 → 5.4-mini 유지) |
+| 2 | codex | gpt-5.5 | 신규 플래그십, Anthropic 대비 비용 우위 유지 |
 | 3 | claude | sonnet-4-6 | 도구 사용 + 장문 추론 필요 시 승격 |
 | 4 | claude | opus-4-7 | 최종 수단, 복잡 아키텍처/합의 요구 시 |
 
@@ -30,7 +30,7 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 {
   "version": 1,
   "chain": [
-    { "cli": "codex", "model": "gpt-5" },
+    { "cli": "codex", "model": "gpt-5.5" },
     { "cli": "claude", "model": "opus-4-7" }
   ]
 }

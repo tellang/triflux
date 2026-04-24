@@ -148,11 +148,14 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 Codex:gpt-5-mini 로 시작", () => {
+    it("DEFAULT_ESCALATION_CHAIN 은 Codex:gpt-5.4-mini → Codex:gpt-5.5 순", () => {
       assert.equal(DEFAULT_ESCALATION_CHAIN.length >= 2, true);
       const first = DEFAULT_ESCALATION_CHAIN[0];
       assert.equal(first.cli, "codex");
-      assert.equal(first.model, "gpt-5-mini");
+      assert.equal(first.model, "gpt-5.4-mini");
+      const second = DEFAULT_ESCALATION_CHAIN[1];
+      assert.equal(second.cli, "codex");
+      assert.equal(second.model, "gpt-5.5");
     });
   });
 

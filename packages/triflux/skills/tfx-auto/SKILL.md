@@ -158,7 +158,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--retry` | `0` | 자동 재시도 없음 | — |
 | `--retry` | `1` (기본) | bounded verify → fix loop 3회 | — |
 | `--retry` | `ralph` | **Phase 3** — true ralph state machine (unlimited, stuck detector 3회 중단) | retry-state-machine.mjs |
-| `--retry` | `auto-escalate` | **Phase 3** — 체인 승격 (codex:mini → codex:gpt-5 → claude:sonnet → claude:opus) | retry-state-machine.mjs |
+| `--retry` | `auto-escalate` | **Phase 3** — 체인 승격 (codex:5.4-mini → codex:gpt-5.5 → claude:sonnet → claude:opus) | retry-state-machine.mjs |
 | `--isolation` | `none` (기본) | cwd 공유 | — |
 | `--isolation` | `worktree` | shard별 `.codex-swarm/wt-*/` 격리 | `--parallel swarm` 자동 강제 |
 | `--remote` | `none` (기본) | 로컬만 | — |
@@ -214,8 +214,8 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 - `--retry auto-escalate` 는 `DEFAULT_ESCALATION_CHAIN` 을 기본으로 사용한다. 커스텀 체인이 필요하면 `.claude/rules/tfx-escalation-chain.md` 로 override 한다.
 
 `DEFAULT_ESCALATION_CHAIN`
-1. codex : gpt-5-mini
-2. codex : gpt-5
+1. codex : gpt-5.4-mini
+2. codex : gpt-5.5
 3. claude : sonnet-4-6
 4. claude : opus-4-7
 
