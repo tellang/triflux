@@ -846,12 +846,16 @@ function ensureWindowsHubAutostart({
 
   const command = buildWindowsHubAutostartCommand({ nodePath, pluginRoot });
 
-  // #161 P3: /TR 262자 제한 사전 검증 (byte 기준 — 한글 경로 등 multi-byte 고려)
-  const commandBytes = Buffer.byteLength(command, "utf8");
-  if (commandBytes > SCHTASKS_TR_MAX_LENGTH) {
+  // #161 P3: /TR 262자 제한 사전 검증.
+  // schtasks 는 Windows 내부에서 wide-char 문자 수로 제한하므로 UTF-8 byte 가 아닌
+  // JavaScript string .length (UTF-16 code units) 기준으로 비교한다.
+  // Codex Round 1 P1 반영: UTF-8 byte 검증은 한글 경로에서 정상 명령도 오차단하는
+  // 회귀를 유발했다 (예: ~218자 한글 경로 = 578 bytes → false positive throw).
+  const commandChars = command.length;
+  if (commandChars > SCHTASKS_TR_MAX_LENGTH) {
     throw new Error(
-      `schtasks /TR 인자가 ${SCHTASKS_TR_MAX_LENGTH} bytes 를 초과합니다 ` +
-        `(${commandBytes} bytes): ${command}`,
+      `schtasks /TR 인자가 ${SCHTASKS_TR_MAX_LENGTH} 문자를 초과합니다 ` +
+        `(${commandChars} chars): ${command}`,
     );
   }
 

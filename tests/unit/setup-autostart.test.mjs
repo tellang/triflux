@@ -89,7 +89,7 @@ describe("#161 P3 — /TR 262자 제한 사전 검증", () => {
 
   it("길이 초과 command 는 win32 에서 throw (schtasks 호출 전)", () => {
     if (process.platform !== "win32") return;
-    // SCHTASKS_TR_MAX_LENGTH(261) 초과를 만드는 긴 pluginRoot
+    // SCHTASKS_TR_MAX_LENGTH(261) 초과를 만드는 긴 pluginRoot (ASCII)
     const longRoot = `C:\\${"x".repeat(SCHTASKS_TR_MAX_LENGTH)}`;
     assert.throws(
       () =>
@@ -99,6 +99,25 @@ describe("#161 P3 — /TR 262자 제한 사전 검증", () => {
         }),
       /schtasks \/TR 인자가.*초과합니다/,
     );
+  });
+
+  it("한글 경로는 char count 기준이라 /TR 검증에서 throw 되지 않아야 한다 (byte 오차단 방지)", () => {
+    if (process.platform !== "win32") return;
+    // 한글 60자 ≈ UTF-8 180 bytes. char count 로 측정하면 prefix 포함해도 ≪ 261.
+    // Codex Round 1 P1: 이전 byte 기반 검증은 정상 한글 경로를 오차단했다.
+    const koreanRoot = `C:\\${"한".repeat(60)}`;
+    try {
+      ensureWindowsHubAutostart({
+        nodePath: "C:\\node\\node.exe",
+        pluginRoot: koreanRoot,
+      });
+    } catch (error) {
+      assert.doesNotMatch(
+        String(error?.message || ""),
+        /schtasks \/TR 인자가.*초과합니다/,
+        "한글 경로가 char count 아닌 byte count 로 잘못 차단됨",
+      );
+    }
   });
 
   it("SCHTASKS_TR_MAX_LENGTH 상수는 의도된 값 (261)", () => {
