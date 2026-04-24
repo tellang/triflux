@@ -158,7 +158,8 @@ function findMcpServerSection(raw, sectionName) {
 
 function appendCodexMcpServerSection(raw, sectionName, hubUrl) {
   const normalized = raw.length > 0 && !raw.endsWith("\n") ? `${raw}\n` : raw;
-  const separator = normalized.length > 0 && !normalized.endsWith("\n\n") ? "\n" : "";
+  const separator =
+    normalized.length > 0 && !normalized.endsWith("\n\n") ? "\n" : "";
   return `${normalized}${separator}[mcp_servers.${sectionName}]\nurl = ${formatTomlString(hubUrl)}\n`;
 }
 
