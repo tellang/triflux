@@ -1965,6 +1965,22 @@ FALLBACK_EOF
     exit 0
   fi
 
+  # Issue #156: hub-ensure 무조건 호출 — codex/gemini 가 tfx-hub MCP 를 쓸 수
+  # 있도록 사전 보장. Claude 세션 SessionStart 훅 외부에서 (Windows 재부팅 후
+  # codex 단독 실행, hub crash 후 Claude 미오픈, WSL/SSH 등) 도 hub 가 자동
+  # 기동된다. hub 가 이미 alive 면 /health 1회 호출로 no-op (저비용).
+  # best-effort: 실패해도 tfx-route 진행 차단하지 않음.
+  if command -v "$NODE_BIN" &>/dev/null; then
+    local _sd_he; _sd_he="$(_get_script_dir)"
+    local _hub_ensure_script
+    _hub_ensure_script="$(_resolve_script "${TFX_HUB_ENSURE_SCRIPT:-}" \
+      ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/hub-ensure.mjs"} \
+      "$_sd_he/hub-ensure.mjs" "$_sd_he/../scripts/hub-ensure.mjs" 2>/dev/null)" || _hub_ensure_script=""
+    if [[ -n "$_hub_ensure_script" && -f "$_hub_ensure_script" ]]; then
+      "$NODE_BIN" "$_hub_ensure_script" >/dev/null 2>&1 || true
+    fi
+  fi
+
   local FULL_PROMPT="$PROMPT"
   [[ -n "$MCP_HINT" ]] && FULL_PROMPT="${PROMPT}. ${MCP_HINT}"
   local codex_transport_effective="n/a"
