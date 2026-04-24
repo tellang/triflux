@@ -50,10 +50,33 @@ describe("#144/#66 heartbeat stall kill — shape", () => {
     assert.match(hb, /kill -KILL "\$pid"/, "SIGKILL 강제 경로 필수");
   });
 
-  it("kill_on_stall 기본값은 활성화(1)이고, grace 기본값은 30초", () => {
+  it("kill_on_stall 기본값은 classify 이고, grace 기본값은 30초 (#165)", () => {
+    // PR #160: default 1 → 0 으로 임시 후퇴 (false kill 방지)
+    // PR #165: 0 → classify 승격. evidence 는 남기되 kill 은 명시적 opt-in.
     const hb = extractFunction("heartbeat_monitor");
-    assert.match(hb, /kill_on_stall="\$\{TFX_STALL_KILL:-1\}"/);
+    assert.match(hb, /kill_on_stall="\$\{TFX_STALL_KILL:-classify\}"/);
     assert.match(hb, /kill_grace="\$\{TFX_STALL_KILL_GRACE:-30\}"/);
+  });
+
+  it("TFX_STALL_KILL 은 kill / classify / off 세 모드를 지원한다 (#165)", () => {
+    const hb = extractFunction("heartbeat_monitor");
+    // case 문에 세 모드 모두 존재해야 함
+    assert.match(hb, /1\|on\|kill/, "kill alias (1|on|kill) case arm 필요");
+    assert.match(
+      hb,
+      /classify\|0\|off\|disabled/,
+      "no-kill alias (classify|0|off|disabled) case arm 필요",
+    );
+    assert.match(
+      hb,
+      /STALL_CLASSIFY/,
+      "classify mode 의 evidence 로그 STALL_CLASSIFY 필요",
+    );
+    assert.match(
+      hb,
+      /no-kill — TFX_STALL_KILL=classify/,
+      "STALL_CLASSIFY 로그에 사용자 개입 힌트 필요",
+    );
   });
 
   it("Windows(MINGW/MSYS) 에서는 taskkill /T /F 로 프로세스 트리를 종료한다", () => {
@@ -94,64 +117,69 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     }
   });
 
-  it("stall 이 지속되면 worker 에게 SIGTERM 을 보내고 loop 을 break 한다", (t) => {
-    const dir = mkdtempSync(path.join(tmpdir(), "tfx-stall-"));
+  function buildStallScript({ killMode, stdoutLog, stderrLog }) {
+    const hb = extractFunction("heartbeat_monitor");
+    const findForks = extractFunction("_find_fork_pids");
+    // bash file 로 실행. spawnSync("bash", ["-c", script]) 는 Windows Git Bash 에서
+    // 긴 script 의 line ending / argv 한도 문제로 EOF 오류를 내는 경우가 있어
+    // 파일 경유가 안전하다.
+    return [
+      "#!/usr/bin/env bash",
+      "set -u",
+      "export TFX_HEARTBEAT=1",
+      "export TFX_HEARTBEAT_INTERVAL=1",
+      "export TFX_STALL_THRESHOLD=2",
+      `export TFX_STALL_KILL=${killMode}`,
+      "export TFX_STALL_KILL_GRACE=1",
+      `STDOUT_LOG='${stdoutLog}'`,
+      `STDERR_LOG='${stderrLog}'`,
+      "TIMESTAMP=$(date +%s)",
+      "",
+      findForks,
+      hb,
+      "",
+      "sleep 30 &",
+      "CHILD_PID=$!",
+      "echo \"CHILD_PID=$CHILD_PID\" >&2",
+      "",
+      "heartbeat_monitor \"$CHILD_PID\" 1 2 &",
+      "HB_PID=$!",
+      "",
+      "for i in 1 2 3 4 5 6 7 8 9 10; do",
+      "  sleep 1",
+      "  if ! kill -0 \"$CHILD_PID\" 2>/dev/null; then",
+      "    echo \"CHILD_KILLED_AFTER=${i}s\" >&2",
+      "    break",
+      "  fi",
+      "done",
+      "",
+      "kill \"$HB_PID\" 2>/dev/null || true",
+      "wait \"$HB_PID\" 2>/dev/null || true",
+      "kill \"$CHILD_PID\" 2>/dev/null || true",
+      "",
+      "if kill -0 \"$CHILD_PID\" 2>/dev/null; then",
+      "  echo \"RESULT=child_still_alive\" >&2",
+      "  exit 1",
+      "else",
+      "  echo \"RESULT=child_terminated\" >&2",
+      "fi",
+      "",
+    ].join("\n");
+  }
+
+  it("TFX_STALL_KILL=kill 이면 stall 지속 시 worker 에게 SIGTERM 을 보내고 loop 을 break 한다", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "tfx-stall-kill-"));
     cleanupDirs.push(dir);
     const stdoutLog = path.join(dir, "stdout.log");
     const stderrLog = path.join(dir, "stderr.log");
+    const scriptFile = path.join(dir, "run.sh");
     writeFileSync(stdoutLog, "");
     writeFileSync(stderrLog, "");
-
-    // heartbeat_monitor + _find_fork_pids 함수를 subshell 에 주입하고,
-    // 실제 child (sleep 60) 에 대해 짧은 interval 로 감시 → STALL_KILL 유도.
-    const hb = extractFunction("heartbeat_monitor");
-    const findForks = extractFunction("_find_fork_pids");
-
-    const script = `
-set -u
-export TFX_HEARTBEAT=1
-export TFX_HEARTBEAT_INTERVAL=1
-export TFX_STALL_THRESHOLD=2
-export TFX_STALL_KILL=1
-export TFX_STALL_KILL_GRACE=1
-STDOUT_LOG='${stdoutLog}'
-STDERR_LOG='${stderrLog}'
-TIMESTAMP=$(date +%s)
-
-${findForks}
-${hb}
-
-# Fork a dummy child that would otherwise run for 30s (simulating a stalled codex worker)
-sleep 30 &
-CHILD_PID=$!
-echo "CHILD_PID=$CHILD_PID" >&2
-
-# Launch heartbeat monitor on the child in background — it should SIGTERM after ~4s
-heartbeat_monitor "$CHILD_PID" 1 2 &
-HB_PID=$!
-
-# Wait up to 10s for heartbeat to do its work
-for i in 1 2 3 4 5 6 7 8 9 10; do
-  sleep 1
-  if ! kill -0 "$CHILD_PID" 2>/dev/null; then
-    echo "CHILD_KILLED_AFTER=\${i}s" >&2
-    break
-  fi
-done
-
-# Cleanup heartbeat + any stragglers
-kill "$HB_PID" 2>/dev/null || true
-wait "$HB_PID" 2>/dev/null || true
-kill "$CHILD_PID" 2>/dev/null || true
-
-if kill -0 "$CHILD_PID" 2>/dev/null; then
-  echo "RESULT=child_still_alive" >&2
-  exit 1
-else
-  echo "RESULT=child_terminated" >&2
-fi
-`;
-    const result = spawnSync("bash", ["-c", script], {
+    writeFileSync(
+      scriptFile,
+      buildStallScript({ killMode: "kill", stdoutLog, stderrLog }),
+    );
+    const result = spawnSync("bash", [scriptFile], {
       encoding: "utf8",
       cwd: REPO_ROOT,
       timeout: 20_000,
@@ -164,5 +192,37 @@ fi
     assert.match(result.stderr, /status=STALL_KILL/, "STALL_KILL 상태 로그");
     assert.match(result.stderr, /SIGTERM/, "SIGTERM 발사 로그");
     assert.match(result.stderr, /RESULT=child_terminated/);
+  });
+
+  it("TFX_STALL_KILL=classify (default) 이면 stall 은 STALL_CLASSIFY 로그만 내고 kill 안 한다 (#165)", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "tfx-stall-classify-"));
+    cleanupDirs.push(dir);
+    const stdoutLog = path.join(dir, "stdout.log");
+    const stderrLog = path.join(dir, "stderr.log");
+    const scriptFile = path.join(dir, "run.sh");
+    writeFileSync(stdoutLog, "");
+    writeFileSync(stderrLog, "");
+    writeFileSync(
+      scriptFile,
+      buildStallScript({ killMode: "classify", stdoutLog, stderrLog }),
+    );
+    const result = spawnSync("bash", [scriptFile], {
+      encoding: "utf8",
+      cwd: REPO_ROOT,
+      timeout: 20_000,
+    });
+    // classify 는 kill 안 함 → child 는 우리가 수동 kill 하므로 terminated.
+    // 중요한 건 STALL_KILL 은 안 뜨고 STALL_CLASSIFY 가 떴어야 한다.
+    assert.match(result.stderr, /STALL_CLASSIFY/, "classify evidence 로그 필요");
+    assert.doesNotMatch(
+      result.stderr,
+      /status=STALL_KILL/,
+      "classify mode 에서는 STALL_KILL 로그가 없어야 함",
+    );
+    assert.doesNotMatch(
+      result.stderr,
+      /SIGTERM/,
+      "classify mode 에서는 SIGTERM 이 발사되면 안 됨",
+    );
   });
 });
