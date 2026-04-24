@@ -4,6 +4,16 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.14.3] - 2026-04-25
+
+### Fixed
+
+- **`fix(mcp-guard-engine)` (#166, #172)** resolveHubUrl pid port cascade 제거 (3c1df54) — PR #158 (`21dca5e`) 이 `hub-ensure.resolveHubTarget()` 에서만 pid port cascade 를 제거하고 "env = single source of truth" 정책을 도입했지만 `scripts/lib/mcp-guard-engine.mjs` 의 `resolveHubUrl()` 은 legacy cascade (envPort 없으면 pidPort 로 target.port 덮어씀) 를 유지 → 두 함수 정책 drift. `TFX_HUB_PORT=27888` 이 shell 에 설정된 환경에서 기존 테스트가 env unset 없이 실행 → pidPort (30123/29991) 가 envPort (27888) 에 밀려 assertion fail 하던 회귀. **Fix**: production 경로에서 pid port cascade 전면 제거 — envPort (또는 default 27888) 만 사용하고 `hub.pid` 는 host hint 로만 참조. PR #158 정책을 mcp-guard-engine 까지 propagate. `scripts/lib/mcp-guard-engine.mjs` 원본 + `packages/{core,remote,triflux}/scripts/lib/mcp-guard-engine.mjs` 3 사본 Edit 동기화 (cp 금지 룰 준수). `resolveHubUrl()` 의 downstream `buildDesiredServerRecord()` → MCP 설정 파일 hub URL 생성 경로에서 의도치 않은 부작용 없음 확인.
+
+### Tests
+
+- **+1 / 기존 2 갱신** `scripts/__tests__/mcp-guard-engine.test.mjs` + `packages/triflux/scripts/__tests__/mcp-guard-engine.test.mjs` — 기존 2 fail 케이스를 "env=single source" 의도로 갱신 + 신규 회귀 가드 `ignores hub.pid port (pid is host hint only, PR #158 policy)` 추가. env 설정/미설정 양쪽에서 pid port 재유입 시 fail 하도록 설계. 6/6 PASS.
+
 ## [10.14.2] - 2026-04-25
 
 ### Fixed
