@@ -2,12 +2,7 @@
 // 기존 cli-adapter-base.mjs:stallThresholdMs(30s)와 headless.mjs:STALL_DEFAULTS(120s)를
 // 4단계 probe 모델로 교체. stdout+stderr 통합 스트림으로 평가 (F3 해결).
 
-import {
-  mkdirSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -92,7 +87,13 @@ export function createHealthProbe(session, opts = {}) {
   // stopped flag는 in-flight probe()가 stop() 사이의 await 점에서
   // writeState/unlink 와 race 하는 것을 막는다. start() 시 false 로 reset.
   let stopped = false;
-  let inFlightProbe = null;
+  // P0 (#167 review): start() 마다 증가. probe() 가 시작 시 캡처 → writeState() 가 epoch
+  // 비교로 stop()→start() 사이의 in-flight 가 새 run 의 state 를 덮는 race 차단.
+  // stopped flag 만으로는 start() 가 stopped=false 로 reset 한 직후 race 못 막음.
+  let runEpoch = 0;
+  // P1-1 (#167 review): Set 으로 모든 in-flight probe 추적. interval 이 빨라 N+1 이 N 끝나기
+  // 전에 시작되면 단일 var 는 N 을 덮어써 stopAndDrain() 시 N 이 누락된다.
+  const inFlightProbes = new Set();
 
   // L1 tracking
   let lastOutputBytes = 0;
@@ -129,8 +130,12 @@ export function createHealthProbe(session, opts = {}) {
     return "active";
   }
 
-  function writeState(result) {
-    if (stopped) return; // stop() 직후 in-flight probe()의 재생성 방지
+  function writeState(result, probeEpoch) {
+    // stop() 직후 in-flight probe()의 재생성 방지.
+    // P0 (#167): probeEpoch !== runEpoch 면 이전 run 의 stale probe 가 새 run 의 state 를
+    // 덮으려는 시도 → skip.
+    if (stopped) return;
+    if (probeEpoch !== undefined && probeEpoch !== runEpoch) return;
     if (!config.writeStateFile && !config.stateFile) return;
     const stateFile = getStateFilePath();
     if (!stateFile) return;
@@ -154,16 +159,38 @@ export function createHealthProbe(session, opts = {}) {
       try {
         renameSync(tmpPath, stateFile);
       } catch (renameErr) {
-        // Windows: 대상이 존재할 때 EPERM/EACCES — unlink 후 재시도.
+        // Windows: 대상이 존재할 때 EPERM/EACCES.
+        // P1-2 (#167 review): backup-then-swap 으로 기존 파일 보존. 옛 unlinkSync→renameSync
+        // 패턴은 1차 unlink 후 2차 rename 실패 시 기존 파일과 tmp 둘 다 잃었다.
         if (
           renameErr?.code === "EEXIST" ||
           renameErr?.code === "EPERM" ||
           renameErr?.code === "EACCES"
         ) {
+          const backupPath = `${stateFile}.old-${process.pid}-${Date.now()}`;
+          let backupCreated = false;
           try {
-            unlinkSync(stateFile);
-          } catch {}
-          renameSync(tmpPath, stateFile);
+            renameSync(stateFile, backupPath);
+            backupCreated = true;
+          } catch {
+            // backup 실패 (대상 없음/잠김) — 그래도 진행 (tmp→stateFile 시도)
+          }
+          try {
+            renameSync(tmpPath, stateFile);
+            if (backupCreated) {
+              try {
+                unlinkSync(backupPath);
+              } catch {}
+            }
+          } catch (secondErr) {
+            // 2차도 실패 → backup 복구해서 기존 파일 보존
+            if (backupCreated) {
+              try {
+                renameSync(backupPath, stateFile);
+              } catch {}
+            }
+            throw secondErr;
+          }
         } else {
           throw renameErr;
         }
@@ -299,6 +326,9 @@ export function createHealthProbe(session, opts = {}) {
    */
   async function probe() {
     if (stopped) return null;
+    // P0 (#167): probe 시작 시 epoch 캡처. start() 가 새 epoch 로 바꾸면 이 probe 의
+    // writeState 는 stale 로 판정 → skip.
+    const probeEpoch = runEpoch;
     const promise = (async () => {
       const result = {
         l0: probeL0(),
@@ -309,7 +339,7 @@ export function createHealthProbe(session, opts = {}) {
         ts: Date.now(),
       };
       status.lastProbeAt = result.ts;
-      writeState(result);
+      writeState(result, probeEpoch);
 
       if (typeof config.onProbe === "function") {
         config.onProbe(result);
@@ -317,9 +347,10 @@ export function createHealthProbe(session, opts = {}) {
 
       return result;
     })();
-    inFlightProbe = promise.finally(() => {
-      if (inFlightProbe === promise) inFlightProbe = null;
-    });
+    // P1-1 (#167): Set 으로 모든 in-flight 추적. 단일 var 패턴은 N+1 이 N 끝나기 전에
+    // 시작되면 N 을 덮어써 stopAndDrain() 시 N 이 누락된다.
+    inFlightProbes.add(promise);
+    promise.finally(() => inFlightProbes.delete(promise));
     return promise;
   }
 
@@ -327,6 +358,8 @@ export function createHealthProbe(session, opts = {}) {
     if (started) return;
     started = true;
     stopped = false;
+    // P0 (#167): epoch 증가 — 이전 run 의 in-flight probe 가 새 run 의 state 를 덮지 못하게.
+    runEpoch += 1;
     spawnedAt = Date.now();
     lastOutputChangeAt = Date.now();
     lastOutputBytes = 0;
@@ -366,10 +399,9 @@ export function createHealthProbe(session, opts = {}) {
    */
   async function stopAndDrain() {
     stop();
-    if (inFlightProbe) {
-      try {
-        await inFlightProbe;
-      } catch {}
+    // P1-1 (#167): 모든 in-flight probe 대기. allSettled 로 unhandled rejection 방지.
+    if (inFlightProbes.size > 0) {
+      await Promise.allSettled(Array.from(inFlightProbes));
     }
   }
 
