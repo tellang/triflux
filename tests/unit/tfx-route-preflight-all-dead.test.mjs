@@ -125,7 +125,9 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
     assert.match(result.stderr, /1개 dead MCP 제외 \(dead1\)/);
   });
 
-  it("all-dead: profile 전부 dead → rc=78 조기 실패", () => {
+  it("#170 all-dead default: graceful degradation (rc=0)", () => {
+    // PR #170 회귀 fix: default 동작이 early-fail (rc=78) 에서 graceful (rc=0+marker) 로 변경.
+    // 호출자 (run_codex_mcp 분기) 가 _TFX_MCP_DEGRADED 마커 보고 transport=exec 강제.
     const result = runPreflight({
       flags: [
         "-c",
@@ -136,12 +138,33 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
       deadList: "dead1,dead2",
     });
     cleanupDirs.push(result.dir);
-    assert.equal(result.preflightRc, 78, `stderr: ${result.stderr}`);
-    assert.match(result.stderr, /조기 실패.*MCP 전부 dead/);
-    assert.match(result.stderr, /TFX_MCP_ALLOW_ALL_DEAD=1/);
+    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stderr, /graceful degradation/);
+    assert.match(result.stderr, /MCP 전부 dead/);
+    assert.equal(result.remainingCount, 0);
   });
 
-  it("all-dead + TFX_MCP_ALLOW_ALL_DEAD=1 → rc=0 degraded 진행", () => {
+  it("#170 all-dead + TFX_MCP_FAIL_ON_ALL_DEAD=1 → rc=78 (opt-in early fail)", () => {
+    // 옛 #148 동작은 TFX_MCP_FAIL_ON_ALL_DEAD=1 명시 opt-in 으로만 활성.
+    const result = runPreflight({
+      flags: [
+        "-c",
+        "mcp_servers.dead1.enabled=true",
+        "-c",
+        "mcp_servers.dead2.enabled=true",
+      ],
+      deadList: "dead1,dead2",
+      envVars: { TFX_MCP_FAIL_ON_ALL_DEAD: "1" },
+    });
+    cleanupDirs.push(result.dir);
+    assert.equal(result.preflightRc, 78, `stderr: ${result.stderr}`);
+    assert.match(result.stderr, /조기 실패.*MCP 전부 dead/);
+    assert.match(result.stderr, /TFX_MCP_FAIL_ON_ALL_DEAD/);
+  });
+
+  it("all-dead + TFX_MCP_ALLOW_ALL_DEAD=1 (legacy alias) → rc=0 degraded 진행", () => {
+    // TFX_MCP_ALLOW_ALL_DEAD=1 은 호환성 유지 — graceful degradation 의 explicit alias.
+    // FAIL_ON_ALL_DEAD 기본 0 이므로 동작상 차이 없음 (테스트는 명시 opt-in 호환성 회귀 가드).
     const result = runPreflight({
       flags: [
         "-c",
@@ -154,8 +177,7 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
     });
     cleanupDirs.push(result.dir);
     assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
-    assert.match(result.stderr, /TFX_MCP_ALLOW_ALL_DEAD=1/);
-    assert.match(result.stderr, /degraded/);
+    assert.match(result.stderr, /graceful degradation/);
     assert.equal(result.remainingCount, 0);
   });
 
@@ -299,7 +321,7 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
     ]);
   });
 
-  it("dotted 서버 + all-dead → rc=78 조기 실패 (#148 과 동일 경로)", () => {
+  it("dotted 서버 + all-dead → rc=0 graceful degradation (#170 default)", () => {
     const result = runPreflight({
       flags: [
         "-c",
@@ -310,17 +332,79 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
       deadList: "foo.bar,baz.qux",
     });
     cleanupDirs.push(result.dir);
+    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stderr, /graceful degradation/);
+  });
+
+  it("dotted 서버 + all-dead + TFX_MCP_FAIL_ON_ALL_DEAD=1 → rc=78 (opt-in)", () => {
+    const result = runPreflight({
+      flags: [
+        "-c",
+        "mcp_servers.foo.bar.enabled=true",
+        "-c",
+        "mcp_servers.baz.qux.enabled=true",
+      ],
+      deadList: "foo.bar,baz.qux",
+      envVars: { TFX_MCP_FAIL_ON_ALL_DEAD: "1" },
+    });
+    cleanupDirs.push(result.dir);
     assert.equal(result.preflightRc, 78, `stderr: ${result.stderr}`);
     assert.match(result.stderr, /조기 실패.*MCP 전부 dead/);
   });
 
-  it("non-dotted 서버도 기존과 동일하게 동작 (회귀 없음)", () => {
+  it("non-dotted 서버 단독 dead → rc=0 graceful (#170 default 동작)", () => {
     const result = runPreflight({
       flags: ["-c", "mcp_servers.simple.enabled=true"],
       deadList: "simple",
     });
     cleanupDirs.push(result.dir);
-    assert.equal(result.preflightRc, 78, `stderr: ${result.stderr}`);
-    assert.match(result.stderr, /전부 dead/);
+    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
+    assert.match(result.stderr, /graceful degradation/);
+  });
+});
+
+// PR #170 — graceful degradation marker 가 호출자 (run_codex_mcp 분기) 에서
+// transport=exec 강제 + FULL_PROMPT 리셋 (MCP_HINT 제거) 을 trigger 한다.
+// 이 분기가 회귀하면 dead MCP 환경에서 codex-mcp.mjs 가 spawn 되어 stall 재발.
+describe("#170 transport degradation marker — source 분기 회귀 가드", () => {
+  it("source 에 _TFX_MCP_DEGRADED 마커 + transport=exec 강제 분기", () => {
+    const source = readFileSync(SCRIPT_PATH, "utf8");
+    assert.match(
+      source,
+      /_TFX_MCP_DEGRADED:-0/,
+      "_TFX_MCP_DEGRADED 마커 분기가 사라짐",
+    );
+    assert.match(
+      source,
+      /TFX_CODEX_TRANSPORT="exec"/,
+      "transport=exec 강제 분기가 사라짐",
+    );
+    assert.match(
+      source,
+      /FULL_PROMPT="\$PROMPT"/,
+      "FULL_PROMPT 리셋 (MCP_HINT 제거) 분기가 사라짐",
+    );
+  });
+
+  it("source 에 TFX_MCP_FAIL_ON_ALL_DEAD opt-in 분기 포함", () => {
+    const source = readFileSync(SCRIPT_PATH, "utf8");
+    assert.match(
+      source,
+      /TFX_MCP_FAIL_ON_ALL_DEAD:-0/,
+      "TFX_MCP_FAIL_ON_ALL_DEAD opt-in 이 사라지면 #148 동작 복원 불가",
+    );
+  });
+
+  it("packages/triflux/scripts/tfx-route.sh mirror 가 main 과 byte-identical", () => {
+    const main = readFileSync(SCRIPT_PATH, "utf8");
+    const mirrorPath = path.join(
+      REPO_ROOT,
+      "packages",
+      "triflux",
+      "scripts",
+      "tfx-route.sh",
+    );
+    const mirror = readFileSync(mirrorPath, "utf8");
+    assert.equal(main, mirror, "mirror drift — patch 가 한쪽에만 적용됨");
   });
 });
