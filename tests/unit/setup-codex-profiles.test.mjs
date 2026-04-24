@@ -8,7 +8,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..", "..");
 
 const {
-  ensureCodexProfiles,
   hasProfileSection,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,

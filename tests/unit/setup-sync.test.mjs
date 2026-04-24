@@ -13,8 +13,6 @@ const {
   detectDevMode,
   SYNC_MAP,
   BREADCRUMB_PATH,
-  PLUGIN_ROOT,
-  CLAUDE_DIR,
   ensureHooksInSettings,
   ensureCodexHubServerConfig,
 } = await import("../../scripts/setup.mjs");

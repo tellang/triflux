@@ -17,8 +17,10 @@ describe("shared.mjs", () => {
     ];
 
     for (const key of keys) {
-      assert.equal(typeof shared[key], "string");
-      assert.ok(shared[key].startsWith("\x1b["));
+      // biome-ignore lint/performance/noDynamicNamespaceImportAccess: 테스트는 상수 키를 반복 순회하며 타입/값을 검증해야 하므로 dynamic access 가 의도된 동작
+      const value = shared[key];
+      assert.equal(typeof value, "string");
+      assert.ok(value.startsWith("\x1b["));
     }
   });
 });
