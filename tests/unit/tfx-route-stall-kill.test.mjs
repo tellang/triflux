@@ -140,28 +140,28 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       "",
       "sleep 30 &",
       "CHILD_PID=$!",
-      "echo \"CHILD_PID=$CHILD_PID\" >&2",
+      'echo "CHILD_PID=$CHILD_PID" >&2',
       "",
-      "heartbeat_monitor \"$CHILD_PID\" 1 2 &",
+      'heartbeat_monitor "$CHILD_PID" 1 2 &',
       "HB_PID=$!",
       "",
       "for i in 1 2 3 4 5 6 7 8 9 10; do",
       "  sleep 1",
-      "  if ! kill -0 \"$CHILD_PID\" 2>/dev/null; then",
-      "    echo \"CHILD_KILLED_AFTER=${i}s\" >&2",
+      '  if ! kill -0 "$CHILD_PID" 2>/dev/null; then',
+      '    echo "CHILD_KILLED_AFTER=${i}s" >&2',
       "    break",
       "  fi",
       "done",
       "",
-      "kill \"$HB_PID\" 2>/dev/null || true",
-      "wait \"$HB_PID\" 2>/dev/null || true",
-      "kill \"$CHILD_PID\" 2>/dev/null || true",
+      'kill "$HB_PID" 2>/dev/null || true',
+      'wait "$HB_PID" 2>/dev/null || true',
+      'kill "$CHILD_PID" 2>/dev/null || true',
       "",
-      "if kill -0 \"$CHILD_PID\" 2>/dev/null; then",
-      "  echo \"RESULT=child_still_alive\" >&2",
+      'if kill -0 "$CHILD_PID" 2>/dev/null; then',
+      '  echo "RESULT=child_still_alive" >&2',
       "  exit 1",
       "else",
-      "  echo \"RESULT=child_terminated\" >&2",
+      '  echo "RESULT=child_terminated" >&2',
       "fi",
       "",
     ].join("\n");
@@ -213,7 +213,11 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     });
     // classify 는 kill 안 함 → child 는 우리가 수동 kill 하므로 terminated.
     // 중요한 건 STALL_KILL 은 안 뜨고 STALL_CLASSIFY 가 떴어야 한다.
-    assert.match(result.stderr, /STALL_CLASSIFY/, "classify evidence 로그 필요");
+    assert.match(
+      result.stderr,
+      /STALL_CLASSIFY/,
+      "classify evidence 로그 필요",
+    );
     assert.doesNotMatch(
       result.stderr,
       /status=STALL_KILL/,
