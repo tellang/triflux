@@ -762,6 +762,64 @@ function buildWindowsHubAutostartCommand({
   ].join(" ");
 }
 
+// #161 P2: schtasks /Query 실패 시 stderr 를 해석해 미등록/권한거부/기타 실패를 구분한다.
+// 기존 구현은 stdio=ignore + catch 후 항상 registered:false 였기 때문에
+// Access Denied 같은 해결 가능한 문제가 "미등록" 으로 묻혔다.
+const WINDOWS_SCHTASKS_NOT_FOUND_PATTERNS = [
+  "cannot find the file",
+  "does not exist",
+  "지정된 파일",
+  "찾을 수 없",
+];
+const WINDOWS_SCHTASKS_ACCESS_DENIED_PATTERNS = [
+  "access is denied",
+  "access denied",
+  "permission",
+  "액세스가 거부",
+  "권한",
+];
+
+// #161 P3: schtasks /TR 인자는 실질적으로 262자 미만으로 제한된다.
+// 초과 시 Create 자체는 성공해도 task 실행에서 인자 잘림/실행 실패 재발.
+// 따라서 Create 전에 사전 검증해 조기 실패를 보장한다.
+const SCHTASKS_TR_MAX_LENGTH = 261;
+
+// #161 P3: /TR 길이 검증 공용 함수.
+// schtasks 는 Windows 내부에서 wide-char 문자 수로 제한하므로 UTF-8 byte 가 아닌
+// JavaScript string .length (UTF-16 code units) 기준으로 비교한다.
+// Codex Round 1 P1 반영: UTF-8 byte 검증은 한글 경로에서 정상 명령을 오차단했다
+// (예: ~218자 한글 경로 = 578 bytes → false positive throw).
+// Codex Round 3 P2 반영: 테스트가 실행 경로와 동일한 이 함수를 exercise 하므로
+// 내부 구현이 회귀해 byte 기반으로 돌아가면 테스트가 즉시 포착한다.
+function validateSchtasksTrLength(command) {
+  const commandChars = command.length;
+  if (commandChars > SCHTASKS_TR_MAX_LENGTH) {
+    throw new Error(
+      `schtasks /TR 인자가 ${SCHTASKS_TR_MAX_LENGTH} 문자를 초과합니다 ` +
+        `(${commandChars} chars): ${command}`,
+    );
+  }
+}
+
+function classifySchtasksStderr(stderr) {
+  const lower = String(stderr || "").toLowerCase();
+  if (
+    WINDOWS_SCHTASKS_NOT_FOUND_PATTERNS.some((p) =>
+      lower.includes(p.toLowerCase()),
+    )
+  ) {
+    return "not_registered";
+  }
+  if (
+    WINDOWS_SCHTASKS_ACCESS_DENIED_PATTERNS.some((p) =>
+      lower.includes(p.toLowerCase()),
+    )
+  ) {
+    return "access_denied";
+  }
+  return "unknown";
+}
+
 function getWindowsHubAutostartStatus({
   taskName = WINDOWS_HUB_AUTOSTART_TASK,
 } = {}) {
@@ -770,12 +828,20 @@ function getWindowsHubAutostartStatus({
   }
   try {
     execFileSync("schtasks.exe", ["/Query", "/TN", taskName], {
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
     return { supported: true, registered: true, taskName };
-  } catch {
-    return { supported: true, registered: false, taskName };
+  } catch (error) {
+    const stderr = String(error?.stderr || "").trim();
+    const reason = classifySchtasksStderr(stderr);
+    return {
+      supported: true,
+      registered: false,
+      taskName,
+      reason,
+      stderr: stderr.slice(0, 200),
+    };
   }
 }
 
@@ -796,6 +862,10 @@ function ensureWindowsHubAutostart({
   }
 
   const command = buildWindowsHubAutostartCommand({ nodePath, pluginRoot });
+
+  // #161 P3: /TR 262자 제한 사전 검증을 공용 함수로 위임해 테스트/실행 로직 일관성 보장.
+  validateSchtasksTrLength(command);
+
   const args = [
     "/Create",
     "/TN",
@@ -809,10 +879,23 @@ function ensureWindowsHubAutostart({
   ];
   if (force) args.push("/F");
 
-  execFileSync("schtasks.exe", args, {
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
+  try {
+    execFileSync("schtasks.exe", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+  } catch (error) {
+    // #161 P3: stderr 를 error.message 에 노출해 호출자가 원인을 볼 수 있게 한다.
+    const stderr = String(error?.stderr || "").trim();
+    if (stderr) {
+      const wrapped = new Error(
+        `schtasks /Create 실패: ${stderr.slice(0, 200)}`,
+      );
+      wrapped.cause = error;
+      throw wrapped;
+    }
+    throw error;
+  }
 
   return {
     supported: true,
@@ -1058,6 +1141,7 @@ export {
   BREADCRUMB_PATH,
   buildWindowsHubAutostartCommand,
   CLAUDE_DIR,
+  classifySchtasksStderr,
   cleanupStaleSkills,
   DEPRECATED_SKILLS,
   detectDevMode,
@@ -1076,11 +1160,13 @@ export {
   REQUIRED_TOP_LEVEL_SETTINGS,
   readMarker,
   replaceProfileSection,
+  SCHTASKS_TR_MAX_LENGTH,
   SETUP_MARKER_PATH,
   SKILL_ALIASES,
   SYNC_MAP,
   scanHudFiles,
   syncAliasedSkillDir,
+  validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
   writeMarker,
 };

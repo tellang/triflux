@@ -7,7 +7,7 @@ import fs from "node:fs";
 import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
+import { BASH_EXE } from "../helpers/bash-path.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..", "..");
