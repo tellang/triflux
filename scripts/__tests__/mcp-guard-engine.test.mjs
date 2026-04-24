@@ -101,14 +101,16 @@ describe("mcp guard engine", () => {
     );
   });
 
-  it("replaces stdio MCP entries with tfx-hub and writes a backup", () => {
+  it("replaces stdio MCP entries with tfx-hub and writes a backup (TFX_HUB_PORT env overrides)", () => {
     const homeDir = createHomeDir();
     withHome(homeDir);
+    process.env.TFX_HUB_PORT = "30123";
 
+    // hub.pid port 는 무시되어야 한다 (PR #158: pid = host hint only).
     const pidPath = join(homeDir, ".claude", "cache", "tfx-hub", "hub.pid");
     writeFileSync(
       pidPath,
-      JSON.stringify({ host: "127.0.0.1", port: 30123 }),
+      JSON.stringify({ host: "127.0.0.1", port: 40404 }),
       "utf8",
     );
 
@@ -141,9 +143,18 @@ describe("mcp guard engine", () => {
     assert.equal(Object.hasOwn(updated.mcpServers, "unsafe-stdio"), false);
   });
 
-  it("uses hub.pid port before registry fallback when resolving Hub URL", () => {
+  it("uses TFX_HUB_PORT env as single source when resolving Hub URL", () => {
     const homeDir = createHomeDir();
     withHome(homeDir);
+    process.env.TFX_HUB_PORT = "29991";
+
+    assert.equal(resolveHubUrl(), "http://127.0.0.1:29991/mcp");
+  });
+
+  it("ignores hub.pid port (pid is host hint only, PR #158 policy)", () => {
+    const homeDir = createHomeDir();
+    withHome(homeDir);
+    delete process.env.TFX_HUB_PORT;
 
     writeFileSync(
       join(homeDir, ".claude", "cache", "tfx-hub", "hub.pid"),
@@ -151,6 +162,8 @@ describe("mcp guard engine", () => {
       "utf8",
     );
 
-    assert.equal(resolveHubUrl(), "http://127.0.0.1:29991/mcp");
+    // env 없음 + hub.pid port 존재 → registry/default 27888 fallback.
+    // pid port cascade 가 제거되어 29991 이 쓰이면 안 됨.
+    assert.equal(resolveHubUrl(), "http://127.0.0.1:27888/mcp");
   });
 });

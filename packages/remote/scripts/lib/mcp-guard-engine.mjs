@@ -851,14 +851,13 @@ export function resolveHubUrl() {
         : DEFAULT_HUB_PATH,
   };
 
+  // PR #158 정책: port = TFX_HUB_PORT env (없으면 registry/default 27888) single source.
+  // hub.pid 는 loopback host 힌트 전용. 과거 pid port cascade 는 오염된 port 영속화의
+  // 원인이었고 hub-ensure.resolveHubTarget 에서 이미 제거됨. 여기도 일관 적용.
   const hubPidPath = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
   if (existsSync(hubPidPath)) {
     try {
       const info = readJsonFile(hubPidPath);
-      if (!envPort) {
-        const pidPort = Number(info?.port);
-        if (Number.isFinite(pidPort) && pidPort > 0) target.port = pidPort;
-      }
       if (typeof info?.host === "string") {
         const host = info.host.trim();
         if (LOOPBACK_HOSTS.has(host)) target.host = host;
