@@ -2,7 +2,7 @@
 // #168 P3: hub /health ping checker factory 동작 검증.
 
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 
 import { createHubHealthChecker } from "../../hub/team/check-mcp-hub.mjs";
 
