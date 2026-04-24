@@ -1,24 +1,23 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-
 import {
   computeFingerprint,
   fingerprintsEqual,
   isCacheFresh,
   parseMcpServersFromToml,
+  probeAll,
   probeHttp,
   probeServer,
   probeStdio,
-  probeAll,
+  readCache,
   resolveBinaryPath,
   splitHealthy,
   writeCache,
-  readCache,
 } from "../../scripts/lib/mcp-health.mjs";
-import { createServer } from "node:http";
 
 const NODE_BIN = process.execPath;
 
@@ -374,9 +373,7 @@ describe("mcp-health — probeHttp validation (A2 regression)", () => {
   it("200 + jsonrpc id 불일치 는 dead", async () => {
     const { server, url } = await startMock((req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({ jsonrpc: "2.0", id: 999, result: {} }),
-      );
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: 999, result: {} }));
     });
     try {
       const result = await probeHttp(url, 2000);

@@ -80,16 +80,16 @@ function parseTomlScalar(raw) {
 function stripInlineComment(line) {
   let inString = false;
   let stringChar = null;
-  let escape = false;
+  let escaped = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-    if (escape) {
-      escape = false;
+    if (escaped) {
+      escaped = false;
       continue;
     }
     if (inString) {
       if (ch === "\\" && stringChar === '"') {
-        escape = true;
+        escaped = true;
         continue;
       }
       if (ch === stringChar) {
@@ -118,11 +118,11 @@ function countBracketDelta(str) {
   let depth = 0;
   let inString = false;
   let stringChar = null;
-  let escape = false;
+  let escaped = false;
   let inComment = false;
   for (const ch of str) {
-    if (escape) {
-      escape = false;
+    if (escaped) {
+      escaped = false;
       continue;
     }
     if (inComment) {
@@ -131,7 +131,7 @@ function countBracketDelta(str) {
     }
     if (inString) {
       if (ch === "\\" && stringChar === '"') {
-        escape = true;
+        escaped = true;
         continue;
       }
       if (ch === stringChar) {
@@ -184,9 +184,7 @@ export function parseMcpServersFromToml(content = "") {
     if (!line || line.startsWith("#")) continue;
 
     const rootSection = line.match(/^\[mcp_servers\.([a-zA-Z0-9_.-]+)\]$/);
-    const envSection = line.match(
-      /^\[mcp_servers\.([a-zA-Z0-9_.-]+)\.env\]$/,
-    );
+    const envSection = line.match(/^\[mcp_servers\.([a-zA-Z0-9_.-]+)\.env\]$/);
     const anySection = line.startsWith("[");
 
     if (envSection) {
@@ -412,7 +410,8 @@ export function probeStdio(def, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
 
     try {
       child.stdin.write(makeInitializeRequest(), (err) => {
-        if (err) done({ alive: false, reason: `stdin:${err.code || err.message}` });
+        if (err)
+          done({ alive: false, reason: `stdin:${err.code || err.message}` });
       });
     } catch (err) {
       done({ alive: false, reason: `write:${err.code || err.message}` });
@@ -522,7 +521,10 @@ export function writeCache(cache, cachePath = DEFAULT_CACHE_PATH) {
   }
 }
 
-export function isCacheFresh(cache, { now = Date.now(), configMtime = 0 } = {}) {
+export function isCacheFresh(
+  cache,
+  { now = Date.now(), configMtime = 0 } = {},
+) {
   if (!cache || typeof cache !== "object") return false;
   if (typeof cache.checkedAt !== "number") return false;
   if (typeof cache.ttlMs !== "number") return false;
@@ -633,7 +635,8 @@ function parseCliArgs(argv) {
     names: null,
     configPath: DEFAULT_CONFIG_PATH,
     cachePath: DEFAULT_CACHE_PATH,
-    timeoutMs: Number(process.env.TFX_MCP_PROBE_TIMEOUT_MS) || DEFAULT_PROBE_TIMEOUT_MS,
+    timeoutMs:
+      Number(process.env.TFX_MCP_PROBE_TIMEOUT_MS) || DEFAULT_PROBE_TIMEOUT_MS,
     ttlMs: Number(process.env.TFX_MCP_HEALTH_TTL_MS) || DEFAULT_TTL_MS,
     useCache: true,
     format: "json",
@@ -718,15 +721,9 @@ function renderOutput(results, source, format) {
     ].join("\n");
   }
   if (format === "disable-flags") {
-    return dead
-      .map((name) => `-c mcp_servers.${name}.enabled=false`)
-      .join(" ");
+    return dead.map((name) => `-c mcp_servers.${name}.enabled=false`).join(" ");
   }
-  return JSON.stringify(
-    { source, healthy, dead, results },
-    null,
-    2,
-  );
+  return JSON.stringify({ source, healthy, dead, results }, null, 2);
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
