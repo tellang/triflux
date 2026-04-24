@@ -2,7 +2,12 @@
 // 기존 cli-adapter-base.mjs:stallThresholdMs(30s)와 headless.mjs:STALL_DEFAULTS(120s)를
 // 4단계 probe 모델로 교체. stdout+stderr 통합 스트림으로 평가 (F3 해결).
 
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -84,6 +89,10 @@ export function createHealthProbe(session, opts = {}) {
   const config = { ...PROBE_DEFAULTS, ...opts };
   let timer = null;
   let started = false;
+  // stopped flag는 in-flight probe()가 stop() 사이의 await 점에서
+  // writeState/unlink 와 race 하는 것을 막는다. start() 시 false 로 reset.
+  let stopped = false;
+  let inFlightProbe = null;
 
   // L1 tracking
   let lastOutputBytes = 0;
@@ -121,27 +130,49 @@ export function createHealthProbe(session, opts = {}) {
   }
 
   function writeState(result) {
+    if (stopped) return; // stop() 직후 in-flight probe()의 재생성 방지
     if (!config.writeStateFile && !config.stateFile) return;
     const stateFile = getStateFilePath();
     if (!stateFile) return;
+    const payload =
+      JSON.stringify(
+        {
+          pid: session.pid ?? null,
+          state: deriveState(result),
+          result,
+          updatedAt: new Date(result.ts).toISOString(),
+        },
+        null,
+        2,
+      ) + "\n";
+    // tmp+rename 으로 atomic write — heartbeat 의 sed 가 부분 파일을 읽는 race 제거.
+    // tmp 는 같은 디렉토리에 둬야 EXDEV (cross-device link) 가 안 난다.
+    const tmpPath = `${stateFile}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       mkdirSync(dirname(stateFile), { recursive: true });
-      writeFileSync(
-        stateFile,
-        JSON.stringify(
-          {
-            pid: session.pid ?? null,
-            state: deriveState(result),
-            result,
-            updatedAt: new Date(result.ts).toISOString(),
-          },
-          null,
-          2,
-        ) + "\n",
-        "utf8",
-      );
+      writeFileSync(tmpPath, payload, "utf8");
+      try {
+        renameSync(tmpPath, stateFile);
+      } catch (renameErr) {
+        // Windows: 대상이 존재할 때 EPERM/EACCES — unlink 후 재시도.
+        if (
+          renameErr?.code === "EEXIST" ||
+          renameErr?.code === "EPERM" ||
+          renameErr?.code === "EACCES"
+        ) {
+          try {
+            unlinkSync(stateFile);
+          } catch {}
+          renameSync(tmpPath, stateFile);
+        } else {
+          throw renameErr;
+        }
+      }
     } catch {
-      // probe state is advisory only.
+      // probe state is advisory only — tmp cleanup
+      try {
+        unlinkSync(tmpPath);
+      } catch {}
     }
   }
 
@@ -264,30 +295,38 @@ export function createHealthProbe(session, opts = {}) {
 
   /**
    * 전체 probe 실행 (L0→L1→L2→L3).
-   * @returns {Promise<object>} probe 결과
+   * @returns {Promise<object|null>} probe 결과. stop() 이후 호출이면 null.
    */
   async function probe() {
-    const result = {
-      l0: probeL0(),
-      l1: probeL1(),
-      l2: await probeL2(),
-      l3: probeL3(),
-      inputWaitPattern: status.inputWaitPattern,
-      ts: Date.now(),
-    };
-    status.lastProbeAt = result.ts;
-    writeState(result);
+    if (stopped) return null;
+    const promise = (async () => {
+      const result = {
+        l0: probeL0(),
+        l1: probeL1(),
+        l2: await probeL2(),
+        l3: probeL3(),
+        inputWaitPattern: status.inputWaitPattern,
+        ts: Date.now(),
+      };
+      status.lastProbeAt = result.ts;
+      writeState(result);
 
-    if (typeof config.onProbe === "function") {
-      config.onProbe(result);
-    }
+      if (typeof config.onProbe === "function") {
+        config.onProbe(result);
+      }
 
-    return result;
+      return result;
+    })();
+    inFlightProbe = promise.finally(() => {
+      if (inFlightProbe === promise) inFlightProbe = null;
+    });
+    return promise;
   }
 
   function start() {
     if (started) return;
     started = true;
+    stopped = false;
     spawnedAt = Date.now();
     lastOutputChangeAt = Date.now();
     lastOutputBytes = 0;
@@ -305,6 +344,9 @@ export function createHealthProbe(session, opts = {}) {
   function stop() {
     if (!started) return;
     started = false;
+    // stopped 를 먼저 set 해야 in-flight probe()의 writeState() 가 skip 된다.
+    // 이후 unlink — in-flight 가 끝나도 writeState 가 no-op 이므로 재생성 없음.
+    stopped = true;
     if (timer) {
       clearInterval(timer);
       timer = null;
@@ -313,6 +355,20 @@ export function createHealthProbe(session, opts = {}) {
       try {
         const stateFile = getStateFilePath();
         if (stateFile) unlinkSync(stateFile);
+      } catch {}
+    }
+  }
+
+  /**
+   * stop() 후 in-flight probe() 가 완료될 때까지 대기.
+   * 결정적 종료가 필요한 테스트/teardown 용. conductor 의 sync stop() 호출자는
+   * 그대로 stop() 만 호출하면 stopped flag 가 race 를 막는다.
+   */
+  async function stopAndDrain() {
+    stop();
+    if (inFlightProbe) {
+      try {
+        await inFlightProbe;
       } catch {}
     }
   }
@@ -333,6 +389,7 @@ export function createHealthProbe(session, opts = {}) {
   return Object.freeze({
     start,
     stop,
+    stopAndDrain,
     probe,
     resetTracking,
     getStatus: () => ({ ...status }),

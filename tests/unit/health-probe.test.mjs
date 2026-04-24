@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -185,6 +185,132 @@ describe("health-probe: createHealthProbe", () => {
     assert.equal(state.pid, 4242);
     assert.equal(state.state, "mcp_initializing");
     assert.equal(state.result.l2, "fail");
+  });
+});
+
+describe("health-probe: stop() race (#162)", () => {
+  it("stop() 후 probe() 호출은 null 을 반환해야 한다", async () => {
+    const session = {
+      pid: 4243,
+      alive: true,
+      getOutputBytes: () => 0,
+      getRecentOutput: () => "",
+    };
+    const probe = createHealthProbe(session);
+    probe.stop(); // start() 안 했어도 stopped 는 set 안 됨 — start() 후 stop() 필요
+    probe.start();
+    probe.stop();
+    const result = await probe.probe();
+    assert.equal(result, null);
+  });
+
+  it("start() 는 stopped flag 를 리셋해야 한다", async () => {
+    const session = {
+      pid: 4244,
+      alive: true,
+      getOutputBytes: () => 100,
+      getRecentOutput: () => "",
+    };
+    const probe = createHealthProbe(session, { intervalMs: 100_000 });
+    probe.start();
+    probe.stop();
+    assert.equal(await probe.probe(), null);
+    probe.start();
+    const result = await probe.probe();
+    assert.ok(result, "start() 후 probe() 는 null 이 아니어야 한다");
+    assert.equal(result.l0, "ok");
+    probe.stop();
+  });
+
+  it("in-flight probe() 가 stop() 후 state file 을 재생성하지 않아야 한다", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "tfx-probe-race-"));
+    let releaseMcp;
+    const mcpPromise = new Promise((resolve) => {
+      releaseMcp = resolve;
+    });
+    const session = {
+      pid: 4245,
+      alive: true,
+      getOutputBytes: () => 0,
+      getRecentOutput: () => "",
+    };
+    const probe = createHealthProbe(session, {
+      enableL2: true,
+      checkMcp: () => mcpPromise, // 영원히 await — manually release
+      writeStateFile: true,
+      stateDir,
+      intervalMs: 100_000,
+    });
+    probe.start();
+
+    // start() 가 즉시 첫 probe() 를 발사. probeL2 의 await mcpPromise 에서 yield 됨.
+    // 이 시점에 stop() 호출 → stopped=true + unlinkSync (state file 없음)
+    probe.stop();
+
+    // in-flight probe() 를 release. writeState 직전 stopped 체크로 skip 되어야 함.
+    releaseMcp(true);
+
+    // stopAndDrain 대신 stop 이미 호출. in-flight 가 끝날 때까지 micro-task 로 yield.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    const stateFile = join(stateDir, "4245.json");
+    assert.equal(
+      existsSync(stateFile),
+      false,
+      "stop() 후 in-flight probe() 가 state file 을 재생성하면 안 됨",
+    );
+    // tmp 파일도 leak 되면 안 됨 (writeState 가 stopped 를 보고 일찍 return).
+    const leftovers = readdirSync(stateDir).filter((n) => n.startsWith("4245.json.tmp"));
+    assert.deepEqual(leftovers, [], `tmp 파일이 남으면 안 됨: ${leftovers.join(",")}`);
+  });
+
+  it("stopAndDrain() 은 in-flight probe() 완료까지 await 한다", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "tfx-probe-drain-"));
+    let releaseMcp;
+    const mcpPromise = new Promise((resolve) => {
+      releaseMcp = resolve;
+    });
+    const session = {
+      pid: 4246,
+      alive: true,
+      getOutputBytes: () => 0,
+      getRecentOutput: () => "",
+    };
+    const probe = createHealthProbe(session, {
+      enableL2: true,
+      checkMcp: () => mcpPromise,
+      writeStateFile: true,
+      stateDir,
+      intervalMs: 100_000,
+    });
+    probe.start();
+    // stop+drain 을 먼저 호출하되, drain 은 in-flight release 까지 대기.
+    queueMicrotask(() => releaseMcp(true));
+    await probe.stopAndDrain();
+    const stateFile = join(stateDir, "4246.json");
+    assert.equal(existsSync(stateFile), false);
+  });
+
+  it("atomic write 결과는 항상 valid JSON 이어야 한다", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "tfx-probe-atomic-"));
+    const session = {
+      pid: 4247,
+      alive: true,
+      getOutputBytes: () => 256,
+      getRecentOutput: () => "",
+    };
+    const probe = createHealthProbe(session, {
+      writeStateFile: true,
+      stateDir,
+    });
+    // 여러 번 연속 write → 매번 JSON.parse 성공해야 함.
+    for (let i = 0; i < 10; i += 1) {
+      await probe.probe();
+      const raw = readFileSync(join(stateDir, "4247.json"), "utf8");
+      assert.doesNotThrow(() => JSON.parse(raw), `iteration ${i} JSON parse fail`);
+    }
+    probe.stop();
   });
 });
 

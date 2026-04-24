@@ -320,6 +320,12 @@ read_probe_state() {
   local pid="$1"
   local state_file="${TFX_PROBE_STATE_FILE:-${TFX_PROBE_DIR}/${pid}.json}"
   [[ -f "$state_file" ]] || return 1
+  # 2-step read (#162): health-probe.mjs 의 atomic write (tmp+rename) 가 도입되었지만
+  # writer 쪽 OS race 또는 race-free 보장을 못 받는 환경 (예: 일부 FS) 에서 빈/부분 파일
+  # 을 sed 가 읽고 stale state 를 반환하는 것을 방지하기 위해 size 가 너무 작으면 무시.
+  local size
+  size=$(wc -c < "$state_file" 2>/dev/null || printf '0')
+  [[ "$size" -ge 20 ]] || return 1
   sed -n 's/.*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$state_file" 2>/dev/null | head -1
 }
 RUN_ID="${TIMESTAMP}-$$-${RANDOM}"
