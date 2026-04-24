@@ -25,12 +25,26 @@ function getCodexConfigPath(codexConfigPath) {
   return join(home, ...CODEX_CONFIG_FILE);
 }
 
-function getProjectMcpJsonPaths(projectRoot) {
-  const root =
-    typeof projectRoot === "string" && projectRoot.length > 0
-      ? projectRoot
-      : process.cwd();
-  return [join(root, ".claude", "mcp.json"), join(root, ".mcp.json")];
+export function getProjectMcpJsonPaths(projectRoot) {
+  // projectRoot: string | string[] | undefined.
+  // 항상 process.cwd() 를 함께 포함한다. 호출자가 PLUGIN_ROOT 만 넘기더라도
+  // 사용자 실제 작업 디렉토리의 .mcp.json 이 sync 대상에서 빠지지 않도록 한다.
+  // Set 으로 dedup, insertion order 유지.
+  const roots = new Set();
+  if (Array.isArray(projectRoot)) {
+    for (const r of projectRoot) {
+      if (typeof r === "string" && r.length > 0) roots.add(r);
+    }
+  } else if (typeof projectRoot === "string" && projectRoot.length > 0) {
+    roots.add(projectRoot);
+  }
+  roots.add(process.cwd());
+
+  const paths = [];
+  for (const root of roots) {
+    paths.push(join(root, ".claude", "mcp.json"), join(root, ".mcp.json"));
+  }
+  return paths;
 }
 
 function getReason(error, fallback) {

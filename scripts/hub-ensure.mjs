@@ -13,6 +13,7 @@ import { fileURLToPath } from "url";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
+const HUB_DEFAULT_PORT = 27888;
 
 function formatHostForUrl(host) {
   return host.includes(":") ? `[${host}]` : host;
@@ -41,22 +42,23 @@ async function syncHubConfigsIfAvailable({ hubUrl }) {
   }
 }
 
-function resolveHubTarget() {
+export function resolveHubTarget() {
   const envPortRaw = Number(process.env.TFX_HUB_PORT || "");
   const envPort =
     Number.isFinite(envPortRaw) && envPortRaw > 0 ? envPortRaw : null;
   const target = {
     host: "127.0.0.1",
-    port: envPort || 27888,
+    port: envPort ?? HUB_DEFAULT_PORT,
   };
 
+  // PID 파일의 port는 source of truth가 아니다. host 힌트만 재사용한다.
+  // 과거에는 `!envPort`일 때 PID file의 port로 target.port를 덮었으나,
+  // 이는 이전 세션의 오염된 port(비표준 포트)가 cascade로 영속화되는 버그 원인이었다.
+  // 포트는 오직 TFX_HUB_PORT env(없으면 HUB_DEFAULT_PORT=27888)만 source of truth다.
+  // client config 는 sync-hub-mcp-settings.mjs가 이 hubUrl로 재동기화한다.
   if (existsSync(HUB_PID_FILE)) {
     try {
       const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-      if (!envPort) {
-        const pidPort = Number(info?.port);
-        if (Number.isFinite(pidPort) && pidPort > 0) target.port = pidPort;
-      }
       if (typeof info?.host === "string") {
         const host = info.host.trim();
         if (LOOPBACK_HOSTS.has(host)) target.host = host;
