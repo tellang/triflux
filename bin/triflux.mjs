@@ -61,21 +61,21 @@ import {
   probePsmuxSupport,
 } from "../scripts/lib/psmux-info.mjs";
 import {
+  buildWindowsHubAutostartCommand,
   cleanupStaleSkills,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
   ensureHooksInSettings,
-  getWindowsHubAutostartStatus,
   extractManagedHookFilename,
   getManagedRegistryHooks,
   getVersion,
+  getWindowsHubAutostartStatus,
   hasProfileSection,
   LEGACY_CODEX_MODELS,
   REQUIRED_CODEX_PROFILES,
   replaceProfileSection,
   SKILL_ALIASES,
   SYNC_MAP,
-  buildWindowsHubAutostartCommand,
   syncAliasedSkillDir,
 } from "../scripts/setup.mjs";
 import { cleanupTmpFiles } from "../scripts/tmp-cleanup.mjs";
@@ -1128,8 +1128,7 @@ function buildSetupDryRunPlan() {
     type: "hub-autostart",
     platform: process.platform,
     taskName: autostart.taskName,
-    change:
-      autostart.supported && !autostart.registered ? "available" : "noop",
+    change: autostart.supported && !autostart.registered ? "available" : "noop",
     registered: autostart.registered,
     command: autostart.supported ? buildWindowsHubAutostartCommand() : null,
     enableWith: "tfx setup --enable-hub-autostart",
@@ -1399,7 +1398,9 @@ function cmdSetup(options = {}) {
             detail: `${verified.taskName} 등록됨`,
           });
         } else {
-          warn("Hub autostart 등록 실패: subprocess 성공했으나 /Query 에서 미발견");
+          warn(
+            "Hub autostart 등록 실패: subprocess 성공했으나 /Query 에서 미발견",
+          );
           summary.push({
             item: "Hub autostart",
             status: "⚠️",
@@ -1422,7 +1423,9 @@ function cmdSetup(options = {}) {
         detail: "이미 등록됨",
       });
     } else {
-      warn("Hub autostart 미등록 — Codex 단독 시작 전 hub가 죽어 있으면 MCP가 실패할 수 있음");
+      warn(
+        "Hub autostart 미등록 — Codex 단독 시작 전 hub가 죽어 있으면 MCP가 실패할 수 있음",
+      );
       info("등록: tfx setup --enable-hub-autostart");
       summary.push({
         item: "Hub autostart",
