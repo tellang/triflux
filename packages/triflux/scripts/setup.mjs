@@ -47,6 +47,7 @@ function detectDevMode(root = PLUGIN_ROOT) {
 const BREADCRUMB_PATH = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
+const WINDOWS_HUB_AUTOSTART_TASK = "TrifluxHubEnsure";
 
 const REQUIRED_CODEX_PROFILES = [
   // gpt-5.5 — 새 main 플래그십. xhigh/high/med/low 4 tier 전부 보장.
@@ -747,6 +748,81 @@ function getSetupArgv(stdinData) {
   return Array.isArray(stdinData?.argv) ? stdinData.argv : [];
 }
 
+function quoteWindowsTaskArg(value) {
+  return `"${String(value).replace(/"/g, '\\"')}"`;
+}
+
+function buildWindowsHubAutostartCommand({
+  nodePath = process.execPath,
+  pluginRoot = PLUGIN_ROOT,
+} = {}) {
+  return [
+    quoteWindowsTaskArg(nodePath),
+    quoteWindowsTaskArg(join(pluginRoot, "scripts", "hub-ensure.mjs")),
+  ].join(" ");
+}
+
+function getWindowsHubAutostartStatus({
+  taskName = WINDOWS_HUB_AUTOSTART_TASK,
+} = {}) {
+  if (process.platform !== "win32") {
+    return { supported: false, registered: false, taskName };
+  }
+  try {
+    execFileSync("schtasks.exe", ["/Query", "/TN", taskName], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return { supported: true, registered: true, taskName };
+  } catch {
+    return { supported: true, registered: false, taskName };
+  }
+}
+
+function ensureWindowsHubAutostart({
+  taskName = WINDOWS_HUB_AUTOSTART_TASK,
+  nodePath = process.execPath,
+  pluginRoot = PLUGIN_ROOT,
+  force = true,
+} = {}) {
+  if (process.platform !== "win32") {
+    return {
+      supported: false,
+      changed: false,
+      registered: false,
+      taskName,
+      reason: "non-windows",
+    };
+  }
+
+  const command = buildWindowsHubAutostartCommand({ nodePath, pluginRoot });
+  const args = [
+    "/Create",
+    "/TN",
+    taskName,
+    "/SC",
+    "ONLOGON",
+    "/TR",
+    command,
+    "/RL",
+    "LIMITED",
+  ];
+  if (force) args.push("/F");
+
+  execFileSync("schtasks.exe", args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+  return {
+    supported: true,
+    changed: true,
+    registered: true,
+    taskName,
+    command,
+  };
+}
+
 function loadSettings() {
   if (!existsSync(SETTINGS_PATH)) return {};
 
@@ -987,9 +1063,11 @@ export {
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
   ensureHooksInSettings,
+  ensureWindowsHubAutostart,
   extractManagedHookFilename,
   getManagedRegistryHooks,
   getVersion,
+  getWindowsHubAutostartStatus,
   hasProfileSection,
   LEGACY_CODEX_MODELS,
   PLUGIN_ROOT,
@@ -1000,6 +1078,8 @@ export {
   SETUP_MARKER_PATH,
   SKILL_ALIASES,
   SYNC_MAP,
+  WINDOWS_HUB_AUTOSTART_TASK,
+  buildWindowsHubAutostartCommand,
   scanHudFiles,
   syncAliasedSkillDir,
   writeMarker,
@@ -1032,6 +1112,9 @@ export async function runDeferred(stdinData) {
   const argv = getSetupArgv(stdinData);
   const isSync = argv.includes("--sync");
   const isForce = argv.includes("--force");
+  const enableHubAutostart =
+    argv.includes("--enable-hub-autostart") ||
+    process.env.TFX_HUB_AUTOSTART === "1";
   const isDev = detectDevMode();
 
   if (isDev) {
@@ -1666,6 +1749,24 @@ export async function runDeferred(stdinData) {
   const codexProfilesResult = ensureCodexProfiles();
   if (codexProfilesResult.ok && codexProfilesResult.changed > 0) {
     synced++;
+  }
+
+  // ── Windows Codex 단독 실행 보호: 로그인 시 hub-ensure 등록 ──
+  // Claude SessionStart 훅이 없는 순수 Codex 시작 경로에서도 tfx-hub가 살아있게 한다.
+  if (enableHubAutostart) {
+    try {
+      const result = ensureWindowsHubAutostart();
+      if (result.registered) {
+        io.log(
+          `  \x1b[32m✓\x1b[0m Windows hub autostart: ${result.taskName}`,
+        );
+        synced++;
+      }
+    } catch (error) {
+      io.log(
+        `  \x1b[33m⚠\x1b[0m Windows hub autostart 등록 실패: ${error.message}`,
+      );
+    }
   }
 
   // ── CLAUDE.md 라우팅 섹션 자동 동기화 ──
