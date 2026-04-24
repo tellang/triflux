@@ -90,6 +90,45 @@ describe("#168 createHubHealthChecker", () => {
     assert.equal(calls[0], "http://example:9999/health");
   });
 
+  it("strips /mcp suffix from hubUrl (#173 Codex P2)", async () => {
+    const calls = [];
+    const check = createHubHealthChecker({
+      hubUrl: "http://example:9999/mcp",
+      fetchFn: async (url) => {
+        calls.push(url);
+        return { ok: true };
+      },
+    });
+    await check();
+    assert.equal(calls[0], "http://example:9999/health");
+  });
+
+  it("strips /mcp/ suffix with trailing slash from hubUrl", async () => {
+    const calls = [];
+    const check = createHubHealthChecker({
+      hubUrl: "http://example:9999/mcp/",
+      fetchFn: async (url) => {
+        calls.push(url);
+        return { ok: true };
+      },
+    });
+    await check();
+    assert.equal(calls[0], "http://example:9999/health");
+  });
+
+  it("honors TFX_HUB_URL with /mcp suffix", async () => {
+    process.env.TFX_HUB_URL = "http://env-host:1234/mcp";
+    const calls = [];
+    const check = createHubHealthChecker({
+      fetchFn: async (url) => {
+        calls.push(url);
+        return { ok: true };
+      },
+    });
+    await check();
+    assert.equal(calls[0], "http://env-host:1234/health");
+  });
+
   it("returns false when global fetch missing and no fetchFn given", async () => {
     const originalFetch = globalThis.fetch;
     try {

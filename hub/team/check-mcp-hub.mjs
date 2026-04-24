@@ -7,7 +7,12 @@ const DEFAULT_TIMEOUT_MS = 3000;
 
 function resolveHubHealthUrl(hubUrl) {
   const base = hubUrl || process.env.TFX_HUB_URL || DEFAULT_HUB_URL;
-  return base.replace(/\/+$/, "") + "/health";
+  // `/mcp` suffix 제거 (triflux convention — bridge.mjs:54, hub-client.mjs,
+  // lead-control.mjs, session-sync.mjs 전부 TFX_HUB_URL 을 MCP transport URL
+  // 로 쓰고 base URL 이 필요할 때 `/mcp$` 를 strip 한다). 제거하지 않으면
+  // `.../mcp/health` 가 되어 hub 가 404 로 응답 → L2 영구 fail → heartbeat
+  // 이 지속적으로 `mcp_initializing` 로 grace — #173 Codex P2 review.
+  return base.replace(/\/mcp\/?$/, "").replace(/\/+$/, "") + "/health";
 }
 
 /**

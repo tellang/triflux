@@ -22,6 +22,7 @@ import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "@triflux/core/hub/account-broker.mjs";
 import { execFile, spawn } from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { killProcess } from "@triflux/core/hub/platform.mjs";
+import { createHubHealthChecker } from "./check-mcp-hub.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
 import {
   ensureConductorRegistry,
@@ -30,7 +31,6 @@ import {
 import { createEventLog } from "./event-log.mjs";
 import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
 import { extractCompletionPayload } from "./extract-completion-payload.mjs";
-import { createHubHealthChecker } from "./check-mcp-hub.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
 import { createSentinelCapture } from "./sentinel-capture.mjs";
@@ -705,8 +705,7 @@ export function createConductor(opts = {}) {
         // 그걸 우선. 아니면 TFX_PROBE_L2=0 로 opt-out. 나머지 경우 hub URL 기반
         // default checker 주입 → deriveState 가 `mcp_initializing` 라벨을 생산 →
         // heartbeat (read_probe_state) 가 probe-grace 분기로 감.
-        enableL2:
-          probeOpts.enableL2 ?? process.env.TFX_PROBE_L2 !== "0",
+        enableL2: probeOpts.enableL2 ?? process.env.TFX_PROBE_L2 !== "0",
         checkMcp:
           probeOpts.checkMcp ||
           (process.env.TFX_PROBE_L2 === "0"
