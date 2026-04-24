@@ -784,6 +784,23 @@ const WINDOWS_SCHTASKS_ACCESS_DENIED_PATTERNS = [
 // 따라서 Create 전에 사전 검증해 조기 실패를 보장한다.
 const SCHTASKS_TR_MAX_LENGTH = 261;
 
+// #161 P3: /TR 길이 검증 공용 함수.
+// schtasks 는 Windows 내부에서 wide-char 문자 수로 제한하므로 UTF-8 byte 가 아닌
+// JavaScript string .length (UTF-16 code units) 기준으로 비교한다.
+// Codex Round 1 P1 반영: UTF-8 byte 검증은 한글 경로에서 정상 명령을 오차단했다
+// (예: ~218자 한글 경로 = 578 bytes → false positive throw).
+// Codex Round 3 P2 반영: 테스트가 실행 경로와 동일한 이 함수를 exercise 하므로
+// 내부 구현이 회귀해 byte 기반으로 돌아가면 테스트가 즉시 포착한다.
+function validateSchtasksTrLength(command) {
+  const commandChars = command.length;
+  if (commandChars > SCHTASKS_TR_MAX_LENGTH) {
+    throw new Error(
+      `schtasks /TR 인자가 ${SCHTASKS_TR_MAX_LENGTH} 문자를 초과합니다 ` +
+        `(${commandChars} chars): ${command}`,
+    );
+  }
+}
+
 function classifySchtasksStderr(stderr) {
   const lower = String(stderr || "").toLowerCase();
   if (
@@ -846,18 +863,8 @@ function ensureWindowsHubAutostart({
 
   const command = buildWindowsHubAutostartCommand({ nodePath, pluginRoot });
 
-  // #161 P3: /TR 262자 제한 사전 검증.
-  // schtasks 는 Windows 내부에서 wide-char 문자 수로 제한하므로 UTF-8 byte 가 아닌
-  // JavaScript string .length (UTF-16 code units) 기준으로 비교한다.
-  // Codex Round 1 P1 반영: UTF-8 byte 검증은 한글 경로에서 정상 명령도 오차단하는
-  // 회귀를 유발했다 (예: ~218자 한글 경로 = 578 bytes → false positive throw).
-  const commandChars = command.length;
-  if (commandChars > SCHTASKS_TR_MAX_LENGTH) {
-    throw new Error(
-      `schtasks /TR 인자가 ${SCHTASKS_TR_MAX_LENGTH} 문자를 초과합니다 ` +
-        `(${commandChars} chars): ${command}`,
-    );
-  }
+  // #161 P3: /TR 262자 제한 사전 검증을 공용 함수로 위임해 테스트/실행 로직 일관성 보장.
+  validateSchtasksTrLength(command);
 
   const args = [
     "/Create",
@@ -1159,6 +1166,7 @@ export {
   SYNC_MAP,
   scanHudFiles,
   syncAliasedSkillDir,
+  validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
   writeMarker,
 };

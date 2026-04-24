@@ -8,6 +8,7 @@ import {
   ensureWindowsHubAutostart,
   getWindowsHubAutostartStatus,
   SCHTASKS_TR_MAX_LENGTH,
+  validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
 } from "../../scripts/setup.mjs";
 
@@ -101,10 +102,11 @@ describe("#161 P3 — /TR 262자 제한 사전 검증", () => {
     );
   });
 
-  it("한글 경로는 char count 기준이라 /TR cap 미만 (byte 오차단 방지)", () => {
-    // 실제 schtasks 호출 없이 build 함수 결과의 char/byte count 만 비교 — hermetic.
-    // Codex Round 2 P1: ensureWindowsHubAutostart 직접 호출은 host 의 실제 task 를
-    // 건드리므로 buildWindowsHubAutostartCommand 단독으로 검증한다.
+  it("한글 경로는 validateSchtasksTrLength 에서 throw 하지 않아야 한다 (byte 오차단 방지)", () => {
+    // 실제 schtasks 호출 없이, ensureWindowsHubAutostart 가 내부적으로 쓰는 공용
+    // 검증 함수를 직접 exercise — hermetic 하면서도 회귀 시 (byte 기반으로 돌아가면) 포착.
+    // Codex Round 3 P2 반영: buildWindowsHubAutostartCommand 만 호출하면 ensureWindowsHubAutostart
+    // 내부 검증 로직과 분리돼 회귀 감지 커버리지 손실.
     const koreanRoot = `C:\\${"한".repeat(60)}`;
     const command = buildWindowsHubAutostartCommand({
       nodePath: "C:\\node\\node.exe",
@@ -114,11 +116,12 @@ describe("#161 P3 — /TR 262자 제한 사전 검증", () => {
     const utf8Bytes = Buffer.byteLength(command, "utf8");
     assert.ok(
       utf8Bytes > chars,
-      `multi-byte 경로라 UTF-8 bytes(${utf8Bytes}) > chars(${chars})`,
+      `multi-byte 경로 — UTF-8 bytes(${utf8Bytes}) > chars(${chars})`,
     );
-    assert.ok(
-      chars <= SCHTASKS_TR_MAX_LENGTH,
-      `한글 경로 char count(${chars}) 가 limit(${SCHTASKS_TR_MAX_LENGTH}) 이하 — byte 기반이면 false positive`,
+    // ensureWindowsHubAutostart 와 동일한 검증 함수를 호출 → throw 하면 즉시 실패
+    assert.doesNotThrow(
+      () => validateSchtasksTrLength(command),
+      `한글 경로 command (${chars} chars / ${utf8Bytes} bytes) 가 /TR 검증에서 throw 되면 안 됨`,
     );
   });
 
