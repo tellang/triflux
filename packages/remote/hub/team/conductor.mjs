@@ -696,6 +696,7 @@ export function createConductor(opts = {}) {
       },
       {
         ...probeOpts,
+        writeStateFile: probeOpts.writeStateFile ?? process.env.TFX_PROBE_WRITE_STATE === "1",
         onProbe: (result) => handleProbeResult(session, result),
       },
     );

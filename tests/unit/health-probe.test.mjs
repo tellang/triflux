@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -159,6 +162,29 @@ describe("health-probe: createHealthProbe", () => {
     assert.equal(probe.started, true);
     probe.stop();
     assert.equal(probe.started, false);
+  });
+
+  it("probe state 파일을 pid 기준으로 쓸 수 있어야 한다", async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "tfx-probe-test-"));
+    const session = {
+      pid: 4242,
+      alive: true,
+      getOutputBytes: () => 0,
+      getRecentOutput: () => "Initializing MCP...",
+    };
+
+    const probe = createHealthProbe(session, {
+      enableL2: true,
+      checkMcp: async () => false,
+      writeStateFile: true,
+      stateDir,
+    });
+    await probe.probe();
+
+    const state = JSON.parse(readFileSync(join(stateDir, "4242.json"), "utf8"));
+    assert.equal(state.pid, 4242);
+    assert.equal(state.state, "mcp_initializing");
+    assert.equal(state.result.l2, "fail");
   });
 });
 
