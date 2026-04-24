@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
-  WINDOWS_HUB_AUTOSTART_TASK,
   buildWindowsHubAutostartCommand,
   getWindowsHubAutostartStatus,
+  WINDOWS_HUB_AUTOSTART_TASK,
 } from "../../scripts/setup.mjs";
 
 describe("setup hub autostart", () => {

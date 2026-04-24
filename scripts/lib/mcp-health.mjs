@@ -334,7 +334,7 @@ function makeInitializeRequest() {
 
 function isValidInitResponse(line) {
   const trimmed = line.trim();
-  if (!trimmed || !trimmed.startsWith("{")) return false;
+  if (!trimmed?.startsWith("{")) return false;
   try {
     const msg = JSON.parse(trimmed);
     if (msg.jsonrpc !== "2.0") return false;
@@ -576,8 +576,7 @@ export async function probeAll({
     const prior = cachedResults[name];
     if (
       cacheWithinTtl &&
-      prior &&
-      prior.fingerprint &&
+      prior?.fingerprint &&
       fingerprintsEqual(prior.fingerprint, fingerprints[name])
     ) {
       hits[name] = prior;
