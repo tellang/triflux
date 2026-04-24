@@ -366,24 +366,33 @@ describe("syncCodexHubUrl", () => {
     assert.equal(readFileSync(configPath, "utf8"), before);
   });
 
-  it("case 5: tfx-hub 섹션이 없으면 생성하지 않고 skip한다", async () => {
+  it("case 5: tfx-hub 섹션이 없으면 Codex 단독 시작을 위해 생성한다", async () => {
     const configPath = codexPath(".codex", "config.toml");
     writeRaw(
       configPath,
       `[mcp_servers.other]\nurl = "http://127.0.0.1:3000/mcp"\n`,
     );
 
-    const before = readFileSync(configPath, "utf8");
     const result = await syncCodexHubUrl({
       hubUrl: HUB_URL,
       codexConfigPath: configPath,
       logger: createLogger(),
     });
 
-    assert.deepEqual(result.updated, []);
+    assert.deepEqual(result.updated, [configPath]);
     assert.deepEqual(result.errors, []);
-    assert.deepEqual(result.skipped, [configPath]);
-    assert.equal(readFileSync(configPath, "utf8"), before);
+    assert.deepEqual(result.skipped, []);
+    assert.equal(
+      readFileSync(configPath, "utf8"),
+      [
+        "[mcp_servers.other]",
+        'url = "http://127.0.0.1:3000/mcp"',
+        "",
+        "[mcp_servers.tfx-hub]",
+        `url = "${HUB_URL}"`,
+        "",
+      ].join("\n"),
+    );
   });
 
   it("case 6: tfx-hub.url 라인이 없으면 errors에 기록하고 원본 파일을 보존한다", async () => {

@@ -279,6 +279,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
         "[profiles.spark53_low]",
         'model = "legacy-spark"',
         "",
+        "# padding: realistic Codex config files are larger than setup's safety floor",
       ].join("\n"),
       "utf8",
     );

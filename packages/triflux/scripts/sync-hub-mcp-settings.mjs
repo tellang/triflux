@@ -132,8 +132,11 @@ function parseTomlScalar(rawValue) {
 }
 
 function findMcpServerSection(raw, sectionName) {
+  // TOML 동치 표현 지원: [mcp_servers.name] / [mcp_servers."name"] / [mcp_servers . name]
+  // 미검출 시 appendCodexMcpServerSection이 중복 테이블 생성 → TOMLDecodeError 회귀 방지.
+  const escaped = escapeRegExp(sectionName);
   const headerRegex = new RegExp(
-    `^\\[mcp_servers\\.${escapeRegExp(sectionName)}\\]\\s*$`,
+    `^\\[\\s*mcp_servers\\s*\\.\\s*(?:${escaped}|"${escaped}"|'${escaped}')\\s*\\]\\s*$`,
     "m",
   );
   const headerMatch = headerRegex.exec(raw);
@@ -151,6 +154,12 @@ function findMcpServerSection(raw, sectionName) {
     bodyStart,
     sectionEnd,
   };
+}
+
+function appendCodexMcpServerSection(raw, sectionName, hubUrl) {
+  const normalized = raw.length > 0 && !raw.endsWith("\n") ? `${raw}\n` : raw;
+  const separator = normalized.length > 0 && !normalized.endsWith("\n\n") ? "\n" : "";
+  return `${normalized}${separator}[mcp_servers.${sectionName}]\nurl = ${formatTomlString(hubUrl)}\n`;
 }
 
 async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
@@ -243,8 +252,29 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
 
     const section = findMcpServerSection(raw, TFX_HUB_SECTION);
     if (!section) {
-      log(logger, "info", `[codex-mcp-sync] skipped: ${filePath}`);
-      return { kind: "skipped", path: filePath };
+      const nextRaw = appendCodexMcpServerSection(raw, TFX_HUB_SECTION, hubUrl);
+      log(
+        logger,
+        "debug",
+        `[codex-mcp-sync] ${filePath} add ${TFX_HUB_SECTION}: ${hubUrl}`,
+      );
+
+      if (!dryRun) {
+        try {
+          await writeTextAtomic(filePath, nextRaw);
+        } catch (error) {
+          const reason = getReason(error, "write failed");
+          log(
+            logger,
+            "error",
+            `[codex-mcp-sync] error: ${filePath} (${reason})`,
+          );
+          return { kind: "error", path: filePath, reason };
+        }
+      }
+
+      log(logger, "info", `[codex-mcp-sync] updated: ${filePath}`);
+      return { kind: "updated", path: filePath };
     }
 
     const urlMatch = /^(\s*url\s*=\s*)(.+?)(\s*(?:#.*)?)$/m.exec(section.body);
