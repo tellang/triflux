@@ -7,7 +7,7 @@
 | **gstack** | `~/.gstack/last-update-check` 훅 / 세션 시작 배너 | `/gstack-upgrade` 스킬 (git install이면 `git merge --ff-only origin/main` + `./setup` + migrations) |
 | **Codex CLI** | `codex --version` / `~/.codex/auth.json` mtime | `npm i -g @openai/codex` / 토큰 만료 시 `codex login` (인터랙티브) + 메시지 한 번 날려 refresh 트리거 |
 | **Gemini CLI** | `gemini --version` | `npm i -g @google/gemini-cli` |
-| **Hub MCP URL 동기화** | Hub 시작 시 hub.pid의 port vs settings의 tfx-hub.url | PR #82 자동화 (`scripts/sync-hub-mcp-settings.mjs`의 `syncHubMcpSettings({hubUrl})`를 server startup에서 호출) |
+| **Hub MCP URL 동기화** | Hub 시작 시 `resolveHubTarget()` (env `TFX_HUB_PORT` 없으면 `HUB_DEFAULT_PORT=27888`) vs client configs의 `tfx-hub.url` | PR #82 auto sync + PR #158 port cascade fix. `scripts/sync-hub-mcp-settings.mjs`의 `syncHubMcpSettings({hubUrl})` + `syncProjectMcpJson({projectRoot: process.cwd()})`를 hub-ensure에서 호출. pid-file은 host 힌트 전용 (port 재사용 제거) |
 | **Codex auth 캐시** (pte1024 등) | 병렬 codex exec 시 `refresh_token_reused` | `cp ~/.codex/auth.json ~/.claude/cache/tfx-hub/codex-auth-<account>.json` 수동 (Issue #78 자동화 대기) |
 
 ## 주의
