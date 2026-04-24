@@ -19,9 +19,9 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRegistry } from "../../mesh/mesh-registry.mjs";
-import { broker } from "../account-broker.mjs";
-import { execFile, spawn } from "../lib/spawn-trace.mjs";
-import { killProcess } from "../platform.mjs";
+import { broker } from "@triflux/core/hub/account-broker.mjs";
+import { execFile, spawn } from "@triflux/core/hub/lib/spawn-trace.mjs";
+import { killProcess } from "@triflux/core/hub/platform.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
 import {
   ensureConductorRegistry,

@@ -4,6 +4,22 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.14.2] - 2026-04-25
+
+### Fixed
+
+- **`fix(probe)` (#162, #167)** atomic write + stop()→start() race + drain 보장 + Windows backup-then-swap (04d08a3) — health-probe.mjs 의 state file write 가 reader (heartbeat sed) 의 부분 파일 read race 를 야기하던 문제를 atomic tmp+rename 으로 해결. 추가로 PR #167 Codex 교차 리뷰 P0/P1 finding 반영: (P0) `runEpoch` 가드 — `start()` 마다 `++`, `probe()` 시작 시 epoch 캡처, `writeState(result, probeEpoch)` 가 epoch !== runEpoch 면 stale 로 판정 skip → stop()→start() 재호출 시 old run 의 in-flight probe 가 새 run 의 state 를 덮는 race 차단. (P1-1) 단일 `inFlightProbe` 변수 → `inFlightProbes` Set. add/finally→delete 패턴. `stopAndDrain()` 가 `Promise.allSettled(Array.from(inFlightProbes))` 로 전체 drain. setInterval 이 빠른 환경에서 N+1 이 N 끝나기 전에 시작되어 N 이 누락되던 회귀 차단. (P1-2) Windows EPERM/EACCES `unlinkSync→renameSync` 비원자 패턴 → backup-then-swap. `stateFile→backupPath` rename 후 `tmpPath→stateFile`, 2차 실패 시 backup 복구로 기존 파일 보존.
+
+### Added
+
+- **`feat(probe)` (#165, #169)** STALL_KILL classify mode + probe state default on (03b8e45) — `TFX_STALL_KILL` 세 모드 도입: `kill` (alias `1|on`) / `classify` (default) / `off` (alias `0|disabled`). default `classify` 는 kill 안 함 + `STALL_CLASSIFY` 로그로 evidence 노출 (PR #160 의 stopgap default `0` 의 false-kill 방지는 유지하면서 진단 가치 회복). unknown 값은 warning + classify fallback. `TFX_PROBE_WRITE_STATE` default off → on 으로 전환 — atomic write (#167) 로 race 제거됐으므로 안전. opt-out 은 `=0` 명시 (`!== "0"` 패턴). conductor 의 writeStateFile 분기가 default-on 으로 동작 → heartbeat grace (mcp_initializing/input_wait) 가 5-state evidence 를 실전에서 받게 됨.
+
+### Tests
+
+- **+5** `tests/unit/health-probe.test.mjs` — P0 stop()→start() epoch isolation (실제 race 시뮬) + P1-1 3 개 동시 in-flight probe drain + P1-2 backup-then-swap source 패턴 + 옛 unlink→rename 회귀 가드 + P0 source 의 runEpoch 가드 + P1-1 source 의 Set + 옛 단일 var 회귀. 28/28 pass (기존 23 + 신규 5).
+- **+9** `tests/unit/tfx-route-stall-kill.test.mjs` — classify default shape assertion + classify mode integration + kill mode integration. 7/7 pass (기존 4 + 신규 3, bash file 경유 — Windows Git Bash EOF race 회피).
+- **+2** `tests/unit/conductor-probe-default.test.mjs` — `!== "0"` 패턴 + mirror drift guard. 2/2 pass.
+
 ## [10.14.1] - 2026-04-25
 
 ### Fixed
