@@ -105,3 +105,9 @@ docs/research/*competitor*
 # 정식 경로: ~/.config/triflux/hosts.json (POSIX) / %APPDATA%\triflux\hosts.json (Windows)
 **/references/hosts.json
 **/references/hosts.json.bak.*
+
+# .mcp.json atomic write backups (sync-hub-mcp-settings.mjs writeTextAtomic)
+# 정상 흐름에서는 finally 에서 정리되지만, rollback 실패 시 수동 복구용으로
+# 보존된다. repo 에 staged 되면 안 된다.
+.mcp.json.bak-*
+**/.mcp.json.bak-*
