@@ -72,11 +72,11 @@ export async function prepareRelease({
       // heavy test step non-interactively and fail fast if it never returns.
       // maxBuffer raised explicitly: 1 MiB default is too small for piped
       // npm test --test-concurrency=8 verbose output. This is generic
-      // robustness, NOT a fix for the prepare-only EXIT=1 mismatch the
-      // 20260425-191243 checkpoint flagged — that root cause is in the
-      // eval-store fixture's nested env, not in buffer sizing (verified:
-      // direct `npm test` EXIT=0, prepare-bypassed prepare:execute still
-      // returns EXIT=1 with this fix in place). Tracking that separately.
+      // robustness, NOT a fix for the prepare-only EXIT=1 mismatch — that
+      // root cause is the test-lock.mjs spawn `stdio: "inherit"` cascading
+      // the parent's ignore/pipe/pipe down to grand-child `node --test`,
+      // breaking ConPTY assumptions on Windows. See issue #192 for the
+      // diagnosis and fix candidates (F1 = test-lock stdio split).
       options: {
         stdio: ["ignore", "pipe", "pipe"],
         timeoutMs: TEST_TIMEOUT_MS,
