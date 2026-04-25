@@ -117,6 +117,11 @@ const REQUIRED_CODEX_PROFILES = [
 ];
 
 const HUD_SYNC_EXCLUDES = new Set(["omc-hud.mjs", "omc-hud.mjs.bak"]);
+const SETUP_USER_STATE_FILES = new Set(["hosts.json"]);
+
+function isSetupUserStateFile(fileName) {
+  return SETUP_USER_STATE_FILES.has(fileName);
+}
 
 /**
  * scripts/lib/*.mjs 자동 스캔.
@@ -409,6 +414,7 @@ function syncAliasedSkillDir(srcDir, dstDir, { alias, source }) {
   for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
     const srcPath = join(srcDir, entry.name);
     const dstPath = join(dstDir, entry.name);
+    if (isSetupUserStateFile(entry.name)) continue;
 
     if (entry.isDirectory()) {
       count += syncAliasedSkillDir(srcPath, dstPath, { alias, source });
@@ -1154,6 +1160,7 @@ export {
   getVersion,
   getWindowsHubAutostartStatus,
   hasProfileSection,
+  isSetupUserStateFile,
   LEGACY_CODEX_MODELS,
   PLUGIN_ROOT,
   REQUIRED_CODEX_PROFILES,
@@ -1162,6 +1169,7 @@ export {
   replaceProfileSection,
   SCHTASKS_TR_MAX_LENGTH,
   SETUP_MARKER_PATH,
+  SETUP_USER_STATE_FILES,
   SKILL_ALIASES,
   SYNC_MAP,
   scanHudFiles,
@@ -1377,7 +1385,8 @@ export async function runDeferred(stdinData) {
   }
 
   // ── 스킬 동기화 ──
-  // SKILL.md + 하위 디렉토리(references/ 등)를 재귀적으로 동기화
+  // SKILL.md + 하위 디렉토리(references/ 등)를 재귀적으로 동기화.
+  // hosts.json 같은 user-state 파일은 설치/동기화 대상이 아니다.
 
   const skillsSrc = join(PLUGIN_ROOT, "skills");
   const skillsDst = join(CLAUDE_DIR, "skills");
@@ -1389,6 +1398,7 @@ export async function runDeferred(stdinData) {
     for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
       const srcPath = join(srcDir, entry.name);
       const dstPath = join(dstDir, entry.name);
+      if (isSetupUserStateFile(entry.name)) continue;
 
       if (entry.isDirectory()) {
         count += syncSkillDir(srcPath, dstPath);

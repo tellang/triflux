@@ -8,12 +8,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { afterEach, before, describe, it } from "node:test";
 
 import {
+  migrateLegacyHosts,
   readHost,
   readHosts,
   resolveHost,
+  userStateHostsPath,
 } from "../../hub/lib/hosts-compat.mjs";
 
 const TEMP_DIRS = [];
@@ -38,6 +40,18 @@ function writeJson(repoRoot, relativePath, payload) {
   writeFileSync(target, JSON.stringify(payload, null, 2));
   return target;
 }
+
+// Pre-existing matrix tests rely on source-tree fixtures and predate the
+// user-state path introduced in issue #178. Disable user-state lookup so
+// candidatePaths() only consults source-tree fixtures inside the temp repo.
+const SAVED_ENV = {
+  TFX_HOSTS_USER_STATE_DISABLE: process.env.TFX_HOSTS_USER_STATE_DISABLE,
+  TFX_HOSTS_USER_STATE: process.env.TFX_HOSTS_USER_STATE,
+};
+
+before(() => {
+  process.env.TFX_HOSTS_USER_STATE_DISABLE = "1";
+});
 
 describe("Phase 4b integration — tfx-remote public subcommands", () => {
   it("documents the consolidated public subcommand surface", () => {
@@ -196,4 +210,119 @@ describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
       assert.equal(resolveHost(host.tailscale.dns, repoRoot)?.name, hostName);
     });
   }
+});
+
+describe("issue #178 — hosts.json user-state migration", () => {
+  function sandboxUserState() {
+    const dir = mkdtempSync(join(tmpdir(), "tfx-userstate-"));
+    TEMP_DIRS.push(dir);
+    delete process.env.TFX_HOSTS_USER_STATE_DISABLE;
+    process.env.TFX_HOSTS_USER_STATE = join(dir, "triflux", "hosts.json");
+    return process.env.TFX_HOSTS_USER_STATE;
+  }
+
+  afterEach(() => {
+    process.env.TFX_HOSTS_USER_STATE_DISABLE =
+      SAVED_ENV.TFX_HOSTS_USER_STATE_DISABLE ?? "1";
+    if (SAVED_ENV.TFX_HOSTS_USER_STATE === undefined) {
+      delete process.env.TFX_HOSTS_USER_STATE;
+    } else {
+      process.env.TFX_HOSTS_USER_STATE = SAVED_ENV.TFX_HOSTS_USER_STATE;
+    }
+  });
+
+  it("userStateHostsPath() returns platform-appropriate path by default", () => {
+    delete process.env.TFX_HOSTS_USER_STATE_DISABLE;
+    delete process.env.TFX_HOSTS_USER_STATE;
+    const path = userStateHostsPath();
+    if (process.platform === "win32") {
+      assert.match(path, /triflux[\\/]hosts\.json$/);
+    } else {
+      assert.match(path, /\.config[\\/]triflux[\\/]hosts\.json$/);
+    }
+  });
+
+  it("TFX_HOSTS_USER_STATE_DISABLE=1 short-circuits to null", () => {
+    process.env.TFX_HOSTS_USER_STATE_DISABLE = "1";
+    delete process.env.TFX_HOSTS_USER_STATE;
+    assert.equal(userStateHostsPath(), null);
+  });
+
+  it("migrates source-tree hosts.json into user-state on first read", () => {
+    const userPath = sandboxUserState();
+    const repoRoot = makeTempRepo();
+    writeJson(repoRoot, "references/hosts.json", {
+      hosts: { ultra4: { description: "legacy", os: "win32" } },
+    });
+
+    const result = migrateLegacyHosts(repoRoot);
+
+    assert.equal(result.migrated, true);
+    assert.equal(result.to, userPath);
+    assert.ok(readFileSync(userPath, "utf8").length > 0);
+  });
+
+  it("migration is idempotent on second call", () => {
+    sandboxUserState();
+    const repoRoot = makeTempRepo();
+    writeJson(repoRoot, "references/hosts.json", {
+      hosts: { ultra4: { os: "win32" } },
+    });
+
+    migrateLegacyHosts(repoRoot);
+    const second = migrateLegacyHosts(repoRoot);
+
+    assert.equal(second.migrated, false);
+    assert.equal(second.reason, "already-exists");
+  });
+
+  it("user-state takes priority over source-tree when both exist", () => {
+    const userPath = sandboxUserState();
+    const repoRoot = makeTempRepo();
+    writeJson(repoRoot, "references/hosts.json", {
+      hosts: { source: { description: "from-source", os: "linux" } },
+    });
+    mkdirSync(dirname(userPath), { recursive: true });
+    writeFileSync(
+      userPath,
+      JSON.stringify({
+        hosts: { user: { description: "from-user-state", os: "darwin" } },
+      }),
+    );
+
+    const registry = readHosts(repoRoot);
+
+    assert.equal(resolve(registry.path), resolve(userPath));
+    assert.ok(registry.hosts.user, "user-state host should win");
+    assert.equal(registry.hosts.source, undefined);
+  });
+
+  it("falls back to source-tree when user-state missing", () => {
+    sandboxUserState();
+    const repoRoot = makeTempRepo();
+    const sourcePath = writeJson(repoRoot, "references/hosts.json", {
+      hosts: { fallback: { os: "linux" } },
+    });
+
+    const registry = readHosts(repoRoot);
+
+    assert.equal(resolve(registry.path), resolve(sourcePath));
+    assert.ok(registry.hosts.fallback);
+  });
+
+  it("disabled user-state still allows source-tree reads", () => {
+    process.env.TFX_HOSTS_USER_STATE_DISABLE = "1";
+    delete process.env.TFX_HOSTS_USER_STATE;
+    const repoRoot = makeTempRepo();
+    const sourcePath = writeJson(repoRoot, "references/hosts.json", {
+      hosts: { ci: { os: "linux" } },
+    });
+
+    const result = migrateLegacyHosts(repoRoot);
+    assert.equal(result.migrated, false);
+    assert.equal(result.reason, "user-state-disabled");
+
+    const registry = readHosts(repoRoot);
+    assert.equal(resolve(registry.path), resolve(sourcePath));
+  });
 });

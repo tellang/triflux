@@ -60,11 +60,13 @@ tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-auto (`--mod
 |------|------|
 | tfx-multi | 2+개 태스크 headless 병렬 |
 | tfx-swarm | PRD별 worktree + 다중 모델(Codex/Gemini/Claude) + 다중 기기(로컬+원격) |
-| tfx-remote-spawn | Claude Code 원격 세션 (SSH, setup 필수) |
+| tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수; tfx-remote-spawn은 legacy alias) |
 
 **Claude 네이티브** (CLI 불필요): tfx-find, tfx-forge, tfx-prune, tfx-index, tfx-setup, tfx-doctor, tfx-hooks, tfx-hub
 
 자원 우선순위: remote-spawn > swarm > multi > Light > 로컬 단독
+
+원격 hosts 설정은 user-state 경로만 참조한다: macOS/Linux `~/.config/triflux/hosts.json`, Windows `%APPDATA%\triflux\hosts.json`. 기존 source-tree `references/hosts.json` 은 라우팅 입력으로 사용하지 않으며 첫 실행 lazy auto-migration 대상이다.
 
 ## 충돌 해소
 

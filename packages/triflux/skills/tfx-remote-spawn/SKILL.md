@@ -12,6 +12,15 @@ argument-hint: "[spawn|list|attach|send|resume|kill|probe] ..."
 
 이 스킬은 Phase 4b thin alias다. 새 표면은 `tfx-remote` 명령군이다.
 
+## hosts.json location
+
+호스트 별칭/설정은 canonical `tfx-remote` 와 동일하게 user-state 경로 한 곳만 사용한다.
+- macOS/Linux: `~/.config/triflux/hosts.json`
+- Windows: `%APPDATA%\triflux\hosts.json`
+
+기존 `references/hosts.json` 및 source/packages/global fan-out는 더 이상 사용하지 않는다.
+첫 실행 시 legacy `references/hosts.json` 이 발견되면 lazy auto-migration으로 user-state 경로에 자동 이동된다.
+
 ## Deprecation logging (alias 호출 즉시 실행 필수)
 
 canonical 위임 **이전** 에 아래 bash 블록을 한 번 실행한다. Phase 5 (v11) 물리 삭제 게이트는 `.omc/state/alias-usage.log` 의 7일 zero-usage 검증에 의존.

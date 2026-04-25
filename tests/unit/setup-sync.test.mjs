@@ -15,6 +15,8 @@ const {
   BREADCRUMB_PATH,
   ensureHooksInSettings,
   ensureCodexHubServerConfig,
+  isSetupUserStateFile,
+  SETUP_USER_STATE_FILES,
 } = await import("../../scripts/setup.mjs");
 
 // ── helpers ──
@@ -174,6 +176,17 @@ describe("setup-sync: SYNC_MAP", () => {
       normalized(expected),
       `agent-map.json dst must resolve from tfx-route.sh relative path`,
     );
+  });
+});
+
+describe("setup-sync: user-state file exclusions", () => {
+  it("hosts.json is treated as user-state and excluded from setup asset sync", () => {
+    assert.ok(
+      SETUP_USER_STATE_FILES.has("hosts.json"),
+      "hosts.json must be listed as user-state",
+    );
+    assert.equal(isSetupUserStateFile("hosts.json"), true);
+    assert.equal(isSetupUserStateFile("SKILL.md"), false);
   });
 });
 

@@ -77,9 +77,6 @@ docs/BUGFIX-*
 docs/SESSION-*
 .venv/
 
-# 개인 호스트 설정 (커밋 금지)
-**/hosts.json
-references/hosts.json
 .test-lock/
 .tmp-home-setup-check/
 tests/.tmp-setup-version-cache/
