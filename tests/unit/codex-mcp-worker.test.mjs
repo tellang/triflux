@@ -129,4 +129,19 @@ describe("CodexMcpWorker", () => {
       await worker.stop();
     }
   });
+
+  it("MCP가 빈 content + exit 0 을 반환하면 worker.execute가 빈 output + exit 0 을 그대로 반환한다 (codex 0.124.0 silent-flush regression reproduction)", async () => {
+    // runCodexMcpCli 의 silent-success guard 가 detect 해야 할 입력 케이스.
+    // worker 자체는 응답을 그대로 전달하고, guard 는 CLI 진입점에서 process.exitCode 를
+    // CODEX_MCP_TRANSPORT_EXIT_CODE 로 승격하여 wrapper 에 fallback 신호를 보낸다.
+    const worker = createWorker({ FAKE_CODEX_MODE: "mcp-empty" });
+
+    try {
+      const result = await worker.execute("anything");
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.output.trim(), "");
+    } finally {
+      await worker.stop();
+    }
+  });
 });
