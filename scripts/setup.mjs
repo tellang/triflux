@@ -28,8 +28,17 @@ import {
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const CLAUDE_DIR = join(homedir(), ".claude");
-const CODEX_DIR = join(homedir(), ".codex");
+// Windows 에서 os.homedir() 가 USERPROFILE 만 보고 process.env.HOME swap 을
+// 무시하기 때문에, integration test 가 fixture 격리한 spawn child 에서도
+// production ~/.codex/config.toml 을 건드릴 수 있다. (#193 회귀)
+// 우선순위: TRIFLUX_TEST_HOME → HOME → USERPROFILE → os.homedir().
+const _TFX_HOME =
+  process.env.TRIFLUX_TEST_HOME ||
+  process.env.HOME ||
+  process.env.USERPROFILE ||
+  homedir();
+const CLAUDE_DIR = join(_TFX_HOME, ".claude");
+const CODEX_DIR = join(_TFX_HOME, ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 const SETUP_MARKER_PATH = join(CLAUDE_DIR, "cache", "tfx-setup-marker.json");
 
