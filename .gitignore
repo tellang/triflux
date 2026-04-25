@@ -99,3 +99,9 @@ docs/research/*competitor*
 .codex-swarm/
 # swarm preservation artifacts (covered by .codex-swarm/ above, listed explicitly)
 .codex-swarm/recovery/
+
+# user-state hosts.json source-tree fallback (PR #183)
+# 사용자 환경 데이터 (Tailscale IP / SSH user) 노출 방지.
+# 정식 경로: ~/.config/triflux/hosts.json (POSIX) / %APPDATA%\triflux\hosts.json (Windows)
+**/references/hosts.json
+**/references/hosts.json.bak.*
