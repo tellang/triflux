@@ -9,9 +9,9 @@
 
 | # | CLI | 모델 | 이유 |
 |---|-----|------|------|
-| 1 | codex | gpt-5.4-mini | 비용 최저, 단순 태스크 대부분 해결. (gpt-5.5 mini 변종 부재 → 5.4-mini 유지) |
-| 2 | codex | gpt-5.5 | 신규 플래그십, Anthropic 대비 비용 우위 유지 |
-| 3 | claude | sonnet-4-6 | 도구 사용 + 장문 추론 필요 시 승격 |
+| 1 | codex | gpt-5.4-mini | 비용 최저, fast tier, 단순 태스크 대부분 해결. (gpt-5.5 mini 변종 부재 → 5.4-mini 유지) |
+| 2 | codex | gpt-5.3-codex | 가성비 중간, code specialized. Plus/free 모두 OK. fast tier 미지원이지만 reasoning depth 보강. |
+| 3 | codex | gpt-5.5 | top reasoning + 코드 강함, fast tier. sonnet-4-6 보다 코드/추론/비용 모두 우위라 sonnet 단계 제거 후 격상. |
 | 4 | claude | opus-4-7 | 최종 수단, 복잡 아키텍처/합의 요구 시 |
 
 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.

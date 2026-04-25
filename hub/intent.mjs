@@ -61,17 +61,22 @@ function _tryCodexClassify(prompt) {
  * triflux 특화 의도 카테고리 (10개)
  */
 export const INTENT_CATEGORIES = {
-  implement: { agent: "executor", mcp: "implement", effort: "codex53_high" },
-  debug: { agent: "debugger", mcp: "implement", effort: "codex53_high" },
-  analyze: { agent: "analyst", mcp: "analyze", effort: "gpt54_xhigh" },
-  design: { agent: "architect", mcp: "analyze", effort: "gpt54_xhigh" },
-  review: { agent: "code-reviewer", mcp: "review", effort: "codex53_high" },
+  // 모델 정책 (2026-04-25):
+  // - gpt-5.5 = 메인 (코드 포함 모든 메인 직무, fast tier 가능)
+  // - gpt-5.4-mini = 자잘/부가/가성비 (fast tier 가능)
+  // - gpt-5.3-codex = escalation 가성비 중간 (fast 미지원)
+  // - gpt-5.4 폐기, gpt-5.5 로 격상
+  implement: { agent: "executor", mcp: "implement", effort: "gpt55_high" },
+  debug: { agent: "debugger", mcp: "implement", effort: "gpt55_xhigh" },
+  analyze: { agent: "analyst", mcp: "analyze", effort: "gpt55_xhigh" },
+  design: { agent: "architect", mcp: "analyze", effort: "gpt55_xhigh" },
+  review: { agent: "code-reviewer", mcp: "review", effort: "gpt55_high" },
   document: { agent: "writer", mcp: "docs", effort: "pro" },
-  research: { agent: "scientist", mcp: "analyze", effort: "codex53_high" },
+  research: { agent: "scientist", mcp: "analyze", effort: "gpt55_high" },
   "quick-fix": {
     agent: "build-fixer",
     mcp: "implement",
-    effort: "codex53_low",
+    effort: "gpt55_low",
   },
   explain: { agent: "writer", mcp: "docs", effort: "flash" },
   test: { agent: "test-engineer", mcp: null, effort: null },

@@ -148,14 +148,22 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 Codex:gpt-5.4-mini → Codex:gpt-5.5 순", () => {
-      assert.equal(DEFAULT_ESCALATION_CHAIN.length >= 2, true);
-      const first = DEFAULT_ESCALATION_CHAIN[0];
-      assert.equal(first.cli, "codex");
-      assert.equal(first.model, "gpt-5.4-mini");
-      const second = DEFAULT_ESCALATION_CHAIN[1];
-      assert.equal(second.cli, "codex");
-      assert.equal(second.model, "gpt-5.5");
+    it("DEFAULT_ESCALATION_CHAIN 은 mini-5.4 → codex-5.3 → gpt-5.5 → opus-4-7 순", () => {
+      // 2026-04-25 정책 갱신: sonnet-4-6 단계 제거, 5.3-codex 가성비 중간 단계 추가.
+      assert.equal(DEFAULT_ESCALATION_CHAIN.length, 4);
+      const [s1, s2, s3, s4] = DEFAULT_ESCALATION_CHAIN;
+
+      assert.equal(s1.cli, "codex");
+      assert.equal(s1.model, "gpt-5.4-mini");
+
+      assert.equal(s2.cli, "codex");
+      assert.equal(s2.model, "gpt-5.3-codex");
+
+      assert.equal(s3.cli, "codex");
+      assert.equal(s3.model, "gpt-5.5");
+
+      assert.equal(s4.cli, "claude");
+      assert.equal(s4.model, "opus-4-7");
     });
   });
 

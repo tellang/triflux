@@ -911,38 +911,45 @@ route_agent() {
   case "$agent" in
     # ─── 구현 레인 ───
     executor|codex)
-      CLI_ARGS="exec --profile codex53_high ${codex_base}"
-      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
+      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     build-fixer)
-      CLI_ARGS="exec --profile codex53_low ${codex_base}"
-      CLI_EFFORT="codex53_low"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      # 빌드 수정 — npm/biome/test-lock 등 도메인 지식 필요. base capability 우위로 gpt55_low (fast tier).
+      CLI_ARGS="exec --profile gpt55_low ${codex_base}"
+      CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+    cleanup|deslop)
+      # 슬롭/정리 — 패턴 매칭 위주. 가성비 mini (gpt-5.4-mini, fast tier).
+      CLI_ARGS="exec --profile mini54_med ${codex_base}"
+      CLI_EFFORT="mini54_med"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     debugger)
-      CLI_ARGS="exec --profile codex53_high ${codex_base}"
-      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      # 디버깅 — 깊은 코드 추적 필요, gpt-5.5 xhigh
+      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
+      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
-    # ─── 설계/분석 레인 (5.4: 1M 컨텍스트, 에이전틱) ───
+    # ─── 설계/분석 레인 (gpt-5.5 xhigh — 5.4 폐기, 5.5 격상) ───
     deep-executor|architect|critic)
-      CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"
-      CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
+      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
     planner|analyst)
-      CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"
-      CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
+      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
 
-    # ─── 리뷰 레인 (5.3-codex: SWE-Bench 72%) ───
+    # ─── 리뷰 레인 (gpt-5.5 — 코드 리뷰도 5.5가 강함) ───
     code-reviewer|quality-reviewer)
-      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
-      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
+      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     security-reviewer)
-      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
-      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
+      # 보안 = 깊은 사고 → xhigh
+      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base} review"
+      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
 
     # ─── 리서치 레인 ───
     scientist|document-specialist)
-      CLI_ARGS="exec --profile codex53_high ${codex_base}"
-      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
+      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     scientist-deep)
-      CLI_ARGS="exec --profile gpt54_high ${codex_base}"
-      CLI_EFFORT="gpt54_high"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
+      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── UI/문서 레인 ───
     designer|gemini)
@@ -958,14 +965,14 @@ route_agent() {
 
     # ─── 검증/테스트 ───
     verifier)
-      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
-      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
+      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     test-engineer)
-      CLI_ARGS="exec --profile codex53_high ${codex_base}"
-      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
+      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     qa-tester)
-      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
-      CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
+      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 경량 ───
     spark)
@@ -975,8 +982,8 @@ route_agent() {
     *)
       case "$CLI_TYPE" in
         codex)
-          CLI_ARGS="exec --profile codex53_high ${codex_base}"
-          CLI_EFFORT="codex53_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+          CLI_ARGS="exec --profile gpt55_high ${codex_base}"
+          CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
         gemini)
           CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"
           CLI_EFFORT="pro31"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
@@ -1143,9 +1150,9 @@ apply_plan_guard() {
   if [[ "$CLI_EFFORT" == spark53_* ]]; then
     local codex_base
     codex_base="$(build_codex_base)"
-    CLI_ARGS="exec --profile codex53_high ${codex_base}"
-    CLI_EFFORT="codex53_high"
-    echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: spark → codex53_high로 다운그레이드 (Pro 전용)" >&2
+    CLI_ARGS="exec --profile gpt55_high ${codex_base}"
+    CLI_EFFORT="gpt55_high"
+    echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: spark → gpt55_high로 다운그레이드 (Pro 전용)" >&2
   fi
 }
 
@@ -1168,29 +1175,29 @@ apply_no_claude_native_mode() {
 
   case "$AGENT_TYPE" in
     explore)
-      CLI_ARGS="exec --profile codex53_low ${codex_base}"
-      CLI_EFFORT="codex53_low"
+      CLI_ARGS="exec --profile gpt55_low ${codex_base}"
+      CLI_EFFORT="gpt55_low"
       DEFAULT_TIMEOUT=600
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
     verifier)
-      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
-      CLI_EFFORT="codex53_high"
+      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
+      CLI_EFFORT="gpt55_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
     test-engineer)
-      CLI_ARGS="exec --profile codex53_high ${codex_base}"
-      CLI_EFFORT="codex53_high"
+      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
+      CLI_EFFORT="gpt55_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
     qa-tester)
-      CLI_ARGS="exec --profile codex53_high ${codex_base} review"
-      CLI_EFFORT="codex53_high"
+      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
+      CLI_EFFORT="gpt55_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"

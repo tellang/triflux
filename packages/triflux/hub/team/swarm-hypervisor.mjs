@@ -855,7 +855,14 @@ export function createSwarmHypervisor(opts) {
    * @returns {{ ok: boolean, violations: Array }}
    */
   function validateResult(shardName, changedFiles) {
-    const violations = lockManager.validateChanges(shardName, changedFiles);
+    // Pass the shard's own lease so validateChanges can flag out-of-lease
+    // writes to distribution-critical paths (regression of #115/#34 —
+    // recovery patches were carrying `+++ /dev/null` deletions of
+    // .claude-plugin/marketplace.json, undetected by lease-only checks).
+    const ownLease = plan.leaseMap.get(shardName) || [];
+    const violations = lockManager.validateChanges(shardName, changedFiles, {
+      ownLease,
+    });
 
     eventLog.append("validate_result", {
       shard: shardName,

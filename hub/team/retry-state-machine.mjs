@@ -38,10 +38,17 @@ export const MODES = Object.freeze({
   ESCALATE: "auto-escalate",
 });
 
+// Escalation chain (2026-04-25 정책):
+//   1. gpt-5.4-mini   — 비용 최저, fast tier, 단순 task 대부분 해결
+//   2. gpt-5.3-codex  — 가성비 중간, code specialized (Plus/free 모두 OK, fast 미지원)
+//   3. gpt-5.5         — top reasoning + 코드 강함, fast tier
+//   4. claude opus-4-7 — 최종 수단
+// sonnet-4-6 단계는 제거: gpt-5.5 가 코드/추론/비용 모두 우위 + 5.3-codex 가성비
+// 단계가 더 적합한 중간 격상.
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
   Object.freeze({ cli: "codex", model: "gpt-5.4-mini" }),
+  Object.freeze({ cli: "codex", model: "gpt-5.3-codex" }),
   Object.freeze({ cli: "codex", model: "gpt-5.5" }),
-  Object.freeze({ cli: "claude", model: "sonnet-4-6" }),
   Object.freeze({ cli: "claude", model: "opus-4-7" }),
 ]);
 
