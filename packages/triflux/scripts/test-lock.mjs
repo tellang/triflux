@@ -73,10 +73,17 @@ process.on("SIGTERM", () => {
 
 // forward args after -- to node --test
 const args = process.argv.slice(2);
+// stdio split (issue #192 F1): when prepare.mjs spawns this lock with
+// ["ignore","pipe","pipe"], full inherit cascades the parent stdin=ignore
+// to grand-child node --test, breaking ConPTY assumptions on Windows and
+// surfacing as EXIT=1 (false-failed). Pipe stdin only — stdout/stderr stay
+// inherited so the grand-child still streams to whoever attached to us.
 const child = spawn(process.execPath, args, {
-  stdio: "inherit",
+  stdio: ["pipe", "inherit", "inherit"],
   env: { ...process.env, TEST_LOCK_PID: String(process.pid) },
 });
+// Close stdin immediately so node --test never blocks waiting for input.
+child.stdin?.end();
 
 child.on("exit", (code) => {
   releaseLock();
