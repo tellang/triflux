@@ -130,6 +130,75 @@ describe("swarm-locks", () => {
       assert.equal(violations.length, 1);
       assert.equal(violations[0].holder, "worker-2");
     });
+
+    // Regression for #115/#34 — recovery patch from a worker that exits
+    // without committing was carrying `+++ /dev/null` deletions of
+    // distribution-critical files (.claude-plugin/marketplace.json,
+    // plugin.json) outside of any shard's lease. The previous validator
+    // only checked for cross-lease writes, so these went undetected.
+    describe("sensitive path guard (out-of-lease destructive)", () => {
+      it("flags .claude-plugin/* changes when not in worker's lease", () => {
+        const locks = createSwarmLocks({ repoRoot: tmpDir });
+        locks.acquire("worker-1", ["src/a.mjs"]);
+
+        const violations = locks.validateChanges(
+          "worker-1",
+          [".claude-plugin/marketplace.json"],
+          { ownLease: ["src/a.mjs"] },
+        );
+        assert.equal(violations.length, 1);
+        assert.equal(violations[0].kind, "sensitive-out-of-lease");
+        assert.equal(violations[0].file, ".claude-plugin/marketplace.json");
+      });
+
+      it("allows sensitive path changes when explicitly leased", () => {
+        const locks = createSwarmLocks({ repoRoot: tmpDir });
+        locks.acquire("worker-1", ["package.json"]);
+
+        const violations = locks.validateChanges("worker-1", ["package.json"], {
+          ownLease: ["package.json"],
+        });
+        assert.equal(violations.length, 0);
+      });
+
+      it("flags package.json / .gitignore / bin/ / .github/workflows/", () => {
+        const locks = createSwarmLocks({ repoRoot: tmpDir });
+        locks.acquire("worker-1", ["docs/x.md"]);
+
+        const violations = locks.validateChanges(
+          "worker-1",
+          ["package.json", ".gitignore", "bin/tfx", ".github/workflows/ci.yml"],
+          { ownLease: ["docs/x.md"] },
+        );
+        assert.equal(violations.length, 4);
+        for (const v of violations) {
+          assert.equal(v.kind, "sensitive-out-of-lease");
+        }
+      });
+
+      it("non-sensitive out-of-lease changes still pass (backward compat)", () => {
+        const locks = createSwarmLocks({ repoRoot: tmpDir });
+        locks.acquire("worker-1", ["src/a.mjs"]);
+
+        const violations = locks.validateChanges(
+          "worker-1",
+          ["src/somewhere-else.mjs", "docs/random.md"],
+          { ownLease: ["src/a.mjs"] },
+        );
+        assert.equal(violations.length, 0);
+      });
+
+      it("backward compat: omitting ownLease keeps legacy behavior", () => {
+        const locks = createSwarmLocks({ repoRoot: tmpDir });
+        locks.acquire("worker-1", ["src/a.mjs"]);
+
+        // No ownLease passed → only cross-lease check, sensitive guard inactive
+        const violations = locks.validateChanges("worker-1", [
+          ".claude-plugin/marketplace.json",
+        ]);
+        assert.equal(violations.length, 0);
+      });
+    });
   });
 
   describe("TTL expiry", () => {

@@ -8,6 +8,26 @@ import { dirname, relative, resolve } from "node:path";
 
 const LOCK_TTL_MS = 10 * 60_000; // 10 minutes default TTL
 
+// Distribution-critical paths. A swarm worker that modifies these without
+// having them explicitly listed in its shard lease is almost certainly a
+// recovery-patch fallout (worker exited before commit, hypervisor saved
+// patch with destructive `+++ /dev/null` deletions). Block by default;
+// override via validateChanges options.sensitiveDeny.
+//
+// Paths use POSIX separators (matches normalizePath output).
+const SENSITIVE_PATH_PREFIXES = [
+  ".claude-plugin/",
+  "bin/",
+  ".github/workflows/",
+];
+const SENSITIVE_PATH_FILES = [
+  ".gitignore",
+  ".npmignore",
+  "package.json",
+  "package-lock.json",
+  "biome.json",
+];
+
 /**
  * Swarm lock manager factory.
  * @param {object} [opts]
@@ -205,20 +225,49 @@ export function createSwarmLocks(opts = {}) {
   /**
    * Validate a set of changed files against the lease map.
    * Returns all violations found.
+   *
+   * Beyond the basic cross-lease check, when `options.ownLease` is supplied
+   * (the caller's known lease set), this also flags out-of-lease writes to
+   * distribution-critical paths — e.g. recovery-patch fallouts where a
+   * worker's recorded diff carries `+++ /dev/null` deletions of files like
+   * `.claude-plugin/marketplace.json` (regression of #115 / #34).
+   *
+   * `options.ownLease` is opt-in to preserve existing callers; when omitted,
+   * legacy behavior (cross-lease check only) is kept.
+   *
    * @param {string} workerId
    * @param {string[]} changedFiles
-   * @returns {Array<{ file: string, holder: string }>}
+   * @param {{ ownLease?: string[], sensitiveDeny?: { prefixes?: string[], files?: string[] } }} [options]
+   * @returns {Array<{ file: string, holder?: string, kind: "other-lease" | "sensitive-out-of-lease" }>}
    */
-  function validateChanges(workerId, changedFiles) {
+  function validateChanges(workerId, changedFiles, options = {}) {
     pruneExpired();
     const violations = [];
+    const ownLeaseSet = Array.isArray(options.ownLease)
+      ? new Set(options.ownLease.map((path) => normalizePath(path)))
+      : null;
+    const sensitivePrefixes =
+      options.sensitiveDeny?.prefixes ?? SENSITIVE_PATH_PREFIXES;
+    const sensitiveFiles = new Set(
+      options.sensitiveDeny?.files ?? SENSITIVE_PATH_FILES,
+    );
 
     for (const file of changedFiles) {
       const path = normalizePath(file);
       const entry = locks.get(path);
 
       if (entry && entry.workerId !== workerId && !isExpired(entry)) {
-        violations.push({ file, holder: entry.workerId });
+        violations.push({ file, holder: entry.workerId, kind: "other-lease" });
+        continue;
+      }
+
+      if (ownLeaseSet && !ownLeaseSet.has(path)) {
+        const isSensitive =
+          sensitiveFiles.has(path) ||
+          sensitivePrefixes.some((prefix) => path.startsWith(prefix));
+        if (isSensitive) {
+          violations.push({ file, kind: "sensitive-out-of-lease" });
+        }
       }
     }
 
