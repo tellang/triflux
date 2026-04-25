@@ -5,15 +5,11 @@
 // 완료/실패 시 notify.mjs 자동 호출.
 
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
+import { readHosts } from "../lib/hosts-compat.mjs";
 import { STATES } from "./conductor.mjs";
 
 // ── 상수 ─────────────────────────────────────────────────────────────────────
-
-const HOSTS_JSON_REL = "../../references/hosts.json";
 
 const CONDUCTOR_STATE_TO_TUI_STATUS = Object.freeze({
   [STATES.INIT]: "pending",
@@ -30,21 +26,6 @@ const CONDUCTOR_STATE_TO_TUI_STATUS = Object.freeze({
 const SESSION_PREFIX = "tfx-spawn-";
 
 // ── 유틸 ─────────────────────────────────────────────────────────────────────
-
-function loadHostsJson(hostsJsonPath) {
-  try {
-    const raw = readFileSync(hostsJsonPath, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return { hosts: {} };
-  }
-}
-
-function resolveHostsJsonPath(overridePath) {
-  if (overridePath) return overridePath;
-  const thisDir = fileURLToPath(new URL(".", import.meta.url));
-  return join(thisDir, HOSTS_JSON_REL);
-}
 
 function resolveSshUser(hostsData, host) {
   if (!host || !hostsData?.hosts) return null;
@@ -144,7 +125,7 @@ function buildWatcherOnlyWorkerData(watcherRecord, hostsData) {
  * @param {object} opts.conductor — createConductor() 인스턴스
  * @param {object} [opts.watcher] — createRemoteWatcher() 인스턴스 (nullable)
  * @param {object} [opts.notifier] — createNotifier() 인스턴스 (nullable)
- * @param {string} [opts.hostsJsonPath] — hosts.json 경로 override
+ * @param {string} [opts.repoRoot] — hosts fallback 탐색용 repo root override
  * @param {number} [opts.pollMs=10000] — conductor snapshot 폴링 간격
  * @param {object} [opts.deps] — 테스트용 의존성 주입
  * @returns {{ start, stop, getWorkers, on, off }}
@@ -160,14 +141,13 @@ export function createRemoteAdapter(opts = {}) {
 
   if (!conductor) throw new Error("conductor is required");
 
-  const hostsJsonPath = resolveHostsJsonPath(opts.hostsJsonPath);
-  const loadHosts = deps.loadHostsJson || loadHostsJson;
+  const loadHosts = deps.readHosts || readHosts;
   const setIntervalFn = deps.setInterval || setInterval;
   const clearIntervalFn = deps.clearInterval || clearInterval;
   const _nowFn = deps.now || Date.now;
 
   const emitter = new EventEmitter();
-  let hostsData = loadHosts(hostsJsonPath);
+  let hostsData = loadHosts(opts.repoRoot);
   let workers = new Map();
   let pollHandle = null;
   let running = false;
@@ -343,7 +323,7 @@ export function createRemoteAdapter(opts = {}) {
     running = true;
 
     // hosts.json 리로드
-    hostsData = loadHosts(hostsJsonPath);
+    hostsData = loadHosts(opts.repoRoot);
 
     // conductor stateChange 구독
     conductor.on("stateChange", handleStateChange);

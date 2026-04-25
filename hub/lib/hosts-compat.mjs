@@ -1,5 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 const HOSTS_LOCATIONS = [
   ["references", "hosts.json"],
@@ -7,13 +8,70 @@ const HOSTS_LOCATIONS = [
   ["packages", "triflux", "references", "hosts.json"],
 ];
 
+let migrated = false;
+
 function readJsonFile(path) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
+export function userStateHostsPath() {
+  if (process.env.TFX_HOSTS_USER_STATE_DISABLE === "1") return null;
+  if (process.env.TFX_HOSTS_USER_STATE) return process.env.TFX_HOSTS_USER_STATE;
+  if (process.platform === "win32") {
+    return join(
+      process.env.APPDATA || join(homedir(), "AppData", "Roaming"),
+      "triflux",
+      "hosts.json",
+    );
+  }
+  return join(homedir(), ".config", "triflux", "hosts.json");
+}
+
 function candidatePaths(repoRoot) {
   const root = repoRoot || process.cwd();
-  return HOSTS_LOCATIONS.map((segments) => join(root, ...segments));
+  const repoRootCandidates = HOSTS_LOCATIONS.map((segments) =>
+    join(root, ...segments),
+  );
+  const userPath = userStateHostsPath();
+  return userPath ? [userPath, ...repoRootCandidates] : repoRootCandidates;
+}
+
+export function migrateLegacyHosts(repoRoot) {
+  const to = userStateHostsPath();
+  let from = null;
+  if (!to) {
+    return {
+      migrated: false,
+      from: null,
+      to: null,
+      reason: "user-state-disabled",
+    };
+  }
+  try {
+    if (existsSync(to)) {
+      return { migrated: false, from: null, to, reason: "already-exists" };
+    }
+
+    const root = repoRoot || process.cwd();
+    from =
+      HOSTS_LOCATIONS.map((segments) => join(root, ...segments)).find((path) =>
+        existsSync(path),
+      ) || null;
+    if (!from) {
+      return { migrated: false, from: null, to, reason: "not-found" };
+    }
+
+    mkdirSync(dirname(to), { recursive: true });
+    copyFileSync(from, to);
+    return { migrated: true, from, to };
+  } catch (error) {
+    return {
+      migrated: false,
+      from,
+      to,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function canonicalOs(rawOs) {
@@ -123,6 +181,11 @@ export function normalizeHost(rawHost = {}, name = "") {
 }
 
 export function readHosts(repoRoot) {
+  if (!migrated) {
+    migrateLegacyHosts(repoRoot);
+    migrated = true;
+  }
+
   for (const path of candidatePaths(repoRoot)) {
     if (!existsSync(path)) continue;
     const parsed = readJsonFile(path);

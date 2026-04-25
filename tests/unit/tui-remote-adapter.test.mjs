@@ -2,26 +2,11 @@
 
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { describe, it } from "node:test";
 import { STATES } from "../../hub/team/conductor.mjs";
 import { createRemoteAdapter } from "../../hub/team/tui-remote-adapter.mjs";
 
 // ── 헬퍼 ────────────────────────────────────────────────────────────────────
-
-function makeTmpDir() {
-  const dir = join(tmpdir(), `tfx-adapter-test-${process.pid}-${Date.now()}`);
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function writeHostsJson(dir, data) {
-  const path = join(dir, "hosts.json");
-  writeFileSync(path, JSON.stringify(data), "utf8");
-  return path;
-}
 
 /** conductor mock — getSnapshot + on/off + stateChange emit */
 function mockConductor(snapshots = []) {
@@ -93,6 +78,15 @@ function defaultHostsData() {
   };
 }
 
+function testDeps(overrides = {}) {
+  return {
+    readHosts: () => defaultHostsData(),
+    setInterval: () => ({ unref() {} }),
+    clearInterval: () => {},
+    ...overrides,
+  };
+}
+
 function remoteSnapshot(overrides = {}) {
   return {
     id: "tfx-spawn-ultra4-abc123",
@@ -112,22 +106,6 @@ function remoteSnapshot(overrides = {}) {
 
 // ── 테스트 ───────────────────────────────────────────────────────────────────
 
-let tmpDir;
-let hostsPath;
-
-beforeEach(() => {
-  tmpDir = makeTmpDir();
-  hostsPath = writeHostsJson(tmpDir, defaultHostsData());
-});
-
-afterEach(() => {
-  try {
-    rmSync(tmpDir, { recursive: true, force: true });
-  } catch {
-    /* ignore */
-  }
-});
-
 // ── 1. 생성 + 라이프사이클 ──────────────────────────────────────────────────
 
 describe("tui-remote-adapter: 생성", () => {
@@ -139,7 +117,7 @@ describe("tui-remote-adapter: 생성", () => {
     const conductor = mockConductor();
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
+      deps: testDeps(),
     });
     assert.ok(adapter.start);
     assert.ok(adapter.stop);
@@ -152,8 +130,7 @@ describe("tui-remote-adapter: 생성", () => {
     const conductor = mockConductor();
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
     adapter.start(); // 중복 — noop
@@ -184,8 +161,7 @@ describe("tui-remote-adapter: STATES → TUI status 변환", () => {
       ]);
       const adapter = createRemoteAdapter({
         conductor,
-        hostsJsonPath: hostsPath,
-        deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+        deps: testDeps(),
       });
       adapter.start();
 
@@ -208,8 +184,7 @@ describe("tui-remote-adapter: paneName 컨벤션", () => {
     const conductor = mockConductor([remoteSnapshot({ id: sessionId })]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -227,8 +202,7 @@ describe("tui-remote-adapter: sshUser", () => {
     const conductor = mockConductor([remoteSnapshot({ host: "ultra4" })]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -243,8 +217,7 @@ describe("tui-remote-adapter: sshUser", () => {
     const conductor = mockConductor([remoteSnapshot({ host: "unknown-host" })]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -258,8 +231,7 @@ describe("tui-remote-adapter: sshUser", () => {
     const conductor = mockConductor([remoteSnapshot()]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: join(tmpDir, "nonexistent.json"),
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps({ readHosts: () => ({ hosts: {} }) }),
     });
     adapter.start();
 
@@ -286,8 +258,7 @@ describe("tui-remote-adapter: snapshot", () => {
     const adapter = createRemoteAdapter({
       conductor,
       watcher,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -301,8 +272,7 @@ describe("tui-remote-adapter: snapshot", () => {
     const conductor = mockConductor([remoteSnapshot()]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -325,8 +295,7 @@ describe("tui-remote-adapter: conductor → notify 이벤트 변환", () => {
     const adapter = createRemoteAdapter({
       conductor,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -354,8 +323,7 @@ describe("tui-remote-adapter: conductor → notify 이벤트 변환", () => {
     const adapter = createRemoteAdapter({
       conductor,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -381,8 +349,7 @@ describe("tui-remote-adapter: conductor → notify 이벤트 변환", () => {
     const adapter = createRemoteAdapter({
       conductor,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -415,8 +382,7 @@ describe("tui-remote-adapter: conductor → notify 이벤트 변환", () => {
     const adapter = createRemoteAdapter({
       conductor,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -444,8 +410,7 @@ describe("tui-remote-adapter: watcher supplemental 이벤트", () => {
       conductor,
       watcher,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -471,8 +436,7 @@ describe("tui-remote-adapter: watcher supplemental 이벤트", () => {
       conductor,
       watcher,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -495,8 +459,7 @@ describe("tui-remote-adapter: watcher supplemental 이벤트", () => {
       conductor,
       watcher,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -520,8 +483,7 @@ describe("tui-remote-adapter: watcher supplemental 이벤트", () => {
       conductor,
       watcher,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -548,8 +510,7 @@ describe("tui-remote-adapter: workerUpdate 이벤트", () => {
     ]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
 
     const updates = [];
@@ -579,8 +540,7 @@ describe("tui-remote-adapter: workerUpdate 이벤트", () => {
     ]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
 
     const completed = [];
@@ -619,8 +579,7 @@ describe("tui-remote-adapter: watcher-only 워커", () => {
     const adapter = createRemoteAdapter({
       conductor,
       watcher,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -649,8 +608,7 @@ describe("tui-remote-adapter: host 추출", () => {
     ]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -677,8 +635,7 @@ describe("tui-remote-adapter: notify 실패 허용", () => {
     const adapter = createRemoteAdapter({
       conductor,
       notifier: badNotifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -708,8 +665,7 @@ describe("tui-remote-adapter: stop 후 정리", () => {
     const adapter = createRemoteAdapter({
       conductor,
       notifier,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
     adapter.stop();
@@ -732,8 +688,7 @@ describe("tui-remote-adapter: 워커 데이터 구조", () => {
     const conductor = mockConductor([remoteSnapshot()]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
@@ -759,8 +714,7 @@ describe("tui-remote-adapter: 워커 데이터 구조", () => {
     const conductor = mockConductor([remoteSnapshot()]);
     const adapter = createRemoteAdapter({
       conductor,
-      hostsJsonPath: hostsPath,
-      deps: { setInterval: () => ({ unref() {} }), clearInterval: () => {} },
+      deps: testDeps(),
     });
     adapter.start();
 
