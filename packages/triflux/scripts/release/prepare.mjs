@@ -70,9 +70,17 @@ export async function prepareRelease({
       // Windows background execution can stall when `npm test` inherits the
       // parent's console handles through nested shell/spawn layers. Run the
       // heavy test step non-interactively and fail fast if it never returns.
+      // maxBuffer raised explicitly: 1 MiB default is too small for piped
+      // npm test --test-concurrency=8 verbose output. This is generic
+      // robustness, NOT a fix for the prepare-only EXIT=1 mismatch the
+      // 20260425-191243 checkpoint flagged — that root cause is in the
+      // eval-store fixture's nested env, not in buffer sizing (verified:
+      // direct `npm test` EXIT=0, prepare-bypassed prepare:execute still
+      // returns EXIT=1 with this fix in place). Tracking that separately.
       options: {
         stdio: ["ignore", "pipe", "pipe"],
         timeoutMs: TEST_TIMEOUT_MS,
+        maxBuffer: 128 * 1024 * 1024,
       },
     },
     {

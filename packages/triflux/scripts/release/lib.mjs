@@ -315,6 +315,7 @@ export function runCommand(
     timeoutMs,
     shell,
     detached,
+    maxBuffer,
   } = {},
 ) {
   const opts = { cwd, stdio };
@@ -331,6 +332,12 @@ export function runCommand(
   }
   if (isPipedStdio(stdio)) {
     opts.encoding = "utf8";
+    // execFileSync default maxBuffer is 1 MiB. With stdio=pipe the parent
+    // captures all stdout/stderr; piped npm/test/build runs easily overflow
+    // that and surface as opaque ENOBUFS-shaped failures. 64 MiB is the
+    // generic floor; callers can override per-step (prepare.mjs npm-test
+    // sets 128 MiB). Defense-in-depth — not a fix for any specific bug.
+    opts.maxBuffer = maxBuffer ?? 64 * 1024 * 1024;
   }
 
   try {
