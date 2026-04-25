@@ -101,10 +101,12 @@ npm run release:check-sync
 ### Step 3 — 버전 bump
 
 ```bash
-npm run release:bump -- --version "$TARGET_VERSION"
+npm run release:bump -- --version "$TARGET_VERSION" --write
 ```
 
 이 스크립트가 `package.json` + `.claude-plugin/marketplace.json` + `package-lock.json` 을 갱신한다.
+
+> **MANDATORY `--write`**: 플래그 없으면 dry-run 만 동작 (`scripts/release/bump-version.mjs:28` `if (write)` 분기). `--write` 누락 시 후속 Step 이 모두 이전 버전으로 진행되는 silent failure 가 된다.
 
 ### Step 4 — CHANGELOG 초안 생성
 
@@ -139,8 +141,10 @@ C) 취소
 ### Step 5 — 테스트 + 빌드 검증
 
 ```bash
-npm run release:prepare -- --execute --version "$TARGET_VERSION"
+npm run release:prepare -- --execute --version "$TARGET_VERSION" --allow-dirty
 ```
+
+> **`--allow-dirty` 사실상 필수**: Step 3 의 `release:bump --write` 가 `package.json` / `marketplace.json` / `package-lock.json` 을 갱신해 working tree 를 dirty 상태로 만든다. `--allow-dirty` 없으면 prepare 가 `Working tree is dirty` 로 거부 (`scripts/release/prepare.mjs:56`). bump 와 prepare 사이에 commit 단계가 없으므로 항상 필수.
 
 이 스크립트가 수행:
 1. `assertVersionSync`
