@@ -44,7 +44,7 @@ options:
 Bash("triflux setup")
 ```
 
-스크립트/HUD/스킬을 `~/.claude/`에 배포. 결과 표시.
+스크립트/HUD/스킬을 `~/.claude/`에 배포. 결과 표시. `tfx setup` 은 user-state 파일(예: macOS/Linux `~/.config/triflux/hosts.json`, Windows `%APPDATA%\triflux\hosts.json`)을 덮어쓰지 않는다.
 
 #### 단계 1.5: 훅 등록 확인
 
@@ -254,7 +254,11 @@ options:
 
 #### 단계 3.8: 원격 기기 프로빙 (Swarm Multi-Machine)
 
-`references/hosts.json` 또는 `~/.triflux/hosts.json` 존재 여부 확인.
+user-state `hosts.json` 존재 여부 확인.
+- macOS/Linux: `~/.config/triflux/hosts.json`
+- Windows: `%APPDATA%\triflux\hosts.json`
+
+기존 source-tree `references/hosts.json` 은 더 이상 사용하지 않는다. legacy 파일이 남아 있으면 첫 원격 실행 시 lazy auto-migration으로 user-state 경로에 자동 이동된다.
 
 - 파일 없음 → AskUserQuestion:
   ```
