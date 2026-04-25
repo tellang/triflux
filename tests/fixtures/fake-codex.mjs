@@ -107,6 +107,20 @@ async function runMcpServer() {
       return errorResult("fake tool failure");
     }
 
+    if (mode === "mcp-empty") {
+      if (name === "codex") {
+        const threadId = nextThreadId();
+        return textResult(threadId, "");
+      }
+      if (name === "codex-reply") {
+        const threadId =
+          typeof args.threadId === "string" && args.threadId
+            ? args.threadId
+            : nextThreadId();
+        return textResult(threadId, "");
+      }
+    }
+
     if (name === "codex") {
       const threadId = nextThreadId();
       const memory = rememberFromPrompt(prompt);
