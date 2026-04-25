@@ -277,11 +277,15 @@ async function main() {
           cmdSanitized,
         );
       } else {
+        // $()/${} 와 eval 직후 첫 토큰만 검사한다.
+        // .* 매칭은 `result=$(grep "codex exec" file)` 같은 grep 인자 패턴까지
+        // 차단하는 오탐을 일으킨다. 진짜 위협은 `$(codex exec ...)` 처럼
+        // command substitution / eval 의 첫 명령이 codex/gemini 인 경우뿐이다.
         hasDirectCli =
-          /\beval\b.*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
+          /\beval\s+(?:["']\s*)?(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
             cmdSanitized,
           ) ||
-          /\$[({].*\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
+          /\$[({]\s*(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
             cmdSanitized,
           );
       }
