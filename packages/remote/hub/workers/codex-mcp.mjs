@@ -533,13 +533,28 @@ export async function runCodexMcpCli(argv = process.argv.slice(2)) {
 
   try {
     const result = await worker.execute(options.prompt, options);
-    if (result.output) {
+    const hasOutput =
+      typeof result.output === "string" && result.output.trim().length > 0;
+    if (hasOutput) {
       process.stdout.write(result.output);
       if (!result.output.endsWith("\n")) {
         process.stdout.write("\n");
       }
     }
-    process.exitCode = result.exitCode;
+    // Silent-success regression guard (codex 0.124.0+):
+    // codex MCP can return exitCode=0 with empty/whitespace `output` when the
+    // result-extraction path fails to read the assistant content from the MCP
+    // response. Without this guard, tfx-route.sh sees STDOUT_LOG=0 bytes and
+    // treats it as success — caller gets nothing back.
+    // Promote to a transport failure so the wrapper falls back to `codex exec`.
+    if (!hasOutput && result.exitCode === 0) {
+      console.error(
+        "[codex-mcp] WARNING: empty output with exit 0 — treating as transport failure (codex 0.124.0 silent-flush regression). Wrapper will fall back to exec path.",
+      );
+      process.exitCode = CODEX_MCP_TRANSPORT_EXIT_CODE;
+    } else {
+      process.exitCode = result.exitCode;
+    }
   } catch (error) {
     const lines = [error instanceof Error ? error.message : String(error)];
     if (error instanceof CodexMcpTransportError && error.stderr) {

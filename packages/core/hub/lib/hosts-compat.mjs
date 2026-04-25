@@ -40,7 +40,12 @@ export function migrateLegacyHosts(repoRoot) {
   const to = userStateHostsPath();
   let from = null;
   if (!to) {
-    return { migrated: false, from: null, to: null, reason: "user-state-disabled" };
+    return {
+      migrated: false,
+      from: null,
+      to: null,
+      reason: "user-state-disabled",
+    };
   }
   try {
     if (existsSync(to)) {

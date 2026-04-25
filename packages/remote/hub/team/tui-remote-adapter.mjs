@@ -6,7 +6,7 @@
 
 import { EventEmitter } from "node:events";
 
-import { readHosts } from "../../../core/hub/lib/hosts-compat.mjs";
+import { readHosts } from "@triflux/core/hub/lib/hosts-compat.mjs";
 import { STATES } from "./conductor.mjs";
 
 // ── 상수 ─────────────────────────────────────────────────────────────────────

@@ -261,6 +261,9 @@ export function createSwarmLocks(opts = {}) {
         continue;
       }
 
+      // Sensitive-path guard only runs when caller supplied ownLease.
+      // We only flag when the worker did NOT explicitly lease the file —
+      // an explicit lease means the shard intentionally owns it.
       if (ownLeaseSet && !ownLeaseSet.has(path)) {
         const isSensitive =
           sensitiveFiles.has(path) ||
