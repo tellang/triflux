@@ -12,8 +12,23 @@ const CODEX_CONFIG_FILE = [".codex", "config.toml"];
 const TFX_HUB_SECTION = "tfx-hub";
 const FILE_LOCKS = new Map();
 
+// Windows 에서 process.env.HOME 만 set 하고 USERPROFILE 은 그대로 둔 fixture 환경
+// (e.g. integration test) 에서 production path 로 새는 것을 방지하려면 platform
+// 별로 native 변수를 우선한다 (#193).
+//
+// - TRIFLUX_TEST_HOME: 두 OS 모두 명시 override
+// - Windows: USERPROFILE > HOME > homedir() (Windows native 가 USERPROFILE)
+// - POSIX: HOME > homedir()
+function resolveHome() {
+  if (process.env.TRIFLUX_TEST_HOME) return process.env.TRIFLUX_TEST_HOME;
+  if (process.platform === "win32") {
+    return process.env.USERPROFILE || process.env.HOME || homedir();
+  }
+  return process.env.HOME || homedir();
+}
+
 function getSettingsPaths() {
-  const home = process.env.HOME || homedir();
+  const home = resolveHome();
   return TARGET_FILES.map((segments) => join(home, ...segments));
 }
 
@@ -21,8 +36,7 @@ function getCodexConfigPath(codexConfigPath) {
   if (typeof codexConfigPath === "string" && codexConfigPath.length > 0) {
     return codexConfigPath;
   }
-  const home = process.env.HOME || homedir();
-  return join(home, ...CODEX_CONFIG_FILE);
+  return join(resolveHome(), ...CODEX_CONFIG_FILE);
 }
 
 export function getProjectMcpJsonPaths(projectRoot) {
