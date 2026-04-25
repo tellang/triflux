@@ -13,15 +13,18 @@ const TFX_HUB_SECTION = "tfx-hub";
 const FILE_LOCKS = new Map();
 
 // Windows 에서 process.env.HOME 만 set 하고 USERPROFILE 은 그대로 둔 fixture 환경
-// (e.g. integration test) 에서 production path 로 새는 것을 방지하려면 두 변수 중
-// 먼저 set 된 쪽을 우선 사용한다. POSIX 는 HOME, Windows 는 USERPROFILE 이 native.
+// (e.g. integration test) 에서 production path 로 새는 것을 방지하려면 platform
+// 별로 native 변수를 우선한다 (#193).
+//
+// - TRIFLUX_TEST_HOME: 두 OS 모두 명시 override
+// - Windows: USERPROFILE > HOME > homedir() (Windows native 가 USERPROFILE)
+// - POSIX: HOME > homedir()
 function resolveHome() {
-  return (
-    process.env.TRIFLUX_TEST_HOME ||
-    process.env.HOME ||
-    process.env.USERPROFILE ||
-    homedir()
-  );
+  if (process.env.TRIFLUX_TEST_HOME) return process.env.TRIFLUX_TEST_HOME;
+  if (process.platform === "win32") {
+    return process.env.USERPROFILE || process.env.HOME || homedir();
+  }
+  return process.env.HOME || homedir();
 }
 
 function getSettingsPaths() {

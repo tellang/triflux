@@ -46,6 +46,7 @@
     "lint:fix": "biome check --write bin config hooks hub hud mesh scripts tests .claude-plugin .github package.json package-lock.json biome.json",
     "health": "npm test && npm run lint",
     "test": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 \"tests/**/*.test.mjs\" \"scripts/__tests__/**/*.test.mjs\"",
+    "test:guard-codex-config": "node scripts/check-codex-config-stable.mjs npm test",
     "test:unit": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/unit/**/*.test.mjs",
     "test:integration": "node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 tests/integration/**/*.test.mjs",
     "test:route-smoke": "node scripts/test-lock.mjs --test scripts/test-tfx-route-no-claude-native.mjs",
