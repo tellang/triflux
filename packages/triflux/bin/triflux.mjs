@@ -5030,6 +5030,16 @@ function stopHubForUpdate() {
   return info;
 }
 
+function openHubLogFd() {
+  try {
+    const logDir = join(homedir(), ".claude", "cache", "tfx-hub");
+    mkdirSync(logDir, { recursive: true });
+    return openSync(join(logDir, "hub.log"), "a");
+  } catch {
+    return undefined;
+  }
+}
+
 function startHubAfterUpdate(info) {
   if (!info) return false;
   const serverPath = join(PKG_ROOT, "hub", "server.mjs");
@@ -5040,13 +5050,19 @@ function startHubAfterUpdate(info) {
       : String(process.env.TFX_HUB_PORT || "27888");
 
   try {
+    const logFd = openHubLogFd();
     const child = spawn(process.execPath, [serverPath], {
       env: { ...process.env, TFX_HUB_PORT: port },
-      stdio: "ignore",
+      stdio: ["ignore", logFd ?? "ignore", logFd ?? "ignore"],
       detached: true,
       windowsHide: true,
     });
     child.unref();
+    if (logFd !== undefined) {
+      try {
+        closeSync(logFd);
+      } catch {}
+    }
     return true;
   } catch {
     return false;
@@ -5211,7 +5227,9 @@ async function cmdHub(args = [], options = {}) {
         });
       }
 
-      // Issue #102: spawn stderr 를 임시 파일로 캡처해 실패 시 root cause 노출.
+      // Issue #102 + hub-detach fix: spawn stdout/stderr 를 두 채널로 redirect.
+      // - startupErrPath (tmp): 3초 안의 startup 실패 진단 (성공 시 cleanup)
+      // - hub.log (cache): runtime stdout/stderr 영구 보존 (crash 추적)
       // detached spawn 은 pipe 유지가 까다로우니 fd 리다이렉트로 접근.
       const { openSync: _openSync, closeSync: _closeSync } = await import(
         "node:fs"
@@ -5227,10 +5245,11 @@ async function cmdHub(args = [], options = {}) {
       } catch {
         errFd = undefined;
       }
+      const logFd = openHubLogFd();
 
       const child = spawn(process.execPath, [serverPath], {
         env: { ...process.env, TFX_HUB_PORT: port },
-        stdio: ["ignore", "ignore", errFd ?? "ignore"],
+        stdio: ["ignore", logFd ?? "ignore", errFd ?? logFd ?? "ignore"],
         detached: true,
         windowsHide: true,
       });
@@ -5238,6 +5257,11 @@ async function cmdHub(args = [], options = {}) {
       if (errFd !== undefined) {
         try {
           _closeSync(errFd);
+        } catch {}
+      }
+      if (logFd !== undefined) {
+        try {
+          _closeSync(logFd);
         } catch {}
       }
 
