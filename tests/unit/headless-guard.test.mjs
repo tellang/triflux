@@ -307,6 +307,31 @@ describe("headless-guard decision matrix (runtime)", () => {
     assert.equal(result.status, 2);
   });
 
+  it("$() 안의 grep 'codex exec' 인자는 통과한다 (오탐 방지)", () => {
+    // result=$(grep "codex exec" file) 같은 grep 인자 패턴은
+    // command substitution 의 첫 명령이 grep 이므로 차단 대상이 아니다.
+    const result = runGuardWithBashCommand(
+      'result=$(grep -rn "codex exec" hooks/)',
+    );
+    assert.equal(result.status, 0);
+  });
+
+  it("$() 안의 파이프된 grep 'codex exec'도 통과한다 (오탐 방지)", () => {
+    const result = runGuardWithBashCommand(
+      'cmd=$(find . -name "*.mjs" | xargs grep "codex exec")',
+    );
+    assert.equal(result.status, 0);
+  });
+
+  it("eval 안의 grep 'codex exec' subshell도 통과한다 (오탐 방지)", () => {
+    // eval "$(grep ...)" 는 eval 의 인자가 subshell 이고 그 안의 첫 명령이 grep.
+    // 진짜 위협 (eval "codex exec ...") 과 구분된다.
+    const result = runGuardWithBashCommand(
+      "eval \"$(grep 'codex exec' file.mjs)\"",
+    );
+    assert.equal(result.status, 0);
+  });
+
   it("psmux send-keys에 codex exec payload가 있으면 deny한다", () => {
     const result = runGuardWithBashCommand(
       "psmux send-keys -t sess \"codex exec 'hello'\" Enter",
