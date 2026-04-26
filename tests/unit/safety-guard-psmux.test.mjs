@@ -31,13 +31,17 @@ function createTempRepo(hosts) {
 function runGuard(command, cwd = tmpdir()) {
   const input = JSON.stringify({ tool_name: "Bash", tool_input: { command } });
   const { TFX_CLEANUP_BYPASS: _unused, ...envClean } = process.env;
+  const env =
+    cwd === tmpdir()
+      ? envClean
+      : { ...envClean, TFX_HOSTS_USER_STATE_DISABLE: "1" };
   try {
     execFileSync("node", [GUARD_PATH], {
       input,
       encoding: "utf8",
       stdio: ["pipe", "pipe", "pipe"],
       cwd,
-      env: envClean,
+      env,
     });
     return 0;
   } catch (e) {
@@ -108,8 +112,7 @@ describe("safety-guard psmux rules", () => {
     const repoDir = createTempRepo({
       winbox: {
         os: "windows",
-        ssh: { user: "nested-user" },
-        tailscale: { ip: "100.64.0.9" },
+        ssh: { user: "nested-user", host: "100.64.0.9" },
       },
     });
 

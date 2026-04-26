@@ -133,8 +133,20 @@ function normalizeLastProbe(rawProbe) {
   return Object.keys(probe).length > 0 ? probe : null;
 }
 
+function normalizeResources(rawHost) {
+  const rawResources =
+    rawHost.resources && typeof rawHost.resources === "object"
+      ? rawHost.resources
+      : {};
+  const rawSpecs =
+    rawHost.specs && typeof rawHost.specs === "object" ? rawHost.specs : {};
+  return { ...rawResources, ...rawSpecs };
+}
+
 export function normalizeHost(rawHost = {}, name = "") {
   const sshUser = rawHost.ssh_user || rawHost.ssh?.user || rawHost.user || null;
+  const sshHost = rawHost.ssh?.host || rawHost.host || null;
+  const resources = normalizeResources(rawHost);
   const tailscale = {
     ip: rawHost.tailscale?.ip || null,
     dns: rawHost.tailscale?.dns || null,
@@ -167,15 +179,14 @@ export function normalizeHost(rawHost = {}, name = "") {
     ssh: {
       ...(rawHost.ssh && typeof rawHost.ssh === "object" ? rawHost.ssh : {}),
       user: sshUser,
+      host: sshHost,
     },
     tailscale,
     capabilities,
     capabilities_v2,
     last_probe: normalizeLastProbe(rawHost.last_probe),
-    specs:
-      rawHost.specs && typeof rawHost.specs === "object"
-        ? { ...rawHost.specs }
-        : {},
+    resources,
+    specs: { ...resources },
     raw: { ...rawHost },
   };
 }
@@ -234,12 +245,16 @@ export function resolveHost(nameOrAlias, repoRoot) {
       ...host.aliases,
       host.tailscale.ip,
       host.tailscale.dns,
+      host.ssh.host,
       host.ssh_user ? `${host.ssh_user}@${name}` : null,
       host.ssh_user && host.tailscale.ip
         ? `${host.ssh_user}@${host.tailscale.ip}`
         : null,
       host.ssh_user && host.tailscale.dns
         ? `${host.ssh_user}@${host.tailscale.dns}`
+        : null,
+      host.ssh_user && host.ssh.host
+        ? `${host.ssh_user}@${host.ssh.host}`
         : null,
     ]);
     for (const alias of aliases) {

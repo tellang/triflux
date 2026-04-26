@@ -1,6 +1,8 @@
 {
   "executor": "codex",
   "build-fixer": "codex",
+  "cleanup": "codex",
+  "deslop": "codex",
   "debugger": "codex",
   "deep-executor": "codex",
   "architect": "codex",

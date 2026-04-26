@@ -123,9 +123,12 @@ function getWindowsHostIds() {
       ids.add(name);
       if (cfg.tailscale?.ip) ids.add(cfg.tailscale.ip);
       if (cfg.tailscale?.dns) ids.add(cfg.tailscale.dns);
+      if (cfg.ssh?.host) ids.add(cfg.ssh.host);
       if (cfg.ssh?.user) {
         ids.add(`${cfg.ssh.user}@${name}`);
         if (cfg.tailscale?.ip) ids.add(`${cfg.ssh.user}@${cfg.tailscale.ip}`);
+        if (cfg.tailscale?.dns) ids.add(`${cfg.ssh.user}@${cfg.tailscale.dns}`);
+        if (cfg.ssh?.host) ids.add(`${cfg.ssh.user}@${cfg.ssh.host}`);
       }
     }
   } catch {
