@@ -240,3 +240,20 @@ gh run view 24946484889 --log-failed | grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.m
   - `node --test --test-force-exit tests/unit/codex-app-server-worker.test.mjs`
   - `node scripts/pack.mjs all`
   - `npm run lint`
+
+## Phase 7-Final fix 결과
+
+- Commit hash: 이 단일 Phase 7-Final 커밋 (최종 SHA는 deliverable에 기록)
+- Run analyzed: PR #199 latest run 24948157725
+- Files changed:
+  - `hub/team/conductor.mjs`
+  - `packages/remote/hub/team/conductor.mjs`
+  - `packages/triflux/hub/team/conductor.mjs`
+  - `tests/unit/conductor.test.mjs`
+  - `.triflux/plans/2026-04-26-ci-baseline-56-fail-categorization.md`
+- Rationale: CI 타임아웃 위치는 `shutdown 후 살아있는 세션`이 아니라 직전 mesh detach 테스트의 `waitFor()`였다. Root는 단순 3000ms 부족이 아니라 mock child가 `STARTING` 직후 `COMPLETED`로 즉시 종료되어 mesh registry 등록/해제가 50ms polling 사이에 사라지는 테스트 레이스였다. 테스트는 slow mock child를 주입해 registry 등록 상태를 관찰 가능하게 만들었고, 같은 과정에서 실제 conductor shutdown 버그도 드러났다. shutdown 중 SIGTERM exit가 일반 실패로 처리되어 `RESTARTING`에 들어가는 경로를 막아, shutdown cleanup이 살아있는 세션을 `DEAD`로 확정할 수 있게 했다.
+- Expected impact: `tests/unit/conductor.test.mjs`의 PR #199 latest residual 1 fail 해소. Timeout 연장만으로 가리는 대신 mesh detach 테스트 레이스와 shutdown 중 restart 전이 버그를 함께 제거.
+- Verification:
+  - `node --test tests/unit/conductor.test.mjs --test-name-pattern "conductor: shutdown"`
+  - `node --test tests/unit/conductor.test.mjs`
+  - `node scripts/pack.mjs all`

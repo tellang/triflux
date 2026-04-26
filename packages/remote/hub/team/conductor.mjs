@@ -628,6 +628,7 @@ export function createConductor(opts = {}) {
       });
 
       if (TERMINAL_STATES.has(session.state)) return;
+      if (shuttingDown) return;
 
       if (code === 0 && !signal) {
         transition(session, STATES.COMPLETED, "exit_0");
@@ -674,7 +675,7 @@ export function createConductor(opts = {}) {
         session: session.id,
         error: err.message,
       });
-      if (!TERMINAL_STATES.has(session.state)) {
+      if (!shuttingDown && !TERMINAL_STATES.has(session.state)) {
         handleFailure(session, `child_error:${err.message}`);
       }
     });
@@ -865,6 +866,8 @@ export function createConductor(opts = {}) {
         host,
       });
 
+      if (shuttingDown || TERMINAL_STATES.has(session.state)) return;
+
       // 원격 세션은 broker lease를 사용하지 않으므로 release 불필요
       // (spawnSession에서 config.remote === true일 때 lease 건너뜀)
       if (code === 0) {
@@ -899,7 +902,9 @@ export function createConductor(opts = {}) {
         session: session.id,
         error: err.message,
       });
-      handleFailure(session, `spawn_error:${err.message}`);
+      if (!shuttingDown && !TERMINAL_STATES.has(session.state)) {
+        handleFailure(session, `spawn_error:${err.message}`);
+      }
     });
   }
 
