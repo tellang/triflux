@@ -290,3 +290,33 @@ gh run view 24946484889 --log-failed | grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.m
   - `npm run lint`
   - `git diff --check`
   - Local full `CI=true npm run test:guard-codex-config`: Codex config before/after identical; command exit 1 due existing Windows-local `tests/integration/tfx-route-smoke.test.mjs` no-op 승격 assertion, unrelated to config mutation guard.
+
+## Phase 9 fix 결과
+
+- Commit hash: Phase 9 커밋 생성 후 deliverable에 기록
+- Run analyzed: PR #199 run 24948458610 (after Phase 8 `b85046b`)
+- Symptom:
+  - `CONFIG MUTATION (#193)`: `~/.codex/config.toml` size `1239 -> 1225`, `tfxHubUrl` becomes `null`.
+  - `tests/integration/hub-idle-timeout.test.mjs`: requested hub port collided with an existing listener (`EADDRINUSE`, no fallback allowed).
+- Files changed:
+  - `scripts/setup.mjs`
+  - `scripts/codex-mcp-gateway-sync.mjs`
+  - `scripts/lib/mcp-guard-engine.mjs`
+  - `hub/server.mjs`
+  - `tests/unit/setup-home-resolution.test.mjs`
+  - `tests/integration/hub-idle-timeout.test.mjs`
+  - `packages/*` mirror sync via `node scripts/pack.mjs all`
+- Rationale:
+  - Phase 8 guarded `syncCodexHubUrl()` and `ensureCodexHubServerConfig()`, but `ensureCodexProfiles()` could still rewrite implicit `~/.codex/config.toml` during setup/critical setup flows. It now skips protected env (`NODE_ENV=test`, `CI=true`, `TFX_TEST=1`) unless `TFX_CODEX_CONFIG_SYNC=1` explicitly opts in.
+  - Direct Codex TOML writers in `codex-mcp-gateway-sync` and registry target sync now use the same protected-env opt-in policy.
+  - Hub startup skips project `.claude/mcp.json` sync in protected env unless `TFX_PROJECT_MCP_SYNC=1`, preventing integration tests from rewriting repo-local MCP config to ephemeral ports.
+  - `hub-idle-timeout` now asks the OS for an ephemeral free port instead of using the crowded `28100-28299` random range, and sets `TFX_TEST=1` while the hub is running.
+- Expected impact:
+  - `npm run test:guard-codex-config` should keep `~/.codex/config.toml` `sha`, `mtime`, size, and `tfxHubUrl` stable through setup/hub startup paths.
+  - `hub-idle-timeout` should no longer fail on stale or concurrently used fixed-range ports.
+- Verification:
+  - `node --test tests/unit/setup-home-resolution.test.mjs`
+  - `node --test tests/unit/sync-hub-mcp-settings.test.mjs`
+  - `node --test tests/unit/setup-sync.test.mjs`
+  - `node --test tests/integration/hub-idle-timeout.test.mjs`
+  - `CI=true node scripts/check-codex-config-stable.mjs node --test tests/unit/setup-home-resolution.test.mjs tests/integration/hub-idle-timeout.test.mjs`

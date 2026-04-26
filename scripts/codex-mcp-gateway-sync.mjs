@@ -21,6 +21,7 @@ import { SERVERS } from "./mcp-gateway-start.mjs";
 
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
 const BACKUP_SUFFIX = ".pre-gateway.bak";
+const CODEX_CONFIG_SYNC_OPT_IN = "TFX_CODEX_CONFIG_SYNC";
 
 // gateway 서버 → SSE URL 매핑
 const GATEWAY_MAP = new Map(
@@ -75,9 +76,25 @@ function _buildStdioEntry(name, block) {
   return `[mcp_servers.${name}]\n${block}\n`;
 }
 
+function isProtectedCodexConfigMutationEnv(env = process.env) {
+  return env.NODE_ENV === "test" || env.CI === "true" || env.TFX_TEST === "1";
+}
+
+function shouldSkipCodexConfigMutation() {
+  return (
+    process.env[CODEX_CONFIG_SYNC_OPT_IN] !== "1" &&
+    isProtectedCodexConfigMutationEnv()
+  );
+}
+
 // ── enable: stdio → SSE ──
 
 export function enableGateway() {
+  if (shouldSkipCodexConfigMutation()) {
+    console.log("[SKIP] protected environment; config.toml not modified");
+    return { changed: 0, skipped: 0, reason: "protected-env" };
+  }
+
   if (!existsSync(CODEX_CONFIG)) {
     console.log("[SKIP] ~/.codex/config.toml not found");
     return { changed: 0, skipped: 0 };
@@ -151,6 +168,11 @@ export function enableGateway() {
 // ── disable: SSE → stdio 복원 ──
 
 export function disableGateway() {
+  if (shouldSkipCodexConfigMutation()) {
+    console.log("[SKIP] protected environment; config.toml not restored");
+    return false;
+  }
+
   const backupPath = CODEX_CONFIG + BACKUP_SUFFIX;
   if (!existsSync(backupPath)) {
     console.log("[SKIP] No backup found — nothing to restore");

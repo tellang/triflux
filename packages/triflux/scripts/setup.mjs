@@ -663,6 +663,13 @@ const REQUIRED_TOP_LEVEL_SETTINGS = [
 
 function ensureCodexProfiles() {
   try {
+    if (
+      process.env.TFX_CODEX_CONFIG_SYNC !== "1" &&
+      isProtectedCodexConfigMutationEnv()
+    ) {
+      return { ok: true, changed: 0, reason: "protected-env" };
+    }
+
     if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
 
     const original = existsSync(CODEX_CONFIG_PATH)
