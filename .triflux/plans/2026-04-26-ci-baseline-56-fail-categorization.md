@@ -130,6 +130,15 @@ grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.mjs" /tmp/ci-baseline-fails.log | sort |
 - Rationale: option (b) 선택. CI에 실제 Codex/Gemini CLI 설치 및 인증 우회를 추가하는 것은 Phase 1 범위를 넘고 auth 변수가 크다. 대신 smoke test가 번들 fake CLI를 Linux CI에서도 실행 가능한 fixture로 사용하도록 executable bit와 fake `--version`을 보강했다. 또한 현재 라우터 정책에 맞게 no-op 승격은 `exit_code: 68`로 검증하고, executor auto MCP 정책은 `context7` 단독 허용으로 정렬했다.
 - Expected impact: `tests/integration/tfx-route-smoke.test.mjs`의 CI Linux `codex not found → claude-native fallback` cascade를 제거하여 baseline 45 fail 해소 예상.
 
+## Phase 2 fix 결과
+
+- Commit hash: 이 단일 Phase 2 커밋 (최종 SHA는 커밋 생성 후 deliverable에 기록)
+- Files changed:
+  - `tests/unit/codex-app-server-worker.test.mjs`
+  - `.triflux/plans/2026-04-26-ci-baseline-56-fail-categorization.md`
+- Rationale: option (a) 선택. 이 unit suite는 `spawnFn`과 fake JSON-RPC client를 주입하므로 실제 `codex` CLI 부재나 fixture `PATH` 문제가 root가 아니다. AC-1 `initialize timeout` 테스트가 30ms bootstrap budget과 `unref()` timer에 의존해 Linux CI에서 test runner가 이벤트 루프 종료로 subtest를 취소할 수 있었다. Timeout fake를 ref timer로 바꾸고 bootstrap timeout을 500ms로 올려 실제 `CodexAppServerTransportError` rejection 경로를 안정적으로 관측하게 했다.
+- Expected impact: `tests/unit/codex-app-server-worker.test.mjs`의 AC-1 `initialize timeout` 단일 root를 제거하여 PR #199 CI의 해당 파일 36 fail cascade 해소 예상.
+
 ## 다음 세션 시작 시 (context-restore 활용)
 
 ```bash
