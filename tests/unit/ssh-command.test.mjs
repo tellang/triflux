@@ -30,6 +30,48 @@ function createTempRepo(hosts) {
   return repoDir;
 }
 
+const FLAT_HOSTS = {
+  ultra4: {
+    description: "legacy windows host",
+    aliases: ["desktop", "ultra", "울트라"],
+    default_dir: "~/Desktop/Projects",
+    os: "win32",
+    ssh_user: "SSAFY",
+    tailscale: {
+      ip: "100.64.0.1",
+      dns: "desk.ts.net",
+    },
+    capabilities: ["codex", "claude"],
+    resources: { cores: 22, ram_gb: 64 },
+  },
+};
+
+function withSourceHosts(hosts, callback) {
+  const savedDisable = process.env.TFX_HOSTS_USER_STATE_DISABLE;
+  const savedUserState = process.env.TFX_HOSTS_USER_STATE;
+  process.env.TFX_HOSTS_USER_STATE_DISABLE = "1";
+  delete process.env.TFX_HOSTS_USER_STATE;
+  resetHostsCache();
+
+  const repoDir = createTempRepo(hosts);
+  try {
+    return callback(repoDir);
+  } finally {
+    rmSync(repoDir, { recursive: true, force: true });
+    resetHostsCache();
+    if (savedDisable === undefined) {
+      delete process.env.TFX_HOSTS_USER_STATE_DISABLE;
+    } else {
+      process.env.TFX_HOSTS_USER_STATE_DISABLE = savedDisable;
+    }
+    if (savedUserState === undefined) {
+      delete process.env.TFX_HOSTS_USER_STATE;
+    } else {
+      process.env.TFX_HOSTS_USER_STATE = savedUserState;
+    }
+  }
+}
+
 describe("ssh-command", () => {
   beforeEach(() => resetHostsCache());
 
@@ -172,95 +214,116 @@ describe("ssh-command", () => {
 
   describe("getHostConfig", () => {
     it("존재하는 호스트 설정 반환", () => {
-      const cfg = getHostConfig("ultra4");
-      assert.ok(cfg, "ultra4 설정 존재");
-      assert.equal(cfg.os, "windows");
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        const cfg = getHostConfig("ultra4", repoDir);
+        assert.ok(cfg, "ultra4 설정 존재");
+        assert.equal(cfg.os, "windows");
+      });
     });
 
     it("없는 호스트는 null 반환", () => {
-      assert.equal(getHostConfig("nonexistent"), null);
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        assert.equal(getHostConfig("nonexistent", repoDir), null);
+      });
     });
 
     it("nested ssh.user shape도 normalized config로 반환", () => {
-      const repoDir = createTempRepo({
-        winbox: {
-          os: "windows",
-          ssh: { user: "nested-user" },
-          tailscale: { ip: "100.64.0.9" },
-          capabilities_v2: { codex: true, high_memory: true },
-          specs: { cores: 12, ram_gb: 48 },
+      withSourceHosts(
+        {
+          winbox: {
+            os: "windows",
+            ssh: { user: "nested-user", host: "100.64.0.9" },
+            tailscale: { ip: "100.64.0.9" },
+            capabilities_v2: { codex: true, high_memory: true },
+            specs: { cores: 12, ram_gb: 48 },
+          },
         },
-      });
-
-      try {
-        const cfg = getHostConfig("winbox", repoDir);
-        assert.equal(cfg?.ssh.user, "nested-user");
-        assert.equal(cfg?.ssh_user, "nested-user");
-        assert.deepEqual(cfg?.capabilities, ["codex", "high-memory"]);
-      } finally {
-        rmSync(repoDir, { recursive: true, force: true });
-      }
+        (repoDir) => {
+          const cfg = getHostConfig("winbox", repoDir);
+          assert.equal(cfg?.ssh.user, "nested-user");
+          assert.equal(cfg?.ssh.host, "100.64.0.9");
+          assert.equal(cfg?.ssh_user, "nested-user");
+          assert.deepEqual(cfg?.capabilities, ["codex", "high-memory"]);
+        },
+      );
     });
   });
 
   describe("detectHostOs", () => {
     it("normalized host registry를 통해 nested windows shape를 감지", () => {
-      const repoDir = createTempRepo({
-        winbox: {
-          os: "windows",
-          ssh: { user: "nested-user" },
+      withSourceHosts(
+        {
+          winbox: {
+            os: "windows",
+            ssh: { user: "nested-user", host: "100.64.0.9" },
+          },
         },
-      });
-
-      try {
-        assert.equal(detectHostOs("winbox", repoDir), "windows");
-      } finally {
-        rmSync(repoDir, { recursive: true, force: true });
-      }
+        (repoDir) => {
+          assert.equal(detectHostOs("winbox", repoDir), "windows");
+          assert.equal(
+            detectHostOs("nested-user@100.64.0.9", repoDir),
+            "windows",
+          );
+        },
+      );
     });
   });
 
   describe("resolveHostAlias", () => {
     it("정확한 키로 해결", () => {
-      assert.equal(resolveHostAlias("ultra4"), "ultra4");
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        assert.equal(resolveHostAlias("ultra4", repoDir), "ultra4");
+      });
     });
 
     it("aliases 배열 내 값으로 해결", () => {
-      const key = resolveHostAlias("울트라");
-      assert.equal(key, "ultra4");
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        const key = resolveHostAlias("울트라", repoDir);
+        assert.equal(key, "ultra4");
+      });
     });
 
     it("없는 별칭은 null", () => {
-      assert.equal(resolveHostAlias("unknown-alias"), null);
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        assert.equal(resolveHostAlias("unknown-alias", repoDir), null);
+      });
     });
   });
 
   describe("selectHostForCapability", () => {
     it("codex capability 매칭", () => {
-      const hosts = selectHostForCapability("codex");
-      assert.ok(hosts.length > 0, "codex capable 호스트 존재");
-      assert.equal(hosts[0].name, "ultra4");
-      assert.deepEqual(hosts[0].specs, { cores: 22, ram_gb: 64 });
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        const hosts = selectHostForCapability("codex", repoDir);
+        assert.ok(hosts.length > 0, "codex capable 호스트 존재");
+        assert.equal(hosts[0].name, "ultra4");
+        assert.deepEqual(hosts[0].specs, { cores: 22, ram_gb: 64 });
+      });
     });
 
     it("없는 capability는 빈 배열", () => {
-      const hosts = selectHostForCapability("quantum-computing");
-      assert.equal(hosts.length, 0);
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        const hosts = selectHostForCapability("quantum-computing", repoDir);
+        assert.equal(hosts.length, 0);
+      });
     });
   });
 
   describe("selectHostByResources", () => {
     it("cores 기준 정렬된 명시적 선택 목록 반환", () => {
-      const hosts = selectHostByResources("codex", "cores");
-      assert.ok(hosts.length > 0, "codex capable 호스트 존재");
-      assert.equal(hosts[0].name, "ultra4");
-      assert.deepEqual(hosts[0].specs, { cores: 22, ram_gb: 64 });
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        const hosts = selectHostByResources("codex", "cores", repoDir);
+        assert.ok(hosts.length > 0, "codex capable 호스트 존재");
+        assert.equal(hosts[0].name, "ultra4");
+        assert.deepEqual(hosts[0].specs, { cores: 22, ram_gb: 64 });
+      });
     });
 
     it("ram_gb 기준 정렬된 명시적 선택 목록 반환", () => {
-      const hosts = selectHostByResources("codex", "ram_gb");
-      assert.ok(hosts.length > 0, "codex capable 호스트 존재");
-      assert.equal(hosts[0].specs.ram_gb, 64);
+      withSourceHosts(FLAT_HOSTS, (repoDir) => {
+        const hosts = selectHostByResources("codex", "ram_gb", repoDir);
+        assert.ok(hosts.length > 0, "codex capable 호스트 존재");
+        assert.equal(hosts[0].specs.ram_gb, 64);
+      });
     });
 
     it("지원하지 않는 sortBy는 예외", () => {

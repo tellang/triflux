@@ -2,7 +2,7 @@
 // PowerShell 호스트에 bash 문법(2>/dev/null, &&, $())을 보내는 사고를 방지한다.
 // 모든 SSH 명령 생성 코드에서 이 유틸리티를 사용할 것.
 
-import { readHosts } from "./hosts-compat.mjs";
+import { readHost, readHosts, resolveHost } from "./hosts-compat.mjs";
 
 /** hosts.json 캐시 (프로세스 수명 동안 유지) */
 let hostsCache = null;
@@ -28,7 +28,7 @@ function loadHostsCache(repoRoot) {
 export function detectHostOs(hostAlias, repoRoot) {
   loadHostsCache(repoRoot);
 
-  const hostCfg = hostsCache.hosts?.[hostAlias];
+  const hostCfg = resolveHost(hostAlias, repoRoot)?.host;
   if (hostCfg?.os === "windows") return "windows";
   if (hostCfg?.os) return "posix";
 
@@ -163,7 +163,7 @@ export function validateCommandForOs(command, os) {
  */
 export function getHostConfig(hostAlias, repoRoot) {
   loadHostsCache(repoRoot);
-  return hostsCache.hosts?.[hostAlias] ?? null;
+  return readHost(hostAlias, repoRoot);
 }
 
 /**
@@ -175,13 +175,7 @@ export function getHostConfig(hostAlias, repoRoot) {
 export function resolveHostAlias(alias, repoRoot) {
   loadHostsCache(repoRoot);
 
-  if (hostsCache.hosts?.[alias]) return alias;
-
-  for (const [name, cfg] of Object.entries(hostsCache.hosts || {})) {
-    if (cfg.aliases.includes(alias)) return name;
-  }
-
-  return null;
+  return resolveHost(alias, repoRoot)?.name ?? null;
 }
 
 /**
