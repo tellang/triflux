@@ -53,7 +53,7 @@ describe("getOrCreateServer()", () => {
     makeTempStateDir();
     writeState({
       pid: process.pid,
-      port: 29998,
+      port: 27888,
       version: "1.0.0",
       sessionId: "test-session",
       startedAt: new Date().toISOString(),
@@ -63,9 +63,9 @@ describe("getOrCreateServer()", () => {
       _deps: {
         isHealthy: async () => true,
         getInfo: () => ({
-          url: "http://127.0.0.1:29998/mcp",
+          url: "http://127.0.0.1:27888/mcp",
           pid: process.pid,
-          port: 29998,
+          port: 27888,
         }),
         startHub: async () => {
           throw new Error("startHub이 호출되면 안 됨");
@@ -74,9 +74,9 @@ describe("getOrCreateServer()", () => {
     });
 
     assert.equal(result.reused, true);
-    assert.equal(result.port, 29998);
+    assert.equal(result.port, 27888);
     assert.equal(result.pid, process.pid);
-    assert.ok(result.url.includes("29998"));
+    assert.ok(result.url.includes("27888"));
   });
 
   it("PID 생존 + health 실패 → startHub 호출, reused: false", async () => {
@@ -143,7 +143,7 @@ describe("getOrCreateServer()", () => {
     makeTempStateDir();
     writeState({
       pid: process.pid,
-      port: 29995,
+      port: 27888,
       version: "1.0.0",
       sessionId: "test-session",
       startedAt: new Date().toISOString(),
@@ -160,6 +160,6 @@ describe("getOrCreateServer()", () => {
     });
 
     assert.equal(result.reused, true);
-    assert.equal(result.url, "http://127.0.0.1:29995/mcp");
+    assert.equal(result.url, "http://127.0.0.1:27888/mcp");
   });
 });

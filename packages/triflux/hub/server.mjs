@@ -140,7 +140,7 @@ export async function tryReuseExistingHub({
 } = {}) {
   const existing = readCurrentState();
   const existingPort = Number(existing?.port);
-  const requestedPort = parseHubPort(port);
+  const requestedPort = parseHubPort(port) ?? HUB_DEFAULT_PORT;
   const livePeer = detectPeer();
   const livePidPort = parseHubPort(livePeer?.port);
   if (
@@ -150,11 +150,7 @@ export async function tryReuseExistingHub({
   ) {
     return null;
   }
-  if (requestedPort && existingPort !== requestedPort) {
-    if (portSpecified) return null;
-    if (!livePeer?.alive || !livePidPort || existingPort !== livePidPort) {
-      return null;
-    }
+  if (existingPort !== requestedPort) {
     log.warn(
       {
         requestedPort,
@@ -162,8 +158,9 @@ export async function tryReuseExistingHub({
         pid: livePeer.pid,
         livePidPort,
       },
-      "hub.port_mismatch_reusing_live_pid",
+      "hub.port_mismatch_not_reusing_live_pid",
     );
+    return null;
   }
   if (!(await checkHealth(existingPort))) return null;
 
@@ -237,18 +234,9 @@ function readHubPidFile(
 }
 
 export function resolveHubPort(env = process.env, opts = {}) {
-  const {
-    preferLivePid = true,
-    detectPeer = detectLivePeer,
-    pidFilePath = PID_FILE,
-  } = opts;
+  void opts;
   const envPort = parseHubPort(env?.TFX_HUB_PORT);
   if (envPort) return envPort;
-  if (preferLivePid) {
-    const peer = detectPeer(pidFilePath);
-    const peerPort = parseHubPort(peer?.port);
-    if (peer?.alive && peerPort) return peerPort;
-  }
   return HUB_DEFAULT_PORT;
 }
 

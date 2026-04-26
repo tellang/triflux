@@ -39,6 +39,8 @@ function writeRaw(filePath, value) {
 
 describe("sync-hub-mcp-settings", () => {
   const originalHome = process.env.HOME;
+  const originalUserprofile = process.env.USERPROFILE;
+  const originalTestHome = process.env.TRIFLUX_TEST_HOME;
   let homeDir;
 
   function settingsPath(...segments) {
@@ -48,6 +50,8 @@ describe("sync-hub-mcp-settings", () => {
   beforeEach(() => {
     homeDir = mkdtempSync(join(tmpdir(), "tfx-mcp-sync-"));
     process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    process.env.TRIFLUX_TEST_HOME = homeDir;
   });
 
   afterEach(() => {
@@ -55,6 +59,16 @@ describe("sync-hub-mcp-settings", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalUserprofile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserprofile;
+    }
+    if (originalTestHome === undefined) {
+      delete process.env.TRIFLUX_TEST_HOME;
+    } else {
+      process.env.TRIFLUX_TEST_HOME = originalTestHome;
     }
 
     if (homeDir && existsSync(homeDir)) {
