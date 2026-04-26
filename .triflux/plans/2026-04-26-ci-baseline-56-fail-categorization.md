@@ -190,3 +190,38 @@ gh run view 24946484889 --log-failed | grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.m
 # 각 fail 카테고리 deep-dive 후 swarm PRD 분할 작성
 # tfx swarm plan → tfx swarm run
 ```
+
+## Phase 7 fix 결과
+
+- Commit hash: Phase 7 커밋 생성 후 deliverable에 기록
+- Run analyzed: PR #199 run 24947877546 (`C:\Users\tellang\AppData\Local\Temp\ci-pr199-r2.log` 재수집)
+- Files changed:
+  - `hub/workers/codex-app-server-worker.mjs`
+  - `hub/team/codex-review.mjs`
+  - `hub/team/conductor.mjs`
+  - `scripts/doctor-diagnose.mjs`
+  - `tests/unit/codex-review.test.mjs`
+  - `tests/unit/psmux.test.mjs`
+  - `tests/integration/gemini.test.mjs`
+  - `tests/unit/conductor-windows-quote-regression.test.mjs`
+  - `packages/remote/**`, `packages/triflux/**` mirror sync via `node scripts/pack.mjs all`
+- Category breakdown:
+  - `codex-app-server-worker`: awaited `execute()` timeout race와 `stop()` unsubscribe deadline에서 `unref()` 제거. Node test runner가 pending promise만 남은 상태를 event-loop-resolved cancellation으로 오판하는 CI residual을 제거.
+  - `codex-review`: `resolveReviewDiff()`에 git runner DI를 추가하고 unit tests를 real `HEAD~N` history 대신 argv/range contract 검증으로 전환. GitHub Actions shallow checkout의 `HEAD~1`/`HEAD~3` ambiguous revision 실패 제거.
+  - `psmux`: orphan MCP cleanup boundary assertion을 escaped session name + `[-./]` boundary class 계약으로 정렬. 기존 구현의 escaped session anchor를 테스트가 정확히 검증하도록 수정.
+  - `gemini integration`: `TFX_ROUTE_WORKER_RUNNER=__nonexistent__`가 default runner fallback으로 성공하는 현재 resolver 동작에 맞춰, 실제로 존재하지만 exit 73을 반환하는 failing runner fixture로 stream wrapper fallback 경로를 결정적으로 검증.
+  - `conductor-windows-quote-regression`: fast-exit headless child가 probe HEALTHY 전 종료되어도 `STARTING -> COMPLETED` 전이를 허용하고, awaited cleanup grace timer의 `unref()`를 제거. 테스트는 L2/synapse 부수 네트워크를 명시 비활성화.
+  - 추가 residual 발견: `scripts/__tests__/tfx-doctor-diagnose.test.mjs`가 Linux CI에서 `powershell.exe` 부재로 실패. `doctor-diagnose` zip 생성에 POSIX `zip -qr` 경로를 추가해 cross-platform 진단 번들 생성을 복구.
+- Expected impact:
+  - PR #199 run 24947877546의 residual 14 fail + 20 cancelled 전부 해소 목표.
+  - 특히 `Promise resolution is still pending but the event loop has already resolved` 계열은 awaited timer/ref 문제를 제거해 cancellation 대신 정상 resolve/reject를 관측하게 함.
+- Verification:
+  - `node scripts/pack.mjs all`
+  - `npm run lint`
+  - `git diff --check`
+  - `node --test tests/unit/codex-app-server-worker.test.mjs`
+  - `node --test tests/unit/codex-review.test.mjs`
+  - `node --test tests/unit/conductor-windows-quote-regression.test.mjs`
+  - `node --test scripts/__tests__/tfx-doctor-diagnose.test.mjs`
+  - `node --test tests/integration/gemini.test.mjs`
+  - `node --test tests/unit/psmux.test.mjs`

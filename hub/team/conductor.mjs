@@ -57,7 +57,7 @@ export const STATES = Object.freeze({
 /** 유효한 상태 전이 테이블 */
 const TRANSITIONS = Object.freeze({
   [STATES.INIT]: [STATES.STARTING],
-  [STATES.STARTING]: [STATES.HEALTHY, STATES.FAILED],
+  [STATES.STARTING]: [STATES.HEALTHY, STATES.FAILED, STATES.COMPLETED],
   [STATES.HEALTHY]: [
     STATES.STALLED,
     STATES.INPUT_WAIT,
@@ -337,7 +337,6 @@ export function createConductor(opts = {}) {
         forceKill(pid);
         resolve();
       }, graceMs);
-      timer.unref?.();
       child.once("exit", () => {
         clearTimeout(timer);
         resolve();

@@ -876,7 +876,6 @@ export class CodexAppServerWorker {
             raw: null,
           });
         }, timeoutMs);
-        timer.unref?.();
       });
 
       const result = await Promise.race([resultPromise, timeoutPromise]);
@@ -952,8 +951,7 @@ export class CodexAppServerWorker {
               });
             client.close("closing");
             const deadline = new Promise((resolve) => {
-              const t = setTimeout(resolve, UNSUBSCRIBE_DEADLINE_MS);
-              t.unref?.();
+              setTimeout(resolve, UNSUBSCRIBE_DEADLINE_MS);
             });
             await Promise.race([unsubPromise, deadline]);
           }
