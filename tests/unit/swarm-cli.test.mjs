@@ -50,8 +50,8 @@ describe("swarm-cli parseFlags — --base", () => {
   });
 });
 
-describe("swarm-cli assertTtyForSwarm — #116-C non-TTY fail-fast", () => {
-  it("passes when stdout is TTY", () => {
+describe("swarm-cli assertTtyForSwarm — #116-C non-TTY policy (v10.15+: warn-and-proceed)", () => {
+  it("passes silently when stdout is TTY", () => {
     const result = assertTtyForSwarm({
       stdoutIsTTY: true,
       stdinIsTTY: false,
@@ -62,7 +62,7 @@ describe("swarm-cli assertTtyForSwarm — #116-C non-TTY fail-fast", () => {
     assert.deepEqual(result.warnings, []);
   });
 
-  it("passes when stdin is TTY (e.g. piped stdout only)", () => {
+  it("passes silently when stdin is TTY (e.g. piped stdout only)", () => {
     const result = assertTtyForSwarm({
       stdoutIsTTY: false,
       stdinIsTTY: true,
@@ -72,20 +72,20 @@ describe("swarm-cli assertTtyForSwarm — #116-C non-TTY fail-fast", () => {
     assert.deepEqual(result.warnings, []);
   });
 
-  it("fails with #116-C guidance when both stdout and stdin are non-TTY", () => {
+  it("proceeds with warning when both stdout and stdin are non-TTY (default)", () => {
     const result = assertTtyForSwarm({
       stdoutIsTTY: false,
       stdinIsTTY: false,
       env: {},
     });
-    assert.equal(result.ok, false);
-    assert.equal(result.optIn, false);
-    assert.match(result.reason, /#116-C/);
-    assert.match(result.reason, /TFX_ALLOW_NON_TTY_SWARM=1/);
-    assert.match(result.reason, /tmux/);
+    assert.equal(result.ok, true);
+    assert.equal(result.optIn, true);
+    assert.equal(result.warnings.length, 1);
+    assert.match(result.warnings[0], /#116-C/);
+    assert.match(result.warnings[0], /TFX_BLOCK_NON_TTY_SWARM=1/);
   });
 
-  it("opts in with warning when TFX_ALLOW_NON_TTY_SWARM=1", () => {
+  it("opts in silently when TFX_ALLOW_NON_TTY_SWARM=1 (compat — warning suppressed)", () => {
     const result = assertTtyForSwarm({
       stdoutIsTTY: false,
       stdinIsTTY: false,
@@ -93,16 +93,39 @@ describe("swarm-cli assertTtyForSwarm — #116-C non-TTY fail-fast", () => {
     });
     assert.equal(result.ok, true);
     assert.equal(result.optIn, true);
-    assert.equal(result.warnings.length, 1);
-    assert.match(result.warnings[0], /opt-in/);
+    assert.deepEqual(result.warnings, []);
   });
 
-  it("does not opt in when TFX_ALLOW_NON_TTY_SWARM is set to other values", () => {
+  it("still proceeds with default warning when TFX_ALLOW_NON_TTY_SWARM is non-'1'", () => {
     const result = assertTtyForSwarm({
       stdoutIsTTY: false,
       stdinIsTTY: false,
       env: { TFX_ALLOW_NON_TTY_SWARM: "true" },
     });
+    assert.equal(result.ok, true);
+    assert.equal(result.optIn, true);
+    assert.equal(result.warnings.length, 1);
+  });
+
+  it("fails-fast with #116-C reason when TFX_BLOCK_NON_TTY_SWARM=1 opt-out", () => {
+    const result = assertTtyForSwarm({
+      stdoutIsTTY: false,
+      stdinIsTTY: false,
+      env: { TFX_BLOCK_NON_TTY_SWARM: "1" },
+    });
     assert.equal(result.ok, false);
+    assert.equal(result.optIn, false);
+    assert.match(result.reason, /#116-C/);
+    assert.match(result.reason, /TFX_BLOCK_NON_TTY_SWARM=1/);
+  });
+
+  it("opt-out takes precedence over opt-in (BLOCK wins over ALLOW)", () => {
+    const result = assertTtyForSwarm({
+      stdoutIsTTY: false,
+      stdinIsTTY: false,
+      env: { TFX_BLOCK_NON_TTY_SWARM: "1", TFX_ALLOW_NON_TTY_SWARM: "1" },
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /TFX_BLOCK_NON_TTY_SWARM=1/);
   });
 });

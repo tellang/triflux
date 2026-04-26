@@ -14,12 +14,18 @@ const YELLOW = "\u001b[93m";
 const GRAY = "\u001b[90m";
 
 /**
- * #116-C: non-TTY background 환경에서 `tfx swarm` 실행은 codex worker spawn 이
- * 무한 hang 한다 (stdin TTY 대기 또는 hub MCP lease race).
+ * #116-C: non-TTY background 환경에서 `tfx swarm` 실행 시 codex worker spawn 이
+ * 무한 hang 가능성이 있다 (stdin TTY 대기 또는 hub MCP lease race).
  *
- * - stdout/stdin 모두 non-TTY 이면 fail-fast — 명시 복구 경로 안내.
- * - `TFX_ALLOW_NON_TTY_SWARM=1` opt-in 시 경고만 남기고 통과 (테스트/CI).
- * - pure function — 테스트하기 쉽게 deps 주입 가능.
+ * Policy (v10.15+):
+ * - stdout 또는 stdin 중 하나라도 TTY → silent OK (기존 동작).
+ * - 양측 non-TTY → warning + 진행 (기본, 사용자 친화 + CI/background 호환).
+ * - `TFX_BLOCK_NON_TTY_SWARM=1` opt-out → fail-fast + 복구 경로 안내 (안전 망).
+ * - `TFX_ALLOW_NON_TTY_SWARM=1` 은 silent OK (호환 유지, warning suppress).
+ *
+ * 기존 fail-fast 정책은 첫 사용자에게 묻기 효과 (실제 user terminal 은 TTY 인데
+ * Claude Code run_in_background 같은 spawn 환경에서 child stdio 는 non-TTY).
+ * 다른 사용자도 동일 마찰 → 기본 동작을 "proceed with warning" 으로 변경.
  *
  * @param {{
  *   stdoutIsTTY?: boolean,
@@ -44,21 +50,25 @@ export function assertTtyForSwarm(deps = {}) {
     return { ok: true, optIn: false, warnings };
   }
 
+  // 양측 non-TTY 부터 적용되는 정책.
+  if (env.TFX_BLOCK_NON_TTY_SWARM === "1") {
+    const reason =
+      "tfx swarm 이 차단됨 — non-TTY 환경 + TFX_BLOCK_NON_TTY_SWARM=1 (#116-C).\n" +
+      "  복구 경로:\n" +
+      "    1) 터미널에서 직접 실행: tfx swarm <prd>\n" +
+      "    2) TFX_BLOCK_NON_TTY_SWARM=0 (또는 unset) 으로 차단 해제 후 재시도";
+    return { ok: false, optIn: false, warnings, reason };
+  }
+
   if (env.TFX_ALLOW_NON_TTY_SWARM === "1") {
-    warnings.push(
-      "non-TTY 환경 감지 — TFX_ALLOW_NON_TTY_SWARM=1 opt-in 으로 진행합니다. codex worker spawn hang 가능성 존재 (#116-C).",
-    );
+    // 명시 opt-in — silent OK (기존 호환, warning 미출력).
     return { ok: true, optIn: true, warnings };
   }
 
-  const reason =
-    "tfx swarm 은 TTY 가 필요합니다 — non-TTY 환경 (run_in_background, nohup 등) 에서 codex worker spawn 이 hang 합니다 (#116-C).\n" +
-    "  복구 경로:\n" +
-    "    1) 터미널에서 직접 실행: tfx swarm <prd>\n" +
-    "    2) tmux 경로: tfx multi --teammate-mode tmux --auto-attach --dashboard --assign ...\n" +
-    "    3) opt-in (위험): TFX_ALLOW_NON_TTY_SWARM=1 tfx swarm <prd>";
-
-  return { ok: false, optIn: false, warnings, reason };
+  warnings.push(
+    "non-TTY 환경 감지 — codex worker spawn hang 가능성 존재 (#116-C). 차단하려면 TFX_BLOCK_NON_TTY_SWARM=1.",
+  );
+  return { ok: true, optIn: true, warnings };
 }
 
 export function parseFlags(args) {

@@ -4,6 +4,14 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **`fix(swarm-cli)` (#116-C policy reversal)** non-TTY 환경에서 fail-fast → warn-and-proceed 로 정책 전환 — `assertTtyForSwarm` 이 양측 stdout/stdin non-TTY 시 더 이상 차단하지 않고 warning 출력 후 진행. **이유**: 기존 fail-fast 는 첫 사용자에게 묻기 효과 (실제 user terminal 은 TTY 인데 Claude Code `run_in_background` 같은 spawn 환경에서 child stdio 만 non-TTY) → 다른 사용자도 동일 마찰. **신설**: `TFX_BLOCK_NON_TTY_SWARM=1` opt-out env (안전 망 — 실제 hang 환경에서 차단). 기존 `TFX_ALLOW_NON_TTY_SWARM=1` 은 silent OK 호환 유지 (warning suppress). main + `packages/{triflux,remote}` mirror 3개 byte-equal 동기화. tests/unit/swarm-cli.test.mjs 12/12 pass (기존 5 + 신규 2: `TFX_BLOCK_NON_TTY_SWARM` opt-out + opt-out > opt-in 우선순위).
+
+### Tests
+
+- **`tests/unit/swarm-cli.test.mjs`** — `assertTtyForSwarm` 7 시나리오 갱신: stdout/stdin TTY silent OK, 양측 non-TTY 기본 warn-proceed, `TFX_ALLOW_NON_TTY_SWARM=1` silent compat, non-'1' 값에서도 default warn, `TFX_BLOCK_NON_TTY_SWARM=1` fail-fast, opt-out > opt-in 우선순위. 12/12 pass.
+
 ## [10.15.0] - 2026-04-25
 
 ### Fixed
