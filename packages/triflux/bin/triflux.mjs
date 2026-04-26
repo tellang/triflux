@@ -462,14 +462,14 @@ function printJson(payload) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
-function withConsoleSilenced(enabled, fn) {
+async function withConsoleSilenced(enabled, fn) {
   if (!enabled) return fn();
   const originalLog = console.log;
   const originalError = console.error;
   console.log = () => {};
   console.error = () => {};
   try {
-    return fn();
+    return await fn();
   } finally {
     console.log = originalLog;
     console.error = originalError;
@@ -1846,6 +1846,7 @@ async function cmdDoctor(options = {}) {
     checks: [],
     actions: [],
     hook_coverage: { total: 0, registered: 0, missing: [] },
+    fsmonitorDaemons: { stale: 0, killed: 0 },
     issue_count: 0,
   };
 
@@ -3126,9 +3127,11 @@ async function cmdDoctor(options = {}) {
     section("Orphan Processes");
     if (process.platform === "win32") {
       try {
-        const { cleanupOrphanNodeProcesses } = await import(
-          "../hub/lib/process-utils.mjs"
-        );
+        const {
+          cleanupOrphanNodeProcesses,
+          cleanupStaleFsmonitorDaemons,
+          findFsmonitorDaemons,
+        } = await import("../hub/lib/process-utils.mjs");
         if (fix) {
           const { killed, remaining } = cleanupOrphanNodeProcesses();
           if (killed > 0) {
@@ -3156,6 +3159,55 @@ async function cmdDoctor(options = {}) {
           } else {
             ok(`node.exe ${count}개 (정상 범위)`);
           }
+        }
+
+        const fsmonitorStale = findFsmonitorDaemons({
+          minAgeMs: 24 * 60 * 60 * 1000,
+        });
+        let fsmonitorKilled = 0;
+        if (fix && fsmonitorStale.length > 0) {
+          const cleanupResult = cleanupStaleFsmonitorDaemons({
+            minAgeMs: 24 * 60 * 60 * 1000,
+          });
+          fsmonitorKilled = cleanupResult.killed;
+          report.actions.push({
+            type: "git-fsmonitor-cleanup",
+            status:
+              fsmonitorKilled === fsmonitorStale.length ? "ok" : "partial",
+            stale: fsmonitorStale.length,
+            killed: fsmonitorKilled,
+          });
+          warn(
+            `stale git fsmonitor daemon ${fsmonitorKilled}/${fsmonitorStale.length}개 정리`,
+          );
+        } else if (fsmonitorStale.length > 0) {
+          warn(
+            `stale git fsmonitor daemon ${fsmonitorStale.length}개 발견 (24h+). 정리: tfx doctor --fix`,
+          );
+        } else {
+          ok("stale git fsmonitor daemon 없음");
+        }
+
+        report.fsmonitorDaemons = {
+          stale: fsmonitorStale.length,
+          killed: fsmonitorKilled,
+        };
+        addDoctorCheck(report, {
+          name: "fsmonitor-daemons",
+          status: fsmonitorStale.length > 0 ? "warning" : "ok",
+          stale: fsmonitorStale.length,
+          killed: fsmonitorKilled,
+          detail: fsmonitorStale.map((p) => ({
+            pid: p.pid,
+            parentPid: p.parentPid,
+            ageHours: Number((p.ageMs / (60 * 60 * 1000)).toFixed(1)),
+          })),
+        });
+        if (
+          fsmonitorStale.length > 0 &&
+          (!fix || fsmonitorKilled < fsmonitorStale.length)
+        ) {
+          issues++;
         }
       } catch (e) {
         info(`고아 프로세스 검사 실패: ${e.message}`);

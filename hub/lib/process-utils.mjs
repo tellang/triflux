@@ -20,6 +20,10 @@ const TREE_SCRIPT_PATH = join(CLEANUP_SCRIPT_DIR, "get-ancestor-tree.ps1");
 // 스크립트 버전 — 내용 변경 시 증가하여 캐시된 스크립트를 갱신
 const SCRIPT_VERSION = 3;
 const VERSION_FILE = join(CLEANUP_SCRIPT_DIR, ".version");
+const FSMONITOR_DAEMON_MARKER = "fsmonitor--daemon run --detach";
+const FSMONITOR_DAEMON_PATTERN =
+  /(^|\s)fsmonitor--daemon\s+run\s+--detach(\s|$)/;
+const DEFAULT_FSMONITOR_MIN_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * 주어진 PID의 프로세스가 살아있는지 확인한다.
@@ -339,6 +343,107 @@ export function cleanupOrphanNodeProcesses() {
   } catch {}
 
   return { killed, remaining };
+}
+
+function normalizePowerShellJson(output) {
+  const trimmed = String(output || "").trim();
+  if (!trimmed || trimmed === "null") return [];
+  const parsed = JSON.parse(trimmed);
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+function parseCreationDateMs(value) {
+  if (!value) return NaN;
+  if (value instanceof Date) return value.getTime();
+
+  const text = String(value);
+  const dotNetMatch = /\/Date\((-?\d+)\)\//.exec(text);
+  if (dotNetMatch) return Number.parseInt(dotNetMatch[1], 10);
+
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+/**
+ * Find stale git fsmonitor--daemon processes.
+ *
+ * Windows only. The CIM query is scoped to git.exe and the command line marker
+ * is intentionally narrow so foreground git commands are never targeted.
+ *
+ * @param {{minAgeMs?: number, execSyncFn?: typeof execSync, nowMs?: number, isWindows?: boolean}} opts
+ * @returns {Array<{pid: number, parentPid: number, creationDate: string, ageMs: number, commandLine: string}>}
+ */
+export function findFsmonitorDaemons({
+  minAgeMs = DEFAULT_FSMONITOR_MIN_AGE_MS,
+  execSyncFn = execSync,
+  nowMs = Date.now(),
+  isWindows = IS_WINDOWS,
+} = {}) {
+  if (!isWindows) return [];
+
+  ensureHelperScripts();
+
+  let records;
+  try {
+    const output = execSyncFn(
+      `powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter \\"Name='git.exe'\\" | Where-Object { $_.CommandLine -match '(^|\\s)fsmonitor--daemon run --detach(\\s|$)' } | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress"`,
+      {
+        encoding: "utf8",
+        timeout: 10000,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    );
+    records = normalizePowerShellJson(output);
+  } catch {
+    return [];
+  }
+
+  const stale = [];
+  for (const record of records) {
+    const pid = Number(record?.ProcessId);
+    const parentPid = Number(record?.ParentProcessId);
+    const commandLine = String(record?.CommandLine || "");
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    if (!commandLine.includes(FSMONITOR_DAEMON_MARKER)) continue;
+    if (!FSMONITOR_DAEMON_PATTERN.test(commandLine)) continue;
+
+    const creationMs = parseCreationDateMs(record?.CreationDate);
+    const ageMs = Number.isFinite(creationMs) ? nowMs - creationMs : NaN;
+    if (!Number.isFinite(ageMs) || ageMs < minAgeMs) continue;
+
+    stale.push({
+      pid,
+      parentPid: Number.isFinite(parentPid) ? parentPid : 0,
+      creationDate: String(record?.CreationDate || ""),
+      ageMs,
+      commandLine,
+    });
+  }
+
+  return stale;
+}
+
+/**
+ * Cleanup stale git fsmonitor--daemon processes.
+ * @param {{minAgeMs?: number, execSyncFn?: typeof execSync, nowMs?: number, isWindows?: boolean, killFn?: typeof process.kill}} opts
+ * @returns {{killed: number, stale: Array}}
+ */
+export function cleanupStaleFsmonitorDaemons({
+  killFn = process.kill,
+  ...findOpts
+} = {}) {
+  const stale = findFsmonitorDaemons(findOpts);
+  let killed = 0;
+
+  for (const proc of stale) {
+    try {
+      killFn(proc.pid, "SIGKILL");
+      killed++;
+    } catch {}
+  }
+
+  return { killed, stale };
 }
 
 /**
