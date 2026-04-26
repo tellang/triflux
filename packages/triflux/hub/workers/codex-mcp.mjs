@@ -116,6 +116,71 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
+function watchBootstrapClose(transport) {
+  let active = true;
+  const promise = new Promise((_, reject) => {
+    const priorClose = transport.onclose;
+    transport.onclose = () => {
+      priorClose?.();
+      if (active) {
+        reject(new Error("Codex MCP transport closed during bootstrap"));
+      }
+    };
+
+    const priorError = transport.onerror;
+    transport.onerror = (error) => {
+      priorError?.(error);
+      if (active) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    };
+  });
+
+  return {
+    promise,
+    stop() {
+      active = false;
+    },
+  };
+}
+
+function watchBootstrapProcessExit(transport) {
+  let active = true;
+  let timer = null;
+  let child = null;
+
+  const promise = new Promise((_, reject) => {
+    const rejectClosed = (code, signal) => {
+      if (!active) return;
+      const suffix = signal ? `signal ${signal}` : `exit ${code}`;
+      reject(
+        new Error(`Codex MCP transport closed during bootstrap (${suffix})`),
+      );
+    };
+
+    timer = setInterval(() => {
+      child = transport._process;
+      if (!child) return;
+      clearInterval(timer);
+      timer = null;
+      if (child.exitCode !== null || child.signalCode !== null) {
+        rejectClosed(child.exitCode, child.signalCode);
+        return;
+      }
+      child.once("close", rejectClosed);
+    }, 10);
+  });
+
+  return {
+    promise,
+    stop() {
+      active = false;
+      if (timer) clearInterval(timer);
+      child?.off?.("close", () => {});
+    },
+  };
+}
+
 function normalizeRetryOptions(retryOptions) {
   if (!retryOptions || typeof retryOptions !== "object") {
     return Object.freeze({});
@@ -267,20 +332,29 @@ export class CodexMcpWorker {
     });
 
     try {
+      const bootstrapClose = watchBootstrapClose(transport);
+      const bootstrapProcessExit = watchBootstrapProcessExit(transport);
       await withTimeout(
-        (async () => {
-          await client.connect(transport);
-          const tools = await client.listTools(undefined, {
-            timeout: this.bootstrapTimeoutMs,
-          });
-          this.availableTools = new Set(tools.tools.map((tool) => tool.name));
+        Promise.race([
+          (async () => {
+            await client.connect(transport);
+            const tools = await client.listTools(undefined, {
+              timeout: this.bootstrapTimeoutMs,
+            });
+            this.availableTools = new Set(tools.tools.map((tool) => tool.name));
 
-          for (const requiredTool of REQUIRED_TOOLS) {
-            if (!this.availableTools.has(requiredTool)) {
-              throw new Error(`필수 MCP 도구 누락: ${requiredTool}`);
+            for (const requiredTool of REQUIRED_TOOLS) {
+              if (!this.availableTools.has(requiredTool)) {
+                throw new Error(`필수 MCP 도구 누락: ${requiredTool}`);
+              }
             }
-          }
-        })(),
+          })(),
+          bootstrapClose.promise,
+          bootstrapProcessExit.promise,
+        ]).finally(() => {
+          bootstrapClose.stop();
+          bootstrapProcessExit.stop();
+        }),
         this.bootstrapTimeoutMs,
         `Codex MCP bootstrap timeout (${this.bootstrapTimeoutMs}ms)`,
       );
@@ -529,6 +603,7 @@ export async function runCodexMcpCli(argv = process.argv.slice(2)) {
   const worker = new CodexMcpWorker({
     command: options.command,
     cwd: options.cwd,
+    retryOptions: { maxAttempts: 1 },
   });
 
   try {
@@ -547,7 +622,9 @@ export async function runCodexMcpCli(argv = process.argv.slice(2)) {
     // response. Without this guard, tfx-route.sh sees STDOUT_LOG=0 bytes and
     // treats it as success — caller gets nothing back.
     // Promote to a transport failure so the wrapper falls back to `codex exec`.
-    if (!hasOutput && result.exitCode === 0) {
+    if (result.error?.code === "CODEX_TRANSPORT_ERROR") {
+      process.exitCode = CODEX_MCP_TRANSPORT_EXIT_CODE;
+    } else if (!hasOutput && result.exitCode === 0) {
       console.error(
         "[codex-mcp] WARNING: empty output with exit 0 — treating as transport failure (codex 0.124.0 silent-flush regression). Wrapper will fall back to exec path.",
       );
