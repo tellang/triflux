@@ -33,6 +33,31 @@ function makeTmpRepo() {
   return dir;
 }
 
+function makeGitSpy(behavior, calls = []) {
+  return async (args, cwd) => {
+    if (args[0] === "fsmonitor--daemon" && args[1] === "stop") {
+      calls.push("fsmonitor-stop");
+      if (behavior === "not_running") {
+        throw new Error(
+          "git fsmonitor--daemon failed: fatal: fsmonitor--daemon is not running",
+        );
+      }
+      if (behavior === "error") {
+        throw new Error("git fsmonitor--daemon failed: fatal: ipc failure");
+      }
+      return "";
+    }
+
+    if (args[0] === "worktree" && args[1] === "remove") {
+      calls.push("worktree-remove");
+    }
+
+    return execFileSync("git", args, { cwd, windowsHide: true })
+      .toString()
+      .trim();
+  };
+}
+
 describe("worktree-lifecycle", () => {
   let repoDir;
 
@@ -215,6 +240,76 @@ describe("worktree-lifecycle", () => {
         }),
       /main working tree/,
     );
+  });
+
+  it("calls fsmonitor stop before worktree remove", async () => {
+    const wt = await ensureWorktree({
+      slug: "fsmonitor-order",
+      runId: "test-run",
+      rootDir: repoDir,
+      baseBranch: "main",
+    });
+
+    const calls = [];
+    const cleanupResult = await cleanupWorktree({
+      worktreePath: wt.worktreePath,
+      branchName: wt.branchName,
+      rootDir: repoDir,
+      force: true,
+      _git: makeGitSpy("success", calls),
+    });
+
+    assert.deepEqual(cleanupResult.fsmonitorStop, {
+      ok: true,
+      stopped: true,
+    });
+    assert.deepEqual(calls.slice(0, 2), ["fsmonitor-stop", "worktree-remove"]);
+  });
+
+  it("tolerates 'fsmonitor--daemon is not running' error", async () => {
+    const wt = await ensureWorktree({
+      slug: "fsmonitor-not-running",
+      runId: "test-run",
+      rootDir: repoDir,
+      baseBranch: "main",
+    });
+
+    const result = await cleanupWorktree({
+      worktreePath: wt.worktreePath,
+      branchName: wt.branchName,
+      rootDir: repoDir,
+      force: true,
+      _git: makeGitSpy("not_running"),
+    });
+
+    assert.equal(existsSync(wt.worktreePath), false);
+    assert.deepEqual(result.fsmonitorStop, {
+      ok: true,
+      stopped: false,
+      reason: "not_running",
+    });
+  });
+
+  it("tolerates unexpected stop error", async () => {
+    const wt = await ensureWorktree({
+      slug: "fsmonitor-stop-error",
+      runId: "test-run",
+      rootDir: repoDir,
+      baseBranch: "main",
+    });
+
+    const result = await cleanupWorktree({
+      worktreePath: wt.worktreePath,
+      branchName: wt.branchName,
+      rootDir: repoDir,
+      force: true,
+      _git: makeGitSpy("error"),
+    });
+
+    assert.equal(existsSync(wt.worktreePath), false);
+    assert.equal(result.fsmonitorStop.ok, false);
+    assert.equal(result.fsmonitorStop.stopped, false);
+    assert.match(result.fsmonitorStop.error, /fatal: ipc failure/);
   });
 
   it("W-08 (#127): rebaseShardOntoIntegration — cherry-pick applies shard commits to integration", async () => {
