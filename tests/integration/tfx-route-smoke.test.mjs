@@ -289,7 +289,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
     );
 
     assert.notEqual(result.status, 0, out(result));
-    assert.match(out(result), /no-op 성공을 실패로 승격/);
+    assert.match(out(result), /exit_code: 68/);
   });
 });
 
@@ -354,7 +354,7 @@ describe("tfx-route.sh — 역할별 MCP profile 필터", () => {
     // exa enabled_tools 제한은 mcp-filter 내부 정책으로 적용됨 (route stderr에 미출력)
   });
 
-  it("executor + auto 는 구현 문맥에서 context7 + exa로 축소해야 한다", () => {
+  it("executor + auto 는 구현 문맥에서 context7로 축소해야 한다", () => {
     const result = runBash(
       `bash "${ROUTE_SCRIPT}" executor 'Implement CLI parser and fix unit test using package docs' auto`,
       fixtureEnv({ FAKE_CODEX_MODE: "exec", FAKE_CODEX_ECHO_CONFIG: "1" }),
@@ -362,7 +362,7 @@ describe("tfx-route.sh — 역할별 MCP profile 필터", () => {
 
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=executor/);
-    assert.deepEqual(allowedMcpServers(result), ["context7", "exa"]);
+    assert.deepEqual(allowedMcpServers(result), ["context7"]);
   });
 
   it("designer + auto 는 codex 모드에서 codex용 MCP 정책으로 수렴해야 한다", () => {
