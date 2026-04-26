@@ -23,12 +23,15 @@
   "files": [
     "bin",
     "skills",
+    "!skills/tfx-workspace",
     "hooks",
     "hud",
     "scripts",
     "hub",
     "mesh",
     "references",
+    "!references/codex-snapshots",
+    "!references/gemini-snapshots",
     "CLAUDE.md",
     "README.md",
     "LICENSE"
