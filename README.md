@@ -101,6 +101,21 @@ Then run `tfx setup` to configure your environment.
 
 > **Note**: Deep skills require **psmux** (or tmux), **triflux Hub**, **Codex CLI**, and **Gemini CLI** for full Tri-CLI consensus. Without these, skills automatically degrade to Claude-only mode. Run `tfx doctor` to check your environment.
 
+### State Snapshots
+
+Hub startup also takes a best-effort daily snapshot of selected `~/.codex/` and
+`~/.gemini/` state into `references/codex-snapshots/` and
+`references/gemini-snapshots/`. Snapshot archives are rolling backups capped at
+10 files per tool and are ignored by git.
+
+Manual commands:
+
+```bash
+npm run snapshot:codex
+npm run snapshot:gemini
+npm run snapshot:all
+```
+
 ---
 
 ## Core Engine
