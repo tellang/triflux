@@ -111,3 +111,7 @@ docs/research/*competitor*
 # 보존된다. repo 에 staged 되면 안 된다.
 .mcp.json.bak-*
 **/.mcp.json.bak-*
+
+# Codex/Gemini state snapshots (local backup, too large for git)
+references/codex-snapshots/
+references/gemini-snapshots/
