@@ -27,7 +27,10 @@ import { createAdaptiveEngine } from "./adaptive.mjs";
 import { createAssignCallbackServer } from "./assign-callbacks.mjs";
 import { DelegatorService } from "./delegator/index.mjs";
 import { createHitlManager } from "./hitl.mjs";
-import { cleanupOrphanNodeProcesses } from "./lib/process-utils.mjs";
+import {
+  cleanupOrphanNodeProcesses,
+  cleanupStaleFsmonitorDaemons,
+} from "./lib/process-utils.mjs";
 import * as spawnTrace from "./lib/spawn-trace.mjs";
 import { logQuotaRefreshFailures } from "./middleware/quota-middleware.mjs";
 import { wrapRequestHandler } from "./middleware/request-logger.mjs";
@@ -1823,6 +1826,18 @@ export async function startHub({
         if (killed > 0) {
           hubLog.info({ killed }, "hub.orphan_cleanup");
         }
+
+        const { killed: fsmonitorKilled, stale } = cleanupStaleFsmonitorDaemons(
+          {
+            minAgeMs: 24 * 60 * 60 * 1000,
+          },
+        );
+        if (fsmonitorKilled > 0) {
+          hubLog.info(
+            { killed: fsmonitorKilled, stale: stale.length },
+            "hub.fsmonitor_cleanup",
+          );
+        }
       } catch {}
 
       // stale tfx-spawn-* psmux 세션 정리 (30분 이상 idle)
@@ -2486,6 +2501,15 @@ if (selfRun) {
         hubLog.info({ signal }, "hub.stopping");
         try {
           cleanupOrphanNodeProcesses();
+          const { killed, stale } = cleanupStaleFsmonitorDaemons({
+            minAgeMs: 24 * 60 * 60 * 1000,
+          });
+          if (killed > 0) {
+            hubLog.info(
+              { killed, stale: stale.length },
+              "hub.fsmonitor_cleanup",
+            );
+          }
         } catch {}
         try {
           cleanupStaleSpawnSessions(hubLog);

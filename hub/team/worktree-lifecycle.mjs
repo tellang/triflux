@@ -84,6 +84,30 @@ function git(args, cwd) {
   });
 }
 
+/**
+ * Best-effort shutdown for the Git fsmonitor daemon attached to a worktree.
+ * Missing or already-stopped daemons are treated as successful no-ops because
+ * cleanup should not be blocked by watcher state.
+ *
+ * @param {string} worktreePath
+ * @param {(args: string[], cwd: string) => Promise<string>} [gitImpl=git]
+ * @returns {Promise<{ ok: boolean, stopped: boolean, reason?: 'not_running', error?: string }>}
+ */
+async function stopFsmonitorDaemon(worktreePath, gitImpl = git) {
+  try {
+    await gitImpl(["fsmonitor--daemon", "stop"], worktreePath);
+    return { ok: true, stopped: true };
+  } catch (err) {
+    const msg = String(err?.message || err || "");
+    if (
+      /not running|not watching|fsmonitor--daemon is not running/iu.test(msg)
+    ) {
+      return { ok: true, stopped: false, reason: "not_running" };
+    }
+    return { ok: false, stopped: false, error: msg };
+  }
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -129,10 +153,10 @@ function resolveCleanupTarget(worktreePath, rootDir) {
   };
 }
 
-async function branchExists(branchName, rootDir) {
+async function branchExists(branchName, rootDir, gitImpl = git) {
   if (!branchName) return false;
   try {
-    const listed = await git(["branch", "--list", branchName], rootDir);
+    const listed = await gitImpl(["branch", "--list", branchName], rootDir);
     return listed.trim().length > 0;
   } catch {
     return false;
@@ -419,13 +443,15 @@ export async function cleanupWorktree({
   branchName,
   rootDir = process.cwd(),
   force = false,
+  _git = git,
 }) {
   const { resolvedWorktree } = resolveCleanupTarget(worktreePath, rootDir);
+  const fsmonitorStop = await stopFsmonitorDaemon(resolvedWorktree, _git);
   const forceArgs = force ? ["--force"] : [];
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await git(
+      await _git(
         ["worktree", "remove", ...forceArgs, resolvedWorktree],
         rootDir,
       );
@@ -444,18 +470,20 @@ export async function cleanupWorktree({
 
   await sleep(SLEEP_MS);
   try {
-    await git(["worktree", "prune"], rootDir);
+    await _git(["worktree", "prune"], rootDir);
   } catch {
     /* best-effort */
   }
 
-  if (branchName && (await branchExists(branchName, rootDir))) {
+  if (branchName && (await branchExists(branchName, rootDir, _git))) {
     try {
-      await git(["branch", "-D", branchName], rootDir);
+      await _git(["branch", "-D", branchName], rootDir);
     } catch {
       /* branch may already be gone */
     }
   }
+
+  return { ok: true, fsmonitorStop };
 }
 
 /**
@@ -496,14 +524,14 @@ export async function pruneWorktree({
     }
   }
 
-  await cleanupWorktree({
+  const cleanupResult = await cleanupWorktree({
     worktreePath,
     branchName,
     rootDir,
     force,
   });
 
-  return { ok: true };
+  return { ok: true, fsmonitorStop: cleanupResult.fsmonitorStop };
 }
 
 /**
@@ -548,6 +576,7 @@ export async function pruneOrphanWorktrees({ rootDir = process.cwd() } = {}) {
     const normalized = normPath(fullPath);
     if (!registeredPaths.has(normalized)) {
       try {
+        await stopFsmonitorDaemon(fullPath).catch(() => null);
         await rm(fullPath, { recursive: true, force: true });
         removed.push(dir);
       } catch {
