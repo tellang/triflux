@@ -139,6 +139,15 @@ grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.mjs" /tmp/ci-baseline-fails.log | sort |
 - Rationale: option (a) 선택. 이 unit suite는 `spawnFn`과 fake JSON-RPC client를 주입하므로 실제 `codex` CLI 부재나 fixture `PATH` 문제가 root가 아니다. AC-1 `initialize timeout` 테스트가 30ms bootstrap budget과 `unref()` timer에 의존해 Linux CI에서 test runner가 이벤트 루프 종료로 subtest를 취소할 수 있었다. Timeout fake를 ref timer로 바꾸고 bootstrap timeout을 500ms로 올려 실제 `CodexAppServerTransportError` rejection 경로를 안정적으로 관측하게 했다.
 - Expected impact: `tests/unit/codex-app-server-worker.test.mjs`의 AC-1 `initialize timeout` 단일 root를 제거하여 PR #199 CI의 해당 파일 36 fail cascade 해소 예상.
 
+## Phase 3 fix 결과
+
+- Commit hash: 이 단일 Phase 3 커밋 (최종 SHA는 커밋 생성 후 deliverable에 기록)
+- Files changed:
+  - `tests/unit/worktree-lifecycle.test.mjs`
+  - `.triflux/plans/2026-04-26-ci-baseline-56-fail-categorization.md`
+- Rationale: fixture/timeout/codex 부재가 아니라 Linux path portability 회귀가 root다. `ensureWorktree()`는 `worktreePath`를 forward-slash normalized path로 반환하는데 테스트가 이를 무조건 Windows `\` 경로로 변환했다. Linux CI에서는 `\tmp\...`가 `/tmp/...`가 아니므로 W-01/W-03/W-05의 `existsSync`가 실패하고, W-08/W-10/W-09는 같은 잘못된 cwd가 파일 생성/git add 단계까지 cascade됐다. 플랫폼 skip 대신 반환 계약 그대로 fs/cwd에 넘기도록 테스트를 정렬했다.
+- Expected impact: `tests/unit/worktree-lifecycle.test.mjs`의 Linux CI 6 subtest cascade / file-level 13 fail 해소 예상.
+
 ## 다음 세션 시작 시 (context-restore 활용)
 
 ```bash
