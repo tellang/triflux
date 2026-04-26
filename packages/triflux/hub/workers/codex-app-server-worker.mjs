@@ -969,12 +969,12 @@ export class CodexAppServerWorker {
       try {
         if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
       } catch {}
-      const killTimer = setTimeout(() => {
+      if (child.exitCode === null && !child.killed) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
         try {
           if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
         } catch {}
-      }, 1_000);
-      killTimer.unref?.();
+      }
     }
   }
 

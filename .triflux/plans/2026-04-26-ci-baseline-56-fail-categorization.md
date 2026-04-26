@@ -225,3 +225,18 @@ gh run view 24946484889 --log-failed | grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.m
   - `node --test scripts/__tests__/tfx-doctor-diagnose.test.mjs`
   - `node --test tests/integration/gemini.test.mjs`
   - `node --test tests/unit/psmux.test.mjs`
+
+## Phase 7-A fix 결과
+
+- Commit hash: 이 단일 Phase 7-A 커밋 (최종 SHA는 커밋 생성 후 deliverable에 기록)
+- Files changed:
+  - `hub/workers/codex-app-server-worker.mjs`
+  - `packages/remote/hub/workers/codex-app-server-worker.mjs`
+  - `packages/triflux/hub/workers/codex-app-server-worker.mjs`
+  - `.triflux/plans/2026-04-26-ci-baseline-56-fail-categorization.md`
+- Rationale: PR #199 r2 로그에서 Phase 2 이후 AC-1은 통과했지만 AC-2/AC-3 이후 suite들이 `Promise resolution is still pending but the event loop has already resolved`로 취소됐다. Root cause는 awaited `execute()`/`stop()` 경로가 ref-count 되지 않은 timeout에 의존한 점이었다. `execute()` timeout race와 `stop()` unsubscribe deadline을 ref timer로 유지하고, 남은 SIGKILL escalator는 `unref()` 대신 조건부 awaited deadline으로 정리했다.
+- Expected impact: `tests/unit/codex-app-server-worker.test.mjs`의 AC-2/AC-3 happy path부터 AC cleanup까지 이어진 PR #199 r2 32 fail/cancelled cascade 해소 예상.
+- Verification:
+  - `node --test --test-force-exit tests/unit/codex-app-server-worker.test.mjs`
+  - `node scripts/pack.mjs all`
+  - `npm run lint`
