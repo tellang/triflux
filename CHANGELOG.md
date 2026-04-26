@@ -4,6 +4,37 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.17.0] - 2026-04-26
+
+### Fixed
+
+- **`fix(test)` (PR #199, Phase 1)** tfx-route-smoke fake CLI fixture 안정화 (5d0edaf) — Linux ubuntu-latest CI 의 `codex --version` not-found 로 tfx-route.sh 가 `claude-native` fallback path 진입 → `tests/integration/tfx-route-smoke.test.mjs` 의 `resolved_profile=executor` regex mismatch (45 fail). `tests/fixtures/bin/{codex,gemini,timeout}` 의 Linux executable bit 활성화 + `tests/fixtures/fake-codex.mjs`/`fake-gemini-cli.mjs` 의 `--version` 응답 보강 + 테스트의 fallback resolved_profile 인식 path 추가. **결과**: 45 fail cascade 제거, CI Linux 에서 fake CLI 사용으로 codex 인증 의존 제거.
+- **`test(ci)` (PR #199, Phase 2)** codex-app-server-worker AC-1 initialize timeout 안정화 (3768b4f) — `tests/unit/codex-app-server-worker.test.mjs:307` 의 AC-1 30ms bootstrap budget + `unref()` timer 가 Linux CI test runner 의 이벤트 루프 종료로 35건 cancelledByParent cascade 유발. Fake JSON-RPC client timer 를 ref 로 변경 + bootstrap timeout 500ms 로 상향 → `CodexAppServerTransportError` rejection 경로 안정 관측. **결과**: 36 fail cascade 제거.
+- **`fix(test)` (PR #199, Phase 3)** worktree-lifecycle Linux path portability (50a95d1) — `tests/unit/worktree-lifecycle.test.mjs` 가 `ensureWorktree()` 의 forward-slash 반환을 무조건 Windows `\` 로 변환 → Linux CI 에서 `\tmp\...` ≠ `/tmp/...` 로 `existsSync` 실패, W-08/W-10/W-09 cwd cascade. 플랫폼 skip 대신 반환 계약 그대로 fs/cwd 에 넘기도록 정렬. **결과**: 13 fail cascade 제거.
+- **`fix(test)` (PR #199, Phase 4)** 잔여 카테고리 cascade 일괄 해소 (c16f411, 28 files) — Linux CI 잔여 fail 제거.
+  - **Ref/unref timer cancellation root**: `hub/workers/worker-utils.mjs`, `hub/cli-adapter-base.mjs`, `hub/workers/lib/jsonrpc-stdio.mjs`, `hub/router.mjs` — awaited retry/timeout timers 를 ref 로 유지해 Node test runner 가 cancelledByParent 선언하지 않도록.
+  - **Codex CLI absent command-shape cascade**: `hub/cli-adapter-base.mjs`, `bin/triflux.mjs` — version detection fallback 을 modern `codex exec --color never` 계약으로 고정. Hub start 가 codex binary 유무와 무관하게 `~/.codex/config.json` 의 tfx-hub entry 보장.
+  - **Codex review fixture determinism**: `hub/team/codex-review.mjs`, `tests/unit/codex-review.test.mjs` — oversized gate 의 실제 git diff 의존을 dependency injection fixture 로 교체.
+  - **CI memory-doctor force fixtures**: `tests/unit/memory-doctor.test.mjs` — autofix 검증 케이스에 `{ force: true }` 적용.
+  - **Linux git identity + psmux regex**: `hub/team/worktree-lifecycle.mjs`, `hub/team/psmux.mjs` — cherry-pick commit 작성용 deterministic fallback identity, orphan MCP cleanup regex 의 session boundary class 정렬.
+  - **결과**: router 18 / retry 12 / codex-review 12 / hub-restart 10 / memory-doctor 9 / jsonrpc-stdio 8 / routing-qa 5 / rebase-branch-safety 4 / hub-start-codex-config 4 / session-fingerprint 3 / pane 3 / backend 3 / gemini-adapter 1 / codex-adapter 1 등 ~62 fail/cancelled 일괄 해소.
+- **`fix(test)` (PR #199, Phase 7)** Phase 1-4 후 잔여 ~14 fail 추가 해소 (bd9605c, 965fb88, d54e2c3) — codex-app-server cleanup timer drain (965fb88), conductor shutdown cleanup 안정화 (d54e2c3), 그 외 phase 7 residuals (bd9605c) 일괄. `tests/unit/conductor.test.mjs:432` waitFor 3000ms timeout 회귀 fix 포함.
+- **`fix(config)` (PR #199, Phase 8)** codex MCP sync test env guard 추가 (b85046b) — Phase 4 의 hub start 자동 sync 가 npm test 중 `~/.codex/config.toml` mutate 해 Issue #193 회귀 가드 trigger. `isProtectedCodexConfigMutationEnv()` (NODE_ENV=test / CI / TFX_TEST / TRIFLUX_TEST_HOME) 가드 적용 + `tests/unit/sync-hub-mcp-settings.test.mjs` 추가.
+- **`fix(test)` (PR #199, Phase 9)** 잔여 codex config mutation paths 차단 + hub-idle-timeout 안정화 (9bb3270, 76d9a04) — Phase 8 후에도 mutation 잔존 (size -14B trim) → `scripts/codex-mcp-gateway-sync.mjs`, `scripts/lib/mcp-guard-engine.mjs`, `hub/server.mjs`, `scripts/setup.mjs` 모든 writer 에 env guard 적용. `tests/integration/hub-idle-timeout.test.mjs` 의 random port 28100-28299 collision 을 `getUnusedPort()` (OS 할당) 로 deterministic 대체. setup integration test 가 `TFX_CODEX_CONFIG_SYNC=1` 로 가드 우회 (76d9a04).
+- **`fix(hosts-compat)` (PR #198)** nested `ssh.user` shape 정규화 (460f5c6) — Windows `references/hosts.json` 의 `{ ssh: { user: "..." } }` 를 capability/resources selector 가 인식하도록 정규화.
+- **`fix(test)` (PR #198)** routing-qa + intent fixtures 의 PR #184 model mapping 동기화 (c698869).
+- **`fix(keyword-rules)` (PR #198)** tfx-unified rule 에 `병렬`/`점검`/`계속` 패턴 추가 (3c2aca8).
+
+### Changed
+
+- **`chore(ci)`** `continue-on-error: true` guard 영구 제거 (8bdc00e, Phase 5) — `cec9124` 가 임시 우회로 추가한 `Codex config stability guard` step 의 `continue-on-error: true` + 주석 7줄 제거. **결과**: strict regression gate 회복 — 다음 push 부터 guard step fail 이 workflow status=failure 로 직결되어 회귀를 즉시 차단. `cec9124` 의 임시 unblock 이후 후속 수정 (Phase 1-4 + 7-9) 으로 baseline 56 fail → 0 fail 100% 해소.
+
+### Tests
+
+- 56 baseline fail → 0 fail / 0 cancelled (PR #198 CI run 24946484889 → PR #199 final run 24948670562)
+- pass count: 3084 → 3195 (97.6% → 100% pass rate)
+- continue-on-error 영구 제거 후에도 CI green 유지
+
 ## [10.16.0] - 2026-04-26
 
 ### Added
