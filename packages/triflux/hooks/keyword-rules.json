@@ -98,6 +98,18 @@
           "flags": "i"
         },
         {
+          "source": "(?:병렬|동시에|parallel|concurrent)",
+          "flags": "i"
+        },
+        {
+          "source": "(?:점검|진단|확인해)",
+          "flags": "i"
+        },
+        {
+          "source": "(?:계속해|이어서|진행해)",
+          "flags": "i"
+        },
+        {
           "source": "\\b(?:implement|build|fix|review|test|plan|analyze)\\b",
           "flags": "i"
         }
