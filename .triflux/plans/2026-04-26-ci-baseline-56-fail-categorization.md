@@ -148,6 +148,38 @@ grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.mjs" /tmp/ci-baseline-fails.log | sort |
 - Rationale: fixture/timeout/codex 부재가 아니라 Linux path portability 회귀가 root다. `ensureWorktree()`는 `worktreePath`를 forward-slash normalized path로 반환하는데 테스트가 이를 무조건 Windows `\` 경로로 변환했다. Linux CI에서는 `\tmp\...`가 `/tmp/...`가 아니므로 W-01/W-03/W-05의 `existsSync`가 실패하고, W-08/W-10/W-09는 같은 잘못된 cwd가 파일 생성/git add 단계까지 cascade됐다. 플랫폼 skip 대신 반환 계약 그대로 fs/cwd에 넘기도록 테스트를 정렬했다.
 - Expected impact: `tests/unit/worktree-lifecycle.test.mjs`의 Linux CI 6 subtest cascade / file-level 13 fail 해소 예상.
 
+## Phase 4 fix 결과
+
+- Commit hash: Phase 4 커밋 (최종 SHA는 커밋 생성 후 deliverable에 기록)
+- Category breakdown:
+  - Ref/unref timer cancellation: `hub/workers/worker-utils.mjs`, `hub/cli-adapter-base.mjs`, `hub/workers/lib/jsonrpc-stdio.mjs`, `hub/router.mjs`
+  - Codex CLI absent command-shape cascade: `hub/cli-adapter-base.mjs`, `bin/triflux.mjs`
+  - Codex review fixture determinism: `hub/team/codex-review.mjs`, `tests/unit/codex-review.test.mjs`
+  - CI memory-doctor force fixtures: `tests/unit/memory-doctor.test.mjs`
+  - Git/Linux identity and psmux regex: `hub/team/worktree-lifecycle.mjs`, `hub/team/psmux.mjs`
+  - Package mirrors: `packages/core/**`, `packages/remote/**`, `packages/triflux/**` via `node scripts/pack.mjs all`
+- Rationale:
+  - CI의 `cancelledByParent` 묶음은 awaited promise를 unref timer에 의존해 Node test runner가 이벤트 루프 종료로 판단한 것이 dominant root였다. Awaited retry/timeout timers는 ref 상태로 유지하고, router ask timeout은 ref timer 기반 race로 교체했다.
+  - Codex CLI가 없는 CI에서도 command builder tests는 최신 `codex exec --color never` 계약을 검증해야 하므로, 실제 runtime preflight와 분리해 version detection fallback을 modern syntax로 고정했다. Hub start는 Codex binary 유무와 무관하게 `~/.codex/config.json`의 `tfx-hub` entry를 보장하도록 바꿨다.
+  - codex-review oversized gate는 실제 git diff 크기에 의존해 작은 커밋에서 Codex spawn으로 새던 테스트를 dependency injection fixture로 고정했다.
+  - memory-doctor autofix 테스트는 CI guard 자체를 검증하는 별도 테스트를 유지하면서, autofix 동작 검증 케이스만 `{ force: true }`를 사용해 CI 환경 변수에 흔들리지 않게 했다.
+  - rebase happy path는 CI의 비어 있는 git identity에서 cherry-pick commit 작성이 실패할 수 있어 lifecycle git wrapper에 deterministic fallback identity를 추가했다. psmux orphan MCP cleanup regex는 테스트가 요구하는 session boundary class와 정렬했다.
+- Expected impact:
+  - `tests/integration/router.test.mjs` 18 fail/cancelled 해소
+  - `tests/unit/retry.test.mjs` 12 fail/cancelled 해소
+  - `tests/unit/jsonrpc-stdio.test.mjs` 8 fail/cancelled 해소
+  - `tests/unit/session-fingerprint.test.mjs` 2 fail/cancelled 해소
+  - `tests/unit/codex-review.test.mjs` Codex spawn/timeout cascade 해소
+  - `tests/unit/memory-doctor.test.mjs` CI guard cascade 3 suite fail 해소
+  - `tests/unit/backend.test.mjs`, `routing-qa.test.mjs`, `pane.test.mjs` Codex command-shape fail 해소
+  - `tests/integration/hub-start-codex-config.test.mjs` ENOENT fail 해소
+  - `tests/unit/rebase-branch-safety.test.mjs` Linux git identity fail 해소
+  - `tests/unit/psmux.test.mjs` macOS/Linux regex boundary fail 해소
+  - `tests/unit/codex-adapter.test.mjs`, `gemini-adapter.test.mjs`, `conductor-windows-quote-regression.test.mjs` cancellation-sensitive residuals 해소
+- Verification:
+  - `node scripts/pack.mjs all`
+  - targeted CI-fail suites: router, retry, codex-review, memory-doctor, jsonrpc-stdio, routing-qa, rebase-branch-safety, hub-start-codex-config, session-fingerprint, psmux, pane, backend, gemini-adapter, conductor-windows-quote-regression, codex-adapter
+
 ## 다음 세션 시작 시 (context-restore 활용)
 
 ```bash

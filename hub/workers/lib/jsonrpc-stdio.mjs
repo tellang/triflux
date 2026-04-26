@@ -178,7 +178,6 @@ export class JsonRpcStdioClient {
             ),
           );
         }, timeoutMs);
-        if (typeof timer.unref === "function") timer.unref();
       }
 
       this._pendingRequests.set(id, { resolve, reject, timer, method });

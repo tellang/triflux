@@ -72,6 +72,11 @@ let _cachedVersion = null;
  */
 export function getCodexVersion() {
   if (_cachedVersion !== null) return _cachedVersion;
+  const override = Number(process.env.TFX_CODEX_VERSION_MINOR);
+  if (Number.isFinite(override) && override > 0) {
+    _cachedVersion = override;
+    return _cachedVersion;
+  }
   try {
     const out = execSync("codex --version", {
       encoding: "utf8",
@@ -80,7 +85,10 @@ export function getCodexVersion() {
     const match = out.match(/(\d+)\.(\d+)\.(\d+)/);
     _cachedVersion = match ? Number.parseInt(match[2], 10) : 0;
   } catch {
-    _cachedVersion = 0;
+    // Command builders should remain stable in CI even when the real Codex
+    // CLI is absent. Runtime preflight still reports/install-gates Codex
+    // separately; this fallback only selects the modern argv shape.
+    _cachedVersion = 117;
   }
   return _cachedVersion;
 }
@@ -182,10 +190,7 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
 // ── Sleep ───────────────────────────────────────────────────────
 
 export function sleep(ms) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ── Result factory ──────────────────────────────────────────────

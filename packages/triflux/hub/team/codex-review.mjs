@@ -306,11 +306,15 @@ export async function runCodexReview({
   timeoutMs = 180_000,
   sandbox = "read-only",
   env = process.env,
+  _deps = {},
 } = {}) {
   let range;
   let diff;
   try {
-    ({ diff, range } = resolveReviewDiff({ ref, base }));
+    ({ diff, range } = (_deps.resolveReviewDiff || resolveReviewDiff)({
+      ref,
+      base,
+    }));
   } catch (err) {
     return {
       ok: false,
@@ -353,7 +357,7 @@ export async function runCodexReview({
     };
   }
 
-  return _runCodexOnPrompt({
+  return (_deps.runCodexOnPrompt || _runCodexOnPrompt)({
     prompt,
     range,
     diffBytes,

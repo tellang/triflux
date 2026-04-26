@@ -81,17 +81,27 @@ test("resolveReviewDiff: explicit base overrides implicit ~1", () => {
 });
 
 test("runCodexReview: rejects oversized prompt without spawning codex", async () => {
-  // Use a deep range to force a large diff. This test validates the size
-  // gate fires before any subprocess is invoked — no flakiness from a
-  // missing codex binary.
-  const result = await runCodexReview({ ref: "HEAD", base: "HEAD~1" });
-  // If the commit itself is small the happy path spawns codex (and may
-  // ENOENT in CI) — skip assertion if the prompt is under the ceiling.
-  if (result.diffBytes > 0 && result.promptBytes > 32_000) {
-    assert.equal(result.ok, false);
-    assert.match(result.error, /prompt too large/);
-    assert.equal(result.verdict, null);
-  }
+  let spawned = false;
+  const result = await runCodexReview({
+    ref: "HEAD",
+    base: "HEAD~1",
+    _deps: {
+      resolveReviewDiff: () => ({
+        diff: `diff --git a/big.txt b/big.txt\n+${"x".repeat(40_000)}\n`,
+        range: "HEAD~1..HEAD",
+      }),
+      runCodexOnPrompt: () => {
+        spawned = true;
+        throw new Error("must not spawn codex for oversized prompt");
+      },
+    },
+  });
+
+  assert.equal(spawned, false);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /prompt too large/);
+  assert.equal(result.verdict, null);
+  assert.ok(result.promptBytes > 32_000);
 });
 
 // ── shard-mode helpers ─────────────────────────────────────────
