@@ -12,6 +12,7 @@ const CODEX_CONFIG_FILE = [".codex", "config.toml"];
 const TFX_HUB_SECTION = "tfx-hub";
 const CODEX_DEFAULT_HUB_URL = "http://127.0.0.1:27888/mcp";
 const FILE_LOCKS = new Map();
+const CODEX_CONFIG_SYNC_OPT_IN = "TFX_CODEX_CONFIG_SYNC";
 
 // Windows 에서 process.env.HOME 만 set 하고 USERPROFILE 은 그대로 둔 fixture 환경
 // (e.g. integration test) 에서 production path 로 새는 것을 방지하려면 platform
@@ -38,6 +39,29 @@ function getCodexConfigPath(codexConfigPath) {
     return codexConfigPath;
   }
   return join(resolveHome(), ...CODEX_CONFIG_FILE);
+}
+
+function isProtectedCodexConfigEnv(env = process.env) {
+  return (
+    env.NODE_ENV === "test" ||
+    env.CI === "true" ||
+    env.TFX_TEST === "1" ||
+    Boolean(env.TRIFLUX_TEST_HOME)
+  );
+}
+
+function shouldSkipImplicitCodexConfigWrite({
+  codexConfigPath,
+  allowProtectedEnvWrite,
+  env = process.env,
+}) {
+  if (allowProtectedEnvWrite || env[CODEX_CONFIG_SYNC_OPT_IN] === "1") {
+    return false;
+  }
+  if (typeof codexConfigPath === "string" && codexConfigPath.length > 0) {
+    return false;
+  }
+  return isProtectedCodexConfigEnv(env);
 }
 
 export function getProjectMcpJsonPaths(projectRoot) {
@@ -533,6 +557,7 @@ export async function syncCodexHubUrl({
   codexConfigPath,
   dryRun = false,
   logger = console,
+  allowProtectedEnvWrite = false,
 }) {
   const result = {
     updated: [],
@@ -540,8 +565,20 @@ export async function syncCodexHubUrl({
     errors: [],
   };
 
+  const filePath = getCodexConfigPath(codexConfigPath);
+  if (
+    shouldSkipImplicitCodexConfigWrite({
+      codexConfigPath,
+      allowProtectedEnvWrite,
+    })
+  ) {
+    log(logger, "info", `[codex-mcp-sync] skipped: ${filePath}`);
+    result.skipped.push(filePath);
+    return result;
+  }
+
   const outcome = await syncCodexConfigFile({
-    filePath: getCodexConfigPath(codexConfigPath),
+    filePath,
     hubUrl,
     dryRun,
     logger,

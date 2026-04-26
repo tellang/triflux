@@ -45,6 +45,7 @@ function runHubStart(homeDir, port) {
         ...process.env,
         HOME: homeDir,
         USERPROFILE: homeDir,
+        TFX_CODEX_CONFIG_SYNC: "1",
         TFX_HUB_PORT: String(port),
       },
       stdio: ["ignore", "pipe", "pipe"],

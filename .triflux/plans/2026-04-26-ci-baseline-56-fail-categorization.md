@@ -257,3 +257,36 @@ gh run view 24946484889 --log-failed | grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.m
   - `node --test tests/unit/conductor.test.mjs --test-name-pattern "conductor: shutdown"`
   - `node --test tests/unit/conductor.test.mjs`
   - `node scripts/pack.mjs all`
+
+## Phase 8 fix 결과
+
+- Commit hash: 이 단일 Phase 8 커밋 (최종 SHA는 deliverable에 기록)
+- Run analyzed: PR #199 run 24948288859
+- Symptom:
+  - 전체 테스트는 `fail 0`, `cancelled 0`, `pass 3193`까지 회복했지만 `Codex config stability guard`가 exit 2로 실패.
+  - `npm test` 중 `/home/runner/.codex/config.toml`에 `[mcp_servers.tfx-hub]` / `url = "http://127.0.0.1:27888/mcp"`이 추가되어 #193 guard가 mutation으로 판정.
+- Root cause:
+  - Phase 4의 hub-start auto-sync가 Codex binary 유무와 무관하게 user-level Codex MCP 설정을 보장하도록 확장됐다.
+  - 이 경로가 CI/test 환경에서도 implicit `~/.codex/config.toml` sync를 수행해, 테스트 자체는 통과했지만 guard 대상인 production Codex 설정 파일을 변경했다.
+- Files changed:
+  - `scripts/sync-hub-mcp-settings.mjs`
+  - `scripts/setup.mjs`
+  - `tests/unit/sync-hub-mcp-settings.test.mjs`
+  - `tests/integration/hub-start-codex-config.test.mjs`
+  - `packages/*` mirror sync via `node scripts/pack.mjs all`
+  - `.triflux/plans/2026-04-26-ci-baseline-56-fail-categorization.md`
+- Rationale:
+  - `syncCodexHubUrl()`는 명시 `codexConfigPath`가 없는 implicit user-level sync일 때 `NODE_ENV=test`, `CI=true`, `TFX_TEST=1`, `TRIFLUX_TEST_HOME` 환경에서 skip한다.
+  - 테스트가 명시 fixture 파일을 넘기는 단위 경로는 계속 write 동작을 검증한다.
+  - `ensureCodexHubServerConfig()`도 implicit `~/.codex/config.json` 등록을 같은 protected env에서 skip한다. 필요한 테스트는 `TFX_CODEX_CONFIG_SYNC=1`로 명시 opt-in한다.
+- Expected impact:
+  - PR #199의 `npm run test:guard-codex-config`가 테스트 중 `/home/runner/.codex/config.toml`을 변경하지 않아 #193 stability guard를 통과할 것으로 예상.
+  - 일반 사용자 환경의 `tfx hub start`는 protected env가 아니므로 기존 auto-registration 동작 유지.
+- Verification:
+  - `node --test tests/unit/sync-hub-mcp-settings.test.mjs`
+  - `CI=true node scripts/check-codex-config-stable.mjs node --test tests/unit/sync-hub-mcp-settings.test.mjs tests/integration/hub-start-codex-config.test.mjs` — Codex config before/after `sha` + `mtime` identical
+  - `node scripts/pack.mjs all`
+  - `node --test tests/unit/setup-sync.test.mjs tests/unit/packages-mirror.test.mjs`
+  - `npm run lint`
+  - `git diff --check`
+  - Local full `CI=true npm run test:guard-codex-config`: Codex config before/after identical; command exit 1 due existing Windows-local `tests/integration/tfx-route-smoke.test.mjs` no-op 승격 assertion, unrelated to config mutation guard.
