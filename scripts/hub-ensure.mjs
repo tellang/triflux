@@ -45,6 +45,28 @@ async function syncHubConfigsIfAvailable({ hubUrl }) {
   }
 }
 
+function snapshotUserStateBestEffort() {
+  for (const scriptName of [
+    "snapshot-codex-state.mjs",
+    "snapshot-gemini-state.mjs",
+  ]) {
+    try {
+      const child = spawn(
+        process.execPath,
+        [join(PLUGIN_ROOT, "scripts", scriptName)],
+        {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        },
+      );
+      child.unref();
+    } catch {
+      // snapshots are best-effort and must not affect hub startup
+    }
+  }
+}
+
 export function resolveHubTarget() {
   const envPortRaw = Number(process.env.TFX_HUB_PORT || "");
   const envPort =
@@ -123,6 +145,7 @@ export async function run(stdinData) {
   const hubUrl = `${buildHubBaseUrl(host, port)}/mcp`;
   if (await isHubHealthy(host, port)) {
     await syncHubConfigsIfAvailable({ hubUrl });
+    snapshotUserStateBestEffort();
     return { code: 0, stdout: "hub: ok", stderr: "" };
   }
 
@@ -134,6 +157,7 @@ export async function run(stdinData) {
   const ready = await waitForHubReady(host, port, 5000);
   if (ready) {
     await syncHubConfigsIfAvailable({ hubUrl });
+    snapshotUserStateBestEffort();
   }
   return {
     code: ready ? 0 : 2,
