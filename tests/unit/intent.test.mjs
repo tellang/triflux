@@ -60,13 +60,13 @@ describe("intent", () => {
     assert.ok(r.reasoning, "Should have reasoning");
   });
 
-  // 7. classifyIntent: implement → executor/implement/codex53_high
-  it("classifyIntent: implement routes to executor/implement/codex53_high", () => {
+  // 7. classifyIntent: implement → executor/implement/gpt55_high
+  it("classifyIntent: implement routes to executor/implement/gpt55_high", () => {
     const r = classifyIntent("새로운 API 엔드포인트 구현해줘");
     assert.equal(r.category, "implement");
     assert.equal(r.routing.agent, "executor");
     assert.equal(r.routing.mcp, "implement");
-    assert.equal(r.routing.effort, "codex53_high");
+    assert.equal(r.routing.effort, "gpt55_high");
   });
 
   // 8. classifyIntent: document → writer/docs/pro

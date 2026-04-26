@@ -215,28 +215,28 @@ describe("route_agent: 에이전트→CLI 매핑", () => {
 // 5. route_agent(): effort/timeout 매핑
 // ========================================================================
 describe("route_agent: effort 레벨 검증", () => {
-  it("executor → codex53_high effort", () => {
-    assert.equal(ROUTE_TABLE.executor?.CLI_EFFORT, "codex53_high");
+  it("executor → gpt55_high effort", () => {
+    assert.equal(ROUTE_TABLE.executor?.CLI_EFFORT, "gpt55_high");
   });
 
-  it("build-fixer → codex53_low effort", () => {
-    assert.equal(ROUTE_TABLE["build-fixer"]?.CLI_EFFORT, "codex53_low");
+  it("build-fixer → gpt55_low effort", () => {
+    assert.equal(ROUTE_TABLE["build-fixer"]?.CLI_EFFORT, "gpt55_low");
   });
 
-  it("deep-executor → gpt54_xhigh effort", () => {
-    assert.equal(ROUTE_TABLE["deep-executor"]?.CLI_EFFORT, "gpt54_xhigh");
+  it("deep-executor → gpt55_xhigh effort", () => {
+    assert.equal(ROUTE_TABLE["deep-executor"]?.CLI_EFFORT, "gpt55_xhigh");
   });
 
   it("spark → spark53_low effort", () => {
     assert.equal(ROUTE_TABLE.spark?.CLI_EFFORT, "spark53_low");
   });
 
-  it("code-reviewer → codex53_high effort", () => {
-    assert.equal(ROUTE_TABLE["code-reviewer"]?.CLI_EFFORT, "codex53_high");
+  it("code-reviewer → gpt55_high effort", () => {
+    assert.equal(ROUTE_TABLE["code-reviewer"]?.CLI_EFFORT, "gpt55_high");
   });
 
-  it("codex alias → codex53_high effort (executor와 동일)", () => {
-    assert.equal(ROUTE_TABLE.codex?.CLI_EFFORT, "codex53_high");
+  it("codex alias → gpt55_high effort (executor와 동일)", () => {
+    assert.equal(ROUTE_TABLE.codex?.CLI_EFFORT, "gpt55_high");
   });
 
   it("gemini alias → pro31 effort", () => {
