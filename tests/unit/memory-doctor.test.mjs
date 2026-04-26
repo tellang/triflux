@@ -214,7 +214,7 @@ describe("checkOrphanFiles", () => {
       claudeDir: dirs.claude,
       backupDir: dirs.backup,
     });
-    doctor.fix("orphan-files");
+    doctor.fix("orphan-files", { force: true });
 
     const updated = readFileSync(join(dirs.memory, "MEMORY.md"), "utf8");
     assert.ok(
@@ -289,7 +289,7 @@ describe("checkPathsYamlBug", () => {
       claudeDir: dirs.claude,
       backupDir: dirs.backup,
     });
-    doctor.fix("paths-yaml-bug");
+    doctor.fix("paths-yaml-bug", { force: true });
 
     const updated = readFileSync(join(dirs.rules, "bad.md"), "utf8");
     assert.ok(updated.includes("globs:"), "should contain globs:");
@@ -358,7 +358,7 @@ describe("backup", () => {
       claudeDir: dirs.claude,
       backupDir: dirs.backup,
     });
-    const result = doctor.fix("orphan-files");
+    const result = doctor.fix("orphan-files", { force: true });
     assert.ok(result.backup != null, "backup dir should exist");
     assert.ok(existsSync(result.backup), "backup dir should be on disk");
     assert.ok(

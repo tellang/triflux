@@ -258,6 +258,28 @@ function generateSummary(stats, sysInfo, hookTimings, traceCount) {
   return lines.join("\n");
 }
 
+function createZipArchive(bundleDir, zipPath) {
+  if (platform() === "win32") {
+    execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Compress-Archive -Path '${bundleDir}\\*' -DestinationPath '${zipPath}' -Force`,
+      ],
+      { timeout: 30000, windowsHide: true },
+    );
+    return;
+  }
+
+  execFileSync("zip", ["-qr", zipPath, "."], {
+    cwd: bundleDir,
+    timeout: 30000,
+    windowsHide: true,
+  });
+}
+
 export async function diagnose({ json = false } = {}) {
   mkdirSync(DIAG_DIR, { recursive: true });
 
@@ -319,19 +341,10 @@ export async function diagnose({ json = false } = {}) {
   const summary = generateSummary(stats, sysInfo, hookTimings, traces.length);
   writeFileSync(join(bundleDir, "summary.txt"), summary);
 
-  // 7. zip via PowerShell Compress-Archive
+  // 7. zip via platform archive tool
   const zipPath = `${bundleDir}.zip`;
   try {
-    execFileSync(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `Compress-Archive -Path '${bundleDir}\\*' -DestinationPath '${zipPath}' -Force`,
-      ],
-      { timeout: 30000, windowsHide: true },
-    );
+    createZipArchive(bundleDir, zipPath);
   } catch (err) {
     // fallback: leave the directory unzipped
     if (json) {

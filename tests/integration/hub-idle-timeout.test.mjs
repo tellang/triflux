@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdirSync } from "node:fs";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -14,6 +15,24 @@ function tempDbPath() {
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getUnusedPort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.close(resolve);
+  });
+
+  assert.ok(port > 0, "ephemeral test port must be assigned");
+  return port;
 }
 
 function createStubDelegatorWorker() {
@@ -50,6 +69,7 @@ describe("startHub() idle auto-shutdown", () => {
     const previousUserProfile = process.env.USERPROFILE;
     const previousHomeDrive = process.env.HOMEDRIVE;
     const previousHomePath = process.env.HOMEPATH;
+    const previousTfxTest = process.env.TFX_TEST;
     const fakeHome = join(tmpdir(), `tfx-hub-home-${randomUUID()}`);
 
     mkdirSync(fakeHome, { recursive: true });
@@ -59,12 +79,13 @@ describe("startHub() idle auto-shutdown", () => {
     process.env.HOMEPATH = fakeHome.slice(2).replace(/\\/g, "/");
     process.env.TFX_HUB_IDLE_TIMEOUT_MS = "300";
     process.env.TFX_HUB_IDLE_SWEEP_MS = "50";
+    process.env.TFX_TEST = "1";
 
     const { startHub } = await import(
       `../../hub/server.mjs?test=${randomUUID()}`
     );
 
-    const port = 28100 + Math.floor(Math.random() * 200);
+    const port = await getUnusedPort();
     const statusUrl = `http://127.0.0.1:${port}/status`;
     let hub;
 
@@ -136,6 +157,12 @@ describe("startHub() idle auto-shutdown", () => {
         delete process.env.HOMEPATH;
       } else {
         process.env.HOMEPATH = previousHomePath;
+      }
+
+      if (previousTfxTest === undefined) {
+        delete process.env.TFX_TEST;
+      } else {
+        process.env.TFX_TEST = previousTfxTest;
       }
     }
   });

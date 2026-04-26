@@ -326,7 +326,14 @@ async function syncHubMcpSettingsIfAvailable({ hubUrl }) {
     if (typeof mod?.syncCodexHubUrl === "function") {
       await mod.syncCodexHubUrl({ hubUrl });
     }
-    if (typeof mod?.syncProjectMcpJson === "function") {
+    const allowProjectSync =
+      process.env.TFX_PROJECT_MCP_SYNC === "1" ||
+      !(
+        process.env.NODE_ENV === "test" ||
+        process.env.CI === "true" ||
+        process.env.TFX_TEST === "1"
+      );
+    if (allowProjectSync && typeof mod?.syncProjectMcpJson === "function") {
       await mod.syncProjectMcpJson({ hubUrl, projectRoot: PROJECT_ROOT });
     }
   } catch (error) {

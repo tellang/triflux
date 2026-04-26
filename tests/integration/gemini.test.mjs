@@ -8,7 +8,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -276,14 +276,26 @@ describe("tfx-route.sh — Gemini stream wrapper fallback", {
   concurrency: 1,
 }, () => {
   it("stream wrapper 실패 시 claude-native fallback metadata를 반환해야 한다", () => {
-    // stream wrapper가 실패하면 (TFX_ROUTE_WORKER_RUNNER 미존재)
+    // stream wrapper가 실패하면
     // run_legacy_gemini 대신 claude-native metadata로 fallback
-    const result = runBash(
-      `GEMINI_BIN=gemini TFX_ROUTE_WORKER_RUNNER=__nonexistent__ bash "${ROUTE_SCRIPT}" designer 'fallback-test' auto 2>&1 || true`,
-      fixtureEnv(),
+    const runnerDir = mkdtempSync(
+      resolve(tmpdir(), "triflux-gemini-runner-fail-"),
     );
-    const output = out(result);
-    assert.match(output, /claude-native fallback|ROUTE_TYPE=claude-native/);
+    const runner = resolve(runnerDir, "failing-runner.mjs");
+    writeFileSync(
+      runner,
+      "process.stderr.write('forced stream worker failure\\n'); process.exit(73);",
+    );
+    try {
+      const result = runBash(
+        `GEMINI_BIN=gemini TFX_ROUTE_WORKER_RUNNER="${toBashPath(runner)}" bash "${ROUTE_SCRIPT}" designer 'fallback-test' auto 2>&1 || true`,
+        fixtureEnv(),
+      );
+      const output = out(result);
+      assert.match(output, /claude-native fallback|ROUTE_TYPE=claude-native/);
+    } finally {
+      removeTempDirWithRetry(runnerDir);
+    }
   });
 });
 

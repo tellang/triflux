@@ -24,11 +24,4 @@ jobs:
         run: npm ci || npm install --no-audit --no-fund
 
       - name: Codex config stability guard
-        # TEMP: 9e2b6fc/3c2aca8 push 후 main CI red 노출 (Linux 환경 의존 ~56 fail baseline).
-        # PR #198 (#192 fixture+host-config swarm fix) 가 14 fail 해소했으나 잔여 ~42 fail 은 별 카테고리:
-        # tfx-route-smoke (45), codex-app-server-worker (36), router (18), worktree-lifecycle (13),
-        # retry/codex-review/hub-restart/memory-doctor/jsonrpc-stdio 등 Linux integration test 다수.
-        # 별 PRD 로 multi-shard 분석 + fix 진행 예정. 그 전까지 가드는 warning only.
-        # f47eb52 의 임시 우회와 동일 — 단기 unblock 후 근본 fix 진행.
-        continue-on-error: true
         run: npm run test:guard-codex-config

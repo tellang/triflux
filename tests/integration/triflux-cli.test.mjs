@@ -284,7 +284,10 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       "utf8",
     );
 
-    const result = runCli(["setup"], { homeDir });
+    const result = runCli(["setup"], {
+      homeDir,
+      env: { TFX_CODEX_CONFIG_SYNC: "1" },
+    });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.doesNotMatch(
       result.stdout,
@@ -316,6 +319,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       homeDir,
       env: {
         NODE_OPTIONS: `--require ${THROW_UNDEFINED_CODEX_CONFIG_FIXTURE}`,
+        TFX_CODEX_CONFIG_SYNC: "1",
       },
     });
 

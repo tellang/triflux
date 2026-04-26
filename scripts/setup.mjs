@@ -581,6 +581,15 @@ function ensureHooksInSettings({ settingsPath, registryPath }) {
   }
 }
 
+function isProtectedCodexConfigMutationEnv(env = process.env) {
+  return (
+    env.NODE_ENV === "test" ||
+    env.CI === "true" ||
+    env.TFX_TEST === "1" ||
+    Boolean(env.TRIFLUX_TEST_HOME)
+  );
+}
+
 /**
  * Codex config.json에 tfx-hub MCP 서버 엔트리를 보장한다.
  * @param {{ mcpUrl: string, createIfMissing?: boolean, enabled?: boolean }} opts
@@ -594,7 +603,19 @@ function ensureCodexHubServerConfig({
 }) {
   try {
     const codexConfigDir = join(homedir(), ".codex");
-    const configPath = configFile || join(codexConfigDir, "config.json");
+    const hasExplicitConfigFile =
+      typeof configFile === "string" && configFile.length > 0;
+    const configPath = hasExplicitConfigFile
+      ? configFile
+      : join(codexConfigDir, "config.json");
+
+    if (
+      !hasExplicitConfigFile &&
+      process.env.TFX_CODEX_CONFIG_SYNC !== "1" &&
+      isProtectedCodexConfigMutationEnv()
+    ) {
+      return { ok: true, changed: false, reason: "protected-env" };
+    }
 
     if (!existsSync(configPath)) {
       if (!createIfMissing)
@@ -642,6 +663,13 @@ const REQUIRED_TOP_LEVEL_SETTINGS = [
 
 function ensureCodexProfiles() {
   try {
+    if (
+      process.env.TFX_CODEX_CONFIG_SYNC !== "1" &&
+      isProtectedCodexConfigMutationEnv()
+    ) {
+      return { ok: true, changed: 0, reason: "protected-env" };
+    }
+
     if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
 
     const original = existsSync(CODEX_CONFIG_PATH)

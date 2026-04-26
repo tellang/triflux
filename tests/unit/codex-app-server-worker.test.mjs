@@ -129,11 +129,10 @@ class TimeoutInitFake extends FakeClientBase {
     this.sent.push({ method, params });
     if (method === "initialize") {
       return new Promise((_, reject) => {
-        const t = setTimeout(
+        setTimeout(
           () => reject(new Error(`initialize timeout ${timeoutMs}ms`)),
-          Math.min(timeoutMs ?? 100, 50),
+          timeoutMs ?? 100,
         );
-        t.unref?.();
       });
     }
     return new Promise(() => {});
@@ -308,7 +307,7 @@ describe("CodexAppServerWorker — AC-1 initialize timeout", () => {
   it("2. initialize timeout resolves to TransportError and ready=false", async () => {
     const { worker } = makeWorker({
       clientClass: TimeoutInitFake,
-      bootstrapTimeoutMs: 30,
+      bootstrapTimeoutMs: 500,
     });
     await assert.rejects(
       () => worker.start(),

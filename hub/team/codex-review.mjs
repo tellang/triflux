@@ -55,21 +55,22 @@ export function expandRange({ ref = "HEAD", base } = {}) {
  * - `HEAD` with no prior commit returns an empty string
  * - optional `file` scopes the diff to a single path via `-- <file>`
  *
- * @param {{ ref?: string, base?: string, file?: string }} opts
+ * @param {{ ref?: string, base?: string, file?: string, runner?: (cmd: string, args: string[]) => string }} opts
  * @returns {{ diff: string, range: string, file?: string }}
  */
-export function resolveReviewDiff({ ref = "HEAD", base, file } = {}) {
+export function resolveReviewDiff({
+  ref = "HEAD",
+  base,
+  file,
+  runner = _defaultGitRunner,
+} = {}) {
   const range = expandRange({ ref, base });
 
   const args = ["log", "-p", "--stat", "--no-color", range];
   if (file) {
     args.push("--", file);
   }
-  const diff = execFileSync("git", args, {
-    encoding: "utf8",
-    windowsHide: true,
-    maxBuffer: 50 * 1024 * 1024,
-  });
+  const diff = runner("git", args);
   return { diff, range, file };
 }
 
@@ -306,11 +307,15 @@ export async function runCodexReview({
   timeoutMs = 180_000,
   sandbox = "read-only",
   env = process.env,
+  _deps = {},
 } = {}) {
   let range;
   let diff;
   try {
-    ({ diff, range } = resolveReviewDiff({ ref, base }));
+    ({ diff, range } = (_deps.resolveReviewDiff || resolveReviewDiff)({
+      ref,
+      base,
+    }));
   } catch (err) {
     return {
       ok: false,
@@ -353,7 +358,7 @@ export async function runCodexReview({
     };
   }
 
-  return _runCodexOnPrompt({
+  return (_deps.runCodexOnPrompt || _runCodexOnPrompt)({
     prompt,
     range,
     diffBytes,

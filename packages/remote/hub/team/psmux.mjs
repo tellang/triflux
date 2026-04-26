@@ -940,7 +940,7 @@ function killOrphanMcpProcesses(sessionName) {
       // (e.g. `<session>2-worker-1.txt`).
       const escSession = escapeRegex(safeSessionUnix);
       const pids = childProcess
-        .execFileSync("pgrep", ["-f", `tfx-headless/${escSession}[-/.]`], {
+        .execFileSync("pgrep", ["-f", `tfx-headless/${escSession}[-./]`], {
           encoding: "utf8",
           timeout: 5000,
           stdio: ["ignore", "pipe", "ignore"],

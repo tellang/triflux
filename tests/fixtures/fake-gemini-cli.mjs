@@ -5,6 +5,11 @@ import { join } from "node:path";
 
 const args = process.argv.slice(2);
 
+if (args.includes("--version") || args.includes("-v")) {
+  process.stdout.write("gemini 0.8.0\n");
+  process.exit(0);
+}
+
 function getArgValue(name) {
   const index = args.indexOf(name);
   return index >= 0 ? (args[index + 1] ?? null) : null;

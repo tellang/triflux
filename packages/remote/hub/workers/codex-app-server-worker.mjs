@@ -876,7 +876,6 @@ export class CodexAppServerWorker {
             raw: null,
           });
         }, timeoutMs);
-        timer.unref?.();
       });
 
       const result = await Promise.race([resultPromise, timeoutPromise]);
@@ -952,8 +951,7 @@ export class CodexAppServerWorker {
               });
             client.close("closing");
             const deadline = new Promise((resolve) => {
-              const t = setTimeout(resolve, UNSUBSCRIBE_DEADLINE_MS);
-              t.unref?.();
+              setTimeout(resolve, UNSUBSCRIBE_DEADLINE_MS);
             });
             await Promise.race([unsubPromise, deadline]);
           }
@@ -971,12 +969,12 @@ export class CodexAppServerWorker {
       try {
         if (child.exitCode === null && !child.killed) child.kill("SIGTERM");
       } catch {}
-      const killTimer = setTimeout(() => {
+      if (child.exitCode === null && !child.killed) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
         try {
           if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
         } catch {}
-      }, 1_000);
-      killTimer.unref?.();
+      }
     }
   }
 

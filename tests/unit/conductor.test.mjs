@@ -37,25 +37,34 @@ function makeMockSpawn({
 } = {}) {
   return function mockSpawn() {
     const child = new EventEmitter();
+    let exitTimer = null;
+    let exited = false;
     child.pid = Math.floor(Math.random() * 1_000_000) + 1;
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     child.stdin = new PassThrough();
-    child.kill = () => {
+    const fire = (code, signal) => {
+      if (exited) return;
+      exited = true;
+      if (exitTimer) {
+        clearTimeout(exitTimer);
+        exitTimer = null;
+      }
       setImmediate(() => {
         child.stdout.end();
         child.stderr.end();
-        child.emit("exit", null, "SIGTERM");
+        child.emit("exit", code, signal);
       });
+    };
+    child.kill = () => {
+      fire(null, "SIGTERM");
       return true;
     };
-    const fire = () => {
-      child.stdout.end();
-      child.stderr.end();
-      child.emit("exit", exitCode, exitSignal);
-    };
-    if (exitDelayMs > 0) setTimeout(fire, exitDelayMs);
-    else setImmediate(fire);
+    if (exitDelayMs > 0) {
+      exitTimer = setTimeout(() => fire(exitCode, exitSignal), exitDelayMs);
+    } else {
+      fire(exitCode, exitSignal);
+    }
     return child;
   };
 }
@@ -430,6 +439,11 @@ describe("conductor: shutdown", () => {
   });
 
   it("shutdown 시 mesh bridge가 detach되어 registry를 정리해야 한다", async () => {
+    await conductor.shutdown("recreate_slow_child_for_mesh_detach");
+    conductor = makeConductor(logsDir, {
+      deps: { spawn: makeMockSpawn({ exitDelayMs: 10_000 }) },
+    });
+
     const cfg = minConfig({ id: "shutdown-mesh-session" });
     conductor.spawnSession(cfg);
 
@@ -445,18 +459,19 @@ describe("conductor: shutdown", () => {
   });
 
   it("shutdown 후 살아있는 세션은 DEAD 상태로 전이해야 한다", async () => {
+    await conductor.shutdown("recreate_slow_child_for_alive_shutdown");
+    conductor = makeConductor(logsDir, {
+      deps: { spawn: makeMockSpawn({ exitDelayMs: 10_000 }) },
+    });
+
     const cfg = minConfig({ id: "shutdown-session" });
     conductor.spawnSession(cfg);
+    await waitFor(() => conductor.getSnapshot()[0]?.pid);
 
     await conductor.shutdown("cleanup_test");
 
     const [entry] = conductor.getSnapshot();
-    assert.ok(
-      entry.state === STATES.DEAD ||
-        entry.state === STATES.COMPLETED ||
-        entry.state === STATES.FAILED,
-      `예상치 못한 state: ${entry.state}`,
-    );
+    assert.equal(entry.state, STATES.DEAD);
   });
 });
 

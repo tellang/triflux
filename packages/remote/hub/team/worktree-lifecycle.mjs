@@ -58,7 +58,20 @@ function git(args, cwd) {
     execFile(
       "git",
       args,
-      { cwd, windowsHide: true, timeout: 30_000 },
+      {
+        cwd,
+        windowsHide: true,
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || "Triflux",
+          GIT_AUTHOR_EMAIL:
+            process.env.GIT_AUTHOR_EMAIL || "triflux@example.invalid",
+          GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || "Triflux",
+          GIT_COMMITTER_EMAIL:
+            process.env.GIT_COMMITTER_EMAIL || "triflux@example.invalid",
+        },
+      },
       (err, stdout, stderr) => {
         if (err) {
           const msg = `git ${args[0]} failed: ${stderr?.trim() || err.message}`;

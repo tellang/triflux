@@ -266,6 +266,11 @@ describe("sync-hub-mcp-settings", () => {
 
 describe("syncCodexHubUrl", () => {
   const originalHome = process.env.HOME;
+  const originalUserprofile = process.env.USERPROFILE;
+  const originalCi = process.env.CI;
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalTfxTest = process.env.TFX_TEST;
+  const originalTrifluxTestHome = process.env.TRIFLUX_TEST_HOME;
   let homeDir;
 
   function codexPath(...segments) {
@@ -275,6 +280,7 @@ describe("syncCodexHubUrl", () => {
   beforeEach(() => {
     homeDir = mkdtempSync(join(tmpdir(), "tfx-codex-sync-"));
     process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
   });
 
   afterEach(() => {
@@ -282,6 +288,31 @@ describe("syncCodexHubUrl", () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalUserprofile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserprofile;
+    }
+    if (originalCi === undefined) {
+      delete process.env.CI;
+    } else {
+      process.env.CI = originalCi;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    if (originalTfxTest === undefined) {
+      delete process.env.TFX_TEST;
+    } else {
+      process.env.TFX_TEST = originalTfxTest;
+    }
+    if (originalTrifluxTestHome === undefined) {
+      delete process.env.TRIFLUX_TEST_HOME;
+    } else {
+      process.env.TRIFLUX_TEST_HOME = originalTrifluxTestHome;
     }
 
     if (homeDir && existsSync(homeDir)) {
@@ -426,6 +457,40 @@ describe("syncCodexHubUrl", () => {
     ]);
     assert.deepEqual(result.skipped, []);
     assert.equal(readFileSync(configPath, "utf8"), before);
+  });
+
+  it("case 7: test/CI env에서 implicit ~/.codex/config.toml 쓰기는 skip한다", async () => {
+    const protectedEnvs = [
+      ["NODE_ENV", "test"],
+      ["CI", "true"],
+      ["TFX_TEST", "1"],
+      ["TRIFLUX_TEST_HOME", homeDir],
+    ];
+
+    for (const [key, value] of protectedEnvs) {
+      delete process.env.NODE_ENV;
+      delete process.env.CI;
+      delete process.env.TFX_TEST;
+      delete process.env.TRIFLUX_TEST_HOME;
+      process.env[key] = value;
+
+      const configPath = codexPath(".codex", "config.toml");
+      writeRaw(
+        configPath,
+        `[mcp_servers.other]\nurl = "http://127.0.0.1:3000/mcp"\n`,
+      );
+      const before = readFileSync(configPath, "utf8");
+
+      const result = await syncCodexHubUrl({
+        hubUrl: HUB_URL,
+        logger: createLogger(),
+      });
+
+      assert.deepEqual(result.updated, [], key);
+      assert.deepEqual(result.errors, [], key);
+      assert.deepEqual(result.skipped, [configPath], key);
+      assert.equal(readFileSync(configPath, "utf8"), before, key);
+    }
   });
 });
 

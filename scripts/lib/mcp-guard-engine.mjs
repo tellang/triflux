@@ -98,6 +98,17 @@ function isCodexConfig(filePath) {
   return normalized.endsWith("/.codex/config.toml");
 }
 
+function isProtectedCodexConfigMutationEnv(env = process.env) {
+  return env.NODE_ENV === "test" || env.CI === "true" || env.TFX_TEST === "1";
+}
+
+function shouldSkipCodexConfigMutation() {
+  return (
+    process.env.TFX_CODEX_CONFIG_SYNC !== "1" &&
+    isProtectedCodexConfigMutationEnv()
+  );
+}
+
 function detectClient(filePath) {
   const normalized = normalizeForMatch(filePath);
   if (normalized.endsWith("/.gemini/settings.json")) return "gemini";
@@ -448,6 +459,15 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
 
 function updateCodexConfig(filePath, updates = [], removals = []) {
   const resolvedPath = resolveFilePath(filePath);
+  if (shouldSkipCodexConfigMutation()) {
+    return {
+      modified: false,
+      filePath: resolvedPath,
+      skipped: true,
+      reason: "protected-env",
+    };
+  }
+
   let raw = existsSync(resolvedPath) ? readFileSync(resolvedPath, "utf8") : "";
 
   for (const name of removals) {

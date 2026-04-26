@@ -60,6 +60,21 @@ function normalizeAgentTopics(store, agentId, runtimeTopics) {
   return Array.from(topics);
 }
 
+function waitForEmitterOnce(emitter, eventName, timeoutMs) {
+  let timer = null;
+  const timeout = Math.max(0, Math.min(Number(timeoutMs) || 0, 30000));
+  return Promise.race([
+    once(emitter, eventName),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`timed out waiting for ${eventName}`));
+      }, timeout);
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 /**
  * 라우터 생성
  * @param {object} store
@@ -525,9 +540,11 @@ export function createRouter(store) {
       }
 
       try {
-        const [response] = await once(responseEmitter, cid, {
-          signal: AbortSignal.timeout(Math.min(await_response_ms, 30000)),
-        });
+        const [response] = await waitForEmitterOnce(
+          responseEmitter,
+          cid,
+          await_response_ms,
+        );
         return {
           ok: true,
           data: {

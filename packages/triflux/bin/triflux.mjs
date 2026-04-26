@@ -5073,29 +5073,28 @@ function startHubAfterUpdate(info) {
 function autoRegisterMcp(mcpUrl, { codexEnabled = false } = {}) {
   section("MCP 자동 등록");
 
-  // Codex — config.json에 기본 disabled 엔트리로 등록
-  if (which("codex")) {
-    try {
-      const result = ensureCodexHubServerConfig({
-        mcpUrl,
-        createIfMissing: true,
-        enabled: codexEnabled,
-      });
-      if (!result.ok) throw new Error(result.reason || "unknown");
-      if (result.changed) {
-        ok(
-          `Codex: config.json에 등록 완료 (${codexEnabled ? "enabled" : "기본 disabled"})`,
-        );
-      } else {
-        ok(
-          `Codex: 이미 등록됨 (${codexEnabled ? "enabled" : "기본 disabled"})`,
-        );
-      }
-    } catch (e) {
-      warn(`Codex 등록 실패: ${e.message}`);
+  // Codex — config.json에 기본 disabled 엔트리로 등록.
+  // Hub startup must keep the MCP config fresh even on CI/dev machines where
+  // the Codex CLI binary itself is not installed.
+  try {
+    const result = ensureCodexHubServerConfig({
+      mcpUrl,
+      createIfMissing: true,
+      enabled: codexEnabled,
+    });
+    if (!result.ok) throw new Error(result.reason || "unknown");
+    const suffix = which("codex") ? "" : " (CLI 미설치)";
+    if (result.changed) {
+      ok(
+        `Codex: config.json에 등록 완료 (${codexEnabled ? "enabled" : "기본 disabled"})${suffix}`,
+      );
+    } else {
+      ok(
+        `Codex: 이미 등록됨 (${codexEnabled ? "enabled" : "기본 disabled"})${suffix}`,
+      );
     }
-  } else {
-    info("Codex: 미설치 (건너뜀)");
+  } catch (e) {
+    warn(`Codex 등록 실패: ${e.message}`);
   }
 
   // Gemini — settings.json 직접 수정

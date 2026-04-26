@@ -61,7 +61,7 @@ describe("worktree-lifecycle", () => {
     // 브랜치 포맷: swarm/{runId}/{slug}
     assert.equal(result.branchName, "swarm/test-run/auth-refactor");
     // 디렉토리 존재
-    assert.ok(existsSync(result.worktreePath.replace(/\//g, "\\")));
+    assert.ok(existsSync(result.worktreePath));
 
     // 멱등성: 재호출 시 같은 결과
     const result2 = await ensureWorktree({
@@ -111,7 +111,7 @@ describe("worktree-lifecycle", () => {
       rootDir: repoDir,
       baseBranch: "main",
     });
-    assert.ok(existsSync(wt.worktreePath.replace(/\//g, "\\")));
+    assert.ok(existsSync(wt.worktreePath));
 
     // prune
     await pruneWorktree({
@@ -121,7 +121,7 @@ describe("worktree-lifecycle", () => {
     });
 
     // worktree 디렉토리 제거됨
-    assert.equal(existsSync(wt.worktreePath.replace(/\//g, "\\")), false);
+    assert.equal(existsSync(wt.worktreePath), false);
 
     // 브랜치도 삭제됨
     const branches = execFileSync("git", ["branch", "--list", wt.branchName], {
@@ -158,10 +158,7 @@ describe("worktree-lifecycle", () => {
     });
 
     // .claude-plugin이 worktree에서 제거됨
-    const wtPluginDir = join(
-      wt.worktreePath.replace(/\//g, "\\"),
-      ".claude-plugin",
-    );
+    const wtPluginDir = join(wt.worktreePath, ".claude-plugin");
     assert.equal(
       existsSync(wtPluginDir),
       false,
@@ -183,7 +180,7 @@ describe("worktree-lifecycle", () => {
       rootDir: repoDir,
       baseBranch: "main",
     });
-    const validPath = wt.worktreePath.replace(/\//g, "\\");
+    const validPath = wt.worktreePath;
     assert.ok(existsSync(validPath));
 
     // 고아 디렉토리 수동 생성 (git worktree list에 등록 안 됨)
@@ -228,7 +225,7 @@ describe("worktree-lifecycle", () => {
       rootDir: repoDir,
       baseBranch: "main",
     });
-    const wtPath = wt.worktreePath.replace(/\//g, "\\");
+    const wtPath = wt.worktreePath;
 
     writeFileSync(join(wtPath, "shard-file.txt"), "shard content\n");
     execFileSync("git", ["add", "shard-file.txt"], {
@@ -283,7 +280,7 @@ describe("worktree-lifecycle", () => {
       rootDir: repoDir,
       baseBranch: "main",
     });
-    const wtPath = wt.worktreePath.replace(/\//g, "\\");
+    const wtPath = wt.worktreePath;
     writeFileSync(join(wtPath, "x.txt"), "x\n");
     execFileSync("git", ["add", "x.txt"], { cwd: wtPath, windowsHide: true });
     execFileSync("git", ["commit", "-m", "x"], {
@@ -335,7 +332,7 @@ describe("worktree-lifecycle", () => {
       rootDir: repoDir,
       baseBranch: "main",
     });
-    const wtPath = wt.worktreePath.replace(/\//g, "\\");
+    const wtPath = wt.worktreePath;
 
     writeFileSync(join(wtPath, "contention.txt"), "from worker\n");
     execFileSync("git", ["add", "contention.txt"], {

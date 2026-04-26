@@ -38,10 +38,20 @@ function snapshotConfig(path) {
   };
 }
 
-function spawnEnsureCodexProfiles({ home, userprofile, trifluxTestHome }) {
+function spawnEnsureCodexProfiles({
+  home,
+  userprofile,
+  trifluxTestHome,
+  codexConfigSync = true,
+  ci,
+}) {
   const env = { ...process.env };
   // 환경 정리 — 명시적으로 set 하지 않은 키는 child 가 OS 기본값 사용 못 하게 비움
   delete env.TRIFLUX_TEST_HOME;
+  delete env.TFX_CODEX_CONFIG_SYNC;
+  delete env.CI;
+  if (codexConfigSync) env.TFX_CODEX_CONFIG_SYNC = "1";
+  if (typeof ci === "string") env.CI = ci;
   if (typeof home === "string") env.HOME = home;
   else delete env.HOME;
   if (typeof userprofile === "string") env.USERPROFILE = userprofile;
@@ -152,6 +162,37 @@ describe("setup home resolution (#193 회귀 가드)", () => {
       rmSync(fixture, { recursive: true, force: true });
       rmSync(decoy1, { recursive: true, force: true });
       rmSync(decoy2, { recursive: true, force: true });
+    }
+  });
+
+  it("CI/test env에서는 opt-in 없으면 implicit config.toml을 쓰지 않는다", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "tfx-home-protected-"));
+    mkdirSync(join(fixture, ".codex"), { recursive: true });
+    const fixtureConfig = join(fixture, ".codex", "config.toml");
+
+    try {
+      const result = spawnEnsureCodexProfiles({
+        home: fixture,
+        userprofile: fixture,
+        codexConfigSync: false,
+        ci: "true",
+      });
+      assert.equal(
+        result.status,
+        0,
+        `spawn failed: ${result.stderr || result.stdout}`,
+      );
+      const parsed = JSON.parse(result.stdout);
+      assert.equal(parsed.ok, true);
+      assert.equal(parsed.changed, 0);
+      assert.equal(parsed.reason, "protected-env");
+      assert.equal(
+        existsSync(fixtureConfig),
+        false,
+        "protected env must not create config.toml without opt-in",
+      );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
     }
   });
 });

@@ -13,6 +13,11 @@ const mode = process.env.FAKE_CODEX_MODE || "mcp-ok";
 const sessions = new Map();
 let sequence = 0;
 
+if (process.argv.includes("--version") || process.argv.includes("-V")) {
+  process.stdout.write("codex 0.124.0\n");
+  process.exit(0);
+}
+
 function nextThreadId() {
   sequence += 1;
   return `thread-${sequence}`;

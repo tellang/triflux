@@ -25,8 +25,7 @@ export function createWorkerError(message, details = {}) {
 
 function sleep(delayMs) {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, Math.max(0, delayMs));
-    timer.unref?.();
+    setTimeout(resolve, Math.max(0, delayMs));
   });
 }
 

@@ -85,7 +85,11 @@ test("conductor launches quoted prompts through argv without shell quoting on Wi
   conductor = createConductor({
     logsDir,
     maxRestarts: 0,
+    graceMs: 100,
+    synapseFetch: null,
     probeOpts: {
+      enableL2: false,
+      writeStateFile: false,
       intervalMs: 999_999,
       l1ThresholdMs: 999_999,
       l3ThresholdMs: 999_999,
