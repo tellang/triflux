@@ -10,6 +10,7 @@ const TARGET_FILES = [
 ];
 const CODEX_CONFIG_FILE = [".codex", "config.toml"];
 const TFX_HUB_SECTION = "tfx-hub";
+const CODEX_DEFAULT_HUB_URL = "http://127.0.0.1:27888/mcp";
 const FILE_LOCKS = new Map();
 
 // Windows 에서 process.env.HOME 만 set 하고 USERPROFILE 은 그대로 둔 fixture 환경
@@ -309,6 +310,9 @@ async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
 }
 
 async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
+  const stableHubUrl =
+    hubUrl === CODEX_DEFAULT_HUB_URL ? hubUrl : CODEX_DEFAULT_HUB_URL;
+
   return withFileLock(filePath, async () => {
     if (!(await fileExists(filePath))) {
       log(logger, "info", `[codex-mcp-sync] skipped: ${filePath}`);
@@ -326,11 +330,15 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
 
     const section = findMcpServerSection(raw, TFX_HUB_SECTION);
     if (!section) {
-      const nextRaw = appendCodexMcpServerSection(raw, TFX_HUB_SECTION, hubUrl);
+      const nextRaw = appendCodexMcpServerSection(
+        raw,
+        TFX_HUB_SECTION,
+        stableHubUrl,
+      );
       log(
         logger,
         "debug",
-        `[codex-mcp-sync] ${filePath} add ${TFX_HUB_SECTION}: ${hubUrl}`,
+        `[codex-mcp-sync] ${filePath} add ${TFX_HUB_SECTION}: ${stableHubUrl}`,
       );
 
       if (!dryRun) {
@@ -375,7 +383,7 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
       return { kind: "error", path: filePath, reason };
     }
 
-    if (currentUrl === hubUrl) {
+    if (currentUrl === stableHubUrl) {
       log(logger, "info", `[codex-mcp-sync] skipped: ${filePath}`);
       return { kind: "skipped", path: filePath };
     }
@@ -383,14 +391,14 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
     const nextBody = section.body.replace(
       /^(\s*url\s*=\s*)(.+?)(\s*(?:#.*)?)$/m,
       (_, prefix, _value, suffix = "") =>
-        `${prefix}${formatTomlString(hubUrl)}${suffix}`,
+        `${prefix}${formatTomlString(stableHubUrl)}${suffix}`,
     );
     const nextRaw = `${raw.slice(0, section.bodyStart)}${nextBody}${raw.slice(section.sectionEnd)}`;
 
     log(
       logger,
       "debug",
-      `[codex-mcp-sync] ${filePath} url: ${String(currentUrl)} -> ${hubUrl}`,
+      `[codex-mcp-sync] ${filePath} url: ${String(currentUrl)} -> ${stableHubUrl}`,
     );
 
     if (!dryRun) {

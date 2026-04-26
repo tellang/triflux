@@ -60,18 +60,26 @@ export async function bumpVersion({
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const args = parseArgs(process.argv.slice(2));
-  const nextVersion = args.next || args.version;
-  const result = await bumpVersion({
-    nextVersion,
-    rootDir: args.root,
-    write: Boolean(args.write),
-  });
-  if (args.json) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    console.log(
-      `${args.write ? "Bumped" : "Planned"} version ${result.previousVersion} -> ${result.nextVersion}`,
+  if (!args.write) {
+    console.error(
+      "[bump-version] --write 플래그 누락 — dry-run 모드. 실제 변경 없음.",
     );
-    console.log(`Updated files: ${result.updatedFiles.join(", ")}`);
+    console.error("[bump-version] 변경하려면 --write 추가하세요.");
+    process.exitCode = 0;
+  } else {
+    const nextVersion = args.next || args.version;
+    const result = await bumpVersion({
+      nextVersion,
+      rootDir: args.root,
+      write: Boolean(args.write),
+    });
+    if (args.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(
+        `${args.write ? "Bumped" : "Planned"} version ${result.previousVersion} -> ${result.nextVersion}`,
+      );
+      console.log(`Updated files: ${result.updatedFiles.join(", ")}`);
+    }
   }
 }

@@ -20,13 +20,41 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
+const EXPECTED_TFX_HUB_URL = "http://127.0.0.1:27888/mcp";
+
+function readTfxHubUrl(raw) {
+  const headerMatch =
+    /^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:tfx-hub|"tfx-hub"|'tfx-hub')[ \t]*\][ \t]*\r?$/m.exec(
+      raw,
+    );
+  if (!headerMatch) return null;
+  const headerLineEnd = raw.indexOf("\n", headerMatch.index);
+  const bodyStart = headerLineEnd === -1 ? raw.length : headerLineEnd + 1;
+  const nextSectionRegex = /^[ \t]*\[/gm;
+  nextSectionRegex.lastIndex = bodyStart;
+  const nextSectionMatch = nextSectionRegex.exec(raw);
+  const sectionEnd = nextSectionMatch ? nextSectionMatch.index : raw.length;
+  const sectionBody = raw.slice(bodyStart, sectionEnd);
+  const urlMatch =
+    /^[ \t]*url[ \t]*=[ \t]*(?:"([^"]+)"|'([^']+)')[ \t]*(?:#.*)?\r?$/m.exec(
+      sectionBody,
+    );
+  return urlMatch?.[1] ?? urlMatch?.[2] ?? "";
+}
 
 function snapshotConfig() {
   try {
     const stat = statSync(CODEX_CONFIG);
     const data = readFileSync(CODEX_CONFIG);
+    const raw = data.toString("utf8");
     const sha = createHash("sha256").update(data).digest("hex");
-    return { exists: true, size: stat.size, mtimeMs: stat.mtimeMs, sha };
+    return {
+      exists: true,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      sha,
+      tfxHubUrl: readTfxHubUrl(raw),
+    };
   } catch {
     return { exists: false };
   }
@@ -40,7 +68,17 @@ function describeChange(before, after) {
   if (before.sha !== after.sha) {
     return `sha256 differs (size: ${before.size} → ${after.size})`;
   }
+  if (before.mtimeMs !== after.mtimeMs) {
+    return `mtime differs (${before.mtimeMs} → ${after.mtimeMs})`;
+  }
   return null;
+}
+
+function describePortDrift(snapshot) {
+  if (!snapshot.exists) return null;
+  if (snapshot.tfxHubUrl === null) return null;
+  if (snapshot.tfxHubUrl === EXPECTED_TFX_HUB_URL) return null;
+  return `tfx-hub url is ${JSON.stringify(snapshot.tfxHubUrl)}; expected ${JSON.stringify(EXPECTED_TFX_HUB_URL)}`;
 }
 
 const argv = process.argv.slice(2);
@@ -62,17 +100,21 @@ process.stderr.write(
 );
 
 const change = describeChange(before, after);
-if (change) {
+const portDrift = describePortDrift(after);
+if (change || portDrift) {
   process.stderr.write(
     [
       "",
       "=== CONFIG MUTATION DETECTED (#193 회귀) ===",
       `Path:    ${CODEX_CONFIG}`,
-      `Change:  ${change}`,
+      `Change:  ${change || "none"}`,
+      portDrift ? `Port:    ${portDrift}` : null,
       "Action:  즉시 backup 으로 복원 + mutation source 추적 필요.",
       "Context: https://github.com/tellang/triflux/issues/193",
       "",
-    ].join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
   );
   process.exit(2);
 }

@@ -60,8 +60,8 @@ describe("resolveHubPort()", () => {
     );
   });
 
-  it("alive PID only -> PID port", () => {
-    assert.equal(resolveHubPort({}, { detectPeer: () => LIVE_PEER }), 29102);
+  it("alive PID only -> 27888", () => {
+    assert.equal(resolveHubPort({}, { detectPeer: () => LIVE_PEER }), 27888);
   });
 
   it("dead PID only -> 27888", () => {
@@ -127,7 +127,7 @@ describe("tryReuseExistingHub()", () => {
     assert.equal(reused?.url, LIVE_PEER.url);
   });
 
-  it("portOpt 미명시 + alive -> reuse (sticky)", async () => {
+  it("portOpt 미명시 + alive mismatch -> null", async () => {
     const serverModule = await import("../../hub/server.mjs");
     assert.equal(typeof serverModule.tryReuseExistingHub, "function");
 
@@ -143,11 +143,8 @@ describe("tryReuseExistingHub()", () => {
       log: createSilentLog(warnings),
     });
 
-    assert.equal(reused?.reused, true);
-    assert.equal(reused?.external, true);
-    assert.equal(reused?.pid, LIVE_PEER.pid);
-    assert.equal(reused?.port, LIVE_PEER.port);
+    assert.equal(reused, null);
     assert.equal(warnings.length, 1);
-    assert.equal(warnings[0]?.event, "hub.port_mismatch_reusing_live_pid");
+    assert.equal(warnings[0]?.event, "hub.port_mismatch_not_reusing_live_pid");
   });
 });

@@ -738,11 +738,11 @@ capture_workspace_signature() {
     return 1
   fi
 
-  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if ! git -c core.fsmonitor=false rev-parse --is-inside-work-tree < /dev/null >/dev/null 2>&1; then
     return 1
   fi
 
-  git status --short --untracked-files=all --ignore-submodules=all 2>/dev/null || return 1
+  git -c core.fsmonitor=false status --short --untracked-files=all --ignore-submodules=all < /dev/null 2>/dev/null || return 1
 }
 
 # ── Codex CLI 버전 감지 (캐시) ──
@@ -750,7 +750,7 @@ _CODEX_VERSION=""
 get_codex_version() {
   if [[ -n "$_CODEX_VERSION" ]]; then echo "$_CODEX_VERSION"; return; fi
   local raw
-  raw=$("$CODEX_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  raw=$("$CODEX_BIN" --version < /dev/null 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
   _CODEX_VERSION="${raw:-0.0.0}"
   echo "$_CODEX_VERSION"
 }
@@ -1293,7 +1293,7 @@ resolve_mcp_policy() {
   [[ -n "$TFX_WORKER_INDEX" ]] && cmd+=("--worker-index" "$TFX_WORKER_INDEX")
 
   local _raw
-  if ! _raw="$("${cmd[@]}")"; then
+  if ! _raw="$("${cmd[@]}" < /dev/null)"; then
     echo "[tfx-route] ERROR: MCP 정책 계산 실패" >&2
     return 1
   fi
@@ -1519,7 +1519,11 @@ heartbeat_monitor() {
 _wait_with_heartbeat() {
   local wpid="$1" hb_pid ec=0
   track_worker_pid "$wpid"
-  heartbeat_monitor "$wpid" &
+  if [[ -t 2 ]]; then
+    heartbeat_monitor "$wpid" &
+  else
+    heartbeat_monitor "$wpid" < /dev/null >>"$STDERR_LOG" 2>&1 &
+  fi
   hb_pid=$!
   wait "$wpid" || ec=$?
   kill "$hb_pid" 2>/dev/null; wait "$hb_pid" 2>/dev/null
@@ -1625,7 +1629,7 @@ _mcp_preflight_filter_dead() {
   # Probe — TTL cache 로 재호출 부하 억제
   local probe_output
   if ! probe_output=$("$NODE_BIN" "$health_script" probe \
-      --names "$names" --format shell 2>/dev/null); then
+      --names "$names" --format shell < /dev/null 2>/dev/null); then
     echo "[tfx-route] MCP preflight probe 실패 — 스킵" >&2
     return 0
   fi
@@ -1951,9 +1955,9 @@ run_codex_mcp() {
   esac
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$NODE_BIN" "${mcp_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$NODE_BIN" "${mcp_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
   _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
@@ -2164,7 +2168,7 @@ FALLBACK_EOF
       elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
         # MCP 실패 → exec fallback. run_codex_exec는 < /dev/null 로 stdin 블록 회피 (line 1639).
         # 정책: codex/gemini 강건성 — MCP 가용 시 MCP, 실패 시 그래도 워커 자체는 굴러간다.
-        echo "[tfx-route] Codex MCP 실패(exit=${exit_code}). exec fallback 시도." >&2
+        echo "[tfx-route] Codex MCP 실패(exit=${exit_code}). legacy exec 경로로 fallback 시도." >&2
         local _sd
         _sd="$(_get_script_dir)"
         if [[ -f "$_sd/hub-ensure.mjs" ]]; then

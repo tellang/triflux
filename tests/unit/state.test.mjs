@@ -177,19 +177,19 @@ describe("getOrCreateServer — 싱글톤 팩토리", () => {
   it("기존 서버가 healthy하면 재사용한다 (reused: true)", async () => {
     const result = await getOrCreateServer({
       _deps: {
-        readState: () => ({ pid: process.pid, port: 31000 }),
+        readState: () => ({ pid: process.pid, port: 27888 }),
         startHub: () => {
           throw new Error("startHub이 호출되면 안 됨");
         },
         isHealthy: () => true,
-        getInfo: () => ({ url: "http://127.0.0.1:31000/mcp" }),
+        getInfo: () => ({ url: "http://127.0.0.1:27888/mcp" }),
       },
     });
 
     assert.equal(result.reused, true);
-    assert.equal(result.port, 31000);
+    assert.equal(result.port, 27888);
     assert.equal(result.pid, process.pid);
-    assert.equal(result.url, "http://127.0.0.1:31000/mcp");
+    assert.equal(result.url, "http://127.0.0.1:27888/mcp");
   });
 
   it("PID는 살아있지만 health 체크 실패 시 새로 시작한다", async () => {
@@ -236,7 +236,7 @@ describe("getOrCreateServer — 싱글톤 팩토리", () => {
   it("getInfo가 url을 반환하지 않으면 기본 url로 폴백한다", async () => {
     const result = await getOrCreateServer({
       _deps: {
-        readState: () => ({ pid: process.pid, port: 34000 }),
+        readState: () => ({ pid: process.pid, port: 27888 }),
         startHub: () => {
           throw new Error("startHub이 호출되면 안 됨");
         },
@@ -246,6 +246,6 @@ describe("getOrCreateServer — 싱글톤 팩토리", () => {
     });
 
     assert.equal(result.reused, true);
-    assert.equal(result.url, "http://127.0.0.1:34000/mcp");
+    assert.equal(result.url, "http://127.0.0.1:27888/mcp");
   });
 });
