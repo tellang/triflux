@@ -410,8 +410,11 @@ export function probeStdio(def, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
 
     try {
       child.stdin.write(makeInitializeRequest(), (err) => {
-        if (err)
+        if (err) {
           done({ alive: false, reason: `stdin:${err.code || err.message}` });
+          return;
+        }
+        child.stdin.end();
       });
     } catch (err) {
       done({ alive: false, reason: `write:${err.code || err.message}` });
