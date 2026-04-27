@@ -14,6 +14,7 @@ import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupShardProcesses } from "../lib/process-utils.mjs";
 import { getHostConfig } from "../lib/ssh-command.mjs";
 import { buildWorkerPrompt } from "./build-worker-prompt.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
@@ -193,6 +194,8 @@ export function createSwarmHypervisor(opts) {
     _deps.rebaseShardOntoIntegration || rebaseShardOntoIntegration;
   const cleanupWorktreeImpl =
     _deps.cleanupWorktree || cleanupWorktree || pruneWorktree;
+  const cleanupShardProcessesImpl =
+    _deps.cleanupShardProcesses || cleanupShardProcesses;
   const preserveWorktreePatchImpl =
     _deps.preserveWorktreePatch || preserveWorktreePatch;
   const ensureHubAliveImpl = hasOwnDep(_deps, "ensureHubAlive")
@@ -219,6 +222,10 @@ export function createSwarmHypervisor(opts) {
   /** @type {Set<string>} shards that have fully completed (not just launched) */
   const completedShards = new Set();
   const cleanedWorktreePaths = new Set();
+  const processCleanupTotals = {
+    totalKilled: 0,
+    byCategory: {},
+  };
 
   const results = new Map(); // shardName → validated result
   const failures = new Map(); // shardName → failure info
@@ -234,6 +241,10 @@ export function createSwarmHypervisor(opts) {
     integrationFailures: [],
     skipped: [],
     integrationBranch: null,
+    processCleanup: {
+      totalKilled: 0,
+      byCategory: {},
+    },
     error: null,
   };
   const integrationPromise = new Promise((resolve) => {
@@ -298,6 +309,8 @@ export function createSwarmHypervisor(opts) {
       return integrationResult;
     }
 
+    const processCleanup = payload.processCleanup || getProcessCleanupSummary();
+
     integrationResult = Object.freeze({
       integrated: Object.freeze([...(payload.integrated || [])]),
       failed: Object.freeze([...(payload.failed || [])]),
@@ -307,6 +320,10 @@ export function createSwarmHypervisor(opts) {
       skipped: Object.freeze([...(payload.skipped || [])]),
       integrationBranch: payload.integrationBranch || null,
       results: Object.freeze([...(payload.results || [])]),
+      processCleanup: Object.freeze({
+        totalKilled: processCleanup.totalKilled || 0,
+        byCategory: Object.freeze({ ...(processCleanup.byCategory || {}) }),
+      }),
       partial:
         payload.partial ??
         (Array.isArray(payload.failed) && payload.failed.length > 0),
@@ -323,11 +340,37 @@ export function createSwarmHypervisor(opts) {
       integrationFailures: [...integrationResult.integrationFailures],
       skipped: [...integrationResult.skipped],
       integrationBranch: integrationResult.integrationBranch,
+      processCleanup: integrationResult.processCleanup,
       error: integrationResult.error,
     };
 
     resolveIntegrationPromise?.(integrationResult);
     return integrationResult;
+  }
+
+  function getProcessCleanupSummary() {
+    return {
+      totalKilled: processCleanupTotals.totalKilled,
+      byCategory: { ...processCleanupTotals.byCategory },
+    };
+  }
+
+  function recordProcessCleanup(result) {
+    if (!result) return getProcessCleanupSummary();
+
+    const killed = Number(result.killed ?? result.totalKilled ?? 0);
+    if (Number.isFinite(killed) && killed > 0) {
+      processCleanupTotals.totalKilled += killed;
+    }
+
+    for (const [category, count] of Object.entries(result.byCategory || {})) {
+      const numeric = Number(count);
+      if (!Number.isFinite(numeric) || numeric <= 0) continue;
+      processCleanupTotals.byCategory[category] =
+        (processCleanupTotals.byCategory[category] || 0) + numeric;
+    }
+
+    return getProcessCleanupSummary();
   }
 
   function git(args, cwd = workdir) {
@@ -1183,6 +1226,33 @@ export function createSwarmHypervisor(opts) {
     }
 
     try {
+      const snapshot = worker.conductor?.getSnapshot?.();
+      const processCleanup = await cleanupShardProcessesImpl({
+        worktreePath: worker.worktreePath,
+        sessionIds: [worker.sessionId || worker.sessionConfig?.id].filter(
+          Boolean,
+        ),
+        topPids: snapshot?.topPids ?? [],
+        runId: plan?.runId || runId,
+        shardName,
+      });
+      worker.processCleanup = processCleanup;
+      recordProcessCleanup(processCleanup);
+      eventLog.append("process_cleanup", {
+        shard: shardName,
+        worktreePath: worker.worktreePath,
+        killed: processCleanup?.killed ?? 0,
+        byCategory: processCleanup?.byCategory || {},
+      });
+    } catch (err) {
+      eventLog.append("process_cleanup_failed", {
+        shard: shardName,
+        worktreePath: worker.worktreePath,
+        error: err.message,
+      });
+    }
+
+    try {
       await cleanupWorktreeImpl({
         worktreePath: worker.worktreePath,
         branchName,
@@ -1317,6 +1387,12 @@ export function createSwarmHypervisor(opts) {
         integrationFailures: [...integrationPromiseState.integrationFailures],
         skipped: [...integrationPromiseState.skipped],
         integrationBranch: integrationPromiseState.integrationBranch,
+        processCleanup: Object.freeze({
+          totalKilled: integrationPromiseState.processCleanup.totalKilled,
+          byCategory: Object.freeze({
+            ...integrationPromiseState.processCleanup.byCategory,
+          }),
+        }),
         error: integrationPromiseState.error,
       }),
     });
@@ -1485,11 +1561,21 @@ export function createSwarmHypervisor(opts) {
     await Promise.allSettled(shutdowns);
 
     if (!keepFailedWorktrees) {
-      for (const [shardName, failureInfo] of failures) {
-        const worker = workers.get(shardName);
+      const cleanupCandidates = new Map();
+      for (const [shardName, worker] of workers) {
+        cleanupCandidates.set(shardName, worker);
+      }
+      for (const [shardName, worker] of redundantWorkers) {
+        cleanupCandidates.set(`${shardName}:redundant`, worker);
+      }
+
+      for (const [candidateName, worker] of cleanupCandidates) {
+        const shardName = worker?.shardConfig?.name || candidateName;
+        const failureInfo = failures.get(shardName);
         const shard =
           worker?.shardConfig ||
           plan?.shards.find((item) => item.name === shardName);
+        if (!worker?.worktreePath) continue;
         await maybeCleanupWorktree(shardName, worker, shard, {
           force: true,
           failureReason: failureInfo?.mode || failureInfo?.reason || reason,
