@@ -114,6 +114,7 @@ function createMockConductorFactory() {
     let completed = false;
     let deadHandler = null;
     let sessionConfig = null;
+    let topPids = [];
     const conductor = {
       spawnSession(config) {
         sessionConfig = config;
@@ -122,13 +123,18 @@ function createMockConductorFactory() {
         if (event === "dead") deadHandler = handler;
       },
       getSnapshot() {
-        return completed
+        const snapshot = completed
           ? [{ state: "completed", outPath: sessionConfig?.outPath || null }]
           : [{ state: "healthy", outPath: sessionConfig?.outPath || null }];
+        snapshot.topPids = topPids;
+        return snapshot;
       },
       shutdown() {
         completed = true;
         return Promise.resolve();
+      },
+      setTopPids(pids) {
+        topPids = pids;
       },
       complete(sessionId = sessionConfig?.id || "session", completionPayload) {
         completed = true;
@@ -594,6 +600,192 @@ describe("swarm-hypervisor", () => {
       ]);
     });
 
+    it("maybeCleanupWorktree calls cleanupShardProcesses before worktree remove", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const calls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "process-cleanup-order",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/process-cleanup-order/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async () => ({
+            ok: true,
+            headCommit: "def456",
+          }),
+          cleanupShardProcesses: async (opts) => {
+            calls.push({ type: "process", opts });
+            return { killed: 1, byCategory: { node: 1 } };
+          },
+          cleanupWorktree: async (opts) => {
+            calls.push({ type: "worktree", opts });
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].setTopPids([12345]);
+      conductors[0].complete();
+      await hv.integrationComplete();
+
+      assert.deepEqual(
+        calls.map((call) => call.type),
+        ["process", "worktree"],
+      );
+      assert.deepEqual(calls[0].opts, {
+        worktreePath: `${workdir}/.codex-swarm/wt-worker-a`,
+        sessionIds: [conductors[0].sessionConfig.id],
+        topPids: [12345],
+        runId: "process-cleanup-order",
+        shardName: "worker-a",
+      });
+    });
+
+    it("maybeCleanupWorktree skips remote shards", async () => {
+      const basePlan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const plan = {
+        ...basePlan,
+        shards: [
+          {
+            ...basePlan.shards[0],
+            host: "remote-host",
+            _remoteEnv: { claudePath: "claude" },
+          },
+        ],
+      };
+      const { createConductor, conductors } = createMockConductorFactory();
+      const cleanupCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "remote-cleanup-skip",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/remote-cleanup-skip/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async () => ({
+            ok: true,
+            headCommit: "def456",
+          }),
+          cleanupShardProcesses: async (opts) => {
+            cleanupCalls.push({ type: "process", opts });
+          },
+          cleanupWorktree: async (opts) => {
+            cleanupCalls.push({ type: "worktree", opts });
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].complete();
+      await hv.integrationComplete();
+
+      assert.deepEqual(cleanupCalls, []);
+    });
+
+    it("maybeCleanupWorktree continues on cleanupShardProcesses failure", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const cleanupCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "process-cleanup-failure",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/process-cleanup-failure/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async () => ({
+            ok: true,
+            headCommit: "def456",
+          }),
+          cleanupShardProcesses: async () => {
+            throw new Error("simulated process cleanup failure");
+          },
+          cleanupWorktree: async (opts) => {
+            cleanupCalls.push(opts);
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].complete();
+      await hv.integrationComplete();
+
+      assert.equal(cleanupCalls.length, 1);
+      await hv.shutdown("flush_process_cleanup_failure");
+      assert.equal(
+        readEventLog(hv.eventLogPath).some(
+          (entry) => entry.event === "process_cleanup_failed",
+        ),
+        true,
+      );
+    });
+
+    it("summary includes processCleanup metadata", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "process-cleanup-summary",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/process-cleanup-summary/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async () => ({
+            ok: true,
+            headCommit: "def456",
+          }),
+          cleanupShardProcesses: async () => ({
+            killed: 3,
+            byCategory: { node: 2, bash: 1 },
+          }),
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].complete();
+      const result = await hv.integrationComplete();
+
+      assert.deepEqual(result.processCleanup, {
+        totalKilled: 3,
+        byCategory: { node: 2, bash: 1 },
+      });
+    });
+
     it("exposes an awaitable integrationComplete promise", async () => {
       const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
       const { createConductor, conductors } = createMockConductorFactory();
@@ -928,6 +1120,64 @@ describe("swarm-hypervisor", () => {
           worktreePath: `${workdir}/.codex-swarm/wt-worker-a`,
           reason: "F1_crash",
         },
+      );
+
+      hv = null;
+    });
+
+    it("shutdown cleanups all launched local workers", async () => {
+      const plan = planSwarm(null, { content: PARALLEL_NO_FILES_PRD });
+      const { createConductor } = createMockConductorFactory();
+      const processCleanupCalls = [];
+      const worktreeCleanupCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "shutdown-all-local",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          cleanupShardProcesses: async (opts) => {
+            processCleanupCalls.push(opts);
+            return { killed: 0, byCategory: {} };
+          },
+          cleanupWorktree: async (opts) => {
+            worktreeCleanupCalls.push(opts);
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      await hv.shutdown("test_shutdown_cleanup_all");
+
+      assert.deepEqual(
+        processCleanupCalls.map((call) => call.shardName).sort(),
+        ["worker-a", "worker-b"],
+      );
+      assert.deepEqual(
+        worktreeCleanupCalls
+          .map((call) => ({
+            worktreePath: call.worktreePath,
+            branchName: call.branchName,
+            force: call.force,
+          }))
+          .sort((a, b) => a.worktreePath.localeCompare(b.worktreePath)),
+        [
+          {
+            worktreePath: `${workdir}/.codex-swarm/wt-worker-a`,
+            branchName: "swarm/shutdown-all-local/worker-a",
+            force: true,
+          },
+          {
+            worktreePath: `${workdir}/.codex-swarm/wt-worker-b`,
+            branchName: "swarm/shutdown-all-local/worker-b",
+            force: true,
+          },
+        ],
       );
 
       hv = null;
