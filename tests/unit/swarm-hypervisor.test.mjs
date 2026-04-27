@@ -424,6 +424,69 @@ describe("swarm-hypervisor", () => {
       await assert.rejects(() => hv.launch(plan), /Cannot launch/);
     });
 
+    it("uses PID-file Hub URL resolution for keepalive status probes", async () => {
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const originalSetInterval = globalThis.setInterval;
+      const originalClearInterval = globalThis.clearInterval;
+      const originalFetch = globalThis.fetch;
+      const timer = {};
+      let keepaliveTick = null;
+      let keepaliveDelay = null;
+      const fetchCalls = [];
+      const { createConductor } = createMockConductorFactory();
+
+      globalThis.setInterval = (fn, delay) => {
+        keepaliveTick = fn;
+        keepaliveDelay = delay;
+        return timer;
+      };
+      globalThis.clearInterval = (id) => {
+        assert.equal(id, timer);
+      };
+      globalThis.fetch = async (url, opts = {}) => {
+        fetchCalls.push({ url: String(url), signal: opts.signal });
+        return { ok: true };
+      };
+
+      try {
+        hv = createSwarmHypervisor({
+          workdir,
+          logsDir,
+          _deps: {
+            createConductor,
+            ensureHubAlive: null,
+            getHubInfo: async () => ({
+              host: "127.0.0.1",
+              port: 28777,
+              url: "http://127.0.0.1:28777/mcp",
+            }),
+            ensureWorktree: async ({ slug, runId }) => ({
+              worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+              branchName: `swarm/${runId}/${slug}`,
+            }),
+          },
+        });
+
+        await hv.launch(plan);
+        assert.equal(keepaliveDelay, 5 * 60 * 1000);
+        assert.equal(typeof keepaliveTick, "function");
+
+        await keepaliveTick();
+
+        assert.equal(fetchCalls.length, 1);
+        assert.equal(fetchCalls[0].url, "http://127.0.0.1:28777/status");
+        assert.ok(fetchCalls[0].signal instanceof AbortSignal);
+      } finally {
+        if (hv) {
+          await hv.shutdown("test_keepalive_cleanup");
+          hv = null;
+        }
+        globalThis.setInterval = originalSetInterval;
+        globalThis.clearInterval = originalClearInterval;
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it("launches redundant workers for critical shards", async () => {
       const plan = planSwarm(null, { content: CRITICAL_PRD });
       ({ hv } = createTestHypervisor(workdir, logsDir));

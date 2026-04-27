@@ -35,10 +35,10 @@ import {
 } from "./worktree-lifecycle.mjs";
 
 let ensureHubAliveFn = null;
+let getHubInfoFn = null;
 try {
-  ({ ensureHubAlive: ensureHubAliveFn } = await import(
-    "./cli/services/hub-client.mjs"
-  ));
+  ({ ensureHubAlive: ensureHubAliveFn, getHubInfo: getHubInfoFn } =
+    await import("./cli/services/hub-client.mjs"));
 } catch {
   // hub-client 미설치 환경 — Hub 수동 관리 필요
 }
@@ -120,6 +120,35 @@ function createSharedRegistry(factory) {
   }
 }
 
+function hasOwnDep(deps, key) {
+  return Object.hasOwn(deps, key);
+}
+
+function formatHubHostForUrl(host) {
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+function resolveHubStatusUrl(hub) {
+  if (!hub) return null;
+
+  if (typeof hub.url === "string" && hub.url.trim()) {
+    try {
+      const url = new URL(hub.url);
+      url.pathname = "/status";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  const host = typeof hub.host === "string" ? hub.host.trim() : "";
+  const port = Number(hub.port);
+  if (!host || !Number.isFinite(port) || port <= 0) return null;
+  return `http://${formatHubHostForUrl(host)}:${port}/status`;
+}
+
 /**
  * Create a swarm hypervisor.
  * @param {object} opts
@@ -166,6 +195,12 @@ export function createSwarmHypervisor(opts) {
     _deps.cleanupWorktree || cleanupWorktree || pruneWorktree;
   const preserveWorktreePatchImpl =
     _deps.preserveWorktreePatch || preserveWorktreePatch;
+  const ensureHubAliveImpl = hasOwnDep(_deps, "ensureHubAlive")
+    ? _deps.ensureHubAlive
+    : ensureHubAliveFn;
+  const getHubInfoImpl = hasOwnDep(_deps, "getHubInfo")
+    ? _deps.getHubInfo
+    : getHubInfoFn;
   const emitter = new EventEmitter();
   const eventLog = createEventLog(join(logsDir, "swarm-events.jsonl"));
   const { registry: sharedRegistry, fallbackReason: meshRegistryFallback } =
@@ -1301,19 +1336,33 @@ export function createSwarmHypervisor(opts) {
     hubKeepaliveTimer = setInterval(
       async () => {
         try {
-          const resp = await fetch("http://127.0.0.1:27888/status");
-          if (!resp.ok && ensureHubAliveFn) {
+          const hub = getHubInfoImpl ? await getHubInfoImpl() : null;
+          const statusUrl = resolveHubStatusUrl(hub);
+          if (!statusUrl) {
+            if (ensureHubAliveImpl) {
+              eventLog.append("hub_keepalive_restart", {
+                reason: "hub_url_unresolved",
+              });
+              await ensureHubAliveImpl();
+            }
+            return;
+          }
+
+          const resp = await fetch(statusUrl, {
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!resp.ok && ensureHubAliveImpl) {
             eventLog.append("hub_keepalive_restart", {});
-            await ensureHubAliveFn();
+            await ensureHubAliveImpl();
           }
         } catch {
           // Hub 다운 — 재시작 시도
-          if (ensureHubAliveFn) {
+          if (ensureHubAliveImpl) {
             eventLog.append("hub_keepalive_restart", {
               reason: "fetch_failed",
             });
             try {
-              await ensureHubAliveFn();
+              await ensureHubAliveImpl();
             } catch {
               eventLog.append("hub_restart_failed", {});
             }
@@ -1340,8 +1389,8 @@ export function createSwarmHypervisor(opts) {
     markIntegrationPromisePending();
 
     // Hub alive 확인 — 죽어있으면 재시작
-    if (ensureHubAliveFn) {
-      ensureHubAliveFn()
+    if (ensureHubAliveImpl) {
+      ensureHubAliveImpl()
         .then((hub) => {
           eventLog.append("hub_ensured", { port: hub?.port });
         })
