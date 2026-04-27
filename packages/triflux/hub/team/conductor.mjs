@@ -33,6 +33,11 @@ import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
 import { extractCompletionPayload } from "./extract-completion-payload.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
+import {
+  killProcessTree,
+  killProcessTreeSnapshot,
+  findProcessTree,
+} from "../lib/process-utils.mjs";
 import { createSentinelCapture } from "./sentinel-capture.mjs";
 import {
   buildSynapseTaskSummary,
@@ -152,6 +157,12 @@ function swapAuthFile(lease, agent, sessionId, eventLog) {
  */
 export function createConductor(opts = {}) {
   const spawnFn = opts.deps?.spawn || spawn;
+  const processUtils = {
+    killProcessTree: opts.deps?.killProcessTree || killProcessTree,
+    killProcessTreeSnapshot:
+      opts.deps?.killProcessTreeSnapshot || killProcessTreeSnapshot,
+    findProcessTree: opts.deps?.findProcessTree || findProcessTree,
+  };
   const {
     logsDir,
     maxRestarts = DEFAULT_MAX_RESTARTS,
@@ -324,6 +335,16 @@ export function createConductor(opts = {}) {
     const pid = child.pid;
     if (!pid) return;
 
+    try {
+      if (session.descendantSnapshot?.length > 0) {
+        processUtils.killProcessTreeSnapshot(session.descendantSnapshot);
+      }
+    } catch {
+      /* best-effort cleanup */
+    }
+
+    if (!session.alive) return;
+
     // SIGTERM 먼저
     try {
       child.kill("SIGTERM");
@@ -332,16 +353,24 @@ export function createConductor(opts = {}) {
     }
 
     // Grace period 대기
-    await new Promise((resolve) => {
+    const exited = await new Promise((resolve) => {
       const timer = setTimeout(() => {
-        forceKill(pid);
-        resolve();
+        resolve(false);
       }, graceMs);
       child.once("exit", () => {
         clearTimeout(timer);
-        resolve();
+        resolve(true);
       });
     });
+
+    if (!exited) {
+      try {
+        processUtils.killProcessTree(pid);
+      } catch {
+        forceKill(pid);
+      }
+      session.alive = false;
+    }
   }
 
   /**
@@ -430,7 +459,7 @@ export function createConductor(opts = {}) {
   /**
    * 실패 처리 — restart 또는 DEAD.
    */
-  function handleFailure(session, reason) {
+  async function handleFailure(session, reason) {
     if (TERMINAL_STATES.has(session.state)) return;
 
     transition(session, STATES.FAILED, reason);
@@ -452,6 +481,7 @@ export function createConductor(opts = {}) {
         }
       }, backoffMs);
     } else {
+      await cleanupChild(session);
       transition(session, STATES.DEAD, `maxRestarts(${maxRestarts})_exceeded`);
       emitter.emit("dead", { sessionId: session.id, reason });
 
@@ -569,6 +599,7 @@ export function createConductor(opts = {}) {
     session.child = child;
     session.outPath = outPath;
     session.errPath = errPath;
+    session.descendantSnapshot = [];
 
     // 로컬 세션: 프롬프트는 CLI args로 전달되므로 stdin 즉시 닫기
     // (codex가 stdin pipe 감지 시 "Reading additional input..." 대기 방지)
@@ -583,6 +614,19 @@ export function createConductor(opts = {}) {
       legacyCommand: launcher.command,
       restart: session.restarts,
     });
+
+    if (session._descendantSnapshotTimer) {
+      clearTimeout(session._descendantSnapshotTimer);
+    }
+    session._descendantSnapshotTimer = setTimeout(() => {
+      session._descendantSnapshotTimer = null;
+      if (session.child !== child) return;
+      try {
+        session.descendantSnapshot = processUtils.findProcessTree(child.pid);
+      } catch {
+        /* best-effort snapshot */
+      }
+    }, 200);
 
     // stdout+stderr 통합 추적 (F3 해결: stderr만 출력되는 경우도 advancing 판정)
     const trackOutput = (buf) => {
@@ -609,6 +653,10 @@ export function createConductor(opts = {}) {
 
     child.on("exit", (code, signal) => {
       session.alive = false;
+      if (session._descendantSnapshotTimer) {
+        clearTimeout(session._descendantSnapshotTimer);
+        session._descendantSnapshotTimer = null;
+      }
       try {
         outWs.end();
       } catch {
@@ -671,6 +719,10 @@ export function createConductor(opts = {}) {
 
     child.on("error", (err) => {
       session.alive = false;
+      if (session._descendantSnapshotTimer) {
+        clearTimeout(session._descendantSnapshotTimer);
+        session._descendantSnapshotTimer = null;
+      }
       eventLog.append("child_error", {
         session: session.id,
         error: err.message,
@@ -999,6 +1051,7 @@ export function createConductor(opts = {}) {
       outPath: null,
       errPath: null,
       createdAt: Date.now(),
+      descendantSnapshot: [],
     };
 
     sessions.set(resolvedConfig.id, session);
@@ -1087,12 +1140,21 @@ export function createConductor(opts = {}) {
 
     eventLog.append("shutdown", { reason, sessions: sessions.size });
 
+    const cleanedSessionIds = new Set();
     const cleanups = [...sessions.values()]
-      .filter((s) => !TERMINAL_STATES.has(s.state))
+      .filter((s) => {
+        if (cleanedSessionIds.has(s.id)) return false;
+        cleanedSessionIds.add(s.id);
+        return true;
+      })
       .map(async (s) => {
         if (s._respawnTimer) {
           clearTimeout(s._respawnTimer);
           s._respawnTimer = null;
+        }
+        if (s._descendantSnapshotTimer) {
+          clearTimeout(s._descendantSnapshotTimer);
+          s._descendantSnapshotTimer = null;
         }
         s.probe?.stop();
         await cleanupChild(s);
