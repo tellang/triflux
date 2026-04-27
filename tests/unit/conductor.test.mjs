@@ -522,9 +522,7 @@ describe("conductor: shutdown", () => {
     conductor.spawnSession(minConfig({ id: "terminal-shutdown-cleanup" }));
 
     await waitFor(() => procUtils.calls.findProcessTree.length === 1);
-    await waitFor(
-      () => conductor.getSnapshot()[0]?.state === STATES.COMPLETED,
-    );
+    await waitFor(() => conductor.getSnapshot()[0]?.state === STATES.COMPLETED);
     await conductor.shutdown("terminal_cleanup_test");
 
     assert.deepEqual(procUtils.calls.killProcessTreeSnapshot, [
