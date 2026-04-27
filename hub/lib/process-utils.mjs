@@ -24,6 +24,14 @@ const FSMONITOR_DAEMON_MARKER = "fsmonitor--daemon run --detach";
 const FSMONITOR_DAEMON_PATTERN =
   /(^|\s)fsmonitor--daemon\s+run\s+--detach(\s|$)/;
 const DEFAULT_FSMONITOR_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+const LEGACY_ORPHAN_KILLABLE_NAMES = new Set([
+  "node.exe",
+  "bash.exe",
+  "cmd.exe",
+  "uvx.exe",
+  "codex.exe",
+  "claude.exe",
+]);
 
 /**
  * 주어진 PID의 프로세스가 살아있는지 확인한다.
@@ -307,12 +315,7 @@ function runPowerShellJson(spawnSyncFn, command) {
 function getWindowsProcessSnapshot(spawnSyncFn = spawnSync) {
   const records = runPowerShellJson(
     spawnSyncFn,
-    [
-      "$ErrorActionPreference='SilentlyContinue'",
-      "Get-CimInstance Win32_Process |",
-      "Select-Object ProcessId,ParentProcessId,Name,CommandLine,CreationDate |",
-      "ConvertTo-Json -Compress",
-    ].join("; "),
+    "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,CreationDate | ConvertTo-Json -Depth 3 -Compress",
   );
   return records.map(processRecordFromCim).filter(Boolean);
 }
@@ -458,6 +461,14 @@ function hasExactFsmonitorDaemon(commandLine) {
   );
 }
 
+function hasGbrainServeCommand(commandLine) {
+  return /(^|\s)gbrain\s+serve(\s|$)/i.test(commandLine.trim());
+}
+
+function hasFsmonitorDaemonCommand(commandLine) {
+  return FSMONITOR_DAEMON_PATTERN.test(commandLine);
+}
+
 function categoryForShardProcess(proc, context) {
   const name = normalizeName(proc.name);
   const commandLine = normalizeCommandLine(proc.commandLine);
@@ -486,11 +497,18 @@ function categoryForShardProcess(proc, context) {
   }
 
   if (name === "bun.exe" || name === "bun") {
-    if (hasExactGbrainServe(proc.commandLine)) return "bun";
+    if ((hasWorktree || hasShardMarker) && hasGbrainServeCommand(commandLine)) {
+      return "bun";
+    }
   }
 
   if (name === "git.exe" || name === "git") {
-    if (hasExactFsmonitorDaemon(proc.commandLine)) return "git";
+    if (
+      (hasWorktree || hasShardMarker) &&
+      hasFsmonitorDaemonCommand(commandLine)
+    ) {
+      return "git";
+    }
   }
 
   return null;
@@ -771,9 +789,13 @@ export function cleanupOrphanRuntimeProcesses({
     protectedPids,
     isWindows,
     spawnSyncFn,
+    includeAncestorScan: legacy,
   });
   const processes = getProcessSnapshot({ isWindows, spawnSyncFn });
   let killed = 0;
+  const procMap = legacy
+    ? new Map(processes.map((proc) => [proc.pid, proc]))
+    : null;
 
   for (const proc of processes) {
     if (protectedSet.has(proc.pid)) continue;
@@ -783,9 +805,8 @@ export function cleanupOrphanRuntimeProcesses({
 
     if (legacy) {
       shouldKill =
-        name === "node.exe" &&
-        commandLine.includes(".codex-swarm\\wt-") &&
-        /hub\\server\.mjs/i.test(commandLine);
+        LEGACY_ORPHAN_KILLABLE_NAMES.has(name) &&
+        !hasLiveAncestorChain(proc.pid, procMap, protectedSet);
     } else if (name === "bun.exe") {
       shouldKill = hasExactGbrainServe(proc.commandLine);
     } else if (includeConhost && name === "conhost.exe") {

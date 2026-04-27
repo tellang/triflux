@@ -32,6 +32,14 @@ function mockSpawnSync({ processRecords = [], failTaskkill = false } = {}) {
       };
     }
     if (command === "powershell") {
+      const psCommand = args.at(-1) || "";
+      if (psCommand.includes("|;")) {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "An empty pipe element is not allowed.",
+        };
+      }
       return {
         status: 0,
         stdout: psJson(processRecords),
@@ -80,6 +88,19 @@ const SWARM_PROCS = [
     ParentProcessId: 1,
     Name: "git.exe",
     CommandLine: "git fsmonitor--daemon run --detach",
+  },
+  {
+    ProcessId: 316,
+    ParentProcessId: 1,
+    Name: "bun.exe",
+    CommandLine: "bun gbrain serve C:\\repo\\.codex-swarm\\wt-alpha",
+  },
+  {
+    ProcessId: 317,
+    ParentProcessId: 1,
+    Name: "git.exe",
+    CommandLine:
+      "git -C C:\\repo\\.codex-swarm\\wt-alpha fsmonitor--daemon run --detach",
   },
 ];
 
@@ -304,7 +325,7 @@ describe("process tree cleanup helpers", () => {
 
     assert.deepEqual(
       result.map((p) => p.pid),
-      [310, 311, 314],
+      [310, 311, 314, 316, 317],
     );
   });
 
@@ -330,6 +351,8 @@ describe("process tree cleanup helpers", () => {
     assert.equal(result.byCategory.bun, 1);
     assert.equal(result.byCategory.git, 1);
     assert.ok(killed.every(([pid]) => pid !== 312));
+    assert.ok(killed.every(([pid]) => pid !== 314));
+    assert.ok(killed.every(([pid]) => pid !== 315));
   });
 
   it("cleanupShardProcesses skips protected PIDs", () => {
@@ -370,6 +393,74 @@ describe("process tree cleanup helpers", () => {
     assert.deepEqual(killed, []);
   });
 
+  it("legacy cleanupOrphanNodeProcesses uses ancestor-chain orphan scope", () => {
+    const killed = [];
+    const result = cleanupOrphanNodeProcesses({
+      isWindows: true,
+      spawnSyncFn: mockSpawnSync({
+        processRecords: [
+          {
+            ProcessId: 410,
+            ParentProcessId: 999991,
+            Name: "node.exe",
+            CommandLine: "node C:\\tmp\\mcp-server.js",
+          },
+          {
+            ProcessId: 411,
+            ParentProcessId: 999992,
+            Name: "bash.exe",
+            CommandLine: "bash -lc worker",
+          },
+          {
+            ProcessId: 412,
+            ParentProcessId: 999993,
+            Name: "cmd.exe",
+            CommandLine: "cmd.exe /c worker",
+          },
+          {
+            ProcessId: 413,
+            ParentProcessId: 999994,
+            Name: "uvx.exe",
+            CommandLine: "uvx mcp-server",
+          },
+          {
+            ProcessId: 414,
+            ParentProcessId: 999995,
+            Name: "codex.exe",
+            CommandLine: "codex exec",
+          },
+          {
+            ProcessId: 415,
+            ParentProcessId: 999996,
+            Name: "claude.exe",
+            CommandLine: "claude --mcp",
+          },
+          {
+            ProcessId: 416,
+            ParentProcessId: 417,
+            Name: "node.exe",
+            CommandLine: "node live-child.js",
+          },
+          {
+            ProcessId: 417,
+            ParentProcessId: process.pid,
+            Name: "pwsh.exe",
+            CommandLine: "pwsh",
+          },
+        ],
+      }),
+      killFn: (pid, signal) => killed.push([pid, signal]),
+      protectedPids: new Set(),
+    });
+
+    assert.equal(result.killed, 6);
+    assert.deepEqual(
+      killed.map(([pid]) => pid),
+      [410, 411, 412, 413, 414, 415],
+    );
+    assert.ok(killed.every(([, signal]) => signal === "SIGKILL"));
+  });
+
   it("cleanupOrphanRuntimeProcesses includes bun.exe", () => {
     const killed = [];
     const result = cleanupOrphanRuntimeProcesses({
@@ -392,7 +483,11 @@ describe("process tree cleanup helpers", () => {
       protectedPids: new Set(),
     });
 
-    assert.equal(result.killed, 1);
-    assert.deepEqual(killed, [[310, "SIGKILL"]]);
+    assert.equal(result.killed, 3);
+    assert.deepEqual(killed, [
+      [310, "SIGKILL"],
+      [311, "SIGKILL"],
+      [312, "SIGKILL"],
+    ]);
   });
 });
