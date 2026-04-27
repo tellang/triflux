@@ -962,6 +962,38 @@ export async function startHub({
   const tools = createTools(store, router, hitl, pipe);
   const transports = new Map();
 
+  async function closeMcpTransportSession(sid, session, reason) {
+    if (!sid) return;
+    if (!session) {
+      transports.delete(sid);
+      return;
+    }
+    if (session.closing) {
+      transports.delete(sid);
+      return;
+    }
+
+    session.closing = true;
+    transports.delete(sid);
+
+    try {
+      await session.mcp.close();
+    } catch (error) {
+      hubLog.debug(
+        { sid, reason, err: String(error?.message || error) },
+        "hub.mcp_session_close_mcp_failed",
+      );
+    }
+    try {
+      await session.transport.close();
+    } catch (error) {
+      hubLog.debug(
+        { sid, reason, err: String(error?.message || error) },
+        "hub.mcp_session_close_transport_failed",
+      );
+    }
+  }
+
   function createMcpForSession() {
     const mcp = new Server(
       { name: "tfx-hub", version: "1.0.0" },
@@ -1705,19 +1737,17 @@ export async function startHub({
               sessionIdGenerator: () => randomUUID(),
               onsessioninitialized: (sid) => {
                 transport._lastActivity = Date.now();
-                transports.set(sid, { transport, mcp });
+                transports.set(sid, { transport, mcp, closing: false });
               },
             });
             transport.onclose = () => {
-              if (transport.sessionId) {
-                const session = transports.get(transport.sessionId);
-                if (session) {
-                  try {
-                    session.mcp.close();
-                  } catch {}
-                }
-                transports.delete(transport.sessionId);
-              }
+              const sid = transport.sessionId;
+              if (sid)
+                void closeMcpTransportSession(
+                  sid,
+                  transports.get(sid),
+                  "transport.onclose",
+                );
             };
             const mcp = createMcpForSession();
             await mcp.connect(transport);
@@ -1808,13 +1838,7 @@ export async function startHub({
     for (const [sid, session] of transports) {
       if (now - (session.transport._lastActivity || 0) <= SESSION_TTL_MS)
         continue;
-      try {
-        session.mcp.close();
-      } catch {}
-      try {
-        session.transport.close();
-      } catch {}
-      transports.delete(sid);
+      void closeMcpTransportSession(sid, session, "session_ttl");
     }
   }, 60000);
   sessionTimer.unref();
@@ -2058,13 +2082,8 @@ export async function startHub({
               if (idleTimer) {
                 clearInterval(idleTimer);
               }
-              for (const [, session] of transports) {
-                try {
-                  await session.mcp.close();
-                } catch {}
-                try {
-                  await session.transport.close();
-                } catch {}
+              for (const [sid, session] of Array.from(transports)) {
+                await closeMcpTransportSession(sid, session, "hub.stop");
               }
               transports.clear();
               await pipe.stop();

@@ -4,6 +4,16 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.17.3] - 2026-04-27
+
+### Fixed
+
+- Prevented tfx-hub from crashing with `RangeError: Maximum call stack size exceeded` when MCP Streamable HTTP sessions close. Transport `onclose` now goes through a guarded close path instead of recursively calling `mcp.close()` through the SDK close chain.
+
+### Tests
+
+- Added regression coverage for MCP session close lifecycle guards.
+
 ## [10.17.2] - 2026-04-27
 
 ### Fixed
