@@ -455,12 +455,6 @@ function hasExactGbrainServe(commandLine) {
   );
 }
 
-function hasExactFsmonitorDaemon(commandLine) {
-  return /^("?[^"\s]*git(?:\.exe)?"?\s+)?fsmonitor--daemon\s+run\s+--detach$/i.test(
-    commandLine.trim(),
-  );
-}
-
 function hasGbrainServeCommand(commandLine) {
   return /(^|\s)gbrain\s+serve(\s|$)/i.test(commandLine.trim());
 }
