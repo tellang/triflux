@@ -233,6 +233,29 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
   return false;
 }
 
+function hasLiveCliDescendant(pid, procMap) {
+  const children = new Map();
+  for (const proc of procMap.values()) {
+    if (!Number.isFinite(proc.ppid) || proc.ppid <= 0) continue;
+    const list = children.get(proc.ppid) || [];
+    list.push(proc);
+    children.set(proc.ppid, list);
+  }
+
+  const visited = new Set();
+  const stack = [...(children.get(pid) || [])];
+  while (stack.length > 0) {
+    const proc = stack.pop();
+    if (!proc || visited.has(proc.pid)) continue;
+    visited.add(proc.pid);
+    if (LIVE_CLI_SESSION_ROOT_NAMES.has(normalizeName(proc.name))) {
+      return true;
+    }
+    stack.push(...(children.get(proc.pid) || []));
+  }
+  return false;
+}
+
 /**
  * Legacy wrapper for scoped orphan node runtime cleanup.
  * @param {Parameters<typeof cleanupOrphanRuntimeProcesses>[0]} opts
@@ -808,7 +831,8 @@ export function cleanupOrphanRuntimeProcesses({
     if (legacy) {
       if (
         LEGACY_ORPHAN_KILLABLE_NAMES.has(name) &&
-        !hasLiveAncestorChain(proc.pid, procMap, protectedSet)
+        !hasLiveAncestorChain(proc.pid, procMap, protectedSet) &&
+        !hasLiveCliDescendant(proc.pid, procMap)
       ) {
         shouldKill = true;
         killReason = "legacy_orphan_ancestor_chain_dead";
@@ -816,7 +840,8 @@ export function cleanupOrphanRuntimeProcesses({
     } else if (name === "bun.exe") {
       if (
         hasExactGbrainServe(proc.commandLine) &&
-        !hasLiveAncestorChain(proc.pid, procMap, protectedSet)
+        !hasLiveAncestorChain(proc.pid, procMap, protectedSet) &&
+        !hasLiveCliDescendant(proc.pid, procMap)
       ) {
         shouldKill = true;
         killReason = "bun_gbrain_serve_orphan";

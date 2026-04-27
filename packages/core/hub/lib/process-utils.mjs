@@ -224,6 +224,31 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
   return false;
 }
 
+function hasLiveCliDescendant(pid, procMap) {
+  const children = new Map();
+  for (const [childPid, proc] of procMap) {
+    if (!Number.isFinite(proc.ppid) || proc.ppid <= 0) continue;
+    const list = children.get(proc.ppid) || [];
+    list.push({ pid: childPid, ...proc });
+    children.set(proc.ppid, list);
+  }
+
+  const visited = new Set();
+  const stack = [...(children.get(pid) || [])];
+  while (stack.length > 0) {
+    const proc = stack.pop();
+    if (!proc || visited.has(proc.pid)) continue;
+    visited.add(proc.pid);
+    if (
+      LIVE_CLI_SESSION_ROOT_NAMES.has(String(proc.name || "").toLowerCase())
+    ) {
+      return true;
+    }
+    stack.push(...(children.get(proc.pid) || []));
+  }
+  return false;
+}
+
 // kill 대상 프로세스 이름 (Windows)
 // codex/claude는 활성 세션 루트로만 취급한다. 전역 orphan sweep이
 // 사용자 Claude Code/Codex 세션을 직접 종료하면 안 된다.
@@ -322,6 +347,7 @@ export function cleanupOrphanNodeProcesses() {
     if (protectedPids.has(pid)) continue;
     if (!KILLABLE_NAMES.has(info.name?.toLowerCase())) continue;
     if (hasLiveAncestorChain(pid, procMap, protectedPids)) continue;
+    if (hasLiveCliDescendant(pid, procMap)) continue;
     orphanPids.push(pid);
   }
 
@@ -419,6 +445,7 @@ function cleanupOrphansUnix() {
     if (protectedPids.has(pid)) continue;
     if (!killableUnix.test(info.name)) continue;
     if (hasLiveAncestorChain(pid, procMap, protectedPids)) continue;
+    if (hasLiveCliDescendant(pid, procMap)) continue;
     orphanPids.push(pid);
   }
 

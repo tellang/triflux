@@ -1031,6 +1031,45 @@ describe("#62: session-stale-cleanup (runtime)", () => {
       false,
     );
   });
+
+  it("live Claude/Codex child를 가진 wrapper PID는 stale PID cleanup이 죽이지 않는다", async () => {
+    const { shouldKillTrackedPid } = await import(
+      `${pathToFileURL(CLEANUP_PATH).href}?protected-descendant-${Date.now()}`
+    );
+    const pidFileMtimeMs = Date.parse("2026-04-27T10:00:00.000Z");
+    const procMap = new Map([
+      [
+        200,
+        {
+          pid: 200,
+          ppid: 999999,
+          name: "node.exe",
+          creationMs: Date.parse("2026-04-27T09:00:00.000Z"),
+          commandLine: "node codex.js resume --last",
+        },
+      ],
+      [
+        201,
+        {
+          pid: 201,
+          ppid: 200,
+          name: "codex.exe",
+          creationMs: Date.parse("2026-04-27T09:00:01.000Z"),
+          commandLine: "codex resume --last",
+        },
+      ],
+    ]);
+
+    assert.equal(
+      shouldKillTrackedPid({
+        pid: 200,
+        pidFileMtimeMs,
+        procMap,
+        isWindows: true,
+      }),
+      false,
+    );
+  });
 });
 
 describe("parseRouteCommand 소스 패리티", () => {

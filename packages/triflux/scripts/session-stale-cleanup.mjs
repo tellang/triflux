@@ -90,6 +90,27 @@ function hasProtectedAncestor(pid, procMap) {
   return false;
 }
 
+function hasProtectedDescendant(pid, procMap) {
+  const children = new Map();
+  for (const proc of procMap.values()) {
+    if (!Number.isFinite(proc.ppid) || proc.ppid <= 0) continue;
+    const list = children.get(proc.ppid) || [];
+    list.push(proc);
+    children.set(proc.ppid, list);
+  }
+
+  const seen = new Set();
+  const stack = [...(children.get(Number(pid)) || [])];
+  while (stack.length > 0) {
+    const proc = stack.pop();
+    if (!proc || seen.has(proc.pid)) continue;
+    seen.add(proc.pid);
+    if (PROTECTED_ANCESTOR_NAMES.has(proc.name)) return true;
+    stack.push(...(children.get(proc.pid) || []));
+  }
+  return false;
+}
+
 export function shouldKillTrackedPid({
   pid,
   pidFileMtimeMs,
@@ -110,6 +131,7 @@ export function shouldKillTrackedPid({
   }
 
   if (hasProtectedAncestor(pid, procMap)) return false;
+  if (hasProtectedDescendant(pid, procMap)) return false;
 
   return true;
 }

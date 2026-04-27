@@ -4,6 +4,16 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.17.2] - 2026-04-27
+
+### Fixed
+
+- Protected live Claude Code/Codex CLI wrapper processes from orphan cleanup. The hub and SessionStart stale PID cleanup now skip a `node.exe`/`cmd.exe` wrapper when a live `claude.exe` or `codex.exe` exists anywhere in its descendant tree, preventing session disconnects when the wrapper parent looks stale.
+
+### Tests
+
+- Added regression coverage for node wrappers that own live Claude/Codex child processes.
+
 ## [10.17.1] - 2026-04-27
 
 ### Fixed

@@ -507,6 +507,48 @@ describe("process tree cleanup helpers", () => {
     assert.deepEqual(killed, []);
   });
 
+  it("legacy cleanupOrphanNodeProcesses never kills node wrappers with live Claude/Codex children", () => {
+    const killed = [];
+    const result = cleanupOrphanNodeProcesses({
+      isWindows: true,
+      spawnSyncFn: mockSpawnSync({
+        processRecords: [
+          {
+            ProcessId: 520,
+            ParentProcessId: 999991,
+            Name: "node.exe",
+            CommandLine:
+              "node C:\\Users\\tellang\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js resume --last",
+          },
+          {
+            ProcessId: 521,
+            ParentProcessId: 520,
+            Name: "codex.exe",
+            CommandLine: "codex resume --last",
+          },
+          {
+            ProcessId: 522,
+            ParentProcessId: 999992,
+            Name: "node.exe",
+            CommandLine:
+              "node C:\\Users\\tellang\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js --resume",
+          },
+          {
+            ProcessId: 523,
+            ParentProcessId: 522,
+            Name: "claude.exe",
+            CommandLine: "claude --resume",
+          },
+        ],
+      }),
+      killFn: (pid, signal) => killed.push([pid, signal]),
+      protectedPids: new Set(),
+    });
+
+    assert.equal(result.killed, 0);
+    assert.deepEqual(killed, []);
+  });
+
   it("cleanupOrphanRuntimeProcesses includes bun.exe", () => {
     const killed = [];
     const result = cleanupOrphanRuntimeProcesses({
