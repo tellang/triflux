@@ -27,6 +27,7 @@
       "~/.codex/config.toml",
       "~/.claude/settings.json",
       "~/.claude/settings.local.json",
+      ".claude/mcp.json",
       ".mcp.json"
     ]
   }

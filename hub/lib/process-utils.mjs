@@ -30,7 +30,11 @@ const LEGACY_ORPHAN_KILLABLE_NAMES = new Set([
   "cmd.exe",
   "uvx.exe",
 ]);
-const LIVE_CLI_SESSION_ROOT_NAMES = new Set(["codex.exe", "claude.exe"]);
+const LIVE_CLI_SESSION_ROOT_NAMES = new Set([
+  "codex.exe",
+  "claude.exe",
+  "gemini.exe",
+]);
 
 /**
  * 주어진 PID의 프로세스가 살아있는지 확인한다.
@@ -179,7 +183,7 @@ function ensureHelperScripts() {
       SCAN_SCRIPT_PATH,
       [
         "$ErrorActionPreference = 'SilentlyContinue'",
-        "Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='bash.exe' OR Name='cmd.exe' OR Name='codex.exe' OR Name='claude.exe' OR Name='pwsh.exe' OR Name='uvx.exe'\" | ForEach-Object {",
+        "Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='bash.exe' OR Name='cmd.exe' OR Name='codex.exe' OR Name='claude.exe' OR Name='gemini.exe' OR Name='pwsh.exe' OR Name='uvx.exe'\" | ForEach-Object {",
         '    Write-Output "$($_.ProcessId),$($_.ParentProcessId),$($_.Name)"',
         "}",
       ].join("\n"),
@@ -1014,7 +1018,7 @@ function cleanupOrphansUnix() {
       if (
         Number.isFinite(pid) &&
         pid > 0 &&
-        /^(node|bash|sh|python|codex|claude|uvx)/.test(name)
+        /^(node|bash|sh|python|codex|claude|gemini|uvx)/.test(name)
       ) {
         procMap.set(pid, { ppid, name });
       }
@@ -1022,7 +1026,7 @@ function cleanupOrphansUnix() {
   } catch {}
 
   // kill 대상: node, python, codex, claude, uvx — bash/sh는 사용자 인터랙티브 쉘 가능성
-  const killableUnix = /^(node|python|codex|claude|uvx)/;
+  const killableUnix = /^(node|python|codex|claude|gemini|uvx)/;
 
   // 고아 판정 + SIGKILL 에스컬레이션
   const orphanPids = [];
@@ -1030,6 +1034,7 @@ function cleanupOrphansUnix() {
     if (protectedPids.has(pid)) continue;
     if (!killableUnix.test(info.name)) continue;
     if (hasLiveAncestorChain(pid, procMap, protectedPids)) continue;
+    if (hasLiveCliDescendant(pid, procMap)) continue;
     orphanPids.push(pid);
   }
 

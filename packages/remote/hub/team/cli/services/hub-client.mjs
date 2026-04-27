@@ -66,15 +66,15 @@ export async function getHubInfo() {
       if (!Number.isFinite(pid) || pid <= 0) throw new Error("invalid pid");
       process.kill(pid, 0);
       const host = normalizeLoopbackHost(raw?.host);
-      const port = Number(raw?.port) || 27888;
+      const port = Number(raw?.port) || probePort;
       const status = await probeHubStatus(host, port, 1200);
+      if (!status) throw new Error("pid file process is not a healthy hub");
       return {
         ...raw,
         pid,
         host,
         port,
         url: `${buildHubBaseUrl(host, port)}/mcp`,
-        ...(status ? {} : { degraded: true }),
       };
     } catch {
       try {

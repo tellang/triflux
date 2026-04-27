@@ -137,8 +137,12 @@ function walkUpForMcpJson(startDir, maxDepth = 5) {
   const found = [];
   let dir = resolve(startDir);
   for (let i = 0; i < maxDepth; i += 1) {
-    const candidate = join(dir, ".mcp.json");
-    if (existsSync(candidate)) found.push(candidate);
+    for (const candidate of [
+      join(dir, ".claude", "mcp.json"),
+      join(dir, ".mcp.json"),
+    ]) {
+      if (existsSync(candidate)) found.push(candidate);
+    }
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;

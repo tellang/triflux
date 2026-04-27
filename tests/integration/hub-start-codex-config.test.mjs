@@ -33,10 +33,15 @@ function sleepMs(ms) {
   Atomics.wait(SLEEP_SAB, 0, 0, ms);
 }
 
-function runHubStart(homeDir, port) {
+function runHubStart(homeDir, port, { passPortArg = true } = {}) {
   return execFileSync(
     process.execPath,
-    [TRIFLUX_BIN, "hub", "start", "--port", String(port)],
+    [
+      TRIFLUX_BIN,
+      "hub",
+      "start",
+      ...(passPortArg ? ["--port", String(port)] : []),
+    ],
     {
       cwd: PROJECT_ROOT,
       encoding: "utf8",
@@ -102,6 +107,30 @@ describe("tfx hub start re-enables Codex MCP config", () => {
       runHubStart(homeDir, port);
 
       config = readJson(configPath);
+      assert.equal(config.mcpServers["tfx-hub"].enabled, true);
+      assert.equal(
+        config.mcpServers["tfx-hub"].url,
+        `http://127.0.0.1:${port}/mcp`,
+      );
+    } finally {
+      stopHubFromPidFile(homeDir);
+      try {
+        rmSync(homeDir, { recursive: true, force: true });
+      } catch {
+        // Windows may keep a transient handle on the temp home for a short time.
+      }
+    }
+  });
+
+  it("hub start without --port should honor TFX_HUB_PORT", () => {
+    const homeDir = makeIsolatedHome("tfx-hub-env-port-");
+    const port = 28230 + Math.floor(Math.random() * 50);
+    const configPath = join(homeDir, ".codex", "config.json");
+
+    try {
+      runHubStart(homeDir, port, { passPortArg: false });
+
+      const config = readJson(configPath);
       assert.equal(config.mcpServers["tfx-hub"].enabled, true);
       assert.equal(
         config.mcpServers["tfx-hub"].url,

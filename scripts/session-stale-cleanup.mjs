@@ -26,7 +26,11 @@ import { isProcessAlive } from "./lib/process-utils.mjs";
 const MULTI_STATE_FILE = join(tmpdir(), "tfx-multi-state.json");
 const EXPIRE_MS = 30 * 60 * 1000; // 30분
 const PID_FILE_RE = /^tfx-route-(\d+)-pids$/;
-const PROTECTED_ANCESTOR_NAMES = new Set(["claude.exe", "codex.exe"]);
+const PROTECTED_ANCESTOR_NAMES = new Set([
+  "claude.exe",
+  "codex.exe",
+  "gemini.exe",
+]);
 const PID_REUSE_GRACE_MS = 1000;
 
 function normalizeName(name) {

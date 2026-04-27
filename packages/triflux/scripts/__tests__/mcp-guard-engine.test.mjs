@@ -54,10 +54,10 @@ describe("mcp guard engine", () => {
     const registry = loadRegistry();
     assert.equal(registry.version, 1);
     assert.equal(registry.servers["tfx-hub"].url, "http://127.0.0.1:27888/mcp");
-    assert.equal(registry.policies.watched_paths.length, 5);
+    assert.equal(registry.policies.watched_paths.length, 6);
   });
 
-  it("matches watched paths for Gemini and local .mcp.json", () => {
+  it("matches watched paths for Gemini, Claude project MCP, and local .mcp.json", () => {
     const homeDir = createHomeDir();
     withHome(homeDir);
 
@@ -67,6 +67,10 @@ describe("mcp guard engine", () => {
     );
     assert.equal(
       isWatchedPath(join(PROJECT_ROOT, "nested", ".mcp.json")),
+      true,
+    );
+    assert.equal(
+      isWatchedPath(join(PROJECT_ROOT, "nested", ".claude", "mcp.json")),
       true,
     );
     assert.equal(
@@ -99,6 +103,42 @@ describe("mcp guard engine", () => {
       found.map((server) => server.name),
       ["unsafe-stdio"],
     );
+  });
+
+  it("treats .claude/mcp.json as a Claude project MCP config", () => {
+    const homeDir = createHomeDir();
+    withHome(homeDir);
+
+    const projectMcpPath = join(homeDir, "repo", ".claude", "mcp.json");
+    mkdirSync(dirname(projectMcpPath), { recursive: true });
+    writeFileSync(
+      projectMcpPath,
+      JSON.stringify(
+        {
+          mcpServers: {
+            "unsafe-stdio": { command: "node", args: ["server.js"] },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const found = scanForStdioServers(projectMcpPath);
+    assert.deepEqual(
+      found.map((server) => server.name),
+      ["unsafe-stdio"],
+    );
+
+    const result = remediate(projectMcpPath, found, {
+      stdio_action: "replace-with-hub",
+    });
+    const updated = JSON.parse(readFileSync(projectMcpPath, "utf8"));
+
+    assert.equal(result.modified, true);
+    assert.equal(updated.mcpServers["tfx-hub"].type, "http");
+    assert.equal(updated.mcpServers["tfx-hub"].url, resolveHubUrl());
+    assert.equal(Object.hasOwn(updated.mcpServers, "unsafe-stdio"), false);
   });
 
   it("replaces stdio MCP entries with tfx-hub and writes a backup (TFX_HUB_PORT env overrides)", () => {

@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { whichCommand, whichCommandAsync } from "../../hub/platform.mjs";
 
+const HUB_DEFAULT_PORT = 27888;
 const DEFAULT_STATUS_URL = "http://127.0.0.1:27888/status";
 const _sab = new Int32Array(new SharedArrayBuffer(4));
 const CLI_PROBE_CACHE = new Map();
@@ -20,7 +21,7 @@ function sleepSync(ms) {
 
 function fetchHubStatus({
   execSyncFn = execSync,
-  statusUrl = DEFAULT_STATUS_URL,
+  statusUrl = resolveDefaultStatusUrl(),
   timeout = 3000,
 } = {}) {
   const response = execSyncFn(`curl -sf ${statusUrl}`, {
@@ -34,6 +35,13 @@ function fetchHubStatus({
     state: data?.hub?.state || "unknown",
     pid: data?.pid,
   };
+}
+
+export function resolveDefaultStatusUrl(env = process.env) {
+  const envPort = Number.parseInt(String(env?.TFX_HUB_PORT ?? ""), 10);
+  const port =
+    Number.isFinite(envPort) && envPort > 0 ? envPort : HUB_DEFAULT_PORT;
+  return `http://127.0.0.1:${port}/status`;
 }
 
 function normalizeCliName(name) {
@@ -205,7 +213,7 @@ export function detectCodexPlan(options = {}) {
 
 export function checkHub({
   pkgRoot = DEFAULT_PKG_ROOT,
-  statusUrl = DEFAULT_STATUS_URL,
+  statusUrl = resolveDefaultStatusUrl(),
   restart = true,
   requestTimeoutMs = 3000,
   pollAttempts = 8,
@@ -231,6 +239,7 @@ export function checkHub({
 
   try {
     const child = spawnFn(process.execPath, [serverPath], {
+      env: { ...process.env, TFX_HUB_PORT: String(new URL(statusUrl).port) },
       detached: true,
       stdio: "ignore",
       windowsHide: true,

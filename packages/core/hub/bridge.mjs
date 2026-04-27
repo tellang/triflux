@@ -31,6 +31,17 @@ const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
 const HUB_TOKEN_FILE = join(homedir(), ".claude", ".tfx-hub-token");
 const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const HUB_DEFAULT_PORT = 27888;
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+
+function formatHostForUrl(host) {
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+function normalizeLoopbackHost(host) {
+  if (typeof host !== "string") return "127.0.0.1";
+  const candidate = host.trim();
+  return LOOPBACK_HOSTS.has(candidate) ? candidate : "127.0.0.1";
+}
 
 function normalizeToken(raw) {
   if (raw == null) return null;
@@ -53,22 +64,21 @@ export function getHubUrl() {
   if (process.env.TFX_HUB_URL)
     return process.env.TFX_HUB_URL.replace(/\/mcp$/, "");
 
+  const envPort = Number.parseInt(String(process.env.TFX_HUB_PORT ?? ""), 10);
+  const port =
+    Number.isFinite(envPort) && envPort > 0 ? envPort : HUB_DEFAULT_PORT;
+  let host = "127.0.0.1";
+
   if (existsSync(HUB_PID_FILE)) {
     try {
       const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-      const pidPort = Number.parseInt(String(info?.port ?? ""), 10);
-      const port =
-        Number.isFinite(pidPort) && pidPort > 0 ? pidPort : HUB_DEFAULT_PORT;
-      return `http://${info.host || "127.0.0.1"}:${port}`;
+      host = normalizeLoopbackHost(info?.host);
     } catch {
       // 무시
     }
   }
 
-  const envPort = Number.parseInt(String(process.env.TFX_HUB_PORT ?? ""), 10);
-  const port =
-    Number.isFinite(envPort) && envPort > 0 ? envPort : HUB_DEFAULT_PORT;
-  return `http://127.0.0.1:${port}`;
+  return `http://${formatHostForUrl(host)}:${port}`;
 }
 
 export function getHubPipePath() {

@@ -155,6 +155,7 @@ function auditMcp() {
   const mcpPaths = [
     join(CLAUDE_DIR, "mcp_servers.json"),
     join(CLAUDE_DIR, ".mcp.json"),
+    join(process.cwd(), ".claude", "mcp.json"),
     join(process.cwd(), ".mcp.json"),
   ];
 

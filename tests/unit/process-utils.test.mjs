@@ -467,7 +467,7 @@ describe("process tree cleanup helpers", () => {
     assert.ok(killed.every(([, signal]) => signal === "SIGKILL"));
   });
 
-  it("legacy cleanupOrphanNodeProcesses never kills live Claude/Codex session roots", () => {
+  it("legacy cleanupOrphanNodeProcesses never kills live Claude/Codex/Gemini session roots", () => {
     const killed = [];
     const result = cleanupOrphanNodeProcesses({
       isWindows: true,
@@ -497,6 +497,18 @@ describe("process tree cleanup helpers", () => {
             Name: "node.exe",
             CommandLine: "node codex-mcp-server.js",
           },
+          {
+            ProcessId: 514,
+            ParentProcessId: 999993,
+            Name: "gemini.exe",
+            CommandLine: "gemini --prompt hello",
+          },
+          {
+            ProcessId: 515,
+            ParentProcessId: 514,
+            Name: "node.exe",
+            CommandLine: "node gemini-mcp-server.js",
+          },
         ],
       }),
       killFn: (pid, signal) => killed.push([pid, signal]),
@@ -507,7 +519,7 @@ describe("process tree cleanup helpers", () => {
     assert.deepEqual(killed, []);
   });
 
-  it("legacy cleanupOrphanNodeProcesses never kills node wrappers with live Claude/Codex children", () => {
+  it("legacy cleanupOrphanNodeProcesses never kills node wrappers with live Claude/Codex/Gemini children", () => {
     const killed = [];
     const result = cleanupOrphanNodeProcesses({
       isWindows: true,
@@ -538,6 +550,19 @@ describe("process tree cleanup helpers", () => {
             ParentProcessId: 522,
             Name: "claude.exe",
             CommandLine: "claude --resume",
+          },
+          {
+            ProcessId: 524,
+            ParentProcessId: 999993,
+            Name: "node.exe",
+            CommandLine:
+              "node C:\\Users\\tellang\\AppData\\Roaming\\npm\\node_modules\\@google\\gemini-cli\\dist\\index.js --prompt hello",
+          },
+          {
+            ProcessId: 525,
+            ParentProcessId: 524,
+            Name: "gemini.exe",
+            CommandLine: "gemini --prompt hello",
           },
         ],
       }),

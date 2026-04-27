@@ -774,7 +774,6 @@ export async function startHub({
   const port = portSpecified
     ? resolvedPort
     : resolveHubPort(process.env, {
-        preferLivePid: true,
         detectPeer: () => livePeer,
       });
 

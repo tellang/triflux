@@ -5158,11 +5158,19 @@ function autoRegisterMcp(mcpUrl, { codexEnabled = false } = {}) {
       if (existsSync(settingsFile))
         settings = JSON.parse(readFileSync(settingsFile, "utf8"));
       if (!settings.mcpServers) settings.mcpServers = {};
-      if (!settings.mcpServers["tfx-hub"]) {
-        settings.mcpServers["tfx-hub"] = { url: mcpUrl };
+      const current = settings.mcpServers["tfx-hub"];
+      if (!current || current.url !== mcpUrl) {
+        settings.mcpServers["tfx-hub"] = {
+          ...(current && typeof current === "object" ? current : {}),
+          url: mcpUrl,
+        };
         if (!existsSync(geminiDir)) mkdirSync(geminiDir, { recursive: true });
         writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + "\n");
-        ok("Gemini: settings.json에 등록 완료");
+        ok(
+          current
+            ? "Gemini: settings.json URL 갱신 완료"
+            : "Gemini: settings.json에 등록 완료",
+        );
       } else {
         ok("Gemini: 이미 등록됨");
       }
@@ -5182,10 +5190,19 @@ function autoRegisterMcp(mcpUrl, { codexEnabled = false } = {}) {
     if (existsSync(mcpJsonPath))
       mcpJson = JSON.parse(readFileSync(mcpJsonPath, "utf8"));
     if (!mcpJson.mcpServers) mcpJson.mcpServers = {};
-    if (!mcpJson.mcpServers["tfx-hub"]) {
-      mcpJson.mcpServers["tfx-hub"] = { type: "url", url: mcpUrl };
+    const current = mcpJson.mcpServers["tfx-hub"];
+    if (!current || current.type !== "http" || current.url !== mcpUrl) {
+      mcpJson.mcpServers["tfx-hub"] = {
+        ...(current && typeof current === "object" ? current : {}),
+        type: "http",
+        url: mcpUrl,
+      };
       writeFileSync(mcpJsonPath, JSON.stringify(mcpJson, null, 2) + "\n");
-      ok("Claude: .claude/mcp.json에 등록 완료");
+      ok(
+        current
+          ? "Claude: .claude/mcp.json URL/type 갱신 완료"
+          : "Claude: .claude/mcp.json에 등록 완료",
+      );
     } else {
       ok("Claude: 이미 등록됨");
     }
@@ -5253,11 +5270,25 @@ async function cmdHub(args = [], options = {}) {
         try {
           const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
           process.kill(info.pid, 0); // 프로세스 존재 확인
-          autoRegisterMcp(info.url, { codexEnabled: true });
-          console.log(
-            `\n  ${YELLOW}⚠${RESET} hub 이미 실행 중 (PID ${info.pid}, ${info.url})\n`,
+          const host =
+            typeof info.host === "string" && info.host.trim()
+              ? info.host.trim()
+              : "127.0.0.1";
+          const port = Number(info.port) || probePort;
+          const probed = await probeHubStatus(host, port, 1500);
+          if (probed?.hub) {
+            const url = `http://${formatHostForUrl(host)}:${probed.port || port}/mcp`;
+            recoverPidFile(probed, host);
+            autoRegisterMcp(url, { codexEnabled: true });
+            console.log(
+              `\n  ${YELLOW}⚠${RESET} hub 이미 실행 중 (PID ${probed.pid || info.pid}, ${url})\n`,
+            );
+            return;
+          }
+          warn(
+            `stale hub PID 파일 감지: PID ${info.pid}는 살아있지만 hub status 응답이 없음. PID 파일을 정리합니다.`,
           );
-          return;
+          unlinkSync(HUB_PID_FILE);
         } catch {
           // PID 파일 있지만 프로세스 없음 — 정리
           try {
@@ -5267,7 +5298,7 @@ async function cmdHub(args = [], options = {}) {
       }
 
       const portArg = args.indexOf("--port");
-      const port = portArg !== -1 ? args[portArg + 1] : "27888";
+      const port = portArg !== -1 ? args[portArg + 1] : String(probePort);
       const serverPath = join(PKG_ROOT, "hub", "server.mjs");
 
       if (!existsSync(serverPath)) {

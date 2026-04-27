@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
+  checkHub,
   detectCodexAuthState,
   detectCodexPlan,
+  resolveDefaultStatusUrl,
 } from "../../scripts/lib/env-probe.mjs";
 
 function makeTempHome() {
@@ -92,6 +94,55 @@ describe("env-probe detectCodexAuthState", () => {
       assert.deepEqual(plan, { plan: "pro", source: "jwt" });
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("env-probe hub port resolution", () => {
+  it("resolveDefaultStatusUrl honors TFX_HUB_PORT", () => {
+    assert.equal(
+      resolveDefaultStatusUrl({ TFX_HUB_PORT: "30123" }),
+      "http://127.0.0.1:30123/status",
+    );
+    assert.equal(
+      resolveDefaultStatusUrl({ TFX_HUB_PORT: "not-a-number" }),
+      "http://127.0.0.1:27888/status",
+    );
+  });
+
+  it("checkHub probes and restarts using the env-selected port", () => {
+    const originalPort = process.env.TFX_HUB_PORT;
+    process.env.TFX_HUB_PORT = "30124";
+    const commands = [];
+    const spawnCalls = [];
+    let attempts = 0;
+
+    try {
+      const result = checkHub({
+        pkgRoot: makeTempHome(),
+        execSyncFn(command) {
+          commands.push(command);
+          attempts += 1;
+          if (attempts === 1) throw new Error("down");
+          return JSON.stringify({ hub: { state: "healthy" }, pid: 1234 });
+        },
+        spawnFn(command, args, options) {
+          spawnCalls.push({ command, args, options });
+          return { unref() {} };
+        },
+        existsSyncFn() {
+          return true;
+        },
+        sleepSyncFn() {},
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.restarted, true);
+      assert.ok(commands.every((command) => command.includes(":30124/status")));
+      assert.equal(spawnCalls[0]?.options?.env?.TFX_HUB_PORT, "30124");
+    } finally {
+      if (originalPort === undefined) delete process.env.TFX_HUB_PORT;
+      else process.env.TFX_HUB_PORT = originalPort;
     }
   });
 });

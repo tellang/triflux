@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 // scripts/hub-watchdog.mjs — Hub 상시 감시 + 자동 재시작
 //
-// 10초마다 27888/status 체크. 응답 없으면 `tfx hub start` 실행.
+// 10초마다 Hub /status 체크. 응답 없으면 `tfx hub start` 실행.
 // 실행: node scripts/hub-watchdog.mjs &
 // 중지: kill $(pgrep -f hub-watchdog.mjs)  (또는 별도 pid 파일)
 
 import { spawn } from "node:child_process";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const HUB_URL = "http://127.0.0.1:27888/status";
+const HUB_DEFAULT_PORT = 27888;
+const envPort = Number.parseInt(String(process.env.TFX_HUB_PORT ?? ""), 10);
+const HUB_PORT =
+  Number.isFinite(envPort) && envPort > 0 ? envPort : HUB_DEFAULT_PORT;
+const HUB_URL = `http://127.0.0.1:${HUB_PORT}/status`;
 const POLL_MS = 10_000;
 const START_GRACE_MS = 5_000;
 const LOG_PREFIX = "[hub-watchdog]";
@@ -24,8 +28,7 @@ function log(msg) {
     process.stdout.write(line);
   } catch {}
   try {
-    const fs = require("node:fs");
-    fs.appendFileSync(LOG_FILE, line);
+    appendFileSync(LOG_FILE, line);
   } catch {}
 }
 
@@ -44,6 +47,7 @@ function startHub() {
   log("Hub 기동: tfx hub start");
   const proc = spawn("tfx", ["hub", "start"], {
     cwd: process.cwd(),
+    env: { ...process.env, TFX_HUB_PORT: String(HUB_PORT) },
     stdio: "ignore",
     detached: true,
     shell: true,
@@ -81,6 +85,6 @@ try {
   writeFileSync(PID_FILE, String(process.pid));
 } catch {}
 
-log(`watchdog 시작 (pid=${process.pid}, poll=${POLL_MS}ms)`);
+log(`watchdog 시작 (pid=${process.pid}, port=${HUB_PORT}, poll=${POLL_MS}ms)`);
 ensure();
 setInterval(ensure, POLL_MS);

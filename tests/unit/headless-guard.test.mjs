@@ -983,7 +983,7 @@ describe("#62: session-stale-cleanup (runtime)", () => {
     );
   });
 
-  it("live Claude/Codex ancestor 아래 runtime은 stale PID cleanup이 죽이지 않는다", async () => {
+  it("live Claude/Codex/Gemini ancestor 아래 runtime은 stale PID cleanup이 죽이지 않는다", async () => {
     const { shouldKillTrackedPid } = await import(
       `${pathToFileURL(CLEANUP_PATH).href}?protected-ancestor-${Date.now()}`
     );
@@ -1019,6 +1019,26 @@ describe("#62: session-stale-cleanup (runtime)", () => {
           commandLine: "node tavily-mcp",
         },
       ],
+      [
+        103,
+        {
+          pid: 103,
+          ppid: 1,
+          name: "gemini.exe",
+          creationMs: Date.parse("2026-04-27T09:02:00.000Z"),
+          commandLine: "gemini --prompt hello",
+        },
+      ],
+      [
+        104,
+        {
+          pid: 104,
+          ppid: 103,
+          name: "node.exe",
+          creationMs: Date.parse("2026-04-27T09:02:01.000Z"),
+          commandLine: "node gemini-mcp-server.js",
+        },
+      ],
     ]);
 
     assert.equal(
@@ -1030,9 +1050,18 @@ describe("#62: session-stale-cleanup (runtime)", () => {
       }),
       false,
     );
+    assert.equal(
+      shouldKillTrackedPid({
+        pid: 104,
+        pidFileMtimeMs,
+        procMap,
+        isWindows: true,
+      }),
+      false,
+    );
   });
 
-  it("live Claude/Codex child를 가진 wrapper PID는 stale PID cleanup이 죽이지 않는다", async () => {
+  it("live Claude/Codex/Gemini child를 가진 wrapper PID는 stale PID cleanup이 죽이지 않는다", async () => {
     const { shouldKillTrackedPid } = await import(
       `${pathToFileURL(CLEANUP_PATH).href}?protected-descendant-${Date.now()}`
     );
@@ -1058,11 +1087,41 @@ describe("#62: session-stale-cleanup (runtime)", () => {
           commandLine: "codex resume --last",
         },
       ],
+      [
+        202,
+        {
+          pid: 202,
+          ppid: 999998,
+          name: "node.exe",
+          creationMs: Date.parse("2026-04-27T09:00:02.000Z"),
+          commandLine:
+            "node C:\\Users\\tellang\\AppData\\Roaming\\npm\\node_modules\\@google\\gemini-cli\\dist\\index.js --prompt hello",
+        },
+      ],
+      [
+        203,
+        {
+          pid: 203,
+          ppid: 202,
+          name: "gemini.exe",
+          creationMs: Date.parse("2026-04-27T09:00:03.000Z"),
+          commandLine: "gemini --prompt hello",
+        },
+      ],
     ]);
 
     assert.equal(
       shouldKillTrackedPid({
         pid: 200,
+        pidFileMtimeMs,
+        procMap,
+        isWindows: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldKillTrackedPid({
+        pid: 202,
         pidFileMtimeMs,
         procMap,
         isWindows: true,

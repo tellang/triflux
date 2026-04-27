@@ -38,6 +38,7 @@ const DEFAULT_REGISTRY = Object.freeze({
       "~/.codex/config.toml",
       "~/.claude/settings.json",
       "~/.claude/settings.local.json",
+      ".claude/mcp.json",
       ".mcp.json",
     ],
   },
@@ -69,6 +70,10 @@ function pathBasename(filePath) {
   return basename(filePath.replace(/\\/g, "/")).toLowerCase();
 }
 
+function isClaudeProjectMcpConfig(filePath) {
+  return normalizeForMatch(filePath).endsWith("/.claude/mcp.json");
+}
+
 function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
 }
@@ -89,7 +94,8 @@ function isJsonMcpConfig(filePath) {
   return (
     name === "settings.json" ||
     name === "settings.local.json" ||
-    name === ".mcp.json"
+    name === ".mcp.json" ||
+    isClaudeProjectMcpConfig(filePath)
   );
 }
 
@@ -116,6 +122,7 @@ function detectClient(filePath) {
   if (
     normalized.endsWith("/.claude/settings.json") ||
     normalized.endsWith("/.claude/settings.local.json") ||
+    normalized.endsWith("/.claude/mcp.json") ||
     normalized.endsWith("/.mcp.json")
   ) {
     return "claude";
@@ -130,6 +137,7 @@ function detectLabel(filePath) {
   if (normalized.endsWith("/.claude/settings.json")) return "Claude User";
   if (normalized.endsWith("/.claude/settings.local.json"))
     return "Claude Local";
+  if (normalized.endsWith("/.claude/mcp.json")) return "Claude Project MCP";
   if (normalized.endsWith("/.mcp.json")) return "Project MCP";
   return basename(filePath);
 }
@@ -139,6 +147,7 @@ function isPrimaryConfigTarget(filePath) {
   return (
     normalized.endsWith("/.gemini/settings.json") ||
     normalized.endsWith("/.codex/config.toml") ||
+    normalized.endsWith("/.claude/mcp.json") ||
     normalized.endsWith("/.mcp.json")
   );
 }
@@ -280,8 +289,8 @@ function buildDesiredServerRecord(name, serverConfig, filePath) {
       : normalizeUrl(serverConfig?.url || "");
   const basenameValue = pathBasename(filePath);
 
-  if (basenameValue === ".mcp.json") {
-    return { name, config: { type: "url", url } };
+  if (basenameValue === ".mcp.json" || isClaudeProjectMcpConfig(filePath)) {
+    return { name, config: { type: "http", url } };
   }
 
   if (isCodexConfig(filePath)) {

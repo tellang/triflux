@@ -1298,10 +1298,12 @@ export function createSwarmHypervisor(opts) {
   let hubKeepaliveTimer = null;
   function startHubKeepalive() {
     // 5분마다 Hub /status 핑 — crash 감지 시 ensureHubAlive로 재시작
+    const envPort = Number(process.env.TFX_HUB_PORT || "27888");
+    const hubPort = Number.isFinite(envPort) && envPort > 0 ? envPort : 27888;
     hubKeepaliveTimer = setInterval(
       async () => {
         try {
-          const resp = await fetch("http://127.0.0.1:27888/status");
+          const resp = await fetch(`http://127.0.0.1:${hubPort}/status`);
           if (!resp.ok && ensureHubAliveFn) {
             eventLog.append("hub_keepalive_restart", {});
             await ensureHubAliveFn();
