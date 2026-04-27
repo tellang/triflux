@@ -203,6 +203,11 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
       // 프로세스 맵에 없음 → 살아있는지 직접 확인
       return isPidAlive(current);
     }
+    if (
+      LIVE_CLI_SESSION_ROOT_NAMES.has(String(info.name || "").toLowerCase())
+    ) {
+      return true;
+    }
 
     const ppid = info.ppid;
     if (!Number.isFinite(ppid) || ppid <= 0) {
@@ -220,16 +225,15 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
 }
 
 // kill 대상 프로세스 이름 (Windows)
-// codex/claude도 포함: protectedPids + hasLiveAncestorChain이 활성 인스턴스를 보호하므로
-// 고아(부모 dead + 자식 dead)만 kill됨. pwsh.exe는 사용자 인터랙티브 쉘이므로 제외.
+// codex/claude는 활성 세션 루트로만 취급한다. 전역 orphan sweep이
+// 사용자 Claude Code/Codex 세션을 직접 종료하면 안 된다.
 const KILLABLE_NAMES = new Set([
   "node.exe",
   "bash.exe",
   "cmd.exe",
   "uvx.exe",
-  "codex.exe",
-  "claude.exe",
 ]);
+const LIVE_CLI_SESSION_ROOT_NAMES = new Set(["codex.exe", "claude.exe"]);
 
 /**
  * 고아 프로세스 트리를 정리한다 (node.exe + bash.exe + cmd.exe + uvx.exe).

@@ -4,6 +4,15 @@
 #       (GitHub Issues #1935, #15211, #28126)
 $ErrorActionPreference = 'SilentlyContinue'
 
+# Claude Code "Stop" hooks fire at response-stop time, not only when the
+# Claude process exits. Running this cleanup by default can kill live MCP
+# runtimes that the current session still needs. Keep it opt-in until the
+# caller can prove the owning Claude/Codex process is gone.
+if ($env:TFX_ENABLE_STOP_MCP_CLEANUP -ne '1') {
+  Write-Error '[mcp-cleanup] skipped: set TFX_ENABLE_STOP_MCP_CLEANUP=1 to enable'
+  exit 0
+}
+
 # npx MCP servers (brave, notion, context7, exa, tavily, jira, playwright, etc.)
 # + oh-my-codex MCP servers (team/code-intel/memory/trace/state)
 # + omc bridge

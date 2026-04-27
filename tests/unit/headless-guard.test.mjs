@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 import { BASH_EXE } from "../helpers/bash-path.mjs";
 
 const GUARD_PATH = join(process.cwd(), "scripts", "headless-guard.mjs");
@@ -951,6 +952,84 @@ describe("#62: session-stale-cleanup (runtime)", () => {
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
+  });
+
+  it("Windows PID 재사용이면 tracked PID를 죽이지 않는다", async () => {
+    const { shouldKillTrackedPid } = await import(
+      `${pathToFileURL(CLEANUP_PATH).href}?pid-reuse-${Date.now()}`
+    );
+    const pidFileMtimeMs = Date.parse("2026-04-27T10:00:00.000Z");
+    const procMap = new Map([
+      [
+        4242,
+        {
+          pid: 4242,
+          ppid: 1,
+          name: "node.exe",
+          creationMs: Date.parse("2026-04-27T10:05:00.000Z"),
+          commandLine: "node live-mcp.js",
+        },
+      ],
+    ]);
+
+    assert.equal(
+      shouldKillTrackedPid({
+        pid: 4242,
+        pidFileMtimeMs,
+        procMap,
+        isWindows: true,
+      }),
+      false,
+    );
+  });
+
+  it("live Claude/Codex ancestor 아래 runtime은 stale PID cleanup이 죽이지 않는다", async () => {
+    const { shouldKillTrackedPid } = await import(
+      `${pathToFileURL(CLEANUP_PATH).href}?protected-ancestor-${Date.now()}`
+    );
+    const pidFileMtimeMs = Date.parse("2026-04-27T10:00:00.000Z");
+    const procMap = new Map([
+      [
+        100,
+        {
+          pid: 100,
+          ppid: 1,
+          name: "claude.exe",
+          creationMs: Date.parse("2026-04-27T09:00:00.000Z"),
+          commandLine: "claude --resume",
+        },
+      ],
+      [
+        101,
+        {
+          pid: 101,
+          ppid: 100,
+          name: "cmd.exe",
+          creationMs: Date.parse("2026-04-27T09:01:00.000Z"),
+          commandLine: "cmd /c npx -y tavily-mcp",
+        },
+      ],
+      [
+        102,
+        {
+          pid: 102,
+          ppid: 101,
+          name: "node.exe",
+          creationMs: Date.parse("2026-04-27T09:01:01.000Z"),
+          commandLine: "node tavily-mcp",
+        },
+      ],
+    ]);
+
+    assert.equal(
+      shouldKillTrackedPid({
+        pid: 102,
+        pidFileMtimeMs,
+        procMap,
+        isWindows: true,
+      }),
+      false,
+    );
   });
 });
 

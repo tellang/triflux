@@ -29,6 +29,7 @@ import { DelegatorService } from "./delegator/index.mjs";
 import { createHitlManager } from "./hitl.mjs";
 import {
   cleanupOrphanNodeProcesses,
+  cleanupOrphanRuntimeProcesses,
   cleanupStaleFsmonitorDaemons,
 } from "./lib/process-utils.mjs";
 import * as spawnTrace from "./lib/spawn-trace.mjs";
@@ -1819,12 +1820,26 @@ export async function startHub({
   sessionTimer.unref();
 
   // 고아 node.exe 프로세스 + stale spawn 세션 주기적 정리 (5분마다)
+  // TFX_DISABLE_ORPHAN_CLEANUP=1 로 비활성 (active SSH/swarm 세션 보호 회피용 hotfix gate)
   const orphanCleanupTimer = setInterval(
     () => {
+      if (process.env.TFX_DISABLE_ORPHAN_CLEANUP === "1") return;
       try {
-        const { killed } = cleanupOrphanNodeProcesses();
-        if (killed > 0) {
-          hubLog.info({ killed }, "hub.orphan_cleanup");
+        const { killed, killedProcesses = [] } = cleanupOrphanNodeProcesses();
+        const {
+          killed: runtimeKilled,
+          killedProcesses: runtimeKilledProcesses = [],
+        } = cleanupOrphanRuntimeProcesses();
+        const totalKilled = killed + runtimeKilled;
+        if (totalKilled > 0) {
+          hubLog.info(
+            {
+              killed: totalKilled,
+              processes: [...killedProcesses, ...runtimeKilledProcesses],
+              caller: "timer",
+            },
+            "hub.orphan_cleanup",
+          );
         }
 
         const { killed: fsmonitorKilled, stale } = cleanupStaleFsmonitorDaemons(
@@ -2500,7 +2515,25 @@ if (selfRun) {
       const shutdown = async (signal) => {
         hubLog.info({ signal }, "hub.stopping");
         try {
-          cleanupOrphanNodeProcesses();
+          if (process.env.TFX_DISABLE_ORPHAN_CLEANUP !== "1") {
+            const { killed: orphanKilled, killedProcesses = [] } =
+              cleanupOrphanNodeProcesses();
+            const {
+              killed: runtimeKilled,
+              killedProcesses: runtimeKilledProcesses = [],
+            } = cleanupOrphanRuntimeProcesses();
+            const totalKilled = orphanKilled + runtimeKilled;
+            if (totalKilled > 0) {
+              hubLog.info(
+                {
+                  killed: totalKilled,
+                  processes: [...killedProcesses, ...runtimeKilledProcesses],
+                  caller: "shutdown",
+                },
+                "hub.orphan_cleanup",
+              );
+            }
+          }
           const { killed, stale } = cleanupStaleFsmonitorDaemons({
             minAgeMs: 24 * 60 * 60 * 1000,
           });

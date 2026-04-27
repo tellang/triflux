@@ -29,9 +29,8 @@ const LEGACY_ORPHAN_KILLABLE_NAMES = new Set([
   "bash.exe",
   "cmd.exe",
   "uvx.exe",
-  "codex.exe",
-  "claude.exe",
 ]);
+const LIVE_CLI_SESSION_ROOT_NAMES = new Set(["codex.exe", "claude.exe"]);
 
 /**
  * 주어진 PID의 프로세스가 살아있는지 확인한다.
@@ -215,6 +214,9 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
       // 프로세스 맵에 없음 → 살아있는지 직접 확인
       return isPidAlive(current);
     }
+    if (LIVE_CLI_SESSION_ROOT_NAMES.has(normalizeName(info.name))) {
+      return true;
+    }
 
     const ppid = info.ppid;
     if (!Number.isFinite(ppid) || ppid <= 0) {
@@ -234,7 +236,7 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
 /**
  * Legacy wrapper for scoped orphan node runtime cleanup.
  * @param {Parameters<typeof cleanupOrphanRuntimeProcesses>[0]} opts
- * @returns {{ killed: number, remaining: number }}
+ * @returns {{ killed: number, remaining: number, killedProcesses: Array<{pid: number, ppid: number, name: string, commandLine: string, killReason: string}> }}
  */
 export function cleanupOrphanNodeProcesses(opts = {}) {
   return cleanupOrphanRuntimeProcesses({ ...opts, legacy: true });
@@ -450,8 +452,12 @@ function matchesPattern(commandLine, pattern, { exact = false } = {}) {
 }
 
 function hasExactGbrainServe(commandLine) {
-  return /^("?[^"\s]*bun(?:\.exe)?"?\s+)?gbrain\s+serve$/i.test(
-    commandLine.trim(),
+  const normalized = commandLine.trim();
+  return (
+    /^("?[^"\s]*bun(?:\.exe)?"?\s+)?gbrain\s+serve$/i.test(normalized) ||
+    /^("?[^"\s]*bun(?:\.exe)?"?\s+)"?[^"]*gbrain[\\/]+src[\\/]+cli\.ts"?\s+serve$/i.test(
+      normalized,
+    )
   );
 }
 
@@ -766,7 +772,7 @@ export function cleanupShardProcesses({
  * behavior by targeting scoped orphan node runtimes only.
  *
  * @param {{legacy?: boolean, includeConhost?: boolean, sessionIds?: string[], isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, protectedPids?: Set<number>}} opts
- * @returns {{killed: number, remaining: number}}
+ * @returns {{killed: number, remaining: number, killedProcesses: Array<{pid: number, ppid: number, name: string, commandLine: string, killReason: string}>}}
  */
 export function cleanupOrphanRuntimeProcesses({
   legacy = false,
@@ -787,37 +793,60 @@ export function cleanupOrphanRuntimeProcesses({
   });
   const processes = getProcessSnapshot({ isWindows, spawnSyncFn });
   let killed = 0;
+  const killedProcesses = [];
   const procMap = legacy
     ? new Map(processes.map((proc) => [proc.pid, proc]))
-    : null;
+    : new Map(processes.map((proc) => [proc.pid, proc]));
 
   for (const proc of processes) {
     if (protectedSet.has(proc.pid)) continue;
     const name = normalizeName(proc.name);
     const commandLine = normalizeCommandLine(proc.commandLine);
     let shouldKill = false;
+    let killReason = null;
 
     if (legacy) {
-      shouldKill =
+      if (
         LEGACY_ORPHAN_KILLABLE_NAMES.has(name) &&
-        !hasLiveAncestorChain(proc.pid, procMap, protectedSet);
+        !hasLiveAncestorChain(proc.pid, procMap, protectedSet)
+      ) {
+        shouldKill = true;
+        killReason = "legacy_orphan_ancestor_chain_dead";
+      }
     } else if (name === "bun.exe") {
-      shouldKill = hasExactGbrainServe(proc.commandLine);
+      if (
+        hasExactGbrainServe(proc.commandLine) &&
+        !hasLiveAncestorChain(proc.pid, procMap, protectedSet)
+      ) {
+        shouldKill = true;
+        killReason = "bun_gbrain_serve_orphan";
+      }
     } else if (includeConhost && name === "conhost.exe") {
-      shouldKill =
+      if (
         sessionIds.length > 0 &&
-        sessionIds.some((id) => id && commandLine.includes(id));
+        sessionIds.some((id) => id && commandLine.includes(id))
+      ) {
+        shouldKill = true;
+        killReason = "conhost_session_match";
+      }
     }
 
     if (!shouldKill) continue;
     try {
       killFn(proc.pid, "SIGKILL");
       killed++;
+      killedProcesses.push({
+        pid: proc.pid,
+        ppid: proc.ppid,
+        name: proc.name,
+        commandLine: String(proc.commandLine || "").slice(0, 200),
+        killReason,
+      });
     } catch {}
   }
 
   const remaining = processes.length - killed;
-  return { killed, remaining };
+  return { killed, remaining, killedProcesses };
 }
 
 /**

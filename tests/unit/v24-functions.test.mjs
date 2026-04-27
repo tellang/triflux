@@ -15,6 +15,12 @@ describe("v2.4 신규 JS 함수 테스트", () => {
       assert.equal(cleanTuiArtifacts(input, "codex"), expected);
     });
 
+    it("1-1. SS3 cursor escape와 잘린 [O[ 조각 제거 확인", () => {
+      const input = "ok\x1bOA\n[O[\nnext [OB";
+      const expected = "ok\nnext";
+      assert.equal(cleanTuiArtifacts(input, "codex"), expected);
+    });
+
     it("2. box drawing 문자(─│┌┐└┘├┤) 제거 확인", () => {
       const input = "┌──────────┐\n│ Content  │\n└──────────┘\nValid Text";
       // codex 모드일 때 줄 시작이 box 문자면 전체 줄 제거

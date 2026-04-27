@@ -436,6 +436,12 @@ describe("process tree cleanup helpers", () => {
             CommandLine: "claude --mcp",
           },
           {
+            ProcessId: 418,
+            ParentProcessId: 415,
+            Name: "node.exe",
+            CommandLine: "node claude-mcp-server.js",
+          },
+          {
             ProcessId: 416,
             ParentProcessId: 417,
             Name: "node.exe",
@@ -453,12 +459,52 @@ describe("process tree cleanup helpers", () => {
       protectedPids: new Set(),
     });
 
-    assert.equal(result.killed, 6);
+    assert.equal(result.killed, 4);
     assert.deepEqual(
       killed.map(([pid]) => pid),
-      [410, 411, 412, 413, 414, 415],
+      [410, 411, 412, 413],
     );
     assert.ok(killed.every(([, signal]) => signal === "SIGKILL"));
+  });
+
+  it("legacy cleanupOrphanNodeProcesses never kills live Claude/Codex session roots", () => {
+    const killed = [];
+    const result = cleanupOrphanNodeProcesses({
+      isWindows: true,
+      spawnSyncFn: mockSpawnSync({
+        processRecords: [
+          {
+            ProcessId: 510,
+            ParentProcessId: 999991,
+            Name: "claude.exe",
+            CommandLine: "claude",
+          },
+          {
+            ProcessId: 511,
+            ParentProcessId: 510,
+            Name: "node.exe",
+            CommandLine: "node claude-mcp-server.js",
+          },
+          {
+            ProcessId: 512,
+            ParentProcessId: 999992,
+            Name: "codex.exe",
+            CommandLine: "codex",
+          },
+          {
+            ProcessId: 513,
+            ParentProcessId: 512,
+            Name: "node.exe",
+            CommandLine: "node codex-mcp-server.js",
+          },
+        ],
+      }),
+      killFn: (pid, signal) => killed.push([pid, signal]),
+      protectedPids: new Set(),
+    });
+
+    assert.equal(result.killed, 0);
+    assert.deepEqual(killed, []);
   });
 
   it("cleanupOrphanRuntimeProcesses includes bun.exe", () => {
@@ -472,6 +518,64 @@ describe("process tree cleanup helpers", () => {
 
     assert.equal(result.killed, 1);
     assert.deepEqual(killed, [[314, "SIGKILL"]]);
+  });
+
+  it("cleanupOrphanRuntimeProcesses kills orphaned bun gbrain cli.ts serve duplicates", () => {
+    const killed = [];
+    const result = cleanupOrphanRuntimeProcesses({
+      isWindows: true,
+      spawnSyncFn: mockSpawnSync({
+        processRecords: [
+          {
+            ProcessId: 610,
+            ParentProcessId: 999991,
+            Name: "bun.exe",
+            CommandLine:
+              'bun "C:\\Users\\tellang\\.bun\\install\\global\\node_modules\\gbrain\\src\\cli.ts" serve',
+          },
+        ],
+      }),
+      killFn: (pid, signal) => killed.push([pid, signal]),
+      protectedPids: new Set(),
+    });
+
+    assert.equal(result.killed, 1);
+    assert.deepEqual(killed, [[610, "SIGKILL"]]);
+  });
+
+  it("cleanupOrphanRuntimeProcesses preserves bun gbrain serve under live Claude", () => {
+    const killed = [];
+    const result = cleanupOrphanRuntimeProcesses({
+      isWindows: true,
+      spawnSyncFn: mockSpawnSync({
+        processRecords: [
+          {
+            ProcessId: 620,
+            ParentProcessId: 1,
+            Name: "claude.exe",
+            CommandLine: "claude --resume",
+          },
+          {
+            ProcessId: 621,
+            ParentProcessId: 620,
+            Name: "gbrain.exe",
+            CommandLine: "gbrain serve",
+          },
+          {
+            ProcessId: 622,
+            ParentProcessId: 621,
+            Name: "bun.exe",
+            CommandLine:
+              'bun "C:\\Users\\tellang\\.bun\\install\\global\\node_modules\\gbrain\\src\\cli.ts" serve',
+          },
+        ],
+      }),
+      killFn: (pid, signal) => killed.push([pid, signal]),
+      protectedPids: new Set(),
+    });
+
+    assert.equal(result.killed, 0);
+    assert.deepEqual(killed, []);
   });
 
   it("legacy cleanupOrphanNodeProcesses wrapper still works", () => {

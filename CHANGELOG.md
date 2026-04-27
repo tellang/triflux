@@ -4,6 +4,21 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.17.1] - 2026-04-27
+
+### Fixed
+
+- Prevented the hub orphan-process cleanup from terminating active Claude Code or Codex sessions. The periodic cleanup now treats live `claude.exe` and `codex.exe` processes as protected session roots, while still reclaiming narrow legacy runtime leftovers.
+- Added `TFX_DISABLE_ORPHAN_CLEANUP=1` as an emergency gate for hub orphan cleanup and expanded cleanup logs with killed process details so future incidents show the exact PID, process name, command line, and caller.
+- Extended hub runtime cleanup to remove orphaned duplicate `bun ... gbrain/src/cli.ts serve` processes while preserving the live `gbrain` runtime under the active Claude/Codex session.
+- Disabled the broad Stop-hook MCP cleanup by default. `mcp-cleanup.ps1` is now opt-in via `TFX_ENABLE_STOP_MCP_CLEANUP=1`, preventing normal Claude Code response-stop events from killing live MCP runtimes.
+- Hardened SessionStart stale PID cleanup against Windows PID reuse and live Claude/Codex ancestor chains, so stale `tfx-route-*-pids` files cannot kill runtime children from the current session.
+- Cleaned up stray SS3 cursor escape fragments such as `[O[` from routed CLI output.
+
+### Tests
+
+- Added regression coverage for active Claude/Codex session protection, MCP child process protection under those roots, stale PID cleanup safety, Stop-hook MCP cleanup safety, and SS3 cursor artifact cleanup.
+
 ## [10.17.0] - 2026-04-26
 
 ### Fixed

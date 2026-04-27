@@ -217,8 +217,12 @@ function cleanTuiArtifacts(output, cliType) {
 
   let cleaned = output
     .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
+    .replace(/\x1bO[ -~]/g, "")
     .replace(/\x1b\][^\x07]*\x07/g, "")
-    .replace(/\x1b\[[0-9;]*[mGKHJsu]/g, "");
+    .replace(/\x1b\[[0-9;]*[mGKHJsu]/g, "")
+    .replace(/(?:^|\n)[^\S\n]*\[O(?:\[|[A-Za-z])[^\S\n]*(?=\n|$)/g, "")
+    .replace(/\[O\[/g, "")
+    .replace(/\[O[A-Za-z]/g, "");
 
   cleaned = cleaned.replace(/\r/g, "");
 
