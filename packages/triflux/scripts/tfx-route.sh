@@ -1869,6 +1869,11 @@ _codex_config_swap() {
   fi
 }
 
+# codex-recovery.sh 의 recover_codex_stdout 헬퍼 사용. STDOUT_LOG/STDERR_LOG env.
+_TFX_ROUTE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/codex-recovery.sh
+source "$_TFX_ROUTE_DIR/lib/codex-recovery.sh"
+
 run_codex_exec() {
   local prompt="$1"
   local use_tee_flag="$2"
@@ -1889,48 +1894,7 @@ run_codex_exec() {
   worker_pid=$!
   _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
 
-  if [[ ! -s "$STDOUT_LOG" && -s "$STDERR_LOG" ]]; then
-    # stderr에서 마지막 "codex" 마커 이후의 텍스트를 stdout으로 복구
-    # 1차: "codex" 마커 기반 (Windows \r 제거 후 매칭)
-    sed 's/\r$//' "$STDERR_LOG" \
-      | awk '/^codex$/{found=NR;content=""} found && NR>found{content=content RS $0} END{if(content) print substr(content,2)}' \
-      > "$STDOUT_LOG"
-
-    # 2차: 마커 없을 때 node fallback (MCP/헤더/sandbox 로그 제외, 응답 부분만 추출)
-    if [[ ! -s "$STDOUT_LOG" ]]; then
-      node -e '
-        const fs=require("fs"),lines=fs.readFileSync(process.argv[1],"utf-8").split(/\r?\n/);
-        const skip=/^(mcp[: ]|OpenAI Codex|--------|workdir:|model:|provider:|approval:|sandbox:|reasoning|session id:|user$|tokens used|EXIT:|exec$|"[A-Z]:|succeeded in |\s*$)/;
-        const out=lines.filter(l=>!skip.test(l));
-        if(out.length) fs.writeFileSync(process.argv[2],out.join("\n"));
-      ' -- "$STDERR_LOG" "$STDOUT_LOG" 2>/dev/null || true
-    fi
-
-    # 3차: 마커/parser 둘 다 실패하면 stderr 의 마지막 chunk 를 응답 후보로 보존.
-    # codex 가 응답을 markdown/diff format 으로 출력하고 마지막에 "tokens used"
-    # 마커로 끝나는 패턴이 안정적이므로, "tokens used" 직전까지의 tail 을 사용한다.
-    if [[ ! -s "$STDOUT_LOG" ]]; then
-      sed 's/\r$//' "$STDERR_LOG" \
-        | awk '
-            /^tokens used/ { exit }
-            { buf[NR]=$0 }
-            END {
-              start=NR-200; if (start<1) start=1
-              for (i=start; i<=NR; i++) if (i in buf) print buf[i]
-            }' \
-        > "$STDOUT_LOG"
-    fi
-
-    if [[ -s "$STDOUT_LOG" ]]; then
-      echo "[tfx-route] 경고: codex stdout 비어있음, stderr에서 응답 복구 ($(wc -c < "$STDOUT_LOG" | tr -d ' ') bytes)" >&2
-    else
-      # 4차: 모든 복구 실패. stderr.log path 를 사용자에게 명확히 노출해
-      # silent exit 가 진짜로 응답을 잃은 게 아니라 단순히 stdout 회수 실패임을 알린다.
-      # marker 형식은 grep 으로 잡기 쉽도록 고정 prefix 사용.
-      echo "[tfx-route] FALLBACK_FAILED stderr_log=$STDERR_LOG" >&2
-      echo "[tfx-route] 경고: codex stdout 비어있음, stderr 복구도 실패. 위 stderr_log 경로에서 raw codex 출력 확인 가능." >&2
-    fi
-  fi
+  recover_codex_stdout
 
   return "$exit_code_local"
 }
