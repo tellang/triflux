@@ -240,15 +240,15 @@ fi
 
 # ── --async-self-test: 단위 테스트 전용 inert surface (CLI dispatch 우회) ──
 # Inert self-test surface for unit tests. Bypasses CLI dispatch, exercises wrapper only.
-if [[ "$1" == "--async-self-test" ]]; then
+if [[ "${1:-}" == "--async-self-test" ]]; then
   shift
   case "${1:-}" in
     wrapper-sleep-3)
-      mkdir -p "${TFX_JOBS_DIR:-/tmp/tfx-jobs}"
+      mkdir -p "$TFX_JOBS_DIR"
       JOB_ID="selftest-$$-$RANDOM"
-      JOB_DIR="${TFX_JOBS_DIR:-/tmp/tfx-jobs}/$JOB_ID"
+      JOB_DIR="$TFX_JOBS_DIR/$JOB_ID"
       mkdir -p "$JOB_DIR"
-      # Same wrapper pattern as production --async (post-Task E).
+      # Mirrors the wrapper pattern used by production --async (see Task E).
       ( set +e
         trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' EXIT INT TERM HUP
         exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
