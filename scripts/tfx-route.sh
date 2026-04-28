@@ -2481,28 +2481,20 @@ if [[ "$TFX_ASYNC_MODE" -eq 1 ]]; then
   echo "$AGENT_TYPE" > "$JOB_DIR/agent_type"
   date +%s > "$JOB_DIR/start_time"
 
-  # 백그라운드 서브쉘: main 실행 → 결과 저장
+  # 백그라운드 서브쉘: main 실행 → trap 으로 마커 기록
+  # H1' 수정 (Track 3 v2): POSIX 2017 wait spec 은 subshell 환경에서
+  # wait 가 즉시 리턴하도록 강제하므로 기존 데몬 블록 (wait $bg_pid; touch done)
+  # 은 main 시작 전에 done 마커를 찍는 dead code 였다. 대신 서브쉘 내부에서
+  # trap EXIT/INT/TERM/HUP 으로 main 종료 시점에 정확히 마커를 기록한다.
   echo "starting" > "$JOB_DIR/pid"
-  (
-    set +e  # main 내부 에러가 exit_code 기록 전에 서브쉘을 죽이는 것 방지
+  ( set +e
+    trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' EXIT INT TERM HUP
     exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
-    main; _ec=$?
-    echo "$_ec" > "$JOB_DIR/exit_code"
-    touch "$JOB_DIR/done"
+    main
   ) &
   bg_pid=$!
   echo "$bg_pid" > "$JOB_DIR/pid"
-
-  # 종료 감지 데몬 (main이 signal/crash로 죽어도 done 마커 생성)
-  (
-    wait "$bg_pid" 2>/dev/null
-    ec=$?
-    if [[ ! -f "$JOB_DIR/done" ]]; then
-      echo "$ec" > "$JOB_DIR/exit_code"
-      touch "$JOB_DIR/done"
-    fi
-  ) &
-  disown
+  disown "$bg_pid"          # explicit PID — H1' fix (was missing arg, disowning daemon only)
 
   # 즉시 리턴: 1초 이내에 Claude Code Bash 도구 완료
   echo "$JOB_ID"
