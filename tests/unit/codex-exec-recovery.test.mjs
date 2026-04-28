@@ -29,6 +29,19 @@ function invokeRecovery(stderrContent) {
   return { stdout, stderr, exit: res.status };
 }
 
+const FIXTURE_DIR = "tests/fixtures/codex-exec-recovery";
+
+function loadFixture(name) {
+  return readFileSync(`${FIXTURE_DIR}/${name}`, "utf-8");
+}
+
+function invokeWithFixture(name) {
+  return invokeRecovery(loadFixture(name));
+}
+
+const RECOVERED_MARKER = "stderr에서 응답 복구";
+const FALLBACK_FAILED_MARKER = "FALLBACK_FAILED stderr_log=";
+
 describe("recover_codex_stdout", () => {
   it("function is sourceable and returns 0 on empty STDERR_LOG", () => {
     const res = invokeRecovery("");
