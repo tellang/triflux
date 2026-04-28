@@ -1537,13 +1537,31 @@ _wait_with_heartbeat() {
   if [[ -t 2 ]]; then
     heartbeat_monitor "$wpid" &
   else
-    heartbeat_monitor "$wpid" < /dev/null >>"$STDERR_LOG" 2>&1 &
+    # < /dev/null 은 git bash sleep 자식의 caller pipe 점유를 막는 핵심 (1b31a63).
+    # stderr redirect 는 의도치 않게 caller heartbeat 를 STDERR_LOG 로 흡수했으므로 제거.
+    heartbeat_monitor "$wpid" < /dev/null &
   fi
   hb_pid=$!
   wait "$wpid" || ec=$?
   kill "$hb_pid" 2>/dev/null; wait "$hb_pid" 2>/dev/null
   return "$ec"
 }
+
+# Inert self-test surface for unit tests. Bypasses CLI dispatch.
+if [[ "${1:-}" == "--inert-self-test" ]]; then
+  shift
+  case "${1:-}" in
+    heartbeat-3s)
+      sleep 3 &
+      _wait_with_heartbeat $! 1
+      exit 0
+      ;;
+    *)
+      echo "[tfx-route] unknown self-test target: ${1:-<empty>}" >&2
+      exit 2
+      ;;
+  esac
+fi
 
 resolve_worker_runner_script() {
   _resolve_script "${TFX_ROUTE_WORKER_RUNNER:-}" "$(_get_script_dir)/tfx-route-worker.mjs"
