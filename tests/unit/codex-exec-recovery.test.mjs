@@ -76,4 +76,23 @@ describe("recover_codex_stdout", () => {
       `expected '복구' marker; stderr=${stderr}`,
     );
   });
+
+  it("2차 node parser: filters skip patterns when codex marker absent", () => {
+    const { stdout, stderr, exit } = invokeWithFixture("path2-node-parser.stderr.log");
+    assert.equal(exit, 0);
+    assert.match(
+      stdout,
+      /This is the path 2 response content extracted by node parser/,
+      "2차 should preserve content lines that don't match skip regex",
+    );
+    assert.match(stdout, /It survives the skip filter/);
+    assert.doesNotMatch(stdout, /^mcp:/m, "skip regex must drop mcp: lines");
+    assert.doesNotMatch(stdout, /^workdir:/m, "skip regex must drop workdir: lines");
+    assert.doesNotMatch(stdout, /^tokens used/m, "skip regex must drop tokens used line");
+    assert.doesNotMatch(stdout, /^EXIT:/m, "skip regex must drop EXIT: line");
+    assert.ok(
+      stderr.includes(RECOVERED_MARKER),
+      `expected '복구' marker; stderr=${stderr}`,
+    );
+  });
 });
