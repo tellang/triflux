@@ -19,14 +19,34 @@ describe("--job-status orphan-running classification", () => {
     writeFileSync(join(jobDir, "agent_type"), "executor");
     writeFileSync(join(jobDir, "start_time"), String(Math.floor(Date.now() / 1000)));
 
-    // Spawn a real sleep child whose PID we record. sleep 5 is long enough for
+    // Spawn a real sleep child whose PID we record. sleep 30 is long enough for
     // the assertion below to fire; cleanup kills it directly by PID, not via pkill.
+    //
+    // Why script-file + nohup (not `bash -c "sleep 5 & echo $! > path; disown"`):
+    //   1. Inline `bash -c` with Windows backslash paths gets escape-mangled by
+    //      Git Bash → `child_pids` ends up empty (same flaw documented in
+    //      `tfx-route-stall-kill.test.mjs:120-125`). Script file + cwd avoids it.
+    //   2. On Windows MSYS, `disown` does not actually detach a child from the
+    //      bash session — when the parent bash exits, the sleep child is reaped.
+    //      `nohup` with stdio redirected to /dev/null does survive parent exit.
     const childPidsPath = join(jobDir, "child_pids");
-    spawnSync(
-      "bash",
-      ["-c", `sleep 5 & echo $! > "${childPidsPath}"; disown; exit 0`],
-      { encoding: "utf-8" },
+    const spawnScriptPath = join(jobDir, "_spawn_child.sh");
+    writeFileSync(
+      spawnScriptPath,
+      [
+        "#!/usr/bin/env bash",
+        "set -u",
+        "nohup sleep 30 >/dev/null 2>&1 &",
+        'echo "$!" > child_pids',
+        "disown",
+        "exit 0",
+        "",
+      ].join("\n"),
     );
+    spawnSync("bash", [spawnScriptPath], {
+      encoding: "utf-8",
+      cwd: jobDir,
+    });
 
     const res = spawnSync(
       "bash",

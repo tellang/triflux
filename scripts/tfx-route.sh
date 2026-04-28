@@ -180,6 +180,15 @@ if [[ "${1:-}" == "--job-status" ]]; then
       local_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null | tr -d ' ' || echo 0)
       elapsed=$(( $(date +%s) - $(cat "$job_dir/start_time" 2>/dev/null || date +%s) ))
       echo "running elapsed=${elapsed}s output=${local_bytes}B"
+    elif [[ -s "$job_dir/child_pids" ]]; then
+      # wrapper 죽었지만 codex child 가 살아남았으면 orphan-running 으로 분류 (Issue #176).
+      while IFS= read -r child; do
+        if [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null; then
+          echo "orphan-running pid=$child"
+          exit 0
+        fi
+      done < "$job_dir/child_pids"
+      echo "failed"
     else
       # 프로세스 종료됐는데 done 마커 없음 → 비정상 종료
       echo "failed"
@@ -1942,6 +1951,10 @@ run_codex_exec() {
       "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
     fi
     worker_pid=$!
+    # Track codex child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
+    if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
+      echo "$worker_pid" >> "$JOB_DIR/child_pids"
+    fi
     _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
   }
 
@@ -2042,6 +2055,10 @@ run_codex_mcp() {
     "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
+  # Track codex MCP child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
+  if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
+    echo "$worker_pid" >> "$JOB_DIR/child_pids"
+  fi
   _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
 
   # 모듈 로드 실패(의존성 누락) → MCP transport exit code로 변환하여 fallback 트리거
