@@ -796,6 +796,19 @@ class AccountBroker extends EventEmitter {
     }));
   }
 
+  // ── disabled marker ───────────────────────────────────────────
+
+  /**
+   * True when the broker holds zero accounts. Used by adapters to distinguish
+   * "broker exists but is empty (disable env / no accounts)" from "broker has
+   * accounts but lease() returned null (all busy/cooldown/circuit)" — the
+   * former should fall back to default ~/.codex/auth.json instead of returning
+   * circuit_open.
+   */
+  get isDisabled() {
+    return this.#state.size === 0;
+  }
+
   // ── nextAvailableEta ──────────────────────────────────────────
 
   nextAvailableEta(provider) {
@@ -849,7 +862,22 @@ function loadConfig() {
 
 // ── Singleton ────────────────────────────────────────────────────
 
+function isBrokerDisabledByEnv() {
+  const flag = process.env.TFX_DISABLE_ACCOUNT_BROKER;
+  return flag === "1" || flag === "true";
+}
+
+function createEmptyBroker() {
+  return new AccountBroker({ codex: [], gemini: [] });
+}
+
 function createBroker() {
+  if (isBrokerDisabledByEnv()) {
+    // Empty broker: lease() always returns null → callers fall back to default
+    // single-account path (~/.codex/auth.json). Avoids per-account multiplexing
+    // race conditions while keeping the AccountBroker API surface intact.
+    return createEmptyBroker();
+  }
   const config = loadConfig();
   if (!config) return null;
   try {
@@ -862,6 +890,10 @@ function createBroker() {
 
 /** Re-read config and replace the module-level singleton. ESM live binding propagates to all importers. */
 function reloadBroker() {
+  if (isBrokerDisabledByEnv()) {
+    broker = createEmptyBroker();
+    return { ok: true, broker, disabled: true };
+  }
   const config = loadConfig();
   if (!config) return { ok: false, error: "Config not found or invalid" };
   try {

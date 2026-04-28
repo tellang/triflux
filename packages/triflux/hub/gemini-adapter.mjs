@@ -113,7 +113,7 @@ export function buildExecArgs(opts = {}) {
 
 // ── Execution ───────────────────────────────────────────────────
 
-async function runGemini(prompt, workdir, preflight, attempt) {
+async function runGemini(prompt, workdir, preflight, attempt, lease) {
   const dir = join(tmpdir(), "triflux-gemini-exec");
   mkdirSync(dir, { recursive: true });
   const resultFile = join(
@@ -125,9 +125,16 @@ async function runGemini(prompt, workdir, preflight, attempt) {
     allowedMcpServers: attempt.allowedMcpServers,
     excludeMcpServers: attempt.excludeMcpServers,
   });
+  // PRD A1: lease.env 가 있으면 spawn env 에 적용 (예: GOOGLE_API_KEY 등 account-specific
+  // 환경변수). lease 가 null 이면 default 동작 유지 (부모 env inherit).
+  const spawnEnv =
+    lease?.env && typeof lease.env === "object"
+      ? { ...process.env, ...lease.env }
+      : undefined;
   return runProcess(command, workdir, attempt.timeout, {
     resultFile,
     inferStallMode,
+    spawnEnv,
   });
 }
 
