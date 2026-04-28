@@ -269,11 +269,15 @@ export async function executeWithCircuitBroker({
   try {
     lastResult = await withRetry(
       async () => {
+        // PRD A1: lease 메타데이터를 runFn 에 전달해서 adapter 가 실제 spawn 시
+        // 해당 account 의 authFile/env/profile 을 적용할 수 있게 한다. lease=null
+        // 이면 adapter 는 default 경로 (단일 ~/.codex/auth.json) 로 동작한다.
         const result = await runFn(
           opts.prompt || "",
           opts.workdir || process.cwd(),
           preflight,
           attempts[attemptIndex],
+          lease,
         );
         const current = {
           ...result,
@@ -372,7 +376,14 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
   let child;
 
   try {
-    child = spawn(command, { cwd: workdir, shell: true, windowsHide: true });
+    // PRD A1: opts.spawnEnv 가 있으면 그 env 로 spawn (lease 의 authFile/env 적용).
+    // undefined 면 spawn 의 default 동작 (부모 process env inherit) 유지.
+    child = spawn(command, {
+      cwd: workdir,
+      shell: true,
+      windowsHide: true,
+      env: opts.spawnEnv,
+    });
   } catch (error) {
     return createResult(false, {
       stderr: String(error?.message || error),
