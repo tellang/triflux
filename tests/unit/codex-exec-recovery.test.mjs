@@ -95,4 +95,22 @@ describe("recover_codex_stdout", () => {
       `expected '복구' marker; stderr=${stderr}`,
     );
   });
+
+  it("3차 stderr tail: dumps everything before 'tokens used' when 1·2차 fail", () => {
+    const { stdout, stderr, exit } = invokeWithFixture("path3-stderr-tail.stderr.log");
+    assert.equal(exit, 0);
+    // 3차 dumps lines that 2차 would have filtered, distinguishing it from 2차.
+    assert.match(stdout, /^mcp: connected/m, "3차 retains mcp: line that 2차 would filter");
+    assert.match(stdout, /^workdir:/m, "3차 retains workdir: line that 2차 would filter");
+    assert.match(stdout, /^reasoning high/m, "3차 retains reasoning line");
+    assert.doesNotMatch(
+      stdout,
+      /^tokens used/m,
+      "3차 awk exits at 'tokens used' before buffering it",
+    );
+    assert.ok(
+      stderr.includes(RECOVERED_MARKER),
+      `expected '복구' marker; stderr=${stderr}`,
+    );
+  });
 });
