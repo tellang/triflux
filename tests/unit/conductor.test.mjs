@@ -34,12 +34,14 @@ function makeMockSpawn({
   exitCode = 0,
   exitSignal = null,
   exitDelayMs = 0,
+  killExits = true,
+  pid = null,
 } = {}) {
   return function mockSpawn() {
     const child = new EventEmitter();
     let exitTimer = null;
     let exited = false;
-    child.pid = Math.floor(Math.random() * 1_000_000) + 1;
+    child.pid = pid || Math.floor(Math.random() * 1_000_000) + 1;
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
     child.stdin = new PassThrough();
@@ -57,7 +59,7 @@ function makeMockSpawn({
       });
     };
     child.kill = () => {
-      fire(null, "SIGTERM");
+      if (killExits) fire(null, "SIGTERM");
       return true;
     };
     if (exitDelayMs > 0) {
@@ -66,6 +68,36 @@ function makeMockSpawn({
       fire(exitCode, exitSignal);
     }
     return child;
+  };
+}
+
+function makeMockProcessUtils({
+  snapshot = [],
+  findError = null,
+  calls = null,
+} = {}) {
+  const record = calls || {
+    findProcessTree: [],
+    killProcessTreeSnapshot: [],
+    killProcessTree: [],
+  };
+  return {
+    calls: record,
+    deps: {
+      findProcessTree(pid) {
+        record.findProcessTree.push(pid);
+        if (findError) throw findError;
+        return snapshot;
+      },
+      killProcessTreeSnapshot(value) {
+        record.killProcessTreeSnapshot.push(value);
+        return { killed: value.length, missing: 0 };
+      },
+      killProcessTree(pid) {
+        record.killProcessTree.push(pid);
+        return { ok: true, killed: 1, errors: [] };
+      },
+    },
   };
 }
 
@@ -472,6 +504,156 @@ describe("conductor: shutdown", () => {
 
     const [entry] = conductor.getSnapshot();
     assert.equal(entry.state, STATES.DEAD);
+  });
+
+  it("global shutdown cleanups terminal sessions", async () => {
+    await conductor.shutdown("recreate_for_terminal_cleanup");
+    const procUtils = makeMockProcessUtils({
+      snapshot: [{ pid: 9101 }, { pid: 9102 }],
+    });
+    conductor = makeConductor(logsDir, {
+      graceMs: 10,
+      deps: {
+        spawn: makeMockSpawn({ exitDelayMs: 300, pid: 9101 }),
+        ...procUtils.deps,
+      },
+    });
+
+    conductor.spawnSession(minConfig({ id: "terminal-shutdown-cleanup" }));
+
+    await waitFor(() => procUtils.calls.findProcessTree.length === 1);
+    await waitFor(() => conductor.getSnapshot()[0]?.state === STATES.COMPLETED);
+    await conductor.shutdown("terminal_cleanup_test");
+
+    assert.deepEqual(procUtils.calls.killProcessTreeSnapshot, [
+      [{ pid: 9101 }, { pid: 9102 }],
+    ]);
+  });
+});
+
+// ── 8-1. process tree cleanup ───────────────────────────────────────────────
+
+describe("conductor: process tree cleanup", () => {
+  it("cleanupChild kills child + descendants when snapshot exists", async () => {
+    await conductor.shutdown("recreate_for_snapshot_cleanup");
+    const procUtils = makeMockProcessUtils({
+      snapshot: [{ pid: 4201 }, { pid: 4202 }],
+    });
+    conductor = makeConductor(logsDir, {
+      graceMs: 10,
+      deps: {
+        spawn: makeMockSpawn({
+          exitDelayMs: 10_000,
+          killExits: false,
+          pid: 4201,
+        }),
+        ...procUtils.deps,
+      },
+    });
+
+    const cfg = minConfig({ id: "snapshot-cleanup" });
+    conductor.spawnSession(cfg);
+    await waitFor(() => procUtils.calls.findProcessTree.length === 1);
+
+    await conductor.killSession(cfg.id, "snapshot_cleanup_test");
+
+    assert.deepEqual(procUtils.calls.killProcessTreeSnapshot, [
+      [{ pid: 4201 }, { pid: 4202 }],
+    ]);
+    assert.deepEqual(procUtils.calls.killProcessTree, [4201]);
+  });
+
+  it("cleanupChild handles missing snapshot gracefully", async () => {
+    await conductor.shutdown("recreate_for_missing_snapshot_cleanup");
+    const procUtils = makeMockProcessUtils({
+      findError: new Error("snapshot failed"),
+    });
+    conductor = makeConductor(logsDir, {
+      graceMs: 10,
+      deps: {
+        spawn: makeMockSpawn({ exitDelayMs: 10_000, pid: 4301 }),
+        ...procUtils.deps,
+      },
+    });
+
+    const cfg = minConfig({ id: "missing-snapshot-cleanup" });
+    conductor.spawnSession(cfg);
+    await waitFor(() => procUtils.calls.findProcessTree.length === 1);
+
+    await assert.doesNotReject(() =>
+      conductor.killSession(cfg.id, "missing_snapshot_cleanup_test"),
+    );
+    assert.deepEqual(procUtils.calls.killProcessTreeSnapshot, []);
+  });
+
+  it("handleFailure final branch invokes cleanupChild before DEAD", async () => {
+    await conductor.shutdown("recreate_for_final_failure_cleanup");
+    const order = [];
+    const procUtils = makeMockProcessUtils({
+      snapshot: [{ pid: 4401 }, { pid: 4402 }],
+      calls: {
+        findProcessTree: [],
+        killProcessTreeSnapshot: [],
+        killProcessTree: [],
+      },
+    });
+    const deps = {
+      findProcessTree: procUtils.deps.findProcessTree,
+      killProcessTree(pid) {
+        procUtils.calls.killProcessTree.push(pid);
+        return { ok: true, killed: 1, errors: [] };
+      },
+      killProcessTreeSnapshot(value) {
+        order.push("cleanup");
+        procUtils.calls.killProcessTreeSnapshot.push(value);
+        return { killed: value.length, missing: 0 };
+      },
+      spawn: makeMockSpawn({ exitCode: 1, exitDelayMs: 300, pid: 4401 }),
+    };
+    conductor = createConductor({
+      logsDir,
+      maxRestarts: 0,
+      graceMs: 10,
+      probeOpts: {
+        intervalMs: 999_999,
+        l1ThresholdMs: 999_999,
+        l3ThresholdMs: 999_999,
+      },
+      deps,
+    });
+    conductor.on("stateChange", (event) => {
+      if (event.to === STATES.DEAD) order.push("dead");
+    });
+
+    conductor.spawnSession(minConfig({ id: "final-failure-cleanup" }));
+
+    await waitFor(() => procUtils.calls.findProcessTree.length === 1);
+    await waitFor(() => order.includes("dead"));
+
+    assert.ok(
+      order.indexOf("cleanup") > -1 &&
+        order.indexOf("cleanup") < order.indexOf("dead"),
+      `expected cleanup before DEAD, got ${order.join(",")}`,
+    );
+  });
+
+  it("spawnSession captures descendantSnapshot after spawn", async () => {
+    await conductor.shutdown("recreate_for_spawn_snapshot_capture");
+    const procUtils = makeMockProcessUtils({
+      snapshot: [{ pid: 4501 }, { pid: 4502 }],
+    });
+    conductor = makeConductor(logsDir, {
+      graceMs: 10,
+      deps: {
+        spawn: makeMockSpawn({ exitDelayMs: 10_000, pid: 4501 }),
+        ...procUtils.deps,
+      },
+    });
+
+    conductor.spawnSession(minConfig({ id: "spawn-snapshot-capture" }));
+
+    await waitFor(() => procUtils.calls.findProcessTree.length === 1);
+    assert.deepEqual(procUtils.calls.findProcessTree, [4501]);
   });
 });
 
