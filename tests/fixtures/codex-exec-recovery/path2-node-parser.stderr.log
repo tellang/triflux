@@ -1,0 +1,13 @@
+mcp: connected
+OpenAI Codex
+--------
+workdir: /tmp/codex
+model: gpt-5
+provider: openai
+approval: never
+sandbox: workspace-write
+reasoning high
+This is the path 2 response content extracted by node parser.
+It survives the skip filter.
+tokens used 50
+EXIT: 0
