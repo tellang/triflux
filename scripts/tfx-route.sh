@@ -1537,7 +1537,9 @@ _wait_with_heartbeat() {
   if [[ -t 2 ]]; then
     heartbeat_monitor "$wpid" &
   else
-    heartbeat_monitor "$wpid" < /dev/null >>"$STDERR_LOG" 2>&1 &
+    # < /dev/null 은 git bash sleep 자식의 caller pipe 점유를 막는 핵심 (1b31a63).
+    # stderr redirect 는 의도치 않게 caller heartbeat 를 STDERR_LOG 로 흡수했으므로 제거.
+    heartbeat_monitor "$wpid" < /dev/null &
   fi
   hb_pid=$!
   wait "$wpid" || ec=$?
