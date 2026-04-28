@@ -796,6 +796,19 @@ class AccountBroker extends EventEmitter {
     }));
   }
 
+  // ── disabled marker ───────────────────────────────────────────
+
+  /**
+   * True when the broker holds zero accounts. Used by adapters to distinguish
+   * "broker exists but is empty (disable env / no accounts)" from "broker has
+   * accounts but lease() returned null (all busy/cooldown/circuit)" — the
+   * former should fall back to default ~/.codex/auth.json instead of returning
+   * circuit_open.
+   */
+  get isDisabled() {
+    return this.#state.size === 0;
+  }
+
   // ── nextAvailableEta ──────────────────────────────────────────
 
   nextAvailableEta(provider) {

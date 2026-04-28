@@ -241,8 +241,14 @@ export async function executeWithCircuitBroker({
 
   // access broker as live binding property (not destructured) so reloadBroker() propagates
   const hasBroker = brokerMod.broker != null;
-  const lease = hasBroker ? brokerMod.broker.lease({ provider }) : null;
-  if (hasBroker && !lease) {
+  // Empty broker (TFX_DISABLE_ACCOUNT_BROKER=1 or zero accounts) must not
+  // gate execution. lease() is null because there are no accounts to lease,
+  // not because all accounts are busy/cooldown/circuit. Treat it like
+  // hasBroker=false and fall through to the default auth path.
+  const brokerDisabled = hasBroker && brokerMod.broker.isDisabled === true;
+  const effectiveBroker = hasBroker && !brokerDisabled;
+  const lease = effectiveBroker ? brokerMod.broker.lease({ provider }) : null;
+  if (effectiveBroker && !lease) {
     return createResult(false, { fellBack: true, failureMode: "circuit_open" });
   }
 
