@@ -20,6 +20,11 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
+import {
+  findProcessTree,
+  killProcessTree,
+  killProcessTreeSnapshot,
+} from "../lib/process-utils.mjs";
 import { execFile, spawn } from "../lib/spawn-trace.mjs";
 import { killProcess } from "../platform.mjs";
 import { createHubHealthChecker } from "./check-mcp-hub.mjs";
@@ -33,11 +38,6 @@ import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
 import { extractCompletionPayload } from "./extract-completion-payload.mjs";
 import { createHealthProbe } from "./health-probe.mjs";
 import { buildLauncher } from "./launcher-template.mjs";
-import {
-  killProcessTree,
-  killProcessTreeSnapshot,
-  findProcessTree,
-} from "../lib/process-utils.mjs";
 import { createSentinelCapture } from "./sentinel-capture.mjs";
 import {
   buildSynapseTaskSummary,
