@@ -1545,6 +1545,22 @@ _wait_with_heartbeat() {
   return "$ec"
 }
 
+# Inert self-test surface for unit tests. Bypasses CLI dispatch.
+if [[ "${1:-}" == "--inert-self-test" ]]; then
+  shift
+  case "${1:-}" in
+    heartbeat-3s)
+      sleep 3 &
+      _wait_with_heartbeat $! 1
+      exit 0
+      ;;
+    *)
+      echo "[tfx-route] unknown self-test target: ${1:-<empty>}" >&2
+      exit 2
+      ;;
+  esac
+fi
+
 resolve_worker_runner_script() {
   _resolve_script "${TFX_ROUTE_WORKER_RUNNER:-}" "$(_get_script_dir)/tfx-route-worker.mjs"
 }
