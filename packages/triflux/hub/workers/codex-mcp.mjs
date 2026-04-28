@@ -116,6 +116,22 @@ function withTimeout(promise, timeoutMs, message) {
   });
 }
 
+// Known noise-only output patterns from codex MCP that indicate transport failure
+// despite exitCode=0. Each entry is matched after trim() against the full output
+// string. Length cap is applied separately to avoid masking real responses that
+// happen to contain a noise substring as a header line.
+const NOISE_ONLY_OUTPUT_PATTERNS = Object.freeze([
+  /^MCP issues detected\.\s*Run \/mcp list for status\.?$/i,
+]);
+const NOISE_ONLY_MAX_BYTES = 256;
+
+function isNoiseOnlyOutput(text) {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > NOISE_ONLY_MAX_BYTES) return false;
+  return NOISE_ONLY_OUTPUT_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
 function watchBootstrapClose(transport) {
   let active = true;
   const promise = new Promise((_, reject) => {
@@ -610,6 +626,7 @@ export async function runCodexMcpCli(argv = process.argv.slice(2)) {
     const result = await worker.execute(options.prompt, options);
     const hasOutput =
       typeof result.output === "string" && result.output.trim().length > 0;
+    const noiseOnly = hasOutput && isNoiseOnlyOutput(result.output);
     if (hasOutput) {
       process.stdout.write(result.output);
       if (!result.output.endsWith("\n")) {
@@ -622,11 +639,23 @@ export async function runCodexMcpCli(argv = process.argv.slice(2)) {
     // response. Without this guard, tfx-route.sh sees STDOUT_LOG=0 bytes and
     // treats it as success — caller gets nothing back.
     // Promote to a transport failure so the wrapper falls back to `codex exec`.
+    //
+    // Noise-only guard (codex 0.125.0+, P2 swarm signature):
+    // codex MCP can also return exitCode=0 with a short noise-only message like
+    // "MCP issues detected. Run /mcp list for status." (~48 bytes) instead of
+    // an actual response payload. trim().length > 0 passes the empty-output
+    // check, so the previous guard misses this case. Pattern-match known noise
+    // strings under a small length cap and promote to transport failure too.
     if (result.error?.code === "CODEX_TRANSPORT_ERROR") {
       process.exitCode = CODEX_MCP_TRANSPORT_EXIT_CODE;
     } else if (!hasOutput && result.exitCode === 0) {
       console.error(
         "[codex-mcp] WARNING: empty output with exit 0 — treating as transport failure (codex 0.124.0 silent-flush regression). Wrapper will fall back to exec path.",
+      );
+      process.exitCode = CODEX_MCP_TRANSPORT_EXIT_CODE;
+    } else if (noiseOnly && result.exitCode === 0) {
+      console.error(
+        "[codex-mcp] WARNING: noise-only output (codex MCP error string without payload) with exit 0 — treating as transport failure. Wrapper will fall back to exec path.",
       );
       process.exitCode = CODEX_MCP_TRANSPORT_EXIT_CODE;
     } else {
