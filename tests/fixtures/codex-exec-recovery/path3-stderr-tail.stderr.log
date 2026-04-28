@@ -1,0 +1,10 @@
+mcp: connected
+OpenAI Codex
+--------
+workdir: /tmp/codex
+model: gpt-5
+provider: openai
+approval: never
+sandbox: workspace-write
+reasoning high
+tokens used 75

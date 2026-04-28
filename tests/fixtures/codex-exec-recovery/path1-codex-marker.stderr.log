@@ -1,0 +1,7 @@
+OpenAI Codex
+--------
+workdir: /tmp/codex
+codex
+This is the actual response content from path 1.
+It has multiple lines.
+And ends here without tokens marker.
