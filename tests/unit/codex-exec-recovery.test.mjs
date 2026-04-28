@@ -113,4 +113,24 @@ describe("recover_codex_stdout", () => {
       `expected '복구' marker; stderr=${stderr}`,
     );
   });
+
+  it("4차 FALLBACK_FAILED: emits marker when all 3 recovery paths fail", () => {
+    const { stdout, stderr, exit } = invokeWithFixture("path4-fallback-failed.stderr.log");
+    assert.equal(exit, 0, "helper still returns 0 even when recovery fails");
+    assert.equal(stdout, "", "stdout must remain empty when all paths fail");
+    assert.ok(
+      stderr.includes(FALLBACK_FAILED_MARKER),
+      `expected '${FALLBACK_FAILED_MARKER}' marker; stderr=${stderr}`,
+    );
+    assert.match(
+      stderr,
+      /stderr 복구도 실패/,
+      "expected human-readable stderr 복구 실패 message",
+    );
+    assert.doesNotMatch(
+      stderr,
+      new RegExp(RECOVERED_MARKER),
+      "복구 marker must NOT appear when no recovery succeeded",
+    );
+  });
 });
