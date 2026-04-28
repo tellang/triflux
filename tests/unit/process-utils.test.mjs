@@ -55,7 +55,7 @@ function mockSpawnSync({ processRecords = [], failTaskkill = false } = {}) {
 const SWARM_PROCS = [
   {
     ProcessId: 310,
-    ParentProcessId: 1,
+    ParentProcessId: 999991,
     Name: "node.exe",
     CommandLine: "node C:\\repo\\.codex-swarm\\wt-alpha\\hub\\server.mjs",
   },
@@ -67,37 +67,37 @@ const SWARM_PROCS = [
   },
   {
     ProcessId: 312,
-    ParentProcessId: 1,
+    ParentProcessId: 999992,
     Name: "node.exe",
     CommandLine: "node C:\\other\\hub\\server.mjs",
   },
   {
     ProcessId: 313,
-    ParentProcessId: 1,
+    ParentProcessId: 999993,
     Name: "conhost.exe",
     CommandLine: "conhost.exe psmux session-1",
   },
   {
     ProcessId: 314,
-    ParentProcessId: 1,
+    ParentProcessId: 999994,
     Name: "bun.exe",
     CommandLine: "bun gbrain serve",
   },
   {
     ProcessId: 315,
-    ParentProcessId: 1,
+    ParentProcessId: 999995,
     Name: "git.exe",
     CommandLine: "git fsmonitor--daemon run --detach",
   },
   {
     ProcessId: 316,
-    ParentProcessId: 1,
+    ParentProcessId: 999996,
     Name: "bun.exe",
     CommandLine: "bun gbrain serve C:\\repo\\.codex-swarm\\wt-alpha",
   },
   {
     ProcessId: 317,
-    ParentProcessId: 1,
+    ParentProcessId: 999997,
     Name: "git.exe",
     CommandLine:
       "git -C C:\\repo\\.codex-swarm\\wt-alpha fsmonitor--daemon run --detach",
@@ -618,7 +618,7 @@ describe("process tree cleanup helpers", () => {
         processRecords: [
           {
             ProcessId: 620,
-            ParentProcessId: 1,
+            ParentProcessId: 999990,
             Name: "claude.exe",
             CommandLine: "claude --resume",
           },
