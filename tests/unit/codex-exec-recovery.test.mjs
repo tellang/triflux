@@ -51,4 +51,29 @@ describe("recover_codex_stdout", () => {
       `helper should exit 0 on empty stderr; got status=${res.exit}, stderr=${res.stderr}`,
     );
   });
+
+  it("1차 codex marker: extracts content after last 'codex' line", () => {
+    const { stdout, stderr, exit } = invokeWithFixture("path1-codex-marker.stderr.log");
+    assert.equal(exit, 0);
+    assert.match(
+      stdout,
+      /This is the actual response content from path 1/,
+      "1차 should preserve real response content",
+    );
+    assert.match(stdout, /And ends here without tokens marker/);
+    assert.doesNotMatch(
+      stdout,
+      /^OpenAI Codex/m,
+      "header before 'codex' marker must not leak into stdout",
+    );
+    assert.doesNotMatch(
+      stdout,
+      /^workdir:/m,
+      "header before 'codex' marker must not leak into stdout",
+    );
+    assert.ok(
+      stderr.includes(RECOVERED_MARKER),
+      `expected '복구' marker; stderr=${stderr}`,
+    );
+  });
 });
