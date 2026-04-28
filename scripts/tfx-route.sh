@@ -151,7 +151,8 @@ build_codex_base() {
 }
 
 # ── Async Job 디렉토리 ──
-TFX_JOBS_DIR="${TFX_TMP}/tfx-jobs"
+# Honor caller-provided TFX_JOBS_DIR env (used by unit tests for isolated jobs dirs).
+TFX_JOBS_DIR="${TFX_JOBS_DIR:-${TFX_TMP}/tfx-jobs}"
 
 # ── --job-status / --job-result 핸들러 (인자 파싱 전에 처리) ──
 if [[ "${1:-}" == "--job-status" ]]; then
@@ -235,6 +236,35 @@ if [[ "${1:-}" == "--job-wait" ]]; then
   # max_wait 도달했지만 아직 실행 중
   echo "still_running elapsed=${elapsed}s"
   exit 0
+fi
+
+# ── --async-self-test: 단위 테스트 전용 inert surface (CLI dispatch 우회) ──
+# Inert self-test surface for unit tests. Bypasses CLI dispatch, exercises wrapper only.
+if [[ "$1" == "--async-self-test" ]]; then
+  shift
+  case "${1:-}" in
+    wrapper-sleep-3)
+      mkdir -p "${TFX_JOBS_DIR:-/tmp/tfx-jobs}"
+      JOB_ID="selftest-$$-$RANDOM"
+      JOB_DIR="${TFX_JOBS_DIR:-/tmp/tfx-jobs}/$JOB_ID"
+      mkdir -p "$JOB_DIR"
+      # Same wrapper pattern as production --async (post-Task E).
+      ( set +e
+        trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' EXIT INT TERM HUP
+        exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
+        sleep 3
+      ) &
+      bg_pid=$!
+      echo "$bg_pid" > "$JOB_DIR/pid"
+      disown "$bg_pid"
+      echo "$JOB_ID"
+      exit 0
+      ;;
+    *)
+      echo "[tfx-route] unknown async-self-test target: ${1:-<empty>}" >&2
+      exit 2
+      ;;
+  esac
 fi
 
 # ── --async 플래그 감지 ──
