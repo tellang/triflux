@@ -1902,15 +1902,51 @@ run_codex_exec() {
   # -c flags는 codex exec에서 MCP enabled 제어 불가 — config swap으로 대체
   # config swap은 codex 블록 최상단(_codex_config_swap "filter")에서 실행됨
 
-  # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
-  # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
-  if [[ "$use_tee_flag" == "true" ]]; then
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
-  else
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+  _attempt_codex_run() {
+    exit_code_local=0
+    # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
+    # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
+    if [[ "$use_tee_flag" == "true" ]]; then
+      "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    else
+      "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    fi
+    worker_pid=$!
+    _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
+  }
+
+  _attempt_codex_run
+
+  # Tier-fallback: ChatGPT account (Plus tier 등) 가 gpt-5.5 거부 시 같은 effort 의
+  # gpt-5.4 로 1회 강등 재시도. effort 는 그대로, model 만 한 단계 낮춤.
+  # 매핑: gpt55_xhigh→gpt54_xhigh, gpt55_high→gpt54_high, gpt55_med/low→gpt54_low.
+  # 출처: Issue #211 — codex CLI tier-aware fallback.
+  if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
+    local fallback_profile=""
+    case "$CLI_EFFORT" in
+      gpt55_xhigh) fallback_profile="gpt54_xhigh" ;;
+      gpt55_high)  fallback_profile="gpt54_high" ;;
+      gpt55_med)   fallback_profile="gpt54_low" ;;
+      gpt55_low)   fallback_profile="gpt54_low" ;;
+    esac
+    if [[ -n "$fallback_profile" ]]; then
+      echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2
+      local -a new_args=()
+      local skip_next=0
+      for arg in "${codex_args[@]}"; do
+        if [[ "$skip_next" -eq 1 ]]; then
+          new_args+=("$fallback_profile"); skip_next=0
+        elif [[ "$arg" == "--profile" ]]; then
+          new_args+=("$arg"); skip_next=1
+        else
+          new_args+=("$arg")
+        fi
+      done
+      codex_args=("${new_args[@]}")
+      CLI_EFFORT="$fallback_profile"
+      _attempt_codex_run
+    fi
   fi
-  worker_pid=$!
-  _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
 
   recover_codex_stdout
 
