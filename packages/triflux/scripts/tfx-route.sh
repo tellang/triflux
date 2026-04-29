@@ -151,7 +151,8 @@ build_codex_base() {
 }
 
 # ── Async Job 디렉토리 ──
-TFX_JOBS_DIR="${TFX_TMP}/tfx-jobs"
+# Honor caller-provided TFX_JOBS_DIR env (used by unit tests for isolated jobs dirs).
+TFX_JOBS_DIR="${TFX_JOBS_DIR:-${TFX_TMP}/tfx-jobs}"
 
 # ── --job-status / --job-result 핸들러 (인자 파싱 전에 처리) ──
 if [[ "${1:-}" == "--job-status" ]]; then
@@ -179,6 +180,15 @@ if [[ "${1:-}" == "--job-status" ]]; then
       local_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null | tr -d ' ' || echo 0)
       elapsed=$(( $(date +%s) - $(cat "$job_dir/start_time" 2>/dev/null || date +%s) ))
       echo "running elapsed=${elapsed}s output=${local_bytes}B"
+    elif [[ -s "$job_dir/child_pids" ]]; then
+      # wrapper 죽었지만 codex child 가 살아남았으면 orphan-running 으로 분류 (Issue #176).
+      while IFS= read -r child; do
+        if [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null; then
+          echo "orphan-running pid=$child"
+          exit 0
+        fi
+      done < "$job_dir/child_pids"
+      echo "failed"
     else
       # 프로세스 종료됐는데 done 마커 없음 → 비정상 종료
       echo "failed"
@@ -235,6 +245,63 @@ if [[ "${1:-}" == "--job-wait" ]]; then
   # max_wait 도달했지만 아직 실행 중
   echo "still_running elapsed=${elapsed}s"
   exit 0
+fi
+
+# ── --async-self-test: 단위 테스트 전용 inert surface (CLI dispatch 우회) ──
+# Inert self-test surface for unit tests. Bypasses CLI dispatch, exercises wrapper only.
+if [[ "${1:-}" == "--async-self-test" ]]; then
+  shift
+  case "${1:-}" in
+    wrapper-sleep-3)
+      mkdir -p "$TFX_JOBS_DIR"
+      JOB_ID="selftest-$$-$RANDOM"
+      JOB_DIR="$TFX_JOBS_DIR/$JOB_ID"
+      mkdir -p "$JOB_DIR"
+      # Mirrors the wrapper pattern used by production --async (see Task E).
+      ( set +e
+        trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
+        exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
+        sleep 3
+        _ec=$?
+        echo "$_ec" > "$JOB_DIR/exit_code"
+        touch "$JOB_DIR/done"
+        exit "$_ec"
+      ) &
+      bg_pid=$!
+      echo "$bg_pid" > "$JOB_DIR/pid"
+      disown "$bg_pid"
+      echo "$JOB_ID"
+      exit 0
+      ;;
+    main-overwrites-exit-trap)
+      mkdir -p "$TFX_JOBS_DIR"
+      JOB_ID="selftest-main-$$-$RANDOM"
+      JOB_DIR="$TFX_JOBS_DIR/$JOB_ID"
+      mkdir -p "$JOB_DIR"
+      ( set +e
+        selftest_main_overwrites_exit_trap() {
+          trap 'echo selftest-cleanup' EXIT
+          return 0
+        }
+        trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
+        exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
+        selftest_main_overwrites_exit_trap
+        _ec=$?
+        echo "$_ec" > "$JOB_DIR/exit_code"
+        touch "$JOB_DIR/done"
+        exit "$_ec"
+      ) &
+      bg_pid=$!
+      echo "$bg_pid" > "$JOB_DIR/pid"
+      disown "$bg_pid"
+      echo "$JOB_ID"
+      exit 0
+      ;;
+    *)
+      echo "[tfx-route] unknown async-self-test target: ${1:-<empty>}" >&2
+      exit 2
+      ;;
+  esac
 fi
 
 # ── --async 플래그 감지 ──
@@ -1912,6 +1979,10 @@ run_codex_exec() {
       "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
     fi
     worker_pid=$!
+    # Track codex child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
+    if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
+      echo "$worker_pid" >> "$JOB_DIR/child_pids"
+    fi
     _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
   }
 
@@ -2012,6 +2083,10 @@ run_codex_mcp() {
     "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
+  # Track codex MCP child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
+  if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
+    echo "$worker_pid" >> "$JOB_DIR/child_pids"
+  fi
   _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
 
   # 모듈 로드 실패(의존성 누락) → MCP transport exit code로 변환하여 fallback 트리거
@@ -2451,28 +2526,24 @@ if [[ "$TFX_ASYNC_MODE" -eq 1 ]]; then
   echo "$AGENT_TYPE" > "$JOB_DIR/agent_type"
   date +%s > "$JOB_DIR/start_time"
 
-  # 백그라운드 서브쉘: main 실행 → 결과 저장
+  # 백그라운드 서브쉘: main 실행 → 반환 코드로 마커 기록
+  # H1' 수정 (Track 3 v2): POSIX 2017 wait spec 은 subshell 환경에서
+  # wait 가 즉시 리턴하도록 강제하므로 기존 데몬 블록 (wait $bg_pid; touch done)
+  # 은 main 시작 전에 done 마커를 찍는 dead code 였다. main() 이 자체 EXIT
+  # trap 을 설치하므로 정상 종료는 straight-line write 로 기록하고, 시그널만 trap 한다.
   echo "starting" > "$JOB_DIR/pid"
-  (
-    set +e  # main 내부 에러가 exit_code 기록 전에 서브쉘을 죽이는 것 방지
+  ( set +e
+    trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
     exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
-    main; _ec=$?
+    main
+    _ec=$?
     echo "$_ec" > "$JOB_DIR/exit_code"
     touch "$JOB_DIR/done"
+    exit "$_ec"
   ) &
   bg_pid=$!
   echo "$bg_pid" > "$JOB_DIR/pid"
-
-  # 종료 감지 데몬 (main이 signal/crash로 죽어도 done 마커 생성)
-  (
-    wait "$bg_pid" 2>/dev/null
-    ec=$?
-    if [[ ! -f "$JOB_DIR/done" ]]; then
-      echo "$ec" > "$JOB_DIR/exit_code"
-      touch "$JOB_DIR/done"
-    fi
-  ) &
-  disown
+  disown "$bg_pid"          # explicit PID — H1' fix (was missing arg, disowning daemon only)
 
   # 즉시 리턴: 1초 이내에 Claude Code Bash 도구 완료
   echo "$JOB_ID"
