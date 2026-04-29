@@ -259,9 +259,37 @@ if [[ "${1:-}" == "--async-self-test" ]]; then
       mkdir -p "$JOB_DIR"
       # Mirrors the wrapper pattern used by production --async (see Task E).
       ( set +e
-        trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' EXIT INT TERM HUP
+        trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
         exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
         sleep 3
+        _ec=$?
+        echo "$_ec" > "$JOB_DIR/exit_code"
+        touch "$JOB_DIR/done"
+        exit "$_ec"
+      ) &
+      bg_pid=$!
+      echo "$bg_pid" > "$JOB_DIR/pid"
+      disown "$bg_pid"
+      echo "$JOB_ID"
+      exit 0
+      ;;
+    main-overwrites-exit-trap)
+      mkdir -p "$TFX_JOBS_DIR"
+      JOB_ID="selftest-main-$$-$RANDOM"
+      JOB_DIR="$TFX_JOBS_DIR/$JOB_ID"
+      mkdir -p "$JOB_DIR"
+      ( set +e
+        selftest_main_overwrites_exit_trap() {
+          trap 'echo selftest-cleanup' EXIT
+          return 0
+        }
+        trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
+        exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
+        selftest_main_overwrites_exit_trap
+        _ec=$?
+        echo "$_ec" > "$JOB_DIR/exit_code"
+        touch "$JOB_DIR/done"
+        exit "$_ec"
       ) &
       bg_pid=$!
       echo "$bg_pid" > "$JOB_DIR/pid"
@@ -2498,16 +2526,20 @@ if [[ "$TFX_ASYNC_MODE" -eq 1 ]]; then
   echo "$AGENT_TYPE" > "$JOB_DIR/agent_type"
   date +%s > "$JOB_DIR/start_time"
 
-  # 백그라운드 서브쉘: main 실행 → trap 으로 마커 기록
+  # 백그라운드 서브쉘: main 실행 → 반환 코드로 마커 기록
   # H1' 수정 (Track 3 v2): POSIX 2017 wait spec 은 subshell 환경에서
   # wait 가 즉시 리턴하도록 강제하므로 기존 데몬 블록 (wait $bg_pid; touch done)
-  # 은 main 시작 전에 done 마커를 찍는 dead code 였다. 대신 서브쉘 내부에서
-  # trap EXIT/INT/TERM/HUP 으로 main 종료 시점에 정확히 마커를 기록한다.
+  # 은 main 시작 전에 done 마커를 찍는 dead code 였다. main() 이 자체 EXIT
+  # trap 을 설치하므로 정상 종료는 straight-line write 로 기록하고, 시그널만 trap 한다.
   echo "starting" > "$JOB_DIR/pid"
   ( set +e
-    trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' EXIT INT TERM HUP
+    trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
     exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
     main
+    _ec=$?
+    echo "$_ec" > "$JOB_DIR/exit_code"
+    touch "$JOB_DIR/done"
+    exit "$_ec"
   ) &
   bg_pid=$!
   echo "$bg_pid" > "$JOB_DIR/pid"
