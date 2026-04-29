@@ -16,8 +16,8 @@ import { CodexMcpWorker } from "../../hub/workers/codex-mcp.mjs";
 import { createWorker } from "../../hub/workers/factory.mjs";
 
 describe("worker factory — AC-9 dispatch", () => {
-  it("1. createWorker('codex') returns CodexMcpWorker (AC-11 regression, zero default change)", () => {
-    const worker = createWorker("codex");
+  it("1. createWorker('codex') returns CodexMcpWorker (AC-11 regression, zero default change)", async () => {
+    const worker = await createWorker("codex");
     assert.ok(
       worker instanceof CodexMcpWorker,
       "default codex type must remain MCP transport",
@@ -25,8 +25,8 @@ describe("worker factory — AC-9 dispatch", () => {
     assert.equal(worker.type, "codex");
   });
 
-  it("2. createWorker('codex', { transport: 'app-server' }) returns CodexAppServerWorker", () => {
-    const worker = createWorker("codex", { transport: "app-server" });
+  it("2. createWorker('codex', { transport: 'app-server' }) returns CodexAppServerWorker", async () => {
+    const worker = await createWorker("codex", { transport: "app-server" });
     assert.ok(
       worker instanceof CodexAppServerWorker,
       "transport=app-server must route to app-server worker",
@@ -35,23 +35,23 @@ describe("worker factory — AC-9 dispatch", () => {
     assert.equal(worker.transport, "app-server");
   });
 
-  it("3. createWorker('codex-app-server') returns CodexAppServerWorker (explicit name)", () => {
-    const worker = createWorker("codex-app-server");
+  it("3. createWorker('codex-app-server') returns CodexAppServerWorker (explicit name)", async () => {
+    const worker = await createWorker("codex-app-server");
     assert.ok(
       worker instanceof CodexAppServerWorker,
       "explicit codex-app-server type must route to app-server worker",
     );
   });
 
-  it("4. createWorker('codex', { transport: 'mcp' }) explicitly returns CodexMcpWorker", () => {
-    const worker = createWorker("codex", { transport: "mcp" });
+  it("4. createWorker('codex', { transport: 'mcp' }) explicitly returns CodexMcpWorker", async () => {
+    const worker = await createWorker("codex", { transport: "mcp" });
     assert.ok(worker instanceof CodexMcpWorker);
   });
 });
 
 describe("worker factory — AC-10 publishCallback wiring", () => {
-  it("5. app-server worker gets a default publishCallback function when none is provided", () => {
-    const worker = createWorker("codex", { transport: "app-server" });
+  it("5. app-server worker gets a default publishCallback function when none is provided", async () => {
+    const worker = await createWorker("codex", { transport: "app-server" });
     assert.equal(
       typeof worker.publishCallback,
       "function",
@@ -59,9 +59,9 @@ describe("worker factory — AC-10 publishCallback wiring", () => {
     );
   });
 
-  it("6. factory passes through a user-provided publishCallback unchanged", () => {
+  it("6. factory passes through a user-provided publishCallback unchanged", async () => {
     const userCallback = async () => {};
-    const worker = createWorker("codex", {
+    const worker = await createWorker("codex", {
       transport: "app-server",
       publishCallback: userCallback,
     });
@@ -79,7 +79,7 @@ describe("worker factory — AC-10 publishCallback wiring", () => {
       return { ok: true };
     };
 
-    const worker = createWorker("codex", {
+    const worker = await createWorker("codex", {
       transport: "app-server",
       requestJsonFn: fakeRequestJson,
     });
@@ -108,7 +108,7 @@ describe("worker factory — AC-10 publishCallback wiring", () => {
     const fakeRequestJson = async () => {
       throw new Error("bridge down");
     };
-    const worker = createWorker("codex-app-server", {
+    const worker = await createWorker("codex-app-server", {
       requestJsonFn: fakeRequestJson,
     });
 
@@ -120,28 +120,31 @@ describe("worker factory — AC-10 publishCallback wiring", () => {
 });
 
 describe("worker factory — AC-11 regression", () => {
-  it("9. no opts → CodexMcpWorker (unchanged behavior for existing callers)", () => {
-    const worker = createWorker("codex");
+  it("9. no opts → CodexMcpWorker (unchanged behavior for existing callers)", async () => {
+    const worker = await createWorker("codex");
     assert.ok(worker instanceof CodexMcpWorker);
     assert.ok(!(worker instanceof CodexAppServerWorker));
   });
 
-  it("10. unknown worker type still throws a recognizable error", () => {
-    assert.throws(() => createWorker("nonexistent"), /Unknown worker type/);
+  it("10. unknown worker type still rejects with a recognizable error", async () => {
+    await assert.rejects(
+      () => createWorker("nonexistent"),
+      /Unknown worker type/,
+    );
   });
 });
 
 describe("worker factory — Issue #95 P1 #4 approvalPolicy validation", () => {
-  it("11. app-server transport + approvalPolicy='never' is accepted", () => {
-    const worker = createWorker("codex", {
+  it("11. app-server transport + approvalPolicy='never' is accepted", async () => {
+    const worker = await createWorker("codex", {
       transport: "app-server",
       approvalPolicy: "never",
     });
     assert.ok(worker instanceof CodexAppServerWorker);
   });
 
-  it("12. app-server transport + approvalPolicy='on-failure' throws", () => {
-    assert.throws(
+  it("12. app-server transport + approvalPolicy='on-failure' rejects", async () => {
+    await assert.rejects(
       () =>
         createWorker("codex", {
           transport: "app-server",
@@ -151,22 +154,22 @@ describe("worker factory — Issue #95 P1 #4 approvalPolicy validation", () => {
     );
   });
 
-  it("13. app-server transport + approvalPolicy='untrusted' throws", () => {
-    assert.throws(
+  it("13. app-server transport + approvalPolicy='untrusted' rejects", async () => {
+    await assert.rejects(
       () => createWorker("codex-app-server", { approvalPolicy: "untrusted" }),
       /approvalPolicy='never'/,
     );
   });
 
-  it("14. app-server transport + undefined approvalPolicy defaults OK", () => {
-    const worker = createWorker("codex", { transport: "app-server" });
+  it("14. app-server transport + undefined approvalPolicy defaults OK", async () => {
+    const worker = await createWorker("codex", { transport: "app-server" });
     assert.ok(worker instanceof CodexAppServerWorker);
   });
 
-  it("15. mcp transport with non-never approvalPolicy is NOT blocked (no regression)", () => {
+  it("15. mcp transport with non-never approvalPolicy is NOT blocked (no regression)", async () => {
     // The restriction only applies to the app-server transport; the legacy MCP
     // path continues to accept any approvalPolicy value.
-    const worker = createWorker("codex", {
+    const worker = await createWorker("codex", {
       transport: "mcp",
       approvalPolicy: "on-failure",
     });
