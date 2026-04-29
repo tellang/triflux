@@ -2,6 +2,9 @@
   "$schema": "mcp-registry-schema",
   "version": 1,
   "description": "MCP 서버 중앙 레지스트리 — 진실의 원천",
+  "policy_notes": {
+    "sync_denylist": "Array of client:server strings skipped by proactive registry sync, for example gemini:tfx-hub."
+  },
   "defaults": {
     "transport": "hub-url",
     "hub_base": "http://127.0.0.1:27888"
@@ -18,6 +21,7 @@
   "policies": {
     "stdio_action": "replace-with-hub",
     "unknown_server_action": "warn",
+    "sync_denylist": [],
     "watched_paths": [
       "~/.gemini/settings.json",
       "~/.codex/config.toml",
