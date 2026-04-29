@@ -13,11 +13,8 @@
 // existing `requestJson` helper. Callers can override by passing their own
 // `publishCallback` or swap the transport with `requestJsonFn`.
 
-import { requestJson } from "@triflux/core/hub/bridge.mjs";
 import { ClaudeWorker } from "./claude-worker.mjs";
 import { CodexAppServerWorker } from "./codex-app-server-worker.mjs";
-import { CodexMcpWorker } from "./codex-mcp.mjs";
-import { DelegatorMcpWorker } from "./delegator-mcp.mjs";
 import { GeminiWorker } from "./gemini-worker.mjs";
 
 /**
@@ -27,10 +24,13 @@ import { GeminiWorker } from "./gemini-worker.mjs";
  * @param {(path: string, opts?: object) => Promise<unknown>} [requestJsonFn]
  * @returns {(publishMessage: object) => Promise<void>}
  */
-function defaultPublishCallback(requestJsonFn = requestJson) {
+function defaultPublishCallback(requestJsonFn = null) {
   return async (publishMessage) => {
     try {
-      await requestJsonFn("/bridge/publish", { body: publishMessage });
+      const publishRequestJson =
+        requestJsonFn ||
+        (await import("@triflux/core/hub/bridge.mjs")).requestJson;
+      await publishRequestJson("/bridge/publish", { body: publishMessage });
     } catch {
       // best-effort; publish failures must not crash the worker
     }
@@ -49,7 +49,7 @@ function defaultPublishCallback(requestJsonFn = requestJson) {
  *
  * @param {object} [opts]
  */
-function createCodexWorker(opts = {}) {
+async function createCodexWorker(opts = {}) {
   const { transport, requestJsonFn, publishCallback, ...rest } = opts;
 
   if (transport === "app-server") {
@@ -72,15 +72,16 @@ function createCodexWorker(opts = {}) {
   }
 
   // Default (and transport === 'mcp'): CodexMcpWorker with zero new deps.
+  const { CodexMcpWorker } = await import("./codex-mcp.mjs");
   return new CodexMcpWorker(rest);
 }
 
 /**
  * @param {'gemini'|'claude'|'codex'|'codex-app-server'|'delegator'} type
  * @param {object} [opts]
- * @returns {import('./interface.mjs').IWorker}
+ * @returns {Promise<import('./interface.mjs').IWorker>}
  */
-export function createWorker(type, opts = {}) {
+export async function createWorker(type, opts = {}) {
   switch (type) {
     case "gemini":
       return new GeminiWorker(opts);
@@ -90,8 +91,10 @@ export function createWorker(type, opts = {}) {
       return createCodexWorker(opts);
     case "codex-app-server":
       return createCodexWorker({ ...opts, transport: "app-server" });
-    case "delegator":
+    case "delegator": {
+      const { DelegatorMcpWorker } = await import("./delegator-mcp.mjs");
       return new DelegatorMcpWorker(opts);
+    }
     default:
       throw new Error(`Unknown worker type: ${type}`);
   }

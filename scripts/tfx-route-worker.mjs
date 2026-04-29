@@ -199,7 +199,7 @@ async function runWorker(worker, type, prompt) {
 const args = parseArgs(process.argv.slice(2));
 const prompt = readPromptFromStdin();
 
-const worker = createWorker(args.type, {
+const worker = await createWorker(args.type, {
   command: args.command,
   commandArgs: parseJsonArray(args.commandArgsJson, "--command-args-json"),
   model: args.model,

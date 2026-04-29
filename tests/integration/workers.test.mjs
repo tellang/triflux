@@ -89,14 +89,20 @@ describe("ClaudeWorker", { timeout: 15000 }, () => {
 });
 
 describe("createWorker()", { timeout: 15000 }, () => {
-  it("타입별 worker 인스턴스를 생성해야 한다", () => {
-    assert.equal(createWorker("gemini").constructor.name, "GeminiWorker");
-    assert.equal(createWorker("claude").constructor.name, "ClaudeWorker");
+  it("타입별 worker 인스턴스를 생성해야 한다", async () => {
     assert.equal(
-      createWorker("delegator").constructor.name,
+      (await createWorker("gemini")).constructor.name,
+      "GeminiWorker",
+    );
+    assert.equal(
+      (await createWorker("claude")).constructor.name,
+      "ClaudeWorker",
+    );
+    assert.equal(
+      (await createWorker("delegator")).constructor.name,
       "DelegatorMcpWorker",
     );
-    assert.throws(() => createWorker("unknown"), /Unknown worker type/);
+    await assert.rejects(() => createWorker("unknown"), /Unknown worker type/);
   });
 });
 

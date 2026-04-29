@@ -91,7 +91,7 @@ describe("codex-app-server integration — fake app-server + factory", () => {
     timeout: 15_000,
   }, async () => {
     const publishes = [];
-    const worker = createWorker("codex", {
+    const worker = await createWorker("codex", {
       transport: "app-server",
       command: process.execPath,
       args: [FAKE_SERVER],
@@ -179,7 +179,7 @@ describe("codex-app-server integration — full stack (no mocks)", () => {
     // Real JsonRpcStdioClient path via `WildcardOrderAdapter` — still a real
     // pipe, real child, real protocol parser. The adapter only patches the
     // wildcard arg order (see header note for the PRD-1/2 bug handoff).
-    const worker = createWorker("codex-app-server", {
+    const worker = await createWorker("codex-app-server", {
       command: process.execPath,
       args: [FAKE_SERVER],
       env: { FAKE_MODE: "ok", FAKE_DELTAS: "PONG" },
@@ -252,7 +252,7 @@ describe("codex-app-server integration — AC-15 PID zombie check", () => {
     const pidState = {};
     const wrappedSpawn = makePidCapturingSpawn(pidState);
 
-    const worker = createWorker("codex", {
+    const worker = await createWorker("codex", {
       transport: "app-server",
       command: process.execPath,
       args: [FAKE_SERVER],
@@ -290,7 +290,7 @@ describe("codex-app-server integration — real codex (env-gated)", () => {
     skip: !REAL_CODEX_ENABLED,
   }, async () => {
     const publishes = [];
-    const worker = createWorker("codex-app-server", {
+    const worker = await createWorker("codex-app-server", {
       bootstrapTimeoutMs: 15_000,
       publishCallback: (msg) => {
         publishes.push(msg);
