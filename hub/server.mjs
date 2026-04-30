@@ -1397,11 +1397,7 @@ export async function startHub({
               metadata?.cmd ||
               metadata?.task ||
               cli;
-            workerSpans.set(agent_id, {
-              command,
-              startedAt: performance.now(),
-            });
-            recordWorker(agent_id, "spawned", command, 0);
+            const workerStartedAt = performance.now();
             const heartbeat_ttl_ms = (timeout_sec + 120) * 1000;
             const result = await pipe.executeCommand("register", {
               agent_id,
@@ -1411,6 +1407,13 @@ export async function startHub({
               heartbeat_ttl_ms,
               metadata,
             });
+            if (result.ok) {
+              workerSpans.set(agent_id, {
+                command,
+                startedAt: workerStartedAt,
+              });
+              recordWorker(agent_id, "spawned", command, 0);
+            }
             return writeJson(res, 200, result);
           }
 
