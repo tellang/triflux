@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, it } from "node:test";
 
 const SCRIPT = "scripts/tfx-route.sh";
 
 function dispatchAsyncJob(jobsDir, target = "wrapper-sleep-3") {
-  const res = spawnSync(
-    "bash",
-    [SCRIPT, "--async-self-test", target],
-    { encoding: "utf-8", env: { ...process.env, TFX_JOBS_DIR: jobsDir }, timeout: 5_000 },
-  );
+  const res = spawnSync("bash", [SCRIPT, "--async-self-test", target], {
+    encoding: "utf-8",
+    env: { ...process.env, TFX_JOBS_DIR: jobsDir },
+    timeout: 5_000,
+  });
   return (res.stdout || "").trim();
 }
 
@@ -41,7 +41,11 @@ describe("async wrapper survives parent shell exit (POSIX)", () => {
       `expected exit_code marker at ${exitCodePath}`,
     );
     const exitCode = readFileSync(exitCodePath, "utf-8").trim();
-    assert.equal(exitCode, "0", `expected exit_code=0, got ${JSON.stringify(exitCode)}`);
+    assert.equal(
+      exitCode,
+      "0",
+      `expected exit_code=0, got ${JSON.stringify(exitCode)}`,
+    );
 
     rmSync(jobsDir, { recursive: true, force: true });
   });
@@ -69,7 +73,11 @@ describe("async wrapper survives parent shell exit (POSIX)", () => {
       `expected exit_code marker at ${exitCodePath}`,
     );
     const exitCode = readFileSync(exitCodePath, "utf-8").trim();
-    assert.equal(exitCode, "0", `expected exit_code=0, got ${JSON.stringify(exitCode)}`);
+    assert.equal(
+      exitCode,
+      "0",
+      `expected exit_code=0, got ${JSON.stringify(exitCode)}`,
+    );
 
     rmSync(jobsDir, { recursive: true, force: true });
   });

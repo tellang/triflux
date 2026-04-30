@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
 import { spawnSync } from "node:child_process";
+import { describe, it } from "node:test";
 
 const SCRIPT = "scripts/tfx-route.sh";
 
@@ -16,7 +16,11 @@ describe("heartbeat visibility for non-TTY callers", () => {
       {
         encoding: "utf-8",
         timeout: 15_000,
-        env: { ...process.env, TFX_HEARTBEAT_INTERVAL: "1", TFX_HEARTBEAT: "1" },
+        env: {
+          ...process.env,
+          TFX_HEARTBEAT_INTERVAL: "1",
+          TFX_HEARTBEAT: "1",
+        },
       },
     );
     assert.match(
