@@ -35,7 +35,7 @@ function registryFor(homeDir, extraServer) {
     version: 1,
     defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
     servers: {
-      auth: extraServer,
+      auth: { safe: true, ...extraServer },
     },
     policies: {
       stdio_action: "replace-with-hub",

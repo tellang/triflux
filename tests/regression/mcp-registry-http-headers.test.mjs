@@ -39,7 +39,7 @@ function writeRegistry(filePath, home, project, server) {
             targets: ["codex", "claude"],
             description: "triflux Hub MCP 서버",
           },
-          ...(server ? { auth: server } : {}),
+          ...(server ? { auth: { safe: true, ...server } } : {}),
         },
         policies: {
           stdio_action: "replace-with-hub",
