@@ -27,3 +27,31 @@
 **Context:** Synapse v1 eng review(2026-04-11)에서 Approach C로 검토됨. Effort XL, Completeness 10/10. v1은 git 기반으로 진행, v2에서 jj 백엔드를 선택적 실험.
 
 **Depends on:** Synapse v1 완료 (Layer 1-3)
+
+## [Tier 2] MCP hub Option C cleanup ownership 설계
+
+**What:** Option C (parent hub + per-CLI MCP frontends) 우선 작업 시 cleanup ownership 명시. orphan node, psmux session, fsmonitor daemon, stale process cleanup 의 단일 owner 1개 고정.
+
+**Why:** PR #200 (fsmonitor cleanup) / Issue #214 (다중 worktree 회귀) 가 보여줬듯 cleanup ownership 모호하면 race + 누락 발생. PRD B Option C 가 cleanup을 acknowledge 만 하고 메커니즘 미정의 → Codex outside voice도 동일 지적.
+
+**Pros:** parent/frontend 양측에서 동일 cleanup 발화 시 race 방지. 'who owns orphan reaping' 명확. 디버깅 시 'which process killed it' 추적 가능.
+
+**Cons:** ownership 결정이 토폴로지에 결합 → Option C 채택 후에만 의미 있음. 지금 결정하면 premature.
+
+**Context:** PRD B (`.triflux/plans/mcp-singleton-redesign-prd.md`) eng review (2026-04-30) Issue 4 + Codex outside voice. PRD Migration Path Step 6+ 에서 적용. 현재 hub/server.mjs:1845-1891 의 orphan cleanup, 1893-1905 rate-limit eviction 이 single-owner 패턴 — Option C 분리 시 이 패턴 깨짐.
+
+**Depends on:** PRD B Step 1 trace 완료 → Step 5 (registry compatibility) → Step 6 (Option C prototype). 이 셋 모두 선행.
+
+## [Tier 2] Q1 benchmark harness real-client lifecycle 재현
+
+**What:** PRD B Step 2 benchmark harness 가 합성 N×M×K 매트릭스 대신 실제 Claude/Codex/Gemini CLI 의 initialize/list/call 호출 주기를 재현해야 함. 합성은 실제 client 가 만들지 않는 워크로드 측정 위험.
+
+**Why:** Codex outside voice (2026-04-30): "Many MCP clients initialize once, list tools once, then serialize or lightly parallelize calls. A synthetic K=8 session model could measure a workload no real Claude/Codex/Gemini lifecycle creates." 합성 측정은 hub topology 결정을 잘못된 데이터로 유도.
+
+**Pros:** Q1 결정의 신뢰도 상승. fairness/saturation 의 진짜 원인을 측정. tools/list 가중치 같은 weak metric 함정 회피.
+
+**Cons:** real CLI 구동 시 외부 모델 latency 노이즈 유입 (mock 가능 영역 줄어듦). 테스트 비용 증가.
+
+**Context:** PRD B Migration Path Step 2 ("Build the Q1 benchmark harness"). 현재 PRD는 합성 N×M×K 스펙. Codex outside voice + 내부 review 모두 합성 < 실제 lifecycle 우선 권장. tools/list initialize 가중치 과다 우려와 동반 검토.
+
+**Depends on:** PRD B Step 1 trace (실제 client lifecycle 데이터 확보) → Step 2 harness 설계.
