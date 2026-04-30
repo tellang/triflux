@@ -2,9 +2,6 @@
   "$schema": "mcp-registry-schema",
   "version": 1,
   "description": "MCP 서버 중앙 레지스트리 — 진실의 원천",
-  "policy_notes": {
-    "sync_denylist": "Array of client:server strings skipped by proactive registry sync, for example gemini:tfx-hub."
-  },
   "defaults": {
     "transport": "hub-url",
     "hub_base": "http://127.0.0.1:27888"
@@ -12,7 +9,8 @@
   "policy_notes": {
     "transport": "Server transport accepts \"hub-url\" for the existing triflux Hub URL flow or \"http\" for direct Streamable HTTP MCP endpoints. Direct stdio registration via command/args is intentionally unsupported.",
     "headers": "Optional headers are allowed only for HTTP-compatible transports. Each header value must be a descriptor: {\"value\":\"literal\"} for non-secret static values, {\"env\":\"ENV_VAR_NAME\"} for secrets resolved at sync/runtime, or {\"env\":\"ENV_VAR_NAME\",\"prefix\":\"Bearer \"} for common authorization formats.",
-    "secret_safety": "Resolved secret values must not be written back to this registry file. Missing env vars warn during sync and do not emit empty secret headers."
+    "secret_safety": "Resolved secret values must not be written back to this registry file. Missing env vars warn during sync and do not emit empty secret headers.",
+    "sync_denylist": "Array of client:server strings skipped by proactive registry sync, for example gemini:tfx-hub."
   },
   "servers": {
     "tfx-hub": {

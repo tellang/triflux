@@ -197,7 +197,7 @@ describe("release governance scripts", () => {
       const testCall = calls.find(
         (call) =>
           (call.command === "npm" && call.args.join(" ") === "test") ||
-          (call.args[0] && call.args[0].endsWith("test-lock.mjs")),
+          call.args[0]?.endsWith("test-lock.mjs"),
       );
       assert.ok(testCall);
       assert.deepEqual(testCall.options.stdio, ["ignore", "pipe", "pipe"]);

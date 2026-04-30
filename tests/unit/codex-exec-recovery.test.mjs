@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describe, it } from "node:test";
 
 const LIB = "scripts/lib/codex-recovery.sh";
 
@@ -53,7 +53,9 @@ describe("recover_codex_stdout", () => {
   });
 
   it("1차 codex marker: extracts content after last 'codex' line", () => {
-    const { stdout, stderr, exit } = invokeWithFixture("path1-codex-marker.stderr.log");
+    const { stdout, stderr, exit } = invokeWithFixture(
+      "path1-codex-marker.stderr.log",
+    );
     assert.equal(exit, 0);
     assert.match(
       stdout,
@@ -78,7 +80,9 @@ describe("recover_codex_stdout", () => {
   });
 
   it("2차 node parser: filters skip patterns when codex marker absent", () => {
-    const { stdout, stderr, exit } = invokeWithFixture("path2-node-parser.stderr.log");
+    const { stdout, stderr, exit } = invokeWithFixture(
+      "path2-node-parser.stderr.log",
+    );
     assert.equal(exit, 0);
     assert.match(
       stdout,
@@ -87,8 +91,16 @@ describe("recover_codex_stdout", () => {
     );
     assert.match(stdout, /It survives the skip filter/);
     assert.doesNotMatch(stdout, /^mcp:/m, "skip regex must drop mcp: lines");
-    assert.doesNotMatch(stdout, /^workdir:/m, "skip regex must drop workdir: lines");
-    assert.doesNotMatch(stdout, /^tokens used/m, "skip regex must drop tokens used line");
+    assert.doesNotMatch(
+      stdout,
+      /^workdir:/m,
+      "skip regex must drop workdir: lines",
+    );
+    assert.doesNotMatch(
+      stdout,
+      /^tokens used/m,
+      "skip regex must drop tokens used line",
+    );
     assert.doesNotMatch(stdout, /^EXIT:/m, "skip regex must drop EXIT: line");
     assert.ok(
       stderr.includes(RECOVERED_MARKER),
@@ -97,11 +109,21 @@ describe("recover_codex_stdout", () => {
   });
 
   it("3차 stderr tail: dumps everything before 'tokens used' when 1·2차 fail", () => {
-    const { stdout, stderr, exit } = invokeWithFixture("path3-stderr-tail.stderr.log");
+    const { stdout, stderr, exit } = invokeWithFixture(
+      "path3-stderr-tail.stderr.log",
+    );
     assert.equal(exit, 0);
     // 3차 dumps lines that 2차 would have filtered, distinguishing it from 2차.
-    assert.match(stdout, /^mcp: connected/m, "3차 retains mcp: line that 2차 would filter");
-    assert.match(stdout, /^workdir:/m, "3차 retains workdir: line that 2차 would filter");
+    assert.match(
+      stdout,
+      /^mcp: connected/m,
+      "3차 retains mcp: line that 2차 would filter",
+    );
+    assert.match(
+      stdout,
+      /^workdir:/m,
+      "3차 retains workdir: line that 2차 would filter",
+    );
     assert.match(stdout, /^reasoning high/m, "3차 retains reasoning line");
     assert.doesNotMatch(
       stdout,
@@ -115,7 +137,9 @@ describe("recover_codex_stdout", () => {
   });
 
   it("4차 FALLBACK_FAILED: emits marker when all 3 recovery paths fail", () => {
-    const { stdout, stderr, exit } = invokeWithFixture("path4-fallback-failed.stderr.log");
+    const { stdout, stderr, exit } = invokeWithFixture(
+      "path4-fallback-failed.stderr.log",
+    );
     assert.equal(exit, 0, "helper still returns 0 even when recovery fails");
     assert.equal(stdout, "", "stdout must remain empty when all paths fail");
     assert.ok(
