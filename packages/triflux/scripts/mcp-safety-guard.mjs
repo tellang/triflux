@@ -10,6 +10,7 @@ import {
   loadRegistry,
   remediate,
   scanForStdioServers,
+  syncRegistryTargets,
 } from "./lib/mcp-guard-engine.mjs";
 
 const GEMINI_SETTINGS = join(homedir(), ".gemini", "settings.json");
@@ -20,40 +21,57 @@ export async function run(stdinData) {
   let registry;
   try {
     registry = loadRegistry();
-  } catch {
-    return { code: 0, stdout: "", stderr: "" };
+  } catch (error) {
+    return {
+      code: 0,
+      stdout: `[mcp-safety] MCP registry invalid: ${error.message}\n`,
+      stderr: "",
+    };
   }
 
   const stdioServers = scanForStdioServers(GEMINI_SETTINGS);
-
-  if (stdioServers.length === 0) {
-    return { code: 0, stdout: "", stderr: "" };
-  }
-
-  const result = remediate(GEMINI_SETTINGS, stdioServers, registry.policies);
-  const names = stdioServers.map((server) => server.name).join(", ");
   const stdout = [];
 
-  if (result.modified) {
-    const actionLabel = result.replacement ? "자동 치환" : "자동 제거";
-    stdout.push(
-      `[mcp-safety] ${stdioServers.length}개 stdio MCP ${actionLabel}: ${names}`,
-    );
-    if (result.replacement?.name && result.replacement?.url) {
+  if (stdioServers.length > 0) {
+    const result = remediate(GEMINI_SETTINGS, stdioServers, registry.policies);
+    const names = stdioServers.map((server) => server.name).join(", ");
+
+    if (result.modified) {
+      const actionLabel = result.replacement ? "자동 치환" : "자동 제거";
       stdout.push(
-        `[mcp-safety] 대체 서버: ${result.replacement.name} -> ${result.replacement.url}`,
+        `[mcp-safety] ${stdioServers.length}개 stdio MCP ${actionLabel}: ${names}`,
+      );
+      if (result.replacement?.name && result.replacement?.url) {
+        stdout.push(
+          `[mcp-safety] 대체 서버: ${result.replacement.name} -> ${result.replacement.url}`,
+        );
+      }
+      if (result.backupPath) {
+        stdout.push(`[mcp-safety] 백업: ${result.backupPath}`);
+      }
+      stdout.push(
+        "[mcp-safety] Gemini는 Hub URL만 사용합니다. stdio MCP는 spawn EPERM을 유발합니다.",
       );
     }
-    if (result.backupPath) {
-      stdout.push(`[mcp-safety] 백업: ${result.backupPath}`);
+
+    for (const warning of result.warnings || []) {
+      stdout.push(warning);
     }
-    stdout.push(
-      "[mcp-safety] Gemini는 Hub URL만 사용합니다. stdio MCP는 spawn EPERM을 유발합니다.",
-    );
   }
 
-  for (const warning of result.warnings || []) {
-    stdout.push(warning);
+  const syncResult = syncRegistryTargets({ registry });
+  for (const action of syncResult.actions) {
+    if (action.status === "updated") {
+      stdout.push(
+        `[mcp-safety] registry sync: ${action.label} -> ${action.filePath}`,
+      );
+    } else if (action.status === "invalid-config") {
+      stdout.push(
+        `[mcp-guard] 설정 파싱 실패: ${action.filePath} (${action.message})`,
+      );
+    } else if (action.status === "policy-skip") {
+      stdout.push(action.message);
+    }
   }
 
   return {

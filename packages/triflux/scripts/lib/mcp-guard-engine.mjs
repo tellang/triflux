@@ -33,6 +33,7 @@ const DEFAULT_REGISTRY = Object.freeze({
   policies: {
     stdio_action: "replace-with-hub",
     unknown_server_action: "warn",
+    sync_denylist: [],
     watched_paths: [
       "~/.gemini/settings.json",
       "~/.codex/config.toml",
@@ -280,6 +281,27 @@ function serverTargets(serverConfig) {
 
 function serverAppliesToClient(serverConfig, client) {
   return serverTargets(serverConfig).includes(client);
+}
+
+function syncDenylistEntries(policy = {}) {
+  if (!Array.isArray(policy?.sync_denylist)) return new Set();
+  return new Set(
+    policy.sync_denylist
+      .map((entry) =>
+        String(entry || "")
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean),
+  );
+}
+
+function syncDenylistKey(client, serverName) {
+  return `${String(client || "")
+    .trim()
+    .toLowerCase()}:${String(serverName || "")
+    .trim()
+    .toLowerCase()}`;
 }
 
 function buildDesiredServerRecord(name, serverConfig, filePath) {
@@ -572,6 +594,22 @@ export function validateRegistry(registry) {
   } else {
     if (!Array.isArray(registry.policies.watched_paths)) {
       errors.push("registry.policies.watched_paths must be an array");
+    }
+    if (
+      registry.policies.sync_denylist !== undefined &&
+      !Array.isArray(registry.policies.sync_denylist)
+    ) {
+      errors.push("registry.policies.sync_denylist must be an array");
+    }
+    if (Array.isArray(registry.policies.sync_denylist)) {
+      for (const entry of registry.policies.sync_denylist) {
+        if (typeof entry !== "string" || !entry.includes(":")) {
+          errors.push(
+            "registry.policies.sync_denylist entries must use client:server format",
+          );
+          break;
+        }
+      }
     }
     if (
       registry.policies.stdio_action &&
@@ -1032,10 +1070,13 @@ export function removeServerFromTargets(name, options = {}) {
 export function syncRegistryTargets(options = {}) {
   const registry = options.registry || loadRegistryOrDefault();
   const actions = [];
+  const invalidConfigs = new Set();
+  const denylist = syncDenylistEntries(registry.policies);
 
   for (const target of listManagedConfigTargets(registry)) {
     const snapshot = scanConfig(target.filePath);
     if (snapshot.parseError) {
+      invalidConfigs.add(normalizeForMatch(target.filePath));
       actions.push({
         type: "sync",
         filePath: target.filePath,
@@ -1065,13 +1106,49 @@ export function syncRegistryTargets(options = {}) {
   }
 
   for (const target of listPrimaryConfigTargets(registry)) {
-    const updates = Object.entries(registry.servers || {})
-      .filter(([, serverConfig]) =>
-        serverAppliesToClient(serverConfig, target.client),
-      )
-      .map(([name, serverConfig]) =>
+    const snapshot = scanConfig(target.filePath);
+    const targetKey = normalizeForMatch(target.filePath);
+    if (snapshot.parseError) {
+      if (!invalidConfigs.has(targetKey)) {
+        actions.push({
+          type: "sync",
+          filePath: target.filePath,
+          label: target.label,
+          status: "invalid-config",
+          message: snapshot.parseError.message,
+        });
+      }
+      continue;
+    }
+
+    const updates = [];
+    for (const [name, serverConfig] of Object.entries(registry.servers || {})) {
+      if (serverConfig?.safe !== true) continue;
+      if (!serverAppliesToClient(serverConfig, target.client)) continue;
+
+      const denyKey = syncDenylistKey(target.client, name);
+      if (denylist.has(denyKey)) {
+        const existing = snapshot.servers.find(
+          (server) => server.name === name,
+        );
+        if (!existing) {
+          actions.push({
+            type: "sync",
+            filePath: target.filePath,
+            label: target.label,
+            status: "policy-skip",
+            server: name,
+            client: target.client,
+            message: `[mcp-guard] policy skip: ${denyKey}`,
+          });
+        }
+        continue;
+      }
+
+      updates.push(
         buildDesiredServerRecord(name, serverConfig, target.filePath),
       );
+    }
 
     if (updates.length === 0) continue;
 
