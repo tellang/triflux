@@ -157,6 +157,7 @@ background로 실행한 headless 결과는 **반드시 task-notification 완료 
 | `.claude/rules/tfx-autoplan-principles.md` | gstack autoplan의 6 decision principles, phase 우선순위, 충돌 해소 규칙 추출본 |
 | `.claude/rules/tfx-update-logic.md` | triflux / OMC / gstack / Codex / Gemini 업데이트 로직 |
 | `.claude/rules/tfx-stack-coexistence.md` | gstack / superpowers / triflux 공존 원칙, 레이어 분리, 의존 방향, 충돌 해소 |
+| `.claude/rules/tfx-mirror-policy.md` | packages/ 3-layer mirror 정책 (core 단순 cp / remote import 변환 / triflux byte-identical), tests 제외 룰, drift 차단 |
 
 Claude Code는 `.claude/rules/*.md` 를 자동 로드한다. Codex CLI는 `@import` 미지원이므로 필요 시 `AGENTS.md` 를 독립 유지한다.
 
