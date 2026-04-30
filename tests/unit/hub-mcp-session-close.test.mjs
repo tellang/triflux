@@ -12,7 +12,10 @@ describe("hub MCP session close lifecycle", () => {
     const start = src.indexOf("transport.onclose = () => {");
     assert.notEqual(start, -1, "transport.onclose handler must exist");
 
-    const end = src.indexOf("const mcp = createMcpForSession();", start);
+    const end = src.indexOf(
+      "const mcp = createMcpForSession(clientRef);",
+      start,
+    );
     assert.notEqual(end, -1, "transport.onclose block boundary must exist");
 
     const block = src.slice(start, end);
@@ -28,7 +31,7 @@ describe("hub MCP session close lifecycle", () => {
     const start = src.indexOf("async function closeMcpTransportSession");
     assert.notEqual(start, -1, "guarded closer must exist");
 
-    const end = src.indexOf("function createMcpForSession()", start);
+    const end = src.indexOf("function createMcpForSession(clientRef", start);
     assert.notEqual(end, -1, "guarded closer boundary must exist");
 
     const block = src.slice(start, end);
