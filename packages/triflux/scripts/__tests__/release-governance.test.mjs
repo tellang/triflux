@@ -191,8 +191,13 @@ describe("release governance scripts", () => {
       });
       assert.equal(executed.skipTests, false);
 
+      // F3 (issue #192): test step 의 command 가 "npm test" 에서 직접 node
+      // test-lock.mjs 호출로 바뀜. legacy npm test 와 F3 후 node test-lock.mjs
+      // 둘 다 인식.
       const testCall = calls.find(
-        (call) => call.command === "npm" && call.args.join(" ") === "test",
+        (call) =>
+          (call.command === "npm" && call.args.join(" ") === "test") ||
+          (call.args[0] && call.args[0].endsWith("test-lock.mjs")),
       );
       assert.ok(testCall);
       assert.deepEqual(testCall.options.stdio, ["ignore", "pipe", "pipe"]);
