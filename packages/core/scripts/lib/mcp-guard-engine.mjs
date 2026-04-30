@@ -10,7 +10,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-const REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
+const DEFAULT_REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const DEFAULT_HUB_PATH = "/mcp";
 const DEFAULT_REGISTRY = Object.freeze({
@@ -20,6 +20,14 @@ const DEFAULT_REGISTRY = Object.freeze({
   defaults: {
     transport: "hub-url",
     hub_base: "http://127.0.0.1:27888",
+  },
+  policy_notes: {
+    transport:
+      'Server transport accepts "hub-url" for the existing triflux Hub URL flow or "http" for direct Streamable HTTP MCP endpoints. Direct stdio registration via command/args is intentionally unsupported.',
+    headers:
+      'Optional headers are allowed only for HTTP-compatible transports. Each header value must be a descriptor: {"value":"literal"} for non-secret static values, {"env":"ENV_VAR_NAME"} for secrets resolved at sync/runtime, or {"env":"ENV_VAR_NAME","prefix":"Bearer "} for common authorization formats.',
+    secret_safety:
+      "Resolved secret values must not be written back to this registry file. Missing env vars warn during sync and do not emit empty secret headers.",
   },
   servers: {
     "tfx-hub": {
@@ -33,6 +41,7 @@ const DEFAULT_REGISTRY = Object.freeze({
   policies: {
     stdio_action: "replace-with-hub",
     unknown_server_action: "warn",
+    sync_denylist: [],
     watched_paths: [
       "~/.gemini/settings.json",
       "~/.codex/config.toml",
@@ -81,6 +90,12 @@ function readJsonFile(filePath) {
 function writeJsonFile(filePath, data) {
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf8");
+}
+
+function registryPath() {
+  return process.env.TFX_MCP_REGISTRY_PATH
+    ? resolve(process.env.TFX_MCP_REGISTRY_PATH)
+    : DEFAULT_REGISTRY_PATH;
 }
 
 function ensureBackup(filePath) {
@@ -175,10 +190,57 @@ function parseTomlScalar(rawValue) {
   if (value === "true") return true;
   if (value === "false") return false;
   if (/^-?\d[\d_]*$/.test(value)) return Number(value.replace(/_/g, ""));
+  if (value.startsWith("{") && value.endsWith("}")) {
+    return parseTomlInlineTable(value);
+  }
   if (value.startsWith('"') && value.endsWith('"')) {
     return value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
   }
   return value;
+}
+
+function parseTomlInlineTable(rawValue) {
+  const source = String(rawValue || "").trim();
+  const body = source.slice(1, -1).trim();
+  if (!body) return {};
+
+  const parts = [];
+  let current = "";
+  let inString = false;
+  let escaped = false;
+  for (const char of body) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      current += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') inString = !inString;
+    if (char === "," && !inString) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  const table = {};
+  for (const part of parts) {
+    const match = part.match(
+      /^\s*(?:"((?:\\"|[^"])*)"|([A-Za-z0-9_-]+))\s*=\s*(.+?)\s*$/,
+    );
+    if (!match) continue;
+    const key = (match[1] || match[2] || "")
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, "\\");
+    table[key] = parseTomlScalar(match[3]);
+  }
+  return table;
 }
 
 function parseCodexMcpServers(raw) {
@@ -209,6 +271,179 @@ function parseCodexMcpServers(raw) {
   return servers;
 }
 
+function isValidHeaderName(name) {
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(String(name || ""));
+}
+
+function normalizeHeaderDescriptors(headers = {}) {
+  const normalized = {};
+  if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+    return normalized;
+  }
+  for (const [name, descriptor] of Object.entries(headers)) {
+    if (!isValidHeaderName(name)) continue;
+    if (
+      descriptor &&
+      typeof descriptor === "object" &&
+      !Array.isArray(descriptor)
+    ) {
+      if (
+        Object.hasOwn(descriptor, "value") &&
+        typeof descriptor.value === "string"
+      ) {
+        normalized[name] = { value: descriptor.value };
+      } else if (
+        Object.hasOwn(descriptor, "env") &&
+        typeof descriptor.env === "string" &&
+        descriptor.env.trim()
+      ) {
+        normalized[name] = { env: descriptor.env.trim() };
+        if (typeof descriptor.prefix === "string") {
+          normalized[name].prefix = descriptor.prefix;
+        }
+      }
+    }
+  }
+  return normalized;
+}
+
+function resolveHeaderDescriptors(name, serverConfig, filePath) {
+  const descriptors = normalizeHeaderDescriptors(serverConfig?.headers || {});
+  const headers = {};
+  const warnings = [];
+  const codex = {
+    bearer_token_env_var: null,
+    env_http_headers: {},
+    http_headers: {},
+  };
+  const codexTarget = isCodexConfig(filePath);
+
+  for (const [headerName, descriptor] of Object.entries(descriptors)) {
+    if (Object.hasOwn(descriptor, "value")) {
+      headers[headerName] = descriptor.value;
+      if (codexTarget) codex.http_headers[headerName] = descriptor.value;
+      continue;
+    }
+
+    const envName = descriptor.env;
+    const envValue = process.env[envName];
+    const prefix = descriptor.prefix || "";
+    if (typeof envValue !== "string" || envValue.length === 0) {
+      warnings.push(
+        `[mcp-guard] ${name}.${headerName} header skipped: env ${envName} is not set`,
+      );
+      continue;
+    }
+
+    headers[headerName] = `${prefix}${envValue}`;
+
+    if (!codexTarget) continue;
+
+    if (
+      headerName.toLowerCase() === "authorization" &&
+      /^Bearer\s+$/i.test(prefix)
+    ) {
+      codex.bearer_token_env_var = envName;
+    } else if (!prefix) {
+      codex.env_http_headers[headerName] = envName;
+    } else {
+      codex.http_headers[headerName] = `${prefix}${envValue}`;
+      warnings.push(
+        `[mcp-guard] ${name}.${headerName} header uses resolved literal in Codex TOML because prefixed env headers are unsupported`,
+      );
+    }
+  }
+
+  return {
+    descriptors,
+    headers,
+    warnings,
+    codex: {
+      ...(codex.bearer_token_env_var
+        ? { bearer_token_env_var: codex.bearer_token_env_var }
+        : {}),
+      env_http_headers: codex.env_http_headers,
+      http_headers: codex.http_headers,
+    },
+  };
+}
+
+function hasOwnEntries(value) {
+  return value && typeof value === "object" && Object.keys(value).length > 0;
+}
+
+function redactHeaders(headers = {}) {
+  const redacted = {};
+  for (const key of Object.keys(headers || {})) {
+    redacted[key] = "***REDACTED***";
+  }
+  return redacted;
+}
+
+function redactServerConfig(config = {}) {
+  if (!config || typeof config !== "object") return config;
+  return {
+    ...config,
+    ...(config.headers ? { headers: redactHeaders(config.headers) } : {}),
+  };
+}
+
+function descriptorsFromCodexConfig(config = {}) {
+  const descriptors = {};
+  if (typeof config.bearer_token_env_var === "string") {
+    descriptors.Authorization = {
+      env: config.bearer_token_env_var,
+      prefix: "Bearer ",
+    };
+  }
+  if (config.env_http_headers && typeof config.env_http_headers === "object") {
+    for (const [name, envName] of Object.entries(config.env_http_headers)) {
+      if (typeof envName === "string") descriptors[name] = { env: envName };
+    }
+  }
+  if (config.http_headers && typeof config.http_headers === "object") {
+    for (const [name, value] of Object.entries(config.http_headers)) {
+      if (typeof value === "string") descriptors[name] = { value };
+    }
+  }
+  return descriptors;
+}
+
+function descriptorsFromJsonConfig(config = {}) {
+  const descriptors = {};
+  if (!config?.headers || typeof config.headers !== "object") {
+    return descriptors;
+  }
+  for (const [name, value] of Object.entries(config.headers)) {
+    if (typeof value === "string") descriptors[name] = { value };
+  }
+  return descriptors;
+}
+
+function headerNames(headers = {}) {
+  return Object.keys(headers || {}).sort();
+}
+
+function sameHeaderDescriptors(left = {}, right = {}) {
+  const leftNames = headerNames(left);
+  const rightNames = headerNames(right);
+  if (JSON.stringify(leftNames) !== JSON.stringify(rightNames)) return false;
+  return leftNames.every(
+    (name) => JSON.stringify(left[name]) === JSON.stringify(right[name]),
+  );
+}
+
+function headerStatus(expected = {}, actual = {}) {
+  const expectedNames = headerNames(expected);
+  const actualNames = headerNames(actual);
+  if (expectedNames.length === 0 && actualNames.length === 0) return "ok";
+  if (expectedNames.some((name) => !Object.hasOwn(actual, name))) {
+    return "missing";
+  }
+  if (!sameHeaderDescriptors(expected, actual)) return "stale";
+  return "ok";
+}
+
 function removeTomlSection(raw, sectionName) {
   const lines = String(raw || "").split(/\r?\n/);
   const output = [];
@@ -235,12 +470,68 @@ function removeTomlSection(raw, sectionName) {
   return cleaned.length > 0 ? cleaned.replace(/\n{3,}/g, "\n\n") : "";
 }
 
-function upsertTomlUrlServer(raw, name, url) {
-  const section = [`[mcp_servers.${name}]`, `url = ${formatTomlString(url)}`];
-  const withoutExisting = removeTomlSection(raw, name).trimEnd();
-  return withoutExisting.length > 0
-    ? `${withoutExisting}\n\n${section.join("\n")}\n`
-    : `${section.join("\n")}\n`;
+function formatTomlInlineTable(data = {}) {
+  const entries = Object.entries(data);
+  if (entries.length === 0) return null;
+  return `{ ${entries
+    .map(
+      ([key, value]) => `${formatTomlString(key)} = ${formatTomlString(value)}`,
+    )
+    .join(", ")} }`;
+}
+
+function upsertTomlServer(raw, name, config, codex = {}) {
+  const lines = String(raw || "").split(/\r?\n/);
+  const header = `[mcp_servers.${name}]`;
+  const managedKeys = new Set([
+    "url",
+    "command",
+    "args",
+    "bearer_token_env_var",
+    "http_headers",
+    "env_http_headers",
+  ]);
+  const nextManagedLines = [`url = ${formatTomlString(config.url)}`];
+  if (codex.bearer_token_env_var) {
+    nextManagedLines.push(
+      `bearer_token_env_var = ${formatTomlString(codex.bearer_token_env_var)}`,
+    );
+  }
+  const httpHeaders = formatTomlInlineTable(codex.http_headers || {});
+  if (httpHeaders) nextManagedLines.push(`http_headers = ${httpHeaders}`);
+  const envHttpHeaders = formatTomlInlineTable(codex.env_http_headers || {});
+  if (envHttpHeaders) {
+    nextManagedLines.push(`env_http_headers = ${envHttpHeaders}`);
+  }
+
+  const sectionStart = lines.findIndex((line) => line.trim() === header);
+  if (sectionStart < 0) {
+    const section = [header, ...nextManagedLines].join("\n");
+    const withoutTrailing = String(raw || "").trimEnd();
+    return withoutTrailing.length > 0
+      ? `${withoutTrailing}\n\n${section}\n`
+      : `${section}\n`;
+  }
+
+  const output = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    output.push(lines[index]);
+    if (index !== sectionStart) continue;
+
+    index += 1;
+    const preserved = [];
+    while (index < lines.length && !/^\s*\[/.test(lines[index])) {
+      const keyMatch = lines[index].match(/^\s*([A-Za-z0-9_]+)\s*=/);
+      if (!keyMatch || !managedKeys.has(keyMatch[1])) {
+        preserved.push(lines[index]);
+      }
+      index += 1;
+    }
+    output.push(...nextManagedLines, ...preserved.filter(Boolean));
+    index -= 1;
+  }
+
+  return output.join("\n");
 }
 
 function getHubServerEntry(registry) {
@@ -282,22 +573,69 @@ function serverAppliesToClient(serverConfig, client) {
   return serverTargets(serverConfig).includes(client);
 }
 
-function buildDesiredServerRecord(name, serverConfig, filePath) {
+function syncDenylistEntries(policy = {}) {
+  if (!Array.isArray(policy?.sync_denylist)) return new Set();
+  return new Set(
+    policy.sync_denylist
+      .map((entry) =>
+        String(entry || "")
+          .trim()
+          .toLowerCase(),
+      )
+      .filter(Boolean),
+  );
+}
+
+function syncDenylistKey(client, serverName) {
+  return `${String(client || "")
+    .trim()
+    .toLowerCase()}:${String(serverName || "")
+    .trim()
+    .toLowerCase()}`;
+}
+
+export function buildDesiredServerRecord(name, serverConfig, filePath) {
   const url =
     serverConfig?.transport === "hub-url"
       ? resolveHubUrl()
       : normalizeUrl(serverConfig?.url || "");
   const basenameValue = pathBasename(filePath);
+  const resolvedHeaders = resolveHeaderDescriptors(
+    name,
+    serverConfig,
+    filePath,
+  );
+  const headerConfig = hasOwnEntries(resolvedHeaders.headers)
+    ? { headers: resolvedHeaders.headers }
+    : {};
 
   if (basenameValue === ".mcp.json" || isClaudeProjectMcpConfig(filePath)) {
-    return { name, config: { type: "http", url } };
+    return {
+      name,
+      config: { type: "http", url, ...headerConfig },
+      headerDescriptors: resolvedHeaders.descriptors,
+      codex: resolvedHeaders.codex,
+      warnings: resolvedHeaders.warnings,
+    };
   }
 
   if (isCodexConfig(filePath)) {
-    return { name, config: { url } };
+    return {
+      name,
+      config: { url, ...headerConfig },
+      headerDescriptors: resolvedHeaders.descriptors,
+      codex: resolvedHeaders.codex,
+      warnings: resolvedHeaders.warnings,
+    };
   }
 
-  return { name, config: { url } };
+  return {
+    name,
+    config: { url, ...headerConfig },
+    headerDescriptors: resolvedHeaders.descriptors,
+    codex: resolvedHeaders.codex,
+    warnings: resolvedHeaders.warnings,
+  };
 }
 
 function scanJsonConfig(filePath) {
@@ -332,6 +670,17 @@ function scanJsonConfig(filePath) {
                 typeof config.url === "string" ? normalizeUrl(config.url) : "",
               command: typeof config.command === "string" ? config.command : "",
               type: typeof config.type === "string" ? config.type : "",
+              headers:
+                config.headers &&
+                typeof config.headers === "object" &&
+                !Array.isArray(config.headers)
+                  ? Object.fromEntries(
+                      Object.entries(config.headers).filter(
+                        ([, value]) => typeof value === "string",
+                      ),
+                    )
+                  : {},
+              headerDescriptors: descriptorsFromJsonConfig(config),
               transport:
                 typeof config.url === "string" && config.url
                   ? "url"
@@ -383,6 +732,11 @@ function scanCodexConfig(filePath) {
       name,
       url: typeof config.url === "string" ? normalizeUrl(config.url) : "",
       command: typeof config.command === "string" ? config.command : "",
+      headers:
+        config.http_headers && typeof config.http_headers === "object"
+          ? config.http_headers
+          : {},
+      headerDescriptors: descriptorsFromCodexConfig(config),
       transport:
         typeof config.url === "string" && config.url
           ? "url"
@@ -450,6 +804,9 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
       ...(current && typeof current === "object" ? current : {}),
       ...update.config,
     };
+    if (!Object.hasOwn(update.config, "headers")) {
+      delete nextConfig.headers;
+    }
     const changed =
       JSON.stringify(current || null) !== JSON.stringify(nextConfig);
     if (changed) {
@@ -484,7 +841,7 @@ function updateCodexConfig(filePath, updates = [], removals = []) {
   }
 
   for (const update of updates) {
-    raw = upsertTomlUrlServer(raw, update.name, update.config.url);
+    raw = upsertTomlServer(raw, update.name, update.config, update.codex || {});
   }
 
   const finalRaw = raw.trim().length > 0 ? `${raw.trimEnd()}\n` : "";
@@ -517,7 +874,7 @@ function scanConfig(filePath) {
 }
 
 export function getRegistryPath() {
-  return REGISTRY_PATH;
+  return registryPath();
 }
 
 export function createDefaultRegistry() {
@@ -557,6 +914,104 @@ export function validateRegistry(registry) {
       if (typeof server.url !== "string" || !server.url.trim()) {
         errors.push(`registry.servers.${name}.url must be a non-empty string`);
       }
+      const transport = server.transport || registry.defaults?.transport;
+      if (!["hub-url", "http"].includes(transport)) {
+        errors.push(
+          `registry.servers.${name}.transport must be hub-url or http`,
+        );
+      }
+      if (server.command !== undefined) {
+        errors.push(
+          `registry.servers.${name}.command is not supported; stdio registration is intentionally unsupported`,
+        );
+      }
+      if (server.args !== undefined) {
+        errors.push(
+          `registry.servers.${name}.args is not supported; stdio registration is intentionally unsupported`,
+        );
+      }
+      if (server.headers !== undefined) {
+        if (!["hub-url", "http"].includes(transport)) {
+          errors.push(
+            `registry.servers.${name}.headers is allowed only for HTTP-compatible transports`,
+          );
+        }
+        if (
+          !server.headers ||
+          typeof server.headers !== "object" ||
+          Array.isArray(server.headers)
+        ) {
+          errors.push(`registry.servers.${name}.headers must be an object`);
+        } else {
+          for (const [headerName, descriptor] of Object.entries(
+            server.headers,
+          )) {
+            if (!isValidHeaderName(headerName)) {
+              errors.push(
+                `registry.servers.${name}.headers contains invalid header name ${headerName}`,
+              );
+              continue;
+            }
+            if (
+              !descriptor ||
+              typeof descriptor !== "object" ||
+              Array.isArray(descriptor)
+            ) {
+              errors.push(
+                `registry.servers.${name}.headers.${headerName} must be a descriptor object`,
+              );
+              continue;
+            }
+            const keys = Object.keys(descriptor);
+            const hasValue = Object.hasOwn(descriptor, "value");
+            const hasEnv = Object.hasOwn(descriptor, "env");
+            if (hasValue && hasEnv) {
+              errors.push(
+                `registry.servers.${name}.headers.${headerName} must use either value or env`,
+              );
+            } else if (hasValue) {
+              if (
+                keys.length !== 1 ||
+                typeof descriptor.value !== "string" ||
+                descriptor.value.length === 0
+              ) {
+                errors.push(
+                  `registry.servers.${name}.headers.${headerName}.value must be a non-empty string`,
+                );
+              }
+            } else if (hasEnv) {
+              if (
+                !["env", "prefix"].every((key) => keys.includes(key)) &&
+                keys.some((key) => !["env", "prefix"].includes(key))
+              ) {
+                errors.push(
+                  `registry.servers.${name}.headers.${headerName} supports only env and optional prefix`,
+                );
+              }
+              if (
+                typeof descriptor.env !== "string" ||
+                !descriptor.env.trim()
+              ) {
+                errors.push(
+                  `registry.servers.${name}.headers.${headerName}.env must be a non-empty string`,
+                );
+              }
+              if (
+                descriptor.prefix !== undefined &&
+                typeof descriptor.prefix !== "string"
+              ) {
+                errors.push(
+                  `registry.servers.${name}.headers.${headerName}.prefix must be a string`,
+                );
+              }
+            } else {
+              errors.push(
+                `registry.servers.${name}.headers.${headerName} must use value or env`,
+              );
+            }
+          }
+        }
+      }
       if (server.targets !== undefined && !Array.isArray(server.targets)) {
         errors.push(`registry.servers.${name}.targets must be an array`);
       }
@@ -574,6 +1029,22 @@ export function validateRegistry(registry) {
       errors.push("registry.policies.watched_paths must be an array");
     }
     if (
+      registry.policies.sync_denylist !== undefined &&
+      !Array.isArray(registry.policies.sync_denylist)
+    ) {
+      errors.push("registry.policies.sync_denylist must be an array");
+    }
+    if (Array.isArray(registry.policies.sync_denylist)) {
+      for (const entry of registry.policies.sync_denylist) {
+        if (typeof entry !== "string" || !entry.includes(":")) {
+          errors.push(
+            "registry.policies.sync_denylist entries must use client:server format",
+          );
+          break;
+        }
+      }
+    }
+    if (
       registry.policies.stdio_action &&
       !["replace-with-hub", "warn"].includes(registry.policies.stdio_action)
     ) {
@@ -587,9 +1058,9 @@ export function validateRegistry(registry) {
 }
 
 export function inspectRegistry() {
-  if (!existsSync(REGISTRY_PATH)) {
+  if (!existsSync(registryPath())) {
     return {
-      path: REGISTRY_PATH,
+      path: registryPath(),
       exists: false,
       valid: false,
       errors: ["registry file missing"],
@@ -598,10 +1069,10 @@ export function inspectRegistry() {
   }
 
   try {
-    const registry = readJsonFile(REGISTRY_PATH);
+    const registry = readJsonFile(registryPath());
     const errors = validateRegistry(registry);
     return {
-      path: REGISTRY_PATH,
+      path: registryPath(),
       exists: true,
       valid: errors.length === 0,
       errors,
@@ -609,7 +1080,7 @@ export function inspectRegistry() {
     };
   } catch (error) {
     return {
-      path: REGISTRY_PATH,
+      path: registryPath(),
       exists: true,
       valid: false,
       errors: [error.message],
@@ -651,7 +1122,7 @@ export function saveRegistry(registry) {
   if (errors.length > 0) {
     throw new Error(`MCP registry invalid: ${errors.join("; ")}`);
   }
-  writeJsonFile(REGISTRY_PATH, registry);
+  writeJsonFile(registryPath(), registry);
   return registry;
 }
 
@@ -698,13 +1169,19 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
     );
 
     for (const [name, serverConfig] of managedServers) {
-      const expectedUrl = buildDesiredServerRecord(
+      const desired = buildDesiredServerRecord(
         name,
         serverConfig,
         config.filePath,
-      ).config.url;
+      );
+      const expectedUrl = desired.config.url;
+      const expectedHeaders = isCodexConfig(config.filePath)
+        ? desired.headerDescriptors || {}
+        : descriptorsFromJsonConfig(desired.config);
       const actual =
         config.servers.find((server) => server.name === name) || null;
+      const actualHeaders = actual?.headerDescriptors || {};
+      const currentHeaderStatus = headerStatus(expectedHeaders, actualHeaders);
       let status = "missing";
 
       if (!config.exists) {
@@ -716,7 +1193,7 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
       } else if (!actual.url) {
         status = actual.transport === "stdio" ? "stdio" : "invalid";
       } else if (normalizeUrl(actual.url) === normalizeUrl(expectedUrl)) {
-        status = "present";
+        status = currentHeaderStatus === "ok" ? "present" : "mismatch";
       } else {
         status = "mismatch";
       }
@@ -730,6 +1207,9 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         expectedUrl,
         actualUrl: actual?.url || "",
         status,
+        headerStatus: currentHeaderStatus,
+        expectedHeaderNames: headerNames(expectedHeaders),
+        actualHeaderNames: headerNames(actualHeaders),
       });
     }
 
@@ -828,14 +1308,19 @@ export function remediate(filePath, stdioServers, policy = {}) {
   let replacement = null;
 
   if (action === "replace-with-hub") {
-    const registry = loadRegistryOrDefault();
-    const [hubServerName, hubServerConfig] = getHubServerEntry(registry);
+    const registry = policy.registry || loadRegistryOrDefault();
+    const matchingOffender = offenders.find((server) =>
+      Object.hasOwn(registry.servers || {}, server.name),
+    );
+    const [hubServerName, hubServerConfig] = matchingOffender
+      ? [matchingOffender.name, registry.servers[matchingOffender.name]]
+      : getHubServerEntry(registry);
     const desired = buildDesiredServerRecord(
       hubServerName,
       hubServerConfig,
       resolvedPath,
     );
-    replacement = { name: desired.name, ...desired.config };
+    replacement = { name: desired.name, ...redactServerConfig(desired.config) };
     updates.push(desired);
   }
 
@@ -846,7 +1331,7 @@ export function remediate(filePath, stdioServers, policy = {}) {
     backupPath,
     removedServers: removals,
     replacement,
-    warnings: [],
+    warnings: updates.flatMap((update) => update.warnings || []),
   };
 }
 
@@ -1032,10 +1517,13 @@ export function removeServerFromTargets(name, options = {}) {
 export function syncRegistryTargets(options = {}) {
   const registry = options.registry || loadRegistryOrDefault();
   const actions = [];
+  const invalidConfigs = new Set();
+  const denylist = syncDenylistEntries(registry.policies);
 
   for (const target of listManagedConfigTargets(registry)) {
     const snapshot = scanConfig(target.filePath);
     if (snapshot.parseError) {
+      invalidConfigs.add(normalizeForMatch(target.filePath));
       actions.push({
         type: "sync",
         filePath: target.filePath,
@@ -1047,11 +1535,10 @@ export function syncRegistryTargets(options = {}) {
     }
 
     if (snapshot.stdioServers.length > 0) {
-      const remediation = remediate(
-        target.filePath,
-        snapshot.stdioServers,
-        registry.policies,
-      );
+      const remediation = remediate(target.filePath, snapshot.stdioServers, {
+        ...registry.policies,
+        registry,
+      });
       actions.push({
         type: "remediate",
         filePath: target.filePath,
@@ -1065,13 +1552,49 @@ export function syncRegistryTargets(options = {}) {
   }
 
   for (const target of listPrimaryConfigTargets(registry)) {
-    const updates = Object.entries(registry.servers || {})
-      .filter(([, serverConfig]) =>
-        serverAppliesToClient(serverConfig, target.client),
-      )
-      .map(([name, serverConfig]) =>
+    const snapshot = scanConfig(target.filePath);
+    const targetKey = normalizeForMatch(target.filePath);
+    if (snapshot.parseError) {
+      if (!invalidConfigs.has(targetKey)) {
+        actions.push({
+          type: "sync",
+          filePath: target.filePath,
+          label: target.label,
+          status: "invalid-config",
+          message: snapshot.parseError.message,
+        });
+      }
+      continue;
+    }
+
+    const updates = [];
+    for (const [name, serverConfig] of Object.entries(registry.servers || {})) {
+      if (serverConfig?.safe !== true) continue;
+      if (!serverAppliesToClient(serverConfig, target.client)) continue;
+
+      const denyKey = syncDenylistKey(target.client, name);
+      if (denylist.has(denyKey)) {
+        const existing = snapshot.servers.find(
+          (server) => server.name === name,
+        );
+        if (!existing) {
+          actions.push({
+            type: "sync",
+            filePath: target.filePath,
+            label: target.label,
+            status: "policy-skip",
+            server: name,
+            client: target.client,
+            message: `[mcp-guard] policy skip: ${denyKey}`,
+          });
+        }
+        continue;
+      }
+
+      updates.push(
         buildDesiredServerRecord(name, serverConfig, target.filePath),
       );
+    }
 
     if (updates.length === 0) continue;
 
@@ -1090,6 +1613,7 @@ export function syncRegistryTargets(options = {}) {
       label: target.label,
       status: result.modified ? "updated" : "ok",
       serverCount: updates.length,
+      warnings: updates.flatMap((update) => update.warnings || []),
     });
   }
 

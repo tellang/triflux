@@ -133,7 +133,7 @@ export function buildExecArgs(opts = {}) {
 
 // ── Codex execution ─────────────────────────────────────────────
 
-async function runCodex(prompt, workdir, preflight, attempt) {
+async function runCodex(prompt, workdir, preflight, attempt, lease) {
   const dir = join(tmpdir(), "triflux-codex-exec");
   mkdirSync(dir, { recursive: true });
   const resultFile = join(
@@ -142,7 +142,7 @@ async function runCodex(prompt, workdir, preflight, attempt) {
   );
   const command = commandWithOverrides(
     buildExecCommand(prompt, resultFile, {
-      profile: attempt.profile,
+      profile: lease?.profile ?? attempt.profile,
       skipGitRepoCheck: true,
       sandboxBypass: attempt.forceBypass,
     }),
@@ -150,10 +150,43 @@ async function runCodex(prompt, workdir, preflight, attempt) {
     preflight.codexPath,
     buildOverrides(attempt.requested, attempt.excluded),
   );
+  // PRD A1 — lease 메타데이터를 spawn env 에 적용한다. lease.authFile 이 있으면
+  // 해당 파일이 위치한 디렉토리를 CODEX_HOME 으로 export 해서 codex CLI 가 그
+  // account 의 auth.json 을 사용하게 한다. lease 가 null 이면 default ~/.codex
+  // 동작 유지 (회귀 없음). lease.env 는 추가 환경변수 (provider 고정 등) 주입용.
+  const spawnEnv = lease ? buildLeaseSpawnEnv(lease) : undefined;
   return runProcess(command, workdir, attempt.timeout, {
     resultFile,
     inferStallMode,
+    spawnEnv,
   });
+}
+
+function buildLeaseSpawnEnv(lease) {
+  const extra = {};
+  if (lease.authFile) {
+    // lease.authFile 은 보통 ~/.claude/cache/tfx-hub/codex-auth-<account>.json 형식.
+    // codex CLI 는 CODEX_HOME 을 통해 auth.json 위치를 결정하므로, 이 cache 파일을
+    // 직접 CODEX_HOME 후보 디렉토리로 사용한다. cache 파일 자체가 auth.json 이름이
+    // 아니라면 후속 PR 에서 isolated dir + symlink/복사 처리한다 (PRD Open Question).
+    // 현재는 lease.authFile 의 dirname 을 export 하되, 그 dirname 안에 auth.json 이
+    // 실제로 있을 때만 적용한다 (false-positive 회피).
+    try {
+      const dir = dirnameOf(lease.authFile);
+      if (dir) extra.CODEX_HOME = dir;
+    } catch {}
+  }
+  if (lease.env && typeof lease.env === "object") {
+    Object.assign(extra, lease.env);
+  }
+  return Object.keys(extra).length ? { ...process.env, ...extra } : undefined;
+}
+
+function dirnameOf(filePath) {
+  if (typeof filePath !== "string" || !filePath) return null;
+  const lastSep = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  if (lastSep < 0) return null;
+  return filePath.slice(0, lastSep);
 }
 
 // ── Public API ──────────────────────────────────────────────────

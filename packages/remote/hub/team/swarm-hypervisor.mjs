@@ -14,6 +14,7 @@ import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupShardProcesses } from "@triflux/core/hub/lib/process-utils.mjs";
 import { getHostConfig } from "@triflux/core/hub/lib/ssh-command.mjs";
 import { buildWorkerPrompt } from "./build-worker-prompt.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
@@ -35,10 +36,10 @@ import {
 } from "./worktree-lifecycle.mjs";
 
 let ensureHubAliveFn = null;
+let getHubInfoFn = null;
 try {
-  ({ ensureHubAlive: ensureHubAliveFn } = await import(
-    "./cli/services/hub-client.mjs"
-  ));
+  ({ ensureHubAlive: ensureHubAliveFn, getHubInfo: getHubInfoFn } =
+    await import("./cli/services/hub-client.mjs"));
 } catch {
   // hub-client 미설치 환경 — Hub 수동 관리 필요
 }
@@ -120,6 +121,35 @@ function createSharedRegistry(factory) {
   }
 }
 
+function hasOwnDep(deps, key) {
+  return Object.hasOwn(deps, key);
+}
+
+function formatHubHostForUrl(host) {
+  return host.includes(":") ? `[${host}]` : host;
+}
+
+function resolveHubStatusUrl(hub) {
+  if (!hub) return null;
+
+  if (typeof hub.url === "string" && hub.url.trim()) {
+    try {
+      const url = new URL(hub.url);
+      url.pathname = "/status";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  const host = typeof hub.host === "string" ? hub.host.trim() : "";
+  const port = Number(hub.port);
+  if (!host || !Number.isFinite(port) || port <= 0) return null;
+  return `http://${formatHubHostForUrl(host)}:${port}/status`;
+}
+
 /**
  * Create a swarm hypervisor.
  * @param {object} opts
@@ -164,8 +194,16 @@ export function createSwarmHypervisor(opts) {
     _deps.rebaseShardOntoIntegration || rebaseShardOntoIntegration;
   const cleanupWorktreeImpl =
     _deps.cleanupWorktree || cleanupWorktree || pruneWorktree;
+  const cleanupShardProcessesImpl =
+    _deps.cleanupShardProcesses || cleanupShardProcesses;
   const preserveWorktreePatchImpl =
     _deps.preserveWorktreePatch || preserveWorktreePatch;
+  const ensureHubAliveImpl = hasOwnDep(_deps, "ensureHubAlive")
+    ? _deps.ensureHubAlive
+    : ensureHubAliveFn;
+  const getHubInfoImpl = hasOwnDep(_deps, "getHubInfo")
+    ? _deps.getHubInfo
+    : getHubInfoFn;
   const emitter = new EventEmitter();
   const eventLog = createEventLog(join(logsDir, "swarm-events.jsonl"));
   const { registry: sharedRegistry, fallbackReason: meshRegistryFallback } =
@@ -184,6 +222,10 @@ export function createSwarmHypervisor(opts) {
   /** @type {Set<string>} shards that have fully completed (not just launched) */
   const completedShards = new Set();
   const cleanedWorktreePaths = new Set();
+  const processCleanupTotals = {
+    totalKilled: 0,
+    byCategory: {},
+  };
 
   const results = new Map(); // shardName → validated result
   const failures = new Map(); // shardName → failure info
@@ -199,6 +241,10 @@ export function createSwarmHypervisor(opts) {
     integrationFailures: [],
     skipped: [],
     integrationBranch: null,
+    processCleanup: {
+      totalKilled: 0,
+      byCategory: {},
+    },
     error: null,
   };
   const integrationPromise = new Promise((resolve) => {
@@ -263,6 +309,8 @@ export function createSwarmHypervisor(opts) {
       return integrationResult;
     }
 
+    const processCleanup = payload.processCleanup || getProcessCleanupSummary();
+
     integrationResult = Object.freeze({
       integrated: Object.freeze([...(payload.integrated || [])]),
       failed: Object.freeze([...(payload.failed || [])]),
@@ -272,6 +320,10 @@ export function createSwarmHypervisor(opts) {
       skipped: Object.freeze([...(payload.skipped || [])]),
       integrationBranch: payload.integrationBranch || null,
       results: Object.freeze([...(payload.results || [])]),
+      processCleanup: Object.freeze({
+        totalKilled: processCleanup.totalKilled || 0,
+        byCategory: Object.freeze({ ...(processCleanup.byCategory || {}) }),
+      }),
       partial:
         payload.partial ??
         (Array.isArray(payload.failed) && payload.failed.length > 0),
@@ -288,11 +340,37 @@ export function createSwarmHypervisor(opts) {
       integrationFailures: [...integrationResult.integrationFailures],
       skipped: [...integrationResult.skipped],
       integrationBranch: integrationResult.integrationBranch,
+      processCleanup: integrationResult.processCleanup,
       error: integrationResult.error,
     };
 
     resolveIntegrationPromise?.(integrationResult);
     return integrationResult;
+  }
+
+  function getProcessCleanupSummary() {
+    return {
+      totalKilled: processCleanupTotals.totalKilled,
+      byCategory: { ...processCleanupTotals.byCategory },
+    };
+  }
+
+  function recordProcessCleanup(result) {
+    if (!result) return getProcessCleanupSummary();
+
+    const killed = Number(result.killed ?? result.totalKilled ?? 0);
+    if (Number.isFinite(killed) && killed > 0) {
+      processCleanupTotals.totalKilled += killed;
+    }
+
+    for (const [category, count] of Object.entries(result.byCategory || {})) {
+      const numeric = Number(count);
+      if (!Number.isFinite(numeric) || numeric <= 0) continue;
+      processCleanupTotals.byCategory[category] =
+        (processCleanupTotals.byCategory[category] || 0) + numeric;
+    }
+
+    return getProcessCleanupSummary();
   }
 
   function git(args, cwd = workdir) {
@@ -1148,6 +1226,33 @@ export function createSwarmHypervisor(opts) {
     }
 
     try {
+      const snapshot = worker.conductor?.getSnapshot?.();
+      const processCleanup = await cleanupShardProcessesImpl({
+        worktreePath: worker.worktreePath,
+        sessionIds: [worker.sessionId || worker.sessionConfig?.id].filter(
+          Boolean,
+        ),
+        topPids: snapshot?.topPids ?? [],
+        runId: plan?.runId || runId,
+        shardName,
+      });
+      worker.processCleanup = processCleanup;
+      recordProcessCleanup(processCleanup);
+      eventLog.append("process_cleanup", {
+        shard: shardName,
+        worktreePath: worker.worktreePath,
+        killed: processCleanup?.killed ?? 0,
+        byCategory: processCleanup?.byCategory || {},
+      });
+    } catch (err) {
+      eventLog.append("process_cleanup_failed", {
+        shard: shardName,
+        worktreePath: worker.worktreePath,
+        error: err.message,
+      });
+    }
+
+    try {
       await cleanupWorktreeImpl({
         worktreePath: worker.worktreePath,
         branchName,
@@ -1282,6 +1387,12 @@ export function createSwarmHypervisor(opts) {
         integrationFailures: [...integrationPromiseState.integrationFailures],
         skipped: [...integrationPromiseState.skipped],
         integrationBranch: integrationPromiseState.integrationBranch,
+        processCleanup: Object.freeze({
+          totalKilled: integrationPromiseState.processCleanup.totalKilled,
+          byCategory: Object.freeze({
+            ...integrationPromiseState.processCleanup.byCategory,
+          }),
+        }),
         error: integrationPromiseState.error,
       }),
     });
@@ -1298,24 +1409,36 @@ export function createSwarmHypervisor(opts) {
   let hubKeepaliveTimer = null;
   function startHubKeepalive() {
     // 5분마다 Hub /status 핑 — crash 감지 시 ensureHubAlive로 재시작
-    const envPort = Number(process.env.TFX_HUB_PORT || "27888");
-    const hubPort = Number.isFinite(envPort) && envPort > 0 ? envPort : 27888;
     hubKeepaliveTimer = setInterval(
       async () => {
         try {
-          const resp = await fetch(`http://127.0.0.1:${hubPort}/status`);
-          if (!resp.ok && ensureHubAliveFn) {
+          const hub = getHubInfoImpl ? await getHubInfoImpl() : null;
+          const statusUrl = resolveHubStatusUrl(hub);
+          if (!statusUrl) {
+            if (ensureHubAliveImpl) {
+              eventLog.append("hub_keepalive_restart", {
+                reason: "hub_url_unresolved",
+              });
+              await ensureHubAliveImpl();
+            }
+            return;
+          }
+
+          const resp = await fetch(statusUrl, {
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!resp.ok && ensureHubAliveImpl) {
             eventLog.append("hub_keepalive_restart", {});
-            await ensureHubAliveFn();
+            await ensureHubAliveImpl();
           }
         } catch {
           // Hub 다운 — 재시작 시도
-          if (ensureHubAliveFn) {
+          if (ensureHubAliveImpl) {
             eventLog.append("hub_keepalive_restart", {
               reason: "fetch_failed",
             });
             try {
-              await ensureHubAliveFn();
+              await ensureHubAliveImpl();
             } catch {
               eventLog.append("hub_restart_failed", {});
             }
@@ -1342,8 +1465,8 @@ export function createSwarmHypervisor(opts) {
     markIntegrationPromisePending();
 
     // Hub alive 확인 — 죽어있으면 재시작
-    if (ensureHubAliveFn) {
-      ensureHubAliveFn()
+    if (ensureHubAliveImpl) {
+      ensureHubAliveImpl()
         .then((hub) => {
           eventLog.append("hub_ensured", { port: hub?.port });
         })
@@ -1438,11 +1561,21 @@ export function createSwarmHypervisor(opts) {
     await Promise.allSettled(shutdowns);
 
     if (!keepFailedWorktrees) {
-      for (const [shardName, failureInfo] of failures) {
-        const worker = workers.get(shardName);
+      const cleanupCandidates = new Map();
+      for (const [shardName, worker] of workers) {
+        cleanupCandidates.set(shardName, worker);
+      }
+      for (const [shardName, worker] of redundantWorkers) {
+        cleanupCandidates.set(`${shardName}:redundant`, worker);
+      }
+
+      for (const [candidateName, worker] of cleanupCandidates) {
+        const shardName = worker?.shardConfig?.name || candidateName;
+        const failureInfo = failures.get(shardName);
         const shard =
           worker?.shardConfig ||
           plan?.shards.find((item) => item.name === shardName);
+        if (!worker?.worktreePath) continue;
         await maybeCleanupWorktree(shardName, worker, shard, {
           force: true,
           failureReason: failureInfo?.mode || failureInfo?.reason || reason,

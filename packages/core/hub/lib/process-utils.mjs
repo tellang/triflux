@@ -1,7 +1,7 @@
 // hub/lib/process-utils.mjs
 // 프로세스 관련 공유 유틸리티
 
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -18,8 +18,23 @@ const SCAN_SCRIPT_PATH = join(CLEANUP_SCRIPT_DIR, "scan-processes.ps1");
 const TREE_SCRIPT_PATH = join(CLEANUP_SCRIPT_DIR, "get-ancestor-tree.ps1");
 
 // 스크립트 버전 — 내용 변경 시 증가하여 캐시된 스크립트를 갱신
-const SCRIPT_VERSION = 3;
+const SCRIPT_VERSION = 4;
 const VERSION_FILE = join(CLEANUP_SCRIPT_DIR, ".version");
+const FSMONITOR_DAEMON_MARKER = "fsmonitor--daemon run --detach";
+const FSMONITOR_DAEMON_PATTERN =
+  /(^|\s)fsmonitor--daemon\s+run\s+--detach(\s|$)/;
+const DEFAULT_FSMONITOR_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+const LEGACY_ORPHAN_KILLABLE_NAMES = new Set([
+  "node.exe",
+  "bash.exe",
+  "cmd.exe",
+  "uvx.exe",
+]);
+const LIVE_CLI_SESSION_ROOT_NAMES = new Set([
+  "codex.exe",
+  "claude.exe",
+  "gemini.exe",
+]);
 
 /**
  * 주어진 PID의 프로세스가 살아있는지 확인한다.
@@ -203,9 +218,7 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
       // 프로세스 맵에 없음 → 살아있는지 직접 확인
       return isPidAlive(current);
     }
-    if (
-      LIVE_CLI_SESSION_ROOT_NAMES.has(String(info.name || "").toLowerCase())
-    ) {
+    if (LIVE_CLI_SESSION_ROOT_NAMES.has(normalizeName(info.name))) {
       return true;
     }
 
@@ -226,10 +239,10 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
 
 function hasLiveCliDescendant(pid, procMap) {
   const children = new Map();
-  for (const [childPid, proc] of procMap) {
+  for (const proc of procMap.values()) {
     if (!Number.isFinite(proc.ppid) || proc.ppid <= 0) continue;
     const list = children.get(proc.ppid) || [];
-    list.push({ pid: childPid, ...proc });
+    list.push(proc);
     children.set(proc.ppid, list);
   }
 
@@ -239,9 +252,7 @@ function hasLiveCliDescendant(pid, procMap) {
     const proc = stack.pop();
     if (!proc || visited.has(proc.pid)) continue;
     visited.add(proc.pid);
-    if (
-      LIVE_CLI_SESSION_ROOT_NAMES.has(String(proc.name || "").toLowerCase())
-    ) {
+    if (LIVE_CLI_SESSION_ROOT_NAMES.has(normalizeName(proc.name))) {
       return true;
     }
     stack.push(...(children.get(proc.pid) || []));
@@ -249,41 +260,134 @@ function hasLiveCliDescendant(pid, procMap) {
   return false;
 }
 
-// kill 대상 프로세스 이름 (Windows)
-// codex/claude는 활성 세션 루트로만 취급한다. 전역 orphan sweep이
-// 사용자 Claude Code/Codex 세션을 직접 종료하면 안 된다.
-const KILLABLE_NAMES = new Set([
-  "node.exe",
-  "bash.exe",
-  "cmd.exe",
-  "uvx.exe",
-]);
-const LIVE_CLI_SESSION_ROOT_NAMES = new Set([
-  "codex.exe",
-  "claude.exe",
-  "gemini.exe",
-]);
-
 /**
- * 고아 프로세스 트리를 정리한다 (node.exe + bash.exe + cmd.exe + uvx.exe).
- * Windows 전용 — Agent 서브프로세스가 MCP 서버, bash 래퍼, cmd 래퍼를 남기는 문제 대응.
- *
- * 전략: 부모 체인을 루트까지 추적하여, 체인 중간에 죽은 프로세스가 있으면
- * 해당 프로세스 아래의 전체 트리를 고아로 판정하고 정리.
- * 스캔 범위에는 codex/claude/pwsh도 포함하여 체인 추적 정확도를 높인다.
- *
- * 보호 대상: 현재 프로세스 조상 트리, Hub PID
- * @returns {{ killed: number, remaining: number }}
+ * Legacy wrapper for scoped orphan node runtime cleanup.
+ * @param {Parameters<typeof cleanupOrphanRuntimeProcesses>[0]} opts
+ * @returns {{ killed: number, remaining: number, killedProcesses: Array<{pid: number, ppid: number, name: string, commandLine: string, killReason: string}> }}
  */
-export function cleanupOrphanNodeProcesses() {
-  if (!IS_WINDOWS) return cleanupOrphansUnix();
+export function cleanupOrphanNodeProcesses(opts = {}) {
+  return cleanupOrphanRuntimeProcesses({ ...opts, legacy: true });
+}
 
-  ensureHelperScripts();
+function normalizePowerShellJson(output) {
+  const trimmed = String(output || "").trim();
+  if (!trimmed || trimmed === "null") return [];
+  const parsed = JSON.parse(trimmed);
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
 
-  const myPid = process.pid;
+function parseCreationDateMs(value) {
+  if (!value) return NaN;
+  if (value instanceof Date) return value.getTime();
 
-  // Hub PID 보호
-  let hubPid = null;
+  const text = String(value);
+  const dotNetMatch = /\/Date\((-?\d+)\)\//.exec(text);
+  if (dotNetMatch) return Number.parseInt(dotNetMatch[1], 10);
+
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+function normalizePid(value) {
+  const pid = Number(value);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function normalizeName(name) {
+  return String(name || "").toLowerCase();
+}
+
+function normalizeCommandLine(commandLine) {
+  return String(commandLine || "").replace(/\//g, "\\");
+}
+
+function processRecordFromCim(record) {
+  const pid = normalizePid(record?.ProcessId ?? record?.pid);
+  if (!pid) return null;
+  const ppid = Number(record?.ParentProcessId ?? record?.ppid ?? 0);
+  return {
+    pid,
+    ppid: Number.isFinite(ppid) ? ppid : 0,
+    name: String(record?.Name ?? record?.name ?? ""),
+    commandLine: String(record?.CommandLine ?? record?.commandLine ?? ""),
+    creationDate: record?.CreationDate,
+  };
+}
+
+function runSpawn(spawnSyncFn, command, args, options = {}) {
+  return spawnSyncFn(command, args, {
+    encoding: "utf8",
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    ...options,
+  });
+}
+
+function runPowerShellJson(spawnSyncFn, command) {
+  const result = runSpawn(spawnSyncFn, "powershell", [
+    "-NoProfile",
+    "-WindowStyle",
+    "Hidden",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    command,
+  ]);
+  if (result.status !== 0) {
+    throw new Error(
+      String(result.stderr || result.error || "PowerShell failed"),
+    );
+  }
+  return normalizePowerShellJson(result.stdout);
+}
+
+function getWindowsProcessSnapshot(spawnSyncFn = spawnSync) {
+  const records = runPowerShellJson(
+    spawnSyncFn,
+    "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,CreationDate | ConvertTo-Json -Depth 3 -Compress",
+  );
+  return records.map(processRecordFromCim).filter(Boolean);
+}
+
+function parsePosixProcessSnapshot(output) {
+  const processes = [];
+  for (const line of String(output || "")
+    .split(/\r?\n/)
+    .slice(1)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const match = /^(\d+)\s+(\d+)\s+(\S+)(?:\s+(.*))?$/.exec(trimmed);
+    if (!match) continue;
+    processes.push({
+      pid: Number.parseInt(match[1], 10),
+      ppid: Number.parseInt(match[2], 10),
+      name: match[3],
+      commandLine: match[4] || match[3],
+    });
+  }
+  return processes;
+}
+
+function getPosixProcessSnapshot(spawnSyncFn = spawnSync) {
+  const result = runSpawn(spawnSyncFn, "ps", ["-eo", "pid,ppid,comm,args"]);
+  if (result.status !== 0) return [];
+  return parsePosixProcessSnapshot(result.stdout);
+}
+
+function getProcessSnapshot({
+  isWindows = IS_WINDOWS,
+  spawnSyncFn = spawnSync,
+} = {}) {
+  try {
+    return isWindows
+      ? getWindowsProcessSnapshot(spawnSyncFn)
+      : getPosixProcessSnapshot(spawnSyncFn);
+  } catch {
+    return [];
+  }
+}
+
+function addHubPid(protectedPids) {
   try {
     const hubPidPath = join(
       homedir(),
@@ -294,85 +398,566 @@ export function cleanupOrphanNodeProcesses() {
     );
     if (existsSync(hubPidPath)) {
       const hubInfo = JSON.parse(readFileSync(hubPidPath, "utf8"));
-      hubPid = Number(hubInfo?.pid);
+      const hubPid = normalizePid(hubInfo?.pid);
+      if (hubPid) protectedPids.add(hubPid);
     }
   } catch {}
+}
 
-  // 보호 PID 세트: 현재 프로세스 + Hub + 현재 프로세스의 조상 트리
-  const protectedPids = new Set();
-  protectedPids.add(myPid);
-  if (Number.isFinite(hubPid) && hubPid > 0) protectedPids.add(hubPid);
+function getProtectedPids({
+  protectedPids,
+  isWindows = IS_WINDOWS,
+  spawnSyncFn = spawnSync,
+  includeAncestorScan = false,
+} = {}) {
+  const result = new Set(protectedPids || []);
+  result.add(process.pid);
+  if (Number.isInteger(process.ppid) && process.ppid > 0) {
+    result.add(process.ppid);
+  }
+  addHubPid(result);
+  if (!includeAncestorScan) return result;
 
-  try {
-    const treeOutput = execSync(
-      `powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${TREE_SCRIPT_PATH}" -StartPid ${myPid}`,
-      {
-        encoding: "utf8",
-        timeout: 8000,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      },
-    );
-    for (const line of treeOutput.split(/\r?\n/)) {
-      const pid = Number.parseInt(line.trim(), 10);
-      if (Number.isFinite(pid) && pid > 0) protectedPids.add(pid);
-    }
-  } catch {}
-
-  // 전체 프로세스 맵 구축 (node + bash + cmd + codex + claude + pwsh + uvx)
-  const procMap = new Map();
-  try {
-    const output = execSync(
-      `powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "${SCAN_SCRIPT_PATH}"`,
-      {
-        encoding: "utf8",
-        timeout: 15000,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      },
-    );
-
-    for (const line of output.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      const [pidStr, ppidStr, name] = trimmed.split(",");
-      const pid = Number.parseInt(pidStr, 10);
-      const ppid = Number.parseInt(ppidStr, 10);
-      if (Number.isFinite(pid) && pid > 0) {
-        procMap.set(pid, { ppid, name: name || "unknown" });
-      }
-    }
-  } catch {}
-
-  // 고아 판정 + 정리 (SIGTERM → 3s → SIGKILL 에스컬레이션)
-  // CLI 도구(codex/claude/pwsh)는 체인 추적용으로만 스캔 — kill 대상에서 제외
-  const orphanPids = [];
-  for (const [pid, info] of procMap) {
-    if (protectedPids.has(pid)) continue;
-    if (!KILLABLE_NAMES.has(info.name?.toLowerCase())) continue;
-    if (hasLiveAncestorChain(pid, procMap, protectedPids)) continue;
-    if (hasLiveCliDescendant(pid, procMap)) continue;
-    orphanPids.push(pid);
+  const snapshot = getProcessSnapshot({ isWindows, spawnSyncFn });
+  const byPid = new Map(snapshot.map((proc) => [proc.pid, proc]));
+  let current = process.pid;
+  const seen = new Set();
+  while (current > 0 && !seen.has(current)) {
+    seen.add(current);
+    result.add(current);
+    const parent = byPid.get(current)?.ppid;
+    if (!Number.isInteger(parent) || parent <= 0) break;
+    current = parent;
   }
 
-  const killed = killWithEscalation(orphanPids, procMap);
+  return result;
+}
 
-  // 남은 프로세스 수 확인
-  let remaining = 0;
+function collectDescendants(rootPid, processes) {
+  const childrenByParent = new Map();
+  for (const proc of processes) {
+    if (!childrenByParent.has(proc.ppid)) childrenByParent.set(proc.ppid, []);
+    childrenByParent.get(proc.ppid).push(proc);
+  }
+
+  const byPid = new Map(processes.map((proc) => [proc.pid, proc]));
+  const root = byPid.get(rootPid) || {
+    pid: rootPid,
+    ppid: 0,
+    name: "",
+    commandLine: "",
+  };
+  const result = [];
+  const queue = [root];
+  const seen = new Set();
+
+  while (queue.length > 0) {
+    const proc = queue.shift();
+    if (!proc || seen.has(proc.pid)) continue;
+    seen.add(proc.pid);
+    result.push(proc);
+    for (const child of childrenByParent.get(proc.pid) || []) {
+      queue.push(child);
+    }
+  }
+
+  return result;
+}
+
+function snapshotPids(snapshot) {
+  const values = Array.isArray(snapshot) ? snapshot : [snapshot];
+  return values
+    .map((item) => normalizePid(typeof item === "object" ? item?.pid : item))
+    .filter(Boolean);
+}
+
+function matchesPattern(commandLine, pattern, { exact = false } = {}) {
+  if (pattern instanceof RegExp) return pattern.test(commandLine);
+  const text = String(pattern || "");
+  if (!text) return false;
+  return exact ? commandLine === text : commandLine.includes(text);
+}
+
+function hasExactGbrainServe(commandLine) {
+  const normalized = commandLine.trim();
+  return (
+    /^("?[^"\s]*bun(?:\.exe)?"?\s+)?gbrain\s+serve$/i.test(normalized) ||
+    /^("?[^"\s]*bun(?:\.exe)?"?\s+)"?[^"]*gbrain[\\/]+src[\\/]+cli\.ts"?\s+serve$/i.test(
+      normalized,
+    )
+  );
+}
+
+function hasGbrainServeCommand(commandLine) {
+  return /(^|\s)gbrain\s+serve(\s|$)/i.test(commandLine.trim());
+}
+
+function hasFsmonitorDaemonCommand(commandLine) {
+  return FSMONITOR_DAEMON_PATTERN.test(commandLine);
+}
+
+function categoryForShardProcess(proc, context) {
+  const name = normalizeName(proc.name);
+  const commandLine = normalizeCommandLine(proc.commandLine);
+  const worktreePath = normalizeCommandLine(context.worktreePath || "");
+  const shardMarker = context.shardName
+    ? `.codex-swarm\\wt-${context.shardName}`
+    : "";
+  const hasWorktree = worktreePath && commandLine.includes(worktreePath);
+  const hasShardMarker = shardMarker && commandLine.includes(shardMarker);
+
+  if (name === "node.exe" || name === "node") {
+    if (hasWorktree || hasShardMarker) return "node";
+  }
+
+  if (name === "bash.exe" || name === "bash" || name === "sh") {
+    if (hasWorktree) return "bash";
+  }
+
+  if (name === "conhost.exe" || name === "conhost") {
+    if (
+      context.sessionIds?.length > 0 &&
+      context.sessionIds.some((id) => id && commandLine.includes(id))
+    ) {
+      return "conhost";
+    }
+  }
+
+  if (name === "bun.exe" || name === "bun") {
+    if ((hasWorktree || hasShardMarker) && hasGbrainServeCommand(commandLine)) {
+      return "bun";
+    }
+  }
+
+  if (name === "git.exe" || name === "git") {
+    if (
+      (hasWorktree || hasShardMarker) &&
+      hasFsmonitorDaemonCommand(commandLine)
+    ) {
+      return "git";
+    }
+  }
+
+  return null;
+}
+
+function killPid(
+  pid,
+  { killFn = process.kill, protectedPids = new Set() } = {},
+) {
+  if (protectedPids.has(pid)) return false;
+  killFn(pid, "SIGKILL");
+  return true;
+}
+
+/**
+ * Return a process tree rooted at `rootPid`.
+ *
+ * Windows queries `Get-CimInstance Win32_Process` once and builds a
+ * ParentProcessId map. POSIX uses `ps` as a best-effort fallback.
+ *
+ * @param {number} rootPid
+ * @param {{isWindows?: boolean, spawnSyncFn?: typeof spawnSync}} opts
+ * @returns {Array<{pid: number, ppid: number, name: string, commandLine: string}>}
+ */
+export function findProcessTree(
+  rootPid,
+  { isWindows = IS_WINDOWS, spawnSyncFn = spawnSync } = {},
+) {
+  const pid = normalizePid(rootPid);
+  if (!pid) return [];
+  const snapshot = getProcessSnapshot({ isWindows, spawnSyncFn });
+  return collectDescendants(pid, snapshot).map((proc) => ({
+    pid: proc.pid,
+    ppid: proc.ppid,
+    name: proc.name,
+    commandLine: proc.commandLine,
+  }));
+}
+
+/**
+ * Kill a process tree.
+ *
+ * Windows tries `taskkill /T /F /PID <pid>` first. If that fails, it falls
+ * back to a CIM process snapshot and kills descendants recursively. POSIX
+ * first targets the process group, then the PID itself.
+ *
+ * @param {number} pid
+ * @param {{isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, isPidAliveFn?: typeof isPidAlive, protectedPids?: Set<number>}} opts
+ * @returns {{ok: boolean, killed: number, errors: Array}}
+ */
+export function killProcessTree(
+  pid,
+  {
+    isWindows = IS_WINDOWS,
+    spawnSyncFn = spawnSync,
+    killFn = process.kill,
+    isPidAliveFn = isPidAlive,
+    protectedPids,
+  } = {},
+) {
+  const rootPid = normalizePid(pid);
+  const protectedSet = getProtectedPids({
+    protectedPids,
+    isWindows,
+    spawnSyncFn,
+  });
+  const errors = [];
+  if (!rootPid) return { ok: false, killed: 0, errors: ["invalid pid"] };
+  if (protectedSet.has(rootPid)) {
+    return { ok: false, killed: 0, errors: ["protected pid"] };
+  }
+
+  if (isWindows) {
+    const result = runSpawn(spawnSyncFn, "taskkill", [
+      "/T",
+      "/F",
+      "/PID",
+      String(rootPid),
+    ]);
+    if (result.status === 0) return { ok: true, killed: 1, errors };
+    errors.push(String(result.stderr || result.error || "taskkill failed"));
+
+    const tree = findProcessTree(rootPid, { isWindows, spawnSyncFn })
+      .filter((proc) => proc.pid !== rootPid)
+      .reverse();
+    let killed = 0;
+    for (const proc of tree) {
+      if (protectedSet.has(proc.pid) || !isPidAliveFn(proc.pid)) continue;
+      try {
+        killFn(proc.pid, "SIGKILL");
+        killed++;
+      } catch (error) {
+        errors.push({ pid: proc.pid, error: String(error?.message || error) });
+      }
+    }
+    return { ok: killed > 0, killed, errors };
+  }
+
+  let killed = 0;
   try {
-    const countOutput = execSync(
-      `powershell -NoProfile -WindowStyle Hidden -Command "(Get-Process node -ErrorAction SilentlyContinue).Count"`,
+    killFn(-rootPid, "SIGKILL");
+    killed++;
+  } catch (error) {
+    errors.push({ pid: -rootPid, error: String(error?.message || error) });
+    try {
+      killFn(rootPid, "SIGKILL");
+      killed++;
+    } catch (fallbackError) {
+      errors.push({
+        pid: rootPid,
+        error: String(fallbackError?.message || fallbackError),
+      });
+    }
+  }
+
+  return { ok: killed > 0, killed, errors };
+}
+
+/**
+ * Kill a previously captured PID snapshot with SIGKILL.
+ *
+ * This is used when a parent process has already died and tree lookup can no
+ * longer reconstruct the original descendants.
+ *
+ * @param {Array<number | {pid: number}>} snapshot
+ * @param {{killFn?: typeof process.kill, isPidAliveFn?: typeof isPidAlive, protectedPids?: Set<number>}} opts
+ * @returns {{killed: number, missing: number}}
+ */
+export function killProcessTreeSnapshot(
+  snapshot,
+  {
+    killFn = process.kill,
+    isPidAliveFn = isPidAlive,
+    protectedPids = new Set(),
+  } = {},
+) {
+  let killed = 0;
+  let missing = 0;
+  for (const pid of snapshotPids(snapshot)) {
+    if (protectedPids.has(pid)) continue;
+    if (!isPidAliveFn(pid)) {
+      missing++;
+      continue;
+    }
+    try {
+      killFn(pid, "SIGKILL");
+      killed++;
+    } catch {
+      missing++;
+    }
+  }
+  return { killed, missing };
+}
+
+/**
+ * Find processes whose command line matches any string or RegExp pattern.
+ *
+ * String patterns use substring matching by default; pass `exact: true` for
+ * exact command-line equality.
+ *
+ * @param {Array<RegExp | string>} patterns
+ * @param {{isWindows?: boolean, spawnSyncFn?: typeof spawnSync, exact?: boolean, nowMs?: number}} opts
+ * @returns {Array<{pid: number, name: string, commandLine: string, ageMs?: number}>}
+ */
+export function findProcessesByCommandLine(
+  patterns,
+  {
+    isWindows = IS_WINDOWS,
+    spawnSyncFn = spawnSync,
+    exact = false,
+    nowMs = Date.now(),
+  } = {},
+) {
+  const list = Array.isArray(patterns) ? patterns : [patterns];
+  if (list.length === 0) return [];
+
+  return getProcessSnapshot({ isWindows, spawnSyncFn })
+    .filter((proc) =>
+      list.some((pattern) =>
+        matchesPattern(proc.commandLine, pattern, { exact }),
+      ),
+    )
+    .map((proc) => {
+      const creationMs = parseCreationDateMs(proc.creationDate);
+      const result = {
+        pid: proc.pid,
+        name: proc.name,
+        commandLine: proc.commandLine,
+      };
+      if (Number.isFinite(creationMs)) result.ageMs = nowMs - creationMs;
+      return result;
+    });
+}
+
+/**
+ * Cleanup processes associated with a swarm shard.
+ *
+ * Sequence: kill known top PID snapshots, scan scoped command lines, skip
+ * protected PIDs, and kill only narrowly gated runtime categories.
+ *
+ * @param {{worktreePath?: string, sessionIds?: string[], topPids?: Array<number | {pid: number}>, runId?: string, shardName?: string, dryRun?: boolean, isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, protectedPids?: Set<number>}} opts
+ * @returns {{killed: number, scanned: number, skipped: number, byCategory: {node: number, bash: number, conhost: number, bun: number, git: number}}}
+ */
+export function cleanupShardProcesses({
+  worktreePath,
+  sessionIds = [],
+  topPids = [],
+  runId,
+  shardName,
+  dryRun = false,
+  isWindows = IS_WINDOWS,
+  spawnSyncFn = spawnSync,
+  killFn = process.kill,
+  protectedPids,
+} = {}) {
+  const protectedSet = getProtectedPids({
+    protectedPids,
+    isWindows,
+    spawnSyncFn,
+    includeAncestorScan: true,
+  });
+  const byCategory = { node: 0, bash: 0, conhost: 0, bun: 0, git: 0 };
+  let killed = 0;
+  let skipped = 0;
+
+  if (!dryRun && topPids.length > 0) {
+    killed += killProcessTreeSnapshot(topPids, {
+      killFn,
+      protectedPids: protectedSet,
+    }).killed;
+  }
+
+  const scanned = getProcessSnapshot({ isWindows, spawnSyncFn });
+
+  for (const proc of scanned) {
+    const category = categoryForShardProcess(proc, {
+      worktreePath,
+      sessionIds,
+      shardName,
+    });
+    if (!category) continue;
+    byCategory[category]++;
+    if (protectedSet.has(proc.pid)) {
+      skipped++;
+      continue;
+    }
+    if (dryRun) continue;
+    try {
+      if (killPid(proc.pid, { killFn, protectedPids: protectedSet })) killed++;
+    } catch {}
+  }
+
+  return { killed, scanned: scanned.length, skipped, byCategory };
+}
+
+/**
+ * Cleanup narrowly gated orphan runtime processes.
+ *
+ * Windows scans node/bash/bun and optional conhost command lines. POSIX is a
+ * best-effort fallback. `legacy: true` preserves `cleanupOrphanNodeProcesses`
+ * behavior by targeting scoped orphan node runtimes only.
+ *
+ * @param {{legacy?: boolean, includeConhost?: boolean, sessionIds?: string[], isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, protectedPids?: Set<number>}} opts
+ * @returns {{killed: number, remaining: number, killedProcesses: Array<{pid: number, ppid: number, name: string, commandLine: string, killReason: string}>}}
+ */
+export function cleanupOrphanRuntimeProcesses({
+  legacy = false,
+  includeConhost = false,
+  sessionIds = [],
+  isWindows = IS_WINDOWS,
+  spawnSyncFn = spawnSync,
+  killFn = process.kill,
+  protectedPids,
+} = {}) {
+  if (!isWindows) return cleanupOrphansUnix();
+
+  const protectedSet = getProtectedPids({
+    protectedPids,
+    isWindows,
+    spawnSyncFn,
+    includeAncestorScan: legacy,
+  });
+  const processes = getProcessSnapshot({ isWindows, spawnSyncFn });
+  let killed = 0;
+  const killedProcesses = [];
+  const procMap = legacy
+    ? new Map(processes.map((proc) => [proc.pid, proc]))
+    : new Map(processes.map((proc) => [proc.pid, proc]));
+
+  for (const proc of processes) {
+    if (protectedSet.has(proc.pid)) continue;
+    const name = normalizeName(proc.name);
+    const commandLine = normalizeCommandLine(proc.commandLine);
+    let shouldKill = false;
+    let killReason = null;
+
+    if (legacy) {
+      if (
+        LEGACY_ORPHAN_KILLABLE_NAMES.has(name) &&
+        !hasLiveAncestorChain(proc.pid, procMap, protectedSet) &&
+        !hasLiveCliDescendant(proc.pid, procMap)
+      ) {
+        shouldKill = true;
+        killReason = "legacy_orphan_ancestor_chain_dead";
+      }
+    } else if (name === "bun.exe") {
+      if (
+        hasExactGbrainServe(proc.commandLine) &&
+        !hasLiveAncestorChain(proc.pid, procMap, protectedSet) &&
+        !hasLiveCliDescendant(proc.pid, procMap)
+      ) {
+        shouldKill = true;
+        killReason = "bun_gbrain_serve_orphan";
+      }
+    } else if (includeConhost && name === "conhost.exe") {
+      if (
+        sessionIds.length > 0 &&
+        sessionIds.some((id) => id && commandLine.includes(id))
+      ) {
+        shouldKill = true;
+        killReason = "conhost_session_match";
+      }
+    }
+
+    if (!shouldKill) continue;
+    try {
+      killFn(proc.pid, "SIGKILL");
+      killed++;
+      killedProcesses.push({
+        pid: proc.pid,
+        ppid: proc.ppid,
+        name: proc.name,
+        commandLine: String(proc.commandLine || "").slice(0, 200),
+        killReason,
+      });
+    } catch {}
+  }
+
+  const remaining = processes.length - killed;
+  return { killed, remaining, killedProcesses };
+}
+
+/**
+ * Find stale git fsmonitor--daemon processes.
+ *
+ * Windows only. The CIM query is scoped to git.exe and the command line marker
+ * is intentionally narrow so foreground git commands are never targeted.
+ *
+ * @param {{minAgeMs?: number, execSyncFn?: typeof execSync, nowMs?: number, isWindows?: boolean}} opts
+ * @returns {Array<{pid: number, parentPid: number, creationDate: string, ageMs: number, commandLine: string}>}
+ */
+export function findFsmonitorDaemons({
+  minAgeMs = DEFAULT_FSMONITOR_MIN_AGE_MS,
+  execSyncFn = execSync,
+  nowMs = Date.now(),
+  isWindows = IS_WINDOWS,
+} = {}) {
+  if (!isWindows) return [];
+
+  ensureHelperScripts();
+
+  let records;
+  try {
+    const output = execSyncFn(
+      `powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process -Filter \\"Name='git.exe'\\" | Where-Object { $_.CommandLine -match '(^|\\s)fsmonitor--daemon run --detach(\\s|$)' } | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress"`,
       {
         encoding: "utf8",
-        timeout: 5000,
-        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 10000,
+        stdio: ["ignore", "pipe", "ignore"],
         windowsHide: true,
       },
     );
-    remaining = Number.parseInt(countOutput.trim(), 10) || 0;
-  } catch {}
+    records = normalizePowerShellJson(output);
+  } catch {
+    return [];
+  }
 
-  return { killed, remaining };
+  const stale = [];
+  for (const record of records) {
+    const pid = Number(record?.ProcessId);
+    const parentPid = Number(record?.ParentProcessId);
+    const commandLine = String(record?.CommandLine || "");
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    if (!commandLine.includes(FSMONITOR_DAEMON_MARKER)) continue;
+    if (!FSMONITOR_DAEMON_PATTERN.test(commandLine)) continue;
+
+    const creationMs = parseCreationDateMs(record?.CreationDate);
+    const ageMs = Number.isFinite(creationMs) ? nowMs - creationMs : NaN;
+    if (!Number.isFinite(ageMs) || ageMs < minAgeMs) continue;
+
+    stale.push({
+      pid,
+      parentPid: Number.isFinite(parentPid) ? parentPid : 0,
+      creationDate: String(record?.CreationDate || ""),
+      ageMs,
+      commandLine,
+    });
+  }
+
+  return stale;
+}
+
+/**
+ * Cleanup stale git fsmonitor--daemon processes.
+ * @param {{minAgeMs?: number, execSyncFn?: typeof execSync, nowMs?: number, isWindows?: boolean, killFn?: typeof process.kill}} opts
+ * @returns {{killed: number, stale: Array}}
+ */
+export function cleanupStaleFsmonitorDaemons({
+  killFn = process.kill,
+  ...findOpts
+} = {}) {
+  const stale = findFsmonitorDaemons(findOpts);
+  let killed = 0;
+
+  for (const proc of stale) {
+    try {
+      killFn(proc.pid, "SIGKILL");
+      killed++;
+    } catch {}
+  }
+
+  return { killed, stale };
 }
 
 /**
