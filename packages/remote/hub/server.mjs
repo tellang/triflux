@@ -13,6 +13,7 @@ import {
 import { createServer as createHttpServer } from "node:http";
 import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -27,8 +28,17 @@ import { createAdaptiveEngine } from "@triflux/core/hub/adaptive.mjs";
 import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.mjs";
 import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
 import { createHitlManager } from "@triflux/core/hub/hitl.mjs";
-import { cleanupOrphanNodeProcesses } from "@triflux/core/hub/lib/process-utils.mjs";
+import {
+  cleanupOrphanNodeProcesses,
+  cleanupOrphanRuntimeProcesses,
+  cleanupStaleFsmonitorDaemons,
+} from "@triflux/core/hub/lib/process-utils.mjs";
 import * as spawnTrace from "@triflux/core/hub/lib/spawn-trace.mjs";
+import {
+  recordRequest,
+  recordWorker,
+  snapshot as traceSnapshot,
+} from "@triflux/core/hub/lib/trace-recorder.mjs";
 import { logQuotaRefreshFailures } from "@triflux/core/hub/middleware/quota-middleware.mjs";
 import { wrapRequestHandler } from "@triflux/core/hub/middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
@@ -195,6 +205,12 @@ function isInitializeRequest(body) {
   if (Array.isArray(body))
     return body.some((message) => message.method === "initialize");
   return false;
+}
+
+function parseTfxClientHeader(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const client = String(raw || "unknown").toLowerCase();
+  return ["codex", "claude", "gemini"].includes(client) ? client : "unknown";
 }
 
 async function parseBody(req) {
@@ -956,39 +972,115 @@ export async function startHub({
   const assignCallbacks = createAssignCallbackServer({ store, sessionId });
   const tools = createTools(store, router, hitl, pipe);
   const transports = new Map();
+  const workerSpans = new Map();
 
-  function createMcpForSession() {
+  async function closeMcpTransportSession(sid, session, reason) {
+    if (!sid) return;
+    if (!session) {
+      transports.delete(sid);
+      return;
+    }
+    if (session.closing) {
+      transports.delete(sid);
+      return;
+    }
+
+    session.closing = true;
+    transports.delete(sid);
+
+    try {
+      await session.mcp.close();
+    } catch (error) {
+      hubLog.debug(
+        { sid, reason, err: String(error?.message || error) },
+        "hub.mcp_session_close_mcp_failed",
+      );
+    }
+    try {
+      await session.transport.close();
+    } catch (error) {
+      hubLog.debug(
+        { sid, reason, err: String(error?.message || error) },
+        "hub.mcp_session_close_transport_failed",
+      );
+    }
+  }
+
+  function getTraceClient(clientRef) {
+    return clientRef?.client || "unknown";
+  }
+
+  function finishWorkerTrace(workerId, kind) {
+    if (!workerId || typeof workerId !== "string") return;
+    const span = workerSpans.get(workerId);
+    if (!span) return;
+    workerSpans.delete(workerId);
+    recordWorker(
+      workerId,
+      "exited",
+      span.command || kind,
+      performance.now() - span.startedAt,
+    );
+  }
+
+  function createMcpForSession(clientRef = { client: "unknown" }) {
     const mcp = new Server(
       { name: "tfx-hub", version: "1.0.0" },
       { capabilities: { tools: {} } },
     );
 
-    mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: tools.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-      })),
-    }));
+    mcp.setRequestHandler(ListToolsRequestSchema, async () => {
+      const started = performance.now();
+      try {
+        return {
+          tools: tools.map((tool) => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          })),
+        };
+      } finally {
+        recordRequest(
+          "tools.list",
+          performance.now() - started,
+          getTraceClient(clientRef),
+          "handler",
+        );
+      }
+    });
 
     mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      const tool = tools.find((candidate) => candidate.name === name);
-      if (!tool) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                ok: false,
-                error: { code: "UNKNOWN_TOOL", message: `도구 없음: ${name}` },
-              }),
-            },
-          ],
-          isError: true,
-        };
+      const category = `tools.call.${name || "unknown"}`;
+      const started = performance.now();
+      try {
+        const tool = tools.find((candidate) => candidate.name === name);
+        if (!tool) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  ok: false,
+                  error: {
+                    code: "UNKNOWN_TOOL",
+                    message: `도구 없음: ${name}`,
+                  },
+                }),
+              },
+            ],
+            isError: true,
+          };
+        }
+        return tool.handler(args || {});
+      } finally {
+        recordRequest(
+          category,
+          performance.now() - started,
+          getTraceClient(clientRef),
+          "handler",
+        );
       }
-      return tool.handler(args || {});
     });
 
     return mcp;
@@ -1043,7 +1135,11 @@ export async function startHub({
 
       if (path === "/" || path === "/status") {
         const status = router.getStatus("hub").data;
-        return writeJson(res, 200, {
+        const includeMetrics =
+          new URL(req.url, `http://${host}`).searchParams.get(
+            "include_metrics",
+          ) === "1";
+        const body = {
           ...status,
           sessions: transports.size,
           pid: process.pid,
@@ -1060,7 +1156,11 @@ export async function startHub({
             max_total_descendants: spawnTrace.MAX_TOTAL_DESCENDANTS,
           },
           version,
-        });
+        };
+        if (includeMetrics) {
+          body.metrics = traceSnapshot();
+        }
+        return writeJson(res, 200, body);
       }
 
       if (path === "/health" || path === "/healthz") {
@@ -1291,6 +1391,13 @@ export async function startHub({
               });
             }
 
+            const command =
+              body.command ||
+              metadata?.command ||
+              metadata?.cmd ||
+              metadata?.task ||
+              cli;
+            const workerStartedAt = performance.now();
             const heartbeat_ttl_ms = (timeout_sec + 120) * 1000;
             const result = await pipe.executeCommand("register", {
               agent_id,
@@ -1300,6 +1407,13 @@ export async function startHub({
               heartbeat_ttl_ms,
               metadata,
             });
+            if (result.ok) {
+              workerSpans.set(agent_id, {
+                command,
+                startedAt: workerStartedAt,
+              });
+              recordWorker(agent_id, "spawned", command, 0);
+            }
             return writeJson(res, 200, result);
           }
 
@@ -1364,7 +1478,17 @@ export async function startHub({
           }
 
           if (path === "/bridge/publish" && req.method === "POST") {
-            const result = router.handlePublish(normalizePublishBody(body));
+            const normalized = normalizePublishBody(body);
+            const result = router.handlePublish(normalized);
+            if (result.ok) {
+              finishWorkerTrace(
+                normalized.from ||
+                  normalized.agent_id ||
+                  normalized.worker_agent ||
+                  normalized.from_agent,
+                "publish",
+              );
+            }
             return writeJson(res, result.ok ? 200 : 400, result);
           }
 
@@ -1660,6 +1784,9 @@ export async function startHub({
             const result = await pipe.executeCommand("deregister", {
               agent_id,
             });
+            if (result.ok) {
+              finishWorkerTrace(agent_id, "deregister");
+            }
             return writeJson(res, 200, result);
           }
 
@@ -1696,27 +1823,43 @@ export async function startHub({
             session.transport._lastActivity = Date.now();
             await session.transport.handleRequest(req, res, body);
           } else if (!sessionIdHeader && isInitializeRequest(body)) {
+            const client = parseTfxClientHeader(req.headers["x-tfx-client"]);
+            const clientRef = { client };
+            const initializeStarted = performance.now();
             const transport = new StreamableHTTPServerTransport({
               sessionIdGenerator: () => randomUUID(),
               onsessioninitialized: (sid) => {
                 transport._lastActivity = Date.now();
-                transports.set(sid, { transport, mcp });
+                transports.set(sid, {
+                  transport,
+                  mcp,
+                  closing: false,
+                  client,
+                  createdAt: Date.now(),
+                });
               },
             });
             transport.onclose = () => {
-              if (transport.sessionId) {
-                const session = transports.get(transport.sessionId);
-                if (session) {
-                  try {
-                    session.mcp.close();
-                  } catch {}
-                }
-                transports.delete(transport.sessionId);
-              }
+              const sid = transport.sessionId;
+              if (sid)
+                void closeMcpTransportSession(
+                  sid,
+                  transports.get(sid),
+                  "transport.onclose",
+                );
             };
-            const mcp = createMcpForSession();
+            const mcp = createMcpForSession(clientRef);
             await mcp.connect(transport);
-            await transport.handleRequest(req, res, body);
+            try {
+              await transport.handleRequest(req, res, body);
+            } finally {
+              recordRequest(
+                "initialize",
+                performance.now() - initializeStarted,
+                client,
+                "ingress",
+              );
+            }
           } else {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(
@@ -1803,24 +1946,44 @@ export async function startHub({
     for (const [sid, session] of transports) {
       if (now - (session.transport._lastActivity || 0) <= SESSION_TTL_MS)
         continue;
-      try {
-        session.mcp.close();
-      } catch {}
-      try {
-        session.transport.close();
-      } catch {}
-      transports.delete(sid);
+      void closeMcpTransportSession(sid, session, "session_ttl");
     }
   }, 60000);
   sessionTimer.unref();
 
   // 고아 node.exe 프로세스 + stale spawn 세션 주기적 정리 (5분마다)
+  // TFX_DISABLE_ORPHAN_CLEANUP=1 로 비활성 (active SSH/swarm 세션 보호 회피용 hotfix gate)
   const orphanCleanupTimer = setInterval(
     () => {
+      if (process.env.TFX_DISABLE_ORPHAN_CLEANUP === "1") return;
       try {
-        const { killed } = cleanupOrphanNodeProcesses();
-        if (killed > 0) {
-          hubLog.info({ killed }, "hub.orphan_cleanup");
+        const { killed, killedProcesses = [] } = cleanupOrphanNodeProcesses();
+        const {
+          killed: runtimeKilled,
+          killedProcesses: runtimeKilledProcesses = [],
+        } = cleanupOrphanRuntimeProcesses();
+        const totalKilled = killed + runtimeKilled;
+        if (totalKilled > 0) {
+          hubLog.info(
+            {
+              killed: totalKilled,
+              processes: [...killedProcesses, ...runtimeKilledProcesses],
+              caller: "timer",
+            },
+            "hub.orphan_cleanup",
+          );
+        }
+
+        const { killed: fsmonitorKilled, stale } = cleanupStaleFsmonitorDaemons(
+          {
+            minAgeMs: 24 * 60 * 60 * 1000,
+          },
+        );
+        if (fsmonitorKilled > 0) {
+          hubLog.info(
+            { killed: fsmonitorKilled, stale: stale.length },
+            "hub.fsmonitor_cleanup",
+          );
         }
       } catch {}
 
@@ -2027,13 +2190,8 @@ export async function startHub({
               if (idleTimer) {
                 clearInterval(idleTimer);
               }
-              for (const [, session] of transports) {
-                try {
-                  await session.mcp.close();
-                } catch {}
-                try {
-                  await session.transport.close();
-                } catch {}
+              for (const [sid, session] of Array.from(transports)) {
+                await closeMcpTransportSession(sid, session, "hub.stop");
               }
               transports.clear();
               await pipe.stop();
@@ -2099,6 +2257,13 @@ export async function startHub({
             assignCallbacks,
             delegatorService,
             delegatorWorker,
+            getMcpSessions: () =>
+              Array.from(transports.entries()).map(([id, session]) => ({
+                id,
+                client: session.client || "unknown",
+                createdAt: session.createdAt ?? null,
+                closing: Boolean(session.closing),
+              })),
             stop: stopFn,
           });
         } catch (error) {
@@ -2484,7 +2649,34 @@ if (selfRun) {
       const shutdown = async (signal) => {
         hubLog.info({ signal }, "hub.stopping");
         try {
-          cleanupOrphanNodeProcesses();
+          if (process.env.TFX_DISABLE_ORPHAN_CLEANUP !== "1") {
+            const { killed: orphanKilled, killedProcesses = [] } =
+              cleanupOrphanNodeProcesses();
+            const {
+              killed: runtimeKilled,
+              killedProcesses: runtimeKilledProcesses = [],
+            } = cleanupOrphanRuntimeProcesses();
+            const totalKilled = orphanKilled + runtimeKilled;
+            if (totalKilled > 0) {
+              hubLog.info(
+                {
+                  killed: totalKilled,
+                  processes: [...killedProcesses, ...runtimeKilledProcesses],
+                  caller: "shutdown",
+                },
+                "hub.orphan_cleanup",
+              );
+            }
+          }
+          const { killed, stale } = cleanupStaleFsmonitorDaemons({
+            minAgeMs: 24 * 60 * 60 * 1000,
+          });
+          if (killed > 0) {
+            hubLog.info(
+              { killed, stale: stale.length },
+              "hub.fsmonitor_cleanup",
+            );
+          }
         } catch {}
         try {
           cleanupStaleSpawnSessions(hubLog);
