@@ -4,6 +4,28 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.18.0] - 2026-04-30
+
+### Added
+
+- **`feat(hub/mcp)` (PR #218)** Step 1 lifecycle trace + per-CLI label + `/status?include_metrics` opt-in (merge commit 6613219)
+  - 신규 `hub/lib/trace-recorder.mjs` (153 lines) — reservoir sample 1000, p50/p95/p99 percentile, `category × client × phase` bucketing
+  - X-TFX-Client header 기반 per-CLI 식별 (request span 에 client 라벨 부착)
+  - `transports` map 에 `client` / `createdAt` 필드 추가
+  - `createMcpForSession(clientRef)` closure 로 ListTools/CallTool span 자동 부착
+  - `/bridge/{register,publish,deregister}` worker span 기록 (성공한 register 만 발화)
+  - `/status` default 응답 14 baseline fields IRON RULE 100% 보존 — metrics 는 `?include_metrics=1` 쿼리 파라미터로만 노출
+
+### Tests
+
+- Added regression coverage for `/status` 14 baseline fields preservation (`tests/regression/status-include-metrics.test.mjs`)
+- Added integration coverage for X-TFX-Client header binding, bucket separation, invalid duration silent ignore (`tests/integration/mcp-trace-lifecycle.test.mjs`)
+- Realigned `tests/unit/hub-mcp-session-close.test.mjs` boundary marker patterns to track new `createMcpForSession(clientRef)` signature
+
+### Docs
+
+- TODOS.md — PRD B Tier 2 followups 추가 (MCP hub Option C cleanup ownership, Q1 benchmark harness real-client lifecycle)
+
 ## [10.17.3] - 2026-04-27
 
 ### Fixed
