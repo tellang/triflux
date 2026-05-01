@@ -30,7 +30,7 @@ const REPORTS_DIR = join(STATE_DIR, "reports");
 // ── 가격 모델 ($/MTok, 비캐시 기준, 보수적 추정) ──
 const PRICING = {
   claude_sonnet: { input: 3, output: 15 },
-  claude_opus: { input: 15, output: 75 },
+  claude_opus: { input: 5, output: 25 },
   codex: { input: 0, output: 0 },
   gemini_flash: { input: 0.1, output: 0.4 },
 };
@@ -38,7 +38,7 @@ const PRICING = {
 // Claude 캐시 가격 ($/MTok) — 오케스트레이션 비용 정밀 계산용
 const CLAUDE_CACHE_PRICING = {
   claude_sonnet: { cache_write: 3.75, cache_read: 0.3 },
-  claude_opus: { cache_write: 18.75, cache_read: 1.5 },
+  claude_opus: { cache_write: 6.25, cache_read: 0.5 },
 };
 
 // 에이전트 → Claude 대체 모델
@@ -628,11 +628,13 @@ function generateReport(sessionId) {
 
 // ── Named exports (파이프라인 벤치마크 훅용) ──
 export {
+  CLAUDE_CACHE_PRICING,
   computeDiff,
   DIFFS_DIR,
   estimateSavings,
   formatCost,
   formatTokenCount,
+  PRICING,
   STATE_DIR,
   takeSnapshot,
 };
