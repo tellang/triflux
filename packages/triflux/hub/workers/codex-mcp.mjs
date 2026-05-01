@@ -16,6 +16,7 @@ const REQUIRED_TOOLS = ["codex", "codex-reply"];
 export { CODEX_MCP_EXECUTION_EXIT_CODE, CODEX_MCP_TRANSPORT_EXIT_CODE };
 export const DEFAULT_CODEX_MCP_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_CODEX_MCP_BOOTSTRAP_TIMEOUT_MS = 120 * 1000;
+export const DEFAULT_CODEX_MCP_SHUTDOWN_TIMEOUT_MS = 2_000;
 
 /**
  * Codex MCP transport/bootstrap 계층 오류
@@ -38,6 +39,35 @@ function cloneEnv(env = process.env) {
   return Object.fromEntries(
     Object.entries(env).filter(([, value]) => typeof value === "string"),
   );
+}
+
+async function closeWithin(label, closeFn, timeoutMs) {
+  let timer = null;
+  try {
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        resolve({ timedOut: true });
+      }, timeoutMs);
+      timer.unref?.();
+    });
+    const closed = Promise.resolve()
+      .then(closeFn)
+      .then(() => ({ timedOut: false }));
+    const result = await Promise.race([closed, timeout]);
+    if (result.timedOut) {
+      console.error(
+        `[codex-mcp] WARNING: ${label} did not close within ${timeoutMs}ms; continuing shutdown.`,
+      );
+    }
+    return result;
+  } catch (error) {
+    console.error(
+      `[codex-mcp] WARNING: ${label} close failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return { timedOut: false };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function collectTextContent(content = []) {
@@ -388,7 +418,7 @@ export class CodexMcpWorker {
     this.ready = true;
   }
 
-  async stop() {
+  async stop(options = {}) {
     this.ready = false;
     this.availableTools.clear();
 
@@ -397,10 +427,26 @@ export class CodexMcpWorker {
     this.transport = null;
     this.client = null;
 
+    const shutdownTimeoutMs = Number.isFinite(options.shutdownTimeoutMs)
+      ? options.shutdownTimeoutMs
+      : DEFAULT_CODEX_MCP_SHUTDOWN_TIMEOUT_MS;
+
+    let clientCloseTimedOut = false;
     if (client) {
-      await client.close().catch(() => {});
-    } else if (transport) {
-      await transport.close().catch(() => {});
+      const result = await closeWithin(
+        "client.close",
+        () => client.close(),
+        shutdownTimeoutMs,
+      );
+      clientCloseTimedOut = Boolean(result.timedOut);
+    }
+
+    if (transport && (!client || clientCloseTimedOut)) {
+      await closeWithin(
+        "transport.close",
+        () => transport.close(),
+        shutdownTimeoutMs,
+      );
     }
 
     transport?.stderr?.destroy?.();

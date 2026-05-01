@@ -144,4 +144,52 @@ describe("CodexMcpWorker", () => {
       await worker.stop();
     }
   });
+
+  it("all packaged codex-mcp worker entrypoints import successfully", async () => {
+    const root = await import("../../hub/workers/codex-mcp.mjs");
+    const triflux = await import(
+      "../../packages/triflux/hub/workers/codex-mcp.mjs"
+    );
+    const remote = await import(
+      "../../packages/remote/hub/workers/codex-mcp.mjs"
+    );
+
+    assert.equal(typeof root.CodexMcpWorker, "function");
+    assert.equal(typeof triflux.CodexMcpWorker, "function");
+    assert.equal(typeof remote.CodexMcpWorker, "function");
+  });
+
+  it("stop returns when client.close never settles and then attempts transport.close", async () => {
+    const worker = createWorker({ FAKE_CODEX_MODE: "mcp-ok" });
+    let transportClosed = false;
+    let stderrDestroyed = false;
+
+    worker.ready = true;
+    worker.availableTools.add("codex");
+    worker.client = {
+      close: () => new Promise(() => {}),
+    };
+    worker.transport = {
+      close: async () => {
+        transportClosed = true;
+      },
+      stderr: {
+        destroy: () => {
+          stderrDestroyed = true;
+        },
+      },
+    };
+
+    const started = Date.now();
+    await worker.stop({ shutdownTimeoutMs: 25 });
+    const elapsed = Date.now() - started;
+
+    assert.equal(worker.ready, false);
+    assert.equal(worker.client, null);
+    assert.equal(worker.transport, null);
+    assert.equal(worker.availableTools.size, 0);
+    assert.equal(transportClosed, true);
+    assert.equal(stderrDestroyed, true);
+    assert.ok(elapsed < 500, `stop took ${elapsed}ms`);
+  });
 });
