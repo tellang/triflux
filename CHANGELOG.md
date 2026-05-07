@@ -4,6 +4,19 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.18.2] - 2026-05-07
+
+### Fixed
+
+- **`fix(macos)` (PR #233)** macOS 환경 두 회귀 해결:
+  - **#231**: `hooks/hook-registry.json`의 `ext-session-vault-{start,export}` 가 `enabled: true`로 박혀 doctor `--fix` 실행 시 source 디렉토리 부재 여부 검사 없이 settings.json 에 무조건 등록됐다. 이제 두 항목은 `enabled: false` + `requires: "$HOME/Desktop/Projects/tools/session-vault"` 로 마킹되고, 등록 로직이 `requires` 경로 부재 시 silent skip 한다. 외부 통합 hook 일반 패턴으로도 재사용 가능. (Closes #231)
+  - **#232**: `scripts/tfx-route.sh:368` 의 `local text="${prompt,,}"` 가 bash 4+ 전용 case-conversion syntax 라 macOS 디폴트 `/bin/bash 3.2.57` 환경에서 `bad substitution` 으로 dispatch 자체가 실패했다. portable `tr '[:upper:]' '[:lower:]'` 로 교체. 추가로 코드베이스 전반에 동일 패턴 sweep — 단일 occurrence 였음을 확인. (Closes #232)
+
+### Tests
+
+- 신규: `tests/unit/setup-sync.test.mjs` (PR #233) — `requires` gating 회귀 가드 (경로 부재/존재/필드 없음 3개 시나리오)
+- 신규: `tests/unit/tfx-route-duration.test.mjs` (PR #233) — `estimate_expected_duration_sec` 가 bash 3.2 호환임을 직접 검증
+
 ## [10.18.1] - 2026-05-07
 
 ### Fixed
