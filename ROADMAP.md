@@ -174,3 +174,56 @@
 - **DISABLE_OMC=1** 설정 추가 (2026-04-21) — `~/.claude/settings.json env.DISABLE_OMC=1`. OMC plugin pre-tool-enforcer 의 hook context 노이즈 억제. 다음 세션부터 적용.
 - **session 15 ROADMAP drift** — 세션 7 이후 미반영 상태가 9 세션 누적됐던 교훈. 세션마다 ROADMAP 갱신 대신 3~5 세션마다 단일 블록 압축 기록으로 전환.
 - **체크포인트 세션 15-ext, 16 파일로 개별 추적 유지** — ROADMAP 은 높은 수준 요약, 체크포인트는 세션별 상세.
+
+## 세션 17 (2026-04-26 ~ 2026-05-01)
+
+세션 16 이후 9 PR + 5 release + working-tree carry-over 누적. v10.13.0 → v10.18.0 단일 블록 요약. 6일 이상 commit 0 갱신 carry-over (다음 세션 입구 = `/gstack-context-restore` + B Tier P1 #1 시작).
+
+### 릴리즈 및 PR
+
+- **v10.16.0 ~ v10.18.0 (9 PR landed)** — #196/#197 (snapshot watcher + WorkerSignalChannel + codex config port stable + child stdin EOF), #198 (hosts compat + tfx-unified rule + 병렬/점검/계속 keyword), #199 (CI 56 fail → 0 fail Phase 1-9, continue-on-error 영구 제거), #218 (Step 1 lifecycle trace + per-CLI X-TFX-Client label + /status include_metrics opt-in), #221 (F3 release:prepare npm wrapper bypass), #222 (lint baseline + mcp-registry policy_notes dedup), #223 (tfx-mirror-policy.md 명문화), #224 (issue #192 silent EXIT 0 분석 + 재현 방법론), #225 (HUD Opus 4.7 pricing $5/$25 + token-snapshot regression guard).
+- **Issue close (검증 후 mechanical close)** — #159 (TFX_MCP_ALLOW_ALL_DEAD), #156 (codex config URL sync), #175 (smoke baseline), #157 (smoke role profiles + safety-guard 100B), #211 (tier-aware fallback).
+- **3채널 sync 검증** — npm publish + GitHub Releases + Claude Code marketplace.json. v10.16.0 1차 publish fail (binary path `references/codex-snapshots/` 117MB) → `packages/triflux/package.json` files 부정 패턴 + `~/.codex-backups/` 외부 이동으로 1MB 복구 (commit 74a9f2d). v10.17.x~v10.18.0 정상.
+
+### 핵심 성과
+
+- **CI 회복 100%** (PR #199, 9 phase 누적) — 56 baseline fail → 0 fail / 0 cancelled. ref/unref timer cancellation root, codex CLI absent command-shape, codex review fixture determinism, Linux git identity + psmux regex, codex MCP sync env guard (NODE_ENV=test / TFX_TEST / TRIFLUX_TEST_HOME), random port collision deterministic 대체. continue-on-error 영구 제거 후 strict regression gate 회복.
+- **CodexConfig mutation 차단** (PR #197 shard A + #194) — Hub start/reuse 가 `TFX_HUB_PORT` 또는 default `27888` 만 단일 source 로 사용. PR #158 single-source 정책을 codex MCP sync 까지 전파. test fixture 격리 (HOME/USERPROFILE swap 존중, `os.homedir()` Windows 한계 mitigation).
+- **MCP transport 정상화** (PR #197 shard B) — non-interactive route helper stdin EOF 강제 + non-TTY heartbeat detach. Codex MCP bootstrap transport exit code → tfx-route auto fallback 매핑.
+- **Lifecycle trace + per-CLI label** (PR #218) — `hub/lib/trace-recorder.mjs` (153 lines), reservoir 1000, p50/p95/p99, `category × client × phase` bucketing. /status 14 baseline IRON RULE 100% 보존, metrics 는 `?include_metrics=1` opt-in.
+- **F3 release:prepare silent EXIT 0** (PR #221) — npm wrapper 우회 (직접 node 호출). K1 root cause 검증은 별도 세션 carry-over (memory `feedback_release_prepare_silent_npm_test_return.md`).
+
+### 미해결 / carry-over (5/1 체크포인트 그대로 — working tree 보존)
+
+- **codex stdout 누락 패턴 — 3-way root cause** (logic 50% / regression 30% / infra 20%). codex 교차 검증 결과 진짜 root cause 는 `hub/workers/codex-mcp.mjs:672` `await worker.stop()` 무제한 대기. B Tier 2 EXIT trap surgical fix 는 "사망 시 유언장" 수준. **working tree 5 files 보존**:
+  - `scripts/tfx-route.sh` + `packages/triflux/scripts/tfx-route.sh` (+54 lines each, B Tier 2 surgical fix landed in tree)
+  - `tests/unit/tfx-route-stuck-exit-dump.test.mjs` (untracked, 회귀 가드 3 cases)
+  - `hub/cli-adapter-base.mjs` + `tests/unit/cli-adapter-base.test.mjs` (+21 / +37 lines, Codex Tier 1 PR 후보 — `runProcess` 가 resultFile size/mtime 도 progress signal 로 인정)
+- **v10.18.1 patch release 후보 7-step plan** (체크포인트 5/1 plan, 미실행):
+  1. P1 codex-mcp.mjs:672 `worker.stop()` Promise.race + 1-2s timeout (진짜 fix — wrapper hang 자체 제거)
+  2. P1 heartbeat STDOUT_LOG nonzero preview emit + sentinel `=== TFX_EMERGENCY_STDOUT_BEGIN/END ===` (실제 bridge fix, EXIT trap 까지 안 기다림)
+  3. P1 post.mjs bounded timeout 30s
+  4. P2 EXIT trap dump 를 `cleanup_workers` 앞쪽으로 이동 + sentinel 마커
+  5. P2 `_TFX_STDOUT_DUMPED` 위치 보정 (post.mjs 시작 전 set, 실패 시 reset)
+  6. P2 "stdout 찼는데 worker 안 끝남" 실제 reproduce test
+  7. v10.18.1 ship (1-6 묶음 + 3채널 sync) + `tfx doctor` v10.18.0 detect → vulnerable 경고
+- **별도 세션/PR**:
+  - D Tier 5 PRD `docs/prd/direct-ipc-transport-default.md` (XXL, deep-interview + outside voice + cross-model consensus 필수). codex 보정: `approvalPolicy='never' + danger-full-access` trust boundary 명시. watchdog plan 동반.
+  - pre-existing `packages/triflux mirror is byte-identical to root` CI baseline drift (main 3 commit 연속 fail). 별도 PR.
+  - F1+K1 reproduce — `547a082` (pre-F3) checkout + monitor wrapper 일회용 + 3-5회 실행 (K2/K3 구별).
+  - hub/cli-adapter-base.mjs WIP 결정 (PR 1 분리 권장 — 같은 layer 다른 surface).
+- **신규 issue 등록 필요** (체크포인트 5/1 명시):
+  - codex-mcp.mjs worker.stop() unbounded
+  - tfx doctor v10.18.0 vulnerable 경고
+
+### 메모리 노트 (5/1 세션 추가)
+
+- `feedback_release_prepare_silent_npm_test_return.md` — PR #225 dispatch 시 stdout 누락 2차 발생 surface-similar / mechanism-different 사례 cross-reference 추가됨.
+- 신규 후보 (미작성): `feedback_codex_mcp_worker_stop_unbounded.md`, `feedback_wrapper_exit_orphan_codex.md`, `feedback_emergency_dump_sentinel_marker.md`.
+
+### 운영 메모
+
+- **6일 carry-over** — 5/1 체크포인트 (`20260501-203633-b-tier2-landed-codex-cross-review-revealed-deeper-bugs.md`) 이후 5/7 까지 commit 0건. working tree dirty 5개 파일 보존. 다음 세션 입구 = 본 ROADMAP 블록 + 체크포인트 reload + cli-adapter-base.mjs WIP 결정 + B Tier P1 #1.
+- **5/7 cwd 분기** — 5/7 codex session (`019e00f1-...`) 은 `cwd: buds-care` (notification ScoreCheckWorker.kt fix). triflux 진척과 무관.
+- **codex CLI 변동** — PR #225 dispatch 시 `0.125.0` → 5/1 cross-review 시 `0.128.0`. 같은 silent stdout pattern 재현 → wrapper layer 문제 확정 (CLI 자체 무관).
+- **모드 (mode=fg vs bg) root cause 아님** — PR #225 (executor agent, fg) + cross-review (code-reviewer agent, bg) 둘 다 같은 패턴. RUN_MODE 는 metadata.
