@@ -32,6 +32,20 @@ function estimate(agent, profile, prompt) {
   return parseInt(result.stdout.trim(), 10);
 }
 
+function estimateWithShell(shell, agent, profile, prompt) {
+  const script = `${FUNC}\nestimate_expected_duration_sec "${agent}" "${profile}" "${prompt}"`;
+  const result = spawnSync(shell, ["-c", script], {
+    encoding: "utf8",
+    env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" },
+  });
+  assert.equal(
+    result.status,
+    0,
+    `${shell} failed: ${result.stderr || result.stdout}`,
+  );
+  return parseInt(result.stdout.trim(), 10);
+}
+
 describe("estimate_expected_duration_sec — agent 기본값", () => {
   it("explore = 30", () => {
     assert.equal(estimate("explore", "", ""), 30);
@@ -102,6 +116,15 @@ describe("estimate_expected_duration_sec — 한글 키워드 bump", () => {
 });
 
 describe("estimate_expected_duration_sec — 영어 키워드 bump", () => {
+  it("/bin/bash에서도 uppercase keyword lowercasing이 동작한다 (#232)", {
+    skip: fs.existsSync("/bin/bash") ? false : "/bin/bash is not available",
+  }, () => {
+    assert.equal(
+      estimateWithShell("/bin/bash", "explore", "", "ANALYZE output"),
+      600,
+    );
+  });
+
   it('"deep" → 600', () => {
     assert.equal(estimate("explore", "", "deep investigation"), 600);
   });

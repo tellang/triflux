@@ -18,7 +18,7 @@ import {
   writeFileSync,
 } from "fs";
 import { homedir } from "os";
-import { dirname, join, relative } from "path";
+import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import {
   ensureGlobalClaudeRoutingSection,
@@ -498,10 +498,22 @@ function extractManagedHookFilename(command) {
   return match ? match[1] : null;
 }
 
+function expandRequiresPath(value) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+  return resolve(
+    value.replace(/\$\{HOME\}/g, _TFX_HOME).replace(/\$HOME\b/g, _TFX_HOME),
+  );
+}
+
+function isRequiredPathAvailable(value) {
+  const expanded = expandRequiresPath(value);
+  return expanded ? existsSync(expanded) : true;
+}
+
 /**
  * hook-registry.json에서 관리 대상 훅 목록을 플랫 배열로 반환한다.
  * @param {string} registryPath - hook-registry.json 경로
- * @returns {Array<{ event: string, id: string, fileName: string, matcher: string, command: string, priority: number, enabled: boolean }>}
+ * @returns {Array<{ event: string, id: string, fileName: string, matcher: string, command: string, priority: number, enabled: boolean, requires?: string }>}
  */
 function getManagedRegistryHooks(registryPath) {
   if (!existsSync(registryPath)) return [];
@@ -513,6 +525,7 @@ function getManagedRegistryHooks(registryPath) {
       if (!Array.isArray(hooks)) continue;
       for (const hook of hooks) {
         if (!hook.enabled) continue;
+        if (!isRequiredPathAvailable(hook.requires)) continue;
         const fileName = extractManagedHookFilename(hook.command);
         result.push({
           event,
@@ -522,6 +535,7 @@ function getManagedRegistryHooks(registryPath) {
           command: hook.command || "",
           priority: hook.priority ?? 100,
           enabled: hook.enabled,
+          requires: hook.requires,
         });
       }
     }
