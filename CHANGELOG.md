@@ -4,6 +4,36 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.18.1] - 2026-05-07
+
+### Fixed
+
+- **`fix(hud)` (PR #230)** macOS Keychain OAuth credentials 지원 — `hud/providers/claude.mjs:readClaudeCredentials()` 가 `~/.claude/.credentials.json` 파일만 읽던 동작에 macOS `security find-generic-password -s "Claude Code-credentials"` fallback 추가. npm 단독/Keychain 환경에서 HUD `c:` 라인이 `--%`/`n/a` 로 굳던 회귀 해결. `writeBackClaudeCredentials()` 도 대칭적으로 Keychain 쓰기 지원해 토큰 갱신 시 file/Keychain drift 방지. (Closes #226)
+- **`fix(setup)` (PR #229)** macOS npm-only install 환경의 hook & recovery sync 회귀 해결: `scripts/lib/*.sh` 도 sync 매니페스트 포함되어 `codex-recovery.sh` 누락 차단; `tfx-route.sh` 의 `codex-recovery.sh` source 를 file-exists 가드로 변경; `triflux doctor` 에 macOS `timeout`/`gtimeout` 검사 + `coreutils` 안내·대화형 설치 추가; settings.json hook command 에 `${PLUGIN_ROOT:-<package-root>}` fallback 적용해 plugin marketplace 미등록 환경에서 hook 이 `/hooks/...` 로 붕괴되던 silent fail 차단; `doctor` 가 붕괴된 hook 경로 자동 감지/수정. (Closes #227, Closes #228)
+- **`fix(hud)` (PR #225)** Opus 4.7 pricing 정정 ($15/$75 → $5/$25, 3× 과대계상 해결)
+- **`fix(release)` (PR #221)** `prepare.mjs` npm-test step 의 npm wrapper 우회 (#192 F3)
+
+### Changed
+
+- **`chore(rules)` (PR #223)** `tfx-mirror-policy.md` — packages/ 3-layer mirror 정책 명문화
+
+### Tests
+
+- **`test(regression)` (PR #220)** `release:prepare` step sequence completeness guard 추가
+- 신규: `tests/unit/hud-claude-credentials.test.mjs` (PR #230) — file-only / Keychain fallback / null-fallback 시나리오
+- 보강: `tests/unit/setup-sync.test.mjs` (PR #229) — `SYNC_MAP` 이 `scripts/lib/*.sh` 포함하는지 회귀 가드
+- 신규: `tests/unit/tfx-route-codex-recovery.test.mjs` (PR #229) — optional source 가드 회귀 보호
+- 신규: `tests/unit/doctor-macos-hooks.test.mjs` (PR #229) — `${PLUGIN_ROOT}` fallback 자동 적용 회귀 보호
+
+### Docs
+
+- **`chore(docs)` (PR #224)** issue #192 silent EXIT 0 분석 + 재현 방법론
+
+### Chore
+
+- **`chore(lint)` (PR #222)** baseline cleanup — biome auto-fix + dedup mcp-registry policy_notes
+- **`chore(packages)` (PR #219)** packages/{core,remote} mirror 동기화 (v10.18.0 hub state)
+
 ## [10.18.0] - 2026-04-30
 
 ### Added

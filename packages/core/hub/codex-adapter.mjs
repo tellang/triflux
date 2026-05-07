@@ -184,7 +184,10 @@ function buildLeaseSpawnEnv(lease) {
 
 function dirnameOf(filePath) {
   if (typeof filePath !== "string" || !filePath) return null;
-  const lastSep = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  const lastSep = Math.max(
+    filePath.lastIndexOf("/"),
+    filePath.lastIndexOf("\\"),
+  );
   if (lastSep < 0) return null;
   return filePath.slice(0, lastSep);
 }
