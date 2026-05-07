@@ -66,9 +66,17 @@ const TIER_PRIORITY = { pro: 0, plus: 1, unknown: 2, free: 3 };
 const LEASE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const CIRCUIT_WINDOW_MS = 10 * 60_000; // 10 minutes
 const CIRCUIT_MAX_FAILURES = 3;
-const AUTH_BASE_PATH = join(homedir(), ".claude", "cache", "tfx-hub");
-const CODEX_AUTH_SOURCE_PATH = join(homedir(), ".codex", "auth.json");
-const STATE_PERSIST_PATH = join(AUTH_BASE_PATH, "broker-state.json");
+function getAuthBasePath() {
+  return join(homedir(), ".claude", "cache", "tfx-hub");
+}
+
+function getCodexAuthSourcePath() {
+  return join(homedir(), ".codex", "auth.json");
+}
+
+function getStatePersistPath() {
+  return join(getAuthBasePath(), "broker-state.json");
+}
 const AUTH_SYNC_LOCK_TIMEOUT_MS = 5_000;
 const AUTH_SYNC_LOCK_RETRY_MS = 25;
 const AUTH_SYNC_LOCK_STALE_MS = 30_000;
@@ -78,6 +86,8 @@ const AUTH_SYNC_SAB = new Int32Array(new SharedArrayBuffer(4));
 
 function persistState(stateMap) {
   try {
+    const authBasePath = getAuthBasePath();
+    const statePersistPath = getStatePersistPath();
     const now = Date.now();
     const entries = {};
     for (const [id, acct] of stateMap) {
@@ -96,8 +106,8 @@ function persistState(stateMap) {
         };
       }
     }
-    mkdirSync(AUTH_BASE_PATH, { recursive: true });
-    writeFileSync(STATE_PERSIST_PATH, JSON.stringify({ ts: now, entries }));
+    mkdirSync(authBasePath, { recursive: true });
+    writeFileSync(statePersistPath, JSON.stringify({ ts: now, entries }));
   } catch (err) {
     try {
       console.error("[account-broker] persistState failed:", err.message);
@@ -107,8 +117,9 @@ function persistState(stateMap) {
 
 function loadPersistedState() {
   try {
-    if (!existsSync(STATE_PERSIST_PATH)) return null;
-    return JSON.parse(readFileSync(STATE_PERSIST_PATH, "utf8"));
+    const statePersistPath = getStatePersistPath();
+    if (!existsSync(statePersistPath)) return null;
+    return JSON.parse(readFileSync(statePersistPath, "utf8"));
   } catch {
     return null;
   }
@@ -253,8 +264,8 @@ class AccountBroker extends EventEmitter {
     config,
     {
       _skipPersistence = false,
-      _authBasePath = AUTH_BASE_PATH,
-      _codexAuthSourcePath = CODEX_AUTH_SOURCE_PATH,
+      _authBasePath = getAuthBasePath(),
+      _codexAuthSourcePath = getCodexAuthSourcePath(),
       _authSyncLockTimeoutMs = AUTH_SYNC_LOCK_TIMEOUT_MS,
       _authSyncLockRetryMs = AUTH_SYNC_LOCK_RETRY_MS,
       _authSyncLockStaleMs = AUTH_SYNC_LOCK_STALE_MS,
