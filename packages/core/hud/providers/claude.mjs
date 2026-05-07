@@ -2,7 +2,7 @@
 // Claude Usage API (api.anthropic.com/api/oauth/usage)
 // ============================================================================
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import https from "node:https";
 import {
@@ -31,6 +31,7 @@ import {
 
 export const CLAUDE_USAGE_POLL_BASE_MS = 5_000;
 export const CLAUDE_USAGE_POLL_JITTER_RATIO = 0.2;
+const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 export const CLAUDE_USAGE_RATE_LIMIT_BACKOFF_MS = [
   CLAUDE_USAGE_POLL_BASE_MS,
   10_000,
@@ -98,8 +99,7 @@ function getSnapshotSchedule(cache) {
   };
 }
 
-export function readClaudeCredentials() {
-  const data = readJson(CLAUDE_CREDENTIALS_PATH, null);
+function normalizeClaudeCredentials(data, source, supportsUsageApi = true) {
   if (!data) return null;
   const creds = data.claudeAiOauth || data;
   if (!creds.accessToken) return null;
@@ -107,7 +107,49 @@ export function readClaudeCredentials() {
     accessToken: creds.accessToken,
     refreshToken: creds.refreshToken,
     expiresAt: creds.expiresAt,
+    source,
+    supportsUsageApi,
   };
+}
+
+function readClaudeKeychainCredentials(execFileSyncFn = execFileSync) {
+  try {
+    const raw = execFileSyncFn(
+      "security",
+      ["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"],
+      { encoding: "utf8" },
+    );
+    return normalizeClaudeCredentials(JSON.parse(raw.trim()), "keychain");
+  } catch {
+    return null;
+  }
+}
+
+export function readClaudeCredentials({
+  readCredentialFile = () => readJson(CLAUDE_CREDENTIALS_PATH, null),
+  platform = process.platform,
+  execFileSyncFn = execFileSync,
+  env = process.env,
+} = {}) {
+  const fileCreds = normalizeClaudeCredentials(readCredentialFile(), "file");
+  if (fileCreds) return fileCreds;
+
+  if (platform === "darwin") {
+    const keychainCreds = readClaudeKeychainCredentials(execFileSyncFn);
+    if (keychainCreds) return keychainCreds;
+  }
+
+  if (env.ANTHROPIC_API_KEY) {
+    return {
+      accessToken: env.ANTHROPIC_API_KEY,
+      refreshToken: null,
+      expiresAt: null,
+      source: "env",
+      supportsUsageApi: false,
+    };
+  }
+
+  return null;
 }
 
 export function refreshClaudeAccessToken(refreshToken) {
@@ -166,17 +208,67 @@ export function refreshClaudeAccessToken(refreshToken) {
   });
 }
 
-export function writeBackClaudeCredentials(creds) {
+function serializeClaudeCredentials(creds) {
+  const oauth = {
+    accessToken: creds.accessToken,
+  };
+  if (creds.expiresAt != null) oauth.expiresAt = creds.expiresAt;
+  if (creds.refreshToken) oauth.refreshToken = creds.refreshToken;
+  return { claudeAiOauth: oauth };
+}
+
+function writeClaudeKeychainCredentials(creds, execFileSyncFn = execFileSync) {
+  execFileSyncFn(
+    "security",
+    [
+      "add-generic-password",
+      "-s",
+      CLAUDE_KEYCHAIN_SERVICE,
+      "-w",
+      JSON.stringify(serializeClaudeCredentials(creds)),
+      "-U",
+    ],
+    { stdio: "ignore" },
+  );
+}
+
+export function writeBackClaudeCredentials(
+  creds,
+  {
+    readCredentialFile = () => readJson(CLAUDE_CREDENTIALS_PATH, null),
+    writeCredentialFile = (data) =>
+      writeFileSync(CLAUDE_CREDENTIALS_PATH, JSON.stringify(data, null, 2)),
+    platform = process.platform,
+    execFileSyncFn = execFileSync,
+  } = {},
+) {
+  if (creds?.source === "env") return;
+
+  let data = null;
   try {
-    const data = readJson(CLAUDE_CREDENTIALS_PATH, null);
-    if (!data) return;
+    data = readCredentialFile();
+  } catch {
+    data = null;
+  }
+
+  if (data) {
     const target = data.claudeAiOauth || data;
     target.accessToken = creds.accessToken;
     if (creds.expiresAt != null) target.expiresAt = creds.expiresAt;
     if (creds.refreshToken) target.refreshToken = creds.refreshToken;
-    writeFileSync(CLAUDE_CREDENTIALS_PATH, JSON.stringify(data, null, 2));
-  } catch {
-    /* 쓰기 실패 무시 */
+    try {
+      writeCredentialFile(data);
+    } catch {
+      /* 파일 쓰기 실패 무시 */
+    }
+  }
+
+  if (platform === "darwin") {
+    try {
+      writeClaudeKeychainCredentials(creds, execFileSyncFn);
+    } catch {
+      /* Keychain 쓰기 실패 무시 */
+    }
   }
 }
 
@@ -396,6 +488,10 @@ export async function fetchClaudeUsage(forceRefresh = false) {
     : 0;
   let creds = readClaudeCredentials();
   if (!creds) {
+    writeClaudeUsageCache(null, { type: "auth", status: 0 });
+    return existingSnapshot.data || null;
+  }
+  if (creds.supportsUsageApi === false) {
     writeClaudeUsageCache(null, { type: "auth", status: 0 });
     return existingSnapshot.data || null;
   }
