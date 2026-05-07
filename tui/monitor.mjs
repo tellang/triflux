@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import readline from "node:readline";
 
 import { fetchHubStatus, pollAgents } from "./monitor-data.mjs";
@@ -97,7 +96,6 @@ export function createMonitor(opts = {}) {
     importModule: (specifier) => import(specifier),
     setIntervalFn: setInterval,
     clearIntervalFn: clearInterval,
-    spawn,
     ...opts._deps,
   };
 
@@ -133,33 +131,19 @@ export function createMonitor(opts = {}) {
     const command = buildOpenCommand(agent);
 
     try {
-      if (process.platform === "win32") {
-        try {
-          const { createWtManager } = await deps.importModule(
-            "../hub/team/wt-manager.mjs",
-          );
-          const manager = createWtManager();
-          await manager.createTab({
-            title,
-            command,
-            cwd: process.cwd(),
-            profile: "triflux",
-          });
-        } catch (wtErr) {
-          statusMessage = `${RED}WT 탭 열기 실패: ${stripUnsafeText(wtErr?.message || "unknown")}${RESET}`;
-          return false;
-        }
-      } else {
-        try {
-          const { execSync } = await deps.importModule("node:child_process");
-          execSync(`tmux new-window -n "${title}" "${command}"`, {
-            timeout: 5000,
-            stdio: "ignore",
-          });
-        } catch (tmuxErr) {
-          statusMessage = `${RED}tmux 새 창 열기 실패: ${stripUnsafeText(tmuxErr?.message || "unknown")}${RESET}`;
-          return false;
-        }
+      const { createTerminalOpener } = await deps.importModule(
+        "../hub/team/terminal-opener.mjs",
+      );
+      const opener = createTerminalOpener(deps);
+      const opened = await opener.openCommand({
+        title,
+        command,
+        cwd: process.cwd(),
+        profile: "triflux",
+      });
+      if (!opened) {
+        statusMessage = `${RED}터미널 열기 실패${RESET}`;
+        return false;
       }
       statusMessage = `${GREEN}${stripUnsafeText(agent.agent || "agent")} 열기 시도 완료${RESET}`;
       return true;

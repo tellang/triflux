@@ -119,4 +119,50 @@ describe("createMonitor", () => {
     await monitor.handleKey("k", {});
     assert.equal(monitor.getState().cursor, 0);
   });
+
+  it("선택 에이전트 열기는 terminal opener openCommand로 라우팅한다", async () => {
+    const imports = [];
+    const openCalls = [];
+    const monitor = createMonitor({
+      stream: makeStream(),
+      refreshMs: 0,
+      _deps: {
+        pollAgents: () => [
+          {
+            pid: 101,
+            cli: "codex",
+            agent: "worker-a",
+            started: 0,
+            elapsed: 1_000,
+            alive: true,
+          },
+        ],
+        fetchHubStatus: async () => ({ online: true, queueDepth: 0, agents: 1 }),
+        importModule: async (specifier) => {
+          imports.push(specifier);
+          return {
+            createTerminalOpener: () => ({
+              openCommand: async (spec) => {
+                openCalls.push(spec);
+                return true;
+              },
+            }),
+          };
+        },
+      },
+    });
+
+    await monitor.renderFrame();
+    assert.equal(await monitor.openSelectedAgent(), true);
+
+    assert.deepEqual(imports, ["../hub/team/terminal-opener.mjs"]);
+    assert.equal(openCalls.length, 1);
+    assert.equal(openCalls[0].title, "tfx worker-a");
+    assert.equal(openCalls[0].cwd, process.cwd());
+    assert.equal(openCalls[0].profile, "triflux");
+    assert.match(
+      openCalls[0].command,
+      /psmux attach-session -t 'worker-a'/,
+    );
+  });
 });
