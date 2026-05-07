@@ -68,9 +68,36 @@ track_worker_pid() {
   echo "$1" >> "$_PID_TRACK"
 }
 
+# Emergency STDOUT_LOG dump for the wrapper-stuck case verified in
+# PR #225 dispatch (2026-05-01): wrapper main reached run_codex_mcp at
+# tfx-route.sh:2292, codex completed and wrote 1102B to STDOUT_LOG, but
+# the wrapper never reached the post-processing dump at line 2494/2500
+# / post.mjs path. User's Bash bg capture had only 6 stderr header lines.
+#
+# Fires from cleanup_workers EXIT trap when main flow set the marker (1)
+# we treat the dump as already done. When the marker is 0 and STDOUT_LOG
+# exists with content, we emit it so the user always sees codex output.
+dump_stdout_log_on_exit() {
+  if [[ "${_TFX_STDOUT_DUMPED:-0}" == "1" ]]; then
+    return 0
+  fi
+  if [[ -z "${STDOUT_LOG:-}" || ! -f "$STDOUT_LOG" ]]; then
+    return 0
+  fi
+  local size
+  size=$(wc -c < "$STDOUT_LOG" 2>/dev/null | tr -d ' ')
+  if [[ -z "$size" || "$size" == "0" ]]; then
+    return 0
+  fi
+  echo "[tfx-route] EMERGENCY STDOUT DUMP wrapper main never reached normal dump (${size}B from $STDOUT_LOG)" >&2
+  cat "$STDOUT_LOG" 2>/dev/null
+  _TFX_STDOUT_DUMPED=1
+}
+
 cleanup_workers() {
   _codex_config_swap "restore" 2>/dev/null || true
   deregister_agent 2>/dev/null || true
+  dump_stdout_log_on_exit
   [[ ! -f "$_PID_TRACK" ]] && return
   while IFS= read -r pid; do
     [[ -z "$pid" ]] && continue
@@ -365,8 +392,7 @@ mkdir -p "$TFX_PROBE_DIR" 2>/dev/null || true
 
 estimate_expected_duration_sec() {
   local agent="${1:-}" profile="${2:-}" prompt="${3:-}"
-  local text
-  text=$(printf '%s' "$prompt" | tr '[:upper:]' '[:lower:]')
+  local text="${prompt,,}"
   local expected=30
 
   case "$agent" in
@@ -414,6 +440,14 @@ read_probe_state() {
 RUN_ID="${TIMESTAMP}-$$-${RANDOM}"
 STDERR_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stderr.log"
 STDOUT_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stdout.log"
+
+# Wrapper main control-flow stuck guard. Set to 1 after main reaches
+# the post-processing dump (line ~2502). cleanup_workers EXIT trap
+# checks this and emits STDOUT_LOG content if main never reached the
+# normal dump (run_codex_mcp wait stuck, post-script hang, signal kill).
+# PR #225 dispatch evidence: 6-line stderr header captured by Bash bg
+# while STDOUT_LOG had complete codex output that user never saw.
+_TFX_STDOUT_DUMPED=0
 
 # ── 팀 환경변수 ──
 TFX_TEAM_NAME="${TFX_TEAM_NAME:-}"
@@ -1624,6 +1658,21 @@ if [[ "${1:-}" == "--inert-self-test" ]]; then
       _wait_with_heartbeat $! 1
       exit 0
       ;;
+    stuck-exit-dump)
+      # Reproduces PR #225 dispatch pattern: STDOUT_LOG has codex output,
+      # main never reached the normal dump → EXIT trap should emit it.
+      STDOUT_LOG="${2:?stuck-exit-dump requires STDOUT_LOG path}"
+      _TFX_STDOUT_DUMPED=0
+      trap 'cleanup_workers' EXIT
+      exit 0
+      ;;
+    normal-exit-no-dump)
+      # Inverse: main flow already dumped, EXIT trap must NOT double-emit.
+      STDOUT_LOG="${2:?normal-exit-no-dump requires STDOUT_LOG path}"
+      _TFX_STDOUT_DUMPED=1
+      trap 'cleanup_workers' EXIT
+      exit 0
+      ;;
     *)
       echo "[tfx-route] unknown self-test target: ${1:-<empty>}" >&2
       exit 2
@@ -1957,12 +2006,8 @@ _codex_config_swap() {
 
 # codex-recovery.sh 의 recover_codex_stdout 헬퍼 사용. STDOUT_LOG/STDERR_LOG env.
 _TFX_ROUTE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$_TFX_ROUTE_DIR/lib/codex-recovery.sh" ]]; then
-  # shellcheck source=lib/codex-recovery.sh
-  source "$_TFX_ROUTE_DIR/lib/codex-recovery.sh"
-else
-  echo "[tfx-route] WARNING: optional helper missing: $_TFX_ROUTE_DIR/lib/codex-recovery.sh (run: tfx doctor --fix)" >&2
-fi
+# shellcheck source=lib/codex-recovery.sh
+source "$_TFX_ROUTE_DIR/lib/codex-recovery.sh"
 
 run_codex_exec() {
   local prompt="$1"
@@ -2505,6 +2550,10 @@ EOF
       cat "$STDOUT_LOG" 2>/dev/null | head -c "$MAX_STDOUT_BYTES"
     fi
   fi
+  # Mark stdout as dumped so the EXIT trap (dump_stdout_log_on_exit)
+  # does not double-emit. If post.mjs hangs or main hits a signal before
+  # this point, the marker stays 0 and the trap dumps STDOUT_LOG.
+  _TFX_STDOUT_DUMPED=1
 
   # 결과를 파일에도 저장 — run_in_background에서 TaskOutput이 stdout을 놓칠 때 대비
   local result_file="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-result.log"
