@@ -1956,8 +1956,12 @@ _codex_config_swap() {
 
 # codex-recovery.sh 의 recover_codex_stdout 헬퍼 사용. STDOUT_LOG/STDERR_LOG env.
 _TFX_ROUTE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib/codex-recovery.sh
-source "$_TFX_ROUTE_DIR/lib/codex-recovery.sh"
+if [[ -f "$_TFX_ROUTE_DIR/lib/codex-recovery.sh" ]]; then
+  # shellcheck source=lib/codex-recovery.sh
+  source "$_TFX_ROUTE_DIR/lib/codex-recovery.sh"
+else
+  echo "[tfx-route] WARNING: optional helper missing: $_TFX_ROUTE_DIR/lib/codex-recovery.sh (run: tfx doctor --fix)" >&2
+fi
 
 run_codex_exec() {
   local prompt="$1"

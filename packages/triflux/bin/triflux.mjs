@@ -43,6 +43,12 @@ import {
   ensureTfxSection,
   getLatestRoutingTable,
 } from "../scripts/claudemd-sync.mjs";
+import {
+  applyPluginRootHookFallbacks,
+  commandExists,
+  findPluginRootHookIssues,
+  inspectMacTimeoutDependency,
+} from "../scripts/lib/doctor-env-checks.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
 import { serializeHandoff } from "../scripts/lib/handoff.mjs";
 import {
@@ -2041,6 +2047,60 @@ async function cmdDoctor(options = {}) {
       for (const target of SYNC_MAP) {
         syncFile(target.src, target.dst, target.label);
       }
+      const macTimeoutForFix = inspectMacTimeoutDependency();
+      if (!macTimeoutForFix.ok) {
+        if (commandExists("brew")) {
+          if (process.stdin.isTTY && process.stdout.isTTY) {
+            info("macOS GNU timeout 부재: coreutils 설치 가능");
+            process.stdout.write(
+              "      brew install coreutils 실행할까요? [y/N] ",
+            );
+            let answer = "";
+            try {
+              const buf = Buffer.alloc(128);
+              const n = readSync(0, buf, 0, 128);
+              answer = buf.toString("utf8", 0, n).trim().toLowerCase();
+            } catch {
+              answer = "";
+            }
+            if (answer.startsWith("y")) {
+              try {
+                execFileSync("brew", ["install", "coreutils"], {
+                  stdio: "inherit",
+                  timeout: 600000,
+                  windowsHide: true,
+                });
+                report.actions.push({
+                  type: "install",
+                  name: "coreutils",
+                  status: "ok",
+                });
+                ok("coreutils 설치 완료");
+              } catch (error) {
+                report.actions.push({
+                  type: "install",
+                  name: "coreutils",
+                  status: "failed",
+                  message: error.message,
+                });
+                warn(
+                  `coreutils 설치 실패: ${renderErrorMessage(error.message)}`,
+                );
+              }
+            } else {
+              info("건너뜀: brew install coreutils");
+            }
+          } else {
+            warn(
+              "macOS GNU timeout 부재 — 비대화형 모드에서는 자동 설치하지 않습니다.",
+            );
+            info("수동 설치: brew install coreutils");
+          }
+        } else {
+          warn("macOS GNU timeout 부재 — Homebrew를 찾지 못했습니다.");
+          info("Homebrew 설치 후: brew install coreutils");
+        }
+      }
       {
         const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
         if (
@@ -2194,6 +2254,34 @@ async function cmdDoctor(options = {}) {
         fix: "tfx setup",
       });
       fail("미설치 — tfx setup 실행 필요");
+      issues++;
+    }
+
+    // macOS GNU timeout/coreutils
+    section("macOS timeout");
+    const macTimeout = inspectMacTimeoutDependency();
+    if (macTimeout.status === "skipped") {
+      addDoctorCheck(report, {
+        name: "macos-timeout",
+        status: "skipped",
+        platform: process.platform,
+      });
+      info("macOS 아님 — 건너뜀");
+    } else if (macTimeout.ok) {
+      addDoctorCheck(report, {
+        name: "macos-timeout",
+        status: "ok",
+        provider: macTimeout.provider,
+      });
+      ok(`timeout provider: ${macTimeout.provider}`);
+    } else {
+      addDoctorCheck(report, {
+        name: "macos-timeout",
+        status: "missing",
+        fix: macTimeout.fix,
+      });
+      warn("GNU timeout/gtimeout 미설치");
+      info("수정: brew install coreutils");
       issues++;
     }
 
@@ -3813,6 +3901,55 @@ async function cmdDoctor(options = {}) {
         }
 
         if (settings) {
+          let pluginRootHookIssues = findPluginRootHookIssues(settings);
+          if (pluginRootHookIssues.length > 0 && fix) {
+            const fallbackResult = applyPluginRootHookFallbacks(settings, {
+              pluginRoot: PKG_ROOT,
+            });
+            if (fallbackResult.changed) {
+              writeFileSync(
+                settingsPath,
+                JSON.stringify(settings, null, 2) + "\n",
+                "utf8",
+              );
+              ok(
+                `PLUGIN_ROOT fallback ${fallbackResult.count}개 hook command에 적용됨`,
+              );
+              try {
+                settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+                pluginRootHookIssues = findPluginRootHookIssues(settings);
+              } catch (error) {
+                warn(`PLUGIN_ROOT fallback 재검증 실패: ${error.message}`);
+              }
+            }
+          }
+
+          addDoctorCheck(report, {
+            name: "hook-plugin-root",
+            status:
+              pluginRootHookIssues.length === 0 ? "ok" : "missing-fallback",
+            count: pluginRootHookIssues.length,
+            examples: pluginRootHookIssues.slice(0, 3).map((issue) => ({
+              event: issue.event,
+              reason: issue.reason,
+              command: issue.command,
+            })),
+            ...(pluginRootHookIssues.length > 0
+              ? { fix: "tfx doctor --fix 또는 tfx setup" }
+              : {}),
+          });
+          if (pluginRootHookIssues.length === 0) {
+            ok("PLUGIN_ROOT hook fallback 확인됨");
+          } else {
+            warn(
+              `PLUGIN_ROOT fallback 없는 hook ${pluginRootHookIssues.length}개 감지`,
+            );
+            info(
+              "영향: npm 단독 설치에서 /hooks/... 경로로 붕괴할 수 있습니다.",
+            );
+            issues += pluginRootHookIssues.length;
+          }
+
           let coverage = computeHookCoverage(settings, managedHooks);
 
           if (coverage.missing.length > 0 && fix) {

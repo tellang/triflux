@@ -130,6 +130,21 @@ describe("setup-sync: SYNC_MAP", () => {
     assert.ok(hasFastSh, "SYNC_MAP must include headless-guard-fast.sh");
   });
 
+  it("scripts/lib/*.sh도 SYNC_MAP에 포함한다 (#227)", () => {
+    const entry = SYNC_MAP.find((e) => e.label === "lib/codex-recovery.sh");
+    assert.ok(entry, "SYNC_MAP must include lib/codex-recovery.sh");
+    assert.ok(
+      entry.src.replace(/\\/g, "/").endsWith("/scripts/lib/codex-recovery.sh"),
+      "src path must reference scripts/lib/codex-recovery.sh",
+    );
+    assert.ok(
+      entry.dst
+        .replace(/\\/g, "/")
+        .endsWith("/.claude/scripts/lib/codex-recovery.sh"),
+      "dst path must sync codex-recovery.sh into ~/.claude/scripts/lib",
+    );
+  });
+
   it("agent-map.json이 SYNC_MAP에 포함되어 있다", () => {
     const entry = SYNC_MAP.find((e) => e.label === "hub/team/agent-map.json");
     assert.ok(entry, "SYNC_MAP must include hub/team/agent-map.json");
@@ -257,8 +272,8 @@ describe("setup-sync: managed hook registration", () => {
         "invalid plugin root must not leak into settings",
       );
       assert.ok(
-        stopCommands.some((command) => command.includes("${PLUGIN_ROOT}")),
-        "registered hook must use ${PLUGIN_ROOT} template variable",
+        stopCommands.some((command) => command.includes("${PLUGIN_ROOT:-")),
+        "registered hook must include a ${PLUGIN_ROOT:-...} fallback",
       );
     } finally {
       if (prevPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
