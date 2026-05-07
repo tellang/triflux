@@ -40,10 +40,10 @@ describe("dashboard-open", () => {
     assert.equal(parseWorkerNumber("lead"), null);
   });
 
-  it("openAll은 terminal opener openSession으로 라우팅한다", () => {
+  it("openAll은 terminal opener openSession으로 라우팅한다", async () => {
     const calls = [];
 
-    const opened = openHeadlessDashboardTarget("demo session!", {
+    const opened = await openHeadlessDashboardTarget("demo session!", {
       openAll: true,
       cwd: "/tmp/triflux",
       title: "Team Dashboard",
@@ -73,10 +73,23 @@ describe("dashboard-open", () => {
     ]);
   });
 
-  it("workerNumber는 terminal opener focusPane으로 라우팅한다", () => {
+  it("openAll은 async openSession 실패를 false로 반환한다", async () => {
+    const opened = await openHeadlessDashboardTarget("demo", {
+      openAll: true,
+      _deps: {
+        createTerminalOpener: () => ({
+          openSession: async () => false,
+        }),
+      },
+    });
+
+    assert.equal(opened, false);
+  });
+
+  it("workerNumber는 terminal opener focusPane으로 라우팅한다", async () => {
     const calls = [];
 
-    const opened = openHeadlessDashboardTarget("demo", {
+    const opened = await openHeadlessDashboardTarget("demo", {
       worker: "worker-2",
       workerNumber: 4,
       _deps: {
@@ -93,8 +106,8 @@ describe("dashboard-open", () => {
     assert.deepEqual(calls, [{ sessionName: "demo", workerNumber: 4 }]);
   });
 
-  it("선택 워커 focus 실패는 기존처럼 true로 처리한다", () => {
-    const opened = openHeadlessDashboardTarget("demo", {
+  it("선택 워커 focus 실패는 기존처럼 true로 처리한다", async () => {
+    const opened = await openHeadlessDashboardTarget("demo", {
       worker: "worker-2",
       _deps: {
         createTerminalOpener: () => ({

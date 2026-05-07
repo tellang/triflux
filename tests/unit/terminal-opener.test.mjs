@@ -173,7 +173,7 @@ describe("terminal-opener adapter", () => {
     assert.match(calls[0], /^new-window -n 'Worker 3' 'echo hi'$/);
   });
 
-  it("macOS psmux fallback opens sessions in a tmux window", async () => {
+  it("macOS psmux fallback opens sessions with psmux attach in a new window", async () => {
     const calls = [];
     const opener = createTerminalOpener({
       platform: "darwin",
@@ -186,7 +186,8 @@ describe("terminal-opener adapter", () => {
       true,
     );
     assert.match(calls[0], /^new-window -n 'Demo Session' /);
-    assert.match(calls[0], /tmux attach-session -t/);
+    assert.match(calls[0], /psmux attach-session -t/);
+    assert.doesNotMatch(calls[0], /tmux attach-session -t/);
   });
 
   it("macOS without mux falls back to exec open -a Terminal", async () => {

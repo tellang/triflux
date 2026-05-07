@@ -60,6 +60,18 @@ function isTmuxLikeMux(mux, platform) {
   return TMUX_LIKE_MUXES.has(mux) || (platform !== "win32" && mux === "psmux");
 }
 
+function shellCommandName(value) {
+  const command = String(value);
+  return /^[A-Za-z0-9_./:-]+$/u.test(command) ? command : shellQuote(command);
+}
+
+function buildAttachCommand(mux, sessionName) {
+  if (mux === "psmux") {
+    return `${shellCommandName(process.env.PSMUX_BIN || "psmux")} attach-session -t ${shellQuote(sessionName)}`;
+  }
+  return `tmux attach-session -t ${shellQuote(sessionName)}`;
+}
+
 function wtResultSucceeded(result) {
   return result?.success !== false;
 }
@@ -123,7 +135,7 @@ export function createTerminalOpener(deps = {}) {
     if (isTmuxLikeMux(mux, platform)) {
       tmuxExec(
         `new-window -n ${shellQuote(opts.title ?? sessionName)} ${shellQuote(
-          `tmux attach-session -t ${shellQuote(sessionName)}`,
+          buildAttachCommand(mux, sessionName),
         )}`,
       );
       return true;

@@ -25,7 +25,7 @@ function ignoreAsyncFailure(value) {
   if (value && typeof value.then === "function") void value.catch(() => {});
 }
 
-export function openHeadlessDashboardTarget(sessionName, opts = {}) {
+export async function openHeadlessDashboardTarget(sessionName, opts = {}) {
   const { openAll = false, cwd = process.cwd(), title } = opts;
   const safeSession = sanitizeSessionName(sessionName);
   const workerNumber =
@@ -56,9 +56,7 @@ export function openHeadlessDashboardTarget(sessionName, opts = {}) {
       cwd,
       profile: opts.profile ?? "triflux",
     });
-    if (typeof opened === "boolean") return opened;
-    ignoreAsyncFailure(opened);
-    return true;
+    return await opened;
   } catch {
     return false;
   }
