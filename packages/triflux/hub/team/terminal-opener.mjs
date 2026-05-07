@@ -76,7 +76,13 @@ export function createTerminalOpener(deps = {}) {
 
     if (platform === "win32") {
       const wt = createWtManager();
-      return wtResultSucceeded(await wt.createTab(createTabSpec(spec, title)));
+      try {
+        return wtResultSucceeded(
+          await wt.createTab(createTabSpec(spec, title)),
+        );
+      } catch {
+        return false;
+      }
     }
 
     const mux = resolveMux(deps);
@@ -99,14 +105,18 @@ export function createTerminalOpener(deps = {}) {
   async function openSession(sessionName, opts = {}) {
     if (platform === "win32") {
       const wt = createWtManager();
-      return wtResultSucceeded(
-        await wt.createTab({
-          title: sanitizeTerminalTitle(opts.title ?? sessionName),
-          command: `psmux attach-session -t ${powershellSingleQuote(sessionName)}`,
-          cwd: opts.cwd,
-          profile: opts.profile ?? "triflux",
-        }),
-      );
+      try {
+        return wtResultSucceeded(
+          await wt.createTab({
+            title: sanitizeTerminalTitle(opts.title ?? sessionName),
+            command: `psmux attach-session -t ${powershellSingleQuote(sessionName)}`,
+            cwd: opts.cwd,
+            profile: opts.profile ?? "triflux",
+          }),
+        );
+      } catch {
+        return false;
+      }
     }
 
     const mux = resolveMux(deps);

@@ -67,6 +67,19 @@ describe("terminal-opener adapter", () => {
     assert.equal(await opener.openCommand({ command: "echo hi" }), false);
   });
 
+  it("Windows openCommand reports thrown wt-manager failures", async () => {
+    const opener = createTerminalOpener({
+      platform: "win32",
+      createWtManager: () => ({
+        createTab: async () => {
+          throw new Error("WT tab ready timeout: demo");
+        },
+      }),
+    });
+
+    assert.equal(await opener.openCommand({ command: "echo hi" }), false);
+  });
+
   it("Windows openSession quotes psmux session names for PowerShell", async () => {
     const calls = [];
     const opener = createTerminalOpener({
@@ -102,6 +115,19 @@ describe("terminal-opener adapter", () => {
       platform: "win32",
       createWtManager: () => ({
         createTab: async () => ({ success: false, reason: "wt-not-installed" }),
+      }),
+    });
+
+    assert.equal(await opener.openSession("demo"), false);
+  });
+
+  it("Windows openSession reports thrown wt-manager failures", async () => {
+    const opener = createTerminalOpener({
+      platform: "win32",
+      createWtManager: () => ({
+        createTab: async () => {
+          throw new Error("WT tab ready timeout: demo");
+        },
       }),
     });
 
