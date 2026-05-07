@@ -137,7 +137,11 @@ describe("createMonitor", () => {
             alive: true,
           },
         ],
-        fetchHubStatus: async () => ({ online: true, queueDepth: 0, agents: 1 }),
+        fetchHubStatus: async () => ({
+          online: true,
+          queueDepth: 0,
+          agents: 1,
+        }),
         importModule: async (specifier) => {
           imports.push(specifier);
           return {
@@ -160,9 +164,6 @@ describe("createMonitor", () => {
     assert.equal(openCalls[0].title, "tfx worker-a");
     assert.equal(openCalls[0].cwd, process.cwd());
     assert.equal(openCalls[0].profile, "triflux");
-    assert.match(
-      openCalls[0].command,
-      /psmux attach-session -t 'worker-a'/,
-    );
+    assert.match(openCalls[0].command, /psmux attach-session -t 'worker-a'/);
   });
 });

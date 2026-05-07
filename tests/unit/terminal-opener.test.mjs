@@ -80,7 +80,10 @@ describe("terminal-opener adapter", () => {
         profile: "triflux",
       },
     ]);
-    assert.notEqual(calls[0].command, "psmux attach-session -t team one; rm 'x'");
+    assert.notEqual(
+      calls[0].command,
+      "psmux attach-session -t team one; rm 'x'",
+    );
   });
 
   it("macOS tmux openCommand calls tmuxExec new-window and includes command", async () => {
