@@ -67,8 +67,13 @@ describe("hub/team/runtime-strategy.mjs", () => {
   it("createRuntime('tmux')는 tmux descriptor를 생성한다", () => {
     const runtime = createRuntime("tmux", { sessionName: "tri" });
 
+    assert.equal(runtime.name, "tmux");
     assert.equal(runtime.kind, "tmux");
     assert.equal(runtime.sessionName, "tri");
+    assert.equal(typeof runtime.start, "function");
+    assert.equal(typeof runtime.stop, "function");
+    assert.equal(typeof runtime.isAlive, "function");
+    assert.equal(typeof runtime.getStatus, "function");
   });
 
   it("native/wt placeholder는 미구현 에러를 던진다", () => {

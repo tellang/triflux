@@ -56,6 +56,33 @@ describe("terminal-opener adapter", () => {
     ]);
   });
 
+  it("Windows openSession quotes psmux session names for PowerShell", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "win32",
+      createWtManager: () => ({
+        createTab: async (spec) => {
+          calls.push(spec);
+        },
+      }),
+    });
+
+    const opened = await opener.openSession("team one; rm 'x'", {
+      cwd: "C:\\Users\\SSAFY\\Project",
+    });
+
+    assert.equal(opened, true);
+    assert.deepEqual(calls, [
+      {
+        title: "team one; rm 'x'",
+        command: "psmux attach-session -t 'team one; rm ''x'''",
+        cwd: "C:\\Users\\SSAFY\\Project",
+        profile: "triflux",
+      },
+    ]);
+    assert.notEqual(calls[0].command, "psmux attach-session -t team one; rm 'x'");
+  });
+
   it("macOS tmux openCommand calls tmuxExec new-window and includes command", async () => {
     const calls = [];
     const opener = createTerminalOpener({

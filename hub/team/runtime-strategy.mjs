@@ -102,16 +102,22 @@ const defaultTmuxAdapter = {
  * }} [opts.adapter]
  * @param {string} [opts.sessionName]
  * @returns {{
+ *   name: "tmux",
  *   kind: "tmux",
  *   sessionName: string,
  *   createSession: (opts?: object) => unknown,
  *   sendPrompt: (prompt: string) => unknown,
+ *   start: (sessionName: string, opts?: object) => unknown,
+ *   stop: (sessionName: string) => void,
+ *   isAlive: (sessionName: string) => boolean,
+ *   getStatus: (sessionName: string) => RuntimeStatus,
  * }}
  */
 export function createTmuxRuntime(opts = {}) {
   const { adapter = defaultTmuxAdapter, sessionName = "" } = opts;
 
   return {
+    name: "tmux",
     kind: "tmux",
     sessionName,
     createSession(opts = {}) {
@@ -120,17 +126,20 @@ export function createTmuxRuntime(opts = {}) {
     sendPrompt(prompt) {
       return adapter.sendPrompt(sessionName, prompt);
     },
-    stop(sessionName) {
-      adapter.killSession(sessionName);
+    start(sessionNameArg = sessionName, opts = {}) {
+      return adapter.createSession(sessionNameArg, opts);
     },
-    isAlive(sessionName) {
-      return adapter.hasSession(sessionName);
+    stop(sessionNameArg = sessionName) {
+      adapter.killSession(sessionNameArg);
     },
-    getStatus(sessionName) {
+    isAlive(sessionNameArg = sessionName) {
+      return adapter.hasSession(sessionNameArg);
+    },
+    getStatus(sessionNameArg = sessionName) {
       return {
         name: "tmux",
-        sessionName,
-        alive: adapter.hasSession(sessionName),
+        sessionName: sessionNameArg,
+        alive: adapter.hasSession(sessionNameArg),
       };
     },
   };
