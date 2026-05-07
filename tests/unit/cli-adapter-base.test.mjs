@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -105,5 +106,41 @@ test("cli-adapter-base exports the shared codex exec builder and codex-compat re
     assert.equal(base.CODEX_MCP_EXECUTION_EXIT_CODE, 1);
     assert.equal(compat.CODEX_MCP_TRANSPORT_EXIT_CODE, 70);
     assert.equal(compat.CODEX_MCP_EXECUTION_EXIT_CODE, 1);
+  });
+});
+
+test("runProcess treats resultFile updates as progress during quiet CLI execution", async () => {
+  await withSandbox(async ({ root }) => {
+    const { runProcess } = await importFresh("../../hub/cli-adapter-base.mjs");
+    const resultFile = join(root, "result.txt");
+    const script = [
+      "const { writeFileSync } = require('node:fs');",
+      "const file = process.env.RESULT_FILE;",
+      "let n = 0;",
+      "const timer = setInterval(() => {",
+      "  n += 1;",
+      "  writeFileSync(file, `tick-${n}`, 'utf8');",
+      "  if (n >= 6) { clearInterval(timer); process.exit(0); }",
+      "}, 75);",
+    ].join(" ");
+
+    const result = await runProcess(
+      `node -e ${JSON.stringify(script)}`,
+      root,
+      3_000,
+      {
+        resultFile,
+        stallCheckIntervalMs: 50,
+        stallThresholdMs: 150,
+        inferStallMode: () => "stall",
+        spawnEnv: { ...process.env, RESULT_FILE: resultFile },
+      },
+    );
+
+    assert.equal(existsSync(resultFile), true);
+    assert.equal(result.ok, true);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.failureMode, null);
+    assert.equal(result.output, "tick-6");
   });
 });

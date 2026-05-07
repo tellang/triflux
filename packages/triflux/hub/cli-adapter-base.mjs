@@ -2,7 +2,7 @@
 // Phase 2: codex-adapter.mjs에서 추출한 재사용 가능 유틸리티
 
 import { execSync, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 
 import { IS_WINDOWS, killProcess } from "./platform.mjs";
 
@@ -391,7 +391,18 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
     });
   }
 
+  const resultFileSignature = () => {
+    if (!resultFile) return "";
+    try {
+      const info = statSync(resultFile);
+      return `${info.size}:${info.mtimeMs}`;
+    } catch {
+      return "";
+    }
+  };
+
   let lastBytes = 0;
+  let lastResultFileSignature = resultFileSignature();
   let lastChange = Date.now();
   const touch = () => {
     lastChange = Date.now();
@@ -420,8 +431,14 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
   }, timeout);
   const stallTimer = setInterval(() => {
     const size = Buffer.byteLength(stdout) + Buffer.byteLength(stderr);
-    if (size !== lastBytes) {
+    const currentResultFileSignature = resultFileSignature();
+    if (
+      size !== lastBytes ||
+      currentResultFileSignature !== lastResultFileSignature
+    ) {
       lastBytes = size;
+      lastResultFileSignature = currentResultFileSignature;
+      touch();
       return;
     }
     if (Date.now() - lastChange >= stallThresholdMs)
