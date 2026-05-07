@@ -56,6 +56,14 @@ function execOpenTerminal(execFn) {
   });
 }
 
+function isTmuxLikeMux(mux, platform) {
+  return TMUX_LIKE_MUXES.has(mux) || (platform !== "win32" && mux === "psmux");
+}
+
+function wtResultSucceeded(result) {
+  return result?.success !== false;
+}
+
 export function createTerminalOpener(deps = {}) {
   const platform = resolvePlatform(deps);
   const tmuxExec = deps.tmuxExec || defaultTmuxExec;
@@ -68,12 +76,11 @@ export function createTerminalOpener(deps = {}) {
 
     if (platform === "win32") {
       const wt = createWtManager();
-      await wt.createTab(createTabSpec(spec, title));
-      return true;
+      return wtResultSucceeded(await wt.createTab(createTabSpec(spec, title)));
     }
 
     const mux = resolveMux(deps);
-    if (TMUX_LIKE_MUXES.has(mux)) {
+    if (isTmuxLikeMux(mux, platform)) {
       tmuxExec(
         `new-window -n ${shellQuote(title)} ${shellQuote(
           buildCommandString(spec),
@@ -92,18 +99,23 @@ export function createTerminalOpener(deps = {}) {
   async function openSession(sessionName, opts = {}) {
     if (platform === "win32") {
       const wt = createWtManager();
-      await wt.createTab({
-        title: sanitizeTerminalTitle(opts.title ?? sessionName),
-        command: `psmux attach-session -t ${powershellSingleQuote(sessionName)}`,
-        cwd: opts.cwd,
-        profile: opts.profile ?? "triflux",
-      });
-      return true;
+      return wtResultSucceeded(
+        await wt.createTab({
+          title: sanitizeTerminalTitle(opts.title ?? sessionName),
+          command: `psmux attach-session -t ${powershellSingleQuote(sessionName)}`,
+          cwd: opts.cwd,
+          profile: opts.profile ?? "triflux",
+        }),
+      );
     }
 
     const mux = resolveMux(deps);
-    if (TMUX_LIKE_MUXES.has(mux)) {
-      tmuxExec(`attach-session -t ${shellQuote(sessionName)}`);
+    if (isTmuxLikeMux(mux, platform)) {
+      tmuxExec(
+        `new-window -n ${shellQuote(opts.title ?? sessionName)} ${shellQuote(
+          `tmux attach-session -t ${shellQuote(sessionName)}`,
+        )}`,
+      );
       return true;
     }
 
@@ -119,7 +131,7 @@ export function createTerminalOpener(deps = {}) {
       return true;
     }
 
-    if (TMUX_LIKE_MUXES.has(mux)) {
+    if (isTmuxLikeMux(mux, platform)) {
       tmuxExec(`select-pane -t ${shellQuote(target)}`);
       return true;
     }

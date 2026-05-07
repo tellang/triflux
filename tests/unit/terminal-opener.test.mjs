@@ -56,6 +56,17 @@ describe("terminal-opener adapter", () => {
     ]);
   });
 
+  it("Windows openCommand reports wt-manager failures", async () => {
+    const opener = createTerminalOpener({
+      platform: "win32",
+      createWtManager: () => ({
+        createTab: async () => ({ success: false, reason: "wt-not-installed" }),
+      }),
+    });
+
+    assert.equal(await opener.openCommand({ command: "echo hi" }), false);
+  });
+
   it("Windows openSession quotes psmux session names for PowerShell", async () => {
     const calls = [];
     const opener = createTerminalOpener({
@@ -86,6 +97,17 @@ describe("terminal-opener adapter", () => {
     );
   });
 
+  it("Windows openSession reports wt-manager failures", async () => {
+    const opener = createTerminalOpener({
+      platform: "win32",
+      createWtManager: () => ({
+        createTab: async () => ({ success: false, reason: "wt-not-installed" }),
+      }),
+    });
+
+    assert.equal(await opener.openSession("demo"), false);
+  });
+
   it("macOS tmux openCommand calls tmuxExec new-window and includes command", async () => {
     const calls = [];
     const opener = createTerminalOpener({
@@ -108,6 +130,37 @@ describe("terminal-opener adapter", () => {
       /node --test tests\/unit\/terminal-opener\.test\.mjs/,
     );
     assert.match(calls[0], /cd '\\''\/tmp\/work tree'\\'' && /);
+  });
+
+  it("macOS psmux fallback is treated as tmux-compatible for openCommand", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "darwin",
+      mux: "psmux",
+      tmuxExec: (command) => calls.push(command),
+    });
+
+    assert.equal(
+      await opener.openCommand({ title: "Worker 3", command: "echo hi" }),
+      true,
+    );
+    assert.match(calls[0], /^new-window -n 'Worker 3' 'echo hi'$/);
+  });
+
+  it("macOS psmux fallback opens sessions in a tmux window", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "darwin",
+      mux: "psmux",
+      tmuxExec: (command) => calls.push(command),
+    });
+
+    assert.equal(
+      await opener.openSession("demo", { title: "Demo Session" }),
+      true,
+    );
+    assert.match(calls[0], /^new-window -n 'Demo Session' /);
+    assert.match(calls[0], /tmux attach-session -t/);
   });
 
   it("macOS without mux falls back to exec open -a Terminal", async () => {
