@@ -25,6 +25,7 @@ import {
   ensureTfxSection,
   getLatestRoutingTable,
 } from "./claudemd-sync.mjs";
+import { addPluginRootFallbackToCommand } from "./lib/doctor-env-checks.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -141,7 +142,7 @@ function isSetupUserStateFile(fileName) {
 }
 
 /**
- * scripts/lib/*.mjs 자동 스캔.
+ * scripts/lib/*.mjs 및 *.sh 자동 스캔.
  * 수동 리스트 대신 glob으로 탐색하여 lib 파일 추가 시 sync 누락 방지.
  */
 function scanLibFiles(pluginRoot, claudeDir) {
@@ -149,7 +150,7 @@ function scanLibFiles(pluginRoot, claudeDir) {
   if (!existsSync(libDir)) return [];
   return readdirSync(libDir)
     .sort()
-    .filter((f) => f.endsWith(".mjs"))
+    .filter((f) => f.endsWith(".mjs") || f.endsWith(".sh"))
     .map((f) => ({
       src: join(libDir, f),
       dst: join(claudeDir, "scripts", "lib", f),
@@ -563,7 +564,13 @@ function ensureHooksInSettings({ settingsPath, registryPath }) {
 
       entries.push({
         matcher: spec.matcher,
-        hooks: [{ type: "command", command: spec.command, timeout: 5 }],
+        hooks: [
+          {
+            type: "command",
+            command: addPluginRootFallbackToCommand(spec.command, PLUGIN_ROOT),
+            timeout: 5,
+          },
+        ],
       });
       added.push(spec.id || spec.fileName);
     }
