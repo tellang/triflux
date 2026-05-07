@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   createPsmuxRuntime,
   createRuntime,
+  createTmuxRuntime,
 } from "../../hub/team/runtime-strategy.mjs";
 
 describe("hub/team/runtime-strategy.mjs", () => {
@@ -52,6 +53,22 @@ describe("hub/team/runtime-strategy.mjs", () => {
     assert.equal(typeof runtime.stop, "function");
     assert.equal(typeof runtime.isAlive, "function");
     assert.equal(typeof runtime.getStatus, "function");
+  });
+
+  it("createTmuxRuntime는 tmux descriptor를 생성한다", () => {
+    const runtime = createTmuxRuntime({ sessionName: "tri" });
+
+    assert.equal(runtime.kind, "tmux");
+    assert.equal(runtime.sessionName, "tri");
+    assert.equal(typeof runtime.createSession, "function");
+    assert.equal(typeof runtime.sendPrompt, "function");
+  });
+
+  it("createRuntime('tmux')는 tmux descriptor를 생성한다", () => {
+    const runtime = createRuntime("tmux", { sessionName: "tri" });
+
+    assert.equal(runtime.kind, "tmux");
+    assert.equal(runtime.sessionName, "tri");
   });
 
   it("native/wt placeholder는 미구현 에러를 던진다", () => {
