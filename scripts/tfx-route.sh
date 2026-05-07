@@ -365,7 +365,8 @@ mkdir -p "$TFX_PROBE_DIR" 2>/dev/null || true
 
 estimate_expected_duration_sec() {
   local agent="${1:-}" profile="${2:-}" prompt="${3:-}"
-  local text="${prompt,,}"
+  local text
+  text=$(printf '%s' "$prompt" | tr '[:upper:]' '[:lower:]')
   local expected=30
 
   case "$agent" in

@@ -206,10 +206,11 @@
       {
         "id": "ext-session-vault-start",
         "source": "session-vault",
+        "requires": "$HOME/Desktop/Projects/tools/session-vault",
         "matcher": "*",
         "command": "bash \"${HOME}/Desktop/Projects/tools/session-vault/scripts/start_hook.sh\"",
         "priority": 100,
-        "enabled": true,
+        "enabled": false,
         "timeout": 10,
         "blocking": false,
         "description": "세션 볼트 로깅 시작"
@@ -230,10 +231,11 @@
       {
         "id": "ext-session-vault-export",
         "source": "session-vault",
+        "requires": "$HOME/Desktop/Projects/tools/session-vault",
         "matcher": "*",
         "command": "bash \"${HOME}/Desktop/Projects/tools/session-vault/scripts/export_hook.sh\"",
         "priority": 100,
-        "enabled": true,
+        "enabled": false,
         "timeout": 30,
         "blocking": false,
         "description": "세션 트랜스크립트 내보내기"

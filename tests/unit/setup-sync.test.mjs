@@ -240,6 +240,94 @@ describe("setup-sync: managed hook registration", () => {
   before(ensureTmpDir);
   after(cleanTmpDir);
 
+  function writeRegistry(registryPath, hooks) {
+    writeFileSync(
+      registryPath,
+      JSON.stringify({ events: { Stop: hooks } }, null, 2) + "\n",
+      "utf8",
+    );
+  }
+
+  function readStopCommands(settingsPath) {
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    return (settings.hooks?.Stop || [])
+      .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
+      .map((hook) => String(hook.command || ""));
+  }
+
+  it("requires 경로가 없으면 managed hook 등록을 건너뛴다 (#231)", () => {
+    const settingsPath = join(TMP_DIR, "settings-requires-missing.json");
+    const registryPath = join(TMP_DIR, "registry-requires-missing.json");
+
+    writeRegistry(registryPath, [
+      {
+        id: "external-missing",
+        matcher: "*",
+        command: 'bash "${HOME}/missing-tool/hook.sh"',
+        enabled: true,
+        requires: "$HOME/missing-tool",
+      },
+    ]);
+
+    const result = ensureHooksInSettings({ settingsPath, registryPath });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.changed, false);
+    assert.deepEqual(result.added, []);
+    assert.equal(existsSync(settingsPath), false);
+  });
+
+  it("requires 경로가 있으면 managed hook을 등록한다 (#231)", () => {
+    const settingsPath = join(TMP_DIR, "settings-requires-present.json");
+    const registryPath = join(TMP_DIR, "registry-requires-present.json");
+    const requiredDir = join(TMP_DIR, "present-tool");
+    mkdirSync(requiredDir, { recursive: true });
+
+    writeRegistry(registryPath, [
+      {
+        id: "external-present",
+        matcher: "*",
+        command: 'bash "${HOME}/present-tool/hook.sh"',
+        enabled: true,
+        requires: requiredDir,
+      },
+    ]);
+
+    const result = ensureHooksInSettings({ settingsPath, registryPath });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.added, ["external-present"]);
+    assert.ok(
+      readStopCommands(settingsPath).some((command) =>
+        command.includes("present-tool"),
+      ),
+    );
+  });
+
+  it("requires 없는 managed hook은 기존처럼 등록한다 (#231)", () => {
+    const settingsPath = join(TMP_DIR, "settings-no-requires.json");
+    const registryPath = join(TMP_DIR, "registry-no-requires.json");
+
+    writeRegistry(registryPath, [
+      {
+        id: "internal-hook",
+        matcher: "*",
+        command: 'node "${PLUGIN_ROOT}/hooks/pipeline-stop.mjs"',
+        enabled: true,
+      },
+    ]);
+
+    const result = ensureHooksInSettings({ settingsPath, registryPath });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.added, ["internal-hook"]);
+    assert.ok(
+      readStopCommands(settingsPath).some((command) =>
+        command.includes("pipeline-stop.mjs"),
+      ),
+    );
+  });
+
   it("유효하지 않은 CLAUDE_PLUGIN_ROOT는 무시하고 실제 패키지 루트를 사용한다", () => {
     const settingsPath = join(TMP_DIR, "settings.json");
     const registryPath = join(PROJECT_ROOT, "hooks", "hook-registry.json");
