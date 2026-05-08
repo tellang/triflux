@@ -97,6 +97,51 @@ describe("createNotifier", () => {
     assert.match(calls[0].args[3], /Triflux failed/u);
   });
 
+  it("escapes AppleScript notification strings on macOS", async () => {
+    const calls = [];
+    const execFile = (command, args, options, callback) => {
+      calls.push({ command, args, options });
+      callback(null, "", "");
+    };
+    const platformDescriptor = Object.getOwnPropertyDescriptor(
+      process,
+      "platform",
+    );
+
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    try {
+      const notifier = createNotifier({
+        stdout: {
+          write() {
+            return true;
+          },
+        },
+        env: {},
+        deps: { execFile },
+        hostname: 'host "mac" \\ runtime',
+      })
+        .setChannel("bell", false)
+        .setChannel("webhook", false);
+
+      const result = await notifier.notify({
+        type: "completed",
+        sessionId: 'session "quoted" \\ path',
+        summary: 'summary "quoted" \\ path',
+        timestamp: "2026-04-04T00:00:04.000Z",
+      });
+
+      assert.equal(result.results.toast.status, "sent");
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].command, "osascript");
+      assert.match(
+        calls[0].args[1],
+        /display notification "summary \\"quoted\\" \\\\ path session session \\"quoted\\" \\\\ path · host host \\"mac\\" \\\\ runtime" with title "Triflux completed"/u,
+      );
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
+  });
+
   it("posts JSON payload to webhook when TRIFLUX_NOTIFY_WEBHOOK is configured", async () => {
     const requests = [];
     const fetch = async (url, init) => {

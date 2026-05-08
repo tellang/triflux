@@ -18,6 +18,13 @@ function escapePowerShellSingleQuoted(value) {
   return String(value ?? "").replaceAll("'", "''");
 }
 
+function escapeAppleScriptString(value) {
+  return String(value ?? "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replace(/\r?\n/g, " ");
+}
+
 function normalizeTimestamp(value) {
   if (value instanceof Date) return value.toISOString();
   if (value == null || value === "") return new Date().toISOString();
@@ -215,8 +222,8 @@ async function sendToast(event, config, deps) {
   if ((deps.platform || process.platform) === "darwin") {
     const title = formatEventTitle(event);
     const body = formatEventBody(event);
-    const safeTitle = title.replace(/\\/g, "\\\\").replace(/'/g, "'\"'\"'");
-    const safeBody = body.replace(/\\/g, "\\\\").replace(/'/g, "'\"'\"'");
+    const safeTitle = escapeAppleScriptString(title);
+    const safeBody = escapeAppleScriptString(body);
     try {
       await execFileAsync(
         "osascript",
