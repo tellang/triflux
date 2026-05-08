@@ -315,10 +315,12 @@ describe("delegator-mcp stdio server", () => {
   });
 
   it("search-engines 캐시가 없으면 기존 fallback을 유지해야 한다", async () => {
+    const tempHome = mkdtempSync(join(tmpdir(), "triflux-delegator-home-"));
     const originalCache = readSearchEngineCacheBackup();
     rmSync(SEARCH_ENGINE_CACHE_FILE, { force: true });
 
     const { client, transport } = await createClient({
+      HOME: tempHome,
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
       TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
       GEMINI_BIN: process.execPath,
@@ -354,6 +356,7 @@ describe("delegator-mcp stdio server", () => {
       );
     } finally {
       restoreSearchEngineCacheBackup(originalCache);
+      rmSync(tempHome, { recursive: true, force: true });
       await closeClient(client, transport);
     }
   });

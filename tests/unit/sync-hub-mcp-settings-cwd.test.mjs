@@ -26,9 +26,10 @@ afterEach(() => {
 describe("getProjectMcpJsonPaths", () => {
   it("returns cwd-based paths when projectRoot undefined", () => {
     const paths = getProjectMcpJsonPaths();
+    const cwd = process.cwd();
     assert.deepEqual(paths, [
-      join(TEMP_CWD, ".claude", "mcp.json"),
-      join(TEMP_CWD, ".mcp.json"),
+      join(cwd, ".claude", "mcp.json"),
+      join(cwd, ".mcp.json"),
     ]);
   });
 
@@ -43,9 +44,10 @@ describe("getProjectMcpJsonPaths", () => {
 
   it("falls back to cwd when projectRoot is empty string", () => {
     const paths = getProjectMcpJsonPaths("");
+    const cwd = process.cwd();
     assert.deepEqual(paths, [
-      join(TEMP_CWD, ".claude", "mcp.json"),
-      join(TEMP_CWD, ".mcp.json"),
+      join(cwd, ".claude", "mcp.json"),
+      join(cwd, ".mcp.json"),
     ]);
   });
 });

@@ -73,6 +73,11 @@ function createTmuxSession(sessionName, opts = {}) {
   tmuxExec(`new-session -d -s ${sessionName} -x 220 -y 55`);
 }
 
+function sendPromptToTmuxSession(sessionName, prompt) {
+  const quotedPrompt = String(prompt).replace(/'/g, "'\\''");
+  tmuxExec(`send-keys -t ${sessionName}:0.0 '${quotedPrompt}' Enter`);
+}
+
 function killTmuxSessionByName(sessionName) {
   try {
     tmuxExec(`kill-session -t ${sessionName}`);
@@ -83,6 +88,7 @@ function killTmuxSessionByName(sessionName) {
 
 const defaultTmuxAdapter = {
   createSession: createTmuxSession,
+  sendPrompt: sendPromptToTmuxSession,
   killSession: killTmuxSessionByName,
   hasSession: tmuxSessionExists,
 };
@@ -90,28 +96,50 @@ const defaultTmuxAdapter = {
 /**
  * @param {{
  *   createSession: typeof createTmuxSession,
+ *   sendPrompt: typeof sendPromptToTmuxSession,
  *   killSession: typeof killTmuxSessionByName,
  *   hasSession: typeof tmuxSessionExists,
- * }} [adapter]
- * @returns {TeamRuntime & { name: "tmux" }}
+ * }} [opts.adapter]
+ * @param {string} [opts.sessionName]
+ * @returns {{
+ *   name: "tmux",
+ *   kind: "tmux",
+ *   sessionName: string,
+ *   createSession: (opts?: object) => unknown,
+ *   sendPrompt: (prompt: string) => unknown,
+ *   start: (sessionName: string, opts?: object) => unknown,
+ *   stop: (sessionName: string) => void,
+ *   isAlive: (sessionName: string) => boolean,
+ *   getStatus: (sessionName: string) => RuntimeStatus,
+ * }}
  */
-export function createTmuxRuntime(adapter = defaultTmuxAdapter) {
+export function createTmuxRuntime(opts = {}) {
+  const { adapter = defaultTmuxAdapter, sessionName = "" } = opts;
+
   return {
     name: "tmux",
-    start(sessionName, opts = {}) {
+    kind: "tmux",
+    sessionName,
+    createSession(opts = {}) {
       return adapter.createSession(sessionName, opts);
     },
-    stop(sessionName) {
-      adapter.killSession(sessionName);
+    sendPrompt(prompt) {
+      return adapter.sendPrompt(sessionName, prompt);
     },
-    isAlive(sessionName) {
-      return adapter.hasSession(sessionName);
+    start(sessionNameArg = sessionName, opts = {}) {
+      return adapter.createSession(sessionNameArg, opts);
     },
-    getStatus(sessionName) {
+    stop(sessionNameArg = sessionName) {
+      adapter.killSession(sessionNameArg);
+    },
+    isAlive(sessionNameArg = sessionName) {
+      return adapter.hasSession(sessionNameArg);
+    },
+    getStatus(sessionNameArg = sessionName) {
       return {
         name: "tmux",
-        sessionName,
-        alive: adapter.hasSession(sessionName),
+        sessionName: sessionNameArg,
+        alive: adapter.hasSession(sessionNameArg),
       };
     },
   };
@@ -119,9 +147,10 @@ export function createTmuxRuntime(adapter = defaultTmuxAdapter) {
 
 /**
  * @param {string} mode
+ * @param {object} [opts]
  * @returns {TeamRuntime & { name: string }}
  */
-export function createRuntime(mode) {
+export function createRuntime(mode, opts = {}) {
   const normalizedMode = String(mode || "")
     .trim()
     .toLowerCase();
@@ -131,7 +160,7 @@ export function createRuntime(mode) {
   }
 
   if (normalizedMode === "tmux") {
-    return createTmuxRuntime();
+    return createTmuxRuntime(opts);
   }
 
   if (normalizedMode === "native" || normalizedMode === "wt") {

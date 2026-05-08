@@ -4,7 +4,7 @@
 // Remote support: host option → SSH-based git operations via remote-session.mjs.
 
 import { execFile } from "node:child_process";
-import { access, mkdir, readdir, rm } from "node:fs/promises";
+import { access, mkdir, readdir, realpath, rm } from "node:fs/promises";
 import { join, normalize, relative, resolve } from "node:path";
 import { remoteGit, validateHost } from "./remote-session.mjs";
 
@@ -115,6 +115,14 @@ function sleep(ms) {
 /** Normalize path for Windows compatibility. */
 function normPath(p) {
   return normalize(p).replace(/\\/g, "/");
+}
+
+async function normExistingPath(p) {
+  try {
+    return normPath(await realpath(p));
+  } catch {
+    return normPath(p);
+  }
 }
 
 function resolveCleanupTarget(worktreePath, rootDir) {
@@ -562,10 +570,12 @@ export async function pruneOrphanWorktrees({ rootDir = process.cwd() } = {}) {
   try {
     const raw = await git(["worktree", "list", "--porcelain"], rootDir);
     registeredPaths = new Set(
-      raw
-        .split("\n")
-        .filter((l) => l.startsWith("worktree "))
-        .map((l) => normPath(l.slice("worktree ".length))),
+      await Promise.all(
+        raw
+          .split("\n")
+          .filter((l) => l.startsWith("worktree "))
+          .map((l) => normExistingPath(l.slice("worktree ".length))),
+      ),
     );
   } catch {
     return removed; // git worktree list failed → don't remove anything
@@ -573,7 +583,7 @@ export async function pruneOrphanWorktrees({ rootDir = process.cwd() } = {}) {
 
   for (const dir of wtDirs) {
     const fullPath = resolve(swarmDir, dir);
-    const normalized = normPath(fullPath);
+    const normalized = await normExistingPath(fullPath);
     if (!registeredPaths.has(normalized)) {
       try {
         await stopFsmonitorDaemon(fullPath).catch(() => null);
