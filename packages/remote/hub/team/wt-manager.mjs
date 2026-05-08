@@ -170,12 +170,34 @@ function atomicWriteSync(filePath, data) {
  * @param {number} [opts.tabCreateDelayMs=500]
  * @param {object} [opts.deps] — 테스트용 의존성 주입
  */
+function createNonWindowsStubManager() {
+  const asyncFalse = async () => false;
+  return Object.freeze({
+    ensureWtProfile: () => {},
+    createTab: asyncFalse,
+    renameTab: asyncFalse,
+    closeTab: asyncFalse,
+    listTabs: async () => [],
+    closeStale: async () => 0,
+    createSession: asyncFalse,
+    splitPane: asyncFalse,
+    applySplitLayout: asyncFalse,
+    getEnvironmentInfo: () => ({
+      platform: process.platform,
+      hasWindowsTerminal: false,
+      hasWt: false,
+      isWindowsTerminalSession: false,
+    }),
+    getTabCount: () => 0,
+  });
+}
+
 export function createWtManager(opts = {}) {
   const deps = opts.deps || {};
   const platform = deps.platform || osPlatform;
 
   if (platform() !== "win32") {
-    throw new Error("wt-manager.mjs is Windows-only");
+    return createNonWindowsStubManager();
   }
 
   const now = deps.now || Date.now;
