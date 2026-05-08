@@ -109,11 +109,12 @@ afterEach(() => {
 });
 
 describe("wt-manager: createWtManager", () => {
-  it("Windows가 아니면 즉시 에러를 던진다", () => {
-    assert.throws(
-      () => createWtManager({ deps: { platform: () => "linux" } }),
-      /Windows-only/,
-    );
+  it("Windows가 아니면 stub manager 를 반환한다 (no throw)", () => {
+    const stub = createWtManager({ deps: { platform: () => "linux" } });
+    assert.ok(stub, "stub manager 반환되어야 함");
+    assert.equal(typeof stub.createTab, "function");
+    assert.equal(typeof stub.getEnvironmentInfo, "function");
+    assert.equal(stub.getEnvironmentInfo().hasWindowsTerminal, false);
   });
 
   it("Object.freeze된 공개 API를 반환한다", () => {
