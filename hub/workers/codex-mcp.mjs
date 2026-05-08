@@ -48,7 +48,6 @@ async function closeWithin(label, closeFn, timeoutMs) {
       timer = setTimeout(() => {
         resolve({ timedOut: true });
       }, timeoutMs);
-      timer.unref?.();
     });
     const closed = Promise.resolve()
       .then(closeFn)
