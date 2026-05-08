@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // tfx-route-worker.mjs — tfx-route.sh용 subprocess worker 러너
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -133,8 +133,18 @@ function parseJsonArray(raw, label) {
   }
 }
 
-function readPromptFromStdin() {
-  return readFileSync(0, "utf8");
+async function readPromptFromStdin() {
+  // Stream-based async read avoids EAGAIN race on Node v25 + background pipe stdin.
+  // readFileSync(0, "utf8") raised EAGAIN when stdin pipe was non-blocking and
+  // data hadn't fully arrived (Node v25 timing change vs v22), causing the
+  // tfx-route.sh wrapper to fall back to claude-native silently.
+  if (process.stdin.isTTY) return "";
+  process.stdin.setEncoding("utf8");
+  let data = "";
+  for await (const chunk of process.stdin) {
+    data += chunk;
+  }
+  return data;
 }
 
 function resolveDefaultMcpConfig(cwd) {
@@ -197,7 +207,7 @@ async function runWorker(worker, type, prompt) {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const prompt = readPromptFromStdin();
+const prompt = await readPromptFromStdin();
 
 const worker = await createWorker(args.type, {
   command: args.command,

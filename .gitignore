@@ -56,6 +56,7 @@ dist/
 .tmp-research/
 .codex-artifacts/
 .codex-swarm/
+.worktrees/
 
 # 기타
 *.bak
@@ -119,3 +120,8 @@ docs/research/*competitor*
 # Codex/Gemini state snapshots (local backup, too large for git)
 references/codex-snapshots/
 references/gemini-snapshots/
+
+# ad-hoc research/eval scratch from earlier projects (diningcode/naver/catchtable/tabling, 2026-04-11)
+# 다른 프로젝트 잔재가 다른 브랜치 체크아웃 시 따라다니지 않도록 ignore
+swarm-logs/
+swarm-prompts/

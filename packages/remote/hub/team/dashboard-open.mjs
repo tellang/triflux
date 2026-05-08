@@ -1,23 +1,7 @@
-import { psmuxExec } from "./psmux.mjs";
-import { detectMultiplexer, hasWindowsTerminal, tmuxExec } from "./session.mjs";
-import { createWtManager } from "./wt-manager.mjs";
-
-function sanitizeWindowTitle(value, fallback = "triflux") {
-  const text = String(value || "")
-    .replace(/[\r\n]+/g, " ")
-    .trim();
-  return text || fallback;
-}
+import { createTerminalOpener } from "./terminal-opener.mjs";
 
 function sanitizeSessionName(value) {
   return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "") || "tfx-session";
-}
-
-function sanitizeWorkingDirectory(value) {
-  const text = String(value || "")
-    .replace(/[\r\n\x00-\x1f]/g, "")
-    .trim();
-  return text || process.cwd();
 }
 
 export function parseWorkerNumber(value) {
@@ -37,110 +21,43 @@ export function decideDashboardOpenMode({
   return hasWtSession ? "split" : "window";
 }
 
-async function spawnWindowsTerminal(spec, opts = {}) {
-  if (!hasWindowsTerminal()) return false;
-
-  const wt = createWtManager();
-  const {
-    mode = "window",
-    title = "triflux",
-    cwd = process.cwd(),
-    split = { orientation: "H", size: 0.5 },
-  } = opts;
-
-  const safeTitle = sanitizeWindowTitle(title);
-  const safeCwd = sanitizeWorkingDirectory(cwd);
-
-  try {
-    if (mode === "split") {
-      await wt.splitPane({
-        direction: split?.orientation === "V" ? "V" : "H",
-        size: (split?.size || 0.5) * 100,
-        title: safeTitle,
-        cwd: safeCwd,
-        command: spec.args
-          ? `${spec.command} ${spec.args.join(" ")}`
-          : spec.command,
-        profile: "triflux",
-      });
-    } else {
-      await wt.createTab({
-        title: safeTitle,
-        cwd: safeCwd,
-        command: spec.args
-          ? `${spec.command} ${spec.args.join(" ")}`
-          : spec.command,
-        profile: "triflux",
-      });
-    }
-    return true;
-  } catch {
-    return false;
-  }
+function ignoreAsyncFailure(value) {
+  if (value && typeof value.then === "function") void value.catch(() => {});
 }
 
-async function spawnMacTerminal(spec, opts = {}) {
-  const mux = detectMultiplexer();
-  if (mux === "tmux") {
-    try {
-      const title = sanitizeWindowTitle(opts.title);
-      const command = spec.args
-        ? `${spec.command} ${spec.args.join(" ")}`
-        : spec.command;
-      tmuxExec(`new-window -n "${title}" "${command}"`);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  // tmux 없으면 기본 터미널
-  try {
-    const { exec } = await import("node:child_process");
-    exec(`open -a Terminal`, { timeout: 5000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function openHeadlessDashboardTarget(sessionName, opts = {}) {
-  const { worker = null, openAll = false, cwd = process.cwd(), title } = opts;
-
+export async function openHeadlessDashboardTarget(sessionName, opts = {}) {
+  const { openAll = false, cwd = process.cwd(), title } = opts;
   const safeSession = sanitizeSessionName(sessionName);
-  const workerNumber = worker == null ? null : parseWorkerNumber(worker);
+  const workerNumber =
+    opts.workerNumber ??
+    (opts.worker == null ? null : parseWorkerNumber(opts.worker));
+
+  let opener;
+  try {
+    const deps = opts._deps ?? {};
+    const openerFactory = deps.createTerminalOpener ?? createTerminalOpener;
+    opener = openerFactory(deps);
+  } catch {
+    return !openAll && workerNumber != null;
+  }
 
   // 선택 워커 → pane focus만 (새 창 열지 않음)
   if (!openAll && workerNumber != null) {
     try {
-      const mux = detectMultiplexer();
-      if (mux === "psmux") {
-        psmuxExec(["select-pane", "-t", `${safeSession}:0.${workerNumber}`]);
-      } else if (
-        mux === "tmux" ||
-        mux === "wsl-tmux" ||
-        mux === "git-bash-tmux"
-      ) {
-        tmuxExec(`select-pane -t ${safeSession}:0.${workerNumber}`);
-      }
+      ignoreAsyncFailure(opener.focusPane(safeSession, workerNumber));
     } catch {}
     return true;
   }
 
   // 전체 열기 (Shift+Enter) → 새 창으로 세션 attach
-  if (process.platform === "win32") {
-    void spawnWindowsTerminal(
-      { command: "psmux", args: ["attach-session", "-t", safeSession] },
-      {
-        mode: decideDashboardOpenMode({ openAll }),
-        title: title || `▲ ${safeSession}`,
-        cwd,
-      },
-    );
-  } else {
-    void spawnMacTerminal(
-      { command: "tmux", args: ["attach-session", "-t", safeSession] },
-      { title: title || `▲ ${safeSession}`, cwd },
-    );
+  try {
+    const opened = opener.openSession(safeSession, {
+      title: title || `▲ ${safeSession}`,
+      cwd,
+      profile: opts.profile ?? "triflux",
+    });
+    return await opened;
+  } catch {
+    return false;
   }
-  return true;
 }
