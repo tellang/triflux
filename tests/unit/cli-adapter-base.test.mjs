@@ -113,19 +113,26 @@ test("runProcess treats resultFile updates as progress during quiet CLI executio
   await withSandbox(async ({ root }) => {
     const { runProcess } = await importFresh("../../hub/cli-adapter-base.mjs");
     const resultFile = join(root, "result.txt");
-    const script = [
-      "const { writeFileSync } = require('node:fs');",
-      "const file = process.env.RESULT_FILE;",
-      "let n = 0;",
-      "const timer = setInterval(() => {",
-      "  n += 1;",
-      "  writeFileSync(file, `tick-${n}`, 'utf8');",
-      "  if (n >= 6) { clearInterval(timer); process.exit(0); }",
-      "}, 75);",
-    ].join(" ");
+    // Write the script to a file to avoid shell-quoting hazards (backticks /
+    // ${...} get expanded by the shell when passed via `node -e "..."`).
+    const scriptPath = join(root, "tick.cjs");
+    writeFileSync(
+      scriptPath,
+      [
+        "const { writeFileSync } = require('node:fs');",
+        "const file = process.env.RESULT_FILE;",
+        "let n = 0;",
+        "const timer = setInterval(() => {",
+        "  n += 1;",
+        "  writeFileSync(file, 'tick-' + n, 'utf8');",
+        "  if (n >= 6) { clearInterval(timer); process.exit(0); }",
+        "}, 75);",
+      ].join("\n"),
+      "utf8",
+    );
 
     const result = await runProcess(
-      `node -e ${JSON.stringify(script)}`,
+      `node ${JSON.stringify(scriptPath)}`,
       root,
       3_000,
       {
