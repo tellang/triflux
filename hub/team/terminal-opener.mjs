@@ -56,6 +56,9 @@ function execOpenTerminal(execFn) {
   });
 }
 
+// psmux는 Windows에서 wt-manager 경유 (createTab/splitPane 등) — tmux 호환 unix 명령군과 다른 표면.
+// 비-Windows(macOS/Linux) 환경에서는 psmux가 tmux-compatible new-window/select-pane 명령을 받아주므로
+// tmux 어댑터와 동일하게 취급한다.
 function isTmuxLikeMux(mux, platform) {
   return TMUX_LIKE_MUXES.has(mux) || (platform !== "win32" && mux === "psmux");
 }
@@ -72,6 +75,8 @@ function buildAttachCommand(mux, sessionName) {
   return `tmux attach-session -t ${shellQuote(sessionName)}`;
 }
 
+// wt-manager.createTab은 (a) undefined/void 반환 — legacy success 의미 (b) {success:true|false, ...} 객체 반환의 두 형태가 공존.
+// `result?.success !== false`는 undefined/null/{}을 모두 success로 취급하고 명시적 {success:false}만 실패로 본다.
 function wtResultSucceeded(result) {
   return result?.success !== false;
 }

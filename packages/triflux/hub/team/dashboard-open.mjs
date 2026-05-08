@@ -13,14 +13,6 @@ export function parseWorkerNumber(value) {
   return null;
 }
 
-export function decideDashboardOpenMode({
-  openAll = false,
-  hasWtSession = !!process.env.WT_SESSION,
-} = {}) {
-  if (openAll) return hasWtSession ? "tab" : "window";
-  return hasWtSession ? "split" : "window";
-}
-
 function ignoreAsyncFailure(value) {
   if (value && typeof value.then === "function") void value.catch(() => {});
 }

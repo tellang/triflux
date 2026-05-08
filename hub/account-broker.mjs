@@ -250,6 +250,19 @@ function withLockFile(lockPath, opts, task) {
 
 // ── AccountBroker ────────────────────────────────────────────────
 
+/**
+ * AccountBroker는 codex/gemini 계정 풀 + lease/cooldown/circuit breaker 를 관리한다.
+ *
+ * **Resolved-at-construction 정책 (lazy/eager mix 주의)**
+ *
+ * `getAuthBasePath()` / `getCodexAuthSourcePath()` 는 호출 시점에 `homedir()` 를
+ * 다시 평가하는 lazy getter 다. 그러나 default 파라미터 (`_authBasePath = getAuthBasePath()`)
+ * 는 생성자 호출 시점에 한 번만 평가되고 결과가 `#authBasePath` 등 private field 에 박힌다.
+ *
+ * 결과: 생성자 이후 process.env.HOME 변경은 broker 가 보는 경로에 전파되지 않는다.
+ * 테스트에서 HOME 을 갈아끼우려면 `new AccountBroker(config, { _authBasePath, _codexAuthSourcePath })`
+ * 로 오버라이드를 직접 주입하거나, broker 자체를 재생성해야 한다.
+ */
 class AccountBroker extends EventEmitter {
   #config;
   #state; // Map<accountId, accountState>
