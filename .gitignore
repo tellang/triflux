@@ -125,3 +125,4 @@ references/gemini-snapshots/
 # 다른 프로젝트 잔재가 다른 브랜치 체크아웃 시 따라다니지 않도록 ignore
 swarm-logs/
 swarm-prompts/
+.claude/settings.local.json
