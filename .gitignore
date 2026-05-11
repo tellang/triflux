@@ -80,6 +80,7 @@ docs/SESSION-*
 
 .test-lock/
 .tmp-home-setup-check/
+.tmp-home-route-*/
 tests/.tmp-setup-version-cache/
 *.codex-npm-test*.log
 docs/research/*reverse*

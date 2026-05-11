@@ -2,8 +2,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ClaudeWorker } from "../../hub/workers/claude-worker.mjs";
 import { createWorker } from "../../hub/workers/factory.mjs";
@@ -126,6 +127,12 @@ describe("worker-utils", () => {
 });
 
 describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
+  after(() => {
+    for (const dir of [".tmp-home-route-codex", ".tmp-home-route-gemini"]) {
+      rmSync(resolve(PROJECT_ROOT, dir), { recursive: true, force: true });
+    }
+  });
+
   it("designer는 Gemini wrapper를 통해 실행되어야 한다", () => {
     const result = spawnSync(
       BASH_EXE,
