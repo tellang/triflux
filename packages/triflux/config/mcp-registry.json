@@ -6,22 +6,32 @@
     "transport": "hub-url",
     "hub_base": "http://127.0.0.1:27888"
   },
+  "policy_notes": {
+    "transport": "Server transport accepts \"hub-url\" for the existing triflux Hub URL flow or \"http\" for direct Streamable HTTP MCP endpoints. Direct stdio registration via command/args is intentionally unsupported.",
+    "headers": "Optional headers are allowed only for HTTP-compatible transports. Each header value must be a descriptor: {\"value\":\"literal\"} for non-secret static values, {\"env\":\"ENV_VAR_NAME\"} for secrets resolved at sync/runtime, or {\"env\":\"ENV_VAR_NAME\",\"prefix\":\"Bearer \"} for common authorization formats.",
+    "secret_safety": "Resolved secret values must not be written back to this registry file. Missing env vars warn during sync and do not emit empty secret headers.",
+    "sync_denylist": "Array of client:server strings skipped by proactive registry sync, for example gemini:tfx-hub."
+  },
   "servers": {
     "tfx-hub": {
       "transport": "hub-url",
       "url": "http://127.0.0.1:27888/mcp",
       "safe": true,
-      "targets": [
-        "claude",
-        "gemini",
-        "codex"
-      ],
+      "targets": ["claude", "gemini", "codex"],
       "description": "triflux Hub MCP 서버"
+    },
+    "context7": {
+      "transport": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "safe": true,
+      "targets": ["claude", "gemini", "codex"],
+      "description": "Upstash Context7 — 라이브러리 문서/코드 컨텍스트 (HTTP MCP, API key 불필요)"
     }
   },
   "policies": {
     "stdio_action": "replace-with-hub",
     "unknown_server_action": "warn",
+    "sync_denylist": [],
     "watched_paths": [
       "~/.gemini/settings.json",
       "~/.codex/config.toml",

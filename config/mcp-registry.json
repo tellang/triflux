@@ -19,6 +19,13 @@
       "safe": true,
       "targets": ["claude", "gemini", "codex"],
       "description": "triflux Hub MCP 서버"
+    },
+    "context7": {
+      "transport": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "safe": true,
+      "targets": ["claude", "gemini", "codex"],
+      "description": "Upstash Context7 — 라이브러리 문서/코드 컨텍스트 (HTTP MCP, API key 불필요)"
     }
   },
   "policies": {
