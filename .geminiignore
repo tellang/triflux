@@ -1,0 +1,59 @@
+# Global ignore for AI CLI agents (Claude Code / Codex / Gemini)
+# Same syntax as .gitignore. Per-tool variants live alongside in $HOME.
+# Project-level overrides go in <project>/.{tool}ignore.
+
+# --- Secrets (defense in depth) ---
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+id_rsa
+id_ed25519
+credentials.json
+credentials.yaml
+credentials.yml
+secrets.json
+secrets.yaml
+secrets.yml
+
+# --- Dependencies ---
+node_modules/
+bower_components/
+vendor/
+.venv/
+venv/
+.pnp.*
+__pycache__/
+*.pyc
+*.pyo
+
+# --- Build outputs ---
+dist/
+build/
+out/
+.next/
+.nuxt/
+.svelte-kit/
+.turbo/
+.parcel-cache/
+target/
+*.egg-info/
+*.tsbuildinfo
+
+# --- Caches & local state ---
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+.nyc_output/
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
