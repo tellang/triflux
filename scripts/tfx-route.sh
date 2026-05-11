@@ -940,9 +940,9 @@ resolve_gemini_profile() {
       }
     }
 
-    process.stdout.write(defaults[name] || defaults.pro31);
+    process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.pro25);
   " "$profile" "$_GEMINI_PROFILE_CACHE" "$settings_cache" 2>/dev/null)
-  echo "${result:-gemini-3.1-pro-preview}"
+  echo "${result:-gemini-2.5-pro}"
 }
 
 # ── 라우팅 테이블 ──
