@@ -4,7 +4,7 @@
 //        node mcp-gateway-start.mjs --stop   # 중지
 //        node mcp-gateway-start.mjs --status # 상태 확인
 
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
@@ -104,16 +104,41 @@ function sleep(ms) {
 // ── 시작 ──
 
 function spawnGateway(srv) {
-  // 임시 .cmd 파일로 quoting 문제 회피
-  const cmdContent = `@echo off\nnpx -y supergateway --stdio "${srv.cmd}" --port ${srv.port} --outputTransport sse --healthEndpoint /healthz --cors "http://localhost"`;
-  const cmdFile = join(tmpdir(), `tfx-sg-${srv.name}.cmd`);
-  writeFileSync(cmdFile, cmdContent);
+  if (process.platform === "win32") {
+    // 임시 .cmd 파일로 quoting 문제 회피
+    const cmdContent = `@echo off\nnpx -y supergateway --stdio "${srv.cmd}" --port ${srv.port} --outputTransport sse --healthEndpoint /healthz --cors "http://localhost"`;
+    const cmdFile = join(tmpdir(), `tfx-sg-${srv.name}.cmd`);
+    writeFileSync(cmdFile, cmdContent);
 
-  // PowerShell Start-Process: Windows Job Object에서 벗어나 부모 종료 후 생존
-  execSync(
-    `powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath cmd.exe -ArgumentList '/c','${cmdFile.replaceAll("'", "''")}'"`,
-    { stdio: "ignore", timeout: 10000 },
-  );
+    // PowerShell Start-Process: Windows Job Object에서 벗어나 부모 종료 후 생존
+    execSync(
+      `powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath cmd.exe -ArgumentList '/c','${cmdFile.replaceAll("'", "''")}'"`,
+      { stdio: "ignore", timeout: 10000 },
+    );
+    return;
+  }
+
+  // POSIX (macOS/Linux): detached child + stdio:'ignore' so parent can exit
+  // 부모 process 가 죽어도 daemon 이 살아남도록 detached + unref.
+  const args = [
+    "-y",
+    "supergateway",
+    "--stdio",
+    srv.cmd,
+    "--port",
+    String(srv.port),
+    "--outputTransport",
+    "sse",
+    "--healthEndpoint",
+    "/healthz",
+    "--cors",
+    "http://localhost",
+  ];
+  const child = spawn("npx", args, {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
 }
 
 function ensureFirewallRule() {
@@ -221,30 +246,57 @@ async function startAll() {
 // ── 중지 ──
 
 function stopAll() {
-  // supergateway + 하위 MCP 프로세스를 포트 기반으로 찾아 종료
-  try {
-    // temp .ps1 파일로 bash/cmd 쿼팅 충돌 회피
-    const psFile = join(tmpdir(), "tfx-sg-stop.ps1");
-    writeFileSync(
-      psFile,
-      [
-        `Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" |`,
-        `  Where-Object { $_.CommandLine -match 'supergateway' } |`,
-        `  ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null; Write-Output "[STOP] PID $($_.ProcessId)" }`,
-      ].join("\n"),
-    );
-    const output = execSync(
-      `powershell -NoProfile -ExecutionPolicy Bypass -File "${psFile}"`,
-      {
+  // supergateway + 하위 MCP 프로세스를 cmdline 기반으로 찾아 종료
+  if (process.platform === "win32") {
+    try {
+      // temp .ps1 파일로 bash/cmd 쿼팅 충돌 회피
+      const psFile = join(tmpdir(), "tfx-sg-stop.ps1");
+      writeFileSync(
+        psFile,
+        [
+          `Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'" |`,
+          `  Where-Object { $_.CommandLine -match 'supergateway' } |`,
+          `  ForEach-Object { taskkill /F /T /PID $_.ProcessId 2>$null; Write-Output "[STOP] PID $($_.ProcessId)" }`,
+        ].join("\n"),
+      );
+      const output = execSync(
+        `powershell -NoProfile -ExecutionPolicy Bypass -File "${psFile}"`,
+        {
+          encoding: "utf8",
+          timeout: 10000,
+          stdio: ["pipe", "pipe", "ignore"],
+        },
+      );
+      if (output.trim()) console.log(output.trim());
+      else console.log("[gateway] No supergateway processes found");
+    } catch {
+      console.log("[gateway] No supergateway processes found");
+    }
+  } else {
+    // POSIX: pgrep -f 로 cmdline match → kill -TERM. pgrep 은 0 hit 시 exit 1.
+    try {
+      const out = execSync("pgrep -f supergateway", {
         encoding: "utf8",
-        timeout: 10000,
-        stdio: ["pipe", "pipe", "ignore"],
-      },
-    );
-    if (output.trim()) console.log(output.trim());
-    else console.log("[gateway] No supergateway processes found");
-  } catch {
-    console.log("[gateway] No supergateway processes found");
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5000,
+      }).trim();
+      const pids = out ? out.split("\n").filter(Boolean) : [];
+      if (pids.length === 0) {
+        console.log("[gateway] No supergateway processes found");
+      } else {
+        for (const pid of pids) {
+          try {
+            execSync(`kill -TERM ${pid}`, { stdio: "ignore" });
+            console.log(`[STOP] PID ${pid}`);
+          } catch {
+            /* 이미 죽었거나 권한 부족 — 다음 PID 시도 */
+          }
+        }
+      }
+    } catch {
+      // pgrep no match → exit 1
+      console.log("[gateway] No supergateway processes found");
+    }
   }
 
   if (existsSync(PID_FILE)) {

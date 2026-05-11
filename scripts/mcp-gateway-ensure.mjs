@@ -3,7 +3,7 @@
 // mcp-gateway-ensure.mjs — SessionStart 훅에서 supergateway MCP 서비스 보장
 // hub-ensure.mjs 패턴을 따름. 가볍게 헬스체크만 수행하고 필요시 기동.
 
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -36,10 +36,19 @@ function startGateway() {
   if (!existsSync(scriptPath)) return false;
 
   try {
-    execSync(
-      `powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath '${process.execPath}' -ArgumentList '${scriptPath.replaceAll("'", "''")}'"`,
-      { stdio: "ignore", timeout: 10000 },
-    );
+    if (process.platform === "win32") {
+      execSync(
+        `powershell -NoProfile -Command "Start-Process -WindowStyle Hidden -FilePath '${process.execPath}' -ArgumentList '${scriptPath.replaceAll("'", "''")}'"`,
+        { stdio: "ignore", timeout: 10000 },
+      );
+    } else {
+      // POSIX: detached node child + stdio:'ignore' so SessionStart 훅이 block 되지 않음
+      const child = spawn(process.execPath, [scriptPath], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+    }
     return true;
   } catch {
     return false;

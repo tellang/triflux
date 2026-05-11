@@ -51,18 +51,34 @@ function runScript(scriptPath, ...args) {
 }
 
 function countSupergateways() {
+  if (process.platform === "win32") {
+    try {
+      // Write the query as a PS1 file to avoid shell quoting issues
+      const ps1 = [
+        `$procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'"`,
+        `$hits = $procs | Where-Object { $_.CommandLine -match 'supergateway' }`,
+        `Write-Output $hits.Count`,
+      ].join("\n");
+      const out = execSync(
+        `powershell -NoProfile -Command "${ps1.replace(/\n/g, "; ")}"`,
+        { encoding: "utf8", timeout: 10000, stdio: ["pipe", "pipe", "ignore"] },
+      );
+      return parseInt(out.trim(), 10) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  // POSIX: pgrep -f → 줄별 PID. macOS BSD pgrep 은 `-c` 미지원이라
+  // PID 목록을 받아 줄 수로 카운트한다. 0 match 시 exit 1.
   try {
-    // Write the query as a PS1 file to avoid shell quoting issues
-    const ps1 = [
-      `$procs = Get-CimInstance Win32_Process -Filter "Name='node.exe' OR Name='cmd.exe'"`,
-      `$hits = $procs | Where-Object { $_.CommandLine -match 'supergateway' }`,
-      `Write-Output $hits.Count`,
-    ].join("\n");
-    const out = execSync(
-      `powershell -NoProfile -Command "${ps1.replace(/\n/g, "; ")}"`,
-      { encoding: "utf8", timeout: 10000, stdio: ["pipe", "pipe", "ignore"] },
-    );
-    return parseInt(out.trim(), 10) || 0;
+    const out = execSync("pgrep -f supergateway", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+    });
+    const trimmed = out.trim();
+    return trimmed ? trimmed.split("\n").filter(Boolean).length : 0;
   } catch {
     return 0;
   }
