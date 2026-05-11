@@ -243,4 +243,50 @@ describe("terminal-opener adapter", () => {
     );
     assert.deepEqual(calls, [["select-pane", "-t", "demo:0.1"]]);
   });
+
+  it("Linux without mux returns false from openCommand", async () => {
+    const opener = createTerminalOpener({
+      platform: "linux",
+      mux: null,
+    });
+    assert.equal(await opener.openCommand({ command: "echo hi" }), false);
+  });
+
+  it("Linux without mux returns false from openSession", async () => {
+    const opener = createTerminalOpener({
+      platform: "linux",
+      mux: null,
+    });
+    assert.equal(await opener.openSession("demo"), false);
+  });
+
+  it("Windows wt-manager undefined return is treated as success", async () => {
+    const opener = createTerminalOpener({
+      platform: "win32",
+      createWtManager: () => ({
+        createTab: async () => undefined,
+      }),
+    });
+    assert.equal(await opener.openCommand({ command: "echo hi" }), true);
+  });
+
+  it("Windows wt-manager null return is treated as success", async () => {
+    const opener = createTerminalOpener({
+      platform: "win32",
+      createWtManager: () => ({
+        createTab: async () => null,
+      }),
+    });
+    assert.equal(await opener.openSession("demo"), true);
+  });
+
+  it("Windows wt-manager empty object return is treated as success (no explicit success:false)", async () => {
+    const opener = createTerminalOpener({
+      platform: "win32",
+      createWtManager: () => ({
+        createTab: async () => ({}),
+      }),
+    });
+    assert.equal(await opener.openCommand({ command: "echo hi" }), true);
+  });
 });
