@@ -4,6 +4,17 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.20.0] - 2026-05-11
+
+### Added
+
+- `mcp-gateway` now supports macOS and Linux hosts with detached POSIX process management, so stdio MCP servers can run through the local gateway outside Windows.
+- `tfx-research` now recognizes Korean question-pattern prompts more reliably, improving routing for Korean research requests.
+
+### Fixed
+
+- Worker integration tests now clean up temporary `.tmp-home-route-*` home-isolation fixture directories after execution, with a `.gitignore` guard for interrupted runs.
+
 ## [10.19.0] - 2026-05-11
 
 ### Added
