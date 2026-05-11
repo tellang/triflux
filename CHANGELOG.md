@@ -4,6 +4,30 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.19.0] - 2026-05-11
+
+### Added
+
+- **`chore(mcp)` (commit 5fc102e9)** Upstash Context7 HTTP MCP 엔트리 추가 (`config/mcp-registry.json`) — API key 불필요. 라이브러리 문서 / 코드 컨텍스트 접근. 3 CLI (claude/gemini/codex) 공통. packages/triflux 미러는 누락된 `policy_notes` / `sync_denylist` 도 함께 보강하여 root 와 byte-identical 정합 회복
+- **`chore(tfx-route)` (PR #249)** `TFX_GEMINI_DEFAULT_PROFILE` env 도입 + pro31 → pro25 default. `scripts/tfx-route.sh:943-945` 의 Node inline + shell fallback 2 위치 변경. 4-case env override 검증 (`unset → pro25`, `pro31`, `flash25`, `invalid → pro25 fallback`)
+- **`chore` (PR #246)** AI CLI ignore templates — `.claudeignore`, `.codexignore`, `.geminiignore` 추가. 각 CLI 가 자기 작업 결과물을 무시하도록 기본 패턴 제공
+- **`fix(skills)` (commit 57d9f5c0, Closes #248)** `tfx-wt` skill 신규 — b313c648 (4/11) PR 누락된 SKILL.md 복원. `wt-cli.mjs` 호출 가이드 + `wt-manager` API 매핑 (createTab/splitPane/list/close/rename) + psmux 통합 패턴 (`.claude/rules/tfx-psmux.md` RULE 5-3 인용) + Windows 전용 분리 정신 (PR #236, PR #241). packages/triflux 미러 byte-identical
+
+### Fixed
+
+- **`fix(wt-manager)` (PR #241)** macOS/Linux 에서 `createWtManager()` 가 stub 반환 + `autoAttachTerminal` OS guard. v10.18.2 회귀 (`tfx multi --teammate-mode headless` 가 macOS 에서 `wt-manager.mjs is Windows-only` throw 로 crash) 수정. 8 호출 사이트 모두 OS-aware 동작
+- **`fix(cli-adapter-base)` (PR #240)** `runProcess` resultFile size/mtime 을 progress signal 로 인정 (Codex Tier 1 강건성). silent CLI 가 stall 잡히지 않던 회귀 fix
+- **`fix(codex-mcp)` (PR #242, Closes #234)** `worker.stop` 을 `closeWithin` 으로 bounded — P1 root fix. shutdown 시 client.close 가 settle 안 되어도 awaited timeout 으로 transport.close 진행
+- **`fix(tfx-route-worker)` (PR #243)** async stream stdin read 로 Node v25 EAGAIN race 회피
+
+### Changed
+
+- **`chore(pr236-followup)` (PR #247)** PR #236 lake-bundle cleanup — A1 dead code drop + F2/S1/T2/M1/M2/A2 후속 정리
+
+### Tests
+
+- **신규** `tests/unit/keyword-rules-skill-targets.test.mjs` (commit 57d9f5c0) — 3 mirror keyword-rules.json 의 모든 `skill` 타깃이 실재 skill 디렉토리 또는 known external gstack alias 인지 자동 검증. 4 케이스 (3 mirror skill target + 1 byte-identical) 회귀 가드
+
 ## [10.18.2] - 2026-05-07
 
 ### Fixed

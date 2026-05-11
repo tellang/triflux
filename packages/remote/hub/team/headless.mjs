@@ -1370,6 +1370,7 @@ export async function autoAttachTerminal(
   opts = {},
   workerCount = 2,
 ) {
+  if (process.platform !== "win32") return false;
   if (!process.env.WT_SESSION) return false;
 
   const wt = createWtManager();
