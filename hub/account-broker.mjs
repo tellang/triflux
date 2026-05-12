@@ -5,12 +5,14 @@
 
 import { EventEmitter } from "node:events";
 import {
+  chmodSync,
   closeSync,
   existsSync,
   constants as fsConstants,
   mkdirSync,
   openSync,
   readFileSync,
+  renameSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -283,6 +285,7 @@ class AccountBroker extends EventEmitter {
       _authSyncLockRetryMs = AUTH_SYNC_LOCK_RETRY_MS,
       _authSyncLockStaleMs = AUTH_SYNC_LOCK_STALE_MS,
       _syncCopyDelayMs = 0,
+      _activeLeases = [],
     } = {},
   ) {
     super();
@@ -309,8 +312,17 @@ class AccountBroker extends EventEmitter {
     const persisted = this.#persist ? loadPersistedState() : null;
     const pEntries = persisted?.entries || {};
 
+    const activeLeaseById = new Map(
+      Array.isArray(_activeLeases)
+        ? _activeLeases
+            .filter((lease) => lease?.id)
+            .map((lease) => [lease.id, lease])
+        : [],
+    );
+
     for (const account of allAccounts) {
       const saved = pEntries[account.id];
+      const activeLease = activeLeaseById.get(account.id);
       this.#state.set(account.id, {
         id: account.id,
         provider: account.provider,
@@ -320,14 +332,17 @@ class AccountBroker extends EventEmitter {
         authFile: account.authFile,
         host: account.host,
         tier: account.tier ?? "unknown",
-        busy: false,
-        leasedAt: null,
+        busy: activeLease?.busy === true,
+        leasedAt: activeLease?.leasedAt ?? null,
         cooldownUntil: saved?.cooldownUntil ?? 0,
         failureTimestamps: saved?.failureTimestamps ?? [],
         circuitOpenedAt: saved?.circuitOpenedAt ?? 0,
-        circuitTrialInFlight: false,
-        lastUsedAt: saved?.lastUsedAt ?? 0,
-        totalSessions: saved?.totalSessions ?? 0,
+        circuitTrialInFlight: activeLease?.circuitTrialInFlight === true,
+        lastUsedAt: activeLease?.lastUsedAt ?? saved?.lastUsedAt ?? 0,
+        totalSessions: Math.max(
+          saved?.totalSessions ?? 0,
+          activeLease?.totalSessions ?? 0,
+        ),
       });
     }
   }
@@ -351,7 +366,10 @@ class AccountBroker extends EventEmitter {
   }
 
   #getLockPath(acct) {
-    return join(this.#authBasePath, `codex-auth-sync-${acct.id}.lock`);
+    if (acct?.provider === "codex" && acct?.mode === "auth") {
+      return join(this.#authBasePath, "codex-auth-source.lock");
+    }
+    return join(this.#authBasePath, `auth-sync-${acct.id}.lock`);
   }
 
   #copyAuthPayload(sourcePath, destPath) {
@@ -360,7 +378,61 @@ class AccountBroker extends EventEmitter {
       sleepSync(this.#syncCopyDelayMs);
     }
     mkdirSync(dirname(destPath), { recursive: true });
-    writeFileSync(destPath, payload);
+    const tmpPath = join(
+      dirname(destPath),
+      `.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
+    );
+    try {
+      writeFileSync(tmpPath, payload, { mode: 0o600 });
+      renameSync(tmpPath, destPath);
+      try {
+        chmodSync(destPath, 0o600);
+      } catch {}
+    } catch (error) {
+      try {
+        unlinkSync(tmpPath);
+      } catch {}
+      throw error;
+    }
+  }
+
+  #runtimeAuthPath(acct) {
+    const safeId = String(acct.id).replace(/[^a-zA-Z0-9._-]/g, "_");
+    return join(this.#authBasePath, "codex-home", safeId, "auth.json");
+  }
+
+  #prepareRuntimeAuthFile(acct, cachePath) {
+    const runtimePath = this.#runtimeAuthPath(acct);
+    try {
+      const cacheAuth = readAuthPayload(cachePath);
+      if (!cacheAuth.accountId) {
+        return {
+          ok: false,
+          reason: "cache_account_unknown",
+          authFile: runtimePath,
+        };
+      }
+      if (cacheAuth.accountId !== acct.id) {
+        return {
+          ok: false,
+          reason: "cache_account_mismatch",
+          authFile: runtimePath,
+        };
+      }
+      this.#copyAuthPayload(cachePath, runtimePath);
+      return {
+        ok: true,
+        reason: "runtime_auth_prepared",
+        authFile: runtimePath,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        reason:
+          error?.code === "ENOENT" ? "cache_missing" : "runtime_auth_error",
+        authFile: runtimePath,
+      };
+    }
   }
 
   #syncAuth(accountId, direction) {
@@ -446,6 +518,30 @@ class AccountBroker extends EventEmitter {
             }
 
             const cacheStat = statOrNull(cachePath);
+            if (cacheStat) {
+              const cacheAuth = readAuthPayload(cachePath);
+              if (!cacheAuth.accountId) {
+                return createSyncResult({
+                  accountId,
+                  direction,
+                  sourcePath,
+                  cachePath,
+                  skipped: true,
+                  reason: "cache_account_unknown",
+                });
+              }
+              if (cacheAuth.accountId !== accountId) {
+                return createSyncResult({
+                  accountId,
+                  direction,
+                  sourcePath,
+                  cachePath,
+                  skipped: true,
+                  reason: "cache_account_mismatch",
+                });
+              }
+            }
+
             if (cacheStat && sourceStat.mtimeMs <= cacheStat.mtimeMs) {
               return createSyncResult({
                 accountId,
@@ -697,14 +793,33 @@ class AccountBroker extends EventEmitter {
         try {
           const syncResult = this.syncAuthFromSource(acct.id);
           this.emit("authSync", syncResult);
+          if (!syncResult?.ok) {
+            this.emit("authSyncError", {
+              accountId: acct.id,
+              direction: "from-source",
+              reason: syncResult?.reason || "sync_failed",
+            });
+            return null;
+          }
         } catch (error) {
           this.emit("authSyncError", {
             accountId: acct.id,
             direction: "from-source",
             error: error?.message || String(error),
           });
+          return null;
         }
       }
+      const runtimeAuth = this.#prepareRuntimeAuthFile(acct, authFile);
+      if (!runtimeAuth.ok) {
+        this.emit("authSyncError", {
+          accountId: acct.id,
+          direction: "runtime-auth",
+          reason: runtimeAuth.reason,
+        });
+        return null;
+      }
+      authFile = runtimeAuth.authFile;
     }
 
     // mark half-open trial if applicable
@@ -820,6 +935,22 @@ class AccountBroker extends EventEmitter {
     }));
   }
 
+  activeLeases() {
+    const now = Date.now();
+    this.#pruneExpiredLeases(now);
+    return [...this.#state.values()]
+      .filter((acct) => acct.busy && acct.leasedAt !== null)
+      .map((acct) => ({
+        id: acct.id,
+        provider: acct.provider,
+        busy: acct.busy,
+        leasedAt: acct.leasedAt,
+        lastUsedAt: acct.lastUsedAt,
+        totalSessions: acct.totalSessions,
+        circuitTrialInFlight: acct.circuitTrialInFlight,
+      }));
+  }
+
   // ── disabled marker ───────────────────────────────────────────
 
   /**
@@ -914,6 +1045,10 @@ function createBroker() {
 
 /** Re-read config and replace the module-level singleton. ESM live binding propagates to all importers. */
 function reloadBroker() {
+  const activeLeases =
+    broker && typeof broker.activeLeases === "function"
+      ? broker.activeLeases()
+      : [];
   if (isBrokerDisabledByEnv()) {
     broker = createEmptyBroker();
     return { ok: true, broker, disabled: true };
@@ -921,7 +1056,7 @@ function reloadBroker() {
   const config = loadConfig();
   if (!config) return { ok: false, error: "Config not found or invalid" };
   try {
-    broker = new AccountBroker(config);
+    broker = new AccountBroker(config, { _activeLeases: activeLeases });
     return { ok: true, broker };
   } catch (err) {
     return { ok: false, error: err.message };

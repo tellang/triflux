@@ -4,8 +4,10 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -158,6 +160,23 @@ describe("AccountBroker auth sync", () => {
     assert.equal(readRefreshToken(fixture.cachePath), "cache-newer");
   });
 
+  it("cache가 더 최신이어도 account_id가 lease와 다르면 up_to_date로 넘기지 않는다", () => {
+    const fixture = createFixture();
+    cleanup.push(fixture.root);
+
+    writeAuth(fixture.sourcePath, fixture.accountId, "source-valid");
+    writeAuth(fixture.cachePath, "other-account", "cache-poisoned");
+    setMtime(fixture.sourcePath, 2_000);
+    setMtime(fixture.cachePath, 4_000);
+
+    const result = fixture.broker.syncAuthFromSource(fixture.accountId);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, "cache_account_mismatch");
+    assert.equal(readRefreshToken(fixture.cachePath), "cache-poisoned");
+  });
+
   it("from-source / to-source 양방향 복사를 지원한다", () => {
     const fixture = createFixture();
     cleanup.push(fixture.root);
@@ -189,10 +208,7 @@ describe("AccountBroker auth sync", () => {
     setMtime(fixture.cachePath, 1_000);
     setMtime(fixture.sourcePath, 2_000);
 
-    const lockPath = join(
-      fixture.authBasePath,
-      `codex-auth-sync-${fixture.accountId}.lock`,
-    );
+    const lockPath = join(fixture.authBasePath, "codex-auth-source.lock");
     const env = {
       BROKER_AUTH_BASE_PATH: fixture.authBasePath,
       BROKER_SOURCE_PATH: fixture.sourcePath,
@@ -221,5 +237,59 @@ describe("AccountBroker auth sync", () => {
     assert.equal(firstPayload.lease?.id, fixture.accountId);
     assert.equal(secondPayload.lease?.id, fixture.accountId);
     assert.equal(readRefreshToken(fixture.cachePath), "source-B");
+  });
+
+  it("lease는 source auth 동기화 실패 시 fail-closed 하고 busy로 남기지 않는다", () => {
+    const fixture = createFixture();
+    cleanup.push(fixture.root);
+    const errors = [];
+    fixture.broker.on("authSyncError", (event) => errors.push(event));
+
+    const lease = fixture.broker.lease({ provider: "codex" });
+
+    assert.equal(lease, null);
+    assert.deepEqual(
+      errors.map((event) => event.reason),
+      ["source_missing"],
+    );
+    const account = fixture.broker
+      .snapshot()
+      .find((entry) => entry.id === fixture.accountId);
+    assert.equal(account.busy, false);
+  });
+
+  it("auth lease는 CODEX_HOME에서 바로 쓸 수 있는 isolated auth.json을 준비한다", () => {
+    const fixture = createFixture();
+    cleanup.push(fixture.root);
+
+    writeAuth(fixture.sourcePath, fixture.accountId, "source-runtime");
+    setMtime(fixture.sourcePath, 2_000);
+
+    const lease = fixture.broker.lease({ provider: "codex" });
+
+    assert.ok(lease);
+    assert.equal(
+      lease.authFile.endsWith(`${fixture.accountId}/auth.json`),
+      true,
+    );
+    assert.equal(readRefreshToken(lease.authFile), "source-runtime");
+    assert.equal(readRefreshToken(fixture.cachePath), "source-runtime");
+  });
+
+  it("auth writes are atomic targets with 0600 permissions and no leftover temp files", () => {
+    const fixture = createFixture();
+    cleanup.push(fixture.root);
+
+    writeAuth(fixture.sourcePath, fixture.accountId, "source-mode");
+    setMtime(fixture.sourcePath, 2_000);
+
+    const result = fixture.broker.syncAuthFromSource(fixture.accountId);
+
+    assert.equal(result.ok, true);
+    assert.equal(statSync(fixture.cachePath).mode & 0o777, 0o600);
+    assert.deepEqual(
+      readdirSync(fixture.authBasePath).filter((name) => name.endsWith(".tmp")),
+      [],
+    );
   });
 });

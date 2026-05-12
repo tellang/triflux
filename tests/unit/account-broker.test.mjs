@@ -1,7 +1,8 @@
 // tests/unit/account-broker.test.mjs — AccountBroker unit tests
 
 import assert from "node:assert/strict";
-import { homedir } from "node:os";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -271,29 +272,50 @@ describe("AccountBroker", () => {
   });
 
   it("auth mode lease returns absolute authFile path", () => {
-    const broker = new AccountBroker({
-      codex: [
+    const root = mkdtempSync(join(tmpdir(), "tfx-account-broker-auth-mode-"));
+    try {
+      const authBasePath = join(root, ".claude", "cache", "tfx-hub");
+      const sourcePath = join(root, ".codex", "auth.json");
+      mkdirSync(join(root, ".codex"), { recursive: true });
+      writeFileSync(
+        sourcePath,
+        JSON.stringify({
+          tokens: { account_id: "codex-auth1", refresh_token: "rt" },
+        }),
+        "utf8",
+      );
+      const broker = new AccountBroker(
         {
-          id: "codex-auth1",
-          mode: "auth",
-          authFile: "codex-auth-pte1024.json",
+          codex: [
+            {
+              id: "codex-auth1",
+              mode: "auth",
+              authFile: "codex-auth-pte1024.json",
+            },
+          ],
         },
-      ],
-    });
+        {
+          _authBasePath: authBasePath,
+          _codexAuthSourcePath: sourcePath,
+        },
+      );
 
-    const lease = broker.lease({ provider: "codex" });
-    assert.ok(lease, "lease should be non-null");
-    assert.equal(lease.id, "codex-auth1");
-    assert.equal(lease.mode, "auth");
-    assert.equal(
-      lease.authFile,
-      join(homedir(), ".claude", "cache", "tfx-hub", "codex-auth-pte1024.json"),
-      "authFile should be absolute path under tfx-hub",
-    );
-    assert.equal(lease.profile, undefined);
-    assert.equal(lease.env, undefined);
-    assert.equal(lease.remote, false);
-    assert.equal(lease.host, undefined);
+      const lease = broker.lease({ provider: "codex" });
+      assert.ok(lease, "lease should be non-null");
+      assert.equal(lease.id, "codex-auth1");
+      assert.equal(lease.mode, "auth");
+      assert.equal(
+        lease.authFile,
+        join(authBasePath, "codex-home", "codex-auth1", "auth.json"),
+        "authFile should be an isolated CODEX_HOME auth.json path",
+      );
+      assert.equal(lease.profile, undefined);
+      assert.equal(lease.env, undefined);
+      assert.equal(lease.remote, false);
+      assert.equal(lease.host, undefined);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('Zod validation throws when mode is "auth" but authFile is missing', () => {
@@ -446,6 +468,31 @@ describe("AccountBroker", () => {
       Date.now = () => 11_000;
       const acct = broker.snapshot().find((entry) => entry.id === lease.id);
       assert.equal(acct.remainingMs, 1_790_000);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it("activeLeases can be carried into a reloaded broker to prevent double-lease", () => {
+    const realNow = Date.now;
+    try {
+      Date.now = () => 10_000;
+      const broker = makeBroker();
+      const lease = broker.lease({ provider: "codex" });
+      assert.ok(lease);
+      assert.equal(lease.id, "codex-a");
+
+      const reloaded = AccountBroker(makeConfig(), {
+        _activeLeases: broker.activeLeases(),
+      });
+
+      const nextLease = reloaded.lease({ provider: "codex" });
+      assert.ok(nextLease);
+      assert.equal(nextLease.id, "codex-b");
+      assert.equal(
+        reloaded.snapshot().find((entry) => entry.id === "codex-a").busy,
+        true,
+      );
     } finally {
       Date.now = realNow;
     }

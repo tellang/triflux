@@ -87,16 +87,17 @@ const DEFAULT_GRACE_MS = 10_000;
  * @param {'codex'|'gemini'} agent
  * @param {string} sessionId — 로깅용
  * @param {object} eventLog — createEventLog 인스턴스
+ * @param {object} brokerInstance — AccountBroker 인스턴스
  */
-function swapAuthFile(lease, agent, sessionId, eventLog) {
+function swapAuthFile(lease, agent, sessionId, eventLog, brokerInstance) {
   if (lease?.mode !== "auth" || !lease.authFile) return true;
   if (
     agent === "codex" &&
     lease.id &&
-    broker &&
-    typeof broker.syncAuthToSource === "function"
+    brokerInstance &&
+    typeof brokerInstance.syncAuthToSource === "function"
   ) {
-    const result = broker.syncAuthToSource(lease.id);
+    const result = brokerInstance.syncAuthToSource(lease.id);
     if (result?.copied || result?.reason === "up_to_date") {
       eventLog.append("auth_copy", {
         session: sessionId,
@@ -182,6 +183,7 @@ export function createConductor(opts = {}) {
     baseUrl: opts.synapseBaseUrl,
     fetchImpl: opts.synapseFetch,
   };
+  const getActiveBroker = () => optsBroker ?? broker;
 
   function buildSynapseMeta(session, state = session.state, reason = "") {
     return {
@@ -486,13 +488,14 @@ export function createConductor(opts = {}) {
       emitter.emit("dead", { sessionId: session.id, reason });
 
       // broker release on final death
-      if (broker && session.config.accountId) {
-        broker.release(session.config.accountId, {
+      const activeBroker = getActiveBroker();
+      if (activeBroker && session.config.accountId) {
+        activeBroker.release(session.config.accountId, {
           ok: false,
           failureMode: session.lastFailureMode,
         });
         if (session.lastFailureMode === "rate_limited") {
-          broker.markRateLimited(session.config.accountId, 5 * 60 * 1000);
+          activeBroker.markRateLimited(session.config.accountId, 5 * 60 * 1000);
         }
       }
     }
@@ -699,8 +702,9 @@ export function createConductor(opts = {}) {
             completionPayload,
           });
         }
-        if (broker && session.config.accountId) {
-          broker.release(session.config.accountId, { ok: true });
+        const activeBroker = getActiveBroker();
+        if (activeBroker && session.config.accountId) {
+          activeBroker.release(session.config.accountId, { ok: true });
         }
       } else {
         // detect rate_limited from recent output before handleFailure
@@ -1001,10 +1005,11 @@ export function createConductor(opts = {}) {
 
     // broker lease (graceful — broker null if accounts.json absent)
     let lease = null;
-    if (broker && config.agent && !config.remote) {
-      lease = broker.lease({ provider: config.agent });
+    const activeBroker = getActiveBroker();
+    if (activeBroker && config.agent && !config.remote) {
+      lease = activeBroker.lease({ provider: config.agent });
       if (lease === null) {
-        const eta = broker.nextAvailableEta(config.agent);
+        const eta = activeBroker.nextAvailableEta(config.agent);
         eventLog.append("broker_no_lease", {
           session: config.id,
           agent: config.agent,
@@ -1026,7 +1031,7 @@ export function createConductor(opts = {}) {
       : config;
 
     // auth file copy — broker resolved absolute path, conductor does the actual copy
-    swapAuthFile(lease, config.agent, config.id, eventLog);
+    swapAuthFile(lease, config.agent, config.id, eventLog, activeBroker);
 
     // 원격 세션은 launcher 불필요 (이미 원격에서 실행 중)
     const launcher = resolvedConfig.remote
@@ -1189,7 +1194,13 @@ export function createConductor(opts = {}) {
           const newLease = brokerInstance.lease({ provider });
           if (!newLease) continue;
 
-          swapAuthFile(newLease, provider, session.id, eventLog);
+          swapAuthFile(
+            newLease,
+            provider,
+            session.id,
+            eventLog,
+            brokerInstance,
+          );
           eventLog.append("tier_fallback_swap", {
             session: session.id,
             agent: provider,

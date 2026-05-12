@@ -29,7 +29,8 @@ function installFakeCodex(binDir) {
     jsPath,
     [
       "#!/usr/bin/env node",
-      "import { writeFileSync } from 'node:fs';",
+      "import { readFileSync, writeFileSync } from 'node:fs';",
+      "import { join } from 'node:path';",
       "const args = process.argv.slice(2);",
       "if (args[0] === '--version') { process.stdout.write('codex 0.119.0\\n'); process.exit(0); }",
       "if (args[0] !== 'exec') { process.stderr.write(`unsupported:${args[0] || 'none'}`); process.exit(64); }",
@@ -37,7 +38,11 @@ function installFakeCodex(binDir) {
       "const outIndex = args.indexOf('--output-last-message');",
       'const resultFile = outIndex >= 0 ? args[outIndex + 1] : "";',
       'const prompt = args.at(-1) || "";',
-      "const output = `EXEC:${prompt}`;",
+      "let output = `EXEC:${prompt}`;",
+      "if (process.env.FAKE_CODEX_ECHO_AUTH === '1') {",
+      "  const auth = JSON.parse(readFileSync(join(process.env.CODEX_HOME || '', 'auth.json'), 'utf8'));",
+      "  output = `AUTH:${auth.tokens?.account_id || auth.account_id || auth.accountId || 'missing'}`;",
+      "}",
       "if (resultFile) writeFileSync(resultFile, output, 'utf8');",
       "process.stdout.write(output);",
     ].join("\n"),
@@ -61,12 +66,14 @@ async function withSandbox(fn) {
     HOME: process.env.HOME,
     USERPROFILE: process.env.USERPROFILE,
     FAKE_CODEX_FAIL: process.env.FAKE_CODEX_FAIL,
+    FAKE_CODEX_ECHO_AUTH: process.env.FAKE_CODEX_ECHO_AUTH,
   };
 
   process.env.PATH = `${sandbox.bin}${delimiter}${process.env.PATH || ""}`;
   process.env.HOME = sandbox.home;
   process.env.USERPROFILE = sandbox.home;
   delete process.env.FAKE_CODEX_FAIL;
+  delete process.env.FAKE_CODEX_ECHO_AUTH;
 
   try {
     await fn(sandbox);
@@ -76,6 +83,11 @@ async function withSandbox(fn) {
     process.env.USERPROFILE = previous.USERPROFILE;
     if (previous.FAKE_CODEX_FAIL == null) delete process.env.FAKE_CODEX_FAIL;
     else process.env.FAKE_CODEX_FAIL = previous.FAKE_CODEX_FAIL;
+    if (previous.FAKE_CODEX_ECHO_AUTH == null) {
+      delete process.env.FAKE_CODEX_ECHO_AUTH;
+    } else {
+      process.env.FAKE_CODEX_ECHO_AUTH = previous.FAKE_CODEX_ECHO_AUTH;
+    }
     rmSync(sandbox.root, { recursive: true, force: true });
   }
 }
@@ -213,5 +225,54 @@ test("execute opens the circuit after repeated crashes", async () => {
     assert.equal(blocked.ok, false);
     assert.equal(blocked.fellBack, true);
     assert.equal(blocked.failureMode, "circuit_open");
+  });
+});
+
+test("execute verifies lease auth and exposes isolated CODEX_HOME to codex", async () => {
+  await withSandbox(async ({ home, root }) => {
+    writeFileSync(
+      join(home, ".codex", "config.toml"),
+      'approval_mode = "full-auto"\n',
+      "utf8",
+    );
+    writeFileSync(
+      join(home, ".codex", "auth.json"),
+      JSON.stringify({
+        tokens: { account_id: "auth-codex", refresh_token: "source-token" },
+      }),
+      "utf8",
+    );
+
+    const brokerDir = join(home, ".claude", "cache", "tfx-hub");
+    mkdirSync(brokerDir, { recursive: true });
+    writeFileSync(
+      join(brokerDir, "accounts.json"),
+      JSON.stringify({
+        codex: [
+          {
+            id: "auth-codex",
+            mode: "auth",
+            authFile: "codex-auth-auth-codex.json",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    process.env.FAKE_CODEX_ECHO_AUTH = "1";
+
+    const brokerMod = await import("../../hub/account-broker.mjs");
+    brokerMod.reloadBroker();
+
+    const { execute } = await importFresh("../../hub/codex-adapter.mjs");
+    const result = await execute({
+      prompt: "auth-check",
+      workdir: root,
+      retryOnFail: false,
+      fallbackToClaude: false,
+      timeout: 5000,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.output, "AUTH:auth-codex");
   });
 });
