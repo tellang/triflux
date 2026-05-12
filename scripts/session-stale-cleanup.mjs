@@ -5,6 +5,7 @@
  * 새 세션 시작 시 이전 세션의 stale 상태를 정리한다:
  * 1. tfx-multi-state.json — 세션 간 상태 누수 방지 (#62)
  * 2. tfx-route-*-pids — 고아 워커 프로세스 정리 (#62 후속)
+ * 3. git fsmonitor--daemon 누적 감시 — threshold 초과 시 증거 기록 (#214)
  *
  * @see scripts/headless-guard.mjs — 상태 소비자
  * @see scripts/tfx-gate-activate.mjs — 상태 생산자 (ownerPid 기록)
@@ -13,14 +14,17 @@
 
 import { execSync } from "node:child_process";
 import {
+  appendFileSync,
   existsSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   statSync,
   unlinkSync,
 } from "node:fs";
-import { platform, tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, platform, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { findFsmonitorDaemons } from "../hub/lib/process-utils.mjs";
 import { isProcessAlive } from "./lib/process-utils.mjs";
 
 const MULTI_STATE_FILE = join(tmpdir(), "tfx-multi-state.json");
@@ -32,6 +36,8 @@ const PROTECTED_ANCESTOR_NAMES = new Set([
   "gemini.exe",
 ]);
 const PID_REUSE_GRACE_MS = 1000;
+const DEFAULT_FSMONITOR_ALERT_THRESHOLD = 50;
+const FSMONITOR_STALE_MS = 24 * 60 * 60 * 1000;
 
 function normalizeName(name) {
   return String(name || "")
@@ -42,6 +48,33 @@ function normalizeName(name) {
 function parseCreationMs(value) {
   const ms = Date.parse(String(value || ""));
   return Number.isFinite(ms) ? ms : null;
+}
+
+function parsePositiveInteger(value, fallback) {
+  const n = Number.parseInt(String(value ?? ""), 10);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+function resolveHomeDir() {
+  return (
+    process.env.TRIFLUX_TEST_HOME ||
+    process.env.USERPROFILE ||
+    process.env.HOME ||
+    homedir()
+  );
+}
+
+function defaultFsmonitorAlertLogPath() {
+  return join(resolveHomeDir(), ".omc", "state", "fsmonitor-alert.log");
+}
+
+function summarizeFsmonitorDaemon(proc) {
+  return {
+    pid: proc.pid,
+    parentPid: proc.parentPid,
+    ageMs: Number.isFinite(proc.ageMs) ? proc.ageMs : null,
+    commandLine: String(proc.commandLine || "").slice(0, 200),
+  };
 }
 
 function collectWindowsProcessTable() {
@@ -243,9 +276,85 @@ function cleanupOrphanPidFiles() {
   }
 }
 
+export function monitorFsmonitorDaemons({
+  threshold = parsePositiveInteger(
+    process.env.TFX_FSMONITOR_ALERT_THRESHOLD,
+    DEFAULT_FSMONITOR_ALERT_THRESHOLD,
+  ),
+  logPath = process.env.TFX_FSMONITOR_ALERT_LOG ||
+    defaultFsmonitorAlertLogPath(),
+  findFn = findFsmonitorDaemons,
+  now = new Date(),
+  isWindows = platform() === "win32",
+} = {}) {
+  if (process.env.TFX_FSMONITOR_MONITOR === "0") {
+    return { checked: false, reason: "disabled" };
+  }
+  if (!isWindows) return { checked: false, reason: "non-windows" };
+
+  const effectiveThreshold = parsePositiveInteger(
+    threshold,
+    DEFAULT_FSMONITOR_ALERT_THRESHOLD,
+  );
+
+  try {
+    const daemons = findFn({
+      minAgeMs: 0,
+      nowMs: now.getTime(),
+      isWindows,
+    });
+    const total = daemons.length;
+    if (total < effectiveThreshold) {
+      return {
+        checked: true,
+        alert: false,
+        total,
+        threshold: effectiveThreshold,
+      };
+    }
+
+    const record = {
+      ts: now.toISOString(),
+      source: "session-start",
+      total,
+      threshold: effectiveThreshold,
+      stale24h: daemons.filter(
+        (proc) =>
+          Number.isFinite(proc.ageMs) && proc.ageMs >= FSMONITOR_STALE_MS,
+      ).length,
+      pids: daemons.slice(0, 20).map(summarizeFsmonitorDaemon),
+    };
+
+    mkdirSync(dirname(logPath), { recursive: true });
+    appendFileSync(logPath, `${JSON.stringify(record)}\n`, "utf8");
+    console.error(
+      `[session-stale-cleanup] git fsmonitor daemon threshold exceeded: total=${total} threshold=${effectiveThreshold} log=${logPath}`,
+    );
+
+    return {
+      checked: true,
+      alert: true,
+      total,
+      threshold: effectiveThreshold,
+      stale24h: record.stale24h,
+      logPath,
+    };
+  } catch (error) {
+    console.error(
+      `[session-stale-cleanup] fsmonitor monitor failed: ${error?.message || error}`,
+    );
+    return {
+      checked: false,
+      reason: "error",
+      error: error?.message || String(error),
+    };
+  }
+}
+
 export function main() {
   cleanupMultiState();
   cleanupOrphanPidFiles();
+  monitorFsmonitorDaemons();
 }
 
 const isDirectRun =

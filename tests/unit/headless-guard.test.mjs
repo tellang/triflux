@@ -820,6 +820,7 @@ describe("#62: session-stale-cleanup (runtime)", () => {
           ...process.env,
           TMPDIR: sandboxDir,
           TEMP: sandboxDir,
+          TFX_FSMONITOR_MONITOR: "0",
         },
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -899,7 +900,12 @@ describe("#62: session-stale-cleanup (runtime)", () => {
       spawnSync(process.execPath, [CLEANUP_PATH], {
         encoding: "utf8",
         timeout: 5000,
-        env: { ...process.env, TMPDIR: sandboxDir, TEMP: sandboxDir },
+        env: {
+          ...process.env,
+          TMPDIR: sandboxDir,
+          TEMP: sandboxDir,
+          TFX_FSMONITOR_MONITOR: "0",
+        },
         stdio: ["pipe", "pipe", "pipe"],
       });
 
@@ -919,7 +925,12 @@ describe("#62: session-stale-cleanup (runtime)", () => {
       spawnSync(process.execPath, [CLEANUP_PATH], {
         encoding: "utf8",
         timeout: 5000,
-        env: { ...process.env, TMPDIR: sandboxDir, TEMP: sandboxDir },
+        env: {
+          ...process.env,
+          TMPDIR: sandboxDir,
+          TEMP: sandboxDir,
+          TFX_FSMONITOR_MONITOR: "0",
+        },
         stdio: ["pipe", "pipe", "pipe"],
       });
 
@@ -940,7 +951,12 @@ describe("#62: session-stale-cleanup (runtime)", () => {
       spawnSync(process.execPath, [CLEANUP_PATH], {
         encoding: "utf8",
         timeout: 5000,
-        env: { ...process.env, TMPDIR: sandboxDir, TEMP: sandboxDir },
+        env: {
+          ...process.env,
+          TMPDIR: sandboxDir,
+          TEMP: sandboxDir,
+          TFX_FSMONITOR_MONITOR: "0",
+        },
         stdio: ["pipe", "pipe", "pipe"],
       });
 
@@ -949,6 +965,102 @@ describe("#62: session-stale-cleanup (runtime)", () => {
         true,
         "살아있는 세션의 PID 파일 유지됨",
       );
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("non-Windows에서는 fsmonitor monitor를 실행하지 않는다", async () => {
+    const { monitorFsmonitorDaemons } = await import(
+      `${pathToFileURL(CLEANUP_PATH).href}?fsmonitor-nonwin-${Date.now()}`
+    );
+    const calls = [];
+    const result = monitorFsmonitorDaemons({
+      isWindows: false,
+      findFn: () => {
+        calls.push("find");
+        return [];
+      },
+    });
+
+    assert.deepEqual(calls, []);
+    assert.deepEqual(result, { checked: false, reason: "non-windows" });
+  });
+
+  it("threshold 미만 fsmonitor daemon은 기록하지 않는다", async () => {
+    const { monitorFsmonitorDaemons } = await import(
+      `${pathToFileURL(CLEANUP_PATH).href}?fsmonitor-below-${Date.now()}`
+    );
+    const sandboxDir = mkdtempSync(join(tmpdir(), "tfx-fsmonitor-below-"));
+    const logPath = join(sandboxDir, "fsmonitor-alert.log");
+
+    try {
+      const result = monitorFsmonitorDaemons({
+        isWindows: true,
+        threshold: 3,
+        logPath,
+        now: new Date("2026-05-12T00:00:00.000Z"),
+        findFn: () => [
+          { pid: 101, parentPid: 1, ageMs: 1000, commandLine: "git fsmonitor" },
+          { pid: 102, parentPid: 1, ageMs: 2000, commandLine: "git fsmonitor" },
+        ],
+      });
+
+      assert.deepEqual(result, {
+        checked: true,
+        alert: false,
+        total: 2,
+        threshold: 3,
+      });
+      assert.equal(existsSync(logPath), false);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it("threshold 이상 fsmonitor daemon은 JSONL 증거를 남긴다", async () => {
+    const { monitorFsmonitorDaemons } = await import(
+      `${pathToFileURL(CLEANUP_PATH).href}?fsmonitor-alert-${Date.now()}`
+    );
+    const sandboxDir = mkdtempSync(join(tmpdir(), "tfx-fsmonitor-alert-"));
+    const logPath = join(sandboxDir, "state", "fsmonitor-alert.log");
+
+    try {
+      const result = monitorFsmonitorDaemons({
+        isWindows: true,
+        threshold: 2,
+        logPath,
+        now: new Date("2026-05-12T00:00:00.000Z"),
+        findFn: () => [
+          {
+            pid: 201,
+            parentPid: 10,
+            ageMs: 25 * 60 * 60 * 1000,
+            commandLine: "git fsmonitor--daemon run --detach --ipc-threads=8",
+          },
+          {
+            pid: 202,
+            parentPid: 10,
+            ageMs: 60 * 1000,
+            commandLine: "git fsmonitor--daemon run --detach --ipc-threads=8",
+          },
+        ],
+      });
+
+      assert.equal(result.alert, true);
+      assert.equal(result.total, 2);
+      assert.equal(result.threshold, 2);
+      assert.equal(result.stale24h, 1);
+      assert.equal(result.logPath, logPath);
+
+      const row = JSON.parse(readFileSync(logPath, "utf8").trim());
+      assert.equal(row.ts, "2026-05-12T00:00:00.000Z");
+      assert.equal(row.source, "session-start");
+      assert.equal(row.total, 2);
+      assert.equal(row.threshold, 2);
+      assert.equal(row.stale24h, 1);
+      assert.equal(row.pids.length, 2);
+      assert.equal(row.pids[0].pid, 201);
     } finally {
       rmSync(sandboxDir, { recursive: true, force: true });
     }
