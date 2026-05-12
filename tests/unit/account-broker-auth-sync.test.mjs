@@ -276,6 +276,27 @@ describe("AccountBroker auth sync", () => {
     assert.equal(readRefreshToken(fixture.cachePath), "source-runtime");
   });
 
+  it("release는 isolated runtime auth refresh를 cache와 source로 되돌린다", () => {
+    const fixture = createFixture();
+    cleanup.push(fixture.root);
+
+    writeAuth(fixture.sourcePath, fixture.accountId, "source-before-run");
+    setMtime(fixture.sourcePath, 2_000);
+
+    const lease = fixture.broker.lease({ provider: "codex" });
+    assert.ok(lease);
+
+    writeAuth(lease.authFile, fixture.accountId, "runtime-refreshed");
+    setMtime(lease.authFile, Date.now() + 60_000);
+    setMtime(fixture.cachePath, 3_000);
+    setMtime(fixture.sourcePath, 4_000);
+
+    fixture.broker.release(lease.id, { ok: true });
+
+    assert.equal(readRefreshToken(fixture.cachePath), "runtime-refreshed");
+    assert.equal(readRefreshToken(fixture.sourcePath), "runtime-refreshed");
+  });
+
   it("auth writes are atomic targets with 0600 permissions and no leftover temp files", () => {
     const fixture = createFixture();
     cleanup.push(fixture.root);

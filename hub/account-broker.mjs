@@ -185,6 +185,7 @@ function createSyncResult({
   direction,
   sourcePath,
   cachePath,
+  runtimePath,
   copied = false,
   skipped = false,
   reason = "ok",
@@ -195,6 +196,7 @@ function createSyncResult({
     direction,
     sourcePath,
     cachePath,
+    runtimePath,
     copied,
     skipped,
     reason,
@@ -439,6 +441,7 @@ class AccountBroker extends EventEmitter {
     const acct = this.#state.get(accountId);
     const sourcePath = this.#getSourceAuthPath(acct);
     const cachePath = this.#resolveCacheAuthPath(acct);
+    const runtimePath = acct ? this.#runtimeAuthPath(acct) : null;
 
     if (!acct || acct.mode !== "auth" || acct.provider !== "codex") {
       return createSyncResult({
@@ -446,6 +449,7 @@ class AccountBroker extends EventEmitter {
         direction,
         sourcePath,
         cachePath,
+        runtimePath,
         skipped: true,
         reason: "unsupported_account",
       });
@@ -461,6 +465,7 @@ class AccountBroker extends EventEmitter {
         direction,
         sourcePath,
         cachePath,
+        runtimePath,
         skipped: true,
         reason: "invalid_cache_path",
       });
@@ -472,6 +477,7 @@ class AccountBroker extends EventEmitter {
         direction,
         sourcePath,
         cachePath,
+        runtimePath,
         skipped: true,
         reason: "unsupported_source",
       });
@@ -482,6 +488,109 @@ class AccountBroker extends EventEmitter {
       this.#authSyncLockOpts,
       () => {
         try {
+          if (direction === "runtime-to-source") {
+            const runtimeStat = statOrNull(runtimePath);
+            if (!runtimeStat) {
+              return createSyncResult({
+                accountId,
+                direction,
+                sourcePath,
+                cachePath,
+                runtimePath,
+                skipped: true,
+                reason: "runtime_missing",
+              });
+            }
+
+            const runtimeAuth = readAuthPayload(runtimePath);
+            if (!runtimeAuth.accountId) {
+              return createSyncResult({
+                accountId,
+                direction,
+                sourcePath,
+                cachePath,
+                runtimePath,
+                skipped: true,
+                reason: "runtime_account_unknown",
+              });
+            }
+            if (runtimeAuth.accountId !== accountId) {
+              return createSyncResult({
+                accountId,
+                direction,
+                sourcePath,
+                cachePath,
+                runtimePath,
+                skipped: true,
+                reason: "runtime_account_mismatch",
+              });
+            }
+
+            const cacheStat = statOrNull(cachePath);
+            let shouldCopyRuntimeToCache = !cacheStat;
+            if (cacheStat) {
+              const cacheAuth = readAuthPayload(cachePath);
+              if (!cacheAuth.accountId) {
+                return createSyncResult({
+                  accountId,
+                  direction,
+                  sourcePath,
+                  cachePath,
+                  runtimePath,
+                  skipped: true,
+                  reason: "cache_account_unknown",
+                });
+              }
+              if (cacheAuth.accountId !== accountId) {
+                return createSyncResult({
+                  accountId,
+                  direction,
+                  sourcePath,
+                  cachePath,
+                  runtimePath,
+                  skipped: true,
+                  reason: "cache_account_mismatch",
+                });
+              }
+              shouldCopyRuntimeToCache =
+                runtimeStat.mtimeMs > cacheStat.mtimeMs ||
+                !runtimeAuth.buffer.equals(cacheAuth.buffer);
+            }
+
+            let copied = false;
+            if (shouldCopyRuntimeToCache) {
+              this.#copyAuthPayload(runtimePath, cachePath);
+              copied = true;
+            }
+
+            const nextCacheStat = statOrNull(cachePath);
+            const nextCacheAuth = readAuthPayload(cachePath);
+            const sourceStat = statOrNull(sourcePath);
+            let shouldCopyCacheToSource = !sourceStat;
+            if (sourceStat) {
+              const sourceAuth = readAuthPayload(sourcePath);
+              shouldCopyCacheToSource =
+                sourceAuth.accountId !== accountId ||
+                nextCacheStat.mtimeMs > sourceStat.mtimeMs ||
+                !nextCacheAuth.buffer.equals(sourceAuth.buffer);
+            }
+            if (shouldCopyCacheToSource) {
+              this.#copyAuthPayload(cachePath, sourcePath);
+              copied = true;
+            }
+
+            return createSyncResult({
+              accountId,
+              direction,
+              sourcePath,
+              cachePath,
+              runtimePath,
+              copied,
+              skipped: !copied,
+              reason: copied ? "runtime_propagated" : "up_to_date",
+            });
+          }
+
           if (direction === "from-source") {
             const sourceStat = statOrNull(sourcePath);
             if (!sourceStat) {
@@ -490,6 +599,7 @@ class AccountBroker extends EventEmitter {
                 direction,
                 sourcePath,
                 cachePath,
+                runtimePath,
                 skipped: true,
                 reason: "source_missing",
               });
@@ -502,6 +612,7 @@ class AccountBroker extends EventEmitter {
                 direction,
                 sourcePath,
                 cachePath,
+                runtimePath,
                 skipped: true,
                 reason: "source_account_unknown",
               });
@@ -512,6 +623,7 @@ class AccountBroker extends EventEmitter {
                 direction,
                 sourcePath,
                 cachePath,
+                runtimePath,
                 skipped: true,
                 reason: "source_account_mismatch",
               });
@@ -526,6 +638,7 @@ class AccountBroker extends EventEmitter {
                   direction,
                   sourcePath,
                   cachePath,
+                  runtimePath,
                   skipped: true,
                   reason: "cache_account_unknown",
                 });
@@ -536,6 +649,7 @@ class AccountBroker extends EventEmitter {
                   direction,
                   sourcePath,
                   cachePath,
+                  runtimePath,
                   skipped: true,
                   reason: "cache_account_mismatch",
                 });
@@ -548,6 +662,7 @@ class AccountBroker extends EventEmitter {
                 direction,
                 sourcePath,
                 cachePath,
+                runtimePath,
                 skipped: true,
                 reason: "up_to_date",
               });
@@ -559,6 +674,7 @@ class AccountBroker extends EventEmitter {
               direction,
               sourcePath,
               cachePath,
+              runtimePath,
               copied: true,
               reason: cacheStat ? "cache_updated" : "cache_created",
             });
@@ -571,6 +687,7 @@ class AccountBroker extends EventEmitter {
               direction,
               sourcePath,
               cachePath,
+              runtimePath,
               skipped: true,
               reason: "cache_missing",
             });
@@ -583,6 +700,7 @@ class AccountBroker extends EventEmitter {
               direction,
               sourcePath,
               cachePath,
+              runtimePath,
               skipped: true,
               reason: "cache_account_unknown",
             });
@@ -593,6 +711,7 @@ class AccountBroker extends EventEmitter {
               direction,
               sourcePath,
               cachePath,
+              runtimePath,
               skipped: true,
               reason: "cache_account_mismatch",
             });
@@ -605,6 +724,7 @@ class AccountBroker extends EventEmitter {
               direction,
               sourcePath,
               cachePath,
+              runtimePath,
               skipped: true,
               reason: "up_to_date",
             });
@@ -616,6 +736,7 @@ class AccountBroker extends EventEmitter {
             direction,
             sourcePath,
             cachePath,
+            runtimePath,
             copied: true,
             reason: sourceStat ? "source_updated" : "source_created",
           });
@@ -625,6 +746,7 @@ class AccountBroker extends EventEmitter {
             direction,
             sourcePath,
             cachePath,
+            runtimePath,
             skipped: true,
             reason: error?.code === "ENOENT" ? "file_missing" : "read_error",
           });
@@ -638,6 +760,7 @@ class AccountBroker extends EventEmitter {
         direction,
         sourcePath,
         cachePath,
+        runtimePath,
         skipped: true,
         reason: "lock_timeout",
       });
@@ -652,6 +775,10 @@ class AccountBroker extends EventEmitter {
 
   syncAuthToSource(accountId) {
     return this.#syncAuth(accountId, "to-source");
+  }
+
+  syncRuntimeAuthToSource(accountId) {
+    return this.#syncAuth(accountId, "runtime-to-source");
   }
 
   // ── per-account circuit breaker ─────────────────────────────────
@@ -860,6 +987,14 @@ class AccountBroker extends EventEmitter {
   release(accountId, result) {
     const acct = this.#state.get(accountId);
     if (!acct?.busy) return;
+
+    if (acct.provider === "codex" && acct.mode === "auth") {
+      const authSync = this.syncRuntimeAuthToSource(accountId);
+      this.emit(authSync?.ok ? "authSync" : "authSyncError", {
+        ...authSync,
+        accountId,
+      });
+    }
 
     const now = Date.now();
     const ok = result?.ok === true;
