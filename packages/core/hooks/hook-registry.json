@@ -250,7 +250,7 @@
         "enabled": true,
         "timeout": 5,
         "blocking": true,
-        "description": "활성 파이프라인 감지 → 종료 차단"
+        "description": "컨텍스트 guard/retry cap + 활성 파이프라인 감지 → Stop 차단"
       },
       {
         "id": "ext-session-vault-export",

@@ -311,4 +311,53 @@ describe("hook-orchestrator PreToolUse:Bash dedupe", () => {
     assert.equal(readFileSync(counterPath, "utf8"), "1");
     assert.equal(first.stdout, second.stdout);
   });
+
+  it("propagates Stop context-guard block output from a blocking hook", () => {
+    const marker = join(sandboxDir, "stop-context-guard.txt");
+    writeFileSync(
+      hookScriptPath,
+      `import { writeFileSync } from "node:fs";\n` +
+        `writeFileSync(${JSON.stringify(marker)}, "ran", "utf8");\n` +
+        `process.stdout.write(JSON.stringify({ decision: "block", reason: "context high (Block 1/2)" }));\n`,
+      "utf8",
+    );
+    writeFileSync(
+      registryPath,
+      JSON.stringify(
+        createRegistry(
+          [
+            {
+              id: "stop-context-guard",
+              matcher: "*",
+              command: `"${process.execPath}" "${hookScriptPath}"`,
+              priority: 0,
+              enabled: true,
+              blocking: true,
+            },
+          ],
+          "Stop",
+        ),
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const result = runOrchestrator({
+      cwd: sandboxDir,
+      registryPath,
+      cacheDir,
+      payload: {
+        hook_event_name: "Stop",
+        tool_name: "Stop",
+        stop_reason: "end_turn",
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.ok(existsSync(marker));
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.decision, "block");
+    assert.match(output.reason, /Block 1\/2/);
+  });
 });
