@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   assertTtyForSwarm,
+  cmdSwarmRun,
   formatIntegrationReport,
   parseFlags,
 } from "../../hub/team/swarm-cli.mjs";
@@ -169,5 +170,57 @@ describe("swarm-cli integration report", () => {
       /shard-3\s+failed\s+-\s+-\s+conflict in pkg\.json; recovery: \.codex-swarm\/recovery\/shard-3\.patch/u,
     );
     assert.match(report, /TOTAL: 2\/3 integrated, 1 recovery patch saved\./u);
+  });
+});
+
+describe("swarm-cli run preflight gate", () => {
+  it("blocks before hypervisor creation when preflight is no-go", async () => {
+    const { mkdtempSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const cwd = process.cwd();
+    const previousExitCode = process.exitCode;
+    const previousStderrWrite = process.stderr.write;
+    const tmp = mkdtempSync(join(tmpdir(), `tfx-swarm-cli-${process.pid}-`));
+    const prdPath = join(tmp, "prd.md");
+    writeFileSync(prdPath, "# PRD\n", "utf8");
+    let stderr = "";
+
+    process.exitCode = undefined;
+    process.stderr.write = (chunk, ...args) => {
+      stderr += String(chunk);
+      const callback = args.find((arg) => typeof arg === "function");
+      if (callback) callback();
+      return true;
+    };
+
+    try {
+      process.chdir(tmp);
+      await cmdSwarmRun([prdPath], {
+        deps: {
+          runSwarmPreflight: () => ({
+            ok: false,
+            verdict: "no-go",
+            prdPath,
+            repoRoot: tmp,
+            checks: { plan: { ok: true }, leases: { ok: false } },
+            errors: ["blocked before launch"],
+            warnings: [],
+            plan: { totalShards: 1 },
+            leaseTable: [],
+          }),
+          createSwarmHypervisor: () => {
+            throw new Error("hypervisor should not be created");
+          },
+        },
+      });
+    } finally {
+      process.chdir(cwd);
+      process.stderr.write = previousStderrWrite;
+      process.exitCode = previousExitCode;
+    }
+
+    assert.match(stderr, /SWARM PREFLIGHT: NO-GO/u);
+    assert.match(stderr, /blocked before launch/u);
   });
 });

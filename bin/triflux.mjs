@@ -333,10 +333,13 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   swarm: {
-    usage: "tfx swarm [run] <prd-path> [--dry-run|--json|--filter <shard>]",
+    usage:
+      "tfx swarm [run|preflight] <prd-path> [--dry-run|--json|--filter <shard>]",
     description: "PRD 기반 멀티모델 x 멀티기기 스웜 실행 (#93)",
     subcommands: {
       run: "tfx swarm run <prd-path> — verb 명시 실행 (기본 경로와 동일)",
+      preflight:
+        "tfx swarm preflight <prd-path> [--json] — 실행 전 go/no-go 리포트 출력",
       plan: "tfx swarm plan <prd-path> [--json] — 실행 없이 계획만 출력",
       list: "tfx swarm list [--json] — 활성 스웜 세션 조회 (synapse status)",
       status: "tfx swarm status [--json] — list alias",
@@ -6165,6 +6168,7 @@ async function main() {
 
   ${BOLD}Subcommands${RESET}
     ${WHITE_BRIGHT}tfx swarm run <prd>${RESET}    ${GRAY}${s.subcommands.run}${RESET}
+    ${WHITE_BRIGHT}tfx swarm preflight <prd>${RESET} ${GRAY}${s.subcommands.preflight}${RESET}
     ${WHITE_BRIGHT}tfx swarm plan <prd>${RESET}   ${GRAY}${s.subcommands.plan}${RESET}
     ${WHITE_BRIGHT}tfx swarm list${RESET}         ${GRAY}${s.subcommands.list}${RESET}
     ${WHITE_BRIGHT}tfx swarm status${RESET}       ${GRAY}${s.subcommands.status}${RESET}
@@ -6175,15 +6179,18 @@ ${s.options.map((o) => `    ${DIM}${o.name.padEnd(16)}${RESET} ${GRAY}${o.descri
         return;
       }
       await checkHubRunning();
-      const { cmdSwarmRun, cmdSwarmPlan, cmdSwarmList } = await import(
-        "../hub/team/swarm-cli.mjs"
-      );
+      const { cmdSwarmRun, cmdSwarmPlan, cmdSwarmList, cmdSwarmPreflight } =
+        await import("../hub/team/swarm-cli.mjs");
       if (sub === "list" || sub === "status") {
         await cmdSwarmList(cmdArgs.slice(1), { json: JSON_OUTPUT });
         return;
       }
       if (sub === "plan") {
         await cmdSwarmPlan(cmdArgs.slice(1), { json: JSON_OUTPUT });
+        return;
+      }
+      if (sub === "preflight") {
+        await cmdSwarmPreflight(cmdArgs.slice(1), { json: JSON_OUTPUT });
         return;
       }
       if (sub === "run") {

@@ -15,18 +15,23 @@ const LOCK_TTL_MS = 10 * 60_000; // 10 minutes default TTL
 // override via validateChanges options.sensitiveDeny.
 //
 // Paths use POSIX separators (matches normalizePath output).
-const SENSITIVE_PATH_PREFIXES = [
+export const SENSITIVE_PATH_PREFIXES = [
   ".claude-plugin/",
   "bin/",
   ".github/workflows/",
 ];
-const SENSITIVE_PATH_FILES = [
+export const SENSITIVE_PATH_FILES = [
   ".gitignore",
   ".npmignore",
   "package.json",
   "package-lock.json",
   "biome.json",
 ];
+
+export const DEFAULT_SENSITIVE_DENY = Object.freeze({
+  prefixes: Object.freeze([...SENSITIVE_PATH_PREFIXES]),
+  files: Object.freeze([...SENSITIVE_PATH_FILES]),
+});
 
 /**
  * Swarm lock manager factory.

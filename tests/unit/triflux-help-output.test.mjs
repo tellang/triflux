@@ -51,4 +51,13 @@ describe("tfx --help 출력", () => {
     const out = stripAnsi(raw);
     assert.match(out, /tfx swarm run/);
   });
+
+  it("#188: tfx swarm --help 에 preflight 서브커맨드 노출", () => {
+    const raw = execSync(`node "${binPath}" swarm --help`, {
+      encoding: "utf8",
+    });
+    const out = stripAnsi(raw);
+    assert.match(out, /tfx swarm preflight/);
+    assert.match(out, /go\/no-go|preflight/i);
+  });
 });
