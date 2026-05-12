@@ -504,7 +504,7 @@ async function main() {
   }
 
   // ── PostToolUse: 컨텍스트 압축 nudge (인라인, 프로세스 추가 없음) ──
-  if (eventName === "PostToolUse" && !blocked) {
+  if (eventName === "PostToolUse" && toolName !== "Bash" && !blocked) {
     try {
       const home = process.env.HOME || process.env.USERPROFILE || "";
       const snapshotPath = join(

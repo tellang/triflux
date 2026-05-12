@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -56,11 +57,11 @@ function hookCommand(scriptPath, markerPath, mode, counterPath, label) {
   return `"${process.execPath}" "${scriptPath}" "${markerPath}" "${mode}" "${safeCounterPath}" "${label}"`;
 }
 
-function createRegistry(hooks) {
+function createRegistry(hooks, eventName = "PreToolUse") {
   return {
     version: 1,
     events: {
-      PreToolUse: hooks,
+      [eventName]: hooks,
     },
   };
 }
@@ -69,6 +70,7 @@ function runOrchestrator({
   cwd,
   registryPath,
   cacheDir,
+  env = {},
   payload = {
     hook_event_name: "PreToolUse",
     tool_name: "Bash",
@@ -81,6 +83,7 @@ function runOrchestrator({
     encoding: "utf8",
     env: {
       ...process.env,
+      ...env,
       TRIFLUX_HOOK_REGISTRY: registryPath,
       TRIFLUX_HOOK_CACHE_DIR: cacheDir,
       TRIFLUX_HOOK_CACHE_TTL_MS: "10000",
@@ -209,6 +212,59 @@ describe("hook-orchestrator PreToolUse:Bash dedupe", () => {
     assert.ok(existsSync(firstMarker));
     assert.ok(existsSync(secondMarker));
     assert.match(result.stdout, /handled:second-output/);
+  });
+
+  it("does not emit context monitor nudge for unrelated PostToolUse Bash", () => {
+    const nudgeMarker = join(tmpdir(), "tfx-compact-nudge-sent");
+    rmSync(nudgeMarker, { force: true });
+
+    const homeDir = join(sandboxDir, "home");
+    const monitorDir = join(homeDir, ".claude", "cache", "tfx-hub");
+    mkdirSync(monitorDir, { recursive: true });
+    writeFileSync(
+      join(monitorDir, "context-monitor.json"),
+      JSON.stringify({ percent: 95 }),
+      "utf8",
+    );
+
+    const marker = join(sandboxDir, "posttool-bash-noop.txt");
+    writeFileSync(
+      registryPath,
+      JSON.stringify(
+        createRegistry(
+          [
+            {
+              id: "noop-posttool-bash",
+              matcher: "Bash",
+              command: hookCommand(hookScriptPath, marker, "noop", "", "noop"),
+              priority: 0,
+              enabled: true,
+            },
+          ],
+          "PostToolUse",
+        ),
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const result = runOrchestrator({
+      cwd: sandboxDir,
+      registryPath,
+      cacheDir,
+      env: { HOME: homeDir, USERPROFILE: homeDir, TFX_POST_TOOL_TIPS: "" },
+      payload: {
+        hook_event_name: "PostToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "echo hello" },
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.ok(existsSync(marker));
+    assert.equal(result.stdout.trim(), "");
+    rmSync(nudgeMarker, { force: true });
   });
 
   it("caches identical PreToolUse:Bash results to avoid recomputing hooks", () => {
