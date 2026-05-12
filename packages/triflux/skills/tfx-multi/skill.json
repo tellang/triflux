@@ -1,6 +1,10 @@
 {
   "name": "tfx-multi",
-  "description": "멀티-CLI 팀 모드. Claude Native Agent Teams + Codex/Gemini 멀티모델 오케스트레이션. '멀티로', '팀 모드', '다중 CLI', '3개 다 동원', 'multi' 같은 요청에 반드시 사용. Claude+Codex+Gemini 협업이 필요한 모든 상황에 적극 활용.",
-  "triggers": ["tfx-multi"],
-  "argument_hint": "\"작업 설명\" | --agents codex,gemini \"작업\" | --tmux \"작업\" | status | stop"
+  "description": "DEPRECATED — tfx-auto 로 통합됨. `/tfx-auto --parallel N --mode deep` 로 리다이렉트. tfx-auto 가 이 플래그 조합을 받으면 내부적으로 `tfx multi --teammate-mode headless` 를 호출한다. Phase 5 (v11) 에 물리 삭제 예정.",
+  "triggers": [
+    "tfx-multi"
+  ],
+  "argument_hint": "<작업 설명 — tfx-auto 로 passthrough>",
+  "deprecated": true,
+  "superseded_by": "tfx-auto"
 }

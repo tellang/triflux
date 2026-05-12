@@ -10,15 +10,15 @@
 
 <p align="center">
   <strong>Consensus Intelligence 기반 Tri-CLI 오케스트레이션</strong><br>
-  <em>Claude + Codex + Gemini — 21개 코어 스킬, 23개 thin alias, 자연어 라우팅, 교차 모델 리뷰.</em>
+  <em>Claude + Codex + Gemini — 13개 공개 코어 스킬, 11개 호환 alias, 자연어 라우팅, 교차 모델 리뷰.</em>
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/skills-21_core-F5C242?style=flat-square" alt="21개 코어 스킬">
-  <sub>+ 23개 thin alias</sub>
+  <img src="https://img.shields.io/badge/skills-13_core-F5C242?style=flat-square" alt="13개 코어 스킬">
+  <sub>+ 11개 호환 alias</sub>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -29,7 +29,7 @@
 <p align="center">
   <a href="#빠른-시작">빠른 시작</a> ·
   <a href="#tri-cli-합의-엔진">Tri-CLI 합의 엔진</a> ·
-  <a href="#전체-21개-스킬-23개-thin-alias-포함">전체 21개 스킬</a> ·
+  <a href="#전체-13개-코어-스킬-호환-alias-포함">전체 13개 스킬</a> ·
   <a href="#아키텍처">아키텍처</a> ·
   <a href="#deep-vs-light">Deep vs Light</a> ·
   <a href="#보안">보안</a>
@@ -57,15 +57,14 @@ npm install -g triflux
 ### 사용법
 
 ```bash
-# Light — 단일 모델로 빠르게 실행
+# Deep 기본값 — 3자 합의로 실행
 /tfx-research "React 19 Server Actions best practices"
 /tfx-review
 /tfx-plan "add JWT auth middleware"
 
-# Deep — 중요한 작업에 3자 합의 적용
-/tfx-deep-research "microservice architecture comparison 2026"
-/tfx-deep-review
-/tfx-deep-plan "migrate REST to GraphQL"
+# Quick opt-out — 단일 모델로 빠르게 실행
+/tfx-review --quick
+/tfx-plan "add JWT auth middleware" --quick
 
 # Debate — 3개의 독립적인 의견을 확보
 /tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
@@ -77,7 +76,7 @@ npm install -g triflux
 /tfx-multi "refactor auth + update UI + add tests"
 
 # Remote — setup, spawn, attach, resume를 하나의 표면으로
-/tfx-remote-setup                              # 인터랙티브 호스트 설정 위저드 (Tailscale + SSH)
+/tfx-remote setup                              # 인터랙티브 호스트 설정 위저드 (Tailscale + SSH)
 /tfx-remote spawn ultra4 "보안 리뷰 실행"       # 원격 호스트에서 세션 실행
 ```
 
@@ -89,9 +88,9 @@ npm install -g triflux
 
 ### v10.11.0 주요 특징
 
-- **자연어 라우팅** — "리뷰해줘"라고 말하면 `/tfx-review`가 자동 호출. "제대로/꼼꼼히" 수정자로 Deep 변형 자동 에스컬레이션
+- **자연어 라우팅** — "리뷰해줘"라고 말하면 `/tfx-review`가 자동 호출. 기본은 Deep이고 `--quick`으로 빠른 경로를 명시
 - **교차 모델 리뷰** — Claude가 작성하면 Codex가 리뷰, Codex가 작성하면 Claude가 리뷰. 동일 모델 self-approve 차단. 커밋 전 미검증 파일 nudge
-- **정확한 카탈로그** — 44개 스킬 파일 기준 `21 core + 23 thin alias`
+- **정확한 카탈로그** — 33개 스킬 파일 기준 `13 public core + 11 compatibility alias + 9 internal helper`
 - **Phase 3** — `--retry ralph`, `--retry auto-escalate`, `--lead codex`, `--max-iterations N`, 4단계 `DEFAULT_ESCALATION_CHAIN`
 - **Phase 4** — `tfx-auto --shape debate|panel|consensus`, `tfx-remote` 단일 진입점, `tfx-psmux-rules`는 `.claude/rules/tfx-psmux.md`로 이동
 - **하위 호환성 유지** — `tfx-persist`, `tfx-debate`, `tfx-multi`, `tfx-remote-spawn` 같은 기존 이름은 thin alias로 계속 지원
@@ -142,44 +141,39 @@ Phase 4 이후에는 `tfx-auto`가 하나의 front door 역할을 맡습니다. 
 
 ---
 
-## 전체 21개 스킬 (23개 thin alias 포함)
+## 전체 13개 코어 스킬 (호환 alias 포함)
 
 ### 리서치
 
 | 스킬 | 상태 | 설명 |
 |------|------|------|
-| `tfx-research` | Active | Exa/Brave/Tavily 자동 선택을 통한 빠른 웹 검색 |
-| `tfx-find` | Active | 파일, 심볼, 패턴 중심의 빠른 코드베이스 탐색 |
+| `tfx-index` | Core | 프로젝트 인덱싱과 컨텍스트 압축 |
 
-Aliases (fold into `tfx-auto` flags): `tfx-deep-research`, `tfx-autoresearch`
+내부 라우팅 helper: `tfx-research`, `tfx-find`
 
 ### 분석 및 계획
 
 | 스킬 | 상태 | 설명 |
 |------|------|------|
-| `tfx-analysis` | Active | 빠른 코드/아키텍처 분석 |
-| `tfx-plan` | Active | 빠른 구현 계획 수립 |
-| `tfx-interview` | Active | 소크라테스식 요구사항 탐색 |
+| _독립 공개 표면 없음_ | — | 분석, 계획, 인터뷰는 내부 helper로 라우팅 |
 
-Aliases (fold into `tfx-auto` flags): `tfx-deep-analysis`, `tfx-deep-plan`, `tfx-deep-interview`
+내부 라우팅 helper: `tfx-analysis`, `tfx-plan`, `tfx-interview`
 
 ### 실행
 
 | 스킬 | 상태 | 설명 |
 |------|------|------|
-| `tfx-auto` | Active | 플래그 기반 라우팅과 legacy surface folding을 담당하는 통합 CLI 오케스트레이터 |
+| `tfx-auto` | Core | 플래그 기반 라우팅과 legacy surface folding을 담당하는 통합 CLI 오케스트레이터 |
 
-Aliases (fold into `tfx-auto` flags): `tfx-autopilot`, `tfx-fullcycle`, `tfx-codex`, `tfx-gemini`
+호환 alias: `tfx-autopilot`, `tfx-fullcycle`, `tfx-multi`, `tfx-persist`, `tfx-swarm`
 
 ### 리뷰 및 QA
 
 | 스킬 | 상태 | 설명 |
 |------|------|------|
-| `tfx-review` | Active | 빠른 코드 리뷰 |
-| `tfx-qa` | Active | Test → Fix → Retest 순환 (최대 3회) |
-| `tfx-prune` | Active | AI slop 제거, dead code 및 과한 추상화 정리 |
+| _독립 공개 표면 없음_ | — | 리뷰, QA, 정리는 내부 helper로 라우팅 |
 
-Aliases (fold into `tfx-auto` flags): `tfx-deep-review`, `tfx-deep-qa`
+내부 라우팅 helper: `tfx-review`, `tfx-qa`, `tfx-prune`
 
 ### 토론 및 의사결정
 
@@ -187,35 +181,33 @@ Aliases (fold into `tfx-auto` flags): `tfx-deep-review`, `tfx-deep-qa`
 |------|------|------|
 | _독립 active 표면 없음_ | — | debate, consensus, panel은 이제 `tfx-auto --mode consensus`의 출력 shape로 통합 |
 
-Aliases (fold into `tfx-auto` flags): `tfx-consensus`, `tfx-debate`, `tfx-panel`
+호환 alias: `tfx-consensus`, `tfx-debate`, `tfx-panel`
 
 ### 지속 실행 및 라우팅
 
 | 스킬 | 상태 | 설명 |
 |------|------|------|
-| `tfx-index` | Active | 프로젝트 인덱싱으로 94% 토큰 절감 (58K→3K) |
-| `tfx-hooks` | Active | Claude Code hook priority 관리 |
-| `tfx-profile` | Active | Codex/Gemini CLI 프로필 관리 |
+| `tfx-hooks` | Core | Claude Code hook priority 관리 |
+| `tfx-profile` | Core | Codex/Gemini CLI 프로필 관리 |
 
-Aliases (fold into `tfx-auto` flags): `tfx-persist`, `tfx-ralph`, `tfx-autoroute`, `tfx-auto-codex`
+내부 라우팅 helper: `tfx-ralph`
 
 ### 오케스트레이션
 
 | 스킬 | 상태 | 설명 |
 |------|------|------|
-| `tfx-hub` | Active | MCP 메시지 버스 관리 |
-| `tfx-codex-swarm` | Active | Codex swarm 실행 표면 |
-| `merge-worktree` | Active | swarm 결과용 worktree merge helper |
+| `tfx-hub` | Core | MCP 메시지 버스 관리 |
+| `merge-worktree` | Core | swarm 결과용 worktree merge helper |
 
-Aliases (fold into active surfaces): `tfx-multi`, `tfx-swarm`
+Swarm 실행은 `tfx-auto --parallel swarm` 과 `tfx swarm` CLI로 노출된다.
 
 ### 원격
 
 | 스킬 | 상태 | 설명 |
 |------|------|------|
-| `tfx-remote` | Active | setup, spawn, list, attach, send, resume, probe, rules를 묶는 원격 command family |
+| `tfx-remote` | Core | setup, spawn, list, attach, send, resume, probe, rules를 묶는 원격 command family |
 
-Aliases (fold into active surfaces): `tfx-remote-spawn`, `tfx-remote-setup`, `tfx-psmux-rules` — Phase 4에서 `.claude/rules/tfx-psmux.md`로 이동
+호환 alias: `tfx-remote-spawn`, `tfx-remote-setup`, `tfx-psmux-rules` — Phase 4에서 `.claude/rules/tfx-psmux.md`로 이동
 
 ### 메타
 
@@ -225,6 +217,7 @@ Aliases (fold into active surfaces): `tfx-remote-spawn`, `tfx-remote-setup`, `tf
 | `tfx-setup` | Active | 초기 설정 마법사 |
 | `tfx-doctor` | Active | 진단 및 자동 복구 |
 | `tfx-ship` | Active | ship workflow orchestration |
+| `tfx-wt` | Active | Windows Terminal 탭/패인 제어 |
 | `star-prompt` | Active | postinstall GitHub star prompt |
 
 ---
@@ -316,15 +309,14 @@ npm install -g triflux
 ### 사용법
 
 ```bash
-# Light — 단일 모델로 빠르게 실행
+# Deep 기본값 — 3자 합의로 실행
 /tfx-research "React 19 Server Actions best practices"
 /tfx-review
 /tfx-plan "add JWT auth middleware"
 
-# Deep — 중요한 작업에 3자 합의 적용
-/tfx-deep-research "microservice architecture comparison 2026"
-/tfx-deep-review
-/tfx-deep-plan "migrate REST to GraphQL"
+# Quick opt-out — 단일 모델로 빠르게 실행
+/tfx-review --quick
+/tfx-plan "add JWT auth middleware" --quick
 
 # Debate — 3개의 독립적인 의견을 확보
 /tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"

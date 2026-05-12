@@ -25,6 +25,9 @@ function extractManifest(skillMdContent) {
   if (data["argument-hint"]) manifest.argument_hint = data["argument-hint"];
   if (data.internal === true || data.internal === "true")
     manifest.internal = true;
+  if (data.deprecated === true || data.deprecated === "true")
+    manifest.deprecated = true;
+  if (data["superseded-by"]) manifest.superseded_by = data["superseded-by"];
 
   return manifest;
 }

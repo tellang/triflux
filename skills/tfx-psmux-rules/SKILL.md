@@ -3,6 +3,8 @@ name: tfx-psmux-rules
 description: >
   legacy alias. Phase 4b부터 psmux 규칙의 source of truth는 skill이 아니라
   .claude/rules/tfx-psmux.md 와 AGENTS.md 의 always-on policy 이다.
+deprecated: true
+superseded-by: .claude/rules/tfx-psmux.md
 triggers:
   - tfx-psmux-rules
   - psmux-rules

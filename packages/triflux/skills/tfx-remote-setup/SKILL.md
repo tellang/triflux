@@ -2,6 +2,8 @@
 name: tfx-remote-setup
 description: >
   legacy thin alias. Phase 4b부터 setup 관련 공용 진입점은 tfx-remote setup 이다.
+deprecated: true
+superseded-by: tfx-remote
 triggers:
   - tfx-remote-setup
 argument-hint: "[--add|--edit|--probe-all|--diagnose]"

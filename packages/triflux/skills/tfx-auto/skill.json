@@ -1,6 +1,6 @@
 {
   "name": "tfx-auto",
-  "description": "통합 CLI 오케스트레이터. 커맨드 숏컷(단일) + 자동 분류/분해(병렬) + 수동 병렬. tfx-route.sh 기반. '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은 구현/수정 요청에 사용. CLI 라우팅이 필요한 모든 작업에 적극 활용.",
+  "description": "통합 CLI 오케스트레이터 + 실행 스킬 front door. 커맨드 숏컷(단일) + 자동 분류/분해(병렬) + 수동 병렬 + 명시 플래그 오버라이드. tfx-route.sh 기반. `--cli`, `--mode`, `--parallel`, `--retry`, `--isolation`, `--remote`, `--shape`, `--cli-set`, `--risk-tier` 플래그로 legacy tfx-codex/gemini/ multi/swarm/fullcycle/persist/autopilot/autoroute/auto-codex 와 consensus/debate/panel 동작을 직접 제어. legacy 스킬은 thin alias (Phase 5 v11 삭제 예정). '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은 구현/수정 요청에 사용.",
   "triggers": [
     "tfx-auto",
     "implement",
@@ -22,5 +22,5 @@
     "business-panel",
     "index-repo"
   ],
-  "argument_hint": "<command|task> [args...]"
+  "argument_hint": "<command|task> [args...] [--cli auto|codex|gemini|claude] [--mode quick|deep|consensus] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-gemini|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none]"
 }

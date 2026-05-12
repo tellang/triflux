@@ -1,7 +1,14 @@
 {
   "name": "tfx-debate",
-  "description": "기술 선택, 아키텍처 비교, 설계 결정에서 3-CLI 구조화 토론으로 최적 답을 도출한다. 'A vs B', '뭐가 나을까', '비교해줘', '어떤 걸 쓸까', '장단점', 'tradeoff' 같은 비교/선택 요청에 반드시 사용한다. 단순 질문이 아닌 여러 옵션 사이의 결정이 필요할 때 적극 활용.",
-  "triggers": ["debate", "토론", "3자 토론", "tri-debate", "멀티모델 토론"],
-  "argument_hint": "<토론 주제 또는 질문>",
-  "internal": true
+  "description": "DEPRECATED — tfx-auto consensus shape 로 통합됨. `/tfx-auto --mode consensus --shape debate` 로 리다이렉트. Phase 4a 부터 debate 는 별도 엔진이 아니라 consensus family 내부의 옵션 비교 shape 다. Phase 5 (v11) 에 물리 삭제 예정.",
+  "triggers": [
+    "debate",
+    "토론",
+    "3자 토론",
+    "tri-debate",
+    "멀티모델 토론"
+  ],
+  "argument_hint": "<토론 주제 또는 질문 — tfx-auto 로 passthrough>",
+  "deprecated": true,
+  "superseded_by": "tfx-auto"
 }

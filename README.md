@@ -11,7 +11,7 @@
 <h3 align="center">Tri-CLI Orchestration with Consensus Intelligence</h3>
 
 <p align="center">
-  Route tasks across <strong>Claude + Codex + Gemini</strong> — 21 core skills, natural language routing,<br>
+  Route tasks across <strong>Claude + Codex + Gemini</strong> — 13 public core skills, natural language routing,<br>
   cross-model review, and reflexion-based adaptive learning.
 </p>
 
@@ -19,8 +19,8 @@
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/skills-21_core-F5C242?style=flat-square" alt="21 core skills">
-  <sub>+ 23 thin aliases</sub>
+  <img src="https://img.shields.io/badge/skills-13_core-F5C242?style=flat-square" alt="13 core skills">
+  <sub>+ 11 compatibility aliases</sub>
   <img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node >= 18">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
@@ -33,7 +33,7 @@
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#core-engine">Core Engine</a> &middot;
   <a href="#killer-skills">Killer Skills</a> &middot;
-  <a href="#all-21-skills-plus-23-thin-aliases">All 21 Skills</a> &middot;
+  <a href="#all-13-core-skills-plus-compatibility-aliases">All 13 Skills</a> &middot;
   <a href="#deep-vs-light">Deep vs Light</a> &middot;
   <a href="#architecture">Architecture</a> &middot;
   <a href="#security">Security</a>
@@ -45,7 +45,7 @@
 
 Most AI coding tools talk to **one model**. triflux talks to **three** — and makes them argue.
 
-triflux is not a collection of skills. It is a **multi-model parallel orchestration harness**. The 21 core skills and 23 thin aliases are what it does. The harness — consensus engine, message bus, router, and security guard — is what makes it different.
+triflux is not a collection of skills. It is a **multi-model parallel orchestration harness**. The 13 public core skills, 11 compatibility aliases, and internal routed helpers are what it does. The harness — consensus engine, message bus, router, and security guard — is what makes it different.
 
 Every Deep skill runs Claude, Codex, and Gemini **independently** (no cross-visibility), then cross-validates their findings. Only consensus-verified results survive. The result: **87% fewer false positives** compared to single-model review.
 
@@ -54,10 +54,10 @@ Phase 4 folds the legacy surface into one front door: `tfx-auto` with flag-based
 You don't need to memorize commands. Say what you want in natural language — triflux routes to the right skill automatically:
 
 ```
-"review this"          → /tfx-review       (Light — single model, fast)
-"review this thoroughly" → /tfx-deep-review  (Deep — 3-party consensus)
+"review this"          → /tfx-review       (Deep by default — 3-party consensus)
+"review this --quick"  → /tfx-review --quick  (quick opt-out)
 "리뷰해줘"              → /tfx-review       (Korean works too)
-"제대로 리뷰해"          → /tfx-deep-review  (depth modifier detected)
+"제대로 리뷰해"          → /tfx-review       (depth modifier detected)
 ```
 
 ---
@@ -83,8 +83,8 @@ Then run `tfx setup` to configure your environment.
 
 ```bash
 # 3-party consensus — three models argue, only consensus survives
-/tfx-deep-review
-/tfx-deep-plan "migrate REST to GraphQL"
+/tfx-review
+/tfx-plan "migrate REST to GraphQL"
 
 # Swarm — split PRD into shards, parallel worktree execution
 /tfx-swarm
@@ -266,13 +266,13 @@ Each shard gets its own git worktree, file-lease enforcement prevents conflicts,
 /tfx-auto "implement full auth flow with tests" --retry ralph --max-iterations 10
 ```
 
-### 3-Party Consensus Reviews — `tfx-deep-review` / `tfx-deep-plan`
+### 3-Party Consensus Reviews — `tfx-review` / `tfx-plan`
 
 The bread-and-butter Deep skills. Three models independently review your code or plan your implementation, then cross-validate. Only consensus-verified findings survive.
 
 ```bash
-/tfx-deep-review            # 3-party code review
-/tfx-deep-plan "migrate to GraphQL"  # 3-party planning
+/tfx-review            # 3-party code review by default
+/tfx-plan "migrate to GraphQL"  # 3-party planning by default
 ```
 
 ### Structured Debate — `tfx-debate` (alias for `tfx-auto --mode consensus --shape debate`)
@@ -285,7 +285,7 @@ Three models take independent positions on a technical question, debate, and con
 
 ---
 
-## All 21 Skills (plus 23 thin aliases)
+## All 13 Core Skills (plus compatibility aliases)
 
 <details>
 <summary>Expand full skill list</summary>
@@ -294,38 +294,33 @@ Three models take independent positions on a technical question, debate, and con
 
 | Skill | Type | Description |
 |-------|------|-------------|
-| `tfx-research` | Active | Quick web search via Exa/Brave/Tavily auto-selection |
-| `tfx-find` | Active | Fast codebase search — files, symbols, patterns |
+| `tfx-index` | Core | Project indexing and context compression |
 
-Aliases (fold into `tfx-auto` flags): `tfx-deep-research`, `tfx-autoresearch`
+Internal routed helpers: `tfx-research`, `tfx-find`
 
 ### Analysis & Planning
 
 | Skill | Type | Description |
 |-------|------|-------------|
-| `tfx-analysis` | Active | Quick code/architecture analysis |
-| `tfx-plan` | Active | Quick implementation plan |
-| `tfx-interview` | Active | Socratic requirements exploration |
+| _No standalone public surface_ | — | Analysis, planning, and interview route through internal helpers |
 
-Aliases (fold into `tfx-auto` flags): `tfx-deep-analysis`, `tfx-deep-plan`, `tfx-deep-interview`
+Internal routed helpers: `tfx-analysis`, `tfx-plan`, `tfx-interview`
 
 ### Execution
 
 | Skill | Type | Description |
 |-------|------|-------------|
-| `tfx-auto` | Active | Unified CLI orchestrator — auto-triage, flag-based routing, and legacy surface folding |
+| `tfx-auto` | Core | Unified CLI orchestrator — auto-triage, flag-based routing, and legacy surface folding |
 
-Aliases (fold into `tfx-auto` flags): `tfx-autopilot`, `tfx-fullcycle`, `tfx-codex`, `tfx-gemini`
+Compatibility aliases: `tfx-autopilot`, `tfx-fullcycle`, `tfx-multi`, `tfx-persist`, `tfx-swarm`
 
 ### Review & QA
 
 | Skill | Type | Description |
 |-------|------|-------------|
-| `tfx-review` | Active | Quick code review |
-| `tfx-qa` | Active | Test → Fix → Retest cycle (max 3 rounds) |
-| `tfx-prune` | Active | AI slop removal — dead code, over-abstraction cleanup |
+| _No standalone public surface_ | — | Review, QA, and cleanup route through internal helpers |
 
-Aliases (fold into `tfx-auto` flags): `tfx-deep-review`, `tfx-deep-qa`
+Internal routed helpers: `tfx-review`, `tfx-qa`, `tfx-prune`
 
 ### Debate & Decision
 
@@ -333,27 +328,25 @@ Aliases (fold into `tfx-auto` flags): `tfx-deep-review`, `tfx-deep-qa`
 |-------|------|-------------|
 | _No standalone active surface_ | — | Debate, consensus, and panel shapes now route through `tfx-auto --mode consensus` |
 
-Aliases (fold into `tfx-auto` flags): `tfx-consensus`, `tfx-debate`, `tfx-panel`
+Compatibility aliases: `tfx-consensus`, `tfx-debate`, `tfx-panel`
 
 ### Persistence & Routing
 
 | Skill | Type | Description |
 |-------|------|-------------|
-| `tfx-index` | Active | Project indexing — 94% token reduction (58K → 3K) |
-| `tfx-hooks` | Active | Claude Code hook priority manager |
-| `tfx-profile` | Active | Codex/Gemini CLI profile management |
+| `tfx-hooks` | Core | Claude Code hook priority manager |
+| `tfx-profile` | Core | Codex/Gemini CLI profile management |
 
-Aliases (fold into `tfx-auto` flags): `tfx-persist`, `tfx-ralph`, `tfx-autoroute`, `tfx-auto-codex`
+Internal routed helper: `tfx-ralph`
 
 ### Orchestration & Infrastructure
 
 | Skill | Description |
 |-------|-------------|
 | `tfx-hub` | MCP message bus — Named Pipe & HTTP bridge |
-| `tfx-codex-swarm` | Codex swarm execution surface |
 | `merge-worktree` | Worktree merge helper for swarm results |
 
-Aliases (fold into active surfaces): `tfx-multi`, `tfx-swarm`
+Swarm execution is exposed through `tfx-auto --parallel swarm` and the `tfx swarm` CLI.
 
 ### Remote
 
@@ -361,7 +354,7 @@ Aliases (fold into active surfaces): `tfx-multi`, `tfx-swarm`
 |-------|-------------|
 | `tfx-remote` | Unified remote command family — setup, spawn, list, attach, send, resume, probe, rules |
 
-Aliases (fold into active surfaces): `tfx-remote-spawn`, `tfx-remote-setup`, `tfx-psmux-rules` — moved to `.claude/rules/tfx-psmux.md` in Phase 4
+Compatibility aliases: `tfx-remote-spawn`, `tfx-remote-setup`, `tfx-psmux-rules` — rules moved to `.claude/rules/tfx-psmux.md` in Phase 4
 
 ### Meta & Tooling
 
@@ -371,6 +364,7 @@ Aliases (fold into active surfaces): `tfx-remote-spawn`, `tfx-remote-setup`, `tf
 | `tfx-setup` | Initial setup wizard |
 | `tfx-doctor` | Diagnostics and auto-repair |
 | `tfx-ship` | Ship workflow orchestration |
+| `tfx-wt` | Windows Terminal tab/pane control |
 | `star-prompt` | GitHub star prompt for postinstall |
 
 </details>
@@ -494,7 +488,7 @@ The monitor visualizes:
 - **Consensus shapes** — `--shape consensus|debate|panel` folds ensemble behaviors into the main router
 - **Remote consolidation** — `tfx-remote` becomes the single remote surface while `tfx-remote-spawn` remains a thin alias
 - **Rules relocation** — `tfx-psmux-rules` moved out of the skill surface to `.claude/rules/tfx-psmux.md`
-- **Legacy compatibility** — 23 thin aliases remain for transition safety and are slated for later removal
+- **Legacy compatibility** — 11 compatibility aliases remain for transition safety and are slated for later removal
 
 </details>
 

@@ -3,6 +3,8 @@ name: tfx-remote-spawn
 description: >
   legacy thin alias. Phase 4b부터 spawn/list/attach/send/resume/kill/probe 공용 진입점은
   tfx-remote 이다.
+deprecated: true
+superseded-by: tfx-remote
 triggers:
   - tfx-remote-spawn
 argument-hint: "[spawn|list|attach|send|resume|kill|probe] ..."

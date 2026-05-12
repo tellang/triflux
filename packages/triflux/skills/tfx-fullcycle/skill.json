@@ -1,7 +1,13 @@
 {
   "name": "tfx-fullcycle",
-  "description": "여러 파일/모듈에 걸친 복잡한 기능을 처음부터 끝까지 자율 개발할 때 사용한다. 설계→계획→구현→QA→검증 전체 파이프라인이 필요한 작업, '처음부터 끝까지', '전체', '완전히', '풀 오토', 'full auto', '전체 파이프라인으로' 같은 수식어가 있을 때 사용. 단순 단일 작업은 tfx-autopilot이 더 빠릅니다.",
-  "triggers": ["deep autopilot", "풀 오토", "처음부터 끝까지", "full auto"],
-  "argument_hint": "<구현할 기능 전체 설명>",
-  "internal": true
+  "description": "DEPRECATED — tfx-auto 로 통합됨. `/tfx-auto --mode deep --parallel 1` 로 리다이렉트. Phase 5 (v11) 에 물리 삭제 예정. \"pipeline-thorough 단일 실행\" 의미는 플래그로 동일 표현.",
+  "triggers": [
+    "deep autopilot",
+    "풀 오토",
+    "처음부터 끝까지",
+    "full auto"
+  ],
+  "argument_hint": "<작업 설명 — tfx-auto 로 passthrough>",
+  "deprecated": true,
+  "superseded_by": "tfx-auto"
 }

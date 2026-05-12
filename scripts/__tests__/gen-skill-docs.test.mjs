@@ -163,6 +163,8 @@ describe("gen-skill-manifest", () => {
           "  - manifest",
           "argument-hint: <arg>",
           "internal: true",
+          "deprecated: true",
+          "superseded-by: tfx-auto",
           "---",
           "body",
         ].join("\n"),
@@ -180,6 +182,8 @@ describe("gen-skill-manifest", () => {
       assert.deepEqual(manifest.triggers, ["test", "manifest"]);
       assert.equal(manifest.argument_hint, "<arg>");
       assert.equal(manifest.internal, true);
+      assert.equal(manifest.deprecated, true);
+      assert.equal(manifest.superseded_by, "tfx-auto");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

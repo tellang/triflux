@@ -1,0 +1,13 @@
+{
+  "name": "tfx-swarm",
+  "description": "DEPRECATED — tfx-auto 로 통합됨. `/tfx-auto --parallel swarm --mode consensus --isolation worktree` 로 리다이렉트. 실제 swarm 엔진 (PRD 파싱, shard 스케줄링, reconcile) 은 `tfx swarm` CLI 에 그대로 유지된다. Phase 5 (v11) 에 물리 삭제 예정.",
+  "triggers": [
+    "swarm",
+    "스웜",
+    "병렬 실행",
+    "codex-swarm"
+  ],
+  "argument_hint": "<PRD 경로 — tfx-auto 로 passthrough>",
+  "deprecated": true,
+  "superseded_by": "tfx-auto"
+}
