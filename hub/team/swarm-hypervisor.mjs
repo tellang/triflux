@@ -241,6 +241,7 @@ export function createSwarmHypervisor(opts) {
     integrationFailures: [],
     skipped: [],
     integrationBranch: null,
+    report: [],
     processCleanup: {
       totalKilled: 0,
       byCategory: {},
@@ -319,6 +320,9 @@ export function createSwarmHypervisor(opts) {
       ]),
       skipped: Object.freeze([...(payload.skipped || [])]),
       integrationBranch: payload.integrationBranch || null,
+      report: Object.freeze(
+        (payload.report || []).map((row) => Object.freeze({ ...row })),
+      ),
       results: Object.freeze([...(payload.results || [])]),
       processCleanup: Object.freeze({
         totalKilled: processCleanup.totalKilled || 0,
@@ -340,6 +344,7 @@ export function createSwarmHypervisor(opts) {
       integrationFailures: [...integrationResult.integrationFailures],
       skipped: [...integrationResult.skipped],
       integrationBranch: integrationResult.integrationBranch,
+      report: integrationResult.report.map((row) => ({ ...row })),
       processCleanup: integrationResult.processCleanup,
       error: integrationResult.error,
     };
@@ -371,6 +376,20 @@ export function createSwarmHypervisor(opts) {
     }
 
     return getProcessCleanupSummary();
+  }
+
+  function normalizeIntegrationReportRow(row) {
+    return {
+      shard: row.shard,
+      strategy: row.strategy || "failed",
+      commits:
+        Number.isFinite(Number(row.commits)) && row.commits !== null
+          ? Number(row.commits)
+          : null,
+      finalSha: row.finalSha || null,
+      notes: row.notes || "",
+      recoveryPatch: row.recoveryPatch || null,
+    };
   }
 
   function git(args, cwd = workdir) {
@@ -964,8 +983,22 @@ export function createSwarmHypervisor(opts) {
 
     const integrated = [];
     const integrationFailures = [];
+    const integrationReport = [];
     const preIntegrationFailures = [...failures.keys()];
     let integrationBranch = null;
+
+    const appendIntegrationReport = (row) => {
+      const normalized = normalizeIntegrationReportRow(row);
+      integrationReport.push(normalized);
+      eventLog.append("integration_shard_report", normalized);
+      return normalized;
+    };
+
+    const failureNotes = (shardName, fallback = "failed") => {
+      const info = failures.get(shardName);
+      if (!info) return fallback;
+      return info.reason || info.mode || fallback;
+    };
 
     try {
       ({ integrationBranch } = await prepareIntegrationBranchImpl({
@@ -977,6 +1010,11 @@ export function createSwarmHypervisor(opts) {
       for (const shardName of plan.mergeOrder) {
         if (failures.has(shardName)) {
           eventLog.append("skip_failed_shard", { shard: shardName });
+          appendIntegrationReport({
+            shard: shardName,
+            strategy: "failed",
+            notes: `skipped: ${failureNotes(shardName)}`,
+          });
           continue;
         }
 
@@ -1002,11 +1040,22 @@ export function createSwarmHypervisor(opts) {
               shard: shardName,
               error: fetchResult.error,
             });
-            await maybeCleanupWorktree(shardName, worker, shard, {
-              force: true,
-              failureReason: "remote_fetch_failed",
-            });
+            const cleanup = await maybeCleanupWorktree(
+              shardName,
+              worker,
+              shard,
+              {
+                force: true,
+                failureReason: "remote_fetch_failed",
+              },
+            );
             integrationFailures.push(shardName);
+            appendIntegrationReport({
+              shard: shardName,
+              strategy: "failed",
+              notes: `remote_fetch_failed: ${fetchResult.error || "unknown"}`,
+              recoveryPatch: cleanup?.recoveryPatch?.patchPath || null,
+            });
             continue;
           }
           eventLog.append("remote_fetch_ok", {
@@ -1042,12 +1091,20 @@ export function createSwarmHypervisor(opts) {
             shard: shardName,
             ...commitEvidence,
           });
-          await maybeCleanupWorktree(shardName, worker, shard, {
+          const cleanup = await maybeCleanupWorktree(shardName, worker, shard, {
             force: true,
             failureReason:
               failures.get(shardName)?.mode || "no_commit_evidence",
           });
           integrationFailures.push(shardName);
+          appendIntegrationReport({
+            shard: shardName,
+            strategy: "failed",
+            commits: commitEvidence.commitsAhead,
+            finalSha: commitEvidence.headCommit,
+            notes: failureNotes(shardName, "no_commit_evidence"),
+            recoveryPatch: cleanup?.recoveryPatch?.patchPath || null,
+          });
           continue;
         }
 
@@ -1065,12 +1122,18 @@ export function createSwarmHypervisor(opts) {
             shard: shardName,
             violations: validation.violations,
           });
-          await maybeCleanupWorktree(shardName, worker, shard, {
+          const cleanup = await maybeCleanupWorktree(shardName, worker, shard, {
             force: true,
             failureReason:
               failures.get(shardName)?.mode || "lease_violation_revert",
           });
           integrationFailures.push(shardName);
+          appendIntegrationReport({
+            shard: shardName,
+            strategy: "failed",
+            notes: failureNotes(shardName, "lease_violation_revert"),
+            recoveryPatch: cleanup?.recoveryPatch?.patchPath || null,
+          });
           continue;
         }
 
@@ -1087,12 +1150,19 @@ export function createSwarmHypervisor(opts) {
             integrationBranch,
             error: rebaseResult.error,
           });
-          await maybeCleanupWorktree(shardName, worker, shard, {
+          const cleanup = await maybeCleanupWorktree(shardName, worker, shard, {
             force: true,
             failureReason:
               rebaseResult.error || FAILURE_MODES.F5_MERGE_CONFLICT,
           });
           integrationFailures.push(shardName);
+          appendIntegrationReport({
+            shard: shardName,
+            strategy: "failed",
+            commits: rebaseResult.commits ?? commitEvidence.commitsAhead,
+            notes: rebaseResult.error || FAILURE_MODES.F5_MERGE_CONFLICT,
+            recoveryPatch: cleanup?.recoveryPatch?.patchPath || null,
+          });
           continue;
         }
 
@@ -1103,9 +1173,19 @@ export function createSwarmHypervisor(opts) {
           worktreePath: worker.worktreePath || null,
           integrationBranch,
           headCommit: rebaseResult.headCommit,
+          integrationStrategy: rebaseResult.strategy || "cherry-pick",
+          commits: rebaseResult.commits ?? commitEvidence.commitsAhead,
+          notes: rebaseResult.notes || "",
           completedAt: Date.now(),
         });
         integrated.push(shardName);
+        appendIntegrationReport({
+          shard: shardName,
+          strategy: rebaseResult.strategy || "cherry-pick",
+          commits: rebaseResult.commits ?? commitEvidence.commitsAhead,
+          finalSha: rebaseResult.headCommit,
+          notes: rebaseResult.notes || "",
+        });
 
         await maybeCleanupWorktree(shardName, worker, shard, {
           branchName: shardBranch,
@@ -1128,6 +1208,15 @@ export function createSwarmHypervisor(opts) {
       const skipped = preIntegrationFailures.filter(
         (name) => !integrationFailures.includes(name),
       );
+      const reported = new Set(integrationReport.map((row) => row.shard));
+      for (const shardName of failed) {
+        if (reported.has(shardName)) continue;
+        appendIntegrationReport({
+          shard: shardName,
+          strategy: "failed",
+          notes: `integration_error: ${err.message}`,
+        });
+      }
 
       eventLog.append("integration_complete", {
         integrated,
@@ -1135,6 +1224,7 @@ export function createSwarmHypervisor(opts) {
         integrationFailures,
         integrationBranch,
         skipped,
+        report: integrationReport,
         error: err.message,
       });
 
@@ -1145,6 +1235,7 @@ export function createSwarmHypervisor(opts) {
         integrationFailures,
         integrationBranch,
         skipped,
+        report: integrationReport,
         results: [...results.values()],
         partial: true,
         error: err.message,
@@ -1164,6 +1255,7 @@ export function createSwarmHypervisor(opts) {
       integrationFailures,
       integrationBranch,
       skipped,
+      report: integrationReport,
     });
 
     if (failed.length > 0 && integrated.length === 0) {
@@ -1181,6 +1273,7 @@ export function createSwarmHypervisor(opts) {
       integrationFailures,
       integrationBranch,
       skipped,
+      report: integrationReport,
       results: [...results.values()],
       partial: failed.length > 0,
     });
@@ -1198,9 +1291,10 @@ export function createSwarmHypervisor(opts) {
       failureReason = null,
     } = {},
   ) {
-    if (!worker?.worktreePath || shard?.host) return;
-    if (failureReason && keepFailedWorktrees) return;
-    if (cleanedWorktreePaths.has(worker.worktreePath)) return;
+    const outcome = { recoveryPatch: null, processCleanup: null };
+    if (!worker?.worktreePath || shard?.host) return outcome;
+    if (failureReason && keepFailedWorktrees) return outcome;
+    if (cleanedWorktreePaths.has(worker.worktreePath)) return outcome;
 
     // Best-effort: preserve any uncommitted worker changes before removing
     // the worktree. Silent on failure — must not block cleanup or mask the
@@ -1213,6 +1307,10 @@ export function createSwarmHypervisor(opts) {
           recoveryDir: join(workdir, ".codex-swarm", "recovery"),
         });
         if (preservation?.ok && !preservation.skipped) {
+          outcome.recoveryPatch = {
+            patchPath: preservation.patchPath,
+            manifestPath: preservation.manifestPath || null,
+          };
           eventLog.append("recovery_patch_saved", {
             shard: shardName,
             worktreePath: worker.worktreePath,
@@ -1236,6 +1334,7 @@ export function createSwarmHypervisor(opts) {
         runId: plan?.runId || runId,
         shardName,
       });
+      outcome.processCleanup = processCleanup;
       worker.processCleanup = processCleanup;
       recordProcessCleanup(processCleanup);
       eventLog.append("process_cleanup", {
@@ -1275,6 +1374,8 @@ export function createSwarmHypervisor(opts) {
         error: err.message,
       });
     }
+
+    return outcome;
   }
 
   /**
@@ -1387,6 +1488,7 @@ export function createSwarmHypervisor(opts) {
         integrationFailures: [...integrationPromiseState.integrationFailures],
         skipped: [...integrationPromiseState.skipped],
         integrationBranch: integrationPromiseState.integrationBranch,
+        report: integrationPromiseState.report.map((row) => ({ ...row })),
         processCleanup: Object.freeze({
           totalKilled: integrationPromiseState.processCleanup.totalKilled,
           byCategory: Object.freeze({

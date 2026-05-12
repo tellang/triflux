@@ -312,7 +312,7 @@ describe("worktree-lifecycle", () => {
     assert.match(result.fsmonitorStop.error, /fatal: ipc failure/);
   });
 
-  it("W-08 (#127): rebaseShardOntoIntegration — cherry-pick applies shard commits to integration", async () => {
+  it("W-08 (#127/#191): rebaseShardOntoIntegration — applies shard commits to integration", async () => {
     const { writeFileSync } = await import("node:fs");
     const wt = await ensureWorktree({
       slug: "cp-basic",

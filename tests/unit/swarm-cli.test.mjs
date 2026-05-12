@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { assertTtyForSwarm, parseFlags } from "../../hub/team/swarm-cli.mjs";
+import {
+  assertTtyForSwarm,
+  formatIntegrationReport,
+  parseFlags,
+} from "../../hub/team/swarm-cli.mjs";
 
 describe("swarm-cli parseFlags — --base", () => {
   it("default baseBranch is 'main' when --base omitted", () => {
@@ -127,5 +131,43 @@ describe("swarm-cli assertTtyForSwarm — #116-C non-TTY policy (v10.15+: warn-a
     });
     assert.equal(result.ok, false);
     assert.match(result.reason, /TFX_BLOCK_NON_TTY_SWARM=1/);
+  });
+});
+
+describe("swarm-cli integration report", () => {
+  it("renders explicit strategy, final sha, notes, and recovery count", () => {
+    const report = formatIntegrationReport([
+      {
+        shard: "shard-1",
+        strategy: "auto-ff",
+        commits: 3,
+        finalSha: "a1b2c3d4",
+        notes: "linear (merge --ff-only)",
+      },
+      {
+        shard: "shard-2",
+        strategy: "cherry-pick",
+        commits: 2,
+        finalSha: "e4f5g6h7",
+        notes: "auto-ff failed: diverged",
+      },
+      {
+        shard: "shard-3",
+        strategy: "failed",
+        commits: null,
+        finalSha: null,
+        notes: "conflict in pkg.json",
+        recoveryPatch: ".codex-swarm/recovery/shard-3.patch",
+      },
+    ]);
+
+    assert.match(report, /=== INTEGRATION REPORT ===/u);
+    assert.match(report, /shard-1\s+auto-ff\s+3\s+a1b2c3/u);
+    assert.match(report, /shard-2\s+cherry-pick\s+2\s+e4f5g6/u);
+    assert.match(
+      report,
+      /shard-3\s+failed\s+-\s+-\s+conflict in pkg\.json; recovery: \.codex-swarm\/recovery\/shard-3\.patch/u,
+    );
+    assert.match(report, /TOTAL: 2\/3 integrated, 1 recovery patch saved\./u);
   });
 });

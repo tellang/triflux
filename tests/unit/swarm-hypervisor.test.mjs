@@ -861,6 +861,89 @@ describe("swarm-hypervisor", () => {
       assert.equal(hv.getStatus().integrationPromise.partial, true);
     });
 
+    it("reports per-shard integration strategy and recovery patch trail", async () => {
+      const plan = planSwarm(null, { content: PARALLEL_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "integration-report",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/integration-report/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardBranch }) =>
+            shardBranch.endsWith("/worker-a")
+              ? {
+                  ok: true,
+                  headCommit: "aaa1111",
+                  strategy: "auto-ff",
+                  commits: 3,
+                  notes: "linear (merge --ff-only)",
+                }
+              : {
+                  ok: false,
+                  strategy: "failed",
+                  commits: 2,
+                  error: "conflict in pkg.json",
+                },
+          cleanupWorktree: async () => {},
+          preserveWorktreePatch: async (opts) => ({
+            ok: true,
+            patchPath: `${opts.recoveryDir}/${opts.shardId}.patch`,
+            manifestPath: `${opts.recoveryDir}/manifest.json`,
+          }),
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].complete();
+      conductors[1].complete();
+
+      const result = await hv.integrationComplete();
+
+      assert.deepEqual(result.integrated, ["worker-a"]);
+      assert.deepEqual(result.integrationFailures, ["worker-b"]);
+      assert.equal(result.report.length, 2);
+      assert.deepEqual(result.report[0], {
+        shard: "worker-a",
+        strategy: "auto-ff",
+        commits: 3,
+        finalSha: "aaa1111",
+        notes: "linear (merge --ff-only)",
+        recoveryPatch: null,
+      });
+      assert.equal(result.report[1].shard, "worker-b");
+      assert.equal(result.report[1].strategy, "failed");
+      assert.equal(result.report[1].commits, 2);
+      assert.match(result.report[1].notes, /conflict in pkg\.json/u);
+      assert.equal(
+        result.report[1].recoveryPatch,
+        `${join(workdir, ".codex-swarm", "recovery")}/worker-b.patch`,
+      );
+      assert.deepEqual(hv.getStatus().integrationPromise.report, result.report);
+
+      let reportEvents = [];
+      await waitForCondition(() => {
+        reportEvents = readEventLog(hv.eventLogPath).filter(
+          (entry) => entry.event === "integration_shard_report",
+        );
+        return reportEvents.length === 2;
+      });
+      assert.equal(reportEvents.length, 2);
+      assert.equal(reportEvents[0].strategy, "auto-ff");
+      assert.equal(
+        reportEvents[1].recoveryPatch,
+        result.report[1].recoveryPatch,
+      );
+    });
+
     it("cascades dep failure to dependents so integration can complete", async () => {
       const plan = planSwarm(null, { content: SIMPLE_NO_FILES_PRD });
       const { createConductor, conductors } = createMockConductorFactory();

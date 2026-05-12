@@ -150,6 +150,40 @@ function printPlan(plan) {
   }
 }
 
+function formatCell(value, width) {
+  const text = value == null || value === "" ? "-" : String(value);
+  return text.padEnd(width).slice(0, width);
+}
+
+export function formatIntegrationReport(report = []) {
+  const rows = Array.isArray(report) ? report : [];
+  const lines = [
+    "=== INTEGRATION REPORT ===",
+    "SHARD     STRATEGY       COMMITS  FINAL_SHA  NOTES",
+  ];
+
+  let integrated = 0;
+  let recoveryPatches = 0;
+  for (const row of rows) {
+    if (row.strategy !== "failed") integrated += 1;
+    if (row.recoveryPatch) recoveryPatches += 1;
+    const finalSha = row.finalSha ? String(row.finalSha).slice(0, 7) : "-";
+    const notes = row.recoveryPatch
+      ? `${row.notes || "failed"}; recovery: ${row.recoveryPatch}`
+      : row.notes || "-";
+    lines.push(
+      `${formatCell(row.shard, 9)} ${formatCell(row.strategy, 14)} ${formatCell(row.commits, 8)} ${formatCell(finalSha, 10)} ${notes}`,
+    );
+  }
+
+  const total = rows.length;
+  lines.push("");
+  lines.push(
+    `TOTAL: ${integrated}/${total} integrated, ${recoveryPatches} recovery patch${recoveryPatches === 1 ? "" : "es"} saved.`,
+  );
+  return lines.join("\n");
+}
+
 /**
  * tfx swarm <prd-path> — PRD 실행
  */
@@ -255,6 +289,10 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
     console.log(
       `  ${RED}integration failures:${RESET} ${ip.integrationFailures.join(", ")}`,
     );
+  }
+
+  if (Array.isArray(ip.report) && ip.report.length > 0) {
+    console.log(`\n${formatIntegrationReport(ip.report)}`);
   }
 
   if (flags.json) {

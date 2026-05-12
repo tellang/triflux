@@ -169,6 +169,7 @@ test("rebaseShardOntoIntegration: cherry-pick conflict rewinds integrationBranch
     });
 
     assert.equal(result.ok, false, "should fail — cherry-pick conflict");
+    assert.equal(result.strategy, "failed");
 
     // integrationBranch ref rewound to its backup (reset --hard path).
     const afterMergeSha = await git(repo, ["rev-parse", "swarm/r/merge"]);
@@ -200,7 +201,7 @@ test("rebaseShardOntoIntegration: cherry-pick conflict rewinds integrationBranch
   });
 });
 
-test("rebaseShardOntoIntegration: happy path cherry-picks shard commits (regression guard)", async () => {
+test("rebaseShardOntoIntegration: happy path auto-fast-forwards linear shard commits", async () => {
   await withTempRepo(async ({ repo }) => {
     // Shard branch with a real file commit we expect to land on integration.
     await git(repo, ["checkout", "-q", "-b", "swarm/r/shard", "main"]);
@@ -222,8 +223,10 @@ test("rebaseShardOntoIntegration: happy path cherry-picks shard commits (regress
     });
 
     assert.equal(result.ok, true, "happy path should succeed");
+    assert.equal(result.strategy, "auto-ff");
+    assert.equal(result.commits, 1);
 
-    // integrationBranch advanced past its base by one cherry-picked commit.
+    // integrationBranch advanced by fast-forward to the shard commit.
     const mergeSha = await git(repo, ["rev-parse", "swarm/r/merge"]);
     assert.notEqual(
       mergeSha,
@@ -237,19 +240,51 @@ test("rebaseShardOntoIntegration: happy path cherry-picks shard commits (regress
       "swarm/r/merge",
     ]);
     assert.equal(mergeSubject, "shard feature");
-
-    // Cherry-pick preserves the tree; sha differs but subject matches.
-    assert.notEqual(
-      await git(repo, ["rev-parse", "swarm/r/merge"]),
-      shardSha,
-      "cherry-pick creates a new commit sha",
-    );
+    assert.equal(mergeSha, shardSha, "auto-ff keeps the original shard sha");
 
     // Caller branch (main) untouched.
     assert.equal(
       await git(repo, ["rev-parse", "main"]),
       callerBefore,
       "main stays at base after happy path",
+    );
+    assert.equal(
+      await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]),
+      "main",
+      "HEAD restored to caller",
+    );
+  });
+});
+
+test("rebaseShardOntoIntegration: divergent integration branch reports cherry-pick fallback", async () => {
+  await withTempRepo(async ({ repo }) => {
+    await git(repo, ["checkout", "-q", "-b", "swarm/r/shard", "main"]);
+    await writeFile(join(repo, "shard.txt"), "shard content\n");
+    await git(repo, ["add", "shard.txt"]);
+    await git(repo, ["commit", "-q", "-m", "shard feature"]);
+
+    await git(repo, ["checkout", "-q", "-b", "swarm/r/merge", "main"]);
+    await writeFile(join(repo, "integration.txt"), "integration content\n");
+    await git(repo, ["add", "integration.txt"]);
+    await git(repo, ["commit", "-q", "-m", "integration base"]);
+    const backupSha = await git(repo, ["rev-parse", "HEAD"]);
+
+    await git(repo, ["checkout", "-q", "main"]);
+
+    const result = await rebaseShardOntoIntegration({
+      shardBranch: "swarm/r/shard",
+      integrationBranch: "swarm/r/merge",
+      rootDir: repo,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.strategy, "cherry-pick");
+    assert.equal(result.commits, 1);
+    assert.match(result.notes, /auto-ff failed/u);
+    assert.notEqual(
+      await git(repo, ["rev-parse", "swarm/r/merge"]),
+      backupSha,
+      "integration branch advances after cherry-pick fallback",
     );
     assert.equal(
       await git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]),
