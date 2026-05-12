@@ -27,6 +27,10 @@ function main() {
     process.exit(0);
   }
 
+  if (input.hook_event_name && input.hook_event_name !== "SubagentStop") {
+    process.exit(0);
+  }
+
   const agentType = input.agent_type || input.subagent_type || "unknown";
   const result = input.tool_output || input.result || "";
   const resultStr =

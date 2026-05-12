@@ -8,6 +8,19 @@
     "external_priority": 100
   },
   "events": {
+    "PermissionRequest": [
+      {
+        "id": "tfx-permission-safe-allow",
+        "source": "triflux",
+        "matcher": "Bash",
+        "command": "node \"${PLUGIN_ROOT}/hooks/permission-safe-allow.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 2,
+        "blocking": false,
+        "description": "안전한 repo-local Bash PermissionRequest 자동 허용 (#245)"
+      }
+    ],
     "PreToolUse": [
       {
         "id": "tfx-safety-guard",
@@ -252,17 +265,67 @@
         "description": "MCP 고아 프로세스 정리"
       }
     ],
+    "SessionEnd": [
+      {
+        "id": "tfx-session-end-cleanup",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/session-end-cleanup.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "세션 종료 시 lifecycle 상태 보고 및 opt-in 정리 (#245)"
+      }
+    ],
+    "SubagentStart": [
+      {
+        "id": "tfx-subagent-tracker",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/subagent-tracker.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 2,
+        "blocking": false,
+        "description": "서브에이전트 lifecycle 시작/종료 상태 추적 (#245)"
+      }
+    ],
     "SubagentStop": [
+      {
+        "id": "tfx-subagent-tracker",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/subagent-tracker.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 2,
+        "blocking": false,
+        "description": "서브에이전트 lifecycle 시작/종료 상태 추적 (#245)"
+      },
       {
         "id": "tfx-subagent-verifier",
         "source": "triflux",
         "matcher": "*",
         "command": "node \"${PLUGIN_ROOT}/hooks/subagent-verifier.mjs\"",
-        "priority": 0,
+        "priority": 1,
         "enabled": true,
         "timeout": 3,
         "blocking": false,
         "description": "서브에이전트 결과 품질 체크"
+      }
+    ],
+    "PreCompact": [
+      {
+        "id": "tfx-pre-compact-snapshot",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/pre-compact-snapshot.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "compact 직전 repo-local 진행 상태 스냅샷 주입 (#245)"
       }
     ]
   }
