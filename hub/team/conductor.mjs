@@ -45,6 +45,7 @@ import {
   registerSynapseSession,
   unregisterSynapseSession,
 } from "./synapse-http.mjs";
+import { buildWorkerSandboxEnv } from "./worker-sandbox.mjs";
 
 /** 세션 상태 */
 export const STATES = Object.freeze({
@@ -89,7 +90,14 @@ const DEFAULT_GRACE_MS = 10_000;
  * @param {object} eventLog — createEventLog 인스턴스
  * @param {object} brokerInstance — AccountBroker 인스턴스
  */
-function swapAuthFile(lease, agent, sessionId, eventLog, brokerInstance) {
+function swapAuthFile(
+  lease,
+  agent,
+  sessionId,
+  eventLog,
+  brokerInstance,
+  targetEnv = {},
+) {
   if (lease?.mode !== "auth" || !lease.authFile) return true;
   if (
     agent === "codex" &&
@@ -114,12 +122,14 @@ function swapAuthFile(lease, agent, sessionId, eventLog, brokerInstance) {
     });
     return false;
   }
+  const targetHome = targetEnv.HOME || homedir();
+  const codexHome = targetEnv.CODEX_HOME || join(targetHome, ".codex");
   const dests =
     agent === "codex"
-      ? [join(homedir(), ".codex", "auth.json")]
+      ? [join(codexHome, "auth.json")]
       : [
-          join(homedir(), ".gemini", "oauth_creds.json"),
-          join(homedir(), ".gemini", "gemini-credentials.json"),
+          join(targetHome, ".gemini", "oauth_creds.json"),
+          join(targetHome, ".gemini", "gemini-credentials.json"),
         ];
   let allOk = true;
   for (const dest of dests) {
@@ -571,19 +581,26 @@ export function createConductor(opts = {}) {
       }
     }
 
+    const spawnEnv = {
+      ...process.env,
+      ...launcher.env,
+      ...(session.config.env || {}),
+      ...(session.config.branchGuard ? { TRIFLUX_GIT_BRANCH_GUARD: "1" } : {}),
+    };
+    if (session.config.workerSandbox?.root) {
+      eventLog.append("worker_sandbox_env", {
+        session: session.id,
+        root: session.config.workerSandbox.root,
+        codeHomePreserved: Boolean(spawnEnv.CODEX_HOME),
+      });
+    }
+
     let child;
     try {
       child = spawnFn(spawnSpec.command, spawnSpec.args, {
         shell: false,
         cwd: spawnCwd,
-        env: {
-          ...process.env,
-          ...launcher.env,
-          ...(session.config.env || {}),
-          ...(session.config.branchGuard
-            ? { TRIFLUX_GIT_BRANCH_GUARD: "1" }
-            : {}),
-        },
+        env: spawnEnv,
         reason: `conductor:respawnSession:${session.id}`,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
@@ -1021,17 +1038,47 @@ export function createConductor(opts = {}) {
     }
 
     // apply lease profile/env/auth to config (immutable — new object)
-    const resolvedConfig = lease
+    const leaseEnv =
+      lease?.authFile && config.agent === "codex"
+        ? { ...(lease.env || {}), CODEX_HOME: dirname(lease.authFile) }
+        : lease?.env || {};
+
+    let resolvedConfig = lease
       ? {
           ...config,
           profile: lease.profile ?? config.profile,
-          env: { ...(config.env || {}), ...(lease.env || {}) },
+          env: { ...(config.env || {}), ...leaseEnv },
           accountId: lease.id,
         }
-      : config;
+      : {
+          ...config,
+          env: { ...(config.env || {}) },
+        };
+
+    if (!resolvedConfig.remote) {
+      const sandbox = buildWorkerSandboxEnv({
+        cwd: resolvedConfig.workdir || process.cwd(),
+        sessionId: resolvedConfig.id,
+        env: { ...process.env, ...(resolvedConfig.env || {}) },
+      });
+      resolvedConfig = {
+        ...resolvedConfig,
+        env: { ...(resolvedConfig.env || {}), ...sandbox.env },
+        workerSandbox: sandbox.disabled
+          ? { disabled: true }
+          : { root: sandbox.root, home: sandbox.home },
+      };
+    }
 
     // auth file copy — broker resolved absolute path, conductor does the actual copy
-    swapAuthFile(lease, config.agent, config.id, eventLog, activeBroker);
+    swapAuthFile(
+      lease,
+      config.agent,
+      config.id,
+      eventLog,
+      activeBroker,
+      resolvedConfig.env,
+    );
 
     // 원격 세션은 launcher 불필요 (이미 원격에서 실행 중)
     const launcher = resolvedConfig.remote
@@ -1193,6 +1240,12 @@ export function createConductor(opts = {}) {
 
           const newLease = brokerInstance.lease({ provider });
           if (!newLease) continue;
+          if (newLease.authFile && provider === "codex") {
+            session.config.env = {
+              ...(session.config.env || {}),
+              CODEX_HOME: dirname(newLease.authFile),
+            };
+          }
 
           swapAuthFile(
             newLease,
@@ -1200,6 +1253,7 @@ export function createConductor(opts = {}) {
             session.id,
             eventLog,
             brokerInstance,
+            session.config.env,
           );
           eventLog.append("tier_fallback_swap", {
             session: session.id,

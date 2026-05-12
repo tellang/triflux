@@ -79,6 +79,7 @@ export async function startNativeSupervisor({
       {
         sessionName: sessionId,
         hubUrl,
+        workdir: process.cwd(),
         startupDelayMs: 3000,
         logsDir,
         runtimeFile: runtimePath,
