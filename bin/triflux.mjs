@@ -77,6 +77,7 @@ import {
   getVersion,
   getWindowsHubAutostartStatus,
   hasProfileSection,
+  isSetupUserStateFile,
   LEGACY_CODEX_MODELS,
   REQUIRED_CODEX_PROFILES,
   replaceProfileSection,
@@ -1206,6 +1207,7 @@ function cmdSetup(options = {}) {
       if (existsSync(refSrc)) {
         mkdirSync(refDst, { recursive: true });
         for (const refFile of readdirSync(refSrc)) {
+          if (isSetupUserStateFile(refFile)) continue;
           const rSrc = join(refSrc, refFile);
           const rDst = join(refDst, refFile);
           if (statSync(rSrc).isFile()) {

@@ -203,6 +203,15 @@ describe("setup-sync: user-state file exclusions", () => {
     assert.equal(isSetupUserStateFile("hosts.json"), true);
     assert.equal(isSetupUserStateFile("SKILL.md"), false);
   });
+
+  it("tfx setup CLI path also skips user-state references", () => {
+    const source = readFileSync(
+      join(PROJECT_ROOT, "bin", "triflux.mjs"),
+      "utf8",
+    );
+    assert.match(source, /isSetupUserStateFile/u);
+    assert.match(source, /if \(isSetupUserStateFile\(refFile\)\) continue;/u);
+  });
 });
 
 describe("setup-sync: dry-run 실행", () => {

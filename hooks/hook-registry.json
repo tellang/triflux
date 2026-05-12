@@ -264,6 +264,19 @@
         "blocking": false,
         "description": "서브에이전트 결과 품질 체크"
       }
+    ],
+    "PreCompact": [
+      {
+        "id": "tfx-pre-compact-snapshot",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/pre-compact-snapshot.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 3,
+        "blocking": false,
+        "description": "compact 직전 repo-local 진행 상태 스냅샷 주입 (#245)"
+      }
     ]
   }
 }
