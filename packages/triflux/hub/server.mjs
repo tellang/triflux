@@ -64,6 +64,7 @@ import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
 registerTeamBridge(nativeProxy);
 
 const hubLog = createModuleLogger("hub");
+const brokerDiagnosticsAttached = new WeakSet();
 
 const MAX_BODY_SIZE = 1024 * 1024;
 const PUBLIC_PATHS = new Set(["/", "/status", "/health", "/healthz"]);
@@ -673,6 +674,45 @@ function getQosStatsPayload() {
   };
 }
 
+export function sanitizeBrokerDiagnosticEvent(event = {}) {
+  const diagnostic = {
+    accountId: event.accountId ?? event.id,
+    provider: event.provider,
+    direction: event.direction,
+    reason: event.reason,
+    error: event.error,
+  };
+  return Object.fromEntries(
+    Object.entries(diagnostic).filter(([, value]) => value !== undefined),
+  );
+}
+
+export function attachBrokerDiagnostics(currentBroker, logger = hubLog) {
+  if (
+    !currentBroker ||
+    typeof currentBroker.on !== "function" ||
+    brokerDiagnosticsAttached.has(currentBroker)
+  ) {
+    return false;
+  }
+
+  currentBroker.on("securityViolation", (event) => {
+    logger.warn(
+      { brokerEvent: sanitizeBrokerDiagnosticEvent(event) },
+      "broker.security_violation",
+    );
+  });
+  currentBroker.on("authSyncError", (event) => {
+    logger.warn(
+      { brokerEvent: sanitizeBrokerDiagnosticEvent(event) },
+      "broker.auth_sync_error",
+    );
+  });
+
+  brokerDiagnosticsAttached.add(currentBroker);
+  return true;
+}
+
 function syncBrokerAuthCache(currentBroker, logger = hubLog) {
   if (
     !currentBroker?.snapshot ||
@@ -819,6 +859,7 @@ export async function startHub({
   });
   if (existingHub) return existingHub;
 
+  attachBrokerDiagnostics(brokerInstance);
   syncBrokerAuthCache(brokerInstance);
 
   const hubIdleTimeoutMs = parsePositiveInt(
@@ -1231,6 +1272,7 @@ export async function startHub({
         if (!result.ok) {
           return writeJson(res, 200, { ok: false, error: result.error });
         }
+        attachBrokerDiagnostics(result.broker);
         syncBrokerAuthCache(result.broker);
         const accounts = getBrokerPublicSnapshot(result.broker).length;
         return writeJson(res, 200, { ok: true, accounts });
