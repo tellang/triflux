@@ -81,7 +81,11 @@ conductor, headless, swarm-hypervisor가 하나의 AccountBroker 싱글턴을 �
 |------|------|
 | 계정별 CircuitBreaker | 장애 격리 — 한 계정 오류가 다른 계정에 전파되지 않음 |
 | busy 플래그 | 동일 계정 이중 임대(double-lease) 방지 |
-| `/broker/reload` | 장시간 세션 중 accounts.json 핫리로드 |
+| `/broker/reload` | 장시간 세션 중 accounts.json 핫리로드. active lease ownership은 reload 후에도 보존 |
+| Adapter no-lease 정책 | headless adapter는 broker가 비활성/empty이면 기본 CLI auth path로 실행, broker가 enabled인데 lease가 없으면 `circuit_open` 실패 |
+| Conductor no-lease 정책 | 로컬 Conductor 세션은 `broker_no_lease`를 event log에 남기고 spawn은 계속 진행. accountId가 없으므로 release는 호출하지 않음 |
+| Public snapshot 정책 | `/broker/snapshot`과 dashboard는 `publicSnapshot()`만 사용. `env`, `authFile`, `profile`, `host`, 파일 경로, raw failure timestamp는 공개하지 않음 |
+| Diagnostic 이벤트 | `securityViolation`, `authSyncError`는 hub가 redacted warn 로그(`broker.security_violation`, `broker.auth_sync_error`)로 처리 |
 | EventEmitter 이벤트 | `lease`, `release`, `cooldown`, `tierFallback`, `circuitOpen`, `circuitClose`, `noAvailableAccounts` — HUD 연동용 |
 </account-broker>
 

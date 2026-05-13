@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -152,6 +152,12 @@ function waitFor(fn, timeoutMs = 3000, intervalMs = 50) {
     };
     check();
   });
+}
+
+function readJsonl(filePath) {
+  const text = readFileSync(filePath, "utf8").trim();
+  if (!text) return [];
+  return text.split("\n").map((line) => JSON.parse(line));
 }
 
 // ── 테스트 ───────────────────────────────────────────────────────────────────
@@ -715,5 +721,56 @@ describe("conductor: eventLogPath", () => {
       `예상: .jsonl 확장자, 실제: ${logPath}`,
     );
     assert.ok(logPath.includes("conductor-events"));
+  });
+});
+
+// ── 11-1. broker no-lease policy ─────────────────────────────────────────────
+
+describe("conductor: broker no-lease policy", () => {
+  it("records broker_no_lease but still spawns local sessions", async () => {
+    await conductor.shutdown("recreate_for_broker_no_lease");
+
+    const calls = { lease: [], release: [] };
+    const eta = Date.now() + 60_000;
+    const broker = new EventEmitter();
+    broker.lease = (request) => {
+      calls.lease.push(request);
+      return null;
+    };
+    broker.nextAvailableEta = (provider) => {
+      assert.equal(provider, "codex");
+      return eta;
+    };
+    broker.release = (accountId, result) => {
+      calls.release.push({ accountId, result });
+    };
+    conductor = makeConductor(logsDir, { broker });
+
+    const cfg = minConfig({ id: "broker-no-lease", agent: "codex" });
+    conductor.spawnSession(cfg);
+
+    await waitFor(() => conductor.getSnapshot()[0]?.state === STATES.COMPLETED);
+    const events = await waitFor(() => {
+      const entries = readJsonl(conductor.eventLogPath);
+      return entries.some((event) => event.event === "spawn") &&
+        entries.some((event) => event.event === "broker_no_lease")
+        ? entries
+        : null;
+    });
+
+    assert.deepEqual(calls.lease, [{ provider: "codex" }]);
+    assert.deepEqual(calls.release, []);
+
+    const noLease = events.find((event) => event.event === "broker_no_lease");
+    assert.equal(noLease.session, cfg.id);
+    assert.equal(noLease.agent, "codex");
+    assert.equal(typeof noLease.eta, "string");
+    assert.equal(noLease.eta, new Date(eta).toISOString());
+
+    const spawn = events.find(
+      (event) => event.event === "spawn" && event.session === cfg.id,
+    );
+    assert.ok(spawn, "spawn event missing after broker_no_lease");
+    assert.equal(spawn.agent, "codex");
   });
 });

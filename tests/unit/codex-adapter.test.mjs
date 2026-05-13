@@ -67,6 +67,7 @@ async function withSandbox(fn) {
     USERPROFILE: process.env.USERPROFILE,
     FAKE_CODEX_FAIL: process.env.FAKE_CODEX_FAIL,
     FAKE_CODEX_ECHO_AUTH: process.env.FAKE_CODEX_ECHO_AUTH,
+    TFX_DISABLE_ACCOUNT_BROKER: process.env.TFX_DISABLE_ACCOUNT_BROKER,
   };
 
   process.env.PATH = `${sandbox.bin}${delimiter}${process.env.PATH || ""}`;
@@ -74,6 +75,7 @@ async function withSandbox(fn) {
   process.env.USERPROFILE = sandbox.home;
   delete process.env.FAKE_CODEX_FAIL;
   delete process.env.FAKE_CODEX_ECHO_AUTH;
+  delete process.env.TFX_DISABLE_ACCOUNT_BROKER;
 
   try {
     await fn(sandbox);
@@ -87,6 +89,12 @@ async function withSandbox(fn) {
       delete process.env.FAKE_CODEX_ECHO_AUTH;
     } else {
       process.env.FAKE_CODEX_ECHO_AUTH = previous.FAKE_CODEX_ECHO_AUTH;
+    }
+    if (previous.TFX_DISABLE_ACCOUNT_BROKER == null) {
+      delete process.env.TFX_DISABLE_ACCOUNT_BROKER;
+    } else {
+      process.env.TFX_DISABLE_ACCOUNT_BROKER =
+        previous.TFX_DISABLE_ACCOUNT_BROKER;
     }
     rmSync(sandbox.root, { recursive: true, force: true });
   }
@@ -175,6 +183,45 @@ test("execute returns stdout for successful codex exec", async () => {
     assert.equal(result.retried, false);
     assert.equal(result.failureMode, null);
     assert.match(result.output, /^EXEC:hello$/);
+  });
+});
+
+test("execute uses default Codex path when AccountBroker is disabled", async () => {
+  await withSandbox(async ({ home, root }) => {
+    writeFileSync(
+      join(home, ".codex", "config.toml"),
+      'approval_mode = "full-auto"\n',
+      "utf8",
+    );
+
+    const brokerDir = join(home, ".claude", "cache", "tfx-hub");
+    mkdirSync(brokerDir, { recursive: true });
+    writeFileSync(
+      join(brokerDir, "accounts.json"),
+      JSON.stringify({
+        codex: [{ id: "disabled-codex", mode: "profile", profile: "default" }],
+      }),
+      "utf8",
+    );
+    process.env.TFX_DISABLE_ACCOUNT_BROKER = "1";
+
+    const brokerMod = await import("../../hub/account-broker.mjs");
+    brokerMod.reloadBroker();
+    assert.equal(brokerMod.broker.isDisabled, true);
+
+    const { execute } = await importFresh("../../hub/codex-adapter.mjs");
+    const result = await execute({
+      prompt: "broker-disabled",
+      workdir: root,
+      retryOnFail: false,
+      fallbackToClaude: false,
+      timeout: 5000,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.fellBack, false);
+    assert.equal(result.failureMode, null);
+    assert.equal(result.output, "EXEC:broker-disabled");
   });
 });
 
