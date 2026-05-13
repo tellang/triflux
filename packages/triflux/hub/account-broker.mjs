@@ -1070,6 +1070,25 @@ class AccountBroker extends EventEmitter {
     }));
   }
 
+  publicSnapshot() {
+    const now = Date.now();
+    this.#pruneExpiredLeases(now);
+    return [...this.#state.values()].map((acct) => ({
+      id: acct.id,
+      provider: acct.provider,
+      tier: acct.tier ?? "unknown",
+      busy: acct.busy === true,
+      cooldownUntil: acct.cooldownUntil ?? 0,
+      lastUsedAt: acct.lastUsedAt ?? 0,
+      totalSessions: acct.totalSessions ?? 0,
+      remainingMs: getRemainingLeaseMs(acct, now),
+      circuitState: this.#getCircuitState(acct, now).state,
+      failureCount: Array.isArray(acct.failureTimestamps)
+        ? acct.failureTimestamps.length
+        : 0,
+    }));
+  }
+
   activeLeases() {
     const now = Date.now();
     this.#pruneExpiredLeases(now);

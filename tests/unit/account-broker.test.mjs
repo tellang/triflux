@@ -234,6 +234,81 @@ describe("AccountBroker", () => {
     assert.ok(snap.every((a) => typeof a.remainingMs === "number"));
   });
 
+  it("publicSnapshot redacts credential-bearing fields and reports safe state", () => {
+    const broker = AccountBroker({
+      codex: [
+        {
+          id: "codex-profile",
+          mode: "profile",
+          profile: "codex53_high",
+          tier: "pro",
+          host: "m5",
+        },
+        {
+          id: "codex-auth",
+          mode: "auth",
+          authFile: "codex-auth-secret.json",
+          tier: "plus",
+          host: "ryzen",
+        },
+      ],
+      gemini: [
+        {
+          id: "gemini-env",
+          mode: "env",
+          env: { GOOGLE_API_KEY: "secret-key" },
+          tier: "free",
+          host: "m2",
+        },
+      ],
+    });
+
+    const lease = broker.lease({ provider: "codex", remote: true });
+    assert.ok(lease);
+    assert.equal(lease.id, "codex-profile");
+    broker.release(lease.id, { ok: false });
+
+    const accounts = broker.publicSnapshot();
+    assert.equal(accounts.length, 3);
+
+    const profile = accounts.find((entry) => entry.id === "codex-profile");
+    assert.ok(profile);
+    assert.deepEqual(
+      Object.keys(profile).sort(),
+      [
+        "busy",
+        "circuitState",
+        "cooldownUntil",
+        "failureCount",
+        "id",
+        "lastUsedAt",
+        "provider",
+        "remainingMs",
+        "tier",
+        "totalSessions",
+      ].sort(),
+    );
+    assert.equal(profile.provider, "codex");
+    assert.equal(profile.tier, "pro");
+    assert.equal(profile.busy, false);
+    assert.equal(profile.failureCount, 1);
+    assert.equal(profile.circuitState, "closed");
+
+    for (const account of accounts) {
+      assert.equal("mode" in account, false);
+      assert.equal("profile" in account, false);
+      assert.equal("env" in account, false);
+      assert.equal("authFile" in account, false);
+      assert.equal("host" in account, false);
+      assert.equal("failureTimestamps" in account, false);
+      assert.equal(JSON.stringify(account).includes("secret-key"), false);
+      assert.equal(
+        JSON.stringify(account).includes("codex-auth-secret"),
+        false,
+      );
+    }
+  });
+
   it("release is a no-op for idle accounts", () => {
     const broker = makeBroker();
 
