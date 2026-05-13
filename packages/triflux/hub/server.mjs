@@ -716,6 +716,13 @@ function syncBrokerAuthCache(currentBroker, logger = hubLog) {
   });
 }
 
+function getBrokerPublicSnapshot(currentBroker = brokerInstance) {
+  if (!currentBroker || typeof currentBroker.publicSnapshot !== "function") {
+    return [];
+  }
+  return currentBroker.publicSnapshot();
+}
+
 function resolvePublicFilePath(path) {
   let relativePath = null;
   if (path === "/dashboard") {
@@ -1185,7 +1192,7 @@ export async function startHub({
       }
 
       if (path === "/broker/snapshot" && req.method === "GET") {
-        const snap = brokerInstance?.snapshot() || [];
+        const snap = getBrokerPublicSnapshot(brokerInstance);
         return writeJson(res, 200, {
           ok: true,
           accounts: snap,
@@ -1225,9 +1232,7 @@ export async function startHub({
           return writeJson(res, 200, { ok: false, error: result.error });
         }
         syncBrokerAuthCache(result.broker);
-        const accounts = result.broker
-          ? [...result.broker.snapshot()].length
-          : 0;
+        const accounts = getBrokerPublicSnapshot(result.broker).length;
         return writeJson(res, 200, { ok: true, accounts });
       }
 
