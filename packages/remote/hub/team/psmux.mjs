@@ -1,4 +1,15 @@
-// hub/team/psmux.mjs — Windows psmux 세션/키바인딩/캡처/steering 관리
+// hub/team/psmux.mjs — terminal multiplexer 세션/키바인딩/캡처/steering 관리
+//
+// 역사: psmux 는 Windows pwsh7 환경용 tmux 호환 클론 (Windows 에서 tmux 가
+// 깔리지 않거나 ConPTY 호환이 부족할 때 대안). triflux 는 원래 Windows 첫
+// 운영 환경이었고 그래서 변수 명에 `PSMUX_` prefix 가 남아있다. 실제 의미는
+// "OS 별 primary multiplexer" 다:
+//   - mac/Linux: tmux 가 primary (POSIX 표준)
+//   - Windows: psmux 가 primary (Windows pwsh7 전용)
+// 이전 코드는 mac 에서 psmux 를 시도하고 tmux 로 silent fallback 했는데,
+// 운영 fact 는 mac 표준이 tmux 라 fallback 이 아닌 정식 primary 다.
+// (PSMUX_BIN 변수 명은 backward-compat 위해 유지)
+//
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
 
 import {
@@ -15,21 +26,26 @@ import { resolveGitBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import childProcess from "@triflux/core/hub/lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 
+// OS 별 primary multiplexer 를 명시적으로 결정한다.
+//   - PSMUX_BIN env 가 있으면 user override (가장 우선)
+//   - Windows: psmux 가 primary. PATH + 기본 설치 경로에서 탐색.
+//   - mac/Linux: tmux 가 primary. PATH 에서만 찾는다 (HomeBrew, apt 등 표준 위치).
+// silent fallback 은 두지 않는다 — primary 가 없으면 의도된 fail.
 const PSMUX_BIN = (() => {
   if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
-  // PATH에서 psmux 찾기
-  try {
-    childProcess.execFileSync("psmux", ["-V"], {
-      stdio: "ignore",
-      timeout: 2000,
-      windowsHide: true,
-    });
-    return "psmux";
-  } catch {
-    /* not in PATH */
-  }
-  // Windows 기본 설치 경로 탐색
+
   if (IS_WINDOWS) {
+    // Windows primary: psmux
+    try {
+      childProcess.execFileSync("psmux", ["-V"], {
+        stdio: "ignore",
+        timeout: 2000,
+        windowsHide: true,
+      });
+      return "psmux";
+    } catch {
+      /* not in PATH */
+    }
     const candidates = [
       join(process.env.LOCALAPPDATA || "", "psmux", "psmux.exe"),
       join(process.env.APPDATA || "", "npm", "psmux.cmd"),
@@ -39,20 +55,20 @@ const PSMUX_BIN = (() => {
     for (const p of candidates) {
       if (existsSync(p)) return p;
     }
+    return "psmux"; // 최종 — hasPsmux/hasMultiplexer 가 검증
   }
-  // macOS/Linux: psmux 없으면 tmux로 fallback (psmux는 tmux 호환 클론)
-  if (!IS_WINDOWS) {
-    try {
-      childProcess.execFileSync("tmux", ["-V"], {
-        stdio: "ignore",
-        timeout: 2000,
-      });
-      return "tmux";
-    } catch {
-      /* tmux도 없음 */
-    }
+
+  // mac/Linux primary: tmux (POSIX 표준). silent fallback 아님 — 정식 primary.
+  try {
+    childProcess.execFileSync("tmux", ["-V"], {
+      stdio: "ignore",
+      timeout: 2000,
+    });
+    return "tmux";
+  } catch {
+    /* tmux not in PATH — hasMultiplexer 가 false 반환할 것 */
   }
-  return "psmux"; // 최종 fallback — 원래대로
+  return "tmux";
 })();
 const GIT_BASH =
   process.env.GIT_BASH_PATH || resolveGitBashExecutable() || "bash";
@@ -582,8 +598,8 @@ function psmux(args, opts = {}) {
   }
 }
 
-/** psmux 실행 가능 여부 확인 */
-export function hasPsmux() {
+/** primary terminal multiplexer (Windows=psmux, mac/Linux=tmux) 실행 가능 여부 */
+export function hasMultiplexer() {
   try {
     childProcess.execFileSync(PSMUX_BIN, ["-V"], {
       stdio: "ignore",
@@ -596,9 +612,20 @@ export function hasPsmux() {
   }
 }
 
-/** PSMUX_BIN이 tmux로 fallback되었는지 여부 */
-export function isTmuxFallback() {
-  return PSMUX_BIN === "tmux";
+/**
+ * backward-compat alias — historical 이름 `hasPsmux` 는 OS 별 primary 의 의미를
+ * 가린다. 외부 caller (scripts/remote-spawn.mjs, scripts/session-spawn-helper.mjs,
+ * tests) 호환을 위해 alias 로 보존. 신규 코드는 hasMultiplexer 사용.
+ */
+export const hasPsmux = hasMultiplexer;
+
+/**
+ * 현재 resolved multiplexer 종류 — "psmux" | "tmux" | <user override path>.
+ * isTmuxFallback() 의 후속 — mac/Linux 에서 tmux 는 fallback 이 아닌 primary 라
+ * "fallback" 표현이 부정확해서 type 으로 정정.
+ */
+export function getMultiplexerType() {
+  return PSMUX_BIN;
 }
 
 /**

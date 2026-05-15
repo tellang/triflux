@@ -32,10 +32,6 @@ export const MODES = Object.freeze({
   AUTO: "auto",
 });
 
-function quotePrompt(prompt) {
-  return JSON.stringify(typeof prompt === "string" ? prompt : "");
-}
-
 function asPrompt(prompt) {
   return typeof prompt === "string" ? prompt : "";
 }
@@ -209,29 +205,8 @@ export function selectExecutionMode(opts = {}) {
   };
 }
 
-/**
- * @param {string} mode
- * @param {{ cli?: "codex"|"gemini"|"claude", prompt?: string }} opts
- * @returns {{ command: string, useExec: boolean }}
- */
-export function buildCommandForMode(mode, opts = {}) {
-  const cli = opts.cli || "codex";
-  const prompt = quotePrompt(opts.prompt);
-
-  if (cli === "gemini") {
-    return { command: `gemini -p ${prompt}`, useExec: true };
-  }
-
-  if (mode === MODES.INTERACTIVE || mode === MODES.AUTO) {
-    return { command: cli === "claude" ? "claude" : "codex", useExec: false };
-  }
-
-  if (cli === "claude") {
-    return { command: `claude --print ${prompt}`, useExec: true };
-  }
-
-  return {
-    command: `codex exec ${prompt} -s danger-full-access --dangerously-bypass-approvals-and-sandbox`,
-    useExec: true,
-  };
-}
+// buildCommandForMode 는 caller 가 없어 제거됨 (v10.20.x). argv-inline 프롬프트와
+// `-s danger-full-access` flag 가 PR #252 의 stdin redirect 패턴과 정합하지
+// 않아 회귀 위험이 있었다. 실제 헤드리스 spawn 은 buildSpawnSpecForMode
+// (conductor.mjs:544) 가 담당하며, 셸 명령 형태가 필요한 경우는
+// hub/cli-adapter-base.mjs:buildExecCommand 를 사용한다.
