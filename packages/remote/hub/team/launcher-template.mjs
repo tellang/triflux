@@ -78,6 +78,11 @@ export function buildLauncher(opts) {
     workdir,
     cwd: workdir,
     mcpServers,
+    // launcher 는 동일 입력 → 동일 명령 (F5 결정론 보장). buildExecCommand 의
+    // stdin redirect 모드는 timestamp/pid/counter 가 들어가 비결정적이라
+    // launcher path 에서는 argv-inline 모드로 강제. headless 워커 spawn 은
+    // backend.mjs → buildExecArgs (stdinPrompt 미명시) 로 default stdin on.
+    stdinPrompt: false,
   });
 
   const env = adapter.env(profile);

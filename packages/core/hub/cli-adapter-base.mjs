@@ -148,10 +148,14 @@ export const CODEX_MCP_EXECUTION_EXIT_CODE = 1;
  * long-form 플래그 기반 명령 빌더.
  *
  * macOS 회귀 fix (codex v0.130.0 oh-my-codex hook lifecycle): 매우 긴
- * argv-inline prompt 가 SessionStart Failed 를 유발하므로 default 가 stdin
- * redirect 패턴 (`< /tmp/triflux-codex-prompt/prompt-*.txt`). 환경에서
- * `TFX_CODEX_STDIN_PROMPT=0` 이면 legacy argv-inline 으로 회귀 (Windows 또는
- * stdin 미지원 환경 대비).
+ * argv-inline prompt 가 SessionStart Failed 를 유발하므로 default 가 prompt
+ * 를 stdin 으로 전달하는 패턴. 셸별 분기:
+ *   - Unix (bash/zsh): `codex exec ... < '/tmp/triflux-codex-prompt/prompt-*.txt'`
+ *   - Windows (pwsh7): `Get-Content -Raw 'path' | codex exec ...`
+ *     (pwsh7 의 `<` 는 reserved future syntax 라 호환성 보장 안 됨)
+ *
+ * 환경 변수 `TFX_CODEX_STDIN_PROMPT=0` 이면 legacy argv-inline 으로 회귀.
+ * 결정론 보장이 필요한 launcher path 는 호출 시 `stdinPrompt: false` 명시.
  *
  * @param {string} prompt
  * @param {string|null} resultFile — null이면 --output-last-message 생략
@@ -196,6 +200,11 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
   const hasPrompt = typeof prompt === "string" && prompt.length > 0;
   if (useStdin && hasPrompt) {
     const promptFile = writePromptToTmpFile(prompt);
+    if (IS_WINDOWS) {
+      // pwsh7 호환: `<` redirect 는 reserved future syntax 라 동작 불안정.
+      // Get-Content -Raw stdin pipe 로 prompt 를 codex stdin 에 주입.
+      return `Get-Content -Raw '${escapePwshSingleQuoted(promptFile)}' | ${parts.join(" ")}`;
+    }
     return `${parts.join(" ")} < ${shellQuote(promptFile)}`;
   }
 

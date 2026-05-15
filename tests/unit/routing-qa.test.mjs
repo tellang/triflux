@@ -283,20 +283,25 @@ describe("headless: buildHeadlessCommand", async () => {
 
   it("프롬프트를 임시 파일에 저장 (셸 주입 방지)", () => {
     const cmd = buildHeadlessCommand("codex", "it's a test", "/tmp/r.txt");
-    // 플랫폼별 프롬프트 읽기 표현식 검증
+    // PR #252: codex 명령은 셸 분기로 prompt 를 stdin 으로 전달.
+    //   - Windows pwsh7: `Get-Content -Raw 'path' | codex ...`
+    //   - Unix bash/zsh: `codex ... < 'path'`
+    // 두 경우 모두 codex 의 argv 에는 prompt 가 안 들어가서 셸 주입 방지.
     if (process.platform === "win32") {
       assert.ok(
         cmd.includes("Get-Content -Raw"),
-        `프롬프트가 파일에서 읽혀야 함 (Windows): ${cmd}`,
+        `프롬프트가 PowerShell stdin pipe 로 주입되어야 함 (Windows): ${cmd}`,
       );
     } else {
       assert.ok(
-        cmd.includes("$(cat "),
-        `프롬프트가 파일에서 읽혀야 함 (Unix): ${cmd}`,
+        /< ['"][^'"]*prompt-/.test(cmd),
+        `프롬프트가 stdin redirect 로 주입되어야 함 (Unix): ${cmd}`,
       );
     }
+    // prompt 파일 경로 검증 — buildExecCommand 의 새 naming
+    // (`prompt-<timestamp>-<pid>-<counter>.txt`).
     assert.ok(
-      cmd.includes("prompt-"),
+      /prompt-\d+-\d+-\d+\.txt/.test(cmd),
       `프롬프트 파일 경로가 포함되어야 함: ${cmd}`,
     );
   });
@@ -321,11 +326,13 @@ describe("headless: buildHeadlessCommand", async () => {
       handoff: false,
       mcp: "implement",
     });
-    // 힌트는 프롬프트 파일에 포함됨 — 파일 경로를 추출하고 내용 검증
-    const promptMatch = cmd.match(/prompt-[a-f0-9]+\.txt/);
+    // PR #252: 힌트는 buildExecCommand 가 생성한 stdin prompt 파일에 포함됨.
+    // 새 file naming: `prompt-<timestamp>-<pid>-<counter>.txt`.
+    const promptMatch = cmd.match(/prompt-\d+-\d+-\d+\.txt/);
     assert.ok(promptMatch, `프롬프트 파일 경로가 명령에 포함되어야 함: ${cmd}`);
-    // 프롬프트 파일이 생성되었으면 MCP 힌트 포함 확인
-    const fullPath = cmd.match(/'([^']*prompt-[a-f0-9]+\.txt)'/)?.[1];
+    // 프롬프트 파일이 생성되었으면 MCP 힌트 포함 확인.
+    // Windows: `Get-Content -Raw 'path' | ...` / Unix: `... < 'path'`.
+    const fullPath = cmd.match(/['"]([^'"]*prompt-\d+-\d+-\d+\.txt)['"]/)?.[1];
     if (fullPath && existsSync(fullPath)) {
       const content = readFileSync(fullPath, "utf8");
       assert.ok(

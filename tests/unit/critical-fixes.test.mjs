@@ -206,20 +206,27 @@ describe("native-supervisor.mjs: child process error handler", () => {
 // ========================================================================
 // 6. headless prompt file-based injection (shell injection prevention)
 // ========================================================================
-describe("headless.mjs: prompt file-based injection", () => {
-  it("uses Get-Content -Raw for prompt injection (not inline shell)", () => {
-    const src = readFileSync(join(ROOT, "hub/team/headless.mjs"), "utf8");
+// PR #252: headless.mjs 가 직접 셸 표현식 (Get-Content / $(cat)) 을 만들지
+// 않고, fullPrompt 를 backend.buildArgs → buildExecCommand 로 위임. 셸 분기
+// (Windows pwsh7 의 Get-Content -Raw stdin pipe / Unix `< file` redirect)
+// 는 cli-adapter-base.mjs:buildExecCommand 가 담당.
+describe("cli-adapter-base.mjs: PowerShell stdin pipe (Windows)", () => {
+  it("uses Get-Content -Raw for prompt injection (PowerShell stdin pipe)", () => {
+    const src = readFileSync(
+      join(ROOT, "hub/cli-adapter-base.mjs"),
+      "utf8",
+    );
     assert.ok(
       src.includes("Get-Content -Raw"),
-      "headless.mjs should use Get-Content -Raw to read prompt from file",
+      "cli-adapter-base.mjs should use Get-Content -Raw on Windows for pwsh7-compatible stdin pipe",
     );
   });
 
   it("writes prompt to a temporary file before execution", () => {
-    const src = readFileSync(join(ROOT, "hub/team/headless.mjs"), "utf8");
+    const src = readFileSync(join(ROOT, "hub/lib/prompt-tmp.mjs"), "utf8");
     assert.ok(
-      /writeFileSync\([^)]*prompt/i.test(src),
-      "headless.mjs should write prompt to a temp file via writeFileSync",
+      /writeFileSync\([^)]*file/i.test(src),
+      "prompt-tmp.mjs should write prompt to a temp file via writeFileSync",
     );
   });
 });
