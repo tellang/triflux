@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "freshness": {
+    "max_snapshot_age_ms": 900000,
+    "max_cross_provider_skew_ms": 300000,
+    "local_clock_skew_guard_ms": 60000
+  },
+  "thresholds": {
+    "reset_imminent_ms": 86400000,
+    "exhaustion_high_percent": 80,
+    "exhaustion_low_percent": 20,
+    "expiry_drain_window_ms": 604800000,
+    "drain_usage_ceiling_percent": 50
+  },
+  "scenarios": [
+    {
+      "id": "S1",
+      "name": "claude-reset-imminent-drain",
+      "when": {
+        "provider": "claude",
+        "weeklyResetsAtLteMs": 86400000,
+        "weeklyPercentLt": 100,
+        "hasMultipleAccounts": true
+      },
+      "then": {
+        "lane": "multi",
+        "primary_cli": "claude",
+        "reserve_codex_share": 0.1,
+        "reason": "claude-weekly-reset-imminent-drain-fleet"
+      }
+    },
+    {
+      "id": "S2",
+      "name": "codex-reset-imminent-drain",
+      "when": {
+        "provider": "codex",
+        "weeklyResetsAtLteMs": 86400000,
+        "weeklyPercentLt": 100
+      },
+      "then": {
+        "lane": "swarm",
+        "primary_cli": "codex",
+        "reserve_claude_share": 0.1,
+        "reason": "codex-weekly-reset-imminent-drain-fleet"
+      }
+    },
+    {
+      "id": "S3",
+      "name": "claude-burned-codex-fresh",
+      "when": {
+        "claude_weekly_percent_gte": 80,
+        "codex_weekly_percent_lt": 20,
+        "claude_weekly_resets_at_gt_ms": 172800000
+      },
+      "then": {
+        "lane": "single",
+        "primary_cli": "codex",
+        "claude_lanes_allowed": ["explore", "final-challenge"],
+        "reason": "claude-burned-codex-fresh-rebalance"
+      }
+    },
+    {
+      "id": "S4",
+      "name": "claude-multi-account-staggered",
+      "when": {
+        "provider": "claude",
+        "accountCountGte": 2,
+        "staggered": true
+      },
+      "then": {
+        "lane": "multi",
+        "primary_cli": "claude",
+        "rank_by": "expiring_capacity_score",
+        "reason": "claude-multi-account-staggered-reset"
+      }
+    },
+    {
+      "id": "S5",
+      "name": "claude-parallel-leasemany",
+      "when": {
+        "provider": "claude",
+        "request_team_size_gte": 2,
+        "accountCountGte": 2
+      },
+      "then": {
+        "lane": "swarm",
+        "primary_cli": "claude",
+        "atomic": "leaseMany",
+        "atomic_policy": "balanced",
+        "reason": "claude-parallel-multi-account"
+      }
+    },
+    {
+      "id": "S6",
+      "name": "account-expiry-drain",
+      "when": {
+        "expiresAtLteMs": 604800000,
+        "weeklyPercentLt": 50,
+        "circuitStateNotOpen": true
+      },
+      "then": {
+        "lane": "single",
+        "riskTier": "drain",
+        "elevated_weight": 2.0,
+        "reason": "account-expiry-drain-before-loss"
+      }
+    }
+  ],
+  "fallback": {
+    "default_mode": "codex-default",
+    "default_cli": "codex",
+    "default_model": "gpt-5.5",
+    "triggers": [
+      "hud_null",
+      "hud_stale_gte_15min",
+      "weekly_reset_in_past",
+      "cross_provider_skew_exceeded",
+      "broker_empty",
+      "all_circuits_open",
+      "mirror_drift",
+      "flag_disabled"
+    ]
+  }
+}
