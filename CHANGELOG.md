@@ -4,6 +4,40 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.20.2] - 2026-05-14
+
+### Fixed
+
+- **`fix(broker)` (commits `7c3faa3f` + `616bd335` + `b85768ef` + `3c7ae61b`, #206 stabilization)** AccountBroker HTTP 서피스의 정보 누출 차단:
+  - `publicSnapshot()` helper 신규 — 외부 노출용으로 redacted state 만 반환 (env, authFile, profile, host, raw failure timestamp 비공개)
+  - `/broker/snapshot` 과 HUD 가 `publicSnapshot()` 만 사용하도록 제한
+  - `securityViolation` / `authSyncError` diagnostic 이벤트는 hub 에서 redacted warn 로그 (`broker.security_violation`, `broker.auth_sync_error`) 로 처리, raw credential 절대 비기록
+  - **no-lease 동작 contract 명문화** — broker 비활성/empty 시 default CLI auth path, enabled but no lease 면 `circuit_open` 반환. Conductor 는 `broker_no_lease` 이벤트 기록 후 spawn 진행 (accountId 없으므로 release 미호출)
+- **`fix(broker)` (commit `761fb7a8`, #206 1차)** AccountBroker auth lease stabilization — `reloadBroker()` 에서 activeLeases() 보존, Codex auth sync 의 shared source lock, atomic 쓰기 (`temp + rename + 0600`), source/cache account_id 검증, auth-mode lease fail-closed (isolated runtime `tfx-hub/codex-home/<account>/auth.json`)
+- **`fix(broker)` (commit `5853d628`, #206 후속)** refreshed runtime auth propagation 보강
+- **`fix(worker)` (commit `f32c3ad4`, Closes #189)** local worker HOME/APPDATA sandbox — `hub/team/worker-sandbox.mjs` helper 신규, conductor/delegator/native supervisor 의 local worker spawn 이 mutable CLI user-state 를 `.triflux/worker-home` 아래로 격리. explicit `CODEX_HOME` 보존, `TFX_WORKER_SANDBOX=0` debug opt-out
+- **`fix(swarm)` (commit `64283a0a`, Closes #188)** `tfx swarm preflight <prd>` GO/NO-GO gate — non-dry-run 직전 PRD 유효성, lease 충돌, missing hosts, local CLI 부재, MCP 호환성 검사. dry-run/plan 는 preview-only 유지
+- **`fix(swarm)` (commit `9641e3dc`, Closes #191)** swarm integration 경로 명시 — `merge --ff-only` 우선 후 divergent 일 때 cherry-pick fallback (shard branch ref 보존). 실패한 shard 는 recovery patch path 와 함께 row 출력
+- **`fix(hooks)` (commit `bb97aeb2`, #245 selective adoption)** hook lifecycle 적응 1차 — `PermissionRequest:Bash` allow-only (read-only git/list/search + explicit `node scripts/test-lock.mjs`), `SubagentStart`/`SubagentStop` paired tracking (lock dir + JSON state), `SessionEnd` report-only (`TFX_SESSION_END_CLEANUP=1` 으로 실제 pruning enable)
+- **`fix(hooks)` (commit `0d62f930`, #245 후속)** `hooks/post-tool-tips.mjs` — opt-in (`TFX_POST_TOOL_TIPS=1`) PostToolUse rules injector. high-impact path (hook lifecycle, package hook mirrors, team runtime, MCP surface, instruction sources) 만 reminder 출력, realpath dedupe + 1200-char cap
+- **`fix(hooks)` (commit `e9bba8d4`, #245 후속)** Stop context guard retry cap — 기존 `tfx-pipeline-stop` Stop hook 확장. context 사용량 높을 때 reminder 최대 2회/세션. context-limit 과 user abort/cancel/interrupt 시 항상 pass-through. critical usage 면 fail open. state I/O 실패는 guard 만 fail open, active-pipeline evaluation 은 계속
+
+### Changed
+
+- **`chore(skills)` (commit `38a05ee8`, Closes #112)** public skill surface 정리 — measurable surface = `internal: true` / `deprecated: true` 제외 core skills. 현재 13 public + 11 compatibility alias + 9 internal helpers. `deprecated` / `superseded-by` metadata 가 `skill.json` 에 보존되어 stale description resurrection 차단
+
+### Notes
+
+- prepare commit `d753e9f7` 가 `.claude-plugin/marketplace.json` + `.claude-plugin/plugin.json` + `package.json` + `package-lock.json` + `packages/triflux/package.json` 5개 metadata bump
+- v11 까지는 legacy skill directory 물리 삭제 보류 (compatibility alias 의 alias-usage logging + zero-usage evidence 수집 단계)
+
+## [10.20.1] - 2026-05-12
+
+### Fixed
+
+- **`fix(swarm)` (commit `106f8cd6`)** bounded lifecycle 과 swarm visibility 갭 해소 — v10.20.0 POSIX gateway 도입 이후 발견된 long-running worker lifecycle bound 누락과 swarm dashboard surface 불일치를 함께 정리
+- **`chore(session)` (commit `20f5076e`)** session cleanup 시 fsmonitor buildup 감시 — `git fsmonitor--daemon` 누적 시 다음 세션 시작 nudge
+
 ## [10.20.0] - 2026-05-11
 
 ### Added
