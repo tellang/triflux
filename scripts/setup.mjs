@@ -2045,10 +2045,10 @@ ${B}Shortcuts:${R}
   ${C}tfx-doctor${R}           triflux doctor
 
 ${B}Skills (Claude Code):${R}
-  ${C}/tfx-auto${R}   "작업"   자동 분류 + 병렬 실행
-  ${C}/tfx-auto-codex${R} "작업" Codex 리드 + Gemini 유지
-  ${C}/tfx-codex${R}  "작업"   Codex 전용 모드
-  ${C}/tfx-gemini${R} "작업"   Gemini 전용 모드
+  ${C}/tfx-auto${R} "작업"                 자동 분류 + 병렬 실행
+  ${C}/tfx-auto${R} "작업" --mode deep     계획 + 검증 포함
+  ${C}/tfx-auto${R} "작업" --cli codex     Codex 전용 lane
+  ${C}/tfx-auto${R} "작업" --cli gemini    Gemini 전용 lane
   ${C}/tfx-setup${R}           HUD 설정 + 진단
 
 ${Y}!${R} 세션 재시작 후 스킬이 활성화됩니다

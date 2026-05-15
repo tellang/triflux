@@ -1,7 +1,8 @@
 # Codex CLI 실행 컨벤션
 
 > triflux에서 Codex CLI를 사용할 때 반드시 준수해야 하는 규칙.
-> tfx-codex-swarm, tfx-auto-codex, tfx-route.sh 모두 이 규칙을 따른다.
+> `tfx-auto --cli codex`, `tfx-auto --parallel swarm --cli codex`, `tfx-route.sh`
+> 모두 이 규칙을 따른다.
 
 ## 1. 실행 방식
 

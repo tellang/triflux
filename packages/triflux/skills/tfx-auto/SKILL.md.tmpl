@@ -53,15 +53,15 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 판단 기준 (우선순위 순):
 
 1. **사용자 명시 키워드** (최우선):
-   - "병렬", "swarm", "PRD 돌려" → `Skill("tfx-swarm")` dispatch
-   - "꼼꼼히", "제대로", "deep" → 해당 `tfx-deep-*` dispatch
-   - "끝까지", "멈추지마", "ralph" → `Skill("tfx-persist")` dispatch
-   - "multi", "팀", "협업" → `Skill("tfx-multi")` dispatch
-   - "codex로", "gemini로" → `Skill("tfx-codex")` 또는 `Skill("tfx-gemini")` dispatch
+   - "병렬", "swarm", "PRD 돌려" → `--parallel swarm --mode consensus --isolation worktree`
+   - "꼼꼼히", "제대로", "deep" → `--mode deep`
+   - "끝까지", "멈추지마", "ralph" → `--retry ralph`
+   - "multi", "팀", "협업" → `--parallel N --mode deep`
+   - "codex로", "gemini로" → `--cli codex` 또는 `--cli gemini`
 
 2. **PRD 인자 분석**:
-   - PRD 경로 2개 이상 → `Skill("tfx-swarm")` dispatch
-   - PRD 1개 + XL 규모 → `Skill("tfx-fullcycle")` dispatch
+   - PRD 경로 2개 이상 → `--parallel swarm --mode consensus --isolation worktree`
+   - PRD 1개 + XL 규모 → `--mode deep --parallel 1`
 
 3. **선호도 가중치** (tiebreaker):
    - USER_PREFERRED_MODE가 있고 가중치 > 0.3이면 제안
@@ -70,7 +70,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 4. **기본**: 기존 tfx-auto 워크플로우 그대로 실행
 
-dispatch 시 해당 스킬을 Skill 도구로 호출하고 **이 워크플로우를 종료**한다. dispatch하지 않으면 아래 기존 워크플로우 진행.
+정규화된 플래그를 현재 `tfx-auto` 실행 인자로 적용한다. legacy Skill 이름은 compatibility alias 문서에서만 다룬다.
 
 라우팅 결정 후 1줄 표시:
 ```
