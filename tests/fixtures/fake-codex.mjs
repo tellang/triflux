@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // tests/fixtures/fake-codex.mjs — Codex CLI/MCP 테스트 대역
+import { readFileSync } from "node:fs";
 import process from "node:process";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -154,7 +155,16 @@ async function runMcpServer() {
 }
 
 function runExec() {
-  const prompt = process.argv.at(-1) || "";
+  // PR #252: prompt 는 stdin redirect (Unix `< file`) / stdin pipe (Windows
+  // `Get-Content -Raw | codex`) 로 전달될 수 있다. stdin 이 redirect 된 경우
+  // 우선 사용하고, 아니면 마지막 argv (legacy 인라인) fallback.
+  let stdinPrompt = "";
+  try {
+    stdinPrompt = readFileSync(0, "utf8");
+  } catch {
+    /* TTY 또는 권한 부족 — argv fallback */
+  }
+  const prompt = stdinPrompt || process.argv.at(-1) || "";
   const configFlags = [];
 
   for (let i = 3; i < process.argv.length - 1; i += 1) {

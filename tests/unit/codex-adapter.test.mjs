@@ -37,7 +37,14 @@ function installFakeCodex(binDir) {
       "if (process.env.FAKE_CODEX_FAIL === '1') { process.stderr.write('exec failed'); process.exit(5); }",
       "const outIndex = args.indexOf('--output-last-message');",
       'const resultFile = outIndex >= 0 ? args[outIndex + 1] : "";',
-      'const prompt = args.at(-1) || "";',
+      // PR #252: prompt 는 stdin redirect (Unix `< file`) 또는 stdin pipe
+      // (Windows `Get-Content -Raw | codex`) 로 전달될 수 있다. stdin 이
+      // redirect 된 경우 우선 사용하고, 아니면 마지막 argv (legacy 인라인)
+      // 로 fallback. readFileSync(0) 는 stdin 이 file/pipe 면 EOF 까지
+      // 동기 차단, TTY 면 throw (자식 spawn 에서는 TTY 가 없으므로 안전).
+      "let stdinPrompt = '';",
+      "try { stdinPrompt = readFileSync(0, 'utf8'); } catch {}",
+      'const prompt = stdinPrompt || args.at(-1) || "";',
       "let output = `EXEC:${prompt}`;",
       "if (process.env.FAKE_CODEX_ECHO_AUTH === '1') {",
       "  const auth = JSON.parse(readFileSync(join(process.env.CODEX_HOME || '', 'auth.json'), 'utf8'));",
