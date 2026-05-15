@@ -410,6 +410,7 @@ const SKILL_ALIASES = [
 // ── 폐기 예정 스킬 목록 ──
 
 const DEPRECATED_SKILLS = ["tfx-codex-route", "tfx-gemini-route"];
+const LOCAL_DEV_SKILL_MARKER = ".triflux-local-skill";
 
 // ── 구형 Codex 모델 (마이그레이션 안내 대상) ──
 
@@ -473,6 +474,7 @@ function cleanupStaleSkills(installedDir, pkgDir) {
     if (pkgNames.has(name)) continue;
 
     const skillPath = join(installedDir, name);
+    if (isLocalDevSkillDir(skillPath)) continue;
     // #144: 재귀 삭제 필요 — 과거 구현은 파일만 unlink 하여 nested 디렉토리가 있는 스킬을
     // 온전히 제거하지 못했다. `tfx-deep-*`, `tfx-codex-swarm` 같은 과거 잔재 디렉토리는
     // workspace/snapshot 같은 하위 폴더를 가지므로 rmSync recursive 가 필수.
@@ -484,6 +486,10 @@ function cleanupStaleSkills(installedDir, pkgDir) {
     }
   }
   return { count: removed.length, removed };
+}
+
+function isLocalDevSkillDir(skillPath) {
+  return existsSync(join(skillPath, LOCAL_DEV_SKILL_MARKER));
 }
 
 /**
@@ -1226,8 +1232,10 @@ export {
   getVersion,
   getWindowsHubAutostartStatus,
   hasProfileSection,
+  isLocalDevSkillDir,
   isSetupUserStateFile,
   LEGACY_CODEX_MODELS,
+  LOCAL_DEV_SKILL_MARKER,
   PLUGIN_ROOT,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,

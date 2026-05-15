@@ -77,6 +77,7 @@ import {
   getVersion,
   getWindowsHubAutostartStatus,
   hasProfileSection,
+  isLocalDevSkillDir,
   isSetupUserStateFile,
   LEGACY_CODEX_MODELS,
   REQUIRED_CODEX_PROFILES,
@@ -583,15 +584,22 @@ function which(cmd) {
 }
 
 function whichInShell(cmd, shell) {
+  const escapedCmd = cmd.replace(/(["\\$`])/g, "\\$1");
   const shellArgs = {
     bash: [
       "bash",
-      ["-c", `source ~/.bashrc 2>/dev/null && command -v "${cmd}" 2>/dev/null`],
+      [
+        "-lc",
+        `source ~/.bashrc 2>/dev/null || true; command -v "${escapedCmd}" 2>/dev/null`,
+      ],
     ],
     cmd: ["cmd", ["/c", "where", cmd]],
     zsh: [
       "zsh",
-      ["-c", `source ~/.zshrc 2>/dev/null && command -v "${cmd}" 2>/dev/null`],
+      [
+        "-lc",
+        `source ~/.zshrc 2>/dev/null || true; command -v "${escapedCmd}" 2>/dev/null`,
+      ],
     ],
     pwsh: [
       "pwsh",
@@ -626,6 +634,7 @@ function isDevUpdateRequested(argv = process.argv) {
 function checkShellAvailable(shell) {
   const cmds = {
     bash: "bash --version",
+    zsh: "zsh --version",
     cmd: "cmd /c echo ok",
     pwsh: "pwsh -NoProfile -c echo ok",
   };
@@ -2701,6 +2710,7 @@ async function cmdDoctor(options = {}) {
 
       for (const n of readdirSync(userSkillsDir)) {
         if (!n.startsWith("tfx-")) continue;
+        if (isLocalDevSkillDir(join(userSkillsDir, n))) continue;
         if (!pkgSkills.has(n)) staleSkills.push(n);
       }
     }
