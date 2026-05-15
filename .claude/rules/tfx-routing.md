@@ -2,6 +2,32 @@
 
 사용자가 스킬명을 모르더라도 자연어로 요청하면 아래 규칙에 따라 적절한 스킬을 호출한다.
 
+## 기본 워크플로우 ladder
+
+넓은 운영 순서와 스택 간 책임 경계는 이 파일에 둔다. 개별 `SKILL.md`
+description에는 해당 스킬을 고르는 데 필요한 좁은 activation phrase만 넣는다.
+
+| 상황 | 기본 순서 | 비고 |
+|------|-----------|------|
+| 메타 라우팅/스킬 선택 | `/tfx-harness` | 어떤 스킬/순서가 맞는지 먼저 판정해야 할 때 쓰는 단일 진입점. |
+| 신규 제품/아이디어 | `/office-hours` → `/autoplan` → `/writing-plans` → `/tfx-auto` | 먼저 문제/범위를 잡고, 리뷰된 계획을 실행으로 넘긴다. |
+| 기존 작업 계속 | `/gstack-context-restore` → `/tfx-auto` | 저장된 맥락을 복원한 뒤 실행한다. |
+| 직접 구현/수정 | `/tfx-auto` (Codex 우선) | "이거 고쳐줘", "구현해줘". 기존 작업 연장이면 `/gstack-context-restore` 먼저. |
+| 디버그 | `/tfx-find` → `/superpowers:systematic-debugging` → `/tfx-auto` | 코드 위치/사용처 확인과 원인 분석을 분리한다. |
+| 리서치 | `/tfx-research` 또는 `/multilingual-parallel-research` | 외부/최신/도구 가능 여부 의문문은 `/tfx-research`; 언어권 병렬 조사는 multilingual 경로. |
+| 검증 | `/superpowers:review` + `/gstack /qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
+| 디자인 검토 | `/gstack /design-review` | 시각/UX 판정. 코드 판정과 분리. |
+| TDD 시작 | `/superpowers:test-driven-development` | 테스트부터 짜는 흐름. 구현 전에 invoke. |
+| PRD/worktree 격리 실행 | `/tfx-swarm` | PRD 별 worktree + 다중 모델/기기. 코드 변경 포함 병렬에 필수. |
+| 병렬 작업 (read-only) | `/tfx-multi` 또는 `/superpowers:dispatching-parallel-agents` | cwd 공유 가능한 read-only 병렬. 코드 변경 시 swarm 으로 격상. |
+| plan 실행 (체크포인트 별도) | `/superpowers:executing-plans` | 다른 세션에서 plan 을 단계별 실행. |
+| 머지 직전 정리 | `/superpowers:finishing-a-development-branch` → `/tfx-ship` 또는 `/ship` | merge/PR/cleanup 결정 후 ship. |
+| 리뷰 응답 | `/superpowers:receiving-code-review` | 검토 의견에 기술적 rigor 로 응답. blind apply 금지. |
+| triflux 릴리즈 | `/tfx-ship` | triflux 본체는 AI trailer 금지 정책이 있는 전용 ship 경로를 쓴다. |
+| 일반 PR/배포 | `/ship` | 로컬 `/ship`도 AI attribution footer/trailer 없이 실행되어야 한다. |
+| 저장/복원 | `/gstack-context-save` / `/gstack-context-restore` | 진행 상태는 gstack checkpoint 계열이 소유한다. |
+| 회고/슬롭 정리 | `/gstack /retro` 또는 `/tfx-prune` | 세션 회고는 gstack, AI 생성 슬롭 제거는 triflux. |
+
 ## 행동 유형 → 스킬 매핑
 
 | 의도 | 자연어 신호 | 스킬 |
@@ -30,9 +56,23 @@
 | 승격 | 알아서 승격, 안 되면 더 강한 모델 | `--retry auto-escalate` (Phase 3 CLI 체인 승격) |
 | 자율 | 알아서, 자동으로, autopilot | autopilot 모드 |
 
+## CLI 우선순위 정책 — default = Codex
+
+triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR) 이 거의 전부 Codex 단독 또는 Codex worker spawn 으로 진행됐다. 이 운영 fact 를 default policy 로 명시한다.
+
+| 우선순위 | CLI / 모델 | default 적용 lane |
+|---------|-----------|-------------------|
+| 1차 (default) | **Codex** (gpt-5.3-codex / gpt-5.5) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
+| 2차 | **Gemini** (pro25 / flash25) | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
+| 한정 (Claude 만) | **Claude** (opus-4-7) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Gemini 미가용 |
+
+`tfx-auto`, `tfx-review`, `tfx-analysis`, `tfx-plan`, `tfx-find` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli gemini`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
+
+`--retry auto-escalate` 체인 (`.claude/rules/tfx-escalation-chain.md`) 의 1~3단계가 모두 Codex 인 것도 이 정책과 정합한다 (4단계 claude opus-4-7 은 최종 수단).
+
 ## CLI 라우팅
 
-headless-guard가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. tfx 스킬 경유 필수.
+headless-guard 가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. tfx 스킬 경유 필수.
 
 **Layer 1 — Light** (tfx-route.sh → 단일 CLI)
 

@@ -17,7 +17,9 @@ import path from "node:path";
 import { after, describe, it } from "node:test";
 
 const SETUP_MJS_URL = new URL("../setup.mjs", import.meta.url).href;
-const { cleanupStaleSkills } = await import(SETUP_MJS_URL);
+const { cleanupStaleSkills, LOCAL_DEV_SKILL_MARKER } = await import(
+  SETUP_MJS_URL
+);
 
 describe("#144 cleanupStaleSkills — 재귀 삭제", () => {
   const cleanupDirs = [];
@@ -101,5 +103,21 @@ describe("#144 cleanupStaleSkills — 재귀 삭제", () => {
     const result = cleanupStaleSkills(installedDir, pkgDir);
     assert.equal(result.count, 0);
     assert.equal(existsSync(path.join(installedDir, "other-skill")), true);
+  });
+
+  it("local dev marker 가 있는 tfx-* 스킬은 패키지에 없어도 보존한다", () => {
+    const { installedDir, pkgDir } = setupFixture();
+    const localSkill = path.join(installedDir, "tfx-harness");
+    mkdirSync(localSkill, { recursive: true });
+    writeFileSync(path.join(localSkill, "SKILL.md"), "# local dev harness");
+    writeFileSync(path.join(localSkill, LOCAL_DEV_SKILL_MARKER), "");
+
+    const result = cleanupStaleSkills(installedDir, pkgDir);
+    assert.equal(result.count, 0);
+    assert.equal(
+      existsSync(localSkill),
+      true,
+      "로컬 개발 스킬은 setup cleanup 에서 보존",
+    );
   });
 });
