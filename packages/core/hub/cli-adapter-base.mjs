@@ -4,6 +4,7 @@
 import { execSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
+import { writePromptToTmpFile } from "./lib/prompt-tmp.mjs";
 import { IS_WINDOWS, killProcess } from "./platform.mjs";
 
 // ── Quota retry-after 파싱 ──────────────────────────────────────
@@ -145,9 +146,16 @@ export const CODEX_MCP_EXECUTION_EXIT_CODE = 1;
 
 /**
  * long-form 플래그 기반 명령 빌더.
+ *
+ * macOS 회귀 fix (codex v0.130.0 oh-my-codex hook lifecycle): 매우 긴
+ * argv-inline prompt 가 SessionStart Failed 를 유발하므로 default 가 stdin
+ * redirect 패턴 (`< /tmp/triflux-codex-prompt/prompt-*.txt`). 환경에서
+ * `TFX_CODEX_STDIN_PROMPT=0` 이면 legacy argv-inline 으로 회귀 (Windows 또는
+ * stdin 미지원 환경 대비).
+ *
  * @param {string} prompt
  * @param {string|null} resultFile — null이면 --output-last-message 생략
- * @param {{ profile?: string, skipGitRepoCheck?: boolean, sandboxBypass?: boolean, cwd?: string, mcpServers?: string[] }} [opts]
+ * @param {{ profile?: string, skipGitRepoCheck?: boolean, sandboxBypass?: boolean, cwd?: string, mcpServers?: string[], stdinPrompt?: boolean }} [opts]
  * @returns {string} 실행할 셸 커맨드
  */
 export function buildExecCommand(prompt, resultFile = null, opts = {}) {
@@ -156,6 +164,7 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
     skipGitRepoCheck = true,
     sandboxBypass = true,
     mcpServers,
+    stdinPrompt,
   } = opts;
 
   const parts = ["codex"];
@@ -183,8 +192,23 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
     if (skipGitRepoCheck) parts.push("--skip-git-repo-check");
   }
 
+  const useStdin = resolveStdinPromptMode(stdinPrompt);
+  const hasPrompt = typeof prompt === "string" && prompt.length > 0;
+  if (useStdin && hasPrompt) {
+    const promptFile = writePromptToTmpFile(prompt);
+    return `${parts.join(" ")} < ${shellQuote(promptFile)}`;
+  }
+
   parts.push(JSON.stringify(prompt));
   return parts.join(" ");
+}
+
+function resolveStdinPromptMode(explicit) {
+  if (typeof explicit === "boolean") return explicit;
+  // Default ON to fix macOS codex hook regression. Opt out via env=0.
+  const env = process.env.TFX_CODEX_STDIN_PROMPT;
+  if (env === "0" || env === "false") return false;
+  return true;
 }
 
 // ── Sleep ───────────────────────────────────────────────────────

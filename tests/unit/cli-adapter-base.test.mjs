@@ -72,20 +72,76 @@ function importFresh(relativePath) {
   return import(`${relativePath}?t=${Date.now()}-${Math.random()}`);
 }
 
-test("cli-adapter-base exports the shared codex exec builder and codex-compat re-exports it", async () => {
+test("buildExecCommand: stdin-prompt mode (macOS hook regression fix) keeps argv short", async () => {
+  await withSandbox(async () => {
+    const base = await importFresh("../../hub/cli-adapter-base.mjs");
+    const longPrompt = "x".repeat(4000) + " — long prompt simulation";
+    const command = base.buildExecCommand(longPrompt, "/tmp/result.txt", {
+      stdinPrompt: true,
+    });
+    // stdin redirect: command 끝이 `< "/path/to/prompt-*.txt"` 패턴이고
+    // 전체 길이가 입력 prompt 길이와 무관하게 짧다.
+    assert.ok(
+      command.length < 500,
+      `stdin-mode command must stay short regardless of prompt size, got ${command.length}`,
+    );
+    assert.match(
+      command,
+      /< "[^"]+\/triflux-codex-prompt\/prompt-\d+-\d+-\d+\.txt"$/u,
+    );
+    assert.ok(!command.includes("xxxxxxxx"), "prompt must NOT be argv-inlined");
+  });
+});
+
+test("buildExecCommand: empty prompt falls back to argv even in stdin mode", async () => {
+  await withSandbox(async () => {
+    const base = await importFresh("../../hub/cli-adapter-base.mjs");
+    const command = base.buildExecCommand("", "/tmp/result.txt", {
+      stdinPrompt: true,
+    });
+    // 빈 prompt 는 stdin redirect 안 함 (그대로 argv "" 로 inline).
+    assert.ok(
+      !command.includes("< "),
+      `empty prompt should not trigger stdin redirect: ${command}`,
+    );
+    assert.ok(command.endsWith('""'));
+  });
+});
+
+test("buildExecCommand: TFX_CODEX_STDIN_PROMPT=0 env opts out of stdin mode", async () => {
+  await withSandbox(async () => {
+    const prev = process.env.TFX_CODEX_STDIN_PROMPT;
+    process.env.TFX_CODEX_STDIN_PROMPT = "0";
+    try {
+      const base = await importFresh("../../hub/cli-adapter-base.mjs");
+      const command = base.buildExecCommand("hello", "/tmp/result.txt", {});
+      assert.ok(command.endsWith('"hello"'));
+      assert.ok(!command.includes("< "));
+    } finally {
+      if (prev === undefined) delete process.env.TFX_CODEX_STDIN_PROMPT;
+      else process.env.TFX_CODEX_STDIN_PROMPT = prev;
+    }
+  });
+});
+
+test("cli-adapter-base exports the shared codex exec builder and codex-compat re-exports it (legacy argv-inline mode)", async () => {
   await withSandbox(async () => {
     const base = await importFresh("../../hub/cli-adapter-base.mjs");
     const compat = await importFresh("../../hub/codex-compat.mjs");
 
+    // explicit opt-out of the stdin-prompt fix to verify legacy argv-inline
+    // shape (matches codex < v0.130 + non-macOS environments).
     const command = base.buildExecCommand("hello", "/tmp/result.txt", {
       profile: "codex53_high",
       cwd: "C:/work/it's-me",
+      stdinPrompt: false,
     });
 
     assert.equal(
       compat.buildExecCommand("hello", "/tmp/result.txt", {
         profile: "codex53_high",
         cwd: "C:/work/it's-me",
+        stdinPrompt: false,
       }),
       command,
     );
