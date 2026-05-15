@@ -42,7 +42,7 @@ triflux  →  superpowers  (금지)
 | 기능 | Owner | 근거 |
 |------|-------|------|
 | **Review** (코드 판정) | superpowers | 입력 diff → 출력 verdict 프리미티브. 가장 단순한 경계 |
-| **Plan** (작업 설계) | triflux (`tfx-plan`, `tfx-deep-plan`) | 멀티모델 합의 + PRD 생성 포함 |
+| **Plan** (작업 설계) | triflux (`tfx-plan`, `tfx-auto --mode deep`) | 멀티모델 합의 + PRD 생성 포함 |
 | **Checkpoint** (진행 상태 스냅샷) | gstack (`/checkpoint`) | 워크플로우 상태 관리는 무대 레이어 책임 |
 | **Worktree** (격리 실행) | triflux (`tfx-swarm`) | PRD별 worktree + auto merge = 오케스트레이션 |
 | **QA / 검증** | gstack (`/qa`) → triflux (`tfx-qa`) 팬아웃 | gstack이 게이트, triflux가 병렬 실행 |
@@ -58,7 +58,7 @@ triflux  →  superpowers  (금지)
 
 라이팅플랜
   → /office-hours  (gstack 게이트: 발표자 영상 전용)
-  → tfx-deep-plan  (triflux: PRD 생성)
+  → tfx-auto --mode deep  (triflux: PRD 생성)
   ← plan.md
 
 워크트리 생성
@@ -80,9 +80,9 @@ triflux  →  superpowers  (금지)
 | 기능 | 1순위 | 2순위 | 3순위 |
 |------|-------|-------|-------|
 | Brainstorm / 아이디어 발산 | `tfx-auto --mode consensus --shape debate` | `sc:brainstorm` | gstack 없음 |
-| Plan / 설계 | `tfx-deep-plan` | `sc:pm` | gstack `/investigate` |
-| Review / 코드 판정 | superpowers `/review` | `tfx-deep-review` | `tfx-auto --mode consensus` |
-| QA / 테스트 검증 | gstack `/qa` → `tfx-qa` | `tfx-deep-qa` | — |
+| Plan / 설계 | `tfx-auto --mode deep` | `sc:pm` | gstack `/investigate` |
+| Review / 코드 판정 | superpowers `/review` | `tfx-auto --mode consensus` | — |
+| QA / 테스트 검증 | gstack `/qa` → `tfx-qa` | `tfx-auto --mode deep` | — |
 | Checkpoint / 스냅샷 | gstack `/checkpoint` | — | — |
 | 문서 작성 | `sc:document` 또는 `/writer` | — | — |
 
@@ -96,5 +96,5 @@ triflux  →  superpowers  (금지)
 | superpowers `/review` 스킬을 triflux 코어에 `import` | sp → tfx 단방향 위반 | triflux는 자체 review primitive 사용 또는 hook으로 sp 결과 수신 |
 | 80+ 스킬 키워드 충돌 시 임의 선택 | 비결정적 라우팅 | 이 문서 §충돌 해소 표에서 1순위를 명확히 따름 |
 | gstack `/ship`이 triflux를 우회하고 codex 직접 호출 | headless-guard 차단 | gstack → triflux → headless 경로 필수 |
-| 발표자 영상 워크플로우에서 tfx-auto만 사용 | /office-hours 게이트 없이 배포 → QA 누락 | gstack /office-hours → tfx-deep-plan → tfx-swarm 순서 준수 |
+| 발표자 영상 워크플로우에서 tfx-auto만 사용 | /office-hours 게이트 없이 배포 → QA 누락 | gstack /office-hours → tfx-auto --mode deep → tfx-swarm 순서 준수 |
 | sp 판정 없이 triflux auto-merge | 미검증 코드 머지 | swarm 완료 후 superpowers review verdict 수신 확인 후 merge |

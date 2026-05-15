@@ -50,7 +50,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 수정자 | 신호 | 효과 |
 |--------|------|------|
 | 기본 | (없음), 빠르게, 간단히 | Light 스킬 |
-| 깊이 | 제대로, 꼼꼼히, 철저히 | Deep 스킬 (tfx-deep-*). 예외: tfx-deep-interview는 Gemini 단독 |
+| 깊이 | 제대로, 꼼꼼히, 철저히 | `tfx-auto --mode deep` |
 | 합의 | 3자, 교차, 다각도 | `tfx-auto --mode consensus` |
 | 반복 | 끝까지, 멈추지마, ralph | `--retry ralph` (Phase 3 true state machine, `.claude/rules/tfx-escalation-chain.md` 참조) |
 | 승격 | 알아서 승격, 안 되면 더 강한 모델 | `--retry auto-escalate` (Phase 3 CLI 체인 승격) |
@@ -76,17 +76,18 @@ headless-guard 가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. 
 
 **Layer 1 — Light** (tfx-route.sh → 단일 CLI)
 
-| 스킬 | CLI | 용도 |
+| 경로 | CLI | 용도 |
 |------|-----|------|
-| tfx-auto | 자동 | 통합 진입점 |
-| tfx-codex | Codex | Codex 전용 |
-| tfx-gemini | Gemini | Gemini 전용 |
-| tfx-autopilot | Codex→검증 | 단일 파일, 5분 이내 |
-| tfx-autoroute | 자동 승격 | 실패→더 강한 모델 |
+| `tfx-auto` | 자동 | 통합 진입점 |
+| `tfx-auto --cli codex` | Codex | Codex 전용 lane |
+| `tfx-auto --cli gemini` | Gemini | Gemini 전용 lane |
+| `tfx-auto --mode quick` | Codex→검증 | 단일 파일, 5분 이내 |
+| `tfx-auto --retry auto-escalate` | 자동 승격 | 실패→더 강한 모델 |
 
 **Layer 2 — Deep** (headless 3-CLI 합의)
 
-tfx-deep-review, tfx-deep-qa, tfx-deep-plan, tfx-deep-research, tfx-auto (`--mode consensus --shape consensus|debate|panel`), tfx-fullcycle, tfx-persist
+`tfx-auto --mode deep`, `tfx-auto --mode consensus --shape consensus|debate|panel`,
+`tfx-auto --parallel swarm --mode consensus --isolation worktree`, `tfx-auto --retry ralph`
 
 호환 alias:
 - `tfx-consensus` → `tfx-auto --mode consensus`

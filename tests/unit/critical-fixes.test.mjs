@@ -212,10 +212,7 @@ describe("native-supervisor.mjs: child process error handler", () => {
 // 는 cli-adapter-base.mjs:buildExecCommand 가 담당.
 describe("cli-adapter-base.mjs: PowerShell stdin pipe (Windows)", () => {
   it("uses Get-Content -Raw for prompt injection (PowerShell stdin pipe)", () => {
-    const src = readFileSync(
-      join(ROOT, "hub/cli-adapter-base.mjs"),
-      "utf8",
-    );
+    const src = readFileSync(join(ROOT, "hub/cli-adapter-base.mjs"), "utf8");
     assert.ok(
       src.includes("Get-Content -Raw"),
       "cli-adapter-base.mjs should use Get-Content -Raw on Windows for pwsh7-compatible stdin pipe",
