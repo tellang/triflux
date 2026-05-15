@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  buildCommandForMode,
   buildSpawnSpecForMode,
   MODES,
   resolveCliExecutable,
@@ -116,44 +115,11 @@ test("selectExecutionMode: review는 needsInput보다 우선해 headless", () =>
   assert.equal(result.mode, MODES.HEADLESS);
 });
 
-test("buildCommandForMode: codex headless command", () => {
-  const result = buildCommandForMode(MODES.HEADLESS, {
-    cli: "codex",
-    prompt: "fix bug",
-  });
-  assert.equal(result.useExec, true);
-  assert.equal(
-    result.command,
-    'codex exec "fix bug" -s danger-full-access --dangerously-bypass-approvals-and-sandbox',
-  );
-});
-
-test("buildCommandForMode: interactive codex command", () => {
-  const result = buildCommandForMode(MODES.INTERACTIVE, {
-    cli: "codex",
-    prompt: "ignored",
-  });
-  assert.deepEqual(result, { command: "codex", useExec: false });
-});
-
-test("buildCommandForMode: interactive claude command", () => {
-  const result = buildCommandForMode(MODES.INTERACTIVE, {
-    cli: "claude",
-    prompt: "ignored",
-  });
-  assert.deepEqual(result, { command: "claude", useExec: false });
-});
-
-test("buildCommandForMode: gemini is always prompt headless", () => {
-  const result = buildCommandForMode(MODES.INTERACTIVE, {
-    cli: "gemini",
-    prompt: "summarize logs",
-  });
-  assert.deepEqual(result, {
-    command: 'gemini -p "summarize logs"',
-    useExec: true,
-  });
-});
+// buildCommandForMode 관련 4 테스트는 본 함수가 dead code 로 제거되면서 동반
+// 삭제됨 (v10.20.x). 회귀 가드: tests/unit/multiplexer-resolution.test.mjs
+// 의 `execution-mode.mjs: dead buildCommandForMode 제거` 가 export 부재를
+// assert. headless spawn 의 실 동작 검증은 buildSpawnSpecForMode 관련 테스트
+// (하단) + tests/unit/codex-adapter.test.mjs:buildExecArgs 가 담당.
 
 // ── resolveCliExecutable: Windows .cmd/.exe fallback (#108 follow-up) ──
 // String.raw: biome auto-fix 가 "redundant escape" 로 판단해 \\n / \\c 를 파괴하는 것을 방지.

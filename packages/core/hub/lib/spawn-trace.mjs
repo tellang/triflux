@@ -7,9 +7,13 @@ import { join } from "node:path";
 const LOG_DIR = join(homedir(), ".triflux", "logs");
 const DEDUPE_WINDOW_MS = 5_000;
 const RATE_WINDOW_MS = 1_000;
+// multi-worker headless dispatch 가 1 초 안에 ~25-30+ psmux/tmux 명령을 호출한다.
+// 2-worker dispatchBatch 가 default 30 limit 을 초과해 `rate_limit` throw 로 mac
+// 호환성 회귀 (smoke test 발견, 2026-05-15). 100 으로 상향 — 폭주 안전망은
+// 여전히 (default 100/sec) 유지, env override 로 보수 설정 가능.
 export let MAX_SPAWN_PER_SEC = resolvePositiveInteger(
   process.env.TRIFLUX_MAX_SPAWN_RATE,
-  30,
+  100,
 );
 export const MAX_TOTAL_DESCENDANTS = resolvePositiveInteger(
   process.env.TRIFLUX_MAX_DESCENDANTS,
