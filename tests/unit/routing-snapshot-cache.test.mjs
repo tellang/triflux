@@ -13,6 +13,7 @@ import {
   __internal__,
   getDefaultSnapshot,
   resetSnapshotCache,
+  tryGetCachedSnapshot,
 } from "../../hub/routing-snapshot.mjs";
 
 const DEFAULT_TTL_MS = 900_000; // 모듈 내부 DEFAULT_CACHE_TTL_MS 와 정합
@@ -143,5 +144,84 @@ describe("routing-snapshot cache — getDefaultSnapshot()", () => {
     });
     assert.equal(tracker.calls, 2);
     assert.equal(refreshed._fakeCallId, 2);
+  });
+});
+
+// Phase 1 wire-up 보강 — sync hot path (conductor.spawnSession) 가 broker.lease
+// atomic 인변량을 깨지 않고 dynamic routing decision 을 평가하려면 cache 의
+// fresh entry 를 sync 로 읽을 수 있어야 한다. tryGetCachedSnapshot() 는
+// builder 를 호출하지 않고, fresh 면 snapshot, 아니면 null 만 반환한다.
+describe("routing-snapshot cache — tryGetCachedSnapshot() sync getter", () => {
+  beforeEach(() => {
+    resetSnapshotCache();
+  });
+
+  it("S-01: cache 가 비어있으면 null 을 반환한다 (cache miss)", () => {
+    assert.equal(tryGetCachedSnapshot({ now: NOW }), null);
+  });
+
+  it("S-02: getDefaultSnapshot 으로 채운 cache 를 sync 로 읽을 수 있다", async () => {
+    const tracker = mkBuilder();
+    const built = await getDefaultSnapshot({
+      now: NOW,
+      builder: tracker.builder,
+    });
+    const cached = tryGetCachedSnapshot({ now: NOW });
+    assert.strictEqual(cached, built);
+  });
+
+  it("S-03: TTL 만료 시 builder 호출 없이 null 을 반환한다 (sync fail-closed)", async () => {
+    const tracker = mkBuilder();
+    await getDefaultSnapshot({ now: NOW, builder: tracker.builder });
+    const expired = tryGetCachedSnapshot({ now: NOW + DEFAULT_TTL_MS + 1 });
+    assert.equal(expired, null);
+    // builder 는 호출되지 않아야 한다 (sync IO 없음 보장)
+    assert.equal(tracker.calls, 1);
+  });
+
+  it("S-04: maxAgeMs override 가 적용된다", async () => {
+    const tracker = mkBuilder();
+    await getDefaultSnapshot({ now: NOW, builder: tracker.builder });
+    // custom 짧은 TTL (1000ms) — 1001ms 후 호출 → cache miss
+    const expired = tryGetCachedSnapshot({
+      now: NOW + 1001,
+      maxAgeMs: 1000,
+    });
+    assert.equal(expired, null);
+    // 같은 시점이라도 default TTL 안이면 hit
+    const hit = tryGetCachedSnapshot({ now: NOW + 1001 });
+    assert.ok(hit, "default TTL 안에서는 hit 이어야 한다");
+  });
+
+  it("S-05: __internal__.setCacheForTest 로 주입된 cache 도 읽힌다", () => {
+    const fakeSnapshot = {
+      schemaVersion: 1,
+      observedAt: NOW,
+      claude: null,
+      codex: null,
+      broker: null,
+      _injected: true,
+    };
+    __internal__.setCacheForTest({ snapshot: fakeSnapshot, fetchedAt: NOW });
+    const cached = tryGetCachedSnapshot({ now: NOW + 100 });
+    assert.strictEqual(cached, fakeSnapshot);
+  });
+
+  it("S-06: now 인자 미주입 시 Date.now() 사용 — fresh cache hit 보장", () => {
+    const fakeSnapshot = {
+      schemaVersion: 1,
+      observedAt: Date.now(),
+      claude: null,
+      codex: null,
+      broker: null,
+    };
+    // 현재 시각으로 cache 주입
+    __internal__.setCacheForTest({
+      snapshot: fakeSnapshot,
+      fetchedAt: Date.now(),
+    });
+    // now 인자 없이 호출 — Date.now() 가 fetchedAt 근처라 TTL 안
+    const cached = tryGetCachedSnapshot();
+    assert.strictEqual(cached, fakeSnapshot);
   });
 });
