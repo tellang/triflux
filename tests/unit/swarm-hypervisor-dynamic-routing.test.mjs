@@ -127,7 +127,10 @@ function readSwarmEvents(logsDir) {
   }
 }
 
-async function waitFor(check, timeoutMs = 1500) {
+async function waitFor(check, timeoutMs = 5000) {
+  // CI 환경에서 buildRoutingSnapshot 의 lazy import (HUD providers + broker) 가
+  // 첫 호출 시 느림 → timeout 을 5s 로 둔다. snapshot 빌드 자체는 작은 IO 라
+  // 정상 시 100ms 이내 완료.
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (check()) return;
