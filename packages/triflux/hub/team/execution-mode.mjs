@@ -42,6 +42,19 @@ function pushFlag(args, flag, value) {
   }
 }
 
+// #116-C: codex headless 의 argv-inline prompt 가 macOS oh-my-codex hook
+// SessionStart Failed 회귀를 유발 (codex CLI v0.130.0). cli-adapter-base 의
+// buildExecCommand 가 shell command 형태에서 동일 fix 를 적용했고
+// (TFX_CODEX_STDIN_PROMPT=0 opt-out), 본 함수의 spawn-args 형태에서도 같은
+// 정신으로 prompt 를 stdin transport 로 분리한다. 동일 env var 를 재사용해
+// 사용자가 한 곳만 끄면 양쪽 path 모두 비활성.
+export function resolveStdinPromptMode(explicit, envSource) {
+  if (typeof explicit === "boolean") return explicit;
+  const env = (envSource || process.env).TFX_CODEX_STDIN_PROMPT;
+  if (env === "0" || env === "false") return false;
+  return true;
+}
+
 export function resolveCliExecutable(cli, opts = {}) {
   const name = String(cli || "codex");
   const resolveCommand = opts.resolveCommand || whichCommand;
@@ -134,6 +147,22 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
       args.push("-c", `mcp_servers.${server}.enabled=true`);
     }
   }
+
+  // #116-C: codex headless 의 argv-inline prompt → macOS oh-my-codex hook
+  // SessionStart Failed 회귀 (codex v0.130.0). default 가 stdin transport.
+  // conductor.respawnSession 이 spec.prompt 를 child.stdin.write 로 주입한다.
+  const useStdin =
+    resolveStdinPromptMode(opts.stdinPrompt, opts.env) && prompt.length > 0;
+  if (useStdin) {
+    return {
+      ...wrap(args),
+      useExec: true,
+      shell: false,
+      stdinPrompt: true,
+      prompt,
+    };
+  }
+
   args.push(prompt);
   return { ...wrap(args), useExec: true, shell: false };
 }
