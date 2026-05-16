@@ -1295,6 +1295,41 @@ apply_no_claude_native_mode() {
   echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1: $AGENT_TYPE -> codex($CLI_EFFORT) 리매핑" >&2
 }
 
+## ── Phase 1 dynamic routing override (opt-in env TRIFLUX_DYNAMIC_ROUTING) ──
+## scripts/lib/dynamic-route-cli.mjs 가 routing decision 의 shards[0].cli 만
+## stdout 으로 반환. env 미설정 시 helper 가 silent no-op (stdout empty) →
+## 현재 CLI_TYPE 유지. conductor (sync) / swarm-hypervisor (plan-time) wire-up
+## 과 의도 정합한 sh 경로 wire-up.
+apply_dynamic_routing_override() {
+  # set -u 환경 safe — 모든 env 변수 default 값 패턴 적용.
+  local flag="${TRIFLUX_DYNAMIC_ROUTING:-}"
+  [[ "$flag" != "1" && "$flag" != "true" ]] && return
+  [[ -z "${CLI_TYPE:-}" ]] && return
+  [[ "${CLI_TYPE}" == "claude-native" ]] && return
+
+  local cli_helper="${REPO_ROOT:-}/scripts/lib/dynamic-route-cli.mjs"
+  [[ ! -f "$cli_helper" ]] && return
+
+  local override_cli
+  override_cli=$(node "$cli_helper" \
+    --task-id "tfx-route-${AGENT_TYPE:-unknown}-$$" \
+    --agent-hint "$CLI_TYPE" \
+    --team-size 1 2>/dev/null) || return
+
+  [[ -z "$override_cli" ]] && return
+  [[ "$override_cli" == "$CLI_TYPE" ]] && return
+
+  # 지원하는 CLI 만 적용 — 알 수 없는 값은 무시
+  case "$override_cli" in
+    codex|gemini|claude) ;;
+    *) return ;;
+  esac
+
+  echo "[tfx-route] dynamic_route_override: ${CLI_TYPE} -> ${override_cli} (TRIFLUX_DYNAMIC_ROUTING=${flag})" >&2
+  CLI_TYPE="$override_cli"
+  CLI_CMD="$override_cli"
+}
+
 apply_verifier_override() {
   [[ "$AGENT_TYPE" != "verifier" ]] && return
 
@@ -2119,6 +2154,7 @@ main() {
   apply_no_claude_native_mode
   apply_plan_guard
   apply_verifier_override
+  apply_dynamic_routing_override
 
   # CLI 경로 해석
   case "$CLI_CMD" in
