@@ -151,7 +151,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   doctor: {
     usage:
-      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--json]",
+      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--dynamic-routing] [--json]",
     description: "설치 상태 진단 및 자동 복구",
     options: [
       {
@@ -180,6 +180,12 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "boolean",
         description:
           "--fix 와 함께 사용. cli-issues.jsonl 에서 7일 초과 항목 물리 삭제 (#144)",
+      },
+      {
+        name: "--dynamic-routing",
+        type: "boolean",
+        description:
+          "Phase 1 dynamic routing 상태 진단 (env / policy / snapshot cache / preview decision)",
       },
       {
         name: "--json",
@@ -5961,6 +5967,45 @@ async function main() {
           } else {
             console.log(`\n  ${RED}✗${RESET} 진단 실패: ${result.error}\n`);
           }
+        }
+        return;
+      }
+      if (cmdArgs.includes("--dynamic-routing")) {
+        const { diagnoseDynamicRouting } = await import(
+          "../scripts/doctor-dynamic-routing.mjs"
+        );
+        const report = await diagnoseDynamicRouting();
+        if (JSON_OUTPUT) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          const mark = (b) =>
+            b ? `${GREEN_BRIGHT}✓${RESET}` : `${RED}✗${RESET}`;
+          console.log(
+            `\n  ${AMBER}${BOLD}⬡ triflux doctor — dynamic routing${RESET}\n`,
+          );
+          console.log(
+            `  ${mark(report.enabled)} enabled: ${report.enabled} (TRIFLUX_DYNAMIC_ROUTING=${report.envFlag ?? "미설정"})`,
+          );
+          console.log(
+            `  ${mark(report.policyLoaded)} policy loaded: ${report.policyLoaded} (scenarios=${report.policyScenarios.length})`,
+          );
+          console.log(
+            `  ${mark(report.snapshotCached)} snapshot cache: ${
+              report.snapshotCached
+                ? `hit (age=${report.snapshotAgeMs}ms)`
+                : "miss"
+            }`,
+          );
+          if (report.previewDecision) {
+            const d = report.previewDecision;
+            console.log(
+              `  ${GREEN_BRIGHT}→${RESET} preview decision: scenario=${d.scenario}, mode=${d.mode}, lane=${d.lane}, shards[0].cli=${d.shards?.[0]?.cli ?? "?"}`,
+            );
+          }
+          if (report.error) {
+            console.log(`  ${RED}✗${RESET} error: ${report.error}`);
+          }
+          console.log("");
         }
         return;
       }
