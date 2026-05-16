@@ -80,7 +80,7 @@ afterEach(async () => {
   rmSync(logsDir, { recursive: true, force: true });
 });
 
-test("conductor launches quoted prompts through argv without shell quoting on Windows-sensitive paths", async () => {
+test("conductor launches quoted prompts through stdin without shell quoting or argv injection on Windows-sensitive paths", async () => {
   const spawnCalls = [];
   conductor = createConductor({
     logsDir,
@@ -139,11 +139,21 @@ test("conductor launches quoted prompts through argv without shell quoting on Wi
   }
   assert.equal(spawnCalls[0].options.shell, false);
   assert.notEqual(spawnCalls[0].exitCode, 255);
-  assert.equal(spawnCalls[0].args.at(-1), prompt);
+
+  // #116-C (v10.21+): default stdinPrompt=true 이므로 prompt 가 args 에서
+  // 빠지고 conductor.respawnSession 이 child.stdin.write 로 분리해서 전달.
+  // 마지막 args 는 --color flag 의 value ("never"). 이는 PR #128 BUG-A 의
+  // 가드보다 더 강력한 가드 — prompt 가 argv 어디에도 없으므로 cmd batch %*
+  // 파싱 / shell quoting / quote escaping 회귀 가능성이 원천 차단된다.
+  assert.equal(spawnCalls[0].args.at(-1), "never");
+  assert.ok(
+    !spawnCalls[0].args.includes(prompt),
+    `prompt must not appear in args under default stdinPrompt=true: ${JSON.stringify(spawnCalls[0].args)}`,
+  );
   assert.ok(
     !spawnCalls[0].args.some((arg) =>
       String(arg).includes('\\"hello world\\"'),
     ),
-    `prompt should be passed as a raw argv item: ${JSON.stringify(spawnCalls[0].args)}`,
+    `no shell-quoted prompt fragment in args: ${JSON.stringify(spawnCalls[0].args)}`,
   );
 });

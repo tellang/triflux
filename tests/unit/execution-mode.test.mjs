@@ -5,6 +5,7 @@ import {
   buildSpawnSpecForMode,
   MODES,
   resolveCliExecutable,
+  resolveStdinPromptMode,
   selectExecutionMode,
   unwrapCmdToJsScript,
 } from "../../hub/team/execution-mode.mjs";
@@ -227,8 +228,9 @@ test("unwrapCmdToJsScript: returns null when .js does not exist on disk", () => 
   assert.equal(result, null);
 });
 
-test("buildSpawnSpecForMode: win32 + .cmd uses node + .js (cmd /c bypass)", () => {
-  // 회귀 방지 #128 BUG-A: cmd /c wrap 경로가 prompt truncation 의 원인이었음
+test("buildSpawnSpecForMode: win32 + .cmd uses node + .js (cmd /c bypass, legacy stdinPrompt=false)", () => {
+  // 회귀 방지 #128 BUG-A: cmd /c wrap 경로가 prompt truncation 의 원인이었음.
+  // stdinPrompt=false 강제 (legacy argv-inline) 회귀 가드.
   const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
     cli: "codex",
     prompt: "no-op probe.\n\n```bash\necho ok\n```\n",
@@ -238,6 +240,7 @@ test("buildSpawnSpecForMode: win32 + .cmd uses node + .js (cmd /c bypass)", () =
     unwrapCmdFn: () =>
       String.raw`C:\npm\node_modules\@openai\codex\bin\codex.js`,
     nodeExecPath: String.raw`C:\nodejs\node.exe`,
+    stdinPrompt: false,
   });
   assert.equal(spec.command, String.raw`C:\nodejs\node.exe`);
   assert.equal(
@@ -248,9 +251,10 @@ test("buildSpawnSpecForMode: win32 + .cmd uses node + .js (cmd /c bypass)", () =
   const lastArg = spec.args[spec.args.length - 1];
   assert.ok(lastArg.includes("```bash"), "fenced bash block must survive");
   assert.ok(lastArg.includes("\n"), "newline must survive in args");
+  assert.notEqual(spec.stdinPrompt, true);
 });
 
-test("buildSpawnSpecForMode: win32 + .cmd falls back to cmd /c when unwrap fails", () => {
+test("buildSpawnSpecForMode: win32 + .cmd falls back to cmd /c when unwrap fails (legacy stdinPrompt=false)", () => {
   const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
     cli: "codex",
     prompt: "test",
@@ -258,8 +262,109 @@ test("buildSpawnSpecForMode: win32 + .cmd falls back to cmd /c when unwrap fails
     resolveCommand: () => String.raw`C:\npm\codex.cmd`,
     existsSyncFn: () => true,
     unwrapCmdFn: () => null,
+    stdinPrompt: false,
   });
   assert.equal(spec.command, "cmd");
   assert.equal(spec.args[0], "/c");
   assert.equal(spec.args[1], String.raw`C:\npm\codex.cmd`);
+});
+
+// ── #116-C: stdin transport for codex headless prompt ────────────────────
+
+test("resolveStdinPromptMode: explicit boolean wins", () => {
+  assert.equal(resolveStdinPromptMode(true, {}), true);
+  assert.equal(resolveStdinPromptMode(false, {}), false);
+  assert.equal(
+    resolveStdinPromptMode(false, { TFX_CODEX_STDIN_PROMPT: "1" }),
+    false,
+  );
+});
+
+test("resolveStdinPromptMode: default true; env=0|false opts out", () => {
+  assert.equal(resolveStdinPromptMode(undefined, {}), true);
+  assert.equal(
+    resolveStdinPromptMode(undefined, { TFX_CODEX_STDIN_PROMPT: "0" }),
+    false,
+  );
+  assert.equal(
+    resolveStdinPromptMode(undefined, { TFX_CODEX_STDIN_PROMPT: "false" }),
+    false,
+  );
+  assert.equal(
+    resolveStdinPromptMode(undefined, { TFX_CODEX_STDIN_PROMPT: "1" }),
+    true,
+  );
+});
+
+test("buildSpawnSpecForMode: codex headless default uses stdinPrompt (prompt out of args)", () => {
+  const prompt = "Please respond ACK.\n\n```bash\necho ok\n```\n";
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "codex",
+    prompt,
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/codex",
+    env: {},
+  });
+  assert.equal(spec.stdinPrompt, true);
+  assert.equal(spec.prompt, prompt);
+  assert.equal(spec.command, "/usr/local/bin/codex");
+  assert.ok(spec.args.includes("exec"), "exec arg must be present");
+  for (const a of spec.args) {
+    assert.notEqual(
+      a,
+      prompt,
+      "prompt must not appear in args when stdinPrompt=true",
+    );
+  }
+});
+
+test("buildSpawnSpecForMode: codex headless TFX_CODEX_STDIN_PROMPT=0 falls back to argv-inline", () => {
+  const prompt = "argv-inline legacy";
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "codex",
+    prompt,
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/codex",
+    env: { TFX_CODEX_STDIN_PROMPT: "0" },
+  });
+  assert.notEqual(spec.stdinPrompt, true);
+  assert.equal(spec.args[spec.args.length - 1], prompt);
+});
+
+test("buildSpawnSpecForMode: codex headless empty prompt falls back to argv-inline (avoid empty stdin EOF)", () => {
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "codex",
+    prompt: "",
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/codex",
+    env: {},
+  });
+  assert.notEqual(spec.stdinPrompt, true);
+  assert.equal(spec.args[spec.args.length - 1], "");
+});
+
+test("buildSpawnSpecForMode: gemini headless ignores stdinPrompt (keeps --prompt flag)", () => {
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "gemini",
+    prompt: "ACK",
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/gemini",
+    env: {},
+  });
+  assert.notEqual(spec.stdinPrompt, true);
+  assert.ok(spec.args.includes("--prompt"));
+  assert.equal(spec.args[spec.args.indexOf("--prompt") + 1], "ACK");
+});
+
+test("buildSpawnSpecForMode: claude headless ignores stdinPrompt (keeps -p flag)", () => {
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "claude",
+    prompt: "ACK",
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/claude",
+    env: {},
+  });
+  assert.notEqual(spec.stdinPrompt, true);
+  assert.ok(spec.args.includes("-p"));
+  assert.equal(spec.args[spec.args.indexOf("-p") + 1], "ACK");
 });

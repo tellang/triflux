@@ -621,9 +621,24 @@ export function createConductor(opts = {}) {
     session.errPath = errPath;
     session.descendantSnapshot = [];
 
-    // 로컬 세션: 프롬프트는 CLI args로 전달되므로 stdin 즉시 닫기
-    // (codex가 stdin pipe 감지 시 "Reading additional input..." 대기 방지)
-    if (child.stdin) child.stdin.end();
+    // #116-C: spawnSpec.stdinPrompt 가 true 면 codex 의 oh-my-codex hook
+    // (macOS) 가 매우 긴 argv-inline prompt 에서 SessionStart Failed → exit 1
+    // 회귀를 유발하므로 prompt 를 stdin write 로 분리해서 전달한다.
+    // stdinPrompt 없으면 기존 흐름 — codex "Reading additional input..." 대기
+    // 방지를 위해 stdin 즉시 닫기.
+    if (child.stdin) {
+      if (spawnSpec.stdinPrompt && typeof spawnSpec.prompt === "string") {
+        try {
+          child.stdin.write(spawnSpec.prompt);
+        } catch (err) {
+          eventLog.append("spawn_stdin_write_error", {
+            session: session.id,
+            error: err.message,
+          });
+        }
+      }
+      child.stdin.end();
+    }
 
     eventLog.append("spawn", {
       session: session.id,
