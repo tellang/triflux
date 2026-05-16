@@ -14,6 +14,10 @@ import { execFile } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  createDynamicRouter,
+  isDynamicRoutingEnabled,
+} from "../dynamic-routing-engine.mjs";
 import { cleanupShardProcesses } from "../lib/process-utils.mjs";
 import { getHostConfig } from "../lib/ssh-command.mjs";
 import { buildWorkerPrompt } from "./build-worker-prompt.mjs";
@@ -1565,6 +1569,61 @@ export function createSwarmHypervisor(opts) {
 
     plan = swarmPlan;
     markIntegrationPromisePending();
+
+    // Phase 1 dynamic routing wire-up (opt-in env TRIFLUX_DYNAMIC_ROUTING).
+    // launch() 는 plan-time, 이미 async 라 D-1 facade 의 await routeRequest 를
+    // 그대로 사용한다 (conductor.spawnSession 의 sync invariant 충돌 없음).
+    // team_size = plan.shards.length 매핑 → S5 leaseMany 시나리오 자연 매핑.
+    // decision.shards[i].cli 가 plan.shards[i].agent 와 다르면 1:1 override.
+    if (
+      isDynamicRoutingEnabled(process.env) &&
+      Array.isArray(plan?.shards) &&
+      plan.shards.length > 0
+    ) {
+      try {
+        const router = createDynamicRouter();
+        const decision = await router.routeRequest({
+          task_id: runId,
+          team_size: plan.shards.length,
+          agent_hint: plan.shards[0]?.agent || "codex",
+        });
+        eventLog.append("dynamic_route_plan_decision", {
+          decisionId: decision.decisionId ?? null,
+          scenario: decision.scenario ?? "unknown",
+          lane: decision.lane ?? null,
+          mode: decision.mode ?? null,
+          shardCount: decision.shards?.length ?? 0,
+          planShardCount: plan.shards.length,
+          snapshotAgeMs: decision.snapshotAgeMs ?? null,
+        });
+        const overrides = [];
+        const decShards = Array.isArray(decision.shards) ? decision.shards : [];
+        for (let i = 0; i < plan.shards.length; i++) {
+          const shard = plan.shards[i];
+          const decShard = decShards[i];
+          if (decShard?.cli && decShard.cli !== shard.agent) {
+            overrides.push({
+              shard: shard.name,
+              original: shard.agent,
+              override: decShard.cli,
+              accountId: decShard.accountId ?? null,
+            });
+            shard.agent = decShard.cli;
+          }
+        }
+        if (overrides.length > 0) {
+          eventLog.append("dynamic_route_plan_overrides", {
+            decisionId: decision.decisionId ?? null,
+            count: overrides.length,
+            overrides,
+          });
+        }
+      } catch (err) {
+        eventLog.append("dynamic_route_plan_error", {
+          error: err?.message || String(err),
+        });
+      }
+    }
 
     // Hub alive 확인 — 죽어있으면 재시작
     if (ensureHubAliveImpl) {
