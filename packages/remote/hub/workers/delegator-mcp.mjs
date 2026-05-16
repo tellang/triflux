@@ -14,6 +14,7 @@ import * as z from "zod";
 import { resolveBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import { whichCommand } from "@triflux/core/hub/platform.mjs";
 import { runHeadlessWithCleanup } from "../team/headless.mjs";
+import { buildWorkerSandboxEnv } from "../team/worker-sandbox.mjs";
 import { CodexMcpWorker } from "./codex-mcp.mjs";
 import { GeminiWorker } from "./gemini-worker.mjs";
 
@@ -1182,8 +1183,20 @@ export class DelegatorMcpWorker {
   }
 
   _buildRouteEnv(args) {
-    const env = cloneEnv(this.env);
+    const baseEnv = cloneEnv(this.env);
+    const sandbox = buildWorkerSandboxEnv({
+      cwd: args.cwd || this.cwd,
+      sessionId:
+        args.teamTaskId ||
+        args.teamAgentName ||
+        args.workerIndex ||
+        args.agentType ||
+        "route",
+      env: baseEnv,
+    });
+    const env = { ...baseEnv, ...sandbox.env };
     env.TFX_CLI_MODE = pickRouteMode(args.provider);
+    if (sandbox.root) env.TFX_WORKER_SANDBOX_SCOPE = "delegator-route";
 
     if (args.codexTransport) {
       env.TFX_CODEX_TRANSPORT = args.codexTransport;

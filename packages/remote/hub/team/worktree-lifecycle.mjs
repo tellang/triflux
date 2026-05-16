@@ -314,7 +314,7 @@ export async function prepareIntegrationBranch({
  * @param {string} [opts.rootDir=process.cwd()]
  * @param {{ checkRebase: Function } | null} [opts.preflight=null] — git-preflight instance
  * @param {{ sessionId: string, workerId?: string } | null} [opts.sessionContext=null]
- * @returns {Promise<{ ok: boolean, headCommit?: string, error?: string, preflight?: object }>}
+ * @returns {Promise<{ ok: boolean, headCommit?: string, strategy?: string, commits?: number, notes?: string, fallbackReason?: string, error?: string, preflight?: object }>}
  */
 export async function rebaseShardOntoIntegration({
   shardBranch,
@@ -355,10 +355,9 @@ export async function rebaseShardOntoIntegration({
   // Backup integration HEAD for rollback
   const backupCommit = await git(["rev-parse", integrationBranch], rootDir);
 
-  // #127: cherry-pick instead of rebase. Rebase fails when shardBranch is
-  // already checked out by a swarm worktree ("branch already used by worktree").
-  // Cherry-pick reads the shard's commits without touching its branch ref,
-  // so worktree contention disappears. Memory: feedback_swarm_cherry_pick.
+  let shaList = [];
+  let ffError = null;
+
   try {
     const log = await git(
       [
@@ -369,19 +368,55 @@ export async function rebaseShardOntoIntegration({
       ],
       rootDir,
     );
-    const shaList = log
+    shaList = log
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
 
     await git(["checkout", integrationBranch], rootDir);
 
+    try {
+      await git(["merge", "--ff-only", shardBranch], rootDir);
+      const headCommit = await git(["rev-parse", "HEAD"], rootDir);
+      return {
+        ok: true,
+        headCommit,
+        strategy: "auto-ff",
+        commits: shaList.length,
+        notes: "linear (merge --ff-only)",
+      };
+    } catch (err) {
+      ffError = err;
+      try {
+        await git(["merge", "--abort"], rootDir);
+      } catch {
+        /* ff-only usually leaves no merge state */
+      }
+      try {
+        await git(["reset", "--hard", backupCommit], rootDir);
+      } catch {
+        /* fallback below will report if cherry-pick also fails */
+      }
+    }
+
+    // #127: cherry-pick fallback instead of branch merge. Rebase/ff paths can
+    // fail when histories diverge or a shard branch is checked out by a swarm
+    // worktree. Cherry-pick reads commits without moving the shard branch ref.
     for (const sha of shaList) {
       await git(["cherry-pick", sha], rootDir);
     }
 
     const headCommit = await git(["rev-parse", "HEAD"], rootDir);
-    return { ok: true, headCommit };
+    return {
+      ok: true,
+      headCommit,
+      strategy: "cherry-pick",
+      commits: shaList.length,
+      fallbackReason: ffError?.message || null,
+      notes: ffError
+        ? `auto-ff failed: ${ffError.message}`
+        : "cherry-pick fallback",
+    };
   } catch (err) {
     try {
       await git(["cherry-pick", "--abort"], rootDir);
@@ -422,7 +457,13 @@ export async function rebaseShardOntoIntegration({
       }
     }
 
-    return { ok: false, error: err.message };
+    return {
+      ok: false,
+      error: err.message,
+      strategy: "failed",
+      commits: shaList.length,
+      fallbackReason: ffError?.message || null,
+    };
   } finally {
     // Always restore caller's branch. Skip if originalBranch is null
     // (detached HEAD case) or already on target.

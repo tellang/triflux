@@ -360,6 +360,8 @@ export function parseFrontmatterWithManifest(source, skillDir) {
   if (manifest.triggers) merged.triggers = manifest.triggers;
   if (manifest.argument_hint) merged["argument-hint"] = manifest.argument_hint;
   if (manifest.internal != null) merged.internal = manifest.internal;
+  if (manifest.deprecated != null) merged.deprecated = manifest.deprecated;
+  if (manifest.superseded_by) merged["superseded-by"] = manifest.superseded_by;
 
   return { data: merged, body };
 }

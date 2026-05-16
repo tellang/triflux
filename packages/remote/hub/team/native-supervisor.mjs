@@ -15,6 +15,7 @@ import {
 } from "@triflux/core/hub/lib/bash-path.mjs";
 import { verifySlimWrapperRouteExecution } from "./native.mjs";
 import { forceCleanupTeam } from "./nativeProxy.mjs";
+import { buildWorkerSandboxEnv } from "./worker-sandbox.mjs";
 
 const ROUTE_LOG_TAIL_BYTES = 65536;
 
@@ -116,6 +117,7 @@ function memberStateSnapshot() {
       routeVerification: state?.routeVerification || null,
       logFile: state?.logFile || null,
       errFile: state?.errFile || null,
+      workerSandboxRoot: state?.workerSandboxRoot || null,
     });
   }
   return states;
@@ -164,15 +166,25 @@ function spawnMember(member) {
   const outWs = createWriteStream(outPath, { flags: "a" });
   const errWs = createWriteStream(errPath, { flags: "a" });
 
+  const baseEnv = {
+    ...process.env,
+    TERM:
+      process.env.TERM && process.env.TERM !== "dumb"
+        ? process.env.TERM
+        : "xterm-256color",
+  };
+  const sandbox =
+    member.role === "worker"
+      ? buildWorkerSandboxEnv({
+          cwd: config.workdir || process.cwd(),
+          sessionId: `${sessionName}-${member.name}`,
+          env: baseEnv,
+        })
+      : { env: {}, root: null };
+
   const child = spawn(command, {
     shell: true,
-    env: {
-      ...process.env,
-      TERM:
-        process.env.TERM && process.env.TERM !== "dumb"
-          ? process.env.TERM
-          : "xterm-256color",
-    },
+    env: { ...baseEnv, ...sandbox.env },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });
@@ -187,6 +199,7 @@ function spawnMember(member) {
     status: "running",
     exitCode: null,
     lastPreview: "",
+    workerSandboxRoot: sandbox.root || null,
   };
 
   child.stdout.on("data", (buf) => {

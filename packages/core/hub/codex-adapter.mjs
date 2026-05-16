@@ -1,8 +1,9 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   buildExecCommand,
+  createResult,
   executeWithCircuitBroker,
   normalizePathForShell,
   runProcess,
@@ -107,6 +108,10 @@ export function buildExecArgs(opts = {}) {
     skipGitRepoCheck: true,
     sandboxBypass: true,
     cwd: opts.cwd,
+    // stdinPrompt 가 명시되면 buildExecCommand 로 forward.
+    // headless 워커 spawn (backend.mjs) 은 default (stdin on, macOS hook fix).
+    // launcher path (launcher-template.mjs) 는 결정론 위해 false 전달.
+    stdinPrompt: opts.stdinPrompt,
   });
 
   if (!prompt) return command.replace(/\s+""$/u, "");
@@ -155,6 +160,14 @@ async function runCodex(prompt, workdir, preflight, attempt, lease) {
   // account 의 auth.json 을 사용하게 한다. lease 가 null 이면 default ~/.codex
   // 동작 유지 (회귀 없음). lease.env 는 추가 환경변수 (provider 고정 등) 주입용.
   const spawnEnv = lease ? buildLeaseSpawnEnv(lease) : undefined;
+  const authCheck = validateLeaseAuth(lease, spawnEnv);
+  if (!authCheck.ok) {
+    return createResult(false, {
+      stderr: authCheck.error,
+      failureMode: "auth_sync",
+      skipCircuit: true,
+    });
+  }
   return runProcess(command, workdir, attempt.timeout, {
     resultFile,
     inferStallMode,
@@ -180,6 +193,57 @@ function buildLeaseSpawnEnv(lease) {
     Object.assign(extra, lease.env);
   }
   return Object.keys(extra).length ? { ...process.env, ...extra } : undefined;
+}
+
+function validateLeaseAuth(lease, spawnEnv) {
+  if (!lease?.authFile) return { ok: true };
+  if (basename(lease.authFile) !== "auth.json") {
+    return {
+      ok: false,
+      error: `lease authFile must resolve to auth.json for account ${lease.id}`,
+    };
+  }
+  if (!existsSync(lease.authFile)) {
+    return {
+      ok: false,
+      error: `lease authFile missing for account ${lease.id}: ${lease.authFile}`,
+    };
+  }
+  if (dirnameOf(lease.authFile) !== spawnEnv?.CODEX_HOME) {
+    return {
+      ok: false,
+      // This is currently expected to match because buildLeaseSpawnEnv derives
+      // CODEX_HOME from authFile. Keep the guard so future lease.env overrides
+      // cannot silently point Codex at a different account home.
+      error: `CODEX_HOME mismatch for account ${lease.id}`,
+    };
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(lease.authFile, "utf8"));
+    const accountId =
+      parsed?.tokens?.account_id ??
+      parsed?.account_id ??
+      parsed?.accountId ??
+      null;
+    if (!accountId) {
+      return {
+        ok: false,
+        error: `lease authFile has no account_id for account ${lease.id}`,
+      };
+    }
+    if (accountId !== lease.id) {
+      return {
+        ok: false,
+        error: `lease authFile account mismatch: expected ${lease.id}, got ${accountId}`,
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: `lease authFile unreadable for account ${lease.id}: ${error?.message || error}`,
+    };
+  }
+  return { ok: true };
 }
 
 function dirnameOf(filePath) {

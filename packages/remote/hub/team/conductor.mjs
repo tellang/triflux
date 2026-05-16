@@ -51,6 +51,7 @@ import {
   registerSynapseSession,
   unregisterSynapseSession,
 } from "./synapse-http.mjs";
+import { buildWorkerSandboxEnv } from "./worker-sandbox.mjs";
 
 /** 세션 상태 */
 export const STATES = Object.freeze({
@@ -93,16 +94,24 @@ const DEFAULT_GRACE_MS = 10_000;
  * @param {'codex'|'gemini'} agent
  * @param {string} sessionId — 로깅용
  * @param {object} eventLog — createEventLog 인스턴스
+ * @param {object} brokerInstance — AccountBroker 인스턴스
  */
-function swapAuthFile(lease, agent, sessionId, eventLog) {
+function swapAuthFile(
+  lease,
+  agent,
+  sessionId,
+  eventLog,
+  brokerInstance,
+  targetEnv = {},
+) {
   if (lease?.mode !== "auth" || !lease.authFile) return true;
   if (
     agent === "codex" &&
     lease.id &&
-    broker &&
-    typeof broker.syncAuthToSource === "function"
+    brokerInstance &&
+    typeof brokerInstance.syncAuthToSource === "function"
   ) {
-    const result = broker.syncAuthToSource(lease.id);
+    const result = brokerInstance.syncAuthToSource(lease.id);
     if (result?.copied || result?.reason === "up_to_date") {
       eventLog.append("auth_copy", {
         session: sessionId,
@@ -119,12 +128,14 @@ function swapAuthFile(lease, agent, sessionId, eventLog) {
     });
     return false;
   }
+  const targetHome = targetEnv.HOME || homedir();
+  const codexHome = targetEnv.CODEX_HOME || join(targetHome, ".codex");
   const dests =
     agent === "codex"
-      ? [join(homedir(), ".codex", "auth.json")]
+      ? [join(codexHome, "auth.json")]
       : [
-          join(homedir(), ".gemini", "oauth_creds.json"),
-          join(homedir(), ".gemini", "gemini-credentials.json"),
+          join(targetHome, ".gemini", "oauth_creds.json"),
+          join(targetHome, ".gemini", "gemini-credentials.json"),
         ];
   let allOk = true;
   for (const dest of dests) {
@@ -188,6 +199,7 @@ export function createConductor(opts = {}) {
     baseUrl: opts.synapseBaseUrl,
     fetchImpl: opts.synapseFetch,
   };
+  const getActiveBroker = () => optsBroker ?? broker;
 
   function buildSynapseMeta(session, state = session.state, reason = "") {
     return {
@@ -492,13 +504,14 @@ export function createConductor(opts = {}) {
       emitter.emit("dead", { sessionId: session.id, reason });
 
       // broker release on final death
-      if (broker && session.config.accountId) {
-        broker.release(session.config.accountId, {
+      const activeBroker = getActiveBroker();
+      if (activeBroker && session.config.accountId) {
+        activeBroker.release(session.config.accountId, {
           ok: false,
           failureMode: session.lastFailureMode,
         });
         if (session.lastFailureMode === "rate_limited") {
-          broker.markRateLimited(session.config.accountId, 5 * 60 * 1000);
+          activeBroker.markRateLimited(session.config.accountId, 5 * 60 * 1000);
         }
       }
     }
@@ -574,19 +587,26 @@ export function createConductor(opts = {}) {
       }
     }
 
+    const spawnEnv = {
+      ...process.env,
+      ...launcher.env,
+      ...(session.config.env || {}),
+      ...(session.config.branchGuard ? { TRIFLUX_GIT_BRANCH_GUARD: "1" } : {}),
+    };
+    if (session.config.workerSandbox?.root) {
+      eventLog.append("worker_sandbox_env", {
+        session: session.id,
+        root: session.config.workerSandbox.root,
+        codeHomePreserved: Boolean(spawnEnv.CODEX_HOME),
+      });
+    }
+
     let child;
     try {
       child = spawnFn(spawnSpec.command, spawnSpec.args, {
         shell: false,
         cwd: spawnCwd,
-        env: {
-          ...process.env,
-          ...launcher.env,
-          ...(session.config.env || {}),
-          ...(session.config.branchGuard
-            ? { TRIFLUX_GIT_BRANCH_GUARD: "1" }
-            : {}),
-        },
+        env: spawnEnv,
         reason: `conductor:respawnSession:${session.id}`,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
@@ -720,8 +740,9 @@ export function createConductor(opts = {}) {
             completionPayload,
           });
         }
-        if (broker && session.config.accountId) {
-          broker.release(session.config.accountId, { ok: true });
+        const activeBroker = getActiveBroker();
+        if (activeBroker && session.config.accountId) {
+          activeBroker.release(session.config.accountId, { ok: true });
         }
       } else {
         // detect rate_limited from recent output before handleFailure
@@ -1025,7 +1046,11 @@ export function createConductor(opts = {}) {
     // account = executing account) 을 깨지 않는다. snapshot 은 D-2 cache 의
     // sync getter 만 사용 — cache miss 면 evaluateDynamicRoute 가 fail-closed
     // 로 codex-default 를 반환한다.
-    if (isDynamicRoutingEnabled(process.env) && !config.remote && config.agent) {
+    if (
+      isDynamicRoutingEnabled(process.env) &&
+      !config.remote &&
+      config.agent
+    ) {
       try {
         const policy = dynamicRoutingInternal.loadPolicy();
         const snapshot = tryGetCachedSnapshot();
@@ -1061,10 +1086,11 @@ export function createConductor(opts = {}) {
 
     // broker lease (graceful — broker null if accounts.json absent)
     let lease = null;
-    if (broker && config.agent && !config.remote) {
-      lease = broker.lease({ provider: config.agent });
+    const activeBroker = getActiveBroker();
+    if (activeBroker && config.agent && !config.remote) {
+      lease = activeBroker.lease({ provider: config.agent });
       if (lease === null) {
-        const eta = broker.nextAvailableEta(config.agent);
+        const eta = activeBroker.nextAvailableEta(config.agent);
         eventLog.append("broker_no_lease", {
           session: config.id,
           agent: config.agent,
@@ -1076,17 +1102,47 @@ export function createConductor(opts = {}) {
     }
 
     // apply lease profile/env/auth to config (immutable — new object)
-    const resolvedConfig = lease
+    const leaseEnv =
+      lease?.authFile && config.agent === "codex"
+        ? { ...(lease.env || {}), CODEX_HOME: dirname(lease.authFile) }
+        : lease?.env || {};
+
+    let resolvedConfig = lease
       ? {
           ...config,
           profile: lease.profile ?? config.profile,
-          env: { ...(config.env || {}), ...(lease.env || {}) },
+          env: { ...(config.env || {}), ...leaseEnv },
           accountId: lease.id,
         }
-      : config;
+      : {
+          ...config,
+          env: { ...(config.env || {}) },
+        };
+
+    if (!resolvedConfig.remote) {
+      const sandbox = buildWorkerSandboxEnv({
+        cwd: resolvedConfig.workdir || process.cwd(),
+        sessionId: resolvedConfig.id,
+        env: { ...process.env, ...(resolvedConfig.env || {}) },
+      });
+      resolvedConfig = {
+        ...resolvedConfig,
+        env: { ...(resolvedConfig.env || {}), ...sandbox.env },
+        workerSandbox: sandbox.disabled
+          ? { disabled: true }
+          : { root: sandbox.root, home: sandbox.home },
+      };
+    }
 
     // auth file copy — broker resolved absolute path, conductor does the actual copy
-    swapAuthFile(lease, config.agent, config.id, eventLog);
+    swapAuthFile(
+      lease,
+      config.agent,
+      config.id,
+      eventLog,
+      activeBroker,
+      resolvedConfig.env,
+    );
 
     // 원격 세션은 launcher 불필요 (이미 원격에서 실행 중)
     const launcher = resolvedConfig.remote
@@ -1248,8 +1304,21 @@ export function createConductor(opts = {}) {
 
           const newLease = brokerInstance.lease({ provider });
           if (!newLease) continue;
+          if (newLease.authFile && provider === "codex") {
+            session.config.env = {
+              ...(session.config.env || {}),
+              CODEX_HOME: dirname(newLease.authFile),
+            };
+          }
 
-          swapAuthFile(newLease, provider, session.id, eventLog);
+          swapAuthFile(
+            newLease,
+            provider,
+            session.id,
+            eventLog,
+            brokerInstance,
+            session.config.env,
+          );
           eventLog.append("tier_fallback_swap", {
             session: session.id,
             agent: provider,

@@ -5,6 +5,10 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createSwarmHypervisor } from "./swarm-hypervisor.mjs";
 import { planSwarm } from "./swarm-planner.mjs";
+import {
+  formatPreflightReport,
+  runSwarmPreflight,
+} from "./swarm-preflight.mjs";
 
 const RESET = "\u001b[0m";
 const BOLD = "\u001b[1m";
@@ -150,10 +154,44 @@ function printPlan(plan) {
   }
 }
 
+function formatCell(value, width) {
+  const text = value == null || value === "" ? "-" : String(value);
+  return text.padEnd(width).slice(0, width);
+}
+
+export function formatIntegrationReport(report = []) {
+  const rows = Array.isArray(report) ? report : [];
+  const lines = [
+    "=== INTEGRATION REPORT ===",
+    "SHARD     STRATEGY       COMMITS  FINAL_SHA  NOTES",
+  ];
+
+  let integrated = 0;
+  let recoveryPatches = 0;
+  for (const row of rows) {
+    if (row.strategy !== "failed") integrated += 1;
+    if (row.recoveryPatch) recoveryPatches += 1;
+    const finalSha = row.finalSha ? String(row.finalSha).slice(0, 7) : "-";
+    const notes = row.recoveryPatch
+      ? `${row.notes || "failed"}; recovery: ${row.recoveryPatch}`
+      : row.notes || "-";
+    lines.push(
+      `${formatCell(row.shard, 9)} ${formatCell(row.strategy, 14)} ${formatCell(row.commits, 8)} ${formatCell(finalSha, 10)} ${notes}`,
+    );
+  }
+
+  const total = rows.length;
+  lines.push("");
+  lines.push(
+    `TOTAL: ${integrated}/${total} integrated, ${recoveryPatches} recovery patch${recoveryPatches === 1 ? "" : "es"} saved.`,
+  );
+  return lines.join("\n");
+}
+
 /**
  * tfx swarm <prd-path> — PRD 실행
  */
-export async function cmdSwarmRun(args, { json = false } = {}) {
+export async function cmdSwarmRun(args, { json = false, deps = {} } = {}) {
   const { flags, positional } = parseFlags(args);
   flags.json = flags.json || json;
 
@@ -168,9 +206,10 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
     throw new Error(`PRD file not found: ${absPrd}`);
   }
 
-  const plan = planSwarm(absPrd, { repoRoot: process.cwd() });
-
   if (flags.dryRun) {
+    const plan = (deps.planSwarm || planSwarm)(absPrd, {
+      repoRoot: process.cwd(),
+    });
     if (flags.json) {
       process.stdout.write(JSON.stringify(planToJson(plan), null, 2) + "\n");
     } else {
@@ -178,6 +217,24 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
     }
     return;
   }
+
+  const preflight = (deps.runSwarmPreflight || runSwarmPreflight)(absPrd, {
+    repoRoot: process.cwd(),
+    deps,
+  });
+  if (!preflight.ok) {
+    if (flags.json) {
+      process.stdout.write(JSON.stringify(preflight, null, 2) + "\n");
+    } else {
+      process.stderr.write(formatPreflightReport(preflight));
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const plan = (deps.planSwarm || planSwarm)(absPrd, {
+    repoRoot: process.cwd(),
+  });
 
   const ttyGate = assertTtyForSwarm();
   for (const w of ttyGate.warnings) {
@@ -190,7 +247,7 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
   const logsDir =
     flags.logsDir ||
     join(process.cwd(), ".triflux", "swarm-logs", `run-${Date.now()}`);
-  const hyper = createSwarmHypervisor({
+  const hyper = (deps.createSwarmHypervisor || createSwarmHypervisor)({
     workdir: process.cwd(),
     logsDir,
     maxRestarts: flags.maxRestarts,
@@ -257,6 +314,10 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
     );
   }
 
+  if (Array.isArray(ip.report) && ip.report.length > 0) {
+    console.log(`\n${formatIntegrationReport(ip.report)}`);
+  }
+
   if (flags.json) {
     process.stdout.write(JSON.stringify(status, null, 2) + "\n");
   }
@@ -270,6 +331,39 @@ export async function cmdSwarmRun(args, { json = false } = {}) {
  */
 export async function cmdSwarmPlan(args, { json = false } = {}) {
   return cmdSwarmRun(["--dry-run", ...args], { json });
+}
+
+/**
+ * tfx swarm preflight <prd-path> — PRD 실행 전 no-go 리포트 출력
+ */
+export async function cmdSwarmPreflight(
+  args,
+  { json = false, deps = {} } = {},
+) {
+  const { flags, positional } = parseFlags(args);
+  flags.json = flags.json || json;
+
+  const prdPath = positional[0];
+  if (!prdPath) {
+    throw new Error(
+      "PRD path required. Usage: tfx swarm preflight <prd-path> [--json]",
+    );
+  }
+  const absPrd = resolve(prdPath);
+  if (!existsSync(absPrd)) {
+    throw new Error(`PRD file not found: ${absPrd}`);
+  }
+
+  const report = (deps.runSwarmPreflight || runSwarmPreflight)(absPrd, {
+    repoRoot: process.cwd(),
+    deps,
+  });
+  if (flags.json) {
+    process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+  } else {
+    process.stdout.write(formatPreflightReport(report));
+  }
+  if (!report.ok) process.exitCode = 1;
 }
 
 /**

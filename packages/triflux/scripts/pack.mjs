@@ -48,6 +48,9 @@ const CORE_FILES = [
   "hub/adaptive-memory.mjs",
   "hub/memory-doctor.mjs",
   "hub/account-broker.mjs",
+  // Phase 1 dynamic routing (#251 + #263 + #264 + wire-ups)
+  "hub/dynamic-routing-engine.mjs",
+  "hub/routing-snapshot.mjs",
 ];
 
 const CORE_DIRS = [

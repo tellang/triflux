@@ -4,6 +4,31 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.21.0] - 2026-05-16
+
+### Added
+
+- **`feat(routing)` (PR #263, commit `da70034d`, D-1)** Phase 1 dynamic routing caller-friendly facade — `createDynamicRouter(opts)` factory + `routeRequest(request, opts)` top-level + opt-in env `TRIFLUX_DYNAMIC_ROUTING=1|true` gating. env 미설정 시 null-router (항상 fallback decision 반환). policy/snapshot/snapshotProvider/nowFn 주입 가능 (pure-fn 결정 테스트)
+- **`feat(routing)` (PR #264, commit `d03182c3`, D-2)** routing-snapshot Phase 1 in-process cache — `getDefaultSnapshot({forceRefresh, maxAgeMs, now, builder})` shortcut, `DEFAULT_CACHE_TTL_MS = 900_000` (policy `freshness.max_snapshot_age_ms` 와 정합), `resetSnapshotCache()` 테스트 격리, `__internal__.getCacheStateForTest`/`setCacheForTest`
+- **`feat(routing)` (PR #266, commit `e8506c55`, Wire-up 1)** `conductor.spawnSession` sync dynamic routing override. 설계 정합: PRD 의사 코드는 `await router.routeRequest(...)` 를 가정했지만 broker.lease atomic 인변량 (commit 761fb7a8 — "leased account = executing account") 보존 위해 sync path 만 사용. `hub/routing-snapshot.mjs` 에 `tryGetCachedSnapshot({maxAgeMs, now})` sync getter 신규 export (cache fresh 면 snapshot, 아니면 null — builder IO 없음). eventLog `dynamic_route_override`/`dynamic_route_error` 가시화. opt-in env 미설정/`config.remote`/`config.agent` 빈 값 시 skip
+- **`feat(routing)` (PR #268, commit `b901556f`, Wire-up 2)** `swarm-hypervisor.launch` plan-time async dynamic routing. `launch()` 가 이미 async 라 D-1 facade 의 `await routeRequest` 그대로 사용 (sync invariant 충돌 없음). `team_size = plan.shards.length` 매핑은 PRD §6 S5 leaseMany 시나리오 정합. `decision.shards[i].cli !== plan.shards[i].agent` 일 때만 1:1 override. eventLog `dynamic_route_plan_decision`/`dynamic_route_plan_overrides`/`dynamic_route_plan_error`. `accountId` 은 기록만 (broker.lease 시그니처 미수용 — Phase 4 leaseMany 와 함께 확장)
+- **`feat(routing)` (PR #269, commit `5f6d7528`, Wire-up 3)** `scripts/tfx-route.sh` sh-path dynamic routing. `scripts/lib/dynamic-route-cli.mjs` helper 신규 — 기본 출력 `shards[0].cli` 한 단어 (sh `$(...)` 친화), `--json` / `--field <name>` / silent no-op (env 미설정 시) / fail-closed (error 시 stderr + exit 0) contract. `apply_dynamic_routing_override()` 함수 + main flow 호출 (`apply_verifier_override` 다음). `set -u` safe default value 패턴. 지원하는 cli (codex/gemini/claude) 만 적용
+- **`feat(doctor)` (PR #270, commit `c2ae219a`, Wire-up 4)** `tfx doctor --dynamic-routing` 진단 옵션. `scripts/doctor-dynamic-routing.mjs` helper 신규. 텍스트 모드: enabled / policy loaded (scenario 수) / snapshot cache hit/miss + age / preview decision (scenario·mode·lane·shards[0].cli). `--json` 으로 구조화 출력 (decisionId·scenario·mode·lane·shards·snapshotAgeMs·confidence)
+
+### Fixed
+
+- **`fix(conductor)` (PR #259, commit `ca5cc880`, #116-C)** codex headless prompt 를 stdin transport 로 분리 — `hub/team/execution-mode.mjs` 의 `resolveStdinPromptMode(explicit, envSource)` helper 신규 (default ON, env `TFX_CODEX_STDIN_PROMPT=0` opt-out). `buildSpawnSpecForMode` 가 args 에서 prompt 빼고 `{stdinPrompt:true, prompt}` 로 분리. `conductor.respawnSession` 이 `spec.stdinPrompt && spec.prompt` 일 때 `child.stdin.write(prompt)` 후 `end()`. argv-inline 회귀 가드 강화 (`conductor-windows-quote-regression.test.mjs` — prompt 가 args 에 아예 없음 검증)
+- **`fix(check-codex-config)` (PR #260, commit `f1f1e2fa`, #193)** `[hooks.state.*]` section whitelist — `splitTomlSections(raw)` / `classifySectionDiff(before, after) → {hooksStateOnly, changedSections}` / `describeChange` helper 신규. hooks.state-only mutation 은 informational warning + exit 0, 그 외는 기존대로 mutation 메시지 + exit 2
+- **`fix(routing)` (PR #261, commit `c328b2a7`)** tfx-multi magic keyword 을 deprecated skill 대신 tfx-auto 로 redirect (`hooks/keyword-rules.json:27` skill 값 변경, `tfx-codex`/`tfx-gemini` 와 동일 패턴)
+- **`fix(psmux-info)` (PR #262, commit `8456eaf0`)** mac/Linux 환경 OS-aware 설치 안내 — `PSMUX_INSTALL_COMMANDS_DARWIN` (brew + cargo) / `_LINUX` (cargo only) / `_FALLBACK_NOTE_DARWIN/LINUX` (tmux + native teams fallback) / `getPsmuxInstallCommandsFor` / `formatPsmuxInstallGuidance(platform)`. Windows 메시지 (winget/scoop/choco) 변경 없음
+
+### Notes
+
+- **`test(dynamic-routing)` (PR #265, commit `e5cf25d9`)** D-1 facade + D-2 cache end-to-end integration 가드 9 케이스 — env-off fallback, cache hit, S1~S6 시나리오, isDynamicRoutingEnabled env gating. D-1/D-2 export 부재 시 graceful skip
+- Phase 1 wire-up 1/2/3/4 모두 opt-in (`TRIFLUX_DYNAMIC_ROUTING=1|true`). 기본 동작은 v10.20.2 와 동일 (codex-default fallback)
+- broker.lease atomic 인변량 (`commit 761fb7a8` — "leased account = executing account") 은 본 release 에서 명문화되었고, 모든 wire-up 이 이 인변량을 보존하도록 설계됨. conductor wire-up 은 sync path, swarm/sh wire-up 은 plan-time path 로 분리 처리
+- 후속: `accountId` hint 적용 (Phase 4 `leaseMany` 와 함께), wire-up 결과를 eventLog 체계로 통합 (sh path 는 현재 stderr 만)
+
 ## [10.20.2] - 2026-05-14
 
 ### Fixed
