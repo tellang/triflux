@@ -14,6 +14,11 @@
 //   - scenario evaluators are first-match-wins in policy.scenarios order.
 
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { buildRoutingSnapshot } from "./routing-snapshot.mjs";
 
 function stableStringify(obj) {
   if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
@@ -388,6 +393,110 @@ export function evaluateDynamicRoute(request, snapshot, policy, options) {
   return makeFallback(policy, "no_scenario_matched", inputsHash, now);
 }
 
+// ─── Phase 1 — caller-friendly facade ─────────────────────────────────
+//
+// Phase 0 keeps `evaluateDynamicRoute()` pure. Callers (conductor,
+// swarm-hypervisor, tfx-route.sh) would otherwise duplicate the same
+// plumbing: snapshot build + policy load + clock read. The facade below
+// folds that plumbing into a single factory with opt-in env gating.
+//
+// Contract:
+//   - `evaluateDynamicRoute()` pure-fn signature is preserved unchanged.
+//   - `createDynamicRouter()` returns a router whose `routeRequest()` is
+//     a `null-router` (always emits the fallback decision) unless the
+//     opt-in `TRIFLUX_DYNAMIC_ROUTING` env flag is set.
+//   - Callers can inject `policy`, `snapshot`, `snapshotProvider`, `nowFn`
+//     for deterministic testing without touching disk or HUD providers.
+
+const DEFAULT_POLICY_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "config",
+  "routing-policy.json",
+);
+
+export function isDynamicRoutingEnabled(env = process.env) {
+  const flag = env.TRIFLUX_DYNAMIC_ROUTING;
+  return flag === "1" || flag === "true";
+}
+
+function loadPolicy(policyPath = DEFAULT_POLICY_PATH) {
+  // Missing/invalid policy → null. evaluateDynamicRoute() will then fall
+  // back to codex-default, which is the documented fail-closed behaviour.
+  try {
+    const raw = readFileSync(policyPath, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Caller-friendly factory. Works with zero arguments — defaults to
+ * `process.env`, the production `routing-policy.json`, and a snapshot
+ * provider that calls `buildRoutingSnapshot()`. Opt-in env-gated:
+ * `TRIFLUX_DYNAMIC_ROUTING=1|true` enables scenario evaluation; anything
+ * else returns a null-router that always emits the fallback decision.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.policyPath] — override the policy file path.
+ * @param {object} [opts.policy] — inject a policy object directly (testing).
+ * @param {(args:{forceRefresh:boolean, now:number}) => Promise<object>} [opts.snapshotProvider]
+ * @param {NodeJS.ProcessEnv} [opts.env] — override env (testing).
+ * @param {() => number} [opts.nowFn] — override clock (testing).
+ */
+export function createDynamicRouter(opts = {}) {
+  const env = opts.env || process.env;
+  const enabled = isDynamicRoutingEnabled(env);
+  const policy =
+    opts.policy !== undefined
+      ? opts.policy
+      : enabled
+        ? loadPolicy(opts.policyPath)
+        : null;
+  const snapshotProvider =
+    opts.snapshotProvider ||
+    (async ({ forceRefresh, now }) =>
+      buildRoutingSnapshot({ forceRefresh, now }));
+  const nowFn = opts.nowFn || (() => Date.now());
+
+  return {
+    enabled,
+    /**
+     * @param {object} request
+     * @param {{ snapshot?: object, now?: number, forceRefresh?: boolean }} [callOpts]
+     * @returns {Promise<object>} RouteDecision
+     */
+    async routeRequest(request, callOpts = {}) {
+      const now = typeof callOpts.now === "number" ? callOpts.now : nowFn();
+      if (!enabled) {
+        // null-router: opt-in env absent → always fallback decision.
+        return evaluateDynamicRoute(request, {}, null, { now });
+      }
+      const snapshot =
+        callOpts.snapshot !== undefined
+          ? callOpts.snapshot
+          : await snapshotProvider({
+              forceRefresh: Boolean(callOpts.forceRefresh),
+              now,
+            });
+      return evaluateDynamicRoute(request, snapshot, policy, { now });
+    },
+    getPolicy() {
+      return policy;
+    },
+  };
+}
+
+/**
+ * Top-level convenience. Equivalent to
+ * `createDynamicRouter(opts).routeRequest(request, opts)`.
+ */
+export async function routeRequest(request, opts = {}) {
+  const router = createDynamicRouter(opts);
+  return router.routeRequest(request, opts);
+}
+
 export const __internal__ = {
   hashInputs,
   checkFreshness,
@@ -396,4 +505,7 @@ export const __internal__ = {
   brokerIsEmpty,
   providerUsagePercent,
   SCENARIO_EVALUATORS,
+  loadPolicy,
+  isDynamicRoutingEnabled,
+  DEFAULT_POLICY_PATH,
 };
