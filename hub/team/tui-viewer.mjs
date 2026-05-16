@@ -8,6 +8,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
 import { openHeadlessDashboardTarget } from "./dashboard-open.mjs";
 import { processHandoff } from "./handoff.mjs";
 import { createLogDashboard } from "./tui.mjs";
@@ -35,7 +36,7 @@ try {
   execFileSync("psmux", ["--version"], { encoding: "utf8", timeout: 2000 });
 } catch {
   process.stderr.write(
-    "ERROR: psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)\n",
+    `ERROR: psmux 미설치. 설치 방법:\n${formatPsmuxInstallGuidance("  ")}\n`,
   );
   process.exit(1);
 }

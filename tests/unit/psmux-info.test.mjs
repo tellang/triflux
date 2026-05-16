@@ -22,13 +22,37 @@ describe("psmux-info", () => {
     assert.equal(compareSemver("3.2.9", "3.3.1"), -1);
   });
 
-  it("guidance formatters include official install/update commands", () => {
-    const installText = formatPsmuxInstallGuidance();
-    const updateText = formatPsmuxUpdateGuidance();
+  it("guidance formatters include official install/update commands (win32)", () => {
+    const installText = formatPsmuxInstallGuidance("", "win32");
+    const updateText = formatPsmuxUpdateGuidance("", "win32");
     assert.match(installText, /winget install marlocarlo\.psmux/);
     assert.match(installText, /scoop install psmux/);
     assert.match(updateText, /winget upgrade marlocarlo\.psmux/);
     assert.match(updateText, /cargo install psmux --force/);
+  });
+
+  it("guidance formatters suggest brew + cargo + tmux fallback on darwin", () => {
+    const installText = formatPsmuxInstallGuidance("", "darwin");
+    const updateText = formatPsmuxUpdateGuidance("", "darwin");
+    // Windows-only 패키지매니저는 mac 안내에서 빠진다.
+    assert.doesNotMatch(installText, /winget|scoop|choco/);
+    assert.match(installText, /brew install psmux/);
+    assert.match(installText, /cargo install psmux/);
+    // tmux native fallback 안내가 mac 가이드에 포함된다.
+    assert.match(installText, /tmux|native teams fallback/);
+    assert.match(updateText, /brew upgrade psmux/);
+    assert.match(updateText, /cargo install psmux --force/);
+    assert.doesNotMatch(updateText, /winget|choco/);
+  });
+
+  it("guidance formatters use cargo + tmux fallback on linux", () => {
+    const installText = formatPsmuxInstallGuidance("", "linux");
+    const updateText = formatPsmuxUpdateGuidance("", "linux");
+    assert.doesNotMatch(installText, /winget|scoop|choco|brew/);
+    assert.match(installText, /cargo install psmux/);
+    assert.match(installText, /tmux|native teams fallback/);
+    assert.match(updateText, /cargo install psmux --force/);
+    assert.doesNotMatch(updateText, /winget|brew/);
   });
 
   it("probePsmuxSupport detects required commands from help output", () => {
