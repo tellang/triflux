@@ -21,12 +21,18 @@ import { dirname, join } from "node:path";
 import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
 import {
+  __internal__ as dynamicRoutingInternal,
+  evaluateDynamicRoute,
+  isDynamicRoutingEnabled,
+} from "../dynamic-routing-engine.mjs";
+import {
   findProcessTree,
   killProcessTree,
   killProcessTreeSnapshot,
 } from "../lib/process-utils.mjs";
 import { execFile, spawn } from "../lib/spawn-trace.mjs";
 import { killProcess } from "../platform.mjs";
+import { tryGetCachedSnapshot } from "../routing-snapshot.mjs";
 import { createHubHealthChecker } from "./check-mcp-hub.mjs";
 import { createConductorMeshBridge } from "./conductor-mesh-bridge.mjs";
 import {
@@ -1034,6 +1040,49 @@ export function createConductor(opts = {}) {
       throw new Error(`Session "${config.id}" already exists`);
     if (config.remote && !config.host)
       throw new Error("host is required for remote sessions");
+
+    // Phase 1 dynamic routing wire-up (opt-in env TRIFLUX_DYNAMIC_ROUTING).
+    // sync 로만 평가해서 broker.lease atomic 인변량 (commit 761fb7a8 — leased
+    // account = executing account) 을 깨지 않는다. snapshot 은 D-2 cache 의
+    // sync getter 만 사용 — cache miss 면 evaluateDynamicRoute 가 fail-closed
+    // 로 codex-default 를 반환한다.
+    if (
+      isDynamicRoutingEnabled(process.env) &&
+      !config.remote &&
+      config.agent
+    ) {
+      try {
+        const policy = dynamicRoutingInternal.loadPolicy();
+        const snapshot = tryGetCachedSnapshot();
+        const decision = evaluateDynamicRoute(
+          {
+            task_id: config.id,
+            team_size: 1,
+            agent_hint: config.agent,
+          },
+          snapshot || {},
+          policy,
+          { now: Date.now() },
+        );
+        const shard = decision?.shards?.[0];
+        if (shard?.cli && shard.cli !== config.agent) {
+          eventLog.append("dynamic_route_override", {
+            session: config.id,
+            original: config.agent,
+            override: shard.cli,
+            scenario: decision.scenario ?? "unknown",
+            decisionId: decision.decisionId ?? null,
+            snapshotAgeMs: decision.snapshotAgeMs ?? null,
+          });
+          config = { ...config, agent: shard.cli };
+        }
+      } catch (err) {
+        eventLog.append("dynamic_route_error", {
+          session: config.id,
+          error: err?.message || String(err),
+        });
+      }
+    }
 
     // broker lease (graceful — broker null if accounts.json absent)
     let lease = null;

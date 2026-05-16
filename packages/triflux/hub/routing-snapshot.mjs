@@ -225,6 +225,28 @@ export async function getDefaultSnapshot(opts = {}) {
   return snapshot;
 }
 
+/**
+ * Synchronous cache shortcut. cache TTL 안에 fresh snapshot이 있으면 즉시 반환,
+ * 아니면 null. caller (sync hot path — e.g. conductor.spawnSession) 가 broker.lease
+ * atomic 인변량을 깨지 않고 dynamic routing decision 을 sync 로 평가할 수 있도록 한다.
+ * builder 호출(IO)은 하지 않는다 — cache miss 면 caller 가 fallback decision 사용.
+ *
+ * @param {{
+ *   maxAgeMs?: number,             // override cache TTL (default 900_000)
+ *   now?: number,                  // pure-fn: caller 가 epoch 주입 (default Date.now())
+ * }} [opts]
+ * @returns {object|null} cache fresh이면 snapshot, 아니면 null
+ */
+export function tryGetCachedSnapshot(opts = {}) {
+  const now = typeof opts.now === "number" ? opts.now : Date.now();
+  const maxAgeMs =
+    typeof opts.maxAgeMs === "number" ? opts.maxAgeMs : DEFAULT_CACHE_TTL_MS;
+  if (_cache && now - _cache.fetchedAt < maxAgeMs) {
+    return _cache.snapshot;
+  }
+  return null;
+}
+
 // Test helpers — pure normalizers exposed so unit tests can build snapshots
 // from mock provider responses without running real HUD I/O.
 export const __internal__ = {
