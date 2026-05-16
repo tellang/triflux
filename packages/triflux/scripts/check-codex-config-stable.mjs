@@ -8,9 +8,19 @@
 // 되면 즉시 fail 하고 진단 정보를 출력한다. CI 또는 로컬 npm script 에서
 // `npm run test:guard-codex-config` 처럼 호출한다.
 //
+// Issue #193 follow-up — `[hooks.state.*]` section whitelist:
+//   oh-my-codex 는 codex CLI hooks 가 발화될 때마다 ~/.codex/config.toml 의
+//   `[hooks.state."<hook-key>"]` section 의 trusted_hash 를 자동 갱신한다.
+//   사용자가 npm test 도중 다른 터미널에서 codex 를 활성 사용 중이면 이
+//   외부 mutation 이 false positive 로 잡힌다. 따라서 hooks.state-only
+//   churn 은 informational warning 으로 분류하고 exit 0 으로 통과시킨다.
+//   triflux 자체 mutation (e.g. tfx-hub URL drift) 은 기존대로 exit 2.
+//
 // Exit codes:
-//   0  = config 안정. wrap 한 명령의 exit code 그대로 반환 (보통 0)
-//   2  = mutation 감지. wrap 한 명령의 exit code 와 무관하게 강제 fail.
+//   0  = config 안정. wrap 한 명령의 exit code 그대로 반환 (보통 0).
+//        hooks.state-only churn 도 여기 포함 (informational warning 만 출력).
+//   2  = triflux 가드가 잡아야 할 mutation 감지. wrap 한 명령의 exit code
+//        와 무관하게 강제 fail.
 //   N  = wrap 한 명령이 N 으로 끝남 (mutation 없음).
 
 import { spawnSync } from "node:child_process";
@@ -21,6 +31,7 @@ import { join } from "node:path";
 
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
 const EXPECTED_TFX_HUB_URL = "http://127.0.0.1:27888/mcp";
+const HOOKS_STATE_PREFIX = "hooks.state.";
 
 function readTfxHubUrl(raw) {
   const headerMatch =
@@ -42,6 +53,65 @@ function readTfxHubUrl(raw) {
   return urlMatch?.[1] ?? urlMatch?.[2] ?? "";
 }
 
+// Split a TOML payload into section blocks. Pre-header content (top-level
+// keys, comments) becomes a single anonymous section with header "".
+// Each returned section has `{ header, body }` — body is the raw text
+// between this header and the next section header, used for byte-level
+// equality comparison.
+export function splitTomlSections(raw) {
+  if (typeof raw !== "string") return [];
+  const sections = [];
+  const headerRegex = /^[ \t]*\[[ \t]*([^\]\n]+?)[ \t]*\][ \t]*\r?$/gm;
+  let lastIndex = 0;
+  let currentHeader = "";
+  let match;
+  while ((match = headerRegex.exec(raw)) !== null) {
+    const body = raw.slice(lastIndex, match.index);
+    sections.push({ header: currentHeader, body });
+    currentHeader = match[1].trim();
+    // skip past header line + trailing newline (if present)
+    lastIndex = match.index + match[0].length;
+    if (raw[lastIndex] === "\n") lastIndex += 1;
+  }
+  sections.push({ header: currentHeader, body: raw.slice(lastIndex) });
+  return sections;
+}
+
+// Classify which sections drifted between before / after payloads.
+// Returns:
+//   { hooksStateOnly: bool, changedSections: string[] }
+//
+// hooksStateOnly = true means every changed section header starts with
+// "hooks.state." (the oh-my-codex managed area). Empty diff returns
+// hooksStateOnly=false so callers don't accidentally whitelist "no change".
+export function classifySectionDiff(beforeRaw, afterRaw) {
+  const beforeSections = splitTomlSections(beforeRaw);
+  const afterSections = splitTomlSections(afterRaw);
+  const beforeMap = new Map();
+  for (const s of beforeSections) {
+    beforeMap.set(s.header, s.body);
+  }
+  const afterMap = new Map();
+  for (const s of afterSections) {
+    afterMap.set(s.header, s.body);
+  }
+  const changed = new Set();
+  for (const [header, body] of afterMap) {
+    if (header === "") continue; // preamble drift is rare and noisy — ignore
+    const prev = beforeMap.get(header);
+    if (prev === undefined || prev !== body) changed.add(header);
+  }
+  for (const header of beforeMap.keys()) {
+    if (header === "") continue;
+    if (!afterMap.has(header)) changed.add(header);
+  }
+  const changedSections = Array.from(changed);
+  const hooksStateOnly =
+    changedSections.length > 0 &&
+    changedSections.every((h) => h.startsWith(HOOKS_STATE_PREFIX));
+  return { hooksStateOnly, changedSections };
+}
+
 function snapshotConfig() {
   try {
     const stat = statSync(CODEX_CONFIG);
@@ -53,6 +123,7 @@ function snapshotConfig() {
       size: stat.size,
       mtimeMs: stat.mtimeMs,
       sha,
+      raw,
       tfxHubUrl: readTfxHubUrl(raw),
     };
   } catch {
@@ -60,16 +131,36 @@ function snapshotConfig() {
   }
 }
 
-function describeChange(before, after) {
+// describeChange — kind + (sha-changed 시) hooksStateOnly 라벨 + message.
+// 호출 측에서 hooksStateOnly 면 informational 처리, 아니면 mutation 으로
+// 처리한다. 반환 null = 차이 없음.
+export function describeChange(before, after) {
   if (!before.exists && !after.exists) return null;
   if (before.exists !== after.exists) {
-    return before.exists ? "file deleted" : "file created";
+    return {
+      kind: before.exists ? "file-deleted" : "file-created",
+      message: before.exists ? "file deleted" : "file created",
+    };
   }
   if (before.sha !== after.sha) {
-    return `sha256 differs (size: ${before.size} → ${after.size})`;
+    const beforeRaw = typeof before.raw === "string" ? before.raw : "";
+    const afterRaw = typeof after.raw === "string" ? after.raw : "";
+    const { hooksStateOnly, changedSections } = classifySectionDiff(
+      beforeRaw,
+      afterRaw,
+    );
+    return {
+      kind: "sha-changed",
+      hooksStateOnly,
+      changedSections,
+      message: `sha256 differs (size: ${before.size} → ${after.size})`,
+    };
   }
   if (before.mtimeMs !== after.mtimeMs) {
-    return `mtime differs (${before.mtimeMs} → ${after.mtimeMs})`;
+    return {
+      kind: "mtime-only",
+      message: `mtime differs (${before.mtimeMs} → ${after.mtimeMs})`,
+    };
   }
   return null;
 }
@@ -81,42 +172,79 @@ function describePortDrift(snapshot) {
   return `tfx-hub url is ${JSON.stringify(snapshot.tfxHubUrl)}; expected ${JSON.stringify(EXPECTED_TFX_HUB_URL)}`;
 }
 
-const argv = process.argv.slice(2);
-const command = argv.length > 0 ? argv : ["npm", "test"];
+// CLI entry only when this script is the main module — keeps unit tests
+// import-safe.
+const isMain = (() => {
+  try {
+    return import.meta.url === `file://${process.argv[1]}`;
+  } catch {
+    return false;
+  }
+})();
 
-const before = snapshotConfig();
-process.stderr.write(
-  `[check-codex-config-stable] before: ${JSON.stringify(before)}\n`,
-);
+if (isMain) {
+  const argv = process.argv.slice(2);
+  const command = argv.length > 0 ? argv : ["npm", "test"];
 
-const result = spawnSync(command[0], command.slice(1), {
-  stdio: "inherit",
-  shell: process.platform === "win32",
-});
-
-const after = snapshotConfig();
-process.stderr.write(
-  `[check-codex-config-stable] after: ${JSON.stringify(after)}\n`,
-);
-
-const change = describeChange(before, after);
-const portDrift = describePortDrift(after);
-if (change || portDrift) {
+  const before = snapshotConfig();
   process.stderr.write(
-    [
-      "",
-      "=== CONFIG MUTATION DETECTED (#193 회귀) ===",
-      `Path:    ${CODEX_CONFIG}`,
-      `Change:  ${change || "none"}`,
-      portDrift ? `Port:    ${portDrift}` : null,
-      "Action:  즉시 backup 으로 복원 + mutation source 추적 필요.",
-      "Context: https://github.com/tellang/triflux/issues/193",
-      "",
-    ]
-      .filter(Boolean)
-      .join("\n"),
+    `[check-codex-config-stable] before: ${JSON.stringify({ ...before, raw: undefined })}\n`,
   );
-  process.exit(2);
-}
 
-process.exit(result.status ?? 0);
+  const result = spawnSync(command[0], command.slice(1), {
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  });
+
+  const after = snapshotConfig();
+  process.stderr.write(
+    `[check-codex-config-stable] after: ${JSON.stringify({ ...after, raw: undefined })}\n`,
+  );
+
+  const change = describeChange(before, after);
+  const portDrift = describePortDrift(after);
+  const hooksStateOnly =
+    change?.kind === "sha-changed" && change.hooksStateOnly === true;
+
+  // hooksStateOnly + port drift 없음 = informational warning + pass.
+  // port drift 가 같이 잡혔으면 그건 triflux-owned section mutation 이라
+  // 기존 fail path 를 탄다.
+  if (hooksStateOnly && !portDrift) {
+    process.stderr.write(
+      [
+        "",
+        "[check-codex-config-stable] hooks.state-only churn (whitelist)",
+        `Path:     ${CODEX_CONFIG}`,
+        `Sections: ${(change.changedSections || []).join(", ") || "(none)"}`,
+        "Reason:   oh-my-codex 가 codex CLI hook trust state 를 자동 갱신.",
+        "          triflux 외부 mutation 이므로 #193 가드의 false positive 다.",
+        "Action:   informational only — pass-through.",
+        "",
+      ].join("\n"),
+    );
+    process.exit(result.status ?? 0);
+  }
+
+  if (change || portDrift) {
+    process.stderr.write(
+      [
+        "",
+        "=== CONFIG MUTATION DETECTED (#193 회귀) ===",
+        `Path:    ${CODEX_CONFIG}`,
+        `Change:  ${change?.message || "none"}`,
+        change?.changedSections?.length
+          ? `Sections: ${change.changedSections.join(", ")}`
+          : null,
+        portDrift ? `Port:    ${portDrift}` : null,
+        "Action:  즉시 backup 으로 복원 + mutation source 추적 필요.",
+        "Context: https://github.com/tellang/triflux/issues/193",
+        "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    );
+    process.exit(2);
+  }
+
+  process.exit(result.status ?? 0);
+}
