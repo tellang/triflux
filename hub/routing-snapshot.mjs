@@ -184,10 +184,56 @@ export async function buildRoutingSnapshot({
   };
 }
 
+// Phase 1 — in-process snapshot cache.
+// 의도: caller (Phase 1+ conductor / swarm-hypervisor) 가 spawn loop 에서
+// 매번 HUD/broker IO 를 트리거하지 않도록 정해진 TTL 안에서 같은 snapshot
+// 을 재사용한다. cache 는 모듈-local 이라 process 단위 (테스트 격리 위해
+// `resetSnapshotCache()` 노출).
+
+const DEFAULT_CACHE_TTL_MS = 900_000; // policy freshness max 와 정합
+
+let _cache = null; // { snapshot, fetchedAt }
+
+export function resetSnapshotCache() {
+  _cache = null;
+}
+
+/**
+ * Cached snapshot shortcut. cache TTL 안이면 재사용, 아니면 새로 빌드.
+ *
+ * @param {{
+ *   forceRefresh?: boolean,        // true 면 cache 무시하고 새로 빌드
+ *   maxAgeMs?: number,             // override cache TTL (default 900_000)
+ *   now?: number,                  // pure-fn: caller 가 epoch 주입 (default Date.now())
+ *   builder?: function,            // 테스트용 builder 주입 (default buildRoutingSnapshot)
+ * }} [opts]
+ * @returns {Promise<object>}
+ */
+export async function getDefaultSnapshot(opts = {}) {
+  const now = typeof opts.now === "number" ? opts.now : Date.now();
+  const maxAgeMs =
+    typeof opts.maxAgeMs === "number" ? opts.maxAgeMs : DEFAULT_CACHE_TTL_MS;
+  const builder = opts.builder || buildRoutingSnapshot;
+  const forceRefresh = Boolean(opts.forceRefresh);
+
+  if (!forceRefresh && _cache && now - _cache.fetchedAt < maxAgeMs) {
+    return _cache.snapshot;
+  }
+
+  const snapshot = await builder({ forceRefresh, now });
+  _cache = { snapshot, fetchedAt: now };
+  return snapshot;
+}
+
 // Test helpers — pure normalizers exposed so unit tests can build snapshots
 // from mock provider responses without running real HUD I/O.
 export const __internal__ = {
   normalizeClaudeUsage,
   normalizeCodexUsage,
   normalizeBrokerSnapshot,
+  // Phase 1 cache 테스트 helpers
+  getCacheStateForTest: () => (_cache ? { ..._cache } : null),
+  setCacheForTest: (state) => {
+    _cache = state ? { ...state } : null;
+  },
 };
