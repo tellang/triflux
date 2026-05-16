@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { createWtManager } from "../hub/team/wt-manager.mjs";
+import { formatPsmuxInstallGuidance } from "./lib/psmux-info.mjs";
 
 const SESSION_PREFIX = "tfx-isolated";
 const DEFAULT_ATTACH_PROFILE = "triflux";
@@ -224,7 +225,7 @@ async function main() {
 
   if (!hasPsmux()) {
     process.stderr.write(
-      "ERROR: psmux 미설치. 설치: winget install marlocarlo.psmux (또는 npm i -g psmux)\n",
+      `ERROR: psmux 미설치. 설치 방법:\n${formatPsmuxInstallGuidance("  ")}\n`,
     );
     process.exit(1);
   }
