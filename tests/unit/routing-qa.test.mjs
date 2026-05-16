@@ -88,26 +88,38 @@ describe("keyword-rules: tfx-auto 매칭", () => {
 });
 
 // ========================================================================
-// 2. keyword-rules: tfx-multi 라우팅
+// 2. keyword-rules: tfx-multi 라우팅 (deprecated → tfx-auto redirect)
 // ========================================================================
-describe("keyword-rules: tfx-multi 매칭", () => {
-  it("'tfx-multi' 입력 시 tfx-multi 스킬로 라우팅", () => {
+// tfx-multi 스킬은 deprecated (superseded-by: tfx-auto). magic keyword
+// routing 은 legacy 키워드를 받아서 tfx-auto 로 redirect 한다.
+// 회귀 가드: skill 값이 "tfx-auto" 가 아니면 deprecated skill 강제 invoke.
+describe("keyword-rules: tfx-multi 매칭 (→ tfx-auto redirect)", () => {
+  it("'tfx-multi' 입력 시 tfx-auto 스킬로 redirect", () => {
     const matches = matchRules(compiled, "tfx-multi 인증+UI+테스트");
     const resolved = resolveConflicts(matches);
-    assert.ok(resolved.some((r) => r.skill === "tfx-multi"));
+    const multiRule = resolved.find((r) => r.id === "tfx-multi");
+    assert.ok(multiRule, "tfx-multi 규칙이 매칭되어야 함");
+    assert.equal(
+      multiRule.skill,
+      "tfx-auto",
+      "deprecated tfx-multi 는 tfx-auto 로 redirect 되어야 함",
+    );
   });
 
-  it("'tfx multi' (공백)도 매칭", () => {
+  it("'tfx multi' (공백)도 tfx-auto 로 redirect", () => {
     const matches = matchRules(compiled, "tfx multi --quick 작업");
     const resolved = resolveConflicts(matches);
-    assert.ok(resolved.some((r) => r.skill === "tfx-multi"));
+    const multiRule = resolved.find((r) => r.id === "tfx-multi");
+    assert.ok(multiRule);
+    assert.equal(multiRule.skill, "tfx-auto");
   });
 
-  it("tfx-multi는 priority 1 — tfx-auto(priority 2)보다 우선", () => {
+  it("tfx-multi 규칙은 priority 1 — tfx-unified(priority 2)보다 우선", () => {
     const matches = matchRules(compiled, "tfx-multi와 tfx-auto 같이 쓰기");
     const resolved = resolveConflicts(matches);
-    // tfx-multi가 먼저 나와야 함
-    assert.equal(resolved[0].skill, "tfx-multi");
+    // tfx-multi 규칙이 먼저 나와야 함 (id 기준), skill 은 tfx-auto 로 redirect
+    assert.equal(resolved[0].id, "tfx-multi");
+    assert.equal(resolved[0].skill, "tfx-auto");
   });
 
   it("'omc tfx-multi' 같은 lookbehind 패턴은 미매칭", () => {
@@ -118,6 +130,27 @@ describe("keyword-rules: tfx-multi 매칭", () => {
       multiMatch.length,
       0,
       "omc 접두사 시 tfx-multi가 매칭되면 안 됨",
+    );
+  });
+
+  it("회귀 가드: keyword-rules.json 의 tfx-multi rule 이 deprecated skill 을 가리키지 않음", () => {
+    // tfx-multi SKILL.md frontmatter 에 deprecated: true, superseded-by: tfx-auto
+    // 가 있어도 magic keyword 가 deprecated skill 을 강제 invoke 하면
+    // 사용자가 tfx-auto 의 새 코드 경로 (--parallel N --mode deep) 를 못 탄다.
+    const tfxMultiRule = rawRules.find((r) => r.id === "tfx-multi");
+    assert.ok(
+      tfxMultiRule,
+      "tfx-multi rule 이 keyword-rules.json 에 존재해야 함",
+    );
+    assert.notEqual(
+      tfxMultiRule.skill,
+      "tfx-multi",
+      "tfx-multi rule 은 deprecated skill 'tfx-multi' 를 가리키면 안 됨 — tfx-auto 로 redirect 필요",
+    );
+    assert.equal(
+      tfxMultiRule.skill,
+      "tfx-auto",
+      "tfx-multi rule 은 tfx-auto 로 redirect 되어야 함 (Phase 2 플래그 매핑은 tfx-auto SKILL.md 에서 처리)",
     );
   });
 });

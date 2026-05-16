@@ -24,7 +24,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-multi",
+      "skill": "tfx-auto",
       "priority": 1,
       "supersedes": [],
       "exclusive": false,
