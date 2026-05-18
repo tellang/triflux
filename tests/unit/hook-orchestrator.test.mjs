@@ -267,6 +267,69 @@ describe("hook-orchestrator PreToolUse:Bash dedupe", () => {
     rmSync(nudgeMarker, { force: true });
   });
 
+  it("does not emit compact nudge from hub token monitor snapshots", () => {
+    const nudgeMarker = join(tmpdir(), "tfx-compact-nudge-sent");
+    rmSync(nudgeMarker, { force: true });
+
+    const homeDir = join(sandboxDir, "home-hub-token-monitor");
+    const monitorDir = join(homeDir, ".claude", "cache", "tfx-hub");
+    mkdirSync(monitorDir, { recursive: true });
+    writeFileSync(
+      join(monitorDir, "context-monitor.json"),
+      JSON.stringify({
+        sessionId: "88b086d5",
+        limitTokens: 200_000,
+        usedTokens: 12_194_022,
+        requestTokens: 142_336,
+        responseTokens: 12_051_686,
+        totalUpdates: 5_646,
+        byTool: { "tools/list": 11_888_383 },
+        display: "12.2M/200K (100%)",
+        percent: 100,
+      }),
+      "utf8",
+    );
+
+    const marker = join(sandboxDir, "posttool-edit-noop.txt");
+    writeFileSync(
+      registryPath,
+      JSON.stringify(
+        createRegistry(
+          [
+            {
+              id: "noop-posttool-edit",
+              matcher: "Edit",
+              command: hookCommand(hookScriptPath, marker, "noop", "", "noop"),
+              priority: 0,
+              enabled: true,
+            },
+          ],
+          "PostToolUse",
+        ),
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const result = runOrchestrator({
+      cwd: sandboxDir,
+      registryPath,
+      cacheDir,
+      env: { HOME: homeDir, USERPROFILE: homeDir, TFX_POST_TOOL_TIPS: "" },
+      payload: {
+        hook_event_name: "PostToolUse",
+        tool_name: "Edit",
+        tool_input: { file_path: "README.md" },
+      },
+    });
+
+    assert.equal(result.status, 0);
+    assert.ok(existsSync(marker));
+    assert.equal(result.stdout.trim(), "");
+    rmSync(nudgeMarker, { force: true });
+  });
+
   it("caches identical PreToolUse:Bash results to avoid recomputing hooks", () => {
     const markerPath = join(sandboxDir, "cached-output.txt");
     const counterPath = join(sandboxDir, "counter.txt");
