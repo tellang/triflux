@@ -158,6 +158,23 @@ describe("terminal-opener adapter", () => {
     assert.match(calls[0], /cd '\\''\/tmp\/work tree'\\'' && /);
   });
 
+  it("macOS tmux openSession opens tmux attach-session in a new window", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "darwin",
+      mux: "tmux",
+      tmuxExec: (command) => calls.push(command),
+    });
+
+    assert.equal(
+      await opener.openSession("demo", { title: "Demo Session" }),
+      true,
+    );
+    assert.match(calls[0], /^new-window -n 'Demo Session' /);
+    assert.match(calls[0], /tmux attach-session -t/);
+    assert.doesNotMatch(calls[0], /psmux attach-session -t/);
+  });
+
   it("macOS psmux fallback is treated as tmux-compatible for openCommand", async () => {
     const calls = [];
     const opener = createTerminalOpener({
@@ -178,6 +195,7 @@ describe("terminal-opener adapter", () => {
     const opener = createTerminalOpener({
       platform: "darwin",
       mux: "psmux",
+      psmuxBinaryExists: () => true,
       tmuxExec: (command) => calls.push(command),
     });
 
@@ -188,6 +206,19 @@ describe("terminal-opener adapter", () => {
     assert.match(calls[0], /^new-window -n 'Demo Session' /);
     assert.match(calls[0], /psmux attach-session -t/);
     assert.doesNotMatch(calls[0], /tmux attach-session -t/);
+  });
+
+  it("macOS psmux openSession refuses to emit attach command when psmux binary is absent", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "darwin",
+      mux: "psmux",
+      psmuxBinaryExists: () => false,
+      tmuxExec: (command) => calls.push(command),
+    });
+
+    assert.equal(await opener.openSession("demo"), false);
+    assert.deepEqual(calls, []);
   });
 
   it("macOS without mux falls back to exec open -a Terminal", async () => {
