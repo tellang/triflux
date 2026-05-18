@@ -7,6 +7,7 @@
 // 그리고 execution-mode.mjs 의 dead buildCommandForMode 가 제거됐는지 가드.
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -17,6 +18,65 @@ function pathFromHere(rel) {
   const here = new URL(import.meta.url).pathname;
   const dir = here.substring(0, here.lastIndexOf("/"));
   return join(dir, rel);
+}
+
+function runSessionProbe({ platform, execFileOk = {}, execSyncOk = {} }) {
+  const script = `
+    import childProcess from "node:child_process";
+    import { syncBuiltinESMExports } from "node:module";
+
+    Object.defineProperty(process, "platform", {
+      value: ${JSON.stringify(platform)},
+      configurable: true,
+    });
+
+    const execFileOk = new Set(${JSON.stringify(Object.keys(execFileOk))});
+    const execSyncOk = new Set(${JSON.stringify(Object.keys(execSyncOk))});
+
+    childProcess.execFileSync = (file, args = []) => {
+      const key = [file, ...args].join(" ");
+      if (execFileOk.has(key)) return Buffer.from(key + "\\n");
+      throw Object.assign(new Error("mock missing execFileSync: " + key), {
+        status: 1,
+      });
+    };
+
+    childProcess.execSync = (command) => {
+      if (execSyncOk.has(command)) return command + "\\n";
+      throw Object.assign(new Error("mock missing execSync: " + command), {
+        status: 1,
+      });
+    };
+
+    childProcess.spawnSync = (file, args = []) => ({
+      status: 1,
+      stdout: "",
+      stderr: "mock missing spawnSync: " + [file, ...args].join(" "),
+    });
+
+    syncBuiltinESMExports();
+
+    const session = await import("./hub/team/session.mjs");
+    const psmux = await import("./hub/team/psmux.mjs");
+    console.log(JSON.stringify({
+      detectMultiplexer: session.detectMultiplexer(),
+      hasPsmuxAlias: psmux.hasPsmux(),
+      multiplexerType: psmux.getMultiplexerType(),
+    }));
+  `;
+
+  const result = spawnSync(process.execPath, ["--input-type=module"], {
+    cwd: ROOT,
+    input: script,
+    encoding: "utf8",
+  });
+
+  assert.equal(
+    result.status,
+    0,
+    result.stderr || result.stdout || "session probe failed",
+  );
+  return JSON.parse(result.stdout.trim());
 }
 
 describe("psmux.mjs: OS primary multiplexer 명시 분기", () => {
@@ -85,5 +145,51 @@ describe("execution-mode.mjs: dead buildCommandForMode 제거", () => {
   it("buildSpawnSpecForMode 는 유지된다 (conductor.mjs:544 의 활성 caller)", async () => {
     const mod = await import("../../hub/team/execution-mode.mjs");
     assert.equal(typeof mod.buildSpawnSpecForMode, "function");
+  });
+});
+
+describe("session.mjs: literal multiplexer identity", () => {
+  it("darwin + tmux available + psmux absent resolves to tmux", () => {
+    const probe = runSessionProbe({
+      platform: "darwin",
+      execFileOk: { "tmux -V": true },
+      execSyncOk: { "tmux -V": true },
+    });
+
+    assert.deepEqual(probe, {
+      detectMultiplexer: "tmux",
+      hasPsmuxAlias: true,
+      multiplexerType: "tmux",
+    });
+  });
+
+  it("hasPsmux alias truth on darwin does not become literal psmux identity", () => {
+    const probe = runSessionProbe({
+      platform: "darwin",
+      execFileOk: { "tmux -V": true },
+      execSyncOk: { "tmux -V": true },
+    });
+
+    assert.equal(probe.hasPsmuxAlias, true);
+    assert.notEqual(probe.detectMultiplexer, "psmux");
+  });
+
+  it("linux + tmux available resolves to tmux", () => {
+    const probe = runSessionProbe({
+      platform: "linux",
+      execFileOk: { "tmux -V": true },
+      execSyncOk: { "tmux -V": true },
+    });
+
+    assert.equal(probe.detectMultiplexer, "tmux");
+  });
+
+  it("Windows primary remains psmux when psmux is available", () => {
+    const probe = runSessionProbe({
+      platform: "win32",
+      execFileOk: { "psmux -V": true },
+    });
+
+    assert.equal(probe.detectMultiplexer, "psmux");
   });
 });

@@ -8,8 +8,9 @@ import {
   capturePsmuxPane,
   configurePsmuxKeybindings,
   createPsmuxSession,
+  getMultiplexerType,
   getPsmuxSessionAttachedCount,
-  hasPsmux,
+  hasMultiplexer,
   killPsmuxSession,
   listPsmuxSessions,
   psmuxExec,
@@ -68,6 +69,38 @@ function hasGitBashTmux() {
   }
 }
 
+function getCommandVersion(command) {
+  const r = spawnSync(command, ["-V"], {
+    encoding: "utf8",
+    timeout: 3000,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  if ((r.status ?? 1) !== 0) return null;
+  return `${r.stdout || ""}${r.stderr || ""}`.trim();
+}
+
+function isPsmuxVersion(command) {
+  try {
+    return /\bpsmux\b/i.test(getCommandVersion(command) || "");
+  } catch {
+    return false;
+  }
+}
+
+function isPsmuxCommandName(command) {
+  const name = String(command || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .pop()
+    .toLowerCase();
+  return name === "psmux" || name === "psmux.exe" || name === "psmux.cmd";
+}
+
+function hasLiteralPsmuxBinary(command = process.env.PSMUX_BIN || "psmux") {
+  return isPsmuxVersion(command);
+}
+
 /**
  * 터미널 멀티플렉서 감지 (결과 캐싱 — 프로세스 수명 동안 불변)
  * @returns {'tmux'|'git-bash-tmux'|'wsl-tmux'|'psmux'|null}
@@ -75,7 +108,26 @@ function hasGitBashTmux() {
 let _cachedMux;
 export function detectMultiplexer() {
   if (_cachedMux !== undefined) return _cachedMux;
-  if (hasPsmux()) {
+
+  if (process.platform !== "win32") {
+    const primaryMux = getMultiplexerType();
+    if (primaryMux === "tmux" && hasMultiplexer()) {
+      _cachedMux = "tmux";
+      return _cachedMux;
+    }
+    if (hasTmux()) {
+      _cachedMux = "tmux";
+      return _cachedMux;
+    }
+    if (hasLiteralPsmuxBinary()) {
+      _cachedMux = "psmux";
+      return _cachedMux;
+    }
+    _cachedMux = null;
+    return _cachedMux;
+  }
+
+  if (hasMultiplexer() && isPsmuxCommandName(getMultiplexerType())) {
     _cachedMux = "psmux";
     return _cachedMux;
   }
