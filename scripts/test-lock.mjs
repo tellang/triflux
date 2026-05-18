@@ -21,7 +21,8 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const LOCK_DIR = join(dirname(SCRIPT_PATH), "..", ".test-lock");
 const LOCK_FILE = join(LOCK_DIR, "pid.lock");
-const STALE_THRESHOLD_MS = 10 * 60 * 1000; // 10분 넘으면 stale
+const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // release prepare 와 동일
+const SHUTDOWN_GRACE_MS = 5 * 1000;
 
 function toPosixPath(path) {
   return path.replace(/\\/g, "/");
@@ -109,25 +110,81 @@ export function expandTestArgs(args, { cwd = process.cwd() } = {}) {
   });
 }
 
+function parseTimeoutMs(value = process.env.TEST_LOCK_TIMEOUT_MS) {
+  if (value === undefined || value === "") return DEFAULT_TIMEOUT_MS;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_TIMEOUT_MS;
+  return Math.trunc(parsed);
+}
+
+function normalizeLock(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      parent_pid: Number(parsed.parent_pid),
+      child_pid:
+        parsed.child_pid === null || parsed.child_pid === undefined
+          ? null
+          : Number(parsed.child_pid),
+      started_at: Number(parsed.started_at),
+      timeout_ms: Number(parsed.timeout_ms) || DEFAULT_TIMEOUT_MS,
+    };
+  } catch {
+    const [pidStr, tsStr] = raw.trim().split("\n");
+    const parentPid = Number(pidStr);
+    const startedAt = Number(tsStr);
+    if (!Number.isFinite(parentPid)) return null;
+    return {
+      parent_pid: parentPid,
+      child_pid: null,
+      started_at: Number.isFinite(startedAt) ? startedAt : 0,
+      timeout_ms: DEFAULT_TIMEOUT_MS,
+    };
+  }
+}
+
 function readLock() {
   try {
     const content = readFileSync(LOCK_FILE, "utf8").trim();
-    const [pidStr, tsStr] = content.split("\n");
-    return { pid: Number(pidStr), ts: Number(tsStr) };
+    if (!content) return null;
+    return normalizeLock(content);
   } catch {
     return null;
   }
 }
 
-function acquireLock() {
+function writeLock(metadata) {
+  writeFileSync(LOCK_FILE, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+}
+
+function isPidAlive(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+function lockAgeMs(lock) {
+  if (!Number.isFinite(lock?.started_at)) return Number.POSITIVE_INFINITY;
+  return Date.now() - lock.started_at;
+}
+
+function formatAge(ms) {
+  if (!Number.isFinite(ms)) return "unknown";
+  return `${Math.max(0, Math.round(ms / 1000))}s`;
+}
+
+function acquireLock(timeoutMs) {
   const existing = readLock();
   if (existing) {
-    const age = Date.now() - existing.ts;
-    // Windows에서 process.kill(pid,0)이 git-bash PID를 못 잡음.
-    // 단순하게: lockfile이 있고 STALE_THRESHOLD 이내면 거부.
-    if (age >= 0 && age < STALE_THRESHOLD_MS) {
+    const age = lockAgeMs(existing);
+    const existingTimeoutMs = existing.timeout_ms || DEFAULT_TIMEOUT_MS;
+    if (age >= 0 && age < existingTimeoutMs) {
       console.error(
-        `\x1b[31m✗ 테스트 이미 실행 중 (PID ${existing.pid}, ${Math.round(age / 1000)}초 전 시작)\x1b[0m`,
+        `\x1b[31m✗ 테스트 이미 실행 중 (parent PID ${existing.parent_pid}, child PID ${existing.child_pid ?? "unknown"}, age ${formatAge(age)})\x1b[0m`,
       );
       console.error(
         `  동시 실행은 WT 메모리 폭발을 유발합니다. 기다리거나 PID를 kill하세요.`,
@@ -135,34 +192,76 @@ function acquireLock() {
       console.error(`  강제 해제: rm ${LOCK_FILE}`);
       process.exit(1);
     }
-    // stale (>10분) — 덮어쓰기
+    if (existing.child_pid && isPidAlive(existing.child_pid)) {
+      console.error(
+        `\x1b[31m✗ stale test lock has live child PID ${existing.child_pid} (age ${formatAge(age)}, timeout ${existingTimeoutMs}ms)\x1b[0m`,
+      );
+      console.error(`  lock 보존: ${LOCK_FILE}`);
+      console.error(
+        `  child 상태를 확인한 뒤 종료하거나, 안전하다고 판단될 때 lock을 수동 제거하세요.`,
+      );
+      process.exit(1);
+    }
+    try {
+      unlinkSync(LOCK_FILE);
+    } catch {
+      /* ignore */
+    }
   }
   mkdirSync(LOCK_DIR, { recursive: true });
-  writeFileSync(LOCK_FILE, `${process.pid}\n${Date.now()}`, "utf8");
+  const lock = {
+    parent_pid: process.pid,
+    child_pid: null,
+    started_at: Date.now(),
+    timeout_ms: timeoutMs,
+  };
+  writeLock(lock);
+  return lock;
 }
 
 function releaseLock() {
   try {
     const lock = readLock();
-    if (lock && lock.pid === process.pid) unlinkSync(LOCK_FILE);
+    if (lock && lock.parent_pid === process.pid) unlinkSync(LOCK_FILE);
   } catch {
     /* ignore */
   }
 }
 
-export function main(argv = process.argv.slice(2)) {
-  acquireLock();
+function updateChildPid(lock, childPid) {
+  if (!Number.isFinite(childPid)) return;
+  const current = readLock();
+  if (!current || current.parent_pid !== process.pid) return;
+  writeLock({ ...lock, child_pid: childPid });
+}
 
-  // cleanup on exit
-  process.on("exit", releaseLock);
-  process.on("SIGINT", () => {
-    releaseLock();
-    process.exit(130);
-  });
-  process.on("SIGTERM", () => {
-    releaseLock();
-    process.exit(143);
-  });
+function signalToExitCode(signal) {
+  if (!signal) return 1;
+  const signals = {
+    SIGHUP: 1,
+    SIGINT: 2,
+    SIGTERM: 15,
+  };
+  return 128 + (signals[signal] ?? 1);
+}
+
+function childIsRunning(child) {
+  return child && child.exitCode === null && child.signalCode === null;
+}
+
+function terminateChild(child, signal) {
+  if (!childIsRunning(child)) return false;
+  try {
+    child.kill(signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function main(argv = process.argv.slice(2)) {
+  const timeoutMs = parseTimeoutMs();
+  const lock = acquireLock(timeoutMs);
 
   // forward args after -- to node --test
   const args = expandTestArgs(argv);
@@ -175,12 +274,81 @@ export function main(argv = process.argv.slice(2)) {
     stdio: ["pipe", "inherit", "inherit"],
     env: { ...process.env, TEST_LOCK_PID: String(process.pid) },
   });
+  updateChildPid(lock, child.pid);
   // Close stdin immediately so node --test never blocks waiting for input.
   child.stdin?.end();
 
-  child.on("exit", (code) => {
+  let finished = false;
+  let requestedExitCode = null;
+  let timeoutTimer = null;
+  let graceTimer = null;
+
+  function clearTimers() {
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    if (graceTimer) clearTimeout(graceTimer);
+    timeoutTimer = null;
+    graceTimer = null;
+  }
+
+  function finish(code) {
+    if (finished) return;
+    finished = true;
+    clearTimers();
     releaseLock();
-    process.exit(code ?? 1);
+    process.exit(code);
+  }
+
+  function forceKillAfterGrace() {
+    if (graceTimer) return;
+    graceTimer = setTimeout(() => {
+      terminateChild(child, "SIGKILL");
+    }, SHUTDOWN_GRACE_MS);
+    graceTimer.unref?.();
+  }
+
+  function requestShutdown(signal, exitCode = signalToExitCode(signal)) {
+    if (finished) return;
+    requestedExitCode = exitCode;
+    if (timeoutTimer) {
+      clearTimeout(timeoutTimer);
+      timeoutTimer = null;
+    }
+    if (childIsRunning(child)) {
+      terminateChild(child, signal);
+      forceKillAfterGrace();
+      return;
+    }
+    finish(requestedExitCode);
+  }
+
+  timeoutTimer = setTimeout(() => {
+    console.error(
+      `\x1b[31m✗ test-lock child timed out after ${timeoutMs}ms (child PID ${child.pid})\x1b[0m`,
+    );
+    requestShutdown("SIGTERM", 124);
+  }, timeoutMs);
+  timeoutTimer.unref?.();
+
+  process.once("exit", () => {
+    if (!finished) terminateChild(child, "SIGTERM");
+    releaseLock();
+  });
+
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    process.once(signal, () => requestShutdown(signal));
+  }
+
+  child.on("error", (error) => {
+    console.error(`test-lock failed to spawn child: ${error.message}`);
+    finish(1);
+  });
+
+  child.on("exit", (code, signal) => {
+    if (requestedExitCode !== null) {
+      finish(requestedExitCode);
+      return;
+    }
+    finish(code ?? signalToExitCode(signal));
   });
 }
 
