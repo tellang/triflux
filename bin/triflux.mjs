@@ -12,6 +12,7 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  realpathSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -26,6 +27,7 @@ import {
   validateRuntimeCachePaths,
 } from "../hub/lib/cache-guard.mjs";
 import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
+import { getVersionHash } from "../hub/state.mjs";
 import { forceCleanupTeam } from "../hub/team/nativeProxy.mjs";
 import {
   detectMultiplexer,
@@ -119,6 +121,8 @@ const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
 const _DOT = `${GRAY}·${RESET}`;
 const STALE_TEAM_MAX_AGE_SEC = 3600;
 const ANSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
+const HUB_DEFAULT_PORT = 27888;
+const DOCTOR_HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
 
 const _EXIT_SUCCESS = 0;
 const EXIT_ERROR = 1;
@@ -151,7 +155,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   doctor: {
     usage:
-      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--dynamic-routing] [--json]",
+      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--dynamic-routing] [--cleanup-stale-hubs --dry-run|--apply] [--json]",
     description: "설치 상태 진단 및 자동 복구",
     options: [
       {
@@ -186,6 +190,24 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "boolean",
         description:
           "Phase 1 dynamic routing 상태 진단 (env / policy / snapshot cache / preview decision)",
+      },
+      {
+        name: "--cleanup-stale-hubs",
+        type: "boolean",
+        description:
+          "PPID=1 hub/server.mjs 후보를 보고하고 opt-in 정리 모드를 활성화",
+      },
+      {
+        name: "--dry-run",
+        type: "boolean",
+        description:
+          "--cleanup-stale-hubs 와 함께 사용. active healthy hub를 제외하고 정리 후보만 표시",
+      },
+      {
+        name: "--apply",
+        type: "boolean",
+        description:
+          "--cleanup-stale-hubs 와 함께 사용. active healthy hub 제외 후 stale hub 종료",
       },
       {
         name: "--json",
@@ -503,6 +525,403 @@ function createCliError(
   error.fix = fix;
   if (cause) error.cause = cause;
   return error;
+}
+
+function parseHubPort(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function isPidAliveForHub(pid, killFn = process.kill) {
+  const resolvedPid = Number(pid);
+  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return false;
+  try {
+    killFn(resolvedPid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function isHubServerCommand(command) {
+  return /(^|[\\/,\s])hub[\\/]server\.mjs(?=$|[\s"'`])/i.test(
+    String(command || ""),
+  );
+}
+
+function parsePortFromAddress(address) {
+  const match = String(address || "").match(/:(\d+)(?:\s|$)/);
+  return parseHubPort(match?.[1]);
+}
+
+export function parseDetachedHubProcessRows(output) {
+  const rows = [];
+  for (const line of String(output || "").split(/\r?\n/)) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
+    if (!match) continue;
+    const [, pidText, ppidText, rssText, uptime, command] = match;
+    const pid = Number.parseInt(pidText, 10);
+    const ppid = Number.parseInt(ppidText, 10);
+    const rssKb = Number.parseInt(rssText, 10);
+    if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
+    if (ppid !== 1) continue;
+    if (!isHubServerCommand(command)) continue;
+    rows.push({
+      pid,
+      ppid,
+      rssKb: Number.isFinite(rssKb) ? rssKb : null,
+      uptime,
+      command: command.trim(),
+    });
+  }
+  return rows;
+}
+
+function queryDetachedHubProcessRows({
+  platform = process.platform,
+  execFile = execFileSync,
+} = {}) {
+  if (platform === "win32") return [];
+  try {
+    const output = execFile("ps", ["-axo", "pid=,ppid=,rss=,etime=,command="], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    return parseDetachedHubProcessRows(output);
+  } catch {
+    return [];
+  }
+}
+
+function parseLsofListeningPorts(output) {
+  const ports = new Set();
+  for (const line of String(output || "").split(/\r?\n/)) {
+    if (!/\(LISTEN\)/i.test(line)) continue;
+    const match = line.match(/TCP\s+\S+:(\d+)\s+\(LISTEN\)/i);
+    const port = parseHubPort(match?.[1]) ?? parsePortFromAddress(line);
+    if (port) ports.add(port);
+  }
+  return [...ports];
+}
+
+function queryListeningPortsForPid(
+  pid,
+  { platform = process.platform, execFile = execFileSync } = {},
+) {
+  const resolvedPid = Number(pid);
+  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return [];
+  if (platform === "win32") return [];
+  try {
+    const output = execFile(
+      "lsof",
+      ["-nP", "-Pan", "-p", String(resolvedPid), "-iTCP", "-sTCP:LISTEN"],
+      {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    );
+    return parseLsofListeningPorts(output);
+  } catch {
+    return [];
+  }
+}
+
+function queryEstablishedCountForPid(
+  pid,
+  { platform = process.platform, execFile = execFileSync } = {},
+) {
+  const resolvedPid = Number(pid);
+  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return 0;
+  if (platform === "win32") return 0;
+  try {
+    const output = execFile(
+      "lsof",
+      ["-nP", "-Pan", "-p", String(resolvedPid), "-iTCP", "-sTCP:ESTABLISHED"],
+      {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    );
+    return Math.max(0, output.trim().split(/\r?\n/).filter(Boolean).length - 1);
+  } catch {
+    return 0;
+  }
+}
+
+function queryPidCommand(
+  pid,
+  { platform = process.platform, execFile = execFileSync } = {},
+) {
+  const resolvedPid = Number(pid);
+  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return "";
+  try {
+    if (platform === "win32") return "";
+    return execFile("ps", ["-p", String(resolvedPid), "-o", "command="], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function queryListeningPidByPort(
+  port,
+  { platform = process.platform, execFile = execFileSync } = {},
+) {
+  const targetPort = parseHubPort(port);
+  if (!targetPort || platform === "win32") return null;
+  try {
+    const output = execFile(
+      "lsof",
+      ["-nP", "-iTCP:" + targetPort, "-sTCP:LISTEN", "-t"],
+      {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    );
+    const pid = Number.parseInt(output.trim().split(/\r?\n/)[0] ?? "", 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchHubHealthForDoctor(
+  host,
+  port,
+  { fetchImpl = fetch, timeoutMs = 1000 } = {},
+) {
+  try {
+    const urlHost = String(host || "127.0.0.1").includes(":")
+      ? `[${host}]`
+      : host || "127.0.0.1";
+    const response = await fetchImpl(`http://${urlHost}:${port}/health`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return { ok: false, version: null };
+    const body = await response.json().catch(() => null);
+    return {
+      ok: body?.ok === true,
+      version: typeof body?.version === "string" ? body.version : null,
+      raw: body,
+    };
+  } catch (error) {
+    return { ok: false, version: null, error };
+  }
+}
+
+function readHubPidInfo({
+  pidFilePath = DOCTOR_HUB_PID_FILE,
+  exists = existsSync,
+  readFile = readFileSync,
+} = {}) {
+  if (!exists(pidFilePath)) return null;
+  try {
+    return JSON.parse(readFile(pidFilePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+async function resolveActiveHealthyHub({
+  expectedVersion = getVersionHash(),
+  pidFilePath = DOCTOR_HUB_PID_FILE,
+  exists = existsSync,
+  readFile = readFileSync,
+  killFn = process.kill,
+  platform = process.platform,
+  execFile = execFileSync,
+  fetchImpl = fetch,
+} = {}) {
+  const info = readHubPidInfo({ pidFilePath, exists, readFile });
+  const pid = Number(info?.pid);
+  const port = parseHubPort(info?.port);
+  const host =
+    typeof info?.host === "string" && info.host.trim()
+      ? info.host.trim()
+      : "127.0.0.1";
+  if (pid && port && isPidAliveForHub(pid, killFn)) {
+    const command = queryPidCommand(pid, { platform, execFile });
+    const health = await fetchHubHealthForDoctor(host, port, { fetchImpl });
+    if (
+      isHubServerCommand(command) &&
+      health.ok &&
+      health.version === expectedVersion
+    ) {
+      return { pid, port, host, version: health.version, source: "pid-file" };
+    }
+  }
+
+  const defaultPid = queryListeningPidByPort(HUB_DEFAULT_PORT, {
+    platform,
+    execFile,
+  });
+  if (!defaultPid || !isPidAliveForHub(defaultPid, killFn)) return null;
+  const command = queryPidCommand(defaultPid, { platform, execFile });
+  if (!isHubServerCommand(command)) return null;
+  const health = await fetchHubHealthForDoctor("127.0.0.1", HUB_DEFAULT_PORT, {
+    fetchImpl,
+  });
+  if (!health.ok || health.version !== expectedVersion) return null;
+  return {
+    pid: defaultPid,
+    port: HUB_DEFAULT_PORT,
+    host: "127.0.0.1",
+    version: health.version,
+    source: "default-port",
+  };
+}
+
+export async function inspectDetachedHubProcesses({
+  expectedVersion = getVersionHash(),
+  pidFilePath = DOCTOR_HUB_PID_FILE,
+  exists = existsSync,
+  readFile = readFileSync,
+  killFn = process.kill,
+  platform = process.platform,
+  execFile = execFileSync,
+  fetchImpl = fetch,
+} = {}) {
+  const rows = queryDetachedHubProcessRows({ platform, execFile });
+  const activeHealthy = await resolveActiveHealthyHub({
+    expectedVersion,
+    pidFilePath,
+    exists,
+    readFile,
+    killFn,
+    platform,
+    execFile,
+    fetchImpl,
+  });
+
+  const hubs = [];
+  for (const row of rows) {
+    const ports = queryListeningPortsForPid(row.pid, { platform, execFile });
+    const established = queryEstablishedCountForPid(row.pid, {
+      platform,
+      execFile,
+    });
+    let version = null;
+    let healthy = false;
+    for (const port of ports) {
+      const health = await fetchHubHealthForDoctor("127.0.0.1", port, {
+        fetchImpl,
+      });
+      if (!health.ok) continue;
+      version = health.version;
+      healthy = true;
+      break;
+    }
+    hubs.push({
+      ...row,
+      ports,
+      established,
+      version,
+      healthy,
+      activeHealthy: activeHealthy?.pid === row.pid,
+      staleCandidate: activeHealthy?.pid !== row.pid,
+    });
+  }
+
+  return {
+    expectedVersion,
+    activeHealthy,
+    hubs,
+    staleCandidates: hubs.filter((hub) => hub.staleCandidate),
+  };
+}
+
+async function waitForHubProcessExit(
+  pid,
+  { killFn = process.kill, graceMs = 5000, pollMs = 100 } = {},
+) {
+  const deadline = Date.now() + Math.max(0, graceMs);
+  while (Date.now() <= deadline) {
+    if (!isPidAliveForHub(pid, killFn)) return true;
+    await delay(pollMs);
+  }
+  return !isPidAliveForHub(pid, killFn);
+}
+
+async function retireDetachedHubPid(
+  pid,
+  { killFn = process.kill, graceMs = 5000, pollMs = 100 } = {},
+) {
+  if (!isPidAliveForHub(pid, killFn)) return { ok: true, reason: "dead" };
+  try {
+    killFn(pid, "SIGTERM");
+  } catch (error) {
+    return { ok: false, reason: "sigterm_failed", error };
+  }
+  if (await waitForHubProcessExit(pid, { killFn, graceMs, pollMs })) {
+    return { ok: true, reason: "sigterm" };
+  }
+  try {
+    killFn(pid, "SIGKILL");
+  } catch (error) {
+    return { ok: false, reason: "sigkill_failed", error };
+  }
+  const exited = await waitForHubProcessExit(pid, {
+    killFn,
+    graceMs: 1000,
+    pollMs,
+  });
+  return { ok: exited, reason: exited ? "sigkill" : "still_alive" };
+}
+
+export async function cleanupDetachedHubProcesses({
+  hubs,
+  activeHealthy,
+  dryRun = true,
+  apply = false,
+  killFn = process.kill,
+  graceMs = 5000,
+  pollMs = 100,
+} = {}) {
+  const results = [];
+  for (const hub of hubs || []) {
+    if (activeHealthy?.pid === hub.pid || hub.activeHealthy) {
+      results.push({ pid: hub.pid, action: "excluded-active", ok: true, hub });
+      continue;
+    }
+    if (!apply || dryRun) {
+      results.push({ pid: hub.pid, action: "dry-run-skip", ok: true, hub });
+      continue;
+    }
+    const retired = await retireDetachedHubPid(hub.pid, {
+      killFn,
+      graceMs,
+      pollMs,
+    });
+    results.push({
+      pid: hub.pid,
+      action: retired.ok ? "retired" : "failed",
+      ok: retired.ok,
+      reason: retired.reason,
+      hub,
+    });
+  }
+  return {
+    dryRun: !apply || dryRun,
+    results,
+    failed: results.filter((result) => result.ok === false).length,
+    retired: results.filter((result) => result.action === "retired").length,
+    skipped: results.filter((result) => result.action === "dry-run-skip")
+      .length,
+    excluded: results.filter((result) => result.action === "excluded-active")
+      .length,
+  };
 }
 
 function inferExitCode(error) {
@@ -1864,6 +2283,9 @@ async function cmdDoctor(options = {}) {
     fix = false,
     reset = false,
     purgeLogs = false,
+    cleanupStaleHubs = false,
+    cleanupStaleHubsDryRun = true,
+    cleanupStaleHubsApply = false,
     json = false,
   } = options;
   const report = {
@@ -1873,6 +2295,7 @@ async function cmdDoctor(options = {}) {
     actions: [],
     hook_coverage: { total: 0, registered: 0, missing: [] },
     fsmonitorDaemons: { stale: 0, killed: 0 },
+    hubServers: { detached: 0, stale: 0, activeHealthy: null },
     issue_count: 0,
   };
 
@@ -3230,6 +3653,96 @@ async function cmdDoctor(options = {}) {
         info("정리: tfx doctor --fix");
         issues += omcTeamReport.entries.length;
       }
+    }
+
+    // 12.4. detached tfx-hub/server.mjs 누적 감지 및 opt-in 정리
+    section("Hub Servers");
+    try {
+      const hubReport = await inspectDetachedHubProcesses();
+      report.hubServers = {
+        detached: hubReport.hubs.length,
+        stale: hubReport.staleCandidates.length,
+        activeHealthy: hubReport.activeHealthy,
+        expectedVersion: hubReport.expectedVersion,
+        hubs: hubReport.hubs.map((hub) => ({
+          pid: hub.pid,
+          ppid: hub.ppid,
+          version: hub.version,
+          uptime: hub.uptime,
+          ports: hub.ports,
+          established: hub.established,
+          rssKb: hub.rssKb,
+          activeHealthy: hub.activeHealthy,
+          staleCandidate: hub.staleCandidate,
+        })),
+      };
+      addDoctorCheck(report, {
+        name: "hub-server-processes",
+        status: hubReport.staleCandidates.length > 0 ? "warning" : "ok",
+        detached: hubReport.hubs.length,
+        stale: hubReport.staleCandidates.length,
+        activeHealthy: hubReport.activeHealthy,
+      });
+
+      if (hubReport.hubs.length === 0) {
+        ok("PPID=1 hub/server.mjs 없음");
+      } else {
+        for (const hub of hubReport.hubs) {
+          const portLabel = hub.ports.length > 0 ? hub.ports.join(",") : "?";
+          const versionLabel = hub.version || "unknown";
+          const rssLabel = hub.rssKb == null ? "?" : `${hub.rssKb}KB`;
+          const activeLabel = hub.activeHealthy
+            ? " active healthy excluded"
+            : " stale candidate";
+          const line = `PID=${hub.pid} PPID=${hub.ppid} version=${versionLabel} uptime=${hub.uptime} port=${portLabel} ESTABLISHED=${hub.established} RSS=${rssLabel}${activeLabel}`;
+          if (hub.activeHealthy) ok(line);
+          else warn(line);
+        }
+      }
+
+      if (cleanupStaleHubs) {
+        const cleanupResult = await cleanupDetachedHubProcesses({
+          hubs: hubReport.hubs,
+          activeHealthy: hubReport.activeHealthy,
+          dryRun: cleanupStaleHubsDryRun,
+          apply: cleanupStaleHubsApply,
+        });
+        report.actions.push({
+          type: "cleanup-stale-hubs",
+          status: cleanupResult.failed > 0 ? "failed" : "ok",
+          dryRun: cleanupResult.dryRun,
+          retired: cleanupResult.retired,
+          skipped: cleanupResult.skipped,
+          excluded: cleanupResult.excluded,
+          failed: cleanupResult.failed,
+        });
+        for (const result of cleanupResult.results) {
+          if (result.action === "excluded-active") {
+            ok(`active healthy hub excluded: PID=${result.pid}`);
+          } else if (result.action === "dry-run-skip") {
+            info(`dry-run skip stale hub: PID=${result.pid}`);
+          } else if (result.action === "retired") {
+            ok(`stale hub retired: PID=${result.pid} (${result.reason})`);
+          } else {
+            fail(`stale hub cleanup failed: PID=${result.pid}`);
+          }
+        }
+        issues += cleanupResult.failed;
+        if (cleanupResult.dryRun && hubReport.staleCandidates.length > 0) {
+          issues += hubReport.staleCandidates.length;
+        }
+      } else if (hubReport.staleCandidates.length > 0) {
+        info("정리: tfx doctor --cleanup-stale-hubs --dry-run|--apply");
+        issues += hubReport.staleCandidates.length;
+      }
+    } catch (error) {
+      addDoctorCheck(report, {
+        name: "hub-server-processes",
+        status: "warning",
+        error: error.message,
+      });
+      warn(`hub/server.mjs 검사 실패: ${error.message}`);
+      issues++;
     }
 
     // 12.5. 고아 node.exe 프로세스 정리 (Windows)
@@ -6012,7 +6525,28 @@ async function main() {
       const fix = cmdArgs.includes("--fix");
       const reset = cmdArgs.includes("--reset");
       const purgeLogs = cmdArgs.includes("--purge-logs");
-      await cmdDoctor({ fix, reset, purgeLogs, json: JSON_OUTPUT });
+      const cleanupStaleHubs = cmdArgs.includes("--cleanup-stale-hubs");
+      const cleanupApply = cmdArgs.includes("--apply");
+      const cleanupDryRun = cmdArgs.includes("--dry-run") || !cleanupApply;
+      if (cleanupStaleHubs && cleanupApply && cmdArgs.includes("--dry-run")) {
+        throw createCliError(
+          "--cleanup-stale-hubs 에서는 --dry-run 과 --apply 중 하나만 지정하세요",
+          {
+            exitCode: EXIT_ARG_ERROR,
+            reason: "argError",
+            fix: "tfx doctor --cleanup-stale-hubs --dry-run",
+          },
+        );
+      }
+      await cmdDoctor({
+        fix,
+        reset,
+        purgeLogs,
+        cleanupStaleHubs,
+        cleanupStaleHubsDryRun: cleanupDryRun,
+        cleanupStaleHubsApply: cleanupApply,
+        json: JSON_OUTPUT,
+      });
       return;
     }
     case "mcp":
@@ -6286,8 +6820,20 @@ ${s.options.map((o) => `    ${DIM}${o.name.padEnd(16)}${RESET} ${GRAY}${o.descri
   }
 }
 
-try {
-  await main();
-} catch (error) {
-  handleFatalError(error, { json: JSON_OUTPUT });
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(process.argv[1]) === modulePath;
+  } catch {
+    return resolve(process.argv[1]) === modulePath;
+  }
+}
+
+if (isMainModule()) {
+  try {
+    await main();
+  } catch (error) {
+    handleFatalError(error, { json: JSON_OUTPUT });
+  }
 }
