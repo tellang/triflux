@@ -343,6 +343,23 @@ function recordRouteOutcome(slug, mode, outcome) {
   writeFileSync(weightsPath, JSON.stringify(weights, null, 2), "utf8");
 }
 
+function isHubTokenMonitorSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  return (
+    Object.hasOwn(snapshot, "requestTokens") ||
+    Object.hasOwn(snapshot, "responseTokens") ||
+    Object.hasOwn(snapshot, "totalUpdates") ||
+    (snapshot.byTool && typeof snapshot.byTool === "object")
+  );
+}
+
+function readCompactNudgePercent(snapshot) {
+  if (isHubTokenMonitorSnapshot(snapshot)) return null;
+  const percent = Number(snapshot?.percent ?? 0);
+  if (!Number.isFinite(percent)) return null;
+  return Math.max(0, Math.min(100, percent));
+}
+
 // ── 메인 ────────────────────────────────────────────────────
 async function main() {
   // CLI: --record-route <slug> <mode> <outcome>
@@ -517,8 +534,8 @@ async function main() {
       const nudgeMarker = join(tmpdir(), "tfx-compact-nudge-sent");
       if (existsSync(snapshotPath) && !existsSync(nudgeMarker)) {
         const snap = JSON.parse(readFileSync(snapshotPath, "utf8"));
-        const percent = Number(snap.percent || 0);
-        if (percent >= 80) {
+        const percent = readCompactNudgePercent(snap);
+        if (percent != null && percent >= 80) {
           const level = percent >= 90 ? "critical" : "warn";
           const msg =
             level === "critical"

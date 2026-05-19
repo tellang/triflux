@@ -216,6 +216,72 @@ describe("pipeline-stop hook", () => {
     assert.equal(result.stderr.trim(), "");
   });
 
+  it("hub token monitor shape의 cache snapshot은 context guard를 트리거하지 않는다", () => {
+    const cacheDir = join(homeDir, ".claude", "cache", "tfx-hub");
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(
+      join(cacheDir, "context-monitor.json"),
+      JSON.stringify({
+        sessionId: "88b086d5",
+        limitTokens: 200_000,
+        usedTokens: 12_194_022,
+        requestTokens: 142_336,
+        responseTokens: 12_051_686,
+        totalUpdates: 5_646,
+        byTool: { "tools/list": 11_888_383 },
+        display: "12.2M/200K (100%)",
+        percent: 100,
+      }),
+      "utf8",
+    );
+
+    const result = runHook({
+      cwd: projectRoot,
+      homeDir,
+      pluginRoot,
+      input: {
+        hook_event_name: "Stop",
+        session_id: "hub-token-monitor-cache-passthrough",
+        stop_reason: "end_turn",
+      },
+      env: { TRIFLUX_CONTEXT_GUARD_STATE_DIR: guardStateDir },
+    });
+
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout.trim(), "");
+    assert.equal(result.stderr.trim(), "");
+  });
+
+  it("일반 context-monitor.json cache의 높은 percent는 여전히 block한다", () => {
+    const cacheDir = join(homeDir, ".claude", "cache", "tfx-hub");
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(
+      join(cacheDir, "context-monitor.json"),
+      JSON.stringify({
+        used_percentage: 85,
+        context_window_size: 200_000,
+      }),
+      "utf8",
+    );
+
+    const output = parseStdout(
+      runHook({
+        cwd: projectRoot,
+        homeDir,
+        pluginRoot,
+        input: {
+          hook_event_name: "Stop",
+          session_id: "non-hub-token-cache-block",
+          stop_reason: "end_turn",
+        },
+        env: { TRIFLUX_CONTEXT_GUARD_STATE_DIR: guardStateDir },
+      }),
+    );
+
+    assert.equal(output.decision, "block");
+    assert.match(output.reason, /context/i);
+  });
+
   it("context guard state write failure 후에도 active pipeline block 동작은 유지한다", () => {
     writePipelineState(projectRoot, "project-active-team", "exec");
     const guardStateFile = join(sandboxDir, "context-guard-state-file");
