@@ -228,6 +228,16 @@ function contextPercentFromTranscript(payload) {
   return percents.length > 0 ? Math.max(...percents) : null;
 }
 
+function isHubTokenMonitorSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  return (
+    Object.hasOwn(snapshot, "requestTokens") ||
+    Object.hasOwn(snapshot, "responseTokens") ||
+    Object.hasOwn(snapshot, "totalUpdates") ||
+    (snapshot.byTool && typeof snapshot.byTool === "object")
+  );
+}
+
 function contextPercentFromCache() {
   const home = process.env.HOME || process.env.USERPROFILE;
   if (!home) return null;
@@ -243,6 +253,7 @@ function contextPercentFromCache() {
   try {
     const parsed = parseJsonCandidate(readFileSync(cachePath, "utf8"));
     if (!parsed) return null;
+    if (isHubTokenMonitorSnapshot(parsed)) return null;
     const direct = contextPercentFromPayload(parsed);
     if (direct !== null) return direct;
     const percents = contextPercentsFromObject(parsed);
