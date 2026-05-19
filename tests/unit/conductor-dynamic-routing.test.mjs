@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { resetSnapshotCache } from "../../hub/routing-snapshot.mjs";
-import { createConductor, STATES } from "../../hub/team/conductor.mjs";
+import { createConductor } from "../../hub/team/conductor.mjs";
 
 process.setMaxListeners(50);
 

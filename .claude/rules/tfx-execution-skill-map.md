@@ -41,12 +41,12 @@
 | PR conflict 해결을 `tfx-remote`로 실행 | WT 세션 `git checkout feat/X` → 메인 세션 working tree도 함께 전환 → race (2026-04-17 PR #72 사고) | `tfx-swarm` |
 | 단일 파일 수정을 `tfx-swarm`으로 실행 | PRD + worktree 오버헤드 과잉 | `tfx-autopilot` |
 | `tfx-multi`로 코드 수정 병렬 | cwd 공유 파일 race | `tfx-swarm` |
-| `tfx-auto --parallel` 만 명시하고 코드 변경 포함 | Issue #87 미해결 갭으로 multi dispatch + cwd 공유 race | 코드 변경 시 반드시 `--parallel swarm --isolation worktree` 명시 |
+| `tfx-auto --parallel N` 명시 + 코드 변경 | warning 후 사용자 결정 존중 | swarm 권장이지만 사용자 명시 override 시 multi 진행 (Issue #281 closed) |
 
 ## 핵심 룰
 
-> **코드 변경 = tfx-swarm만** (로컬/원격 동일). tfx-remote는 원격 대화형/탐색 전용. multi는 로컬 headless 병렬 (worktree 불필요 read-only 작업).
-> **MANDATORY**: 코드 변경 포함 병렬은 사용자가 직접 `--parallel swarm --isolation worktree` 플래그 명시. tfx-auto 자동 swarm dispatch 는 Issue #87 미해결.
+> **코드 변경 = tfx-swarm 우선** (로컬/원격 동일). tfx-remote는 원격 대화형/탐색 전용. multi는 로컬 headless 병렬 (worktree 불필요 read-only 작업).
+> **MANDATORY**: `tfx-auto` 는 2+ 태스크 + 코드 변경 자동 감지 시 swarm 으로 escalate (Issue #281 closed). 사용자 명시 `--parallel N` override 시 warning 후 사용자 결정 존중.
 
 ## Retry 정책 (Phase 3+)
 
@@ -59,6 +59,6 @@
 
 `ralph`/`auto-escalate` 는 `hub/team/retry-state-machine.mjs` 가 구동. state 는 `.omc/state/retry-<sessionId>.json` 에 저장 (compaction survive). Bridge: `node hub/bridge.mjs retry-run --snapshot X --event ...`.
 
-## 알려진 한계
+## 해결됨
 
-현재 `tfx-auto`는 2+ 태스크를 만나면 **multi로만 dispatch**한다. 코드 변경 포함 시 자동 swarm dispatch 로직은 Issue #87 (auto 라우터 강화)에서 추적.
+`tfx-auto` 자동 swarm dispatch 갭은 Issue #87 / #281 로 종료됐다. 2+ 태스크 + 코드 변경은 자동 swarm escalate, 명시 `--parallel N` override 는 warning 후 사용자 결정 존중.

@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_OPTIONS,
+  decideDispatchMode,
   parseArgs,
   VALID_VALUES,
 } from "../../hub/lib/tfx-route-args.mjs";
@@ -131,5 +132,64 @@ describe("tfx-route-args — parseArgs", () => {
       const r = parseArgs(["--cli"]);
       assert.ok(r.warnings.some((w) => w.includes("--cli needs a value")));
     });
+  });
+});
+
+describe("tfx-route-args — decideDispatchMode", () => {
+  const noChange = () => false;
+  const withChange = () => true;
+
+  it("case 0: 1 task → single", () => {
+    const r = decideDispatchMode({ tasks: ["t1"] }, { detector: noChange });
+    assert.equal(r.mode, "single");
+    assert.equal(r.escalated, false);
+    assert.equal(r.warning, null);
+    assert.equal(r.reason, "single-task");
+  });
+
+  it("case 1: 2+ tasks + 코드 변경 0건 → multi", () => {
+    const r = decideDispatchMode(
+      { tasks: ["t1", "t2"] },
+      { detector: noChange },
+    );
+    assert.equal(r.mode, "multi");
+    assert.equal(r.escalated, false);
+    assert.equal(r.warning, null);
+    assert.equal(r.reason, "multi-no-code-change");
+  });
+
+  it("case 2: 2+ tasks + 코드 변경 → swarm auto-escalate", () => {
+    const r = decideDispatchMode(
+      { tasks: ["t1", "t2"] },
+      { detector: withChange },
+    );
+    assert.equal(r.mode, "swarm");
+    assert.equal(r.escalated, true);
+    assert.match(r.warning, /자동 escalate/);
+    assert.match(r.warning, /Issue #281/);
+    assert.equal(r.reason, "auto-escalate-code-change");
+  });
+
+  it("case 3: --parallel N 명시 + 코드 변경 → multi + warning", () => {
+    const r = decideDispatchMode(
+      { tasks: ["t1", "t2"], parallel: 3 },
+      { detector: withChange },
+    );
+    assert.equal(r.mode, "multi");
+    assert.equal(r.escalated, false);
+    assert.match(r.warning, /WARNING: 코드 변경/);
+    assert.match(r.warning, /사용자 명시.*존중/);
+    assert.equal(r.reason, "user-explicit-multi-with-code-change");
+  });
+
+  it("user-explicit swarm 그대로", () => {
+    const r = decideDispatchMode(
+      { tasks: ["t1", "t2"], parallel: "swarm", isolation: "worktree" },
+      { detector: withChange },
+    );
+    assert.equal(r.mode, "swarm");
+    assert.equal(r.escalated, false);
+    assert.equal(r.warning, null);
+    assert.equal(r.reason, "user-explicit-swarm");
   });
 });

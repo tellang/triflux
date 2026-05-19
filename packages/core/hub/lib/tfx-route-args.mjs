@@ -19,6 +19,8 @@
 //   --no-claude-native                (Claude native sub-agent 경로 disable)
 //   --max-iterations <N>              (ralph / auto-escalate 상한, 0=unlimited)
 
+import { hasCodeChange } from "./staged-file-detect.mjs";
+
 export const DEFAULT_OPTIONS = Object.freeze({
   cli: "auto",
   mode: "quick",
@@ -220,3 +222,88 @@ function validate(opts, warnings) {
 }
 
 export { VALID_VALUES };
+
+/**
+ * Decide dispatch mode based on parsed args and current git state.
+ *
+ * Issue #281: auto router code changes should use isolated swarm dispatch for
+ * multi-task work unless the user explicitly selected local parallel mode.
+ *
+ * @param {object} args
+ * @param {object} [opts]
+ * @param {string} [opts.cwd]
+ * @param {Function} [opts.detector]
+ * @returns {{
+ *   mode: "single" | "multi" | "swarm",
+ *   escalated: boolean,
+ *   warning: string | null,
+ *   reason: string,
+ * }}
+ */
+export function decideDispatchMode(
+  args = {},
+  { cwd = process.cwd(), detector = hasCodeChange } = {},
+) {
+  const tasksCount = countTasks(args);
+  const parallel = normalizeParallel(args.parallel);
+  const hasUserParallel = parallel !== null && parallel !== "1";
+  const hasUserSwarm = parallel === "swarm" || args.isolation === "worktree";
+  const codeChanged = Boolean(detector({ cwd }));
+
+  if (hasUserSwarm) {
+    return {
+      mode: "swarm",
+      escalated: false,
+      warning: null,
+      reason: "user-explicit-swarm",
+    };
+  }
+
+  if (hasUserParallel && codeChanged) {
+    return {
+      mode: "multi",
+      escalated: false,
+      warning: `[tfx-auto] WARNING: 코드 변경 감지 (cwd race 위험). --parallel swarm --isolation worktree 권장. 사용자 명시 --parallel=${args.parallel} 존중하여 multi 로 진행.`,
+      reason: "user-explicit-multi-with-code-change",
+    };
+  }
+
+  if (tasksCount >= 2 && codeChanged) {
+    return {
+      mode: "swarm",
+      escalated: true,
+      warning: `[tfx-auto] 코드 변경 ${tasksCount}건 태스크 + dirty cwd 감지. swarm dispatch 자동 escalate (--parallel swarm --isolation worktree). Issue #281.`,
+      reason: "auto-escalate-code-change",
+    };
+  }
+
+  if (tasksCount >= 2 || hasUserParallel) {
+    return {
+      mode: "multi",
+      escalated: false,
+      warning: null,
+      reason: "multi-no-code-change",
+    };
+  }
+
+  return {
+    mode: "single",
+    escalated: false,
+    warning: null,
+    reason: "single-task",
+  };
+}
+
+function countTasks(args) {
+  if (Array.isArray(args.tasks)) return args.tasks.length;
+  if (typeof args.tasks === "number") return args.tasks;
+  if (typeof args.tasks === "string") return args.tasks.trim() ? 1 : 0;
+  if (typeof args.task === "string") return args.task.trim() ? 1 : 0;
+  return args.tasks ?? 0;
+}
+
+function normalizeParallel(value) {
+  if (value == null) return null;
+  if (value === "swarm") return value;
+  return String(value);
+}
