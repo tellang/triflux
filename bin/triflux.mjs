@@ -120,6 +120,8 @@ const VER = `${DIM}v${PKG.version}${RESET}`;
 const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
 const _DOT = `${GRAY}·${RESET}`;
 const STALE_TEAM_MAX_AGE_SEC = 3600;
+const DEFAULT_TMUX_CLEANUP_PREFIX = "tfx-*";
+const DEFAULT_TMUX_CLEANUP_AGE_MIN = 60;
 const ANSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const HUB_DEFAULT_PORT = 27888;
 const DOCTOR_HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
@@ -155,7 +157,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   doctor: {
     usage:
-      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--dynamic-routing] [--cleanup-stale-hubs --dry-run|--apply] [--json]",
+      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--dynamic-routing] [--cleanup-stale-hubs --dry-run|--apply] [--cleanup-stale-tmux --prefix tfx-* --age-min N --dry-run|--apply] [--json]",
     description: "설치 상태 진단 및 자동 복구",
     options: [
       {
@@ -198,16 +200,32 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
           "PPID=1 hub/server.mjs 후보를 보고하고 opt-in 정리 모드를 활성화",
       },
       {
+        name: "--cleanup-stale-tmux",
+        type: "boolean",
+        description:
+          "detached tmux session 후보를 보고하고 opt-in 정리 모드를 활성화",
+      },
+      {
+        name: "--prefix <glob>",
+        type: "string",
+        description: "--cleanup-stale-tmux 와 함께 사용. 기본 tfx-*",
+      },
+      {
+        name: "--age-min <minutes>",
+        type: "number",
+        description: "--cleanup-stale-tmux 와 함께 사용. 기본 60",
+      },
+      {
         name: "--dry-run",
         type: "boolean",
         description:
-          "--cleanup-stale-hubs 와 함께 사용. active healthy hub를 제외하고 정리 후보만 표시",
+          "--cleanup-stale-hubs/--cleanup-stale-tmux 와 함께 사용. 정리 후보만 표시",
       },
       {
         name: "--apply",
         type: "boolean",
         description:
-          "--cleanup-stale-hubs 와 함께 사용. active healthy hub 제외 후 stale hub 종료",
+          "--cleanup-stale-hubs/--cleanup-stale-tmux 와 함께 사용. stale 대상 종료",
       },
       {
         name: "--json",
@@ -823,14 +841,23 @@ export async function inspectDetachedHubProcesses({
       healthy = true;
       break;
     }
+    const activeByPidFile = activeHealthy?.pid === row.pid;
+    const activeByConnection = established >= 1;
+    const isActiveHealthy = activeByPidFile || activeByConnection;
     hubs.push({
       ...row,
       ports,
       established,
       version,
-      healthy,
-      activeHealthy: activeHealthy?.pid === row.pid,
-      staleCandidate: activeHealthy?.pid !== row.pid,
+      healthy: healthy || activeByConnection,
+      activeHealthy: isActiveHealthy,
+      activeReason: activeByPidFile
+        ? "pid-file-health"
+        : activeByConnection
+          ? "established-connection"
+          : null,
+      healthStatus: isActiveHealthy ? "healthy" : "stale",
+      staleCandidate: !isActiveHealthy,
     });
   }
 
@@ -891,12 +918,30 @@ export async function cleanupDetachedHubProcesses({
 } = {}) {
   const results = [];
   for (const hub of hubs || []) {
-    if (activeHealthy?.pid === hub.pid || hub.activeHealthy) {
-      results.push({ pid: hub.pid, action: "excluded-active", ok: true, hub });
+    const classification =
+      activeHealthy?.pid === hub.pid ||
+      hub.activeHealthy ||
+      Number(hub.established) >= 1
+        ? "healthy"
+        : "stale";
+    if (classification === "healthy") {
+      results.push({
+        pid: hub.pid,
+        classification,
+        action: "excluded-active",
+        ok: true,
+        hub,
+      });
       continue;
     }
     if (!apply || dryRun) {
-      results.push({ pid: hub.pid, action: "dry-run-skip", ok: true, hub });
+      results.push({
+        pid: hub.pid,
+        classification,
+        action: "dry-run-skip",
+        ok: true,
+        hub,
+      });
       continue;
     }
     const retired = await retireDetachedHubPid(hub.pid, {
@@ -906,6 +951,7 @@ export async function cleanupDetachedHubProcesses({
     });
     results.push({
       pid: hub.pid,
+      classification,
       action: retired.ok ? "retired" : "failed",
       ok: retired.ok,
       reason: retired.reason,
@@ -1108,6 +1154,240 @@ function formatElapsedAge(ageSec) {
   if (ageSec < 3600) return `${Math.floor(ageSec / 60)}분`;
   if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}시간`;
   return `${Math.floor(ageSec / 86400)}일`;
+}
+
+function compileSimpleGlob(pattern) {
+  const source = String(pattern || DEFAULT_TMUX_CLEANUP_PREFIX)
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*");
+  return new RegExp(`^${source}$`);
+}
+
+function parseDetachedTmuxSessionRows(output, nowSec) {
+  const sessions = [];
+  for (const line of String(output || "").split(/\r?\n/)) {
+    const [name, attachedText, createdText] = line.split("\t");
+    if (!name) continue;
+    const attached = Number.parseInt(attachedText || "0", 10);
+    const createdAt = parseSessionCreated(createdText);
+    sessions.push({
+      name,
+      attached: Number.isFinite(attached) ? attached : 0,
+      ageSec: createdAt == null ? null : Math.max(0, nowSec - createdAt),
+    });
+  }
+  return sessions;
+}
+
+function parseTmuxPaneRows(output) {
+  return String(output || "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .map((line) => {
+      const [cwd, command, pidText] = line.split("\t");
+      const pid = Number.parseInt(pidText || "", 10);
+      return {
+        cwd: cwd || null,
+        command: command || null,
+        pid: Number.isFinite(pid) && pid > 0 ? pid : null,
+      };
+    });
+}
+
+function queryTmuxPaneRows(sessionName, { execFile = execFileSync } = {}) {
+  try {
+    return parseTmuxPaneRows(
+      execFile(
+        "tmux",
+        [
+          "list-panes",
+          "-t",
+          sessionName,
+          "-F",
+          "#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}",
+        ],
+        {
+          encoding: "utf8",
+          timeout: 1000,
+          stdio: ["ignore", "pipe", "ignore"],
+          windowsHide: true,
+        },
+      ),
+    );
+  } catch {
+    return [];
+  }
+}
+
+function queryProcessMemoryMb(pid, { execFile = execFileSync } = {}) {
+  const resolvedPid = Number(pid);
+  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return null;
+  try {
+    const output = execFile("ps", ["-o", "rss=", "-p", String(resolvedPid)], {
+      encoding: "utf8",
+      timeout: 1000,
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    const rssKb = Number.parseInt(String(output || "").trim(), 10);
+    if (!Number.isFinite(rssKb) || rssKb < 0) return null;
+    return Math.round(rssKb / 1024);
+  } catch {
+    return null;
+  }
+}
+
+function sumMemoryEstimateMb(panes, { execFile = execFileSync } = {}) {
+  let total = 0;
+  let seen = false;
+  for (const pane of panes) {
+    const memory = queryProcessMemoryMb(pane.pid, { execFile });
+    if (memory == null) continue;
+    total += memory;
+    seen = true;
+  }
+  return seen ? total : null;
+}
+
+export function inspectDetachedTmuxSessions({
+  prefix = DEFAULT_TMUX_CLEANUP_PREFIX,
+  ageMin = DEFAULT_TMUX_CLEANUP_AGE_MIN,
+  platform = process.platform,
+  execFile = execFileSync,
+  now = Date.now(),
+} = {}) {
+  if (platform === "win32") {
+    return {
+      available: false,
+      reason: "unsupported-platform",
+      prefix,
+      ageMin,
+      sessions: [],
+      staleCandidates: [],
+    };
+  }
+
+  let output = "";
+  try {
+    output = execFile(
+      "tmux",
+      [
+        "list-sessions",
+        "-F",
+        "#{session_name}\t#{session_attached}\t#{session_created}",
+      ],
+      {
+        encoding: "utf8",
+        timeout: 1000,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    );
+  } catch (error) {
+    return {
+      available: false,
+      reason: error?.code === "ENOENT" ? "tmux-missing" : "tmux-unavailable",
+      prefix,
+      ageMin,
+      sessions: [],
+      staleCandidates: [],
+    };
+  }
+
+  const nowSec = Math.floor(now / 1000);
+  const matcher = compileSimpleGlob(prefix);
+  const minAgeSec = Math.max(0, Number(ageMin) || 0) * 60;
+  const sessions = parseDetachedTmuxSessionRows(output, nowSec)
+    .filter((session) => session.attached === 0 && matcher.test(session.name))
+    .map((session) => {
+      const panes = queryTmuxPaneRows(session.name, { execFile });
+      const commands = [
+        ...new Set(panes.map((pane) => pane.command).filter(Boolean)),
+      ];
+      const cwd = panes.find((pane) => pane.cwd)?.cwd || null;
+      const staleCandidate =
+        session.ageSec != null && session.ageSec >= minAgeSec;
+      return {
+        name: session.name,
+        age: formatElapsedAge(session.ageSec),
+        ageSec: session.ageSec,
+        cwd,
+        command: commands.length > 0 ? commands.join(",") : null,
+        memoryEstimateMb: sumMemoryEstimateMb(panes, { execFile }),
+        staleCandidate,
+      };
+    });
+
+  return {
+    available: true,
+    reason: null,
+    prefix,
+    ageMin,
+    sessions,
+    staleCandidates: sessions.filter((session) => session.staleCandidate),
+  };
+}
+
+export async function cleanupDetachedTmuxSessions({
+  sessions,
+  dryRun = true,
+  apply = false,
+  execFile = execFileSync,
+} = {}) {
+  const results = [];
+  for (const session of sessions || []) {
+    if (!session.staleCandidate) {
+      results.push({
+        name: session.name,
+        action: "excluded-fresh",
+        ok: true,
+        session,
+      });
+      continue;
+    }
+    if (!apply || dryRun) {
+      results.push({
+        name: session.name,
+        action: "dry-run-skip",
+        ok: true,
+        session,
+      });
+      continue;
+    }
+    try {
+      execFile("tmux", ["kill-session", "-t", session.name], {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      results.push({
+        name: session.name,
+        action: "retired",
+        ok: true,
+        session,
+      });
+    } catch (error) {
+      results.push({
+        name: session.name,
+        action: "failed",
+        ok: false,
+        error,
+        session,
+      });
+    }
+  }
+
+  return {
+    dryRun: !apply || dryRun,
+    results,
+    failed: results.filter((result) => result.ok === false).length,
+    retired: results.filter((result) => result.action === "retired").length,
+    skipped: results.filter((result) => result.action === "dry-run-skip")
+      .length,
+    excluded: results.filter((result) => result.action === "excluded-fresh")
+      .length,
+  };
 }
 
 function readTeamSessionCreatedMap() {
@@ -2286,6 +2566,11 @@ async function cmdDoctor(options = {}) {
     cleanupStaleHubs = false,
     cleanupStaleHubsDryRun = true,
     cleanupStaleHubsApply = false,
+    cleanupStaleTmux = false,
+    cleanupStaleTmuxDryRun = true,
+    cleanupStaleTmuxApply = false,
+    cleanupStaleTmuxPrefix = DEFAULT_TMUX_CLEANUP_PREFIX,
+    cleanupStaleTmuxAgeMin = DEFAULT_TMUX_CLEANUP_AGE_MIN,
     json = false,
   } = options;
   const report = {
@@ -2296,6 +2581,13 @@ async function cmdDoctor(options = {}) {
     hook_coverage: { total: 0, registered: 0, missing: [] },
     fsmonitorDaemons: { stale: 0, killed: 0 },
     hubServers: { detached: 0, stale: 0, activeHealthy: null },
+    tmuxSessions: {
+      detached: 0,
+      stale: 0,
+      prefix: cleanupStaleTmuxPrefix,
+      ageMin: cleanupStaleTmuxAgeMin,
+      sessions: [],
+    },
     issue_count: 0,
   };
 
@@ -3583,6 +3875,106 @@ async function cmdDoctor(options = {}) {
       }
     }
 
+    // 12.5. detached tmux session report and opt-in cleanup
+    section("Detached Tmux Sessions");
+    const detachedTmuxReport = inspectDetachedTmuxSessions({
+      prefix: cleanupStaleTmuxPrefix,
+      ageMin: cleanupStaleTmuxAgeMin,
+    });
+    report.tmuxSessions = {
+      detached: detachedTmuxReport.sessions.length,
+      stale: detachedTmuxReport.staleCandidates.length,
+      prefix: detachedTmuxReport.prefix,
+      ageMin: detachedTmuxReport.ageMin,
+      available: detachedTmuxReport.available,
+      reason: detachedTmuxReport.reason,
+      sessions: detachedTmuxReport.sessions.map((session) => ({
+        name: session.name,
+        age: session.age,
+        age_sec: session.ageSec,
+        cwd: session.cwd,
+        command: session.command,
+        memory_estimate_mb: session.memoryEstimateMb,
+        stale: session.staleCandidate,
+      })),
+    };
+    addDoctorCheck(report, {
+      name: "detached-tmux-sessions",
+      status: !detachedTmuxReport.available
+        ? "skipped"
+        : detachedTmuxReport.staleCandidates.length > 0
+          ? "warning"
+          : "ok",
+      prefix: detachedTmuxReport.prefix,
+      age_min: detachedTmuxReport.ageMin,
+      detached: detachedTmuxReport.sessions.length,
+      stale: detachedTmuxReport.staleCandidates.length,
+      reason: detachedTmuxReport.reason,
+    });
+
+    if (!detachedTmuxReport.available) {
+      info(
+        `tmux 미감지 또는 서버 없음 — detached tmux 검사 건너뜀 (${detachedTmuxReport.reason})`,
+      );
+    } else if (detachedTmuxReport.sessions.length === 0) {
+      ok(`detached tmux session 없음 (prefix=${detachedTmuxReport.prefix})`);
+    } else {
+      info(
+        `prefix=${detachedTmuxReport.prefix} age-min=${detachedTmuxReport.ageMin}분`,
+      );
+      for (const session of detachedTmuxReport.sessions) {
+        const memoryLabel =
+          session.memoryEstimateMb == null
+            ? "?"
+            : `${session.memoryEstimateMb}MB`;
+        const cwdLabel = session.cwd || "?";
+        const commandLabel = session.command || "?";
+        const line = `${session.name}: age=${session.age} cwd=${cwdLabel} command=${commandLabel} memory=${memoryLabel}`;
+        if (session.staleCandidate) warn(`${line} stale`);
+        else ok(`${line} fresh`);
+      }
+    }
+
+    if (cleanupStaleTmux) {
+      const cleanupResult = await cleanupDetachedTmuxSessions({
+        sessions: detachedTmuxReport.sessions,
+        dryRun: cleanupStaleTmuxDryRun,
+        apply: cleanupStaleTmuxApply,
+      });
+      report.actions.push({
+        type: "cleanup-stale-tmux",
+        status: cleanupResult.failed > 0 ? "failed" : "ok",
+        dryRun: cleanupResult.dryRun,
+        retired: cleanupResult.retired,
+        skipped: cleanupResult.skipped,
+        excluded: cleanupResult.excluded,
+        failed: cleanupResult.failed,
+      });
+      for (const result of cleanupResult.results) {
+        if (result.action === "excluded-fresh") {
+          ok(`fresh detached tmux excluded: ${result.name}`);
+        } else if (result.action === "dry-run-skip") {
+          info(`dry-run stale tmux target: ${result.name}`);
+        } else if (result.action === "retired") {
+          ok(`stale tmux session killed: ${result.name}`);
+        } else {
+          fail(`stale tmux cleanup failed: ${result.name}`);
+        }
+      }
+      issues += cleanupResult.failed;
+      if (
+        cleanupResult.dryRun &&
+        detachedTmuxReport.staleCandidates.length > 0
+      ) {
+        issues += detachedTmuxReport.staleCandidates.length;
+      }
+    } else if (detachedTmuxReport.staleCandidates.length > 0) {
+      info(
+        "정리: tfx doctor --cleanup-stale-tmux --prefix tfx-* --dry-run|--apply",
+      );
+      issues += detachedTmuxReport.staleCandidates.length;
+    }
+
     // 13. OMC stale team 상태
     section("OMC Stale Teams");
     const omcTeamReport = inspectStaleOmcTeams({
@@ -3673,6 +4065,8 @@ async function cmdDoctor(options = {}) {
           established: hub.established,
           rssKb: hub.rssKb,
           activeHealthy: hub.activeHealthy,
+          activeReason: hub.activeReason,
+          healthStatus: hub.healthStatus,
           staleCandidate: hub.staleCandidate,
         })),
       };
@@ -3692,9 +4086,9 @@ async function cmdDoctor(options = {}) {
           const versionLabel = hub.version || "unknown";
           const rssLabel = hub.rssKb == null ? "?" : `${hub.rssKb}KB`;
           const activeLabel = hub.activeHealthy
-            ? " active healthy excluded"
+            ? ` healthy excluded${hub.activeReason ? ` (${hub.activeReason})` : ""}`
             : " stale candidate";
-          const line = `PID=${hub.pid} PPID=${hub.ppid} version=${versionLabel} uptime=${hub.uptime} port=${portLabel} ESTABLISHED=${hub.established} RSS=${rssLabel}${activeLabel}`;
+          const line = `PID=${hub.pid} PPID=${hub.ppid} status=${hub.healthStatus} version=${versionLabel} uptime=${hub.uptime} port=${portLabel} ESTABLISHED=${hub.established} RSS=${rssLabel}${activeLabel}`;
           if (hub.activeHealthy) ok(line);
           else warn(line);
         }
@@ -3718,9 +4112,9 @@ async function cmdDoctor(options = {}) {
         });
         for (const result of cleanupResult.results) {
           if (result.action === "excluded-active") {
-            ok(`active healthy hub excluded: PID=${result.pid}`);
+            ok(`dry-run healthy hub excluded: PID=${result.pid}`);
           } else if (result.action === "dry-run-skip") {
-            info(`dry-run skip stale hub: PID=${result.pid}`);
+            info(`dry-run stale hub target: PID=${result.pid}`);
           } else if (result.action === "retired") {
             ok(`stale hub retired: PID=${result.pid} (${result.reason})`);
           } else {
@@ -6430,6 +6824,28 @@ async function cmdHub(args = [], options = {}) {
 
 // ── 메인 ──
 
+function readCliOptionValue(args, name) {
+  const index = args.indexOf(name);
+  if (index === -1) return null;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) return null;
+  return value;
+}
+
+function parsePositiveIntegerOption(args, name, fallback) {
+  const value = readCliOptionValue(args, name);
+  if (value == null) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw createCliError(`${name} 값은 0 이상의 정수여야 합니다`, {
+      exitCode: EXIT_ARG_ERROR,
+      reason: "argError",
+      fix: `${name} ${fallback}`,
+    });
+  }
+  return parsed;
+}
+
 async function main() {
   const cmd = NORMALIZED_ARGS[0] || "help";
   const cmdArgs = NORMALIZED_ARGS.slice(1);
@@ -6526,18 +6942,30 @@ async function main() {
       const reset = cmdArgs.includes("--reset");
       const purgeLogs = cmdArgs.includes("--purge-logs");
       const cleanupStaleHubs = cmdArgs.includes("--cleanup-stale-hubs");
+      const cleanupStaleTmux = cmdArgs.includes("--cleanup-stale-tmux");
       const cleanupApply = cmdArgs.includes("--apply");
       const cleanupDryRun = cmdArgs.includes("--dry-run") || !cleanupApply;
-      if (cleanupStaleHubs && cleanupApply && cmdArgs.includes("--dry-run")) {
+      if (
+        (cleanupStaleHubs || cleanupStaleTmux) &&
+        cleanupApply &&
+        cmdArgs.includes("--dry-run")
+      ) {
         throw createCliError(
-          "--cleanup-stale-hubs 에서는 --dry-run 과 --apply 중 하나만 지정하세요",
+          "cleanup 옵션에서는 --dry-run 과 --apply 중 하나만 지정하세요",
           {
             exitCode: EXIT_ARG_ERROR,
             reason: "argError",
-            fix: "tfx doctor --cleanup-stale-hubs --dry-run",
+            fix: "tfx doctor --cleanup-stale-tmux --dry-run",
           },
         );
       }
+      const cleanupStaleTmuxPrefix =
+        readCliOptionValue(cmdArgs, "--prefix") || DEFAULT_TMUX_CLEANUP_PREFIX;
+      const cleanupStaleTmuxAgeMin = parsePositiveIntegerOption(
+        cmdArgs,
+        "--age-min",
+        DEFAULT_TMUX_CLEANUP_AGE_MIN,
+      );
       await cmdDoctor({
         fix,
         reset,
@@ -6545,6 +6973,11 @@ async function main() {
         cleanupStaleHubs,
         cleanupStaleHubsDryRun: cleanupDryRun,
         cleanupStaleHubsApply: cleanupApply,
+        cleanupStaleTmux,
+        cleanupStaleTmuxDryRun: cleanupDryRun,
+        cleanupStaleTmuxApply: cleanupApply,
+        cleanupStaleTmuxPrefix,
+        cleanupStaleTmuxAgeMin,
         json: JSON_OUTPUT,
       });
       return;

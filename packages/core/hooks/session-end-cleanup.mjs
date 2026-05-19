@@ -1,16 +1,20 @@
 #!/usr/bin/env node
+
 // hooks/session-end-cleanup.mjs — SessionEnd lifecycle state reporter
 //
 // Report-only by default. Opt-in cleanup only removes the repo-local
 // .triflux/subagents/subagents.json file when stale running lifecycle state is
 // present. It never kills processes or touches external HOME/MCP configs.
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const MARKER = "[session-end-cleanup]";
 const STALE_MS = 30 * 60 * 1000;
 const MAX_OUTPUT_BYTES = 2 * 1024;
+const DEFAULT_TMUX_PREFIX = "tfx-*";
+const MAX_TMUX_REPORT_SESSIONS = 8;
 
 function readStdin() {
   try {
@@ -63,6 +67,140 @@ function agentEntries(state) {
   if (Array.isArray(agents)) return agents;
   if (agents && typeof agents === "object") return Object.values(agents);
   return [];
+}
+
+function compileSimpleGlob(pattern) {
+  const source = String(pattern || DEFAULT_TMUX_PREFIX)
+    .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*");
+  return new RegExp(`^${source}$`);
+}
+
+function formatAge(ageSec) {
+  if (!Number.isFinite(ageSec) || ageSec < 0) return "unknown";
+  if (ageSec < 60) return `${Math.floor(ageSec)}s`;
+  if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m`;
+  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)}h`;
+  return `${Math.floor(ageSec / 86400)}d`;
+}
+
+function parseSessionCreated(rawValue) {
+  const parsed = Number.parseInt(String(rawValue || "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseTmuxListSessions(output, nowSec) {
+  const sessions = [];
+  for (const line of String(output || "").split(/\r?\n/)) {
+    const [name, attachedText, createdText] = line.split("\t");
+    if (!name) continue;
+    const attached = Number.parseInt(attachedText || "0", 10);
+    const created = parseSessionCreated(createdText);
+    sessions.push({
+      name,
+      attached: Number.isFinite(attached) ? attached : 0,
+      ageSec: created == null ? null : Math.max(0, nowSec - created),
+    });
+  }
+  return sessions;
+}
+
+function parseFirstPane(output) {
+  const first = String(output || "")
+    .split(/\r?\n/)
+    .find((line) => line.trim());
+  if (!first) return { cwd: null, command: null, pid: null };
+  const [cwd, command, pidText] = first.split("\t");
+  const pid = Number.parseInt(pidText || "", 10);
+  return {
+    cwd: cwd || null,
+    command: command || null,
+    pid: Number.isFinite(pid) && pid > 0 ? pid : null,
+  };
+}
+
+function queryMemoryEstimateMb(pid, execFile = execFileSync) {
+  if (!pid) return null;
+  try {
+    const output = execFile("ps", ["-o", "rss=", "-p", String(pid)], {
+      encoding: "utf8",
+      timeout: 400,
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    const rssKb = Number.parseInt(String(output || "").trim(), 10);
+    if (!Number.isFinite(rssKb) || rssKb < 0) return null;
+    return Math.round(rssKb / 1024);
+  } catch {
+    return null;
+  }
+}
+
+export function inspectDetachedTmuxSessions({
+  prefix = DEFAULT_TMUX_PREFIX,
+  now = Date.now(),
+  execFile = execFileSync,
+  limit = MAX_TMUX_REPORT_SESSIONS,
+} = {}) {
+  const nowSec = Math.floor(now / 1000);
+  const matcher = compileSimpleGlob(prefix);
+  let output = "";
+  try {
+    output = execFile(
+      "tmux",
+      [
+        "list-sessions",
+        "-F",
+        "#{session_name}\t#{session_attached}\t#{session_created}",
+      ],
+      {
+        encoding: "utf8",
+        timeout: 500,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    );
+  } catch {
+    return { available: false, prefix, sessions: [] };
+  }
+
+  const sessions = [];
+  for (const session of parseTmuxListSessions(output, nowSec)) {
+    if (session.attached !== 0 || !matcher.test(session.name)) continue;
+    let pane = { cwd: null, command: null, pid: null };
+    try {
+      pane = parseFirstPane(
+        execFile(
+          "tmux",
+          [
+            "list-panes",
+            "-t",
+            session.name,
+            "-F",
+            "#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}",
+          ],
+          {
+            encoding: "utf8",
+            timeout: 500,
+            stdio: ["ignore", "pipe", "ignore"],
+            windowsHide: true,
+          },
+        ),
+      );
+    } catch {
+      pane = { cwd: null, command: null, pid: null };
+    }
+    sessions.push({
+      name: session.name,
+      age: formatAge(session.ageSec),
+      cwd: pane.cwd,
+      command: pane.command,
+      memory_estimate_mb: queryMemoryEstimateMb(pane.pid, execFile),
+    });
+    if (sessions.length >= limit) break;
+  }
+
+  return { available: true, prefix, sessions };
 }
 
 export function summarizeLifecycleState(state, now = Date.now()) {
@@ -121,28 +259,31 @@ function pruneStaleRunningAgents(state, now = Date.now()) {
   };
 }
 
-function buildOutput(summary, cleanup) {
-  const context =
+function buildContext(summary, cleanup, tmuxReport) {
+  let context =
     `${MARKER} subagent lifecycle: ` +
     `running=${summary.running} completed=${summary.completed} ` +
     `stale=${summary.stale} total=${summary.total} cleanup=${cleanup}`;
+
+  if (tmuxReport?.sessions?.length > 0) {
+    context += ` detached_tmux_sessions=${JSON.stringify(tmuxReport.sessions)}`;
+  }
+  return context;
+}
+
+function buildOutput(summary, cleanup, tmuxReport) {
+  const context = buildContext(summary, cleanup, tmuxReport);
   const output = {
     systemMessage: context,
-    hookSpecificOutput: {
-      hookEventName: "SessionEnd",
-      additionalContext: context,
-    },
   };
 
   let json = JSON.stringify(output);
   if (Buffer.byteLength(json, "utf8") >= MAX_OUTPUT_BYTES) {
-    const bounded = `${MARKER} subagent lifecycle: running=${summary.running} completed=${summary.completed} stale=${summary.stale} cleanup=${cleanup}`;
+    const bounded = buildContext(summary, cleanup, {
+      sessions: tmuxReport?.sessions?.slice(0, 2) || [],
+    });
     json = JSON.stringify({
       systemMessage: bounded,
-      hookSpecificOutput: {
-        hookEventName: "SessionEnd",
-        additionalContext: bounded,
-      },
     });
   }
   return json;
@@ -160,6 +301,9 @@ export function run(input, env = process.env) {
 
   const summary = summarizeLifecycleState(state);
   let cleanup = "report-only";
+  const tmuxReport = inspectDetachedTmuxSessions({
+    prefix: env.TFX_SESSION_END_TMUX_PREFIX || DEFAULT_TMUX_PREFIX,
+  });
 
   if (env.TFX_SESSION_END_CLEANUP === "1" && summary.stale > 0) {
     try {
@@ -184,7 +328,7 @@ export function run(input, env = process.env) {
     }
   }
 
-  return buildOutput(summary, cleanup);
+  return buildOutput(summary, cleanup, tmuxReport);
 }
 
 function main() {
