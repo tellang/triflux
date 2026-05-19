@@ -4,6 +4,24 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.22.0] - 2026-05-19
+
+### Fixed
+
+- **`fix(macos)` (PR #275, commit `98f46851`, P1 mux identity)** `hub/team/session.mjs::detectMultiplexer()` 가 darwin tmux-only 환경에서 `"psmux"` 를 반환하던 문제 — `hasPsmux()` alias 의존 제거, `psmux.mjs::getMultiplexerType()` literal resolver 사용. `hub/team/terminal-opener.mjs::buildAttachCommand` 에 `PSMUX_BIN` env + 바이너리 존재 검증 추가. Windows primary 는 `"psmux"` 유지. packages/triflux + packages/remote mirror (`@triflux/core/*` import 보존). 회귀 테스트: `tests/unit/multiplexer-resolution.test.mjs` (4 assertions) + `tests/unit/terminal-opener.test.mjs` (2 assertions). ultrareview cloud multi-agent 검토 통과 (severity=critical 0).
+- **`fix(test-lock)` (PR #276, commit `aeb1e64b`, P2 supervisor)** `scripts/test-lock.mjs` 가 concurrent start 만 막고 child lifetime owning 부재 — 결과: `node --test --test-force-exit` 가 parent 종료 후 orphan (PPID=1) 으로 살아남아 누적 GB-급 memory pressure 발생. fix: env `TEST_LOCK_TIMEOUT_MS` (default 10min) timeout, SIGINT/SIGTERM/SIGHUP child forward, parent shutdown 시 `child.kill('SIGTERM')` → 5s grace → SIGKILL, lock metadata 에 `parent_pid` + `child_pid` + `started_at` + `timeout_ms` 추가, stale lock + live child PID 시 actionable diagnostic + non-zero exit (lock 보존), stale lock + dead child PID 시 cleanup + 정상 진행. packages/triflux/scripts/test-lock.mjs mirror. 회귀 테스트: `tests/unit/test-lock.test.mjs` (5 assertions, 신규).
+- **`fix(hub)` (PR #274, commit `6d92d536`, P3a stale retirement + P3b version drift)** `scripts/hub-ensure.mjs` 가 pid file 신뢰만 하고 live process / port / version 검증 부재 — 결과: 옛 version hub 가 `:27888` 점유 시 새 version 이 random port cascade, pid file 은 새 version 가리키지만 traffic 은 옛 version 으로 흐름 (실측: v10.21.0 새 hub PID 86156 → `:29196` cascade → 죽음, 옛 v10.20.2 PID 61463 `:27888` 살아남음). fix: startup 시 pid file PID alive 확인 (`process.kill(pid, 0)`) + cmdline 매칭 (`hub/server.mjs` 인지) + port 일치 + `/health` version 일치, 불일치 시 명시 warn + retire 시도 (SIGTERM → 5s grace → SIGKILL). `bin/triflux.mjs doctor` 에 stale hub diagnostic 추가 (PPID=1 hub/server.mjs 목록 + PID + version + uptime + port + ESTABLISHED count + RSS). opt-in cleanup CLI: `tfx doctor --cleanup-stale-hubs --dry-run|--apply` (active healthy hub 명시 제외). packages/triflux mirror. 회귀 테스트: `tests/integration/hub-singleton.test.mjs` 확장 (3 assertions) + `tests/unit/hub-ensure-version-drift.test.mjs` (3 assertions, 신규) + `tests/unit/doctor-stale-hubs.test.mjs` (2 assertions, 신규).
+
+### Added
+
+- **`docs(research)` (PR #273, commit `43d48294`)** macOS process lifecycle leak audit report (`docs/research/macos-process-lifecycle-leak-report-2026-05-18.md`) — 4 결함 분류: P1 mux identity (compatibility regression), P2 test-lock supervisor (lifecycle design bug), P3a hub stale retirement (lifecycle design bug), P4 tmux cleanup (policy gap). 작업 중 추가 발견: P3b version drift (port-collision cascade) + P4b SessionEnd hook JSON schema mismatch.
+
+### Notes
+
+- 보고서가 정의한 P4 (tmux cleanup policy + SessionEnd hook schema) shard 는 본 release 에 포함되지 않음 (swarm worker token 소진으로 commit 전 종료). follow-up shard 로 별도 진행 예정.
+- ultrareview cloud multi-agent 검토는 PR #275 (가장 위험한 macOS edge case) 에만 1회 사용. severity=critical 0건. yellow finding 3건은 cosmetic / edge-case / pre-existing — Issues #277 (dead win32 guards) / #278 (defaultPsmuxBinaryExists stderr asymmetry) / #279 (Windows openSession lacks psmux binary check, pre-existing) 로 follow-up 등록.
+- packages mirror 정합: `hub/`, `scripts/`, `hooks/` → `packages/triflux/` byte-identical (PR 별 diff 확인됨), `hub/team/*` → `packages/remote/` 에서 `@triflux/core/*` import 경로 보존.
+
 ## [10.21.0] - 2026-05-16
 
 ### Added
