@@ -15,4 +15,4 @@
 - `git reset --hard`는 safety-guard가 차단 → `git merge --ff-only`로 우회
 - OMC drift 감지 시 plugin/npm/CLAUDE.md 3개 컴포넌트를 반드시 함께 갱신 (한쪽만 새 버전이면 훅/라우팅 호환성 깨짐)
 - gstack 업그레이드 후 `~/.gstack/just-upgraded-from`을 체크해서 CHANGELOG 하이라이트 표시
-- 원격 머신 업그레이드 전파는 `tfx-remote-spawn` + SSH scp로 수동 (자동화 예정)
+- 원격 머신 업그레이드 전파는 `tfx-remote` + SSH scp로 수동 (자동화 예정)
