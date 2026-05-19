@@ -13,7 +13,7 @@
 | 2+ 태스크 + 코드 변경 **없음** | **tfx-multi** (로컬 headless 병렬) |
 | 2+ 태스크 + 코드 변경 **포함** | **tfx-swarm** (worktree 격리 필수) |
 | 원격 + 코드 변경 | **tfx-swarm** (shard `host:`) |
-| 원격 + 탐색/대화형 | **tfx-remote-spawn** (세션 관리 + resume) |
+| 원격 + 탐색/대화형 | **tfx-remote** (세션 관리 + resume) |
 
 ## 엔진 역할
 
@@ -21,12 +21,13 @@
 |------|------|----------|
 | tfx-multi | 로컬 headless 병렬 (cwd 공유, worktree 불필요) | auto 내부 dispatch 또는 `/tfx-multi` |
 | tfx-swarm | 격리 + 다기기 + auto merge (로컬/원격) | auto 내부 dispatch 또는 `/tfx-swarm` |
-| tfx-remote-spawn | 단일 세션 관리 (list/attach/send/resume/탐색) | 직접 `/tfx-remote-spawn` |
+| tfx-remote | 단일 세션 관리 (list/attach/send/resume/탐색) | 직접 호출: `/tfx-remote` |
+| tfx-remote-spawn | **DEPRECATED** — tfx-remote로 통합됨 | 사용 금지 |
 | tfx-codex-swarm | **DEPRECATED** — tfx-swarm으로 통합됨 | 사용 금지 |
 
 ## 핵심 차이 (격리 기준)
 
-| 항목 | tfx-swarm | tfx-remote-spawn | tfx-multi |
+| 항목 | tfx-swarm | tfx-remote | tfx-multi |
 |------|-----------|------------------|-----------|
 | Working tree 격리 | **YES** (shard별 `.codex-swarm/wt-*`) | NO (cwd 공유) | NO (cwd 공유) |
 | 원격 지원 | shard별 `host:` 자동 분배 (격리 유지) | SSH 단일 세션 | 로컬 전용 |
@@ -35,13 +36,17 @@
 
 ## 안티패턴 (실제 사고)
 
-- PR conflict 해결을 `tfx-remote-spawn`으로 실행 → WT 세션 `git checkout feat/X` → 메인 세션 working tree도 함께 전환 → race (2026-04-17 PR #72 사고)
-- 단일 파일 수정을 `tfx-swarm`으로 → PRD + worktree 오버헤드 과잉 → `tfx-autopilot` 사용
-- `tfx-multi`로 코드 수정 병렬 → cwd 공유 파일 race → `tfx-swarm`
+| 패턴 | 문제 | 대체 |
+|------|------|------|
+| PR conflict 해결을 `tfx-remote`로 실행 | WT 세션 `git checkout feat/X` → 메인 세션 working tree도 함께 전환 → race (2026-04-17 PR #72 사고) | `tfx-swarm` |
+| 단일 파일 수정을 `tfx-swarm`으로 실행 | PRD + worktree 오버헤드 과잉 | `tfx-autopilot` |
+| `tfx-multi`로 코드 수정 병렬 | cwd 공유 파일 race | `tfx-swarm` |
+| `tfx-auto --parallel` 만 명시하고 코드 변경 포함 | Issue #87 미해결 갭으로 multi dispatch + cwd 공유 race | 코드 변경 시 반드시 `--parallel swarm --isolation worktree` 명시 |
 
 ## 핵심 룰
 
-> **코드 변경 = tfx-swarm만** (로컬/원격 동일). remote-spawn은 원격 대화형/탐색 전용. multi는 로컬 headless 병렬 (worktree 불필요 read-only 작업).
+> **코드 변경 = tfx-swarm만** (로컬/원격 동일). tfx-remote는 원격 대화형/탐색 전용. multi는 로컬 headless 병렬 (worktree 불필요 read-only 작업).
+> **MANDATORY**: 코드 변경 포함 병렬은 사용자가 직접 `--parallel swarm --isolation worktree` 플래그 명시. tfx-auto 자동 swarm dispatch 는 Issue #87 미해결.
 
 ## Retry 정책 (Phase 3+)
 

@@ -97,10 +97,11 @@ conductor, headless, swarm-hypervisor가 하나의 AccountBroker 싱글턴을 �
 | 스킬 | 대상 | 방식 |
 |------|------|------|
 | tfx-codex-swarm | 로컬 전용 | 로컬 worktree + psmux |
-| tfx-remote-spawn | Claude Code 원격 | SSH → Claude Code 세션 → 내부 tfx 라우팅 |
+| tfx-remote | Claude Code 원격 | SSH → Claude Code 세션 → 내부 tfx 라우팅 |
+| tfx-remote-spawn | deprecated alias | tfx-remote로 통합됨; 직접 호출 금지 |
 
 codex를 SSH 너머로 직접 실행하지 않는다. config.toml 충돌 + TTY 문제.
-원격에서 codex가 필요하면: remote-spawn → Claude Code → Claude가 내부에서 codex 호출.
+원격에서 codex가 필요하면: tfx-remote → Claude Code → Claude가 내부에서 codex 호출.
 
 ### SSH 패턴
 
