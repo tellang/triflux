@@ -135,11 +135,11 @@ export function detectMultiplexer() {
     _cachedMux = "tmux";
     return _cachedMux;
   }
-  if (process.platform === "win32" && hasGitBashTmux()) {
+  if (hasGitBashTmux()) {
     _cachedMux = "git-bash-tmux";
     return _cachedMux;
   }
-  if (process.platform === "win32" && hasWslTmux()) {
+  if (hasWslTmux()) {
     _cachedMux = "wsl-tmux";
     return _cachedMux;
   }

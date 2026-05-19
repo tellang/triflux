@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -28,6 +31,85 @@ describe("terminal-opener helpers", () => {
 });
 
 describe("terminal-opener adapter", () => {
+  it("detects psmux when version output is written to stdout only", async () => {
+    const binDir = mkdtempSync(join(tmpdir(), "triflux-psmux-stdout-"));
+    const psmuxPath = join(binDir, "psmux");
+    writeFileSync(psmuxPath, "#!/bin/sh\nprintf 'psmux 1.2.3\\n'\n");
+    chmodSync(psmuxPath, 0o755);
+
+    const previousPath = process.env.PATH;
+    const previousPsmuxBin = process.env.PSMUX_BIN;
+    process.env.PATH = `${binDir}:${previousPath || ""}`;
+    delete process.env.PSMUX_BIN;
+
+    try {
+      const calls = [];
+      const opener = createTerminalOpener({
+        platform: "darwin",
+        mux: "psmux",
+        tmuxExec: (command) => calls.push(command),
+      });
+
+      assert.equal(await opener.openSession("demo"), true);
+      assert.match(calls[0], /psmux attach-session -t/);
+    } finally {
+      process.env.PATH = previousPath;
+      if (previousPsmuxBin === undefined) {
+        delete process.env.PSMUX_BIN;
+      } else {
+        process.env.PSMUX_BIN = previousPsmuxBin;
+      }
+    }
+  });
+
+  it("detects psmux when version output is written to stderr only", async () => {
+    const binDir = mkdtempSync(join(tmpdir(), "triflux-psmux-stderr-"));
+    const psmuxPath = join(binDir, "psmux");
+    writeFileSync(psmuxPath, "#!/bin/sh\nprintf 'psmux 1.2.3\\n' >&2\n");
+    chmodSync(psmuxPath, 0o755);
+
+    const previousPath = process.env.PATH;
+    const previousPsmuxBin = process.env.PSMUX_BIN;
+    process.env.PATH = `${binDir}:${previousPath || ""}`;
+    delete process.env.PSMUX_BIN;
+
+    try {
+      const calls = [];
+      const opener = createTerminalOpener({
+        platform: "darwin",
+        mux: "psmux",
+        tmuxExec: (command) => calls.push(command),
+      });
+
+      assert.equal(await opener.openSession("demo"), true);
+      assert.match(calls[0], /psmux attach-session -t/);
+    } finally {
+      process.env.PATH = previousPath;
+      if (previousPsmuxBin === undefined) {
+        delete process.env.PSMUX_BIN;
+      } else {
+        process.env.PSMUX_BIN = previousPsmuxBin;
+      }
+    }
+  });
+
+  it("session multiplexer detection removes redundant nested win32 guards only", () => {
+    const source = readFileSync("hub/team/session.mjs", "utf8");
+
+    assert.doesNotMatch(
+      source,
+      /process\.platform === "win32" && hasGitBashTmux\(\)/,
+    );
+    assert.doesNotMatch(
+      source,
+      /process\.platform === "win32" && hasWslTmux\(\)/,
+    );
+    assert.match(
+      source,
+      /return process\.platform === "win32" && !!process\.env\.WT_SESSION;/,
+    );
+  });
+
   it("Windows openCommand uses wt-manager createTab with original command and cwd", async () => {
     const calls = [];
     const opener = createTerminalOpener({
@@ -84,6 +166,7 @@ describe("terminal-opener adapter", () => {
     const calls = [];
     const opener = createTerminalOpener({
       platform: "win32",
+      psmuxBinaryExists: () => true,
       createWtManager: () => ({
         createTab: async (spec) => {
           calls.push(spec);
@@ -113,6 +196,7 @@ describe("terminal-opener adapter", () => {
   it("Windows openSession reports wt-manager failures", async () => {
     const opener = createTerminalOpener({
       platform: "win32",
+      psmuxBinaryExists: () => true,
       createWtManager: () => ({
         createTab: async () => ({ success: false, reason: "wt-not-installed" }),
       }),
@@ -124,6 +208,7 @@ describe("terminal-opener adapter", () => {
   it("Windows openSession reports thrown wt-manager failures", async () => {
     const opener = createTerminalOpener({
       platform: "win32",
+      psmuxBinaryExists: () => true,
       createWtManager: () => ({
         createTab: async () => {
           throw new Error("WT tab ready timeout: demo");
@@ -132,6 +217,22 @@ describe("terminal-opener adapter", () => {
     });
 
     assert.equal(await opener.openSession("demo"), false);
+  });
+
+  it("Windows openSession refuses to create a psmux attach tab when psmux is absent", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "win32",
+      psmuxBinaryExists: () => false,
+      createWtManager: () => ({
+        createTab: async (spec) => {
+          calls.push(spec);
+        },
+      }),
+    });
+
+    assert.equal(await opener.openSession("demo"), false);
+    assert.deepEqual(calls, []);
   });
 
   it("macOS tmux openCommand calls tmuxExec new-window and includes command", async () => {
@@ -304,6 +405,7 @@ describe("terminal-opener adapter", () => {
   it("Windows wt-manager null return is treated as success", async () => {
     const opener = createTerminalOpener({
       platform: "win32",
+      psmuxBinaryExists: () => true,
       createWtManager: () => ({
         createTab: async () => null,
       }),
