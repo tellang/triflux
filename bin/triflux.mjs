@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { execFileSync, execSync, spawn } from "child_process";
 // triflux CLI — setup, doctor, version
 import {
+  appendFileSync,
   chmodSync,
   closeSync,
   copyFileSync,
@@ -26,6 +27,10 @@ import {
   checkNetworkAvailability,
   validateRuntimeCachePaths,
 } from "../hub/lib/cache-guard.mjs";
+import {
+  decideDispatchMode,
+  parseArgs as parseRouteArgs,
+} from "../hub/lib/tfx-route-args.mjs";
 import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
 import { getVersionHash } from "../hub/state.mjs";
 import { forceCleanupTeam } from "../hub/team/nativeProxy.mjs";
@@ -6846,6 +6851,31 @@ function parsePositiveIntegerOption(args, name, fallback) {
   return parsed;
 }
 
+function applyAutoDispatchDecision(parsedArgs, decision = null) {
+  const resolved = decision || decideDispatchMode(parsedArgs);
+  if (resolved.warning) {
+    process.stderr.write(`${resolved.warning}\n`);
+  }
+  if (resolved.escalated) {
+    const logLine = `${JSON.stringify({
+      at: new Date().toISOString(),
+      issue: 281,
+      from: "multi",
+      to: "swarm",
+      tasksCount: Array.isArray(parsedArgs.tasks)
+        ? parsedArgs.tasks.length
+        : (parsedArgs.tasks ?? null),
+      reason: resolved.reason,
+    })}\n`;
+    try {
+      appendFileSync(".omc/state/auto-escalation.log", logLine, "utf8");
+    } catch {
+      // Fresh checkouts may not have .omc/state yet; dispatch should continue.
+    }
+  }
+  return resolved;
+}
+
 async function main() {
   const cmd = NORMALIZED_ARGS[0] || "help";
   const cmdArgs = NORMALIZED_ARGS.slice(1);
@@ -6855,6 +6885,16 @@ async function main() {
   }).catch(() => {});
 
   switch (cmd) {
+    case "auto": {
+      const parsedArgs = parseRouteArgs(cmdArgs);
+      const decision = applyAutoDispatchDecision(parsedArgs);
+      if (JSON_OUTPUT) {
+        printJson({ args: parsedArgs, dispatch: decision });
+      } else {
+        process.stdout.write(`${decision.mode}\n`);
+      }
+      return;
+    }
     case "setup":
       cmdSetup({
         dryRun: cmdArgs.includes("--dry-run"),

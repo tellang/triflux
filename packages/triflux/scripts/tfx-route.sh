@@ -787,6 +787,9 @@ detect_quota_exceeded() {
 }
 
 auto_reroute() {
+  # Issue #281: code-change dispatch escalation is decided in the JS router
+  # (hub/lib/tfx-route-args.mjs). This shell function only handles quota-driven
+  # CLI fallback and must stay a transparent passthrough for dispatch mode.
   local failed_cli="$1"
   local target_cli=""
   case "$failed_cli" in
@@ -1207,6 +1210,9 @@ apply_cli_mode() {
         echo "[tfx-route] TFX_CLI_MODE=gemini: $AGENT_TYPE → gemini($gemini_tier)로 리매핑" >&2
       fi ;;
     auto)
+      # Issue #281: JS layer is the single source of truth for auto router
+      # single/multi/swarm dispatch. Shell auto mode only normalizes CLI
+      # availability and leaves code-change swarm escalation to JS.
       if [[ "$CLI_TYPE" == "codex" ]] && ! command -v "$CODEX_BIN" &>/dev/null; then
         if command -v "$GEMINI_BIN" &>/dev/null; then
           TFX_CLI_MODE="gemini"; apply_cli_mode; return
