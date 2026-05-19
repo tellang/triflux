@@ -7,9 +7,8 @@
 ## Shard: A-staged-file-detect
 - agent: codex
 - files: hub/lib/staged-file-detect.mjs, packages/core/hub/lib/staged-file-detect.mjs, packages/triflux/hub/lib/staged-file-detect.mjs, tests/unit/staged-file-detect.test.mjs
-- mcp: implement
 - depends:
-- critical: true
+- critical: false
 - prompt: |
     Issue #281 Shard A — staged-file-detect helper (Codex worker).
 
@@ -30,9 +29,8 @@
 ## Shard: B-router-escalate
 - agent: codex
 - files: hub/lib/tfx-route-args.mjs, packages/core/hub/lib/tfx-route-args.mjs, packages/triflux/hub/lib/tfx-route-args.mjs, bin/triflux.mjs, packages/triflux/bin/triflux.mjs, scripts/tfx-route.sh, packages/triflux/scripts/tfx-route.sh, tests/unit/tfx-route-args.test.mjs
-- mcp: implement
 - depends: A-staged-file-detect
-- critical: true
+- critical: false
 - prompt: |
     Issue #281 Shard B — router auto-escalate 로직 (Codex worker).
 
@@ -62,9 +60,8 @@
 ## Shard: C-integration-ssot-mirror
 - agent: codex
 - files: tests/integration/tfx-auto-routing.test.mjs, .claude/rules/tfx-execution-skill-map.md, .claude/rules/tfx-routing.md
-- mcp: implement
 - depends: A-staged-file-detect, B-router-escalate
-- critical: true
+- critical: false
 - prompt: |
     Issue #281 Shard C — integration test + SSOT docs (Codex worker).
 
