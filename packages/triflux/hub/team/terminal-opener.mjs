@@ -1,4 +1,4 @@
-import { exec as defaultExec, execFileSync } from "node:child_process";
+import { exec as defaultExec, spawnSync } from "node:child_process";
 import { platform as osPlatform } from "node:os";
 import { psmuxExec as defaultPsmuxExec } from "./psmux.mjs";
 import { tmuxExec as defaultTmuxExec, detectMultiplexer } from "./session.mjs";
@@ -68,15 +68,27 @@ function shellCommandName(value) {
   return /^[A-Za-z0-9_./:-]+$/u.test(command) ? command : shellQuote(command);
 }
 
+function powershellCommandName(value) {
+  const command = String(value);
+  return /^[A-Za-z0-9_.:-]+$/u.test(command)
+    ? command
+    : `& ${powershellSingleQuote(command)}`;
+}
+
+function getCommandVersion(command) {
+  const r = spawnSync(command, ["-V"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 3000,
+    windowsHide: true,
+  });
+  if ((r.status ?? 1) !== 0) return null;
+  return `${r.stdout || ""}${r.stderr || ""}`.trim();
+}
+
 function defaultPsmuxBinaryExists(command) {
   try {
-    const output = execFileSync(command, ["-V"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 3000,
-      windowsHide: true,
-    });
-    return /\bpsmux\b/i.test(String(output || ""));
+    return /\bpsmux\b/i.test(getCommandVersion(command) || "");
   } catch {
     return false;
   }
@@ -139,12 +151,18 @@ export function createTerminalOpener(deps = {}) {
 
   async function openSession(sessionName, opts = {}) {
     if (platform === "win32") {
+      const command = process.env.PSMUX_BIN || "psmux";
+      const psmuxBinaryExists =
+        deps.psmuxBinaryExists || defaultPsmuxBinaryExists;
+      if (!psmuxBinaryExists(command)) return false;
       const wt = createWtManager();
       try {
         return wtResultSucceeded(
           await wt.createTab({
             title: sanitizeTerminalTitle(opts.title ?? sessionName),
-            command: `psmux attach-session -t ${powershellSingleQuote(sessionName)}`,
+            command: `${powershellCommandName(
+              command,
+            )} attach-session -t ${powershellSingleQuote(sessionName)}`,
             cwd: opts.cwd,
             profile: opts.profile ?? "triflux",
           }),
