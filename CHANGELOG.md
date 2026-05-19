@@ -4,6 +4,31 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.23.0] - 2026-05-19
+
+### Added
+
+- **`feat(doctor)` (PR #284, commit `340160f3`, S4 follow-up)** macOS process lifecycle audit S4 통합: P4b SessionEnd hook output schema 를 Claude Code universal hook spec 에 정렬해 "Invalid input" warning 0 (`hooks/session-end-cleanup.mjs::buildOutput()` 갱신). P4 detached tmux 보고서 확장 (`age`, `cwd`, `command`, `memory_estimate_mb` 필드). `bin/triflux.mjs doctor` 에 detached tmux sessions 섹션 추가 + 신규 CLI `tfx doctor --cleanup-stale-tmux --prefix tfx-* [--age-min N] [--dry-run|--apply]`. packages/triflux + packages/core mirror. 회귀 테스트: `tests/unit/session-end-cleanup.test.mjs` 확장 (schema + 새 필드) + `tests/unit/doctor-cleanup-stale-hubs.test.mjs` 신규 (active healthy hub 보존 케이스 + stale-only 정리 케이스 분리).
+
+### Fixed
+
+- **`fix(doctor)` (PR #284, commit `340160f3`, S4 cleanup-stale-hubs 회귀)** `tfx doctor --cleanup-stale-hubs --apply` 가 ESTABLISHED ≥ 1 active healthy hub (실측: PID 84365) 도 정리하던 회귀 — PR #274 PRD §"cleanup excludes active healthy hub" 위반. fix: active connection 가진 hub 는 정리 후보에서 제외 (`bin/triflux.mjs::cleanupStaleHubs` active hub 판정 로직 강화), `--dry-run` 출력에 healthy/stale 구분 명시. 회귀 테스트로 영구 가드.
+- **`fix(hooks)` (PR #280, commit `e734c76c`, hub-token guard)** PostToolUse compact nudge + pipeline-stop context guard 가 `~/.claude/cache/tfx-hub/context-monitor.json` 의 hub token monitor snapshot (long-lived MCP tools/list traffic 누적으로 200K limit 에서 100% 채워짐) 을 Claude session context 로 오인해 compact nudge 강제. fix: `isHubTokenMonitorSnapshot()` 가드 추가 (requestTokens/responseTokens/totalUpdates/byTool 시그니처 매칭). `hooks/hook-orchestrator.mjs` + `hooks/pipeline-stop.mjs` 양쪽 가드 적용 + 4-layer mirror. 회귀 테스트 추가 (hub-token shape -> context guard 트리거 안 함 / 일반 cache shape -> 정상 트리거).
+- **`fix(terminal-opener)` (PR #285, commit `e65b0c5e`, Issue #277+#278+#279)** macos-lifecycle ultrareview verified follow-up 3건 통합. #277: `hub/team/session.mjs` 의 nested `process.platform === "win32" &&` redundant guard 제거 (Windows-only branch 안 평가 의미 없음). #278: `hub/team/terminal-opener.mjs::defaultPsmuxBinaryExists` 가 stderr-only 응답 누락 케이스 -> `getCommandVersion` 패턴 (spawnSync + stdout+stderr concat) 통일. #279: Windows openSession 분기에 symmetric `psmuxBinaryExists` 가드 추가 (POSIX 분기와 같은 검증). 4-layer mirror (root + packages/{core,triflux,remote}; remote 는 Edit only `@triflux/core` import 보존). 회귀 테스트 3 case.
+
+### Docs
+
+- **`docs(routing)` (PR #282, commit `179323aa`, D1 + D2)** 라우팅 SSOT audit (tfx-harness) drift fix 2건 통합. D1: `.claude/rules/tfx-execution-skill-map.md` + `CLAUDE.md` 의 정식 표기 `tfx-remote-spawn` -> `tfx-remote` 통일 + `tfx-codex-swarm` 스타일 미러로 `tfx-remote-spawn DEPRECATED` 마커 추가. D2: 안티패턴 섹션에 `--parallel swarm --isolation worktree` 명시 강제 라인 + 핵심 룰 MANDATORY 라인 (Issue #87 미해결 갭 가이드).
+- **`docs(routing)` (PR #283, commit `9a9065dd`, D3)** `.claude/rules/tfx-routing.md` 의 "## 충돌 해소" 섹션에 `ralph` 의미 통일 1줄 추가 — `--retry ralph` mode 만 지칭, persist 스킬 동일, `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).
+
+### Notes
+
+- macos-lifecycle S4 follow-up 의 P4 tmux cleanup + P4b SessionEnd hook schema 가 본 release 에 포함 (이전 v10.22.0 에서 미포함이었던 잔여 작업). 4 shards (S4 + Issue #277/#278/#279 + cleanup-stale-hubs 회귀) 가 tfx-swarm 격리 worktree 병렬 실행으로 2 PRs (#284 + #285) 통합 발행됨.
+- 라우팅 audit (tfx-harness) D2 장기 follow-up 은 별도 Issue [#281](https://github.com/tellang/triflux/issues/281) 등록 (label `routing,tier:high`) — `tfx-auto` 가 staged code change 자동 감지 후 swarm dispatch 로 escalate 하는 라우터 강화 작업. 회귀 테스트 3 case body 명시.
+- packages mirror 정합: `hub/`, `scripts/`, `hooks/`, `bin/` -> `packages/triflux/` byte-identical, `hub/lib/` + `scripts/lib/` -> `packages/core/` byte-identical, `packages/remote/hub/team/*` -> `@triflux/core/*` import 경로 보존. PR #284 / #285 각 PR diff 에서 4-layer 검증 통과.
+- `tfx-harness` 라우팅 audit 정적 일관성 검증 (escalation chain 1~4단계 / dynamic routing fallback `codex-default` / `TRIFLUX_DYNAMIC_ROUTING` env gate 기본 false) 통과. 동적 라우팅 wire-up (PR #266~#270) 과 SSOT 정합 확인.
+
+
 ## [10.22.0] - 2026-05-19
 
 ### Fixed
