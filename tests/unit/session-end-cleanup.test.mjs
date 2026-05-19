@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -35,6 +36,11 @@ function writeState(root, state) {
   );
 }
 
+function writeExecutable(path, content) {
+  writeFileSync(path, content, "utf8");
+  chmodSync(path, 0o755);
+}
+
 describe("session-end-cleanup hook", () => {
   let root;
 
@@ -64,7 +70,7 @@ describe("session-end-cleanup hook", () => {
     assert.equal(result.status, 0);
     assert.match(result.stdout, /\[session-end-cleanup\]/);
     const out = JSON.parse(result.stdout);
-    const context = out.hookSpecificOutput.additionalContext;
+    const context = out.systemMessage;
     assert.match(context, /running=1/);
     assert.match(context, /completed=1/);
     assert.match(context, /stale=1/);
@@ -73,6 +79,78 @@ describe("session-end-cleanup hook", () => {
       existsSync(join(root, ".triflux", "subagents", "subagents.json")),
       true,
     );
+  });
+
+  it("emits SessionEnd-compatible structured JSON without event-specific output", () => {
+    writeState(root, {
+      agents: {
+        running: { startedAt: new Date().toISOString() },
+      },
+    });
+
+    const result = run(
+      { hook_event_name: "SessionEnd", session_id: "s1", reason: "other" },
+      root,
+    );
+
+    assert.equal(result.status, 0);
+    const out = JSON.parse(result.stdout);
+    assert.equal(typeof out.systemMessage, "string");
+    assert.equal(out.hookSpecificOutput, undefined);
+    assert.equal(out.decision, undefined);
+    assert.equal(out.reason, undefined);
+  });
+
+  it("reports detached tmux session age, cwd, command, and memory estimate", () => {
+    writeState(root, {
+      agents: {
+        running: { startedAt: new Date().toISOString() },
+      },
+    });
+    const fakeBin = join(root, "fake-bin");
+    mkdirSync(fakeBin, { recursive: true });
+    writeExecutable(
+      join(fakeBin, "tmux"),
+      `#!/bin/sh
+if [ "$1" = "list-sessions" ]; then
+  printf 'tfx-old\\t0\\t%d\\n' $(($(date +%s) - 7200))
+  exit 0
+fi
+if [ "$1" = "list-panes" ]; then
+  printf '%s\\tnode\\t4242\\n' '${root}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    writeExecutable(
+      join(fakeBin, "ps"),
+      `#!/bin/sh
+if [ "$1" = "-o" ] && [ "$2" = "rss=" ]; then
+  printf '65536\\n'
+  exit 0
+fi
+exit 1
+`,
+    );
+
+    const result = run(
+      { hook_event_name: "SessionEnd", session_id: "s1", reason: "other" },
+      root,
+      { PATH: `${fakeBin}:${process.env.PATH}` },
+    );
+
+    assert.equal(result.status, 0);
+    const out = JSON.parse(result.stdout);
+    const match = out.systemMessage.match(/detached_tmux_sessions=(\[.*\])$/);
+    assert.ok(match, out.systemMessage);
+    const sessions = JSON.parse(match[1]);
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].name, "tfx-old");
+    assert.ok(sessions[0].age);
+    assert.equal(sessions[0].cwd, root);
+    assert.equal(sessions[0].command, "node");
+    assert.equal(sessions[0].memory_estimate_mb, 64);
   });
 
   it("deletes stale lifecycle files only when opt-in cleanup is enabled", () => {
