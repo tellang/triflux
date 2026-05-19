@@ -117,6 +117,7 @@ headless-guard 가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. 
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto → cross-review hook
 - "합의해서 비교해" 류 요청은 alias 대신 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
 - `ralph` 표기는 항상 `--retry ralph` mode 를 지칭. persist 스킬도 동일 의미. `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).
+- `tfx-auto` 자동 swarm escalate: 2+ 태스크 + 코드 변경 ≥ 1건 시 자동. 명시 `--parallel N` override 가능 (warning).
 
 ## Q-Learning 동적 라우팅 (실험적)
 
