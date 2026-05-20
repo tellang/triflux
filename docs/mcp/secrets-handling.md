@@ -41,6 +41,29 @@
 - 가능하면 remote MCP의 OAuth flow를 우선 사용한다. Gemini CLI는 MCP OAuth token을 별도 token store에서 관리할 수 있다.
 - API key 방식이 필요하면 token rotation 주기를 문서화하고, 노출이 의심될 때 즉시 revoke/rotate한다.
 
+## Gateway startup 등록
+
+MCP gateway를 로그인/부팅 시 자동 시작하려면 한 번만 실행한다.
+
+```bash
+node scripts/install-mcp-gateway-startup.mjs --dry-run
+node scripts/install-mcp-gateway-startup.mjs
+```
+
+해제는 다음 명령을 사용한다.
+
+```bash
+node scripts/install-mcp-gateway-startup.mjs --uninstall
+```
+
+macOS는 `~/Library/LaunchAgents/com.tellang.mcp-gateway.plist`를 만들고 `launchctl load -w`로 등록한다. plist에는 secret을 쓰지 않고 `~/.local/bin/mcp-gateway-wrapper.sh`가 아래 env 파일 중 존재하는 파일을 source한 뒤 `scripts/mcp-gateway-start.mjs`를 실행한다.
+
+- `~/.config/triflux/mcp-gateway.env`
+- `~/.config/tfx/mcp-gateway.env`
+- `~/.mcp-gateway.env`
+
+Windows는 `schtasks /sc onlogon` 등록을 먼저 시도하고, 실패하면 Startup folder shortcut으로 fallback한다. Linux는 가능하면 `systemd --user` unit을 사용한다.
+
 ## Migration path
 
 Gemini/Antigravity가 secret header 보간을 안전하게 지원한다고 검증되면 다음 순서로 이전한다.
