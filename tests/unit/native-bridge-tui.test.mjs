@@ -49,4 +49,14 @@ test('Session persistence should write valid JSON to sessions folder', async () 
   await fs.rm(MOCK_STATE_DIR, { recursive: true, force: true });
 });
 
+test('runHeadless must bypass psmux loop when nativeBridge option is true', async () => {
+  const { runHeadless } = await import('../../hub/team/headless.mjs');
+  
+  const result = await runHeadless('session_nb_test', [], { nativeBridge: true });
+  
+  assert.equal(result.bypassed, true, 'Should bypass and return bypassed true');
+  assert.equal(result.status, 'ok', 'Should return status ok');
+});
+
+
 
