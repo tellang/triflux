@@ -34,7 +34,7 @@ const DEFAULT_REGISTRY = Object.freeze({
       transport: "hub-url",
       url: "http://127.0.0.1:27888/mcp",
       safe: true,
-      targets: ["claude", "gemini", "codex"],
+      targets: ["claude", "gemini", "codex", "antigravity"],
       description: "triflux Hub MCP 서버",
     },
   },
@@ -49,6 +49,7 @@ const DEFAULT_REGISTRY = Object.freeze({
       "~/.claude/settings.local.json",
       ".claude/mcp.json",
       ".mcp.json",
+      "~/.gemini/config/mcp_config.json",
     ],
   },
 });
@@ -107,6 +108,7 @@ function ensureBackup(filePath) {
 function isJsonMcpConfig(filePath) {
   const name = pathBasename(filePath);
   return (
+    isAntigravityConfig(filePath) ||
     name === "settings.json" ||
     name === "settings.local.json" ||
     name === ".mcp.json" ||
@@ -117,6 +119,11 @@ function isJsonMcpConfig(filePath) {
 function isCodexConfig(filePath) {
   const normalized = normalizeForMatch(filePath);
   return normalized.endsWith("/.codex/config.toml");
+}
+
+function isAntigravityConfig(filePath) {
+  const normalized = normalizeForMatch(filePath);
+  return normalized.endsWith("/.gemini/config/mcp_config.json");
 }
 
 function isProtectedCodexConfigMutationEnv(env = process.env) {
@@ -132,6 +139,8 @@ function shouldSkipCodexConfigMutation() {
 
 function detectClient(filePath) {
   const normalized = normalizeForMatch(filePath);
+  if (normalized.endsWith("/.gemini/config/mcp_config.json"))
+    return "antigravity";
   if (normalized.endsWith("/.gemini/settings.json")) return "gemini";
   if (normalized.endsWith("/.codex/config.toml")) return "codex";
   if (
@@ -147,6 +156,8 @@ function detectClient(filePath) {
 
 function detectLabel(filePath) {
   const normalized = normalizeForMatch(filePath);
+  if (normalized.endsWith("/.gemini/config/mcp_config.json"))
+    return "Antigravity";
   if (normalized.endsWith("/.gemini/settings.json")) return "Gemini";
   if (normalized.endsWith("/.codex/config.toml")) return "Codex";
   if (normalized.endsWith("/.claude/settings.json")) return "Claude User";
@@ -161,6 +172,7 @@ function isPrimaryConfigTarget(filePath) {
   const normalized = normalizeForMatch(filePath);
   return (
     normalized.endsWith("/.gemini/settings.json") ||
+    normalized.endsWith("/.gemini/config/mcp_config.json") ||
     normalized.endsWith("/.codex/config.toml") ||
     normalized.endsWith("/.claude/mcp.json") ||
     normalized.endsWith("/.mcp.json")
@@ -566,7 +578,7 @@ function serverTargets(serverConfig) {
       ),
     ];
   }
-  return ["claude", "gemini", "codex"];
+  return ["claude", "gemini", "codex", "antigravity"];
 }
 
 function serverAppliesToClient(serverConfig, client) {
@@ -613,6 +625,16 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
     return {
       name,
       config: { type: "http", url, ...headerConfig },
+      headerDescriptors: resolvedHeaders.descriptors,
+      codex: resolvedHeaders.codex,
+      warnings: resolvedHeaders.warnings,
+    };
+  }
+
+  if (isAntigravityConfig(filePath)) {
+    return {
+      name,
+      config: { url, type: "http", ...headerConfig },
       headerDescriptors: resolvedHeaders.descriptors,
       codex: resolvedHeaders.codex,
       warnings: resolvedHeaders.warnings,
@@ -1440,7 +1462,7 @@ export function addRegistryServer(name, url, options = {}) {
                 .filter(Boolean),
             ),
           ]
-        : ["claude", "gemini", "codex"],
+        : ["claude", "gemini", "codex", "antigravity"],
     description: options.description || `${trimmedName} MCP 서버`,
   };
 

@@ -17,15 +17,45 @@
       "transport": "hub-url",
       "url": "http://127.0.0.1:27888/mcp",
       "safe": true,
-      "targets": ["claude", "gemini", "codex"],
+      "targets": ["claude", "gemini", "codex", "antigravity"],
       "description": "triflux Hub MCP 서버"
     },
     "context7": {
       "transport": "http",
       "url": "https://mcp.context7.com/mcp",
       "safe": true,
-      "targets": ["claude", "gemini", "codex"],
+      "targets": ["claude", "gemini", "codex", "antigravity"],
       "description": "Upstash Context7 — 라이브러리 문서/코드 컨텍스트 (HTTP MCP, API key 불필요)"
+    },
+    "exa": {
+      "transport": "http",
+      "url": "https://mcp.exa.ai/mcp",
+      "headers": {
+        "Authorization": { "env": "EXA_API_KEY", "prefix": "Bearer " }
+      },
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Exa neural/semantic web search — 학술/기술 깊이. Key 발급: https://exa.ai/dashboard → secrets.env의 EXA_API_KEY"
+    },
+    "brave-search": {
+      "transport": "http",
+      "url": "https://mcp.brave.com/mcp",
+      "headers": {
+        "Authorization": { "env": "BRAVE_API_KEY", "prefix": "Bearer " }
+      },
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Brave Search — 실용/뉴스/실시간. Key 발급: https://brave.com/search/api/ → secrets.env의 BRAVE_API_KEY"
+    },
+    "tavily": {
+      "transport": "http",
+      "url": "https://mcp.tavily.com/mcp",
+      "headers": {
+        "Authorization": { "env": "TAVILY_API_KEY", "prefix": "Bearer " }
+      },
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Tavily research — 비용/운영/DX/일반 웹. Key 발급: https://app.tavily.com/home → secrets.env의 TAVILY_API_KEY"
     }
   },
   "policies": {
@@ -38,7 +68,8 @@
       "~/.claude/settings.json",
       "~/.claude/settings.local.json",
       ".claude/mcp.json",
-      ".mcp.json"
+      ".mcp.json",
+      "~/.gemini/config/mcp_config.json"
     ]
   }
 }
