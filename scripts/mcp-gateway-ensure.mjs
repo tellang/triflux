@@ -5,12 +5,15 @@
 
 import { execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  SERVERS,
+  serversWithSatisfiedEnv,
+} from "./lib/mcp-gateway-servers.mjs";
+import { readManifest, writeManifest } from "./lib/mcp-manifest.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PID_FILE = join(tmpdir(), "tfx-gateway-pids.json");
 const PROBE_PORT = 8100; // context7 — 첫 번째 게이트웨이 포트로 alive 프로브
 const PROBE_TIMEOUT_MS = 1500;
 const STARTUP_WAIT_MS = 4000;
@@ -27,8 +30,22 @@ async function isGatewayAlive() {
   }
 }
 
-function hasManifest() {
-  return existsSync(PID_FILE);
+function ensureGatewayManifest() {
+  const manifest = readManifest();
+  if (manifest) return manifest;
+
+  const envReadyServers = serversWithSatisfiedEnv()
+    .filter((server) => server.envVars.length > 0)
+    .map((server) => server.name);
+  return writeManifest(envReadyServers);
+}
+
+function hasConfiguredGatewayServer(manifest) {
+  const enabled = new Set(manifest?.enabled || []);
+  return SERVERS.some((server) => {
+    if (!enabled.has(server.name)) return false;
+    return server.envVars.every((envName) => Boolean(process.env[envName]));
+  });
 }
 
 function startGateway() {
@@ -66,12 +83,13 @@ async function waitForGatewayReady(maxWaitMs = STARTUP_WAIT_MS) {
 
 export async function run(stdinData) {
   void stdinData;
+  const manifest = ensureGatewayManifest();
 
-  if (hasManifest() && (await isGatewayAlive())) {
+  if (hasConfiguredGatewayServer(manifest) && (await isGatewayAlive())) {
     return { code: 0, stdout: "gateway: ok", stderr: "" };
   }
 
-  if (!hasManifest()) {
+  if (!hasConfiguredGatewayServer(manifest)) {
     return { code: 0, stdout: "gateway: not configured", stderr: "" };
   }
 

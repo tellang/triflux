@@ -3,11 +3,19 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -71,6 +79,29 @@ function resolveFilePath(filePath) {
   return isAbsolute(expanded)
     ? resolve(expanded)
     : resolve(process.cwd(), expanded);
+}
+
+function defaultProjectsRoot() {
+  return process.env.TFX_MCP_PROJECTS_ROOT
+    ? resolve(expandHome(process.env.TFX_MCP_PROJECTS_ROOT))
+    : join(homedir(), "Projects");
+}
+
+function globToRegExp(glob) {
+  const source = String(glob || "")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${source}$`);
+}
+
+function isExcludedProjectPath(relativePath, excludePatterns = []) {
+  const normalized = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const basenameValue = basename(normalized);
+  return excludePatterns.some((pattern) => {
+    const re = globToRegExp(pattern);
+    return re.test(normalized) || re.test(basenameValue);
+  });
 }
 
 function normalizeForMatch(filePath) {
@@ -1417,6 +1448,71 @@ export function listManagedConfigTargets(registry = loadRegistryOrDefault()) {
   });
 }
 
+export function discoverProjectMcpTargets(options = {}) {
+  const root = resolve(expandHome(options.root || defaultProjectsRoot()));
+  const maxDepth = Number.isFinite(Number(options.maxDepth))
+    ? Number(options.maxDepth)
+    : 4;
+  const excludePatterns = Array.isArray(options.exclude)
+    ? options.exclude.filter(Boolean).map(String)
+    : [];
+  const targets = [];
+  const seen = new Set();
+
+  function addTarget(filePath) {
+    const normalized = normalizeForMatch(filePath);
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    targets.push({
+      watchedPath: filePath,
+      filePath,
+      client: detectClient(filePath),
+      label: detectLabel(filePath),
+      exists: existsSync(filePath),
+    });
+  }
+
+  function walk(dirPath, depth) {
+    if (depth > maxDepth) return;
+    let entries;
+    try {
+      entries = readdirSync(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryPath = join(dirPath, entry.name);
+      const relativePath = relative(root, entryPath).replace(/\\/g, "/");
+      if (isExcludedProjectPath(relativePath, excludePatterns)) continue;
+
+      if (entry.isDirectory()) {
+        if (depth < maxDepth) walk(entryPath, depth + 1);
+        continue;
+      }
+
+      if (!entry.isFile() || depth + 1 > maxDepth) continue;
+      const normalized = entryPath.replace(/\\/g, "/");
+      if (
+        entry.name === ".mcp.json" ||
+        normalized.endsWith("/.claude/mcp.json")
+      ) {
+        addTarget(resolve(entryPath));
+      }
+    }
+  }
+
+  walk(root, 0);
+  return {
+    root,
+    maxDepth,
+    exclude: excludePatterns,
+    targets: targets.sort((left, right) =>
+      left.filePath.localeCompare(right.filePath),
+    ),
+  };
+}
+
 export function listPrimaryConfigTargets(registry = loadRegistryOrDefault()) {
   return listManagedConfigTargets(registry).filter((target) =>
     isPrimaryConfigTarget(target.filePath),
@@ -1804,11 +1900,17 @@ export function removeServerFromTargets(name, options = {}) {
 
 export function syncRegistryTargets(options = {}) {
   const registry = options.registry || loadRegistryOrDefault();
+  const syncTargets = Array.isArray(options.targets)
+    ? options.targets
+    : listManagedConfigTargets(registry);
+  const primaryTargets = syncTargets.filter((target) =>
+    isPrimaryConfigTarget(target.filePath),
+  );
   const actions = [];
   const invalidConfigs = new Set();
   const denylist = syncDenylistEntries(registry.policies);
 
-  for (const target of listManagedConfigTargets(registry)) {
+  for (const target of syncTargets) {
     const snapshot = scanConfig(target.filePath);
     if (snapshot.parseError) {
       invalidConfigs.add(normalizeForMatch(target.filePath));
@@ -1839,7 +1941,7 @@ export function syncRegistryTargets(options = {}) {
     }
   }
 
-  for (const target of listPrimaryConfigTargets(registry)) {
+  for (const target of primaryTargets) {
     const snapshot = scanConfig(target.filePath);
     const targetKey = normalizeForMatch(target.filePath);
     if (snapshot.parseError) {

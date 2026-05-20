@@ -7,41 +7,12 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { GATEWAY_SERVERS } from "./lib/mcp-gateway-servers.mjs";
 import { isServerEnabled } from "./lib/mcp-manifest.mjs";
 
 const BACKUP_FILE = join(homedir(), ".claude", "cache", "mcp-pre-gateway.json");
 
-export const GATEWAY_SERVERS = [
-  {
-    name: "context7",
-    port: 8100,
-    stdioCmd: "cmd /c npx -y @upstash/context7-mcp@latest",
-  },
-  {
-    name: "brave-search",
-    port: 8101,
-    stdioCmd: "cmd /c npx -y @brave/brave-search-mcp-server",
-  },
-  { name: "exa", port: 8102, stdioCmd: "cmd /c npx -y exa-mcp-server" },
-  { name: "tavily", port: 8103, stdioCmd: "cmd /c npx -y tavily-mcp@latest" },
-  { name: "jira", port: 8104, stdioCmd: "cmd /c npx -y mcp-jira-cloud@latest" },
-  {
-    name: "serena",
-    port: 8105,
-    stdioCmd:
-      "uvx --from git+https://github.com/oraios/serena serena start-mcp-server",
-  },
-  {
-    name: "notion",
-    port: 8106,
-    stdioCmd: "cmd /c npx -y @notionhq/notion-mcp-server",
-  },
-  {
-    name: "notion-guest",
-    port: 8107,
-    stdioCmd: "cmd /c npx -y @notionhq/notion-mcp-server",
-  },
-];
+export { GATEWAY_SERVERS };
 
 const SKIP_SERVERS = new Set([
   "playwright",

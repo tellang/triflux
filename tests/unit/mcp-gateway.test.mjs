@@ -22,6 +22,13 @@ const ROOT = join(process.cwd());
 const START_PATH = join(ROOT, "scripts", "mcp-gateway-start.mjs");
 const CONFIG_PATH = join(ROOT, "scripts", "mcp-gateway-config.mjs");
 const VERIFY_PATH = join(ROOT, "scripts", "mcp-gateway-verify.mjs");
+const SERVERS_LIB_PATH = join(
+  ROOT,
+  "scripts",
+  "lib",
+  "mcp-gateway-servers.mjs",
+);
+const gatewayServerModule = await import(`${SERVERS_LIB_PATH}?t=${Date.now()}`);
 
 // ── SERVERS / GATEWAY_SERVERS 로드 ──
 // mcp-gateway-start.mjs는 flag === '--stop' / '--status' 이외엔 startAll()을 실행한다.
@@ -46,18 +53,6 @@ function parseServersFromSource(filePath, varName) {
     entries.push({ name: m[1], port: parseInt(m[2], 10) });
   }
   return entries;
-}
-
-function parseStdioCmdsFromSource(filePath) {
-  const src = readFileSync(filePath, "utf8");
-  const results = [];
-  const re =
-    /name:\s*["']([^"']+)["'].*?port:\s*(\d+).*?stdioCmd:\s*\n?\s*["']([^"']+)["']/gs;
-  let m;
-  while ((m = re.exec(src)) !== null) {
-    results.push({ name: m[1], port: parseInt(m[2], 10), stdioCmd: m[3] });
-  }
-  return results;
 }
 
 // ── loadManifest 로직 미러 (mcp-gateway-start.mjs와 동일) ──
@@ -92,8 +87,8 @@ function isPortInUse(port) {
 // 1. 포트 일관성 — SERVERS vs GATEWAY_SERVERS
 // ─────────────────────────────────────────────
 describe("port consistency across files", () => {
-  const servers = parseServersFromSource(START_PATH, "SERVERS");
-  const gateways = parseServersFromSource(CONFIG_PATH, "GATEWAY_SERVERS");
+  const servers = gatewayServerModule.SERVERS;
+  const gateways = gatewayServerModule.GATEWAY_SERVERS;
 
   it("SERVERS and GATEWAY_SERVERS have the same number of entries", () => {
     assert.strictEqual(servers.length, gateways.length);
@@ -167,7 +162,7 @@ describe("port consistency across files", () => {
 // 2. SERVERS vs ENDPOINTS (verify.mjs) 일관성
 // ─────────────────────────────────────────────
 describe("port consistency: SERVERS vs verify ENDPOINTS", () => {
-  const servers = parseServersFromSource(START_PATH, "SERVERS");
+  const servers = gatewayServerModule.SERVERS;
   const endpoints = parseServersFromSource(VERIFY_PATH, "ENDPOINTS");
 
   it("ENDPOINTS count matches SERVERS count", () => {
@@ -288,7 +283,7 @@ describe("loadManifest", () => {
 // 5. GATEWAY_SERVERS — stdioCmd 필드 무결성
 // ─────────────────────────────────────────────
 describe("GATEWAY_SERVERS stdioCmd fields", () => {
-  const entries = parseStdioCmdsFromSource(CONFIG_PATH);
+  const entries = gatewayServerModule.GATEWAY_SERVERS;
 
   it("all GATEWAY_SERVERS entries have a stdioCmd field", () => {
     assert.ok(entries.length > 0, "No entries parsed from GATEWAY_SERVERS");
@@ -344,25 +339,49 @@ describe("GATEWAY_SERVERS stdioCmd fields", () => {
       );
     }
   });
+
+  it("stdioCmd defaults are shell-neutral and do not use Windows cmd wrappers", () => {
+    for (const e of entries) {
+      assert.doesNotMatch(
+        e.stdioCmd,
+        /\bcmd\s*\/c\b/i,
+        `stdioCmd for '${e.name}' must be cross-platform`,
+      );
+    }
+  });
 });
 
 // ─────────────────────────────────────────────
 // 6. 소스 파일 구조 무결성 검사
 // ─────────────────────────────────────────────
 describe("source file structural integrity", () => {
-  it("mcp-gateway-start.mjs exports SERVERS", () => {
-    const src = readFileSync(START_PATH, "utf8");
+  it("gateway server definitions live in a side-effect-free lib module", async () => {
+    const mod = await import(`${SERVERS_LIB_PATH}?t=${Date.now()}`);
+    assert.ok(Array.isArray(mod.SERVERS), "SERVERS must be exported");
     assert.ok(
-      src.includes("export { SERVERS }"),
-      "SERVERS must be exported from start.mjs",
+      Array.isArray(mod.GATEWAY_SERVERS),
+      "GATEWAY_SERVERS must be exported",
+    );
+    assert.equal(
+      mod.SERVERS.length,
+      mod.GATEWAY_SERVERS.length,
+      "start/config server lists should share one source",
     );
   });
 
-  it("mcp-gateway-config.mjs exports GATEWAY_SERVERS", () => {
+  it("mcp-gateway-start.mjs imports SERVERS instead of defining them inline", () => {
+    const src = readFileSync(START_PATH, "utf8");
+    assert.ok(
+      src.includes("./lib/mcp-gateway-servers.mjs"),
+      "SERVERS must be imported from the shared lib",
+    );
+  });
+
+  it("mcp-gateway-config.mjs imports GATEWAY_SERVERS instead of defining them inline", () => {
     const src = readFileSync(CONFIG_PATH, "utf8");
     assert.ok(
-      src.includes("export const GATEWAY_SERVERS"),
-      "GATEWAY_SERVERS must be exported from config.mjs",
+      src.includes("./lib/mcp-gateway-servers.mjs"),
+      "GATEWAY_SERVERS must be imported from the shared lib",
     );
   });
 
@@ -409,6 +428,27 @@ describe("source file structural integrity", () => {
     assert.ok(
       src.includes("return []"),
       "loadManifest must return [] on error/missing",
+    );
+  });
+
+  it("mcp-gateway-ensure.mjs does not use gateway PID files as configuration state", () => {
+    const src = readFileSync(
+      join(ROOT, "scripts", "mcp-gateway-ensure.mjs"),
+      "utf8",
+    );
+    assert.doesNotMatch(
+      src,
+      /tfx-gateway-pids\.json|PID_FILE|hasManifest/,
+      "ensure must use MCP manifest/registry lifecycle instead of PID files",
+    );
+  });
+
+  it("setup.mjs legacy direct SessionStart hook includes gateway ensure", () => {
+    const src = readFileSync(join(ROOT, "scripts", "setup.mjs"), "utf8");
+    assert.match(
+      src,
+      /mcp-gateway-ensure\.mjs/,
+      "legacy direct hook install path must include mcp-gateway-ensure",
     );
   });
 });

@@ -1568,6 +1568,12 @@ export async function runDeferred(stdinData) {
     // ── SessionStart 훅 ──
     if (!Array.isArray(s.hooks.SessionStart)) s.hooks.SessionStart = [];
 
+    const nodePath = process.execPath.replace(/\\/g, "/");
+    const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
+    const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
+    const commandForScript = (scriptName) =>
+      `${nodeRef} "${pluginRoot}/scripts/${scriptName}"`;
+
     const hasTrifluxHooks = s.hooks.SessionStart.some(
       (entry) =>
         Array.isArray(entry.hooks) &&
@@ -1577,30 +1583,57 @@ export async function runDeferred(stdinData) {
     );
 
     if (!hasTrifluxHooks) {
-      const nodePath = process.execPath.replace(/\\/g, "/");
-      const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
-      const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
-
       s.hooks.SessionStart.push({
         matcher: "*",
         hooks: [
           {
             type: "command",
-            command: `${nodeRef} "${pluginRoot}/scripts/setup.mjs"`,
+            command: commandForScript("setup.mjs"),
             timeout: 10,
           },
           {
             type: "command",
-            command: `${nodeRef} "${pluginRoot}/scripts/hub-ensure.mjs"`,
+            command: commandForScript("hub-ensure.mjs"),
             timeout: 8,
           },
           {
             type: "command",
-            command: `${nodeRef} "${pluginRoot}/scripts/preflight-cache.mjs"`,
+            command: commandForScript("mcp-gateway-ensure.mjs"),
+            timeout: 8,
+          },
+          {
+            type: "command",
+            command: commandForScript("preflight-cache.mjs"),
             timeout: 5,
           },
         ],
       });
+      changed = true;
+    }
+
+    for (const entry of s.hooks.SessionStart) {
+      if (!Array.isArray(entry.hooks)) continue;
+      const hasDirectTrifluxHook = entry.hooks.some(
+        (h) => typeof h.command === "string" && h.command.includes("triflux"),
+      );
+      const hasGatewayEnsure = entry.hooks.some(
+        (h) =>
+          typeof h.command === "string" &&
+          h.command.includes("mcp-gateway-ensure.mjs"),
+      );
+      if (!hasDirectTrifluxHook || hasGatewayEnsure) continue;
+
+      const hubIndex = entry.hooks.findIndex(
+        (h) =>
+          typeof h.command === "string" && h.command.includes("hub-ensure.mjs"),
+      );
+      const gatewayHook = {
+        type: "command",
+        command: commandForScript("mcp-gateway-ensure.mjs"),
+        timeout: 8,
+      };
+      if (hubIndex >= 0) entry.hooks.splice(hubIndex + 1, 0, gatewayHook);
+      else entry.hooks.push(gatewayHook);
       changed = true;
     }
 

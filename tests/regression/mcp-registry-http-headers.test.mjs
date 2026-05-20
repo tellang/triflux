@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -149,6 +149,106 @@ describe("tfx mcp HTTP headers regression", () => {
         type: "http",
         url: "http://127.0.0.1:27888/mcp",
       },
+    );
+  });
+
+  it("syncs project MCP files under --all-projects and preserves non-mcpServers keys", () => {
+    const { root, home, project } = createFixture("tfx-mcp-all-projects");
+    const projectsRoot = join(root, "Projects");
+    const alpha = join(projectsRoot, "alpha");
+    const beta = join(projectsRoot, "nested", "beta");
+    const skipped = join(projectsRoot, "skip-me");
+    mkdirSync(alpha, { recursive: true });
+    mkdirSync(join(beta, ".claude"), { recursive: true });
+    mkdirSync(skipped, { recursive: true });
+
+    writeFileSync(
+      join(alpha, ".mcp.json"),
+      JSON.stringify({ custom: true, mcpServers: { old: { command: "old" } } }),
+    );
+    writeFileSync(
+      join(beta, ".claude", "mcp.json"),
+      JSON.stringify({ other: "keep", mcpServers: {} }),
+    );
+    writeFileSync(
+      join(skipped, ".mcp.json"),
+      JSON.stringify({ mcpServers: {} }),
+    );
+
+    const registryPath = join(root, "mcp-registry.json");
+    writeRegistry(registryPath, home, project, null);
+    const env = {
+      HOME: home,
+      USERPROFILE: home,
+      TFX_MCP_REGISTRY_PATH: registryPath,
+    };
+
+    const dryRun = JSON.parse(
+      runTfx(
+        [
+          "mcp",
+          "sync",
+          "--all-projects",
+          projectsRoot,
+          "--exclude",
+          "skip-*",
+          "--dry-run",
+          "--json",
+        ],
+        env,
+        project,
+      ),
+    );
+    assert.equal(dryRun.dry_run, true);
+    assert.deepEqual(
+      dryRun.targets.map((target) => target.filePath).sort(),
+      [join(alpha, ".mcp.json"), join(beta, ".claude", "mcp.json")].sort(),
+    );
+    assert.equal(
+      existsSync(join(skipped, ".mcp.json")),
+      true,
+      "dry-run must not remove or rewrite excluded project files",
+    );
+
+    const syncResult = JSON.parse(
+      runTfx(
+        [
+          "mcp",
+          "sync",
+          "--all-projects",
+          projectsRoot,
+          "--exclude",
+          "skip-*",
+          "--json",
+        ],
+        env,
+        project,
+      ),
+    );
+    assert.equal(syncResult.all_projects.root, projectsRoot);
+
+    const alphaConfig = JSON.parse(
+      readFileSync(join(alpha, ".mcp.json"), "utf8"),
+    );
+    assert.equal(alphaConfig.custom, true);
+    assert.deepEqual(alphaConfig.mcpServers["tfx-hub"], {
+      type: "http",
+      url: "http://127.0.0.1:27888/mcp",
+    });
+
+    const betaConfig = JSON.parse(
+      readFileSync(join(beta, ".claude", "mcp.json"), "utf8"),
+    );
+    assert.equal(betaConfig.other, "keep");
+    assert.deepEqual(betaConfig.mcpServers["tfx-hub"], {
+      type: "http",
+      url: "http://127.0.0.1:27888/mcp",
+    });
+
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(skipped, ".mcp.json"), "utf8")).mcpServers,
+      {},
+      "excluded project should remain untouched",
     );
   });
 });
