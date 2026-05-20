@@ -794,8 +794,9 @@ auto_reroute() {
   local failed_cli="$1"
   local target_cli=""
   case "$failed_cli" in
-    codex) target_cli="gemini"; echo "[tfx-quota] Codex → Gemini 자동 전환" >&2 ;;
-    gemini) target_cli="codex"; echo "[tfx-quota] Gemini → Codex 자동 전환" >&2 ;;
+    codex) target_cli="antigravity"; echo "[tfx-quota] Codex → Antigravity 자동 전환 (Gemini API_KEY_INVALID 회피)" >&2 ;;
+    gemini) target_cli="antigravity"; echo "[tfx-quota] Gemini → Antigravity 자동 전환" >&2 ;;
+    antigravity) target_cli="codex"; echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
     *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
   esac
 
@@ -804,6 +805,7 @@ auto_reroute() {
   case "$target_cli" in
     codex) target_bin="$CODEX_BIN" ;;
     gemini) target_bin="$GEMINI_BIN" ;;
+    antigravity) target_bin="$AGY_BIN" ;;
   esac
   if ! command -v "$target_bin" &>/dev/null; then
     echo "[tfx-quota] $target_cli CLI 미설치 — 자동 전환 불가" >&2
@@ -1050,6 +1052,9 @@ route_agent() {
     # ─── Antigravity CLI 레인 (2026-05-19 발표, Gemini CLI 후속) ───
     # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic
     antigravity)
+      # agy --print 는 stdin-only (sanity test 4종 확인). positional arg 패턴은
+      # 환영 메시지 폴백을 발생시키므로 wrapper 의 호출 분기 (L2031/2033) 에서
+      # CLI_TYPE="antigravity" 일 때 stdin pipe 로 전환한다 (아래 변경 2).
       CLI_ARGS="--print --dangerously-skip-permissions"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
@@ -2028,9 +2033,18 @@ run_codex_exec() {
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
-      "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+      if [[ "$CLI_TYPE" == "antigravity" ]]; then
+        # agy --print 는 stdin-only — positional arg + < /dev/null 패턴이 환영 메시지 폴백 유발.
+        printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+      else
+        "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+      fi
     else
-      "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+      if [[ "$CLI_TYPE" == "antigravity" ]]; then
+        printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+      else
+        "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+      fi
     fi
     worker_pid=$!
     # Track codex child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
@@ -2480,7 +2494,7 @@ EOF
       fi
     fi
 
-    if [[ ! -s "$STDOUT_LOG" && "$workspace_changed" == "no" ]]; then
+    if [[ ! -s "$STDOUT_LOG" && "$workspace_changed" == "no" && "$CLI_TYPE" != "antigravity" ]]; then
       printf '%s\n' "[tfx-route] exit 0 이지만 stdout 비어있고 워크스페이스 변화가 없습니다. no-op 성공을 실패로 승격합니다." >> "$STDERR_LOG"
       exit_code=68
     fi
