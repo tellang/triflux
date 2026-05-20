@@ -244,6 +244,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const backendCommand = backend.buildArgs(fullPrompt, resultFile, {
     ...opts,
     model,
+    promptFile,
   });
   const safeCwd =
     typeof cwd === "string" ? cwd.trim().replace(/[\r\n\x00-\x1f]/g, "") : "";
