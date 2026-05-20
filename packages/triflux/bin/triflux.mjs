@@ -2515,11 +2515,12 @@ function buildMcpStatusRows(statusInfo) {
     .filter((row) => row.type === "registry")
     .map((row) => {
       let detail = "";
-      if (row.status === "present") detail = row.actualUrl || row.expectedUrl;
+      if (row.status === "present")
+        detail = row.actualUrl || row.actualCommand || row.expectedUrl;
       else if (row.status === "missing") detail = "registry only";
       else if (row.status === "missing-file") detail = "config missing";
       else if (row.status === "mismatch")
-        detail = `expected ${row.expectedUrl}`;
+        detail = `expected ${row.expectedUrl || row.expectedCommand}`;
       else if (row.status === "invalid-config") detail = "parse error";
       else if (row.status === "stdio") detail = "configured as stdio";
       return [

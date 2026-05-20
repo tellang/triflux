@@ -59,7 +59,28 @@ describe("mcp guard HTTP transport + headers schema", () => {
     }
   });
 
-  it("rejects malformed header descriptors and stdio-shaped registry servers", () => {
+  it("validates stdio transport with command, args, and env descriptors", () => {
+    assert.deepEqual(
+      validateRegistry(
+        registryWith({
+          transport: "stdio",
+          command: "npx",
+          args: [
+            "-y",
+            "@brave/brave-search-mcp-server",
+            "--transport",
+            "stdio",
+          ],
+          env: {
+            BRAVE_API_KEY: { env: "BRAVE_API_KEY" },
+          },
+        }),
+      ),
+      [],
+    );
+  });
+
+  it("rejects malformed header descriptors and malformed stdio registry servers", () => {
     const invalidServers = [
       {
         transport: "http",
@@ -78,7 +99,8 @@ describe("mcp guard HTTP transport + headers schema", () => {
       },
       {
         transport: "stdio",
-        url: "https://example.com/mcp",
+        command: "npx",
+        args: [],
         headers: { "X-Client": { value: "triflux" } },
       },
       {
@@ -90,6 +112,28 @@ describe("mcp guard HTTP transport + headers schema", () => {
         transport: "http",
         url: "https://example.com/mcp",
         args: ["server.js"],
+      },
+      {
+        transport: "stdio",
+        url: "https://example.com/mcp",
+        command: "npx",
+        args: [],
+      },
+      {
+        transport: "stdio",
+        args: ["server.js"],
+      },
+      {
+        transport: "stdio",
+        command: "node",
+        args: ["server.js"],
+        env: { "bad-name": { env: "TOKEN" } },
+      },
+      {
+        transport: "stdio",
+        command: "node",
+        args: ["server.js"],
+        env: { TOKEN: { value: "literal" } },
       },
     ];
 

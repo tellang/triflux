@@ -23,7 +23,7 @@ const DEFAULT_REGISTRY = Object.freeze({
   },
   policy_notes: {
     transport:
-      'Server transport accepts "hub-url" for the existing triflux Hub URL flow or "http" for direct Streamable HTTP MCP endpoints. Direct stdio registration via command/args is intentionally unsupported.',
+      'Server transport accepts "hub-url" for triflux Hub URL flow, "http" for direct Streamable HTTP MCP endpoints, or "stdio" for upstream-stdio-only MCP servers (rare; only for servers that have no hosted HTTP endpoint, e.g. brave-search). stdio servers require command, args, and may include env.',
     headers:
       'Optional headers are allowed only for HTTP-compatible transports. Each header value must be a descriptor: {"value":"literal"} for non-secret static values, {"env":"ENV_VAR_NAME"} for secrets resolved at sync/runtime, or {"env":"ENV_VAR_NAME","prefix":"Bearer "} for common authorization formats.',
     secret_safety:
@@ -202,6 +202,9 @@ function parseTomlScalar(rawValue) {
   if (value === "true") return true;
   if (value === "false") return false;
   if (/^-?\d[\d_]*$/.test(value)) return Number(value.replace(/_/g, ""));
+  if (value.startsWith("[") && value.endsWith("]")) {
+    return parseTomlArray(value);
+  }
   if (value.startsWith("{") && value.endsWith("}")) {
     return parseTomlInlineTable(value);
   }
@@ -209,6 +212,39 @@ function parseTomlScalar(rawValue) {
     return value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
   }
   return value;
+}
+
+function parseTomlArray(rawValue) {
+  const source = String(rawValue || "").trim();
+  const body = source.slice(1, -1).trim();
+  if (!body) return [];
+
+  const parts = [];
+  let current = "";
+  let inString = false;
+  let escaped = false;
+  for (const char of body) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      current += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') inString = !inString;
+    if (char === "," && !inString) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  return parts.map((part) => parseTomlScalar(part));
 }
 
 function parseTomlInlineTable(rawValue) {
@@ -287,6 +323,10 @@ function isValidHeaderName(name) {
   return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(String(name || ""));
 }
 
+function isValidEnvName(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(name || ""));
+}
+
 function normalizeHeaderDescriptors(headers = {}) {
   const normalized = {};
   if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
@@ -317,6 +357,47 @@ function normalizeHeaderDescriptors(headers = {}) {
     }
   }
   return normalized;
+}
+
+function normalizeEnvDescriptors(env = {}) {
+  const normalized = {};
+  if (!env || typeof env !== "object" || Array.isArray(env)) {
+    return normalized;
+  }
+  for (const [name, descriptor] of Object.entries(env)) {
+    if (!isValidEnvName(name)) continue;
+    if (
+      descriptor &&
+      typeof descriptor === "object" &&
+      !Array.isArray(descriptor) &&
+      Object.hasOwn(descriptor, "env") &&
+      typeof descriptor.env === "string" &&
+      descriptor.env.trim()
+    ) {
+      normalized[name] = { env: descriptor.env.trim() };
+    }
+  }
+  return normalized;
+}
+
+function resolveEnvDescriptors(name, serverConfig) {
+  const descriptors = normalizeEnvDescriptors(serverConfig?.env || {});
+  const env = {};
+  const warnings = [];
+
+  for (const [envKey, descriptor] of Object.entries(descriptors)) {
+    const envName = descriptor.env;
+    const envValue = process.env[envName];
+    if (typeof envValue !== "string" || envValue.length === 0) {
+      warnings.push(
+        `[mcp-guard] ${name}.${envKey} env skipped: env ${envName} is not set`,
+      );
+      continue;
+    }
+    env[envKey] = envValue;
+  }
+
+  return { descriptors, env, warnings };
 }
 
 function resolveHeaderDescriptors(name, serverConfig, filePath) {
@@ -492,6 +573,10 @@ function formatTomlInlineTable(data = {}) {
     .join(", ")} }`;
 }
 
+function formatTomlArray(values = []) {
+  return `[${values.map((value) => formatTomlString(value)).join(", ")}]`;
+}
+
 function upsertTomlServer(raw, name, config, codex = {}) {
   const lines = String(raw || "").split(/\r?\n/);
   const header = `[mcp_servers.${name}]`;
@@ -502,8 +587,20 @@ function upsertTomlServer(raw, name, config, codex = {}) {
     "bearer_token_env_var",
     "http_headers",
     "env_http_headers",
+    "env",
   ]);
-  const nextManagedLines = [`url = ${formatTomlString(config.url)}`];
+  const nextManagedLines = [];
+  if (typeof config.url === "string") {
+    nextManagedLines.push(`url = ${formatTomlString(config.url)}`);
+  }
+  if (typeof config.command === "string") {
+    nextManagedLines.push(`command = ${formatTomlString(config.command)}`);
+  }
+  if (Array.isArray(config.args)) {
+    nextManagedLines.push(`args = ${formatTomlArray(config.args)}`);
+  }
+  const env = formatTomlInlineTable(config.env || {});
+  if (env) nextManagedLines.push(`env = ${env}`);
   if (codex.bearer_token_env_var) {
     nextManagedLines.push(
       `bearer_token_env_var = ${formatTomlString(codex.bearer_token_env_var)}`,
@@ -607,6 +704,24 @@ function syncDenylistKey(client, serverName) {
 }
 
 export function buildDesiredServerRecord(name, serverConfig, filePath) {
+  if (serverConfig?.transport === "stdio") {
+    const resolvedEnv = resolveEnvDescriptors(name, serverConfig);
+    const envConfig = hasOwnEntries(resolvedEnv.env)
+      ? { env: resolvedEnv.env }
+      : {};
+    return {
+      name,
+      config: {
+        command: serverConfig.command,
+        args: Array.isArray(serverConfig.args) ? [...serverConfig.args] : [],
+        ...envConfig,
+      },
+      envDescriptors: resolvedEnv.descriptors,
+      codex: {},
+      warnings: resolvedEnv.warnings,
+    };
+  }
+
   const url =
     serverConfig?.transport === "hub-url"
       ? resolveHubUrl()
@@ -691,6 +806,19 @@ function scanJsonConfig(filePath) {
               url:
                 typeof config.url === "string" ? normalizeUrl(config.url) : "",
               command: typeof config.command === "string" ? config.command : "",
+              args: Array.isArray(config.args)
+                ? config.args.filter((value) => typeof value === "string")
+                : [],
+              env:
+                config.env &&
+                typeof config.env === "object" &&
+                !Array.isArray(config.env)
+                  ? Object.fromEntries(
+                      Object.entries(config.env).filter(
+                        ([, value]) => typeof value === "string",
+                      ),
+                    )
+                  : {},
               type: typeof config.type === "string" ? config.type : "",
               headers:
                 config.headers &&
@@ -754,6 +882,19 @@ function scanCodexConfig(filePath) {
       name,
       url: typeof config.url === "string" ? normalizeUrl(config.url) : "",
       command: typeof config.command === "string" ? config.command : "",
+      args: Array.isArray(config.args)
+        ? config.args.filter((value) => typeof value === "string")
+        : [],
+      env:
+        config.env &&
+        typeof config.env === "object" &&
+        !Array.isArray(config.env)
+          ? Object.fromEntries(
+              Object.entries(config.env).filter(
+                ([, value]) => typeof value === "string",
+              ),
+            )
+          : {},
       headers:
         config.http_headers && typeof config.http_headers === "object"
           ? config.http_headers
@@ -826,8 +967,21 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
       ...(current && typeof current === "object" ? current : {}),
       ...update.config,
     };
+    if (Object.hasOwn(update.config, "command")) {
+      delete nextConfig.url;
+      delete nextConfig.type;
+      delete nextConfig.headers;
+    }
+    if (Object.hasOwn(update.config, "url")) {
+      delete nextConfig.command;
+      delete nextConfig.args;
+      delete nextConfig.env;
+    }
     if (!Object.hasOwn(update.config, "headers")) {
       delete nextConfig.headers;
+    }
+    if (!Object.hasOwn(update.config, "env")) {
+      delete nextConfig.env;
     }
     const changed =
       JSON.stringify(current || null) !== JSON.stringify(nextConfig);
@@ -933,24 +1087,89 @@ export function validateRegistry(registry) {
         errors.push(`registry.servers.${name} must be an object`);
         continue;
       }
-      if (typeof server.url !== "string" || !server.url.trim()) {
+      const transport = server.transport || registry.defaults?.transport;
+      if (!["hub-url", "http", "stdio"].includes(transport)) {
+        errors.push(
+          `registry.servers.${name}.transport must be hub-url, http, or stdio`,
+        );
+      }
+      if (
+        transport !== "stdio" &&
+        (typeof server.url !== "string" || !server.url.trim())
+      ) {
         errors.push(`registry.servers.${name}.url must be a non-empty string`);
       }
-      const transport = server.transport || registry.defaults?.transport;
-      if (!["hub-url", "http"].includes(transport)) {
+      if (transport === "stdio" && server.url !== undefined) {
+        errors.push(`registry.servers.${name}.url is not used for stdio`);
+      }
+      if (transport === "stdio") {
+        if (typeof server.command !== "string" || !server.command.trim()) {
+          errors.push(
+            `registry.servers.${name}.command must be a non-empty string for stdio`,
+          );
+        }
+        if (
+          !Array.isArray(server.args) ||
+          server.args.some((arg) => typeof arg !== "string")
+        ) {
+          errors.push(
+            `registry.servers.${name}.args must be an array of strings for stdio`,
+          );
+        }
+      }
+      if (transport !== "stdio" && server.command !== undefined) {
         errors.push(
-          `registry.servers.${name}.transport must be hub-url or http`,
+          `registry.servers.${name}.command is allowed only for stdio transport`,
         );
       }
-      if (server.command !== undefined) {
+      if (transport !== "stdio" && server.args !== undefined) {
         errors.push(
-          `registry.servers.${name}.command is not supported; stdio registration is intentionally unsupported`,
+          `registry.servers.${name}.args is allowed only for stdio transport`,
         );
       }
-      if (server.args !== undefined) {
-        errors.push(
-          `registry.servers.${name}.args is not supported; stdio registration is intentionally unsupported`,
-        );
+      if (server.env !== undefined) {
+        if (transport !== "stdio") {
+          errors.push(
+            `registry.servers.${name}.env is allowed only for stdio transport`,
+          );
+        }
+        if (
+          !server.env ||
+          typeof server.env !== "object" ||
+          Array.isArray(server.env)
+        ) {
+          errors.push(`registry.servers.${name}.env must be an object`);
+        } else {
+          for (const [envKey, descriptor] of Object.entries(server.env)) {
+            if (!isValidEnvName(envKey)) {
+              errors.push(
+                `registry.servers.${name}.env contains invalid env name ${envKey}`,
+              );
+              continue;
+            }
+            if (
+              !descriptor ||
+              typeof descriptor !== "object" ||
+              Array.isArray(descriptor)
+            ) {
+              errors.push(
+                `registry.servers.${name}.env.${envKey} must be a descriptor object`,
+              );
+              continue;
+            }
+            const keys = Object.keys(descriptor);
+            if (
+              keys.length !== 1 ||
+              !Object.hasOwn(descriptor, "env") ||
+              typeof descriptor.env !== "string" ||
+              !descriptor.env.trim()
+            ) {
+              errors.push(
+                `registry.servers.${name}.env.${envKey}.env must be a non-empty string`,
+              );
+            }
+          }
+        }
       }
       if (server.headers !== undefined) {
         if (!["hub-url", "http"].includes(transport)) {
@@ -1196,7 +1415,8 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         serverConfig,
         config.filePath,
       );
-      const expectedUrl = desired.config.url;
+      const expectedUrl = desired.config.url || "";
+      const expectedCommand = desired.config.command || "";
       const expectedHeaders = isCodexConfig(config.filePath)
         ? desired.headerDescriptors || {}
         : descriptorsFromJsonConfig(desired.config);
@@ -1212,6 +1432,13 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         status = "invalid-config";
       } else if (!actual) {
         status = "missing";
+      } else if (expectedCommand) {
+        status =
+          actual.command === expectedCommand &&
+          JSON.stringify(actual.args || []) ===
+            JSON.stringify(desired.config.args || [])
+            ? "present"
+            : "mismatch";
       } else if (!actual.url) {
         status = actual.transport === "stdio" ? "stdio" : "invalid";
       } else if (normalizeUrl(actual.url) === normalizeUrl(expectedUrl)) {
@@ -1227,7 +1454,9 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         label: config.label,
         filePath: config.filePath,
         expectedUrl,
+        expectedCommand,
         actualUrl: actual?.url || "",
+        actualCommand: actual?.command || "",
         status,
         headerStatus: currentHeaderStatus,
         expectedHeaderNames: headerNames(expectedHeaders),
