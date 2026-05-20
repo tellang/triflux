@@ -33,13 +33,16 @@ function writeRegistry(filePath, home, project, server) {
         },
         servers: {
           "tfx-hub": {
+            policy: "hosted",
             transport: "hub-url",
             url: "http://127.0.0.1:27888/mcp",
             safe: true,
             targets: ["codex", "claude"],
             description: "triflux Hub MCP 서버",
           },
-          ...(server ? { auth: { safe: true, ...server } } : {}),
+          ...(server
+            ? { auth: { policy: "hosted", safe: true, ...server } }
+            : {}),
         },
         policies: {
           stdio_action: "replace-with-hub",

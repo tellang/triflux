@@ -59,7 +59,7 @@ describe("mcp guard engine", () => {
     const registry = loadRegistry();
     assert.equal(registry.version, 1);
     assert.equal(registry.servers["tfx-hub"].url, "http://127.0.0.1:27888/mcp");
-    assert.equal(registry.policies.watched_paths.length, 7);
+    assert.equal(registry.policies.watched_paths.length, 8);
   });
 
   it("matches watched paths for Gemini, Antigravity, Claude project MCP, and local .mcp.json", () => {

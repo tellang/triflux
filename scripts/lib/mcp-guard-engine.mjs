@@ -22,6 +22,17 @@ const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const DEFAULT_HUB_PATH = "/mcp";
+const SERVER_POLICIES = new Set(["hosted", "gateway-sse", "stdio"]);
+const GATEWAY_PORTS = Object.freeze({
+  context7: 8100,
+  "brave-search": 8101,
+  exa: 8102,
+  tavily: 8103,
+  jira: 8104,
+  serena: 8105,
+  notion: 8106,
+  "notion-guest": 8107,
+});
 const DEFAULT_REGISTRY = Object.freeze({
   $schema: "mcp-registry-schema",
   version: 1,
@@ -40,6 +51,7 @@ const DEFAULT_REGISTRY = Object.freeze({
   },
   servers: {
     "tfx-hub": {
+      policy: "hosted",
       transport: "hub-url",
       url: "http://127.0.0.1:27888/mcp",
       safe: true,
@@ -54,6 +66,7 @@ const DEFAULT_REGISTRY = Object.freeze({
     watched_paths: [
       "~/.gemini/settings.json",
       "~/.codex/config.toml",
+      "~/.claude.json",
       "~/.claude/settings.json",
       "~/.claude/settings.local.json",
       ".claude/mcp.json",
@@ -116,6 +129,10 @@ function isClaudeProjectMcpConfig(filePath) {
   return normalizeForMatch(filePath).endsWith("/.claude/mcp.json");
 }
 
+function isClaudeUserConfig(filePath) {
+  return normalizeForMatch(filePath).endsWith("/.claude.json");
+}
+
 function readJsonFile(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
 }
@@ -141,6 +158,7 @@ function isJsonMcpConfig(filePath) {
   const name = pathBasename(filePath);
   return (
     isAntigravityConfig(filePath) ||
+    isClaudeUserConfig(filePath) ||
     name === "settings.json" ||
     name === "settings.local.json" ||
     name === "mcp_config.json" ||
@@ -202,6 +220,7 @@ function detectClient(filePath) {
   if (normalized.endsWith("/.gemini/settings.json")) return "gemini";
   if (normalized.endsWith("/.codex/config.toml")) return "codex";
   if (
+    normalized.endsWith("/.claude.json") ||
     normalized.endsWith("/.claude/settings.json") ||
     normalized.endsWith("/.claude/settings.local.json") ||
     normalized.endsWith("/.claude/mcp.json") ||
@@ -220,6 +239,7 @@ function detectLabel(filePath) {
   if (normalized.endsWith("/.gemini/config/mcp_config.json"))
     return "Antigravity";
   if (normalized.endsWith("/.codex/config.toml")) return "Codex";
+  if (normalized.endsWith("/.claude.json")) return "Claude User MCP";
   if (normalized.endsWith("/.claude/settings.json")) return "Claude User";
   if (normalized.endsWith("/.claude/settings.local.json"))
     return "Claude Local";
@@ -234,6 +254,7 @@ function isPrimaryConfigTarget(filePath) {
     normalized.endsWith("/.gemini/settings.json") ||
     normalized.endsWith("/.gemini/config/mcp_config.json") ||
     normalized.endsWith("/.codex/config.toml") ||
+    normalized.endsWith("/.claude.json") ||
     normalized.endsWith("/.claude/mcp.json") ||
     normalized.endsWith("/.mcp.json")
   );
@@ -649,6 +670,7 @@ function upsertTomlServer(raw, name, config, codex = {}) {
   const header = `[mcp_servers.${name}]`;
   const managedKeys = new Set([
     "url",
+    "transport",
     "command",
     "args",
     "bearer_token_env_var",
@@ -659,6 +681,9 @@ function upsertTomlServer(raw, name, config, codex = {}) {
   const nextManagedLines = [];
   if (typeof config.url === "string") {
     nextManagedLines.push(`url = ${formatTomlString(config.url)}`);
+  }
+  if (typeof config.transport === "string") {
+    nextManagedLines.push(`transport = ${formatTomlString(config.transport)}`);
   }
   if (typeof config.command === "string") {
     nextManagedLines.push(`command = ${formatTomlString(config.command)}`);
@@ -749,6 +774,24 @@ function serverAppliesToClient(serverConfig, client) {
   return serverTargets(serverConfig).includes(client);
 }
 
+function serverPolicy(serverConfig = {}, registry = {}) {
+  if (SERVER_POLICIES.has(serverConfig.policy)) return serverConfig.policy;
+  const transport = serverConfig.transport || registry?.defaults?.transport;
+  if (transport === "stdio") return "stdio";
+  return "hosted";
+}
+
+function gatewaySseUrl(name, serverConfig = {}) {
+  if (typeof serverConfig.url === "string" && serverConfig.url.trim()) {
+    return normalizeUrl(serverConfig.url);
+  }
+  const port =
+    Number(serverConfig.gateway_port || serverConfig.port || 0) ||
+    GATEWAY_PORTS[name];
+  if (!Number.isFinite(port) || port <= 0) return "";
+  return `http://127.0.0.1:${port}/sse`;
+}
+
 function syncDenylistEntries(policy = {}) {
   if (!Array.isArray(policy?.sync_denylist)) return new Set();
   return new Set(
@@ -771,7 +814,8 @@ function syncDenylistKey(client, serverName) {
 }
 
 export function buildDesiredServerRecord(name, serverConfig, filePath) {
-  if (serverConfig?.transport === "stdio") {
+  const policy = serverPolicy(serverConfig);
+  if (policy === "stdio") {
     const resolvedEnv = resolveEnvDescriptors(name, serverConfig);
     const envConfig = hasOwnEntries(resolvedEnv.env)
       ? { env: resolvedEnv.env }
@@ -790,9 +834,11 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
   }
 
   const url =
-    serverConfig?.transport === "hub-url"
-      ? resolveHubUrl()
-      : normalizeUrl(serverConfig?.url || "");
+    policy === "gateway-sse"
+      ? gatewaySseUrl(name, serverConfig)
+      : serverConfig?.transport === "hub-url"
+        ? resolveHubUrl()
+        : normalizeUrl(serverConfig?.url || "");
   const basenameValue = pathBasename(filePath);
   const resolvedHeaders = resolveHeaderDescriptors(
     name,
@@ -803,7 +849,31 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
     ? { headers: resolvedHeaders.headers }
     : {};
 
-  if (basenameValue === ".mcp.json" || isClaudeProjectMcpConfig(filePath)) {
+  if (policy === "gateway-sse") {
+    if (isCodexConfig(filePath)) {
+      return {
+        name,
+        config: { url, transport: "sse" },
+        headerDescriptors: {},
+        codex: {},
+        warnings: [],
+      };
+    }
+
+    return {
+      name,
+      config: { type: "sse", url },
+      headerDescriptors: {},
+      codex: {},
+      warnings: [],
+    };
+  }
+
+  if (
+    basenameValue === ".mcp.json" ||
+    isClaudeProjectMcpConfig(filePath) ||
+    isClaudeUserConfig(filePath)
+  ) {
     return {
       name,
       config: { type: "http", url, ...headerConfig },
@@ -1044,6 +1114,12 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
       delete nextConfig.args;
       delete nextConfig.env;
     }
+    if (!Object.hasOwn(update.config, "type")) {
+      delete nextConfig.type;
+    }
+    if (!Object.hasOwn(update.config, "transport")) {
+      delete nextConfig.transport;
+    }
     if (!Object.hasOwn(update.config, "headers")) {
       delete nextConfig.headers;
     }
@@ -1155,6 +1231,15 @@ export function validateRegistry(registry) {
         errors.push(`registry.servers.${name} must be an object`);
         continue;
       }
+      const policy = serverPolicy(server, registry);
+      if (
+        typeof server.policy !== "string" ||
+        !SERVER_POLICIES.has(server.policy)
+      ) {
+        errors.push(
+          `registry.servers.${name}.policy must be hosted, gateway-sse, or stdio`,
+        );
+      }
       const transport = server.transport || registry.defaults?.transport;
       if (!["hub-url", "http", "stdio"].includes(transport)) {
         errors.push(
@@ -1162,15 +1247,28 @@ export function validateRegistry(registry) {
         );
       }
       if (
-        transport !== "stdio" &&
+        policy === "hosted" &&
         (typeof server.url !== "string" || !server.url.trim())
       ) {
         errors.push(`registry.servers.${name}.url must be a non-empty string`);
       }
-      if (transport === "stdio" && server.url !== undefined) {
+      if (policy === "gateway-sse") {
+        const port = Number(server.gateway_port || server.port || 0);
+        const hasGatewayUrl =
+          typeof server.url === "string" && server.url.trim().length > 0;
+        if (
+          !hasGatewayUrl &&
+          (!Number.isInteger(port) || port <= 0 || port > 65535)
+        ) {
+          errors.push(
+            `registry.servers.${name}.gateway_port must be a valid TCP port for gateway-sse`,
+          );
+        }
+      }
+      if (policy === "stdio" && server.url !== undefined) {
         errors.push(`registry.servers.${name}.url is not used for stdio`);
       }
-      if (transport === "stdio") {
+      if (policy === "stdio") {
         if (typeof server.command !== "string" || !server.command.trim()) {
           errors.push(
             `registry.servers.${name}.command must be a non-empty string for stdio`,
@@ -1185,18 +1283,18 @@ export function validateRegistry(registry) {
           );
         }
       }
-      if (transport !== "stdio" && server.command !== undefined) {
+      if (policy !== "stdio" && server.command !== undefined) {
         errors.push(
           `registry.servers.${name}.command is allowed only for stdio transport`,
         );
       }
-      if (transport !== "stdio" && server.args !== undefined) {
+      if (policy !== "stdio" && server.args !== undefined) {
         errors.push(
           `registry.servers.${name}.args is allowed only for stdio transport`,
         );
       }
       if (server.env !== undefined) {
-        if (transport !== "stdio") {
+        if (policy !== "stdio") {
           errors.push(
             `registry.servers.${name}.env is allowed only for stdio transport`,
           );
@@ -1240,9 +1338,9 @@ export function validateRegistry(registry) {
         }
       }
       if (server.headers !== undefined) {
-        if (!["hub-url", "http"].includes(transport)) {
+        if (policy !== "hosted") {
           errors.push(
-            `registry.servers.${name}.headers is allowed only for HTTP-compatible transports`,
+            `registry.servers.${name}.headers is allowed only for hosted policy`,
           );
         }
         if (
@@ -1809,9 +1907,17 @@ export function addRegistryServer(name, url, options = {}) {
     ? loadRegistry()
     : cloneDefaultRegistry();
   const transport =
-    options.transport || (trimmedName === "tfx-hub" ? "hub-url" : "url");
+    options.transport || (trimmedName === "tfx-hub" ? "hub-url" : "http");
+  const policy =
+    options.policy ||
+    (transport === "stdio"
+      ? "stdio"
+      : options.gateway_port || options.port
+        ? "gateway-sse"
+        : "hosted");
 
   registry.servers[trimmedName] = {
+    policy,
     transport,
     url: normalizedUrl,
     safe: options.safe ?? true,
@@ -1924,7 +2030,10 @@ export function syncRegistryTargets(options = {}) {
       continue;
     }
 
-    if (snapshot.stdioServers.length > 0) {
+    if (
+      snapshot.stdioServers.length > 0 &&
+      !isClaudeUserConfig(target.filePath)
+    ) {
       const remediation = remediate(target.filePath, snapshot.stdioServers, {
         ...registry.policies,
         registry,

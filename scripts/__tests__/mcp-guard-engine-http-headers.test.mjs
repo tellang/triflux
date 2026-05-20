@@ -13,10 +13,12 @@ const originalEnv = {
 };
 
 function registryWith(server) {
+  const policy =
+    server.policy || (server.transport === "stdio" ? "stdio" : "hosted");
   return {
     version: 1,
     defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
-    servers: { auth: server },
+    servers: { auth: { policy, ...server } },
     policies: { watched_paths: [] },
   };
 }

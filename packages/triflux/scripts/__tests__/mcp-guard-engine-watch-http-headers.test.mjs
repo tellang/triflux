@@ -123,6 +123,7 @@ describe("watched MCP remediation with HTTP headers", () => {
       defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
       servers: {
         stdio: {
+          policy: "stdio",
           transport: "stdio",
           command: "node",
           args: ["server.js"],
