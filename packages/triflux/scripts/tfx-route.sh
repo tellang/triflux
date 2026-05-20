@@ -27,6 +27,14 @@ VERSION="2.7"
 #   tfx-route.sh --job-status 1742400000-12345-9876
 #   tfx-route.sh --job-result 1742400000-12345-9876
 
+# ── Phase 0 PoC: Node single-entry gateway ──
+# TFX_ROUTE_NODE=1 일 때 scripts/tfx-route.mjs 로 exec. Node 진입점이 다시 이 스크립트를
+# 호출할 때는 TFX_ROUTE_NODE_BYPASS=1 을 세팅해 무한 루프를 방지한다.
+# PRD: .triflux/plans/node-cli-single-entry-migration.md (Phase 0).
+if [ "${TFX_ROUTE_NODE:-0}" = "1" ] && [ "${TFX_ROUTE_NODE_BYPASS:-0}" != "1" ]; then
+  exec node "$(dirname "$0")/tfx-route.mjs" "$@"
+fi
+
 set -euo pipefail
 
 # ── timeout 명령 호환성 — Windows에서 TIMEOUT.exe 대신 Git Bash coreutils timeout 사용 ──

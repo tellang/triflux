@@ -17,8 +17,10 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@iarna/toml": "^2.2.5",
     "@triflux/core": "10.0.1",
-    "@triflux/remote": "^10.0.0-alpha.1"
+    "@triflux/remote": "^10.0.0-alpha.1",
+    "tree-kill": "^1.2.2"
   },
   "files": [
     "bin",
