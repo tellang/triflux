@@ -74,6 +74,7 @@ export function parseTeamArgs(args = []) {
   let mcpProfile = "";
   let model = "";
   let cwd = "";
+  let nativeBridge = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const current = args[index];
@@ -121,6 +122,8 @@ export function parseTeamArgs(args = []) {
       mcpProfile = args[++index].trim();
     } else if ((current === "--model" || current === "-m") && args[index + 1]) {
       model = args[++index].trim();
+    } else if (current === "--native-bridge" || current === "-nb") {
+      nativeBridge = true;
     } else if (current === "--cwd" && args[index + 1]) {
       let p = args[++index].trim();
       // MSYS/Git Bash 드라이브 문자 변환: /c/... → C:/...
@@ -153,5 +156,6 @@ export function parseTeamArgs(args = []) {
     mcpProfile,
     model,
     cwd,
+    nativeBridge,
   };
 }
