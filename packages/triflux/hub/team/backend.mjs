@@ -1,6 +1,7 @@
 // hub/team/backend.mjs — CLI 백엔드 추상화 레이어
 // 각 CLI(codex/gemini/claude/antigravity)의 명령 빌드 로직을 클래스로 캡슐화한다.
 // v7.2.2
+import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { buildExecArgs } from "../codex-adapter.mjs";
@@ -21,10 +22,15 @@ export function buildAntigravityCommand(
   resultFile,
   { isWindows } = {},
 ) {
+  // Persist prompt to a sibling file so the shell never interpolates raw
+  // prompt content. Without this the Unix branch let `$()`, backticks, `\\`,
+  // and `"` reach the shell verbatim (P1: shell injection).
+  const promptFile = `${resultFile}.prompt`;
+  writeFileSync(promptFile, prompt);
   if (isWindows) {
-    return `${prompt} | agy --print --dangerously-skip-permissions > '${resultFile}' 2>'${resultFile}.err'`;
+    return `Get-Content -Raw '${promptFile}' | agy --print --dangerously-skip-permissions > '${resultFile}' 2>'${resultFile}.err'`;
   }
-  return `printf '%s' "${prompt}" | agy --print --dangerously-skip-permissions > '${resultFile}' 2>'${resultFile}.err'`;
+  return `agy --print --dangerously-skip-permissions < '${promptFile}' > '${resultFile}' 2>'${resultFile}.err'`;
 }
 
 const _require = createRequire(import.meta.url);
