@@ -794,8 +794,9 @@ auto_reroute() {
   local failed_cli="$1"
   local target_cli=""
   case "$failed_cli" in
-    codex) target_cli="gemini"; echo "[tfx-quota] Codex → Gemini 자동 전환" >&2 ;;
-    gemini) target_cli="codex"; echo "[tfx-quota] Gemini → Codex 자동 전환" >&2 ;;
+    codex) target_cli="antigravity"; echo "[tfx-quota] Codex → Antigravity 자동 전환 (Gemini API_KEY_INVALID 회피)" >&2 ;;
+    gemini) target_cli="antigravity"; echo "[tfx-quota] Gemini → Antigravity 자동 전환" >&2 ;;
+    antigravity) target_cli="codex"; echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
     *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
   esac
 
@@ -804,6 +805,7 @@ auto_reroute() {
   case "$target_cli" in
     codex) target_bin="$CODEX_BIN" ;;
     gemini) target_bin="$GEMINI_BIN" ;;
+    antigravity) target_bin="$AGY_BIN" ;;
   esac
   if ! command -v "$target_bin" &>/dev/null; then
     echo "[tfx-quota] $target_cli CLI 미설치 — 자동 전환 불가" >&2
