@@ -1023,18 +1023,22 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   } = opts;
 
   if (nativeBridge) {
-    const { writeBridgeSession } = await import("./headless-bridge-session.mjs");
+    const { writeBridgeSession } = await import(
+      "./headless-bridge-session.mjs"
+    );
     const os = await import("node:os");
     const path = await import("node:path");
-    
+
     const homeDir = os.homedir();
-    const stateDir = process.platform === "darwin"
-      ? path.join(homeDir, "Library", "Application Support", "ClaudeCode")
-      : path.join(homeDir, ".claudecode");
-      
-    const socketPath = process.platform === "win32"
-      ? `\\\\.\\pipe\\claude-${sessionName}`
-      : `/tmp/claude-${sessionName}.sock`;
+    const stateDir =
+      process.platform === "darwin"
+        ? path.join(homeDir, "Library", "Application Support", "ClaudeCode")
+        : path.join(homeDir, ".claudecode");
+
+    const socketPath =
+      process.platform === "win32"
+        ? `\\\\.\\pipe\\claude-${sessionName}`
+        : `/tmp/claude-${sessionName}.sock`;
 
     await writeBridgeSession(sessionName, socketPath, stateDir);
 
@@ -1043,7 +1047,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       sessionName,
       socketPath,
       bypassed: true,
-      results: []
+      results: [],
     };
   }
 
