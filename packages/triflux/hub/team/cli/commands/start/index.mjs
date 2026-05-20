@@ -95,6 +95,7 @@ export async function teamStart(args = []) {
     model,
     cwd,
     nativeBridge,
+    nativeBridgeMode,
   } = parseTeamArgs(args);
   // --assign 사용 시 task를 자동 생성
   const task =
@@ -180,6 +181,7 @@ export async function teamStart(args = []) {
             model,
             cwd,
             nativeBridge,
+            nativeBridgeMode,
           })
         : effectiveMode === "wt"
           ? await startWtTeam({
