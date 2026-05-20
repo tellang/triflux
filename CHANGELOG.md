@@ -4,6 +4,27 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.24.0] - 2026-05-19
+
+### Added
+
+- **`feat(routing)` (PR #289, Issue #281 closed, commit `b295c32f`)** `tfx-auto` 자동 swarm dispatch — staged + unstaged + untracked 변경 파일 자동 감지 후 2+ 태스크 + 코드 변경 ≥ 1건 시 swarm escalate. 사용자 명시 `--parallel N` override 시 warning + 사용자 결정 존중. 신규 helper `hub/lib/staged-file-detect.mjs` (`detectChangedFiles()` + `hasCodeChange()` export, CRLF 대응, non-git cwd graceful). 신규 router 함수 `hub/lib/tfx-route-args.mjs::decideDispatchMode()` (4 분기 + injectable detector + countTasks/normalizeParallel helpers). `bin/triflux.mjs` 의 tfx-auto entry 에 `applyAutoDispatchDecision()` 추가 — warning stderr + escalation `.omc/state/auto-escalation.log` JSON append (graceful skip). 4-layer mirror byte-identical (root + packages/{core,triflux}, packages/remote 무영향). 회귀 가드 3 case (`tests/integration/tfx-auto-routing.test.mjs`) + 단위 6 case (`tests/unit/staged-file-detect.test.mjs`) + 5 case (`tests/unit/tfx-route-args.test.mjs`). Closes #87 + #281.
+
+### Docs
+
+- **`docs(plans)` (PR #286, commit `4069d656`)** Issue #281 auto router swarm dispatch PRD bundle — index + 3 shard PRD (A staged-file-detect helper / B router escalate / C integration test + SSOT docs + 4-layer mirror).
+- **`docs(plans)` (PR #287, commit `8c63fa5e`)** Issue #281 swarm CLI 전용 PRD (`## Shard:` format) — swarm-planner parser 호환 single-file. parseShards 3 shards 인식 검증.
+- **`fix(plans)` (PR #288, commit `9c6bf060`)** Issue #281 swarm PRD 인프라 회피 — `mcp: implement` 제거 (codex `mcp_servers.implement` 미정의 → `invalid transport` exit 1) + `critical: false` (redundancy gemini auto-spawn 회피).
+
+### Changed
+
+- **SSOT** `.claude/rules/tfx-execution-skill-map.md` L44 안티패턴 / L48-49 핵심 룰 / L57-59 알려진 한계 (→ "해결됨") 3개 라인 갱신 — `tfx-auto` 자동 swarm escalate 정식화 톤 적용. `.claude/rules/tfx-routing.md` "충돌 해소" 섹션에 `tfx-auto 자동 swarm escalate` 1줄 추가.
+
+### Notes
+
+- Issue #281 본체 작업 자체가 `/tfx-auto --parallel swarm --isolation worktree --cli codex` 로 dogfooding — Codex worker 3 shards (A → B → C 의존) 가 cherry-pick 통합 후 단일 PR #289 로 머지. swarm CLI 인프라 갭 4건 (mcp manifest abstraction / redundancy default / CODEX_HOME auto-preserve / codex_apps MCP init) 은 별도 [Issue #290](https://github.com/tellang/triflux/issues/290) 으로 추적.
+- 본 release 는 feat + 신규 public API (`detectChangedFiles`, `hasCodeChange`, `decideDispatchMode` export) 추가 = semver minor.
+
 ## [10.23.0] - 2026-05-19
 
 ### Added
