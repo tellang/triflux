@@ -24,5 +24,7 @@
   "qa-tester": "codex",
   "codex": "codex",
   "gemini": "gemini",
+  "antigravity": "antigravity",
+  "agy": "antigravity",
   "claude": "claude"
 }

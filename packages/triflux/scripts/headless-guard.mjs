@@ -228,7 +228,7 @@ async function main() {
 
     // psmux send-keys / split-window: payload에 codex/gemini가 있으면 deny (간접 실행 터널 차단)
     if (/psmux\s+(send-keys|split-window)/.test(cmd)) {
-      if (/\b(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(cmd)) {
+      if (/\b(codex\s+exec|gemini\s+(-p|--prompt)|agy\s+(-p|--print|--prompt))\b/i.test(cmd)) {
         deny(
           "[headless-guard] psmux send-keys/split-window에 codex/gemini 직접 호출이 포함되어 있습니다. " +
             `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
@@ -259,10 +259,11 @@ async function main() {
           /^\s*(?:bash|sh)\s+(?:-\w+\s+)*(?:"([^"]*)".*|'([^']*)'.*)/i,
           "$1$2",
         )
-        .replace(/^\s*(?:\/[\w./+-]+\/)(codex|gemini)\b/, " $1");
+        .replace(/^\s*(?:\/[\w./+-]+\/)(codex|gemini|agy)\b/, " $1");
       return (
         /^\s*codex\b.*\bexec\b/i.test(stripped) ||
-        /^\s*gemini\s+(-p|--prompt)\b/i.test(stripped)
+        /^\s*gemini\s+(-p|--prompt)\b/i.test(stripped) ||
+        /^\s*agy\s+(-p|--print|--prompt)\b/i.test(stripped)
       );
     });
     // 2차 휴리스틱: 1차 세그먼트 검사를 통과한 간접 실행 패턴 탐지
@@ -273,7 +274,7 @@ async function main() {
       if (isAllSafeCmd) {
         // gh/git 전용: $(codex exec ...) 직접 명령 치환만 차단
         // $(cat <<'EOF'\n...codex exec text...\nEOF) 같은 heredoc 텍스트는 허용
-        hasDirectCli = /\$\(\s*(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
+        hasDirectCli = /\$\(\s*(codex\s+exec|gemini\s+(-p|--prompt)|agy\s+(-p|--print|--prompt))\b/i.test(
           cmdSanitized,
         );
       } else {
@@ -282,10 +283,10 @@ async function main() {
         // 차단하는 오탐을 일으킨다. 진짜 위협은 `$(codex exec ...)` 처럼
         // command substitution / eval 의 첫 명령이 codex/gemini 인 경우뿐이다.
         hasDirectCli =
-          /\beval\s+(?:["']\s*)?(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
+          /\beval\s+(?:["']\s*)?(codex\s+exec|gemini\s+(-p|--prompt)|agy\s+(-p|--print|--prompt))\b/i.test(
             cmdSanitized,
           ) ||
-          /\$[({]\s*(codex\s+exec|gemini\s+(-p|--prompt))\b/i.test(
+          /\$[({]\s*(codex\s+exec|gemini\s+(-p|--prompt)|agy\s+(-p|--print|--prompt))\b/i.test(
             cmdSanitized,
           );
       }
@@ -445,9 +446,11 @@ async function main() {
     const cliPatterns = [
       /codex\s+(exec|run|실행)/,
       /gemini\s+(-p|run|실행)/,
+      /agy\s+(-p|--print|--prompt|run|실행)/,
       /tfx-route/,
       /bash.*codex/,
       /bash.*gemini/,
+      /bash.*\bagy\b/,
     ];
 
     if (cliPatterns.some((p) => p.test(combined))) {

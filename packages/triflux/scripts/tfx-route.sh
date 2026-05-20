@@ -332,6 +332,7 @@ fi
 NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || command -v node.exe 2>/dev/null || echo node)}"
 CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo codex)}"
 GEMINI_BIN="${GEMINI_BIN:-$(command -v gemini 2>/dev/null || echo gemini)}"
+AGY_BIN="${AGY_BIN:-$(command -v agy 2>/dev/null || echo agy)}"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo claude)}"
 GEMINI_BIN_ARGS_JSON="${GEMINI_BIN_ARGS_JSON:-[]}"
 # ── Gemini 확장 플래그 (issue #64) ──
@@ -990,6 +991,7 @@ route_agent() {
   case "$CLI_TYPE" in
     codex)         CLI_CMD="codex" ;;
     gemini)        CLI_CMD="gemini" ;;
+    antigravity)   CLI_CMD="agy" ;;
     claude-native) CLI_CMD=""; CLI_ARGS="" ;;
   esac
 
@@ -1044,6 +1046,12 @@ route_agent() {
     writer)
       CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"
       CLI_EFFORT="flash3"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+
+    # ─── Antigravity CLI 레인 (2026-05-19 발표, Gemini CLI 후속) ───
+    # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic
+    antigravity)
+      CLI_ARGS="--print --dangerously-skip-permissions"
+      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 탐색 (Claude-native: Glob/Grep/Read 직접 접근) ───
     explore|claude)
@@ -2166,6 +2174,7 @@ main() {
   case "$CLI_CMD" in
     codex) CLI_CMD="$CODEX_BIN" ;;
     gemini) CLI_CMD="$GEMINI_BIN" ;;
+    agy) CLI_CMD="$AGY_BIN" ;;
     claude) CLI_CMD="$CLAUDE_BIN" ;;
   esac
 
