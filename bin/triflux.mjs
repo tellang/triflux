@@ -5790,6 +5790,9 @@ function cmdMcp(args = [], options = {}) {
       console.log(`  ${LINE}`);
       section("Actions");
       for (const action of result.actions) {
+        for (const warning of action.warnings || []) {
+          process.stderr.write(`${warning}\n`);
+        }
         const label = `${action.label} ${DIM}(${formatPathForDisplay(action.filePath)})${RESET}`;
         if (action.status === "updated") ok(`${label} → updated`);
         else if (action.status === "warning") warn(`${label} → warning`);

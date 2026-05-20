@@ -21,6 +21,7 @@ docs/*
 !docs/demo.tape
 !docs/demo-light.tape
 !docs/design/
+!docs/mcp/
 !docs/prd/
 !docs/research/
 !docs/codex-conventions.md
