@@ -8,381 +8,404 @@
   </picture>
 </p>
 
+<h3 align="center">Claude Code, Codex, Gemini를 위한 CLI-first 멀티 모델 오케스트레이션</h3>
+
 <p align="center">
-  <strong>Consensus Intelligence 기반 Tri-CLI 오케스트레이션</strong><br>
-  <em>Claude + Codex + Gemini — 13개 공개 코어 스킬, 11개 호환 alias, 자연어 라우팅, 교차 모델 리뷰.</em>
+  작업 라우팅, 에이전트 조율, 로컬/원격 팀 실행, Codex/Gemini/Claude 실행 경로를<br>
+  감사 가능한 guard 뒤에 묶는 하나의 front door입니다.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/skills-13_core-F5C242?style=flat-square" alt="13개 코어 스킬">
-  <sub>+ 11개 호환 alias</sub>
+  <img src="https://img.shields.io/badge/skill_files-33-F5C242?style=flat-square" alt="33 skill files">
+  <sub>deprecated 호환 alias 11개는 전면 표면이 아닙니다</sub>
+  <img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node >= 18">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
 <p align="center">
-  <img alt="triflux 데모" src="docs/assets/demo-multi.gif" width="680">
+  <img alt="triflux demo" src="docs/assets/demo-multi.gif" width="680">
 </p>
 
 <p align="center">
-  <a href="#빠른-시작">빠른 시작</a> ·
-  <a href="#tri-cli-합의-엔진">Tri-CLI 합의 엔진</a> ·
-  <a href="#전체-13개-코어-스킬-호환-alias-포함">전체 13개 스킬</a> ·
-  <a href="#아키텍처">아키텍처</a> ·
-  <a href="#deep-vs-light">Deep vs Light</a> ·
-  <a href="#보안">보안</a>
+  <a href="#빠른-시작">빠른 시작</a> &middot;
+  <a href="#현재-표면">현재 표면</a> &middot;
+  <a href="#권장-워크플로우">권장 워크플로우</a> &middot;
+  <a href="#아키텍처">아키텍처</a> &middot;
+  <a href="#운영">운영</a> &middot;
+  <a href="#보안과-guard">보안</a>
 </p>
+
+---
+
+## triflux란?
+
+triflux는 **Claude Code plugin + npm CLI**입니다. Claude, Codex, Gemini를
+오가며 AI 코딩 작업을 라우팅하되, 임의 셸 명령이나 오래된 skill alias가 제어면이
+되지 않도록 현재 표면을 정리합니다.
+
+현재 설계는 예전 README보다 단순합니다.
+
+- **`/tfx-auto`가 Claude Code skill의 표준 front door입니다.** quick/deep/consensus/parallel/retry 동작은 플래그로 표현합니다.
+- **`tfx`는 셸 CLI입니다.** setup, doctor, Hub, MCP, team/swarm, handoff 같은 운영 작업을 담당합니다.
+- **호환 alias는 남아 있지만 전면 API가 아닙니다.** 마이그레이션 표는 [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md)로 분리했습니다.
+- **호스트 로컬 Codex harness는 패키지 범위 밖입니다.** 예를 들어 `~/.codex/skills/tfx-harness`는 특정 머신에서 워크플로우를 추천할 수 있지만, 이 저장소/npm/Claude plugin에 포함되지 않습니다.
 
 ---
 
 ## 빠른 시작
 
-**Claude Code** (권장) — Claude Code 세션 안에서 실행:
+### 1. 설치
 
-```
+Claude Code plugin:
+
+```text
 /plugin marketplace add tellang/triflux
 /plugin install triflux@tellang
 ```
 
-**npm**:
+npm:
 
 ```bash
 npm install -g triflux
 ```
 
-`tfx setup`으로 환경을 설정하세요.
-
-### 사용법
+터미널에서 setup/doctor를 실행합니다.
 
 ```bash
-# Deep 기본값 — 3자 합의로 실행
-/tfx-research "React 19 Server Actions best practices"
-/tfx-review
-/tfx-plan "add JWT auth middleware"
-
-# Quick opt-out — 단일 모델로 빠르게 실행
-/tfx-review --quick
-/tfx-plan "add JWT auth middleware" --quick
-
-# Debate — 3개의 독립적인 의견을 확보
-/tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
-
-# Persistence — 또는 단일 진입점에서 직접 호출
-/tfx-auto "implement full auth flow with tests" --retry ralph
-
-# Team — Multi-CLI 병렬 오케스트레이션
-/tfx-multi "refactor auth + update UI + add tests"
-
-# Remote — setup, spawn, attach, resume를 하나의 표면으로
-/tfx-remote setup                              # 인터랙티브 호스트 설정 위저드 (Tailscale + SSH)
-/tfx-remote spawn ultra4 "보안 리뷰 실행"       # 원격 호스트에서 세션 실행
+tfx setup
+tfx doctor
 ```
 
----
+자동화에서는 `tfx doctor --json`을 사용하세요.
 
-## v10.11.0의 새로운 기능
+### 2. 현재 권장 front door 사용
 
-**triflux v10.11.0**은 **하나의 front door + 플래그 기반 라우팅**으로 정리됩니다. 자연어 입력은 계속 지원되고, Phase 3/4에서 legacy 표면은 `tfx-auto`와 `tfx-remote` 뒤로 접히며, 기존 스킬명은 thin alias로 계속 동작합니다.
+Claude Code slash skill:
 
-### v10.11.0 주요 특징
-
-- **자연어 라우팅** — "리뷰해줘"라고 말하면 `/tfx-review`가 자동 호출. 기본은 Deep이고 `--quick`으로 빠른 경로를 명시
-- **교차 모델 리뷰** — Claude가 작성하면 Codex가 리뷰, Codex가 작성하면 Claude가 리뷰. 동일 모델 self-approve 차단. 커밋 전 미검증 파일 nudge
-- **정확한 카탈로그** — 33개 스킬 파일 기준 `13 public core + 11 compatibility alias + 9 internal helper`
-- **Phase 3** — `--retry ralph`, `--retry auto-escalate`, `--lead codex`, `--max-iterations N`, 4단계 `DEFAULT_ESCALATION_CHAIN`
-- **Phase 4** — `tfx-auto --shape debate|panel|consensus`, `tfx-remote` 단일 진입점, `tfx-psmux-rules`는 `.claude/rules/tfx-psmux.md`로 이동
-- **하위 호환성 유지** — `tfx-persist`, `tfx-debate`, `tfx-multi`, `tfx-remote-spawn` 같은 기존 이름은 thin alias로 계속 지원
-
-### v8 기반 (계속 유지)
-
-- **Tri-Debate Engine** — 3개 CLI가 독립 분석 후 Anti-Herding, 교차 검증, 합의 점수 산출
-- **Deep/Light 변형** — 모든 기능에 토큰 효율적인 Light 모드와 정밀한 Deep 모드를 제공
-- **Consensus Gate** — Deep 스킬은 3개 CLI 중 2개 이상의 동의 요구
-- **Expert Panel** — `tfx-panel`을 통한 가상 전문가 시뮬레이션
-- **Hub IPC** — Named Pipe 및 HTTP MCP 브리지를 활용한 상주형 Hub 서버
-- **psmux / Windows 네이티브** — `tmux`(WSL)와 `psmux`(Windows Terminal) 하이브리드 지원
-
----
-
-## Tri-CLI 합의 엔진
-
-<p align="center">
-  <img src="docs/assets/consensus-flow.svg" alt="Tri-CLI Consensus 플로우" width="680">
-</p>
-
-triflux의 핵심 혁신입니다. 단일 모델을 맹신하는 대신, 모든 Deep 스킬은 다음 과정을 거칩니다:
-
-```
-Phase 1: Independent Analysis (Anti-Herding)
-  ├─ Claude Opus  → Analysis A (격리 실행, 상호 참조 없음)
-  ├─ Codex CLI    → Analysis B (격리 실행, 상호 참조 없음)
-  └─ Gemini CLI   → Analysis C (격리 실행, 상호 참조 없음)
-
-Phase 2: Cross-Validation
-  ├─ 3개 소스의 모든 발견 사항을 비교
-  ├─ 2/3 이상 동의 → CONSENSUS (합의)
-  └─ 1/3만 동의 → DISPUTED (이의, 해결 필요)
-
-Phase 3: Resolution (합의율 < 70%일 경우)
-  ├─ 각 CLI가 반대 의견을 검토
-  ├─ 근거를 들어 수용 또는 반박
-  └─ 미해결 → 사용자가 최종 판단
+```text
+/tfx-auto "이 변경 리뷰해줘" --mode consensus
+/tfx-auto "인증 플로우 구현하고 테스트까지" --mode deep --retry ralph
+/tfx-auto "이 PRD를 격리 shard로 나눠 실행" --parallel swarm --mode consensus --isolation worktree
+/tfx-remote spawn ryzen5-7600 "보안 리뷰 실행"
+/tfx-doctor
 ```
 
-**결과**: 단일 모델 리뷰 대비 오탐(false positive) 87% 감소 (Calimero 합의 연구 기반).
+셸 CLI:
 
-Phase 4 이후에는 `tfx-auto`가 하나의 front door 역할을 맡습니다. legacy 스킬명은 그대로 받아들이되, 실제 의미는 플래그로 표현됩니다:
+```bash
+tfx list
+tfx hub ensure
+tfx mcp list
+tfx handoff --target remote --output .omx/handoff.md
+tfx swarm preflight docs/prd/example.md --json
+tfx codex-team "auth 리팩터링 + 테스트 추가"
+```
 
-- `--retry ralph` / `--retry auto-escalate` (Phase 3)
-- `--lead codex` / `--no-claude-native` (Phase 3)
-- `--shape debate|panel|consensus` (Phase 4)
-
----
-
-## 전체 13개 코어 스킬 (호환 alias 포함)
-
-### 리서치
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| `tfx-index` | Core | 프로젝트 인덱싱과 컨텍스트 압축 |
-
-내부 라우팅 helper: `tfx-research`, `tfx-find`
-
-### 분석 및 계획
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| _독립 공개 표면 없음_ | — | 분석, 계획, 인터뷰는 내부 helper로 라우팅 |
-
-내부 라우팅 helper: `tfx-analysis`, `tfx-plan`, `tfx-interview`
-
-### 실행
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| `tfx-auto` | Core | 플래그 기반 라우팅과 legacy surface folding을 담당하는 통합 CLI 오케스트레이터 |
-
-호환 alias: `tfx-autopilot`, `tfx-fullcycle`, `tfx-multi`, `tfx-persist`, `tfx-swarm`
-
-### 리뷰 및 QA
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| _독립 공개 표면 없음_ | — | 리뷰, QA, 정리는 내부 helper로 라우팅 |
-
-내부 라우팅 helper: `tfx-review`, `tfx-qa`, `tfx-prune`
-
-### 토론 및 의사결정
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| _독립 active 표면 없음_ | — | debate, consensus, panel은 이제 `tfx-auto --mode consensus`의 출력 shape로 통합 |
-
-호환 alias: `tfx-consensus`, `tfx-debate`, `tfx-panel`
-
-### 지속 실행 및 라우팅
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| `tfx-hooks` | Core | Claude Code hook priority 관리 |
-| `tfx-profile` | Core | Codex/Gemini CLI 프로필 관리 |
-
-내부 라우팅 helper: `tfx-ralph`
-
-### 오케스트레이션
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| `tfx-hub` | Core | MCP 메시지 버스 관리 |
-| `merge-worktree` | Core | swarm 결과용 worktree merge helper |
-
-Swarm 실행은 `tfx-auto --parallel swarm` 과 `tfx swarm` CLI로 노출된다.
-
-### 원격
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| `tfx-remote` | Core | setup, spawn, list, attach, send, resume, probe, rules를 묶는 원격 command family |
-
-호환 alias: `tfx-remote-spawn`, `tfx-remote-setup`, `tfx-psmux-rules` — Phase 4에서 `.claude/rules/tfx-psmux.md`로 이동
-
-### 메타
-
-| 스킬 | 상태 | 설명 |
-|------|------|------|
-| `tfx-forge` | Active | 대화형 스킬 생성 |
-| `tfx-setup` | Active | 초기 설정 마법사 |
-| `tfx-doctor` | Active | 진단 및 자동 복구 |
-| `tfx-ship` | Active | ship workflow orchestration |
-| `tfx-wt` | Active | Windows Terminal 탭/패인 제어 |
-| `star-prompt` | Active | postinstall GitHub star prompt |
+> deep, consensus, team, swarm 경로는 관련 CLI와 터미널 multiplexer가 필요합니다.
+> 먼저 `tfx doctor`를 실행하면 Codex/Gemini/Claude, psmux/tmux, Hub, MCP,
+> profile, stale skill 문제를 한 번에 확인할 수 있습니다.
 
 ---
 
-## Deep vs Light
+## 현재 표면
 
-모든 도메인에서 두 가지 모드를 제공합니다:
+### 셸 명령
 
-<p align="center">
-  <img src="docs/assets/deep-vs-light.svg" alt="Deep vs Light 비교" width="680">
-</p>
+`tfx` CLI의 주요 명령은 다음과 같습니다.
 
-Phase 매핑:
+| 명령 | 용도 |
+| --- | --- |
+| `tfx setup` | scripts, HUD, hooks, MCP, profile 동기화. `--dry-run` 지원. |
+| `tfx doctor` | 설치 상태 진단/복구. `--fix`, `--reset`, `--diagnose`, `--json` 지원. |
+| `tfx mcp` | MCP registry 대상을 `list`, `sync`, `add`, `remove`. |
+| `tfx hub` | 로컬 MCP 메시지 버스 시작/중지/보장/상태 확인. |
+| `tfx list` | 설치된 package/user skill 목록. |
+| `tfx handoff` | 현재 컨텍스트를 로컬/원격 이어받기 프롬프트로 직렬화. |
+| `tfx schema` | CLI와 Hub delegator schema 출력. |
+| `tfx multi` | tmux/psmux + Hub 기반 로컬 multi-agent team 실행. |
+| `tfx swarm` | PRD 기반 worktree 격리 swarm의 plan/preflight/run/list. |
+| `tfx synapse` | swarm registry와 lease 상태 확인. |
+| `tfx codex-team` | Codex lead team mode 편의 wrapper. |
+| `tfx notion-read` | MCP client를 통해 Notion 페이지를 Markdown으로 변환. |
+| `tfx why` | 특정 경로의 마지막 커밋 intent trailer 조회. |
+| `tfx update` | 최신 stable/dev 패키지로 업데이트. |
+| `tfx version` | 버전 정보 출력. |
+| `tfx-profile` | Codex/Gemini profile 관리용 편의 binary. |
 
-- `--mode deep` 는 Phase 2의 직접적인 Light → Deep 스위치
-- `--retry ralph` / `--retry auto-escalate` 는 Phase 3의 persistence / escalation 시맨틱
-- `--shape consensus|debate|panel` 은 Phase 4의 consensus output shape 라우팅
+정확한 인자 계약은 `tfx schema <command>`로 확인합니다.
 
-| 항목 | Light | Deep |
-|------|-------|------|
-| **CLI** | 단일 (주로 Codex) | 3자 (Claude + Codex + Gemini) |
-| **토큰** | 3K-15K | 20K-80K |
-| **속도** | 수 초 | 수 분 |
-| **정확도** | 양호 (단일 관점) | 우수 (합의 검증 완료) |
-| **편향** | 발생 가능 | Anti-Herding으로 제거 |
-| **적합한 상황** | 빠른 작업, 익숙한 패턴 | 중요한 의사결정, 미지의 영역 |
+### Claude Code skill
+
+패키지에는 **33개 skill 파일**이 들어 있습니다. 크게 나누면 다음과 같습니다.
+
+- **표준 진입점**: `tfx-auto`, `tfx-remote`, `tfx-doctor`, `tfx-setup`,
+  `tfx-profile`, `tfx-hub`, `tfx-hooks`, `tfx-ship`, `tfx-wt`.
+- **작업 helper**: `tfx-plan`, `tfx-review`, `tfx-qa`, `tfx-research`,
+  `tfx-analysis`, `tfx-find`, `tfx-index`, `tfx-interview`, `tfx-prune`,
+  `tfx-forge`, `merge-worktree`, `star-prompt`.
+- **deprecated 호환 alias**: 11개 legacy 이름은 전환용 shim입니다. 새 문서와 새 프롬프트에서는 위 표준 진입점을 우선 사용하세요.
+
+### 표준 플래그 맵
+
+대부분의 옛 skill 이름은 이제 명시적인 `tfx-auto` 플래그로 표현할 수 있습니다.
+
+| 의도 | 표준 형태 |
+| --- | --- |
+| 빠른 단일 lane 작업 | `/tfx-auto "작업" --mode quick` |
+| 더 깊은 계획/실행/검증 루프 | `/tfx-auto "작업" --mode deep` |
+| 지속 retry 루프 | `/tfx-auto "작업" --retry ralph` |
+| consensus 리뷰 | `/tfx-auto "작업" --mode consensus` |
+| debate 또는 panel 보고 | `/tfx-auto "작업" --mode consensus --shape debate|panel` |
+| 로컬 병렬 작업 | `/tfx-auto "작업" --parallel N --mode deep` 또는 shell `tfx multi ...` |
+| PRD/worktree swarm | `/tfx-auto "작업" --parallel swarm --mode consensus --isolation worktree` 또는 shell `tfx swarm ...` |
+| CLI lane 강제 | `/tfx-auto "작업" --cli codex|gemini|claude` |
+
+### 제어 표면의 경계
+
+triflux를 디버그하거나 확장할 때는 아래 표면을 나눠서 봐야 합니다.
+
+| 표면 | 기준 위치 | npm/plugin 포함 여부 |
+| --- | --- | --- |
+| 공개 CLI/runtime | `bin/`, `scripts/`, `hub/`, `hooks/`, `skills/` | 포함 |
+| publish mirror | `packages/triflux/` | 포함. root runtime 파일과 일치해야 함 |
+| Claude plugin metadata | `.claude-plugin/` | 포함. npm package 내용을 가리킴 |
+| Codex-local harness 실험 | `~/.codex/skills/*` | 미포함 |
+| legacy alias | `skills/<alias>/` + `docs/legacy-skill-aliases.md` | 포함되지만 deprecated 상태 |
+
+로컬 Codex harness가 workflow를 추천해도 이는 해당 머신의 routing 조언일 뿐입니다.
+패키지의 계약은 위의 CLI, Claude skill, hook, Hub 표면입니다.
+
+---
+
+## 권장 워크플로우
+
+### 직접 구현/리뷰
+
+```text
+/tfx-auto "실패하는 auth 테스트 고쳐줘" --risk-tier medium
+/tfx-auto "SQL과 trust-boundary 중심으로 PR 리뷰" --mode consensus
+```
+
+검증 강도를 명시하려면 `--risk-tier low|medium|high`, 모드를 이미 알고 있으면
+`--mode quick|deep|consensus`를 사용합니다.
+
+### 끝까지 완료 루프
+
+```text
+/tfx-auto "마이그레이션 끝내고 검증까지" --mode deep --retry ralph --max-iterations 10
+```
+
+`--retry ralph`는 retry state machine과 stuck detector를 사용합니다. 루프 상한이
+필요하면 `--max-iterations`를 지정하세요.
+
+### consensus/debate/panel 출력
+
+```text
+/tfx-auto "Postgres LISTEN/NOTIFY vs Redis Streams" --mode consensus --shape debate
+/tfx-auto "마이그레이션 전략 리뷰" --mode consensus --shape panel
+```
+
+참여 lane은 설정된 Claude/Codex/Gemini입니다. 어떤 lane이 없으면 결과에 partial/degraded 상태가 드러나야 합니다.
+
+### 로컬 팀 또는 PRD swarm
+
+```text
+# 로컬 team mode
+tfx multi "auth 리팩터링 + UI 수정 + 테스트 추가"
+
+# worktree 격리 PRD swarm
+tfx swarm preflight docs/prd/my-feature.md --json
+tfx swarm run docs/prd/my-feature.md
+```
+
+swarm은 격리 worktree와 file lease를 사용합니다. 큰 PRD는 실행 전에 preflight로 host,
+CLI profile, lease 충돌을 먼저 확인하세요.
+
+### 원격 세션
+
+```text
+/tfx-remote setup
+/tfx-remote spawn ryzen5-7600 "보안 리뷰 실행"
+/tfx-remote list
+/tfx-remote attach <session>
+/tfx-remote send <session> "수정 계속 진행"
+```
+
+`tfx-remote`는 setup/spawn/list/attach/send/resume/probe/kill 흐름을 하나로 묶은 Claude skill 표면입니다.
+
+### 컨텍스트 저장/이어받기
+
+```bash
+tfx handoff --target remote --decision "README는 canonical 중심, alias는 docs로 분리" --output .omx/handoff.md
+```
+
+세션을 끝내거나 다른 host/agent가 이어받아야 할 때 사용합니다.
 
 ---
 
 ## 아키텍처
 
 <p align="center">
-  <img src="docs/assets/architecture.svg" alt="triflux 아키텍처" width="680">
+  <img src="docs/assets/architecture.svg" alt="triflux architecture" width="680">
 </p>
-
-<details>
-<summary>인터랙티브 다이어그램 (GitHub 전용)</summary>
 
 ```mermaid
 graph TD
-    User([사용자 / Claude Code]) <-->|Skills & Slash Commands| TFX[tfx Skills Layer]
-    TFX <-->|Consensus Engine| CONSENSUS[tfx-consensus]
-
-    subgraph "Tri-CLI Consensus"
-        CONSENSUS -->|Independent| CLAUDE[Claude Opus/Sonnet]
-        CONSENSUS -->|Independent| CODEX[Codex CLI]
-        CONSENSUS -->|Independent| GEMINI[Gemini CLI]
-        CLAUDE --> MERGE[Cross-Validation]
-        CODEX --> MERGE
-        GEMINI --> MERGE
-        MERGE --> GATE{Consensus >= 70%?}
-        GATE -->|Yes| OUTPUT[검증된 출력]
-        GATE -->|No| RESOLVE[Resolution Round]
-        RESOLVE --> MERGE
-    end
-
-    TFX <-->|Named Pipe / HTTP| HUB[triflux Hub 서버]
-
-    subgraph "오케스트레이션 Hub"
-        HUB <--> STORE[(SQLite 저장소)]
-        HUB <--> DASH[QoS 대시보드]
-        HUB <--> DELEGATOR[Delegator 서비스]
-    end
-
-    HUB -.->|MCP Bridge| External[외부 MCP 클라이언트]
+    User([User / Claude Code / shell]) --> Skills[Claude skills]
+    User --> CLI[tfx CLI]
+    Skills --> Auto[/tfx-auto]
+    Skills --> Remote[/tfx-remote]
+    CLI --> Hub[triflux Hub]
+    CLI --> Team[tfx multi / swarm]
+    Auto --> Route[tfx-route.sh + guards]
+    Team --> Hub
+    Remote --> Hub
+    Route --> Codex[Codex CLI]
+    Route --> Gemini[Gemini CLI]
+    Route --> Claude[Claude Code]
+    Hub --> MCP[MCP registry + bridge]
+    Hub --> Store[(SQLite or memory store)]
+    Hub --> Dashboard[HUD / monitor]
 ```
 
-</details>
+일반적인 라우팅 경로는 다음과 같습니다.
 
----
+1. Claude Code prompt 또는 명시적 skill 호출.
+2. keyword/routing hook이 context를 추가하거나 skill을 고릅니다.
+3. `tfx-auto`가 intent를 mode, retry, parallelism, risk tier, 대상 CLI lane으로 정규화합니다.
+4. `tfx-route.sh`, Hub worker, 또는 `tfx` CLI가 실제 Codex/Gemini/Claude 기반 작업을 실행합니다.
+5. Hub가 team message, lease, retry, handoff, status surface를 기록합니다.
 
-## 빠른 시작
+### Hub
 
-**Claude Code** (권장) — Claude Code 세션 안에서 실행:
-
-```
-/plugin marketplace add tellang/triflux
-/plugin install triflux@tellang
-```
-
-**npm**:
+Hub는 team, remote session, MCP tool, status surface를 위한 로컬 메시지 버스입니다.
+localhost에 bind하며 pipe/HTTP transport를 사용합니다.
 
 ```bash
-npm install -g triflux
+tfx hub ensure
+tfx hub status --json
+tfx hub stop
 ```
 
-`tfx setup`으로 환경을 설정하세요.
+macOS에서 test나 Hub 시작이 `node` localhost port를 열면 방화벽 팝업이 뜰 수 있습니다.
+문서 작업에는 필요 없고, 실제 Hub/team/MCP workflow가 필요할 때만 환경 정책에 맞게 허용하세요.
 
-### 사용법
+### Guard
+
+triflux는 위험한 실행을 관리된 경로 뒤에 둡니다.
+
+- CLI 호출은 `tfx-route.sh`, Hub worker, `tfx` CLI를 통과해야 합니다.
+- 직접 `codex exec` / `gemini -y` 경로는 설치된 workflow에서 guard됩니다.
+- psmux/Windows Terminal 흐름은 임의 `wt.exe`/`psmux send-keys`가 아니라 관리 API와 규칙을 사용합니다.
+
+### Profile과 모델 라우팅
+
+Codex/Gemini profile은 `tfx-profile` 또는 `tfx setup`으로 관리합니다. 이미 profile이
+소유한 model/effort 값을 launcher script에 중복 하드코딩하지 마세요.
+
+---
+
+## 운영
+
+### 진단
 
 ```bash
-# Deep 기본값 — 3자 합의로 실행
-/tfx-research "React 19 Server Actions best practices"
-/tfx-review
-/tfx-plan "add JWT auth middleware"
-
-# Quick opt-out — 단일 모델로 빠르게 실행
-/tfx-review --quick
-/tfx-plan "add JWT auth middleware" --quick
-
-# Debate — 3개의 독립적인 의견을 확보
-/tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
-
-# Persistence — front door에서 직접 호출 가능
-/tfx-auto "implement full auth flow with tests" --retry ralph --max-iterations 10
-
-# Team — Multi-CLI 병렬 오케스트레이션
-/tfx-multi "refactor auth + update UI + add tests"
-
-# Remote — 단일 진입점
-/tfx-remote spawn ultra4 "보안 리뷰 실행"
+tfx doctor
+tfx doctor --json
+tfx doctor --fix
+tfx doctor --diagnose
 ```
-> **참고**: Deep 스킬과 `tfx-auto --mode consensus`, `--retry ralph`, `--shape ...` 경로는 완전한 Tri-CLI 합의(Tier 1)를 위해 **psmux**(또는 tmux), **triflux Hub**, **Codex CLI**, **Gemini CLI**가 필요합니다. 전제조건이 충족되지 않으면 Tier 3(Claude 단독, single-model) 모드로 자동 전환됩니다. `tfx doctor`로 환경을 확인하세요.
->
-> **Serena 참고**: Serena MCP는 stateful합니다. 따라서 **같은 프로젝트**를 다루는 에이전트끼리만 하나의 Serena 인스턴스를 공유하는 것이 안전합니다. 서로 다른 프로젝트를 병렬로 작업할 때는 Serena 인스턴스를 분리하세요. Serena가 `No active project`를 보고하면 Codex Serena 설정의 `--project-from-cwd`(또는 `--project <path>`)를 확인하고 `tfx doctor`를 다시 실행하세요.
 
----
+`doctor`는 CLI, profile, hook, skill, Hub, MCP registry, route script sync,
+stale team, 로컬 설정 drift를 확인합니다.
 
-## 리서치 기반
+### MCP registry
 
-v8 스킬 체계는 Claude Code 생태계 내 37개 클론 저장소를 종합 역분석한 결과를 토대로 설계되었습니다:
+```bash
+tfx mcp list
+tfx mcp sync
+tfx mcp add context7 --url https://mcp.context7.com/mcp
+tfx mcp remove context7
+```
 
-| 프로젝트 | Stars | 채택한 핵심 인사이트 |
-|----------|-------|---------------------|
-| everything-claude-code | 114K | 직관 기반 학습 패턴 |
-| Superpowers | 93K | TDD 강제화, 조합형 스킬 |
-| oh-my-openagent | 44K | 카테고리 라우팅, Hashline 편집 |
-| SuperClaude | 22K | index-repo 94% 토큰 절감, 전문가 패널 |
-| oh-my-claudecode | 15K | Ralph 지속 실행, CCG tri-model |
-| ruflo | 28K | 60개 이상의 에이전트 오케스트레이션 |
-| Exa MCP | 3.7K | 뉴럴 검색, 하이라이트 추출 |
-| Brave Search MCP | — | 독립 인덱스, Goggles 재순위 |
-| Tavily MCP | — | Deep Research 파이프라인 |
+registry가 관리 대상 MCP 설정의 source of truth입니다. Drift 디버깅이 아니라면
+Codex/Gemini/Claude MCP 파일을 직접 수정하지 마세요.
 
-5개 언어(EN/CN/RU/JP/UA) 리서치를 통해 고유 패턴을 발굴했습니다: WeChat 연동(CN), Discord 모바일 브리지(JP), GigaCode 국산 대안(RU), 커뮤니티 주도 로컬라이제이션 등.
+### State snapshot
 
----
+Hub 시작 시 `~/.codex/`, `~/.gemini/` 일부 상태를 ignored `references/*-snapshots/`
+폴더에 best-effort daily snapshot으로 저장할 수 있습니다. 수동 helper:
 
-## 보안
+```bash
+npm run snapshot:codex
+npm run snapshot:gemini
+npm run snapshot:all
+```
 
-- **Hub 토큰 인증** — `TFX_HUB_TOKEN`을 이용한 보안 IPC (Bearer Auth)
-- **Localhost 전용** — Hub가 기본적으로 `127.0.0.1`에만 바인딩
-- **CORS 잠금** — QoS 대시보드에 대한 엄격한 오리진 검사
-- **인젝션 방어** — `psmux` 및 `tmux` 실행 시 쉘 명령어 새니타이징
-- **합의 기반 검증** — Deep 스킬이 3자 합의를 통해 단일 모델 환각을 방지
+### Release/mirror check
+
+패키지 내용에 영향이 있는 저장소 변경은 ship 전에 release gate를 통과시킵니다.
+
+```bash
+npm run gen:skill-docs
+npm run gen:skill-manifest
+npm run release:check-sync
+npm run release:check-mirror
+npm run lint
+```
+
+`packages/triflux`는 일부 runtime folder의 npm publish mirror입니다. mirror 대상 파일을
+수정했다면 동기화 상태를 확인하세요.
 
 ---
 
 ## 플랫폼 지원
 
-- **Linux / macOS**: 네이티브 `tmux` 통합
-- **Windows**: **psmux** (PowerShell Multiplexer) + Windows Terminal 네이티브
+| 플랫폼 | Multiplexer | 참고 |
+| --- | --- | --- |
+| macOS | tmux | 지원. 일부 흐름은 `gtimeout` 같은 timeout provider 필요. |
+| Linux | tmux | 지원. |
+| Windows | psmux + Windows Terminal | 관리된 psmux/WT 경로로 지원. psmux 기본 shell은 PowerShell. |
+
+agent/launcher가 따라야 하는 더 엄격한 Windows/psmux 규칙은 `AGENTS.md`와
+`.claude/rules/tfx-psmux.md`를 보세요.
 
 ---
 
-## QoS 대시보드
+## 보안과 Guard
 
-`http://localhost:27888/dashboard`에서 오케스트레이션 상태를 모니터링할 수 있습니다.
+| 계층 | 보호 |
+| --- | --- |
+| Hub token auth | 설정된 경우 Hub API에 로컬 bearer token 적용. |
+| Localhost binding | Hub 기본 bind는 `127.0.0.1`. |
+| MCP registry guard | 지원하지 않거나 stale한 MCP record를 관리형 HTTP entry로 교체. |
+| Headless guard | 비관리 Codex/Gemini headless 실행 경로 차단. |
+| Safety guard | psmux/SSH/WT 셸 민감 흐름 sanitizing. |
+| Consensus reporting | deep/consensus workflow는 degraded/disputed 결과를 명시해야 함. |
 
-- **AIMD 배치 사이징** — 작업 성공률에 따라 병렬 작업 수를 자동 조절
-- **토큰 절약량** — Claude 토큰 절약량을 실시간 추적
-- **합의 메트릭** — CLI 간 합의율을 추적
+---
+
+## 개발
+
+```bash
+npm ci
+npm test
+npm run lint
+npm run release:check-sync
+npm run release:check-mirror
+```
+
+기여자 메모:
+
+- deprecated alias 세부사항은 main README에 다시 늘어놓지 말고 [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md)를 갱신하세요.
+- Codex-local 실험은 패키지 경계를 의도적으로 바꾸는 경우가 아니라면 `~/.codex/skills` 아래에 둡니다.
+- docs-only 변경은 보통 `npm run lint`, release sync check 같은 targeted check로 충분합니다. full integration test는 Hub 서버와 localhost listener를 띄울 수 있습니다.
 
 ---
 
 <p align="center">
-  <sub>MIT License · Made by <a href="https://github.com/tellang">tellang</a></sub>
+  <sub>MIT License &middot; Made by <a href="https://github.com/tellang">tellang</a></sub>
 </p>
