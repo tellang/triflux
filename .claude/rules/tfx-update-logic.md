@@ -27,3 +27,30 @@
   - **IDE Cask (Antigravity 2.0) 경로** (Google Codelab 출처): 글로벌 skills `~/.gemini/antigravity/skills/` · 글로벌 workflows `~/.gemini/antigravity/global_workflows/` · 워크스페이스 `.agents/{rules,workflows,skills}/` (복수형 `s`).
   - **공통**: 글로벌 rules `~/.gemini/GEMINI.md` (Gemini CLI · Antigravity CLI · Antigravity IDE 가 모두 같은 path 공유).
   - **주의**: `~/.gemini/antigravity-cli/` (CLI 전용) 와 `~/.gemini/antigravity/` (IDE 전용) 는 **별개** path. third-party docs 의 `.agent/` (단수) 는 잘못된 경로.
+
+## Antigravity CLI 1.0.0 정밀 sanity matrix 발견 (2026-05-20)
+
+agy CLI 1.0.0 의 prompt 전달 mechanism 정밀 검증 결과 (정밀 sanity matrix 10종 + context7 3개 출처 + 공식 docs verbatim):
+
+- **`--print` 는 string value-taking flag** (Go flag library 기본): T1 `--print=hi` → "hi" ✅, T2 `--print` alone → "flag needs an argument" (exit 2). 즉 boolean flag 가 아님.
+- **flag 순서 critical**: `--print` 가 먼저 + 다른 flag 가 뒤 = **timeout** (T6 `--print --add-dir /tmp 'prompt'`, T9 `--print --sandbox 'prompt'` 둘 다 exit 124 timeout — `--print` value 로 다음 flag 흡수). 정상 패턴 3가지:
+  - `--dangerously-skip-permissions --print VALUE` (T10) — flag swap
+  - `--print=VALUE` (T1) — `=` syntax (Go flag default)
+  - `--print --dangerously-skip-permissions` + stdin pipe (T4/D) — wrapper Tier 2 (PR #296) 채택
+- **CLI TUI 모델 = account-dependent** (사용자 직접 확인 2026-05-20):
+  - **사내 계정 5개**: Gemini 3.1 Pro (High), Gemini 3.1 Pro (Low), **Gemini 3.5 Flash (default current)**, Gemini 3.5 Flash (Low), Gemini 3 Flash
+  - 개인 계정 4개 (이전 메모): Gemini 3.5 Flash High/Med, Gemini 3.1 Pro High/Low
+  - context7 `/llmstxt/sirius-red` 의 7개 (Gemini 3 Pro high/low/Flash, Claude Sonnet 4.5/thinking, Opus 4.5 thinking, GPT-OSS) 는 **IDE Antigravity 2.0 모델 리스트로 추정** (CLI TUI 와 별개)
+- **`/model` slash command** (CLI 안에서) = default 모델 변경 + **persists across sessions** (공식 docs verbatim). settings 저장 위치 미확정 (`~/.gemini/antigravity-cli/settings.json` 에 model 항목 부재, 추정 in-memory 또는 hidden state — 사용자 직접 검증 필요).
+- **모델 선택 sticky scope**: "The choice of reasoning model is sticky between user messages within a conversation" (공식 docs verbatim) — 새 conversation 시 default 적용.
+- **CLI launch flag override 가능 항목**: `--sandbox`, `--dangerously-skip-permissions` **2개만** (verbatim). `-m`/`--model` flag 부재 = wrapper 가 헤드리스 호출 시 model 통제 불가 (drop-down UI 만 가능).
+- **`/model` 외 주요 slash commands** (공식 docs verbatim): `/resume` (alias `/switch`), `/rewind` (alias `/undo`), `/rename <name>`, `/permissions`, `/keybindings`, `/statusline`, `/tasks`, `/skills`, `/mcp`, `/open <path>`, `/usage`, `/logout`.
+- **agy subagents framework** (공식 docs verbatim): `/tasks` panel (monitor/view-logs/terminate background tasks) + `/agents` panel (running subagents UI, ctrl+j teleport, ctrl+k fast-approve) + asynchronous subagents (parallel work, background research, system tests). triflux hub/team_mode 와 **중복/통합 가능 영역** — 별도 분석 PRD `.triflux/plans/agy-subagents-integration-eval.md`.
+- **MCP server config 위치 변경**: Gemini CLI 의 `~/.gemini/settings.json` (inline mcpServers) → Antigravity CLI 의 **`~/.gemini/antigravity-cli/mcp_config.json`** (별도 file) + workspace 는 `.agents/mcp_config.json`. **`serverUrl` field** (Gemini 의 `url`/`httpUrl` 대신).
+- **workspace context 호환**: GEMINI.md + AGENTS.md 둘 다 읽음. Global rules `~/.gemini/GEMINI.md` (Gemini CLI 와 공유).
+- **plugin import 명령 verbatim**: `agy plugin import gemini` — Gemini CLI extensions → Antigravity plugins 자동 변환 (`~/.gemini/antigravity-cli/plugins/<name>/skills/`).
+- **wrapper Tier 2 (PR #296)** 의 antigravity stdin pipe 분기 + no-op 승격 skip + auto_reroute tri-lane 확장 = 위 mechanism 의 운영 적용. 회귀테스트 (PR #297) 의 5 test 가 mechanism lock-in.
+
+후속 PRD:
+- `.triflux/plans/agy-subagents-integration-eval.md` — triflux hub vs agy subagents 책임 매트릭스 + 통합 시나리오 3가지
+- `.triflux/plans/node-cli-single-entry-migration.md` — wrapper 2609줄 Bash → Node 전환 plan (책임 16가지 매핑 + Phase 0~3)
