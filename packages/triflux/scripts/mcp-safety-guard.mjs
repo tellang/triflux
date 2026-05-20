@@ -31,6 +31,7 @@ export async function run(stdinData) {
 
   const stdioServers = scanForStdioServers(GEMINI_SETTINGS);
   const stdout = [];
+  const stderr = [];
 
   if (stdioServers.length > 0) {
     const result = remediate(GEMINI_SETTINGS, stdioServers, registry.policies);
@@ -61,6 +62,7 @@ export async function run(stdinData) {
 
   const syncResult = syncRegistryTargets({ registry });
   for (const action of syncResult.actions) {
+    stderr.push(...(action.warnings || []));
     if (action.status === "updated") {
       stdout.push(
         `[mcp-safety] registry sync: ${action.label} -> ${action.filePath}`,
@@ -77,7 +79,7 @@ export async function run(stdinData) {
   return {
     code: 0,
     stdout: stdout.length > 0 ? `${stdout.join("\n")}\n` : "",
-    stderr: "",
+    stderr: stderr.length > 0 ? `${stderr.join("\n")}\n` : "",
   };
 }
 

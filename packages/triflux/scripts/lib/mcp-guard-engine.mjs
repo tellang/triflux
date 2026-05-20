@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -111,6 +112,7 @@ function isJsonMcpConfig(filePath) {
     isAntigravityConfig(filePath) ||
     name === "settings.json" ||
     name === "settings.local.json" ||
+    name === "mcp_config.json" ||
     name === ".mcp.json" ||
     isClaudeProjectMcpConfig(filePath)
   );
@@ -124,6 +126,31 @@ function isCodexConfig(filePath) {
 function isAntigravityConfig(filePath) {
   const normalized = normalizeForMatch(filePath);
   return normalized.endsWith("/.gemini/config/mcp_config.json");
+}
+
+function plaintextSecretHeaderClient(filePath) {
+  const client = detectClient(filePath);
+  return client === "gemini" || client === "antigravity" ? client : null;
+}
+
+function plaintextSecretPermissionHint(filePath) {
+  const normalized = normalizeForMatch(filePath);
+  if (normalized.endsWith("/.gemini/settings.json")) {
+    return "~/.gemini/settings.json";
+  }
+  if (normalized.endsWith("/.gemini/config/mcp_config.json")) {
+    return "~/.gemini/config/mcp_config.json";
+  }
+  return filePath;
+}
+
+function shouldLockJsonConfigPermissions(filePath) {
+  return Boolean(plaintextSecretHeaderClient(filePath));
+}
+
+function lockJsonConfigPermissions(filePath) {
+  if (!shouldLockJsonConfigPermissions(filePath)) return;
+  chmodSync(filePath, 0o600);
 }
 
 function isProtectedCodexConfigMutationEnv(env = process.env) {
@@ -159,6 +186,8 @@ function detectLabel(filePath) {
   if (normalized.endsWith("/.gemini/config/mcp_config.json"))
     return "Antigravity";
   if (normalized.endsWith("/.gemini/settings.json")) return "Gemini";
+  if (normalized.endsWith("/.gemini/config/mcp_config.json"))
+    return "Antigravity";
   if (normalized.endsWith("/.codex/config.toml")) return "Codex";
   if (normalized.endsWith("/.claude/settings.json")) return "Claude User";
   if (normalized.endsWith("/.claude/settings.local.json"))
@@ -429,6 +458,13 @@ function resolveHeaderDescriptors(name, serverConfig, filePath) {
     }
 
     headers[headerName] = `${prefix}${envValue}`;
+
+    const plaintextClient = plaintextSecretHeaderClient(filePath);
+    if (plaintextClient) {
+      warnings.push(
+        `[tfx mcp sync] warn: ${plaintextClient} server '${name}' headers contain plaintext secret resolved from $${envName}. Ensure ${plaintextSecretPermissionHint(filePath)} permissions stay 600.`,
+      );
+    }
 
     if (!codexTarget) continue;
 
@@ -996,6 +1032,7 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
   }
 
   writeJsonFile(resolvedPath, parsed);
+  lockJsonConfigPermissions(resolvedPath);
   return { modified: true, filePath: resolvedPath };
 }
 

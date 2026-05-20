@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -222,5 +222,51 @@ describe("syncRegistryTargets HTTP headers", () => {
     assert.deepEqual(projectConfig.mcpServers.auth.headers, {
       "X-Client": "triflux",
     });
+  });
+
+  it("warns and locks permissions when Gemini sync writes env secrets as plaintext headers", () => {
+    const homeDir = createHomeDir();
+    mkdirSync(join(homeDir, ".gemini"), { recursive: true });
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    process.env.TFX_TEST_TOKEN = "sync-secret";
+
+    const settingsPath = join(homeDir, ".gemini", "settings.json");
+    const result = syncRegistryTargets({
+      registry: {
+        version: 1,
+        defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
+        servers: {
+          auth: {
+            safe: true,
+            transport: "http",
+            url: "https://example.com/mcp",
+            targets: ["gemini"],
+            headers: {
+              Authorization: { env: "TFX_TEST_TOKEN", prefix: "Bearer " },
+            },
+          },
+        },
+        policies: {
+          stdio_action: "replace-with-hub",
+          watched_paths: [settingsPath],
+        },
+      },
+    });
+
+    const syncAction = result.actions.find(
+      (action) => action.filePath === settingsPath,
+    );
+    assert.equal(syncAction.status, "updated");
+    assert.deepEqual(syncAction.warnings, [
+      "[tfx mcp sync] warn: gemini server 'auth' headers contain plaintext secret resolved from $TFX_TEST_TOKEN. Ensure ~/.gemini/settings.json permissions stay 600.",
+    ]);
+
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    assert.equal(
+      settings.mcpServers.auth.headers.Authorization,
+      "Bearer sync-secret",
+    );
+    assert.equal(statSync(settingsPath).mode & 0o777, 0o600);
   });
 });
