@@ -18,11 +18,12 @@ import {
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { requestJson } from "@triflux/core/hub/bridge.mjs";
-import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
-import { getMaxSpawnPerSec } from "@triflux/core/hub/lib/spawn-trace.mjs";
-import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
+import { requestJson } from "../bridge.mjs";
+import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
+import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
+import { IS_WINDOWS } from "../platform.mjs";
 import { getBackend } from "./backend.mjs";
+import { startClaudeNativeBridge } from "./claude-native-bridge.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
   formatHandoffForLead,
@@ -1019,9 +1020,33 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     dashboard = false,
     dashboardLayout = "single",
     stallDetect,
+    nativeBridge = false,
   } = opts;
 
   mkdirSync(RESULT_DIR, { recursive: true });
+
+  if (assignments.length === 0) {
+    return { sessionName, results: [] };
+  }
+
+  let nativeBridgeHandle = null;
+  if (nativeBridge) {
+    nativeBridgeHandle = await startClaudeNativeBridge({
+      sessionName,
+      assignments,
+      cwd: process.cwd(),
+      onKill() {
+        try {
+          killPsmuxSession(sessionName);
+        } catch {
+          /* session may not exist yet */
+        }
+      },
+    });
+    process.stderr.write(
+      `[headless] Claude native bridge roster written: ${nativeBridgeHandle.rosterPath}\n`,
+    );
+  }
 
   // Hub version skew pre-flight (fail-open, best-effort)
   requestJson("/status", { method: "GET", timeoutMs: 500 })
@@ -1141,6 +1166,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
+    nativeBridgeHandle?.handleProgress(event);
     feedTui(event);
     feedSynapse(event);
     if (onProgress) {
@@ -1159,60 +1185,64 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     }
   };
 
-  const dispatches = progressive
-    ? await dispatchProgressive(sessionName, assignments, {
-        layout,
-        safeProgress,
-        dashboardLayout,
-      })
-    : await dispatchBatch(sessionName, assignments, {
-        layout,
-        safeProgress,
-        dashboardLayout,
-      });
+  try {
+    const dispatches = progressive
+      ? await dispatchProgressive(sessionName, assignments, {
+          layout,
+          safeProgress,
+          dashboardLayout,
+        })
+      : await dispatchBatch(sessionName, assignments, {
+          layout,
+          safeProgress,
+          dashboardLayout,
+        });
 
-  const results = await awaitAll(
-    sessionName,
-    dispatches,
-    timeoutSec,
-    safeProgress,
-    progressIntervalSec,
-    stallDetect,
-  );
-  const collected = await collectResults(sessionName, results);
+    const results = await awaitAll(
+      sessionName,
+      dispatches,
+      timeoutSec,
+      safeProgress,
+      progressIntervalSec,
+      stallDetect,
+    );
+    const collected = await collectResults(sessionName, results);
+    for (const result of collected) nativeBridgeHandle?.completeWorker(result);
 
-  // 완료 시 TUI에 최종 상태 반영 후 닫기
-  if (tui) {
-    for (const r of collected) {
-      tui.updateWorker(r.paneName, {
-        cli: r.cli,
-        role: r.role || "",
-        status: r.handoff?.status === "failed" ? "failed" : "completed",
-        handoff: r.handoff,
-        summary: r.handoff?.verdict || (r.matched ? "completed" : "failed"),
-        detail: r.output,
-        progress: 1,
-        elapsed: Math.round(
-          (Date.now() - (tui._startedAt || Date.now())) / 1000,
-        ),
-      });
+    // 완료 시 TUI에 최종 상태 반영 후 닫기
+    if (tui) {
+      for (const r of collected) {
+        tui.updateWorker(r.paneName, {
+          cli: r.cli,
+          role: r.role || "",
+          status: r.handoff?.status === "failed" ? "failed" : "completed",
+          handoff: r.handoff,
+          summary: r.handoff?.verdict || (r.matched ? "completed" : "failed"),
+          detail: r.output,
+          progress: 1,
+          elapsed: Math.round(
+            (Date.now() - (tui._startedAt || Date.now())) / 1000,
+          ),
+        });
+      }
+      tui.render();
+      // 최종 화면을 잠깐 유지 후 닫기
+      await new Promise((r) => setTimeout(r, 1500));
+      tui.close();
     }
-    tui.render();
-    // 최종 화면을 잠깐 유지 후 닫기
-    await new Promise((r) => setTimeout(r, 1500));
-    tui.close();
-  }
 
-  // Synapse: 세션 unregister (fire-and-forget)
-  for (const sid of synapseIds) {
-    requestJson("/synapse/unregister", {
-      method: "POST",
-      body: { sessionId: sid },
-      timeoutMs: 1000,
-    }).catch(() => {});
+    return { sessionName, results: collected };
+  } finally {
+    // Synapse: 세션 unregister (fire-and-forget)
+    for (const sid of synapseIds) {
+      requestJson("/synapse/unregister", {
+        method: "POST",
+        body: { sessionId: sid },
+        timeoutMs: 1000,
+      }).catch(() => {});
+    }
+    if (nativeBridgeHandle) await nativeBridgeHandle.close();
   }
-
-  return { sessionName, results: collected };
 }
 
 /**
