@@ -19,11 +19,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Update npm to 11.5.1+
-        run: npm install -g npm@latest
+      - name: Verify npm 11.5.1+
+        run: npm --version
 
       - name: Install dependencies
         run: npm ci || npm install --no-audit --no-fund
