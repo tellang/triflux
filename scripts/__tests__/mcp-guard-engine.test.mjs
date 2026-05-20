@@ -11,6 +11,7 @@ import {
   remediate,
   resolveHubUrl,
   scanForStdioServers,
+  syncRegistryTargets,
 } from "../lib/mcp-guard-engine.mjs";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,7 @@ const originalHome = {
   HOME: process.env.HOME,
   USERPROFILE: process.env.USERPROFILE,
   TFX_HUB_PORT: process.env.TFX_HUB_PORT,
+  EXA_API_KEY: process.env.EXA_API_KEY,
 };
 
 function createHomeDir(prefix = "mcp-guard-") {
@@ -47,6 +49,9 @@ afterEach(() => {
 
   if (originalHome.TFX_HUB_PORT === undefined) delete process.env.TFX_HUB_PORT;
   else process.env.TFX_HUB_PORT = originalHome.TFX_HUB_PORT;
+
+  if (originalHome.EXA_API_KEY === undefined) delete process.env.EXA_API_KEY;
+  else process.env.EXA_API_KEY = originalHome.EXA_API_KEY;
 });
 
 describe("mcp guard engine", () => {
@@ -54,15 +59,19 @@ describe("mcp guard engine", () => {
     const registry = loadRegistry();
     assert.equal(registry.version, 1);
     assert.equal(registry.servers["tfx-hub"].url, "http://127.0.0.1:27888/mcp");
-    assert.equal(registry.policies.watched_paths.length, 6);
+    assert.equal(registry.policies.watched_paths.length, 7);
   });
 
-  it("matches watched paths for Gemini, Claude project MCP, and local .mcp.json", () => {
+  it("matches watched paths for Gemini, Antigravity, Claude project MCP, and local .mcp.json", () => {
     const homeDir = createHomeDir();
     withHome(homeDir);
 
     assert.equal(
       isWatchedPath(join(homeDir, ".gemini", "settings.json")),
+      true,
+    );
+    assert.equal(
+      isWatchedPath(join(homeDir, ".gemini", "config", "mcp_config.json")),
       true,
     );
     assert.equal(
@@ -205,5 +214,81 @@ describe("mcp guard engine", () => {
     // env 없음 + hub.pid port 존재 → registry/default 27888 fallback.
     // pid port cascade 가 제거되어 29991 이 쓰이면 안 됨.
     assert.equal(resolveHubUrl(), "http://127.0.0.1:27888/mcp");
+  });
+
+  it("syncs antigravity MCP config with Gemini-style JSON and http type", () => {
+    const homeDir = createHomeDir();
+    withHome(homeDir);
+    process.env.EXA_API_KEY = "test-exa-key";
+
+    const antigravityPath = join(
+      homeDir,
+      ".gemini",
+      "config",
+      "mcp_config.json",
+    );
+    const registry = {
+      version: 1,
+      defaults: {
+        transport: "hub-url",
+        hub_base: "http://127.0.0.1:27888",
+      },
+      servers: {
+        "tfx-hub": {
+          transport: "hub-url",
+          url: "http://127.0.0.1:27888/mcp",
+          safe: true,
+          targets: ["gemini", "antigravity"],
+        },
+        context7: {
+          transport: "http",
+          url: "https://mcp.context7.com/mcp",
+          safe: true,
+          targets: ["gemini"],
+        },
+        exa: {
+          transport: "http",
+          url: "https://mcp.exa.ai/mcp",
+          headers: {
+            Authorization: { env: "EXA_API_KEY", prefix: "Bearer " },
+          },
+          safe: true,
+          targets: ["antigravity"],
+        },
+      },
+      policies: {
+        stdio_action: "replace-with-hub",
+        unknown_server_action: "warn",
+        sync_denylist: [],
+        watched_paths: ["~/.gemini/config/mcp_config.json"],
+      },
+    };
+
+    const result = syncRegistryTargets({ registry });
+    const updated = JSON.parse(readFileSync(antigravityPath, "utf8"));
+
+    assert.deepEqual(
+      result.actions.map((action) => ({
+        label: action.label,
+        status: action.status,
+        serverCount: action.serverCount,
+      })),
+      [{ label: "Antigravity", status: "updated", serverCount: 2 }],
+    );
+    assert.deepEqual(updated, {
+      mcpServers: {
+        "tfx-hub": {
+          url: "http://127.0.0.1:27888/mcp",
+          type: "http",
+        },
+        exa: {
+          url: "https://mcp.exa.ai/mcp",
+          type: "http",
+          headers: {
+            Authorization: "Bearer test-exa-key",
+          },
+        },
+      },
+    });
   });
 });

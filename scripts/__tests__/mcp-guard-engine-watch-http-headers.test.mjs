@@ -117,7 +117,7 @@ describe("watched MCP remediation with HTTP headers", () => {
     assert.match(JSON.stringify(result), /\*\*\*REDACTED\*\*\*/);
   });
 
-  it("keeps stdio-only registry entries unsupported", () => {
+  it("accepts stdio-only registry entries with command and args", () => {
     const errors = validateRegistry({
       version: 1,
       defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
@@ -131,8 +131,6 @@ describe("watched MCP remediation with HTTP headers", () => {
       policies: { watched_paths: [] },
     });
 
-    assert.ok(errors.some((error) => error.includes("transport")));
-    assert.ok(errors.some((error) => error.includes("command")));
-    assert.ok(errors.some((error) => error.includes("args")));
+    assert.deepEqual(errors, []);
   });
 });
