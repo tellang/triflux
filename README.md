@@ -8,19 +8,19 @@
   </picture>
 </p>
 
-<h3 align="center">Tri-CLI Orchestration with Consensus Intelligence</h3>
+<h3 align="center">CLI-first multi-model orchestration for Claude Code, Codex, and Gemini</h3>
 
 <p align="center">
-  Route tasks across <strong>Claude + Codex + Gemini</strong> — 13 public core skills, natural language routing,<br>
-  cross-model review, and reflexion-based adaptive learning.
+  One front door for routing work, coordinating agents, running local/remote teams,<br>
+  and keeping Codex/Gemini/Claude execution behind auditable guards.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/skills-13_core-F5C242?style=flat-square" alt="13 core skills">
-  <sub>+ 11 compatibility aliases</sub>
+  <img src="https://img.shields.io/badge/skill_files-33-F5C242?style=flat-square" alt="33 skill files">
+  <sub>11 compatibility aliases are deprecated</sub>
   <img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node >= 18">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
@@ -31,367 +31,229 @@
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> &middot;
-  <a href="#core-engine">Core Engine</a> &middot;
-  <a href="#killer-skills">Killer Skills</a> &middot;
-  <a href="#all-13-core-skills-plus-compatibility-aliases">All 13 Skills</a> &middot;
-  <a href="#deep-vs-light">Deep vs Light</a> &middot;
+  <a href="#current-surface">Current Surface</a> &middot;
+  <a href="#canonical-workflows">Canonical Workflows</a> &middot;
   <a href="#architecture">Architecture</a> &middot;
-  <a href="#security">Security</a>
+  <a href="#operations">Operations</a> &middot;
+  <a href="#security-and-guards">Security</a>
 </p>
 
 ---
 
 ## What is triflux?
 
-Most AI coding tools talk to **one model**. triflux talks to **three** — and makes them argue.
+triflux is a **Claude Code plugin + npm CLI** for routing AI coding work across
+Claude, Codex, and Gemini without letting ad-hoc shell commands or stale skill
+aliases become the control plane.
 
-triflux is not a collection of skills. It is a **multi-model parallel orchestration harness**. The 13 public core skills, 11 compatibility aliases, and internal routed helpers are what it does. The harness — consensus engine, message bus, router, and security guard — is what makes it different.
+The current design is intentionally simpler than the old README implied:
 
-Every Deep skill runs Claude, Codex, and Gemini **independently** (no cross-visibility), then cross-validates their findings. Only consensus-verified results survive. The result: **87% fewer false positives** compared to single-model review.
-
-Phase 4 folds the legacy surface into one front door: `tfx-auto` with flag-based routing. Old skill names still work as thin aliases.
-
-You don't need to memorize commands. Say what you want in natural language — triflux routes to the right skill automatically:
-
-```
-"review this"          → /tfx-review       (Deep by default — 3-party consensus)
-"review this --quick"  → /tfx-review --quick  (quick opt-out)
-"리뷰해줘"              → /tfx-review       (Korean works too)
-"제대로 리뷰해"          → /tfx-review       (depth modifier detected)
-```
+- **`/tfx-auto` is the canonical Claude Code skill front door.** Use flags to
+  express quick/deep/consensus/parallel/retry behavior.
+- **`tfx` is the shell CLI.** Use it for setup, diagnostics, hub lifecycle,
+  MCP sync, team/swarm orchestration, and handoffs.
+- **Compatibility aliases still exist, but they are not the primary API.** They
+  are documented in [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md)
+  so the main README stays focused on the supported path.
+- **Host-local Codex harnesses are out of package scope.** For example, a local
+  `~/.codex/skills/tfx-harness` can recommend workflows on one machine, but it
+  is not shipped in this repository, npm package, or Claude plugin.
 
 ---
 
 ## Quick Start
 
-**Claude Code** (recommended) — run inside a Claude Code session:
+### 1. Install
 
-```
+Claude Code plugin install:
+
+```text
 /plugin marketplace add tellang/triflux
 /plugin install triflux@tellang
 ```
 
-**npm**:
+npm install:
 
 ```bash
 npm install -g triflux
 ```
 
-Then run `tfx setup` to configure your environment.
-
-### Use
+Then run the setup/diagnostic path from a terminal:
 
 ```bash
-# 3-party consensus — three models argue, only consensus survives
-/tfx-review
-/tfx-plan "migrate REST to GraphQL"
+tfx setup
+tfx doctor
+```
 
-# Swarm — split PRD into shards, parallel worktree execution
-/tfx-swarm
+Use `tfx doctor --json` when you need machine-readable status for automation.
 
-# Team — Claude + Codex + Gemini on parallel tasks
-/tfx-multi "refactor auth + update UI + add tests"
+### 2. Use the canonical front doors
 
-# Persist — or call the front door directly
-/tfx-auto "implement full auth flow with tests" --retry ralph
+Claude Code slash skills:
 
-# Remote — single front door for setup, spawn, attach, resume
+```text
+/tfx-auto "review this change" --mode consensus
+/tfx-auto "implement auth flow with tests" --mode deep --retry ralph
+/tfx-auto "split this PRD across isolated shards" --parallel swarm --mode consensus --isolation worktree
+/tfx-remote spawn ryzen5-7600 "run a security review"
+/tfx-doctor
+```
+
+Shell CLI:
+
+```bash
+tfx list
+tfx hub ensure
+tfx mcp list
+tfx handoff --target remote --output .omx/handoff.md
+tfx swarm preflight docs/prd/example.md --json
+tfx codex-team "refactor auth + add tests"
+```
+
+> Deep, consensus, team, and swarm paths need the relevant CLIs and a terminal
+> multiplexer. Run `tfx doctor` first; it reports missing Codex/Gemini/Claude,
+> psmux/tmux, Hub, MCP, profile, and stale-skill issues.
+
+---
+
+## Current Surface
+
+### Shell commands
+
+The `tfx` CLI currently exposes these primary commands:
+
+| Command | Use |
+| --- | --- |
+| `tfx setup` | Sync scripts, HUD, hooks, MCP, and profiles. Supports `--dry-run`. |
+| `tfx doctor` | Diagnose and repair installation state. Supports `--fix`, `--reset`, `--diagnose`, `--json`. |
+| `tfx mcp` | Manage MCP registry targets with `list`, `sync`, `add`, and `remove`. |
+| `tfx hub` | Start, stop, ensure, or inspect the local MCP message bus. |
+| `tfx list` | Show installed package and user skills. |
+| `tfx handoff` | Serialize the current context for local or remote continuation. |
+| `tfx schema` | Print CLI and Hub delegator schemas. |
+| `tfx multi` | Launch local multi-agent team mode through tmux/psmux + Hub. |
+| `tfx swarm` | Plan, preflight, run, or list PRD-based worktree-isolated swarm work. |
+| `tfx synapse` | Inspect swarm registry and leases. |
+| `tfx codex-team` | Codex-led team mode convenience wrapper. |
+| `tfx notion-read` | Convert Notion pages to Markdown through configured MCP clients. |
+| `tfx why` | Read intent trailers from the last commit touching a path. |
+| `tfx update` | Update to the latest stable or dev package. |
+| `tfx version` | Print version information. |
+| `tfx-profile` | Convenience binary for interactive Codex/Gemini profile management. |
+
+Run `tfx schema <command>` for the exact argument contract.
+
+### Claude Code skills
+
+The package ships **33 skill files**. The important split is:
+
+- **Canonical entrypoints**: `tfx-auto`, `tfx-remote`, `tfx-doctor`,
+  `tfx-setup`, `tfx-profile`, `tfx-hub`, `tfx-hooks`, `tfx-ship`, `tfx-wt`.
+- **Task helpers**: `tfx-plan`, `tfx-review`, `tfx-qa`, `tfx-research`,
+  `tfx-analysis`, `tfx-find`, `tfx-index`, `tfx-interview`, `tfx-prune`,
+  `tfx-forge`, `merge-worktree`, `star-prompt`.
+- **Deprecated compatibility aliases**: 11 legacy names remain only as transition
+  shims. Prefer the canonical commands above and see the alias table only when
+  migrating old prompts.
+
+### Canonical flag map
+
+Most old skill names now map to explicit `tfx-auto` flags:
+
+| Intent | Canonical form |
+| --- | --- |
+| quick single-lane work | `/tfx-auto "task" --mode quick` |
+| deeper plan/execute/verify loop | `/tfx-auto "task" --mode deep` |
+| persistent retry loop | `/tfx-auto "task" --retry ralph` |
+| consensus review | `/tfx-auto "task" --mode consensus` |
+| debate or panel report | `/tfx-auto "task" --mode consensus --shape debate|panel` |
+| local parallel work | `/tfx-auto "task" --parallel N --mode deep` or shell `tfx multi ...` |
+| PRD/worktree swarm | `/tfx-auto "task" --parallel swarm --mode consensus --isolation worktree` or shell `tfx swarm ...` |
+| force a CLI lane | `/tfx-auto "task" --cli codex|gemini|claude` |
+
+### Control-plane boundaries
+
+Keep these surfaces separate when debugging or extending triflux:
+
+| Surface | Source of truth | Ships in npm/plugin? |
+| --- | --- | --- |
+| Public CLI/runtime | `bin/`, `scripts/`, `hub/`, `hooks/`, `skills/` | Yes |
+| Published mirror | `packages/triflux/` | Yes; must match root runtime files |
+| Claude plugin metadata | `.claude-plugin/` | Yes; points at npm package contents |
+| Codex-local harness experiments | `~/.codex/skills/*` | No |
+| Legacy aliases | `skills/<alias>/` + `docs/legacy-skill-aliases.md` | Yes, but deprecated |
+
+If a local Codex harness recommends a workflow, treat that as host-local routing
+advice. The package contract is still the CLI, Claude skill, hook, and Hub surface
+above.
+
+---
+
+## Canonical Workflows
+
+### Direct implementation or review
+
+```text
+/tfx-auto "fix the failing auth tests" --risk-tier medium
+/tfx-auto "review this PR for SQL and trust-boundary issues" --mode consensus
+```
+
+Use `--risk-tier low|medium|high` when you want verification intensity to be
+explicit. Use `--mode quick|deep|consensus` when you already know the mode.
+
+### Persistent completion loop
+
+```text
+/tfx-auto "finish the migration and verify it" --mode deep --retry ralph --max-iterations 10
+```
+
+`--retry ralph` uses the retry state machine and stuck detection. Set
+`--max-iterations` when the loop must be bounded.
+
+### Consensus, debate, or panel output
+
+```text
+/tfx-auto "Postgres LISTEN/NOTIFY vs Redis Streams" --mode consensus --shape debate
+/tfx-auto "review the migration strategy" --mode consensus --shape panel
+```
+
+Consensus participants are the configured Claude/Codex/Gemini lanes. If a lane is
+unavailable, the result should report partial/degraded status instead of hiding it.
+
+### Local team or PRD swarm
+
+```text
+# Local team mode
+tfx multi "refactor auth + update UI + add tests"
+
+# Worktree-isolated PRD swarm
+tfx swarm preflight docs/prd/my-feature.md --json
+tfx swarm run docs/prd/my-feature.md
+```
+
+Swarm work uses isolated worktrees and file leases. Use preflight before running a
+large PRD so missing hosts, CLI profiles, and lease conflicts are caught first.
+
+### Remote sessions
+
+```text
+/tfx-remote setup
 /tfx-remote spawn ryzen5-7600 "run security review"
+/tfx-remote list
+/tfx-remote attach <session>
+/tfx-remote send <session> "continue with fixes"
 ```
 
-> **Note**: Deep skills require **psmux** (or tmux), **triflux Hub**, **Codex CLI**, and **Gemini CLI** for full Tri-CLI consensus. Without these, skills automatically degrade to Claude-only mode. Run `tfx doctor` to check your environment.
+`tfx-remote` is the consolidated Claude skill surface for setup/spawn/list/attach/send/resume/probe/kill flows.
 
-### State Snapshots
-
-Hub startup also takes a best-effort daily snapshot of selected `~/.codex/` and
-`~/.gemini/` state into `references/codex-snapshots/` and
-`references/gemini-snapshots/`. Snapshot archives are rolling backups capped at
-10 files per tool and are ignored by git.
-
-Manual commands:
+### Save or restore context
 
 ```bash
-npm run snapshot:codex
-npm run snapshot:gemini
-npm run snapshot:all
+tfx handoff --target remote --decision "Keep README canonical; move aliases to docs" --output .omx/handoff.md
 ```
 
----
-
-## Core Engine
-
-The infrastructure that makes triflux triflux. If any of these break, everything breaks.
-
-### Tri-CLI Consensus
-
-<p align="center">
-  <img src="docs/assets/consensus-flow.svg" alt="Tri-CLI Consensus Flow" width="680">
-</p>
-
-The core innovation. Instead of trusting a single model, every Deep skill runs:
-
-```
-Phase 1: Independent Analysis (Anti-Herding)
-  ├─ Claude Opus  → Analysis A  (isolated, no cross-visibility)
-  ├─ Codex CLI    → Analysis B  (isolated, no cross-visibility)
-  └─ Gemini CLI   → Analysis C  (isolated, no cross-visibility)
-
-Phase 2: Cross-Validation
-  ├─ Compare findings across 3 sources
-  ├─ 2/3+ agreement → CONSENSUS
-  └─ 1/3 only → DISPUTED (needs resolution)
-
-Phase 3: Resolution (if consensus < 70%)
-  ├─ Each CLI reviews opposing arguments
-  ├─ Accept or rebut with evidence
-  └─ Unresolved → user decides
-```
-
-### Hub — Singleton MCP Message Bus
-
-triflux Hub runs as a **singleton daemon** per machine. A filesystem lock prevents duplicate instances.
-
-```
-Local agents ──→ Named Pipe (NDJSON, sub-ms latency) ──→ Hub
-Remote/Dashboard ──→ HTTP/REST ──────────────────────→ Hub
-```
-
-The bridge client tries Named Pipe first and falls back to HTTP automatically. Sessions auto-expire after 30 minutes, and the Hub self-terminates when idle. Run `tfx hub ensure` to guarantee the Hub is alive from any context.
-
-### Router — Natural Language Skill Mapping
-
-`tfx-auto` is the unified entry point. Natural language input → keyword detection → skill routing → CLI dispatch. Depth modifiers ("thoroughly", "제대로") auto-escalate Light skills to Deep. The router handles Korean and English natively.
-
-tfx-auto flags now express all legacy behaviors:
-- `--retry ralph` / `--retry auto-escalate` (true state machine, Phase 3)
-- `--lead codex` / `--no-claude-native` (Codex-led pipeline, Phase 3)
-- `--shape debate|panel|consensus` (ensemble fold, Phase 4)
-
-### Guard — Security Perimeter
-
-Two layers that enforce the safety boundary:
-
-- **headless-guard**: Blocks direct `codex exec` / `gemini -y` outside tfx skills. Wrapper bypass, pipe bypass, env escape vectors all covered.
-- **safety-guard**: SSH bash-syntax forwarding prevention, injection-safe shell execution.
-
-Every CLI invocation flows through the guard layer. No exceptions.
-
-### Reflexion Adaptive Learning
-
-Errors become knowledge automatically. The Reflexion Engine runs a closed-loop learning pipeline:
-
-```
-safety-guard blocks command
-  → error normalized (paths, timestamps, UUIDs stripped)
-  → pattern stored in pending-penalties
-  → promoted to adaptive rule (Bayesian confidence scoring)
-  → injected into CLAUDE.md when confidence > threshold
-
-Three-tier memory:
-  Tier 1 (Session)   → cleared on session end
-  Tier 2 (Project)   → decays -0.2 confidence per 5 unobserved sessions
-  Tier 3 (Permanent) → auto-injected into CLAUDE.md as machine-readable rules
-```
-
-A blocked command in Session 1 becomes a proactive warning in Session 2 and eventually a permanent instruction. Your AI agent literally gets smarter over time.
-
-### Pipeline Quality Gates
-
-Every Deep task runs through a **10-phase state machine** with quality gates:
-
-```
-plan → PRD → confidence gate → execute → deslop → verify → selfcheck → complete
-                                                              ↓
-                                                          fix (max 3) → retry
-```
-
-- **Confidence Gate** (pre-execution): 5 weighted criteria must score >= 90% before execution starts
-- **Hallucination Detection** (post-execution): 7 regex patterns catch AI claims without evidence:
-  - "tests pass" without test output
-  - "performance improved" without benchmarks
-  - "backward compatible" without verification
-  - "no changes needed" when diff exists
-- **Bounded loops**: Fix attempts capped at 3, ralph iterations at 10. State persists in SQLite for crash recovery.
-
----
-
-## Killer Skills
-
-These are why you use triflux. Each one depends on the Core Engine above.
-
-### Multi-CLI Team Orchestration — `tfx-multi` (alias for `tfx-auto --parallel N`)
-
-Run Claude + Codex + Gemini as a coordinated team on parallel tasks. Phase 4 keeps `tfx-multi` as a compatibility alias while `tfx-auto --parallel N` becomes the canonical surface.
-
-```bash
-/tfx-multi "refactor auth + update UI + add tests"
-/tfx-multi --agents codex,gemini "frontend + backend"
-```
-
-### Multi-Machine x Multi-Model Swarm — `tfx-swarm`
-
-One PRD, multiple machines, multiple models. Write a PRD with `agent:` and `host:` per shard, and triflux distributes work across local and remote machines using Claude + Codex + Gemini in parallel.
-
-```bash
-/tfx-swarm    # select PRDs, choose remote/model config, launch workers
-```
-
-Example PRD shard:
-```markdown
-## Shard: security-audit
-- agent: claude
-- host: ryzen5-7600
-- critical: true
-- files: src/security.mjs
-- prompt: Security vulnerability audit
-```
-
-Each shard gets its own git worktree, file-lease enforcement prevents conflicts, and results merge automatically in dependency order. Critical shards run on two different models for redundant verification.
-
-### Remote Sessions — `tfx-remote`
-
-`tfx-remote` is the consolidated remote surface. Setup, spawn, attach, send, resume, probe, and rules now live behind one command family. `tfx-remote-spawn` remains as a thin alias during the transition.
-
-```bash
-/tfx-remote spawn ryzen5-7600 "run security review"
-/tfx-remote list           # see active remote sessions
-```
-
-### Persistence Loop — `tfx-persist` (alias for `tfx-auto --retry ralph`)
-
-"Don't stop until it's done." Phase 3 turns `--retry ralph` into the real persistence state machine, with `--max-iterations N` and the four-step `DEFAULT_ESCALATION_CHAIN` available from the unified surface.
-
-```bash
-/tfx-persist "implement full auth flow with tests"
-/tfx-auto "implement full auth flow with tests" --retry ralph --max-iterations 10
-```
-
-### 3-Party Consensus Reviews — `tfx-review` / `tfx-plan`
-
-The bread-and-butter Deep skills. Three models independently review your code or plan your implementation, then cross-validate. Only consensus-verified findings survive.
-
-```bash
-/tfx-review            # 3-party code review by default
-/tfx-plan "migrate to GraphQL"  # 3-party planning by default
-```
-
-### Structured Debate — `tfx-debate` (alias for `tfx-auto --mode consensus --shape debate`)
-
-Three models take independent positions on a technical question, debate, and converge on a recommendation. Anti-herding ensures genuine independence, while Phase 4 folds the output shape into `tfx-auto`.
-
-```bash
-/tfx-debate "Redis vs PostgreSQL LISTEN/NOTIFY for real-time events"
-```
-
----
-
-## All 13 Core Skills (plus compatibility aliases)
-
-<details>
-<summary>Expand full skill list</summary>
-
-### Research & Discovery
-
-| Skill | Type | Description |
-|-------|------|-------------|
-| `tfx-index` | Core | Project indexing and context compression |
-
-Internal routed helpers: `tfx-research`, `tfx-find`
-
-### Analysis & Planning
-
-| Skill | Type | Description |
-|-------|------|-------------|
-| _No standalone public surface_ | — | Analysis, planning, and interview route through internal helpers |
-
-Internal routed helpers: `tfx-analysis`, `tfx-plan`, `tfx-interview`
-
-### Execution
-
-| Skill | Type | Description |
-|-------|------|-------------|
-| `tfx-auto` | Core | Unified CLI orchestrator — auto-triage, flag-based routing, and legacy surface folding |
-
-Compatibility aliases: `tfx-autopilot`, `tfx-fullcycle`, `tfx-multi`, `tfx-persist`, `tfx-swarm`
-
-### Review & QA
-
-| Skill | Type | Description |
-|-------|------|-------------|
-| _No standalone public surface_ | — | Review, QA, and cleanup route through internal helpers |
-
-Internal routed helpers: `tfx-review`, `tfx-qa`, `tfx-prune`
-
-### Debate & Decision
-
-| Skill | Type | Description |
-|-------|------|-------------|
-| _No standalone active surface_ | — | Debate, consensus, and panel shapes now route through `tfx-auto --mode consensus` |
-
-Compatibility aliases: `tfx-consensus`, `tfx-debate`, `tfx-panel`
-
-### Persistence & Routing
-
-| Skill | Type | Description |
-|-------|------|-------------|
-| `tfx-hooks` | Core | Claude Code hook priority manager |
-| `tfx-profile` | Core | Codex/Gemini CLI profile management |
-
-Internal routed helper: `tfx-ralph`
-
-### Orchestration & Infrastructure
-
-| Skill | Description |
-|-------|-------------|
-| `tfx-hub` | MCP message bus — Named Pipe & HTTP bridge |
-| `merge-worktree` | Worktree merge helper for swarm results |
-
-Swarm execution is exposed through `tfx-auto --parallel swarm` and the `tfx swarm` CLI.
-
-### Remote
-
-| Skill | Description |
-|-------|-------------|
-| `tfx-remote` | Unified remote command family — setup, spawn, list, attach, send, resume, probe, rules |
-
-Compatibility aliases: `tfx-remote-spawn`, `tfx-remote-setup`, `tfx-psmux-rules` — rules moved to `.claude/rules/tfx-psmux.md` in Phase 4
-
-### Meta & Tooling
-
-| Skill | Description |
-|-------|-------------|
-| `tfx-forge` | Create new skills interactively |
-| `tfx-setup` | Initial setup wizard |
-| `tfx-doctor` | Diagnostics and auto-repair |
-| `tfx-ship` | Ship workflow orchestration |
-| `tfx-wt` | Windows Terminal tab/pane control |
-| `star-prompt` | GitHub star prompt for postinstall |
-
-</details>
-
----
-
-## Deep vs Light
-
-<p align="center">
-  <img src="docs/assets/deep-vs-light.svg" alt="Deep vs Light comparison" width="680">
-</p>
-
-Every domain offers both modes. Depth modifiers in natural language auto-escalate:
-
-Phase mapping:
-- `--mode deep` is the direct Light → Deep switch from Phase 2
-- `--retry ralph` / `--retry auto-escalate` add Phase 3 persistence and escalation semantics
-- `--shape consensus|debate|panel` adds Phase 4 output-shape routing on top of consensus mode
-
-| Dimension | Light | Deep |
-|-----------|-------|------|
-| **Models** | Single (usually Codex) | 3-party (Claude + Codex + Gemini) |
-| **Tokens** | 3K–15K | 20K–80K |
-| **Speed** | Seconds | Minutes |
-| **Accuracy** | Good (single perspective) | Excellent (consensus-verified) |
-| **Bias** | Possible | Eliminated via anti-herding |
-| **Trigger** | Default, "quick", "fast" | "thoroughly", "carefully", "제대로" |
+Use handoffs when a session is ending or when another host/agent needs the current
+state without replaying the entire conversation.
 
 ---
 
@@ -401,194 +263,167 @@ Phase mapping:
   <img src="docs/assets/architecture.svg" alt="triflux architecture" width="680">
 </p>
 
-<details>
-<summary>Interactive diagram</summary>
-
 ```mermaid
 graph TD
-    User([User / Claude Code]) <-->|"Skills & Natural Language"| TFX[tfx Skills Layer]
-    TFX <-->|Consensus Engine| CONSENSUS[tfx-consensus]
-
-    subgraph "Tri-CLI Consensus"
-        CONSENSUS -->|Independent| CLAUDE[Claude Opus/Sonnet]
-        CONSENSUS -->|Independent| CODEX[Codex CLI]
-        CONSENSUS -->|Independent| GEMINI[Gemini CLI]
-        CLAUDE --> MERGE[Cross-Validation]
-        CODEX --> MERGE
-        GEMINI --> MERGE
-        MERGE --> GATE{Consensus >= 70%?}
-        GATE -->|Yes| OUTPUT[Verified Output]
-        GATE -->|No| RESOLVE[Resolution Round]
-        RESOLVE --> MERGE
-    end
-
-    TFX <-->|Named Pipe / HTTP| HUB[triflux Hub]
-
-    subgraph "Hub Services"
-        HUB <--> STORE[(SQLite Store)]
-        HUB <--> REFLEXION[Reflexion Engine]
-        HUB <--> ADAPTIVE[Adaptive Rules]
-        HUB <--> MONITOR[TUI Monitor]
-    end
-
-    REFLEXION -->|"Feedback Loop"| TFX
-    HUB -.->|MCP Bridge| External[External MCP Clients]
+    User([User / Claude Code / shell]) --> Skills[Claude skills]
+    User --> CLI[tfx CLI]
+    Skills --> Auto[/tfx-auto]
+    Skills --> Remote[/tfx-remote]
+    CLI --> Hub[triflux Hub]
+    CLI --> Team[tfx multi / swarm]
+    Auto --> Route[tfx-route.sh + guards]
+    Team --> Hub
+    Remote --> Hub
+    Route --> Codex[Codex CLI]
+    Route --> Gemini[Gemini CLI]
+    Route --> Claude[Claude Code]
+    Hub --> MCP[MCP registry + bridge]
+    Hub --> Store[(SQLite or memory store)]
+    Hub --> Dashboard[HUD / monitor]
 ```
 
-</details>
+The common routing path is:
+
+1. Claude Code prompt or explicit skill invocation.
+2. Keyword/routing hooks may add context or choose a skill.
+3. `tfx-auto` normalizes intent into mode, retry, parallelism, risk tier, and
+   target CLI lane.
+4. `tfx-route.sh`, Hub workers, or the `tfx` CLI execute the actual Codex/Gemini/
+   Claude-backed work.
+5. Hub records team messages, leases, retries, handoffs, and status surfaces.
+
+### Hub
+
+The Hub is the local message bus for teams, remote sessions, MCP tools, and
+status surfaces. It binds to localhost, uses pipe/HTTP transports, and can be
+managed with:
+
+```bash
+tfx hub ensure
+tfx hub status --json
+tfx hub stop
+```
+
+macOS may show a firewall prompt when tests or Hub startup open a localhost port
+through `node`. For normal documentation work this is not needed; for active Hub,
+team, or MCP workflows allow localhost access if your environment requires it.
+
+### Guards
+
+triflux keeps risky execution behind managed routes:
+
+- CLI calls should flow through `tfx-route.sh`, Hub workers, or the `tfx` CLI.
+- Direct `codex exec` / `gemini -y` paths are guarded in the installed workflow.
+- psmux/Windows Terminal flows must use the managed API and documented rules, not
+  ad-hoc `wt.exe` or `psmux send-keys` snippets.
+
+### Profiles and model routing
+
+Use `tfx-profile` or `tfx setup` to manage Codex/Gemini profiles. Do not hardcode
+model and effort flags in launcher scripts when a profile already owns them.
 
 ---
 
-## TUI Routing Monitor
+## Operations
 
-**Available in v10.11.0** — `tfx monitor` launches an interactive terminal dashboard:
+### Diagnostics
 
-```
-┌─ Routing Monitor ─────────────────────────────────────────┐
-│                                                           │
-│  Active Skills    Success Rate    Avg Latency    Model    │
-│  ─────────────    ────────────    ───────────    ─────    │
-│  tfx-review       94.2%           3.2s           codex    │
-│  tfx-auto         87.1%           5.8s           mixed    │
-│  tfx-research     91.0%           4.1s           claude   │
-│                                                           │
-│  Reflexion Store: 142 rules  │  Adaptive: 28 promoted     │
-│  Q-Table entries: 89         │  Pending penalties: 3      │
-│                                                           │
-└───────────────────────────────────────────────────────────┘
+```bash
+tfx doctor
+tfx doctor --json
+tfx doctor --fix
+tfx doctor --diagnose
 ```
 
-The monitor visualizes:
-- Real-time skill routing decisions and model selection
-- Success/failure rates per skill and per model
-- Reflexion store growth and adaptive rule promotions
-- Q-Learning weight evolution (when `TRIFLUX_DYNAMIC_ROUTING=true`)
+`doctor` checks CLI availability, profiles, hooks, skills, Hub, MCP registry,
+route-script sync, stale teams, and common local configuration drift.
 
----
+### MCP registry
 
-## What's New
+```bash
+tfx mcp list
+tfx mcp sync
+tfx mcp add context7 --url https://mcp.context7.com/mcp
+tfx mcp remove context7
+```
 
-### v10.11.0 — Phase 3: Retry, Escalation, Codex Lead
+The registry is the source of truth for managed MCP targets. Avoid hand-editing
+Codex/Gemini/Claude MCP files unless you are intentionally debugging drift.
 
-| Feature | Description |
-|---------|-------------|
-| **True Ralph Retry** | `--retry ralph` now maps to the real persistence state machine instead of a bounded placeholder |
-| **Auto Escalation** | `--retry auto-escalate` enables the four-step `DEFAULT_ESCALATION_CHAIN` |
-| **Codex-Led Pipeline** | `--lead codex` and `--no-claude-native` expose the Codex-first execution lane |
-| **Iteration Budgeting** | `--max-iterations N` makes retry loops explicit and reviewable |
-| **Reflexion + Guards** | safety-guard and headless-guard continue feeding adaptive learning and hard security boundaries |
-| **Routing Monitor** | `tfx monitor` remains the live view over skill routing, model mix, and latency |
+### State snapshots
 
-### v10.11.0 — Phase 4: Flag-Based Surface Consolidation
+Hub startup can take best-effort daily snapshots of selected `~/.codex/` and
+`~/.gemini/` state into ignored `references/*-snapshots/` folders. Manual helpers:
 
-<details>
-<summary>Expand Phase 4 details</summary>
+```bash
+npm run snapshot:codex
+npm run snapshot:gemini
+npm run snapshot:all
+```
 
-- **One front door** — `tfx-auto` now absorbs legacy behaviors through flags instead of one-off top-level surfaces
-- **Consensus shapes** — `--shape consensus|debate|panel` folds ensemble behaviors into the main router
-- **Remote consolidation** — `tfx-remote` becomes the single remote surface while `tfx-remote-spawn` remains a thin alias
-- **Rules relocation** — `tfx-psmux-rules` moved out of the skill surface to `.claude/rules/tfx-psmux.md`
-- **Legacy compatibility** — 11 compatibility aliases remain for transition safety and are slated for later removal
+### Release and mirror checks
 
-</details>
+For repository changes that affect package contents, run the release gates before
+shipping:
 
-### v9 — Harness-Native Intelligence
+```bash
+npm run gen:skill-docs
+npm run gen:skill-manifest
+npm run release:check-sync
+npm run release:check-mirror
+npm run lint
+```
 
-<details>
-<summary>Expand v9 details</summary>
-
-- **Natural Language Routing** — Say "review this" or "리뷰해줘" instead of memorizing skill names
-- **Cross-Model Review** — Claude writes → Codex reviews. Same-model self-approve blocked
-- **Context Isolation** — Off-topic requests auto-detected; spawns a clean psmux session
-- **Codex Swarm Hardened** — PowerShell `.ps1` launchers, profile-based execution
-
-</details>
-
-### v8 — Tri-Debate Foundation
-
-<details>
-<summary>Expand v8 details</summary>
-
-- **Tri-Debate Engine** — 3-CLI independent analysis with anti-herding and consensus scoring
-- **Deep/Light Variants** — Every domain has both a fast mode and a thorough mode
-- **Expert Panel** — Virtual expert simulation via `tfx-panel`
-- **Hub IPC** — Named Pipe & HTTP MCP bridge
-- **psmux** — Windows Terminal native multiplexer
-
-</details>
-
----
-
-## Security
-
-| Layer | Protection |
-|-------|-----------|
-| **Hub Token Auth** | Secure IPC via `TFX_HUB_TOKEN` (Bearer Auth) |
-| **Localhost Binding** | Hub defaults to `127.0.0.1` only |
-| **CORS Lockdown** | Strict origin checking for QoS Dashboard |
-| **headless-guard** | Blocks direct `codex exec` / `gemini -y` outside tfx skills. Wrapper bypass, pipe bypass, env escape vectors all covered |
-| **safety-guard** | SSH bash-syntax forwarding prevention, injection-safe shell execution |
-| **Consensus Verification** | Deep skills prevent single-model hallucination via 3-party consensus |
-| **Reflexion Feedback** | Security events feed adaptive rules for continuous improvement |
+`packages/triflux` is the npm-publishable mirror for several top-level runtime
+folders. Keep it synchronized when touching mirrored runtime files.
 
 ---
 
 ## Platform Support
 
-| Platform | Multiplexer | Status |
-|----------|-------------|--------|
-| **Windows** | psmux (PowerShell) + Windows Terminal | Full support (CP949 encoding handled) |
-| **Linux** | tmux | Full support |
-| **macOS** | tmux | Full support |
+| Platform | Multiplexer | Notes |
+| --- | --- | --- |
+| macOS | tmux | Supported. Requires a timeout provider such as `gtimeout` for some flows. |
+| Linux | tmux | Supported. |
+| Windows | psmux + Windows Terminal | Supported through managed psmux/WT paths. PowerShell is the default psmux shell. |
+
+See `AGENTS.md` and `.claude/rules/tfx-psmux.md` for the stricter Windows/psmux
+rules used by agents and launch scripts.
 
 ---
 
-## 5-Tier Adaptive HUD
+## Security and Guards
 
-The Claude Code status bar auto-adapts to any terminal width:
+| Layer | Protection |
+| --- | --- |
+| Hub token auth | Local bearer token for Hub APIs where configured. |
+| Localhost binding | Hub defaults to `127.0.0.1`. |
+| MCP registry guard | Replaces unsupported or stale MCP records with managed HTTP entries. |
+| Headless guard | Blocks unmanaged Codex/Gemini headless execution paths. |
+| Safety guard | Sanitizes shell-sensitive psmux/SSH/WT flows. |
+| Consensus reporting | Deep/consensus workflows should report degraded or disputed findings explicitly. |
 
+---
+
+## Development
+
+```bash
+npm ci
+npm test
+npm run lint
+npm run release:check-sync
+npm run release:check-mirror
 ```
- full (120+ cols)  ██████░░░░ claude 52%  ██████░░░░ codex 48%  savings: $2.40
- compact (80 cols) c:52% x:48% g:Free  sv:$2.40  CTX:67%
- minimal (60 cols) c:52% x:48% sv:$2.40
- micro (<60 cols)  c52 x48 sv$2
- nano (<40 cols)   c:52%/x:48%
-```
 
-Zero config. Open a vertical split pane and the HUD auto-collapses. Close it and it expands back. When `tfx-multi` is active, a live worker row appears showing per-CLI progress: `x✓ g⋯ c✗` (completed/running/failed).
+Notes for contributors:
 
-Context token attribution tracks usage by skill, file, and tool call, with warnings at 60%/80%/90% context fill.
-
----
-
-## Windows Terminal Orchestration
-
-triflux doesn't just run in a terminal -- it **orchestrates** it. The WT Manager API provides:
-
-- **Tab creation** with PID-tracked lifecycle (temp file polling for readiness)
-- **Split-pane layouts** via `applySplitLayout()` for multi-agent dashboards
-- **Dead tab pruning** using cross-platform PID liveness detection
-- **Base64 PowerShell encoding** eliminating all quoting/escaping issues
-
-Every direct `wt.exe` call is blocked by safety-guard. Agents can only use the managed API path, preventing uncontrolled terminal sprawl.
-
----
-
-## Research Foundation
-
-The triflux skill suite was shaped by patterns from across the Claude Code ecosystem:
-
-| Project | Inspiration |
-|---------|-------------|
-| everything-claude-code | Instinct-based learning patterns |
-| Superpowers | TDD enforcement, composable skills |
-| oh-my-openagent | Category routing, Hashline edits |
-| SuperClaude | index-repo 94% token reduction, expert panels |
-| oh-my-claudecode | Ralph persistence, CCG tri-model |
-| ruflo | 60+ agent orchestration |
-| Exa / Brave / Tavily MCP | Neural search, deep research pipeline |
-
-5-language research (EN/CN/RU/JP/UA) uncovered unique patterns: WeChat integration (CN), Discord mobile bridges (JP), GigaCode alternatives (RU), and community-driven localization efforts.
+- Keep deprecated alias details out of the main README; update
+  [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md) instead.
+- Keep Codex-local experiments under `~/.codex/skills`, not in this package,
+  unless the package boundary is intentionally changed.
+- For docs-only changes, targeted checks such as `npm run lint` and release sync
+  checks are usually enough; full integration tests may start Hub servers and
+  local listener prompts.
 
 ---
 
