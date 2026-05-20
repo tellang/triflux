@@ -228,7 +228,11 @@ async function main() {
 
     // psmux send-keys / split-window: payload에 codex/gemini가 있으면 deny (간접 실행 터널 차단)
     if (/psmux\s+(send-keys|split-window)/.test(cmd)) {
-      if (/\b(codex\s+exec|gemini\s+(-p|--prompt)|agy\s+(-p|--print|--prompt))\b/i.test(cmd)) {
+      if (
+        /\b(codex\s+exec|gemini\s+(-p|--prompt)|agy\s+(-p|--print|--prompt))\b/i.test(
+          cmd,
+        )
+      ) {
         deny(
           "[headless-guard] psmux send-keys/split-window에 codex/gemini 직접 호출이 포함되어 있습니다. " +
             `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
@@ -274,9 +278,10 @@ async function main() {
       if (isAllSafeCmd) {
         // gh/git 전용: $(codex exec ...) 직접 명령 치환만 차단
         // $(cat <<'EOF'\n...codex exec text...\nEOF) 같은 heredoc 텍스트는 허용
-        hasDirectCli = /\$\(\s*(codex\s+exec|gemini\s+(-p|--prompt)|agy\s+(-p|--print|--prompt))\b/i.test(
-          cmdSanitized,
-        );
+        hasDirectCli =
+          /\$\(\s*(codex\s+exec|gemini\s+(-p|--prompt)|agy\s+(-p|--print|--prompt))\b/i.test(
+            cmdSanitized,
+          );
       } else {
         // $()/${} 와 eval 직후 첫 토큰만 검사한다.
         // .* 매칭은 `result=$(grep "codex exec" file)` 같은 grep 인자 패턴까지

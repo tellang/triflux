@@ -787,39 +787,73 @@ detect_quota_exceeded() {
   return 1
 }
 
+agy_supports_headless() {
+  local agy_bin="$1"
+  local help_text
+  if ! command -v "$agy_bin" &>/dev/null; then
+    return 1
+  fi
+  if ! help_text=$("$agy_bin" --help 2>/dev/null | head -c 20000); then
+    return 1
+  fi
+  [[ "$help_text" == *"--print"* && "$help_text" == *"--dangerously-skip-permissions"* ]]
+}
+
 auto_reroute() {
   # Issue #281: code-change dispatch escalation is decided in the JS router
   # (hub/lib/tfx-route-args.mjs). This shell function only handles quota-driven
   # CLI fallback and must stay a transparent passthrough for dispatch mode.
   local failed_cli="$1"
   local target_cli=""
+  local -a candidates=()
   case "$failed_cli" in
-    codex) target_cli="antigravity"; echo "[tfx-quota] Codex → Antigravity 자동 전환 (Gemini API_KEY_INVALID 회피)" >&2 ;;
-    gemini) target_cli="antigravity"; echo "[tfx-quota] Gemini → Antigravity 자동 전환" >&2 ;;
-    antigravity) target_cli="codex"; echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
+    codex) candidates=("antigravity" "gemini") ;;
+    gemini) candidates=("antigravity" "codex") ;;
+    antigravity) candidates=("codex" "gemini") ;;
     *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
   esac
 
   # 대상 CLI 존재 확인 (P2: command not found 방지)
-  local target_bin
-  case "$target_cli" in
-    codex) target_bin="$CODEX_BIN" ;;
-    gemini) target_bin="$GEMINI_BIN" ;;
-    antigravity) target_bin="$AGY_BIN" ;;
-  esac
-  if ! command -v "$target_bin" &>/dev/null; then
-    echo "[tfx-quota] $target_cli CLI 미설치 — 자동 전환 불가" >&2
+  local candidate target_bin
+  for candidate in "${candidates[@]}"; do
+    case "$candidate" in
+      codex) target_bin="${CODEX_BIN:-codex}" ;;
+      gemini) target_bin="${GEMINI_BIN:-gemini}" ;;
+      antigravity) target_bin="${AGY_BIN:-agy}" ;;
+    esac
+    if [[ "$candidate" == "antigravity" ]]; then
+      [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] || continue
+      agy_supports_headless "$target_bin" || continue
+      target_cli="$candidate"
+      break
+    elif command -v "$target_bin" &>/dev/null; then
+      target_cli="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$target_cli" ]]; then
+    echo "[tfx-quota] $failed_cli 대체 CLI 미설치 — 자동 전환 불가" >&2
     return 1
   fi
+
+  case "$failed_cli:$target_cli" in
+    codex:antigravity) echo "[tfx-quota] Codex → Antigravity 자동 전환" >&2 ;;
+    codex:gemini) echo "[tfx-quota] Codex → Gemini 자동 전환" >&2 ;;
+    gemini:antigravity) echo "[tfx-quota] Gemini → Antigravity 자동 전환" >&2 ;;
+    gemini:codex) echo "[tfx-quota] Gemini → Codex 자동 전환" >&2 ;;
+    antigravity:codex) echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
+    antigravity:gemini) echo "[tfx-quota] Antigravity → Gemini 자동 전환" >&2 ;;
+  esac
 
   local quota_marker="$TFX_TMP/tfx-quota-${failed_cli}-$(date +%Y%m%d)"
   echo "$(date +%s)" >> "$quota_marker"
   ORIGINAL_AGENT="$AGENT_TYPE"
   export TFX_REROUTED_FROM="$CLI_TYPE"
   # EXIT trap 정리 — exec는 현재 프로세스를 교체하므로 trap이 실행되지 않음
-  cleanup_workers
+  declare -F cleanup_workers >/dev/null && cleanup_workers
   TFX_CLI_MODE="$target_cli" exec bash "${BASH_SOURCE[0]}" \
-    "$AGENT_TYPE" "$PROMPT" "$MCP_PROFILE" "$USER_TIMEOUT" "$CONTEXT_FILE"
+    "$AGENT_TYPE" "$PROMPT" "$MCP_PROFILE" "${USER_TIMEOUT:-}" "${CONTEXT_FILE:-}"
 }
 
 capture_workspace_signature() {
@@ -1051,7 +1085,7 @@ route_agent() {
 
     # ─── Antigravity CLI 레인 (2026-05-19 발표, Gemini CLI 후속) ───
     # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic
-    antigravity)
+    antigravity|agy)
       # agy --print 는 stdin-only (sanity test 4종 확인). positional arg 패턴은
       # 환영 메시지 폴백을 발생시키므로 wrapper 의 호출 분기 (L2031/2033) 에서
       # CLI_TYPE="antigravity" 일 때 stdin pipe 로 전환한다 (아래 변경 2).
@@ -1098,32 +1132,34 @@ TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
 # Preflight 캐시 일괄 로드 — CLI/Hub 가용성 + Codex 요금제를 환경변수로 내보냄
-# 하위 프로세스(스킬 포함)가 TFX_CODEX_OK, TFX_GEMINI_OK, TFX_HUB_OK로 즉시 참조 가능
+# 하위 프로세스(스킬 포함)가 TFX_CODEX_OK, TFX_GEMINI_OK, TFX_ANTIGRAVITY_OK, TFX_HUB_OK로 즉시 참조 가능
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   # eval 제거 — \x1e (ASCII 30, Record Separator) delimited read로 인젝션 위험 차단
   # F05: `|`에서 `\x1e`로 변경 — 계정 tier/agent 이름 등 값에 `|` 포함 시 필드 분리 오류 방지
-  IFS=$'\x1e' read -r _pf_codex _pf_gemini _pf_hub _pf_plan _pf_agents < <(
+  IFS=$'\x1e' read -r _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents < <(
     "$NODE_BIN" -e '
       try {
         const c = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(),".claude","cache","tfx-preflight.json"),"utf8"));
         const parts = [
           c?.codex?.ok ? "1" : "0",
           c?.gemini?.ok ? "1" : "0",
+          c?.antigravity?.ok ? "1" : "0",
           c?.hub?.ok ? "1" : "0",
           (c?.codex_plan?.plan && c.codex_plan.plan !== "unknown" && c.codex_plan.plan !== "api") ? c.codex_plan.plan : "",
           Array.isArray(c?.available_agents) ? c.available_agents.join(",") : ""
         ];
         process.stdout.write(parts.join("\x1e"));
-      } catch { process.stdout.write("0\x1e0\x1e0\x1e\x1e"); }
+      } catch { process.stdout.write("0\x1e0\x1e0\x1e0\x1e\x1e"); }
     ' 2>/dev/null
   ) || true
   export TFX_CODEX_OK="${_pf_codex:-0}"
   export TFX_GEMINI_OK="${_pf_gemini:-0}"
+  export TFX_ANTIGRAVITY_OK="${_pf_antigravity:-0}"
   export TFX_HUB_OK="${_pf_hub:-0}"
   [[ -n "${_pf_plan:-}" ]] && export TFX_CODEX_PLAN="$_pf_plan"
   [[ -n "${_pf_agents:-}" ]] && export TFX_AVAILABLE_AGENTS="$_pf_agents"
   export TFX_PREFLIGHT_LOADED=1
-  unset _pf_codex _pf_gemini _pf_hub _pf_plan _pf_agents
+  unset _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents
   TFX_CODEX_PLAN="${TFX_CODEX_PLAN:-pro}"
 fi
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
@@ -1221,6 +1257,15 @@ apply_cli_mode() {
           *) gemini_tier="$CLI_EFFORT" ;;
         esac
         echo "[tfx-route] TFX_CLI_MODE=gemini: $AGENT_TYPE → gemini($gemini_tier)로 리매핑" >&2
+      fi ;;
+    antigravity)
+      if [[ "$CLI_TYPE" != "claude-native" && "$CLI_TYPE" != "claude" ]]; then
+        CLI_TYPE="antigravity"
+        CLI_CMD="agy"
+        CLI_ARGS="--print --dangerously-skip-permissions"
+        CLI_EFFORT="agy_v1"
+        DEFAULT_TIMEOUT=900
+        echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
       fi ;;
     auto)
       # Issue #281: JS layer is the single source of truth for auto router
@@ -1723,6 +1768,32 @@ run_stream_worker() {
     printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
+  _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
+  return "$exit_code_local"
+}
+
+run_antigravity_exec() {
+  local prompt="$1"
+  local use_tee_flag="$2"
+  local exit_code_local=0
+  local worker_pid
+  local -a agy_args=()
+  read -r -a agy_args <<< "$CLI_ARGS"
+
+  if ! agy_supports_headless "$CLI_CMD"; then
+    echo "[tfx-route] Antigravity CLI headless flags unsupported or missing: $CLI_CMD" >"$STDERR_LOG"
+    return 127
+  fi
+
+  if [[ "$use_tee_flag" == "true" ]]; then
+    printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${agy_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+  else
+    printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${agy_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+  fi
+  worker_pid=$!
+  if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
+    echo "$worker_pid" >> "$JOB_DIR/child_pids"
+  fi
   _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
   return "$exit_code_local"
 }
@@ -2447,6 +2518,18 @@ EOF
       : > "$STDERR_LOG"
       exit_code=0
       CLI_TYPE="claude-native"
+    fi
+
+  elif [[ "$CLI_TYPE" == "antigravity" ]]; then
+    run_antigravity_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
+    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
+      local agy_stderr_bytes=0
+      [[ -f "$STDERR_LOG" ]] && agy_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
+      echo "[tfx-route] Antigravity CLI 실패(exit=${exit_code}, stderr=${agy_stderr_bytes}B)." >&2
+      if [[ "$agy_stderr_bytes" -gt 0 ]]; then
+        echo "[tfx-route] Antigravity stderr 보존:" >&2
+        tail -c 2048 "$STDERR_LOG" >&2
+      fi
     fi
 
   elif [[ "$CLI_TYPE" == "claude" ]]; then

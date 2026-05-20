@@ -7,6 +7,8 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  AntigravityBackend,
+  buildAntigravityCommand,
   buildGeminiCommand,
   ClaudeBackend,
   CodexBackend,
@@ -169,6 +171,59 @@ describe("ClaudeBackend", () => {
   });
 });
 
+describe("AntigravityBackend", () => {
+  const backend = new AntigravityBackend();
+
+  it("name() === 'antigravity'", () => {
+    assert.equal(backend.name(), "antigravity");
+  });
+
+  it("command() === 'agy'", () => {
+    assert.equal(backend.command(), "agy");
+  });
+
+  it("buildArgs — agy --print stdin pipe 계약을 사용한다", () => {
+    const cmd = backend.buildArgs(
+      "(Get-Content -Raw '/tmp/p.txt')",
+      "/tmp/r.txt",
+    );
+    assert.ok(cmd.includes("agy --print"), `agy --print 포함: ${cmd}`);
+    assert.ok(
+      cmd.includes("--dangerously-skip-permissions"),
+      `dangerously flag 포함: ${cmd}`,
+    );
+    assert.ok(cmd.includes("> '/tmp/r.txt'"), `> result 포함: ${cmd}`);
+  });
+
+  it("env() — 빈 객체 반환", () => {
+    assert.deepEqual(backend.env(), {});
+  });
+});
+
+describe("buildAntigravityCommand: platform-specific formatting", () => {
+  const prompt = "(Get-Content -Raw '/tmp/p.txt')";
+  const resultFile = "/tmp/r.txt";
+
+  it("Windows 분기 — PowerShell pipeline으로 stdin 전달", () => {
+    const cmd = buildAntigravityCommand(prompt, resultFile, {
+      isWindows: true,
+    });
+    assert.ok(cmd.startsWith(`${prompt} | agy --print `), cmd);
+    assert.ok(cmd.includes("--dangerously-skip-permissions"), cmd);
+  });
+
+  it("Unix 분기 — printf pipeline으로 stdin 전달", () => {
+    const cmd = buildAntigravityCommand(prompt, resultFile, {
+      isWindows: false,
+    });
+    assert.ok(cmd.startsWith("printf '%s' "), cmd);
+    assert.ok(
+      cmd.includes("| agy --print --dangerously-skip-permissions"),
+      cmd,
+    );
+  });
+});
+
 // ========================================================================
 // 2. 레지스트리 조회 (getBackend)
 // ========================================================================
@@ -189,6 +244,12 @@ describe("getBackend: 레지스트리 조회", () => {
     const b = getBackend("claude");
     assert.ok(b instanceof ClaudeBackend);
     assert.equal(b.name(), "claude");
+  });
+
+  it("'antigravity' → AntigravityBackend", () => {
+    const b = getBackend("antigravity");
+    assert.ok(b instanceof AntigravityBackend);
+    assert.equal(b.name(), "antigravity");
   });
 
   it("알 수 없는 이름 → throw (지원하지 않는)", () => {
@@ -234,6 +295,16 @@ describe("getBackendForAgent: 에이전트명 → Backend", () => {
     assert.ok(b instanceof ClaudeBackend);
   });
 
+  it("직접 CLI명 'antigravity' → AntigravityBackend", () => {
+    const b = getBackendForAgent("antigravity");
+    assert.ok(b instanceof AntigravityBackend);
+  });
+
+  it("alias 'agy' → AntigravityBackend", () => {
+    const b = getBackendForAgent("agy");
+    assert.ok(b instanceof AntigravityBackend);
+  });
+
   it("알 수 없는 에이전트명 → throw (지원하지 않는)", () => {
     assert.throws(
       () => getBackendForAgent("nonexistent-agent-xyz"),
@@ -246,16 +317,17 @@ describe("getBackendForAgent: 에이전트명 → Backend", () => {
 // 4. listBackends
 // ========================================================================
 describe("listBackends", () => {
-  it("3개 백엔드 반환", () => {
+  it("4개 백엔드 반환", () => {
     const list = listBackends();
-    assert.equal(list.length, 3);
+    assert.equal(list.length, 4);
   });
 
-  it("codex, gemini, claude 모두 포함", () => {
+  it("codex, gemini, claude, antigravity 모두 포함", () => {
     const names = listBackends().map((b) => b.name());
     assert.ok(names.includes("codex"), "codex 포함");
     assert.ok(names.includes("gemini"), "gemini 포함");
     assert.ok(names.includes("claude"), "claude 포함");
+    assert.ok(names.includes("antigravity"), "antigravity 포함");
   });
 });
 
@@ -313,6 +385,10 @@ describe("packages/remote/hub/team/backend.mjs — mirror contract", () => {
       /class\s+ClaudeBackend\b/.test(REMOTE_BACKEND),
       "ClaudeBackend class 누락",
     );
+    assert.ok(
+      /class\s+AntigravityBackend\b/.test(REMOTE_BACKEND),
+      "AntigravityBackend class 누락",
+    );
   });
 });
 
@@ -323,7 +399,7 @@ describe("agent-map.json 정합성", () => {
   const agentMap = JSON.parse(
     readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"),
   );
-  const validCliNames = ["codex", "gemini", "claude"];
+  const validCliNames = ["codex", "gemini", "claude", "antigravity"];
 
   it("agent-map.json의 모든 값이 유효한 CLI 이름", () => {
     for (const [agent, cli] of Object.entries(agentMap)) {

@@ -156,6 +156,12 @@ export const GEMINI_SESSION_CACHE_PATH = join(
   "cache",
   "gemini-session-cache.json",
 );
+export const TFX_PREFLIGHT_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "tfx-preflight.json",
+);
 export const GEMINI_RPM_TRACKER_PATH = join(
   homedir(),
   ".claude",
