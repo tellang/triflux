@@ -111,7 +111,6 @@ export function buildDaemonExecDispatchPayload({
     createdAt,
     source: "shell",
     cwd,
-    agent: "triflux",
     launch: {
       mode: "exec",
       cmd: "/bin/zsh",

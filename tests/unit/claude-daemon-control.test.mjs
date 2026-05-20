@@ -51,11 +51,11 @@ test("deriveClaudeDaemonPaths matches Claude daemon hash convention", () => {
 
   assert.equal(paths.configDir, path.resolve(configDir));
   assert.equal(paths.daemonDir, `/tmp/cc-daemon-501/${hash}`);
+  assert.equal(paths.controlSock, `/tmp/cc-daemon-501/${hash}/control.sock`);
   assert.equal(
-    paths.controlSock,
-    `/tmp/cc-daemon-501/${hash}/control.sock`,
+    paths.sessionsDir,
+    path.join(path.resolve(configDir), "sessions"),
   );
-  assert.equal(paths.sessionsDir, path.join(path.resolve(configDir), "sessions"));
 });
 
 test("sendClaudeControlRequest sends one JSON line and parses first response line", async () => {

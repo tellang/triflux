@@ -24,6 +24,7 @@ export async function startHeadlessTeam({
   model,
   cwd,
   nativeBridge,
+  nativeBridgeMode,
 }) {
   // --assign이 있으면 그것을 사용, 없으면 agents+subtasks 조합
   const assignments =
@@ -47,6 +48,11 @@ export async function startHeadlessTeam({
 
   const _startedAt = Date.now();
   ok(`headless ${assignments.length}워커 시작`);
+  if (nativeBridge) {
+    process.stderr.write(
+      `[headless] Claude native bridge mode: ${nativeBridgeMode || "roster"}\n`,
+    );
+  }
 
   const handle = await runHeadlessInteractive(sessionId, assignments, {
     timeoutSec: timeoutSec || 900,
@@ -58,6 +64,7 @@ export async function startHeadlessTeam({
     dashboardAnchor,
     progressive: progressive !== false,
     nativeBridge,
+    nativeBridgeMode,
     progressIntervalSec: verbose ? 10 : 0,
     onProgress: verbose
       ? function onProgress(event) {

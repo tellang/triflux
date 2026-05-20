@@ -51,7 +51,11 @@ export async function writeClaudeSessionProjection(sessionsDir, projection) {
 
 export async function updateClaudeSessionProjection(sessionPath, patch) {
   const parsed = JSON.parse(await fs.readFile(sessionPath, "utf8"));
-  const next = { ...parsed, ...patch, updatedAt: patch.updatedAt || Date.now() };
+  const next = {
+    ...parsed,
+    ...patch,
+    updatedAt: patch.updatedAt || Date.now(),
+  };
   await fs.writeFile(sessionPath, `${JSON.stringify(next)}\n`, "utf8");
   return next;
 }
