@@ -61,6 +61,7 @@ import { serializeHandoff } from "../scripts/lib/handoff.mjs";
 import {
   addRegistryServer,
   createDefaultRegistry,
+  discoverProjectMcpTargets,
   inspectRegistry,
   inspectRegistryStatus,
   removeRegistryServer,
@@ -333,7 +334,8 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         ],
       },
       sync: {
-        usage: "tfx mcp sync [--json]",
+        usage:
+          "tfx mcp sync [--json] [--all-projects [root]] [--dry-run] [--exclude <glob>]",
         options: [
           {
             name: "--json",
@@ -5777,10 +5779,45 @@ function cmdMcp(args = [], options = {}) {
 
     case "sync": {
       const registryState = ensureValidRegistryState();
-      const result = syncRegistryTargets({ registry: registryState.registry });
+      const allProjectsIndex = args.indexOf("--all-projects");
+      const allProjectsRoot =
+        allProjectsIndex >= 0 &&
+        args[allProjectsIndex + 1] &&
+        !String(args[allProjectsIndex + 1]).startsWith("--")
+          ? args[allProjectsIndex + 1]
+          : null;
+      const dryRun = args.includes("--dry-run");
+      const excludes = args.flatMap((arg, index) =>
+        arg === "--exclude" && args[index + 1] ? [args[index + 1]] : [],
+      );
+      const allProjects =
+        allProjectsIndex >= 0
+          ? discoverProjectMcpTargets({
+              root: allProjectsRoot || undefined,
+              exclude: excludes,
+            })
+          : null;
+      const result = dryRun
+        ? { actions: [] }
+        : syncRegistryTargets({
+            registry: registryState.registry,
+            ...(allProjects ? { targets: allProjects.targets } : {}),
+          });
       if (json) {
         printJson({
           registry_path: registryState.path,
+          ...(allProjects
+            ? {
+                dry_run: dryRun,
+                all_projects: {
+                  root: allProjects.root,
+                  maxDepth: allProjects.maxDepth,
+                  exclude: allProjects.exclude,
+                  count: allProjects.targets.length,
+                },
+                targets: allProjects.targets,
+              }
+            : {}),
           actions: result.actions,
         });
         return;
@@ -5788,6 +5825,17 @@ function cmdMcp(args = [], options = {}) {
 
       console.log(`\n  ${AMBER}${BOLD}⬡ triflux mcp sync${RESET} ${VER}\n`);
       console.log(`  ${LINE}`);
+      if (allProjects) {
+        section("Project Targets");
+        info(`${allProjects.targets.length}개 파일 (${allProjects.root})`);
+        for (const target of allProjects.targets) {
+          info(formatPathForDisplay(target.filePath));
+        }
+        if (dryRun) {
+          console.log("");
+          return;
+        }
+      }
       section("Actions");
       for (const action of result.actions) {
         for (const warning of action.warnings || []) {

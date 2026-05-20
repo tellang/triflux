@@ -17,7 +17,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { SERVERS } from "./mcp-gateway-start.mjs";
+import { SERVERS } from "./lib/mcp-gateway-servers.mjs";
 
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
 const BACKUP_SUFFIX = ".pre-gateway.bak";

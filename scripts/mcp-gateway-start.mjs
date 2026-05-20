@@ -8,64 +8,15 @@ import { execSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { SERVERS } from "./lib/mcp-gateway-servers.mjs";
 import { isServerEnabled } from "./lib/mcp-manifest.mjs";
 
 const PID_FILE = join(tmpdir(), "tfx-gateway-pids.json");
 const STARTUP_WAIT_MS = 8000;
 const POLL_INTERVAL_MS = 500;
 const HEALTH_TIMEOUT_MS = 3000;
-
-const SERVERS = [
-  {
-    name: "context7",
-    port: 8100,
-    cmd: "npx -y @upstash/context7-mcp@latest",
-    envVars: [],
-  },
-  {
-    name: "brave-search",
-    port: 8101,
-    cmd: "npx -y @brave/brave-search-mcp-server",
-    envVars: ["BRAVE_API_KEY"],
-  },
-  {
-    name: "exa",
-    port: 8102,
-    cmd: "npx -y exa-mcp-server",
-    envVars: ["EXA_API_KEY"],
-  },
-  {
-    name: "tavily",
-    port: 8103,
-    cmd: "npx -y tavily-mcp@latest",
-    envVars: ["TAVILY_API_KEY"],
-  },
-  {
-    name: "jira",
-    port: 8104,
-    cmd: "npx -y mcp-jira-cloud@latest",
-    envVars: ["JIRA_API_TOKEN", "JIRA_EMAIL", "JIRA_INSTANCE_URL"],
-  },
-  {
-    name: "serena",
-    port: 8105,
-    cmd: "uvx --from git+https://github.com/oraios/serena serena start-mcp-server",
-    envVars: [],
-  },
-  {
-    name: "notion",
-    port: 8106,
-    cmd: "npx -y @notionhq/notion-mcp-server",
-    envVars: ["NOTION_TOKEN"],
-  },
-  {
-    name: "notion-guest",
-    port: 8107,
-    cmd: "npx -y @notionhq/notion-mcp-server",
-    envVars: ["NOTION_TOKEN"],
-  },
-];
 
 export { SERVERS };
 
@@ -334,11 +285,17 @@ function loadManifest() {
 
 // ── main ──
 
-const flag = process.argv[2];
-if (flag === "--stop") {
-  stopAll();
-} else if (flag === "--status") {
-  await showStatus();
-} else {
-  await startAll();
+const isMain =
+  process.argv[1] &&
+  resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+
+if (isMain) {
+  const flag = process.argv[2];
+  if (flag === "--stop") {
+    stopAll();
+  } else if (flag === "--status") {
+    await showStatus();
+  } else {
+    await startAll();
+  }
 }

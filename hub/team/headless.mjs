@@ -1019,7 +1019,33 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     dashboard = false,
     dashboardLayout = "single",
     stallDetect,
+    nativeBridge = false,
   } = opts;
+
+  if (nativeBridge) {
+    const { writeBridgeSession } = await import("./headless-bridge-session.mjs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    
+    const homeDir = os.homedir();
+    const stateDir = process.platform === "darwin"
+      ? path.join(homeDir, "Library", "Application Support", "ClaudeCode")
+      : path.join(homeDir, ".claudecode");
+      
+    const socketPath = process.platform === "win32"
+      ? `\\\\.\\pipe\\claude-${sessionName}`
+      : `/tmp/claude-${sessionName}.sock`;
+
+    await writeBridgeSession(sessionName, socketPath, stateDir);
+
+    return {
+      status: "ok",
+      sessionName,
+      socketPath,
+      bypassed: true,
+      results: []
+    };
+  }
 
   mkdirSync(RESULT_DIR, { recursive: true });
 
