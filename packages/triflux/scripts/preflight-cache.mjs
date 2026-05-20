@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // scripts/preflight-cache.mjs — 세션 시작 시 preflight 점검 캐싱
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,20 +15,82 @@ const CACHE_DIR = join(homedir(), ".claude", "cache");
 const CACHE_FILE = join(CACHE_DIR, "tfx-preflight.json");
 const CACHE_TTL_MS = 3_600_000; // 1시간 (세션당 1회, SessionStart 훅에서 갱신)
 
-function checkRoute() {
-  const routePath = join(homedir(), ".claude", "scripts", "tfx-route.sh");
-  return { ok: existsSync(routePath), path: routePath };
+function checkRoute({ homeDir = homedir(), existsSyncFn = existsSync } = {}) {
+  const routePath = join(homeDir, ".claude", "scripts", "tfx-route.sh");
+  return { ok: existsSyncFn(routePath), path: routePath };
 }
 
-async function runPreflight() {
-  const cliChecks = await probeClis(["codex", "gemini"]);
+function hasAntigravityCredential({ homeDir, existsSyncFn }) {
+  return [
+    join(homeDir, ".gemini", "oauth_creds.json"),
+    join(homeDir, ".gemini", "antigravity-cli", "oauth_creds.json"),
+    join(homeDir, ".gemini", "antigravity-cli", "credentials.json"),
+  ].some((path) => existsSyncFn(path));
+}
+
+function checkAntigravityReadiness(
+  cliResult,
+  {
+    homeDir = homedir(),
+    existsSyncFn = existsSync,
+    execFileSyncFn = execFileSync,
+    timeout = 2000,
+  } = {},
+) {
+  if (!cliResult?.ok || !cliResult.path)
+    return { ok: false, reason: "missing" };
+
+  let helpText = "";
+  try {
+    helpText = String(
+      execFileSyncFn(cliResult.path, ["--help"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout,
+        windowsHide: true,
+      }),
+    );
+  } catch {
+    return { ok: false, path: cliResult.path, reason: "help_failed" };
+  }
+
+  const hasHeadlessFlags =
+    helpText.includes("--print") &&
+    helpText.includes("--dangerously-skip-permissions");
+  if (!hasHeadlessFlags) {
+    return { ok: false, path: cliResult.path, reason: "headless_unsupported" };
+  }
+
+  if (!hasAntigravityCredential({ homeDir, existsSyncFn })) {
+    return { ok: false, path: cliResult.path, reason: "auth_missing" };
+  }
+
+  return { ok: true, path: cliResult.path, reason: "ready" };
+}
+
+async function runPreflight({
+  homeDir = homedir(),
+  probeClisFn = probeClis,
+  checkHubFn = checkHub,
+  checkRouteFn = checkRoute,
+  detectCodexPlanFn = detectCodexPlan,
+  existsSyncFn = existsSync,
+  execFileSyncFn = execFileSync,
+} = {}) {
+  const cliChecks = await probeClisFn(["codex", "gemini", "agy"]);
+  const antigravity = checkAntigravityReadiness(cliChecks.agy, {
+    homeDir,
+    existsSyncFn,
+    execFileSyncFn,
+  });
   const result = {
     timestamp: Date.now(),
-    hub: checkHub({ pkgRoot: PKG_ROOT }),
-    route: checkRoute(),
+    hub: checkHubFn({ pkgRoot: PKG_ROOT }),
+    route: checkRouteFn({ homeDir, existsSyncFn }),
     codex: cliChecks.codex || { ok: false },
     gemini: cliChecks.gemini || { ok: false },
-    codex_plan: detectCodexPlan(),
+    antigravity,
+    codex_plan: detectCodexPlanFn({ homeDir }),
     ok: false,
   };
   result.ok = result.hub.ok && result.route.ok;
@@ -35,6 +98,7 @@ async function runPreflight() {
   const agents = [];
   if (result.codex.ok) agents.push("codex");
   if (result.gemini.ok) agents.push("gemini");
+  if (result.antigravity.ok) agents.push("antigravity");
   agents.push("claude");
   result.available_agents = agents;
 
@@ -83,4 +147,10 @@ if (isMain) {
   process.exit(result.code);
 }
 
-export { CACHE_FILE, CACHE_TTL_MS, runPreflight };
+export {
+  CACHE_FILE,
+  CACHE_TTL_MS,
+  checkAntigravityReadiness,
+  checkRoute,
+  runPreflight,
+};

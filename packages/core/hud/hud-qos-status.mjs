@@ -25,6 +25,7 @@ import {
   GEMINI_REFRESH_FLAG,
   GEMINI_SESSION_REFRESH_FLAG,
   QOS_PATH,
+  TFX_PREFLIGHT_CACHE_PATH,
 } from "./constants.mjs";
 import {
   buildContextUsageView,
@@ -109,6 +110,11 @@ async function main() {
   const stdinPromise = readStdinJson();
 
   const qosProfile = readJson(QOS_PATH, { providers: {} });
+  const preflightCache = readJson(TFX_PREFLIGHT_CACHE_PATH, null);
+  const antigravityReady =
+    process.env.TFX_ANTIGRAVITY_OK === "1" ||
+    preflightCache?.antigravity?.ok === true ||
+    preflightCache?.available_agents?.includes("antigravity");
   const accountsConfig = readJson(ACCOUNTS_CONFIG_PATH, { providers: {} });
   const accountsState = readJson(ACCOUNTS_STATE_PATH, { providers: {} });
   const claudeUsageSnapshot = readClaudeUsageSnapshot();
@@ -203,6 +209,7 @@ async function main() {
       geminiSession,
       geminiBucket,
       combinedSvPct,
+      antigravityReady ? "a" : "g",
     );
     process.stdout.write(`\x1b[0m${microLine}\n`);
     return;
@@ -239,14 +246,14 @@ async function main() {
     ),
     getProviderRow(
       CURRENT_TIER,
-      "gemini",
-      "g",
+      antigravityReady ? "antigravity" : "gemini",
+      antigravityReady ? "a" : "g",
       geminiBlue,
       qosProfile,
       accountsConfig,
       accountsState,
       geminiQuotaData,
-      geminiEmail,
+      antigravityReady ? "anti" : geminiEmail,
       geminiSv,
       null,
     ),
@@ -277,6 +284,7 @@ async function main() {
   // 비활성 프로바이더 dim 처리: 데이터 없으면 전체 줄 dim
   const codexActive = codexBuckets != null;
   const geminiActive =
+    antigravityReady ||
     (geminiSession?.total || 0) > 0 ||
     geminiBucket != null ||
     geminiProBucket != null ||

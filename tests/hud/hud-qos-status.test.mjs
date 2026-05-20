@@ -153,6 +153,10 @@ function normalizeOutput(output) {
   return normalized;
 }
 
+function stripAnsiText(output) {
+  return output.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 describe("HUD Breakpoints", () => {
   it("renders 'full' tier correctly (cols >= 120)", () => {
     const output = runHudWithDimensions(120, 40);
@@ -197,5 +201,29 @@ describe("HUD Breakpoints", () => {
     const output = runHudWithDimensions(150, 40); // Even with large cols, it should be compact
     matchSnapshot("forced_compact_tier", normalizeOutput(output));
     rmSync(join(mockOmcConfigDir, "hud.json"));
+  });
+
+  it("renders Antigravity as a and hides the Gemini g marker when ready", () => {
+    const preflightPath = join(mockClaudeCacheDir, "tfx-preflight.json");
+    writeFileSync(
+      preflightPath,
+      JSON.stringify({
+        timestamp: Date.now(),
+        antigravity: { ok: true, path: "/fake/bin/agy", reason: "ready" },
+        available_agents: ["codex", "gemini", "antigravity", "claude"],
+      }),
+    );
+    try {
+      const fullOutput = stripAnsiText(runHudWithDimensions(120, 40));
+      assert.match(fullOutput, /^a:/m);
+      assert.doesNotMatch(fullOutput, /^g:/m);
+      assert.doesNotMatch(fullOutput, /gemini/);
+
+      const nanoOutput = stripAnsiText(runHudWithDimensions(35, 40));
+      assert.match(nanoOutput, /\ba:/);
+      assert.doesNotMatch(nanoOutput, /\bg:/);
+    } finally {
+      rmSync(preflightPath, { force: true });
+    }
   });
 });

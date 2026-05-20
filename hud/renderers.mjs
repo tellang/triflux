@@ -261,6 +261,7 @@ export function getMicroLine(
   geminiSession,
   geminiBucket,
   combinedSvPct,
+  geminiMarker = "g",
 ) {
   const ctxView = contextView || buildContextUsageView({}, null);
   // Claude 5h/1w
@@ -315,7 +316,7 @@ export function getMicroLine(
   const line =
     `${bold(claudeOrange("c"))}${dim(":")}${cVal} ` +
     `${bold(codexWhite("x"))}${dim(":")}${xVal} ` +
-    `${bold(geminiBlue("g"))}${dim(":")}${gVal} ` +
+    `${bold(geminiBlue(geminiMarker))}${dim(":")}${gVal} ` +
     `${dim("sv:")}${sv} ` +
     `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
   return truncateAnsi(line, cols);
@@ -458,18 +459,11 @@ export function getProviderRow(
   const _modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
 
   // 프로바이더별 색상 프로필
+  const isGeminiFamily = provider === "gemini" || provider === "antigravity";
   const provAnsi =
-    provider === "codex"
-      ? CODEX_WHITE
-      : provider === "gemini"
-        ? GEMINI_BLUE
-        : GREEN;
+    provider === "codex" ? CODEX_WHITE : isGeminiFamily ? GEMINI_BLUE : GREEN;
   const provFn =
-    provider === "codex"
-      ? codexWhite
-      : provider === "gemini"
-        ? geminiBlue
-        : green;
+    provider === "codex" ? codexWhite : isGeminiFamily ? geminiBlue : green;
 
   let quotaSection;
   const _extraRightSection = "";

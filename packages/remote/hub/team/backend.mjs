@@ -1,6 +1,7 @@
 // hub/team/backend.mjs — CLI 백엔드 추상화 레이어
-// 각 CLI(codex/gemini/claude)의 명령 빌드 로직을 클래스로 캡슐화한다.
+// 각 CLI(codex/gemini/claude/antigravity)의 명령 빌드 로직을 클래스로 캡슐화한다.
 // v7.2.2
+import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
@@ -14,6 +15,22 @@ export function buildGeminiCommand(prompt, resultFile, { isWindows } = {}) {
     return `$null | gemini --yolo --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
   }
   return `gemini --yolo --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err' < /dev/null`;
+}
+
+export function buildAntigravityCommand(
+  prompt,
+  resultFile,
+  { isWindows } = {},
+) {
+  // Persist prompt to a sibling file so the shell never interpolates raw
+  // prompt content. Without this the Unix branch let `$()`, backticks, `\\`,
+  // and `"` reach the shell verbatim (P1: shell injection).
+  const promptFile = `${resultFile}.prompt`;
+  writeFileSync(promptFile, prompt);
+  if (isWindows) {
+    return `Get-Content -Raw '${promptFile}' | agy --print --dangerously-skip-permissions > '${resultFile}' 2>'${resultFile}.err'`;
+  }
+  return `agy --print --dangerously-skip-permissions < '${promptFile}' > '${resultFile}' 2>'${resultFile}.err'`;
 }
 
 const _require = createRequire(import.meta.url);
@@ -77,19 +94,40 @@ export class ClaudeBackend {
   }
 }
 
+export class AntigravityBackend {
+  name() {
+    return "antigravity";
+  }
+  command() {
+    return "agy";
+  }
+
+  buildArgs(prompt, resultFile, opts = {}) {
+    return buildAntigravityCommand(prompt, resultFile, {
+      isWindows: IS_WINDOWS,
+      ...opts,
+    });
+  }
+
+  env() {
+    return {};
+  }
+}
+
 // ── 레지스트리 ─────────────────────────────────────────────────────────────
 
-/** @type {Map<string, CodexBackend|GeminiBackend|ClaudeBackend>} */
+/** @type {Map<string, CodexBackend|GeminiBackend|ClaudeBackend|AntigravityBackend>} */
 const backends = new Map([
   ["codex", new CodexBackend()],
   ["gemini", new GeminiBackend()],
   ["claude", new ClaudeBackend()],
+  ["antigravity", new AntigravityBackend()],
 ]);
 
 /**
  * 백엔드 이름으로 조회한다.
- * @param {string} name — "codex" | "gemini" | "claude"
- * @returns {CodexBackend|GeminiBackend|ClaudeBackend}
+ * @param {string} name — "codex" | "gemini" | "claude" | "antigravity"
+ * @returns {CodexBackend|GeminiBackend|ClaudeBackend|AntigravityBackend}
  * @throws {Error} 등록되지 않은 이름
  */
 export function getBackend(name) {
@@ -102,7 +140,7 @@ export function getBackend(name) {
  * 에이전트명 또는 CLI명을 Backend로 해석한다.
  * agent-map.json을 통해 에이전트명 → CLI명으로 변환 후 레지스트리에서 조회한다.
  * @param {string} agentOrCli — "executor", "codex", "designer" 등
- * @returns {CodexBackend|GeminiBackend|ClaudeBackend}
+ * @returns {CodexBackend|GeminiBackend|ClaudeBackend|AntigravityBackend}
  */
 export function getBackendForAgent(agentOrCli) {
   const agentMap = _require("./agent-map.json");
@@ -112,7 +150,7 @@ export function getBackendForAgent(agentOrCli) {
 
 /**
  * 등록된 모든 백엔드를 반환한다.
- * @returns {Array<CodexBackend|GeminiBackend|ClaudeBackend>}
+ * @returns {Array<CodexBackend|GeminiBackend|ClaudeBackend|AntigravityBackend>}
  */
 export function listBackends() {
   return Array.from(backends.values());

@@ -1,6 +1,11 @@
-import { test } from "node:test";
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 /**
  * agy CLI 1.0.0 prompt 전달 패턴 회귀테스트.
@@ -11,9 +16,17 @@ import { spawnSync } from "node:child_process";
  * - `--dangerously-skip-permissions` 가 먼저 + `--print` 가 뒤 = 정상 (T10)
  * - `--print=VALUE` syntax = 정상 (T1, Go flag default)
  *
- * wrapper (scripts/tfx-route.sh L2031-2046) 의 antigravity case 가 사용해야 할
- * 정답 패턴을 명시적으로 검증한다.
+ * wrapper 의 antigravity case 가 사용해야 할 정답 패턴을 명시적으로 검증한다.
  */
+
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(SCRIPT_DIR, "..", "..");
+const ROUTE_SCRIPT = toBashPath(
+  resolve(PROJECT_ROOT, "scripts", "tfx-route.sh"),
+);
+const FIXTURE_BIN = toBashPath(
+  resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
+);
 
 function getAgyPath() {
   const result = spawnSync("which", ["agy"], { encoding: "utf8" });
@@ -40,63 +53,185 @@ function hasWelcomeOrFailure(text) {
   return WELCOME_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
-test("agy --print prompt-passing regression tests", { skip: !AGY_PATH ? "agy not in PATH" : false }, async (t) => {
+function createRouteHome() {
+  const home = mkdtempSync(join(tmpdir(), "tfx-route-agy-home-"));
+  const codexDir = join(home, ".codex");
+  mkdirSync(codexDir, { recursive: true });
+  writeFileSync(join(codexDir, "config.toml"), "", "utf8");
+  return home;
+}
 
-  await t.test("1. α commit 패턴 (현재): --print --dangerously + stdin pipe -> 정상", { timeout: 30000 }, () => {
-    const result = spawnSync(AGY_PATH, ["--print", "--dangerously-skip-permissions"], {
-      input: TEST_PROMPT,
-      encoding: "utf8",
-      timeout: 25000,
-      env: { ...process.env, PAGER: "cat" },
-    });
-    assert.strictEqual(result.status, 0, `Should exit 0. status=${result.status} signal=${result.signal} stderr=${result.stderr}`);
-    assert.ok(hasHi(result.stdout), `Should contain 'hi'. Got: ${result.stdout}`);
+function runBash(command, extraEnv = {}) {
+  const home = createRouteHome();
+  return spawnSync(BASH_EXE, ["-c", command], {
+    cwd: PROJECT_ROOT,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+      AGY_BIN: "agy",
+      HOME: home,
+      USERPROFILE: home,
+      TFX_TEAM_NAME: "",
+      TFX_TEAM_TASK_ID: "",
+      TFX_TEAM_AGENT_NAME: "",
+      TFX_TEAM_LEAD_NAME: "",
+      TFX_HUB_URL: "",
+      TMUX: "",
+      TFX_CLI_MODE: "auto",
+      TFX_NO_CLAUDE_NATIVE: "0",
+      TFX_CODEX_TRANSPORT: "exec",
+      TFX_MCP_HEALTH_CHECK: "0",
+      ...extraEnv,
+    },
   });
+}
 
-  await t.test("2. Tier 1 broken 패턴 (regression guard): positional + stdin closed -> 실패", { timeout: 30000 }, () => {
-    const result = spawnSync(AGY_PATH, ["--print", "--dangerously-skip-permissions", "--", TEST_PROMPT], {
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf8",
-      timeout: 25000,
-      env: { ...process.env, PAGER: "cat" },
-    });
-    const combined = (result.stdout || "") + (result.stderr || "");
-    assert.ok(
-      !hasHi(combined) || hasWelcomeOrFailure(combined),
-      `Broken pattern should NOT pass prompt. status=${result.status} signal=${result.signal} output: ${combined}`,
-    );
-  });
+function out(result) {
+  return `${result.stdout || ""}\n${result.stderr || ""}`;
+}
 
-  await t.test("3. 대안 (flag swap): --dangerously 먼저 + --print + positional -> 정상", { timeout: 30000 }, () => {
-    const result = spawnSync(AGY_PATH, ["--dangerously-skip-permissions", "--print", TEST_PROMPT], {
-      encoding: "utf8",
-      timeout: 25000,
-      env: { ...process.env, PAGER: "cat" },
-    });
-    assert.strictEqual(result.status, 0, `Should exit 0. status=${result.status}`);
-    assert.ok(hasHi(result.stdout), `Should contain 'hi'. Got: ${result.stdout}`);
-  });
+test("agy --print prompt-passing regression tests", {
+  skip: !AGY_PATH ? "agy not in PATH" : false,
+}, async (t) => {
+  await t.test(
+    "1. alpha commit pattern: --print --dangerously + stdin pipe -> success",
+    { timeout: 30000 },
+    () => {
+      const result = spawnSync(
+        AGY_PATH,
+        ["--print", "--dangerously-skip-permissions"],
+        {
+          input: TEST_PROMPT,
+          encoding: "utf8",
+          timeout: 25000,
+          env: { ...process.env, PAGER: "cat" },
+        },
+      );
+      assert.strictEqual(
+        result.status,
+        0,
+        `Should exit 0. status=${result.status} signal=${result.signal} stderr=${result.stderr}`,
+      );
+      assert.ok(
+        hasHi(result.stdout),
+        `Should contain 'hi'. Got: ${result.stdout}`,
+      );
+    },
+  );
 
-  await t.test("4. 대안 (= syntax): --print=VALUE + --dangerously -> 정상", { timeout: 30000 }, () => {
-    const result = spawnSync(AGY_PATH, [`--print=${TEST_PROMPT}`, "--dangerously-skip-permissions"], {
-      encoding: "utf8",
-      timeout: 25000,
-      env: { ...process.env, PAGER: "cat" },
-    });
-    assert.strictEqual(result.status, 0, `Should exit 0. status=${result.status}`);
-    assert.ok(hasHi(result.stdout), `Should contain 'hi'. Got: ${result.stdout}`);
-  });
+  await t.test(
+    "2. Tier 1 broken pattern: positional + stdin closed -> failure",
+    { timeout: 30000 },
+    () => {
+      const result = spawnSync(
+        AGY_PATH,
+        ["--print", "--dangerously-skip-permissions", "--", TEST_PROMPT],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+          timeout: 25000,
+          env: { ...process.env, PAGER: "cat" },
+        },
+      );
+      const combined = (result.stdout || "") + (result.stderr || "");
+      assert.ok(
+        !hasHi(combined) || hasWelcomeOrFailure(combined),
+        `Broken pattern should NOT pass prompt. status=${result.status} signal=${result.signal} output: ${combined}`,
+      );
+    },
+  );
 
-  await t.test("5. flag 흡수 사고 (regression guard): --print + --add-dir + positional -> timeout", { timeout: 30000 }, () => {
-    const result = spawnSync(AGY_PATH, ["--print", "--add-dir", "/tmp", TEST_PROMPT], {
-      encoding: "utf8",
-      timeout: 25000,
-      env: { ...process.env, PAGER: "cat" },
-    });
-    const combined = (result.stdout || "") + (result.stderr || "");
-    assert.ok(
-      !hasHi(combined) || hasWelcomeOrFailure(combined),
-      `--print + --add-dir + positional should NOT pass prompt cleanly. status=${result.status} signal=${result.signal} output: ${combined}`,
-    );
-  });
+  await t.test(
+    "3. alternative flag order: --dangerously first + --print + positional -> success",
+    { timeout: 30000 },
+    () => {
+      const result = spawnSync(
+        AGY_PATH,
+        ["--dangerously-skip-permissions", "--print", TEST_PROMPT],
+        {
+          encoding: "utf8",
+          timeout: 25000,
+          env: { ...process.env, PAGER: "cat" },
+        },
+      );
+      assert.strictEqual(
+        result.status,
+        0,
+        `Should exit 0. status=${result.status}`,
+      );
+      assert.ok(
+        hasHi(result.stdout),
+        `Should contain 'hi'. Got: ${result.stdout}`,
+      );
+    },
+  );
+
+  await t.test(
+    "4. alternative equals syntax: --print=VALUE + --dangerously -> success",
+    { timeout: 30000 },
+    () => {
+      const result = spawnSync(
+        AGY_PATH,
+        [`--print=${TEST_PROMPT}`, "--dangerously-skip-permissions"],
+        {
+          encoding: "utf8",
+          timeout: 25000,
+          env: { ...process.env, PAGER: "cat" },
+        },
+      );
+      assert.strictEqual(
+        result.status,
+        0,
+        `Should exit 0. status=${result.status}`,
+      );
+      assert.ok(
+        hasHi(result.stdout),
+        `Should contain 'hi'. Got: ${result.stdout}`,
+      );
+    },
+  );
+
+  await t.test(
+    "5. flag absorption guard: --print + --add-dir + positional -> timeout/failure",
+    { timeout: 30000 },
+    () => {
+      const result = spawnSync(
+        AGY_PATH,
+        ["--print", "--add-dir", "/tmp", TEST_PROMPT],
+        {
+          encoding: "utf8",
+          timeout: 25000,
+          env: { ...process.env, PAGER: "cat" },
+        },
+      );
+      const combined = (result.stdout || "") + (result.stderr || "");
+      assert.ok(
+        !hasHi(combined) || hasWelcomeOrFailure(combined),
+        `--print + --add-dir + positional should NOT pass prompt cleanly. status=${result.status} signal=${result.signal} output: ${combined}`,
+      );
+    },
+  );
+});
+
+test("tfx-route.sh routes Antigravity through agy --print stdin", () => {
+  const result = runBash(
+    `bash "${ROUTE_SCRIPT}" antigravity 'Return exactly: AGY_OK' minimal 120`,
+  );
+
+  assert.equal(result.status, 0, out(result));
+  assert.match(out(result), /type=antigravity/);
+  assert.match(result.stdout, /AGY_OK/);
+  assert.doesNotMatch(out(result), /ROUTE_TYPE=claude-native/);
+});
+
+test("TFX_CLI_MODE=antigravity remaps codex-routed agents to agy", () => {
+  const result = runBash(
+    `TFX_CLI_MODE=antigravity bash "${ROUTE_SCRIPT}" executor 'Return exactly: AGY_OK' minimal 120`,
+  );
+
+  assert.equal(result.status, 0, out(result));
+  assert.match(out(result), /TFX_CLI_MODE=antigravity: executor/);
+  assert.match(out(result), /type=antigravity/);
+  assert.match(result.stdout, /AGY_OK/);
 });
