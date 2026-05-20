@@ -7,7 +7,8 @@
     "hub_base": "http://127.0.0.1:27888"
   },
   "policy_notes": {
-    "transport": "Server transport accepts \"hub-url\" for triflux Hub URL flow, \"http\" for direct Streamable HTTP MCP endpoints, or \"stdio\" for upstream-stdio-only MCP servers (rare; only for servers that have no hosted HTTP endpoint, e.g. brave-search). stdio servers require command, args, and may include env.",
+    "policy": "Server policy is the SSOT for client sync shape: hosted writes url+headers, gateway-sse writes http://127.0.0.1:81XX/sse with SSE metadata, and stdio writes command/args/env.",
+    "transport": "Server transport accepts \"hub-url\" for triflux Hub URL flow, \"http\" for direct Streamable HTTP MCP endpoints, or \"stdio\" for upstream-stdio-only MCP servers. Gateway-backed stdio upstreams use policy:\"gateway-sse\" plus gateway_port so clients receive URL/SSE config.",
     "headers": "Optional headers are allowed only for HTTP-compatible transports. Each header value must be a descriptor: {\"value\":\"literal\"} for non-secret static values, {\"env\":\"ENV_VAR_NAME\"} for secrets resolved at sync/runtime, or {\"env\":\"ENV_VAR_NAME\",\"prefix\":\"Bearer \"} for common authorization formats.",
     "secret_safety": "Resolved secret values must not be written back to this registry file. Missing env vars warn during sync and do not emit empty secret headers.",
     "sync_denylist": "Array of client:server strings skipped by proactive registry sync, for example gemini:tfx-hub."
@@ -30,6 +31,7 @@
       "description": "Upstash Context7 — 라이브러리 문서/코드 컨텍스트 (HTTP MCP, API key 불필요)"
     },
     "exa": {
+      "policy": "hosted",
       "transport": "http",
       "url": "https://mcp.exa.ai/mcp",
       "headers": {
@@ -39,18 +41,22 @@
       "targets": ["claude", "gemini", "codex", "antigravity"],
       "description": "Exa neural/semantic web search — 학술/기술 깊이. Key 발급: https://exa.ai/dashboard → secrets.env의 EXA_API_KEY"
     },
-    "brave-search": {
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@brave/brave-search-mcp-server", "--transport", "stdio"],
-      "env": {
-        "BRAVE_API_KEY": { "env": "BRAVE_API_KEY" }
-      },
+    "serena": {
+      "policy": "gateway-sse",
+      "gateway_port": 8105,
       "safe": true,
       "targets": ["claude", "gemini", "codex", "antigravity"],
-      "description": "Brave Search MCP — stdio 양식 (공식 hosted endpoint 없음, npx 로컬 실행). BRAVE_API_KEY 환경변수 필요 (https://brave.com/search/api/). secrets.env 의 BRAVE_API_KEY 참조."
+      "description": "Serena MCP — supergateway singleton SSE endpoint (:8105)"
+    },
+    "brave-search": {
+      "policy": "gateway-sse",
+      "gateway_port": 8101,
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Brave Search MCP — supergateway singleton SSE endpoint (:8101). BRAVE_API_KEY 환경변수 필요 (https://brave.com/search/api/). secrets.env 의 BRAVE_API_KEY 참조."
     },
     "tavily": {
+      "policy": "hosted",
       "transport": "http",
       "url": "https://mcp.tavily.com/mcp",
       "headers": {

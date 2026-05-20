@@ -18,6 +18,7 @@ import {
 } from "../../scripts/sync-hub-mcp-settings.mjs";
 
 const HUB_URL = "http://127.0.0.1:27888/mcp";
+const BRAVE_GATEWAY_URL = "http://127.0.0.1:8101/sse";
 
 function createLogger() {
   return {
@@ -88,6 +89,7 @@ describe("sync-hub-mcp-settings", () => {
       settingsPath(".gemini", "settings.json"),
       settingsPath(".claude", "settings.json"),
       settingsPath(".claude", "settings.local.json"),
+      settingsPath(".gemini", "antigravity-cli", "mcp_config.json"),
     ]);
   });
 
@@ -261,6 +263,59 @@ describe("sync-hub-mcp-settings", () => {
       timeout: 15000,
       type: "http",
     });
+  });
+
+  it("case 9: registry gateway-sse 서버를 Gemini와 Antigravity 양식으로 동기화한다", async () => {
+    const geminiPath = settingsPath(".gemini", "settings.json");
+    const antigravityPath = settingsPath(
+      ".gemini",
+      "antigravity-cli",
+      "mcp_config.json",
+    );
+    writeJson(geminiPath, {
+      mcpServers: {
+        "tfx-hub": {
+          url: HUB_URL,
+          type: "http",
+        },
+        "brave-search": {
+          command: "npx",
+          args: ["-y", "@brave/brave-search-mcp-server"],
+        },
+      },
+    });
+    writeJson(antigravityPath, {
+      mcpServers: {
+        "brave-search": {
+          command: "npx",
+          args: ["-y", "@brave/brave-search-mcp-server"],
+        },
+      },
+    });
+
+    const result = await syncHubMcpSettings({
+      hubUrl: HUB_URL,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.errors, []);
+    assert.ok(result.updated.includes(geminiPath));
+    assert.ok(result.updated.includes(antigravityPath));
+    assert.deepEqual(
+      JSON.parse(readFileSync(geminiPath, "utf8")).mcpServers["brave-search"],
+      {
+        type: "sse",
+        url: BRAVE_GATEWAY_URL,
+      },
+    );
+    assert.deepEqual(
+      JSON.parse(readFileSync(antigravityPath, "utf8")).mcpServers[
+        "brave-search"
+      ],
+      {
+        serverUrl: BRAVE_GATEWAY_URL,
+      },
+    );
   });
 });
 
@@ -491,6 +546,33 @@ describe("syncCodexHubUrl", () => {
       assert.deepEqual(result.skipped, [configPath], key);
       assert.equal(readFileSync(configPath, "utf8"), before, key);
     }
+  });
+
+  it("case 8: registry gateway-sse 서버를 Codex url/transport 양식으로 동기화한다", async () => {
+    const configPath = codexPath(".codex", "config.toml");
+    writeRaw(
+      configPath,
+      [
+        "[mcp_servers.brave-search]",
+        'command = "npx"',
+        'args = ["-y", "@brave/brave-search-mcp-server"]',
+        "",
+      ].join("\n"),
+    );
+
+    const result = await syncCodexHubUrl({
+      hubUrl: HUB_URL,
+      codexConfigPath: configPath,
+      logger: createLogger(),
+    });
+
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.updated, [configPath]);
+    const codexToml = readFileSync(configPath, "utf8");
+    assert.match(codexToml, /\[mcp_servers\.brave-search\]/);
+    assert.match(codexToml, /url = "http:\/\/127\.0\.0\.1:8101\/sse"/);
+    assert.match(codexToml, /transport = "sse"/);
+    assert.doesNotMatch(codexToml, /command = "npx"/);
   });
 });
 

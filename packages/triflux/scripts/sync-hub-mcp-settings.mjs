@@ -1,5 +1,12 @@
 import { constants } from "node:fs";
-import { access, readFile, rename, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -8,9 +15,18 @@ const TARGET_FILES = [
   [".claude", "settings.json"],
   [".claude", "settings.local.json"],
 ];
+const ANTIGRAVITY_CONFIG_FILE = [
+  ".gemini",
+  "antigravity-cli",
+  "mcp_config.json",
+];
 const CODEX_CONFIG_FILE = [".codex", "config.toml"];
 const TFX_HUB_SECTION = "tfx-hub";
 const CODEX_DEFAULT_HUB_URL = "http://127.0.0.1:27888/mcp";
+const DEFAULT_REGISTRY_PATH = new URL(
+  "../config/mcp-registry.json",
+  import.meta.url,
+);
 const FILE_LOCKS = new Map();
 const CODEX_CONFIG_SYNC_OPT_IN = "TFX_CODEX_CONFIG_SYNC";
 
@@ -39,6 +55,10 @@ function getCodexConfigPath(codexConfigPath) {
     return codexConfigPath;
   }
   return join(resolveHome(), ...CODEX_CONFIG_FILE);
+}
+
+function getAntigravityConfigPath() {
+  return join(resolveHome(), ...ANTIGRAVITY_CONFIG_FILE);
 }
 
 function isProtectedCodexConfigEnv(env = process.env) {
@@ -120,7 +140,7 @@ async function fileExists(filePath) {
   }
 }
 
-async function writeTextAtomic(filePath, payload) {
+async function writeTextAtomic(filePath, payload, { mode } = {}) {
   // #164 MEDIUM 1: rename fallback 비원자성 개선.
   // 기존: rename 실패 시 원본을 먼저 rm → rename(tmp, dest) 이므로 2차 실패/프로세스 중단 시 원본 유실.
   // 개선: 원본을 backup 경로로 먼저 옮기고 (atomic rename), tmp → dest 성공 후에만 backup 삭제.
@@ -164,6 +184,9 @@ async function writeTextAtomic(filePath, payload) {
       await rm(backupPath, { force: true }).catch(() => {});
       hasBackup = false;
     }
+    if (mode !== undefined && process.platform !== "win32") {
+      await chmod(filePath, mode);
+    }
   } catch (error) {
     // 실패 — backup 복원 시도. 복원 성공 시에만 hasBackup=false 로 내려 cleanup 경로 진입 허용.
     // 복원 실패 시에는 hasBackup=true 유지 → finally 에서도 backup 을 **삭제하지 않아** 수동 복구 가능.
@@ -204,9 +227,9 @@ function validateCodexTomlPayload(raw, sectionName) {
   return { ok: true };
 }
 
-async function writeJsonAtomic(filePath, value) {
+async function writeJsonAtomic(filePath, value, options = {}) {
   const payload = `${JSON.stringify(value, null, 2)}\n`;
-  await writeTextAtomic(filePath, payload);
+  await writeTextAtomic(filePath, payload, options);
 }
 
 function escapeRegExp(value) {
@@ -259,6 +282,75 @@ function appendCodexMcpServerSection(raw, sectionName, hubUrl) {
   const separator =
     normalized.length > 0 && !normalized.endsWith("\n\n") ? "\n" : "";
   return `${normalized}${separator}[mcp_servers.${sectionName}]\nurl = ${formatTomlString(hubUrl)}\n`;
+}
+
+function appendCodexMcpServerBody(raw, sectionName, body) {
+  const normalized = raw.length > 0 && !raw.endsWith("\n") ? `${raw}\n` : raw;
+  const separator =
+    normalized.length > 0 && !normalized.endsWith("\n\n") ? "\n" : "";
+  return `${normalized}${separator}[mcp_servers.${sectionName}]\n${body}`;
+}
+
+function setCodexMcpServerBody(raw, sectionName, body) {
+  const section = findMcpServerSection(raw, sectionName);
+  if (!section) {
+    return appendCodexMcpServerBody(raw, sectionName, body);
+  }
+  if (section.body === body) {
+    return raw;
+  }
+  return `${raw.slice(0, section.bodyStart)}${body}${raw.slice(section.sectionEnd)}`;
+}
+
+function gatewaySseUrl(serverName, serverConfig) {
+  if (typeof serverConfig?.url === "string" && serverConfig.url.trim()) {
+    return serverConfig.url.trim();
+  }
+  const port = Number(serverConfig?.gateway_port || serverConfig?.port || 0);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    return "";
+  }
+  return `http://127.0.0.1:${port}/sse`;
+}
+
+async function loadGatewaySseServers({ registryPath, client, logger }) {
+  let registry;
+  const pathOrUrl = registryPath || DEFAULT_REGISTRY_PATH;
+  try {
+    registry = JSON.parse(await readFile(pathOrUrl, "utf8"));
+  } catch (error) {
+    log(
+      logger,
+      "error",
+      `[mcp-sync] error: registry (${getReason(error, "read failed")})`,
+    );
+    return [];
+  }
+
+  const servers = registry?.servers;
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
+    return [];
+  }
+
+  return Object.entries(servers)
+    .filter(([, server]) => {
+      if (server?.policy !== "gateway-sse") return false;
+      if (!Array.isArray(server.targets)) return true;
+      return server.targets.includes(client);
+    })
+    .map(([name, server]) => ({ name, url: gatewaySseUrl(name, server) }))
+    .filter((server) => server.url.length > 0);
+}
+
+function desiredJsonGatewayConfig(client, url) {
+  if (client === "antigravity") {
+    return { serverUrl: url };
+  }
+  return { type: "sse", url };
+}
+
+function sameJsonValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
@@ -320,7 +412,71 @@ async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
       try {
         hubServer.type = "http";
         hubServer.url = hubUrl;
-        await writeJsonAtomic(filePath, settings);
+        await writeJsonAtomic(filePath, settings, { mode: 0o600 });
+      } catch (error) {
+        const reason = getReason(error, "write failed");
+        log(logger, "error", `[mcp-sync] error: ${filePath} (${reason})`);
+        return { kind: "error", path: filePath, reason };
+      }
+    }
+
+    log(logger, "info", `[mcp-sync] updated: ${filePath}`);
+    return { kind: "updated", path: filePath };
+  });
+}
+
+async function syncGatewayJsonFile({
+  filePath,
+  client,
+  gatewayServers,
+  dryRun,
+  logger,
+}) {
+  return withFileLock(filePath, async () => {
+    if (!(await fileExists(filePath))) {
+      log(logger, "info", `[mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    let settings;
+    try {
+      settings = JSON.parse(await readFile(filePath, "utf8"));
+    } catch (error) {
+      const reason =
+        error?.name === "SyntaxError"
+          ? "invalid json"
+          : getReason(error, "read failed");
+      log(logger, "error", `[mcp-sync] error: ${filePath} (${reason})`);
+      return { kind: "error", path: filePath, reason };
+    }
+
+    const servers = settings?.mcpServers;
+    if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
+      log(logger, "info", `[mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    let changed = false;
+    for (const gatewayServer of gatewayServers) {
+      if (servers[gatewayServer.name] === undefined) {
+        continue;
+      }
+      const nextConfig = desiredJsonGatewayConfig(client, gatewayServer.url);
+      if (sameJsonValue(servers[gatewayServer.name], nextConfig)) {
+        continue;
+      }
+      servers[gatewayServer.name] = nextConfig;
+      changed = true;
+    }
+
+    if (!changed) {
+      log(logger, "info", `[mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    if (!dryRun) {
+      try {
+        await writeJsonAtomic(filePath, settings, { mode: 0o600 });
       } catch (error) {
         const reason = getReason(error, "write failed");
         log(logger, "error", `[mcp-sync] error: ${filePath} (${reason})`);
@@ -377,7 +533,7 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
           return { kind: "error", path: filePath, reason };
         }
         try {
-          await writeTextAtomic(filePath, nextRaw);
+          await writeTextAtomic(filePath, nextRaw, { mode: 0o600 });
         } catch (error) {
           const reason = getReason(error, "write failed");
           log(
@@ -433,7 +589,80 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
         return { kind: "error", path: filePath, reason };
       }
       try {
-        await writeTextAtomic(filePath, nextRaw);
+        await writeTextAtomic(filePath, nextRaw, { mode: 0o600 });
+      } catch (error) {
+        const reason = getReason(error, "write failed");
+        log(logger, "error", `[codex-mcp-sync] error: ${filePath} (${reason})`);
+        return { kind: "error", path: filePath, reason };
+      }
+    }
+
+    log(logger, "info", `[codex-mcp-sync] updated: ${filePath}`);
+    return { kind: "updated", path: filePath };
+  });
+}
+
+async function syncCodexGatewayConfigFile({
+  filePath,
+  gatewayServers,
+  dryRun,
+  logger,
+}) {
+  return withFileLock(filePath, async () => {
+    if (!(await fileExists(filePath))) {
+      log(logger, "info", `[codex-mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    let raw;
+    try {
+      raw = await readFile(filePath, "utf8");
+    } catch (error) {
+      const reason = getReason(error, "read failed");
+      log(logger, "error", `[codex-mcp-sync] error: ${filePath} (${reason})`);
+      return { kind: "error", path: filePath, reason };
+    }
+
+    let nextRaw = raw;
+    const changedServers = [];
+    for (const gatewayServer of gatewayServers) {
+      if (!findMcpServerSection(nextRaw, gatewayServer.name)) {
+        continue;
+      }
+      const beforeRaw = nextRaw;
+      nextRaw = setCodexMcpServerBody(
+        nextRaw,
+        gatewayServer.name,
+        `url = ${formatTomlString(gatewayServer.url)}\ntransport = "sse"\n`,
+      );
+      if (nextRaw !== beforeRaw) {
+        changedServers.push(gatewayServer);
+      }
+    }
+
+    if (nextRaw === raw) {
+      log(logger, "info", `[codex-mcp-sync] skipped: ${filePath}`);
+      return { kind: "skipped", path: filePath };
+    }
+
+    if (!dryRun) {
+      for (const gatewayServer of changedServers) {
+        const validation = validateCodexTomlPayload(
+          nextRaw,
+          gatewayServer.name,
+        );
+        if (!validation.ok) {
+          const reason = `invalid toml payload: ${validation.reason}`;
+          log(
+            logger,
+            "error",
+            `[codex-mcp-sync] error: ${filePath} (${reason})`,
+          );
+          return { kind: "error", path: filePath, reason };
+        }
+      }
+      try {
+        await writeTextAtomic(filePath, nextRaw, { mode: 0o600 });
       } catch (error) {
         const reason = getReason(error, "write failed");
         log(logger, "error", `[codex-mcp-sync] error: ${filePath} (${reason})`);
@@ -529,24 +758,69 @@ export async function syncHubMcpSettings({
   hubUrl,
   dryRun = false,
   logger = console,
+  registryPath,
 }) {
   const result = {
     updated: [],
     skipped: [],
     errors: [],
   };
+  const geminiGatewayServers = await loadGatewaySseServers({
+    registryPath,
+    client: "gemini",
+    logger,
+  });
+  const antigravityGatewayServers = await loadGatewaySseServers({
+    registryPath,
+    client: "antigravity",
+    logger,
+  });
+
+  const recordOutcome = (outcome) => {
+    if (outcome.kind === "updated") {
+      if (!result.updated.includes(outcome.path))
+        result.updated.push(outcome.path);
+      return;
+    }
+    if (outcome.kind === "skipped") {
+      if (
+        !result.updated.includes(outcome.path) &&
+        !result.skipped.includes(outcome.path)
+      ) {
+        result.skipped.push(outcome.path);
+      }
+      return;
+    }
+    result.errors.push({ path: outcome.path, reason: outcome.reason });
+  };
 
   for (const filePath of getSettingsPaths()) {
     const outcome = await syncSingleFile({ filePath, hubUrl, dryRun, logger });
-    if (outcome.kind === "updated") {
-      result.updated.push(outcome.path);
-      continue;
+    recordOutcome(outcome);
+    if (filePath === join(resolveHome(), ".gemini", "settings.json")) {
+      const gatewayOutcome = await syncGatewayJsonFile({
+        filePath,
+        client: "gemini",
+        gatewayServers: geminiGatewayServers,
+        dryRun,
+        logger,
+      });
+      recordOutcome(gatewayOutcome);
     }
-    if (outcome.kind === "skipped") {
-      result.skipped.push(outcome.path);
-      continue;
-    }
-    result.errors.push({ path: outcome.path, reason: outcome.reason });
+  }
+
+  const antigravityOutcome = await syncGatewayJsonFile({
+    filePath: getAntigravityConfigPath(),
+    client: "antigravity",
+    gatewayServers: antigravityGatewayServers,
+    dryRun,
+    logger,
+  });
+  recordOutcome(antigravityOutcome);
+
+  for (const path of result.updated) {
+    const skippedIndex = result.skipped.indexOf(path);
+    if (skippedIndex !== -1) result.skipped.splice(skippedIndex, 1);
   }
 
   return result;
@@ -558,6 +832,7 @@ export async function syncCodexHubUrl({
   dryRun = false,
   logger = console,
   allowProtectedEnvWrite = false,
+  registryPath,
 }) {
   const result = {
     updated: [],
@@ -584,12 +859,47 @@ export async function syncCodexHubUrl({
     logger,
   });
 
-  if (outcome.kind === "updated") {
-    result.updated.push(outcome.path);
-  } else if (outcome.kind === "skipped") {
-    result.skipped.push(outcome.path);
-  } else {
-    result.errors.push({ path: outcome.path, reason: outcome.reason });
+  const recordOutcome = (nextOutcome) => {
+    if (nextOutcome.kind === "updated") {
+      if (!result.updated.includes(nextOutcome.path)) {
+        result.updated.push(nextOutcome.path);
+      }
+    } else if (nextOutcome.kind === "skipped") {
+      if (
+        !result.updated.includes(nextOutcome.path) &&
+        !result.skipped.includes(nextOutcome.path)
+      ) {
+        result.skipped.push(nextOutcome.path);
+      }
+    } else {
+      result.errors.push({
+        path: nextOutcome.path,
+        reason: nextOutcome.reason,
+      });
+    }
+  };
+
+  recordOutcome(outcome);
+  if (outcome.kind === "error") {
+    return result;
+  }
+
+  const gatewayServers = await loadGatewaySseServers({
+    registryPath,
+    client: "codex",
+    logger,
+  });
+  const gatewayOutcome = await syncCodexGatewayConfigFile({
+    filePath,
+    gatewayServers,
+    dryRun,
+    logger,
+  });
+  recordOutcome(gatewayOutcome);
+
+  if (result.updated.includes(filePath)) {
+    const skippedIndex = result.skipped.indexOf(filePath);
+    if (skippedIndex !== -1) result.skipped.splice(skippedIndex, 1);
   }
 
   return result;
