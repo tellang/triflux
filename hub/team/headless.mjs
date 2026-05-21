@@ -16,6 +16,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { requestJson } from "../bridge.mjs";
@@ -23,6 +24,22 @@ import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 import { getBackend } from "./backend.mjs";
+import {
+  buildDaemonExecDispatchPayload,
+  deriveClaudeDaemonPaths as deriveClaudeControlPaths,
+  killDaemonJob,
+  sendClaudeControlRequest,
+  waitForDaemonJobPid,
+} from "./claude-daemon-control.mjs";
+import {
+  getProcStart,
+  startClaudeNativeBridge,
+} from "./claude-native-bridge.mjs";
+import {
+  buildClaudeSessionProjection,
+  removeClaudeSessionProjection,
+  writeClaudeSessionProjection,
+} from "./claude-session-projection.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
   formatHandoffForLead,
@@ -48,6 +65,7 @@ import { createLogDashboard } from "./tui.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
+const DAEMON_COMPLETION_PREFIX = "__TFX_HEADLESS_DONE__:";
 
 /** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
 const CLI_BRAND = {
@@ -226,6 +244,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const backendCommand = backend.buildArgs(fullPrompt, resultFile, {
     ...opts,
     model,
+    promptFile,
   });
   const safeCwd =
     typeof cwd === "string" ? cwd.trim().replace(/[\r\n\x00-\x1f]/g, "") : "";
@@ -241,6 +260,48 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
     return `Set-Location -LiteralPath '${escapePwshSingleQuoted(safeCwd)}'; ${backendCommand}`;
   }
   return `cd '${safeCwd.replace(/'/g, "'\\''")}' && ${backendCommand}`;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function buildDaemonWrappedCommand(command, token) {
+  return `{ ${command}; __ec=$?; echo "${DAEMON_COMPLETION_PREFIX}${token}:$__ec"; }`;
+}
+
+export function waitForDaemonCompletionFromMessages(
+  messages,
+  { token, resultFile } = {},
+) {
+  const completionRegex = new RegExp(
+    `${escapeRegExp(DAEMON_COMPLETION_PREFIX)}${escapeRegExp(token)}:(\\d+)`,
+  );
+  const stream = [];
+  let matched = false;
+  let exitCode = null;
+
+  for (const message of messages) {
+    if (Array.isArray(message?.streamTail)) {
+      stream.push(...message.streamTail.map((line) => `${line}\n`));
+    }
+    if (typeof message?.line !== "string") continue;
+    const match = completionRegex.exec(message.line);
+    if (match) {
+      const beforeCompletion = message.line.slice(0, match.index);
+      if (beforeCompletion) stream.push(beforeCompletion);
+      matched = true;
+      exitCode = Number.parseInt(match[1], 10);
+      continue;
+    }
+    stream.push(message.line);
+  }
+
+  if (resultFile) {
+    writeFileSync(`${resultFile}.partial`, stream.join(""), "utf8");
+  }
+
+  return { matched, exitCode };
 }
 
 /**
@@ -780,6 +841,115 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
   );
 }
 
+async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
+  const { safeProgress, configDir } = opts;
+  const paths = deriveClaudeControlPaths({ configDir });
+  const dispatches = [];
+
+  try {
+    for (let i = 0; i < assignments.length; i += 1) {
+      const assignment = assignments[i];
+      const paneName = `worker-${i + 1}`;
+      const workerId = getHeadlessWorkerAgentId(sessionName, i);
+      const resultFile = join(
+        RESULT_DIR,
+        `${sessionName}-${paneName}.txt`,
+      ).replace(/\\/g, "/");
+      cleanStaleResultArtifacts(resultFile);
+      const command = buildHeadlessCommand(
+        assignment.cli,
+        assignment.prompt,
+        resultFile,
+        {
+          mcp: assignment.mcp,
+          model: assignment.model,
+          cwd: assignment.cwd || assignment.workdir,
+        },
+      );
+      const token = randomUUID().slice(0, 10);
+      const short = randomUUID().replace(/-/g, "").slice(0, 8);
+      const name = `Triflux ${assignment.cli || "worker"} ${assignment.role || paneName}`;
+      const record = {
+        paneId: `daemon:${short}`,
+        paneName,
+        resultFile,
+        cli: assignment.cli,
+        role: assignment.role,
+        command,
+        token,
+        workerId,
+        cwd: assignment.cwd || assignment.workdir,
+        daemonShort: short,
+        controlSock: paths.controlSock,
+        sessionProjectionPath: "",
+      };
+      dispatches.push(record);
+
+      const payload = buildDaemonExecDispatchPayload({
+        short,
+        cwd: assignment.cwd || assignment.workdir || process.cwd(),
+        command: buildDaemonWrappedCommand(command, token),
+        name,
+      });
+      const dispatch = await sendClaudeControlRequest(paths.controlSock, {
+        proto: 1,
+        op: "dispatch",
+        d: payload,
+        timeoutMs: 5000,
+      });
+      if (dispatch?.ok !== true) {
+        throw new Error(
+          `[headless] Claude daemon dispatch failed for ${paneName}`,
+        );
+      }
+
+      const job = await waitForDaemonJobPid(paths.controlSock, short);
+      const projection = buildClaudeSessionProjection({
+        pid: job.pid,
+        procStart: getProcStart(job.pid),
+        sessionId: payload.sessionId,
+        short,
+        cwd: assignment.cwd || assignment.workdir || process.cwd(),
+        name,
+        agent: assignment.cli || "codex",
+        startedAt: job.startedAt || Date.now(),
+        updatedAt: Date.now(),
+      });
+      record.sessionProjectionPath = await writeClaudeSessionProjection(
+        paths.sessionsDir,
+        projection,
+      );
+      await registerHeadlessWorker(sessionName, i, assignment.cli);
+      registerHeadlessSynapseWorker(workerId, assignment.prompt);
+      if (safeProgress) {
+        safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
+      }
+    }
+  } catch (error) {
+    await cleanupDaemonDispatches(dispatches);
+    throw error;
+  }
+
+  return dispatches;
+}
+
+async function cleanupDaemonDispatches(dispatches) {
+  await Promise.all(
+    dispatches.map(async (dispatch) => {
+      if (dispatch.sessionProjectionPath) {
+        await removeClaudeSessionProjection(
+          dispatch.sessionProjectionPath,
+        ).catch(() => {});
+      }
+      if (dispatch.controlSock && dispatch.daemonShort) {
+        await killDaemonJob(dispatch.controlSock, dispatch.daemonShort).catch(
+          () => {},
+        );
+      }
+    }),
+  );
+}
+
 /**
  * 모든 dispatch를 병렬 대기하며 완료 결과를 수집한다.
  * @param {string} sessionName
@@ -921,6 +1091,131 @@ async function awaitAll(
   );
 }
 
+async function waitForDaemonCompletion(
+  dispatch,
+  timeoutSec,
+  safeProgress,
+  progressIntervalSec,
+) {
+  const messages = [];
+  const socket = net.connect(dispatch.controlSock);
+  let buffer = "";
+  let settled = false;
+  let lastProgressAt = 0;
+
+  return await new Promise((resolve) => {
+    const finish = (completion) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      const finalCompletion =
+        completion ||
+        waitForDaemonCompletionFromMessages(messages, {
+          token: dispatch.token,
+          resultFile: dispatch.resultFile,
+        });
+      if (!finalCompletion.matched) {
+        killDaemonJob(dispatch.controlSock, dispatch.daemonShort).catch(
+          () => {},
+        );
+      }
+      resolve(finalCompletion);
+    };
+
+    const timer = setTimeout(
+      () => {
+        finish({ matched: false, exitCode: null });
+      },
+      Math.max(0, timeoutSec * 1000),
+    );
+
+    socket.on("error", () => {
+      finish({ matched: false, exitCode: null });
+    });
+    socket.on("close", () => {
+      if (!settled) finish({ matched: false, exitCode: null });
+    });
+    socket.on("connect", () => {
+      socket.write(
+        `${JSON.stringify({
+          proto: 1,
+          op: "subscribe",
+          short: dispatch.daemonShort,
+          tail: 20,
+        })}\n`,
+      );
+    });
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      while (buffer.includes("\n")) {
+        const index = buffer.indexOf("\n");
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        if (!line.trim()) continue;
+        const message = JSON.parse(line);
+        messages.push(message);
+        if (
+          safeProgress &&
+          progressIntervalSec > 0 &&
+          typeof message.line === "string"
+        ) {
+          const now = Date.now();
+          if (now - lastProgressAt >= progressIntervalSec * 1000) {
+            lastProgressAt = now;
+            safeProgress({
+              type: "progress",
+              paneName: dispatch.paneName,
+              cli: dispatch.cli,
+              snapshot: message.line.split("\n").slice(-15).join("\n"),
+            });
+          }
+        }
+        const completion = waitForDaemonCompletionFromMessages(messages, {
+          token: dispatch.token,
+          resultFile: dispatch.resultFile,
+        });
+        if (completion.matched) finish(completion);
+      }
+    });
+  });
+}
+
+async function awaitAllDaemon(
+  dispatches,
+  timeoutSec,
+  safeProgress,
+  progressIntervalSec,
+) {
+  return Promise.all(
+    dispatches.map(async (d) => {
+      const completion = await waitForDaemonCompletion(
+        d,
+        timeoutSec,
+        safeProgress,
+        progressIntervalSec,
+      );
+      const output = readResult(d.resultFile, d.paneId);
+      unregisterHeadlessSynapseWorker(d.workerId);
+
+      if (safeProgress) {
+        safeProgress({
+          type: "completed",
+          paneName: d.paneName,
+          cli: d.cli,
+          matched: completion.matched,
+          exitCode: completion.exitCode,
+          sessionDead: false,
+          stallDetected: false,
+          stallExhausted: false,
+        });
+      }
+
+      return { d, completion, output };
+    }),
+  );
+}
+
 /**
  * git diff + handoff 파이프라인을 적용하여 최종 결과 배열을 반환한다.
  * @param {Array<{d, completion, output}>} results
@@ -1020,38 +1315,39 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     dashboardLayout = "single",
     stallDetect,
     nativeBridge = false,
+    nativeBridgeMode = "roster",
   } = opts;
 
-  if (nativeBridge) {
-    const { writeBridgeSession } = await import(
-      "./headless-bridge-session.mjs"
-    );
-    const os = await import("node:os");
-    const path = await import("node:path");
+  mkdirSync(RESULT_DIR, { recursive: true });
 
-    const homeDir = os.homedir();
-    const stateDir =
-      process.platform === "darwin"
-        ? path.join(homeDir, "Library", "Application Support", "ClaudeCode")
-        : path.join(homeDir, ".claudecode");
-
-    const socketPath =
-      process.platform === "win32"
-        ? `\\\\.\\pipe\\claude-${sessionName}`
-        : `/tmp/claude-${sessionName}.sock`;
-
-    await writeBridgeSession(sessionName, socketPath, stateDir);
-
-    return {
-      status: "ok",
-      sessionName,
-      socketPath,
-      bypassed: true,
-      results: [],
-    };
+  if (assignments.length === 0) {
+    return { sessionName, results: [] };
   }
 
-  mkdirSync(RESULT_DIR, { recursive: true });
+  let nativeBridgeHandle = null;
+  let daemonDispatches = [];
+  if (nativeBridge && nativeBridgeMode === "claude-wrapper") {
+    throw new Error(
+      "[headless] --native-bridge-mode claude-wrapper is reserved and not implemented yet",
+    );
+  }
+  if (nativeBridge && nativeBridgeMode === "roster") {
+    nativeBridgeHandle = await startClaudeNativeBridge({
+      sessionName,
+      assignments,
+      cwd: process.cwd(),
+      onKill() {
+        try {
+          killPsmuxSession(sessionName);
+        } catch {
+          /* session may not exist yet */
+        }
+      },
+    });
+    process.stderr.write(
+      `[headless] Claude native bridge roster written: ${nativeBridgeHandle.rosterPath}\n`,
+    );
+  }
 
   // Hub version skew pre-flight (fail-open, best-effort)
   requestJson("/status", { method: "GET", timeoutMs: 500 })
@@ -1171,6 +1467,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
+    nativeBridgeHandle?.handleProgress(event);
     feedTui(event);
     feedSynapse(event);
     if (onProgress) {
@@ -1189,60 +1486,83 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     }
   };
 
-  const dispatches = progressive
-    ? await dispatchProgressive(sessionName, assignments, {
-        layout,
-        safeProgress,
-        dashboardLayout,
-      })
-    : await dispatchBatch(sessionName, assignments, {
-        layout,
-        safeProgress,
-        dashboardLayout,
-      });
-
-  const results = await awaitAll(
-    sessionName,
-    dispatches,
-    timeoutSec,
-    safeProgress,
-    progressIntervalSec,
-    stallDetect,
-  );
-  const collected = await collectResults(sessionName, results);
-
-  // 완료 시 TUI에 최종 상태 반영 후 닫기
-  if (tui) {
-    for (const r of collected) {
-      tui.updateWorker(r.paneName, {
-        cli: r.cli,
-        role: r.role || "",
-        status: r.handoff?.status === "failed" ? "failed" : "completed",
-        handoff: r.handoff,
-        summary: r.handoff?.verdict || (r.matched ? "completed" : "failed"),
-        detail: r.output,
-        progress: 1,
-        elapsed: Math.round(
-          (Date.now() - (tui._startedAt || Date.now())) / 1000,
-        ),
-      });
+  try {
+    const dispatches =
+      nativeBridge && nativeBridgeMode === "agents"
+        ? await dispatchDaemonBatch(sessionName, assignments, {
+            safeProgress,
+          })
+        : progressive
+          ? await dispatchProgressive(sessionName, assignments, {
+              layout,
+              safeProgress,
+              dashboardLayout,
+            })
+          : await dispatchBatch(sessionName, assignments, {
+              layout,
+              safeProgress,
+              dashboardLayout,
+            });
+    if (nativeBridge && nativeBridgeMode === "agents") {
+      daemonDispatches = dispatches;
     }
-    tui.render();
-    // 최종 화면을 잠깐 유지 후 닫기
-    await new Promise((r) => setTimeout(r, 1500));
-    tui.close();
-  }
 
-  // Synapse: 세션 unregister (fire-and-forget)
-  for (const sid of synapseIds) {
-    requestJson("/synapse/unregister", {
-      method: "POST",
-      body: { sessionId: sid },
-      timeoutMs: 1000,
-    }).catch(() => {});
-  }
+    const results =
+      nativeBridge && nativeBridgeMode === "agents"
+        ? await awaitAllDaemon(
+            dispatches,
+            timeoutSec,
+            safeProgress,
+            progressIntervalSec,
+          )
+        : await awaitAll(
+            sessionName,
+            dispatches,
+            timeoutSec,
+            safeProgress,
+            progressIntervalSec,
+            stallDetect,
+          );
+    const collected = await collectResults(sessionName, results);
+    for (const result of collected) nativeBridgeHandle?.completeWorker(result);
 
-  return { sessionName, results: collected };
+    // 완료 시 TUI에 최종 상태 반영 후 닫기
+    if (tui) {
+      for (const r of collected) {
+        tui.updateWorker(r.paneName, {
+          cli: r.cli,
+          role: r.role || "",
+          status: r.handoff?.status === "failed" ? "failed" : "completed",
+          handoff: r.handoff,
+          summary: r.handoff?.verdict || (r.matched ? "completed" : "failed"),
+          detail: r.output,
+          progress: 1,
+          elapsed: Math.round(
+            (Date.now() - (tui._startedAt || Date.now())) / 1000,
+          ),
+        });
+      }
+      tui.render();
+      // 최종 화면을 잠깐 유지 후 닫기
+      await new Promise((r) => setTimeout(r, 1500));
+      tui.close();
+    }
+
+    return { sessionName, results: collected };
+  } finally {
+    // Synapse: 세션 unregister (fire-and-forget)
+    for (const sid of synapseIds) {
+      requestJson("/synapse/unregister", {
+        method: "POST",
+        body: { sessionId: sid },
+        timeoutMs: 1000,
+      }).catch(() => {});
+    }
+    if (nativeBridgeHandle) await nativeBridgeHandle.close();
+    if (daemonDispatches.length > 0) {
+      await cleanupDaemonDispatches(daemonDispatches);
+    }
+  }
 }
 
 /**

@@ -26,6 +26,8 @@ const KNOWN_ROLES = new Set([
   "scientist",
 ]);
 
+const NATIVE_BRIDGE_MODES = new Set(["roster", "agents", "claude-wrapper"]);
+
 /**
  * --assign "cli:prompt:role" 형식을 콜론-안전하게 파싱한다.
  * 프롬프트 내부의 콜론(:)은 구분자로 취급하지 않는다.
@@ -75,6 +77,7 @@ export function parseTeamArgs(args = []) {
   let model = "";
   let cwd = "";
   let nativeBridge = false;
+  let nativeBridgeMode = "roster";
 
   for (let index = 0; index < args.length; index += 1) {
     const current = args[index];
@@ -124,6 +127,18 @@ export function parseTeamArgs(args = []) {
       model = args[++index].trim();
     } else if (current === "--native-bridge" || current === "-nb") {
       nativeBridge = true;
+    } else if (current === "--native-bridge-ui") {
+      nativeBridge = true;
+      nativeBridgeMode = "agents";
+    } else if (current === "--native-bridge-mode") {
+      const mode = args[++index];
+      if (!NATIVE_BRIDGE_MODES.has(mode)) {
+        throw new Error(
+          `unknown native bridge mode: ${mode || ""}; expected roster, agents, or claude-wrapper`,
+        );
+      }
+      nativeBridge = true;
+      nativeBridgeMode = mode;
     } else if (current === "--cwd" && args[index + 1]) {
       let p = args[++index].trim();
       // MSYS/Git Bash 드라이브 문자 변환: /c/... → C:/...
@@ -157,5 +172,6 @@ export function parseTeamArgs(args = []) {
     model,
     cwd,
     nativeBridge,
+    nativeBridgeMode,
   };
 }
