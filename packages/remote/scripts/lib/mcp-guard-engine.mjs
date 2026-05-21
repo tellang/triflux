@@ -1,18 +1,38 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const DEFAULT_HUB_PATH = "/mcp";
+const SERVER_POLICIES = new Set(["hosted", "gateway-sse", "stdio"]);
+const GATEWAY_PORTS = Object.freeze({
+  context7: 8100,
+  "brave-search": 8101,
+  exa: 8102,
+  tavily: 8103,
+  jira: 8104,
+  serena: 8105,
+  notion: 8106,
+  "notion-guest": 8107,
+});
 const DEFAULT_REGISTRY = Object.freeze({
   $schema: "mcp-registry-schema",
   version: 1,
@@ -23,7 +43,7 @@ const DEFAULT_REGISTRY = Object.freeze({
   },
   policy_notes: {
     transport:
-      'Server transport accepts "hub-url" for the existing triflux Hub URL flow or "http" for direct Streamable HTTP MCP endpoints. Direct stdio registration via command/args is intentionally unsupported.',
+      'Server transport accepts "hub-url" for triflux Hub URL flow, "http" for direct Streamable HTTP MCP endpoints, or "stdio" for upstream-stdio-only MCP servers (rare; only for servers that have no hosted HTTP endpoint, e.g. brave-search). stdio servers require command, args, and may include env.',
     headers:
       'Optional headers are allowed only for HTTP-compatible transports. Each header value must be a descriptor: {"value":"literal"} for non-secret static values, {"env":"ENV_VAR_NAME"} for secrets resolved at sync/runtime, or {"env":"ENV_VAR_NAME","prefix":"Bearer "} for common authorization formats.',
     secret_safety:
@@ -31,10 +51,11 @@ const DEFAULT_REGISTRY = Object.freeze({
   },
   servers: {
     "tfx-hub": {
+      policy: "hosted",
       transport: "hub-url",
       url: "http://127.0.0.1:27888/mcp",
       safe: true,
-      targets: ["claude", "gemini", "codex"],
+      targets: ["claude", "gemini", "codex", "antigravity"],
       description: "triflux Hub MCP 서버",
     },
   },
@@ -45,10 +66,12 @@ const DEFAULT_REGISTRY = Object.freeze({
     watched_paths: [
       "~/.gemini/settings.json",
       "~/.codex/config.toml",
+      "~/.claude.json",
       "~/.claude/settings.json",
       "~/.claude/settings.local.json",
       ".claude/mcp.json",
       ".mcp.json",
+      "~/.gemini/config/mcp_config.json",
     ],
   },
 });
@@ -71,6 +94,29 @@ function resolveFilePath(filePath) {
     : resolve(process.cwd(), expanded);
 }
 
+function defaultProjectsRoot() {
+  return process.env.TFX_MCP_PROJECTS_ROOT
+    ? resolve(expandHome(process.env.TFX_MCP_PROJECTS_ROOT))
+    : join(homedir(), "Projects");
+}
+
+function globToRegExp(glob) {
+  const source = String(glob || "")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*/g, ".*")
+    .replace(/\?/g, ".");
+  return new RegExp(`^${source}$`);
+}
+
+function isExcludedProjectPath(relativePath, excludePatterns = []) {
+  const normalized = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  const basenameValue = basename(normalized);
+  return excludePatterns.some((pattern) => {
+    const re = globToRegExp(pattern);
+    return re.test(normalized) || re.test(basenameValue);
+  });
+}
+
 function normalizeForMatch(filePath) {
   return resolveFilePath(filePath).replace(/\\/g, "/").toLowerCase();
 }
@@ -81,6 +127,10 @@ function pathBasename(filePath) {
 
 function isClaudeProjectMcpConfig(filePath) {
   return normalizeForMatch(filePath).endsWith("/.claude/mcp.json");
+}
+
+function isClaudeUserConfig(filePath) {
+  return normalizeForMatch(filePath).endsWith("/.claude.json");
 }
 
 function readJsonFile(filePath) {
@@ -107,8 +157,11 @@ function ensureBackup(filePath) {
 function isJsonMcpConfig(filePath) {
   const name = pathBasename(filePath);
   return (
+    isAntigravityConfig(filePath) ||
+    isClaudeUserConfig(filePath) ||
     name === "settings.json" ||
     name === "settings.local.json" ||
+    name === "mcp_config.json" ||
     name === ".mcp.json" ||
     isClaudeProjectMcpConfig(filePath)
   );
@@ -117,6 +170,36 @@ function isJsonMcpConfig(filePath) {
 function isCodexConfig(filePath) {
   const normalized = normalizeForMatch(filePath);
   return normalized.endsWith("/.codex/config.toml");
+}
+
+function isAntigravityConfig(filePath) {
+  const normalized = normalizeForMatch(filePath);
+  return normalized.endsWith("/.gemini/config/mcp_config.json");
+}
+
+function plaintextSecretHeaderClient(filePath) {
+  const client = detectClient(filePath);
+  return client === "gemini" || client === "antigravity" ? client : null;
+}
+
+function plaintextSecretPermissionHint(filePath) {
+  const normalized = normalizeForMatch(filePath);
+  if (normalized.endsWith("/.gemini/settings.json")) {
+    return "~/.gemini/settings.json";
+  }
+  if (normalized.endsWith("/.gemini/config/mcp_config.json")) {
+    return "~/.gemini/config/mcp_config.json";
+  }
+  return filePath;
+}
+
+function shouldLockJsonConfigPermissions(filePath) {
+  return Boolean(plaintextSecretHeaderClient(filePath));
+}
+
+function lockJsonConfigPermissions(filePath) {
+  if (!shouldLockJsonConfigPermissions(filePath)) return;
+  chmodSync(filePath, 0o600);
 }
 
 function isProtectedCodexConfigMutationEnv(env = process.env) {
@@ -132,9 +215,12 @@ function shouldSkipCodexConfigMutation() {
 
 function detectClient(filePath) {
   const normalized = normalizeForMatch(filePath);
+  if (normalized.endsWith("/.gemini/config/mcp_config.json"))
+    return "antigravity";
   if (normalized.endsWith("/.gemini/settings.json")) return "gemini";
   if (normalized.endsWith("/.codex/config.toml")) return "codex";
   if (
+    normalized.endsWith("/.claude.json") ||
     normalized.endsWith("/.claude/settings.json") ||
     normalized.endsWith("/.claude/settings.local.json") ||
     normalized.endsWith("/.claude/mcp.json") ||
@@ -147,8 +233,13 @@ function detectClient(filePath) {
 
 function detectLabel(filePath) {
   const normalized = normalizeForMatch(filePath);
+  if (normalized.endsWith("/.gemini/config/mcp_config.json"))
+    return "Antigravity";
   if (normalized.endsWith("/.gemini/settings.json")) return "Gemini";
+  if (normalized.endsWith("/.gemini/config/mcp_config.json"))
+    return "Antigravity";
   if (normalized.endsWith("/.codex/config.toml")) return "Codex";
+  if (normalized.endsWith("/.claude.json")) return "Claude User MCP";
   if (normalized.endsWith("/.claude/settings.json")) return "Claude User";
   if (normalized.endsWith("/.claude/settings.local.json"))
     return "Claude Local";
@@ -161,7 +252,9 @@ function isPrimaryConfigTarget(filePath) {
   const normalized = normalizeForMatch(filePath);
   return (
     normalized.endsWith("/.gemini/settings.json") ||
+    normalized.endsWith("/.gemini/config/mcp_config.json") ||
     normalized.endsWith("/.codex/config.toml") ||
+    normalized.endsWith("/.claude.json") ||
     normalized.endsWith("/.claude/mcp.json") ||
     normalized.endsWith("/.mcp.json")
   );
@@ -190,6 +283,9 @@ function parseTomlScalar(rawValue) {
   if (value === "true") return true;
   if (value === "false") return false;
   if (/^-?\d[\d_]*$/.test(value)) return Number(value.replace(/_/g, ""));
+  if (value.startsWith("[") && value.endsWith("]")) {
+    return parseTomlArray(value);
+  }
   if (value.startsWith("{") && value.endsWith("}")) {
     return parseTomlInlineTable(value);
   }
@@ -197,6 +293,39 @@ function parseTomlScalar(rawValue) {
     return value.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
   }
   return value;
+}
+
+function parseTomlArray(rawValue) {
+  const source = String(rawValue || "").trim();
+  const body = source.slice(1, -1).trim();
+  if (!body) return [];
+
+  const parts = [];
+  let current = "";
+  let inString = false;
+  let escaped = false;
+  for (const char of body) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && inString) {
+      current += char;
+      escaped = true;
+      continue;
+    }
+    if (char === '"') inString = !inString;
+    if (char === "," && !inString) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  return parts.map((part) => parseTomlScalar(part));
 }
 
 function parseTomlInlineTable(rawValue) {
@@ -275,6 +404,10 @@ function isValidHeaderName(name) {
   return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(String(name || ""));
 }
 
+function isValidEnvName(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(String(name || ""));
+}
+
 function normalizeHeaderDescriptors(headers = {}) {
   const normalized = {};
   if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
@@ -307,6 +440,47 @@ function normalizeHeaderDescriptors(headers = {}) {
   return normalized;
 }
 
+function normalizeEnvDescriptors(env = {}) {
+  const normalized = {};
+  if (!env || typeof env !== "object" || Array.isArray(env)) {
+    return normalized;
+  }
+  for (const [name, descriptor] of Object.entries(env)) {
+    if (!isValidEnvName(name)) continue;
+    if (
+      descriptor &&
+      typeof descriptor === "object" &&
+      !Array.isArray(descriptor) &&
+      Object.hasOwn(descriptor, "env") &&
+      typeof descriptor.env === "string" &&
+      descriptor.env.trim()
+    ) {
+      normalized[name] = { env: descriptor.env.trim() };
+    }
+  }
+  return normalized;
+}
+
+function resolveEnvDescriptors(name, serverConfig) {
+  const descriptors = normalizeEnvDescriptors(serverConfig?.env || {});
+  const env = {};
+  const warnings = [];
+
+  for (const [envKey, descriptor] of Object.entries(descriptors)) {
+    const envName = descriptor.env;
+    const envValue = process.env[envName];
+    if (typeof envValue !== "string" || envValue.length === 0) {
+      warnings.push(
+        `[mcp-guard] ${name}.${envKey} env skipped: env ${envName} is not set`,
+      );
+      continue;
+    }
+    env[envKey] = envValue;
+  }
+
+  return { descriptors, env, warnings };
+}
+
 function resolveHeaderDescriptors(name, serverConfig, filePath) {
   const descriptors = normalizeHeaderDescriptors(serverConfig?.headers || {});
   const headers = {};
@@ -336,6 +510,13 @@ function resolveHeaderDescriptors(name, serverConfig, filePath) {
     }
 
     headers[headerName] = `${prefix}${envValue}`;
+
+    const plaintextClient = plaintextSecretHeaderClient(filePath);
+    if (plaintextClient) {
+      warnings.push(
+        `[tfx mcp sync] warn: ${plaintextClient} server '${name}' headers contain plaintext secret resolved from $${envName}. Ensure ${plaintextSecretPermissionHint(filePath)} permissions stay 600.`,
+      );
+    }
 
     if (!codexTarget) continue;
 
@@ -480,18 +661,38 @@ function formatTomlInlineTable(data = {}) {
     .join(", ")} }`;
 }
 
+function formatTomlArray(values = []) {
+  return `[${values.map((value) => formatTomlString(value)).join(", ")}]`;
+}
+
 function upsertTomlServer(raw, name, config, codex = {}) {
   const lines = String(raw || "").split(/\r?\n/);
   const header = `[mcp_servers.${name}]`;
   const managedKeys = new Set([
     "url",
+    "transport",
     "command",
     "args",
     "bearer_token_env_var",
     "http_headers",
     "env_http_headers",
+    "env",
   ]);
-  const nextManagedLines = [`url = ${formatTomlString(config.url)}`];
+  const nextManagedLines = [];
+  if (typeof config.url === "string") {
+    nextManagedLines.push(`url = ${formatTomlString(config.url)}`);
+  }
+  if (typeof config.transport === "string") {
+    nextManagedLines.push(`transport = ${formatTomlString(config.transport)}`);
+  }
+  if (typeof config.command === "string") {
+    nextManagedLines.push(`command = ${formatTomlString(config.command)}`);
+  }
+  if (Array.isArray(config.args)) {
+    nextManagedLines.push(`args = ${formatTomlArray(config.args)}`);
+  }
+  const env = formatTomlInlineTable(config.env || {});
+  if (env) nextManagedLines.push(`env = ${env}`);
   if (codex.bearer_token_env_var) {
     nextManagedLines.push(
       `bearer_token_env_var = ${formatTomlString(codex.bearer_token_env_var)}`,
@@ -566,11 +767,29 @@ function serverTargets(serverConfig) {
       ),
     ];
   }
-  return ["claude", "gemini", "codex"];
+  return ["claude", "gemini", "codex", "antigravity"];
 }
 
 function serverAppliesToClient(serverConfig, client) {
   return serverTargets(serverConfig).includes(client);
+}
+
+function serverPolicy(serverConfig = {}, registry = {}) {
+  if (SERVER_POLICIES.has(serverConfig.policy)) return serverConfig.policy;
+  const transport = serverConfig.transport || registry?.defaults?.transport;
+  if (transport === "stdio") return "stdio";
+  return "hosted";
+}
+
+function gatewaySseUrl(name, serverConfig = {}) {
+  if (typeof serverConfig.url === "string" && serverConfig.url.trim()) {
+    return normalizeUrl(serverConfig.url);
+  }
+  const port =
+    Number(serverConfig.gateway_port || serverConfig.port || 0) ||
+    GATEWAY_PORTS[name];
+  if (!Number.isFinite(port) || port <= 0) return "";
+  return `http://127.0.0.1:${port}/sse`;
 }
 
 function syncDenylistEntries(policy = {}) {
@@ -595,10 +814,31 @@ function syncDenylistKey(client, serverName) {
 }
 
 export function buildDesiredServerRecord(name, serverConfig, filePath) {
+  const policy = serverPolicy(serverConfig);
+  if (policy === "stdio") {
+    const resolvedEnv = resolveEnvDescriptors(name, serverConfig);
+    const envConfig = hasOwnEntries(resolvedEnv.env)
+      ? { env: resolvedEnv.env }
+      : {};
+    return {
+      name,
+      config: {
+        command: serverConfig.command,
+        args: Array.isArray(serverConfig.args) ? [...serverConfig.args] : [],
+        ...envConfig,
+      },
+      envDescriptors: resolvedEnv.descriptors,
+      codex: {},
+      warnings: resolvedEnv.warnings,
+    };
+  }
+
   const url =
-    serverConfig?.transport === "hub-url"
-      ? resolveHubUrl()
-      : normalizeUrl(serverConfig?.url || "");
+    policy === "gateway-sse"
+      ? gatewaySseUrl(name, serverConfig)
+      : serverConfig?.transport === "hub-url"
+        ? resolveHubUrl()
+        : normalizeUrl(serverConfig?.url || "");
   const basenameValue = pathBasename(filePath);
   const resolvedHeaders = resolveHeaderDescriptors(
     name,
@@ -609,10 +849,44 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
     ? { headers: resolvedHeaders.headers }
     : {};
 
-  if (basenameValue === ".mcp.json" || isClaudeProjectMcpConfig(filePath)) {
+  if (policy === "gateway-sse") {
+    if (isCodexConfig(filePath)) {
+      return {
+        name,
+        config: { url, transport: "sse" },
+        headerDescriptors: {},
+        codex: {},
+        warnings: [],
+      };
+    }
+
+    return {
+      name,
+      config: { type: "sse", url },
+      headerDescriptors: {},
+      codex: {},
+      warnings: [],
+    };
+  }
+
+  if (
+    basenameValue === ".mcp.json" ||
+    isClaudeProjectMcpConfig(filePath) ||
+    isClaudeUserConfig(filePath)
+  ) {
     return {
       name,
       config: { type: "http", url, ...headerConfig },
+      headerDescriptors: resolvedHeaders.descriptors,
+      codex: resolvedHeaders.codex,
+      warnings: resolvedHeaders.warnings,
+    };
+  }
+
+  if (isAntigravityConfig(filePath)) {
+    return {
+      name,
+      config: { url, type: "http", ...headerConfig },
       headerDescriptors: resolvedHeaders.descriptors,
       codex: resolvedHeaders.codex,
       warnings: resolvedHeaders.warnings,
@@ -669,6 +943,19 @@ function scanJsonConfig(filePath) {
               url:
                 typeof config.url === "string" ? normalizeUrl(config.url) : "",
               command: typeof config.command === "string" ? config.command : "",
+              args: Array.isArray(config.args)
+                ? config.args.filter((value) => typeof value === "string")
+                : [],
+              env:
+                config.env &&
+                typeof config.env === "object" &&
+                !Array.isArray(config.env)
+                  ? Object.fromEntries(
+                      Object.entries(config.env).filter(
+                        ([, value]) => typeof value === "string",
+                      ),
+                    )
+                  : {},
               type: typeof config.type === "string" ? config.type : "",
               headers:
                 config.headers &&
@@ -732,6 +1019,19 @@ function scanCodexConfig(filePath) {
       name,
       url: typeof config.url === "string" ? normalizeUrl(config.url) : "",
       command: typeof config.command === "string" ? config.command : "",
+      args: Array.isArray(config.args)
+        ? config.args.filter((value) => typeof value === "string")
+        : [],
+      env:
+        config.env &&
+        typeof config.env === "object" &&
+        !Array.isArray(config.env)
+          ? Object.fromEntries(
+              Object.entries(config.env).filter(
+                ([, value]) => typeof value === "string",
+              ),
+            )
+          : {},
       headers:
         config.http_headers && typeof config.http_headers === "object"
           ? config.http_headers
@@ -804,8 +1104,27 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
       ...(current && typeof current === "object" ? current : {}),
       ...update.config,
     };
+    if (Object.hasOwn(update.config, "command")) {
+      delete nextConfig.url;
+      delete nextConfig.type;
+      delete nextConfig.headers;
+    }
+    if (Object.hasOwn(update.config, "url")) {
+      delete nextConfig.command;
+      delete nextConfig.args;
+      delete nextConfig.env;
+    }
+    if (!Object.hasOwn(update.config, "type")) {
+      delete nextConfig.type;
+    }
+    if (!Object.hasOwn(update.config, "transport")) {
+      delete nextConfig.transport;
+    }
     if (!Object.hasOwn(update.config, "headers")) {
       delete nextConfig.headers;
+    }
+    if (!Object.hasOwn(update.config, "env")) {
+      delete nextConfig.env;
     }
     const changed =
       JSON.stringify(current || null) !== JSON.stringify(nextConfig);
@@ -820,6 +1139,7 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
   }
 
   writeJsonFile(resolvedPath, parsed);
+  lockJsonConfigPermissions(resolvedPath);
   return { modified: true, filePath: resolvedPath };
 }
 
@@ -911,29 +1231,116 @@ export function validateRegistry(registry) {
         errors.push(`registry.servers.${name} must be an object`);
         continue;
       }
-      if (typeof server.url !== "string" || !server.url.trim()) {
-        errors.push(`registry.servers.${name}.url must be a non-empty string`);
+      const policy = serverPolicy(server, registry);
+      if (
+        typeof server.policy !== "string" ||
+        !SERVER_POLICIES.has(server.policy)
+      ) {
+        errors.push(
+          `registry.servers.${name}.policy must be hosted, gateway-sse, or stdio`,
+        );
       }
       const transport = server.transport || registry.defaults?.transport;
-      if (!["hub-url", "http"].includes(transport)) {
+      if (!["hub-url", "http", "stdio"].includes(transport)) {
         errors.push(
-          `registry.servers.${name}.transport must be hub-url or http`,
+          `registry.servers.${name}.transport must be hub-url, http, or stdio`,
         );
       }
-      if (server.command !== undefined) {
+      if (
+        policy === "hosted" &&
+        (typeof server.url !== "string" || !server.url.trim())
+      ) {
+        errors.push(`registry.servers.${name}.url must be a non-empty string`);
+      }
+      if (policy === "gateway-sse") {
+        const port = Number(server.gateway_port || server.port || 0);
+        const hasGatewayUrl =
+          typeof server.url === "string" && server.url.trim().length > 0;
+        if (
+          !hasGatewayUrl &&
+          (!Number.isInteger(port) || port <= 0 || port > 65535)
+        ) {
+          errors.push(
+            `registry.servers.${name}.gateway_port must be a valid TCP port for gateway-sse`,
+          );
+        }
+      }
+      if (policy === "stdio" && server.url !== undefined) {
+        errors.push(`registry.servers.${name}.url is not used for stdio`);
+      }
+      if (policy === "stdio") {
+        if (typeof server.command !== "string" || !server.command.trim()) {
+          errors.push(
+            `registry.servers.${name}.command must be a non-empty string for stdio`,
+          );
+        }
+        if (
+          !Array.isArray(server.args) ||
+          server.args.some((arg) => typeof arg !== "string")
+        ) {
+          errors.push(
+            `registry.servers.${name}.args must be an array of strings for stdio`,
+          );
+        }
+      }
+      if (policy !== "stdio" && server.command !== undefined) {
         errors.push(
-          `registry.servers.${name}.command is not supported; stdio registration is intentionally unsupported`,
+          `registry.servers.${name}.command is allowed only for stdio transport`,
         );
       }
-      if (server.args !== undefined) {
+      if (policy !== "stdio" && server.args !== undefined) {
         errors.push(
-          `registry.servers.${name}.args is not supported; stdio registration is intentionally unsupported`,
+          `registry.servers.${name}.args is allowed only for stdio transport`,
         );
+      }
+      if (server.env !== undefined) {
+        if (policy !== "stdio") {
+          errors.push(
+            `registry.servers.${name}.env is allowed only for stdio transport`,
+          );
+        }
+        if (
+          !server.env ||
+          typeof server.env !== "object" ||
+          Array.isArray(server.env)
+        ) {
+          errors.push(`registry.servers.${name}.env must be an object`);
+        } else {
+          for (const [envKey, descriptor] of Object.entries(server.env)) {
+            if (!isValidEnvName(envKey)) {
+              errors.push(
+                `registry.servers.${name}.env contains invalid env name ${envKey}`,
+              );
+              continue;
+            }
+            if (
+              !descriptor ||
+              typeof descriptor !== "object" ||
+              Array.isArray(descriptor)
+            ) {
+              errors.push(
+                `registry.servers.${name}.env.${envKey} must be a descriptor object`,
+              );
+              continue;
+            }
+            const keys = Object.keys(descriptor);
+            if (
+              keys.length !== 1 ||
+              !Object.hasOwn(descriptor, "env") ||
+              typeof descriptor.env !== "string" ||
+              !descriptor.env.trim()
+            ) {
+              errors.push(
+                `registry.servers.${name}.env.${envKey}.env must be a non-empty string`,
+              );
+            }
+          }
+        }
       }
       if (server.headers !== undefined) {
-        if (!["hub-url", "http"].includes(transport)) {
+        if (policy !== "hosted") {
           errors.push(
-            `registry.servers.${name}.headers is allowed only for HTTP-compatible transports`,
+            `registry.servers.${name}.headers is allowed only for hosted policy`,
           );
         }
         if (
@@ -1139,6 +1546,71 @@ export function listManagedConfigTargets(registry = loadRegistryOrDefault()) {
   });
 }
 
+export function discoverProjectMcpTargets(options = {}) {
+  const root = resolve(expandHome(options.root || defaultProjectsRoot()));
+  const maxDepth = Number.isFinite(Number(options.maxDepth))
+    ? Number(options.maxDepth)
+    : 4;
+  const excludePatterns = Array.isArray(options.exclude)
+    ? options.exclude.filter(Boolean).map(String)
+    : [];
+  const targets = [];
+  const seen = new Set();
+
+  function addTarget(filePath) {
+    const normalized = normalizeForMatch(filePath);
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    targets.push({
+      watchedPath: filePath,
+      filePath,
+      client: detectClient(filePath),
+      label: detectLabel(filePath),
+      exists: existsSync(filePath),
+    });
+  }
+
+  function walk(dirPath, depth) {
+    if (depth > maxDepth) return;
+    let entries;
+    try {
+      entries = readdirSync(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryPath = join(dirPath, entry.name);
+      const relativePath = relative(root, entryPath).replace(/\\/g, "/");
+      if (isExcludedProjectPath(relativePath, excludePatterns)) continue;
+
+      if (entry.isDirectory()) {
+        if (depth < maxDepth) walk(entryPath, depth + 1);
+        continue;
+      }
+
+      if (!entry.isFile() || depth + 1 > maxDepth) continue;
+      const normalized = entryPath.replace(/\\/g, "/");
+      if (
+        entry.name === ".mcp.json" ||
+        normalized.endsWith("/.claude/mcp.json")
+      ) {
+        addTarget(resolve(entryPath));
+      }
+    }
+  }
+
+  walk(root, 0);
+  return {
+    root,
+    maxDepth,
+    exclude: excludePatterns,
+    targets: targets.sort((left, right) =>
+      left.filePath.localeCompare(right.filePath),
+    ),
+  };
+}
+
 export function listPrimaryConfigTargets(registry = loadRegistryOrDefault()) {
   return listManagedConfigTargets(registry).filter((target) =>
     isPrimaryConfigTarget(target.filePath),
@@ -1174,7 +1646,8 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         serverConfig,
         config.filePath,
       );
-      const expectedUrl = desired.config.url;
+      const expectedUrl = desired.config.url || "";
+      const expectedCommand = desired.config.command || "";
       const expectedHeaders = isCodexConfig(config.filePath)
         ? desired.headerDescriptors || {}
         : descriptorsFromJsonConfig(desired.config);
@@ -1190,6 +1663,13 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         status = "invalid-config";
       } else if (!actual) {
         status = "missing";
+      } else if (expectedCommand) {
+        status =
+          actual.command === expectedCommand &&
+          JSON.stringify(actual.args || []) ===
+            JSON.stringify(desired.config.args || [])
+            ? "present"
+            : "mismatch";
       } else if (!actual.url) {
         status = actual.transport === "stdio" ? "stdio" : "invalid";
       } else if (normalizeUrl(actual.url) === normalizeUrl(expectedUrl)) {
@@ -1205,7 +1685,9 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         label: config.label,
         filePath: config.filePath,
         expectedUrl,
+        expectedCommand,
         actualUrl: actual?.url || "",
+        actualCommand: actual?.command || "",
         status,
         headerStatus: currentHeaderStatus,
         expectedHeaderNames: headerNames(expectedHeaders),
@@ -1425,9 +1907,17 @@ export function addRegistryServer(name, url, options = {}) {
     ? loadRegistry()
     : cloneDefaultRegistry();
   const transport =
-    options.transport || (trimmedName === "tfx-hub" ? "hub-url" : "url");
+    options.transport || (trimmedName === "tfx-hub" ? "hub-url" : "http");
+  const policy =
+    options.policy ||
+    (transport === "stdio"
+      ? "stdio"
+      : options.gateway_port || options.port
+        ? "gateway-sse"
+        : "hosted");
 
   registry.servers[trimmedName] = {
+    policy,
     transport,
     url: normalizedUrl,
     safe: options.safe ?? true,
@@ -1440,7 +1930,7 @@ export function addRegistryServer(name, url, options = {}) {
                 .filter(Boolean),
             ),
           ]
-        : ["claude", "gemini", "codex"],
+        : ["claude", "gemini", "codex", "antigravity"],
     description: options.description || `${trimmedName} MCP 서버`,
   };
 
@@ -1516,11 +2006,17 @@ export function removeServerFromTargets(name, options = {}) {
 
 export function syncRegistryTargets(options = {}) {
   const registry = options.registry || loadRegistryOrDefault();
+  const syncTargets = Array.isArray(options.targets)
+    ? options.targets
+    : listManagedConfigTargets(registry);
+  const primaryTargets = syncTargets.filter((target) =>
+    isPrimaryConfigTarget(target.filePath),
+  );
   const actions = [];
   const invalidConfigs = new Set();
   const denylist = syncDenylistEntries(registry.policies);
 
-  for (const target of listManagedConfigTargets(registry)) {
+  for (const target of syncTargets) {
     const snapshot = scanConfig(target.filePath);
     if (snapshot.parseError) {
       invalidConfigs.add(normalizeForMatch(target.filePath));
@@ -1534,7 +2030,10 @@ export function syncRegistryTargets(options = {}) {
       continue;
     }
 
-    if (snapshot.stdioServers.length > 0) {
+    if (
+      snapshot.stdioServers.length > 0 &&
+      !isClaudeUserConfig(target.filePath)
+    ) {
       const remediation = remediate(target.filePath, snapshot.stdioServers, {
         ...registry.policies,
         registry,
@@ -1551,7 +2050,7 @@ export function syncRegistryTargets(options = {}) {
     }
   }
 
-  for (const target of listPrimaryConfigTargets(registry)) {
+  for (const target of primaryTargets) {
     const snapshot = scanConfig(target.filePath);
     const targetKey = normalizeForMatch(target.filePath);
     if (snapshot.parseError) {

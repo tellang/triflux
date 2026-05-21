@@ -158,6 +158,7 @@ function isJsonMcpConfig(filePath) {
   const name = pathBasename(filePath);
   return (
     isAntigravityConfig(filePath) ||
+    isClaudeUserConfig(filePath) ||
     name === "settings.json" ||
     name === "settings.local.json" ||
     name === "mcp_config.json" ||
@@ -681,6 +682,9 @@ function upsertTomlServer(raw, name, config, codex = {}) {
   if (typeof config.url === "string") {
     nextManagedLines.push(`url = ${formatTomlString(config.url)}`);
   }
+  if (typeof config.transport === "string") {
+    nextManagedLines.push(`transport = ${formatTomlString(config.transport)}`);
+  }
   if (typeof config.command === "string") {
     nextManagedLines.push(`command = ${formatTomlString(config.command)}`);
   }
@@ -810,7 +814,8 @@ function syncDenylistKey(client, serverName) {
 }
 
 export function buildDesiredServerRecord(name, serverConfig, filePath) {
-  if (serverConfig?.transport === "stdio") {
+  const policy = serverPolicy(serverConfig);
+  if (policy === "stdio") {
     const resolvedEnv = resolveEnvDescriptors(name, serverConfig);
     const envConfig = hasOwnEntries(resolvedEnv.env)
       ? { env: resolvedEnv.env }
@@ -1109,6 +1114,12 @@ function updateJsonConfig(filePath, updates = [], removals = []) {
       delete nextConfig.args;
       delete nextConfig.env;
     }
+    if (!Object.hasOwn(update.config, "type")) {
+      delete nextConfig.type;
+    }
+    if (!Object.hasOwn(update.config, "transport")) {
+      delete nextConfig.transport;
+    }
     if (!Object.hasOwn(update.config, "headers")) {
       delete nextConfig.headers;
     }
@@ -1220,6 +1231,15 @@ export function validateRegistry(registry) {
         errors.push(`registry.servers.${name} must be an object`);
         continue;
       }
+      const policy = serverPolicy(server, registry);
+      if (
+        typeof server.policy !== "string" ||
+        !SERVER_POLICIES.has(server.policy)
+      ) {
+        errors.push(
+          `registry.servers.${name}.policy must be hosted, gateway-sse, or stdio`,
+        );
+      }
       const transport = server.transport || registry.defaults?.transport;
       if (!["hub-url", "http", "stdio"].includes(transport)) {
         errors.push(
@@ -1227,15 +1247,28 @@ export function validateRegistry(registry) {
         );
       }
       if (
-        transport !== "stdio" &&
+        policy === "hosted" &&
         (typeof server.url !== "string" || !server.url.trim())
       ) {
         errors.push(`registry.servers.${name}.url must be a non-empty string`);
       }
-      if (transport === "stdio" && server.url !== undefined) {
+      if (policy === "gateway-sse") {
+        const port = Number(server.gateway_port || server.port || 0);
+        const hasGatewayUrl =
+          typeof server.url === "string" && server.url.trim().length > 0;
+        if (
+          !hasGatewayUrl &&
+          (!Number.isInteger(port) || port <= 0 || port > 65535)
+        ) {
+          errors.push(
+            `registry.servers.${name}.gateway_port must be a valid TCP port for gateway-sse`,
+          );
+        }
+      }
+      if (policy === "stdio" && server.url !== undefined) {
         errors.push(`registry.servers.${name}.url is not used for stdio`);
       }
-      if (transport === "stdio") {
+      if (policy === "stdio") {
         if (typeof server.command !== "string" || !server.command.trim()) {
           errors.push(
             `registry.servers.${name}.command must be a non-empty string for stdio`,
@@ -1250,59 +1283,15 @@ export function validateRegistry(registry) {
           );
         }
       }
-      if (transport !== "stdio" && server.command !== undefined) {
+      if (policy !== "stdio" && server.command !== undefined) {
         errors.push(
           `registry.servers.${name}.command is allowed only for stdio transport`,
         );
       }
-      if (transport !== "stdio" && server.args !== undefined) {
+      if (policy !== "stdio" && server.args !== undefined) {
         errors.push(
           `registry.servers.${name}.args is allowed only for stdio transport`,
         );
-      }
-      if (server.env !== undefined) {
-        if (transport !== "stdio") {
-          errors.push(
-            `registry.servers.${name}.env is allowed only for stdio transport`,
-          );
-        }
-        if (
-          !server.env ||
-          typeof server.env !== "object" ||
-          Array.isArray(server.env)
-        ) {
-          errors.push(`registry.servers.${name}.env must be an object`);
-        } else {
-          for (const [envKey, descriptor] of Object.entries(server.env)) {
-            if (!isValidEnvName(envKey)) {
-              errors.push(
-                `registry.servers.${name}.env contains invalid env name ${envKey}`,
-              );
-              continue;
-            }
-            if (
-              !descriptor ||
-              typeof descriptor !== "object" ||
-              Array.isArray(descriptor)
-            ) {
-              errors.push(
-                `registry.servers.${name}.env.${envKey} must be a descriptor object`,
-              );
-              continue;
-            }
-            const keys = Object.keys(descriptor);
-            if (
-              keys.length !== 1 ||
-              !Object.hasOwn(descriptor, "env") ||
-              typeof descriptor.env !== "string" ||
-              !descriptor.env.trim()
-            ) {
-              errors.push(
-                `registry.servers.${name}.env.${envKey}.env must be a non-empty string`,
-              );
-            }
-          }
-        }
       }
       if (server.env !== undefined) {
         if (policy !== "stdio") {

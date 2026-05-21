@@ -1,22 +1,22 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { once } from "node:events";
+import test from "node:test";
 
 import {
+  buildIsolatedDaemonEnv,
   buildPtyControlFrame,
   buildPtyDataFrame,
-  buildIsolatedDaemonEnv,
+  buildRosterEntry,
   decodePtyFrames,
   deriveDaemonPaths,
   extractPtyFrames,
   getProcStart,
   parseJsonLine,
-  buildRosterEntry,
 } from "../../experiments/native-bridge-feasibility/claude-native-worker-protocol.mjs";
 import { startFakeNativeWorker } from "../../experiments/native-bridge-feasibility/fake-claude-native-worker.mjs";
 
@@ -31,12 +31,17 @@ test("deriveDaemonPaths uses Claude /tmp hash convention", () => {
   const paths = deriveDaemonPaths({ configDir, uid: 501, tmpRoot: "/tmp" });
 
   assert.equal(paths.hash, expectedHash);
-  assert.equal(paths.controlSock, `/tmp/cc-daemon-501/${expectedHash}/control.sock`);
+  assert.equal(
+    paths.controlSock,
+    `/tmp/cc-daemon-501/${expectedHash}/control.sock`,
+  );
   assert.equal(paths.rosterPath, path.join(configDir, "daemon", "roster.json"));
 });
 
 test("parseJsonLine parses the first newline-delimited JSON frame", () => {
-  assert.deepEqual(parseJsonLine('{"ok":true}\n{"ignored":true}\n'), { ok: true });
+  assert.deepEqual(parseJsonLine('{"ok":true}\n{"ignored":true}\n'), {
+    ok: true,
+  });
 });
 
 test("PTY frame codec round trips data and control frames", () => {
@@ -67,8 +72,13 @@ test("PTY incremental codec preserves partial frames", () => {
   assert.equal(first.frames.length, 1);
   assert.equal(first.rest.length, combined.length - 3 - firstFrame.length);
 
-  const second = extractPtyFrames(Buffer.concat([first.rest, combined.subarray(combined.length - 3)]));
-  assert.deepEqual(second.frames[0], { kind: 1, ctrl: { t: "resize", cols: 100, rows: 30 } });
+  const second = extractPtyFrames(
+    Buffer.concat([first.rest, combined.subarray(combined.length - 3)]),
+  );
+  assert.deepEqual(second.frames[0], {
+    kind: 1,
+    ctrl: { t: "resize", cols: 100, rows: 30 },
+  });
   assert.equal(second.rest.length, 0);
 });
 
@@ -135,7 +145,11 @@ test("fake native worker accepts RV and PTY connections", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "fake-native-worker-"));
   const rvSock = path.join(dir, "worker.rv.sock");
   const ptySock = path.join(dir, "worker.pty.sock");
-  const worker = await startFakeNativeWorker({ rvSock, ptySock, pid: process.pid });
+  const worker = await startFakeNativeWorker({
+    rvSock,
+    ptySock,
+    pid: process.pid,
+  });
 
   try {
     const rv = net.connect(rvSock);
@@ -149,8 +163,15 @@ test("fake native worker accepts RV and PTY connections", async () => {
     await once(pty, "connect");
     const ptyData = await once(pty, "data");
     const frames = decodePtyFrames(ptyData[0]);
-    assert.deepEqual(frames[0].ctrl, { t: "hello", replPid: process.pid, version: "2.1.145" });
-    assert.equal(frames.some((frame) => frame.kind === 0), true);
+    assert.deepEqual(frames[0].ctrl, {
+      t: "hello",
+      replPid: process.pid,
+      version: "2.1.145",
+    });
+    assert.equal(
+      frames.some((frame) => frame.kind === 0),
+      true,
+    );
     pty.destroy();
   } finally {
     await worker.close();

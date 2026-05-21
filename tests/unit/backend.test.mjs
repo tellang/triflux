@@ -210,9 +210,7 @@ describe("buildAntigravityCommand: platform-specific formatting", () => {
     });
     assert.equal(readFileSync(`${resultFile}.prompt`, "utf8"), prompt);
     assert.ok(
-      cmd.startsWith(
-        `Get-Content -Raw '${resultFile}.prompt' | agy --print `,
-      ),
+      cmd.startsWith(`Get-Content -Raw '${resultFile}.prompt' | agy --print `),
       cmd,
     );
     assert.ok(cmd.includes("--dangerously-skip-permissions"), cmd);

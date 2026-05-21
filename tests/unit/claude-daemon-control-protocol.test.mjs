@@ -1,10 +1,10 @@
-import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import net from "node:net";
-import fs from "node:fs/promises";
+import test from "node:test";
 
 import {
   buildDispatchPayload,
@@ -28,7 +28,10 @@ test("deriveDaemonPaths matches Claude daemon temp path convention", () => {
   assert.equal(paths.configDir, configDir);
   assert.equal(paths.hash, expectedHash);
   assert.equal(paths.daemonDir, `/tmp/cc-daemon-501/${expectedHash}`);
-  assert.equal(paths.controlSock, `/tmp/cc-daemon-501/${expectedHash}/control.sock`);
+  assert.equal(
+    paths.controlSock,
+    `/tmp/cc-daemon-501/${expectedHash}/control.sock`,
+  );
 });
 
 test("deriveDaemonPaths defaults to Claude's /tmp daemon root on macOS", () => {
@@ -160,7 +163,6 @@ test("redactSubscribeMessages removes record intent and detail", () => {
     },
   ]);
 });
-
 
 test("sendControlRequest speaks Claude daemon JSON-line control protocol", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-daemon-test-"));

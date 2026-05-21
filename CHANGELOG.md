@@ -4,6 +4,50 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.25.0] - 2026-05-21
+
+### Added
+
+- **`feat(native-bridge)` (PR #311, commit `2a6d592c`)** Claude agents 목록에서 Triflux native bridge workers 를 사용자에게 직접 노출하는 UI 통합. 40 files, +5834/-182 의 user-facing native bridge surface 확장.
+- **`feat(mcp)` (commit `19d7daec`)** MCP gateway startup auto-install script 추가로 gateway startup 경로의 초기 설치/복구 흐름을 자동화.
+- **`feat(routing)` (PR #305, commit `a5c02313`)** `tfx-route` Node single entry Phase 0 PoC + Phase 1 cross-cutting migration 통합.
+- **`feat(mcp)` (PR #304, commit `a30503fc`)** portable gateway + `sync --all-projects` 지원 추가.
+- **`feat(mcp)` (PR #303, commit `72717ccf`)** MCP registry policy 가 client sync 를 주도하도록 registry/client 동기화 경로 정렬.
+- **`feat(mcp)` (PR #294, commit `769238ad`)** exa/brave/tavily MCP integration 과 Antigravity client target 통합.
+- **`feat(routing)` (commit `09169b6d`)** Antigravity lane Tier 1 dual-lane 운영 기반 추가.
+- **`ci(workflow)` (PR #293, commit `f63d75fb`)** npm trusted publishing OIDC workflow 추가.
+
+### Fixed
+
+- **`fix(startup)` (commit `0665d189`)** systemd + macOS startup path rendering 을 shell-injection safe 하게 강화.
+- **`fix(security)` (commit `d1cc8bbb`)** secret config chmod window race 를 닫아 permission hardening.
+- **`fix(ci)` (commit `424d18e3`)** Antigravity CI 를 prompt-file contract 에 고정해 inline prompt drift 방지.
+- **`fix(routing)` (PR #296, commit `b97773a7`)** Antigravity stdin pipe + tri-lane fallback 회귀 수정.
+- **`fix(ci)` (commit `4019e3d9`)** Node 24 CI 경로에서 npm self-upgrade fail path 제거.
+
+### Changed
+
+- **`chore(registry)` (commit `642a13eb`)** registry driven gateway client sync 로 registry/client 동기화 책임을 정리.
+
+### Security
+
+- **`security(mcp)` (PR #295, commit `b41ca335`)** plaintext Gemini header sync 경로 hardening.
+
+### Tests
+
+- **`test(integration)` (PR #297, commit `c4600522`)** Antigravity `agy --print` 5종 prompt-passing regression coverage 추가.
+
+### Docs
+
+- **`docs(rules)` (commit `517a99eb`)** Antigravity CLI migration policy memo 추가.
+- **`docs` (PR #301, commit `e2856c60`)** Tier 2 follow-up rule corrections, Antigravity subagents PRD, Node CLI PRD 정리.
+
+### Notes
+
+- PR #311 native bridge UI 가 이번 release 의 주요 user-facing 변경이다.
+- 3-way consensus review (codex + agy + gemini -> Claude) 에서 확인된 P1 1건 + P2 4건 fix 를 모두 포함한다.
+- Commit/tag 메시지에는 AI attribution trailer 를 포함하지 않는다.
+
 ## [10.24.0] - 2026-05-19
 
 ### Added
