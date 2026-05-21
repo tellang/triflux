@@ -230,9 +230,13 @@ describe("release governance scripts", () => {
     assert.match(releaseWorkflow, /actions:\s*write/);
     assert.match(releaseWorkflow, /node-version:\s*24/);
     assert.match(releaseWorkflow, /publish\.mjs.*--skip-npm.*--allow-existing/);
-    assert.match(releaseWorkflow, /gh workflow run npm-publish\.yml/);
+    assert.match(
+      releaseWorkflow,
+      /gh workflow run npm-publish\.yml --ref \$\{\{ github\.ref_name \}\}/,
+    );
     assert.match(releaseWorkflow, /npm-publish\.yml/);
     assert.match(releaseWorkflow, /workflow_dispatch/);
+    assert.match(releaseWorkflow, /publish_ref="\$\{\{ github\.ref_name \}\}"/);
     assert.match(releaseWorkflow, /gh run list/);
     assert.doesNotMatch(
       releaseWorkflow,

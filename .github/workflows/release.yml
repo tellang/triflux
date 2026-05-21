@@ -47,28 +47,28 @@ jobs:
       - name: Dispatch npm publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run npm-publish.yml --ref v${{ inputs.version }}
+        run: gh workflow run npm-publish.yml --ref ${{ github.ref_name }}
 
       - name: Wait for npm publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="v${{ inputs.version }}"
+          publish_ref="${{ github.ref_name }}"
           head_sha="$(git rev-parse HEAD)"
           deadline=$((SECONDS + 900))
 
-          echo "Waiting for npm-publish.yml push run for $tag at $head_sha"
+          echo "Waiting for npm-publish.yml workflow_dispatch run for $publish_ref at $head_sha"
           while (( SECONDS < deadline )); do
             run_json="$(
               gh run list \
                 --workflow npm-publish.yml \
                 --limit 20 \
                 --json databaseId,status,conclusion,headBranch,headSha,event,url \
-                | jq -c --arg tag "$tag" --arg sha "$head_sha" '
+                | jq -c --arg publish_ref "$publish_ref" --arg sha "$head_sha" '
                   map(
                     select(
-                      (.event == "push" or .event == "workflow_dispatch")
-                      and .headBranch == $tag
+                      .event == "workflow_dispatch"
+                      and .headBranch == $publish_ref
                       and .headSha == $sha
                     )
                   )
@@ -97,7 +97,7 @@ jobs:
             sleep 15
           done
 
-          echo "Timed out waiting for npm-publish.yml to complete for $tag"
+          echo "Timed out waiting for npm-publish.yml to complete for $publish_ref"
           exit 1
 
       - name: Verify release
