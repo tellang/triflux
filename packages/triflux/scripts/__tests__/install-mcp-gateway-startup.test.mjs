@@ -248,6 +248,10 @@ describe("install mcp gateway startup", () => {
     assert.equal(result.verified, true);
     assert.match(
       fs.files.get(unitPath),
+      /EnvironmentFile=-%h\/\.config\/triflux\/secrets\.env/,
+    );
+    assert.match(
+      fs.files.get(unitPath),
       /EnvironmentFile=-%h\/\.config\/triflux\/mcp-gateway\.env/,
     );
     assert.match(

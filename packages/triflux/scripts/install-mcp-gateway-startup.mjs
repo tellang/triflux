@@ -164,7 +164,7 @@ set -euo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-for env_file in "$HOME/.config/triflux/mcp-gateway.env" "$HOME/.config/tfx/mcp-gateway.env" "$HOME/.mcp-gateway.env"; do
+for env_file in "$HOME/.config/triflux/secrets.env" "$HOME/.config/triflux/mcp-gateway.env" "$HOME/.config/tfx/mcp-gateway.env" "$HOME/.mcp-gateway.env"; do
   if [ -f "$env_file" ]; then
     set -a
     . "$env_file"
@@ -366,6 +366,7 @@ After=network-online.target
 Type=simple
 WorkingDirectory=${systemdQuote(projectRoot)}
 Environment=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+EnvironmentFile=-%h/.config/triflux/secrets.env
 EnvironmentFile=-%h/.config/triflux/mcp-gateway.env
 EnvironmentFile=-%h/.config/tfx/mcp-gateway.env
 EnvironmentFile=-%h/.mcp-gateway.env
@@ -423,6 +424,7 @@ function usage(stdout) {
 Register scripts/mcp-gateway-start.mjs with the current OS startup mechanism.
 
 Secrets are read by the startup process from one of:
+  ~/.config/triflux/secrets.env
   ~/.config/triflux/mcp-gateway.env
   ~/.config/tfx/mcp-gateway.env
   ~/.mcp-gateway.env
