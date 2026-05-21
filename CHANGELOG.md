@@ -6,6 +6,7 @@ All notable changes to triflux will be documented in this file.
 
 ### Added
 
+- `tfx doctor`: verify wrapper script sources `secrets.env` (closes static-config gap left by PR #313 log-parser)
 - **`feat(doctor)`** `tfx doctor` 에 "MCP Gateway Health" 진단 섹션 추가. `~/.local/state/triflux/mcp-gateway.out.log` 를 파싱해 `[WARN] X skipped — missing env: Y` 패턴으로 skip 된 server 를 잡고, 같은 server 의 [START]/[SKIP-running] 이 더 최근이면 복구된 것으로 인식 (false-positive 회피). missing key 발견 시 `secrets.env` + `launchctl kickstart` 또는 `systemctl --user restart` 수정 힌트를 노출. 로그 파일이 없으면 gateway 미설치/미실행으로 침묵. `scripts/lib/mcp-gateway-health-check.mjs` 단위 테스트 8건. `packages/core` + `packages/triflux` mirror byte-identical 동기.
 
 ### Fixed

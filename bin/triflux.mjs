@@ -4701,6 +4701,34 @@ async function cmdDoctor(options = {}) {
       }
     }
 
+    // ── MCP Gateway Wrapper ──
+    // 로그가 생기기 전 단계에서 wrapper 자체가 secrets.env 를 source 하는지 확인한다.
+    section("MCP Gateway Wrapper");
+    {
+      const { checkWrapperSourcing } = await import(
+        "../scripts/lib/mcp-gateway-wrapper-check.mjs"
+      );
+      const wrapperCheck = await checkWrapperSourcing();
+      addDoctorCheck(report, {
+        name: "mcp-gateway-wrapper-sourcing",
+        status: wrapperCheck.status === "warn" ? "warning" : wrapperCheck.status,
+        path: wrapperCheck.wrapperPath,
+        ...(wrapperCheck.message ? { message: wrapperCheck.message } : {}),
+        ...(wrapperCheck.suggestedFix ? { fix: wrapperCheck.suggestedFix } : {}),
+      });
+
+      if (wrapperCheck.status === "ok") {
+        ok("wrapper sources secrets.env");
+      } else if (wrapperCheck.status === "warn") {
+        warn(wrapperCheck.message);
+        info(`수정: ${wrapperCheck.suggestedFix}`);
+        issues++;
+      } else {
+        warn("mcp-gateway wrapper not installed");
+        if (wrapperCheck.message) info(wrapperCheck.message);
+      }
+    }
+
     // ── Codex Config Health (BUG-H #132) ──
     // _codex_config_swap 의 restore 가 Windows lock/ACL 로 실패하면
     // ~/.codex/config.toml.pre-exec 가 남아 [mcp_servers.*] 섹션이 영구 손실된다.
