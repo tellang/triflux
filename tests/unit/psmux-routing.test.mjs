@@ -371,6 +371,59 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
   });
 });
 
+describe("Deep skill preflight — macOS tmux is first-class", () => {
+  const deepSkillPaths = [
+    "skills/tfx-plan/SKILL.md",
+    "skills/tfx-plan/SKILL.md.tmpl",
+    "skills/tfx-analysis/SKILL.md",
+    "skills/tfx-analysis/SKILL.md.tmpl",
+    "skills/tfx-review/SKILL.md",
+    "skills/tfx-review/SKILL.md.tmpl",
+    "skills/tfx-persist/SKILL.md",
+    "skills/tfx-persist/SKILL.md.tmpl",
+    "packages/triflux/skills/tfx-plan/SKILL.md",
+    "packages/triflux/skills/tfx-plan/SKILL.md.tmpl",
+    "packages/triflux/skills/tfx-analysis/SKILL.md",
+    "packages/triflux/skills/tfx-analysis/SKILL.md.tmpl",
+    "packages/triflux/skills/tfx-review/SKILL.md",
+    "packages/triflux/skills/tfx-review/SKILL.md.tmpl",
+    "packages/triflux/skills/tfx-persist/SKILL.md",
+    "packages/triflux/skills/tfx-persist/SKILL.md.tmpl",
+  ];
+
+  it("deep skills do not gate headless multi on literal psmux --version", () => {
+    for (const relativePath of deepSkillPaths) {
+      const content = readFileSync(resolve(PROJECT_ROOT, relativePath), "utf8");
+      assert.doesNotMatch(
+        content,
+        /\bpsmux --version\b/,
+        `${relativePath} must not require psmux on macOS/Linux`,
+      );
+    }
+  });
+
+  it("deep skills name tmux/psmux as the cross-platform mux dependency", () => {
+    let checked = 0;
+    for (const relativePath of deepSkillPaths) {
+      const content = readFileSync(resolve(PROJECT_ROOT, relativePath), "utf8");
+      if (
+        !/headless multi|teammate-mode headless|psmux -V|psmux --version/.test(
+          content,
+        )
+      ) {
+        continue;
+      }
+      checked += 1;
+      assert.match(
+        content,
+        /tmux\/psmux|tmux.*psmux|psmux.*tmux/i,
+        `${relativePath} must describe macOS/Linux tmux and Windows psmux together`,
+      );
+    }
+    assert.ok(checked > 0, "expected at least one deep headless skill");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // D. runtime-mode.mjs — source code regression guard
 // ---------------------------------------------------------------------------

@@ -326,6 +326,15 @@ MCP_PROFILE="${3:-auto}"
 USER_TIMEOUT="${4:-}"
 CONTEXT_FILE="${5:-}"
 
+case "$AGENT_TYPE" in
+  multi|team|codex-team)
+    echo "ERROR: '$AGENT_TYPE' is a tfx CLI subcommand, not a tfx-route agent." >&2
+    echo "Use: tfx multi ... for team/headless dispatch." >&2
+    echo "macOS/Linux headless uses tmux; Windows uses psmux." >&2
+    exit 64
+    ;;
+esac
+
 # ── CLI 이름은 route_agent()에서 기본 역할 alias로 처리됨 (codex→executor, gemini→designer, claude→explore) ──
 
 # ── 인자 검증: MCP_PROFILE이 --flag 형태인 경우 거절 ──

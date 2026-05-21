@@ -132,6 +132,23 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     assert.ok(threw, "unknown agent 인데 throw 안 함");
   });
 
+  test("reserved multi command → actionable tfx multi guidance in node lane", () => {
+    let threw = false;
+    try {
+      execFileSync("node", [NODE_SCRIPT, "--route-print", "multi", "x"], {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      threw = true;
+      assert.equal(err.status, 1);
+      assert.match(String(err.stderr ?? ""), /tfx multi/);
+      assert.match(String(err.stderr ?? ""), /not a tfx-route agent/i);
+    }
+    assert.ok(threw, "reserved multi command should fail with guidance");
+  });
+
   test("TFX_ROUTE_NODE=1 게이트웨이: bash → node 정확히 이관", () => {
     const out = execFileSync(
       "bash",
@@ -165,5 +182,23 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     // bash 의 route_agent() L983 에러 메시지 ("알 수 없는 에이전트 타입") 가 나와야
     // bash 가 직접 처리했다는 신호. node 진입점이면 "Unknown agent type" (영어) 가 남는다.
     assert.match(stderr, /알 수 없는 에이전트 타입|Unknown agent type/);
+  });
+
+  test("reserved multi command → actionable tfx multi guidance in bash lane", () => {
+    let stderr = "";
+    let status = 0;
+    try {
+      execFileSync("bash", [BASH_SCRIPT, "multi", "x"], {
+        encoding: "utf8",
+        timeout: 5000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (err) {
+      status = err.status;
+      stderr = String(err.stderr ?? "");
+    }
+    assert.equal(status, 64);
+    assert.match(stderr, /tfx multi/);
+    assert.match(stderr, /not a tfx-route agent/i);
   });
 });

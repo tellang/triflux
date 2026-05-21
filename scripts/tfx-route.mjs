@@ -42,6 +42,16 @@ const ADAPTERS = {
   agy: agyAdapter,
 };
 
+const RESERVED_TFX_COMMANDS = new Set(["multi", "team", "codex-team"]);
+
+function reservedCommandError(command) {
+  return [
+    `'${command}' is a tfx CLI subcommand, not a tfx-route agent.`,
+    "Use `tfx multi ...` for team/headless dispatch.",
+    "macOS/Linux headless uses tmux; Windows uses psmux.",
+  ].join(" ");
+}
+
 export function preflightNodeVersion(versionString = process.versions.node) {
   const major = Number(versionString.split(".")[0]);
   if (!Number.isFinite(major) || major < MIN_NODE_MAJOR) {
@@ -60,6 +70,9 @@ export function loadAgentMap(path = AGENT_MAP_PATH) {
 }
 
 export function resolveCliTypeForAgent(agent, agentMap) {
+  if (RESERVED_TFX_COMMANDS.has(String(agent || "").toLowerCase())) {
+    throw new Error(reservedCommandError(agent));
+  }
   const raw = agentMap[agent];
   if (!raw) {
     throw new Error(`Unknown agent type: ${agent}`);

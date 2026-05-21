@@ -36,7 +36,7 @@ argument-hint: "<구현할 기능> [--quick]"
 ### 전제조건 프로브 및 Tier Degradation
 
 ```bash
-psmux --version 2>/dev/null && \
+(tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
   curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
   gemini --version 2>/dev/null

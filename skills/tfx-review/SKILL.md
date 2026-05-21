@@ -50,7 +50,7 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (아래 Quick 섹션).
 > **진입 즉시 실행** — 10초 내 가시적 출력 보장. 빈 stdout + exit 0 **금지**.
 
 ```bash
-psmux --version 2>/dev/null && \
+(tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
   curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
   gemini --version 2>/dev/null
@@ -60,12 +60,12 @@ psmux --version 2>/dev/null && \
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | psmux + Hub + Codex + Gemini 전부 정상 | headless multi 3-CLI |
+| **Tier 1** | tmux/psmux + Hub + Codex + Gemini 전부 정상 | headless multi 3-CLI |
 | **Tier 2** | Codex 또는 Gemini 중 하나만 가용 | 가용 CLI + Claude Agent 조합 |
 | **Tier 3** | headless 불가 또는 `claude -p` one-shot | Claude Agent only (consensus 미적용) |
 
 ```
-IF claude -p (one-shot) OR psmux 없음:
+IF claude -p (one-shot) OR mux 없음 (macOS/Linux tmux, Windows psmux):
   → Tier 3
 
 IF Hub 미응답:
@@ -88,7 +88,7 @@ ELSE:
 ```
 ⚠ [Tier 3] headless multi 환경 미충족 — single-model 모드로 실행합니다 (consensus 미적용)
   누락: {missing_components}
-  권장: psmux, Hub, Codex CLI, Gemini CLI 설치 후 재실행
+  권장: tmux/psmux, Hub, Codex CLI, Gemini CLI 설치 후 재실행
   또는 /tfx-review --quick 으로 명시적 quick 경로 사용
 ```
 

@@ -36,7 +36,7 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (Codex 단일).
 > **진입 즉시 실행** — 10초 내 가시적 출력 보장. 빈 stdout + exit 0 **금지**.
 
 ```bash
-psmux --version 2>/dev/null && \
+(tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
   curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
   gemini --version 2>/dev/null
@@ -44,14 +44,14 @@ psmux --version 2>/dev/null && \
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | psmux + Hub + Codex + Gemini 전부 | headless multi 3-CLI |
+| **Tier 1** | tmux/psmux + Hub + Codex + Gemini 전부 | headless multi 3-CLI |
 | **Tier 2** | Codex 또는 Gemini 중 하나만 | 가용 CLI + Claude Agent |
 | **Tier 3** | headless 불가 | Claude Agent only (consensus 미적용) |
 
 Tier 3 시:
 ```
 ⚠ [Tier 3] headless multi 환경 미충족 — single-model 모드 (consensus 미적용)
-  누락: {missing}  |  권장: psmux + Hub + Codex + Gemini 설치
+  누락: {missing}  |  권장: tmux/psmux + Hub + Codex + Gemini 설치
   또는 /tfx-analysis --quick 사용
 ```
 
