@@ -544,6 +544,73 @@ describe("swarm-hypervisor", () => {
       );
     });
 
+    it("keeps native bridge registration disabled for direct hypervisor construction", async () => {
+      const plan = planSwarm(null, { content: SINGLE_PRD });
+      const registerCalls = [];
+      const { createConductor } = createMockConductorFactory();
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "native-bridge-default-off",
+        _deps: {
+          createConductor,
+          registerSwarmShard: async (opts) => {
+            registerCalls.push(opts);
+            return { close() {} };
+          },
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+        },
+      });
+
+      await hv.launch(plan);
+
+      assert.deepEqual(registerCalls, []);
+    });
+
+    it("registers native bridge shard rows under the parent project cwd", async () => {
+      const plan = planSwarm(null, { content: SINGLE_PRD });
+      const registerCalls = [];
+      const closeCalls = [];
+      const { createConductor, conductors } = createMockConductorFactory();
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "native-bridge-parent-cwd",
+        nativeBridge: true,
+        _deps: {
+          createConductor,
+          registerSwarmShard: async (opts) => {
+            registerCalls.push(opts);
+            return { close: () => closeCalls.push(opts.shardName) };
+          },
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+        },
+      });
+
+      await hv.launch(plan);
+
+      assert.equal(registerCalls.length, 1);
+      assert.equal(registerCalls[0].shardName, "worker-a");
+      assert.equal(registerCalls[0].cwd, workdir);
+      assert.equal(registerCalls[0].sessionId, conductors[0].sessionConfig.id);
+      assert.equal(
+        conductors[0].sessionConfig.workdir,
+        `${workdir}/.codex-swarm/wt-worker-a`,
+      );
+
+      await hv.shutdown("native_bridge_parent_cwd_cleanup");
+      hv = null;
+      assert.deepEqual(closeCalls, ["worker-a"]);
+    });
+
     it("rebases shard branches onto the integration branch and cleans up worktrees", async () => {
       const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
       const { createConductor, conductors } = createMockConductorFactory();
@@ -600,7 +667,7 @@ describe("swarm-hypervisor", () => {
       ]);
     });
 
-    it("maybeCleanupWorktree calls cleanupShardProcesses before worktree remove", async () => {
+    it("maybeCleanupWorktree closes native bridge before process and worktree cleanup", async () => {
       const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
       const { createConductor, conductors } = createMockConductorFactory();
       const calls = [];
@@ -609,8 +676,14 @@ describe("swarm-hypervisor", () => {
         workdir,
         logsDir,
         runId: "process-cleanup-order",
+        nativeBridge: true,
         _deps: {
           createConductor,
+          registerSwarmShard: async (opts) => ({
+            close: async () => {
+              calls.push({ type: "bridge", opts });
+            },
+          }),
           ensureWorktree: async ({ slug, runId }) => ({
             worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
             branchName: `swarm/${runId}/${slug}`,
@@ -640,9 +713,11 @@ describe("swarm-hypervisor", () => {
 
       assert.deepEqual(
         calls.map((call) => call.type),
-        ["process", "worktree"],
+        ["bridge", "process", "worktree"],
       );
-      assert.deepEqual(calls[0].opts, {
+      assert.deepEqual(calls[0].opts.cwd, workdir);
+      assert.deepEqual(calls[0].opts.shardName, "worker-a");
+      assert.deepEqual(calls[1].opts, {
         worktreePath: `${workdir}/.codex-swarm/wt-worker-a`,
         sessionIds: [conductors[0].sessionConfig.id],
         topPids: [12345],

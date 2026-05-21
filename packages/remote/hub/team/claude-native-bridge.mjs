@@ -48,6 +48,7 @@ export function deriveClaudeDaemonPaths({
     ptyDir: path.join(daemonDir, "pty"),
     rosterPath: path.join(resolvedConfigDir, "daemon", "roster.json"),
     sessionsDir: path.join(resolvedConfigDir, "sessions"),
+    jobsDir: path.join(resolvedConfigDir, "jobs"),
   };
 }
 
@@ -215,6 +216,11 @@ export async function removeRosterWorkers(rosterPath, shorts) {
   });
 }
 
+export async function removeClaudeJobState(jobsDir, short) {
+  if (!short) return;
+  await fs.rm(path.join(jobsDir, short), { recursive: true, force: true });
+}
+
 function shellSingleQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
@@ -279,18 +285,19 @@ export async function registerSwarmShard({
     _deps.writeClaudeSessionProjection || writeClaudeSessionProjection;
   const removeProjection =
     _deps.removeClaudeSessionProjection || removeClaudeSessionProjection;
+  const removeJobStateImpl = _deps.removeClaudeJobState || removeClaudeJobState;
   const killJob = _deps.killDaemonJob || killDaemonJob;
   const accessControlSock = _deps.accessControlSock || fs.access;
 
   const paths = derivePaths({ configDir, tmpRoot });
   const sessionsDir =
     paths.sessionsDir || path.join(paths.configDir || configDir, "sessions");
+  const jobsDir = paths.jobsDir || path.join(paths.configDir || configDir, "jobs");
   const short = deriveSwarmShort({ sessionId, shardName, host });
   const displayName = `Triflux swarm ${shardName}`;
   const command = buildSwarmShardBridgeCommand({ displayName, sessionId });
   const payload = buildPayload({
     short,
-    sessionId,
     cwd,
     command,
     name: displayName,
@@ -334,6 +341,7 @@ export async function registerSwarmShard({
     skipped: false,
     host: "local",
     sessionId: payload.sessionId,
+    swarmSessionId: sessionId,
     shardName,
     cli,
     role,
@@ -346,6 +354,7 @@ export async function registerSwarmShard({
       closed = true;
       await removeProjection(sessionProjectionPath).catch(() => {});
       await killJob(paths.controlSock, short).catch(() => {});
+      await removeJobStateImpl(jobsDir, short).catch(() => {});
     },
   };
 }

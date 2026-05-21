@@ -12,6 +12,7 @@ describe("swarm-cli parseFlags — --base", () => {
   it("default baseBranch is 'main' when --base omitted", () => {
     const { flags, positional } = parseFlags(["docs/prd/foo.md"]);
     assert.equal(flags.baseBranch, "main");
+    assert.equal(flags.nativeBridge, true);
     assert.deepEqual(positional, ["docs/prd/foo.md"]);
   });
 

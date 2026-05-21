@@ -164,7 +164,7 @@ function resolveHubStatusUrl(hub) {
  * @param {string} [opts.baseBranch='main'] — base branch for shard worktrees
  * @param {string} [opts.runId=`swarm-${Date.now()}`] — logical swarm run id
  * @param {number} [opts.maxRestarts=2] — per-shard max restarts
- * @param {boolean} [opts.nativeBridge=true] — expose local shards in Claude agents
+ * @param {boolean} [opts.nativeBridge=false] — expose local shards in Claude agents
  * @param {number} [opts.graceMs=10000] — conductor shutdown grace period
  * @param {number} [opts.integrationTimeoutMs=60000] — max time for integration phase
  * @param {boolean} [opts.keepFailedWorktrees=false] — preserve failed shard worktrees for debugging
@@ -179,7 +179,7 @@ export function createSwarmHypervisor(opts) {
     baseBranch = "main",
     runId = `swarm-${Date.now()}`,
     maxRestarts = 2,
-    nativeBridge = true,
+    nativeBridge = false,
     graceMs = 10_000,
     keepFailedWorktrees = false,
     _integrationTimeoutMs = 60_000,
@@ -548,21 +548,33 @@ export function createSwarmHypervisor(opts) {
   }
 
   async function closeNativeBridgeRegistration(worker, shardName, reason) {
+    if (worker?.nativeBridgeClosePromise) {
+      await worker.nativeBridgeClosePromise;
+      return;
+    }
     const registration = worker?.nativeBridgeRegistration;
     if (!registration || typeof registration.close !== "function") return;
-    try {
-      await registration.close();
-      eventLog.append("native_bridge_registration_closed", {
-        shard: shardName,
-        reason,
-      });
-    } catch (err) {
-      eventLog.append("native_bridge_registration_close_failed", {
-        shard: shardName,
-        reason,
-        error: err.message,
-      });
-    }
+    worker.nativeBridgeClosePromise = (async () => {
+      let closed = false;
+      try {
+        await registration.close();
+        closed = true;
+        eventLog.append("native_bridge_registration_closed", {
+          shard: shardName,
+          reason,
+        });
+      } catch (err) {
+        eventLog.append("native_bridge_registration_close_failed", {
+          shard: shardName,
+          reason,
+          error: err.message,
+        });
+      } finally {
+        worker.nativeBridgeClosePromise = null;
+        if (closed) worker.nativeBridgeRegistration = null;
+      }
+    })();
+    await worker.nativeBridgeClosePromise;
   }
 
   async function maybeRegisterNativeBridgeShard(shard, sessionConfig) {
@@ -573,7 +585,7 @@ export function createSwarmHypervisor(opts) {
         cli: shard.agent,
         role: shard.role || "worker",
         shardName: shard.name,
-        cwd: sessionConfig.workdir,
+        cwd: workdir,
         host: shard.host || "local",
         _deps: {
           warn(message) {
@@ -892,10 +904,18 @@ export function createSwarmHypervisor(opts) {
         const worker = workers.get(shardName);
         const shard = plan?.shards.find((item) => item.name === shardName);
         if (worker && shard) {
-          void maybeCleanupWorktree(shardName, worker, shard, {
+          const cleanupPromise = maybeCleanupWorktree(shardName, worker, shard, {
             force: true,
             failureReason: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
           });
+          worker.cleanupPromise = cleanupPromise;
+          void cleanupPromise
+            .finally(() => {
+              if (worker.cleanupPromise === cleanupPromise) {
+                worker.cleanupPromise = null;
+              }
+            })
+            .catch(() => {});
         }
 
         const redundant = redundantWorkers.get(shardName);
@@ -1125,6 +1145,8 @@ export function createSwarmHypervisor(opts) {
 
       for (const shardName of plan.mergeOrder) {
         if (failures.has(shardName)) {
+          const worker = workers.get(shardName);
+          if (worker?.cleanupPromise) await worker.cleanupPromise;
           eventLog.append("skip_failed_shard", { shard: shardName });
           appendIntegrationReport({
             shard: shardName,
@@ -1411,6 +1433,12 @@ export function createSwarmHypervisor(opts) {
     if (!worker?.worktreePath || shard?.host) return outcome;
     if (failureReason && keepFailedWorktrees) return outcome;
     if (cleanedWorktreePaths.has(worker.worktreePath)) return outcome;
+
+    await closeNativeBridgeRegistration(
+      worker,
+      shardName,
+      "before_worktree_cleanup",
+    );
 
     // Best-effort: preserve any uncommitted worker changes before removing
     // the worktree. Silent on failure — must not block cleanup or mask the

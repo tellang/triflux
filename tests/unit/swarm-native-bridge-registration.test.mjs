@@ -67,7 +67,11 @@ test("local shard registers Triflux swarm shard row with shard display name", as
 
     const dispatch = requests.find((request) => request.op === "dispatch");
     assert.equal(registration.skipped, false);
-    assert.equal(dispatch.d.sessionId, "swarm-run42-api-feedface");
+    assert.match(dispatch.d.short, /^[a-f0-9]{8}$/u);
+    assert.match(dispatch.d.sessionId, /^[a-f0-9]{8}-/u);
+    assert.notEqual(dispatch.d.sessionId, "swarm-run42-api-feedface");
+    assert.equal(registration.swarmSessionId, "swarm-run42-api-feedface");
+    assert.equal(registration.sessionId, dispatch.d.sessionId);
     assert.equal(dispatch.d.cwd, "/tmp/project");
     assert.equal(dispatch.d.seed.name, "Triflux swarm api");
     assert.equal(dispatch.d.seed.intent, "Triflux swarm api");
@@ -75,11 +79,25 @@ test("local shard registers Triflux swarm shard row with shard display name", as
     const projection = JSON.parse(
       await fs.readFile(path.join(paths.sessionsDir, `${process.pid}.json`)),
     );
+    await fs.mkdir(path.join(paths.jobsDir, dispatch.d.short), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(paths.jobsDir, dispatch.d.short, "state.json"),
+      JSON.stringify({ name: "Triflux swarm api" }),
+      "utf8",
+    );
     assert.equal(projection.name, "Triflux swarm api");
     assert.equal(projection.agent, "codex");
-    assert.equal(projection.sessionId, "swarm-run42-api-feedface");
+    assert.equal(projection.sessionId, dispatch.d.sessionId);
+    assert.equal(projection.jobId, dispatch.d.short);
+    assert.equal(projection.bridgeSessionId, `session_${dispatch.d.short}`);
 
     await registration.close();
+    await assert.rejects(
+      fs.access(path.join(paths.jobsDir, dispatch.d.short, "state.json")),
+      /ENOENT/u,
+    );
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmp, { recursive: true, force: true });
