@@ -15,6 +15,7 @@ import {
   syncCodexHubUrl,
   syncHubMcpSettings,
   syncProjectMcpJson,
+  writeTextAtomic,
 } from "../../scripts/sync-hub-mcp-settings.mjs";
 
 const HUB_URL = "http://127.0.0.1:27888/mcp";
@@ -859,5 +860,102 @@ describe("syncProjectMcpJson", () => {
     // 파일도 byte-for-byte 동일.
     assert.equal(readFileSync(projectMcpPath, "utf8"), before.project);
     assert.equal(readFileSync(rootMcpPath, "utf8"), before.root);
+  });
+});
+
+describe("writeTextAtomic", () => {
+  it("applies the requested mode to the temp file before rename", async () => {
+    const calls = [];
+    const ops = {
+      async chmod(path, mode) {
+        calls.push(["chmod", path, mode]);
+      },
+      async rename(from, to) {
+        calls.push(["rename", from, to]);
+        if (from === "/secret/settings.json") {
+          const error = new Error("missing original");
+          error.code = "ENOENT";
+          throw error;
+        }
+      },
+      async rm(path, options) {
+        calls.push(["rm", path, options]);
+      },
+      async writeFile(path, payload, options) {
+        calls.push(["writeFile", path, payload, options]);
+      },
+    };
+
+    await writeTextAtomic("/secret/settings.json", "{}\n", {
+      mode: 0o600,
+      ops,
+    });
+
+    const write = calls.find(([name]) => name === "writeFile");
+    assert.equal(write[3].mode, 0o600);
+    const chmodIndex = calls.findIndex(([name]) => name === "chmod");
+    const publishRenameIndex = calls.findIndex(
+      ([name, from, to]) =>
+        name === "rename" &&
+        from.startsWith("/secret/settings.json.tmp-") &&
+        to === "/secret/settings.json",
+    );
+    assert.ok(chmodIndex >= 0);
+    assert.ok(publishRenameIndex >= 0);
+    assert.ok(chmodIndex < publishRenameIndex);
+  });
+
+  it("rolls back the backup when chmod fails before publishing the temp file", async () => {
+    const calls = [];
+    const ops = {
+      async chmod(path, mode) {
+        calls.push(["chmod", path, mode]);
+        throw new Error("chmod denied");
+      },
+      async rename(from, to) {
+        calls.push(["rename", from, to]);
+      },
+      async rm(path, options) {
+        calls.push(["rm", path, options]);
+      },
+      async writeFile(path, payload, options) {
+        calls.push(["writeFile", path, payload, options]);
+      },
+    };
+
+    await assert.rejects(
+      writeTextAtomic("/secret/settings.json", "{}\n", {
+        mode: 0o600,
+        ops,
+      }),
+      /chmod denied/,
+    );
+
+    const backupPath = calls.find(
+      ([name, from]) => name === "rename" && from === "/secret/settings.json",
+    )?.[2];
+    assert.match(backupPath, /\/secret\/settings\.json\.bak-/);
+    assert.deepEqual(
+      calls.find(
+        ([name, from, to]) =>
+          name === "rename" &&
+          from === backupPath &&
+          to === "/secret/settings.json",
+      ),
+      ["rename", backupPath, "/secret/settings.json"],
+    );
+    assert.equal(
+      calls.some(([name, path]) => name === "rm" && path === backupPath),
+      false,
+    );
+    assert.equal(
+      calls.some(
+        ([name, from, to]) =>
+          name === "rename" &&
+          from.startsWith("/secret/settings.json.tmp-") &&
+          to === "/secret/settings.json",
+      ),
+      false,
+    );
   });
 });
