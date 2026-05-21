@@ -186,7 +186,11 @@ describe("mcp-gateway-health-check", () => {
       fs: makeFs({ logBody: recoveredLog }),
       logPath: "/fake/log",
     });
-    assert.equal(result.findings.length, 0, "복구된 server 는 finding 에서 빠진다");
+    assert.equal(
+      result.findings.length,
+      0,
+      "복구된 server 는 finding 에서 빠진다",
+    );
     const startedNames = result.started.map((s) => s.server).sort();
     assert.deepEqual(startedNames, ["brave-search", "context7", "serena"]);
   });

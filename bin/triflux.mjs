@@ -4711,10 +4711,13 @@ async function cmdDoctor(options = {}) {
       const wrapperCheck = await checkWrapperSourcing();
       addDoctorCheck(report, {
         name: "mcp-gateway-wrapper-sourcing",
-        status: wrapperCheck.status === "warn" ? "warning" : wrapperCheck.status,
+        status:
+          wrapperCheck.status === "warn" ? "warning" : wrapperCheck.status,
         path: wrapperCheck.wrapperPath,
         ...(wrapperCheck.message ? { message: wrapperCheck.message } : {}),
-        ...(wrapperCheck.suggestedFix ? { fix: wrapperCheck.suggestedFix } : {}),
+        ...(wrapperCheck.suggestedFix
+          ? { fix: wrapperCheck.suggestedFix }
+          : {}),
       });
 
       if (wrapperCheck.status === "ok") {

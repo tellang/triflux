@@ -134,7 +134,10 @@ describe("install mcp gateway startup", () => {
       const body = fs.files.get(wrapperPath);
       const secretsIdx = body.indexOf("$HOME/.config/triflux/secrets.env");
       const legacyIdx = body.indexOf("$HOME/.config/triflux/mcp-gateway.env");
-      assert.ok(secretsIdx >= 0, "secrets.env 가 wrapper sourcing 목록에 있어야 한다");
+      assert.ok(
+        secretsIdx >= 0,
+        "secrets.env 가 wrapper sourcing 목록에 있어야 한다",
+      );
       assert.ok(legacyIdx >= 0, "legacy mcp-gateway.env 도 호환 유지");
       assert.ok(
         secretsIdx < legacyIdx,

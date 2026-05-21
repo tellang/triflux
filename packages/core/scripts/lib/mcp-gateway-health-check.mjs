@@ -105,7 +105,6 @@ export function checkMcpGatewayHealth({
       lastEvent.set(m[1], {
         type: "manifest-disabled",
       });
-      continue;
     }
   }
 
@@ -146,9 +145,7 @@ export function summarizeMcpGatewayHealth(result) {
   }
   const missingEnv = result.findings.filter((f) => f.reason === "missing-env");
   if (missingEnv.length > 0) {
-    const list = missingEnv
-      .map((f) => `${f.server} (${f.detail})`)
-      .join(", ");
+    const list = missingEnv.map((f) => `${f.server} (${f.detail})`).join(", ");
     return {
       level: "warn",
       message: `${missingEnv.length}개 MCP 서버가 missing env 로 skip: ${list}`,
