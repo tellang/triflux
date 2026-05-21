@@ -34,6 +34,15 @@ function getAgyPath() {
 }
 
 const AGY_PATH = getAgyPath();
+
+// 실측 agy CLI 를 직접 호출하는 5종 flag-mechanism regression 은 OAuth
+// 토큰 차감이 발생한다. CI / 기본 `npm test` 에서는 항상 skip 하고, 명시적
+// `TFX_AGY_LIVE=1 npm test` 또는 release 직전 검증 시에만 실행한다.
+// tfx-route.sh routing regression (이 파일 line 217+) 은 `tests/fixtures/bin/agy`
+// mock 으로 PATH override 되어 OAuth 와 무관하게 항상 실행된다.
+const AGY_LIVE_REGRESSION =
+  process.env.TFX_AGY_LIVE === "1" || process.env.TFX_AGY_LIVE === "true";
+
 const TEST_PROMPT = "Reply with single word: hi";
 const WELCOME_KEYWORDS = [
   "antigravity",
@@ -92,7 +101,11 @@ function out(result) {
 }
 
 test("agy --print prompt-passing regression tests", {
-  skip: !AGY_PATH ? "agy not in PATH" : false,
+  skip: !AGY_PATH
+    ? "agy not in PATH"
+    : !AGY_LIVE_REGRESSION
+      ? "set TFX_AGY_LIVE=1 to run real-agy regression (OAuth cost)"
+      : false,
 }, async (t) => {
   await t.test(
     "1. alpha commit pattern: --print --dangerously + stdin pipe -> success",
