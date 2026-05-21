@@ -158,13 +158,15 @@ describe("worktree-lifecycle", () => {
     assert.equal(branches, "");
   });
 
-  it("W-04: ensureWorktree — .claude-plugin 디렉토리가 자동 제거된다 (#34 L2)", async () => {
+  it("W-04: ensureWorktree — preserves .claude-plugin for codex worker compatibility", async () => {
     // main 브랜치에 .claude-plugin/ 생성 후 커밋
     const pluginDir = join(repoDir, ".claude-plugin");
     mkdirSync(pluginDir, { recursive: true });
     const pluginJson = join(pluginDir, "plugin.json");
+    const marketplaceJson = join(pluginDir, "marketplace.json");
     const { writeFileSync } = await import("node:fs");
     writeFileSync(pluginJson, '{"name":"triflux"}');
+    writeFileSync(marketplaceJson, '{"plugins":[]}');
     execFileSync("git", ["add", ".claude-plugin"], {
       cwd: repoDir,
       windowsHide: true,
@@ -182,12 +184,15 @@ describe("worktree-lifecycle", () => {
       baseBranch: "main",
     });
 
-    // .claude-plugin이 worktree에서 제거됨
+    // Codex 0.132.0+ requires project-local plugin metadata in swarm worktrees.
     const wtPluginDir = join(wt.worktreePath, ".claude-plugin");
-    assert.equal(
-      existsSync(wtPluginDir),
-      false,
-      ".claude-plugin should be removed from worktree",
+    assert.ok(
+      existsSync(join(wtPluginDir, "plugin.json")),
+      ".claude-plugin/plugin.json should be preserved in worktree",
+    );
+    assert.ok(
+      existsSync(join(wtPluginDir, "marketplace.json")),
+      ".claude-plugin/marketplace.json should be preserved in worktree",
     );
 
     // 원본 repo에서는 여전히 존재

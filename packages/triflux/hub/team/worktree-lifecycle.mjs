@@ -5,19 +5,15 @@
 
 import { execFile } from "node:child_process";
 import { access, mkdir, readdir, realpath, rm } from "node:fs/promises";
-import { join, normalize, relative, resolve } from "node:path";
+import { normalize, relative, resolve } from "node:path";
 import { remoteGit, validateHost } from "./remote-session.mjs";
 
 const SWARM_ROOT = ".codex-swarm";
 const SLEEP_MS = 2000; // WT race-guard (MEMORY.md: wt-attach-spacing)
 
-// BUG-I: prepareWorktree 가 #34 L2 의도로 worktree 에서 rm 하는 tracked paths.
-// swarm-hypervisor 의 commit_evidence dirty 판정에서 이 경로들을 filter 해야
-// "의도된 삭제" 가 F6 no_commit_guard 를 잘못 trip 하는 것을 막을 수 있다.
-export const EXPECTED_WORKTREE_DELETIONS = Object.freeze([
-  ".claude-plugin/marketplace.json",
-  ".claude-plugin/plugin.json",
-]);
+// Tracked files intentionally removed from swarm worktrees. Keep this list
+// narrow: .claude-plugin metadata must be preserved for Codex worker startup.
+export const EXPECTED_WORKTREE_DELETIONS = Object.freeze([]);
 
 /**
  * Parse `git status --short` output into a dirty-file list. Filters out paths
@@ -256,14 +252,6 @@ export async function ensureWorktree({
     );
   } catch {
     await git(["worktree", "add", wtDir, branchName], rootDir);
-  }
-
-  // #34 L2: worktree에 복사된 .claude-plugin 제거 (하네스가 PLUGIN_ROOT를 오인하는 것 방지)
-  const pluginDir = join(wtDir, ".claude-plugin");
-  try {
-    await rm(pluginDir, { recursive: true, force: true });
-  } catch {
-    /* absent → ok */
   }
 
   return { worktreePath: normPath(wtDir), branchName, remote: false };

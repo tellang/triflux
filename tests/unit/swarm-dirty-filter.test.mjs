@@ -1,6 +1,6 @@
-// BUG-I regression — extractDirtyFiles filters EXPECTED_WORKTREE_DELETIONS
-// so F6 no_commit_guard does not trip on #34 L2 intentional .claude-plugin
-// removal. See hub/team/worktree-lifecycle.mjs prepareWorktree.
+// BUG-I regression — extractDirtyFiles filters only explicitly expected
+// deletions. .claude-plugin metadata must stay visible because Codex workers
+// require it inside swarm worktrees.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -15,13 +15,13 @@ test("extractDirtyFiles: empty/null/undefined input returns empty array", () => 
   assert.deepStrictEqual(extractDirtyFiles(undefined), []);
 });
 
-test("extractDirtyFiles: filters EXPECTED_WORKTREE_DELETIONS (BUG-I #129)", () => {
+test("extractDirtyFiles: .claude-plugin deletions are dirty regressions", () => {
   const raw =
     " D .claude-plugin/marketplace.json\n D .claude-plugin/plugin.json";
-  assert.deepStrictEqual(
-    extractDirtyFiles(raw, EXPECTED_WORKTREE_DELETIONS),
-    [],
-  );
+  assert.deepStrictEqual(extractDirtyFiles(raw, EXPECTED_WORKTREE_DELETIONS), [
+    ".claude-plugin/marketplace.json",
+    ".claude-plugin/plugin.json",
+  ]);
 });
 
 test("extractDirtyFiles: passes through genuine dirty paths", () => {
@@ -32,14 +32,16 @@ test("extractDirtyFiles: passes through genuine dirty paths", () => {
   ]);
 });
 
-test("extractDirtyFiles: mixed input — only expected deletions filtered", () => {
+test("extractDirtyFiles: mixed input preserves .claude-plugin deletions", () => {
   const raw =
     " D .claude-plugin/marketplace.json\n" +
     " M hub/team/foo.mjs\n" +
     " D .claude-plugin/plugin.json\n" +
     "?? untracked.md";
   assert.deepStrictEqual(extractDirtyFiles(raw, EXPECTED_WORKTREE_DELETIONS), [
+    ".claude-plugin/marketplace.json",
     "hub/team/foo.mjs",
+    ".claude-plugin/plugin.json",
     "untracked.md",
   ]);
 });
@@ -66,10 +68,9 @@ test("extractDirtyFiles: rename 'R  old -> new' passes through (edge case)", () 
   ]);
 });
 
-test("extractDirtyFiles: staged deletion 'D ' of expected path IS filtered", () => {
+test("extractDirtyFiles: staged .claude-plugin deletion is dirty", () => {
   const raw = "D  .claude-plugin/marketplace.json";
-  assert.deepStrictEqual(
-    extractDirtyFiles(raw, EXPECTED_WORKTREE_DELETIONS),
-    [],
-  );
+  assert.deepStrictEqual(extractDirtyFiles(raw, EXPECTED_WORKTREE_DELETIONS), [
+    ".claude-plugin/marketplace.json",
+  ]);
 });

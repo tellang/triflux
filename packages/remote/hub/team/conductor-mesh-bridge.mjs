@@ -1,4 +1,4 @@
-import { createMessage, MSG_TYPES } from "../../mesh/mesh-protocol.mjs";
+import { createMessage, MSG_TYPES } from "@triflux/core/mesh/mesh-protocol.mjs";
 
 const BRIDGE_AGENT_ID = "conductor";
 
