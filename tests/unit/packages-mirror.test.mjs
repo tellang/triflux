@@ -1,6 +1,7 @@
 // packages-mirror — smoke test that check-packages-mirror.mjs reports
 // Mirror OK on a healthy tree. If this fails in CI, the dev forgot to
-// run `npm run release:check-mirror:fix` after editing hub/bin/scripts.
+// run `npm run release:check-mirror:fix` after editing any mirrored top
+// (bin, config, hooks, hub, hud, mesh, scripts, skills).
 
 import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
