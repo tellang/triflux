@@ -77,7 +77,10 @@ export function parseTeamArgs(args = []) {
   let model = "";
   let cwd = "";
   let nativeBridge = false;
-  let nativeBridgeMode = "roster";
+  let nativeBridgeMode = "agents";
+  let nativeBridgeExplicit = false;
+  let nativeBridgeUiRequested = false;
+  let nativeBridgeUiOptOut = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const current = args[index];
@@ -127,9 +130,25 @@ export function parseTeamArgs(args = []) {
       model = args[++index].trim();
     } else if (current === "--native-bridge" || current === "-nb") {
       nativeBridge = true;
+      nativeBridgeExplicit = true;
     } else if (current === "--native-bridge-ui") {
+      if (nativeBridgeUiOptOut) {
+        throw new Error(
+          "cannot combine --native-bridge-ui and --no-native-bridge-ui",
+        );
+      }
       nativeBridge = true;
       nativeBridgeMode = "agents";
+      nativeBridgeExplicit = true;
+      nativeBridgeUiRequested = true;
+    } else if (current === "--no-native-bridge-ui") {
+      if (nativeBridgeUiRequested) {
+        throw new Error(
+          "cannot combine --native-bridge-ui and --no-native-bridge-ui",
+        );
+      }
+      nativeBridge = false;
+      nativeBridgeUiOptOut = true;
     } else if (current === "--native-bridge-mode") {
       const mode = args[++index];
       if (!NATIVE_BRIDGE_MODES.has(mode)) {
@@ -139,6 +158,7 @@ export function parseTeamArgs(args = []) {
       }
       nativeBridge = true;
       nativeBridgeMode = mode;
+      nativeBridgeExplicit = true;
     } else if (current === "--cwd" && args[index + 1]) {
       let p = args[++index].trim();
       // MSYS/Git Bash 드라이브 문자 변환: /c/... → C:/...
@@ -153,11 +173,20 @@ export function parseTeamArgs(args = []) {
     }
   }
 
+  const normalizedTeammateMode = normalizeTeammateMode(teammateMode);
+  if (
+    !nativeBridgeExplicit &&
+    !nativeBridgeUiOptOut &&
+    normalizedTeammateMode === "headless"
+  ) {
+    nativeBridge = true;
+  }
+
   return {
     agents,
     lead,
     layout: normalizeLayout(layout),
-    teammateMode: normalizeTeammateMode(teammateMode),
+    teammateMode: normalizedTeammateMode,
     task: taskParts.join(" ").trim(),
     assigns,
     autoAttach,
@@ -173,5 +202,6 @@ export function parseTeamArgs(args = []) {
     cwd,
     nativeBridge,
     nativeBridgeMode,
+    nativeBridgeUiOptOut,
   };
 }

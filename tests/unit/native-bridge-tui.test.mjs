@@ -83,12 +83,28 @@ test("CLI start parser should resolve -nb option correctly", () => {
   );
 });
 
-test("CLI start parser should default nativeBridge to false", () => {
-  const result = parseTeamArgs(["start"]);
+test("CLI start parser defaults headless native bridge UI to agents mode", () => {
+  const result = parseTeamArgs(["start", "--teammate-mode", "headless"]);
   assert.equal(
     result.nativeBridge,
+    true,
+    "headless nativeBridge should default to true",
+  );
+  assert.equal(
+    result.nativeBridgeMode,
+    "agents",
+    "headless nativeBridgeMode should default to agents",
+  );
+});
+
+test("CLI start parser keeps interactive native bridge UI default-off", () => {
+  assert.equal(
+    parseTeamArgs(["start", "--teammate-mode", "tmux"]).nativeBridge,
     false,
-    "nativeBridge should default to false",
+  );
+  assert.equal(
+    parseTeamArgs(["start", "--teammate-mode", "wt"]).nativeBridge,
+    false,
   );
 });
 

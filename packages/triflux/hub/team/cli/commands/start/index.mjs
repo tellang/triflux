@@ -96,6 +96,7 @@ export async function teamStart(args = []) {
     cwd,
     nativeBridge,
     nativeBridgeMode,
+    nativeBridgeUiOptOut,
   } = parseTeamArgs(args);
   // --assign 사용 시 task를 자동 생성
   const task =
@@ -133,6 +134,8 @@ export async function teamStart(args = []) {
   const { mode: effectiveMode, warnings: modeWarnings } =
     resolveEffectiveMode(teammateMode);
   for (const message of modeWarnings) warn(message);
+  const effectiveNativeBridge =
+    effectiveMode === "headless" && !nativeBridgeUiOptOut ? true : nativeBridge;
 
   console.log(`  세션:  ${WHITE}${sessionId}${RESET}`);
   console.log(`  모드:  ${effectiveMode}`);
@@ -180,7 +183,7 @@ export async function teamStart(args = []) {
             mcpProfile,
             model,
             cwd,
-            nativeBridge,
+            nativeBridge: effectiveNativeBridge,
             nativeBridgeMode,
           })
         : effectiveMode === "wt"
