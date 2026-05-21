@@ -53,6 +53,26 @@ describe("swarm-cli parseFlags — --base", () => {
     assert.equal(flags.baseBranch, "release/v2");
     assert.deepEqual(positional, ["docs/prd/bar.md"]);
   });
+
+  it("parseFlags accepts --no-native-bridge-ui and rejects conflicting native bridge flags", () => {
+    const { flags, positional } = parseFlags([
+      "docs/prd/native-bridge.md",
+      "--no-native-bridge-ui",
+      "--unknown-flag",
+    ]);
+
+    assert.equal(flags.nativeBridge, false);
+    assert.deepEqual(positional, ["docs/prd/native-bridge.md"]);
+    assert.throws(
+      () =>
+        parseFlags([
+          "docs/prd/native-bridge.md",
+          "--native-bridge-ui",
+          "--no-native-bridge-ui",
+        ]),
+      /conflicting native bridge flags/,
+    );
+  });
 });
 
 describe("swarm-cli assertTtyForSwarm — #116-C non-TTY policy (v10.15+: warn-and-proceed)", () => {
