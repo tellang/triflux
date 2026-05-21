@@ -52,7 +52,7 @@ let importedCreateRegistry = null;
 let meshRegistryImportError = null;
 try {
   ({ createRegistry: importedCreateRegistry } = await import(
-    "../../mesh/mesh-registry.mjs"
+    "@triflux/core/mesh/mesh-registry.mjs"
   ));
 } catch (err) {
   meshRegistryImportError = err;
@@ -511,8 +511,8 @@ export function createSwarmHypervisor(opts) {
     if (worker?.worktreePath && !worker?.shardConfig?.host) {
       try {
         const rawStatus = await git(["status", "--short"], worker.worktreePath);
-        // BUG-I: prepareWorktree 가 #34 L2 의도로 rm 한 tracked paths
-        // (EXPECTED_WORKTREE_DELETIONS) 는 dirty 판정에서 제외한다.
+        // Only explicitly expected lifecycle deletions are filtered. Plugin
+        // metadata deletions remain dirty because Codex workers need them.
         evidence.dirtyFiles = extractDirtyFiles(
           rawStatus,
           EXPECTED_WORKTREE_DELETIONS,

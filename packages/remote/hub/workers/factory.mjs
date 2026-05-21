@@ -28,7 +28,7 @@ function defaultPublishCallback(requestJsonFn = null) {
   return async (publishMessage) => {
     try {
       const publishRequestJson =
-        requestJsonFn || (await import("../bridge.mjs")).requestJson;
+        requestJsonFn || (await import("@triflux/core/hub/bridge.mjs")).requestJson;
       await publishRequestJson("/bridge/publish", { body: publishMessage });
     } catch {
       // best-effort; publish failures must not crash the worker

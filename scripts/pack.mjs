@@ -60,7 +60,9 @@ const CORE_DIRS = [
   "hub/delegator",
   "hub/lib",
   "hub/middleware",
+  "hub/team/retry-state-machine.mjs",
   "hub/workers/worker-utils.mjs", // shared utility
+  "mesh",
 ];
 
 const REMOTE_FILES = [
@@ -102,7 +104,7 @@ function copyItem(src, dest) {
 }
 
 function cleanDist(pkgDir) {
-  const dirs = ["hub", "bin", "skills", "scripts", "hooks", "hud"];
+  const dirs = ["hub", "bin", "skills", "scripts", "hooks", "hud", "mesh"];
   for (const d of dirs) {
     const target = join(pkgDir, d);
     if (existsSync(target)) rmSync(target, { recursive: true, force: true });
@@ -148,25 +150,28 @@ function rewriteRemoteImports(remotePkgDir, corePkgDir) {
     let content = readFileSync(filePath, "utf8");
     let changed = false;
 
+    const rewriteRelativeSpecifier = (match, pre, importPath, post) => {
+      const resolved = normalize(join(dirname(filePath), importPath));
+      // import 대상이 remote 패키지 내에 있으면 그대로 유지
+      if (existsSync(resolved)) return match;
+      // core 패키지에 동일 상대경로로 존재하는지 확인
+      const relToRemote = relative(remotePkgDir, resolved).replace(/\\/g, "/");
+      const coreEquiv = normalize(join(corePkgDir, relToRemote));
+      if (coreFiles.has(coreEquiv)) {
+        changed = true;
+        totalRewrites++;
+        return `${pre}@triflux/core/${relToRemote}${post}`;
+      }
+      return match;
+    };
+
     content = content.replace(
       /(from\s+['"])(\.[^'"]+)(['"])/g,
-      (match, pre, importPath, post) => {
-        const resolved = normalize(join(dirname(filePath), importPath));
-        // import 대상이 remote 패키지 내에 있으면 그대로 유지
-        if (existsSync(resolved)) return match;
-        // core 패키지에 동일 상대경로로 존재하는지 확인
-        const relToRemote = relative(remotePkgDir, resolved).replace(
-          /\\/g,
-          "/",
-        );
-        const coreEquiv = normalize(join(corePkgDir, relToRemote));
-        if (coreFiles.has(coreEquiv)) {
-          changed = true;
-          totalRewrites++;
-          return `${pre}@triflux/core/${relToRemote}${post}`;
-        }
-        return match;
-      },
+      rewriteRelativeSpecifier,
+    );
+    content = content.replace(
+      /(import\(\s*['"])(\.[^'"]+)(['"]\s*\))/g,
+      rewriteRelativeSpecifier,
     );
 
     if (changed) writeFileSync(filePath, content);

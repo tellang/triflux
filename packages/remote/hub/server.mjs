@@ -954,7 +954,7 @@ export async function startHub({
 
   // adaptive rule confidence decay (7일 이상 미관측 규칙 -0.1 감소)
   try {
-    const { decayRules } = await import("./reflexion.mjs");
+    const { decayRules } = await import("@triflux/core/hub/reflexion.mjs");
     const decay = decayRules(
       store,
       adaptiveEngine.sessionCount?.() || 1,

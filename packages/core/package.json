@@ -7,6 +7,7 @@
   "exports": {
     ".": "./hub/index.mjs",
     "./hub/*": "./hub/*",
+    "./mesh/*": "./mesh/*",
     "./scripts/*": "./scripts/*"
   },
   "engines": {
@@ -21,6 +22,7 @@
   },
   "files": [
     "hub",
+    "mesh",
     "scripts/lib",
     "hooks",
     "hud"

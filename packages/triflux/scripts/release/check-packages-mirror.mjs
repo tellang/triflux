@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "..", "..");
 const MIRROR_ROOT = join(REPO_ROOT, "packages", "triflux");
-const MIRROR_TOPS = ["bin", "hub", "scripts"];
+const MIRROR_TOPS = ["bin", "hub", "mesh", "scripts"];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 
 function walkRelFiles(root) {
