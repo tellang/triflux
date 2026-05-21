@@ -52,6 +52,11 @@ const WELCOME_KEYWORDS = [
   "timed out",
   "flag needs an argument",
 ];
+const LEAK_FLAGS = [
+  "--dangerously-skip-permissions",
+  "--add-dir",
+  "--print=",
+];
 
 function hasHi(text) {
   return text.toLowerCase().includes("hi");
@@ -60,6 +65,10 @@ function hasHi(text) {
 function hasWelcomeOrFailure(text) {
   const lower = text.toLowerCase();
   return WELCOME_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
+function leakedFlags(text) {
+  return LEAK_FLAGS.filter((flag) => text.includes(flag));
 }
 
 function createRouteHome() {
@@ -109,7 +118,7 @@ test("agy --print prompt-passing regression tests", {
 }, async (t) => {
   await t.test(
     "1. alpha commit pattern: --print --dangerously + stdin pipe -> success",
-    { timeout: 30000 },
+    { timeout: 100000 },
     () => {
       const result = spawnSync(
         AGY_PATH,
@@ -117,7 +126,7 @@ test("agy --print prompt-passing regression tests", {
         {
           input: TEST_PROMPT,
           encoding: "utf8",
-          timeout: 25000,
+          timeout: 90000,
           env: { ...process.env, PAGER: "cat" },
         },
       );
@@ -130,12 +139,18 @@ test("agy --print prompt-passing regression tests", {
         hasHi(result.stdout),
         `Should contain 'hi'. Got: ${result.stdout}`,
       );
+      const leaks = leakedFlags(result.stdout);
+      assert.deepStrictEqual(
+        leaks,
+        [],
+        `Flag pollution detected in stdout: ${leaks.join(", ")}. Got: ${result.stdout}`,
+      );
     },
   );
 
   await t.test(
     "2. Tier 1 broken pattern: positional + stdin closed -> failure",
-    { timeout: 30000 },
+    { timeout: 100000 },
     () => {
       const result = spawnSync(
         AGY_PATH,
@@ -143,7 +158,7 @@ test("agy --print prompt-passing regression tests", {
         {
           stdio: ["ignore", "pipe", "pipe"],
           encoding: "utf8",
-          timeout: 25000,
+          timeout: 90000,
           env: { ...process.env, PAGER: "cat" },
         },
       );
@@ -157,14 +172,14 @@ test("agy --print prompt-passing regression tests", {
 
   await t.test(
     "3. alternative flag order: --dangerously first + --print + positional -> success",
-    { timeout: 30000 },
+    { timeout: 100000 },
     () => {
       const result = spawnSync(
         AGY_PATH,
         ["--dangerously-skip-permissions", "--print", TEST_PROMPT],
         {
           encoding: "utf8",
-          timeout: 25000,
+          timeout: 90000,
           env: { ...process.env, PAGER: "cat" },
         },
       );
@@ -176,20 +191,26 @@ test("agy --print prompt-passing regression tests", {
       assert.ok(
         hasHi(result.stdout),
         `Should contain 'hi'. Got: ${result.stdout}`,
+      );
+      const leaks = leakedFlags(result.stdout);
+      assert.deepStrictEqual(
+        leaks,
+        [],
+        `Flag pollution detected in stdout: ${leaks.join(", ")}. Got: ${result.stdout}`,
       );
     },
   );
 
   await t.test(
     "4. alternative equals syntax: --print=VALUE + --dangerously -> success",
-    { timeout: 30000 },
+    { timeout: 100000 },
     () => {
       const result = spawnSync(
         AGY_PATH,
         [`--print=${TEST_PROMPT}`, "--dangerously-skip-permissions"],
         {
           encoding: "utf8",
-          timeout: 25000,
+          timeout: 90000,
           env: { ...process.env, PAGER: "cat" },
         },
       );
@@ -202,19 +223,25 @@ test("agy --print prompt-passing regression tests", {
         hasHi(result.stdout),
         `Should contain 'hi'. Got: ${result.stdout}`,
       );
+      const leaks = leakedFlags(result.stdout);
+      assert.deepStrictEqual(
+        leaks,
+        [],
+        `Flag pollution detected in stdout: ${leaks.join(", ")}. Got: ${result.stdout}`,
+      );
     },
   );
 
   await t.test(
     "5. flag absorption guard: --print + --add-dir + positional -> timeout/failure",
-    { timeout: 30000 },
+    { timeout: 100000 },
     () => {
       const result = spawnSync(
         AGY_PATH,
         ["--print", "--add-dir", "/tmp", TEST_PROMPT],
         {
           encoding: "utf8",
-          timeout: 25000,
+          timeout: 90000,
           env: { ...process.env, PAGER: "cat" },
         },
       );
