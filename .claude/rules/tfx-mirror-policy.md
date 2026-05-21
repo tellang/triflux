@@ -7,7 +7,7 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 | 레이어 | 역할 | mirror 룰 |
 |--------|------|----------|
 | `packages/core` (`@triflux/core`) | 공용 라이브러리 (hub primitives, scripts/lib helper) | root 와 byte-identical cp |
-| `packages/remote` (`@triflux/remote`) | 원격 entry / store / pipe / server | root subset + `@triflux/core/...` import path 변환 |
+| `packages/remote` (`@triflux/remote`) | 원격 entry / store / pipe / server / scripts helper | root subset + `@triflux/core/...` import path 변환 |
 | `packages/triflux` (`triflux` npm) | 사용자 facing CLI / runtime / skills | npm publish files 기준 byte-identical mirror |
 
 ## 레이어별 정책
@@ -56,7 +56,7 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 **mirror 대상** (root → packages 동기 필수):
 - `hub/lib/*` → `packages/core/hub/lib/`, `packages/triflux/hub/lib/`
 - `hub/team/*`, `hub/*.mjs` (entry/runtime) → `packages/triflux/hub/`, `packages/remote/hub/` (해당 모듈만)
-- `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`
+- `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up — remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)
 - `scripts/release/*`, `scripts/__tests__/*` → `packages/triflux/scripts/` (publish 포함)
 - `bin/*` → `packages/triflux/bin/`
 - `hooks/*`, `hud/*`, `mesh/*`, `config/*` → `packages/triflux/{hooks,hud,mesh,config}/`
