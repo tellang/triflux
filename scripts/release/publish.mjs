@@ -11,6 +11,7 @@ export async function publishRelease({
   createGithubRelease = true,
   publishNpm = true,
   provenance = false,
+  allowExistingArtifacts = false,
   execFileSyncFn,
 } = {}) {
   const sync = assertVersionSync({ rootDir });
@@ -95,8 +96,46 @@ export async function publishRelease({
     });
   }
 
+  const shouldSkipExistingTag = (tagName) => {
+    if (!allowExistingArtifacts) return false;
+    try {
+      runCommand("git", ["rev-parse", "--verify", tagName], {
+        cwd: rootDir,
+        execFileSyncFn,
+        stdio: "pipe",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const shouldSkipExistingGithubRelease = (tagName) => {
+    if (!allowExistingArtifacts) return false;
+    try {
+      runCommand("gh", ["release", "view", tagName, "--json", "tagName"], {
+        cwd: rootDir,
+        execFileSyncFn,
+        stdio: "pipe",
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   if (!dryRun) {
     for (const step of steps) {
+      const tagName = `v${releaseVersion}`;
+      if (step.label === "git tag" && shouldSkipExistingTag(tagName)) {
+        continue;
+      }
+      if (
+        step.label === "gh release create" &&
+        shouldSkipExistingGithubRelease(tagName)
+      ) {
+        continue;
+      }
       runCommand(step.command, step.args, {
         cwd: step.cwd || rootDir,
         execFileSyncFn,
@@ -111,6 +150,7 @@ export async function publishRelease({
     npmTag,
     publishNpm,
     provenance,
+    allowExistingArtifacts,
     dryRun,
     notesPath,
     steps: steps.map((step) => ({
@@ -134,6 +174,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     createGithubRelease: !args["skip-gh-release"],
     publishNpm: !args["skip-npm"],
     provenance: Boolean(args.provenance || envProvenance),
+    allowExistingArtifacts: Boolean(args["allow-existing"]),
   });
   console.log(JSON.stringify(result, null, 2));
 }
