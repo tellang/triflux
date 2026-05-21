@@ -25,24 +25,24 @@ argument-hint: "<구현할 주제 또는 요구사항>"
 > OMC deep-interview + ouroboros 오마주. 모호성을 숫자로 측정하고 20% 미만까지 질문한다.
 > "측정할 수 없으면 개선할 수 없다."
 >
-> **Gemini 위임**: 분석·점수 계산·산출물 초안은 Gemini CLI에 위임하여 Claude 토큰을 절약한다.
+> **Antigravity 위임**: 분석·점수 계산·산출물 초안은 Antigravity CLI에 위임하여 Claude 토큰을 절약한다.
 > 위임 패턴: `Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '{prompt}'")`
 
 ## 위임 패턴
 
-Claude와 Gemini의 역할을 분리하여 토큰을 최적화한다.
+Claude와 Antigravity의 역할을 분리하여 토큰을 최적화한다.
 
 | 담당 | 작업 |
 |------|------|
 | **Claude** | AskUserQuestion (사용자 상호작용), 최종 파일 저장 |
-| **Gemini** | 모호성 점수 계산, 질문 생성, 응답 분석, 산출물 초안 |
+| **Antigravity** | 모호성 점수 계산, 질문 생성, 응답 분석, 산출물 초안 |
 
 ```bash
 # 위임 호출 형태
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '{prompt}'")
 ```
 
-Gemini 실패 시 Fallback: Claude Opus가 분석을 직접 처리한다.
+Antigravity 실패 시 Fallback: Claude Opus가 분석을 직접 처리한다.
 
 ## 용도
 
@@ -77,14 +77,14 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
 
 ### Step 1: 초기 모호성 평가
 
-사용자 입력을 Gemini에 전달하여 초기 ambiguity score를 계산한다:
+사용자 입력을 Antigravity에 전달하여 초기 ambiguity score를 계산한다:
 
 ```bash
-# Claude → Gemini 위임
+# Claude → Antigravity 위임
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Analyze the following requirement and calculate ambiguity score. Return JSON: {goal, constraints, criteria, ambiguity, suggested_questions}: {user_input}'")
 ```
 
-Gemini가 반환한 JSON에서 점수를 읽어 사용자에게 표시한다:
+Antigravity가 반환한 JSON에서 점수를 읽어 사용자에게 표시한다:
 
 ```
 출력 예시:
@@ -97,9 +97,9 @@ Gemini가 반환한 JSON에서 점수를 읽어 사용자에게 표시한다:
 
 ### Step 2: 5단계 인터뷰 (모호성 < 20%까지)
 
-각 단계에서 Claude가 AskUserQuestion으로 질문하고, 사용자 응답을 Gemini에 전달하여 분석 및 다음 질문을 생성한다.
+각 단계에서 Claude가 AskUserQuestion으로 질문하고, 사용자 응답을 Antigravity에 전달하여 분석 및 다음 질문을 생성한다.
 
-흐름: `Claude(질문) → 사용자(응답) → Gemini(분석+재계산) → Claude(다음 질문 제시)`
+흐름: `Claude(질문) → 사용자(응답) → Antigravity(분석+재계산) → Claude(다음 질문 제시)`
 
 #### Stage 1: Clarify (명확화) — goal 개선
 
@@ -111,15 +111,15 @@ Gemini가 반환한 JSON에서 점수를 읽어 사용자에게 표시한다:
 ```
 
 ```bash
-# 응답 수집 후 Gemini에 분석 위임
+# 응답 수집 후 Antigravity에 분석 위임
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 1 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
-응답 후: Gemini JSON에서 goal 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
+응답 후: Antigravity JSON에서 goal 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
-**질문 템플릿 (Gemini 실패 시 Fallback):**
+**질문 템플릿 (Antigravity 실패 시 Fallback):**
 
 1. "이 작업의 핵심 목표를 한 문장으로 설명해주세요."
 2. "완료 후 어떤 상태가 되어야 성공인가요?"
@@ -135,15 +135,15 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 1 response analysis
 ```
 
 ```bash
-# 응답 수집 후 Gemini에 분석 위임
+# 응답 수집 후 Antigravity에 분석 위임
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 2 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
-응답 후: Gemini JSON에서 constraints 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
+응답 후: Antigravity JSON에서 constraints 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
-**질문 템플릿 (Gemini 실패 시 Fallback):**
+**질문 템플릿 (Antigravity 실패 시 Fallback):**
 
 1. "이 작업을 3-5개의 독립된 단계로 나눈다면?"
 2. "각 단계 사이에 의존성이 있나요?"
@@ -159,15 +159,15 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 2 response analysis
 ```
 
 ```bash
-# 응답 수집 후 Gemini에 분석 위임
+# 응답 수집 후 Antigravity에 분석 위임
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 3 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
-응답 후: Gemini JSON에서 constraints + criteria 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
+응답 후: Antigravity JSON에서 constraints + criteria 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
-**질문 템플릿 (Gemini 실패 시 Fallback):**
+**질문 템플릿 (Antigravity 실패 시 Fallback):**
 
 1. "이 방식이 실패할 수 있는 시나리오는 무엇인가요?"
 2. "6개월 후 유지보수할 때 문제가 될 부분은 무엇인가요?"
@@ -183,15 +183,15 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 3 response analysis
 ```
 
 ```bash
-# 응답 수집 후 Gemini에 분석 위임
+# 응답 수집 후 Antigravity에 분석 위임
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 4 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
-응답 후: Gemini JSON에서 criteria 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
+응답 후: Antigravity JSON에서 criteria 점수 읽기 → ambiguity 재계산 결과 사용자에게 표시
 ```
 
-**질문 템플릿 (Gemini 실패 시 Fallback):**
+**질문 템플릿 (Antigravity 실패 시 Fallback):**
 
 1. "같은 목표를 달성할 수 있는 완전히 다른 접근은 무엇인가요?"
 2. "시간이 절반밖에 없다면 어떤 방식을 택하겠습니까?"
@@ -207,15 +207,15 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 4 response analysis
 ```
 
 ```bash
-# 응답 수집 후 Gemini에 최종 분석 위임
+# 응답 수집 후 Antigravity에 최종 분석 위임
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 5 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
-응답 후: Gemini JSON에서 전체 점수 읽기 → 최종 ambiguity score 사용자에게 표시
+응답 후: Antigravity JSON에서 전체 점수 읽기 → 최종 ambiguity score 사용자에게 표시
 ```
 
-**질문 템플릿 (Gemini 실패 시 Fallback):**
+**질문 템플릿 (Antigravity 실패 시 Fallback):**
 
 1. "지금까지의 논의를 종합하면, 최적의 접근 방식은 무엇인가요?"
 2. "첫 번째 단계로 무엇을 실행하시겠습니까?"
@@ -238,14 +238,14 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 5 response analysis
 
 ### Step 4: 산출물 생성
 
-Gemini가 인터뷰 전체 컨텍스트를 바탕으로 구조화된 문서 초안을 생성하고, Claude가 파일로 저장한다:
+Antigravity가 인터뷰 전체 컨텍스트를 바탕으로 구조화된 문서 초안을 생성하고, Claude가 파일로 저장한다:
 
 ```bash
-# Gemini에 산출물 초안 생성 위임
+# Antigravity에 산출물 초안 생성 위임
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Generate a structured interview output document based on the following interview context: {full_context}. Return the complete markdown document.'")
 ```
 
-Claude는 Gemini가 반환한 마크다운을 Write 도구로 저장한다.
+Claude는 Antigravity가 반환한 마크다운을 Write 도구로 저장한다.
 
 저장 위치: `.tfx/plans/interview-{timestamp}.md`
 
@@ -299,7 +299,7 @@ Date: {date} | Final Ambiguity: {score}%
 
 ## 토큰 예산
 
-| 단계 | Claude | Gemini |
+| 단계 | Claude | Antigravity |
 |------|--------|--------|
 | 초기 평가 (모호성 분석) | ~0.2K | ~1K |
 | 5단계 인터뷰 (질문 제시) | ~1K | ~10K |
@@ -308,7 +308,7 @@ Date: {date} | Final Ambiguity: {score}%
 | 코드베이스 탐색 | ~0.3K | — |
 | **총합** | **~2K** | **~13K** |
 
-Fallback: Gemini 호출 실패 시 Claude Opus가 분석을 직접 처리한다 (총합 ~15K).
+Fallback: Antigravity 호출 실패 시 Claude Opus가 분석을 직접 처리한다 (총합 ~15K).
 
 ## 사용 예
 

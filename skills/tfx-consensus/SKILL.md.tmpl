@@ -2,7 +2,7 @@
 internal: true
 name: tfx-consensus
 description: >
-  3자 합의 엔진 — 모든 Deep 스킬의 핵심 인프라. Claude/Codex/Gemini 독립 분석 결과를 교차검증하여 편향 없는 합의를 도출한다.
+  3자 합의 엔진 — 모든 Deep 스킬의 핵심 인프라. Claude/Codex/Antigravity 독립 분석 결과를 교차검증하여 편향 없는 합의를 도출한다.
   독립 실행도 가능: '합의로 분석해', '3자 합의', 'consensus' 같은 요청 시 직접 호출 가능.
 triggers: [consensus, 합의]
 argument-hint: "<분석 주제 또는 컨텍스트> (Deep 스킬 내부 자동 호출 또는 직접 사용 가능)"
@@ -22,7 +22,7 @@ argument-hint: "<분석 주제 또는 컨텍스트> (Deep 스킬 내부 자동 �
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
 1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
-2. Codex·Gemini → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
@@ -34,7 +34,7 @@ argument-hint: "<분석 주제 또는 컨텍스트> (Deep 스킬 내부 자동 �
 |-------|---------|------|------|
 | Claude Opus | architect | 합의 통합 및 교차검증 조율 | 논리 분석, 불일치 해소 |
 | Codex | analyst | 구현/보안 관점 독립 분석 | 코드 품질, 취약점 탐지 |
-| Gemini | analyst | UX/문서화 관점 독립 분석 | DX, 접근성, 가독성 |
+| Antigravity | analyst | UX/문서화 관점 독립 분석 | DX, 접근성, 가독성 |
 
 ## EXECUTION STEPS
 
@@ -56,7 +56,7 @@ Agent(
 )
 ```
 
-**도구 2 — Codex+Gemini 독립 분석 headless dispatch:**
+**도구 2 — Codex+Antigravity 독립 분석 headless dispatch:**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:{analysis_prompt} 출력 형식을 JSON으로 강제: { findings: [{ id: string, category: string, severity: critical|high|medium|low, description: string, evidence: string }], summary: string, confidence: 0.0-1.0 }:analyst' --assign 'gemini:{analysis_prompt} 출력 형식을 JSON으로 강제: { findings: [{ id: string, category: string, severity: critical|high|medium|low, description: string, evidence: string }], summary: string, confidence: 0.0-1.0 }:analyst' --timeout 600")
 ```
@@ -87,13 +87,13 @@ Agent(
   run_in_background=true,
   name="consensus-resolve-claude",
   description="미합의 항목 2차 검토",
-  prompt="미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Codex — {codex_rebuttal}, Gemini — {gemini_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수."
+  prompt="미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Codex — {codex_rebuttal}, Antigravity — {gemini_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수."
 )
 ```
 
-**도구 2 — Codex+Gemini 재검토:**
+**도구 2 — Codex+Antigravity 재검토:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Claude — {claude_rebuttal}, Gemini — {gemini_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수.:analyst' --assign 'gemini:미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Claude — {claude_rebuttal}, Codex — {codex_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수.:analyst' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Claude — {claude_rebuttal}, Antigravity — {gemini_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수.:analyst' --assign 'gemini:미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Claude — {claude_rebuttal}, Codex — {codex_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수.:analyst' --timeout 600")
 ```
 
 Resolution 결과 처리:
@@ -134,7 +134,7 @@ Learned Weights를 `.omc/state/consensus-weights.json`에서 읽어 가중 투�
 |------|------|
 | headless timeout (600s) | Claude Agent로 해당 역할 대체 실행 |
 | Codex 워커 실패 | Agent(oh-my-claudecode:architect, model="opus") 대체 |
-| Gemini 워커 실패 | Agent(oh-my-claudecode:critic, model="sonnet") 대체 |
+| Antigravity 워커 실패 | Agent(oh-my-claudecode:critic, model="sonnet") 대체 |
 
 ## 토큰 예산
 

@@ -53,7 +53,7 @@ Bash("triflux setup")
 필수 훅 목록:
 | 이벤트 | matcher | 스크립트 | 역할 |
 |--------|---------|---------|------|
-| PreToolUse | Bash\|Agent | headless-guard-fast.sh | Codex/Gemini 직접 호출 차단 |
+| PreToolUse | Bash\|Agent | headless-guard-fast.sh | Codex/Antigravity 직접 호출 차단 |
 | PreToolUse | Bash | psmux-safety-guard.mjs | psmux kill-session 직접 호출 차단 (WT 프리징 방지) |
 | PreToolUse | Skill | tfx-gate-activate.mjs | tfx-multi 게이트 |
 
@@ -112,7 +112,7 @@ Bash("triflux setup")
       description: "나중에 /tfx-profile로 관리"
   ```
 
-#### 단계 3.5: Gemini 프로필
+#### 단계 3.5: Antigravity 프로필
 
 `~/.gemini/triflux-profiles.json` 존재 여부 확인.
 필수 프로필: `pro31`, `flash3`.
@@ -121,8 +121,8 @@ Bash("triflux setup")
 - 파일 미존재 → 기본 프로필 5개 자동 생성 (pro31, flash3, pro25, flash25, lite25)
 - 누락 있으면 → AskUserQuestion:
   ```
-  question: "누락된 Gemini 프로필을 생성하시겠습니까?"
-  header: "Gemini Profiles"
+  question: "누락된 Antigravity 프로필을 생성하시겠습니까?"
+  header: "Antigravity Profiles"
   options:
     - label: "생성 (Recommended)"
       description: "누락된 프로필을 triflux-profiles.json에 추가"
@@ -487,7 +487,7 @@ options:
     description: "settings.json statusLine 등록"
   - label: "Codex 프로파일"
     description: "필수 프로파일 생성"
-  - label: "Gemini 프로필"
+  - label: "Antigravity 프로필"
     description: "triflux-profiles.json 생성/확인"
   - label: "CLI + MCP 진단"
     description: "CLI 존재 + MCP 인벤토리 확인"
@@ -509,7 +509,7 @@ options:
 | Codex 프로파일 | ✅ 3개 확인 |
 | Codex config.toml | ✅ approval_mode=full-auto (CLI 플래그 자동 생략) |
 | Codex CLI | ✅ |
-| Gemini CLI | ⚠ 미설치 (선택) |
+| Antigravity CLI | ⚠ 미설치 (선택) |
 | 원격 기기 | ✅ 2대 사용 가능 (ryzen5-7600, m2) / ❌ 1대 연결 실패 |
 | MCP 인벤토리 | ✅ N개 서버 |
 | 검색 MCP | ✅ Exa, Tavily / ⏭ Brave (키 없음) |
@@ -519,13 +519,13 @@ options:
 | 기능 | 상태 | 필요 조건 |
 |------|------|----------|
 | 로컬 단일 모델 | ✅ | Codex CLI |
-| 로컬 다중 모델 | ✅ | Codex CLI + Gemini CLI |
+| 로컬 다중 모델 | ✅ | Codex CLI + Antigravity CLI |
 | 다중 기기 스웜 | ✅ 2대 | SSH 호스트 + Claude 설치 |
 | 전체 (다중 기기 x 다중 모델) | ✅ | 위 전부 |
 
 ### 다음 단계
 - Codex 미설치 시: `npm install -g @openai/codex`
-- Gemini 미설치 시: `npm install -g @google/gemini-cli`
+- Antigravity 미설치 시: `npm install -g @google/gemini-cli`
 - 원격 호스트 추가: `/tfx-remote-setup`
 - 검색 MCP 추가/변경: `/tfx-setup` → 단계별 선택 → 검색 MCP
 - 세션 재시작하면 HUD + 검색 MCP가 활성화됩니다

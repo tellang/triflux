@@ -1,7 +1,7 @@
 ---
 name: tfx-profile
 description: >
-  Codex/Gemini CLI 프로파일·모델 관리 인터랙티브 UI. tfx-route가 사용하는
+  Codex/Antigravity CLI 프로파일·모델 관리 인터랙티브 UI. tfx-route가 사용하는
   프로파일 목록 조회, 모델 변경, effort 조정, 추가/삭제를 AskUserQuestion 기반
   인터랙티브 선택지로 수행합니다.
   Use when: codex profile, codex model, gemini profile, gemini model,
@@ -12,10 +12,10 @@ triggers:
 argument-hint: "[--list] [--codex | --gemini]"
 ---
 
-# tfx-profile — Codex/Gemini 프로파일 매니저
+# tfx-profile — Codex/Antigravity 프로파일 매니저
 
 > CLI 프로파일의 모델/effort를 AskUserQuestion 선택지로 관리합니다.
-> Codex(`~/.codex/config.toml`)와 Gemini(`~/.gemini/triflux-profiles.json`) 모두 지원.
+> Codex(`~/.codex/config.toml`)와 Antigravity(`~/.gemini/triflux-profiles.json`) 모두 지원.
 
 ## 워크플로우
 
@@ -30,7 +30,7 @@ header: "CLI"
 options:
   - label: "Codex"
     description: "~/.codex/config.toml (TOML)"
-  - label: "Gemini"
+  - label: "Antigravity"
     description: "~/.gemini/triflux-profiles.json (JSON)"
 ```
 
@@ -101,7 +101,7 @@ options:
 
 ---
 
-## Gemini 워크플로우
+## Antigravity 워크플로우
 
 ### Step 1: triflux-profiles.json 읽기 + 현재 상태 표시
 
@@ -173,7 +173,7 @@ options:
 - **다른 섹션 건드리지 않기**: `[notice]`, `[features]`, `[mcp_servers.*]` 등 절대 수정 금지
 - **Edit 도구 사용**: old_string → new_string으로 정확한 섹션만 치환
 
-### Gemini (triflux-profiles.json)
+### Antigravity (triflux-profiles.json)
 
 - **백업 필수**: `.bak` 자동 생성
 - **JSON 형식 유지**: `profiles.{name}.model`, `profiles.{name}.hint`
@@ -202,7 +202,7 @@ options:
 | high | 깊은 추론 |
 | xhigh | 최대 추론 (느림) |
 
-### Gemini 모델
+### Antigravity 모델
 
 | 모델 | 용도 |
 |------|------|
@@ -212,7 +212,7 @@ options:
 | gemini-2.5-flash | 2.5 Flash — 경량 범용 |
 | gemini-2.5-flash-lite | 2.5 Flash Lite — 최경량 |
 
-### Gemini → 에이전트 배치 (벤치마크 기반)
+### Antigravity → 에이전트 배치 (벤치마크 기반)
 
 | 프로필 | 모델 | 에이전트 |
 |--------|------|----------|
@@ -225,7 +225,7 @@ options:
 ### 설정 파일 경로
 
 - Codex: `~/.codex/config.toml`
-- Gemini: `~/.gemini/triflux-profiles.json`
+- Antigravity: `~/.gemini/triflux-profiles.json`
 
 ## 에러 처리
 
@@ -240,4 +240,4 @@ options:
 
 터미널에서 직접 실행:
 - Codex: `node tui/codex-profile.mjs`
-- Gemini: `node tui/gemini-profile.mjs`
+- Antigravity: `node tui/gemini-profile.mjs`

@@ -18,7 +18,7 @@ argument-hint: "[테스트 대상] [--quick]"
 
 > **ARGUMENTS 처리**: ARGUMENTS 에 `--quick` 포함 → Quick 모드. 그 외 → Deep 모드 (기본).
 
-> AI makes completeness near-free. 기본은 Claude(기능/엣지) + Codex(보안/성능) + Gemini(UX/접근성) 3-CLI 독립 검증 + 교차검증 + 자동 수정.
+> AI makes completeness near-free. 기본은 Claude(기능/엣지) + Codex(보안/성능) + Antigravity(UX/접근성) 3-CLI 독립 검증 + 교차검증 + 자동 수정.
 > 빠른 테스트-수정 루프는 `--quick`.
 
 ---
@@ -58,7 +58,7 @@ Tier 3 시:
 ### HARD RULES
 
 1. `codex exec` / `gemini -p` 직접 호출 금지
-2. Codex/Gemini → `Bash("tfx multi --teammate-mode headless --assign ...")` 만
+2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless --assign ...")` 만
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
 
@@ -68,7 +68,7 @@ Tier 3 시:
 |-----|------|------|
 | Claude Opus | 기능검증 | 정확성, 엣지케이스, 누락 테스트 |
 | Codex | 보안+성능 | OWASP, O(n²), 메모리, 입력 검증 |
-| Gemini | UX+접근성 | 응답 일관성, 에러 메시지, WCAG |
+| Antigravity | UX+접근성 | 응답 일관성, 에러 메시지, WCAG |
 
 ### EXECUTION
 
@@ -90,7 +90,7 @@ Agent(
 )
 ```
 
-**Codex + Gemini headless:**
+**Codex + Antigravity headless:**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가. OWASP Top 10, O(n²), 메모리 누수, 입력 검증 누락. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --assign 'gemini:UX/접근성 전문가. API 응답 일관성, 에러 메시지, WCAG 2.1 AA, 문서-동작 일치. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --timeout 600")
 ```

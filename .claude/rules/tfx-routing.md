@@ -63,8 +63,8 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 | 우선순위 | CLI / 모델 | default 적용 lane |
 |---------|-----------|-------------------|
 | 1차 (default) | **Codex** (gpt-5.3-codex / gpt-5.5) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
-| 2차 | **Gemini** (pro25 / flash25) | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
-| 한정 (Claude 만) | **Claude** (opus-4-7) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Gemini 미가용 |
+| 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
+| 한정 (Claude 만) | **Claude** (opus-4-7) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
 
 `tfx-auto`, `tfx-review`, `tfx-analysis`, `tfx-plan`, `tfx-find` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli gemini`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
 
@@ -100,7 +100,7 @@ headless-guard 가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. 
 | 스킬 | 용도 |
 |------|------|
 | tfx-multi | 2+개 태스크 headless 병렬 |
-| tfx-swarm | PRD별 worktree + 다중 모델(Codex/Gemini/Claude) + 다중 기기(로컬+원격) |
+| tfx-swarm | PRD별 worktree + 다중 모델(Codex/Antigravity/Claude) + 다중 기기(로컬+원격) |
 | tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수; tfx-remote-spawn은 legacy alias) |
 
 **Claude 네이티브** (CLI 불필요): tfx-find, tfx-forge, tfx-prune, tfx-index, tfx-setup, tfx-doctor, tfx-hooks, tfx-hub

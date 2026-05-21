@@ -17,7 +17,7 @@ argument-hint: "<분석 대상> [--quick]"
 
 > **ARGUMENTS 처리**: ARGUMENTS 에 `--quick` 포함 → Quick 모드. 그 외 → Deep 모드 (기본).
 
-> AI makes completeness near-free. 기본은 Claude(아키텍처) + Codex(보안/성능) + Gemini(UX/문서화) Tri-Debate 합의.
+> AI makes completeness near-free. 기본은 Claude(아키텍처) + Codex(보안/성능) + Antigravity(UX/문서화) Tri-Debate 합의.
 > 빠른 단일 CLI 분석은 `--quick` opt-out.
 
 ---
@@ -44,21 +44,21 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (Codex 단일).
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | tmux/psmux + Hub + Codex + Gemini 전부 | headless multi 3-CLI |
-| **Tier 2** | Codex 또는 Gemini 중 하나만 | 가용 CLI + Claude Agent |
+| **Tier 1** | tmux/psmux + Hub + Codex + Antigravity 전부 | headless multi 3-CLI |
+| **Tier 2** | Codex 또는 Antigravity 중 하나만 | 가용 CLI + Claude Agent |
 | **Tier 3** | headless 불가 | Claude Agent only (consensus 미적용) |
 
 Tier 3 시:
 ```
 ⚠ [Tier 3] headless multi 환경 미충족 — single-model 모드 (consensus 미적용)
-  누락: {missing}  |  권장: tmux/psmux + Hub + Codex + Gemini 설치
+  누락: {missing}  |  권장: tmux/psmux + Hub + Codex + Antigravity 설치
   또는 /tfx-analysis --quick 사용
 ```
 
 ### HARD RULES
 
 1. `codex exec` / `gemini -p` 직접 호출 금지
-2. Codex/Gemini → `Bash("tfx multi --teammate-mode headless ...")` 만
+2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless ...")` 만
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
 
@@ -68,7 +68,7 @@ Tier 3 시:
 |-------|------|------|
 | Claude Opus (architect) | 아키텍처/설계 | 레이어, SOLID, 확장성 |
 | Codex (security-engineer) | 구현/보안 | 복잡도, OWASP, 기술 부채 |
-| Gemini (ux-engineer) | UX/문서화 | DX, 접근성, 네이밍 |
+| Antigravity (ux-engineer) | UX/문서화 | DX, 접근성, 네이밍 |
 
 ### EXECUTION
 
@@ -90,7 +90,7 @@ Agent(
 )
 ```
 
-**Codex + Gemini headless:**
+**Codex + Antigravity headless:**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:시니어+보안 엔지니어로서 분석하라. 대상: {target}. 렌즈: 구현 품질, 성능, OWASP, 안정성, 기술 부채. JSON: { findings: [...], metrics: {...}, health_score: 0-100 }:security-engineer' --assign 'gemini:UX 엔지니어+테크니컬 라이터로서 분석하라. 대상: {target}. 렌즈: DX, 문서화, 접근성, 국제화, 네이밍. JSON: { findings: [...], documentation_score: 0-100, health_score: 0-100 }:ux-engineer' --timeout 600")
 ```
@@ -101,10 +101,10 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cod
 
 **Agent:**
 ```
-Agent(subagent_type="oh-my-claudecode:architect", model="opus", run_in_background=true, name="arch-debate", prompt="다른 두 분석가 결과: A(Codex)={codex}, B(Gemini)={gemini}. 동의에 +1, 반대에 근거 반박, 놓친 사항 추가, health_score 재조정")
+Agent(subagent_type="oh-my-claudecode:architect", model="opus", run_in_background=true, name="arch-debate", prompt="다른 두 분석가 결과: A(Codex)={codex}, B(Antigravity)={gemini}. 동의에 +1, 반대에 근거 반박, 놓친 사항 추가, health_score 재조정")
 ```
 
-**Bash:** (위와 동일 패턴, Codex/Gemini 각각 교차검증)
+**Bash:** (위와 동일 패턴, Codex/Antigravity 각각 교차검증)
 
 합의 분류: 3/3 → CONFIRMED, 2/3 → LIKELY, 1/3 → UNVERIFIED.
 
@@ -112,7 +112,7 @@ Agent(subagent_type="oh-my-claudecode:architect", model="opus", run_in_backgroun
 
 ```markdown
 # Deep Analysis Report: {target}
-**Consensus**: {score}% | **Health**: {weighted}/100 | **Analysts**: Claude/Codex/Gemini
+**Consensus**: {score}% | **Health**: {weighted}/100 | **Analysts**: Claude/Codex/Antigravity
 
 ## Executive Summary
 {3-5줄 합의 기반 요약}
@@ -122,7 +122,7 @@ Agent(subagent_type="oh-my-claudecode:architect", model="opus", run_in_backgroun
 
 ## 발견사항 (Critical/High/Medium, 합의 기반)
 - [C1] `{file}:{line}` — {description} — 3/3
-  - 아키텍처: {Claude} | 구현: {Codex} | DX: {Gemini}
+  - 아키텍처: {Claude} | 구현: {Codex} | DX: {Antigravity}
   - 권장: {rec}
 
 ## 메트릭

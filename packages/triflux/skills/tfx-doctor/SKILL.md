@@ -51,7 +51,7 @@ JSON 결과를 파싱하여 마크다운 테이블로 표시:
 | tfx-route.sh | ✅ | v2.0 |
 | HUD | ✅ | 설치됨 |
 | Codex CLI | ✅ | found |
-| Gemini CLI | ⚠ | 미설치 (선택) |
+| Antigravity CLI | ⚠ | 미설치 (선택) |
 | ...  | ... | ... |
 ```
 
@@ -82,7 +82,7 @@ Bash("triflux doctor --fix")
 |-----------|------|
 | claude-usage-cache.json | Claude 사용량 |
 | codex-rate-limits-cache.json | Codex 레이트 리밋 |
-| gemini-quota-cache.json | Gemini 쿼터 |
+| gemini-quota-cache.json | Antigravity 쿼터 |
 | sv-accumulator.json | 절약량 누적 |
 | mcp-inventory.json | MCP 서버 인벤토리 |
 | cli-issues.jsonl | CLI 이슈 로그 |
@@ -145,7 +145,7 @@ options:
 
 - tfx-route.sh 설치 상태
 - HUD 설치 및 설정 상태
-- Codex/Gemini/Claude CLI 경로 (크로스 셸)
+- Codex/Antigravity/Claude CLI 경로 (크로스 셸)
 - **psmux 버전 / capability preflight**
   - `new-session`, `attach-session`, `kill-session`, `capture-pane`, `detach-client`
   - 권장 버전 이상인지 여부
@@ -156,7 +156,7 @@ options:
 - Phase 1 웜업 캐시 무결성 (`node scripts/cache-doctor.mjs`)
 - 잔존 팀(orphan teams) 감지
 - **Docs 동기화** — `docs/design/`, `docs/research/` → `~/.claude/docs/` 레퍼런스 문서 동기화 상태
-- **Gemini MCP 안전성** — `~/.gemini/settings.json`의 stdio MCP 감지 (spawn EPERM 방지)
+- **Antigravity MCP 안전성** — `~/.gemini/settings.json`의 stdio MCP 감지 (spawn EPERM 방지)
 - **Route Script 정합성** — 프로젝트 소스 `scripts/tfx-route.sh`와 `~/.claude/scripts/tfx-route.sh` 일치 여부
 
 ## 에러 처리
@@ -165,7 +165,7 @@ options:
 |------|------|
 | 캐시 디렉토리 없음 | 정상 — 삭제할 파일 없음 보고 |
 | 파일 삭제 권한 없음 | 수동 삭제 안내 |
-| --fix 후에도 이슈 남음 | Codex/Gemini 설치는 수동 필요 안내 |
+| --fix 후에도 이슈 남음 | Codex/Antigravity 설치는 수동 필요 안내 |
 
 ## standalone TUI
 

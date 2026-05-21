@@ -16,7 +16,7 @@ argument-hint: "<start|stop|status|자유형 작업 설명>"
 
 
 > **인프라**: 다른 스킬이 내부적으로 사용. 직접 호출할 필요 없음.
-> CLI 에이전트(Codex/Gemini/Claude) 간 실시간 메시지 허브를 관리합니다.
+> CLI 에이전트(Codex/Antigravity/Claude) 간 실시간 메시지 허브를 관리합니다.
 > **커맨드 매칭 + fallthrough**: start/stop/status에 매칭되면 즉시 실행,
 > 매칭 안 되면 **hub 도메인 컨텍스트를 활용한 범용 작업**으로 처리합니다.
 
@@ -96,7 +96,7 @@ Bash("curl -s http://127.0.0.1:27888/status 2>/dev/null || echo '{\"error\":\"hu
 # 사전 등록은 disabled로 두고 `tfx hub start` 이후에만 enabled로 전환한다.
 codex mcp add tfx-hub --url http://127.0.0.1:27888/mcp
 
-# Gemini (settings.json)
+# Antigravity (settings.json)
 # mcpServers.tfx-hub.url = "http://127.0.0.1:27888/mcp"
 
 # Claude

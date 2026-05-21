@@ -218,7 +218,7 @@ sentinel exit 즉시 daemon `sendKillBySessionId` 발사 → stale row 잔존 �
 | `.claude/rules/tfx-routing.md` | 자연어 → 스킬 라우팅, CLI 라우팅 Layer 1~3, 충돌 해소 |
 | `.claude/rules/tfx-execution-skill-map.md` | tfx-auto / multi / swarm 실행 엔진 매핑, 격리 기준, 안티패턴 |
 | `.claude/rules/tfx-autoplan-principles.md` | gstack autoplan의 6 decision principles, phase 우선순위, 충돌 해소 규칙 추출본 |
-| `.claude/rules/tfx-update-logic.md` | triflux / OMC / gstack / Codex / Gemini 업데이트 로직 |
+| `.claude/rules/tfx-update-logic.md` | triflux / OMC / gstack / Codex / Antigravity 업데이트 로직 |
 | `.claude/rules/tfx-stack-coexistence.md` | gstack / superpowers / triflux 공존 원칙, 레이어 분리, 의존 방향, 충돌 해소 |
 | `.claude/rules/tfx-mirror-policy.md` | packages/ 3-layer mirror 정책 (core 단순 cp / remote import 변환 / triflux byte-identical), tests 제외 룰, drift 차단 |
 

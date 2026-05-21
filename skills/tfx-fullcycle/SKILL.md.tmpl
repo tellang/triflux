@@ -73,7 +73,7 @@ Phase 1 시작 전 아래 intake를 먼저 수행한다.
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
 1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
-2. Codex·Gemini 워커 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+2. Codex·Antigravity 워커 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude 워커 → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
@@ -84,12 +84,12 @@ Phase 1 시작 전 아래 intake를 먼저 수행한다.
 | Phase 1: Expansion | 아키텍트 — 요구사항 분석, acceptance criteria 도출 | Claude Opus (Agent) |
 | Phase 2: Planning | 플래너 — 태스크 분해, TDD 전략 | Claude Opus (Agent, background) |
 | Phase 2: Planning | 아키텍트 — 기술 설계, 파일 구조, API 인터페이스 | Codex (tfx headless) |
-| Phase 2: Planning | 크리틱 — 리스크 분석, 엣지 케이스, 보안 | Gemini (tfx headless) |
+| Phase 2: Planning | 크리틱 — 리스크 분석, 엣지 케이스, 보안 | Antigravity (tfx headless) |
 | Phase 3: Execution | 구현자 — 코드 작성, TDD RED→GREEN→REFACTOR | Codex (tfx headless) |
-| Phase 3: Execution | 문서/UI 작성자 | Gemini (tfx headless) |
+| Phase 3: Execution | 문서/UI 작성자 | Antigravity (tfx headless) |
 | Phase 4: QA | 기능 검증자 — acceptance criteria 충족 여부 | Claude (Agent, background) |
 | Phase 4: QA | 보안/성능 검증자 — OWASP, 병목, 에러 핸들링 | Codex (tfx headless) |
-| Phase 4: QA | UX/접근성 검증자 — 반응형, DX, 문서화 | Gemini (tfx headless) |
+| Phase 4: QA | UX/접근성 검증자 — 반응형, DX, 문서화 | Antigravity (tfx headless) |
 | Phase 5: Validation | 합의 판정 — Consensus Score 계산 및 완료 결정 | Claude (직접 판단) |
 
 ## EXECUTION STEPS
@@ -123,7 +123,7 @@ JSON 형식으로 출력하라: { tasks, order, dependencies, tdd_strategy, risk
 )
 ```
 
-**Step 2-B: Codex Architect + Gemini Critic (Bash — 동시에 위 Agent와 같은 응답에서 호출)**
+**Step 2-B: Codex Architect + Antigravity Critic (Bash — 동시에 위 Agent와 같은 응답에서 호출)**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:시니어 엔지니어로서 다음 기능의 기술적 설계를 작성하라. 기능: {expanded_requirements}. 파일 구조, API 인터페이스, 데이터 모델을 포함하라. JSON 형식: { design, file_changes, interfaces, test_plan }:architect' \
@@ -145,7 +145,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
 
 **라우팅 규칙:**
 - 코드 구현/수정/테스트 작성 → Codex (tfx headless)
-- UI/문서 → Gemini (tfx headless)
+- UI/문서 → Antigravity (tfx headless)
 
 **TDD 실행 순서 (Codex에 전달하는 프롬프트에 명시):**
 1. 테스트 먼저 작성 (RED)
@@ -190,7 +190,7 @@ JSON 형식: { criteria_results, edge_case_findings, overall_pass }"
 )
 ```
 
-**Step 4-B: Codex 보안/성능 + Gemini UX/접근성 (Bash — 동시에 위 Agent와 같은 응답에서 호출)**
+**Step 4-B: Codex 보안/성능 + Antigravity UX/접근성 (Bash — 동시에 위 Agent와 같은 응답에서 호출)**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:보안/성능 관점에서 다음 변경사항을 리뷰하라. OWASP Top 10, 성능 병목, 에러 핸들링, 리소스 누수를 확인하라. 변경 파일: {changed_files}. JSON 형식: { security_findings, performance_findings, overall_pass }:verifier' \
@@ -238,7 +238,7 @@ Phase 4의 3자 결과에 Consensus 프로토콜을 적용한다.
 
 ## Acceptance Criteria
 - [x] {criterion1} — 3/3 PASS
-- [x] {criterion2} — 2/3 PASS (Gemini: 조건부)
+- [x] {criterion2} — 2/3 PASS (Antigravity: 조건부)
 
 ## QA 결과
 - 보안: {findings_count}건 (모두 해결)

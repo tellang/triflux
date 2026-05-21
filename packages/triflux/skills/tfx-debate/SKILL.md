@@ -48,7 +48,7 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) tfx-debate -> tfx-auto --mode consensus --s
 tfx-debate 의 본질은 "3-CLI 토론 엔진"이 아니라 "옵션 비교와 최종 추천을 내는 보고서 shape" 였다. Phase 4a 부터 orchestration root 는 `--mode consensus` 로 통합되고, debate 의미는 `--shape debate` 로 보존된다.
 
 공통 규약:
-- participants 기본값은 `triad` (Claude + Codex + Gemini)
+- participants 기본값은 `triad` (Claude + Codex + Antigravity)
 - `--cli-set no-gemini` 시 partial consensus 로 degrade 가능
 - 공통 `meta_judgment` 는 `hub/team/consensus-meta.mjs` 스키마를 따른다
 

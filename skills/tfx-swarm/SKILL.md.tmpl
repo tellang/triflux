@@ -13,7 +13,7 @@ triggers:
 {{> base}}
 
 > **Multi-Machine x Multi-Model Swarm.** PRD 하나로 로컬과 원격 머신에서
-> Claude + Codex + Gemini를 병렬 실행하고, file-lease로 충돌을 방지하며,
+> Claude + Codex + Antigravity를 병렬 실행하고, file-lease로 충돌을 방지하며,
 > 결과를 자동 통합한다. triflux의 킬러 스킬.
 
 ## 트리거
@@ -36,7 +36,7 @@ triggers:
 
 - psmux >= 3.3.0
 - Hub 실행 중 (`curl -sf http://127.0.0.1:27888/status`)
-- Codex CLI 또는 Gemini CLI (사용할 agent에 따라)
+- Codex CLI 또는 Antigravity CLI (사용할 agent에 따라)
 - 원격 shard 사용 시: SSH 키 인증 + 원격 머신에 Claude Code 설치
 - 프로젝트에 `docs/prd/` 디렉토리 존재
 
@@ -78,7 +78,7 @@ PRD에 다중 agent가 지정된 경우에도 AskUserQuestion:
 Options:
 - A) PRD 그대로 — shard별 지정 모델 사용 (권장)
 - B) 전부 Codex로 — 단일 모델
-- C) 전부 Gemini로 — 단일 모델
+- C) 전부 Antigravity로 — 단일 모델
 
 ### Step 3: 계획 생성
 
@@ -163,7 +163,7 @@ await hyper.shutdown('completed');
 - prompt: 성능 최적화 (auth 리팩터 완료 후)
 ```
 
-위 PRD 하나로: Codex(로컬) + Gemini(로컬) + Claude(ryzen5-7600) + Codex(m2) 4개 워커가 병렬 실행된다.
+위 PRD 하나로: Codex(로컬) + Antigravity(로컬) + Claude(ryzen5-7600) + Codex(m2) 4개 워커가 병렬 실행된다.
 security-audit는 `critical: true`이므로 다른 모델로 이중 실행 후 reconcile.
 
 ## PRD Shard 필드 레퍼런스
