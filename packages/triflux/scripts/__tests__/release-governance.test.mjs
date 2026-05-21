@@ -168,6 +168,29 @@ describe("release governance scripts", () => {
         ["git tag", "git push", "gh release create"],
       );
 
+      const executed = [];
+      const resumedPublish = await publishRelease({
+        rootDir: root,
+        version: "1.2.3",
+        dryRun: false,
+        publishNpm: false,
+        allowExistingArtifacts: true,
+        execFileSyncFn: (command, args) => {
+          executed.push([command, ...args].join(" "));
+          if (command === "git" && args[0] === "rev-parse") return "tag\n";
+          if (command === "gh" && args[0] === "release") {
+            return '{"tagName":"v1.2.3"}\n';
+          }
+          return "";
+        },
+      });
+      assert.equal(resumedPublish.allowExistingArtifacts, true);
+      assert.deepEqual(executed, [
+        "git rev-parse --verify v1.2.3",
+        "git push origin HEAD --tags",
+        "gh release view v1.2.3 --json tagName",
+      ]);
+
       const verify = await verifyRelease({
         rootDir: root,
         version: "1.2.3",
@@ -206,7 +229,7 @@ describe("release governance scripts", () => {
     );
     assert.match(releaseWorkflow, /actions:\s*write/);
     assert.match(releaseWorkflow, /node-version:\s*24/);
-    assert.match(releaseWorkflow, /publish\.mjs.*--skip-npm/);
+    assert.match(releaseWorkflow, /publish\.mjs.*--skip-npm.*--allow-existing/);
     assert.match(releaseWorkflow, /gh workflow run npm-publish\.yml/);
     assert.match(releaseWorkflow, /npm-publish\.yml/);
     assert.match(releaseWorkflow, /workflow_dispatch/);

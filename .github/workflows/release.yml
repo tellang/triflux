@@ -42,7 +42,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/release/publish.mjs --version ${{ inputs.version }} --channel ${{ inputs.channel }} --skip-npm --execute
+        run: node scripts/release/publish.mjs --version ${{ inputs.version }} --channel ${{ inputs.channel }} --skip-npm --allow-existing --execute
 
       - name: Dispatch npm publish
         env:
