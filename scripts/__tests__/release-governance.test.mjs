@@ -150,6 +150,23 @@ describe("release governance scripts", () => {
           .map((step) => step.command.includes("--provenance")),
         [true, true, true],
       );
+      const tagOnlyPublish = await publishRelease({
+        rootDir: root,
+        version: "1.2.3",
+        dryRun: true,
+        publishNpm: false,
+      });
+      assert.equal(tagOnlyPublish.publishNpm, false);
+      assert.equal(
+        tagOnlyPublish.steps.some((step) =>
+          step.label.startsWith("npm publish"),
+        ),
+        false,
+      );
+      assert.deepEqual(
+        tagOnlyPublish.steps.map((step) => step.label),
+        ["git tag", "git push", "gh release create"],
+      );
 
       const verify = await verifyRelease({
         rootDir: root,
@@ -187,9 +204,11 @@ describe("release governance scripts", () => {
       new URL("../../.github/workflows/release.yml", import.meta.url),
       "utf8",
     );
-    assert.match(releaseWorkflow, /id-token:\s*write/);
+    assert.match(releaseWorkflow, /actions:\s*read/);
     assert.match(releaseWorkflow, /node-version:\s*24/);
-    assert.match(releaseWorkflow, /publish\.mjs.*--provenance/);
+    assert.match(releaseWorkflow, /publish\.mjs.*--skip-npm/);
+    assert.match(releaseWorkflow, /npm-publish\.yml/);
+    assert.match(releaseWorkflow, /gh run list/);
     assert.doesNotMatch(
       releaseWorkflow,
       /NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/,
