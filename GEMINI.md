@@ -1,6 +1,6 @@
 # triflux — Gemini 프로젝트 지시
 
-triflux 워크스페이스에서 Gemini CLI의 역할과 운영 규칙. 1M context 활용·웹 검색·헤드리스 합의의 한 축으로 사용된다.
+triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M context 활용·웹 검색·헤드리스 합의의 한 축으로 사용된다.
 
 전체 프로젝트 컨텍스트는 `CLAUDE.md`를 참조한다 (이 파일은 Gemini 관점만 다룸).
 
@@ -18,7 +18,7 @@ triflux 워크스페이스에서 Gemini CLI의 역할과 운영 규칙. 1M conte
 - swarm/multi headless 병렬 실행의 워커
 
 ## headless-guard
-- `gemini -y -p` 직접 호출은 차단됨
+- `agy --dangerously-skip-permissions --print=` 직접 호출은 차단됨
 - 반드시 tfx 스킬 경유: tfx-auto, tfx-gemini, tfx-multi, tfx-swarm 등
 - 일반 호출: `tfx-route.sh --cli gemini ...`
 

@@ -24,7 +24,7 @@ triflux 워크스페이스에서 Codex CLI의 역할과 운영 규칙. Claude/Ge
 - 안전 패턴: config.toml에 기본값 + CLI는 `--profile` 선택만
 
 ## headless-guard
-- `codex exec` / `gemini -y -p` 직접 호출은 차단됨
+- `codex exec` / `agy --dangerously-skip-permissions --print=` 직접 호출은 차단됨
 - 반드시 tfx 스킬 경유: tfx-auto, tfx-codex, tfx-multi, tfx-swarm 등
 
 ## Headless 결과 회수
