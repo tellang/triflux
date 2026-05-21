@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 
 export async function checkWrapperSourcing({
-  wrapperPath = path.join(os.homedir(), ".local", "bin", "mcp-gateway-wrapper.sh"),
+  wrapperPath = path.join(
+    os.homedir(),
+    ".local",
+    "bin",
+    "mcp-gateway-wrapper.sh",
+  ),
   marker = "secrets.env",
 } = {}) {
   let text;
