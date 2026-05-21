@@ -204,23 +204,34 @@ describe("buildAntigravityCommand: platform-specific formatting", () => {
   const prompt = "(Get-Content -Raw '/tmp/p.txt')";
   const resultFile = "/tmp/r.txt";
 
-  it("Windows 분기 — PowerShell pipeline으로 stdin 전달", () => {
+  it("Windows 분기 — prompt file을 PowerShell pipeline으로 stdin 전달", () => {
     const cmd = buildAntigravityCommand(prompt, resultFile, {
       isWindows: true,
     });
-    assert.ok(cmd.startsWith(`${prompt} | agy --print `), cmd);
+    assert.equal(readFileSync(`${resultFile}.prompt`, "utf8"), prompt);
+    assert.ok(
+      cmd.startsWith(
+        `Get-Content -Raw '${resultFile}.prompt' | agy --print `,
+      ),
+      cmd,
+    );
     assert.ok(cmd.includes("--dangerously-skip-permissions"), cmd);
+    assert.ok(!cmd.includes(prompt), cmd);
   });
 
-  it("Unix 분기 — printf pipeline으로 stdin 전달", () => {
+  it("Unix 분기 — prompt file redirect로 stdin 전달", () => {
     const cmd = buildAntigravityCommand(prompt, resultFile, {
       isWindows: false,
     });
-    assert.ok(cmd.startsWith("printf '%s' "), cmd);
     assert.ok(
-      cmd.includes("| agy --print --dangerously-skip-permissions"),
+      cmd.startsWith(
+        `agy --print --dangerously-skip-permissions < '${resultFile}.prompt' `,
+      ),
       cmd,
     );
+    assert.equal(readFileSync(`${resultFile}.prompt`, "utf8"), prompt);
+    assert.ok(cmd.includes(`> '${resultFile}'`), cmd);
+    assert.ok(!cmd.includes(prompt), cmd);
   });
 });
 
