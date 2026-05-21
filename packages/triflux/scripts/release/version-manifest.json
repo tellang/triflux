@@ -11,6 +11,14 @@
       "paths": [["version"]]
     },
     {
+      "file": "packages/core/package.json",
+      "paths": [["version"]]
+    },
+    {
+      "file": "packages/remote/package.json",
+      "paths": [["version"]]
+    },
+    {
       "file": ".claude-plugin/plugin.json",
       "paths": [["version"]]
     },
