@@ -19,10 +19,10 @@ import { createRequire } from "node:module";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { requestJson } from "../bridge.mjs";
-import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
-import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
-import { IS_WINDOWS } from "../platform.mjs";
+import { requestJson } from "@triflux/core/hub/bridge.mjs";
+import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
+import { getMaxSpawnPerSec } from "@triflux/core/hub/lib/spawn-trace.mjs";
+import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 import { getBackend } from "./backend.mjs";
 import {
   buildDaemonExecDispatchPayload,

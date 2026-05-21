@@ -4,8 +4,8 @@
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
-import { buildExecArgs } from "../codex-adapter.mjs";
-import { IS_WINDOWS } from "../platform.mjs";
+import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
+import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 
 // --yolo is required: without it gemini waits on stdin for tool-call approval
 // even when stdin is redirected, producing a 0-byte 90s+ silent hang.
