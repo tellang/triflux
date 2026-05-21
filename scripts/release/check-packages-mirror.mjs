@@ -22,10 +22,15 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "..", "..");
 const MIRROR_ROOT = join(REPO_ROOT, "packages", "triflux");
-const MIRROR_TOPS = ["bin", "hub", "mesh", "scripts"];
+const MIRROR_TOPS = ["bin", "hooks", "hub", "mesh", "scripts", "skills"];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
+// Per-top relative paths to skip. Mirror policy excludes these via
+// packages/triflux/package.json "files" negation patterns (e.g.
+// "!skills/tfx-workspace"), so source-tree drift in these subtrees does not
+// affect the npm tarball. See .claude/rules/tfx-mirror-policy.md.
+const SKIP_RELS = new Map([["skills", new Set(["tfx-workspace"])]]);
 
-function walkRelFiles(root) {
+function walkRelFiles(root, skipRels = new Set()) {
   const out = [];
   if (!existsSync(root)) return out;
   const stack = [""];
@@ -35,6 +40,7 @@ function walkRelFiles(root) {
     for (const entry of readdirSync(abs, { withFileTypes: true })) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const subRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (skipRels.has(subRel)) continue;
       if (entry.isDirectory()) stack.push(subRel);
       else out.push(subRel);
     }
@@ -49,8 +55,9 @@ function compareMirror({ fix = false } = {}) {
   for (const top of MIRROR_TOPS) {
     const srcDir = join(REPO_ROOT, top);
     const dstDir = join(MIRROR_ROOT, top);
-    const srcFiles = new Set(walkRelFiles(srcDir));
-    const dstFiles = new Set(walkRelFiles(dstDir));
+    const skipRels = SKIP_RELS.get(top) ?? new Set();
+    const srcFiles = new Set(walkRelFiles(srcDir, skipRels));
+    const dstFiles = new Set(walkRelFiles(dstDir, skipRels));
     const allFiles = new Set([...srcFiles, ...dstFiles]);
 
     for (const rel of allFiles) {

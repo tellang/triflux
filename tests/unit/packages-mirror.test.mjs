@@ -3,8 +3,13 @@
 // run `npm run release:check-mirror:fix` after editing hub/bin/scripts.
 
 import assert from "node:assert/strict";
+import { rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { compareMirror } from "../../scripts/release/check-packages-mirror.mjs";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 test("packages/triflux mirror is byte-identical to root", () => {
   const result = compareMirror({ fix: false });
@@ -18,4 +23,62 @@ test("packages/triflux mirror is byte-identical to root", () => {
   }
   assert.equal(result.ok, true);
   assert.equal(result.issues.length, 0);
+});
+
+// Lock-in coverage for hooks/skills tops. Without these in MIRROR_TOPS the
+// release gate silently ignores drift in hooks/ and skills/ — caught by Codex
+// review on PR #319 follow-up.
+function withMirrorProbe(rel, fn) {
+  const probePath = join(REPO_ROOT, rel);
+  writeFileSync(probePath, "probe");
+  try {
+    fn();
+  } finally {
+    rmSync(probePath, { force: true });
+  }
+}
+
+test("check-packages-mirror walks hooks/ top-level dir", () => {
+  withMirrorProbe("hooks/__mirror_probe_temp__.txt", () => {
+    const result = compareMirror({ fix: false });
+    const found = result.issues.find((i) =>
+      i.path.endsWith("hooks/__mirror_probe_temp__.txt"),
+    );
+    assert.ok(
+      found,
+      "hooks/ drift was not flagged — check-packages-mirror.mjs MIRROR_TOPS regression",
+    );
+    assert.equal(found.kind, "missing-in-mirror");
+  });
+});
+
+test("check-packages-mirror walks skills/ top-level dir", () => {
+  withMirrorProbe("skills/__mirror_probe_temp__.txt", () => {
+    const result = compareMirror({ fix: false });
+    const found = result.issues.find((i) =>
+      i.path.endsWith("skills/__mirror_probe_temp__.txt"),
+    );
+    assert.ok(
+      found,
+      "skills/ drift was not flagged — check-packages-mirror.mjs MIRROR_TOPS regression",
+    );
+    assert.equal(found.kind, "missing-in-mirror");
+  });
+});
+
+test("check-packages-mirror skips skills/tfx-workspace", () => {
+  // tfx-workspace is excluded from npm tarball via
+  // packages/triflux/package.json files negation ("!skills/tfx-workspace"),
+  // so source-tree drift in that subtree must not fail the release gate.
+  withMirrorProbe("skills/tfx-workspace/__mirror_probe_temp__.txt", () => {
+    const result = compareMirror({ fix: false });
+    const leaked = result.issues.find((i) =>
+      i.path.includes("tfx-workspace/__mirror_probe_temp__"),
+    );
+    assert.equal(
+      leaked,
+      undefined,
+      "tfx-workspace drift was flagged — SKIP_RELS regression",
+    );
+  });
 });
