@@ -11,6 +11,7 @@ import {
   deriveClaudeDaemonPaths,
   findDaemonJobByShort,
   sendClaudeControlRequest,
+  sendKillBySessionId,
 } from "../../hub/team/claude-daemon-control.mjs";
 
 function listenJsonServer(sockPath, handler) {
@@ -113,4 +114,41 @@ test("findDaemonJobByShort returns a daemon list job by short id", () => {
 
   assert.deepEqual(job, { short: "22222222", pid: 42 });
   assert.equal(findDaemonJobByShort({ ok: true, jobs: [] }, "missing"), null);
+});
+
+test("killDaemonJobBySessionId resolves short then sends kill", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-kill-session-"));
+  const sockPath = path.join(dir, "control.sock");
+  const seen = [];
+  const { server } = await listenJsonServer(sockPath, (request) => {
+    seen.push(request);
+    if (request.op === "list") {
+      return {
+        ok: true,
+        op: "list",
+        jobs: [
+          { short: "keep1111", sessionId: "other-session" },
+          { short: "kill2222", sessionId: "session-target" },
+        ],
+      };
+    }
+    return { ok: true, op: request.op, killed: request.short };
+  });
+
+  try {
+    const result = await sendKillBySessionId({
+      daemonPaths: { controlSock: sockPath },
+      sessionId: "session-target",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.killed, "kill2222");
+    assert.deepEqual(seen, [
+      { proto: 1, op: "list" },
+      { proto: 1, op: "kill", short: "kill2222" },
+    ]);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });

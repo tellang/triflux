@@ -12,6 +12,7 @@ describe("swarm-cli parseFlags — --base", () => {
   it("default baseBranch is 'main' when --base omitted", () => {
     const { flags, positional } = parseFlags(["docs/prd/foo.md"]);
     assert.equal(flags.baseBranch, "main");
+    assert.equal(flags.nativeBridge, true);
     assert.deepEqual(positional, ["docs/prd/foo.md"]);
   });
 
@@ -52,6 +53,26 @@ describe("swarm-cli parseFlags — --base", () => {
     assert.equal(flags.filter, "shard-a");
     assert.equal(flags.baseBranch, "release/v2");
     assert.deepEqual(positional, ["docs/prd/bar.md"]);
+  });
+
+  it("parseFlags accepts --no-native-bridge-ui and rejects conflicting native bridge flags", () => {
+    const { flags, positional } = parseFlags([
+      "docs/prd/native-bridge.md",
+      "--no-native-bridge-ui",
+      "--unknown-flag",
+    ]);
+
+    assert.equal(flags.nativeBridge, false);
+    assert.deepEqual(positional, ["docs/prd/native-bridge.md"]);
+    assert.throws(
+      () =>
+        parseFlags([
+          "docs/prd/native-bridge.md",
+          "--native-bridge-ui",
+          "--no-native-bridge-ui",
+        ]),
+      /conflicting native bridge flags/,
+    );
   });
 });
 

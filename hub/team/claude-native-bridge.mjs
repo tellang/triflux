@@ -4,6 +4,17 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import {
+  buildDaemonExecDispatchPayload,
+  killDaemonJob,
+  sendClaudeControlRequest,
+  waitForDaemonJobPid,
+} from "./claude-daemon-control.mjs";
+import {
+  buildClaudeSessionProjection,
+  removeClaudeSessionProjection,
+  writeClaudeSessionProjection,
+} from "./claude-session-projection.mjs";
 
 const DEFAULT_ROWS = 40;
 const DEFAULT_COLS = 120;
@@ -36,6 +47,8 @@ export function deriveClaudeDaemonPaths({
     rendezvousDir: path.join(daemonDir, "rv"),
     ptyDir: path.join(daemonDir, "pty"),
     rosterPath: path.join(resolvedConfigDir, "daemon", "roster.json"),
+    sessionsDir: path.join(resolvedConfigDir, "sessions"),
+    jobsDir: path.join(resolvedConfigDir, "jobs"),
   };
 }
 
@@ -201,6 +214,150 @@ export async function removeRosterWorkers(rosterPath, shorts) {
     if (changed) await writeRoster(rosterPath, roster);
     return changed;
   });
+}
+
+export async function removeClaudeJobState(jobsDir, short) {
+  if (!short) return;
+  await fs.rm(path.join(jobsDir, short), { recursive: true, force: true });
+}
+
+function shellSingleQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function buildSwarmShardBridgeCommand({ displayName, sessionId }) {
+  const banner = `${displayName} native bridge active (${sessionId})`;
+  return `printf '%s\\n' ${shellSingleQuote(banner)}; while true; do sleep 3600; done`;
+}
+
+function isLocalHost(host) {
+  const value = String(host || "local").toLowerCase();
+  return value === "local" || value === "localhost" || value === "127.0.0.1";
+}
+
+function deriveSwarmShort({ sessionId, shardName, host }) {
+  return crypto
+    .createHash("sha256")
+    .update(`${sessionId}:${shardName}:${host || "local"}`)
+    .digest("hex")
+    .slice(0, 8);
+}
+
+export async function registerSwarmShard({
+  sessionId,
+  cli = "codex",
+  role = "worker",
+  shardName,
+  cwd = process.cwd(),
+  host = "local",
+  configDir = resolveClaudeConfigDir(),
+  tmpRoot = "/tmp",
+  _deps = {},
+} = {}) {
+  if (!sessionId) throw new Error("sessionId is required");
+  if (!shardName) throw new Error("shardName is required");
+
+  const warn = _deps.warn || ((message) => console.warn(message));
+  if (!isLocalHost(host)) {
+    warn(
+      `[native-bridge] remote shard ${shardName}@${host}: skipping local registration; remote launcher must register on that host`,
+    );
+    return {
+      ok: true,
+      skipped: true,
+      host,
+      sessionId,
+      shardName,
+      close() {},
+    };
+  }
+
+  const derivePaths = _deps.deriveClaudeDaemonPaths || deriveClaudeDaemonPaths;
+  const buildPayload =
+    _deps.buildDaemonExecDispatchPayload || buildDaemonExecDispatchPayload;
+  const sendControl =
+    _deps.sendClaudeControlRequest || sendClaudeControlRequest;
+  const waitForPid = _deps.waitForDaemonJobPid || waitForDaemonJobPid;
+  const readProcStart = _deps.getProcStart || getProcStart;
+  const buildProjection =
+    _deps.buildClaudeSessionProjection || buildClaudeSessionProjection;
+  const writeProjection =
+    _deps.writeClaudeSessionProjection || writeClaudeSessionProjection;
+  const removeProjection =
+    _deps.removeClaudeSessionProjection || removeClaudeSessionProjection;
+  const removeJobStateImpl = _deps.removeClaudeJobState || removeClaudeJobState;
+  const killJob = _deps.killDaemonJob || killDaemonJob;
+  const accessControlSock = _deps.accessControlSock || fs.access;
+
+  const paths = derivePaths({ configDir, tmpRoot });
+  const sessionsDir =
+    paths.sessionsDir || path.join(paths.configDir || configDir, "sessions");
+  const jobsDir =
+    paths.jobsDir || path.join(paths.configDir || configDir, "jobs");
+  const short = deriveSwarmShort({ sessionId, shardName, host });
+  const displayName = `Triflux swarm ${shardName}`;
+  const command = buildSwarmShardBridgeCommand({ displayName, sessionId });
+  const payload = buildPayload({
+    short,
+    cwd,
+    command,
+    name: displayName,
+  });
+
+  await accessControlSock(paths.controlSock);
+  const dispatch = await sendControl(
+    paths.controlSock,
+    {
+      proto: 1,
+      op: "dispatch",
+      d: payload,
+      timeoutMs: 1000,
+    },
+    { timeoutMs: 1000 },
+  );
+  if (dispatch?.ok !== true) {
+    throw new Error(
+      `Claude daemon dispatch failed for swarm shard ${shardName}`,
+    );
+  }
+
+  const job = await waitForPid(paths.controlSock, short, { timeoutMs: 1000 });
+  const pid = job.pid;
+  const projection = buildProjection({
+    pid,
+    procStart: readProcStart(pid),
+    sessionId: payload.sessionId,
+    short,
+    cwd,
+    name: displayName,
+    agent: cli,
+    startedAt: job.startedAt || Date.now(),
+    updatedAt: Date.now(),
+  });
+  const sessionProjectionPath = await writeProjection(sessionsDir, projection);
+  let closed = false;
+
+  return {
+    ok: true,
+    skipped: false,
+    host: "local",
+    sessionId: payload.sessionId,
+    swarmSessionId: sessionId,
+    shardName,
+    cli,
+    role,
+    short,
+    displayName,
+    controlSock: paths.controlSock,
+    sessionProjectionPath,
+    async close() {
+      if (closed) return;
+      closed = true;
+      await removeProjection(sessionProjectionPath).catch(() => {});
+      await killJob(paths.controlSock, short).catch(() => {});
+      await removeJobStateImpl(jobsDir, short).catch(() => {});
+    },
+  };
 }
 
 export function buildNativeWorkerRosterEntry({

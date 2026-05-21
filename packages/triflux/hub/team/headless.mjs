@@ -29,6 +29,7 @@ import {
   deriveClaudeDaemonPaths as deriveClaudeControlPaths,
   killDaemonJob,
   sendClaudeControlRequest,
+  sendKillBySessionId,
   waitForDaemonJobPid,
 } from "./claude-daemon-control.mjs";
 import {
@@ -880,8 +881,11 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
         workerId,
         cwd: assignment.cwd || assignment.workdir,
         daemonShort: short,
+        daemonPaths: paths,
         controlSock: paths.controlSock,
+        sessionId: "",
         sessionProjectionPath: "",
+        daemonCompletionMatched: false,
       };
       dispatches.push(record);
 
@@ -891,6 +895,7 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
         command: buildDaemonWrappedCommand(command, token),
         name,
       });
+      record.sessionId = payload.sessionId;
       const dispatch = await sendClaudeControlRequest(paths.controlSock, {
         proto: 1,
         op: "dispatch",
@@ -933,13 +938,23 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
   return dispatches;
 }
 
-async function cleanupDaemonDispatches(dispatches) {
+export async function cleanupDaemonDispatches(dispatches) {
   await Promise.all(
     dispatches.map(async (dispatch) => {
       if (dispatch.sessionProjectionPath) {
         await removeClaudeSessionProjection(
           dispatch.sessionProjectionPath,
         ).catch(() => {});
+      }
+      if (
+        dispatch.daemonCompletionMatched === true &&
+        dispatch.daemonPaths &&
+        dispatch.sessionId
+      ) {
+        await sendKillBySessionId({
+          daemonPaths: dispatch.daemonPaths,
+          sessionId: dispatch.sessionId,
+        }).catch(() => {});
       }
       if (dispatch.controlSock && dispatch.daemonShort) {
         await killDaemonJob(dispatch.controlSock, dispatch.daemonShort).catch(
@@ -1115,7 +1130,10 @@ async function waitForDaemonCompletion(
           token: dispatch.token,
           resultFile: dispatch.resultFile,
         });
-      if (!finalCompletion.matched) {
+      if (finalCompletion.matched) {
+        dispatch.daemonCompletionMatched = true;
+        cleanupDaemonDispatches([dispatch]).catch(() => {});
+      } else {
         killDaemonJob(dispatch.controlSock, dispatch.daemonShort).catch(
           () => {},
         );

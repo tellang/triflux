@@ -155,6 +155,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--parallel` | `1` (기본) | 단일 워커 | tfx-route.sh |
 | `--parallel` | `N` | 로컬 headless 병렬 (cwd 공유) | `tfx multi` |
 | `--parallel` | `swarm` | worktree 격리 + 다기기 | `tfx swarm` (PRD 필요) |
+| `--no-native-bridge-ui` | true | headless worker의 Claude agents UI 노출을 비활성화 | `tfx multi` |
 | `--retry` | `0` | 자동 재시도 없음 | — |
 | `--retry` | `1` (기본) | bounded verify → fix loop 3회 | — |
 | `--retry` | `ralph` | **Phase 3** — true ralph state machine (unlimited, stuck detector 3회 중단) | retry-state-machine.mjs |
@@ -805,6 +806,7 @@ deep/fullcycle 추가 규칙:
 > **MANDATORY: 2개+ 서브태스크 시 headless 엔진 필수**
 > `Agent()` 백그라운드나 `Bash(tfx-route.sh)` 개별 호출로 대체 금지.
 > 반드시 아래 `Bash("tfx multi ...")` 명령으로 headless 엔진에 위임한다.
+> headless dispatch는 기본적으로 Claude agents native bridge UI에 노출된다. 필요 시 `--no-native-bridge-ui` 로 opt-out 한다.
 
 **전환 방법:**
 
@@ -813,7 +815,7 @@ thorough = args에 -t 또는 --thorough 포함
 
 if subtasks.length >= 2:
   if psmux 설치됨:
-    → Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:prompt:role' ...")
+    → Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --native-bridge-ui --assign 'cli:prompt:role' ...")
     → if thorough: verify → fix loop
   else:
     → fallback: tfx-multi Phase 3 Native Teams (Agent slim wrapper)

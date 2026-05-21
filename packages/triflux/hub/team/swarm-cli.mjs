@@ -84,8 +84,11 @@ export function parseFlags(args) {
     maxRestarts: 2,
     logsDir: null,
     baseBranch: "main",
+    nativeBridge: true,
   };
   const positional = [];
+  let nativeBridgeUiEnabled = false;
+  let nativeBridgeUiDisabled = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--dry-run" || a === "--plan-only") flags.dryRun = true;
@@ -101,11 +104,22 @@ export function parseFlags(args) {
         );
       }
       flags.baseBranch = v;
+    } else if (a === "--native-bridge-ui") {
+      nativeBridgeUiEnabled = true;
+      flags.nativeBridge = true;
+    } else if (a === "--no-native-bridge-ui") {
+      nativeBridgeUiDisabled = true;
+      flags.nativeBridge = false;
     } else if (a.startsWith("--")) {
       // ignore unknown flags silently
     } else {
       positional.push(a);
     }
+  }
+  if (nativeBridgeUiEnabled && nativeBridgeUiDisabled) {
+    throw new Error(
+      "conflicting native bridge flags: --native-bridge-ui and --no-native-bridge-ui",
+    );
   }
   return { flags, positional };
 }
@@ -252,6 +266,7 @@ export async function cmdSwarmRun(args, { json = false, deps = {} } = {}) {
     logsDir,
     maxRestarts: flags.maxRestarts,
     baseBranch: flags.baseBranch,
+    nativeBridge: flags.nativeBridge,
   });
 
   hyper.on("shardLaunched", ({ shardName, sessionId, remote }) => {

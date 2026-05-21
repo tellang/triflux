@@ -11,6 +11,7 @@
 //   F5: Merge conflict        → retry integration with conflict resolution
 
 import { execFile } from "node:child_process";
+import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ import {
 import { cleanupShardProcesses } from "@triflux/core/hub/lib/process-utils.mjs";
 import { getHostConfig } from "@triflux/core/hub/lib/ssh-command.mjs";
 import { buildWorkerPrompt } from "./build-worker-prompt.mjs";
+import { registerSwarmShard } from "./claude-native-bridge.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
 import { ensureConductorRegistry } from "./conductor-registry.mjs";
 import { createEventLog } from "./event-log.mjs";
@@ -162,6 +164,7 @@ function resolveHubStatusUrl(hub) {
  * @param {string} [opts.baseBranch='main'] — base branch for shard worktrees
  * @param {string} [opts.runId=`swarm-${Date.now()}`] — logical swarm run id
  * @param {number} [opts.maxRestarts=2] — per-shard max restarts
+ * @param {boolean} [opts.nativeBridge=false] — expose local shards in Claude agents
  * @param {number} [opts.graceMs=10000] — conductor shutdown grace period
  * @param {number} [opts.integrationTimeoutMs=60000] — max time for integration phase
  * @param {boolean} [opts.keepFailedWorktrees=false] — preserve failed shard worktrees for debugging
@@ -176,6 +179,7 @@ export function createSwarmHypervisor(opts) {
     baseBranch = "main",
     runId = `swarm-${Date.now()}`,
     maxRestarts = 2,
+    nativeBridge = false,
     graceMs = 10_000,
     keepFailedWorktrees = false,
     _integrationTimeoutMs = 60_000,
@@ -200,6 +204,7 @@ export function createSwarmHypervisor(opts) {
     _deps.cleanupWorktree || cleanupWorktree || pruneWorktree;
   const cleanupShardProcessesImpl =
     _deps.cleanupShardProcesses || cleanupShardProcesses;
+  const registerSwarmShardImpl = _deps.registerSwarmShard || registerSwarmShard;
   const preserveWorktreePatchImpl =
     _deps.preserveWorktreePatch || preserveWorktreePatch;
   const ensureHubAliveImpl = hasOwnDep(_deps, "ensureHubAlive")
@@ -530,9 +535,101 @@ export function createSwarmHypervisor(opts) {
 
   // ── Worker lifecycle ────────────────────────────────────────
 
+  function safeSessionPart(value) {
+    return String(value || "unknown")
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80);
+  }
+
+  function buildSwarmSessionId(shard) {
+    const short8 = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+    return `swarm-${safeSessionPart(runId)}-${safeSessionPart(shard.name)}-${short8}`;
+  }
+
+  async function closeNativeBridgeRegistration(worker, shardName, reason) {
+    if (worker?.nativeBridgeClosePromise) {
+      await worker.nativeBridgeClosePromise;
+      return;
+    }
+    const registration = worker?.nativeBridgeRegistration;
+    if (!registration || typeof registration.close !== "function") return;
+    worker.nativeBridgeClosePromise = (async () => {
+      let closed = false;
+      try {
+        await registration.close();
+        closed = true;
+        eventLog.append("native_bridge_registration_closed", {
+          shard: shardName,
+          reason,
+        });
+      } catch (err) {
+        eventLog.append("native_bridge_registration_close_failed", {
+          shard: shardName,
+          reason,
+          error: err.message,
+        });
+      } finally {
+        worker.nativeBridgeClosePromise = null;
+        if (closed) worker.nativeBridgeRegistration = null;
+      }
+    })();
+    await worker.nativeBridgeClosePromise;
+  }
+
+  async function maybeRegisterNativeBridgeShard(shard, sessionConfig) {
+    if (!nativeBridge) return null;
+    try {
+      const registration = await registerSwarmShardImpl({
+        sessionId: sessionConfig.id,
+        cli: shard.agent,
+        role: shard.role || "worker",
+        shardName: shard.name,
+        cwd: workdir,
+        host: shard.host || "local",
+        _deps: {
+          warn(message) {
+            emitter.emit("warning", {
+              type: "native_bridge_registration_skipped",
+              shard: shard.name,
+              host: shard.host || "local",
+              message,
+            });
+          },
+        },
+      });
+      eventLog.append(
+        registration?.skipped
+          ? "native_bridge_registration_skipped"
+          : "native_bridge_registration",
+        {
+          shard: shard.name,
+          sessionId: sessionConfig.id,
+          host: shard.host || "local",
+          displayName: `Triflux swarm ${shard.name}`,
+        },
+      );
+      return registration;
+    } catch (err) {
+      eventLog.append("native_bridge_registration_failed", {
+        shard: shard.name,
+        sessionId: sessionConfig.id,
+        host: shard.host || "local",
+        error: err.message,
+      });
+      emitter.emit("warning", {
+        type: "native_bridge_registration_failed",
+        shard: shard.name,
+        host: shard.host || "local",
+        error: err.message,
+      });
+      return null;
+    }
+  }
+
   function buildSessionConfig(shard) {
     const config = {
-      id: `swarm-${shard.name}-${Date.now()}`,
+      id: buildSwarmSessionId(shard),
       agent: shard.agent,
       // #125: append Completion Protocol appendix so workers emit a
       // sentinel-framed JSON payload that conductor can reliably capture.
@@ -574,6 +671,7 @@ export function createSwarmHypervisor(opts) {
   async function launchShard(shard, isRedundant = false) {
     // Clone frozen shard so we can attach mutable runtime state (_remoteEnv)
     shard = { ...shard };
+    let nativeBridgeRegistration = null;
 
     const shardLogsDir = join(
       logsDir,
@@ -661,6 +759,10 @@ export function createSwarmHypervisor(opts) {
       // 직접 주입해야 shardCompleted 이벤트가 발화된다. 2026-04-17 세션에서
       // follow-up swarm 이 여기서 hang 했던 원인.
       const sessionConfig = buildSessionConfig(shard);
+      nativeBridgeRegistration = await maybeRegisterNativeBridgeShard(
+        shard,
+        sessionConfig,
+      );
       sessionConfig.onCompleted = ({ sessionId, completionPayload } = {}) =>
         handleShardCompleted(
           shard.name,
@@ -698,6 +800,7 @@ export function createSwarmHypervisor(opts) {
         startedAt: Date.now(),
         worktreePath: sessionConfig.worktreePath,
         branchName: sessionConfig.branchName,
+        nativeBridgeRegistration,
       };
 
       if (isRedundant) {
@@ -713,6 +816,13 @@ export function createSwarmHypervisor(opts) {
 
       return entry;
     } catch (err) {
+      if (nativeBridgeRegistration) {
+        await closeNativeBridgeRegistration(
+          { nativeBridgeRegistration },
+          shard.name,
+          "launch_failed",
+        );
+      }
       eventLog.append("shard_launch_failed", {
         shard: shard.name,
         isRedundant,
@@ -760,6 +870,16 @@ export function createSwarmHypervisor(opts) {
       isRedundant,
       hasPayload: completionPayload !== undefined,
     });
+    const completedWorker = isRedundant
+      ? redundantWorkers.get(shardName)
+      : workers.get(shardName);
+    if (completedWorker) {
+      void closeNativeBridgeRegistration(
+        completedWorker,
+        shardName,
+        "completed",
+      );
+    }
 
     // F7 — worker self-reported completion must include commits_made.
     // Only enforce when payload is actually provided; legacy workers that
@@ -784,10 +904,18 @@ export function createSwarmHypervisor(opts) {
         const worker = workers.get(shardName);
         const shard = plan?.shards.find((item) => item.name === shardName);
         if (worker && shard) {
-          void maybeCleanupWorktree(shardName, worker, shard, {
+          const cleanupPromise = maybeCleanupWorktree(shardName, worker, shard, {
             force: true,
             failureReason: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
           });
+          worker.cleanupPromise = cleanupPromise;
+          void cleanupPromise
+            .finally(() => {
+              if (worker.cleanupPromise === cleanupPromise) {
+                worker.cleanupPromise = null;
+              }
+            })
+            .catch(() => {});
         }
 
         const redundant = redundantWorkers.get(shardName);
@@ -845,6 +973,10 @@ export function createSwarmHypervisor(opts) {
     });
 
     if (isRedundant) return; // redundant failure is non-critical
+    const failedWorker = workers.get(shardName);
+    if (failedWorker) {
+      void closeNativeBridgeRegistration(failedWorker, shardName, "failed");
+    }
 
     // F2: Rate limit — try fallback agent
     if (failureMode === FAILURE_MODES.F2_RATE_LIMIT) {
@@ -1013,6 +1145,8 @@ export function createSwarmHypervisor(opts) {
 
       for (const shardName of plan.mergeOrder) {
         if (failures.has(shardName)) {
+          const worker = workers.get(shardName);
+          if (worker?.cleanupPromise) await worker.cleanupPromise;
           eventLog.append("skip_failed_shard", { shard: shardName });
           appendIntegrationReport({
             shard: shardName,
@@ -1299,6 +1433,12 @@ export function createSwarmHypervisor(opts) {
     if (!worker?.worktreePath || shard?.host) return outcome;
     if (failureReason && keepFailedWorktrees) return outcome;
     if (cleanedWorktreePaths.has(worker.worktreePath)) return outcome;
+
+    await closeNativeBridgeRegistration(
+      worker,
+      shardName,
+      "before_worktree_cleanup",
+    );
 
     // Best-effort: preserve any uncommitted worker changes before removing
     // the worktree. Silent on failure — must not block cleanup or mask the
@@ -1714,9 +1854,15 @@ export function createSwarmHypervisor(opts) {
     const shutdowns = [];
     for (const [, w] of workers) {
       shutdowns.push(w.conductor.shutdown(reason));
+      shutdowns.push(
+        closeNativeBridgeRegistration(w, w.shardConfig?.name, reason),
+      );
     }
     for (const [, w] of redundantWorkers) {
       shutdowns.push(w.conductor.shutdown(reason));
+      shutdowns.push(
+        closeNativeBridgeRegistration(w, w.shardConfig?.name, reason),
+      );
     }
 
     await Promise.allSettled(shutdowns);

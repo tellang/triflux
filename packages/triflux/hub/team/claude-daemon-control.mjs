@@ -133,6 +133,23 @@ export function findDaemonJobByShort(listResponse, short) {
   return listResponse.jobs.find((job) => job?.short === short) || null;
 }
 
+export function findDaemonJobBySessionId(listResponse, sessionId) {
+  if (!Array.isArray(listResponse?.jobs)) return null;
+  const expected = String(sessionId || "");
+  if (!expected) return null;
+  return (
+    listResponse.jobs.find((job) => {
+      const candidate =
+        job?.sessionId ??
+        job?.session_id ??
+        job?.dispatch?.sessionId ??
+        job?.d?.sessionId ??
+        "";
+      return String(candidate) === expected;
+    }) || null
+  );
+}
+
 export async function waitForDaemonJobPid(
   controlSock,
   short,
@@ -157,4 +174,46 @@ export async function killDaemonJob(controlSock, short) {
     op: "kill",
     short,
   });
+}
+
+export async function sendKillBySessionId({
+  daemonPaths,
+  sessionId,
+  timeoutMs = 6000,
+} = {}) {
+  const controlSock = daemonPaths?.controlSock;
+  if (!controlSock || !sessionId) {
+    return { ok: true, killed: false, reason: "missing_target" };
+  }
+
+  try {
+    const list = await sendClaudeControlRequest(
+      controlSock,
+      {
+        proto: 1,
+        op: "list",
+      },
+      { timeoutMs },
+    );
+    const job = findDaemonJobBySessionId(list, sessionId);
+    if (!job?.short) {
+      return { ok: true, killed: false, reason: "not_found" };
+    }
+    return await sendClaudeControlRequest(
+      controlSock,
+      {
+        proto: 1,
+        op: "kill",
+        short: job.short,
+      },
+      { timeoutMs },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      killed: false,
+      reason: "control_unavailable",
+      error: error?.message || String(error),
+    };
+  }
 }
