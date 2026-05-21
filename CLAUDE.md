@@ -174,6 +174,21 @@ background로 실행한 headless 결과는 **반드시 task-notification 완료 
 워커 상세: `$TMPDIR/tfx-headless/{sessionName}-worker-N.txt`
 </headless-retrieval>
 
+<native-bridge>
+## native-bridge UI (claude agents 노출)
+
+headless 워커는 default 로 `claude agents` 패널에 row 로 등장한다. opt-out 은 `--no-native-bridge-ui`.
+
+| 모드 | default | row 가 보이는 위치 |
+|------|---------|--------------------|
+| `tfx-auto` / `tfx multi` (headless) | on | 로컬 `claude agents` |
+| `tfx swarm` 로컬 shard | on | 로컬 `claude agents` (`Triflux swarm <shard-name>`) |
+| `tfx swarm` 원격 shard | **skip + warn** | n/a — `registerSwarmShard()` 가 host!=local 일 때 `{ ok: true, skipped: true }` 반환하며 `"remote launcher must register on that host"` 만 경고. 원격 daemon 실제 등록은 후속 PRD. |
+| interactive (tmux/wt) | off | n/a |
+
+sentinel exit 즉시 daemon `sendKillBySessionId` 발사 → stale row 잔존 없음. PRD: `.triflux/plans/native-bridge-ui-default-expansion.md` (PR #323 으로 머지).
+</native-bridge>
+
 <cross-review>
 ## 교차 검증
 

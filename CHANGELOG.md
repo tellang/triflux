@@ -4,6 +4,14 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+### Docs
+
+- **`docs(native-bridge)` (PR #323 follow-up)** `CLAUDE.md` 에 `<native-bridge>` 섹션 추가 (모드별 default + row visibility 표 + opt-out `--no-native-bridge-ui` + 원격 shard 의 `registerSwarmShard()` warn + skip 동작 명시). `.claude/rules/tfx-routing.md` CLI 라우팅 섹션에 "Headless UI default" 1단락 추가. PR #323 (`feat(native-bridge)`: expose swarm shards without stale agent rows, commit `6f741364`) 의 user-facing 정책을 SSOT 문서로 정합.
+
+### Notes
+
+- **Observability side-effect default enabled** — Triflux headless workers now appear in `claude agents` by default. Opt-out: `--no-native-bridge-ui`. (consensus codex+agy 답변 Q3, 2026-05-21, PR #323 머지에 동반)
+
 ### Added
 
 - `tfx doctor`: verify wrapper script sources `secrets.env` (closes static-config gap left by PR #313 log-parser)
