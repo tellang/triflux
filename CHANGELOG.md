@@ -4,22 +4,50 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
-### Docs
-
-- **`docs(native-bridge)` (PR #323 follow-up)** `CLAUDE.md` 에 `<native-bridge>` 섹션 추가 (모드별 default + row visibility 표 + opt-out `--no-native-bridge-ui` + 원격 shard 의 `registerSwarmShard()` warn + skip 동작 명시). `.claude/rules/tfx-routing.md` CLI 라우팅 섹션에 "Headless UI default" 1단락 추가. PR #323 (`feat(native-bridge)`: expose swarm shards without stale agent rows, commit `6f741364`) 의 user-facing 정책을 SSOT 문서로 정합.
-
-### Notes
-
-- **Observability side-effect default enabled** — Triflux headless workers now appear in `claude agents` by default. Opt-out: `--no-native-bridge-ui`. (consensus codex+agy 답변 Q3, 2026-05-21, PR #323 머지에 동반)
+## [10.25.1] - 2026-05-21
 
 ### Added
 
-- `tfx doctor`: verify wrapper script sources `secrets.env` (closes static-config gap left by PR #313 log-parser)
-- **`feat(doctor)`** `tfx doctor` 에 "MCP Gateway Health" 진단 섹션 추가. `~/.local/state/triflux/mcp-gateway.out.log` 를 파싱해 `[WARN] X skipped — missing env: Y` 패턴으로 skip 된 server 를 잡고, 같은 server 의 [START]/[SKIP-running] 이 더 최근이면 복구된 것으로 인식 (false-positive 회피). missing key 발견 시 `secrets.env` + `launchctl kickstart` 또는 `systemctl --user restart` 수정 힌트를 노출. 로그 파일이 없으면 gateway 미설치/미실행으로 침묵. `scripts/lib/mcp-gateway-health-check.mjs` 단위 테스트 8건. `packages/core` + `packages/triflux` mirror byte-identical 동기.
+- **`feat(doctor)` (PR #313, commit `14e6fc2d`)** `tfx doctor` 에 "MCP Gateway Health" 진단 섹션 추가. `~/.local/state/triflux/mcp-gateway.out.log` 의 skipped/missing-env 패턴을 false-positive 없이 해석하고, `secrets.env` 및 service restart 힌트를 노출한다.
+- **`feat(doctor)` (PR #317, commit `2941b177`)** MCP gateway wrapper 가 `secrets.env` 를 실제 source 하는지 정적 검증한다. PR #313 의 runtime log-parser 만으로는 잡히지 않는 startup wrapper 설정 gap 을 release 전 진단 가능하게 했다.
+- **`feat(native-bridge)` (commit `6f741364`)** Triflux headless/swarm shards 를 Claude native bridge row 로 노출해 stale agent rows 없이 worker 상태를 사용자-facing surface 에 표시한다.
+- **`ci(release)` (PR #330, commit `ad75ade3`)** release workflow 에 `release:check-mirror` 와 `release:check-sync` fast-fail gate 를 추가해 mirror/version drift 를 pack/publish 전 차단한다.
 
 ### Fixed
 
-- **`fix(mcp)`** `install-mcp-gateway-startup.mjs` 의 wrapper sourcing 목록과 systemd `EnvironmentFile` 목록에 `~/.config/triflux/secrets.env` 추가. 기존 `mcp-gateway.env` 후보 3개는 legacy 호환으로 유지. triflux 표준 secrets 파일이 wrapper 에 누락되어 있어 BRAVE_API_KEY 등이 주입되지 않고 supergateway 가 brave-search 를 `[WARN] missing env` 로 skip 하던 회귀 해결. usage 문구도 동기 갱신. 본체/`packages/triflux` mirror 와 테스트(`scripts/__tests__/install-mcp-gateway-startup.test.mjs`) 모두 동기.
+- **`fix(mcp)` (PR #312, commit `98507f47`)** MCP gateway startup wrapper/systemd `EnvironmentFile` 후보에 표준 `~/.config/triflux/secrets.env` 를 포함해 BRAVE_API_KEY 등 secret 누락으로 MCP server 가 skip 되는 회귀를 수정한다.
+- **`fix(swarm)` (PR #320, commit `a105942f`)** sub-worktree 에서 Codex worker 가 boot 되지 않는 회귀를 수정한다. main checkout 전제에 묶인 경로/환경 계산을 정렬해 Issue #315 재발을 막는다.
+- **`fix(macos)` (PR #319, commit `154e60db`)** Windows Terminal 전용 규칙이 macOS 문서/doctor surface 로 새어 나오는 drift 를 제거하고 platform guard 설명을 맞춘다.
+- **`fix(release)` (PR #322, commit `e642e1de`)** `release:check-packages-mirror` auto-compare 범위에 hooks/skills 를 포함한다.
+- **`fix(release)` (PR #325, commit `f8348d51`)** mirror gate 범위에 HUD/config surface 를 포함한다.
+- **`fix(release)` (PR #327, commit `8555b5c1`)** tfx-ship, verify, npm-publish, packages/triflux dependency sync 가 같은 package mirror 범위를 보도록 release packaging/check path 를 정렬한다.
+- **`fix(release)` (PR #328, commit `7bddd936`)** npm publish files 목록에 config surface 를 포함해 설치 package 에 필요한 config 파일이 누락되는 배포 회귀를 막는다.
+- **`fix(team)` (commit `a3815e84`)** macOS team dispatch 가 psmux-only capability check 때문에 tmux 환경을 놓치지 않도록 tmux route 를 유지한다.
+- **`fix(route)` (PR #332, commit `35fb8f3e`)** deprecated Gemini route 를 Antigravity-ready 환경에서는 `agy --print` path 로 redirect 하되, Antigravity 미준비 환경의 legacy Gemini fallback 은 보존한다. native-bridge default-on 및 release mirror/sync gate 를 최신 main 기준으로 다시 포함해 stale-branch 회귀를 막았다.
+- **`fix(route)` (PR #336, commit `25602e94`)** macOS route smoke fixture 의 intentionally tiny `config.toml` 이 production small-config corruption guard 에 막히지 않도록 test-only opt-in 을 추가하고, stale inherited `_TFX_MCP_DEGRADED` 를 current invocation preflight 전에 정리한다.
+- **`fix(swarm)` (PR #335, commit `804b1451`)** native bridge / swarm display row 를 run identity 기준으로 group 하도록 정리한다.
+
+### Changed
+
+- **`chore(packages)` (PR #314, commit `7671123f`)** `packages/core` 와 `packages/remote` 를 v10.25.0 baseline 및 Phase 1 mirror staging 상태로 catch-up 한다.
+- **`chore(deps)` (PR #324, commit `ded33c8c`)** `better-sqlite3` remote dependency 를 Node 26 환경에 맞춰 정렬한다.
+- **`chore/lint` (PR #331, commit `7dfdb8a3`)** Biome cleanup 으로 `bin/` 과 `scripts/` 의 stale lint drift 를 제거한다.
+- **`chore(psmux)` (commit `4b858658`)** psmux mirrored rule block 의 sync-hash integrity 를 보존한다.
+- **`test(agy)` (PR #334, commit `2d032c90`)** real Antigravity OAuth smoke 를 opt-in gate 로 묶어 기본 CI/release path 에서 credential-cost 회귀를 만들지 않도록 정리한다.
+
+### Docs
+
+- **`docs(mirror-policy)` (PR #316, commit `fda2c8de`)** mirror policy table 에 `packages/remote/scripts/lib` 범위를 추가한다.
+- **`docs/plans` (PR #318, commit `563752c5`)** macOS WT-rule leakage 증상과 수정 계획을 plans 문서로 수집한다.
+- **`docs/tfx-setup` (PR #321, commit `dee38b4b`)** macOS-aware setup guidance 를 추가한다.
+- **`docs(native-bridge)` (PR #333, commit `a6a40948`)** headless native bridge UI default-on policy 와 `--no-native-bridge-ui` opt-out routing 을 문서화한다.
+- **`docs(mirror-policy)` (PR #326, commit `f06f56eb`)** packages mirror mesh 와 `packages/core/hub/team` minimal mirror policy 를 문서화한다.
+- **`docs(prompt-hygiene)` (commit `bb3662dd`)** Gemini-to-Antigravity migration wording 을 적용한다.
+
+### Notes
+
+- `v10.25.1` 은 `v10.25.0` 이후 macOS WT/psmux leakage, native bridge visibility, Antigravity migration, release mirror/package gates, and route-smoke release blockers 를 함께 정리하는 patch release 이다.
+- Triflux headless workers now appear in Claude agents by default. Opt-out: `--no-native-bridge-ui`.
 
 ## [10.25.0] - 2026-05-21
 
