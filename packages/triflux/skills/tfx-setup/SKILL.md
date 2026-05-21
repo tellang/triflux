@@ -16,6 +16,23 @@ argument-hint: "[doctor]"
 > 신규/변경된 훅이 settings.json에 반영되도록 한다.
 > 훅 우선순위 관리는 `tfx-hooks` 스킬의 오케스트레이터 패턴을 따른다.
 
+## OS별 동작
+
+triflux 자체는 cross-platform (macOS / Linux / Windows) 이지만, 일부 안내·룰은 Windows 발 origin이 그대로 노출된다. 아래 표를 참고하여 macOS/Linux 사용자는 Windows 전용 항목을 skip 한다.
+
+| 영역 | Windows | macOS · Linux |
+|------|---------|---------------|
+| 탭/패인 매니저 | Windows Terminal (`wt.exe`) → `wt-manager.mjs` 경유 필수 | 별도 매니저 없음. `hub/team/terminal-opener.mjs` 의 3단계 fallback (win32→wt-manager / tmux 감지→tmux/psmux / darwin→Terminal.app) 으로 동작 |
+| psmux | `winget install marlocarlo.psmux` / `scoop install psmux` / `choco install psmux` / `cargo install psmux` | `cargo install psmux` (cross-platform). 설치 후 `hub/team/psmux.mjs` 의 `IS_MAC` 분기로 동일 capability 제공 |
+| `<psmux-wt>` 룰 (CLAUDE.md / AGENTS.md / `.claude/rules/tfx-psmux.md`) | RULE 1~3, 5~6, 8 적용 (PowerShell, wt-manager, WT layout) | RULE 1~3, 5~6, 8 skip 가능. RULE 4 (Codex CLI 인자) · RULE 7 (spark53 Pro 전용) 만 공통 적용 |
+| `tfx doctor` 의 WT 항목 | `WT: <version>` 또는 `WT: not found` | 현재 build 는 `WT: not found` 로 표시될 수 있음 — Windows 미설치이므로 정상. 후속 PR 에서 `WT: N/A (non-Windows)` 로 명시 표기 예정 |
+| 셸 | PowerShell 7+ 우선 (`pwsh -File` 필수) | zsh (macOS 기본) / bash. 인라인 명령 가능 |
+| 경로 | Windows 형식 (`C:\Users\...`) | POSIX (`/Users/...`, `$HOME`) |
+
+요지:
+- **mac/Linux 사용자**: `<psmux-wt>` 섹션의 WT/PowerShell 안내는 무시. psmux 만 설치하면 tfx-multi · swarm 의 로컬 병렬은 동일하게 동작한다.
+- **Windows 사용자**: 기존 안내 그대로 적용.
+
 ## 워크플로우
 
 ### Step 1: 모드 선택 (AskUserQuestion)
