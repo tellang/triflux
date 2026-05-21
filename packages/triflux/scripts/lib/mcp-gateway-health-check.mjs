@@ -25,7 +25,10 @@ const DEFAULT_LOG_PATH = join(
   "mcp-gateway.out.log",
 );
 
-const MISSING_ENV_RE = /^\[WARN\]\s+(\S+)\s+skipped\s+—\s+missing env:\s+(\S+)$/;
+// producer (scripts/mcp-gateway-start.mjs:146) 가 missing env 를 `missing.join(", ")`
+// 로 출력하므로 detail 은 공백 포함 다중 키 (예: "JIRA_API_TOKEN, JIRA_EMAIL, JIRA_INSTANCE_URL")
+// 일 수 있다. line 끝까지 캡처한다.
+const MISSING_ENV_RE = /^\[WARN\]\s+(\S+)\s+skipped\s+—\s+missing env:\s+(.+)$/;
 const START_RE = /^\[START\]\s+(\S+)\s+on\s+:(\d+)$/;
 const SKIP_RUNNING_RE = /^\[SKIP\]\s+(\S+)\s+already running on\s+:(\d+)$/;
 const SKIP_DISABLED_RE = /^\[SKIP\]\s+(\S+)\s+—\s+manifest에서 비활성$/;

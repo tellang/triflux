@@ -112,6 +112,30 @@ describe("mcp-gateway-health-check", () => {
     assert.deepEqual(started, ["context7", "serena"]);
   });
 
+  it("다중 env 가 누락된 [WARN] (예: jira) 도 캡처한다", () => {
+    const multiEnvLog = `[SKIP] context7 already running on :8100
+[WARN] jira skipped — missing env: JIRA_API_TOKEN, JIRA_EMAIL, JIRA_INSTANCE_URL
+[START] serena on :8105
+`;
+    const result = checkMcpGatewayHealth({
+      fs: makeFs({ logBody: multiEnvLog }),
+      logPath: "/fake/log",
+    });
+    assert.equal(result.findings.length, 1);
+    assert.deepEqual(result.findings[0], {
+      server: "jira",
+      reason: "missing-env",
+      detail: "JIRA_API_TOKEN, JIRA_EMAIL, JIRA_INSTANCE_URL",
+    });
+    const summary = summarizeMcpGatewayHealth(result);
+    assert.equal(summary.level, "warn");
+    assert.match(summary.message, /jira/);
+    assert.match(
+      summary.message,
+      /JIRA_API_TOKEN, JIRA_EMAIL, JIRA_INSTANCE_URL/,
+    );
+  });
+
   it("read 에러는 log-read-error finding 으로 보고한다", () => {
     const fs = makeFs({ logBody: "" });
     fs.readFileSync = () => {
