@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.10.0",
     "systray2": "^2.1.4"
   },
   "files": [
