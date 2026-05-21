@@ -25,9 +25,9 @@ test("packages/triflux mirror is byte-identical to root", () => {
   assert.equal(result.issues.length, 0);
 });
 
-// Lock-in coverage for hooks/skills tops. Without these in MIRROR_TOPS the
-// release gate silently ignores drift in hooks/ and skills/ — caught by Codex
-// review on PR #319 follow-up.
+// Lock-in coverage for mirrored tops. Without these in MIRROR_TOPS the
+// release gate silently ignores drift in those root directories — caught by
+// Codex review on PR #319 follow-up and mirror-policy follow-ups.
 function withMirrorProbe(rel, fn) {
   const probePath = join(REPO_ROOT, rel);
   writeFileSync(probePath, "probe");
@@ -47,6 +47,34 @@ test("check-packages-mirror walks hooks/ top-level dir", () => {
     assert.ok(
       found,
       "hooks/ drift was not flagged — check-packages-mirror.mjs MIRROR_TOPS regression",
+    );
+    assert.equal(found.kind, "missing-in-mirror");
+  });
+});
+
+test("check-packages-mirror walks hud/ top-level dir", () => {
+  withMirrorProbe("hud/__mirror_probe_temp__.txt", () => {
+    const result = compareMirror({ fix: false });
+    const found = result.issues.find((i) =>
+      i.path.endsWith("hud/__mirror_probe_temp__.txt"),
+    );
+    assert.ok(
+      found,
+      "hud/ drift was not flagged — check-packages-mirror.mjs MIRROR_TOPS regression",
+    );
+    assert.equal(found.kind, "missing-in-mirror");
+  });
+});
+
+test("check-packages-mirror walks config/ top-level dir", () => {
+  withMirrorProbe("config/__mirror_probe_temp__.json", () => {
+    const result = compareMirror({ fix: false });
+    const found = result.issues.find((i) =>
+      i.path.endsWith("config/__mirror_probe_temp__.json"),
+    );
+    assert.ok(
+      found,
+      "config/ drift was not flagged — check-packages-mirror.mjs MIRROR_TOPS regression",
     );
     assert.equal(found.kind, "missing-in-mirror");
   });
