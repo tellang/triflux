@@ -124,6 +124,23 @@ describe("install mcp gateway startup", () => {
     assert.match(fs.files.get(plistPath), /mcp-gateway-wrapper\.sh/);
     assert.doesNotMatch(fs.files.get(plistPath), /API_KEY|TOKEN|SECRET/);
     assert.match(fs.files.get(wrapperPath), /mcp-gateway\.env/);
+    // Codex cross-review (PR #312): Darwin wrapper 도 Linux EnvironmentFile assertion
+    // 처럼 secrets.env 명시 검증 + sourcing 순서 (secrets.env → legacy mcp-gateway.env) 고정.
+    assert.match(
+      fs.files.get(wrapperPath),
+      /\$HOME\/\.config\/triflux\/secrets\.env/,
+    );
+    {
+      const body = fs.files.get(wrapperPath);
+      const secretsIdx = body.indexOf("$HOME/.config/triflux/secrets.env");
+      const legacyIdx = body.indexOf("$HOME/.config/triflux/mcp-gateway.env");
+      assert.ok(secretsIdx >= 0, "secrets.env 가 wrapper sourcing 목록에 있어야 한다");
+      assert.ok(legacyIdx >= 0, "legacy mcp-gateway.env 도 호환 유지");
+      assert.ok(
+        secretsIdx < legacyIdx,
+        "secrets.env 가 legacy mcp-gateway.env 보다 먼저 sourcing 되어야 한다",
+      );
+    }
     assert.match(
       fs.files.get(wrapperPath),
       /exec '\/usr\/local\/bin\/node' '\/repo\/scripts\/mcp-gateway-start\.mjs'/,
@@ -246,6 +263,10 @@ describe("install mcp gateway startup", () => {
 
     assert.equal(result.code, 0);
     assert.equal(result.verified, true);
+    assert.match(
+      fs.files.get(unitPath),
+      /EnvironmentFile=-%h\/\.config\/triflux\/secrets\.env/,
+    );
     assert.match(
       fs.files.get(unitPath),
       /EnvironmentFile=-%h\/\.config\/triflux\/mcp-gateway\.env/,

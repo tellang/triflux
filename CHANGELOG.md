@@ -4,6 +4,10 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`fix(mcp)`** `install-mcp-gateway-startup.mjs` 의 wrapper sourcing 목록과 systemd `EnvironmentFile` 목록에 `~/.config/triflux/secrets.env` 추가. 기존 `mcp-gateway.env` 후보 3개는 legacy 호환으로 유지. triflux 표준 secrets 파일이 wrapper 에 누락되어 있어 BRAVE_API_KEY 등이 주입되지 않고 supergateway 가 brave-search 를 `[WARN] missing env` 로 skip 하던 회귀 해결. usage 문구도 동기 갱신. 본체/`packages/triflux` mirror 와 테스트(`scripts/__tests__/install-mcp-gateway-startup.test.mjs`) 모두 동기.
+
 ## [10.25.0] - 2026-05-21
 
 ### Added
