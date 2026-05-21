@@ -55,10 +55,14 @@ test("local shard registers Triflux swarm shard row with shard display name", as
   const { server, requests } = await listenDaemon(paths.controlSock);
 
   try {
+    const expectedDisplayName = "Triflux swarm run42 02/05 codex api";
     const registration = await registerSwarmShard({
       sessionId: "swarm-run42-api-feedface",
       cli: "codex",
       role: "executor",
+      swarmName: "run42",
+      shardIndex: 2,
+      shardCount: 5,
       shardName: "api",
       cwd: "/tmp/project",
       host: "local",
@@ -72,9 +76,10 @@ test("local shard registers Triflux swarm shard row with shard display name", as
     assert.notEqual(dispatch.d.sessionId, "swarm-run42-api-feedface");
     assert.equal(registration.swarmSessionId, "swarm-run42-api-feedface");
     assert.equal(registration.sessionId, dispatch.d.sessionId);
+    assert.equal(registration.displayName, expectedDisplayName);
     assert.equal(dispatch.d.cwd, "/tmp/project");
-    assert.equal(dispatch.d.seed.name, "Triflux swarm api");
-    assert.equal(dispatch.d.seed.intent, "Triflux swarm api");
+    assert.equal(dispatch.d.seed.name, expectedDisplayName);
+    assert.equal(dispatch.d.seed.intent, expectedDisplayName);
 
     const projection = JSON.parse(
       await fs.readFile(path.join(paths.sessionsDir, `${process.pid}.json`)),
@@ -84,10 +89,10 @@ test("local shard registers Triflux swarm shard row with shard display name", as
     });
     await fs.writeFile(
       path.join(paths.jobsDir, dispatch.d.short, "state.json"),
-      JSON.stringify({ name: "Triflux swarm api" }),
+      JSON.stringify({ name: expectedDisplayName }),
       "utf8",
     );
-    assert.equal(projection.name, "Triflux swarm api");
+    assert.equal(projection.name, expectedDisplayName);
     assert.equal(projection.agent, "codex");
     assert.equal(projection.sessionId, dispatch.d.sessionId);
     assert.equal(projection.jobId, dispatch.d.short);
@@ -113,6 +118,9 @@ test("remote shard skips native bridge registration and emits warning", async ()
     shardName: "api",
     cwd: "/tmp/project",
     host: "ultra4",
+    swarmName: "run42",
+    shardIndex: 1,
+    shardCount: 2,
     _deps: {
       warn(message) {
         warnings.push(message);
@@ -125,5 +133,6 @@ test("remote shard skips native bridge registration and emits warning", async ()
 
   assert.equal(registration.skipped, true);
   assert.equal(registration.host, "ultra4");
+  assert.equal(registration.displayName, "Triflux swarm run42 01/02 codex api");
   assert.match(warnings[0], /remote shard.*ultra4.*skipping/u);
 });
