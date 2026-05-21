@@ -547,6 +547,17 @@ export function createSwarmHypervisor(opts) {
     return `swarm-${safeSessionPart(runId)}-${safeSessionPart(shard.name)}-${short8}`;
   }
 
+  function getShardDisplayPosition(shard) {
+    const shardIndex = plan?.shards?.findIndex(
+      (item) => item.name === shard.name,
+    );
+    if (!plan?.shards?.length || shardIndex < 0) return {};
+    return {
+      shardIndex: shardIndex + 1,
+      shardCount: plan.shards.length,
+    };
+  }
+
   async function closeNativeBridgeRegistration(worker, shardName, reason) {
     if (worker?.nativeBridgeClosePromise) {
       await worker.nativeBridgeClosePromise;
@@ -584,6 +595,8 @@ export function createSwarmHypervisor(opts) {
         sessionId: sessionConfig.id,
         cli: shard.agent,
         role: shard.role || "worker",
+        swarmName: runId,
+        ...getShardDisplayPosition(shard),
         shardName: shard.name,
         cwd: workdir,
         host: shard.host || "local",
@@ -606,7 +619,7 @@ export function createSwarmHypervisor(opts) {
           shard: shard.name,
           sessionId: sessionConfig.id,
           host: shard.host || "local",
-          displayName: `Triflux swarm ${shard.name}`,
+          displayName: registration?.displayName || null,
         },
       );
       return registration;

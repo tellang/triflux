@@ -586,7 +586,11 @@ describe("swarm-hypervisor", () => {
           createConductor,
           registerSwarmShard: async (opts) => {
             registerCalls.push(opts);
-            return { close: () => closeCalls.push(opts.shardName) };
+            return {
+              displayName:
+                "Triflux swarm native-bridge-parent-cwd 01/01 claude worker-a",
+              close: () => closeCalls.push(opts.shardName),
+            };
           },
           ensureWorktree: async ({ slug, runId }) => ({
             worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
@@ -601,12 +605,21 @@ describe("swarm-hypervisor", () => {
       assert.equal(registerCalls[0].shardName, "worker-a");
       assert.equal(registerCalls[0].cwd, workdir);
       assert.equal(registerCalls[0].sessionId, conductors[0].sessionConfig.id);
+      assert.equal(registerCalls[0].swarmName, "native-bridge-parent-cwd");
+      assert.equal(registerCalls[0].shardIndex, 1);
+      assert.equal(registerCalls[0].shardCount, 1);
       assert.equal(
         conductors[0].sessionConfig.workdir,
         `${workdir}/.codex-swarm/wt-worker-a`,
       );
 
       await hv.shutdown("native_bridge_parent_cwd_cleanup");
+      assert.equal(
+        readEventLog(hv.eventLogPath).find(
+          (entry) => entry.event === "native_bridge_registration",
+        )?.displayName,
+        "Triflux swarm native-bridge-parent-cwd 01/01 claude worker-a",
+      );
       hv = null;
       assert.deepEqual(closeCalls, ["worker-a"]);
     });

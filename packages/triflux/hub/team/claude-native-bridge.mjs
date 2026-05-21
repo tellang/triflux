@@ -230,6 +230,49 @@ function buildSwarmShardBridgeCommand({ displayName, sessionId }) {
   return `printf '%s\\n' ${shellSingleQuote(banner)}; while true; do sleep 3600; done`;
 }
 
+function compactDisplayPart(value, fallback = "") {
+  const text = String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || fallback;
+}
+
+function toPositiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function formatShardOrdinal({ shardIndex, shardCount }) {
+  const index = toPositiveInteger(shardIndex);
+  const count = toPositiveInteger(shardCount);
+  if (!index || !count) return null;
+  const width = Math.max(String(count).length, 2);
+  return `${String(index).padStart(width, "0")}/${String(count).padStart(width, "0")}`;
+}
+
+function buildSwarmShardDisplayName({
+  sessionId,
+  cli,
+  swarmName,
+  shardIndex,
+  shardCount,
+  shardName,
+}) {
+  const groupName = compactDisplayPart(swarmName || sessionId, "swarm");
+  const agentName = compactDisplayPart(cli, "agent");
+  const workerName = compactDisplayPart(shardName, "shard");
+  return [
+    "Triflux swarm",
+    groupName,
+    formatShardOrdinal({ shardIndex, shardCount }),
+    agentName,
+    workerName,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function isLocalHost(host) {
   const value = String(host || "local").toLowerCase();
   return value === "local" || value === "localhost" || value === "127.0.0.1";
@@ -247,6 +290,9 @@ export async function registerSwarmShard({
   sessionId,
   cli = "codex",
   role = "worker",
+  swarmName,
+  shardIndex,
+  shardCount,
   shardName,
   cwd = process.cwd(),
   host = "local",
@@ -257,6 +303,14 @@ export async function registerSwarmShard({
   if (!sessionId) throw new Error("sessionId is required");
   if (!shardName) throw new Error("shardName is required");
 
+  const displayName = buildSwarmShardDisplayName({
+    sessionId,
+    cli,
+    swarmName,
+    shardIndex,
+    shardCount,
+    shardName,
+  });
   const warn = _deps.warn || ((message) => console.warn(message));
   if (!isLocalHost(host)) {
     warn(
@@ -268,6 +322,7 @@ export async function registerSwarmShard({
       host,
       sessionId,
       shardName,
+      displayName,
       close() {},
     };
   }
@@ -295,7 +350,6 @@ export async function registerSwarmShard({
   const jobsDir =
     paths.jobsDir || path.join(paths.configDir || configDir, "jobs");
   const short = deriveSwarmShort({ sessionId, shardName, host });
-  const displayName = `Triflux swarm ${shardName}`;
   const command = buildSwarmShardBridgeCommand({ displayName, sessionId });
   const payload = buildPayload({
     short,
