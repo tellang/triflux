@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -135,6 +135,7 @@ export async function prepareRelease({
     "plans",
     `release-notes-v${releaseVersion}.md`,
   );
+  mkdirSync(join(rootDir, ".omx", "plans"), { recursive: true });
   writeFileSync(notesPath, notes, "utf8");
 
   return {
