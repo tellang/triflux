@@ -204,10 +204,12 @@ describe("release governance scripts", () => {
       new URL("../../.github/workflows/release.yml", import.meta.url),
       "utf8",
     );
-    assert.match(releaseWorkflow, /actions:\s*read/);
+    assert.match(releaseWorkflow, /actions:\s*write/);
     assert.match(releaseWorkflow, /node-version:\s*24/);
     assert.match(releaseWorkflow, /publish\.mjs.*--skip-npm/);
+    assert.match(releaseWorkflow, /gh workflow run npm-publish\.yml/);
     assert.match(releaseWorkflow, /npm-publish\.yml/);
+    assert.match(releaseWorkflow, /workflow_dispatch/);
     assert.match(releaseWorkflow, /gh run list/);
     assert.doesNotMatch(
       releaseWorkflow,
@@ -219,6 +221,10 @@ describe("release governance scripts", () => {
       "utf8",
     );
     assert.match(npmPublishWorkflow, /npm view "\$name@\$version" version/);
+    assert.doesNotMatch(
+      npmPublishWorkflow,
+      /NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/,
+    );
     assert.equal(
       (npmPublishWorkflow.match(/already published; skipping/g) || []).length,
       3,

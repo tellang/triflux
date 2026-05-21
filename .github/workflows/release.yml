@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      actions: read
+      actions: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,6 +44,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/release/publish.mjs --version ${{ inputs.version }} --channel ${{ inputs.channel }} --skip-npm --execute
 
+      - name: Dispatch npm publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run npm-publish.yml --ref v${{ inputs.version }}
+
       - name: Wait for npm publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,7 +65,13 @@ jobs:
                 --limit 20 \
                 --json databaseId,status,conclusion,headBranch,headSha,event,url \
                 | jq -c --arg tag "$tag" --arg sha "$head_sha" '
-                  map(select(.event == "push" and .headBranch == $tag and .headSha == $sha))
+                  map(
+                    select(
+                      (.event == "push" or .event == "workflow_dispatch")
+                      and .headBranch == $tag
+                      and .headSha == $sha
+                    )
+                  )
                   | first // empty
                 '
             )"
