@@ -222,7 +222,7 @@ auto_reroute gemini
       assert.match(out(result), /REROUTED: MODE=antigravity FROM=gemini/);
     });
 
-    it("3. Antigravity readiness gate 미설정 시 codex → gemini 기존 fallback 유지", () => {
+    it("3. Antigravity readiness 미설정 시 codex 대체 CLI 미설치 (gemini lane deprecated)", () => {
       const wrapperScript = resolve(
         os.tmpdir(),
         `tfx-reroute-wrapper-3-${Date.now()}.sh`,
@@ -260,8 +260,9 @@ auto_reroute codex
       });
       fs.unlinkSync(wrapperScript);
 
-      assert.match(out(result), /Codex → Gemini 자동 전환/);
-      assert.match(out(result), /REROUTED: MODE=gemini FROM=codex/);
+      assert.match(out(result), /codex 대체 CLI 미설치 — 자동 전환 불가/);
+      assert.doesNotMatch(out(result), /Codex → Gemini 자동 전환/);
+      assert.doesNotMatch(out(result), /REROUTED: MODE=gemini/);
     });
 
     it("4. antigravity → codex 전환 시 TFX_CLI_MODE=codex 설정 확인", () => {

@@ -824,9 +824,9 @@ auto_reroute() {
   local target_cli=""
   local -a candidates=()
   case "$failed_cli" in
-    codex) candidates=("antigravity" "gemini") ;;
+    codex) candidates=("antigravity") ;;
     gemini) candidates=("antigravity" "codex") ;;
-    antigravity) candidates=("codex" "gemini") ;;
+    antigravity) candidates=("codex") ;;
     *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
   esac
 
@@ -856,11 +856,9 @@ auto_reroute() {
 
   case "$failed_cli:$target_cli" in
     codex:antigravity) echo "[tfx-quota] Codex → Antigravity 자동 전환" >&2 ;;
-    codex:gemini) echo "[tfx-quota] Codex → Gemini 자동 전환" >&2 ;;
     gemini:antigravity) echo "[tfx-quota] Gemini → Antigravity 자동 전환" >&2 ;;
     gemini:codex) echo "[tfx-quota] Gemini → Codex 자동 전환" >&2 ;;
     antigravity:codex) echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
-    antigravity:gemini) echo "[tfx-quota] Antigravity → Gemini 자동 전환" >&2 ;;
   esac
 
   local quota_marker="$TFX_TMP/tfx-quota-${failed_cli}-$(date +%Y%m%d)"
@@ -1169,10 +1167,10 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
       } catch { process.stdout.write("0\x1e0\x1e0\x1e0\x1e\x1e"); }
     ' 2>/dev/null
   ) || true
-  export TFX_CODEX_OK="${_pf_codex:-0}"
-  export TFX_GEMINI_OK="${_pf_gemini:-0}"
-  export TFX_ANTIGRAVITY_OK="${_pf_antigravity:-0}"
-  export TFX_HUB_OK="${_pf_hub:-0}"
+  export TFX_CODEX_OK="${TFX_CODEX_OK:-${_pf_codex:-0}}"
+  export TFX_GEMINI_OK="${TFX_GEMINI_OK:-${_pf_gemini:-0}}"
+  export TFX_ANTIGRAVITY_OK="${TFX_ANTIGRAVITY_OK:-${_pf_antigravity:-0}}"
+  export TFX_HUB_OK="${TFX_HUB_OK:-${_pf_hub:-0}}"
   [[ -n "${_pf_plan:-}" ]] && export TFX_CODEX_PLAN="$_pf_plan"
   [[ -n "${_pf_agents:-}" ]] && export TFX_AVAILABLE_AGENTS="$_pf_agents"
   export TFX_PREFLIGHT_LOADED=1
@@ -1230,6 +1228,19 @@ apply_cli_mode() {
   codex_base="$(build_codex_base)"
   local gemini_tier=""
 
+  if [[ "$CLI_TYPE" == "gemini" && ( "$TFX_CLI_MODE" == "auto" || "$TFX_CLI_MODE" == "gemini" ) ]]; then
+    # Gemini CLI is deprecated, but the `gemini` route name remains as a
+    # compatibility alias until Phase 5 cleanup. When Antigravity readiness has
+    # already been proven by preflight/cache, direct gemini routes must follow
+    # the same redirect as TFX_CLI_MODE=gemini remaps.
+    if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && command -v "${AGY_BIN:-agy}" &>/dev/null; then
+      echo "[tfx-route] [deprecated] gemini route → antigravity (Gemini CLI deprecated, use antigravity/agy)" >&2
+      TFX_CLI_MODE="antigravity"
+      apply_cli_mode
+      return
+    fi
+  fi
+
   case "$TFX_CLI_MODE" in
     codex)
       if [[ "$CLI_TYPE" == "gemini" ]]; then
@@ -1258,6 +1269,14 @@ apply_cli_mode() {
             return 0
             ;;
         esac
+        # Gemini CLI deprecated — redirect to Antigravity when available.
+        # Legacy gemini binary path is preserved as fallback for environments
+        # without agy (TFX_ANTIGRAVITY_OK=0) until Phase 5 cleanup.
+        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && command -v "${AGY_BIN:-agy}" &>/dev/null; then
+          echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini → antigravity (Gemini CLI deprecated, use --cli antigravity)" >&2
+          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
+        fi
+        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy 미설치 — legacy gemini binary path 진입" >&2
         CLI_TYPE="gemini"; CLI_CMD="gemini"
         case "$AGENT_TYPE" in
           executor|debugger|deep-executor|architect|planner|critic|analyst|\

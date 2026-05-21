@@ -60,8 +60,8 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (아래 Quick 섹션).
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | tmux/psmux + Hub + Codex + Gemini 전부 정상 | headless multi 3-CLI |
-| **Tier 2** | Codex 또는 Gemini 중 하나만 가용 | 가용 CLI + Claude Agent 조합 |
+| **Tier 1** | tmux/psmux + Hub + Codex + Antigravity 전부 정상 | headless multi 3-CLI |
+| **Tier 2** | Codex 또는 Antigravity 중 하나만 가용 | 가용 CLI + Claude Agent 조합 |
 | **Tier 3** | headless 불가 또는 `claude -p` one-shot | Claude Agent only (consensus 미적용) |
 
 ```
@@ -73,10 +73,10 @@ IF Hub 미응답:
   → 성공 → Tier 판정 재시도
   → 실패 → Tier 3
 
-IF Codex 없음 AND Gemini 없음:
+IF Codex 없음 AND Antigravity 없음:
   → Tier 3
 
-IF Codex 없음 OR Gemini 없음:
+IF Codex 없음 OR Antigravity 없음:
   → Tier 2
 
 ELSE:
@@ -88,7 +88,7 @@ ELSE:
 ```
 ⚠ [Tier 3] headless multi 환경 미충족 — single-model 모드로 실행합니다 (consensus 미적용)
   누락: {missing_components}
-  권장: tmux/psmux, Hub, Codex CLI, Gemini CLI 설치 후 재실행
+  권장: tmux/psmux, Hub, Codex CLI, Antigravity CLI 설치 후 재실행
   또는 /tfx-review --quick 으로 명시적 quick 경로 사용
 ```
 
@@ -97,7 +97,7 @@ ELSE:
 > headless-guard가 이 규칙 위반을 **자동 차단**한다.
 
 1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
-2. Codex·Gemini → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
@@ -107,7 +107,7 @@ ELSE:
 |-----|------|------|
 | Claude Opus | 로직+아키텍처 | 로직 결함, 아키텍처 위반, 설계 패턴 |
 | Codex | 보안+성능 | OWASP Top 10, O(n²) 패턴, 누락된 에러 핸들링 |
-| Gemini | 가독성+DX | 네이밍 컨벤션, 가독성, 주석 필요성, 타입 안전성 |
+| Antigravity | 가독성+DX | 네이밍 컨벤션, 가독성, 주석 필요성, 타입 안전성 |
 
 ### 실행 단계
 
@@ -128,7 +128,7 @@ Agent(
 )
 ```
 
-**Codex + Gemini headless dispatch:**
+**Codex + Antigravity headless dispatch:**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --assign 'gemini:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --timeout 600")
 ```
@@ -147,11 +147,11 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cod
 
 ```markdown
 ## Deep Code Review: {target}
-**Consensus Score**: {score}% | **Reviewers**: Claude/Codex/Gemini
+**Consensus Score**: {score}% | **Reviewers**: Claude/Codex/Antigravity
 
 ### Critical (3/3 합의)
 - [C1] `{file}:{line}` — {description}
-  - Claude: {detail} | Codex: {detail} | Gemini: {detail}
+  - Claude: {detail} | Codex: {detail} | Antigravity: {detail}
   - **Fix**: {suggestion}
 
 ### High (2/3 합의)
@@ -169,7 +169,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cod
 |-----|---------|------------|
 | Claude | {n} | {%} |
 | Codex | {n} | {%} |
-| Gemini | {n} | {%} |
+| Antigravity | {n} | {%} |
 ```
 
 ### Error Recovery

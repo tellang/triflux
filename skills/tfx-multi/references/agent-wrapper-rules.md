@@ -3,8 +3,8 @@
 ## 슬림 래퍼의 존재 이유
 
 Native Teams의 teammate는 Claude 모델만 가능하다.
-Codex/Gemini는 teammate로 직접 등록할 수 없으므로, Claude slim wrapper를 spawn하고
-래퍼 내부에서 `tfx-route.sh`로 Codex/Gemini CLI를 실행하는 구조이다.
+Codex/Antigravity는 teammate로 직접 등록할 수 없으므로, Claude slim wrapper를 spawn하고
+래퍼 내부에서 `tfx-route.sh`로 Codex/Antigravity CLI를 실행하는 구조이다.
 
 래퍼가 존재하는 이유:
 1. **Shift+Down 네비게이션 등록** — 래퍼 없이 Lead가 직접 Bash를 실행하면 네비게이션에 등록되지 않음
@@ -15,7 +15,7 @@ Codex/Gemini는 teammate로 직접 등록할 수 없으므로, Claude slim wrapp
 
 ### 1. Agent 래퍼 생략 금지
 
-Codex/Gemini 서브태스크는 워커 수에 관계없이 반드시 Agent 래퍼를 spawn해야 한다.
+Codex/Antigravity 서브태스크는 워커 수에 관계없이 반드시 Agent 래퍼를 spawn해야 한다.
 단일 워커(1:gemini 등)여도 Lead가 직접 Bash를 실행하면 안 된다.
 Lead가 "효율적"이라고 판단해서 Agent를 건너뛰는 것은 금지한다.
 

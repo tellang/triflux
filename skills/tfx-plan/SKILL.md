@@ -1,7 +1,7 @@
 ---
 internal: true
 name: tfx-plan
-description: "구현 계획이 필요할 때 사용한다. '계획 세워줘', 'plan', '플랜', '어떻게 구현하지', '태스크 분해', '작업 순서', '합의 계획', 'ralplan', '철저한 계획' 같은 요청에 반드시 사용. 기본값은 3자 합의(Opus+Codex+Gemini) 딥 계획. 빠른 단일 CLI 계획은 --quick 파라미터."
+description: "구현 계획이 필요할 때 사용한다. '계획 세워줘', 'plan', '플랜', '어떻게 구현하지', '태스크 분해', '작업 순서', '합의 계획', 'ralplan', '철저한 계획' 같은 요청에 반드시 사용. 기본값은 3자 합의(Opus+Codex+Antigravity) 딥 계획. 빠른 단일 CLI 계획은 --quick 파라미터."
 triggers:
   - plan
   - 계획
@@ -19,14 +19,14 @@ argument-hint: "<구현할 기능> [--quick]"
 
 > **ARGUMENTS 처리**: `--quick` → Quick 모드. 그 외 → Deep 모드 (기본).
 
-> AI makes completeness near-free. 기본은 Opus 4.6(Planner) + Codex(Architect) + Gemini(Critic) Tri-Model 합의.
-> 빠른 Gemini 위임 계획은 `--quick`.
+> AI makes completeness near-free. 기본은 Opus 4.6(Planner) + Codex(Architect) + Antigravity(Critic) Tri-Model 합의.
+> 빠른 Antigravity 위임 계획은 `--quick`.
 
 ---
 
 ## 모드 분기
 
-`--quick` → Quick 모드 (Gemini 위임).
+`--quick` → Quick 모드 (Antigravity 위임).
 그 외 → Deep 모드 (기본, 3-Model 합의 + 교차 검토).
 
 ---
@@ -56,7 +56,7 @@ Tier 3:
 
 ### HARD RULES
 1. `codex exec` / `gemini -p` 직접 호출 금지
-2. Codex/Gemini → `Bash("tfx multi --teammate-mode headless --assign ...")` 만
+2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless --assign ...")` 만
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
 
@@ -66,7 +66,7 @@ Tier 3:
 |-------|------|------|
 | Claude Opus (Planner) | 전략 비전 | 리스크 통합, 아키텍처 결정 |
 | Codex (Architect) | 기술 설계 | API, 파일 구조, 구현 세부 |
-| Gemini (Critic) | 리스크 분석 | 엣지케이스, 보안, 테스트 전략 |
+| Antigravity (Critic) | 리스크 분석 | 엣지케이스, 보안, 테스트 전략 |
 
 ### EXECUTION — TASK 는 사용자 입력
 
@@ -96,7 +96,7 @@ Agent(
 )
 ```
 
-**Bash (Codex Architect + Gemini Critic):**
+**Bash (Codex Architect + Antigravity Critic):**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:시니어 엔지니어 기술 설계. 기능: [TASK]. 코드베이스: [RECON]. JSON: { architecture, components, data_models, api, files, impl_notes, confidence }:architect' \
@@ -123,7 +123,7 @@ Agent(
 )
 ```
 
-**Bash:** (위와 동일 패턴, Codex/Gemini 각각 교차검토)
+**Bash:** (위와 동일 패턴, Codex/Antigravity 각각 교차검토)
 
 #### Step 5: 합의 점수 산출 (Claude 직접)
 
@@ -143,7 +143,7 @@ consensus_score = CONSENSUS / 전체 * 100
 
 ```markdown
 ## 합의된 구현 계획: [TASK]
-**Consensus**: {score}% | **Rounds**: {n} | **Models**: Opus+Codex+Gemini
+**Consensus**: {score}% | **Rounds**: {n} | **Models**: Opus+Codex+Antigravity
 
 ### 설계 방향
 ### 태스크 (T1..., 복잡도, 합의 P:A:C)
@@ -162,13 +162,13 @@ consensus_score = CONSENSUS / 전체 * 100
 ### Step 1: 요구사항 파싱
 사용자 입력 + PROJECT_INDEX.md (있으면) + Glob 파일 목록.
 
-### Step 2: Gemini 위임
+### Step 2: Antigravity 위임
 
 ```
 Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '소프트웨어 아키텍트로서 구현 계획. 기능: {feature}. 컨텍스트: {context}. 파일: {file_list}. 출력: 1) 영향 범위 2) 태스크 분해 (검증 방법 포함) 3) 리스크/의존성 4) 복잡도'")
 ```
 
-**Fallback**: Gemini 실패 시 Claude Opus 직접.
+**Fallback**: Antigravity 실패 시 Claude Opus 직접.
 
 ### Step 3: 구조화 출력
 
@@ -181,12 +181,12 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '소프트웨어 아키텍
 ### 복잡도: {level}
 ```
 
-### Token (Quick): ~1.5K (Claude), ~2K (Gemini)
+### Token (Quick): ~1.5K (Claude), ~2K (Antigravity)
 
 ## 사용 예
 
 ```
 /tfx-plan "JWT 인증 미들웨어 추가"          # Deep (기본)
 /tfx-plan "마이크로서비스 분리"             # Deep
-/tfx-plan --quick "README 섹션 추가"        # Quick (Gemini)
+/tfx-plan --quick "README 섹션 추가"        # Quick (Antigravity)
 ```

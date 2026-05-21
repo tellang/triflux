@@ -25,7 +25,7 @@ argument-hint: "[파일 경로 또는 git diff 범위]"
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
 1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
-2. Codex·Gemini → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
@@ -35,7 +35,7 @@ argument-hint: "[파일 경로 또는 git diff 범위]"
 |-----|------|----------|
 | Claude (Opus) | 코드 품질 분석 + 합의 중재 | 설계 원칙, 코드 구조, 불필요 추상화 |
 | Codex | AI 슬롭 탐지 | 구현 효율, 중복 패턴, 과잉 에러 핸들링 |
-| Gemini | 가독성 평가 | 가독성/DX, 과잉 주석, 과잉 타입 |
+| Antigravity | 가독성 평가 | 가독성/DX, 과잉 주석, 과잉 타입 |
 
 ## 슬롭 카테고리
 
@@ -96,7 +96,7 @@ severity: critical(기능에 영향) | high(가독성 심각) | medium(개선) |
 )
 ```
 
-Codex + Gemini (Bash, background):
+Codex + Antigravity (Bash, background):
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:다음 파일에서 AI 슬롭을 감지하세요. 구현 효율 관점(중복 패턴, 과잉 에러핸들링, 미사용 코드)으로 분석. 파일: {file_content}. JSON: [{id,category,line_start,line_end,description,severity,suggested_fix}]. severity: critical|high|medium|low. 과탐보다 미탐이 낫습니다.:slop-detector' \
@@ -173,7 +173,7 @@ for each finding in ALL results:
 
 ## ERROR RECOVERY
 
-- Codex/Gemini 타임아웃(600s 초과) → Claude Agent 단독으로 2자 합의 기준(단독 감지도 제거 대상) 적용
+- Codex/Antigravity 타임아웃(600s 초과) → Claude Agent 단독으로 2자 합의 기준(단독 감지도 제거 대상) 적용
 - 테스트 명령 없음 → Step 5 건너뜀, 보고서에 "테스트 미실행 — 수동 검증 필요" 표시
 - 파일 파싱 오류 → 해당 파일 스킵 후 보고서에 "파싱 실패" 기록
 

@@ -104,11 +104,11 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 > **MANDATORY RULES**
 >
 > 1. **실행**: CLI 에이전트는 반드시 `Bash("bash ~/.claude/scripts/tfx-route.sh ...")`. Claude 네이티브(explore/verifier/test-engineer/qa-tester)만 `Agent()`.
-> 2. **비용**: Codex 우선 → Gemini → Claude 최후 수단. `claude` 선택 전 "Codex로 가능한가?" 재확인.
+> 2. **비용**: Codex 우선 → Antigravity → Claude 최후 수단. `claude` 선택 전 "Codex로 가능한가?" 재확인.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
 > 4. **트리아지**: Codex `exec --full-auto` 분류 + Opus 인라인 분해. Agent 스폰 금지.
 > 5. **thorough**: `-t`/`--thorough` 시 파이프라인 init 필수. 커맨드 숏컷은 항상 quick.
-> 6. **직접 수정 금지**: implement/review/analyze 등 커맨드 숏컷 실행 시 절대로 Edit/Write 도구로 직접 코드를 수정하지 마라. 반드시 Bash(tfx-route.sh)를 통해 Codex/Gemini에 위임하라. 작업이 아무리 사소해도 예외 없음.
+> 6. **직접 수정 금지**: implement/review/analyze 등 커맨드 숏컷 실행 시 절대로 Edit/Write 도구로 직접 코드를 수정하지 마라. 반드시 Bash(tfx-route.sh)를 통해 Codex/Antigravity에 위임하라. 작업이 아무리 사소해도 예외 없음.
 
 ## 모드
 
@@ -133,7 +133,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 |--------|-----|------|----------|
 | `--cli` | `auto` (기본) | Codex 분류 후 최적 CLI 선택 | 기존 라우팅 |
 | `--cli` | `codex` | Codex 전용 고정. `TFX_CLI_MODE=codex` | tfx-route.sh |
-| `--cli` | `gemini` | Gemini 전용 고정. `TFX_CLI_MODE=gemini` | tfx-route.sh |
+| `--cli` | `gemini` | [deprecated alias] Antigravity 로 redirect. `TFX_CLI_MODE=gemini` (agy 없으면 legacy gemini fallback) | tfx-route.sh |
 | `--cli` | `claude` | Claude native 에이전트만 (CLI 호출 없음) | Agent() |
 | `--mode` | `quick` (기본) | fire-and-forget, plan/verify 오버헤드 없음 | 직접 실행 |
 | `--mode` | `deep` | pipeline init → plan → PRD → verify → fix loop | `-t/--thorough` 동일 |
@@ -145,7 +145,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--shape` | `consensus` (기본) | findings 합의/충돌 판정 | consensus renderer |
 | `--shape` | `debate` | 옵션 비교 + 점수화 + 최종 추천 | debate renderer |
 | `--shape` | `panel` | 전문가 roster 기반 시뮬레이션 | panel renderer |
-| `--cli-set` | `triad` (기본) | Claude + Codex + Gemini | consensus participants |
+| `--cli-set` | `triad` (기본) | Claude + Codex + Antigravity | consensus participants |
 | `--cli-set` | `no-gemini` | Claude + Codex partial degrade | consensus participants |
 | `--cli-set` | `custom` | 기존 3 CLI 내부 subset/repetition 만 허용 | consensus participants |
 | `--options` | `"A|B|C"` | debate 비교 대상 | debate normalizer |
@@ -281,8 +281,8 @@ shape 의미:
 
 | 값 | 의미 | 비고 |
 |----|------|------|
-| `triad` | Claude + Codex + Gemini | 기본값 |
-| `no-gemini` | Claude + Codex | Gemini 미가용 degrade |
+| `triad` | Claude + Codex + Antigravity | 기본값 |
+| `no-gemini` | Claude + Codex | Antigravity 미가용 degrade |
 | `custom` | 기존 3 CLI 내부 subset/repetition 만 허용 | 신규 provider 추가 금지 |
 
 shape 입력 정규화:
@@ -328,7 +328,7 @@ shape 별 `shape_input`:
 2. `--mode consensus` 확인
 3. `--shape` 기본값 보정 (`consensus`)
 4. shape 별 payload 정규화
-5. Claude native + headless Codex/Gemini 동시 dispatch
+5. Claude native + headless Codex/Antigravity 동시 dispatch
 6. 결과 수집
 7. 공통 `meta_judgment` 생성
 8. shape renderer 로 markdown/json 출력
@@ -686,7 +686,7 @@ Phase 5 삭제 게이트:
 | `spec-panel` | architect + analyst + critic | analyze |
 | `business-panel` | analyst + architect | analyze |
 
-### Gemini 직행
+### Antigravity 직행
 
 | 커맨드 | 에이전트 | MCP |
 |--------|---------|-----|
@@ -828,7 +828,7 @@ else:
 
 ## 실행
 
-### CLI 에이전트 (Codex/Gemini)
+### CLI 에이전트 (Codex/Antigravity)
 
 ```bash
 # Level 0 / INDEPENDENT
@@ -853,7 +853,7 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 | architect / planner / critic / analyst | Codex (xhigh) | analyze |
 | scientist / document-specialist | Codex | analyze |
 | code-reviewer / security-reviewer / quality-reviewer | Codex (review) | review |
-| gemini / designer / writer | Gemini | docs |
+| gemini / designer / writer | Antigravity | docs |
 | explore / test-engineer / qa-tester | Claude native | — |
 | verifier | Codex review (기본) / Claude native (TFX_VERIFIER_OVERRIDE=claude 시) | review / — |
 

@@ -39,8 +39,8 @@ argument-hint: "<완료할 작업 설명>"
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | tmux/psmux + Hub + Codex + Gemini 전부 정상 | 기존 headless multi (변경 없음) |
-| **Tier 2** | 일부 CLI만 가용 (Codex 또는 Gemini 중 하나) | 가용 CLI + Claude Agent 조합 |
+| **Tier 1** | tmux/psmux + Hub + Codex + Antigravity 전부 정상 | 기존 headless multi (변경 없음) |
+| **Tier 2** | 일부 CLI만 가용 (Codex 또는 Antigravity 중 하나) | 가용 CLI + Claude Agent 조합 |
 | **Tier 3** | headless 불가 또는 `claude -p` one-shot | Claude Agent only |
 
 ```
@@ -56,10 +56,10 @@ IF Hub 미응답:
   → 재시작 실패 → Tier 3
   → Tier 3
 
-IF Codex 없음 AND Gemini 없음:
+IF Codex 없음 AND Antigravity 없음:
   → Tier 3
 
-IF Codex 없음 OR Gemini 없음:
+IF Codex 없음 OR Antigravity 없음:
   → Tier 2
 
 ELSE:
@@ -71,7 +71,7 @@ ELSE:
 ```
 ⚠ [Tier 3] headless multi 환경 미충족 — single-model 모드로 실행합니다 (consensus 미적용)
   누락: {missing_components}
-  권장: tmux/psmux, Hub, Codex CLI, Gemini CLI 설치 후 재실행
+  권장: tmux/psmux, Hub, Codex CLI, Antigravity CLI 설치 후 재실행
 ```
 
 Tier 3에서는 모든 headless dispatch(`tfx multi ...`)를 **Claude Agent**(subagent)로 대체한다.
@@ -82,7 +82,7 @@ Tier 2에서는 누락된 CLI만 Claude Agent로 대체한다.
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
 1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
-2. Codex·Gemini 검증자 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+2. Codex·Antigravity 검증자 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude 검증자 → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 5. 루프 종료 조건: 모든 criteria 3자 검증 통과 + 통합 검증 Consensus >= 70
@@ -93,12 +93,12 @@ Tier 2에서는 누락된 CLI만 Claude Agent로 대체한다.
 |------|------|------|
 | Goal Definition | 완료 기준 추출 및 사용자 확인 | Claude (직접 실행) |
 | 구현 (단순) | 코드 작성, 파일 수정, 테스트 | Codex (tfx headless) |
-| 구현 (복잡) | 태스크 분해 후 병렬 실행 | Codex + Gemini (tfx headless) |
+| 구현 (복잡) | 태스크 분해 후 병렬 실행 | Codex + Antigravity (tfx headless) |
 | 기준별 검증 — Claude | 코드 읽기 + 논리 검증 | Claude (Agent, background) |
 | 기준별 검증 — Codex | 코드 실행 + 테스트 검증 | Codex (tfx headless) |
-| 기준별 검증 — Gemini | 코드 리뷰 + 품질 검증 | Gemini (tfx headless) |
-| 통합 검증 | 전체 criteria 최종 합의 | Claude + Codex + Gemini (동시) |
-| Deslop Pass | 슬롭 감지 및 제거 | Codex + Gemini (tfx headless) |
+| 기준별 검증 — Antigravity | 코드 리뷰 + 품질 검증 | Antigravity (tfx headless) |
+| 통합 검증 | 전체 criteria 최종 합의 | Claude + Codex + Antigravity (동시) |
+| Deslop Pass | 슬롭 감지 및 제거 | Codex + Antigravity (tfx headless) |
 
 ## EXECUTION STEPS
 
@@ -156,7 +156,7 @@ Agent(
 )
 ```
 
-**Codex + Gemini 검증 (Bash — 동시에 위 Agent와 같은 응답에서 호출):**
+**Codex + Antigravity 검증 (Bash — 동시에 위 Agent와 같은 응답에서 호출):**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:다음 기준 충족 여부를 코드 실행/테스트로 검증하라. 기준: {current_criterion}. 실제 테스트를 실행하여 결과를 확인하라. 결과: PASS 또는 FAIL + 근거 1문장:verifier' \
@@ -198,7 +198,7 @@ JSON 형식: { criteria_results: [{criterion, pass, reason}], regression_check, 
 )
 ```
 
-**Codex + Gemini 통합 검증 (Bash — 동시에 위 Agent와 같은 응답에서 호출):**
+**Codex + Antigravity 통합 검증 (Bash — 동시에 위 Agent와 같은 응답에서 호출):**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:모든 acceptance criteria 충족 여부를 테스트 실행으로 통합 검증하라. 기준 목록: {criteria_list}. 전체 테스트 스위트를 실행하고 회귀 여부를 확인하라. JSON 형식: { criteria_results, test_results, overall_pass }:verifier' \
@@ -232,7 +232,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
 Consensus Score: {score}%
 변경 파일: {count}개
 테스트: {pass}/{total} 통과
-검증: Claude PASS | Codex PASS | Gemini PASS
+검증: Claude PASS | Codex PASS | Antigravity PASS
 ```
 
 ## ANTI-STUCK 메커니즘

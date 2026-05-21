@@ -36,7 +36,7 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 }
 ```
 
-체인 항목 필드: `cli` (codex|gemini|claude), `model` (CLI 가 해석하는 문자열).
+체인 항목 필드: `cli` (codex|antigravity|claude), `model` (CLI 가 해석하는 문자열).
 
 ## 사용 예시
 

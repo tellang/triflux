@@ -32,7 +32,7 @@ argument-hint: "<토론 주제 또는 질문>"
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
 1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
-2. Codex·Gemini → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
@@ -42,7 +42,7 @@ argument-hint: "<토론 주제 또는 질문>"
 |-----|------|
 | Claude | 소프트웨어 아키텍트 — 시스템 설계 관점 |
 | Codex | 시니어 백엔드 엔지니어 — 구현/기술적 트레이드오프 관점 |
-| Gemini | DevOps/인프라 엔지니어 + DX 전문가 — 운영/개발자경험 관점 |
+| Antigravity | DevOps/인프라 엔지니어 + DX 전문가 — 운영/개발자경험 관점 |
 
 ## EXECUTION STEPS
 
@@ -85,7 +85,7 @@ Agent(
 )
 ```
 
-Codex와 Gemini를 headless dispatch로 동시에 실행하라:
+Codex와 Antigravity를 headless dispatch로 동시에 실행하라:
 
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
@@ -133,7 +133,7 @@ Agent(
 )
 ```
 
-Codex와 Gemini 2차 라운드를 headless dispatch로 동시에 실행하라:
+Codex와 Antigravity 2차 라운드를 headless dispatch로 동시에 실행하라:
 
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
@@ -168,7 +168,7 @@ Claude Opus가 전체 토론을 종합하여 다음 구조로 최종 보고서�
 
 ## ERROR RECOVERY
 
-- Codex 또는 Gemini 결과가 없으면: 2개 소스로 교차검증을 진행하고 보고서에 누락 CLI를 명시하라
+- Codex 또는 Antigravity 결과가 없으면: 2개 소스로 교차검증을 진행하고 보고서에 누락 CLI를 명시하라
 - tfx multi 명령이 실패하면: 오류 메시지를 출력하고 재시도 1회 후 실패를 사용자에게 보고하라
 - Agent 결과가 없으면: Claude 관점 없이 나머지 2개 소스로 진행하라
 - Round 2 후에도 불일치가 지속되면: 해소되지 않은 항목으로 보고서에 명시하고 최종 추천은 다수결로 결정하라

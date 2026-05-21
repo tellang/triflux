@@ -91,7 +91,7 @@ exec codex $prompt
 
 ## RULE 4: 프로파일 사용, 인자 하드코딩 금지
 
-Codex든 Gemini든 모델·effort·실행모드는 프로파일(config)로 관리한다.
+Codex든 Antigravity든 모델·effort·실행모드는 프로파일(config)로 관리한다.
 CLI 인자로 하드코딩하지 않는다.
 
 ### 4-1. 프로파일 우선

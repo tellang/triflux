@@ -25,7 +25,7 @@ argument-hint: "<토론 주제>"
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
 1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
-2. Codex·Gemini → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
@@ -35,7 +35,7 @@ argument-hint: "<토론 주제>"
 |-----|------|----------------|
 | Claude (Opus) | 패널 모더레이터 + 인문/전략 전문가 | 리팩터링, 점진적 설계, 요구사항 |
 | Codex | 기술 구현 전문가 | 아키텍처, 마이크로서비스, 클라우드 |
-| Gemini | 통합/비즈니스 전문가 | 통합 패턴, 경쟁 전략, 프로덕트 |
+| Antigravity | 통합/비즈니스 전문가 | 통합 패턴, 경쟁 전략, 프로덕트 |
 
 ## 전문가 풀
 
@@ -84,7 +84,7 @@ argument-hint: "<토론 주제>"
 분배 예시 (`"우리 모놀리스를 마이크로서비스로 전환해야 할까?"`):
 - Claude 담당: Martin Fowler (리팩터링), Kent Beck (점진적 설계)
 - Codex 담당: Sam Newman (마이크로서비스), Michael Porter (전략)
-- Gemini 담당: Gregor Hohpe (통합 패턴), Karl Wiegers (요구사항)
+- Antigravity 담당: Gregor Hohpe (통합 패턴), Karl Wiegers (요구사항)
 
 주제가 모호하면 AskUserQuestion으로 명확화한다.
 
@@ -106,7 +106,7 @@ JSON 형식으로 응답:
 )
 ```
 
-Codex + Gemini (Bash, background):
+Codex + Antigravity (Bash, background):
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:당신은 {codex_expert_1}({role_3})과 {codex_expert_2}({role_4})입니다. 주제: {topic}. 각 전문가의 고유 관점에서 독립 분석. 상호 참조 금지. JSON: {experts:[{name,position,reasoning,concerns,recommendation,confidence}]}:analyst' \
@@ -164,7 +164,7 @@ tfx-consensus 프로토콜 적용:
 
 ## ERROR RECOVERY
 
-- Codex/Gemini 타임아웃(600s 초과) → Claude Agent로 해당 전문가 재분석
+- Codex/Antigravity 타임아웃(600s 초과) → Claude Agent로 해당 전문가 재분석
 - 결과 파싱 실패 → 원문 그대로 Step 3에 투입하여 모더레이터가 정리
 - 전문가 선정 불확실 → AskUserQuestion으로 사용자 확인 후 진행
 
