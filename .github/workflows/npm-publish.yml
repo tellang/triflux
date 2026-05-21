@@ -31,33 +31,48 @@ jobs:
       # Each npm package needs a Trusted Publisher entry for OIDC/provenance.
       - name: Publish @triflux/core
         working-directory: packages/core
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           if npm view "$name@$version" version >/dev/null 2>&1; then
             echo "$name@$version is already published; skipping."
           else
+            if [[ -n "${NPM_TOKEN:-}" ]]; then
+              export NODE_AUTH_TOKEN="$NPM_TOKEN"
+            fi
             npm publish --provenance --access public
           fi
 
       - name: Publish @triflux/remote
         working-directory: packages/remote
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           if npm view "$name@$version" version >/dev/null 2>&1; then
             echo "$name@$version is already published; skipping."
           else
+            if [[ -n "${NPM_TOKEN:-}" ]]; then
+              export NODE_AUTH_TOKEN="$NPM_TOKEN"
+            fi
             npm publish --provenance --access public
           fi
 
       - name: Publish triflux
         working-directory: packages/triflux
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           if npm view "$name@$version" version >/dev/null 2>&1; then
             echo "$name@$version is already published; skipping."
           else
+            if [[ -n "${NPM_TOKEN:-}" ]]; then
+              export NODE_AUTH_TOKEN="$NPM_TOKEN"
+            fi
             npm publish --provenance --access public
           fi

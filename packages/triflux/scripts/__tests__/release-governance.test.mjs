@@ -248,9 +248,19 @@ describe("release governance scripts", () => {
       "utf8",
     );
     assert.match(npmPublishWorkflow, /npm view "\$name@\$version" version/);
-    assert.doesNotMatch(
-      npmPublishWorkflow,
-      /NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/,
+    assert.doesNotMatch(npmPublishWorkflow, /NODE_AUTH_TOKEN:\s*\$\{\{/);
+    assert.equal(
+      (
+        npmPublishWorkflow.match(
+          /NPM_TOKEN:\s*\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/g,
+        ) || []
+      ).length,
+      3,
+    );
+    assert.equal(
+      (npmPublishWorkflow.match(/export NODE_AUTH_TOKEN="\$NPM_TOKEN"/g) || [])
+        .length,
+      3,
     );
     assert.equal(
       (npmPublishWorkflow.match(/already published; skipping/g) || []).length,
