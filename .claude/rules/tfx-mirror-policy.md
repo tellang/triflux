@@ -22,6 +22,12 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 | root `hub/lib/foo.mjs` 수정 | 같은 cp 또는 두 곳 동시 Edit |
 | 검증 | `diff -q hub/lib/foo.mjs packages/core/hub/lib/foo.mjs` exit 0 |
 
+#### `packages/core/hub/team` — minimal individual mirror
+
+`hub/team/*` 전체는 `packages/triflux/hub/team/` 와 `packages/remote/hub/team/` mirror 대상이다. `packages/core` 는 `hub/team/*` 전체를 mirror 하지 않는다. 다만 `packages/core/hub/bridge.mjs` 가 `./team/*` 를 self-import 하는 개별 파일은 `packages/core/hub/team/` 에 byte-identical cp 한다.
+
+현재 minimal mirror 예시는 PR #314 의 `packages/core/hub/team/retry-state-machine.mjs` 다. 신규 파일을 추가할 때는 먼저 `grep -n './team/' packages/core/hub/bridge.mjs` 로 `bridge.mjs` 의 `./team/*` 의존 파일을 식별하고, 필요한 파일만 `packages/core/hub/team/` 으로 cp 한 뒤 root 파일과 `diff -q` 로 확인한다.
+
 ### `packages/remote` — import path 변환
 
 `packages/remote/` 는 `packages/core` 를 외부 dep 로 import 한다. 그래서 root 의 상대 경로 import 를 그대로 cp 하면 깨진다.
@@ -55,11 +61,12 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 
 **mirror 대상** (root → packages 동기 필수):
 - `hub/lib/*` → `packages/core/hub/lib/`, `packages/triflux/hub/lib/`
-- `hub/team/*`, `hub/*.mjs` (entry/runtime) → `packages/triflux/hub/`, `packages/remote/hub/` (해당 모듈만)
+- `hub/team/*`, `hub/*.mjs` (entry/runtime) → `packages/triflux/hub/`, `packages/remote/hub/` (해당 모듈만; `packages/core/hub/team/` 는 self-import 대상만 minimal mirror, 예: `retry-state-machine.mjs`)
+- `mesh/*` → `packages/core/mesh/`, `packages/triflux/mesh/` (PR #320 — root subset)
 - `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up — remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)
 - `scripts/release/*`, `scripts/__tests__/*` → `packages/triflux/scripts/` (publish 포함)
 - `bin/*` → `packages/triflux/bin/`
-- `hooks/*`, `hud/*`, `mesh/*`, `config/*` → `packages/triflux/{hooks,hud,mesh,config}/`
+- `hooks/*`, `hud/*`, `config/*` → `packages/triflux/{hooks,hud,config}/`
 
 **mirror 제외**:
 - `tests/` (root + `packages/{core,remote}/tests/`) — npm files 에 없음. 만약 packages 쪽에 untracked tests 디렉토리가 만들어졌으면 그건 잘못된 mirror 시도다.
