@@ -23,5 +23,15 @@ jobs:
         # npm install fallback. deterministic 손실 trade-off 있으나 CI 미실행 보다 낫다.
         run: npm ci || npm install --no-audit --no-fund
 
+      - name: packages/triflux mirror byte-identical
+        # packages-mirror.test.mjs 가 transitive 로 같은 검사를 돌지만, drift 시
+        # unit test 실행 전에 fast-fail 로 끊어주면 원인 파악이 명확해진다.
+        # PR #325 retro review (Codex) 가 발견한 dormant drift 같은 시나리오 가드.
+        run: npm run release:check-mirror
+
+      - name: packages version sync
+        # root vs packages/{core,remote,triflux} package.json version drift 감지.
+        run: npm run release:check-sync
+
       - name: Codex config stability guard
         run: npm run test:guard-codex-config
