@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import {
+  deriveClaudeDaemonPaths,
+  extractPtyFrames,
+  startClaudeNativeBridge,
+} from "../../hub/team/claude-native-bridge.mjs";
 import { parseTeamArgs } from "../../hub/team/cli/commands/start/parse-args.mjs";
 import { writeBridgeSession } from "../../hub/team/headless-bridge-session.mjs";
 
@@ -11,6 +17,53 @@ const MOCK_STATE_DIR = path.join(
   os.tmpdir(),
   `mock-claude-state-${Date.now()}`,
 );
+
+function readJsonLine(sockPath, { timeoutMs = 1000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(sockPath);
+    let buffer = "";
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`Timed out waiting for JSON line: ${sockPath}`));
+    }, timeoutMs);
+    socket.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString("utf8");
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(JSON.parse(buffer.slice(0, newline)));
+    });
+  });
+}
+
+function readPtyFrames(sockPath, { timeoutMs = 1000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(sockPath);
+    let buffer = Buffer.alloc(0);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`Timed out waiting for PTY frames: ${sockPath}`));
+    }, timeoutMs);
+    socket.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    socket.on("data", (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      const { frames } = extractPtyFrames(buffer);
+      if (frames.some((frame) => frame.kind === 0)) {
+        clearTimeout(timer);
+        socket.destroy();
+        resolve(frames);
+      }
+    });
+  });
+}
 
 test("CLI start parser should resolve --native-bridge option correctly", () => {
   const result = parseTeamArgs(["start", "--native-bridge"]);
@@ -69,17 +122,6 @@ test("Session persistence should write valid JSON to sessions folder", async () 
 
   // Cleanup mock dir
   await fs.rm(MOCK_STATE_DIR, { recursive: true, force: true });
-});
-
-test("runHeadless must bypass psmux loop when nativeBridge option is true", async () => {
-  const { runHeadless } = await import("../../hub/team/headless.mjs");
-
-  const result = await runHeadless("session_nb_test", [], {
-    nativeBridge: true,
-  });
-
-  assert.equal(result.bypassed, true, "Should bypass and return bypassed true");
-  assert.equal(result.status, "ok", "Should return status ok");
 });
 
 test("runHeadless no longer bypasses assignments when nativeBridge is true", async () => {
