@@ -1994,7 +1994,7 @@ _codex_config_swap() {
     # Pre-validation: config.toml이 500 bytes 미만이면 이미 손상된 상태일 수 있음 — 스킵
     local config_size
     config_size=$(wc -c < "$config" 2>/dev/null | tr -d ' ') || config_size=0
-    if [[ "$config_size" -lt 500 ]]; then
+    if [[ "$config_size" -lt 500 && "${TFX_ALLOW_SMALL_CODEX_CONFIG:-0}" != "1" ]]; then
       echo "[tfx-route] 경고: config.toml 크기 ${config_size} bytes — 손상 의심, swap 스킵 (수동 확인 필요)" >&2
       return 0
     fi
@@ -2025,7 +2025,7 @@ _codex_config_swap() {
       # backup 이 원본을 담고 있는 한 그것을 살린다.
       local backup_restore_guard_size
       backup_restore_guard_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_restore_guard_size=0
-      if [[ "$backup_restore_guard_size" -lt 500 ]]; then
+      if [[ "$backup_restore_guard_size" -lt 500 && "${TFX_ALLOW_SMALL_CODEX_CONFIG:-0}" != "1" ]]; then
         # 작은 backup 은 이미 손상된 state. 현재 config 도 필터된 상태일 수 있으므로
         # 추가 swap 은 상황을 악화시킬 위험. 전체 스킵하고 수동 확인 유도.
         echo "[tfx-route] stale backup 작음 (size=${backup_restore_guard_size}B, pid=${owner_pid:-?} dead) — swap 스킵, 수동 확인: $backup" >&2
@@ -2065,7 +2065,7 @@ _codex_config_swap() {
     filtered_size=$(wc -c < "$tmp_filtered" 2>/dev/null | tr -d ' ') || filtered_size=0
     backup_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_size=1
     threshold=$(( backup_size * 30 / 100 ))
-    if [[ "$filtered_size" -eq 0 || "$filtered_size" -lt "$threshold" ]]; then
+    if [[ ( "$filtered_size" -eq 0 || "$filtered_size" -lt "$threshold" ) && "${TFX_ALLOW_SMALL_CODEX_CONFIG:-0}" != "1" ]]; then
       echo "[tfx-route] 경고: 필터 결과 크기 ${filtered_size} bytes (백업 ${backup_size} bytes의 30% 미만) — 적용 거부, 백업에서 복원" >&2
       rm -f "$tmp_filtered" 2>/dev/null
       rm -f "$backup" 2>/dev/null
@@ -2092,7 +2092,7 @@ _codex_config_swap() {
     # Restore sanity check: 백업 자체가 비었거나 500 bytes 미만이면 복원 중단
     local backup_restore_size
     backup_restore_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_restore_size=0
-    if [[ "$backup_restore_size" -lt 500 ]]; then
+    if [[ "$backup_restore_size" -lt 500 && "${TFX_ALLOW_SMALL_CODEX_CONFIG:-0}" != "1" ]]; then
       echo "[tfx-route] 경고: backup 크기 ${backup_restore_size} bytes — 손상 의심, 복원 중단. 수동 확인 필요: $backup" >&2
       return 1
     fi
@@ -2436,6 +2436,10 @@ FALLBACK_EOF
   fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
+    # Degraded is a per-invocation result, not an inherited process contract.
+    # Test and wrapper environments can carry stale exported values from prior
+    # route calls; clear it before the current MCP preflight decides.
+    unset _TFX_MCP_DEGRADED
     # Preflight: dead MCP 감지 후 CODEX_CONFIG_FLAGS 에서 제거.
     # swap 이 allowed_pat 을 이 배열에서 계산하므로, 여기서 제거하면
     # dead section 이 config.toml 에서 자동으로 drop 된다.

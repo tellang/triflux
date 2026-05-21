@@ -77,6 +77,9 @@ function runBash(command, extraEnv = {}) {
       // #148: 테스트 환경에서는 실제 MCP probe 가 모두 dead 로 나와 early-fail 발생.
       // 라우팅/트랜스포트 검증이 목적이므로 preflight 자체를 스킵.
       TFX_MCP_HEALTH_CHECK: "0",
+      // Fixture config is intentionally tiny but valid. Production keeps the
+      // small-config corruption guard unless a caller opts in explicitly.
+      TFX_ALLOW_SMALL_CODEX_CONFIG: "1",
       ...extraEnv,
     },
   });
