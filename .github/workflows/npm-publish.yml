@@ -28,6 +28,22 @@ jobs:
       - name: Install dependencies
         run: npm ci || npm install --no-audit --no-fund
 
+      # Each npm package needs a Trusted Publisher entry for OIDC/provenance.
+      # If OIDC is not configured yet, set NPM_TOKEN as a fallback secret.
+      - name: Publish @triflux/core
+        working-directory: packages/core
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
+
+      - name: Publish @triflux/remote
+        working-directory: packages/remote
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
+
       - name: Publish triflux
         working-directory: packages/triflux
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public

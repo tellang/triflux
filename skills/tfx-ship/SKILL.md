@@ -36,7 +36,7 @@ triflux 는 아래 3채널로 동시 배포. 각 채널의 버전은 반드시 �
 | # | 채널 | 명령 | 우선순위 |
 |---|------|------|---------|
 | 1 | **GitHub Releases** | `gh release create vX.Y.Z --notes-file <notes>` | 공지 + changelog 공식 소스 |
-| 2 | **npm registry** | `cd packages/triflux && npm publish --access public` | primary distribution |
+| 2 | **npm registry** | `node scripts/release/publish.mjs --execute` | primary distribution |
 | 3 | **Claude Code marketplace** | `.claude-plugin/marketplace.json` (`source: npm` 참조) | `claude plugin add triflux` |
 | 4 | **pypi** (future, 비활성) | 현재 `pyproject.toml` 없음 | 활성화 시 Step 10.5 신설 |
 
@@ -221,15 +221,14 @@ gh release create "v${TARGET_VERSION}" \
 ```
 npm registry 에 배포하시겠습니까?
 
-A) cd packages/triflux && npm publish --access public
-B) dry-run 으로 먼저 검증 (npm publish --dry-run)
+A) node scripts/release/publish.mjs --execute
+B) dry-run 으로 먼저 검증 (node scripts/release/publish.mjs --dry-run)
 C) 건너뜀 (수동 배포)
 ```
 
 선택 A:
 ```bash
-cd packages/triflux
-npm publish --access public
+node scripts/release/publish.mjs --execute
 ```
 
 ### Step 10.5 — pypi publish (future, 현재 비활성)

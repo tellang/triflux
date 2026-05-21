@@ -143,7 +143,67 @@ describe("release governance scripts", () => {
         dryRun: true,
       });
       assert.equal(verify.ok, true);
-      assert.equal(verify.checks[1].name, "npm-view");
+      assert.deepEqual(
+        verify.checks
+          .filter((check) => check.name.startsWith("npm-view"))
+          .map((check) => check.name),
+        [
+          "npm-view @triflux/core",
+          "npm-view @triflux/remote",
+          "npm-view triflux",
+        ],
+      );
+      assert.deepEqual(
+        verify.checks
+          .filter((check) => check.name.startsWith("npm-view"))
+          .map((check) => check.detail),
+        [
+          "would run: npm view @triflux/core@1.2.3 version",
+          "would run: npm view @triflux/remote@1.2.3 version",
+          "would run: npm view triflux@1.2.3 version",
+        ],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("verify reports explicit npm package/version failures", async () => {
+    const root = makeRepo();
+    try {
+      assertVersionSync({ rootDir: root, fix: true });
+      const calls = [];
+      const verify = await verifyRelease({
+        rootDir: root,
+        version: "1.2.3",
+        dryRun: false,
+        execFileSyncFn: (command, args) => {
+          calls.push({ command, args });
+          if (command === "npm" && args[1] === "@triflux/remote@1.2.3") {
+            const error = new Error("npm view failed");
+            error.stderr = Buffer.from("not found");
+            throw error;
+          }
+          if (command === "npm") return "1.2.3\n";
+          if (command === "gh") return '{"tagName":"v1.2.3"}\n';
+          return "";
+        },
+      });
+
+      assert.equal(verify.ok, false);
+      assert.deepEqual(
+        calls.filter((call) => call.command === "npm").map((call) => call.args),
+        [
+          ["view", "@triflux/core@1.2.3", "version"],
+          ["view", "@triflux/remote@1.2.3", "version"],
+          ["view", "triflux@1.2.3", "version"],
+        ],
+      );
+      assert.equal(
+        verify.checks.find((check) => check.name === "npm-view @triflux/remote")
+          .detail,
+        "npm view failed for @triflux/remote@1.2.3: not found",
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
