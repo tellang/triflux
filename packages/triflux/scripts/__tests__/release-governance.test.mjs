@@ -137,6 +137,20 @@ describe("release governance scripts", () => {
       });
       assert.equal(publish.steps.length >= 3, true);
 
+      const trustedPublish = await publishRelease({
+        rootDir: root,
+        version: "1.2.3",
+        dryRun: true,
+        provenance: true,
+      });
+      assert.equal(trustedPublish.provenance, true);
+      assert.deepEqual(
+        trustedPublish.steps
+          .filter((step) => step.label.startsWith("npm publish"))
+          .map((step) => step.command.includes("--provenance")),
+        [true, true, true],
+      );
+
       const verify = await verifyRelease({
         rootDir: root,
         version: "1.2.3",
@@ -166,6 +180,30 @@ describe("release governance scripts", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("release workflows use trusted publishing and skip duplicate tag publishes", () => {
+    const releaseWorkflow = readFileSync(
+      new URL("../../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    );
+    assert.match(releaseWorkflow, /id-token:\s*write/);
+    assert.match(releaseWorkflow, /node-version:\s*24/);
+    assert.match(releaseWorkflow, /publish\.mjs.*--provenance/);
+    assert.doesNotMatch(
+      releaseWorkflow,
+      /NODE_AUTH_TOKEN:\s*\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/,
+    );
+
+    const npmPublishWorkflow = readFileSync(
+      new URL("../../.github/workflows/npm-publish.yml", import.meta.url),
+      "utf8",
+    );
+    assert.match(npmPublishWorkflow, /npm view "\$name@\$version" version/);
+    assert.equal(
+      (npmPublishWorkflow.match(/already published; skipping/g) || []).length,
+      3,
+    );
   });
 
   it("verify reports explicit npm package/version failures", async () => {
