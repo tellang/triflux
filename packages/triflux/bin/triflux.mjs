@@ -4670,6 +4670,37 @@ async function cmdDoctor(options = {}) {
       }
     }
 
+    // ── MCP Gateway Health ──
+    // install-mcp-gateway-startup 으로 띄운 LaunchAgent/systemd daemon 의 stdout
+    // (~/.local/state/triflux/mcp-gateway.out.log) 를 파싱해 missing-env 등으로
+    // skip 된 server 를 잡는다. 로그가 없으면 gateway 미설치/미실행으로 침묵.
+    section("MCP Gateway Health");
+    {
+      const { checkMcpGatewayHealth, summarizeMcpGatewayHealth } = await import(
+        "../scripts/lib/mcp-gateway-health-check.mjs"
+      );
+      const gatewayHealth = checkMcpGatewayHealth();
+      const summary = summarizeMcpGatewayHealth(gatewayHealth);
+      addDoctorCheck(report, {
+        name: "mcp-gateway-health",
+        status: summary.level === "warn" ? "warning" : "ok",
+        log_path: gatewayHealth.logPath,
+        findings: gatewayHealth.findings,
+        started: gatewayHealth.started,
+        skipped: gatewayHealth.skipped,
+        ...(summary.fix ? { fix: summary.fix } : {}),
+      });
+      if (summary.level === "skip") {
+        info(summary.message);
+      } else if (summary.level === "ok") {
+        ok(summary.message);
+      } else {
+        warn(summary.message);
+        if (summary.fix) info(`수정: ${summary.fix}`);
+        issues++;
+      }
+    }
+
     // ── Codex Config Health (BUG-H #132) ──
     // _codex_config_swap 의 restore 가 Windows lock/ACL 로 실패하면
     // ~/.codex/config.toml.pre-exec 가 남아 [mcp_servers.*] 섹션이 영구 손실된다.

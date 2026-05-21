@@ -4,6 +4,10 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`feat(doctor)`** `tfx doctor` 에 "MCP Gateway Health" 진단 섹션 추가. `~/.local/state/triflux/mcp-gateway.out.log` 를 파싱해 `[WARN] X skipped — missing env: Y` 패턴으로 skip 된 server 를 잡고, 같은 server 의 [START]/[SKIP-running] 이 더 최근이면 복구된 것으로 인식 (false-positive 회피). missing key 발견 시 `secrets.env` + `launchctl kickstart` 또는 `systemctl --user restart` 수정 힌트를 노출. 로그 파일이 없으면 gateway 미설치/미실행으로 침묵. `scripts/lib/mcp-gateway-health-check.mjs` 단위 테스트 8건. `packages/core` + `packages/triflux` mirror byte-identical 동기.
+
 ### Fixed
 
 - **`fix(mcp)`** `install-mcp-gateway-startup.mjs` 의 wrapper sourcing 목록과 systemd `EnvironmentFile` 목록에 `~/.config/triflux/secrets.env` 추가. 기존 `mcp-gateway.env` 후보 3개는 legacy 호환으로 유지. triflux 표준 secrets 파일이 wrapper 에 누락되어 있어 BRAVE_API_KEY 등이 주입되지 않고 supergateway 가 brave-search 를 `[WARN] missing env` 로 skip 하던 회귀 해결. usage 문구도 동기 갱신. 본체/`packages/triflux` mirror 와 테스트(`scripts/__tests__/install-mcp-gateway-startup.test.mjs`) 모두 동기.
