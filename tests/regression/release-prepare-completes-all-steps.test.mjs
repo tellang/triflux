@@ -14,7 +14,13 @@
 // step sequence 단락 회귀는 즉시 catch.
 
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -193,5 +199,48 @@ describe("release:prepare regression — step sequence completeness", () => {
     // skipTests=true 일 때 test 는 skip, lint + pack 만 호출
     assert.deepEqual(buildSteps, ["lint", "pack"]);
     assert.ok(result.releaseNotesPath);
+  });
+
+  it("CI fresh checkout 처럼 .omx/plans 가 없어도 release-notes 디렉터리를 생성", async () => {
+    const tmpRootNoOmx = mkdtempSync(join(tmpdir(), "tfx-prepare-no-omx-"));
+    try {
+      const manifest = {
+        canonicalFile: "package.json",
+        canonicalPath: ["version"],
+        targets: [{ file: "package.json", paths: [["version"]] }],
+      };
+
+      mkdirSync(join(tmpRootNoOmx, "scripts", "release"), {
+        recursive: true,
+      });
+      writeFileSync(
+        join(tmpRootNoOmx, "scripts", "release", "version-manifest.json"),
+        JSON.stringify(manifest, null, 2),
+      );
+      writeFileSync(
+        join(tmpRootNoOmx, "package.json"),
+        JSON.stringify({ name: "test", version: "10.25.1" }, null, 2),
+      );
+
+      const { fn } = makeMockExec();
+      const result = await prepareRelease({
+        version: "10.25.1",
+        rootDir: tmpRootNoOmx,
+        allowDirty: true,
+        dryRun: false,
+        skipTests: true,
+        execFileSyncFn: fn,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(
+        existsSync(
+          join(tmpRootNoOmx, ".omx", "plans", "release-notes-v10.25.1.md"),
+        ),
+        true,
+      );
+    } finally {
+      rmSync(tmpRootNoOmx, { recursive: true, force: true });
+    }
   });
 });
