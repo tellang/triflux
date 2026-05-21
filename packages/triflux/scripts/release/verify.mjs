@@ -3,6 +3,14 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertVersionSync, parseArgs, ROOT } from "./lib.mjs";
 
+const NPM_VERIFY_TARGETS = ["@triflux/core", "@triflux/remote", "triflux"];
+
+function errorMessage(error) {
+  const stderr = error?.stderr?.toString?.().trim();
+  const stdout = error?.stdout?.toString?.().trim();
+  return stderr || stdout || error?.message || "unknown error";
+}
+
 export async function verifyRelease({
   version,
   rootDir = ROOT,
@@ -23,15 +31,33 @@ export async function verifyRelease({
   ];
 
   if (!dryRun) {
-    const npmVersion = execFileSyncFn("npm", ["view", "triflux", "version"], {
-      cwd: rootDir,
-      encoding: "utf8",
-    }).trim();
-    checks.push({
-      name: "npm-view",
-      ok: npmVersion === releaseVersion,
-      detail: npmVersion,
-    });
+    for (const packageName of NPM_VERIFY_TARGETS) {
+      const packageSpec = `${packageName}@${releaseVersion}`;
+      try {
+        const npmVersion = execFileSyncFn(
+          "npm",
+          ["view", packageSpec, "version"],
+          {
+            cwd: rootDir,
+            encoding: "utf8",
+          },
+        ).trim();
+        checks.push({
+          name: `npm-view ${packageName}`,
+          ok: npmVersion === releaseVersion,
+          detail:
+            npmVersion === releaseVersion
+              ? npmVersion
+              : `expected ${releaseVersion}, got ${npmVersion}`,
+        });
+      } catch (error) {
+        checks.push({
+          name: `npm-view ${packageName}`,
+          ok: false,
+          detail: `npm view failed for ${packageSpec}: ${errorMessage(error)}`,
+        });
+      }
+    }
 
     const ghRelease = execFileSyncFn(
       "gh",
@@ -48,11 +74,11 @@ export async function verifyRelease({
     });
   } else {
     checks.push(
-      {
-        name: "npm-view",
+      ...NPM_VERIFY_TARGETS.map((packageName) => ({
+        name: `npm-view ${packageName}`,
         ok: null,
-        detail: `would run: npm view triflux version`,
-      },
+        detail: `would run: npm view ${packageName}@${releaseVersion} version`,
+      })),
       {
         name: "github-release",
         ok: null,
