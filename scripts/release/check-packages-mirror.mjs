@@ -22,7 +22,16 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(SCRIPT_DIR, "..", "..");
 const MIRROR_ROOT = join(REPO_ROOT, "packages", "triflux");
-const MIRROR_TOPS = ["bin", "hooks", "hub", "mesh", "scripts", "skills"];
+const MIRROR_TOPS = [
+  "bin",
+  "config",
+  "hooks",
+  "hub",
+  "hud",
+  "mesh",
+  "scripts",
+  "skills",
+];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 // Per-top relative paths to skip. Mirror policy excludes these via
 // packages/triflux/package.json "files" negation patterns (e.g.
