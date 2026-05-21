@@ -6,11 +6,24 @@ All notable changes to triflux will be documented in this file.
 
 ### Added
 
+- **`feat(native-bridge)` (PR #323, commits `f38393c4` + `61631d82` + `e3354e9b`)** Triflux headless 워커가 `claude agents` 패널에 default 로 노출. `/tfx-auto` 슬래시 한 줄 호출만으로 `Triflux <cli> <role>` row 가 등장하고 sentinel exit 후 ≤ 5 초 내 사라짐. `tfx swarm` 로컬 shard 도 `Triflux swarm <shard-name>` row 로 등장 (원격 shard 는 host-local visibility — 등록은 그 원격 daemon, view 는 그 host 의 `claude agents`). opt-out 은 `--no-native-bridge-ui` (parseTeamArgs + swarm-cli parseFlags 양쪽 지원, 충돌 동시 지정은 explicit error). 3 commit: cleanup-signal — `hub/team/claude-daemon-control.mjs::sendKillBySessionId({ daemonPaths, sessionId })` helper + `headless.mjs::cleanupDaemonDispatches()` 가 `waitForDaemonCompletion()` matched 이후 즉시 kill 신호; default-on — `parseTeamArgs()` 의 `nativeBridge=true/nativeBridgeMode="agents"` 기본, headless 만 활성 (interactive default-off 유지); swarm-bridge — `hub/team/swarm-hypervisor.mjs::buildSessionConfig()` 가 `swarm-${runId}-${shardName}-${short8}` sessionId 생성 후 `claude-native-bridge.mjs::registerSwarmShard()` 호출, host=remote 면 warn 후 skip. 4-layer mirror byte-identical (root + packages/core + packages/triflux + packages/remote; remote 는 `@triflux/core/...` import path 보존). PRD `.triflux/plans/native-bridge-ui-default-expansion.md`.
 - **`feat(doctor)`** `tfx doctor` 에 "MCP Gateway Health" 진단 섹션 추가. `~/.local/state/triflux/mcp-gateway.out.log` 를 파싱해 `[WARN] X skipped — missing env: Y` 패턴으로 skip 된 server 를 잡고, 같은 server 의 [START]/[SKIP-running] 이 더 최근이면 복구된 것으로 인식 (false-positive 회피). missing key 발견 시 `secrets.env` + `launchctl kickstart` 또는 `systemctl --user restart` 수정 힌트를 노출. 로그 파일이 없으면 gateway 미설치/미실행으로 침묵. `scripts/lib/mcp-gateway-health-check.mjs` 단위 테스트 8건. `packages/core` + `packages/triflux` mirror byte-identical 동기.
 
 ### Fixed
 
 - **`fix(mcp)`** `install-mcp-gateway-startup.mjs` 의 wrapper sourcing 목록과 systemd `EnvironmentFile` 목록에 `~/.config/triflux/secrets.env` 추가. 기존 `mcp-gateway.env` 후보 3개는 legacy 호환으로 유지. triflux 표준 secrets 파일이 wrapper 에 누락되어 있어 BRAVE_API_KEY 등이 주입되지 않고 supergateway 가 brave-search 를 `[WARN] missing env` 로 skip 하던 회귀 해결. usage 문구도 동기 갱신. 본체/`packages/triflux` mirror 와 테스트(`scripts/__tests__/install-mcp-gateway-startup.test.mjs`) 모두 동기.
+
+### Docs
+
+- **`docs(native-bridge)` (PR #323 follow-up)** `CLAUDE.md` 에 `<native-bridge>` 섹션 추가 (모드별 default / opt-out / row 가 보이는 위치 표). `.claude/rules/tfx-routing.md` CLI 라우팅 섹션에 "Headless UI default" 1단락 추가 (`--no-native-bridge-ui` opt-out, 원격 shard 의 host-local visibility 명시).
+
+### Tests
+
+- **`test(packages-remote)` (PR #323 follow-up)** `tests/unit/packages-remote-imports.test.mjs` 에 native-bridge entrypoint static 회귀 가드 신규 — `headless` / `backend` / `swarm-cli` / `swarm-hypervisor` / `claude-daemon-control` / `claude-native-bridge` 6 파일이 packages/remote 에 존재하고 `node --check` 로 parse 되며 cross-package import 는 `@triflux/core/...` 만 쓰는지 검증. 런타임 `import()` 대신 static check 를 쓰는 이유는 packages/core 의 별개 구조 갭 (예: core/hub/bridge.mjs 가 core 에 미러되지 않은 ./team/retry-state-machine.mjs 를 import) 이 packages/remote 와 무관하게 cascade 되기 때문 — 이 PR 의 회귀 대상은 packages/remote 자체 surface 다. PRD risk 표 § "packages/remote native-bridge entrypoint 깨짐" 대응.
+
+### Notes
+
+- **Observability side-effect default enabled** — Triflux headless workers now appear in `claude agents` by default. Opt-out: `--no-native-bridge-ui`. (consensus codex+agy 답변 Q3, 2026-05-21)
 
 ## [10.25.0] - 2026-05-21
 
