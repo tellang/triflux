@@ -133,7 +133,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 |--------|-----|------|----------|
 | `--cli` | `auto` (기본) | Codex 분류 후 최적 CLI 선택 | 기존 라우팅 |
 | `--cli` | `codex` | Codex 전용 고정. `TFX_CLI_MODE=codex` | tfx-route.sh |
-| `--cli` | `gemini` | Gemini 전용 고정. `TFX_CLI_MODE=gemini` | tfx-route.sh |
+| `--cli` | `gemini` | [deprecated alias] Antigravity 로 redirect. `TFX_CLI_MODE=gemini` (agy 없으면 legacy gemini fallback) | tfx-route.sh |
 | `--cli` | `claude` | Claude native 에이전트만 (CLI 호출 없음) | Agent() |
 | `--mode` | `quick` (기본) | fire-and-forget, plan/verify 오버헤드 없음 | 직접 실행 |
 | `--mode` | `deep` | pipeline init → plan → PRD → verify → fix loop | `-t/--thorough` 동일 |

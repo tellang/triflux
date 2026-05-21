@@ -80,7 +80,7 @@ headless-guard 가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. 
 |------|-----|------|
 | `tfx-auto` | 자동 | 통합 진입점 |
 | `tfx-auto --cli codex` | Codex | Codex 전용 lane |
-| `tfx-auto --cli gemini` | Gemini | Gemini 전용 lane |
+| `tfx-auto --cli gemini` | Antigravity | [deprecated alias] Antigravity 로 redirect (agy 없으면 legacy gemini fallback) |
 | `tfx-auto --mode quick` | Codex→검증 | 단일 파일, 5분 이내 |
 | `tfx-auto --retry auto-escalate` | 자동 승격 | 실패→더 강한 모델 |
 

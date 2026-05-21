@@ -824,9 +824,9 @@ auto_reroute() {
   local target_cli=""
   local -a candidates=()
   case "$failed_cli" in
-    codex) candidates=("antigravity" "gemini") ;;
+    codex) candidates=("antigravity") ;;
     gemini) candidates=("antigravity" "codex") ;;
-    antigravity) candidates=("codex" "gemini") ;;
+    antigravity) candidates=("codex") ;;
     *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
   esac
 
@@ -856,11 +856,9 @@ auto_reroute() {
 
   case "$failed_cli:$target_cli" in
     codex:antigravity) echo "[tfx-quota] Codex → Antigravity 자동 전환" >&2 ;;
-    codex:gemini) echo "[tfx-quota] Codex → Gemini 자동 전환" >&2 ;;
     gemini:antigravity) echo "[tfx-quota] Gemini → Antigravity 자동 전환" >&2 ;;
     gemini:codex) echo "[tfx-quota] Gemini → Codex 자동 전환" >&2 ;;
     antigravity:codex) echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
-    antigravity:gemini) echo "[tfx-quota] Antigravity → Gemini 자동 전환" >&2 ;;
   esac
 
   local quota_marker="$TFX_TMP/tfx-quota-${failed_cli}-$(date +%Y%m%d)"
@@ -1258,6 +1256,14 @@ apply_cli_mode() {
             return 0
             ;;
         esac
+        # Gemini CLI deprecated — redirect to Antigravity when available.
+        # Legacy gemini binary path is preserved as fallback for environments
+        # without agy (TFX_ANTIGRAVITY_OK=0) until Phase 5 cleanup.
+        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && command -v "${AGY_BIN:-agy}" &>/dev/null; then
+          echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini → antigravity (Gemini CLI deprecated, use --cli antigravity)" >&2
+          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
+        fi
+        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy 미설치 — legacy gemini binary path 진입" >&2
         CLI_TYPE="gemini"; CLI_CMD="gemini"
         case "$AGENT_TYPE" in
           executor|debugger|deep-executor|architect|planner|critic|analyst|\
