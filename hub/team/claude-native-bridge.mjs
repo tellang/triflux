@@ -8,6 +8,9 @@ import path from "node:path";
 const DEFAULT_ROWS = 40;
 const DEFAULT_COLS = 120;
 const MAX_TRANSCRIPT_BYTES = 64 * 1024;
+const ROSTER_LOCK_STALE_MS = 30_000;
+const ROSTER_LOCK_TIMEOUT_MS = 5_000;
+const ROSTER_LOCK_RETRY_MS = 10;
 
 export function resolveClaudeConfigDir(env = process.env) {
   if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
@@ -134,24 +137,70 @@ async function writeRoster(rosterPath, roster) {
   await fs.rename(tmpPath, rosterPath);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireRosterLock(rosterPath) {
+  await fs.mkdir(path.dirname(rosterPath), { recursive: true });
+  const lockPath = `${rosterPath}.lock`;
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      await fs.mkdir(lockPath);
+      return async () => {
+        await fs.rm(lockPath, { recursive: true, force: true });
+      };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      if (Date.now() - startedAt > ROSTER_LOCK_TIMEOUT_MS) {
+        throw new Error(`Timed out waiting for roster lock: ${lockPath}`);
+      }
+      try {
+        const stat = await fs.stat(lockPath);
+        if (Date.now() - stat.mtimeMs > ROSTER_LOCK_STALE_MS) {
+          await fs.rm(lockPath, { recursive: true, force: true });
+          continue;
+        }
+      } catch (statError) {
+        if (statError?.code !== "ENOENT") throw statError;
+      }
+      await sleep(ROSTER_LOCK_RETRY_MS);
+    }
+  }
+}
+
+async function withRosterLock(rosterPath, fn) {
+  const release = await acquireRosterLock(rosterPath);
+  try {
+    return await fn();
+  } finally {
+    await release();
+  }
+}
+
 export async function mergeRosterWorkers(rosterPath, workers) {
-  const roster = await readRoster(rosterPath);
-  roster.workers = { ...roster.workers, ...workers };
-  await writeRoster(rosterPath, roster);
-  return roster;
+  return withRosterLock(rosterPath, async () => {
+    const roster = await readRoster(rosterPath);
+    roster.workers = { ...roster.workers, ...workers };
+    await writeRoster(rosterPath, roster);
+    return roster;
+  });
 }
 
 export async function removeRosterWorkers(rosterPath, shorts) {
-  const roster = await readRoster(rosterPath);
-  let changed = false;
-  for (const short of shorts) {
-    if (Object.hasOwn(roster.workers, short)) {
-      delete roster.workers[short];
-      changed = true;
+  return withRosterLock(rosterPath, async () => {
+    const roster = await readRoster(rosterPath);
+    let changed = false;
+    for (const short of shorts) {
+      if (Object.hasOwn(roster.workers, short)) {
+        delete roster.workers[short];
+        changed = true;
+      }
     }
-  }
-  if (changed) await writeRoster(rosterPath, roster);
-  return changed;
+    if (changed) await writeRoster(rosterPath, roster);
+    return changed;
+  });
 }
 
 export function buildNativeWorkerRosterEntry({
