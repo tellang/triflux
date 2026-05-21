@@ -53,6 +53,22 @@ function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 }
 
+function assertNoShellMetacharacters(value, label) {
+  if (/[$`;&|\r\n]/.test(String(value))) {
+    throw new Error(`${label} contains unsafe shell metacharacter`);
+  }
+}
+
+function systemdQuote(value) {
+  return `"${String(value)
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("%", "%%")
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "\\r")
+    .replaceAll("\t", "\\t")}"`;
+}
+
 function psSingleQuote(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
@@ -140,6 +156,9 @@ function writeFileSafe(fs, filePath, body, stdout) {
 }
 
 function buildDarwinWrapper({ gatewayScript, nodePath }) {
+  assertNoShellMetacharacters(nodePath, "nodePath");
+  assertNoShellMetacharacters(gatewayScript, "gatewayScript");
+
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -153,7 +172,7 @@ for env_file in "$HOME/.config/triflux/mcp-gateway.env" "$HOME/.config/tfx/mcp-g
   fi
 done
 
-exec "${nodePath}" "${gatewayScript}"
+exec ${shellQuote(nodePath)} ${shellQuote(gatewayScript)}
 `;
 }
 
@@ -345,12 +364,12 @@ After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=${projectRoot}
+WorkingDirectory=${systemdQuote(projectRoot)}
 Environment=PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 EnvironmentFile=-%h/.config/triflux/mcp-gateway.env
 EnvironmentFile=-%h/.config/tfx/mcp-gateway.env
 EnvironmentFile=-%h/.mcp-gateway.env
-ExecStart=${nodePath} ${gatewayScript}
+ExecStart=${systemdQuote(nodePath)} ${systemdQuote(gatewayScript)}
 Restart=on-failure
 RestartSec=5
 

@@ -126,7 +126,7 @@ describe("install mcp gateway startup", () => {
     assert.match(fs.files.get(wrapperPath), /mcp-gateway\.env/);
     assert.match(
       fs.files.get(wrapperPath),
-      /exec "\/usr\/local\/bin\/node" "\/repo\/scripts\/mcp-gateway-start\.mjs"/,
+      /exec '\/usr\/local\/bin\/node' '\/repo\/scripts\/mcp-gateway-start\.mjs'/,
     );
     assert.deepEqual(run.calls.at(-2), ["launchctl", "load", "-w", plistPath]);
     assert.deepEqual(run.calls.at(-1), [
@@ -252,7 +252,7 @@ describe("install mcp gateway startup", () => {
     );
     assert.match(
       fs.files.get(unitPath),
-      /ExecStart=\/usr\/local\/bin\/node \/repo\/scripts\/mcp-gateway-start\.mjs/,
+      /ExecStart="\/usr\/local\/bin\/node" "\/repo\/scripts\/mcp-gateway-start\.mjs"/,
     );
     assert.equal(run.calls.at(-1)[0], "systemctl");
     assert.deepEqual(run.calls.at(-1).slice(1), [
@@ -260,6 +260,57 @@ describe("install mcp gateway startup", () => {
       "is-enabled",
       "mcp-gateway.service",
     ]);
+  });
+
+  it("linux unit quotes paths with spaces", () => {
+    const fs = makeFs();
+    const run = makeRun();
+
+    const result = runStartupInstaller({
+      ...baseOptions,
+      nodePath: "/opt/node builds/bin/node",
+      projectRoot: "/home/user/Projects/my repo",
+      fs,
+      platform: "linux",
+      run,
+    });
+
+    const unitPath = join(
+      "/home/user",
+      ".config",
+      "systemd",
+      "user",
+      "mcp-gateway.service",
+    );
+    const unit = fs.files.get(unitPath);
+
+    assert.equal(result.code, 0);
+    assert.match(unit, /WorkingDirectory="\/home\/user\/Projects\/my repo"/);
+    assert.match(
+      unit,
+      /ExecStart="\/opt\/node builds\/bin\/node" "\/home\/user\/Projects\/my repo\/scripts\/mcp-gateway-start\.mjs"/,
+    );
+  });
+
+  it("macOS wrapper rejects shell metacharacters", () => {
+    const fs = makeFs();
+    const run = makeRun();
+    let stderr = "";
+
+    const result = runStartupInstaller({
+      ...baseOptions,
+      projectRoot: "/tmp/triflux$(touch injected)",
+      fs,
+      platform: "darwin",
+      run,
+      stderr: { write: (chunk) => (stderr += chunk) },
+    });
+
+    assert.equal(result.code, 1);
+    assert.equal(result.platform, "darwin");
+    assert.match(stderr, /unsafe shell metacharacter/);
+    assert.equal(fs.files.size, 0);
+    assert.equal(run.calls.length, 0);
   });
 
   it("uninstall removes the OS startup registration", () => {
