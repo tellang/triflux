@@ -9,6 +9,7 @@ export async function publishRelease({
   channel = "stable",
   dryRun = true,
   createGithubRelease = true,
+  publishNpm = true,
   provenance = false,
   execFileSyncFn,
 } = {}) {
@@ -61,13 +62,15 @@ export async function publishRelease({
     `release-notes-v${releaseVersion}.md`,
   );
   const steps = [
-    ...npmPublishTargets.map((target) => ({
-      label: target.label,
-      command: "npm",
-      args: target.args,
-      cwd: target.cwd,
-      displayCwd: target.displayCwd,
-    })),
+    ...(publishNpm
+      ? npmPublishTargets.map((target) => ({
+          label: target.label,
+          command: "npm",
+          args: target.args,
+          cwd: target.cwd,
+          displayCwd: target.displayCwd,
+        }))
+      : []),
     { label: "git tag", command: "git", args: ["tag", `v${releaseVersion}`] },
     {
       label: "git push",
@@ -106,6 +109,7 @@ export async function publishRelease({
     version: releaseVersion,
     channel,
     npmTag,
+    publishNpm,
     provenance,
     dryRun,
     notesPath,
@@ -128,6 +132,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     channel: args.channel || "stable",
     dryRun: !args.execute,
     createGithubRelease: !args["skip-gh-release"],
+    publishNpm: !args["skip-npm"],
     provenance: Boolean(args.provenance || envProvenance),
   });
   console.log(JSON.stringify(result, null, 2));
