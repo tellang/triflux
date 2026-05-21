@@ -52,11 +52,7 @@ const WELCOME_KEYWORDS = [
   "timed out",
   "flag needs an argument",
 ];
-const LEAK_FLAGS = [
-  "--dangerously-skip-permissions",
-  "--add-dir",
-  "--print=",
-];
+const LEAK_FLAGS = ["--dangerously-skip-permissions", "--add-dir", "--print="];
 
 function hasHi(text) {
   return text.toLowerCase().includes("hi");
@@ -274,4 +270,16 @@ test("TFX_CLI_MODE=antigravity remaps codex-routed agents to agy", () => {
   assert.match(out(result), /TFX_CLI_MODE=antigravity: executor/);
   assert.match(out(result), /type=antigravity/);
   assert.match(result.stdout, /AGY_OK/);
+});
+
+test("direct gemini route redirects to Antigravity when preflight marked agy ready", () => {
+  const result = runBash(
+    `TFX_ANTIGRAVITY_OK=1 bash "${ROUTE_SCRIPT}" gemini 'Return exactly: AGY_OK' minimal 120`,
+  );
+
+  assert.equal(result.status, 0, out(result));
+  assert.match(out(result), /gemini route → antigravity/);
+  assert.match(out(result), /type=antigravity/);
+  assert.match(result.stdout, /AGY_OK/);
+  assert.doesNotMatch(out(result), /type=gemini/);
 });
