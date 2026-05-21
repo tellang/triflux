@@ -340,7 +340,14 @@ function main() {
     return hasSegmentInvocation(cmd, WT_DIRECT_PATTERNS);
   }
 
-  if (isWtDirectInvocation(command)) {
+  // wt.exe는 Windows Terminal 전용. macOS/Linux에서는 PATH에 존재하지 않아
+  // 차단해도 dormant이며, 문서/로그 텍스트의 wt 단어가 false positive로 잡힐
+  // 위험만 있다. win32에서만 차단 적용.
+  // SAFETY_GUARD_FORCE_PLATFORM env로 테스트에서 platform 시뮬레이션 가능
+  // (mac CI에서 win32 차단 동작을 검증하기 위함).
+  const guardPlatform =
+    process.env.SAFETY_GUARD_FORCE_PLATFORM || process.platform;
+  if (guardPlatform === "win32" && isWtDirectInvocation(command)) {
     blockCommand(WT_DIRECT_BLOCK_MESSAGE, command);
   }
 

@@ -798,7 +798,7 @@ deep/fullcycle 추가 규칙:
 |------|----------|------|
 | 1개 + quick | tfx-auto 직접 실행 (fire-and-forget) | tfx-route.sh |
 | 1개 + thorough | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
-| 2개+ + quick | **headless 직접 실행** (WT 자동 팝업) | headless.mjs |
+| 2개+ + quick | **headless 직접 실행** (Windows: WT 자동 팝업 / macOS·Linux: psmux/tmux 단독) | headless.mjs |
 | 2개+ + thorough | Plan/PRD/Approval 후 → headless + verify/fix | headless.mjs |
 | psmux 미설치 fallback | Native Teams (Agent slim wrapper) | native.mjs |
 

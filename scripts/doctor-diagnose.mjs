@@ -152,14 +152,20 @@ function collectSystemInfo() {
   };
 
   // Windows Terminal version (wt.exe --version은 GUI 다이얼로그를 띄우므로 AppxPackage로 조회)
-  try {
-    const wtVer = execSync(
-      'powershell.exe -NoProfile -NoLogo -Command "(Get-AppxPackage Microsoft.WindowsTerminal).Version"',
-      { encoding: "utf8", timeout: 5000, windowsHide: true },
-    ).trim();
-    info.wtVersion = wtVer || "not found";
-  } catch {
-    info.wtVersion = "not found";
+  // macOS/Linux는 wt 자체가 없으므로 조회 skip — "not found"로 표시되면 사용자가
+  // 설치 누락으로 오해할 수 있다. 명시적으로 "N/A (non-Windows)"로 표시.
+  if (platform() === "win32") {
+    try {
+      const wtVer = execSync(
+        'powershell.exe -NoProfile -NoLogo -Command "(Get-AppxPackage Microsoft.WindowsTerminal).Version"',
+        { encoding: "utf8", timeout: 5000, windowsHide: true },
+      ).trim();
+      info.wtVersion = wtVer || "not found";
+    } catch {
+      info.wtVersion = "not found";
+    }
+  } else {
+    info.wtVersion = "N/A (non-Windows)";
   }
 
   // triflux version
