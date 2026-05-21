@@ -3,7 +3,7 @@
 sync-source: AGENTS.md
 sync-scope: section `TFX psmux Rules`
 sync-status: mirrored
-sync-block-sha256: 69c0caac243e0ebac085964b4068ba6ba3a7be63f660d33c90156fa50ec64063
+sync-block-sha256: b975aedecb60cd489f5acc55675657eaaca20a8316add8bb613025689dff7436
 
 <!-- TFX_PSMUX_RULES:START -->
 > **적용 범위: Windows 환경 한정.** macOS/Linux는 platform guard(`hub/team/wt-manager.mjs:199`, `hub/team/headless.mjs:1725`, `tfx-route.sh:86`)로 코드 레벨 no-op 처리된다. mac 사용자는 이 룰셋의 RULE 1~3, 5~6, 8 (WT/PowerShell 관련) 전체를 skip해도 됨. RULE 4 (Codex CLI), RULE 7 (spark53)만 cross-platform.
