@@ -287,7 +287,7 @@ export function createSwarmHypervisor(opts) {
     const target = mapping[swarmState];
     if (!target) return;
     try {
-      const mod = await import("../lib/phase-manager.mjs");
+      const mod = await import("@triflux/core/hub/lib/phase-manager.mjs");
       if (typeof mod?.writePhase === "function") {
         await mod.writePhase(runId, target[0], target[1]);
       }

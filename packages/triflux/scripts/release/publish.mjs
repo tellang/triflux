@@ -18,6 +18,26 @@ export async function publishRelease({
 
   const releaseVersion = version || sync.rootVersion;
   const npmTag = channel === "canary" ? "canary" : "latest";
+  const npmPublishTargets = [
+    {
+      label: "npm publish @triflux/core",
+      cwd: join(rootDir, "packages", "core"),
+      displayCwd: "packages/core",
+      args: ["publish", "--tag", npmTag, "--access", "public"],
+    },
+    {
+      label: "npm publish @triflux/remote",
+      cwd: join(rootDir, "packages", "remote"),
+      displayCwd: "packages/remote",
+      args: ["publish", "--tag", npmTag, "--access", "public"],
+    },
+    {
+      label: "npm publish triflux",
+      cwd: join(rootDir, "packages", "triflux"),
+      displayCwd: "packages/triflux",
+      args: ["publish", "--tag", npmTag],
+    },
+  ];
   const notesPath = join(
     rootDir,
     ".omx",
@@ -25,11 +45,13 @@ export async function publishRelease({
     `release-notes-v${releaseVersion}.md`,
   );
   const steps = [
-    {
-      label: "npm publish",
+    ...npmPublishTargets.map((target) => ({
+      label: target.label,
       command: "npm",
-      args: ["publish", "--tag", npmTag],
-    },
+      args: target.args,
+      cwd: target.cwd,
+      displayCwd: target.displayCwd,
+    })),
     { label: "git tag", command: "git", args: ["tag", `v${releaseVersion}`] },
     {
       label: "git push",
@@ -56,7 +78,10 @@ export async function publishRelease({
 
   if (!dryRun) {
     for (const step of steps) {
-      runCommand(step.command, step.args, { cwd: rootDir, execFileSyncFn });
+      runCommand(step.command, step.args, {
+        cwd: step.cwd || rootDir,
+        execFileSyncFn,
+      });
     }
   }
 
@@ -69,7 +94,9 @@ export async function publishRelease({
     notesPath,
     steps: steps.map((step) => ({
       label: step.label,
-      command: [step.command, ...step.args].join(" "),
+      command: step.displayCwd
+        ? `(cd ${step.displayCwd} && ${[step.command, ...step.args].join(" ")})`
+        : [step.command, ...step.args].join(" "),
     })),
   };
 }
