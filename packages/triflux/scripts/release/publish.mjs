@@ -9,6 +9,7 @@ export async function publishRelease({
   channel = "stable",
   dryRun = true,
   createGithubRelease = true,
+  provenance = false,
   execFileSyncFn,
 } = {}) {
   const sync = assertVersionSync({ rootDir });
@@ -18,24 +19,39 @@ export async function publishRelease({
 
   const releaseVersion = version || sync.rootVersion;
   const npmTag = channel === "canary" ? "canary" : "latest";
+  const provenanceArgs = provenance ? ["--provenance"] : [];
   const npmPublishTargets = [
     {
       label: "npm publish @triflux/core",
       cwd: join(rootDir, "packages", "core"),
       displayCwd: "packages/core",
-      args: ["publish", "--tag", npmTag, "--access", "public"],
+      args: [
+        "publish",
+        "--tag",
+        npmTag,
+        ...provenanceArgs,
+        "--access",
+        "public",
+      ],
     },
     {
       label: "npm publish @triflux/remote",
       cwd: join(rootDir, "packages", "remote"),
       displayCwd: "packages/remote",
-      args: ["publish", "--tag", npmTag, "--access", "public"],
+      args: [
+        "publish",
+        "--tag",
+        npmTag,
+        ...provenanceArgs,
+        "--access",
+        "public",
+      ],
     },
     {
       label: "npm publish triflux",
       cwd: join(rootDir, "packages", "triflux"),
       displayCwd: "packages/triflux",
-      args: ["publish", "--tag", npmTag],
+      args: ["publish", "--tag", npmTag, ...provenanceArgs],
     },
   ];
   const notesPath = join(
@@ -90,6 +106,7 @@ export async function publishRelease({
     version: releaseVersion,
     channel,
     npmTag,
+    provenance,
     dryRun,
     notesPath,
     steps: steps.map((step) => ({
@@ -103,12 +120,15 @@ export async function publishRelease({
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const args = parseArgs(process.argv.slice(2));
+  const envProvenance =
+    String(process.env.NPM_CONFIG_PROVENANCE || "").toLowerCase() === "true";
   const result = await publishRelease({
     version: args.version,
     rootDir: args.root,
     channel: args.channel || "stable",
     dryRun: !args.execute,
     createGithubRelease: !args["skip-gh-release"],
+    provenance: Boolean(args.provenance || envProvenance),
   });
   console.log(JSON.stringify(result, null, 2));
 }
