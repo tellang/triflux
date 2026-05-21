@@ -13,9 +13,12 @@
 sync-source: .claude/rules/tfx-psmux.md
 sync-scope: full section
 sync-status: mirrored
-sync-block-sha256: c2f3ea31aeb6a49ca3c167a46258a581df6ff533ceb3ab8b96571b3c98ecdba5
+sync-block-sha256: 69c0caac243e0ebac085964b4068ba6ba3a7be63f660d33c90156fa50ec64063
 
 <!-- TFX_PSMUX_RULES:START -->
+> **적용 범위: Windows 환경 한정.** macOS/Linux는 platform guard(`hub/team/wt-manager.mjs:199`, `hub/team/headless.mjs:1725`, `tfx-route.sh:86`)로 코드 레벨 no-op 처리된다. mac 사용자는 이 룰셋의 RULE 1~3, 5~6, 8 (WT/PowerShell 관련) 전체를 skip해도 됨. RULE 4 (Codex CLI), RULE 7 (spark53)만 cross-platform.
+> mac 인프라는 `hub/team/terminal-opener.mjs` 3단계 fallback (win32 → wt-manager / tmux 감지 시 → tmux/psmux / darwin → Terminal.app) + `hub/team/psmux.mjs` cross-platform (`IS_WINDOWS`/`IS_MAC` 분기) 으로 처리되며, 별도 iTerm2/tmux 매니저는 불필요.
+>
 > 이 문서는 선택형 스킬이 아니라 항상 적용되는 정책이다.
 > psmux 명령, launch 스크립트, Codex CLI 호출을 생성하는 모든 흐름은
 > 아래 규칙을 반드시 준수해야 한다. 위반 시 생성을 중단하고 수정한다.

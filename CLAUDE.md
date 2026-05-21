@@ -18,6 +18,8 @@
 <psmux-wt>
 ## psmux/WT 규칙
 
+> **이 섹션은 Windows 환경 한정.** macOS/Linux는 platform guard로 코드 레벨 no-op 처리되며 이 섹션 전체를 skip해도 됨. mac 인프라는 아래 `<macos-terminal>` 섹션 참조.
+
 psmux 세션·WT 패인을 생성/조작/정리할 때 `tfx-psmux-rules` 스킬을 참조한다.
 WT 프리징 방지: exit → sleep 2 → kill 순서. 바로 kill하지 않는다.
 
@@ -58,6 +60,47 @@ safety-guard가 raw `psmux kill-session`을 차단한다.
 `codex exec`는 config.toml `approval_mode`를 무시하므로 `--dangerously-bypass-approvals-and-sandbox` 필수.
 `-s` 유효값: read-only, workspace-write, danger-full-access.
 </psmux-wt>
+
+<macos-terminal>
+## macOS / Linux 터미널 처리
+
+위 `<psmux-wt>` 룰셋은 Windows 전용이다. macOS/Linux 환경에서 triflux가 터미널/세션을 다루는 방식.
+
+### terminal-opener.mjs 3단계 fallback (`hub/team/terminal-opener.mjs:124~149`)
+
+`openCommand()` 가 순차 평가하는 분기:
+
+| 우선순위 | 조건 | 동작 | API |
+|---------|------|------|-----|
+| 1 | `platform === "win32"` | wt-manager.createTab | `hub/team/wt-manager.mjs` |
+| 2 | `isTmuxLikeMux(mux, platform)` (`detectMultiplexer()` → `getMultiplexerType()`/`hasMultiplexer()`/`hasTmux()` + literal psmux 검사) | `tmux new-window -n <title> <command>` | shell 직접 호출 |
+| 3 | `platform === "darwin"` (fallback) | `open -a Terminal` | macOS `open` 명령 |
+| — | Linux (mux 없음) | unsupported (return false) | — |
+
+### 별도 mac 매니저 불필요
+
+| 후보 | 필요성 | 이유 |
+|------|--------|------|
+| iTerm2 manager | **불필요** | `hub/lib/env-detect.mjs:96`이 `TERM_PROGRAM === "iTerm.app"` 감지하지만 별도 GUI 패인 조작은 tmux/psmux로 cover됨. 새 창 띄우기는 `open -a Terminal` fallback으로 충분 |
+| tmux manager | **불필요** | psmux 자체가 tmux fork. `terminal-opener.mjs`가 `tmux new-window`로 직접 호출 |
+| psmux manager | **이미 있음** | `hub/team/psmux.mjs` (`IS_WINDOWS`/`IS_MAC` 분기, cross-platform) |
+
+참고 사례: OMC(`oh-my-claudecode`)도 OS-specific 매니저를 만들지 않고 Tmux Manager + Worktree Manager + Claude Launcher 3개 컴포넌트로 정리한다. 본 repo 결정의 외부 근거가 아니라 비교 참고로만 본다.
+
+### platform guard 위치 (참고)
+
+| 파일 | 라인 | guard |
+|------|------|-------|
+| `hub/team/wt-manager.mjs` | 199 | `if (platform() !== "win32") return createNonWindowsStubManager();` |
+| `hub/team/headless.mjs` | 1725-1726 | `if (process.platform !== "win32") return false;` + `WT_SESSION` 체크 |
+| `tfx-route.sh` | 86, 1662, 1681 | `case "$(uname -s)"` 분기 |
+
+mac에서 위 코드가 호출돼도 early-return이라 dead code 실행 없음. **dead text(문서)만 inject되는 게 잔여 drift.**
+
+### macOS notification (참고)
+
+`hub/team/notify.mjs:221~234`이 `osascript`로 macOS 네이티브 알림 발송 (별도 의존성 없음).
+</macos-terminal>
 
 <codex-config>
 ## Codex config.toml
