@@ -41,7 +41,7 @@ argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 ## Deep 모드 (기본)
 
 ### HARD RULES
-1. `codex exec` / `gemini -p` 직접 호출 금지
+1. `codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 금지
 2. Codex/Antigravity → `Bash("tfx multi ...")` 만
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
@@ -87,7 +87,7 @@ Agent(
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: {sub_queries}. 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:researcher' \
-  --assign 'gemini:서브쿼리를 Tavily 로 검색. {sub_queries}. 관점: 비용/운영/DX. tavily_search search_depth=advanced, max_results=5, include_raw_content=false. 구조화.:researcher' \
+  --assign 'antigravity:서브쿼리를 Tavily 로 검색. {sub_queries}. 관점: 비용/운영/DX. tavily_search search_depth=advanced, max_results=5, include_raw_content=false. 구조화.:researcher' \
   --timeout 600")
 ```
 
@@ -142,7 +142,7 @@ AskUserQuestion:
 ### Step 2: Antigravity Google Search 위임
 
 ```
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini 'Research: use Google Search, return structured markdown with sources. Query: {optimized_query}' auto 120")
+Bash("bash ~/.claude/scripts/tfx-route.sh antigravity 'Research: use Google Search, return structured markdown with sources. Query: {optimized_query}' auto 120")
 ```
 
 **Fallback**: Antigravity 실패 시 MCP 순서 — context7 → WebSearch → Brave → Exa → Tavily.

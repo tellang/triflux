@@ -1,7 +1,7 @@
 ---
 internal: true
 name: tfx-plan
-description: "구현 계획이 필요할 때 사용한다. '계획 세워줘', 'plan', '플랜', '어떻게 구현하지', '태스크 분해', '작업 순서', '합의 계획', 'ralplan', '철저한 계획' 같은 요청에 반드시 사용. 기본값은 3자 합의(Opus+Codex+Antigravity) 딥 계획. 빠른 단일 CLI 계획은 --quick 파라미터."
+description: "구현 계획이 필요할 때 사용한다. '계획 세워줘', 'plan', '플랜', '어떻게 구현하지', '태스크 분해', '작업 순서', '합의 계획', 'ralplan', '철저한 계획' 같은 요청에 반드시 사용. 기본값은 Opus+Codex 합의와 Claude critic 보강. Antigravity는 quick/freeform 보조로만 사용하며 deprecated Gemini CLI는 쓰지 않는다."
 triggers:
   - plan
   - 계획
@@ -19,15 +19,15 @@ argument-hint: "<구현할 기능> [--quick]"
 
 > **ARGUMENTS 처리**: `--quick` → Quick 모드. 그 외 → Deep 모드 (기본).
 
-> AI makes completeness near-free. 기본은 Opus 4.6(Planner) + Codex(Architect) + Antigravity(Critic) Tri-Model 합의.
-> 빠른 Antigravity 위임 계획은 `--quick`.
+> AI makes completeness near-free. 기본은 Opus 4.6(Planner) + Codex(Architect) + Claude Opus(Critic) 합의.
+> Antigravity는 `agy --print` stdin 경로가 단순 프롬프트에서만 검증됐으므로, schema-driven critic에는 쓰지 않고 `--quick` freeform 보조로만 사용한다.
 
 ---
 
 ## 모드 분기
 
-`--quick` → Quick 모드 (Antigravity 위임).
-그 외 → Deep 모드 (기본, 3-Model 합의 + 교차 검토).
+`--quick` → Quick 모드 (Antigravity freeform 위임).
+그 외 → Deep 모드 (기본, Opus+Codex+Claude critic 합의 + 교차 검토).
 
 ---
 
@@ -39,7 +39,7 @@ argument-hint: "<구현할 기능> [--quick]"
 (tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
   curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
-  gemini --version 2>/dev/null
+  agy --version 2>/dev/null
 ```
 
 | Tier | 조건 | 실행 |
@@ -55,10 +55,12 @@ Tier 3:
 ```
 
 ### HARD RULES
-1. `codex exec` / `gemini -p` 직접 호출 금지
+1. `codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 금지
 2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless --assign ...")` 만
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
+5. deprecated Gemini CLI 또는 legacy Gemini assign 금지. Antigravity는 `antigravity:`/`agy` 이름만 사용한다.
+6. `agy --print`는 stdin prompt만 사용한다. positional prompt 및 strict JSON critic 검증에 실패하면 Claude critic으로 대체한다.
 
 ### 모델 역할
 
@@ -66,7 +68,8 @@ Tier 3:
 |-------|------|------|
 | Claude Opus (Planner) | 전략 비전 | 리스크 통합, 아키텍처 결정 |
 | Codex (Architect) | 기술 설계 | API, 파일 구조, 구현 세부 |
-| Antigravity (Critic) | 리스크 분석 | 엣지케이스, 보안, 테스트 전략 |
+| Claude Opus (Critic) | 리스크 분석 | 엣지케이스, 보안, 테스트 전략 |
+| Antigravity (Quick/Advisory) | freeform 보조 | 빠른 초안, UX/DX 관점, 비-schema 검토 |
 
 ### EXECUTION — TASK 는 사용자 입력
 
@@ -96,17 +99,28 @@ Agent(
 )
 ```
 
-**Bash (Codex Architect + Antigravity Critic):**
+**Bash (Codex Architect):**
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:시니어 엔지니어 기술 설계. 기능: [TASK]. 코드베이스: [RECON]. JSON: { architecture, components, data_models, api, files, impl_notes, confidence }:architect' \
-  --assign 'gemini:QA 보안 전문가 리스크 분석. JSON: { edge_cases, security, performance, test_strategy: {unit, integration, edge_case}, missing_reqs, risk_level, confidence }:critic' \
   --timeout 600")
+```
+
+**Agent (Claude Critic fallback, schema-valid path):**
+```
+Agent(
+  subagent_type="oh-my-claudecode:critic",
+  model="opus",
+  run_in_background=true,
+  name="critic-r1",
+  prompt="QA 보안 전문가 리스크 분석. 기능: [TASK]. 코드베이스: [RECON]. JSON: { edge_cases, security, performance, test_strategy: {unit, integration, edge_case}, missing_reqs, risk_level, confidence }"
+)
 ```
 
 #### Step 3: 결과 수집
 - RESULT_PLANNER / RESULT_ARCHITECT / RESULT_CRITIC
 - 실패 워커 → Claude Agent 로 대체
+- Antigravity 결과가 strict schema를 만족하지 않으면 consensus vote에 포함하지 않는다.
 
 #### Step 4: Round 2 교차 검토 — Bash + Agent 동시 호출
 
@@ -123,7 +137,7 @@ Agent(
 )
 ```
 
-**Bash:** (위와 동일 패턴, Codex/Antigravity 각각 교차검토)
+**Bash:** Codex가 Claude planner/critic 결과를 교차검토한다. Antigravity는 freeform advisory가 필요할 때만 별도 quick/advisory로 실행한다.
 
 #### Step 5: 합의 점수 산출 (Claude 직접)
 
@@ -143,7 +157,7 @@ consensus_score = CONSENSUS / 전체 * 100
 
 ```markdown
 ## 합의된 구현 계획: [TASK]
-**Consensus**: {score}% | **Rounds**: {n} | **Models**: Opus+Codex+Antigravity
+**Consensus**: {score}% | **Rounds**: {n} | **Models**: Opus+Codex+ClaudeCritic
 
 ### 설계 방향
 ### 태스크 (T1..., 복잡도, 합의 P:A:C)
@@ -165,7 +179,7 @@ consensus_score = CONSENSUS / 전체 * 100
 ### Step 2: Antigravity 위임
 
 ```
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '소프트웨어 아키텍트로서 구현 계획. 기능: {feature}. 컨텍스트: {context}. 파일: {file_list}. 출력: 1) 영향 범위 2) 태스크 분해 (검증 방법 포함) 3) 리스크/의존성 4) 복잡도'")
+Bash("printf '%s' '소프트웨어 아키텍트로서 구현 계획. 기능: {feature}. 컨텍스트: {context}. 파일: {file_list}. 출력: 1) 영향 범위 2) 태스크 분해 (검증 방법 포함) 3) 리스크/의존성 4) 복잡도' | agy --print --dangerously-skip-permissions --print-timeout 10m")
 ```
 
 **Fallback**: Antigravity 실패 시 Claude Opus 직접.

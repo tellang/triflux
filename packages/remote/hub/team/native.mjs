@@ -33,13 +33,24 @@ function inferWorkerIndex(agentName = "") {
   return Number.isInteger(index) && index > 0 ? index : null;
 }
 
-function buildRouteEnvPrefix(agentName, workerIndex, searchTool) {
+function normalizeRouteMode(cli) {
+  const normalized = String(cli || "").trim();
+  if (["gemini", "antigravity", "agy"].includes(normalized)) {
+    return "antigravity";
+  }
+  if (normalized === "codex") return "codex";
+  return "";
+}
+
+function buildRouteEnvPrefix(agentName, workerIndex, searchTool, cli) {
   const effectiveWorkerIndex =
     Number.isInteger(workerIndex) && workerIndex > 0
       ? workerIndex
       : inferWorkerIndex(agentName);
+  const routeMode = normalizeRouteMode(cli);
 
   let envPrefix = "";
+  if (routeMode) envPrefix += ` TFX_CLI_MODE="${routeMode}"`;
   if (effectiveWorkerIndex)
     envPrefix += ` TFX_WORKER_INDEX="${effectiveWorkerIndex}"`;
   if (searchTool) envPrefix += ` TFX_SEARCH_TOOL="${searchTool}"`;
@@ -197,6 +208,7 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
     agentName,
     workerIndex,
     searchTool,
+    cli,
   );
   const scoutConstraint =
     role === "scout" || role === "scientist"
@@ -333,6 +345,7 @@ export function buildHybridWrapperPrompt(cli, opts = {}) {
     agentName,
     workerIndex,
     searchTool,
+    cli,
   );
 
   const routeCmd = `TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} "${role}" '${escaped}' ${mcp_profile}`;

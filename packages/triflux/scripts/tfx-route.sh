@@ -335,7 +335,7 @@ case "$AGENT_TYPE" in
     ;;
 esac
 
-# ── CLI 이름은 route_agent()에서 기본 역할 alias로 처리됨 (codex→executor, gemini→designer, claude→explore) ──
+# ── CLI 이름은 route_agent()에서 기본 역할 alias로 처리됨 (codex→executor, antigravity/agy→Antigravity, claude→explore) ──
 
 # ── 인자 검증: MCP_PROFILE이 --flag 형태인 경우 거절 ──
 if [[ "$MCP_PROFILE" == --* ]]; then
@@ -1090,17 +1090,9 @@ route_agent() {
       CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
       CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
-    # ─── UI/문서 레인 ───
-    designer|gemini)
-      CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"
-      CLI_EFFORT="pro31"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-    writer)
-      CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"
-      CLI_EFFORT="flash3"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-
-    # ─── Antigravity CLI 레인 (2026-05-19 발표, Gemini CLI 후속) ───
+    # ─── Antigravity CLI 레인 (Gemini CLI 후속) ───
     # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic
-    antigravity|agy)
+    designer|writer|gemini|antigravity|agy)
       # agy --print 는 stdin-only (sanity test 4종 확인). positional arg 패턴은
       # 환영 메시지 폴백을 발생시키므로 wrapper 의 호출 분기 (L2031/2033) 에서
       # CLI_TYPE="antigravity" 일 때 stdin pipe 로 전환한다 (아래 변경 2).
@@ -1132,9 +1124,9 @@ route_agent() {
         codex)
           CLI_ARGS="exec --profile gpt55_high ${codex_base}"
           CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-        gemini)
-          CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"
-          CLI_EFFORT="pro31"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+        gemini|antigravity)
+          CLI_ARGS="--print --dangerously-skip-permissions"
+          CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
         claude-native)
           CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
       esac ;;
@@ -1269,30 +1261,20 @@ apply_cli_mode() {
             return 0
             ;;
         esac
-        # Gemini CLI deprecated — redirect to Antigravity when available.
-        # Legacy gemini binary path is preserved as fallback for environments
-        # without agy (TFX_ANTIGRAVITY_OK=0) until Phase 5 cleanup.
-        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && command -v "${AGY_BIN:-agy}" &>/dev/null; then
+        # Gemini CLI deprecated — the mode name is retained as a compatibility
+        # alias only. Do not enter the legacy gemini binary path.
+        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
           echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini → antigravity (Gemini CLI deprecated, use --cli antigravity)" >&2
           TFX_CLI_MODE="antigravity"; apply_cli_mode; return
         fi
-        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy 미설치 — legacy gemini binary path 진입" >&2
-        CLI_TYPE="gemini"; CLI_CMD="gemini"
-        case "$AGENT_TYPE" in
-          executor|debugger|deep-executor|architect|planner|critic|analyst|\
-          code-reviewer|security-reviewer|quality-reviewer|scientist-deep|designer)
-            CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"; CLI_EFFORT="pro31" ;;
-          build-fixer|spark)
-            CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"; CLI_EFFORT="flash3"; DEFAULT_TIMEOUT=180 ;;
-          *)
-            CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"; CLI_EFFORT="flash3" ;;
-        esac
-        case "$CLI_EFFORT" in
-          pro*) gemini_tier="pro" ;;
-          flash*|lite*) gemini_tier="flash" ;;
-          *) gemini_tier="$CLI_EFFORT" ;;
-        esac
-        echo "[tfx-route] TFX_CLI_MODE=gemini: $AGENT_TYPE → gemini($gemini_tier)로 리매핑" >&2
+        if command -v "$CODEX_BIN" &>/dev/null; then
+          echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy headless 불가 — codex fallback" >&2
+          TFX_CLI_MODE="codex"; apply_cli_mode; return
+        fi
+        ORIGINAL_AGENT="${AGENT_TYPE}"
+        CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+        CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy/codex 불가 — claude-native fallback" >&2
       fi ;;
     antigravity)
       if [[ "$CLI_TYPE" != "claude-native" && "$CLI_TYPE" != "claude" ]]; then
@@ -1308,19 +1290,27 @@ apply_cli_mode() {
       # single/multi/swarm dispatch. Shell auto mode only normalizes CLI
       # availability and leaves code-change swarm escalation to JS.
       if [[ "$CLI_TYPE" == "codex" ]] && ! command -v "$CODEX_BIN" &>/dev/null; then
-        if command -v "$GEMINI_BIN" &>/dev/null; then
-          TFX_CLI_MODE="gemini"; apply_cli_mode; return
+        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
+          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
         else
           ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-          echo "[tfx-route] codex/gemini 모두 미설치: $AGENT_TYPE → claude-native fallback" >&2
+          echo "[tfx-route] codex/antigravity 모두 불가: $AGENT_TYPE → claude-native fallback" >&2
         fi
-      elif [[ "$CLI_TYPE" == "gemini" ]] && ! command -v "$GEMINI_BIN" &>/dev/null; then
-        if command -v "$CODEX_BIN" &>/dev/null; then
+      elif [[ "$CLI_TYPE" == "gemini" ]]; then
+        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
+          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
+        elif command -v "$CODEX_BIN" &>/dev/null; then
           TFX_CLI_MODE="codex"; apply_cli_mode; return
         else
           ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-          echo "[tfx-route] codex/gemini 모두 미설치: $AGENT_TYPE → claude-native fallback" >&2
+          echo "[tfx-route] deprecated gemini alias: agy/codex 불가 — $AGENT_TYPE → claude-native fallback" >&2
         fi
+      elif [[ "$CLI_TYPE" == "antigravity" ]] && ! agy_supports_headless "${AGY_BIN:-agy}"; then
+        if command -v "$CODEX_BIN" &>/dev/null; then
+          TFX_CLI_MODE="codex"; apply_cli_mode; return
+        fi
+        ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+        echo "[tfx-route] antigravity headless 불가: $AGENT_TYPE → claude-native fallback" >&2
       fi ;;
   esac
 }
@@ -1345,7 +1335,7 @@ apply_no_claude_native_mode() {
   codex_base="$(build_codex_base)"
 
   [[ "$TFX_NO_CLAUDE_NATIVE" != "1" ]] && return
-  [[ "$TFX_CLI_MODE" == "gemini" ]] && return
+  [[ "$TFX_CLI_MODE" == "gemini" || "$TFX_CLI_MODE" == "antigravity" ]] && return
   [[ "$CLI_TYPE" != "claude-native" ]] && return
 
   if ! command -v "$CODEX_BIN" &>/dev/null; then
@@ -1417,17 +1407,36 @@ apply_dynamic_routing_override() {
     --team-size 1 2>/dev/null) || return
 
   [[ -z "$override_cli" ]] && return
+  [[ "$override_cli" == "gemini" ]] && override_cli="antigravity"
   [[ "$override_cli" == "$CLI_TYPE" ]] && return
 
   # 지원하는 CLI 만 적용 — 알 수 없는 값은 무시
   case "$override_cli" in
-    codex|gemini|claude) ;;
+    codex|antigravity|claude) ;;
     *) return ;;
   esac
 
   echo "[tfx-route] dynamic_route_override: ${CLI_TYPE} -> ${override_cli} (TRIFLUX_DYNAMIC_ROUTING=${flag})" >&2
   CLI_TYPE="$override_cli"
-  CLI_CMD="$override_cli"
+  case "$override_cli" in
+    codex)
+      local codex_base
+      codex_base="$(build_codex_base)"
+      CLI_CMD="codex"
+      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
+      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      ;;
+    antigravity)
+      CLI_CMD="agy"
+      CLI_ARGS="--print --dangerously-skip-permissions"
+      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false"
+      ;;
+    claude)
+      CLI_CMD="claude"
+      CLI_ARGS=""
+      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      ;;
+  esac
 }
 
 apply_verifier_override() {

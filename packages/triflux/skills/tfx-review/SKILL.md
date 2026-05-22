@@ -53,7 +53,7 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (아래 Quick 섹션).
 (tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
   curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
-  gemini --version 2>/dev/null
+  agy --version 2>/dev/null
 ```
 
 ### Tier 판정
@@ -96,7 +96,7 @@ ELSE:
 
 > headless-guard가 이 규칙 위반을 **자동 차단**한다.
 
-1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
 2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
@@ -130,7 +130,7 @@ Agent(
 
 **Codex + Antigravity headless dispatch:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --assign 'gemini:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --assign 'antigravity:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --timeout 600")
 ```
 
 #### Step 3: Consensus Scoring

@@ -25,12 +25,12 @@ triggers:
 
 | 기능 | 설명 |
 |------|------|
-| **다중 모델** | shard별 `agent: codex\|gemini\|claude` 지정. 작업 특성에 맞는 모델 배치 |
+| **다중 모델** | shard별 `agent: codex\|antigravity\|claude` 지정. 작업 특성에 맞는 모델 배치 |
 | **다중 기기** | shard별 `host: <ssh-host>` 지정. 로컬/원격 혼합 실행 |
 | **File Lease** | shard별 파일 소유권. 동일 파일 동시 수정 방지 |
 | **Redundant Execution** | critical shard는 다른 모델로 이중 실행 후 reconcile |
 | **자동 통합** | 의존 순서대로 merge. 원격 shard는 SSH 경유 fetch |
-| **장애 폴백** | rate limit -> 다른 모델로 자동 전환 (codex<->gemini<->claude) |
+| **장애 폴백** | rate limit -> 다른 모델로 자동 전환 (codex<->antigravity<->claude) |
 
 ## 전제조건
 
@@ -70,7 +70,7 @@ PRD에 다중 agent가 지정된 경우에도 AskUserQuestion:
 
 > PRD에 여러 모델이 지정되어 있습니다:
 > - codex: {N}개 shard
-> - gemini: {N}개 shard
+> - antigravity: {N}개 shard
 > - claude: {N}개 shard
 >
 > 모델 배치를 어떻게 할까요?
@@ -144,7 +144,7 @@ await hyper.shutdown('completed');
 - prompt: JWT 인증 미들웨어 리팩터링
 
 ## Shard: ui-dashboard
-- agent: gemini
+- agent: antigravity
 - files: src/ui/dashboard.mjs, src/ui/charts.mjs
 - prompt: 대시보드 UI 개선
 
@@ -170,7 +170,7 @@ security-audit는 `critical: true`이므로 다른 모델로 이중 실행 후 r
 
 | 필드 | 필수 | 기본값 | 설명 |
 |------|------|--------|------|
-| `agent` | - | `codex` | 실행 모델: `codex`, `gemini`, `claude` |
+| `agent` | - | `codex` | 실행 모델: `codex`, `antigravity`, `claude` |
 | `host` | - | (로컬) | SSH 호스트. 미지정 시 로컬 실행 |
 | `files` | O | - | shard가 수정할 파일 목록 (file-lease 대상) |
 | `depends` | - | - | 의존하는 shard 이름. 해당 shard 완료 후 실행 |
@@ -180,7 +180,7 @@ security-audit는 `critical: true`이므로 다른 모델로 이중 실행 후 r
 
 ## 제약
 
-- `codex exec` / `gemini -p` 직접 호출 금지 (headless-guard)
+- `codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 금지 (headless-guard)
 - MAX_CONCURRENCY 기본 4 (WT 프리징 방지)
 - WT 조작 간 sleep 2s (race-guard)
 - config.toml과 CLI 플래그 중복 지정 금지
@@ -206,7 +206,7 @@ HITL fallback 시 AskUserQuestion으로 사용자에게 선택 요청.
 | 장애 | 분류 | 대응 |
 |------|------|------|
 | 워커 크래시 | F1 | conductor auto-restart (최대 2회) |
-| Rate limit | F2 | 다른 모델로 자동 전환 (codex->gemini->claude) |
+| Rate limit | F2 | 다른 모델로 자동 전환 (codex->antigravity->claude) |
 | Stall | F3 | health probe 감지 -> kill -> restart |
 | File lease 위반 | F4 | 워커 변경 revert, shard 실패 처리 |
 | Merge 충돌 | F5 | 충돌 해결 재시도 |

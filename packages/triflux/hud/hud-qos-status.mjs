@@ -51,6 +51,7 @@ import {
 import {
   buildGeminiAuthContext,
   fetchGeminiQuota,
+  getAntigravityEmail,
   getGeminiEmail,
   readGeminiQuotaSnapshot,
   readGeminiSessionSnapshot,
@@ -153,6 +154,7 @@ async function main() {
   const claudeUsage = claudeUsageSnapshot.data;
   const codexEmail = getCodexEmail();
   const geminiEmail = getGeminiEmail();
+  const antigravityEmail = getAntigravityEmail();
   const codexBuckets = codexSnapshot.buckets;
   const geminiSession = geminiSessionSnapshot.session;
   const geminiQuota = geminiQuotaSnapshot.quota;
@@ -209,9 +211,9 @@ async function main() {
       contextView,
       claudeUsage,
       codexBuckets,
-      geminiSession,
-      geminiBucket,
-      combinedSvPct,
+      antigravityReady ? null : geminiSession,
+      antigravityReady ? null : geminiBucket,
+      antigravityReady ? Math.round((codexSv ?? 0) * 100) : combinedSvPct,
       antigravityReady ? "a" : "g",
     );
     process.stdout.write(`\x1b[0m${microLine}\n`);
@@ -255,9 +257,9 @@ async function main() {
       qosProfile,
       accountsConfig,
       accountsState,
-      geminiQuotaData,
-      geminiEmail,
-      geminiSv,
+      antigravityReady ? { type: "antigravity" } : geminiQuotaData,
+      antigravityReady ? antigravityEmail : geminiEmail,
+      antigravityReady ? null : geminiSv,
       null,
     ),
   ];

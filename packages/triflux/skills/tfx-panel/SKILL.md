@@ -40,7 +40,7 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) tfx-panel -> tfx-auto --mode consensus --sh
 `--mode consensus --shape panel`
 
 전문가 shape 입력:
-- `--experts "claude:Martin Fowler|Kent Beck;codex:Sam Newman|Gregor Hohpe;gemini:Michael Porter|Karl Wiegers"`
+- `--experts "claude:Martin Fowler|Kent Beck;codex:Sam Newman|Gregor Hohpe;antigravity:Michael Porter|Karl Wiegers"`
 - 명시 roster 가 없으면 `tfx-auto` 가 주제 기반 기본 roster 를 선택한다.
 
 ## 이 alias 의 의미
@@ -57,4 +57,4 @@ tfx-panel 의 본질은 "패널 전용 orchestration" 이 아니라 "전문가 r
 | 기존 호출 | 새 호출 |
 |----------|---------|
 | `/tfx-panel "모놀리스 분해 전략"` | `/tfx-auto "모놀리스 분해 전략" --mode consensus --shape panel` |
-| `/tfx-panel "가격 전략" --experts "claude:Porter;codex:Wiegers;gemini:Cagan"` | `/tfx-auto "가격 전략" --mode consensus --shape panel --experts "claude:Porter;codex:Wiegers;gemini:Cagan"` |
+| `/tfx-panel "가격 전략" --experts "claude:Porter;codex:Wiegers;antigravity:Cagan"` | `/tfx-auto "가격 전략" --mode consensus --shape panel --experts "claude:Porter;codex:Wiegers;antigravity:Cagan"` |

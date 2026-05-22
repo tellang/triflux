@@ -24,7 +24,7 @@ test("selectExecutionMode: hub가 없으면 headless", () => {
   assert.match(result.reason, /requires hub/u);
 });
 
-test("selectExecutionMode: gemini는 항상 headless", () => {
+test("selectExecutionMode: gemini alias는 Antigravity headless", () => {
   const result = selectExecutionMode({
     cli: "gemini",
     hasHub: true,
@@ -33,7 +33,7 @@ test("selectExecutionMode: gemini는 항상 headless", () => {
     taskType: "research",
   });
   assert.equal(result.mode, MODES.HEADLESS);
-  assert.match(result.reason, /gemini CLI/u);
+  assert.match(result.reason, /antigravity CLI/u);
 });
 
 test("selectExecutionMode: implement + no input -> headless", () => {
@@ -343,17 +343,21 @@ test("buildSpawnSpecForMode: codex headless empty prompt falls back to argv-inli
   assert.equal(spec.args[spec.args.length - 1], "");
 });
 
-test("buildSpawnSpecForMode: gemini headless ignores stdinPrompt (keeps --prompt flag)", () => {
+test("buildSpawnSpecForMode: gemini alias uses agy stdin print mode", () => {
   const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
     cli: "gemini",
     prompt: "ACK",
     platform: "linux",
-    resolveCommand: () => "/usr/local/bin/gemini",
+    resolveCommand: () => "/usr/local/bin/agy",
     env: {},
   });
-  assert.notEqual(spec.stdinPrompt, true);
-  assert.ok(spec.args.includes("--prompt"));
-  assert.equal(spec.args[spec.args.indexOf("--prompt") + 1], "ACK");
+  assert.equal(spec.command, "/usr/local/bin/agy");
+  assert.equal(spec.stdinPrompt, true);
+  assert.deepEqual(spec.args, [
+    "--print",
+    "--dangerously-skip-permissions",
+  ]);
+  assert.equal(spec.prompt, "ACK");
 });
 
 test("buildSpawnSpecForMode: claude headless ignores stdinPrompt (keeps -p flag)", () => {

@@ -18,7 +18,8 @@ import {
 import { createRequire } from "node:module";
 import net from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { requestJson } from "@triflux/core/hub/bridge.mjs";
 import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
 import { getMaxSpawnPerSec } from "@triflux/core/hub/lib/spawn-trace.mjs";
@@ -67,11 +68,17 @@ import { createWtManager } from "./wt-manager.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
 const DAEMON_COMPLETION_PREFIX = "__TFX_HEADLESS_DONE__:";
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 /** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
 const CLI_BRAND = {
   codex: { emoji: "\u{26AA}", label: "Codex", ansi: "\x1b[97m" }, // ⚪ bright white (codexWhite)
   gemini: { emoji: "\u{1F535}", label: "Gemini", ansi: "\x1b[38;5;39m" }, // 🔵 geminiBlue
+  antigravity: {
+    emoji: "\u{1F535}",
+    label: "Antigravity",
+    ansi: "\x1b[38;5;39m",
+  },
   claude: {
     emoji: "\u{1F7E0}",
     label: "Claude",
@@ -86,13 +93,76 @@ const _require = createRequire(import.meta.url);
 const AGENT_TO_CLI = _require("./agent-map.json");
 
 /**
- * 에이전트 역할명 또는 CLI 이름을 CLI 타입("codex"|"gemini"|"claude")으로 해석한다.
+ * 에이전트 역할명 또는 CLI 이름을 CLI 타입("codex"|"antigravity"|"claude")으로 해석한다.
  * route_agent()가 적용되지 않는 headless 경로에서 사용.
  * @param {string} agentOrCli — "executor", "codex", "designer" 등
- * @returns {'codex'|'gemini'|'claude'} CLI 타입
+ * @returns {'codex'|'antigravity'|'claude'} CLI 타입
  */
 export function resolveCliType(agentOrCli) {
   return AGENT_TO_CLI[agentOrCli] || agentOrCli;
+}
+
+function resolveHeadlessCliType(agentOrCli) {
+  const resolved = resolveCliType(agentOrCli);
+  return resolved === "gemini" ? "antigravity" : resolved;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function resolveHeadlessRouteScript(opts = {}) {
+  const candidates = [
+    opts.routeScript,
+    process.env.TFX_ROUTE_SCRIPT,
+    process.env.TFX_DELEGATOR_ROUTE_SCRIPT,
+    join(process.cwd(), "scripts", "tfx-route.sh"),
+    join(SCRIPT_DIR, "..", "..", "scripts", "tfx-route.sh"),
+    process.env.HOME
+      ? join(process.env.HOME, ".claude", "scripts", "tfx-route.sh")
+      : "",
+    "tfx-route.sh",
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (candidate === "tfx-route.sh" || existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "tfx-route.sh";
+}
+
+function resolveRouteAgentForHeadless(resolvedCli, opts = {}) {
+  const role = String(opts.role || "").trim();
+  if (role && !["gemini", "antigravity", "agy"].includes(role)) {
+    return role;
+  }
+  return resolvedCli === "antigravity" ? "antigravity" : role || resolvedCli;
+}
+
+function buildRouteBackedHeadlessCommand(
+  resolvedCli,
+  promptFile,
+  resultFile,
+  opts = {},
+) {
+  const routeScript = resolveHeadlessRouteScript(opts);
+  const routeAgent = resolveRouteAgentForHeadless(resolvedCli, opts);
+  const mcp = String(opts.mcp || "auto");
+  const timeout =
+    Number.isFinite(Number(opts.timeoutSec)) && Number(opts.timeoutSec) > 0
+      ? String(Math.trunc(Number(opts.timeoutSec)))
+      : "";
+  const timeoutArg = timeout ? ` ${shellQuote(timeout)}` : "";
+  const routeMode = resolvedCli === "antigravity" ? "antigravity" : resolvedCli;
+  const script =
+    `__tfx_prompt=$(cat ${shellQuote(promptFile)}); ` +
+    `TFX_CLI_MODE=${shellQuote(routeMode)} ` +
+    `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)}${timeoutArg} ` +
+    `> ${shellQuote(resultFile)} 2>${shellQuote(`${resultFile}.err`)} < /dev/null`;
+  return `bash -lc ${shellQuote(script)}`;
 }
 
 export function getHeadlessWorkerAgentId(sessionName, index) {
@@ -173,7 +243,7 @@ const MCP_PROFILE_HINTS = {
 
 /**
  * CLI별 헤드리스 명령 빌더
- * @param {'codex'|'gemini'|'claude'} cli
+ * @param {'codex'|'antigravity'|'claude'} cli
  * @param {string} prompt — 실행할 프롬프트
  * @param {string} resultFile — 결과 저장 파일 경로
  * @param {object} [opts]
@@ -205,7 +275,7 @@ export function buildDashboardAttachArgs(
 
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
-  const resolvedCli = resolveCliType(cli);
+  const resolvedCli = resolveHeadlessCliType(cli);
 
   // contextFile 처리: 32KB(32768 bytes) 초과 시 UTF-8 안전 절단
   let contextPrefix = "";
@@ -241,12 +311,17 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   writeFileSync(promptFile, fullPrompt, "utf8");
   void IS_WINDOWS; // referenced for diagnostic guard chain below
 
-  const backend = getBackend(resolvedCli);
-  const backendCommand = backend.buildArgs(fullPrompt, resultFile, {
-    ...opts,
-    model,
-    promptFile,
-  });
+  const backendCommand =
+    resolvedCli === "antigravity"
+      ? buildRouteBackedHeadlessCommand(resolvedCli, promptFile, resultFile, {
+          ...opts,
+          mcp,
+        })
+      : getBackend(resolvedCli).buildArgs(fullPrompt, resultFile, {
+          ...opts,
+          model,
+          promptFile,
+        });
   const safeCwd =
     typeof cwd === "string" ? cwd.trim().replace(/[\r\n\x00-\x1f]/g, "") : "";
   if (safeCwd && (safeCwd.startsWith("\\\\") || safeCwd.startsWith("//"))) {
@@ -680,7 +755,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     const assignment = assignments[i];
     const paneName = `worker-${i + 1}`;
     const workerId = getHeadlessWorkerAgentId(sessionName, i);
-    const resolvedCli = resolveCliType(assignment.cli);
+    const resolvedCli = resolveHeadlessCliType(assignment.cli);
     const brand = CLI_BRAND[resolvedCli] || {
       emoji: "\u{25CF}",
       label: resolvedCli,
@@ -708,13 +783,13 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     } catch {
       /* 무시 */
     }
-    await registerHeadlessWorker(sessionName, i, assignment.cli);
+    await registerHeadlessWorker(sessionName, i, resolvedCli);
 
     if (safeProgress)
       safeProgress({
         type: "worker_added",
         paneName,
-        cli: assignment.cli,
+        cli: resolvedCli,
         paneTitle,
       });
 
@@ -731,6 +806,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       resultFile,
       {
         mcp: assignment.mcp,
+        role: assignment.role,
         model: assignment.model,
         cwd: assignment.cwd || assignment.workdir,
       },
@@ -742,14 +818,14 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     registerHeadlessSynapseWorker(workerId, assignment.prompt);
 
     if (safeProgress)
-      safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
+      safeProgress({ type: "dispatched", paneName, cli: resolvedCli });
 
     dispatches.push({
       ...dispatch,
       paneId: newPaneId,
       paneName,
       resultFile,
-      cli: assignment.cli,
+      cli: resolvedCli,
       role: assignment.role,
       command: cmd,
       workerId,
@@ -797,6 +873,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
     assignments.map(async (assignment, i) => {
       const paneName = `worker-${i + 1}`;
       const workerId = getHeadlessWorkerAgentId(sessionName, i);
+      const resolvedCli = resolveHeadlessCliType(assignment.cli);
       const resultFile = join(
         RESULT_DIR,
         `${sessionName}-${paneName}.txt`,
@@ -809,12 +886,13 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         resultFile,
         {
           mcp: assignment.mcp,
+          role: assignment.role,
           model: assignment.model,
           cwd: assignment.cwd || assignment.workdir,
         },
       );
       const scriptDir = join(RESULT_DIR, sessionName);
-      await registerHeadlessWorker(sessionName, i, assignment.cli);
+      await registerHeadlessWorker(sessionName, i, resolvedCli);
       const dispatch = dispatchCommand(sessionName, paneName, cmd, {
         scriptDir,
         scriptName: paneName,
@@ -826,13 +904,13 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       // progressive 모드에서는 split-window 시 새 pane에 바로 타이틀이 설정되므로 문제없음
 
       if (safeProgress)
-        safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
+        safeProgress({ type: "dispatched", paneName, cli: resolvedCli });
 
       return {
         ...dispatch,
         paneName,
         resultFile,
-        cli: assignment.cli,
+        cli: resolvedCli,
         role: assignment.role,
         command: cmd,
         workerId,
@@ -852,6 +930,7 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
       const assignment = assignments[i];
       const paneName = `worker-${i + 1}`;
       const workerId = getHeadlessWorkerAgentId(sessionName, i);
+      const resolvedCli = resolveHeadlessCliType(assignment.cli);
       const resultFile = join(
         RESULT_DIR,
         `${sessionName}-${paneName}.txt`,
@@ -863,18 +942,19 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
         resultFile,
         {
           mcp: assignment.mcp,
+          role: assignment.role,
           model: assignment.model,
           cwd: assignment.cwd || assignment.workdir,
         },
       );
       const token = randomUUID().slice(0, 10);
       const short = randomUUID().replace(/-/g, "").slice(0, 8);
-      const name = `Triflux ${assignment.cli || "worker"} ${assignment.role || paneName}`;
+      const name = `Triflux ${resolvedCli || "worker"} ${assignment.role || paneName}`;
       const record = {
         paneId: `daemon:${short}`,
         paneName,
         resultFile,
-        cli: assignment.cli,
+        cli: resolvedCli,
         role: assignment.role,
         command,
         token,
@@ -916,7 +996,7 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
         short,
         cwd: assignment.cwd || assignment.workdir || process.cwd(),
         name,
-        agent: assignment.cli || "codex",
+        agent: resolvedCli || "codex",
         startedAt: job.startedAt || Date.now(),
         updatedAt: Date.now(),
       });
@@ -924,10 +1004,10 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
         paths.sessionsDir,
         projection,
       );
-      await registerHeadlessWorker(sessionName, i, assignment.cli);
+      await registerHeadlessWorker(sessionName, i, resolvedCli);
       registerHeadlessSynapseWorker(workerId, assignment.prompt);
       if (safeProgress) {
-        safeProgress({ type: "dispatched", paneName, cli: assignment.cli });
+        safeProgress({ type: "dispatched", paneName, cli: resolvedCli });
       }
     }
   } catch (error) {
@@ -1416,7 +1496,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     for (let i = 0; i < assignments.length; i++) {
       const a = assignments[i];
       tui.updateWorker(`worker-${i + 1}`, {
-        cli: a.cli || "codex",
+        cli: resolveHeadlessCliType(a.cli || "codex"),
         role: a.role || "",
         status: "pending",
         progress: 0,

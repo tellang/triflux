@@ -39,7 +39,7 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (Codex 단일).
 (tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
   curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
-  gemini --version 2>/dev/null
+  agy --version 2>/dev/null
 ```
 
 | Tier | 조건 | 실행 방식 |
@@ -57,7 +57,7 @@ Tier 3 시:
 
 ### HARD RULES
 
-1. `codex exec` / `gemini -p` 직접 호출 금지
+1. `codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 금지
 2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless ...")` 만
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
@@ -92,7 +92,7 @@ Agent(
 
 **Codex + Antigravity headless:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:시니어+보안 엔지니어로서 분석하라. 대상: {target}. 렌즈: 구현 품질, 성능, OWASP, 안정성, 기술 부채. JSON: { findings: [...], metrics: {...}, health_score: 0-100 }:security-engineer' --assign 'gemini:UX 엔지니어+테크니컬 라이터로서 분석하라. 대상: {target}. 렌즈: DX, 문서화, 접근성, 국제화, 네이밍. JSON: { findings: [...], documentation_score: 0-100, health_score: 0-100 }:ux-engineer' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:시니어+보안 엔지니어로서 분석하라. 대상: {target}. 렌즈: 구현 품질, 성능, OWASP, 안정성, 기술 부채. JSON: { findings: [...], metrics: {...}, health_score: 0-100 }:security-engineer' --assign 'antigravity:UX 엔지니어+테크니컬 라이터로서 분석하라. 대상: {target}. 렌즈: DX, 문서화, 접근성, 국제화, 네이밍. JSON: { findings: [...], documentation_score: 0-100, health_score: 0-100 }:ux-engineer' --timeout 600")
 ```
 
 #### Step 3: Tri-Debate (교차검증) — Bash + Agent 동시 호출
@@ -101,7 +101,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cod
 
 **Agent:**
 ```
-Agent(subagent_type="oh-my-claudecode:architect", model="opus", run_in_background=true, name="arch-debate", prompt="다른 두 분석가 결과: A(Codex)={codex}, B(Antigravity)={gemini}. 동의에 +1, 반대에 근거 반박, 놓친 사항 추가, health_score 재조정")
+Agent(subagent_type="oh-my-claudecode:architect", model="opus", run_in_background=true, name="arch-debate", prompt="다른 두 분석가 결과: A(Codex)={codex}, B(Antigravity)={antigravity}. 동의에 +1, 반대에 근거 반박, 놓친 사항 추가, health_score 재조정")
 ```
 
 **Bash:** (위와 동일 패턴, Codex/Antigravity 각각 교차검증)

@@ -29,7 +29,7 @@ function printStartUsage() {
   console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET}\n`);
   console.log(`  사용법: ${WHITE}tfx multi "작업 설명"${RESET}`);
   console.log(
-    `          ${WHITE}tfx multi --agents codex,gemini --lead claude "작업"${RESET}`,
+    `          ${WHITE}tfx multi --agents codex,antigravity --lead claude "작업"${RESET}`,
   );
   console.log(
     `          ${WHITE}tfx multi --teammate-mode headless "작업"${RESET} ${DIM}(psmux 헤드리스, 기본)${RESET}`,

@@ -3,7 +3,7 @@ name: tfx-auto
 description: >
   통합 CLI 오케스트레이터 + 실행 스킬 front door. 커맨드 숏컷(단일) + 자동 분류/분해(병렬)
   + 수동 병렬 + 명시 플래그 오버라이드. tfx-route.sh 기반. `--cli`, `--mode`, `--parallel`,
-  `--retry`, `--isolation`, `--remote`, `--shape`, `--cli-set`, `--risk-tier` 플래그로 legacy tfx-codex/gemini/
+  `--retry`, `--isolation`, `--remote`, `--shape`, `--cli-set`, `--risk-tier` 플래그로 legacy tfx-codex/antigravity/
   multi/swarm/fullcycle/persist/autopilot/autoroute/auto-codex 와 consensus/debate/panel 동작을 직접 제어.
   legacy 스킬은 thin alias (Phase 5 v11 삭제 예정).
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
@@ -28,7 +28,7 @@ triggers:
   - spec-panel
   - business-panel
   - index-repo
-argument-hint: "<command|task> [args...] [--cli auto|codex|gemini|claude] [--mode quick|deep|consensus] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-gemini|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none]"
+argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none]"
 ---
 
 # tfx-auto — 통합 CLI 오케스트레이터
@@ -69,7 +69,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--risk-tier`/`--shape`/`--cli-set`/`--parallel`/`--retry`/`--isolation`/`--remote` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
    - `--parallel swarm` → tfx-swarm 엔진 위임 (PRD 필요)
    - `--parallel N` → tfx-multi 엔진 위임 (headless)
-   - `--cli codex|gemini` → `TFX_CLI_MODE` 설정 + 단일 실행
+   - `--cli codex|antigravity` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
    - `--risk-tier low|medium|high` → risk-tier 기준으로 verification 강도와 mode 결정
    - `--mode ...` 명시 시 `--risk-tier` 는 무시 (mode 우선)
@@ -81,7 +81,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
    - "꼼꼼히", "제대로", "deep" → `--mode deep`
    - "끝까지", "멈추지마", "ralph" → `--retry ralph`
    - "multi", "팀", "협업" → `--parallel N --mode deep`
-   - "codex로", "gemini로" → `--cli codex` 또는 `--cli gemini`
+   - "codex로", "antigravity로" → `--cli codex` 또는 `--cli antigravity`
 
 2. **PRD 인자 분석**:
    - PRD 경로 2개 이상 → `--parallel swarm --mode consensus --isolation worktree`
@@ -125,7 +125,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 ## 플래그 오버라이드 (명시 제어, Phase 2 v10.9.33+)
 
-ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부 추론을 건너뛰고 값대로 즉시 dispatch 한다. legacy tfx-codex/gemini/multi/swarm 등을 이 플래그로 표현할 수 있게 되어, 기존 11개 실행 스킬의 front door 역할을 tfx-auto 가 맡는다.
+ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부 추론을 건너뛰고 값대로 즉시 dispatch 한다. legacy tfx-codex/antigravity/multi/swarm 등을 이 플래그로 표현할 수 있게 되어, 기존 11개 실행 스킬의 front door 역할을 tfx-auto 가 맡는다.
 
 ### 플래그 표
 
@@ -133,7 +133,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 |--------|-----|------|----------|
 | `--cli` | `auto` (기본) | Codex 분류 후 최적 CLI 선택 | 기존 라우팅 |
 | `--cli` | `codex` | Codex 전용 고정. `TFX_CLI_MODE=codex` | tfx-route.sh |
-| `--cli` | `gemini` | [deprecated alias] Antigravity 로 redirect. `TFX_CLI_MODE=gemini` (agy 없으면 legacy gemini fallback) | tfx-route.sh |
+| `--cli` | `antigravity` | Antigravity CLI 고정. `TFX_CLI_MODE=antigravity` | tfx-route.sh |
 | `--cli` | `claude` | Claude native 에이전트만 (CLI 호출 없음) | Agent() |
 | `--mode` | `quick` (기본) | fire-and-forget, plan/verify 오버헤드 없음 | 직접 실행 |
 | `--mode` | `deep` | pipeline init → plan → PRD → verify → fix loop | `-t/--thorough` 동일 |
@@ -146,11 +146,11 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--shape` | `debate` | 옵션 비교 + 점수화 + 최종 추천 | debate renderer |
 | `--shape` | `panel` | 전문가 roster 기반 시뮬레이션 | panel renderer |
 | `--cli-set` | `triad` (기본) | Claude + Codex + Antigravity | consensus participants |
-| `--cli-set` | `no-gemini` | Claude + Codex partial degrade | consensus participants |
+| `--cli-set` | `no-antigravity` | Claude + Codex partial degrade | consensus participants |
 | `--cli-set` | `custom` | 기존 3 CLI 내부 subset/repetition 만 허용 | consensus participants |
 | `--options` | `"A|B|C"` | debate 비교 대상 | debate normalizer |
 | `--criteria` | `"latency|complexity|operability"` | debate 평가 기준 | debate normalizer |
-| `--experts` | `"claude:...;codex:...;gemini:..."` | panel roster override | panel normalizer |
+| `--experts` | `"claude:...;codex:...;antigravity:..."` | panel roster override | panel normalizer |
 | `--analysis-prompt-file` | `<path>` | consensus family 공통 분석 프롬프트 주입 | consensus normalizer |
 | `--parallel` | `1` (기본) | 단일 워커 | tfx-route.sh |
 | `--parallel` | `N` | 로컬 headless 병렬 (cwd 공유) | `tfx multi` |
@@ -244,7 +244,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 /tfx-auto "병렬" --parallel N --mode deep      # = legacy tfx-multi 기본값
 /tfx-auto "PRD 실행" --parallel swarm          # = legacy tfx-swarm
 /tfx-auto "REST vs GraphQL" --mode consensus --shape debate
-/tfx-auto "모놀리스 분해 전략" --mode consensus --shape panel --experts "claude:Fowler|Beck;codex:Newman|Hohpe;gemini:Porter|Wiegers"
+/tfx-auto "모놀리스 분해 전략" --mode consensus --shape panel --experts "claude:Fowler|Beck;codex:Newman|Hohpe;antigravity:Porter|Wiegers"
 ```
 
 ### Consensus shape 계약 (Phase 4a — ensemble fold)
@@ -262,7 +262,7 @@ tfx-auto \
   "<task or topic>" \
   --mode consensus \
   --shape consensus|debate|panel \
-  --cli-set triad|no-gemini|custom \
+  --cli-set triad|no-antigravity|custom \
   [--experts "..."] \
   [--options "..."] \
   [--criteria "..."] \
@@ -282,7 +282,7 @@ shape 의미:
 | 값 | 의미 | 비고 |
 |----|------|------|
 | `triad` | Claude + Codex + Antigravity | 기본값 |
-| `no-gemini` | Claude + Codex | Antigravity 미가용 degrade |
+| `no-antigravity` | Claude + Codex | Antigravity 미가용 degrade |
 | `custom` | 기존 3 CLI 내부 subset/repetition 만 허용 | 신규 provider 추가 금지 |
 
 shape 입력 정규화:
@@ -293,7 +293,7 @@ shape 입력 정규화:
   "shape": "consensus|debate|panel",
   "topic": "...",
   "cli_set": "triad",
-  "participants": ["claude", "codex", "gemini"],
+  "participants": ["claude", "codex", "antigravity"],
   "context": "...",
   "analysis_prompt": "...",
   "shape_input": {}
@@ -316,7 +316,7 @@ shape 별 `shape_input`:
     "experts": {
       "claude": ["Martin Fowler", "Kent Beck"],
       "codex": ["Sam Newman", "Gregor Hohpe"],
-      "gemini": ["Michael Porter", "Karl Wiegers"]
+      "antigravity": ["Michael Porter", "Karl Wiegers"]
     }
   }
 }
@@ -360,7 +360,7 @@ shape 별 `shape_input`:
   "participants": [
     { "name": "claude", "status": "success" },
     { "name": "codex", "status": "success" },
-    { "name": "gemini", "status": "timeout" }
+    { "name": "antigravity", "status": "timeout" }
   ],
   "status": "complete|partial|needs_user_input"
 }
@@ -385,7 +385,7 @@ shape 별 orchestration 정책:
 - 수집 단위: 옵션 비교가 아니라 finding/assertion 단위다. 동일 결론이라도 근거가 다르면 separate evidence 로 보존한다.
 - 합의 판정: 3자 중 2자 이상이 같은 remediation 또는 risk assessment 를 지지하면 provisional agreement 로 분류하고, Claude 가 최종 `resolved_items` 승격 여부를 결정한다.
 - 충돌 승격: P1/P2 급 충돌은 score 와 무관하게 `user_decision_needed` 또는 `FIX_FIRST` 로 승격한다. score 가 높아도 안전 이슈를 묻지 않는다.
-- degrade: `no-gemini` 또는 partial timeout 시 2자 합의를 허용하되 root meta 의 `status=partial` 과 누락 participant 이유를 반드시 남긴다.
+- degrade: `no-antigravity` 또는 partial timeout 시 2자 합의를 허용하되 root meta 의 `status=partial` 과 누락 participant 이유를 반드시 남긴다.
 
 출력 schema 예시:
 
@@ -398,7 +398,7 @@ shape 별 orchestration 정책:
   "participants": [
     { "name": "claude", "status": "success" },
     { "name": "codex", "status": "success" },
-    { "name": "gemini", "status": "success" }
+    { "name": "antigravity", "status": "success" }
   ],
   "status": "complete",
   "shape_output": {
@@ -413,7 +413,7 @@ shape 별 orchestration 정책:
         "positions": {
           "claude": "defer",
           "codex": "proceed",
-          "gemini": "defer"
+          "antigravity": "defer"
         },
         "severity": "p2"
       }
@@ -472,7 +472,7 @@ shape 별 orchestration 정책:
   "participants": [
     { "name": "claude", "status": "success" },
     { "name": "codex", "status": "success" },
-    { "name": "gemini", "status": "success" }
+    { "name": "antigravity", "status": "success" }
   ],
   "status": "complete",
   "shape_output": {
@@ -569,14 +569,14 @@ shape 별 orchestration 정책:
   "participants": [
     { "name": "claude", "status": "success" },
     { "name": "codex", "status": "success" },
-    { "name": "gemini", "status": "success" }
+    { "name": "antigravity", "status": "success" }
   ],
   "status": "complete",
   "shape_output": {
     "panelists": [
       { "cli": "claude", "experts": ["Martin Fowler", "Kent Beck"] },
       { "cli": "codex", "experts": ["Sam Newman", "Gregor Hohpe"] },
-      { "cli": "gemini", "experts": ["Michael Porter", "Karl Wiegers"] }
+      { "cli": "antigravity", "experts": ["Michael Porter", "Karl Wiegers"] }
     ],
     "majority_view": "Delete routing aliases first, then consensus family, then remote aliases after usage and docs converge",
     "minority_views": [
@@ -632,7 +632,7 @@ shape 별 orchestration 정책:
 | `tfx-fullcycle` | `--mode deep --parallel 1` |
 | `tfx-persist` | `--retry ralph` (Phase 3, unlimited) |
 | `tfx-codex` | `--cli codex` |
-| `tfx-gemini` | `--cli gemini` |
+| `tfx-antigravity` | `--cli antigravity` |
 | `tfx-auto-codex` | `--cli codex --lead codex --no-claude-native` (Phase 3) |
 | `tfx-consensus` | `--mode consensus` |
 | `tfx-debate` | `--mode consensus --shape debate` |
@@ -710,7 +710,7 @@ Phase 5 삭제 게이트:
 ## 트리아지
 
 **자동 모드:**
-1. Codex 분류: `codex exec --full-auto --skip-git-repo-check` → JSON `{parts: [{description, agent: "codex|gemini|claude"}]}`
+1. Codex 분류: `codex exec --full-auto --skip-git-repo-check` → JSON `{parts: [{description, agent: "codex|antigravity|claude"}]}`
 2. Opus 인라인 분해: `{graph_type: "INDEPENDENT|SEQUENTIAL|DAG", subtasks: [{id, description, scope, agent, mcp_profile, depends_on, context_output, context_input}]}`
 3. 실패 시 Opus가 직접 분류+분해
 
@@ -853,7 +853,7 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 | architect / planner / critic / analyst | Codex (xhigh) | analyze |
 | scientist / document-specialist | Codex | analyze |
 | code-reviewer / security-reviewer / quality-reviewer | Codex (review) | review |
-| gemini / designer / writer | Antigravity | docs |
+| antigravity / designer / writer | Antigravity | docs |
 | explore / test-engineer / qa-tester | Claude native | — |
 | verifier | Codex review (기본) / Claude native (TFX_VERIFIER_OVERRIDE=claude 시) | review / — |
 
@@ -898,14 +898,14 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 ## 필수 조건
 
 - `~/.claude/scripts/tfx-route.sh` (필수)
-- codex: `npm install -g @openai/codex` | gemini: `npm install -g @google/gemini-cli`
+- codex: `npm install -g @openai/codex` | antigravity: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
 
 ## 에러 레퍼런스
 
 | 에러 | 처리 |
 |------|------|
 | `tfx-route.sh: not found` | tfx-route.sh 생성 |
-| `codex/gemini: not found` | npm install -g |
+| `codex/antigravity: not found` | npm install -g |
 | timeout / failed (`tfx-route.sh` 결과) | stderr → Claude fallback |
 | N > 10 | 10 이하로 조정 |
 | 순환 의존 | 분해 재시도 |

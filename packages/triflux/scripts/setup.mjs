@@ -2147,7 +2147,7 @@ ${B}╚════════════════════════�
 
 ${B}Commands:${R}
   ${C}triflux${R} setup     파일 동기화 + HUD 설정
-  ${C}triflux${R} doctor    CLI 진단 (Codex/Gemini 확인)
+  ${C}triflux${R} doctor    CLI 진단 (Codex/Antigravity 확인)
   ${C}triflux${R} list      설치된 스킬 목록
   ${C}triflux${R} update    최신 안정 버전으로 업데이트
   ${C}triflux${R} update --dev  dev 채널로 업데이트 (${D}dev 별칭 지원${R})
@@ -2161,7 +2161,7 @@ ${B}Skills (Claude Code):${R}
   ${C}/tfx-auto${R} "작업"                 자동 분류 + 병렬 실행
   ${C}/tfx-auto${R} "작업" --mode deep     계획 + 검증 포함
   ${C}/tfx-auto${R} "작업" --cli codex     Codex 전용 lane
-  ${C}/tfx-auto${R} "작업" --cli gemini    Gemini 전용 lane
+  ${C}/tfx-auto${R} "작업" --cli antigravity    Antigravity 전용 lane
   ${C}/tfx-setup${R}           HUD 설정 + 진단
 
 ${Y}!${R} 세션 재시작 후 스킬이 활성화됩니다

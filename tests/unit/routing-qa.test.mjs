@@ -177,10 +177,10 @@ describe("keyword-rules: 충돌 해결", () => {
     );
   });
 
-  it("MCP 라우트: notion 키워드 → gemini 라우트", () => {
+  it("MCP 라우트: notion 키워드 → antigravity 라우트", () => {
     const matches = matchRules(compiled, "노션 페이지 조회");
     const resolved = resolveConflicts(matches);
-    assert.ok(resolved.some((r) => r.mcp_route === "gemini"));
+    assert.ok(resolved.some((r) => r.mcp_route === "antigravity"));
   });
 
   it("MCP 라우트: jira 키워드 → codex 라우트", () => {
@@ -224,12 +224,12 @@ describe("route_agent: 에이전트→CLI 매핑", () => {
     });
   }
 
-  it("designer → gemini", () => {
-    assert.equal(ROUTE_TABLE.designer?.CLI_TYPE, "gemini");
+  it("designer → antigravity", () => {
+    assert.equal(ROUTE_TABLE.designer?.CLI_TYPE, "antigravity");
   });
 
-  it("writer → gemini", () => {
-    assert.equal(ROUTE_TABLE.writer?.CLI_TYPE, "gemini");
+  it("writer → antigravity", () => {
+    assert.equal(ROUTE_TABLE.writer?.CLI_TYPE, "antigravity");
   });
 
   it("explore → claude-native", () => {
@@ -272,8 +272,8 @@ describe("route_agent: effort 레벨 검증", () => {
     assert.equal(ROUTE_TABLE.codex?.CLI_EFFORT, "gpt55_high");
   });
 
-  it("gemini alias → pro31 effort", () => {
-    assert.equal(ROUTE_TABLE.gemini?.CLI_EFFORT, "pro31");
+  it("gemini alias → agy_v1 effort", () => {
+    assert.equal(ROUTE_TABLE.gemini?.CLI_EFFORT, "agy_v1");
   });
 });
 
@@ -290,18 +290,34 @@ describe("headless: buildHeadlessCommand", async () => {
     assert.ok(cmd.includes("/tmp/result.txt"));
   });
 
-  it("gemini → gemini --yolo --prompt ... --output-format text > result", () => {
+  it("gemini → tfx-route.sh antigravity 경로로 위임한다", () => {
     const cmd = buildHeadlessCommand(
       "gemini",
       "test prompt",
       "/tmp/result.txt",
     );
     assert.ok(
-      cmd.includes("gemini --yolo --prompt"),
-      `gemini --yolo --prompt 포함: ${cmd}`,
+      cmd.includes("tfx-route.sh"),
+      `tfx-route.sh 포함: ${cmd}`,
     );
-    assert.ok(cmd.includes("--output-format text"));
-    assert.ok(cmd.includes("> '/tmp/result.txt'"));
+    assert.ok(
+      cmd.includes("TFX_CLI_MODE=") && cmd.includes("antigravity"),
+      `Antigravity route mode 포함: ${cmd}`,
+    );
+    assert.ok(!cmd.includes("gemini --yolo"), `Gemini direct 금지: ${cmd}`);
+    assert.ok(!cmd.includes("agy --print"), `agy direct 금지: ${cmd}`);
+    assert.ok(cmd.includes("/tmp/result.txt"), `result 파일 포함: ${cmd}`);
+  });
+
+  it("gemini headless route는 role을 유지하며 antigravity mode만 주입한다", () => {
+    const cmd = buildHeadlessCommand("gemini", "review", "/tmp/result.txt", {
+      role: "critic",
+      mcp: "review",
+    });
+    assert.ok(cmd.includes("'critic'"), `critic role 유지: ${cmd}`);
+    assert.ok(cmd.includes("'review'"), `mcp profile 유지: ${cmd}`);
+    assert.ok(cmd.includes("TFX_CLI_MODE="), `route mode env 포함: ${cmd}`);
+    assert.ok(cmd.includes("antigravity"), `antigravity mode 포함: ${cmd}`);
   });
 
   it("claude → claude --print ... --output-format text", () => {
@@ -350,7 +366,9 @@ describe("headless: buildHeadlessCommand", async () => {
     const cmd = buildHeadlessCommand("executor", "fix bug", "/tmp/r.txt");
     assert.ok(cmd.includes("codex exec"), `executor → codex: ${cmd}`);
     const cmd2 = buildHeadlessCommand("designer", "make ui", "/tmp/r.txt");
-    assert.ok(cmd2.includes("gemini"), `designer → gemini: ${cmd2}`);
+    assert.ok(cmd2.includes("tfx-route.sh"), `designer → route: ${cmd2}`);
+    assert.ok(cmd2.includes("antigravity"), `designer → antigravity: ${cmd2}`);
+    assert.ok(!cmd2.includes("gemini --yolo"), `designer direct gemini 금지: ${cmd2}`);
   });
 
   it("MCP 프로필 힌트 주입 (implement)", async () => {
@@ -467,6 +485,15 @@ describe("tfx-route.sh: 기본 검증", () => {
       /^2\.\d+$/,
       `버전이 2.x 형식이어야 함: ${vMatch[1]}`,
     );
+  });
+
+  it("dynamic route override는 CLI별 실행 인자를 함께 재설정해야 함", () => {
+    const src = readFileSync(join(ROOT, "scripts/tfx-route.sh"), "utf8");
+    const fn = src.match(/apply_dynamic_routing_override\(\)\s*\{([\s\S]*?)^}/m)?.[1];
+    assert.ok(fn, "apply_dynamic_routing_override 함수가 있어야 함");
+    assert.match(fn, /codex\)[\s\S]*CLI_ARGS="exec --profile gpt55_high/);
+    assert.match(fn, /antigravity\)[\s\S]*CLI_ARGS="--print --dangerously-skip-permissions"/);
+    assert.match(fn, /claude\)[\s\S]*CLI_ARGS=""/);
   });
 });
 

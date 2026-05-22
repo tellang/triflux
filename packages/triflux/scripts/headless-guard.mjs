@@ -16,7 +16,7 @@
  *
  * 동작:
  * - psmux 설치 + Bash(tfx-route.sh) → updatedInput: tfx multi --headless --assign
- * - psmux 설치 + Bash(codex exec / gemini --prompt) → deny
+ * - psmux 설치 + Bash(codex exec / legacy Gemini prompt mode) → deny
  * - psmux 설치 + Agent(codex/gemini CLI 래핑) → deny
  * - psmux 미설치 → 전부 통과
  * - tfx-multi 활성 + Agent(work) before dispatch → deny (A: gate)

@@ -40,7 +40,7 @@ argument-hint: "[테스트 대상] [--quick]"
 psmux --version 2>/dev/null && \
   curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
-  gemini --version 2>/dev/null
+  agy --version 2>/dev/null
 ```
 
 | Tier | 조건 | 실행 방식 |
@@ -57,7 +57,7 @@ Tier 3 시:
 
 ### HARD RULES
 
-1. `codex exec` / `gemini -p` 직접 호출 금지
+1. `codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 금지
 2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless --assign ...")` 만
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
@@ -92,7 +92,7 @@ Agent(
 
 **Codex + Antigravity headless:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가. OWASP Top 10, O(n²), 메모리 누수, 입력 검증 누락. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --assign 'gemini:UX/접근성 전문가. API 응답 일관성, 에러 메시지, WCAG 2.1 AA, 문서-동작 일치. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가. OWASP Top 10, O(n²), 메모리 누수, 입력 검증 누락. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --assign 'antigravity:UX/접근성 전문가. API 응답 일관성, 에러 메시지, WCAG 2.1 AA, 문서-동작 일치. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --timeout 600")
 ```
 
 #### Step 3: Consensus Scoring

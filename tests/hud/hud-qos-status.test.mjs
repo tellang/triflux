@@ -19,6 +19,7 @@ const mockOmcConfigDir = join(mockHomeDir, ".omc", "config");
 const mockClaudeCacheDir = join(mockHomeDir, ".claude", "cache");
 const mockOmcStateDir = join(mockHomeDir, ".omc", "state");
 const mockGeminiDir = join(mockHomeDir, ".gemini");
+const mockAntigravityCliDir = join(mockGeminiDir, "antigravity-cli");
 
 // Ensure directories exist
 if (!existsSync(snapshotDir)) {
@@ -212,8 +213,8 @@ describe("HUD Breakpoints", () => {
 
   it("renders Antigravity as a and hides the Gemini g marker when ready", () => {
     const preflightPath = join(mockClaudeCacheDir, "tfx-preflight.json");
-    const oauthPath = join(mockGeminiDir, "oauth_creds.json");
-    mkdirSync(mockGeminiDir, { recursive: true });
+    const oauthPath = join(mockAntigravityCliDir, "oauth_creds.json");
+    mkdirSync(mockAntigravityCliDir, { recursive: true });
     writeFileSync(
       preflightPath,
       JSON.stringify({
@@ -229,9 +230,11 @@ describe("HUD Breakpoints", () => {
     try {
       const fullOutput = stripAnsiText(runHudWithDimensions(120, 40));
       assert.match(fullOutput, /^a:/m);
-      assert.match(fullOutput, /^a: .*5h:.*1w:/m);
+      assert.match(fullOutput, /^a: .*q:/m);
       assert.doesNotMatch(fullOutput, /^a: .*Pr:/m);
       assert.doesNotMatch(fullOutput, /^a: .*Fl:/m);
+      assert.doesNotMatch(fullOutput, /^a: .*5h:/m);
+      assert.doesNotMatch(fullOutput, /^a: .*1w:/m);
       assert.match(fullOutput, /\bhudacct\b/);
       assert.doesNotMatch(fullOutput, /\banti\b/);
       assert.doesNotMatch(fullOutput, /^g:/m);
@@ -239,6 +242,8 @@ describe("HUD Breakpoints", () => {
 
       const nanoOutput = stripAnsiText(runHudWithDimensions(35, 40));
       assert.match(nanoOutput, /\ba:/);
+      assert.match(nanoOutput, /\ba:--/);
+      assert.doesNotMatch(nanoOutput, /\ba:90\b/);
       assert.doesNotMatch(nanoOutput, /\bg:/);
     } finally {
       rmSync(preflightPath, { force: true });

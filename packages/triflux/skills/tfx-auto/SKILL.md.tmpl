@@ -57,7 +57,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
    - "꼼꼼히", "제대로", "deep" → `--mode deep`
    - "끝까지", "멈추지마", "ralph" → `--retry ralph`
    - "multi", "팀", "협업" → `--parallel N --mode deep`
-   - "codex로", "gemini로" → `--cli codex` 또는 `--cli gemini`
+   - "codex로", "antigravity로" → `--cli codex` 또는 `--cli antigravity`
 
 2. **PRD 인자 분석**:
    - PRD 경로 2개 이상 → `--parallel swarm --mode consensus --isolation worktree`
@@ -152,7 +152,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 ## 트리아지
 
 **자동 모드:**
-1. Codex 분류: `codex exec --full-auto --skip-git-repo-check` → JSON `{parts: [{description, agent: "codex|gemini|claude"}]}`
+1. Codex 분류: `codex exec --full-auto --skip-git-repo-check` → JSON `{parts: [{description, agent: "codex|antigravity|claude"}]}`
 2. Opus 인라인 분해: `{graph_type: "INDEPENDENT|SEQUENTIAL|DAG", subtasks: [{id, description, scope, agent, mcp_profile, depends_on, context_output, context_input}]}`
 3. 실패 시 Opus가 직접 분류+분해
 
@@ -261,7 +261,7 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 | architect / planner / critic / analyst | Codex (xhigh) | analyze |
 | scientist / document-specialist | Codex | analyze |
 | code-reviewer / security-reviewer / quality-reviewer | Codex (review) | review |
-| gemini / designer / writer | Antigravity | docs |
+| antigravity / designer / writer | Antigravity | docs |
 | explore / test-engineer / qa-tester | Claude native | — |
 | verifier | Codex review (기본) / Claude native (TFX_VERIFIER_OVERRIDE=claude 시) | review / — |
 
@@ -306,14 +306,14 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 ## 필수 조건
 
 - `~/.claude/scripts/tfx-route.sh` (필수)
-- codex: `npm install -g @openai/codex` | gemini: `npm install -g @google/gemini-cli`
+- codex: `npm install -g @openai/codex` | antigravity: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
 
 ## 에러 레퍼런스
 
 | 에러 | 처리 |
 |------|------|
 | `tfx-route.sh: not found` | tfx-route.sh 생성 |
-| `codex/gemini: not found` | npm install -g |
+| `codex/antigravity: not found` | npm install -g |
 | timeout / failed (`tfx-route.sh` 결과) | stderr → Claude fallback |
 | N > 10 | 10 이하로 조정 |
 | 순환 의존 | 분해 재시도 |

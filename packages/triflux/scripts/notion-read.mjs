@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// notion-read.mjs v1.2 — Notion 대형 페이지 리더 (Codex/Gemini/Claude MCP 위임)
+// notion-read.mjs v1.2 — Notion 대형 페이지 리더 (Codex/Antigravity/Claude MCP 위임)
 //
-// Codex/Gemini/Claude CLI에 설치된 Notion MCP를 활용하여 대형 페이지를 마크다운으로 추출.
-// 폴백 체인: Codex(무료) → Gemini(무료) → Claude(최후) → 에러
+// Codex/Antigravity/Claude CLI에 설치된 Notion MCP를 활용하여 대형 페이지를 마크다운으로 추출.
+// 폴백 체인: Codex → Antigravity → Claude(최후) → 에러
 // 이관 모드(--delegate): Claude(notion-guest 우선) 단독 실행 + 결과 파일 저장
 //
 // 사용법:
@@ -12,7 +12,7 @@
 // 옵션:
 //   --output, -o <file>      결과 파일 저장 (기본: stdout)
 //   --timeout, -t <sec>      CLI 타임아웃 (기본: 600)
-//   --cli, -c <codex|gemini> CLI 강제 지정 (기본: 자동 + 폴백)
+//   --cli, -c <codex|antigravity|agy|claude> CLI 강제 지정 (기본: 자동 + 폴백)
 //   --depth, -d <n>          중첩 블록 최대 깊이 (기본: 3)
 //   --guest                  notion-guest 통합 사용 (기본: notion)
 //   --delegate               Claude 이관 모드 (notion-guest 우선, 파일 저장)
@@ -72,7 +72,7 @@ function parseNotionUrl(input) {
 // ── MCP 가용성 확인 ──
 function getNotionMcpClis(useGuest) {
   const serverName = useGuest ? "notion-guest" : "notion";
-  const result = { codex: false, gemini: false };
+  const result = { codex: false, antigravity: false };
 
   if (!existsSync(MCP_CACHE)) return result;
 
@@ -86,8 +86,9 @@ function getNotionMcpClis(useGuest) {
           (s.status === "enabled" || s.status === "configured"),
       );
     }
-    if (inv.gemini?.servers) {
-      result.gemini = inv.gemini.servers.some(
+    const agyInventory = inv.antigravity?.servers || inv.gemini?.servers;
+    if (agyInventory) {
+      result.antigravity = agyInventory.some(
         (s) =>
           s.name === serverName &&
           (s.status === "enabled" || s.status === "configured"),
@@ -115,6 +116,16 @@ function cliExists(name) {
   } catch {
     return false;
   }
+}
+
+function normalizeCliType(cliType) {
+  const value = String(cliType || "").trim().toLowerCase();
+  if (value === "gemini" || value === "agy") return "antigravity";
+  return value;
+}
+
+function shellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 // ── 프롬프트 생성 ──
@@ -201,8 +212,9 @@ ${mcpServer} MCP 서버의 도구를 사용하라.
 
 // ── CLI 실행 (임시 파일 + execSync — Windows .cmd 호환) ──
 function runWithCli(cliType, prompt, timeout, runMode = "fg") {
+  cliType = normalizeCliType(cliType);
   const cliName =
-    cliType === "claude" ? "claude" : cliType === "codex" ? "codex" : "gemini";
+    cliType === "claude" ? "claude" : cliType === "codex" ? "codex" : "agy";
   if (!cliExists(cliName)) {
     return {
       success: false,
@@ -223,8 +235,8 @@ function runWithCli(cliType, prompt, timeout, runMode = "fg") {
   let cmd;
   if (cliType === "codex") {
     cmd = buildExecArgs({ prompt: metaPrompt });
-  } else if (cliType === "gemini") {
-    cmd = `gemini -m gemini-3-flash-preview -y --allowed-mcp-server-names notion,notion-guest --prompt "${metaPrompt}"`;
+  } else if (cliType === "antigravity") {
+    cmd = `agy --print --dangerously-skip-permissions < ${shellSingleQuote(promptPath)}`;
   } else {
     // Claude CLI — print 모드 (MCP 도구 자동 접근)
     cmd = `claude -p "${metaPrompt}"`;
@@ -356,7 +368,7 @@ function main() {
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
     console.log(`
   ${AMBER}${BOLD}notion-read${RESET} ${DIM}v${VERSION}${RESET}
-  ${GRAY}Notion 대형 페이지 리더 — Codex/Gemini MCP 위임${RESET}
+  ${GRAY}Notion 대형 페이지 리더 — Codex/Antigravity MCP 위임${RESET}
 
   ${BOLD}사용법${RESET}
     tfx notion-read <notion-url-or-page-id> [옵션]
@@ -364,19 +376,19 @@ function main() {
   ${BOLD}옵션${RESET}
     --output, -o <file>       결과 파일 저장 (기본: stdout)
     --timeout, -t <sec>       CLI 타임아웃 (기본: 600)
-    --cli, -c <codex|gemini|claude>  CLI 강제 지정 (기본: 자동 + 폴백)
+    --cli, -c <codex|antigravity|agy|claude>  CLI 강제 지정 (기본: 자동 + 폴백)
     --depth, -d <n>           중첩 블록 최대 깊이 (기본: 3)
     --comments                블록/페이지 댓글 포함
     --guest                   notion-guest 통합 사용
     --delegate                Claude 이관 모드 (notion-guest 우선, 파일 저장)
 
   ${BOLD}폴백 체인${RESET}
-    Codex(무료) → Gemini(무료) → Claude(최후) → 에러
+    Codex → Antigravity → Claude(최후) → 에러
 
   ${BOLD}예시${RESET}
     tfx notion-read https://notion.so/Page-abc123def456...
     tfx notion-read abc123def456... --output page.md --comments
-    tfx notion-read abc123def456... --cli gemini --timeout 900
+    tfx notion-read abc123def456... --cli antigravity --timeout 900
     tfx notion-read abc123def456... --guest --comments
     tfx notion-read abc123def456... --delegate
     tfx notion-read abc123def456... --delegate --output .notion-cache/page.md
@@ -406,7 +418,7 @@ function main() {
         break;
       case "--cli":
       case "-c":
-        forceCli = args[++i];
+        forceCli = normalizeCliType(args[++i]);
         break;
       case "--depth":
       case "-d":
@@ -507,7 +519,7 @@ function main() {
         `${RED}✗${RESET} delegate 모드 실패: Claude 결과가 비정상적입니다.`,
       );
       console.error(
-        `${GRAY}  대안: --delegate 없이 실행해 Codex/Gemini/Claude 폴백 체인을 사용하세요.${RESET}`,
+        `${GRAY}  대안: --delegate 없이 실행해 Codex/Antigravity/Claude 폴백 체인을 사용하세요.${RESET}`,
       );
       process.exit(1);
     }
@@ -529,35 +541,35 @@ function main() {
   // MCP 가용성 확인
   const mcpAvail = getNotionMcpClis(useGuest);
   console.error(
-    `${GRAY}  MCP: codex=${mcpAvail.codex ? "O" : "X"} gemini=${mcpAvail.gemini ? "O" : "X"}${RESET}`,
+    `${GRAY}  MCP: codex=${mcpAvail.codex ? "O" : "X"} antigravity=${mcpAvail.antigravity ? "O" : "X"}${RESET}`,
   );
 
   // MCP 미설치 안내
-  if (!mcpAvail.codex && !mcpAvail.gemini) {
-    console.error(`${YELLOW}!${RESET} Codex/Gemini에 Notion MCP 미설치.`);
+  if (!mcpAvail.codex && !mcpAvail.antigravity) {
+    console.error(`${YELLOW}!${RESET} Codex/Antigravity에 Notion MCP 미설치.`);
     console.error(`${GRAY}  Codex: codex mcp add notion${RESET}`);
     console.error(
-      `${GRAY}  Gemini: ~/.gemini/settings.json에 notion 서버 추가${RESET}`,
+      `${GRAY}  Antigravity: Antigravity MCP 설정에 notion 서버 추가${RESET}`,
     );
     console.error(`${GRAY}  설치 후 tfx doctor --reset으로 캐시 갱신${RESET}`);
   } else if (!mcpAvail.codex) {
     console.error(
       `${GRAY}  Codex에 Notion MCP 미설치: codex mcp add notion${RESET}`,
     );
-  } else if (!mcpAvail.gemini) {
+  } else if (!mcpAvail.antigravity) {
     console.error(
-      `${GRAY}  Gemini에 Notion MCP 미설치: ~/.gemini/settings.json 확인${RESET}`,
+      `${GRAY}  Antigravity에 Notion MCP 미설치: Antigravity MCP 설정 확인${RESET}`,
     );
   }
 
-  // CLI 실행 순서 결정 (Codex → Gemini → Claude)
+  // CLI 실행 순서 결정 (Codex → Antigravity → Claude)
   let cliOrder;
   if (forceCli) {
     cliOrder = [forceCli];
   } else {
     cliOrder = [];
     if (mcpAvail.codex) cliOrder.push("codex");
-    if (mcpAvail.gemini) cliOrder.push("gemini");
+    if (mcpAvail.antigravity) cliOrder.push("antigravity");
     // Claude는 항상 최종 폴백 (자체 Notion MCP — notion-guest 포함)
     cliOrder.push("claude");
   }

@@ -15,9 +15,14 @@ describe("launcher-template: getAdapter", () => {
     assert.equal(typeof adapter.env, "function");
   });
 
-  it("gemini adapter를 반환해야 한다", () => {
+  it("gemini alias adapter는 agy를 반환해야 한다", () => {
     const adapter = getAdapter("gemini");
-    assert.equal(adapter.bin, "gemini");
+    assert.equal(adapter.bin, "agy");
+  });
+
+  it("antigravity adapter를 반환해야 한다", () => {
+    const adapter = getAdapter("antigravity");
+    assert.equal(adapter.bin, "agy");
   });
 
   it("claude adapter를 반환해야 한다", () => {
@@ -48,12 +53,15 @@ describe("launcher-template: buildLauncher", () => {
     );
   });
 
-  it("gemini 런처에 --yolo가 포함되어야 한다", () => {
+  it("gemini 런처는 agy stdin print 계약을 사용해야 한다", () => {
     const result = buildLauncher({ agent: "gemini", prompt: "test" });
+    assert.equal(result.bin, "agy");
+    assert.ok(result.command.includes("agy --print"), result.command);
     assert.ok(
-      result.command.includes("--yolo"),
-      `expected --yolo in: ${result.command}`,
+      result.command.includes("--dangerously-skip-permissions"),
+      result.command,
     );
+    assert.ok(!result.command.includes("gemini "), result.command);
   });
 
   it("claude 런처에 -p 플래그가 포함되어야 한다", () => {
@@ -89,10 +97,11 @@ describe("launcher-template: buildLauncher", () => {
 });
 
 describe("launcher-template: listAgents", () => {
-  it("codex, gemini, claude를 포함해야 한다", () => {
+  it("codex, gemini alias, antigravity, claude를 포함해야 한다", () => {
     const agents = listAgents();
     assert.ok(agents.includes("codex"));
     assert.ok(agents.includes("gemini"));
+    assert.ok(agents.includes("antigravity"));
     assert.ok(agents.includes("claude"));
   });
 });

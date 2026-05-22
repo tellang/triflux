@@ -49,7 +49,7 @@ tfx-debate 의 본질은 "3-CLI 토론 엔진"이 아니라 "옵션 비교와 �
 
 공통 규약:
 - participants 기본값은 `triad` (Claude + Codex + Antigravity)
-- `--cli-set no-gemini` 시 partial consensus 로 degrade 가능
+- `--cli-set no-antigravity` 시 partial consensus 로 degrade 가능
 - 공통 `meta_judgment` 는 `hub/team/consensus-meta.mjs` 스키마를 따른다
 
 ## 마이그레이션 가이드

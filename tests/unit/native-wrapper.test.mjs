@@ -26,6 +26,7 @@ describe("hub/team/native.mjs — route env prefix", () => {
     });
 
     assert.match(prompt, /TFX_WORKER_INDEX="2"/);
+    assert.match(prompt, /TFX_CLI_MODE="codex"/);
     assert.match(prompt, /subagent_type="slim-wrapper"/);
     // v2.3: Bash 완료 후 TaskUpdate + SendMessage로 Claude Code 태스크 동기화
     assert.match(prompt, /TaskUpdate\(taskId:/);
@@ -34,6 +35,20 @@ describe("hub/team/native.mjs — route env prefix", () => {
       prompt,
       /허용 도구: Bash, TaskUpdate, TaskGet, TaskList, SendMessage만 사용한다/,
     );
+  });
+
+  it("Gemini/Antigravity 래퍼는 tfx-route.sh에 antigravity mode를 주입해야 한다", () => {
+    const prompt = buildSlimWrapperPrompt("gemini", {
+      subtask: "quota strategy",
+      agentName: "gemini-2",
+      role: "critic",
+      mcp_profile: "review",
+    });
+
+    assert.match(prompt, /TFX_CLI_MODE="antigravity"/);
+    assert.match(prompt, /tfx-route\.sh/);
+    assert.doesNotMatch(prompt, /gemini\s+--yolo/);
+    assert.doesNotMatch(prompt, /agy\s+--print/);
   });
 
   it("하이브리드 래퍼는 명시적 workerIndex와 searchTool을 함께 주입해야 한다", () => {
@@ -47,6 +62,7 @@ describe("hub/team/native.mjs — route env prefix", () => {
 
     assert.match(prompt, /TFX_WORKER_INDEX="3"/);
     assert.match(prompt, /TFX_SEARCH_TOOL="exa"/);
+    assert.match(prompt, /TFX_CLI_MODE="codex"/);
   });
 
   it("슬림 래퍼 agent spec은 slim-wrapper subagent_type을 명시해야 한다", () => {

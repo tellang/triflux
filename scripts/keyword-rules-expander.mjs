@@ -17,16 +17,16 @@ const SOURCE_FILTER = "ollama-%";
 
 // 서비스명 → 기본 mcp_route 매핑
 const MCP_SERVICE_ROUTE_MAP = {
-  notion: "gemini",
+  notion: "antigravity",
   jira: "codex",
-  chrome: "gemini",
-  playwright: "gemini",
-  canva: "gemini",
-  calendar: "gemini",
-  gmail: "gemini",
-  email: "gemini",
+  chrome: "antigravity",
+  playwright: "antigravity",
+  canva: "antigravity",
+  calendar: "antigravity",
+  gmail: "antigravity",
+  email: "antigravity",
   github: "codex",
-  figma: "gemini",
+  figma: "antigravity",
 };
 
 const MCP_SERVICE_NAMES = new Set([
@@ -321,7 +321,7 @@ function classifyCandidate(keyword) {
       type: "mcp_route",
       label: "mcp_route 규칙 후보",
       skill: null,
-      mcpRoute: MCP_SERVICE_ROUTE_MAP[normalized] || "gemini",
+      mcpRoute: MCP_SERVICE_ROUTE_MAP[normalized] || "antigravity",
     };
   }
 
