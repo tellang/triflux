@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   buildDaemonExecDispatchPayload,
   killDaemonJob,
+  resolveDaemonBridgeSessionId,
   sendClaudeControlRequest,
   waitForDaemonJobPid,
 } from "./claude-daemon-control.mjs";
@@ -333,6 +334,8 @@ export async function registerSwarmShard({
   const sendControl =
     _deps.sendClaudeControlRequest || sendClaudeControlRequest;
   const waitForPid = _deps.waitForDaemonJobPid || waitForDaemonJobPid;
+  const resolveBridgeSessionId =
+    _deps.resolveDaemonBridgeSessionId || resolveDaemonBridgeSessionId;
   const readProcStart = _deps.getProcStart || getProcStart;
   const buildProjection =
     _deps.buildClaudeSessionProjection || buildClaudeSessionProjection;
@@ -377,6 +380,12 @@ export async function registerSwarmShard({
 
   const job = await waitForPid(paths.controlSock, short, { timeoutMs: 1000 });
   const pid = job.pid;
+  const bridgeSessionId = await resolveBridgeSessionId({
+    daemonPaths: paths,
+    short,
+    job,
+    timeoutMs: 1000,
+  });
   const projection = buildProjection({
     pid,
     procStart: readProcStart(pid),
@@ -387,6 +396,7 @@ export async function registerSwarmShard({
     agent: cli,
     startedAt: job.startedAt || Date.now(),
     updatedAt: Date.now(),
+    bridgeSessionId,
   });
   const sessionProjectionPath = await writeProjection(sessionsDir, projection);
   let closed = false;

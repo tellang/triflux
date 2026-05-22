@@ -10,6 +10,7 @@ import {
   buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths,
   findDaemonJobByShort,
+  resolveDaemonBridgeSessionId,
   sendClaudeControlRequest,
   sendKillBySessionId,
 } from "../../hub/team/claude-daemon-control.mjs";
@@ -57,6 +58,7 @@ test("deriveClaudeDaemonPaths matches Claude daemon hash convention", () => {
     paths.sessionsDir,
     path.join(path.resolve(configDir), "sessions"),
   );
+  assert.equal(paths.jobsDir, path.join(path.resolve(configDir), "jobs"));
 });
 
 test("sendClaudeControlRequest sends one JSON line and parses first response line", async () => {
@@ -114,6 +116,32 @@ test("findDaemonJobByShort returns a daemon list job by short id", () => {
 
   assert.deepEqual(job, { short: "22222222", pid: 42 });
   assert.equal(findDaemonJobByShort({ ok: true, jobs: [] }, "missing"), null);
+});
+
+test("resolveDaemonBridgeSessionId reads Claude job state bridge id", async () => {
+  const configDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "claude-bridge-session-"),
+  );
+  const paths = deriveClaudeDaemonPaths({ configDir });
+  await fs.mkdir(path.join(paths.jobsDir, "deadbeef"), { recursive: true });
+  await fs.writeFile(
+    path.join(paths.jobsDir, "deadbeef", "state.json"),
+    `${JSON.stringify({ bridgeSessionId: "cse_01NativeBridge" })}\n`,
+    "utf8",
+  );
+
+  try {
+    const bridgeSessionId = await resolveDaemonBridgeSessionId({
+      daemonPaths: paths,
+      short: "deadbeef",
+      job: { short: "deadbeef", pid: 123 },
+      timeoutMs: 10,
+    });
+
+    assert.equal(bridgeSessionId, "cse_01NativeBridge");
+  } finally {
+    await fs.rm(configDir, { recursive: true, force: true });
+  }
 });
 
 test("killDaemonJobBySessionId resolves short then sends kill", async () => {

@@ -67,6 +67,9 @@ test("local shard registers Triflux swarm shard row with shard display name", as
       cwd: "/tmp/project",
       host: "local",
       configDir,
+      _deps: {
+        resolveDaemonBridgeSessionId: async () => "cse_01SwarmBridge",
+      },
     });
 
     const dispatch = requests.find((request) => request.op === "dispatch");
@@ -96,7 +99,7 @@ test("local shard registers Triflux swarm shard row with shard display name", as
     assert.equal(projection.agent, "codex");
     assert.equal(projection.sessionId, dispatch.d.sessionId);
     assert.equal(projection.jobId, dispatch.d.short);
-    assert.equal(projection.bridgeSessionId, `session_${dispatch.d.short}`);
+    assert.equal(projection.bridgeSessionId, "session_01SwarmBridge");
 
     await registration.close();
     await assert.rejects(

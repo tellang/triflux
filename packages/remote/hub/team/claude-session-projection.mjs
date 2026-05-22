@@ -1,6 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+export function normalizeClaudeBridgeSessionId(bridgeSessionId, short) {
+  const value = String(bridgeSessionId || "").trim();
+  if (value.startsWith("session_")) return value;
+  if (value.startsWith("cse_")) return `session_${value.slice(4)}`;
+  if (value) return value;
+  return `session_${short}`;
+}
+
 export function buildClaudeSessionProjection({
   pid,
   procStart,
@@ -13,6 +21,7 @@ export function buildClaudeSessionProjection({
   updatedAt = Date.now(),
   status = "busy",
   version = "triflux-native-bridge",
+  bridgeSessionId,
 } = {}) {
   if (!Number.isInteger(pid) || pid <= 0) throw new Error("pid is required");
   if (!procStart) throw new Error("procStart is required");
@@ -36,7 +45,7 @@ export function buildClaudeSessionProjection({
     jobId: short,
     status,
     updatedAt,
-    bridgeSessionId: `session_${short}`,
+    bridgeSessionId: normalizeClaudeBridgeSessionId(bridgeSessionId, short),
   };
 }
 

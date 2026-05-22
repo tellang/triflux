@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -27,6 +28,7 @@ export function deriveClaudeDaemonPaths({
     controlSock: path.join(daemonDir, "control.sock"),
     rosterPath: path.join(resolvedConfigDir, "daemon", "roster.json"),
     sessionsDir: path.join(resolvedConfigDir, "sessions"),
+    jobsDir: path.join(resolvedConfigDir, "jobs"),
   };
 }
 
@@ -166,6 +168,54 @@ export async function waitForDaemonJobPid(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`Claude daemon dispatch did not expose a pid for ${short}`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function bridgeSessionIdFromJob(job) {
+  return (
+    job?.bridgeSessionId ||
+    job?.bridge_session_id ||
+    job?.bridge?.sessionId ||
+    job?.state?.bridgeSessionId ||
+    ""
+  );
+}
+
+async function readDaemonJobStateBridgeSessionId(jobsDir, short) {
+  if (!jobsDir || !short) return "";
+  try {
+    const statePath = path.join(jobsDir, short, "state.json");
+    const parsed = JSON.parse(await fs.readFile(statePath, "utf8"));
+    return bridgeSessionIdFromJob(parsed);
+  } catch (error) {
+    if (error?.code === "ENOENT") return "";
+    if (error instanceof SyntaxError) return "";
+    throw error;
+  }
+}
+
+export async function resolveDaemonBridgeSessionId({
+  daemonPaths = {},
+  short,
+  job,
+  timeoutMs = 1000,
+} = {}) {
+  const direct = bridgeSessionIdFromJob(job);
+  if (direct) return direct;
+
+  const jobsDir =
+    daemonPaths.jobsDir ||
+    (daemonPaths.configDir ? path.join(daemonPaths.configDir, "jobs") : "");
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  while (true) {
+    const fromState = await readDaemonJobStateBridgeSessionId(jobsDir, short);
+    if (fromState) return fromState;
+    if (Date.now() >= deadline) return "";
+    await sleep(Math.min(50, Math.max(1, deadline - Date.now())));
+  }
 }
 
 export async function killDaemonJob(controlSock, short) {

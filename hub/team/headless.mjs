@@ -29,6 +29,7 @@ import {
   buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths as deriveClaudeControlPaths,
   killDaemonJob,
+  resolveDaemonBridgeSessionId,
   sendClaudeControlRequest,
   sendKillBySessionId,
   waitForDaemonJobPid,
@@ -989,6 +990,11 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
       }
 
       const job = await waitForDaemonJobPid(paths.controlSock, short);
+      const bridgeSessionId = await resolveDaemonBridgeSessionId({
+        daemonPaths: paths,
+        short,
+        job,
+      });
       const projection = buildClaudeSessionProjection({
         pid: job.pid,
         procStart: getProcStart(job.pid),
@@ -999,6 +1005,7 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
         agent: resolvedCli || "codex",
         startedAt: job.startedAt || Date.now(),
         updatedAt: Date.now(),
+        bridgeSessionId,
       });
       record.sessionProjectionPath = await writeClaudeSessionProjection(
         paths.sessionsDir,
