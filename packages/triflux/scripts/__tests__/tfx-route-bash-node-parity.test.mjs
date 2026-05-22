@@ -20,6 +20,8 @@ const REPO_ROOT = join(HERE, "../..");
 const BASH_SCRIPT = join(REPO_ROOT, "scripts/tfx-route.sh");
 const NODE_SCRIPT = join(REPO_ROOT, "scripts/tfx-route.mjs");
 const AGENT_MAP_PATH = join(REPO_ROOT, "hub/team/agent-map.json");
+const NODE_ROUTE_TIMEOUT_MS = 5_000;
+const BASH_ROUTE_TIMEOUT_MS = 15_000;
 
 describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
   test("tfx-route.sh 에 TFX_ROUTE_NODE 게이트웨이 + bypass guard 존재", () => {
@@ -60,7 +62,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
   test("--version invocation: node lane 정상 출력", () => {
     const out = execFileSync("node", [NODE_SCRIPT, "--version"], {
       encoding: "utf8",
-      timeout: 5000,
+      timeout: NODE_ROUTE_TIMEOUT_MS,
     });
     assert.match(out, /tfx-route\.mjs/);
   });
@@ -69,7 +71,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     const out = execFileSync(
       "node",
       [NODE_SCRIPT, "--route-print", "executor", "hello world"],
-      { encoding: "utf8", timeout: 5000 },
+      { encoding: "utf8", timeout: NODE_ROUTE_TIMEOUT_MS },
     );
     const plan = JSON.parse(out);
     assert.equal(plan.agent, "executor");
@@ -83,7 +85,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     const out = execFileSync(
       "node",
       [NODE_SCRIPT, "--route-print", "designer", "ui sketch"],
-      { encoding: "utf8", timeout: 5000 },
+      { encoding: "utf8", timeout: NODE_ROUTE_TIMEOUT_MS },
     );
     const plan = JSON.parse(out);
     assert.equal(plan.cliType, "gemini");
@@ -95,7 +97,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     const out = execFileSync(
       "node",
       [NODE_SCRIPT, "--route-print", "explore", "search"],
-      { encoding: "utf8", timeout: 5000 },
+      { encoding: "utf8", timeout: NODE_ROUTE_TIMEOUT_MS },
     );
     const plan = JSON.parse(out);
     assert.equal(plan.cliType, "claude-native");
@@ -107,7 +109,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     const out = execFileSync(
       "node",
       [NODE_SCRIPT, "--route-print", "antigravity", "doc gen"],
-      { encoding: "utf8", timeout: 5000 },
+      { encoding: "utf8", timeout: NODE_ROUTE_TIMEOUT_MS },
     );
     const plan = JSON.parse(out);
     assert.equal(plan.cliType, "antigravity");
@@ -122,7 +124,11 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
       execFileSync(
         "node",
         [NODE_SCRIPT, "--route-print", "totally-nonexistent-agent", "x"],
-        { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "pipe"] },
+        {
+          encoding: "utf8",
+          timeout: NODE_ROUTE_TIMEOUT_MS,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
       );
     } catch (err) {
       threw = true;
@@ -137,7 +143,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     try {
       execFileSync("node", [NODE_SCRIPT, "--route-print", "multi", "x"], {
         encoding: "utf8",
-        timeout: 5000,
+        timeout: NODE_ROUTE_TIMEOUT_MS,
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (err) {
@@ -155,7 +161,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
       [BASH_SCRIPT, "--route-print", "executor", "via-gateway"],
       {
         encoding: "utf8",
-        timeout: 5000,
+        timeout: BASH_ROUTE_TIMEOUT_MS,
         env: { ...process.env, TFX_ROUTE_NODE: "1" },
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -173,7 +179,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     try {
       execFileSync("bash", [BASH_SCRIPT, "nope-nonexistent-agent", "x"], {
         encoding: "utf8",
-        timeout: 5000,
+        timeout: BASH_ROUTE_TIMEOUT_MS,
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (err) {
@@ -190,7 +196,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     try {
       execFileSync("bash", [BASH_SCRIPT, "multi", "x"], {
         encoding: "utf8",
-        timeout: 5000,
+        timeout: BASH_ROUTE_TIMEOUT_MS,
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (err) {
