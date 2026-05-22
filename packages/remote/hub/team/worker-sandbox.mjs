@@ -71,6 +71,10 @@ export function buildWorkerSandboxEnv(opts = {}) {
     XDG_CACHE_HOME: xdgCache,
     XDG_STATE_HOME: xdgState,
   };
+  const hostHome = env.HOME || env.USERPROFILE;
+  if (!env.CODEX_HOME && hostHome) {
+    overlay.CODEX_HOME = join(hostHome, ".codex");
+  }
 
   const winParts =
     windowsHomeParts(home) ||
