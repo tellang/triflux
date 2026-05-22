@@ -5,7 +5,7 @@
   "$defs": {
     "Provider": {
       "type": "string",
-      "enum": ["auto", "codex", "gemini"]
+      "enum": ["auto", "codex", "antigravity", "gemini"]
     },
     "Mode": {
       "type": "string",

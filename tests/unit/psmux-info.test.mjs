@@ -25,9 +25,9 @@ describe("psmux-info", () => {
   it("guidance formatters include official install/update commands (win32)", () => {
     const installText = formatPsmuxInstallGuidance("", "win32");
     const updateText = formatPsmuxUpdateGuidance("", "win32");
-    assert.match(installText, /winget install marlocarlo\.psmux/);
+    assert.match(installText, /winget install psmux/);
     assert.match(installText, /scoop install psmux/);
-    assert.match(updateText, /winget upgrade marlocarlo\.psmux/);
+    assert.match(updateText, /winget upgrade psmux/);
     assert.match(updateText, /cargo install psmux --force/);
   });
 
@@ -38,8 +38,8 @@ describe("psmux-info", () => {
     assert.doesNotMatch(installText, /winget|scoop|choco/);
     assert.match(installText, /brew install psmux/);
     assert.match(installText, /cargo install psmux/);
-    // tmux native fallback 안내가 mac 가이드에 포함된다.
-    assert.match(installText, /tmux|native teams fallback/);
+    // tmux primary 안내가 mac 가이드에 포함된다.
+    assert.match(installText, /tmux.*primary|tmux.*표준|in-process\/native fallback/);
     assert.match(updateText, /brew upgrade psmux/);
     assert.match(updateText, /cargo install psmux --force/);
     assert.doesNotMatch(updateText, /winget|choco/);
@@ -50,7 +50,7 @@ describe("psmux-info", () => {
     const updateText = formatPsmuxUpdateGuidance("", "linux");
     assert.doesNotMatch(installText, /winget|scoop|choco|brew/);
     assert.match(installText, /cargo install psmux/);
-    assert.match(installText, /tmux|native teams fallback/);
+    assert.match(installText, /tmux.*primary|tmux.*표준|in-process\/native fallback/);
     assert.match(updateText, /cargo install psmux --force/);
     assert.doesNotMatch(updateText, /winget|brew/);
   });

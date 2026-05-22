@@ -52,10 +52,10 @@ class TestGeminiWorker extends GeminiWorker {
     const next = this.sequence.shift();
     if (next instanceof Error) throw next;
     return {
-      type: "gemini",
+      type: "antigravity",
       command: this.command,
       args: [],
-      response: next?.response || `gemini:${prompt}`,
+      response: next?.response || `antigravity:${prompt}`,
       events: [],
       resultEvent: null,
       usage: null,
@@ -216,16 +216,16 @@ describe("CodexMcpWorker.execute", () => {
   });
 });
 
-describe("GeminiWorker.execute", () => {
+describe("GeminiWorker compatibility execute", () => {
   it("retries transient worker exits and succeeds", async () => {
     const worker = new TestGeminiWorker(
       [
-        createWorkerError("Gemini worker exited with code 1", {
+        createWorkerError("Antigravity route worker exited with code 1", {
           code: "WORKER_EXIT",
           stderr: "temporary failure",
           result: { exitCode: 1, stderr: "temporary failure" },
         }),
-        { response: "gemini:ok" },
+        { response: "antigravity:ok" },
       ],
       {
         retryOptions: { baseDelayMs: 0, maxDelayMs: 0 },
@@ -235,14 +235,14 @@ describe("GeminiWorker.execute", () => {
     const result = await worker.execute("retry me");
 
     assert.equal(result.exitCode, 0);
-    assert.equal(result.output, "gemini:ok");
+    assert.equal(result.output, "antigravity:ok");
     assert.equal(worker.runCalls, 2);
   });
 
   it("does not retry misuse exits and reports config metadata", async () => {
     const worker = new TestGeminiWorker(
       [
-        createWorkerError("Gemini worker exited with code 2", {
+        createWorkerError("Antigravity route worker exited with code 2", {
           code: "WORKER_EXIT",
           stderr: "bad args",
           result: { exitCode: 2, stderr: "bad args" },
@@ -262,7 +262,7 @@ describe("GeminiWorker.execute", () => {
       retryable: false,
       attempts: 1,
       category: "config",
-      recovery: "Check the Gemini CLI flags and worker configuration.",
+      recovery: "Check the Antigravity route worker configuration.",
     });
   });
 });

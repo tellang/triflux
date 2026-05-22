@@ -299,7 +299,8 @@ test("direct gemini route redirects to Antigravity when preflight marked agy rea
   );
 
   assert.equal(result.status, 0, out(result));
-  assert.match(out(result), /gemini route → antigravity/);
+  assert.match(out(result), /agent: gemini/);
+  assert.match(out(result), /cli: antigravity/);
   assert.match(out(result), /type=antigravity/);
   assert.match(result.stdout, /AGY_OK/);
   assert.doesNotMatch(out(result), /type=gemini/);

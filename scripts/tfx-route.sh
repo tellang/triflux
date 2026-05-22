@@ -810,9 +810,10 @@ agy_supports_headless() {
   if ! command -v "$agy_bin" &>/dev/null; then
     return 1
   fi
-  if ! help_text=$("$agy_bin" --help 2>/dev/null | head -c 20000); then
+  if ! help_text=$("$agy_bin" --help 2>&1); then
     return 1
   fi
+  help_text="${help_text:0:20000}"
   [[ "$help_text" == *"--print"* && "$help_text" == *"--dangerously-skip-permissions"* ]]
 }
 
@@ -1057,9 +1058,9 @@ route_agent() {
       CLI_ARGS="exec --profile gpt55_low ${codex_base}"
       CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     cleanup|deslop)
-      # 슬롭/정리 — 패턴 매칭 위주. 가성비 mini (gpt-5.4-mini, fast tier).
-      CLI_ARGS="exec --profile mini54_med ${codex_base}"
-      CLI_EFFORT="mini54_med"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      # 슬롭/정리 — 패턴 매칭 위주. gpt-5.5 mid로 lightweight lane 통일.
+      CLI_ARGS="exec --profile gpt55_med ${codex_base}"
+      CLI_EFFORT="gpt55_med"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     debugger)
       # 디버깅 — 깊은 코드 추적 필요, gpt-5.5 xhigh
       CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
@@ -1093,9 +1094,8 @@ route_agent() {
     # ─── Antigravity CLI 레인 (Gemini CLI 후속) ───
     # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic
     designer|writer|gemini|antigravity|agy)
-      # agy --print 는 stdin-only (sanity test 4종 확인). positional arg 패턴은
-      # 환영 메시지 폴백을 발생시키므로 wrapper 의 호출 분기 (L2031/2033) 에서
-      # CLI_TYPE="antigravity" 일 때 stdin pipe 로 전환한다 (아래 변경 2).
+      # agy --print + --dangerously-skip-permissions 조합은 positional prompt에서
+      # timeout이 재현되므로 wrapper 호출은 stdin pipe로 고정한다.
       CLI_ARGS="--print --dangerously-skip-permissions"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
@@ -1116,8 +1116,8 @@ route_agent() {
 
     # ─── 경량 ───
     spark)
-      CLI_ARGS="exec --profile spark53_low ${codex_base}"
-      CLI_EFFORT="spark53_low"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_low ${codex_base}"
+      CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     # ─── agent-map.json에만 정의된 신규 에이전트 (CLI_TYPE별 기본값) ───
     *)
       case "$CLI_TYPE" in
@@ -1235,13 +1235,15 @@ apply_cli_mode() {
 
   case "$TFX_CLI_MODE" in
     codex)
-      if [[ "$CLI_TYPE" == "gemini" ]]; then
+      if [[ "$CLI_TYPE" == "gemini" || "$CLI_TYPE" == "antigravity" ]]; then
         CLI_TYPE="codex"; CLI_CMD="codex"
         case "$AGENT_TYPE" in
-          designer)
-            CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"; CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=600 ;;
+          designer|antigravity|agy|gemini)
+            CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"; CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=600 ;;
           writer)
-            CLI_ARGS="exec --profile spark53_low ${codex_base}"; CLI_EFFORT="spark53_low"; DEFAULT_TIMEOUT=180 ;;
+            CLI_ARGS="exec --profile gpt55_low ${codex_base}"; CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=180 ;;
+          *)
+            CLI_ARGS="exec --profile gpt55_high ${codex_base}"; CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080 ;;
         esac
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
       fi ;;
@@ -1315,18 +1317,24 @@ apply_cli_mode() {
   esac
 }
 
-# ── Codex 요금제 가드 (spark 프로필은 Pro 전용) ──
+# ── Codex legacy 프로필 가드 ──
 apply_plan_guard() {
   [[ "$CLI_TYPE" != "codex" ]] && return
-  [[ "$TFX_CODEX_PLAN" == "pro" ]] && return
 
-  if [[ "$CLI_EFFORT" == spark53_* ]]; then
-    local codex_base
-    codex_base="$(build_codex_base)"
-    CLI_ARGS="exec --profile gpt55_high ${codex_base}"
-    CLI_EFFORT="gpt55_high"
-    echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: spark → gpt55_high로 다운그레이드 (Pro 전용)" >&2
-  fi
+  local replacement=""
+  case "$CLI_EFFORT" in
+    spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt55_low" ;;
+    spark53_med|codex53_med|mini54_med) replacement="gpt55_med" ;;
+    codex53_xhigh|gpt54_xhigh) replacement="gpt55_xhigh" ;;
+    spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt55_high" ;;
+  esac
+  [[ -z "$replacement" ]] && return
+
+  local codex_base
+  codex_base="$(build_codex_base)"
+  CLI_ARGS="exec --profile ${replacement} ${codex_base}"
+  CLI_EFFORT="$replacement"
+  echo "[tfx-route] legacy Codex profile remapped to ${replacement}" >&2
 }
 
 # ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
@@ -2201,7 +2209,7 @@ run_codex_exec() {
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
       if [[ "$CLI_TYPE" == "antigravity" ]]; then
-        # agy --print 는 stdin-only — positional arg + < /dev/null 패턴이 환영 메시지 폴백 유발.
+        # agy --print + skip-permissions positional prompt는 timeout이 재현되어 stdin pipe로 고정한다.
         printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
       else
         "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
@@ -2223,17 +2231,13 @@ run_codex_exec() {
 
   _attempt_codex_run
 
-  # Tier-fallback: ChatGPT account (Plus tier 등) 가 gpt-5.5 거부 시 같은 effort 의
-  # gpt-5.4 로 1회 강등 재시도. effort 는 그대로, model 만 한 단계 낮춤.
-  # 매핑: gpt55_xhigh→gpt54_xhigh, gpt55_high→gpt54_high, gpt55_med/low→gpt54_low.
+  # Tier-fallback: ChatGPT account가 높은 reasoning profile을 거부하면
+  # gpt-5.5 low로만 1회 재시도한다. 구형 gpt-5.4 계열로는 더 이상 다운그레이드하지 않는다.
   # 출처: Issue #211 — codex CLI tier-aware fallback.
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
-      gpt55_xhigh) fallback_profile="gpt54_xhigh" ;;
-      gpt55_high)  fallback_profile="gpt54_high" ;;
-      gpt55_med)   fallback_profile="gpt54_low" ;;
-      gpt55_low)   fallback_profile="gpt54_low" ;;
+      gpt55_xhigh|gpt55_high|gpt55_med) fallback_profile="gpt55_low" ;;
     esac
     if [[ -n "$fallback_profile" ]]; then
       echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2

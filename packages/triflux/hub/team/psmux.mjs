@@ -234,7 +234,7 @@ function ensurePsmuxInstalled() {
   if (!hasPsmux()) {
     throw new Error(
       "psmux가 설치되어 있지 않습니다.\n\n" +
-        "psmux는 Codex/Gemini CLI를 병렬 세션으로 실행하는 터미널 멀티플렉서입니다.\n" +
+        "psmux는 Codex/Antigravity CLI를 병렬 세션으로 실행하는 터미널 멀티플렉서입니다.\n" +
         "설치 방법 (택 1):\n" +
         `${formatPsmuxInstallGuidance("  ")}\n\n` +
         "설치 후 터미널을 재시작하세요.",

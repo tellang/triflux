@@ -165,8 +165,11 @@ async function runPreflight({
 
   const agents = [];
   if (result.codex.ok) agents.push("codex");
-  if (result.gemini.ok) agents.push("gemini");
-  if (result.antigravity.ok) agents.push("antigravity");
+  if (result.antigravity.ok) {
+    agents.push("antigravity");
+  } else if (result.gemini.ok) {
+    agents.push("gemini");
+  }
   agents.push("claude");
   result.available_agents = agents;
 

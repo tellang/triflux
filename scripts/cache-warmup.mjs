@@ -232,6 +232,7 @@ export function probeTierEnvironment(options = {}) {
   const geminiCheck =
     preflight?.gemini ||
     checkCliSync("gemini", { whichCommandFn: options.whichCommandFn });
+  const antigravityCheck = preflight?.antigravity || null;
   const hubCheck =
     preflight?.hub ||
     checkHub({
@@ -242,20 +243,25 @@ export function probeTierEnvironment(options = {}) {
       execSyncFn,
     });
   const checks = {
+    multiplexer: false,
     psmux: false,
     hub: !!hubCheck?.ok,
     codex: !!codexCheck?.ok,
     gemini: !!geminiCheck?.ok,
+    antigravity: !!antigravityCheck?.ok,
     wt: false,
   };
 
+  const multiplexerCommand =
+    process.platform === "win32" ? "psmux --version" : "tmux -V";
   try {
-    execSyncFn("psmux --version", {
+    execSyncFn(multiplexerCommand, {
       stdio: "ignore",
       timeout: 2000,
       windowsHide: true,
     });
-    checks.psmux = true;
+    checks.multiplexer = true;
+    checks.psmux = process.platform === "win32";
   } catch {}
 
   if (process.platform === "win32") {
@@ -270,13 +276,21 @@ export function probeTierEnvironment(options = {}) {
   }
 
   let tier = "minimal";
-  if (checks.codex || checks.gemini) tier = "standard";
-  if (checks.psmux && checks.hub && (checks.codex || checks.gemini))
+  if (checks.codex || checks.antigravity || checks.gemini) tier = "standard";
+  if (
+    checks.multiplexer &&
+    checks.hub &&
+    (checks.codex || checks.antigravity || checks.gemini)
+  )
     tier = "full";
 
   const agents = ["claude"];
   if (checks.codex) agents.push("codex");
-  if (checks.gemini) agents.push("gemini");
+  if (checks.antigravity) {
+    agents.push("antigravity");
+  } else if (checks.gemini) {
+    agents.push("gemini");
+  }
 
   return {
     probed_at: new Date(options.now ?? Date.now()).toISOString(),

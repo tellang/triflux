@@ -120,7 +120,7 @@ describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
     );
   });
 
-  it("에이전트 매핑 섹션에 codex와 gemini 모두 포함", () => {
+  it("에이전트 매핑 섹션에 codex와 antigravity 모두 포함", () => {
     const content = readSkill("tfx-auto");
     const agentSection = extractSection(content, /^###\s+에이전트\s+매핑/);
     assert.ok(
@@ -128,8 +128,8 @@ describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
       "codex가 에이전트 매핑 섹션에 없음",
     );
     assert.ok(
-      /\bgemini\b/i.test(agentSection),
-      "gemini가 에이전트 매핑 섹션에 없음",
+      /\bantigravity\b/i.test(agentSection),
+      "antigravity가 에이전트 매핑 섹션에 없음",
     );
   });
 

@@ -347,7 +347,8 @@ export async function registerSwarmShard({
   const paths = derivePaths({ configDir, tmpRoot });
   const sessionsDir =
     paths.sessionsDir || path.join(paths.configDir || configDir, "sessions");
-  const jobsDir = paths.jobsDir || path.join(paths.configDir || configDir, "jobs");
+  const jobsDir =
+    paths.jobsDir || path.join(paths.configDir || configDir, "jobs");
   const short = deriveSwarmShort({ sessionId, shardName, host });
   const command = buildSwarmShardBridgeCommand({ displayName, sessionId });
   const payload = buildPayload({

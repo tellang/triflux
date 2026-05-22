@@ -9,7 +9,7 @@ argument-hint: "\"작업 설명\" | N:codex \"작업 설명\""
 # tfx-codex — Codex-Only 오케스트레이터
 
 > Codex CLI만 사용하여 모든 외부 CLI 작업을 라우팅합니다.
-> Gemini CLI가 없는 환경에서 사용합니다.
+> Antigravity CLI가 없는 환경에서 사용합니다.
 
 ## 사용법
 
@@ -58,7 +58,7 @@ argument-hint: "\"작업 설명\" | N:codex \"작업 설명\""
 ## 필수 조건
 
 - [Codex CLI](https://github.com/openai/codex): `npm install -g @openai/codex`
-- Gemini CLI 불필요
+- Antigravity CLI 불필요
 
 ## Troubleshooting
 

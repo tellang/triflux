@@ -31,11 +31,6 @@ function toMuxPath(p) {
   const drive = m[1].toLowerCase();
   const rest = m[2];
 
-  // wsl tmux는 /mnt/c/... 경로를 사용
-  if (mux === "wsl-tmux") {
-    return `/mnt/${drive}/${rest}`;
-  }
-
   // Git Bash/MSYS tmux는 /c/... 경로를 사용
   return `/${drive}/${rest}`;
 }

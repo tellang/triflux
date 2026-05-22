@@ -56,9 +56,11 @@ describe("cache-buildup", () => {
     assertIsoTimestamp(result.probed_at);
     assert.ok(["minimal", "standard", "full"].includes(result.tier));
     assert.deepEqual(Object.keys(result.checks).sort(), [
+      "antigravity",
       "codex",
       "gemini",
       "hub",
+      "multiplexer",
       "psmux",
       "wt",
     ]);
@@ -75,24 +77,41 @@ describe("cache-buildup", () => {
     );
     assert.equal(
       result.available_agents.includes("gemini"),
-      result.checks.gemini,
+      result.checks.gemini && !result.checks.antigravity,
+    );
+    assert.equal(
+      result.available_agents.includes("antigravity"),
+      result.checks.antigravity,
     );
     assert.equal(typeof result.codex_plan, "object");
     assert.ok(result.codex_plan);
 
     if (result.tier === "minimal") {
-      assert.equal(result.checks.codex || result.checks.gemini, false);
+      assert.equal(
+        result.checks.codex ||
+          result.checks.antigravity ||
+          result.checks.gemini,
+        false,
+      );
     }
 
     if (result.tier === "standard") {
-      assert.ok(result.checks.codex || result.checks.gemini);
-      assert.equal(result.checks.psmux && result.checks.hub, false);
+      assert.ok(
+        result.checks.codex ||
+          result.checks.antigravity ||
+          result.checks.gemini,
+      );
+      assert.equal(result.checks.multiplexer && result.checks.hub, false);
     }
 
     if (result.tier === "full") {
-      assert.ok(result.checks.psmux);
+      assert.ok(result.checks.multiplexer);
       assert.ok(result.checks.hub);
-      assert.ok(result.checks.codex || result.checks.gemini);
+      assert.ok(
+        result.checks.codex ||
+          result.checks.antigravity ||
+          result.checks.gemini,
+      );
     }
   });
 
@@ -108,7 +127,7 @@ describe("cache-buildup", () => {
         throw new Error(`missing: ${name}`);
       },
       execSyncFn: (command) => {
-        if (command === "psmux --version") return "";
+        if (command === "psmux --version" || command === "tmux -V") return "";
         if (command.startsWith("curl -sf"))
           return '{"hub":{"state":"running"},"pid":1}';
         if (process.platform === "win32" && command.startsWith("where wt"))
@@ -133,23 +152,27 @@ describe("cache-buildup", () => {
       preflight: {
         codex: { ok: false },
         gemini: { ok: true },
+        antigravity: { ok: true },
         hub: { ok: false },
         codex_plan: { plan: "pro" },
       },
       execSyncFn: (command) => {
         commands.push(command);
-        if (command === "psmux --version") return "";
+        if (command === "psmux --version" || command === "tmux -V") return "";
         throw new Error(`missing: ${command}`);
       },
     });
 
     assert.equal(result.checks.codex, false);
     assert.equal(result.checks.gemini, true);
+    assert.equal(result.checks.antigravity, true);
     assert.equal(result.tier, "standard");
+    assert.ok(result.available_agents.includes("antigravity"));
+    assert.equal(result.available_agents.includes("gemini"), false);
     assert.deepEqual(result.codex_plan, { plan: "pro" });
     assert.ok(!commands.includes("codex"));
     assert.ok(!commands.includes("gemini"));
-    assert.ok(commands.includes("psmux --version"));
+    assert.ok(commands.includes(process.platform === "win32" ? "psmux --version" : "tmux -V"));
   });
 
   it("extractProjectMeta는 현재 프로젝트 메타를 추출한다", () => {

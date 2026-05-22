@@ -29,7 +29,7 @@ argument-hint: "[--fix|--reset]"
 
 - tfx-route.sh 설치 상태
 - HUD 설치 및 설정 상태
-- Codex/Gemini/Claude CLI 경로 (크로스 셸)
+- Codex/Antigravity/Claude CLI 경로 (크로스 셸)
 - 스킬 설치 상태
 - 플러그인 등록 상태
 - MCP 인벤토리 캐시
@@ -91,4 +91,4 @@ Bash("triflux doctor --reset")
 |------|------|
 | 캐시 디렉토리 없음 | 정상 — 삭제할 파일 없음 보고 |
 | 파일 삭제 권한 없음 | 수동 삭제 안내 |
-| --fix 후에도 이슈 남음 | Codex/Gemini 설치는 수동 필요 안내 |
+| --fix 후에도 이슈 남음 | Codex/Antigravity 설치는 수동 필요 안내 |

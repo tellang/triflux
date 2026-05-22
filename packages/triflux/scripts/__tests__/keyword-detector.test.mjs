@@ -183,7 +183,7 @@ test("matchRules: MCP 라우팅 매칭", () => {
     {
       text: "노션 페이지 조회해줘",
       expectedId: "notion-route",
-      expectedRoute: "gemini",
+      expectedRoute: "antigravity",
     },
     {
       text: "jira 이슈 생성",
@@ -193,27 +193,27 @@ test("matchRules: MCP 라우팅 매칭", () => {
     {
       text: "크롬 열고 로그인",
       expectedId: "chrome-route",
-      expectedRoute: "gemini",
+      expectedRoute: "antigravity",
     },
     {
       text: "이메일 보내줘",
       expectedId: "mail-route",
-      expectedRoute: "gemini",
+      expectedRoute: "antigravity",
     },
     {
       text: "캘린더 일정 생성",
       expectedId: "calendar-route",
-      expectedRoute: "gemini",
+      expectedRoute: "antigravity",
     },
     {
       text: "playwright 테스트 작성",
       expectedId: "playwright-route",
-      expectedRoute: "gemini",
+      expectedRoute: "antigravity",
     },
     {
       text: "canva 디자인 생성",
       expectedId: "canva-route",
-      expectedRoute: "gemini",
+      expectedRoute: "antigravity",
     },
   ];
 

@@ -793,15 +793,16 @@ deep/fullcycle 추가 규칙:
 ## 멀티 태스크 라우팅 (트리아지 후)
 
 > **트리아지 결과에 따라 실행 경로 결정.**
-> v6.0.0부터 CLI 워커는 **Lead-Direct Headless** (psmux)가 기본. Agent 래퍼 불필요.
+> v6.0.0부터 CLI 워커는 **Lead-Direct Headless** 가 기본. Agent 래퍼 불필요.
+> OS별 primary multiplexer는 macOS/Linux = tmux, Windows = psmux다. macOS에서 psmux 미설치는 fallback 사유가 아니다.
 
 | 조건 | 실행 경로 | 엔진 |
 |------|----------|------|
 | 1개 + quick | tfx-auto 직접 실행 (fire-and-forget) | tfx-route.sh |
 | 1개 + thorough | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
-| 2개+ + quick | **headless 직접 실행** (Windows: WT 자동 팝업 / macOS·Linux: psmux/tmux 단독) | headless.mjs |
+| 2개+ + quick | **headless 직접 실행** (Windows: WT/psmux / macOS·Linux: tmux) | headless.mjs |
 | 2개+ + thorough | Plan/PRD/Approval 후 → headless + verify/fix | headless.mjs |
-| psmux 미설치 fallback | Native Teams (Agent slim wrapper) | native.mjs |
+| primary multiplexer 없음 | Native/in-process fallback | native.mjs |
 
 > **MANDATORY: 2개+ 서브태스크 시 headless 엔진 필수**
 > `Agent()` 백그라운드나 `Bash(tfx-route.sh)` 개별 호출로 대체 금지.
@@ -814,11 +815,11 @@ deep/fullcycle 추가 규칙:
 thorough = args에 -t 또는 --thorough 포함
 
 if subtasks.length >= 2:
-  if psmux 설치됨:
+  if OS primary multiplexer 사용 가능(macOS/Linux tmux, Windows psmux):
     → Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --native-bridge-ui --assign 'cli:prompt:role' ...")
     → if thorough: verify → fix loop
   else:
-    → fallback: tfx-multi Phase 3 Native Teams (Agent slim wrapper)
+    → fallback: tfx-multi Native/in-process fallback
 else:
   if thorough:
     → Pipeline init → Plan → PRD → Approval → 직접 실행 → Verify → Fix loop

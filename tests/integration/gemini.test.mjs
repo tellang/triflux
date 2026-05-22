@@ -1,14 +1,13 @@
-// tests/integration/gemini.test.mjs — Gemini 전용 통합 테스트
+// tests/integration/gemini.test.mjs — Gemini compatibility 통합 테스트
 //
 // TFX_CLI_MODE=gemini 환경의 시나리오:
-//   - Gemini 모델 리매핑 검증 (Pro / Flash 분기)
-//   - GEMINI_ALLOWED_SERVERS MCP 필터링 동작
-//   - Gemini stream wrapper 실패 시 claude-native fallback
-//   - Gemini health check 동작
+//   - deprecated Gemini mode가 direct Gemini CLI 대신 Antigravity/Codex fallback으로 수렴
+//   - GEMINI_ALLOWED_SERVERS compatibility MCP 필터링 동작
+//   - legacy Gemini worker requests are normalized to the Antigravity route lane
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -21,12 +20,6 @@ const ROUTE_SCRIPT = toBashPath(
   resolve(PROJECT_ROOT, "scripts", "tfx-route.sh"),
 );
 const WORKER_SCRIPT = resolve(PROJECT_ROOT, "scripts", "tfx-route-worker.mjs");
-const FAKE_GEMINI_CLI = resolve(
-  PROJECT_ROOT,
-  "tests",
-  "fixtures",
-  "fake-gemini-cli.mjs",
-);
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
@@ -92,75 +85,85 @@ function fixtureEnv(extraEnv = {}) {
   };
 }
 
-// ── Gemini 모델 리매핑 검증 ──
+function agyReadyEnv(extraEnv = {}) {
+  return fixtureEnv({
+    TFX_ANTIGRAVITY_OK: "1",
+    AGY_BIN: "agy",
+    ...extraEnv,
+  });
+}
 
-describe("tfx-route.sh — Gemini 모델 리매핑 (TFX_CLI_MODE=gemini)", {
+// ── Gemini compatibility alias 검증 ──
+
+describe("tfx-route.sh — Gemini compatibility alias (TFX_CLI_MODE=gemini)", {
   concurrency: 1,
 }, () => {
-  it("executor는 codex에서 gemini Pro로 리매핑되어야 한다", () => {
+  it("executor는 direct Gemini 대신 Antigravity로 리매핑되어야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" executor 'gemini-remap-test' 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /TFX_CLI_MODE=gemini/);
-    assert.match(out(result), /type=gemini/);
-    assert.match(out(result), /gemini\(pro(?:31)?\)로 리매핑/);
+    assert.match(out(result), /type=antigravity/);
+    assert.match(out(result), /TFX_CLI_MODE=gemini → antigravity/);
+    assert.match(out(result), /AGY:gemini-remap-test/);
   });
 
-  it("architect는 gemini Pro로 리매핑되어야 한다", () => {
+  it("architect는 direct Gemini 대신 Antigravity로 리매핑되어야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" architect 'gemini-arch-test' 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /gemini\(pro(?:31)?\)로 리매핑/);
+    assert.match(out(result), /type=antigravity/);
+    assert.match(out(result), /AGY:gemini-arch-test/);
   });
 
-  it("build-fixer는 gemini Flash로 리매핑되어야 한다", (t) => {
+  it("build-fixer는 direct Gemini 대신 Antigravity로 리매핑되어야 한다", (t) => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" build-fixer 'gemini-flash-test' 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     if (result.status === null) {
-      t.skip("Gemini stream wrapper timeout");
+      t.skip("Antigravity compatibility wrapper timeout");
       return;
     }
     assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /gemini\(flash(?:3)?\)로 리매핑/);
+    assert.match(out(result), /type=antigravity/);
+    assert.match(out(result), /AGY:gemini-flash-test/);
   });
 
-  it("spark는 gemini Flash로 리매핑되어야 한다", () => {
+  it("spark는 direct Gemini 대신 Antigravity로 리매핑되어야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" spark 'gemini-spark-test' 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /gemini\(flash(?:3)?\)로 리매핑/);
+    assert.match(out(result), /type=antigravity/);
+    assert.match(out(result), /AGY:gemini-spark-test/);
   });
 
-  it("기본 gemini 타입(designer)은 리매핑 없이 gemini 유지되어야 한다", () => {
-    // designer는 원래 gemini 타입이므로 codex->gemini 리매핑이 발생하지 않음
+  it("기본 Antigravity 타입(designer)은 direct Gemini로 내려가지 않아야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" designer 'gemini-native-test' 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /type=gemini/);
+    assert.match(out(result), /type=antigravity/);
     assert.match(out(result), /agent=designer/);
-    // 리매핑 메시지가 없어야 함 (이미 gemini 타입)
-    assert.doesNotMatch(out(result), /리매핑/);
+    assert.doesNotMatch(out(result), /type=gemini/);
   });
 
-  it("writer는 원래 gemini Flash 타입이므로 리매핑 없이 유지되어야 한다", () => {
+  it("writer는 direct Gemini로 내려가지 않아야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" writer 'gemini-writer-test' 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /type=gemini/);
+    assert.match(out(result), /type=antigravity/);
     assert.match(out(result), /agent=writer/);
-    assert.doesNotMatch(out(result), /리매핑/);
+    assert.doesNotMatch(out(result), /type=gemini/);
   });
 });
 
@@ -172,7 +175,7 @@ describe("tfx-route.sh — Gemini MCP 필터링 (GEMINI_ALLOWED_SERVERS)", {
   it("designer + auto 프로필에서 playwright 포함 MCP 서버가 필터링되어야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" designer 'Capture browser screenshot and inspect layout' auto 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=designer/);
@@ -183,10 +186,10 @@ describe("tfx-route.sh — Gemini MCP 필터링 (GEMINI_ALLOWED_SERVERS)", {
   it("executor가 gemini로 리매핑된 후에도 MCP 정책이 적용되어야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" executor 'Implement CLI parser using package docs' auto 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /type=gemini/);
+    assert.match(out(result), /type=antigravity/);
     assert.match(out(result), /resolved_profile=executor/);
     // executor 프로필 MCP 서버가 필터링됨
     assert.match(out(result), /allowed_mcp_servers=/);
@@ -195,7 +198,7 @@ describe("tfx-route.sh — Gemini MCP 필터링 (GEMINI_ALLOWED_SERVERS)", {
   it("writer + auto 프로필에서 context7과 brave-search가 허용되어야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" writer 'write documentation' auto 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=writer/);
@@ -204,7 +207,7 @@ describe("tfx-route.sh — Gemini MCP 필터링 (GEMINI_ALLOWED_SERVERS)", {
   it("none 프로필에서는 MCP 서버가 비활성화되어야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=gemini bash "${ROUTE_SCRIPT}" designer 'no-mcp-test' none 2>&1 || true`,
-      fixtureEnv(),
+      agyReadyEnv(),
     );
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /resolved_profile=none/);
@@ -212,25 +215,31 @@ describe("tfx-route.sh — Gemini MCP 필터링 (GEMINI_ALLOWED_SERVERS)", {
   });
 });
 
-// ── Gemini stream worker 429 재시도 ──
+// ── Gemini stream worker alias bypass ──
 
-describe("tfx-route.sh — Gemini stream worker 429 재시도", {
+describe("tfx-route.sh — Gemini stream worker alias bypass", {
   concurrency: 1,
 }, () => {
-  it("첫 호출이 429여도 5초 대기 후 1회 재시도에서 성공해야 한다", () => {
+  it("tfx-route-worker --type gemini는 direct GeminiWorker 대신 Antigravity route를 호출해야 한다", () => {
     const testTempDir = mkdtempSync(
       resolve(tmpdir(), "triflux-gemini-worker-retry-"),
     );
+    const routeScript = resolve(testTempDir, "route.sh");
+    writeFileSync(
+      routeScript,
+      [
+        "printf 'type=antigravity\\n'",
+        "printf 'AGY-ROUTE:%s\\n' \"$2\"",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(routeScript, 0o755);
     const result = spawnSync(
       process.execPath,
       [
         WORKER_SCRIPT,
         "--type",
         "gemini",
-        "--command",
-        process.execPath,
-        "--command-args-json",
-        JSON.stringify([FAKE_GEMINI_CLI]),
         "--model",
         "fake-gemini-model",
         "--approval-mode",
@@ -249,7 +258,7 @@ describe("tfx-route.sh — Gemini stream worker 429 재시도", {
           TMPDIR: testTempDir,
           TMP: testTempDir,
           TEMP: testTempDir,
-          FAKE_GEMINI_429: "1",
+          TFX_DELEGATOR_ROUTE_SCRIPT: routeScript,
         },
       },
     );
@@ -257,11 +266,9 @@ describe("tfx-route.sh — Gemini stream worker 429 재시도", {
     const output = out(result);
     try {
       assert.equal(result.status, 0, output);
-      assert.match(result.stdout || "", /gemini:gemini-retry-429/);
-      assert.match(
-        result.stderr || "",
-        /Gemini 429\/quota 감지 — 5초 후 1회 재시도합니다\./,
-      );
+      assert.match(result.stdout || "", /AGY-ROUTE:gemini-retry-429/);
+      assert.match(result.stdout || "", /type=antigravity/);
+      assert.doesNotMatch(output, /fake-gemini-cli|GeminiWorker/);
     } finally {
       removeTempDirWithRetry(testTempDir);
     }
@@ -272,12 +279,10 @@ describe("tfx-route.sh — Gemini stream worker 429 재시도", {
 // run_legacy_gemini는 좀비 프로세스 원인으로 제거됨 (#62 후속).
 // stream wrapper 실패 시 claude-native metadata를 반환한다.
 
-describe("tfx-route.sh — Gemini stream wrapper fallback", {
+describe("tfx-route.sh — Gemini stream wrapper bypass", {
   concurrency: 1,
 }, () => {
-  it("stream wrapper 실패 시 claude-native fallback metadata를 반환해야 한다", () => {
-    // stream wrapper가 실패하면
-    // run_legacy_gemini 대신 claude-native metadata로 fallback
+  it("deprecated gemini route는 legacy stream wrapper를 거치지 않고 Antigravity로 실행되어야 한다", () => {
     const runnerDir = mkdtempSync(
       resolve(tmpdir(), "triflux-gemini-runner-fail-"),
     );
@@ -289,10 +294,12 @@ describe("tfx-route.sh — Gemini stream wrapper fallback", {
     try {
       const result = runBash(
         `GEMINI_BIN=gemini TFX_ROUTE_WORKER_RUNNER="${toBashPath(runner)}" bash "${ROUTE_SCRIPT}" designer 'fallback-test' auto 2>&1 || true`,
-        fixtureEnv(),
+        agyReadyEnv(),
       );
       const output = out(result);
-      assert.match(output, /claude-native fallback|ROUTE_TYPE=claude-native/);
+      assert.match(output, /type=antigravity/);
+      assert.match(output, /AGY:fallback-test/);
+      assert.doesNotMatch(output, /forced stream worker failure/);
     } finally {
       removeTempDirWithRetry(runnerDir);
     }
@@ -329,9 +336,9 @@ describe("tfx-route.sh — Gemini CLI 모드 전환", { concurrency: 1 }, () => 
     assert.match(out(result), /AGENT=verifier/);
   });
 
-  it("gemini 미설치 + codex 미설치 시 claude-native fallback이 발생해야 한다", () => {
+  it("agy 미설치 + codex 미설치 시 claude-native fallback이 발생해야 한다", () => {
     const result = runBash(
-      `TFX_CLI_MODE=auto GEMINI_BIN=__nonexistent_gemini__ CODEX_BIN=__nonexistent_codex__ bash "${ROUTE_SCRIPT}" designer 'fallback-test'`,
+      `TFX_CLI_MODE=auto AGY_BIN=__nonexistent_agy__ CODEX_BIN=__nonexistent_codex__ bash "${ROUTE_SCRIPT}" designer 'fallback-test'`,
     );
     assert.equal(result.status, 0, out(result));
     assert.match(
@@ -340,13 +347,13 @@ describe("tfx-route.sh — Gemini CLI 모드 전환", { concurrency: 1 }, () => 
     );
   });
 
-  it("gemini 미설치 + codex 설치 시 auto 모드에서 codex로 전환되어야 한다", () => {
+  it("agy 미설치 + codex 설치 시 auto 모드에서 codex로 전환되어야 한다", () => {
     const result = runBash(
-      `TFX_CLI_MODE=auto GEMINI_BIN=__nonexistent_gemini__ CODEX_BIN=codex bash "${ROUTE_SCRIPT}" designer 'codex-switch-test' auto 2>&1 || true`,
+      `TFX_CLI_MODE=auto AGY_BIN=__nonexistent_agy__ CODEX_BIN=codex bash "${ROUTE_SCRIPT}" designer 'codex-switch-test' auto 2>&1 || true`,
       fixtureEnv({ FAKE_CODEX_MODE: "exec" }),
     );
     assert.equal(result.status, 0, out(result));
-    // gemini 미설치로 codex로 전환됨
+    // agy 미설치로 codex로 전환됨
     assert.match(out(result), /type=codex/);
   });
 });

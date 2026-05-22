@@ -4,7 +4,7 @@ import { psmuxExec as defaultPsmuxExec } from "./psmux.mjs";
 import { tmuxExec as defaultTmuxExec, detectMultiplexer } from "./session.mjs";
 import { createWtManager as defaultCreateWtManager } from "./wt-manager.mjs";
 
-const TMUX_LIKE_MUXES = new Set(["tmux", "wsl-tmux", "git-bash-tmux"]);
+const TMUX_LIKE_MUXES = new Set(["tmux", "git-bash-tmux"]);
 
 export function sanitizeTerminalTitle(value, fallback = "triflux") {
   const title = String(value ?? "")

@@ -12,11 +12,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod";
 import { resolveBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
-import { whichCommand } from "@triflux/core/hub/platform.mjs";
 import { runHeadlessWithCleanup } from "../team/headless.mjs";
 import { buildWorkerSandboxEnv } from "../team/worker-sandbox.mjs";
 import { CodexMcpWorker } from "./codex-mcp.mjs";
-import { GeminiWorker } from "./gemini-worker.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -34,7 +32,6 @@ if (!mcpFilterPath) {
 const {
   buildPromptHint,
   getCodexMcpConfig,
-  getGeminiAllowedServers,
   SUPPORTED_MCP_PROFILES,
 } = await import(pathToFileURL(mcpFilterPath).href);
 const SERVER_INFO = { name: "triflux-delegator", version: "1.0.0" };
@@ -70,30 +67,24 @@ const AGENT_TIMEOUT_SEC = Object.freeze({
 });
 
 const CODEX_PROFILE_BY_AGENT = Object.freeze({
-  executor: "codex53_high",
-  "build-fixer": "codex53_low",
-  debugger: "codex53_high",
-  "deep-executor": "gpt54_xhigh",
-  architect: "gpt54_xhigh",
-  planner: "gpt54_xhigh",
-  critic: "gpt54_xhigh",
-  analyst: "gpt54_xhigh",
-  "code-reviewer": "codex53_high",
-  "security-reviewer": "codex53_high",
-  "quality-reviewer": "codex53_high",
-  scientist: "codex53_high",
-  "scientist-deep": "gpt54_high",
-  "document-specialist": "codex53_high",
-  verifier: "codex53_high",
-  designer: "gpt54_xhigh", // Gemini primary, codex fallback — UI/UX는 5.4 에이전틱
-  writer: "codex53_high", // Gemini primary, codex fallback용
-  spark: "spark53_low",
-});
-
-const GEMINI_MODEL_BY_AGENT = Object.freeze({
-  "build-fixer": "gemini-3-flash-preview",
-  writer: "gemini-3-flash-preview",
-  spark: "gemini-3-flash-preview",
+  executor: "gpt55_high",
+  "build-fixer": "gpt55_low",
+  debugger: "gpt55_xhigh",
+  "deep-executor": "gpt55_xhigh",
+  architect: "gpt55_xhigh",
+  planner: "gpt55_xhigh",
+  critic: "gpt55_xhigh",
+  analyst: "gpt55_xhigh",
+  "code-reviewer": "gpt55_high",
+  "security-reviewer": "gpt55_xhigh",
+  "quality-reviewer": "gpt55_high",
+  scientist: "gpt55_high",
+  "scientist-deep": "gpt55_xhigh",
+  "document-specialist": "gpt55_high",
+  verifier: "gpt55_high",
+  designer: "gpt55_xhigh",
+  writer: "gpt55_low",
+  spark: "gpt55_low",
 });
 
 const REVIEW_INSTRUCTION_BY_AGENT = Object.freeze({
@@ -152,8 +143,13 @@ function resolveCodexProfile(agentType) {
   return CODEX_PROFILE_BY_AGENT[agentType] || "high";
 }
 
-function resolveGeminiModel(agentType) {
-  return GEMINI_MODEL_BY_AGENT[agentType] || "gemini-3.1-pro-preview";
+function normalizeProvider(provider = "auto") {
+  const value = provider || "auto";
+  return value === "gemini" ? "antigravity" : value;
+}
+
+function normalizeDelegateArgs(args = {}) {
+  return { ...args, provider: normalizeProvider(args.provider) };
 }
 
 function resolveTimeoutMs(agentType, timeoutMs) {
@@ -187,21 +183,6 @@ function withContext(prompt, contextFile) {
   return `${prompt}\n\n<prior_context>\n${context}\n</prior_context>`;
 }
 
-function withPromptHint(prompt, args) {
-  const promptWithContext = withContext(prompt, args.contextFile);
-  const hint = buildPromptHint({
-    agentType: args.agentType,
-    requestedProfile: args.mcpProfile,
-    searchTool: args.searchTool,
-    workerIndex: Number.isInteger(args.workerIndex)
-      ? args.workerIndex
-      : undefined,
-    taskText: promptWithContext,
-  });
-  if (!hint) return promptWithContext;
-  return `${promptWithContext}. ${hint}`;
-}
-
 function joinInstructions(...values) {
   return values
     .filter((value) => typeof value === "string" && value.trim())
@@ -231,7 +212,7 @@ function parseRouteType(stderr = "") {
   const match = stderr.match(/type=([a-z-]+)/);
   if (!match) return null;
   if (match[1] === "codex") return "codex";
-  if (match[1] === "gemini") return "gemini";
+  if (match[1] === "gemini") return "antigravity";
   return match[1];
 }
 
@@ -265,7 +246,7 @@ function createErrorPayload(message, extras = {}) {
 const DelegateInputSchema = z.object({
   prompt: z.string().min(1).describe("위임할 프롬프트"),
   provider: z
-    .enum(["auto", "codex", "gemini"])
+    .enum(["auto", "codex", "antigravity", "gemini"])
     .default("auto")
     .describe("사용할 provider"),
   mode: z
@@ -327,7 +308,9 @@ const DelegateInputSchema = z.object({
   workers: z
     .array(
       z.object({
-        provider: z.enum(["codex", "gemini"]).describe("워커 provider"),
+        provider: z
+          .enum(["codex", "antigravity", "gemini"])
+          .describe("워커 provider"),
         agentType: z.string().default("executor").describe("역할명"),
         prompt: z.string().describe("워커별 프롬프트"),
         mcpProfile: z.string().default("auto").describe("MCP 프로필"),
@@ -399,12 +382,13 @@ function isTeamRouteRequested(args) {
 }
 
 function pickRouteMode(provider) {
-  return provider === "auto" ? "auto" : provider;
+  const normalized = normalizeProvider(provider);
+  return normalized === "auto" ? "auto" : normalized;
 }
 
 function sanitizeDelegateArgs(args = {}) {
   return {
-    provider: args.provider || "auto",
+    provider: normalizeProvider(args.provider),
     agentType: args.agentType || "executor",
     cwd: args.cwd || null,
     timeoutMs: Number.isFinite(Number(args.timeoutMs))
@@ -431,18 +415,6 @@ function sanitizeDelegateArgs(args = {}) {
     teamLeadName: args.teamLeadName || null,
     hubUrl: args.hubUrl || null,
   };
-}
-
-function formatConversationTranscript(turns = []) {
-  return turns
-    .map((turn, index) => {
-      const parts = [`Turn ${index + 1} user:\n${turn.user}`];
-      if (typeof turn.assistant === "string" && turn.assistant.trim()) {
-        parts.push(`Turn ${index + 1} assistant:\n${turn.assistant}`);
-      }
-      return parts.join("\n\n");
-    })
-    .join("\n\n");
 }
 
 async function emitProgress(extra, progress, total, message) {
@@ -486,17 +458,9 @@ export class DelegatorMcpWorker {
       clientInfo: { name: SERVER_INFO.name, version: SERVER_INFO.version },
     });
 
-    this.geminiCommand =
-      options.geminiCommand || this.env.GEMINI_BIN || "gemini";
-    this.geminiCommandArgs =
-      Array.isArray(options.geminiArgs) && options.geminiArgs.length
-        ? [...options.geminiArgs]
-        : parseJsonArray(this.env.GEMINI_BIN_ARGS_JSON, []);
-
     this.server = null;
     this.transport = null;
     this.jobs = new Map();
-    this.geminiConversations = new Map();
     this.routeChildren = new Set();
     this.ready = false;
   }
@@ -519,7 +483,7 @@ export class DelegatorMcpWorker {
       "triflux-delegate",
       {
         description:
-          "새 위임을 실행합니다. codex/gemini direct 경로와 tfx-route 기반 auto 라우팅을 모두 지원합니다.",
+          "새 위임을 실행합니다. codex direct 경로와 antigravity/tfx-route 기반 auto 라우팅을 지원합니다.",
         inputSchema: DelegateInputSchema,
         outputSchema: DelegateOutputSchema,
       },
@@ -548,7 +512,7 @@ export class DelegatorMcpWorker {
       "triflux-delegate-reply",
       {
         description:
-          "기존 delegate job에 후속 응답을 보내고, Gemini direct job이면 multi-turn 대화를 이어갑니다.",
+          "기존 delegate job에 후속 응답을 보냅니다. 현재 route 기반 Antigravity job은 후속 응답을 지원하지 않습니다.",
         inputSchema: DelegateReplyInputSchema,
         outputSchema: DelegateOutputSchema,
       },
@@ -581,15 +545,6 @@ export class DelegatorMcpWorker {
     this.routeChildren.clear();
 
     await this.codexWorker.stop().catch(() => {});
-
-    for (const job of this.jobs.values()) {
-      if (job.worker) {
-        await job.worker.stop().catch(() => {});
-        job.worker = null;
-      }
-    }
-    this.geminiConversations.clear();
-
     if (this.server) {
       await this.server.close().catch(() => {});
     }
@@ -599,11 +554,13 @@ export class DelegatorMcpWorker {
   }
 
   async run(prompt, options = {}) {
-    return this._executeDirect({ prompt, ...options });
+    return this._executeDirect(normalizeDelegateArgs({ prompt, ...options }));
   }
 
   async execute(prompt, options = {}) {
-    const result = await this._executeDirect({ prompt, ...options });
+    const result = await this._executeDirect(
+      normalizeDelegateArgs({ prompt, ...options }),
+    );
     return {
       output: result.output || result.error || "",
       exitCode: result.exitCode ?? (result.ok ? 0 : 1),
@@ -614,10 +571,11 @@ export class DelegatorMcpWorker {
   }
 
   async delegate(args, extra) {
-    if (args.mode === "async") {
-      return this._startAsyncJob(args, extra);
+    const normalizedArgs = normalizeDelegateArgs(args);
+    if (normalizedArgs.mode === "async") {
+      return this._startAsyncJob(normalizedArgs, extra);
     }
-    return this._runSyncJob(args, extra);
+    return this._runSyncJob(normalizedArgs, extra);
   }
 
   async getJobStatus(jobId, extra) {
@@ -637,7 +595,7 @@ export class DelegatorMcpWorker {
     return payload;
   }
 
-  async reply({ job_id, reply, done = false }, extra) {
+  async reply({ job_id }, extra) {
     const job = this.jobs.get(job_id);
     if (!job) {
       return createErrorPayload(`알 수 없는 jobId: ${job_id}`, {
@@ -651,143 +609,18 @@ export class DelegatorMcpWorker {
         job_id,
       });
     }
-    if (
-      job.providerRequested !== "gemini" ||
-      job.transport !== "gemini-worker"
-    ) {
-      return createErrorPayload(
-        "delegate-reply는 현재 direct Gemini job에만 지원됩니다.",
-        {
-          jobId: job_id,
-          job_id,
-        },
-      );
-    }
-
-    const conversation = this.geminiConversations.get(job_id);
-    if (!conversation) {
-      return createErrorPayload(`Gemini 대화 컨텍스트가 없습니다: ${job_id}`, {
+    void extra;
+    return createErrorPayload(
+      "delegate-reply는 route 기반 Antigravity job에 지원되지 않습니다.",
+      {
         jobId: job_id,
         job_id,
-      });
-    }
-    if (conversation.closed) {
-      return createErrorPayload(`이미 종료된 대화입니다: ${job_id}`, {
-        jobId: job_id,
-        job_id,
-      });
-    }
-
-    await emitProgress(
-      extra,
-      DIRECT_PROGRESS_START,
-      100,
-      `job ${job_id} 후속 응답을 시작합니다.`,
+      },
     );
-    job.status = "running";
-    job.updatedAt = new Date().toISOString();
-
-    const worker = this._createGeminiWorker();
-    job.worker = worker;
-    const prompt = this._buildGeminiReplyPrompt(conversation, reply);
-
-    try {
-      const result = await worker.execute(prompt, {
-        cwd: job.requestArgs.cwd || this.cwd,
-        timeoutMs: resolveTimeoutMs(job.agentType, job.requestArgs.timeoutMs),
-        model: job.requestArgs.model || resolveGeminiModel(job.agentType),
-        approvalMode: "yolo",
-        allowedMcpServerNames: getGeminiAllowedServers(
-          this._getMcpPolicyOptions(job.requestArgs),
-        ),
-      });
-
-      conversation.turns.push({
-        user: reply,
-        assistant: result.output,
-      });
-      conversation.updatedAt = new Date().toISOString();
-      conversation.closed = Boolean(done);
-      if (done) {
-        this.geminiConversations.delete(job_id);
-      }
-
-      this._applyJobResult(job, {
-        ok: result.exitCode === 0,
-        status: result.exitCode === 0 ? "completed" : "failed",
-        providerRequested: "gemini",
-        providerResolved: "gemini",
-        agentType: job.agentType,
-        transport: "gemini-worker",
-        exitCode: result.exitCode,
-        output: result.output,
-        sessionKey: result.sessionKey || job.sessionKey || null,
-      });
-      await emitProgress(
-        extra,
-        DIRECT_PROGRESS_DONE,
-        100,
-        `job ${job_id} 후속 응답이 완료되었습니다.`,
-      );
-      return this._serializeJob(job);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this._applyJobResult(
-        job,
-        createErrorPayload(message, {
-          mode: job.mode,
-          providerRequested: "gemini",
-          providerResolved: "gemini",
-          agentType: job.agentType,
-          transport: "gemini-worker",
-        }),
-      );
-      return this._serializeJob(job);
-    } finally {
-      await worker.stop().catch(() => {});
-      job.worker = null;
-    }
-  }
-
-  _createGeminiWorker() {
-    const resolved = whichCommand(this.geminiCommand) || this.geminiCommand;
-    return new GeminiWorker({
-      command: resolved,
-      commandArgs: this.geminiCommandArgs,
-      cwd: this.cwd,
-      env: this.env,
-    });
   }
 
   _buildDirectPrompt(args) {
     return withContext(String(args.prompt ?? ""), args.contextFile);
-  }
-
-  _buildDirectPromptWithHint(args) {
-    return withPromptHint(String(args.prompt ?? ""), {
-      agentType: args.agentType || "executor",
-      mcpProfile: args.mcpProfile || "auto",
-      searchTool: args.searchTool,
-      workerIndex: Number.isInteger(args.workerIndex)
-        ? args.workerIndex
-        : undefined,
-      contextFile: args.contextFile,
-    });
-  }
-
-  _buildGeminiReplyPrompt(conversation, reply) {
-    const transcript = formatConversationTranscript(conversation.turns);
-    return [
-      "Continue the conversation using the prior transcript below.",
-      "",
-      "<conversation_history>",
-      transcript,
-      "</conversation_history>",
-      "",
-      "<latest_user_reply>",
-      reply,
-      "</latest_user_reply>",
-    ].join("\n");
   }
 
   _getMcpPolicyOptions(args) {
@@ -810,7 +643,12 @@ export class DelegatorMcpWorker {
   }
 
   _shouldUseRoute(args) {
-    return args.provider === "auto" || isTeamRouteRequested(args);
+    return (
+      args.provider === "auto" ||
+      args.provider === "antigravity" ||
+      args.provider === "gemini" ||
+      isTeamRouteRequested(args)
+    );
   }
 
   async _executeDirect(args, extra = null) {
@@ -878,8 +716,8 @@ export class DelegatorMcpWorker {
 
     // workers 배열을 headless assignments 형식으로 변환
     const assignments = args.workers.map((w) => {
-      // provider를 CLI 이름으로 매핑 (codex/gemini 그대로)
-      const cli = w.provider;
+      // provider를 CLI 이름으로 매핑. gemini는 deprecated alias로 antigravity에 합류한다.
+      const cli = normalizeProvider(w.provider);
       const role = w.agentType || "executor";
       // buildDirectPrompt와 동일한 context 처리
       const prompt = withContext(String(w.prompt || ""), args.contextFile);
@@ -1003,38 +841,6 @@ export class DelegatorMcpWorker {
       };
     }
 
-    if (args.provider === "gemini") {
-      const worker = this._createGeminiWorker();
-      const prompt = this._buildDirectPromptWithHint(args);
-      try {
-        const result = await worker.execute(prompt, {
-          cwd: args.cwd || this.cwd,
-          timeoutMs: resolveTimeoutMs(args.agentType, args.timeoutMs),
-          model: args.model || resolveGeminiModel(args.agentType),
-          approvalMode: "yolo",
-          allowedMcpServerNames: getGeminiAllowedServers(
-            this._getMcpPolicyOptions(args),
-          ),
-        });
-
-        return {
-          ok: result.exitCode === 0,
-          mode: "sync",
-          status: result.exitCode === 0 ? "completed" : "failed",
-          providerRequested: "gemini",
-          providerResolved: "gemini",
-          agentType: args.agentType,
-          transport: "gemini-worker",
-          exitCode: result.exitCode,
-          output: result.output,
-          sessionKey: result.sessionKey,
-          _geminiPrompt: prompt,
-        };
-      } finally {
-        await worker.stop().catch(() => {});
-      }
-    }
-
     return createErrorPayload(
       `지원하지 않는 direct provider: ${args.provider}`,
       {
@@ -1155,30 +961,6 @@ export class DelegatorMcpWorker {
       };
     }
 
-    if (args.provider === "gemini") {
-      const worker = this._createGeminiWorker();
-      job.worker = worker;
-      const prompt = this._buildDirectPromptWithHint(args);
-      const result = await worker.execute(prompt, {
-        cwd: args.cwd || this.cwd,
-        timeoutMs: resolveTimeoutMs(args.agentType, args.timeoutMs),
-        model: args.model || resolveGeminiModel(args.agentType),
-        approvalMode: "yolo",
-        allowedMcpServerNames: getGeminiAllowedServers(
-          this._getMcpPolicyOptions(args),
-        ),
-      });
-
-      return {
-        ok: result.exitCode === 0,
-        providerResolved: "gemini",
-        output: result.output,
-        exitCode: result.exitCode,
-        sessionKey: result.sessionKey,
-        _geminiPrompt: prompt,
-      };
-    }
-
     throw new Error(`지원하지 않는 async provider: ${args.provider}`);
   }
 
@@ -1287,7 +1069,7 @@ export class DelegatorMcpWorker {
       error: "",
       thread_id: job.threadId,
       session_key: job.sessionKey,
-      conversation_open: this.geminiConversations.has(job.jobId),
+      conversation_open: false,
     };
   }
 
@@ -1332,44 +1114,6 @@ export class DelegatorMcpWorker {
     job.sessionKey = result.sessionKey || job.sessionKey || null;
     job.completedAt = new Date().toISOString();
     job.updatedAt = job.completedAt;
-
-    if (
-      job.providerRequested === "gemini" &&
-      job.transport === "gemini-worker" &&
-      typeof result._geminiPrompt === "string"
-    ) {
-      this._storeGeminiConversation(
-        job,
-        result._geminiPrompt,
-        result.output || "",
-      );
-    }
-  }
-
-  _storeGeminiConversation(job, userPrompt, assistantReply) {
-    const existing = this.geminiConversations.get(job.jobId);
-    if (existing) {
-      if (typeof assistantReply === "string") {
-        const lastTurn = existing.turns.at(-1);
-        if (lastTurn && lastTurn.assistant !== assistantReply) {
-          lastTurn.assistant = assistantReply;
-        }
-      }
-      existing.updatedAt = new Date().toISOString();
-      return;
-    }
-
-    this.geminiConversations.set(job.jobId, {
-      jobId: job.jobId,
-      closed: false,
-      updatedAt: new Date().toISOString(),
-      turns: [
-        {
-          user: userPrompt,
-          assistant: assistantReply,
-        },
-      ],
-    });
   }
 
   async _runSyncJob(args, extra) {

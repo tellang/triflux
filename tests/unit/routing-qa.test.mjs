@@ -260,8 +260,8 @@ describe("route_agent: effort 레벨 검증", () => {
     assert.equal(ROUTE_TABLE["deep-executor"]?.CLI_EFFORT, "gpt55_xhigh");
   });
 
-  it("spark → spark53_low effort", () => {
-    assert.equal(ROUTE_TABLE.spark?.CLI_EFFORT, "spark53_low");
+  it("spark → gpt55_low effort", () => {
+    assert.equal(ROUTE_TABLE.spark?.CLI_EFFORT, "gpt55_low");
   });
 
   it("code-reviewer → gpt55_high effort", () => {

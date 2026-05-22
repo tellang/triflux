@@ -8,6 +8,7 @@
 import { execFileSync, spawn } from "child_process";
 import {
   chmodSync,
+  cpSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -85,57 +86,24 @@ const REQUIRED_CODEX_PROFILES = [
     name: "gpt55_low",
     lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "low"'],
   },
-  {
-    name: "codex53_high",
-    lines: ['model = "gpt-5.3-codex"', 'model_reasoning_effort = "high"'],
-  },
-  {
-    name: "codex53_xhigh",
-    lines: ['model = "gpt-5.3-codex"', 'model_reasoning_effort = "xhigh"'],
-  },
-  {
-    name: "codex53_med",
-    lines: ['model = "gpt-5.3-codex"', 'model_reasoning_effort = "medium"'],
-  },
-  {
-    name: "spark53_low",
-    lines: ['model = "gpt-5.3-codex-spark"', 'model_reasoning_effort = "low"'],
-  },
-  {
-    name: "spark53_med",
-    lines: [
-      'model = "gpt-5.3-codex-spark"',
-      'model_reasoning_effort = "medium"',
-    ],
-  },
-  {
-    name: "gpt54_xhigh",
-    lines: ['model = "gpt-5.4"', 'model_reasoning_effort = "xhigh"'],
-  },
-  {
-    name: "gpt54_high",
-    lines: ['model = "gpt-5.4"', 'model_reasoning_effort = "high"'],
-  },
-  {
-    name: "gpt54_low",
-    lines: ['model = "gpt-5.4"', 'model_reasoning_effort = "low"'],
-  },
-  {
-    name: "mini54_low",
-    lines: ['model = "gpt-5.4-mini"', 'model_reasoning_effort = "low"'],
-  },
-  {
-    name: "mini54_med",
-    lines: ['model = "gpt-5.4-mini"', 'model_reasoning_effort = "medium"'],
-  },
-  {
-    name: "mini54_high",
-    lines: ['model = "gpt-5.4-mini"', 'model_reasoning_effort = "high"'],
-  },
 ];
 
 const HUD_SYNC_EXCLUDES = new Set(["omc-hud.mjs", "omc-hud.mjs.bak"]);
 const SETUP_USER_STATE_FILES = new Set(["hosts.json"]);
+const WORKER_PACKAGE_SPECS = [
+  {
+    packageName: "@triflux/core",
+    workspacePath: ["packages", "core"],
+    workspaceSibling: "core",
+    modulePath: ["@triflux", "core"],
+  },
+  {
+    packageName: "@triflux/remote",
+    workspacePath: ["packages", "remote"],
+    workspaceSibling: "remote",
+    modulePath: ["@triflux", "remote"],
+  },
+];
 
 function isSetupUserStateFile(fileName) {
   return SETUP_USER_STATE_FILES.has(fileName);
@@ -330,6 +298,64 @@ function shouldSyncTextFile(src, dst) {
   } catch {
     return true;
   }
+}
+
+function findFirstExistingDir(candidates) {
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function isWorkerPackageCopyCandidate(source) {
+  const name = source.replace(/\\/g, "/").split("/").pop();
+  return name !== "node_modules" && name !== ".git" && name !== ".DS_Store";
+}
+
+function getWorkerPackageSyncEntries({
+  pluginRoot = PLUGIN_ROOT,
+  workerNodeModules = join(CLAUDE_DIR, "scripts", "node_modules"),
+} = {}) {
+  const entries = [];
+
+  for (const spec of WORKER_PACKAGE_SPECS) {
+    const src = findFirstExistingDir([
+      join(pluginRoot, ...spec.workspacePath),
+      join(pluginRoot, "..", spec.workspaceSibling),
+      join(pluginRoot, "node_modules", ...spec.modulePath),
+      join(pluginRoot, "..", ...spec.modulePath),
+      join(pluginRoot, "..", "..", ...spec.modulePath),
+    ]);
+
+    if (!src) continue;
+
+    const dst = join(workerNodeModules, ...spec.modulePath);
+    if (resolve(src) === resolve(dst)) continue;
+
+    entries.push({
+      src,
+      dst,
+      label: `${spec.packageName} worker package`,
+    });
+  }
+
+  return entries;
+}
+
+function syncWorkerPackages(options = {}) {
+  let count = 0;
+
+  for (const { src, dst } of getWorkerPackageSyncEntries(options)) {
+    mkdirSync(dirname(dst), { recursive: true });
+    rmSync(dst, { recursive: true, force: true });
+    cpSync(src, dst, {
+      recursive: true,
+      filter: isWorkerPackageCopyCandidate,
+    });
+    count++;
+  }
+
+  return count;
 }
 
 function getPackageVersion() {
@@ -1288,6 +1314,7 @@ export {
   ensureHooksInSettings,
   ensureWindowsHubAutostart,
   extractManagedHookFilename,
+  getWorkerPackageSyncEntries,
   getManagedRegistryHooks,
   getVersion,
   getWindowsHubAutostartStatus,
@@ -1307,6 +1334,7 @@ export {
   SKILL_ALIASES,
   SYNC_MAP,
   scanHudFiles,
+  syncWorkerPackages,
   syncAliasedSkillDir,
   validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
@@ -1457,7 +1485,6 @@ export async function runDeferred(stdinData) {
 
   if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
     try {
-      const { cpSync } = await import("fs");
       for (const entry of readdirSync(srcNodeModules)) {
         if (SKIP_PACKAGES.has(entry)) continue;
 
@@ -1472,6 +1499,14 @@ export async function runDeferred(stdinData) {
     } catch {
       // best effort: 의존성 복사 실패 시 exec fallback으로 동작
     }
+  }
+
+  try {
+    synced += syncWorkerPackages({ workerNodeModules });
+  } catch (error) {
+    io.log(
+      `  \x1b[33m⚠\x1b[0m worker package sync skipped: ${_normalizeErrorMessage(error)}`,
+    );
   }
 
   // ── 패키지 루트 breadcrumb 기록 ──
@@ -1931,7 +1966,7 @@ export async function runDeferred(stdinData) {
     }
   }
 
-  // ── psmux 자동 설치 (Windows, headless 모드용) ──
+  // ── psmux 자동 설치 (Windows tmux-compatible mux) ──
 
   if (process.platform === "win32") {
     try {
@@ -1945,7 +1980,7 @@ export async function runDeferred(stdinData) {
           [
             "install",
             "--id",
-            "marlocarlo.psmux",
+            "psmux",
             "--accept-package-agreements",
             "--accept-source-agreements",
           ],
@@ -1993,7 +2028,7 @@ export async function runDeferred(stdinData) {
   }
 
   // ── Windows bash PATH 자동 설정 ──
-  // Codex/Gemini가 cmd에는 있지만 bash에서 못 찾는 문제 해결
+  // Codex/Antigravity가 cmd에는 있지만 bash에서 못 찾는 문제 해결
 
   if (process.platform === "win32") {
     const npmBin = join(process.env.APPDATA || "", "npm");
@@ -2013,7 +2048,7 @@ export async function runDeferred(stdinData) {
       }
 
       if (needsUpdate) {
-        const line = `\n# triflux: Codex/Gemini CLI를 bash에서 사용하기 위한 PATH 설정\n${pathExport}\n`;
+        const line = `\n# triflux: Codex/Antigravity CLI를 bash에서 사용하기 위한 PATH 설정\n${pathExport}\n`;
         try {
           writeFileSync(
             bashrcPath,

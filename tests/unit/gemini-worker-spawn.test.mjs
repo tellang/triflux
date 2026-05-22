@@ -35,7 +35,7 @@ describe("quoteWindowsCmdArg", () => {
   });
 
   it("특수문자가 없으면 그대로 반환한다", () => {
-    assert.equal(quoteWindowsCmdArg("gemini-cli"), "gemini-cli");
+    assert.equal(quoteWindowsCmdArg("agy"), "agy");
   });
 
   it("퍼센트 문자를 이스케이프한다", () => {
@@ -59,8 +59,8 @@ describe("buildSpawnSpec", () => {
   it("non-Windows에서는 command/args를 그대로 유지한다", () => {
     setPlatform("linux");
 
-    assert.deepEqual(buildSpawnSpec("gemini", ["--version"]), {
-      command: "gemini",
+    assert.deepEqual(buildSpawnSpec("agy", ["--version"]), {
+      command: "agy",
       args: ["--version"],
       shell: false,
     });
@@ -69,8 +69,8 @@ describe("buildSpawnSpec", () => {
   it("Windows에서 .exe는 직접 실행한다", () => {
     setPlatform("win32");
 
-    assert.deepEqual(buildSpawnSpec("C:/tools/gemini.exe", ["--version"]), {
-      command: "C:/tools/gemini.exe",
+    assert.deepEqual(buildSpawnSpec("C:/tools/agy.exe", ["--version"]), {
+      command: "C:/tools/agy.exe",
       args: ["--version"],
       shell: false,
     });
@@ -80,7 +80,7 @@ describe("buildSpawnSpec", () => {
     setPlatform("win32");
 
     assert.deepEqual(
-      buildSpawnSpec("C:/tools/gemini.cmd", ["--prompt", "hello world"]),
+      buildSpawnSpec("C:/tools/agy.cmd", ["--prompt", "hello world"]),
       {
         command: "cmd.exe",
         args: [
@@ -88,7 +88,7 @@ describe("buildSpawnSpec", () => {
           "/s",
           "/v:off",
           "/c",
-          'C:/tools/gemini.cmd --prompt "hello world"',
+          'C:/tools/agy.cmd --prompt "hello world"',
         ],
         shell: false,
       },
@@ -98,9 +98,9 @@ describe("buildSpawnSpec", () => {
   it("Windows에서 .bat도 cmd.exe를 경유한다", () => {
     setPlatform("win32");
 
-    assert.deepEqual(buildSpawnSpec("C:/tools/gemini.bat", ["--flag"]), {
+    assert.deepEqual(buildSpawnSpec("C:/tools/agy.bat", ["--flag"]), {
       command: "cmd.exe",
-      args: ["/d", "/s", "/v:off", "/c", "C:/tools/gemini.bat --flag"],
+      args: ["/d", "/s", "/v:off", "/c", "C:/tools/agy.bat --flag"],
       shell: false,
     });
   });
@@ -111,23 +111,23 @@ describe("buildSpawnSpec", () => {
 
     mockExistsSync((candidate) => {
       calls.push(candidate);
-      return candidate === "C:/tools/gemini.cmd";
+      return candidate === "C:/tools/agy.cmd";
     });
 
-    assert.deepEqual(buildSpawnSpec("C:/tools/gemini", ["--help"]), {
+    assert.deepEqual(buildSpawnSpec("C:/tools/agy", ["--help"]), {
       command: "cmd.exe",
-      args: ["/d", "/s", "/v:off", "/c", "C:/tools/gemini.cmd --help"],
+      args: ["/d", "/s", "/v:off", "/c", "C:/tools/agy.cmd --help"],
       shell: false,
     });
-    assert.deepEqual(calls, ["C:/tools/gemini.exe", "C:/tools/gemini.cmd"]);
+    assert.deepEqual(calls, ["C:/tools/agy.exe", "C:/tools/agy.cmd"]);
   });
 
   it("Windows에서 확장자 탐색이 전부 실패하면 원래 command를 그대로 반환한다", () => {
     setPlatform("win32");
     mockExistsSync(() => false);
 
-    assert.deepEqual(buildSpawnSpec("C:/tools/gemini", ["--help"]), {
-      command: "C:/tools/gemini",
+    assert.deepEqual(buildSpawnSpec("C:/tools/agy", ["--help"]), {
+      command: "C:/tools/agy",
       args: ["--help"],
       shell: false,
     });

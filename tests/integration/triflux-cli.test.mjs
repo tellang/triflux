@@ -130,16 +130,16 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     writeFileSync(
       join(homeDir, ".codex", "config.toml"),
       [
-        "[profiles.codex53_high]",
+        "[profiles.gpt55_high]",
         'model = "legacy-model"',
         'model_reasoning_effort = "low"',
         "",
-        "[profiles.codex53_xhigh]",
+        "[profiles.gpt55_xhigh]",
         'model = "legacy-model"',
         'model_reasoning_effort = "medium"',
         "",
-        "[profiles.spark53_low]",
-        'model = "legacy-spark"',
+        "[profiles.gpt55_low]",
+        'model = "legacy-model"',
         'model_reasoning_effort = "high"',
         "",
       ].join("\n"),
@@ -155,24 +155,11 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
 
     assert.ok(codexProfiles, "codex-profiles action missing");
     assert.equal(codexProfiles.change, "update");
-    // REQUIRED_CODEX_PROFILES 에 gpt55_* 4개 + 기존 11개 = 15개 모두 포함.
-    // fixture 에 3개만 stale 로 심어둬서 12개는 신규 생성, 3개는 갱신.
     assert.deepEqual(codexProfiles.profiles, [
       "gpt55_xhigh",
       "gpt55_high",
       "gpt55_med",
       "gpt55_low",
-      "codex53_high",
-      "codex53_xhigh",
-      "codex53_med",
-      "spark53_low",
-      "spark53_med",
-      "gpt54_xhigh",
-      "gpt54_high",
-      "gpt54_low",
-      "mini54_low",
-      "mini54_med",
-      "mini54_high",
     ]);
     if (process.platform === "win32") {
       assert.equal(codexProfiles.windowsSandbox, true);
@@ -273,11 +260,11 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     writeFileSync(
       codexConfigPath,
       [
-        "[profiles.codex53_high]",
+        "[profiles.gpt55_high]",
         'model = "legacy-model"',
         "",
-        "[profiles.spark53_low]",
-        'model = "legacy-spark"',
+        "[profiles.gpt55_low]",
+        'model = "legacy-model"',
         "",
         "# padding: realistic Codex config files are larger than setup's safety floor",
       ].join("\n"),
@@ -297,15 +284,15 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     const updated = readFileSync(codexConfigPath, "utf8");
     assert.match(
       updated,
-      /\[profiles\.codex53_high\]\nmodel = "gpt-5\.3-codex"\nmodel_reasoning_effort = "high"/,
+      /\[profiles\.gpt55_high\]\nmodel = "gpt-5\.5"\nmodel_reasoning_effort = "high"/,
     );
     assert.match(
       updated,
-      /\[profiles\.codex53_xhigh\]\nmodel = "gpt-5\.3-codex"\nmodel_reasoning_effort = "xhigh"/,
+      /\[profiles\.gpt55_xhigh\]\nmodel = "gpt-5\.5"\nmodel_reasoning_effort = "xhigh"/,
     );
     assert.match(
       updated,
-      /\[profiles\.spark53_low\]\nmodel = "gpt-5\.3-codex-spark"\nmodel_reasoning_effort = "low"/,
+      /\[profiles\.gpt55_low\]\nmodel = "gpt-5\.5"\nmodel_reasoning_effort = "low"/,
     );
 
     if (process.platform === "win32") {

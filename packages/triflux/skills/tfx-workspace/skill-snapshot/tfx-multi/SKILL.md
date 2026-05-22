@@ -1,6 +1,6 @@
 ---
 name: tfx-multi
-description: 멀티-CLI 팀 모드. Claude Native Agent Teams + Codex/Gemini 멀티모델 오케스트레이션.
+description: 멀티-CLI 팀 모드. Claude Native Agent Teams + Codex/Antigravity 멀티모델 오케스트레이션.
 triggers:
   - tfx-multi
 argument-hint: '"작업 설명" | --agents codex,gemini "작업" | --tmux "작업" | status | stop'
@@ -9,7 +9,7 @@ argument-hint: '"작업 설명" | --agents codex,gemini "작업" | --tmux "작�
 # tfx-multi v3 — 파이프라인 기반 멀티-CLI 팀 오케스트레이터
 
 > Claude Code Native Teams의 Shift+Down 네비게이션을 복원한다.
-> Codex/Gemini 워커마다 최소 프롬프트(~100 토큰)의 슬림 Agent 래퍼를 spawn하여 네비게이션에 등록하고,
+> Codex/Antigravity 워커마다 최소 프롬프트(~100 토큰)의 슬림 Agent 래퍼를 spawn하여 네비게이션에 등록하고,
 > 실제 작업은 `tfx-route.sh`가 수행한다. task 상태는 `team_task_list`를 truth source로 검증한다.
 > v3 — `--quick`(기본, v2.2 호환) + `--thorough`(전체 파이프라인: plan→prd→exec→verify→fix loop).
 
@@ -98,9 +98,9 @@ Bash("codex exec --full-auto --skip-git-repo-check '다음 작업을 분석하�
   - gemini: 문서/UI/디자인/멀티모달
   - claude: 코드베이스 탐색/테스트 실행/검증 (최후 수단)
 
-  모든 역할은 Codex/Gemini 우선 배정:
-  - explore, verifier, test-engineer, qa-tester 포함 전 역할이 Codex/Gemini로 라우팅
-  - Codex/Gemini 미설치 시에만 claude-native(sonnet/haiku) fallback
+  모든 역할은 Codex/Antigravity 우선 배정:
+  - explore, verifier, test-engineer, qa-tester 포함 전 역할이 Codex/Antigravity로 라우팅
+  - Codex/Antigravity 미설치 시에만 claude-native(sonnet/haiku) fallback
   - claude 타입은 최후 수단으로만 사용
 
   작업: {task}
@@ -185,15 +185,15 @@ for each assignment in assignments (index i):
 #### Step 3c: 슬림 래퍼 Agent 실행 (v2.2 네비게이션 복원)
 
 > **[배경] Native Teams의 teammate는 Claude 모델만 가능하다.**
-> Codex/Gemini는 teammate로 직접 등록할 수 없으므로, Claude slim wrapper를 spawn하고
-> 래퍼 내부에서 `tfx-route.sh`로 Codex/Gemini CLI를 실행하는 구조이다.
+> Codex/Antigravity는 teammate로 직접 등록할 수 없으므로, Claude slim wrapper를 spawn하고
+> 래퍼 내부에서 `tfx-route.sh`로 Codex/Antigravity CLI를 실행하는 구조이다.
 
-> **[필수] Codex/Gemini 서브태스크는 워커 수에 관계없이 반드시 Agent 래퍼를 spawn해야 한다.**
+> **[필수] Codex/Antigravity 서브태스크는 워커 수에 관계없이 반드시 Agent 래퍼를 spawn해야 한다.**
 > 단일 워커(1:gemini 등)여도 Lead가 직접 Bash를 실행하면 안 된다.
 > Agent 래퍼를 생략하면 Shift+Down 네비게이션에 워커가 등록되지 않아 v2.2의 핵심 가치가 사라진다.
 > Lead가 "효율적"이라고 판단해서 Agent를 건너뛰는 것은 금지한다.
 
-Codex/Gemini 서브태스크마다 최소 프롬프트의 Agent를 spawn하여 네비게이션에 등록한다.
+Codex/Antigravity 서브태스크마다 최소 프롬프트의 Agent를 spawn하여 네비게이션에 등록한다.
 Agent 내부에서 `Bash(tfx-route.sh)`를 N회 실행할 수 있다. 리드 피드백을 받아 재실행하는 구조이다.
 
 ```
@@ -228,7 +228,7 @@ status는 "completed"만 사용. 실패 여부는 `metadata.result`로 구분.
 
 > **[필수] `mode: "bypassPermissions"` — 모든 Agent spawn에 반드시 포함한다.**
 > 이 설정이 없으면 워커가 Bash 실행 시 사용자 승인을 요청하여 자동 실행이 중단된다.
-> Codex/Gemini 래퍼, Claude 워커 모두 동일하게 적용한다.
+> Codex/Antigravity 래퍼, Claude 워커 모두 동일하게 적용한다.
 
 > **[금지] Lead 또는 Agent 래퍼가 `gemini -y -p "..."` 또는 `codex exec "..."`를 직접 호출하면 안 된다.**
 > 직접 호출하면 tfx-route.sh의 모델 지정(`-m gemini-3.1-pro-preview`), MCP 필터, 팀 bridge 연동,
@@ -301,7 +301,7 @@ Agent({
 
 ```
 "팀 '{teamName}' 생성 완료.
-Codex/Gemini 워커가 슬림 래퍼 Agent로 네비게이션에 등록되었습니다.
+Codex/Antigravity 워커가 슬림 래퍼 Agent로 네비게이션에 등록되었습니다.
 Shift+Down으로 다음 워커로 전환 (마지막→리드 wrap). Shift+Tab으로 이전 워커 전환."
 ```
 
@@ -380,7 +380,7 @@ Bash("node hub/bridge.mjs team-task-list --team ${teamName}")
 5. 종합 보고서를 출력한다.
 
 ### Phase 3-mux: 레거시 psmux/tmux 모드
-`--tmux` 또는 `--psmux` 플래그 시 pane 기반 실행. `detectMultiplexer()`가 psmux → tmux → wsl-tmux → git-bash-tmux 순으로 자동 감지.
+`--tmux` 또는 `--psmux` 플래그 시 pane 기반 실행. `detectMultiplexer()`가 psmux → tmux → git-bash-tmux 순으로 자동 감지.
 Windows에서는 **psmux가 1순위** (ADR-001).
 
 Bash("node {PKG_ROOT}/bin/triflux.mjs multi --no-attach --agents {agents} \\\"{task}\\\"")
@@ -395,7 +395,7 @@ Bash("node {PKG_ROOT}/bin/triflux.mjs multi --no-attach --agents {agents} \\\"{t
 - **codex/gemini CLI** — 해당 에이전트 사용 시
 - **tfx setup** — tfx-route.sh 동기화 + AGENT_TEAMS 자동 설정 (사전 실행 권장)
 - **Hub 활성 상태** — Named Pipe(`\\.\pipe\triflux-{pid}`) 우선, HTTP `127.0.0.1:27888` fallback. `bridge.mjs`가 자동 선택. Hub 미실행 시 nativeProxy fallback.
-- **멀티플렉서** — psmux(Windows 1순위) / tmux / wsl-tmux / git-bash-tmux 자동 감지 (`--tmux`/`--psmux` 모드)
+- **멀티플렉서** — psmux(Windows 1순위) / tmux / git-bash-tmux 자동 감지 (`--tmux`/`--psmux` 모드)
 - **출력 정책** — preflight는 비동기/요약 출력이 기본이며, 실패 시에만 상세 출력
 
 ## 에러 처리

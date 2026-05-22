@@ -78,12 +78,12 @@ Bash("triflux doctor")
 | HUD (hud-qos-status.mjs) | ✅ v1.7 |
 | HUD 설정 (settings.json) | ✅ statusLine 등록됨 |
 | Codex CLI | ✅ / ⚠️ 미설치 (선택) |
-| Gemini CLI | ✅ / ⚠️ 미설치 (선택) |
+| Antigravity CLI | ✅ / ⚠️ 미설치 (선택) |
 | 스킬 | ✅ N개 설치됨 |
 
 ### 다음 단계
 - Codex 미설치 시: `npm install -g @openai/codex`
-- Gemini 미설치 시: `npm install -g @google/gemini-cli`
+- Antigravity 미설치 시: Google Antigravity 설치 후 `agy`가 PATH에서 실행되는지 확인
 - 세션 재시작하면 HUD가 표시됩니다
 ```
 

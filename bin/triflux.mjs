@@ -2236,14 +2236,23 @@ function cmdSetup(options = {}) {
   // CLI 존재 확인
   const cliChecks = [
     { name: "codex", install: "npm i -g @openai/codex" },
-    { name: "gemini", install: "npm i -g @google/gemini-cli" },
+    {
+      name: "agy",
+      label: "Antigravity",
+      install: "Install Google Antigravity and ensure `agy` is on PATH",
+    },
   ];
-  for (const { name, install } of cliChecks) {
+  for (const { name, label, install } of cliChecks) {
+    const displayName = label || name;
     if (which(name)) {
-      summary.push({ item: `${name} CLI`, status: "✅", detail: "설치됨" });
+      summary.push({
+        item: `${displayName} CLI`,
+        status: "✅",
+        detail: "설치됨",
+      });
     } else {
       summary.push({
-        item: `${name} CLI`,
+        item: `${displayName} CLI`,
         status: "⏭️",
         detail: `미설치 (${install})`,
       });
@@ -3189,20 +3198,20 @@ async function cmdDoctor(options = {}) {
       issues++;
     }
 
-    // 5. Gemini CLI
-    section(`Gemini CLI ${BLUE}●${RESET}`);
-    const geminiCli = checkCliCrossShell(
-      "gemini",
-      "npm install -g @google/gemini-cli",
+    // 5. Antigravity CLI
+    section(`Antigravity CLI ${BLUE}●${RESET}`);
+    const antigravityCli = checkCliCrossShell(
+      "agy",
+      "Install Google Antigravity and ensure `agy` is on PATH",
     );
-    issues += geminiCli.issues;
+    issues += antigravityCli.issues;
     addDoctorCheck(report, {
-      name: "gemini",
-      status: geminiCli.status,
-      shells: geminiCli.shells,
-      ...(geminiCli.fix ? { fix: geminiCli.fix } : {}),
+      name: "antigravity",
+      status: antigravityCli.status,
+      shells: antigravityCli.shells,
+      ...(antigravityCli.fix ? { fix: antigravityCli.fix } : {}),
     });
-    // API 키 검사 제거 — bash exec 기반이므로 API 키 불필요
+    // API 키 검사 제거 — agy OAuth 기반이므로 API 키 불필요
 
     // Gemini 구형 모델 감지
     const geminiProfilesPath = join(
@@ -3373,7 +3382,7 @@ async function cmdDoctor(options = {}) {
           name: "psmux",
           status: "skipped",
           detail: "미설치 (선택)",
-          fix: "winget install marlocarlo.psmux",
+          fix: "winget install psmux",
         });
       }
     }

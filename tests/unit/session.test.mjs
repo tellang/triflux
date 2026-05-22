@@ -27,7 +27,7 @@ describe("session.mjs", () => {
     const mux = detectMultiplexer();
     assert.ok(
       mux === null ||
-        ["tmux", "git-bash-tmux", "wsl-tmux", "psmux"].includes(mux),
+        ["tmux", "git-bash-tmux", "psmux"].includes(mux),
     );
   });
 

@@ -37,12 +37,12 @@ function removeTree(path) {
 }
 
 describe("worker factory lazy imports SDK-dependent workers", () => {
-  it("creates GeminiWorker when @modelcontextprotocol/sdk is absent", async () => {
+  it("maps deprecated gemini worker creation to Antigravity route worker", async () => {
     const { root, factory } = await importFactoryFromSdkMissingTree();
     try {
       const worker = await factory.createWorker("gemini");
-      assert.equal(worker.constructor.name, "GeminiWorker");
-      assert.equal(worker.type, "gemini");
+      assert.equal(worker.constructor.name, "AntigravityRouteWorker");
+      assert.equal(worker.type, "antigravity");
     } finally {
       removeTree(root);
     }

@@ -917,10 +917,15 @@ export function createSwarmHypervisor(opts) {
         const worker = workers.get(shardName);
         const shard = plan?.shards.find((item) => item.name === shardName);
         if (worker && shard) {
-          const cleanupPromise = maybeCleanupWorktree(shardName, worker, shard, {
-            force: true,
-            failureReason: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
-          });
+          const cleanupPromise = maybeCleanupWorktree(
+            shardName,
+            worker,
+            shard,
+            {
+              force: true,
+              failureReason: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
+            },
+          );
           worker.cleanupPromise = cleanupPromise;
           void cleanupPromise
             .finally(() => {

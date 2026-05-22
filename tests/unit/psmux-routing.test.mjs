@@ -1,8 +1,9 @@
 /**
  * psmux-routing.test.mjs — psmux routing fix edge-case tests
  *
- * Bug 1: normalizeTeammateMode("auto") + psmux installed was returning "psmux"
- *         instead of "headless". Fixed in runtime-mode.mjs line 16.
+ * Bug 1: normalizeTeammateMode("auto") + tmux installed was falling through to
+ *         "in-process" on macOS. Fixed by treating tmux as a first-class mux
+ *         mode while preserving psmux as the Windows tmux-compatible mode.
  *
  * Bug 2: SKILL.md Phase 3 was describing a JS API pattern instead of a
  *         concrete Bash("tfx multi --teammate-mode headless ...") invocation.
@@ -44,12 +45,15 @@ function normalizeTeammateMode(
   const raw = String(mode).toLowerCase();
   if (raw === "inline" || raw === "native") return "in-process";
   if (raw === "headless" || raw === "hl") return "headless";
-  if (raw === "psmux") return "headless";
-  if (raw === "in-process" || raw === "tmux" || raw === "wt") return raw;
+  if (raw === "in-process" || raw === "tmux" || raw === "psmux" || raw === "wt")
+    return raw;
   if (raw === "windows-terminal" || raw === "windows_terminal") return "wt";
   if (raw === "auto") {
     if (tmuxEnv) return "tmux";
-    return detectMultiplexer?.() === "psmux" ? "headless" : "in-process";
+    const mux = detectMultiplexer?.();
+    if (mux === "psmux") return "psmux";
+    if (mux === "tmux") return "tmux";
+    return "in-process";
   }
   return "in-process";
 }
@@ -58,14 +62,13 @@ function normalizeTeammateMode(
 // A. normalizeTeammateMode — unit tests (reference impl)
 // ---------------------------------------------------------------------------
 describe("normalizeTeammateMode — psmux routing fix", () => {
-  // Test 1: THE FIX — auto + psmux = headless (was returning "psmux")
-  it('auto + psmux installed → "headless" (not "psmux")', () => {
+  // Test 1: psmux is the Windows tmux-compatible mux mode, not a headless alias.
+  it('auto + psmux installed → "psmux" mux mode', () => {
     const result = normalizeTeammateMode("auto", {
       detectMultiplexer: () => "psmux",
       tmuxEnv: null,
     });
-    assert.equal(result, "headless", 'auto+psmux must route to "headless"');
-    assert.notEqual(result, "psmux", 'must NOT return legacy "psmux"');
+    assert.equal(result, "psmux", 'auto+psmux must preserve "psmux" mux mode');
   });
 
   // Test 2: auto + no mux = in-process
@@ -101,9 +104,9 @@ describe("normalizeTeammateMode — psmux routing fix", () => {
     assert.equal(normalizeTeammateMode("hl"), "headless");
   });
 
-  // Test 6: explicit "psmux" → "headless" (psmux always maps to headless now)
-  it('explicit "psmux" → "headless" (psmux maps to headless)', () => {
-    assert.equal(normalizeTeammateMode("psmux"), "headless");
+  // Test 6: explicit "psmux" → "psmux" (Windows tmux-compatible mux mode)
+  it('explicit "psmux" → "psmux" (identity pass-through)', () => {
+    assert.equal(normalizeTeammateMode("psmux"), "psmux");
   });
 
   // Test 7: no args → default "auto" behavior
@@ -173,21 +176,20 @@ describe("normalizeTeammateMode — psmux routing fix", () => {
   });
 
   // Edge: auto + tmux detected (not psmux)
-  it('auto + tmux detected → "in-process" (tmux detection not used in auto; TMUX env is)', () => {
+  it('auto + tmux detected → "tmux" (macOS/Linux primary mux)', () => {
     // auto branch checks process.env.TMUX first, then detectMultiplexer().
-    // If TMUX env is not set but detectMultiplexer returns "tmux", it does NOT
-    // return "tmux" — only returns "tmux" when process.env.TMUX is truthy.
+    // If TMUX env is not set but detectMultiplexer returns "tmux", tmux is still
+    // the primary macOS/Linux team surface.
     const result = normalizeTeammateMode("auto", {
       detectMultiplexer: () => "tmux",
       tmuxEnv: null,
     });
-    // detectMultiplexer() !== "psmux" → falls to "in-process"
-    assert.equal(result, "in-process");
+    assert.equal(result, "tmux");
   });
 
   // Edge: auto + detectMultiplexer returns other values
-  it("auto + detectMultiplexer returns non-psmux strings → in-process", () => {
-    for (const mux of ["tmux", "git-bash-tmux", "wsl-tmux", "unknown"]) {
+  it("auto + non-primary detectMultiplexer strings → in-process", () => {
+    for (const mux of ["git-bash-tmux", "unknown"]) {
       const result = normalizeTeammateMode("auto", {
         detectMultiplexer: () => mux,
         tmuxEnv: null,
@@ -433,35 +435,37 @@ describe("runtime-mode.mjs — source code regression guard", () => {
     "hub/team/cli/services/runtime-mode.mjs",
   );
 
-  it("auto+psmux branch returns 'headless' not 'psmux' (THE FIX)", () => {
+  it("auto+psmux branch returns psmux mux mode, not headless", () => {
     const src = readFileSync(runtimeModePath, "utf8");
 
-    // The fix: detectMultiplexer() === "psmux" ? "headless" : "in-process"
+    // psmux is the Windows tmux-compatible mux mode. Headless remains an
+    // explicit teammate mode selected with --teammate-mode headless.
     const fixedPattern =
-      /detectMultiplexer\(\)\s*===\s*"psmux"\s*\?\s*"headless"/;
+      /if\s*\(mux\s*===\s*"psmux"\)\s*return\s+"psmux"/;
     assert.ok(
       fixedPattern.test(src),
-      'auto branch must map psmux detection to "headless" return value',
+      'auto branch must map psmux detection to "psmux"',
     );
+    assert.match(src, /mux\s*===\s*"tmux"/);
+    assert.match(src, /return\s+"tmux"/);
 
-    // Regression guard: must NOT return "psmux" in the auto branch
+    // Regression guard: must NOT collapse psmux into headless in the auto branch
     const regressedPattern =
-      /detectMultiplexer\(\)\s*===\s*"psmux"\s*\?\s*"psmux"/;
+      /if\s*\(mux\s*===\s*"psmux"\)\s*return\s+"headless"/;
     assert.ok(
       !regressedPattern.test(src),
-      'REGRESSION: auto branch must NOT return "psmux" when psmux is detected',
+      'REGRESSION: auto branch must NOT return "headless" when psmux is detected',
     );
   });
 
-  it("explicit psmux maps to headless, not identity pass-through", () => {
+  it("explicit psmux is identity pass-through, not headless alias", () => {
     const src = readFileSync(runtimeModePath, "utf8");
 
-    // psmux should map to "headless": if (raw === "psmux") return "headless";
-    const psmuxToHeadless =
-      /if\s*\(raw\s*===\s*"psmux"\)\s*return\s+"headless"/;
+    const psmuxPassThrough =
+      /"in-process"\s*\|\|\s*raw\s*===\s*"tmux"\s*\|\|\s*raw\s*===\s*"psmux"/;
     assert.ok(
-      psmuxToHeadless.test(src),
-      'explicit "psmux" input must map to "headless" (not identity pass-through)',
+      psmuxPassThrough.test(src),
+      'explicit "psmux" input must preserve psmux mux mode',
     );
   });
 
@@ -486,7 +490,7 @@ describe("runtime-mode.mjs — source code regression guard", () => {
       fn.includes('"headless"') && fn.includes('"hl"'),
       "headless/hl branch exists",
     );
-    // Branch: identity pass-through (in-process, tmux, wt, psmux)
+    // Branch: identity pass-through (in-process, tmux, psmux, wt)
     assert.ok(
       fn.includes('"in-process"') &&
         fn.includes('"tmux"') &&

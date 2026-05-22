@@ -211,7 +211,9 @@ function isInitializeRequest(body) {
 function parseTfxClientHeader(value) {
   const raw = Array.isArray(value) ? value[0] : value;
   const client = String(raw || "unknown").toLowerCase();
-  return ["codex", "claude", "gemini"].includes(client) ? client : "unknown";
+  return ["codex", "claude", "antigravity", "gemini"].includes(client)
+    ? client
+    : "unknown";
 }
 
 async function parseBody(req) {
@@ -335,8 +337,13 @@ async function syncHubMcpSettingsIfAvailable({ hubUrl }) {
     const mod = await import(
       new URL("../scripts/sync-hub-mcp-settings.mjs", import.meta.url)
     );
+    const protectedMcpSyncEnv = isProtectedImplicitMcpSyncEnv();
     if (typeof mod?.syncHubMcpSettings === "function") {
-      await mod.syncHubMcpSettings({ hubUrl });
+      if (process.env.TFX_USER_MCP_SYNC === "1" || !protectedMcpSyncEnv) {
+        await mod.syncHubMcpSettings({ hubUrl });
+      } else {
+        hubLog.debug({ hubUrl }, "hub.user_mcp_sync_skipped_protected_env");
+      }
     } else {
       hubLog.warn({ hubUrl }, "hub.mcp_sync_missing_export");
     }
@@ -344,12 +351,7 @@ async function syncHubMcpSettingsIfAvailable({ hubUrl }) {
       await mod.syncCodexHubUrl({ hubUrl });
     }
     const allowProjectSync =
-      process.env.TFX_PROJECT_MCP_SYNC === "1" ||
-      !(
-        process.env.NODE_ENV === "test" ||
-        process.env.CI === "true" ||
-        process.env.TFX_TEST === "1"
-      );
+      process.env.TFX_PROJECT_MCP_SYNC === "1" || !protectedMcpSyncEnv;
     if (allowProjectSync && typeof mod?.syncProjectMcpJson === "function") {
       await mod.syncProjectMcpJson({ hubUrl, projectRoot: PROJECT_ROOT });
     }
@@ -361,6 +363,17 @@ async function syncHubMcpSettingsIfAvailable({ hubUrl }) {
     }
     hubLog.warn({ hubUrl, err: message }, "hub.mcp_sync_skipped");
   }
+}
+
+function isProtectedImplicitMcpSyncEnv(env = process.env) {
+  return (
+    env.NODE_ENV === "test" ||
+    env.CI === "true" ||
+    env.TFX_TEST === "1" ||
+    Boolean(env.TRIFLUX_TEST_HOME) ||
+    Boolean(env.NODE_TEST_CONTEXT) ||
+    Boolean(env.NODE_TEST_WORKER_ID)
+  );
 }
 
 function findListeningPidByPort(

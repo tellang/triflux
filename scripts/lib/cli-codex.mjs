@@ -33,14 +33,14 @@ const AGENT_PROFILES = {
     mcpHint: "implement",
   },
   cleanup: {
-    profile: "mini54_med",
+    profile: "gpt55_med",
     timeoutSec: 540,
     runMode: "fg",
     opusOversight: false,
     mcpHint: "implement",
   },
   deslop: {
-    profile: "mini54_med",
+    profile: "gpt55_med",
     timeoutSec: 540,
     runMode: "fg",
     opusOversight: false,
@@ -157,7 +157,7 @@ const AGENT_PROFILES = {
     subcommand: "review",
   },
   spark: {
-    profile: "spark53_low",
+    profile: "gpt55_low",
     timeoutSec: 180,
     runMode: "fg",
     opusOversight: false,

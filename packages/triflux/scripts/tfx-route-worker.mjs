@@ -15,8 +15,8 @@ const FACTORY_CANDIDATES = [
 // MCP transport 실패 시 tfx-route.sh가 exec fallback을 수행할 수 있도록
 // CODEX_MCP_TRANSPORT_EXIT_CODE(70)으로 종료한다.
 const MCP_TRANSPORT_EXIT_CODE = 70;
-const GEMINI_RETRY_DELAY_MS = 5000;
-const GEMINI_RETRY_PATTERN_SNIPPETS = [
+const ROUTE_RETRY_DELAY_MS = 5000;
+const ROUTE_RETRY_PATTERN_SNIPPETS = [
   "429",
   "quota",
   "rate limit",
@@ -120,6 +120,11 @@ function parseArgs(argv) {
   return args;
 }
 
+function normalizeWorkerType(type) {
+  if (type === "gemini" || type === "agy") return "antigravity";
+  return type;
+}
+
 function parseJsonArray(raw, label) {
   if (!raw) return [];
   try {
@@ -162,7 +167,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function isGeminiQuotaRetrySignal(error) {
+function isRouteQuotaRetrySignal(error) {
   if (Number(error?.result?.exitCode) === 429) {
     return true;
   }
@@ -173,13 +178,13 @@ function isGeminiQuotaRetrySignal(error) {
 
   if (fragments.length === 0) return false;
   const merged = fragments.join("\n");
-  return GEMINI_RETRY_PATTERN_SNIPPETS.some((pattern) =>
+  return ROUTE_RETRY_PATTERN_SNIPPETS.some((pattern) =>
     merged.includes(pattern),
   );
 }
 
 async function runWorker(worker, type, prompt) {
-  const maxAttempts = type === "gemini" ? 2 : 1;
+  const maxAttempts = type === "antigravity" ? 2 : 1;
   let lastError = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -188,18 +193,18 @@ async function runWorker(worker, type, prompt) {
     } catch (error) {
       lastError = error;
       const shouldRetry =
-        type === "gemini" &&
+        type === "antigravity" &&
         attempt < maxAttempts &&
-        isGeminiQuotaRetrySignal(error);
+        isRouteQuotaRetrySignal(error);
 
       if (!shouldRetry) {
         throw error;
       }
 
       process.stderr.write(
-        "[tfx-route-worker] Gemini 429/quota 감지 — 5초 후 1회 재시도합니다.\n",
+        "[tfx-route-worker] Antigravity 429/quota 감지 — 5초 후 1회 재시도합니다.\n",
       );
-      await sleep(GEMINI_RETRY_DELAY_MS);
+      await sleep(ROUTE_RETRY_DELAY_MS);
     }
   }
 
@@ -207,6 +212,7 @@ async function runWorker(worker, type, prompt) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+args.type = normalizeWorkerType(args.type);
 const prompt = await readPromptFromStdin();
 
 const worker = await createWorker(args.type, {

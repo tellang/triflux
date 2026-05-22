@@ -26,12 +26,6 @@ const SERVER_FILE = resolve(
   "delegator-mcp.mjs",
 );
 const FAKE_CODEX = resolve(PROJECT_ROOT, "tests", "fixtures", "fake-codex.mjs");
-const FAKE_GEMINI = resolve(
-  PROJECT_ROOT,
-  "tests",
-  "fixtures",
-  "fake-gemini-cli.mjs",
-);
 const FAKE_ROUTE = resolve(PROJECT_ROOT, "tests", "fixtures", "fake-route.sh");
 const SEARCH_ENGINE_CACHE_FILE = resolve(
   PROJECT_ROOT,
@@ -323,9 +317,8 @@ describe("delegator-mcp stdio server", () => {
       HOME: tempHome,
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
       TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
-      GEMINI_BIN: process.execPath,
-      GEMINI_BIN_ARGS_JSON: JSON.stringify([FAKE_GEMINI]),
-      FAKE_GEMINI_ECHO_ALLOWED_MCP: "1",
+      TFX_DELEGATOR_ROUTE_SCRIPT: FAKE_ROUTE,
+      TFX_DELEGATOR_BASH_COMMAND: BASH_EXE,
     });
 
     try {
@@ -341,7 +334,7 @@ describe("delegator-mcp stdio server", () => {
       const codexConfig = JSON.parse(codexResult.structuredContent.output);
       assert.deepEqual(codexConfig, { mcp_servers: {} });
 
-      const geminiResult = await client.callTool({
+      const aliasResult = await client.callTool({
         name: "triflux-delegate",
         arguments: {
           provider: "gemini",
@@ -350,10 +343,16 @@ describe("delegator-mcp stdio server", () => {
           prompt: "cache fallback",
         },
       });
-      assert.match(
-        geminiResult.structuredContent.output,
-        /allowed:context7,brave-search,exa/,
+      assert.equal(
+        aliasResult.structuredContent.provider_requested,
+        "antigravity",
       );
+      assert.equal(
+        aliasResult.structuredContent.provider_resolved,
+        "antigravity",
+      );
+      assert.equal(aliasResult.structuredContent.transport, "route-script");
+      assert.match(aliasResult.structuredContent.stderr, /cli=antigravity/);
     } finally {
       restoreSearchEngineCacheBackup(originalCache);
       rmSync(tempHome, { recursive: true, force: true });
@@ -361,12 +360,12 @@ describe("delegator-mcp stdio server", () => {
     }
   });
 
-  it("gemini direct job은 delegate-reply로 multi-turn 대화를 이어가고 done=true 시 종료해야 한다", async () => {
+  it("gemini provider alias는 direct GeminiWorker 대신 Antigravity route로 실행한다", async () => {
     const { client, transport } = await createClient({
-      GEMINI_BIN: process.execPath,
-      GEMINI_BIN_ARGS_JSON: JSON.stringify([FAKE_GEMINI]),
       TFX_DELEGATOR_CODEX_COMMAND: process.execPath,
       TFX_DELEGATOR_CODEX_ARGS_JSON: JSON.stringify([FAKE_CODEX, "mcp-server"]),
+      TFX_DELEGATOR_ROUTE_SCRIPT: FAKE_ROUTE,
+      TFX_DELEGATOR_BASH_COMMAND: BASH_EXE,
     });
 
     try {
@@ -382,7 +381,11 @@ describe("delegator-mcp stdio server", () => {
 
       const jobId = first.structuredContent.job_id;
       assert.equal(typeof jobId, "string");
-      assert.equal(first.structuredContent.conversation_open, true);
+      assert.equal(first.structuredContent.provider_requested, "antigravity");
+      assert.equal(first.structuredContent.provider_resolved, "antigravity");
+      assert.equal(first.structuredContent.transport, "route-script");
+      assert.equal(first.structuredContent.conversation_open, false);
+      assert.match(first.structuredContent.stderr, /cli=antigravity/);
 
       const second = await client.callTool({
         name: "triflux-delegate-reply",
@@ -392,34 +395,10 @@ describe("delegator-mcp stdio server", () => {
         },
       });
 
-      assert.equal(second.structuredContent.job_id, jobId);
-      assert.equal(second.structuredContent.conversation_open, true);
-      assert.match(second.structuredContent.output, /first turn/);
-      assert.match(second.structuredContent.output, /second turn/);
-
-      const finalTurn = await client.callTool({
-        name: "triflux-delegate-reply",
-        arguments: {
-          job_id: jobId,
-          reply: "wrap up",
-          done: true,
-        },
-      });
-
-      assert.equal(finalTurn.structuredContent.conversation_open, false);
-
-      const afterDone = await client.callTool({
-        name: "triflux-delegate-reply",
-        arguments: {
-          job_id: jobId,
-          reply: "one more",
-        },
-      });
-
-      assert.equal(afterDone.isError, true);
+      assert.equal(second.isError, true);
       assert.match(
-        afterDone.structuredContent.error,
-        /종료된 대화|대화 컨텍스트가 없습니다/,
+        second.structuredContent.error,
+        /route 기반 Antigravity job에 지원되지 않습니다/,
       );
     } finally {
       await closeClient(client, transport);
@@ -456,7 +435,7 @@ describe("delegator-mcp stdio server", () => {
       assert.match(payload.stderr, /task=TASK-1/);
       assert.match(payload.stderr, /agent=delegator-worker/);
       assert.match(payload.stderr, /lead=team-lead/);
-      assert.match(payload.stderr, /cli=gemini/);
+      assert.match(payload.stderr, /cli=antigravity/);
     } finally {
       await closeClient(client, transport);
     }

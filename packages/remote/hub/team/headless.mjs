@@ -29,8 +29,8 @@ import {
   buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths as deriveClaudeControlPaths,
   killDaemonJob,
-  sendKillBySessionId,
   sendClaudeControlRequest,
+  sendKillBySessionId,
   waitForDaemonJobPid,
 } from "./claude-daemon-control.mjs";
 import {
