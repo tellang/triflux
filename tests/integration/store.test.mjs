@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 import { createStore, uuidv7 } from "../../hub/store.mjs";
+import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 // ── 헬퍼: 격리된 임시 DB 경로 생성 ──
 function tempDbPath() {
@@ -41,7 +42,7 @@ describe("uuidv7()", () => {
 });
 
 // ── createStore() ──
-describe("createStore()", () => {
+describe("createStore()", { skip: SQLITE_SKIP }, () => {
   let store;
   let dbPath;
 

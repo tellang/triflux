@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createRouter } from "../../hub/router.mjs";
 import { createStore } from "../../hub/store.mjs";
+import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 // 격리된 임시 DB 경로 생성
 function tempDbPath() {
@@ -22,7 +23,7 @@ function tempDbPath() {
   return join(dir, "test.db");
 }
 
-describe("createRouter() — route() 직접 호출", () => {
+describe("createRouter() — route() 직접 호출", { skip: SQLITE_SKIP }, () => {
   let store;
   let _router;
 
@@ -98,7 +99,9 @@ describe("createRouter() — route() 직접 호출", () => {
   });
 });
 
-describe("createRouter() — responseEmitter 기반 ask/publish 응답 수신", () => {
+describe("createRouter() — responseEmitter 기반 ask/publish 응답 수신", {
+  skip: SQLITE_SKIP,
+}, () => {
   let store;
   let router;
   let dbPath;
@@ -199,7 +202,9 @@ describe("createRouter() — responseEmitter 기반 ask/publish 응답 수신", 
   });
 });
 
-describe("createRouter() — getStatus() 분기 보완", () => {
+describe("createRouter() — getStatus() 분기 보완", {
+  skip: SQLITE_SKIP,
+}, () => {
   let store;
   let router;
   let dbPath;

@@ -4,7 +4,6 @@
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import Database from "better-sqlite3";
 
 import {
   createPipeline,
@@ -14,6 +13,7 @@ import {
   initPipelineState,
   readPipelineState,
 } from "../../hub/pipeline/state.mjs";
+import { loadBetterSqlite3ForTest, SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 // ── 헬퍼 ───────────────────────────────────────────────────────────────────
 
@@ -55,10 +55,13 @@ function pipelineAtDeslop(db, teamName) {
 
 // ── runConfidenceGate ───────────────────────────────────────────────────────
 
-describe("runConfidenceGate — decision별 상태 전이", () => {
+describe("runConfidenceGate — decision별 상태 전이", {
+  skip: SQLITE_SKIP,
+}, () => {
   let db;
 
   beforeEach(() => {
+    const Database = loadBetterSqlite3ForTest();
     db = new Database(":memory:");
     ensurePipelineTable(db);
   });
@@ -176,10 +179,13 @@ describe("runConfidenceGate — decision별 상태 전이", () => {
 
 // ── runSelfCheckGate ────────────────────────────────────────────────────────
 
-describe("runSelfCheckGate — pass/fail별 상태 전이", () => {
+describe("runSelfCheckGate — pass/fail별 상태 전이", {
+  skip: SQLITE_SKIP,
+}, () => {
   let db;
 
   beforeEach(() => {
+    const Database = loadBetterSqlite3ForTest();
     db = new Database(":memory:");
     ensurePipelineTable(db);
   });
@@ -294,10 +300,13 @@ describe("runSelfCheckGate — pass/fail별 상태 전이", () => {
 
 // ── runDeslopGate ───────────────────────────────────────────────────────────
 
-describe("runDeslopGate — unconditional verify 전이", () => {
+describe("runDeslopGate — unconditional verify 전이", {
+  skip: SQLITE_SKIP,
+}, () => {
   let db;
 
   beforeEach(() => {
+    const Database = loadBetterSqlite3ForTest();
     db = new Database(":memory:");
     ensurePipelineTable(db);
   });

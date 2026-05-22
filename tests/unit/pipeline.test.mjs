@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import Database from "better-sqlite3";
 import {
   createPipeline,
   ensurePipelineTable,
 } from "../../hub/pipeline/index.mjs";
 import { initPipelineState } from "../../hub/pipeline/state.mjs";
 import { createTools } from "../../hub/tools.mjs";
+import { loadBetterSqlite3ForTest, SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 // 테스트 전용 임시 디렉토리 (CWD를 오염시키지 않기 위해)
 const TEST_BASE = resolve(
@@ -18,7 +18,7 @@ const TEST_BASE = resolve(
   ".test-tmp-pipeline",
 );
 
-describe("pipeline.writePlanFile()", () => {
+describe("pipeline.writePlanFile()", { skip: SQLITE_SKIP }, () => {
   let db;
   let origCwd;
 
@@ -30,6 +30,7 @@ describe("pipeline.writePlanFile()", () => {
     process.chdir(TEST_BASE);
 
     // in-memory SQLite
+    const Database = loadBetterSqlite3ForTest();
     db = new Database(":memory:");
   });
 
@@ -89,7 +90,7 @@ describe("pipeline.writePlanFile()", () => {
   });
 });
 
-describe("pipeline_advance_gated (이슈 2)", () => {
+describe("pipeline_advance_gated (이슈 2)", { skip: SQLITE_SKIP }, () => {
   let db;
   let pipelineAdvanceGatedTool;
   let hitlCalls;
@@ -101,6 +102,7 @@ describe("pipeline_advance_gated (이슈 2)", () => {
   }
 
   beforeEach(() => {
+    const Database = loadBetterSqlite3ForTest();
     db = new Database(":memory:");
     ensurePipelineTable(db);
 
