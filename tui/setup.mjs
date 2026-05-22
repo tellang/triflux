@@ -36,6 +36,31 @@ const CODEX_DIR = join(homedir(), ".codex");
 const GEMINI_DIR = join(homedir(), ".gemini");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 
+const STABLE_NODE_COMMAND_CANDIDATES = Object.freeze([
+  "/opt/homebrew/bin/node",
+  "/usr/local/bin/node",
+  "/home/linuxbrew/.linuxbrew/bin/node",
+]);
+
+function quoteShellCommandArg(value) {
+  const normalized = String(value).replace(/\\/g, "/");
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/u.test(normalized)) return normalized;
+  return `"${normalized.replace(/(["\\$`])/gu, "\\$1")}"`;
+}
+
+function resolveStableNodeCommand() {
+  if (process.platform !== "win32") {
+    for (const candidate of STABLE_NODE_COMMAND_CANDIDATES) {
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return "node";
+}
+
+function buildNodeScriptCommand(scriptPath) {
+  return `${quoteShellCommandArg(resolveStableNodeCommand())} ${quoteShellCommandArg(scriptPath)}`;
+}
+
 // ── Step Definitions ──
 
 const STEPS = [
@@ -85,10 +110,23 @@ function stepHud() {
     }
 
     const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-    const nodePath = process.execPath;
+    const target = {
+      type: "command",
+      command: buildNodeScriptCommand(hudScript),
+    };
+    const currentCmd = settings.statusLine?.command || "";
 
     // Check if statusLine already configured correctly
-    if (settings.statusLine?.command?.includes("hud-qos-status")) {
+    if (currentCmd.includes("hud-qos-status")) {
+      if (currentCmd !== target.command) {
+        return {
+          ok: false,
+          detail: "statusLine의 Node command가 갱신 필요",
+          action: "configure",
+          current: settings.statusLine,
+          target,
+        };
+      }
       return {
         ok: true,
         detail: "statusLine 이미 설정됨",
@@ -103,10 +141,7 @@ function stepHud() {
         : "statusLine 미설정",
       action: "configure",
       current: settings.statusLine || null,
-      target: {
-        type: "command",
-        command: `"${nodePath}" "${hudScript}"`,
-      },
+      target,
     };
   } catch (e) {
     return { ok: false, detail: e.message };

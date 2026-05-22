@@ -830,6 +830,44 @@ function quoteWindowsTaskArg(value) {
   return `"${String(value).replace(/"/g, '\\"')}"`;
 }
 
+const STABLE_NODE_COMMAND_CANDIDATES = Object.freeze([
+  "/opt/homebrew/bin/node",
+  "/usr/local/bin/node",
+  "/home/linuxbrew/.linuxbrew/bin/node",
+]);
+
+function quoteShellCommandArg(value) {
+  const normalized = String(value).replace(/\\/g, "/");
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/u.test(normalized)) return normalized;
+  return `"${normalized.replace(/(["\\$`])/gu, "\\$1")}"`;
+}
+
+function resolveStableNodeCommand({ existsSyncFn = existsSync } = {}) {
+  if (process.platform !== "win32") {
+    for (const candidate of STABLE_NODE_COMMAND_CANDIDATES) {
+      try {
+        if (existsSyncFn(candidate)) return candidate;
+      } catch {
+        /* ignore candidate probe errors */
+      }
+    }
+  }
+  return "node";
+}
+
+function buildNodeScriptCommand(scriptPath) {
+  return `${quoteShellCommandArg(resolveStableNodeCommand())} ${quoteShellCommandArg(scriptPath)}`;
+}
+
+function refreshHookCommandForScript(hook, scriptName, scriptPath) {
+  if (typeof hook?.command !== "string") return false;
+  if (!hook.command.includes(scriptName)) return false;
+  const desired = buildNodeScriptCommand(scriptPath);
+  if (hook.command === desired) return false;
+  hook.command = desired;
+  return true;
+}
+
 function buildWindowsHubAutostartCommand({
   nodePath = process.execPath,
   pluginRoot = PLUGIN_ROOT,
@@ -1005,14 +1043,14 @@ function persistSettings(settings) {
 function applyStatusLine(settings) {
   if (!existsSync(HUD_PATH)) return false;
   const currentCmd = settings.statusLine?.command || "";
-  if (currentCmd.includes("hud-qos-status.mjs")) return false;
+  const desiredCommand = buildNodeScriptCommand(HUD_PATH);
+  if (currentCmd.includes("hud-qos-status.mjs")) {
+    if (currentCmd === desiredCommand) return false;
+    settings.statusLine = { type: "command", command: desiredCommand };
+    return true;
+  }
 
-  const nodePath = process.execPath.replace(/\\/g, "/");
-  const hudForward = HUD_PATH.replace(/\\/g, "/");
-  const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
-  const hudRef = hudForward.includes(" ") ? `"${hudForward}"` : hudForward;
-
-  settings.statusLine = { type: "command", command: `${nodeRef} ${hudRef}` };
+  settings.statusLine = { type: "command", command: desiredCommand };
   return true;
 }
 
@@ -1054,32 +1092,54 @@ function applyHooks(settings) {
       ),
   );
 
-  if (!hasTrifluxHooks) {
-    const nodePath = process.execPath.replace(/\\/g, "/");
-    const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
-    const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
+  const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
+  const commandForScript = (scriptName) =>
+    buildNodeScriptCommand(`${pluginRoot}/scripts/${scriptName}`);
 
+  if (!hasTrifluxHooks) {
     settings.hooks.SessionStart.push({
       matcher: "*",
       hooks: [
         {
           type: "command",
-          command: `${nodeRef} "${pluginRoot}/scripts/setup.mjs"`,
+          command: commandForScript("setup.mjs"),
           timeout: 10,
         },
         {
           type: "command",
-          command: `${nodeRef} "${pluginRoot}/scripts/hub-ensure.mjs"`,
+          command: commandForScript("hub-ensure.mjs"),
           timeout: 8,
         },
         {
           type: "command",
-          command: `${nodeRef} "${pluginRoot}/scripts/preflight-cache.mjs"`,
+          command: commandForScript("preflight-cache.mjs"),
           timeout: 5,
         },
       ],
     });
     changed = true;
+  }
+
+  for (const entry of settings.hooks.SessionStart) {
+    if (!Array.isArray(entry.hooks)) continue;
+    for (const hook of entry.hooks) {
+      for (const scriptName of [
+        "setup.mjs",
+        "hub-ensure.mjs",
+        "mcp-gateway-ensure.mjs",
+        "preflight-cache.mjs",
+      ]) {
+        if (
+          refreshHookCommandForScript(
+            hook,
+            scriptName,
+            `${pluginRoot}/scripts/${scriptName}`,
+          )
+        ) {
+          changed = true;
+        }
+      }
+    }
   }
 
   if (!Array.isArray(settings.hooks.PreToolUse)) settings.hooks.PreToolUse = [];
@@ -1148,7 +1208,7 @@ function applyHooks(settings) {
       hooks: [
         {
           type: "command",
-          command: `node "${gateScriptPath}"`,
+          command: buildNodeScriptCommand(gateScriptPath),
           timeout: 2,
         },
       ],
@@ -1161,9 +1221,9 @@ function applyHooks(settings) {
         if (
           typeof hook.command === "string" &&
           hook.command.includes("tfx-gate-activate") &&
-          !hook.command.includes(gateScriptPath)
+          hook.command !== buildNodeScriptCommand(gateScriptPath)
         ) {
-          hook.command = `node "${gateScriptPath}"`;
+          hook.command = buildNodeScriptCommand(gateScriptPath);
           changed = true;
         }
       }
@@ -1510,14 +1570,14 @@ export async function runDeferred(stdinData) {
   function applyStatusLine(s) {
     if (!existsSync(hudPath)) return false;
     const currentCmd = s.statusLine?.command || "";
-    if (currentCmd.includes("hud-qos-status.mjs")) return false;
+    const desiredCommand = buildNodeScriptCommand(hudPath);
+    if (currentCmd.includes("hud-qos-status.mjs")) {
+      if (currentCmd === desiredCommand) return false;
+      s.statusLine = { type: "command", command: desiredCommand };
+      return true;
+    }
 
-    const nodePath = process.execPath.replace(/\\/g, "/");
-    const hudForward = hudPath.replace(/\\/g, "/");
-    const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
-    const hudRef = hudForward.includes(" ") ? `"${hudForward}"` : hudForward;
-
-    s.statusLine = { type: "command", command: `${nodeRef} ${hudRef}` };
+    s.statusLine = { type: "command", command: desiredCommand };
     return true;
   }
 
@@ -1568,11 +1628,9 @@ export async function runDeferred(stdinData) {
     // ── SessionStart 훅 ──
     if (!Array.isArray(s.hooks.SessionStart)) s.hooks.SessionStart = [];
 
-    const nodePath = process.execPath.replace(/\\/g, "/");
-    const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
     const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
     const commandForScript = (scriptName) =>
-      `${nodeRef} "${pluginRoot}/scripts/${scriptName}"`;
+      buildNodeScriptCommand(`${pluginRoot}/scripts/${scriptName}`);
 
     const hasTrifluxHooks = s.hooks.SessionStart.some(
       (entry) =>
@@ -1635,6 +1693,28 @@ export async function runDeferred(stdinData) {
       if (hubIndex >= 0) entry.hooks.splice(hubIndex + 1, 0, gatewayHook);
       else entry.hooks.push(gatewayHook);
       changed = true;
+    }
+
+    for (const entry of s.hooks.SessionStart) {
+      if (!Array.isArray(entry.hooks)) continue;
+      for (const hook of entry.hooks) {
+        for (const scriptName of [
+          "setup.mjs",
+          "hub-ensure.mjs",
+          "mcp-gateway-ensure.mjs",
+          "preflight-cache.mjs",
+        ]) {
+          if (
+            refreshHookCommandForScript(
+              hook,
+              scriptName,
+              `${pluginRoot}/scripts/${scriptName}`,
+            )
+          ) {
+            changed = true;
+          }
+        }
+      }
     }
 
     // ── PreToolUse 훅: headless-guard + tfx-gate-activate ──
@@ -1726,7 +1806,7 @@ export async function runDeferred(stdinData) {
           hooks: [
             {
               type: "command",
-              command: `node "${gateScriptPath}"`,
+              command: buildNodeScriptCommand(gateScriptPath),
               timeout: 2,
             },
           ],
@@ -1750,9 +1830,9 @@ export async function runDeferred(stdinData) {
         }
         if (
           h.command.includes("tfx-gate-activate") &&
-          !h.command.includes(gateScriptPath)
+          h.command !== buildNodeScriptCommand(gateScriptPath)
         ) {
-          h.command = `node "${gateScriptPath}"`;
+          h.command = buildNodeScriptCommand(gateScriptPath);
           changed = true;
         }
       }
