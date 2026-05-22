@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/preflight-cache.mjs — 세션 시작 시 preflight 점검 캐싱
 
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,18 +14,67 @@ const PKG_ROOT = join(dirname(__filename), "..");
 const CACHE_DIR = join(homedir(), ".claude", "cache");
 const CACHE_FILE = join(CACHE_DIR, "tfx-preflight.json");
 const CACHE_TTL_MS = 3_600_000; // 1시간 (세션당 1회, SessionStart 훅에서 갱신)
+const ANTIGRAVITY_AUTH_READY_SKEW_MS = 60_000;
 
 function checkRoute({ homeDir = homedir(), existsSyncFn = existsSync } = {}) {
   const routePath = join(homeDir, ".claude", "scripts", "tfx-route.sh");
   return { ok: existsSyncFn(routePath), path: routePath };
 }
 
-function hasAntigravityCredential({ homeDir, existsSyncFn }) {
-  return [
+function checkAntigravityCredential({
+  homeDir,
+  existsSyncFn,
+  readFileSyncFn,
+  now = Date.now(),
+}) {
+  const paths = [
     join(homeDir, ".gemini", "oauth_creds.json"),
     join(homeDir, ".gemini", "antigravity-cli", "oauth_creds.json"),
     join(homeDir, ".gemini", "antigravity-cli", "credentials.json"),
-  ].some((path) => existsSyncFn(path));
+  ];
+
+  let reason = "auth_missing";
+  for (const path of paths) {
+    if (!existsSyncFn(path)) continue;
+
+    try {
+      const credential = JSON.parse(readFileSyncFn(path, "utf8"));
+      if (
+        Number.isFinite(credential?.expiry_date) &&
+        credential.expiry_date > now + ANTIGRAVITY_AUTH_READY_SKEW_MS
+      ) {
+        return { ok: true, path };
+      }
+      reason = "auth_expired";
+    } catch {
+      reason = "auth_invalid";
+    }
+  }
+
+  return { ok: false, reason };
+}
+
+function checkAntigravitySmoke(cliPath, { spawnSyncFn, timeout = 8000 } = {}) {
+  try {
+    const smoke = spawnSyncFn(
+      cliPath,
+      ["--print", "--dangerously-skip-permissions", "--print-timeout=3s"],
+      {
+        encoding: "utf8",
+        input: "Return exactly AGY_OK\n",
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout,
+        windowsHide: true,
+      },
+    );
+    return (
+      !smoke.error &&
+      (smoke.status == null || smoke.status === 0) &&
+      String(smoke.stdout || "").trim().length > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 function checkAntigravityReadiness(
@@ -33,7 +82,8 @@ function checkAntigravityReadiness(
   {
     homeDir = homedir(),
     existsSyncFn = existsSync,
-    execFileSyncFn = execFileSync,
+    readFileSyncFn = readFileSync,
+    spawnSyncFn = spawnSync,
     timeout = 2000,
   } = {},
 ) {
@@ -42,14 +92,16 @@ function checkAntigravityReadiness(
 
   let helpText = "";
   try {
-    helpText = String(
-      execFileSyncFn(cliResult.path, ["--help"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout,
-        windowsHide: true,
-      }),
-    );
+    const help = spawnSyncFn(cliResult.path, ["--help"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout,
+      windowsHide: true,
+    });
+    if (help.error || (help.status != null && help.status !== 0)) {
+      return { ok: false, path: cliResult.path, reason: "help_failed" };
+    }
+    helpText = [help.stdout, help.stderr].filter(Boolean).join("\n");
   } catch {
     return { ok: false, path: cliResult.path, reason: "help_failed" };
   }
@@ -61,8 +113,19 @@ function checkAntigravityReadiness(
     return { ok: false, path: cliResult.path, reason: "headless_unsupported" };
   }
 
-  if (!hasAntigravityCredential({ homeDir, existsSyncFn })) {
-    return { ok: false, path: cliResult.path, reason: "auth_missing" };
+  const credential = checkAntigravityCredential({
+    homeDir,
+    existsSyncFn,
+    readFileSyncFn,
+  });
+  if (!credential.ok) {
+    if (
+      credential.reason === "auth_expired" &&
+      checkAntigravitySmoke(cliResult.path, { spawnSyncFn })
+    ) {
+      return { ok: true, path: cliResult.path, reason: "ready" };
+    }
+    return { ok: false, path: cliResult.path, reason: credential.reason };
   }
 
   return { ok: true, path: cliResult.path, reason: "ready" };
@@ -75,13 +138,15 @@ async function runPreflight({
   checkRouteFn = checkRoute,
   detectCodexPlanFn = detectCodexPlan,
   existsSyncFn = existsSync,
-  execFileSyncFn = execFileSync,
+  readFileSyncFn = readFileSync,
+  spawnSyncFn = spawnSync,
 } = {}) {
   const cliChecks = await probeClisFn(["codex", "gemini", "agy"]);
   const antigravity = checkAntigravityReadiness(cliChecks.agy, {
     homeDir,
     existsSyncFn,
-    execFileSyncFn,
+    readFileSyncFn,
+    spawnSyncFn,
   });
   const result = {
     timestamp: Date.now(),
