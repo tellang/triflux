@@ -21,7 +21,7 @@ argument-hint: "<분석 주제 또는 컨텍스트> (Deep 스킬 내부 자동 �
 
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
-1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
 2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
@@ -58,12 +58,12 @@ Agent(
 
 **도구 2 — Codex+Antigravity 독립 분석 headless dispatch:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:{analysis_prompt} 출력 형식을 JSON으로 강제: { findings: [{ id: string, category: string, severity: critical|high|medium|low, description: string, evidence: string }], summary: string, confidence: 0.0-1.0 }:analyst' --assign 'gemini:{analysis_prompt} 출력 형식을 JSON으로 강제: { findings: [{ id: string, category: string, severity: critical|high|medium|low, description: string, evidence: string }], summary: string, confidence: 0.0-1.0 }:analyst' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:{analysis_prompt} 출력 형식을 JSON으로 강제: { findings: [{ id: string, category: string, severity: critical|high|medium|low, description: string, evidence: string }], summary: string, confidence: 0.0-1.0 }:analyst' --assign 'antigravity:{analysis_prompt} 출력 형식을 JSON으로 강제: { findings: [{ id: string, category: string, severity: critical|high|medium|low, description: string, evidence: string }], summary: string, confidence: 0.0-1.0 }:analyst' --timeout 600")
 ```
 
 ### Step 2: 교차검증 (Cross-Validation)
 
-3개 결과(`result_claude`, `result_codex`, `result_gemini`)를 수집한 후 Claude가 통합 교차검증을 수행한다.
+3개 결과(`result_claude`, `result_codex`, `result_antigravity`)를 수집한 후 Claude가 통합 교차검증을 수행한다.
 
 합의 분류 알고리즘:
 - 각 finding에 대해 동의한 CLI 수를 집계
@@ -87,13 +87,13 @@ Agent(
   run_in_background=true,
   name="consensus-resolve-claude",
   description="미합의 항목 2차 검토",
-  prompt="미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Codex — {codex_rebuttal}, Antigravity — {gemini_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수."
+  prompt="미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Codex — {codex_rebuttal}, Antigravity — {antigravity_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수."
 )
 ```
 
 **도구 2 — Codex+Antigravity 재검토:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Claude — {claude_rebuttal}, Antigravity — {gemini_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수.:analyst' --assign 'gemini:미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Claude — {claude_rebuttal}, Codex — {codex_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수.:analyst' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Claude — {claude_rebuttal}, Antigravity — {antigravity_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수.:analyst' --assign 'antigravity:미합의 항목 목록: {disputed_items}. 다른 두 CLI의 반대 논거: Claude — {claude_rebuttal}, Codex — {codex_rebuttal}. 각 항목에 대해 수용(accept) 또는 반박(rebut)으로 응답하라. 수용 시 근거 필수.:analyst' --timeout 600")
 ```
 
 Resolution 결과 처리:
@@ -108,12 +108,12 @@ Learned Weights를 `.omc/state/consensus-weights.json`에서 읽어 가중 투�
 {
   "claude": { "accuracy": 0.85, "total": 100, "correct": 85 },
   "codex":  { "accuracy": 0.82, "total": 100, "correct": 82 },
-  "gemini": { "accuracy": 0.78, "total": 100, "correct": 78 }
+  "antigravity": { "accuracy": 0.78, "total": 100, "correct": 78 }
 }
 ```
 
 가중 투표:
-`weighted_score = (claude_vote * 0.85 + codex_vote * 0.82 + gemini_vote * 0.78) / (0.85 + 0.82 + 0.78)`
+`weighted_score = (claude_vote * 0.85 + codex_vote * 0.82 + antigravity_vote * 0.78) / (0.85 + 0.82 + 0.78)`
 
 최종 결과를 호출 스킬에 반환한다:
 
@@ -124,7 +124,7 @@ Learned Weights를 `.omc/state/consensus-weights.json`에서 읽어 가중 투�
   "disputed_items": [...],
   "resolved_items": [...],
   "user_decision_needed": [...],
-  "cli_weights": { "claude": 0.85, "codex": 0.82, "gemini": 0.78 }
+  "cli_weights": { "claude": 0.85, "codex": 0.82, "antigravity": 0.78 }
 }
 ```
 

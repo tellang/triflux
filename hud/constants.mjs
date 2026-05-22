@@ -138,6 +138,11 @@ export const SPAWN_LOCK_TTL_MS = 30 * 1000; // 30초 spawn dedup
 
 // Gemini 쿼터 API 관련
 export const GEMINI_OAUTH_PATH = join(homedir(), ".gemini", "oauth_creds.json");
+export const ANTIGRAVITY_OAUTH_PATHS = [
+  join(homedir(), ".gemini", "antigravity-cli", "oauth_creds.json"),
+  join(homedir(), ".gemini", "antigravity-cli", "credentials.json"),
+  GEMINI_OAUTH_PATH,
+];
 export const GEMINI_QUOTA_CACHE_PATH = join(
   homedir(),
   ".claude",
@@ -162,6 +167,7 @@ export const TFX_PREFLIGHT_CACHE_PATH = join(
   "cache",
   "tfx-preflight.json",
 );
+export const TFX_PREFLIGHT_CACHE_STALE_MS = 60 * 60 * 1000;
 export const GEMINI_RPM_TRACKER_PATH = join(
   homedir(),
   ".claude",

@@ -347,7 +347,7 @@
       "supersedes": [],
       "exclusive": false,
       "state": null,
-      "mcp_route": "gemini"
+      "mcp_route": "antigravity"
     },
     {
       "id": "chrome-route",
@@ -366,7 +366,7 @@
       "supersedes": [],
       "exclusive": false,
       "state": null,
-      "mcp_route": "gemini"
+      "mcp_route": "antigravity"
     },
     {
       "id": "jira-route",
@@ -404,7 +404,7 @@
       "supersedes": [],
       "exclusive": false,
       "state": null,
-      "mcp_route": "gemini"
+      "mcp_route": "antigravity"
     },
     {
       "id": "calendar-route",
@@ -423,7 +423,7 @@
       "supersedes": [],
       "exclusive": false,
       "state": null,
-      "mcp_route": "gemini"
+      "mcp_route": "antigravity"
     },
     {
       "id": "playwright-route",
@@ -438,7 +438,7 @@
       "supersedes": [],
       "exclusive": false,
       "state": null,
-      "mcp_route": "gemini"
+      "mcp_route": "antigravity"
     },
     {
       "id": "canva-route",
@@ -453,7 +453,7 @@
       "supersedes": [],
       "exclusive": false,
       "state": null,
-      "mcp_route": "gemini"
+      "mcp_route": "antigravity"
     },
     {
       "id": "confluence-route",
@@ -472,7 +472,7 @@
       "supersedes": [],
       "exclusive": false,
       "state": null,
-      "mcp_route": "gemini"
+      "mcp_route": "antigravity"
     },
     {
       "id": "slack-route",
@@ -491,7 +491,7 @@
       "supersedes": [],
       "exclusive": false,
       "state": null,
-      "mcp_route": "gemini"
+      "mcp_route": "antigravity"
     },
     {
       "id": "github-route",

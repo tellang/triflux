@@ -2,7 +2,7 @@
 
 > 상태: Draft  
 > 작성일: 2026-04-02  
-> 목적: triflux에서 Codex, Gemini, Claude를 어떤 실행 표면으로 호출할지 빠르게 판단하기 위한 운영 기준
+> 목적: triflux에서 Codex, Antigravity, Claude를 어떤 실행 표면으로 호출할지 빠르게 판단하기 위한 운영 기준
 
 ---
 
@@ -10,9 +10,9 @@
 
 | 모드 | 호출 표면 | 실제 실행체 | 파일 수정 가능 | 결과 수집 | 적합한 작업 |
 |---|---|---|---|---|---|
-| A. `tfx-route.sh` | 단일 CLI 라우팅 | `codex exec` / `gemini -p` / `claude` one-shot | 제한적 또는 불안정 | stdout/stderr | 분석, 리뷰, 계획, 짧은 문서화 |
+| A. `tfx-route.sh` | 단일 CLI 라우팅 | `codex exec` / `agy --print` / `claude` one-shot | 제한적 또는 불안정 | stdout/stderr | 분석, 리뷰, 계획, 짧은 문서화 |
 | B. `tfx multi --teammate-mode headless` | headless 허브 기반 병렬 실행 | Hub + worker launcher | 기본적으로 텍스트 중심 | hub 상태 + handoff 파일 | 다중 에이전트 토론, 병렬 분석, 교차 검토 |
-| C. direct `codex` / `gemini` in `psmux` | 대화형 세션 | 장기 실행 CLI 세션 | 가능 | git diff, 커밋, pane capture | 실제 구현, 테스트, 리팩터링 |
+| C. direct `codex` / `agy` in mux | 대화형 세션 | 장기 실행 CLI 세션 | 가능 | git diff, 커밋, pane capture | 실제 구현, 테스트, 리팩터링 |
 | D. native subagent | Codex/Claude 네이티브 서브에이전트 | 현재 세션 내부 도구 실행 | 가능 | 직접 반환값 | 탐색, 검증, 제한된 구현, 리뷰 |
 
 ---
@@ -22,7 +22,7 @@
 ### A. `tfx-route.sh`
 
 ```bash
-bash ~/.claude/scripts/tfx-route.sh executor "구현 방향을 분석해라" codex53_high 900
+bash ~/.claude/scripts/tfx-route.sh executor "구현 방향을 분석해라" implement 900
 ```
 
 - 장점
@@ -41,7 +41,7 @@ bash ~/.claude/scripts/tfx-route.sh executor "구현 방향을 분석해라" cod
 ```bash
 tfx multi --teammate-mode headless \
   --assign 'codex:라우팅 구조를 분석해라:architect' \
-  --assign 'gemini:반례를 찾아라:critic'
+  --assign 'antigravity:반례를 찾아라:critic'
 ```
 
 - 장점
@@ -55,11 +55,11 @@ tfx multi --teammate-mode headless \
 - 권장 용도
 - 다중 모델 합의, 리서치 분산, 리뷰 분업, 논쟁적 의사결정.
 
-### C. direct `codex` / `gemini` in `psmux`
+### C. direct `codex` / `agy` in mux
 
 ```bash
 prompt=$(cat .codex-swarm/prompts/prompt-hook-integration.md)
-codex -p codex53_xhigh --dangerously-bypass-approvals-and-sandbox "$prompt"
+codex --profile gpt55_xhigh exec --dangerously-bypass-approvals-and-sandbox "$prompt"
 ```
 
 - 장점
@@ -110,12 +110,12 @@ codex -p codex53_xhigh --dangerously-bypass-approvals-and-sandbox "$prompt"
 - 구현은 가능하면 mode C.
 - 분석/문서는 mode A 또는 D.
 
-### Gemini
+### Antigravity
 
 - 강점
 - 비교 관점, 빠른 대안 제시, 문서 초안에 유리하다.
 - 약점
-- 파일 변경 보장은 실행 표면에 크게 의존한다.
+- `agy` CLI는 route에서 stdin 기반 one-shot worker로만 안정적으로 다룬다.
 - 권장
 - 병렬 분석은 mode B.
 - 짧은 문서화는 mode A.
@@ -149,7 +149,7 @@ codex -p codex53_xhigh --dangerously-bypass-approvals-and-sandbox "$prompt"
 
 ```bash
 prompt=$(cat prompt.md)
-codex -p codex53_xhigh --dangerously-bypass-approvals-and-sandbox "$prompt"
+codex --profile gpt55_xhigh exec --dangerously-bypass-approvals-and-sandbox "$prompt"
 ```
 
 ### 완료 감지

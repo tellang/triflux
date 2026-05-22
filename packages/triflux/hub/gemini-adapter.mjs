@@ -1,5 +1,5 @@
-// hub/gemini-adapter.mjs — Gemini CLI 방어 계층
-// codex-adapter.mjs와 동일 패턴, cli-adapter-base 공통 인터페이스 사용
+// hub/gemini-adapter.mjs — legacy Gemini adapter compatibility layer
+// The "gemini" route is retained as an alias, but execution is Antigravity/agy.
 
 import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,11 +8,14 @@ import {
   executeWithCircuitBroker,
   normalizePathForShell,
   runProcess,
-  shellQuote,
 } from "./cli-adapter-base.mjs";
 import { whichCommandAsync } from "./platform.mjs";
 
-// ── Gemini-specific stall inference ─────────────────────────────
+function shellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+// ── Antigravity stall inference ─────────────────────────────────
 
 function inferStallMode(stdout, stderr) {
   const text = `${stdout}\n${stderr}`.toLowerCase();
@@ -30,12 +33,12 @@ function inferStallMode(stdout, stderr) {
 // ── Preflight ───────────────────────────────────────────────────
 
 async function runPreflight(opts = {}) {
-  const geminiPath = await whichCommandAsync("gemini");
-  if (!geminiPath) {
+  const agyPath = await whichCommandAsync("agy");
+  if (!agyPath) {
     return {
-      geminiPath: null,
+      agyPath: null,
       warnings: [
-        "Gemini CLI not found. Install Gemini and ensure `gemini` is available on PATH.",
+        "Antigravity CLI not found. Install Antigravity and ensure `agy` is available on PATH.",
       ],
       excludeMcpServers: [],
       ok: false,
@@ -48,40 +51,27 @@ async function runPreflight(opts = {}) {
   for (const name of Array.isArray(opts.mcpServers) ? opts.mcpServers : []) {
     const server = String(name ?? "").trim();
     if (!server) continue;
-    // Gemini MCP health는 best-effort: 실행 시점에 --allowed-mcp-server-names로 필터링
-    // 사전 probe는 수행하지 않음 (gemini가 자체적으로 graceful degrade)
+    // Antigravity MCP health는 best-effort: 실행 시점 probe는 수행하지 않음.
   }
 
-  return { geminiPath, warnings, excludeMcpServers, ok: true };
+  return { agyPath, warnings, excludeMcpServers, ok: true };
 }
 
 // ── Command building ────────────────────────────────────────────
 
 function buildGeminiCommand(prompt, resultFile, opts = {}) {
-  const parts = ["gemini"];
-
-  if (opts.model) parts.push("--model", shellQuote(opts.model));
-  parts.push("--yolo");
-
-  const allowed = Array.isArray(opts.allowedMcpServers)
-    ? opts.allowedMcpServers
-    : [];
-  const excluded = Array.isArray(opts.excludeMcpServers)
-    ? opts.excludeMcpServers
-    : [];
-  const filtered = allowed.filter((name) => !excluded.includes(name));
-  if (filtered.length) {
-    parts.push(
-      "--allowed-mcp-server-names",
-      ...filtered.map((n) => shellQuote(n)),
-    );
-  }
-
-  parts.push("--prompt", shellQuote(prompt));
-  parts.push("--output-format", "text");
+  const parts = [
+    "printf",
+    "%s",
+    shellSingleQuote(prompt),
+    "|",
+    "agy",
+    "--print",
+    "--dangerously-skip-permissions",
+  ];
 
   if (resultFile) {
-    return `${parts.join(" ")} > ${shellQuote(normalizePathForShell(resultFile))} 2>${shellQuote(normalizePathForShell(resultFile + ".err"))}`;
+    return `${parts.join(" ")} > ${shellSingleQuote(normalizePathForShell(resultFile))} 2>${shellSingleQuote(normalizePathForShell(resultFile + ".err"))}`;
   }
 
   return parts.join(" ");
@@ -114,11 +104,11 @@ export function buildExecArgs(opts = {}) {
 // ── Execution ───────────────────────────────────────────────────
 
 async function runGemini(prompt, workdir, preflight, attempt, lease) {
-  const dir = join(tmpdir(), "triflux-gemini-exec");
+  const dir = join(tmpdir(), "triflux-antigravity-exec");
   mkdirSync(dir, { recursive: true });
   const resultFile = join(
     dir,
-    `gemini-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
+    `agy-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
   );
   const command = buildGeminiCommand(prompt, resultFile, {
     model: attempt.model,
@@ -153,6 +143,8 @@ export async function getCircuitState() {
 
 export function execute(opts = {}) {
   return executeWithCircuitBroker({
+    // Account-broker still stores this compatibility bucket as "gemini";
+    // execution itself is routed to agy above.
     provider: "gemini",
     runFn: runGemini,
     preflightFn: (o) => runPreflight({ mcpServers: o.mcpServers }),

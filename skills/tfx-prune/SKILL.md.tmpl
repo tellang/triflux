@@ -24,7 +24,7 @@ argument-hint: "[파일 경로 또는 git diff 범위]"
 
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
-1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
 2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
@@ -100,7 +100,7 @@ Codex + Antigravity (Bash, background):
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:다음 파일에서 AI 슬롭을 감지하세요. 구현 효율 관점(중복 패턴, 과잉 에러핸들링, 미사용 코드)으로 분석. 파일: {file_content}. JSON: [{id,category,line_start,line_end,description,severity,suggested_fix}]. severity: critical|high|medium|low. 과탐보다 미탐이 낫습니다.:slop-detector' \
-  --assign 'gemini:다음 파일에서 AI 슬롭을 감지하세요. 가독성/DX 관점(과잉 주석, 과잉 타입, 불필요 추상화)으로 분석. 파일: {file_content}. JSON: [{id,category,line_start,line_end,description,severity,suggested_fix}]. severity: critical|high|medium|low. 과탐보다 미탐이 낫습니다.:readability-reviewer' \
+  --assign 'antigravity:다음 파일에서 AI 슬롭을 감지하세요. 가독성/DX 관점(과잉 주석, 과잉 타입, 불필요 추상화)으로 분석. 파일: {file_content}. JSON: [{id,category,line_start,line_end,description,severity,suggested_fix}]. severity: critical|high|medium|low. 과탐보다 미탐이 낫습니다.:readability-reviewer' \
   --timeout 600")
 ```
 

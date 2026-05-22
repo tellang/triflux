@@ -211,7 +211,9 @@ function isInitializeRequest(body) {
 function parseTfxClientHeader(value) {
   const raw = Array.isArray(value) ? value[0] : value;
   const client = String(raw || "unknown").toLowerCase();
-  return ["codex", "claude", "gemini"].includes(client) ? client : "unknown";
+  return ["codex", "claude", "antigravity", "gemini"].includes(client)
+    ? client
+    : "unknown";
 }
 
 async function parseBody(req) {

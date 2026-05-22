@@ -13,7 +13,7 @@ _tfx() {
         'hub:MCP message bus management'
         'auto:Auto mode'
         'codex:Codex mode'
-        'gemini:Gemini mode'
+        'antigravity:Antigravity mode'
     )
 
     multi_cmds=(

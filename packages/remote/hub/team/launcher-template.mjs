@@ -1,12 +1,24 @@
 // hub/team/launcher-template.mjs — 결정론적 런처 생성
-// 기존 codex-adapter/gemini-adapter의 buildExecArgs를 소비하여
+// 기존 codex-adapter와 Antigravity stdin 계약을 소비하여
 // 동일 입력 → 동일 args 배열을 보장한다.
 // F1 해결: codex adapter가 --dangerously-bypass-approvals-and-sandbox 자동 추가
 // F4 해결: codex exec "prompt" 인라인 (파이프/리다이렉트 아님)
 // F5 해결: 동일 입력 → 동일 args 배열 (런타임 분기 없음)
 
 import { buildExecArgs as buildCodexArgs } from "@triflux/core/hub/codex-adapter.mjs";
-import { buildExecArgs as buildGeminiArgs } from "@triflux/core/hub/gemini-adapter.mjs";
+
+function shellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function buildAntigravityArgs(opts = {}) {
+  const prompt = typeof opts.prompt === "string" ? opts.prompt : "";
+  const command = `printf %s ${shellSingleQuote(prompt)} | agy --print --dangerously-skip-permissions`;
+  if (opts.resultFile) {
+    return `${command} > ${shellSingleQuote(opts.resultFile)} 2>${shellSingleQuote(`${opts.resultFile}.err`)}`;
+  }
+  return command;
+}
 
 /** CLI별 adapter 레지스트리 */
 const ADAPTERS = Object.freeze({
@@ -16,8 +28,18 @@ const ADAPTERS = Object.freeze({
     env: (profile) => (profile ? { CODEX_PROFILE: profile } : {}),
   },
   gemini: {
-    bin: "gemini",
-    buildArgs: buildGeminiArgs,
+    bin: "agy",
+    buildArgs: buildAntigravityArgs,
+    env: () => ({}),
+  },
+  antigravity: {
+    bin: "agy",
+    buildArgs: buildAntigravityArgs,
+    env: () => ({}),
+  },
+  agy: {
+    bin: "agy",
+    buildArgs: buildAntigravityArgs,
     env: () => ({}),
   },
   claude: {
@@ -34,7 +56,7 @@ const ADAPTERS = Object.freeze({
 
 /**
  * CLI adapter 조회.
- * @param {'codex'|'gemini'|'claude'} agent
+ * @param {'codex'|'gemini'|'antigravity'|'agy'|'claude'} agent
  * @returns {object} adapter — { bin, buildArgs, env }
  * @throws {Error} 알 수 없는 agent
  */
@@ -53,7 +75,7 @@ export function getAdapter(agent) {
  * 동일 입력이면 항상 동일한 { bin, command, env } 반환.
  *
  * @param {object} opts
- * @param {'codex'|'gemini'|'claude'} opts.agent — CLI 타입
+ * @param {'codex'|'gemini'|'antigravity'|'agy'|'claude'} opts.agent — CLI 타입
  * @param {string} [opts.profile] — CLI 프로파일
  * @param {string} opts.prompt — 실행할 프롬프트
  * @param {string} [opts.workdir] — 작업 디렉토리

@@ -64,7 +64,7 @@
         "enabled": true,
         "timeout": 3,
         "blocking": false,
-        "description": "psmux headless 가드"
+        "description": "primary multiplexer headless 가드"
       },
       {
         "id": "omc-tfx-gate-activate",

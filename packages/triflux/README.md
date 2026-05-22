@@ -275,7 +275,7 @@ graph TD
     Team --> Hub
     Remote --> Hub
     Route --> Codex[Codex CLI]
-    Route --> Gemini[Gemini CLI]
+    Route --> Antigravity[Antigravity agy CLI]
     Route --> Claude[Claude Code]
     Hub --> MCP[MCP registry + bridge]
     Hub --> Store[(SQLite or memory store)]

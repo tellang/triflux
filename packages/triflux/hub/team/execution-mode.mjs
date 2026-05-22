@@ -8,7 +8,7 @@ import { whichCommand } from "../platform.mjs";
 const WIN32_EXT_PRECEDENCE = [".cmd", ".exe", ".bat", ".ps1"];
 
 // #128: parse npm-cmd-shim wrapper to extract the underlying .js entry point.
-// codex.cmd / gemini.cmd end with: "%_prog%" "%dp0%\node_modules\...\<cli>.js" %*
+// npm shim wrappers end with: "%_prog%" "%dp0%\node_modules\...\<cli>.js" %*
 // %* is cmd batch arg pass-through which mangles multi-line / fenced prompts.
 // Bypass cmd entirely by spawning node + the .js directly.
 export function unwrapCmdToJsScript(cmdPath, opts = {}) {
@@ -55,6 +55,14 @@ export function resolveStdinPromptMode(explicit, envSource) {
   return true;
 }
 
+function normalizeCli(cli) {
+  const value = String(cli || "codex").toLowerCase();
+  if (value === "gemini" || value === "antigravity" || value === "agy") {
+    return "antigravity";
+  }
+  return value;
+}
+
 export function resolveCliExecutable(cli, opts = {}) {
   const name = String(cli || "codex");
   const resolveCommand = opts.resolveCommand || whichCommand;
@@ -86,9 +94,10 @@ export function resolveCliExecutable(cli, opts = {}) {
 }
 
 export function buildSpawnSpecForMode(mode, opts = {}) {
-  const cli = opts.cli || "codex";
+  const cli = normalizeCli(opts.cli || "codex");
   const prompt = asPrompt(opts.prompt);
-  const resolvedCommand = resolveCliExecutable(cli, opts);
+  const commandName = cli === "antigravity" ? "agy" : cli;
+  const resolvedCommand = resolveCliExecutable(commandName, opts);
   const platform = opts.platform || process.platform;
 
   // Node v20.12+ (CVE-2024-27980) rejects spawn of .cmd/.bat files with shell:false
@@ -115,11 +124,15 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
     return { command: resolvedCommand, args };
   };
 
-  if (cli === "gemini") {
-    const args = [];
-    pushFlag(args, "--model", opts.model);
-    args.push("--yolo", "--prompt", prompt, "--output-format", "text");
-    return { ...wrap(args), useExec: true, shell: false };
+  if (cli === "antigravity") {
+    const args = ["--print", "--dangerously-skip-permissions"];
+    return {
+      ...wrap(args),
+      useExec: true,
+      shell: false,
+      stdinPrompt: prompt.length > 0,
+      prompt,
+    };
   }
 
   if (mode === MODES.INTERACTIVE || mode === MODES.AUTO) {
@@ -169,7 +182,7 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
 
 /**
  * @param {{
- *   cli: "codex"|"gemini"|"claude",
+ *   cli: "codex"|"gemini"|"antigravity"|"agy"|"claude",
  *   taskType?: "implement"|"review"|"research"|"test"|"analyze",
  *   needsInput?: boolean,
  *   estimatedDuration?: number,
@@ -179,12 +192,14 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
  */
 export function selectExecutionMode(opts = {}) {
   const {
-    cli = "codex",
+    cli: rawCli = "codex",
     taskType = "research",
     needsInput = false,
     estimatedDuration = 0,
     hasHub = false,
   } = opts;
+
+  const cli = normalizeCli(rawCli);
 
   if (!hasHub) {
     return {
@@ -193,10 +208,10 @@ export function selectExecutionMode(opts = {}) {
     };
   }
 
-  if (cli === "gemini") {
+  if (cli === "antigravity") {
     return {
       mode: MODES.HEADLESS,
-      reason: "gemini CLI only supports headless prompt mode",
+      reason: "antigravity CLI uses headless stdin print mode",
     };
   }
 

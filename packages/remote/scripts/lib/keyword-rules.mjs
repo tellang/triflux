@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-const VALID_MCP_ROUTES = new Set(["codex", "gemini", "claude"]);
+const VALID_MCP_ROUTES = new Set(["codex", "antigravity", "gemini", "claude"]);
 
 function logRuleError(message, error) {
   if (error) {

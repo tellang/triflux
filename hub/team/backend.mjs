@@ -1,5 +1,5 @@
 // hub/team/backend.mjs — CLI 백엔드 추상화 레이어
-// 각 CLI(codex/gemini/claude/antigravity)의 명령 빌드 로직을 클래스로 캡슐화한다.
+// 각 CLI(codex/antigravity/claude)의 명령 빌드 로직을 클래스로 캡슐화한다.
 // v7.2.2
 import { writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -7,14 +7,8 @@ import { createRequire } from "node:module";
 import { buildExecArgs } from "../codex-adapter.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 
-// --yolo is required: without it gemini waits on stdin for tool-call approval
-// even when stdin is redirected, producing a 0-byte 90s+ silent hang.
-// execution-mode.mjs:buildSpawnSpecForMode enforces the same flag.
 export function buildGeminiCommand(prompt, resultFile, { isWindows } = {}) {
-  if (isWindows) {
-    return `$null | gemini --yolo --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err'`;
-  }
-  return `gemini --yolo --prompt ${prompt} --output-format text > '${resultFile}' 2>'${resultFile}.err' < /dev/null`;
+  return buildAntigravityCommand(prompt, resultFile, { isWindows });
 }
 
 export function buildAntigravityCommand(
@@ -65,7 +59,7 @@ export class GeminiBackend {
     return "gemini";
   }
   command() {
-    return "gemini";
+    return "agy";
   }
 
   buildArgs(prompt, resultFile, opts = {}) {

@@ -19,6 +19,11 @@ function assertKnown(enumValues, value, fieldName) {
   }
 }
 
+function normalizeProvider(provider = "auto") {
+  const value = provider || "auto";
+  return value === "gemini" ? "antigravity" : value;
+}
+
 export class DelegatorService {
   constructor({
     idFactory = randomUUID,
@@ -40,7 +45,7 @@ export class DelegatorService {
     const timestamp = this.now().toISOString();
     const jobId = input.job_id || this.idFactory();
     const mode = input.mode || "sync";
-    const providerRequested = input.provider || "auto";
+    const providerRequested = normalizeProvider(input.provider);
 
     assertKnown(DELEGATOR_MODES, mode, "mode");
     assertKnown(DELEGATOR_PROVIDERS, providerRequested, "provider");
@@ -86,7 +91,7 @@ export class DelegatorService {
   _normalizeInput(input = {}) {
     return {
       prompt: input.prompt,
-      provider: input.provider || "auto",
+      provider: normalizeProvider(input.provider),
       mode: input.mode || "sync",
       agent_type: input.agent_type || input.agentType || "executor",
       cwd: input.cwd || null,

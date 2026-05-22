@@ -8,7 +8,7 @@ argument-hint: "<start|stop|status|자유형 작업 설명>"
 
 # tfx-hub — MCP 메시지 버스 관리 + 개방형 작업
 
-> CLI 에이전트(Codex/Gemini/Claude) 간 실시간 메시지 허브를 관리합니다.
+> CLI 에이전트(Codex/Antigravity/Claude) 간 실시간 메시지 허브를 관리합니다.
 > **커맨드 매칭 + fallthrough**: start/stop/status에 매칭되면 즉시 실행,
 > 매칭 안 되면 **hub 도메인 컨텍스트를 활용한 범용 작업**으로 처리합니다.
 

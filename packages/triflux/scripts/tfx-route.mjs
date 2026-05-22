@@ -21,7 +21,6 @@ import { createJob, getJobResult, getJobStatus } from "./lib/async.mjs";
 import * as agyAdapter from "./lib/cli-agy.mjs";
 import * as claudeAdapter from "./lib/cli-claude.mjs";
 import * as codexAdapter from "./lib/cli-codex.mjs";
-import * as geminiAdapter from "./lib/cli-gemini.mjs";
 import { buildPreflightEnv } from "./lib/env.mjs";
 import { resolveJobsDir, resolveTmpDir } from "./lib/tmp.mjs";
 import { patchCodexConfigFile } from "./lib/toml.mjs";
@@ -35,7 +34,7 @@ const AGENT_MAP_PATH = join(REPO_ROOT, "hub/team/agent-map.json");
 
 const ADAPTERS = {
   codex: codexAdapter,
-  gemini: geminiAdapter,
+  gemini: agyAdapter,
   claude: claudeAdapter,
   "claude-native": claudeAdapter,
   antigravity: agyAdapter,

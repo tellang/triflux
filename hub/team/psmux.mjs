@@ -234,7 +234,7 @@ function ensurePsmuxInstalled() {
   if (!hasPsmux()) {
     throw new Error(
       "psmux가 설치되어 있지 않습니다.\n\n" +
-        "psmux는 Codex/Gemini CLI를 병렬 세션으로 실행하는 터미널 멀티플렉서입니다.\n" +
+        "psmux는 Codex/Antigravity CLI를 병렬 세션으로 실행하는 터미널 멀티플렉서입니다.\n" +
         "설치 방법 (택 1):\n" +
         `${formatPsmuxInstallGuidance("  ")}\n\n` +
         "설치 후 터미널을 재시작하세요.",
@@ -1412,10 +1412,10 @@ export function startCapture(sessionName, paneNameOrTarget) {
  * @returns {{ paneId: string, paneName: string, token: string, logPath: string }}
  */
 /**
- * CLI 명령(codex/gemini)이 psmux pane의 PowerShell 환경에서 단축 플래그 충돌을
+ * CLI 명령(codex/legacy Gemini)이 psmux pane의 PowerShell 환경에서 단축 플래그 충돌을
  * 일으키는 문제를 방지하기 위해 bash -c '...' 로 감싼다.
  * - codex -o flag → PS -OutVariable/OutBuffer 충돌
- * - gemini --prompt flag (v8.6.0: -p → --prompt, PS 충돌 해소)
+ * - legacy Gemini prompt flag (v8.6.0: -p → long-form prompt flag, PS 충돌 해소)
  * @param {string} cmd
  * @returns {string}
  */

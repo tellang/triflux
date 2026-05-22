@@ -3,10 +3,10 @@
 /**
  * headless-guard.mjs — PreToolUse 훅 (상시 활성 auto-route)
  *
- * psmux가 설치된 환경에서 Bash(tfx-route.sh) 개별 호출을
+ * primary multiplexer(Windows psmux, macOS/Linux tmux)가 설치된 환경에서 Bash(tfx-route.sh) 개별 호출을
  * 자동으로 headless 명령으로 변환한다.
  *
- * v2: 마커 파일 의존 제거. psmux 설치 여부만으로 판단.
+ * v2: 마커 파일 의존 제거. primary multiplexer 설치 여부만으로 판단.
  *     Opus가 SKILL.md를 무시해도 auto-route가 작동한다.
  *
  * v3: A(gate) + B(nudge) — OMC 패턴 도입
@@ -15,14 +15,14 @@
  *     상태: $TMPDIR/tfx-multi-state.json (tfx-multi-activate.mjs가 생성)
  *
  * 동작:
- * - psmux 설치 + Bash(tfx-route.sh) → updatedInput: tfx multi --headless --assign
- * - psmux 설치 + Bash(codex exec / gemini --prompt) → deny
- * - psmux 설치 + Agent(codex/gemini CLI 래핑) → deny
- * - psmux 미설치 → 전부 통과
+ * - primary multiplexer 있음 + Bash(tfx-route.sh) → updatedInput: tfx multi --headless --assign
+ * - primary multiplexer 있음 + Bash(codex exec / legacy Gemini prompt mode) → deny
+ * - primary multiplexer 있음 + Agent(codex/gemini CLI 래핑) → deny
+ * - primary multiplexer 없음 → 전부 통과
  * - tfx-multi 활성 + Agent(work) before dispatch → deny (A: gate)
  * - tfx-multi 활성 + Agent(work) after dispatch → nudge (B: nudge)
  *
- * 성능: psmux 감지 결과를 5분간 캐시 ($TMPDIR/tfx-psmux-check.json)
+ * 성능: primary multiplexer 감지 결과를 5분간 캐시 ($TMPDIR/tfx-psmux-check.json)
  */
 
 import { execFileSync } from "node:child_process";
@@ -31,7 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deny, nudge } from "./lib/hook-utils.mjs";
 import { isProcessAlive } from "./lib/process-utils.mjs";
-import { probePsmuxSupport } from "./lib/psmux-info.mjs";
+import { probePrimaryMultiplexerSupport } from "./lib/psmux-info.mjs";
 
 const CACHE_FILE = join(tmpdir(), "tfx-psmux-check.json");
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5분
@@ -79,7 +79,7 @@ function writeMultiState(state) {
   }
 }
 
-function isPsmuxInstalled() {
+function isHeadlessMultiplexerInstalled() {
   // 캐시 확인 (미래 타임스탬프 오염 방어)
   try {
     if (existsSync(CACHE_FILE)) {
@@ -92,7 +92,7 @@ function isPsmuxInstalled() {
     /* cache miss */
   }
 
-  const probe = probePsmuxSupport({ execFileSyncFn: execFileSync });
+  const probe = probePrimaryMultiplexerSupport({ execFileSyncFn: execFileSync });
   const ok = probe.ok;
 
   // 캐시 저장
@@ -102,6 +102,7 @@ function isPsmuxInstalled() {
       JSON.stringify({
         ts: Date.now(),
         ok,
+        kind: probe.kind,
         version: probe.version,
         missingCommands: probe.missingCommands,
       }),
@@ -185,8 +186,8 @@ async function main() {
   // P0: TFX_ALLOW_DIRECT_CLI는 hasDirectCli 블록 안에서만 체크 (CLI deny만 스킵)
   // 전체 guard를 비활성화하지 않음 — tfx-multi gate, Edit/Write gate 등은 유지
 
-  // psmux 미설치 → 전부 통과
-  if (!isPsmuxInstalled()) process.exit(0);
+  // primary multiplexer 미설치 → 전부 통과
+  if (!isHeadlessMultiplexerInstalled()) process.exit(0);
 
   let raw = "";
   for await (const chunk of process.stdin) raw += chunk;
@@ -460,7 +461,7 @@ async function main() {
 
     if (cliPatterns.some((p) => p.test(combined))) {
       deny(
-        "[headless-guard] Codex/Gemini를 Agent()로 래핑하지 마세요. " +
+        "[headless-guard] Codex/Antigravity를 Agent()로 래핑하지 마세요. " +
           `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
           DIRECT_CLI_BYPASS_HINT,
       );

@@ -123,7 +123,7 @@ else:
 
 ## 실행
 
-### CLI 에이전트 (Codex/Gemini)
+### CLI 에이전트 (Codex/Antigravity)
 
 ```bash
 # Level 0 / INDEPENDENT
@@ -192,7 +192,7 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 ## 필수 조건
 
 - `~/.claude/scripts/tfx-route.sh` (필수)
-- codex: `npm install -g @openai/codex` | gemini: `npm install -g @google/gemini-cli`
+- codex: `npm install -g @openai/codex` | antigravity: Google Antigravity 설치 후 `agy` PATH 확인
 
 ## 에러 레퍼런스
 

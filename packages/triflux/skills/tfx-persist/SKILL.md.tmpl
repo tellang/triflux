@@ -32,7 +32,7 @@ argument-hint: "<완료할 작업 설명>"
 (tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
   curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
-  gemini --version 2>/dev/null
+  agy --version 2>/dev/null
 ```
 
 ### Tier 판정
@@ -81,7 +81,7 @@ Tier 2에서는 누락된 CLI만 Claude Agent로 대체한다.
 
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
-1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
 2. Codex·Antigravity 검증자 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude 검증자 → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
@@ -135,7 +135,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:{서브태스크_A} 구현하라. 세부사항: {spec_A}:implementer' \
   --assign 'codex:{서브태스크_B} 구현하라. 세부사항: {spec_B}:implementer' \
-  --assign 'gemini:{문서/UI_항목} 작성하라. 세부사항: {spec_C}:writer' \
+  --assign 'antigravity:{문서/UI_항목} 작성하라. 세부사항: {spec_C}:writer' \
   --timeout 600")
 ```
 
@@ -160,7 +160,7 @@ Agent(
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:다음 기준 충족 여부를 코드 실행/테스트로 검증하라. 기준: {current_criterion}. 실제 테스트를 실행하여 결과를 확인하라. 결과: PASS 또는 FAIL + 근거 1문장:verifier' \
-  --assign 'gemini:다음 기준 충족 여부를 코드 리뷰로 판단하라. 기준: {current_criterion}. 코드 품질, 엣지 케이스, 완전성을 확인하라. 결과: PASS 또는 FAIL + 근거 1문장:verifier' \
+  --assign 'antigravity:다음 기준 충족 여부를 코드 리뷰로 판단하라. 기준: {current_criterion}. 코드 품질, 엣지 케이스, 완전성을 확인하라. 결과: PASS 또는 FAIL + 근거 1문장:verifier' \
   --timeout 600")
 ```
 
@@ -202,7 +202,7 @@ JSON 형식: { criteria_results: [{criterion, pass, reason}], regression_check, 
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:모든 acceptance criteria 충족 여부를 테스트 실행으로 통합 검증하라. 기준 목록: {criteria_list}. 전체 테스트 스위트를 실행하고 회귀 여부를 확인하라. JSON 형식: { criteria_results, test_results, overall_pass }:verifier' \
-  --assign 'gemini:모든 acceptance criteria 충족 여부를 코드 리뷰로 통합 검증하라. 기준 목록: {criteria_list}. 전체 변경사항을 검토하고 누락, 불완전한 구현, 엣지 케이스를 확인하라. JSON 형식: { criteria_results, edge_cases, overall_pass }:verifier' \
+  --assign 'antigravity:모든 acceptance criteria 충족 여부를 코드 리뷰로 통합 검증하라. 기준 목록: {criteria_list}. 전체 변경사항을 검토하고 누락, 불완전한 구현, 엣지 케이스를 확인하라. JSON 형식: { criteria_results, edge_cases, overall_pass }:verifier' \
   --timeout 600")
 ```
 
@@ -217,7 +217,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:다음 파일에서 AI가 생성한 불필요 코드(슬롭)를 감지하라. 파일: {changed_files}. 중복 코드, 불필요 추상화, 과잉 에러 핸들링, 사용되지 않는 임포트를 보고하라. 수정하지 말고 목록만 반환하라.:critic' \
-  --assign 'gemini:다음 파일에서 AI가 생성한 불필요 코드(슬롭)를 감지하라. 파일: {changed_files}. 중복 코드, 불필요 추상화, 과잉 에러 핸들링, 사용되지 않는 임포트를 보고하라. 수정하지 말고 목록만 반환하라.:critic' \
+  --assign 'antigravity:다음 파일에서 AI가 생성한 불필요 코드(슬롭)를 감지하라. 파일: {changed_files}. 중복 코드, 불필요 추상화, 과잉 에러 핸들링, 사용되지 않는 임포트를 보고하라. 수정하지 말고 목록만 반환하라.:critic' \
   --timeout 600")
 ```
 

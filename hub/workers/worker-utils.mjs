@@ -1,5 +1,5 @@
 // hub/workers/worker-utils.mjs — 워커 공통 유틸리티
-// claude-worker, gemini-worker, pipe 등에서 공유하는 순수 유틸 함수 모음.
+// claude-worker, Antigravity route compatibility worker, pipe 등에서 공유하는 순수 유틸 함수 모음.
 
 export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 export const DEFAULT_KILL_GRACE_MS = 1000;

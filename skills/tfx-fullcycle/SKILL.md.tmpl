@@ -72,7 +72,7 @@ Phase 1 시작 전 아래 intake를 먼저 수행한다.
 
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
-1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
 2. Codex·Antigravity 워커 → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude 워커 → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
@@ -127,7 +127,7 @@ JSON 형식으로 출력하라: { tasks, order, dependencies, tdd_strategy, risk
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:시니어 엔지니어로서 다음 기능의 기술적 설계를 작성하라. 기능: {expanded_requirements}. 파일 구조, API 인터페이스, 데이터 모델을 포함하라. JSON 형식: { design, file_changes, interfaces, test_plan }:architect' \
-  --assign 'gemini:QA 전문가로서 다음 기능 구현의 리스크를 분석하라. 기능: {expanded_requirements}. 엣지 케이스, 보안, 성능, 접근성 우려를 포함하라. JSON 형식: { edge_cases, security_risks, performance, accessibility, test_cases }:critic' \
+  --assign 'antigravity:QA 전문가로서 다음 기능 구현의 리스크를 분석하라. 기능: {expanded_requirements}. 엣지 케이스, 보안, 성능, 접근성 우려를 포함하라. JSON 형식: { edge_cases, security_risks, performance, accessibility, test_cases }:critic' \
   --timeout 600")
 ```
 
@@ -162,7 +162,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:TDD로 {모듈_A}를 구현하라. 테스트 먼저 작성(RED), 구현(GREEN), 리팩터링(REFACTOR) 순서로 진행하라. 계획: {task_A_spec}:implementer' \
   --assign 'codex:TDD로 {모듈_B}를 구현하라. 테스트 먼저 작성(RED), 구현(GREEN), 리팩터링(REFACTOR) 순서로 진행하라. 계획: {task_B_spec}:implementer' \
-  --assign 'gemini:{문서_항목}을 작성하라. 변경된 API 인터페이스: {interfaces}:writer' \
+  --assign 'antigravity:{문서_항목}을 작성하라. 변경된 API 인터페이스: {interfaces}:writer' \
   --timeout 600")
 ```
 
@@ -194,7 +194,7 @@ JSON 형식: { criteria_results, edge_case_findings, overall_pass }"
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:보안/성능 관점에서 다음 변경사항을 리뷰하라. OWASP Top 10, 성능 병목, 에러 핸들링, 리소스 누수를 확인하라. 변경 파일: {changed_files}. JSON 형식: { security_findings, performance_findings, overall_pass }:verifier' \
-  --assign 'gemini:UX/접근성 관점에서 다음 변경사항을 리뷰하라. UI 변경: 접근성, 반응형, 사용성. API 변경: DX, 문서화, 일관성. 변경 파일: {changed_files}. JSON 형식: { ux_findings, accessibility_findings, overall_pass }:verifier' \
+  --assign 'antigravity:UX/접근성 관점에서 다음 변경사항을 리뷰하라. UI 변경: 접근성, 반응형, 사용성. API 변경: DX, 문서화, 일관성. 변경 파일: {changed_files}. JSON 형식: { ux_findings, accessibility_findings, overall_pass }:verifier' \
   --timeout 600")
 ```
 

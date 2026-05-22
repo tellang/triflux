@@ -24,7 +24,7 @@ argument-hint: "<토론 주제>"
 
 > headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
 
-1. **`codex exec` / `gemini -p` 직접 호출 절대 금지**
+1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
 2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
@@ -110,7 +110,7 @@ Codex + Antigravity (Bash, background):
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:당신은 {codex_expert_1}({role_3})과 {codex_expert_2}({role_4})입니다. 주제: {topic}. 각 전문가의 고유 관점에서 독립 분석. 상호 참조 금지. JSON: {experts:[{name,position,reasoning,concerns,recommendation,confidence}]}:analyst' \
-  --assign 'gemini:당신은 {gemini_expert_1}({role_5})과 {gemini_expert_2}({role_6})입니다. 주제: {topic}. 각 전문가의 고유 관점에서 독립 분석. 상호 참조 금지. JSON: {experts:[{name,position,reasoning,concerns,recommendation,confidence}]}:analyst' \
+  --assign 'antigravity:당신은 {antigravity_expert_1}({role_5})과 {antigravity_expert_2}({role_6})입니다. 주제: {topic}. 각 전문가의 고유 관점에서 독립 분석. 상호 참조 금지. JSON: {experts:[{name,position,reasoning,concerns,recommendation,confidence}]}:analyst' \
   --timeout 600")
 ```
 

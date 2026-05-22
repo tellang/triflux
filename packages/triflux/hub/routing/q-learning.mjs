@@ -20,7 +20,7 @@ try {
 }
 
 /** 사용 가능한 CLI 액션 */
-const ACTIONS = ["codex", "gemini", "claude", "haiku", "sonnet"];
+const ACTIONS = ["codex", "antigravity", "claude", "haiku", "sonnet"];
 
 /** 특성 벡터 키워드 (48차원, 에이전트 타입 기반) */
 const FEATURE_KEYWORDS = [
@@ -42,7 +42,7 @@ const FEATURE_KEYWORDS = [
   "optimize",
   "research",
   "evaluate",
-  // 디자인/문서 (gemini 친화)
+  // 디자인/문서 (Antigravity 친화)
   "design",
   "ui",
   "ux",
@@ -74,7 +74,7 @@ const FEATURE_KEYWORDS = [
   "검토",
   "보안",
   "최적화",
-  // 한국어 — 디자인/문서 (gemini 친화)
+  // 한국어 — 디자인/문서 (Antigravity 친화)
   "디자인",
   "문서화",
   // 한국어 — 간단/빠른 (haiku 친화)

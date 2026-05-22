@@ -98,7 +98,7 @@ Bash("triflux setup")
 #### 단계 3: Codex 프로파일
 
 `~/.codex/config.toml`을 Read 도구로 읽어 필수 프로파일 존재 여부 확인.
-필수: `codex53_high`, `codex53_xhigh`, `spark53_low`.
+필수: `gpt55_xhigh`, `gpt55_high`, `gpt55_med`, `gpt55_low`.
 
 - 모두 존재 → ✅ 표시
 - 누락 있으면 → AskUserQuestion:
@@ -525,7 +525,7 @@ options:
 
 ### 다음 단계
 - Codex 미설치 시: `npm install -g @openai/codex`
-- Antigravity 미설치 시: `npm install -g @google/gemini-cli`
+- Antigravity 미설치 시: Google Antigravity 설치 후 `agy`를 PATH에 추가
 - 원격 호스트 추가: `/tfx-remote-setup`
 - 검색 MCP 추가/변경: `/tfx-setup` → 단계별 선택 → 검색 MCP
 - 세션 재시작하면 HUD + 검색 MCP가 활성화됩니다

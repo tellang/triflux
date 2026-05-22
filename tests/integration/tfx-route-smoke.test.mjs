@@ -5,7 +5,7 @@
 //
 // 테스트 범위:
 //   - claude-native 에이전트(explore/verifier/test-engineer/qa-tester) 기본 라우팅
-//   - TFX_CLI_MODE=codex/gemini 오버라이드 메타데이터
+//   - TFX_CLI_MODE=codex/gemini compatibility 오버라이드 메타데이터
 //   - TFX_NO_CLAUDE_NATIVE 유효성 검증 (0/1만 허용)
 //   - 알 수 없는 에이전트 타입 오류
 //   - 인자 부족 시 오류
@@ -460,11 +460,12 @@ describe("tfx-route.sh — 오류 케이스", () => {
     assert.match(out(result), /agent=codex/);
   });
 
-  it("CLI 이름(gemini)을 역할 자리에 사용하면 alias로 허용된다 (type=gemini 메타 출력)", () => {
+  it("CLI 이름(gemini)을 역할 자리에 사용하면 antigravity alias로 허용된다", () => {
     const result = runBash(
       `GEMINI_BIN=false bash "${ROUTE_SCRIPT}" gemini 'test-prompt' 2>&1 || true`,
+      fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
     );
-    assert.match(out(result), /type=gemini/);
+    assert.match(out(result), /type=antigravity/);
     assert.match(out(result), /agent=gemini/);
   });
 
@@ -505,11 +506,12 @@ describe("tfx-route.sh — 라우팅 테이블 메타데이터", () => {
     assert.match(out(result), /agent=executor/);
   });
 
-  it("designer 에이전트는 type=gemini 메타데이터를 출력해야 한다", () => {
+  it("designer 에이전트는 type=antigravity 메타데이터를 출력해야 한다", () => {
     const result = runBash(
       `GEMINI_BIN=false bash "${ROUTE_SCRIPT}" designer 'test' 2>&1 || true`,
+      fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
     );
-    assert.match(out(result), /type=gemini/);
+    assert.match(out(result), /type=antigravity/);
     assert.match(out(result), /agent=designer/);
   });
 });
@@ -532,24 +534,18 @@ describe("tfx-route.sh — executor 라우팅 회귀 방지", {
     assert.match(out(result), /agent=executor/, out(result));
   });
 
-  it("executor + TFX_NO_CLAUDE_NATIVE=1 + CODEX_BIN 미설치 → 종료 코드 0, 경고 또는 폴백", () => {
-    // codex/gemini 모두 미검출이면 route.sh는 claude-native로 fallback하고
-    // TFX_NO_CLAUDE_NATIVE=1 이라도 'codex를 찾지 못해 claude-native 유지' 경고만 낸다.
-    // 에러로 종료되지 않아야 하고 (exit 0), 메타데이터가 출력되어야 한다.
+  it("executor + TFX_NO_CLAUDE_NATIVE=1 + CODEX_BIN 미설치 + agy 사용 가능 → antigravity fallback", () => {
+    // codex가 없어도 agy headless가 사용 가능하면 claude-native가 아니라
+    // Antigravity로 폴백해야 한다. 실제 agy 바이너리를 치지 않도록 fixture를 사용한다.
     const result = runBash(
       `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=__nonexistent_codex__ GEMINI_BIN=__nonexistent_gemini__ bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
+      fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
     );
     assert.equal(result.status, 0, out(result));
-    // 경고 메시지 또는 ROUTE_TYPE 메타데이터 중 하나는 반드시 출력됨
     const combined = out(result);
-    const hasWarning = /claude-native 유지|claude-native fallback/.test(
-      combined,
-    );
-    const hasMetadata = /ROUTE_TYPE=/.test(combined);
-    assert.ok(
-      hasWarning || hasMetadata,
-      `expected warning or metadata:\n${combined}`,
-    );
+    assert.match(combined, /type=antigravity|cli: antigravity/, combined);
+    assert.match(combined, /TFX_CLI_MODE=antigravity/, combined);
+    assert.doesNotMatch(combined, /gemini-worker|type=gemini/, combined);
   });
 });
 

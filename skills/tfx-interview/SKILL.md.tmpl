@@ -21,7 +21,7 @@ argument-hint: "<구현할 주제 또는 요구사항>"
 > "측정할 수 없으면 개선할 수 없다."
 >
 > **Antigravity 위임**: 분석·점수 계산·산출물 초안은 Antigravity CLI에 위임하여 Claude 토큰을 절약한다.
-> 위임 패턴: `Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '{prompt}'")`
+> 위임 패턴: `Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity '{prompt}'")`
 
 ## 위임 패턴
 
@@ -34,7 +34,7 @@ Claude와 Antigravity의 역할을 분리하여 토큰을 최적화한다.
 
 ```bash
 # 위임 호출 형태
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '{prompt}'")
+Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity '{prompt}'")
 ```
 
 Antigravity 실패 시 Fallback: Claude Opus가 분석을 직접 처리한다.
@@ -76,7 +76,7 @@ ambiguity = 1 - (goal × 0.40 + constraints × 0.30 + criteria × 0.30)
 
 ```bash
 # Claude → Antigravity 위임
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Analyze the following requirement and calculate ambiguity score. Return JSON: {goal, constraints, criteria, ambiguity, suggested_questions}: {user_input}'")
+Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity 'Analyze the following requirement and calculate ambiguity score. Return JSON: {goal, constraints, criteria, ambiguity, suggested_questions}: {user_input}'")
 ```
 
 Antigravity가 반환한 JSON에서 점수를 읽어 사용자에게 표시한다:
@@ -107,7 +107,7 @@ Antigravity가 반환한 JSON에서 점수를 읽어 사용자에게 표시한�
 
 ```bash
 # 응답 수집 후 Antigravity에 분석 위임
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 1 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity 'Stage 1 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
@@ -125,7 +125,7 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 1 response analysis
 
 ```bash
 # 응답 수집 후 Antigravity에 분석 위임
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 2 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity 'Stage 2 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
@@ -143,7 +143,7 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 2 response analysis
 
 ```bash
 # 응답 수집 후 Antigravity에 분석 위임
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 3 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity 'Stage 3 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
@@ -161,7 +161,7 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 3 response analysis
 
 ```bash
 # 응답 수집 후 Antigravity에 분석 위임
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 4 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity 'Stage 4 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
@@ -179,7 +179,7 @@ Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 4 response analysis
 
 ```bash
 # 응답 수집 후 Antigravity에 최종 분석 위임
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Stage 5 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
+Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity 'Stage 5 response analysis. Previous context: {context}. User answer: {answer}. Calculate updated ambiguity score and generate next stage questions. Return JSON.'")
 ```
 
 ```
@@ -207,7 +207,7 @@ Antigravity가 인터뷰 전체 컨텍스트를 바탕으로 구조화된 문서
 
 ```bash
 # Antigravity에 산출물 초안 생성 위임
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec 'Generate a structured interview output document based on the following interview context: {full_context}. Return the complete markdown document.'")
+Bash("TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh antigravity 'Generate a structured interview output document based on the following interview context: {full_context}. Return the complete markdown document.'")
 ```
 
 Claude는 Antigravity가 반환한 마크다운을 Write 도구로 저장한다.

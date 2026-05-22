@@ -1,39 +1,11 @@
-// cli-gemini.mjs — Gemini CLI adapter (Phase 0 PoC).
-//
-// 책임: Gemini 프로파일/모델/timeout 매핑. resolve_gemini_profile() 의 결과는 Phase 1 에서
-// 통합한다 (Phase 0 은 라벨만 전달).
-//
-// 출처: scripts/tfx-route.sh route_agent() L1045-L1050.
+// cli-gemini.mjs — legacy Gemini adapter alias.
+// The public "gemini" label remains accepted, but the executable plan is AGY.
+
+import * as agyAdapter from "./cli-agy.mjs";
 
 export const id = "gemini";
-export const cliType = "gemini";
-export const command = "gemini";
-
-const AGENT_PROFILES = {
-  designer: {
-    profile: "pro31",
-    timeoutSec: 900,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "docs",
-  },
-  gemini: {
-    profile: "pro31",
-    timeoutSec: 900,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "docs",
-  },
-  writer: {
-    profile: "flash3",
-    timeoutSec: 900,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "docs",
-  },
-};
-
-const DEFAULT_PROFILE = AGENT_PROFILES.gemini;
+export const cliType = "antigravity";
+export const command = "agy";
 
 export function plan({
   agent,
@@ -45,23 +17,21 @@ export function plan({
   if (!agent) {
     throw new Error("[cli-gemini] agent required");
   }
-  const cfg = AGENT_PROFILES[agent] ?? DEFAULT_PROFILE;
-  const effectiveTimeoutSec =
-    Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec : cfg.timeoutSec;
-  return {
-    command,
-    profile: cfg.profile,
-    effort: cfg.profile,
-    args: ["-m", cfg.profile, "-y", "--prompt"],
-    timeoutMs: effectiveTimeoutSec * 1000,
-    runMode: cfg.runMode,
-    opusOversight: cfg.opusOversight,
-    mcpProfile: mcpProfile === "auto" ? cfg.mcpHint : mcpProfile,
-    promptLength: prompt.length,
-    contextFile: contextFile || null,
-  };
+  return agyAdapter.plan({
+    agent: agent === "gemini" ? "antigravity" : agent,
+    prompt,
+    mcpProfile,
+    timeoutSec,
+    contextFile,
+  });
 }
 
 export function describe() {
-  return { id, cliType, command, agents: Object.keys(AGENT_PROFILES) };
+  return {
+    id,
+    cliType,
+    command,
+    aliases: ["gemini"],
+    agents: ["gemini", "designer", "writer", "antigravity", "agy"],
+  };
 }

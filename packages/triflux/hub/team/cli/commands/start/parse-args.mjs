@@ -9,6 +9,8 @@ import {
 // --assign 파싱 시 마지막 콜론 뒤를 role로 인식할 알려진 역할/CLI 이름
 const KNOWN_ROLES = new Set([
   "codex",
+  "antigravity",
+  "agy",
   "gemini",
   "claude",
   "executor",
@@ -59,7 +61,7 @@ function parseAssignValue(raw) {
 }
 
 export function parseTeamArgs(args = []) {
-  let agents = ["codex", "gemini"];
+  let agents = ["codex", "antigravity"];
   let lead = "claude";
   let layout = "2x2";
   let teammateMode = "auto";

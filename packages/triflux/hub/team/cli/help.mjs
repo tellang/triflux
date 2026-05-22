@@ -6,7 +6,7 @@ export function renderTeamHelp() {
 
   ${BOLD}시작${RESET}
     ${WHITE}tfx multi "작업 설명"${RESET}
-    ${WHITE}tfx multi --agents codex,gemini --lead claude "작업"${RESET}
+    ${WHITE}tfx multi --agents codex,antigravity --lead claude "작업"${RESET}
     ${WHITE}tfx multi --teammate-mode tmux "작업"${RESET}
     ${WHITE}tfx multi --teammate-mode wt "작업"${RESET}   ${DIM}(Windows Terminal split-pane)${RESET}
     ${WHITE}tfx multi --layout 1xN "작업"${RESET}               ${DIM}(세로 분할 컬럼)${RESET}

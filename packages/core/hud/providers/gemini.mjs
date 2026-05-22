@@ -8,6 +8,7 @@ import https from "node:https";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  ANTIGRAVITY_OAUTH_PATHS,
   GEMINI_API_TIMEOUT_MS,
   GEMINI_OAUTH_PATH,
   GEMINI_PROJECT_CACHE_PATH,
@@ -82,13 +83,37 @@ export function deriveGeminiLimits(bucket) {
   };
 }
 
+function getCredentialEmail(credential) {
+  return (
+    decodeJwtEmail(credential?.id_token) ||
+    credential?.email ||
+    credential?.account?.email ||
+    credential?.user?.email ||
+    credential?.profile?.email ||
+    null
+  );
+}
+
 export function getGeminiEmail() {
   try {
     const oauth = readJson(GEMINI_OAUTH_PATH, null);
-    return decodeJwtEmail(oauth?.id_token);
+    return getCredentialEmail(oauth);
   } catch {
     return null;
   }
+}
+
+export function getAntigravityEmail() {
+  for (const oauthPath of ANTIGRAVITY_OAUTH_PATHS) {
+    try {
+      const oauth = readJson(oauthPath, null);
+      const email = getCredentialEmail(oauth);
+      if (email) return email;
+    } catch {
+      // Try the next known Antigravity credential path.
+    }
+  }
+  return null;
 }
 
 export function buildGeminiAuthContext(accountId) {

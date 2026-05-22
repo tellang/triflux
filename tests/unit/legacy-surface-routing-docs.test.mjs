@@ -37,7 +37,7 @@ describe("legacy TFX surface routing docs", () => {
     assert.doesNotMatch(help, /\/tfx-gemini\b/u);
 
     assert.match(help, /\/tfx-auto.*--cli codex/u);
-    assert.match(help, /\/tfx-auto.*--cli gemini/u);
+    assert.match(help, /\/tfx-auto.*--cli antigravity/u);
     assert.match(help, /\/tfx-auto.*--mode deep/u);
   });
 
@@ -68,8 +68,8 @@ describe("legacy TFX surface routing docs", () => {
       );
       assert.match(
         content,
-        /--cli gemini/u,
-        `${file} should mention --cli gemini`,
+        /--cli antigravity/u,
+        `${file} should mention --cli antigravity`,
       );
       assert.match(
         content,

@@ -127,17 +127,17 @@ describe("QLearningRouter", () => {
     // 실행 작업 → codex
     for (let i = 0; i < 20; i++) {
       router.update("implement and build code", "codex", 1.0);
-      router.update("implement and build code", "gemini", -0.5);
+      router.update("implement and build code", "antigravity", -0.5);
     }
-    // 디자인 작업 → gemini
+    // 디자인 작업 → antigravity
     for (let i = 0; i < 20; i++) {
-      router.update("design ui visual frontend", "gemini", 1.0);
+      router.update("design ui visual frontend", "antigravity", 1.0);
       router.update("design ui visual frontend", "codex", -0.5);
     }
     const execResult = router.predict("implement and build code");
     const designResult = router.predict("design ui visual frontend");
     assert.equal(execResult.action, "codex");
-    assert.equal(designResult.action, "gemini");
+    assert.equal(designResult.action, "antigravity");
   });
 
   it("음수 보상 → 해당 액션 Q-value 감소", () => {
@@ -160,7 +160,7 @@ describe("QLearningRouter", () => {
     assert.equal(router.totalUpdates, 0);
     router.update("task", "codex", 0.5);
     assert.equal(router.totalUpdates, 1);
-    router.update("task", "gemini", 0.3);
+    router.update("task", "antigravity", 0.3);
     assert.equal(router.totalUpdates, 2);
   });
 
@@ -235,7 +235,7 @@ describe("엡실론-그리디", () => {
 describe("agent-map.json 폴백", () => {
   it("정적 폴백: 알려진 에이전트 → agent-map.json 매핑", () => {
     assert.equal(QLearningRouter.fallback("executor"), "codex");
-    assert.equal(QLearningRouter.fallback("designer"), "gemini");
+    assert.equal(QLearningRouter.fallback("designer"), "antigravity");
     assert.equal(QLearningRouter.fallback("explore"), "claude");
   });
 

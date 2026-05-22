@@ -16,7 +16,7 @@ sync-status: mirrored
 sync-block-sha256: b975aedecb60cd489f5acc55675657eaaca20a8316add8bb613025689dff7436
 
 <!-- TFX_PSMUX_RULES:START -->
-> **적용 범위: Windows 환경 한정.** macOS/Linux는 platform guard(`hub/team/wt-manager.mjs:199`, `hub/team/headless.mjs:1725`, `tfx-route.sh:86`)로 코드 레벨 no-op 처리된다. mac 사용자는 이 룰셋의 RULE 1~3, 5~6, 8 (WT/PowerShell 관련) 전체를 skip해도 됨. RULE 4 (Codex CLI), RULE 7 (spark53)만 cross-platform.
+> **적용 범위: Windows 환경 한정.** macOS/Linux는 platform guard(`hub/team/wt-manager.mjs:199`, `hub/team/headless.mjs:1725`, `tfx-route.sh:86`)로 코드 레벨 no-op 처리된다. mac 사용자는 이 룰셋의 RULE 1~3, 5~6, 8 (WT/PowerShell 관련) 전체를 skip해도 됨. RULE 4 (Codex CLI), RULE 7 (gpt55 프로파일 정책)만 cross-platform.
 > mac 인프라는 `hub/team/terminal-opener.mjs` 3단계 fallback (win32 → wt-manager / tmux 감지 시 → tmux/psmux / darwin → Terminal.app) + `hub/team/psmux.mjs` cross-platform (`IS_WINDOWS`/`IS_MAC` 분기) 으로 처리되며, 별도 iTerm2/tmux 매니저는 불필요.
 >
 > 이 문서는 선택형 스킬이 아니라 항상 적용되는 정책이다.
@@ -187,12 +187,12 @@ tfx doctor --json
 공식 설치/업데이트 기준:
 
 ```bash
-winget install marlocarlo.psmux
+winget install psmux
 scoop install psmux
 choco install psmux
 cargo install psmux
 
-winget upgrade marlocarlo.psmux
+winget upgrade psmux
 scoop update psmux
 choco upgrade psmux
 cargo install psmux --force
@@ -250,10 +250,10 @@ wt.exe -w 0 sp -V -p triflux ...
 - `Start-Process wt.exe ...` PowerShell 호출 금지
 - 반드시 `wt-manager.mjs`의 `createTab()` / `applyLayout()` 사용
 
-## RULE 7: spark53 프로파일은 Pro 전용
+## RULE 7: gpt55 프로파일 우선
 
-`spark53_med`, `spark53_low` 등 spark 모델 프로파일은 Codex Pro 구독 전용이다.
-비-Pro 환경에서는 `codex53_low`로 폴백한다.
+라우팅 기본값은 `gpt55_xhigh`, `gpt55_high`, `gpt55_med`, `gpt55_low` 프로파일을 사용한다.
+구형 `spark53_*`, `codex53_*`, `gpt54_*`, `mini54_*` 프로파일을 새 라우팅 기본값으로 되살리지 않는다.
 
 ## RULE 8: WT 레이아웃 선택 필수
 

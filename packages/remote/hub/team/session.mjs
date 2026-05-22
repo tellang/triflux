@@ -38,20 +38,6 @@ function hasTmux() {
   }
 }
 
-/** WSL2 내 tmux 사용 가능 여부 (Windows 전용) */
-function hasWslTmux() {
-  try {
-    execSync("wsl tmux -V", {
-      stdio: "ignore",
-      timeout: 5000,
-      windowsHide: true,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Git Bash 내 tmux 사용 가능 여부 (Windows 전용) */
 function hasGitBashTmux() {
   const bash = resolveGitBashExecutable();
@@ -103,7 +89,7 @@ function hasLiteralPsmuxBinary(command = process.env.PSMUX_BIN || "psmux") {
 
 /**
  * 터미널 멀티플렉서 감지 (결과 캐싱 — 프로세스 수명 동안 불변)
- * @returns {'tmux'|'git-bash-tmux'|'wsl-tmux'|'psmux'|null}
+ * @returns {'tmux'|'git-bash-tmux'|'psmux'|null}
  */
 let _cachedMux;
 export function detectMultiplexer() {
@@ -139,16 +125,12 @@ export function detectMultiplexer() {
     _cachedMux = "git-bash-tmux";
     return _cachedMux;
   }
-  if (hasWslTmux()) {
-    _cachedMux = "wsl-tmux";
-    return _cachedMux;
-  }
   _cachedMux = null;
   return _cachedMux;
 }
 
 /**
- * tmux/psmux 커맨드 실행 (wsl-tmux 투명 지원)
+ * tmux/psmux 커맨드 실행
  * @param {string} args — tmux 서브커맨드 + 인자
  * @param {object} opts — execSync 옵션
  * @returns {string} stdout
@@ -159,14 +141,9 @@ function tmux(args, opts = {}) {
     throw new Error(
       "tmux/psmux 미발견.\n\n" +
         "tfx multi은 tmux 계열 멀티플렉서가 필요합니다:\n" +
-        "  Windows: psmux 설치 또는 WSL2 tmux 사용\n" +
-        "  WSL2:   wsl sudo apt install tmux\n" +
+        "  Windows: psmux 설치\n" +
         "  macOS:  brew install tmux\n" +
-        "  Linux:  apt install tmux\n\n" +
-        "Windows에서는 WSL2를 권장합니다:\n" +
-        "  1. wsl --install\n" +
-        "  2. wsl sudo apt install tmux\n" +
-        '  3. tfx multi "작업"  (자동으로 WSL tmux 사용)',
+        "  Linux:  apt install tmux",
     );
   }
   if (mux === "psmux") {
@@ -190,8 +167,7 @@ function tmux(args, opts = {}) {
     return (r.stdout || "").trim();
   }
 
-  const prefix = mux === "wsl-tmux" ? "wsl tmux" : "tmux";
-  const result = execSync(`${prefix} ${args}`, {
+  const result = execSync(`tmux ${args}`, {
     encoding: "utf8",
     timeout: 10000,
     stdio: ["pipe", "pipe", "pipe"],
@@ -235,13 +211,6 @@ export function resolveAttachCommand(sessionName, opts = {}) {
     return {
       command: bash,
       args: ["-lc", `tmux attach-session -t ${sessionName}`],
-    };
-  }
-
-  if (mux === "wsl-tmux") {
-    return {
-      command: "wsl",
-      args: ["tmux", "attach-session", "-t", sessionName],
     };
   }
 

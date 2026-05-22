@@ -335,7 +335,7 @@ case "$AGENT_TYPE" in
     ;;
 esac
 
-# ── CLI 이름은 route_agent()에서 기본 역할 alias로 처리됨 (codex→executor, gemini→designer, claude→explore) ──
+# ── CLI 이름은 route_agent()에서 기본 역할 alias로 처리됨 (codex→executor, antigravity/agy→Antigravity, claude→explore) ──
 
 # ── 인자 검증: MCP_PROFILE이 --flag 형태인 경우 거절 ──
 if [[ "$MCP_PROFILE" == --* ]]; then
@@ -810,9 +810,10 @@ agy_supports_headless() {
   if ! command -v "$agy_bin" &>/dev/null; then
     return 1
   fi
-  if ! help_text=$("$agy_bin" --help 2>/dev/null | head -c 20000); then
+  if ! help_text=$("$agy_bin" --help 2>&1); then
     return 1
   fi
+  help_text="${help_text:0:20000}"
   [[ "$help_text" == *"--print"* && "$help_text" == *"--dangerously-skip-permissions"* ]]
 }
 
@@ -1057,9 +1058,9 @@ route_agent() {
       CLI_ARGS="exec --profile gpt55_low ${codex_base}"
       CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     cleanup|deslop)
-      # 슬롭/정리 — 패턴 매칭 위주. 가성비 mini (gpt-5.4-mini, fast tier).
-      CLI_ARGS="exec --profile mini54_med ${codex_base}"
-      CLI_EFFORT="mini54_med"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      # 슬롭/정리 — 패턴 매칭 위주. gpt-5.5 mid로 lightweight lane 통일.
+      CLI_ARGS="exec --profile gpt55_med ${codex_base}"
+      CLI_EFFORT="gpt55_med"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     debugger)
       # 디버깅 — 깊은 코드 추적 필요, gpt-5.5 xhigh
       CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
@@ -1090,20 +1091,11 @@ route_agent() {
       CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
       CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
-    # ─── UI/문서 레인 ───
-    designer|gemini)
-      CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"
-      CLI_EFFORT="pro31"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-    writer)
-      CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"
-      CLI_EFFORT="flash3"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-
-    # ─── Antigravity CLI 레인 (2026-05-19 발표, Gemini CLI 후속) ───
+    # ─── Antigravity CLI 레인 (Gemini CLI 후속) ───
     # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic
-    antigravity|agy)
-      # agy --print 는 stdin-only (sanity test 4종 확인). positional arg 패턴은
-      # 환영 메시지 폴백을 발생시키므로 wrapper 의 호출 분기 (L2031/2033) 에서
-      # CLI_TYPE="antigravity" 일 때 stdin pipe 로 전환한다 (아래 변경 2).
+    designer|writer|gemini|antigravity|agy)
+      # agy --print + --dangerously-skip-permissions 조합은 positional prompt에서
+      # timeout이 재현되므로 wrapper 호출은 stdin pipe로 고정한다.
       CLI_ARGS="--print --dangerously-skip-permissions"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
@@ -1124,17 +1116,17 @@ route_agent() {
 
     # ─── 경량 ───
     spark)
-      CLI_ARGS="exec --profile spark53_low ${codex_base}"
-      CLI_EFFORT="spark53_low"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt55_low ${codex_base}"
+      CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     # ─── agent-map.json에만 정의된 신규 에이전트 (CLI_TYPE별 기본값) ───
     *)
       case "$CLI_TYPE" in
         codex)
           CLI_ARGS="exec --profile gpt55_high ${codex_base}"
           CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-        gemini)
-          CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"
-          CLI_EFFORT="pro31"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+        gemini|antigravity)
+          CLI_ARGS="--print --dangerously-skip-permissions"
+          CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
         claude-native)
           CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
       esac ;;
@@ -1243,13 +1235,15 @@ apply_cli_mode() {
 
   case "$TFX_CLI_MODE" in
     codex)
-      if [[ "$CLI_TYPE" == "gemini" ]]; then
+      if [[ "$CLI_TYPE" == "gemini" || "$CLI_TYPE" == "antigravity" ]]; then
         CLI_TYPE="codex"; CLI_CMD="codex"
         case "$AGENT_TYPE" in
-          designer)
-            CLI_ARGS="exec --profile gpt54_xhigh ${codex_base}"; CLI_EFFORT="gpt54_xhigh"; DEFAULT_TIMEOUT=600 ;;
+          designer|antigravity|agy|gemini)
+            CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"; CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=600 ;;
           writer)
-            CLI_ARGS="exec --profile spark53_low ${codex_base}"; CLI_EFFORT="spark53_low"; DEFAULT_TIMEOUT=180 ;;
+            CLI_ARGS="exec --profile gpt55_low ${codex_base}"; CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=180 ;;
+          *)
+            CLI_ARGS="exec --profile gpt55_high ${codex_base}"; CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080 ;;
         esac
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
       fi ;;
@@ -1269,30 +1263,20 @@ apply_cli_mode() {
             return 0
             ;;
         esac
-        # Gemini CLI deprecated — redirect to Antigravity when available.
-        # Legacy gemini binary path is preserved as fallback for environments
-        # without agy (TFX_ANTIGRAVITY_OK=0) until Phase 5 cleanup.
-        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && command -v "${AGY_BIN:-agy}" &>/dev/null; then
+        # Gemini CLI deprecated — the mode name is retained as a compatibility
+        # alias only. Do not enter the legacy gemini binary path.
+        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
           echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini → antigravity (Gemini CLI deprecated, use --cli antigravity)" >&2
           TFX_CLI_MODE="antigravity"; apply_cli_mode; return
         fi
-        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy 미설치 — legacy gemini binary path 진입" >&2
-        CLI_TYPE="gemini"; CLI_CMD="gemini"
-        case "$AGENT_TYPE" in
-          executor|debugger|deep-executor|architect|planner|critic|analyst|\
-          code-reviewer|security-reviewer|quality-reviewer|scientist-deep|designer)
-            CLI_ARGS="-m $(resolve_gemini_profile pro31) -y --prompt"; CLI_EFFORT="pro31" ;;
-          build-fixer|spark)
-            CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"; CLI_EFFORT="flash3"; DEFAULT_TIMEOUT=180 ;;
-          *)
-            CLI_ARGS="-m $(resolve_gemini_profile flash3) -y --prompt"; CLI_EFFORT="flash3" ;;
-        esac
-        case "$CLI_EFFORT" in
-          pro*) gemini_tier="pro" ;;
-          flash*|lite*) gemini_tier="flash" ;;
-          *) gemini_tier="$CLI_EFFORT" ;;
-        esac
-        echo "[tfx-route] TFX_CLI_MODE=gemini: $AGENT_TYPE → gemini($gemini_tier)로 리매핑" >&2
+        if command -v "$CODEX_BIN" &>/dev/null; then
+          echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy headless 불가 — codex fallback" >&2
+          TFX_CLI_MODE="codex"; apply_cli_mode; return
+        fi
+        ORIGINAL_AGENT="${AGENT_TYPE}"
+        CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+        CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy/codex 불가 — claude-native fallback" >&2
       fi ;;
     antigravity)
       if [[ "$CLI_TYPE" != "claude-native" && "$CLI_TYPE" != "claude" ]]; then
@@ -1308,35 +1292,49 @@ apply_cli_mode() {
       # single/multi/swarm dispatch. Shell auto mode only normalizes CLI
       # availability and leaves code-change swarm escalation to JS.
       if [[ "$CLI_TYPE" == "codex" ]] && ! command -v "$CODEX_BIN" &>/dev/null; then
-        if command -v "$GEMINI_BIN" &>/dev/null; then
-          TFX_CLI_MODE="gemini"; apply_cli_mode; return
+        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
+          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
         else
           ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-          echo "[tfx-route] codex/gemini 모두 미설치: $AGENT_TYPE → claude-native fallback" >&2
+          echo "[tfx-route] codex/antigravity 모두 불가: $AGENT_TYPE → claude-native fallback" >&2
         fi
-      elif [[ "$CLI_TYPE" == "gemini" ]] && ! command -v "$GEMINI_BIN" &>/dev/null; then
-        if command -v "$CODEX_BIN" &>/dev/null; then
+      elif [[ "$CLI_TYPE" == "gemini" ]]; then
+        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
+          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
+        elif command -v "$CODEX_BIN" &>/dev/null; then
           TFX_CLI_MODE="codex"; apply_cli_mode; return
         else
           ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-          echo "[tfx-route] codex/gemini 모두 미설치: $AGENT_TYPE → claude-native fallback" >&2
+          echo "[tfx-route] deprecated gemini alias: agy/codex 불가 — $AGENT_TYPE → claude-native fallback" >&2
         fi
+      elif [[ "$CLI_TYPE" == "antigravity" ]] && ! agy_supports_headless "${AGY_BIN:-agy}"; then
+        if command -v "$CODEX_BIN" &>/dev/null; then
+          TFX_CLI_MODE="codex"; apply_cli_mode; return
+        fi
+        ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+        echo "[tfx-route] antigravity headless 불가: $AGENT_TYPE → claude-native fallback" >&2
       fi ;;
   esac
 }
 
-# ── Codex 요금제 가드 (spark 프로필은 Pro 전용) ──
+# ── Codex legacy 프로필 가드 ──
 apply_plan_guard() {
   [[ "$CLI_TYPE" != "codex" ]] && return
-  [[ "$TFX_CODEX_PLAN" == "pro" ]] && return
 
-  if [[ "$CLI_EFFORT" == spark53_* ]]; then
-    local codex_base
-    codex_base="$(build_codex_base)"
-    CLI_ARGS="exec --profile gpt55_high ${codex_base}"
-    CLI_EFFORT="gpt55_high"
-    echo "[tfx-route] TFX_CODEX_PLAN=$TFX_CODEX_PLAN: spark → gpt55_high로 다운그레이드 (Pro 전용)" >&2
-  fi
+  local replacement=""
+  case "$CLI_EFFORT" in
+    spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt55_low" ;;
+    spark53_med|codex53_med|mini54_med) replacement="gpt55_med" ;;
+    codex53_xhigh|gpt54_xhigh) replacement="gpt55_xhigh" ;;
+    spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt55_high" ;;
+  esac
+  [[ -z "$replacement" ]] && return
+
+  local codex_base
+  codex_base="$(build_codex_base)"
+  CLI_ARGS="exec --profile ${replacement} ${codex_base}"
+  CLI_EFFORT="$replacement"
+  echo "[tfx-route] legacy Codex profile remapped to ${replacement}" >&2
 }
 
 # ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
@@ -1345,7 +1343,7 @@ apply_no_claude_native_mode() {
   codex_base="$(build_codex_base)"
 
   [[ "$TFX_NO_CLAUDE_NATIVE" != "1" ]] && return
-  [[ "$TFX_CLI_MODE" == "gemini" ]] && return
+  [[ "$TFX_CLI_MODE" == "gemini" || "$TFX_CLI_MODE" == "antigravity" ]] && return
   [[ "$CLI_TYPE" != "claude-native" ]] && return
 
   if ! command -v "$CODEX_BIN" &>/dev/null; then
@@ -1417,17 +1415,36 @@ apply_dynamic_routing_override() {
     --team-size 1 2>/dev/null) || return
 
   [[ -z "$override_cli" ]] && return
+  [[ "$override_cli" == "gemini" ]] && override_cli="antigravity"
   [[ "$override_cli" == "$CLI_TYPE" ]] && return
 
   # 지원하는 CLI 만 적용 — 알 수 없는 값은 무시
   case "$override_cli" in
-    codex|gemini|claude) ;;
+    codex|antigravity|claude) ;;
     *) return ;;
   esac
 
   echo "[tfx-route] dynamic_route_override: ${CLI_TYPE} -> ${override_cli} (TRIFLUX_DYNAMIC_ROUTING=${flag})" >&2
   CLI_TYPE="$override_cli"
-  CLI_CMD="$override_cli"
+  case "$override_cli" in
+    codex)
+      local codex_base
+      codex_base="$(build_codex_base)"
+      CLI_CMD="codex"
+      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
+      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      ;;
+    antigravity)
+      CLI_CMD="agy"
+      CLI_ARGS="--print --dangerously-skip-permissions"
+      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false"
+      ;;
+    claude)
+      CLI_CMD="claude"
+      CLI_ARGS=""
+      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      ;;
+  esac
 }
 
 apply_verifier_override() {
@@ -2192,7 +2209,7 @@ run_codex_exec() {
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
       if [[ "$CLI_TYPE" == "antigravity" ]]; then
-        # agy --print 는 stdin-only — positional arg + < /dev/null 패턴이 환영 메시지 폴백 유발.
+        # agy --print + skip-permissions positional prompt는 timeout이 재현되어 stdin pipe로 고정한다.
         printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
       else
         "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
@@ -2214,17 +2231,13 @@ run_codex_exec() {
 
   _attempt_codex_run
 
-  # Tier-fallback: ChatGPT account (Plus tier 등) 가 gpt-5.5 거부 시 같은 effort 의
-  # gpt-5.4 로 1회 강등 재시도. effort 는 그대로, model 만 한 단계 낮춤.
-  # 매핑: gpt55_xhigh→gpt54_xhigh, gpt55_high→gpt54_high, gpt55_med/low→gpt54_low.
+  # Tier-fallback: ChatGPT account가 높은 reasoning profile을 거부하면
+  # gpt-5.5 low로만 1회 재시도한다. 구형 gpt-5.4 계열로는 더 이상 다운그레이드하지 않는다.
   # 출처: Issue #211 — codex CLI tier-aware fallback.
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
-      gpt55_xhigh) fallback_profile="gpt54_xhigh" ;;
-      gpt55_high)  fallback_profile="gpt54_high" ;;
-      gpt55_med)   fallback_profile="gpt54_low" ;;
-      gpt55_low)   fallback_profile="gpt54_low" ;;
+      gpt55_xhigh|gpt55_high|gpt55_med) fallback_profile="gpt55_low" ;;
     esac
     if [[ -n "$fallback_profile" ]]; then
       echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2

@@ -2,7 +2,7 @@
 // teammate 프롬프트 템플릿 + 팀 설정 빌더
 //
 // Claude Code 네이티브 Agent Teams (CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1)
-// 환경에서 teammate를 Codex/Gemini CLI 래퍼로 구성하는 유틸리티.
+// 환경에서 teammate를 Codex/Antigravity CLI 래퍼로 구성하는 유틸리티.
 // SKILL.md가 인라인 프롬프트를 사용하므로, 이 모듈은 CLI(tfx multi --native)에서
 // 팀 설정을 프로그래밍적으로 생성할 때 사용한다.
 
@@ -33,13 +33,24 @@ function inferWorkerIndex(agentName = "") {
   return Number.isInteger(index) && index > 0 ? index : null;
 }
 
-function buildRouteEnvPrefix(agentName, workerIndex, searchTool) {
+function normalizeRouteMode(cli) {
+  const normalized = String(cli || "").trim();
+  if (["gemini", "antigravity", "agy"].includes(normalized)) {
+    return "antigravity";
+  }
+  if (normalized === "codex") return "codex";
+  return "";
+}
+
+function buildRouteEnvPrefix(agentName, workerIndex, searchTool, cli) {
   const effectiveWorkerIndex =
     Number.isInteger(workerIndex) && workerIndex > 0
       ? workerIndex
       : inferWorkerIndex(agentName);
+  const routeMode = normalizeRouteMode(cli);
 
   let envPrefix = "";
+  if (routeMode) envPrefix += ` TFX_CLI_MODE="${routeMode}"`;
   if (effectiveWorkerIndex)
     envPrefix += ` TFX_WORKER_INDEX="${effectiveWorkerIndex}"`;
   if (searchTool) envPrefix += ` TFX_SEARCH_TOOL="${searchTool}"`;
@@ -197,6 +208,7 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
     agentName,
     workerIndex,
     searchTool,
+    cli,
   );
   const scoutConstraint =
     role === "scout" || role === "scientist"
@@ -218,7 +230,7 @@ SendMessage(type: "message", recipient: "${leadName}", content: "작업 시작: 
 
 [HARD CONSTRAINT] 허용 도구: Bash, TaskUpdate, TaskGet, TaskList, SendMessage만 사용한다.
 Read, Edit, Write, Grep, Glob, Agent, WebSearch, WebFetch 등 다른 모든 도구 사용을 금지한다.
-코드를 직접 읽거나 수정하면 안 된다. 반드시 아래 Bash 명령(tfx-route.sh)을 통해 Codex/Gemini에 위임하라.
+코드를 직접 읽거나 수정하면 안 된다. 반드시 아래 Bash 명령(tfx-route.sh)을 통해 Codex/Antigravity에 위임하라.
 이 규칙을 위반하면 작업 실패로 간주한다.${scoutConstraint}
 
 gemini/codex를 직접 호출하지 마라. 반드시 tfx-route.sh를 거쳐야 한다.
@@ -333,6 +345,7 @@ export function buildHybridWrapperPrompt(cli, opts = {}) {
     agentName,
     workerIndex,
     searchTool,
+    cli,
   );
 
   const routeCmd = `TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} "${role}" '${escaped}' ${mcp_profile}`;
@@ -360,7 +373,7 @@ export function buildHybridWrapperPrompt(cli, opts = {}) {
 ${pipelineHint}
 [HARD CONSTRAINT] 너는 Bash, TaskUpdate, TaskGet, TaskList, SendMessage만 사용할 수 있다.
 Read, Edit, Write, Grep, Glob, Agent, WebSearch, WebFetch 등 다른 모든 도구 사용을 금지한다.
-코드를 직접 읽거나 수정하면 안 된다. 반드시 아래 Bash 명령(tfx-route.sh)을 통해 Codex/Gemini에 위임하라.
+코드를 직접 읽거나 수정하면 안 된다. 반드시 아래 Bash 명령(tfx-route.sh)을 통해 Codex/Antigravity에 위임하라.
 이 규칙을 위반하면 작업 실패로 간주한다.
 
 gemini/codex를 직접 호출하지 마라. psmux spawn이 tfx-route.sh를 통해 실행한다.

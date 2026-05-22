@@ -434,6 +434,16 @@ export function getAccountLabel(
   return label;
 }
 
+function formatAntigravityQuotaSection(currentTier) {
+  if (currentTier === "minimal") {
+    return `${dim("q:")}${dim(formatPlaceholderPercentCell())}`;
+  }
+  if (currentTier === "compact") {
+    return `${dim("q:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
+  }
+  return `${dim("q:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
+}
+
 export function getProviderRow(
   currentTier,
   provider,
@@ -470,6 +480,9 @@ export function getProviderRow(
 
   if (currentTier === "nano" || currentTier === "micro") {
     const minPrefix = `${bold(markerColor(`${marker}`))}:`;
+    if (provider === "antigravity") {
+      return { prefix: minPrefix, left: dim("--"), right: "" };
+    }
     if (realQuota?.type === "codex") {
       const main =
         realQuota.buckets.codex ||
@@ -498,7 +511,7 @@ export function getProviderRow(
         };
       }
     }
-    if (realQuota?.type === "gemini") {
+    if (provider === "gemini" && realQuota?.type === "gemini") {
       const pools = realQuota.pools || {};
       if (pools.pro || pools.flash) {
         const pP = pools.pro
@@ -526,6 +539,9 @@ export function getProviderRow(
   }
 
   if (currentTier === "minimal") {
+    if (provider === "antigravity") {
+      quotaSection = formatAntigravityQuotaSection(currentTier);
+    }
     if (realQuota?.type === "codex") {
       const main =
         realQuota.buckets.codex ||
@@ -550,7 +566,7 @@ export function getProviderRow(
         quotaSection = `${dim("5h:")}${fCell} ${dim("1w:")}${wCell}`;
       }
     }
-    if (realQuota?.type === "gemini") {
+    if (provider === "gemini" && realQuota?.type === "gemini") {
       const pools = realQuota.pools || {};
       if (pools.pro || pools.flash) {
         const slot = (bucket, label) => {
@@ -579,6 +595,9 @@ export function getProviderRow(
   }
 
   if (currentTier === "compact") {
+    if (provider === "antigravity") {
+      quotaSection = formatAntigravityQuotaSection(currentTier);
+    }
     if (realQuota?.type === "codex") {
       const main =
         realQuota.buckets.codex ||
@@ -610,7 +629,7 @@ export function getProviderRow(
         quotaSection = `${dim("5h:")}${fCell} ${dim(formatTimeCell(fiveReset))} ${dim("1w:")}${wCell} ${dim(formatTimeCellDH(weekReset))}`;
       }
     }
-    if (realQuota?.type === "gemini") {
+    if (provider === "gemini" && realQuota?.type === "gemini") {
       const pools = realQuota.pools || {};
       const hasAnyPool = pools.pro || pools.flash;
       if (hasAnyPool) {
@@ -644,6 +663,10 @@ export function getProviderRow(
   }
 
   // full tier
+  if (provider === "antigravity") {
+    quotaSection = formatAntigravityQuotaSection(currentTier);
+  }
+
   if (realQuota?.type === "codex") {
     const main =
       realQuota.buckets.codex ||
@@ -686,7 +709,7 @@ export function getProviderRow(
     }
   }
 
-  if (realQuota?.type === "gemini") {
+  if (provider === "gemini" && realQuota?.type === "gemini") {
     const pools = realQuota.pools || {};
     const hasAnyPool = pools.pro || pools.flash;
 

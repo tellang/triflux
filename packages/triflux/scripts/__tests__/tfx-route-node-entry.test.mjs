@@ -28,7 +28,7 @@ const AGENT_MAP = JSON.parse(readFileSync(AGENT_MAP_PATH, "utf8"));
 describe("tfx-route.mjs Phase 0 PoC — adapter contract", () => {
   const adapters = [
     ["codex", codexAdapter, "codex", "codex"],
-    ["gemini", geminiAdapter, "gemini", "gemini"],
+    ["gemini", geminiAdapter, "gemini", "antigravity"],
     ["claude", claudeAdapter, "claude", "claude-native"],
     ["agy", agyAdapter, "agy", "antigravity"],
   ];
@@ -152,8 +152,8 @@ describe("tfx-route.mjs — selectAdapter", () => {
   test("codex → codex adapter", () => {
     assert.equal(route.selectAdapter("codex").id, "codex");
   });
-  test("gemini → gemini adapter", () => {
-    assert.equal(route.selectAdapter("gemini").id, "gemini");
+  test("gemini → agy adapter compatibility alias", () => {
+    assert.equal(route.selectAdapter("gemini").id, "agy");
   });
   test("claude-native → claude adapter", () => {
     assert.equal(route.selectAdapter("claude-native").id, "claude");
@@ -307,28 +307,30 @@ describe("cli-codex.mjs — 핵심 매핑", () => {
   });
 });
 
-describe("cli-gemini.mjs — 핵심 매핑", () => {
-  test("designer → pro31 / 900s / bg", () => {
+describe("cli-gemini.mjs — Antigravity compatibility alias", () => {
+  test("designer → agy_v1 / 900s / bg / stdin pipe", () => {
     const p = geminiAdapter.plan({
       agent: "designer",
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.effort, "pro31");
+    assert.equal(p.effort, "agy_v1");
     assert.equal(p.timeoutMs, 900_000);
     assert.equal(p.runMode, "bg");
     assert.equal(p.mcpProfile, "docs");
-    assert.deepEqual(p.args, ["-m", "pro31", "-y", "--prompt"]);
+    assert.equal(p.stdinMode, "pipe");
+    assert.deepEqual(p.args, ["--print", "--dangerously-skip-permissions"]);
   });
 
-  test("writer → flash3", () => {
+  test("writer → agy_v1 stdin pipe", () => {
     const p = geminiAdapter.plan({
       agent: "writer",
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.effort, "flash3");
-    assert.deepEqual(p.args, ["-m", "flash3", "-y", "--prompt"]);
+    assert.equal(p.effort, "agy_v1");
+    assert.equal(p.stdinMode, "pipe");
+    assert.deepEqual(p.args, ["--print", "--dangerously-skip-permissions"]);
   });
 });
 

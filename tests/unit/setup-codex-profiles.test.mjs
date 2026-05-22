@@ -46,17 +46,10 @@ function _withTempCodex(configContent, fn) {
 
 describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
   const requiredNames = [
-    "codex53_high",
-    "codex53_xhigh",
-    "codex53_med",
-    "spark53_low",
-    "spark53_med",
-    "gpt54_xhigh",
-    "gpt54_high",
-    "gpt54_low",
-    "mini54_low",
-    "mini54_med",
-    "mini54_high",
+    "gpt55_xhigh",
+    "gpt55_high",
+    "gpt55_med",
+    "gpt55_low",
   ];
 
   for (const name of requiredNames) {
@@ -122,18 +115,18 @@ describe("REQUIRED_TOP_LEVEL_SETTINGS: 필수 top-level 설정 목록", () => {
 describe("hasProfileSection: 프로필 섹션 감지", () => {
   it("존재하는 프로필 섹션을 감지한다", () => {
     const content =
-      '[profiles.gpt54_high]\nmodel = "gpt-5.4"\nmodel_reasoning_effort = "high"\n';
-    assert.equal(hasProfileSection(content, "gpt54_high"), true);
+      '[profiles.gpt55_high]\nmodel = "gpt-5.5"\nmodel_reasoning_effort = "high"\n';
+    assert.equal(hasProfileSection(content, "gpt55_high"), true);
   });
 
   it("존재하지 않는 프로필 섹션은 false를 반환한다", () => {
-    const content = '[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
-    assert.equal(hasProfileSection(content, "gpt54_high"), false);
+    const content = '[profiles.gpt55_high]\nmodel = "gpt-5.5"\n';
+    assert.equal(hasProfileSection(content, "gpt55_low"), false);
   });
 
-  it("부분 일치는 false를 반환한다 (gpt54 vs gpt54_high)", () => {
-    const content = '[profiles.gpt54]\nmodel = "gpt-5.4"\n';
-    assert.equal(hasProfileSection(content, "gpt54_high"), false);
+  it("부분 일치는 false를 반환한다 (gpt55 vs gpt55_high)", () => {
+    const content = '[profiles.gpt55]\nmodel = "gpt-5.5"\n';
+    assert.equal(hasProfileSection(content, "gpt55_high"), false);
   });
 });
 
@@ -141,7 +134,7 @@ describe("hasProfileSection: 프로필 섹션 감지", () => {
 
 describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", () => {
   it("top-level 영역(첫 섹션 전)에 model이 없으면 주입 대상으로 판정된다", () => {
-    const content = '[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
+    const content = '[profiles.gpt55_high]\nmodel = "gpt-5.5"\n';
     // top-level 영역 = 첫 번째 [profiles.*] 헤더 이전
     const firstSectionIdx = content.search(/^\[(?:profiles|mcp_servers)\./m);
     const topLevelRegion =
@@ -156,7 +149,7 @@ describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", (
 
   it("top-level model= 이 있으면 보존 대상으로 판정된다", () => {
     const content =
-      'model = "gpt-5.4"\nservice_tier = "fast"\n\n[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
+      'model = "gpt-5.5"\nservice_tier = "fast"\n\n[profiles.gpt55_high]\nmodel = "gpt-5.5"\n';
     const topLevelKeyRe = /^model\s*=/m;
     assert.equal(
       topLevelKeyRe.test(content),
@@ -170,7 +163,7 @@ describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", (
     // 현재 regex는 ^model\s*= (multiline)이므로 섹션 헤더 다음 줄도 매칭될 수 있다.
     // 이 테스트는 top-level에 model= 이 없고 프로필에만 있는 케이스를 문서화한다.
     const contentWithoutTopLevel =
-      '[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
+      '[profiles.gpt55_high]\nmodel = "gpt-5.5"\n';
     // regex matches any line starting with "model" — including inside profiles.
     // The injection logic relies on the caller to check BEFORE the first section header.
     // Here we just document the known behavior: the regex WILL match the profile-internal model=.
@@ -188,7 +181,7 @@ describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", (
   });
 
   it("top-level 삽입 로직: 첫 섹션 앞에 키를 삽입한다", () => {
-    const content = '[profiles.codex53_high]\nmodel = "gpt-5.3-codex"\n';
+    const content = '[profiles.gpt55_high]\nmodel = "gpt-5.5"\n';
     const key = "service_tier";
     const value = '"fast"';
     const line = `${key} = ${value}\n`;
@@ -200,7 +193,7 @@ describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", (
       "key should be inserted at top",
     );
     assert.ok(
-      injected.includes("[profiles.codex53_high]"),
+      injected.includes("[profiles.gpt55_high]"),
       "profile section preserved",
     );
   });

@@ -17,21 +17,20 @@ function makeSandbox() {
   return { root, bin };
 }
 
-function installFakeGemini(binDir) {
-  const jsPath = join(binDir, "gemini.js");
-  const shPath = join(binDir, "gemini");
-  const cmdPath = join(binDir, "gemini.cmd");
+function installFakeAntigravity(binDir) {
+  const jsPath = join(binDir, "agy.js");
+  const shPath = join(binDir, "agy");
+  const cmdPath = join(binDir, "agy.cmd");
 
   writeFileSync(
     jsPath,
     [
       "#!/usr/bin/env node",
-      "const args = process.argv.slice(2);",
-      "if (process.env.FAKE_GEMINI_FAIL === '1') { process.stderr.write('gemini failed'); process.exit(5); }",
-      "const pi = args.indexOf('--prompt');",
-      "const prompt = pi >= 0 ? args[pi + 1] : '';",
-      "const oi = args.indexOf('--output-format');",
-      "process.stdout.write(`GEMINI:${prompt}`);",
+      "if (process.env.FAKE_GEMINI_FAIL === '1') { process.stderr.write('agy failed'); process.exit(5); }",
+      "let input = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (chunk) => { input += chunk; });",
+      "process.stdin.on('end', () => { process.stdout.write(`AGY:${input}`); });",
     ].join("\n"),
     "utf8",
   );
@@ -47,7 +46,7 @@ function installFakeGemini(binDir) {
 
 async function withSandbox(fn) {
   const sandbox = makeSandbox();
-  installFakeGemini(sandbox.bin);
+  installFakeAntigravity(sandbox.bin);
   const previous = {
     PATH: process.env.PATH,
     FAKE_GEMINI_FAIL: process.env.FAKE_GEMINI_FAIL,
@@ -70,21 +69,20 @@ function importFresh(relativePath) {
   return import(`${relativePath}?t=${Date.now()}-${Math.random()}`);
 }
 
-test("buildExecArgs produces gemini command with --yolo and --prompt", async () => {
+test("buildExecArgs produces agy stdin print command for legacy gemini adapter", async () => {
   const { buildExecArgs } = await importFresh("../../hub/gemini-adapter.mjs");
   const cmd = buildExecArgs({
     prompt: "hello world",
     model: "gemini-3-flash-preview",
   });
 
-  assert.match(cmd, /^gemini\s/);
-  assert.match(cmd, /--yolo/);
-  assert.match(cmd, /--prompt/);
-  assert.match(cmd, /--output-format/);
-  assert.match(cmd, /--model/);
+  assert.match(cmd, /agy --print/);
+  assert.match(cmd, /--dangerously-skip-permissions/);
+  assert.doesNotMatch(cmd, /gemini --/);
+  assert.doesNotMatch(cmd, /--prompt/);
 });
 
-test("execute returns stdout for successful gemini run", async () => {
+test("execute returns stdout for successful agy run", async () => {
   await withSandbox(async ({ root }) => {
     const { execute } = await importFresh("../../hub/gemini-adapter.mjs");
     const result = await execute({
@@ -99,7 +97,7 @@ test("execute returns stdout for successful gemini run", async () => {
     assert.equal(result.fellBack, false);
     assert.equal(result.retried, false);
     assert.equal(result.failureMode, null);
-    assert.match(result.output, /GEMINI:hello/);
+    assert.match(result.output, /AGY:hello/);
   });
 });
 

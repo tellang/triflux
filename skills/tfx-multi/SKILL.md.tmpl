@@ -6,7 +6,7 @@ description: >
   Claude+Codex+Antigravity 협업이 필요한 모든 상황에 적극 활용.
 triggers:
   - tfx-multi
-argument-hint: '"작업 설명" | --agents codex,gemini "작업" | --tmux "작업" | status | stop'
+argument-hint: '"작업 설명" | --agents codex,antigravity "작업" | --tmux "작업" | status | stop'
 ---
 
 # tfx-multi v3 — 파이프라인 기반 멀티-CLI 팀 오케스트레이터
@@ -31,7 +31,7 @@ argument-hint: '"작업 설명" | --agents codex,gemini "작업" | --tmux "작�
 ```
 /tfx-multi "인증 리팩터링 + UI 개선 + 보안 리뷰"           # --thorough (기본)
 /tfx-multi --quick "인증 리팩터링 + UI 개선 + 보안 리뷰"    # 경량 모드 (plan/verify 생략)
-/tfx-multi --agents codex,gemini "프론트+백엔드"
+/tfx-multi --agents codex,antigravity "프론트+백엔드"
 /tfx-multi --tmux "작업"         # 레거시 tmux 모드
 /tfx-multi status
 /tfx-multi stop
@@ -91,13 +91,13 @@ preflight와 Agent 생성을 병렬로 실행하여 사용자 체감 지연을 �
 **실행 명령 (Lead가 호출하는 유일한 명령):**
 
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:{프롬프트1}:{역할1}' --assign 'gemini:{프롬프트2}:{역할2}' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:{프롬프트1}:{역할1}' --assign 'antigravity:{프롬프트2}:{역할2}' --timeout 600")
 ```
 
 **예시:**
 
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:코드 리뷰하고 개선 사항 제안:reviewer' --assign 'gemini:API 문서 작성:writer' --assign 'codex:보안 취약점 분석:security' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:코드 리뷰하고 개선 사항 제안:reviewer' --assign 'antigravity:API 문서 작성:writer' --assign 'codex:보안 취약점 분석:security' --timeout 600")
 ```
 
 **Claude 워커가 Read/Edit 필요한 경우 (하이브리드):**
@@ -106,7 +106,7 @@ Claude 워커는 headless에서 실행 불가 (Read/Edit 도구 필요). CLI 워
 
 ```
 # 1. CLI 워커를 headless로 dispatch
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:{프롬프트}:{역할}' --assign 'gemini:{프롬프트}:{역할}' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:{프롬프트}:{역할}' --assign 'antigravity:{프롬프트}:{역할}' --timeout 600")
 
 # 2. Claude 워커를 Agent로 병렬 실행 (headless Bash와 동시에 spawn)
 Agent(subagent_type="...", prompt="...", run_in_background=true)
@@ -114,7 +114,7 @@ Agent(subagent_type="...", prompt="...", run_in_background=true)
 
 **결정 로직:**
 ```
-if 모든 워커가 CLI (codex/gemini):
+if 모든 워커가 CLI (codex/antigravity):
   → Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign ...")
 elif CLI + Claude 혼합:
   → CLI 워커: Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign ...")
@@ -156,7 +156,7 @@ psmux가 없는 환경에서만 사용. Agent slim wrapper로 CLI를 실행.
 ## 전제 조건
 
 - **CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1** — `tfx setup`이 자동 설정
-- **codex/gemini CLI** — 해당 에이전트 사용 시
+- **codex/antigravity CLI** — 해당 에이전트 사용 시
 - **Hub 활성 상태** — Named Pipe 우선, HTTP `127.0.0.1:27888` fallback. Hub 미실행 시 nativeProxy fallback.
 
 ## 에러 처리
@@ -165,7 +165,7 @@ psmux가 없는 환경에서만 사용. Agent slim wrapper로 CLI를 실행.
 |------|------|
 | TeamCreate 실패 / Agent Teams 비활성 | `--psmux/--tmux` 폴백 |
 | tfx-route.sh 없음 | `tfx setup` 실행 안내 |
-| CLI 미설치 (codex/gemini) | claude 워커로 대체 |
+| CLI 미설치 (codex/antigravity) | claude 워커로 대체 |
 | Codex 분류 실패 | Opus 직접 분류+분해 |
 | Bash 실행 실패 | `completed` + `metadata.result: "failed"` 마킹 후 Claude fallback |
 | claude fallback 실패 | 실패 목록/원인 요약 후 사용자 승인 대기 |

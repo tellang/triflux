@@ -29,10 +29,10 @@ function printStartUsage() {
   console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET}\n`);
   console.log(`  사용법: ${WHITE}tfx multi "작업 설명"${RESET}`);
   console.log(
-    `          ${WHITE}tfx multi --agents codex,gemini --lead claude "작업"${RESET}`,
+    `          ${WHITE}tfx multi --agents codex,antigravity --lead claude "작업"${RESET}`,
   );
   console.log(
-    `          ${WHITE}tfx multi --teammate-mode headless "작업"${RESET} ${DIM}(psmux 헤드리스, 기본)${RESET}`,
+    `          ${WHITE}tfx multi --teammate-mode headless "작업"${RESET} ${DIM}(headless workers)${RESET}`,
   );
   console.log(
     `          ${WHITE}tfx multi --dashboard-layout lite "작업"${RESET} ${DIM}(dashboard-lite 기본 뷰)${RESET}`,
@@ -66,10 +66,7 @@ function renderTmuxInstallHelp() {
   console.log(`\n  ${RED}${BOLD}tmux 미발견${RESET}\n`);
   console.log("  현재 선택한 모드는 tmux 기반 팀세션이 필요합니다.\n");
   console.log(
-    `  설치:\n    WSL2:   ${WHITE}wsl sudo apt install tmux${RESET}\n    macOS:  ${WHITE}brew install tmux${RESET}\n    Linux:  ${WHITE}apt install tmux${RESET}\n`,
-  );
-  console.log(
-    `  Windows에서는 WSL2를 권장합니다:\n    1. ${WHITE}wsl --install${RESET}\n    2. ${WHITE}wsl sudo apt install tmux${RESET}\n    3. ${WHITE}tfx multi "작업"${RESET}\n`,
+    `  설치:\n    Windows: ${WHITE}winget install psmux${RESET}\n    macOS:   ${WHITE}brew install tmux${RESET}\n    Linux:   ${WHITE}apt install tmux${RESET}\n`,
   );
 }
 

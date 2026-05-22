@@ -12,14 +12,14 @@ export const PSMUX_OPTIONAL_COMMANDS = ["detach-client"];
 
 // Windows 패키지 매니저 — winget/scoop/choco 는 Windows 전용
 export const PSMUX_INSTALL_COMMANDS = [
-  "winget install marlocarlo.psmux",
+  "winget install psmux",
   "scoop install psmux",
   "choco install psmux",
   "cargo install psmux",
 ];
 
 export const PSMUX_UPDATE_COMMANDS = [
-  "winget upgrade marlocarlo.psmux",
+  "winget upgrade psmux",
   "scoop update psmux",
   "choco upgrade psmux",
   "cargo install psmux --force",
@@ -42,14 +42,15 @@ export const PSMUX_INSTALL_COMMANDS_LINUX = ["cargo install psmux"];
 export const PSMUX_UPDATE_COMMANDS_LINUX = ["cargo install psmux --force"];
 
 // PR #258 OS-primary 분기 정책: macOS/Linux 는 tmux 가 POSIX 표준 primary,
-// psmux 는 선택형. native teams fallback (tmux 또는 child process spawn) 으로 동작 가능.
+// psmux 는 선택형이다. 따라서 macOS/Linux 에서 "psmux 미설치"는 fallback 사유가
+// 아니며, tmux 까지 없을 때만 native/in-process fallback 을 고려한다.
 export const PSMUX_FALLBACK_NOTE_DARWIN =
   "macOS 에서는 tmux 가 표준 멀티플렉서이며, " +
-  "triflux 는 psmux 없이도 native teams fallback 으로 멀티모델 병렬 실행을 지원합니다.";
+  "psmux 미설치는 fallback 사유가 아닙니다. tmux 도 없을 때만 in-process/native fallback 을 사용합니다.";
 
 export const PSMUX_FALLBACK_NOTE_LINUX =
   "Linux 에서는 tmux 가 표준 멀티플렉서이며, " +
-  "triflux 는 psmux 없이도 native teams fallback 으로 멀티모델 병렬 실행을 지원합니다.";
+  "psmux 미설치는 fallback 사유가 아닙니다. tmux 도 없을 때만 in-process/native fallback 을 사용합니다.";
 
 export function getPsmuxInstallCommandsFor(platform = process.platform) {
   if (platform === "darwin") return PSMUX_INSTALL_COMMANDS_DARWIN;
@@ -174,6 +175,50 @@ export function probePsmuxSupport(options = {}) {
       hasHelp: false,
       installHint: formatPsmuxInstallGuidance("  "),
       updateHint: formatPsmuxUpdateGuidance("  "),
+    };
+  }
+}
+
+export function probePrimaryMultiplexerSupport(options = {}) {
+  const platform = options.platform || process.platform;
+  const execFileSyncFn = options.execFileSyncFn || execFileSync;
+
+  if (platform === "win32") {
+    return {
+      kind: "psmux",
+      ...probePsmuxSupport(options),
+    };
+  }
+
+  const bin = options.bin || "tmux";
+  try {
+    const versionOutput = execFileSyncFn(bin, ["-V"], {
+      encoding: "utf8",
+      timeout: 2000,
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    return {
+      ok: true,
+      installed: true,
+      kind: "tmux",
+      version: String(versionOutput || "").trim() || null,
+      recommendedVersion: null,
+      recommended: true,
+      missingCommands: [],
+      missingOptionalCommands: [],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      installed: false,
+      kind: "tmux",
+      version: null,
+      recommendedVersion: null,
+      recommended: false,
+      missingCommands: ["tmux"],
+      missingOptionalCommands: [],
+      error: error?.message || String(error),
     };
   }
 }

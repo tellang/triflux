@@ -135,7 +135,10 @@ export function createTools(store, router, hitl, pipe = null) {
         ],
         properties: {
           agent_id: { type: "string", pattern: "^[a-zA-Z0-9._:-]{3,64}$" },
-          cli: { type: "string", enum: ["codex", "gemini", "claude", "other"] },
+          cli: {
+            type: "string",
+            enum: ["codex", "antigravity", "gemini", "claude", "other"],
+          },
           pid: { type: "integer", minimum: 1 },
           capabilities: {
             type: "array",

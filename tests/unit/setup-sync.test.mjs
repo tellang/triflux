@@ -17,6 +17,8 @@ const {
   ensureCodexHubServerConfig,
   isSetupUserStateFile,
   SETUP_USER_STATE_FILES,
+  getWorkerPackageSyncEntries,
+  syncWorkerPackages,
 } = await import("../../scripts/setup.mjs");
 
 // ── helpers ──
@@ -190,6 +192,96 @@ describe("setup-sync: SYNC_MAP", () => {
       normalized(mapEntry.dst),
       normalized(expected),
       `agent-map.json dst must resolve from tfx-route.sh relative path`,
+    );
+  });
+});
+
+describe("setup-sync: worker package mirrors", () => {
+  before(ensureTmpDir);
+  after(cleanTmpDir);
+
+  it("syncs @triflux package code into Claude worker node_modules", () => {
+    const pluginRoot = join(TMP_DIR, "worker-package-root");
+    const workerNodeModules = join(TMP_DIR, "claude-worker-node-modules");
+
+    const coreSrc = join(pluginRoot, "packages", "core");
+    const remoteSrc = join(pluginRoot, "packages", "remote");
+    mkdirSync(join(coreSrc, "scripts", "lib"), { recursive: true });
+    mkdirSync(join(remoteSrc, "hub", "team", "cli", "services"), {
+      recursive: true,
+    });
+    mkdirSync(join(remoteSrc, "node_modules", "transitive"), {
+      recursive: true,
+    });
+
+    writeFileSync(join(coreSrc, "package.json"), '{"name":"@triflux/core"}\n');
+    writeFileSync(join(coreSrc, "scripts", "lib", "psmux-info.mjs"), "core\n");
+    writeFileSync(
+      join(remoteSrc, "package.json"),
+      '{"name":"@triflux/remote"}\n',
+    );
+    writeFileSync(
+      join(remoteSrc, "hub", "team", "cli", "services", "runtime-mode.mjs"),
+      "remote\n",
+    );
+    writeFileSync(
+      join(remoteSrc, "node_modules", "transitive", "stale.txt"),
+      "skip\n",
+    );
+
+    const staleRemoteFile = join(
+      workerNodeModules,
+      "@triflux",
+      "remote",
+      "stale.txt",
+    );
+    mkdirSync(dirname(staleRemoteFile), { recursive: true });
+    writeFileSync(staleRemoteFile, "old\n");
+
+    const entries = getWorkerPackageSyncEntries({
+      pluginRoot,
+      workerNodeModules,
+    });
+    assert.deepEqual(
+      entries.map((entry) => entry.label).sort(),
+      ["@triflux/core worker package", "@triflux/remote worker package"],
+    );
+
+    assert.equal(
+      syncWorkerPackages({ pluginRoot, workerNodeModules }),
+      2,
+      "both worker packages should be refreshed",
+    );
+    assert.equal(
+      readFileSync(
+        join(
+          workerNodeModules,
+          "@triflux",
+          "remote",
+          "hub",
+          "team",
+          "cli",
+          "services",
+          "runtime-mode.mjs",
+        ),
+        "utf8",
+      ),
+      "remote\n",
+    );
+    assert.equal(existsSync(staleRemoteFile), false);
+    assert.equal(
+      existsSync(
+        join(
+          workerNodeModules,
+          "@triflux",
+          "remote",
+          "node_modules",
+          "transitive",
+          "stale.txt",
+        ),
+      ),
+      false,
+      "nested package node_modules must not be copied",
     );
   });
 });

@@ -81,16 +81,17 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     assert.equal(plan.runMode, "fg");
   });
 
-  test("--route-print invocation: designer → gemini", () => {
+  test("--route-print invocation: designer → antigravity", () => {
     const out = execFileSync(
       "node",
       [NODE_SCRIPT, "--route-print", "designer", "ui sketch"],
       { encoding: "utf8", timeout: NODE_ROUTE_TIMEOUT_MS },
     );
     const plan = JSON.parse(out);
-    assert.equal(plan.cliType, "gemini");
-    assert.equal(plan.adapter, "gemini");
-    assert.equal(plan.effort, "pro31");
+    assert.equal(plan.cliType, "antigravity");
+    assert.equal(plan.adapter, "agy");
+    assert.equal(plan.effort, "agy_v1");
+    assert.equal(plan.stdinMode, "pipe");
   });
 
   test("--route-print invocation: explore → claude-native (no CLI command)", () => {

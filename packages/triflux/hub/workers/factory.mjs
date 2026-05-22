@@ -1,7 +1,8 @@
 // hub/workers/factory.mjs — Worker 생성 팩토리
 //
 // Supported worker types:
-//   - 'gemini'           → GeminiWorker
+//   - 'gemini'           → AntigravityRouteWorker (deprecated alias)
+//   - 'antigravity'      → AntigravityRouteWorker
 //   - 'claude'           → ClaudeWorker
 //   - 'codex'            → CodexMcpWorker (default) or CodexAppServerWorker when
 //                          opts.transport === 'app-server'
@@ -14,8 +15,8 @@
 // `publishCallback` or swap the transport with `requestJsonFn`.
 
 import { ClaudeWorker } from "./claude-worker.mjs";
+import { AntigravityRouteWorker } from "./antigravity-route-worker.mjs";
 import { CodexAppServerWorker } from "./codex-app-server-worker.mjs";
-import { GeminiWorker } from "./gemini-worker.mjs";
 
 /**
  * Build a best-effort publishCallback that posts the envelope to
@@ -76,14 +77,16 @@ async function createCodexWorker(opts = {}) {
 }
 
 /**
- * @param {'gemini'|'claude'|'codex'|'codex-app-server'|'delegator'} type
+ * @param {'gemini'|'antigravity'|'agy'|'claude'|'codex'|'codex-app-server'|'delegator'} type
  * @param {object} [opts]
  * @returns {Promise<import('./interface.mjs').IWorker>}
  */
 export async function createWorker(type, opts = {}) {
   switch (type) {
     case "gemini":
-      return new GeminiWorker(opts);
+    case "antigravity":
+    case "agy":
+      return new AntigravityRouteWorker(opts);
     case "claude":
       return new ClaudeWorker(opts);
     case "codex":

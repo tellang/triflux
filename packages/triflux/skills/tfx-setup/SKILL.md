@@ -23,8 +23,8 @@ triflux 자체는 cross-platform (macOS / Linux / Windows) 이지만, 일부 안
 | 영역 | Windows | macOS · Linux |
 |------|---------|---------------|
 | 탭/패인 매니저 | Windows Terminal (`wt.exe`) → `wt-manager.mjs` 경유 필수 | 별도 매니저 없음. `hub/team/terminal-opener.mjs` 의 3단계 fallback (win32→wt-manager / tmux 감지→tmux/psmux / darwin→Terminal.app) 으로 동작 |
-| psmux | `winget install marlocarlo.psmux` / `scoop install psmux` / `choco install psmux` / `cargo install psmux` | `cargo install psmux` (cross-platform). 설치 후 `hub/team/psmux.mjs` 의 `IS_MAC` 분기로 동일 capability 제공 |
-| `<psmux-wt>` 룰 (CLAUDE.md / AGENTS.md / `.claude/rules/tfx-psmux.md`) | RULE 1~3, 5~6, 8 적용 (PowerShell, wt-manager, WT layout) | RULE 1~3, 5~6, 8 skip 가능. RULE 4 (Codex CLI 인자) · RULE 7 (spark53 Pro 전용) 만 공통 적용 |
+| psmux | `winget install psmux` / `scoop install psmux` / `choco install psmux` / `cargo install psmux` | Windows용 native tmux. macOS/Linux는 `tmux`가 primary |
+| `<psmux-wt>` 룰 (CLAUDE.md / AGENTS.md / `.claude/rules/tfx-psmux.md`) | RULE 1~3, 5~6, 8 적용 (PowerShell, wt-manager, WT layout) | RULE 1~3, 5~6, 8 skip 가능. RULE 4 (Codex CLI 인자) 와 gpt55 profile policy 는 공통 적용 |
 | `tfx doctor` 의 WT 항목 | `WT: <version>` 또는 `WT: not found` | 현재 build 는 `WT: not found` 로 표시될 수 있음 — Windows 미설치이므로 정상. 후속 PR 에서 `WT: N/A (non-Windows)` 로 명시 표기 예정 |
 | 셸 | PowerShell 7+ 우선 (`pwsh -File` 필수) | zsh (macOS 기본) / bash. 인라인 명령 가능 |
 | 경로 | Windows 형식 (`C:\Users\...`) | POSIX (`/Users/...`, `$HOME`) |
@@ -115,7 +115,7 @@ Bash("triflux setup")
 #### 단계 3: Codex 프로파일
 
 `~/.codex/config.toml`을 Read 도구로 읽어 필수 프로파일 존재 여부 확인.
-필수: `codex53_high`, `codex53_xhigh`, `spark53_low`.
+필수: `gpt55_xhigh`, `gpt55_high`, `gpt55_med`, `gpt55_low`.
 
 - 모두 존재 → ✅ 표시
 - 누락 있으면 → AskUserQuestion:
@@ -546,7 +546,7 @@ options:
 
 ### 다음 단계
 - Codex 미설치 시: `npm install -g @openai/codex`
-- Antigravity 미설치 시: `npm install -g @google/gemini-cli`
+- Antigravity 미설치 시: Google Antigravity 설치 후 `agy`가 PATH에서 실행되는지 확인
 - 원격 호스트 추가: `/tfx-remote-setup`
 - 검색 MCP 추가/변경: `/tfx-setup` → 단계별 선택 → 검색 MCP
 - 세션 재시작하면 HUD + 검색 MCP가 활성화됩니다

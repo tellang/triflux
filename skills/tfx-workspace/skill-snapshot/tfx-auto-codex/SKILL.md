@@ -10,7 +10,7 @@ argument-hint: "\"작업 설명\" | N:agent_type \"작업 설명\""
 
 > 목적: 기존 `tfx-auto`의 오케스트레이션 패턴을 유지하면서
 > Claude 네이티브 역할(`explore`, `verifier`, `test-engineer`, `qa-tester`)을
-> Codex로 치환해 Codex/Gemini만으로 실행한다.
+> Codex로 치환해 Codex/Antigravity만으로 실행한다.
 
 ## 핵심 원칙
 
@@ -70,7 +70,7 @@ Claude 타입 반환은 기본적으로 허용하지 않는다.
 
 - `~/.claude/scripts/tfx-route.sh` 최신 동기화 상태
 - Codex CLI 설치
-- Gemini CLI 설치 (UI/문서 경로 사용 시)
+- Antigravity CLI 설치 (UI/문서 경로 사용 시)
 
 ## Troubleshooting
 
