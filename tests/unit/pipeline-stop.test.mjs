@@ -6,14 +6,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import Database from "better-sqlite3";
-
 import {
   ensurePipelineStateDbPath,
   ensurePipelineTable,
   initPipelineState,
   updatePipelineState,
 } from "../../hub/pipeline/state.mjs";
+import { loadBetterSqlite3ForTest, SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 const HOOK_PATH = fileURLToPath(
   new URL("../../hooks/pipeline-stop.mjs", import.meta.url),
@@ -32,6 +31,7 @@ function createValidPluginRoot(baseDir, name = "plugin-root") {
 
 function writePipelineState(baseDir, teamName, phase = "exec") {
   const dbPath = ensurePipelineStateDbPath(baseDir);
+  const Database = loadBetterSqlite3ForTest();
   const db = new Database(dbPath);
   ensurePipelineTable(db);
   initPipelineState(db, teamName);
@@ -83,7 +83,7 @@ function parseStdout(result) {
   return JSON.parse(result.stdout);
 }
 
-describe("pipeline-stop hook", () => {
+describe("pipeline-stop hook", { skip: SQLITE_SKIP }, () => {
   let sandboxDir;
   let homeDir;
   let pluginRoot;

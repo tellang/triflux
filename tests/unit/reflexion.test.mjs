@@ -13,8 +13,9 @@ import {
   reportOutcome,
 } from "../../hub/reflexion.mjs";
 import { createStore } from "../../hub/store.mjs";
+import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
-describe("reflexion", () => {
+describe("reflexion", { skip: SQLITE_SKIP }, () => {
   let store, tmpDir;
 
   before(() => {

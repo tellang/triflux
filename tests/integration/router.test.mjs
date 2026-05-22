@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createRouter } from "../../hub/router.mjs";
 import { createStore } from "../../hub/store.mjs";
+import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 function tempDbPath() {
   const dir = join(tmpdir(), `tfx-router-test-${randomUUID()}`);
@@ -16,7 +17,7 @@ function tempDbPath() {
   return join(dir, "test.db");
 }
 
-describe("createRouter()", () => {
+describe("createRouter()", { skip: SQLITE_SKIP }, () => {
   let store;
   let router;
   let dbPath;

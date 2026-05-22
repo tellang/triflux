@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
 
 import { createStoreAdapter } from "../../hub/store-adapter.mjs";
+import {
+  getBetterSqlite3UnavailableReason,
+  loadBetterSqlite3ForTest,
+} from "../helpers/sqlite.mjs";
 
 const TEMP_DIRS = [];
 
@@ -59,23 +63,12 @@ function assertStoreInterface(store) {
 describe("hub/store-adapter.mjs", () => {
   it("better-sqlite3가 있으면 sqlite store를 사용한다", async (t) => {
     const dbPath = tempDbPath();
-    let sqliteCtor;
-    try {
-      const mod = await import("better-sqlite3");
-      sqliteCtor = mod.default ?? mod;
-    } catch {
-      t.skip("better-sqlite3 unavailable in this environment");
+    const unavailable = getBetterSqlite3UnavailableReason();
+    if (unavailable) {
+      t.skip(unavailable);
       return;
     }
-    // native binding 검증 — import 성공해도 native fn 호출 시 fail 가능 (예: Node v26 + 12.6.2)
-    try {
-      const probe = new sqliteCtor(":memory:");
-      probe.prepare("SELECT 1").get();
-      probe.close();
-    } catch {
-      t.skip("better-sqlite3 native binding unavailable in this environment");
-      return;
-    }
+    const sqliteCtor = loadBetterSqlite3ForTest();
 
     const store = await createStoreAdapter(dbPath, {
       loadDatabase: async () => sqliteCtor,

@@ -8,13 +8,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
-import Database from "better-sqlite3";
 import { initPipelineState } from "../../hub/pipeline/state.mjs";
 import { startHub } from "../../hub/server.mjs";
 import {
   createConductorRegistry,
   setConductorRegistry,
 } from "../../hub/team/conductor-registry.mjs";
+import { loadBetterSqlite3ForTest, SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -166,7 +166,10 @@ describe("bridge.mjs pipe-first", () => {
     }
   });
 
-  it("pipeline-state는 HTTP가 죽어 있어도 pipe로 조회되어야 한다", async () => {
+  it("pipeline-state는 HTTP가 죽어 있어도 pipe로 조회되어야 한다", {
+    skip: SQLITE_SKIP,
+  }, async () => {
+    const Database = loadBetterSqlite3ForTest();
     const db = new Database(dbPath);
     initPipelineState(db, "pipe-state-team");
     db.close();
@@ -184,7 +187,10 @@ describe("bridge.mjs pipe-first", () => {
     assert.equal(result.data.phase, "plan");
   });
 
-  it("pipeline-advance는 pipe 실패 시 HTTP fallback으로 성공해야 한다", async () => {
+  it("pipeline-advance는 pipe 실패 시 HTTP fallback으로 성공해야 한다", {
+    skip: SQLITE_SKIP,
+  }, async () => {
+    const Database = loadBetterSqlite3ForTest();
     const db = new Database(dbPath);
     initPipelineState(db, "http-fallback-team");
     db.close();
@@ -228,7 +234,9 @@ describe("bridge.mjs pipe-first", () => {
     assert.equal(result.data.status, "queued");
   });
 
-  it("pipeline-init/list는 공통 transport helper를 통해 동작해야 한다", async () => {
+  it("pipeline-init/list는 공통 transport helper를 통해 동작해야 한다", {
+    skip: SQLITE_SKIP,
+  }, async () => {
     const initResult = await execBridge(
       [
         "pipeline-init",
