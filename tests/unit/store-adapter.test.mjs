@@ -67,6 +67,15 @@ describe("hub/store-adapter.mjs", () => {
       t.skip("better-sqlite3 unavailable in this environment");
       return;
     }
+    // native binding 검증 — import 성공해도 native fn 호출 시 fail 가능 (예: Node v26 + 12.6.2)
+    try {
+      const probe = new sqliteCtor(":memory:");
+      probe.prepare("SELECT 1").get();
+      probe.close();
+    } catch {
+      t.skip("better-sqlite3 native binding unavailable in this environment");
+      return;
+    }
 
     const store = await createStoreAdapter(dbPath, {
       loadDatabase: async () => sqliteCtor,
