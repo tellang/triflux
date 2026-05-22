@@ -498,7 +498,7 @@ export function getProviderRow(
         };
       }
     }
-    if (realQuota?.type === "gemini") {
+    if (provider === "gemini" && realQuota?.type === "gemini") {
       const pools = realQuota.pools || {};
       if (pools.pro || pools.flash) {
         const pP = pools.pro
@@ -550,7 +550,7 @@ export function getProviderRow(
         quotaSection = `${dim("5h:")}${fCell} ${dim("1w:")}${wCell}`;
       }
     }
-    if (realQuota?.type === "gemini") {
+    if (provider === "gemini" && realQuota?.type === "gemini") {
       const pools = realQuota.pools || {};
       if (pools.pro || pools.flash) {
         const slot = (bucket, label) => {
@@ -610,7 +610,7 @@ export function getProviderRow(
         quotaSection = `${dim("5h:")}${fCell} ${dim(formatTimeCell(fiveReset))} ${dim("1w:")}${wCell} ${dim(formatTimeCellDH(weekReset))}`;
       }
     }
-    if (realQuota?.type === "gemini") {
+    if (provider === "gemini" && realQuota?.type === "gemini") {
       const pools = realQuota.pools || {};
       const hasAnyPool = pools.pro || pools.flash;
       if (hasAnyPool) {
@@ -686,7 +686,7 @@ export function getProviderRow(
     }
   }
 
-  if (realQuota?.type === "gemini") {
+  if (provider === "gemini" && realQuota?.type === "gemini") {
     const pools = realQuota.pools || {};
     const hasAnyPool = pools.pro || pools.flash;
 

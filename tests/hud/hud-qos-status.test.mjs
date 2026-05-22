@@ -18,6 +18,7 @@ const mockHomeDir = join(__dirname, "__mock_home__");
 const mockOmcConfigDir = join(mockHomeDir, ".omc", "config");
 const mockClaudeCacheDir = join(mockHomeDir, ".claude", "cache");
 const mockOmcStateDir = join(mockHomeDir, ".omc", "state");
+const mockGeminiDir = join(mockHomeDir, ".gemini");
 
 // Ensure directories exist
 if (!existsSync(snapshotDir)) {
@@ -116,6 +117,7 @@ function runHudWithDimensions(cols, rows, extraEnv = {}) {
         LINES: rows.toString(),
         OMC_HUD_COMPACT: "", // Unset explicit flags
         OMC_HUD_MINIMAL: "",
+        TFX_ANTIGRAVITY_OK: "",
         HOME: mockHomeDir,
         USERPROFILE: mockHomeDir,
         ...extraEnv,
@@ -155,6 +157,11 @@ function normalizeOutput(output) {
 
 function stripAnsiText(output) {
   return output.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function fakeJwtWithEmail(email) {
+  const payload = Buffer.from(JSON.stringify({ email })).toString("base64url");
+  return `header.${payload}.signature`;
 }
 
 describe("HUD Breakpoints", () => {
@@ -205,6 +212,8 @@ describe("HUD Breakpoints", () => {
 
   it("renders Antigravity as a and hides the Gemini g marker when ready", () => {
     const preflightPath = join(mockClaudeCacheDir, "tfx-preflight.json");
+    const oauthPath = join(mockGeminiDir, "oauth_creds.json");
+    mkdirSync(mockGeminiDir, { recursive: true });
     writeFileSync(
       preflightPath,
       JSON.stringify({
@@ -213,15 +222,59 @@ describe("HUD Breakpoints", () => {
         available_agents: ["codex", "gemini", "antigravity", "claude"],
       }),
     );
+    writeFileSync(
+      oauthPath,
+      JSON.stringify({ id_token: fakeJwtWithEmail("hudacct@example.com") }),
+    );
     try {
       const fullOutput = stripAnsiText(runHudWithDimensions(120, 40));
       assert.match(fullOutput, /^a:/m);
+      assert.match(fullOutput, /^a: .*5h:.*1w:/m);
+      assert.doesNotMatch(fullOutput, /^a: .*Pr:/m);
+      assert.doesNotMatch(fullOutput, /^a: .*Fl:/m);
+      assert.match(fullOutput, /\bhudacct\b/);
+      assert.doesNotMatch(fullOutput, /\banti\b/);
       assert.doesNotMatch(fullOutput, /^g:/m);
       assert.doesNotMatch(fullOutput, /gemini/);
 
       const nanoOutput = stripAnsiText(runHudWithDimensions(35, 40));
       assert.match(nanoOutput, /\ba:/);
       assert.doesNotMatch(nanoOutput, /\bg:/);
+    } finally {
+      rmSync(preflightPath, { force: true });
+      rmSync(oauthPath, { force: true });
+    }
+  });
+
+  it("does not derive Antigravity readiness from redundant or stale signals", () => {
+    const preflightPath = join(mockClaudeCacheDir, "tfx-preflight.json");
+    const staleTimestamp = Date.now() - 2 * 60 * 60 * 1000;
+    try {
+      writeFileSync(
+        preflightPath,
+        JSON.stringify({
+          timestamp: Date.now(),
+          antigravity: { ok: false, reason: "auth_missing" },
+          available_agents: ["codex", "gemini", "antigravity", "claude"],
+        }),
+      );
+      const redundantSignalOutput = stripAnsiText(
+        runHudWithDimensions(120, 40, { TFX_ANTIGRAVITY_OK: "1" }),
+      );
+      assert.match(redundantSignalOutput, /^g:/m);
+      assert.doesNotMatch(redundantSignalOutput, /^a:/m);
+
+      writeFileSync(
+        preflightPath,
+        JSON.stringify({
+          timestamp: staleTimestamp,
+          antigravity: { ok: true, path: "/fake/bin/agy", reason: "ready" },
+          available_agents: ["codex", "gemini", "antigravity", "claude"],
+        }),
+      );
+      const staleOutput = stripAnsiText(runHudWithDimensions(120, 40));
+      assert.match(staleOutput, /^g:/m);
+      assert.doesNotMatch(staleOutput, /^a:/m);
     } finally {
       rmSync(preflightPath, { force: true });
     }

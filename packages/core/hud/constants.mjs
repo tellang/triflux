@@ -162,6 +162,7 @@ export const TFX_PREFLIGHT_CACHE_PATH = join(
   "cache",
   "tfx-preflight.json",
 );
+export const TFX_PREFLIGHT_CACHE_STALE_MS = 60 * 60 * 1000;
 export const GEMINI_RPM_TRACKER_PATH = join(
   homedir(),
   ".claude",
