@@ -14,7 +14,7 @@ const PKG_ROOT = join(dirname(__filename), "..");
 const CACHE_DIR = join(homedir(), ".claude", "cache");
 const CACHE_FILE = join(CACHE_DIR, "tfx-preflight.json");
 const CACHE_TTL_MS = 3_600_000; // 1시간 (세션당 1회, SessionStart 훅에서 갱신)
-const ANTIGRAVITY_AUTH_READY_SKEW_MS = 60_000;
+const ANTIGRAVITY_AUTH_READY_SKEW_MS = CACHE_TTL_MS + 60_000;
 
 function checkRoute({ homeDir = homedir(), existsSyncFn = existsSync } = {}) {
   const routePath = join(homeDir, ".claude", "scripts", "tfx-route.sh");
@@ -69,8 +69,11 @@ function checkAntigravitySmoke(cliPath, { spawnSyncFn, timeout = 8000 } = {}) {
     );
     return (
       !smoke.error &&
+      !smoke.signal &&
       (smoke.status == null || smoke.status === 0) &&
-      String(smoke.stdout || "").trim().length > 0
+      String(smoke.stdout || "")
+        .split(/\r?\n/)
+        .some((line) => line.trim() === "AGY_OK")
     );
   } catch {
     return false;
