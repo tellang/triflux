@@ -1569,29 +1569,47 @@ _codex_rollout_activity_bytes() {
   [[ "${CLI_TYPE:-}" == "codex" ]] || { printf '0\n'; return 0; }
   local codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
   [[ -n "$codex_home" && "$codex_home" != "/.codex" ]] || { printf '0\n'; return 0; }
+  local codex_home_real="$codex_home"
+  [[ -d "$codex_home" ]] && codex_home_real=$(cd "$codex_home" 2>/dev/null && pwd -P || printf '%s' "$codex_home")
 
-  local session_dir="${codex_home}/sessions/$(date +%Y/%m/%d)"
-  [[ -d "$session_dir" ]] || { printf '0\n'; return 0; }
+  local total=0 seen="" proc_pid fd target candidate size
+  for proc_pid in "$@"; do
+    [[ "$proc_pid" =~ ^[0-9]+$ ]] || continue
 
-  local since="${TIMESTAMP:-0}"
-  [[ "$since" =~ ^[0-9]+$ ]] || since=0
-
-  local total=0 candidate mtime size
-  for candidate in "$session_dir"/rollout-*.jsonl; do
-    [[ -f "$candidate" ]] || continue
-    mtime=$(stat -f %m "$candidate" 2>/dev/null || printf '')
-    mtime="${mtime//[[:space:]]/}"
-    if ! [[ "$mtime" =~ ^[0-9]+$ ]]; then
-      mtime=$(stat -c %Y "$candidate" 2>/dev/null || printf '0')
-      mtime="${mtime//[[:space:]]/}"
+    if [[ -d "/proc/$proc_pid/fd" ]]; then
+      for fd in "/proc/$proc_pid/fd"/*; do
+        [[ -e "$fd" ]] || continue
+        target=$(readlink "$fd" 2>/dev/null || true)
+        case "$target" in
+          "$codex_home"/sessions/*/rollout-*.jsonl|"$codex_home_real"/sessions/*/rollout-*.jsonl)
+            seen="${seen}${target}"$'\n'
+            ;;
+        esac
+      done
     fi
-    [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
-    [[ "$mtime" -ge "$since" ]] || continue
+
+    if command -v lsof >/dev/null 2>&1; then
+      while IFS= read -r candidate; do
+        case "$candidate" in
+          n"$codex_home"/sessions/*/rollout-*.jsonl|n"$codex_home_real"/sessions/*/rollout-*.jsonl)
+            seen="${seen}${candidate#n}"$'\n'
+            ;;
+        esac
+      done < <(lsof -Fn -p "$proc_pid" 2>/dev/null || true)
+    fi
+  done
+
+  local raw_paths="$seen"
+  seen=$'\n'
+  while IFS= read -r candidate; do
+    [[ -f "$candidate" ]] || continue
+    [[ "$seen" == *$'\n'"$candidate"$'\n'* ]] && continue
+    seen="${seen}${candidate}"$'\n'
     size=$(wc -c < "$candidate" 2>/dev/null || printf '0')
     size="${size//[[:space:]]/}"
     [[ "$size" =~ ^[0-9]+$ ]] || size=0
     total=$((total + size))
-  done
+  done <<< "$raw_paths"
   printf '%s\n' "$total"
 }
 
@@ -1636,7 +1654,7 @@ heartbeat_monitor() {
     local stderr_size=0
     [[ -f "$STDERR_LOG" ]] && stderr_size=$(wc -c < "$STDERR_LOG" 2>/dev/null || echo 0)
     local codex_rollout_size=0
-    codex_rollout_size=$(_codex_rollout_activity_bytes 2>/dev/null || echo 0)
+    codex_rollout_size=$(_codex_rollout_activity_bytes "$pid" $last_known_forks 2>/dev/null || echo 0)
     [[ "$codex_rollout_size" =~ ^[0-9]+$ ]] || codex_rollout_size=0
     current_size=$((current_size + stderr_size + codex_rollout_size))
     local elapsed=$(($(date +%s) - TIMESTAMP))
