@@ -50,8 +50,12 @@ import {
 // Gemini provider
 import {
   buildGeminiAuthContext,
+  deriveGeminiFamilyBucket,
   fetchGeminiQuota,
+  getAntigravityCurrentModel,
   getAntigravityEmail,
+  getAntigravityModelAbbrev,
+  getAntigravityModelFamily,
   getGeminiEmail,
   readGeminiQuotaSnapshot,
   readGeminiSessionSnapshot,
@@ -199,6 +203,15 @@ async function main() {
   const geminiLiteBucket =
     geminiBuckets.find((b) => b.modelId?.includes("flash-lite")) || null;
 
+  // Antigravity 현재 장착 모델 + family 통합 bucket (slot1 = 장착 모델 약어, slot2 = Gn family)
+  // slot1 quota: 현재 모델이 Gemini family면 family bucket, 아니면(Claude/GPT-OSS) placeholder.
+  const antigravityModel = getAntigravityCurrentModel();
+  const antigravityAbbrev = getAntigravityModelAbbrev(antigravityModel);
+  const antigravityModelFamily = getAntigravityModelFamily(antigravityModel);
+  const antigravityFamilyBucket = deriveGeminiFamilyBucket(geminiBuckets);
+  const antigravitySlot1Bucket =
+    antigravityModelFamily === "gemini" ? antigravityFamilyBucket : null;
+
   // 합산 절약: Codex+Gemini sv% 합산 (컨텍스트 대비 위임 토큰 비율)
   const combinedSvPct = Math.round(((codexSv ?? 0) + (geminiSv ?? 0)) * 100);
 
@@ -257,7 +270,18 @@ async function main() {
       qosProfile,
       accountsConfig,
       accountsState,
-      antigravityReady ? { type: "antigravity" } : geminiQuotaData,
+      antigravityReady
+        ? {
+            type: "antigravity",
+            pools: {
+              current: antigravitySlot1Bucket,
+              gemini_family: antigravityFamilyBucket,
+            },
+            currentAbbrev: antigravityAbbrev,
+            currentModel: antigravityModel,
+            currentFamily: antigravityModelFamily,
+          }
+        : geminiQuotaData,
       antigravityReady ? antigravityEmail : geminiEmail,
       antigravityReady ? null : geminiSv,
       null,

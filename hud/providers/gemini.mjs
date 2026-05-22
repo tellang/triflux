@@ -8,7 +8,9 @@ import https from "node:https";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  ANTIGRAVITY_MODEL_ABBREV,
   ANTIGRAVITY_OAUTH_PATHS,
+  ANTIGRAVITY_SETTINGS_PATH,
   GEMINI_API_TIMEOUT_MS,
   GEMINI_OAUTH_PATH,
   GEMINI_PROJECT_CACHE_PATH,
@@ -114,6 +116,52 @@ export function getAntigravityEmail() {
     }
   }
   return null;
+}
+
+// agy 1.0.1+ settings.json `model` 필드에서 현재 장착 모델 라벨을 읽는다.
+// 예: "Gemini 3.5 Flash (High)". 없으면 null.
+export function getAntigravityCurrentModel() {
+  const s = readJson(ANTIGRAVITY_SETTINGS_PATH, null);
+  return s?.model || null;
+}
+
+// 모델 라벨 → 2자 약어 (constants의 ANTIGRAVITY_MODEL_ABBREV 매핑).
+// 매핑에 없으면 "<Head> ... (<Level>)" 패턴에서 자동 추출.
+export function getAntigravityModelAbbrev(label) {
+  if (!label) return "??";
+  const known = ANTIGRAVITY_MODEL_ABBREV[label];
+  if (known) return known;
+  const parens = label.match(/\(([^)]+)\)/);
+  const head = label.match(/^(\w+)/);
+  if (head && parens) {
+    return `${head[1][0].toUpperCase()}${parens[1][0].toLowerCase()}`;
+  }
+  if (head) return head[1].slice(0, 2);
+  return "??";
+}
+
+// 모델 라벨 → family ("gemini" | "claude" | "gpt-oss" | "unknown")
+// quota 풀이 family 단위로 분리되므로 slot1 데이터 채울지 결정할 때 사용.
+export function getAntigravityModelFamily(label) {
+  if (!label) return "unknown";
+  if (label.startsWith("Gemini")) return "gemini";
+  if (label.startsWith("Claude")) return "claude";
+  if (label.startsWith("GPT")) return "gpt-oss";
+  return "unknown";
+}
+
+// Gemini family 통합 quota — 모든 bucket 중 최소 remainingFraction을 가진 bucket을 대표로 반환.
+// /usage 실측 (2026-05-22): 4개 모델이 같은 reset window 공유하므로 결과는 사실상 family 단일 카운터.
+export function deriveGeminiFamilyBucket(buckets) {
+  if (!Array.isArray(buckets) || buckets.length === 0) return null;
+  let chosen = null;
+  for (const b of buckets) {
+    if (b?.remainingFraction == null) continue;
+    if (!chosen || b.remainingFraction < chosen.remainingFraction) {
+      chosen = b;
+    }
+  }
+  return chosen;
 }
 
 export function buildGeminiAuthContext(accountId) {
