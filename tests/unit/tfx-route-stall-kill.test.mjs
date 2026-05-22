@@ -120,6 +120,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
   function buildStallScript({ killMode, stdoutLog, stderrLog }) {
     const hb = extractFunction("heartbeat_monitor");
     const findForks = extractFunction("_find_fork_pids");
+    const rolloutActivity = extractFunction("_codex_rollout_activity_bytes");
     // bash file 로 실행. spawnSync("bash", ["-c", script]) 는 Windows Git Bash 에서
     // 긴 script 의 line ending / argv 한도 문제로 EOF 오류를 내는 경우가 있어
     // 파일 경유가 안전하다.
@@ -136,6 +137,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       "TIMESTAMP=$(date +%s)",
       "",
       findForks,
+      rolloutActivity,
       hb,
       "",
       "sleep 30 &",
@@ -163,6 +165,63 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       "else",
       '  echo "RESULT=child_terminated" >&2',
       "fi",
+      "",
+    ].join("\n");
+  }
+
+  function buildCodexRolloutActivityScript({
+    codexHome,
+    stdoutLog,
+    stderrLog,
+  }) {
+    const hb = extractFunction("heartbeat_monitor");
+    const findForks = extractFunction("_find_fork_pids");
+    const rolloutActivity = extractFunction("_codex_rollout_activity_bytes");
+    return [
+      "#!/usr/bin/env bash",
+      "set -u",
+      "export TFX_HEARTBEAT=1",
+      "export TFX_HEARTBEAT_INTERVAL=1",
+      "export TFX_STALL_THRESHOLD=2",
+      "export TFX_STALL_KILL=kill",
+      "export TFX_STALL_KILL_GRACE=1",
+      "export CLI_TYPE=codex",
+      `export CODEX_HOME='${codexHome}'`,
+      `STDOUT_LOG='${stdoutLog}'`,
+      `STDERR_LOG='${stderrLog}'`,
+      "TIMESTAMP=$(date +%s)",
+      "",
+      findForks,
+      rolloutActivity,
+      hb,
+      "",
+      'session_dir="$CODEX_HOME/sessions/$(date +%Y/%m/%d)"',
+      'mkdir -p "$session_dir"',
+      'rollout_log="$session_dir/rollout-heartbeat-test.jsonl"',
+      ': > "$rollout_log"',
+      "(",
+      "  for i in 1 2 3 4 5; do",
+      "    sleep 1",
+      '    printf \'{"event":"tick","i":%s}\\n\' "$i" >> "$rollout_log"',
+      "  done",
+      ") &",
+      "WRITER_PID=$!",
+      "",
+      "sleep 6 &",
+      "CHILD_PID=$!",
+      'heartbeat_monitor "$CHILD_PID" 1 2 &',
+      "HB_PID=$!",
+      "",
+      'wait "$CHILD_PID"',
+      "child_status=$?",
+      'kill "$HB_PID" "$WRITER_PID" 2>/dev/null || true',
+      'wait "$HB_PID" "$WRITER_PID" 2>/dev/null || true',
+      "",
+      'if [[ "$child_status" -ne 0 ]]; then',
+      '  echo "RESULT=child_killed status=$child_status" >&2',
+      "  exit 1",
+      "fi",
+      'echo "RESULT=child_completed" >&2',
       "",
     ].join("\n");
   }
@@ -227,6 +286,37 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       result.stderr,
       /SIGTERM/,
       "classify mode 에서는 SIGTERM 이 발사되면 안 됨",
+    );
+  });
+
+  it("Codex rollout jsonl activity resets stall detection when stdout/stderr stay empty (#267)", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "tfx-codex-rollout-"));
+    cleanupDirs.push(dir);
+    const codexHome = path.join(dir, "codex-home");
+    const stdoutLog = path.join(dir, "stdout.log");
+    const stderrLog = path.join(dir, "stderr.log");
+    const scriptFile = path.join(dir, "run.sh");
+    writeFileSync(stdoutLog, "");
+    writeFileSync(stderrLog, "");
+    writeFileSync(
+      scriptFile,
+      buildCodexRolloutActivityScript({ codexHome, stdoutLog, stderrLog }),
+    );
+    const result = spawnSync("bash", [scriptFile], {
+      encoding: "utf8",
+      cwd: REPO_ROOT,
+      timeout: 20_000,
+    });
+    assert.equal(
+      result.status,
+      0,
+      `Codex worker should not be killed while rollout jsonl grows.\nstderr:\n${result.stderr}`,
+    );
+    assert.match(result.stderr, /RESULT=child_completed/);
+    assert.doesNotMatch(
+      result.stderr,
+      /status=STALL_KILL/,
+      "rollout jsonl activity must prevent STALL_KILL",
     );
   });
 });

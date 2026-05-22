@@ -1565,6 +1565,36 @@ _find_fork_pids() {
   ps 2>/dev/null | awk -v p="$parent" 'NR>1 && ($2==p || ($3==p && $1!=p)) {print $1}' | sort -un | tr '\n' ' '
 }
 
+_codex_rollout_activity_bytes() {
+  [[ "${CLI_TYPE:-}" == "codex" ]] || { printf '0\n'; return 0; }
+  local codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
+  [[ -n "$codex_home" && "$codex_home" != "/.codex" ]] || { printf '0\n'; return 0; }
+
+  local session_dir="${codex_home}/sessions/$(date +%Y/%m/%d)"
+  [[ -d "$session_dir" ]] || { printf '0\n'; return 0; }
+
+  local since="${TIMESTAMP:-0}"
+  [[ "$since" =~ ^[0-9]+$ ]] || since=0
+
+  local total=0 candidate mtime size
+  for candidate in "$session_dir"/rollout-*.jsonl; do
+    [[ -f "$candidate" ]] || continue
+    mtime=$(stat -f %m "$candidate" 2>/dev/null || printf '')
+    mtime="${mtime//[[:space:]]/}"
+    if ! [[ "$mtime" =~ ^[0-9]+$ ]]; then
+      mtime=$(stat -c %Y "$candidate" 2>/dev/null || printf '0')
+      mtime="${mtime//[[:space:]]/}"
+    fi
+    [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
+    [[ "$mtime" -ge "$since" ]] || continue
+    size=$(wc -c < "$candidate" 2>/dev/null || printf '0')
+    size="${size//[[:space:]]/}"
+    [[ "$size" =~ ^[0-9]+$ ]] || size=0
+    total=$((total + size))
+  done
+  printf '%s\n' "$total"
+}
+
 # heartbeat_monitor PID [INTERVAL] [STALL_THRESHOLD]
 # - PID: 감시할 워커 프로세스 PID
 # - INTERVAL: heartbeat 출력 간격 (초, 기본 10)
@@ -1605,7 +1635,10 @@ heartbeat_monitor() {
     # P3: stderr 활동도 포함하여 거짓 STALL 방지
     local stderr_size=0
     [[ -f "$STDERR_LOG" ]] && stderr_size=$(wc -c < "$STDERR_LOG" 2>/dev/null || echo 0)
-    current_size=$((current_size + stderr_size))
+    local codex_rollout_size=0
+    codex_rollout_size=$(_codex_rollout_activity_bytes 2>/dev/null || echo 0)
+    [[ "$codex_rollout_size" =~ ^[0-9]+$ ]] || codex_rollout_size=0
+    current_size=$((current_size + stderr_size + codex_rollout_size))
     local elapsed=$(($(date +%s) - TIMESTAMP))
     local expected_suffix=""
     if [[ -n "$expected_duration" && "$expected_duration" =~ ^[0-9]+$ && "$expected_duration" -gt 0 ]]; then
