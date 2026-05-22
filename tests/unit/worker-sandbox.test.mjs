@@ -69,6 +69,22 @@ describe("worker sandbox env", () => {
     assert.equal(existsSync(result.env.XDG_STATE_HOME), true);
   });
 
+  it("preserves the host Codex home when CODEX_HOME is unset", () => {
+    const cwd = tmpRoot("worker-sandbox-cwd");
+    const hostHome = tmpRoot("worker-sandbox-host-home");
+    const result = buildWorkerSandboxEnv({
+      cwd,
+      sessionId: "codex-worker",
+      env: {
+        HOME: hostHome,
+      },
+    });
+
+    const expectedHome = join(cwd, ".triflux", "worker-home", "codex-worker");
+    assert.equal(result.env.HOME, expectedHome);
+    assert.equal(result.env.CODEX_HOME, join(hostHome, ".codex"));
+  });
+
   it("supports explicit opt-out for debugging", () => {
     const result = buildWorkerSandboxEnv({
       cwd: tmpRoot("worker-sandbox-disabled"),
