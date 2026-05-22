@@ -1565,6 +1565,54 @@ _find_fork_pids() {
   ps 2>/dev/null | awk -v p="$parent" 'NR>1 && ($2==p || ($3==p && $1!=p)) {print $1}' | sort -un | tr '\n' ' '
 }
 
+_codex_rollout_activity_bytes() {
+  [[ "${CLI_TYPE:-}" == "codex" ]] || { printf '0\n'; return 0; }
+  local codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
+  [[ -n "$codex_home" && "$codex_home" != "/.codex" ]] || { printf '0\n'; return 0; }
+  local codex_home_real="$codex_home"
+  [[ -d "$codex_home" ]] && codex_home_real=$(cd "$codex_home" 2>/dev/null && pwd -P || printf '%s' "$codex_home")
+
+  local total=0 seen="" proc_pid fd target candidate size
+  for proc_pid in "$@"; do
+    [[ "$proc_pid" =~ ^[0-9]+$ ]] || continue
+
+    if [[ -d "/proc/$proc_pid/fd" ]]; then
+      for fd in "/proc/$proc_pid/fd"/*; do
+        [[ -e "$fd" ]] || continue
+        target=$(readlink "$fd" 2>/dev/null || true)
+        case "$target" in
+          "$codex_home"/sessions/*/rollout-*.jsonl|"$codex_home_real"/sessions/*/rollout-*.jsonl)
+            seen="${seen}${target}"$'\n'
+            ;;
+        esac
+      done
+    fi
+
+    if command -v lsof >/dev/null 2>&1; then
+      while IFS= read -r candidate; do
+        case "$candidate" in
+          n"$codex_home"/sessions/*/rollout-*.jsonl|n"$codex_home_real"/sessions/*/rollout-*.jsonl)
+            seen="${seen}${candidate#n}"$'\n'
+            ;;
+        esac
+      done < <(lsof -Fn -p "$proc_pid" 2>/dev/null || true)
+    fi
+  done
+
+  local raw_paths="$seen"
+  seen=$'\n'
+  while IFS= read -r candidate; do
+    [[ -f "$candidate" ]] || continue
+    [[ "$seen" == *$'\n'"$candidate"$'\n'* ]] && continue
+    seen="${seen}${candidate}"$'\n'
+    size=$(wc -c < "$candidate" 2>/dev/null || printf '0')
+    size="${size//[[:space:]]/}"
+    [[ "$size" =~ ^[0-9]+$ ]] || size=0
+    total=$((total + size))
+  done <<< "$raw_paths"
+  printf '%s\n' "$total"
+}
+
 # heartbeat_monitor PID [INTERVAL] [STALL_THRESHOLD]
 # - PID: 감시할 워커 프로세스 PID
 # - INTERVAL: heartbeat 출력 간격 (초, 기본 10)
@@ -1605,7 +1653,10 @@ heartbeat_monitor() {
     # P3: stderr 활동도 포함하여 거짓 STALL 방지
     local stderr_size=0
     [[ -f "$STDERR_LOG" ]] && stderr_size=$(wc -c < "$STDERR_LOG" 2>/dev/null || echo 0)
-    current_size=$((current_size + stderr_size))
+    local codex_rollout_size=0
+    codex_rollout_size=$(_codex_rollout_activity_bytes "$pid" $last_known_forks 2>/dev/null || echo 0)
+    [[ "$codex_rollout_size" =~ ^[0-9]+$ ]] || codex_rollout_size=0
+    current_size=$((current_size + stderr_size + codex_rollout_size))
     local elapsed=$(($(date +%s) - TIMESTAMP))
     local expected_suffix=""
     if [[ -n "$expected_duration" && "$expected_duration" =~ ^[0-9]+$ && "$expected_duration" -gt 0 ]]; then
