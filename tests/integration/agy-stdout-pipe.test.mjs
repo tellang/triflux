@@ -248,6 +248,27 @@ test("agy --print prompt-passing regression tests", {
       );
     },
   );
+
+  await t.test(
+    "6. flag absorption guard: --print + --sandbox + positional -> timeout/failure",
+    { timeout: 100000 },
+    () => {
+      const result = spawnSync(
+        AGY_PATH,
+        ["--print", "--sandbox", "/tmp", TEST_PROMPT],
+        {
+          encoding: "utf8",
+          timeout: 90000,
+          env: { ...process.env, PAGER: "cat" },
+        },
+      );
+      const combined = (result.stdout || "") + (result.stderr || "");
+      assert.ok(
+        !hasHi(combined) || hasWelcomeOrFailure(combined),
+        `--print + --sandbox + positional should NOT pass prompt cleanly. status=${result.status} signal=${result.signal} output: ${combined}`,
+      );
+    },
+  );
 });
 
 test("tfx-route.sh routes Antigravity through agy --print stdin", () => {
