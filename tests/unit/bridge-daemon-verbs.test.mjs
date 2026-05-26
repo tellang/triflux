@@ -261,3 +261,77 @@ test("daemon-attach returns the full failure response shape before input", async
     assert.match(out.error, /ENOENT|ECONNREFUSED|control\.sock/u);
   });
 });
+
+test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
+  await withTempConfig(async (configDir) => {
+    const paths = deriveClaudeDaemonPaths({ configDir });
+    const requests = [];
+    let attachedInput = "";
+    const server = net.createServer((socket) => {
+      socket.setEncoding("utf8");
+      let firstLine = "";
+      socket.on("data", (chunk) => {
+        if (!firstLine.includes("\n")) {
+          firstLine += chunk;
+          if (!firstLine.includes("\n")) return;
+          const line = firstLine.slice(0, firstLine.indexOf("\n"));
+          const request = JSON.parse(line);
+          requests.push(request);
+          socket.write(
+            `${JSON.stringify({
+              ok: true,
+              op: "attach",
+              via: "spare",
+              tempo: "active",
+              state: "working",
+            })}\n`,
+          );
+          attachedInput += firstLine.slice(firstLine.indexOf("\n") + 1);
+          return;
+        }
+
+        attachedInput += chunk;
+        if (attachedInput.includes("\x1b")) {
+          socket.end("interrupted\n");
+        }
+      });
+    });
+
+    try {
+      await fs.mkdir(path.dirname(paths.controlSock), { recursive: true });
+      await new Promise((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(paths.controlSock, resolve);
+      });
+
+      const out = await runBridge([
+        "daemon-interrupt",
+        "--payload",
+        JSON.stringify({
+          configDir,
+          short: "facefeed",
+          timeoutMs: 1000,
+        }),
+      ]);
+
+      assert.equal(out.ok, true);
+      assert.equal(out.done, false);
+      assert.equal(out.aborted, true);
+      assert.equal(out.reason, "user_interrupt");
+      assert.equal(out.inputSent, true);
+      assert.match(attachedInput, /\x1b/);
+      assert.deepEqual(requests, [
+        {
+          proto: 1,
+          op: "attach",
+          short: "facefeed",
+          cols: 120,
+          rows: 40,
+          caps: { terminal: null, mux: null, ssh: false },
+        },
+      ]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});

@@ -36,6 +36,7 @@ function usage() {
     "  tfx-live ask --session NAME --prompt TEXT [--cli codex|claude] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
+    "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--bridge ABS] [--timeout 5]",
     "  tfx-live stop --session NAME [--cli codex|claude] [--remote HOST]",
     "  tfx-live probe [--short SHORT] [--session-id ID] [--bridge ABS] [--timeout 10]",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
@@ -1122,6 +1123,94 @@ async function doStop(adapter, opts) {
   };
 }
 
+async function doInterruptViaTmux(adapter, opts) {
+  await runTmux(opts.remote, ["send-keys", "-t", opts.session, "Escape"]);
+  return {
+    cli: adapter.cli,
+    session: opts.session,
+    remote: opts.remote ?? null,
+    transport: "tmux",
+    done: false,
+    aborted: true,
+    reason: "user_interrupt",
+  };
+}
+
+async function doInterruptViaDaemon(opts, meta = {}) {
+  const { bridgePath, timeoutMs, short, sessionId } = opts;
+  const payload = { timeoutMs };
+  if (short) payload.short = short;
+  if (sessionId) payload.sessionId = sessionId;
+  const result = await callBridgeVerb(
+    bridgePath,
+    "daemon-interrupt",
+    payload,
+    timeoutMs,
+  );
+  const aborted = result?.aborted === true;
+  return {
+    cli: "claude",
+    transport: "uds",
+    short: short ?? null,
+    sessionId: sessionId ?? null,
+    done: false,
+    aborted,
+    reason: result?.reason ?? (aborted ? "user_interrupt" : "interrupt_failed"),
+    inputSent: result?.inputSent === true,
+    timedOut: result?.timedOut === true,
+    closed: result?.closed === true,
+    ...(result?.error ? { error: result.error } : {}),
+    ...meta,
+  };
+}
+
+async function doInterrupt(adapter, opts) {
+  const transport = opts.transport ?? "tmux";
+  if (transport === "tmux") {
+    return doInterruptViaTmux(adapter, opts);
+  }
+  if (adapter.cli !== "claude") {
+    throw new Error(
+      `--transport ${transport} is only supported with --cli claude (daemon interrupt target)`,
+    );
+  }
+  if (!opts.short && !opts.sessionId) {
+    throw new Error(
+      `--transport ${transport} requires --short or --session-id`,
+    );
+  }
+  if (!opts.bridgePath) {
+    throw new Error(
+      `--transport ${transport} requires a bridge path (--bridge, TFX_BRIDGE, or TFX_REPO_ROOT)`,
+    );
+  }
+  if (transport === "uds") {
+    return doInterruptViaDaemon(opts);
+  }
+
+  const udsResult = await doInterruptViaDaemon(opts, {
+    transportSelected: "uds",
+  });
+  if (udsResult.aborted) {
+    return { ...udsResult, transport: "auto" };
+  }
+  if (opts.session) {
+    const tmuxResult = await doInterruptViaTmux(adapter, opts);
+    return {
+      ...tmuxResult,
+      transport: "auto",
+      transportSelected: "tmux",
+      transportProbe: "uds-interrupt-failed",
+      udsError: udsResult.error ?? udsResult.reason,
+    };
+  }
+  return {
+    ...udsResult,
+    transport: "auto",
+    transportSelected: "none",
+  };
+}
+
 function startOpts(flags) {
   return {
     session: requireFlag(flags, "session"),
@@ -1195,6 +1284,22 @@ function stopOpts(flags) {
   };
 }
 
+function interruptOpts(flags, adapter) {
+  const short = flags.short;
+  const sessionId = flags["session-id"];
+  const transport = transportFlag(flags, adapter, short, sessionId);
+  return {
+    session:
+      transport === "tmux" ? requireFlag(flags, "session") : flags.session,
+    short,
+    sessionId,
+    transport,
+    bridgePath: resolveBridgePath(flags),
+    remote: flags.remote,
+    timeoutMs: secondsFlag(flags, "timeout", 5000),
+  };
+}
+
 async function start(flags) {
   const adapter = selectAdapter(flags);
   printJson(await doStart(adapter, startOpts(flags)));
@@ -1208,6 +1313,11 @@ async function ask(flags) {
 async function stop(flags) {
   const adapter = selectAdapter(flags);
   printJson(await doStop(adapter, stopOpts(flags)));
+}
+
+async function interrupt(flags) {
+  const adapter = selectAdapter(flags);
+  printJson(await doInterrupt(adapter, interruptOpts(flags, adapter)));
 }
 
 async function probe(flags) {
@@ -1540,6 +1650,8 @@ async function peer(flags) {
         sent,
         response: result.response,
         done: result.done,
+        aborted: result.aborted === true ? true : undefined,
+        reason: result.reason,
       });
 
       if (mode === "counting") {
@@ -1596,6 +1708,8 @@ async function main() {
     await ask(flags);
   } else if (command === "stop") {
     await stop(flags);
+  } else if (command === "interrupt") {
+    await interrupt(flags);
   } else if (command === "probe") {
     await probe(flags);
   } else if (command === "converse") {

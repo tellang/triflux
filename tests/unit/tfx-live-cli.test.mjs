@@ -22,6 +22,7 @@ test("tfx-live help documents UDS-first auto default", async () => {
   const stdout = await runTfxLive(["--help"]);
 
   assert.match(stdout, /tfx-live ask/);
+  assert.match(stdout, /tfx-live interrupt/);
   assert.match(stdout, /tfx-live probe/);
   assert.match(
     stdout,
@@ -90,5 +91,92 @@ test("tfx-live ask defaults Claude daemon refs to auto transport and reports fal
     assert.equal(report.bridgePath, path.resolve("hub/bridge.mjs"));
   } finally {
     await fs.rm(bugReportDir, { recursive: true, force: true });
+  }
+});
+
+test("tfx-live interrupt returns the common abort contract through UDS bridge", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-bridge-"));
+  try {
+    const bridgePath = path.join(dir, "fake-bridge.mjs");
+    await fs.writeFile(
+      bridgePath,
+      [
+        "#!/usr/bin/env node",
+        "const [,, verb] = process.argv;",
+        "if (verb !== 'daemon-interrupt') process.exit(2);",
+        "console.log(JSON.stringify({ok:true,done:false,aborted:true,reason:'user_interrupt',transport:'uds',inputSent:true}));",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const stdout = await runTfxLive([
+      "interrupt",
+      "--cli",
+      "claude",
+      "--transport",
+      "uds",
+      "--short",
+      "facefeed",
+      "--bridge",
+      bridgePath,
+      "--timeout",
+      "1",
+    ]);
+    const result = JSON.parse(stdout);
+
+    assert.equal(result.cli, "claude");
+    assert.equal(result.transport, "uds");
+    assert.equal(result.done, false);
+    assert.equal(result.aborted, true);
+    assert.equal(result.reason, "user_interrupt");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("tfx-live interrupt returns the common abort contract through tmux Escape", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-tmux-"));
+  try {
+    const logPath = path.join(dir, "tmux-args.json");
+    const tmuxPath = path.join(dir, "tmux");
+    await fs.writeFile(
+      tmuxPath,
+      [
+        "#!/usr/bin/env node",
+        "await import('node:fs/promises').then(({writeFile}) => writeFile(process.env.TMUX_LOG, JSON.stringify(process.argv.slice(2))));",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.chmod(tmuxPath, 0o755);
+
+    const stdout = await runTfxLive(
+      [
+        "interrupt",
+        "--cli",
+        "claude",
+        "--transport",
+        "tmux",
+        "--session",
+        "live-peer",
+      ],
+      {
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          TMUX_LOG: logPath,
+        },
+      },
+    );
+    const result = JSON.parse(stdout);
+    const tmuxArgs = JSON.parse(await fs.readFile(logPath, "utf8"));
+
+    assert.equal(result.cli, "claude");
+    assert.equal(result.transport, "tmux");
+    assert.equal(result.done, false);
+    assert.equal(result.aborted, true);
+    assert.equal(result.reason, "user_interrupt");
+    assert.deepEqual(tmuxArgs, ["send-keys", "-t", "live-peer", "Escape"]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });

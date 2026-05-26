@@ -120,6 +120,7 @@ function stripTerminalControl(text) {
 }
 
 const CLAUDE_ATTACH_SPINNER_RE = /^[✻✶✳✢✽·]/u;
+const DEFAULT_ATTACH_COMPLETION_QUIESCENCE_MS = 750;
 
 function isClaudeAttachElapsedStatusLine(line) {
   const trimmed = line.trim();
@@ -179,6 +180,10 @@ export function extractClaudeDaemonAttachText(text) {
     const rawLine = lines[index];
     const line =
       index === assistantIndex ? rawLine.replace(/^\s*⏺\s*/, "") : rawLine;
+    if (index > assistantIndex && line.trim().length === 0) {
+      response.push("");
+      continue;
+    }
     if (
       response.length > 0 &&
       /^[A-Z0-9_./:-]+$/.test(response[0].trim()) &&
@@ -220,6 +225,20 @@ function findClaudeAttachPromptEchoIndex(text, input) {
   const prefix = prompt.slice(0, Math.min(40, prompt.length));
   if (prefix.length >= 12) return cleaned.indexOf(prefix);
   return -1;
+}
+
+function claudeAttachDynamicProgressSignature(text) {
+  const cleaned = stripTerminalControl(text);
+  const spinnerGlyphs = [...cleaned.matchAll(/[✻✶✳✢✽·]/gu)]
+    .map((match) => match[0])
+    .join("")
+    .slice(-32);
+  const elapsedSeconds = [...cleaned.matchAll(/\b(\d+)s\b/gi)]
+    .map((match) => match[1])
+    .join(",")
+    .slice(-64);
+  if (!spinnerGlyphs && !elapsedSeconds) return "";
+  return `${spinnerGlyphs}|${elapsedSeconds}`;
 }
 
 function hasClaudeAttachPreInputScreen(text) {
@@ -265,6 +284,7 @@ export function attachClaudeDaemonSession({
   caps,
   initialDrainMs = 150,
   timeoutMs = 30_000,
+  completionQuiescenceMs = DEFAULT_ATTACH_COMPLETION_QUIESCENCE_MS,
   completionMatched = defaultClaudeAttachCompletionMatched,
 } = {}) {
   if (!controlSock) throw new Error("controlSock is required");
@@ -281,12 +301,48 @@ export function attachClaudeDaemonSession({
     let responseReadyText = "";
     let requirePostInputTransition = false;
     let sendInputTimer = null;
+    let completionTimer = null;
+    let pendingCompletion = null;
+    let dynamicProgressSignature = "";
+    let postInputDynamicProgressSeen = false;
+
+    const cancelCompletionTimer = () => {
+      if (completionTimer) clearTimeout(completionTimer);
+      completionTimer = null;
+      pendingCompletion = null;
+    };
+
+    const scheduleCompletion = (extra) => {
+      pendingCompletion = extra;
+      if (completionTimer) clearTimeout(completionTimer);
+      if (completionQuiescenceMs <= 0) {
+        const completion = pendingCompletion;
+        pendingCompletion = null;
+        finish(completion);
+        return;
+      }
+      completionTimer = setTimeout(() => {
+        const completion = pendingCompletion;
+        completionTimer = null;
+        pendingCompletion = null;
+        finish(completion);
+      }, completionQuiescenceMs);
+    };
+
+    const noteDynamicProgress = (text) => {
+      const signature = claudeAttachDynamicProgressSignature(text);
+      if (signature && signature !== dynamicProgressSignature) {
+        dynamicProgressSignature = signature;
+        postInputDynamicProgressSeen = true;
+      }
+    };
 
     const fail = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       if (sendInputTimer) clearTimeout(sendInputTimer);
+      cancelCompletionTimer();
       socket.destroy();
       error.inputSent = inputSent;
       reject(error);
@@ -297,6 +353,7 @@ export function attachClaudeDaemonSession({
       settled = true;
       clearTimeout(timer);
       if (sendInputTimer) clearTimeout(sendInputTimer);
+      cancelCompletionTimer();
       socket.destroy();
       const streamText = stream.toString("utf8");
       const responseStreamText = stream
@@ -313,6 +370,7 @@ export function attachClaudeDaemonSession({
         ),
         postInputBusySeen,
         postInputPromptEchoSeen,
+        postInputDynamicProgressSeen,
         ...extra,
       });
     };
@@ -370,6 +428,7 @@ export function attachClaudeDaemonSession({
       const responseStreamText = stream
         .subarray(responseStartOffset)
         .toString("utf8");
+      noteDynamicProgress(responseStreamText);
       if (input !== undefined && !responseReadyText) {
         const busyIndex = findClaudeAttachBusySignalIndex(responseStreamText);
         const promptEchoIndex = findClaudeAttachPromptEchoIndex(
@@ -403,18 +462,123 @@ export function attachClaudeDaemonSession({
           postInputPromptEchoSeen ||= promptEchoIndex >= 0;
         }
       }
-      if (
+      const completionText = responseReadyText || responseStreamText;
+      const readyToMatch =
         (input === undefined ||
           !requirePostInputTransition ||
           responseReadyText) &&
-        completionMatched?.(responseReadyText || responseStreamText)
-      ) {
-        finish({ timedOut: false, matchedCompletion: true, closed: false });
+        completionMatched?.(completionText);
+      if (readyToMatch) {
+        scheduleCompletion({
+          timedOut: false,
+          matchedCompletion: true,
+          closed: false,
+        });
+      } else {
+        cancelCompletionTimer();
       }
     });
     socket.on("close", () => {
       if (!settled) {
+        if (pendingCompletion) {
+          finish(pendingCompletion);
+          return;
+        }
         finish({ timedOut: false, matchedCompletion: false, closed: true });
+      }
+    });
+  });
+}
+
+export function interruptClaudeDaemonSession({
+  controlSock,
+  short,
+  cols = 120,
+  rows = 40,
+  caps,
+  initialDrainMs = 50,
+  timeoutMs = 5000,
+} = {}) {
+  if (!controlSock) throw new Error("controlSock is required");
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(controlSock);
+    let settled = false;
+    let buffer = Buffer.alloc(0);
+    let handshake = null;
+    let stream = Buffer.alloc(0);
+    let inputSent = false;
+    let sendInterruptTimer = null;
+
+    const finish = (extra = {}) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (sendInterruptTimer) clearTimeout(sendInterruptTimer);
+      socket.destroy();
+      const streamText = stream.toString("utf8");
+      resolve({
+        handshake,
+        inputSent,
+        streamText,
+        streamBytes: stream.length,
+        ...extra,
+      });
+    };
+
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (sendInterruptTimer) clearTimeout(sendInterruptTimer);
+      socket.destroy();
+      error.inputSent = inputSent;
+      reject(error);
+    };
+
+    const timer = setTimeout(
+      () => finish({ timedOut: true, closed: false }),
+      timeoutMs,
+    );
+
+    socket.on("error", fail);
+    socket.on("connect", () => {
+      socket.write(
+        `${JSON.stringify(buildDaemonAttachRequest({ short, cols, rows, caps }))}\n`,
+      );
+    });
+    socket.on("data", (chunk) => {
+      if (settled) return;
+      buffer = Buffer.concat([buffer, chunk]);
+      if (!handshake) {
+        const newline = buffer.indexOf(10);
+        if (newline < 0) return;
+        try {
+          handshake = JSON.parse(buffer.subarray(0, newline).toString("utf8"));
+        } catch (error) {
+          fail(error);
+          return;
+        }
+        stream = Buffer.concat([stream, buffer.subarray(newline + 1)]);
+        buffer = Buffer.alloc(0);
+        if (handshake.ok === false) {
+          finish({ timedOut: false, closed: false });
+          return;
+        }
+        sendInterruptTimer = setTimeout(() => {
+          if (settled) return;
+          socket.write("\x1b", () => {
+            inputSent = true;
+            setTimeout(() => finish({ timedOut: false, closed: false }), 25);
+          });
+        }, initialDrainMs);
+        return;
+      }
+      stream = Buffer.concat([stream, buffer]);
+      buffer = Buffer.alloc(0);
+    });
+    socket.on("close", () => {
+      if (!settled) {
+        finish({ timedOut: false, closed: true });
       }
     });
   });

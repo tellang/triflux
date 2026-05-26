@@ -414,6 +414,79 @@ test("attachClaudeDaemonSession waits for post-input busy before matching comple
   }
 });
 
+test("attachClaudeDaemonSession waits through dynamic progress before returning multi-paragraph response", async () => {
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "claude-attach-partial-"),
+  );
+  const sockPath = path.join(dir, "control.sock");
+  let attachedInput = "";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (!firstLine.includes("\n")) {
+        firstLine += chunk;
+        if (!firstLine.includes("\n")) return;
+        socket.write(
+          `${JSON.stringify({
+            ok: true,
+            op: "attach",
+            via: "spare",
+            tempo: "idle",
+            state: "done",
+          })}\n`,
+        );
+        return;
+      }
+
+      attachedInput += chunk;
+      if (!attachedInput.includes("\r")) return;
+      socket.write("✻ Fermenting… (esc to interrupt)\n");
+      socket.write("⏺ First paragraph only.\n");
+      socket.write("❯ \n");
+      setTimeout(() => socket.write("✶ Fermenting…1\n"), 15);
+      setTimeout(() => socket.write("✳ Fermenting…2\n"), 30);
+      setTimeout(() => {
+        socket.write(
+          "⏺ First paragraph only.\n\nSecond paragraph with design opinion.\n\nQuestion for Codex?\n",
+        );
+        socket.write("❯ \n");
+      }, 45);
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "partial1",
+      input: "Reply with three paragraphs.",
+      timeoutMs: 1000,
+      completionQuiescenceMs: 80,
+    });
+
+    assert.equal(result.inputSent, true);
+    assert.equal(result.matchedCompletion, true);
+    assert.equal(
+      result.text,
+      [
+        "First paragraph only.",
+        "",
+        "Second paragraph with design opinion.",
+        "",
+        "Question for Codex?",
+      ].join("\n"),
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("attachClaudeDaemonSession accepts prompt echo as post-input transition", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-attach-echo-"));
   const sockPath = path.join(dir, "control.sock");
