@@ -54,10 +54,7 @@ test("buildClaudeSessionProjection normalizes daemon cse bridge session ids", ()
     bridgeSessionId: "cse_01L6zfB6z3LxWqsQcB6kZmoA",
   });
 
-  assert.equal(
-    projection.bridgeSessionId,
-    "session_01L6zfB6z3LxWqsQcB6kZmoA",
-  );
+  assert.equal(projection.bridgeSessionId, "session_01L6zfB6z3LxWqsQcB6kZmoA");
 });
 
 test("writeClaudeSessionProjection writes pid-named JSON and remove deletes only that file", async () => {

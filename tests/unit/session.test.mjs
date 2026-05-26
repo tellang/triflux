@@ -25,10 +25,7 @@ describe("session.mjs", () => {
 
   it("detectMultiplexer()는 string 또는 null을 반환해야 한다", () => {
     const mux = detectMultiplexer();
-    assert.ok(
-      mux === null ||
-        ["tmux", "git-bash-tmux", "psmux"].includes(mux),
-    );
+    assert.ok(mux === null || ["tmux", "git-bash-tmux", "psmux"].includes(mux));
   });
 
   it("sessionExists(nonexistent)는 false를 반환해야 한다", () => {

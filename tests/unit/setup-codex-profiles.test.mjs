@@ -45,12 +45,7 @@ function _withTempCodex(configContent, fn) {
 // ── REQUIRED_CODEX_PROFILES 확장 확인 ──
 
 describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
-  const requiredNames = [
-    "gpt55_xhigh",
-    "gpt55_high",
-    "gpt55_med",
-    "gpt55_low",
-  ];
+  const requiredNames = ["gpt55_xhigh", "gpt55_high", "gpt55_med", "gpt55_low"];
 
   for (const name of requiredNames) {
     it(`REQUIRED_CODEX_PROFILES에 ${name} 이 포함되어야 한다`, () => {
@@ -162,8 +157,7 @@ describe("top-level 설정 주입 로직: 없으면 주입, 있으면 보존", (
     // 프로필 섹션 안의 model=은 top-level key 탐지에서 제외되어야 한다.
     // 현재 regex는 ^model\s*= (multiline)이므로 섹션 헤더 다음 줄도 매칭될 수 있다.
     // 이 테스트는 top-level에 model= 이 없고 프로필에만 있는 케이스를 문서화한다.
-    const contentWithoutTopLevel =
-      '[profiles.gpt55_high]\nmodel = "gpt-5.5"\n';
+    const contentWithoutTopLevel = '[profiles.gpt55_high]\nmodel = "gpt-5.5"\n';
     // regex matches any line starting with "model" — including inside profiles.
     // The injection logic relies on the caller to check BEFORE the first section header.
     // Here we just document the known behavior: the regex WILL match the profile-internal model=.

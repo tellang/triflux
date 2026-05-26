@@ -23,7 +23,11 @@ function makeHome({ antigravityAuth } = {}) {
       typeof antigravityAuth === "string"
         ? antigravityAuth
         : JSON.stringify(antigravityAuth);
-    writeFileSync(join(homeDir, ".gemini", "oauth_creds.json"), authText, "utf8");
+    writeFileSync(
+      join(homeDir, ".gemini", "oauth_creds.json"),
+      authText,
+      "utf8",
+    );
   }
 
   return homeDir;

@@ -296,10 +296,7 @@ describe("headless: buildHeadlessCommand", async () => {
       "test prompt",
       "/tmp/result.txt",
     );
-    assert.ok(
-      cmd.includes("tfx-route.sh"),
-      `tfx-route.sh 포함: ${cmd}`,
-    );
+    assert.ok(cmd.includes("tfx-route.sh"), `tfx-route.sh 포함: ${cmd}`);
     assert.ok(
       cmd.includes("TFX_CLI_MODE=") && cmd.includes("antigravity"),
       `Antigravity route mode 포함: ${cmd}`,
@@ -368,7 +365,10 @@ describe("headless: buildHeadlessCommand", async () => {
     const cmd2 = buildHeadlessCommand("designer", "make ui", "/tmp/r.txt");
     assert.ok(cmd2.includes("tfx-route.sh"), `designer → route: ${cmd2}`);
     assert.ok(cmd2.includes("antigravity"), `designer → antigravity: ${cmd2}`);
-    assert.ok(!cmd2.includes("gemini --yolo"), `designer direct gemini 금지: ${cmd2}`);
+    assert.ok(
+      !cmd2.includes("gemini --yolo"),
+      `designer direct gemini 금지: ${cmd2}`,
+    );
   });
 
   it("MCP 프로필 힌트 주입 (implement)", async () => {
@@ -489,10 +489,15 @@ describe("tfx-route.sh: 기본 검증", () => {
 
   it("dynamic route override는 CLI별 실행 인자를 함께 재설정해야 함", () => {
     const src = readFileSync(join(ROOT, "scripts/tfx-route.sh"), "utf8");
-    const fn = src.match(/apply_dynamic_routing_override\(\)\s*\{([\s\S]*?)^}/m)?.[1];
+    const fn = src.match(
+      /apply_dynamic_routing_override\(\)\s*\{([\s\S]*?)^}/m,
+    )?.[1];
     assert.ok(fn, "apply_dynamic_routing_override 함수가 있어야 함");
     assert.match(fn, /codex\)[\s\S]*CLI_ARGS="exec --profile gpt55_high/);
-    assert.match(fn, /antigravity\)[\s\S]*CLI_ARGS="--print --dangerously-skip-permissions"/);
+    assert.match(
+      fn,
+      /antigravity\)[\s\S]*CLI_ARGS="--print --dangerously-skip-permissions"/,
+    );
     assert.match(fn, /claude\)[\s\S]*CLI_ARGS=""/);
   });
 });

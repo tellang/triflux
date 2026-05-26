@@ -242,10 +242,10 @@ describe("setup-sync: worker package mirrors", () => {
       pluginRoot,
       workerNodeModules,
     });
-    assert.deepEqual(
-      entries.map((entry) => entry.label).sort(),
-      ["@triflux/core worker package", "@triflux/remote worker package"],
-    );
+    assert.deepEqual(entries.map((entry) => entry.label).sort(), [
+      "@triflux/core worker package",
+      "@triflux/remote worker package",
+    ]);
 
     assert.equal(
       syncWorkerPackages({ pluginRoot, workerNodeModules }),

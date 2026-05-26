@@ -136,7 +136,10 @@ describe("worker-utils", () => {
 
 describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
   after(() => {
-    for (const dir of [".tmp-home-route-codex", ".tmp-home-route-antigravity"]) {
+    for (const dir of [
+      ".tmp-home-route-codex",
+      ".tmp-home-route-antigravity",
+    ]) {
       rmSync(resolve(PROJECT_ROOT, dir), { recursive: true, force: true });
     }
   });

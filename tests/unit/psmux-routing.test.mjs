@@ -440,8 +440,7 @@ describe("runtime-mode.mjs — source code regression guard", () => {
 
     // psmux is the Windows tmux-compatible mux mode. Headless remains an
     // explicit teammate mode selected with --teammate-mode headless.
-    const fixedPattern =
-      /if\s*\(mux\s*===\s*"psmux"\)\s*return\s+"psmux"/;
+    const fixedPattern = /if\s*\(mux\s*===\s*"psmux"\)\s*return\s+"psmux"/;
     assert.ok(
       fixedPattern.test(src),
       'auto branch must map psmux detection to "psmux"',

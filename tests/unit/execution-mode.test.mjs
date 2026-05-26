@@ -353,10 +353,7 @@ test("buildSpawnSpecForMode: gemini alias uses agy stdin print mode", () => {
   });
   assert.equal(spec.command, "/usr/local/bin/agy");
   assert.equal(spec.stdinPrompt, true);
-  assert.deepEqual(spec.args, [
-    "--print",
-    "--dangerously-skip-permissions",
-  ]);
+  assert.deepEqual(spec.args, ["--print", "--dangerously-skip-permissions"]);
   assert.equal(spec.prompt, "ACK");
 });
 

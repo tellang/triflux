@@ -227,10 +227,9 @@ describe("tfx-route.sh — Gemini stream worker alias bypass", {
     const routeScript = resolve(testTempDir, "route.sh");
     writeFileSync(
       routeScript,
-      [
-        "printf 'type=antigravity\\n'",
-        "printf 'AGY-ROUTE:%s\\n' \"$2\"",
-      ].join("\n"),
+      ["printf 'type=antigravity\\n'", "printf 'AGY-ROUTE:%s\\n' \"$2\""].join(
+        "\n",
+      ),
       "utf8",
     );
     chmodSync(routeScript, 0o755);

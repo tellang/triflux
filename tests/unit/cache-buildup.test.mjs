@@ -172,7 +172,11 @@ describe("cache-buildup", () => {
     assert.deepEqual(result.codex_plan, { plan: "pro" });
     assert.ok(!commands.includes("codex"));
     assert.ok(!commands.includes("gemini"));
-    assert.ok(commands.includes(process.platform === "win32" ? "psmux --version" : "tmux -V"));
+    assert.ok(
+      commands.includes(
+        process.platform === "win32" ? "psmux --version" : "tmux -V",
+      ),
+    );
   });
 
   it("extractProjectMeta는 현재 프로젝트 메타를 추출한다", () => {

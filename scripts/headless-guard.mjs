@@ -92,7 +92,9 @@ function isHeadlessMultiplexerInstalled() {
     /* cache miss */
   }
 
-  const probe = probePrimaryMultiplexerSupport({ execFileSyncFn: execFileSync });
+  const probe = probePrimaryMultiplexerSupport({
+    execFileSyncFn: execFileSync,
+  });
   const ok = probe.ok;
 
   // 캐시 저장

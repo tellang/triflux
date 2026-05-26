@@ -74,6 +74,7 @@ before(() => {
   writeFileSync(
     join(mockClaudeCacheDir, "gemini-quota-cache.json"),
     JSON.stringify({
+      cacheKey: "gemini-main::none",
       timestamp: Date.now(),
       buckets: [{ modelId: "gemini-3-flash-preview", remainingFraction: 0.1 }],
     }),
@@ -214,6 +215,7 @@ describe("HUD Breakpoints", () => {
   it("renders Antigravity as a and hides the Gemini g marker when ready", () => {
     const preflightPath = join(mockClaudeCacheDir, "tfx-preflight.json");
     const oauthPath = join(mockAntigravityCliDir, "oauth_creds.json");
+    const settingsPath = join(mockAntigravityCliDir, "settings.json");
     mkdirSync(mockAntigravityCliDir, { recursive: true });
     writeFileSync(
       preflightPath,
@@ -227,10 +229,17 @@ describe("HUD Breakpoints", () => {
       oauthPath,
       JSON.stringify({ id_token: fakeJwtWithEmail("hudacct@example.com") }),
     );
+    // Antigravity HUD now renders current-model + Gn slots, so the fixture must
+    // provide settings.json instead of asserting the removed generic q slot.
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ model: "Gemini 3.5 Flash (High)" }),
+    );
     try {
       const fullOutput = stripAnsiText(runHudWithDimensions(120, 40));
       assert.match(fullOutput, /^a:/m);
-      assert.match(fullOutput, /^a: .*q:/m);
+      assert.match(fullOutput, /^a: .*Fh:.*Gn:/m);
+      assert.doesNotMatch(fullOutput, /^a: .*q:/m);
       assert.doesNotMatch(fullOutput, /^a: .*Pr:/m);
       assert.doesNotMatch(fullOutput, /^a: .*Fl:/m);
       assert.doesNotMatch(fullOutput, /^a: .*5h:/m);
@@ -248,6 +257,7 @@ describe("HUD Breakpoints", () => {
     } finally {
       rmSync(preflightPath, { force: true });
       rmSync(oauthPath, { force: true });
+      rmSync(settingsPath, { force: true });
     }
   });
 

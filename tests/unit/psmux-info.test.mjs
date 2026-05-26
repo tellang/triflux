@@ -39,7 +39,10 @@ describe("psmux-info", () => {
     assert.match(installText, /brew install psmux/);
     assert.match(installText, /cargo install psmux/);
     // tmux primary 안내가 mac 가이드에 포함된다.
-    assert.match(installText, /tmux.*primary|tmux.*표준|in-process\/native fallback/);
+    assert.match(
+      installText,
+      /tmux.*primary|tmux.*표준|in-process\/native fallback/,
+    );
     assert.match(updateText, /brew upgrade psmux/);
     assert.match(updateText, /cargo install psmux --force/);
     assert.doesNotMatch(updateText, /winget|choco/);
@@ -50,7 +53,10 @@ describe("psmux-info", () => {
     const updateText = formatPsmuxUpdateGuidance("", "linux");
     assert.doesNotMatch(installText, /winget|scoop|choco|brew/);
     assert.match(installText, /cargo install psmux/);
-    assert.match(installText, /tmux.*primary|tmux.*표준|in-process\/native fallback/);
+    assert.match(
+      installText,
+      /tmux.*primary|tmux.*표준|in-process\/native fallback/,
+    );
     assert.match(updateText, /cargo install psmux --force/);
     assert.doesNotMatch(updateText, /winget|brew/);
   });

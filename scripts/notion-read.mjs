@@ -119,7 +119,9 @@ function cliExists(name) {
 }
 
 function normalizeCliType(cliType) {
-  const value = String(cliType || "").trim().toLowerCase();
+  const value = String(cliType || "")
+    .trim()
+    .toLowerCase();
   if (value === "gemini" || value === "agy") return "antigravity";
   return value;
 }
