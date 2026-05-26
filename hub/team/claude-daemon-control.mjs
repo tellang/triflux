@@ -94,7 +94,7 @@ export function sendClaudeControlRequest(
 
 export function buildDaemonAttachRequest({
   short,
-  cols = 120,
+  cols = DEFAULT_DAEMON_ATTACH_COLS,
   rows = 40,
   caps = { terminal: null, mux: null, ssh: false },
 } = {}) {
@@ -109,18 +109,345 @@ export function buildDaemonAttachRequest({
   };
 }
 
-function stripTerminalControl(text) {
-  return String(text)
-    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
-    .replace(/\x1B[78]/g, "")
-    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "")
-    .replace(/\r/g, "\n")
-    .replace(/[^\S\n]+$/gm, "")
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
+const CLAUDE_ATTACH_SPINNER_RE = /^[✻✶✳✢✽·]/u;
+const DEFAULT_DAEMON_ATTACH_COLS = 240;
+const DEFAULT_ATTACH_COMPLETION_QUIESCENCE_MS = 750;
+
+function normalizeTerminalCols(cols) {
+  const value = Number(cols);
+  if (!Number.isFinite(value)) return DEFAULT_DAEMON_ATTACH_COLS;
+  return Math.max(1, Math.floor(value));
 }
 
-const CLAUDE_ATTACH_SPINNER_RE = /^[✻✶✳✢✽·]/u;
-const DEFAULT_ATTACH_COMPLETION_QUIESCENCE_MS = 750;
+function terminalCellWidth(char) {
+  const cp = char.codePointAt(0);
+  if (
+    cp === 0 ||
+    cp === 0xad ||
+    (cp >= 0x0300 && cp <= 0x036f) ||
+    (cp >= 0x0610 && cp <= 0x061a) ||
+    (cp >= 0x064b && cp <= 0x065f) ||
+    (cp >= 0x1ab0 && cp <= 0x1aff) ||
+    (cp >= 0x1dc0 && cp <= 0x1dff) ||
+    (cp >= 0x20d0 && cp <= 0x20ff) ||
+    (cp >= 0xfe20 && cp <= 0xfe2f)
+  ) {
+    return 0;
+  }
+
+  if (
+    (cp >= 0x1100 && cp <= 0x115f) ||
+    (cp >= 0x2e80 && cp <= 0x2eff) ||
+    (cp >= 0x2f00 && cp <= 0x2fff) ||
+    (cp >= 0x3000 && cp <= 0x303f) ||
+    (cp >= 0x3040 && cp <= 0x309f) ||
+    (cp >= 0x30a0 && cp <= 0x30ff) ||
+    (cp >= 0x3100 && cp <= 0x312f) ||
+    (cp >= 0x3130 && cp <= 0x318f) ||
+    (cp >= 0x3190 && cp <= 0x319f) ||
+    (cp >= 0x31c0 && cp <= 0x31ef) ||
+    (cp >= 0x3200 && cp <= 0x32ff) ||
+    (cp >= 0x3300 && cp <= 0x33ff) ||
+    (cp >= 0x3400 && cp <= 0x4dbf) ||
+    (cp >= 0x4e00 && cp <= 0x9fff) ||
+    (cp >= 0xa000 && cp <= 0xa48f) ||
+    (cp >= 0xa490 && cp <= 0xa4cf) ||
+    (cp >= 0xa960 && cp <= 0xa97f) ||
+    (cp >= 0xac00 && cp <= 0xd7af) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe10 && cp <= 0xfe1f) ||
+    (cp >= 0xfe30 && cp <= 0xfe4f) ||
+    (cp >= 0xff00 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    (cp >= 0x1b000 && cp <= 0x1b0ff) ||
+    (cp >= 0x1f004 && cp <= 0x1f0cf) ||
+    (cp >= 0x1f200 && cp <= 0x1f2ff) ||
+    (cp >= 0x1f300 && cp <= 0x1f64f) ||
+    (cp >= 0x1f680 && cp <= 0x1f6ff) ||
+    (cp >= 0x1f900 && cp <= 0x1faff) ||
+    (cp >= 0x20000 && cp <= 0x2fffd) ||
+    (cp >= 0x30000 && cp <= 0x3fffd)
+  ) {
+    return 2;
+  }
+
+  return 1;
+}
+
+function terminalTextWidth(text) {
+  let width = 0;
+  for (const char of String(text)) {
+    width += terminalCellWidth(char);
+  }
+  return width;
+}
+
+function parseCsiParams(params) {
+  const normalized = params.replace(/[?<=>]/g, "");
+  if (!normalized) return [];
+  return normalized.split(";").map((entry) => {
+    const value = Number.parseInt(entry, 10);
+    return Number.isFinite(value) ? value : 0;
+  });
+}
+
+function readTerminalEscape(text, offset) {
+  if (text[offset] !== "\x1b") return null;
+  const next = text[offset + 1];
+  if (next === undefined) return { end: offset + 1, type: "escape" };
+
+  if (next === "]") {
+    let index = offset + 2;
+    while (index < text.length) {
+      if (text[index] === "\x07") {
+        return { end: index + 1, type: "osc" };
+      }
+      if (text[index] === "\x1b" && text[index + 1] === "\\") {
+        return { end: index + 2, type: "osc" };
+      }
+      index += 1;
+    }
+    return { end: text.length, type: "osc" };
+  }
+
+  if (next === "[") {
+    let index = offset + 2;
+    while (index < text.length) {
+      const code = text.charCodeAt(index);
+      if (code >= 0x40 && code <= 0x7e) {
+        return {
+          end: index + 1,
+          type: "csi",
+          final: text[index],
+          params: text.slice(offset + 2, index),
+        };
+      }
+      index += 1;
+    }
+    return { end: text.length, type: "csi" };
+  }
+
+  return { end: offset + 2, type: "escape", final: next };
+}
+
+function renderTerminalText(text, { cols = DEFAULT_DAEMON_ATTACH_COLS } = {}) {
+  const width = normalizeTerminalCols(cols);
+  const rows = [[]];
+  const softWrappedRows = new Set();
+  let row = 0;
+  let col = 0;
+  let pendingWrap = false;
+  let savedCursor = { row: 0, col: 0 };
+
+  const ensureRow = (targetRow = row) => {
+    while (rows.length <= targetRow) rows.push([]);
+  };
+
+  const setCursor = (nextRow, nextCol) => {
+    row = Math.max(0, nextRow);
+    col = Math.max(0, Math.min(width - 1, nextCol));
+    pendingWrap = false;
+    ensureRow(row);
+  };
+
+  const clearLine = (mode = 0) => {
+    ensureRow();
+    if (mode === 2) {
+      rows[row] = [];
+      return;
+    }
+    if (mode === 1) {
+      for (let index = 0; index <= col; index += 1) rows[row][index] = " ";
+      return;
+    }
+    rows[row].length = col;
+  };
+
+  const clearScreen = (mode = 0) => {
+    if (mode === 2 || mode === 3) {
+      rows.length = 1;
+      rows[0] = [];
+      row = 0;
+      col = 0;
+      pendingWrap = false;
+    }
+  };
+
+  const applyCsi = ({ final, params = "" }) => {
+    const values = parseCsiParams(params);
+    const first = values[0] || 1;
+    switch (final) {
+      case "A":
+        setCursor(row - first, col);
+        break;
+      case "B":
+        setCursor(row + first, col);
+        break;
+      case "C":
+        setCursor(row, col + first);
+        break;
+      case "D":
+        setCursor(row, col - first);
+        break;
+      case "G":
+        setCursor(row, first - 1);
+        break;
+      case "H":
+      case "f":
+        setCursor((values[0] || 1) - 1, (values[1] || 1) - 1);
+        break;
+      case "J":
+        clearScreen(values[0] || 0);
+        break;
+      case "K":
+        clearLine(values[0] || 0);
+        break;
+      case "s":
+        savedCursor = { row, col };
+        break;
+      case "u":
+        setCursor(savedCursor.row, savedCursor.col);
+        break;
+    }
+  };
+
+  const clearWideAt = (targetCol) => {
+    ensureRow();
+    if (rows[row][targetCol] === "" && targetCol > 0) {
+      rows[row][targetCol - 1] = " ";
+    }
+    if (rows[row][targetCol + 1] === "") {
+      rows[row][targetCol + 1] = " ";
+    }
+  };
+
+  const writeCell = (char, cellWidth) => {
+    if (pendingWrap) {
+      row += 1;
+      col = 0;
+      pendingWrap = false;
+      softWrappedRows.add(row);
+      ensureRow();
+    }
+    if (col + cellWidth > width && col > 0) {
+      row += 1;
+      col = 0;
+      softWrappedRows.add(row);
+      ensureRow();
+    }
+
+    clearWideAt(col);
+    rows[row][col] = char;
+    if (cellWidth === 2 && col + 1 < width) {
+      clearWideAt(col + 1);
+      rows[row][col + 1] = "";
+    }
+    col += cellWidth;
+    if (col >= width) {
+      col = width;
+      pendingWrap = true;
+    }
+  };
+
+  const appendCombining = (char) => {
+    ensureRow();
+    for (let index = Math.min(col - 1, width - 1); index >= 0; index -= 1) {
+      if (rows[row][index] && rows[row][index] !== "") {
+        rows[row][index] += char;
+        return;
+      }
+    }
+  };
+
+  const writeChar = (char) => {
+    if (char === "\n") {
+      row += 1;
+      col = 0;
+      pendingWrap = false;
+      ensureRow();
+      return;
+    }
+    if (char === "\r") {
+      col = 0;
+      pendingWrap = false;
+      return;
+    }
+    if (char === "\b") {
+      col = Math.max(0, col - 1);
+      pendingWrap = false;
+      return;
+    }
+    if (char === "\t") {
+      const spaces = 8 - (col % 8);
+      for (let index = 0; index < spaces; index += 1) writeCell(" ", 1);
+      return;
+    }
+
+    const cellWidth = terminalCellWidth(char);
+    if (cellWidth === 0) {
+      appendCombining(char);
+      return;
+    }
+    writeCell(char, cellWidth);
+  };
+
+  const input = String(text);
+  for (let index = 0; index < input.length; ) {
+    const char = input[index];
+    if (char === "\x1b") {
+      const sequence = readTerminalEscape(input, index);
+      if (sequence?.type === "csi") applyCsi(sequence);
+      else if (sequence?.final === "7") savedCursor = { row, col };
+      else if (sequence?.final === "8")
+        setCursor(savedCursor.row, savedCursor.col);
+      index = sequence?.end ?? index + 1;
+      continue;
+    }
+    const code = input.charCodeAt(index);
+    if (
+      code <= 0x1f &&
+      char !== "\n" &&
+      char !== "\r" &&
+      char !== "\b" &&
+      char !== "\t"
+    ) {
+      index += 1;
+      continue;
+    }
+    const cp = input.codePointAt(index);
+    const charLength = cp > 0xffff ? 2 : 1;
+    writeChar(input.slice(index, index + charLength));
+    index += charLength;
+  }
+
+  const trailingSpaceRows = new Set();
+  const lines = rows.map((cells, index) => {
+    let last = cells.length - 1;
+    while (
+      last >= 0 &&
+      (cells[last] === undefined || cells[last] === null || cells[last] === "")
+    ) {
+      last -= 1;
+    }
+    if (last >= 0 && cells[last] === " ") trailingSpaceRows.add(index);
+    const line = Array.from({ length: last + 1 }, (_, cellIndex) => {
+      const cell = cells[cellIndex];
+      if (cell === undefined || cell === null || cell === "") return "";
+      return cell;
+    }).join("");
+    return line.replace(/[^\S\n]+$/g, "");
+  });
+
+  return {
+    text: lines.join("\n"),
+    softWrappedRows,
+    trailingSpaceRows,
+  };
+}
+
+function stripTerminalControl(text, options) {
+  return renderTerminalText(text, options).text.replace(/\x7f/g, "");
+}
 
 function isClaudeAttachElapsedStatusLine(line) {
   const trimmed = line.trim();
@@ -169,13 +496,40 @@ function isClaudeAttachChromeLine(line) {
   );
 }
 
-export function extractClaudeDaemonAttachText(text) {
-  const cleaned = stripTerminalControl(text);
+function normalizeClaudeAttachResponseLine(line) {
+  return line.replace(/^ {2}/, "");
+}
+
+function shouldJoinSoftWrappedLine({
+  cols,
+  rendered,
+  lineIndex,
+  previousLine,
+}) {
+  if (rendered.softWrappedRows.has(lineIndex)) return true;
+  return terminalTextWidth(previousLine) >= normalizeTerminalCols(cols);
+}
+
+function joinSoftWrappedLine(previous, current, previousHadTrailingSpace) {
+  if (previous.endsWith(" ") || current.startsWith(" ")) {
+    return `${previous}${current}`;
+  }
+  if (previousHadTrailingSpace) return `${previous} ${current}`;
+  return `${previous}${current}`;
+}
+
+export function extractClaudeDaemonAttachText(
+  text,
+  { cols = DEFAULT_DAEMON_ATTACH_COLS } = {},
+) {
+  const rendered = renderTerminalText(text, { cols });
+  const cleaned = rendered.text;
   const lines = cleaned.split("\n").map((line) => line.trimEnd());
   const assistantIndex = lines.findLastIndex((line) => /^\s*⏺\s*/.test(line));
   if (assistantIndex < 0) return cleaned.trim();
 
   const response = [];
+  let lastAcceptedLineIndex = -1;
   for (let index = assistantIndex; index < lines.length; index += 1) {
     const rawLine = lines[index];
     const line =
@@ -193,7 +547,26 @@ export function extractClaudeDaemonAttachText(text) {
     }
     if (index > assistantIndex && isClaudeAttachChromeLine(line)) break;
     if (isClaudeAttachChromeLine(line)) continue;
-    response.push(line.trim());
+    if (
+      response.length > 0 &&
+      lastAcceptedLineIndex === index - 1 &&
+      shouldJoinSoftWrappedLine({
+        cols,
+        rendered,
+        lineIndex: index,
+        previousLine: response[response.length - 1],
+      })
+    ) {
+      response[response.length - 1] = joinSoftWrappedLine(
+        response[response.length - 1],
+        line,
+        rendered.trailingSpaceRows.has(index - 1),
+      );
+      lastAcceptedLineIndex = index;
+      continue;
+    }
+    response.push(normalizeClaudeAttachResponseLine(line));
+    lastAcceptedLineIndex = index;
   }
 
   return response.join("\n").trim();
@@ -206,8 +579,8 @@ function isClaudeAttachBusyLine(line) {
   return !isClaudeAttachElapsedStatusLine(trimmed);
 }
 
-function findClaudeAttachBusySignalIndex(text) {
-  const cleaned = stripTerminalControl(text);
+function findClaudeAttachBusySignalIndex(text, options) {
+  const cleaned = stripTerminalControl(text, options);
   let offset = 0;
   for (const line of cleaned.split("\n")) {
     if (isClaudeAttachBusyLine(line)) return offset;
@@ -216,10 +589,10 @@ function findClaudeAttachBusySignalIndex(text) {
   return -1;
 }
 
-function findClaudeAttachPromptEchoIndex(text, input) {
+function findClaudeAttachPromptEchoIndex(text, input, options) {
   const prompt = String(input ?? "").trim();
   if (!prompt) return -1;
-  const cleaned = stripTerminalControl(text);
+  const cleaned = stripTerminalControl(text, options);
   const exact = cleaned.indexOf(prompt);
   if (exact >= 0) return exact;
   const prefix = prompt.slice(0, Math.min(40, prompt.length));
@@ -227,8 +600,8 @@ function findClaudeAttachPromptEchoIndex(text, input) {
   return -1;
 }
 
-function claudeAttachDynamicProgressSignature(text) {
-  const cleaned = stripTerminalControl(text);
+function claudeAttachDynamicProgressSignature(text, options) {
+  const cleaned = stripTerminalControl(text, options);
   const spinnerGlyphs = [...cleaned.matchAll(/[✻✶✳✢✽·]/gu)]
     .map((match) => match[0])
     .join("")
@@ -241,20 +614,23 @@ function claudeAttachDynamicProgressSignature(text) {
   return `${spinnerGlyphs}|${elapsedSeconds}`;
 }
 
-function hasClaudeAttachPreInputScreen(text) {
-  const cleaned = stripTerminalControl(text);
+function hasClaudeAttachPreInputScreen(text, options) {
+  const cleaned = stripTerminalControl(text, options);
   return /(^|\n)\s*(⏺|❯|⏵)\s*/.test(cleaned);
 }
 
-function defaultClaudeAttachCompletionMatched(streamText) {
-  const cleaned = stripTerminalControl(streamText);
+function defaultClaudeAttachCompletionMatched(
+  streamText,
+  { cols = DEFAULT_DAEMON_ATTACH_COLS } = {},
+) {
+  const cleaned = stripTerminalControl(streamText, { cols });
   const assistantIndex = cleaned.lastIndexOf("⏺");
   if (assistantIndex < 0) return false;
   const tail = cleaned.slice(assistantIndex);
   if (/esc to interrupt/i.test(tail)) return false;
   return (
     /(^|\n)\s*❯\s*(?:\n|$)/.test(tail) ||
-    (extractClaudeDaemonAttachText(tail).length > 0 &&
+    (extractClaudeDaemonAttachText(tail, { cols }).length > 0 &&
       tail.split("\n").some((line) => isClaudeAttachElapsedStatusLine(line)))
   );
 }
@@ -279,7 +655,7 @@ export function attachClaudeDaemonSession({
   controlSock,
   short,
   input,
-  cols = 120,
+  cols = DEFAULT_DAEMON_ATTACH_COLS,
   rows = 40,
   caps,
   initialDrainMs = 150,
@@ -330,7 +706,7 @@ export function attachClaudeDaemonSession({
     };
 
     const noteDynamicProgress = (text) => {
-      const signature = claudeAttachDynamicProgressSignature(text);
+      const signature = claudeAttachDynamicProgressSignature(text, { cols });
       if (signature && signature !== dynamicProgressSignature) {
         dynamicProgressSignature = signature;
         postInputDynamicProgressSeen = true;
@@ -367,6 +743,7 @@ export function attachClaudeDaemonSession({
         streamBytes: stream.length,
         text: extractClaudeDaemonAttachText(
           responseReadyText || responseStreamText || streamText,
+          { cols },
         ),
         postInputBusySeen,
         postInputPromptEchoSeen,
@@ -412,6 +789,7 @@ export function attachClaudeDaemonSession({
             if (settled) return;
             requirePostInputTransition ||= hasClaudeAttachPreInputScreen(
               stream.toString("utf8"),
+              { cols },
             );
             responseStartOffset = stream.length;
             writeClaudeAttachInput(socket, input);
@@ -430,34 +808,41 @@ export function attachClaudeDaemonSession({
         .toString("utf8");
       noteDynamicProgress(responseStreamText);
       if (input !== undefined && !responseReadyText) {
-        const busyIndex = findClaudeAttachBusySignalIndex(responseStreamText);
+        const busyIndex = findClaudeAttachBusySignalIndex(responseStreamText, {
+          cols,
+        });
         const promptEchoIndex = findClaudeAttachPromptEchoIndex(
           responseStreamText,
           input,
+          { cols },
         );
         const transitionIndexes = [busyIndex, promptEchoIndex].filter(
           (index) => index >= 0,
         );
         if (transitionIndexes.length > 0) {
           const transitionIndex = Math.min(...transitionIndexes);
-          responseReadyText =
-            stripTerminalControl(responseStreamText).slice(transitionIndex);
+          responseReadyText = stripTerminalControl(responseStreamText, {
+            cols,
+          }).slice(transitionIndex);
           postInputBusySeen = busyIndex >= 0;
           postInputPromptEchoSeen = promptEchoIndex >= 0;
         }
       } else if (responseReadyText) {
-        const busyIndex = findClaudeAttachBusySignalIndex(responseStreamText);
+        const busyIndex = findClaudeAttachBusySignalIndex(responseStreamText, {
+          cols,
+        });
         const promptEchoIndex = findClaudeAttachPromptEchoIndex(
           responseStreamText,
           input,
+          { cols },
         );
         const transitionIndexes = [busyIndex, promptEchoIndex].filter(
           (index) => index >= 0,
         );
         if (transitionIndexes.length > 0) {
-          responseReadyText = stripTerminalControl(responseStreamText).slice(
-            Math.min(...transitionIndexes),
-          );
+          responseReadyText = stripTerminalControl(responseStreamText, {
+            cols,
+          }).slice(Math.min(...transitionIndexes));
           postInputBusySeen ||= busyIndex >= 0;
           postInputPromptEchoSeen ||= promptEchoIndex >= 0;
         }
@@ -467,7 +852,7 @@ export function attachClaudeDaemonSession({
         (input === undefined ||
           !requirePostInputTransition ||
           responseReadyText) &&
-        completionMatched?.(completionText);
+        completionMatched?.(completionText, { cols, rows });
       if (readyToMatch) {
         scheduleCompletion({
           timedOut: false,
@@ -493,7 +878,7 @@ export function attachClaudeDaemonSession({
 export function interruptClaudeDaemonSession({
   controlSock,
   short,
-  cols = 120,
+  cols = DEFAULT_DAEMON_ATTACH_COLS,
   rows = 40,
   caps,
   initialDrainMs = 50,

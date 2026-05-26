@@ -225,6 +225,37 @@ test("extractClaudeDaemonAttachText strips transient status lines after numeric 
   );
 });
 
+test("extractClaudeDaemonAttachText rejoins soft-wrapped rows without dropping boundary spaces", () => {
+  const text = [
+    "⏺ 캡처에서",
+    " completion까지 보존",
+    "✻ Brewed for 1s",
+    "❯ ",
+  ].join("\n");
+
+  assert.equal(
+    extractClaudeDaemonAttachText(text, { cols: 8 }),
+    "캡처에서 completion까지 보존",
+  );
+});
+
+test("extractClaudeDaemonAttachText applies repaint overwrites before extracting", () => {
+  const text = ["⏺ latency 750s\x1b[Dms", "✻ Brewed for 1s", "❯ "].join("\n");
+
+  assert.equal(extractClaudeDaemonAttachText(text), "latency 750ms");
+});
+
+test("extractClaudeDaemonAttachText respects Hangul cell width at soft-wrap boundaries", () => {
+  const text = ["⏺ 한글한", " 글 경계 보존", "✻ Brewed for 1s", "❯ "].join(
+    "\n",
+  );
+
+  assert.equal(
+    extractClaudeDaemonAttachText(text, { cols: 6 }),
+    "한글한 글 경계 보존",
+  );
+});
+
 test("attachClaudeDaemonSession pastes into a live daemon PTY and returns response text", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-attach-"));
   const sockPath = path.join(dir, "control.sock");
@@ -278,7 +309,7 @@ test("attachClaudeDaemonSession pastes into a live daemon PTY and returns respon
       proto: 1,
       op: "attach",
       short: "da387370",
-      cols: 120,
+      cols: 240,
       rows: 40,
       caps: { terminal: null, mux: null, ssh: false },
     });
