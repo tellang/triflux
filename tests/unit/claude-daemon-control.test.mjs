@@ -7,8 +7,11 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  attachClaudeDaemonSession,
+  buildDaemonAttachRequest,
   buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths,
+  extractClaudeDaemonAttachText,
   findDaemonJobByShort,
   resolveDaemonBridgeSessionId,
   sendClaudeControlRequest,
@@ -106,6 +109,363 @@ test("buildDaemonExecDispatchPayload names a Triflux worker and launches shell e
     args: ["-lc", "printf ok"],
   });
   assert.equal(payload.seed.name, "Triflux codex executor");
+});
+
+test("buildDaemonAttachRequest creates the live PTY attach request shape", () => {
+  assert.deepEqual(
+    buildDaemonAttachRequest({
+      short: "deadbeef",
+      cols: 140,
+      rows: 45,
+    }),
+    {
+      proto: 1,
+      op: "attach",
+      short: "deadbeef",
+      cols: 140,
+      rows: 45,
+      caps: { terminal: null, mux: null, ssh: false },
+    },
+  );
+  assert.throws(() => buildDaemonAttachRequest(), /short is required/);
+});
+
+test("extractClaudeDaemonAttachText returns the last assistant block without chrome", () => {
+  const text = [
+    "❯ echoed prompt",
+    "⏺ first answer",
+    "✻ Brewed for 1s",
+    "❯ another prompt",
+    "⏺ final answer",
+    "  continuation line",
+    "✻ Brewed for 2s",
+    "Image in clipboard · ctrl+v to paste",
+    "──────────────── Claude ────────────────",
+    "❯ ",
+  ].join("\n");
+
+  assert.equal(
+    extractClaudeDaemonAttachText(text),
+    "final answer\ncontinuation line",
+  );
+});
+
+test("extractClaudeDaemonAttachText stops before settings overlays", () => {
+  const text = [
+    "⏺ ACK",
+    "- keep UDS and tmux separate",
+    "▔▔▔▔▔▔▔▔▔▔",
+    "SettingsStatus Config UsageStats",
+    "╭────────────────────╮",
+    "│⌕ Search settings…│",
+    "╰────────────────────╯",
+    "❯ Auto-compactfalse",
+    "Showtipsfalse",
+    "Space to change · Enter to save · Esc to cancel",
+  ].join("\n");
+
+  assert.equal(
+    extractClaudeDaemonAttachText(text),
+    "ACK\n- keep UDS and tmux separate",
+  );
+});
+
+test("extractClaudeDaemonAttachText stops before transient runtime status lines", () => {
+  const text = [
+    "⏺ STRUCTURED_RETURN_OK",
+    "2",
+    "·3",
+    "W(3s · ↓1 tokens)",
+    "Undulating…(1s · ↓1 tokens)",
+    "Smooshing…",
+    "2 MCP servers failed · /mcp",
+    "❯ ",
+  ].join("\n");
+
+  assert.equal(extractClaudeDaemonAttachText(text), "STRUCTURED_RETURN_OK");
+});
+
+test("extractClaudeDaemonAttachText strips transient status lines after numeric replies", () => {
+  assert.equal(
+    extractClaudeDaemonAttachText(
+      [
+        "⏺ 2",
+        "Harmonizing…(1s · ↓1 tokens)",
+        "·Harmonizing…2",
+        "Harmonizing…3",
+        "❯ ",
+      ].join("\n"),
+    ),
+    "2",
+  );
+
+  assert.equal(
+    extractClaudeDaemonAttachText(
+      ["⏺ 4", "Baking…(1s · ↓1 tokens)", "❯ "].join("\n"),
+    ),
+    "4",
+  );
+
+  assert.equal(
+    extractClaudeDaemonAttachText(["⏺ 4", "lin…", "❯ "].join("\n")),
+    "4",
+  );
+});
+
+test("attachClaudeDaemonSession pastes into a live daemon PTY and returns response text", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-attach-"));
+  const sockPath = path.join(dir, "control.sock");
+  let attachedRequest = null;
+  let attachedInput = "";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (!attachedRequest) {
+        firstLine += chunk;
+        if (!firstLine.includes("\n")) return;
+        const line = firstLine.slice(0, firstLine.indexOf("\n"));
+        attachedRequest = JSON.parse(line);
+        socket.write(
+          `${JSON.stringify({
+            ok: true,
+            op: "attach",
+            via: "spare",
+            tempo: "idle",
+            state: "done",
+          })}\n`,
+        );
+        return;
+      }
+
+      attachedInput += chunk;
+      if (!attachedInput.includes("\r")) return;
+      socket.write("❯ relayed prompt\n");
+      socket.write("⏺ ATTACH_RESPONSE\n");
+      socket.write("✻ Brewed for 1s\n");
+      socket.write("❯ \n");
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "da387370",
+      input: "hello peer",
+      timeoutMs: 1000,
+    });
+
+    assert.deepEqual(attachedRequest, {
+      proto: 1,
+      op: "attach",
+      short: "da387370",
+      cols: 120,
+      rows: 40,
+      caps: { terminal: null, mux: null, ssh: false },
+    });
+    assert.match(attachedInput, /\x15/);
+    assert.match(attachedInput, /\x1b\[200~hello peer\x1b\[201~/);
+    assert.match(attachedInput, /\r/);
+    assert.equal(result.handshake.ok, true);
+    assert.equal(result.inputSent, true);
+    assert.equal(result.matchedCompletion, true);
+    assert.equal(result.text, "ATTACH_RESPONSE");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachClaudeDaemonSession extracts only the response after injected input", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-attach-delta-"));
+  const sockPath = path.join(dir, "control.sock");
+  let attachedInput = "";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (!firstLine.includes("\n")) {
+        firstLine += chunk;
+        if (!firstLine.includes("\n")) return;
+        socket.write(
+          `${JSON.stringify({
+            ok: true,
+            op: "attach",
+            via: "spare",
+            tempo: "idle",
+            state: "done",
+          })}\n`,
+        );
+        socket.write("⏺ OLD_READY_TEXT\n");
+        socket.write("❯ \n");
+        return;
+      }
+
+      attachedInput += chunk;
+      if (!attachedInput.includes("\r")) return;
+      socket.write("❯ injected prompt\n");
+      socket.write("⏺ STRUCTURED_RETURN_OK\n");
+      socket.write("❯ \n");
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "df3d9c2d",
+      input: "Reply with exactly STRUCTURED_RETURN_OK and then stop.",
+      timeoutMs: 1000,
+    });
+
+    assert.equal(result.inputSent, true);
+    assert.equal(result.matchedCompletion, true);
+    assert.equal(result.timedOut, false);
+    assert.equal(result.text, "STRUCTURED_RETURN_OK");
+    assert.doesNotMatch(result.text, /OLD_READY_TEXT/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachClaudeDaemonSession does not treat settings selector as completed composer", async () => {
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "claude-attach-settings-"),
+  );
+  const sockPath = path.join(dir, "control.sock");
+  let attachedInput = "";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (!firstLine.includes("\n")) {
+        firstLine += chunk;
+        if (!firstLine.includes("\n")) return;
+        socket.write(
+          `${JSON.stringify({
+            ok: true,
+            op: "attach",
+            via: "spare",
+            tempo: "idle",
+            state: "done",
+          })}\n`,
+        );
+        return;
+      }
+
+      attachedInput += chunk;
+      if (!attachedInput.includes("\r")) return;
+      socket.write("⏺ ACK_FROM_CLAUDE\n");
+      socket.write("SettingsStatus Config UsageStats\n");
+      socket.write("❯ Auto-compactfalse\n");
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "52059f6d",
+      input: "hello peer",
+      initialDrainMs: 0,
+      timeoutMs: 50,
+    });
+
+    assert.equal(result.inputSent, true);
+    assert.equal(result.timedOut, true);
+    assert.equal(result.matchedCompletion, false);
+    assert.equal(result.text, "ACK_FROM_CLAUDE");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachClaudeDaemonSession marks socket close before completion as closed", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-attach-closed-"));
+  const sockPath = path.join(dir, "control.sock");
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (firstLine.includes("\n")) return;
+      firstLine += chunk;
+      if (!firstLine.includes("\n")) return;
+      socket.write(`${JSON.stringify({ ok: true, op: "attach" })}\n`);
+      socket.end("⏺ PARTIAL_RESPONSE\n");
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "closed01",
+      input: "hello",
+      initialDrainMs: 0,
+      timeoutMs: 1000,
+    });
+
+    assert.equal(result.inputSent, false);
+    assert.equal(result.closed, true);
+    assert.equal(result.matchedCompletion, false);
+    assert.equal(result.timedOut, false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachClaudeDaemonSession rejects malformed daemon attach handshakes", async () => {
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "claude-attach-malformed-"),
+  );
+  const sockPath = path.join(dir, "control.sock");
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    socket.on("data", () => {
+      socket.end("{not-json}\n");
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    await assert.rejects(
+      attachClaudeDaemonSession({
+        controlSock: sockPath,
+        short: "badjson1",
+        input: "hello",
+        initialDrainMs: 0,
+        timeoutMs: 1000,
+      }),
+      /Expected property name|JSON/u,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("findDaemonJobByShort returns a daemon list job by short id", () => {
