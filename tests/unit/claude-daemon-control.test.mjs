@@ -210,6 +210,19 @@ test("extractClaudeDaemonAttachText strips transient status lines after numeric 
     extractClaudeDaemonAttachText(["⏺ 4", "lin…", "❯ "].join("\n")),
     "4",
   );
+
+  assert.equal(
+    extractClaudeDaemonAttachText(
+      [
+        "⏺ SELF_PEER_OK",
+        "Thought for 4s)",
+        "RaccoonJuggling for 4s)",
+        "Zorbling…7",
+        "❯ ",
+      ].join("\n"),
+    ),
+    "SELF_PEER_OK",
+  );
 });
 
 test("attachClaudeDaemonSession pastes into a live daemon PTY and returns response text", async () => {
@@ -241,6 +254,7 @@ test("attachClaudeDaemonSession pastes into a live daemon PTY and returns respon
       attachedInput += chunk;
       if (!attachedInput.includes("\r")) return;
       socket.write("❯ relayed prompt\n");
+      socket.write("✻ Fermenting… (esc to interrupt)\n");
       socket.write("⏺ ATTACH_RESPONSE\n");
       socket.write("✻ Brewed for 1s\n");
       socket.write("❯ \n");
@@ -309,6 +323,7 @@ test("attachClaudeDaemonSession extracts only the response after injected input"
       attachedInput += chunk;
       if (!attachedInput.includes("\r")) return;
       socket.write("❯ injected prompt\n");
+      socket.write("✻ Fermenting… (esc to interrupt)\n");
       socket.write("⏺ STRUCTURED_RETURN_OK\n");
       socket.write("❯ \n");
     });
@@ -332,6 +347,186 @@ test("attachClaudeDaemonSession extracts only the response after injected input"
     assert.equal(result.timedOut, false);
     assert.equal(result.text, "STRUCTURED_RETURN_OK");
     assert.doesNotMatch(result.text, /OLD_READY_TEXT/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachClaudeDaemonSession waits for post-input busy before matching completion", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-attach-busy-"));
+  const sockPath = path.join(dir, "control.sock");
+  let attachedInput = "";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (!firstLine.includes("\n")) {
+        firstLine += chunk;
+        if (!firstLine.includes("\n")) return;
+        socket.write(
+          `${JSON.stringify({
+            ok: true,
+            op: "attach",
+            via: "spare",
+            tempo: "idle",
+            state: "done",
+          })}\n`,
+        );
+        socket.write("⏺ OLD_SELF_PEER_REPLY\n");
+        socket.write("❯ \n");
+        return;
+      }
+
+      attachedInput += chunk;
+      if (!attachedInput.includes("\r")) return;
+      socket.write("⏺ OLD_SELF_PEER_REPLY\n");
+      socket.write("❯ \n");
+      setTimeout(() => {
+        socket.write("✻ Fermenting… (esc to interrupt)\n");
+        socket.write("⏺ NEW_SELF_PEER_REPLY\n");
+        socket.write("❯ \n");
+      }, 20);
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "busy001",
+      input: "Reply with NEW_SELF_PEER_REPLY",
+      timeoutMs: 1000,
+    });
+
+    assert.equal(result.inputSent, true);
+    assert.equal(result.matchedCompletion, true);
+    assert.equal(result.postInputBusySeen, true);
+    assert.equal(result.text, "NEW_SELF_PEER_REPLY");
+    assert.doesNotMatch(result.text, /OLD_SELF_PEER_REPLY/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachClaudeDaemonSession accepts prompt echo as post-input transition", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-attach-echo-"));
+  const sockPath = path.join(dir, "control.sock");
+  let attachedInput = "";
+  const prompt = "Reply with exactly PROMPT_ECHO_OK";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (!firstLine.includes("\n")) {
+        firstLine += chunk;
+        if (!firstLine.includes("\n")) return;
+        socket.write(
+          `${JSON.stringify({
+            ok: true,
+            op: "attach",
+            via: "spare",
+            tempo: "active",
+            state: "working",
+          })}\n`,
+        );
+        socket.write("⏺ OLD_IDLE_REPLY\n");
+        socket.write("❯ \n");
+        return;
+      }
+
+      attachedInput += chunk;
+      if (!attachedInput.includes("\r")) return;
+      socket.write("⏺ OLD_IDLE_REPLY\n");
+      socket.write("❯ \n");
+      socket.write(`❯ ${prompt}\n`);
+      socket.write("⏺ PROMPT_ECHO_OK\n");
+      socket.write("❯ \n");
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "echo001",
+      input: prompt,
+      timeoutMs: 1000,
+    });
+
+    assert.equal(result.inputSent, true);
+    assert.equal(result.matchedCompletion, true);
+    assert.equal(result.postInputBusySeen, false);
+    assert.equal(result.postInputPromptEchoSeen, true);
+    assert.equal(result.text, "PROMPT_ECHO_OK");
+    assert.doesNotMatch(result.text, /OLD_IDLE_REPLY/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachClaudeDaemonSession accepts elapsed summary completion without verb allowlist", async () => {
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "claude-attach-elapsed-"),
+  );
+  const sockPath = path.join(dir, "control.sock");
+  let attachedInput = "";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (!firstLine.includes("\n")) {
+        firstLine += chunk;
+        if (!firstLine.includes("\n")) return;
+        socket.write(
+          `${JSON.stringify({
+            ok: true,
+            op: "attach",
+            via: "spare",
+            tempo: "idle",
+            state: "done",
+          })}\n`,
+        );
+        return;
+      }
+
+      attachedInput += chunk;
+      if (!attachedInput.includes("\r")) return;
+      socket.write("❯ elapsed prompt\n");
+      socket.write("✻ Zorbling… (esc to interrupt)\n");
+      socket.write("⏺ ELAPSED_SUMMARY_OK\n");
+      socket.write("(2s · ↓1 tokens)\n");
+      socket.write("Wombatizing…8\n");
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "elapsed1",
+      input: "Reply with ELAPSED_SUMMARY_OK",
+      timeoutMs: 1000,
+    });
+
+    assert.equal(result.inputSent, true);
+    assert.equal(result.matchedCompletion, true);
+    assert.equal(result.timedOut, false);
+    assert.equal(result.text, "ELAPSED_SUMMARY_OK");
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(dir, { recursive: true, force: true });

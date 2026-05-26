@@ -44,7 +44,10 @@ async function runBridge(args, options = {}) {
 
 async function listenFakeDaemon(
   controlSock,
-  { jobs, attachText = "⏺ BRIDGE_ATTACH_OK\n❯ \n" },
+  {
+    jobs,
+    attachText = "✻ Fermenting… (esc to interrupt)\n⏺ BRIDGE_ATTACH_OK\n❯ \n",
+  },
 ) {
   await fs.mkdir(path.dirname(controlSock), { recursive: true });
   const requests = [];

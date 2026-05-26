@@ -119,6 +119,28 @@ function stripTerminalControl(text) {
     .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "");
 }
 
+const CLAUDE_ATTACH_SPINNER_RE = /^[✻✶✳✢✽·]/u;
+
+function isClaudeAttachElapsedStatusLine(line) {
+  const trimmed = line.trim();
+  return (
+    /\bfor\s+\d+s\)?$/i.test(trimmed) ||
+    /^\(?\d+s\b(?:\s*[·•]\s*.*\btokens?\s*)?\)?$/i.test(trimmed) ||
+    /\(\d+s\b.*\btokens?\)/i.test(trimmed)
+  );
+}
+
+function isClaudeAttachTransientStatusLine(line) {
+  const trimmed = line.trim();
+  return (
+    isClaudeAttachElapsedStatusLine(trimmed) ||
+    /esc to interrupt/i.test(trimmed) ||
+    CLAUDE_ATTACH_SPINNER_RE.test(trimmed) ||
+    /^·?[\p{L}\w-]+…(?:$|\s|\(|\d+$)/u.test(trimmed) ||
+    /^[\p{L}\w-]+\s+for\s+\d+s\)?$/u.test(trimmed)
+  );
+}
+
 function isClaudeAttachChromeLine(line) {
   const trimmed = line.trim();
   return (
@@ -126,17 +148,13 @@ function isClaudeAttachChromeLine(line) {
     trimmed === "❯" ||
     /^❯\s/.test(trimmed) ||
     /^⏵/.test(trimmed) ||
-    /^✻|^✶|^✳|^✢/.test(trimmed) ||
+    isClaudeAttachTransientStatusLine(trimmed) ||
     /^Ran \d+ shell command/.test(trimmed) ||
     /^Image in clipboard/.test(trimmed) ||
     /^SettingsStatus Config UsageStats/.test(trimmed) ||
     /^Space to change · Enter to save · Esc to cancel/.test(trimmed) ||
     /^⌕ Search settings/.test(trimmed) ||
     /^W\(\d+s\b/.test(trimmed) ||
-    /^·?[A-Za-z]+…(?:$|\(\d+s\b|\d+$)/.test(trimmed) ||
-    /^(Fermenting|Whirring|Smooshing|Undulating|Harmonizing|Baking|Churned|Baked for)/.test(
-      trimmed,
-    ) ||
     /^running stop hooks…/.test(trimmed) ||
     /^Tip: /.test(trimmed) ||
     /^\d+ MCP servers? failed\b/.test(trimmed) ||
@@ -176,18 +194,66 @@ export function extractClaudeDaemonAttachText(text) {
   return response.join("\n").trim();
 }
 
+function isClaudeAttachBusyLine(line) {
+  const trimmed = line.trim();
+  if (/esc to interrupt/i.test(trimmed)) return true;
+  if (!CLAUDE_ATTACH_SPINNER_RE.test(trimmed)) return false;
+  return !isClaudeAttachElapsedStatusLine(trimmed);
+}
+
+function findClaudeAttachBusySignalIndex(text) {
+  const cleaned = stripTerminalControl(text);
+  let offset = 0;
+  for (const line of cleaned.split("\n")) {
+    if (isClaudeAttachBusyLine(line)) return offset;
+    offset += line.length + 1;
+  }
+  return -1;
+}
+
+function findClaudeAttachPromptEchoIndex(text, input) {
+  const prompt = String(input ?? "").trim();
+  if (!prompt) return -1;
+  const cleaned = stripTerminalControl(text);
+  const exact = cleaned.indexOf(prompt);
+  if (exact >= 0) return exact;
+  const prefix = prompt.slice(0, Math.min(40, prompt.length));
+  if (prefix.length >= 12) return cleaned.indexOf(prefix);
+  return -1;
+}
+
+function hasClaudeAttachPreInputScreen(text) {
+  const cleaned = stripTerminalControl(text);
+  return /(^|\n)\s*(⏺|❯|⏵)\s*/.test(cleaned);
+}
+
 function defaultClaudeAttachCompletionMatched(streamText) {
   const cleaned = stripTerminalControl(streamText);
   const assistantIndex = cleaned.lastIndexOf("⏺");
   if (assistantIndex < 0) return false;
   const tail = cleaned.slice(assistantIndex);
-  return /(^|\n)\s*❯\s*(?:\n|$)/.test(tail);
+  if (/esc to interrupt/i.test(tail)) return false;
+  return (
+    /(^|\n)\s*❯\s*(?:\n|$)/.test(tail) ||
+    (extractClaudeDaemonAttachText(tail).length > 0 &&
+      tail.split("\n").some((line) => isClaudeAttachElapsedStatusLine(line)))
+  );
 }
 
 function writeClaudeAttachInput(socket, input) {
   socket.write("\x15");
   socket.write(`\x1b[200~${String(input)}\x1b[201~`);
   socket.write("\r");
+}
+
+function requiresPostInputTransition(handshake) {
+  return (
+    handshake?.active === true ||
+    handshake?.tempo === "active" ||
+    handshake?.state === "working" ||
+    handshake?.source === "slash" ||
+    handshake?.source === "fleet"
+  );
 }
 
 export function attachClaudeDaemonSession({
@@ -210,6 +276,10 @@ export function attachClaudeDaemonSession({
     let stream = Buffer.alloc(0);
     let inputSent = false;
     let responseStartOffset = 0;
+    let postInputBusySeen = input === undefined;
+    let postInputPromptEchoSeen = false;
+    let responseReadyText = "";
+    let requirePostInputTransition = false;
     let sendInputTimer = null;
 
     const fail = (error) => {
@@ -238,7 +308,11 @@ export function attachClaudeDaemonSession({
         streamText,
         responseStreamText,
         streamBytes: stream.length,
-        text: extractClaudeDaemonAttachText(responseStreamText || streamText),
+        text: extractClaudeDaemonAttachText(
+          responseReadyText || responseStreamText || streamText,
+        ),
+        postInputBusySeen,
+        postInputPromptEchoSeen,
         ...extra,
       });
     };
@@ -274,9 +348,13 @@ export function attachClaudeDaemonSession({
           finish({ timedOut: false, matchedCompletion: false, closed: false });
           return;
         }
+        requirePostInputTransition = requiresPostInputTransition(handshake);
         if (input !== undefined) {
           sendInputTimer = setTimeout(() => {
             if (settled) return;
+            requirePostInputTransition ||= hasClaudeAttachPreInputScreen(
+              stream.toString("utf8"),
+            );
             responseStartOffset = stream.length;
             writeClaudeAttachInput(socket, input);
             inputSent = true;
@@ -292,7 +370,45 @@ export function attachClaudeDaemonSession({
       const responseStreamText = stream
         .subarray(responseStartOffset)
         .toString("utf8");
-      if (completionMatched?.(responseStreamText)) {
+      if (input !== undefined && !responseReadyText) {
+        const busyIndex = findClaudeAttachBusySignalIndex(responseStreamText);
+        const promptEchoIndex = findClaudeAttachPromptEchoIndex(
+          responseStreamText,
+          input,
+        );
+        const transitionIndexes = [busyIndex, promptEchoIndex].filter(
+          (index) => index >= 0,
+        );
+        if (transitionIndexes.length > 0) {
+          const transitionIndex = Math.min(...transitionIndexes);
+          responseReadyText =
+            stripTerminalControl(responseStreamText).slice(transitionIndex);
+          postInputBusySeen = busyIndex >= 0;
+          postInputPromptEchoSeen = promptEchoIndex >= 0;
+        }
+      } else if (responseReadyText) {
+        const busyIndex = findClaudeAttachBusySignalIndex(responseStreamText);
+        const promptEchoIndex = findClaudeAttachPromptEchoIndex(
+          responseStreamText,
+          input,
+        );
+        const transitionIndexes = [busyIndex, promptEchoIndex].filter(
+          (index) => index >= 0,
+        );
+        if (transitionIndexes.length > 0) {
+          responseReadyText = stripTerminalControl(responseStreamText).slice(
+            Math.min(...transitionIndexes),
+          );
+          postInputBusySeen ||= busyIndex >= 0;
+          postInputPromptEchoSeen ||= promptEchoIndex >= 0;
+        }
+      }
+      if (
+        (input === undefined ||
+          !requirePostInputTransition ||
+          responseReadyText) &&
+        completionMatched?.(responseReadyText || responseStreamText)
+      ) {
         finish({ timedOut: false, matchedCompletion: true, closed: false });
       }
     });
