@@ -20,8 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(SCRIPT_DIR, "..", "..");
-const MIRROR_ROOT = join(REPO_ROOT, "packages", "triflux");
+const DEFAULT_REPO_ROOT = join(SCRIPT_DIR, "..", "..");
 const MIRROR_TOPS = [
   "bin",
   "config",
@@ -31,6 +30,20 @@ const MIRROR_TOPS = [
   "mesh",
   "scripts",
   "skills",
+];
+const CORE_FILE_MIRRORS = [
+  {
+    source: "hub/bridge.mjs",
+    target: "packages/core/hub/bridge.mjs",
+  },
+  {
+    source: "hub/team/retry-state-machine.mjs",
+    target: "packages/core/hub/team/retry-state-machine.mjs",
+  },
+  {
+    source: "hub/team/claude-daemon-control.mjs",
+    target: "packages/core/hub/team/claude-daemon-control.mjs",
+  },
 ];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 // Per-top relative paths to skip. Mirror policy excludes these via
@@ -57,13 +70,17 @@ function walkRelFiles(root, skipRels = new Set()) {
   return out;
 }
 
-function compareMirror({ fix = false } = {}) {
+function compareMirror({
+  fix = false,
+  repoRoot = DEFAULT_REPO_ROOT,
+  mirrorRoot = join(repoRoot, "packages", "triflux"),
+} = {}) {
   const issues = [];
   const fixed = [];
 
   for (const top of MIRROR_TOPS) {
-    const srcDir = join(REPO_ROOT, top);
-    const dstDir = join(MIRROR_ROOT, top);
+    const srcDir = join(repoRoot, top);
+    const dstDir = join(mirrorRoot, top);
     const skipRels = SKIP_RELS.get(top) ?? new Set();
     const srcFiles = new Set(walkRelFiles(srcDir, skipRels));
     const dstFiles = new Set(walkRelFiles(dstDir, skipRels));
@@ -107,6 +124,40 @@ function compareMirror({ fix = false } = {}) {
     }
   }
 
+  for (const mirror of CORE_FILE_MIRRORS) {
+    const srcPath = join(repoRoot, mirror.source);
+    const dstPath = join(repoRoot, mirror.target);
+    const srcExists = existsSync(srcPath);
+    const dstExists = existsSync(dstPath);
+
+    if (!srcExists) {
+      issues.push({ path: mirror.source, kind: "missing-source" });
+      continue;
+    }
+
+    if (!dstExists) {
+      if (fix) {
+        mkdirSync(dirname(dstPath), { recursive: true });
+        copyFileSync(srcPath, dstPath);
+        fixed.push({ path: mirror.target, kind: "added" });
+      } else {
+        issues.push({ path: mirror.target, kind: "missing-in-mirror" });
+      }
+      continue;
+    }
+
+    const a = readFileSync(srcPath);
+    const b = readFileSync(dstPath);
+    if (!a.equals(b)) {
+      if (fix) {
+        copyFileSync(srcPath, dstPath);
+        fixed.push({ path: mirror.target, kind: "updated" });
+      } else {
+        issues.push({ path: mirror.target, kind: "content-diff" });
+      }
+    }
+  }
+
   return { ok: issues.length === 0, issues, fixed };
 }
 
@@ -126,7 +177,9 @@ function main() {
         console.log(`  ${f.kind.padEnd(8)} ${f.path}`);
       }
     } else {
-      console.log("Mirror OK — packages/triflux matches root");
+      console.log(
+        "Mirror OK — packages/triflux and packages/core file mirrors match root",
+      );
     }
   } else {
     console.log(`Mirror mismatch (${result.issues.length} issues):`);
@@ -141,13 +194,15 @@ function main() {
     }
     console.log("");
     console.log(
-      "Run with --fix to copy root → packages/triflux. Orphans must be removed manually.",
+      "Run with --fix to copy root → packages/triflux and packages/core file mirrors. Orphans must be removed manually.",
     );
   }
 
   process.exitCode = result.ok ? 0 : 1;
 }
 
-main();
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}
 
 export { compareMirror };

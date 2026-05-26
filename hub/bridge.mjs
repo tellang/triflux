@@ -371,6 +371,7 @@ export function parseArgs(argv) {
       capabilities: { type: "string" },
       file: { type: "string" },
       payload: { type: "string" },
+      "payload-file": { type: "string" },
       topic: { type: "string" },
       trace: { type: "string" },
       correlation: { type: "string" },
@@ -446,6 +447,21 @@ export function parseJsonSafe(raw, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+export function readBridgePayload(args = {}, stdin) {
+  if (args["payload-file"]) {
+    const payloadFile = String(args["payload-file"]);
+    const raw =
+      payloadFile === "-"
+        ? stdin === undefined
+          ? readFileSync(0, "utf8")
+          : String(stdin)
+        : readFileSync(payloadFile, "utf8");
+    return JSON.parse(raw);
+  }
+  if (args.payload) return JSON.parse(args.payload);
+  return {};
 }
 
 function normalizeBridgePayload(payload) {
@@ -1145,6 +1161,185 @@ async function cmdHitlPending() {
   return emitJson(outcome?.result || unavailableResult());
 }
 
+async function loadDaemonControl() {
+  return await import("./team/claude-daemon-control.mjs");
+}
+
+function daemonErrorResult(error) {
+  return {
+    ok: false,
+    error: error?.message || String(error),
+  };
+}
+
+function daemonAttachErrorResult(error) {
+  return {
+    ok: false,
+    text: "",
+    raw: "",
+    responseRaw: "",
+    matchedCompletion: false,
+    timedOut: false,
+    closed: false,
+    inputSent: error?.inputSent === true,
+    error: error?.message || String(error),
+  };
+}
+
+function daemonInterruptErrorResult(error) {
+  return {
+    ok: false,
+    done: false,
+    aborted: false,
+    reason: "interrupt_failed",
+    inputSent: error?.inputSent === true,
+    error: error?.message || String(error),
+  };
+}
+
+function numericOption(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+async function cmdDaemonProbe(args) {
+  try {
+    const payload = readBridgePayload(args);
+    const {
+      deriveClaudeDaemonPaths,
+      findDaemonJobBySessionId,
+      findDaemonJobByShort,
+      sendClaudeControlRequest,
+    } = await loadDaemonControl();
+    const daemonPaths = deriveClaudeDaemonPaths({
+      configDir: payload.configDir,
+    });
+    const list = await sendClaudeControlRequest(
+      daemonPaths.controlSock,
+      { proto: 1, op: "list" },
+      { timeoutMs: numericOption(payload.timeoutMs, 6000) },
+    );
+    const target = payload.sessionId
+      ? findDaemonJobBySessionId(list, payload.sessionId)
+      : payload.short
+        ? findDaemonJobByShort(list, payload.short)
+        : null;
+
+    return emitJson({
+      ok: list?.ok !== false,
+      controlSock: daemonPaths.controlSock,
+      sessions: list?.jobs || list?.sessions || [],
+      target: target || undefined,
+      error: list?.ok === false ? list?.error : undefined,
+    });
+  } catch (error) {
+    return emitJson(daemonErrorResult(error));
+  }
+}
+
+async function cmdDaemonAttach(args) {
+  try {
+    const payload = readBridgePayload(args);
+    if (!payload.prompt) throw new Error("prompt is required");
+
+    const {
+      attachClaudeDaemonSession,
+      deriveClaudeDaemonPaths,
+      findDaemonJobBySessionId,
+      sendClaudeControlRequest,
+    } = await loadDaemonControl();
+    const daemonPaths = deriveClaudeDaemonPaths({
+      configDir: payload.configDir,
+    });
+    let short = payload.short;
+    if (!short && payload.sessionId) {
+      const list = await sendClaudeControlRequest(
+        daemonPaths.controlSock,
+        { proto: 1, op: "list" },
+        { timeoutMs: numericOption(payload.timeoutMs, 6000) },
+      );
+      const target = findDaemonJobBySessionId(list, payload.sessionId);
+      short = target?.short;
+    }
+    if (!short) throw new Error("short or resolvable sessionId is required");
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: daemonPaths.controlSock,
+      short,
+      input: payload.prompt,
+      cols: numericOption(payload.cols, undefined),
+      rows: numericOption(payload.rows, undefined),
+      timeoutMs: numericOption(payload.timeoutMs, 30_000),
+    });
+
+    return emitJson({
+      ok: result.matchedCompletion === true,
+      text: result.text,
+      raw: result.streamText,
+      responseRaw: result.responseStreamText,
+      matchedCompletion: result.matchedCompletion === true,
+      timedOut: result.timedOut === true,
+      closed: result.closed === true,
+      inputSent: result.inputSent === true,
+      error:
+        result.handshake?.ok === false ? result.handshake?.error : undefined,
+    });
+  } catch (error) {
+    return emitJson(daemonAttachErrorResult(error));
+  }
+}
+
+async function cmdDaemonInterrupt(args) {
+  try {
+    const payload = readBridgePayload(args);
+
+    const {
+      deriveClaudeDaemonPaths,
+      findDaemonJobBySessionId,
+      interruptClaudeDaemonSession,
+      sendClaudeControlRequest,
+    } = await loadDaemonControl();
+    const daemonPaths = deriveClaudeDaemonPaths({
+      configDir: payload.configDir,
+    });
+    let short = payload.short;
+    if (!short && payload.sessionId) {
+      const list = await sendClaudeControlRequest(
+        daemonPaths.controlSock,
+        { proto: 1, op: "list" },
+        { timeoutMs: numericOption(payload.timeoutMs, 6000) },
+      );
+      const target = findDaemonJobBySessionId(list, payload.sessionId);
+      short = target?.short;
+    }
+    if (!short) throw new Error("short or resolvable sessionId is required");
+
+    const result = await interruptClaudeDaemonSession({
+      controlSock: daemonPaths.controlSock,
+      short,
+      cols: numericOption(payload.cols, undefined),
+      rows: numericOption(payload.rows, undefined),
+      timeoutMs: numericOption(payload.timeoutMs, 5000),
+    });
+    const aborted = result.inputSent === true;
+
+    return emitJson({
+      ok: aborted,
+      done: false,
+      aborted,
+      reason: aborted ? "user_interrupt" : "interrupt_failed",
+      raw: result.streamText,
+      timedOut: result.timedOut === true,
+      closed: result.closed === true,
+      inputSent: result.inputSent === true,
+      error:
+        result.handshake?.ok === false ? result.handshake?.error : undefined,
+    });
+  } catch (error) {
+    return emitJson(daemonInterruptErrorResult(error));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // retry-run / retry-status — Phase 3 Step C2 bridge 서브커맨드.
 // retry-state-machine.mjs 를 multi-process safe 하게 외부 호출용 wrap.
@@ -1322,13 +1517,19 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdHitlSubmit(args);
     case "hitl-pending":
       return await cmdHitlPending(args);
+    case "daemon-probe":
+      return await cmdDaemonProbe(args);
+    case "daemon-attach":
+      return await cmdDaemonAttach(args);
+    case "daemon-interrupt":
+      return await cmdDaemonInterrupt(args);
     case "retry-run":
       return await cmdRetryRun(args);
     case "retry-status":
       return await cmdRetryStatus(args);
     default:
       console.error(
-        "사용법: bridge.mjs <register|result|control|handoff|publish|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|retry-run|retry-status> [--옵션]",
+        "사용법: bridge.mjs <register|result|control|handoff|publish|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|daemon-probe|daemon-attach|daemon-interrupt|retry-run|retry-status> [--옵션]",
       );
       process.exit(1);
   }
