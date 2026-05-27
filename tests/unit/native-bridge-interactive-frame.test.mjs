@@ -149,7 +149,10 @@ test("headless worker keeps echoing inbound PTY data to transcript by default", 
     await waitForLive(socket);
     socket.write(buildPtyDataFrame("headless echo\n"));
 
-    const frame = await waitForFrame(socket, (candidate) => candidate.kind === 0);
+    const frame = await waitForFrame(
+      socket,
+      (candidate) => candidate.kind === 0,
+    );
     assert.equal(frame.payload.toString("utf8"), "headless echo\n");
   } finally {
     socket.destroy();

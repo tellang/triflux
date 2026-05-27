@@ -119,10 +119,7 @@ test("interactive native worker routes attach input to transport and transport o
     );
 
     transport.emit("codex output\n");
-    const outputFrame = await waitForFrame(
-      socket,
-      (frame) => frame.kind === 0,
-    );
+    const outputFrame = await waitForFrame(socket, (frame) => frame.kind === 0);
     assert.equal(outputFrame.payload.toString("utf8"), "codex output\n");
 
     await new Promise((resolve) => setTimeout(resolve, 50));
