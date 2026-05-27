@@ -7,6 +7,7 @@
 // 팀 설정을 프로그래밍적으로 생성할 때 사용한다.
 
 import * as fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
@@ -25,6 +26,9 @@ const ROUTE_COMMAND_RE =
   /(?:^|[\s"'`])(?:bash\s+)?(?:[^"'`\s]*\/)?tfx-route\.sh\b/i;
 const ROUTE_PROMPT_RE = /tfx-route\.sh/i;
 const DIRECT_TOOL_BYPASS_RE = /\b(?:Read|Edit|Write)\s*\(/;
+const _require = createRequire(import.meta.url);
+const AGENT_TO_CLI = _require("./agent-map.json");
+const VALID_ROUTE_AGENTS = new Set(Object.keys(AGENT_TO_CLI));
 
 function inferWorkerIndex(agentName = "") {
   const match = /(\d+)(?!.*\d)/.exec(agentName);
@@ -40,6 +44,26 @@ function normalizeRouteMode(cli) {
   }
   if (normalized === "codex") return "codex";
   return "";
+}
+
+function resolveRouteCli(cli) {
+  const normalized = String(cli || "").trim();
+  const mapped = AGENT_TO_CLI[normalized] || normalized;
+  return mapped === "gemini" ? "antigravity" : mapped;
+}
+
+function resolveSlimWrapperRouteAgent(cli, role) {
+  const routeRole = String(role || "").trim();
+  if (
+    routeRole &&
+    VALID_ROUTE_AGENTS.has(routeRole) &&
+    !["gemini", "antigravity", "agy"].includes(routeRole)
+  ) {
+    return routeRole;
+  }
+
+  const resolvedCli = resolveRouteCli(cli);
+  return VALID_ROUTE_AGENTS.has(resolvedCli) ? resolvedCli : "codex";
 }
 
 function buildRouteEnvPrefix(agentName, workerIndex, searchTool, cli) {
@@ -199,7 +223,8 @@ export function buildSlimWrapperPrompt(cli, opts = {}) {
     maxIterations = 3,
   } = opts;
 
-  const routeTimeoutSec = getRouteTimeout(role, mcp_profile);
+  const routeAgent = resolveSlimWrapperRouteAgent(cli, role);
+  const routeTimeoutSec = getRouteTimeout(routeAgent, mcp_profile);
   const escaped = subtask.replace(/'/g, "'\\''");
   const pipelineHint = pipelinePhase
     ? `\n파이프라인 단계: ${pipelinePhase}`
@@ -237,7 +262,7 @@ gemini/codex를 직접 호출하지 마라. 반드시 tfx-route.sh를 거쳐야 
 프롬프트를 파일로 저장하지 마라. tfx-route.sh가 인자로 받는다.
 
 Step 1 — Async 시작 (즉시 리턴, <1초):
-Bash(command: 'TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} --async "${role}" '"'"'${escaped}'"'"' ${mcp_profile} ${routeTimeoutSec}', timeout: ${launchTimeoutMs})
+Bash(command: 'TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} --async "${routeAgent}" '"'"'${escaped}'"'"' ${mcp_profile} ${routeTimeoutSec}', timeout: ${launchTimeoutMs})
 → 출력 한 줄이 JOB_ID이다. 반드시 기억하라.
 
 Step 2 — 완료 대기 (내부 폴링, 최대 540초):
@@ -347,8 +372,9 @@ export function buildHybridWrapperPrompt(cli, opts = {}) {
     searchTool,
     cli,
   );
+  const routeAgent = resolveSlimWrapperRouteAgent(cli, role);
 
-  const routeCmd = `TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} "${role}" '${escaped}' ${mcp_profile}`;
+  const routeCmd = `TFX_TEAM_NAME="${teamName}" TFX_TEAM_TASK_ID="${taskId}" TFX_TEAM_AGENT_NAME="${agentName}" TFX_TEAM_LEAD_NAME="${leadName}"${routeEnvPrefix} bash ${ROUTE_SCRIPT} "${routeAgent}" '${escaped}' ${mcp_profile}`;
 
   return `하이브리드 psmux 워커 프로토콜:
 

@@ -2,7 +2,13 @@
 // Phase 3 Step A — retry-state-machine.mjs 계약 검증.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -148,22 +154,60 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 mini-5.4 → codex-5.3 → gpt-5.5 → opus-4-7 순", () => {
-      // 2026-04-25 정책 갱신: sonnet-4-6 단계 제거, 5.3-codex 가성비 중간 단계 추가.
-      assert.equal(DEFAULT_ESCALATION_CHAIN.length, 4);
-      const [s1, s2, s3, s4] = DEFAULT_ESCALATION_CHAIN;
+    it("DEFAULT_ESCALATION_CHAIN 은 gpt-5.5 → opus-4-7 2단계 순", () => {
+      assert.equal(DEFAULT_ESCALATION_CHAIN.length, 2);
+      const [s1, s2] = DEFAULT_ESCALATION_CHAIN;
 
       assert.equal(s1.cli, "codex");
-      assert.equal(s1.model, "gpt-5.4-mini");
+      assert.equal(s1.model, "gpt-5.5");
+      assert.equal(s1.profile, undefined);
 
-      assert.equal(s2.cli, "codex");
-      assert.equal(s2.model, "gpt-5.3-codex");
+      assert.equal(s2.cli, "claude");
+      assert.equal(s2.model, "opus-4-7");
+      assert.equal(s2.profile, undefined);
+    });
 
-      assert.equal(s3.cli, "codex");
-      assert.equal(s3.model, "gpt-5.5");
+    it("custom cliChain 의 optional profile 필드를 보존한다", () => {
+      const chain = [
+        { cli: "codex", model: "gpt-5.5", profile: "gpt55_xhigh" },
+        { cli: "claude", model: "opus-4-7" },
+      ];
+      const sm = createRetryStateMachine({
+        mode: "auto-escalate",
+        cliChain: chain,
+      });
 
-      assert.equal(s4.cli, "claude");
-      assert.equal(s4.model, "opus-4-7");
+      const cur = sm.getCurrent();
+      assert.deepEqual(cur.cliChain, chain);
+
+      const restored = createRetryStateMachine({ mode: "auto-escalate" });
+      restored.applySnapshot(sm.serialize());
+      assert.deepEqual(restored.getCurrent().cliChain, chain);
+    });
+
+    it(".triflux/config/escalation-chain.json override 는 profile 필드를 읽는다", () => {
+      const dir = makeTempDir();
+      const configDir = join(dir, ".triflux", "config");
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(
+        join(configDir, "escalation-chain.json"),
+        JSON.stringify({
+          version: 1,
+          chain: [
+            { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
+            { cli: "claude", model: "opus-4-7" },
+          ],
+        }),
+      );
+
+      const sm = createRetryStateMachine({
+        mode: "auto-escalate",
+        projectRoot: dir,
+      });
+      assert.deepEqual(sm.getCurrent().cliChain, [
+        { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
+        { cli: "claude", model: "opus-4-7" },
+      ]);
     });
   });
 

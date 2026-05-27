@@ -76,6 +76,28 @@ describe("hub/team/native.mjs — route env prefix", () => {
     assert.equal(worker.subagent_type, SLIM_WRAPPER_SUBAGENT_TYPE);
     assert.match(worker.prompt, /subagent_type="slim-wrapper"/);
   });
+
+  it("슬림 래퍼는 agent-map에 없는 role을 route 인자로 넘기지 않고 cli로 fallback해야 한다", () => {
+    const prompt = buildSlimWrapperPrompt("codex", {
+      subtask: "dead path guard",
+      role: "reviewer; touch /tmp/tfx-native-role-injection",
+      mcp_profile: "analyze",
+    });
+
+    assert.match(prompt, /tfx-route\.sh --async "codex" /);
+    assert.doesNotMatch(prompt, /reviewer; touch/);
+  });
+
+  it("하이브리드 래퍼는 agent-map에 없는 role을 route 인자로 넘기지 않고 antigravity로 fallback해야 한다", () => {
+    const prompt = buildHybridWrapperPrompt("gemini", {
+      subtask: "dead path guard",
+      role: "reviewer; touch /tmp/tfx-native-role-injection",
+      mcp_profile: "analyze",
+    });
+
+    assert.match(prompt, /tfx-route\.sh "antigravity" 'dead path guard'/);
+    assert.doesNotMatch(prompt, /reviewer; touch/);
+  });
 });
 
 describe("hub/team/native.mjs — slim wrapper route verification", () => {

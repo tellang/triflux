@@ -573,6 +573,7 @@ function buildWorkerRail(name, st, opts = {}) {
   const innerWidth = Math.max(12, width - 4);
   const cli = st.cli || "codex";
   const role = sanitizeOneLine(st.role);
+  const displayName = sanitizeOneLine(st.displayName, name);
   const status = runtimeStatus(st);
   const sec = Number.isFinite(st._logSec) ? st._logSec : 0;
   const changeElapsed = st._statusChangedAt
@@ -598,9 +599,9 @@ function buildWorkerRail(name, st, opts = {}) {
     st.host && st.host !== "local"
       ? color(`[${st.host}]`, MOCHA.mauve) + " "
       : "";
-  const displayRole = dedupeRole(role, name, cli);
+  const displayRole = dedupeRole(role, displayName, cli);
   const title = truncate(
-    `${selMark} ${hb} ${hostBadge}${color(name, FG.triflux)} ${color("•", MOCHA.overlay)} ${color(cli, cliColor(cli))}${displayRole ? ` ${color(`(${displayRole})`, MOCHA.overlay)}` : ""}`,
+    `${selMark} ${hb} ${hostBadge}${color(displayName, FG.triflux)} ${color("•", MOCHA.overlay)} ${color(cli, cliColor(cli))}${displayRole ? ` ${color(`(${displayRole})`, MOCHA.overlay)}` : ""}`,
     innerWidth,
   );
 
@@ -1658,6 +1659,7 @@ export function createLogDashboard(opts = {}) {
         cli: merged.cli,
         status: merged.status,
         role: merged.role,
+        displayName: merged.displayName,
         snapshot: merged.snapshot,
         summary: merged.summary,
         detail: merged.detail,

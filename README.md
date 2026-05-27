@@ -367,7 +367,7 @@ For repository changes that affect package contents, run the release gates befor
 shipping:
 
 ```bash
-npm run gen:skill-docs
+npm run lint:skills
 npm run gen:skill-manifest
 npm run release:check-sync
 npm run release:check-mirror

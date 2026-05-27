@@ -447,10 +447,10 @@ function ingest() {
 function pushToTui(paneName, cli, paneTitle, update) {
   // _leadAction은 tui에 노출하지 않음 (내부용)
   const { _leadAction: _ignored, ...safeUpdate } = update;
-  // pane title에서 실제 역할만 추출: "⚪ codex (executor)" → "executor"
-  const roleMatch = paneTitle.match(/\(([^)]+)\)$/);
-  const role = roleMatch ? roleMatch[1] : "";
-  tui.updateWorker(paneName, { cli, role, ...safeUpdate });
+  // pane title의 괄호 값은 UI 라벨이며 role 의미값으로 승격하지 않는다.
+  const labelMatch = paneTitle.match(/\(([^)]+)\)$/);
+  const displayName = labelMatch ? labelMatch[1] : paneName;
+  tui.updateWorker(paneName, { cli, displayName, role: "", ...safeUpdate });
 }
 
 // ── render 루프 (8-12FPS ≈ 100ms) ──

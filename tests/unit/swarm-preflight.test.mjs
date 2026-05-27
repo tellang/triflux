@@ -116,6 +116,52 @@ describe("swarm-preflight", () => {
     assert.match(report.errors.join("\n"), /missing local worker CLI/u);
   });
 
+  it("checks antigravity and agy shards against the agy worker CLI", () => {
+    const repoRoot = makeTmpDir();
+    const prdPath = writePrd(
+      repoRoot,
+      `
+## Shard: antigravity-worker
+- agent: antigravity
+- files: src/antigravity.mjs
+- prompt: Run Antigravity.
+
+## Shard: agy-worker
+- agent: agy
+- files: src/agy.mjs
+- prompt: Run agy.
+`,
+    );
+    const checkedCommands = [];
+    const report = runSwarmPreflight(prdPath, {
+      repoRoot,
+      deps: {
+        whichCommand: (command) => {
+          checkedCommands.push(command);
+          return command === "agy" ? "/usr/local/bin/agy" : null;
+        },
+      },
+    });
+
+    assert.equal(report.ok, true);
+    assert.deepEqual(checkedCommands, ["agy"]);
+    assert.deepEqual(report.checks.workerCli.present, [
+      {
+        shard: "antigravity-worker",
+        agent: "antigravity",
+        command: "agy",
+        path: "/usr/local/bin/agy",
+      },
+      {
+        shard: "agy-worker",
+        agent: "agy",
+        command: "agy",
+        path: "/usr/local/bin/agy",
+      },
+    ]);
+    assert.deepEqual(report.checks.workerCli.missing, []);
+  });
+
   it("warns, but does not block, explicitly leased sensitive files", () => {
     const repoRoot = makeTmpDir();
     const prdPath = writePrd(
