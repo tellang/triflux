@@ -10,6 +10,7 @@ export async function startInteractiveNativeWorker({
   sessionName,
   cwd,
   launchCmd,
+  pid = process.pid,
   env = {},
   createTransport = createInteractiveTuiTransport,
 } = {}) {
@@ -44,6 +45,7 @@ export async function startInteractiveNativeWorker({
       short,
       rvSock,
       ptySock,
+      pid,
       workerType: "interactive",
       onInput(payload) {
         void Promise.resolve()
@@ -72,6 +74,7 @@ export async function startInteractiveNativeWorker({
     short,
     rvSock,
     ptySock,
+    pid,
     close,
   };
 }
