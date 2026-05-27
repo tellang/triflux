@@ -28,9 +28,48 @@ function hasCall(calls, expected) {
   });
 }
 
+function startupSendKeys(calls, sessionName) {
+  return calls
+    .filter((call) => call[0] === "send-keys" && call[2] === sessionName)
+    .filter((call) => call.at(-1) !== "codex")
+    .filter((call) => call[3] !== "codex")
+    .map((call) => call.at(-1));
+}
+
+function updatePromptScreen(selected = "Update now") {
+  const lines = [
+    "✨ Update available!",
+    "  1. Update now",
+    "  2. Skip",
+    "  3. Skip until next version",
+  ];
+  return lines
+    .map((line) =>
+      line.includes(selected) ? line.replace(/^  /, "› ") : line,
+    )
+    .join("\n");
+}
+
+function trustPromptScreen(selected = "Yes, continue") {
+  const lines = [
+    "Do you trust the contents of this directory?",
+    "  No, quit",
+    "  Yes, continue",
+  ];
+  return lines
+    .map((line) =>
+      line.includes(selected) ? line.replace(/^  /, "› ") : line,
+    )
+    .join("\n");
+}
+
+function mainPromptScreen() {
+  return "Welcome to Codex\n/model to change model\n\n› ";
+}
+
 test("start creates a detached tmux session, sends launch command, and streams captured output", async () => {
   const chunks = [];
-  const fake = createFakeTmux({ captures: ["", "", "ready\n"] });
+  const fake = createFakeTmux({ captures: [mainPromptScreen(), "ready\n"] });
   const transport = createInteractiveTuiTransport({
     runTmux: fake.runTmux,
     sessionName: "tfx-int-test",
@@ -65,6 +104,121 @@ test("start creates a detached tmux session, sends launch command, and streams c
     ]),
   );
   assert.deepEqual(chunks, ["ready\n"]);
+});
+
+test("start dismisses update before trust without selecting Update now", async () => {
+  const fake = createFakeTmux({
+    captures: [
+      updatePromptScreen("Update now"),
+      updatePromptScreen("Skip"),
+      trustPromptScreen("Yes, continue"),
+      mainPromptScreen(),
+    ],
+  });
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-update-trust",
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  assert.deepEqual(startupSendKeys(fake.calls, "tfx-int-update-trust"), [
+    "Down",
+    "Enter",
+    "Enter",
+  ]);
+});
+
+test("start retries startup prompt dismissal while the TUI is still rendering", async () => {
+  const fake = createFakeTmux({
+    captures: [
+      "",
+      "Codex",
+      updatePromptScreen("Update now"),
+      updatePromptScreen("Skip"),
+      mainPromptScreen(),
+    ],
+  });
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-delayed-render",
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  assert.deepEqual(startupSendKeys(fake.calls, "tfx-int-delayed-render"), [
+    "Down",
+    "Enter",
+  ]);
+});
+
+test("start exits startup prompt dismissal immediately when already at main prompt", async () => {
+  const fake = createFakeTmux({ captures: [mainPromptScreen()] });
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-main",
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  assert.deepEqual(startupSendKeys(fake.calls, "tfx-int-main"), []);
+});
+
+test("start dismisses update-only startup prompt by skipping", async () => {
+  const fake = createFakeTmux({
+    captures: [
+      updatePromptScreen("Update now"),
+      updatePromptScreen("Skip until next version"),
+      mainPromptScreen(),
+    ],
+  });
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-update-only",
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  assert.deepEqual(startupSendKeys(fake.calls, "tfx-int-update-only"), [
+    "Down",
+    "Enter",
+  ]);
+});
+
+test("start dismisses trust-only startup prompt by continuing", async () => {
+  const fake = createFakeTmux({
+    captures: [trustPromptScreen("Yes, continue"), mainPromptScreen()],
+  });
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-trust-only",
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  assert.deepEqual(startupSendKeys(fake.calls, "tfx-int-trust-only"), [
+    "Enter",
+  ]);
+});
+
+test("start leaves startup dismissal alone when no prompt is visible", async () => {
+  const fake = createFakeTmux({
+    captures: ["shell ready\n", mainPromptScreen()],
+  });
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-no-prompt",
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  assert.deepEqual(startupSendKeys(fake.calls, "tfx-int-no-prompt"), []);
 });
 
 test("writeInput sends printable text literally and maps control keys to tmux key names", async () => {

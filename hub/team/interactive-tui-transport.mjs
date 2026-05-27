@@ -6,6 +6,8 @@ const execFileAsync = promisify(execFile);
 const MAX_BUFFER = 5 * 1024 * 1024;
 const DEFAULT_POLL_INTERVAL_MS = 150;
 const MAX_CONSECUTIVE_POLL_ERRORS = 3;
+const STARTUP_PROMPT_MAX_ATTEMPTS = 30;
+const STARTUP_PROMPT_POLL_INTERVAL_MS = 300;
 
 const CONTROL_SEQUENCES = [
   ["\x1b[A", "Up"],
@@ -261,11 +263,20 @@ function assertPositiveInteger(name, value) {
 }
 
 function isUpdatePrompt(text) {
-  return /Update available/.test(text) && /Skip until next version/.test(text);
+  return (
+    /Update available/.test(text) &&
+    /Update now/.test(text) &&
+    /\bSkip\b/.test(text)
+  );
 }
 
 function isCodexTrustPrompt(text) {
   return String(text).includes("Do you trust the contents of this directory");
+}
+
+function isCodexMainPrompt(text) {
+  const raw = String(text);
+  return /\/model to change/.test(raw) || /^\s*›\s*$/m.test(raw);
 }
 
 function selectedLine(text) {
@@ -280,63 +291,50 @@ function isUpdateNowLine(line) {
   return /Update now/.test(line);
 }
 
-function isSkipUntilNextVersionLine(line) {
-  return /Skip until next version/.test(line) && !isUpdateNowLine(line);
-}
-
 function isSafeSkipLine(line) {
   return /\bSkip\b/.test(line) && !isUpdateNowLine(line);
 }
 
 async function dismissStartupPrompts({ tmux, captureVisible, sessionName }) {
-  await dismissCodexTrustPrompt({ tmux, captureVisible, sessionName });
-  await dismissCodexUpdatePrompt({ tmux, captureVisible, sessionName });
-}
+  for (let attempt = 0; attempt < STARTUP_PROMPT_MAX_ATTEMPTS; attempt += 1) {
+    const raw = await captureVisible();
 
-async function dismissCodexTrustPrompt({ tmux, captureVisible, sessionName }) {
-  let raw = await captureVisible();
-  if (!isCodexTrustPrompt(raw)) {
-    return;
-  }
+    if (isUpdatePrompt(raw)) {
+      await dismissCodexUpdatePromptStep({ tmux, raw, sessionName });
+      await sleep(STARTUP_PROMPT_POLL_INTERVAL_MS);
+      continue;
+    }
 
-  for (let iteration = 0; iteration < 4; iteration += 1) {
-    const selected = selectedLine(raw);
-    if (/Yes, continue/.test(selected) && !/No, quit/.test(selected)) {
-      await tmux(["send-keys", "-t", sessionName, "Enter"]);
+    if (isCodexTrustPrompt(raw)) {
+      await dismissCodexTrustPromptStep({ tmux, raw, sessionName });
+      await sleep(STARTUP_PROMPT_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (isCodexMainPrompt(raw)) {
       return;
     }
 
-    await tmux(["send-keys", "-t", sessionName, "Down"]);
-    await sleep(200);
-    raw = await captureVisible();
-  }
-
-  const selected = selectedLine(raw);
-  if (/\bYes\b/.test(selected) && !/\bNo\b/.test(selected)) {
-    await tmux(["send-keys", "-t", sessionName, "Enter"]);
+    await sleep(STARTUP_PROMPT_POLL_INTERVAL_MS);
   }
 }
 
-async function dismissCodexUpdatePrompt({ tmux, captureVisible, sessionName }) {
-  let raw = await captureVisible();
-  if (!isUpdatePrompt(raw)) {
-    return;
-  }
-
-  for (let iteration = 0; iteration < 4; iteration += 1) {
-    await tmux(["send-keys", "-t", sessionName, "Down"]);
-    await sleep(200);
-    raw = await captureVisible();
-
-    const selected = selectedLine(raw);
-    if (isSkipUntilNextVersionLine(selected)) {
-      await tmux(["send-keys", "-t", sessionName, "Enter"]);
-      return;
-    }
-  }
-
+async function dismissCodexUpdatePromptStep({ tmux, raw, sessionName }) {
   const selected = selectedLine(raw);
   if (isSafeSkipLine(selected)) {
     await tmux(["send-keys", "-t", sessionName, "Enter"]);
+    return;
   }
+
+  await tmux(["send-keys", "-t", sessionName, "Down"]);
+}
+
+async function dismissCodexTrustPromptStep({ tmux, raw, sessionName }) {
+  const selected = selectedLine(raw);
+  if (/Yes, continue/.test(selected) && !/No, quit/.test(selected)) {
+    await tmux(["send-keys", "-t", sessionName, "Enter"]);
+    return;
+  }
+
+  await tmux(["send-keys", "-t", sessionName, "Down"]);
 }
