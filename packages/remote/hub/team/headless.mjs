@@ -92,6 +92,8 @@ const _ANSI_DIM = "\x1b[2m";
 /** 에이전트 역할명 → CLI 타입 매핑 (단일 소스: agent-map.json) */
 const _require = createRequire(import.meta.url);
 const AGENT_TO_CLI = _require("./agent-map.json");
+// scripts/tfx-route.sh also validates route agents from agent-map.json.
+const VALID_ROUTE_AGENTS = new Set(Object.keys(AGENT_TO_CLI));
 
 /**
  * 에이전트 역할명 또는 CLI 이름을 CLI 타입("codex"|"antigravity"|"claude")으로 해석한다.
@@ -137,10 +139,14 @@ function resolveHeadlessRouteScript(opts = {}) {
 
 function resolveRouteAgentForHeadless(resolvedCli, opts = {}) {
   const role = String(opts.role || "").trim();
-  if (role && !["gemini", "antigravity", "agy"].includes(role)) {
+  if (
+    role &&
+    VALID_ROUTE_AGENTS.has(role) &&
+    !["gemini", "antigravity", "agy"].includes(role)
+  ) {
     return role;
   }
-  return resolvedCli === "antigravity" ? "antigravity" : role || resolvedCli;
+  return resolvedCli === "antigravity" ? "antigravity" : resolvedCli;
 }
 
 function buildRouteBackedHeadlessCommand(
