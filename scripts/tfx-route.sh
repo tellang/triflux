@@ -1398,6 +1398,10 @@ apply_no_claude_native_mode() {
 ## stdout 으로 반환. env 미설정 시 helper 가 silent no-op (stdout empty) →
 ## 현재 CLI_TYPE 유지. conductor (sync) / swarm-hypervisor (plan-time) wire-up
 ## 과 의도 정합한 sh 경로 wire-up.
+## TODO(retry-profile): bridge retry-run/status now exposes
+## cliInvocation.argv for escalation-chain profile steps. This shell route has
+## no retry snapshot input yet; when adding one, append those argv before
+## running codex instead of duplicating profile resolution here.
 apply_dynamic_routing_override() {
   # set -u 환경 safe — 모든 env 변수 default 값 패턴 적용.
   local flag="${TRIFLUX_DYNAMIC_ROUTING:-}"

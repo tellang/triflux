@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -130,5 +130,43 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
         assert.equal(last.stuckCounter, 3);
       }
     }
+  });
+
+  it("retry-status 는 profile 지정 chain step 을 codex --profile argv 로 방출한다", () => {
+    const dir = makeTempDir();
+    const snapshot = join(dir, "snap.json");
+    writeFileSync(
+      snapshot,
+      JSON.stringify({
+        version: 1,
+        current: "EXECUTING",
+        iterations: 1,
+        maxIterations: 3,
+        stuckCounter: 0,
+        lastFailureReason: null,
+        cliIndex: 0,
+        cliChain: [
+          { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
+          { cli: "claude", model: "opus-4-7" },
+        ],
+        mode: "auto-escalate",
+        sessionId: null,
+        history: [],
+      }),
+      "utf8",
+    );
+
+    const status = runBridge(["retry-status", "--snapshot", snapshot]);
+    assert.deepEqual(status.cli, {
+      cli: "codex",
+      model: "gpt-5.5",
+      profile: "gpt55_high",
+    });
+    assert.deepEqual(status.cliInvocation, {
+      cli: "codex",
+      model: "gpt-5.5",
+      profile: "gpt55_high",
+      argv: ["--profile", "gpt55_high"],
+    });
   });
 });
