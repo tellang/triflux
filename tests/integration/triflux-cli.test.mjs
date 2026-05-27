@@ -266,6 +266,10 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
         "[profiles.gpt55_low]",
         'model = "legacy-model"',
         "",
+        "[profiles.personal]",
+        'model = "custom-model"',
+        'model_reasoning_effort = "medium"',
+        "",
         "# padding: realistic Codex config files are larger than setup's safety floor",
       ].join("\n"),
       "utf8",
@@ -301,6 +305,11 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.equal(
       readFileSync(join(codexDir, "gpt55_low.config.toml"), "utf8"),
       'model = "gpt-5.5"\nmodel_reasoning_effort = "low"\n',
+    );
+    // 커스텀 inline 프로필도 별도 파일로 이관되어야 한다 (내용 보존, codex 0.134+).
+    assert.equal(
+      readFileSync(join(codexDir, "personal.config.toml"), "utf8"),
+      'model = "custom-model"\nmodel_reasoning_effort = "medium"\n',
     );
 
     if (process.platform === "win32") {

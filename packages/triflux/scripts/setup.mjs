@@ -452,6 +452,32 @@ function removeProfileSection(tomlContent, profileName) {
   return tomlContent.replace(sectionRe, "");
 }
 
+// config.toml 에 inline 으로 정의된 모든 [profiles.NAME] 의 NAME 목록을 반환한다.
+function listInlineProfileNames(tomlContent) {
+  const names = [];
+  const re = /^\[profiles\.([\w-]+)\]\s*$/gm;
+  let match;
+  while ((match = re.exec(tomlContent)) !== null) {
+    names.push(match[1]);
+  }
+  return names;
+}
+
+// inline [profiles.NAME] 테이블의 본문(key = value 라인들)을 추출한다.
+// 커스텀 프로필을 별도 파일로 이관할 때 내용을 보존하기 위해 사용한다.
+function extractProfileLines(tomlContent, profileName) {
+  const re = new RegExp(
+    `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*\\n((?:(?!\\[)[^\\n]*\\n?)*)`,
+    "m",
+  );
+  const match = tomlContent.match(re);
+  if (!match) return [];
+  return match[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+}
+
 // ── 스킬 별칭 (하나의 소스 스킬을 다른 이름으로도 노출) ──
 
 const SKILL_ALIASES = [
@@ -810,16 +836,27 @@ function ensureCodexProfiles() {
         changed++;
       }
     }
-    // 기존 inline [profiles.*] 테이블 제거 (마이그레이션) — triflux 관리 프로필
-    // (현행 gpt55_* + 구형) 만 대상. 사용자가 직접 정의한 임의 프로필은 보존한다.
-    for (const managedName of [
-      ...REQUIRED_CODEX_PROFILES.map((p) => p.name),
-      ...LEGACY_CODEX_PROFILE_NAMES,
-    ]) {
-      if (hasProfileSection(updated, managedName)) {
-        updated = removeProfileSection(updated, managedName);
-        changed++;
+    // config.toml 의 모든 inline [profiles.*] 마이그레이션 (Codex 0.134 는 inline 거부).
+    //   - 관리 gpt55_*: 위에서 canonical 별도 파일을 썼으므로 inline 만 제거.
+    //   - 구형 retired (codex53/spark53/gpt54/mini54): inline 제거, 재생성 안 함.
+    //   - 그 외 사용자 커스텀: 본문을 보존해 별도 파일로 이관한 뒤 inline 제거.
+    //     (별도 파일이 이미 있으면 덮어쓰지 않는다 — 사용자 수정 보존.)
+    const managedProfileNames = new Set(
+      REQUIRED_CODEX_PROFILES.map((p) => p.name),
+    );
+    const retiredProfileNames = new Set(LEGACY_CODEX_PROFILE_NAMES);
+    for (const name of listInlineProfileNames(updated)) {
+      if (!managedProfileNames.has(name) && !retiredProfileNames.has(name)) {
+        const customPath = join(CODEX_DIR, `${name}.config.toml`);
+        if (!existsSync(customPath)) {
+          const lines = extractProfileLines(updated, name);
+          if (lines.length > 0) {
+            writeFileSync(customPath, `${lines.join("\n")}\n`, "utf8");
+          }
+        }
       }
+      updated = removeProfileSection(updated, name);
+      changed++;
     }
 
     // headless 모드에서 승인 없이 실행하려면 sandbox 설정 필수
@@ -1351,6 +1388,7 @@ export {
   ensureHooksInSettings,
   ensureWindowsHubAutostart,
   extractManagedHookFilename,
+  extractProfileLines,
   getManagedRegistryHooks,
   getVersion,
   getWindowsHubAutostartStatus,
@@ -1361,6 +1399,7 @@ export {
   LEGACY_CODEX_MODELS,
   LEGACY_CODEX_PROFILE_NAMES,
   LOCAL_DEV_SKILL_MARKER,
+  listInlineProfileNames,
   PLUGIN_ROOT,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,

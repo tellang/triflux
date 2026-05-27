@@ -8,8 +8,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..", "..");
 
 const {
+  extractProfileLines,
   hasProfileSection,
   LEGACY_CODEX_PROFILE_NAMES,
+  listInlineProfileNames,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,
   removeProfileSection,
@@ -291,5 +293,38 @@ describe("프로필 lines 포맷: 별도 파일용 top-level 키", () => {
         assert.match(line, /^\w+\s*=\s*.+$/, `invalid profile line: ${line}`);
       }
     }
+  });
+});
+
+// ── listInlineProfileNames / extractProfileLines: 커스텀 프로필 이관 (0.134) ──
+
+describe("listInlineProfileNames: config.toml 의 모든 inline 프로필 이름", () => {
+  it("관리/구형/커스텀 inline 프로필을 모두 순서대로 나열한다", () => {
+    const content =
+      '[profiles.gpt55_high]\nmodel = "gpt-5.5"\n[profiles.personal]\nmodel = "custom"\n[profiles.gpt54_low]\nmodel = "gpt-5.4"\n';
+    assert.deepEqual(listInlineProfileNames(content), [
+      "gpt55_high",
+      "personal",
+      "gpt54_low",
+    ]);
+  });
+
+  it("inline 프로필이 없으면 빈 배열을 반환한다", () => {
+    assert.deepEqual(listInlineProfileNames('model = "gpt-5.5"\n'), []);
+  });
+});
+
+describe("extractProfileLines: inline 본문 추출 (커스텀 이관용)", () => {
+  it("프로필 본문의 key = value 라인을 추출한다", () => {
+    const content =
+      '[profiles.personal]\nmodel = "custom-model"\nmodel_reasoning_effort = "high"\n\n[profiles.other]\nmodel = "x"\n';
+    assert.deepEqual(extractProfileLines(content, "personal"), [
+      'model = "custom-model"',
+      'model_reasoning_effort = "high"',
+    ]);
+  });
+
+  it("존재하지 않는 프로필은 빈 배열을 반환한다", () => {
+    assert.deepEqual(extractProfileLines('model = "x"\n', "nope"), []);
   });
 });

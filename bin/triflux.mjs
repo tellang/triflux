@@ -84,11 +84,10 @@ import {
   getManagedRegistryHooks,
   getVersion,
   getWindowsHubAutostartStatus,
-  hasProfileSection,
   isLocalDevSkillDir,
   isSetupUserStateFile,
   LEGACY_CODEX_MODELS,
-  LEGACY_CODEX_PROFILE_NAMES,
+  listInlineProfileNames,
   REQUIRED_CODEX_PROFILES,
   SKILL_ALIASES,
   SYNC_MAP,
@@ -1516,11 +1515,8 @@ function previewCodexProfiles() {
     }
   }
 
-  // 마이그레이션: config.toml 에 관리 대상 inline [profiles.*] 가 잔존하면 제거 예정.
-  const legacyInlineCleanup = [
-    ...REQUIRED_CODEX_PROFILES.map((p) => p.name),
-    ...LEGACY_CODEX_PROFILE_NAMES,
-  ].some((name) => hasProfileSection(original, name));
+  // 마이그레이션: config.toml 에 inline [profiles.*] 가 잔존하면 제거/이관 예정 (커스텀 포함).
+  const legacyInlineCleanup = listInlineProfileNames(original).length > 0;
 
   const windowsSandbox =
     process.platform === "win32" && !original.includes("[windows]");
@@ -3099,11 +3095,8 @@ async function cmdDoctor(options = {}) {
           issues++;
         }
       }
-      // 0.134: config.toml 에 잔존하는 legacy inline [profiles.*] 는 codex 가 거부한다.
-      const leftoverInline = [
-        ...REQUIRED_CODEX_PROFILES.map((p) => p.name),
-        ...LEGACY_CODEX_PROFILE_NAMES,
-      ].filter((name) => hasProfileSection(codexConfig, name));
+      // 0.134: config.toml 에 잔존하는 inline [profiles.*] 는 codex 가 거부한다 (커스텀 포함).
+      const leftoverInline = listInlineProfileNames(codexConfig);
       if (leftoverInline.length > 0) {
         warn(
           `config.toml legacy inline [profiles.*] 잔존: ${leftoverInline.join(", ")} ${DIM}(codex 0.134+ 거부 — 'tfx setup' 로 정리)${RESET}`,
