@@ -4,7 +4,9 @@ import {
   copyFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -58,113 +60,70 @@ const EFFORT_LEVELS = [
 // ── TOML Parsing ──
 
 function readConfig() {
-  if (!existsSync(CONFIG_PATH)) return { raw: "", defaults: {}, profiles: [] };
-  const raw = readFileSync(CONFIG_PATH, "utf8");
-  return { raw, ...parseConfig(raw) };
+  const raw = existsSync(CONFIG_PATH) ? readFileSync(CONFIG_PATH, "utf8") : "";
+  return { raw, defaults: parseDefaults(raw), profiles: readProfiles() };
 }
 
-function parseConfig(raw) {
-  const lines = raw.split("\n");
+// config.toml 의 top-level 키만 파싱한다 (첫 섹션 헤더 이전 영역).
+function parseDefaults(raw) {
   const defaults = {};
-  const profiles = [];
-  let currentSection = null;
-  let currentProfile = null;
-
-  for (const line of lines) {
+  for (const line of raw.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const sectionMatch = trimmed.match(/^\[(.+)\]$/);
-    if (sectionMatch) {
-      const name = sectionMatch[1];
-      const profileMatch = name.match(/^profiles\.(\w+)$/);
-      if (profileMatch) {
-        currentSection = "profile";
-        currentProfile = { name: profileMatch[1] };
-        profiles.push(currentProfile);
-      } else {
-        currentSection = name;
-        currentProfile = null;
-      }
-      continue;
-    }
-
-    const kvMatch = trimmed.match(/^(\w+)\s*=\s*(.+)$/);
-    if (kvMatch) {
-      const [, key, rawVal] = kvMatch;
-      const value = rawVal.replace(/^["']|["']$/g, "").trim();
-      if (currentSection === "profile" && currentProfile) {
-        currentProfile[key] = value;
-      } else if (!currentSection) {
-        defaults[key] = value;
-      }
-    }
+    if (trimmed.startsWith("[")) break; // 첫 섹션 → top-level 영역 종료
+    const kv = trimmed.match(/^(\w+)\s*=\s*(.+)$/);
+    if (kv) defaults[kv[1]] = kv[2].replace(/^["']|["']$/g, "").trim();
   }
-
-  return { defaults, profiles };
+  return defaults;
 }
 
-function writeProfile(raw, profileName, props) {
-  const lines = raw.split("\n");
-  const sectionRe = new RegExp(`^\\[profiles\\.${escRe(profileName)}\\]\\s*$`);
-  let inSection = false;
-  let sectionStart = -1;
-  let sectionEnd = lines.length;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (sectionRe.test(lines[i].trim())) {
-      inSection = true;
-      sectionStart = i;
-      continue;
-    }
-    if (inSection && lines[i].trim().startsWith("[")) {
-      sectionEnd = i;
-      break;
-    }
+// Codex 0.134+: 프로필은 별도 파일 ~/.codex/<name>.config.toml (top-level 키)로 관리한다.
+// inline [profiles.X] 테이블은 0.134 에서 거부되므로 더 이상 읽거나 쓰지 않는다.
+function readProfiles() {
+  if (!existsSync(CODEX_DIR)) return [];
+  const profiles = [];
+  for (const file of readdirSync(CODEX_DIR)) {
+    if (!file.endsWith(".config.toml")) continue;
+    const name = file.slice(0, -".config.toml".length);
+    profiles.push({
+      name,
+      ...parseProfileFile(readFileSync(join(CODEX_DIR, file), "utf8")),
+    });
   }
-
-  if (sectionStart === -1) {
-    // Append new profile section
-    const newLines = [`[profiles.${profileName}]`];
-    for (const [k, v] of Object.entries(props)) {
-      newLines.push(`${k} = "${v}"`);
-    }
-    return raw.trimEnd() + "\n" + newLines.join("\n") + "\n";
-  }
-
-  // Replace existing section body
-  const newBody = [];
-  for (const [k, v] of Object.entries(props)) {
-    newBody.push(`${k} = "${v}"`);
-  }
-  lines.splice(sectionStart + 1, sectionEnd - sectionStart - 1, ...newBody);
-  return lines.join("\n");
+  return profiles;
 }
 
-function deleteProfile(raw, profileName) {
-  const lines = raw.split("\n");
-  const sectionRe = new RegExp(`^\\[profiles\\.${escRe(profileName)}\\]\\s*$`);
-  let inSection = false;
-  let start = -1;
-  let end = lines.length;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (sectionRe.test(lines[i].trim())) {
-      inSection = true;
-      start = i;
+function parseProfileFile(content) {
+  const props = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("["))
       continue;
-    }
-    if (inSection && lines[i].trim().startsWith("[")) {
-      end = i;
-      break;
-    }
+    const kv = trimmed.match(/^(\w+)\s*=\s*(.+)$/);
+    if (kv) props[kv[1]] = kv[2].replace(/^["']|["']$/g, "").trim();
   }
+  return props;
+}
 
-  if (start === -1) return raw;
-  // Remove trailing blank lines too
-  while (end < lines.length && lines[end].trim() === "") end++;
-  lines.splice(start, end - start);
-  return lines.join("\n");
+function profileFilePath(name) {
+  return join(CODEX_DIR, `${name}.config.toml`);
+}
+
+// 별도 파일로 프로필을 쓴다 (top-level 키, [profiles.X] 헤더 없음 — codex 0.134+).
+function writeProfile(profileName, props) {
+  if (!existsSync(CODEX_DIR)) mkdirSync(CODEX_DIR, { recursive: true });
+  const path = profileFilePath(profileName);
+  if (existsSync(path)) copyFileSync(path, path + ".bak");
+  const body = Object.entries(props).map(([k, v]) => `${k} = "${v}"`);
+  writeFileSync(path, body.join("\n") + "\n", "utf8");
+}
+
+function deleteProfile(profileName) {
+  const path = profileFilePath(profileName);
+  if (existsSync(path)) {
+    copyFileSync(path, path + ".bak");
+    rmSync(path);
+  }
 }
 
 function setDefault(raw, key, value) {
@@ -296,8 +255,7 @@ async function editProfile(config) {
     if (!["name", "model", "model_reasoning_effort"].includes(k)) props[k] = v;
   }
 
-  const raw = writeProfile(config.raw, profile.name, props);
-  save(raw);
+  writeProfile(profile.name, props);
   ok(`${profile.name} 프로파일 저장 완료`);
   return readConfig();
 }
@@ -348,11 +306,10 @@ async function addProfile(config) {
   info(`추가: ${BOLD}${name}${RESET} → ${model} / ${effort}`);
   if (!(await confirm("저장하시겠습니까?"))) return config;
 
-  const raw = writeProfile(config.raw, name, {
+  writeProfile(name, {
     model,
     model_reasoning_effort: effort,
   });
-  save(raw);
   ok(`${name} 프로파일 추가 완료`);
   return readConfig();
 }
@@ -378,8 +335,7 @@ async function removeProfile(config) {
     return config;
   }
 
-  const raw = deleteProfile(config.raw, name);
-  save(raw);
+  deleteProfile(name);
   ok(`${name} 프로파일 삭제 완료`);
   return readConfig();
 }
