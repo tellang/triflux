@@ -232,7 +232,10 @@ function resolveEscalationChain(options) {
   const projectRoot = options.projectRoot || process.cwd();
   return (
     loadEscalationChainOverride(projectRoot) ||
-    normalizeEscalationChain(DEFAULT_ESCALATION_CHAIN, "DEFAULT_ESCALATION_CHAIN")
+    normalizeEscalationChain(
+      DEFAULT_ESCALATION_CHAIN,
+      "DEFAULT_ESCALATION_CHAIN",
+    )
   );
 }
 
@@ -240,7 +243,16 @@ export function loadEscalationChainOverride(projectRoot = process.cwd()) {
   const configPath = join(projectRoot, ESCALATION_CHAIN_CONFIG_PATH);
   if (!existsSync(configPath)) return null;
 
-  const parsed = JSON.parse(readFileSync(configPath, "utf8"));
+  const raw = readFileSync(configPath, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `escalation-chain override 파싱 실패: ${configPath} — 원인: ${err.message} — 수정: JSON 문법 확인 또는 파일 삭제로 DEFAULT_ESCALATION_CHAIN 사용`,
+      { cause: err },
+    );
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`${configPath}: expected object`);
   }
@@ -264,7 +276,9 @@ function normalizeEscalationChainEntry(entry, index, source) {
     throw new Error(`${source}: chain[${index}] must be an object`);
   }
   if (typeof entry.cli !== "string" || entry.cli.trim() === "") {
-    throw new Error(`${source}: chain[${index}].cli must be a non-empty string`);
+    throw new Error(
+      `${source}: chain[${index}].cli must be a non-empty string`,
+    );
   }
   if (typeof entry.model !== "string" || entry.model.trim() === "") {
     throw new Error(
