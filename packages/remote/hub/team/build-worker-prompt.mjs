@@ -9,6 +9,32 @@
 
 import { SENTINEL_BEGIN, SENTINEL_END } from "./sentinel-capture.mjs";
 
+function normalizeLeaseFiles(leaseFiles) {
+  if (!Array.isArray(leaseFiles)) return [];
+  return leaseFiles
+    .map((file) => (typeof file === "string" ? file.trim() : ""))
+    .filter(Boolean);
+}
+
+function formatLeaseFiles(leaseFiles) {
+  const normalized = normalizeLeaseFiles(leaseFiles);
+  if (normalized.length === 0) return "- (none declared)";
+  return normalized.map((file) => `- ${file}`).join("\n");
+}
+
+export function buildLeaseScopedAcceptanceAppendix({ leaseFiles = [] } = {}) {
+  return `
+
+## Lease-scoped Acceptance / Lint Guard (자동 삽입됨)
+- 이 shard 의 파일 lease:
+${formatLeaseFiles(leaseFiles)}
+- Acceptance, lint, and format checks are scoped to files changed by this shard; if that set is unclear, use only the lease list above.
+- Do not run repo-wide format/lint fixers such as \`biome check --write .\`, \`biome --write .\`, \`npm run lint:fix\`, or broad \`npm run lint\` to absorb unrelated drift.
+- For Biome, use \`npx biome check <changed-files-or-lease-files>\`; add \`--write\` only when every target is a changed/leased file you intend to commit.
+- Pre-existing lint drift outside the lease is not this shard's acceptance responsibility; report it instead of editing it.
+`;
+}
+
 export const COMPLETION_PROTOCOL_APPENDIX = `
 
 ## Completion Protocol (자동 삽입됨)
@@ -34,9 +60,14 @@ ${SENTINEL_END}
  * Append the Completion Protocol section to a PRD prompt.
  *
  * @param {string|null|undefined} prdPrompt — original PRD body
+ * @param {{ leaseFiles?: string[] }} [opts] — shard file lease for scoped acceptance
  * @returns {string} prompt with appendix
  */
-export function buildWorkerPrompt(prdPrompt) {
+export function buildWorkerPrompt(prdPrompt, opts = {}) {
   const body = typeof prdPrompt === "string" ? prdPrompt : "";
-  return body + COMPLETION_PROTOCOL_APPENDIX;
+  return (
+    body +
+    buildLeaseScopedAcceptanceAppendix({ leaseFiles: opts.leaseFiles }) +
+    COMPLETION_PROTOCOL_APPENDIX
+  );
 }

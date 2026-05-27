@@ -542,6 +542,17 @@ describe("swarm-hypervisor", () => {
         conductors[0].sessionConfig.branchName,
         "swarm/issue-4/worker-a",
       );
+      assert.ok(
+        conductors[0].sessionConfig.prompt.includes(
+          "Lease-scoped Acceptance / Lint Guard",
+        ),
+      );
+      assert.ok(conductors[0].sessionConfig.prompt.includes("- src/a.mjs"));
+      assert.ok(
+        conductors[0].sessionConfig.prompt.includes(
+          "npx biome check <changed-files-or-lease-files>",
+        ),
+      );
     });
 
     it("keeps native bridge registration disabled for direct hypervisor construction", async () => {

@@ -646,7 +646,7 @@ export function createSwarmHypervisor(opts) {
       agent: shard.agent,
       // #125: append Completion Protocol appendix so workers emit a
       // sentinel-framed JSON payload that conductor can reliably capture.
-      prompt: buildWorkerPrompt(shard.prompt),
+      prompt: buildWorkerPrompt(shard.prompt, { leaseFiles: shard.files }),
       workdir: shard.worktreePath || workdir,
       mcpServers: shard.mcp,
       worktreePath: shard.worktreePath || null,
