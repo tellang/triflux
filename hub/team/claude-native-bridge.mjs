@@ -480,6 +480,8 @@ export async function startNativeWorkerFacade({
   pid = process.pid,
   version = "triflux-native-bridge",
   initialDetail = "pending",
+  workerType = "headless",
+  onInput,
   onKill,
 } = {}) {
   if (!short) throw new Error("short is required");
@@ -516,6 +518,10 @@ export async function startNativeWorkerFacade({
     transcript = trimTranscript(Buffer.concat([transcript, payload]));
     broadcastPty(buildPtyDataFrame(payload));
   };
+  const handlePtyInput =
+    workerType === "interactive" && typeof onInput === "function"
+      ? onInput
+      : appendOutput;
 
   const rvServer = net.createServer((socket) => {
     rvSockets.add(socket);
@@ -573,7 +579,7 @@ export async function startNativeWorkerFacade({
                 ? frame.ctrl
                 : { kind: 0, bytes: frame.payload.length },
           });
-          if (frame.kind === 0) appendOutput(frame.payload);
+          if (frame.kind === 0) handlePtyInput(frame.payload);
           else if (frame.ctrl.t === "resize") {
             socket.write(buildPtyControlFrame({ t: "live" }));
           } else if (frame.ctrl.t === "kill") {
