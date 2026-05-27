@@ -254,7 +254,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.equal(listPayload.user_skills.includes("tfx-autopilot"), false);
   });
 
-  it("setup은 기존 Codex 프로필을 공유 로직으로 보정해야 한다", () => {
+  it("setup은 기존 inline Codex 프로필을 0.134 별도 파일로 마이그레이션해야 한다", () => {
     const homeDir = createHomeDir();
     const codexConfigPath = join(homeDir, ".codex", "config.toml");
     writeFileSync(
@@ -281,18 +281,26 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       /Codex profiles 설정 실패|Codex Profiles 자동 복구 실패/,
     );
 
+    // Codex 0.134+: 프로필은 별도 파일로 이동하고 config.toml 의 inline [profiles.*] 는
+    // 제거된다 (legacy gpt55_high/gpt55_low inline 테이블이 사라져야 한다).
     const updated = readFileSync(codexConfigPath, "utf8");
-    assert.match(
+    assert.doesNotMatch(
       updated,
-      /\[profiles\.gpt55_high\]\nmodel = "gpt-5\.5"\nmodel_reasoning_effort = "high"/,
+      /\[profiles\./,
+      "inline [profiles.*] 는 config.toml 에서 제거되어야 한다 (codex 0.134+)",
     );
-    assert.match(
-      updated,
-      /\[profiles\.gpt55_xhigh\]\nmodel = "gpt-5\.5"\nmodel_reasoning_effort = "xhigh"/,
+    const codexDir = join(homeDir, ".codex");
+    assert.equal(
+      readFileSync(join(codexDir, "gpt55_high.config.toml"), "utf8"),
+      'model = "gpt-5.5"\nmodel_reasoning_effort = "high"\n',
     );
-    assert.match(
-      updated,
-      /\[profiles\.gpt55_low\]\nmodel = "gpt-5\.5"\nmodel_reasoning_effort = "low"/,
+    assert.equal(
+      readFileSync(join(codexDir, "gpt55_xhigh.config.toml"), "utf8"),
+      'model = "gpt-5.5"\nmodel_reasoning_effort = "xhigh"\n',
+    );
+    assert.equal(
+      readFileSync(join(codexDir, "gpt55_low.config.toml"), "utf8"),
+      'model = "gpt-5.5"\nmodel_reasoning_effort = "low"\n',
     );
 
     if (process.platform === "win32") {
