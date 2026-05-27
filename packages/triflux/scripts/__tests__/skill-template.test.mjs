@@ -292,7 +292,7 @@ describe("skill-template engine", () => {
     }
   });
 
-  it("gen-skill-docs에서 누락 partial 참조 시 에러를 전파한다", () => {
+  it("deprecated gen-skill-docs는 템플릿 partial을 해석하지 않는다", () => {
     const root = makeTempDir();
     try {
       const skillsDir = join(root, "skills");
@@ -319,10 +319,13 @@ describe("skill-template engine", () => {
         "utf8",
       );
 
-      assert.throws(
-        () => generateSkillDocs({ skillsDir, templatesDir, write: false }),
-        /Missing partial: missing_partial/,
-      );
+      const result = generateSkillDocs({
+        skillsDir,
+        templatesDir,
+        write: false,
+      });
+      assert.equal(result.deprecated, true);
+      assert.equal(result.count, 0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -45,7 +45,7 @@ options:
 ```
 | 프로파일 | 모델 | Effort |
 |----------|------|--------|
-| gpt55_high | gpt-5.5 | high |
+| gpt55_high | config.toml의 현재 프로필 값 | high |
 | ...  | ...           | ...  |
 ```
 
@@ -72,16 +72,14 @@ options:
 #### 프로파일 모델 변경
 
 1. AskUserQuestion으로 프로파일 선택
-2. AskUserQuestion으로 모델 선택:
+2. AskUserQuestion으로 프로필/alias 선택:
    ```
    options:
-     - label: "gpt-5.5"         → 최신 플래그십 (Recommended)
-     - label: "gpt-5.4"         → 이전 플래그십
-     - label: "gpt-5.4-mini"    → 경량 (mini)
-     - label: "gpt-5.3-codex"   → 코딩 특화
-     - label: "gpt-5.1-codex-mini" → 경량 Spark
-     - label: "o3"              → 추론 특화
-     - label: "o4-mini"         → 추론 경량
+     - label: "gpt55_high"  → 기본 고품질 (Recommended)
+     - label: "gpt55_med"   → 균형형
+     - label: "gpt55_low"   → 빠른 경량
+     - label: "gpt55_xhigh" → 최대 추론
+     - label: "custom"      → 사용자가 관리하는 프로필
    ```
 3. AskUserQuestion으로 effort 선택: `low | medium | high | xhigh`
 4. Edit 도구로 config.toml 수정
@@ -110,8 +108,8 @@ options:
 ```
 | 프로필 | 모델 | 설명 |
 |--------|------|------|
-| pro31  | gemini-3.1-pro-preview | 3.1 Pro — 플래그십 |
-| flash3 | gemini-3-flash-preview | 3.0 Flash — 빠른 응답 |
+| pro31  | profiles.json의 현재 프로필 값 | 플래그십 프로필 |
+| flash3 | profiles.json의 현재 프로필 값 | 빠른 응답 프로필 |
 | ...    | ...                    | ...                 |
 ```
 
@@ -138,14 +136,14 @@ options:
 #### 프로필 모델 변경
 
 1. AskUserQuestion으로 프로필 선택
-2. AskUserQuestion으로 모델 선택:
+2. AskUserQuestion으로 프로필 선택:
    ```
    options:
-     - label: "gemini-3.1-pro-preview"   → 3.1 Pro — 플래그십
-     - label: "gemini-3-flash-preview"   → 3.0 Flash — 빠른 응답
-     - label: "gemini-2.5-pro"           → 2.5 Pro — 안정
-     - label: "gemini-2.5-flash"         → 2.5 Flash — 경량
-     - label: "gemini-2.5-flash-lite"    → 2.5 Flash Lite — 최경량
+     - label: "pro31"   → 플래그십 프로필
+     - label: "flash3"  → 빠른 응답 프로필
+     - label: "pro25"   → 안정 예비 프로필
+     - label: "flash25" → 대량 배치 프로필
+     - label: "lite25"  → 최경량 프로필
    ```
 3. Edit 도구로 triflux-profiles.json 수정
 
@@ -181,17 +179,15 @@ options:
 
 ## 참조
 
-### Codex 모델
+### Codex 프로필
 
-| 모델 | 용도 |
+| 프로필 | 용도 |
 |------|------|
-| gpt-5.5 | 최신 플래그십 (default) |
-| gpt-5.4 | 이전 플래그십 |
-| gpt-5.4-mini | 경량 (mini) |
-| gpt-5.3-codex | 코딩 특화 |
-| gpt-5.1-codex-mini | 경량 Spark |
-| o3 | 추론 특화 |
-| o4-mini | 추론 경량 |
+| gpt55_high | 기본 고품질 |
+| gpt55_xhigh | 최대 추론 |
+| gpt55_med | 균형형 |
+| gpt55_low | 빠른 경량 |
+| custom | 사용자가 관리하는 프로필 |
 
 ### Codex Effort 레벨
 
@@ -202,25 +198,25 @@ options:
 | high | 깊은 추론 |
 | xhigh | 최대 추론 (느림) |
 
-### Antigravity 모델
+### Antigravity 프로필
 
-| 모델 | 용도 |
+| 프로필 | 용도 |
 |------|------|
-| gemini-3.1-pro-preview | 3.1 Pro — 플래그십 (1M ctx) |
-| gemini-3-flash-preview | 3.0 Flash — 빠른 응답, 비용 효율 |
-| gemini-2.5-pro | 2.5 Pro — 안정 (추론 강화) |
-| gemini-2.5-flash | 2.5 Flash — 경량 범용 |
-| gemini-2.5-flash-lite | 2.5 Flash Lite — 최경량 |
+| pro31 | 플래그십 프로필 |
+| flash3 | 빠른 응답, 비용 효율 프로필 |
+| pro25 | 안정 예비 프로필 |
+| flash25 | 대량 배치 프로필 |
+| lite25 | 최경량 프로필 |
 
 ### Antigravity → 에이전트 배치 (벤치마크 기반)
 
-| 프로필 | 모델 | 에이전트 |
+| 프로필 | 용도 | 에이전트 |
 |--------|------|----------|
-| pro31 | gemini-3.1-pro-preview | executor, debugger, deep-executor, architect, planner, critic, analyst, code-reviewer, security-reviewer, quality-reviewer, scientist-deep, designer |
-| flash3 | gemini-3-flash-preview | writer, build-fixer, spark, 기본 폴백 |
-| pro25 | gemini-2.5-pro | (예비 — 3.1 불안정 시 폴백) |
-| flash25 | gemini-2.5-flash | (예비 — 대량 배치) |
-| lite25 | gemini-2.5-flash-lite | (예비 — 최경량) |
+| pro31 | 플래그십 | executor, debugger, deep-executor, architect, planner, critic, analyst, code-reviewer, security-reviewer, quality-reviewer, scientist-deep, designer |
+| flash3 | 빠른 응답 | writer, build-fixer, spark, 기본 폴백 |
+| pro25 | 안정 예비 | 불안정 시 폴백 |
+| flash25 | 대량 배치 | 예비 |
+| lite25 | 최경량 | 예비 |
 
 ### 설정 파일 경로
 

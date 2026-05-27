@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -18,34 +18,21 @@ function makeTempDir() {
 }
 
 describe("lake4 integration", () => {
-  it("gen-skill-docs 파이프라인이 템플릿/partial을 실제 출력으로 변환한다", () => {
+  it("Lake4 템플릿 분리 파이프라인은 보류되어 no-op으로 유지된다", () => {
     const root = makeTempDir();
     try {
       const skillsDir = join(root, "skills");
       const templatesDir = join(skillsDir, "_templates");
       const basicSkillDir = join(skillsDir, "tfx-basic");
-      const deepSkillDir = join(skillsDir, "tfx-deep-worker");
 
       mkdirSync(templatesDir, { recursive: true });
       mkdirSync(basicSkillDir, { recursive: true });
-      mkdirSync(deepSkillDir, { recursive: true });
 
       writeFileSync(
         join(templatesDir, "header.md"),
         "# {{SKILL_NAME}}",
         "utf8",
       );
-      writeFileSync(
-        join(templatesDir, "summary.md"),
-        "desc={{SKILL_DESCRIPTION}}",
-        "utf8",
-      );
-      writeFileSync(
-        join(templatesDir, "deep.md"),
-        "deep-enabled={{SKILL_NAME}}",
-        "utf8",
-      );
-      writeFileSync(join(templatesDir, "footer.md"), "eof", "utf8");
 
       writeFileSync(
         join(basicSkillDir, "SKILL.md.tmpl"),
@@ -55,28 +42,6 @@ describe("lake4 integration", () => {
           "description: basic mode",
           "---",
           "{{> header}}",
-          "{{> summary}}",
-          "{{#if DEEP}}",
-          "{{> deep}}",
-          "{{/if}}",
-          "{{> footer}}",
-        ].join("\n"),
-        "utf8",
-      );
-
-      writeFileSync(
-        join(deepSkillDir, "SKILL.md.tmpl"),
-        [
-          "---",
-          "name: tfx-deep-worker",
-          "description: deep mode",
-          "---",
-          "{{> header}}",
-          "{{> summary}}",
-          "{{#if DEEP}}",
-          "{{> deep}}",
-          "{{/if}}",
-          "{{> footer}}",
         ].join("\n"),
         "utf8",
       );
@@ -86,39 +51,9 @@ describe("lake4 integration", () => {
         templatesDir,
         write: true,
       });
-      assert.equal(result.count, 2);
-
-      const basicOut = readFileSync(join(basicSkillDir, "SKILL.md"), "utf8");
-      const deepOut = readFileSync(join(deepSkillDir, "SKILL.md"), "utf8");
-
-      assert.equal(
-        basicOut,
-        [
-          "---",
-          "name: tfx-basic",
-          "description: basic mode",
-          "---",
-          "# tfx-basic",
-          "desc=basic mode",
-          "",
-          "eof",
-        ].join("\n"),
-      );
-      assert.equal(
-        deepOut,
-        [
-          "---",
-          "name: tfx-deep-worker",
-          "description: deep mode",
-          "---",
-          "# tfx-deep-worker",
-          "desc=deep mode",
-          "",
-          "deep-enabled=tfx-deep-worker",
-          "",
-          "eof",
-        ].join("\n"),
-      );
+      assert.equal(result.deprecated, true);
+      assert.equal(result.count, 0);
+      assert.equal(existsSync(join(basicSkillDir, "SKILL.md")), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

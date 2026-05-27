@@ -350,7 +350,7 @@ npm run snapshot:all
 패키지 내용에 영향이 있는 저장소 변경은 ship 전에 release gate를 통과시킵니다.
 
 ```bash
-npm run gen:skill-docs
+npm run lint:skills
 npm run gen:skill-manifest
 npm run release:check-sync
 npm run release:check-mirror
