@@ -9,8 +9,10 @@ const PROJECT_ROOT = join(__dirname, "..", "..");
 
 const {
   hasProfileSection,
+  LEGACY_CODEX_PROFILE_NAMES,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,
+  removeProfileSection,
 } = await import("../../scripts/setup.mjs");
 
 // ── helpers ──
@@ -208,5 +210,86 @@ describe("ensureCodexProfiles: 손상 파일 가드", () => {
       REQUIRED_TOP_LEVEL_SETTINGS.length >= 3,
       "need at least 3 top-level settings",
     );
+  });
+});
+
+// ── removeProfileSection: inline [profiles.*] 제거 (0.134 마이그레이션) ──
+
+describe("removeProfileSection: inline 프로필 섹션 제거", () => {
+  it("inline 프로필 섹션을 제거한다", () => {
+    const content =
+      'model = "gpt-5.5"\n\n[profiles.gpt55_high]\nmodel = "gpt-5.5"\nmodel_reasoning_effort = "high"\n';
+    const result = removeProfileSection(content, "gpt55_high");
+    assert.equal(hasProfileSection(result, "gpt55_high"), false);
+    assert.ok(
+      result.includes('model = "gpt-5.5"'),
+      "top-level 키는 보존되어야 한다",
+    );
+  });
+
+  it("대상 외 프로필은 보존한다", () => {
+    const content =
+      '[profiles.gpt55_high]\nmodel = "gpt-5.5"\n[profiles.gpt55_low]\nmodel = "gpt-5.5"\nmodel_reasoning_effort = "low"\n';
+    const result = removeProfileSection(content, "gpt55_high");
+    assert.equal(hasProfileSection(result, "gpt55_high"), false);
+    assert.equal(hasProfileSection(result, "gpt55_low"), true);
+  });
+
+  it("존재하지 않는 프로필 제거는 내용을 바꾸지 않는다", () => {
+    const content = 'model = "gpt-5.5"\n';
+    assert.equal(removeProfileSection(content, "nope"), content);
+  });
+});
+
+// ── LEGACY_CODEX_PROFILE_NAMES: 마이그레이션 정리 대상 ──
+
+describe("LEGACY_CODEX_PROFILE_NAMES: 구형 프로필 정리 목록", () => {
+  it("retired 모델 프로필명을 포함한다", () => {
+    assert.ok(Array.isArray(LEGACY_CODEX_PROFILE_NAMES));
+    for (const n of [
+      "codex53_high",
+      "gpt54_high",
+      "mini54_low",
+      "spark53_low",
+    ]) {
+      assert.ok(
+        LEGACY_CODEX_PROFILE_NAMES.includes(n),
+        `${n} not in LEGACY_CODEX_PROFILE_NAMES`,
+      );
+    }
+  });
+
+  it("현행 gpt55_* 는 legacy 목록에 없다 (정리 대상 아님)", () => {
+    for (const p of REQUIRED_CODEX_PROFILES) {
+      assert.equal(
+        LEGACY_CODEX_PROFILE_NAMES.includes(p.name),
+        false,
+        `${p.name} 은 현행 프로필이라 legacy 가 아니어야 한다`,
+      );
+    }
+  });
+});
+
+// ── 0.134 별도 파일 포맷: 프로필 lines 는 top-level 키 (inline 헤더 없음) ──
+
+describe("프로필 lines 포맷: 별도 파일용 top-level 키", () => {
+  it("REQUIRED_CODEX_PROFILES lines 에 [profiles.*] 헤더가 없다", () => {
+    for (const p of REQUIRED_CODEX_PROFILES) {
+      for (const line of p.lines) {
+        assert.equal(
+          line.includes("[profiles."),
+          false,
+          `${p.name} line 에 inline 헤더가 있으면 안 된다: ${line}`,
+        );
+      }
+    }
+  });
+
+  it("각 line 은 key = value 형태다 (별도 파일 top-level)", () => {
+    for (const p of REQUIRED_CODEX_PROFILES) {
+      for (const line of p.lines) {
+        assert.match(line, /^\w+\s*=\s*.+$/, `invalid profile line: ${line}`);
+      }
+    }
   });
 });
