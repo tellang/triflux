@@ -1373,6 +1373,21 @@ function buildRetrySmFromArgs(args, snapshot) {
   return sm;
 }
 
+function buildRetryCliInvocation(cli) {
+  if (!cli) return null;
+
+  const invocation = {
+    cli: cli.cli,
+    model: cli.model,
+    argv: [],
+  };
+  if (cli.profile) invocation.profile = cli.profile;
+  if (cli.cli === "codex" && cli.profile) {
+    invocation.argv.push("--profile", cli.profile);
+  }
+  return invocation;
+}
+
 async function cmdRetryRun(args) {
   const snapshotFile = args.snapshot || args["snapshot-file"];
   const event = args.event;
@@ -1411,12 +1426,14 @@ async function cmdRetryRun(args) {
 
   const terminal = ["DONE", "STUCK", "BUDGET_EXCEEDED"].includes(snap.current);
   const cli = snap.cliChain?.[snap.cliIndex] || null;
+  const cliInvocation = buildRetryCliInvocation(cli);
   const out = {
     ok: true,
     current: snap.current,
     iterations: snap.iterations,
     cliIndex: snap.cliIndex,
     cli,
+    cliInvocation,
     done: snap.current === "DONE",
     shouldStop: terminal,
     stuckCounter: snap.stuckCounter,
@@ -1440,6 +1457,7 @@ async function cmdRetryStatus(args) {
   }
   const terminal = ["DONE", "STUCK", "BUDGET_EXCEEDED"].includes(snap.current);
   const cli = snap.cliChain?.[snap.cliIndex] || null;
+  const cliInvocation = buildRetryCliInvocation(cli);
   console.log(
     JSON.stringify({
       ok: true,
@@ -1449,6 +1467,7 @@ async function cmdRetryStatus(args) {
       maxIterations: snap.maxIterations,
       cliIndex: snap.cliIndex,
       cli,
+      cliInvocation,
       mode: snap.mode,
       shouldStop: terminal,
       stuckCounter: snap.stuckCounter,

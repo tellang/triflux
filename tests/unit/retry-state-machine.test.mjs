@@ -209,6 +209,32 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
         { cli: "claude", model: "opus-4-7" },
       ]);
     });
+
+    it("malformed escalation-chain override 는 problem/cause/fix 에러로 실패한다", () => {
+      const dir = makeTempDir();
+      const configDir = join(dir, ".triflux", "config");
+      const configPath = join(configDir, "escalation-chain.json");
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(configPath, '{"version":1,"chain":[', "utf8");
+
+      assert.throws(
+        () =>
+          createRetryStateMachine({
+            mode: "auto-escalate",
+            projectRoot: dir,
+          }),
+        (err) => {
+          assert.match(err.message, /escalation-chain override 파싱 실패/u);
+          assert.match(err.message, new RegExp(configPath));
+          assert.match(err.message, /원인:/u);
+          assert.match(
+            err.message,
+            /수정: JSON 문법 확인 또는 파일 삭제로 DEFAULT_ESCALATION_CHAIN 사용/u,
+          );
+          return true;
+        },
+      );
+    });
   });
 
   describe("compaction survival — stateFile persist / resume", () => {

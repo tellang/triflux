@@ -10,7 +10,7 @@ import { planSwarm } from "./swarm-planner.mjs";
 
 const AGENT_COMMANDS = Object.freeze({
   codex: "codex",
-  gemini: "gemini",
+  gemini: "agy",
   antigravity: "agy",
   agy: "agy",
   claude: "claude",
