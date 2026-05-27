@@ -21,7 +21,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 export const STATES = Object.freeze({
   PLANNING: "PLANNING",
@@ -38,16 +38,12 @@ export const MODES = Object.freeze({
   ESCALATE: "auto-escalate",
 });
 
-// Escalation chain (2026-04-25 정책):
-//   1. gpt-5.4-mini   — 비용 최저, fast tier, 단순 task 대부분 해결
-//   2. gpt-5.3-codex  — 가성비 중간, code specialized (Plus/free 모두 OK, fast 미지원)
-//   3. gpt-5.5         — top reasoning + 코드 강함, fast tier
-//   4. claude opus-4-7 — 최종 수단
-// sonnet-4-6 단계는 제거: gpt-5.5 가 코드/추론/비용 모두 우위 + 5.3-codex 가성비
-// 단계가 더 적합한 중간 격상.
+const ESCALATION_CHAIN_CONFIG_PATH = ".triflux/config/escalation-chain.json";
+
+// Escalation chain (2026-05-27 정책):
+//   1. codex gpt-5.5   — 코드/추론/비용에서 mini/5.3-codex 중간 단계를 대체
+//   2. claude opus-4-7 — 최종 수단
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
-  Object.freeze({ cli: "codex", model: "gpt-5.4-mini" }),
-  Object.freeze({ cli: "codex", model: "gpt-5.3-codex" }),
   Object.freeze({ cli: "codex", model: "gpt-5.5" }),
   Object.freeze({ cli: "claude", model: "opus-4-7" }),
 ]);
@@ -56,9 +52,7 @@ const STUCK_THRESHOLD = 3;
 
 export function createRetryStateMachine(options = {}) {
   const mode = options.mode || MODES.BOUNDED;
-  const cliChain = Array.isArray(options.cliChain)
-    ? options.cliChain.slice()
-    : DEFAULT_ESCALATION_CHAIN.slice();
+  const cliChain = resolveEscalationChain(options);
   const maxIterationsInput =
     typeof options.maxIterations === "number" ? options.maxIterations : null;
   const maxIterations =
@@ -205,7 +199,10 @@ export function createRetryStateMachine(options = {}) {
     state.lastFailureReason = snapshot.lastFailureReason || null;
     state.cliIndex = Number(snapshot.cliIndex) || 0;
     if (Array.isArray(snapshot.cliChain) && snapshot.cliChain.length > 0) {
-      state.cliChain = snapshot.cliChain.slice();
+      state.cliChain = normalizeEscalationChain(
+        snapshot.cliChain,
+        "snapshot.cliChain",
+      );
     }
     if (snapshot.mode) state.mode = snapshot.mode;
     if (snapshot.sessionId !== undefined) state.sessionId = snapshot.sessionId;
@@ -225,6 +222,64 @@ export function createRetryStateMachine(options = {}) {
     serialize,
     applySnapshot,
   };
+}
+
+function resolveEscalationChain(options) {
+  if (Array.isArray(options.cliChain)) {
+    return normalizeEscalationChain(options.cliChain, "options.cliChain");
+  }
+
+  const projectRoot = options.projectRoot || process.cwd();
+  return (
+    loadEscalationChainOverride(projectRoot) ||
+    normalizeEscalationChain(DEFAULT_ESCALATION_CHAIN, "DEFAULT_ESCALATION_CHAIN")
+  );
+}
+
+export function loadEscalationChainOverride(projectRoot = process.cwd()) {
+  const configPath = join(projectRoot, ESCALATION_CHAIN_CONFIG_PATH);
+  if (!existsSync(configPath)) return null;
+
+  const parsed = JSON.parse(readFileSync(configPath, "utf8"));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${configPath}: expected object`);
+  }
+  if (parsed.version !== undefined && parsed.version !== 1) {
+    throw new Error(`${configPath}: unsupported version ${parsed.version}`);
+  }
+  return normalizeEscalationChain(parsed.chain, configPath);
+}
+
+function normalizeEscalationChain(chain, source) {
+  if (!Array.isArray(chain) || chain.length === 0) {
+    throw new Error(`${source}: chain must be a non-empty array`);
+  }
+  return chain.map((entry, index) =>
+    normalizeEscalationChainEntry(entry, index, source),
+  );
+}
+
+function normalizeEscalationChainEntry(entry, index, source) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    throw new Error(`${source}: chain[${index}] must be an object`);
+  }
+  if (typeof entry.cli !== "string" || entry.cli.trim() === "") {
+    throw new Error(`${source}: chain[${index}].cli must be a non-empty string`);
+  }
+  if (typeof entry.model !== "string" || entry.model.trim() === "") {
+    throw new Error(
+      `${source}: chain[${index}].model must be a non-empty string`,
+    );
+  }
+
+  const normalized = {
+    cli: entry.cli,
+    model: entry.model,
+  };
+  if (typeof entry.profile === "string" && entry.profile.trim() !== "") {
+    normalized.profile = entry.profile;
+  }
+  return normalized;
 }
 
 function persistTransition(stateFile, entry) {

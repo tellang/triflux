@@ -7,12 +7,10 @@
 
 `hub/team/retry-state-machine.mjs` 의 `DEFAULT_ESCALATION_CHAIN` 상수.
 
-| # | CLI | 모델 | 이유 |
-|---|-----|------|------|
-| 1 | codex | gpt-5.4-mini | 비용 최저, fast tier, 단순 태스크 대부분 해결. (gpt-5.5 mini 변종 부재 → 5.4-mini 유지) |
-| 2 | codex | gpt-5.3-codex | 가성비 중간, code specialized. Plus/free 모두 OK. fast tier 미지원이지만 reasoning depth 보강. |
-| 3 | codex | gpt-5.5 | top reasoning + 코드 강함, fast tier. sonnet-4-6 보다 코드/추론/비용 모두 우위라 sonnet 단계 제거 후 격상. |
-| 4 | claude | opus-4-7 | 최종 수단, 복잡 아키텍처/합의 요구 시 |
+| # | CLI | 모델 | profile | 이유 |
+|---|-----|------|---------|------|
+| 1 | codex | gpt-5.5 | 미지정 | 코드/추론/비용에서 gpt-5.4-mini / gpt-5.3-codex 중간 단계를 대체. profile 미지정 시 `config.toml` 기본값 사용. |
+| 2 | claude | opus-4-7 | 미지정 | 최종 수단, 복잡 아키텍처/합의 요구 시 |
 
 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
 
@@ -24,24 +22,27 @@
 
 ## 프로젝트 override
 
-PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escalation-chain.json` 을 두면 `DEFAULT_ESCALATION_CHAIN` 대신 이 파일을 읽는다 (구현 예정, Step F 에서 노출):
+PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escalation-chain.json` 을 두면 `DEFAULT_ESCALATION_CHAIN` 대신 이 파일을 읽는다:
 
 ```json
 {
   "version": 1,
   "chain": [
-    { "cli": "codex", "model": "gpt-5.5" },
+    { "cli": "codex", "model": "gpt-5.5", "profile": "gpt55_high" },
     { "cli": "claude", "model": "opus-4-7" }
   ]
 }
 ```
 
-체인 항목 필드: `cli` (codex|antigravity|claude), `model` (CLI 가 해석하는 문자열).
+체인 항목 필드:
+- `cli` (codex|antigravity|claude)
+- `model` (CLI 가 해석하는 문자열)
+- `profile` (optional): `gpt55_low` / `gpt55_med` / `gpt55_high` / `gpt55_xhigh` 같은 CLI profile 이름. 지정되면 파싱/전달만 하며, 없으면 기존 동작과 동일하게 각 CLI/config 기본값을 따른다.
 
 ## 사용 예시
 
 ```
-# 기본 체인 (4단계)
+# 기본 체인 (2단계)
 /tfx-auto "복구" --retry auto-escalate
 
 # 단계당 상한 2회
