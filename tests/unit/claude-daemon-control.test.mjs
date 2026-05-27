@@ -226,16 +226,29 @@ test("extractClaudeDaemonAttachText strips transient status lines after numeric 
 });
 
 test("extractClaudeDaemonAttachText rejoins soft-wrapped rows without dropping boundary spaces", () => {
+  const text = ["⏺ 캡처에서 completion까지 보존", "✻ Brewed for 1s", "❯ "].join(
+    "\n",
+  );
+
+  assert.equal(
+    extractClaudeDaemonAttachText(text, { cols: 8 }),
+    "캡처에서 completion까지 보존",
+  );
+});
+
+test("extractClaudeDaemonAttachText keeps hard newlines after full-width rows", () => {
+  const fullWidthCodeLine = "x".repeat(80);
   const text = [
-    "⏺ 캡처에서",
-    " completion까지 보존",
+    "⏺ generated code:",
+    fullWidthCodeLine,
+    "return result;",
     "✻ Brewed for 1s",
     "❯ ",
   ].join("\n");
 
   assert.equal(
-    extractClaudeDaemonAttachText(text, { cols: 8 }),
-    "캡처에서 completion까지 보존",
+    extractClaudeDaemonAttachText(text, { cols: 80 }),
+    ["generated code:", fullWidthCodeLine, "return result;"].join("\n"),
   );
 });
 
@@ -246,9 +259,7 @@ test("extractClaudeDaemonAttachText applies repaint overwrites before extracting
 });
 
 test("extractClaudeDaemonAttachText respects Hangul cell width at soft-wrap boundaries", () => {
-  const text = ["⏺ 한글한", " 글 경계 보존", "✻ Brewed for 1s", "❯ "].join(
-    "\n",
-  );
+  const text = ["⏺ 한글한 글 경계 보존", "✻ Brewed for 1s", "❯ "].join("\n");
 
   assert.equal(
     extractClaudeDaemonAttachText(text, { cols: 6 }),

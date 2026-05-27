@@ -174,14 +174,6 @@ function terminalCellWidth(char) {
   return 1;
 }
 
-function terminalTextWidth(text) {
-  let width = 0;
-  for (const char of String(text)) {
-    width += terminalCellWidth(char);
-  }
-  return width;
-}
-
 function parseCsiParams(params) {
   const normalized = params.replace(/[?<=>]/g, "");
   if (!normalized) return [];
@@ -500,14 +492,8 @@ function normalizeClaudeAttachResponseLine(line) {
   return line.replace(/^ {2}/, "");
 }
 
-function shouldJoinSoftWrappedLine({
-  cols,
-  rendered,
-  lineIndex,
-  previousLine,
-}) {
-  if (rendered.softWrappedRows.has(lineIndex)) return true;
-  return terminalTextWidth(previousLine) >= normalizeTerminalCols(cols);
+function shouldJoinSoftWrappedLine({ rendered, lineIndex }) {
+  return rendered.softWrappedRows.has(lineIndex);
 }
 
 function joinSoftWrappedLine(previous, current, previousHadTrailingSpace) {
@@ -551,10 +537,8 @@ export function extractClaudeDaemonAttachText(
       response.length > 0 &&
       lastAcceptedLineIndex === index - 1 &&
       shouldJoinSoftWrappedLine({
-        cols,
         rendered,
         lineIndex: index,
-        previousLine: response[response.length - 1],
       })
     ) {
       response[response.length - 1] = joinSoftWrappedLine(
