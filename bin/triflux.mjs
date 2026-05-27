@@ -88,8 +88,8 @@ import {
   isLocalDevSkillDir,
   isSetupUserStateFile,
   LEGACY_CODEX_MODELS,
+  LEGACY_CODEX_PROFILE_NAMES,
   REQUIRED_CODEX_PROFILES,
-  replaceProfileSection,
   SKILL_ALIASES,
   SYNC_MAP,
   syncAliasedSkillDir,
@@ -1502,36 +1502,37 @@ function previewCodexProfiles() {
   const original = existsSync(CODEX_CONFIG_PATH)
     ? readFileSync(CODEX_CONFIG_PATH, "utf8")
     : "";
-  let updated = original;
   const profiles = [];
 
+  // Codex 0.134+: 프로필은 별도 파일 ~/.codex/<name>.config.toml 로 관리한다.
   for (const profile of REQUIRED_CODEX_PROFILES) {
-    const before = updated;
-    if (hasProfileSection(updated, profile.name)) {
-      updated = replaceProfileSection(updated, profile.name, profile.lines);
-    } else {
-      if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
-      if (updated.trim().length > 0) updated += "\n";
-      updated += `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
-    }
-    if (updated !== before) {
+    const profilePath = join(CODEX_DIR, `${profile.name}.config.toml`);
+    const desiredContent = `${profile.lines.join("\n")}\n`;
+    const existingContent = existsSync(profilePath)
+      ? readFileSync(profilePath, "utf8")
+      : null;
+    if (existingContent !== desiredContent) {
       profiles.push(profile.name);
     }
   }
 
-  const windowsSandbox =
-    process.platform === "win32" && !updated.includes("[windows]");
+  // 마이그레이션: config.toml 에 관리 대상 inline [profiles.*] 가 잔존하면 제거 예정.
+  const legacyInlineCleanup = [
+    ...REQUIRED_CODEX_PROFILES.map((p) => p.name),
+    ...LEGACY_CODEX_PROFILE_NAMES,
+  ].some((name) => hasProfileSection(original, name));
 
+  const windowsSandbox =
+    process.platform === "win32" && !original.includes("[windows]");
+
+  const willChange =
+    profiles.length > 0 || legacyInlineCleanup || windowsSandbox;
   return {
     path: CODEX_CONFIG_PATH,
     profiles,
     windowsSandbox,
-    change:
-      profiles.length > 0 || windowsSandbox
-        ? original
-          ? "update"
-          : "create"
-        : "noop",
+    legacyInlineCleanup,
+    change: willChange ? (original ? "update" : "create") : "noop",
   };
 }
 
@@ -3073,13 +3074,16 @@ async function cmdDoctor(options = {}) {
     });
     // API 키 검사 제거 — bash exec 기반이므로 API 키 불필요
 
-    // 4. Codex Profiles
+    // 4. Codex Profiles (0.134+: 별도 파일 ~/.codex/<name>.config.toml)
     section("Codex Profiles");
-    if (existsSync(CODEX_CONFIG_PATH)) {
-      const codexConfig = readFileSync(CODEX_CONFIG_PATH, "utf8");
+    {
+      const codexConfig = existsSync(CODEX_CONFIG_PATH)
+        ? readFileSync(CODEX_CONFIG_PATH, "utf8")
+        : "";
       const missingProfiles = [];
       for (const profile of REQUIRED_CODEX_PROFILES) {
-        if (hasProfileSection(codexConfig, profile.name)) {
+        const profilePath = join(CODEX_DIR, `${profile.name}.config.toml`);
+        if (existsSync(profilePath)) {
           ok(
             `${profile.name}: 정상${profile.proOnly ? ` ${DIM}(Pro 전용)${RESET}` : ""}`,
           );
@@ -3089,26 +3093,33 @@ async function cmdDoctor(options = {}) {
           );
         } else {
           missingProfiles.push(profile.name);
-          warn(`${profile.name}: 미설정`);
+          warn(
+            `${profile.name}: 미설정 ${DIM}(~/.codex/${profile.name}.config.toml)${RESET}`,
+          );
           issues++;
         }
       }
+      // 0.134: config.toml 에 잔존하는 legacy inline [profiles.*] 는 codex 가 거부한다.
+      const leftoverInline = [
+        ...REQUIRED_CODEX_PROFILES.map((p) => p.name),
+        ...LEGACY_CODEX_PROFILE_NAMES,
+      ].filter((name) => hasProfileSection(codexConfig, name));
+      if (leftoverInline.length > 0) {
+        warn(
+          `config.toml legacy inline [profiles.*] 잔존: ${leftoverInline.join(", ")} ${DIM}(codex 0.134+ 거부 — 'tfx setup' 로 정리)${RESET}`,
+        );
+        issues++;
+      }
+      const profilesOk =
+        missingProfiles.length === 0 && leftoverInline.length === 0;
       addDoctorCheck(report, {
         name: "codex-profiles",
-        status: missingProfiles.length === 0 ? "ok" : "missing",
-        path: CODEX_CONFIG_PATH,
+        status: profilesOk ? "ok" : "missing",
+        path: CODEX_DIR,
         missing_profiles: missingProfiles,
-        ...(missingProfiles.length > 0 ? { fix: "tfx setup" } : {}),
+        ...(leftoverInline.length > 0 ? { legacy_inline: leftoverInline } : {}),
+        ...(profilesOk ? {} : { fix: "tfx setup" }),
       });
-    } else {
-      addDoctorCheck(report, {
-        name: "codex-profiles",
-        status: "missing",
-        path: CODEX_CONFIG_PATH,
-        fix: "tfx setup",
-      });
-      warn("config.toml 미존재");
-      issues++;
     }
 
     // Codex 구형 모델 감지
