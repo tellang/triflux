@@ -116,11 +116,16 @@ describe("swarm-preflight", () => {
     assert.match(report.errors.join("\n"), /missing local worker CLI/u);
   });
 
-  it("checks antigravity and agy shards against the agy worker CLI", () => {
+  it("checks gemini, antigravity, and agy shards against the agy worker CLI", () => {
     const repoRoot = makeTmpDir();
     const prdPath = writePrd(
       repoRoot,
       `
+## Shard: gemini-worker
+- agent: gemini
+- files: src/gemini.mjs
+- prompt: Run Gemini alias.
+
 ## Shard: antigravity-worker
 - agent: antigravity
 - files: src/antigravity.mjs
@@ -146,6 +151,12 @@ describe("swarm-preflight", () => {
     assert.equal(report.ok, true);
     assert.deepEqual(checkedCommands, ["agy"]);
     assert.deepEqual(report.checks.workerCli.present, [
+      {
+        shard: "gemini-worker",
+        agent: "gemini",
+        command: "agy",
+        path: "/usr/local/bin/agy",
+      },
       {
         shard: "antigravity-worker",
         agent: "antigravity",
