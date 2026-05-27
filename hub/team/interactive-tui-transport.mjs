@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const MAX_BUFFER = 5 * 1024 * 1024;
 const DEFAULT_POLL_INTERVAL_MS = 150;
+const MAX_CONSECUTIVE_POLL_ERRORS = 3;
 
 const CONTROL_SEQUENCES = [
   ["\x1b[A", "Up"],
@@ -53,6 +54,7 @@ export function createInteractiveTuiTransport({
   let pollTimer = null;
   let pollInFlight = false;
   let previousCapture = "";
+  let consecutivePollErrors = 0;
 
   async function tmux(args, options) {
     return runTmux(args, options);
@@ -152,11 +154,17 @@ export function createInteractiveTuiTransport({
     pollInFlight = true;
     try {
       const raw = await capturePane();
+      consecutivePollErrors = 0;
       if (raw && raw !== previousCapture) {
         previousCapture = raw;
         onData(raw);
       } else if (!raw) {
         previousCapture = raw;
+      }
+    } catch {
+      consecutivePollErrors += 1;
+      if (consecutivePollErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+        stopPolling();
       }
     } finally {
       pollInFlight = false;
