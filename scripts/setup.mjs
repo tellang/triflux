@@ -88,6 +88,22 @@ const REQUIRED_CODEX_PROFILES = [
   },
 ];
 
+// Codex 0.134 마이그레이션: triflux 가 과거에 inline [profiles.*] 로 썼던 구형 프로필.
+// config.toml 에서 제거 대상 (retired 모델 — 별도 파일로 만들지 않는다).
+const LEGACY_CODEX_PROFILE_NAMES = [
+  "codex53_high",
+  "codex53_xhigh",
+  "codex53_med",
+  "spark53_low",
+  "spark53_med",
+  "gpt54_xhigh",
+  "gpt54_high",
+  "gpt54_low",
+  "mini54_low",
+  "mini54_med",
+  "mini54_high",
+];
+
 const HUD_SYNC_EXCLUDES = new Set(["omc-hud.mjs", "omc-hud.mjs.bak"]);
 const SETUP_USER_STATE_FILES = new Set(["hosts.json"]);
 const WORKER_PACKAGE_SPECS = [
@@ -423,6 +439,17 @@ function replaceProfileSection(tomlContent, profileName, lines) {
   );
   const replacement = `${header}\n${lines.join("\n")}\n`;
   return tomlContent.replace(sectionRe, replacement);
+}
+
+// Codex 0.134+ 마이그레이션: config.toml 의 inline [profiles.NAME] 테이블을 제거한다.
+// (프로필은 별도 파일 ~/.codex/NAME.config.toml 로 이동했고, inline 테이블은 0.134 에서
+//  `--profile NAME` 사용 시 거부되므로 잔존 inline 을 정리해야 한다.)
+function removeProfileSection(tomlContent, profileName) {
+  const sectionRe = new RegExp(
+    `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*\\n?(?:(?!\\[)[^\\n]*\\n?)*`,
+    "m",
+  );
+  return tomlContent.replace(sectionRe, "");
 }
 
 // ── 스킬 별칭 (하나의 소스 스킬을 다른 이름으로도 노출) ──
@@ -767,20 +794,30 @@ function ensureCodexProfiles() {
       }
     }
 
-    // ── 2. 필수 프로필 보장 ──
+    // ── 2. 필수 프로필 보장 (Codex 0.134+: 별도 파일 포맷) ──
+    // Codex 0.134.0 부터 `--profile X` 는 별도 파일 ~/.codex/X.config.toml (top-level
+    // 키)을 읽고, config.toml 의 inline [profiles.X] 테이블은 거부한다. 따라서
+    // (a) 각 프로필을 별도 파일로 쓰고 (b) config.toml 의 inline 테이블을 제거한다.
+    // ref: developers.openai.com/codex/config-advanced#profiles
     for (const profile of REQUIRED_CODEX_PROFILES) {
-      const desired = `[profiles.${profile.name}]\n${profile.lines.join("\n")}\n`;
-
-      if (hasProfileSection(updated, profile.name)) {
-        // 기존 프로필이 있으면 강제 갱신
-        const before = updated;
-        updated = replaceProfileSection(updated, profile.name, profile.lines);
-        if (updated !== before) changed++;
-      } else {
-        // 없으면 추가
-        if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
-        if (updated.trim().length > 0) updated += "\n";
-        updated += desired;
+      const profilePath = join(CODEX_DIR, `${profile.name}.config.toml`);
+      const desiredContent = `${profile.lines.join("\n")}\n`;
+      const existingContent = existsSync(profilePath)
+        ? readFileSync(profilePath, "utf8")
+        : null;
+      if (existingContent !== desiredContent) {
+        writeFileSync(profilePath, desiredContent, "utf8");
+        changed++;
+      }
+    }
+    // 기존 inline [profiles.*] 테이블 제거 (마이그레이션) — triflux 관리 프로필
+    // (현행 gpt55_* + 구형) 만 대상. 사용자가 직접 정의한 임의 프로필은 보존한다.
+    for (const managedName of [
+      ...REQUIRED_CODEX_PROFILES.map((p) => p.name),
+      ...LEGACY_CODEX_PROFILE_NAMES,
+    ]) {
+      if (hasProfileSection(updated, managedName)) {
+        updated = removeProfileSection(updated, managedName);
         changed++;
       }
     }
@@ -793,7 +830,7 @@ function ensureCodexProfiles() {
       changed++;
     }
 
-    if (changed > 0) {
+    if (updated !== original) {
       writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
     }
 
@@ -1322,11 +1359,13 @@ export {
   isLocalDevSkillDir,
   isSetupUserStateFile,
   LEGACY_CODEX_MODELS,
+  LEGACY_CODEX_PROFILE_NAMES,
   LOCAL_DEV_SKILL_MARKER,
   PLUGIN_ROOT,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,
   readMarker,
+  removeProfileSection,
   replaceProfileSection,
   SCHTASKS_TR_MAX_LENGTH,
   SETUP_MARKER_PATH,
