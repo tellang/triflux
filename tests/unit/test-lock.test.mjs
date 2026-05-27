@@ -89,9 +89,12 @@ setInterval(() => {}, 1000);
 }
 
 function spawnWrapper(harness, args, env = {}) {
+  const childEnv = { ...process.env, ...env };
+  delete childEnv.NODE_TEST_CONTEXT;
+  delete childEnv.NODE_TEST_WORKER_ID;
   return spawn(process.execPath, [harness.script, ...args], {
     cwd: harness.root,
-    env: { ...process.env, ...env },
+    env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
 }
@@ -245,7 +248,11 @@ test("stale lock with live child PID exits non-zero and preserves lock", async (
     const wrapper = spawnWrapper(harness, [okScript]);
     const result = await waitForExit(wrapper);
 
-    assert.notEqual(result.code, 0);
+    assert.notEqual(
+      result.code,
+      0,
+      `expected wrapper to exit non-zero; stdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
     assert.match(result.stderr, new RegExp(`child PID ${process.pid}`));
     assert.match(result.stderr, /age/i);
     assert.deepEqual(readLock(harness.lockFile), metadata);
@@ -295,6 +302,35 @@ test("normal child exit preserves wrapper success behavior and releases lock", a
     assert.equal(result.code, 0);
     assert.match(result.stdout, /normal-ok/);
     assert.ok(!existsSync(harness.lockFile));
+  } finally {
+    cleanupHarness(harness);
+  }
+});
+
+test("--test-force-exit preserves late async test failures as non-zero", async () => {
+  const harness = createHarness();
+  try {
+    const failingTest = writeScript(
+      harness,
+      "late-async-failure.test.mjs",
+      `
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+test("late async failure", () => {
+  setImmediate(() => assert.fail("late async failure"));
+});
+`,
+    );
+
+    const wrapper = spawnWrapper(harness, [
+      "--test",
+      "--test-force-exit",
+      failingTest,
+    ]);
+    const result = await waitForExit(wrapper);
+
+    assert.notEqual(result.code, 0);
   } finally {
     cleanupHarness(harness);
   }

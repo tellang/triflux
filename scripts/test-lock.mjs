@@ -23,6 +23,26 @@ const LOCK_DIR = join(dirname(SCRIPT_PATH), "..", ".test-lock");
 const LOCK_FILE = join(LOCK_DIR, "pid.lock");
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // release prepare 와 동일
 const SHUTDOWN_GRACE_MS = 5 * 1000;
+// --test-force-exit can beat already queued async test failures. Delay the
+// forced exit one turn so Node can surface a non-zero test result first.
+const FORCE_EXIT_FAILURE_PROPAGATION_IMPORT = `data:text/javascript,${encodeURIComponent(`
+const realExit = process.exit.bind(process);
+let pendingCode = 0;
+let scheduled = false;
+
+process.exit = (code) => {
+  if (code !== undefined && code !== 0) pendingCode = code;
+  if (scheduled) return;
+  scheduled = true;
+  setImmediate(() => {
+    const exitCode =
+      process.exitCode !== undefined && process.exitCode !== 0
+        ? process.exitCode
+        : pendingCode;
+    realExit(exitCode ?? 0);
+  });
+};
+`)}`;
 
 function toPosixPath(path) {
   return path.replace(/\\/g, "/");
@@ -249,6 +269,11 @@ function childIsRunning(child) {
   return child && child.exitCode === null && child.signalCode === null;
 }
 
+function preserveForceExitFailures(args) {
+  if (!args.includes("--test-force-exit")) return args;
+  return ["--import", FORCE_EXIT_FAILURE_PROPAGATION_IMPORT, ...args];
+}
+
 function terminateChild(child, signal) {
   if (!childIsRunning(child)) return false;
   try {
@@ -264,7 +289,7 @@ export function main(argv = process.argv.slice(2)) {
   const lock = acquireLock(timeoutMs);
 
   // forward args after -- to node --test
-  const args = expandTestArgs(argv);
+  const args = preserveForceExitFailures(expandTestArgs(argv));
   // stdio split (issue #192 F1): when prepare.mjs spawns this lock with
   // ["ignore","pipe","pipe"], full inherit cascades the parent stdin=ignore
   // to grand-child node --test, breaking ConPTY assumptions on Windows and
