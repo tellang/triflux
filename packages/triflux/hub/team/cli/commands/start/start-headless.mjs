@@ -1,8 +1,49 @@
-import { resolveCliType, runHeadlessInteractive } from "../../../headless.mjs";
+import {
+  normalizeHeadlessRole,
+  resolveCliType,
+  resolveHeadlessDisplayName,
+  runHeadlessInteractive,
+} from "../../../headless.mjs";
 import { AMBER, DIM, GREEN, RESET } from "../../../shared.mjs";
 import { ok } from "../../render.mjs";
 import { clearTeamState } from "../../services/state-store.mjs";
 import { buildTasks } from "../../services/task-model.mjs";
+
+export function buildHeadlessAssignments({
+  agents = [],
+  subtasks = [],
+  assigns = [],
+  mcpProfile,
+  model,
+  cwd,
+} = {}) {
+  // --assign이 있으면 그것을 사용, 없으면 agents+subtasks 조합
+  return assigns && assigns.length > 0
+    ? assigns.map((a, i) => {
+        const paneName = `worker-${i + 1}`;
+        return {
+          cli: resolveCliType(a.cli),
+          prompt: a.prompt,
+          displayName: resolveHeadlessDisplayName(a, paneName),
+          role: normalizeHeadlessRole(a.role),
+          mcp: mcpProfile,
+          model,
+          cwd,
+        };
+      })
+    : subtasks.map((subtask, i) => {
+        const paneName = `worker-${i + 1}`;
+        return {
+          cli: resolveCliType(agents[i] || agents[0]),
+          prompt: subtask,
+          displayName: paneName,
+          role: "",
+          mcp: mcpProfile,
+          model,
+          cwd,
+        };
+      });
+}
 
 export async function startHeadlessTeam({
   sessionId,
@@ -26,25 +67,14 @@ export async function startHeadlessTeam({
   nativeBridge,
   nativeBridgeMode,
 }) {
-  // --assign이 있으면 그것을 사용, 없으면 agents+subtasks 조합
-  const assignments =
-    assigns && assigns.length > 0
-      ? assigns.map((a, i) => ({
-          cli: resolveCliType(a.cli),
-          prompt: a.prompt,
-          role: a.role || `worker-${i + 1}`,
-          mcp: mcpProfile,
-          model,
-          cwd,
-        }))
-      : subtasks.map((subtask, i) => ({
-          cli: resolveCliType(agents[i] || agents[0]),
-          prompt: subtask,
-          role: `worker-${i + 1}`,
-          mcp: mcpProfile,
-          model,
-          cwd,
-        }));
+  const assignments = buildHeadlessAssignments({
+    agents,
+    subtasks,
+    assigns,
+    mcpProfile,
+    model,
+    cwd,
+  });
 
   const _startedAt = Date.now();
   ok(`headless ${assignments.length}워커 시작`);

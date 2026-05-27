@@ -137,6 +137,10 @@ export function normalizeWorkerState(existing = {}, state = {}, opts = {}) {
         : existing.cli || "codex",
     role:
       state.role !== undefined ? sanitizeOneLine(state.role) : existing.role,
+    displayName:
+      state.displayName !== undefined
+        ? sanitizeOneLine(state.displayName, existing.displayName)
+        : existing.displayName,
     status:
       state.status !== undefined
         ? sanitizeOneLine(state.status, existing.status || "pending")

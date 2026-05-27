@@ -82,6 +82,7 @@ function buildWorkerRail(names, workers, selectedWorker, width) {
   const lines = names.length
     ? names.map((name, index) => {
         const worker = workers.get(name);
+        const displayName = worker?.displayName || name;
         const status = runtimeStatus(worker);
         const pct = Math.round(
           ((worker?.progress ?? (status === "completed" ? 1 : 0)) || 0) * 100,
@@ -91,7 +92,7 @@ function buildWorkerRail(names, workers, selectedWorker, width) {
           : "";
         const prefix =
           name === selectedWorker ? color("▶", MOCHA.blue) : dim("·");
-        return `${prefix} ${index + 1}.${name} ${stripAnsi(statusBadge(status))} ${pct}%${token}`;
+        return `${prefix} ${index + 1}.${displayName} ${stripAnsi(statusBadge(status))} ${pct}%${token}`;
       })
     : [dim("workers 없음")];
   return frame(lines, width);
@@ -115,7 +116,7 @@ function buildDetail(workerName, worker, width, tab, helpVisible) {
   }
   if (!workerName || !worker) return frame([dim("선택된 워커 없음")], width);
   const detailLines = [
-    bold(workerName),
+    bold(worker.displayName || workerName),
     `status ${runtimeStatus(worker)}`,
     `progress ${Math.round((worker.progress || 0) * 100)}% ${progressBar(Math.round((worker.progress || 0) * 100), 12)}`,
     `tokens ${formatTokens(worker.tokens)}`,

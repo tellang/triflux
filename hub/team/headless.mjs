@@ -149,6 +149,29 @@ function resolveRouteAgentForHeadless(resolvedCli, opts = {}) {
   return resolvedCli === "antigravity" ? "antigravity" : resolvedCli;
 }
 
+export function normalizeHeadlessRole(role) {
+  const normalized = String(role || "")
+    .trim()
+    .toLowerCase();
+  return normalized && VALID_ROUTE_AGENTS.has(normalized) ? normalized : "";
+}
+
+export function resolveHeadlessDisplayName(assignment = {}, paneName = "") {
+  const normalized = String(assignment.displayName || "")
+    .trim()
+    .replace(/[\r\n\x00-\x1f]/g, " ");
+  return normalized || paneName || "";
+}
+
+export function normalizeHeadlessAssignment(assignment = {}, index = 0) {
+  const paneName = `worker-${index + 1}`;
+  return {
+    ...assignment,
+    role: normalizeHeadlessRole(assignment.role),
+    displayName: resolveHeadlessDisplayName(assignment, paneName),
+  };
+}
+
 function buildRouteBackedHeadlessCommand(
   resolvedCli,
   promptFile,
@@ -761,6 +784,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
   for (let i = 0; i < assignments.length; i++) {
     const assignment = assignments[i];
     const paneName = `worker-${i + 1}`;
+    const displayName = resolveHeadlessDisplayName(assignment, paneName);
     const workerId = getHeadlessWorkerAgentId(sessionName, i);
     const resolvedCli = resolveHeadlessCliType(assignment.cli);
     const brand = CLI_BRAND[resolvedCli] || {
@@ -768,9 +792,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       label: resolvedCli,
       ansi: "",
     };
-    const paneTitle = assignment.role
-      ? `${brand.emoji} ${resolvedCli} (${assignment.role})`
-      : `${brand.emoji} ${resolvedCli}-${i + 1}`;
+    const paneTitle = `${brand.emoji} ${resolvedCli} (${displayName})`;
 
     let newPaneId;
     // 모든 워커를 split-window로 생성 (lead pane index 0은 비워둠)
@@ -796,6 +818,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       safeProgress({
         type: "worker_added",
         paneName,
+        displayName,
         cli: resolvedCli,
         paneTitle,
       });
@@ -831,6 +854,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       ...dispatch,
       paneId: newPaneId,
       paneName,
+      displayName,
       resultFile,
       cli: resolvedCli,
       role: assignment.role,
@@ -879,6 +903,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
   return await Promise.all(
     assignments.map(async (assignment, i) => {
       const paneName = `worker-${i + 1}`;
+      const displayName = resolveHeadlessDisplayName(assignment, paneName);
       const workerId = getHeadlessWorkerAgentId(sessionName, i);
       const resolvedCli = resolveHeadlessCliType(assignment.cli);
       const resultFile = join(
@@ -911,11 +936,17 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       // progressive 모드에서는 split-window 시 새 pane에 바로 타이틀이 설정되므로 문제없음
 
       if (safeProgress)
-        safeProgress({ type: "dispatched", paneName, cli: resolvedCli });
+        safeProgress({
+          type: "dispatched",
+          paneName,
+          displayName,
+          cli: resolvedCli,
+        });
 
       return {
         ...dispatch,
         paneName,
+        displayName,
         resultFile,
         cli: resolvedCli,
         role: assignment.role,
@@ -936,6 +967,7 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
     for (let i = 0; i < assignments.length; i += 1) {
       const assignment = assignments[i];
       const paneName = `worker-${i + 1}`;
+      const displayName = resolveHeadlessDisplayName(assignment, paneName);
       const workerId = getHeadlessWorkerAgentId(sessionName, i);
       const resolvedCli = resolveHeadlessCliType(assignment.cli);
       const resultFile = join(
@@ -956,10 +988,11 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
       );
       const token = randomUUID().slice(0, 10);
       const short = randomUUID().replace(/-/g, "").slice(0, 8);
-      const name = `Triflux ${resolvedCli || "worker"} ${assignment.role || paneName}`;
+      const name = `Triflux ${resolvedCli || "worker"} ${displayName}`;
       const record = {
         paneId: `daemon:${short}`,
         paneName,
+        displayName,
         resultFile,
         cli: resolvedCli,
         role: assignment.role,
@@ -1090,6 +1123,7 @@ async function awaitAll(
             safeProgress({
               type: "progress",
               paneName: d.paneName,
+              displayName: d.displayName,
               cli: d.cli,
               snapshot: content.split("\n").slice(-15).join("\n"), // 마지막 15줄
             });
@@ -1108,6 +1142,7 @@ async function awaitAll(
                     safeProgress({
                       type: "progress",
                       paneName: d.paneName,
+                      displayName: d.displayName,
                       cli: d.cli,
                       snapshot: snapshot.split("\n").slice(-15).join("\n"),
                     });
@@ -1185,6 +1220,7 @@ async function awaitAll(
         safeProgress({
           type: "completed",
           paneName: d.paneName,
+          displayName: d.displayName,
           cli: d.cli,
           matched: completion.matched,
           exitCode: completion.exitCode,
@@ -1277,6 +1313,7 @@ async function waitForDaemonCompletion(
             safeProgress({
               type: "progress",
               paneName: dispatch.paneName,
+              displayName: dispatch.displayName,
               cli: dispatch.cli,
               snapshot: message.line.split("\n").slice(-15).join("\n"),
             });
@@ -1313,6 +1350,7 @@ async function awaitAllDaemon(
         safeProgress({
           type: "completed",
           paneName: d.paneName,
+          displayName: d.displayName,
           cli: d.cli,
           matched: completion.matched,
           exitCode: completion.exitCode,
@@ -1369,6 +1407,7 @@ async function collectResults(sessionName, results) {
       return {
         cli: d.cli,
         paneName: d.paneName,
+        displayName: d.displayName,
         paneId: d.paneId,
         workerId: d.workerId,
         role: d.role,
@@ -1430,8 +1469,11 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   } = opts;
 
   mkdirSync(RESULT_DIR, { recursive: true });
+  const normalizedAssignments = (assignments || []).map((assignment, index) =>
+    normalizeHeadlessAssignment(assignment, index),
+  );
 
-  if (assignments.length === 0) {
+  if (normalizedAssignments.length === 0) {
     return { sessionName, results: [] };
   }
 
@@ -1445,7 +1487,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   if (nativeBridge && nativeBridgeMode === "roster") {
     nativeBridgeHandle = await startClaudeNativeBridge({
       sessionName,
-      assignments,
+      assignments: normalizedAssignments,
       cwd: process.cwd(),
       onKill() {
         try {
@@ -1474,11 +1516,11 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     .catch(() => {});
 
   // Synapse: 세션 registration (fire-and-forget, hub 미응답 시 무시)
-  const synapseIds = assignments.map(
+  const synapseIds = normalizedAssignments.map(
     (_, i) => `${sessionName}-worker-${i + 1}`,
   );
-  for (let i = 0; i < assignments.length; i++) {
-    const a = assignments[i];
+  for (let i = 0; i < normalizedAssignments.length; i++) {
+    const a = normalizedAssignments[i];
     requestJson("/synapse/register", {
       method: "POST",
       body: {
@@ -1495,7 +1537,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   let tui = null;
   const resolvedLayout = resolveDashboardLayout(
     dashboardLayout,
-    assignments.length,
+    normalizedAssignments.length,
   );
   if (dashboard && process.stdout.isTTY) {
     tui = createLogDashboard({
@@ -1506,10 +1548,12 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     });
     tui.setStartTime(Date.now());
     // 초기 워커 상태 등록
-    for (let i = 0; i < assignments.length; i++) {
-      const a = assignments[i];
-      tui.updateWorker(`worker-${i + 1}`, {
+    for (let i = 0; i < normalizedAssignments.length; i++) {
+      const a = normalizedAssignments[i];
+      const paneName = `worker-${i + 1}`;
+      tui.updateWorker(paneName, {
         cli: resolveHeadlessCliType(a.cli || "codex"),
+        displayName: resolveHeadlessDisplayName(a, paneName),
         role: a.role || "",
         status: "pending",
         progress: 0,
@@ -1530,12 +1574,14 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   // per-worker state feed: onProgress 이벤트 → tui.updateWorker()
   function feedTui(event) {
     if (!tui) return;
-    const { type, paneName, cli, snapshot, matched, exitCode } = event;
+    const { type, paneName, displayName, cli, snapshot, matched, exitCode } =
+      event;
     if (!paneName) return;
 
     if (type === "progress" && snapshot) {
       tui.updateWorker(paneName, {
         cli: cli || "codex",
+        displayName,
         status: "running",
         snapshot: snapshot.split("\n").at(-1) || "",
         summary: snapshot.split("\n").at(-1) || "",
@@ -1546,12 +1592,14 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       const status = matched && exitCode === 0 ? "completed" : "failed";
       tui.updateWorker(paneName, {
         cli: cli || "codex",
+        displayName,
         status,
         progress: 1,
       });
     } else if (type === "worker_added") {
       tui.updateWorker(paneName, {
         cli: cli || "codex",
+        displayName,
         status: "running",
         progress: 0.05,
       });
@@ -1600,16 +1648,16 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   try {
     const dispatches =
       nativeBridge && nativeBridgeMode === "agents"
-        ? await dispatchDaemonBatch(sessionName, assignments, {
+        ? await dispatchDaemonBatch(sessionName, normalizedAssignments, {
             safeProgress,
           })
         : progressive
-          ? await dispatchProgressive(sessionName, assignments, {
+          ? await dispatchProgressive(sessionName, normalizedAssignments, {
               layout,
               safeProgress,
               dashboardLayout,
             })
-          : await dispatchBatch(sessionName, assignments, {
+          : await dispatchBatch(sessionName, normalizedAssignments, {
               layout,
               safeProgress,
               dashboardLayout,
@@ -1642,6 +1690,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       for (const r of collected) {
         tui.updateWorker(r.paneName, {
           cli: r.cli,
+          displayName: r.displayName,
           role: r.role || "",
           status: r.handoff?.status === "failed" ? "failed" : "completed",
           handoff: r.handoff,
@@ -2043,6 +2092,7 @@ export async function runHeadlessInteractive(
   // Fix P2: paneId를 dispatches에 포함 (snapshots에서 필요)
   const dispatches = results.map((r, i) => ({
     paneName: r.paneName,
+    displayName: r.displayName,
     paneId: r.paneId || "",
     cli: r.cli,
     role: r.role,
