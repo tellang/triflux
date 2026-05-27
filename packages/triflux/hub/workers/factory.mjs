@@ -14,8 +14,8 @@
 // existing `requestJson` helper. Callers can override by passing their own
 // `publishCallback` or swap the transport with `requestJsonFn`.
 
-import { ClaudeWorker } from "./claude-worker.mjs";
 import { AntigravityRouteWorker } from "./antigravity-route-worker.mjs";
+import { ClaudeWorker } from "./claude-worker.mjs";
 import { CodexAppServerWorker } from "./codex-app-server-worker.mjs";
 
 /**

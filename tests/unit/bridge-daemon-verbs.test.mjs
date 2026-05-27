@@ -325,7 +325,7 @@ test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
           proto: 1,
           op: "attach",
           short: "facefeed",
-          cols: 120,
+          cols: 240,
           rows: 40,
           caps: { terminal: null, mux: null, ssh: false },
         },

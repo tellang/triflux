@@ -242,6 +242,7 @@ AGENT_TYPE="__rerouted_probe"
 PROMPT="test"
 MCP_PROFILE="auto"
 CLI_TYPE="codex"
+unset TFX_ANTIGRAVITY_OK
 TFX_TMP="${os.tmpdir()}"
 ${agyHeadlessFunc}
 ${rerouteFunc}
