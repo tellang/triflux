@@ -1398,10 +1398,97 @@ apply_no_claude_native_mode() {
 ## stdout 으로 반환. env 미설정 시 helper 가 silent no-op (stdout empty) →
 ## 현재 CLI_TYPE 유지. conductor (sync) / swarm-hypervisor (plan-time) wire-up
 ## 과 의도 정합한 sh 경로 wire-up.
-## TODO(retry-profile): bridge retry-run/status now exposes
-## cliInvocation.argv for escalation-chain profile steps. This shell route has
-## no retry snapshot input yet; when adding one, append those argv before
-## running codex instead of duplicating profile resolution here.
+## Retry snapshot profile plumbing.
+## bridge retry-run/status exposes cliInvocation.argv for escalation-chain
+## profile steps. Consume those argv directly instead of duplicating profile
+## resolution here.
+apply_retry_snapshot_cli_invocation() {
+  [[ "${CLI_TYPE:-}" == "codex" ]] || return 0
+
+  local snapshot="${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}"
+  [[ -n "$snapshot" ]] || return 0
+
+  local status_json
+  if ! status_json=$(bridge_cli retry-status --snapshot "$snapshot" --json); then
+    echo "[tfx-route] WARNING: retry snapshot status unavailable; keeping existing codex args" >&2
+    return
+  fi
+
+  local invocation_cli
+  invocation_cli=$(bridge_json_get "$status_json" "cliInvocation.cli" 2>/dev/null || true)
+  [[ "$invocation_cli" == "codex" ]] || return 0
+
+  local argv_json
+  argv_json=$(bridge_json_get "$status_json" "cliInvocation.argv" 2>/dev/null || true)
+  [[ -n "$argv_json" ]] || return 0
+
+  local retry_argv
+  if ! retry_argv=$("$NODE_BIN" -e '
+    const argv = JSON.parse(process.argv[1] || "[]");
+    if (!Array.isArray(argv)) process.exit(1);
+    if (argv.length === 0) process.exit(0);
+    for (const arg of argv) {
+      if (typeof arg !== "string" || arg.length === 0 || /\s/.test(arg)) {
+        process.exit(2);
+      }
+    }
+    process.stdout.write(argv.join(" "));
+  ' -- "$argv_json" 2>/dev/null); then
+    echo "[tfx-route] WARNING: retry snapshot argv unsupported; keeping existing codex args" >&2
+    return
+  fi
+  [[ -n "$retry_argv" ]] || return 0
+
+  local -a base_args=()
+  local -a retry_args=()
+  local -a merged_args=()
+  read -r -a base_args <<< "$CLI_ARGS"
+  read -r -a retry_args <<< "$retry_argv"
+
+  local retry_has_profile=0
+  local retry_profile=""
+  local i
+  for ((i = 0; i < ${#retry_args[@]}; i++)); do
+    case "${retry_args[$i]}" in
+      --profile)
+        retry_has_profile=1
+        retry_profile="${retry_args[$((i + 1))]:-}"
+        ;;
+      --profile=*)
+        retry_has_profile=1
+        retry_profile="${retry_args[$i]#--profile=}"
+        ;;
+    esac
+  done
+
+  if [[ "$retry_has_profile" -eq 1 ]]; then
+    local skip_next=0
+    for ((i = 0; i < ${#base_args[@]}; i++)); do
+      if [[ "$skip_next" -eq 1 ]]; then
+        skip_next=0
+        continue
+      fi
+      case "${base_args[$i]}" in
+        --profile)
+          skip_next=1
+          continue
+          ;;
+        --profile=*)
+          continue
+          ;;
+      esac
+      merged_args+=("${base_args[$i]}")
+    done
+  else
+    merged_args=("${base_args[@]}")
+  fi
+
+  merged_args+=("${retry_args[@]}")
+  CLI_ARGS="${merged_args[*]}"
+  [[ -n "$retry_profile" ]] && CLI_EFFORT="$retry_profile"
+  echo "[tfx-route] retry snapshot cliInvocation.argv applied" >&2
+}
+
 apply_dynamic_routing_override() {
   # set -u 환경 safe — 모든 env 변수 default 값 패턴 적용.
   local flag="${TRIFLUX_DYNAMIC_ROUTING:-}"
@@ -2358,6 +2445,7 @@ main() {
   apply_plan_guard
   apply_verifier_override
   apply_dynamic_routing_override
+  apply_retry_snapshot_cli_invocation
 
   # CLI 경로 해석
   case "$CLI_CMD" in
