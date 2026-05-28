@@ -1484,11 +1484,16 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       "[headless] --native-bridge-mode claude-wrapper is reserved and not implemented yet",
     );
   }
-  if (nativeBridge && nativeBridgeMode === "roster") {
+  if (
+    nativeBridge &&
+    (nativeBridgeMode === "roster" || nativeBridgeMode === "interactive-attach")
+  ) {
     nativeBridgeHandle = await startClaudeNativeBridge({
       sessionName,
       assignments: normalizedAssignments,
       cwd: process.cwd(),
+      workerType:
+        nativeBridgeMode === "interactive-attach" ? "interactive" : "headless",
       onKill() {
         try {
           killPsmuxSession(sessionName);

@@ -16,6 +16,7 @@ import {
   removeClaudeSessionProjection,
   writeClaudeSessionProjection,
 } from "./claude-session-projection.mjs";
+import { createInteractiveTuiTransport } from "./interactive-tui-transport.mjs";
 
 const DEFAULT_ROWS = 40;
 const DEFAULT_COLS = 120;
@@ -231,6 +232,30 @@ function buildSwarmShardBridgeCommand({ displayName, sessionId }) {
   return `printf '%s\\n' ${shellSingleQuote(banner)}; while true; do sleep 3600; done`;
 }
 
+function normalizeWorkerType(value) {
+  return value === "interactive" ? "interactive" : "headless";
+}
+
+function buildInteractiveTransportSessionName(...parts) {
+  const raw = parts.filter(Boolean).join("-");
+  return raw
+    .replace(/[^A-Za-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function createStopOnce(transport) {
+  let stopPromise = null;
+  return () => {
+    if (!stopPromise) {
+      stopPromise = Promise.resolve()
+        .then(() => transport.stop())
+        .catch(() => {});
+    }
+    return stopPromise;
+  };
+}
+
 function compactDisplayPart(value, fallback = "") {
   const text = String(value ?? "")
     .replace(/[\u0000-\u001f\u007f]+/g, " ")
@@ -297,6 +322,10 @@ export async function registerSwarmShard({
   shardName,
   cwd = process.cwd(),
   host = "local",
+  interactive = false,
+  workerType,
+  launchCmd = "codex",
+  env = {},
   configDir = resolveClaudeConfigDir(),
   tmpRoot = "/tmp",
   _deps = {},
@@ -343,6 +372,10 @@ export async function registerSwarmShard({
     _deps.writeClaudeSessionProjection || writeClaudeSessionProjection;
   const removeProjection =
     _deps.removeClaudeSessionProjection || removeClaudeSessionProjection;
+  const mergeRoster = _deps.mergeRosterWorkers || mergeRosterWorkers;
+  const removeRoster = _deps.removeRosterWorkers || removeRosterWorkers;
+  const createTransport =
+    _deps.createInteractiveTuiTransport || createInteractiveTuiTransport;
   const removeJobStateImpl = _deps.removeClaudeJobState || removeClaudeJobState;
   const killJob = _deps.killDaemonJob || killDaemonJob;
   const accessControlSock = _deps.accessControlSock || fs.access;
@@ -354,6 +387,99 @@ export async function registerSwarmShard({
     paths.jobsDir || path.join(paths.configDir || configDir, "jobs");
   const short = deriveSwarmShort({ sessionId, shardName, host });
   const command = buildSwarmShardBridgeCommand({ displayName, sessionId });
+  const resolvedWorkerType = interactive
+    ? "interactive"
+    : normalizeWorkerType(workerType);
+
+  if (resolvedWorkerType === "interactive") {
+    const rvSock = path.join(paths.rendezvousDir, `${short}.rv.sock`);
+    const ptySock = path.join(paths.ptyDir, `${short}.pty.sock`);
+    let facade = null;
+    let rosterWritten = false;
+    const transport = createTransport({
+      sessionName: buildInteractiveTransportSessionName(
+        "tfx",
+        "swarm",
+        sessionId,
+        shardName,
+        short,
+      ),
+      cwd,
+      launchCmd,
+      env,
+      onData(chunk) {
+        if (facade) facade.writeOutput(chunk);
+      },
+    });
+    const stopTransport = createStopOnce(transport);
+
+    try {
+      facade = await startNativeWorkerFacade({
+        short,
+        rvSock,
+        ptySock,
+        pid: process.pid,
+        initialDetail: `${cli}:${role}:interactive`,
+        workerType: "interactive",
+        onInput(payload) {
+          void Promise.resolve()
+            .then(() => transport.writeInput(payload))
+            .catch(() => {});
+        },
+        onResize(size) {
+          void Promise.resolve()
+            .then(() => transport.resize(size))
+            .catch(() => {});
+        },
+        onKill() {
+          void stopTransport();
+        },
+      });
+      await transport.start();
+      const rosterEntry = buildNativeWorkerRosterEntry({
+        short,
+        pid: process.pid,
+        procStart: readProcStart(process.pid),
+        sessionId,
+        cwd,
+        startedAt: Date.now(),
+        rendezvousSock: rvSock,
+        ptySock,
+        name: displayName,
+        prompt: displayName,
+      });
+      await mergeRoster(paths.rosterPath, { [short]: rosterEntry });
+      rosterWritten = true;
+    } catch (error) {
+      await stopTransport();
+      if (facade) await facade.close({ exitCode: 1 }).catch(() => {});
+      throw error;
+    }
+
+    let closed = false;
+    return {
+      ok: true,
+      skipped: false,
+      interactive: true,
+      host: "local",
+      sessionId,
+      swarmSessionId: sessionId,
+      shardName,
+      cli,
+      role,
+      short,
+      displayName,
+      rosterPath: paths.rosterPath,
+      async close() {
+        if (closed) return;
+        closed = true;
+        if (rosterWritten) await removeRoster(paths.rosterPath, [short]);
+        await stopTransport();
+        if (facade) await facade.close().catch(() => {});
+      },
+    };
+  }
+
   const payload = buildPayload({
     short,
     cwd,
@@ -482,6 +608,7 @@ export async function startNativeWorkerFacade({
   initialDetail = "pending",
   workerType = "headless",
   onInput,
+  onResize,
   onKill,
 } = {}) {
   if (!short) throw new Error("short is required");
@@ -581,6 +708,23 @@ export async function startNativeWorkerFacade({
           });
           if (frame.kind === 0) handlePtyInput(frame.payload);
           else if (frame.ctrl.t === "resize") {
+            if (
+              workerType === "interactive" &&
+              typeof onResize === "function"
+            ) {
+              const cols = toPositiveInteger(frame.ctrl.cols);
+              const rows = toPositiveInteger(frame.ctrl.rows);
+              if (cols && rows) {
+                void Promise.resolve()
+                  .then(() => onResize({ cols, rows }))
+                  .catch((error) => {
+                    events.push({
+                      type: "pty-resize-error",
+                      message: error.message,
+                    });
+                  });
+              }
+            }
             socket.write(buildPtyControlFrame({ t: "live" }));
           } else if (frame.ctrl.t === "kill") {
             socket.write(
@@ -650,6 +794,10 @@ export async function startClaudeNativeBridge({
   procStart,
   tmpRoot = os.tmpdir(),
   onKill,
+  workerType = "headless",
+  launchCmd = "codex",
+  env = {},
+  createTransport = createInteractiveTuiTransport,
 } = {}) {
   if (!sessionName) throw new Error("sessionName is required");
   const paths = deriveClaudeDaemonPaths({ configDir, tmpRoot: "/tmp" });
@@ -664,6 +812,7 @@ export async function startClaudeNativeBridge({
   const startedAt = Date.now();
   const facades = [];
   const sentinels = [];
+  const transportStops = [];
   const rosterWorkers = {};
   const byPaneName = new Map();
 
@@ -692,15 +841,66 @@ export async function startClaudeNativeBridge({
       if (!workerPid) throw new Error("native bridge sentinel pid unavailable");
       const rvSock = path.join(socketRoot, `${short}.rv.sock`);
       const ptySock = path.join(socketRoot, `${short}.pty.sock`);
-      const facade = await startNativeWorkerFacade({
-        short,
-        rvSock,
-        ptySock,
-        pid: workerPid,
-        initialDetail: `${cli}:${role}:pending`,
-        onKill,
-      });
       const workerCwd = assignment.cwd || assignment.workdir || cwd;
+      const assignmentWorkerType = normalizeWorkerType(
+        assignment.workerType || workerType,
+      );
+      let facade = null;
+      if (assignmentWorkerType === "interactive") {
+        const transport = createTransport({
+          sessionName: buildInteractiveTransportSessionName(
+            sessionName,
+            paneName,
+            short,
+          ),
+          cwd: workerCwd,
+          launchCmd: assignment.launchCmd || launchCmd,
+          env: assignment.env || env,
+          onData(chunk) {
+            if (facade) facade.writeOutput(chunk);
+          },
+        });
+        const stopTransport = createStopOnce(transport);
+        transportStops.push(stopTransport);
+        facade = await startNativeWorkerFacade({
+          short,
+          rvSock,
+          ptySock,
+          pid: workerPid,
+          initialDetail: `${cli}:${role}:interactive`,
+          workerType: "interactive",
+          onInput(payload) {
+            void Promise.resolve()
+              .then(() => transport.writeInput(payload))
+              .catch(() => {});
+          },
+          onResize(size) {
+            void Promise.resolve()
+              .then(() => transport.resize(size))
+              .catch(() => {});
+          },
+          onKill(event) {
+            void stopTransport();
+            if (typeof onKill === "function") onKill(event);
+          },
+        });
+        try {
+          await transport.start();
+        } catch (error) {
+          await stopTransport();
+          await facade.close({ exitCode: 1 }).catch(() => {});
+          throw error;
+        }
+      } else {
+        facade = await startNativeWorkerFacade({
+          short,
+          rvSock,
+          ptySock,
+          pid: workerPid,
+          initialDetail: `${cli}:${role}:pending`,
+          onKill,
+        });
+      }
       rosterWorkers[short] = buildNativeWorkerRosterEntry({
         short,
         pid: workerPid,
@@ -713,11 +913,18 @@ export async function startClaudeNativeBridge({
         prompt: assignment.prompt || "",
       });
       facades.push(facade);
-      byPaneName.set(paneName, { facade, cli, role, short });
+      byPaneName.set(paneName, {
+        facade,
+        cli,
+        role,
+        short,
+        workerType: assignmentWorkerType,
+      });
     }
 
     await mergeRosterWorkers(paths.rosterPath, rosterWorkers);
   } catch (error) {
+    await Promise.all(transportStops.map((stop) => stop()));
     await Promise.all(facades.map((facade) => facade.close()));
     for (const sentinel of sentinels) {
       try {
@@ -737,6 +944,7 @@ export async function startClaudeNativeBridge({
     handleProgress(event) {
       const worker = byPaneName.get(event?.paneName);
       if (!worker) return;
+      if (worker.workerType === "interactive") return;
       if (event.type === "worker_added" || event.type === "dispatched") {
         worker.facade.update({
           state: "running",
@@ -770,6 +978,7 @@ export async function startClaudeNativeBridge({
     completeWorker(result) {
       const worker = byPaneName.get(result?.paneName);
       if (!worker) return;
+      if (worker.workerType === "interactive") return;
       worker.facade.writeOutput(
         `\r\n${String(result.output || "").slice(0, 4096)}\r\n`,
       );
@@ -783,6 +992,7 @@ export async function startClaudeNativeBridge({
       });
     },
     async close() {
+      await Promise.all(transportStops.map((stop) => stop()));
       await Promise.all(facades.map((facade) => facade.close()));
       await removeRosterWorkers(paths.rosterPath, Object.keys(rosterWorkers));
       for (const sentinel of sentinels) {

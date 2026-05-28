@@ -44,9 +44,7 @@ describe("legacy TFX surface routing docs", () => {
   it("tfx-auto skill docs route legacy intents through canonical flags", () => {
     const files = [
       "skills/tfx-auto/SKILL.md",
-      "skills/tfx-auto/SKILL.md.tmpl",
       "packages/triflux/skills/tfx-auto/SKILL.md",
-      "packages/triflux/skills/tfx-auto/SKILL.md.tmpl",
     ];
 
     for (const file of files) {

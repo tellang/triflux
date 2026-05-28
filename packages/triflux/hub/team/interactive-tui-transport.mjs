@@ -1,4 +1,8 @@
 import { execFile } from "node:child_process";
+import { mkdtemp, open, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
@@ -8,6 +12,8 @@ const DEFAULT_POLL_INTERVAL_MS = 150;
 const MAX_CONSECUTIVE_POLL_ERRORS = 3;
 const STARTUP_PROMPT_MAX_ATTEMPTS = 30;
 const STARTUP_PROMPT_POLL_INTERVAL_MS = 300;
+const PIPE_TEMP_PREFIX = "triflux-tui-pipe-";
+const PIPE_OUTPUT_FILE = "pane.out";
 
 const CONTROL_SEQUENCES = [
   ["\x1b[A", "Up"],
@@ -53,10 +59,18 @@ export function createInteractiveTuiTransport({
 
   let started = false;
   let stopped = false;
-  let pollTimer = null;
-  let pollInFlight = false;
+  let capturePollTimer = null;
+  let capturePollInFlight = false;
   let previousCapture = "";
   let consecutivePollErrors = 0;
+  let pipeTimer = null;
+  let pipeReadInFlight = false;
+  let pipeTempDir = null;
+  let pipeOutputPath = null;
+  let pipeReadOffset = 0;
+  let pipeDecoder = null;
+  let pipeEnabled = false;
+  let consecutivePipeReadErrors = 0;
 
   async function tmux(args, options) {
     return runTmux(args, options);
@@ -102,7 +116,7 @@ export function createInteractiveTuiTransport({
     await tmux(["send-keys", "-t", sessionName, String(launchCmd), "Enter"]);
     await dismissStartupPrompts({ tmux, captureVisible, sessionName });
     started = true;
-    startPolling();
+    await startOutputStream();
   }
 
   async function writeInput(bytesOrText) {
@@ -135,25 +149,132 @@ export function createInteractiveTuiTransport({
       return;
     }
     stopped = true;
-    stopPolling();
+    await stopOutputStream();
     await tmux(["kill-session", "-t", sessionName]);
   }
 
-  function startPolling() {
-    // TODO: upgrade this transport to tmux pipe-pane once attach wiring needs
-    // byte-level output fidelity. The first native-bridge shard intentionally
-    // starts with capture-pane -e polling per the PRD.
-    pollTimer = setInterval(() => {
-      void pollOutput();
-    }, pollIntervalMs);
-    void pollOutput();
+  async function startOutputStream() {
+    try {
+      await startPipeStream();
+    } catch {
+      await stopPipeStream({ disableTmux: false });
+      startCapturePolling();
+    }
   }
 
-  async function pollOutput() {
-    if (stopped || pollInFlight) {
+  async function stopOutputStream() {
+    stopCapturePolling();
+    await stopPipeStream();
+  }
+
+  async function startPipeStream() {
+    pipeTempDir = await mkdtemp(path.join(tmpdir(), PIPE_TEMP_PREFIX));
+    pipeOutputPath = path.join(pipeTempDir, PIPE_OUTPUT_FILE);
+    pipeReadOffset = 0;
+    pipeDecoder = new StringDecoder("utf8");
+
+    await tmux([
+      "pipe-pane",
+      "-t",
+      sessionName,
+      "-o",
+      `cat >> ${shellQuote(pipeOutputPath)}`,
+    ]);
+    pipeEnabled = true;
+    startPipeReader();
+  }
+
+  function startPipeReader() {
+    pipeTimer = setInterval(() => {
+      void readPipeOutput();
+    }, pollIntervalMs);
+    void readPipeOutput();
+  }
+
+  async function readPipeOutput() {
+    if (stopped || !pipeOutputPath || pipeReadInFlight) {
       return;
     }
-    pollInFlight = true;
+    pipeReadInFlight = true;
+    let handle = null;
+    try {
+      handle = await open(pipeOutputPath, "r");
+      const stats = await handle.stat();
+      consecutivePipeReadErrors = 0;
+      if (stats.size < pipeReadOffset) {
+        pipeReadOffset = 0;
+      }
+      const bytesToRead = stats.size - pipeReadOffset;
+      if (bytesToRead > 0) {
+        const buffer = Buffer.allocUnsafe(bytesToRead);
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          bytesToRead,
+          pipeReadOffset,
+        );
+        if (bytesRead > 0 && pipeDecoder) {
+          pipeReadOffset += bytesRead;
+          const chunk = pipeDecoder.write(buffer.subarray(0, bytesRead));
+          if (chunk) {
+            onData(chunk);
+          }
+        }
+      }
+    } catch {
+      consecutivePipeReadErrors += 1;
+      if (
+        !stopped &&
+        pipeEnabled &&
+        consecutivePipeReadErrors >= MAX_CONSECUTIVE_POLL_ERRORS
+      ) {
+        await stopPipeStream();
+        startCapturePolling();
+      }
+    } finally {
+      if (handle) {
+        await handle.close().catch(() => {});
+      }
+      pipeReadInFlight = false;
+    }
+  }
+
+  async function stopPipeStream({ disableTmux = true } = {}) {
+    stopPipeReader();
+    if (pipeEnabled && disableTmux) {
+      await tmux(["pipe-pane", "-t", sessionName]).catch(() => {});
+    }
+    pipeEnabled = false;
+    pipeDecoder = null;
+    pipeReadOffset = 0;
+    consecutivePipeReadErrors = 0;
+    pipeOutputPath = null;
+    const tempDir = pipeTempDir;
+    pipeTempDir = null;
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  }
+
+  function stopPipeReader() {
+    if (pipeTimer) {
+      clearInterval(pipeTimer);
+      pipeTimer = null;
+    }
+  }
+
+  function startCapturePolling() {
+    capturePollTimer = setInterval(() => {
+      void pollCaptureOutput();
+    }, pollIntervalMs);
+    void pollCaptureOutput();
+  }
+
+  async function pollCaptureOutput() {
+    if (stopped || capturePollInFlight) {
+      return;
+    }
+    capturePollInFlight = true;
     try {
       const raw = await capturePane();
       consecutivePollErrors = 0;
@@ -166,17 +287,17 @@ export function createInteractiveTuiTransport({
     } catch {
       consecutivePollErrors += 1;
       if (consecutivePollErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
-        stopPolling();
+        stopCapturePolling();
       }
     } finally {
-      pollInFlight = false;
+      capturePollInFlight = false;
     }
   }
 
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
+  function stopCapturePolling() {
+    if (capturePollTimer) {
+      clearInterval(capturePollTimer);
+      capturePollTimer = null;
     }
   }
 
@@ -186,6 +307,10 @@ export function createInteractiveTuiTransport({
     resize,
     stop,
   };
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
 function buildTmuxEnvArgs(env) {
