@@ -2,7 +2,7 @@
 
 ## Summary
 
-스킬 문서(.md)를 템플릿(.tmpl)에서 자동 생성하는 엔진을 완성하고 검증한다.
+스킬 문서(.md)를 템플릿 파일에서 자동 생성하는 엔진을 완성하고 검증한다.
 반복되는 boilerplate(ARGUMENTS 처리, Telemetry, Deep Consensus 등)를 partial로 분리하여
 스킬 문서의 일관성을 보장하고 유지보수 비용을 줄인다.
 
@@ -31,9 +31,9 @@
 | `SKILL_DESCRIPTION` | frontmatter.description | 스킬 설명 |
 | `DEEP` | frontmatter.deep 또는 이름 패턴 추론 | deep 스킬 여부 (boolean) |
 
-### 문서 생성기 (`scripts/gen-skill-docs.mjs`)
+### 문서 생성기
 
-- `skills/` 하위의 `SKILL.md.tmpl` 파일을 스캔
+- `skills/` 하위의 템플릿 파일을 스캔
 - `skills/_templates/` 에서 partial을 로드
 - frontmatter + 디렉토리명으로 context를 구성
 - 렌더링 결과를 `SKILL.md`로 출력
@@ -47,15 +47,15 @@
   - `buildSkillTemplateContext()`: SKILL_NAME/DESCRIPTION/DEEP 자동 설정
   - `renderSkillTemplate()`: 변수 치환, #if, partial, 중첩, 에러 케이스
   - `loadTemplatePartials()`: 디렉토리 로드, 중첩 경로 alias, basename 충돌
-- `tests/unit/gen-skill-docs.test.mjs`: 통합 생성 테스트
+- 문서 생성기 통합 테스트
   - 단일/다중 스킬 생성, deep/non-deep 분기, write=false dry-run
   - _templates/ 내부 파일 무시, skillsDir 미지정 에러
 
-### 2. .tmpl 변환 (2개 스킬)
+### 2. 템플릿 변환 (2개 스킬)
 
-- `skills/tfx-find/SKILL.md.tmpl`: `{{> base}}` partial + `{{SKILL_NAME}}` 변수
-- `skills/tfx-index/SKILL.md.tmpl`: `{{> base}}` partial + `{{SKILL_NAME}}` 변수
-- `gen-skill-docs` 실행으로 .tmpl에서 .md 재생성 검증
+- `tfx-find` 스킬 템플릿: `{{> base}}` partial + `{{SKILL_NAME}}` 변수
+- `tfx-index` 스킬 템플릿: `{{> base}}` partial + `{{SKILL_NAME}}` 변수
+- 문서 생성기 실행으로 템플릿에서 .md 재생성 검증
 
 ### 3. Partials
 
@@ -69,11 +69,11 @@
 - immutable 패턴, 파일 800줄 이하, 함수 50줄 이하
 - 기존 SKILL.md의 내용/구조 보존
 - npm test 전체 통과
-- 기존 API (`parseFrontmatter`, `buildSkillTemplateContext`, `loadTemplatePartials`, `renderSkillTemplate`, `generateSkillDocs`) 호환 유지
+- 기존 API (`parseFrontmatter`, `buildSkillTemplateContext`, `loadTemplatePartials`, `renderSkillTemplate`, 문서 생성 함수) 호환 유지
 
 ## Success Criteria
 
 - `node --test tests/unit/skill-template.test.mjs` 전체 통과
-- `node --test tests/unit/gen-skill-docs.test.mjs` 전체 통과
-- `node scripts/gen-skill-docs.mjs` 실행 시 변환된 스킬의 SKILL.md 정상 생성
+- 문서 생성기 테스트 전체 통과
+- 문서 생성기 실행 시 변환된 스킬의 SKILL.md 정상 생성
 - 생성된 SKILL.md가 기존 내용과 의미적으로 동일

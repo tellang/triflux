@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { generateSkillDocs } from "../gen-skill-docs.mjs";
 import {
   buildSkillTemplateContext,
   loadSkillManifest,
@@ -287,45 +286,6 @@ describe("skill-template engine", () => {
       const source = "---\nname: yaml-only\n---\nbody";
       const result = parseFrontmatterWithManifest(source, root);
       assert.equal(result.data.name, "yaml-only");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("deprecated gen-skill-docs는 템플릿 partial을 해석하지 않는다", () => {
-    const root = makeTempDir();
-    try {
-      const skillsDir = join(root, "skills");
-      const templatesDir = join(skillsDir, "_templates");
-      const skillDir = join(skillsDir, "tfx-missing-partial");
-
-      mkdirSync(templatesDir, { recursive: true });
-      mkdirSync(skillDir, { recursive: true });
-
-      writeFileSync(
-        join(templatesDir, "base.md"),
-        "base={{SKILL_NAME}}",
-        "utf8",
-      );
-      writeFileSync(
-        join(skillDir, "SKILL.md.tmpl"),
-        [
-          "---",
-          "name: tfx-missing-partial",
-          "---",
-          "{{> base}}",
-          "{{> missing_partial}}",
-        ].join("\n"),
-        "utf8",
-      );
-
-      const result = generateSkillDocs({
-        skillsDir,
-        templatesDir,
-        write: false,
-      });
-      assert.equal(result.deprecated, true);
-      assert.equal(result.count, 0);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

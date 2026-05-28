@@ -8,7 +8,7 @@ Lake 4a/4b 단위 테스트는 통과하지만, 경계값/에지케이스/통합
 ## Problem
 
 - Context Monitor: 4개 테스트 (111줄) — 기본 시나리오만 커버
-- Skill Templates: gen-skill-docs 테스트 104줄 — 해피 패스 위주
+- Skill Templates: 문서 생성기 테스트 104줄 — 해피 패스 위주
 - 경계값, 에러 복구, 통합 시나리오 미검증
 
 ## Solution
@@ -34,13 +34,13 @@ Lake 4a/4b 단위 테스트는 통과하지만, 경계값/에지케이스/통합
 | 특수문자 변수 | `{{FOO.BAR}}`, `{{FOO-BAR}}` |
 | 중첩 조건 | `{{#if A}}{{#if B}}...{{/if}}{{/if}}` |
 | 대형 템플릿 | 1000줄 이상 템플릿 렌더링 |
-| gen-skill-docs 에러 | 존재하지 않는 partial 참조 시 에러 처리 |
+| 문서 생성기 에러 | 존재하지 않는 partial 참조 시 에러 처리 |
 
 ### 통합 테스트
 
 | 테스트 | 설명 |
 |--------|------|
-| gen-skill-docs 파이프라인 | 실제 _templates/ + 변환된 스킬로 전체 생성→비교 |
+| 문서 생성 파이프라인 | 실제 _templates/ + 변환된 스킬로 전체 생성→비교 |
 | Context Monitor 뷰 빌드 | buildContextUsageView 출력 형식 + 임계값 분류 연동 |
 
 ## Deliverables
