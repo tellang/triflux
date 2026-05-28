@@ -45,7 +45,7 @@ function updatePromptScreen(selected = "Update now") {
   ];
   return lines
     .map((line) =>
-      line.includes(selected) ? line.replace(/^  /, "› ") : line,
+      line.includes(selected) ? line.replace(/^ {2}/, "› ") : line,
     )
     .join("\n");
 }
@@ -58,7 +58,7 @@ function trustPromptScreen(selected = "Yes, continue") {
   ];
   return lines
     .map((line) =>
-      line.includes(selected) ? line.replace(/^  /, "› ") : line,
+      line.includes(selected) ? line.replace(/^ {2}/, "› ") : line,
     )
     .join("\n");
 }
