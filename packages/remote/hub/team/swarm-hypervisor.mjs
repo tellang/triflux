@@ -156,6 +156,19 @@ function resolveHubStatusUrl(hub) {
   return `http://${formatHubHostForUrl(host)}:${port}/status`;
 }
 
+function isTruthyConfigValue(value) {
+  if (typeof value === "boolean") return value;
+  return /^(true|yes|1|interactive)$/i.test(String(value || "").trim());
+}
+
+function isInteractiveNativeBridgeShard(shard) {
+  return (
+    isTruthyConfigValue(shard?.interactive) ||
+    isTruthyConfigValue(shard?.nativeBridgeInteractive) ||
+    String(shard?.workerType || "").toLowerCase() === "interactive"
+  );
+}
+
 /**
  * Create a swarm hypervisor.
  * @param {object} opts
@@ -591,6 +604,7 @@ export function createSwarmHypervisor(opts) {
   async function maybeRegisterNativeBridgeShard(shard, sessionConfig) {
     if (!nativeBridge) return null;
     try {
+      const interactive = !shard.host && isInteractiveNativeBridgeShard(shard);
       const registration = await registerSwarmShardImpl({
         sessionId: sessionConfig.id,
         cli: shard.agent,
@@ -598,8 +612,11 @@ export function createSwarmHypervisor(opts) {
         swarmName: runId,
         ...getShardDisplayPosition(shard),
         shardName: shard.name,
-        cwd: workdir,
+        cwd: interactive
+          ? shard.worktreePath || sessionConfig.workdir || workdir
+          : workdir,
         host: shard.host || "local",
+        interactive,
         _deps: {
           warn(message) {
             emitter.emit("warning", {

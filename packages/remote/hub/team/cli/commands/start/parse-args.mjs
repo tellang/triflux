@@ -28,7 +28,12 @@ const KNOWN_ROLES = new Set([
   "scientist",
 ]);
 
-const NATIVE_BRIDGE_MODES = new Set(["roster", "agents", "claude-wrapper"]);
+const NATIVE_BRIDGE_MODES = new Set([
+  "roster",
+  "agents",
+  "interactive-attach",
+  "claude-wrapper",
+]);
 
 /**
  * --assign "cli:prompt:role" 형식을 콜론-안전하게 파싱한다.
@@ -155,7 +160,7 @@ export function parseTeamArgs(args = []) {
       const mode = args[++index];
       if (!NATIVE_BRIDGE_MODES.has(mode)) {
         throw new Error(
-          `unknown native bridge mode: ${mode || ""}; expected roster, agents, or claude-wrapper`,
+          `unknown native bridge mode: ${mode || ""}; expected roster, agents, interactive-attach, or claude-wrapper`,
         );
       }
       nativeBridge = true;
