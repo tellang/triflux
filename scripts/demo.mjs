@@ -17,11 +17,11 @@ const WORKERS = [
   },
   {
     pane: 1,
-    agent: "gemini",
+    agent: "antigravity",
     messages: [
-      "[gemini] Reviewing UI components...",
-      "[gemini] Optimizing render cycle...",
-      "[gemini] Done ✓",
+      "[antigravity] Reviewing UI components...",
+      "[antigravity] Optimizing render cycle...",
+      "[antigravity] Done ✓",
     ],
   },
   {
@@ -99,7 +99,7 @@ export function showSummary() {
     "",
     "=== triflux demo summary ===",
     "  codex  → JWT auth refactor    [done]",
-    "  gemini → UI render optimize   [done]",
+    "  antigravity → UI render optimize   [done]",
     "  claude → Security audit       [done]",
     "============================",
     "",
@@ -111,9 +111,19 @@ export function showSummary() {
 
 export function cleanup(sessionName, opts = {}) {
   if (opts.dryRun) {
+    console.log(`[dry-run] psmux detach-client -t ${sessionName}`);
+    console.log(`[dry-run] sleep 2`);
     console.log(`[dry-run] psmux kill-session -t ${sessionName}`);
     return;
   }
+  try {
+    childProcess.execFileSync("psmux", ["detach-client", "-t", sessionName], {
+      stdio: "pipe",
+    });
+  } catch {
+    // session may have no attached clients
+  }
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
   try {
     childProcess.execFileSync("psmux", ["kill-session", "-t", sessionName], {
       stdio: "pipe",

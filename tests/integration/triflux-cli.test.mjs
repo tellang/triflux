@@ -94,6 +94,17 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
   it("schema는 CLI 명세와 hub tool schema를 노출해야 한다", () => {
     const bundle = parseStdoutJson(runCli(["schema"]));
     assert.ok(bundle.commands.doctor);
+    for (const command of [
+      "auto",
+      "update",
+      "tray",
+      "codex-team",
+      "notion-read",
+      "review",
+      "monitor",
+    ]) {
+      assert.ok(bundle.commands[command], `schema command missing: ${command}`);
+    }
     assert.ok(Array.isArray(bundle.hub_tools["x-triflux-mcp-tools"]));
 
     const delegate = parseStdoutJson(runCli(["schema", "delegate"]));
@@ -246,11 +257,84 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     const listPayload = parseStdoutJson(
       runCli(["list", "--json"], { homeDir }),
     );
-    assert.deepEqual(listPayload.skill_aliases, [
-      { alias: "tfx-autopilot", source: "tfx-auto", installed: true },
-      { alias: "tfx-persist", source: "tfx-auto", installed: true },
-      { alias: "tfx-fullcycle", source: "tfx-auto", installed: true },
-    ]);
+    assert.deepEqual(
+      listPayload.skill_aliases.map(
+        ({ alias, source, installed, deprecated }) => ({
+          alias,
+          source,
+          installed,
+          deprecated,
+        }),
+      ),
+      [
+        {
+          alias: "tfx-autopilot",
+          source: "tfx-auto",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-consensus",
+          source: "tfx-auto",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-debate",
+          source: "tfx-auto",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-fullcycle",
+          source: "tfx-auto",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-multi",
+          source: "tfx-auto",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-panel",
+          source: "tfx-auto",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-persist",
+          source: "tfx-auto",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-psmux-rules",
+          source: ".claude/rules/tfx-psmux.md",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-remote-setup",
+          source: "tfx-remote",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-remote-spawn",
+          source: "tfx-remote",
+          installed: true,
+          deprecated: true,
+        },
+        {
+          alias: "tfx-swarm",
+          source: "tfx-auto",
+          installed: true,
+          deprecated: true,
+        },
+      ],
+    );
     assert.equal(listPayload.user_skills.includes("tfx-autopilot"), false);
   });
 

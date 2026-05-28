@@ -30,6 +30,7 @@ const MIRROR_TOPS = [
   "mesh",
   "scripts",
   "skills",
+  "tui",
 ];
 const CORE_FILE_MIRRORS = [
   {

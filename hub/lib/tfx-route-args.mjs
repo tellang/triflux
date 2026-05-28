@@ -7,7 +7,7 @@
 //        maxIterations, task, warnings}.
 //
 // 기존 플래그 (Phase 2 v10.9.33+):
-//   --cli {auto|codex|gemini|claude}
+//   --cli {auto|codex|antigravity|claude}
 //   --mode {quick|deep|consensus}
 //   --parallel {1|N|swarm}
 //   --retry {0|1|ralph|auto-escalate}    (Phase 3 에서 ralph/auto-escalate 신규)
@@ -34,7 +34,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
 });
 
 const VALID_VALUES = Object.freeze({
-  cli: ["auto", "codex", "gemini", "claude"],
+  cli: ["auto", "codex", "antigravity", "claude"],
   mode: ["quick", "deep", "consensus"],
   retry: ["0", "1", "ralph", "auto-escalate"],
   isolation: ["none", "worktree"],
@@ -158,7 +158,14 @@ function applyBool(opts, flag) {
 function applyValue(opts, flag, value, warnings) {
   switch (flag) {
     case "--cli":
-      opts.cli = value;
+      if (value === "gemini") {
+        opts.cli = "antigravity";
+        warnings.push(
+          "--cli gemini is deprecated; using --cli antigravity instead",
+        );
+      } else {
+        opts.cli = value;
+      }
       break;
     case "--mode":
       opts.mode = value;

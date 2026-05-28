@@ -8,18 +8,18 @@
   </picture>
 </p>
 
-<h3 align="center">CLI-first multi-model orchestration for Claude Code, Codex, and Gemini</h3>
+<h3 align="center">CLI-first multi-model orchestration for Claude Code, Codex, and Antigravity</h3>
 
 <p align="center">
   One front door for routing work, coordinating agents, running local/remote teams,<br>
-  and keeping Codex/Gemini/Claude execution behind auditable guards.
+  and keeping Codex/Antigravity/Claude execution behind auditable guards.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/skill_files-33-F5C242?style=flat-square" alt="33 skill files">
+  <img src="https://img.shields.io/badge/skill_files-34-F5C242?style=flat-square" alt="34 skill files">
   <sub>11 compatibility aliases are deprecated</sub>
   <img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node >= 18">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
@@ -43,7 +43,7 @@
 ## What is triflux?
 
 triflux is a **Claude Code plugin + npm CLI** for routing AI coding work across
-Claude, Codex, and Gemini without letting ad-hoc shell commands or stale skill
+Claude, Codex, and Antigravity without letting ad-hoc shell commands or stale skill
 aliases become the control plane.
 
 The current design is intentionally simpler than the old README implied:
@@ -111,7 +111,7 @@ tfx codex-team "refactor auth + add tests"
 ```
 
 > Deep, consensus, team, and swarm paths need the relevant CLIs and a terminal
-> multiplexer. Run `tfx doctor` first; it reports missing Codex/Gemini/Claude,
+> multiplexer. Run `tfx doctor` first; it reports missing Codex/Antigravity/Claude,
 > psmux/tmux, Hub, MCP, profile, and stale-skill issues.
 
 ---
@@ -126,26 +126,31 @@ The `tfx` CLI currently exposes these primary commands:
 | --- | --- |
 | `tfx setup` | Sync scripts, HUD, hooks, MCP, and profiles. Supports `--dry-run`. |
 | `tfx doctor` | Diagnose and repair installation state. Supports `--fix`, `--reset`, `--diagnose`, `--json`. |
+| `tfx auto` | Preview the `tfx-auto` routing decision. Supports `--cli`, `--mode`, `--parallel`, `--json`. |
 | `tfx mcp` | Manage MCP registry targets with `list`, `sync`, `add`, and `remove`. |
 | `tfx hub` | Start, stop, ensure, or inspect the local MCP message bus. |
 | `tfx list` | Show installed package and user skills. |
 | `tfx handoff` | Serialize the current context for local or remote continuation. |
 | `tfx schema` | Print CLI and Hub delegator schemas. |
+| `tfx hooks` | Scan, diff, apply, restore, or inspect hook orchestrator state. |
+| `tfx tray` | Start the tray/HUD status process; use `--attach` for foreground debugging. |
 | `tfx multi` | Launch local multi-agent team mode through tmux/psmux + Hub. |
 | `tfx swarm` | Plan, preflight, run, or list PRD-based worktree-isolated swarm work. |
 | `tfx synapse` | Inspect swarm registry and leases. |
+| `tfx review` | Run Codex-backed git diff review. |
 | `tfx codex-team` | Codex-led team mode convenience wrapper. |
 | `tfx notion-read` | Convert Notion pages to Markdown through configured MCP clients. |
 | `tfx why` | Read intent trailers from the last commit touching a path. |
 | `tfx update` | Update to the latest stable or dev package. |
+| `tfx monitor` | Open the terminal TUI monitor. |
 | `tfx version` | Print version information. |
-| `tfx-profile` | Convenience binary for interactive Codex/Gemini profile management. |
+| `tfx-profile` | Convenience binary for interactive Codex profile management. |
 
 Run `tfx schema <command>` for the exact argument contract.
 
 ### Claude Code skills
 
-The package ships **33 skill files**. The important split is:
+The package ships **34 skill files**. The important split is:
 
 - **Canonical entrypoints**: `tfx-auto`, `tfx-remote`, `tfx-doctor`,
   `tfx-setup`, `tfx-profile`, `tfx-hub`, `tfx-hooks`, `tfx-ship`, `tfx-wt`.
@@ -169,7 +174,7 @@ Most old skill names now map to explicit `tfx-auto` flags:
 | debate or panel report | `/tfx-auto "task" --mode consensus --shape debate|panel` |
 | local parallel work | `/tfx-auto "task" --parallel N --mode deep` or shell `tfx multi ...` |
 | PRD/worktree swarm | `/tfx-auto "task" --parallel swarm --mode consensus --isolation worktree` or shell `tfx swarm ...` |
-| force a CLI lane | `/tfx-auto "task" --cli codex|gemini|claude` |
+| force a CLI lane | `/tfx-auto "task" --cli codex|antigravity|claude` |
 
 ### Control-plane boundaries
 
@@ -217,7 +222,7 @@ explicit. Use `--mode quick|deep|consensus` when you already know the mode.
 /tfx-auto "review the migration strategy" --mode consensus --shape panel
 ```
 
-Consensus participants are the configured Claude/Codex/Gemini lanes. If a lane is
+Consensus participants are the configured Claude/Codex/Antigravity lanes. If a lane is
 unavailable, the result should report partial/degraded status instead of hiding it.
 
 ### Local team or PRD swarm
@@ -267,8 +272,8 @@ state without replaying the entire conversation.
 graph TD
     User([User / Claude Code / shell]) --> Skills[Claude skills]
     User --> CLI[tfx CLI]
-    Skills --> Auto[/tfx-auto]
-    Skills --> Remote[/tfx-remote]
+    Skills --> Auto["/tfx-auto"]
+    Skills --> Remote["/tfx-remote"]
     CLI --> Hub[triflux Hub]
     CLI --> Team[tfx multi / swarm]
     Auto --> Route[tfx-route.sh + guards]
@@ -288,7 +293,7 @@ The common routing path is:
 2. Keyword/routing hooks may add context or choose a skill.
 3. `tfx-auto` normalizes intent into mode, retry, parallelism, risk tier, and
    target CLI lane.
-4. `tfx-route.sh`, Hub workers, or the `tfx` CLI execute the actual Codex/Gemini/
+4. `tfx-route.sh`, Hub workers, or the `tfx` CLI execute the actual Codex/Antigravity/
    Claude-backed work.
 5. Hub records team messages, leases, retries, handoffs, and status surfaces.
 
@@ -313,13 +318,13 @@ team, or MCP workflows allow localhost access if your environment requires it.
 triflux keeps risky execution behind managed routes:
 
 - CLI calls should flow through `tfx-route.sh`, Hub workers, or the `tfx` CLI.
-- Direct `codex exec` / `gemini -y` paths are guarded in the installed workflow.
+- Direct `codex exec`, unmanaged `agy`, and deprecated `gemini` routes are guarded in the installed workflow.
 - psmux/Windows Terminal flows must use the managed API and documented rules, not
   ad-hoc `wt.exe` or `psmux send-keys` snippets.
 
 ### Profiles and model routing
 
-Use `tfx-profile` or `tfx setup` to manage Codex/Gemini profiles. Do not hardcode
+Use `tfx-profile` for Codex profiles and `tfx setup`/`tfx doctor` for Antigravity plus legacy Gemini compatibility state. Do not hardcode
 model and effort flags in launcher scripts when a profile already owns them.
 
 ---
@@ -348,12 +353,11 @@ tfx mcp remove context7
 ```
 
 The registry is the source of truth for managed MCP targets. Avoid hand-editing
-Codex/Gemini/Claude MCP files unless you are intentionally debugging drift.
+Codex/Antigravity/Claude MCP files unless you are intentionally debugging drift.
 
 ### State snapshots
 
-Hub startup can take best-effort daily snapshots of selected `~/.codex/` and
-`~/.gemini/` state into ignored `references/*-snapshots/` folders. Manual helpers:
+Hub startup can take best-effort daily snapshots of selected `~/.codex/` and Antigravity/Gemini `~/.gemini/` state into ignored `references/*-snapshots/` folders. Manual helpers:
 
 ```bash
 npm run snapshot:codex
@@ -399,7 +403,7 @@ rules used by agents and launch scripts.
 | Hub token auth | Local bearer token for Hub APIs where configured. |
 | Localhost binding | Hub defaults to `127.0.0.1`. |
 | MCP registry guard | Replaces unsupported or stale MCP records with managed HTTP entries. |
-| Headless guard | Blocks unmanaged Codex/Gemini headless execution paths. |
+| Headless guard | Blocks unmanaged Codex/Antigravity headless execution paths and deprecated Gemini routes. |
 | Safety guard | Sanitizes shell-sensitive psmux/SSH/WT flows. |
 | Consensus reporting | Deep/consensus workflows should report degraded or disputed findings explicitly. |
 

@@ -143,6 +143,34 @@ const JSON_OUTPUT = RAW_ARGS.includes("--json");
 const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
 
 const CLI_COMMAND_SCHEMAS = Object.freeze({
+  auto: {
+    usage:
+      "tfx auto [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus] [--parallel 1|N|swarm] [--json]",
+    description:
+      "tfx-auto 라우팅 결정을 CLI에서 미리보기/직렬화 (실행 skill front door와 같은 flag surface)",
+    options: [
+      {
+        name: "--cli <name>",
+        type: "string",
+        description: "실행 lane 강제: auto|codex|antigravity|claude",
+      },
+      {
+        name: "--mode <name>",
+        type: "string",
+        description: "라우팅 모드: quick|deep|consensus",
+      },
+      {
+        name: "--parallel <1|N|swarm>",
+        type: "string",
+        description: "단일/로컬 병렬/PRD swarm 라우팅 힌트",
+      },
+      {
+        name: "--json",
+        type: "boolean",
+        description: "parse 결과와 dispatch 결정을 JSON으로 출력",
+      },
+    ],
+  },
   setup: {
     usage: "tfx setup [--dry-run] [--enable-hub-autostart]",
     description: "파일 동기화 + HUD/MCP 설정",
@@ -498,6 +526,102 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     },
   },
+  update: {
+    usage: "tfx update [--dev]",
+    description:
+      "설치 방식(plugin/npm/git)을 감지해 triflux를 업데이트하고 setup/cache를 재동기화",
+    options: [
+      {
+        name: "--dev / dev",
+        type: "boolean",
+        description: "npm 설치 모드에서 dev tag로 업데이트",
+      },
+      {
+        name: "--help",
+        type: "boolean",
+        description: "업데이트를 실행하지 않고 도움말만 출력",
+      },
+    ],
+  },
+  tray: {
+    usage: "tfx tray [--attach]",
+    description: "트레이/HUD 상태 표시 프로세스 실행",
+    options: [
+      {
+        name: "--attach",
+        type: "boolean",
+        description: "디버깅용 foreground 실행 (기본은 detach)",
+      },
+    ],
+  },
+  "codex-team": {
+    usage:
+      "tfx codex-team [status|debug|send|attach|stop|<task>] [--layout 1xN|Nx1] [--json]",
+    description:
+      "Codex lead + Codex workers 기본값으로 tfx multi 팀 모드를 시작/제어",
+    subcommands: {
+      status: "현재 Codex team 상태 확인",
+      debug: "최근 로그/상태 진단 출력",
+      send: "워커에게 메시지 전송: tfx codex-team send <N> <msg>",
+      attach: "팀 pane/session attach",
+      stop: "팀 세션 정리",
+    },
+    options: [
+      {
+        name: "--layout <shape>",
+        type: "string",
+        description: "기본 1xN. Nx1 등 team layout 전달",
+      },
+      {
+        name: "--json",
+        type: "boolean",
+        description: "지원 subcommand의 출력을 JSON으로 전환",
+      },
+    ],
+  },
+  "notion-read": {
+    usage: "tfx notion-read <notion-url-or-page-id> [options]",
+    description: "Notion page/database를 markdown/JSON으로 읽기 (nr alias)",
+    aliases: ["nr"],
+    options: [
+      {
+        name: "--json",
+        type: "boolean",
+        description: "가능한 경우 구조화된 JSON 출력",
+      },
+    ],
+  },
+  review: {
+    usage:
+      "tfx review [ref] [--base <ref>] [--timeout <seconds>] [--shard off|per-file] [--json]",
+    description: "Codex 기반 git diff review 실행",
+    options: [
+      {
+        name: "--base <ref>",
+        type: "string",
+        description: "비교 기준 ref",
+      },
+      {
+        name: "--timeout <seconds>",
+        type: "number",
+        description: "review 실행 timeout (기본 180)",
+      },
+      {
+        name: "--shard <mode>",
+        type: "string",
+        description: "off 또는 per-file",
+      },
+      {
+        name: "--json",
+        type: "boolean",
+        description: "review 결과 JSON 출력",
+      },
+    ],
+  },
+  monitor: {
+    usage: "tfx monitor",
+    description: "터미널 TUI 모니터 실행",
+  },
 });
 
 // ── 유틸리티 ──
@@ -523,6 +647,53 @@ function stripAnsi(value) {
 }
 function printJson(payload) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+}
+
+function isHelpArg(arg) {
+  return ["help", "--help", "-h"].includes(String(arg || "").toLowerCase());
+}
+
+function formatSubcommandHelp(name, entry) {
+  if (typeof entry === "string") return `${name} — ${entry}`;
+  if (entry?.usage && entry?.description) {
+    return `${entry.usage} — ${entry.description}`;
+  }
+  if (entry?.usage) return entry.usage;
+  if (entry?.description) return `${name} — ${entry.description}`;
+  return String(name);
+}
+
+function printCommandHelp(command) {
+  const schema = CLI_COMMAND_SCHEMAS[command];
+  if (!schema) return false;
+  const subcommands = schema.subcommands
+    ? Object.entries(schema.subcommands)
+        .map(
+          ([name, entry]) =>
+            `    ${WHITE_BRIGHT}${formatSubcommandHelp(name, entry)}${RESET}`,
+        )
+        .join("\n")
+    : "";
+  const options = schema.options
+    ? schema.options
+        .map(
+          (option) =>
+            `    ${DIM}${String(option.name).padEnd(22)}${RESET} ${GRAY}${option.description || ""}${RESET}`,
+        )
+        .join("\n")
+    : "";
+  const aliases = schema.aliases?.length
+    ? `\n  ${BOLD}Aliases${RESET}\n    ${schema.aliases.join(", ")}\n`
+    : "";
+  console.log(`
+  ${AMBER}${BOLD}⬡ tfx ${command}${RESET}
+
+  ${GRAY}${schema.description || ""}${RESET}
+
+  ${BOLD}Usage${RESET}
+    ${WHITE_BRIGHT}${schema.usage}${RESET}
+${aliases}${subcommands ? `\n  ${BOLD}Subcommands${RESET}\n${subcommands}\n` : ""}${options ? `\n  ${BOLD}Options${RESET}\n${options}\n` : ""}`);
+  return true;
 }
 
 async function withConsoleSilenced(enabled, fn) {
@@ -2064,32 +2235,36 @@ function cmdSetup(options = {}) {
     });
   }
 
-  // Gemini 프로필
+  // Antigravity/Gemini 호환 프로필
   const geminiResult = ensureGeminiProfiles();
   if (!geminiResult.ok) {
     const reason = renderErrorMessage(geminiResult.message);
-    warn(`Gemini profiles 설정 실패: ${reason}`);
-    summary.push({ item: "Gemini profiles", status: "⚠️", detail: reason });
+    warn(`Antigravity/Gemini profiles 설정 실패: ${reason}`);
+    summary.push({
+      item: "Antigravity/Gemini profiles",
+      status: "⚠️",
+      detail: reason,
+    });
   } else if (geminiResult.created) {
     ok(
-      `Gemini profiles: ${geminiResult.count}개 생성됨 (~/.gemini/triflux-profiles.json)`,
+      `Antigravity/Gemini profiles: ${geminiResult.count}개 생성됨 (~/.gemini/triflux-profiles.json)`,
     );
     summary.push({
-      item: "Gemini profiles",
+      item: "Antigravity/Gemini profiles",
       status: "✅",
       detail: `${geminiResult.count}개 생성됨`,
     });
   } else if (geminiResult.added > 0) {
-    ok(`Gemini profiles: ${geminiResult.added}개 추가됨`);
+    ok(`Antigravity/Gemini profiles: ${geminiResult.added}개 추가됨`);
     summary.push({
-      item: "Gemini profiles",
+      item: "Antigravity/Gemini profiles",
       status: "✅",
       detail: `${geminiResult.added}개 추가됨 (총 ${geminiResult.count}개)`,
     });
   } else {
-    ok(`Gemini profiles: ${geminiResult.count}개 준비됨`);
+    ok(`Antigravity/Gemini profiles: ${geminiResult.count}개 준비됨`);
     summary.push({
-      item: "Gemini profiles",
+      item: "Antigravity/Gemini profiles",
       status: "✅",
       detail: `${geminiResult.count}개 준비됨`,
     });
@@ -5163,8 +5338,13 @@ function resolveUpdateTargets({ installMode, pluginPath }) {
   return [];
 }
 
-async function cmdUpdate() {
-  const isDev = isDevUpdateRequested(NORMALIZED_ARGS);
+async function cmdUpdate(args = []) {
+  if (args.some(isHelpArg)) {
+    printCommandHelp("update");
+    return;
+  }
+
+  const isDev = isDevUpdateRequested(args);
   const tagLabel = isDev ? ` ${YELLOW}--dev${RESET}` : "";
   console.log(`\n${BOLD}triflux update${RESET}${tagLabel}\n`);
 
@@ -5520,27 +5700,74 @@ async function cmdUpdate() {
   console.log(`${GREEN}${BOLD}✓ 업데이트 완료${RESET}\n`);
 }
 
+function readPackagedSkillMetadata(skillName) {
+  const skillPath = join(PKG_ROOT, "skills", skillName, "SKILL.md");
+  if (!existsSync(skillPath)) return null;
+  const metadata = { name: skillName, deprecated: false, supersededBy: null };
+  let inFrontmatter = false;
+  for (const line of readFileSync(skillPath, "utf8").split(/\r?\n/)) {
+    if (line.trim() === "---") {
+      if (!inFrontmatter) {
+        inFrontmatter = true;
+        continue;
+      }
+      break;
+    }
+    if (!inFrontmatter) continue;
+    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    const value = rawValue.trim().replace(/^["']|["']$/g, "");
+    if (key === "deprecated") metadata.deprecated = value === "true";
+    if (key === "superseded-by") metadata.supersededBy = value || null;
+  }
+  return metadata;
+}
+
+function listDeprecatedPackagedSkillAliases(pluginSkills, installedSkills) {
+  if (!existsSync(pluginSkills)) return [];
+  return readdirSync(pluginSkills)
+    .sort()
+    .map((name) => readPackagedSkillMetadata(name))
+    .filter((metadata) => metadata?.deprecated)
+    .map((metadata) => ({
+      alias: metadata.name,
+      source: metadata.supersededBy || "deprecated",
+      installed: existsSync(join(installedSkills, metadata.name, "SKILL.md")),
+      deprecated: true,
+    }));
+}
+
 function cmdList(options = {}) {
   const { json = false } = options;
   const pluginSkills = join(PKG_ROOT, "skills");
   const installedSkills = join(CLAUDE_DIR, "skills");
   const packageSkills = [];
   const userSkills = [];
-  const aliasNames = new Set(SKILL_ALIASES.map(({ alias }) => alias));
-  const skillAliases = [];
+  const skillAliases = listDeprecatedPackagedSkillAliases(
+    pluginSkills,
+    installedSkills,
+  );
+  const aliasNames = new Set([
+    ...SKILL_ALIASES.map(({ alias }) => alias),
+    ...skillAliases.map(({ alias }) => alias),
+  ]);
 
   if (existsSync(pluginSkills)) {
     for (const name of readdirSync(pluginSkills).sort()) {
       const src = join(pluginSkills, name, "SKILL.md");
       if (!existsSync(src)) continue;
+      const metadata = readPackagedSkillMetadata(name);
       const dst = join(installedSkills, name, "SKILL.md");
-      packageSkills.push({ name, installed: existsSync(dst) });
+      packageSkills.push({
+        name,
+        installed: existsSync(dst),
+        ...(metadata?.deprecated ? { deprecated: true } : {}),
+        ...(metadata?.supersededBy
+          ? { superseded_by: metadata.supersededBy }
+          : {}),
+      });
     }
-  }
-
-  for (const { alias, source } of SKILL_ALIASES) {
-    const dst = join(installedSkills, alias, "SKILL.md");
-    skillAliases.push({ alias, source, installed: existsSync(dst) });
   }
 
   const pkgNames = new Set(
@@ -5593,7 +5820,7 @@ function cmdList(options = {}) {
         : `${RED_BRIGHT}↳${RESET}`;
       const status = entry.installed ? "" : ` ${GRAY}(미설치)${RESET}`;
       console.log(
-        `    ${icon} ${BOLD}${entry.alias}${RESET} ${GRAY}→ ${entry.source}${RESET}${status}`,
+        `    ${icon} ${BOLD}${entry.alias}${RESET} ${GRAY}→ ${entry.source}${RESET}${entry.deprecated ? ` ${YELLOW}(deprecated)${RESET}` : ""}${status}`,
       );
     }
   }
@@ -5624,6 +5851,11 @@ function cmdVersion(options = {}) {
 }
 
 function cmdHandoff(args = [], options = {}) {
+  if (args.some(isHelpArg)) {
+    printCommandHelp("handoff");
+    return;
+  }
+
   const { json = false } = options;
   const parsed = {
     target: "remote",
@@ -5751,6 +5983,11 @@ function cmdSchema(args = []) {
   const toolEntry = Array.isArray(bundle["x-triflux-mcp-tools"])
     ? bundle["x-triflux-mcp-tools"].find((tool) => tool.name === selector)
     : null;
+
+  if (isHelpArg(selector)) {
+    printCommandHelp("schema");
+    return;
+  }
 
   if (!selector) {
     printJson({
@@ -6084,18 +6321,21 @@ ${updateNotice}
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
     ${DIM}  --json${RESET}       ${GRAY}구조화된 진단 결과 JSON 출력${RESET}
+    ${WHITE_BRIGHT}tfx auto${RESET}       ${GRAY}tfx-auto 라우팅 결정 미리보기 (--cli codex|antigravity|claude)${RESET}
     ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP registry 관리 (list/sync/add/remove)${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx handoff${RESET}    ${GRAY}현재 컨텍스트를 원격/로컬 핸드오프 프롬프트로 생성${RESET}
     ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
+    ${WHITE_BRIGHT}tfx hooks${RESET}      ${GRAY}훅 오케스트레이터 scan/diff/apply/status${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx tray${RESET}       ${GRAY}Windows 시스템 트레이 실행${RESET}
-    ${DIM}  --detach${RESET}      ${GRAY}백그라운드 트레이 프로세스로 분리${RESET}
+    ${DIM}  --attach${RESET}      ${GRAY}foreground 트레이 프로세스로 실행${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx swarm${RESET}       ${GRAY}PRD 기반 worktree 격리 병렬 실행 (run/plan/list)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
+    ${WHITE_BRIGHT}tfx review${RESET}      ${GRAY}Codex 기반 git diff review${RESET}
     ${WHITE_BRIGHT}tfx why${RESET}         ${GRAY}경로의 마지막 커밋 X-Intent 트레일러 추출${RESET}
     ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
@@ -6103,7 +6343,7 @@ ${updateNotice}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
 
-    ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행 (--cli codex|gemini, --parallel N|swarm)${RESET}
+    ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행 (--cli codex|antigravity|claude, --parallel N|swarm)${RESET}
     ${AMBER}/tfx-setup${RESET}      ${GRAY}HUD 설정 + 진단${RESET}
     ${YELLOW}/tfx-doctor${RESET}     ${GRAY}진단 + 수리 + 캐시 초기화${RESET}
 
@@ -7013,6 +7253,10 @@ async function main() {
 
   switch (cmd) {
     case "auto": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("auto");
+        return;
+      }
       const parsedArgs = parseRouteArgs(cmdArgs);
       const decision = applyAutoDispatchDecision(parsedArgs);
       if (JSON_OUTPUT) {
@@ -7023,12 +7267,20 @@ async function main() {
       return;
     }
     case "setup":
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("setup");
+        return;
+      }
       cmdSetup({
         dryRun: cmdArgs.includes("--dry-run"),
         enableHubAutostart: cmdArgs.includes("--enable-hub-autostart"),
       });
       return;
     case "doctor": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("doctor");
+        return;
+      }
       if (cmdArgs.includes("--audit")) {
         const auditScript = join(PKG_ROOT, "scripts", "config-audit.mjs");
         const auditArgs = JSON_OUTPUT ? ["--json"] : [];
@@ -7156,28 +7408,44 @@ async function main() {
       cmdSchema(cmdArgs);
       return;
     case "update":
-      await cmdUpdate();
+      await cmdUpdate(cmdArgs);
       return;
     case "list":
     case "ls":
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("list");
+        return;
+      }
       cmdList({ json: JSON_OUTPUT });
       return;
     case "handoff":
       cmdHandoff(cmdArgs, { json: JSON_OUTPUT });
       return;
     case "hub":
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("hub");
+        return;
+      }
       await cmdHub(cmdArgs, {
         json:
           JSON_OUTPUT && ["status", "ensure"].includes(cmdArgs[0] || "status"),
       });
       return;
     case "monitor": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("monitor");
+        return;
+      }
       const { createMonitor } = await import("../tui/monitor.mjs");
       const mon = createMonitor();
       await mon.start();
       break;
     }
     case "tray": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("tray");
+        return;
+      }
       const trayUrl = new URL("../hub/tray.mjs", import.meta.url);
       const trayPath = fileURLToPath(trayUrl);
       if (cmdArgs.includes("--attach")) {
@@ -7200,6 +7468,10 @@ async function main() {
     }
     case "multi": {
       const subcommand = cmdArgs[0] || "";
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("multi");
+        return;
+      }
       if (JSON_OUTPUT) process.env.TFX_OUTPUT_JSON = "1";
       else delete process.env.TFX_OUTPUT_JSON;
       if (subcommand !== "status") {
@@ -7220,6 +7492,10 @@ async function main() {
       return;
     }
     case "codex-team":
+      if (cmdArgs.some(isHelpArg)) {
+        await cmdCodexTeam(["--help"]);
+        return;
+      }
       if (JSON_OUTPUT) process.env.TFX_OUTPUT_JSON = "1";
       else delete process.env.TFX_OUTPUT_JSON;
       await checkHubRunning();
@@ -7231,6 +7507,10 @@ async function main() {
       return;
     case "notion-read":
     case "nr": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("notion-read");
+        return;
+      }
       const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
       try {
         execFileSync(process.execPath, [scriptPath, ...cmdArgs], {
@@ -7247,6 +7527,10 @@ async function main() {
       return;
     }
     case "hooks": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("hooks");
+        return;
+      }
       const hookManagerPath = join(PKG_ROOT, "hooks", "hook-manager.mjs");
       const sub = cmdArgs[0] || "status";
       try {
@@ -7267,6 +7551,10 @@ async function main() {
     case "synapse": {
       const { cmdSynapseStatus } = await import("../hub/team/synapse-cli.mjs");
       const sub = cmdArgs[0] || "status";
+      if (isHelpArg(sub)) {
+        printCommandHelp("synapse");
+        return;
+      }
       if (sub !== "status") {
         throw createCliError(`synapse 서브커맨드 미지원: ${sub}`, {
           exitCode: EXIT_ARG_ERROR,
@@ -7278,6 +7566,10 @@ async function main() {
       return;
     }
     case "review": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("review");
+        return;
+      }
       const ref =
         cmdArgs[0] && !cmdArgs[0].startsWith("--") ? cmdArgs[0] : "HEAD";
       const baseIdx = cmdArgs.indexOf("--base");
@@ -7397,6 +7689,10 @@ ${s.options.map((o) => `    ${DIM}${o.name.padEnd(16)}${RESET} ${GRAY}${o.descri
       return;
     }
     case "why": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("why");
+        return;
+      }
       const { cmdSynapseWhy } = await import("../hub/team/synapse-cli.mjs");
       await cmdSynapseWhy(cmdArgs, { json: JSON_OUTPUT });
       return;
@@ -7404,6 +7700,10 @@ ${s.options.map((o) => `    ${DIM}${o.name.padEnd(16)}${RESET} ${GRAY}${o.descri
     case "version":
     case "--version":
     case "-v":
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("version");
+        return;
+      }
       cmdVersion({ json: JSON_OUTPUT });
       return;
     case "help":

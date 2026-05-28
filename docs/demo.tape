@@ -26,7 +26,7 @@ Sleep 3s
 Type "# Auto mode — AI가 분류 + 분해 + 병렬 실행"
 Enter
 Sleep 500ms
-Type@80ms 'claude "/tfx-auto refactor auth module + improve login UI + add tests"'
+Type@80ms 'claude "/tfx-auto refactor auth module + improve login UI + add tests --parallel 3 --mode deep"'
 Enter
 Sleep 2s
 
@@ -35,7 +35,7 @@ Type "# Phase 2: Triage"
 Enter
 Type "# auth refactor → codex (executor)"
 Enter
-Type "# login UI     → gemini (designer)"
+Type "# login UI     → antigravity (designer)"
 Enter
 Type "# tests        → claude (test-engineer)"
 Enter
@@ -46,7 +46,7 @@ Type "# Phase 3: Parallel Execution"
 Enter
 Type "# [codex] executor: src/auth/ ████████████ done (45s)"
 Enter
-Type "# [gemini] designer: src/components/ ████████████ done (30s)"
+Type "# [antigravity] designer: src/components/ ████████████ done (30s)"
 Enter
 Type "# [claude] test-engineer: tests/ ████████████ done (25s)"
 Enter
@@ -56,14 +56,14 @@ Sleep 2s
 Type "# Command shortcuts — instant single-agent execution"
 Enter
 Sleep 500ms
-Type@80ms 'claude "/implement add JWT auth middleware"'
+Type@80ms 'claude "/tfx-auto add JWT auth middleware --mode quick --cli codex"'
 Enter
 Sleep 2s
-Type@80ms 'claude "/analyze security review of payment module"'
+Type@80ms 'claude "/tfx-auto security review of payment module --mode consensus"'
 Enter
 Sleep 2s
 
 # 완료
-Type "# Done! Token savings: $0.94 (Codex free tier)"
+Type "# Done! Guarded routes used Codex + Antigravity lanes"
 Enter
 Sleep 3s

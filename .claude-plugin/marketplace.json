@@ -1,15 +1,15 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "triflux",
-  "description": "CLI-first multi-model orchestrator — Codex/Gemini/Claude routing with DAG execution, auto-triage, and cost optimization",
+  "description": "CLI-first multi-model orchestrator — Codex/Antigravity/Claude routing with DAG execution, auto-triage, and cost optimization",
   "owner": {
     "name": "tellang"
   },
   "plugins": [
     {
       "name": "triflux",
-      "description": "Tri-CLI orchestrator for Claude Code. Routes tasks across Claude + Codex + Gemini with consensus intelligence, natural language routing, 42 skills, and cross-model review.",
-      "version": "10.26.0",
+      "description": "Tri-CLI orchestrator for Claude Code. Routes tasks across Claude + Codex + Antigravity with consensus intelligence, natural language routing, 34 skills, and cross-model review.",
+      "version": "10.27.0",
       "author": {
         "name": "tellang"
       },
@@ -22,7 +22,7 @@
       "tags": [
         "multi-model",
         "codex",
-        "gemini",
+        "antigravity",
         "cli-routing",
         "orchestration",
         "cost-optimization",
@@ -30,5 +30,5 @@
       ]
     }
   ],
-  "version": "10.26.0"
+  "version": "10.27.0"
 }

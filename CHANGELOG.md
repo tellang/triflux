@@ -4,6 +4,33 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.27.0] - 2026-05-28
+
+### Added
+
+- **`feat(cli)`** `tfx auto` 서브커맨드 추가 — tfx-auto 라우팅 결정을 실행 없이 미리보기/직렬화한다 (`--cli codex|antigravity|claude`, `--mode`, `--parallel`, `--json`). 실행 skill front door 와 동일한 flag surface 를 CLI 에 노출한다.
+
+### Fixed
+
+- **`fix(cli)`** `tfx update --help` 가 도움말 대신 실제 update 를 실행하던 side-effect 를 차단한다 — `cmdUpdate(args)` 가 help 인자 감지 시 install 탐지/실행 전에 early return 한다.
+- **`fix(swarm)` (PR #360, commit `d1ef1b29`)** redundant worker 의 invalid/failed 완료를 redundant preemption 전에 검증한다 — failed redundant worker 가 healthy primary 를 preempt 하던 correctness 결함을 막는다. invalid payload 시 hypervisor 가 해당 redundant 등록을 삭제하고 native-bridge 등록을 failed 로 닫은 뒤 shard 완료·`redundant_wins`·`primary.shutdown("redundant_completed_first")` 전에 return 한다. primary lock 은 해제하지 않는다 (primary 소유).
+- **`fix(native-bridge)` (PR #359, commit `772bcbcd`)** facade socket 의 unhandled peer-disconnect(EPIPE) 에러를 guard 한다.
+
+### Changed
+
+- **`chore(docs)`** README / README.ko / package README 를 전면 stale 정리한다 — Mermaid 렌더 오류 수정, skill count 갱신(34), Codex/Gemini/Claude → Codex/Antigravity/Claude 표기 통일, 한국어 폴리싱. demo/architecture/social/consensus/deep asset 을 재생성한다.
+- **`chore(cli)`** tfx CLI help/schema/completion 의 stale·정합성 문제를 수정한다 — schema 에 auto/update/tray/codex-team/notion-read/review/monitor 추가, completions 에서 미존재 top-level(codex/gemini) 제거, `--cli gemini` 를 deprecated alias → antigravity 로 정규화, Codex profile TUI/setup 을 gpt55_* 기준으로 정리한다.
+- **`chore(pkg)`** npm 패키지 self-containment 를 보강한다 — docs/assets + tui + README.ko.md 를 packages/triflux 에 포함하고, mirror check 가 tui 누락도 감지하도록 확장한다.
+
+### Tests
+
+- **`test(cli)`** tfx auto 미리보기, `tfx update --help` no-side-effect, schema 신규 커맨드, `--cli gemini`→antigravity 정규화에 대한 회귀 테스트를 추가한다.
+- **`test(native-bridge)` (PR #359, commit `da3ff864`)** interactive-attach kind-0 round-trip 의 opt-in real-tmux E2E 를 추가한다 (`TFX_NATIVE_BRIDGE_E2E=1` 일 때만 실행, 기본 npm test 는 skip).
+
+### Docs
+
+- **`docs(native-bridge)` (PR #361, commit `01dc4679`)** native-bridge daemon-adoption gap PRD 를 기록한다 — 남은 gap 은 socket-location-only 변경이 아니라 daemon dispatch/adoption 임을 확정한다.
+
 ## [10.26.0] - 2026-05-28
 
 ### Added

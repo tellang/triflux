@@ -113,12 +113,12 @@ describe("cache-guard", () => {
       "utf8",
     );
 
-    assert.match(source, /async function cmdUpdate\(\)/);
+    assert.match(source, /async function cmdUpdate\(/);
     assert.match(source, /await checkNetworkAvailability\(networkTargets\)/);
     assert.match(
       source,
       /validateRuntimeCachePaths\(join\(CLAUDE_DIR, "cache"\)\)/,
     );
-    assert.match(source, /case "update":[\s\S]*await cmdUpdate\(\);/);
+    assert.match(source, /case "update":[\s\S]*await cmdUpdate\(/);
   });
 });

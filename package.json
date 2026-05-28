@@ -1,7 +1,7 @@
 {
   "name": "triflux",
-  "version": "10.26.0",
-  "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Gemini, and Claude",
+  "version": "10.27.0",
+  "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Antigravity, and Claude",
   "type": "module",
   "bin": {
     "triflux": "bin/triflux.mjs",
@@ -27,6 +27,7 @@
     "hud",
     "mesh",
     ".claude-plugin",
+    "docs/assets",
     "README.md",
     "README.ko.md",
     "LICENSE"
@@ -95,7 +96,7 @@
     "claude-code",
     "plugin",
     "codex",
-    "gemini",
+    "antigravity",
     "cli-routing",
     "orchestration",
     "multi-model",
