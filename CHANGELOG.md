@@ -4,6 +4,35 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.26.0] - 2026-05-28
+
+### Added
+
+- **`feat(native-bridge)` (PR #355, PR #358, commits `405e2373`, `865a95c0`, `903842e9`)** Claude Agents 패널에서 Codex interactive worker 를 attach 하는 native-bridge **interactive-attach** 모드. `headless.mjs` 에 `interactive-attach` nativeBridgeMode 분기 + swarm `registerSwarmShard` interactive 옵션(shard worktree cwd)을 추가하고, facade ptySock kind-0 inbound 을 interactive worker 일 때만 tmux transport `writeInput` 으로 라우팅한다(headless worker 는 기존 echo 유지). 신규 socket/protocol 없이 기존 ptySock + `daemon-interrupt` verb 재사용 (PRD §11 B2).
+- **`feat(live)` (commits `092fcc2b`, `97ac98c7`)** live Claude↔Codex daemon relay 를 Triflux 본체로 promote 한다. tmux-only coupling 없이 daemon relay 가 동작한다.
+- **`feat(retry)` (PR #356, PR #358, commits `4869f83a`, `696836a7`, `9124276c`)** escalation-chain profile 을 end-to-end 로 작동시킨다. 2-stage 체인(codex→claude) + profile 필드를 bridge `cliInvocation.argv` 로 노출하고, `scripts/tfx-route.sh` 가 retry-snapshot 입력으로 `--profile` 를 codex 호출에 plumbing 한다(snapshot 없으면 no-op).
+- **`feat(skills)` (PR #356, commit `5ee02498`)** skill-authoring SSOT + `lint-skills` guard 를 추가하고 `.tmpl` 생성 파이프라인을 deprecate 한다. `SKILL.md` 가 단일 정본.
+
+### Changed
+
+- **`perf(native-bridge)` (PR #358, commit `795ba1dc`)** interactive-tui-transport 출력 회수를 capture-pane 전체화면 폴링(깜빡임)에서 tmux `pipe-pane` 증분 byte stream 으로 전환한다. 공개 인터페이스(`{start,writeInput,resize,stop}` + `onData`) 보존, pipe-pane 미지원 환경 capture-pane fallback 유지.
+- **`chore(skills)` (PR #358, commit `998564cf`)** deprecated `.tmpl` 파이프라인을 물리 제거한다 — 30개 `skills/**/SKILL.md.tmpl` + `gen-skill-docs.mjs`/`convert-to-tmpl.mjs` + dead test. 실제 `SKILL.md` 는 무변경(SSOT 보존).
+- **`refactor(codex)` (commits `2eb8dbc1`, `bfe27d29`, `ff658b70`, `1ec70a26`)** Codex 0.134 separate-file profile 포맷으로 마이그레이션한다 (inline `[profiles.NAME]` → `~/.codex/NAME.config.toml`). setup/tui/doctor/preview 전체 정렬 + custom profile 포함.
+- **`refactor(headless)` (PR #356, commit `c3946b61`)** UI displayName 을 agent role 필드에서 분리한다(worker-N role 오염 제거).
+
+### Fixed
+
+- **`fix(swarm-preflight)` (PR #356, commits `b01b8fe9`, `a88847e2`)** `AGENT_COMMANDS` 가 antigravity/agy agent 를 agy 바이너리로 매핑하도록 정렬한다 — `agent:antigravity` preflight 거짓 차단을 해소한다.
+- **`fix(test-lock)` (PR #356, commit `d4388292`)** `--test-force-exit` 실패 시 non-zero exit code 를 전파해 release/CI 게이트 신뢰성을 확보한다.
+- **`fix(swarm)` (PR #356, commit `e39723bb`)** worker acceptance lint 을 changed/lease 파일로 한정한다 — pre-existing drift 의 lease escape 를 차단한다.
+- **`fix(native)` (PR #356, commits `2b3cd027`, `f1a35823`)** slim-wrapper 와 route agent 를 agent-map allowlist 로 검증한다.
+- **`fix(retry)` (PR #356, commit `0519255c`)** escalation override `JSON.parse` 를 problem+cause+fix 에러로 guard 한다.
+- **`fix(live)` (commits `50233b94`, `de414538`, `621b82c3`, `62fd681d`, `b68b1b2b`)** daemon attach fidelity 를 terminal repaint/soft-wrap 너머로 보존하고 live relay capture 를 완전하고 interruptible 하게 안정화한다.
+
+### Docs
+
+- **`docs(report)` (PR #358, commit `e34dca71`)** main lint 출처 진단 문서(`.triflux/reports/main-lint-source.md`)를 추가한다 — drift isolation 용.
+
 ## [10.25.1] - 2026-05-21
 
 ### Added
