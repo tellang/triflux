@@ -903,26 +903,45 @@ export function createSwarmHypervisor(opts) {
     const completedWorker = isRedundant
       ? redundantWorkers.get(shardName)
       : workers.get(shardName);
-    if (completedWorker) {
-      void closeNativeBridgeRegistration(
-        completedWorker,
-        shardName,
-        "completed",
-      );
-    }
 
     // F7 — worker self-reported completion must include commits_made.
     // Only enforce when payload is actually provided; legacy workers that
     // don't emit a structured payload keep the F6 integration-time guard.
-    if (!isRedundant && completionPayload !== undefined) {
+    if (completionPayload !== undefined) {
       const verdict = validateWorkerCompletion(completionPayload);
       if (!verdict.ok) {
         const reason = verdict.reason || "invalid_completion_payload";
+
+        if (isRedundant) {
+          eventLog.append("redundant_completion_rejected", {
+            shard: shardName,
+            sessionId,
+            reason,
+          });
+          redundantWorkers.delete(shardName);
+          if (completedWorker) {
+            void closeNativeBridgeRegistration(
+              completedWorker,
+              shardName,
+              "failed",
+            );
+          }
+          checkAllShardsCompleted();
+          return;
+        }
+
         eventLog.append("no_worker_commit_report", {
           shard: shardName,
           sessionId,
           reason,
         });
+        if (completedWorker) {
+          void closeNativeBridgeRegistration(
+            completedWorker,
+            shardName,
+            "failed",
+          );
+        }
         failures.set(shardName, {
           mode: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
           reason,
@@ -968,6 +987,14 @@ export function createSwarmHypervisor(opts) {
         checkAllShardsCompleted();
         return;
       }
+    }
+
+    if (completedWorker) {
+      void closeNativeBridgeRegistration(
+        completedWorker,
+        shardName,
+        "completed",
+      );
     }
 
     completedShards.add(shardName);

@@ -74,6 +74,17 @@ const CRITICAL_PRD = `
 - prompt: normal work
 `;
 
+const CRITICAL_NO_FILES_PRD = `
+## Shard: critical-shard
+- agent: codex
+- critical: true
+- prompt: critical work
+
+## Shard: normal-shard
+- agent: codex
+- prompt: normal work
+`;
+
 const SINGLE_PRD = `
 ## Shard: worker-a
 - agent: claude
@@ -499,6 +510,93 @@ describe("swarm-hypervisor", () => {
 
       await hv.launch(plan);
       assert.deepEqual(plan.criticalShards, ["critical-shard"]);
+    });
+
+    it("does not let an invalid redundant completion kill a healthy primary", async () => {
+      const plan = planSwarm(null, { content: CRITICAL_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const rebaseCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "redundant-invalid-completion",
+        _deps: {
+          createConductor,
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/redundant-invalid-completion/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardName, shardBranch }) => {
+            rebaseCalls.push({ shardName, shardBranch });
+            return {
+              ok: true,
+              headCommit: `head:${shardBranch}`,
+              strategy: "cherry-pick",
+              commits: 1,
+              notes: "test integration",
+            };
+          },
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      assert.equal(conductors.length, 3);
+
+      const primary = conductors.find(
+        (item) =>
+          item.sessionConfig.worktreePath.includes("wt-critical-shard") &&
+          !item.sessionConfig.worktreePath.includes("redundant"),
+      );
+      const redundant = conductors.find((item) =>
+        item.sessionConfig.worktreePath.includes("wt-critical-shard-redundant"),
+      );
+      assert.ok(primary, "primary conductor expected");
+      assert.ok(redundant, "redundant conductor expected");
+
+      redundant.complete(undefined, {
+        status: "failed",
+        reason: "OAuth timeout",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      assert.equal(
+        primary.getSnapshot()[0].state,
+        "healthy",
+        "invalid redundant completion must not stop the primary",
+      );
+      assert.equal(hv.getStatus().completedShards, 0);
+
+      primary.complete(undefined, {
+        status: "ok",
+        commits_made: [{ sha: "abc1234", message: "fix: primary result" }],
+      });
+      conductors
+        .find((item) => item.sessionConfig.id.includes("normal-shard"))
+        .complete();
+
+      const result = await hv.integrationComplete();
+      assert.deepEqual(result.failed, []);
+      assert.deepEqual(result.integrated, ["critical-shard", "normal-shard"]);
+      assert.ok(rebaseCalls[0].shardBranch.endsWith("/critical-shard"));
+
+      const events = readEventLog(hv.eventLogPath);
+      assert.ok(
+        events.some(
+          (entry) =>
+            entry.event === "redundant_completion_rejected" &&
+            entry.reason === "worker_self_reported_failure:OAuth timeout",
+        ),
+      );
+      assert.equal(
+        events.some((entry) => entry.event === "redundant_wins"),
+        false,
+      );
     });
 
     it("wires ensureWorktree metadata into spawned session configs", async () => {
