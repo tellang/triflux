@@ -655,6 +655,9 @@ export async function startNativeWorkerFacade({
     events.push({ type: "rv-connect" });
     socket.setEncoding("utf8");
     socket.once("close", () => rvSockets.delete(socket));
+    socket.on("error", (error) => {
+      events.push({ type: "rv-socket-error", message: error.message });
+    });
     writeJsonLine(socket, { type: "heartbeat" });
     writeJsonLine(socket, { type: "state", patch: state });
     socket.on("data", (chunk) => {
@@ -690,6 +693,9 @@ export async function startNativeWorkerFacade({
     ptySockets.add(socket);
     events.push({ type: "pty-connect" });
     socket.once("close", () => ptySockets.delete(socket));
+    socket.on("error", (error) => {
+      events.push({ type: "pty-socket-error", message: error.message });
+    });
     socket.write(buildPtyControlFrame({ t: "hello", replPid: pid, version }));
     if (transcript.length > 0) socket.write(buildPtyDataFrame(transcript));
     socket.write(buildPtyControlFrame({ t: "live" }));
