@@ -1,27 +1,17 @@
 import crypto from "node:crypto";
-import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
-  buildNativeWorkerRosterEntry,
+  buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths,
-  mergeRosterWorkers,
-  removeRosterWorkers,
-} from "./claude-native-bridge.mjs";
-import { startInteractiveNativeWorker } from "./interactive-native-worker.mjs";
+  dispatchClaudeDaemonJob,
+  teardownClaudeDaemonJob,
+} from "./claude-daemon-control.mjs";
+import { encodeBridgeConfig } from "./daemon-pty-tmux-bridge.mjs";
 
-function buildWorkerSocketPaths({ configDir, sessionName, pid, short }) {
-  const hash = crypto
-    .createHash("sha256")
-    .update(`${configDir || ""}:${sessionName}:${pid}:${crypto.randomUUID()}`)
-    .digest("hex")
-    .slice(0, 10);
-  const socketRoot = path.join(os.tmpdir(), `tfx-in-${hash}`);
-  return {
-    rvSock: path.join(socketRoot, `${short}.rv.sock`),
-    ptySock: path.join(socketRoot, `${short}.pty.sock`),
-  };
-}
+const DEFAULT_COLS = 120;
+const DEFAULT_ROWS = 40;
 
 export async function launchAdoptedInteractiveWorker({
   cwd = process.cwd(),
@@ -31,76 +21,99 @@ export async function launchAdoptedInteractiveWorker({
   role = "interactive",
   configDir,
   pid = process.pid,
+  env = {},
+  cols = DEFAULT_COLS,
+  rows = DEFAULT_ROWS,
   _deps = {},
 } = {}) {
-  const startWorker =
-    _deps.startInteractiveNativeWorker || startInteractiveNativeWorker;
-  const buildRosterEntry =
-    _deps.buildNativeWorkerRosterEntry || buildNativeWorkerRosterEntry;
-  const mergeWorkers = _deps.mergeRosterWorkers || mergeRosterWorkers;
   const derivePaths = _deps.deriveClaudeDaemonPaths || deriveClaudeDaemonPaths;
+  const encodeConfig = _deps.encodeBridgeConfig || encodeBridgeConfig;
+  const buildPayload =
+    _deps.buildDaemonExecDispatchPayload || buildDaemonExecDispatchPayload;
+  const dispatchJob = _deps.dispatchClaudeDaemonJob || dispatchClaudeDaemonJob;
+  const teardownJob = _deps.teardownClaudeDaemonJob || teardownClaudeDaemonJob;
 
   const resolvedCwd = path.resolve(cwd);
-  const effectiveSessionName =
-    sessionName || `tfx-${cli}-${role}-${process.pid}`;
+  const effectiveSessionName = sessionName || `tfx-${cli}-${role}-${pid}`;
   const paths = derivePaths({ configDir });
-  const short = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
-  const { rvSock, ptySock } = buildWorkerSocketPaths({
-    configDir,
-    sessionName: effectiveSessionName,
-    pid,
-    short,
-  });
+  const short = crypto.randomBytes(4).toString("hex");
   const displayName = `Triflux ${cli} ${role}`;
+  const bridgePath = fileURLToPath(
+    new URL("./daemon-pty-tmux-bridge.mjs", import.meta.url),
+  );
+  const bridgeConfig = encodeConfig({
+    sessionName: effectiveSessionName,
+    launchCmd,
+    cwd: resolvedCwd,
+    env,
+    cols,
+    rows,
+  });
+  const command = `${shellQuote(process.execPath)} ${shellQuote(
+    bridgePath,
+  )} --config ${bridgeConfig}`;
+  const payload = buildPayload({
+    short,
+    cwd: resolvedCwd,
+    command,
+    name: displayName,
+    cols,
+    rows,
+  });
+  let dispatched;
+  try {
+    dispatched = await dispatchJob({
+      paths,
+      controlSock: paths.controlSock,
+      payload,
+      agent: cli,
+      name: displayName,
+      cwd: resolvedCwd,
+      dispatchTimeoutMs: 5000,
+    });
+  } catch (error) {
+    // dispatch may have started a daemon job (pid assigned) before a later
+    // step (bridge-session resolve / projection write) threw. Tear down by
+    // short + sessionId so a failed launch never leaks a running pty/tmux job.
+    await teardownJob({
+      controlSock: paths.controlSock,
+      paths,
+      short,
+      sessionId: payload.sessionId,
+    }).catch(() => {});
+    throw error;
+  }
 
-  let worker;
   let closed = false;
   let closePromise = null;
 
-  try {
-    worker = await startWorker({
-      short,
-      rvSock,
-      ptySock,
-      sessionName: effectiveSessionName,
-      cwd: resolvedCwd,
-      launchCmd,
-      pid,
-    });
-    const workerShort = worker.short || short;
-    const workerPid = worker.pid || pid;
-    const entry = buildRosterEntry({
-      short: workerShort,
-      pid: workerPid,
-      cwd: resolvedCwd,
-      rendezvousSock: worker.rvSock,
-      ptySock: worker.ptySock,
-      name: displayName,
-      prompt: displayName,
-    });
-    await mergeWorkers(paths.rosterPath, { [workerShort]: entry });
+  return {
+    short,
+    displayName,
+    sessionId: dispatched.sessionId,
+    pid: dispatched.pid,
+    bridgeSessionId: dispatched.bridgeSessionId,
+    sessionProjectionPath: dispatched.sessionProjectionPath,
+    controlSock: paths.controlSock,
+    close() {
+      if (!closePromise) {
+        closePromise = (async () => {
+          if (closed) return;
+          closed = true;
+          await teardownJob({
+            controlSock: paths.controlSock,
+            paths,
+            short,
+            sessionProjectionPath: dispatched.sessionProjectionPath,
+            sessionId: dispatched.sessionId,
+          });
+        })();
+      }
+      return closePromise;
+    },
+  };
+}
 
-    return {
-      short: workerShort,
-      displayName,
-      rosterPath: paths.rosterPath,
-      close() {
-        if (!closePromise) {
-          closePromise = (async () => {
-            if (closed) return;
-            closed = true;
-            try {
-              await worker.close();
-            } finally {
-              await removeRosterWorkers(paths.rosterPath, [workerShort]);
-            }
-          })();
-        }
-        return closePromise;
-      },
-    };
-  } catch (error) {
-    if (worker) await worker.close().catch(() => {});
-    throw error;
-  }
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
