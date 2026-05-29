@@ -55,17 +55,27 @@ function parseTomlMcpServers(content) {
 
     const hasUrl = /^url\s*=/m.test(block);
     const hasCommand = /^command\s*=/m.test(block);
+    const urlMatch = block.match(/^url\s*=\s*["']([^"']*)["']/m);
+    const url = urlMatch ? urlMatch[1] : null;
 
     servers.set(name, {
       block,
       hasUrl,
       hasCommand,
+      url,
       startIdx,
       headerIdx: match.index,
     });
   }
 
   return servers;
+}
+
+// 블록의 url 값이 이 서버의 기대 gateway /mcp endpoint 와 일치하는지 판정.
+// /sse 등 stale endpoint 는 false → enableGateway 가 강제 재작성, getStatus 는
+// "needs-migration" 으로 분류한다.
+function isCurrentGatewayUrl(srv, expectedUrl) {
+  return Boolean(srv) && srv.url === expectedUrl;
 }
 
 function buildHttpEntry(name, url) {
@@ -89,24 +99,24 @@ function shouldSkipCodexConfigMutation() {
 
 // ── enable: stdio → Streamable HTTP ──
 
-export function enableGateway() {
+export function enableGateway(configPath = CODEX_CONFIG) {
   if (shouldSkipCodexConfigMutation()) {
     console.log("[SKIP] protected environment; config.toml not modified");
     return { changed: 0, skipped: 0, reason: "protected-env" };
   }
 
-  if (!existsSync(CODEX_CONFIG)) {
+  if (!existsSync(configPath)) {
     console.log("[SKIP] ~/.codex/config.toml not found");
     return { changed: 0, skipped: 0 };
   }
 
-  const original = readFileSync(CODEX_CONFIG, "utf8");
+  const original = readFileSync(configPath, "utf8");
   const servers = parseTomlMcpServers(original);
 
   // 백업 (최초 1회만)
-  const backupPath = CODEX_CONFIG + BACKUP_SUFFIX;
+  const backupPath = configPath + BACKUP_SUFFIX;
   if (!existsSync(backupPath)) {
-    copyFileSync(CODEX_CONFIG, backupPath);
+    copyFileSync(configPath, backupPath);
     console.log(`[BACKUP] ${backupPath}`);
   }
 
@@ -126,8 +136,18 @@ export function enableGateway() {
     }
 
     if (srv.hasUrl) {
-      // 이미 URL 기반 → 스킵
-      skipped++;
+      if (isCurrentGatewayUrl(srv, url)) {
+        // 이미 올바른 /mcp gateway URL → 스킵
+        skipped++;
+        continue;
+      }
+      // stale URL (예: v10.27.0 이 남긴 /sse) → 올바른 /mcp 로 강제 재작성.
+      // 데몬이 streamableHttp /mcp 만 서빙하므로 그대로 두면 dead path 가 된다.
+      const oldSection = `[mcp_servers.${name}]\n${srv.block}`;
+      const newSection = buildHttpEntry(name, url).trim();
+      content = content.replace(oldSection, newSection);
+      changed++;
+      console.log(`[MIGRATE] ${name}: ${srv.url} → ${url}`);
       continue;
     }
 
@@ -154,7 +174,7 @@ export function enableGateway() {
   }
 
   if (changed > 0) {
-    writeFileSync(CODEX_CONFIG, content, "utf8");
+    writeFileSync(configPath, content, "utf8");
     console.log(
       `\n[DONE] ${changed} servers converted, ${skipped} already HTTP`,
     );
@@ -186,12 +206,12 @@ export function disableGateway() {
 
 // ── status: 현재 상태 확인 ──
 
-export function getStatus() {
-  if (!existsSync(CODEX_CONFIG)) {
+export function getStatus(configPath = CODEX_CONFIG) {
+  if (!existsSync(configPath)) {
     return { exists: false, servers: [] };
   }
 
-  const content = readFileSync(CODEX_CONFIG, "utf8");
+  const content = readFileSync(configPath, "utf8");
   const servers = parseTomlMcpServers(content);
   const result = [];
 
@@ -199,8 +219,11 @@ export function getStatus() {
     const srv = servers.get(name);
     if (!srv) {
       result.push({ name, mode: "missing", url });
-    } else if (srv.hasUrl) {
+    } else if (isCurrentGatewayUrl(srv, url)) {
       result.push({ name, mode: "http", url });
+    } else if (srv.hasUrl) {
+      // url 은 있으나 기대 /mcp endpoint 가 아님 (stale /sse 등) → 마이그레이션 필요
+      result.push({ name, mode: "needs-migration", url, currentUrl: srv.url });
     } else {
       result.push({ name, mode: "stdio", url });
     }
@@ -226,10 +249,19 @@ if (arg === "--enable") {
   console.log("\nCodex MCP Gateway Status:");
   console.log("─".repeat(50));
   for (const s of servers) {
-    const icon = s.mode === "http" ? "✅" : s.mode === "stdio" ? "⚠️" : "❌";
-    console.log(
-      `${icon} ${s.name.padEnd(15)} ${s.mode.padEnd(8)} ${s.mode === "stdio" ? "← zombie risk" : ""}`,
-    );
+    const icon =
+      s.mode === "http"
+        ? "✅"
+        : s.mode === "stdio" || s.mode === "needs-migration"
+          ? "⚠️"
+          : "❌";
+    const note =
+      s.mode === "stdio"
+        ? "← zombie risk"
+        : s.mode === "needs-migration"
+          ? `← stale endpoint (${s.currentUrl}) — run --enable`
+          : "";
+    console.log(`${icon} ${s.name.padEnd(15)} ${s.mode.padEnd(15)} ${note}`);
   }
 } else {
   console.log(
