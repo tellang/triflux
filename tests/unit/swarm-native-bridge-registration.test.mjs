@@ -112,6 +112,47 @@ test("local shard registers Triflux swarm shard row with shard display name", as
   }
 });
 
+test("local shard dispatches via the shared helper with native-bridge 1000ms timeouts", async () => {
+  let captured = null;
+  const registration = await registerSwarmShard({
+    sessionId: "swarm-run42-api-feedface",
+    cli: "codex",
+    role: "executor",
+    swarmName: "run42",
+    shardIndex: 2,
+    shardCount: 5,
+    shardName: "api",
+    cwd: "/tmp/project",
+    host: "local",
+    _deps: {
+      // 데몬 control.sock 존재 체크는 통과시킨다.
+      accessControlSock: async () => {},
+      // 공유 헬퍼를 가로채 timeout 인자만 검증한다.
+      dispatchClaudeDaemonJob: async (args) => {
+        captured = args;
+        return {
+          ok: true,
+          short: args.payload.short,
+          sessionId: args.payload.sessionId,
+          job: { pid: process.pid, startedAt: 1 },
+          pid: process.pid,
+          bridgeSessionId: "cse_fast",
+          sessionProjectionPath: "/tmp/proj.json",
+          controlSock: args.controlSock,
+          paths: args.paths,
+        };
+      },
+    },
+  });
+
+  assert.equal(registration.skipped, false);
+  assert.ok(captured, "shared dispatch helper should be invoked");
+  // native-bridge 는 5000ms(headless)로 합쳐지면 안 되고 1000ms 로 고정돼야 한다.
+  assert.equal(captured.dispatchTimeoutMs, 1000);
+  assert.equal(captured.pidTimeoutMs, 1000);
+  assert.equal(captured.bridgeTimeoutMs, 1000);
+});
+
 test("remote shard skips native bridge registration and emits warning", async () => {
   const warnings = [];
   const registration = await registerSwarmShard({

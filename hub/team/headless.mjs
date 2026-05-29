@@ -28,21 +28,12 @@ import { getBackend } from "./backend.mjs";
 import {
   buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths as deriveClaudeControlPaths,
+  dispatchClaudeDaemonJob,
   killDaemonJob,
-  resolveDaemonBridgeSessionId,
-  sendClaudeControlRequest,
   sendKillBySessionId,
-  waitForDaemonJobPid,
 } from "./claude-daemon-control.mjs";
-import {
-  getProcStart,
-  startClaudeNativeBridge,
-} from "./claude-native-bridge.mjs";
-import {
-  buildClaudeSessionProjection,
-  removeClaudeSessionProjection,
-  writeClaudeSessionProjection,
-} from "./claude-session-projection.mjs";
+import { startClaudeNativeBridge } from "./claude-native-bridge.mjs";
+import { removeClaudeSessionProjection } from "./claude-session-projection.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
   formatHandoffForLead,
@@ -1016,40 +1007,30 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
         name,
       });
       record.sessionId = payload.sessionId;
-      const dispatch = await sendClaudeControlRequest(paths.controlSock, {
-        proto: 1,
-        op: "dispatch",
-        d: payload,
-        timeoutMs: 5000,
-      });
-      if (dispatch?.ok !== true) {
-        throw new Error(
-          `[headless] Claude daemon dispatch failed for ${paneName}`,
-        );
-      }
-
-      const job = await waitForDaemonJobPid(paths.controlSock, short);
-      const bridgeSessionId = await resolveDaemonBridgeSessionId({
-        daemonPaths: paths,
-        short,
-        job,
-      });
-      const projection = buildClaudeSessionProjection({
-        pid: job.pid,
-        procStart: getProcStart(job.pid),
-        sessionId: payload.sessionId,
-        short,
-        cwd: assignment.cwd || assignment.workdir || process.cwd(),
-        name,
+      // buildDaemonWrappedCommand + token completion 시맨틱은 헬퍼 밖(headless 전용)에
+      // 남기고, dispatch→pid→bridge→projection 시퀀스만 공유 헬퍼로 위임한다.
+      // CRITICAL: waitForDaemonCompletion 이 나중에 record.daemonCompletionMatched 를
+      // 변경하고 cleanupDaemonDispatches 가 같은 record 를 읽으므로, 헬퍼가 새 객체를
+      // 반환해도 record 를 교체하지 말고 plain 필드를 Object.assign 한다.
+      const dispatched = await dispatchClaudeDaemonJob({
+        paths,
+        controlSock: paths.controlSock,
+        payload,
         agent: resolvedCli || "codex",
-        startedAt: job.startedAt || Date.now(),
-        updatedAt: Date.now(),
-        bridgeSessionId,
+        name,
+        cwd: assignment.cwd || assignment.workdir || process.cwd(),
+        dispatchTimeoutMs: 5000,
+      }).catch((error) => {
+        throw new Error(
+          `[headless] Claude daemon dispatch failed for ${paneName}: ${
+            error?.message || error
+          }`,
+        );
       });
-      record.sessionProjectionPath = await writeClaudeSessionProjection(
-        paths.sessionsDir,
-        projection,
-      );
+      Object.assign(record, {
+        sessionId: dispatched.sessionId,
+        sessionProjectionPath: dispatched.sessionProjectionPath,
+      });
       await registerHeadlessWorker(sessionName, i, resolvedCli);
       registerHeadlessSynapseWorker(workerId, assignment.prompt);
       if (safeProgress) {

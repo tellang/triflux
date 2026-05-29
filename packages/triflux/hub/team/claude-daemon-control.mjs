@@ -1,8 +1,14 @@
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import {
+  buildClaudeSessionProjection,
+  removeClaudeSessionProjection,
+  writeClaudeSessionProjection,
+} from "./claude-session-projection.mjs";
 
 export function resolveClaudeConfigDir(env = process.env) {
   if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
@@ -26,10 +32,21 @@ export function deriveClaudeDaemonPaths({
     hash,
     daemonDir,
     controlSock: path.join(daemonDir, "control.sock"),
+    rendezvousDir: path.join(daemonDir, "rv"),
+    ptyDir: path.join(daemonDir, "pty"),
     rosterPath: path.join(resolvedConfigDir, "daemon", "roster.json"),
     sessionsDir: path.join(resolvedConfigDir, "sessions"),
     jobsDir: path.join(resolvedConfigDir, "jobs"),
   };
+}
+
+export function getProcStart(pid = process.pid) {
+  if (!Number.isInteger(pid) || pid <= 0)
+    throw new Error(`invalid pid: ${pid}`);
+  return execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+  }).trim();
 }
 
 export function readFirstJsonLine(text) {
@@ -1127,4 +1144,155 @@ export async function sendKillBySessionId({
       error: error?.message || String(error),
     };
   }
+}
+
+/**
+ * Claude 데몬 dispatch 한 건의 공통 시퀀스를 캡슐화한다.
+ * dispatch → waitForDaemonJobPid → resolveDaemonBridgeSessionId →
+ * buildClaudeSessionProjection → writeClaudeSessionProjection.
+ *
+ * 호출 측이 reference 로 들고 있는 record 를 헬퍼가 새로 만들지 않도록
+ * plain 필드만 반환한다. caller 는 이 결과를 자기 record 에 Object.assign 한다.
+ *
+ * @returns {Promise<{ok:boolean, short:string, sessionId:string, job:object,
+ *   pid:number, bridgeSessionId:string, sessionProjectionPath:string,
+ *   controlSock:string, paths:object}>}
+ */
+export async function dispatchClaudeDaemonJob({
+  paths,
+  controlSock,
+  payload,
+  agent,
+  name,
+  cwd,
+  projection = "write",
+  dispatchTimeoutMs = 5000,
+  pidTimeoutMs,
+  bridgeTimeoutMs,
+  accessControlSock,
+  _deps = {},
+} = {}) {
+  if (!payload) throw new Error("payload is required");
+  if (!payload.short) throw new Error("payload.short is required");
+  const resolvedControlSock = controlSock || paths?.controlSock;
+  if (!resolvedControlSock) throw new Error("controlSock is required");
+
+  const sendControl =
+    _deps.sendClaudeControlRequest || sendClaudeControlRequest;
+  const waitForPid = _deps.waitForDaemonJobPid || waitForDaemonJobPid;
+  const resolveBridgeSessionId =
+    _deps.resolveDaemonBridgeSessionId || resolveDaemonBridgeSessionId;
+  const buildProjection =
+    _deps.buildClaudeSessionProjection || buildClaudeSessionProjection;
+  const writeProjection =
+    _deps.writeClaudeSessionProjection || writeClaudeSessionProjection;
+  const readProcStart = _deps.getProcStart || getProcStart;
+
+  const short = payload.short;
+  const sessionsDir =
+    paths?.sessionsDir ||
+    (paths?.configDir ? path.join(paths.configDir, "sessions") : "");
+
+  // native-bridge 는 control.sock 존재를 미리 점검한다 (없으면 fast-fail).
+  if (accessControlSock) await accessControlSock(resolvedControlSock);
+
+  const dispatch = await sendControl(
+    resolvedControlSock,
+    {
+      proto: 1,
+      op: "dispatch",
+      d: payload,
+      timeoutMs: dispatchTimeoutMs,
+    },
+    { timeoutMs: dispatchTimeoutMs },
+  );
+  if (dispatch?.ok !== true) {
+    throw new Error(`Claude daemon dispatch failed for ${name || short}`);
+  }
+
+  const pidOpts =
+    pidTimeoutMs === undefined ? undefined : { timeoutMs: pidTimeoutMs };
+  const job = await waitForPid(resolvedControlSock, short, pidOpts);
+  const pid = job.pid;
+  const bridgeSessionId = await resolveBridgeSessionId({
+    daemonPaths: paths,
+    short,
+    job,
+    ...(bridgeTimeoutMs === undefined ? {} : { timeoutMs: bridgeTimeoutMs }),
+  });
+
+  let sessionProjectionPath = "";
+  if (projection !== "skip") {
+    const projectionRecord = buildProjection({
+      pid,
+      procStart: readProcStart(pid),
+      sessionId: payload.sessionId,
+      short,
+      cwd,
+      name,
+      agent,
+      startedAt: job.startedAt || Date.now(),
+      updatedAt: Date.now(),
+      bridgeSessionId,
+    });
+    sessionProjectionPath = await writeProjection(
+      sessionsDir,
+      projectionRecord,
+    );
+  }
+
+  return {
+    ok: true,
+    short,
+    sessionId: payload.sessionId,
+    job,
+    pid,
+    bridgeSessionId,
+    sessionProjectionPath,
+    controlSock: resolvedControlSock,
+    paths,
+  };
+}
+
+/**
+ * dispatchClaudeDaemonJob 의 대칭 정리 경로.
+ * removeProjection + killDaemonJob (+ optional removeClaudeJobState) 를
+ * 모두 시도하며, 각 스텝 오류는 기존 close()/cleanupDaemonDispatches 와
+ * 동일하게 .catch 로 삼킨다.
+ */
+export async function teardownClaudeDaemonJob({
+  controlSock,
+  paths,
+  short,
+  sessionProjectionPath,
+  sessionId,
+  jobsDir,
+  removeJobState = false,
+  _deps = {},
+} = {}) {
+  const removeProjection =
+    _deps.removeClaudeSessionProjection || removeClaudeSessionProjection;
+  const killJob = _deps.killDaemonJob || killDaemonJob;
+  const removeJobStateImpl = _deps.removeClaudeJobState;
+  const resolvedControlSock = controlSock || paths?.controlSock;
+  const resolvedJobsDir =
+    jobsDir ||
+    paths?.jobsDir ||
+    (paths?.configDir ? path.join(paths.configDir, "jobs") : "");
+
+  const steps = [];
+  if (sessionProjectionPath) {
+    steps.push(removeProjection(sessionProjectionPath).catch(() => {}));
+  }
+  if (sessionId && (paths?.controlSock || resolvedControlSock)) {
+    const daemonPaths = paths || { controlSock: resolvedControlSock };
+    steps.push(sendKillBySessionId({ daemonPaths, sessionId }).catch(() => {}));
+  }
+  if (resolvedControlSock && short) {
+    steps.push(killJob(resolvedControlSock, short).catch(() => {}));
+  }
+  if (removeJobState && removeJobStateImpl && resolvedJobsDir && short) {
+    steps.push(removeJobStateImpl(resolvedJobsDir, short).catch(() => {}));
+  }
+  await Promise.all(steps);
 }

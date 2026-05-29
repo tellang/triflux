@@ -21,6 +21,10 @@ const CORE_MIRRORS = new Map([
     "hub/team/claude-daemon-control.mjs",
     "packages/core/hub/team/claude-daemon-control.mjs",
   ],
+  [
+    "hub/team/claude-session-projection.mjs",
+    "packages/core/hub/team/claude-session-projection.mjs",
+  ],
 ]);
 
 function write(root, rel, content) {
