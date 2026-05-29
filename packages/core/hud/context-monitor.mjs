@@ -15,9 +15,10 @@ const MAX_CAPTURE_BYTES = 256 * 1024;
 const MAX_TOP_KEYS = 20;
 
 // stdin 이 context_window_size 를 제공하지 않을 때 모델 ID 로 한도를 추정한다.
-// Anthropic 공식 문서(2026-04 기준): Opus 4.7 / Opus 4.6 / Sonnet 4.6 = 1M,
+// Anthropic 공식 문서(2026-04 기준): Opus 4.8 / Opus 4.7 / Opus 4.6 / Sonnet 4.6 = 1M,
 // Sonnet 4.5 / Haiku 4.5 = 200K. 그 외 모델은 [1m] suffix 로 opt-in 가능.
 const MODEL_HINT_1M_PREFIXES = [
+  "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
@@ -41,7 +42,11 @@ function resolveModelLimit(modelId) {
 export function shouldSuppressInfoOnlyContextStatus(modelId) {
   const id = normalizeModelId(modelId);
   if (!id) return false;
-  return id.startsWith("claude-opus-4-7") || id.includes("[1m]");
+  return (
+    id.startsWith("claude-opus-4-8") ||
+    id.startsWith("claude-opus-4-7") ||
+    id.includes("[1m]")
+  );
 }
 
 const WARNING_LEVELS = Object.freeze({

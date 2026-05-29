@@ -154,7 +154,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 gpt-5.5 → opus-4-7 2단계 순", () => {
+    it("DEFAULT_ESCALATION_CHAIN 은 gpt-5.5 → opus-4-8 2단계 순", () => {
       assert.equal(DEFAULT_ESCALATION_CHAIN.length, 2);
       const [s1, s2] = DEFAULT_ESCALATION_CHAIN;
 
@@ -163,14 +163,14 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(s1.profile, undefined);
 
       assert.equal(s2.cli, "claude");
-      assert.equal(s2.model, "opus-4-7");
+      assert.equal(s2.model, "opus-4-8");
       assert.equal(s2.profile, undefined);
     });
 
     it("custom cliChain 의 optional profile 필드를 보존한다", () => {
       const chain = [
         { cli: "codex", model: "gpt-5.5", profile: "gpt55_xhigh" },
-        { cli: "claude", model: "opus-4-7" },
+        { cli: "claude", model: "opus-4-8" },
       ];
       const sm = createRetryStateMachine({
         mode: "auto-escalate",
@@ -195,7 +195,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
           version: 1,
           chain: [
             { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
-            { cli: "claude", model: "opus-4-7" },
+            { cli: "claude", model: "opus-4-8" },
           ],
         }),
       );
@@ -206,7 +206,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       });
       assert.deepEqual(sm.getCurrent().cliChain, [
         { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
-        { cli: "claude", model: "opus-4-7" },
+        { cli: "claude", model: "opus-4-8" },
       ]);
     });
 

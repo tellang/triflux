@@ -55,6 +55,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 반복 | 끝까지, 멈추지마, ralph | `--retry ralph` (Phase 3 true state machine, `.claude/rules/tfx-escalation-chain.md` 참조) |
 | 승격 | 알아서 승격, 안 되면 더 강한 모델 | `--retry auto-escalate` (Phase 3 CLI 체인 승격) |
 | 자율 | 알아서, 자동으로, autopilot | autopilot 모드 |
+| 최대 effort | ultracode, 울트라코드 | Claude Code 최대 effort — 기본적으로 멀티에이전트 Workflow 오케스트레이션, 토큰 비용 무관 철저성 우선 (tfx CLI 플래그 아님, Claude Code 하니스 모드) |
 
 ## CLI 우선순위 정책 — default = Codex
 
@@ -64,11 +65,11 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 |---------|-----------|-------------------|
 | 1차 (default) | **Codex** (gpt-5.3-codex / gpt-5.5) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
 | 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
-| 한정 (Claude 만) | **Claude** (opus-4-7) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
+| 한정 (Claude 만) | **Claude** (opus-4-8) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
 
 `tfx-auto`, `tfx-review`, `tfx-analysis`, `tfx-plan`, `tfx-find` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli gemini`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
 
-`--retry auto-escalate` 체인 (`.claude/rules/tfx-escalation-chain.md`) 의 1~3단계가 모두 Codex 인 것도 이 정책과 정합한다 (4단계 claude opus-4-7 은 최종 수단).
+`--retry auto-escalate` 체인 (`.claude/rules/tfx-escalation-chain.md`) 의 1단계가 Codex 인 것도 이 정책과 정합한다 (2단계 claude opus-4-8 은 최종 수단).
 
 ## CLI 라우팅
 

@@ -42,10 +42,10 @@ const ESCALATION_CHAIN_CONFIG_PATH = ".triflux/config/escalation-chain.json";
 
 // Escalation chain (2026-05-27 정책):
 //   1. codex gpt-5.5   — 코드/추론/비용에서 mini/5.3-codex 중간 단계를 대체
-//   2. claude opus-4-7 — 최종 수단
+//   2. claude opus-4-8 — 최종 수단
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
   Object.freeze({ cli: "codex", model: "gpt-5.5" }),
-  Object.freeze({ cli: "claude", model: "opus-4-7" }),
+  Object.freeze({ cli: "claude", model: "opus-4-8" }),
 ]);
 
 const STUCK_THRESHOLD = 3;

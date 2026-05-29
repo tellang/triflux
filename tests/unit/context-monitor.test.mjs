@@ -80,6 +80,22 @@ describe("hud/context-monitor.mjs", () => {
     assert.equal(view.limitTokens, 1_000_000);
   });
 
+  it("Opus 4.8도 1M으로 추정한다 (Anthropic 공식 1M 모델)", () => {
+    const view = buildContextUsageView(
+      { model: { id: "claude-opus-4-8" } },
+      null,
+    );
+    assert.equal(view.limitTokens, 1_000_000);
+  });
+
+  it("Opus 4.8 [1m] suffix 모델도 1M으로 추정한다 (현재 세션 모델 ID)", () => {
+    const view = buildContextUsageView(
+      { model: { id: "claude-opus-4-8[1m]" } },
+      null,
+    );
+    assert.equal(view.limitTokens, 1_000_000);
+  });
+
   it("model.id에 [1m] suffix가 있으면 1M으로 추정한다", () => {
     const view = buildContextUsageView(
       { model: { id: "claude-opus-4-7[1m]" } },
@@ -91,6 +107,15 @@ describe("hud/context-monitor.mjs", () => {
   it("monitor snapshot의 stale 200K 한도는 model hint 1M으로 오버라이드된다 (#88)", () => {
     const view = buildContextUsageView(
       { model: { id: "claude-opus-4-7" } },
+      { usedTokens: 44_000, limitTokens: 200_000 },
+    );
+    assert.equal(view.limitTokens, 1_000_000);
+    assert.equal(view.warningLevel, "ok");
+  });
+
+  it("Opus 4.8의 stale 200K 한도도 model hint 1M으로 오버라이드된다", () => {
+    const view = buildContextUsageView(
+      { model: { id: "claude-opus-4-8" } },
       { usedTokens: 44_000, limitTokens: 200_000 },
     );
     assert.equal(view.limitTokens, 1_000_000);

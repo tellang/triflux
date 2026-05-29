@@ -10,7 +10,7 @@
 | # | CLI | 모델 | profile | 이유 |
 |---|-----|------|---------|------|
 | 1 | codex | gpt-5.5 | 미지정 | 코드/추론/비용에서 gpt-5.4-mini / gpt-5.3-codex 중간 단계를 대체. profile 미지정 시 `config.toml` 기본값 사용. |
-| 2 | claude | opus-4-7 | 미지정 | 최종 수단, 복잡 아키텍처/합의 요구 시 |
+| 2 | claude | opus-4-8 | 미지정 | 최종 수단, 복잡 아키텍처/합의 요구 시 |
 
 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
 
@@ -29,7 +29,7 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
   "version": 1,
   "chain": [
     { "cli": "codex", "model": "gpt-5.5", "profile": "gpt55_high" },
-    { "cli": "claude", "model": "opus-4-7" }
+    { "cli": "claude", "model": "opus-4-8" }
   ]
 }
 ```

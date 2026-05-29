@@ -147,7 +147,7 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
         cliIndex: 0,
         cliChain: [
           { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
-          { cli: "claude", model: "opus-4-7" },
+          { cli: "claude", model: "opus-4-8" },
         ],
         mode: "auto-escalate",
         sessionId: null,
