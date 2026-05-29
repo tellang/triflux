@@ -182,7 +182,35 @@ function treeKill(pid) {
         windowsHide: true,
       });
     } else {
-      process.kill(pid, "SIGTERM");
+      // POSIX: detached 워커의 손자까지 회수하려면 프로세스 '그룹' 을 종료해야 한다
+      // (Windows `taskkill /T` 와 동일 의미). 단 PID 재사용/공유 그룹 때문에 그룹
+      // kill 이 무관한 live 프로세스 그룹을 죽일 수 있다 (Codex review PR #365 P1).
+      // 그래서 그룹 kill 은 다음을 모두 만족할 때만 한다:
+      //   - 대상이 자기 그룹의 leader (pgid === pid → 그룹 = 그 워커의 subtree 뿐)
+      //   - 여전히 triflux 가 띄운 워커처럼 보임 (command signature)
+      //   - init 류 그룹 아님 (pgid > 1)
+      // 그 외에는 기존과 동일하게 단일 PID SIGTERM 으로 폴백한다 (회귀 없음).
+      let pgid = null;
+      let cmd = "";
+      try {
+        const out = execSync(`ps -o pgid=,command= -p ${pid}`, { timeout: 2000 })
+          .toString()
+          .trim();
+        const m = out.match(/^(\d+)\s+(.*)$/);
+        if (m) {
+          pgid = parseInt(m[1], 10);
+          cmd = m[2];
+        }
+      } catch {
+        /* 조회 실패 — bare pid 폴백 */
+      }
+      const isWorker =
+        /codex|antigravity|claude|--bg-pty-host|--bg-spare|--agent-id|tfx-route/.test(
+          cmd,
+        );
+      const safeGroupKill =
+        Number.isInteger(pgid) && pgid > 1 && pgid === pid && isWorker;
+      process.kill(safeGroupKill ? -pgid : pid, "SIGTERM");
     }
   } catch {
     /* already dead */
