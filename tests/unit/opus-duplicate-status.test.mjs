@@ -18,6 +18,33 @@ describe("Opus 4.7 duplicate status suppression", () => {
     assert.equal(view.warningTag, "");
   });
 
+  it("claude-opus-4-8 계열에서도 info-only 상태 태그를 숨긴다", () => {
+    const view = buildContextUsageView(
+      { model: { id: "claude-opus-4-8" } },
+      { usedTokens: 700_000, limitTokens: 200_000 },
+    );
+
+    assert.equal(shouldSuppressInfoOnlyContextStatus("claude-opus-4-8"), true);
+    assert.equal(view.warningLevel, "info");
+    assert.equal(view.warningMessage, "");
+    assert.equal(view.warningTag, "");
+  });
+
+  it("claude-opus-4-8[1m] 계열에서도 info-only 상태 태그를 숨긴다 (현재 세션 모델 ID)", () => {
+    const view = buildContextUsageView(
+      { model: { id: "claude-opus-4-8[1m]" } },
+      { usedTokens: 700_000, limitTokens: 200_000 },
+    );
+
+    assert.equal(
+      shouldSuppressInfoOnlyContextStatus("claude-opus-4-8[1m]"),
+      true,
+    );
+    assert.equal(view.warningLevel, "info");
+    assert.equal(view.warningMessage, "");
+    assert.equal(view.warningTag, "");
+  });
+
   it("[1m] suffix 모델도 info-only 상태 태그를 숨긴다", () => {
     const view = buildContextUsageView(
       { model: { id: "claude-sonnet-4-5[1m]" } },
@@ -40,6 +67,22 @@ describe("Opus 4.7 duplicate status suppression", () => {
     );
     const criticalView = buildContextUsageView(
       { model: { id: "claude-opus-4-7[1m]" } },
+      { usedTokens: 950_000, limitTokens: 200_000 },
+    );
+
+    assert.equal(warnView.warningLevel, "warn");
+    assert.equal(warnView.warningTag, "⚠ 압축 권장");
+    assert.equal(criticalView.warningLevel, "critical");
+    assert.equal(criticalView.warningTag, "‼ 분할 권장");
+  });
+
+  it("warn/critical 구간은 Opus 4.8에서도 그대로 유지한다", () => {
+    const warnView = buildContextUsageView(
+      { model: { id: "claude-opus-4-8" } },
+      { usedTokens: 850_000, limitTokens: 200_000 },
+    );
+    const criticalView = buildContextUsageView(
+      { model: { id: "claude-opus-4-8[1m]" } },
       { usedTokens: 950_000, limitTokens: 200_000 },
     );
 
