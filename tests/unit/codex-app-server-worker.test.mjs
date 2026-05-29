@@ -522,6 +522,12 @@ describe("CodexAppServerWorker — AC-13 defaults", () => {
     // app-server subcommand (regression guard for the stale-arg exit-2 bug).
     assert.equal(childRef.args[0], "app-server");
     assert.equal(childRef.args[1], "--listen");
+    // Guard against re-adding the flag at ANY position — codex app-server
+    // rejects --skip-git-repo-check whether it leads or trails the argv.
+    assert.ok(
+      !childRef.args.includes("--skip-git-repo-check"),
+      "--skip-git-repo-check must not appear in app-server argv",
+    );
     emitTurnCompleted(FakeClientBase.last, "completed");
     await p;
     await worker.stop();
