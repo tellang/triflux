@@ -22,7 +22,12 @@ const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const DEFAULT_HUB_PATH = "/mcp";
-const SERVER_POLICIES = new Set(["hosted", "gateway-sse", "stdio"]);
+const SERVER_POLICIES = new Set([
+  "hosted",
+  "gateway-sse",
+  "gateway-http",
+  "stdio",
+]);
 const GATEWAY_PORTS = Object.freeze({
   context7: 8100,
   "brave-search": 8101,
@@ -792,6 +797,23 @@ function gatewaySseUrl(name, serverConfig = {}) {
   return `http://127.0.0.1:${port}/sse`;
 }
 
+function gatewayHttpUrl(name, serverConfig = {}) {
+  if (typeof serverConfig.url === "string" && serverConfig.url.trim()) {
+    return normalizeUrl(serverConfig.url);
+  }
+  const port =
+    Number(serverConfig.gateway_port || serverConfig.port || 0) ||
+    GATEWAY_PORTS[name];
+  if (!Number.isFinite(port) || port <= 0) return "";
+  const path =
+    typeof serverConfig.gateway_path === "string" &&
+    serverConfig.gateway_path.trim()
+      ? serverConfig.gateway_path.trim()
+      : "/mcp";
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `http://127.0.0.1:${port}${normalizedPath}`;
+}
+
 function syncDenylistEntries(policy = {}) {
   if (!Array.isArray(policy?.sync_denylist)) return new Set();
   return new Set(
@@ -836,9 +858,11 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
   const url =
     policy === "gateway-sse"
       ? gatewaySseUrl(name, serverConfig)
-      : serverConfig?.transport === "hub-url"
-        ? resolveHubUrl()
-        : normalizeUrl(serverConfig?.url || "");
+      : policy === "gateway-http"
+        ? gatewayHttpUrl(name, serverConfig)
+        : serverConfig?.transport === "hub-url"
+          ? resolveHubUrl()
+          : normalizeUrl(serverConfig?.url || "");
   const basenameValue = pathBasename(filePath);
   const resolvedHeaders = resolveHeaderDescriptors(
     name,
@@ -848,6 +872,26 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
   const headerConfig = hasOwnEntries(resolvedHeaders.headers)
     ? { headers: resolvedHeaders.headers }
     : {};
+
+  if (policy === "gateway-http") {
+    if (isCodexConfig(filePath)) {
+      return {
+        name,
+        config: { url },
+        headerDescriptors: {},
+        codex: {},
+        warnings: [],
+      };
+    }
+
+    return {
+      name,
+      config: { type: "http", url },
+      headerDescriptors: {},
+      codex: {},
+      warnings: [],
+    };
+  }
 
   if (policy === "gateway-sse") {
     if (isCodexConfig(filePath)) {
@@ -1237,7 +1281,7 @@ export function validateRegistry(registry) {
         !SERVER_POLICIES.has(server.policy)
       ) {
         errors.push(
-          `registry.servers.${name}.policy must be hosted, gateway-sse, or stdio`,
+          `registry.servers.${name}.policy must be hosted, gateway-sse, gateway-http, or stdio`,
         );
       }
       const transport = server.transport || registry.defaults?.transport;
@@ -1252,7 +1296,7 @@ export function validateRegistry(registry) {
       ) {
         errors.push(`registry.servers.${name}.url must be a non-empty string`);
       }
-      if (policy === "gateway-sse") {
+      if (policy === "gateway-sse" || policy === "gateway-http") {
         const port = Number(server.gateway_port || server.port || 0);
         const hasGatewayUrl =
           typeof server.url === "string" && server.url.trim().length > 0;
@@ -1261,7 +1305,7 @@ export function validateRegistry(registry) {
           (!Number.isInteger(port) || port <= 0 || port > 65535)
         ) {
           errors.push(
-            `registry.servers.${name}.gateway_port must be a valid TCP port for gateway-sse`,
+            `registry.servers.${name}.gateway_port must be a valid TCP port for ${policy}`,
           );
         }
       }
@@ -1913,7 +1957,7 @@ export function addRegistryServer(name, url, options = {}) {
     (transport === "stdio"
       ? "stdio"
       : options.gateway_port || options.port
-        ? "gateway-sse"
+        ? "gateway-http"
         : "hosted");
 
   registry.servers[trimmedName] = {

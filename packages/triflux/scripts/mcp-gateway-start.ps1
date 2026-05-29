@@ -1,5 +1,5 @@
-# mcp-gateway-start.ps1 — supergateway MCP SSE 영속 서비스 관리
-# 각 MCP 서버를 supergateway로 래핑하여 SSE 엔드포인트로 노출한다.
+# mcp-gateway-start.ps1 — supergateway MCP Streamable HTTP 영속 서비스 관리
+# 각 MCP 서버를 supergateway로 래핑하여 Streamable HTTP 엔드포인트로 노출한다.
 # Usage: .\mcp-gateway-start.ps1          # 시작
 #        .\mcp-gateway-start.ps1 -Stop    # 중지
 
@@ -88,7 +88,7 @@ function Start-AllGateways {
 
     # supergateway 기동 — npx는 .cmd 파일이므로 cmd.exe /c 로 래핑
     $stdioCmdEscaped = $srv.Cmd -replace '"', '\"'
-    $sgCmd = "npx -y supergateway --stdio `"$stdioCmdEscaped`" --port $port --outputTransport sse --healthEndpoint /healthz"
+    $sgCmd = "npx -y supergateway --stdio `"$stdioCmdEscaped`" --port $port --outputTransport streamableHttp --stateful --streamableHttpPath /mcp --healthEndpoint /healthz"
 
     try {
       $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList "/c $sgCmd" `

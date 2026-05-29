@@ -4864,10 +4864,9 @@ async function cmdDoctor(options = {}) {
     // skip 된 server 를 잡는다. 로그가 없으면 gateway 미설치/미실행으로 침묵.
     section("MCP Gateway Health");
     {
-      const { checkMcpGatewayHealth, summarizeMcpGatewayHealth } = await import(
-        "../scripts/lib/mcp-gateway-health-check.mjs"
-      );
-      const gatewayHealth = checkMcpGatewayHealth();
+      const { checkMcpGatewayHealthLive, summarizeMcpGatewayHealth } =
+        await import("../scripts/lib/mcp-gateway-health-check.mjs");
+      const gatewayHealth = await checkMcpGatewayHealthLive();
       const summary = summarizeMcpGatewayHealth(gatewayHealth);
       addDoctorCheck(report, {
         name: "mcp-gateway-health",
@@ -4875,6 +4874,7 @@ async function cmdDoctor(options = {}) {
         log_path: gatewayHealth.logPath,
         findings: gatewayHealth.findings,
         started: gatewayHealth.started,
+        live: gatewayHealth.live,
         skipped: gatewayHealth.skipped,
         ...(summary.fix ? { fix: summary.fix } : {}),
       });

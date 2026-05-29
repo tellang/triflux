@@ -41,8 +41,15 @@ Windows 환경에서 프로세스 트리를 강제 종료하는 데는 다음과
 - **cc-reaper 활용**: 커뮤니티 도구인 `cc-reaper`와 같은 전문 프로세스 관리 유틸리티의 도입 검토.
 
 ### 5.3 장기적 아키텍처 (Long-term)
-- **트랜스포트 전환**: 불안정한 stdio 방식 대신 HTTP/SSE 트랜스포트로 전환.
-- **Gateway 도입**: `supergateway` 등을 사용하여 MCP 서버를 영속적인 서비스 형태로 관리하고, Claude Code는 클라이언트로서 접속만 수행하는 구조로 변경.
+- **트랜스포트 전환**: 불안정한 직접 stdio 클라이언트 연결 대신 gateway-backed HTTP MCP 트랜스포트로 전환.
+- **Gateway 도입**: `supergateway` 등을 사용하여 MCP 서버를 영속적인 서비스 형태로 관리하고, Claude Code/Codex/Gemini/Antigravity는 클라이언트로서 접속만 수행하는 구조로 변경.
+- **현재 표준**: gateway가 stdio upstream을 감싸야 하는 서버는 `gateway-http` 정책과 `/mcp` 경로를 사용한다. `supergateway`는 `--outputTransport streamableHttp --stateful --streamableHttpPath /mcp`로 실행한다.
+
+### 5.4 SSE Gateway를 기본값으로 쓰지 않는 이유
+- 기존 `gateway-sse`는 직접 stdio spawn을 줄이고 registry SSOT를 유지하기 위해 도입된 과도기적 형태였다. 설계 목적 자체는 여전히 유효하다.
+- 그러나 `supergateway`의 stdio→SSE 래핑은 단일 stdio transport를 공유하는 형태라, 같은 포트에 두 번째 SSE GET/reconnect가 들어오면 `Already connected to a transport`로 gateway process가 종료될 수 있다.
+- 따라서 해결 방향은 gateway daemon을 제거하거나 직접 stdio로 되돌리는 것이 아니라, 동일한 gateway daemon 경계 안에서 reconnect-safe한 stateful Streamable HTTP로 노출하는 것이다.
+- `gateway-sse` 정책은 과거 설정을 읽기 위한 backward compatibility로만 남긴다. 신규 registry sync와 setup 안내는 `gateway-http`를 기본값으로 사용해야 한다.
 
 ## 6. 참고 자료
 - **GitHub Issues**: #1935, #15211, #28126, #11778, #29058, #30267

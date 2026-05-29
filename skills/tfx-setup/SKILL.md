@@ -150,20 +150,20 @@ Bash("triflux setup")
 #### 단계 3.6: Codex MCP Gateway 싱글톤 전환
 
 Codex CLI가 매 호출마다 MCP 서버를 stdio로 spawn하면 좀비 Node.js 프로세스가 생긴다.
-gateway SSE 싱글톤을 사용하도록 config.toml을 전환한다.
+gateway Streamable HTTP 싱글톤을 사용하도록 config.toml을 전환한다.
 
 ```bash
 node scripts/codex-mcp-gateway-sync.mjs --status
 ```
 
-- 전부 `sse` → ✅ 이미 전환됨
+- 전부 `http` → ✅ 이미 전환됨
 - `stdio` 또는 `missing` 있으면 → AskUserQuestion:
   ```
-  question: "Codex MCP 서버를 gateway 싱글톤(SSE)으로 전환하시겠습니까? 매 호출마다 MCP를 새로 spawn하는 대신, 영속 gateway 데몬을 공유합니다. (좀비 Node.js 방지)"
+  question: "Codex MCP 서버를 gateway 싱글톤(Streamable HTTP)으로 전환하시겠습니까? 매 호출마다 MCP를 새로 spawn하는 대신, 영속 gateway 데몬을 공유합니다. (좀비 Node.js 방지)"
   header: "MCP Gateway"
   options:
     - label: "전환 (Recommended)"
-      description: "stdio → SSE URL 전환. 좀비 프로세스 방지"
+      description: "stdio → Streamable HTTP URL 전환. 좀비 프로세스 방지"
     - label: "건너뛰기"
       description: "현재 stdio 방식 유지"
   ```

@@ -14,6 +14,7 @@
 // 침묵한다 (false-positive 방지).
 
 import { readFileSync, statSync } from "node:fs";
+import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -32,6 +33,27 @@ const MISSING_ENV_RE = /^\[WARN\]\s+(\S+)\s+skipped\s+—\s+missing env:\s+(.+)$
 const START_RE = /^\[START\]\s+(\S+)\s+on\s+:(\d+)$/;
 const SKIP_RUNNING_RE = /^\[SKIP\]\s+(\S+)\s+already running on\s+:(\d+)$/;
 const SKIP_DISABLED_RE = /^\[SKIP\]\s+(\S+)\s+—\s+manifest에서 비활성$/;
+
+function probePortListening(
+  port,
+  { host = "127.0.0.1", timeoutMs = 800 } = {},
+) {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host, port });
+    let settled = false;
+
+    function finish(value) {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(value);
+    }
+
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+    socket.setTimeout(timeoutMs, () => finish(false));
+  });
+}
 
 export function checkMcpGatewayHealth({
   fs = { readFileSync, statSync },
@@ -130,6 +152,40 @@ export function checkMcpGatewayHealth({
   };
 }
 
+export async function checkMcpGatewayHealthLive({
+  probePort = probePortListening,
+  ...options
+} = {}) {
+  const result = checkMcpGatewayHealth(options);
+  if (!result.available || result.started.length === 0) {
+    return {
+      ...result,
+      live: [],
+    };
+  }
+
+  const live = [];
+  const findings = [...result.findings];
+  for (const entry of result.started) {
+    const listening = await probePort(entry.port);
+    live.push({ ...entry, listening });
+    if (!listening) {
+      findings.push({
+        server: entry.server,
+        reason: "port-down",
+        detail: `expected listener on :${entry.port}`,
+        port: entry.port,
+      });
+    }
+  }
+
+  return {
+    ...result,
+    findings,
+    live,
+  };
+}
+
 export function summarizeMcpGatewayHealth(result) {
   if (!result?.available) {
     return {
@@ -150,6 +206,15 @@ export function summarizeMcpGatewayHealth(result) {
       level: "warn",
       message: `${missingEnv.length}개 MCP 서버가 missing env 로 skip: ${list}`,
       fix: "secrets 를 ~/.config/triflux/secrets.env 에 추가하고 `launchctl kickstart -k gui/$(id -u)/com.tellang.mcp-gateway` (macOS) 또는 `systemctl --user restart mcp-gateway` (linux)",
+    };
+  }
+  const portDown = result.findings.filter((f) => f.reason === "port-down");
+  if (portDown.length > 0) {
+    const list = portDown.map((f) => `${f.server} (:${f.port})`).join(", ");
+    return {
+      level: "warn",
+      message: `${portDown.length}개 MCP gateway port down: ${list}`,
+      fix: "gateway 를 재기동하세요: `node scripts/mcp-gateway-start.mjs` 또는 macOS `launchctl kickstart -k gui/$(id -u)/com.tellang.mcp-gateway`",
     };
   }
   return {

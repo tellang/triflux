@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// mcp-gateway-start.mjs — supergateway MCP SSE 영속 서비스 관리
+// mcp-gateway-start.mjs — supergateway MCP Streamable HTTP 영속 서비스 관리
 // Usage: node mcp-gateway-start.mjs          # 시작
 //        node mcp-gateway-start.mjs --stop   # 중지
 //        node mcp-gateway-start.mjs --status # 상태 확인
@@ -57,7 +57,7 @@ function sleep(ms) {
 function spawnGateway(srv) {
   if (process.platform === "win32") {
     // 임시 .cmd 파일로 quoting 문제 회피
-    const cmdContent = `@echo off\nnpx -y supergateway --stdio "${srv.cmd}" --port ${srv.port} --outputTransport sse --healthEndpoint /healthz --cors "http://localhost"`;
+    const cmdContent = `@echo off\nnpx -y supergateway --stdio "${srv.cmd}" --port ${srv.port} --outputTransport streamableHttp --stateful --streamableHttpPath /mcp --healthEndpoint /healthz --cors "http://localhost"`;
     const cmdFile = join(tmpdir(), `tfx-sg-${srv.name}.cmd`);
     writeFileSync(cmdFile, cmdContent);
 
@@ -79,7 +79,10 @@ function spawnGateway(srv) {
     "--port",
     String(srv.port),
     "--outputTransport",
-    "sse",
+    "streamableHttp",
+    "--stateful",
+    "--streamableHttpPath",
+    "/mcp",
     "--healthEndpoint",
     "/healthz",
     "--cors",

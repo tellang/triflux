@@ -22,6 +22,8 @@ const ROOT = join(process.cwd());
 const START_PATH = join(ROOT, "scripts", "mcp-gateway-start.mjs");
 const CONFIG_PATH = join(ROOT, "scripts", "mcp-gateway-config.mjs");
 const VERIFY_PATH = join(ROOT, "scripts", "mcp-gateway-verify.mjs");
+const ENSURE_PATH = join(ROOT, "scripts", "mcp-gateway-ensure.mjs");
+const PREFLIGHT_PATH = join(ROOT, "scripts", "codex-gateway-preflight.mjs");
 const SERVERS_LIB_PATH = join(
   ROOT,
   "scripts",
@@ -431,16 +433,53 @@ describe("source file structural integrity", () => {
     );
   });
 
-  it("mcp-gateway-ensure.mjs does not use gateway PID files as configuration state", () => {
-    const src = readFileSync(
-      join(ROOT, "scripts", "mcp-gateway-ensure.mjs"),
-      "utf8",
+  it("mcp-gateway-start.mjs exposes stdio upstreams as stateful Streamable HTTP on /mcp", () => {
+    const src = readFileSync(START_PATH, "utf8");
+    assert.match(src, /--outputTransport/);
+    assert.match(src, /streamableHttp/);
+    assert.match(src, /--stateful/);
+    assert.match(src, /--streamableHttpPath/);
+    assert.match(src, /\/mcp/);
+    assert.doesNotMatch(
+      src,
+      /--outputTransport(?:\s*["',`]+|\s+)sse\b/,
+      "gateway start must not expose shared stdio upstreams through SSE",
     );
+  });
+
+  it("mcp-gateway-config.mjs writes Claude Streamable HTTP MCP URLs, not SSE URLs", () => {
+    const src = readFileSync(CONFIG_PATH, "utf8");
+    assert.match(src, /--transport http/);
+    assert.match(src, /\/mcp/);
+    assert.doesNotMatch(src, /--transport sse/);
+    assert.doesNotMatch(src, /\/sse/);
+  });
+
+  it("mcp-gateway-ensure.mjs does not use gateway PID files as configuration state", () => {
+    const src = readFileSync(ENSURE_PATH, "utf8");
     assert.doesNotMatch(
       src,
       /tfx-gateway-pids\.json|PID_FILE|hasManifest/,
       "ensure must use MCP manifest/registry lifecycle instead of PID files",
     );
+  });
+
+  it("mcp-gateway-ensure.mjs probes every configured gateway port, not a single sentinel port", () => {
+    const src = readFileSync(ENSURE_PATH, "utf8");
+    assert.doesNotMatch(src, /PROBE_PORT/);
+    assert.match(src, /function configuredServers/);
+    assert.match(src, /async function gatewayReadiness/);
+    assert.match(src, /servers\.map/);
+    assert.match(src, /entries\.every/);
+  });
+
+  it("codex-gateway-preflight.mjs caches only the configured gateway port set", () => {
+    const src = readFileSync(PREFLIGHT_PATH, "utf8");
+    assert.doesNotMatch(src, /PROBE_PORT/);
+    assert.match(src, /function configuredPorts/);
+    assert.match(src, /samePorts/);
+    assert.match(src, /ports: configuredPorts\(servers\)/);
+    assert.match(src, /async function gatewayReadiness/);
   });
 
   it("setup.mjs legacy direct SessionStart hook includes gateway ensure", () => {

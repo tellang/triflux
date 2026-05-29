@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// mcp-gateway-config.mjs — Claude Code MCP stdio↔SSE 전환
-// Usage: node mcp-gateway-config.mjs --enable   # stdio → SSE
-//        node mcp-gateway-config.mjs --disable  # SSE → stdio (복원)
+// mcp-gateway-config.mjs — Claude Code MCP stdio↔Streamable HTTP 전환
+// Usage: node mcp-gateway-config.mjs --enable   # stdio → Streamable HTTP
+//        node mcp-gateway-config.mjs --disable  # Streamable HTTP → stdio (복원)
 
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -92,10 +92,10 @@ function loadBackup() {
   }
 }
 
-// ── enable: 스냅샷 → remove → SSE add (실패 시 rollback) ──
+// ── enable: 스냅샷 → remove → HTTP add (실패 시 rollback) ──
 
-function enableSse() {
-  console.log("Switching MCP servers to SSE mode...\n");
+function enableHttp() {
+  console.log("Switching MCP servers to Streamable HTTP mode...\n");
 
   // 1) 현재 상태 스냅샷
   const snapshot = captureCurrentMcpState();
@@ -112,13 +112,13 @@ function enableSse() {
     }
 
     removeMcp(name);
-    const url = `http://localhost:${port}/sse`;
+    const url = `http://localhost:${port}/mcp`;
     const success = run(
-      `claude mcp add --transport sse -s user "${name}" ${url}`,
+      `claude mcp add --transport http -s user "${name}" ${url}`,
     );
 
     if (success) {
-      console.log(`  [SSE] ${name} → ${url}`);
+      console.log(`  [HTTP] ${name} → ${url}`);
       ok++;
     } else {
       // add 실패 → 원본 복원 시도
@@ -141,7 +141,7 @@ function enableSse() {
 
 // ── disable: 백업에서 서버별 원복 ──
 
-function disableSse() {
+function disableHttp() {
   console.log("Restoring MCP servers from backup...\n");
   const backup = loadBackup();
 
@@ -202,7 +202,7 @@ function disableSse() {
 function printUsage() {
   console.log(`Usage: node mcp-gateway-config.mjs [--enable|--disable]
 
-  --enable   Switch Claude Code MCP servers from stdio to SSE (supergateway)
+  --enable   Switch Claude Code MCP servers from stdio to Streamable HTTP (supergateway)
   --disable  Restore Claude Code MCP servers to original stdio mode
 
 Servers managed: ${GATEWAY_SERVERS.map((s) => s.name).join(", ")}
@@ -213,9 +213,9 @@ Servers skipped: ${[...SKIP_SERVERS].join(", ")}`);
 const flag = process.argv[2];
 
 if (flag === "--enable") {
-  enableSse();
+  enableHttp();
 } else if (flag === "--disable") {
-  disableSse();
+  disableHttp();
 } else {
   printUsage();
   process.exit(flag ? 1 : 0);

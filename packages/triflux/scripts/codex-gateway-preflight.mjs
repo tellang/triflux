@@ -8,54 +8,104 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  SERVERS,
+  serversWithSatisfiedEnv,
+} from "./lib/mcp-gateway-servers.mjs";
+import { readManifest, writeManifest } from "./lib/mcp-manifest.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PROBE_PORT = 8100;
 const PROBE_TIMEOUT_MS = 2000;
 const STARTUP_WAIT_MS = 6000;
 const POLL_MS = 500;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5분
 const CACHE_FILE = join(tmpdir(), "tfx-gateway-alive.json");
 
-function readCache() {
+function ensureGatewayManifest() {
+  const manifest = readManifest();
+  if (manifest) return manifest;
+
+  const envReadyServers = serversWithSatisfiedEnv()
+    .filter((server) => server.envVars.length > 0)
+    .map((server) => server.name);
+  return writeManifest(envReadyServers);
+}
+
+function configuredServers(manifest) {
+  const enabled = new Set(manifest?.enabled || []);
+  return SERVERS.filter((server) => {
+    if (!enabled.has(server.name)) return false;
+    return server.envVars.every((envName) => Boolean(process.env[envName]));
+  });
+}
+
+function configuredPorts(servers) {
+  return servers.map((server) => server.port).sort((a, b) => a - b);
+}
+
+function samePorts(left, right) {
+  if (!Array.isArray(left) || left.length !== right.length) return false;
+  return left.every((port, index) => port === right[index]);
+}
+
+function readCache(servers) {
+  const ports = configuredPorts(servers);
   try {
     if (!existsSync(CACHE_FILE)) return null;
     const data = JSON.parse(readFileSync(CACHE_FILE, "utf8"));
-    if (Date.now() - data.ts < CACHE_TTL_MS) return data;
+    if (Date.now() - data.ts >= CACHE_TTL_MS) return null;
+    return samePorts(data.ports, ports) ? data : null;
   } catch {
     /* ignore */
   }
   return null;
 }
 
-function writeCache() {
+function writeCache(servers) {
   try {
-    writeFileSync(CACHE_FILE, JSON.stringify({ ts: Date.now(), alive: true }));
+    writeFileSync(
+      CACHE_FILE,
+      JSON.stringify({
+        ts: Date.now(),
+        alive: true,
+        ports: configuredPorts(servers),
+      }),
+    );
   } catch {
     /* ignore */
   }
 }
 
-async function isGatewayAlive() {
-  // B) Preflight 캐시: 5분 이내 확인했으면 프로브 스킵
-  const cached = readCache();
-  if (cached) return true;
-
+async function isPortHealthy(port) {
   try {
-    const res = await fetch(`http://127.0.0.1:${PROBE_PORT}/healthz`, {
+    const res = await fetch(`http://127.0.0.1:${port}/healthz`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    if (res.ok) {
-      writeCache();
-      return true;
-    }
-    return false;
+    return res.ok;
   } catch {
     return false;
   }
 }
 
-async function startGateway() {
+async function gatewayReadiness(servers, { useCache = true } = {}) {
+  if (servers.length === 0) return { ready: true, entries: [] };
+
+  // B) Preflight 캐시: 5분 이내 같은 configured port set을 확인했으면 프로브 스킵
+  if (useCache && readCache(servers)) return { ready: true, entries: [] };
+
+  const entries = await Promise.all(
+    servers.map(async (server) => ({
+      name: server.name,
+      port: server.port,
+      healthy: await isPortHealthy(server.port),
+    })),
+  );
+  const ready = entries.every((entry) => entry.healthy);
+  if (ready) writeCache(servers);
+  return { ready, entries };
+}
+
+async function startGateway(servers) {
   const script = join(PLUGIN_ROOT, "scripts", "mcp-gateway-start.mjs");
   if (!existsSync(script)) {
     process.stderr.write(
@@ -78,7 +128,9 @@ async function startGateway() {
   // 헬스체크 대기
   const deadline = Date.now() + STARTUP_WAIT_MS;
   while (Date.now() < deadline) {
-    if (await isGatewayAlive()) return true;
+    if ((await gatewayReadiness(servers, { useCache: false })).ready) {
+      return true;
+    }
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
   return false;
@@ -88,10 +140,18 @@ async function startGateway() {
 
 async function main() {
   // 1) gateway 보장
-  const alive = await isGatewayAlive();
-  if (!alive) {
-    process.stderr.write("[gateway-preflight] gateway down, starting...\n");
-    const ok = await startGateway();
+  const manifest = ensureGatewayManifest();
+  const servers = configuredServers(manifest);
+  const readiness = await gatewayReadiness(servers);
+  if (!readiness.ready) {
+    const downPorts = readiness.entries
+      .filter((entry) => !entry.healthy)
+      .map((entry) => `${entry.name}:${entry.port}`)
+      .join(", ");
+    process.stderr.write(
+      `[gateway-preflight] gateway down (${downPorts}), starting...\n`,
+    );
+    const ok = await startGateway(servers);
     process.stderr.write(
       ok
         ? "[gateway-preflight] gateway started\n"

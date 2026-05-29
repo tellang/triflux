@@ -317,7 +317,7 @@ function setCodexMcpServerBody(raw, sectionName, body) {
   return `${raw.slice(0, section.bodyStart)}${body}${raw.slice(section.sectionEnd)}`;
 }
 
-function gatewaySseUrl(serverName, serverConfig) {
+function gatewayUrl(serverName, serverConfig) {
   if (typeof serverConfig?.url === "string" && serverConfig.url.trim()) {
     return serverConfig.url.trim();
   }
@@ -325,7 +325,14 @@ function gatewaySseUrl(serverName, serverConfig) {
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     return "";
   }
-  return `http://127.0.0.1:${port}/sse`;
+  const fallbackPath = serverConfig?.policy === "gateway-sse" ? "/sse" : "/mcp";
+  const rawPath =
+    typeof serverConfig?.gateway_path === "string" &&
+    serverConfig.gateway_path.trim()
+      ? serverConfig.gateway_path.trim()
+      : fallbackPath;
+  const path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+  return `http://127.0.0.1:${port}${path}`;
 }
 
 async function loadGatewaySseServers({ registryPath, client, logger }) {
@@ -349,19 +356,25 @@ async function loadGatewaySseServers({ registryPath, client, logger }) {
 
   return Object.entries(servers)
     .filter(([, server]) => {
-      if (server?.policy !== "gateway-sse") return false;
+      if (!["gateway-sse", "gateway-http"].includes(server?.policy))
+        return false;
       if (!Array.isArray(server.targets)) return true;
       return server.targets.includes(client);
     })
-    .map(([name, server]) => ({ name, url: gatewaySseUrl(name, server) }))
+    .map(([name, server]) => ({
+      name,
+      url: gatewayUrl(name, server),
+      policy: server.policy,
+    }))
     .filter((server) => server.url.length > 0);
 }
 
-function desiredJsonGatewayConfig(client, url) {
-  if (client === "antigravity") {
-    return { serverUrl: url };
+function desiredJsonGatewayConfig(client, gatewayServer) {
+  if (gatewayServer.policy === "gateway-sse") {
+    if (client === "antigravity") return { serverUrl: gatewayServer.url };
+    return { type: "sse", url: gatewayServer.url };
   }
-  return { type: "sse", url };
+  return { type: "http", url: gatewayServer.url };
 }
 
 function sameJsonValue(left, right) {
@@ -476,7 +489,7 @@ async function syncGatewayJsonFile({
       if (servers[gatewayServer.name] === undefined) {
         continue;
       }
-      const nextConfig = desiredJsonGatewayConfig(client, gatewayServer.url);
+      const nextConfig = desiredJsonGatewayConfig(client, gatewayServer);
       if (sameJsonValue(servers[gatewayServer.name], nextConfig)) {
         continue;
       }
@@ -645,11 +658,14 @@ async function syncCodexGatewayConfigFile({
         continue;
       }
       const beforeRaw = nextRaw;
-      nextRaw = setCodexMcpServerBody(
-        nextRaw,
-        gatewayServer.name,
-        `url = ${formatTomlString(gatewayServer.url)}\ntransport = "sse"\n`,
-      );
+      const body =
+        gatewayServer.policy === "gateway-sse"
+          ? `url = ${formatTomlString(gatewayServer.url)}
+transport = "sse"
+`
+          : `url = ${formatTomlString(gatewayServer.url)}
+`;
+      nextRaw = setCodexMcpServerBody(nextRaw, gatewayServer.name, body);
       if (nextRaw !== beforeRaw) {
         changedServers.push(gatewayServer);
       }

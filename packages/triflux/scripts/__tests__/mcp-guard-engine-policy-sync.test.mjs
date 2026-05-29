@@ -62,7 +62,7 @@ function policyRegistry(homeDir) {
         targets: ["claude", "gemini", "codex", "antigravity"],
       },
       serena: {
-        policy: "gateway-sse",
+        policy: "gateway-http",
         gateway_port: 8105,
         safe: true,
         targets: ["claude", "gemini", "codex", "antigravity"],
@@ -96,7 +96,7 @@ function policyRegistry(homeDir) {
 afterEach(restoreEnv);
 
 describe("mcp guard policy sync", () => {
-  it("validates explicit hosted, gateway-sse, and stdio server policies", () => {
+  it("validates explicit hosted, gateway-http, and stdio server policies", () => {
     const homeDir = createHomeDir();
     assert.deepEqual(validateRegistry(policyRegistry(homeDir)), []);
   });
@@ -153,8 +153,8 @@ describe("mcp guard policy sync", () => {
       headers: { Authorization: "Bearer test-exa-key" },
     });
     assert.deepEqual(claudeUser.mcpServers.serena, {
-      type: "sse",
-      url: "http://127.0.0.1:8105/sse",
+      type: "http",
+      url: "http://127.0.0.1:8105/mcp",
     });
     assert.deepEqual(claudeUser.mcpServers["brave-search"], {
       command: "npx",
@@ -177,8 +177,8 @@ describe("mcp guard policy sync", () => {
         config.mcpServers.exa.headers.Authorization,
         "Bearer test-exa-key",
       );
-      assert.equal(config.mcpServers.serena.url, "http://127.0.0.1:8105/sse");
-      assert.equal(config.mcpServers.serena.type, "sse");
+      assert.equal(config.mcpServers.serena.url, "http://127.0.0.1:8105/mcp");
+      assert.equal(config.mcpServers.serena.type, "http");
       assert.equal(config.mcpServers["brave-search"].command, "npx");
       assert.deepEqual(config.mcpServers["brave-search"].env, {
         BRAVE_API_KEY: "test-brave-key",
@@ -194,8 +194,8 @@ describe("mcp guard policy sync", () => {
     assert.match(codexToml, /\[mcp_servers\.exa\]/);
     assert.match(codexToml, /bearer_token_env_var = "EXA_API_KEY"/);
     assert.match(codexToml, /\[mcp_servers\.serena\]/);
-    assert.match(codexToml, /url = "http:\/\/127\.0\.0\.1:8105\/sse"/);
-    assert.match(codexToml, /transport = "sse"/);
+    assert.match(codexToml, /url = "http:\/\/127\.0\.0\.1:8105\/mcp"/);
+    assert.doesNotMatch(codexToml, /transport = "sse"/);
     assert.match(codexToml, /\[mcp_servers\.brave-search\]/);
     assert.match(codexToml, /command = "npx"/);
     assert.match(codexToml, /env = \{ "BRAVE_API_KEY" = "test-brave-key" \}/);

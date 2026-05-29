@@ -14,14 +14,13 @@ import {
 import { readManifest, writeManifest } from "./lib/mcp-manifest.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const PROBE_PORT = 8100; // context7 — 첫 번째 게이트웨이 포트로 alive 프로브
 const PROBE_TIMEOUT_MS = 1500;
 const STARTUP_WAIT_MS = 4000;
 const POLL_INTERVAL_MS = 500;
 
-async function isGatewayAlive() {
+async function isPortHealthy(port) {
   try {
-    const res = await fetch(`http://127.0.0.1:${PROBE_PORT}/healthz`, {
+    const res = await fetch(`http://127.0.0.1:${port}/healthz`, {
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
     return res.ok;
@@ -40,12 +39,27 @@ function ensureGatewayManifest() {
   return writeManifest(envReadyServers);
 }
 
-function hasConfiguredGatewayServer(manifest) {
+function configuredServers(manifest) {
   const enabled = new Set(manifest?.enabled || []);
-  return SERVERS.some((server) => {
+  return SERVERS.filter((server) => {
     if (!enabled.has(server.name)) return false;
     return server.envVars.every((envName) => Boolean(process.env[envName]));
   });
+}
+
+async function gatewayReadiness(servers) {
+  const entries = await Promise.all(
+    servers.map(async (server) => ({
+      name: server.name,
+      port: server.port,
+      healthy: await isPortHealthy(server.port),
+    })),
+  );
+
+  return {
+    ready: entries.length > 0 && entries.every((entry) => entry.healthy),
+    entries,
+  };
 }
 
 function startGateway() {
@@ -72,10 +86,10 @@ function startGateway() {
   }
 }
 
-async function waitForGatewayReady(maxWaitMs = STARTUP_WAIT_MS) {
+async function waitForGatewayReady(servers, maxWaitMs = STARTUP_WAIT_MS) {
   const deadline = Date.now() + maxWaitMs;
   while (Date.now() < deadline) {
-    if (await isGatewayAlive()) return true;
+    if ((await gatewayReadiness(servers)).ready) return true;
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
   return false;
@@ -84,13 +98,14 @@ async function waitForGatewayReady(maxWaitMs = STARTUP_WAIT_MS) {
 export async function run(stdinData) {
   void stdinData;
   const manifest = ensureGatewayManifest();
+  const servers = configuredServers(manifest);
 
-  if (hasConfiguredGatewayServer(manifest) && (await isGatewayAlive())) {
-    return { code: 0, stdout: "gateway: ok", stderr: "" };
+  if (servers.length === 0) {
+    return { code: 0, stdout: "gateway: not configured", stderr: "" };
   }
 
-  if (!hasConfiguredGatewayServer(manifest)) {
-    return { code: 0, stdout: "gateway: not configured", stderr: "" };
+  if ((await gatewayReadiness(servers)).ready) {
+    return { code: 0, stdout: "gateway: ok", stderr: "" };
   }
 
   const started = startGateway();
@@ -98,7 +113,7 @@ export async function run(stdinData) {
     return { code: 0, stdout: "", stderr: "[gateway-ensure] start failed" };
   }
 
-  const ready = await waitForGatewayReady();
+  const ready = await waitForGatewayReady(servers);
   return {
     code: 0,
     stdout: ready ? "gateway: ok" : "gateway: starting",
