@@ -1,0 +1,210 @@
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import {
+  deriveClaudeDaemonPaths,
+  dispatchClaudeDaemonJob,
+  teardownClaudeDaemonJob,
+} from "../../hub/team/claude-daemon-control.mjs";
+
+// 데몬 control.sock 을 흉내내는 최소 서버. dispatch/list/kill 요청을 기록한다.
+async function listenDaemon(sockPath, { short, pid }) {
+  const requests = [];
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let data = "";
+    socket.on("data", (chunk) => {
+      data += chunk;
+      if (!data.includes("\n")) return;
+      const request = JSON.parse(data.slice(0, data.indexOf("\n")));
+      requests.push(request);
+      if (request.op === "list") {
+        socket.end(
+          `${JSON.stringify({
+            ok: true,
+            jobs: [{ short, pid, startedAt: 4321 }],
+          })}\n`,
+        );
+        return;
+      }
+      socket.end(`${JSON.stringify({ ok: true })}\n`);
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(sockPath, resolve);
+  });
+  return { server, requests };
+}
+
+test("dispatchClaudeDaemonJob emits op:dispatch, resolves pid+bridge, writes projection", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-job-"));
+  const configDir = path.join(tmp, "claude");
+  const paths = deriveClaudeDaemonPaths({ configDir });
+  await fs.mkdir(paths.daemonDir, { recursive: true });
+  const short = "abcd1234";
+  const { server, requests } = await listenDaemon(paths.controlSock, {
+    short,
+    pid: process.pid,
+  });
+
+  try {
+    const payload = {
+      proto: 1,
+      short,
+      sessionId: "abcd1234-sess",
+      cwd: "/tmp/project",
+      seed: { name: "Triflux codex worker" },
+    };
+    const result = await dispatchClaudeDaemonJob({
+      paths,
+      controlSock: paths.controlSock,
+      payload,
+      agent: "codex",
+      name: "Triflux codex worker",
+      cwd: "/tmp/project",
+      dispatchTimeoutMs: 5000,
+      _deps: {
+        getProcStart: () => "Mon Jan 1 00:00:00 2026",
+        resolveDaemonBridgeSessionId: async () => "cse_01DispatchJob",
+      },
+    });
+
+    // op:'dispatch' 페이로드가 정확히 controlSock 으로 나갔는지
+    const dispatch = requests.find((r) => r.op === "dispatch");
+    assert.ok(dispatch, "dispatch request should be sent");
+    assert.equal(dispatch.proto, 1);
+    assert.equal(dispatch.d.short, short);
+    assert.equal(dispatch.d.sessionId, "abcd1234-sess");
+    assert.equal(dispatch.timeoutMs, 5000);
+
+    // 헬퍼는 plain 필드를 반환한다 (caller record 로 Object.assign 가능).
+    assert.equal(result.ok, true);
+    assert.equal(result.short, short);
+    assert.equal(result.sessionId, "abcd1234-sess");
+    assert.equal(result.pid, process.pid);
+    assert.equal(result.bridgeSessionId, "cse_01DispatchJob");
+    assert.equal(result.controlSock, paths.controlSock);
+    assert.ok(result.job);
+    assert.ok(result.sessionProjectionPath);
+
+    const projection = JSON.parse(
+      await fs.readFile(result.sessionProjectionPath, "utf8"),
+    );
+    assert.equal(projection.sessionId, "abcd1234-sess");
+    assert.equal(projection.agent, "codex");
+    assert.equal(projection.jobId, short);
+    assert.equal(projection.bridgeSessionId, "session_01DispatchJob");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dispatchClaudeDaemonJob projection:'skip' does not build/write a projection", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-skip-"));
+  const configDir = path.join(tmp, "claude");
+  const paths = deriveClaudeDaemonPaths({ configDir });
+  await fs.mkdir(paths.daemonDir, { recursive: true });
+  const short = "skip5678";
+  const { server, requests } = await listenDaemon(paths.controlSock, {
+    short,
+    pid: process.pid,
+  });
+
+  let projectionBuilt = false;
+  try {
+    const result = await dispatchClaudeDaemonJob({
+      paths,
+      controlSock: paths.controlSock,
+      payload: { proto: 1, short, sessionId: "skip5678-sess" },
+      agent: "codex",
+      name: "skip projection",
+      cwd: "/tmp/project",
+      projection: "skip",
+      _deps: {
+        getProcStart: () => "Mon Jan 1 00:00:00 2026",
+        resolveDaemonBridgeSessionId: async () => "cse_skip",
+        buildClaudeSessionProjection: () => {
+          projectionBuilt = true;
+          return {};
+        },
+      },
+    });
+
+    assert.equal(projectionBuilt, false);
+    assert.equal(result.sessionProjectionPath, "");
+    assert.equal(result.bridgeSessionId, "cse_skip");
+    assert.ok(requests.find((r) => r.op === "dispatch"));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dispatchClaudeDaemonJob throws when daemon dispatch is not ok", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-fail-"));
+  const configDir = path.join(tmp, "claude");
+  const paths = deriveClaudeDaemonPaths({ configDir });
+  await fs.mkdir(paths.daemonDir, { recursive: true });
+
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    socket.on("data", () => socket.end(`${JSON.stringify({ ok: false })}\n`));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(paths.controlSock, resolve);
+  });
+
+  try {
+    await assert.rejects(
+      dispatchClaudeDaemonJob({
+        paths,
+        controlSock: paths.controlSock,
+        payload: { proto: 1, short: "fail0000", sessionId: "fail0000-sess" },
+        agent: "codex",
+        name: "fail dispatch",
+        cwd: "/tmp/project",
+      }),
+      /dispatch failed/u,
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("teardownClaudeDaemonJob attempts every step even when killDaemonJob throws", async () => {
+  const calls = [];
+  await teardownClaudeDaemonJob({
+    controlSock: "/tmp/does-not-matter.sock",
+    short: "tear1234",
+    sessionProjectionPath: "/tmp/proj.json",
+    jobsDir: "/tmp/jobs",
+    removeJobState: true,
+    _deps: {
+      removeClaudeSessionProjection: async () => {
+        calls.push("removeProjection");
+      },
+      killDaemonJob: async () => {
+        calls.push("killDaemonJob");
+        throw new Error("kill exploded");
+      },
+      removeClaudeJobState: async () => {
+        calls.push("removeJobState");
+      },
+    },
+  });
+
+  // killDaemonJob 이 throw 해도 .catch 로 삼키고 모든 스텝이 시도되어야 한다.
+  assert.deepEqual(calls.sort(), [
+    "killDaemonJob",
+    "removeJobState",
+    "removeProjection",
+  ]);
+});

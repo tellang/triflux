@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
@@ -6,9 +6,13 @@ import os from "node:os";
 import path from "node:path";
 import {
   buildDaemonExecDispatchPayload,
+  deriveClaudeDaemonPaths,
+  dispatchClaudeDaemonJob,
+  getProcStart,
   killDaemonJob,
   resolveDaemonBridgeSessionId,
   sendClaudeControlRequest,
+  teardownClaudeDaemonJob,
   waitForDaemonJobPid,
 } from "./claude-daemon-control.mjs";
 import {
@@ -17,6 +21,10 @@ import {
   writeClaudeSessionProjection,
 } from "./claude-session-projection.mjs";
 import { createInteractiveTuiTransport } from "./interactive-tui-transport.mjs";
+
+// daemon-control 이 deriveClaudeDaemonPaths / getProcStart 의 단일 owner 다.
+// 기존 native-bridge import 경로 (headless 포함) 호환을 위해 re-export 한다.
+export { deriveClaudeDaemonPaths, getProcStart };
 
 const DEFAULT_ROWS = 40;
 const DEFAULT_COLS = 120;
@@ -28,39 +36,6 @@ const ROSTER_LOCK_RETRY_MS = 10;
 export function resolveClaudeConfigDir(env = process.env) {
   if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
   return path.join(os.homedir(), ".claude");
-}
-
-export function deriveClaudeDaemonPaths({
-  configDir = resolveClaudeConfigDir(),
-  uid = typeof process.getuid === "function" ? process.getuid() : 0,
-  tmpRoot = "/tmp",
-} = {}) {
-  const resolvedConfigDir = path.resolve(configDir);
-  const hash = crypto
-    .createHash("sha256")
-    .update(resolvedConfigDir)
-    .digest("hex")
-    .slice(0, 8);
-  const daemonDir = path.join(tmpRoot, `cc-daemon-${uid}`, hash);
-  return {
-    configDir: resolvedConfigDir,
-    daemonDir,
-    controlSock: path.join(daemonDir, "control.sock"),
-    rendezvousDir: path.join(daemonDir, "rv"),
-    ptyDir: path.join(daemonDir, "pty"),
-    rosterPath: path.join(resolvedConfigDir, "daemon", "roster.json"),
-    sessionsDir: path.join(resolvedConfigDir, "sessions"),
-    jobsDir: path.join(resolvedConfigDir, "jobs"),
-  };
-}
-
-export function getProcStart(pid = process.pid) {
-  if (!Number.isInteger(pid) || pid <= 0)
-    throw new Error(`invalid pid: ${pid}`);
-  return execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-    encoding: "utf8",
-    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
-  }).trim();
 }
 
 export function buildPtyDataFrame(value) {
@@ -379,6 +354,8 @@ export async function registerSwarmShard({
   const removeJobStateImpl = _deps.removeClaudeJobState || removeClaudeJobState;
   const killJob = _deps.killDaemonJob || killDaemonJob;
   const accessControlSock = _deps.accessControlSock || fs.access;
+  const dispatchJob = _deps.dispatchClaudeDaemonJob || dispatchClaudeDaemonJob;
+  const teardownJob = _deps.teardownClaudeDaemonJob || teardownClaudeDaemonJob;
 
   const paths = derivePaths({ configDir, tmpRoot });
   const sessionsDir =
@@ -487,44 +464,30 @@ export async function registerSwarmShard({
     name: displayName,
   });
 
-  await accessControlSock(paths.controlSock);
-  const dispatch = await sendControl(
-    paths.controlSock,
-    {
-      proto: 1,
-      op: "dispatch",
-      d: payload,
-      timeoutMs: 1000,
-    },
-    { timeoutMs: 1000 },
-  );
-  if (dispatch?.ok !== true) {
-    throw new Error(
-      `Claude daemon dispatch failed for swarm shard ${shardName}`,
-    );
-  }
-
-  const job = await waitForPid(paths.controlSock, short, { timeoutMs: 1000 });
-  const pid = job.pid;
-  const bridgeSessionId = await resolveBridgeSessionId({
-    daemonPaths: paths,
-    short,
-    job,
-    timeoutMs: 1000,
-  });
-  const projection = buildProjection({
-    pid,
-    procStart: readProcStart(pid),
-    sessionId: payload.sessionId,
-    short,
-    cwd,
-    name: displayName,
+  // native-bridge 는 데몬이 없으면 빠르게 실패해야 하므로 1000ms 로 고정한다
+  // (headless 의 5000ms 와 다르므로 명시 전달).
+  const dispatched = await dispatchJob({
+    paths,
+    controlSock: paths.controlSock,
+    payload,
     agent: cli,
-    startedAt: job.startedAt || Date.now(),
-    updatedAt: Date.now(),
-    bridgeSessionId,
+    name: displayName,
+    cwd,
+    dispatchTimeoutMs: 1000,
+    pidTimeoutMs: 1000,
+    bridgeTimeoutMs: 1000,
+    accessControlSock,
+    _deps: {
+      sendClaudeControlRequest: sendControl,
+      waitForDaemonJobPid: waitForPid,
+      resolveDaemonBridgeSessionId: resolveBridgeSessionId,
+      buildClaudeSessionProjection: buildProjection,
+      writeClaudeSessionProjection: writeProjection,
+      getProcStart: readProcStart,
+    },
   });
-  const sessionProjectionPath = await writeProjection(sessionsDir, projection);
+  const sessionProjectionPath = dispatched.sessionProjectionPath;
+  void sessionsDir;
   let closed = false;
 
   return {
@@ -543,9 +506,18 @@ export async function registerSwarmShard({
     async close() {
       if (closed) return;
       closed = true;
-      await removeProjection(sessionProjectionPath).catch(() => {});
-      await killJob(paths.controlSock, short).catch(() => {});
-      await removeJobStateImpl(jobsDir, short).catch(() => {});
+      await teardownJob({
+        controlSock: paths.controlSock,
+        short,
+        sessionProjectionPath,
+        jobsDir,
+        removeJobState: true,
+        _deps: {
+          removeClaudeSessionProjection: removeProjection,
+          killDaemonJob: killJob,
+          removeClaudeJobState: removeJobStateImpl,
+        },
+      });
     },
   };
 }
