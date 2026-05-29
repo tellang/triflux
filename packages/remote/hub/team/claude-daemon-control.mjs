@@ -10,6 +10,52 @@ import {
   writeClaudeSessionProjection,
 } from "./claude-session-projection.mjs";
 
+export function buildClaudePromptDispatchPayload({
+  short = crypto.randomBytes(4).toString("hex"),
+  sessionId,
+  cwd = process.cwd(),
+  prompt,
+  name = "tfx uds claude prompt",
+  createdAt = Date.now(),
+  cols = 120,
+  rows = 40,
+} = {}) {
+  if (!prompt) throw new Error("prompt is required");
+  const uuid = crypto.randomUUID();
+  const resolvedSessionId = sessionId || `${short}${uuid.slice(8)}`;
+  return {
+    proto: 1,
+    short,
+    sessionId: resolvedSessionId,
+    createdAt,
+    source: "shell",
+    cwd,
+    agent: "claude",
+    launch: {
+      mode: "prompt",
+      args: [
+        "--session-id",
+        resolvedSessionId,
+        "--agent",
+        "claude",
+        "--permission-mode",
+        "auto",
+        "--",
+        prompt,
+      ],
+    },
+    env: {},
+    isolation: "none",
+    respawnFlags: [],
+    seed: {
+      intent: "[redacted uds orchestration prompt]",
+      name,
+    },
+    cols,
+    rows,
+  };
+}
+
 export function resolveClaudeConfigDir(env = process.env) {
   if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
   return path.join(os.homedir(), ".claude");
