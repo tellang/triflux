@@ -1008,6 +1008,52 @@ export function buildDaemonExecDispatchPayload({
   };
 }
 
+export function buildClaudePromptDispatchPayload({
+  short = crypto.randomBytes(4).toString("hex"),
+  sessionId,
+  cwd = process.cwd(),
+  prompt,
+  name = "tfx uds claude prompt",
+  createdAt = Date.now(),
+  cols = 120,
+  rows = 40,
+} = {}) {
+  if (!prompt) throw new Error("prompt is required");
+  const uuid = crypto.randomUUID();
+  const resolvedSessionId = sessionId || `${short}${uuid.slice(8)}`;
+  return {
+    proto: 1,
+    short,
+    sessionId: resolvedSessionId,
+    createdAt,
+    source: "shell",
+    cwd,
+    agent: "claude",
+    launch: {
+      mode: "prompt",
+      args: [
+        "--session-id",
+        resolvedSessionId,
+        "--agent",
+        "claude",
+        "--permission-mode",
+        "auto",
+        "--",
+        prompt,
+      ],
+    },
+    env: {},
+    isolation: "none",
+    respawnFlags: [],
+    seed: {
+      intent: "[redacted uds orchestration prompt]",
+      name,
+    },
+    cols,
+    rows,
+  };
+}
+
 export function findDaemonJobByShort(listResponse, short) {
   if (!Array.isArray(listResponse?.jobs)) return null;
   return listResponse.jobs.find((job) => job?.short === short) || null;
