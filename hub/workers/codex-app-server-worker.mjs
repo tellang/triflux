@@ -160,8 +160,11 @@ export const KIND_MAP = Object.freeze({
   configWarning: "error",
 });
 
+// NOTE: codex 0.135.0 rejects `--skip-git-repo-check` as a global option (exit 2:
+// "unexpected argument"); it lives at `codex exec` subcommand scope, and the
+// `app-server` subcommand does not need it. Empirically verified against
+// codex-cli 0.135.0. Do not re-add it as a global flag here.
 export const DEFAULT_CODEX_APP_SERVER_ARGS = Object.freeze([
-  "--skip-git-repo-check",
   "app-server",
   "--listen",
   "stdio://",
