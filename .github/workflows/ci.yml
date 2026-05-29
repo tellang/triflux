@@ -23,6 +23,14 @@ jobs:
         # npm install fallback. deterministic 손실 trade-off 있으나 CI 미실행 보다 낫다.
         run: npm ci || npm install --no-audit --no-fund
 
+      - name: Biome lint
+        # ci.yml 이 `npm run lint` (biome) 를 안 돌려서 format/arg drift 가 main 에
+        # invisible 하게 누적되고 release prepare 단계에서만 터졌다 (v10.28.0 release
+        # blocker, PR #371). PR 시점에 fast-fail 로 잡는다.
+        # NOTE: `lint` 스크립트는 packages/ 를 제외한다 — packages 미러는 아래
+        # release:check-mirror 가 byte-identical 로 보증하므로 중복 검사 불필요.
+        run: npm run lint
+
       - name: packages/triflux mirror byte-identical
         # packages-mirror.test.mjs 가 transitive 로 같은 검사를 돌지만, drift 시
         # unit test 실행 전에 fast-fail 로 끊어주면 원인 파악이 명확해진다.
