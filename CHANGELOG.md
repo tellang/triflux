@@ -4,6 +4,29 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.28.0] - 2026-05-29
+
+### Added
+
+- **`feat(native-bridge)` (PR #369, commit `ef81c135`)** interactive native worker 를 `claude agents` 패널에 노출한다 — daemon exec dispatch(Option A)로 전환해 daemon 이 pty 를 소유하고 visible row 를 만든다. 신규 `hub/team/daemon-pty-tmux-bridge.mjs` 가 daemon-owned pty(자기 stdin/stdout)를 tmux transport 에 역방향 배선한다(stdin→`send-keys`, `pipe-pane`→stdout, SIGWINCH→`resize-window`). `launchAdoptedInteractiveWorker` 는 roster-only 채택 경로를 폐기하고 공유 `dispatchClaudeDaemonJob`/`teardownClaudeDaemonJob` 헬퍼로 dispatch/teardown 한다.
+
+### Changed
+
+- **`refactor(mcp-gateway)` (PR #362, commit `a6042e22`/`4a2700cd`)** 로컬 MCP gateway 를 SSE 싱글톤에서 stateful Streamable HTTP `/mcp` 로 이관한다 — daemon/registry SSOT 를 보존하면서 SSE reconnect crash 를 제거하고, `codex-mcp-gateway-sync --enable` 이 stale `/sse` URL 을 `/mcp` 로 강제 마이그레이션한다. health-check mirror 도 완성한다.
+- **`chore(routing)` (PR #363, commit `02268ebf`)** Opus 4.8 와 ultracode 를 routing / escalation chain / HUD 전반에 반영한다 — escalation 2단계 head 를 opus-4-8 로 bump 하고 ultracode depth-modifier 와 1M context HUD 를 정합한다.
+- **`refactor(daemon)` (PR #364, commit `629c4c01`/`893ea199`)** 공유 Claude daemon dispatch 헬퍼(`dispatchClaudeDaemonJob`/`teardownClaudeDaemonJob`)를 `hub/team/claude-daemon-control.mjs` 로 추출하고 path/proc owner 를 단일화한다 — 루트 dispatch 2곳(headless / native-bridge swarm)을 onto 해 4번째 dispatch 구현을 막는다. UDS orchestration(PR #366)도 이 공유 control 을 채택한다.
+
+### Fixed
+
+- **`fix(session-stale-cleanup)` (PR #365, commit `67822227`)** POSIX treeKill 이 bare pid 가 아니라 process group 을 reap 하도록 고친다 — orphan 백엔드 프로세스 잔존을 막는다.
+- **`fix(native-bridge)` (PR #369, commit `ddfd4bc6`)** interactive dispatch 가 pid 할당 후 실패(bridge-session resolve / projection write)할 때 daemon job 을 teardown 해 pty/tmux 누수를 막는다.
+- **`fix(uds-orchestration)` (PR #366, commit `0bb5b116`/`d585b500`)** createClaudeUdsEndpoint 가 공유 dispatch/teardown 을 사용하도록 포팅한다 (P2: dispatch ok-fail throw, transcript marker noise 필터) 그리고 `buildClaudePromptDispatchPayload` 를 root/core/triflux/remote 미러에 정합한다.
+- **`fix(packages)` (PR #364, commit `d06def5c`)** `@triflux/core` daemon-control 미러에 누락된 `claude-session-projection` 을 추가한다 — 발행된 `@triflux/core` 소비자의 `ERR_MODULE_NOT_FOUND` 를 막고 mirror checker 에 등록한다.
+
+### Chore
+
+- **`chore(native-bridge)` (PR #368, commit `9953bb33`)** UDS local-dev smoke harness + 단위테스트(hermetic, 6 tests)와 2026-05-28 stale audit 문서를 추적하고, 휘발성 `*-latest-report.json` 을 gitignore 한다.
+
 ## [10.27.0] - 2026-05-28
 
 ### Added
