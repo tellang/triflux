@@ -29,6 +29,10 @@ import {
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const DEFAULT_MAX_FRAME_SIZE = 16 * 1024 * 1024; // 16 MiB
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+// After a graceful close("closing") we wait this long for the peer's close/EOF
+// before force-destroying the socket so a silent peer cannot pin it open.
+const CLOSING_DEADLINE_MS = 2_000;
+const MAX_CONTROL_PAYLOAD = 125; // RFC 6455 §5.5: control frames <=125 bytes
 const CLOSED_MESSAGE = "JsonRpcWsUdsClient closed";
 
 // RFC 6455 opcodes
@@ -110,7 +114,11 @@ export class JsonRpcWsUdsClient {
     this._rxBuf = Buffer.alloc(0);
     /** @type {Buffer[]} accumulated payloads of a fragmented message */
     this._fragmentChunks = [];
+    /** @type {number|null} opcode of the in-progress fragmented message */
     this._fragmentOpcode = null;
+    this._fragmentSize = 0;
+    /** @type {ReturnType<typeof setTimeout>|null} */
+    this._closingTimer = null;
   }
 
   /**
@@ -198,14 +206,22 @@ export class JsonRpcWsUdsClient {
           }
           return;
         }
-        const headers = handshakeBuf.subarray(0, sep).toString("utf8");
+        const rawHeaders = handshakeBuf.subarray(0, sep).toString("utf8");
         const leftover = handshakeBuf.subarray(sep + 4);
 
-        const ok101 = /^HTTP\/1\.\d 101/.test(headers);
-        const acceptOk = new RegExp(
-          `sec-websocket-accept:\\s*${expectedAccept.replace(/[+/=]/g, "\\$&")}`,
-          "i",
-        ).test(headers);
+        const lines = rawHeaders.split("\r\n");
+        const ok101 = /^HTTP\/1\.\d 101/.test(lines[0] || "");
+        const headerMap = new Map();
+        for (let i = 1; i < lines.length; i++) {
+          const idx = lines[i].indexOf(":");
+          if (idx < 0) continue;
+          headerMap.set(
+            lines[i].slice(0, idx).trim().toLowerCase(),
+            lines[i].slice(idx + 1).trim(),
+          );
+        }
+        const acceptOk =
+          headerMap.get("sec-websocket-accept") === expectedAccept;
 
         if (!ok101 || !acceptOk) {
           settled = true;
@@ -350,6 +366,14 @@ export class JsonRpcWsUdsClient {
       try {
         this._socket?.write(encodeClientFrame(OP_CLOSE, Buffer.alloc(0)));
       } catch {}
+      // Arm a deadline so a peer that never replies with close/EOF cannot pin
+      // the socket + pending requests open forever.
+      this._closingTimer = setTimeout(() => {
+        if (this._state === "closing") this._closeWith("closed");
+      }, CLOSING_DEADLINE_MS);
+      if (typeof this._closingTimer.unref === "function") {
+        this._closingTimer.unref();
+      }
       return;
     }
     this._closeWith("closed");
@@ -424,18 +448,15 @@ export class JsonRpcWsUdsClient {
         return;
       }
 
-      const maskKey = masked ? this._rxBuf.subarray(cursor, cursor + 4) : null;
-      if (masked) cursor += 4;
-      if (this._rxBuf.length < cursor + len) return; // wait for more bytes
-
-      let payload = this._rxBuf.subarray(cursor, cursor + len);
-      if (masked && maskKey) {
-        const out = Buffer.allocUnsafe(len);
-        for (let i = 0; i < len; i++) out[i] = payload[i] ^ maskKey[i % 4];
-        payload = out;
-      } else {
-        payload = Buffer.from(payload); // detach from rxBuf before slicing it off
+      // RFC 6455 §5.1: server -> client frames MUST NOT be masked.
+      if (masked) {
+        this._protocolClose("WebSocket server frame is masked (RFC 6455 §5.1)");
+        return;
       }
+      if (this._rxBuf.length < cursor + len) return; // wait for full payload
+
+      // Detach from rxBuf before we slice it off.
+      const payload = Buffer.from(this._rxBuf.subarray(cursor, cursor + len));
       this._rxBuf = this._rxBuf.subarray(cursor + len);
 
       this._handleFrame(fin, opcode, payload);
@@ -444,15 +465,22 @@ export class JsonRpcWsUdsClient {
   }
 
   _handleFrame(fin, opcode, payload) {
-    switch (opcode) {
-      case OP_PING:
+    // Control frames (>=0x8): must be FIN and <=125 bytes (RFC 6455 §5.5).
+    if (opcode >= 0x8) {
+      if (!fin || payload.length > MAX_CONTROL_PAYLOAD) {
+        this._protocolClose(
+          `Invalid control frame (opcode 0x${opcode.toString(16)}, fin=${fin}, len=${payload.length})`,
+        );
+        return;
+      }
+      if (opcode === OP_PING) {
         try {
           this._socket?.write(encodeClientFrame(OP_PONG, payload));
         } catch {}
         return;
-      case OP_PONG:
-        return;
-      case OP_CLOSE:
+      }
+      if (opcode === OP_PONG) return;
+      if (opcode === OP_CLOSE) {
         if (this._state === "running") {
           const err = new JsonRpcTransportError(
             "WebSocket server sent close frame",
@@ -463,28 +491,66 @@ export class JsonRpcWsUdsClient {
           this._closeWith("closed");
         }
         return;
-      case OP_TEXT:
-      case OP_BINARY:
-        this._fragmentOpcode = opcode;
-        this._fragmentChunks = [payload];
-        break;
-      case OP_CONTINUATION:
-        this._fragmentChunks.push(payload);
-        break;
-      default:
-        this._emitError(
-          new JsonRpcProtocolError(
-            `Unknown WebSocket opcode 0x${opcode.toString(16)}`,
-          ),
-        );
-        return;
+      }
+      this._protocolClose(`Unknown control opcode 0x${opcode.toString(16)}`);
+      return;
     }
 
-    if (!fin) return; // wait for the rest of a fragmented message
-    const full = Buffer.concat(this._fragmentChunks);
-    this._fragmentChunks = [];
-    this._fragmentOpcode = null;
-    this._handleMessage(full.toString("utf8"));
+    // Data frames: text / binary (message start) or continuation.
+    if (opcode === OP_TEXT || opcode === OP_BINARY) {
+      if (this._fragmentOpcode !== null) {
+        this._protocolClose(
+          "New data frame received while a fragmented message is active",
+        );
+        return;
+      }
+      if (opcode === OP_BINARY) {
+        this._protocolClose(
+          "Binary frames are not supported (expected text JSON-RPC)",
+        );
+        return;
+      }
+      if (fin) {
+        this._handleMessage(payload.toString("utf8"));
+        return;
+      }
+      this._fragmentOpcode = opcode;
+      this._fragmentChunks = [payload];
+      this._fragmentSize = payload.length;
+      return;
+    }
+
+    if (opcode === OP_CONTINUATION) {
+      if (this._fragmentOpcode === null) {
+        this._protocolClose(
+          "Continuation frame with no active fragmented message",
+        );
+        return;
+      }
+      this._fragmentSize += payload.length;
+      if (this._fragmentSize > this._maxFrameSize) {
+        this._protocolClose(
+          `Fragmented message ${this._fragmentSize} exceeds max ${this._maxFrameSize}`,
+        );
+        return;
+      }
+      this._fragmentChunks.push(payload);
+      if (!fin) return;
+      const full = Buffer.concat(this._fragmentChunks);
+      this._fragmentChunks = [];
+      this._fragmentOpcode = null;
+      this._fragmentSize = 0;
+      this._handleMessage(full.toString("utf8"));
+      return;
+    }
+
+    this._protocolClose(`Unknown WebSocket opcode 0x${opcode.toString(16)}`);
+  }
+
+  _protocolClose(message) {
+    const err = new JsonRpcProtocolError(message);
+    this._emitError(err);
+    this._closeWith("closed", err);
   }
 
   _handleMessage(line) {
@@ -591,6 +657,10 @@ export class JsonRpcWsUdsClient {
   _closeWith(target, rejectReason = null) {
     if (this._state === "closed") return;
     this._state = target;
+    if (this._closingTimer) {
+      clearTimeout(this._closingTimer);
+      this._closingTimer = null;
+    }
     const rejectErr =
       rejectReason instanceof Error ? rejectReason : new Error(CLOSED_MESSAGE);
     for (const [, pending] of this._pendingRequests) {

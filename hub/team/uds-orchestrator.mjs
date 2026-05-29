@@ -377,6 +377,37 @@ async function waitForSocketFile(sockPath, deadlineMs) {
 }
 
 /**
+ * SIGTERM a child, wait up to graceMs for it to actually exit, then SIGKILL if
+ * still alive. Liveness is `exitCode === null && signalCode === null` — NOT
+ * `child.killed`, which only means "a signal was sent" and would suppress the
+ * SIGKILL fallback when the child ignores SIGTERM.
+ * @param {import('node:child_process').ChildProcess} child
+ * @param {number} [graceMs]
+ */
+async function terminateChild(child, graceMs = 1000) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => {
+    child.once("exit", () => resolve("exited"));
+  });
+  try {
+    child.kill("SIGTERM");
+  } catch {}
+  const outcome = await Promise.race([
+    exited,
+    new Promise((resolve) => setTimeout(() => resolve("timeout"), graceMs)),
+  ]);
+  if (
+    outcome !== "exited" &&
+    child.exitCode === null &&
+    child.signalCode === null
+  ) {
+    try {
+      child.kill("SIGKILL");
+    } catch {}
+  }
+}
+
+/**
  * Experimental Codex endpoint that drives a real `codex app-server` over its
  * WebSocket-over-Unix-Domain-Socket control plane (the symmetric peer of the
  * Claude daemon `control.sock` path). Same `ask(prompt) -> {endpoint,text,done}`
@@ -535,15 +566,21 @@ export function createCodexAppServerUdsEndpoint({
           { threadId, input: [{ type: "text", text: prompt }] },
           timeoutMs,
         );
-        const settled = await Promise.race([
-          completion,
-          new Promise((resolve) =>
-            setTimeout(() => {
-              cleanup();
-              resolve({ status: "timeout" });
-            }, timeoutMs),
-          ),
-        ]);
+        let timeoutHandle = null;
+        const timeoutPromise = new Promise((resolve) => {
+          timeoutHandle = setTimeout(() => {
+            cleanup();
+            resolve({ status: "timeout" });
+          }, timeoutMs);
+        });
+        let settled;
+        try {
+          settled = await Promise.race([completion, timeoutPromise]);
+        } finally {
+          // Clear the timer whichever side won, so a completed turn does not
+          // keep the event loop alive until timeoutMs.
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+        }
 
         return {
           endpoint: "codex-app-server-uds",
@@ -561,15 +598,7 @@ export function createCodexAppServerUdsEndpoint({
         try {
           client?.close();
         } catch {}
-        if (child && child.exitCode === null && !child.killed) {
-          try {
-            child.kill("SIGTERM");
-          } catch {}
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          try {
-            if (child.exitCode === null && !child.killed) child.kill("SIGKILL");
-          } catch {}
-        }
+        if (child) await terminateChild(child);
         if (dir)
           await rm(dir, { recursive: true, force: true }).catch(() => {});
       }

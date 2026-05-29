@@ -36,8 +36,13 @@ async function waitForSocket(sockPath, deadlineMs = 5000) {
   return false;
 }
 
+let fakeServerSeq = 0;
+
 async function startFakeServer(dir, env = {}) {
-  const sockPath = join(dir, "fake-app-server.sock");
+  // Unique socket path per call — tests in a suite share `dir`, and a reused
+  // path races a not-yet-unlinked stale socket from a prior test (EADDRINUSE on
+  // the new fake + stale-socket "ready" false positive => dead-socket timeout).
+  const sockPath = join(dir, `fake-${++fakeServerSeq}.sock`);
   const child = spawn(process.execPath, [FAKE_WS_SERVER, sockPath], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...env },
@@ -109,6 +114,45 @@ describe("JsonRpcWsUdsClient over fake WebSocket-over-UDS", () => {
     } finally {
       client.close();
       assert.equal(client.isOpen(), false);
+      killChild(child);
+    }
+  });
+
+  it("reassembles fragmented server messages (text + continuation)", async () => {
+    const { child, sockPath } = await startFakeServer(dir, {
+      FAKE_FRAGMENT: "1",
+      FAKE_DELTAS: "P,O,N,G",
+    });
+    const client = new JsonRpcWsUdsClient({ socketPath: sockPath });
+    try {
+      await client.connect();
+      // initialize response is itself fragmented by the fake under FAKE_FRAGMENT.
+      const init = await client.request(
+        "initialize",
+        { clientInfo: { name: "test", version: "0" } },
+        3000,
+      );
+      assert.equal(typeof init.codexHome, "string");
+      client.notify("initialized", {});
+      const threadStart = await client.request("thread/start", {}, 3000);
+      const threadId = threadStart?.thread?.id;
+      assert.equal(typeof threadId, "string");
+      const parts = [];
+      const completed = new Promise((res) => {
+        client.onNotification("item/agentMessage/delta", (p) => {
+          if (typeof p?.delta === "string") parts.push(p.delta);
+        });
+        client.onNotification("turn/completed", (p) => res(p?.turn?.status));
+      });
+      await client.request(
+        "turn/start",
+        { threadId, input: [{ type: "text", text: "Say PONG" }] },
+        3000,
+      );
+      assert.equal(await completed, "completed");
+      assert.equal(parts.join(""), "PONG");
+    } finally {
+      client.close();
       killChild(child);
     }
   });

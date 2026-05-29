@@ -27,33 +27,45 @@ if (!sockPath) {
   process.exit(2);
 }
 
-function encodeServerFrame(opcode, payload) {
+// Server -> client frames are unmasked. `fin` controls the FIN bit so the fake
+// can split a message into text + continuation frames (FAKE_FRAGMENT=1).
+function encodeServerFrame(opcode, payload, fin = true) {
   const len = payload.length;
+  const b0 = (fin ? 0x80 : 0) | opcode;
   let header;
   if (len < 126) {
-    header = Buffer.from([0x80 | opcode, len]);
+    header = Buffer.from([b0, len]);
   } else if (len < 65536) {
     header = Buffer.alloc(4);
-    header[0] = 0x80 | opcode;
+    header[0] = b0;
     header[1] = 126;
     header.writeUInt16BE(len, 2);
   } else {
     header = Buffer.alloc(10);
-    header[0] = 0x80 | opcode;
+    header[0] = b0;
     header[1] = 127;
     header.writeBigUInt64BE(BigInt(len), 2);
   }
   return Buffer.concat([header, payload]);
 }
 
+const FRAGMENT = process.env.FAKE_FRAGMENT === "1";
+
 const server = net.createServer((socket) => {
   let upgraded = false;
   let buf = Buffer.alloc(0);
 
   const sendJson = (obj) => {
-    socket.write(
-      encodeServerFrame(0x1, Buffer.from(JSON.stringify(obj), "utf8")),
-    );
+    const full = Buffer.from(JSON.stringify(obj), "utf8");
+    if (FRAGMENT && full.length >= 4) {
+      // Split into a non-final text frame + a final continuation frame to
+      // exercise the client's fragment reassembly.
+      const mid = Math.floor(full.length / 2);
+      socket.write(encodeServerFrame(0x1, full.subarray(0, mid), false));
+      socket.write(encodeServerFrame(0x0, full.subarray(mid), true));
+    } else {
+      socket.write(encodeServerFrame(0x1, full));
+    }
   };
   const respond = (id, result) => sendJson({ id, result });
   const notify = (method, params) => sendJson({ method, params });
@@ -126,6 +138,12 @@ const server = net.createServer((socket) => {
     while (buf.length >= 2) {
       const b1 = buf[1];
       const masked = (b1 & 0x80) !== 0;
+      // Client -> server frames MUST be masked (RFC 6455 §5.1). Reject otherwise
+      // so this fake actively verifies the client masks correctly.
+      if (!masked) {
+        socket.destroy();
+        return;
+      }
       let len = b1 & 0x7f;
       let cursor = 2;
       if (len === 126) {
@@ -137,20 +155,22 @@ const server = net.createServer((socket) => {
         len = Number(buf.readBigUInt64BE(cursor));
         cursor += 8;
       }
-      const maskKey = masked ? buf.subarray(cursor, cursor + 4) : null;
-      if (masked) cursor += 4;
-      if (buf.length < cursor + len) return;
+      if (buf.length < cursor + 4 + len) return;
+      const maskKey = buf.subarray(cursor, cursor + 4);
+      cursor += 4;
       const opcode = buf[0] & 0x0f;
-      let payload = buf.subarray(cursor, cursor + len);
-      if (masked && maskKey) {
-        const out = Buffer.allocUnsafe(len);
-        for (let i = 0; i < len; i++) out[i] = payload[i] ^ maskKey[i % 4];
-        payload = out;
-      }
+      const maskedPayload = buf.subarray(cursor, cursor + len);
+      const payload = Buffer.allocUnsafe(len);
+      for (let i = 0; i < len; i++)
+        payload[i] = maskedPayload[i] ^ maskKey[i % 4];
       buf = Buffer.from(buf.subarray(cursor + len));
       if (opcode === 0x8) {
         socket.end();
         return;
+      }
+      if (opcode === 0x9) {
+        socket.write(encodeServerFrame(0xa, payload)); // ping -> pong
+        continue;
       }
       if (opcode === 0x1 || opcode === 0x0)
         handleMessage(payload.toString("utf8"));
