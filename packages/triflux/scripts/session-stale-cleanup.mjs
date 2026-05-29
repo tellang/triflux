@@ -193,7 +193,9 @@ function treeKill(pid) {
       let pgid = null;
       let cmd = "";
       try {
-        const out = execSync(`ps -o pgid=,command= -p ${pid}`, { timeout: 2000 })
+        const out = execSync(`ps -o pgid=,command= -p ${pid}`, {
+          timeout: 2000,
+        })
           .toString()
           .trim();
         const m = out.match(/^(\d+)\s+(.*)$/);

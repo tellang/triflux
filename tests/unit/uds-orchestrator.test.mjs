@@ -91,7 +91,9 @@ test("peer mode asks Claude UDS and Codex as peers, then synthesizes", async () 
 
 async function withFakeClaudeDaemon(handler, fn) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "uds-orchestrator-"));
-  const paths = deriveClaudeDaemonPaths({ configDir: path.join(dir, "claude") });
+  const paths = deriveClaudeDaemonPaths({
+    configDir: path.join(dir, "claude"),
+  });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   const requests = [];
   const server = net.createServer((socket) => {
@@ -163,7 +165,10 @@ test("createClaudeUdsEndpoint dispatches with shared daemon helper, captures mar
       } else if (request.op === "subscribe") {
         writeJson(socket, { type: "snapshot", streamTail: ["boot\n"] });
         writeJson(socket, { type: "stream", line: "⏺ ANSWER_TEXT\n" });
-        writeJson(socket, { type: "stream", line: `${request.marker || ""}\n` });
+        writeJson(socket, {
+          type: "stream",
+          line: `${request.marker || ""}\n`,
+        });
       } else if (request.op === "kill") {
         writeJson(socket, { ok: true, op: "kill" }, { end: true });
       } else {
@@ -187,9 +192,14 @@ test("createClaudeUdsEndpoint dispatches with shared daemon helper, captures mar
       assert.ok(requests.find((request) => request.op === "dispatch"));
       assert.ok(requests.find((request) => request.op === "subscribe"));
       assert.ok(requests.find((request) => request.op === "kill"));
-      assert.equal(requests.find((request) => request.op === "dispatch").d.short, "fixed123");
+      assert.equal(
+        requests.find((request) => request.op === "dispatch").d.short,
+        "fixed123",
+      );
       assert.match(
-        requests.find((request) => request.op === "dispatch").d.launch.args.join(" "),
+        requests
+          .find((request) => request.op === "dispatch")
+          .d.launch.args.join(" "),
         /DONE_MARKER/,
       );
     },
@@ -214,7 +224,10 @@ test("createClaudeUdsEndpoint throws before subscribe when daemon dispatch is no
         sessionIdFactory: () => "fail1234-session",
       });
 
-      await assert.rejects(() => endpoint.ask("say answer"), /dispatch failed/u);
+      await assert.rejects(
+        () => endpoint.ask("say answer"),
+        /dispatch failed/u,
+      );
       assert.deepEqual(
         requests.map((request) => request.op),
         ["dispatch"],
@@ -229,7 +242,12 @@ test("createClaudeUdsEndpoint ignores echoed marker instructions before completi
       if (request.op === "dispatch") {
         writeJson(
           socket,
-          { ok: true, op: "dispatch", short: request.d.short, pid: process.pid },
+          {
+            ok: true,
+            op: "dispatch",
+            short: request.d.short,
+            pid: process.pid,
+          },
           { end: true },
         );
       } else if (request.op === "list") {

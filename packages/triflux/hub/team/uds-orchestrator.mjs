@@ -243,9 +243,7 @@ export function extractClaudeUdsText(text, marker) {
   if (assistantIndex >= 0) {
     const useful = lines
       .slice(assistantIndex)
-      .map((line, index) =>
-        index === 0 ? line.replace(/^\s*⏺\s*/, "") : line,
-      )
+      .map((line, index) => (index === 0 ? line.replace(/^\s*⏺\s*/, "") : line))
       .filter((line) => !isClaudeUdsNoiseLine(line));
     return useful.join("\n").trim();
   }
