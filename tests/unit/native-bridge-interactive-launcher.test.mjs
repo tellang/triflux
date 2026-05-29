@@ -135,3 +135,34 @@ test("launchAdoptedInteractiveWorker dispatches a daemon exec job that runs the 
     },
   ]);
 });
+
+test("launchAdoptedInteractiveWorker tears down the daemon job when dispatch fails after assigning a pid", async () => {
+  const { calls, deps, paths } = createDispatchFakes();
+  deps.dispatchClaudeDaemonJob = async (options) => {
+    calls.dispatch.push(options);
+    throw new Error("bridge session resolution timed out");
+  };
+
+  await assert.rejects(
+    launchAdoptedInteractiveWorker({
+      sessionName: "tfx-session",
+      cli: "codex",
+      role: "executor",
+      configDir: "/tmp/claude",
+      _deps: deps,
+    }),
+    /bridge session resolution timed out/,
+  );
+
+  // The failed launch must not leak a running daemon pty/tmux job: teardown is
+  // called with the short + payload sessionId known before dispatch threw.
+  assert.equal(calls.teardown.length, 1);
+  assert.equal(calls.teardown[0].controlSock, paths.controlSock);
+  assert.equal(calls.teardown[0].paths, paths);
+  assert.match(calls.teardown[0].short, /^[a-f0-9]{8}$/);
+  assert.equal(
+    calls.teardown[0].sessionId,
+    `${calls.teardown[0].short}-session`,
+  );
+  assert.equal(calls.rosterWrites.length, 0);
+});

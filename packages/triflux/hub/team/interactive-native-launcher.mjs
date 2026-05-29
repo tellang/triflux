@@ -60,15 +60,29 @@ export async function launchAdoptedInteractiveWorker({
     cols,
     rows,
   });
-  const dispatched = await dispatchJob({
-    paths,
-    controlSock: paths.controlSock,
-    payload,
-    agent: cli,
-    name: displayName,
-    cwd: resolvedCwd,
-    dispatchTimeoutMs: 5000,
-  });
+  let dispatched;
+  try {
+    dispatched = await dispatchJob({
+      paths,
+      controlSock: paths.controlSock,
+      payload,
+      agent: cli,
+      name: displayName,
+      cwd: resolvedCwd,
+      dispatchTimeoutMs: 5000,
+    });
+  } catch (error) {
+    // dispatch may have started a daemon job (pid assigned) before a later
+    // step (bridge-session resolve / projection write) threw. Tear down by
+    // short + sessionId so a failed launch never leaks a running pty/tmux job.
+    await teardownJob({
+      controlSock: paths.controlSock,
+      paths,
+      short,
+      sessionId: payload.sessionId,
+    }).catch(() => {});
+    throw error;
+  }
 
   let closed = false;
   let closePromise = null;
