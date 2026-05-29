@@ -45,6 +45,10 @@ const CORE_FILE_MIRRORS = [
     source: "hub/team/claude-daemon-control.mjs",
     target: "packages/core/hub/team/claude-daemon-control.mjs",
   },
+  {
+    source: "hub/team/claude-session-projection.mjs",
+    target: "packages/core/hub/team/claude-session-projection.mjs",
+  },
 ];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 // Per-top relative paths to skip. Mirror policy excludes these via
