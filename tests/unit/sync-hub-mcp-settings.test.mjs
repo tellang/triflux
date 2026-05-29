@@ -19,7 +19,7 @@ import {
 } from "../../scripts/sync-hub-mcp-settings.mjs";
 
 const HUB_URL = "http://127.0.0.1:27888/mcp";
-const BRAVE_GATEWAY_URL = "http://127.0.0.1:8101/sse";
+const BRAVE_GATEWAY_URL = "http://127.0.0.1:8101/mcp";
 
 function createLogger() {
   return {
@@ -266,7 +266,7 @@ describe("sync-hub-mcp-settings", () => {
     });
   });
 
-  it("case 9: registry gateway-sse 서버를 Gemini와 Antigravity 양식으로 동기화한다", async () => {
+  it("case 9: registry gateway-http 서버를 Gemini와 Antigravity 양식으로 동기화한다", async () => {
     const geminiPath = settingsPath(".gemini", "settings.json");
     const antigravityPath = settingsPath(
       ".gemini",
@@ -305,7 +305,7 @@ describe("sync-hub-mcp-settings", () => {
     assert.deepEqual(
       JSON.parse(readFileSync(geminiPath, "utf8")).mcpServers["brave-search"],
       {
-        type: "sse",
+        type: "http",
         url: BRAVE_GATEWAY_URL,
       },
     );
@@ -314,7 +314,8 @@ describe("sync-hub-mcp-settings", () => {
         "brave-search"
       ],
       {
-        serverUrl: BRAVE_GATEWAY_URL,
+        type: "http",
+        url: BRAVE_GATEWAY_URL,
       },
     );
   });
@@ -549,7 +550,7 @@ describe("syncCodexHubUrl", () => {
     }
   });
 
-  it("case 8: registry gateway-sse 서버를 Codex url/transport 양식으로 동기화한다", async () => {
+  it("case 8: registry gateway-http 서버를 Codex url 양식으로 동기화한다", async () => {
     const configPath = codexPath(".codex", "config.toml");
     writeRaw(
       configPath,
@@ -571,8 +572,8 @@ describe("syncCodexHubUrl", () => {
     assert.deepEqual(result.updated, [configPath]);
     const codexToml = readFileSync(configPath, "utf8");
     assert.match(codexToml, /\[mcp_servers\.brave-search\]/);
-    assert.match(codexToml, /url = "http:\/\/127\.0\.0\.1:8101\/sse"/);
-    assert.match(codexToml, /transport = "sse"/);
+    assert.match(codexToml, /url = "http:\/\/127\.0\.0\.1:8101\/mcp"/);
+    assert.doesNotMatch(codexToml, /transport = "sse"/);
     assert.doesNotMatch(codexToml, /command = "npx"/);
   });
 });

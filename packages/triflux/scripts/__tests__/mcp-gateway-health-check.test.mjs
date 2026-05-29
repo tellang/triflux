@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   checkMcpGatewayHealth,
+  checkMcpGatewayHealthLive,
   summarizeMcpGatewayHealth,
 } from "../lib/mcp-gateway-health-check.mjs";
 
@@ -204,5 +205,57 @@ describe("mcp-gateway-health-check", () => {
     );
     assert.equal(summary.level, "ok");
     assert.match(summary.message, /healthy/);
+  });
+
+  it("live probe: START 로그가 있어도 port 가 닫혀 있으면 stale 로 경고한다", async () => {
+    const result = await checkMcpGatewayHealthLive({
+      fs: makeFs({ logBody: HEALTHY_LOG }),
+      logPath: "/fake/log",
+      probePort: async (port) => port === 8100,
+    });
+
+    assert.deepEqual(result.live, [
+      {
+        server: "brave-search",
+        port: 8101,
+        preExisting: false,
+        listening: false,
+      },
+      {
+        server: "context7",
+        port: 8100,
+        preExisting: true,
+        listening: true,
+      },
+      {
+        server: "serena",
+        port: 8105,
+        preExisting: false,
+        listening: false,
+      },
+    ]);
+    assert.deepEqual(
+      result.findings.filter((finding) => finding.reason === "port-down"),
+      [
+        {
+          server: "brave-search",
+          reason: "port-down",
+          detail: "expected listener on :8101",
+          port: 8101,
+        },
+        {
+          server: "serena",
+          reason: "port-down",
+          detail: "expected listener on :8105",
+          port: 8105,
+        },
+      ],
+    );
+
+    const summary = summarizeMcpGatewayHealth(result);
+    assert.equal(summary.level, "warn");
+    assert.match(summary.message, /brave-search \(:8101\)/);
+    assert.match(summary.message, /serena \(:8105\)/);
+    assert.match(summary.fix, /mcp-gateway-start\.mjs/);
   });
 });

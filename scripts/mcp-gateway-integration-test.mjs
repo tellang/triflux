@@ -178,43 +178,49 @@ async function main() {
     );
   }
 
-  // STEP 3: Switch Claude Code config to SSE
-  console.log("\n[STEP 3] Switching Claude Code config to SSE mode...");
+  // STEP 3: Switch Claude Code config to Streamable HTTP
+  console.log(
+    "\n[STEP 3] Switching Claude Code config to Streamable HTTP mode...",
+  );
   try {
     runScript(CONFIG_SCRIPT, "--enable");
-    pass("Config switch to SSE (--enable)");
+    pass("Config switch to Streamable HTTP (--enable)");
   } catch (err) {
-    fail("Config switch to SSE", err.message);
+    fail("Config switch to Streamable HTTP", err.message);
   }
 
-  // STEP 4: Verify SSE endpoints respond on each active port
-  console.log("\n[STEP 4] Verifying SSE endpoints (/healthz)...");
-  const sseResults = await Promise.allSettled(
+  // STEP 4: Verify Streamable HTTP gateways respond on each active port
+  console.log("\n[STEP 4] Verifying Streamable HTTP gateways (/healthz)...");
+  const httpResults = await Promise.allSettled(
     SERVERS.map(async (srv) => ({
       ...srv,
       alive: await checkHealth(srv.port),
     })),
   );
 
-  let sseOk = 0;
-  for (const r of sseResults) {
+  let httpOk = 0;
+  for (const r of httpResults) {
     if (r.status !== "fulfilled") continue;
     const { name, port, alive } = r.value;
     if (alive) {
       console.log(`  [ok]   ${name.padEnd(16)} :${port}`);
-      sseOk++;
+      httpOk++;
     } else {
       console.log(`  [skip] ${name.padEnd(16)} :${port}  (not running)`);
     }
   }
 
-  if (sseOk === 0 && healthOk > 0) {
-    fail("SSE endpoint verification — servers went down after config switch");
-  } else if (sseOk > 0) {
-    pass(`SSE endpoint verification — ${sseOk} endpoint(s) healthy`);
+  if (httpOk === 0 && healthOk > 0) {
+    fail(
+      "Streamable HTTP gateway verification — servers went down after config switch",
+    );
+  } else if (httpOk > 0) {
+    pass(
+      `Streamable HTTP gateway verification — ${httpOk} endpoint(s) healthy`,
+    );
   } else {
     pass(
-      "SSE endpoint verification — no servers running (all skipped due to missing env)",
+      "Streamable HTTP gateway verification — no servers running (all skipped due to missing env)",
     );
   }
 

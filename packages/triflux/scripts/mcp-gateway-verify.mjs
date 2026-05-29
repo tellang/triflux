@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// mcp-gateway-verify.mjs — supergateway SSE 엔드포인트 헬스체크
+// mcp-gateway-verify.mjs — supergateway Streamable HTTP 엔드포인트 헬스체크
 
 import { readManifest } from "./lib/mcp-manifest.mjs";
 
