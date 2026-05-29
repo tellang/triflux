@@ -42,6 +42,8 @@ function usage() {
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
     "  tfx-live peer [--cli-a codex] [--cli-b claude] [--session-a peerA] [--session-b peerB] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--bridge ABS] [--remote HOST] [--cwd DIR] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
+    "  tfx-live orchestrate --task TEXT [--mode peer|codex-led|claude-led] [--codex-transport exec|app-server-uds] [--cwd DIR] [--timeout 120]",
+    "    Runs the Claude(UDS)+Codex orchestration engine. --codex-transport app-server-uds drives a real `codex app-server` over WebSocket-over-UDS (experimental); default exec keeps the codex stdio one-shot path.",
   ].join("\n");
 }
 
@@ -1690,6 +1692,47 @@ async function peer(flags) {
   printJson(output);
 }
 
+const ORCHESTRATION_MODES = ["peer", "codex-led", "claude-led"];
+const CODEX_ORCH_TRANSPORTS = ["exec", "app-server-uds"];
+
+async function orchestrate(flags) {
+  const mode = flags.mode ?? "peer";
+  if (!ORCHESTRATION_MODES.includes(mode)) {
+    throw new Error(`--mode must be one of: ${ORCHESTRATION_MODES.join(", ")}`);
+  }
+  const task = requireFlag(flags, "task");
+  const codexTransport = flags["codex-transport"] ?? "exec";
+  if (!CODEX_ORCH_TRANSPORTS.includes(codexTransport)) {
+    throw new Error(
+      `--codex-transport must be one of: ${CODEX_ORCH_TRANSPORTS.join(", ")}`,
+    );
+  }
+  const cwd = flags.cwd ?? process.cwd();
+  const timeoutMs = secondsFlag(flags, "timeout", 120_000);
+
+  // Lazy import keeps the orchestration engine (and its hub/team deps) off the
+  // hot path for every other thin-CLI verb; only `orchestrate` pays the cost.
+  const orchestratorUrl = new URL(
+    "../hub/team/uds-orchestrator.mjs",
+    import.meta.url,
+  ).href;
+  const {
+    runUdsOrchestration,
+    createClaudeUdsEndpoint,
+    createCodexExecEndpoint,
+    createCodexAppServerUdsEndpoint,
+  } = await import(orchestratorUrl);
+
+  const claude = createClaudeUdsEndpoint({ cwd, timeoutMs });
+  const codex =
+    codexTransport === "app-server-uds"
+      ? createCodexAppServerUdsEndpoint({ cwd, timeoutMs })
+      : createCodexExecEndpoint({ workdir: cwd, timeout: timeoutMs });
+
+  const result = await runUdsOrchestration({ mode, task, claude, codex });
+  printJson({ codexTransport, ...result });
+}
+
 function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -1718,6 +1761,8 @@ async function main() {
     await goalDriven(flags);
   } else if (command === "peer") {
     await peer(flags);
+  } else if (command === "orchestrate") {
+    await orchestrate(flags);
   } else {
     throw new Error(`Unknown subcommand: ${command}\n${usage()}`);
   }

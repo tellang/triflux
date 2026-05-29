@@ -76,6 +76,25 @@ tfx-live peer --cli-a codex --cli-b claude \
 
 In `peer`, every hop sends the previous response as the next prompt to the opposite agent; the final JSON is only the transcript.
 
+## Orchestrate (Claude UDS + Codex)
+
+`orchestrate` exposes the `runUdsOrchestration` engine as a formal verb: Claude is driven over the daemon control socket (UDS) and Codex over a selectable transport, in one of three shapes.
+
+```bash
+# default: Codex over the stdio one-shot path (codex exec)
+tfx-live orchestrate --task "이 변경의 위험을 한 줄로" --mode peer
+
+# experimental: Codex over a real `codex app-server` WebSocket-over-UDS daemon
+tfx-live orchestrate --task "이 변경의 위험을 한 줄로" \
+  --mode codex-led --codex-transport app-server-uds --timeout 120
+```
+
+- `--mode` = `peer` (default) | `codex-led` | `claude-led`.
+- `--codex-transport` = `exec` (default, `codex exec` stdio) | `app-server-uds` (experimental).
+  - `app-server-uds` spawns a private `codex app-server --listen unix://<tmp>`, attaches over WebSocket-over-UDS (RFC 6455, masked client frames), runs `initialize`→`thread/start`→`turn/start`, and resolves on `turn/completed`. Transport proven against codex-cli 0.135.0 (see `experiments/native-bridge-feasibility/codex-app-server-uds-smoke.mjs`).
+  - It is NOT the default — the existing `codex exec` path is unchanged.
+- Requires a live Claude daemon (same as the UDS `ask` path) for the Claude side.
+
 ## Useful diagnostics
 
 ```bash

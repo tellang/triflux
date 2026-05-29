@@ -1,7 +1,12 @@
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import { join as pathJoin } from "node:path";
 
 import { execute as defaultExecuteCodex } from "../codex-adapter.mjs";
+import { JsonRpcWsUdsClient } from "../workers/lib/jsonrpc-ws-uds.mjs";
 import {
   buildClaudePromptDispatchPayload,
   deriveClaudeDaemonPaths,
@@ -10,6 +15,8 @@ import {
 } from "./claude-daemon-control.mjs";
 
 const DEFAULT_TIMEOUT_MS = 90_000;
+const DEFAULT_CODEX_APP_SERVER_UDS_TIMEOUT_MS = 120_000;
+const DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS = 12_000;
 
 function requireEndpoint(endpoint, name) {
   if (!endpoint || typeof endpoint.ask !== "function") {
@@ -343,6 +350,258 @@ export function createCodexExecEndpoint({
         ).trim(),
         done: true,
       };
+    },
+  };
+}
+
+function extractCodexThreadId(result) {
+  if (!result || typeof result !== "object") return null;
+  if (typeof result.threadId === "string") return result.threadId;
+  if (result.thread && typeof result.thread.id === "string") {
+    return result.thread.id;
+  }
+  return null;
+}
+
+async function waitForSocketFile(sockPath, deadlineMs) {
+  const start = Date.now();
+  while (Date.now() - start < deadlineMs) {
+    try {
+      if ((await stat(sockPath)).isSocket()) return true;
+    } catch {
+      /* not bound yet */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return false;
+}
+
+/**
+ * SIGTERM a child, wait up to graceMs for it to actually exit, then SIGKILL if
+ * still alive. Liveness is `exitCode === null && signalCode === null` — NOT
+ * `child.killed`, which only means "a signal was sent" and would suppress the
+ * SIGKILL fallback when the child ignores SIGTERM.
+ * @param {import('node:child_process').ChildProcess} child
+ * @param {number} [graceMs]
+ */
+async function terminateChild(child, graceMs = 1000) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise((resolve) => {
+    child.once("exit", () => resolve("exited"));
+  });
+  try {
+    child.kill("SIGTERM");
+  } catch {}
+  const outcome = await Promise.race([
+    exited,
+    new Promise((resolve) => setTimeout(() => resolve("timeout"), graceMs)),
+  ]);
+  if (
+    outcome !== "exited" &&
+    child.exitCode === null &&
+    child.signalCode === null
+  ) {
+    try {
+      child.kill("SIGKILL");
+    } catch {}
+  }
+}
+
+/**
+ * Experimental Codex endpoint that drives a real `codex app-server` over its
+ * WebSocket-over-Unix-Domain-Socket control plane (the symmetric peer of the
+ * Claude daemon `control.sock` path). Same `ask(prompt) -> {endpoint,text,done}`
+ * contract as `createCodexExecEndpoint`, so it is a drop-in for
+ * `runUdsOrchestration`'s `codex` slot — but it is NOT the default.
+ *
+ * Two modes:
+ *   - spawnServer (default): mkdtemp a private socket, spawn
+ *     `codex app-server --listen unix://PATH`, attach, run one turn, tear down.
+ *   - attach (socketPath + spawnServer=false): connect to an already-running
+ *     daemon socket (e.g. $CODEX_HOME/app-server-control/app-server-control.sock).
+ *
+ * Wire transport proven against codex-cli 0.135.0 — see
+ * experiments/native-bridge-feasibility/codex-app-server-uds-smoke.mjs.
+ *
+ * @param {object} [options]
+ * @param {string|null} [options.socketPath] Existing daemon socket to attach to.
+ * @param {boolean} [options.spawnServer] Spawn a private app-server (default true).
+ * @param {string} [options.codexBin]
+ * @param {string} [options.cwd]
+ * @param {string} [options.model]
+ * @param {number} [options.timeoutMs] Turn timeout.
+ * @param {number} [options.bootstrapTimeoutMs] Connect + handshake timeout.
+ * @param {(opts: object) => JsonRpcWsUdsClient} [options.clientFactory]
+ * @param {(command: string, args: string[], options: object) => import('node:child_process').ChildProcess} [options.spawnFn]
+ */
+export function createCodexAppServerUdsEndpoint({
+  socketPath = null,
+  spawnServer = true,
+  codexBin = process.env.CODEX_BIN || "codex",
+  cwd = process.cwd(),
+  model,
+  timeoutMs = DEFAULT_CODEX_APP_SERVER_UDS_TIMEOUT_MS,
+  bootstrapTimeoutMs = DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
+  clientFactory = (opts) => new JsonRpcWsUdsClient(opts),
+  spawnFn = spawn,
+} = {}) {
+  return {
+    name: "codex-app-server-uds",
+    async ask(prompt, _meta = {}) {
+      if (typeof prompt !== "string" || !prompt.trim()) {
+        throw new Error(
+          "codex-app-server-uds endpoint requires a non-empty prompt",
+        );
+      }
+
+      let dir = null;
+      let child = null;
+      let client = null;
+      let resolvedSock = socketPath;
+
+      try {
+        if (spawnServer && !socketPath) {
+          dir = await mkdtemp(pathJoin(tmpdir(), "tfx-codex-appserver-uds-"));
+          resolvedSock = pathJoin(dir, "app-server.sock");
+          child = spawnFn(
+            codexBin,
+            ["app-server", "--listen", `unix://${resolvedSock}`],
+            { stdio: ["ignore", "pipe", "pipe"], cwd, env: process.env },
+          );
+          let stderr = "";
+          child.stderr?.on("data", (chunk) => {
+            stderr += String(chunk);
+            if (stderr.length > 8000) stderr = stderr.slice(-8000);
+          });
+          const earlyExit = new Promise((resolve) => {
+            child.once("error", (err) =>
+              resolve(`spawn error: ${err.message}`),
+            );
+            child.once("exit", (code, sig) =>
+              resolve(`exited early code=${code} sig=${sig || ""}`),
+            );
+          });
+          const ready = await Promise.race([
+            waitForSocketFile(resolvedSock, bootstrapTimeoutMs).then((ok) =>
+              ok ? "ready" : "no-socket",
+            ),
+            earlyExit,
+          ]);
+          if (ready !== "ready") {
+            throw new Error(
+              `codex app-server did not bind socket: ${ready}${
+                stderr ? ` — ${stderr.slice(-400)}` : ""
+              }`,
+            );
+          }
+        }
+        if (!resolvedSock) {
+          throw new Error(
+            "codex-app-server-uds endpoint needs socketPath or spawnServer=true",
+          );
+        }
+
+        client = clientFactory({
+          socketPath: resolvedSock,
+          connectTimeoutMs: bootstrapTimeoutMs,
+        });
+        await client.connect();
+        await client.request(
+          "initialize",
+          { clientInfo: { name: "triflux-tfx-live", version: "1.0.0" } },
+          bootstrapTimeoutMs,
+        );
+        client.notify("initialized", {});
+
+        const threadParams = {
+          sandbox: "read-only",
+          approvalPolicy: "never",
+          ephemeral: true,
+        };
+        if (typeof model === "string" && model) threadParams.model = model;
+        if (cwd) threadParams.cwd = cwd;
+        const threadStart = await client.request(
+          "thread/start",
+          threadParams,
+          bootstrapTimeoutMs,
+        );
+        const threadId = extractCodexThreadId(threadStart);
+        if (!threadId) {
+          throw new Error(
+            "codex app-server thread/start returned no thread id",
+          );
+        }
+
+        const parts = [];
+        let offDelta = () => {};
+        let offError = () => {};
+        let offDone = () => {};
+        const cleanup = () => {
+          offDelta();
+          offError();
+          offDone();
+        };
+        const completion = new Promise((resolve) => {
+          offDelta = client.onNotification(
+            "item/agentMessage/delta",
+            (params) => {
+              if (typeof params?.delta === "string") parts.push(params.delta);
+            },
+          );
+          offError = client.onNotification("error", (params) => {
+            cleanup();
+            resolve({
+              status: "failed",
+              message: params?.message || "codex app-server error",
+            });
+          });
+          offDone = client.onNotification("turn/completed", (params) => {
+            cleanup();
+            resolve({ status: params?.turn?.status || "unknown" });
+          });
+        });
+
+        await client.request(
+          "turn/start",
+          { threadId, input: [{ type: "text", text: prompt }] },
+          timeoutMs,
+        );
+        let timeoutHandle = null;
+        const timeoutPromise = new Promise((resolve) => {
+          timeoutHandle = setTimeout(() => {
+            cleanup();
+            resolve({ status: "timeout" });
+          }, timeoutMs);
+        });
+        let settled;
+        try {
+          settled = await Promise.race([completion, timeoutPromise]);
+        } finally {
+          // Clear the timer whichever side won, so a completed turn does not
+          // keep the event loop alive until timeoutMs.
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+        }
+
+        return {
+          endpoint: "codex-app-server-uds",
+          text: parts.join("").trim(),
+          done: settled.status === "completed",
+          meta: {
+            threadId,
+            status: settled.status,
+            socketPath: resolvedSock,
+            spawned: Boolean(child),
+            ...(settled.message ? { error: settled.message } : {}),
+          },
+        };
+      } finally {
+        try {
+          client?.close();
+        } catch {}
+        if (child) await terminateChild(child);
+        if (dir)
+          await rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
     },
   };
 }
