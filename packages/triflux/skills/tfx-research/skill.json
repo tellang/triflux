@@ -1,6 +1,6 @@
 {
   "name": "tfx-research",
-  "description": "웹 검색/리서치가 필요할 때 사용한다. '검색해줘', '찾아봐', '최신 정보', '이거 뭐야', '심층 조사', '자세히 알아봐', 'deep research', '전면 리서치', '자율 리서치', '조사해', 'research and plan' 같은 요청에 반드시 사용. 추가로 'X 있나?', 'X 쓸 수 있나?', 'X 풀려있어?', 'X 어떻게 쓰는지', 'X 가능한가?', '방법 있나?', 'X 살아있나?' 같은 도구·기능 존재/사용법/상태 의문문에도 사용. 기본값은 3-CLI 멀티소스(Exa+Brave+Tavily) 합의 딥 리서치. 빠른 Antigravity Google Search 는 --quick. 자율 쿼리생성+보고서 모드는 --auto.",
+  "description": "웹 검색/리서치가 필요할 때 사용한다. '검색해줘', '찾아봐', '최신 정보', '이거 뭐야', '심층 조사', '자세히 알아봐', 'deep research', '전면 리서치', '자율 리서치', '조사해', 'research and plan' 같은 요청에 반드시 사용. 추가로 'X 있나?', 'X 쓸 수 있나?', 'X 풀려있어?', 'X 어떻게 쓰는지', 'X 가능한가?', '방법 있나?', 'X 살아있나?' 같은 도구·기능 존재/사용법/상태 의문문에도 사용. 기본값은 2-CLI 멀티소스(Exa+Brave) 합의 딥 리서치. 빠른 Antigravity Google Search 는 --quick. 자율 쿼리생성+보고서 모드는 --auto.",
   "triggers": [
     "tfx-research",
     "리서치",
