@@ -61,6 +61,8 @@ const CORE_DIRS = [
   "hub/lib",
   "hub/middleware",
   "hub/team/retry-state-machine.mjs",
+  "hub/team/claude-daemon-control.mjs",
+  "hub/team/claude-session-projection.mjs",
   "hub/workers/worker-utils.mjs", // shared utility
   "mesh",
 ];
