@@ -329,4 +329,83 @@ describe("pipeline-stop hook", { skip: SQLITE_SKIP }, () => {
     assert.equal(afterCap.decision, "block");
     assert.match(afterCap.reason, /project-active-team/);
   });
+
+  it("window 없는 raw-token payload는 기본 1M 윈도우로 false-block을 피한다", () => {
+    // 170K tokens with no explicit context window. Under the old implicit 200K
+    // assumption this is 85% and false-blocks; with the 1M default it is 17%
+    // and the stop is silently allowed.
+    const result = runHook({
+      cwd: projectRoot,
+      homeDir,
+      pluginRoot,
+      input: {
+        hook_event_name: "Stop",
+        session_id: "windowless-1m-default-allows",
+        stop_reason: "end_turn",
+        context_window: {
+          current_usage: { input_tokens: 170_000 },
+        },
+      },
+      env: { TRIFLUX_CONTEXT_GUARD_STATE_DIR: guardStateDir },
+    });
+
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout.trim(), "");
+    assert.equal(result.stderr.trim(), "");
+  });
+
+  it("TFX_CONTEXT_DEFAULT_MAX_TOKENS를 좁히면 동일 raw-token payload가 다시 block한다", () => {
+    // Same windowless 170K payload, but a 200K fallback window makes it 85%,
+    // so the guard blocks — proving the fallback denominator is the only knob.
+    const output = parseStdout(
+      runHook({
+        cwd: projectRoot,
+        homeDir,
+        pluginRoot,
+        input: {
+          hook_event_name: "Stop",
+          session_id: "windowless-200k-blocks",
+          stop_reason: "end_turn",
+          context_window: {
+            current_usage: { input_tokens: 170_000 },
+          },
+        },
+        env: {
+          TRIFLUX_CONTEXT_GUARD_STATE_DIR: guardStateDir,
+          TFX_CONTEXT_DEFAULT_MAX_TOKENS: "200000",
+        },
+      }),
+    );
+
+    assert.equal(output.decision, "block");
+    assert.match(output.reason, /context/i);
+  });
+
+  it("TFX_CONTEXT_DEFAULT_MAX_TOKENS가 음수면 1M 폴백으로 guard를 유지한다", () => {
+    // A malformed (-1) env must not make the fallback denominator negative,
+    // which would drop the token candidate and silently skip the guard. It
+    // must fall back to 1M: 800K raw tokens = 80% and still blocks.
+    const output = parseStdout(
+      runHook({
+        cwd: projectRoot,
+        homeDir,
+        pluginRoot,
+        input: {
+          hook_event_name: "Stop",
+          session_id: "windowless-negative-env-blocks",
+          stop_reason: "end_turn",
+          context_window: {
+            current_usage: { input_tokens: 800_000 },
+          },
+        },
+        env: {
+          TRIFLUX_CONTEXT_GUARD_STATE_DIR: guardStateDir,
+          TFX_CONTEXT_DEFAULT_MAX_TOKENS: "-1",
+        },
+      }),
+    );
+
+    assert.equal(output.decision, "block");
+    assert.match(output.reason, /context/i);
+  });
 });

@@ -201,6 +201,101 @@ describe("hud/context-monitor.mjs", () => {
     rmSync(logsDir, { recursive: true, force: true });
   });
 
+  it("limitTokens 옵션이 없으면 기본 1M 컨텍스트 윈도우를 사용한다", () => {
+    const cachePath = makeTmpPath("context-monitor-cache");
+    const logsDir = makeTmpPath("context-monitor-logs");
+    const monitor = createContextMonitor({
+      cachePath,
+      logsDir,
+      registerExitHooks: false,
+      sessionId: "default-1m-window",
+    });
+
+    const summary = monitor.record({
+      requestBody: '{"method":"tools/call","params":{"name":"read_file"}}',
+      responseBody:
+        '{"result":{"usage":{"input_tokens":150000,"output_tokens":0}}}',
+    });
+
+    // 150K used against a 1M default = 15%, not the 75%+ a 200K default would
+    // report and which would false-block a stop on 1M-context models.
+    assert.equal(summary.limitTokens, 1_000_000);
+    assert.equal(summary.warningLevel, "ok");
+
+    monitor.flush("default-1m");
+    rmSync(cachePath, { force: true });
+    rmSync(logsDir, { recursive: true, force: true });
+  });
+
+  it("TFX_CONTEXT_DEFAULT_MAX_TOKENS로 기본 컨텍스트 윈도우를 좁힐 수 있다", () => {
+    const cachePath = makeTmpPath("context-monitor-cache");
+    const logsDir = makeTmpPath("context-monitor-logs");
+    const previous = process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS;
+    process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS = "300000";
+    try {
+      const monitor = createContextMonitor({
+        cachePath,
+        logsDir,
+        registerExitHooks: false,
+        sessionId: "env-override-window",
+      });
+
+      const summary = monitor.record({
+        requestBody: '{"method":"tools/call","params":{"name":"read_file"}}',
+        responseBody:
+          '{"result":{"usage":{"input_tokens":150000,"output_tokens":0}}}',
+      });
+
+      assert.equal(summary.limitTokens, 300_000);
+
+      monitor.flush("env-override");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS;
+      } else {
+        process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS = previous;
+      }
+      rmSync(cachePath, { force: true });
+      rmSync(logsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("TFX_CONTEXT_DEFAULT_MAX_TOKENS가 음수/비유한값이면 1M 기본값으로 폴백한다", () => {
+    const cachePath = makeTmpPath("context-monitor-cache");
+    const logsDir = makeTmpPath("context-monitor-logs");
+    const previous = process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS;
+    process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS = "-1";
+    try {
+      const monitor = createContextMonitor({
+        cachePath,
+        logsDir,
+        registerExitHooks: false,
+        sessionId: "negative-env-window",
+      });
+
+      const summary = monitor.record({
+        requestBody: '{"method":"tools/call","params":{"name":"read_file"}}',
+        responseBody:
+          '{"result":{"usage":{"input_tokens":150000,"output_tokens":0}}}',
+      });
+
+      // A malformed (-1) env must not poison the limit to -1, which would
+      // report percent 0 / "ok" and silently disable the guard signal.
+      assert.equal(summary.limitTokens, 1_000_000);
+      assert.equal(summary.warningLevel, "ok");
+
+      monitor.flush("negative-env");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS;
+      } else {
+        process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS = previous;
+      }
+      rmSync(cachePath, { force: true });
+      rmSync(logsDir, { recursive: true, force: true });
+    }
+  });
+
   it("임계값 경계값(소수 포함)을 정확히 분류한다", () => {
     assert.equal(classifyContextThreshold(59.9).level, "ok");
     assert.equal(classifyContextThreshold(60.0).level, "info");
