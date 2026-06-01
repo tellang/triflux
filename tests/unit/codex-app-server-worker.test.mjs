@@ -507,7 +507,7 @@ describe("CodexAppServerWorker — AC-12 publish invariants", () => {
 });
 
 describe("CodexAppServerWorker — AC-13 defaults", () => {
-  it("14. default sandbox 'read-only' and args start with --skip-git-repo-check", async () => {
+  it("14. default sandbox 'read-only' and args start with app-server subcommand", async () => {
     const { worker, childRef } = makeWorker();
     const p = worker.execute("x");
     await tick();
@@ -518,8 +518,16 @@ describe("CodexAppServerWorker — AC-13 defaults", () => {
     assert.equal(ts.params.ephemeral, true);
     assert.equal(ts.params.experimentalRawEvents, false);
     assert.equal(ts.params.persistExtendedHistory, false);
-    assert.equal(childRef.args[0], "--skip-git-repo-check");
-    assert.equal(childRef.args[1], "app-server");
+    // codex 0.135.0: no global --skip-git-repo-check; args start with the
+    // app-server subcommand (regression guard for the stale-arg exit-2 bug).
+    assert.equal(childRef.args[0], "app-server");
+    assert.equal(childRef.args[1], "--listen");
+    // Guard against re-adding the flag at ANY position — codex app-server
+    // rejects --skip-git-repo-check whether it leads or trails the argv.
+    assert.ok(
+      !childRef.args.includes("--skip-git-repo-check"),
+      "--skip-git-repo-check must not appear in app-server argv",
+    );
     emitTurnCompleted(FakeClientBase.last, "completed");
     await p;
     await worker.stop();
