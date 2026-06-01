@@ -15,10 +15,10 @@ import {
 const TEST_TIMEOUT_MS = 10 * 60 * 1000;
 const STALE_LOCK = join(ROOT, ".test-lock", "pid.lock");
 
-export function cleanupStaleTestLock() {
-  if (!existsSync(STALE_LOCK)) return;
+export function cleanupStaleTestLock(lockPath = STALE_LOCK) {
+  if (!existsSync(lockPath)) return;
   try {
-    rmSync(STALE_LOCK, { force: true });
+    rmSync(lockPath, { force: true });
     console.log("[prepare] cleaned stale .test-lock/pid.lock");
   } catch (e) {
     console.warn(`[prepare] failed to clean test-lock: ${e.message}`);
@@ -41,7 +41,10 @@ export async function prepareRelease({
   skipTests = false,
   execFileSyncFn,
 } = {}) {
-  cleanupStaleTestLock();
+  // Derive the preflight lock from rootDir so tests that pass a temp rootDir
+  // never delete the live repo-root .test-lock/pid.lock owned by the running
+  // test-lock.mjs wrapper. Production (rootDir = ROOT) is unchanged.
+  cleanupStaleTestLock(join(rootDir, ".test-lock", "pid.lock"));
   const logStep = createStepLogger();
   logStep("version-sync");
   const sync = assertVersionSync({ rootDir });

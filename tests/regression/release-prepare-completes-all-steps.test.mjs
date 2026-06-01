@@ -22,10 +22,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { prepareRelease } from "../../scripts/release/prepare.mjs";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const REAL_LOCK = join(REPO_ROOT, ".test-lock", "pid.lock");
 
 describe("release:prepare regression — step sequence completeness", () => {
   let tmpRoot;
@@ -242,5 +246,43 @@ describe("release:prepare regression — step sequence completeness", () => {
     } finally {
       rmSync(tmpRootNoOmx, { recursive: true, force: true });
     }
+  });
+
+  it("preflight cleanup은 rootDir의 .test-lock만 제거한다 (실제 repo 락 무접촉)", async () => {
+    // 회귀 가드: prepareRelease 의 preflight cleanupStaleTestLock 이 모듈 상수
+    // 대신 rootDir 기준 락을 지워야 한다. 안 그러면 npm test 중 살아있는 repo
+    // 루트 .test-lock/pid.lock (test-lock.mjs 래퍼 소유) 을 삭제해 싱글톤
+    // 가드를 무력화한다.
+    const tmpLockDir = join(tmpRoot, ".test-lock");
+    const tmpLock = join(tmpLockDir, "pid.lock");
+    mkdirSync(tmpLockDir, { recursive: true });
+    writeFileSync(tmpLock, "99999\n");
+
+    // 실제 repo 락은 절대 건드리지 않는다 — 존재 여부만 캡처해 불변 검증.
+    const realBefore = existsSync(REAL_LOCK);
+
+    const { fn } = makeMockExec();
+    const result = await prepareRelease({
+      version: "10.18.0",
+      rootDir: tmpRoot,
+      allowDirty: true,
+      dryRun: false,
+      skipTests: true,
+      execFileSyncFn: fn,
+    });
+
+    assert.equal(result.ok, true);
+    // rootDir 기준 락은 preflight 가 제거한다 (버그면 모듈 상수만 지워 tmpLock 잔존).
+    assert.equal(
+      existsSync(tmpLock),
+      false,
+      "rootDir .test-lock should be cleaned",
+    );
+    // 실제 repo 락은 불변 (버그면 삭제되어 realBefore 와 달라진다).
+    assert.equal(
+      existsSync(REAL_LOCK),
+      realBefore,
+      "real repo lock must be untouched",
+    );
   });
 });
