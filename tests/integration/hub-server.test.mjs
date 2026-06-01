@@ -970,3 +970,67 @@ describe("startHub() localhost-only 모드", () => {
     assert.equal(body.error, "Forbidden: localhost only");
   });
 });
+
+describe("startHub() token-required + 원격 바인드 — raw /synapse/sessions loopback 강제", () => {
+  const REMOTE_SYNAPSE_PORT = TEST_PORT + 300;
+  let hub;
+  let baseUrl;
+
+  before(async () => {
+    process.env.TFX_HUB_TOKEN = TEST_TOKEN;
+    const dbPath = tempDbPath();
+    hub = await startHub({
+      port: REMOTE_SYNAPSE_PORT,
+      dbPath,
+      host: "0.0.0.0",
+      sessionId: `test-${REMOTE_SYNAPSE_PORT}`,
+    });
+    baseUrl = `http://127.0.0.1:${REMOTE_SYNAPSE_PORT}`;
+  });
+
+  after(async () => {
+    if (hub?.stop) {
+      await Promise.race([hub.stop(), new Promise((r) => setTimeout(r, 5000))]);
+    }
+    delete process.env.TFX_HUB_TOKEN;
+  });
+
+  it("loopback + 토큰이면 raw /synapse/sessions 접근 허용 (200)", async () => {
+    const res = await fetch(`${baseUrl}/synapse/sessions`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.ok(Array.isArray(body.sessions));
+  });
+
+  it("원격 주소 + 유효 토큰이어도 raw /synapse/sessions는 403 (loopback 전용)", {
+    skip: !EXTERNAL_IP,
+  }, async () => {
+    const res = await fetch(
+      `http://${EXTERNAL_IP}:${REMOTE_SYNAPSE_PORT}/synapse/sessions`,
+      { headers: { Authorization: `Bearer ${TEST_TOKEN}` } },
+    );
+    assert.equal(res.status, 403);
+    const body = await res.json();
+    assert.equal(body.ok, false);
+    // The per-route loopback gate (not the global localhost gate) must fire.
+    assert.match(body.error, /loopback-only/);
+  });
+
+  it("원격 주소 + 토큰은 redacted /synapse/peers는 여전히 접근 가능 (raw만 차단)", {
+    skip: !EXTERNAL_IP,
+  }, async () => {
+    const res = await fetch(
+      `http://${EXTERNAL_IP}:${REMOTE_SYNAPSE_PORT}/synapse/peers?cwd=${encodeURIComponent("/tmp/remote-peer-probe")}`,
+      { headers: { Authorization: `Bearer ${TEST_TOKEN}` } },
+    );
+    // /synapse/peers is the intended off-loopback surface (redacted); a
+    // token-authorized remote stays allowed — the fix only gates the raw route.
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.ok(Array.isArray(body.peers));
+  });
+});

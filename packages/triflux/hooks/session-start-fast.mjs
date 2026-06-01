@@ -14,6 +14,7 @@ import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  drainPendingSynapse,
   heartbeatSynapseSession,
   registerSynapseSession,
 } from "../hub/team/synapse-http.mjs";
@@ -307,6 +308,15 @@ export async function execute(stdinData, externalHooks = []) {
   // DEFERRED + BACKGROUND: fire-and-forget
   runDeferred(stdinData);
   runBackground(stdinData);
+
+  // hook-orchestrator process.exit(0)s immediately after we return, which would
+  // drop the just-fired Synapse register POST before it flushes to the loopback
+  // socket (Node's exit abandons pending I/O). Drain it with a tight bound: the
+  // register is a fast localhost POST (hub was ensured up in the BLOCKING phase)
+  // and the ceiling caps a hub stall so SessionStart never hangs. The async
+  // git-enrich heartbeat stays best-effort (it may not have fired yet) — losing
+  // it only drops worktree/branch enrichment, not the core registration.
+  await drainPendingSynapse(1000);
 
   const totalDur = performance.now() - totalStart;
   log.info(

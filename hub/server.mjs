@@ -1305,6 +1305,17 @@ export async function startHub({
       // Admin/raw snapshot (loopback-only). Returns raw cwd/pid for local
       // admin/HUD use; the redacted peer surface is GET /synapse/peers.
       if (path === "/synapse/sessions" && req.method === "GET") {
+        // Enforce the loopback boundary independent of token mode: the global
+        // token gate admits any token-bearing remote client, but this raw
+        // snapshot leaks absolute cwd/pid/worktreePath/dirtyFiles for every
+        // session, so it must never be reachable off 127.0.0.1 (LOCKED #3: raw
+        // cwd is admin-only via loopback). Off-loopback peers use /synapse/peers.
+        if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
+          return writeJson(res, 403, {
+            ok: false,
+            error: "Forbidden: /synapse/sessions is loopback-only",
+          });
+        }
         return writeJson(res, 200, {
           ok: true,
           ...synapseRegistry.snapshot(),

@@ -8,6 +8,13 @@ const HUB_DEFAULT_PORT = 27888;
 // packages/core mirror (which cannot carry relative cross-package imports).
 const HUB_TOKEN_FILE = join(homedir(), ".claude", ".tfx-hub-token");
 
+// In-flight fire-and-forget POSTs. A short-lived caller (the SessionStart hook,
+// which process.exit(0)s immediately after firing register) must be able to
+// flush these before the process dies: Node's process.exit() abandons pending
+// socket I/O, so an un-awaited loopback POST is created but never written.
+// Callers on an exit budget drain this set via drainPendingSynapse() first.
+const inFlightSynapse = new Set();
+
 function normalizeToken(raw) {
   if (raw == null) return null;
   const token = String(raw).trim();
@@ -96,15 +103,34 @@ export function fireAndForgetSynapse(path, payload, opts = {}) {
       timer = setTimeout(() => controller.abort(), timeoutMs);
       if (typeof timer.unref === "function") timer.unref();
     }
-    Promise.resolve(fetchImpl(url, init))
+    const tracked = Promise.resolve(fetchImpl(url, init))
       .catch(() => {})
       .finally(() => {
         if (timer) clearTimeout(timer);
+        inFlightSynapse.delete(tracked);
       });
+    inFlightSynapse.add(tracked);
     return true;
   } catch {
     return false;
   }
+}
+
+// Await any in-flight fire-and-forget Synapse POSTs, bounded by timeoutMs so a
+// stalled hub can never hang the caller. The SessionStart hook calls this right
+// before process.exit(0) so the register POST actually flushes to the socket.
+export function drainPendingSynapse(timeoutMs = 1000) {
+  if (inFlightSynapse.size === 0) return Promise.resolve();
+  const settled = Promise.allSettled([...inFlightSynapse]);
+  const ms = Number(timeoutMs);
+  if (!Number.isFinite(ms) || ms <= 0) return settled;
+  return Promise.race([
+    settled,
+    new Promise((resolve) => {
+      const t = setTimeout(resolve, ms);
+      if (typeof t.unref === "function") t.unref();
+    }),
+  ]);
 }
 
 export function registerSynapseSession(meta, opts = {}) {
