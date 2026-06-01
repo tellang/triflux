@@ -307,7 +307,14 @@ export function createSynapseRegistry(opts = {}) {
       return { ok: false, sessionId, reason: "invalid_id" };
     }
 
-    if (sessions.has(sessionId)) {
+    // A live row (active/idle) means a concurrent session already holds this id
+    // — reject (LOCKED #5). A stale/expired row is a dead remnant of the SAME
+    // session resuming: Claude Code re-fires SessionStart with the same
+    // session_id on resume/clear/compact, so fall through and re-register
+    // (revive) it. Otherwise the resumed-but-live session stays stale forever
+    // and vanishes from peer-discovery AND git-preflight's dirty-file guard.
+    const existing = sessions.get(sessionId);
+    if (existing && isLiveStatus(existing.status)) {
       console.warn(
         "[synapse-registry] duplicate registration rejected:",
         sessionId,

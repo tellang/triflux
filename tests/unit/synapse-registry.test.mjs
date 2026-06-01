@@ -377,6 +377,60 @@ describe("synapse-registry peer-discovery", () => {
     reg.destroy();
   });
 
+  it("re-register revives a stale row (resume same-id), keeping it visible to both safety surfaces", async () => {
+    const reg = createSynapseRegistry({
+      persistPath,
+      interactiveHeartbeatIntervalMs: 5,
+      interactiveTimeoutMs: 25,
+    });
+    reg.register(
+      baseMeta({
+        sessionId: "ix-resume",
+        sessionKind: "interactive",
+        cwd: "/ix-resume",
+        worktreePath: "/ix-resume",
+        dirtyFiles: ["hub/server.mjs"],
+      }),
+    );
+    // Past the 25ms TTL with no heartbeat → stale, invisible to both surfaces.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(reg.getSession("ix-resume").status, "stale");
+    assert.equal(reg.getActive().length, 0);
+    assert.equal(reg.querySessions({ cwd: "/ix-resume" }).length, 0);
+
+    // Claude Code re-fires SessionStart with the SAME session_id on resume →
+    // register() must revive the dead row, not reject it as a duplicate.
+    const res = reg.register(
+      baseMeta({
+        sessionId: "ix-resume",
+        sessionKind: "interactive",
+        cwd: "/ix-resume",
+        worktreePath: "/ix-resume",
+        dirtyFiles: ["hub/server.mjs"],
+      }),
+    );
+    assert.equal(res.ok, true);
+    assert.equal(reg.getSession("ix-resume").status, "active");
+    // Live again → visible to git-preflight (getActive) AND peer-discovery.
+    assert.equal(reg.getActive().length, 1);
+    assert.equal(reg.querySessions({ cwd: "/ix-resume" }).length, 1);
+
+    reg.destroy();
+  });
+
+  it("re-register of a still-live (active) row is still rejected as duplicate (LOCKED #5)", () => {
+    const reg = createSynapseRegistry({ persistPath });
+    reg.register(
+      baseMeta({ sessionId: "ix-live", sessionKind: "interactive" }),
+    );
+    const res = reg.register(
+      baseMeta({ sessionId: "ix-live", sessionKind: "interactive" }),
+    );
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, "duplicate");
+    reg.destroy();
+  });
+
   it("interactive session becomes stale only after its TTL", async () => {
     const reg = createSynapseRegistry({
       persistPath,
