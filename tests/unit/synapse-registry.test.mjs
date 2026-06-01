@@ -388,4 +388,100 @@ describe("synapse-registry peer-discovery", () => {
 
     reg.destroy();
   });
+
+  it("querySessions with no locator returns [] (never enumerates the registry)", () => {
+    const reg = createSynapseRegistry({ persistPath });
+    reg.register(baseMeta({ sessionId: "e1", cwd: "/a", worktreePath: "/a" }));
+    reg.register(baseMeta({ sessionId: "e2", cwd: "/b", worktreePath: "/b" }));
+
+    // Empty filter, empty strings, whitespace-only excludeId — all must yield [].
+    assert.deepEqual(reg.querySessions(), []);
+    assert.deepEqual(reg.querySessions({}), []);
+    assert.deepEqual(reg.querySessions({ cwd: "", worktree: "" }), []);
+    assert.deepEqual(reg.querySessions({ excludeSessionId: "e1" }), []);
+
+    reg.destroy();
+  });
+
+  it("querySessions matches cwd OR worktree (same worktree, different subdir)", () => {
+    const reg = createSynapseRegistry({ persistPath });
+    const worktree = "/repo/.wt/shard-1";
+    // Peer lives in a SUBDIR of the shared worktree → different cwd, same worktree.
+    reg.register(
+      baseMeta({
+        sessionId: "sub",
+        cwd: "/repo/.wt/shard-1/packages/core",
+        worktreePath: worktree,
+      }),
+    );
+    // Unrelated session in a different worktree must not match.
+    reg.register(
+      baseMeta({ sessionId: "other", cwd: "/repo2", worktreePath: "/repo2" }),
+    );
+
+    // Caller is at the worktree root with the worktree locator. A conjunctive
+    // (AND cwd) match would wrongly drop the subdir peer; OR keeps it.
+    const peers = reg.querySessions({
+      cwd: worktree,
+      worktree,
+      excludeSessionId: "caller",
+    });
+    assert.equal(peers.length, 1);
+    assert.equal(peers[0].sessionId, "sub");
+
+    reg.destroy();
+  });
+
+  it("projectPeer redacts Windows-style paths regardless of host platform", () => {
+    const reg = createSynapseRegistry({ persistPath });
+    // On POSIX, node:path.basename() would NOT split a Windows path, leaking the
+    // whole `C:\Users\Alice\secret` as the label. The separator-agnostic pathLabel
+    // must return only the last segment.
+    reg.register(
+      baseMeta({
+        sessionId: "win",
+        cwd: "C:\\Users\\Alice\\secret",
+        worktreePath: "C:\\Users\\Alice\\secret\\.wt\\shard",
+        sessionKind: "interactive",
+      }),
+    );
+
+    const [match] = reg.querySessions({ cwd: "C:\\Users\\Alice\\secret" });
+    const projected = projectPeer(match, { cwd: "C:\\Users\\Alice\\secret" });
+
+    assert.equal(projected.cwdLabel, "secret");
+    assert.equal(projected.worktreeLabel, "shard");
+    // Raw Windows path must never appear anywhere in the serialized projection.
+    const serialized = JSON.stringify(projected);
+    assert.ok(!serialized.includes("Alice"), "raw Windows path leaked");
+    assert.ok(!serialized.includes("C:\\"), "raw Windows drive leaked");
+
+    reg.destroy();
+  });
+
+  it("projectPeer never exposes raw worktreePath (only worktreeLabel)", () => {
+    const reg = createSynapseRegistry({ persistPath });
+    const worktree = "/home/dev/secret-wt/shard-9";
+    reg.register(
+      baseMeta({
+        sessionId: "wtp",
+        cwd: worktree,
+        worktreePath: worktree,
+        sessionKind: "interactive",
+      }),
+    );
+
+    const [match] = reg.querySessions({ worktree });
+    const projected = projectPeer(match, { worktree });
+
+    assert.equal(projected.worktreePath, undefined);
+    assert.equal(projected.worktreeLabel, "shard-9");
+    const serialized = JSON.stringify(projected);
+    assert.ok(
+      !serialized.includes("secret-wt"),
+      "raw worktree path leaked in projection",
+    );
+
+    reg.destroy();
+  });
 });

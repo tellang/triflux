@@ -10,10 +10,13 @@
 //
 // external source 훅 (session-vault 등)은 여전히 execFile로 실행된다.
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { registerSynapseSession } from "../hub/team/synapse-http.mjs";
+import {
+  heartbeatSynapseSession,
+  registerSynapseSession,
+} from "../hub/team/synapse-http.mjs";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -35,46 +38,93 @@ function parseStartPayload(stdinData) {
   }
 }
 
-/** cwd 기준 git 컨텍스트(worktree root / branch)를 best-effort 로 수집. */
-function gitContext(cwd) {
-  const run = (args) => {
-    try {
-      return execFileSync("git", args, {
-        cwd,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 2000,
-      }).trim();
-    } catch {
-      return "";
-    }
-  };
-  const worktreePath = run(["rev-parse", "--show-toplevel"]) || cwd;
-  const branch = run(["rev-parse", "--abbrev-ref", "HEAD"]);
-  return { worktreePath, branch };
+/**
+ * cwd 기준 git 컨텍스트(worktree root / branch)를 best-effort, 비동기로 수집.
+ * execFileSync 와 달리 호출자(BACKGROUND)를 블로킹하지 않는다. 각 git 호출은
+ * tight timeout(1.5s) + 강제 kill 로 묶여 hub/디스크 stall 시에도 잔류하지 않는다.
+ * @param {string} cwd
+ * @param {(args:string[], cb:(out:string)=>void)=>void} [gitRunner] 테스트용 seam
+ * @returns {Promise<{ worktreePath: string, branch: string }>}
+ */
+function gitContextAsync(cwd, gitRunner = defaultGitRunner) {
+  const run = (args) =>
+    new Promise((resolve) => {
+      try {
+        gitRunner(cwd, args, (out) => resolve(out));
+      } catch {
+        resolve("");
+      }
+    });
+  return Promise.all([
+    run(["rev-parse", "--show-toplevel"]),
+    run(["rev-parse", "--abbrev-ref", "HEAD"]),
+  ]).then(([toplevel, branch]) => ({
+    worktreePath: toplevel || cwd,
+    branch,
+  }));
+}
+
+/** 기본 git runner: execFile(async) + tight timeout + kill. 실패는 빈 문자열. */
+function defaultGitRunner(cwd, args, cb) {
+  execFile(
+    "git",
+    args,
+    {
+      cwd,
+      encoding: "utf8",
+      timeout: 1500,
+      killSignal: "SIGKILL",
+      windowsHide: true,
+    },
+    (err, stdout) => {
+      cb(err ? "" : String(stdout || "").trim());
+    },
+  );
 }
 
 /**
  * 인터랙티브 세션을 Synapse 레지스트리에 self-register (fire-and-forget).
- * hub 미응답이면 silent no-op. BLOCKING path 에 latency 0.
+ * hub 미응답이면 silent no-op. BLOCKING path 에 latency 0 — git 컨텍스트는
+ * 블로킹 경로 밖에서 비동기로 enrich 한다 (cwd 만으로 즉시 minimal register).
+ *
+ * pid 는 의도적으로 보내지 않는다: 이 훅 프로세스의 process.pid 는 short-lived
+ * 훅 PID 일 뿐 세션 PID 가 아니므로 오기재가 된다. liveness 는 TTL 이 담당한다.
+ *
+ * @param {string} stdinData
+ * @param {object} [seams] 테스트용 injectable seam
+ * @param {Function} [seams.register]  registerSynapseSession 대체
+ * @param {Function} [seams.heartbeat] heartbeatSynapseSession 대체
+ * @param {Function} [seams.gitRunner] git runner 대체
+ * @returns {void} (enrich 는 백그라운드에서 완료)
  */
-function registerInteractiveSession(stdinData) {
+export function registerInteractiveSession(stdinData, seams = {}) {
+  const register = seams.register || registerSynapseSession;
+  const heartbeat = seams.heartbeat || heartbeatSynapseSession;
+  const gitRunner = seams.gitRunner || defaultGitRunner;
   try {
     const payload = parseStartPayload(stdinData);
     const sessionId = String(payload?.session_id || "").trim();
     if (!sessionId) return;
     const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
-    const { worktreePath, branch } = gitContext(cwd);
-    registerSynapseSession({
+
+    // 1) cwd 만으로 즉시 minimal register (블로킹 git 없음, latency 0).
+    register({
       sessionId,
       cwd,
-      pid: process.pid,
-      worktreePath,
-      branch,
+      worktreePath: cwd,
+      branch: "",
       host: "local",
       sessionKind: "interactive",
       isRemote: false,
     });
+
+    // 2) worktree/branch 는 블로킹 경로 밖에서 비동기 enrich → heartbeat partial.
+    gitContextAsync(cwd, gitRunner)
+      .then(({ worktreePath, branch }) => {
+        if (worktreePath === cwd && !branch) return; // 추가 정보 없음
+        heartbeat(sessionId, { worktreePath, branch });
+      })
+      .catch(() => {});
   } catch {
     /* best-effort — never affects session start */
   }

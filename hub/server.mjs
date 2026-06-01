@@ -1315,10 +1315,19 @@ export async function startHub({
       // Redacted peer-discovery surface. Returns co-located live peers (same
       // cwd / worktree) with raw cwd/pid stripped — only label/hash + booleans.
       if (path === "/synapse/peers" && req.method === "GET") {
-        const query = new URL(req.url, `http://${host}`).searchParams;
+        // formatHostForUrl wraps IPv6 hosts in [...]; a bare `::1` would make
+        // `new URL(req.url, "http://::1")` throw (invalid authority).
+        const query = new URL(req.url, `http://${formatHostForUrl(host)}`)
+          .searchParams;
         const cwd = query.get("cwd") || "";
         const worktree = query.get("worktree") || "";
         const excludeSessionId = query.get("excludeSessionId") || "";
+        // Require at least one non-empty locator. Without it querySessions
+        // already returns [], but short-circuiting keeps the contract explicit
+        // and avoids ever enumerating the registry over the redacted surface.
+        if (!cwd && !worktree) {
+          return writeJson(res, 200, { ok: true, peers: [], ts: Date.now() });
+        }
         const matches = synapseRegistry.querySessions({
           cwd,
           worktree,

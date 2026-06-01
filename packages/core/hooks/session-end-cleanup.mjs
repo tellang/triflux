@@ -297,9 +297,12 @@ export function run(input, env = process.env) {
   // never fires, the 5-min interactive TTL eventually marks the row stale, so
   // unregister is an optimization, not a correctness dependency. Never throws,
   // never changes the report-only stdout contract below.
+  //
+  // Bounded timeout (unref AbortController inside synapse-http) so a stalled hub
+  // cannot keep this short-lived SessionEnd hook process alive past its budget.
   try {
     const sessionId = String(input?.session_id || "").trim();
-    if (sessionId) unregisterSynapseSession(sessionId);
+    if (sessionId) unregisterSynapseSession(sessionId, { timeoutMs: 1500 });
   } catch {
     /* swallow — report-only charter preserved */
   }

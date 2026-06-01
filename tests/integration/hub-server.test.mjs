@@ -268,6 +268,96 @@ describe("startHub() 라이프사이클", () => {
     });
   });
 
+  // ── GET /synapse/peers (redacted peer-discovery surface) ──
+  describe("GET /synapse/peers", () => {
+    const sharedCwd = "/tmp/triflux-peers-cwd";
+    const selfId = `peer-self-${randomUUID().slice(0, 8)}`;
+    const peerId = `peer-other-${randomUUID().slice(0, 8)}`;
+    const elsewhereId = `peer-elsewhere-${randomUUID().slice(0, 8)}`;
+
+    before(async () => {
+      // Self + a co-located peer + an unrelated session in a different cwd.
+      for (const [sessionId, cwd] of [
+        [selfId, sharedCwd],
+        [peerId, sharedCwd],
+        [elsewhereId, "/tmp/triflux-peers-other"],
+      ]) {
+        await fetch(`${baseUrl}/synapse/register`, {
+          method: "POST",
+          headers: bridgeHeaders(),
+          body: JSON.stringify({
+            sessionId,
+            host: "127.0.0.1",
+            cwd,
+            pid: 4242,
+            worktreePath: cwd,
+            branch: "main",
+            dirtyFiles: ["hub/server.mjs"],
+            sessionKind: "interactive",
+            isRemote: false,
+          }),
+        });
+      }
+    });
+
+    after(async () => {
+      for (const sessionId of [selfId, peerId, elsewhereId]) {
+        await fetch(`${baseUrl}/synapse/unregister`, {
+          method: "POST",
+          headers: bridgeHeaders(),
+          body: JSON.stringify({ sessionId }),
+        });
+      }
+    });
+
+    it("authenticated GET는 같은 cwd peer만 반환하고 self를 제외한다", async () => {
+      const res = await fetch(
+        `${baseUrl}/synapse/peers?cwd=${encodeURIComponent(sharedCwd)}&excludeSessionId=${selfId}`,
+        { headers: { Authorization: `Bearer ${TEST_TOKEN}` } },
+      );
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      // Only the co-located peer — never self, never the elsewhere session.
+      assert.equal(body.peers.length, 1);
+      assert.equal(body.peers[0].sessionId, peerId);
+    });
+
+    it("peer 응답은 raw cwd/pid/dirtyFiles를 노출하지 않는다", async () => {
+      const res = await fetch(
+        `${baseUrl}/synapse/peers?cwd=${encodeURIComponent(sharedCwd)}&excludeSessionId=${selfId}`,
+        { headers: { Authorization: `Bearer ${TEST_TOKEN}` } },
+      );
+      const body = await res.json();
+      const [peer] = body.peers;
+      assert.equal(peer.cwd, undefined);
+      assert.equal(peer.pid, undefined);
+      assert.equal(peer.dirtyFiles, undefined);
+      assert.equal(peer.sameCwd, true);
+      assert.equal(peer.cwdLabel, "triflux-peers-cwd");
+      assert.ok(peer.cwdHash.length > 0);
+      // The raw cwd string must never appear in the serialized response.
+      assert.ok(!JSON.stringify(body).includes(sharedCwd));
+    });
+
+    it("locator(cwd/worktree)가 없으면 빈 peers를 반환한다 (전체 열람 차단)", async () => {
+      const res = await fetch(`${baseUrl}/synapse/peers`, {
+        headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.deepEqual(body.peers, []);
+    });
+
+    it("인증 없는 GET /synapse/peers는 401을 반환한다", async () => {
+      const res = await fetch(
+        `${baseUrl}/synapse/peers?cwd=${encodeURIComponent(sharedCwd)}`,
+      );
+      assert.equal(res.status, 401);
+    });
+  });
+
   // ── OPTIONS (CORS preflight) ──
 
   describe("OPTIONS 요청", () => {

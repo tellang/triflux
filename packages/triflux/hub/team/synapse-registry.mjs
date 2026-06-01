@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { dirname } from "node:path";
 
 const DEFAULT_LOCAL_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_LOCAL_TIMEOUT_MS = 30_000;
@@ -22,8 +22,11 @@ function normalizeSessionKind(raw) {
   return VALID_SESSION_KINDS.has(raw) ? raw : "headless";
 }
 
-// Short, stable, non-reversible hash of a path so peers can correlate co-located
-// sessions without leaking the raw filesystem path (cf. AccountBroker redaction).
+// Non-secret co-location fingerprint: a short, stable, non-reversible hash of a
+// path so peers can correlate co-located sessions without leaking the raw
+// filesystem path (cf. AccountBroker redaction). This is NOT a security boundary
+// — the boundary is `cwdLabel` (basename only). Treat the hash as an opaque
+// correlation token, not as a secret.
 function shortHash(value) {
   const str = String(value ?? "");
   let h = 5381;
@@ -33,12 +36,16 @@ function shortHash(value) {
   return (h >>> 0).toString(36);
 }
 
-// Last path segment / basename of a directory, used as a human-readable label
-// in redacted peer projections.
+// Last path segment of a directory, used as a human-readable label in redacted
+// peer projections. Separator-agnostic on purpose: `node:path`.basename() is
+// platform-dependent, so on POSIX a Windows path like `C:\Users\Alice\secret`
+// would NOT be split and the full path would leak as the label. Splitting on
+// either separator redacts both path styles regardless of host platform.
 function pathLabel(value) {
   const str = String(value ?? "").replace(/[/\\]+$/, "");
   if (!str) return "";
-  return basename(str);
+  const segments = str.split(/[/\\]+/);
+  return segments[segments.length - 1] || "";
 }
 
 function cloneSession(session) {
@@ -394,14 +401,26 @@ export function createSynapseRegistry(opts = {}) {
     return session ? cloneSession(session) : null;
   }
 
-  // Peer-discovery primitive: returns sessions sharing the caller's cwd and/or
+  // Peer-discovery primitive: returns sessions sharing the caller's cwd OR
   // worktree, excluding the caller's own session. Only live peers (active/idle)
   // are returned — stale/expired rows are presumed dead and omitted.
+  //
+  // SECURITY: at least one non-empty locator (cwd or worktree) is REQUIRED. An
+  // empty filter would otherwise return every active/idle session, turning the
+  // redacted peer surface into a full-registry enumeration (session ids/branches/
+  // labels/hashes). With no usable locator we return [] rather than leak.
+  //
+  // Matching is disjunctive (cwd OR worktreePath): a peer in the same worktree
+  // but a different subdirectory shares the worktree locator even though its cwd
+  // differs, and a conjunctive (AND) match would wrongly drop it.
   function querySessions(filter = {}) {
     const wantCwd = typeof filter?.cwd === "string" ? filter.cwd : "";
     const wantWorktree =
       typeof filter?.worktree === "string" ? filter.worktree : "";
     const excludeId = normalizeSessionId(filter?.excludeSessionId);
+
+    // Require at least one non-empty locator — never enumerate the whole registry.
+    if (!wantCwd && !wantWorktree) return [];
 
     return [...sessions.values()]
       .filter((session) => {
@@ -409,9 +428,10 @@ export function createSynapseRegistry(opts = {}) {
           return false;
         }
         if (excludeId && session.sessionId === excludeId) return false;
-        if (wantCwd && session.cwd !== wantCwd) return false;
-        if (wantWorktree && session.worktreePath !== wantWorktree) return false;
-        return true;
+        const cwdMatch = Boolean(wantCwd) && session.cwd === wantCwd;
+        const worktreeMatch =
+          Boolean(wantWorktree) && session.worktreePath === wantWorktree;
+        return cwdMatch || worktreeMatch;
       })
       .map((session) => cloneSession(session));
   }
