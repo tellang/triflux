@@ -29,6 +29,9 @@ const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
 const TRACKED_FILES = Object.freeze([
   "hub/workers/codex-app-server-worker.mjs",
   "hub/workers/lib/jsonrpc-stdio.mjs",
+  "hub/workers/lib/jsonrpc-core.mjs",
+  "hub/workers/lib/jsonrpc-ws-uds.mjs",
+  "hub/team/uds-orchestrator.mjs",
 ]);
 
 /** Downstream package trees that receive copies via `npm run pack`. */
