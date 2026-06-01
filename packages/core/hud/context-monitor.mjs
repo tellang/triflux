@@ -288,11 +288,16 @@ export function buildContextUsageView(stdin, snapshot = null) {
   const modelHintLimit = resolveModelLimit(modelId);
   const monitorLimit = Number(monitor?.limitTokens || 0);
   const stdinLimit = stdinUsage?.limitTokens;
+  // When a model id is known it is the authoritative per-model ceiling: the
+  // monitor's cached limitTokens is just a default-derived accumulator (now 1M
+  // by default) and must not override a known model's real window in either
+  // direction — it would inflate a 200K model (Sonnet 4.5 / Haiku) up to 1M.
+  // The model hint already upgrades a stale-low monitor on its own (#88).
   const limitTokens =
     stdinLimit != null && stdinLimit > 0
       ? Math.max(1, stdinLimit)
       : modelId
-        ? Math.max(1, monitorLimit, modelHintLimit)
+        ? Math.max(1, modelHintLimit)
         : Math.max(1, monitorLimit || modelHintLimit);
 
   const usedTokens = stdinUsage?.usedTokens ?? Number(monitor?.usedTokens || 0);
@@ -324,7 +329,19 @@ export function buildContextUsageView(stdin, snapshot = null) {
 }
 
 export function createContextMonitor(options = {}) {
-  const limitTokens = Number(options.limitTokens || DEFAULT_CONTEXT_LIMIT);
+  // Default to a 1M context window (Opus 4.x [1M] / Codex gpt-5.5 both run on
+  // a 1M window) when no explicit limit is supplied, so the cached percent the
+  // Stop hook reads is not inflated against a 200K assumption — assuming 200K
+  // there false-positives at ~15% real usage and blocks legitimate stops.
+  // Narrower setups override via TFX_CONTEXT_DEFAULT_MAX_TOKENS.
+  const explicitLimit = Number(options.limitTokens);
+  const envLimit = Number(process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS);
+  const limitTokens =
+    Number.isFinite(explicitLimit) && explicitLimit > 0
+      ? explicitLimit
+      : Number.isFinite(envLimit) && envLimit > 0
+        ? envLimit
+        : MILLION_CONTEXT_LIMIT;
   const cachePath = options.cachePath || CONTEXT_MONITOR_CACHE_PATH;
   const logsDir = options.logsDir || CONTEXT_MONITOR_LOG_DIR;
   const sessionId = options.sessionId || randomUUID().slice(0, 8);

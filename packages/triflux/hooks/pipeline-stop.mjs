@@ -142,7 +142,7 @@ function contextPercentsFromObject(value) {
   ];
 
   const currentUsage = value.current_usage ?? value.currentUsage ?? {};
-  const maxTokens =
+  const explicitMaxTokens =
     value.context_window_size ??
     value.contextWindowSize ??
     value.max_context_tokens ??
@@ -151,6 +151,18 @@ function contextPercentsFromObject(value) {
     value.maxTokens ??
     value.total_tokens ??
     value.totalTokens;
+  // Fall back to a 1M context window when the payload omits one — Opus 4.x
+  // [1M] and Codex gpt-5.5 both run on a 1M window, and assuming 200K there
+  // false-positives at ~15% real usage. Override via
+  // TFX_CONTEXT_DEFAULT_MAX_TOKENS for narrower setups.
+  const envFallback = Number(process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS);
+  const fallbackMaxTokens =
+    Number.isFinite(envFallback) && envFallback > 0 ? envFallback : 1_000_000;
+  const explicitNumeric = Number(explicitMaxTokens);
+  const maxTokens =
+    Number.isFinite(explicitNumeric) && explicitNumeric > 0
+      ? explicitNumeric
+      : fallbackMaxTokens;
   candidates.push(
     tokenPercent(value.used_tokens ?? value.usedTokens, maxTokens),
     tokenPercent(
