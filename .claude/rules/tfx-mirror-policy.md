@@ -66,7 +66,8 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 - `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up — remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)
 - `scripts/release/*`, `scripts/__tests__/*` → `packages/triflux/scripts/` (publish 포함)
 - `bin/*` → `packages/triflux/bin/`
-- `hooks/*`, `hud/*`, `config/*` → `packages/triflux/{hooks,hud,config}/`
+- `hooks/*`, `hud/*` → `packages/triflux/{hooks,hud}/` + `packages/core/{hooks,hud}/` (core 도 `package.json` files 에 `hooks`, `hud` 포함 → byte-identical cp 2곳. PR #376 에서 hooks/pipeline-stop.mjs·hud/context-monitor.mjs 가 core 에도 미러됨을 실측 확인)
+- `config/*` → `packages/triflux/config/` (core·remote 는 config 미러 안 함)
 
 **mirror 제외**:
 - `tests/` (root + `packages/{core,remote}/tests/`) — npm files 에 없음. 만약 packages 쪽에 untracked tests 디렉토리가 만들어졌으면 그건 잘못된 mirror 시도다.
@@ -95,7 +96,7 @@ shard 가 `references/{codex,gemini}-snapshots/` 같은 경로에 100MB+ binary 
 |------|------|----------|
 | 1 | `git diff --name-only origin/main..HEAD \| grep -E '^(hub/|scripts/lib/|scripts/__tests__/|scripts/release/|bin/|hooks/|hud/|mesh/|config/)'` | mirror 가 필요한 root 변경 목록 |
 | 2 | 위 목록의 각 파일이 packages/triflux 에 byte-identical 로 존재하는지 `diff -q` | exit 0 |
-| 3 | hub/lib, scripts/lib 변경분이 packages/core 에 cp 됐는지 `diff -q` | exit 0 |
+| 3 | hub/lib, scripts/lib, mesh, hooks, hud 변경분이 packages/core 에 cp 됐는지 `diff -q` | exit 0 |
 | 4 | packages/remote/hub/team/ 가 변경됐다면 `grep "@triflux/core/" packages/remote/hub/team/*.mjs` | import 경로 살아있음 |
 | 5 | tests/ 변경이 packages/{core,remote}/tests/ 에 untracked 로 추가됐는지 | **금지 — staging 회수** |
 | 6 | npm publish 영향 시 `cd packages/triflux && npm pack --dry-run` size | ~1MB |
