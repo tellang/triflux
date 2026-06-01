@@ -21,6 +21,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import net from "node:net";
 
+import { JsonRpcDispatchBase } from "./jsonrpc-core.mjs";
 import {
   JsonRpcProtocolError,
   JsonRpcTransportError,
@@ -74,7 +75,7 @@ function encodeClientFrame(opcode, payload) {
 /**
  * JSON-RPC 2.0 client over WebSocket-over-UDS.
  */
-export class JsonRpcWsUdsClient {
+export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
   /**
    * @param {object} options
    * @param {string} options.socketPath Absolute path to the AF_UNIX socket.
@@ -91,8 +92,8 @@ export class JsonRpcWsUdsClient {
     if (typeof socketPath !== "string" || !socketPath) {
       throw new TypeError("JsonRpcWsUdsClient requires a socketPath string");
     }
+    super({ onError, closedMessage: CLOSED_MESSAGE });
     this._socketPath = socketPath;
-    this._onError = typeof onError === "function" ? onError : null;
     this._maxFrameSize =
       Number.isFinite(maxFrameSize) && maxFrameSize > 0
         ? maxFrameSize
@@ -104,11 +105,6 @@ export class JsonRpcWsUdsClient {
     /** @type {'idle'|'running'|'closing'|'closed'} */
     this._state = "idle";
     this._socket = null;
-    this._nextRequestId = 1;
-    /** @type {Map<number, { resolve: Function, reject: Function, timer: any, method: string }>} */
-    this._pendingRequests = new Map();
-    /** @type {Map<string, Set<Function>>} */
-    this._notificationHandlers = new Map();
 
     // RX framing state
     this._rxBuf = Buffer.alloc(0);
@@ -272,124 +268,39 @@ export class JsonRpcWsUdsClient {
     });
   }
 
-  /**
-   * Issue a JSON-RPC request and resolve with the server's `result`.
-   * @param {string} method
-   * @param {unknown} params
-   * @param {number} [timeoutMs=60000]
-   * @returns {Promise<any>}
-   */
-  request(method, params, timeoutMs = 60000) {
-    if (this._state !== "running") {
-      return Promise.reject(new Error(CLOSED_MESSAGE));
-    }
-    const id = this._nextRequestId++;
-    const frame = { id, method };
-    if (params !== undefined) frame.params = params;
-
-    return new Promise((resolve, reject) => {
-      let timer = null;
-      if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
-        timer = setTimeout(() => {
-          const pending = this._pendingRequests.get(id);
-          if (!pending) return;
-          this._pendingRequests.delete(id);
-          reject(
-            new Error(
-              `JSON-RPC request timed out after ${timeoutMs}ms: ${method}`,
-            ),
-          );
-        }, timeoutMs);
-      }
-      this._pendingRequests.set(id, { resolve, reject, timer, method });
-      try {
-        this._sendText(JSON.stringify(frame));
-      } catch (err) {
-        this._pendingRequests.delete(id);
-        if (timer) clearTimeout(timer);
-        reject(err);
-      }
-    });
-  }
-
-  /**
-   * Send a JSON-RPC notification (no id, no response).
-   * @param {string} method
-   * @param {unknown} [params]
-   */
-  notify(method, params) {
-    if (this._state !== "running") return;
-    const frame = { method };
-    if (params !== undefined) frame.params = params;
-    try {
-      this._sendText(JSON.stringify(frame));
-    } catch (err) {
-      this._emitError(err instanceof Error ? err : new Error(String(err)));
-    }
-  }
-
-  /**
-   * Subscribe to inbound notifications. `"*"` = catch-all receiving
-   * `(params, method)`; targeted handlers receive `(params)`.
-   * @param {string} method
-   * @param {(params: any, method?: string) => void} callback
-   * @returns {() => void} unsubscribe
-   */
-  onNotification(method, callback) {
-    if (typeof callback !== "function") {
-      throw new TypeError("onNotification requires a callback function");
-    }
-    let set = this._notificationHandlers.get(method);
-    if (!set) {
-      set = new Set();
-      this._notificationHandlers.set(method, set);
-    }
-    set.add(callback);
-    return () => {
-      const handlers = this._notificationHandlers.get(method);
-      if (!handlers) return;
-      handlers.delete(callback);
-      if (handlers.size === 0) this._notificationHandlers.delete(method);
-    };
-  }
-
-  /**
-   * Close the client. `reason === "closing"` transitions to an intermediate
-   * graceful state where a subsequent EOF is treated as normal. Idempotent.
-   * @param {string} [reason]
-   */
-  close(reason) {
-    if (this._state === "closed") return;
-    if (reason === "closing" && this._state === "running") {
-      this._state = "closing";
-      // best-effort WS close frame
-      try {
-        this._socket?.write(encodeClientFrame(OP_CLOSE, Buffer.alloc(0)));
-      } catch {}
-      // Arm a deadline so a peer that never replies with close/EOF cannot pin
-      // the socket + pending requests open forever.
-      this._closingTimer = setTimeout(() => {
-        if (this._state === "closing") this._closeWith("closed");
-      }, CLOSING_DEADLINE_MS);
-      if (typeof this._closingTimer.unref === "function") {
-        this._closingTimer.unref();
-      }
-      return;
-    }
-    this._closeWith("closed");
-  }
-
-  /** @returns {boolean} */
-  isOpen() {
-    return this._state === "running";
-  }
-
-  /** @returns {'idle'|'running'|'closing'|'closed'} */
-  getState() {
-    return this._state;
-  }
-
   // --- internals ---------------------------------------------------------
+
+  _encodeAndSend(frame) {
+    this._sendText(JSON.stringify(frame));
+  }
+
+  _onEnterClosing() {
+    // best-effort WS close frame
+    try {
+      this._socket?.write(encodeClientFrame(OP_CLOSE, Buffer.alloc(0)));
+    } catch {}
+    // Arm a deadline so a peer that never replies with close/EOF cannot pin
+    // the socket + pending requests open forever.
+    this._closingTimer = setTimeout(() => {
+      if (this._state === "closing") this._closeWith("closed");
+    }, CLOSING_DEADLINE_MS);
+    if (typeof this._closingTimer.unref === "function") {
+      this._closingTimer.unref();
+    }
+  }
+
+  _beforeRejectPending() {
+    if (this._closingTimer) {
+      clearTimeout(this._closingTimer);
+      this._closingTimer = null;
+    }
+  }
+
+  _teardownTransport() {
+    try {
+      this._socket?.destroy();
+    } catch {}
+  }
 
   _sendText(text) {
     if (this._state === "closed") throw new Error(CLOSED_MESSAGE);
@@ -511,7 +422,7 @@ export class JsonRpcWsUdsClient {
         return;
       }
       if (fin) {
-        this._handleMessage(payload.toString("utf8"));
+        this._handleInboundMessage(payload.toString("utf8"));
         return;
       }
       this._fragmentOpcode = opcode;
@@ -540,7 +451,7 @@ export class JsonRpcWsUdsClient {
       this._fragmentChunks = [];
       this._fragmentOpcode = null;
       this._fragmentSize = 0;
-      this._handleMessage(full.toString("utf8"));
+      this._handleInboundMessage(full.toString("utf8"));
       return;
     }
 
@@ -553,96 +464,6 @@ export class JsonRpcWsUdsClient {
     this._closeWith("closed", err);
   }
 
-  _handleMessage(line) {
-    if (this._state === "closed") return;
-    if (line.length === 0) return;
-
-    let frame;
-    try {
-      frame = JSON.parse(line);
-    } catch (err) {
-      const pErr = new JsonRpcProtocolError(
-        `JSON-RPC parse error: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err },
-      );
-      this._emitError(pErr);
-      if (this._state === "running") this._closeWith("closed", pErr);
-      return;
-    }
-
-    if (!frame || typeof frame !== "object") {
-      const pErr = new JsonRpcProtocolError(
-        "JSON-RPC protocol error: frame is not an object",
-      );
-      this._emitError(pErr);
-      if (this._state === "running") this._closeWith("closed", pErr);
-      return;
-    }
-
-    if (
-      Object.hasOwn(frame, "id") &&
-      frame.id !== null &&
-      (Object.hasOwn(frame, "result") || Object.hasOwn(frame, "error"))
-    ) {
-      this._dispatchResponse(frame);
-      return;
-    }
-
-    if (typeof frame.method === "string" && !Object.hasOwn(frame, "id")) {
-      this._dispatchNotification(frame);
-      return;
-    }
-
-    this._emitError(
-      new JsonRpcProtocolError(
-        "JSON-RPC protocol error: unrecognized frame shape",
-      ),
-    );
-  }
-
-  _dispatchResponse(frame) {
-    const pending = this._pendingRequests.get(frame.id);
-    if (!pending) return;
-    this._pendingRequests.delete(frame.id);
-    if (pending.timer) clearTimeout(pending.timer);
-
-    if (Object.hasOwn(frame, "error") && frame.error) {
-      const { code, message, data } = frame.error;
-      const err = new Error(
-        `JSON-RPC error${typeof code === "number" ? ` ${code}` : ""}: ${message || "unknown"}`,
-      );
-      if (code !== undefined) err.code = code;
-      if (data !== undefined) err.data = data;
-      pending.reject(err);
-      return;
-    }
-    pending.resolve(frame.result);
-  }
-
-  _dispatchNotification(frame) {
-    const { method, params } = frame;
-    const targeted = this._notificationHandlers.get(method);
-    if (targeted && targeted.size > 0) {
-      for (const cb of targeted) {
-        try {
-          cb(params);
-        } catch (err) {
-          this._emitError(err instanceof Error ? err : new Error(String(err)));
-        }
-      }
-    }
-    const wildcard = this._notificationHandlers.get("*");
-    if (wildcard && wildcard.size > 0) {
-      for (const cb of wildcard) {
-        try {
-          cb(params, method);
-        } catch (err) {
-          this._emitError(err instanceof Error ? err : new Error(String(err)));
-        }
-      }
-    }
-  }
-
   _handleStreamError(which, err) {
     if (this._state === "closed") return;
     const base = err instanceof Error ? err : new Error(String(err));
@@ -652,34 +473,6 @@ export class JsonRpcWsUdsClient {
     );
     this._emitError(wrapped);
     this._closeWith("closed", wrapped);
-  }
-
-  _closeWith(target, rejectReason = null) {
-    if (this._state === "closed") return;
-    this._state = target;
-    if (this._closingTimer) {
-      clearTimeout(this._closingTimer);
-      this._closingTimer = null;
-    }
-    const rejectErr =
-      rejectReason instanceof Error ? rejectReason : new Error(CLOSED_MESSAGE);
-    for (const [, pending] of this._pendingRequests) {
-      if (pending.timer) clearTimeout(pending.timer);
-      pending.reject(rejectErr);
-    }
-    this._pendingRequests.clear();
-    try {
-      this._socket?.destroy();
-    } catch {}
-  }
-
-  _emitError(err) {
-    if (!this._onError) return;
-    try {
-      this._onError(err);
-    } catch {
-      /* never throw out of the dispatch loop */
-    }
   }
 }
 
