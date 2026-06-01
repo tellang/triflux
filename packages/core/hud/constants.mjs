@@ -143,6 +143,29 @@ export const ANTIGRAVITY_OAUTH_PATHS = [
   join(homedir(), ".gemini", "antigravity-cli", "credentials.json"),
   GEMINI_OAUTH_PATH,
 ];
+export const ANTIGRAVITY_SETTINGS_PATH = join(
+  homedir(),
+  ".gemini",
+  "antigravity-cli",
+  "settings.json",
+);
+// Antigravity CLI 현재 장착 모델 라벨 → HUD 2자 약어 매핑
+// /usage 실측 (2026-05-22): Gemini 4개 모델이 동일 reset window 공유 (family-pool).
+// Claude/GPT-OSS family는 Gemini와 별도 quota 윈도우.
+export const ANTIGRAVITY_MODEL_ABBREV = {
+  // Gemini family — 통합 quota
+  "Gemini 3.5 Flash (High)": "Fh",
+  "Gemini 3.5 Flash (Medium)": "Fm",
+  "Gemini 3.5 Flash (Low)": "Fl",
+  "Gemini 3.1 Pro (High)": "Ph",
+  "Gemini 3.1 Pro (Low)": "Pl",
+  "Gemini 3 Flash": "F3",
+  // Claude family — 각자 별도 quota
+  "Claude Sonnet 4.6 (Thinking)": "Cs",
+  "Claude Opus 4.6 (Thinking)": "Co",
+  // GPT-OSS family — 각자 별도 quota
+  "GPT-OSS 120B (Medium)": "Go",
+};
 export const GEMINI_QUOTA_CACHE_PATH = join(
   homedir(),
   ".claude",
