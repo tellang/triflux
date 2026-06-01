@@ -22,6 +22,16 @@ function normalizeSessionKind(raw) {
   return VALID_SESSION_KINDS.has(raw) ? raw : "headless";
 }
 
+// A session is "live" while active OR idle. Idle is an interactive session that
+// missed its heartbeat interval but is still under the TTL — alive but inactive,
+// not presumed dead. getActive() and querySessions() share this single predicate
+// so the liveness contract can't drift: getActive() feeds git-preflight's
+// dirty-file conflict guard, so dropping idle there would hide a still-live
+// interactive session's claimed paths from that safety check.
+function isLiveStatus(status) {
+  return status === "active" || status === "idle";
+}
+
 // Non-secret co-location fingerprint: a short, stable, non-reversible hash of a
 // path so peers can correlate co-located sessions without leaking the raw
 // filesystem path (cf. AccountBroker redaction). This is NOT a security boundary
@@ -385,8 +395,11 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function getActive() {
+    // Live = active or idle. git-preflight uses this to detect other live
+    // sessions whose dirty files would conflict; an idle interactive session is
+    // still live (process alive, dirty files on disk) and must stay visible.
     return [...sessions.values()]
-      .filter((session) => session.status === "active")
+      .filter((session) => isLiveStatus(session.status))
       .map((session) => cloneSession(session));
   }
 
@@ -424,7 +437,7 @@ export function createSynapseRegistry(opts = {}) {
 
     return [...sessions.values()]
       .filter((session) => {
-        if (session.status !== "active" && session.status !== "idle") {
+        if (!isLiveStatus(session.status)) {
           return false;
         }
         if (excludeId && session.sessionId === excludeId) return false;

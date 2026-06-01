@@ -342,6 +342,41 @@ describe("synapse-registry peer-discovery", () => {
     reg.destroy();
   });
 
+  it("getActive()는 idle interactive 세션도 live로 포함한다 (git-preflight 충돌 가드)", async () => {
+    const reg = createSynapseRegistry({
+      persistPath,
+      interactiveHeartbeatIntervalMs: 10,
+      interactiveTimeoutMs: 5_000,
+    });
+    reg.register(
+      baseMeta({
+        sessionId: "ix-idle",
+        sessionKind: "interactive",
+        cwd: "/ix-idle",
+        worktreePath: "/ix-idle",
+        dirtyFiles: ["hub/server.mjs"],
+      }),
+    );
+    // Past the idle interval (10ms) but well under the TTL (5s) → idle, still live.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(reg.getSession("ix-idle").status, "idle");
+
+    // git-preflight reads getActive() to find other live sessions whose dirty
+    // files would conflict. An idle interactive session is still live, so it
+    // MUST appear here with its dirty files (regression: getActive() previously
+    // returned only "active" and hid idle sessions from that safety check).
+    const live = reg.getActive();
+    const ixIdle = live.find((s) => s.sessionId === "ix-idle");
+    assert.ok(
+      ixIdle,
+      "idle interactive session must be visible to getActive()",
+    );
+    assert.equal(ixIdle.status, "idle");
+    assert.deepEqual(ixIdle.dirtyFiles, ["hub/server.mjs"]);
+
+    reg.destroy();
+  });
+
   it("interactive session becomes stale only after its TTL", async () => {
     const reg = createSynapseRegistry({
       persistPath,
