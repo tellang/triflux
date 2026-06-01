@@ -434,14 +434,56 @@ export function getAccountLabel(
   return label;
 }
 
-function formatAntigravityQuotaSection(currentTier) {
+// 2슬롯: slot1 = 현재 장착 모델 약어 (Fh/Fm/Ph/Pl 등), slot2 = "Gn" Gemini family 통합
+// realQuota.pools.{current,gemini_family} 가 있으면 실데이터, 없으면 placeholder.
+function formatAntigravityQuotaSection(
+  currentTier,
+  realQuota,
+  provFn,
+  provAnsi,
+) {
+  const pools = realQuota?.pools || {};
+  const abbr = realQuota?.currentAbbrev || "??";
+  const currentBucket = pools.current;
+  const familyBucket = pools.gemini_family;
+  const hasData = Boolean(currentBucket || familyBucket);
+
+  if (!hasData) {
+    // 기존 placeholder 동작 유지
+    if (currentTier === "minimal") {
+      return `${dim(`${abbr}:`)}${dim(formatPlaceholderPercentCell())} ${dim("Gn:")}${dim(formatPlaceholderPercentCell())}`;
+    }
+    if (currentTier === "compact") {
+      return `${dim(`${abbr}:`)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("Gn:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
+    }
+    return `${dim(`${abbr}:`)}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("Gn:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
+  }
+
+  const slot = (bucket, label, { withBar, withTime }) => {
+    if (!bucket) {
+      const bar = withBar ? tierDimBar(currentTier) : "";
+      const base = `${dim(`${label}:`)}${bar}${dim(formatPlaceholderPercentCell())}`;
+      return withTime ? `${base} ${dim(formatTimeCell("n/a"))}` : base;
+    }
+    const gl = deriveGeminiLimits(bucket);
+    const usedP = gl
+      ? gl.usedPct
+      : clampPercent(Math.round((1 - (bucket.remainingFraction ?? 1)) * 100));
+    const bar = withBar ? tierBar(currentTier, usedP, provAnsi) : "";
+    const base = `${dim(`${label}:`)}${bar}${colorByProvider(usedP, formatPercentCell(usedP), provFn)}`;
+    if (!withTime) return base;
+    const rstRemaining =
+      formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
+    return `${base} ${dim(formatTimeCell(rstRemaining))}`;
+  };
+
   if (currentTier === "minimal") {
-    return `${dim("q:")}${dim(formatPlaceholderPercentCell())}`;
+    return `${slot(currentBucket, abbr, { withBar: false, withTime: false })} ${slot(familyBucket, "Gn", { withBar: false, withTime: false })}`;
   }
   if (currentTier === "compact") {
-    return `${dim("q:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
+    return `${slot(currentBucket, abbr, { withBar: false, withTime: true })} ${slot(familyBucket, "Gn", { withBar: false, withTime: true })}`;
   }
-  return `${dim("q:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
+  return `${slot(currentBucket, abbr, { withBar: true, withTime: true })} ${slot(familyBucket, "Gn", { withBar: true, withTime: true })}`;
 }
 
 export function getProviderRow(
@@ -540,7 +582,12 @@ export function getProviderRow(
 
   if (currentTier === "minimal") {
     if (provider === "antigravity") {
-      quotaSection = formatAntigravityQuotaSection(currentTier);
+      quotaSection = formatAntigravityQuotaSection(
+        currentTier,
+        realQuota,
+        provFn,
+        provAnsi,
+      );
     }
     if (realQuota?.type === "codex") {
       const main =
@@ -596,7 +643,12 @@ export function getProviderRow(
 
   if (currentTier === "compact") {
     if (provider === "antigravity") {
-      quotaSection = formatAntigravityQuotaSection(currentTier);
+      quotaSection = formatAntigravityQuotaSection(
+        currentTier,
+        realQuota,
+        provFn,
+        provAnsi,
+      );
     }
     if (realQuota?.type === "codex") {
       const main =
@@ -664,7 +716,12 @@ export function getProviderRow(
 
   // full tier
   if (provider === "antigravity") {
-    quotaSection = formatAntigravityQuotaSection(currentTier);
+    quotaSection = formatAntigravityQuotaSection(
+      currentTier,
+      realQuota,
+      provFn,
+      provAnsi,
+    );
   }
 
   if (realQuota?.type === "codex") {

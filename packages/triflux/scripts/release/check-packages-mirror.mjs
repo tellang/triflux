@@ -50,6 +50,10 @@ const CORE_FILE_MIRRORS = [
     target: "packages/core/hub/team/claude-session-projection.mjs",
   },
 ];
+// Whole directories under packages/core that must be byte-identical to root.
+// Mirror policy (§packages/core): hooks/hud are byte-identical cp mirrors.
+// See .claude/rules/tfx-mirror-policy.md and PR #377.
+const CORE_DIR_MIRRORS = ["hud"];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 // Per-top relative paths to skip. Mirror policy excludes these via
 // packages/triflux/package.json "files" negation patterns (e.g.
@@ -159,6 +163,49 @@ function compareMirror({
         fixed.push({ path: mirror.target, kind: "updated" });
       } else {
         issues.push({ path: mirror.target, kind: "content-diff" });
+      }
+    }
+  }
+
+  for (const dir of CORE_DIR_MIRRORS) {
+    const srcDir = join(repoRoot, dir);
+    const dstDir = join(repoRoot, "packages", "core", dir);
+    const srcFiles = new Set(walkRelFiles(srcDir));
+    const dstFiles = new Set(walkRelFiles(dstDir));
+    const allFiles = new Set([...srcFiles, ...dstFiles]);
+
+    for (const rel of allFiles) {
+      const srcPath = join(srcDir, rel);
+      const dstPath = join(dstDir, rel);
+      const inSrc = srcFiles.has(rel);
+      const inDst = dstFiles.has(rel);
+      const displayPath = `packages/core/${dir}/${rel}`;
+
+      if (inSrc && !inDst) {
+        if (fix) {
+          mkdirSync(dirname(dstPath), { recursive: true });
+          copyFileSync(srcPath, dstPath);
+          fixed.push({ path: displayPath, kind: "added" });
+        } else {
+          issues.push({ path: displayPath, kind: "missing-in-mirror" });
+        }
+        continue;
+      }
+
+      if (!inSrc && inDst) {
+        issues.push({ path: displayPath, kind: "orphan-in-mirror" });
+        continue;
+      }
+
+      const a = readFileSync(srcPath);
+      const b = readFileSync(dstPath);
+      if (!a.equals(b)) {
+        if (fix) {
+          copyFileSync(srcPath, dstPath);
+          fixed.push({ path: displayPath, kind: "updated" });
+        } else {
+          issues.push({ path: displayPath, kind: "content-diff" });
+        }
       }
     }
   }

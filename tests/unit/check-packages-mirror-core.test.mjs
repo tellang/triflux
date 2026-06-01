@@ -116,3 +116,103 @@ test("compareMirror keeps existing packages/triflux top-level mirror behavior", 
     findIssue(result, "packages/triflux/bin/triflux", "missing-in-mirror"),
   );
 });
+
+// --- packages/core/hud directory mirror tests ---
+
+test("compareMirror detects missing packages/core/hud file", (t) => {
+  const repoRoot = makeFixture(t);
+  write(repoRoot, "hud/constants.mjs", "export const X = 1;\n");
+  write(repoRoot, "packages/core/hud/constants.mjs", "export const X = 1;\n");
+  // Remove one file from core mirror to simulate drift
+  rmSync(join(repoRoot, "packages/core/hud/constants.mjs"));
+
+  const result = compareMirror({ fix: false, repoRoot });
+
+  assert.equal(result.ok, false);
+  assert.ok(
+    findIssue(result, "packages/core/hud/constants.mjs", "missing-in-mirror"),
+  );
+});
+
+test("compareMirror detects content drift in packages/core/hud file", (t) => {
+  const repoRoot = makeFixture(t);
+  write(repoRoot, "hud/constants.mjs", "export const X = 1;\n");
+  write(repoRoot, "packages/core/hud/constants.mjs", "export const X = 2;\n");
+
+  const result = compareMirror({ fix: false, repoRoot });
+
+  assert.equal(result.ok, false);
+  assert.ok(
+    findIssue(result, "packages/core/hud/constants.mjs", "content-diff"),
+  );
+});
+
+test("compareMirror --fix syncs packages/core/hud drift", (t) => {
+  const repoRoot = makeFixture(t);
+  write(repoRoot, "hud/constants.mjs", "export const X = 1;\n");
+  write(repoRoot, "packages/core/hud/constants.mjs", "export const X = 2;\n");
+
+  const result = compareMirror({ fix: true, repoRoot });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.issues, []);
+  assert.ok(
+    result.fixed.some(
+      (f) =>
+        f.kind === "updated" && f.path === "packages/core/hud/constants.mjs",
+    ),
+  );
+  assert.equal(
+    readFileSync(join(repoRoot, "packages/core/hud/constants.mjs"), "utf8"),
+    "export const X = 1;\n",
+  );
+});
+
+test("compareMirror --fix creates missing packages/core/hud file and parents", (t) => {
+  const repoRoot = makeFixture(t);
+  write(repoRoot, "hud/providers/gemini.mjs", "export const P = 1;\n");
+
+  const result = compareMirror({ fix: true, repoRoot });
+
+  assert.equal(result.ok, true);
+  assert.ok(
+    result.fixed.some(
+      (f) =>
+        f.kind === "added" &&
+        f.path === "packages/core/hud/providers/gemini.mjs",
+    ),
+  );
+  assert.equal(
+    readFileSync(
+      join(repoRoot, "packages/core/hud/providers/gemini.mjs"),
+      "utf8",
+    ),
+    "export const P = 1;\n",
+  );
+});
+
+test("compareMirror detects orphan in packages/core/hud", (t) => {
+  const repoRoot = makeFixture(t);
+  write(repoRoot, "packages/core/hud/orphan.mjs", "// orphan\n");
+
+  const result = compareMirror({ fix: false, repoRoot });
+
+  assert.equal(result.ok, false);
+  assert.ok(
+    findIssue(result, "packages/core/hud/orphan.mjs", "orphan-in-mirror"),
+  );
+});
+
+test("compareMirror reports clean when packages/core/hud matches root hud", (t) => {
+  const repoRoot = makeFixture(t);
+  write(repoRoot, "hud/constants.mjs", "export const X = 1;\n");
+  write(repoRoot, "packages/core/hud/constants.mjs", "export const X = 1;\n");
+
+  const result = compareMirror({ fix: false, repoRoot });
+
+  // Only check hud-related issues are absent; other fixtures may add issues
+  const hudIssues = result.issues.filter((i) =>
+    i.path.startsWith("packages/core/hud/"),
+  );
+  assert.deepEqual(hudIssues, []);
+});
