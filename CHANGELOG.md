@@ -4,6 +4,16 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.28.1] - 2026-06-01
+
+### Fixed
+
+- **`fix(test-lock)` (commit `e1dcf591`)** release 테스트가 `npm test`/`release:prepare` 실행 중 부모 `scripts/test-lock.mjs` 래퍼가 점유한 repo 루트 `.test-lock/pid.lock`(동시 실행 싱글톤 락)을 삭제하던 비-hermetic 회귀를 막는다. 두 벡터: (1) `release-prepare-testlock.test.mjs` 가 실제 락을 직접 쓰고 지웠고, (2) 지배적으로 `prepareRelease()` 의 preflight `cleanupStaleTestLock()` 이 모듈 상수 `STALE_LOCK` 을 지워, temp `rootDir` 를 넘긴 `release-governance`/`completes-all-steps` 테스트들이 매 호출(런당 5회+)마다 살아있는 락을 삭제 → 동시 실행 가드 무력화(락이 막으려던 ConPTY/RAM 폭발 재노출). fix: `cleanupStaleTestLock(lockPath = STALE_LOCK)` DI 추가 + `prepareRelease()` 가 `join(rootDir, ".test-lock", "pid.lock")` 로 락 경로를 유도한다(프로덕션 동작 불변). 결정적 재현으로 가드 무력화/복구를 확인했다. packages/triflux 미러 byte-identical.
+
+### Tests
+
+- **`test(test-lock)`** `release-prepare-testlock.test.mjs` 를 `mkdtemp` 락으로 hermetic 화하고 실제 repo 락 무접촉을 단언한다. `release-prepare-completes-all-steps.test.mjs` 에 `prepareRelease({ rootDir: tmp })` 가 rootDir 의 락만 지우고 실제 repo 락은 건드리지 않는지 검증하는 회귀 가드를 추가한다.
+
 ## [10.28.0] - 2026-05-29
 
 ### Added
