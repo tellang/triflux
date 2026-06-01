@@ -6,7 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 
-import { createSynapseRegistry } from "../../hub/team/synapse-registry.mjs";
+import {
+  createSynapseRegistry,
+  projectPeer,
+} from "../../hub/team/synapse-registry.mjs";
 
 function makeTmpDir() {
   const dir = join(
@@ -198,6 +201,190 @@ describe("synapse-registry", () => {
 
     assert.equal(local.status, "stale");
     assert.equal(remote.status, "active");
+
+    reg.destroy();
+  });
+});
+
+describe("synapse-registry peer-discovery", () => {
+  let tmpDir;
+  let persistPath;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+    persistPath = join(tmpDir, "synapse-registry-peers.json");
+  });
+
+  it("sanitizeSession defaults additive fields for legacy rows", () => {
+    // Write a persist file in the *old* schema (no cwd/pid/sessionKind).
+    const legacy = {
+      "legacy-1": {
+        sessionId: "legacy-1",
+        host: "local",
+        worktreePath: "/tmp/wt-legacy",
+        branch: "main",
+        dirtyFiles: [],
+        taskSummary: "old row",
+        lastHeartbeat: Date.now(),
+        status: "active",
+        isRemote: false,
+      },
+    };
+    writeFileSync(persistPath, JSON.stringify(legacy), "utf8");
+
+    const reg = createSynapseRegistry({ persistPath });
+    const restored = reg.getSession("legacy-1");
+    assert.ok(restored);
+    assert.equal(restored.cwd, "");
+    assert.equal(restored.pid, null);
+    assert.equal(restored.sessionKind, "headless");
+
+    reg.destroy();
+  });
+
+  it("register stores cwd/pid/sessionKind and persist round-trips them", () => {
+    const reg1 = createSynapseRegistry({ persistPath });
+    reg1.register(
+      baseMeta({
+        sessionId: "interactive-1",
+        cwd: "/home/dev/proj",
+        pid: 4242,
+        sessionKind: "interactive",
+      }),
+    );
+    const stored = reg1.getSession("interactive-1");
+    assert.equal(stored.cwd, "/home/dev/proj");
+    assert.equal(stored.pid, 4242);
+    assert.equal(stored.sessionKind, "interactive");
+    reg1.destroy();
+
+    const reg2 = createSynapseRegistry({ persistPath });
+    const restored = reg2.getSession("interactive-1");
+    assert.equal(restored.cwd, "/home/dev/proj");
+    assert.equal(restored.pid, 4242);
+    assert.equal(restored.sessionKind, "interactive");
+    reg2.destroy();
+  });
+
+  it("querySessions filters by cwd and excludes the caller", () => {
+    const reg = createSynapseRegistry({ persistPath });
+    reg.register(
+      baseMeta({ sessionId: "a", cwd: "/shared/cwd", worktreePath: "/wt/x" }),
+    );
+    reg.register(
+      baseMeta({ sessionId: "b", cwd: "/shared/cwd", worktreePath: "/wt/x" }),
+    );
+    reg.register(
+      baseMeta({ sessionId: "c", cwd: "/other/cwd", worktreePath: "/wt/y" }),
+    );
+
+    const peersForA = reg.querySessions({
+      cwd: "/shared/cwd",
+      excludeSessionId: "a",
+    });
+    assert.equal(peersForA.length, 1);
+    assert.equal(peersForA[0].sessionId, "b");
+
+    const byWorktree = reg.querySessions({
+      worktree: "/wt/x",
+      excludeSessionId: "a",
+    });
+    assert.equal(byWorktree.length, 1);
+    assert.equal(byWorktree[0].sessionId, "b");
+
+    reg.destroy();
+  });
+
+  it("querySessions omits stale sessions", async () => {
+    const reg = createSynapseRegistry({
+      persistPath,
+      localHeartbeatIntervalMs: 5,
+      localTimeoutMs: 15,
+    });
+    reg.register(baseMeta({ sessionId: "headless-dead", cwd: "/shared" }));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(reg.getSession("headless-dead").status, "stale");
+
+    const peers = reg.querySessions({ cwd: "/shared" });
+    assert.equal(peers.length, 0);
+
+    reg.destroy();
+  });
+
+  it("interactive session is not stale before its 5-min TTL but goes idle", async () => {
+    const reg = createSynapseRegistry({
+      persistPath,
+      // Headless local would go stale at 15ms; interactive must NOT.
+      localHeartbeatIntervalMs: 5,
+      localTimeoutMs: 15,
+      // Interactive: idle after 10ms (interval), stale only after 5s (TTL).
+      interactiveHeartbeatIntervalMs: 10,
+      interactiveTimeoutMs: 5_000,
+    });
+
+    let idleCaught = null;
+    reg.onIdle((session) => {
+      idleCaught = session;
+    });
+
+    reg.register(
+      baseMeta({ sessionId: "ix", sessionKind: "interactive", cwd: "/ix" }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    const session = reg.getSession("ix");
+    assert.equal(session.status, "idle");
+    assert.ok(idleCaught !== null);
+    assert.equal(idleCaught.sessionId, "ix");
+    // Idle sessions are still live peers.
+    assert.equal(reg.querySessions({ cwd: "/ix" }).length, 1);
+
+    reg.destroy();
+  });
+
+  it("interactive session becomes stale only after its TTL", async () => {
+    const reg = createSynapseRegistry({
+      persistPath,
+      interactiveHeartbeatIntervalMs: 5,
+      interactiveTimeoutMs: 25,
+    });
+    reg.register(baseMeta({ sessionId: "ix2", sessionKind: "interactive" }));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    assert.equal(reg.getSession("ix2").status, "stale");
+    reg.destroy();
+  });
+
+  it("projectPeer redacts raw cwd/pid and exposes label/hash + sameCwd", () => {
+    const reg = createSynapseRegistry({ persistPath });
+    reg.register(
+      baseMeta({
+        sessionId: "peer-1",
+        cwd: "/home/dev/secret-project",
+        pid: 9001,
+        worktreePath: "/home/dev/secret-project/.wt/shard",
+        branch: "feature/x",
+        sessionKind: "interactive",
+      }),
+    );
+
+    const [match] = reg.querySessions({ cwd: "/home/dev/secret-project" });
+    const projected = projectPeer(match, { cwd: "/home/dev/secret-project" });
+
+    // Raw path/pid must never leak.
+    assert.equal(projected.cwd, undefined);
+    assert.equal(projected.pid, undefined);
+    assert.equal(projected.dirtyFiles, undefined);
+    // Redacted correlates present.
+    assert.equal(projected.cwdLabel, "secret-project");
+    assert.ok(projected.cwdHash.length > 0);
+    assert.equal(projected.sameCwd, true);
+    assert.equal(projected.worktreeLabel, "shard");
+    assert.equal(projected.branch, "feature/x");
+    assert.equal(projected.sessionKind, "interactive");
+
+    // Different caller cwd → sameCwd false.
+    const other = projectPeer(match, { cwd: "/elsewhere" });
+    assert.equal(other.sameCwd, false);
 
     reg.destroy();
   });

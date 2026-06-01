@@ -63,6 +63,8 @@ const CORE_DIRS = [
   "hub/team/retry-state-machine.mjs",
   "hub/team/claude-daemon-control.mjs",
   "hub/team/claude-session-projection.mjs",
+  // dep-free helper imported by core's session-start/end hooks (peer-discovery)
+  "hub/team/synapse-http.mjs",
   "hub/workers/worker-utils.mjs", // shared utility
   "mesh",
 ];

@@ -48,6 +48,37 @@ describe("synapse-http helpers", () => {
     ]);
   });
 
+  it("register는 인터랙티브 peer 필드(cwd/pid/sessionKind)를 그대로 전달한다", async () => {
+    const calls = [];
+    registerSynapseSession(
+      {
+        sessionId: "interactive-1",
+        cwd: "/home/dev/proj",
+        pid: 4242,
+        worktreePath: "/home/dev/proj",
+        branch: "main",
+        host: "local",
+        sessionKind: "interactive",
+        isRemote: false,
+      },
+      {
+        fetchImpl: async (url, init) => {
+          calls.push({ url, init });
+          return { ok: true };
+        },
+      },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(calls[0].url, "http://127.0.0.1:27888/synapse/register");
+    const body = JSON.parse(calls[0].init.body);
+    assert.equal(body.sessionId, "interactive-1");
+    assert.equal(body.cwd, "/home/dev/proj");
+    assert.equal(body.pid, 4242);
+    assert.equal(body.sessionKind, "interactive");
+    assert.equal(body.isRemote, false);
+  });
+
   it("heartbeat는 sessionId와 partial meta를 함께 보낸다", async () => {
     const calls = [];
     heartbeatSynapseSession(

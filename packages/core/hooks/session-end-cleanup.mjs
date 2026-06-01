@@ -9,6 +9,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { unregisterSynapseSession } from "../hub/team/synapse-http.mjs";
 
 const MARKER = "[session-end-cleanup]";
 const STALE_MS = 30 * 60 * 1000;
@@ -291,6 +292,17 @@ function buildOutput(summary, cleanup, tmuxReport) {
 
 export function run(input, env = process.env) {
   if (input?.hook_event_name !== "SessionEnd") return "";
+
+  // Best-effort Synapse unregister (fire-and-forget). Crash-safe: if this hook
+  // never fires, the 5-min interactive TTL eventually marks the row stale, so
+  // unregister is an optimization, not a correctness dependency. Never throws,
+  // never changes the report-only stdout contract below.
+  try {
+    const sessionId = String(input?.session_id || "").trim();
+    if (sessionId) unregisterSynapseSession(sessionId);
+  } catch {
+    /* swallow — report-only charter preserved */
+  }
 
   const root = env.CLAUDE_CWD || process.cwd();
   const statePath = join(root, ".triflux", "subagents", "subagents.json");

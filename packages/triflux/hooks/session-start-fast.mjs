@@ -10,8 +10,10 @@
 //
 // external source 훅 (session-vault 등)은 여전히 execFile로 실행된다.
 
+import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { registerSynapseSession } from "../hub/team/synapse-http.mjs";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -19,6 +21,64 @@ const SCRIPTS = join(__dirname, "..", "scripts");
 const importMod = (p) => import(pathToFileURL(p).href);
 
 const log = createModuleLogger("session-start-fast");
+
+/**
+ * SessionStart 페이로드(JSON 문자열)에서 session_id / cwd 를 추출한다.
+ * 파싱 실패는 빈 객체로 흡수한다 (BLOCKING path 에 절대 영향 없음).
+ */
+function parseStartPayload(stdinData) {
+  try {
+    const raw = typeof stdinData === "string" ? stdinData : "";
+    return raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** cwd 기준 git 컨텍스트(worktree root / branch)를 best-effort 로 수집. */
+function gitContext(cwd) {
+  const run = (args) => {
+    try {
+      return execFileSync("git", args, {
+        cwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 2000,
+      }).trim();
+    } catch {
+      return "";
+    }
+  };
+  const worktreePath = run(["rev-parse", "--show-toplevel"]) || cwd;
+  const branch = run(["rev-parse", "--abbrev-ref", "HEAD"]);
+  return { worktreePath, branch };
+}
+
+/**
+ * 인터랙티브 세션을 Synapse 레지스트리에 self-register (fire-and-forget).
+ * hub 미응답이면 silent no-op. BLOCKING path 에 latency 0.
+ */
+function registerInteractiveSession(stdinData) {
+  try {
+    const payload = parseStartPayload(stdinData);
+    const sessionId = String(payload?.session_id || "").trim();
+    if (!sessionId) return;
+    const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
+    const { worktreePath, branch } = gitContext(cwd);
+    registerSynapseSession({
+      sessionId,
+      cwd,
+      pid: process.pid,
+      worktreePath,
+      branch,
+      host: "local",
+      sessionKind: "interactive",
+      isRemote: false,
+    });
+  } catch {
+    /* best-effort — never affects session start */
+  }
+}
 
 /**
  * BLOCKING 훅을 순차 실행. 하나라도 throw하면 로그만 남기고 계속.
@@ -173,6 +233,9 @@ function runBackground(stdinData) {
   importMod(join(SCRIPTS, "preflight-cache.mjs"))
     .then((mod) => mod.run(stdinData))
     .catch(() => {}); // 완전 무시
+
+  // Synapse: 인터랙티브 세션 self-register (fire-and-forget, hub 미응답 무시)
+  registerInteractiveSession(stdinData);
 
   // session-vault은 external source — hook-orchestrator가 execFile로 실행
 }

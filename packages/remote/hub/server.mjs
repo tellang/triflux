@@ -56,7 +56,10 @@ import { createStoreAdapter } from "./store-adapter.mjs";
 import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
 import { createSwarmLocks } from "./team/swarm-locks.mjs";
-import { createSynapseRegistry } from "./team/synapse-registry.mjs";
+import {
+  createSynapseRegistry,
+  projectPeer,
+} from "./team/synapse-registry.mjs";
 import { registerTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
 import { createTools } from "./tools.mjs";
 import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
@@ -1299,12 +1302,32 @@ export async function startHub({
       }
 
       // ── Synapse Layer 5: session registry + locks + preflight routes ──
+      // Admin/raw snapshot (loopback-only). Returns raw cwd/pid for local
+      // admin/HUD use; the redacted peer surface is GET /synapse/peers.
       if (path === "/synapse/sessions" && req.method === "GET") {
         return writeJson(res, 200, {
           ok: true,
           ...synapseRegistry.snapshot(),
           ts: Date.now(),
         });
+      }
+
+      // Redacted peer-discovery surface. Returns co-located live peers (same
+      // cwd / worktree) with raw cwd/pid stripped — only label/hash + booleans.
+      if (path === "/synapse/peers" && req.method === "GET") {
+        const query = new URL(req.url, `http://${host}`).searchParams;
+        const cwd = query.get("cwd") || "";
+        const worktree = query.get("worktree") || "";
+        const excludeSessionId = query.get("excludeSessionId") || "";
+        const matches = synapseRegistry.querySessions({
+          cwd,
+          worktree,
+          excludeSessionId,
+        });
+        const peers = matches.map((session) =>
+          projectPeer(session, { cwd, worktree }),
+        );
+        return writeJson(res, 200, { ok: true, peers, ts: Date.now() });
       }
 
       if (path === "/synapse/register" && req.method === "POST") {

@@ -1,14 +1,44 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 
 const DEFAULT_LOCAL_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_LOCAL_TIMEOUT_MS = 30_000;
 const DEFAULT_REMOTE_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_REMOTE_TIMEOUT_MS = 90_000;
+// Interactive (Claude/Codex) sessions idle for long stretches; a 30s local
+// timeout produces stale false-positives. 5-minute TTL + an `idle` state
+// distinguishes "alive but inactive" from "presumed dead".
+const DEFAULT_INTERACTIVE_HEARTBEAT_INTERVAL_MS = 60_000;
+const DEFAULT_INTERACTIVE_TIMEOUT_MS = 300_000;
+
+const VALID_SESSION_KINDS = new Set(["interactive", "headless"]);
 
 function normalizeSessionId(sessionId) {
   if (sessionId == null) return "";
   return String(sessionId).trim();
+}
+
+function normalizeSessionKind(raw) {
+  return VALID_SESSION_KINDS.has(raw) ? raw : "headless";
+}
+
+// Short, stable, non-reversible hash of a path so peers can correlate co-located
+// sessions without leaking the raw filesystem path (cf. AccountBroker redaction).
+function shortHash(value) {
+  const str = String(value ?? "");
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = (h * 33) ^ str.charCodeAt(i);
+  }
+  return (h >>> 0).toString(36);
+}
+
+// Last path segment / basename of a directory, used as a human-readable label
+// in redacted peer projections.
+function pathLabel(value) {
+  const str = String(value ?? "").replace(/[/\\]+$/, "");
+  if (!str) return "";
+  return basename(str);
 }
 
 function cloneSession(session) {
@@ -24,6 +54,13 @@ function sanitizeSession(raw, fallbackSessionId = "") {
   const sessionId = normalizeSessionId(raw?.sessionId ?? fallbackSessionId);
   if (!sessionId) return null;
 
+  const status =
+    raw?.status === "stale" ||
+    raw?.status === "expired" ||
+    raw?.status === "idle"
+      ? raw.status
+      : "active";
+
   return {
     sessionId,
     host: typeof raw?.host === "string" ? raw.host : "local",
@@ -33,11 +70,39 @@ function sanitizeSession(raw, fallbackSessionId = "") {
     taskSummary: typeof raw?.taskSummary === "string" ? raw.taskSummary : "",
     lastHeartbeat:
       typeof raw?.lastHeartbeat === "number" ? raw.lastHeartbeat : Date.now(),
-    status:
-      raw?.status === "stale" || raw?.status === "expired"
-        ? raw.status
-        : "active",
+    status,
     isRemote: Boolean(raw?.isRemote),
+    // Additive fields (peer-discovery). Defaults keep pre-existing persist rows
+    // (no cwd/pid/sessionKind) loading cleanly — no persist version bump needed.
+    cwd: typeof raw?.cwd === "string" ? raw.cwd : "",
+    pid: typeof raw?.pid === "number" ? raw.pid : null,
+    sessionKind: normalizeSessionKind(raw?.sessionKind),
+  };
+}
+
+// Pure redacted projection of a session for the peer-discovery route. Raw
+// `cwd`/`pid` and `dirtyFiles` are NEVER exposed; only label/hash + booleans
+// computed against the caller's query args (cf. AccountBroker.publicSnapshot).
+export function projectPeer(session, query = {}) {
+  const cwd = typeof session?.cwd === "string" ? session.cwd : "";
+  const worktreePath =
+    typeof session?.worktreePath === "string" ? session.worktreePath : "";
+  const queryCwd = typeof query?.cwd === "string" ? query.cwd : "";
+  const queryWorktree =
+    typeof query?.worktree === "string" ? query.worktree : "";
+
+  return {
+    sessionId: typeof session?.sessionId === "string" ? session.sessionId : "",
+    branch: typeof session?.branch === "string" ? session.branch : "",
+    sessionKind: normalizeSessionKind(session?.sessionKind),
+    status: typeof session?.status === "string" ? session.status : "active",
+    host: typeof session?.host === "string" ? session.host : "local",
+    isRemote: Boolean(session?.isRemote),
+    sameCwd: Boolean(queryCwd) && cwd === queryCwd,
+    sameWorktree: Boolean(queryWorktree) && worktreePath === queryWorktree,
+    cwdLabel: pathLabel(cwd),
+    cwdHash: cwd ? shortHash(cwd) : "",
+    worktreeLabel: pathLabel(worktreePath),
   };
 }
 
@@ -49,11 +114,14 @@ export function createSynapseRegistry(opts = {}) {
     localTimeoutMs = DEFAULT_LOCAL_TIMEOUT_MS,
     remoteHeartbeatIntervalMs = DEFAULT_REMOTE_HEARTBEAT_INTERVAL_MS,
     remoteTimeoutMs = DEFAULT_REMOTE_TIMEOUT_MS,
+    interactiveHeartbeatIntervalMs = DEFAULT_INTERACTIVE_HEARTBEAT_INTERVAL_MS,
+    interactiveTimeoutMs = DEFAULT_INTERACTIVE_TIMEOUT_MS,
   } = opts;
 
   const sessions = new Map();
   const monitors = new Map();
   const staleCallbacks = new Set();
+  const idleCallbacks = new Set();
   const removedCallbacks = new Set();
 
   function now() {
@@ -61,12 +129,16 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function intervalFor(session) {
+    if (session.sessionKind === "interactive") {
+      return interactiveHeartbeatIntervalMs;
+    }
     return session.isRemote
       ? remoteHeartbeatIntervalMs
       : localHeartbeatIntervalMs;
   }
 
   function timeoutFor(session) {
+    if (session.sessionKind === "interactive") return interactiveTimeoutMs;
     return session.isRemote ? remoteTimeoutMs : localTimeoutMs;
   }
 
@@ -130,6 +202,21 @@ export function createSynapseRegistry(opts = {}) {
     }
   }
 
+  function notifyIdle(session) {
+    const clone = cloneSession(session);
+    emitter?.emit("synapse.session.idle", {
+      sessionId: session.sessionId,
+      session: clone,
+    });
+    for (const callback of idleCallbacks) {
+      try {
+        callback(clone);
+      } catch {
+        /* no-op */
+      }
+    }
+  }
+
   function notifyRemoved(session) {
     const clone = cloneSession(session);
     emitter?.emit("synapse.session.removed", {
@@ -156,12 +243,30 @@ export function createSynapseRegistry(opts = {}) {
       if (!current) return;
 
       const elapsedMs = now() - current.lastHeartbeat;
-      if (elapsedMs > timeoutFor(current) && current.status !== "stale") {
-        const staled = { ...current, status: "stale" };
-        sessions.set(sessionId, staled);
+      if (elapsedMs > timeoutFor(current)) {
+        if (current.status !== "stale") {
+          const staled = { ...current, status: "stale" };
+          sessions.set(sessionId, staled);
+          schedulePersist();
+          setImmediate(() => {
+            if (!destroyed) notifyStale(staled);
+          });
+        }
+        return;
+      }
+
+      // Interactive sessions that miss the heartbeat interval but are still
+      // under the TTL are "alive but inactive" (idle), not "presumed dead".
+      if (
+        current.sessionKind === "interactive" &&
+        current.status === "active" &&
+        elapsedMs > intervalFor(current)
+      ) {
+        const idled = { ...current, status: "idle" };
+        sessions.set(sessionId, idled);
         schedulePersist();
         setImmediate(() => {
-          if (!destroyed) notifyStale(staled);
+          if (!destroyed) notifyIdle(idled);
         });
       }
     }, intervalFor(session));
@@ -252,6 +357,9 @@ export function createSynapseRegistry(opts = {}) {
       if (typeof partialMeta.isRemote === "boolean") {
         updated.isRemote = partialMeta.isRemote;
       }
+      if (typeof partialMeta.cwd === "string") updated.cwd = partialMeta.cwd;
+      if (typeof partialMeta.pid === "number") updated.pid = partialMeta.pid;
+      // sessionKind is set at register time and immutable on heartbeat.
     }
 
     sessions.set(normalized, updated);
@@ -286,9 +394,36 @@ export function createSynapseRegistry(opts = {}) {
     return session ? cloneSession(session) : null;
   }
 
+  // Peer-discovery primitive: returns sessions sharing the caller's cwd and/or
+  // worktree, excluding the caller's own session. Only live peers (active/idle)
+  // are returned — stale/expired rows are presumed dead and omitted.
+  function querySessions(filter = {}) {
+    const wantCwd = typeof filter?.cwd === "string" ? filter.cwd : "";
+    const wantWorktree =
+      typeof filter?.worktree === "string" ? filter.worktree : "";
+    const excludeId = normalizeSessionId(filter?.excludeSessionId);
+
+    return [...sessions.values()]
+      .filter((session) => {
+        if (session.status !== "active" && session.status !== "idle") {
+          return false;
+        }
+        if (excludeId && session.sessionId === excludeId) return false;
+        if (wantCwd && session.cwd !== wantCwd) return false;
+        if (wantWorktree && session.worktreePath !== wantWorktree) return false;
+        return true;
+      })
+      .map((session) => cloneSession(session));
+  }
+
   function onStale(callback) {
     if (typeof callback !== "function") return;
     staleCallbacks.add(callback);
+  }
+
+  function onIdle(callback) {
+    if (typeof callback !== "function") return;
+    idleCallbacks.add(callback);
   }
 
   function onRemoved(callback) {
@@ -321,7 +456,9 @@ export function createSynapseRegistry(opts = {}) {
     getActive,
     getAll,
     getSession,
+    querySessions,
     onStale,
+    onIdle,
     onRemoved,
     snapshot,
     destroy,
