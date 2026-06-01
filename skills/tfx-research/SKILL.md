@@ -1,7 +1,7 @@
 ---
 internal: true
 name: tfx-research
-description: "웹 검색/리서치가 필요할 때 사용한다. '검색해줘', '찾아봐', '최신 정보', '이거 뭐야', '심층 조사', '자세히 알아봐', 'deep research', '전면 리서치', '자율 리서치', '조사해', 'research and plan' 같은 요청에 반드시 사용. 추가로 'X 있나?', 'X 쓸 수 있나?', 'X 풀려있어?', 'X 어떻게 쓰는지', 'X 가능한가?', '방법 있나?', 'X 살아있나?' 같은 도구·기능 존재/사용법/상태 의문문에도 사용. 기본값은 3-CLI 멀티소스(Exa+Brave+Tavily) 합의 딥 리서치. 빠른 Antigravity Google Search 는 --quick. 자율 쿼리생성+보고서 모드는 --auto."
+description: "웹 검색/리서치가 필요할 때 사용한다. '검색해줘', '찾아봐', '최신 정보', '이거 뭐야', '심층 조사', '자세히 알아봐', 'deep research', '전면 리서치', '자율 리서치', '조사해', 'research and plan' 같은 요청에 반드시 사용. 추가로 'X 있나?', 'X 쓸 수 있나?', 'X 풀려있어?', 'X 어떻게 쓰는지', 'X 가능한가?', '방법 있나?', 'X 살아있나?' 같은 도구·기능 존재/사용법/상태 의문문에도 사용. 기본값은 2-CLI 멀티소스(Exa+Brave) 합의 딥 리서치. 빠른 Antigravity Google Search 는 --quick. 자율 쿼리생성+보고서 모드는 --auto."
 triggers:
   - tfx-research
   - 리서치
@@ -23,7 +23,7 @@ argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 
 > **ARGUMENTS 처리**: `--quick` → Quick. `--auto` → Auto. 그 외 → Deep (기본).
 
-> AI makes completeness near-free. 기본은 Claude(Exa/학술) + Codex(Brave/실용) + Antigravity(Tavily/DX) 3-CLI 멀티소스 교차검증 합의.
+> AI makes completeness near-free. 기본은 Claude(Exa/학술) + Codex(Brave/실용) 2-CLI 멀티소스 교차검증 합의 (Antigravity/Tavily는 agy --print idle 미도달 행으로 Deep 제외; Quick 단일 검색만 유지).
 > 빠른 단일 Google Search 는 `--quick`. 자율 쿼리생성+구조화 보고서 는 `--auto`.
 
 ---
@@ -32,7 +32,7 @@ argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 
 | 플래그 | 모드 | 특징 |
 |--------|------|------|
-| (없음) | **Deep** (기본) | 3-CLI 멀티소스 교차검증, consensus score |
+| (없음) | **Deep** (기본) | 2-CLI 멀티소스 교차검증, consensus score |
 | `--quick` | Quick | Antigravity 단일 Google Search |
 | `--auto` | Auto | 자율 쿼리생성(3-5개) + 검색 + 구조화 보고서 |
 
@@ -52,7 +52,6 @@ argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 |-----|-----|------|
 | Claude | Exa (neural semantic) | 학술/기술 깊이, 공식 문서, 벤치마크 |
 | Codex | Brave Search | 실용/구현/산업 사례 |
-| Antigravity | Tavily | 비용/운영/DX |
 
 ### Depth 모드 (`--depth` 플래그)
 
@@ -71,7 +70,7 @@ argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 - depth 에 따른 서브쿼리 생성
 - 각 쿼리에 관점(학술/실용/DX) 매핑
 
-#### Step 2: 3-CLI 독립 병렬 검색 (Anti-Herding) — Bash + Agent 동시 호출
+#### Step 2: 2-CLI 독립 병렬 검색 (Anti-Herding) — Bash + Agent 동시 호출
 
 **Agent (Claude + Exa):**
 ```
@@ -83,11 +82,10 @@ Agent(
 )
 ```
 
-**Bash (Codex + Brave, Antigravity + Tavily):**
+**Bash (Codex + Brave):**  *(Antigravity/agy 제외 — agy --print 는 무거운 리서치에서 idle 미도달 시 5분 행; route 에서 --print-timeout 180s 로 bound)*
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: {sub_queries}. 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:researcher' \
-  --assign 'antigravity:서브쿼리를 Tavily 로 검색. {sub_queries}. 관점: 비용/운영/DX. tavily_search search_depth=advanced, max_results=5, include_raw_content=false. 구조화.:researcher' \
   --timeout 600")
 ```
 
