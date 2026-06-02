@@ -19,19 +19,75 @@ import { fileURLToPath } from "node:url";
 import { renderBrief } from "./brief.mjs";
 
 const SCHEMA_VERSION = "cto-lake.v1";
-const SOURCE_IDS = [
-  "git",
-  "tfx_hub",
-  "tfx_swarm",
-  "tfx_team",
-  "tfx_synapse",
-  "ultragoal_omx",
-  "ultragoal_omc",
-  "handoffs",
-  "session_vault",
-  "agy",
-  "gbrain",
+const SOURCE_REGISTRY = [
+  {
+    id: "git",
+    kind: "repo",
+    probe: "git rev-parse, git branch, git status",
+    enabled: true,
+  },
+  {
+    id: "tfx_hub",
+    kind: "triflux-runtime-artifact",
+    probe: ".triflux/hub/status.json or host tfx-hub cache",
+    enabled: true,
+  },
+  {
+    id: "tfx_swarm",
+    kind: "triflux-runtime-artifact",
+    probe: ".triflux/swarm-locks.json or .triflux/swarm/*.json",
+    enabled: true,
+  },
+  {
+    id: "tfx_team",
+    kind: "triflux-runtime-artifact",
+    probe: ".triflux/team-state.json or host tfx-hub team cache",
+    enabled: true,
+  },
+  {
+    id: "tfx_synapse",
+    kind: "triflux-runtime-artifact",
+    probe: ".triflux/synapse registry or host tfx-hub synapse cache",
+    enabled: true,
+  },
+  {
+    id: "ultragoal_omx",
+    kind: "durable-goal-artifact",
+    probe: ".omx/ultragoal/goals.json",
+    enabled: true,
+  },
+  {
+    id: "ultragoal_omc",
+    kind: "durable-goal-artifact",
+    probe: ".omc/ultragoal/goals.json",
+    enabled: true,
+  },
+  {
+    id: "handoffs",
+    kind: "durable-handoff-artifact",
+    probe: ".omx/handoffs/*",
+    enabled: true,
+  },
+  {
+    id: "session_vault",
+    kind: "optional-durable-ref",
+    probe: ".triflux/session-vault.json, sessions_v2.db, or .session-vault",
+    enabled: true,
+  },
+  {
+    id: "agy",
+    kind: "optional-durable-ref",
+    probe: ".agy/state.json or .agy/refs.json",
+    enabled: true,
+  },
+  {
+    id: "gbrain",
+    kind: "optional-durable-ref",
+    probe: ".gbrain/refs.json or .gbrain/config.json",
+    enabled: true,
+  },
 ];
+const SOURCE_IDS = SOURCE_REGISTRY.map((source) => source.id);
 
 const SCHEMA_PATH = fileURLToPath(
   new URL("./current.schema.json", import.meta.url),
@@ -420,12 +476,97 @@ function buildSummary(current) {
   };
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function assertPlainObject(name, value) {
+  if (!isPlainObject(value)) throw new Error(`${name} must be object`);
+}
+
+function assertOnlyKeys(name, value, allowedKeys) {
+  assertPlainObject(name, value);
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new Error(`${name} has unexpected ${key}`);
+  }
+}
+
+function assertString(name, value) {
+  if (typeof value !== "string") throw new Error(`${name} must be string`);
+}
+
+function assertStringOrNull(name, value) {
+  if (typeof value !== "string" && value !== null) {
+    throw new Error(`${name} must be string or null`);
+  }
+}
+
+function assertDateTimeStringOrNull(name, value) {
+  assertStringOrNull(name, value);
+  if (value !== null && Number.isNaN(Date.parse(value))) {
+    throw new Error(`${name} must be date-time`);
+  }
+}
+
+function assertBoolean(name, value) {
+  if (typeof value !== "boolean") throw new Error(`${name} must be boolean`);
+}
+
+function validateLedgerEntry(entry, prefix = "ledger_tail entry") {
+  assertOnlyKeys(prefix, entry, ["ts", "event", "source", "summary", "ref"]);
+  assertDateTimeStringOrNull(`${prefix}.ts`, entry.ts);
+  if (entry.ts === null) throw new Error(`${prefix}.ts must be string`);
+  assertString(`${prefix}.event`, entry.event);
+  assertString(`${prefix}.source`, entry.source);
+  assertString(`${prefix}.summary`, entry.summary);
+  if (
+    entry.ref !== null &&
+    typeof entry.ref !== "string" &&
+    !isPlainObject(entry.ref)
+  ) {
+    throw new Error(`${prefix}.ref must be string, object, or null`);
+  }
+}
+
+function isValidLedgerEntry(entry) {
+  try {
+    validateLedgerEntry(entry);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readLedgerTail(lakeRoot, limit = 5) {
-  return readJsonLines(join(lakeRoot, "ledger.jsonl"), limit);
+  return readJsonLines(join(lakeRoot, "ledger.jsonl"), limit * 4)
+    .filter(isValidLedgerEntry)
+    .slice(-limit);
+}
+
+function validateSourceState(sourceId, source) {
+  const prefix = `current.json source ${sourceId}`;
+  assertOnlyKeys(prefix, source, [
+    "available",
+    "status",
+    "detail",
+    "collected_at",
+  ]);
+  assertBoolean(`${prefix}.available`, source.available);
+  assertString(`${prefix}.status`, source.status);
+  if (
+    source.detail !== null &&
+    typeof source.detail !== "string" &&
+    typeof source.detail !== "object"
+  ) {
+    throw new Error(`${prefix}.detail must be string, object, array, or null`);
+  }
+  assertDateTimeStringOrNull(`${prefix}.collected_at`, source.collected_at);
 }
 
 function validateCurrent(current) {
   const schema = readJson(SCHEMA_PATH);
+  assertOnlyKeys("current.json", current, schema.required);
   for (const field of schema.required) {
     if (!Object.hasOwn(current, field))
       throw new Error(`current.json missing ${field}`);
@@ -433,22 +574,37 @@ function validateCurrent(current) {
   if (current.schema_version !== SCHEMA_VERSION) {
     throw new Error(`current.json schema_version must be ${SCHEMA_VERSION}`);
   }
+  assertDateTimeStringOrNull("current.json.generated_at", current.generated_at);
+  if (current.generated_at === null)
+    throw new Error("current.json.generated_at must be string");
+
+  assertOnlyKeys("current.json.repo", current.repo, [
+    "root",
+    "branch",
+    "head",
+    "dirty",
+  ]);
+  assertString("current.json.repo.root", current.repo.root);
+  assertStringOrNull("current.json.repo.branch", current.repo.branch);
+  assertStringOrNull("current.json.repo.head", current.repo.head);
+  assertBoolean("current.json.repo.dirty", current.repo.dirty);
+
+  assertOnlyKeys(
+    "current.json.sources",
+    current.sources,
+    schema.properties.sources.required,
+  );
   for (const sourceId of schema.properties.sources.required) {
     const source = current.sources?.[sourceId];
     if (!source) throw new Error(`current.json missing source ${sourceId}`);
-    for (const field of schema.$defs.sourceState.required) {
-      if (!Object.hasOwn(source, field)) {
-        throw new Error(`current.json source ${sourceId} missing ${field}`);
-      }
-    }
+    validateSourceState(sourceId, source);
   }
+
+  assertPlainObject("current.json.summary", current.summary);
   if (!Array.isArray(current.ledger_tail))
     throw new Error("current.json ledger_tail must be array");
-  for (const entry of current.ledger_tail) {
-    for (const field of schema.$defs.ledgerEntry.required) {
-      if (!Object.hasOwn(entry, field))
-        throw new Error(`ledger_tail entry missing ${field}`);
-    }
+  for (const [index, entry] of current.ledger_tail.entries()) {
+    validateLedgerEntry(entry, `ledger_tail[${index}]`);
   }
 }
 
@@ -638,6 +794,7 @@ export async function runCollect(args = [], opts = {}) {
     ref: {
       current_json: "current.json",
       current_md: "current.md",
+      sources_json: "sources.json",
     },
   };
   const appended = await appendLedgerEvent(lakeRoot, event, stderr);
@@ -649,6 +806,11 @@ export async function runCollect(args = [], opts = {}) {
     `${JSON.stringify(current, null, 2)}\n`,
   );
   writeAtomic(join(lakeRoot, "current.md"), renderBrief(current));
+  writeAtomic(
+    join(lakeRoot, "sources.json"),
+    `${JSON.stringify(SOURCE_REGISTRY, null, 2)}
+`,
+  );
 
   if (opts.json === true || hasFlag(args, "--json")) {
     stdout.write(`${JSON.stringify(current, null, 2)}\n`);

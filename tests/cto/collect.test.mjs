@@ -150,6 +150,22 @@ describe("runCollect", () => {
       assert.ok(brief.startsWith("brief_version: cto-lake.v1\n"));
       assert.ok(Buffer.byteLength(brief, "utf8") <= 2048);
 
+      const registry = readJson(join(lakeRoot, "sources.json"));
+      const schema = readJson(SCHEMA_PATH.pathname);
+      assert.equal(registry.length, schema.properties.sources.required.length);
+      assert.deepEqual(
+        registry.map((source) => source.id).sort(),
+        [...schema.properties.sources.required].sort(),
+      );
+      for (const source of registry) {
+        assert.equal(typeof source.id, "string");
+        assert.equal(typeof source.kind, "string");
+        assert.ok(
+          typeof source.probe === "string" || typeof source.probe === "object",
+        );
+        assert.equal(typeof source.enabled, "boolean");
+      }
+
       const ledger = readJsonl(join(lakeRoot, "ledger.jsonl"));
       assert.equal(ledger.length, 1);
       assert.equal(ledger[0].event, "collect");
@@ -214,6 +230,37 @@ describe("runCollect", () => {
       assert.match(warnings.join(""), /ledger.*lock.*timeout/i);
       assert.ok(existsSync(join(lakeRoot, "current.json")));
       assert.ok(existsSync(join(lakeRoot, "current.md")));
+    } finally {
+      cleanup(rootDir);
+    }
+  });
+
+  it("excludes malformed ledger tail entries before writing current.json", async () => {
+    const rootDir = makeTempDir();
+    const lakeRoot = join(rootDir, ".test-lake");
+    try {
+      initGitRepo(rootDir);
+      mkdirSync(lakeRoot, { recursive: true });
+      writeFileSync(
+        join(lakeRoot, "ledger.jsonl"),
+        `${JSON.stringify({ ts: 123, event: "bad", source: "x", summary: {}, ref: null, extra: true })}\n`,
+        "utf8",
+      );
+
+      const current = await runCollect([], {
+        lakeRoot,
+        includeHostArtifacts: false,
+        rootDir,
+        stdout: { write() {} },
+        stderr: { write() {} },
+      });
+
+      assertCurrentMatchesSchema(current);
+      assert.equal(current.ledger_tail.length, 1);
+      assert.equal(current.ledger_tail[0].event, "collect");
+      assert.equal(typeof current.ledger_tail[0].ts, "string");
+      assert.equal(typeof current.ledger_tail[0].summary, "string");
+      assert.equal(Object.hasOwn(current.ledger_tail[0], "extra"), false);
     } finally {
       cleanup(rootDir);
     }

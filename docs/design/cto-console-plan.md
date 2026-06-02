@@ -42,6 +42,16 @@ Collectors must be read-only against upstream engines. They may write only the l
 
 `ledger.jsonl` is append-only and single-writer. A collector must acquire `.triflux/lake/ledger.jsonl.lock` before appending so concurrent collectors on this machine cannot interleave or corrupt JSONL lines.
 
+## Host-Local Source Boundary
+
+The collector is repo-local first. It reads `.triflux/*`, `.omx/*`, `.omc/*`, and other durable repo artifacts before considering host-local Triflux caches under `~/.claude/cache/tfx-hub/*`. Host-local cache reads are a discovery fallback for operators who want one CTO view of active local Triflux runtime state; they are not written back to upstream engines and can be disabled in tests or library calls with `includeHostArtifacts:false`.
+
+Because host-local cache files may be shared by multiple checkouts, every collected source remains tagged by `sources.{id}` plus `.triflux/lake/sources.json`. Consumers must treat the lake as a snapshot of readable evidence, not as ownership over the underlying hub, team, synapse, goal, memory, AGY, or gbrain systems.
+
+## Prompt Boundary
+
+`current.md` is injected only as read-only context. Hook and route injectors wrap it with explicit `CTO NORTH STAR - READ ONLY` boundaries, and `TFX_CTO_NORTH_STAR=0` disables injection for tests, automation, or operators who want no implicit prompt conditioning.
+
 ## Commands
 
 - `tfx cto collect`: refresh `.triflux/lake/current.json`, `.triflux/lake/current.md`, and append `.triflux/lake/ledger.jsonl` events.
