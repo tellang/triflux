@@ -27,6 +27,7 @@
     "bin",
     "tui",
     "config",
+    "cto",
     "skills",
     "!skills/tfx-workspace",
     "hooks",

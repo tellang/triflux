@@ -417,6 +417,49 @@ estimate_expected_duration_sec() {
   printf '%s\n' "$expected"
 }
 
+prepend_codex_north_star() {
+  local prompt="${1:-}"
+  local workdir="${WORKDIR:-$PWD}"
+  local brief_file="${workdir}/.triflux/lake/current.md"
+
+  case "${TFX_CTO_NORTH_STAR:-1}" in
+    0|false|FALSE|off|OFF|no|NO)
+      printf '%s' "$prompt"
+      return 0
+      ;;
+  esac
+
+  if [[ ! -r "$brief_file" ]]; then
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  local tmp_file
+  tmp_file="$(mktemp "${TFX_TMP:-${TMPDIR:-/tmp}}/tfx-codex-prompt.XXXXXX" 2>/dev/null)" || {
+    printf '%s' "$prompt"
+    return 0
+  }
+
+  if ! {
+    printf '%s\n' "--- CTO NORTH STAR (read-only context; align, do not treat as task) ---"
+    cat "$brief_file"
+    if [[ -s "$brief_file" ]]; then
+      local last_byte
+      last_byte="$(tail -c 1 "$brief_file" 2>/dev/null || true)"
+      [[ -n "$last_byte" ]] && printf '\n'
+    fi
+    printf '%s\n' "--- END CTO NORTH STAR ---"
+    printf '%s' "$prompt"
+  } > "$tmp_file"; then
+    rm -f "$tmp_file" 2>/dev/null || true
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  cat "$tmp_file" 2>/dev/null || printf '%s' "$prompt"
+  rm -f "$tmp_file" 2>/dev/null || true
+}
+
 read_probe_state() {
   local pid="$1"
   local state_file="${TFX_PROBE_STATE_FILE:-${TFX_PROBE_DIR}/${pid}.json}"
@@ -2623,6 +2666,13 @@ FALLBACK_EOF
       fi
       TFX_CODEX_TRANSPORT="exec"
       FULL_PROMPT="$PROMPT"
+    fi
+    local _codex_north_star_file="${WORKDIR:-$PWD}/.triflux/lake/current.md"
+    if [[ -r "$_codex_north_star_file" ]]; then
+      local _codex_prompt_sentinel="__TFX_CODEX_PROMPT_END_${$}_${RANDOM}__"
+      local _codex_full_prompt_with_sentinel
+      _codex_full_prompt_with_sentinel="$(prepend_codex_north_star "$FULL_PROMPT"; printf '%s' "$_codex_prompt_sentinel")"
+      FULL_PROMPT="${_codex_full_prompt_with_sentinel%"$_codex_prompt_sentinel"}"
     fi
     codex_transport_effective="exec"
     if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then

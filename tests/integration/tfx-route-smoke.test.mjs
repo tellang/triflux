@@ -72,6 +72,7 @@ function runBash(command, extraEnv = {}) {
       TFX_CLI_MODE: "auto",
       TFX_NO_CLAUDE_NATIVE: "0",
       TFX_CODEX_TRANSPORT: "exec",
+      TFX_CTO_NORTH_STAR: "0",
       TFX_WORKER_INDEX: "",
       TFX_SEARCH_TOOL: "",
       // #148: 테스트 환경에서는 실제 MCP probe 가 모두 dead 로 나와 early-fail 발생.
