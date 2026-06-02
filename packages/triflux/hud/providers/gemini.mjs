@@ -2,12 +2,14 @@
 // Gemini 쿼터 API / 세션 토큰 / RPM 트래커
 // ============================================================================
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import https from "node:https";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  ANTIGRAVITY_KEYCHAIN_ACCOUNT,
+  ANTIGRAVITY_KEYCHAIN_SERVICE,
   ANTIGRAVITY_MODEL_ABBREV,
   ANTIGRAVITY_OAUTH_PATHS,
   ANTIGRAVITY_SETTINGS_PATH,
@@ -61,7 +63,19 @@ export function getGeminiModelLabel(model) {
 
 // remainingFraction → 사용 퍼센트 변환 (remainingAmount가 있으면 절대값도 제공)
 export function deriveGeminiLimits(bucket) {
-  if (!bucket || bucket.remainingFraction == null) return null;
+  if (!bucket) return null;
+  // TODO(verify): Workspace quota 응답 모양 라이브 확인 필요
+  if (isGeminiUnlimitedBucket(bucket, bucket.remainingFraction)) {
+    return {
+      unlimited: true,
+      usedPct: null,
+      remaining: null,
+      limit: null,
+      resetTime: bucket.resetTime,
+      modelId: bucket.modelId,
+    };
+  }
+  if (bucket.remainingFraction == null) return null;
   const fraction = bucket.remainingFraction;
   const usedPct = clampPercent(Math.round((1 - fraction) * 100));
   // remainingAmount가 API에서 오면 절대값 역산 (Gemini CLI 방식)
@@ -83,6 +97,23 @@ export function deriveGeminiLimits(bucket) {
     resetTime: bucket.resetTime,
     modelId: bucket.modelId,
   };
+}
+
+function isUnlimitedValue(value) {
+  if (value === Infinity) return true;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "infinity" || normalized === "unlimited";
+}
+
+function isGeminiUnlimitedBucket(bucket, fraction) {
+  return (
+    bucket?.unlimited === true ||
+    isUnlimitedValue(fraction) ||
+    isUnlimitedValue(bucket?.limit) ||
+    isUnlimitedValue(bucket?.remaining) ||
+    isUnlimitedValue(bucket?.remainingAmount)
+  );
 }
 
 function getCredentialEmail(credential) {
@@ -165,12 +196,95 @@ export function deriveGeminiFamilyBucket(buckets) {
 }
 
 export function buildGeminiAuthContext(accountId) {
-  const oauth = readJson(GEMINI_OAUTH_PATH, null);
+  let oauth = readJson(GEMINI_OAUTH_PATH, null);
+  if (!oauth?.access_token) {
+    const keychainOAuth = getAntigravityTokenFromKeychain();
+    if (keychainOAuth?.access_token) {
+      oauth = { ...(oauth || {}), ...keychainOAuth };
+    }
+  }
   const tokenSource =
     oauth?.refresh_token || oauth?.id_token || oauth?.access_token || "";
   const tokenFingerprint = tokenSource ? makeHash(tokenSource) : "none";
   const cacheKey = `${accountId || "gemini-main"}::${tokenFingerprint}`;
   return { oauth, tokenFingerprint, cacheKey };
+}
+
+function firstPresent(...values) {
+  for (const value of values) {
+    if (value != null && value !== "") return value;
+  }
+  return null;
+}
+
+function normalizeExpiryDate(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+  }
+  if (typeof value === "string") {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return normalizeExpiryDate(numeric);
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function normalizeAntigravityCredential(parsed) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const accessToken = firstPresent(
+    parsed.access_token,
+    parsed.accessToken,
+    parsed.access?.token,
+    parsed.token,
+  );
+  if (!accessToken) return null;
+  const normalized = { ...parsed, access_token: accessToken };
+  const idToken = firstPresent(parsed.id_token, parsed.idToken);
+  if (idToken) normalized.id_token = idToken;
+  const refreshToken = firstPresent(parsed.refresh_token, parsed.refreshToken);
+  if (refreshToken) normalized.refresh_token = refreshToken;
+  const expiryDate = normalizeExpiryDate(
+    firstPresent(
+      parsed.expiry_date,
+      parsed.expiryDate,
+      parsed.expiry,
+      parsed.expires_at,
+      parsed.expiresAt,
+    ),
+  );
+  if (expiryDate != null) normalized.expiry_date = expiryDate;
+  return normalized;
+}
+
+function getAntigravityTokenFromKeychain() {
+  try {
+    const result = spawnSync(
+      "security",
+      [
+        "find-generic-password",
+        "-s",
+        ANTIGRAVITY_KEYCHAIN_SERVICE,
+        "-a",
+        ANTIGRAVITY_KEYCHAIN_ACCOUNT,
+        "-w",
+      ],
+      { encoding: "utf8", timeout: 3000 },
+    );
+    if (result.status !== 0) return null;
+    const stdout = result.stdout?.trim();
+    if (!stdout) return null;
+    try {
+      return normalizeAntigravityCredential(JSON.parse(stdout));
+    } catch {
+      return { access_token: stdout };
+    }
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================================

@@ -158,6 +158,8 @@ export const ANTIGRAVITY_OAUTH_PATHS = [
   join(homedir(), ".gemini", "antigravity-cli", "credentials.json"),
   GEMINI_OAUTH_PATH,
 ];
+export const ANTIGRAVITY_KEYCHAIN_SERVICE = "gemini";
+export const ANTIGRAVITY_KEYCHAIN_ACCOUNT = "antigravity";
 export const ANTIGRAVITY_SETTINGS_PATH = join(
   homedir(),
   ".gemini",
