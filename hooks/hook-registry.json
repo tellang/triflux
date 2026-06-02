@@ -158,6 +158,17 @@
         "timeout": 5,
         "blocking": false,
         "description": "키워드 매칭 → 스킬 자동 라우팅"
+      },
+      {
+        "id": "tfx-cto-north-star-brief",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/cto-north-star-brief.mjs\"",
+        "priority": 2,
+        "enabled": true,
+        "timeout": 2,
+        "blocking": false,
+        "description": "CTO north-star brief를 UserPromptSubmit additionalContext로 변경 시 주입"
       }
     ],
     "SessionStart": [
