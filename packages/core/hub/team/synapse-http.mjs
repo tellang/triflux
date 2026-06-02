@@ -127,8 +127,12 @@ export function drainPendingSynapse(timeoutMs = 1000) {
   return Promise.race([
     settled,
     new Promise((resolve) => {
-      const t = setTimeout(resolve, ms);
-      if (typeof t.unref === "function") t.unref();
+      // Keep this timer ref'ed: drainPendingSynapse() is awaited specifically
+      // to hold the process open until either in-flight POSTs settle or the
+      // bounded drain budget expires. An unref'ed timer can let Node's test
+      // runner/process exit before the Promise resolves when no other handles
+      // remain.
+      setTimeout(resolve, ms);
     }),
   ]);
 }
