@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -18,7 +19,28 @@ async function importHudModule(relativePath) {
   return import(url.href);
 }
 
-function makeKeychainHome(secretPayload) {
+function buildGeminiAuthContextInChild(accountId) {
+  const providerUrl = new URL("hud/providers/gemini.mjs", repoRoot);
+  providerUrl.searchParams.set("t", `${Date.now()}-${Math.random()}`);
+  const script = `
+    const mod = await import(${JSON.stringify(providerUrl.href)});
+    const context = mod.buildGeminiAuthContext(${JSON.stringify(accountId)});
+    process.stdout.write(JSON.stringify(context));
+  `;
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", script],
+    {
+      encoding: "utf8",
+      env: process.env,
+    },
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  return JSON.parse(result.stdout);
+}
+
+function makeKeychainHome(secretPayload, options = {}) {
+  const exitStatus = options.exitStatus ?? 0;
   const homeDir = mkdtempSync(join(tmpdir(), "triflux-gemini-hud-"));
   const binDir = join(homeDir, "bin");
   mkdirSync(binDir, { recursive: true });
@@ -27,7 +49,7 @@ function makeKeychainHome(secretPayload) {
     `#!/bin/sh
 if [ "$1" = "find-generic-password" ] && [ "$2" = "-s" ] && [ "$3" = "gemini" ] && [ "$4" = "-a" ] && [ "$5" = "antigravity" ] && [ "$6" = "-w" ]; then
   printf '%s' '${secretPayload.replaceAll("'", "'\\''")}'
-  exit 0
+  exit ${exitStatus}
 fi
 exit 2
 `,
@@ -35,6 +57,16 @@ exit 2
   );
   chmodSync(join(binDir, "security"), 0o755);
   return { homeDir, binDir };
+}
+
+function writeGeminiOauth(homeDir, oauth) {
+  const geminiDir = join(homeDir, ".gemini");
+  mkdirSync(geminiDir, { recursive: true });
+  writeFileSync(
+    join(geminiDir, "oauth_creds.json"),
+    JSON.stringify(oauth),
+    "utf8",
+  );
 }
 
 describe("Gemini HUD Antigravity auth", () => {
@@ -51,15 +83,132 @@ describe("Gemini HUD Antigravity auth", () => {
       process.env.HOME = homeDir;
       process.env.PATH = `${binDir}:${originalPath || ""}`;
 
-      const { buildGeminiAuthContext } = await importHudModule(
-        "hud/providers/gemini.mjs",
-      );
-      const context = buildGeminiAuthContext("agy-main");
+      const context = buildGeminiAuthContextInChild("agy-main");
 
       assert.equal(context.oauth.access_token, "keychain-access-token");
       assert.equal(context.oauth.expiry_date > Date.now(), true);
       assert.notEqual(context.tokenFingerprint, "none");
       assert.match(context.cacheKey, /^agy-main::/);
+    } finally {
+      process.env.HOME = originalHome;
+      process.env.PATH = originalPath;
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses Antigravity Keychain raw token when security returns non-JSON", async () => {
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PATH;
+    const { homeDir, binDir } = makeKeychainHome("raw-keychain-token");
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.PATH = `${binDir}:${originalPath || ""}`;
+
+      const context = buildGeminiAuthContextInChild("agy-main");
+
+      assert.equal(context.oauth.access_token, "raw-keychain-token");
+      assert.notEqual(context.tokenFingerprint, "none");
+    } finally {
+      process.env.HOME = originalHome;
+      process.env.PATH = originalPath;
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps file oauth when Keychain lookup fails", async () => {
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PATH;
+    const { homeDir, binDir } = makeKeychainHome("", { exitStatus: 2 });
+    writeGeminiOauth(homeDir, {
+      access_token: "file-access-token",
+      refresh_token: "file-refresh-token",
+    });
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.PATH = `${binDir}:${originalPath || ""}`;
+
+      const context = buildGeminiAuthContextInChild("agy-main");
+
+      assert.equal(context.oauth.access_token, "file-access-token");
+      assert.equal(context.oauth.refresh_token, "file-refresh-token");
+    } finally {
+      process.env.HOME = originalHome;
+      process.env.PATH = originalPath;
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses Keychain token when file access token is expired", async () => {
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PATH;
+    const staleExpiry = Date.now() - 60_000;
+    const { homeDir, binDir } = makeKeychainHome("replacement-keychain-token");
+    writeGeminiOauth(homeDir, {
+      access_token: "expired-file-token",
+      expiry_date: staleExpiry,
+      refresh_token: "file-refresh-token",
+    });
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.PATH = `${binDir}:${originalPath || ""}`;
+
+      const context = buildGeminiAuthContextInChild("agy-main");
+
+      assert.equal(context.oauth.access_token, "replacement-keychain-token");
+      assert.equal(context.oauth.expiry_date, undefined);
+      assert.equal(context.oauth.refresh_token, "file-refresh-token");
+    } finally {
+      process.env.HOME = originalHome;
+      process.env.PATH = originalPath;
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps valid file access token even when Keychain has Antigravity token", async () => {
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PATH;
+    const { homeDir, binDir } = makeKeychainHome("keychain-token");
+    writeGeminiOauth(homeDir, {
+      access_token: "valid-file-token",
+      expiry_date: Date.now() + 60_000,
+    });
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.PATH = `${binDir}:${originalPath || ""}`;
+
+      const context = buildGeminiAuthContextInChild("gemini-main");
+
+      assert.equal(context.oauth.access_token, "valid-file-token");
+    } finally {
+      process.env.HOME = originalHome;
+      process.env.PATH = originalPath;
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not keep stale file expiry when using Keychain raw token", async () => {
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PATH;
+    const staleExpiry = Date.now() - 60_000;
+    const { homeDir, binDir } = makeKeychainHome("fresh-keychain-raw-token");
+    writeGeminiOauth(homeDir, {
+      expiry_date: staleExpiry,
+      refresh_token: "file-refresh-token",
+    });
+
+    try {
+      process.env.HOME = homeDir;
+      process.env.PATH = `${binDir}:${originalPath || ""}`;
+
+      const context = buildGeminiAuthContextInChild("agy-main");
+
+      assert.equal(context.oauth.access_token, "fresh-keychain-raw-token");
+      assert.equal(context.oauth.expiry_date, undefined);
+      assert.equal(context.oauth.refresh_token, "file-refresh-token");
     } finally {
       process.env.HOME = originalHome;
       process.env.PATH = originalPath;

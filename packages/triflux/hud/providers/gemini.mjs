@@ -197,10 +197,18 @@ export function deriveGeminiFamilyBucket(buckets) {
 
 export function buildGeminiAuthContext(accountId) {
   let oauth = readJson(GEMINI_OAUTH_PATH, null);
-  if (!oauth?.access_token) {
+  const fileExpired =
+    oauth?.expiry_date != null && oauth.expiry_date < Date.now();
+  // Preserve a valid Gemini file token; agy Keychain is only a missing/expired fallback.
+  if (!oauth?.access_token || fileExpired) {
     const keychainOAuth = getAntigravityTokenFromKeychain();
     if (keychainOAuth?.access_token) {
-      oauth = { ...(oauth || {}), ...keychainOAuth };
+      const {
+        expiry_date: _dropExpiry,
+        access_token: _dropToken,
+        ...fileRest
+      } = oauth || {};
+      oauth = { ...fileRest, ...keychainOAuth };
     }
   }
   const tokenSource =
