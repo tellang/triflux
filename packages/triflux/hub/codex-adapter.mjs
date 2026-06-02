@@ -101,8 +101,8 @@ export function buildLaunchScript(opts = {}) {
 
 // ── Exec args builder ───────────────────────────────────────────
 
-// TODO(cto-north-star): This adapter assembles Codex prompts outside
-// scripts/tfx-route.sh. Wire .triflux/lake/current.md here once the
+// CTO boundary: this adapter assembles Codex prompts outside
+// scripts/tfx-route.sh. Keep north-star injection in tfx-route.sh until
 // launcher/circuit-broker workdir contracts have focused coverage.
 export function buildExecArgs(opts = {}) {
   const prompt = typeof opts.prompt === "string" ? opts.prompt : "";
