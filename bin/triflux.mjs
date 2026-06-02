@@ -491,6 +491,15 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     },
   },
+  cto: {
+    usage: "tfx cto <collect|status|dashboard> [options]",
+    description: "repo-local authority layer console",
+    subcommands: {
+      collect: "refresh .triflux/lake/current.json from authority sources",
+      status: "print the current authority summary",
+      dashboard: "render the CTO console dashboard, optionally with --watch",
+    },
+  },
   multi: {
     usage:
       "tfx multi [--dashboard-layout lite|single|split-2col|split-3col|auto] <subcommand|task>",
@@ -7464,6 +7473,18 @@ async function main() {
       console.log(
         `\n  ${GREEN_BRIGHT}✓${RESET} tray 시작됨 (PID ${child.pid})\n`,
       );
+      return;
+    }
+    case "cto": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("cto");
+        return;
+      }
+      const { pathToFileURL } = await import("node:url");
+      const { cmdCto } = await import(
+        pathToFileURL(join(PKG_ROOT, "cto", "index.mjs")).href
+      );
+      await cmdCto(cmdArgs, { json: JSON_OUTPUT });
       return;
     }
     case "multi": {
