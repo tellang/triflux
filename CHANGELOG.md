@@ -4,6 +4,28 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.29.0] - 2026-06-02
+
+### Added
+
+- **`feat(hud)` (commit `792399eb`)** Claude 신규 주간 사용량 버킷(Sonnet/Opus) 보조 표시. `/api/oauth/usage` 응답의 `seven_day_sonnet`/`seven_day_opus` 를 조건부 파싱(null 버킷 키 생략)하고, 독립 한도가 아닌 all-models nested 가드레일이므로 값>0 일 때만 `Sn:`/`Op:` 보조 셀로 노출(3-bucket 동등 나열 아님). compact/full tier 에 노출, nano/micro 는 폭상 생략.
+- **`feat(hub)` (commit `e4a5684f`)** Synapse Registry 기반 interactive session peer-discovery.
+
+### Fixed
+
+- **`fix(hud)` (commit `792399eb`)** Claude 토큰 게이지가 비던 근본 원인 해결. Keychain service-name 을 `CLAUDE_CONFIG_DIR` 의 sha256(raw 값) 으로 분리(`Claude Code-credentials-<hash8>`)하고 account=username 우선 + 미만료 우선으로 선택해, 격리 세션(`~/.claude/.omc-launch`)에서 만료된 default 항목을 골라 401 로 빈칸이 되던 문제를 잡는다. 추가로 429/에러 시 `readClaudeUsageSnapshot` 의 `isStale` 플래그를 렌더까지 전파하고 compact/full tier 에 `[stale]` 배지를 노출하며, `/api/oauth/usage` 및 token refresh 요청에 `User-Agent` 헤더를 추가(헤더 누락 시 aggressive 429 무한 버킷 회피). packages/{core,triflux} 3-layer mirror 동반.
+- **`fix(hub)` (commits `05a38e3c`, `2eb48208`, `bf9e4c0d`, `991be2fa`)** session peer-discovery 보강: re-register 시 stale/expired row revive(resume 세션 재노출), `getActive()` 가 idle interactive 세션도 포함(git-preflight 가 live peer 인식), SessionStart Synapse register 를 종료 전 flush + raw 세션 라우트 loopback-gate, Codex 리뷰 결함 수정.
+- **`fix(packages)` (commits `dded022d`, `3c1dc50a`, `9098c0d6`)** packages/core/hud 및 claude daemon helper mirror drift 동기화 + `check-mirror` 가드 강화.
+
+### Changed
+
+- **`refactor(jsonrpc)` (commit `5bf4c9a9`)** 공유 `JsonRpcDispatchBase` 추출.
+
+### Tests
+
+- HUD: `parseClaudeUsageResponse` 신규 Sonnet/Opus 버킷(null 생략 포함), Keychain configDir/account 선택, `isStale` 배지 케이스 추가.
+- packages-sync: UDS + jsonrpc-core 파일 mirror drift 가드.
+
 ## [10.28.1] - 2026-06-01
 
 ### Fixed
