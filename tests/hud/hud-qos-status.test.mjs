@@ -106,13 +106,14 @@ after(() => {
   }
 });
 
-function runHudWithDimensions(cols, rows, extraEnv = {}) {
+function runHudWithDimensions(cols, rows, extraEnv = {}, options = {}) {
   try {
     const input = JSON.stringify({
       context_window: { used_percentage: 25, context_window_size: 200000 },
     });
     const output = execSync(`node "${hudScriptPath}"`, {
       input,
+      cwd: options.cwd,
       env: {
         ...process.env,
         COLUMNS: cols.toString(),
@@ -293,5 +294,39 @@ describe("HUD Breakpoints", () => {
     } finally {
       rmSync(preflightPath, { force: true });
     }
+  });
+
+  it("renders the CTO north-star row and keeps nano/micro tiers compact", () => {
+    const projectDir = join(mockHomeDir, "cto-project");
+    const lakeDir = join(projectDir, ".triflux", "lake");
+    mkdirSync(lakeDir, { recursive: true });
+    writeFileSync(
+      join(lakeDir, "current.md"),
+      [
+        "brief_version: cto-lake.v1",
+        "repo_state",
+        "summary: focus on the north-star row",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const fullOutput = stripAnsiText(
+      runHudWithDimensions(120, 40, {}, { cwd: projectDir }),
+    );
+    assert.match(fullOutput, /^\^: cto:focus on the north-star row/m);
+    assert.match(fullOutput, /^\^: .* \| cto-lake\.v1/m);
+
+    const microOutput = stripAnsiText(
+      runHudWithDimensions(50, 40, {}, { cwd: projectDir }),
+    );
+    assert.match(microOutput, /^\^: cto:focus on the north-star row/m);
+    assert.doesNotMatch(microOutput, /cto-lake\.v1/);
+
+    const nanoOutput = stripAnsiText(
+      runHudWithDimensions(35, 40, {}, { cwd: projectDir }),
+    );
+    assert.doesNotMatch(nanoOutput, /cto-lake\.v1/);
+    assert.doesNotMatch(nanoOutput, /^\^:/m);
   });
 });
