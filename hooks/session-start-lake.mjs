@@ -53,6 +53,12 @@ function wrapBrief(brief) {
   return [HEADER, INSTRUCTION, BEGIN, brief, END].join("\n");
 }
 
+function buildAdditionalContext(brief) {
+  const wrapperBytes = Buffer.byteLength(wrapBrief(""), "utf8");
+  const briefBytes = Math.max(0, MAX_CONTEXT_BYTES - wrapperBytes);
+  return wrapBrief(capUtf8(brief, briefBytes));
+}
+
 function main() {
   if (!ctoNorthStarEnabled()) return;
 
@@ -68,10 +74,7 @@ function main() {
   const briefPath = join(projectRoot, ".triflux", "lake", "current.md");
   if (!existsSync(briefPath)) return;
 
-  const brief = capUtf8(
-    wrapBrief(readFileSync(briefPath, "utf8")),
-    MAX_CONTEXT_BYTES,
-  );
+  const brief = buildAdditionalContext(readFileSync(briefPath, "utf8"));
   if (!brief) return;
 
   process.stdout.write(

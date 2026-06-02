@@ -103,5 +103,9 @@ describe("session-start-lake hook", () => {
     const context = output.hookSpecificOutput.additionalContext;
     assert.equal(Buffer.byteLength(context, "utf8"), 2048);
     assert.match(context, /^\[CTO NORTH STAR - READ ONLY\]\n/);
+    assert.ok(
+      context.endsWith("\n--- END CTO NORTH STAR ---"),
+      "closing read-only delimiter must survive truncation",
+    );
   });
 });

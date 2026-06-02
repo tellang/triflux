@@ -64,6 +64,12 @@ function wrapBrief(brief) {
   return [HEADER, INSTRUCTION, BEGIN, brief, END].join("\n");
 }
 
+function buildAdditionalContext(brief) {
+  const wrapperBytes = Buffer.byteLength(wrapBrief(""), "utf8");
+  const briefBytes = Math.max(0, MAX_CONTEXT_BYTES - wrapperBytes);
+  return wrapBrief(capUtf8(brief, briefBytes));
+}
+
 function readMarker(markerPath) {
   try {
     if (!existsSync(markerPath)) return null;
@@ -113,7 +119,7 @@ function main() {
   const previous = readMarker(markerPath);
   if (previous?.hash === hash) return;
 
-  const additionalContext = capUtf8(wrapBrief(brief), MAX_CONTEXT_BYTES);
+  const additionalContext = buildAdditionalContext(brief);
   if (!additionalContext) return;
 
   process.stdout.write(
