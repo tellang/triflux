@@ -24,6 +24,7 @@ const DEFAULT_REPO_ROOT = join(SCRIPT_DIR, "..", "..");
 const MIRROR_TOPS = [
   "bin",
   "config",
+  "cto",
   "hooks",
   "hub",
   "hud",

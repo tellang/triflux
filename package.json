@@ -19,6 +19,7 @@
     "tui",
     "hub",
     "config",
+    "cto",
     "skills",
     "!skills/tfx-workspace",
     "!**/failure-reports",
