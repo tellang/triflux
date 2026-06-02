@@ -35,14 +35,19 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function runPrepend({ workdir, prompt }) {
+function runPrepend({ workdir, prompt, northStarFlag }) {
   const funcDef = extractFunction("prepend_codex_north_star");
   const script = [
     "set -euo pipefail",
     `WORKDIR=${shellQuote(workdir)}`,
+    northStarFlag === undefined
+      ? ""
+      : `TFX_CTO_NORTH_STAR=${shellQuote(northStarFlag)}`,
     funcDef,
     `prepend_codex_north_star ${shellQuote(prompt)}`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
   return spawnSync(BASH_EXE, ["-c", script], {
     encoding: "utf8",
   });
@@ -90,6 +95,26 @@ describe("tfx-route Codex north-star prepend", () => {
     const prompt = "Original prompt.\n--flag-like text must remain literal.";
 
     const result = runPrepend({ workdir, prompt });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, prompt);
+  });
+
+  it("leaves the prompt byte-unchanged when TFX_CTO_NORTH_STAR=0", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "tfx-codex-brief-off-"));
+    cleanupDirs.push(workdir);
+    mkdirSync(join(workdir, ".triflux", "lake"), { recursive: true });
+    writeFileSync(
+      join(workdir, ".triflux", "lake", "current.md"),
+      "This ambient brief must not leak into opt-out tests.\n",
+    );
+    const prompt = "Original prompt stays first.";
+
+    const result = runPrepend({
+      workdir,
+      prompt,
+      northStarFlag: "0",
+    });
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, prompt);

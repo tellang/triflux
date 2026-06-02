@@ -422,6 +422,13 @@ prepend_codex_north_star() {
   local workdir="${WORKDIR:-$PWD}"
   local brief_file="${workdir}/.triflux/lake/current.md"
 
+  case "${TFX_CTO_NORTH_STAR:-1}" in
+    0|false|FALSE|off|OFF|no|NO)
+      printf '%s' "$prompt"
+      return 0
+      ;;
+  esac
+
   if [[ ! -r "$brief_file" ]]; then
     printf '%s' "$prompt"
     return 0
