@@ -16,6 +16,65 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+async function withDeadline(promise, timeoutMs, message) {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function closeServer(server) {
+  await withDeadline(
+    new Promise((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    }),
+    1000,
+    "test server did not close within 1000ms",
+  );
+}
+
+async function waitForChildExit(cp, timeoutMs) {
+  let timeout;
+  let exited = false;
+  const exitPromise = new Promise((resolve, reject) => {
+    cp.once("error", reject);
+    cp.once("exit", (code, signal) => {
+      exited = true;
+      if (code === 0) resolve();
+      else reject(new Error(`child exited ${code ?? `signal ${signal}`}`));
+    });
+  });
+
+  try {
+    await Promise.race([
+      exitPromise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error(`child did not exit within ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+    if (!exited) {
+      cp.kill("SIGTERM");
+      await Promise.race([
+        new Promise((resolve) => cp.once("exit", resolve)),
+        new Promise((resolve) => setTimeout(resolve, 500)),
+      ]);
+      if (!exited) cp.kill("SIGKILL");
+    }
+  }
+}
+
 describe("synapse-http helpers", () => {
   it("task summary를 앞 100자로 자른다", () => {
     const prompt = "a".repeat(120);
@@ -243,7 +302,11 @@ describe("drainPendingSynapse (flush before process.exit)", () => {
         { sessionId: "drain-real", host: "local" },
         { token: false },
       );
-      await drainPendingSynapse(2000);
+      await withDeadline(
+        drainPendingSynapse(2000),
+        3000,
+        "drainPendingSynapse did not flush loopback POST within 3000ms",
+      );
       assert.equal(received.length, 1);
       assert.equal(received[0].method, "POST");
       assert.equal(received[0].url, "/synapse/register");
@@ -251,7 +314,7 @@ describe("drainPendingSynapse (flush before process.exit)", () => {
     } finally {
       if (prevUrl === undefined) delete process.env.TFX_HUB_URL;
       else process.env.TFX_HUB_URL = prevUrl;
-      await new Promise((resolve) => server.close(resolve));
+      await closeServer(server);
     }
   });
 
@@ -267,12 +330,24 @@ describe("drainPendingSynapse (flush before process.exit)", () => {
       { token: false, fetchImpl: () => blocked },
     );
     const t0 = performance.now();
-    await drainPendingSynapse(60);
-    const elapsed = performance.now() - t0;
-    assert.ok(elapsed < 1000, `drain should be bounded, took ${elapsed}ms`);
-    // Release so the tracked promise leaves the in-flight set (no cross-test leak).
-    release({ ok: true });
-    await new Promise((resolve) => setImmediate(resolve));
+    try {
+      await withDeadline(
+        drainPendingSynapse(60),
+        1000,
+        "drainPendingSynapse did not resolve stalled fetch within test deadline",
+      );
+      const elapsed = performance.now() - t0;
+      assert.ok(elapsed < 1000, `drain should be bounded, took ${elapsed}ms`);
+    } finally {
+      // Release and await the tracked promise so the module-global in-flight set
+      // cannot leak into later subtests when --test-force-exit is active.
+      release({ ok: true });
+      await withDeadline(
+        drainPendingSynapse(0),
+        1000,
+        "released stalled Synapse request did not settle within 1000ms",
+      );
+    }
   });
 
   it("register POST가 drain 후 실제 process.exit(0) 경계를 넘어 도달한다", async () => {
@@ -298,21 +373,16 @@ describe("drainPendingSynapse (flush before process.exit)", () => {
     // reaches the server before the child process dies.
     const childCode = `import(${JSON.stringify(moduleUrl)}).then(async (m) => { m.registerSynapseSession({ sessionId: "exit-boundary" }, { token: false }); await m.drainPendingSynapse(2000); process.exit(0); }).catch((e) => { console.error(e); process.exit(1); });`;
     try {
-      await new Promise((resolve, reject) => {
-        const cp = spawn(process.execPath, ["-e", childCode], {
-          env: { ...process.env, TFX_HUB_URL: `http://127.0.0.1:${port}` },
-          stdio: "ignore",
-        });
-        cp.on("error", reject);
-        cp.on("exit", (code) =>
-          code === 0 ? resolve() : reject(new Error(`child exited ${code}`)),
-        );
+      const cp = spawn(process.execPath, ["-e", childCode], {
+        env: { ...process.env, TFX_HUB_URL: `http://127.0.0.1:${port}` },
+        stdio: "ignore",
       });
+      await waitForChildExit(cp, 4000);
       assert.equal(received.length, 1);
       assert.equal(received[0].url, "/synapse/register");
       assert.equal(JSON.parse(received[0].body).sessionId, "exit-boundary");
     } finally {
-      await new Promise((resolve) => server.close(resolve));
+      await closeServer(server);
     }
   });
 });
