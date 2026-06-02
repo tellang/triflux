@@ -83,15 +83,87 @@ describe("hud usage backoff", () => {
 });
 
 describe("hud stale marker", () => {
-  it("adds a [stale] marker to the Claude row while backoff is active", () => {
+  for (const tier of ["minimal", "compact", "full"]) {
+    it(`adds a [stale] marker to the ${tier} Claude row while backoff is active`, () => {
+      const rows = getClaudeRows(
+        tier,
+        { percent: 42, display: "42%" },
+        { fiveHourPercent: 11, weeklyPercent: 22, stale: true },
+        0,
+      );
+
+      assert.equal(rows.length, 1);
+      assert.match(stripAnsi(rows[0].left), /\[stale\]/);
+    });
+  }
+
+  it("omits the [stale] marker when the Claude usage snapshot has no data", () => {
     const rows = getClaudeRows(
       "minimal",
       { percent: 42, display: "42%" },
-      { fiveHourPercent: 11, weeklyPercent: 22, stale: true },
+      null,
       0,
     );
 
     assert.equal(rows.length, 1);
-    assert.match(stripAnsi(rows[0].left), /\[stale\]/);
+    assert.doesNotMatch(stripAnsi(rows[0].left), /\[stale\]/);
+  });
+});
+
+describe("Claude model-specific weekly markers", () => {
+  it("shows positive Sonnet and Opus weekly usage as secondary compact markers", () => {
+    const rows = getClaudeRows(
+      "compact",
+      { percent: 42, display: "42%" },
+      {
+        fiveHourPercent: 11,
+        weeklyPercent: 22,
+        sonnetWeeklyPercent: 33,
+        opusWeeklyPercent: 44,
+      },
+      0,
+    );
+
+    const left = stripAnsi(rows[0].left);
+    assert.match(left, /1w:/);
+    assert.match(left, /Sn:33%/);
+    assert.match(left, /Op:44%/);
+  });
+
+  it("hides zero or absent model-specific weekly usage", () => {
+    const rows = getClaudeRows(
+      "minimal",
+      { percent: 42, display: "42%" },
+      {
+        fiveHourPercent: 11,
+        weeklyPercent: 22,
+        sonnetWeeklyPercent: 0,
+      },
+      0,
+    );
+
+    const left = stripAnsi(rows[0].left);
+    assert.doesNotMatch(left, /Sn:/);
+    assert.doesNotMatch(left, /Op:/);
+  });
+
+  it("does not show model-specific weekly usage in nano or micro tiers", () => {
+    for (const tier of ["nano", "micro"]) {
+      const rows = getClaudeRows(
+        tier,
+        { percent: 42, display: "42%" },
+        {
+          fiveHourPercent: 11,
+          weeklyPercent: 22,
+          sonnetWeeklyPercent: 33,
+          opusWeeklyPercent: 44,
+        },
+        0,
+      );
+
+      const left = stripAnsi(rows[0].left);
+      assert.doesNotMatch(left, /Sn:/);
+      assert.doesNotMatch(left, /Op:/);
+    }
   });
 });

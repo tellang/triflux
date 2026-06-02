@@ -21,6 +21,25 @@ describe("parseClaudeUsageResponse", () => {
     assert.equal(result.weeklyPercent, 13);
     assert.equal(result.fiveHourResetsAt, "2026-04-22T10:00:00Z");
     assert.equal(result.weeklyResetsAt, "2026-04-29T10:00:00Z");
+    assert.equal(result.sonnetWeeklyPercent, undefined);
+    assert.equal(result.opusWeeklyPercent, undefined);
+  });
+
+  it("conditionally parses Sonnet weekly usage and omits null Opus bucket keys", () => {
+    const result = parseClaudeUsageResponse({
+      five_hour: { utilization: 42, resets_at: "2026-04-22T10:00:00Z" },
+      seven_day: { utilization: 13, resets_at: "2026-04-29T10:00:00Z" },
+      seven_day_sonnet: {
+        utilization: 67,
+        resets_at: "2026-04-30T10:00:00Z",
+      },
+      seven_day_opus: null,
+    });
+
+    assert.equal(result.sonnetWeeklyPercent, 67);
+    assert.equal(result.sonnetWeeklyResetsAt, "2026-04-30T10:00:00Z");
+    assert.equal(result.opusWeeklyPercent, undefined);
+    assert.equal(result.opusWeeklyResetsAt, undefined);
   });
 
   it("treats utilization=null as 0% (no usage in window)", () => {

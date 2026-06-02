@@ -3,8 +3,10 @@
 // ============================================================================
 
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import https from "node:https";
+import { userInfo } from "node:os";
 import {
   CLAUDE_API_TIMEOUT_MS,
   CLAUDE_CREDENTIALS_PATH,
@@ -17,6 +19,8 @@ import {
   CLAUDE_USAGE_STALE_MS_WITH_OMC,
   DEFAULT_OAUTH_CLIENT_ID,
   FIVE_HOUR_MS,
+  getClaudeCodeUserAgent,
+  getClaudeCredentialPaths,
   OMC_PLUGIN_USAGE_CACHE_PATH,
   SEVEN_DAY_MS,
   SPAWN_LOCK_TTL_MS,
@@ -112,30 +116,91 @@ function normalizeClaudeCredentials(data, source, supportsUsageApi = true) {
   };
 }
 
-function readClaudeKeychainCredentials(execFileSyncFn = execFileSync) {
+export function getKeychainServiceName(env = process.env) {
+  const configDir = env.CLAUDE_CONFIG_DIR;
+  if (configDir) {
+    const hash = createHash("sha256")
+      .update(configDir)
+      .digest("hex")
+      .slice(0, 8);
+    return `${CLAUDE_KEYCHAIN_SERVICE}-${hash}`;
+  }
+  return CLAUDE_KEYCHAIN_SERVICE;
+}
+
+function isCredentialExpired(creds) {
+  return creds.expiresAt != null && creds.expiresAt <= Date.now();
+}
+
+function getKeychainAccount() {
   try {
-    const raw = execFileSyncFn(
-      "security",
-      ["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"],
-      { encoding: "utf8" },
-    );
+    return userInfo().username?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function readClaudeKeychainCredential(
+  serviceName,
+  account,
+  execFileSyncFn = execFileSync,
+) {
+  try {
+    const args = account
+      ? ["find-generic-password", "-s", serviceName, "-a", account, "-w"]
+      : ["find-generic-password", "-s", serviceName, "-w"];
+    const raw = execFileSyncFn("security", args, { encoding: "utf8" });
     return normalizeClaudeCredentials(JSON.parse(raw.trim()), "keychain");
   } catch {
     return null;
   }
 }
 
+function readClaudeKeychainCredentials(
+  execFileSyncFn = execFileSync,
+  env = process.env,
+) {
+  const serviceName = getKeychainServiceName(env);
+  const candidateAccounts = [];
+  const username = getKeychainAccount();
+  if (username) candidateAccounts.push(username);
+  candidateAccounts.push(undefined);
+
+  let expiredFallback = null;
+  for (const account of candidateAccounts) {
+    const creds = readClaudeKeychainCredential(
+      serviceName,
+      account,
+      execFileSyncFn,
+    );
+    if (!creds) continue;
+    if (!isCredentialExpired(creds)) return creds;
+    expiredFallback ??= creds;
+  }
+  return expiredFallback;
+}
+
 export function readClaudeCredentials({
-  readCredentialFile = () => readJson(CLAUDE_CREDENTIALS_PATH, null),
+  readCredentialFile = (filePath = CLAUDE_CREDENTIALS_PATH) =>
+    readJson(filePath, null),
   platform = process.platform,
   execFileSyncFn = execFileSync,
   env = process.env,
 } = {}) {
-  const fileCreds = normalizeClaudeCredentials(readCredentialFile(), "file");
-  if (fileCreds) return fileCreds;
+  for (const filePath of getClaudeCredentialPaths(env)) {
+    try {
+      const fileCreds = normalizeClaudeCredentials(
+        readCredentialFile(filePath),
+        "file",
+      );
+      if (fileCreds) return fileCreds;
+    } catch {
+      /* try next credential source */
+    }
+  }
 
   if (platform === "darwin") {
-    const keychainCreds = readClaudeKeychainCredentials(execFileSyncFn);
+    const keychainCreds = readClaudeKeychainCredentials(execFileSyncFn, env);
     if (keychainCreds) return keychainCreds;
   }
 
@@ -169,6 +234,7 @@ export function refreshClaudeAccessToken(refreshToken) {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           "Content-Length": Buffer.byteLength(body),
+          "User-Agent": getClaudeCodeUserAgent(),
         },
         timeout: CLAUDE_API_TIMEOUT_MS,
       },
@@ -217,13 +283,20 @@ function serializeClaudeCredentials(creds) {
   return { claudeAiOauth: oauth };
 }
 
-function writeClaudeKeychainCredentials(creds, execFileSyncFn = execFileSync) {
+function writeClaudeKeychainCredentials(
+  creds,
+  execFileSyncFn = execFileSync,
+  env = process.env,
+) {
+  const username = getKeychainAccount();
+  const accountArgs = username ? ["-a", username] : [];
   execFileSyncFn(
     "security",
     [
       "add-generic-password",
       "-s",
-      CLAUDE_KEYCHAIN_SERVICE,
+      getKeychainServiceName(env),
+      ...accountArgs,
       "-w",
       JSON.stringify(serializeClaudeCredentials(creds)),
       "-U",
@@ -240,6 +313,7 @@ export function writeBackClaudeCredentials(
       writeFileSync(CLAUDE_CREDENTIALS_PATH, JSON.stringify(data, null, 2)),
     platform = process.platform,
     execFileSyncFn = execFileSync,
+    env = process.env,
   } = {},
 ) {
   if (creds?.source === "env") return;
@@ -265,7 +339,7 @@ export function writeBackClaudeCredentials(
 
   if (platform === "darwin") {
     try {
-      writeClaudeKeychainCredentials(creds, execFileSyncFn);
+      writeClaudeKeychainCredentials(creds, execFileSyncFn, env);
     } catch {
       /* Keychain 쓰기 실패 무시 */
     }
@@ -283,6 +357,7 @@ export function fetchClaudeUsageFromApi(accessToken) {
           Authorization: `Bearer ${accessToken}`,
           "anthropic-beta": "oauth-2025-04-20",
           "Content-Type": "application/json",
+          "User-Agent": getClaudeCodeUserAgent(),
         },
         timeout: CLAUDE_API_TIMEOUT_MS,
       },
@@ -320,7 +395,7 @@ export function parseClaudeUsageResponse(response) {
   // 키 자체가 부재하면 percent=null (HUD --% placeholder), utilization=null 만 0%로 처리
   const fiveHourPresent = response.five_hour != null;
   const sevenDayPresent = response.seven_day != null;
-  return {
+  const result = {
     fiveHourPercent: fiveHourPresent
       ? clampPercent(response.five_hour.utilization ?? 0)
       : null,
@@ -330,6 +405,19 @@ export function parseClaudeUsageResponse(response) {
     fiveHourResetsAt: response.five_hour?.resets_at || null,
     weeklyResetsAt: response.seven_day?.resets_at || null,
   };
+  if (response.seven_day_sonnet != null) {
+    result.sonnetWeeklyPercent = clampPercent(
+      response.seven_day_sonnet.utilization ?? 0,
+    );
+    result.sonnetWeeklyResetsAt = response.seven_day_sonnet.resets_at || null;
+  }
+  if (response.seven_day_opus != null) {
+    result.opusWeeklyPercent = clampPercent(
+      response.seven_day_opus.utilization ?? 0,
+    );
+    result.opusWeeklyResetsAt = response.seven_day_opus.resets_at || null;
+  }
+  return result;
 }
 
 // stale 캐시의 과거 resetsAt → 다음 주기로 순환 추정 (null 대신 다음 reset 시간 계산)
@@ -347,6 +435,20 @@ export function stripStaleResets(data) {
     const t = new Date(copy.weeklyResetsAt).getTime();
     if (!Number.isNaN(t))
       copy.weeklyResetsAt = new Date(
+        advanceToNextCycle(t, SEVEN_DAY_MS),
+      ).toISOString();
+  }
+  if (copy.sonnetWeeklyResetsAt) {
+    const t = new Date(copy.sonnetWeeklyResetsAt).getTime();
+    if (!Number.isNaN(t))
+      copy.sonnetWeeklyResetsAt = new Date(
+        advanceToNextCycle(t, SEVEN_DAY_MS),
+      ).toISOString();
+  }
+  if (copy.opusWeeklyResetsAt) {
+    const t = new Date(copy.opusWeeklyResetsAt).getTime();
+    if (!Number.isNaN(t))
+      copy.opusWeeklyResetsAt = new Date(
         advanceToNextCycle(t, SEVEN_DAY_MS),
       ).toISOString();
   }

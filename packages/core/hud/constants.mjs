@@ -73,6 +73,21 @@ export const CLAUDE_CREDENTIALS_PATH = join(
   ".claude",
   ".credentials.json",
 );
+export const CLAUDE_CREDENTIALS_FILENAME = ".credentials.json";
+export const CLAUDE_CODE_USER_AGENT_FALLBACK = "claude-code/2.x";
+export function getClaudeCredentialPaths(env = process.env) {
+  const paths = [];
+  if (env.CLAUDE_CONFIG_DIR) {
+    paths.push(join(env.CLAUDE_CONFIG_DIR, CLAUDE_CREDENTIALS_FILENAME));
+  }
+  paths.push(CLAUDE_CREDENTIALS_PATH);
+  return paths;
+}
+export function getClaudeCodeUserAgent(env = process.env) {
+  return env.CLAUDE_CODE_VERSION
+    ? `claude-code/${env.CLAUDE_CODE_VERSION}`
+    : CLAUDE_CODE_USER_AGENT_FALLBACK;
+}
 export const CLAUDE_USAGE_CACHE_PATH = join(
   homedir(),
   ".claude",
