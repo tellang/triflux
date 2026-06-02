@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { deriveClaudeDaemonPaths as deriveFromControl } from "../../hub/team/claude-daemon-control.mjs";
+import {
+  buildClaudeDaemonDiscoveryCandidates,
+  deriveClaudeDaemonPaths as deriveFromControl,
+  detectCallerProvenance,
+  findDaemonJobBySessionId,
+  readOmcLaunchProfile,
+} from "../../hub/team/claude-daemon-control.mjs";
 import { deriveClaudeDaemonPaths as deriveFromBridge } from "../../hub/team/claude-native-bridge.mjs";
 
 // daemon-control 이 단일 owner 이고 native-bridge 는 그것을 re-export 한다.
@@ -65,4 +72,202 @@ test("parity: derived field set covers what both former callsites needed", () =>
       `expected derived paths to include ${key}`,
     );
   }
+});
+
+test("detectCallerProvenance distinguishes vanilla Codex from OMX caller env", () => {
+  assert.deepEqual(detectCallerProvenance({ CODEX_THREAD_ID: "thread-1" }), {
+    claudeLauncher: "unknown",
+    codexLauncher: "codex",
+    signals: {
+      claudeConfigDir: null,
+      omxSessionId: null,
+      omxEntryPath: null,
+      codexThreadId: "thread-1",
+    },
+  });
+
+  assert.deepEqual(
+    detectCallerProvenance({
+      CODEX_THREAD_ID: "thread-1",
+      OMX_SESSION_ID: "omx-123",
+      OMX_ENTRY_PATH:
+        "/opt/homebrew/lib/node_modules/oh-my-codex/dist/cli/omx.js",
+    }),
+    {
+      claudeLauncher: "unknown",
+      codexLauncher: "omx",
+      signals: {
+        claudeConfigDir: null,
+        omxSessionId: "omx-123",
+        omxEntryPath:
+          "/opt/homebrew/lib/node_modules/oh-my-codex/dist/cli/omx.js",
+        codexThreadId: "thread-1",
+      },
+    },
+  );
+});
+
+test("readOmcLaunchProfile requires a valid sourceConfigDir marker", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-omc-profile-"));
+  const runtime = path.join(home, ".claude", ".omc-launch");
+  const defaultConfig = path.join(home, ".claude");
+  const malformed = path.join(home, "malformed-omc");
+  const invalid = path.join(home, "invalid-omc");
+  await fs.mkdir(runtime, { recursive: true });
+  await fs.mkdir(malformed, { recursive: true });
+  await fs.mkdir(invalid, { recursive: true });
+  await fs.writeFile(
+    path.join(runtime, ".omc-launch-profile.json"),
+    JSON.stringify({
+      sourceConfigDir: defaultConfig,
+      sourceClaudeMd: path.join(defaultConfig, "CLAUDE-omc.md"),
+    }),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(malformed, ".omc-launch-profile.json"),
+    "{",
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(invalid, ".omc-launch-profile.json"),
+    JSON.stringify({ sourceConfigDir: "" }),
+    "utf8",
+  );
+
+  try {
+    assert.deepEqual(await readOmcLaunchProfile(runtime), {
+      sourceConfigDir: defaultConfig,
+      sourceClaudeMd: path.join(defaultConfig, "CLAUDE-omc.md"),
+    });
+    assert.equal(await readOmcLaunchProfile(defaultConfig), null);
+    assert.equal(await readOmcLaunchProfile(malformed), null);
+    assert.equal(await readOmcLaunchProfile(invalid), null);
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
+test("buildClaudeDaemonDiscoveryCandidates uses exact, env-strict, and ambient modes", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-daemon-home-"));
+  const base = path.join(home, ".claude");
+  const omcRuntime = path.join(base, ".omc-launch");
+  const explicit = path.join(home, "custom-claude");
+  await fs.mkdir(omcRuntime, { recursive: true });
+  await fs.writeFile(
+    path.join(omcRuntime, ".omc-launch-profile.json"),
+    JSON.stringify({
+      sourceConfigDir: base,
+      sourceClaudeMd: path.join(base, "CLAUDE-omc.md"),
+    }),
+    "utf8",
+  );
+
+  try {
+    const ambient = await buildClaudeDaemonDiscoveryCandidates({
+      env: { HOME: home, CODEX_THREAD_ID: "thread", OMX_SESSION_ID: "omx" },
+      uid: 501,
+      tmpRoot: "/tmp",
+    });
+    assert.deepEqual(
+      ambient.map((candidate) => ({
+        source: candidate.configDirSource,
+        mode: candidate.selectionMode,
+        launcher: candidate.claudeLauncher,
+        dir: candidate.configDir,
+        codex: candidate.callerProvenance.codexLauncher,
+        sourceConfigDir: candidate.sourceConfigDir ?? null,
+      })),
+      [
+        {
+          source: "omc-runtime",
+          mode: "ambient",
+          launcher: "omc",
+          dir: omcRuntime,
+          codex: "omx",
+          sourceConfigDir: base,
+        },
+        {
+          source: "default",
+          mode: "ambient",
+          launcher: "claude",
+          dir: base,
+          codex: "omx",
+          sourceConfigDir: null,
+        },
+      ],
+    );
+
+    const exact = await buildClaudeDaemonDiscoveryCandidates({
+      configDir: explicit,
+      env: { HOME: home, CLAUDE_CONFIG_DIR: omcRuntime },
+      uid: 501,
+      tmpRoot: "/tmp",
+    });
+    assert.deepEqual(
+      exact.map((candidate) => ({
+        source: candidate.configDirSource,
+        mode: candidate.selectionMode,
+        launcher: candidate.claudeLauncher,
+        dir: candidate.configDir,
+      })),
+      [
+        {
+          source: "explicit",
+          mode: "exact",
+          launcher: "unknown",
+          dir: path.resolve(explicit),
+        },
+      ],
+    );
+
+    const envStrict = await buildClaudeDaemonDiscoveryCandidates({
+      env: { HOME: home, CLAUDE_CONFIG_DIR: omcRuntime },
+      uid: 501,
+      tmpRoot: "/tmp",
+    });
+    assert.deepEqual(
+      envStrict.map((candidate) => ({
+        source: candidate.configDirSource,
+        mode: candidate.selectionMode,
+        launcher: candidate.claudeLauncher,
+        dir: candidate.configDir,
+        sourceConfigDir: candidate.sourceConfigDir ?? null,
+      })),
+      [
+        {
+          source: "env",
+          mode: "env-strict",
+          launcher: "omc",
+          dir: omcRuntime,
+          sourceConfigDir: base,
+        },
+      ],
+    );
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
+test("findDaemonJobBySessionId preserves all supported Claude daemon id shapes", () => {
+  const jobs = [
+    { short: "a", session_id: "legacy-session" },
+    { short: "b", dispatch: { sessionId: "dispatch-session" } },
+    { short: "c", d: { sessionId: "compact-session" } },
+    { short: "d", sessionId: "camel-session" },
+  ];
+
+  assert.equal(
+    findDaemonJobBySessionId({ jobs }, "legacy-session")?.short,
+    "a",
+  );
+  assert.equal(
+    findDaemonJobBySessionId({ jobs }, "dispatch-session")?.short,
+    "b",
+  );
+  assert.equal(
+    findDaemonJobBySessionId({ jobs }, "compact-session")?.short,
+    "c",
+  );
+  assert.equal(findDaemonJobBySessionId({ jobs }, "camel-session")?.short, "d");
 });

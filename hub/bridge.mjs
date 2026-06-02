@@ -1186,6 +1186,36 @@ function daemonAttachErrorResult(error) {
   };
 }
 
+function daemonAttachProbeFailureResult(probe) {
+  return {
+    ok: false,
+    text: "",
+    raw: "",
+    responseRaw: "",
+    matchedCompletion: false,
+    timedOut: false,
+    closed: false,
+    inputSent: false,
+    error: probe?.error || probe?.reason || "Claude daemon unavailable",
+    reason: probe?.reason || "daemon-unavailable",
+    daemon: probe?.daemon ?? null,
+    daemons: probe?.daemons ?? [],
+    matches: probe?.matches ?? [],
+    candidateResults: probe?.candidateResults ?? [],
+    callerProvenance: probe?.callerProvenance ?? null,
+  };
+}
+
+function daemonProbeMetadata(probe) {
+  return {
+    daemon: probe?.daemon ?? null,
+    daemons: probe?.daemons ?? [],
+    matches: probe?.matches ?? [],
+    candidateResults: probe?.candidateResults ?? [],
+    callerProvenance: probe?.callerProvenance ?? null,
+  };
+}
+
 function daemonInterruptErrorResult(error) {
   return {
     ok: false,
@@ -1197,6 +1227,22 @@ function daemonInterruptErrorResult(error) {
   };
 }
 
+function daemonInterruptProbeFailureResult(probe) {
+  return {
+    ok: false,
+    done: false,
+    aborted: false,
+    reason: probe?.reason || "interrupt_failed",
+    inputSent: false,
+    error: probe?.error || probe?.reason || "Claude daemon unavailable",
+    daemon: probe?.daemon ?? null,
+    daemons: probe?.daemons ?? [],
+    matches: probe?.matches ?? [],
+    candidateResults: probe?.candidateResults ?? [],
+    callerProvenance: probe?.callerProvenance ?? null,
+  };
+}
+
 function numericOption(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -1205,33 +1251,15 @@ function numericOption(value, fallback) {
 async function cmdDaemonProbe(args) {
   try {
     const payload = readBridgePayload(args);
-    const {
-      deriveClaudeDaemonPaths,
-      findDaemonJobBySessionId,
-      findDaemonJobByShort,
-      sendClaudeControlRequest,
-    } = await loadDaemonControl();
-    const daemonPaths = deriveClaudeDaemonPaths({
+    const { probeClaudeDaemonCandidates } = await loadDaemonControl();
+    const probe = await probeClaudeDaemonCandidates({
       configDir: payload.configDir,
+      env: process.env,
+      short: payload.short,
+      sessionId: payload.sessionId,
+      timeoutMs: numericOption(payload.timeoutMs, 6000),
     });
-    const list = await sendClaudeControlRequest(
-      daemonPaths.controlSock,
-      { proto: 1, op: "list" },
-      { timeoutMs: numericOption(payload.timeoutMs, 6000) },
-    );
-    const target = payload.sessionId
-      ? findDaemonJobBySessionId(list, payload.sessionId)
-      : payload.short
-        ? findDaemonJobByShort(list, payload.short)
-        : null;
-
-    return emitJson({
-      ok: list?.ok !== false,
-      controlSock: daemonPaths.controlSock,
-      sessions: list?.jobs || list?.sessions || [],
-      target: target || undefined,
-      error: list?.ok === false ? list?.error : undefined,
-    });
+    return emitJson(probe);
   } catch (error) {
     return emitJson(daemonErrorResult(error));
   }
@@ -1242,35 +1270,44 @@ async function cmdDaemonAttach(args) {
     const payload = readBridgePayload(args);
     if (!payload.prompt) throw new Error("prompt is required");
 
-    const {
-      attachClaudeDaemonSession,
-      deriveClaudeDaemonPaths,
-      findDaemonJobBySessionId,
-      sendClaudeControlRequest,
-    } = await loadDaemonControl();
-    const daemonPaths = deriveClaudeDaemonPaths({
+    const { attachClaudeDaemonSession, probeClaudeDaemonCandidates } =
+      await loadDaemonControl();
+    const probe = await probeClaudeDaemonCandidates({
       configDir: payload.configDir,
+      env: process.env,
+      short: payload.short,
+      sessionId: payload.sessionId,
+      timeoutMs: numericOption(payload.timeoutMs, 6000),
     });
-    let short = payload.short;
-    if (!short && payload.sessionId) {
-      const list = await sendClaudeControlRequest(
-        daemonPaths.controlSock,
-        { proto: 1, op: "list" },
-        { timeoutMs: numericOption(payload.timeoutMs, 6000) },
+    if (!probe.ok) return emitJson(daemonAttachProbeFailureResult(probe));
+    const short = payload.short ?? probe.target?.short;
+    if (!short) {
+      return emitJson(
+        daemonAttachProbeFailureResult({
+          ...probe,
+          ok: false,
+          reason: "target-not-found",
+          error: "short or resolvable sessionId is required",
+        }),
       );
-      const target = findDaemonJobBySessionId(list, payload.sessionId);
-      short = target?.short;
     }
-    if (!short) throw new Error("short or resolvable sessionId is required");
 
-    const result = await attachClaudeDaemonSession({
-      controlSock: daemonPaths.controlSock,
-      short,
-      input: payload.prompt,
-      cols: numericOption(payload.cols, undefined),
-      rows: numericOption(payload.rows, undefined),
-      timeoutMs: numericOption(payload.timeoutMs, 30_000),
-    });
+    let result;
+    try {
+      result = await attachClaudeDaemonSession({
+        controlSock: probe.controlSock,
+        short,
+        input: payload.prompt,
+        cols: numericOption(payload.cols, undefined),
+        rows: numericOption(payload.rows, undefined),
+        timeoutMs: numericOption(payload.timeoutMs, 30_000),
+      });
+    } catch (error) {
+      return emitJson({
+        ...daemonAttachErrorResult(error),
+        ...daemonProbeMetadata(probe),
+      });
+    }
 
     return emitJson({
       ok: result.matchedCompletion === true,
@@ -1283,6 +1320,7 @@ async function cmdDaemonAttach(args) {
       inputSent: result.inputSent === true,
       error:
         result.handshake?.ok === false ? result.handshake?.error : undefined,
+      ...daemonProbeMetadata(probe),
     });
   } catch (error) {
     return emitJson(daemonAttachErrorResult(error));
@@ -1293,34 +1331,43 @@ async function cmdDaemonInterrupt(args) {
   try {
     const payload = readBridgePayload(args);
 
-    const {
-      deriveClaudeDaemonPaths,
-      findDaemonJobBySessionId,
-      interruptClaudeDaemonSession,
-      sendClaudeControlRequest,
-    } = await loadDaemonControl();
-    const daemonPaths = deriveClaudeDaemonPaths({
+    const { interruptClaudeDaemonSession, probeClaudeDaemonCandidates } =
+      await loadDaemonControl();
+    const probe = await probeClaudeDaemonCandidates({
       configDir: payload.configDir,
+      env: process.env,
+      short: payload.short,
+      sessionId: payload.sessionId,
+      timeoutMs: numericOption(payload.timeoutMs, 6000),
     });
-    let short = payload.short;
-    if (!short && payload.sessionId) {
-      const list = await sendClaudeControlRequest(
-        daemonPaths.controlSock,
-        { proto: 1, op: "list" },
-        { timeoutMs: numericOption(payload.timeoutMs, 6000) },
+    if (!probe.ok) return emitJson(daemonInterruptProbeFailureResult(probe));
+    const short = payload.short ?? probe.target?.short;
+    if (!short) {
+      return emitJson(
+        daemonInterruptProbeFailureResult({
+          ...probe,
+          ok: false,
+          reason: "target-not-found",
+          error: "short or resolvable sessionId is required",
+        }),
       );
-      const target = findDaemonJobBySessionId(list, payload.sessionId);
-      short = target?.short;
     }
-    if (!short) throw new Error("short or resolvable sessionId is required");
 
-    const result = await interruptClaudeDaemonSession({
-      controlSock: daemonPaths.controlSock,
-      short,
-      cols: numericOption(payload.cols, undefined),
-      rows: numericOption(payload.rows, undefined),
-      timeoutMs: numericOption(payload.timeoutMs, 5000),
-    });
+    let result;
+    try {
+      result = await interruptClaudeDaemonSession({
+        controlSock: probe.controlSock,
+        short,
+        cols: numericOption(payload.cols, undefined),
+        rows: numericOption(payload.rows, undefined),
+        timeoutMs: numericOption(payload.timeoutMs, 5000),
+      });
+    } catch (error) {
+      return emitJson({
+        ...daemonInterruptErrorResult(error),
+        ...daemonProbeMetadata(probe),
+      });
+    }
     const aborted = result.inputSent === true;
 
     return emitJson({
@@ -1334,6 +1381,7 @@ async function cmdDaemonInterrupt(args) {
       inputSent: result.inputSent === true,
       error:
         result.handshake?.ok === false ? result.handshake?.error : undefined,
+      ...daemonProbeMetadata(probe),
     });
   } catch (error) {
     return emitJson(daemonInterruptErrorResult(error));

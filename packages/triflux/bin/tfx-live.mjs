@@ -34,11 +34,11 @@ function usage() {
     "Usage:",
     "  tfx-live start --session NAME [--cli codex|claude] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME --prompt TEXT [--cli codex|claude] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
-    "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
+    "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
-    "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--bridge ABS] [--timeout 5]",
+    "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
     "  tfx-live stop --session NAME [--cli codex|claude] [--remote HOST]",
-    "  tfx-live probe [--short SHORT] [--session-id ID] [--bridge ABS] [--timeout 10]",
+    "  tfx-live probe [--short SHORT] [--session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 10]",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
     "  tfx-live peer [--cli-a codex] [--cli-b claude] [--session-a peerA] [--session-b peerB] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--bridge ABS] [--remote HOST] [--cwd DIR] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
@@ -787,13 +787,19 @@ async function probeDaemon(bridgePath, ref, timeoutMs) {
     const payload = {};
     if (ref?.short) payload.short = ref.short;
     if (ref?.sessionId) payload.sessionId = ref.sessionId;
+    if (ref?.configDir) payload.configDir = ref.configDir;
     const result = await callBridgeVerb(
       bridgePath,
       "daemon-probe",
       payload,
       timeoutMs,
     );
-    return { ok: result?.ok === true, sessions: result?.sessions, raw: result };
+    return {
+      ok: result?.ok === true,
+      reason: result?.reason,
+      sessions: result?.sessions,
+      raw: result,
+    };
   } catch (error) {
     return { ok: false, reason: error.message };
   }
@@ -931,10 +937,11 @@ async function doAsk(adapter, opts) {
 }
 
 async function doAskViaDaemon(opts, meta = {}) {
-  const { bridgePath, prompt, timeoutMs, short, sessionId } = opts;
+  const { bridgePath, prompt, timeoutMs, short, sessionId, configDir } = opts;
   const payload = { prompt, timeoutMs };
   if (short) payload.short = short;
   if (sessionId) payload.sessionId = sessionId;
+  if (configDir) payload.configDir = configDir;
 
   const result = await callBridgeVerb(
     bridgePath,
@@ -956,10 +963,33 @@ async function doAskViaDaemon(opts, meta = {}) {
     timedOut: result?.timedOut === true,
     closed: result?.closed === true,
     inputSent: result?.inputSent === true,
+    daemon: result?.daemon ?? null,
+    daemons: result?.daemons ?? [],
+    matches: result?.matches ?? [],
+    candidateResults: result?.candidateResults ?? [],
+    callerProvenance: result?.callerProvenance ?? null,
     done: matchedCompletion,
     ...(result?.error ? { error: result.error } : {}),
     ...meta,
   };
+}
+
+function daemonProbeTargetAttachable(probe, opts) {
+  if (!probe?.ok) return false;
+  // New bridge responses carry `target`; daemon-control owns selection policy.
+  if (probe.raw?.target) return true;
+  // Compatibility only for older bridge binaries that list sessions but do not
+  // expose `target` yet. Do not add new selection semantics here.
+  if (!Array.isArray(probe.sessions)) return false;
+  return probe.sessions.some(
+    (entry) =>
+      (opts.short && entry?.short === opts.short) ||
+      (opts.sessionId &&
+        (entry?.sessionId === opts.sessionId ||
+          entry?.session_id === opts.sessionId ||
+          entry?.dispatch?.sessionId === opts.sessionId ||
+          entry?.d?.sessionId === opts.sessionId)),
+  );
 }
 
 async function ensureTmuxSession(adapter, opts) {
@@ -1004,6 +1034,13 @@ function writeUdsBugReport(reason, context) {
                 .map((entry) => entry?.short)
                 .filter(Boolean)
             : [],
+          // Diagnostic-only bridge metadata; callers should not depend on this
+          // shape as a versioned control contract.
+          daemon: context.probe.raw?.daemon ?? null,
+          daemons: context.probe.raw?.daemons ?? [],
+          matches: context.probe.raw?.matches ?? [],
+          candidateResults: context.probe.raw?.candidateResults ?? [],
+          callerProvenance: context.probe.raw?.callerProvenance ?? null,
         }
       : null,
     attachError: context.attachError ?? null,
@@ -1052,26 +1089,23 @@ async function runTmuxFallback(adapter, opts, reason, udsResult) {
 async function doAskAuto(adapter, opts) {
   const probe = await probeDaemon(
     opts.bridgePath,
-    { short: opts.short, sessionId: opts.sessionId },
+    { short: opts.short, sessionId: opts.sessionId, configDir: opts.configDir },
     opts.timeoutMs,
   );
   // daemon-probe returns the full session list (it does not filter by the
   // requested short), so confirm the target is actually attachable here rather
   // than firing a doomed attach at a missing short.
-  const targetAttachable =
-    probe.ok &&
-    Array.isArray(probe.sessions) &&
-    probe.sessions.some(
-      (entry) =>
-        (opts.short && entry?.short === opts.short) ||
-        (opts.sessionId && entry?.sessionId === opts.sessionId),
-    );
+  const targetAttachable = daemonProbeTargetAttachable(probe, opts);
 
   if (targetAttachable) {
-    const udsResult = await doAskViaDaemon(opts, {
-      transportSelected: "uds",
-      transportProbe: "ok",
-    });
+    const daemonConfigDir = opts.configDir ?? probe.raw?.daemon?.configDir;
+    const udsResult = await doAskViaDaemon(
+      { ...opts, configDir: daemonConfigDir },
+      {
+        transportSelected: "uds",
+        transportProbe: "ok",
+      },
+    );
     if (udsResult.matchedCompletion) {
       return udsResult;
     }
@@ -1139,10 +1173,11 @@ async function doInterruptViaTmux(adapter, opts) {
 }
 
 async function doInterruptViaDaemon(opts, meta = {}) {
-  const { bridgePath, timeoutMs, short, sessionId } = opts;
+  const { bridgePath, timeoutMs, short, sessionId, configDir } = opts;
   const payload = { timeoutMs };
   if (short) payload.short = short;
   if (sessionId) payload.sessionId = sessionId;
+  if (configDir) payload.configDir = configDir;
   const result = await callBridgeVerb(
     bridgePath,
     "daemon-interrupt",
@@ -1161,6 +1196,11 @@ async function doInterruptViaDaemon(opts, meta = {}) {
     inputSent: result?.inputSent === true,
     timedOut: result?.timedOut === true,
     closed: result?.closed === true,
+    daemon: result?.daemon ?? null,
+    daemons: result?.daemons ?? [],
+    matches: result?.matches ?? [],
+    candidateResults: result?.candidateResults ?? [],
+    callerProvenance: result?.callerProvenance ?? null,
     ...(result?.error ? { error: result.error } : {}),
     ...meta,
   };
@@ -1269,6 +1309,7 @@ function askOpts(flags, adapter) {
       transport === "tmux" ? requireFlag(flags, "session") : flags.session,
     short,
     sessionId,
+    configDir: flags["config-dir"],
     transport,
     bridgePath: resolveBridgePath(flags),
     prompt: requireFlag(flags, "prompt"),
@@ -1295,6 +1336,7 @@ function interruptOpts(flags, adapter) {
       transport === "tmux" ? requireFlag(flags, "session") : flags.session,
     short,
     sessionId,
+    configDir: flags["config-dir"],
     transport,
     bridgePath: resolveBridgePath(flags),
     remote: flags.remote,
@@ -1326,6 +1368,7 @@ async function probe(flags) {
   const payload = {};
   if (flags.short) payload.short = flags.short;
   if (flags["session-id"]) payload.sessionId = flags["session-id"];
+  if (flags["config-dir"]) payload.configDir = flags["config-dir"];
   const timeoutMs = secondsFlag(flags, "timeout", 10_000);
   printJson(
     await callBridgeVerb(

@@ -107,6 +107,63 @@ async function listenFakeDaemon(
   return { server, requests };
 }
 
+async function listenFakeInterruptDaemon(controlSock, { jobs }) {
+  await fs.mkdir(path.dirname(controlSock), { recursive: true });
+  const requests = [];
+  let attachedInput = "";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let controlBuffer = "";
+    let attachStarted = false;
+    socket.on("data", (chunk) => {
+      if (attachStarted) {
+        attachedInput += chunk;
+        if (attachedInput.includes("\x1b")) {
+          socket.end("interrupted\n");
+        }
+        return;
+      }
+
+      controlBuffer += chunk;
+      if (!controlBuffer.includes("\n")) return;
+      const newlineIndex = controlBuffer.indexOf("\n");
+      const line = controlBuffer.slice(0, newlineIndex);
+      const request = JSON.parse(line);
+      requests.push(request);
+      if (request.op === "list") {
+        socket.end(`${JSON.stringify({ ok: true, jobs })}\n`);
+        return;
+      }
+      if (request.op === "attach") {
+        socket.write(
+          `${JSON.stringify({
+            ok: true,
+            op: "attach",
+            via: "spare",
+            tempo: "active",
+            state: "working",
+          })}\n`,
+        );
+        attachStarted = true;
+        attachedInput += controlBuffer.slice(newlineIndex + 1);
+      }
+    });
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(controlSock, resolve);
+  });
+
+  return {
+    server,
+    requests,
+    get attachedInput() {
+      return attachedInput;
+    },
+  };
+}
+
 async function withTempConfig(fn) {
   const configDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "triflux-bridge-daemon-"),
@@ -117,6 +174,36 @@ async function withTempConfig(fn) {
   } finally {
     await fs.rm(configDir, { recursive: true, force: true });
     await fs.rm(daemonDir, { recursive: true, force: true });
+  }
+}
+
+async function withTempClaudeHome(fn) {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "triflux-home-"));
+  const defaultConfig = path.join(home, ".claude");
+  const omcRuntime = path.join(defaultConfig, ".omc-launch");
+  const customConfig = path.join(home, "custom-claude");
+  const configDirs = [defaultConfig, omcRuntime, customConfig];
+  await fs.mkdir(omcRuntime, { recursive: true });
+  await fs.writeFile(
+    path.join(omcRuntime, ".omc-launch-profile.json"),
+    JSON.stringify({
+      sourceConfigDir: defaultConfig,
+      sourceClaudeMd: path.join(defaultConfig, "CLAUDE-omc.md"),
+    }),
+    "utf8",
+  );
+  try {
+    return await fn({ home, defaultConfig, omcRuntime, customConfig });
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+    await Promise.all(
+      configDirs.map((configDir) =>
+        fs.rm(deriveClaudeDaemonPaths({ configDir }).daemonDir, {
+          recursive: true,
+          force: true,
+        }),
+      ),
+    );
   }
 }
 
@@ -265,45 +352,11 @@ test("daemon-attach returns the full failure response shape before input", async
 test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
   await withTempConfig(async (configDir) => {
     const paths = deriveClaudeDaemonPaths({ configDir });
-    const requests = [];
-    let attachedInput = "";
-    const server = net.createServer((socket) => {
-      socket.setEncoding("utf8");
-      let firstLine = "";
-      socket.on("data", (chunk) => {
-        if (!firstLine.includes("\n")) {
-          firstLine += chunk;
-          if (!firstLine.includes("\n")) return;
-          const line = firstLine.slice(0, firstLine.indexOf("\n"));
-          const request = JSON.parse(line);
-          requests.push(request);
-          socket.write(
-            `${JSON.stringify({
-              ok: true,
-              op: "attach",
-              via: "spare",
-              tempo: "active",
-              state: "working",
-            })}\n`,
-          );
-          attachedInput += firstLine.slice(firstLine.indexOf("\n") + 1);
-          return;
-        }
-
-        attachedInput += chunk;
-        if (attachedInput.includes("\x1b")) {
-          socket.end("interrupted\n");
-        }
-      });
+    const fake = await listenFakeInterruptDaemon(paths.controlSock, {
+      jobs: [{ short: "facefeed", sessionId: "interrupt-session" }],
     });
 
     try {
-      await fs.mkdir(path.dirname(paths.controlSock), { recursive: true });
-      await new Promise((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(paths.controlSock, resolve);
-      });
-
       const out = await runBridge([
         "daemon-interrupt",
         "--payload",
@@ -319,8 +372,9 @@ test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
       assert.equal(out.aborted, true);
       assert.equal(out.reason, "user_interrupt");
       assert.equal(out.inputSent, true);
-      assert.match(attachedInput, /\x1b/);
-      assert.deepEqual(requests, [
+      assert.match(fake.attachedInput, /\x1b/);
+      assert.deepEqual(fake.requests, [
+        { proto: 1, op: "list" },
         {
           proto: 1,
           op: "attach",
@@ -331,7 +385,290 @@ test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
         },
       ]);
     } finally {
-      await new Promise((resolve) => server.close(resolve));
+      await new Promise((resolve) => fake.server.close(resolve));
+    }
+  });
+});
+
+test("daemon-probe discovers an OMC runtime daemon in ambient OMX caller env", async () => {
+  await withTempClaudeHome(async ({ home, omcRuntime }) => {
+    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const jobs = [{ short: "omc12345", sessionId: "omc-session" }];
+    const fake = await listenFakeDaemon(omcPaths.controlSock, { jobs });
+    try {
+      const out = await runBridge(
+        [
+          "daemon-probe",
+          "--payload",
+          JSON.stringify({ short: "omc12345", timeoutMs: 1000 }),
+        ],
+        {
+          env: {
+            HOME: home,
+            CLAUDE_CONFIG_DIR: "",
+            CODEX_THREAD_ID: "codex-thread",
+            OMX_SESSION_ID: "omx-session",
+          },
+          allowFailure: true,
+        },
+      );
+
+      assert.equal(out.ok, true);
+      assert.equal(out.controlSock, omcPaths.controlSock);
+      assert.equal(out.daemon.configDir, omcRuntime);
+      assert.equal(out.daemon.configDirSource, "omc-runtime");
+      assert.equal(out.daemon.claudeLauncher, "omc");
+      assert.equal(out.callerProvenance.codexLauncher, "omx");
+      assert.deepEqual(out.sessions, jobs);
+      assert.equal(Object.hasOwn(out.sessions[0], "daemon"), false);
+      assert.deepEqual(
+        out.candidateResults.map((candidate) => ({
+          source: candidate.configDirSource,
+          ok: candidate.ok,
+          sessionCount: candidate.sessionCount,
+        })),
+        [
+          { source: "omc-runtime", ok: true, sessionCount: 1 },
+          { source: "default", ok: false, sessionCount: 0 },
+        ],
+      );
+      assert.deepEqual(fake.requests, [{ proto: 1, op: "list" }]);
+    } finally {
+      await new Promise((resolve) => fake.server.close(resolve));
+    }
+  });
+});
+
+test("daemon-attach in ambient mode selects OMC runtime and resolves compact session ids", async () => {
+  await withTempClaudeHome(async ({ home, omcRuntime }) => {
+    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const fake = await listenFakeDaemon(omcPaths.controlSock, {
+      jobs: [{ short: "facefeed", d: { sessionId: "compact-session" } }],
+    });
+    try {
+      const out = await runBridge(
+        [
+          "daemon-attach",
+          "--payload",
+          JSON.stringify({
+            sessionId: "compact-session",
+            prompt: "say bridge ok",
+            timeoutMs: 1500,
+          }),
+        ],
+        {
+          env: {
+            HOME: home,
+            CLAUDE_CONFIG_DIR: "",
+            CODEX_THREAD_ID: "codex-thread",
+            OMX_ENTRY_PATH:
+              "/opt/homebrew/lib/node_modules/oh-my-codex/dist/cli/omx.js",
+          },
+        },
+      );
+
+      assert.equal(out.ok, true);
+      assert.equal(out.text, "BRIDGE_ATTACH_OK");
+      assert.equal(out.daemon.configDirSource, "omc-runtime");
+      assert.equal(out.daemon.claudeLauncher, "omc");
+      assert.equal(out.callerProvenance.codexLauncher, "omx");
+      assert.deepEqual(fake.requests, [
+        { proto: 1, op: "list" },
+        {
+          proto: 1,
+          op: "attach",
+          short: "facefeed",
+          cols: 240,
+          rows: 40,
+          caps: { terminal: null, mux: null, ssh: false },
+        },
+      ]);
+    } finally {
+      await new Promise((resolve) => fake.server.close(resolve));
+    }
+  });
+});
+
+test("daemon-interrupt in ambient mode selects OMC runtime before sending Escape", async () => {
+  await withTempClaudeHome(async ({ home, omcRuntime }) => {
+    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const fake = await listenFakeInterruptDaemon(omcPaths.controlSock, {
+      jobs: [{ short: "cab005e", sessionId: "interrupt-session" }],
+    });
+    try {
+      const out = await runBridge(
+        [
+          "daemon-interrupt",
+          "--payload",
+          JSON.stringify({
+            sessionId: "interrupt-session",
+            timeoutMs: 1000,
+          }),
+        ],
+        {
+          env: {
+            HOME: home,
+            CLAUDE_CONFIG_DIR: "",
+            CODEX_THREAD_ID: "codex-thread",
+            OMX_SESSION_ID: "omx-session",
+          },
+          allowFailure: true,
+        },
+      );
+
+      assert.equal(out.ok, true);
+      assert.equal(out.aborted, true);
+      assert.equal(out.reason, "user_interrupt");
+      assert.equal(out.daemon.configDirSource, "omc-runtime");
+      assert.equal(out.callerProvenance.codexLauncher, "omx");
+      assert.match(fake.attachedInput, /\x1b/u);
+      assert.deepEqual(fake.requests, [
+        { proto: 1, op: "list" },
+        {
+          proto: 1,
+          op: "attach",
+          short: "cab005e",
+          cols: 240,
+          rows: 40,
+          caps: { terminal: null, mux: null, ssh: false },
+        },
+      ]);
+    } finally {
+      await new Promise((resolve) => fake.server.close(resolve));
+    }
+  });
+});
+
+test("daemon-attach rejects duplicate ambient targets before attaching", async () => {
+  await withTempClaudeHome(async ({ home, defaultConfig, omcRuntime }) => {
+    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const defaultPaths = deriveClaudeDaemonPaths({ configDir: defaultConfig });
+    const omcFake = await listenFakeDaemon(omcPaths.controlSock, {
+      jobs: [{ short: "dupe0001", sessionId: "omc-dupe" }],
+    });
+    const defaultFake = await listenFakeDaemon(defaultPaths.controlSock, {
+      jobs: [{ short: "dupe0001", sessionId: "default-dupe" }],
+    });
+    try {
+      const out = await runBridge(
+        [
+          "daemon-attach",
+          "--payload",
+          JSON.stringify({
+            short: "dupe0001",
+            prompt: "must not attach",
+            timeoutMs: 1000,
+          }),
+        ],
+        {
+          env: {
+            HOME: home,
+            CLAUDE_CONFIG_DIR: "",
+            CODEX_THREAD_ID: "codex-thread",
+            OMX_SESSION_ID: "omx-session",
+          },
+          allowFailure: true,
+        },
+      );
+
+      assert.equal(out.ok, false);
+      assert.equal(out.reason, "ambiguous-target");
+      assert.equal(out.inputSent, false);
+      assert.equal(out.daemon, null);
+      assert.equal(out.matches.length, 2);
+      assert.deepEqual(
+        out.matches.map((match) => match.daemon.configDirSource).sort(),
+        ["default", "omc-runtime"],
+      );
+      assert.deepEqual(omcFake.requests, [{ proto: 1, op: "list" }]);
+      assert.deepEqual(defaultFake.requests, [{ proto: 1, op: "list" }]);
+    } finally {
+      await new Promise((resolve) => omcFake.server.close(resolve));
+      await new Promise((resolve) => defaultFake.server.close(resolve));
+    }
+  });
+});
+
+test("explicit configDir is exact-only and never falls back to ambient OMC", async () => {
+  await withTempClaudeHome(async ({ home, omcRuntime, customConfig }) => {
+    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const fake = await listenFakeDaemon(omcPaths.controlSock, {
+      jobs: [{ short: "omc12345", sessionId: "omc-session" }],
+    });
+    try {
+      const out = await runBridge(
+        [
+          "daemon-probe",
+          "--payload",
+          JSON.stringify({
+            configDir: customConfig,
+            short: "omc12345",
+            timeoutMs: 100,
+          }),
+        ],
+        {
+          env: {
+            HOME: home,
+            CLAUDE_CONFIG_DIR: "",
+            CODEX_THREAD_ID: "codex-thread",
+            OMX_SESSION_ID: "omx-session",
+          },
+          allowFailure: true,
+        },
+      );
+
+      assert.equal(out.ok, false);
+      assert.equal(out.reason, "daemon-unavailable");
+      assert.equal(out.daemon, null);
+      assert.deepEqual(
+        out.candidateResults.map((candidate) => candidate.configDirSource),
+        ["explicit"],
+      );
+      assert.deepEqual(fake.requests, []);
+    } finally {
+      await new Promise((resolve) => fake.server.close(resolve));
+    }
+  });
+});
+
+test("CLAUDE_CONFIG_DIR env mode is strict and never falls back to ambient OMC", async () => {
+  await withTempClaudeHome(async ({ home, defaultConfig, omcRuntime }) => {
+    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const fake = await listenFakeDaemon(omcPaths.controlSock, {
+      jobs: [{ short: "omc12345", sessionId: "omc-session" }],
+    });
+    try {
+      const out = await runBridge(
+        [
+          "daemon-attach",
+          "--payload",
+          JSON.stringify({
+            short: "omc12345",
+            prompt: "must not attach",
+            timeoutMs: 100,
+          }),
+        ],
+        {
+          env: {
+            HOME: home,
+            CLAUDE_CONFIG_DIR: defaultConfig,
+            CODEX_THREAD_ID: "codex-thread",
+            OMX_SESSION_ID: "omx-session",
+          },
+          allowFailure: true,
+        },
+      );
+
+      assert.equal(out.ok, false);
+      assert.equal(out.reason, "daemon-unavailable");
+      assert.equal(out.inputSent, false);
+      assert.deepEqual(
+        out.candidateResults.map((candidate) => candidate.configDirSource),
+        ["env"],
+      );
+      assert.deepEqual(fake.requests, []);
+    } finally {
+      await new Promise((resolve) => fake.server.close(resolve));
     }
   });
 });

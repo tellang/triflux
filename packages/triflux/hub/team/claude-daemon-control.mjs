@@ -12,7 +12,12 @@ import {
 
 export function resolveClaudeConfigDir(env = process.env) {
   if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
-  return path.join(os.homedir(), ".claude");
+  return path.join(resolveClaudeHomeDir(env), ".claude");
+}
+
+export function resolveClaudeHomeDir(env = process.env) {
+  const home = nullableEnv(env.HOME);
+  return home ? path.resolve(home) : os.homedir();
 }
 
 export function deriveClaudeDaemonPaths({
@@ -38,6 +43,316 @@ export function deriveClaudeDaemonPaths({
     sessionsDir: path.join(resolvedConfigDir, "sessions"),
     jobsDir: path.join(resolvedConfigDir, "jobs"),
   };
+}
+
+function nullableEnv(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text.length > 0 ? text : null;
+}
+
+function defaultClaudeConfigDir(env = process.env) {
+  return path.join(resolveClaudeHomeDir(env), ".claude");
+}
+
+export function detectCallerProvenance(env = process.env) {
+  const claudeConfigDir = nullableEnv(env.CLAUDE_CONFIG_DIR);
+  const omxSessionId = nullableEnv(env.OMX_SESSION_ID);
+  const omxEntryPath = nullableEnv(env.OMX_ENTRY_PATH);
+  const codexThreadId = nullableEnv(env.CODEX_THREAD_ID);
+  const codexLauncher =
+    omxSessionId || omxEntryPath ? "omx" : codexThreadId ? "codex" : "unknown";
+  return {
+    claudeLauncher: "unknown",
+    codexLauncher,
+    signals: {
+      claudeConfigDir,
+      omxSessionId,
+      omxEntryPath,
+      codexThreadId,
+    },
+  };
+}
+
+export async function readOmcLaunchProfile(configDir) {
+  if (!configDir) return null;
+  try {
+    // Provenance hint only: OMC writes this profile in its runtime config dir.
+    // It is not an auth/security boundary and must not override explicit/env
+    // config-dir authority.
+    const parsed = JSON.parse(
+      await fs.readFile(
+        path.join(path.resolve(configDir), ".omc-launch-profile.json"),
+        "utf8",
+      ),
+    );
+    const sourceConfigDir = nullableEnv(parsed?.sourceConfigDir);
+    if (!sourceConfigDir) return null;
+    const sourceClaudeMd = nullableEnv(parsed?.sourceClaudeMd);
+    return {
+      sourceConfigDir: path.resolve(sourceConfigDir),
+      sourceClaudeMd: sourceClaudeMd ? path.resolve(sourceClaudeMd) : null,
+    };
+  } catch (error) {
+    if (error?.code === "ENOENT" || error instanceof SyntaxError) return null;
+    return null;
+  }
+}
+
+async function buildClaudeDaemonCandidate({
+  configDir,
+  configDirSource,
+  selectionMode,
+  env,
+  uid,
+  tmpRoot,
+}) {
+  const paths = deriveClaudeDaemonPaths({ configDir, uid, tmpRoot });
+  const defaultConfig = path.resolve(defaultClaudeConfigDir(env));
+  const omcProfile = await readOmcLaunchProfile(paths.configDir);
+  const claudeLauncher = omcProfile
+    ? "omc"
+    : paths.configDir === defaultConfig
+      ? "claude"
+      : "unknown";
+  return {
+    ...paths,
+    configDirSource,
+    selectionMode,
+    claudeLauncher,
+    sourceConfigDir: omcProfile?.sourceConfigDir,
+    sourceClaudeMd: omcProfile?.sourceClaudeMd ?? null,
+    callerProvenance: detectCallerProvenance(env),
+  };
+}
+
+export async function buildClaudeDaemonDiscoveryCandidates({
+  configDir,
+  env = process.env,
+  uid = typeof process.getuid === "function" ? process.getuid() : 0,
+  tmpRoot = "/tmp",
+} = {}) {
+  const explicitConfigDir = nullableEnv(configDir);
+  if (explicitConfigDir) {
+    return [
+      await buildClaudeDaemonCandidate({
+        configDir: explicitConfigDir,
+        configDirSource: "explicit",
+        selectionMode: "exact",
+        env,
+        uid,
+        tmpRoot,
+      }),
+    ];
+  }
+
+  const envConfigDir = nullableEnv(env.CLAUDE_CONFIG_DIR);
+  if (envConfigDir) {
+    return [
+      await buildClaudeDaemonCandidate({
+        configDir: envConfigDir,
+        configDirSource: "env",
+        selectionMode: "env-strict",
+        env,
+        uid,
+        tmpRoot,
+      }),
+    ];
+  }
+
+  const candidates = [];
+  const defaultConfig = defaultClaudeConfigDir(env);
+  const omcRuntime = path.join(defaultConfig, ".omc-launch");
+  if (await readOmcLaunchProfile(omcRuntime)) {
+    candidates.push(
+      await buildClaudeDaemonCandidate({
+        configDir: omcRuntime,
+        configDirSource: "omc-runtime",
+        selectionMode: "ambient",
+        env,
+        uid,
+        tmpRoot,
+      }),
+    );
+  }
+  candidates.push(
+    await buildClaudeDaemonCandidate({
+      configDir: defaultConfig,
+      configDirSource: "default",
+      selectionMode: "ambient",
+      env,
+      uid,
+      tmpRoot,
+    }),
+  );
+  return candidates;
+}
+
+export function publicClaudeDaemonCandidate(candidate) {
+  if (!candidate) return null;
+  return {
+    configDirSource: candidate.configDirSource,
+    selectionMode: candidate.selectionMode,
+    claudeLauncher: candidate.claudeLauncher,
+    configDir: candidate.configDir,
+    sourceConfigDir: candidate.sourceConfigDir ?? null,
+    sourceClaudeMd: candidate.sourceClaudeMd ?? null,
+    hash: candidate.hash,
+    controlSock: candidate.controlSock,
+  };
+}
+
+function sessionsFromDaemonList(listResponse) {
+  if (Array.isArray(listResponse?.jobs)) return listResponse.jobs;
+  if (Array.isArray(listResponse?.sessions)) return listResponse.sessions;
+  return [];
+}
+
+function errorMessage(error) {
+  return error?.message || String(error);
+}
+
+function findDaemonTargetInSessions(sessions, { short, sessionId } = {}) {
+  if (sessionId) {
+    return findDaemonJobBySessionId({ jobs: sessions }, sessionId);
+  }
+  if (short) {
+    return findDaemonJobByShort({ jobs: sessions }, short);
+  }
+  return null;
+}
+
+function candidateResultSummary(result) {
+  const summary = publicClaudeDaemonCandidate(result.candidate);
+  return {
+    ...summary,
+    ok: result.ok === true,
+    error: result.error ?? null,
+    sessionCount: Array.isArray(result.sessions) ? result.sessions.length : 0,
+  };
+}
+
+function buildProbeResponse({
+  candidates,
+  results,
+  selected,
+  matches,
+  targetRequested,
+  callerProvenance,
+}) {
+  const reachable = results.filter((result) => result.ok === true);
+  let ok = false;
+  let reason = "daemon-unavailable";
+  let error = null;
+
+  if (targetRequested && matches.length > 1) {
+    reason = "ambiguous-target";
+    error = `Claude daemon target ambiguous across ${matches.length} candidates`;
+  } else if (selected) {
+    ok = true;
+    reason = selected.target ? "target-found" : "daemon-available";
+  } else if (targetRequested && reachable.length > 0) {
+    reason = "target-not-found";
+    error = "Claude daemon target not found in reachable candidates";
+  } else if (results.length > 0) {
+    error =
+      results
+        .map((result) => result.error)
+        .filter(Boolean)
+        .join("; ") || "Claude daemon unavailable";
+  }
+
+  const selectedSessions = selected
+    ? selected.sessions
+    : targetRequested
+      ? []
+      : reachable.flatMap((result) => result.sessions);
+  const selectedDaemon = publicClaudeDaemonCandidate(selected?.candidate);
+  const reachableDaemons = reachable.map((result) =>
+    publicClaudeDaemonCandidate(result.candidate),
+  );
+
+  return {
+    ok,
+    reason,
+    controlSock: selected?.candidate?.controlSock,
+    daemon: selectedDaemon,
+    daemons: reachableDaemons,
+    sessions: selectedSessions,
+    target: selected?.target || undefined,
+    matches: matches.map((match) => ({
+      daemon: publicClaudeDaemonCandidate(match.candidate),
+      target: match.target,
+    })),
+    candidateResults: results.map(candidateResultSummary),
+    callerProvenance,
+    candidates: candidates.map(publicClaudeDaemonCandidate),
+    error: ok ? undefined : error,
+  };
+}
+
+export async function probeClaudeDaemonCandidates({
+  configDir,
+  env = process.env,
+  short,
+  sessionId,
+  timeoutMs = 6000,
+} = {}) {
+  const candidates = await buildClaudeDaemonDiscoveryCandidates({
+    configDir,
+    env,
+  });
+  const callerProvenance = detectCallerProvenance(env);
+  const targetRequested = Boolean(short || sessionId);
+  const results = [];
+
+  for (const candidate of candidates) {
+    try {
+      const list = await sendClaudeControlRequest(
+        candidate.controlSock,
+        { proto: 1, op: "list" },
+        { timeoutMs },
+      );
+      const sessions = sessionsFromDaemonList(list);
+      const ok = list?.ok !== false;
+      results.push({
+        ok,
+        candidate,
+        list,
+        sessions: ok ? sessions : [],
+        target: ok
+          ? findDaemonTargetInSessions(sessions, { short, sessionId })
+          : null,
+        error: ok ? null : list?.error || "Claude daemon list failed",
+      });
+    } catch (error) {
+      results.push({
+        ok: false,
+        candidate,
+        list: null,
+        sessions: [],
+        target: null,
+        error: errorMessage(error),
+      });
+    }
+  }
+
+  const matches = targetRequested
+    ? results.filter((result) => result.ok === true && result.target)
+    : [];
+  const selected = targetRequested
+    ? matches.length === 1
+      ? matches[0]
+      : null
+    : results.find((result) => result.ok === true) || null;
+
+  return buildProbeResponse({
+    candidates,
+    results,
+    selected,
+    matches,
+    targetRequested,
+    callerProvenance,
+  });
 }
 
 export function getProcStart(pid = process.pid) {
