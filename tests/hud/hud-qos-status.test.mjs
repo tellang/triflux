@@ -113,7 +113,10 @@ function runHudWithDimensions(cols, rows, extraEnv = {}, options = {}) {
     });
     const output = execSync(`node "${hudScriptPath}"`, {
       input,
-      cwd: options.cwd,
+      // Default to the mock home (no .triflux/lake) so the cto north-star row
+      // does not leak in from the real repo cwd when a dev has run
+      // `tfx cto collect`. Tests that exercise the cto row pass an explicit cwd.
+      cwd: options.cwd || mockHomeDir,
       env: {
         ...process.env,
         COLUMNS: cols.toString(),
