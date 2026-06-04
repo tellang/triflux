@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -88,6 +89,42 @@ function runOrchestrator({
       TRIFLUX_HOOK_CACHE_DIR: cacheDir,
       TRIFLUX_HOOK_CACHE_TTL_MS: "10000",
     },
+  });
+}
+
+// Async variant: spawnSync blocks the parent event loop, so an in-process mock
+// hub can't accept the child's loopback POST until the child has already exited
+// (deadlock). spawn keeps the parent loop live so the synapse POST round-trips.
+function runOrchestratorAsync({
+  cwd,
+  registryPath,
+  cacheDir,
+  env = {},
+  payload,
+}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [ORCHESTRATOR_PATH], {
+      cwd,
+      env: {
+        ...process.env,
+        ...env,
+        TRIFLUX_HOOK_REGISTRY: registryPath,
+        TRIFLUX_HOOK_CACHE_DIR: cacheDir,
+        TRIFLUX_HOOK_CACHE_TTL_MS: "10000",
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
   });
 }
 
@@ -422,5 +459,157 @@ describe("hook-orchestrator PreToolUse:Bash dedupe", () => {
     const output = JSON.parse(result.stdout);
     assert.equal(output.decision, "block");
     assert.match(output.reason, /Block 1\/2/);
+  });
+});
+
+describe("hook-orchestrator UserPromptSubmit synapse heartbeat", () => {
+  let sandboxDir;
+  let hookScriptPath;
+  let registryPath;
+  let cacheDir;
+
+  beforeEach(() => {
+    sandboxDir = mkdtempSync(join(tmpdir(), "triflux-hook-orch-hb-"));
+    hookScriptPath = writeHookScript(sandboxDir);
+    registryPath = join(sandboxDir, "hook-registry.json");
+    cacheDir = join(sandboxDir, "cache");
+  });
+
+  afterEach(() => {
+    rmSync(sandboxDir, { recursive: true, force: true });
+  });
+
+  // A real loopback hub: the heartbeat POST is fire-and-forget, so this proves
+  // the orchestrator drains it before process.exit (cf. the
+  // process-exit-drops-fire-and-forget regression class) — a mock fetchImpl
+  // could not, since the hook runs in a spawned process.
+  function startMockHub() {
+    const received = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        received.push({ url: req.url, body });
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+      });
+    });
+    return { server, received };
+  }
+
+  function upsRegistry() {
+    return JSON.stringify(
+      createRegistry(
+        [
+          {
+            id: "noop-ups",
+            matcher: "*",
+            command: hookCommand(
+              hookScriptPath,
+              join(sandboxDir, "ups.txt"),
+              "noop",
+              "",
+              "noop",
+            ),
+            priority: 0,
+            enabled: true,
+          },
+        ],
+        "UserPromptSubmit",
+      ),
+      null,
+      2,
+    );
+  }
+
+  it("fires a synapse heartbeat POST and drains it before process.exit", async () => {
+    const { server, received } = startMockHub();
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address();
+
+    writeFileSync(registryPath, upsRegistry(), "utf8");
+
+    const result = await runOrchestratorAsync({
+      cwd: sandboxDir,
+      registryPath,
+      cacheDir,
+      env: {
+        TFX_HUB_URL: `http://127.0.0.1:${port}`,
+        TFX_HUB_TOKEN: "test-token",
+      },
+      payload: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "sess-ups",
+        cwd: sandboxDir,
+        prompt: "implement the heartbeat wiring",
+      },
+    });
+
+    await new Promise((resolve) => server.close(resolve));
+
+    assert.equal(result.status, 0, result.stderr);
+    const hb = received.find((r) => r.url === "/synapse/heartbeat");
+    assert.ok(hb, "expected a /synapse/heartbeat POST to reach the hub");
+    const parsed = JSON.parse(hb.body);
+    assert.equal(parsed.sessionId, "sess-ups");
+    assert.equal(parsed.partial.taskSummary, "implement the heartbeat wiring");
+    assert.equal(parsed.partial.worktreePath, sandboxDir);
+    // pid is never sent — liveness is the TTL + heartbeat's job.
+    assert.equal("pid" in parsed.partial, false);
+  });
+
+  it("does not fire a heartbeat for non-UserPromptSubmit events", async () => {
+    const { server, received } = startMockHub();
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address();
+
+    writeFileSync(
+      registryPath,
+      JSON.stringify(
+        createRegistry(
+          [
+            {
+              id: "noop-read",
+              matcher: "*",
+              command: hookCommand(
+                hookScriptPath,
+                join(sandboxDir, "read.txt"),
+                "noop",
+                "",
+                "noop",
+              ),
+              priority: 0,
+              enabled: true,
+            },
+          ],
+          "PreToolUse",
+        ),
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const result = await runOrchestratorAsync({
+      cwd: sandboxDir,
+      registryPath,
+      cacheDir,
+      env: { TFX_HUB_URL: `http://127.0.0.1:${port}` },
+      payload: {
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: {},
+      },
+    });
+
+    await new Promise((resolve) => server.close(resolve));
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(
+      received.find((r) => r.url === "/synapse/heartbeat"),
+      undefined,
+    );
   });
 });
