@@ -110,45 +110,9 @@ describe("hud stale marker", () => {
   });
 });
 
-describe("Claude model-specific weekly markers", () => {
-  it("shows positive Sonnet and Opus weekly usage as secondary compact markers", () => {
-    const rows = getClaudeRows(
-      "compact",
-      { percent: 42, display: "42%" },
-      {
-        fiveHourPercent: 11,
-        weeklyPercent: 22,
-        sonnetWeeklyPercent: 33,
-        opusWeeklyPercent: 44,
-      },
-      0,
-    );
-
-    const left = stripAnsi(rows[0].left);
-    assert.match(left, /1w:/);
-    assert.match(left, /Sn:33%/);
-    assert.match(left, /Op:44%/);
-  });
-
-  it("hides zero or absent model-specific weekly usage", () => {
-    const rows = getClaudeRows(
-      "minimal",
-      { percent: 42, display: "42%" },
-      {
-        fiveHourPercent: 11,
-        weeklyPercent: 22,
-        sonnetWeeklyPercent: 0,
-      },
-      0,
-    );
-
-    const left = stripAnsi(rows[0].left);
-    assert.doesNotMatch(left, /Sn:/);
-    assert.doesNotMatch(left, /Op:/);
-  });
-
-  it("does not show model-specific weekly usage in nano or micro tiers", () => {
-    for (const tier of ["nano", "micro"]) {
+describe("Claude unified weekly markers", () => {
+  it("does not render Sonnet or Opus weekly markers in any Claude row tier", () => {
+    for (const tier of ["nano", "micro", "minimal", "compact", "full"]) {
       const rows = getClaudeRows(
         tier,
         { percent: 42, display: "42%" },
@@ -162,6 +126,10 @@ describe("Claude model-specific weekly markers", () => {
       );
 
       const left = stripAnsi(rows[0].left);
+      assert.match(
+        left,
+        tier === "nano" || tier === "micro" ? /11%\/22%/ : /1w:/,
+      );
       assert.doesNotMatch(left, /Sn:/);
       assert.doesNotMatch(left, /Op:/);
     }

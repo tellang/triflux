@@ -25,7 +25,7 @@ describe("parseClaudeUsageResponse", () => {
     assert.equal(result.opusWeeklyPercent, undefined);
   });
 
-  it("conditionally parses Sonnet weekly usage and omits null Opus bucket keys", () => {
+  it("ignores model-specific weekly buckets and keeps unified weekly usage", () => {
     const result = parseClaudeUsageResponse({
       five_hour: { utilization: 42, resets_at: "2026-04-22T10:00:00Z" },
       seven_day: { utilization: 13, resets_at: "2026-04-29T10:00:00Z" },
@@ -33,11 +33,16 @@ describe("parseClaudeUsageResponse", () => {
         utilization: 67,
         resets_at: "2026-04-30T10:00:00Z",
       },
-      seven_day_opus: null,
+      seven_day_opus: {
+        utilization: 89,
+        resets_at: "2026-05-01T10:00:00Z",
+      },
     });
 
-    assert.equal(result.sonnetWeeklyPercent, 67);
-    assert.equal(result.sonnetWeeklyResetsAt, "2026-04-30T10:00:00Z");
+    assert.equal(result.weeklyPercent, 13);
+    assert.equal(result.weeklyResetsAt, "2026-04-29T10:00:00Z");
+    assert.equal(result.sonnetWeeklyPercent, undefined);
+    assert.equal(result.sonnetWeeklyResetsAt, undefined);
     assert.equal(result.opusWeeklyPercent, undefined);
     assert.equal(result.opusWeeklyResetsAt, undefined);
   });
