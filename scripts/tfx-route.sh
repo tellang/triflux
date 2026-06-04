@@ -2767,6 +2767,17 @@ EOF
     fi
 
   elif [[ "$CLI_TYPE" == "antigravity" ]]; then
+    # CTO north-star: codex lane(line ~2670)과 동일하게 brief 를 prompt 앞에 주입.
+    # prepend_codex_north_star 는 CLI-agnostic (TFX_CTO_NORTH_STAR opt-out +
+    # .triflux/lake/current.md 만 참조) 하므로 agy 워커에서도 그대로 재사용한다.
+    # sentinel 은 command-substitution 이 trailing newline 을 삼키는 것을 막는다.
+    local _agy_north_star_file="${WORKDIR:-$PWD}/.triflux/lake/current.md"
+    if [[ -r "$_agy_north_star_file" ]]; then
+      local _agy_prompt_sentinel="__TFX_AGY_PROMPT_END_${$}_${RANDOM}__"
+      local _agy_full_prompt_with_sentinel
+      _agy_full_prompt_with_sentinel="$(prepend_codex_north_star "$FULL_PROMPT"; printf '%s' "$_agy_prompt_sentinel")"
+      FULL_PROMPT="${_agy_full_prompt_with_sentinel%"$_agy_prompt_sentinel"}"
+    fi
     run_antigravity_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
       local agy_stderr_bytes=0

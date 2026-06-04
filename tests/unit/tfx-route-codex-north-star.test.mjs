@@ -119,4 +119,41 @@ describe("tfx-route Codex north-star prepend", () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, prompt);
   });
+
+  it("wires the antigravity lane to prepend the same north-star brief", () => {
+    // codex lane(line ~2670)과 동일하게 antigravity dispatch 직전에 north-star 를
+    // prepend 해야 한다. prepend_codex_north_star 는 CLI-agnostic 이라 재사용한다.
+    const laneStart = routeSource.indexOf(
+      'elif [[ "$CLI_TYPE" == "antigravity" ]]; then',
+    );
+    assert.ok(laneStart >= 0, "antigravity dispatch lane not found");
+    const dispatchIdx = routeSource.indexOf("run_antigravity_exec", laneStart);
+    assert.ok(dispatchIdx > laneStart, "run_antigravity_exec call not found");
+    const lane = routeSource.slice(laneStart, dispatchIdx);
+
+    assert.match(
+      lane,
+      /current\.md/,
+      "antigravity lane must read .triflux/lake/current.md",
+    );
+    assert.match(
+      lane,
+      /prepend_codex_north_star "\$FULL_PROMPT"/,
+      "antigravity lane must call prepend_codex_north_star before dispatch",
+    );
+    assert.match(
+      lane,
+      /FULL_PROMPT=/,
+      "antigravity lane must reassign FULL_PROMPT with the prepended brief",
+    );
+  });
+
+  it("keeps the codex lane north-star prepend wiring (regression guard)", () => {
+    const codexIdx = routeSource.indexOf("_codex_north_star_file=");
+    assert.ok(codexIdx >= 0, "codex lane north-star wiring missing");
+    assert.match(
+      routeSource.slice(codexIdx, codexIdx + 400),
+      /prepend_codex_north_star "\$FULL_PROMPT"/,
+    );
+  });
 });

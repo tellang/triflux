@@ -9,7 +9,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { registerInteractiveSession } from "../../hooks/session-start-fast.mjs";
+import {
+  heartbeatInteractiveSession,
+  registerInteractiveSession,
+} from "../../hooks/session-start-fast.mjs";
 
 function payloadJson(obj) {
   return JSON.stringify(obj);
@@ -133,6 +136,92 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
 
     assert.equal(registered.length, 1);
     // worktreePath defaults back to cwd and branch is empty → no new info → no heartbeat.
+    assert.equal(heartbeats.length, 0);
+  });
+});
+
+describe("heartbeatInteractiveSession (UserPromptSubmit liveness)", () => {
+  it("fires a heartbeat with cwd-derived worktree, host, and prompt task summary", () => {
+    const heartbeats = [];
+
+    heartbeatInteractiveSession(
+      payloadJson({
+        session_id: "sess-hb",
+        cwd: "/home/dev/proj",
+        prompt: "implement the live-session heartbeat",
+      }),
+      {
+        heartbeat: (sessionId, partial) =>
+          heartbeats.push({ sessionId, partial }),
+      },
+    );
+
+    assert.equal(heartbeats.length, 1);
+    assert.equal(heartbeats[0].sessionId, "sess-hb");
+    assert.equal(heartbeats[0].partial.worktreePath, "/home/dev/proj");
+    assert.equal(heartbeats[0].partial.host, "local");
+    assert.equal(
+      heartbeats[0].partial.taskSummary,
+      "implement the live-session heartbeat",
+    );
+    // pid must NOT be sent — liveness is the TTL + heartbeat's job (cf. register).
+    assert.equal("pid" in heartbeats[0].partial, false);
+  });
+
+  it("caps the task summary at 100 chars (buildSynapseTaskSummary contract)", () => {
+    const heartbeats = [];
+
+    heartbeatInteractiveSession(
+      payloadJson({
+        session_id: "sess-long",
+        cwd: "/p",
+        prompt: "x".repeat(250),
+      }),
+      {
+        heartbeat: (sessionId, partial) =>
+          heartbeats.push({ sessionId, partial }),
+      },
+    );
+
+    assert.equal(heartbeats[0].partial.taskSummary.length, 100);
+  });
+
+  it("omits taskSummary when the payload carries no prompt", () => {
+    const heartbeats = [];
+
+    heartbeatInteractiveSession(
+      payloadJson({ session_id: "sess-noprompt", cwd: "/p" }),
+      {
+        heartbeat: (sessionId, partial) =>
+          heartbeats.push({ sessionId, partial }),
+      },
+    );
+
+    assert.equal(heartbeats.length, 1);
+    assert.equal("taskSummary" in heartbeats[0].partial, false);
+  });
+
+  it("is a no-op when the payload has no session_id", () => {
+    const heartbeats = [];
+
+    heartbeatInteractiveSession(payloadJson({ cwd: "/p", prompt: "hi" }), {
+      heartbeat: (sessionId, partial) =>
+        heartbeats.push({ sessionId, partial }),
+    });
+
+    assert.equal(heartbeats.length, 0);
+  });
+
+  it("is a no-op (no throw) on unparseable payload", () => {
+    const heartbeats = [];
+
+    assert.doesNotThrow(() =>
+      heartbeatInteractiveSession("{not json", {
+        heartbeat: (sessionId, partial) =>
+          heartbeats.push({ sessionId, partial }),
+      }),
+    );
+
     assert.equal(heartbeats.length, 0);
   });
 });
