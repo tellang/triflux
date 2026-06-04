@@ -4,6 +4,27 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.30.0] - 2026-06-04
+
+### Added
+
+- **`feat(cto)` (PR #380)** triflux CTO lake console — `tfx cto collect/status/dashboard` authority 레이어. 기존 durable surface(git/tfx_hub/tfx_swarm/tfx_synapse/ultragoal/handoffs)만 읽어 ignored `.triflux/lake/*` runtime 파일로 집계하는 thin repo-local 레이어다(신규 daemon/scheduler/memory engine 없음). north-star brief 를 Claude(SessionStart/UserPromptSubmit hook → `additionalContext`)와 Codex(`tfx-route.sh` route seam prepend)에 주입하고, 항상 켜진 HUD north-star row + `status --json` pull surface + AGENTS.md 포인터를 제공한다. `TFX_CTO_NORTH_STAR=0` opt-out. packages 3-layer mirror 동반.
+
+### Fixed
+
+- **`fix(cto)` (PR #384)** CTO efficacy 갭 2건 해소. (작업 A) `scripts/tfx-route.sh` antigravity lane 에 north-star prepend 를 추가해 codex 만 받던 brief 를 agy 워커도 수신한다(sentinel probe 통과). (작업 B) interactive 세션 live 추적 — SessionStart/주기 heartbeat 로 synapse registry 를 갱신 유지하고, `cto/status.mjs` `active_shards` 를 하드코딩 `[]` 에서 실제 swarm shard derive 로 교체하며, `cto/collect.mjs` 가 swarm lock object map 을 `workerId` 별 shard row 로 환원한다. packages 3-layer mirror 동반.
+- **`fix(synapse)` (commits `27c4fc57`, `8f3be4c7`)** CI synapse drain 안정화 — `drainPendingSynapse()` timeout 을 ref 유지해 await 중인 drain 이 process exit 에 취소되지 않게 하고, in-flight POST 가 먼저 settle 하면 ref 된 타이머를 정리해 자연 종료가 지연되지 않게 한다.
+- **`fix(cto)` (commits `e66b189b`, `8e728aa4`)** lake contract 강화(strict `current.json`/`ledger_tail` 검증 + malformed ledger 필터)와 north-star delimiter(`--- END CTO NORTH STAR ---`)가 hook cap 이후에도 보존되도록 inner brief 를 wrap 전에 cap 처리.
+
+### Changed
+
+- **`revert(hud)` (PR #383)** Claude HUD 에서 Sonnet/Opus 주간 분리 표시(`Sn:`/`Op:` 배지)를 제거하고 통합 `5h:`/`1w:` 2-게이지 구조로 환원한다. v10.29.0(`792399eb`)이 도입한 모델별 분리는 독립 한도가 아니라 all-models nested 가드레일이라 혼란을 줘 운영 요청으로 되돌린다. Keychain configDir 스코프 토큰 읽기·주간 버킷 파싱·`User-Agent` 헤더·`[stale]` 배지 등 토큰-빔 버그 수정은 그대로 유지. packages 3-layer mirror 동반.
+
+### Tests
+
+- **`test(cto)`** `cto-collect-swarm`, `cto-status`, north-star route smoke, HUD ambient `.triflux/lake` 격리, session-start synapse, hook-orchestrator heartbeat 테스트 추가/보강.
+- **`test(hud)`** Sonnet/Opus 분리 제거에 맞춰 `hud-claude-parse`/`credentials`/`backoff` 조정(통합 5h/1w 유지, Keychain/주간/UA/stale 케이스 보존).
+
 ## [10.29.0] - 2026-06-02
 
 ### Added
