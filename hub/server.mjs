@@ -2054,6 +2054,16 @@ export async function startHub({
   }, 60000);
   sessionTimer.unref();
 
+  const synapsePruneTimer = setInterval(() => {
+    try {
+      const { count } = synapseRegistry.pruneExpired();
+      if (count > 0) hubLog.info({ count }, "synapse.prune");
+    } catch (err) {
+      hubLog.warn({ err }, "synapse.prune_failed");
+    }
+  }, 60000);
+  synapsePruneTimer.unref();
+
   // 고아 node.exe 프로세스 + stale spawn 세션 주기적 정리 (5분마다)
   // TFX_DISABLE_ORPHAN_CLEANUP=1 로 비활성 (active SSH/swarm 세션 보호 회피용 hotfix gate)
   const orphanCleanupTimer = setInterval(
@@ -2288,6 +2298,7 @@ export async function startHub({
               router.stopSweeper();
               clearInterval(hitlTimer);
               clearInterval(sessionTimer);
+              clearInterval(synapsePruneTimer);
               clearInterval(rateLimitTimer);
               clearInterval(orphanCleanupTimer);
               if (idleTimer) {
