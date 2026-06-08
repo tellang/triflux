@@ -366,6 +366,15 @@ export async function startTray() {
     
     trayProc.on("error", (err) => console.error("[tfx-tray-mac] start failed:", err));
     
+    trayProc.on("exit", (code) => {
+      console.error(`[tfx-tray-mac] swift script exited (code ${code})`);
+      process.exit(typeof code === "number" ? code : 1);
+    });
+
+    const cleanup = () => trayProc.kill();
+    process.on("SIGINT", cleanup);
+    process.on("SIGTERM", cleanup);
+    
     return {
       systray: null,
       stop: () => trayProc.kill()
