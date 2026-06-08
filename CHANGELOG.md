@@ -4,6 +4,18 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.30.1] - 2026-06-08
+
+### Fixed
+
+- **`fix(codex)` (PR #386)** codex 0.137이 Codex MCP tool 스키마에서 `profile` 필드를 폐기해 default codex 레인이 `unknown field \`profile\``로 즉사하던 회귀를 수정. `hub/workers/codex-mcp.mjs:buildCodexArguments`가 더 이상 `args.profile`을 tool 인자로 보내지 않고, effort 프로필을 SSOT `~/.codex/<profile>.config.toml`에서 `model` + `config.model_reasoning_effort`로 해석한다(inline-comment tolerant TOML 파싱 + name-suffix fallback). CLI `exec --profile` 플래그는 0.137에서 정상이라 영향 없음. packages/{triflux,remote} 미러 동반.
+- **`fix(tests)` (PR #386)** 통합 테스트(team-bridge/hub-restart/quota)가 full `tfx-route.sh`(minimal profile)로 실제 `~/.codex/config.toml`을 config-swap하다 `--test-concurrency` 레이스로 손상시키던 non-hermetic 버그 격리. `scripts/tfx-route.sh`에 `TFX_CODEX_CONFIG` override seam(미설정 시 실제 경로 default)을 추가하고, per-file throwaway config fixture(`tests/helpers/codex-config-fixture.mjs`)로 격리.
+- **`fix(skills)` (PR #385)** tfx-goal-clarify Step 1의 route.sh signature 정정.
+
+### Added
+
+- **`feat(skills)` (PR #385)** tfx-goal-clarify 스킬을 repo 본체로 promote — 자연어 아이디어를 Claude Code `/goal` 명령 블록으로 변환하는 clarifier.
+
 ## [10.30.0] - 2026-06-04
 
 ### Added
