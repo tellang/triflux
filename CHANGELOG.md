@@ -4,6 +4,22 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.31.0] - 2026-06-08
+
+### Added
+
+- **`feat(tfx-route)` (PR #387)** codex/agy 워커 프롬프트에 등록 스킬을 주입하는 opt-in 프레임워크. `--skill <name>`(env `TFX_INJECT_SKILL`)으로 `skills/<name>/SKILL.md` 본문을 codex/agy 프롬프트 앞에 prepend(`prepend_skill`, CLI-agnostic). 미지정 시 no-op로 현행 동작 무변경. `printf`/`cat` temp-file 전달이라 codex `$`·agy `₩`/백슬래시 특수문자를 셸 재확장 없이 리터럴 보존(argv `--` 뒤 / stdin `printf %s`). skill name path-traversal 가드 포함. 네이티브 CLI 스킬(`/name` 슬래시)은 TUI 전용이라 headless에서 호출 불가 → prose 주입 채택(omc 레퍼런스도 동일). packages/triflux 미러 동반.
+- **`feat(tfx-route)` (PR #387)** agy(Gemini 3.x) 레인 anti-overclaim 규율 블록(`append_agy_anti_overclaim`, env `TFX_AGY_ANTI_OVERCLAIM` 기본 on). Gemini 3.x 과신(AA-Omniscience 실측: 정확도 53-56% 대비 환각률 88-91%) 대응 — fresh 증거 없는 완료 주장 금지 + grounded abstention("No Info") 규율을 프롬프트 END에 append(Gemini 3 공식 가이드의 부정제약-END 배치, blanket "do not guess" 회피).
+
+### Fixed
+
+- **`fix(synapse)` (PR #388)** bg/interactive 세션이 synapse registry에서 사라지고 dead 세션이 무한 누적되던 두 결함 수정. `pruneExpired()`가 stale/expired 세션을 `expireTimeoutMs`(기본 24h) 초과 시 제거하되 live(active/idle)는 보존(git-preflight dirty-file 가드 의존). heartbeat self-heal — 미등록 세션이 locator(worktreePath/cwd) 있는 heartbeat를 보내면 register로 복구(SessionStart register POST drop 회복). self-heal 세션은 명시 sessionKind 없으면 interactive로 본다(headless 기본값의 30s timeout→즉시 stale 재현 방지). `hub/server.mjs`에 60초 주기 prune sweep + shutdown clear. packages/{triflux,remote} 미러 동반.
+
+### Tests
+
+- **(PR #387)** tfx-route 스킬 주입 9 단위테스트(`$`/`₩`/백슬래시/`--flag` parse-safety, path-traversal 거부, anti-overclaim, 레인 wiring). north-star 회귀 5/5 무손상.
+- **(PR #388)** synapse-registry 회귀 가드(pruneExpired live 보존/explicit olderThanMs, self-heal 발동/미발동/UserPromptSubmit interactive 보존).
+
 ## [10.30.1] - 2026-06-08
 
 ### Fixed
