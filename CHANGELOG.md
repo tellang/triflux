@@ -4,6 +4,17 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.32.0] - 2026-06-08
+
+### Added
+
+- **`feat(codex)`** Codex 인터랙티브 세션을 시작 시 tfx-hub synapse 레지스트리에 자동 등록하는 lean 훅. Claude의 `registerInteractiveSession`을 codex 평면에서 미러 — `hooks/codex-session-hook.mjs`(argv 모드 `register`/`heartbeat`)가 허브가 꺼져있으면 hub-ensure로 켜고 register/heartbeat 후 drain, 항상 exit 0(세션 비차단). `scripts/ensure-codex-hooks.mjs`가 `~/.codex/hooks.json`(PascalCase)에 SessionStart/UserPromptSubmit 훅을 멱등 등록 + `config.toml [hooks.state] trusted_hash` 사전주입(codex 0.137 알고리즘 역공학, oh-my-codex 실제 해시와 byte-match 검증 → 인터랙티브 `/hooks` 승인 불필요). 기존 oh-my-codex/superpowers 엔트리 보존(merge only). `scripts/setup.mjs`가 `ensureCodexProfiles` 후 배선. 범위 = 인터랙티브 codex 세션(codex exec worker는 MCP roster 추적). packages/{core,triflux} 미러.
+- **`feat(cto)`** 같은 프로젝트에서 2개 이상 live 세션이 감지되면 CTO lake collect를 자동 실행. `hub/team/cto-auto-collect.mjs`가 `synapse.session.started`에서 `querySessions`로 동일 cwd/worktree peer를 확인해 peer≥1이면 debounced `runCollect`로 `.triflux/lake/current.md`를 갱신 → north-star brief가 협업 시점에만 활성화. env `TFX_CTO_AUTO_COLLECT` opt-out, fresh-lake skip, non-blocking. Codex 자동등록과 결합해 Codex+Claude 멀티세션까지 감지. packages/{triflux,remote} 미러(remote는 lazy `triflux/cto/collect.mjs` import).
+
+### Tests
+
+- **(codex 등록 훅 + CTO 트리거)** 3 hermetic 단위테스트(mkdtemp/seam): codex-session-hook(register/heartbeat/casing fallback/error 흡수), ensure-codex-hooks(PascalCase merge/no-clobber/idempotent/trusted_hash 골든 + oh-my-codex 실해시 교차검증), cto-auto-collect(peer 게이트/debounce/fresh-lake/opt-out). 전체 4116 pass / 0 fail, biome + lint:skills clean.
+
 ## [10.31.0] - 2026-06-08
 
 ### Added
