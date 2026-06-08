@@ -240,6 +240,14 @@ function timestamp() {
 
 export function ensureCodexHooks(opts = {}) {
   const codexHome = opts.codexHome || join(homedir(), ".codex");
+  // Never install into the real user HOME while the test runner is active.
+  // scripts/test-lock.mjs sets TEST_LOCK_PID for every test process, inherited by
+  // in-process callers (runCritical/runDeferred -> ensureCriticalSetup) and any
+  // spawned setup.mjs. Installer unit tests pass an explicit codexHome seam, which
+  // bypasses this guard.
+  if (!opts.codexHome && process.env.TEST_LOCK_PID) {
+    return { skipped: true, changedHooks: false, changedConfig: false };
+  }
   if (!existsSync(codexHome)) {
     return { skipped: true, changedHooks: false, changedConfig: false };
   }
