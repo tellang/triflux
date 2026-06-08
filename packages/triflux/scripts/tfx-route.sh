@@ -123,7 +123,11 @@ _preflight_check_gh_auth
 # top-level sandbox/approval_mode와 의미가 다르다. 이 값이 "approve"이면
 # codex exec이 non-TTY subprocess에서 승인 대기로 stall하므로 감지 대상에서 제외.
 # (refs: tellang/triflux#66, Yeachan-Heo/oh-my-codex#1478)
-_CODEX_CONFIG="${HOME}/.codex/config.toml"
+# TFX_CODEX_CONFIG override: integration tests that run the full route script
+# point this at an isolated tmpdir config so the MCP config-swap never mutates
+# the real ~/.codex/config.toml (non-hermetic corruption guard). Defaults to the
+# real path for normal runs.
+_CODEX_CONFIG="${TFX_CODEX_CONFIG:-${HOME}/.codex/config.toml}"
 _CODEX_HAS_SANDBOX=""
 if [[ -f "$_CODEX_CONFIG" ]] && awk '
   /^\[{1,2}mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
