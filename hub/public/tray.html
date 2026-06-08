@@ -51,8 +51,8 @@
       <button class="mac-tab" onclick="switchTab('gateway', this)">Gateway MCP</button>
     </div>
     <div class="mac-content-area">
-      <div id="tab-sessions" class="tab-pane active" id="sessions-container">Loading sessions...</div>
-      <div id="tab-gateway" class="tab-pane" id="mcp-container">Loading gateway info...</div>
+      <div id="tab-sessions" class="tab-pane active">Loading sessions...</div>
+      <div id="tab-gateway" class="tab-pane">Loading gateway info...</div>
     </div>
   </div>
   <script>
@@ -69,15 +69,20 @@
         const data = await res.json();
         renderSessions(data.sessions);
         renderGateway(data.broker);
-      } catch (e) { console.error(e); }
+        document.querySelector('.mac-status').innerHTML = '<span class="dot agy"></span> Connected';
+      } catch (e) {
+        console.error(e);
+        document.querySelector('.mac-status').innerHTML = '<span class="dot" style="background: #e06c75; box-shadow: 0 0 5px #e06c75;"></span> Disconnected';
+        document.getElementById('tab-sessions').innerHTML = 'Error loading sessions...';
+      }
     }
 
     function renderSessions(sessions) {
       const container = document.getElementById('tab-sessions');
       // For MVP, simply loop over raw sessions. In a real tree, we'd build a tree structure.
-      if (!sessions || !sessions.sessions) return;
+      if (!sessions) return;
       let html = '';
-      for (const [sid, sess] of Object.entries(sessions.sessions)) {
+      for (const [sid, sess] of Object.entries(sessions)) {
         html += `
           <div class="glass-card tree-branch">
             <div style="display:flex; justify-content:space-between;">
@@ -101,7 +106,7 @@
 
     function copyText(txt) { navigator.clipboard.writeText(txt); }
     async function focusSession(sid) {
-      await fetch('/api/focus-session', { method: 'POST', body: JSON.stringify({ sessionId: sid }) });
+      await fetch('/api/focus-session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: sid }) });
     }
 
     setInterval(fetchState, 3000);
