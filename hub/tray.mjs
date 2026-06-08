@@ -4,12 +4,12 @@ import _SysTrayModule from "systray2";
 
 const SysTray = _SysTrayModule.default || _SysTrayModule;
 
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { IS_WINDOWS } from "./platform.mjs";
+import { IS_WINDOWS, IS_MAC } from "./platform.mjs";
 
 const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
 const DEFAULT_HUB_PORT = "27888";
@@ -354,8 +354,26 @@ async function shutdown(reason = "shutdown") {
 }
 
 export async function startTray() {
+  if (IS_MAC) {
+    const swiftScript = join(dirname(fileURLToPath(import.meta.url)), "mac-tray.swift");
+    const port = process.env.TFX_HUB_PORT || DEFAULT_HUB_PORT;
+    
+    // Spawn swift script detached or as a child
+    const trayProc = spawn("swift", [swiftScript, port], {
+      stdio: "ignore",
+      detached: false
+    });
+    
+    trayProc.on("error", (err) => console.error("[tfx-tray-mac] start failed:", err));
+    
+    return {
+      systray: null,
+      stop: () => trayProc.kill()
+    };
+  }
+
   if (!IS_WINDOWS) {
-    throw new Error("tray command is only supported on Windows.");
+    throw new Error("systray2 tray command is only supported on Windows.");
   }
 
   systray = new SysTray({
