@@ -64,7 +64,7 @@ git rev-parse --show-toplevel 2>/dev/null
 
 Gemini 위임 (tfx-interview와 동일):
 ```bash
-Bash("bash ~/.claude/scripts/tfx-route.sh gemini exec '<analysis prompt>'")
+Bash("bash ~/.claude/scripts/tfx-route.sh gemini '<analysis prompt>'")
 ```
 
 Gemini 미사용 환경(m5 등 SSH 원격)에서는 Claude가 직접 채점.
