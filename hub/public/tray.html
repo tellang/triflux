@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Triflux CTO Tray</title>
+  <style>
+    body { -webkit-font-smoothing: antialiased; margin: 0; background: transparent; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 10px; }
+    .mac-popover {
+      width: 100%; height: 100vh;
+      background: rgba(20, 20, 20, 0.65);
+      backdrop-filter: blur(30px) saturate(180%);
+      -webkit-backdrop-filter: blur(30px) saturate(180%);
+      color: #fff; display: flex; flex-direction: column;
+    }
+    .mac-header { padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.1); background: rgba(0, 0, 0, 0.2); }
+    .mac-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+    .mac-logo { width: 20px; height: 20px; background: linear-gradient(135deg, #0A84FF, #5E5CE6); border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; }
+    .mac-tabs { display: flex; padding: 12px 16px 8px; gap: 2px; }
+    .mac-tab { flex: 1; background: transparent; border: none; color: rgba(255,255,255,0.6); font-size: 13px; font-weight: 500; padding: 6px 12px; cursor: pointer; border-radius: 6px; }
+    .mac-tab.active { background: rgba(255,255,255,0.15); color: #fff; }
+    .mac-content-area { padding: 10px 16px 16px; overflow-y: auto; flex: 1; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    .glass-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px; margin-bottom: 8px; }
+    .tree-branch { margin-left: 12px; padding-left: 16px; border-left: 1px solid rgba(255,255,255,0.15); position: relative; }
+    .tree-branch::before { content: ''; position: absolute; left: 0; top: 24px; width: 16px; height: 1px; background: rgba(255,255,255,0.15); }
+    .session-name { font-size: 13px; font-weight: 600; }
+    .path-text { font-size: 11px; color: rgba(255,255,255,0.5); margin: 4px 0 8px; }
+    .badge-group { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+    .mac-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; gap: 4px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .dot.claude { background: #d19a66; box-shadow: 0 0 5px #d19a66; }
+    .dot.codex { background: #ffffff; box-shadow: 0 0 5px rgba(255,255,255,0.5); }
+    .dot.agy { background: #61afef; box-shadow: 0 0 5px #61afef; }
+    .copyable { font-size: 11px; color: rgba(255,255,255,0.6); background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+    .focus-btn { background: rgba(97, 175, 239, 0.2); border: 1px solid rgba(97,175,239,0.4); color: #61afef; font-size: 11px; padding: 4px 8px; cursor: pointer; border-radius: 5px; opacity: 0.8; }
+    .focus-btn:hover { opacity: 1; background: rgba(97,175,239,0.4); color: white; }
+    .mcp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 8px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="mac-popover">
+    <div class="mac-header">
+      <div class="mac-title"><div class="mac-logo">T</div> Triflux Hub</div>
+      <div class="mac-status"><span class="dot agy"></span> Connected</div>
+    </div>
+    <div class="mac-tabs">
+      <button class="mac-tab active" onclick="switchTab('sessions', this)">Sessions / CTO</button>
+      <button class="mac-tab" onclick="switchTab('gateway', this)">Gateway MCP</button>
+    </div>
+    <div class="mac-content-area">
+      <div id="tab-sessions" class="tab-pane active" id="sessions-container">Loading sessions...</div>
+      <div id="tab-gateway" class="tab-pane" id="mcp-container">Loading gateway info...</div>
+    </div>
+  </div>
+  <script>
+    function switchTab(id, btn) {
+      document.querySelectorAll('.tab-pane').forEach(e => e.classList.remove('active'));
+      document.querySelectorAll('.mac-tab').forEach(e => e.classList.remove('active'));
+      document.getElementById('tab-' + id).classList.add('active');
+      btn.classList.add('active');
+    }
+
+    async function fetchState() {
+      try {
+        const res = await fetch('/api/tray-state');
+        const data = await res.json();
+        renderSessions(data.sessions);
+        renderGateway(data.broker);
+      } catch (e) { console.error(e); }
+    }
+
+    function renderSessions(sessions) {
+      const container = document.getElementById('tab-sessions');
+      // For MVP, simply loop over raw sessions. In a real tree, we'd build a tree structure.
+      if (!sessions || !sessions.sessions) return;
+      let html = '';
+      for (const [sid, sess] of Object.entries(sessions.sessions)) {
+        html += `
+          <div class="glass-card tree-branch">
+            <div style="display:flex; justify-content:space-between;">
+              <div class="session-name">${sess.role || 'Worker'}</div>
+              <button class="focus-btn" onclick="focusSession('${sid}')">Focus</button>
+            </div>
+            <div class="path-text">${sess.cwd || ''}</div>
+            <div class="badge-group">
+              <span class="copyable" onclick="copyText('${sid}')">ID: ${sid.substring(0,6)} ⎘</span>
+            </div>
+          </div>
+        `;
+      }
+      container.innerHTML = html || 'No active sessions';
+    }
+
+    function renderGateway(broker) {
+      const container = document.getElementById('tab-gateway');
+      container.innerHTML = '<div class="glass-card"><div class="path-text">Broker stats will go here</div></div>';
+    }
+
+    function copyText(txt) { navigator.clipboard.writeText(txt); }
+    async function focusSession(sid) {
+      await fetch('/api/focus-session', { method: 'POST', body: JSON.stringify({ sessionId: sid }) });
+    }
+
+    setInterval(fetchState, 3000);
+    fetchState();
+  </script>
+</body>
+</html>
