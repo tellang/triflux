@@ -300,8 +300,13 @@ describe("delegator-mcp stdio server", () => {
       });
 
       // 캐시의 부분 리스트가 availableServers로 주입되면 안 됨 — 교집합 필터로 MCP 서버 탈락 버그 유발
+      // model_reasoning_effort: designer→gpt55_xhigh 프로필이 config로 해석됨
+      // (codex 0.137이 profile 필드를 폐기 → effort는 config로 전달). mcp_servers는 여전히 {}.
       const config = JSON.parse(result.structuredContent.output);
-      assert.deepEqual(config, { mcp_servers: {} });
+      assert.deepEqual(config, {
+        mcp_servers: {},
+        model_reasoning_effort: "xhigh",
+      });
     } finally {
       restoreSearchEngineCacheBackup(originalCache);
       await closeClient(client, transport);
@@ -332,7 +337,11 @@ describe("delegator-mcp stdio server", () => {
         },
       });
       const codexConfig = JSON.parse(codexResult.structuredContent.output);
-      assert.deepEqual(codexConfig, { mcp_servers: {} });
+      // designer→gpt55_xhigh effort가 config로 해석됨 (profile 필드 폐기 대응)
+      assert.deepEqual(codexConfig, {
+        mcp_servers: {},
+        model_reasoning_effort: "xhigh",
+      });
 
       const aliasResult = await client.callTool({
         name: "triflux-delegate",

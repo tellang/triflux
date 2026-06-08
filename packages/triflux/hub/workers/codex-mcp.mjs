@@ -1,4 +1,7 @@
 // hub/workers/codex-mcp.mjs — Codex MCP 서버 래퍼
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -94,13 +97,78 @@ function normalizeStructuredContent(structuredContent, fallbackText = "") {
   return { threadId, content };
 }
 
-function buildCodexArguments(prompt, opts = {}) {
+/**
+ * Read a top-level TOML scalar (`key = "value"` / `key = 'value'` /
+ * `key = value`), tolerating an inline `# comment` and surrounding whitespace.
+ * Returns the trimmed value, or null when the key is absent/empty. Intentionally
+ * tiny — the per-profile files only carry `model` + `model_reasoning_effort`.
+ *
+ * @param {string} raw
+ * @param {string} key
+ * @returns {string|null}
+ */
+function readTomlScalar(raw, key) {
+  const re = new RegExp(
+    `^\\s*${key}\\s*=\\s*(?:"([^"\\n]*)"|'([^'\\n]*)'|([^#\\n]*?))\\s*(?:#.*)?$`,
+    "m",
+  );
+  const match = raw.match(re);
+  if (!match) return null;
+  const value = (match[1] ?? match[2] ?? match[3] ?? "").trim();
+  return value || null;
+}
+
+/**
+ * Resolve a Codex effort profile name (e.g. "gpt55_high") to its concrete
+ * `model` + reasoning effort. SSOT = the per-profile file written by
+ * `tfx setup` at `~/.codex/<profile>.config.toml`. Falls back to deriving the
+ * effort from the `<...>_<effort>` naming convention when the file is absent.
+ *
+ * codex 0.137 removed `profile` from the Codex MCP tool schema, so we translate
+ * the profile into the still-accepted `model` + `config` fields instead of
+ * forwarding `profile` (which now hard-fails with "unknown field `profile`").
+ *
+ * @param {string} profileName
+ * @returns {{ model: string|null, reasoningEffort: string|null }}
+ */
+export function resolveCodexProfileConfig(profileName) {
+  const result = { model: null, reasoningEffort: null };
+  if (typeof profileName !== "string" || !profileName) return result;
+
+  const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
+  try {
+    const raw = readFileSync(
+      join(codexHome, `${profileName}.config.toml`),
+      "utf8",
+    );
+    result.model = readTomlScalar(raw, "model");
+    result.reasoningEffort = readTomlScalar(raw, "model_reasoning_effort");
+  } catch {
+    // Profile file absent (non-file alias). Derive effort from the naming
+    // convention; leave model unset so codex uses its config.toml default.
+    const suffix = /_(xhigh|high|med|medium|low)$/.exec(profileName);
+    if (suffix) {
+      const map = {
+        xhigh: "xhigh",
+        high: "high",
+        med: "medium",
+        medium: "medium",
+        low: "low",
+      };
+      result.reasoningEffort = map[suffix[1]] || null;
+    }
+  }
+  return result;
+}
+
+export function buildCodexArguments(prompt, opts = {}) {
   const args = { prompt };
 
   if (typeof opts.cwd === "string" && opts.cwd) args.cwd = opts.cwd;
   if (typeof opts.model === "string" && opts.model) args.model = opts.model;
-  if (typeof opts.profile === "string" && opts.profile)
-    args.profile = opts.profile;
+  // NOTE: `profile` is intentionally NOT forwarded as a Codex tool argument.
+  // codex 0.137 dropped it from the tool schema; it is resolved into
+  // `model` + `config.model_reasoning_effort` just before return (see below).
   if (typeof opts.approvalPolicy === "string" && opts.approvalPolicy) {
     args["approval-policy"] = opts.approvalPolicy;
   }
@@ -118,6 +186,22 @@ function buildCodexArguments(prompt, opts = {}) {
   }
   if (typeof opts.compactPrompt === "string" && opts.compactPrompt) {
     args["compact-prompt"] = opts.compactPrompt;
+  }
+
+  // Map the effort profile to model + reasoning effort instead of forwarding the
+  // (0.137-rejected) `profile` field. Explicit opts.model wins over the profile;
+  // profile effort merges on top of any opts.config.
+  if (typeof opts.profile === "string" && opts.profile) {
+    const resolved = resolveCodexProfileConfig(opts.profile);
+    if (resolved.model && typeof args.model !== "string") {
+      args.model = resolved.model;
+    }
+    if (resolved.reasoningEffort) {
+      args.config = {
+        ...(args.config || {}),
+        model_reasoning_effort: resolved.reasoningEffort,
+      };
+    }
   }
 
   return args;
