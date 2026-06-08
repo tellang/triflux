@@ -464,6 +464,85 @@ prepend_codex_north_star() {
   rm -f "$tmp_file" 2>/dev/null || true
 }
 
+# prepend_skill: opt-in 으로 등록된 스킬의 SKILL.md 본문을 프롬프트 앞에 주입한다.
+# 활성 조건은 TFX_INJECT_SKILL env (tfx-auto 가 --skill <name> 으로 set). 미설정이면
+# 현행 동작 그대로 (no-op). CLI-agnostic — codex/agy 레인에서 동일하게 재사용한다.
+# 전달은 prepend_codex_north_star 와 동일하게 printf/cat → temp file 만 사용하므로
+# $ / 백슬래시(₩) 같은 특수문자를 셸 재확장 없이 리터럴로 보존한다 (parse-safe).
+# 스킬 경로: ${TFX_SKILLS_DIR:-<repo>/skills}/<name>/SKILL.md.
+prepend_skill() {
+  local prompt="${1:-}"
+  local skill_name="${TFX_INJECT_SKILL:-}"
+  if [[ -z "$skill_name" ]]; then
+    printf '%s' "$prompt"
+    return 0
+  fi
+  # 경로 탈출 방지: skill_name 은 skills/ 하위 단일 디렉토리 이름만 허용한다.
+  if [[ "$skill_name" == *"/"* || "$skill_name" == *".."* ]]; then
+    echo "[tfx-route] WARNING: TFX_INJECT_SKILL='${skill_name}' 에 경로 구분자/.. 포함 — 주입 거부" >&2
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  local skills_dir="${TFX_SKILLS_DIR:-}"
+  if [[ -z "$skills_dir" ]]; then
+    skills_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/skills"
+  fi
+  local skill_file="${skills_dir}/${skill_name}/SKILL.md"
+  if [[ ! -r "$skill_file" ]]; then
+    echo "[tfx-route] WARNING: TFX_INJECT_SKILL='${skill_name}' 스킬을 찾지 못함 ($skill_file) — 주입 생략" >&2
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  local tmp_file
+  tmp_file="$(mktemp "${TFX_TMP:-${TMPDIR:-/tmp}}/tfx-skill-prompt.XXXXXX" 2>/dev/null)" || {
+    printf '%s' "$prompt"
+    return 0
+  }
+
+  if ! {
+    printf '%s\n' "--- SKILL: ${skill_name} (apply this methodology to the task below) ---"
+    cat "$skill_file"
+    if [[ -s "$skill_file" ]]; then
+      local last_byte
+      last_byte="$(tail -c 1 "$skill_file" 2>/dev/null || true)"
+      [[ -n "$last_byte" ]] && printf '\n'
+    fi
+    printf '%s\n' "--- END SKILL ---"
+    printf '%s' "$prompt"
+  } > "$tmp_file"; then
+    rm -f "$tmp_file" 2>/dev/null || true
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  cat "$tmp_file" 2>/dev/null || printf '%s' "$prompt"
+  rm -f "$tmp_file" 2>/dev/null || true
+}
+
+# append_agy_anti_overclaim: agy(Gemini 3.x) 레인 전용 완료/grounding 규율 블록을
+# 프롬프트 *뒤*에 붙인다. Gemini 3.x 는 과신(overconfidence) outlier 라 거짓 완료
+# 주장·환각이 잦다 (AA-Omniscience 실증). 부정 제약은 Gemini 3 공식 가이드 권고대로
+# 프롬프트 END 에 배치하고, blanket "do not guess" 대신 "주어진 context 로 추론 +
+# 정확한 abstention 우선" 형태로 적는다 (open-ended negative 는 역효과). TFX_AGY_ANTI_OVERCLAIM=0 으로 opt-out.
+append_agy_anti_overclaim() {
+  local prompt="${1:-}"
+  case "${TFX_AGY_ANTI_OVERCLAIM:-1}" in
+    0|false|FALSE|off|OFF|no|NO)
+      printf '%s' "$prompt"
+      return 0
+      ;;
+  esac
+
+  printf '%s' "$prompt"
+  printf '\n\n%s\n' "--- COMPLETION & GROUNDING DISCIPLINE (apply strictly) ---"
+  printf '%s\n' "- Claim done/fixed/passing ONLY after running the check in this turn and seeing its output. With no fresh evidence, report what is still unverified instead of asserting success."
+  printf '%s\n' "- Ground every answer in the provided context and the actual repository. If something is not verifiable from what you can see, say 'No Info / 확인 불가' and stop rather than inventing plausible-but-unconfirmed details."
+  printf '%s\n' "- Use the provided context for deductions and prefer accurate abstention over confident guessing."
+  printf '%s' "--- END DISCIPLINE ---"
+}
+
 read_probe_state() {
   local pid="$1"
   local state_file="${TFX_PROBE_STATE_FILE:-${TFX_PROBE_DIR}/${pid}.json}"
@@ -2678,6 +2757,14 @@ FALLBACK_EOF
       _codex_full_prompt_with_sentinel="$(prepend_codex_north_star "$FULL_PROMPT"; printf '%s' "$_codex_prompt_sentinel")"
       FULL_PROMPT="${_codex_full_prompt_with_sentinel%"$_codex_prompt_sentinel"}"
     fi
+    # Opt-in 스킬 주입 (TFX_INJECT_SKILL). north-star 와 동일한 sentinel 패턴으로
+    # trailing newline 을 보존한다. 미설정이면 prepend_skill 이 no-op.
+    if [[ -n "${TFX_INJECT_SKILL:-}" ]]; then
+      local _codex_skill_sentinel="__TFX_CODEX_SKILL_END_${$}_${RANDOM}__"
+      local _codex_skill_prompt
+      _codex_skill_prompt="$(prepend_skill "$FULL_PROMPT"; printf '%s' "$_codex_skill_sentinel")"
+      FULL_PROMPT="${_codex_skill_prompt%"$_codex_skill_sentinel"}"
+    fi
     codex_transport_effective="exec"
     if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
       run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
@@ -2782,6 +2869,18 @@ EOF
       _agy_full_prompt_with_sentinel="$(prepend_codex_north_star "$FULL_PROMPT"; printf '%s' "$_agy_prompt_sentinel")"
       FULL_PROMPT="${_agy_full_prompt_with_sentinel%"$_agy_prompt_sentinel"}"
     fi
+    # Opt-in 스킬 주입 (TFX_INJECT_SKILL) — codex 레인과 동일.
+    if [[ -n "${TFX_INJECT_SKILL:-}" ]]; then
+      local _agy_skill_sentinel="__TFX_AGY_SKILL_END_${$}_${RANDOM}__"
+      local _agy_skill_prompt
+      _agy_skill_prompt="$(prepend_skill "$FULL_PROMPT"; printf '%s' "$_agy_skill_sentinel")"
+      FULL_PROMPT="${_agy_skill_prompt%"$_agy_skill_sentinel"}"
+    fi
+    # agy(Gemini 3.x) anti-overclaim 규율 블록을 프롬프트 END 에 append. opt-out: TFX_AGY_ANTI_OVERCLAIM=0.
+    local _agy_aoc_sentinel="__TFX_AGY_AOC_END_${$}_${RANDOM}__"
+    local _agy_aoc_prompt
+    _agy_aoc_prompt="$(append_agy_anti_overclaim "$FULL_PROMPT"; printf '%s' "$_agy_aoc_sentinel")"
+    FULL_PROMPT="${_agy_aoc_prompt%"$_agy_aoc_sentinel"}"
     run_antigravity_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
       local agy_stderr_bytes=0
