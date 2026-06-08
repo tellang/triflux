@@ -3,9 +3,10 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
+import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..", "..");
@@ -19,6 +20,11 @@ const FAKE_BRIDGE = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "fake-bridge.mjs"),
 );
 
+// Isolate tfx-route's codex config-swap to a throwaway file so the full-route
+// invocations below never mutate the real ~/.codex/config.toml under concurrency.
+const isolatedCodex = makeIsolatedCodexConfig();
+after(() => isolatedCodex.cleanup());
+
 function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
@@ -26,6 +32,7 @@ function runBash(command, extraEnv = {}) {
     env: {
       ...process.env,
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+      TFX_CODEX_CONFIG: isolatedCodex.path,
       TFX_CODEX_TRANSPORT: "exec",
       TFX_CTO_NORTH_STAR: "0",
       // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight 가 early-fail.

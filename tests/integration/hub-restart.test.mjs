@@ -19,9 +19,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
+import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..", "..");
@@ -31,6 +32,11 @@ const ROUTE_SCRIPT = toBashPath(
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
+
+// Isolate tfx-route's codex config-swap so the full-route invocations below
+// never mutate the real ~/.codex/config.toml under concurrency.
+const isolatedCodex = makeIsolatedCodexConfig();
+after(() => isolatedCodex.cleanup());
 
 function output(result) {
   return `${result.stdout || ""}\n${result.stderr || ""}`;
@@ -278,6 +284,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
           env: {
             ...process.env,
             PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+            TFX_CODEX_CONFIG: isolatedCodex.path,
             FAKE_CODEX_MODE: "exec",
             TFX_CODEX_TRANSPORT: "exec",
             TFX_CTO_NORTH_STAR: "0",
@@ -371,6 +378,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
           env: {
             ...process.env,
             PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+            TFX_CODEX_CONFIG: isolatedCodex.path,
             FAKE_CODEX_MODE: "exec",
             TFX_CODEX_TRANSPORT: "exec",
             TFX_CTO_NORTH_STAR: "0",
@@ -463,6 +471,7 @@ if (cmd === 'team-task-update') {
           env: {
             ...process.env,
             PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+            TFX_CODEX_CONFIG: isolatedCodex.path,
             FAKE_CODEX_MODE: "exec",
             TFX_CODEX_TRANSPORT: "exec",
             TFX_CTO_NORTH_STAR: "0",
@@ -565,6 +574,7 @@ if (cmd === 'team-task-update' && isClaim) {
           env: {
             ...process.env,
             PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+            TFX_CODEX_CONFIG: isolatedCodex.path,
             FAKE_CODEX_MODE: "exec",
             TFX_CODEX_TRANSPORT: "exec",
             TFX_CTO_NORTH_STAR: "0",

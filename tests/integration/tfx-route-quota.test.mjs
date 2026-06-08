@@ -8,6 +8,7 @@ import { dirname, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
+import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..", "..");
@@ -16,6 +17,11 @@ const ROUTE_SCRIPT = toBashPath(ROUTE_SCRIPT_WIN);
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
+
+// Isolate tfx-route's codex config-swap so the full-route invocations below
+// never mutate the real ~/.codex/config.toml under concurrency.
+const isolatedCodex = makeIsolatedCodexConfig();
+after(() => isolatedCodex.cleanup());
 
 // 헬퍼: bash 스크립트에서 특정 함수 내용만 추출
 function extractFunction(scriptPath, funcName) {
@@ -341,6 +347,7 @@ auto_reroute codex
         encoding: "utf8",
         env: {
           ...process.env,
+          TFX_CODEX_CONFIG: isolatedCodex.path,
           TFX_CLI_MODE: "auto",
           TFX_QUOTA_REROUTE: "0",
           CODEX_BIN: fakeCodex,
@@ -372,6 +379,7 @@ auto_reroute codex
         encoding: "utf8",
         env: {
           ...process.env,
+          TFX_CODEX_CONFIG: isolatedCodex.path,
           TFX_CLI_MODE: "auto",
           TFX_REROUTED_FROM: "gemini", // 이전에 gemini에서 넘어왔음을 가정
           CODEX_BIN: fakeCodex,
