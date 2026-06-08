@@ -1,5 +1,6 @@
 // hub/server.mjs — HTTP MCP + REST bridge + Named Pipe 서버 진입점
 
+import { focusSessionOnMac } from "./mac-focus.mjs";
 import { execSync as execSyncHub } from "node:child_process";
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -1329,6 +1330,36 @@ export async function startHub({
           ...synapseRegistry.snapshot(),
           ts: Date.now(),
         });
+      }
+
+      if (path === "/api/tray-state" && req.method === "GET") {
+        if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
+          return writeJson(res, 403, { ok: false, error: "Loopback only" });
+        }
+        
+        const qos = getQosStatsPayload();
+        const sessions = synapseRegistry.snapshot();
+        const broker = getBrokerPublicSnapshot(brokerInstance);
+        
+        return writeJson(res, 200, {
+          ok: true,
+          qos,
+          sessions,
+          broker,
+          ts: Date.now()
+        });
+      }
+
+      if (path === "/api/focus-session" && req.method === "POST") {
+        if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
+          return writeJson(res, 403, { ok: false, error: "Loopback only" });
+        }
+        let body;
+        try { body = JSON.parse(await readBody(req)); } catch (e) { return writeJson(res, 400, { error: "Invalid JSON" }); }
+        
+        const { sessionId, udsId } = body;
+        focusSessionOnMac(sessionId, udsId);
+        return writeJson(res, 200, { ok: true });
       }
 
       // Redacted peer-discovery surface. Returns co-located live peers (same
