@@ -1355,9 +1355,13 @@ export async function startHub({
           return writeJson(res, 403, { ok: false, error: "Loopback only" });
         }
         let body;
-        try { body = JSON.parse(await readBody(req)); } catch (e) { return writeJson(res, 400, { error: "Invalid JSON" }); }
+        try { 
+          body = await parseBody(req); 
+        } catch (e) { 
+          return writeJson(res, 400, { error: "Invalid JSON or Body too large" }); 
+        }
         
-        const { sessionId, udsId } = body;
+        const { sessionId, udsId } = body || {};
         focusSessionOnMac(sessionId, udsId);
         return writeJson(res, 200, { ok: true });
       }
