@@ -26,6 +26,7 @@ import {
   ensureTfxSection,
   getLatestRoutingTable,
 } from "./claudemd-sync.mjs";
+import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { addPluginRootFallbackToCommand } from "./lib/doctor-env-checks.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
@@ -1373,6 +1374,9 @@ function ensureCriticalSetup() {
   try {
     ensureCodexProfiles();
   } catch {}
+  try {
+    ensureCodexHooks();
+  } catch {}
 }
 
 export {
@@ -1383,6 +1387,7 @@ export {
   cleanupStaleSkills,
   DEPRECATED_SKILLS,
   detectDevMode,
+  ensureCodexHooks,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
   ensureHooksInSettings,
@@ -2145,6 +2150,21 @@ export async function runDeferred(stdinData) {
   const codexProfilesResult = ensureCodexProfiles();
   if (codexProfilesResult.ok && codexProfilesResult.changed > 0) {
     synced++;
+  }
+
+  try {
+    const codexHooksResult = ensureCodexHooks();
+    if (
+      !codexHooksResult?.skipped &&
+      (codexHooksResult?.changedHooks || codexHooksResult?.changedConfig)
+    ) {
+      io.log("  \x1b[32m✓\x1b[0m Codex hooks: registered session sync hooks");
+      synced++;
+    }
+  } catch (error) {
+    io.log(
+      `  \x1b[33m⚠\x1b[0m Codex hooks 등록 실패: ${error.message || error}`,
+    );
   }
 
   // ── Windows Codex 단독 실행 보호: 로그인 시 hub-ensure 등록 ──

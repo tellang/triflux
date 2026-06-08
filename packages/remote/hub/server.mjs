@@ -56,6 +56,7 @@ import { createStoreAdapter } from "./store-adapter.mjs";
 import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
 import { createSwarmLocks } from "./team/swarm-locks.mjs";
+import { createCtoAutoCollector } from "./team/cto-auto-collect.mjs";
 import {
   createSynapseRegistry,
   projectPeer,
@@ -68,6 +69,21 @@ registerTeamBridge(nativeProxy);
 
 const hubLog = createModuleLogger("hub");
 const brokerDiagnosticsAttached = new WeakSet();
+
+async function runCtoCollect(args, opts) {
+  try {
+    const mod = await import("triflux/cto/collect.mjs");
+    if (typeof mod?.runCollect === "function") {
+      return await mod.runCollect(args, opts);
+    }
+  } catch (error) {
+    hubLog.warn(
+      { err: String(error?.message || error) },
+      "cto.auto_collect.remote_collect_unavailable",
+    );
+  }
+  return null;
+}
 
 const MAX_BODY_SIZE = 1024 * 1024;
 const PUBLIC_PATHS = new Set(["/", "/status", "/health", "/healthz"]);
@@ -1009,10 +1025,16 @@ export async function startHub({
     registry: synapseRegistry,
     locks: swarmLocks,
   });
+  const ctoAutoCollector = createCtoAutoCollector({
+    registry: synapseRegistry,
+    runCollect: runCtoCollect,
+    logger: hubLog,
+  });
 
   // Synapse Layer 5: emitter subscribers — bridge events to hub logging
-  synapseEmitter.on("synapse.session.started", ({ sessionId }) => {
+  synapseEmitter.on("synapse.session.started", ({ sessionId, session }) => {
     hubLog.info({ sessionId }, "synapse.session.started");
+    ctoAutoCollector.handleSessionStarted({ sessionId, session });
   });
   synapseEmitter.on("synapse.session.heartbeat", ({ sessionId }) => {
     hubLog.debug({ sessionId }, "synapse.session.heartbeat");

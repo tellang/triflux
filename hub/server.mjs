@@ -22,6 +22,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { runCollect } from "../cto/collect.mjs";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
 import { broker as brokerInstance, reloadBroker } from "./account-broker.mjs";
 import { createAdaptiveEngine } from "./adaptive.mjs";
@@ -53,6 +54,7 @@ import {
   writeState,
 } from "./state.mjs";
 import { createStoreAdapter } from "./store-adapter.mjs";
+import { createCtoAutoCollector } from "./team/cto-auto-collect.mjs";
 import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
 import { createSwarmLocks } from "./team/swarm-locks.mjs";
@@ -1009,10 +1011,16 @@ export async function startHub({
     registry: synapseRegistry,
     locks: swarmLocks,
   });
+  const ctoAutoCollector = createCtoAutoCollector({
+    registry: synapseRegistry,
+    runCollect,
+    logger: hubLog,
+  });
 
   // Synapse Layer 5: emitter subscribers — bridge events to hub logging
-  synapseEmitter.on("synapse.session.started", ({ sessionId }) => {
+  synapseEmitter.on("synapse.session.started", ({ sessionId, session }) => {
     hubLog.info({ sessionId }, "synapse.session.started");
+    ctoAutoCollector.handleSessionStarted({ sessionId, session });
   });
   synapseEmitter.on("synapse.session.heartbeat", ({ sessionId }) => {
     hubLog.debug({ sessionId }, "synapse.session.heartbeat");
