@@ -760,6 +760,24 @@ team_send_message() {
 }
 
 # ── Hub 자동 재시작 (슬립 복귀 등으로 Hub 종료 시) ──
+is_ephemeral_hub_context() {
+  local normalized_cwd="${PWD//\\//}"
+  case "$normalized_cwd" in
+    *"/.claude/worktrees/"*|*"/.worktrees/"*|*"/.codex-swarm/wt-"*|*"/wt-"*)
+      return 0
+      ;;
+  esac
+
+  local key
+  for key in TFX_WORKER_SANDBOX_SCOPE TFX_WORKER_INDEX TFX_TEAM_TASK_ID TFX_TEAM_AGENT_NAME TFX_EPHEMERAL; do
+    if [[ -n "${!key:-}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 try_restart_hub() {
   local hub_server script_dir hub_port
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -781,6 +799,9 @@ try_restart_hub() {
   hub_port="${TFX_HUB_URL##*:}"
   hub_port="${hub_port%%/*}"
   [[ -z "$hub_port" || "$hub_port" == "$TFX_HUB_URL" ]] && hub_port=27888
+  if is_ephemeral_hub_context; then
+    hub_port=27888
+  fi
 
   echo "[tfx-route] Hub 미응답 — 자동 재시작 시도 (port=$hub_port)..." >&2
   TFX_HUB_PORT="$hub_port" "$NODE_BIN" "$hub_server" &>/dev/null &

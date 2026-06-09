@@ -29,11 +29,8 @@ if (!mcpFilterPath) {
     `mcp-filter.mjs not found. candidates: ${MCP_FILTER_CANDIDATES.join(", ")}`,
   );
 }
-const {
-  buildPromptHint,
-  getCodexMcpConfig,
-  SUPPORTED_MCP_PROFILES,
-} = await import(pathToFileURL(mcpFilterPath).href);
+const { buildPromptHint, getCodexMcpConfig, SUPPORTED_MCP_PROFILES } =
+  await import(pathToFileURL(mcpFilterPath).href);
 const SERVER_INFO = { name: "triflux-delegator", version: "1.0.0" };
 const DEFAULT_CONTEXT_BYTES = 32 * 1024;
 const DEFAULT_ROUTE_TIMEOUT_SEC = 120;

@@ -26,6 +26,7 @@ const TEST_HOME = mkdtempSync(join(tmpdir(), "tfx-hub-ensure-test-"));
 const ORIG_USERPROFILE = process.env.USERPROFILE;
 const ORIG_HOME = process.env.HOME;
 const ORIG_TFX_HUB_PORT = process.env.TFX_HUB_PORT;
+const ORIG_TFX_HUB_URL = process.env.TFX_HUB_URL;
 
 process.env.USERPROFILE = TEST_HOME;
 process.env.HOME = TEST_HOME;
@@ -46,6 +47,8 @@ process.on("exit", () => {
   else process.env.HOME = ORIG_HOME;
   if (ORIG_TFX_HUB_PORT === undefined) delete process.env.TFX_HUB_PORT;
   else process.env.TFX_HUB_PORT = ORIG_TFX_HUB_PORT;
+  if (ORIG_TFX_HUB_URL === undefined) delete process.env.TFX_HUB_URL;
+  else process.env.TFX_HUB_URL = ORIG_TFX_HUB_URL;
   try {
     rmSync(TEST_HOME, { recursive: true, force: true });
   } catch {
@@ -141,6 +144,27 @@ describe("resolveHubTarget — port cascade regression", () => {
   it("treats TFX_HUB_PORT=<negative> as invalid, falls back to default", () => {
     process.env.TFX_HUB_PORT = "-1";
     const target = resolveHubTarget();
+    assert.equal(target.port, 27888);
+  });
+
+  it("ignores non-standard TFX_HUB_PORT inside worktree contexts", () => {
+    process.env.TFX_HUB_PORT = "29009";
+    const target = resolveHubTarget({
+      cwd: "/repo/.worktrees/agent-a7608",
+    });
+    assert.equal(target.port, 27888);
+  });
+
+  it("ignores non-standard TFX_HUB_URL inside ephemeral worker contexts", () => {
+    delete process.env.TFX_HUB_PORT;
+    process.env.TFX_HUB_URL = "http://127.0.0.1:29132/mcp";
+    const target = resolveHubTarget({
+      cwd: "/repo",
+      env: {
+        TFX_HUB_URL: "http://127.0.0.1:29132/mcp",
+        TFX_WORKER_SANDBOX_SCOPE: "delegator-route",
+      },
+    });
     assert.equal(target.port, 27888);
   });
 });

@@ -4,7 +4,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { whichCommand, whichCommandAsync } from "@triflux/core/hub/platform.mjs";
+import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
+import { whichCommand, whichCommandAsync } from "../../hub/platform.mjs";
 
 const HUB_DEFAULT_PORT = 27888;
 const DEFAULT_STATUS_URL = "http://127.0.0.1:27888/status";
@@ -37,11 +38,34 @@ function fetchHubStatus({
   };
 }
 
-export function resolveDefaultStatusUrl(env = process.env) {
-  const envPort = Number.parseInt(String(env?.TFX_HUB_PORT ?? ""), 10);
-  const port =
-    Number.isFinite(envPort) && envPort > 0 ? envPort : HUB_DEFAULT_PORT;
+export function resolveDefaultStatusUrl(env = process.env, cwd = process.cwd()) {
+  const port = resolveHubPortForContext({
+    env,
+    cwd,
+    defaultPort: HUB_DEFAULT_PORT,
+  });
   return `http://127.0.0.1:${port}/status`;
+}
+
+function resolveStatusUrlForContext({
+  statusUrl,
+  env = process.env,
+  cwd = process.cwd(),
+} = {}) {
+  try {
+    const url = new URL(String(statusUrl));
+    url.port = String(
+      resolveHubPortForContext({
+        port: url.port,
+        env,
+        cwd,
+        defaultPort: HUB_DEFAULT_PORT,
+      }),
+    );
+    return url.toString();
+  } catch {
+    return resolveDefaultStatusUrl(env, cwd);
+  }
 }
 
 function normalizeCliName(name) {
@@ -212,8 +236,10 @@ export function detectCodexPlan(options = {}) {
 }
 
 export function checkHub({
+  env = process.env,
+  cwd = process.cwd(),
   pkgRoot = DEFAULT_PKG_ROOT,
-  statusUrl = resolveDefaultStatusUrl(),
+  statusUrl = resolveDefaultStatusUrl(env, cwd),
   restart = true,
   requestTimeoutMs = 3000,
   pollAttempts = 8,
@@ -223,10 +249,11 @@ export function checkHub({
   existsSyncFn = existsSync,
   sleepSyncFn = sleepSync,
 } = {}) {
+  const guardedStatusUrl = resolveStatusUrlForContext({ statusUrl, env, cwd });
   try {
     return fetchHubStatus({
       execSyncFn,
-      statusUrl,
+      statusUrl: guardedStatusUrl,
       timeout: requestTimeoutMs,
     });
   } catch {}
@@ -239,7 +266,7 @@ export function checkHub({
 
   try {
     const child = spawnFn(process.execPath, [serverPath], {
-      env: { ...process.env, TFX_HUB_PORT: String(new URL(statusUrl).port) },
+      env: { ...env, TFX_HUB_PORT: String(new URL(guardedStatusUrl).port) },
       detached: true,
       stdio: "ignore",
       windowsHide: true,
@@ -254,7 +281,7 @@ export function checkHub({
     try {
       const status = fetchHubStatus({
         execSyncFn,
-        statusUrl,
+        statusUrl: guardedStatusUrl,
         timeout: Math.min(requestTimeoutMs, 1000),
       });
       if (status.state === "healthy") {

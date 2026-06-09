@@ -4,15 +4,70 @@ import _SysTrayModule from "systray2";
 
 const SysTray = _SysTrayModule.default || _SysTrayModule;
 
-import { exec } from "node:child_process";
+import { exec, execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
+import { IS_MAC, IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
+import { ensureHubForTray } from "./tray-lifecycle.mjs";
 
 const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
 const DEFAULT_HUB_PORT = "27888";
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+export function collectMacTrayProcesses(
+  psOutput = "",
+  {
+    scriptPath = fileURLToPath(import.meta.url),
+    currentPid = process.pid,
+  } = {},
+) {
+  const target = String(scriptPath || "");
+  if (!target) return [];
+  const ownPid = Number(currentPid);
+  return String(psOutput)
+    .split(/\r?\n/u)
+    .flatMap((line) => {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.+)$/u);
+      if (!match) return [];
+      const pid = Number.parseInt(match[1], 10);
+      const ppid = Number.parseInt(match[2], 10);
+      const command = match[3].trim();
+      if (!Number.isFinite(pid) || pid === ownPid) return [];
+      if (!command.includes(target)) return [];
+      if (!/\bnode(?:\s|$)|\/node(?:\s|$)/u.test(command)) return [];
+      return [{ pid, ppid, command }];
+    });
+}
+
+export function reapExistingMacTrayProcesses({
+  scriptPath = fileURLToPath(import.meta.url),
+  currentPid = process.pid,
+  execFileSyncFn = execFileSync,
+  killFn = process.kill,
+} = {}) {
+  let output = "";
+  try {
+    output = execFileSyncFn("ps", ["-axo", "pid,ppid,command"], {
+      encoding: "utf8",
+      timeout: 1000,
+      maxBuffer: 1024 * 1024,
+    });
+  } catch {
+    return [];
+  }
+  const existing = collectMacTrayProcesses(output, { scriptPath, currentPid });
+  for (const processInfo of existing) {
+    try {
+      killFn(processInfo.pid, "SIGTERM");
+    } catch {}
+  }
+  return existing;
+}
 
 function getHubBaseUrl() {
   if (process.env.TFX_HUB_URL)
@@ -354,8 +409,42 @@ async function shutdown(reason = "shutdown") {
 }
 
 export async function startTray() {
+  if (IS_MAC) {
+    const trayScript = fileURLToPath(import.meta.url);
+    const port = process.env.TFX_HUB_PORT || DEFAULT_HUB_PORT;
+    const serverPath = join(dirname(trayScript), "server.mjs");
+    await ensureHubForTray({ port, serverPath });
+    const reaped = reapExistingMacTrayProcesses({ scriptPath: trayScript });
+    if (reaped.length > 0) await sleep(350);
+    const swiftScript = join(dirname(trayScript), "mac-tray.swift");
+
+    // Spawn swift script detached or as a child
+    const trayProc = spawn("swift", [swiftScript, port], {
+      stdio: "ignore",
+      detached: false,
+    });
+
+    trayProc.on("error", (err) =>
+      console.error("[tfx-tray-mac] start failed:", err),
+    );
+
+    trayProc.on("exit", (code) => {
+      console.error(`[tfx-tray-mac] swift script exited (code ${code})`);
+      process.exit(typeof code === "number" ? code : 1);
+    });
+
+    const cleanup = () => trayProc.kill();
+    process.on("SIGINT", cleanup);
+    process.on("SIGTERM", cleanup);
+
+    return {
+      systray: null,
+      stop: () => trayProc.kill(),
+    };
+  }
+
   if (!IS_WINDOWS) {
-    throw new Error("tray command is only supported on Windows.");
+    throw new Error("systray2 tray command is only supported on Windows.");
   }
 
   systray = new SysTray({
