@@ -43,6 +43,10 @@ const CORE_FILE_MIRRORS = [
     target: "packages/core/hub/team/retry-state-machine.mjs",
   },
   {
+    source: "hub/team/claude-agent-session-normalizer.mjs",
+    target: "packages/core/hub/team/claude-agent-session-normalizer.mjs",
+  },
+  {
     source: "hub/team/claude-daemon-control.mjs",
     target: "packages/core/hub/team/claude-daemon-control.mjs",
   },

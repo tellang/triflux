@@ -784,7 +784,15 @@ test("findDaemonJobByShort returns a daemon list job by short id", () => {
     "22222222",
   );
 
-  assert.deepEqual(job, { short: "22222222", pid: 42 });
+  assert.deepEqual(job, {
+    short: "22222222",
+    pid: 42,
+    id: "22222222",
+    sessionId: "",
+    session_id: "",
+    state: "unknown",
+    status: "unknown",
+  });
   assert.equal(findDaemonJobByShort({ ok: true, jobs: [] }, "missing"), null);
 });
 

@@ -61,6 +61,7 @@ const CORE_DIRS = [
   "hub/lib",
   "hub/middleware",
   "hub/team/retry-state-machine.mjs",
+  "hub/team/claude-agent-session-normalizer.mjs",
   "hub/team/claude-daemon-control.mjs",
   "hub/team/claude-session-projection.mjs",
   // dep-free helper imported by core's session-start/end hooks (peer-discovery)
