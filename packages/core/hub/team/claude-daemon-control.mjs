@@ -9,6 +9,10 @@ import {
   removeClaudeSessionProjection,
   writeClaudeSessionProjection,
 } from "./claude-session-projection.mjs";
+import {
+  extractClaudeAgentSessions,
+  normalizeClaudeAgentSession,
+} from "./claude-agent-session-normalizer.mjs";
 
 export function resolveClaudeConfigDir(env = process.env) {
   if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
@@ -1055,26 +1059,26 @@ export function buildClaudePromptDispatchPayload({
 }
 
 export function findDaemonJobByShort(listResponse, short) {
-  if (!Array.isArray(listResponse?.jobs)) return null;
-  return listResponse.jobs.find((job) => job?.short === short) || null;
+  const expected = String(short || "").trim();
+  if (!expected) return null;
+  return (
+    extractClaudeAgentSessions(listResponse).find(
+      (job) => job.short === expected || job.id === expected,
+    ) || null
+  );
 }
 
 export function findDaemonJobBySessionId(listResponse, sessionId) {
-  if (!Array.isArray(listResponse?.jobs)) return null;
-  const expected = String(sessionId || "");
+  const expected = String(sessionId || "").trim();
   if (!expected) return null;
   return (
-    listResponse.jobs.find((job) => {
-      const candidate =
-        job?.sessionId ??
-        job?.session_id ??
-        job?.dispatch?.sessionId ??
-        job?.d?.sessionId ??
-        "";
-      return String(candidate) === expected;
-    }) || null
+    extractClaudeAgentSessions(listResponse).find(
+      (job) => String(job.sessionId || job.session_id || "") === expected,
+    ) || null
   );
 }
+
+export { extractClaudeAgentSessions, normalizeClaudeAgentSession };
 
 export async function waitForDaemonJobPid(
   controlSock,

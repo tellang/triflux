@@ -1207,6 +1207,7 @@ async function cmdDaemonProbe(args) {
     const payload = readBridgePayload(args);
     const {
       deriveClaudeDaemonPaths,
+      extractClaudeAgentSessions,
       findDaemonJobBySessionId,
       findDaemonJobByShort,
       sendClaudeControlRequest,
@@ -1224,11 +1225,12 @@ async function cmdDaemonProbe(args) {
       : payload.short
         ? findDaemonJobByShort(list, payload.short)
         : null;
+    const sessions = extractClaudeAgentSessions(list);
 
     return emitJson({
       ok: list?.ok !== false,
       controlSock: daemonPaths.controlSock,
-      sessions: list?.jobs || list?.sessions || [],
+      sessions,
       target: target || undefined,
       error: list?.ok === false ? list?.error : undefined,
     });
