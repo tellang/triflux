@@ -72,6 +72,24 @@ export function sendControlRequest(sockPath, request, { timeoutMs = 3000 } = {})
   });
 }
 
+export async function readDaemonControlKey(configDir) {
+  if (!configDir) return undefined;
+  try {
+    const key = await fs.readFile(
+      path.join(configDir, "daemon", "control.key"),
+      "utf8",
+    );
+    return key.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function buildDaemonControlAuth(configDir) {
+  const auth = await readDaemonControlKey(configDir);
+  return auth ? { auth } : {};
+}
+
 export function buildIsolatedDaemonEnv(configDir, baseEnv = process.env) {
   const allowed = [
     "PATH",

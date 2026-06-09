@@ -5,7 +5,10 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { sendControlRequest } from "../../experiments/native-bridge-feasibility/claude-native-worker-protocol.mjs";
+import {
+  buildDaemonControlAuth,
+  sendControlRequest,
+} from "../../experiments/native-bridge-feasibility/claude-native-worker-protocol.mjs";
 import {
   deriveClaudeDaemonPaths,
   startClaudeNativeBridge,
@@ -104,7 +107,12 @@ async function stopDaemon(daemon, controlSock) {
   await waitForExit(daemon, 2000);
 }
 
-async function collectAttach(controlSock, short, { timeoutMs = 1500 } = {}) {
+async function collectAttach(
+  controlSock,
+  short,
+  { timeoutMs = 1500, configDir } = {},
+) {
+  const authPayload = await buildDaemonControlAuth(configDir);
   return new Promise((resolve) => {
     const socket = net.connect(controlSock);
     let buffer = Buffer.alloc(0);
@@ -131,6 +139,7 @@ async function collectAttach(controlSock, short, { timeoutMs = 1500 } = {}) {
         `${JSON.stringify({
           proto: 1,
           op: "attach",
+          ...authPayload,
           short,
           cols: 120,
           rows: 40,
@@ -246,7 +255,7 @@ test("startup-native adopts production Triflux native bridge facade", {
       proto: 1,
       op: "list",
     });
-    const attach = await collectAttach(paths.controlSock, short);
+    const attach = await collectAttach(paths.controlSock, short, { configDir });
     const resize = await sendControlRequest(paths.controlSock, {
       proto: 1,
       op: "resize",
