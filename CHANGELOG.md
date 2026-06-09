@@ -4,6 +4,22 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.33.0] - 2026-06-09
+
+### Added
+
+- **`feat(hub)`** macOS 네이티브 tray. Swift `mac-tray.swift` 팝오버 + `tray.html` 드롭다운 UI, `/api/tray-state`·`/api/focus-session` 엔드포인트, `tray-lifecycle`/`tray-runtime`/`tray-state` 모듈 분리. `reapExistingMacTrayProcesses`로 기동 시 stale tray 프로세스 정리. packages/{triflux,remote} 미러.
+
+### Fixed
+
+- **`fix(hub)` hub 고아 프로세스 누수.** 워커 worktree가 env에 실린 비표준 `TFX_HUB_PORT`로 전용 hub를 detached spawn하고 회수되지 않아 ~24h에 다수(실측 48개/~1.4GB) 누적되던 결함. ① `resolveHubPortForContext`가 worktree/ephemeral 컨텍스트(cwd `.claude/worktrees`·`.worktrees`·`.codex-swarm/wt-` 또는 `TFX_WORKER_*`/`TFX_TEAM_*`/`TFX_EPHEMERAL` env)에서 canonical 포트 27888을 강제 — server bootstrap·hub-ensure·tray-lifecycle·env-probe·tfx-route 모든 spawn 경로에 적용해 워커가 비표준 포트 hub를 새로 띄우지 않고 27888 primary를 재사용/대기. 비-worktree 커스텀 `TFX_HUB_PORT`는 그대로 honor(회귀 없음, PR #158/#197 27888 안정화 불변). ② `reapExistingHubProcesses`가 canonical hub(27888) 기동 성공 시 비표준 포트 고아 hub를 일괄 정리(self·pidfile pid·27888 listener는 보존, 나머지 SIGTERM→SIGKILL). ③ 비-canonical hub는 idle 30분 후 자동 종료(`HUB_IDLE_TIMEOUT_DEFAULT_MS` 포트조건부, primary는 영구). ④ pidfile/token 파일은 소유 hub만 삭제(`cleanupOwnedPidFile`/`cleanupOwnedTokenFile`). packages/{triflux,remote} 미러.
+- **`fix(native-bridge)`** claude-native worker adoption harness가 production Triflux native bridge에 attach할 때 `~/.claude/daemon/control.key`를 제시(`buildDaemonControlAuth`) — control-key 인증을 강제하는 daemon에서도 attach 성공.
+- **`fix(hub, tray)`** mac-tray 앱 활성화 정책으로 입력·포커스 문제 해결, `tray.html` 코드리뷰 버그 수정, `/api/focus-session` JSON body 파싱/구조분해 수정.
+
+### Tests
+
+- hub-lifecycle / tray-lifecycle / tray-runtime / tray-state / tray-singleton / tray-html / mac-focus / pack-remote 단위테스트 신규, env-probe·hub-server-port·hub-ensure-port-cascade·packages-sync·tfx-route-bash-node-parity 확장. (hub 누수 fix: server-boundary 포트 가드·reaper 보존 로직·token 소유권 회귀 테스트 포함)
+
 ## [10.32.0] - 2026-06-08
 
 ### Added
