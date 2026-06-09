@@ -34,14 +34,14 @@ import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.m
 import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
 import { createHitlManager } from "@triflux/core/hub/hitl.mjs";
 import {
+  reapExistingHubProcesses,
+  resolveHubPortForContext,
+} from "./hub-lifecycle.mjs";
+import {
   cleanupOrphanNodeProcesses,
   cleanupOrphanRuntimeProcesses,
   cleanupStaleFsmonitorDaemons,
 } from "@triflux/core/hub/lib/process-utils.mjs";
-import {
-  reapExistingHubProcesses,
-  resolveHubPortForContext,
-} from "./hub-lifecycle.mjs";
 import * as spawnTrace from "@triflux/core/hub/lib/spawn-trace.mjs";
 import {
   recordRequest,
@@ -659,7 +659,10 @@ export function resolveHubIdleTimeoutMs({
   env = process.env,
   defaultPort = HUB_DEFAULT_PORT,
 } = {}) {
-  const parsed = Number.parseInt(String(env?.TFX_HUB_IDLE_TIMEOUT_MS ?? ""), 10);
+  const parsed = Number.parseInt(
+    String(env?.TFX_HUB_IDLE_TIMEOUT_MS ?? ""),
+    10,
+  );
   if (Number.isFinite(parsed) && parsed >= 0) return parsed;
   return Number(port) === defaultPort ? 0 : HUB_IDLE_TIMEOUT_DEFAULT_MS;
 }
@@ -2440,7 +2443,7 @@ export async function startHub({
           );
           if (port === HUB_DEFAULT_PORT) {
             void reapExistingHubProcesses({ currentPid: process.pid }).then(
-              ({ reaped }) => {
+              ({ reaped, failed }) => {
                 if (reaped.length > 0) {
                   hubLog.info(
                     {
@@ -2449,6 +2452,19 @@ export async function startHub({
                       caller: "startup",
                     },
                     "hub.startup_reaper",
+                  );
+                }
+                // Surface kill-unable orphans (EPERM/defunct). Without this the
+                // reaper's failed[] is dropped and an unreapable hub survives
+                // with zero log signal (FU3 observability gap).
+                if (failed && failed.length > 0) {
+                  hubLog.warn(
+                    {
+                      failed: failed.length,
+                      processes: failed,
+                      caller: "startup",
+                    },
+                    "hub.startup_reaper_failed",
                   );
                 }
               },
