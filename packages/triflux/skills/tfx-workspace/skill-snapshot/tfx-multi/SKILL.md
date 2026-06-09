@@ -231,7 +231,7 @@ status는 "completed"만 사용. 실패 여부는 `metadata.result`로 구분.
 > Codex/Antigravity 래퍼, Claude 워커 모두 동일하게 적용한다.
 
 > **[금지] Lead 또는 Agent 래퍼가 `gemini -y -p "..."` 또는 `codex exec "..."`를 직접 호출하면 안 된다.**
-> 직접 호출하면 tfx-route.sh의 모델 지정(`-m gemini-3.1-pro-preview`), MCP 필터, 팀 bridge 연동,
+> 직접 호출하면 tfx-route.sh의 프로필 기반 모델 지정, MCP 필터, 팀 bridge 연동,
 > Windows 호환 경로, 타임아웃, 후처리(토큰 추적/이슈 로깅)가 모두 누락된다.
 > 반드시 `bash ~/.claude/scripts/tfx-route.sh {role} '{subtask}' {mcp_profile}`을 통해 실행해야 한다.
 

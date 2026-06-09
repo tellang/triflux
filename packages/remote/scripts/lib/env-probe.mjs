@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
-import { whichCommand, whichCommandAsync } from "../../hub/platform.mjs";
+import { whichCommand, whichCommandAsync } from "@triflux/core/hub/platform.mjs";
 
 const HUB_DEFAULT_PORT = 27888;
 const DEFAULT_STATUS_URL = "http://127.0.0.1:27888/status";
