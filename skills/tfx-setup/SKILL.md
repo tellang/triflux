@@ -241,7 +241,7 @@ project_doc_fallback_filenames = ["CODEX.md", "AGENTS.md"]
 **이유:**
 - Codex 전용 진입점 `CODEX.md` 우선 → 프로젝트가 의도한 Codex 컨텍스트 적용
 - `AGENTS.md` 폴백 → 공용 에이전트 지시서 지원
-- **`CLAUDE.md` 포함 금지** — Claude 전용 hint(XML 태그, 한국어 응답 지시 등)가 Codex 로 누설되어 컨텍스트 노이즈 증가 (실측: 약 84% 노이즈 감소)
+- **`CLAUDE.md`는 fallback에 넣지 않기** — Claude 전용 hint가 Codex prompt에 섞일 수 있다. 실제 영향은 `codex debug prompt-input`으로 확인하며, 근거 없는 정량치(예: N% 감소)는 쓰지 않는다.
 
 **감지 규칙:**
 
@@ -249,7 +249,7 @@ project_doc_fallback_filenames = ["CODEX.md", "AGENTS.md"]
 |------|------|------|
 | 키 누락 | 기본값 `["AGENTS.md"]` 로 동작 → `CODEX.md` 무시됨 | AskUserQuestion 으로 추가 제안 |
 | 값 `["CODEX.md", "AGENTS.md"]` | ✅ 표준 | 변경 없음 |
-| `CLAUDE.md` 포함 | 컨텍스트 노이즈 위험 | AskUserQuestion 으로 제거 제안 |
+| `CLAUDE.md` 포함 | Codex prompt 혼입 위험 | AskUserQuestion 으로 제거 제안 |
 | 순서 불일치 (예: AGENTS 먼저) | 우선순위 의도 미반영 | AskUserQuestion 으로 교정 제안 |
 
 **비표준 감지 시 AskUserQuestion:**
