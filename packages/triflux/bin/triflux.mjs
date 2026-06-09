@@ -22,6 +22,7 @@ import {
 import { homedir, tmpdir } from "os";
 import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
+import { inspectClaudeRuntimeFlags } from "../hub/diagnostics/claude-runtime-flags.mjs";
 import { loadDelegatorSchemaBundle } from "../hub/delegator/tool-definitions.mjs";
 import {
   checkNetworkAvailability,
@@ -2524,6 +2525,15 @@ function addDoctorCheck(report, entry) {
   report.checks.push(entry);
 }
 
+function readJsonIfExists(filePath) {
+  if (!existsSync(filePath)) return {};
+  try {
+    return JSON.parse(readFileSync(filePath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
 function toHookCoverageName(fileName, fallbackId = "") {
   if (typeof fileName === "string" && fileName.trim()) {
     return basename(fileName).replace(/\.mjs$/i, "");
@@ -3452,6 +3462,22 @@ async function cmdDoctor(options = {}) {
       fail("미설치 (필수)");
       issues++;
     }
+
+    const claudeSettings = readJsonIfExists(join(CLAUDE_DIR, "settings.json"));
+    const runtimeFlags = inspectClaudeRuntimeFlags({
+      env: process.env,
+      settings: claudeSettings,
+    });
+    addDoctorCheck(report, {
+      name: "claude-runtime-flags",
+      status: runtimeFlags.status,
+      safe_mode: runtimeFlags.safeMode,
+      disable_bundled_skills: runtimeFlags.disableBundledSkills,
+      managed_mcp_policy: runtimeFlags.managedMcpPolicy,
+      summary: runtimeFlags.summary,
+      ...(runtimeFlags.fix ? { fix: runtimeFlags.fix } : {}),
+    });
+    if (runtimeFlags.status === "warning") warn(runtimeFlags.summary);
 
     // 7. psmux (Windows only)
     if (process.platform === "win32") {
