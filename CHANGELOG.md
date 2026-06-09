@@ -4,6 +4,29 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.33.1] - 2026-06-09
+
+### Added
+
+- **`feat(hub)` Stop-hook interactive 세션 heartbeat.** Claude는 UserPromptSubmit 에서만 heartbeat 해서, 열어둔 채 매 분 새 프롬프트를 안 보내는 세션이 5분 interactive TTL 을 넘겨 `stale` 로 떨어져 `cto status` live_sessions / tray 에서 사라졌다(다음 프롬프트가 재활성화하기 전까지 미등록처럼 보임). `hook-orchestrator` 가 Stop 이벤트(어시스턴트 턴 종료)마다 synapse heartbeat 를 추가 발사(UserPromptSubmit 과 동일한 fire-and-forget + bounded drain). 진짜 완전 idle(턴 자체가 없음)은 여전히 TTL 후 stale — 의도된 dead 신호. packages/{triflux,core} 미러. (loopback-hub orchestrator 테스트로 Stop 시 `/synapse/heartbeat` POST 도달 검증)
+- **`feat(mirror-gate)`** `check-packages-mirror` 에 packages/remote 구조 검증 추가. 기존엔 triflux/core 만 byte-비교하고 remote(=pack 이 core import 를 `@triflux/core/*` 로 rewrite, byte 비교 불가)는 전혀 검증 안 해 두 드리프트가 무성하게 출하됐다 — core-only 모듈로의 깨진 상대 import(standalone 설치 시 Cannot find module)와 stale non-JS asset(tray UI). remote .mjs 의 모든 import 해석 가능(상대→remote, `@triflux/core/X`→core) + non-.mjs 의 root byte-동일을 검증. JSDoc 사용 예시 오탐 방지 위해 import 스캔 전 주석 제거.
+- **`feat(claude169 compat)`** Claude Code 2.1.169 호환 3트랙. `claude agents --json` mixed/daemon row 정규화(`state||status`, `id/short`, `sessionId/session_id`), `tfx doctor --json` 에 `CLAUDE_CODE_SAFE_MODE`/disabled bundled skills/managed MCP policy 경고, `/cd` `CwdChanged` 이벤트로 native-bridge 세션 projection cwd 갱신. packages/{triflux,core,remote} 미러.
+
+### Fixed
+
+- **`fix(mirror)` packages/remote 깨진 import 복구.** v10.33.0 의 `packages/remote/hub/server.mjs`·`scripts/lib/env-probe.mjs` 가 remote 에 존재하지 않는 core 모듈을 상대 경로(`./account-broker.mjs`, `../../hub/platform.mjs` 등)로 import 해 in-workspace 에서만 우연히 해석되고 standalone `@triflux/remote` 설치에선 깨졌다. core 소유 모듈은 `@triflux/core/*` 로 복구, remote-local(hub-lifecycle/mac-focus)은 상대 유지. core/triflux 사전존재 미러 드리프트도 root 와 정합.
+- **`fix(hub)` reaper kill 실패 관측성 + startHubDaemon 포트 정규화 (FU3).** ① startup reaper 가 `failed[]`(SIGKILL 불가 orphan, EPERM/defunct)를 버려 로그 신호 0으로 생존하던 갭 → `hub.startup_reaper_failed` warn 으로 표면화. ② `startHubDaemon` 이 오염된 `TFX_HUB_PORT` 를 그대로 forward 하고 `getDefaultHubPort()` 로 probe 해 worktree/ephemeral 에서 daemon 이 binding 하지 않는 포트를 probe 할 수 있던 문제 → `resolveHubPortForContext` 로 canonical 포트를 child env·probe 양쪽에 적용(방어심도). packages/{triflux,remote} 미러.
+- **`fix(codex-hook)`** register/heartbeat 부수효과가 내뿜는 stray stdout(`[mcp-sync]` 등)이 codex 훅의 stdout 계약(JSON-only)을 오염시키던 문제 → `runHookSideEffectsWithStdoutSuppressed` 로 감싸 `{}` 페이로드만 stdout 도달, finally 에서 복원. packages/{core,triflux} 미러.
+
+### Changed
+
+- **`feat(tray)`** macOS tray Sessions 탭 리디자인. cramped 320x520 2-컬럼 CTO/Workers drawer → 460x720 단일 컬럼 Prompt→Agents. KPI 카드(Live/Active/Idle/Stale), runtime progress bar → Agent Mix chips, Projects/CTO/Workers → Workspaces(라벨 chip). workspace 경로 trailing-slash 정규화로 동일 디렉토리 분할 방지. 460x720 라이브 검증(스크린샷+DOM). packages/triflux 미러.
+- **`chore`** 누적 biome import-sort/format 드리프트 정리(CI lint 미실행으로 invisible 누적분), remote tray 미러 동기(v10.33.0 출하 누락분), tray scratch 파일 제거 + `.superpowers/` ignore, Codex fallback docs 의 근거 없는 정량치 제거.
+
+### Tests
+
+- route-smoke `runBash` spawnSync 에 per-call timeout(동기 spawnSync hang → 스위트 전체 hang 방지), hook-orchestrator Stop heartbeat 테스트, mirror-core fixture 에 claude-agent-session-normalizer 추가(claude169 가 source CORE_FILE_MIRRORS 만 갱신하고 fixture 누락 → 3 fail).
+
 ## [10.33.0] - 2026-06-09
 
 ### Added
