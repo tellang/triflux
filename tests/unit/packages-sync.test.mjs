@@ -91,11 +91,7 @@ describe("packages/* sync — PRD-4 gate", () => {
         }, () => {
           assert.equal(pkgExists, true);
           const pkgHash = sha256File(pkgAbs);
-          const expectedContent = packageExpectedContent(
-            pkg,
-            rel,
-            rootContent,
-          );
+          const expectedContent = packageExpectedContent(pkg, rel, rootContent);
           const expectedHash = sha256Text(expectedContent);
           assert.equal(
             pkgHash,

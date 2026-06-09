@@ -38,7 +38,10 @@ function fetchHubStatus({
   };
 }
 
-export function resolveDefaultStatusUrl(env = process.env, cwd = process.cwd()) {
+export function resolveDefaultStatusUrl(
+  env = process.env,
+  cwd = process.cwd(),
+) {
   const port = resolveHubPortForContext({
     env,
     cwd,
