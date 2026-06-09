@@ -6,6 +6,8 @@ import test from "node:test";
 
 import {
   buildClaudeSessionProjection,
+  findClaudeSessionProjectionBySessionId,
+  refreshClaudeSessionProjectionCwd,
   removeClaudeSessionProjection,
   writeClaudeSessionProjection,
 } from "../../hub/team/claude-session-projection.mjs";
@@ -83,5 +85,65 @@ test("writeClaudeSessionProjection writes pid-named JSON and remove deletes only
 
   await removeClaudeSessionProjection(sessionPath);
   await assert.rejects(() => fs.access(sessionPath), /ENOENT/);
+  await fs.rm(tmp, { recursive: true, force: true });
+});
+
+test("findClaudeSessionProjectionBySessionId scans pid-named projection files", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "claude-proj-find-"));
+  const sessionsDir = path.join(tmp, "sessions");
+  const projection = buildClaudeSessionProjection({
+    pid: 9999,
+    procStart: "Wed May 20 08:02:53 2026",
+    sessionId: "find-session-1",
+    short: "findsess",
+    cwd: "/tmp/old",
+    name: "Triflux cwd test",
+    agent: "claude",
+  });
+  const sessionPath = await writeClaudeSessionProjection(
+    sessionsDir,
+    projection,
+  );
+
+  const found = await findClaudeSessionProjectionBySessionId(
+    sessionsDir,
+    "find-session-1",
+  );
+  assert.equal(found.path, sessionPath);
+  assert.equal(found.projection.cwd, "/tmp/old");
+
+  await fs.rm(tmp, { recursive: true, force: true });
+});
+
+test("refreshClaudeSessionProjectionCwd updates cwd and updatedAt", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "claude-proj-refresh-"));
+  const sessionsDir = path.join(tmp, "sessions");
+  const projection = buildClaudeSessionProjection({
+    pid: 10001,
+    procStart: "Wed May 20 08:02:53 2026",
+    sessionId: "refresh-session-1",
+    short: "refresh1",
+    cwd: "/tmp/old",
+    name: "Triflux cwd refresh",
+    agent: "claude",
+    updatedAt: 10,
+  });
+  const sessionPath = await writeClaudeSessionProjection(
+    sessionsDir,
+    projection,
+  );
+
+  const result = await refreshClaudeSessionProjectionCwd({
+    sessionsDir,
+    sessionId: "refresh-session-1",
+    cwd: "/tmp/new",
+    updatedAt: 12345,
+  });
+
+  assert.equal(result.updated, true);
+  assert.equal(result.path, sessionPath);
+  assert.equal(result.projection.cwd, "/tmp/new");
+  assert.equal(result.projection.updatedAt, 12345);
+
   await fs.rm(tmp, { recursive: true, force: true });
 });

@@ -8,6 +8,19 @@
     "external_priority": 100
   },
   "events": {
+    "CwdChanged": [
+      {
+        "id": "tfx-claude-cwd-projection-refresh",
+        "source": "triflux",
+        "matcher": "*",
+        "command": "node \"${PLUGIN_ROOT}/hooks/claude-cwd-projection-refresh.mjs\"",
+        "priority": 0,
+        "enabled": true,
+        "timeout": 2,
+        "blocking": false,
+        "description": "Claude /cd CwdChanged 이벤트를 Triflux native-bridge projection cwd에 반영"
+      }
+    ],
     "PermissionRequest": [
       {
         "id": "tfx-permission-safe-allow",
