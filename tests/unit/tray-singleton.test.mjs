@@ -9,7 +9,7 @@ import {
 } from "../../hub/tray.mjs";
 
 describe("macOS tray singleton", () => {
-  it("detects existing node tray parents for the same tray script", () => {
+  it("detects every node hub/tray.mjs parent (machine-wide singleton)", () => {
     const scriptPath = "/Users/tellang/Projects/tools/triflux/hub/tray.mjs";
     const psOutput = `
       27259     1 /opt/homebrew/bin/node /Users/tellang/Projects/tools/triflux/hub/tray.mjs
@@ -33,11 +33,20 @@ describe("macOS tray singleton", () => {
           command:
             "/opt/homebrew/bin/node /Users/tellang/Projects/tools/triflux/hub/tray.mjs",
         },
+        // tray 는 전역 hub.pid(canonical 27888)를 보는 머신 전역 싱글턴이다.
+        // 경로가 달라도(worktree 사본, 다른 클론) 같은 tray 로 식별해 reap
+        // 한다 — 2026-06-10 worktree tray 중복(메뉴바 아이콘 2개) 재발 방지.
+        {
+          pid: 99999,
+          ppid: 1,
+          command:
+            "/opt/homebrew/bin/node /Users/tellang/Projects/other/hub/tray.mjs",
+        },
       ],
     );
   });
 
-  it("reaps existing same-script tray parents before starting a new tray", () => {
+  it("reaps every existing tray parent (any path) before starting a new tray", () => {
     const killed = [];
     const scriptPath = "/repo/hub/tray.mjs";
     const psOutput = `
@@ -55,11 +64,12 @@ describe("macOS tray singleton", () => {
 
     assert.deepEqual(
       reaped.map((process) => process.pid),
-      [111, 222],
+      [111, 222, 333],
     );
     assert.deepEqual(killed, [
       [111, "SIGTERM"],
       [222, "SIGTERM"],
+      [333, "SIGTERM"],
     ]);
   });
 });
