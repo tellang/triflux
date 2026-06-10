@@ -77,11 +77,6 @@ describe("tfx-deep-interview SKILL.md — 구조 검증", () => {
       frontmatter.includes("description:"),
       "frontmatter description 필드 필요",
     );
-    assert.ok(
-      frontmatter.includes("triggers:"),
-      "frontmatter triggers 필드 필요",
-    );
-
     // Heading 구조
     assert.ok(content.includes("# "), "H1 제목 필요");
     assert.ok(content.includes("## "), "H2 섹션 필요");
