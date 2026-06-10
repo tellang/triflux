@@ -1,7 +1,7 @@
 // hub/tray-lifecycle.mjs — Hub/Tray bidirectional auto-start helpers
 
 import { spawn } from "node:child_process";
-import { resolveHubPortForContext } from "./hub-lifecycle.mjs";
+import { resolveHubPortForContext, isWorktreeOrEphemeralHubContext } from "./hub-lifecycle.mjs";
 
 const DEFAULT_HUB_PORT = "27888";
 const DEFAULT_HEALTH_TIMEOUT_MS = 1_000;
@@ -117,6 +117,9 @@ export function spawnTrayForHub({
   spawnFn = spawn,
 } = {}) {
   if (env?.TFX_HUB_AUTO_TRAY === "0") return { status: "disabled" };
+  if (isWorktreeOrEphemeralHubContext({ env })) {
+    return { status: "disabled", reason: "ephemeral-or-worktree-context" };
+  }
   if (platform !== "darwin") return { status: "unsupported-platform" };
   if (!trayPath) return { status: "missing-tray-path" };
 

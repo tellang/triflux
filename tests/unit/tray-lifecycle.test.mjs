@@ -128,4 +128,18 @@ describe("hub/tray lifecycle", () => {
       { status: "unsupported-platform" },
     );
   });
+
+  it("hub startup skips tray in worktree or ephemeral context", () => {
+    assert.deepEqual(
+      spawnTrayForHub({
+        platform: "darwin",
+        trayPath: "/repo/hub/tray.mjs",
+        env: { TFX_TEAM_TASK_ID: "task-123" },
+        spawnFn: () => {
+          throw new Error("should not spawn");
+        },
+      }),
+      { status: "disabled", reason: "ephemeral-or-worktree-context" }
+    );
+  });
 });
