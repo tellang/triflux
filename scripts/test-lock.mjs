@@ -23,24 +23,54 @@ const LOCK_DIR = join(dirname(SCRIPT_PATH), "..", ".test-lock");
 const LOCK_FILE = join(LOCK_DIR, "pid.lock");
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // release prepare 와 동일
 const SHUTDOWN_GRACE_MS = 5 * 1000;
-// --test-force-exit can beat already queued async test failures. Delay the
-// forced exit one turn so Node can surface a non-zero test result first.
+// --test-force-exit can beat already-queued async test failures: Node sets
+// process.exitCode=1 a few microtask turns AFTER the runner calls
+// process.exit(). A single-turn defer raced that and could force-exit 0 with
+// real failures still pending (masking e.g. 4185-pass/3-fail as a green exit).
+// Drain a BOUNDED number of turns until the runner's exitCode settles, and keep
+// an independent failure signal for uncaught/rejection classes that may never
+// set process.exitCode. Rejections are tracked per-promise and cleared on
+// rejectionHandled so a late-attached .catch does not false-fail the run.
+// Fails closed: a genuinely-unhandled rejection or uncaught error resolves
+// toward non-zero.
 const FORCE_EXIT_FAILURE_PROPAGATION_IMPORT = `data:text/javascript,${encodeURIComponent(`
 const realExit = process.exit.bind(process);
 let pendingCode = 0;
+let uncaught = false;
 let scheduled = false;
+const pendingRejections = new Set();
+process.on("uncaughtException", () => {
+  uncaught = true;
+});
+process.on("unhandledRejection", (_reason, promise) => {
+  pendingRejections.add(promise);
+});
+process.on("rejectionHandled", (promise) => {
+  pendingRejections.delete(promise);
+});
 
 process.exit = (code) => {
   if (code !== undefined && code !== 0) pendingCode = code;
   if (scheduled) return;
   scheduled = true;
-  setImmediate(() => {
-    const exitCode =
-      process.exitCode !== undefined && process.exitCode !== 0
-        ? process.exitCode
-        : pendingCode;
-    realExit(exitCode ?? 0);
-  });
+  let turns = 0;
+  const settle = () => {
+    const runnerCode = process.exitCode;
+    const failed = uncaught || pendingRejections.size > 0;
+    const resolved =
+      runnerCode !== undefined && runnerCode !== 0
+        ? runnerCode
+        : failed
+          ? 1
+          : pendingCode;
+    if (resolved || turns >= 50) {
+      realExit(resolved ?? 0);
+      return;
+    }
+    turns += 1;
+    setImmediate(settle);
+  };
+  setImmediate(settle);
 };
 `)}`;
 
