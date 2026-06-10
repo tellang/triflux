@@ -7,8 +7,6 @@ description: >
   Use when: codex profile, codex model, gemini profile, gemini model,
   프로파일 변경, 모델 변경, effort 변경, codex 설정, gemini 설정,
   profile manager, 프로파일 관리, 어떤 모델, tfx profile
-triggers:
-  - tfx-profile
 argument-hint: "[--list] [--codex | --gemini]"
 ---
 

@@ -1,15 +1,7 @@
 ---
 internal: true
 name: tfx-analysis
-description: "코드나 아키텍처를 분석해야 할 때 사용한다. '코드 분석', 'code analysis', '아키텍처 분석', '이 코드 어떻게 돌아가?', '구조 파악', '심층 분석', '제대로 분석', '3관점 분석', '편향 없이 분석' 같은 요청에 반드시 사용. 기본값은 3-CLI 합의 딥 분석. 빠른 단일 CLI 분석은 --quick 파라미터."
-triggers:
-  - 코드 분석
-  - code analysis
-  - 아키텍처 분석
-  - analysis
-  - deep analyze
-  - 심층 분석
-  - deep-analysis
+description: "코드나 아키텍처를 분석해야 할 때 사용한다. '코드 분석', 'code analysis', '아키텍처 분석', '이 코드 어떻게 돌아가?', '구조 파악', '심층 분석', '제대로 분석', '3관점 분석', '편향 없이 분석' 같은 요청에 반드시 사용."
 argument-hint: "<분석 대상> [--quick]"
 ---
 

@@ -612,4 +612,64 @@ describe("hook-orchestrator UserPromptSubmit synapse heartbeat", () => {
       undefined,
     );
   });
+
+  it("fires a synapse heartbeat POST on Stop (turn-end liveness)", async () => {
+    const { server, received } = startMockHub();
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address();
+
+    writeFileSync(
+      registryPath,
+      JSON.stringify(
+        createRegistry(
+          [
+            {
+              id: "noop-stop",
+              matcher: "*",
+              command: hookCommand(
+                hookScriptPath,
+                join(sandboxDir, "stop.txt"),
+                "noop",
+                "",
+                "noop",
+              ),
+              priority: 0,
+              enabled: true,
+            },
+          ],
+          "Stop",
+        ),
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const result = await runOrchestratorAsync({
+      cwd: sandboxDir,
+      registryPath,
+      cacheDir,
+      env: {
+        TFX_HUB_URL: `http://127.0.0.1:${port}`,
+        TFX_HUB_TOKEN: "test-token",
+      },
+      payload: {
+        hook_event_name: "Stop",
+        session_id: "sess-stop",
+        cwd: sandboxDir,
+      },
+    });
+
+    await new Promise((resolve) => server.close(resolve));
+
+    assert.equal(result.status, 0, result.stderr);
+    const hb = received.find((r) => r.url === "/synapse/heartbeat");
+    assert.ok(
+      hb,
+      "expected a /synapse/heartbeat POST to reach the hub on Stop",
+    );
+    const parsed = JSON.parse(hb.body);
+    assert.equal(parsed.sessionId, "sess-stop");
+    assert.equal(parsed.partial.worktreePath, sandboxDir);
+  });
 });

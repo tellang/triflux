@@ -137,7 +137,7 @@ describe("tray Sessions frontend", () => {
     assert.match(tabSessions.innerHTML, /data-agent-id="antigravity"/u);
   });
 
-  it("renders CTO detail as a two-column chat drawer with collapsible bubbles and C/X/A badges", () => {
+  it("renders session detail as a single-column prompt and agents stream with C/X/A badges", () => {
     const { context, tabSessions } = loadTrayRenderer();
 
     context.renderSessions({
@@ -191,16 +191,13 @@ describe("tray Sessions frontend", () => {
 
     assert.match(tabSessions.innerHTML, /<details class="project-group"/u);
     assert.match(tabSessions.innerHTML, /data-open-key="project:/u);
-    assert.match(tabSessions.innerHTML, /<details class="cto-chat"/u);
+    assert.match(tabSessions.innerHTML, /<details class="session-card"/u);
     assert.match(tabSessions.innerHTML, /data-open-key="cto:cto-long-123456"/u);
-    assert.match(
-      tabSessions.innerHTML,
-      /<div class="chat-column worker-column">/u,
-    );
-    assert.match(
-      tabSessions.innerHTML,
-      /<div class="chat-column cto-column">/u,
-    );
+    assert.match(tabSessions.innerHTML, /<div class="session-detail">/u);
+    assert.match(tabSessions.innerHTML, /<div class="detail-label">Prompt/u);
+    assert.match(tabSessions.innerHTML, /<div class="detail-label">Agents/u);
+    assert.doesNotMatch(tabSessions.innerHTML, /chat-column/u);
+    assert.doesNotMatch(tabSessions.innerHTML, /worker-column|cto-column/u);
     assert.match(tabSessions.innerHTML, /<summary class="bubble-preview"/u);
     assert.match(tabSessions.innerHTML, /<pre class="bubble-full">/u);
     assert.match(
@@ -267,7 +264,7 @@ describe("tray Sessions frontend", () => {
       runtime: { summary: { total: 0, clients: [] } },
     });
 
-    assert.match(tabSessions.innerHTML, /<div class="bubble-card">/u);
+    assert.match(tabSessions.innerHTML, /<div class="bubble-card worker">/u);
     assert.match(
       tabSessions.innerHTML,
       /Please inspect the tray session grouping/u,
@@ -321,17 +318,60 @@ describe("tray Sessions frontend", () => {
       tabSessions.innerHTML,
       /<span class="runtime-command">codex<\/span>/u,
     );
-    assert.match(
-      tabSessions.innerHTML,
-      /<span class="chip">PID 24978<\/span>/u,
-    );
-    assert.match(
+    assert.match(tabSessions.innerHTML, /data-pid="24978"/u);
+    assert.doesNotMatch(
       tabSessions.innerHTML,
       /No prompt handoff events captured yet/u,
     );
+    assert.doesNotMatch(tabSessions.innerHTML, /<span class="chip">PID/u);
     assert.doesNotMatch(tabSessions.innerHTML, /CTO runtime overlay/u);
     assert.doesNotMatch(tabSessions.innerHTML, /node_modules\/.*codex-darwin/u);
     assert.doesNotMatch(tabSessions.innerHTML, /dangerously-bypass-approvals/u);
+  });
+
+  it("coalesces equivalent project paths that only differ by a trailing slash", () => {
+    const { context, tabSessions } = loadTrayRenderer();
+
+    context.renderSessions({
+      hub: {
+        id: "hub-abcdef",
+        projectRoot: "/Users/tellang/Projects/tools/triflux/",
+      },
+      sessions: [
+        {
+          sessionId: "cto-current",
+          status: "active",
+          cwd: "/Users/tellang/Projects/tools/triflux",
+          taskSummary: "current triflux session",
+        },
+      ],
+      cto: {
+        live_sessions: [
+          {
+            sessionId: "claude-runtime",
+            phase: "active",
+            agent_id: "claude",
+            agent: { id: "claude", label: "Claude", icon: "C" },
+            pid: 101,
+            cwd: "",
+            command: "claude",
+            taskSummary: "claude",
+          },
+        ],
+        active_shards: [],
+      },
+      runtime: { summary: { total: 1, clients: [] } },
+    });
+
+    const projectNameMatches = tabSessions.innerHTML.match(
+      /<span class="project-name">triflux<\/span>/gu,
+    );
+    assert.equal(projectNameMatches?.length, 1);
+    assert.match(tabSessions.innerHTML, /current triflux session/u);
+    assert.match(
+      tabSessions.innerHTML,
+      /<span class="runtime-command">claude<\/span>/u,
+    );
   });
 
   it("keeps command-backed runtime rows out of chat and avoids focus without a session id", () => {
@@ -409,7 +449,7 @@ describe("tray Sessions frontend", () => {
     });
 
     assert.match(tabSessions.innerHTML, /<div class="runtime-card"/u);
-    assert.match(
+    assert.doesNotMatch(
       tabSessions.innerHTML,
       /No prompt handoff events captured yet/u,
     );
@@ -444,7 +484,7 @@ describe("tray Sessions frontend", () => {
     });
 
     assert.match(tabSessions.innerHTML, /<div class="runtime-card"/u);
-    assert.match(
+    assert.doesNotMatch(
       tabSessions.innerHTML,
       /No prompt handoff events captured yet/u,
     );
@@ -479,7 +519,7 @@ describe("tray Sessions frontend", () => {
     });
 
     assert.match(tabSessions.innerHTML, /<div class="runtime-card"/u);
-    assert.match(
+    assert.doesNotMatch(
       tabSessions.innerHTML,
       /No prompt handoff events captured yet/u,
     );
@@ -514,7 +554,7 @@ describe("tray Sessions frontend", () => {
     });
 
     assert.match(tabSessions.innerHTML, /Real prompt text from handoff/u);
-    assert.match(tabSessions.innerHTML, /<div class="bubble-card">/u);
+    assert.match(tabSessions.innerHTML, /<div class="bubble-card worker">/u);
     assert.doesNotMatch(tabSessions.innerHTML, /data-session-id=""/u);
     assert.doesNotMatch(tabSessions.innerHTML, /data-pid="9130"[^>]*>Focus/u);
   });

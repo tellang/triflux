@@ -61,6 +61,11 @@ function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
+    // Per-call timeout: a slow or hung command must not block the synchronous
+    // spawnSync and hang the entire suite (a describe/test-level timeout cannot
+    // interrupt a sync call). Codex-transport fixtures take ~10s; 60s headroom.
+    timeout: 60_000,
+    killSignal: "SIGKILL",
     env: {
       ...process.env,
       TFX_TEAM_NAME: "",

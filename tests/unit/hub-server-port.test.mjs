@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  cleanupOwnedTokenFile,
   cleanupOwnedPidFile,
+  cleanupOwnedTokenFile,
   resolveHubIdleTimeoutMs,
   resolveHubPort,
   writeOwnedTokenFile,
@@ -115,7 +115,10 @@ describe("resolveHubIdleTimeoutMs()", () => {
   });
 
   it("gives non-canonical hubs a 30 minute idle timeout by default", () => {
-    assert.equal(resolveHubIdleTimeoutMs({ port: 29009, env: {} }), 30 * 60 * 1000);
+    assert.equal(
+      resolveHubIdleTimeoutMs({ port: 29009, env: {} }),
+      30 * 60 * 1000,
+    );
   });
 
   it("preserves explicit TFX_HUB_IDLE_TIMEOUT_MS override", () => {

@@ -5,7 +5,7 @@
   <title>Triflux CTO Tray</title>
   <style>
     :root {
-      --bg-color: rgba(30, 30, 30, 0.68);
+      --bg-color: rgba(30, 30, 30, 0.76);
       --border-color: rgba(255,255,255,0.15);
       --text-main: #ffffff;
       --text-muted: rgba(255,255,255,0.58);
@@ -44,6 +44,12 @@
     .stat-label { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .stat-value { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 4px; }
     .stat-unit { font-size: 10px; font-weight: 400; color: var(--text-muted); }
+    .session-overview { display: grid; grid-template-columns: 1.25fr repeat(3, minmax(0, 0.78fr)); gap: 8px; }
+    .summary-card { min-width: 0; border-radius: 10px; padding: 9px 10px; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.07); }
+    .summary-card.primary { background: rgba(10,132,255,0.14); border-color: rgba(10,132,255,0.24); }
+    .summary-kpi { font-size: 18px; line-height: 1; font-weight: 760; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
+    .summary-label { margin-top: 4px; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.76); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .summary-sub { margin-top: 2px; font-size: 9px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .models-list, .server-list, .session-list { display: flex; flex-direction: column; gap: 8px; }
     .model-row { display: grid; grid-template-columns: minmax(76px, auto) 1fr auto; gap: 10px; align-items: center; font-size: 12px; min-width: 0; }
     .model-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -60,25 +66,25 @@
     .focus-btn:hover { background: var(--accent); color: #fff; }
     .agent-view { display: flex; flex-direction: column; gap: 8px; }
     .project-group { min-width: 0; border: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.13); border-radius: 9px; overflow: hidden; }
-    .project-group > summary, .cto-chat > summary, .bubble-wrap > summary { list-style: none; }
-    .project-group > summary::-webkit-details-marker, .cto-chat > summary::-webkit-details-marker, .bubble-wrap > summary::-webkit-details-marker { display: none; }
-    .project-summary { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 7px; align-items: center; padding: 8px 9px; cursor: pointer; }
+    .project-group > summary, .session-card > summary, .bubble-wrap > summary { list-style: none; }
+    .project-group > summary::-webkit-details-marker, .session-card > summary::-webkit-details-marker, .bubble-wrap > summary::-webkit-details-marker { display: none; }
+    .project-summary { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 9px 10px; cursor: pointer; }
     .project-chevron { color: rgba(255,255,255,0.44); font-size: 11px; transform: rotate(-90deg); transition: transform 120ms ease; }
     .project-group[open] .project-chevron { transform: rotate(0deg); }
     .project-name { color: #b6b1e8; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .project-count { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .project-count { display: inline-flex; align-items: center; justify-content: center; min-height: 20px; border-radius: 999px; padding: 2px 7px; color: rgba(255,255,255,0.72); background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.07); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .project-path { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 10px; padding: 0 9px 8px 32px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .project-body { padding: 0 8px 9px; display: flex; flex-direction: column; gap: 7px; }
-    .cto-chat { border: 1px solid rgba(10,132,255,0.13); background: rgba(255,255,255,0.035); border-radius: 8px; overflow: hidden; }
-    .cto-summary { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 7px; align-items: center; padding: 7px 8px; cursor: pointer; }
-    .cto-summary-title { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cto-summary-sub { color: var(--text-muted); font-size: 10px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chat-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; padding: 8px; border-top: 1px solid rgba(255,255,255,0.05); }
-    .chat-column { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
-    .chat-column-title { color: var(--text-muted); font-size: 9px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; }
-    .chat-empty { color: var(--text-muted); border: 1px dashed rgba(255,255,255,0.10); border-radius: 8px; padding: 8px; font-size: 10px; }
+    .session-card { border: 1px solid rgba(10,132,255,0.13); background: rgba(255,255,255,0.035); border-radius: 9px; overflow: hidden; }
+    .session-summary { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 9px; cursor: pointer; }
+    .session-summary-title { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; font-weight: 740; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-summary-sub { color: var(--text-muted); font-size: 10px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-detail { display: flex; flex-direction: column; gap: 9px; padding: 9px; border-top: 1px solid rgba(255,255,255,0.05); }
+    .detail-section { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+    .detail-label { color: var(--text-muted); font-size: 9px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; }
+    .detail-empty { color: var(--text-muted); border: 1px dashed rgba(255,255,255,0.10); border-radius: 8px; padding: 8px; font-size: 10px; }
     .runtime-list { display: flex; flex-direction: column; gap: 7px; }
-    .runtime-card { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 7px; align-items: center; padding: 7px; border-radius: 8px; background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.07); }
+    .runtime-card { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.07); }
     .runtime-main { min-width: 0; }
     .runtime-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
     .runtime-command { color: rgba(255,255,255,0.90); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; font-weight: 750; }
@@ -89,8 +95,8 @@
     .bubble-card { min-width: 0; }
     .bubble-wrap { min-width: 0; }
     .bubble-preview { display: block; cursor: pointer; border-radius: 12px; padding: 8px 9px; font-size: 11px; line-height: 1.35; color: rgba(255,255,255,0.88); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.08); max-height: 48px; overflow: hidden; }
-    .worker-column .bubble-preview { border-top-left-radius: 4px; }
-    .cto-column .bubble-preview { background: rgba(10,132,255,0.14); border-color: rgba(10,132,255,0.18); border-top-right-radius: 4px; }
+    .bubble-card.worker .bubble-preview { border-top-left-radius: 4px; }
+    .bubble-card.cto .bubble-preview { background: rgba(10,132,255,0.14); border-color: rgba(10,132,255,0.18); border-top-right-radius: 4px; }
     .bubble-full { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 190px; overflow: auto; padding: 8px; border-radius: 8px; background: rgba(0,0,0,0.28); color: rgba(255,255,255,0.82); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 10px; line-height: 1.35; }
     .agent-line { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 5px; align-items: start; min-width: 0; padding: 3px 0; }
     .agent-line.worker { padding-left: 10px; }
@@ -112,6 +118,12 @@
     .chip.on { color: var(--success); border-color: rgba(50,215,75,0.25); background: rgba(50,215,75,0.08); }
     .chip.partial { color: var(--warning); border-color: rgba(255,214,10,0.25); background: rgba(255,214,10,0.08); }
     .chip.off { color: var(--danger); border-color: rgba(255,69,58,0.25); background: rgba(255,69,58,0.08); }
+    .client-chip-row { display: flex; gap: 7px; flex-wrap: wrap; }
+    .client-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; border-radius: 999px; padding: 4px 8px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.08); color: rgba(255,255,255,0.82); font-size: 11px; }
+    .client-chip strong { font-variant-numeric: tabular-nums; color: var(--text-main); }
+    .client-chip.on { border-color: rgba(50,215,75,0.24); }
+    .client-chip.partial { border-color: rgba(255,214,10,0.24); }
+    .client-chip.off { border-color: rgba(255,69,58,0.24); }
     .agent-badge { width: 20px; height: 20px; display: inline-grid; place-items: center; flex: 0 0 auto; border-radius: 6px; font-size: 11px; font-weight: 850; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; border: 1px solid rgba(255,255,255,0.12); }
     .agent-tag { justify-content: center; }
     .agent-tag.claude { color: #d19a66; background: rgba(209,154,102,0.12); border-color: rgba(209,154,102,0.32); }
@@ -202,14 +214,14 @@
 
     function renderRuntimeClients(runtime) {
       const clients = Array.isArray(runtime?.summary?.clients) ? runtime.summary.clients : [];
-      const max = Math.max(1, ...clients.map(client => client.count || 0));
-      return clients.map(client => `
-        <div class="model-row">
-          <div class="model-name"><div class="model-icon" style="color:${escapeHtml(client.color)}">${escapeHtml(client.icon)}</div><span class="model-label">${escapeHtml(client.label)}</span></div>
-          <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:${pct(client.count || 0, max)}%; background:${escapeHtml(client.color)}"></div></div>
-          <div class="value-pill status-text ${escapeHtml(client.status)}">${escapeHtml(client.count || 0)}</div>
-        </div>
-      `).join('');
+      if (clients.length === 0) return '<div class="mini-card muted">No runtime clients reported</div>';
+      return `<div class="client-chip-row">${clients.map(client => `
+        <span class="client-chip ${escapeHtml(client.status)}">
+          <span class="dot ${escapeHtml(client.id)}" style="background:${escapeHtml(client.color)};box-shadow:0 0 6px ${escapeHtml(client.color)}"></span>
+          <span>${escapeHtml(client.label)}</span>
+          <strong>${escapeHtml(client.count || 0)}</strong>
+        </span>
+      `).join('')}</div>`;
     }
 
     function liveFallbackRows(live) {
@@ -246,21 +258,28 @@
       return path.replace(/^\/Users\/[^/]+/, '~');
     }
 
+    function normalizeProjectPath(value) {
+      const path = String(value || '').trim();
+      if (!path) return '';
+      if (path === '/' || /^\/+$/u.test(path) || /^[A-Za-z]:[\\/]$/u.test(path)) return path;
+      return path.replace(/[\\/]+$/u, '') || path;
+    }
+
     function projectName(value) {
-      const path = String(value || '').replace(/\/+$/u, '').trim();
+      const path = normalizeProjectPath(value);
       if (!path) return 'local';
-      return path.split('/').filter(Boolean).pop() || path;
+      return path.split(/[\\/]/u).filter(Boolean).pop() || path;
     }
 
     function projectPathFor(row, hub, fallback = '') {
       const cwd = String(row?.cwd || row?.worktreePath || '').trim();
-      if (cwd && cwd !== 'local' && cwd !== 'local runtime') return cwd;
+      if (cwd && cwd !== 'local' && cwd !== 'local runtime') return normalizeProjectPath(cwd);
       const root = String(hub?.projectRoot || fallback || '').trim();
-      return root || cwd || 'local';
+      return normalizeProjectPath(root || cwd || 'local');
     }
 
     function getProjectGroup(groups, projectPath) {
-      const key = projectPath || 'local';
+      const key = normalizeProjectPath(projectPath) || 'local';
       if (!groups.has(key)) groups.set(key, { projectPath: key, ctos: [], workers: [] });
       return groups.get(key);
     }
@@ -356,9 +375,9 @@
       const focusDisabled = row.synthetic || !sid;
       const badge = side === 'cto'
         ? '<span class="agent-badge">T</span>'
-        : `<span class="agent-marker">└</span>${renderAgentTag(row.agent)}`;
+        : renderAgentTag(row.agent) || '<span class="agent-badge">A</span>';
       return `
-        <div class="bubble-card">
+        <div class="bubble-card ${escapeHtml(side)}">
           <div class="chat-session-title">
             <span style="display:flex;align-items:center;gap:6px;min-width:0;">${badge}<span class="chat-session-id">${escapeHtml(sid || side)}</span></span>
             ${focusDisabled ? '' : `<button class="focus-btn" data-focus-session="1" data-session-id="${dataAttr(sid)}" data-pid="${dataAttr(pid)}" data-agent-id="${dataAttr(agentId)}">Focus</button>`}
@@ -383,7 +402,6 @@
           <div class="runtime-main">
             <div class="runtime-title"><span class="runtime-command">${escapeHtml(commandLabel(row))}</span><span class="agent-state ${escapeHtml(status)}">${escapeHtml(status)}</span></div>
             <div class="runtime-sub">${escapeHtml(displayPath(row.cwd || row.host || 'local runtime'))}${row.elapsed ? ` · ${escapeHtml(row.elapsed)}` : ''}</div>
-            <div class="runtime-meta">${pid ? `<span class="chip">PID ${escapeHtml(pid)}</span>` : ''}${renderCopyChip('ID', sid)}</div>
           </div>
           ${focusDisabled ? '' : `<button class="focus-btn" data-focus-session="1" data-session-id="${dataAttr(sid)}" data-pid="${dataAttr(pid)}" data-agent-id="${dataAttr(agentId)}">Focus</button>`}
         </div>
@@ -392,42 +410,53 @@
 
     function renderCtoChat(ctoRow, workers) {
       const status = ctoRow.status || ctoRow.phase || 'active';
-      const title = compactText(ctoRow.sessionId || ctoRow.taskSummary || 'CTO', 'CTO');
-      const subtitle = compactText(hasPromptText(ctoRow) ? ctoRow.taskSummary || ctoRow.sessionKind || '' : '', '');
+      const title = compactText(ctoRow.sessionId || ctoRow.taskSummary || 'Session', 'Session');
+      const subtitle = compactText(hasPromptText(ctoRow) ? ctoRow.taskSummary || ctoRow.sessionKind || '' : displayPath(ctoRow.cwd || ctoRow.worktreePath || ''), '');
+      const promptHtml = hasPromptText(ctoRow)
+        ? `<div class="detail-section"><div class="detail-label">Prompt</div>${renderChatBubble(ctoRow, { side: 'cto' })}</div>`
+        : '';
+      const agentRows = workers.map(worker => hasPromptText(worker) ? renderChatBubble(worker, { side: 'worker' }) : renderRuntimeCard(worker)).join('');
+      const agentsHtml = workers.length
+        ? `<div class="detail-section"><div class="detail-label">Agents</div><div class="runtime-list">${agentRows}</div></div>`
+        : '';
+      const emptyHtml = promptHtml || agentsHtml ? '' : '<div class="detail-empty">No session details yet</div>';
       return `
-        <details class="cto-chat" data-open-key="cto:${dataAttr(ctoRow.sessionId || title)}">
-          <summary class="cto-summary">
-            <div class="agent-marker">•</div>
+        <details class="session-card" data-open-key="cto:${dataAttr(ctoRow.sessionId || title)}">
+          <summary class="session-summary">
+            <span class="agent-badge">T</span>
             <div style="min-width:0;">
-              <div class="cto-summary-title">${escapeHtml(title)}</div>
-              ${subtitle ? `<div class="cto-summary-sub">${escapeHtml(subtitle)}</div>` : ''}
+              <div class="session-summary-title">${escapeHtml(title)}</div>
+              ${subtitle ? `<div class="session-summary-sub">${escapeHtml(subtitle)}</div>` : ''}
             </div>
             <div class="agent-state ${escapeHtml(status)}">${escapeHtml(status)}</div>
           </summary>
-          <div class="chat-panel">
-            <div class="chat-column worker-column">
-              <div class="chat-column-title">Workers</div>
-              ${workers.length ? `<div class="runtime-list">${workers.map(worker => hasPromptText(worker) ? renderChatBubble(worker, { side: 'worker' }) : renderRuntimeCard(worker)).join('')}</div>` : '<div class="chat-empty">No worker sessions detected</div>'}
-            </div>
-            <div class="chat-column cto-column">
-              <div class="chat-column-title">CTO</div>
-              ${hasPromptText(ctoRow) ? renderChatBubble(ctoRow, { side: 'cto' }) : '<div class="chat-empty">No prompt handoff events captured yet</div>'}
-            </div>
+          <div class="session-detail">
+            ${promptHtml}
+            ${agentsHtml}
+            ${emptyHtml}
           </div>
         </details>
       `;
     }
 
+    function pluralize(count, one, many = `${one}s`) {
+      return `${count} ${count === 1 ? one : many}`;
+    }
+
     function renderProjectGroup(group) {
       const projectDisplayPath = displayPath(group.projectPath);
       const projectLabel = projectName(group.projectPath);
-      const totalChildren = group.ctos.length + group.workers.length;
+      const sessionCount = group.ctos.filter(row => !isSyntheticCto(row)).length;
+      const agentCount = group.workers.length;
+      const projectCount = [sessionCount ? pluralize(sessionCount, 'session') : '', agentCount ? pluralize(agentCount, 'agent') : '']
+        .filter(Boolean)
+        .join(' · ') || 'empty';
       let html = `
         <details class="project-group" data-open-key="project:${dataAttr(group.projectPath)}">
           <summary class="project-summary">
             <span class="project-chevron">▾</span>
             <span class="project-name">${escapeHtml(projectLabel)}</span>
-            <span class="project-count">${escapeHtml(String(totalChildren))}</span>
+            <span class="project-count">${escapeHtml(projectCount)}</span>
           </summary>
           <div class="project-path">${escapeHtml(projectDisplayPath)}</div>
           <div class="project-body">
@@ -452,23 +481,26 @@
       const activeSessions = sessions.filter(s => s.status !== 'stale');
       const liveRows = liveFallbackRows(live);
       const projectGroups = buildProjectGroups(activeSessions.slice(0, 10), liveRows, hub);
+      const activeCount = activeSessions.filter(s => s.status === 'active').length;
+      const idleCount = activeSessions.filter(s => s.status === 'idle').length;
       const staleCount = sessions.filter(s => s.status === 'stale').length;
+      const runtimeTotal = runtime?.summary?.total || liveRows.length || 0;
       let html = `
         <div class="section">
-          <div class="stats-grid">
-            <div class="stat-box"><div class="stat-label">Live Sessions</div><div class="stat-value">${live.length}<span class="stat-unit">nodes</span></div></div>
-            <div class="stat-box"><div class="stat-label">Active Shards</div><div class="stat-value">${cto.active_shards?.length || 0}<span class="stat-unit">shards</span></div></div>
-            <div class="stat-box"><div class="stat-label">Runtime CLIs</div><div class="stat-value">${runtime?.summary?.total || 0}<span class="stat-unit">proc</span></div></div>
-            <div class="stat-box"><div class="stat-label">Hub ID</div><div class="badge-row" style="margin-top:0;">${renderCopyChip('Hub', hub.id || String(hub.pid || ''))}</div></div>
+          <div class="session-overview">
+            <div class="summary-card primary"><div class="summary-kpi">${live.length}</div><div class="summary-label">Live agents</div><div class="summary-sub">${runtimeTotal} runtime CLIs</div></div>
+            <div class="summary-card"><div class="summary-kpi">${activeCount}</div><div class="summary-label">Active</div></div>
+            <div class="summary-card"><div class="summary-kpi">${idleCount}</div><div class="summary-label">Idle</div></div>
+            <div class="summary-card"><div class="summary-kpi">${staleCount}</div><div class="summary-label">Stale</div></div>
           </div>
-          ${staleCount ? `<div class="path-text">${staleCount} stale sessions hidden from active cards</div>` : ''}
+          <div class="path-text">${projectGroups.length} ${projectGroups.length === 1 ? 'workspace' : 'workspaces'} · ${cto.active_shards?.length || 0} shards · ${renderCopyChip('Hub', hub.id || String(hub.pid || ''))}</div>
         </div>
         <div class="section">
-          <div class="section-title">Runtime Clients</div>
+          <div class="section-title">Agent Mix</div>
           <div class="models-list">${renderRuntimeClients(runtime)}</div>
         </div>
         <div class="section">
-          <div class="section-title">Projects / CTO / Workers</div>
+          <div class="section-title">Workspaces</div>
           <div class="agent-view">
       `;
       for (const group of projectGroups) html += renderProjectGroup(group);

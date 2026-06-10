@@ -5,6 +5,10 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import {
+  extractClaudeAgentSessions,
+  normalizeClaudeAgentSession,
+} from "./claude-agent-session-normalizer.mjs";
+import {
   buildClaudeSessionProjection,
   removeClaudeSessionProjection,
   writeClaudeSessionProjection,

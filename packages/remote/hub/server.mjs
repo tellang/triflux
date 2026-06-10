@@ -28,32 +28,32 @@ import {
   inspectRegistry,
   inspectRegistryStatus,
 } from "../scripts/lib/mcp-guard-engine.mjs";
-import { broker as brokerInstance, reloadBroker } from "./account-broker.mjs";
-import { createAdaptiveEngine } from "./adaptive.mjs";
-import { createAssignCallbackServer } from "./assign-callbacks.mjs";
-import { DelegatorService } from "./delegator/index.mjs";
-import { createHitlManager } from "./hitl.mjs";
-import {
-  cleanupOrphanNodeProcesses,
-  cleanupOrphanRuntimeProcesses,
-  cleanupStaleFsmonitorDaemons,
-} from "./lib/process-utils.mjs";
+import { broker as brokerInstance, reloadBroker } from "@triflux/core/hub/account-broker.mjs";
+import { createAdaptiveEngine } from "@triflux/core/hub/adaptive.mjs";
+import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.mjs";
+import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
+import { createHitlManager } from "@triflux/core/hub/hitl.mjs";
 import {
   reapExistingHubProcesses,
   resolveHubPortForContext,
 } from "./hub-lifecycle.mjs";
-import * as spawnTrace from "./lib/spawn-trace.mjs";
+import {
+  cleanupOrphanNodeProcesses,
+  cleanupOrphanRuntimeProcesses,
+  cleanupStaleFsmonitorDaemons,
+} from "@triflux/core/hub/lib/process-utils.mjs";
+import * as spawnTrace from "@triflux/core/hub/lib/spawn-trace.mjs";
 import {
   recordRequest,
   recordWorker,
   snapshot as traceSnapshot,
-} from "./lib/trace-recorder.mjs";
+} from "@triflux/core/hub/lib/trace-recorder.mjs";
 import { focusSessionOnMac } from "./mac-focus.mjs";
-import { logQuotaRefreshFailures } from "./middleware/quota-middleware.mjs";
-import { wrapRequestHandler } from "./middleware/request-logger.mjs";
+import { logQuotaRefreshFailures } from "@triflux/core/hub/middleware/quota-middleware.mjs";
+import { wrapRequestHandler } from "@triflux/core/hub/middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
-import { createRouter } from "./router.mjs";
-import { createAdaptiveFingerprintService } from "./session-fingerprint.mjs";
+import { createRouter } from "@triflux/core/hub/router.mjs";
+import { createAdaptiveFingerprintService } from "@triflux/core/hub/session-fingerprint.mjs";
 import {
   acquireLock,
   getVersionHash,
@@ -61,7 +61,7 @@ import {
   readState,
   releaseLock,
   writeState,
-} from "./state.mjs";
+} from "@triflux/core/hub/state.mjs";
 import { createStoreAdapter } from "./store-adapter.mjs";
 import { createCtoAutoCollector } from "./team/cto-auto-collect.mjs";
 import { createGitPreflight } from "./team/git-preflight.mjs";
@@ -71,7 +71,7 @@ import {
   createSynapseRegistry,
   projectPeer,
 } from "./team/synapse-registry.mjs";
-import { registerTeamBridge } from "./team-bridge.mjs";
+import { registerTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
 import { createTools } from "./tools.mjs";
 import { spawnTrayForHub } from "./tray-lifecycle.mjs";
 import { getRuntimeStatus } from "./tray-runtime.mjs";
@@ -659,7 +659,10 @@ export function resolveHubIdleTimeoutMs({
   env = process.env,
   defaultPort = HUB_DEFAULT_PORT,
 } = {}) {
-  const parsed = Number.parseInt(String(env?.TFX_HUB_IDLE_TIMEOUT_MS ?? ""), 10);
+  const parsed = Number.parseInt(
+    String(env?.TFX_HUB_IDLE_TIMEOUT_MS ?? ""),
+    10,
+  );
   if (Number.isFinite(parsed) && parsed >= 0) return parsed;
   return Number(port) === defaultPort ? 0 : HUB_IDLE_TIMEOUT_DEFAULT_MS;
 }
@@ -1073,7 +1076,7 @@ export async function startHub({
 
   // adaptive rule confidence decay (7일 이상 미관측 규칙 -0.1 감소)
   try {
-    const { decayRules } = await import("./reflexion.mjs");
+    const { decayRules } = await import("@triflux/core/hub/reflexion.mjs");
     const decay = decayRules(
       store,
       adaptiveEngine.sessionCount?.() || 1,
@@ -2440,7 +2443,7 @@ export async function startHub({
           );
           if (port === HUB_DEFAULT_PORT) {
             void reapExistingHubProcesses({ currentPid: process.pid }).then(
-              ({ reaped }) => {
+              ({ reaped, failed }) => {
                 if (reaped.length > 0) {
                   hubLog.info(
                     {
@@ -2449,6 +2452,19 @@ export async function startHub({
                       caller: "startup",
                     },
                     "hub.startup_reaper",
+                  );
+                }
+                // Surface kill-unable orphans (EPERM/defunct). Without this the
+                // reaper's failed[] is dropped and an unreapable hub survives
+                // with zero log signal (FU3 observability gap).
+                if (failed && failed.length > 0) {
+                  hubLog.warn(
+                    {
+                      failed: failed.length,
+                      processes: failed,
+                      caller: "startup",
+                    },
+                    "hub.startup_reaper_failed",
                   );
                 }
               },

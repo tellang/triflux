@@ -72,6 +72,46 @@ describe("codex-session-hook", () => {
     assert.deepEqual(calls, ["heartbeat"]);
   });
 
+  it("keeps hook stdout JSON-only even when side effects log to stdout", async () => {
+    const writes = [];
+    const originalWrite = process.stdout.write;
+    process.stdout.write = function writeForTest(
+      chunk,
+      encodingOrCallback,
+      callback,
+    ) {
+      writes.push(String(chunk));
+      const done =
+        typeof encodingOrCallback === "function"
+          ? encodingOrCallback
+          : callback;
+      if (typeof done === "function") done();
+      return true;
+    };
+
+    try {
+      const result = await runCodexSessionHook(payload(), {
+        argvMode: "register",
+        hubEnsureRun: async () => {
+          process.stdout.write("[mcp-sync] skipped\n");
+          console.log("[mcp-sync] console noise");
+        },
+        registerInteractiveSession: () => {
+          process.stdout.write("[session-start] register noise\n");
+        },
+        drainPendingSynapse: async () => {
+          process.stdout.write("[synapse] drain noise\n");
+        },
+      });
+
+      assert.equal(result, "{}\n");
+      assert.deepEqual(writes, ["{}\n"]);
+      assert.doesNotThrow(() => JSON.parse(writes.join("")));
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+  });
+
   it("absorbs parse failures, unknown modes, and seam errors while still returning {}", async () => {
     const calls = [];
     const result = await runCodexSessionHook("{not-json", {

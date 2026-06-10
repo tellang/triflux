@@ -51,6 +51,33 @@ function normalizeMode(mode, payload) {
   return "";
 }
 
+function swallowStdoutWrite(_chunk, encodingOrCallback, callback) {
+  const done =
+    typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+  if (typeof done === "function") done();
+  return true;
+}
+
+async function runHookSideEffectsWithStdoutSuppressed(fn) {
+  const originalStdoutWrite = stdout.write;
+  const originalConsoleDebug = console.debug;
+  const originalConsoleInfo = console.info;
+  const originalConsoleLog = console.log;
+
+  stdout.write = swallowStdoutWrite;
+  console.debug = () => {};
+  console.info = () => {};
+  console.log = () => {};
+  try {
+    return await fn();
+  } finally {
+    stdout.write = originalStdoutWrite;
+    console.debug = originalConsoleDebug;
+    console.info = originalConsoleInfo;
+    console.log = originalConsoleLog;
+  }
+}
+
 export async function runCodexSessionHook(stdinData, opts = {}) {
   const output = "{}\n";
   const parsed = parsePayload(stdinData);
@@ -66,24 +93,26 @@ export async function runCodexSessionHook(stdinData, opts = {}) {
     opts.drainPendingSynapse || defaultDrainPendingSynapse;
 
   try {
-    if (mode === "register") {
-      try {
-        await hubEnsureRun(stdinData);
-      } catch {}
-      try {
-        registerInteractiveSession(stdinData);
-      } catch {}
-      try {
-        await drainPendingSynapse(1000);
-      } catch {}
-    } else if (mode === "heartbeat") {
-      try {
-        heartbeatInteractiveSession(stdinData);
-      } catch {}
-      try {
-        await drainPendingSynapse(500);
-      } catch {}
-    }
+    await runHookSideEffectsWithStdoutSuppressed(async () => {
+      if (mode === "register") {
+        try {
+          await hubEnsureRun(stdinData);
+        } catch {}
+        try {
+          registerInteractiveSession(stdinData);
+        } catch {}
+        try {
+          await drainPendingSynapse(1000);
+        } catch {}
+      } else if (mode === "heartbeat") {
+        try {
+          heartbeatInteractiveSession(stdinData);
+        } catch {}
+        try {
+          await drainPendingSynapse(500);
+        } catch {}
+      }
+    });
   } catch {
     // Codex session hooks are observational and must never block the session.
   }

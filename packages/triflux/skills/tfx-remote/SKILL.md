@@ -4,8 +4,6 @@ description: >
   원격 관련 표면을 setup/spawn 계열 하나로 통합한 엔트리포인트.
   setup, spawn, list, attach, send, resume, kill, probe 하위 명령을 기준으로
   기존 tfx-remote-setup/tfx-remote-spawn 흐름을 축소 통합한다.
-triggers:
-  - tfx-remote
 argument-hint: "[setup|spawn|list|attach|send|resume|kill|probe] ..."
 ---
 

@@ -63,7 +63,7 @@ class WebViewController: NSViewController, WKNavigationDelegate, WKScriptMessage
     override func loadView() {
         let webConfiguration = WKWebViewConfiguration()
         webConfiguration.userContentController.add(self, name: "tray")
-        let initialFrame = NSRect(x: 0, y: 0, width: 320, height: 520)
+        let initialFrame = NSRect(x: 0, y: 0, width: 460, height: 720)
         webView = WKWebView(frame: initialFrame, configuration: webConfiguration)
 
         // Transparent background for Glassmorphism
