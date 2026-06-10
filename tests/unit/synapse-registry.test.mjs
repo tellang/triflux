@@ -141,6 +141,7 @@ describe("synapse-registry", () => {
       localHeartbeatIntervalMs: 5,
       localTimeoutMs: 15,
       expireTimeoutMs: 30,
+      cleanExpireTimeoutMs: 30,
     });
 
     const removedSessions = [];

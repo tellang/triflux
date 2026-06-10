@@ -10,7 +10,7 @@
 //
 // external source 훅 (session-vault 등)은 여전히 execFile로 실행된다.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -38,6 +38,55 @@ function parseStartPayload(stdinData) {
   } catch {
     return {};
   }
+}
+
+function readAncestorCommands(pid = process.ppid, maxDepth = 6) {
+  if (process.platform === "win32") return [];
+  const commands = [];
+  let currentPid = Number(pid);
+  for (let depth = 0; depth < maxDepth; depth++) {
+    if (!Number.isInteger(currentPid) || currentPid <= 1) break;
+    try {
+      const output = execFileSync(
+        "ps",
+        ["-o", "ppid=", "-o", "command=", "-p", String(currentPid)],
+        {
+          encoding: "utf8",
+          timeout: 200,
+          windowsHide: true,
+        },
+      ).trim();
+      const match = output.match(/^(\d+)\s+([\s\S]+)$/);
+      if (!match) break;
+      commands.push(match[2]);
+      currentPid = Number(match[1]);
+    } catch {
+      break;
+    }
+  }
+  return commands;
+}
+
+function commandUsesClaudePrintMode(command) {
+  return /\bclaude(?:\s+\S+)*\s+(?:--print|-p)(?:\s|=|$)/u.test(
+    String(command || ""),
+  );
+}
+
+function shouldSkipInteractiveRegistration(payload, seams = {}) {
+  const declaredKind = String(
+    payload?.sessionKind || payload?.session_kind || "",
+  )
+    .trim()
+    .toLowerCase();
+  if (declaredKind === "headless") return true;
+
+  const ancestorCommands = Array.isArray(seams.ancestorCommands)
+    ? seams.ancestorCommands
+    : readAncestorCommands(seams.parentPid);
+  return ancestorCommands.some((command) =>
+    commandUsesClaudePrintMode(command),
+  );
 }
 
 /**
@@ -107,6 +156,7 @@ export function registerInteractiveSession(stdinData, seams = {}) {
     const payload = parseStartPayload(stdinData);
     const sessionId = String(payload?.session_id || "").trim();
     if (!sessionId) return;
+    if (shouldSkipInteractiveRegistration(payload, seams)) return;
     const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
 
     // 1) cwd 만으로 즉시 minimal register (블로킹 git 없음, latency 0).
