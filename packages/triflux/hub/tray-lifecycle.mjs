@@ -1,7 +1,10 @@
 // hub/tray-lifecycle.mjs — Hub/Tray bidirectional auto-start helpers
 
 import { spawn } from "node:child_process";
-import { resolveHubPortForContext, isWorktreeOrEphemeralHubContext } from "./hub-lifecycle.mjs";
+import {
+  isWorktreeOrEphemeralHubContext,
+  resolveHubPortForContext,
+} from "./hub-lifecycle.mjs";
 
 const DEFAULT_HUB_PORT = "27888";
 const DEFAULT_HEALTH_TIMEOUT_MS = 1_000;
