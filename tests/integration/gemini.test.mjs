@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -57,8 +58,7 @@ function runBash(command, extraEnv = {}) {
       cwd: testTempDir,
       encoding: "utf8",
       timeout: 30_000,
-      env: {
-        ...process.env,
+      env: hubServerTestEnv({
         HOME: testTempDir,
         TMPDIR: testTempDir,
         TMP: testTempDir,
@@ -76,7 +76,7 @@ function runBash(command, extraEnv = {}) {
         TFX_WORKER_INDEX: "",
         TFX_SEARCH_TOOL: "",
         ...extraEnv,
-      },
+      }),
     });
   } finally {
     removeTempDirWithRetry(testTempDir);

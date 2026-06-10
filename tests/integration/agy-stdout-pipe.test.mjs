@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 /**
@@ -88,8 +89,7 @@ function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
-    env: {
-      ...process.env,
+    env: hubServerTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       AGY_BIN: "agy",
       HOME: home,
@@ -106,7 +106,7 @@ function runBash(command, extraEnv = {}) {
       TFX_CODEX_TRANSPORT: "exec",
       TFX_MCP_HEALTH_CHECK: "0",
       ...extraEnv,
-    },
+    }),
   });
 }
 

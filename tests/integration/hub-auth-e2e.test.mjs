@@ -14,6 +14,7 @@ import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -259,8 +260,7 @@ function runRouteWithBridgeLogger({ homeDir, tokenEnv = "" }) {
       cwd: workspaceDir,
       encoding: "utf8",
       timeout: 10000,
-      env: {
-        ...process.env,
+      env: hubServerTestEnv({
         HOME: homeDir,
         USERPROFILE: homeDir,
         PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
@@ -281,7 +281,7 @@ function runRouteWithBridgeLogger({ homeDir, tokenEnv = "" }) {
         BRIDGE_LOG_PATH: logPath,
         TFX_HUB_TOKEN: tokenEnv,
         TFX_RESULT_DIR: join(homeDir, ".claude", "tfx-results"),
-      },
+      }),
     },
   );
 
