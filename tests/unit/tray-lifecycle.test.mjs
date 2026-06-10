@@ -139,7 +139,7 @@ describe("hub/tray lifecycle", () => {
           throw new Error("should not spawn");
         },
       }),
-      { status: "disabled", reason: "ephemeral-or-worktree-context" }
+      { status: "disabled", reason: "ephemeral-or-worktree-context" },
     );
   });
 });
