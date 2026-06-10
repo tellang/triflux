@@ -22,7 +22,6 @@ import {
 import { homedir, tmpdir } from "os";
 import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
-import { inspectClaudeRuntimeFlags } from "../hub/diagnostics/claude-runtime-flags.mjs";
 import { loadDelegatorSchemaBundle } from "../hub/delegator/tool-definitions.mjs";
 import { inspectClaudeRuntimeFlags } from "../hub/diagnostics/claude-runtime-flags.mjs";
 import {

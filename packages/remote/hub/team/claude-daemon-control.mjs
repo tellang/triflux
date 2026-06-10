@@ -13,10 +13,6 @@ import {
   removeClaudeSessionProjection,
   writeClaudeSessionProjection,
 } from "./claude-session-projection.mjs";
-import {
-  extractClaudeAgentSessions,
-  normalizeClaudeAgentSession,
-} from "./claude-agent-session-normalizer.mjs";
 
 export function resolveClaudeConfigDir(env = process.env) {
   if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
