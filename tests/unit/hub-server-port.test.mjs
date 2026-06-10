@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -37,6 +40,14 @@ const BASE_STATE = Object.freeze({
   url: LIVE_PEER.url,
 });
 
+const NON_WORKTREE_CWD = mkdtempSync(join(tmpdir(), "tfx-hub-server-port-"));
+
+process.on("exit", () => {
+  try {
+    rmSync(NON_WORKTREE_CWD, { recursive: true, force: true });
+  } catch {}
+});
+
 function createSilentLog(warnings) {
   return {
     warn(payload, event) {
@@ -45,10 +56,14 @@ function createSilentLog(warnings) {
   };
 }
 
+function resolveHubPortInNonWorktree(env, opts = {}) {
+  return resolveHubPort(env, { cwd: NON_WORKTREE_CWD, ...opts });
+}
+
 describe("resolveHubPort()", () => {
   it("env only -> env value", () => {
     assert.equal(
-      resolveHubPort(
+      resolveHubPortInNonWorktree(
         { TFX_HUB_PORT: "30001" },
         { detectPeer: () => LIVE_PEER },
       ),
@@ -58,7 +73,7 @@ describe("resolveHubPort()", () => {
 
   it("env + alive PID -> env value", () => {
     assert.equal(
-      resolveHubPort(
+      resolveHubPortInNonWorktree(
         { TFX_HUB_PORT: "30002" },
         { detectPeer: () => LIVE_PEER },
       ),
@@ -67,20 +82,29 @@ describe("resolveHubPort()", () => {
   });
 
   it("alive PID only -> 27888", () => {
-    assert.equal(resolveHubPort({}, { detectPeer: () => LIVE_PEER }), 27888);
+    assert.equal(
+      resolveHubPortInNonWorktree({}, { detectPeer: () => LIVE_PEER }),
+      27888,
+    );
   });
 
   it("dead PID only -> 27888", () => {
-    assert.equal(resolveHubPort({}, { detectPeer: () => DEAD_PEER }), 27888);
+    assert.equal(
+      resolveHubPortInNonWorktree({}, { detectPeer: () => DEAD_PEER }),
+      27888,
+    );
   });
 
   it("no PID + no env -> 27888", () => {
-    assert.equal(resolveHubPort({}, { detectPeer: () => MISSING_PEER }), 27888);
+    assert.equal(
+      resolveHubPortInNonWorktree({}, { detectPeer: () => MISSING_PEER }),
+      27888,
+    );
   });
 
   it("preferLivePid:false + alive PID -> 27888", () => {
     assert.equal(
-      resolveHubPort(
+      resolveHubPortInNonWorktree(
         {},
         {
           preferLivePid: false,
@@ -103,7 +127,7 @@ describe("resolveHubPort()", () => {
 
   it("server boundary preserves custom ports outside worktree contexts", () => {
     assert.equal(
-      resolveHubPort({ TFX_HUB_PORT: "29009" }, { cwd: "/repo/main" }),
+      resolveHubPort({ TFX_HUB_PORT: "29009" }, { cwd: NON_WORKTREE_CWD }),
       29009,
     );
   });

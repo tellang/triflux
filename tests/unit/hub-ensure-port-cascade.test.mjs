@@ -65,21 +65,26 @@ function clearPid() {
   if (existsSync(HUB_PID_FILE)) rmSync(HUB_PID_FILE, { force: true });
 }
 
+function resolveTarget(options = {}) {
+  return resolveHubTarget({ cwd: TEST_HOME, ...options });
+}
+
 describe("resolveHubTarget — port cascade regression", () => {
   afterEach(() => {
     delete process.env.TFX_HUB_PORT;
+    delete process.env.TFX_HUB_URL;
     clearPid();
   });
 
   it("returns HUB_DEFAULT_PORT(27888) when no env and no pid file", () => {
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
     assert.equal(target.host, "127.0.0.1");
   });
 
   it("honors TFX_HUB_PORT env over default", () => {
     process.env.TFX_HUB_PORT = "28000";
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 28000);
   });
 
@@ -89,7 +94,7 @@ describe("resolveHubTarget — port cascade regression", () => {
     // 수정 후에는 27888 을 반환해야 한다.
     writePid({ pid: 99999, port: 29115, host: "127.0.0.1" });
 
-    const target = resolveHubTarget();
+    const target = resolveTarget();
 
     assert.equal(
       target.port,
@@ -102,27 +107,27 @@ describe("resolveHubTarget — port cascade regression", () => {
   it("env TFX_HUB_PORT wins even when pid-file has different port", () => {
     process.env.TFX_HUB_PORT = "27888";
     writePid({ pid: 99999, port: 29115 });
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
   });
 
   it("preserves loopback host hint from pid-file but not port", () => {
     writePid({ pid: 99999, port: 29115, host: "::1" });
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888, "port는 항상 default/env 기준");
     assert.equal(target.host, "::1", "loopback host 힌트는 재사용 허용");
   });
 
   it("ignores non-loopback host from pid-file", () => {
     writePid({ pid: 99999, port: 29115, host: "10.0.0.1" });
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.host, "127.0.0.1");
   });
 
   it("handles corrupted pid-file gracefully", () => {
     mkdirSync(HUB_PID_DIR, { recursive: true });
     writeFileSync(HUB_PID_FILE, "not json", "utf8");
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
     assert.equal(target.host, "127.0.0.1");
   });
@@ -131,19 +136,19 @@ describe("resolveHubTarget — port cascade regression", () => {
     // Port 0 은 TCP 에서 "OS 가 ephemeral port 할당" 의미지만 hub 에서는
     // 사용 의도 없음. envPortRaw > 0 조건으로 reject 되어 default 27888 로 fallback.
     process.env.TFX_HUB_PORT = "0";
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
   });
 
   it("treats TFX_HUB_PORT=<non-numeric> as invalid, falls back to default", () => {
     process.env.TFX_HUB_PORT = "not-a-number";
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
   });
 
   it("treats TFX_HUB_PORT=<negative> as invalid, falls back to default", () => {
     process.env.TFX_HUB_PORT = "-1";
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
   });
 
