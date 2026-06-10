@@ -663,7 +663,10 @@ export function createSwarmHypervisor(opts) {
       agent: shard.agent,
       // #125: append Completion Protocol appendix so workers emit a
       // sentinel-framed JSON payload that conductor can reliably capture.
-      prompt: buildWorkerPrompt(shard.prompt, { leaseFiles: shard.files }),
+      prompt: buildWorkerPrompt(shard.prompt, {
+        leaseFiles: shard.files,
+        worktreePath: shard.worktreePath,
+      }),
       workdir: shard.worktreePath || workdir,
       mcpServers: shard.mcp,
       worktreePath: shard.worktreePath || null,
@@ -980,6 +983,72 @@ export function createSwarmHypervisor(opts) {
         emitter.emit("shardFailed", {
           shardName,
           failureMode: FAILURE_MODES.F7_WORKER_DID_NOT_COMMIT,
+          reason,
+        });
+
+        cascadeDependencyFailure(shardName);
+        checkAllShardsCompleted();
+        return;
+      }
+
+      if (
+        completionPayload?.status === "failed" ||
+        completionPayload?.status === "blocked"
+      ) {
+        const detail =
+          typeof completionPayload.reason === "string" &&
+          completionPayload.reason.length > 0
+            ? completionPayload.reason
+            : "unspecified";
+        const reason = `worker_reported_${completionPayload.status}:${detail}`;
+
+        if (isRedundant) {
+          eventLog.append("redundant_completion_rejected", {
+            shard: shardName,
+            sessionId,
+            reason,
+          });
+          redundantWorkers.delete(shardName);
+          if (completedWorker) {
+            void closeNativeBridgeRegistration(
+              completedWorker,
+              shardName,
+              "failed",
+            );
+          }
+          checkAllShardsCompleted();
+          return;
+        }
+
+        eventLog.append("worker_reported_non_ok_completion", {
+          shard: shardName,
+          sessionId,
+          status: completionPayload.status,
+          reason,
+        });
+        if (completedWorker) {
+          void closeNativeBridgeRegistration(
+            completedWorker,
+            shardName,
+            "failed",
+          );
+        }
+        failures.set(shardName, {
+          mode: classifyFailure(reason),
+          reason,
+          sessionId,
+          completionPayload,
+        });
+        lockManager.release(shardName);
+
+        const redundant = redundantWorkers.get(shardName);
+        if (redundant) {
+          void redundant.conductor.shutdown("primary_reported_non_ok");
+        }
+
+        emitter.emit("shardFailed", {
+          shardName,
+          failureMode: classifyFailure(reason),
           reason,
         });
 

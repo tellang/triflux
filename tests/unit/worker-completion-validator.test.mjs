@@ -31,51 +31,45 @@ describe("validateWorkerCompletion", () => {
     assert.equal(result.reason, undefined);
   });
 
-  it("allows status=skipped payload with empty or omitted commits_made", () => {
-    const omitted = validateWorkerCompletion({
-      status: "skipped",
-      reason: "no-op for this shard",
-    });
-    assert.equal(omitted.ok, true);
-
-    const empty = validateWorkerCompletion({
-      status: "skipped",
-      commits_made: [],
-    });
-    assert.equal(empty.ok, true);
-  });
-
   it("rejects non-object payloads", () => {
     assert.equal(validateWorkerCompletion(null).ok, false);
     assert.equal(validateWorkerCompletion("ok").ok, false);
     assert.equal(validateWorkerCompletion(undefined).ok, false);
   });
 
-  it("rejects status=failed payload with a reason (BUG-G #130)", () => {
+  it("accepts status=failed payload with reason and no commits_made", () => {
     const result = validateWorkerCompletion({
       status: "failed",
       reason: "codex stall",
     });
-    assert.equal(result.ok, false);
-    assert.equal(result.reason, "worker_self_reported_failure:codex stall");
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, undefined);
   });
 
-  it("rejects status=failed payload with empty commits_made (BUG-G #130)", () => {
+  it("accepts status=failed payload with empty commits_made", () => {
     const result = validateWorkerCompletion({
       status: "failed",
       commits_made: [],
     });
-    assert.equal(result.ok, false);
-    assert.equal(result.reason, "worker_self_reported_failure:unspecified");
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, undefined);
   });
 
-  it("rejects status=failed payload even when commits_made has entries", () => {
+  it("accepts status=blocked payload with optional reason and no commits_made", () => {
     const result = validateWorkerCompletion({
-      status: "failed",
-      reason: "partial work then abort",
-      commits_made: [{ sha: "abc1234", message: "wip" }],
+      status: "blocked",
+      reason: "waiting on user input",
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, undefined);
+  });
+
+  it("rejects obsolete status=skipped payloads", () => {
+    const result = validateWorkerCompletion({
+      status: "skipped",
+      reason: "old no-op contract",
     });
     assert.equal(result.ok, false);
-    assert.match(result.reason, /^worker_self_reported_failure:/);
+    assert.equal(result.reason, "invalid_status:skipped");
   });
 });

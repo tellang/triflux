@@ -1,9 +1,9 @@
 // hub/team/worker-completion-validator.mjs — Enforce worker completion schema.
 // Issue #115 Lane 1 / F7_worker_did_not_commit.
 //
-// A shard worker MUST emit a completion JSON with `status: "ok"` + a non-empty
-// `commits_made` array. Reporting without committing is the #1 cause of lost
-// swarm work — guarded here before integration trusts the worker.
+// A shard worker that reports `status: "ok"` MUST include a non-empty
+// `commits_made` array. Non-ok statuses are valid terminal reports, but they
+// are not allowed to masquerade as successful completion.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -34,23 +34,18 @@ export function validateWorkerCompletion(payload) {
     return { ok: false, reason: "payload_not_object" };
   }
 
-  const valid = compiled(payload);
+  const status = payload.status;
+  if (!["ok", "failed", "blocked"].includes(status)) {
+    return { ok: false, reason: `invalid_status:${status ?? "undefined"}` };
+  }
+
+  const schemaPayload =
+    status === "blocked" ? { ...payload, status: "failed" } : payload;
+  const valid = compiled(schemaPayload);
   if (!valid) {
     const firstError = compiled.errors?.[0];
     const reason = formatError(firstError, payload);
     return { ok: false, reason };
-  }
-
-  // BUG-G (#130): the schema's if-then only constrains commits_made when
-  // status='ok', so status='failed' payloads pass AJV vacuously. Without
-  // this guard the hypervisor F7 path treats a worker self-reported failure
-  // as a successful completion and integrates phantom shards.
-  if (payload.status === "failed") {
-    const detail =
-      typeof payload.reason === "string" && payload.reason.length > 0
-        ? payload.reason
-        : "unspecified";
-    return { ok: false, reason: `worker_self_reported_failure:${detail}` };
   }
 
   return { ok: true };
