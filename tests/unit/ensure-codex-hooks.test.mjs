@@ -164,13 +164,15 @@ describe("ensureCodexHooks", () => {
       /"\/tmp\/elsewhere\/hooks\.json:session_start:0:0" = \{ trusted_hash = "sha256:other" \}/,
     );
     assert.doesNotMatch(configAfterFirst, /sha256:stale/);
+    // 관리 키는 codex CLI 0.137+ canonical 인 table-header 형식으로 기록된다
+    // (inline dotted-key 는 codex 자체 재직렬화와 duplicate key 충돌 — #394).
     assert.match(
       configAfterFirst,
-      /"\S+hooks\.json:session_start:1:0" = \{ trusted_hash = "sha256:[0-9a-f]{64}" \}/,
+      /\[hooks\.state\."\S+hooks\.json:session_start:1:0"\]\ntrusted_hash = "sha256:[0-9a-f]{64}"/,
     );
     assert.match(
       configAfterFirst,
-      /"\S+hooks\.json:user_prompt_submit:1:0" = \{ trusted_hash = "sha256:[0-9a-f]{64}" \}/,
+      /\[hooks\.state\."\S+hooks\.json:user_prompt_submit:1:0"\]\ntrusted_hash = "sha256:[0-9a-f]{64}"/,
     );
   });
 
