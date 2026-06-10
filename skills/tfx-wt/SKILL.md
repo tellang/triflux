@@ -5,12 +5,6 @@ description: >
   "탭 목록", "탭 닫아" 같은 한국어/영어 표현을 쓰면 wt-cli.mjs 경유로 wt-manager API 호출.
   safety-guard가 wt.exe 직접 호출을 차단하므로 이 스킬이 유일한 경로다.
   Use when: 새 탭, tab open, 패인, pane split, 탭 목록, 탭 닫아, wt 탭, wt 패인
-triggers:
-  - tfx-wt
-  - wt-tab-route
-  - wt-tab-rename
-  - wt-tab-list
-  - wt-tab-close
 argument-hint: "<create-tab|split-pane|layout|list|close|close-stale|rename> [json-opts]"
 ---
 

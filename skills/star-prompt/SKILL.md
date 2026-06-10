@@ -2,8 +2,6 @@
 name: star-prompt
 description: >-
   CLI 프로젝트의 setup/postinstall 흐름에 GitHub 스타 요청을 추가한다.
-  기본: 모달 차단형 (AskUserQuestion). --soft: 부드러운 confirm 모드.
-  gh CLI 인증 확인 → 이미 스타 여부 감지 → 선택 강제 → gh API로 자동 스타.
   'star prompt', '스타 요청', '리포 스타', 'star request', '깃헙 스타 넣어줘',
   'star 눌러달라고', '응원 요청' 같은 요청에 사용한다.
 ---
