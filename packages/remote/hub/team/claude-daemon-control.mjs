@@ -113,6 +113,29 @@ export function sendClaudeControlRequest(
   });
 }
 
+// claude daemon 은 control.sock 의 mutating op(dispatch 등)에 control-key
+// 인증을 강제한다 (미제시 시 EAUTH "didn't present the daemon control key").
+// key 는 <configDir>/daemon/control.key (configDir 스코프별). 파일이 없으면
+// 인증 미강제 daemon 으로 보고 auth 필드를 생략한다 (fail-open — 구버전 호환).
+export async function readDaemonControlKey(
+  configDir = resolveClaudeConfigDir(),
+) {
+  try {
+    const key = await fs.readFile(
+      path.join(configDir, "daemon", "control.key"),
+      "utf8",
+    );
+    return key.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function buildDaemonControlAuth(configDir) {
+  const auth = await readDaemonControlKey(configDir);
+  return auth ? { auth } : {};
+}
+
 export function buildDaemonAttachRequest({
   short,
   cols = DEFAULT_DAEMON_ATTACH_COLS,
@@ -1146,11 +1169,12 @@ export async function resolveDaemonBridgeSessionId({
   }
 }
 
-export async function killDaemonJob(controlSock, short) {
+export async function killDaemonJob(controlSock, short, { auth } = {}) {
   return await sendClaudeControlRequest(controlSock, {
     proto: 1,
     op: "kill",
     short,
+    ...(auth ? { auth } : {}),
   });
 }
 
@@ -1237,6 +1261,7 @@ export async function dispatchClaudeDaemonJob({
   const writeProjection =
     _deps.writeClaudeSessionProjection || writeClaudeSessionProjection;
   const readProcStart = _deps.getProcStart || getProcStart;
+  const buildAuth = _deps.buildDaemonControlAuth || buildDaemonControlAuth;
 
   const short = payload.short;
   const sessionsDir =
@@ -1246,6 +1271,7 @@ export async function dispatchClaudeDaemonJob({
   // native-bridge 는 control.sock 존재를 미리 점검한다 (없으면 fast-fail).
   if (accessControlSock) await accessControlSock(resolvedControlSock);
 
+  const controlAuth = await buildAuth(paths?.configDir);
   const dispatch = await sendControl(
     resolvedControlSock,
     {
@@ -1253,11 +1279,17 @@ export async function dispatchClaudeDaemonJob({
       op: "dispatch",
       d: payload,
       timeoutMs: dispatchTimeoutMs,
+      ...controlAuth,
     },
     { timeoutMs: dispatchTimeoutMs },
   );
   if (dispatch?.ok !== true) {
-    throw new Error(`Claude daemon dispatch failed for ${name || short}`);
+    // daemon 거부 사유를 보존한다 — generic 메시지만 던지면 EAUTH 같은
+    // 실원인이 묻혀 진단이 어려워진다.
+    const reason = dispatch?.error ? `: ${dispatch.error}` : "";
+    throw new Error(
+      `Claude daemon dispatch failed for ${name || short}${reason}`,
+    );
   }
 
   const pidOpts =

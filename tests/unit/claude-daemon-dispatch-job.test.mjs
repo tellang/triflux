@@ -208,3 +208,119 @@ test("teardownClaudeDaemonJob attempts every step even when killDaemonJob throws
     "removeProjection",
   ]);
 });
+
+test("dispatchClaudeDaemonJob presents daemon control.key as auth when present", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-auth-"));
+  const configDir = path.join(tmp, "claude");
+  const paths = deriveClaudeDaemonPaths({ configDir });
+  await fs.mkdir(paths.daemonDir, { recursive: true });
+  await fs.mkdir(path.join(configDir, "daemon"), { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "daemon", "control.key"),
+    "feedface00112233\n",
+    "utf8",
+  );
+  const short = "auth1234";
+  const { server, requests } = await listenDaemon(paths.controlSock, {
+    short,
+    pid: process.pid,
+  });
+
+  try {
+    await dispatchClaudeDaemonJob({
+      paths,
+      controlSock: paths.controlSock,
+      payload: { proto: 1, short, sessionId: "auth1234-sess", cwd: "/tmp/p" },
+      agent: "codex",
+      name: "auth worker",
+      cwd: "/tmp/p",
+      _deps: {
+        getProcStart: () => "Mon Jan 1 00:00:00 2026",
+        resolveDaemonBridgeSessionId: async () => "cse_01Auth",
+      },
+    });
+    const dispatch = requests.find((r) => r.op === "dispatch");
+    assert.equal(
+      dispatch.auth,
+      "feedface00112233",
+      "control.key must be presented as auth (daemon enforces EAUTH otherwise)",
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dispatchClaudeDaemonJob omits auth when control.key is absent (legacy daemon)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-noauth-"));
+  const configDir = path.join(tmp, "claude");
+  const paths = deriveClaudeDaemonPaths({ configDir });
+  await fs.mkdir(paths.daemonDir, { recursive: true });
+  const short = "noau5678";
+  const { server, requests } = await listenDaemon(paths.controlSock, {
+    short,
+    pid: process.pid,
+  });
+
+  try {
+    await dispatchClaudeDaemonJob({
+      paths,
+      controlSock: paths.controlSock,
+      payload: { proto: 1, short, sessionId: "noau5678-sess", cwd: "/tmp/p" },
+      agent: "codex",
+      name: "noauth worker",
+      cwd: "/tmp/p",
+      _deps: {
+        getProcStart: () => "Mon Jan 1 00:00:00 2026",
+        resolveDaemonBridgeSessionId: async () => "cse_01NoAuth",
+      },
+    });
+    const dispatch = requests.find((r) => r.op === "dispatch");
+    assert.equal(dispatch.auth, undefined, "no key file → no auth field");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dispatchClaudeDaemonJob preserves daemon rejection reason in error message", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-reject-"));
+  const configDir = path.join(tmp, "claude");
+  const paths = deriveClaudeDaemonPaths({ configDir });
+  await fs.mkdir(paths.daemonDir, { recursive: true });
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    socket.on("data", () => {
+      socket.end(
+        `${JSON.stringify({
+          ok: false,
+          error:
+            "dispatch rejected: this client didn't present the daemon control key",
+          code: "EAUTH",
+        })}\n`,
+      );
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(paths.controlSock, resolve);
+  });
+
+  try {
+    await assert.rejects(
+      dispatchClaudeDaemonJob({
+        paths,
+        controlSock: paths.controlSock,
+        payload: { proto: 1, short: "rej90abc", sessionId: "rej-sess" },
+        agent: "codex",
+        name: "reject worker",
+        cwd: "/tmp/p",
+      }),
+      /didn't present the daemon control key/,
+      "daemon error reason must surface in the thrown message",
+    );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
