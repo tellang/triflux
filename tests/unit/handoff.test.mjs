@@ -6,6 +6,8 @@ import { describe, it } from "node:test";
 import {
   buildFallbackHandoff,
   formatHandoffForLead,
+  HANDOFF_INSTRUCTION,
+  HANDOFF_INSTRUCTION_SHORT,
   parseHandoff,
   processHandoff,
   validateHandoff,
@@ -46,6 +48,53 @@ const NO_HANDOFF = `
 This is just regular output without any handoff block.
 Done processing files.
 `;
+
+describe("HANDOFF instruction contract", () => {
+  it("full contract gates ok status on verification evidence", () => {
+    assert.ok(
+      HANDOFF_INSTRUCTION.includes(
+        "Set status: ok only after you have verified the work (file/diff/test evidence) — unverified claims must use partial or failed.",
+      ),
+      HANDOFF_INSTRUCTION,
+    );
+  });
+
+  it("full contract requires repo-root relative files_changed and final output ownership", () => {
+    assert.ok(
+      HANDOFF_INSTRUCTION.includes(
+        'files_changed: <comma-separated repo-root relative file paths, or "none">',
+      ),
+      HANDOFF_INSTRUCTION,
+    );
+    assert.ok(
+      HANDOFF_INSTRUCTION.includes(
+        "this block must be the last thing you output",
+      ),
+      HANDOFF_INSTRUCTION,
+    );
+  });
+
+  it("short contract keeps verification gate and final output ownership", () => {
+    assert.ok(
+      HANDOFF_INSTRUCTION_SHORT.includes(
+        "Set status: ok only after you have verified the work (file/diff/test evidence) — unverified claims must use partial or failed.",
+      ),
+      HANDOFF_INSTRUCTION_SHORT,
+    );
+    assert.ok(
+      HANDOFF_INSTRUCTION_SHORT.includes(
+        'files_changed: <comma-separated repo-root relative paths or "none">',
+      ),
+      HANDOFF_INSTRUCTION_SHORT,
+    );
+    assert.ok(
+      HANDOFF_INSTRUCTION_SHORT.includes(
+        "this block must be the last thing you output",
+      ),
+      HANDOFF_INSTRUCTION_SHORT,
+    );
+  });
+});
 
 // ── parseHandoff ──
 
