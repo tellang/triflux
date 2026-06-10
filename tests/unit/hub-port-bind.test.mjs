@@ -3,13 +3,12 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-
+import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
 import {
   cleanStaleHubPid,
   detectLivePeer,
   resolveHubPort,
 } from "../../hub/server.mjs";
-import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
 
 const TEMP_DIRS = [];
 
