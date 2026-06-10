@@ -4,13 +4,6 @@ description: >
   triflux 전용 릴리즈 자동화. 기존 scripts/release/* 래퍼 + AskUserQuestion 기반 버전 선택 +
   CHANGELOG 편집 게이트 + Co-Authored-By/AI trailer 금지 강제. 'ship', '배포', '릴리즈',
   'release', 'tfx-ship', 'publish' 같은 요청에 반드시 사용.
-triggers:
-  - tfx-ship
-  - ship
-  - 배포
-  - 릴리즈
-  - release
-  - publish
 argument-hint: "[patch|minor|major|<version>] [--skip-tests] [--no-publish] [--dry-run]"
 ---
 
@@ -18,8 +11,6 @@ argument-hint: "[patch|minor|major|<version>] [--skip-tests] [--no-publish] [--d
 
 > **ARGUMENTS 처리**: ARGUMENTS 가 있으면 첫 토큰을 version bump 타입 또는 명시 버전으로 해석.
 > 플래그는 `--skip-tests`, `--no-publish`, `--dry-run` 지원.
-
-> **Telemetry**: Skill=tfx-ship, 단계별 실행 로그 추적, 실패 시 복구 지침 포함.
 
 > **하드 룰** (절대 위반 금지):
 >

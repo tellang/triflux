@@ -1,17 +1,7 @@
 ---
 internal: true
 name: tfx-plan
-description: "구현 계획이 필요할 때 사용한다. '계획 세워줘', 'plan', '플랜', '어떻게 구현하지', '태스크 분해', '작업 순서', '합의 계획', 'ralplan', '철저한 계획' 같은 요청에 반드시 사용. 기본값은 Opus+Codex 합의와 Claude critic 보강. Antigravity는 quick/freeform 보조로만 사용하며 deprecated Gemini CLI는 쓰지 않는다."
-triggers:
-  - plan
-  - 계획
-  - 플랜
-  - 설계
-  - deep plan
-  - 합의 계획
-  - consensus plan
-  - deep-plan
-  - ralplan
+description: "구현 계획이 필요할 때 사용한다. '계획 세워줘', 'plan', '플랜', '어떻게 구현하지', '태스크 분해', '작업 순서', '합의 계획', 'ralplan', '철저한 계획' 같은 요청에 반드시 사용."
 argument-hint: "<구현할 기능> [--quick]"
 ---
 

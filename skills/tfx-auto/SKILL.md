@@ -1,33 +1,10 @@
 ---
 name: tfx-auto
 description: >
-  통합 CLI 오케스트레이터 + 실행 스킬 front door. 커맨드 숏컷(단일) + 자동 분류/분해(병렬)
-  + 수동 병렬 + 명시 플래그 오버라이드. tfx-route.sh 기반. `--cli`, `--mode`, `--parallel`,
-  `--retry`, `--isolation`, `--remote`, `--shape`, `--cli-set`, `--risk-tier` 플래그로 legacy tfx-codex/antigravity/
-  multi/swarm/fullcycle/persist/autopilot/autoroute/auto-codex 와 consensus/debate/panel 동작을 직접 제어.
-  legacy 스킬은 thin alias (Phase 5 v11 삭제 예정).
+  통합 CLI 오케스트레이터이자 실행 스킬 front door. 단일/병렬 구현·수정 작업을 자동 분류해
+  Codex 우선으로 dispatch 하고, 명시 플래그로 mode/parallel/consensus 등 동작을 오버라이드한다.
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
-  구현/수정 요청에 사용.
-triggers:
-  - tfx-auto
-  - implement
-  - build
-  - research
-  - brainstorm
-  - design
-  - test
-  - analyze
-  - troubleshoot
-  - improve
-  - cleanup
-  - explain
-  - document
-  - pm
-  - reflect
-  - estimate
-  - spec-panel
-  - business-panel
-  - index-repo
+  구현/수정 요청에 사용. 플래그 상세는 argument-hint, 라우팅 정책은 .claude/rules/tfx-routing.md 참조.
 argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none] [--skill <name>]"
 ---
 
@@ -35,15 +12,6 @@ argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [
 
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
 > 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
-
-> **Telemetry**
->
-> - Skill: `tfx-auto`
-> - Description: `통합 CLI 오케스트레이터. 커맨드 숏컷(단일) + 자동 분류/분해(병렬) + 수동 병렬. tfx-route.sh 기반. '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은 구현/수정 요청에 사용. CLI 라우팅이 필요한 모든 작업에 적극 활용.`
-> - Session: 요청별 식별자를 유지해 단계별 실행 로그를 추적한다.
-> - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
-
-
 
 ### Step 0: 스마트 라우팅 (tfx-auto 진입 시 자동 실행)
 
@@ -229,7 +197,7 @@ tfx-auto 가 커맨드/agent 별로 주입할 스킬을 고를 때 쓰는 **권�
 
 #### agy anti-overclaim (자동, agy 레인 전용)
 
-agy(Gemini 3.x) 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율 블록을 프롬프트 **END** 에 자동 append (`append_agy_anti_overclaim`). Gemini 3.x 과신(AA-Omniscience 실측: 정확도 53-56% 대비 환각률 88-91%) 대응:
+agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율 블록을 프롬프트 **END** 에 자동 append (`append_agy_anti_overclaim`). Gemini 3.x 과신(AA-Omniscience 실측: 정확도 53-56% 대비 환각률 88-91%) 대응:
 
 - fresh 증거 없이 done/fixed/passing 주장 금지.
 - 검증 불가 시 `No Info / 확인 불가` 후 중단 (날조 금지).

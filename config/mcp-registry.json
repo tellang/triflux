@@ -41,15 +41,6 @@
       "targets": ["claude", "gemini", "codex", "antigravity"],
       "description": "Exa neural/semantic web search — 학술/기술 깊이. Key 발급: https://exa.ai/dashboard → secrets.env의 EXA_API_KEY"
     },
-    "serena": {
-      "policy": "gateway-http",
-      "transport": "http",
-      "gateway_port": 8105,
-      "gateway_path": "/mcp",
-      "safe": true,
-      "targets": ["claude", "gemini", "codex", "antigravity"],
-      "description": "Serena MCP — local supergateway stateful Streamable HTTP endpoint (:8105/mcp)"
-    },
     "brave-search": {
       "policy": "gateway-http",
       "transport": "http",
