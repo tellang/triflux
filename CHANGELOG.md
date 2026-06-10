@@ -4,6 +4,30 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.34.0] - 2026-06-10
+
+### Fixed
+- **[#395]** codex-hooks: serialize hooks.state in the codex canonical table-header form with an idempotent convergence check — every Claude SessionStart re-appended the inline form next to codex 0.137+'s table form, producing a TOML duplicate key that killed every codex invocation; manual repair was undone on the next session start
+- **[#396]** native-bridge: present the daemon control-key on dispatch and preserve the daemon rejection reason — worker registration to the claude agents panel failed with EAUTH on every swarm/multi run
+- swarm hub hygiene: expire clean (no dirty files) stale synapse sessions sooner instead of holding everything 24h — dirty-file sessions keep the 24h guard window, clean ones default to a short expire (`TFX_SYNAPSE_CLEAN_EXPIRE_MS`)
+- tray: dedupe mac tray processes machine-wide (worktree copies and other clones reap as the same tray) and suppress tray auto-spawn from worktree/ephemeral hub contexts — both sides of the duplicate menubar icon incident
+- hub: lifecycle observability guards — SIGKILL failures are no longer silent, polluted `TFX_HUB_PORT` is guarded before forwarding
+- **[#393]** claude integration: refresh claude cwd projections, warn on runtime compatibility flags, normalize agent json rows, drop duplicate runtime imports
+- **[#392]** v10.33.1 follow-ups: route integration tests use a no-op hub-ensure stub (no more canonical 27888 binds from isolated HOME), test-lock drains with a bounded loop so real failures stop masking as exit 0, packages/core hooks join the mirror gate, hub-auth assertions match the non-canonical-port token design, and 4 hub-restart route cases unskip behind `TFX_HUB_ALLOW_EPHEMERAL_PORT=1`
+
+### Changed
+- skill-hygiene: drop frontmatter `triggers` and duplicated Telemetry blocks across 22 active skills, diet descriptions (activation phrases preserved), 3-way mirrors byte-identical
+- mcp-registry: remove the serena entry
+- routing docs: drop stale gpt-5.3-codex and `--cli gemini` alias wording
+
+### Added
+- jsconfig for editor type-checking over hub/scripts/tests
+
+### Tests
+- stabilize hub port cwd assumptions (worktree-clamp no longer fails the suite from a worktree cwd)
+- update tray singleton expectations to machine-wide semantics; drop the stale frontmatter-triggers assertion; biome formatting catch-ups surfaced by the new CI lint step
+
+
 ## [10.33.1] - 2026-06-09
 
 ### Added

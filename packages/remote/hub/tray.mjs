@@ -19,15 +19,20 @@ function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+function isNodeCommand(command) {
+  return /\bnode(?:\s|$)|[/\\]node(?:\s|$)/u.test(command);
+}
+
+function hasMacTrayScriptArg(command) {
+  return /(?:^|[\s"'])[^"'<>|]*[/\\]hub[/\\]tray\.mjs(?:$|[\s"'])/u.test(
+    command,
+  );
+}
+
 export function collectMacTrayProcesses(
   psOutput = "",
-  {
-    scriptPath = fileURLToPath(import.meta.url),
-    currentPid = process.pid,
-  } = {},
+  { currentPid = process.pid } = {},
 ) {
-  const target = String(scriptPath || "");
-  if (!target) return [];
   const ownPid = Number(currentPid);
   return String(psOutput)
     .split(/\r?\n/u)
@@ -38,8 +43,8 @@ export function collectMacTrayProcesses(
       const ppid = Number.parseInt(match[2], 10);
       const command = match[3].trim();
       if (!Number.isFinite(pid) || pid === ownPid) return [];
-      if (!command.includes(target)) return [];
-      if (!/\bnode(?:\s|$)|\/node(?:\s|$)/u.test(command)) return [];
+      if (!isNodeCommand(command)) return [];
+      if (!hasMacTrayScriptArg(command)) return [];
       return [{ pid, ppid, command }];
     });
 }

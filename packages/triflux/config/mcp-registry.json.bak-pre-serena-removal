@@ -1,0 +1,89 @@
+{
+  "$schema": "mcp-registry-schema",
+  "version": 1,
+  "description": "MCP 서버 중앙 레지스트리 — 진실의 원천",
+  "defaults": {
+    "transport": "hub-url",
+    "hub_base": "http://127.0.0.1:27888"
+  },
+  "policy_notes": {
+    "policy": "Server policy is the SSOT for client sync shape: hosted writes url+headers, gateway-sse writes http://127.0.0.1:81XX/sse with SSE metadata, gateway-http writes http://127.0.0.1:81XX/mcp with HTTP metadata, and stdio writes command/args/env.",
+    "transport": "Server transport accepts \"hub-url\" for triflux Hub URL flow, \"http\" for direct Streamable HTTP MCP endpoints, or \"stdio\" for upstream-stdio-only MCP servers. Gateway-backed stdio upstreams should use policy:\"gateway-http\" plus gateway_port/gateway_path so clients receive reconnect-safe HTTP MCP config; legacy policy:\"gateway-sse\" remains supported only for backward compatibility.",
+    "headers": "Optional headers are allowed only for HTTP-compatible transports. Each header value must be a descriptor: {\"value\":\"literal\"} for non-secret static values, {\"env\":\"ENV_VAR_NAME\"} for secrets resolved at sync/runtime, or {\"env\":\"ENV_VAR_NAME\",\"prefix\":\"Bearer \"} for common authorization formats.",
+    "secret_safety": "Resolved secret values must not be written back to this registry file. Missing env vars warn during sync and do not emit empty secret headers.",
+    "sync_denylist": "Array of client:server strings skipped by proactive registry sync, for example gemini:tfx-hub."
+  },
+  "servers": {
+    "tfx-hub": {
+      "policy": "hosted",
+      "transport": "hub-url",
+      "url": "http://127.0.0.1:27888/mcp",
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "triflux Hub MCP 서버"
+    },
+    "context7": {
+      "policy": "hosted",
+      "transport": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Upstash Context7 — 라이브러리 문서/코드 컨텍스트 (HTTP MCP, API key 불필요)"
+    },
+    "exa": {
+      "policy": "hosted",
+      "transport": "http",
+      "url": "https://mcp.exa.ai/mcp",
+      "headers": {
+        "Authorization": { "env": "EXA_API_KEY", "prefix": "Bearer " }
+      },
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Exa neural/semantic web search — 학술/기술 깊이. Key 발급: https://exa.ai/dashboard → secrets.env의 EXA_API_KEY"
+    },
+    "serena": {
+      "policy": "gateway-http",
+      "transport": "http",
+      "gateway_port": 8105,
+      "gateway_path": "/mcp",
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Serena MCP — local supergateway stateful Streamable HTTP endpoint (:8105/mcp)"
+    },
+    "brave-search": {
+      "policy": "gateway-http",
+      "transport": "http",
+      "gateway_port": 8101,
+      "gateway_path": "/mcp",
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Brave Search MCP — local supergateway stateful Streamable HTTP endpoint (:8101/mcp). BRAVE_API_KEY 환경변수 필요 (https://brave.com/search/api/). secrets.env 의 BRAVE_API_KEY 참조."
+    },
+    "tavily": {
+      "policy": "hosted",
+      "transport": "http",
+      "url": "https://mcp.tavily.com/mcp",
+      "headers": {
+        "Authorization": { "env": "TAVILY_API_KEY", "prefix": "Bearer " }
+      },
+      "safe": true,
+      "targets": ["claude", "gemini", "codex", "antigravity"],
+      "description": "Tavily research — 비용/운영/DX/일반 웹. Key 발급: https://app.tavily.com/home → secrets.env의 TAVILY_API_KEY"
+    }
+  },
+  "policies": {
+    "stdio_action": "replace-with-hub",
+    "unknown_server_action": "warn",
+    "sync_denylist": [],
+    "watched_paths": [
+      "~/.gemini/settings.json",
+      "~/.codex/config.toml",
+      "~/.claude.json",
+      "~/.claude/settings.json",
+      "~/.claude/settings.local.json",
+      ".claude/mcp.json",
+      ".mcp.json",
+      "~/.gemini/config/mcp_config.json"
+    ]
+  }
+}
