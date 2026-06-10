@@ -799,12 +799,20 @@ try_restart_hub() {
   hub_port="${TFX_HUB_URL##*:}"
   hub_port="${hub_port%%/*}"
   [[ -z "$hub_port" || "$hub_port" == "$TFX_HUB_URL" ]] && hub_port=27888
-  if is_ephemeral_hub_context; then
+  # Test-only opt-in (TFX_HUB_ALLOW_EPHEMERAL_PORT=1): keep the TFX_HUB_URL-derived
+  # port in ephemeral context instead of forcing canonical 27888, so hub-restart
+  # integration tests bind an isolated port without thrashing the live hub.
+  # Default-off: unset/empty/non-"1" preserves the canonical force (production
+  # unchanged). The elif keeps the bash↔node parity assertion matching
+  # (then → hub_port=27888 stays adjacent).
+  if [[ "${TFX_HUB_ALLOW_EPHEMERAL_PORT:-0}" == "1" ]]; then
+    : # honor URL-derived hub_port (no canonical force)
+  elif is_ephemeral_hub_context; then
     hub_port=27888
   fi
 
   echo "[tfx-route] Hub 미응답 — 자동 재시작 시도 (port=$hub_port)..." >&2
-  TFX_HUB_PORT="$hub_port" "$NODE_BIN" "$hub_server" &>/dev/null &
+  TFX_HUB_PORT="$hub_port" TFX_HUB_ALLOW_EPHEMERAL_PORT="${TFX_HUB_ALLOW_EPHEMERAL_PORT:-0}" "$NODE_BIN" "$hub_server" &>/dev/null &
   local hub_pid=$!
 
   # 최대 4초 대기 (0.5초 간격)

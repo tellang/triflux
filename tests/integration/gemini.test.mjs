@@ -23,6 +23,14 @@ const WORKER_SCRIPT = resolve(PROJECT_ROOT, "scripts", "tfx-route-worker.mjs");
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
+// Stub hub-ensure so full-route invocations never bind/spawn a hub on the
+// canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
+const HUB_ENSURE_STUB = resolve(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "no-op-hub-ensure.mjs",
+);
 
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
@@ -60,6 +68,7 @@ function runBash(command, extraEnv = {}) {
         TFX_TEAM_AGENT_NAME: "",
         TFX_TEAM_LEAD_NAME: "",
         TFX_HUB_URL: "",
+        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TMUX: "",
         TFX_CLI_MODE: "gemini",
         TFX_NO_CLAUDE_NATIVE: "0",

@@ -19,6 +19,14 @@ const FIXTURE_BIN = toBashPath(
 const FAKE_BRIDGE = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "fake-bridge.mjs"),
 );
+// Stub hub-ensure so the full-route invocations below never bind/spawn a hub on
+// the canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
+const HUB_ENSURE_STUB = resolve(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "no-op-hub-ensure.mjs",
+);
 
 // Isolate tfx-route's codex config-swap to a throwaway file so the full-route
 // invocations below never mutate the real ~/.codex/config.toml under concurrency.
@@ -38,6 +46,7 @@ function runBash(command, extraEnv = {}) {
       // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight 가 early-fail.
       // 라우팅/bridge 검증이 목적이므로 preflight 스킵.
       TFX_MCP_HEALTH_CHECK: "0",
+      TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
       ...extraEnv,
     },
   });
