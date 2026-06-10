@@ -339,11 +339,12 @@ Read 도구로 `~/.claude/cache/mcp-enabled.json` 읽기 시도.
 
 ##### 5-2: Core 서버 안내
 
-Core 서버(context7, serena)는 API 키 불필요, 자동 활성화됨을 표시:
+Core 서버(context7)는 API 키 불필요, 자동 활성화됨을 표시:
 ```
 ✅ context7 — 라이브러리 문서 조회 (API 키 불필요)
-✅ serena   — 시맨틱 코드 분석 (API 키 불필요)
 ```
+
+> serena는 2026-06-10 core에서 제거됨 (mcp-manifest.mjs `CORE_SERVERS = []`). 재도입하려면 CORE_SERVERS와 이 섹션을 함께 갱신한다.
 
 ##### 5-3: 검색 MCP 선택
 
@@ -407,7 +408,7 @@ node -e "
 {
   "version": 1,
   "updatedAt": "2026-03-31T...",
-  "enabled": ["context7", "serena", "brave-search", "exa"]
+  "enabled": ["context7", "brave-search", "exa"]
 }
 ```
 
@@ -419,7 +420,6 @@ node -e "
 | 서버 | 상태 | 비고 |
 |------|------|------|
 | context7 | ✅ 활성 | Core (항상 활성) |
-| serena | ✅ 활성 | Core (항상 활성) |
 | brave-search | ✅ 활성 | BRAVE_API_KEY ✅ |
 | exa | ⚠️ 활성 | EXA_API_KEY 미설정 — 키 추가 후 사용 가능 |
 | tavily | ⏭️ 건너뜀 | 사용자 선택 |
