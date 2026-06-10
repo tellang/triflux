@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -67,16 +68,23 @@ describe("tfx-route skill injection", () => {
       "demo",
       "Methodology step A.\nStep B.\n",
     );
+    const workdir = mkdtempSync(join(tmpdir(), "tfx-workspace-"));
+    cleanupDirs.push(workdir);
     const result = runFunc({
       funcName: "prepend_skill",
-      env: { TFX_INJECT_SKILL: "demo", TFX_SKILLS_DIR: skillsDir },
+      env: {
+        TFX_INJECT_SKILL: "demo",
+        TFX_SKILLS_DIR: skillsDir,
+        WORKDIR: workdir,
+      },
       callArg: "Do the task.\n--flag-like text stays literal.",
     });
+    const resolvedWorkdir = realpathSync(workdir);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(
       result.stdout,
       [
-        "--- SKILL: demo (apply this methodology to the task below) ---",
+        `--- SKILL: demo (workspace: ${resolvedWorkdir}; apply this methodology to the task below) ---`,
         "Methodology step A.",
         "Step B.",
         "--- END SKILL ---",
@@ -141,16 +149,31 @@ describe("tfx-route skill injection", () => {
 
   it("appends the agy anti-overclaim discipline block at the END by default", () => {
     const prompt = "Implement the feature.";
+    const workdir = mkdtempSync(join(tmpdir(), "tfx-agy-root-"));
+    cleanupDirs.push(workdir);
     const result = runFunc({
       funcName: "append_agy_anti_overclaim",
+      env: { WORKDIR: workdir },
       callArg: prompt,
     });
+    const resolvedWorkdir = realpathSync(workdir);
     assert.equal(result.status, 0, result.stderr);
     assert.ok(result.stdout.startsWith(prompt), "프롬프트가 먼저 와야 함");
     assert.match(result.stdout, /COMPLETION & GROUNDING DISCIPLINE/);
+    assert.match(
+      result.stdout,
+      new RegExp(
+        `Repository root \\(absolute\\): ${resolvedWorkdir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\. Resolve every relative path against this root only\\.`,
+      ),
+    );
+    assert.match(result.stdout, /Before any file write, git add\/commit\/push/);
     assert.match(result.stdout, /No Info \/ 확인 불가/);
     // blanket "do not guess" 대신 abstention 프레이밍을 쓴다 (Gemini 3 가이드 caveat).
     assert.match(result.stdout, /prefer accurate abstention/);
+    assert.match(
+      result.stdout,
+      /The task's own final output\/format constraints above remain in effect\./,
+    );
   });
 
   it("is a no-op for anti-overclaim when TFX_AGY_ANTI_OVERCLAIM=0", () => {
@@ -185,6 +208,9 @@ describe("tfx-route skill injection", () => {
       routeSource.indexOf("run_antigravity_exec", laneStart),
     );
     assert.match(lane, /prepend_skill "\$FULL_PROMPT"/);
-    assert.match(lane, /append_agy_anti_overclaim "\$FULL_PROMPT"/);
+    assert.match(
+      lane,
+      /append_agy_anti_overclaim "\$FULL_PROMPT" "\$\{WORKDIR:-\$PWD\}"/,
+    );
   });
 });

@@ -424,6 +424,10 @@ estimate_expected_duration_sec() {
 prepend_codex_north_star() {
   local prompt="${1:-}"
   local workdir="${WORKDIR:-$PWD}"
+  local resolved_workdir="$workdir"
+  if [[ -d "$workdir" ]]; then
+    resolved_workdir="$(cd "$workdir" 2>/dev/null && pwd -P)" || resolved_workdir="$workdir"
+  fi
   local brief_file="${workdir}/.triflux/lake/current.md"
 
   case "${TFX_CTO_NORTH_STAR:-1}" in
@@ -445,14 +449,14 @@ prepend_codex_north_star() {
   }
 
   if ! {
-    printf '%s\n' "--- CTO NORTH STAR (read-only context; align, do not treat as task) ---"
+    printf '%s\n' "--- CTO NORTH STAR (repo: ${resolved_workdir}; read-only context; align, do not treat as task) ---"
     cat "$brief_file"
     if [[ -s "$brief_file" ]]; then
       local last_byte
       last_byte="$(tail -c 1 "$brief_file" 2>/dev/null || true)"
       [[ -n "$last_byte" ]] && printf '\n'
     fi
-    printf '%s\n' "--- END CTO NORTH STAR ---"
+    printf '%s\n' "--- END CTO NORTH STAR (context only — the actual task follows below; do not execute items above as tasks) ---"
     printf '%s' "$prompt"
   } > "$tmp_file"; then
     rm -f "$tmp_file" 2>/dev/null || true
@@ -495,6 +499,12 @@ prepend_skill() {
     return 0
   fi
 
+  local workdir="${WORKDIR:-$PWD}"
+  local resolved_workdir="$workdir"
+  if [[ -d "$workdir" ]]; then
+    resolved_workdir="$(cd "$workdir" 2>/dev/null && pwd -P)" || resolved_workdir="$workdir"
+  fi
+
   local tmp_file
   tmp_file="$(mktemp "${TFX_TMP:-${TMPDIR:-/tmp}}/tfx-skill-prompt.XXXXXX" 2>/dev/null)" || {
     printf '%s' "$prompt"
@@ -502,7 +512,7 @@ prepend_skill() {
   }
 
   if ! {
-    printf '%s\n' "--- SKILL: ${skill_name} (apply this methodology to the task below) ---"
+    printf '%s\n' "--- SKILL: ${skill_name} (workspace: ${resolved_workdir}; apply this methodology to the task below) ---"
     cat "$skill_file"
     if [[ -s "$skill_file" ]]; then
       local last_byte
@@ -528,6 +538,11 @@ prepend_skill() {
 # 정확한 abstention 우선" 형태로 적는다 (open-ended negative 는 역효과). TFX_AGY_ANTI_OVERCLAIM=0 으로 opt-out.
 append_agy_anti_overclaim() {
   local prompt="${1:-}"
+  local repo_root="${2:-${WORKDIR:-$PWD}}"
+  local resolved_repo_root="$repo_root"
+  if [[ -d "$repo_root" ]]; then
+    resolved_repo_root="$(cd "$repo_root" 2>/dev/null && pwd -P)" || resolved_repo_root="$repo_root"
+  fi
   case "${TFX_AGY_ANTI_OVERCLAIM:-1}" in
     0|false|FALSE|off|OFF|no|NO)
       printf '%s' "$prompt"
@@ -537,9 +552,12 @@ append_agy_anti_overclaim() {
 
   printf '%s' "$prompt"
   printf '\n\n%s\n' "--- COMPLETION & GROUNDING DISCIPLINE (apply strictly) ---"
+  printf '%s\n' "Repository root (absolute): ${resolved_repo_root}. Resolve every relative path against this root only."
+  printf '%s\n' "Before any file write, git add/commit/push, verify \`git rev-parse --show-toplevel\` equals the repository root above; if it differs, stop and report the mismatch instead of proceeding."
   printf '%s\n' "- Claim done/fixed/passing ONLY after running the check in this turn and seeing its output. With no fresh evidence, report what is still unverified instead of asserting success."
   printf '%s\n' "- Ground every answer in the provided context and the actual repository. If something is not verifiable from what you can see, say 'No Info / 확인 불가' and stop rather than inventing plausible-but-unconfirmed details."
   printf '%s\n' "- Use the provided context for deductions and prefer accurate abstention over confident guessing."
+  printf '%s\n' "The task's own final output/format constraints above remain in effect."
   printf '%s' "--- END DISCIPLINE ---"
 }
 
@@ -2698,7 +2716,9 @@ FALLBACK_EOF
   fi
 
   local FULL_PROMPT="$PROMPT"
-  [[ -n "$MCP_HINT" ]] && FULL_PROMPT="${PROMPT}. ${MCP_HINT}"
+  if [[ -n "$MCP_HINT" ]]; then
+    FULL_PROMPT="${PROMPT}"$'\n\n'"[도구 안내] ${MCP_HINT}"
+  fi
   local codex_transport_effective="n/a"
 
   # 메타정보 (stderr)
@@ -2823,6 +2843,10 @@ FALLBACK_EOF
     _codex_config_swap "restore"
 
   elif [[ "$CLI_TYPE" == "gemini" ]]; then
+    # Codex degraded branch strips MCP_HINT; keep gemini parity when the marker is inherited.
+    if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
+      FULL_PROMPT="$PROMPT"
+    fi
     local gemini_model
     gemini_model=$(awk '{
       for (i = 1; i <= NF; i++) {
@@ -2887,6 +2911,10 @@ EOF
     fi
 
   elif [[ "$CLI_TYPE" == "antigravity" ]]; then
+    # Codex degraded branch strips MCP_HINT; keep agy parity when the marker is inherited.
+    if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
+      FULL_PROMPT="$PROMPT"
+    fi
     # CTO north-star: codex lane(line ~2670)과 동일하게 brief 를 prompt 앞에 주입.
     # prepend_codex_north_star 는 CLI-agnostic (TFX_CTO_NORTH_STAR opt-out +
     # .triflux/lake/current.md 만 참조) 하므로 agy 워커에서도 그대로 재사용한다.
@@ -2908,7 +2936,7 @@ EOF
     # agy(Gemini 3.x) anti-overclaim 규율 블록을 프롬프트 END 에 append. opt-out: TFX_AGY_ANTI_OVERCLAIM=0.
     local _agy_aoc_sentinel="__TFX_AGY_AOC_END_${$}_${RANDOM}__"
     local _agy_aoc_prompt
-    _agy_aoc_prompt="$(append_agy_anti_overclaim "$FULL_PROMPT"; printf '%s' "$_agy_aoc_sentinel")"
+    _agy_aoc_prompt="$(append_agy_anti_overclaim "$FULL_PROMPT" "${WORKDIR:-$PWD}"; printf '%s' "$_agy_aoc_sentinel")"
     FULL_PROMPT="${_agy_aoc_prompt%"$_agy_aoc_sentinel"}"
     run_antigravity_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
