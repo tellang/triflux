@@ -435,6 +435,11 @@ export function createSwarmHypervisor(opts) {
     });
   }
 
+  // Injectable git seam (#394). Defaults to the execFile closure above; tests
+  // override via `_deps.git` to drive the redundant-win commit-evidence gate
+  // deterministically without provisioning a real worktree.
+  const gitRun = _deps.git || git;
+
   function computeAuthoritativeStatus(shardName, workerEntry, sessions) {
     const failureInfo = failures.get(shardName) || null;
     if (failureInfo) {
@@ -508,7 +513,7 @@ export function createSwarmHypervisor(opts) {
     try {
       evidence.commitsAhead =
         Number.parseInt(
-          await git([
+          await gitRun([
             "rev-list",
             "--count",
             `${integrationBranch}..${branchName}`,
@@ -521,14 +526,17 @@ export function createSwarmHypervisor(opts) {
     }
 
     try {
-      evidence.headCommit = await git(["rev-parse", branchName]);
+      evidence.headCommit = await gitRun(["rev-parse", branchName]);
     } catch {
       /* best-effort */
     }
 
     if (worker?.worktreePath && !worker?.shardConfig?.host) {
       try {
-        const rawStatus = await git(["status", "--short"], worker.worktreePath);
+        const rawStatus = await gitRun(
+          ["status", "--short"],
+          worker.worktreePath,
+        );
         // Only explicitly expected lifecycle deletions are filtered. Plugin
         // metadata deletions remain dirty because Codex workers need them.
         evidence.dirtyFiles = extractDirtyFiles(
@@ -989,6 +997,18 @@ export function createSwarmHypervisor(opts) {
       }
     }
 
+    if (isRedundant) {
+      // #394: a redundant worker may only "win" (and SIGKILL the still-running
+      // primary) once it has produced real, integratable commits. The earlier
+      // F7 payload check trusts a self-report; agy/gemini redundant workers are
+      // known to signal completion with zero commits (and legacy workers emit
+      // no payload at all, bypassing F7). Gate the win on authoritative git
+      // evidence collected now — before any kill — so a phantom completion can
+      // never kill the worker that is doing the actual work.
+      void finalizeRedundantWin(shardName, sessionId, completedWorker);
+      return;
+    }
+
     if (completedWorker) {
       void closeNativeBridgeRegistration(
         completedWorker,
@@ -999,27 +1019,122 @@ export function createSwarmHypervisor(opts) {
 
     completedShards.add(shardName);
 
-    if (isRedundant) {
-      // Redundant worker completed first — kill primary if still running
-      const primary = workers.get(shardName);
-      const redundant = redundantWorkers.get(shardName);
-      if (redundant) {
-        workers.set(shardName, redundant);
-        redundantWorkers.delete(shardName);
-      }
-      if (primary && !isTerminal(primary)) {
-        eventLog.append("redundant_wins", { shard: shardName });
-        void primary.conductor.shutdown("redundant_completed_first");
-      }
-    } else {
-      // Primary completed — kill redundant if exists
-      const redundant = redundantWorkers.get(shardName);
-      if (redundant) {
-        void redundant.conductor.shutdown("primary_completed_first");
-      }
+    // Primary completed — kill redundant if exists
+    const redundant = redundantWorkers.get(shardName);
+    if (redundant) {
+      void redundant.conductor.shutdown("primary_completed_first");
     }
 
     emitter.emit("shardCompleted", { shardName, sessionId, isRedundant });
+    checkAllShardsCompleted();
+  }
+
+  /**
+   * Gate a redundant worker's completion on authoritative git commit evidence
+   * before it is allowed to win the shard and SIGKILL the primary (#394).
+   *
+   * A redundant worker with no commits ahead of the base branch is NOT a valid
+   * winner: it is rejected, the primary is left running, and the shard is not
+   * marked complete. Only a worker with `commitsAhead > 0` promotes itself and
+   * terminates the primary.
+   *
+   * @param {string} shardName
+   * @param {string} sessionId
+   * @param {object} redundantWorker — entry fetched before this async hop
+   */
+  async function finalizeRedundantWin(shardName, sessionId, redundantWorker) {
+    const redundant = redundantWorker || redundantWorkers.get(shardName);
+    if (!redundant) {
+      // The primary already completed/failed and cleared the redundant entry
+      // (primary_completed_first / primary_failed_f7). Nothing to promote.
+      checkAllShardsCompleted();
+      return;
+    }
+
+    // A redundant worker may win only while the shard is still undecided. This
+    // is checked TWICE — once up front (a cheap early-out before the git
+    // round-trip) and again AFTER the async evidence hop. The second check is
+    // the load-bearing one: the primary can complete/fail while
+    // collectCommitEvidence() is in flight, and without re-checking, a slow git
+    // probe would resume and flip an already-decided winner via
+    // `workers.set(shardName, redundant)` (#394 TOCTOU race).
+    const retireSupersededRedundant = (phase) => {
+      eventLog.append("redundant_win_superseded", {
+        shard: shardName,
+        sessionId,
+        phase,
+      });
+      redundantWorkers.delete(shardName);
+      void closeNativeBridgeRegistration(redundant, shardName, "failed");
+      checkAllShardsCompleted();
+    };
+
+    if (completedShards.has(shardName) || failures.has(shardName)) {
+      retireSupersededRedundant("before_evidence");
+      return;
+    }
+
+    let evidence;
+    try {
+      evidence = await collectCommitEvidence(redundant, baseBranch);
+    } catch (err) {
+      evidence = { commitsAhead: 0, dirty: false, error: err.message };
+    }
+
+    // Re-check after the await: the primary may have won while we waited.
+    if (completedShards.has(shardName) || failures.has(shardName)) {
+      retireSupersededRedundant("after_evidence");
+      return;
+    }
+
+    // A redundant worker may win only with CLEAN, integratable commits — the
+    // exact bar integration applies (collectCommitEvidence.ok =
+    // commitsAhead > 0 && !dirty). A weaker gate (commits-only) would promote a
+    // dirty-but-committed redundant, kill the primary, then fail integration on
+    // that same dirty evidence (F6) — losing the shard the primary could have
+    // delivered (#394 re-review). Reject anything integration would not accept.
+    if (!evidence?.ok) {
+      const reason = evidence?.error
+        ? "evidence_error"
+        : evidence?.dirty
+          ? "dirty_worktree"
+          : "no_commit";
+      eventLog.append("redundant_win_rejected", {
+        shard: shardName,
+        sessionId,
+        reason,
+        commitsAhead: evidence?.commitsAhead || 0,
+        dirty: Boolean(evidence?.dirty),
+        error: evidence?.error || null,
+      });
+      redundantWorkers.delete(shardName);
+      void closeNativeBridgeRegistration(redundant, shardName, "failed");
+      // Re-check in case the primary already reached a terminal state while we
+      // were collecting evidence.
+      checkAllShardsCompleted();
+      return;
+    }
+
+    // Clean, integratable commit evidence — promote the redundant worker and
+    // kill the primary if it is still running.
+    const primary = workers.get(shardName);
+    workers.set(shardName, redundant);
+    redundantWorkers.delete(shardName);
+    completedShards.add(shardName);
+    void closeNativeBridgeRegistration(redundant, shardName, "completed");
+    if (primary && !isTerminal(primary)) {
+      eventLog.append("redundant_wins", {
+        shard: shardName,
+        commitsAhead: evidence.commitsAhead,
+      });
+      void primary.conductor.shutdown("redundant_completed_first");
+    }
+
+    emitter.emit("shardCompleted", {
+      shardName,
+      sessionId,
+      isRedundant: true,
+    });
     checkAllShardsCompleted();
   }
 
@@ -1502,31 +1617,33 @@ export function createSwarmHypervisor(opts) {
       "before_worktree_cleanup",
     );
 
-    // Best-effort: preserve any uncommitted worker changes before removing
-    // the worktree. Silent on failure — must not block cleanup or mask the
-    // original failure reason.
-    if (failureReason) {
-      try {
-        const preservation = await preserveWorktreePatchImpl({
+    // Best-effort: preserve any uncommitted worker changes before removing the
+    // worktree, on BOTH the failure and success teardown paths (#394). A worker
+    // can exit 0 yet leave dirty, uncommitted work (the hub-observability case:
+    // exit 0, commits_made []), and the success cleanup carries no
+    // failureReason — without this it would silently delete that work.
+    // preserveWorktreePatchImpl self-skips when the worktree is clean, so a
+    // properly-committed shard saves nothing here.
+    try {
+      const preservation = await preserveWorktreePatchImpl({
+        worktreePath: worker.worktreePath,
+        shardId: shardName,
+        recoveryDir: join(workdir, ".codex-swarm", "recovery"),
+      });
+      if (preservation?.ok && !preservation.skipped) {
+        outcome.recoveryPatch = {
+          patchPath: preservation.patchPath,
+          manifestPath: preservation.manifestPath || null,
+        };
+        eventLog.append("recovery_patch_saved", {
+          shard: shardName,
           worktreePath: worker.worktreePath,
-          shardId: shardName,
-          recoveryDir: join(workdir, ".codex-swarm", "recovery"),
+          patchPath: preservation.patchPath,
+          reason: failureReason || "dirty_on_cleanup",
         });
-        if (preservation?.ok && !preservation.skipped) {
-          outcome.recoveryPatch = {
-            patchPath: preservation.patchPath,
-            manifestPath: preservation.manifestPath || null,
-          };
-          eventLog.append("recovery_patch_saved", {
-            shard: shardName,
-            worktreePath: worker.worktreePath,
-            patchPath: preservation.patchPath,
-            reason: failureReason,
-          });
-        }
-      } catch {
-        /* silent: preservation failures must not block cleanup */
       }
+    } catch {
+      /* silent: preservation failures must not block cleanup */
     }
 
     try {
