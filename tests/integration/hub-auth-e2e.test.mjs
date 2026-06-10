@@ -24,6 +24,15 @@ const ROUTE_SCRIPT = toBashPath(
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
+// Stub the route's hub-ensure: this suite starts its own hub on a random port
+// via startHub(), so the route spawn must not also bind/spawn a hub on the
+// canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
+const HUB_ENSURE_STUB = resolve(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "no-op-hub-ensure.mjs",
+);
 const HUB_SERVER_URL = pathToFileURL(
   resolve(PROJECT_ROOT, "hub", "server.mjs"),
 ).href;
@@ -259,6 +268,7 @@ function runRouteWithBridgeLogger({ homeDir, tokenEnv = "" }) {
         CODEX_BIN: "codex",
         FAKE_CODEX_MODE: "exec",
         TFX_CODEX_TRANSPORT: "exec",
+        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TFX_CLI_MODE: "auto",
         TFX_NO_CLAUDE_NATIVE: "0",
         TFX_WORKER_INDEX: "",

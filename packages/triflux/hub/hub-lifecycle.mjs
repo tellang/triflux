@@ -62,6 +62,10 @@ export function resolveHubPortForContext({
   const resolvedPort = envPort ?? urlPort ?? defaultPort;
   if (
     resolvedPort !== defaultPort &&
+    // Test-only opt-in seam: TFX_HUB_ALLOW_EPHEMERAL_PORT=1 lets an ephemeral
+    // context (worktree cwd / TFX_TEAM_* env) honor the resolved port instead
+    // of clamping to the canonical default. Default-off — production unchanged.
+    String(env?.TFX_HUB_ALLOW_EPHEMERAL_PORT ?? "") !== "1" &&
     isWorktreeOrEphemeralHubContext({ cwd, env })
   ) {
     return defaultPort;

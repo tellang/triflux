@@ -58,7 +58,7 @@ const CORE_FILE_MIRRORS = [
 // Whole directories under packages/core that must be byte-identical to root.
 // Mirror policy (§packages/core): hooks/hud are byte-identical cp mirrors.
 // See .claude/rules/tfx-mirror-policy.md and PR #377.
-const CORE_DIR_MIRRORS = ["hud"];
+const CORE_DIR_MIRRORS = ["hooks", "hud"];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 // Per-top relative paths to skip. Mirror policy excludes these via
 // packages/triflux/package.json "files" negation patterns (e.g.

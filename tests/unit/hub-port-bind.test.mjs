@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-
+import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
 import {
   cleanStaleHubPid,
   detectLivePeer,
@@ -31,6 +31,45 @@ afterEach(() => {
       rmSync(TEMP_DIRS.pop(), { recursive: true, force: true });
     } catch {}
   }
+});
+
+describe("resolveHubPortForContext — TFX_HUB_ALLOW_EPHEMERAL_PORT seam (v10.33.1 #4)", () => {
+  // Explicit worktree cwd so the assertion is deterministic regardless of where
+  // the runner's process.cwd() points (the suite itself can run from a
+  // worktree). Locks the opt-in seam's default-off contract on the core port
+  // resolver so a regression can't silently disable the canonical force.
+  const ephemeralCwd = "/repo/.claude/worktrees/agent-x";
+  const ephemeralEnv = { TFX_HUB_PORT: "28850", TFX_TEAM_TASK_ID: "t" };
+
+  it("default-off: ephemeral context still clamps to canonical 27888", () => {
+    assert.equal(
+      resolveHubPortForContext({ env: ephemeralEnv, cwd: ephemeralCwd }),
+      27888,
+    );
+  });
+
+  it("opt-in: TFX_HUB_ALLOW_EPHEMERAL_PORT=1 honors the resolved port", () => {
+    assert.equal(
+      resolveHubPortForContext({
+        env: { ...ephemeralEnv, TFX_HUB_ALLOW_EPHEMERAL_PORT: "1" },
+        cwd: ephemeralCwd,
+      }),
+      28850,
+    );
+  });
+
+  it('only literal "1" opts in ("0"/empty/other stay clamped)', () => {
+    for (const v of ["0", "", "true", "yes"]) {
+      assert.equal(
+        resolveHubPortForContext({
+          env: { ...ephemeralEnv, TFX_HUB_ALLOW_EPHEMERAL_PORT: v },
+          cwd: ephemeralCwd,
+        }),
+        27888,
+        `value ${JSON.stringify(v)} must not opt in`,
+      );
+    }
+  });
 });
 
 describe("hub port bind helpers", () => {
