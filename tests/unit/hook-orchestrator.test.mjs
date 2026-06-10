@@ -664,7 +664,10 @@ describe("hook-orchestrator UserPromptSubmit synapse heartbeat", () => {
 
     assert.equal(result.status, 0, result.stderr);
     const hb = received.find((r) => r.url === "/synapse/heartbeat");
-    assert.ok(hb, "expected a /synapse/heartbeat POST to reach the hub on Stop");
+    assert.ok(
+      hb,
+      "expected a /synapse/heartbeat POST to reach the hub on Stop",
+    );
     const parsed = JSON.parse(hb.body);
     assert.equal(parsed.sessionId, "sess-stop");
     assert.equal(parsed.partial.worktreePath, sandboxDir);
