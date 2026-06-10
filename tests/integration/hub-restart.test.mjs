@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
@@ -117,7 +118,7 @@ function runBashScript(script, env = {}, timeoutMs = 15000) {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
     timeout: timeoutMs,
-    env: { ...process.env, ...env },
+    env: hubServerTestEnv(env),
   });
 }
 
@@ -307,8 +308,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: {
-            ...process.env,
+          env: hubServerTestEnv({
             // Isolate hub state (pid file / token / cache) to the temp HOME so
             // the spawned isolated-port hub never writes the canonical
             // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
@@ -336,7 +336,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
             TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
-          },
+          }),
         },
       );
 
@@ -414,8 +414,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: {
-            ...process.env,
+          env: hubServerTestEnv({
             // Isolate hub state (pid file / token / cache) to the temp HOME so
             // the spawned isolated-port hub never writes the canonical
             // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
@@ -442,7 +441,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
             TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
-          },
+          }),
         },
       );
 
@@ -522,8 +521,7 @@ if (cmd === 'team-task-update') {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: {
-            ...process.env,
+          env: hubServerTestEnv({
             // Isolate hub state (pid file / token / cache) to the temp HOME so
             // the spawned isolated-port hub never writes the canonical
             // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
@@ -551,7 +549,7 @@ if (cmd === 'team-task-update') {
             TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
-          },
+          }),
         },
       );
 
@@ -638,8 +636,7 @@ if (cmd === 'team-task-update' && isClaim) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: {
-            ...process.env,
+          env: hubServerTestEnv({
             // Isolate hub state (pid file / token / cache) to the temp HOME so
             // the spawned isolated-port hub never writes the canonical
             // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
@@ -668,7 +665,7 @@ if (cmd === 'team-task-update' && isClaim) {
             TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
-          },
+          }),
         },
       );
 

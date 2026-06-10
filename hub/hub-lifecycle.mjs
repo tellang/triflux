@@ -15,15 +15,21 @@ const EPHEMERAL_ENV_KEYS = [
   "TFX_TEAM_AGENT_NAME",
   "TFX_EPHEMERAL",
 ];
+const WORKTREE_CWD_PATTERNS = [
+  /\/\.claude\/worktrees\//u,
+  /\/\.worktrees\//u,
+  /\/\.codex-swarm\/wt-[^/]+(?:\/|$)/u,
+  /(^|\/)wt-[^/]+(?:\/|$)/u,
+];
 
-function parsePositiveInt(value) {
+function parsePositivePort(value) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function parsePortFromUrl(value) {
+function parsePortFromHubUrl(value) {
   try {
-    return parsePositiveInt(new URL(String(value)).port);
+    return parsePositivePort(new URL(String(value)).port);
   } catch {
     return null;
   }
@@ -40,12 +46,7 @@ export function isWorktreeOrEphemeralHubContext({
   env = process.env,
 } = {}) {
   const normalizedCwd = String(cwd || "").replace(/\\/g, "/");
-  if (
-    normalizedCwd.includes("/.claude/worktrees/") ||
-    normalizedCwd.includes("/.worktrees/") ||
-    normalizedCwd.includes("/.codex-swarm/wt-") ||
-    /(^|\/)wt-[^/]+(?:\/|$)/u.test(normalizedCwd)
-  ) {
+  if (WORKTREE_CWD_PATTERNS.some((pattern) => pattern.test(normalizedCwd))) {
     return true;
   }
   return EPHEMERAL_ENV_KEYS.some((key) => String(env?.[key] || "").length > 0);
@@ -57,8 +58,9 @@ export function resolveHubPortForContext({
   cwd = process.cwd(),
   defaultPort = HUB_DEFAULT_PORT,
 } = {}) {
-  const envPort = parsePositiveInt(port) ?? parsePositiveInt(env?.TFX_HUB_PORT);
-  const urlPort = parsePortFromUrl(env?.TFX_HUB_URL);
+  const envPort =
+    parsePositivePort(port) ?? parsePositivePort(env?.TFX_HUB_PORT);
+  const urlPort = parsePortFromHubUrl(env?.TFX_HUB_URL);
   const resolvedPort = envPort ?? urlPort ?? defaultPort;
   if (
     resolvedPort !== defaultPort &&
@@ -185,7 +187,7 @@ export async function reapExistingHubProcesses({
     typeof readPidFileFn === "function"
       ? readPidFileFn()
       : { pid: readPidFilePid({ pidFilePath }) };
-  const pidFilePid = parsePositiveInt(pidFileInfo?.pid);
+  const pidFilePid = parsePositivePort(pidFileInfo?.pid);
   const defaultPortPids = [
     ...new Set(
       (typeof findListeningPidsForPortFn === "function"

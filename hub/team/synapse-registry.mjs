@@ -6,6 +6,7 @@ const DEFAULT_LOCAL_TIMEOUT_MS = 30_000;
 const DEFAULT_REMOTE_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_REMOTE_TIMEOUT_MS = 90_000;
 const DEFAULT_EXPIRE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_CLEAN_EXPIRE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 // Interactive (Claude/Codex) sessions idle for long stretches; a 30s local
 // timeout produces stale false-positives. 5-minute TTL + an `idle` state
 // distinguishes "alive but inactive" from "presumed dead".
@@ -21,6 +22,27 @@ function normalizeSessionId(sessionId) {
 
 function normalizeSessionKind(raw) {
   return VALID_SESSION_KINDS.has(raw) ? raw : "headless";
+}
+
+function normalizeDurationMs(raw, fallback) {
+  if (raw == null) return fallback;
+  const str = String(raw).trim();
+  if (!str) return fallback;
+  const parsed = Number(str);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function defaultCleanExpireTimeoutMs() {
+  return normalizeDurationMs(
+    process.env.TFX_SYNAPSE_CLEAN_EXPIRE_MS,
+    DEFAULT_CLEAN_EXPIRE_TIMEOUT_MS,
+  );
+}
+
+function hasDirtyFiles(session) {
+  return Array.isArray(session?.dirtyFiles)
+    ? session.dirtyFiles.some((file) => typeof file === "string" && file)
+    : false;
 }
 
 // A session is "live" while active OR idle. Idle is an interactive session that
@@ -135,6 +157,7 @@ export function createSynapseRegistry(opts = {}) {
     interactiveHeartbeatIntervalMs = DEFAULT_INTERACTIVE_HEARTBEAT_INTERVAL_MS,
     interactiveTimeoutMs = DEFAULT_INTERACTIVE_TIMEOUT_MS,
     expireTimeoutMs = DEFAULT_EXPIRE_TIMEOUT_MS,
+    cleanExpireTimeoutMs = defaultCleanExpireTimeoutMs(),
   } = opts;
 
   const sessions = new Map();
@@ -357,19 +380,23 @@ export function createSynapseRegistry(opts = {}) {
     return true;
   }
 
-  // stale/expired 세션이 expireTimeoutMs 넘게 누적되면 Map에서 제거.
+  // stale/expired 세션이 cutoff 넘게 누적되면 Map에서 제거.
   // live(active/idle)는 lastHeartbeat가 오래돼도 보존 — git-preflight dirty-file 가드가 의존.
+  // Dirty stale rows keep the historical 24h window because same-id resume
+  // revives their dirty-file guard; clean stale rows expire quickly to avoid
+  // daily dummy rows after overnight operator gaps.
   function pruneExpired(opts2 = {}) {
     if (destroyed) return { removed: [], count: 0 };
 
-    const cutoff =
-      typeof opts2.olderThanMs === "number"
-        ? opts2.olderThanMs
-        : expireTimeoutMs;
+    const explicitCutoff =
+      typeof opts2.olderThanMs === "number" ? opts2.olderThanMs : null;
     const removed = [];
     const currentTime = now();
 
     for (const [sessionId, session] of sessions) {
+      const cutoff =
+        explicitCutoff ??
+        (hasDirtyFiles(session) ? expireTimeoutMs : cleanExpireTimeoutMs);
       if (
         isLiveStatus(session.status) ||
         currentTime - session.lastHeartbeat <= cutoff

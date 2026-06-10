@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
@@ -37,8 +38,7 @@ function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
-    env: {
-      ...process.env,
+    env: hubServerTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       TFX_CODEX_CONFIG: isolatedCodex.path,
       TFX_CODEX_TRANSPORT: "exec",
@@ -48,7 +48,7 @@ function runBash(command, extraEnv = {}) {
       TFX_MCP_HEALTH_CHECK: "0",
       TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
       ...extraEnv,
-    },
+    }),
   });
 }
 
