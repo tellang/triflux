@@ -35,6 +35,7 @@ const HUB_ENSURE_STUB = resolve(
   "fixtures",
   "no-op-hub-ensure.mjs",
 );
+const RUN_BASH_TIMEOUT_MS = 60_000;
 
 function createRouteHome() {
   const home = mkdtempSync(join(tmpdir(), "tfx-route-home-"));
@@ -72,7 +73,7 @@ function runBash(command, extraEnv = {}) {
     // Per-call timeout: a slow or hung command must not block the synchronous
     // spawnSync and hang the entire suite (a describe/test-level timeout cannot
     // interrupt a sync call). Codex-transport fixtures take ~10s; 60s headroom.
-    timeout: 60_000,
+    timeout: RUN_BASH_TIMEOUT_MS,
     killSignal: "SIGKILL",
     env: {
       ...process.env,

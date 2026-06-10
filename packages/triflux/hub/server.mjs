@@ -2461,6 +2461,7 @@ export async function startHub({
                   hubLog.warn(
                     {
                       failed: failed.length,
+                      failedCount: failed.length,
                       processes: failed,
                       caller: "startup",
                     },
