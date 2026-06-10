@@ -133,16 +133,22 @@ function escapeTomlKey(key) {
   return `"${String(key).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function stateLine(key, hash) {
-  return `${escapeTomlKey(key)} = { trusted_hash = "${hash}" }`;
+// codex CLI 0.137+ 는 hooks.state 를 table-header 형식
+// ([hooks.state."<key>"] + trusted_hash = "...") 으로 직렬화한다. 과거
+// 이 설치기는 inline dotted-key 형식("<key>" = { trusted_hash = ... }) 으로
+// 기록했는데, codex 가 같은 키를 table 형식으로 재기록한 config 에 inline 을
+// 다시 append 하면 TOML duplicate key 가 되어 codex 전 호출이 즉사한다
+// (2026-06-10 실측, issue #394 배경). 기록은 codex canonical 인 table-header
+// 형식만 사용하고, strip 은 양 형식 모두 인식한다.
+function stateBlock(key, hash) {
+  return `[hooks.state.${escapeTomlKey(key)}]\ntrusted_hash = "${hash}"`;
 }
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function stripManagedStateLines(content, managedKeys, hooksPath) {
-  if (!content) return "";
+function managedKeyPatterns(managedKeys, hooksPath) {
   const escapedKeys = [...managedKeys].map((key) =>
     escapeRegExp(escapeTomlKey(key)),
   );
@@ -154,37 +160,75 @@ function stripManagedStateLines(content, managedKeys, hooksPath) {
       ),
     );
   }
-  const re = new RegExp(
+  return escapedKeys;
+}
+
+function stripManagedStateLines(content, managedKeys, hooksPath) {
+  if (!content) return "";
+  const escapedKeys = managedKeyPatterns(managedKeys, hooksPath);
+  const inlineRe = new RegExp(
     `^\\s*(?:${escapedKeys.join("|")})\\s*=\\s*\\{\\s*trusted_hash\\s*=.*\\}\\s*$`,
     "gm",
   );
-  return content.replace(re, "").replace(/\n{3,}/g, "\n\n");
+  const tableRe = new RegExp(
+    `^\\[hooks\\.state\\.(?:${escapedKeys.join("|")})\\]\\s*\\n(?:[ \\t]*trusted_hash[^\\n]*\\n?)*`,
+    "gm",
+  );
+  return content
+    .replace(inlineRe, "")
+    .replace(tableRe, "")
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+// 관리 키의 현재 상태를 양 형식 모두에서 수집한다. 멱등 판정용:
+// 모든 entry 가 정확히 1회 존재하고 hash 가 일치하면 재기록하지 않는다.
+function collectManagedState(content, managedKeys, hooksPath) {
+  if (!content) return [];
+  const escapedKeys = managedKeyPatterns(managedKeys, hooksPath);
+  const found = [];
+  const inlineRe = new RegExp(
+    `^\\s*(${escapedKeys.join("|")})\\s*=\\s*\\{\\s*trusted_hash\\s*=\\s*"([^"]+)"`,
+    "gm",
+  );
+  const tableRe = new RegExp(
+    `^\\[hooks\\.state\\.(${escapedKeys.join("|")})\\]\\s*\\n[ \\t]*trusted_hash\\s*=\\s*"([^"]+)"`,
+    "gm",
+  );
+  for (const re of [inlineRe, tableRe]) {
+    let m = re.exec(content);
+    while (m) {
+      found.push({ key: m[1].replace(/^"|"$/g, ""), hash: m[2] });
+      m = re.exec(content);
+    }
+  }
+  return found;
+}
+
+function hooksStateConverged(content, entries, hooksPath) {
+  const managedKeys = new Set(entries.map((entry) => entry.key));
+  const found = collectManagedState(content, managedKeys, hooksPath);
+  return entries.every((entry) => {
+    const matches = found.filter((f) => f.key === entry.key);
+    return matches.length === 1 && matches[0].hash === entry.hash;
+  });
 }
 
 function mergeHooksState(content, entries, hooksPath) {
   const managedKeys = new Set(entries.map((entry) => entry.key));
-  let updated = stripManagedStateLines(content, managedKeys, hooksPath);
-  const lines = entries.map((entry) => stateLine(entry.key, entry.hash));
-  const sectionRe = /^\[hooks\.state\]\s*$/m;
-  const match = sectionRe.exec(updated);
-
-  if (!match) {
-    if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
-    if (updated.length > 0 && !updated.endsWith("\n\n")) updated += "\n";
-    return `${updated}[hooks.state]\n${lines.join("\n")}\n`;
+  // 이미 수렴 상태(각 키 정확히 1회 + hash 일치, 형식 무관)면 무변경.
+  // SessionStart 마다 호출되므로 이 조기 종료가 없으면 config 를 매 세션
+  // 재기록하게 된다.
+  if (hooksStateConverged(content, entries, hooksPath)) {
+    return content;
   }
-
-  const sectionStart = match.index;
-  const afterHeader = match.index + match[0].length;
-  const nextSectionMatch = /^\[[^\]]+\]\s*$/m.exec(updated.slice(afterHeader));
-  const sectionEnd = nextSectionMatch
-    ? afterHeader + nextSectionMatch.index
-    : updated.length;
-  let sectionBody = updated.slice(sectionStart, sectionEnd).trimEnd();
-  sectionBody += `\n${lines.join("\n")}\n`;
-  return (
-    updated.slice(0, sectionStart) + sectionBody + updated.slice(sectionEnd)
-  );
+  let updated = stripManagedStateLines(content, managedKeys, hooksPath);
+  const blocks = entries.map((entry) => stateBlock(entry.key, entry.hash));
+  // table-header 서브테이블은 TOML 상 부모 [hooks.state] 재선언이 아니므로
+  // 파일 끝 append 가 항상 유효하다. 빈 [hooks.state] 헤더가 남아 있어도
+  // (서브테이블 선언과 공존 가능) 무해해서 건드리지 않는다.
+  if (updated.length > 0 && !updated.endsWith("\n")) updated += "\n";
+  if (updated.length > 0 && !updated.endsWith("\n\n")) updated += "\n";
+  return `${updated}${blocks.join("\n\n")}\n`;
 }
 
 function timestamp() {
