@@ -19,7 +19,17 @@ export function resolveClaudeConfigDir(env = process.env) {
   return path.join(resolveClaudeHomeDir(env), ".claude");
 }
 
-export function resolveClaudeHomeDir(env = process.env) {
+export function resolveClaudeHomeDir(
+  env = process.env,
+  platform = process.platform,
+) {
+  // win32: claude daemon launcher 의 os.homedir() 는 USERPROFILE 기반이므로
+  // USERPROFILE 우선이어야 socket hash 가 daemon 과 일치한다. POSIX 는 HOME
+  // 우선 — sandbox HOME 오버라이드를 추적하는 provenance 해석(#382)과 일치.
+  if (platform === "win32") {
+    const userProfile = nullableEnv(env.USERPROFILE);
+    if (userProfile) return path.resolve(userProfile);
+  }
   const home = nullableEnv(env.HOME);
   return home ? path.resolve(home) : os.homedir();
 }

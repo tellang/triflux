@@ -11,8 +11,13 @@ import {
   detectCallerProvenance,
   findDaemonJobBySessionId,
   readOmcLaunchProfile,
+  resolveClaudeConfigDir,
+  resolveClaudeHomeDir,
 } from "../../hub/team/claude-daemon-control.mjs";
-import { deriveClaudeDaemonPaths as deriveFromBridge } from "../../hub/team/claude-native-bridge.mjs";
+import {
+  deriveClaudeDaemonPaths as deriveFromBridge,
+  resolveClaudeConfigDir as resolveConfigDirFromBridge,
+} from "../../hub/team/claude-native-bridge.mjs";
 
 // daemon-control 이 단일 owner 이고 native-bridge 는 그것을 re-export 한다.
 test("deriveClaudeDaemonPaths returns the superset incl rendezvousDir+ptyDir+hash", () => {
@@ -45,6 +50,40 @@ test("deriveClaudeDaemonPaths returns the superset incl rendezvousDir+ptyDir+has
 
 test("native-bridge re-exports the canonical deriveClaudeDaemonPaths (same implementation)", () => {
   assert.equal(deriveFromBridge, deriveFromControl);
+});
+
+// configDir 해석이 모듈마다 갈리면 control.sock hash split-brain 이 생긴다
+// (probe 는 daemon-control, dispatch/roster 는 native-bridge). 단일 owner 강제.
+test("native-bridge re-exports the canonical resolveClaudeConfigDir (same implementation)", () => {
+  assert.equal(resolveConfigDirFromBridge, resolveClaudeConfigDir);
+});
+
+test("resolveClaudeHomeDir prefers HOME on POSIX and falls back to os.homedir()", () => {
+  assert.equal(
+    resolveClaudeHomeDir({ HOME: "/posix/home" }, "darwin"),
+    path.resolve("/posix/home"),
+  );
+  assert.equal(
+    resolveClaudeHomeDir({ HOME: "/posix/home" }, "linux"),
+    path.resolve("/posix/home"),
+  );
+  // 빈 HOME 은 미설정과 동일하게 취급
+  assert.equal(resolveClaudeHomeDir({ HOME: "  " }, "darwin"), os.homedir());
+});
+
+test("resolveClaudeHomeDir prefers USERPROFILE over divergent HOME on win32", () => {
+  // win32 daemon launcher 의 os.homedir() 는 USERPROFILE 기반 — git-bash 가
+  // HOME 을 따로 잡아도 socket hash 는 daemon 쪽(USERPROFILE)과 일치해야 한다.
+  const env = { HOME: "/c/Users/x", USERPROFILE: "/win/profile" };
+  assert.equal(
+    resolveClaudeHomeDir(env, "win32"),
+    path.resolve("/win/profile"),
+  );
+  // USERPROFILE 미설정이면 HOME 으로 폴백
+  assert.equal(
+    resolveClaudeHomeDir({ HOME: "/c/Users/x" }, "win32"),
+    path.resolve("/c/Users/x"),
+  );
 });
 
 test("parity: derived field set covers what both former callsites needed", () => {
