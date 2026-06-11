@@ -269,6 +269,9 @@ function normalizeAntigravityCredential(parsed) {
 }
 
 function getAntigravityTokenFromKeychain() {
+  // macOS Keychain only; the `security` binary does not exist elsewhere, so
+  // skip the doomed spawn on Linux/Windows (file-token fallback still applies).
+  if (process.platform !== "darwin") return null;
   try {
     const result = spawnSync(
       "security",
