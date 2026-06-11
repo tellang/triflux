@@ -19,9 +19,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
+import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..", "..");
@@ -32,8 +34,35 @@ const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
 
+// Isolate tfx-route's codex config-swap so the full-route invocations below
+// never mutate the real ~/.codex/config.toml under concurrency.
+const isolatedCodex = makeIsolatedCodexConfig();
+after(() => isolatedCodex.cleanup());
+
 function output(result) {
   return `${result.stdout || ""}\n${result.stderr || ""}`;
+}
+
+// Kill the hub the route spawned on an ISOLATED test port so the re-enabled
+// restart cases don't leak a listener (non-canonical hubs self-exit on idle
+// TTL, but kill immediately for clean reruns). Two ownership guards so cleanup
+// can never target the live dev hub OR an unrelated local listener that happens
+// to be on the random test port: (1) never 27888, (2) only kill a process whose
+// command is our own hub/server.mjs.
+function killHubOnPort(port) {
+  if (!port || Number(port) === 27888) return;
+  const r = spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+    encoding: "utf8",
+  });
+  for (const pid of (r.stdout || "").split(/\s+/).filter(Boolean)) {
+    const ps = spawnSync("ps", ["-p", pid, "-o", "command="], {
+      encoding: "utf8",
+    });
+    if (!/hub[/\\]server\.mjs/.test(ps.stdout || "")) continue;
+    try {
+      process.kill(Number(pid), "SIGKILL");
+    } catch {}
+  }
 }
 
 // try_restart_hub() 함수를 단독 테스트하기 위한 bash 래퍼 생성
@@ -89,7 +118,7 @@ function runBashScript(script, env = {}, timeoutMs = 15000) {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
     timeout: timeoutMs,
-    env: { ...process.env, ...env },
+    env: hubServerTestEnv(env),
   });
 }
 
@@ -216,6 +245,10 @@ describe("try_restart_hub() — TFX_HUB_URL 포트 추출", () => {
 // try_restart_hub()는 실제 hub/server.mjs를 시작하므로 Hub가 실제 기동됨
 
 describe("team_claim_task() — Hub 미응답 시 try_restart_hub() 복구 경로", () => {
+  // Re-enabled (v10.33.1 follow-up #4) via the TFX_HUB_ALLOW_EPHEMERAL_PORT
+  // opt-in seam — the route binds the isolated testPort instead of forced
+  // canonical 27888, so the team_claim_task restart-recovery path runs without
+  // thrashing the live hub. The finally block kills the spawned isolated-port hub.
   it("bridge_cli가 빈 응답을 반환하면 Hub 자동 재시작 시도 메시지를 출력해야 한다", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "tfx-hub-claim-retry-"));
     const logPath = join(tempDir, "bridge.log");
@@ -262,9 +295,9 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
     );
     chmodSync(customBridge, 0o755);
 
+    // 임의 포트 사용 — 실제 Hub가 해당 포트에서 시작됨
+    const testPort = 28800 + Math.floor(Math.random() * 100);
     try {
-      // 임의 포트 사용 — 실제 Hub가 해당 포트에서 시작됨
-      const testPort = 28800 + Math.floor(Math.random() * 100);
       const result = spawnSync(
         BASH_EXE,
         [
@@ -275,11 +308,17 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: {
-            ...process.env,
+          env: hubServerTestEnv({
+            // Isolate hub state (pid file / token / cache) to the temp HOME so
+            // the spawned isolated-port hub never writes the canonical
+            // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
+            HOME: tempDir,
+            USERPROFILE: tempDir,
             PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+            TFX_CODEX_CONFIG: isolatedCodex.path,
             FAKE_CODEX_MODE: "exec",
             TFX_CODEX_TRANSPORT: "exec",
+            TFX_CTO_NORTH_STAR: "0",
             TFX_TEAM_NAME: "hub-restart-team",
             TFX_TEAM_TASK_ID: "task-restart-001",
             TFX_TEAM_AGENT_NAME: "executor-restart-test",
@@ -288,13 +327,16 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
             FAKE_BRIDGE_LOG: logPath,
             BRIDGE_CALL_COUNT_FILE: callCountFile,
             TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
+            // Opt into the isolated-port seam so try_restart_hub binds testPort
+            // (not forced 27888) — keeps the live dev hub untouched.
+            TFX_HUB_ALLOW_EPHEMERAL_PORT: "1",
             TFX_CLI_MODE: "auto",
             TFX_NO_CLAUDE_NATIVE: "0",
             // #148: real MCP probe 가 fixture 환경에서 dead 로 나와 exit 78 trigger
             TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
-          },
+          }),
         },
       );
 
@@ -318,10 +360,15 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
         `claim 호출이 최소 1번이어야 함: ${JSON.stringify(claimCalls)}`,
       );
     } finally {
+      killHubOnPort(testPort);
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
+  // Re-enabled (v10.33.1 follow-up #4) via the TFX_HUB_ALLOW_EPHEMERAL_PORT seam.
+  // Even when the restart succeeds on the isolated testPort, the fail-bridge
+  // keeps the post-restart claim failing, so the "claim 없이 계속 실행" continue
+  // path still fires — covering restart-recovery without thrashing the live hub.
   it("Hub 재시작 실패 시에도 실행을 계속해야 한다", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "tfx-hub-claim-nohub-"));
     const logPath = join(tempDir, "bridge.log");
@@ -357,9 +404,9 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
     );
     chmodSync(failBridge, 0o755);
 
+    // 실제 Hub가 시작될 수 있는 포트 사용
+    const testPort = 28900 + Math.floor(Math.random() * 100);
     try {
-      // 실제 Hub가 시작될 수 있는 포트 사용
-      const testPort = 28900 + Math.floor(Math.random() * 100);
       const result = spawnSync(
         BASH_EXE,
         ["-c", `bash "${ROUTE_SCRIPT}" executor 'hub-fail-test' minimal 5`],
@@ -367,11 +414,17 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: {
-            ...process.env,
+          env: hubServerTestEnv({
+            // Isolate hub state (pid file / token / cache) to the temp HOME so
+            // the spawned isolated-port hub never writes the canonical
+            // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
+            HOME: tempDir,
+            USERPROFILE: tempDir,
             PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+            TFX_CODEX_CONFIG: isolatedCodex.path,
             FAKE_CODEX_MODE: "exec",
             TFX_CODEX_TRANSPORT: "exec",
+            TFX_CTO_NORTH_STAR: "0",
             TFX_TEAM_NAME: "hub-fail-team",
             TFX_TEAM_TASK_ID: "task-fail-001",
             TFX_TEAM_AGENT_NAME: "executor-fail-test",
@@ -379,13 +432,16 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
             TFX_BRIDGE_SCRIPT: failBridge,
             FAKE_BRIDGE_LOG: logPath,
             TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
+            // Opt into the isolated-port seam so try_restart_hub binds testPort
+            // (not forced 27888) — keeps the live dev hub untouched.
+            TFX_HUB_ALLOW_EPHEMERAL_PORT: "1",
             TFX_CLI_MODE: "auto",
             TFX_NO_CLAUDE_NATIVE: "0",
             // #148: real MCP probe 가 fixture 환경에서 dead 로 나와 exit 78 trigger
             TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
-          },
+          }),
         },
       );
 
@@ -397,12 +453,19 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
       // 전체 실행은 성공적으로 완료 (codex exec 경로 진행)
       assert.equal(result.status, 0, output(result));
     } finally {
+      killHubOnPort(testPort);
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
 });
 
 describe("team_send_message() / team_complete_task() — Hub 미응답 시 재시도 복구", () => {
+  // Re-enabled (v10.33.1 follow-up #4) via the TFX_HUB_ALLOW_EPHEMERAL_PORT
+  // opt-in seam (tfx-route.sh try_restart_hub + hub-lifecycle.mjs
+  // resolveHubPortForContext). With the seam the route binds the isolated
+  // testPort instead of the forced canonical 27888, so this exercises the real
+  // bridge_cli_with_restart → try_restart_hub → retry path WITHOUT thrashing the
+  // live hub. The finally block kills the spawned isolated-port hub.
   it("시작 메시지 전송 실패 시 Hub 재시작 후 team_send_message를 재시도해야 한다", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "tfx-hub-message-retry-"));
     const logPath = join(tempDir, "bridge.log");
@@ -446,8 +509,8 @@ if (cmd === 'team-task-update') {
     );
     chmodSync(customBridge, 0o755);
 
+    const testPort = 29000 + Math.floor(Math.random() * 100);
     try {
-      const testPort = 29000 + Math.floor(Math.random() * 100);
       const result = spawnSync(
         BASH_EXE,
         [
@@ -458,11 +521,17 @@ if (cmd === 'team-task-update') {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: {
-            ...process.env,
+          env: hubServerTestEnv({
+            // Isolate hub state (pid file / token / cache) to the temp HOME so
+            // the spawned isolated-port hub never writes the canonical
+            // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
+            HOME: tempDir,
+            USERPROFILE: tempDir,
             PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+            TFX_CODEX_CONFIG: isolatedCodex.path,
             FAKE_CODEX_MODE: "exec",
             TFX_CODEX_TRANSPORT: "exec",
+            TFX_CTO_NORTH_STAR: "0",
             TFX_TEAM_NAME: "hub-message-team",
             TFX_TEAM_TASK_ID: "task-message-001",
             TFX_TEAM_AGENT_NAME: "executor-message-test",
@@ -471,13 +540,16 @@ if (cmd === 'team-task-update') {
             FAKE_BRIDGE_LOG: logPath,
             MESSAGE_CALL_COUNT_FILE: callCountFile,
             TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
+            // Opt into the isolated-port seam so try_restart_hub binds testPort
+            // (not forced 27888) — keeps the live dev hub untouched.
+            TFX_HUB_ALLOW_EPHEMERAL_PORT: "1",
             TFX_CLI_MODE: "auto",
             TFX_NO_CLAUDE_NATIVE: "0",
             // #148: real MCP probe 가 fixture 환경에서 dead 로 나와 exit 78 trigger
             TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
-          },
+          }),
         },
       );
 
@@ -498,10 +570,15 @@ if (cmd === 'team-task-update') {
         `team-send-message 재시도가 기록되어야 함: ${JSON.stringify(messageCalls)}`,
       );
     } finally {
+      killHubOnPort(testPort);
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
+  // Re-enabled (v10.33.1 follow-up #4) via the same TFX_HUB_ALLOW_EPHEMERAL_PORT
+  // opt-in seam — the route binds the isolated testPort, exercising the real
+  // result-publish restart/retry path without thrashing the live hub. The
+  // finally block kills the spawned isolated-port hub.
   it("result 발행 실패 시 Hub 재시작 후 재시도하고 완료는 backup 파일로 남겨야 한다", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "tfx-hub-complete-retry-"));
     const logPath = join(tempDir, "bridge.log");
@@ -547,8 +624,8 @@ if (cmd === 'team-task-update' && isClaim) {
     );
     chmodSync(customBridge, 0o755);
 
+    const testPort = 29100 + Math.floor(Math.random() * 100);
     try {
-      const testPort = 29100 + Math.floor(Math.random() * 100);
       const result = spawnSync(
         BASH_EXE,
         [
@@ -559,11 +636,17 @@ if (cmd === 'team-task-update' && isClaim) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: {
-            ...process.env,
+          env: hubServerTestEnv({
+            // Isolate hub state (pid file / token / cache) to the temp HOME so
+            // the spawned isolated-port hub never writes the canonical
+            // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
+            HOME: tempDir,
+            USERPROFILE: tempDir,
             PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+            TFX_CODEX_CONFIG: isolatedCodex.path,
             FAKE_CODEX_MODE: "exec",
             TFX_CODEX_TRANSPORT: "exec",
+            TFX_CTO_NORTH_STAR: "0",
             TFX_TEAM_NAME: "hub-complete-team",
             TFX_TEAM_TASK_ID: "task-complete-001",
             TFX_TEAM_AGENT_NAME: "executor-complete-test",
@@ -573,13 +656,16 @@ if (cmd === 'team-task-update' && isClaim) {
             COMPLETE_RESULT_COUNT_FILE: resultCountFile,
             TFX_RESULT_DIR: resultDir,
             TFX_HUB_URL: `http://127.0.0.1:${testPort}`,
+            // Opt into the isolated-port seam so try_restart_hub binds testPort
+            // (not forced 27888) — keeps the live dev hub untouched.
+            TFX_HUB_ALLOW_EPHEMERAL_PORT: "1",
             TFX_CLI_MODE: "auto",
             TFX_NO_CLAUDE_NATIVE: "0",
             // #148: real MCP probe 가 fixture 환경에서 dead 로 나와 exit 78 trigger
             TFX_MCP_HEALTH_CHECK: "0",
             TFX_WORKER_INDEX: "",
             TFX_SEARCH_TOOL: "",
-          },
+          }),
         },
       );
 
@@ -611,6 +697,7 @@ if (cmd === 'team-task-update' && isClaim) {
       assert.equal(backup.result, "success");
       assert.match(backup.summary, /^EXEC:hub-complete-retry-test/);
     } finally {
+      killHubOnPort(testPort);
       rmSync(tempDir, { recursive: true, force: true });
     }
   });

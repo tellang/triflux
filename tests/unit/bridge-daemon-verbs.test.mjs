@@ -259,14 +259,62 @@ test("daemon-probe lists fake daemon sessions and resolves target by short", asy
       assert.equal(out.ok, true);
       assert.equal(out.controlSock, paths.controlSock);
       assert.deepEqual(out.sessions, [
-        { short: "abcd1234", sessionId: "sess-1", state: "ready" },
+        {
+          short: "abcd1234",
+          id: "abcd1234",
+          sessionId: "sess-1",
+          session_id: "sess-1",
+          state: "ready",
+          status: "ready",
+        },
       ]);
       assert.deepEqual(out.target, {
         short: "abcd1234",
+        id: "abcd1234",
         sessionId: "sess-1",
+        session_id: "sess-1",
         state: "ready",
+        status: "ready",
       });
       assert.deepEqual(fake.requests, [{ proto: 1, op: "list" }]);
+    } finally {
+      await new Promise((resolve) => fake.server.close(resolve));
+    }
+  });
+});
+
+test("daemon-probe normalizes Claude agent-view state/status row variants", async () => {
+  await withTempConfig(async (configDir) => {
+    const paths = deriveClaudeDaemonPaths({ configDir });
+    const fake = await listenFakeDaemon(paths.controlSock, {
+      jobs: [
+        {
+          id: "beadfeed",
+          cwd: "/tmp/repo",
+          kind: "bg",
+          sessionId: "session-beadfeed",
+          state: "blocked",
+          waitingFor: "permission prompt",
+        },
+      ],
+    });
+    try {
+      const payload = {
+        configDir,
+        sessionId: "session-beadfeed",
+        timeoutMs: 1000,
+      };
+      const out = await runBridge([
+        "daemon-probe",
+        "--payload",
+        JSON.stringify(payload),
+      ]);
+      assert.equal(out.ok, true);
+      assert.equal(out.sessions[0].short, "beadfeed");
+      assert.equal(out.sessions[0].state, "blocked");
+      assert.equal(out.sessions[0].status, "blocked");
+      assert.equal(out.target.short, "beadfeed");
+      assert.equal(out.target.waitingFor, "permission prompt");
     } finally {
       await new Promise((resolve) => fake.server.close(resolve));
     }
@@ -419,7 +467,16 @@ test("daemon-probe discovers an OMC runtime daemon in ambient OMX caller env", a
       assert.equal(out.daemon.configDirSource, "omc-runtime");
       assert.equal(out.daemon.claudeLauncher, "omc");
       assert.equal(out.callerProvenance.codexLauncher, "omx");
-      assert.deepEqual(out.sessions, jobs);
+      assert.deepEqual(out.sessions, [
+        {
+          short: "omc12345",
+          id: "omc12345",
+          sessionId: "omc-session",
+          session_id: "omc-session",
+          state: "unknown",
+          status: "unknown",
+        },
+      ]);
       assert.equal(Object.hasOwn(out.sessions[0], "daemon"), false);
       assert.deepEqual(
         out.candidateResults.map((candidate) => ({

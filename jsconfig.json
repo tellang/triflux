@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ESNext",
+    "noEmit": true
+  },
+  "include": ["hub/**/*.mjs", "scripts/**/*.mjs", "tests/**/*.mjs"],
+  "exclude": ["node_modules", ".worktrees", ".claude", "packages", "experiments"]
+}

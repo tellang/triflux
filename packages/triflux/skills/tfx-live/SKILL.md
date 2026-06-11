@@ -3,10 +3,6 @@ name: tfx-live
 description: >
   Use when Claude, Codex, or a Triflux worker needs live Claude↔Codex orchestration:
   start/ask/stop, multi-turn, peer relay, daemon UDS attach, or UDS-first with tmux fallback.
-triggers:
-  - tfx-live
-  - claude-codex-live
-  - codex-claude-live
 argument-hint: "<start|ask|stop|probe|peer|converse|goal-driven> ..."
 ---
 

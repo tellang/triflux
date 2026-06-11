@@ -135,6 +135,135 @@ describe("synapse-registry", () => {
     reg.destroy();
   });
 
+  it("pruneExpired removes long-stale sessions but keeps live ones", async () => {
+    const reg = createSynapseRegistry({
+      persistPath,
+      localHeartbeatIntervalMs: 5,
+      localTimeoutMs: 15,
+      expireTimeoutMs: 30,
+      cleanExpireTimeoutMs: 30,
+    });
+
+    const removedSessions = [];
+    reg.onRemoved((session) => {
+      removedSessions.push(session.sessionId);
+    });
+
+    reg.register(baseMeta({ sessionId: "headless-stale" }));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(reg.getSession("headless-stale").status, "stale");
+
+    reg.register(
+      baseMeta({
+        sessionId: "interactive-live",
+        sessionKind: "interactive",
+      }),
+    );
+
+    const result = reg.pruneExpired();
+    assert.deepEqual(result.removed, ["headless-stale"]);
+    assert.equal(result.count, 1);
+    assert.equal(reg.getSession("headless-stale"), null);
+    assert.equal(
+      reg.getAll().some((s) => s.sessionId === "headless-stale"),
+      false,
+    );
+    assert.equal(reg.getSession("interactive-live").status, "active");
+    assert.deepEqual(removedSessions, ["headless-stale"]);
+
+    reg.destroy();
+  });
+
+  it("heartbeat self-heals an unregistered session", () => {
+    const reg = createSynapseRegistry({ persistPath });
+
+    const ok = reg.heartbeat("ghost-session", {
+      worktreePath: "/tmp/x",
+      sessionKind: "interactive",
+    });
+
+    assert.equal(ok, true);
+    const session = reg.getSession("ghost-session");
+    assert.ok(session);
+    assert.equal(session.sessionId, "ghost-session");
+    assert.equal(session.worktreePath, "/tmp/x");
+    assert.equal(session.sessionKind, "interactive");
+    assert.equal(session.status, "active");
+
+    reg.destroy();
+  });
+
+  it("self-heal defaults to interactive on the real UserPromptSubmit shape (no sessionKind)", async () => {
+    // heartbeatInteractiveSession은 worktreePath/host/taskSummary만 보내고
+    // sessionKind는 생략한다. self-heal이 이를 headless로 분류하면 복구된
+    // 세션이 짧은 local timeout으로 곧장 stale이 돼 사라진다(원래 증상 재현).
+    const reg = createSynapseRegistry({
+      persistPath,
+      // headless면 15ms 만에 stale; interactive면 5s TTL까지 살아있어야 한다.
+      localHeartbeatIntervalMs: 5,
+      localTimeoutMs: 15,
+      interactiveHeartbeatIntervalMs: 10,
+      interactiveTimeoutMs: 5_000,
+    });
+
+    const ok = reg.heartbeat("drop-recovered", {
+      worktreePath: "/tmp/recovered",
+      host: "local",
+      taskSummary: "resumed prompt",
+    });
+    assert.equal(ok, true);
+    assert.equal(reg.getSession("drop-recovered").sessionKind, "interactive");
+
+    // headless라면 이 시점에 stale이지만, interactive로 복구됐으므로 live여야 한다.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const after = reg.getSession("drop-recovered");
+    assert.notEqual(after.status, "stale");
+    assert.equal(
+      reg.getActive().some((s) => s.sessionId === "drop-recovered"),
+      true,
+    );
+
+    reg.destroy();
+  });
+
+  it("heartbeat does NOT self-heal without a locator (worktreePath/cwd)", () => {
+    const reg = createSynapseRegistry({ persistPath });
+
+    // taskSummary만 담긴 빈약한 heartbeat는 위치 정보가 없으므로 self-heal
+    // 대상이 아니다 — 위치 없는 가비지 세션 register 방지.
+    const ok = reg.heartbeat("no-locator", { taskSummary: "missing" });
+
+    assert.equal(ok, false);
+    assert.equal(reg.getSession("no-locator"), null);
+
+    // cwd locator만 있어도 self-heal 된다(worktreePath 외 경로 커버).
+    const okCwd = reg.heartbeat("cwd-only", { cwd: "/tmp/cwd-heal" });
+    assert.equal(okCwd, true);
+    assert.equal(reg.getSession("cwd-only")?.status, "active");
+
+    reg.destroy();
+  });
+
+  it("pruneExpired with explicit olderThanMs", async () => {
+    const reg = createSynapseRegistry({
+      persistPath,
+      localHeartbeatIntervalMs: 5,
+      localTimeoutMs: 15,
+      expireTimeoutMs: 60_000,
+    });
+
+    reg.register(baseMeta({ sessionId: "explicit-prune" }));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(reg.getSession("explicit-prune").status, "stale");
+
+    const result = reg.pruneExpired({ olderThanMs: 1 });
+    assert.deepEqual(result.removed, ["explicit-prune"]);
+    assert.equal(result.count, 1);
+    assert.equal(reg.getSession("explicit-prune"), null);
+
+    reg.destroy();
+  });
+
   it("persists and restores session state", () => {
     const reg1 = createSynapseRegistry({ persistPath });
     reg1.register(

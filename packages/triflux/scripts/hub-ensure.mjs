@@ -9,6 +9,7 @@ import { existsSync, readFileSync, unlinkSync } from "fs";
 import { homedir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { resolveHubPortForContext } from "../hub/hub-lifecycle.mjs";
 import { getVersionHash } from "../hub/state.mjs";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -593,13 +594,18 @@ function chooseCascadePort(
   return null;
 }
 
-export function resolveHubTarget({ pidFilePath = HUB_PID_FILE } = {}) {
-  const envPortRaw = Number(process.env.TFX_HUB_PORT || "");
-  const envPort =
-    Number.isFinite(envPortRaw) && envPortRaw > 0 ? envPortRaw : null;
+export function resolveHubTarget({
+  pidFilePath = HUB_PID_FILE,
+  env = process.env,
+  cwd = process.cwd(),
+} = {}) {
   const target = {
     host: "127.0.0.1",
-    port: envPort ?? HUB_DEFAULT_PORT,
+    port: resolveHubPortForContext({
+      env,
+      cwd,
+      defaultPort: HUB_DEFAULT_PORT,
+    }),
   };
 
   // PID 파일의 port는 source of truth가 아니다. host 힌트만 재사용한다.

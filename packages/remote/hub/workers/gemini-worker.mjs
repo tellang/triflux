@@ -102,7 +102,8 @@ function detectAntigravityCategory(error) {
 function buildAntigravityErrorInfo(error, attempts) {
   const category = detectAntigravityCategory(error);
   const retryable = isAntigravityRetryable(error);
-  let recovery = "Retry the Antigravity route worker after correcting the issue.";
+  let recovery =
+    "Retry the Antigravity route worker after correcting the issue.";
 
   if (category === "auth") {
     recovery = "Refresh the Antigravity authentication state and retry.";

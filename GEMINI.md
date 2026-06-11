@@ -41,3 +41,29 @@ triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M 
 ## 검증
 - 변경 후 lint/typecheck/test 실행
 - 새 차단 규칙은 항상 대안 API와 함께 추가 (차단만 추가하면 데드락)
+
+## Skill routing
+
+When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
+
+Key routing rules:
+- Product ideas/brainstorming → invoke /gstack:office-hours
+- Strategy/scope → invoke /gstack:plan-ceo-review
+- Architecture → invoke /gstack:plan-eng-review
+- Design system/plan review → invoke /gstack:design-consultation or /gstack:plan-design-review
+- Full review pipeline → invoke /gstack:autoplan
+- Bugs/errors → invoke /gstack:investigate
+- QA/testing site behavior → invoke /gstack:qa or /gstack:qa-only
+- Code review/diff check → invoke /gstack:review
+- Visual polish → invoke /gstack:design-review
+- Ship/deploy/PR → invoke /gstack:ship or /gstack:land-and-deploy
+- Save progress → invoke /gstack:context-save
+- Resume context → invoke /gstack:context-restore
+- Author a backlog-ready spec/issue → invoke /gstack:spec
+
+## Health Stack
+
+- lint: biome check .
+- test: node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 "tests/**/*.test.mjs" "scripts/__tests__/**/*.test.mjs" && npm run lint:skills
+- deadcode: npx knip
+- gbrain: gbrain doctor --json

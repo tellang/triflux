@@ -335,3 +335,64 @@ test("late async failure", () => {
     cleanupHarness(harness);
   }
 });
+
+test("--test-force-exit propagates a late failure under concurrency (no exit-0 masking)", async () => {
+  // Regression for the v10.33.1 follow-up: the single-turn force-exit defer
+  // could win the race against the runner's deferred process.exitCode=1 and
+  // report a green exit with real failures pending (observed 4185-pass/3-fail
+  // exiting 0). The single-file late-async test above passes even on the buggy
+  // shim, so it does not guard this. Run many fast-passing files alongside one
+  // late-failing file under concurrency to pin exit-code propagation.
+  const harness = createHarness();
+  try {
+    const files = [];
+    for (let i = 0; i < 20; i += 1) {
+      files.push(
+        writeScript(
+          harness,
+          `pass-${i}.test.mjs`,
+          `
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+test("pass ${i}", () => {
+  assert.equal(1, 1);
+});
+`,
+        ),
+      );
+    }
+    // Fails on a later macrotask, after its test body has already returned —
+    // exactly the class whose exitCode the runner sets a few turns late.
+    files.push(
+      writeScript(
+        harness,
+        "late-fail.test.mjs",
+        `
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+test("late macrotask failure", () => {
+  setTimeout(() => assert.fail("late macrotask failure"), 2);
+});
+`,
+      ),
+    );
+
+    const wrapper = spawnWrapper(harness, [
+      "--test",
+      "--test-force-exit",
+      "--test-concurrency=8",
+      ...files,
+    ]);
+    const result = await waitForExit(wrapper, 20000);
+
+    assert.notEqual(
+      result.code,
+      0,
+      "a real failure must propagate as non-zero even when many fast passing files finish first",
+    );
+  } finally {
+    cleanupHarness(harness);
+  }
+});

@@ -441,6 +441,52 @@ async function main() {
     }
   }
 
+  // ── UserPromptSubmit: interactive 세션 liveness heartbeat ──
+  // SessionStart 가 register, 매 프롬프트가 갱신한다(사용자 활동 = liveness). 이
+  // 갱신이 없으면 hub monitor 가 5분 TTL 후 세션을 stale 로 전이시켜 `cto status`
+  // 의 live_sessions 가 항상 비어 보인다. fire-and-forget POST 는 process.exit 가
+  // 버리므로(cf. [[project_process_exit_drops_fire_and_forget]]) 발사 직후 바로
+  // drain 한다 — 아래 registry hook 이 없어 early-exit 하는 경로에서도 flush 를
+  // 보장하기 위해서다. drain 은 localhost POST 라 보통 즉시 반환되고, hub stall
+  // 시에만 짧은 상한(500ms)으로 프롬프트 지연을 막는다. keyword-detector /
+  // north-star 등 registry hook 은 그 뒤로 평소대로 실행된다.
+  if (eventName === "UserPromptSubmit") {
+    try {
+      const { heartbeatInteractiveSession } = await import(
+        "./session-start-fast.mjs"
+      );
+      heartbeatInteractiveSession(stdinRaw);
+      const { drainPendingSynapse } = await import(
+        "../hub/team/synapse-http.mjs"
+      );
+      await drainPendingSynapse(500);
+    } catch {
+      /* best-effort — heartbeat 실패가 프롬프트 턴을 막지 않는다 */
+    }
+  }
+
+  // ── Stop: interactive 세션 liveness heartbeat (턴 종료 시) ──
+  // UserPromptSubmit 은 턴 *시작* 에, Stop 은 매 어시스턴트 턴 *종료* 에 heartbeat
+  // 한다. 둘이 함께 "대화 중이지만 매 분 새 프롬프트를 보내지는 않는" 세션을 5분
+  // interactive TTL 위로 유지해, 대화 도중 stale 로 떨어져 `cto status`
+  // live_sessions / tray 에서 사라지는 것을 막는다. 진짜 완전 idle(턴 자체가 없음)
+  // 은 여전히 TTL 후 stale 로 가며 — 그게 의도된 dead-session 신호다. UserPromptSubmit
+  // 과 동일하게 fire-and-forget POST 직후 짧은 상한으로 drain 한다.
+  if (eventName === "Stop") {
+    try {
+      const { heartbeatInteractiveSession } = await import(
+        "./session-start-fast.mjs"
+      );
+      heartbeatInteractiveSession(stdinRaw);
+      const { drainPendingSynapse } = await import(
+        "../hub/team/synapse-http.mjs"
+      );
+      await drainPendingSynapse(500);
+    } catch {
+      /* best-effort — heartbeat 실패가 Stop 을 막지 않는다 */
+    }
+  }
+
   // 이벤트에 해당하는 훅 목록
   const hooks = registry.events[eventName];
   if (!hooks || hooks.length === 0) process.exit(0);

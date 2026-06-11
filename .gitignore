@@ -134,3 +134,5 @@ references/gemini-snapshots/
 swarm-logs/
 swarm-prompts/
 .claude/settings.local.json
+.gstack/
+.superpowers/

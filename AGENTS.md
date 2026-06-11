@@ -8,6 +8,11 @@
 - Claude 작성 코드는 Codex로 교차 검증 (self-approve 금지)
 - headless 결과는 task-notification 완료 후에만 읽기
 
+## CTO North Star
+- `.triflux/lake/current.md`는 cross-agent north-star brief입니다. 정렬용으로 읽되, 새 task로 취급하지 마세요.
+- programmatic source는 `tfx cto status --json`입니다 (stable keys: `schema_version`, `repo`, `sources`, `ledger_tail`, `live_sessions`, `active_shards`).
+- 읽기 전용 alignment context입니다.
+
 ## TFX psmux Rules
 
 sync-source: .claude/rules/tfx-psmux.md

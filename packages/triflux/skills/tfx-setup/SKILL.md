@@ -4,8 +4,6 @@ description: >
   triflux 초기 설정 및 진단. AskUserQuestion 기반 인터랙티브 위저드로
   파일 동기화, HUD 설정, Codex 프로파일, CLI 진단, MCP 확인, 검색 MCP 설정을 수행합니다.
   Use when: setup, 설정, 설치, install, 초기화, 처음, 시작, wizard
-triggers:
-  - tfx-setup
 argument-hint: "[doctor]"
 ---
 
@@ -241,7 +239,7 @@ project_doc_fallback_filenames = ["CODEX.md", "AGENTS.md"]
 **이유:**
 - Codex 전용 진입점 `CODEX.md` 우선 → 프로젝트가 의도한 Codex 컨텍스트 적용
 - `AGENTS.md` 폴백 → 공용 에이전트 지시서 지원
-- **`CLAUDE.md` 포함 금지** — Claude 전용 hint(XML 태그, 한국어 응답 지시 등)가 Codex 로 누설되어 컨텍스트 노이즈 증가 (실측: 약 84% 노이즈 감소)
+- **`CLAUDE.md`는 fallback에 넣지 않기** — Claude 전용 hint가 Codex prompt에 섞일 수 있다. 실제 영향은 `codex debug prompt-input`으로 확인하며, 근거 없는 정량치(예: N% 감소)는 쓰지 않는다.
 
 **감지 규칙:**
 
@@ -249,7 +247,7 @@ project_doc_fallback_filenames = ["CODEX.md", "AGENTS.md"]
 |------|------|------|
 | 키 누락 | 기본값 `["AGENTS.md"]` 로 동작 → `CODEX.md` 무시됨 | AskUserQuestion 으로 추가 제안 |
 | 값 `["CODEX.md", "AGENTS.md"]` | ✅ 표준 | 변경 없음 |
-| `CLAUDE.md` 포함 | 컨텍스트 노이즈 위험 | AskUserQuestion 으로 제거 제안 |
+| `CLAUDE.md` 포함 | Codex prompt 혼입 위험 | AskUserQuestion 으로 제거 제안 |
 | 순서 불일치 (예: AGENTS 먼저) | 우선순위 의도 미반영 | AskUserQuestion 으로 교정 제안 |
 
 **비표준 감지 시 AskUserQuestion:**
@@ -341,11 +339,12 @@ Read 도구로 `~/.claude/cache/mcp-enabled.json` 읽기 시도.
 
 ##### 5-2: Core 서버 안내
 
-Core 서버(context7, serena)는 API 키 불필요, 자동 활성화됨을 표시:
+강제 활성(Core) 서버는 현재 없다 (mcp-manifest.mjs `CORE_SERVERS = []`). 모든 서버는 매니페스트 enabled 목록 기반으로만 활성화된다. API 키가 필요 없는 context7는 기본 권장으로 표시:
 ```
-✅ context7 — 라이브러리 문서 조회 (API 키 불필요)
-✅ serena   — 시맨틱 코드 분석 (API 키 불필요)
+✅ context7 — 라이브러리 문서 조회 (API 키 불필요, 매니페스트 기반)
 ```
+
+> serena는 2026-06-10 core에서 제거됨. core 강제 활성을 재도입하려면 CORE_SERVERS와 이 섹션을 함께 갱신한다.
 
 ##### 5-3: 검색 MCP 선택
 
@@ -409,7 +408,7 @@ node -e "
 {
   "version": 1,
   "updatedAt": "2026-03-31T...",
-  "enabled": ["context7", "serena", "brave-search", "exa"]
+  "enabled": ["context7", "brave-search", "exa"]
 }
 ```
 
@@ -420,8 +419,7 @@ node -e "
 
 | 서버 | 상태 | 비고 |
 |------|------|------|
-| context7 | ✅ 활성 | Core (항상 활성) |
-| serena | ✅ 활성 | Core (항상 활성) |
+| context7 | ✅ 활성 | API 키 불필요 (매니페스트 기반) |
 | brave-search | ✅ 활성 | BRAVE_API_KEY ✅ |
 | exa | ⚠️ 활성 | EXA_API_KEY 미설정 — 키 추가 후 사용 가능 |
 | tavily | ⏭️ 건너뜀 | 사용자 선택 |

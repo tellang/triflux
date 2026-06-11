@@ -590,12 +590,493 @@ describe("swarm-hypervisor", () => {
         events.some(
           (entry) =>
             entry.event === "redundant_completion_rejected" &&
-            entry.reason === "worker_self_reported_failure:OAuth timeout",
+            entry.reason === "worker_reported_failed:OAuth timeout",
         ),
       );
       assert.equal(
         events.some((entry) => entry.event === "redundant_wins"),
         false,
+      );
+    });
+
+    it("rejects a no-commit redundant completion and keeps the primary alive (#394)", async () => {
+      // The exact #394 regression: a redundant worker (agy/gemini) signals
+      // completion with NO structured payload (F7 is bypassed) and zero commits.
+      // It must NOT win the shard nor SIGKILL the working primary.
+      const plan = planSwarm(null, { content: CRITICAL_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const rebaseCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "redundant-no-commit",
+        _deps: {
+          createConductor,
+          // Only the redundant shard branch (…/critical-shard-redundant) has
+          // zero commits. Match the branch suffix, not the runId — a runId
+          // containing "redundant" must not poison the integration merge range.
+          git: async (args) => {
+            if (args[0] === "rev-list") {
+              const range = args[args.length - 1] || "";
+              return range.endsWith("-redundant") ? "0" : "2";
+            }
+            if (args[0] === "rev-parse") return "deadbeefcafe";
+            return ""; // status --short → clean
+          },
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/redundant-no-commit/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardName, shardBranch }) => {
+            rebaseCalls.push({ shardName, shardBranch });
+            return {
+              ok: true,
+              headCommit: `head:${shardBranch}`,
+              strategy: "cherry-pick",
+              commits: 2,
+              notes: "test integration",
+            };
+          },
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      const primary = conductors.find(
+        (item) =>
+          item.sessionConfig.worktreePath.includes("wt-critical-shard") &&
+          !item.sessionConfig.worktreePath.includes("redundant"),
+      );
+      const redundant = conductors.find((item) =>
+        item.sessionConfig.worktreePath.includes("wt-critical-shard-redundant"),
+      );
+      assert.ok(primary, "primary conductor expected");
+      assert.ok(redundant, "redundant conductor expected");
+
+      // No payload at all — legacy/agy completion that bypasses the F7 check.
+      redundant.complete(undefined, undefined);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      assert.equal(
+        primary.getSnapshot()[0].state,
+        "healthy",
+        "a no-commit redundant completion must not stop the primary",
+      );
+      assert.equal(hv.getStatus().completedShards, 0);
+
+      const events = readEventLog(hv.eventLogPath);
+      assert.ok(
+        events.some(
+          (entry) =>
+            entry.event === "redundant_win_rejected" &&
+            entry.reason === "no_commit" &&
+            entry.shard === "critical-shard" &&
+            entry.commitsAhead === 0,
+        ),
+        "redundant_win_rejected (no_commit) must be logged",
+      );
+      assert.equal(
+        events.some((entry) => entry.event === "redundant_wins"),
+        false,
+        "no redundant_wins for a worker with zero commits",
+      );
+
+      // The primary is still the authoritative attempt — let it finish.
+      primary.complete(undefined, {
+        status: "ok",
+        commits_made: [{ sha: "abc1234", message: "fix: primary result" }],
+      });
+      conductors
+        .find((item) => item.sessionConfig.id.includes("normal-shard"))
+        .complete(undefined, {
+          status: "ok",
+          commits_made: [{ sha: "def5678", message: "feat: normal" }],
+        });
+
+      const result = await hv.integrationComplete();
+      assert.deepEqual(result.integrated, ["critical-shard", "normal-shard"]);
+      // Integration must use the PRIMARY branch, never the rejected redundant.
+      assert.ok(rebaseCalls[0].shardBranch.endsWith("/critical-shard"));
+
+      // afterEach shuts the hypervisor down (closes the event-log stream).
+    });
+
+    it("rejects a redundant completion that claims commits git cannot confirm (#394)", async () => {
+      // Defense-in-depth: even a schema-valid payload claiming commits_made is
+      // not trusted. Authoritative git evidence (commitsAhead) is the gate.
+      const plan = planSwarm(null, { content: CRITICAL_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "redundant-phantom-commit",
+        _deps: {
+          createConductor,
+          git: async (args) => {
+            if (args[0] === "rev-list") {
+              // Only the redundant shard branch (…/critical-shard-redundant)
+              // has zero commits. Match the branch suffix, not the runId — a
+              // runId containing "redundant" must not poison the merge range.
+              const range = args[args.length - 1] || "";
+              return range.endsWith("-redundant") ? "0" : "2";
+            }
+            if (args[0] === "rev-parse") return "deadbeefcafe";
+            return "";
+          },
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/redundant-phantom-commit/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async () => ({
+            ok: true,
+            headCommit: "head",
+            strategy: "cherry-pick",
+            commits: 2,
+          }),
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      const primary = conductors.find(
+        (item) =>
+          item.sessionConfig.worktreePath.includes("wt-critical-shard") &&
+          !item.sessionConfig.worktreePath.includes("redundant"),
+      );
+      const redundant = conductors.find((item) =>
+        item.sessionConfig.worktreePath.includes("wt-critical-shard-redundant"),
+      );
+
+      // Schema-valid, but the claimed commits don't exist in git.
+      redundant.complete(undefined, {
+        status: "ok",
+        commits_made: [
+          { sha: "phantom0", message: "claims work it never did" },
+        ],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      assert.equal(
+        primary.getSnapshot()[0].state,
+        "healthy",
+        "a phantom-commit redundant completion must not stop the primary",
+      );
+      const events = readEventLog(hv.eventLogPath);
+      assert.ok(
+        events.some(
+          (entry) =>
+            entry.event === "redundant_win_rejected" &&
+            entry.reason === "no_commit",
+        ),
+      );
+      assert.equal(
+        events.some((entry) => entry.event === "redundant_wins"),
+        false,
+      );
+
+      // afterEach shuts the hypervisor down (closes the event-log stream).
+    });
+
+    it("rejects a redundant completion with commits but a dirty worktree (#394)", async () => {
+      // commitsAhead > 0 alone is insufficient: a dirty worktree means
+      // integration would F6-fail this branch, so promoting it would kill the
+      // primary for nothing. The gate requires evidence.ok (commits AND clean).
+      const plan = planSwarm(null, { content: CRITICAL_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "redundant-dirty",
+        _deps: {
+          createConductor,
+          git: async (args, cwd) => {
+            if (args[0] === "rev-list") return "2"; // every branch has commits
+            if (args[0] === "rev-parse") return "deadbeefcafe";
+            if (args[0] === "status") {
+              // Only the redundant worktree carries uncommitted changes.
+              return cwd && cwd.includes("redundant") ? "?? src/junk.mjs" : "";
+            }
+            return "";
+          },
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/redundant-dirty/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async () => ({
+            ok: true,
+            headCommit: "head",
+            strategy: "cherry-pick",
+            commits: 2,
+          }),
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      const primary = conductors.find(
+        (item) =>
+          item.sessionConfig.worktreePath.includes("wt-critical-shard") &&
+          !item.sessionConfig.worktreePath.includes("redundant"),
+      );
+      const redundant = conductors.find((item) =>
+        item.sessionConfig.worktreePath.includes("wt-critical-shard-redundant"),
+      );
+
+      redundant.complete(undefined, {
+        status: "ok",
+        commits_made: [
+          { sha: "dirty123", message: "committed but left a mess" },
+        ],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      assert.equal(
+        primary.getSnapshot()[0].state,
+        "healthy",
+        "a dirty redundant worktree must not stop the primary",
+      );
+      const events = readEventLog(hv.eventLogPath);
+      assert.ok(
+        events.some(
+          (entry) =>
+            entry.event === "redundant_win_rejected" &&
+            entry.reason === "dirty_worktree" &&
+            entry.dirty === true,
+        ),
+        "redundant_win_rejected (dirty_worktree) must be logged",
+      );
+      assert.equal(
+        events.some((entry) => entry.event === "redundant_wins"),
+        false,
+        "no redundant_wins when the redundant worktree is dirty",
+      );
+
+      // afterEach shuts the hypervisor down (closes the event-log stream).
+    });
+
+    it("lets a redundant worker with real commits win and retire the primary (#394)", async () => {
+      // Positive path: the redundant worker actually produced commits, so it is
+      // a valid winner and the primary is shut down.
+      const plan = planSwarm(null, { content: CRITICAL_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const rebaseCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "redundant-real-commit",
+        _deps: {
+          createConductor,
+          // Every branch — including the redundant one — has commits.
+          git: async (args) => {
+            if (args[0] === "rev-list") return "2";
+            if (args[0] === "rev-parse") return "deadbeefcafe";
+            return "";
+          },
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/redundant-real-commit/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardName, shardBranch }) => {
+            rebaseCalls.push({ shardName, shardBranch });
+            return {
+              ok: true,
+              headCommit: `head:${shardBranch}`,
+              strategy: "cherry-pick",
+              commits: 2,
+            };
+          },
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      const primary = conductors.find(
+        (item) =>
+          item.sessionConfig.worktreePath.includes("wt-critical-shard") &&
+          !item.sessionConfig.worktreePath.includes("redundant"),
+      );
+      const redundant = conductors.find((item) =>
+        item.sessionConfig.worktreePath.includes("wt-critical-shard-redundant"),
+      );
+
+      redundant.complete(undefined, {
+        status: "ok",
+        commits_made: [
+          { sha: "real1234", message: "fix: redundant did the work" },
+        ],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+
+      const events = readEventLog(hv.eventLogPath);
+      assert.ok(
+        events.some(
+          (entry) =>
+            entry.event === "redundant_wins" &&
+            entry.shard === "critical-shard" &&
+            entry.commitsAhead === 2,
+        ),
+        "redundant_wins must fire with commit evidence",
+      );
+      assert.equal(
+        primary.getSnapshot()[0].state,
+        "completed",
+        "the primary must be shut down once the redundant worker wins",
+      );
+
+      conductors
+        .find((item) => item.sessionConfig.id.includes("normal-shard"))
+        .complete(undefined, {
+          status: "ok",
+          commits_made: [{ sha: "def5678", message: "feat: normal" }],
+        });
+
+      const result = await hv.integrationComplete();
+      assert.deepEqual(result.integrated, ["critical-shard", "normal-shard"]);
+      // The winning shard integrates from the redundant branch.
+      assert.ok(
+        rebaseCalls.some((call) =>
+          call.shardBranch.endsWith("/critical-shard-redundant"),
+        ),
+        "integration must use the winning redundant branch",
+      );
+
+      // afterEach shuts the hypervisor down (closes the event-log stream).
+    });
+
+    it("does not let a slow redundant evidence probe flip a primary that won mid-await (#394 race)", async () => {
+      // TOCTOU race: redundant completes first and finalizeRedundantWin awaits
+      // git evidence; the primary completes DURING that await. When the probe
+      // resumes it must NOT flip the already-decided winner.
+      const plan = planSwarm(null, { content: CRITICAL_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const rebaseCalls = [];
+      let releaseRedundantGit;
+      const redundantGitGate = new Promise((resolve) => {
+        releaseRedundantGit = resolve;
+      });
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "redundant-race",
+        _deps: {
+          createConductor,
+          // The redundant-branch probe blocks until the test releases it, so the
+          // primary can win while finalizeRedundantWin is awaiting evidence.
+          git: async (args) => {
+            if (args[0] === "rev-list") {
+              const range = args[args.length - 1] || "";
+              if (range.endsWith("-redundant")) {
+                await redundantGitGate;
+                return "2"; // redundant did commit — but it is already too late
+              }
+              return "2";
+            }
+            if (args[0] === "rev-parse") return "deadbeefcafe";
+            return "";
+          },
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/redundant-race/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardName, shardBranch }) => {
+            rebaseCalls.push({ shardName, shardBranch });
+            return {
+              ok: true,
+              headCommit: `head:${shardBranch}`,
+              strategy: "cherry-pick",
+              commits: 2,
+            };
+          },
+          cleanupWorktree: async () => {},
+        },
+      });
+
+      await hv.launch(plan);
+      const primary = conductors.find(
+        (item) =>
+          item.sessionConfig.worktreePath.includes("wt-critical-shard") &&
+          !item.sessionConfig.worktreePath.includes("redundant"),
+      );
+
+      const redundant = conductors.find((item) =>
+        item.sessionConfig.worktreePath.includes("wt-critical-shard-redundant"),
+      );
+
+      // Redundant completes first → finalizeRedundantWin starts and blocks on
+      // the gated git probe.
+      redundant.complete(undefined, {
+        status: "ok",
+        commits_made: [{ sha: "redun123", message: "redundant work" }],
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      // While the probe is blocked, the primary (and normal shard) win.
+      primary.complete(undefined, {
+        status: "ok",
+        commits_made: [{ sha: "prim1234", message: "primary work" }],
+      });
+      conductors
+        .find((item) => item.sessionConfig.id.includes("normal-shard"))
+        .complete(undefined, {
+          status: "ok",
+          commits_made: [{ sha: "norm5678", message: "normal" }],
+        });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      // Now let the redundant probe resume — it must observe the settled shard.
+      releaseRedundantGit();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      const result = await hv.integrationComplete();
+      assert.deepEqual(result.integrated, ["critical-shard", "normal-shard"]);
+      // Critical shard must integrate from the PRIMARY branch, not the redundant.
+      const criticalRebase = rebaseCalls.find((call) =>
+        call.shardBranch.includes("critical-shard"),
+      );
+      assert.ok(
+        criticalRebase.shardBranch.endsWith("/critical-shard"),
+        "winner must stay the primary, not the late redundant",
+      );
+
+      await hv.shutdown("test_flush");
+      const events = readEventLog(hv.eventLogPath);
+      assert.ok(
+        events.some(
+          (entry) =>
+            entry.event === "redundant_win_superseded" &&
+            entry.phase === "after_evidence",
+        ),
+        "the superseded redundant must be logged after the evidence hop",
+      );
+      assert.equal(
+        events.some((entry) => entry.event === "redundant_wins"),
+        false,
+        "no redundant_wins once the primary already won",
       );
     });
 
@@ -643,6 +1124,11 @@ describe("swarm-hypervisor", () => {
       assert.ok(
         conductors[0].sessionConfig.prompt.includes(
           "Lease-scoped Acceptance / Lint Guard",
+        ),
+      );
+      assert.ok(
+        conductors[0].sessionConfig.prompt.includes(
+          `작업 루트(절대경로): ${workdir}/.codex-swarm/wt-worker-a — 아래 lease 경로와 모든 상대경로는 이 루트 기준으로만 해석한다.`,
         ),
       );
       assert.ok(conductors[0].sessionConfig.prompt.includes("- src/a.mjs"));
@@ -1601,6 +2087,84 @@ describe("swarm-hypervisor", () => {
         false,
         "clean worktree must not emit recovery_patch_saved",
       );
+
+      hv = null;
+    });
+
+    it("preserves uncommitted work on the success teardown path (#394)", async () => {
+      // #394 secondary case (hub-observability): a worker exits 0 with dirty,
+      // uncommitted work. With no shard.files it bypasses the integration
+      // commit-evidence guard and reaches the SUCCESS cleanup, which carries no
+      // failureReason. Preservation must still run so the work is not lost.
+      const plan = planSwarm(null, { content: SINGLE_NO_FILES_PRD });
+      const { createConductor, conductors } = createMockConductorFactory();
+      const preserveCalls = [];
+
+      hv = createSwarmHypervisor({
+        workdir,
+        logsDir,
+        runId: "recovery-success-path",
+        _deps: {
+          createConductor,
+          git: async (args) => {
+            if (args[0] === "rev-list") return "1";
+            if (args[0] === "rev-parse") return "deadbeefcafe";
+            return "";
+          },
+          ensureWorktree: async ({ slug, runId }) => ({
+            worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
+            branchName: `swarm/${runId}/${slug}`,
+          }),
+          prepareIntegrationBranch: async () => ({
+            integrationBranch: "swarm/recovery-success-path/merge",
+            baseCommit: "abc123",
+          }),
+          rebaseShardOntoIntegration: async ({ shardBranch }) => ({
+            ok: true,
+            headCommit: `head:${shardBranch}`,
+            strategy: "cherry-pick",
+            commits: 1,
+          }),
+          cleanupWorktree: async () => {},
+          // Dirty worktree — preservation captures a patch (not skipped).
+          preserveWorktreePatch: async (opts) => {
+            preserveCalls.push(opts);
+            return {
+              ok: true,
+              patchPath: `${opts.recoveryDir}/${opts.shardId}.patch`,
+              manifestPath: `${opts.recoveryDir}/manifest.json`,
+            };
+          },
+        },
+      });
+
+      await hv.launch(plan);
+      conductors[0].complete(undefined, {
+        status: "ok",
+        commits_made: [{ sha: "abc1234", message: "feat: work" }],
+      });
+
+      const result = await hv.integrationComplete();
+      assert.deepEqual(result.integrated, ["worker-a"]);
+
+      assert.equal(
+        preserveCalls.length,
+        1,
+        "preservation must run on the success teardown path",
+      );
+
+      // Flush the async event-log write stream to disk before reading it.
+      await hv.shutdown("test_flush");
+
+      const savedEvent = readEventLog(hv.eventLogPath).find(
+        (entry) => entry.event === "recovery_patch_saved",
+      );
+      assert.ok(
+        savedEvent,
+        "recovery_patch_saved must fire on success cleanup",
+      );
+      assert.equal(savedEvent.shard, "worker-a");
+      assert.equal(savedEvent.reason, "dirty_on_cleanup");
 
       hv = null;
     });

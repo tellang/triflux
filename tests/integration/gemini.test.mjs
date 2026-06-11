@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,14 @@ const ROUTE_SCRIPT = toBashPath(
 const WORKER_SCRIPT = resolve(PROJECT_ROOT, "scripts", "tfx-route-worker.mjs");
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
+);
+// Stub hub-ensure so full-route invocations never bind/spawn a hub on the
+// canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
+const HUB_ENSURE_STUB = resolve(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "no-op-hub-ensure.mjs",
 );
 
 function sleepSync(ms) {
@@ -49,8 +58,7 @@ function runBash(command, extraEnv = {}) {
       cwd: testTempDir,
       encoding: "utf8",
       timeout: 30_000,
-      env: {
-        ...process.env,
+      env: hubServerTestEnv({
         HOME: testTempDir,
         TMPDIR: testTempDir,
         TMP: testTempDir,
@@ -60,6 +68,7 @@ function runBash(command, extraEnv = {}) {
         TFX_TEAM_AGENT_NAME: "",
         TFX_TEAM_LEAD_NAME: "",
         TFX_HUB_URL: "",
+        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TMUX: "",
         TFX_CLI_MODE: "gemini",
         TFX_NO_CLAUDE_NATIVE: "0",
@@ -67,7 +76,7 @@ function runBash(command, extraEnv = {}) {
         TFX_WORKER_INDEX: "",
         TFX_SEARCH_TOOL: "",
         ...extraEnv,
-      },
+      }),
     });
   } finally {
     removeTempDirWithRetry(testTempDir);

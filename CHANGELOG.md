@@ -4,6 +4,129 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+## [10.34.0] - 2026-06-10
+
+### Fixed
+- **[#395]** codex-hooks: serialize hooks.state in the codex canonical table-header form with an idempotent convergence check — every Claude SessionStart re-appended the inline form next to codex 0.137+'s table form, producing a TOML duplicate key that killed every codex invocation; manual repair was undone on the next session start
+- **[#396]** native-bridge: present the daemon control-key on dispatch and preserve the daemon rejection reason — worker registration to the claude agents panel failed with EAUTH on every swarm/multi run
+- swarm hub hygiene: expire clean (no dirty files) stale synapse sessions sooner instead of holding everything 24h — dirty-file sessions keep the 24h guard window, clean ones default to a short expire (`TFX_SYNAPSE_CLEAN_EXPIRE_MS`)
+- tray: dedupe mac tray processes machine-wide (worktree copies and other clones reap as the same tray) and suppress tray auto-spawn from worktree/ephemeral hub contexts — both sides of the duplicate menubar icon incident
+- hub: lifecycle observability guards — SIGKILL failures are no longer silent, polluted `TFX_HUB_PORT` is guarded before forwarding
+- **[#393]** claude integration: refresh claude cwd projections, warn on runtime compatibility flags, normalize agent json rows, drop duplicate runtime imports
+- **[#392]** v10.33.1 follow-ups: route integration tests use a no-op hub-ensure stub (no more canonical 27888 binds from isolated HOME), test-lock drains with a bounded loop so real failures stop masking as exit 0, packages/core hooks join the mirror gate, hub-auth assertions match the non-canonical-port token design, and 4 hub-restart route cases unskip behind `TFX_HUB_ALLOW_EPHEMERAL_PORT=1`
+
+### Changed
+- skill-hygiene: drop frontmatter `triggers` and duplicated Telemetry blocks across 22 active skills, diet descriptions (activation phrases preserved), 3-way mirrors byte-identical
+- mcp-registry: remove the serena entry
+- routing docs: drop stale gpt-5.3-codex and `--cli gemini` alias wording
+
+### Added
+- jsconfig for editor type-checking over hub/scripts/tests
+
+### Tests
+- stabilize hub port cwd assumptions (worktree-clamp no longer fails the suite from a worktree cwd)
+- update tray singleton expectations to machine-wide semantics; drop the stale frontmatter-triggers assertion; biome formatting catch-ups surfaced by the new CI lint step
+
+
+## [10.33.1] - 2026-06-09
+
+### Added
+
+- **`feat(hub)` Stop-hook interactive 세션 heartbeat.** Claude는 UserPromptSubmit 에서만 heartbeat 해서, 열어둔 채 매 분 새 프롬프트를 안 보내는 세션이 5분 interactive TTL 을 넘겨 `stale` 로 떨어져 `cto status` live_sessions / tray 에서 사라졌다(다음 프롬프트가 재활성화하기 전까지 미등록처럼 보임). `hook-orchestrator` 가 Stop 이벤트(어시스턴트 턴 종료)마다 synapse heartbeat 를 추가 발사(UserPromptSubmit 과 동일한 fire-and-forget + bounded drain). 진짜 완전 idle(턴 자체가 없음)은 여전히 TTL 후 stale — 의도된 dead 신호. packages/{triflux,core} 미러. (loopback-hub orchestrator 테스트로 Stop 시 `/synapse/heartbeat` POST 도달 검증)
+- **`feat(mirror-gate)`** `check-packages-mirror` 에 packages/remote 구조 검증 추가. 기존엔 triflux/core 만 byte-비교하고 remote(=pack 이 core import 를 `@triflux/core/*` 로 rewrite, byte 비교 불가)는 전혀 검증 안 해 두 드리프트가 무성하게 출하됐다 — core-only 모듈로의 깨진 상대 import(standalone 설치 시 Cannot find module)와 stale non-JS asset(tray UI). remote .mjs 의 모든 import 해석 가능(상대→remote, `@triflux/core/X`→core) + non-.mjs 의 root byte-동일을 검증. JSDoc 사용 예시 오탐 방지 위해 import 스캔 전 주석 제거.
+- **`feat(claude169 compat)`** Claude Code 2.1.169 호환 3트랙. `claude agents --json` mixed/daemon row 정규화(`state||status`, `id/short`, `sessionId/session_id`), `tfx doctor --json` 에 `CLAUDE_CODE_SAFE_MODE`/disabled bundled skills/managed MCP policy 경고, `/cd` `CwdChanged` 이벤트로 native-bridge 세션 projection cwd 갱신. packages/{triflux,core,remote} 미러.
+
+### Fixed
+
+- **`fix(mirror)` packages/remote 깨진 import 복구.** v10.33.0 의 `packages/remote/hub/server.mjs`·`scripts/lib/env-probe.mjs` 가 remote 에 존재하지 않는 core 모듈을 상대 경로(`./account-broker.mjs`, `../../hub/platform.mjs` 등)로 import 해 in-workspace 에서만 우연히 해석되고 standalone `@triflux/remote` 설치에선 깨졌다. core 소유 모듈은 `@triflux/core/*` 로 복구, remote-local(hub-lifecycle/mac-focus)은 상대 유지. core/triflux 사전존재 미러 드리프트도 root 와 정합.
+- **`fix(hub)` reaper kill 실패 관측성 + startHubDaemon 포트 정규화 (FU3).** ① startup reaper 가 `failed[]`(SIGKILL 불가 orphan, EPERM/defunct)를 버려 로그 신호 0으로 생존하던 갭 → `hub.startup_reaper_failed` warn 으로 표면화. ② `startHubDaemon` 이 오염된 `TFX_HUB_PORT` 를 그대로 forward 하고 `getDefaultHubPort()` 로 probe 해 worktree/ephemeral 에서 daemon 이 binding 하지 않는 포트를 probe 할 수 있던 문제 → `resolveHubPortForContext` 로 canonical 포트를 child env·probe 양쪽에 적용(방어심도). packages/{triflux,remote} 미러.
+- **`fix(codex-hook)`** register/heartbeat 부수효과가 내뿜는 stray stdout(`[mcp-sync]` 등)이 codex 훅의 stdout 계약(JSON-only)을 오염시키던 문제 → `runHookSideEffectsWithStdoutSuppressed` 로 감싸 `{}` 페이로드만 stdout 도달, finally 에서 복원. packages/{core,triflux} 미러.
+
+### Changed
+
+- **`feat(tray)`** macOS tray Sessions 탭 리디자인. cramped 320x520 2-컬럼 CTO/Workers drawer → 460x720 단일 컬럼 Prompt→Agents. KPI 카드(Live/Active/Idle/Stale), runtime progress bar → Agent Mix chips, Projects/CTO/Workers → Workspaces(라벨 chip). workspace 경로 trailing-slash 정규화로 동일 디렉토리 분할 방지. 460x720 라이브 검증(스크린샷+DOM). packages/triflux 미러.
+- **`chore`** 누적 biome import-sort/format 드리프트 정리(CI lint 미실행으로 invisible 누적분), remote tray 미러 동기(v10.33.0 출하 누락분), tray scratch 파일 제거 + `.superpowers/` ignore, Codex fallback docs 의 근거 없는 정량치 제거.
+
+### Tests
+
+- route-smoke `runBash` spawnSync 에 per-call timeout(동기 spawnSync hang → 스위트 전체 hang 방지), hook-orchestrator Stop heartbeat 테스트, mirror-core fixture 에 claude-agent-session-normalizer 추가(claude169 가 source CORE_FILE_MIRRORS 만 갱신하고 fixture 누락 → 3 fail).
+
+## [10.33.0] - 2026-06-09
+
+### Added
+
+- **`feat(hub)`** macOS 네이티브 tray. Swift `mac-tray.swift` 팝오버 + `tray.html` 드롭다운 UI, `/api/tray-state`·`/api/focus-session` 엔드포인트, `tray-lifecycle`/`tray-runtime`/`tray-state` 모듈 분리. `reapExistingMacTrayProcesses`로 기동 시 stale tray 프로세스 정리. packages/{triflux,remote} 미러.
+
+### Fixed
+
+- **`fix(hub)` hub 고아 프로세스 누수.** 워커 worktree가 env에 실린 비표준 `TFX_HUB_PORT`로 전용 hub를 detached spawn하고 회수되지 않아 ~24h에 다수(실측 48개/~1.4GB) 누적되던 결함. ① `resolveHubPortForContext`가 worktree/ephemeral 컨텍스트(cwd `.claude/worktrees`·`.worktrees`·`.codex-swarm/wt-` 또는 `TFX_WORKER_*`/`TFX_TEAM_*`/`TFX_EPHEMERAL` env)에서 canonical 포트 27888을 강제 — server bootstrap·hub-ensure·tray-lifecycle·env-probe·tfx-route 모든 spawn 경로에 적용해 워커가 비표준 포트 hub를 새로 띄우지 않고 27888 primary를 재사용/대기. 비-worktree 커스텀 `TFX_HUB_PORT`는 그대로 honor(회귀 없음, PR #158/#197 27888 안정화 불변). ② `reapExistingHubProcesses`가 canonical hub(27888) 기동 성공 시 비표준 포트 고아 hub를 일괄 정리(self·pidfile pid·27888 listener는 보존, 나머지 SIGTERM→SIGKILL). ③ 비-canonical hub는 idle 30분 후 자동 종료(`HUB_IDLE_TIMEOUT_DEFAULT_MS` 포트조건부, primary는 영구). ④ pidfile/token 파일은 소유 hub만 삭제(`cleanupOwnedPidFile`/`cleanupOwnedTokenFile`). packages/{triflux,remote} 미러.
+- **`fix(native-bridge)`** claude-native worker adoption harness가 production Triflux native bridge에 attach할 때 `~/.claude/daemon/control.key`를 제시(`buildDaemonControlAuth`) — control-key 인증을 강제하는 daemon에서도 attach 성공.
+- **`fix(hub, tray)`** mac-tray 앱 활성화 정책으로 입력·포커스 문제 해결, `tray.html` 코드리뷰 버그 수정, `/api/focus-session` JSON body 파싱/구조분해 수정.
+
+### Tests
+
+- hub-lifecycle / tray-lifecycle / tray-runtime / tray-state / tray-singleton / tray-html / mac-focus / pack-remote 단위테스트 신규, env-probe·hub-server-port·hub-ensure-port-cascade·packages-sync·tfx-route-bash-node-parity 확장. (hub 누수 fix: server-boundary 포트 가드·reaper 보존 로직·token 소유권 회귀 테스트 포함)
+
+## [10.32.0] - 2026-06-08
+
+### Added
+
+- **`feat(codex)`** Codex 인터랙티브 세션을 시작 시 tfx-hub synapse 레지스트리에 자동 등록하는 lean 훅. Claude의 `registerInteractiveSession`을 codex 평면에서 미러 — `hooks/codex-session-hook.mjs`(argv 모드 `register`/`heartbeat`)가 허브가 꺼져있으면 hub-ensure로 켜고 register/heartbeat 후 drain, 항상 exit 0(세션 비차단). `scripts/ensure-codex-hooks.mjs`가 `~/.codex/hooks.json`(PascalCase)에 SessionStart/UserPromptSubmit 훅을 멱등 등록 + `config.toml [hooks.state] trusted_hash` 사전주입(codex 0.137 알고리즘 역공학, oh-my-codex 실제 해시와 byte-match 검증 → 인터랙티브 `/hooks` 승인 불필요). 기존 oh-my-codex/superpowers 엔트리 보존(merge only). `scripts/setup.mjs`가 `ensureCodexProfiles` 후 배선. 범위 = 인터랙티브 codex 세션(codex exec worker는 MCP roster 추적). packages/{core,triflux} 미러.
+- **`feat(cto)`** 같은 프로젝트에서 2개 이상 live 세션이 감지되면 CTO lake collect를 자동 실행. `hub/team/cto-auto-collect.mjs`가 `synapse.session.started`에서 `querySessions`로 동일 cwd/worktree peer를 확인해 peer≥1이면 debounced `runCollect`로 `.triflux/lake/current.md`를 갱신 → north-star brief가 협업 시점에만 활성화. env `TFX_CTO_AUTO_COLLECT` opt-out, fresh-lake skip, non-blocking. Codex 자동등록과 결합해 Codex+Claude 멀티세션까지 감지. packages/{triflux,remote} 미러(remote는 lazy `triflux/cto/collect.mjs` import).
+
+### Tests
+
+- **(codex 등록 훅 + CTO 트리거)** 3 hermetic 단위테스트(mkdtemp/seam): codex-session-hook(register/heartbeat/casing fallback/error 흡수), ensure-codex-hooks(PascalCase merge/no-clobber/idempotent/trusted_hash 골든 + oh-my-codex 실해시 교차검증), cto-auto-collect(peer 게이트/debounce/fresh-lake/opt-out). 전체 4116 pass / 0 fail, biome + lint:skills clean.
+
+## [10.31.0] - 2026-06-08
+
+### Added
+
+- **`feat(tfx-route)` (PR #387)** codex/agy 워커 프롬프트에 등록 스킬을 주입하는 opt-in 프레임워크. `--skill <name>`(env `TFX_INJECT_SKILL`)으로 `skills/<name>/SKILL.md` 본문을 codex/agy 프롬프트 앞에 prepend(`prepend_skill`, CLI-agnostic). 미지정 시 no-op로 현행 동작 무변경. `printf`/`cat` temp-file 전달이라 codex `$`·agy `₩`/백슬래시 특수문자를 셸 재확장 없이 리터럴 보존(argv `--` 뒤 / stdin `printf %s`). skill name path-traversal 가드 포함. 네이티브 CLI 스킬(`/name` 슬래시)은 TUI 전용이라 headless에서 호출 불가 → prose 주입 채택(omc 레퍼런스도 동일). packages/triflux 미러 동반.
+- **`feat(tfx-route)` (PR #387)** agy(Gemini 3.x) 레인 anti-overclaim 규율 블록(`append_agy_anti_overclaim`, env `TFX_AGY_ANTI_OVERCLAIM` 기본 on). Gemini 3.x 과신(AA-Omniscience 실측: 정확도 53-56% 대비 환각률 88-91%) 대응 — fresh 증거 없는 완료 주장 금지 + grounded abstention("No Info") 규율을 프롬프트 END에 append(Gemini 3 공식 가이드의 부정제약-END 배치, blanket "do not guess" 회피).
+
+### Fixed
+
+- **`fix(synapse)` (PR #388)** bg/interactive 세션이 synapse registry에서 사라지고 dead 세션이 무한 누적되던 두 결함 수정. `pruneExpired()`가 stale/expired 세션을 `expireTimeoutMs`(기본 24h) 초과 시 제거하되 live(active/idle)는 보존(git-preflight dirty-file 가드 의존). heartbeat self-heal — 미등록 세션이 locator(worktreePath/cwd) 있는 heartbeat를 보내면 register로 복구(SessionStart register POST drop 회복). self-heal 세션은 명시 sessionKind 없으면 interactive로 본다(headless 기본값의 30s timeout→즉시 stale 재현 방지). `hub/server.mjs`에 60초 주기 prune sweep + shutdown clear. packages/{triflux,remote} 미러 동반.
+
+### Tests
+
+- **(PR #387)** tfx-route 스킬 주입 9 단위테스트(`$`/`₩`/백슬래시/`--flag` parse-safety, path-traversal 거부, anti-overclaim, 레인 wiring). north-star 회귀 5/5 무손상.
+- **(PR #388)** synapse-registry 회귀 가드(pruneExpired live 보존/explicit olderThanMs, self-heal 발동/미발동/UserPromptSubmit interactive 보존).
+
+## [10.30.1] - 2026-06-08
+
+### Fixed
+
+- **`fix(codex)` (PR #386)** codex 0.137이 Codex MCP tool 스키마에서 `profile` 필드를 폐기해 default codex 레인이 `unknown field \`profile\``로 즉사하던 회귀를 수정. `hub/workers/codex-mcp.mjs:buildCodexArguments`가 더 이상 `args.profile`을 tool 인자로 보내지 않고, effort 프로필을 SSOT `~/.codex/<profile>.config.toml`에서 `model` + `config.model_reasoning_effort`로 해석한다(inline-comment tolerant TOML 파싱 + name-suffix fallback). CLI `exec --profile` 플래그는 0.137에서 정상이라 영향 없음. packages/{triflux,remote} 미러 동반.
+- **`fix(tests)` (PR #386)** 통합 테스트(team-bridge/hub-restart/quota)가 full `tfx-route.sh`(minimal profile)로 실제 `~/.codex/config.toml`을 config-swap하다 `--test-concurrency` 레이스로 손상시키던 non-hermetic 버그 격리. `scripts/tfx-route.sh`에 `TFX_CODEX_CONFIG` override seam(미설정 시 실제 경로 default)을 추가하고, per-file throwaway config fixture(`tests/helpers/codex-config-fixture.mjs`)로 격리.
+- **`fix(skills)` (PR #385)** tfx-goal-clarify Step 1의 route.sh signature 정정.
+
+### Added
+
+- **`feat(skills)` (PR #385)** tfx-goal-clarify 스킬을 repo 본체로 promote — 자연어 아이디어를 Claude Code `/goal` 명령 블록으로 변환하는 clarifier.
+
+## [10.30.0] - 2026-06-04
+
+### Added
+
+- **`feat(cto)` (PR #380)** triflux CTO lake console — `tfx cto collect/status/dashboard` authority 레이어. 기존 durable surface(git/tfx_hub/tfx_swarm/tfx_synapse/ultragoal/handoffs)만 읽어 ignored `.triflux/lake/*` runtime 파일로 집계하는 thin repo-local 레이어다(신규 daemon/scheduler/memory engine 없음). north-star brief 를 Claude(SessionStart/UserPromptSubmit hook → `additionalContext`)와 Codex(`tfx-route.sh` route seam prepend)에 주입하고, 항상 켜진 HUD north-star row + `status --json` pull surface + AGENTS.md 포인터를 제공한다. `TFX_CTO_NORTH_STAR=0` opt-out. packages 3-layer mirror 동반.
+
+### Fixed
+
+- **`fix(cto)` (PR #384)** CTO efficacy 갭 2건 해소. (작업 A) `scripts/tfx-route.sh` antigravity lane 에 north-star prepend 를 추가해 codex 만 받던 brief 를 agy 워커도 수신한다(sentinel probe 통과). (작업 B) interactive 세션 live 추적 — SessionStart/주기 heartbeat 로 synapse registry 를 갱신 유지하고, `cto/status.mjs` `active_shards` 를 하드코딩 `[]` 에서 실제 swarm shard derive 로 교체하며, `cto/collect.mjs` 가 swarm lock object map 을 `workerId` 별 shard row 로 환원한다. packages 3-layer mirror 동반.
+- **`fix(synapse)` (commits `27c4fc57`, `8f3be4c7`)** CI synapse drain 안정화 — `drainPendingSynapse()` timeout 을 ref 유지해 await 중인 drain 이 process exit 에 취소되지 않게 하고, in-flight POST 가 먼저 settle 하면 ref 된 타이머를 정리해 자연 종료가 지연되지 않게 한다.
+- **`fix(cto)` (commits `e66b189b`, `8e728aa4`)** lake contract 강화(strict `current.json`/`ledger_tail` 검증 + malformed ledger 필터)와 north-star delimiter(`--- END CTO NORTH STAR ---`)가 hook cap 이후에도 보존되도록 inner brief 를 wrap 전에 cap 처리.
+
+### Changed
+
+- **`revert(hud)` (PR #383)** Claude HUD 에서 Sonnet/Opus 주간 분리 표시(`Sn:`/`Op:` 배지)를 제거하고 통합 `5h:`/`1w:` 2-게이지 구조로 환원한다. v10.29.0(`792399eb`)이 도입한 모델별 분리는 독립 한도가 아니라 all-models nested 가드레일이라 혼란을 줘 운영 요청으로 되돌린다. Keychain configDir 스코프 토큰 읽기·주간 버킷 파싱·`User-Agent` 헤더·`[stale]` 배지 등 토큰-빔 버그 수정은 그대로 유지. packages 3-layer mirror 동반.
+
+### Tests
+
+- **`test(cto)`** `cto-collect-swarm`, `cto-status`, north-star route smoke, HUD ambient `.triflux/lake` 격리, session-start synapse, hook-orchestrator heartbeat 테스트 추가/보강.
+- **`test(hud)`** Sonnet/Opus 분리 제거에 맞춰 `hud-claude-parse`/`credentials`/`backoff` 조정(통합 5h/1w 유지, Keychain/주간/UA/stale 케이스 보존).
+
 ## [10.29.0] - 2026-06-02
 
 ### Added

@@ -7,8 +7,6 @@ description: >
   orchestrator, 훅 설정, hook 설정, 훅 순서, hook order를 언급할 때마다
   반드시 이 스킬을 사용하세요.
   Use when: hooks, 훅, hook priority, 훅 관리, orchestrator, 오케스트레이터, 훅 설정, 훅 순서
-triggers:
-  - tfx-hooks
 argument-hint: "[scan|apply|restore]"
 ---
 

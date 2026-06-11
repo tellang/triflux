@@ -218,6 +218,50 @@ describe("synapse-http helpers", () => {
 });
 
 describe("drainPendingSynapse (flush before process.exit)", () => {
+  it("in-flight POST가 먼저 settle되면 drain timeout handle을 남기지 않는다", async () => {
+    const moduleUrl = pathToFileURL(
+      join(__dirname, "..", "..", "hub", "team", "synapse-http.mjs"),
+    ).href;
+    const childCode = `
+      const t0 = Date.now();
+      const m = await import(${JSON.stringify(moduleUrl)});
+      m.registerSynapseSession(
+        { sessionId: "drain-fast" },
+        { token: false, fetchImpl: async () => ({ ok: true }) },
+      );
+      await m.drainPendingSynapse(750);
+      console.log(String(Date.now() - t0));
+    `;
+    const started = performance.now();
+    const stdout = await new Promise((resolve, reject) => {
+      const chunks = [];
+      const cp = spawn(
+        process.execPath,
+        ["--input-type=module", "-e", childCode],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      cp.stdout.on("data", (chunk) => chunks.push(chunk));
+      cp.on("error", reject);
+      cp.on("exit", (code) =>
+        code === 0
+          ? resolve(Buffer.concat(chunks).toString("utf8").trim())
+          : reject(new Error(`child exited ${code}`)),
+      );
+    });
+    const elapsed = performance.now() - started;
+
+    assert.ok(
+      Number(stdout) < 500,
+      `child drain should resolve quickly, reported ${stdout}ms`,
+    );
+    assert.ok(
+      elapsed < 500,
+      `child process should not wait for stale drain timer, took ${elapsed}ms`,
+    );
+  });
+
   it("in-flight register POST를 실제 loopback 소켓으로 flush한다", async () => {
     const received = [];
     const server = createServer((req, res) => {

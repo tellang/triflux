@@ -39,6 +39,7 @@ import {
   ensureConductorRegistry,
   getConductorRegistry,
 } from "./conductor-registry.mjs";
+import { readCtoSnapshot } from "./cto-pull.mjs";
 import { createEventLog } from "./event-log.mjs";
 import { buildSpawnSpecForMode, MODES } from "./execution-mode.mjs";
 import { extractCompletionPayload } from "./extract-completion-payload.mjs";
@@ -218,6 +219,22 @@ export function createConductor(opts = {}) {
 
   // 공유 event log (모든 세션 이벤트를 하나의 JSONL에)
   const eventLog = createEventLog(join(logsDir, "conductor-events.jsonl"));
+
+  function logCtoContext(sessionId) {
+    const snapshot = readCtoSnapshot({ lakeRoot: opts.ctoLakeRoot });
+    if (!snapshot) return;
+    eventLog.append("cto_context", {
+      session: sessionId,
+      snapshot: {
+        schema_version: snapshot.schema_version,
+        repo: snapshot.repo,
+        sources: snapshot.sources,
+        ledger_tail: snapshot.ledger_tail,
+        live_sessions: snapshot.live_sessions,
+        active_shards: snapshot.active_shards,
+      },
+    });
+  }
 
   /**
    * 세션 상태 전이.
@@ -1123,6 +1140,7 @@ export function createConductor(opts = {}) {
       const sandbox = buildWorkerSandboxEnv({
         cwd: resolvedConfig.workdir || process.cwd(),
         sessionId: resolvedConfig.id,
+        agent: resolvedConfig.agent,
         env: { ...process.env, ...(resolvedConfig.env || {}) },
       });
       resolvedConfig = {
@@ -1172,6 +1190,7 @@ export function createConductor(opts = {}) {
 
     sessions.set(resolvedConfig.id, session);
     getConductorRegistry()?.register?.(resolvedConfig.id, publicApi);
+    logCtoContext(resolvedConfig.id);
 
     if (resolvedConfig.remote) {
       startRemoteSession(session);

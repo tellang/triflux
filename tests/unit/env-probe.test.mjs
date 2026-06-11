@@ -110,6 +110,16 @@ describe("env-probe hub port resolution", () => {
     );
   });
 
+  it("resolveDefaultStatusUrl forces worktree hub probes back to 27888", () => {
+    assert.equal(
+      resolveDefaultStatusUrl(
+        { TFX_HUB_PORT: "30123" },
+        "/repo/.claude/worktrees/worker-a",
+      ),
+      "http://127.0.0.1:27888/status",
+    );
+  });
+
   it("checkHub probes and restarts using the env-selected port", () => {
     const originalPort = process.env.TFX_HUB_PORT;
     process.env.TFX_HUB_PORT = "30124";
@@ -143,6 +153,47 @@ describe("env-probe hub port resolution", () => {
     } finally {
       if (originalPort === undefined) delete process.env.TFX_HUB_PORT;
       else process.env.TFX_HUB_PORT = originalPort;
+    }
+  });
+
+  it("checkHub restarts worktree probes on canonical 27888 despite poisoned env", () => {
+    const originalPort = process.env.TFX_HUB_PORT;
+    const originalUrl = process.env.TFX_HUB_URL;
+    process.env.TFX_HUB_PORT = "30124";
+    process.env.TFX_HUB_URL = "http://127.0.0.1:30124/mcp";
+    const commands = [];
+    const spawnCalls = [];
+    let attempts = 0;
+
+    try {
+      const result = checkHub({
+        cwd: "/repo/.worktrees/worker-a",
+        pkgRoot: makeTempHome(),
+        execSyncFn(command) {
+          commands.push(command);
+          attempts += 1;
+          if (attempts === 1) throw new Error("down");
+          return JSON.stringify({ hub: { state: "healthy" }, pid: 1234 });
+        },
+        spawnFn(command, args, options) {
+          spawnCalls.push({ command, args, options });
+          return { unref() {} };
+        },
+        existsSyncFn() {
+          return true;
+        },
+        sleepSyncFn() {},
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.restarted, true);
+      assert.ok(commands.every((command) => command.includes(":27888/status")));
+      assert.equal(spawnCalls[0]?.options?.env?.TFX_HUB_PORT, "27888");
+    } finally {
+      if (originalPort === undefined) delete process.env.TFX_HUB_PORT;
+      else process.env.TFX_HUB_PORT = originalPort;
+      if (originalUrl === undefined) delete process.env.TFX_HUB_URL;
+      else process.env.TFX_HUB_URL = originalUrl;
     }
   });
 });

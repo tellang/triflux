@@ -50,7 +50,7 @@ export function decomposeTask(taskDescription, agentCount) {
  * @returns {string}
  */
 export function buildLeadPrompt(taskDescription, config) {
-  const { agentId, teammateMode = "tmux", workers = [] } = config;
+  const { agentId, repoRoot, teammateMode = "tmux", workers = [] } = config;
 
   const roster =
     workers
@@ -59,7 +59,10 @@ export function buildLeadPrompt(taskDescription, config) {
 
   const workerIds = workers.map((w) => w.agentId).join(", ");
 
-  const bridgePath = "node hub/bridge.mjs";
+  // TODO: Require repoRoot once all callers pass absolute repository roots.
+  const bridgePath = repoRoot
+    ? `node ${String(repoRoot).replace(/\/+$/, "")}/hub/bridge.mjs`
+    : "node hub/bridge.mjs";
 
   return `리드 에이전트: ${agentId}
 
@@ -76,6 +79,8 @@ ${roster}
 - 워커 결과 수집:
   ${bridgePath} context --agent ${agentId} --max 20
 - 최종 결과는 topic="task.result"를 모아 통합
+- 모든 워커의 task.result 수신 후 결과를 통합하고 종료하라. 워커가 무응답이면 상태를 보고하고 중단하라.
+- 증거(커밋/테스트/파일) 없는 완료 주장은 통합하지 말고 해당 워커에 redo 를 지시하라.
 
 워커 ID: ${workerIds || "(없음)"}
 지금 즉시 워커를 배정하고 병렬 진행을 관리하라.`;

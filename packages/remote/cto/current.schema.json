@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://triflux.local/schemas/cto/current.schema.json",
+  "title": "Triflux CTO Lake Current Authority State",
+  "description": "Contract for .triflux/lake/current.json. .triflux/lake is a triflux-owned, namespace-neutral cross-agent rollup for durable artifacts across Claude, Codex/OMX, OMC, AGY, gstack, gbrain, and Triflux state. It reads and aggregates .omx/ultragoal and .omc/ultragoal execution ledgers without replacing or duplicating their authority. ledger.jsonl and sources.json companion contracts are documented in $defs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "repo",
+    "sources",
+    "summary",
+    "ledger_tail"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "cto-lake.v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "branch", "head", "dirty"],
+      "properties": {
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "branch": {
+          "type": ["string", "null"]
+        },
+        "head": {
+          "type": ["string", "null"]
+        },
+        "dirty": {
+          "type": "boolean"
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "description": "Durable artifact source states only. Live Claude /goal state and AGY internal state are not shell-collectable; a source reports available:false when no shell-readable durable artifact exists.",
+      "additionalProperties": false,
+      "required": [
+        "git",
+        "tfx_hub",
+        "tfx_swarm",
+        "tfx_team",
+        "tfx_synapse",
+        "ultragoal_omx",
+        "ultragoal_omc",
+        "handoffs",
+        "session_vault",
+        "agy",
+        "gbrain"
+      ],
+      "properties": {
+        "git": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "tfx_hub": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "tfx_swarm": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "tfx_team": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "tfx_synapse": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "ultragoal_omx": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "ultragoal_omc": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "handoffs": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "session_vault": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "agy": {
+          "$ref": "#/$defs/sourceState"
+        },
+        "gbrain": {
+          "$ref": "#/$defs/sourceState"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "description": "Human- and dashboard-oriented synthesized authority summary derived from durable artifacts and live Triflux synapse session status. Phase 1 may add source-derived fields here without changing the top-level contract.",
+      "additionalProperties": true
+    },
+    "ledger_tail": {
+      "type": "array",
+      "description": "Recent append-only .triflux/lake/ledger.jsonl entries copied into current.json for quick status rendering.",
+      "items": {
+        "$ref": "#/$defs/ledgerEntry"
+      }
+    }
+  },
+  "$defs": {
+    "sourceState": {
+      "description": "Every collected durable source reports { available, status, detail, collected_at }. available:false means the surface exposes no shell-readable artifact for this collection pass.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "status", "detail", "collected_at"],
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string"
+        },
+        "detail": {
+          "type": ["string", "object", "array", "null"]
+        },
+        "collected_at": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      }
+    },
+    "ledgerEntry": {
+      "description": ".triflux/lake/ledger.jsonl is append-only and single-writer. The collector must acquire .triflux/lake/ledger.jsonl.lock before appending so concurrent collectors cannot interleave or corrupt JSONL lines. Each line is one JSON object with this shape.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ts", "event", "source", "summary", "ref"],
+      "properties": {
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "event": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "ref": {
+          "type": ["string", "object", "null"]
+        }
+      }
+    },
+    "sourceRegistry": {
+      "$comment": ".triflux/lake/sources.json is an array of durable source probe registrations.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "probe", "enabled"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "probe": {
+            "type": ["string", "object"]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

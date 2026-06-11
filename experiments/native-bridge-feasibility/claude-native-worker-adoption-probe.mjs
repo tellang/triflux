@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 
 import {
   buildRosterEntry,
+  buildDaemonControlAuth,
   buildIsolatedDaemonEnv,
   deriveDaemonPaths,
   getProcStart,
@@ -97,7 +98,12 @@ async function collectSubscribe(controlSock, short, { timeoutMs = 1500 } = {}) {
   });
 }
 
-async function collectAttach(controlSock, short, { timeoutMs = 1500 } = {}) {
+async function collectAttach(
+  controlSock,
+  short,
+  { timeoutMs = 1500, configDir } = {},
+) {
+  const authPayload = await buildDaemonControlAuth(configDir);
   return new Promise((resolve) => {
     const socket = net.connect(controlSock);
     let buffer = Buffer.alloc(0);
@@ -124,6 +130,7 @@ async function collectAttach(controlSock, short, { timeoutMs = 1500 } = {}) {
         `${JSON.stringify({
           proto: 1,
           op: "attach",
+          ...authPayload,
           short,
           cols: 120,
           rows: 40,
@@ -220,7 +227,10 @@ export default async function runProbe({ scenario = "startup-native", cleanup = 
     const list = await sendControlRequest(paths.controlSock, { proto: 1, op: "list" });
     const has = await sendControlRequest(paths.controlSock, { proto: 1, op: "has", short });
     const subscribe = await collectSubscribe(paths.controlSock, short);
-    const attach = scenario === "startup-native" ? await collectAttach(paths.controlSock, short) : undefined;
+    const attach =
+      scenario === "startup-native"
+        ? await collectAttach(paths.controlSock, short, { configDir })
+        : undefined;
     const resize =
       scenario === "startup-native"
         ? await sendControlRequest(paths.controlSock, { proto: 1, op: "resize", short, cols: 100, rows: 30 })

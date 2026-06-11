@@ -34,6 +34,7 @@ function buildRouteEnv(extraEnv = {}) {
     TFX_CLI_MODE: "auto",
     TFX_NO_CLAUDE_NATIVE: "0",
     TFX_CODEX_TRANSPORT: "exec",
+    TFX_CTO_NORTH_STAR: "0",
     ...extraEnv,
   };
 }

@@ -15,19 +15,28 @@ import { homedir } from "node:os";
 import { extname, join, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { runCollect } from "../cto/collect.mjs";
+import { runStatus as runCtoStatus } from "../cto/status.mjs";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
+import {
+  inspectRegistry,
+  inspectRegistryStatus,
+} from "../scripts/lib/mcp-guard-engine.mjs";
 import { broker as brokerInstance, reloadBroker } from "./account-broker.mjs";
 import { createAdaptiveEngine } from "./adaptive.mjs";
 import { createAssignCallbackServer } from "./assign-callbacks.mjs";
 import { DelegatorService } from "./delegator/index.mjs";
 import { createHitlManager } from "./hitl.mjs";
+import {
+  reapExistingHubProcesses,
+  resolveHubPortForContext,
+} from "./hub-lifecycle.mjs";
 import {
   cleanupOrphanNodeProcesses,
   cleanupOrphanRuntimeProcesses,
@@ -39,6 +48,7 @@ import {
   recordWorker,
   snapshot as traceSnapshot,
 } from "./lib/trace-recorder.mjs";
+import { focusSessionOnMac } from "./mac-focus.mjs";
 import { logQuotaRefreshFailures } from "./middleware/quota-middleware.mjs";
 import { wrapRequestHandler } from "./middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
@@ -53,6 +63,7 @@ import {
   writeState,
 } from "./state.mjs";
 import { createStoreAdapter } from "./store-adapter.mjs";
+import { createCtoAutoCollector } from "./team/cto-auto-collect.mjs";
 import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
 import { createSwarmLocks } from "./team/swarm-locks.mjs";
@@ -62,6 +73,9 @@ import {
 } from "./team/synapse-registry.mjs";
 import { registerTeamBridge } from "./team-bridge.mjs";
 import { createTools } from "./tools.mjs";
+import { spawnTrayForHub } from "./tray-lifecycle.mjs";
+import { getRuntimeStatus } from "./tray-runtime.mjs";
+import { buildTrayStatePayload } from "./tray-state.mjs";
 import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
 
 registerTeamBridge(nativeProxy);
@@ -104,7 +118,7 @@ const SYNAPSE_VALID_OPS = new Set([
   "stash-pop",
   "worktree-remove",
 ]);
-const HUB_IDLE_TIMEOUT_DEFAULT_MS = 0; // 0 = 영구 실행 (idle shutdown 비활성). TFX_HUB_IDLE_TIMEOUT_MS 환경변수로 오버라이드 가능
+const HUB_IDLE_TIMEOUT_DEFAULT_MS = 30 * 60 * 1000;
 const HUB_IDLE_SWEEP_DEFAULT_MS = 60 * 1000;
 const STATIC_CONTENT_TYPES = Object.freeze({
   ".html": "text/html",
@@ -256,10 +270,11 @@ function readHubPidFile(
 }
 
 export function resolveHubPort(env = process.env, opts = {}) {
-  void opts;
-  const envPort = parseHubPort(env?.TFX_HUB_PORT);
-  if (envPort) return envPort;
-  return HUB_DEFAULT_PORT;
+  return resolveHubPortForContext({
+    env,
+    cwd: opts.cwd ?? process.cwd(),
+    defaultPort: HUB_DEFAULT_PORT,
+  });
 }
 
 export function detectLivePeer(
@@ -482,6 +497,7 @@ function isPublicPath(path) {
   return (
     PUBLIC_PATHS.has(path) ||
     path === "/dashboard" ||
+    path === "/tray.html" ||
     path === "/api/qos-stats" ||
     path.startsWith("/public/")
   );
@@ -638,6 +654,71 @@ function parsePositiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+export function resolveHubIdleTimeoutMs({
+  port,
+  env = process.env,
+  defaultPort = HUB_DEFAULT_PORT,
+} = {}) {
+  const parsed = Number.parseInt(
+    String(env?.TFX_HUB_IDLE_TIMEOUT_MS ?? ""),
+    10,
+  );
+  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  return Number(port) === defaultPort ? 0 : HUB_IDLE_TIMEOUT_DEFAULT_MS;
+}
+
+export function cleanupOwnedPidFile({
+  pidFilePath = PID_FILE,
+  currentPid = process.pid,
+  readFile = readFileSync,
+  unlink = unlinkSync,
+} = {}) {
+  try {
+    const info = JSON.parse(readFile(pidFilePath, "utf8"));
+    if (Number(info?.pid) !== Number(currentPid)) return false;
+    unlink(pidFilePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function cleanupOwnedTokenFile({
+  tokenFilePath = TOKEN_FILE,
+  token,
+  port = HUB_DEFAULT_PORT,
+  readFile = readFileSync,
+  unlink = unlinkSync,
+  defaultPort = HUB_DEFAULT_PORT,
+} = {}) {
+  if (Number(port) !== Number(defaultPort)) return false;
+  const normalizedToken = String(token ?? "").trim();
+  if (!normalizedToken) return false;
+  try {
+    if (String(readFile(tokenFilePath, "utf8")).trim() !== normalizedToken) {
+      return false;
+    }
+    unlink(tokenFilePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function writeOwnedTokenFile({
+  tokenFilePath = TOKEN_FILE,
+  tokenDir = join(homedir(), ".claude"),
+  token,
+  mkdir = mkdirSync,
+  writeFile = writeFileSync,
+} = {}) {
+  const normalizedToken = String(token ?? "").trim();
+  if (!normalizedToken) return false;
+  mkdir(tokenDir, { recursive: true });
+  writeFile(tokenFilePath, normalizedToken, { mode: 0o600 });
+  return true;
+}
+
 function readRecentAimdEvents(now = Date.now()) {
   try {
     if (!existsSync(BATCH_EVENTS_PATH)) return [];
@@ -779,10 +860,41 @@ function getBrokerPublicSnapshot(currentBroker = brokerInstance) {
   return currentBroker.publicSnapshot();
 }
 
+async function getTrayCtoStatus() {
+  try {
+    return await runCtoStatus(["--json"], {
+      rootDir: PROJECT_ROOT,
+      stdout: { write() {} },
+    });
+  } catch (error) {
+    return { error: error?.message || String(error) };
+  }
+}
+
+function getTrayMcpStatus() {
+  const registryState = inspectRegistry();
+  if (!registryState.exists || !registryState.valid) {
+    return {
+      registry_path: registryState.path,
+      server_count: 0,
+      rows: [],
+      error: registryState.errors?.join("; ") || "MCP registry unavailable",
+    };
+  }
+  const status = inspectRegistryStatus(registryState.registry);
+  return {
+    registry_path: registryState.path,
+    server_count: Object.keys(registryState.registry?.servers || {}).length,
+    rows: status.rows,
+  };
+}
+
 function resolvePublicFilePath(path) {
   let relativePath = null;
   if (path === "/dashboard") {
     relativePath = "dashboard.html";
+  } else if (path === "/tray.html") {
+    relativePath = "tray.html";
   } else if (path.startsWith("/public/")) {
     relativePath = path.slice("/public/".length);
   }
@@ -878,10 +990,7 @@ export async function startHub({
   attachBrokerDiagnostics(brokerInstance);
   syncBrokerAuthCache(brokerInstance);
 
-  const hubIdleTimeoutMs = parsePositiveInt(
-    process.env.TFX_HUB_IDLE_TIMEOUT_MS,
-    HUB_IDLE_TIMEOUT_DEFAULT_MS,
-  );
+  const hubIdleTimeoutMs = resolveHubIdleTimeoutMs({ port, env: process.env });
   const hubIdleSweepMs = parsePositiveInt(
     process.env.TFX_HUB_IDLE_SWEEP_MS,
     Math.min(HUB_IDLE_SWEEP_DEFAULT_MS, hubIdleTimeoutMs),
@@ -926,12 +1035,9 @@ export async function startHub({
 
   const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;
   if (HUB_TOKEN) {
-    mkdirSync(join(homedir(), ".claude"), { recursive: true });
-    writeFileSync(TOKEN_FILE, HUB_TOKEN, { mode: 0o600 });
+    writeOwnedTokenFile({ token: HUB_TOKEN, port });
   } else {
-    try {
-      unlinkSync(TOKEN_FILE);
-    } catch {}
+    cleanupOwnedTokenFile({ token: HUB_TOKEN, port });
   }
 
   const store = await createStoreAdapter(dbPath);
@@ -1009,10 +1115,16 @@ export async function startHub({
     registry: synapseRegistry,
     locks: swarmLocks,
   });
+  const ctoAutoCollector = createCtoAutoCollector({
+    registry: synapseRegistry,
+    runCollect,
+    logger: hubLog,
+  });
 
   // Synapse Layer 5: emitter subscribers — bridge events to hub logging
-  synapseEmitter.on("synapse.session.started", ({ sessionId }) => {
+  synapseEmitter.on("synapse.session.started", ({ sessionId, session }) => {
     hubLog.info({ sessionId }, "synapse.session.started");
+    ctoAutoCollector.handleSessionStarted({ sessionId, session });
   });
   synapseEmitter.on("synapse.session.heartbeat", ({ sessionId }) => {
     hubLog.debug({ sessionId }, "synapse.session.heartbeat");
@@ -1321,6 +1433,66 @@ export async function startHub({
           ...synapseRegistry.snapshot(),
           ts: Date.now(),
         });
+      }
+
+      if (path === "/api/tray-state" && req.method === "GET") {
+        if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
+          return writeJson(res, 403, { ok: false, error: "Loopback only" });
+        }
+
+        const qos = getQosStatsPayload();
+        const synapseSnapshot = synapseRegistry.snapshot();
+        const broker = getBrokerPublicSnapshot(brokerInstance);
+        const runtimeStatus = getRuntimeStatus({
+          projectRoots: [PROJECT_ROOT],
+        });
+        const [ctoStatus, mcpStatus] = await Promise.all([
+          getTrayCtoStatus(),
+          Promise.resolve(getTrayMcpStatus()),
+        ]);
+
+        return writeJson(
+          res,
+          200,
+          buildTrayStatePayload({
+            hub: {
+              id: String(sessionId),
+              pid: process.pid,
+              port,
+              url: buildHubUrl(host, port),
+              projectRoot: PROJECT_ROOT,
+            },
+            qos,
+            synapseSnapshot,
+            broker,
+            ctoStatus,
+            mcpStatus,
+            runtimeStatus,
+          }),
+        );
+      }
+
+      if (path === "/api/focus-session" && req.method === "POST") {
+        if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
+          return writeJson(res, 403, { ok: false, error: "Loopback only" });
+        }
+        let body;
+        try {
+          body = await parseBody(req);
+        } catch (_e) {
+          return writeJson(res, 400, {
+            error: "Invalid JSON or Body too large",
+          });
+        }
+
+        const { sessionId, udsId } = body || {};
+        const result = await focusSessionOnMac({
+          sessionId,
+          udsId,
+          pid: body?.pid,
+          agentId: body?.agentId ?? body?.agent_id,
+        });
+        return writeJson(res, 200, { ok: result.ok !== false, focus: result });
       }
 
       // Redacted peer-discovery surface. Returns co-located live peers (same
@@ -2054,6 +2226,16 @@ export async function startHub({
   }, 60000);
   sessionTimer.unref();
 
+  const synapsePruneTimer = setInterval(() => {
+    try {
+      const { count } = synapseRegistry.pruneExpired();
+      if (count > 0) hubLog.info({ count }, "synapse.prune");
+    } catch (err) {
+      hubLog.warn({ err }, "synapse.prune_failed");
+    }
+  }, 60000);
+  synapsePruneTimer.unref();
+
   // 고아 node.exe 프로세스 + stale spawn 세션 주기적 정리 (5분마다)
   // TFX_DISABLE_ORPHAN_CLEANUP=1 로 비활성 (active SSH/swarm 세션 보호 회피용 hotfix gate)
   const orphanCleanupTimer = setInterval(
@@ -2135,9 +2317,7 @@ export async function startHub({
       store.close();
     } catch {}
     if (!preserveTokenFile) {
-      try {
-        unlinkSync(TOKEN_FILE);
-      } catch {}
+      cleanupOwnedTokenFile({ token: HUB_TOKEN, port });
     }
     releaseStartupLock();
   };
@@ -2261,6 +2441,36 @@ export async function startHub({
             },
             "hub.started",
           );
+          if (port === HUB_DEFAULT_PORT) {
+            void reapExistingHubProcesses({ currentPid: process.pid }).then(
+              ({ reaped, failed }) => {
+                if (reaped.length > 0) {
+                  hubLog.info(
+                    {
+                      killed: reaped.length,
+                      processes: reaped,
+                      caller: "startup",
+                    },
+                    "hub.startup_reaper",
+                  );
+                }
+                // Surface kill-unable orphans (EPERM/defunct). Without this the
+                // reaper's failed[] is dropped and an unreapable hub survives
+                // with zero log signal (FU3 observability gap).
+                if (failed && failed.length > 0) {
+                  hubLog.warn(
+                    {
+                      failed: failed.length,
+                      failedCount: failed.length,
+                      processes: failed,
+                      caller: "startup",
+                    },
+                    "hub.startup_reaper_failed",
+                  );
+                }
+              },
+            );
+          }
           hubLog.debug(
             {
               publicDir: PUBLIC_DIR,
@@ -2288,6 +2498,7 @@ export async function startHub({
               router.stopSweeper();
               clearInterval(hitlTimer);
               clearInterval(sessionTimer);
+              clearInterval(synapsePruneTimer);
               clearInterval(rateLimitTimer);
               clearInterval(orphanCleanupTimer);
               if (idleTimer) {
@@ -2304,12 +2515,8 @@ export async function startHub({
                 synapseRegistry.destroy();
               } catch {}
               store.close();
-              try {
-                unlinkSync(PID_FILE);
-              } catch {}
-              try {
-                unlinkSync(TOKEN_FILE);
-              } catch {}
+              cleanupOwnedPidFile();
+              cleanupOwnedTokenFile({ token: HUB_TOKEN, port });
               httpServer.closeAllConnections();
               await new Promise((resolveClose) =>
                 httpServer.close(resolveClose),
@@ -2719,13 +2926,14 @@ refresh();setInterval(refresh,10000);
 
 const selfRun = process.argv[1]?.replace(/\\/g, "/").endsWith("hub/server.mjs");
 if (selfRun) {
-  const port = resolveHubPort(process.env);
+  const port = resolveHubPortForContext({
+    env: process.env,
+    cwd: process.cwd(),
+  });
   const dbPath = process.env.TFX_HUB_DB || undefined;
 
   const cleanupPidFile = () => {
-    try {
-      unlinkSync(PID_FILE);
-    } catch {}
+    cleanupOwnedPidFile();
   };
 
   process.on("unhandledRejection", (err) => {
@@ -2748,6 +2956,15 @@ if (selfRun) {
         );
         process.exit(0);
         return;
+      }
+      try {
+        const trayPath = fileURLToPath(new URL("./tray.mjs", import.meta.url));
+        const tray = spawnTrayForHub({ trayPath });
+        if (tray.status === "started") {
+          hubLog.info({ pid: tray.pid }, "tray.auto_started");
+        }
+      } catch (error) {
+        hubLog.warn({ err: error }, "tray.auto_start_failed");
       }
       const shutdown = async (signal) => {
         hubLog.info({ signal }, "hub.stopping");

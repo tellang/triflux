@@ -16,7 +16,11 @@ function resolveCandidatePath(candidate, cwd = process.cwd()) {
   return existsSync(normalized) ? normalized : null;
 }
 
-function resolveRouteScript(explicitPath, cwd = process.cwd(), env = process.env) {
+function resolveRouteScript(
+  explicitPath,
+  cwd = process.cwd(),
+  env = process.env,
+) {
   const candidates = [
     explicitPath,
     env.TFX_DELEGATOR_ROUTE_SCRIPT,
@@ -57,10 +61,15 @@ export class AntigravityRouteWorker {
   constructor(options = {}) {
     this.cwd = options.cwd || process.cwd();
     this.env = { ...process.env, ...(options.env || {}) };
-    this.routeScript = resolveRouteScript(options.routeScript, this.cwd, this.env);
+    this.routeScript = resolveRouteScript(
+      options.routeScript,
+      this.cwd,
+      this.env,
+    );
     this.bashCommand = options.bashCommand || this.env.BASH_BIN || "bash";
     this.timeoutMs =
-      Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
+      Number.isFinite(Number(options.timeoutMs)) &&
+      Number(options.timeoutMs) > 0
         ? Number(options.timeoutMs)
         : DEFAULT_TIMEOUT_MS;
     this.children = new Set();
@@ -89,7 +98,8 @@ export class AntigravityRouteWorker {
     }
 
     const timeoutMs =
-      Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
+      Number.isFinite(Number(options.timeoutMs)) &&
+      Number(options.timeoutMs) > 0
         ? Number(options.timeoutMs)
         : this.timeoutMs;
     const timeoutSec = Math.max(1, Math.ceil(timeoutMs / 1000));

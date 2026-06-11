@@ -3,9 +3,11 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
+import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..", "..");
@@ -18,20 +20,35 @@ const FIXTURE_BIN = toBashPath(
 const FAKE_BRIDGE = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "fake-bridge.mjs"),
 );
+// Stub hub-ensure so the full-route invocations below never bind/spawn a hub on
+// the canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
+const HUB_ENSURE_STUB = resolve(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "no-op-hub-ensure.mjs",
+);
+
+// Isolate tfx-route's codex config-swap to a throwaway file so the full-route
+// invocations below never mutate the real ~/.codex/config.toml under concurrency.
+const isolatedCodex = makeIsolatedCodexConfig();
+after(() => isolatedCodex.cleanup());
 
 function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
-    env: {
-      ...process.env,
+    env: hubServerTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+      TFX_CODEX_CONFIG: isolatedCodex.path,
       TFX_CODEX_TRANSPORT: "exec",
+      TFX_CTO_NORTH_STAR: "0",
       // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight 가 early-fail.
       // 라우팅/bridge 검증이 목적이므로 preflight 스킵.
       TFX_MCP_HEALTH_CHECK: "0",
+      TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
       ...extraEnv,
-    },
+    }),
   });
 }
 
