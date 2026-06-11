@@ -1316,7 +1316,7 @@ TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   # eval 제거 — \x1e (ASCII 30, Record Separator) delimited read로 인젝션 위험 차단
   # F05: `|`에서 `\x1e`로 변경 — 계정 tier/agent 이름 등 값에 `|` 포함 시 필드 분리 오류 방지
-  IFS=$'\x1e' read -r _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents < <(
+  IFS=$'\x1e' read -r _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason < <(
     "$NODE_BIN" -e '
       try {
         const c = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(),".claude","cache","tfx-preflight.json"),"utf8"));
@@ -1326,20 +1326,26 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
           c?.antigravity?.ok ? "1" : "0",
           c?.hub?.ok ? "1" : "0",
           (c?.codex_plan?.plan && c.codex_plan.plan !== "unknown" && c.codex_plan.plan !== "api") ? c.codex_plan.plan : "",
-          Array.isArray(c?.available_agents) ? c.available_agents.join(",") : ""
+          Array.isArray(c?.available_agents) ? c.available_agents.join(",") : "",
+          c?.antigravity?.status || "",
+          c?.antigravity?.auth_source || "",
+          c?.antigravity?.reason || ""
         ];
         process.stdout.write(parts.join("\x1e"));
-      } catch { process.stdout.write("0\x1e0\x1e0\x1e0\x1e\x1e"); }
+      } catch { process.stdout.write("0\x1e0\x1e0\x1e0\x1e\x1e\x1e\x1e\x1e"); }
     ' 2>/dev/null
   ) || true
   export TFX_CODEX_OK="${TFX_CODEX_OK:-${_pf_codex:-0}}"
   export TFX_GEMINI_OK="${TFX_GEMINI_OK:-${_pf_gemini:-0}}"
   export TFX_ANTIGRAVITY_OK="${TFX_ANTIGRAVITY_OK:-${_pf_antigravity:-0}}"
   export TFX_HUB_OK="${TFX_HUB_OK:-${_pf_hub:-0}}"
+  [[ -n "${_pf_antigravity_status:-}" ]] && export TFX_ANTIGRAVITY_STATUS="$_pf_antigravity_status"
+  [[ -n "${_pf_antigravity_source:-}" ]] && export TFX_ANTIGRAVITY_AUTH_SOURCE="$_pf_antigravity_source"
+  [[ -n "${_pf_antigravity_reason:-}" ]] && export TFX_ANTIGRAVITY_REASON="$_pf_antigravity_reason"
   [[ -n "${_pf_plan:-}" ]] && export TFX_CODEX_PLAN="$_pf_plan"
   [[ -n "${_pf_agents:-}" ]] && export TFX_AVAILABLE_AGENTS="$_pf_agents"
   export TFX_PREFLIGHT_LOADED=1
-  unset _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents
+  unset _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason
   TFX_CODEX_PLAN="${TFX_CODEX_PLAN:-pro}"
 fi
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
