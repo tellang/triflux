@@ -106,7 +106,7 @@ describe("runStatus", () => {
       });
 
       const parsed = JSON.parse(out.read());
-      assert.deepEqual(Object.keys(parsed), [
+      const existingKeys = [
         "schema_version",
         "generated_at",
         "repo",
@@ -115,12 +115,16 @@ describe("runStatus", () => {
         "ledger_tail",
         "live_sessions",
         "active_shards",
-      ]);
+      ];
+      for (const key of existingKeys)
+        assert.ok(key in parsed, `${key} missing`);
+      assert.ok("live_session_groups" in parsed);
       assert.deepEqual(parsed, result);
       assert.equal(parsed.schema_version, "cto-lake.v1");
       assert.equal(parsed.repo.branch, "main");
       assert.equal(parsed.sources.git.available, true);
       assert.equal(parsed.ledger_tail.length, 1);
+      assert.deepEqual(parsed.live_session_groups, []);
       assert.deepEqual(parsed.live_sessions, [
         {
           sessionId: "sess-1",
