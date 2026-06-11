@@ -29,7 +29,61 @@ function toIsoTime(value) {
   return null;
 }
 
+function shortHash(value) {
+  const str = String(value ?? "");
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = (h * 33) ^ str.charCodeAt(i);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function pathLabel(value) {
+  const str = String(value ?? "").replace(/[/\\]+$/u, "");
+  if (!str) return "";
+  const segments = str.split(/[/\\]+/u);
+  return segments[segments.length - 1] || "";
+}
+
+export function deriveRepoRootFromCwd(cwd) {
+  if (typeof cwd !== "string" || !cwd) return "";
+  if (cwd.includes("\\") || /^[A-Za-z]:/u.test(cwd)) return cwd;
+
+  const normalized = cwd.replace(/\/+$/u, "");
+  const claudeMarker = "/.claude/worktrees/";
+  const claudeIndex = normalized.indexOf(claudeMarker);
+  if (claudeIndex > 0) {
+    const suffix = normalized.slice(claudeIndex + claudeMarker.length);
+    if (/^[^/]+(?:\/|$)/u.test(suffix)) {
+      return normalized.slice(0, claudeIndex);
+    }
+  }
+
+  const codexMarker = "/.codex-swarm/";
+  const codexIndex = normalized.indexOf(codexMarker);
+  if (codexIndex > 0) {
+    const suffix = normalized.slice(codexIndex + codexMarker.length);
+    if (/^wt-[^/]+(?:\/|$)/u.test(suffix)) {
+      return normalized.slice(0, codexIndex);
+    }
+  }
+
+  return cwd;
+}
+
+function redactedCwdFields(cwd) {
+  if (typeof cwd !== "string" || !cwd) return {};
+  const repoRoot = deriveRepoRootFromCwd(cwd);
+  return {
+    cwdLabel: pathLabel(cwd),
+    cwdHash: shortHash(cwd),
+    repoRootLabel: pathLabel(repoRoot),
+    repoRootHash: shortHash(repoRoot),
+  };
+}
+
 function normalizeLiveSession(session) {
+  const cwd = typeof session?.cwd === "string" ? session.cwd : "";
   return {
     sessionId: String(session?.sessionId || ""),
     host: typeof session?.host === "string" ? session.host : "local",
@@ -48,6 +102,7 @@ function normalizeLiveSession(session) {
     started_at: toIsoTime(
       session?.started_at ?? session?.startedAt ?? session?.lastHeartbeat,
     ),
+    ...redactedCwdFields(cwd),
   };
 }
 
@@ -164,7 +219,27 @@ function deriveActiveShards(current, overlay) {
   return shards.map(normalizeActiveShard).filter((shard) => shard.shard_name);
 }
 
+function deriveLiveSessionGroups(liveSessions) {
+  const groups = new Map();
+  for (const session of liveSessions || []) {
+    if (!session?.repoRootHash) continue;
+    if (!groups.has(session.repoRootHash)) {
+      groups.set(session.repoRootHash, {
+        repoRootLabel: session.repoRootLabel || "",
+        repoRootHash: session.repoRootHash,
+        session_count: 0,
+        sessions: [],
+      });
+    }
+    const group = groups.get(session.repoRootHash);
+    group.session_count += 1;
+    group.sessions.push(session.sessionId);
+  }
+  return [...groups.values()];
+}
+
 function projectStatus(current, overlay) {
+  const liveSessions = overlay.live_sessions;
   return {
     schema_version: current?.schema_version || SCHEMA_VERSION,
     generated_at: current?.generated_at || null,
@@ -172,7 +247,8 @@ function projectStatus(current, overlay) {
     sources: current?.sources || {},
     summary: current?.summary || {},
     ledger_tail: Array.isArray(current?.ledger_tail) ? current.ledger_tail : [],
-    live_sessions: overlay.live_sessions,
+    live_sessions: liveSessions,
+    live_session_groups: deriveLiveSessionGroups(liveSessions),
     active_shards: deriveActiveShards(current, overlay),
   };
 }
