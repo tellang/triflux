@@ -26,6 +26,7 @@ import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 import { getBackend } from "./backend.mjs";
 import {
+  buildDaemonControlAuth,
   buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths as deriveClaudeControlPaths,
   dispatchClaudeDaemonJob,
@@ -1073,9 +1074,14 @@ export async function cleanupDaemonDispatches(dispatches) {
         }).catch(() => {});
       }
       if (dispatch.controlSock && dispatch.daemonShort) {
-        await killDaemonJob(dispatch.controlSock, dispatch.daemonShort).catch(
-          () => {},
-        );
+        const controlAuth = await buildDaemonControlAuth(
+          dispatch.daemonPaths?.configDir,
+        ).catch(() => ({}));
+        await killDaemonJob(
+          dispatch.controlSock,
+          dispatch.daemonShort,
+          controlAuth,
+        ).catch(() => {});
       }
     }),
   );
@@ -1253,9 +1259,16 @@ async function waitForDaemonCompletion(
         dispatch.daemonCompletionMatched = true;
         cleanupDaemonDispatches([dispatch]).catch(() => {});
       } else {
-        killDaemonJob(dispatch.controlSock, dispatch.daemonShort).catch(
-          () => {},
-        );
+        buildDaemonControlAuth(dispatch.daemonPaths?.configDir)
+          .catch(() => ({}))
+          .then((controlAuth) =>
+            killDaemonJob(
+              dispatch.controlSock,
+              dispatch.daemonShort,
+              controlAuth,
+            ),
+          )
+          .catch(() => {});
       }
       resolve(finalCompletion);
     };

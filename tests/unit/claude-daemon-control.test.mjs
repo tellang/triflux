@@ -13,6 +13,7 @@ import {
   deriveClaudeDaemonPaths,
   extractClaudeDaemonAttachText,
   findDaemonJobByShort,
+  interruptClaudeDaemonSession,
   resolveDaemonBridgeSessionId,
   sendClaudeControlRequest,
   sendKillBySessionId,
@@ -125,6 +126,23 @@ test("buildDaemonAttachRequest creates the live PTY attach request shape", () =>
       cols: 140,
       rows: 45,
       caps: { terminal: null, mux: null, ssh: false },
+    },
+  );
+  assert.deepEqual(
+    buildDaemonAttachRequest({
+      short: "deadbeef",
+      cols: 140,
+      rows: 45,
+      auth: "control-secret",
+    }),
+    {
+      proto: 1,
+      op: "attach",
+      short: "deadbeef",
+      cols: 140,
+      rows: 45,
+      caps: { terminal: null, mux: null, ssh: false },
+      auth: "control-secret",
     },
   );
   assert.throws(() => buildDaemonAttachRequest(), /short is required/);
@@ -331,6 +349,123 @@ test("attachClaudeDaemonSession pastes into a live daemon PTY and returns respon
     assert.equal(result.inputSent, true);
     assert.equal(result.matchedCompletion, true);
     assert.equal(result.text, "ATTACH_RESPONSE");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("attachClaudeDaemonSession includes auth in attach request when provided", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-attach-auth-"));
+  const sockPath = path.join(dir, "control.sock");
+  let attachedRequest = null;
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    socket.on("data", (chunk) => {
+      if (attachedRequest) return;
+      firstLine += chunk;
+      if (!firstLine.includes("\n")) return;
+      attachedRequest = JSON.parse(firstLine.slice(0, firstLine.indexOf("\n")));
+      socket.end(
+        `${JSON.stringify({
+          ok: true,
+          op: "attach",
+          via: "spare",
+          tempo: "idle",
+          state: "done",
+        })}\n`,
+      );
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await attachClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "authface",
+      auth: "attach-secret",
+      timeoutMs: 1000,
+    });
+
+    assert.deepEqual(attachedRequest, {
+      proto: 1,
+      op: "attach",
+      short: "authface",
+      cols: 240,
+      rows: 40,
+      caps: { terminal: null, mux: null, ssh: false },
+      auth: "attach-secret",
+    });
+    assert.equal(result.handshake.ok, true);
+    assert.equal(result.closed, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("interruptClaudeDaemonSession includes auth in attach request when provided", async () => {
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "claude-interrupt-auth-"),
+  );
+  const sockPath = path.join(dir, "control.sock");
+  let attachedRequest = null;
+  let attachedInput = "";
+  const server = net.createServer((socket) => {
+    socket.setEncoding("utf8");
+    let firstLine = "";
+    let attached = false;
+    socket.on("data", (chunk) => {
+      if (attached) {
+        attachedInput += chunk;
+        if (attachedInput.includes("\x1b")) socket.end("interrupted\n");
+        return;
+      }
+      firstLine += chunk;
+      if (!firstLine.includes("\n")) return;
+      attachedRequest = JSON.parse(firstLine.slice(0, firstLine.indexOf("\n")));
+      socket.write(
+        `${JSON.stringify({
+          ok: true,
+          op: "attach",
+          via: "spare",
+          tempo: "active",
+          state: "working",
+        })}\n`,
+      );
+      attached = true;
+    });
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(sockPath, resolve);
+    });
+
+    const result = await interruptClaudeDaemonSession({
+      controlSock: sockPath,
+      short: "stopface",
+      auth: "interrupt-secret",
+      timeoutMs: 1000,
+    });
+
+    assert.deepEqual(attachedRequest, {
+      proto: 1,
+      op: "attach",
+      short: "stopface",
+      cols: 240,
+      rows: 40,
+      caps: { terminal: null, mux: null, ssh: false },
+      auth: "interrupt-secret",
+    });
+    assert.equal(result.inputSent, true);
+    assert.match(attachedInput, /\x1b/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(dir, { recursive: true, force: true });
@@ -825,6 +960,13 @@ test("resolveDaemonBridgeSessionId reads Claude job state bridge id", async () =
 test("killDaemonJobBySessionId resolves short then sends kill", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-kill-session-"));
   const sockPath = path.join(dir, "control.sock");
+  const configDir = path.join(dir, "claude");
+  await fs.mkdir(path.join(configDir, "daemon"), { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "daemon", "control.key"),
+    "kill-secret\n",
+    "utf8",
+  );
   const seen = [];
   const { server } = await listenJsonServer(sockPath, (request) => {
     seen.push(request);
@@ -843,7 +985,7 @@ test("killDaemonJobBySessionId resolves short then sends kill", async () => {
 
   try {
     const result = await sendKillBySessionId({
-      daemonPaths: { controlSock: sockPath },
+      daemonPaths: { controlSock: sockPath, configDir },
       sessionId: "session-target",
     });
 
@@ -851,7 +993,42 @@ test("killDaemonJobBySessionId resolves short then sends kill", async () => {
     assert.equal(result.killed, "kill2222");
     assert.deepEqual(seen, [
       { proto: 1, op: "list" },
-      { proto: 1, op: "kill", short: "kill2222" },
+      { proto: 1, op: "kill", short: "kill2222", auth: "kill-secret" },
+    ]);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("killDaemonJobBySessionId omits auth when control.key is absent", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "claude-kill-noauth-"));
+  const sockPath = path.join(dir, "control.sock");
+  const configDir = path.join(dir, "claude");
+  const seen = [];
+  const { server } = await listenJsonServer(sockPath, (request) => {
+    seen.push(request);
+    if (request.op === "list") {
+      return {
+        ok: true,
+        op: "list",
+        jobs: [{ short: "kill3333", sessionId: "session-target" }],
+      };
+    }
+    return { ok: true, op: request.op, killed: request.short };
+  });
+
+  try {
+    const result = await sendKillBySessionId({
+      daemonPaths: { controlSock: sockPath, configDir },
+      sessionId: "session-target",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.killed, "kill3333");
+    assert.deepEqual(seen, [
+      { proto: 1, op: "list" },
+      { proto: 1, op: "kill", short: "kill3333" },
     ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));

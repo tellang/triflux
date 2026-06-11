@@ -209,6 +209,36 @@ test("teardownClaudeDaemonJob attempts every step even when killDaemonJob throws
   ]);
 });
 
+test("teardownClaudeDaemonJob passes daemon control auth to short kill", async () => {
+  const calls = [];
+  await teardownClaudeDaemonJob({
+    paths: {
+      controlSock: "/tmp/does-not-matter.sock",
+      configDir: "/tmp/claude-auth-scope",
+    },
+    short: "tear5678",
+    _deps: {
+      buildDaemonControlAuth: async (configDir) => {
+        calls.push(["buildAuth", configDir]);
+        return { auth: "teardown-secret" };
+      },
+      killDaemonJob: async (controlSock, short, options) => {
+        calls.push(["killDaemonJob", controlSock, short, options]);
+      },
+    },
+  });
+
+  assert.deepEqual(calls, [
+    ["buildAuth", "/tmp/claude-auth-scope"],
+    [
+      "killDaemonJob",
+      "/tmp/does-not-matter.sock",
+      "tear5678",
+      { auth: "teardown-secret" },
+    ],
+  ]);
+});
+
 test("dispatchClaudeDaemonJob presents daemon control.key as auth when present", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-auth-"));
   const configDir = path.join(tmp, "claude");

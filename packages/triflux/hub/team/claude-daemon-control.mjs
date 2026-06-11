@@ -468,6 +468,7 @@ export function buildDaemonAttachRequest({
   cols = DEFAULT_DAEMON_ATTACH_COLS,
   rows = 40,
   caps = { terminal: null, mux: null, ssh: false },
+  auth,
 } = {}) {
   if (!short) throw new Error("short is required");
   return {
@@ -477,6 +478,7 @@ export function buildDaemonAttachRequest({
     cols,
     rows,
     caps,
+    ...(auth ? { auth } : {}),
   };
 }
 
@@ -1010,6 +1012,7 @@ export function attachClaudeDaemonSession({
   controlSock,
   short,
   input,
+  auth,
   cols = DEFAULT_DAEMON_ATTACH_COLS,
   rows = 40,
   caps,
@@ -1117,7 +1120,9 @@ export function attachClaudeDaemonSession({
     });
     socket.on("connect", () => {
       socket.write(
-        `${JSON.stringify(buildDaemonAttachRequest({ short, cols, rows, caps }))}\n`,
+        `${JSON.stringify(
+          buildDaemonAttachRequest({ short, cols, rows, caps, auth }),
+        )}\n`,
       );
     });
     socket.on("data", (chunk) => {
@@ -1233,6 +1238,7 @@ export function attachClaudeDaemonSession({
 export function interruptClaudeDaemonSession({
   controlSock,
   short,
+  auth,
   cols = DEFAULT_DAEMON_ATTACH_COLS,
   rows = 40,
   caps,
@@ -1283,7 +1289,9 @@ export function interruptClaudeDaemonSession({
     socket.on("error", fail);
     socket.on("connect", () => {
       socket.write(
-        `${JSON.stringify(buildDaemonAttachRequest({ short, cols, rows, caps }))}\n`,
+        `${JSON.stringify(
+          buildDaemonAttachRequest({ short, cols, rows, caps, auth }),
+        )}\n`,
       );
     });
     socket.on("data", (chunk) => {
@@ -1509,6 +1517,7 @@ export async function sendKillBySessionId({
   daemonPaths,
   sessionId,
   timeoutMs = 6000,
+  auth,
 } = {}) {
   const controlSock = daemonPaths?.controlSock;
   if (!controlSock || !sessionId) {
@@ -1528,12 +1537,16 @@ export async function sendKillBySessionId({
     if (!job?.short) {
       return { ok: true, killed: false, reason: "not_found" };
     }
+    const controlAuth = auth
+      ? { auth }
+      : await buildDaemonControlAuth(daemonPaths?.configDir);
     return await sendClaudeControlRequest(
       controlSock,
       {
         proto: 1,
         op: "kill",
         short: job.short,
+        ...controlAuth,
       },
       { timeoutMs },
     );
@@ -1683,6 +1696,7 @@ export async function teardownClaudeDaemonJob({
     _deps.removeClaudeSessionProjection || removeClaudeSessionProjection;
   const killJob = _deps.killDaemonJob || killDaemonJob;
   const removeJobStateImpl = _deps.removeClaudeJobState;
+  const buildAuth = _deps.buildDaemonControlAuth || buildDaemonControlAuth;
   const resolvedControlSock = controlSock || paths?.controlSock;
   const resolvedJobsDir =
     jobsDir ||
@@ -1698,7 +1712,10 @@ export async function teardownClaudeDaemonJob({
     steps.push(sendKillBySessionId({ daemonPaths, sessionId }).catch(() => {}));
   }
   if (resolvedControlSock && short) {
-    steps.push(killJob(resolvedControlSock, short).catch(() => {}));
+    const controlAuth = await buildAuth(paths?.configDir);
+    steps.push(
+      killJob(resolvedControlSock, short, controlAuth).catch(() => {}),
+    );
   }
   if (removeJobState && removeJobStateImpl && resolvedJobsDir && short) {
     steps.push(removeJobStateImpl(resolvedJobsDir, short).catch(() => {}));
