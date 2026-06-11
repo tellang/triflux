@@ -10,6 +10,7 @@ import {
   dispatchClaudeDaemonJob,
   getProcStart,
   killDaemonJob,
+  resolveClaudeConfigDir,
   resolveDaemonBridgeSessionId,
   sendClaudeControlRequest,
   teardownClaudeDaemonJob,
@@ -22,9 +23,11 @@ import {
 } from "./claude-session-projection.mjs";
 import { createInteractiveTuiTransport } from "./interactive-tui-transport.mjs";
 
-// daemon-control 이 deriveClaudeDaemonPaths / getProcStart 의 단일 owner 다.
-// 기존 native-bridge import 경로 (headless 포함) 호환을 위해 re-export 한다.
-export { deriveClaudeDaemonPaths, getProcStart };
+// daemon-control 이 deriveClaudeDaemonPaths / getProcStart /
+// resolveClaudeConfigDir 의 단일 owner 다. configDir 해석이 갈리면 양쪽이
+// 서로 다른 control.sock hash 를 보게 되므로 (HOME 오버라이드 split-brain)
+// 로컬 복제본을 두지 않는다. 기존 import 경로 호환을 위해 re-export 한다.
+export { deriveClaudeDaemonPaths, getProcStart, resolveClaudeConfigDir };
 
 const DEFAULT_ROWS = 40;
 const DEFAULT_COLS = 120;
@@ -32,11 +35,6 @@ const MAX_TRANSCRIPT_BYTES = 64 * 1024;
 const ROSTER_LOCK_STALE_MS = 30_000;
 const ROSTER_LOCK_TIMEOUT_MS = 5_000;
 const ROSTER_LOCK_RETRY_MS = 10;
-
-export function resolveClaudeConfigDir(env = process.env) {
-  if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
-  return path.join(os.homedir(), ".claude");
-}
 
 export function buildPtyDataFrame(value) {
   const payload = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");

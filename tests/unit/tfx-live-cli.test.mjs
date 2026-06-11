@@ -18,6 +18,31 @@ async function runTfxLive(args, options = {}) {
   return result.stdout;
 }
 
+async function writeFakeBridge(dir, handlersSource) {
+  const bridgePath = path.join(dir, "fake-bridge.mjs");
+  await fs.writeFile(
+    bridgePath,
+    [
+      "#!/usr/bin/env node",
+      "import fs from 'node:fs/promises';",
+      "const [,, verb] = process.argv;",
+      "const payloadIndex = process.argv.indexOf('--payload');",
+      "const payloadFileIndex = process.argv.indexOf('--payload-file');",
+      "let payload = {};",
+      "if (payloadIndex >= 0) payload = JSON.parse(process.argv[payloadIndex + 1]);",
+      "if (payloadFileIndex >= 0) payload = JSON.parse(await fs.readFile(process.argv[payloadFileIndex + 1], 'utf8'));",
+      "const logPath = process.env.FAKE_BRIDGE_LOG;",
+      "const prior = logPath ? JSON.parse(await fs.readFile(logPath, 'utf8').catch(() => '[]')) : [];",
+      "prior.push({ verb, payload });",
+      "if (logPath) await fs.writeFile(logPath, JSON.stringify(prior));",
+      handlersSource,
+    ].join("\n"),
+    "utf8",
+  );
+  await fs.chmod(bridgePath, 0o755);
+  return bridgePath;
+}
+
 test("tfx-live help documents UDS-first auto default", async () => {
   const stdout = await runTfxLive(["--help"]);
 
@@ -89,8 +114,152 @@ test("tfx-live ask defaults Claude daemon refs to auto transport and reports fal
     assert.equal(report.kind, "uds-fallback");
     assert.equal(report.target.short, "00000000");
     assert.equal(report.bridgePath, path.resolve("hub/bridge.mjs"));
+    assert.ok(Object.hasOwn(report.probe, "daemon"));
+    assert.ok(Object.hasOwn(report.probe, "daemons"));
+    assert.ok(Object.hasOwn(report.probe, "candidateResults"));
+    assert.ok(Object.hasOwn(report.probe, "callerProvenance"));
   } finally {
     await fs.rm(bugReportDir, { recursive: true, force: true });
+  }
+});
+
+test("tfx-live probe forwards --config-dir to daemon-probe", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-probe-"));
+  try {
+    const logPath = path.join(dir, "bridge-log.json");
+    const configDir = path.join(dir, "claude-config");
+    const bridgePath = await writeFakeBridge(
+      dir,
+      [
+        "if (verb !== 'daemon-probe') process.exit(2);",
+        "console.log(JSON.stringify({ok:true,sessions:[],daemon:{configDir:payload.configDir},candidateResults:[],callerProvenance:{codexLauncher:'codex'}}));",
+      ].join("\n"),
+    );
+
+    const stdout = await runTfxLive(
+      [
+        "probe",
+        "--short",
+        "facefeed",
+        "--config-dir",
+        configDir,
+        "--bridge",
+        bridgePath,
+        "--timeout",
+        "1",
+      ],
+      { env: { ...process.env, FAKE_BRIDGE_LOG: logPath } },
+    );
+    const result = JSON.parse(stdout);
+    const log = JSON.parse(await fs.readFile(logPath, "utf8"));
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(log, [
+      {
+        verb: "daemon-probe",
+        payload: { short: "facefeed", configDir },
+      },
+    ]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("tfx-live ask --transport auto forwards --config-dir to probe and selected attach", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-ask-auto-"));
+  try {
+    const logPath = path.join(dir, "bridge-log.json");
+    const configDir = path.join(dir, "claude-config");
+    const bridgePath = await writeFakeBridge(
+      dir,
+      [
+        "if (verb === 'daemon-probe') {",
+        "  console.log(JSON.stringify({ok:true,sessions:[{short:'facefeed',sessionId:'sess-1'}],target:{short:'facefeed',sessionId:'sess-1'},daemon:{configDir:payload.configDir,configDirSource:'explicit'},candidateResults:[{configDirSource:'explicit',ok:true,sessionCount:1}],callerProvenance:{codexLauncher:'omx'}}));",
+        "} else if (verb === 'daemon-attach') {",
+        "  console.log(JSON.stringify({ok:true,text:'ATTACH_OK',raw:'ATTACH_OK',matchedCompletion:true,timedOut:false,closed:false,inputSent:true,daemon:{configDir:payload.configDir,configDirSource:'explicit'},candidateResults:[{configDirSource:'explicit',ok:true,sessionCount:1}],callerProvenance:{codexLauncher:'omx'}}));",
+        "} else process.exit(2);",
+      ].join("\n"),
+    );
+
+    const stdout = await runTfxLive(
+      [
+        "ask",
+        "--cli",
+        "claude",
+        "--transport",
+        "auto",
+        "--short",
+        "facefeed",
+        "--prompt",
+        "hello",
+        "--config-dir",
+        configDir,
+        "--bridge",
+        bridgePath,
+        "--timeout",
+        "1",
+      ],
+      { env: { ...process.env, FAKE_BRIDGE_LOG: logPath } },
+    );
+    const result = JSON.parse(stdout);
+    const log = JSON.parse(await fs.readFile(logPath, "utf8"));
+
+    assert.equal(result.done, true);
+    assert.equal(result.response, "ATTACH_OK");
+    assert.equal(result.transportSelected, "uds");
+    assert.equal(result.daemon.configDir, configDir);
+    assert.deepEqual(
+      log.map((entry) => entry.payload.configDir),
+      [configDir, configDir],
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("tfx-live interrupt forwards --config-dir to daemon-interrupt and returns provenance", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-interrupt-"));
+  try {
+    const logPath = path.join(dir, "bridge-log.json");
+    const configDir = path.join(dir, "claude-config");
+    const bridgePath = await writeFakeBridge(
+      dir,
+      [
+        "if (verb !== 'daemon-interrupt') process.exit(2);",
+        "console.log(JSON.stringify({ok:true,done:false,aborted:true,reason:'user_interrupt',inputSent:true,daemon:{configDir:payload.configDir,configDirSource:'explicit'},candidateResults:[{configDirSource:'explicit',ok:true,sessionCount:1}],callerProvenance:{codexLauncher:'omx'}}));",
+      ].join("\n"),
+    );
+
+    const stdout = await runTfxLive(
+      [
+        "interrupt",
+        "--cli",
+        "claude",
+        "--transport",
+        "uds",
+        "--short",
+        "facefeed",
+        "--config-dir",
+        configDir,
+        "--bridge",
+        bridgePath,
+        "--timeout",
+        "1",
+      ],
+      { env: { ...process.env, FAKE_BRIDGE_LOG: logPath } },
+    );
+    const result = JSON.parse(stdout);
+    const log = JSON.parse(await fs.readFile(logPath, "utf8"));
+
+    assert.equal(result.aborted, true);
+    assert.equal(result.daemon.configDir, configDir);
+    assert.deepEqual(log[0].payload, {
+      timeoutMs: 1000,
+      short: "facefeed",
+      configDir,
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });
 
