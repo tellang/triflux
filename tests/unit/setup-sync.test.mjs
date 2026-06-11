@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { execFileSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
+import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -24,6 +32,19 @@ const {
 // ── helpers ──
 
 const TMP_DIR = join(PROJECT_ROOT, "tests", ".tmp-setup-sync");
+const SETUP_TEST_HOME = mkdtempSync(join(tmpdir(), "tfx-setup-sync-"));
+const SETUP_TEST_ENV = {
+  ...process.env,
+  TRIFLUX_TEST_HOME: SETUP_TEST_HOME,
+  HOME: SETUP_TEST_HOME,
+  USERPROFILE: SETUP_TEST_HOME,
+};
+
+mkdirSync(join(SETUP_TEST_HOME, ".codex"), { recursive: true });
+
+after(() => {
+  rmSync(SETUP_TEST_HOME, { recursive: true, force: true });
+});
 
 function ensureTmpDir() {
   if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
@@ -73,6 +94,7 @@ describe("setup-sync: --sync 플래그 파싱", () => {
       {
         timeout: 15000,
         encoding: "utf8",
+        env: SETUP_TEST_ENV,
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -89,6 +111,7 @@ describe("setup-sync: --sync 플래그 파싱", () => {
       {
         timeout: 15000,
         encoding: "utf8",
+        env: SETUP_TEST_ENV,
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -316,6 +339,7 @@ describe("setup-sync: dry-run 실행", () => {
       {
         timeout: 15000,
         encoding: "utf8",
+        env: SETUP_TEST_ENV,
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -330,6 +354,7 @@ describe("setup-sync: dry-run 실행", () => {
       {
         timeout: 15000,
         encoding: "utf8",
+        env: SETUP_TEST_ENV,
         stdio: ["ignore", "pipe", "pipe"],
       },
     );

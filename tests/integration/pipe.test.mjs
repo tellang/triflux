@@ -16,6 +16,20 @@ function tempDbPath() {
   return join(dir, "test.db");
 }
 
+function setTempHubStateDir() {
+  const previous = process.env.TFX_HUB_STATE_DIR;
+  const stateDir = join(tmpdir(), `tfx-hub-pipe-state-${randomUUID()}`);
+  mkdirSync(stateDir, { recursive: true });
+  process.env.TFX_HUB_STATE_DIR = stateDir;
+  return () => {
+    if (previous == null) delete process.env.TFX_HUB_STATE_DIR;
+    else process.env.TFX_HUB_STATE_DIR = previous;
+    try {
+      rmSync(stateDir, { recursive: true, force: true });
+    } catch {}
+  };
+}
+
 async function createPipeClient(pipePath) {
   return await new Promise((resolve, reject) => {
     const socket = net.createConnection(pipePath);
@@ -158,8 +172,10 @@ const TEST_PORT = 28100 + Math.floor(Math.random() * 100);
 describe("Named Pipe 실시간 채널", () => {
   let hub;
   let dbPath;
+  let restoreHubStateDir;
 
   before(async () => {
+    restoreHubStateDir = setTempHubStateDir();
     dbPath = tempDbPath();
     hub = await startHub({ port: TEST_PORT, dbPath, host: "127.0.0.1" });
   });
@@ -169,6 +185,7 @@ describe("Named Pipe 실시간 채널", () => {
     try {
       rmSync(join(dbPath, ".."), { recursive: true, force: true });
     } catch {}
+    restoreHubStateDir?.();
   });
 
   it("구독된 에이전트는 publish 후 메시지를 실시간 push로 받아야 한다", async () => {

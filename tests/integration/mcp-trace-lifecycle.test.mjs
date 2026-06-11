@@ -21,6 +21,7 @@ let testHome;
 let previousToken;
 let previousNodeEnv;
 let previousTestHome;
+let previousStateDir;
 
 function parseJsonResponse(text, contentType) {
   if (!text || !contentType.includes("application/json")) return null;
@@ -82,6 +83,7 @@ describe("MCP lifecycle trace", () => {
     previousToken = process.env.TFX_HUB_TOKEN;
     previousNodeEnv = process.env.NODE_ENV;
     previousTestHome = process.env.TRIFLUX_TEST_HOME;
+    previousStateDir = process.env.TFX_HUB_STATE_DIR;
     delete process.env.TFX_HUB_TOKEN;
     process.env.NODE_ENV = "test";
     reset();
@@ -90,6 +92,7 @@ describe("MCP lifecycle trace", () => {
     mkdirSync(dbDir, { recursive: true });
     mkdirSync(testHome, { recursive: true });
     process.env.TRIFLUX_TEST_HOME = testHome;
+    process.env.TFX_HUB_STATE_DIR = join(testHome, ".claude", "cache", "tfx-hub");
     hub = await startHub({
       port: TEST_PORT,
       dbPath: join(dbDir, "hub.db"),
@@ -119,6 +122,11 @@ describe("MCP lifecycle trace", () => {
       delete process.env.TRIFLUX_TEST_HOME;
     } else {
       process.env.TRIFLUX_TEST_HOME = previousTestHome;
+    }
+    if (previousStateDir == null) {
+      delete process.env.TFX_HUB_STATE_DIR;
+    } else {
+      process.env.TFX_HUB_STATE_DIR = previousStateDir;
     }
   });
 

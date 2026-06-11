@@ -29,10 +29,20 @@ function listenJsonServer(sockPath, handler) {
   });
 }
 
+function assertNoControlAuth(requests) {
+  assert.deepEqual(
+    requests.map((request) => Object.hasOwn(request, "auth")),
+    requests.map(() => false),
+    "cleanup control requests must not inherit host daemon auth",
+  );
+}
+
 test("cleanupDaemonDispatches removes projection and kills daemon job within 5s", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "daemon-cleanup-"));
+  const configDir = path.join(dir, "claude-config");
   const sockPath = path.join(dir, "control.sock");
   const projectionPath = path.join(dir, "sessions", "session-target.json");
+  await fs.mkdir(configDir, { recursive: true });
   await fs.mkdir(path.dirname(projectionPath), { recursive: true });
   await fs.writeFile(projectionPath, "{}\n", "utf8");
 
@@ -53,7 +63,7 @@ test("cleanupDaemonDispatches removes projection and kills daemon job within 5s"
         {
           controlSock: sockPath,
           daemonShort: "short222",
-          daemonPaths: { controlSock: sockPath },
+          daemonPaths: { controlSock: sockPath, configDir },
           sessionId: "session-target",
           sessionProjectionPath: projectionPath,
           daemonCompletionMatched: true,
@@ -72,6 +82,7 @@ test("cleanupDaemonDispatches removes projection and kills daemon job within 5s"
       { proto: 1, op: "kill", short: "short222" },
       { proto: 1, op: "kill", short: "short222" },
     ]);
+    assertNoControlAuth(requests);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(dir, { recursive: true, force: true });
@@ -84,8 +95,10 @@ test("cleanupDaemonDispatches removes projection and kills daemon job within 5s"
 // 새 객체로 교체하면 이 flip 이 유실되어 sendKillBySessionId(list→kill) 가 발사되지 않는다.
 test("cleanupDaemonDispatches honors an externally-flipped daemonCompletionMatched (by-reference)", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "daemon-flip-"));
+  const configDir = path.join(dir, "claude-config");
   const sockPath = path.join(dir, "control.sock");
   const projectionPath = path.join(dir, "sessions", "session-flip.json");
+  await fs.mkdir(configDir, { recursive: true });
   await fs.mkdir(path.dirname(projectionPath), { recursive: true });
   await fs.writeFile(projectionPath, "{}\n", "utf8");
 
@@ -105,7 +118,7 @@ test("cleanupDaemonDispatches honors an externally-flipped daemonCompletionMatch
     const record = {
       controlSock: sockPath,
       daemonShort: "flip333",
-      daemonPaths: { controlSock: sockPath },
+      daemonPaths: { controlSock: sockPath, configDir },
       sessionId: "session-flip",
       sessionProjectionPath: projectionPath,
       daemonCompletionMatched: false,
@@ -130,6 +143,7 @@ test("cleanupDaemonDispatches honors an externally-flipped daemonCompletionMatch
       killCalls.length >= 1,
       "sendKillBySessionId must still fire a kill after the flip",
     );
+    assertNoControlAuth(requests);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(dir, { recursive: true, force: true });

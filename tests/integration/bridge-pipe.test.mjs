@@ -3,13 +3,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { promisify } from "node:util";
 import { initPipelineState } from "../../hub/pipeline/state.mjs";
-import { startHub } from "../../hub/server.mjs";
 import {
   createConductorRegistry,
   setConductorRegistry,
@@ -30,8 +29,25 @@ describe("bridge.mjs pipe-first", () => {
   let hub;
   let dbPath;
   let baseUrl;
+  let homeDir;
+  let previousHome;
+  let previousUserProfile;
+  let previousStateDir;
 
   before(async () => {
+    homeDir = mkdtempSync(join(tmpdir(), "tfx-bridge-pipe-home-"));
+    const stateDir = join(homeDir, ".claude", "cache", "tfx-hub");
+    mkdirSync(stateDir, { recursive: true });
+    previousHome = process.env.HOME;
+    previousUserProfile = process.env.USERPROFILE;
+    previousStateDir = process.env.TFX_HUB_STATE_DIR;
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    process.env.TFX_HUB_STATE_DIR = stateDir;
+
+    const { startHub } = await import(
+      `../../hub/server.mjs?bridge-pipe=${randomUUID()}`
+    );
     dbPath = tempDbPath();
     hub = await startHub({ port: TEST_PORT, dbPath, host: "127.0.0.1" });
     baseUrl = `http://127.0.0.1:${TEST_PORT}`;
@@ -39,8 +55,17 @@ describe("bridge.mjs pipe-first", () => {
 
   after(async () => {
     if (hub?.stop) await hub.stop();
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+    if (previousStateDir === undefined) delete process.env.TFX_HUB_STATE_DIR;
+    else process.env.TFX_HUB_STATE_DIR = previousStateDir;
     try {
       rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    } catch {}
+    try {
+      rmSync(homeDir, { recursive: true, force: true });
     } catch {}
   });
 

@@ -12,7 +12,15 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -67,38 +75,68 @@ function createRouteHome() {
 
 // bash 실행 헬퍼 — stdout + stderr 합산 반환
 function runBash(command, extraEnv = {}) {
-  return spawnSync(BASH_EXE, ["-c", command], {
-    cwd: PROJECT_ROOT,
-    encoding: "utf8",
-    // Per-call timeout: a slow or hung command must not block the synchronous
-    // spawnSync and hang the entire suite (a describe/test-level timeout cannot
-    // interrupt a sync call). Codex-transport fixtures take ~10s; 60s headroom.
-    timeout: RUN_BASH_TIMEOUT_MS,
-    killSignal: "SIGKILL",
-    env: {
-      ...process.env,
-      TFX_TEAM_NAME: "",
-      TFX_TEAM_TASK_ID: "",
-      TFX_TEAM_AGENT_NAME: "",
-      TFX_TEAM_LEAD_NAME: "",
-      TFX_HUB_URL: "",
-      TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
-      TMUX: "",
-      TFX_CLI_MODE: "auto",
-      TFX_NO_CLAUDE_NATIVE: "0",
-      TFX_CODEX_TRANSPORT: "exec",
-      TFX_CTO_NORTH_STAR: "0",
-      TFX_WORKER_INDEX: "",
-      TFX_SEARCH_TOOL: "",
-      // #148: 테스트 환경에서는 실제 MCP probe 가 모두 dead 로 나와 early-fail 발생.
-      // 라우팅/트랜스포트 검증이 목적이므로 preflight 자체를 스킵.
-      TFX_MCP_HEALTH_CHECK: "0",
-      // Fixture config is intentionally tiny but valid. Production keeps the
-      // small-config corruption guard unless a caller opts in explicitly.
-      TFX_ALLOW_SMALL_CODEX_CONFIG: "1",
-      ...extraEnv,
-    },
-  });
+  const fallbackHome = extraEnv.HOME ? null : createRouteHome();
+  const home = extraEnv.HOME ?? fallbackHome;
+  const outputDir = mkdtempSync(join(tmpdir(), "tfx-route-output-"));
+  const stdoutPath = join(outputDir, "stdout.log");
+  const stderrPath = join(outputDir, "stderr.log");
+  const stdoutFd = openSync(stdoutPath, "w+");
+  const stderrFd = openSync(stderrPath, "w+");
+  let closed = false;
+
+  const closeOutput = () => {
+    if (closed) return;
+    closed = true;
+    closeSync(stdoutFd);
+    closeSync(stderrFd);
+  };
+
+  try {
+    const result = spawnSync(BASH_EXE, ["-c", command], {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+      // Per-call timeout: a slow or hung command must not block the synchronous
+      // spawnSync and hang the entire suite (a describe/test-level timeout cannot
+      // interrupt a sync call). Codex-transport fixtures take ~10s; 60s headroom.
+      timeout: RUN_BASH_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+      stdio: ["ignore", stdoutFd, stderrFd],
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        TRIFLUX_TEST_HOME: home,
+        TFX_TEAM_NAME: "",
+        TFX_TEAM_TASK_ID: "",
+        TFX_TEAM_AGENT_NAME: "",
+        TFX_TEAM_LEAD_NAME: "",
+        TFX_HUB_URL: "",
+        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
+        TMUX: "",
+        TFX_CLI_MODE: "auto",
+        TFX_NO_CLAUDE_NATIVE: "0",
+        TFX_CODEX_TRANSPORT: "exec",
+        TFX_CTO_NORTH_STAR: "0",
+        TFX_WORKER_INDEX: "",
+        TFX_SEARCH_TOOL: "",
+        // #148: 테스트 환경에서는 실제 MCP probe 가 모두 dead 로 나와 early-fail 발생.
+        // 라우팅/트랜스포트 검증이 목적이므로 preflight 자체를 스킵.
+        TFX_MCP_HEALTH_CHECK: "0",
+        // Fixture config is intentionally tiny but valid. Production keeps the
+        // small-config corruption guard unless a caller opts in explicitly.
+        TFX_ALLOW_SMALL_CODEX_CONFIG: "1",
+        ...extraEnv,
+      },
+    });
+    closeOutput();
+    result.stdout = readFileSync(stdoutPath, "utf8");
+    result.stderr = readFileSync(stderrPath, "utf8");
+    return result;
+  } finally {
+    closeOutput();
+    rmSync(outputDir, { recursive: true, force: true });
+    if (fallbackHome) rmSync(fallbackHome, { recursive: true, force: true });
+  }
 }
 
 // stdout + stderr 합산 문자열
@@ -123,6 +161,7 @@ function fixtureEnv(extraEnv = {}) {
     PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
     HOME: home,
     USERPROFILE: home,
+    TRIFLUX_TEST_HOME: home,
   };
 }
 

@@ -101,7 +101,10 @@ describe("env-probe detectCodexAuthState", () => {
 describe("env-probe hub port resolution", () => {
   it("resolveDefaultStatusUrl honors TFX_HUB_PORT", () => {
     assert.equal(
-      resolveDefaultStatusUrl({ TFX_HUB_PORT: "30123" }),
+      resolveDefaultStatusUrl({
+        TFX_HUB_PORT: "30123",
+        TFX_HUB_ALLOW_EPHEMERAL_PORT: "1",
+      }),
       "http://127.0.0.1:30123/status",
     );
     assert.equal(
@@ -122,7 +125,9 @@ describe("env-probe hub port resolution", () => {
 
   it("checkHub probes and restarts using the env-selected port", () => {
     const originalPort = process.env.TFX_HUB_PORT;
+    const originalAllowEphemeral = process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT;
     process.env.TFX_HUB_PORT = "30124";
+    process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT = "1";
     const commands = [];
     const spawnCalls = [];
     let attempts = 0;
@@ -153,6 +158,11 @@ describe("env-probe hub port resolution", () => {
     } finally {
       if (originalPort === undefined) delete process.env.TFX_HUB_PORT;
       else process.env.TFX_HUB_PORT = originalPort;
+      if (originalAllowEphemeral === undefined) {
+        delete process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT;
+      } else {
+        process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT = originalAllowEphemeral;
+      }
     }
   });
 
