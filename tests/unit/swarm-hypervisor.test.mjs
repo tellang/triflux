@@ -590,7 +590,7 @@ describe("swarm-hypervisor", () => {
         events.some(
           (entry) =>
             entry.event === "redundant_completion_rejected" &&
-            entry.reason === "worker_self_reported_failure:OAuth timeout",
+            entry.reason === "worker_reported_failed:OAuth timeout",
         ),
       );
       assert.equal(
@@ -1124,6 +1124,11 @@ describe("swarm-hypervisor", () => {
       assert.ok(
         conductors[0].sessionConfig.prompt.includes(
           "Lease-scoped Acceptance / Lint Guard",
+        ),
+      );
+      assert.ok(
+        conductors[0].sessionConfig.prompt.includes(
+          `작업 루트(절대경로): ${workdir}/.codex-swarm/wt-worker-a — 아래 lease 경로와 모든 상대경로는 이 루트 기준으로만 해석한다.`,
         ),
       );
       assert.ok(conductors[0].sessionConfig.prompt.includes("- src/a.mjs"));

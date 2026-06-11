@@ -367,6 +367,20 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
 // transport=exec 강제 + FULL_PROMPT 리셋 (MCP_HINT 제거) 을 trigger 한다.
 // 이 분기가 회귀하면 dead MCP 환경에서 codex-mcp.mjs 가 spawn 되어 stall 재발.
 describe("#170 transport degradation marker — source 분기 회귀 가드", () => {
+  it("MCP_HINT 는 사용자 프롬프트와 라벨+빈줄로 분리해 결합한다", () => {
+    const source = readFileSync(SCRIPT_PATH, "utf8");
+    assert.doesNotMatch(
+      source,
+      /FULL_PROMPT="\$\{PROMPT\}\. \$\{MCP_HINT\}"/,
+      "MCP_HINT 가 사용자 태스크 마지막 문장에 inline 접착되면 안 됨",
+    );
+    assert.match(
+      source,
+      /\[도구 안내\] \$\{MCP_HINT\}/,
+      "MCP_HINT 라벨 분리 결합이 사라짐",
+    );
+  });
+
   it("source 에 _TFX_MCP_DEGRADED 마커 + transport=exec 강제 분기", () => {
     const source = readFileSync(SCRIPT_PATH, "utf8");
     assert.match(
@@ -384,6 +398,34 @@ describe("#170 transport degradation marker — source 분기 회귀 가드", ()
       /FULL_PROMPT="\$PROMPT"/,
       "FULL_PROMPT 리셋 (MCP_HINT 제거) 분기가 사라짐",
     );
+  });
+
+  it("gemini/antigravity lane 도 degraded 시 MCP_HINT 를 제거한다", () => {
+    const source = readFileSync(SCRIPT_PATH, "utf8");
+    const geminiStart = source.indexOf(
+      'elif [[ "$CLI_TYPE" == "gemini" ]]; then',
+    );
+    assert.ok(geminiStart >= 0, "gemini lane not found");
+    const geminiLane = source.slice(
+      geminiStart,
+      source.indexOf(
+        'elif [[ "$CLI_TYPE" == "antigravity" ]]; then',
+        geminiStart,
+      ),
+    );
+    assert.match(geminiLane, /_TFX_MCP_DEGRADED:-0/);
+    assert.match(geminiLane, /FULL_PROMPT="\$PROMPT"/);
+
+    const agyStart = source.indexOf(
+      'elif [[ "$CLI_TYPE" == "antigravity" ]]; then',
+    );
+    assert.ok(agyStart >= 0, "antigravity lane not found");
+    const agyLane = source.slice(
+      agyStart,
+      source.indexOf('elif [[ "$CLI_TYPE" == "claude" ]]; then', agyStart),
+    );
+    assert.match(agyLane, /_TFX_MCP_DEGRADED:-0/);
+    assert.match(agyLane, /FULL_PROMPT="\$PROMPT"/);
   });
 
   it("source 에 TFX_MCP_FAIL_ON_ALL_DEAD opt-in 분기 포함", () => {

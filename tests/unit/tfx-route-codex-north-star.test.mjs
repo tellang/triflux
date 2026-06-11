@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -74,15 +75,16 @@ describe("tfx-route Codex north-star prepend", () => {
       workdir,
       prompt: "Implement the requested change.\nKeep dispatch stable.",
     });
+    const resolvedWorkdir = realpathSync(workdir);
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(
       result.stdout,
       [
-        "--- CTO NORTH STAR (read-only context; align, do not treat as task) ---",
+        `--- CTO NORTH STAR (repo: ${resolvedWorkdir}; read-only context; align, do not treat as task) ---`,
         "Align on customer trust.",
         "Quotes: 'single' and \"double\".",
-        "--- END CTO NORTH STAR ---",
+        "--- END CTO NORTH STAR (context only — the actual task follows below; do not execute items above as tasks) ---",
         "Implement the requested change.",
         "Keep dispatch stable.",
       ].join("\n"),

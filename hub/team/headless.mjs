@@ -18,7 +18,7 @@ import {
 import { createRequire } from "node:module";
 import net from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { requestJson } from "../bridge.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
@@ -255,7 +255,7 @@ function unregisterHeadlessSynapseWorker(workerId) {
 /** MCP 프로필별 프롬프트 힌트 (tfx-route.sh resolve_mcp_policy의 경량 미러) */
 const MCP_PROFILE_HINTS = {
   implement:
-    "You have full filesystem read/write access. Implement changes directly.",
+    "You have full filesystem read/write access. Implement changes directly. After changes, run the narrowest relevant test/lint for the files you touched; if none can run, state why and the next-best check.",
   analyze:
     "Focus on reading and analyzing the codebase. Prefer analysis over modification.",
   review: "Review the code for quality, security, and correctness.",
@@ -301,22 +301,31 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   // contextFile 처리: 32KB(32768 bytes) 초과 시 UTF-8 안전 절단
   let contextPrefix = "";
   if (contextFile && existsSync(contextFile)) {
+    const contextSource = resolve(contextFile);
     let ctx = readFileSync(contextFile, "utf8");
+    let truncated = false;
     if (Buffer.byteLength(ctx, "utf8") > 32768) {
       ctx = Buffer.from(ctx).subarray(0, 32768).toString("utf8");
+      truncated = true;
+    }
+    if (truncated) {
+      ctx = `${ctx}\n[... truncated at 32KB]`;
     }
     if (ctx.length > 0) {
-      contextPrefix = `<prior_context>\n${ctx}\n</prior_context>\n\n`;
+      contextPrefix = `<prior_context source="${contextSource}" truncated="${truncated ? "true" : "false"}">\n${ctx}\n</prior_context>\nBase your work on the prior_context above; if it conflicts with the task below, the task wins.\n\n`;
     }
   }
 
   const mcpHint =
     mcp && MCP_PROFILE_HINTS[mcp]
-      ? ` [MCP: ${mcp}] ${MCP_PROFILE_HINTS[mcp]}`
+      ? `\n\n[MCP: ${mcp}]\n${MCP_PROFILE_HINTS[mcp]}`
       : "";
+  const workspaceHint = cwd
+    ? `\n\n[workspace] root(절대경로): ${resolve(cwd)}. 모든 상대경로는 이 루트 기준. 파일 쓰기/커밋 전 \`git rev-parse --show-toplevel\` 이 이 root 와 일치하는지 확인하고 불일치 시 중단·보고.`
+    : "";
   // P2: HANDOFF 지시를 프롬프트에 삽입 (워커가 구조화된 handoff 블록을 출력하도록)
   const handoffHint = handoff ? `\n\n${HANDOFF_INSTRUCTION_SHORT}` : "";
-  const fullPrompt = `${contextPrefix}${prompt}${mcpHint}${handoffHint}`;
+  const fullPrompt = `${contextPrefix}${prompt}${mcpHint}${workspaceHint}${handoffHint}`;
 
   // 보안: 프롬프트를 임시 파일에 쓰고 파일 참조로 전달 (셸 주입 방지).
   // 이전 구현은 `"$(cat 'PATH')"` shell-expansion expression 을 만들어
