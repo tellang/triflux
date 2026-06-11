@@ -246,7 +246,9 @@ async function parseBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString());
 }
 
-const PID_DIR = join(homedir(), ".claude", "cache", "tfx-hub");
+const PID_DIR =
+  process.env.TFX_HUB_PID_DIR?.trim() ||
+  join(homedir(), ".claude", "cache", "tfx-hub");
 const PID_FILE = join(PID_DIR, "hub.pid");
 const TOKEN_FILE = join(homedir(), ".claude", ".tfx-hub-token");
 
@@ -1004,7 +1006,7 @@ export async function startHub({
     // DB를 npm 패키지 밖에 저장하여 npm update 시 EBUSY 방지
     // 기존: PROJECT_ROOT/.tfx/state/state.db (패키지 내부 → 락 충돌)
     // 변경: ~/.claude/cache/tfx-hub/state.db (패키지 외부 → 안전)
-    const hubCacheDir = join(homedir(), ".claude", "cache", "tfx-hub");
+    const hubCacheDir = PID_DIR;
     mkdirSync(hubCacheDir, { recursive: true });
     dbPath = join(hubCacheDir, "state.db");
   }

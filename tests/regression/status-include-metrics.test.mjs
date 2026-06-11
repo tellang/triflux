@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import { startHub } from "../../hub/server.mjs";
 import { releaseLock } from "../../hub/state.mjs";
 
 const TEST_PORT = 27889 + Math.floor(Math.random() * 1000);
@@ -16,6 +15,10 @@ let testHome;
 let previousToken;
 let previousNodeEnv;
 let previousTestHome;
+let previousHome;
+let previousUserProfile;
+let previousPidDir;
+let previousStateDir;
 
 const BASELINE_FIELDS = [
   "hub",
@@ -40,13 +43,26 @@ describe("/status include_metrics opt-in", () => {
     previousToken = process.env.TFX_HUB_TOKEN;
     previousNodeEnv = process.env.NODE_ENV;
     previousTestHome = process.env.TRIFLUX_TEST_HOME;
+    previousHome = process.env.HOME;
+    previousUserProfile = process.env.USERPROFILE;
+    previousPidDir = process.env.TFX_HUB_PID_DIR;
+    previousStateDir = process.env.TFX_HUB_STATE_DIR;
     delete process.env.TFX_HUB_TOKEN;
     process.env.NODE_ENV = "test";
     dbDir = join(tmpdir(), `tfx-status-metrics-${randomUUID()}`);
     testHome = join(dbDir, "home");
+    const hubStateDir = join(testHome, ".claude", "cache", "tfx-hub");
     mkdirSync(dbDir, { recursive: true });
     mkdirSync(testHome, { recursive: true });
+    mkdirSync(hubStateDir, { recursive: true });
+    process.env.HOME = testHome;
+    process.env.USERPROFILE = testHome;
     process.env.TRIFLUX_TEST_HOME = testHome;
+    process.env.TFX_HUB_PID_DIR = hubStateDir;
+    process.env.TFX_HUB_STATE_DIR = hubStateDir;
+    const { startHub } = await import(
+      `../../hub/server.mjs?status-metrics=${randomUUID()}`
+    );
     hub = await startHub({
       port: TEST_PORT,
       dbPath: join(dbDir, "hub.db"),
@@ -76,6 +92,26 @@ describe("/status include_metrics opt-in", () => {
       delete process.env.TRIFLUX_TEST_HOME;
     } else {
       process.env.TRIFLUX_TEST_HOME = previousTestHome;
+    }
+    if (previousHome == null) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+    if (previousUserProfile == null) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = previousUserProfile;
+    }
+    if (previousPidDir == null) {
+      delete process.env.TFX_HUB_PID_DIR;
+    } else {
+      process.env.TFX_HUB_PID_DIR = previousPidDir;
+    }
+    if (previousStateDir == null) {
+      delete process.env.TFX_HUB_STATE_DIR;
+    } else {
+      process.env.TFX_HUB_STATE_DIR = previousStateDir;
     }
   });
 

@@ -11,8 +11,12 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const HUB_SERVER_URL = pathToFileURL(resolve(ROOT, "hub", "server.mjs")).href;
 
 function withEnv(overrides, fn) {
+  const nextEnv = {
+    TFX_HUB_ALLOW_EPHEMERAL_PORT: "1",
+    ...overrides,
+  };
   const previous = new Map();
-  for (const [key, value] of Object.entries(overrides)) {
+  for (const [key, value] of Object.entries(nextEnv)) {
     previous.set(key, process.env[key]);
     if (value == null) delete process.env[key];
     else process.env[key] = value;

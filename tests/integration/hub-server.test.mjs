@@ -84,10 +84,25 @@ function cleanupTeamFixture(teamName) {
   } catch {}
 }
 
+function setTempHubStateDir(label) {
+  const previous = process.env.TFX_HUB_STATE_DIR;
+  const stateDir = join(tmpdir(), `tfx-${label}-${randomUUID()}`);
+  mkdirSync(stateDir, { recursive: true });
+  process.env.TFX_HUB_STATE_DIR = stateDir;
+  return () => {
+    if (previous == null) delete process.env.TFX_HUB_STATE_DIR;
+    else process.env.TFX_HUB_STATE_DIR = previous;
+    try {
+      rmSync(stateDir, { recursive: true, force: true });
+    } catch {}
+  };
+}
+
 describe("startHub() 라이프사이클", () => {
   let hub;
   let baseUrl;
   let previousRegistry;
+  let restoreHubStateDir;
 
   function bridgeHeaders() {
     return {
@@ -97,6 +112,7 @@ describe("startHub() 라이프사이클", () => {
   }
 
   before(async () => {
+    restoreHubStateDir = setTempHubStateDir("hub-server-main");
     process.env.TFX_HUB_TOKEN = TEST_TOKEN;
     previousRegistry = setConductorRegistry(createConductorRegistry());
     const dbPath = tempDbPath();
@@ -115,6 +131,7 @@ describe("startHub() 라이프사이클", () => {
     }
     setConductorRegistry(previousRegistry);
     delete process.env.TFX_HUB_TOKEN;
+    restoreHubStateDir?.();
   });
 
   it("startHub()는 port, host, url, pid를 포함한 객체를 반환해야 한다", () => {
@@ -909,8 +926,10 @@ describe("startHub() localhost-only 모드", () => {
   const LOCAL_ONLY_PORT = TEST_PORT + 200;
   let hub;
   let baseUrl;
+  let restoreHubStateDir;
 
   before(async () => {
+    restoreHubStateDir = setTempHubStateDir("hub-server-local");
     delete process.env.TFX_HUB_TOKEN;
     const dbPath = tempDbPath();
     hub = await startHub({
@@ -926,6 +945,7 @@ describe("startHub() localhost-only 모드", () => {
     if (hub?.stop) {
       await Promise.race([hub.stop(), new Promise((r) => setTimeout(r, 5000))]);
     }
+    restoreHubStateDir?.();
   });
 
   it("로컬 /status는 인증 없이 접근 가능해야 한다", async () => {
@@ -975,8 +995,10 @@ describe("startHub() token-required + 원격 바인드 — raw /synapse/sessions
   const REMOTE_SYNAPSE_PORT = TEST_PORT + 300;
   let hub;
   let baseUrl;
+  let restoreHubStateDir;
 
   before(async () => {
+    restoreHubStateDir = setTempHubStateDir("hub-server-remote");
     process.env.TFX_HUB_TOKEN = TEST_TOKEN;
     const dbPath = tempDbPath();
     hub = await startHub({
@@ -993,6 +1015,7 @@ describe("startHub() token-required + 원격 바인드 — raw /synapse/sessions
       await Promise.race([hub.stop(), new Promise((r) => setTimeout(r, 5000))]);
     }
     delete process.env.TFX_HUB_TOKEN;
+    restoreHubStateDir?.();
   });
 
   it("loopback + 토큰이면 raw /synapse/sessions 접근 허용 (200)", async () => {

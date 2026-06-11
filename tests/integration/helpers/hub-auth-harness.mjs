@@ -53,6 +53,7 @@ export function withEnv(overrides, fn) {
  */
 export async function createHubHarness({ token, homeDir: providedHome } = {}) {
   const homeDir = providedHome || mkdtempSync(join(tmpdir(), "hub-auth-e2e-"));
+  const hubStateDir = join(homeDir, ".claude", "cache", "tfx-hub");
   const ownsHome = !providedHome;
   let hub = null;
   let port = 0;
@@ -65,6 +66,8 @@ export async function createHubHarness({ token, homeDir: providedHome } = {}) {
         {
           HOME: homeDir,
           USERPROFILE: homeDir,
+          TFX_HUB_PID_DIR: hubStateDir,
+          TFX_HUB_STATE_DIR: hubStateDir,
           TFX_HUB_TOKEN: token ?? null,
         },
         async () => {
@@ -95,14 +98,30 @@ export async function createHubHarness({ token, homeDir: providedHome } = {}) {
     baseUrl: `http://127.0.0.1:${port}`,
     hub,
     async cleanup() {
-      await withEnv({ HOME: homeDir, USERPROFILE: homeDir }, async () => {
-        if (hub?.stop) await hub.stop();
-      });
+      await withEnv(
+        {
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          TFX_HUB_PID_DIR: hubStateDir,
+          TFX_HUB_STATE_DIR: hubStateDir,
+        },
+        async () => {
+          if (hub?.stop) await hub.stop();
+        },
+      );
     },
     async cleanupAll() {
-      await withEnv({ HOME: homeDir, USERPROFILE: homeDir }, async () => {
-        if (hub?.stop) await hub.stop();
-      });
+      await withEnv(
+        {
+          HOME: homeDir,
+          USERPROFILE: homeDir,
+          TFX_HUB_PID_DIR: hubStateDir,
+          TFX_HUB_STATE_DIR: hubStateDir,
+        },
+        async () => {
+          if (hub?.stop) await hub.stop();
+        },
+      );
       if (ownsHome) {
         try {
           rmSync(homeDir, { recursive: true, force: true });

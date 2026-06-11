@@ -188,6 +188,8 @@ describe("hub quota refresh non-blocking regression", () => {
         TFX_HUB_PROJECT_ROOT: PROJECT_ROOT,
         TFX_HUB_TEST_PORT: String(port),
         TFX_HUB_DB_DIR: dbDir,
+        TFX_HUB_PID_DIR: join(homeDir, ".claude", "cache", "tfx-hub"),
+        TFX_HUB_STATE_DIR: join(homeDir, ".claude", "cache", "tfx-hub"),
         TFX_HUB_QUOTA_PLAN: JSON.stringify(plan),
       },
     });

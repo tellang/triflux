@@ -117,10 +117,11 @@ export function spawnTrayForHub({
   trayPath,
   nodePath = process.execPath,
   env = process.env,
+  cwd = process.cwd(),
   spawnFn = spawn,
 } = {}) {
   if (env?.TFX_HUB_AUTO_TRAY === "0") return { status: "disabled" };
-  if (isWorktreeOrEphemeralHubContext({ env })) {
+  if (isWorktreeOrEphemeralHubContext({ cwd, env })) {
     return { status: "disabled", reason: "ephemeral-or-worktree-context" };
   }
   if (platform !== "darwin") return { status: "unsupported-platform" };

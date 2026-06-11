@@ -79,6 +79,7 @@ function withEnv(overrides, fn) {
 
 async function createHubHarness({ token } = {}) {
   const homeDir = SHARED_HOME_DIR;
+  const hubStateDir = join(homeDir, ".claude", "cache", "tfx-hub");
   let hub = null;
   let port = 0;
 
@@ -91,6 +92,8 @@ async function createHubHarness({ token } = {}) {
         {
           HOME: homeDir,
           USERPROFILE: homeDir,
+          TFX_HUB_PID_DIR: hubStateDir,
+          TFX_HUB_STATE_DIR: hubStateDir,
           TFX_HUB_TOKEN: token ?? null,
         },
         async () => {
@@ -125,6 +128,8 @@ async function createHubHarness({ token } = {}) {
         {
           HOME: homeDir,
           USERPROFILE: homeDir,
+          TFX_HUB_PID_DIR: hubStateDir,
+          TFX_HUB_STATE_DIR: hubStateDir,
         },
         async () => {
           if (hub?.stop) await hub.stop();

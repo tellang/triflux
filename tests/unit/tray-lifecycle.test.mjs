@@ -91,6 +91,7 @@ describe("hub/tray lifecycle", () => {
       trayPath: "/repo/hub/tray.mjs",
       nodePath: "/usr/local/bin/node",
       env: { PATH: "/bin" },
+      cwd: "/repo",
       spawnFn: (...args) => {
         spawns.push(args);
         return { pid: 5678, unref() {} };
@@ -110,6 +111,7 @@ describe("hub/tray lifecycle", () => {
       spawnTrayForHub({
         platform: "darwin",
         env: { TFX_HUB_AUTO_TRAY: "0" },
+        cwd: "/repo",
         spawnFn: () => {
           throw new Error("should not spawn");
         },
@@ -121,6 +123,7 @@ describe("hub/tray lifecycle", () => {
       spawnTrayForHub({
         platform: "linux",
         env: {},
+        cwd: "/repo",
         spawnFn: () => {
           throw new Error("should not spawn");
         },

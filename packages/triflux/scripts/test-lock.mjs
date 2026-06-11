@@ -10,11 +10,14 @@
 import { spawn } from "node:child_process";
 import {
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -317,6 +320,7 @@ function terminateChild(child, signal) {
 export function main(argv = process.argv.slice(2)) {
   const timeoutMs = parseTimeoutMs();
   const lock = acquireLock(timeoutMs);
+  const testHubPidDir = mkdtempSync(join(tmpdir(), "tfx-test-hub-pid-"));
 
   // forward args after -- to node --test
   const args = preserveForceExitFailures(expandTestArgs(argv));
@@ -327,7 +331,12 @@ export function main(argv = process.argv.slice(2)) {
   // inherited so the grand-child still streams to whoever attached to us.
   const child = spawn(process.execPath, args, {
     stdio: ["pipe", "inherit", "inherit"],
-    env: { ...process.env, TEST_LOCK_PID: String(process.pid) },
+    env: {
+      ...process.env,
+      TEST_LOCK_PID: String(process.pid),
+      TFX_HUB_PID_DIR: process.env.TFX_HUB_PID_DIR || testHubPidDir,
+      TFX_HUB_STATE_DIR: process.env.TFX_HUB_STATE_DIR || testHubPidDir,
+    },
   });
   updateChildPid(lock, child.pid);
   // Close stdin immediately so node --test never blocks waiting for input.
@@ -350,6 +359,11 @@ export function main(argv = process.argv.slice(2)) {
     finished = true;
     clearTimers();
     releaseLock();
+    try {
+      rmSync(testHubPidDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup only
+    }
     process.exit(code);
   }
 
