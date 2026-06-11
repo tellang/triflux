@@ -179,6 +179,82 @@ describe("preflight-cache Antigravity readiness", () => {
     }
   });
 
+  it("accepts raw macOS Keychain tokens without expiry metadata", async () => {
+    const homeDir = makeHome();
+    const rawToken = "x".repeat(682);
+    try {
+      const result = await runPreflight(
+        makePreflightOptions(
+          homeDir,
+          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
+          {
+            platform: "darwin",
+            keychainCredential: rawToken,
+          },
+        ),
+      );
+
+      assert.equal(result.antigravity.ok, true);
+      assert.equal(result.antigravity.status, "ready");
+      assert.equal(result.antigravity.auth_source, "keychain");
+      assert.equal(result.antigravity.reason, "keychain_token_present");
+      assert.ok(result.available_agents.includes("antigravity"));
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts macOS Keychain JSON tokens without expiry metadata", async () => {
+    const homeDir = makeHome();
+    try {
+      const result = await runPreflight(
+        makePreflightOptions(
+          homeDir,
+          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
+          {
+            platform: "darwin",
+            keychainCredential: { accessToken: "keychain-access-token" },
+          },
+        ),
+      );
+
+      assert.equal(result.antigravity.ok, true);
+      assert.equal(result.antigravity.status, "ready");
+      assert.equal(result.antigravity.auth_source, "keychain");
+      assert.equal(result.antigravity.reason, "keychain_token_present");
+      assert.ok(result.available_agents.includes("antigravity"));
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects expired macOS Keychain JSON auth", async () => {
+    const homeDir = makeHome();
+    try {
+      const result = await runPreflight(
+        makePreflightOptions(
+          homeDir,
+          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
+          {
+            platform: "darwin",
+            keychainCredential: {
+              accessToken: "expired-keychain-token",
+              expiry_date: Date.now() - 30_000,
+            },
+          },
+        ),
+      );
+
+      assert.equal(result.antigravity.ok, false);
+      assert.equal(result.antigravity.status, "not_ready");
+      assert.equal(result.antigravity.auth_source, "keychain");
+      assert.equal(result.antigravity.reason, "auth_expired");
+      assert.ok(!result.available_agents.includes("antigravity"));
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts Antigravity headless help flags emitted on stderr", async () => {
     const homeDir = makeHome({
       antigravityAuth: { expiry_date: Date.now() + READY_EXPIRY_MS },

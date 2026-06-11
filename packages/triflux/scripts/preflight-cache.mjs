@@ -88,6 +88,15 @@ function credentialReadiness(parsed, { source, path, now }) {
     };
   }
   if (!Number.isFinite(credential.expiry_date)) {
+    if (source === "keychain" && credential.access_token) {
+      return {
+        ok: true,
+        status: "ready",
+        reason: "keychain_token_present",
+        auth_source: source,
+        ...(path ? { path } : {}),
+      };
+    }
     return {
       ok: false,
       status: "unknown",
