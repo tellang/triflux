@@ -92,7 +92,12 @@ describe("MCP lifecycle trace", () => {
     mkdirSync(dbDir, { recursive: true });
     mkdirSync(testHome, { recursive: true });
     process.env.TRIFLUX_TEST_HOME = testHome;
-    process.env.TFX_HUB_STATE_DIR = join(testHome, ".claude", "cache", "tfx-hub");
+    process.env.TFX_HUB_STATE_DIR = join(
+      testHome,
+      ".claude",
+      "cache",
+      "tfx-hub",
+    );
     hub = await startHub({
       port: TEST_PORT,
       dbPath: join(dbDir, "hub.db"),
