@@ -47,6 +47,7 @@ import {
   refreshCodexRateLimitsCache,
   scheduleCodexRateLimitRefresh,
 } from "./providers/codex.mjs";
+import { readCtoStatus } from "./providers/cto.mjs";
 // Gemini provider
 import {
   buildGeminiAuthContext,
@@ -82,6 +83,7 @@ import {
   getProviderAccountId,
   readJson,
   readStdinJson,
+  stripAnsi,
 } from "./utils.mjs";
 
 // ============================================================================
@@ -289,6 +291,19 @@ async function main() {
       null,
     ),
   ];
+
+  const ctoStatus = readCtoStatus();
+  if (ctoStatus) {
+    const rightTag =
+      CURRENT_TIER === "nano" || CURRENT_TIER === "micro"
+        ? ""
+        : stripAnsi(ctoStatus.rightTag || "").trim();
+    rows.push({
+      prefix: `${bold(claudeOrange("^"))}:`,
+      left: `${dim("cto:")}${stripAnsi(ctoStatus.line)}`,
+      right: rightTag ? dim(rightTag) : "",
+    });
+  }
 
   // tfx-multi 활성 시 팀 상태 행 추가 (v2.2)
   const teamRow = getTeamRow(CURRENT_TIER);

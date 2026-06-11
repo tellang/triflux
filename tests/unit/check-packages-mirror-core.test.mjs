@@ -18,6 +18,10 @@ const CORE_MIRRORS = new Map([
     "packages/core/hub/team/retry-state-machine.mjs",
   ],
   [
+    "hub/team/claude-agent-session-normalizer.mjs",
+    "packages/core/hub/team/claude-agent-session-normalizer.mjs",
+  ],
+  [
     "hub/team/claude-daemon-control.mjs",
     "packages/core/hub/team/claude-daemon-control.mjs",
   ],

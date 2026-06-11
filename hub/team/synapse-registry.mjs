@@ -5,6 +5,8 @@ const DEFAULT_LOCAL_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_LOCAL_TIMEOUT_MS = 30_000;
 const DEFAULT_REMOTE_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_REMOTE_TIMEOUT_MS = 90_000;
+const DEFAULT_EXPIRE_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_CLEAN_EXPIRE_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 // Interactive (Claude/Codex) sessions idle for long stretches; a 30s local
 // timeout produces stale false-positives. 5-minute TTL + an `idle` state
 // distinguishes "alive but inactive" from "presumed dead".
@@ -20,6 +22,27 @@ function normalizeSessionId(sessionId) {
 
 function normalizeSessionKind(raw) {
   return VALID_SESSION_KINDS.has(raw) ? raw : "headless";
+}
+
+function normalizeDurationMs(raw, fallback) {
+  if (raw == null) return fallback;
+  const str = String(raw).trim();
+  if (!str) return fallback;
+  const parsed = Number(str);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function defaultCleanExpireTimeoutMs() {
+  return normalizeDurationMs(
+    process.env.TFX_SYNAPSE_CLEAN_EXPIRE_MS,
+    DEFAULT_CLEAN_EXPIRE_TIMEOUT_MS,
+  );
+}
+
+function hasDirtyFiles(session) {
+  return Array.isArray(session?.dirtyFiles)
+    ? session.dirtyFiles.some((file) => typeof file === "string" && file)
+    : false;
 }
 
 // A session is "live" while active OR idle. Idle is an interactive session that
@@ -133,6 +156,8 @@ export function createSynapseRegistry(opts = {}) {
     remoteTimeoutMs = DEFAULT_REMOTE_TIMEOUT_MS,
     interactiveHeartbeatIntervalMs = DEFAULT_INTERACTIVE_HEARTBEAT_INTERVAL_MS,
     interactiveTimeoutMs = DEFAULT_INTERACTIVE_TIMEOUT_MS,
+    expireTimeoutMs = DEFAULT_EXPIRE_TIMEOUT_MS,
+    cleanExpireTimeoutMs = defaultCleanExpireTimeoutMs(),
   } = opts;
 
   const sessions = new Map();
@@ -355,10 +380,93 @@ export function createSynapseRegistry(opts = {}) {
     return true;
   }
 
+  // stale/expired 세션이 cutoff 넘게 누적되면 Map에서 제거.
+  // live(active/idle)는 lastHeartbeat가 오래돼도 보존 — git-preflight dirty-file 가드가 의존.
+  // Dirty stale rows keep the historical 24h window because same-id resume
+  // revives their dirty-file guard; clean stale rows expire quickly to avoid
+  // daily dummy rows after overnight operator gaps.
+  function pruneExpired(opts2 = {}) {
+    if (destroyed) return { removed: [], count: 0 };
+
+    const explicitCutoff =
+      typeof opts2.olderThanMs === "number" ? opts2.olderThanMs : null;
+    const removed = [];
+    const currentTime = now();
+
+    for (const [sessionId, session] of sessions) {
+      const cutoff =
+        explicitCutoff ??
+        (hasDirtyFiles(session) ? expireTimeoutMs : cleanExpireTimeoutMs);
+      if (
+        isLiveStatus(session.status) ||
+        currentTime - session.lastHeartbeat <= cutoff
+      ) {
+        continue;
+      }
+
+      stopMonitor(sessionId);
+      sessions.delete(sessionId);
+      removed.push(sessionId);
+      notifyRemoved(session);
+    }
+
+    if (removed.length > 0) persist();
+    return { removed, count: removed.length };
+  }
+
   function heartbeat(sessionId, partialMeta = null) {
     const normalized = normalizeSessionId(sessionId);
     const session = sessions.get(normalized);
-    if (!session) return false;
+    if (!session) {
+      // self-heal은 위치 정보(worktreePath 또는 cwd)가 있는 heartbeat에서만
+      // 발동한다. UserPromptSubmit heartbeat는 항상 worktreePath를 보내므로
+      // SessionStart register POST drop 복구 경로는 커버되고, taskSummary만 담은
+      // 빈약한 heartbeat로 위치 없는 가비지 세션이 register 되는 것은 막는다
+      // (그 경우는 기존대로 false → 400/heartbeat failed).
+      const hasLocator =
+        partialMeta &&
+        typeof partialMeta === "object" &&
+        !Array.isArray(partialMeta) &&
+        ((typeof partialMeta.worktreePath === "string" &&
+          partialMeta.worktreePath.length > 0) ||
+          (typeof partialMeta.cwd === "string" && partialMeta.cwd.length > 0));
+      const canSelfHeal = Boolean(normalized) && hasLocator;
+      if (!canSelfHeal) return false;
+
+      // 미등록 세션 heartbeat = SessionStart register POST가 drop된 경우.
+      // self-heal로 register 복구(영구 미등록 방지).
+      //
+      // sessionKind는 명시값이 없으면 "interactive"로 본다. 실제 복구 경로인
+      // heartbeatInteractiveSession은 worktreePath/host/taskSummary만 보내고
+      // sessionKind는 생략하는데, sanitizeSession 기본값("headless")으로 떨어지면
+      // 복구된 Claude 세션이 30초 local timeout을 받아 idle/5분 TTL을 잃고 곧장
+      // stale로 전이돼 getActive()/peer discovery에서 사라진다(이 PRD가 고치려던
+      // 원래 증상의 재현). heartbeat 기반 liveness로 살아나는 세션은 interactive다.
+      const sanitizedKind =
+        typeof partialMeta.sessionKind === "string"
+          ? partialMeta.sessionKind
+          : "interactive";
+      const healed = sanitizeSession(
+        {
+          ...partialMeta,
+          sessionId: normalized,
+          sessionKind: sanitizedKind,
+          status: "active",
+          lastHeartbeat: now(),
+        },
+        normalized,
+      );
+      if (!healed) return false;
+
+      sessions.set(normalized, healed);
+      startMonitor(normalized);
+      persist();
+      emitter?.emit("synapse.session.started", {
+        sessionId: normalized,
+        session: cloneSession(healed),
+      });
+      return true;
+    }
 
     const wasRemote = session.isRemote;
     const updated = { ...session, lastHeartbeat: now(), status: "active" };
@@ -492,6 +600,7 @@ export function createSynapseRegistry(opts = {}) {
   return Object.freeze({
     register,
     unregister,
+    pruneExpired,
     heartbeat,
     getActive,
     getAll,

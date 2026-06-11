@@ -50,7 +50,7 @@ describe("hub auth 공개 경로 + 상태 E2E", () => {
     }
   });
 
-  it("hub 종료 후 토큰 파일이 삭제되어야 한다", async () => {
+  it("비-canonical 포트 hub 종료 시 canonical 토큰 파일을 보존해야 한다", async () => {
     const h = await createHubHarness({ token: "cleanup-test-token" });
     const tokenFile = join(h.homeDir, ".claude", ".tfx-hub-token");
 
@@ -59,10 +59,17 @@ describe("hub auth 공개 경로 + 상태 E2E", () => {
 
       await h.cleanup();
 
+      // d0981c03 (v10.33.0 orphan-leak hotfix): cleanupOwnedTokenFile only
+      // unlinks when the hub owns the canonical port (HUB_DEFAULT_PORT=27888).
+      // The harness runs on a random non-canonical port (28400-29399), so
+      // shutdown must PRESERVE the shared token rather than clobber the primary
+      // hub's token. Pinned at the unit level by hub-server-port.test.mjs
+      // (nonCanonicalOwn === false). Asserting deletion here is impossible
+      // without binding 27888, which is the live hub (not hub-safe).
       assert.equal(
         existsSync(tokenFile),
-        false,
-        "종료 후 토큰 파일이 삭제되어야 한다",
+        true,
+        "비-canonical 포트 hub는 canonical 토큰을 삭제하지 않아야 한다 (orphan-leak 보호)",
       );
     } finally {
       try {

@@ -31,6 +31,16 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     assert.match(sh, /TFX_ROUTE_NODE_BYPASS/, "bypass guard 누락 (재귀 방지)");
   });
 
+  test("tfx-route.sh hub restart forces worktree and ephemeral contexts to 27888", () => {
+    const sh = readFileSync(BASH_SCRIPT, "utf8");
+    assert.match(sh, /is_ephemeral_hub_context\(\)/);
+    assert.match(sh, /\.claude\/worktrees/);
+    assert.match(sh, /\.worktrees/);
+    assert.match(sh, /\.codex-swarm\/wt-/);
+    assert.match(sh, /TFX_WORKER_SANDBOX_SCOPE/);
+    assert.match(sh, /if is_ephemeral_hub_context; then\s+hub_port=27888/s);
+  });
+
   test("Node 진입점이 agent-map.json 의 모든 agent 를 dispatch 한다", async () => {
     const route = await import("../tfx-route.mjs");
     const agentMap = JSON.parse(readFileSync(AGENT_MAP_PATH, "utf8"));

@@ -391,34 +391,6 @@ export function getClaudeRows(
       : tierDimBar(currentTier);
   const fTime = formatTimeCell(fiveHourReset);
   const wTime = formatTimeCellDH(weeklyReset);
-  const modelWeeklyPart = (label, percent, resetsAt, { includeTime }) => {
-    if (!hasData || percent == null || percent <= 0) return null;
-    const value = colorByProvider(
-      percent,
-      formatPercentCell(percent),
-      claudeOrange,
-    );
-    const reset = resetsAt
-      ? formatResetRemainingDayHour(resetsAt, SEVEN_DAY_MS)
-      : null;
-    const time = includeTime && reset ? ` ${dim(formatTimeCellDH(reset))}` : "";
-    return `${dim(`${label}:`)}${value}${time}`;
-  };
-  const modelWeeklyParts = ({ includeTime = false } = {}) =>
-    [
-      modelWeeklyPart(
-        "Sn",
-        claudeUsage?.sonnetWeeklyPercent,
-        claudeUsage?.sonnetWeeklyResetsAt,
-        { includeTime },
-      ),
-      modelWeeklyPart(
-        "Op",
-        claudeUsage?.opusWeeklyPercent,
-        claudeUsage?.opusWeeklyResetsAt,
-        { includeTime },
-      ),
-    ].filter(Boolean);
 
   if (currentTier === "nano" || currentTier === "micro") {
     const fShort =
@@ -435,18 +407,14 @@ export function getClaudeRows(
 
   if (currentTier === "minimal") {
     const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
-    const modelSection = modelWeeklyParts();
-    const modelSuffix = modelSection.length ? ` ${modelSection.join(" ")}` : "";
-    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${modelSuffix}${staleTag}`;
+    const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${staleTag}`;
     const right = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
     return [{ prefix, left: quotaSection, right }];
   }
 
   if (currentTier === "compact") {
     const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
-    const modelSection = modelWeeklyParts();
-    const modelSuffix = modelSection.length ? ` ${modelSection.join(" ")}` : "";
-    const quotaSection = `${dim("5h:")}${fStr} ${dim(fTime)} ${dim("1w:")}${wStr} ${dim(wTime)}${modelSuffix}${staleTag}`;
+    const quotaSection = `${dim("5h:")}${fStr} ${dim(fTime)} ${dim("1w:")}${wStr} ${dim(wTime)}${staleTag}`;
     const warning = ctxView.warningTag
       ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
       : "";
@@ -456,9 +424,7 @@ export function getClaudeRows(
 
   // full tier (>= 120 cols)
   const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
-  const modelSection = modelWeeklyParts({ includeTime: true });
-  const modelSuffix = modelSection.length ? ` ${modelSection.join(" ")}` : "";
-  const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}${modelSuffix}${staleTag}`;
+  const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}${staleTag}`;
   const warning = ctxView.warningTag
     ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
     : "";

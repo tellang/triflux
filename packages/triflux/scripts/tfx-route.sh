@@ -123,7 +123,11 @@ _preflight_check_gh_auth
 # top-level sandbox/approval_mode와 의미가 다르다. 이 값이 "approve"이면
 # codex exec이 non-TTY subprocess에서 승인 대기로 stall하므로 감지 대상에서 제외.
 # (refs: tellang/triflux#66, Yeachan-Heo/oh-my-codex#1478)
-_CODEX_CONFIG="${HOME}/.codex/config.toml"
+# TFX_CODEX_CONFIG override: integration tests that run the full route script
+# point this at an isolated tmpdir config so the MCP config-swap never mutates
+# the real ~/.codex/config.toml (non-hermetic corruption guard). Defaults to the
+# real path for normal runs.
+_CODEX_CONFIG="${TFX_CODEX_CONFIG:-${HOME}/.codex/config.toml}"
 _CODEX_HAS_SANDBOX=""
 if [[ -f "$_CODEX_CONFIG" ]] && awk '
   /^\[{1,2}mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
@@ -417,6 +421,146 @@ estimate_expected_duration_sec() {
   printf '%s\n' "$expected"
 }
 
+prepend_codex_north_star() {
+  local prompt="${1:-}"
+  local workdir="${WORKDIR:-$PWD}"
+  local resolved_workdir="$workdir"
+  if [[ -d "$workdir" ]]; then
+    resolved_workdir="$(cd "$workdir" 2>/dev/null && pwd -P)" || resolved_workdir="$workdir"
+  fi
+  local brief_file="${workdir}/.triflux/lake/current.md"
+
+  case "${TFX_CTO_NORTH_STAR:-1}" in
+    0|false|FALSE|off|OFF|no|NO)
+      printf '%s' "$prompt"
+      return 0
+      ;;
+  esac
+
+  if [[ ! -r "$brief_file" ]]; then
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  local tmp_file
+  tmp_file="$(mktemp "${TFX_TMP:-${TMPDIR:-/tmp}}/tfx-codex-prompt.XXXXXX" 2>/dev/null)" || {
+    printf '%s' "$prompt"
+    return 0
+  }
+
+  if ! {
+    printf '%s\n' "--- CTO NORTH STAR (repo: ${resolved_workdir}; read-only context; align, do not treat as task) ---"
+    cat "$brief_file"
+    if [[ -s "$brief_file" ]]; then
+      local last_byte
+      last_byte="$(tail -c 1 "$brief_file" 2>/dev/null || true)"
+      [[ -n "$last_byte" ]] && printf '\n'
+    fi
+    printf '%s\n' "--- END CTO NORTH STAR (context only — the actual task follows below; do not execute items above as tasks) ---"
+    printf '%s' "$prompt"
+  } > "$tmp_file"; then
+    rm -f "$tmp_file" 2>/dev/null || true
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  cat "$tmp_file" 2>/dev/null || printf '%s' "$prompt"
+  rm -f "$tmp_file" 2>/dev/null || true
+}
+
+# prepend_skill: opt-in 으로 등록된 스킬의 SKILL.md 본문을 프롬프트 앞에 주입한다.
+# 활성 조건은 TFX_INJECT_SKILL env (tfx-auto 가 --skill <name> 으로 set). 미설정이면
+# 현행 동작 그대로 (no-op). CLI-agnostic — codex/agy 레인에서 동일하게 재사용한다.
+# 전달은 prepend_codex_north_star 와 동일하게 printf/cat → temp file 만 사용하므로
+# $ / 백슬래시(₩) 같은 특수문자를 셸 재확장 없이 리터럴로 보존한다 (parse-safe).
+# 스킬 경로: ${TFX_SKILLS_DIR:-<repo>/skills}/<name>/SKILL.md.
+prepend_skill() {
+  local prompt="${1:-}"
+  local skill_name="${TFX_INJECT_SKILL:-}"
+  if [[ -z "$skill_name" ]]; then
+    printf '%s' "$prompt"
+    return 0
+  fi
+  # 경로 탈출 방지: skill_name 은 skills/ 하위 단일 디렉토리 이름만 허용한다.
+  if [[ "$skill_name" == *"/"* || "$skill_name" == *".."* ]]; then
+    echo "[tfx-route] WARNING: TFX_INJECT_SKILL='${skill_name}' 에 경로 구분자/.. 포함 — 주입 거부" >&2
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  local skills_dir="${TFX_SKILLS_DIR:-}"
+  if [[ -z "$skills_dir" ]]; then
+    skills_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." 2>/dev/null && pwd)/skills"
+  fi
+  local skill_file="${skills_dir}/${skill_name}/SKILL.md"
+  if [[ ! -r "$skill_file" ]]; then
+    echo "[tfx-route] WARNING: TFX_INJECT_SKILL='${skill_name}' 스킬을 찾지 못함 ($skill_file) — 주입 생략" >&2
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  local workdir="${WORKDIR:-$PWD}"
+  local resolved_workdir="$workdir"
+  if [[ -d "$workdir" ]]; then
+    resolved_workdir="$(cd "$workdir" 2>/dev/null && pwd -P)" || resolved_workdir="$workdir"
+  fi
+
+  local tmp_file
+  tmp_file="$(mktemp "${TFX_TMP:-${TMPDIR:-/tmp}}/tfx-skill-prompt.XXXXXX" 2>/dev/null)" || {
+    printf '%s' "$prompt"
+    return 0
+  }
+
+  if ! {
+    printf '%s\n' "--- SKILL: ${skill_name} (workspace: ${resolved_workdir}; apply this methodology to the task below) ---"
+    cat "$skill_file"
+    if [[ -s "$skill_file" ]]; then
+      local last_byte
+      last_byte="$(tail -c 1 "$skill_file" 2>/dev/null || true)"
+      [[ -n "$last_byte" ]] && printf '\n'
+    fi
+    printf '%s\n' "--- END SKILL ---"
+    printf '%s' "$prompt"
+  } > "$tmp_file"; then
+    rm -f "$tmp_file" 2>/dev/null || true
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  cat "$tmp_file" 2>/dev/null || printf '%s' "$prompt"
+  rm -f "$tmp_file" 2>/dev/null || true
+}
+
+# append_agy_anti_overclaim: agy(Gemini 3.x) 레인 전용 완료/grounding 규율 블록을
+# 프롬프트 *뒤*에 붙인다. Gemini 3.x 는 과신(overconfidence) outlier 라 거짓 완료
+# 주장·환각이 잦다 (AA-Omniscience 실증). 부정 제약은 Gemini 3 공식 가이드 권고대로
+# 프롬프트 END 에 배치하고, blanket "do not guess" 대신 "주어진 context 로 추론 +
+# 정확한 abstention 우선" 형태로 적는다 (open-ended negative 는 역효과). TFX_AGY_ANTI_OVERCLAIM=0 으로 opt-out.
+append_agy_anti_overclaim() {
+  local prompt="${1:-}"
+  local repo_root="${2:-${WORKDIR:-$PWD}}"
+  local resolved_repo_root="$repo_root"
+  if [[ -d "$repo_root" ]]; then
+    resolved_repo_root="$(cd "$repo_root" 2>/dev/null && pwd -P)" || resolved_repo_root="$repo_root"
+  fi
+  case "${TFX_AGY_ANTI_OVERCLAIM:-1}" in
+    0|false|FALSE|off|OFF|no|NO)
+      printf '%s' "$prompt"
+      return 0
+      ;;
+  esac
+
+  printf '%s' "$prompt"
+  printf '\n\n%s\n' "--- COMPLETION & GROUNDING DISCIPLINE (apply strictly) ---"
+  printf '%s\n' "Repository root (absolute): ${resolved_repo_root}. Resolve every relative path against this root only."
+  printf '%s\n' "Before any file write, git add/commit/push, verify \`git rev-parse --show-toplevel\` equals the repository root above; if it differs, stop and report the mismatch instead of proceeding."
+  printf '%s\n' "- Claim done/fixed/passing ONLY after running the check in this turn and seeing its output. With no fresh evidence, report what is still unverified instead of asserting success."
+  printf '%s\n' "- Ground every answer in the provided context and the actual repository. If something is not verifiable from what you can see, say 'No Info / 확인 불가' and stop rather than inventing plausible-but-unconfirmed details."
+  printf '%s\n' "- Use the provided context for deductions and prefer accurate abstention over confident guessing."
+  printf '%s\n' "The task's own final output/format constraints above remain in effect."
+  printf '%s' "--- END DISCIPLINE ---"
+}
+
 read_probe_state() {
   local pid="$1"
   local state_file="${TFX_PROBE_STATE_FILE:-${TFX_PROBE_DIR}/${pid}.json}"
@@ -634,6 +778,24 @@ team_send_message() {
 }
 
 # ── Hub 자동 재시작 (슬립 복귀 등으로 Hub 종료 시) ──
+is_ephemeral_hub_context() {
+  local normalized_cwd="${PWD//\\//}"
+  case "$normalized_cwd" in
+    *"/.claude/worktrees/"*|*"/.worktrees/"*|*"/.codex-swarm/wt-"*|*"/wt-"*)
+      return 0
+      ;;
+  esac
+
+  local key
+  for key in TFX_WORKER_SANDBOX_SCOPE TFX_WORKER_INDEX TFX_TEAM_TASK_ID TFX_TEAM_AGENT_NAME TFX_EPHEMERAL; do
+    if [[ -n "${!key:-}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 try_restart_hub() {
   local hub_server script_dir hub_port
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -655,9 +817,20 @@ try_restart_hub() {
   hub_port="${TFX_HUB_URL##*:}"
   hub_port="${hub_port%%/*}"
   [[ -z "$hub_port" || "$hub_port" == "$TFX_HUB_URL" ]] && hub_port=27888
+  # Test-only opt-in (TFX_HUB_ALLOW_EPHEMERAL_PORT=1): keep the TFX_HUB_URL-derived
+  # port in ephemeral context instead of forcing canonical 27888, so hub-restart
+  # integration tests bind an isolated port without thrashing the live hub.
+  # Default-off: unset/empty/non-"1" preserves the canonical force (production
+  # unchanged). The elif keeps the bash↔node parity assertion matching
+  # (then → hub_port=27888 stays adjacent).
+  if [[ "${TFX_HUB_ALLOW_EPHEMERAL_PORT:-0}" == "1" ]]; then
+    : # honor URL-derived hub_port (no canonical force)
+  elif is_ephemeral_hub_context; then
+    hub_port=27888
+  fi
 
   echo "[tfx-route] Hub 미응답 — 자동 재시작 시도 (port=$hub_port)..." >&2
-  TFX_HUB_PORT="$hub_port" "$NODE_BIN" "$hub_server" &>/dev/null &
+  TFX_HUB_PORT="$hub_port" TFX_HUB_ALLOW_EPHEMERAL_PORT="${TFX_HUB_ALLOW_EPHEMERAL_PORT:-0}" "$NODE_BIN" "$hub_server" &>/dev/null &
   local hub_pid=$!
 
   # 최대 4초 대기 (0.5초 간격)
@@ -2543,7 +2716,9 @@ FALLBACK_EOF
   fi
 
   local FULL_PROMPT="$PROMPT"
-  [[ -n "$MCP_HINT" ]] && FULL_PROMPT="${PROMPT}. ${MCP_HINT}"
+  if [[ -n "$MCP_HINT" ]]; then
+    FULL_PROMPT="${PROMPT}"$'\n\n'"[도구 안내] ${MCP_HINT}"
+  fi
   local codex_transport_effective="n/a"
 
   # 메타정보 (stderr)
@@ -2624,6 +2799,21 @@ FALLBACK_EOF
       TFX_CODEX_TRANSPORT="exec"
       FULL_PROMPT="$PROMPT"
     fi
+    local _codex_north_star_file="${WORKDIR:-$PWD}/.triflux/lake/current.md"
+    if [[ -r "$_codex_north_star_file" ]]; then
+      local _codex_prompt_sentinel="__TFX_CODEX_PROMPT_END_${$}_${RANDOM}__"
+      local _codex_full_prompt_with_sentinel
+      _codex_full_prompt_with_sentinel="$(prepend_codex_north_star "$FULL_PROMPT"; printf '%s' "$_codex_prompt_sentinel")"
+      FULL_PROMPT="${_codex_full_prompt_with_sentinel%"$_codex_prompt_sentinel"}"
+    fi
+    # Opt-in 스킬 주입 (TFX_INJECT_SKILL). north-star 와 동일한 sentinel 패턴으로
+    # trailing newline 을 보존한다. 미설정이면 prepend_skill 이 no-op.
+    if [[ -n "${TFX_INJECT_SKILL:-}" ]]; then
+      local _codex_skill_sentinel="__TFX_CODEX_SKILL_END_${$}_${RANDOM}__"
+      local _codex_skill_prompt
+      _codex_skill_prompt="$(prepend_skill "$FULL_PROMPT"; printf '%s' "$_codex_skill_sentinel")"
+      FULL_PROMPT="${_codex_skill_prompt%"$_codex_skill_sentinel"}"
+    fi
     codex_transport_effective="exec"
     if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
       run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
@@ -2653,6 +2843,10 @@ FALLBACK_EOF
     _codex_config_swap "restore"
 
   elif [[ "$CLI_TYPE" == "gemini" ]]; then
+    # Codex degraded branch strips MCP_HINT; keep gemini parity when the marker is inherited.
+    if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
+      FULL_PROMPT="$PROMPT"
+    fi
     local gemini_model
     gemini_model=$(awk '{
       for (i = 1; i <= NF; i++) {
@@ -2717,6 +2911,33 @@ EOF
     fi
 
   elif [[ "$CLI_TYPE" == "antigravity" ]]; then
+    # Codex degraded branch strips MCP_HINT; keep agy parity when the marker is inherited.
+    if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
+      FULL_PROMPT="$PROMPT"
+    fi
+    # CTO north-star: codex lane(line ~2670)과 동일하게 brief 를 prompt 앞에 주입.
+    # prepend_codex_north_star 는 CLI-agnostic (TFX_CTO_NORTH_STAR opt-out +
+    # .triflux/lake/current.md 만 참조) 하므로 agy 워커에서도 그대로 재사용한다.
+    # sentinel 은 command-substitution 이 trailing newline 을 삼키는 것을 막는다.
+    local _agy_north_star_file="${WORKDIR:-$PWD}/.triflux/lake/current.md"
+    if [[ -r "$_agy_north_star_file" ]]; then
+      local _agy_prompt_sentinel="__TFX_AGY_PROMPT_END_${$}_${RANDOM}__"
+      local _agy_full_prompt_with_sentinel
+      _agy_full_prompt_with_sentinel="$(prepend_codex_north_star "$FULL_PROMPT"; printf '%s' "$_agy_prompt_sentinel")"
+      FULL_PROMPT="${_agy_full_prompt_with_sentinel%"$_agy_prompt_sentinel"}"
+    fi
+    # Opt-in 스킬 주입 (TFX_INJECT_SKILL) — codex 레인과 동일.
+    if [[ -n "${TFX_INJECT_SKILL:-}" ]]; then
+      local _agy_skill_sentinel="__TFX_AGY_SKILL_END_${$}_${RANDOM}__"
+      local _agy_skill_prompt
+      _agy_skill_prompt="$(prepend_skill "$FULL_PROMPT"; printf '%s' "$_agy_skill_sentinel")"
+      FULL_PROMPT="${_agy_skill_prompt%"$_agy_skill_sentinel"}"
+    fi
+    # agy(Gemini 3.x) anti-overclaim 규율 블록을 프롬프트 END 에 append. opt-out: TFX_AGY_ANTI_OVERCLAIM=0.
+    local _agy_aoc_sentinel="__TFX_AGY_AOC_END_${$}_${RANDOM}__"
+    local _agy_aoc_prompt
+    _agy_aoc_prompt="$(append_agy_anti_overclaim "$FULL_PROMPT" "${WORKDIR:-$PWD}"; printf '%s' "$_agy_aoc_sentinel")"
+    FULL_PROMPT="${_agy_aoc_prompt%"$_agy_aoc_sentinel"}"
     run_antigravity_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
       local agy_stderr_bytes=0

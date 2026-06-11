@@ -13,8 +13,8 @@ export const MANIFEST_PATH = join(
   "mcp-enabled.json",
 );
 
-/** API 키 불필요 — 항상 활성화 for gateway-managed MCP servers */
-export const CORE_SERVERS = Object.freeze(["serena"]);
+/** API 키 불필요 — 항상 활성화 for gateway-managed MCP servers (현재 없음 — serena는 2026-06-10 core에서 제거) */
+export const CORE_SERVERS = Object.freeze([]);
 
 /** 검색 MCP — API 키 필요 */
 export const SEARCH_SERVERS = Object.freeze([

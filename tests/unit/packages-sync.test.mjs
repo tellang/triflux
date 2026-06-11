@@ -1,13 +1,15 @@
 // tests/unit/packages-sync.test.mjs — PRD-4 packages/* sync verification
 //
 // Purpose
-//  - After `npm run pack`, the root hub/workers files must be byte-identical to
+//  - After `npm run pack`, the root hub/workers files must stay synced with
 //    their packages/{core,triflux,remote}/hub/workers/ counterparts. This test
 //    enforces that contract for the two files PRD-1 and PRD-2 introduced:
 //      - hub/workers/codex-app-server-worker.mjs
 //      - hub/workers/lib/jsonrpc-stdio.mjs
 //
 // Gate semantics
+//  - packages/core and packages/triflux stay byte-identical.
+//  - packages/remote is allowed to apply pack's @triflux/core import rewrite.
 //  - If the packages/* copy does not exist at all, the test is SKIPPED with a
 //    diagnostic — this is the expected state between PRD-1/2 landing and the
 //    next `npm run pack`. Once pack runs, every package must have the file.
@@ -42,12 +44,26 @@ function sha256File(absPath) {
   return createHash("sha256").update(buf).digest("hex");
 }
 
+function packageExpectedContent(pkg, rel, rootContent) {
+  if (pkg !== "remote") return rootContent;
+  if (rel !== "hub/team/uds-orchestrator.mjs") return rootContent;
+  return rootContent.replace(
+    'from "../codex-adapter.mjs"',
+    'from "@triflux/core/hub/codex-adapter.mjs"',
+  );
+}
+
+function sha256Text(text) {
+  return createHash("sha256").update(text).digest("hex");
+}
+
 describe("packages/* sync — PRD-4 gate", () => {
   for (const rel of TRACKED_FILES) {
     describe(rel, () => {
       const rootAbs = resolve(PROJECT_ROOT, rel);
       const rootExists = existsSync(rootAbs);
-      const rootHash = rootExists ? sha256File(rootAbs) : null;
+      const rootContent = rootExists ? readFileSync(rootAbs, "utf8") : null;
+      const rootHash = rootContent ? sha256Text(rootContent) : null;
 
       it("root file exists (PRD-1/2 landed)", {
         skip: rootExists ? false : "root file missing; PRD-1/2 not yet landed",
@@ -75,11 +91,13 @@ describe("packages/* sync — PRD-4 gate", () => {
         }, () => {
           assert.equal(pkgExists, true);
           const pkgHash = sha256File(pkgAbs);
+          const expectedContent = packageExpectedContent(pkg, rel, rootContent);
+          const expectedHash = sha256Text(expectedContent);
           assert.equal(
             pkgHash,
-            rootHash,
+            expectedHash,
             `packages/${pkg}/${rel} sha256 drift from root:\n` +
-              `  root: ${rootHash}\n` +
+              `  root: ${expectedHash}\n` +
               `  pkg:  ${pkgHash}\n` +
               "Run `npm run pack` to re-sync.",
           );

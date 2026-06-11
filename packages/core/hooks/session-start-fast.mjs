@@ -10,10 +10,11 @@
 //
 // external source 훅 (session-vault 등)은 여전히 execFile로 실행된다.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  buildSynapseTaskSummary,
   drainPendingSynapse,
   heartbeatSynapseSession,
   registerSynapseSession,
@@ -37,6 +38,55 @@ function parseStartPayload(stdinData) {
   } catch {
     return {};
   }
+}
+
+function readAncestorCommands(pid = process.ppid, maxDepth = 6) {
+  if (process.platform === "win32") return [];
+  const commands = [];
+  let currentPid = Number(pid);
+  for (let depth = 0; depth < maxDepth; depth++) {
+    if (!Number.isInteger(currentPid) || currentPid <= 1) break;
+    try {
+      const output = execFileSync(
+        "ps",
+        ["-o", "ppid=", "-o", "command=", "-p", String(currentPid)],
+        {
+          encoding: "utf8",
+          timeout: 200,
+          windowsHide: true,
+        },
+      ).trim();
+      const match = output.match(/^(\d+)\s+([\s\S]+)$/);
+      if (!match) break;
+      commands.push(match[2]);
+      currentPid = Number(match[1]);
+    } catch {
+      break;
+    }
+  }
+  return commands;
+}
+
+function commandUsesClaudePrintMode(command) {
+  return /\bclaude(?:\s+\S+)*\s+(?:--print|-p)(?:\s|=|$)/u.test(
+    String(command || ""),
+  );
+}
+
+function shouldSkipInteractiveRegistration(payload, seams = {}) {
+  const declaredKind = String(
+    payload?.sessionKind || payload?.session_kind || "",
+  )
+    .trim()
+    .toLowerCase();
+  if (declaredKind === "headless") return true;
+
+  const ancestorCommands = Array.isArray(seams.ancestorCommands)
+    ? seams.ancestorCommands
+    : readAncestorCommands(seams.parentPid);
+  return ancestorCommands.some((command) =>
+    commandUsesClaudePrintMode(command),
+  );
 }
 
 /**
@@ -106,6 +156,7 @@ export function registerInteractiveSession(stdinData, seams = {}) {
     const payload = parseStartPayload(stdinData);
     const sessionId = String(payload?.session_id || "").trim();
     if (!sessionId) return;
+    if (shouldSkipInteractiveRegistration(payload, seams)) return;
     const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
 
     // 1) cwd 만으로 즉시 minimal register (블로킹 git 없음, latency 0).
@@ -128,6 +179,40 @@ export function registerInteractiveSession(stdinData, seams = {}) {
       .catch(() => {});
   } catch {
     /* best-effort — never affects session start */
+  }
+}
+
+/**
+ * UserPromptSubmit 마다 interactive 세션의 liveness 를 갱신한다.
+ * SessionStart 가 register, 이후 매 프롬프트가 heartbeat — 사용자 활동이 곧
+ * liveness 다. 이 갱신이 없으면 hub monitor 가 5분 TTL 후 세션을 stale 로 전이시켜
+ * `cto status` 의 live_sessions 가 항상 비어 보인다.
+ *
+ * heartbeat 는 fire-and-forget POST 이므로 호출측(hook-orchestrator)이
+ * process.exit 전에 drainPendingSynapse 로 flush 해야 drop 되지 않는다
+ * (cf. SessionStart 의 execute() 자체 drain).
+ *
+ * pid 는 register 와 동일하게 보내지 않는다(91-92 주석): liveness 는 TTL +
+ * heartbeat 가 담당한다.
+ *
+ * @param {string} stdinData UserPromptSubmit stdin JSON
+ * @param {object} [seams] 테스트용 injectable seam
+ * @param {Function} [seams.heartbeat] heartbeatSynapseSession 대체
+ * @returns {void}
+ */
+export function heartbeatInteractiveSession(stdinData, seams = {}) {
+  const heartbeat = seams.heartbeat || heartbeatSynapseSession;
+  try {
+    const payload = parseStartPayload(stdinData);
+    const sessionId = String(payload?.session_id || "").trim();
+    if (!sessionId) return;
+    const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
+    const partial = { worktreePath: cwd, host: "local" };
+    const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
+    if (prompt) partial.taskSummary = buildSynapseTaskSummary(prompt);
+    heartbeat(sessionId, partial);
+  } catch {
+    /* best-effort — never affects the prompt turn */
   }
 }
 

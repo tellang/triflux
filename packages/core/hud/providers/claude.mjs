@@ -395,7 +395,7 @@ export function parseClaudeUsageResponse(response) {
   // 키 자체가 부재하면 percent=null (HUD --% placeholder), utilization=null 만 0%로 처리
   const fiveHourPresent = response.five_hour != null;
   const sevenDayPresent = response.seven_day != null;
-  const result = {
+  return {
     fiveHourPercent: fiveHourPresent
       ? clampPercent(response.five_hour.utilization ?? 0)
       : null,
@@ -405,19 +405,6 @@ export function parseClaudeUsageResponse(response) {
     fiveHourResetsAt: response.five_hour?.resets_at || null,
     weeklyResetsAt: response.seven_day?.resets_at || null,
   };
-  if (response.seven_day_sonnet != null) {
-    result.sonnetWeeklyPercent = clampPercent(
-      response.seven_day_sonnet.utilization ?? 0,
-    );
-    result.sonnetWeeklyResetsAt = response.seven_day_sonnet.resets_at || null;
-  }
-  if (response.seven_day_opus != null) {
-    result.opusWeeklyPercent = clampPercent(
-      response.seven_day_opus.utilization ?? 0,
-    );
-    result.opusWeeklyResetsAt = response.seven_day_opus.resets_at || null;
-  }
-  return result;
 }
 
 // stale 캐시의 과거 resetsAt → 다음 주기로 순환 추정 (null 대신 다음 reset 시간 계산)
@@ -435,20 +422,6 @@ export function stripStaleResets(data) {
     const t = new Date(copy.weeklyResetsAt).getTime();
     if (!Number.isNaN(t))
       copy.weeklyResetsAt = new Date(
-        advanceToNextCycle(t, SEVEN_DAY_MS),
-      ).toISOString();
-  }
-  if (copy.sonnetWeeklyResetsAt) {
-    const t = new Date(copy.sonnetWeeklyResetsAt).getTime();
-    if (!Number.isNaN(t))
-      copy.sonnetWeeklyResetsAt = new Date(
-        advanceToNextCycle(t, SEVEN_DAY_MS),
-      ).toISOString();
-  }
-  if (copy.opusWeeklyResetsAt) {
-    const t = new Date(copy.opusWeeklyResetsAt).getTime();
-    if (!Number.isNaN(t))
-      copy.opusWeeklyResetsAt = new Date(
         advanceToNextCycle(t, SEVEN_DAY_MS),
       ).toISOString();
   }

@@ -15,7 +15,6 @@ $Servers = @(
   @{ Name = 'exa';          Port = 8102; Cmd = 'npx -y exa-mcp-server';                        EnvVars = @('EXA_API_KEY') }
   @{ Name = 'tavily';       Port = 8103; Cmd = 'npx -y tavily-mcp@latest';                     EnvVars = @('TAVILY_API_KEY') }
   @{ Name = 'jira';         Port = 8104; Cmd = 'npx -y mcp-jira-cloud@latest';                 EnvVars = @('JIRA_API_TOKEN', 'JIRA_EMAIL', 'JIRA_INSTANCE_URL') }
-  @{ Name = 'serena';       Port = 8105; Cmd = 'uvx --from git+https://github.com/oraios/serena serena start-mcp-server'; EnvVars = @() }
   @{ Name = 'notion';       Port = 8106; Cmd = 'npx -y @notionhq/notion-mcp-server';           EnvVars = @('NOTION_TOKEN') }
   @{ Name = 'notion-guest'; Port = 8107; Cmd = 'npx -y @notionhq/notion-mcp-server';           EnvVars = @('NOTION_TOKEN') }
 )

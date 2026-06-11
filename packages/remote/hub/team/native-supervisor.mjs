@@ -173,11 +173,15 @@ function spawnMember(member) {
         ? process.env.TERM
         : "xterm-256color",
   };
+  // Worker members get HOME-isolated sandboxes, but antigravity-family agents
+  // (agy/gemini) are carved out inside buildWorkerSandboxEnv so their keyring/
+  // OAuth auth resolves — pass member.cli so the carve-out applies in-process too.
   const sandbox =
     member.role === "worker"
       ? buildWorkerSandboxEnv({
           cwd: config.workdir || process.cwd(),
           sessionId: `${sessionName}-${member.name}`,
+          agent: member.cli,
           env: baseEnv,
         })
       : { env: {}, root: null };

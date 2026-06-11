@@ -26,6 +26,7 @@ const TEST_HOME = mkdtempSync(join(tmpdir(), "tfx-hub-ensure-test-"));
 const ORIG_USERPROFILE = process.env.USERPROFILE;
 const ORIG_HOME = process.env.HOME;
 const ORIG_TFX_HUB_PORT = process.env.TFX_HUB_PORT;
+const ORIG_TFX_HUB_URL = process.env.TFX_HUB_URL;
 
 process.env.USERPROFILE = TEST_HOME;
 process.env.HOME = TEST_HOME;
@@ -46,6 +47,8 @@ process.on("exit", () => {
   else process.env.HOME = ORIG_HOME;
   if (ORIG_TFX_HUB_PORT === undefined) delete process.env.TFX_HUB_PORT;
   else process.env.TFX_HUB_PORT = ORIG_TFX_HUB_PORT;
+  if (ORIG_TFX_HUB_URL === undefined) delete process.env.TFX_HUB_URL;
+  else process.env.TFX_HUB_URL = ORIG_TFX_HUB_URL;
   try {
     rmSync(TEST_HOME, { recursive: true, force: true });
   } catch {
@@ -62,21 +65,26 @@ function clearPid() {
   if (existsSync(HUB_PID_FILE)) rmSync(HUB_PID_FILE, { force: true });
 }
 
+function resolveTarget(options = {}) {
+  return resolveHubTarget({ cwd: TEST_HOME, ...options });
+}
+
 describe("resolveHubTarget — port cascade regression", () => {
   afterEach(() => {
     delete process.env.TFX_HUB_PORT;
+    delete process.env.TFX_HUB_URL;
     clearPid();
   });
 
   it("returns HUB_DEFAULT_PORT(27888) when no env and no pid file", () => {
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
     assert.equal(target.host, "127.0.0.1");
   });
 
   it("honors TFX_HUB_PORT env over default", () => {
     process.env.TFX_HUB_PORT = "28000";
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 28000);
   });
 
@@ -86,7 +94,7 @@ describe("resolveHubTarget — port cascade regression", () => {
     // 수정 후에는 27888 을 반환해야 한다.
     writePid({ pid: 99999, port: 29115, host: "127.0.0.1" });
 
-    const target = resolveHubTarget();
+    const target = resolveTarget();
 
     assert.equal(
       target.port,
@@ -99,27 +107,27 @@ describe("resolveHubTarget — port cascade regression", () => {
   it("env TFX_HUB_PORT wins even when pid-file has different port", () => {
     process.env.TFX_HUB_PORT = "27888";
     writePid({ pid: 99999, port: 29115 });
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
   });
 
   it("preserves loopback host hint from pid-file but not port", () => {
     writePid({ pid: 99999, port: 29115, host: "::1" });
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888, "port는 항상 default/env 기준");
     assert.equal(target.host, "::1", "loopback host 힌트는 재사용 허용");
   });
 
   it("ignores non-loopback host from pid-file", () => {
     writePid({ pid: 99999, port: 29115, host: "10.0.0.1" });
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.host, "127.0.0.1");
   });
 
   it("handles corrupted pid-file gracefully", () => {
     mkdirSync(HUB_PID_DIR, { recursive: true });
     writeFileSync(HUB_PID_FILE, "not json", "utf8");
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
     assert.equal(target.host, "127.0.0.1");
   });
@@ -128,19 +136,40 @@ describe("resolveHubTarget — port cascade regression", () => {
     // Port 0 은 TCP 에서 "OS 가 ephemeral port 할당" 의미지만 hub 에서는
     // 사용 의도 없음. envPortRaw > 0 조건으로 reject 되어 default 27888 로 fallback.
     process.env.TFX_HUB_PORT = "0";
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
   });
 
   it("treats TFX_HUB_PORT=<non-numeric> as invalid, falls back to default", () => {
     process.env.TFX_HUB_PORT = "not-a-number";
-    const target = resolveHubTarget();
+    const target = resolveTarget();
     assert.equal(target.port, 27888);
   });
 
   it("treats TFX_HUB_PORT=<negative> as invalid, falls back to default", () => {
     process.env.TFX_HUB_PORT = "-1";
-    const target = resolveHubTarget();
+    const target = resolveTarget();
+    assert.equal(target.port, 27888);
+  });
+
+  it("ignores non-standard TFX_HUB_PORT inside worktree contexts", () => {
+    process.env.TFX_HUB_PORT = "29009";
+    const target = resolveHubTarget({
+      cwd: "/repo/.worktrees/agent-a7608",
+    });
+    assert.equal(target.port, 27888);
+  });
+
+  it("ignores non-standard TFX_HUB_URL inside ephemeral worker contexts", () => {
+    delete process.env.TFX_HUB_PORT;
+    process.env.TFX_HUB_URL = "http://127.0.0.1:29132/mcp";
+    const target = resolveHubTarget({
+      cwd: "/repo",
+      env: {
+        TFX_HUB_URL: "http://127.0.0.1:29132/mcp",
+        TFX_WORKER_SANDBOX_SCOPE: "delegator-route",
+      },
+    });
     assert.equal(target.port, 27888);
   });
 });

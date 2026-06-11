@@ -36,6 +36,13 @@ export const TEAM_STATE_PATH = join(
   "tfx-hub",
   "team-state.json",
 );
+export const CTO_LAKE_CURRENT_RELATIVE_PATH = join(
+  ".triflux",
+  "lake",
+  "current.md",
+);
+export const CTO_STATUS_STALE_MS = 60 * 60 * 1000; // 1시간
+export const CTO_STATUS_LINE_MAX_CHARS = 140;
 export const CONTEXT_MONITOR_CACHE_PATH = join(
   homedir(),
   ".claude",

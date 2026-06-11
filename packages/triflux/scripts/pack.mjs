@@ -61,6 +61,7 @@ const CORE_DIRS = [
   "hub/lib",
   "hub/middleware",
   "hub/team/retry-state-machine.mjs",
+  "hub/team/claude-agent-session-normalizer.mjs",
   "hub/team/claude-daemon-control.mjs",
   "hub/team/claude-session-projection.mjs",
   // dep-free helper imported by core's session-start/end hooks (peer-discovery)
@@ -76,6 +77,17 @@ const REMOTE_FILES = [
   "hub/pipe.mjs",
   "hub/tools.mjs",
   "hub/tray.mjs",
+  "hub/hub-lifecycle.mjs",
+  "hub/tray-lifecycle.mjs",
+  "hub/mac-tray.swift",
+  "hub/mac-focus.mjs",
+  "hub/promote-penalties.mjs",
+  "hub/tray-runtime.mjs",
+  "hub/tray-state.mjs",
+  "cto/brief.mjs",
+  "cto/collect.mjs",
+  "cto/status.mjs",
+  "cto/current.schema.json",
 ];
 
 const REMOTE_DIRS = ["hub/team", "hub/workers", "hub/public"];
@@ -87,6 +99,7 @@ const TRIFLUX_DIRS = [
   "hud",
   "scripts",
   "hub",
+  "cto",
   "mesh",
   "references",
 ];
@@ -108,7 +121,16 @@ function copyItem(src, dest) {
 }
 
 function cleanDist(pkgDir) {
-  const dirs = ["hub", "bin", "skills", "scripts", "hooks", "hud", "mesh"];
+  const dirs = [
+    "hub",
+    "bin",
+    "skills",
+    "scripts",
+    "hooks",
+    "hud",
+    "mesh",
+    "cto",
+  ];
   for (const d of dirs) {
     const target = join(pkgDir, d);
     if (existsSync(target)) rmSync(target, { recursive: true, force: true });
@@ -287,7 +309,15 @@ function packTriflux() {
   console.log("\ntriflux (meta)");
   cleanDist(dest);
   // clean extra dirs that triflux now includes
-  for (const d of ["hooks", "hud", "scripts", "hub", "mesh", "references"]) {
+  for (const d of [
+    "hooks",
+    "hud",
+    "scripts",
+    "hub",
+    "cto",
+    "mesh",
+    "references",
+  ]) {
     const target = join(dest, d);
     if (existsSync(target)) rmSync(target, { recursive: true, force: true });
   }

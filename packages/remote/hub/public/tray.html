@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Triflux CTO Tray</title>
+  <style>
+    :root {
+      --bg-color: rgba(30, 30, 30, 0.76);
+      --border-color: rgba(255,255,255,0.15);
+      --text-main: #ffffff;
+      --text-muted: rgba(255,255,255,0.58);
+      --accent: #0A84FF;
+      --danger: #FF453A;
+      --success: #32D74B;
+      --warning: #FFD60A;
+      --hover-bg: rgba(255,255,255,0.1);
+    }
+    * { box-sizing: border-box; }
+    body { -webkit-font-smoothing: antialiased; margin: 0; background: transparent; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; color: var(--text-main); }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 10px; }
+    .mac-popover { width: 100%; height: 100vh; background: var(--bg-color); backdrop-filter: blur(22px) saturate(155%); -webkit-backdrop-filter: blur(22px) saturate(155%); border: 1px solid var(--border-color); border-radius: 14px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05) inset; display: flex; flex-direction: column; }
+    .mac-header { padding: 15px 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .title-area { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .mac-logo { width: 24px; height: 24px; background: linear-gradient(135deg, #0A84FF, #5E5CE6); border-radius: 6px; display: grid; place-items: center; font-weight: 700; font-size: 12px; flex: 0 0 auto; }
+    .mac-title { font-size: 14px; font-weight: 600; letter-spacing: -0.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mac-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+    .status-dot, .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
+    .status-dot.on, .dot.on { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .status-dot.off, .dot.off { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+    .dot.claude { background: #d19a66; box-shadow: 0 0 5px #d19a66; }
+    .dot.codex { background: #ffffff; box-shadow: 0 0 5px rgba(255,255,255,0.5); }
+    .dot.antigravity { background: #61afef; box-shadow: 0 0 5px #61afef; }
+    .mac-tabs { display: flex; padding: 8px; gap: 4px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .mac-tab { flex: 1; background: transparent; border: none; color: var(--text-muted); font-size: 12px; font-weight: 600; padding: 6px 8px; cursor: pointer; border-radius: 7px; }
+    .mac-tab.active { background: rgba(255,255,255,0.13); color: var(--text-main); }
+    .mac-content-area { overflow-y: auto; flex: 1; }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+    .section { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .section-title { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .stat-box { background: rgba(0,0,0,0.22); border-radius: 8px; padding: 10px; border: 1px solid rgba(255,255,255,0.06); min-width: 0; }
+    .stat-label { font-size: 10px; color: var(--text-muted); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stat-value { font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 4px; }
+    .stat-unit { font-size: 10px; font-weight: 400; color: var(--text-muted); }
+    .session-overview { display: grid; grid-template-columns: 1.25fr repeat(3, minmax(0, 0.78fr)); gap: 8px; }
+    .summary-card { min-width: 0; border-radius: 10px; padding: 9px 10px; background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.07); }
+    .summary-card.primary { background: rgba(10,132,255,0.14); border-color: rgba(10,132,255,0.24); }
+    .summary-kpi { font-size: 18px; line-height: 1; font-weight: 760; font-variant-numeric: tabular-nums; letter-spacing: -0.3px; }
+    .summary-label { margin-top: 4px; font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.76); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .summary-sub { margin-top: 2px; font-size: 9px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .models-list, .server-list, .session-list { display: flex; flex-direction: column; gap: 8px; }
+    .model-row { display: grid; grid-template-columns: minmax(76px, auto) 1fr auto; gap: 10px; align-items: center; font-size: 12px; min-width: 0; }
+    .model-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .model-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .model-icon { width: 16px; height: 16px; border-radius: 4px; background: rgba(255,255,255,0.1); display: grid; place-items: center; font-size: 10px; font-weight: 700; flex: 0 0 auto; }
+    .progress-bar-bg { height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden; min-width: 30px; }
+    .progress-bar-fill { height: 100%; border-radius: 2px; }
+    .value-pill { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .mini-card, .mcp-card { background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.06); border-radius: 9px; padding: 9px 10px; min-width: 0; }
+    .mini-head, .mcp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
+    .mini-title, .mcp-name { font-size: 12px; font-weight: 650; line-height: 1.25; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .path-text { font-size: 10px; color: var(--text-muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .focus-btn { background: transparent; border: 1px solid rgba(10,132,255,0.45); color: #64b5ff; font-size: 10px; line-height: 1; padding: 4px 7px; cursor: pointer; border-radius: 6px; flex: 0 0 auto; }
+    .focus-btn:hover { background: var(--accent); color: #fff; }
+    .agent-view { display: flex; flex-direction: column; gap: 8px; }
+    .project-group { min-width: 0; border: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.13); border-radius: 9px; overflow: hidden; }
+    .project-group > summary, .session-card > summary, .bubble-wrap > summary { list-style: none; }
+    .project-group > summary::-webkit-details-marker, .session-card > summary::-webkit-details-marker, .bubble-wrap > summary::-webkit-details-marker { display: none; }
+    .project-summary { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 9px 10px; cursor: pointer; }
+    .project-chevron { color: rgba(255,255,255,0.44); font-size: 11px; transform: rotate(-90deg); transition: transform 120ms ease; }
+    .project-group[open] .project-chevron { transform: rotate(0deg); }
+    .project-name { color: #b6b1e8; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-count { display: inline-flex; align-items: center; justify-content: center; min-height: 20px; border-radius: 999px; padding: 2px 7px; color: rgba(255,255,255,0.72); background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.07); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .project-path { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 10px; padding: 0 9px 8px 32px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .project-body { padding: 0 8px 9px; display: flex; flex-direction: column; gap: 7px; }
+    .session-card { border: 1px solid rgba(10,132,255,0.13); background: rgba(255,255,255,0.035); border-radius: 9px; overflow: hidden; }
+    .session-summary { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 9px; cursor: pointer; }
+    .session-summary-title { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; font-weight: 740; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-summary-sub { color: var(--text-muted); font-size: 10px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .session-detail { display: flex; flex-direction: column; gap: 9px; padding: 9px; border-top: 1px solid rgba(255,255,255,0.05); }
+    .detail-section { min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+    .detail-label { color: var(--text-muted); font-size: 9px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; }
+    .detail-empty { color: var(--text-muted); border: 1px dashed rgba(255,255,255,0.10); border-radius: 8px; padding: 8px; font-size: 10px; }
+    .runtime-list { display: flex; flex-direction: column; gap: 7px; }
+    .runtime-card { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.07); }
+    .runtime-main { min-width: 0; }
+    .runtime-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .runtime-command { color: rgba(255,255,255,0.90); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; font-weight: 750; }
+    .runtime-sub { color: var(--text-muted); font-size: 10px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .runtime-meta { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
+    .chat-session-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; margin-bottom: 5px; }
+    .chat-session-id { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 10px; color: rgba(255,255,255,0.78); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bubble-card { min-width: 0; }
+    .bubble-wrap { min-width: 0; }
+    .bubble-preview { display: block; cursor: pointer; border-radius: 12px; padding: 8px 9px; font-size: 11px; line-height: 1.35; color: rgba(255,255,255,0.88); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.08); max-height: 48px; overflow: hidden; }
+    .bubble-card.worker .bubble-preview { border-top-left-radius: 4px; }
+    .bubble-card.cto .bubble-preview { background: rgba(10,132,255,0.14); border-color: rgba(10,132,255,0.18); border-top-right-radius: 4px; }
+    .bubble-full { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; max-height: 190px; overflow: auto; padding: 8px; border-radius: 8px; background: rgba(0,0,0,0.28); color: rgba(255,255,255,0.82); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 10px; line-height: 1.35; }
+    .agent-line { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 5px; align-items: start; min-width: 0; padding: 3px 0; }
+    .agent-line.worker { padding-left: 10px; }
+    .agent-marker { color: rgba(255,255,255,0.46); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; line-height: 20px; text-align: center; user-select: none; }
+    .agent-body { min-width: 0; border-radius: 7px; padding: 4px 5px; }
+    .agent-body:hover { background: rgba(255,255,255,0.05); }
+    .agent-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; min-width: 0; }
+    .agent-title { color: rgba(255,255,255,0.90); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-sub { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 10px; line-height: 1.35; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-meta { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
+    .agent-state { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 11px; white-space: nowrap; }
+    .agent-state.active, .agent-state.on { color: var(--success); }
+    .agent-state.idle { color: var(--warning); }
+    .agent-state.stopped, .agent-state.stale, .agent-state.error { color: var(--danger); }
+    .badge-row, .client-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .chip { display: inline-flex; align-items: center; gap: 5px; min-height: 20px; border-radius: 999px; padding: 3px 7px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.07); font-size: 10px; color: rgba(255,255,255,0.76); }
+    .copy-chip { cursor: pointer; }
+    .copy-chip:hover { border-color: rgba(10,132,255,0.42); color: #8ec9ff; }
+    .chip.on { color: var(--success); border-color: rgba(50,215,75,0.25); background: rgba(50,215,75,0.08); }
+    .chip.partial { color: var(--warning); border-color: rgba(255,214,10,0.25); background: rgba(255,214,10,0.08); }
+    .chip.off { color: var(--danger); border-color: rgba(255,69,58,0.25); background: rgba(255,69,58,0.08); }
+    .client-chip-row { display: flex; gap: 7px; flex-wrap: wrap; }
+    .client-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; border-radius: 999px; padding: 4px 8px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.08); color: rgba(255,255,255,0.82); font-size: 11px; }
+    .client-chip strong { font-variant-numeric: tabular-nums; color: var(--text-main); }
+    .client-chip.on { border-color: rgba(50,215,75,0.24); }
+    .client-chip.partial { border-color: rgba(255,214,10,0.24); }
+    .client-chip.off { border-color: rgba(255,69,58,0.24); }
+    .agent-badge { width: 20px; height: 20px; display: inline-grid; place-items: center; flex: 0 0 auto; border-radius: 6px; font-size: 11px; font-weight: 850; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; border: 1px solid rgba(255,255,255,0.12); }
+    .agent-tag { justify-content: center; }
+    .agent-tag.claude { color: #d19a66; background: rgba(209,154,102,0.12); border-color: rgba(209,154,102,0.32); }
+    .agent-tag.codex { color: #ffffff; background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.32); }
+    .agent-tag.antigravity { color: #61afef; background: rgba(97,175,239,0.12); border-color: rgba(97,175,239,0.32); }
+    .muted { color: var(--text-muted); font-size: 11px; }
+    .status-text.on { color: var(--success); }
+    .status-text.partial { color: var(--warning); }
+    .status-text.off, .status-text.error { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <div class="mac-popover">
+    <div class="mac-header">
+      <div class="title-area"><div class="mac-logo">T</div><div class="mac-title">Triflux CTO</div></div>
+      <div class="mac-status"><span class="status-dot on"></span><span>Connected</span></div>
+    </div>
+    <div class="mac-tabs">
+      <button class="mac-tab active" onclick="switchTab('sessions', this)">Sessions</button>
+      <button class="mac-tab" onclick="switchTab('gateway', this)">Gateway MCP</button>
+    </div>
+    <div class="mac-content-area">
+      <div id="tab-sessions" class="tab-pane active"><div class="section muted">Loading sessions…</div></div>
+      <div id="tab-gateway" class="tab-pane"><div class="section muted">Loading MCP…</div></div>
+    </div>
+  </div>
+  <script>
+    const CLIENT_LABEL = { claude: 'Claude', codex: 'Codex', antigravity: 'Antigravity' };
+    const STATUS_LABEL = { on: 'ON', partial: 'PARTIAL', off: 'OFF' };
+
+    function switchTab(id, btn) {
+      document.querySelectorAll('.tab-pane').forEach(e => e.classList.remove('active'));
+      document.querySelectorAll('.mac-tab').forEach(e => e.classList.remove('active'));
+      document.getElementById('tab-' + id).classList.add('active');
+      btn.classList.add('active');
+    }
+
+    async function fetchState() {
+      try {
+        const res = await fetch('/api/tray-state');
+        const data = await res.json();
+        renderSessions(data);
+        renderGateway(data.mcp);
+        document.querySelector('.mac-status').innerHTML = '<span class="status-dot on"></span><span>Connected</span>';
+      } catch (e) {
+        console.error(e);
+        document.querySelector('.mac-status').innerHTML = '<span class="status-dot off"></span><span>Disconnected</span>';
+        document.getElementById('tab-sessions').innerHTML = '<div class="section muted">Error loading sessions…</div>';
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+    function shortId(value) { return String(value || '').substring(0, 8); }
+    function pct(count, max) { return Math.max(4, Math.min(100, max ? Math.round((count / max) * 100) : 4)); }
+    function dataAttr(value) { return escapeHtml(String(value ?? '')); }
+    function renderAgentTag(agent) {
+      if (!agent?.id) return '';
+      const initial = (agent.icon || { claude: 'C', codex: 'X', antigravity: 'A' }[agent.id] || agent.id.slice(0, 1)).toUpperCase();
+      return `<span class="agent-badge agent-tag ${escapeHtml(agent.id)}" title="${escapeHtml(agent.label || agent.id)}" aria-label="${escapeHtml(agent.label || agent.id)}">${escapeHtml(initial)}</span>`;
+    }
+    function renderCopyChip(label, value) {
+      if (!value) return '';
+      return `<span class="chip copy-chip" title="Copy ${escapeHtml(label)}" data-copy-text="${dataAttr(value)}">${escapeHtml(label)} ${escapeHtml(shortId(value))}</span>`;
+    }
+
+    function collectOpenDetailKeys(container) {
+      try {
+        return new Set([...container.querySelectorAll('details[data-open-key][open]')].map(detail => detail.dataset.openKey).filter(Boolean));
+      } catch (_err) {
+        return new Set();
+      }
+    }
+
+    function restoreOpenDetails(container, openKeys) {
+      if (!openKeys || openKeys.size === 0) return;
+      try {
+        for (const detail of container.querySelectorAll('details[data-open-key]')) {
+          if (openKeys.has(detail.dataset.openKey)) detail.open = true;
+        }
+      } catch (_err) {
+        // Test and legacy WebView fallback: missing querySelectorAll should not break rendering.
+      }
+    }
+
+    function renderRuntimeClients(runtime) {
+      const clients = Array.isArray(runtime?.summary?.clients) ? runtime.summary.clients : [];
+      if (clients.length === 0) return '<div class="mini-card muted">No runtime clients reported</div>';
+      return `<div class="client-chip-row">${clients.map(client => `
+        <span class="client-chip ${escapeHtml(client.status)}">
+          <span class="dot ${escapeHtml(client.id)}" style="background:${escapeHtml(client.color)};box-shadow:0 0 6px ${escapeHtml(client.color)}"></span>
+          <span>${escapeHtml(client.label)}</span>
+          <strong>${escapeHtml(client.count || 0)}</strong>
+        </span>
+      `).join('')}</div>`;
+    }
+
+    function liveFallbackRows(live) {
+      return live.map(session => ({
+        sessionId: session.sessionId,
+        status: session.phase || 'active',
+        agent_id: session.agent_id || session.agent?.id || '',
+        agent: session.agent || null,
+        promptText: session.promptText || '',
+        prompt: session.prompt || '',
+        userPrompt: session.userPrompt || '',
+        handoffPrompt: session.handoffPrompt || '',
+        command: session.command || '',
+        source: session.source || '',
+        conversationId: session.conversationId || '',
+        focusable: session.focusable !== false,
+        taskSummary: session.taskSummary || session.command || (session.pid ? `PID ${session.pid}` : ''),
+        pid: session.pid || '',
+        cwd: session.cwd || session.host || 'local runtime',
+        elapsed: session.elapsed || '',
+        started_at: session.started_at || null,
+      }));
+    }
+
+    function compactText(value, fallback = '') {
+      const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+      const safe = text || fallback;
+      return safe.length > 84 ? safe.slice(0, 81) + '…' : safe;
+    }
+
+    function displayPath(value) {
+      const path = String(value || '').trim();
+      if (!path) return '';
+      return path.replace(/^\/Users\/[^/]+/, '~');
+    }
+
+    function normalizeProjectPath(value) {
+      const path = String(value || '').trim();
+      if (!path) return '';
+      if (path === '/' || /^\/+$/u.test(path) || /^[A-Za-z]:[\\/]$/u.test(path)) return path;
+      return path.replace(/[\\/]+$/u, '') || path;
+    }
+
+    function projectName(value) {
+      const path = normalizeProjectPath(value);
+      if (!path) return 'local';
+      return path.split(/[\\/]/u).filter(Boolean).pop() || path;
+    }
+
+    function projectPathFor(row, hub, fallback = '') {
+      const cwd = String(row?.cwd || row?.worktreePath || '').trim();
+      if (cwd && cwd !== 'local' && cwd !== 'local runtime') return normalizeProjectPath(cwd);
+      const root = String(hub?.projectRoot || fallback || '').trim();
+      return normalizeProjectPath(root || cwd || 'local');
+    }
+
+    function getProjectGroup(groups, projectPath) {
+      const key = normalizeProjectPath(projectPath) || 'local';
+      if (!groups.has(key)) groups.set(key, { projectPath: key, ctos: [], workers: [] });
+      return groups.get(key);
+    }
+
+    function buildProjectGroups(activeSessions, liveRows, hub) {
+      const groups = new Map();
+      const fallbackProject = hub.projectRoot || activeSessions[0]?.cwd || activeSessions[0]?.worktreePath || 'local';
+      for (const session of activeSessions) {
+        getProjectGroup(groups, projectPathFor(session, hub, fallbackProject)).ctos.push(session);
+      }
+
+      const ctoIds = new Set(activeSessions.map(session => session.sessionId).filter(Boolean));
+      for (const worker of liveRows) {
+        if (ctoIds.has(worker.sessionId)) continue;
+        getProjectGroup(groups, projectPathFor(worker, hub, fallbackProject)).workers.push(worker);
+      }
+
+      if (groups.size === 0 && fallbackProject) getProjectGroup(groups, fallbackProject);
+      for (const group of groups.values()) {
+        if (group.ctos.length === 0 && group.workers.length > 0) {
+          group.ctos.push({
+            sessionId: `cto-${shortId(hub.id || group.projectPath)}`,
+            status: 'active',
+            cwd: group.projectPath,
+            taskSummary: 'CTO runtime overlay',
+            synthetic: true,
+          });
+        }
+      }
+      return [...groups.values()].sort((a, b) => a.projectPath.localeCompare(b.projectPath));
+    }
+
+    function explicitPromptText(row) {
+      return String(row?.promptText || row?.prompt || row?.userPrompt || row?.handoffPrompt || '').trim();
+    }
+
+    function numericPid(value) {
+      const text = String(value ?? '').trim();
+      if (!text) return '';
+      const pid = Number(text);
+      return Number.isFinite(pid) && pid > 0 ? pid : '';
+    }
+
+    function isRuntimeRow(row) {
+      return Boolean(numericPid(row?.pid)) || Boolean(row?.command);
+    }
+
+    function promptCandidateText(row) {
+      const explicit = explicitPromptText(row);
+      if (explicit) return explicit;
+      if (isRuntimeRow(row)) return '';
+      return String(row?.taskSummary || '').trim();
+    }
+
+    function equivalentText(left, right) {
+      return String(left || '').replace(/\s+/g, ' ').trim() === String(right || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function bubbleText(row, fallback) {
+      return promptCandidateText(row) || String(row?.command || row?.sessionKind || row?.sessionId || fallback || '').trim() || fallback;
+    }
+
+    function isSyntheticCto(row) {
+      return row?.synthetic === true || row?.sessionId?.startsWith('cto-') && row?.taskSummary === 'CTO runtime overlay';
+    }
+
+    function looksLikeRawCommand(text) {
+      const value = String(text || '').trim();
+      return /\/node_modules\/|\/bin\/|--dangerously-|model_instructions_file=|(?:^|\s)--(?:secret|token|api-key|password|pass|key)(?:[=\s]|$)|\bAuthorization\s*:|\bBearer\s+\S+|^(?:node|npm|pnpm|yarn|python(?:3)?|bash|zsh|sh|npx|bun|curl|wget)(?:\s|$)|^claude(?:\s+agents)?(?:\s|$)|^codex(?:\s|$)|^antigravity(?:\s|$)|^(?:\/|~\/|\.\/|\.\.\/|[A-Za-z]:[\\/])\S+/u.test(value);
+    }
+
+    function hasPromptText(row) {
+      const text = promptCandidateText(row);
+      const command = String(row?.command || '').trim();
+      return Boolean(text) && !isSyntheticCto(row) && !looksLikeRawCommand(text) && (!command || !equivalentText(text, command));
+    }
+
+    function commandLabel(row) {
+      const text = String(row?.command || row?.taskSummary || '').trim();
+      const agentId = row?.agent_id || row?.agent?.id || '';
+      if (/^claude\s+agents\b/u.test(text)) return 'claude agents';
+      if (/^claude\b/u.test(text)) return 'claude';
+      if (/codex(?:\s|$)|\/codex(?:\s|$)/u.test(text) || agentId === 'codex') return 'codex';
+      if (/antigravity|\bagy\b/u.test(text) || agentId === 'antigravity') return 'antigravity';
+      return agentId || 'runtime';
+    }
+
+    function renderChatBubble(row, { side = 'worker' } = {}) {
+      const sid = row.sessionId || '';
+      const pid = numericPid(row.pid);
+      const agentId = row.agent_id || row.agent?.id || '';
+      const text = bubbleText(row, side === 'cto' ? 'CTO prompt unavailable' : 'Worker prompt unavailable');
+      const focusDisabled = row.synthetic || !sid;
+      const badge = side === 'cto'
+        ? '<span class="agent-badge">T</span>'
+        : renderAgentTag(row.agent) || '<span class="agent-badge">A</span>';
+      return `
+        <div class="bubble-card ${escapeHtml(side)}">
+          <div class="chat-session-title">
+            <span style="display:flex;align-items:center;gap:6px;min-width:0;">${badge}<span class="chat-session-id">${escapeHtml(sid || side)}</span></span>
+            ${focusDisabled ? '' : `<button class="focus-btn" data-focus-session="1" data-session-id="${dataAttr(sid)}" data-pid="${dataAttr(pid)}" data-agent-id="${dataAttr(agentId)}">Focus</button>`}
+          </div>
+          <details class="bubble-wrap" data-open-key="bubble:${escapeHtml(side)}:${dataAttr(sid || text.slice(0, 24))}">
+            <summary class="bubble-preview">${escapeHtml(compactText(text, 'prompt'))}</summary>
+            <pre class="bubble-full">${escapeHtml(text)}</pre>
+          </details>
+        </div>
+      `;
+    }
+
+    function renderRuntimeCard(row) {
+      const sid = row.sessionId || '';
+      const pid = numericPid(row.pid);
+      const agentId = row.agent_id || row.agent?.id || '';
+      const status = row.status || row.phase || 'active';
+      const focusDisabled = row.focusable === false || !sid || !pid;
+      return `
+        <div class="runtime-card">
+          ${renderAgentTag(row.agent)}
+          <div class="runtime-main">
+            <div class="runtime-title"><span class="runtime-command">${escapeHtml(commandLabel(row))}</span><span class="agent-state ${escapeHtml(status)}">${escapeHtml(status)}</span></div>
+            <div class="runtime-sub">${escapeHtml(displayPath(row.cwd || row.host || 'local runtime'))}${row.elapsed ? ` · ${escapeHtml(row.elapsed)}` : ''}</div>
+          </div>
+          ${focusDisabled ? '' : `<button class="focus-btn" data-focus-session="1" data-session-id="${dataAttr(sid)}" data-pid="${dataAttr(pid)}" data-agent-id="${dataAttr(agentId)}">Focus</button>`}
+        </div>
+      `;
+    }
+
+    function renderCtoChat(ctoRow, workers) {
+      const status = ctoRow.status || ctoRow.phase || 'active';
+      const title = compactText(ctoRow.sessionId || ctoRow.taskSummary || 'Session', 'Session');
+      const subtitle = compactText(hasPromptText(ctoRow) ? ctoRow.taskSummary || ctoRow.sessionKind || '' : displayPath(ctoRow.cwd || ctoRow.worktreePath || ''), '');
+      const promptHtml = hasPromptText(ctoRow)
+        ? `<div class="detail-section"><div class="detail-label">Prompt</div>${renderChatBubble(ctoRow, { side: 'cto' })}</div>`
+        : '';
+      const agentRows = workers.map(worker => hasPromptText(worker) ? renderChatBubble(worker, { side: 'worker' }) : renderRuntimeCard(worker)).join('');
+      const agentsHtml = workers.length
+        ? `<div class="detail-section"><div class="detail-label">Agents</div><div class="runtime-list">${agentRows}</div></div>`
+        : '';
+      const emptyHtml = promptHtml || agentsHtml ? '' : '<div class="detail-empty">No session details yet</div>';
+      return `
+        <details class="session-card" data-open-key="cto:${dataAttr(ctoRow.sessionId || title)}">
+          <summary class="session-summary">
+            <span class="agent-badge">T</span>
+            <div style="min-width:0;">
+              <div class="session-summary-title">${escapeHtml(title)}</div>
+              ${subtitle ? `<div class="session-summary-sub">${escapeHtml(subtitle)}</div>` : ''}
+            </div>
+            <div class="agent-state ${escapeHtml(status)}">${escapeHtml(status)}</div>
+          </summary>
+          <div class="session-detail">
+            ${promptHtml}
+            ${agentsHtml}
+            ${emptyHtml}
+          </div>
+        </details>
+      `;
+    }
+
+    function pluralize(count, one, many = `${one}s`) {
+      return `${count} ${count === 1 ? one : many}`;
+    }
+
+    function renderProjectGroup(group) {
+      const projectDisplayPath = displayPath(group.projectPath);
+      const projectLabel = projectName(group.projectPath);
+      const sessionCount = group.ctos.filter(row => !isSyntheticCto(row)).length;
+      const agentCount = group.workers.length;
+      const projectCount = [sessionCount ? pluralize(sessionCount, 'session') : '', agentCount ? pluralize(agentCount, 'agent') : '']
+        .filter(Boolean)
+        .join(' · ') || 'empty';
+      let html = `
+        <details class="project-group" data-open-key="project:${dataAttr(group.projectPath)}">
+          <summary class="project-summary">
+            <span class="project-chevron">▾</span>
+            <span class="project-name">${escapeHtml(projectLabel)}</span>
+            <span class="project-count">${escapeHtml(projectCount)}</span>
+          </summary>
+          <div class="project-path">${escapeHtml(projectDisplayPath)}</div>
+          <div class="project-body">
+      `;
+      const ctos = group.ctos.slice(0, 6);
+      const workers = group.workers.slice(0, 10);
+      for (const [index, ctoRow] of ctos.entries()) {
+        html += renderCtoChat(ctoRow, index === 0 ? workers : []);
+      }
+      html += '</div></details>';
+      return html;
+    }
+
+    function renderSessions(data) {
+      const container = document.getElementById('tab-sessions');
+      const openKeys = collectOpenDetailKeys(container);
+      const hub = data?.hub || {};
+      const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+      const cto = data?.cto || {};
+      const live = Array.isArray(cto.live_sessions) ? cto.live_sessions : [];
+      const runtime = data?.runtime || {};
+      const activeSessions = sessions.filter(s => s.status !== 'stale');
+      const liveRows = liveFallbackRows(live);
+      const projectGroups = buildProjectGroups(activeSessions.slice(0, 10), liveRows, hub);
+      const activeCount = activeSessions.filter(s => s.status === 'active').length;
+      const idleCount = activeSessions.filter(s => s.status === 'idle').length;
+      const staleCount = sessions.filter(s => s.status === 'stale').length;
+      const runtimeTotal = runtime?.summary?.total || liveRows.length || 0;
+      let html = `
+        <div class="section">
+          <div class="session-overview">
+            <div class="summary-card primary"><div class="summary-kpi">${live.length}</div><div class="summary-label">Live agents</div><div class="summary-sub">${runtimeTotal} runtime CLIs</div></div>
+            <div class="summary-card"><div class="summary-kpi">${activeCount}</div><div class="summary-label">Active</div></div>
+            <div class="summary-card"><div class="summary-kpi">${idleCount}</div><div class="summary-label">Idle</div></div>
+            <div class="summary-card"><div class="summary-kpi">${staleCount}</div><div class="summary-label">Stale</div></div>
+          </div>
+          <div class="path-text">${projectGroups.length} ${projectGroups.length === 1 ? 'workspace' : 'workspaces'} · ${cto.active_shards?.length || 0} shards · ${renderCopyChip('Hub', hub.id || String(hub.pid || ''))}</div>
+        </div>
+        <div class="section">
+          <div class="section-title">Agent Mix</div>
+          <div class="models-list">${renderRuntimeClients(runtime)}</div>
+        </div>
+        <div class="section">
+          <div class="section-title">Workspaces</div>
+          <div class="agent-view">
+      `;
+      for (const group of projectGroups) html += renderProjectGroup(group);
+      if (projectGroups.length === 0) html += '<div class="mini-card muted">No active sessions detected</div>';
+      html += '</div></div>';
+      container.innerHTML = html;
+      restoreOpenDetails(container, openKeys);
+    }
+
+    function renderGateway(mcp) {
+      const container = document.getElementById('tab-gateway');
+      const servers = Array.isArray(mcp?.servers) ? mcp.servers : [];
+      const byStatus = mcp?.summary?.by_status || {};
+      let html = `
+        <div class="section">
+          <div class="stats-grid">
+            <div class="stat-box"><div class="stat-label">MCP Servers</div><div class="stat-value">${servers.length || mcp?.server_count || 0}<span class="stat-unit">cards</span></div></div>
+            <div class="stat-box"><div class="stat-label">Registry Rows</div><div class="stat-value">${mcp?.summary?.total || 0}<span class="stat-unit">rows</span></div></div>
+            <div class="stat-box"><div class="stat-label">Present</div><div class="stat-value">${byStatus.present || 0}<span class="stat-unit">ok</span></div></div>
+            <div class="stat-box"><div class="stat-label">Registry</div><div class="stat-value">${mcp?.server_count || 0}<span class="stat-unit">defs</span></div></div>
+          </div>
+          <div class="path-text">${escapeHtml(mcp?.registry_path || '')}</div>
+        </div>
+        <div class="section">
+          <div class="section-title">MCP Cards</div>
+          <div class="server-list">
+      `;
+      for (const server of servers) {
+        html += `
+          <div class="mcp-card">
+            <div class="mcp-head">
+              <div class="mcp-name">${escapeHtml(server.name)}</div>
+              <div class="value-pill status-text ${escapeHtml(server.status)}">${escapeHtml(STATUS_LABEL[server.status] || server.status)}</div>
+            </div>
+            <div class="path-text">${escapeHtml(server.target || '')}</div>
+            <div class="client-chips">
+              ${server.clients.map(client => `
+                <span class="chip ${escapeHtml(client.status)}"><span class="dot ${escapeHtml(client.id)}"></span>${escapeHtml(client.label)} ${escapeHtml(STATUS_LABEL[client.status] || client.status)}${client.total > 1 ? ` · ${client.present}/${client.total}` : ''}</span>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+      if (servers.length === 0) html += '<div class="mcp-card muted">No MCP registry cards reported</div>';
+      html += `</div>${mcp?.error ? `<div class="path-text status-text error">${escapeHtml(mcp.error)}</div>` : ''}</div>`;
+      container.innerHTML = html;
+    }
+
+    async function copyText(txt, element) {
+      if (!txt) return;
+      try {
+        await navigator.clipboard.writeText(txt);
+      } catch (_err) {
+        const input = document.createElement('textarea');
+        input.value = txt;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.focus();
+        input.select();
+        document.execCommand('copy');
+        document.body.removeChild(input);
+      }
+      if (element) {
+        const previous = element.textContent;
+        element.textContent = 'Copied';
+        setTimeout(() => { element.textContent = previous; }, 700);
+      }
+    }
+    function postNativeTrayMessage(message) {
+      try {
+        window?.webkit?.messageHandlers?.tray?.postMessage(message);
+      } catch (_err) {
+        // Browser fallback: the web tray can run without a native wrapper.
+      }
+    }
+
+    async function focusSession(sid, pid, agentId, button) {
+      if (!sid) return;
+      const previous = button?.textContent || 'Focus';
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Focusing…';
+      }
+      try {
+        const res = await fetch('/api/focus-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: sid, pid: pid || undefined, agentId: agentId || undefined })
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || body?.ok === false || body?.focus?.ok === false) throw new Error(body?.error || body?.focus?.error || 'focus failed');
+        if (button) button.textContent = 'Focused';
+        postNativeTrayMessage({ type: 'focus-complete' });
+      } catch (err) {
+        console.error(err);
+        if (button) button.textContent = 'Failed';
+      } finally {
+        setTimeout(() => {
+          if (button) {
+            button.textContent = previous;
+            button.disabled = false;
+          }
+        }, 650);
+      }
+    }
+    document.addEventListener('click', event => {
+      const copyTarget = event.target.closest('[data-copy-text]');
+      if (copyTarget) {
+        copyText(copyTarget.dataset.copyText, copyTarget);
+        return;
+      }
+      const focusTarget = event.target.closest('[data-focus-session]');
+      if (focusTarget) {
+        focusSession(focusTarget.dataset.sessionId, Number(focusTarget.dataset.pid || 0), focusTarget.dataset.agentId || '', focusTarget);
+      }
+    });
+
+    setInterval(fetchState, 3000);
+    fetchState();
+  </script>
+</body>
+</html>

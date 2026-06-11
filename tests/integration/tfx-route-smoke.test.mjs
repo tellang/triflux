@@ -27,6 +27,15 @@ const ROUTE_SCRIPT = toBashPath(
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
+// Stub hub-ensure so full-route invocations never bind/spawn a hub on the
+// canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
+const HUB_ENSURE_STUB = resolve(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "no-op-hub-ensure.mjs",
+);
+const RUN_BASH_TIMEOUT_MS = 60_000;
 
 function createRouteHome() {
   const home = mkdtempSync(join(tmpdir(), "tfx-route-home-"));
@@ -61,6 +70,11 @@ function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
+    // Per-call timeout: a slow or hung command must not block the synchronous
+    // spawnSync and hang the entire suite (a describe/test-level timeout cannot
+    // interrupt a sync call). Codex-transport fixtures take ~10s; 60s headroom.
+    timeout: RUN_BASH_TIMEOUT_MS,
+    killSignal: "SIGKILL",
     env: {
       ...process.env,
       TFX_TEAM_NAME: "",
@@ -68,10 +82,12 @@ function runBash(command, extraEnv = {}) {
       TFX_TEAM_AGENT_NAME: "",
       TFX_TEAM_LEAD_NAME: "",
       TFX_HUB_URL: "",
+      TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
       TMUX: "",
       TFX_CLI_MODE: "auto",
       TFX_NO_CLAUDE_NATIVE: "0",
       TFX_CODEX_TRANSPORT: "exec",
+      TFX_CTO_NORTH_STAR: "0",
       TFX_WORKER_INDEX: "",
       TFX_SEARCH_TOOL: "",
       // #148: 테스트 환경에서는 실제 MCP probe 가 모두 dead 로 나와 early-fail 발생.

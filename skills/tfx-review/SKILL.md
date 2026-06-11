@@ -1,16 +1,7 @@
 ---
 internal: true
 name: tfx-review
-description: "코드 리뷰가 필요할 때 사용한다. 'review', '리뷰해줘', '코드 봐줘', '이거 괜찮아?', 'PR 리뷰', '변경사항 확인', '꼼꼼히 리뷰', 'deep review', '심층 리뷰', '보안까지 리뷰', '다각도 리뷰' 같은 요청에 반드시 사용. 기본값은 3-CLI 합의 딥 리뷰. 빠른 단일 CLI 리뷰는 --quick 파라미터."
-triggers:
-  - review
-  - 리뷰
-  - 코드 리뷰
-  - code review
-  - deep review
-  - 심층 리뷰
-  - 꼼꼼히 리뷰
-  - multi review
+description: "코드 리뷰가 필요할 때 사용한다. 'review', '리뷰해줘', '코드 봐줘', '이거 괜찮아?', 'PR 리뷰', '변경사항 확인', '꼼꼼히 리뷰', 'deep review', '심층 리뷰', '보안까지 리뷰', '다각도 리뷰' 같은 요청에 반드시 사용."
 argument-hint: "[파일 경로 또는 변경 설명] [--quick]"
 ---
 
@@ -18,12 +9,6 @@ argument-hint: "[파일 경로 또는 변경 설명] [--quick]"
 
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
 > 워크플로우의 첫 단계 입력으로 사용한다. `--quick` 플래그 감지 시 quick 경로로 분기.
-
-> **Telemetry**
->
-> - Skill: `tfx-review`
-> - Session: 요청별 식별자를 유지해 단계별 실행 로그를 추적한다.
-> - Errors: 실패 시 원인/복구/재시도 여부를 구조화해 기록한다.
 
 ---
 

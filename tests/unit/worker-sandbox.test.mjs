@@ -164,4 +164,95 @@ describe("worker sandbox env", () => {
     assert.equal(env.CODEX_HOME, join(hostHome, ".codex"));
     assert.equal(env.TFX_WORKER_SANDBOX_SCOPE, "delegator-route");
   });
+
+  it("keeps the host HOME for antigravity-family agents (no headless auth)", () => {
+    const cwd = tmpRoot("worker-sandbox-agy");
+    for (const agent of ["antigravity", "agy", "gemini", "AGY"]) {
+      const result = buildWorkerSandboxEnv({
+        cwd,
+        sessionId: "agy-worker",
+        agent,
+        env: { HOME: "/host/home" },
+      });
+      assert.equal(result.disabled, true, `${agent} should skip the sandbox`);
+      assert.equal(result.reason, "auth-home-bound-agent");
+      assert.deepEqual(result.env, {});
+    }
+  });
+
+  it("still sandboxes codex (it is isolated via CODEX_HOME)", () => {
+    const cwd = tmpRoot("worker-sandbox-codex-agent");
+    const result = buildWorkerSandboxEnv({
+      cwd,
+      sessionId: "codex-worker",
+      agent: "codex",
+      env: { HOME: "/host/home" },
+    });
+    const expectedHome = join(cwd, ".triflux", "worker-home", "codex-worker");
+    assert.equal(result.disabled, false);
+    assert.equal(result.env.HOME, expectedHome);
+    assert.equal(result.env.CODEX_HOME, join("/host/home", ".codex"));
+  });
+
+  it("conductor antigravity worker spawns with the host HOME (auth carve-out)", async () => {
+    const logsDir = tmpRoot("worker-sandbox-agy-logs");
+    const workdir = tmpRoot("worker-sandbox-agy-workdir");
+    const calls = [];
+    const fakeBroker = new EventEmitter();
+    fakeBroker.lease = () => undefined;
+    const conductor = createConductor({
+      logsDir,
+      maxRestarts: 0,
+      probeOpts: {
+        intervalMs: 999_999,
+        l1ThresholdMs: 999_999,
+        l3ThresholdMs: 999_999,
+      },
+      broker: fakeBroker,
+      deps: { spawn: mockSpawnRecorder(calls) },
+    });
+
+    try {
+      conductor.spawnSession({
+        id: "sandbox-agy",
+        agent: "antigravity",
+        prompt: "test",
+        workdir,
+      });
+
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(calls.length, 1);
+      const env = calls[0].env;
+      const sandboxHome = join(
+        workdir,
+        ".triflux",
+        "worker-home",
+        "sandbox-agy",
+      );
+      assert.notEqual(env.HOME, sandboxHome);
+      assert.equal(env.HOME, process.env.HOME);
+    } finally {
+      await conductor.shutdown("worker_sandbox_agy_test_cleanup");
+    }
+  });
+
+  it("delegator route keeps the host HOME for the antigravity provider", () => {
+    const cwd = tmpRoot("worker-sandbox-agy-delegator");
+    const hostHome = tmpRoot("worker-sandbox-agy-host-home");
+    const worker = new DelegatorMcpWorker({
+      cwd,
+      env: {
+        HOME: hostHome,
+        PATH: process.env.PATH || "",
+      },
+    });
+
+    const env = worker._buildRouteEnv({
+      provider: "antigravity",
+      teamTaskId: "task/agy",
+    });
+
+    assert.equal(env.HOME, hostHome);
+    assert.equal(env.TFX_WORKER_SANDBOX_SCOPE, undefined);
+  });
 });

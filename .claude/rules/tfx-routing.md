@@ -63,17 +63,17 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 
 | 우선순위 | CLI / 모델 | default 적용 lane |
 |---------|-----------|-------------------|
-| 1차 (default) | **Codex** (gpt-5.3-codex / gpt-5.5) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
+| 1차 (default) | **Codex** (gpt-5.5) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
 | 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
 | 한정 (Claude 만) | **Claude** (opus-4-8) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
 
-`tfx-auto`, `tfx-review`, `tfx-analysis`, `tfx-plan`, `tfx-find` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli gemini`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
+`tfx-auto`, `tfx-review`, `tfx-analysis`, `tfx-plan`, `tfx-find` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
 
 `--retry auto-escalate` 체인 (`.claude/rules/tfx-escalation-chain.md`) 의 1단계가 Codex 인 것도 이 정책과 정합한다 (2단계 claude opus-4-8 은 최종 수단).
 
 ## CLI 라우팅
 
-headless-guard 가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. tfx 스킬 경유 필수.
+headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx 스킬 경유 필수.
 
 **Layer 1 — Light** (tfx-route.sh → 단일 CLI)
 
@@ -81,7 +81,7 @@ headless-guard 가 `codex exec` / `gemini -y -p` 직접 호출을 차단한다. 
 |------|-----|------|
 | `tfx-auto` | 자동 | 통합 진입점 |
 | `tfx-auto --cli codex` | Codex | Codex 전용 lane |
-| `tfx-auto --cli gemini` | Antigravity | [deprecated alias] Antigravity 로 redirect (agy 없으면 legacy gemini fallback) |
+| `tfx-auto --cli antigravity` | Antigravity | Antigravity 전용 lane (agy 없으면 legacy gemini fallback) |
 | `tfx-auto --mode quick` | Codex→검증 | 단일 파일, 5분 이내 |
 | `tfx-auto --retry auto-escalate` | 자동 승격 | 실패→더 강한 모델 |
 

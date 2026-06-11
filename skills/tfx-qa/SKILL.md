@@ -1,16 +1,7 @@
 ---
 internal: true
 name: tfx-qa
-description: "테스트/검증이 필요할 때 사용한다. 'qa', '검증해', '테스트 돌려', 'test-fix', '심층 검증', '철저히 테스트', '보안까지 확인', '전방위 검증' 같은 요청에 반드시 사용. 기본값은 3-CLI 합의 딥 QA (기능+보안+UX). 빠른 테스트-수정 루프는 --quick."
-triggers:
-  - qa
-  - 검증
-  - 테스트 검증
-  - test-fix
-  - deep qa
-  - 심층 검증
-  - thorough test
-  - deep-qa
+description: "테스트/검증이 필요할 때 사용한다. 'qa', '검증해', '테스트 돌려', 'test-fix', '심층 검증', '철저히 테스트', '보안까지 확인', '전방위 검증' 같은 요청에 반드시 사용."
 argument-hint: "[테스트 대상] [--quick]"
 ---
 

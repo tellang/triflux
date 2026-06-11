@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-
+import { resolveHubPortForContext } from "../../../hub-lifecycle.mjs";
 import { publishLeadControl as publishLeadControlBridge } from "../../lead-control.mjs";
 import {
   getTeamStatus as fetchTeamStatus,
@@ -117,15 +117,24 @@ export async function startHubDaemon() {
     throw error;
   }
 
+  // Resolve the canonical port. server.mjs forces 27888 in worktree/ephemeral
+  // contexts via resolveHubPortForContext; mirror that here so a polluted
+  // TFX_HUB_PORT does not make us spawn with / probe a port the daemon never
+  // binds (defense-in-depth — do not rely solely on server.mjs's boundary guard).
+  const resolvedPort = resolveHubPortForContext({
+    env: process.env,
+    cwd: process.cwd(),
+  });
+
   const child = spawn(process.execPath, [serverPath], {
-    env: { ...process.env },
+    env: { ...process.env, TFX_HUB_PORT: String(resolvedPort) },
     stdio: "ignore",
     detached: true,
     windowsHide: true,
   });
   child.unref();
 
-  const expectedPort = getDefaultHubPort();
+  const expectedPort = resolvedPort;
   const deadline = Date.now() + 3000;
   while (Date.now() < deadline) {
     const status = await probeHubStatus("127.0.0.1", expectedPort, 500);

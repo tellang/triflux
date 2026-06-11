@@ -23,7 +23,7 @@ After completing the task, you MUST output a HANDOFF block in exactly this forma
 status: ok | partial | failed
 lead_action: accept | needs_read | retry | reassign
 task: <1-3 word task type>
-files_changed: <comma-separated file paths, or "none">
+files_changed: <comma-separated repo-root relative file paths, or "none">
 verdict: <one sentence conclusion>
 confidence: high | medium | low
 risk: low | med | high
@@ -36,21 +36,25 @@ partial_output: yes | no
 
 Rules:
 - The HANDOFF block must start with exactly "--- HANDOFF ---"
+- Set status: ok only after you have verified the work (file/diff/test evidence) — unverified claims must use partial or failed.
 - Each field must be on its own line as "key: value"
+- Report files_changed as repo-root relative paths
 - verdict must be a single concise sentence
 - Do not skip any required field
+- This block owns the final output position; this block must be the last thing you output
 `.trim();
 
 /**
  * CLI 프롬프트 길이 제한을 고려한 축약 HANDOFF 지시
  */
-export const HANDOFF_INSTRUCTION_SHORT = `After completing, output this block at the end:
+export const HANDOFF_INSTRUCTION_SHORT = `After completing, output this block at the end; this block must be the last thing you output:
 --- HANDOFF ---
 status: ok | partial | failed
 lead_action: accept | needs_read | retry | reassign
 verdict: <one sentence>
-files_changed: <comma-separated paths or "none">
-confidence: high | medium | low`;
+files_changed: <comma-separated repo-root relative paths or "none">
+confidence: high | medium | low
+Set status: ok only after you have verified the work (file/diff/test evidence) — unverified claims must use partial or failed.`;
 
 /**
  * raw 텍스트에서 HANDOFF 블록을 파싱한다.
