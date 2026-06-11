@@ -51,6 +51,25 @@ import {
   truncateAnsi,
 } from "./utils.mjs";
 
+function formatGeminiLimitValue(limit, provFn) {
+  if (limit?.unlimited) return provFn("\u221E");
+  const usedP = limit?.usedPct;
+  if (usedP == null) return dim(formatPlaceholderPercentCell());
+  return colorByProvider(usedP, formatPercentCell(usedP), provFn);
+}
+
+function getGeminiLimitUsedPercent(bucket, limit) {
+  if (limit?.unlimited) return null;
+  if (limit?.usedPct != null) return limit.usedPct;
+  return clampPercent(Math.round((1 - (bucket?.remainingFraction ?? 1)) * 100));
+}
+
+function formatGeminiCompactValue(bucket, limit, provFn) {
+  if (limit?.unlimited) return provFn("\u221E");
+  const usedP = getGeminiLimitUsedPercent(bucket, limit);
+  return usedP != null ? colorByProvider(usedP, `${usedP}`, provFn) : dim("--");
+}
+
 // ============================================================================
 // 최근 벤치마크 diff 파일 읽기
 // ============================================================================
@@ -299,10 +318,7 @@ export function getMicroLine(
   let gVal;
   if (geminiBucket) {
     const gl = deriveGeminiLimits(geminiBucket);
-    const gU = gl
-      ? gl.usedPct
-      : clampPercent((1 - (geminiBucket.remainingFraction ?? 1)) * 100);
-    gVal = colorByProvider(gU, `${gU}`, geminiBlue);
+    gVal = formatGeminiCompactValue(geminiBucket, gl, geminiBlue);
   } else if ((geminiSession?.total || 0) > 0) {
     gVal = geminiBlue("\u221E");
   } else {
@@ -468,11 +484,10 @@ function formatAntigravityQuotaSection(
       return withTime ? `${base} ${dim(formatTimeCell("n/a"))}` : base;
     }
     const gl = deriveGeminiLimits(bucket);
-    const usedP = gl
-      ? gl.usedPct
-      : clampPercent(Math.round((1 - (bucket.remainingFraction ?? 1)) * 100));
-    const bar = withBar ? tierBar(currentTier, usedP, provAnsi) : "";
-    const base = `${dim(`${label}:`)}${bar}${colorByProvider(usedP, formatPercentCell(usedP), provFn)}`;
+    const usedP = getGeminiLimitUsedPercent(bucket, gl);
+    const bar =
+      withBar && usedP != null ? tierBar(currentTier, usedP, provAnsi) : "";
+    const base = `${dim(`${label}:`)}${bar}${formatGeminiLimitValue(gl, provFn)}`;
     if (!withTime) return base;
     const rstRemaining =
       formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
@@ -558,20 +573,14 @@ export function getProviderRow(
     if (provider === "gemini" && realQuota?.type === "gemini") {
       const pools = realQuota.pools || {};
       if (pools.pro || pools.flash) {
-        const pP = pools.pro
-          ? clampPercent(
-              Math.round((1 - (pools.pro.remainingFraction ?? 1)) * 100),
-            )
-          : null;
-        const pF = pools.flash
-          ? clampPercent(
-              Math.round((1 - (pools.flash.remainingFraction ?? 1)) * 100),
-            )
-          : null;
-        const pStr =
-          pP != null ? colorByProvider(pP, `${pP}`, provFn) : dim("--");
-        const fStr =
-          pF != null ? colorByProvider(pF, `${pF}`, provFn) : dim("--");
+        const pP = pools.pro ? deriveGeminiLimits(pools.pro) : null;
+        const pF = pools.flash ? deriveGeminiLimits(pools.flash) : null;
+        const pStr = pools.pro
+          ? formatGeminiCompactValue(pools.pro, pP, provFn)
+          : dim("--");
+        const fStr = pools.flash
+          ? formatGeminiCompactValue(pools.flash, pF, provFn)
+          : dim("--");
         return {
           prefix: minPrefix,
           left: `${pStr}${dim("/")}${fStr}`,
@@ -622,10 +631,7 @@ export function getProviderRow(
           if (!bucket)
             return `${dim(label + ":")}${dim(formatPlaceholderPercentCell())}`;
           const gl = deriveGeminiLimits(bucket);
-          const usedP = gl
-            ? gl.usedPct
-            : clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
-          return `${dim(label + ":")}${colorByProvider(usedP, formatPercentCell(usedP), provFn)}`;
+          return `${dim(label + ":")}${formatGeminiLimitValue(gl, provFn)}`;
         };
         quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
       } else {
@@ -691,12 +697,9 @@ export function getProviderRow(
           if (!bucket)
             return `${dim(label + ":")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
           const gl = deriveGeminiLimits(bucket);
-          const usedP = gl
-            ? gl.usedPct
-            : clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
           const rstRemaining =
             formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
-          return `${dim(label + ":")}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))}`;
+          return `${dim(label + ":")}${formatGeminiLimitValue(gl, provFn)} ${dim(formatTimeCell(rstRemaining))}`;
         };
         quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
       } else {
@@ -778,12 +781,11 @@ export function getProviderRow(
           return `${dim(label + ":")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
         }
         const gl = deriveGeminiLimits(bucket);
-        const usedP = gl
-          ? gl.usedPct
-          : clampPercent((1 - (bucket.remainingFraction ?? 1)) * 100);
+        const usedP = getGeminiLimitUsedPercent(bucket, gl);
         const rstRemaining =
           formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
-        return `${dim(label + ":")}${tierBar(currentTier, usedP, provAnsi)}${colorByProvider(usedP, formatPercentCell(usedP), provFn)} ${dim(formatTimeCell(rstRemaining))}`;
+        const bar = usedP != null ? tierBar(currentTier, usedP, provAnsi) : "";
+        return `${dim(label + ":")}${bar}${formatGeminiLimitValue(gl, provFn)} ${dim(formatTimeCell(rstRemaining))}`;
       };
 
       quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
