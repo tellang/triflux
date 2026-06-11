@@ -36,7 +36,13 @@ function makeHome({ antigravityAuth } = {}) {
 function makePreflightOptions(
   homeDir,
   helpText,
-  { helpStderr = "", smoke = { status: 1, stdout: "", stderr: "" } } = {},
+  {
+    helpStderr = "",
+    keychainCredential = null,
+    platform = "linux",
+    smoke = { status: 1, stdout: "", stderr: "" },
+    smokeCalls = null,
+  } = {},
 ) {
   return {
     homeDir,
@@ -47,10 +53,25 @@ function makePreflightOptions(
     }),
     checkHubFn: () => ({ ok: true, state: "healthy" }),
     detectCodexPlanFn: () => ({ plan: "pro", source: "test" }),
-    spawnSyncFn: (_command, args) => {
+    platformFn: () => platform,
+    spawnSyncFn: (command, args) => {
+      if (command === "security") {
+        if (keychainCredential == null) {
+          return { status: 44, stdout: "", stderr: "not found" };
+        }
+        return {
+          status: 0,
+          stdout:
+            typeof keychainCredential === "string"
+              ? keychainCredential
+              : JSON.stringify(keychainCredential),
+          stderr: "",
+        };
+      }
       if (args.includes("--help")) {
         return { status: 0, stdout: helpText, stderr: helpStderr };
       }
+      if (smokeCalls) smokeCalls.count += 1;
       return smoke;
     },
   };
@@ -72,7 +93,9 @@ describe("preflight-cache Antigravity readiness", () => {
       assert.deepEqual(result.antigravity, {
         ok: true,
         path: "/fake/bin/agy",
+        status: "ready",
         reason: "ready",
+        auth_source: "file",
       });
       assert.ok(result.available_agents.includes("antigravity"));
     } finally {
@@ -100,6 +123,138 @@ describe("preflight-cache Antigravity readiness", () => {
     }
   });
 
+  it("does not rescue stale file auth with an agy smoke call", async () => {
+    const smokeCalls = { count: 0 };
+    const homeDir = makeHome({
+      antigravityAuth: { expiry_date: Date.now() - 30_000 },
+    });
+    try {
+      const result = await runPreflight(
+        makePreflightOptions(
+          homeDir,
+          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
+          {
+            smokeCalls,
+            smoke: { status: 0, stdout: "AGY_OK\n", stderr: "" },
+          },
+        ),
+      );
+
+      assert.equal(result.antigravity.ok, false);
+      assert.equal(result.antigravity.status, "not_ready");
+      assert.equal(result.antigravity.reason, "auth_expired");
+      assert.equal(smokeCalls.count, 0);
+      assert.ok(!result.available_agents.includes("antigravity"));
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses fresh macOS Keychain auth before stale file auth", async () => {
+    const homeDir = makeHome({
+      antigravityAuth: { expiry_date: Date.now() - 30_000 },
+    });
+    try {
+      const result = await runPreflight(
+        makePreflightOptions(
+          homeDir,
+          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
+          {
+            platform: "darwin",
+            keychainCredential: {
+              accessToken: "fresh-token",
+              expires_at: new Date(Date.now() + READY_EXPIRY_MS).toISOString(),
+            },
+          },
+        ),
+      );
+
+      assert.equal(result.antigravity.ok, true);
+      assert.equal(result.antigravity.status, "ready");
+      assert.equal(result.antigravity.auth_source, "keychain");
+      assert.equal(result.antigravity.reason, "ready");
+      assert.ok(result.available_agents.includes("antigravity"));
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts raw macOS Keychain tokens without expiry metadata", async () => {
+    const homeDir = makeHome();
+    const rawToken = "x".repeat(682);
+    try {
+      const result = await runPreflight(
+        makePreflightOptions(
+          homeDir,
+          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
+          {
+            platform: "darwin",
+            keychainCredential: rawToken,
+          },
+        ),
+      );
+
+      assert.equal(result.antigravity.ok, true);
+      assert.equal(result.antigravity.status, "ready");
+      assert.equal(result.antigravity.auth_source, "keychain");
+      assert.equal(result.antigravity.reason, "keychain_token_present");
+      assert.ok(result.available_agents.includes("antigravity"));
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts macOS Keychain JSON tokens without expiry metadata", async () => {
+    const homeDir = makeHome();
+    try {
+      const result = await runPreflight(
+        makePreflightOptions(
+          homeDir,
+          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
+          {
+            platform: "darwin",
+            keychainCredential: { accessToken: "keychain-access-token" },
+          },
+        ),
+      );
+
+      assert.equal(result.antigravity.ok, true);
+      assert.equal(result.antigravity.status, "ready");
+      assert.equal(result.antigravity.auth_source, "keychain");
+      assert.equal(result.antigravity.reason, "keychain_token_present");
+      assert.ok(result.available_agents.includes("antigravity"));
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects expired macOS Keychain JSON auth", async () => {
+    const homeDir = makeHome();
+    try {
+      const result = await runPreflight(
+        makePreflightOptions(
+          homeDir,
+          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
+          {
+            platform: "darwin",
+            keychainCredential: {
+              accessToken: "expired-keychain-token",
+              expiry_date: Date.now() - 30_000,
+            },
+          },
+        ),
+      );
+
+      assert.equal(result.antigravity.ok, false);
+      assert.equal(result.antigravity.status, "not_ready");
+      assert.equal(result.antigravity.auth_source, "keychain");
+      assert.equal(result.antigravity.reason, "auth_expired");
+      assert.ok(!result.available_agents.includes("antigravity"));
+    } finally {
+      rmSync(homeDir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts Antigravity headless help flags emitted on stderr", async () => {
     const homeDir = makeHome({
       antigravityAuth: { expiry_date: Date.now() + READY_EXPIRY_MS },
@@ -120,7 +275,7 @@ describe("preflight-cache Antigravity readiness", () => {
     }
   });
 
-  it("accepts expired Antigravity auth when non-interactive smoke succeeds", async () => {
+  it("does not accept expired Antigravity auth when non-interactive smoke succeeds", async () => {
     const homeDir = makeHome({
       antigravityAuth: { expiry_date: Date.now() - 30_000 },
     });
@@ -139,9 +294,10 @@ describe("preflight-cache Antigravity readiness", () => {
         ),
       );
 
-      assert.equal(result.antigravity.ok, true);
-      assert.equal(result.antigravity.reason, "ready");
-      assert.ok(result.available_agents.includes("antigravity"));
+      assert.equal(result.antigravity.ok, false);
+      assert.equal(result.antigravity.status, "not_ready");
+      assert.equal(result.antigravity.reason, "auth_expired");
+      assert.ok(!result.available_agents.includes("antigravity"));
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }
@@ -168,7 +324,7 @@ describe("preflight-cache Antigravity readiness", () => {
     }
   });
 
-  it("does not enable Antigravity auto fallback for auth files without expiry_date", async () => {
+  it("reports unknown Antigravity readiness for auth files without expiry_date", async () => {
     const homeDir = makeHome({ antigravityAuth: {} });
     try {
       const result = await runPreflight(
@@ -179,7 +335,8 @@ describe("preflight-cache Antigravity readiness", () => {
       );
 
       assert.equal(result.antigravity.ok, false);
-      assert.equal(result.antigravity.reason, "auth_expired");
+      assert.equal(result.antigravity.status, "unknown");
+      assert.equal(result.antigravity.reason, "auth_expiry_unknown");
       assert.ok(!result.available_agents.includes("antigravity"));
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
