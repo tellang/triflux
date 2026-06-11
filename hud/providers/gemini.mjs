@@ -269,9 +269,16 @@ function normalizeAntigravityCredential(parsed) {
 }
 
 function getAntigravityTokenFromKeychain() {
-  // macOS Keychain only; the `security` binary does not exist elsewhere, so
-  // skip the doomed spawn on Linux/Windows (file-token fallback still applies).
-  if (process.platform !== "darwin") return null;
+  // macOS Keychain only; elsewhere `security` is absent (wasted spawn) or a
+  // different PATH binary entirely, so skip on Linux/Windows and let the
+  // file-token fallback apply. TFX_HUD_KEYCHAIN_FORCE=1 re-enables the spawn
+  // for cross-platform tests that inject a fake `security` via PATH.
+  if (
+    process.platform !== "darwin" &&
+    process.env.TFX_HUD_KEYCHAIN_FORCE !== "1"
+  ) {
+    return null;
+  }
   try {
     const result = spawnSync(
       "security",

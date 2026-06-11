@@ -13,6 +13,12 @@ import { describe, it } from "node:test";
 
 const repoRoot = new URL("../..", import.meta.url);
 
+// This suite exercises the Keychain spawn path with a fake `security` binary
+// injected via PATH — including on non-darwin CI runners. Force-enable the
+// platform-gated spawn in getAntigravityTokenFromKeychain (default-off seam);
+// child processes inherit it via `env: process.env`.
+process.env.TFX_HUD_KEYCHAIN_FORCE = "1";
+
 async function importHudModule(relativePath) {
   const url = new URL(relativePath, repoRoot);
   url.searchParams.set("t", `${Date.now()}-${Math.random()}`);
