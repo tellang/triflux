@@ -79,10 +79,11 @@ test("resolveClaudeHomeDir prefers USERPROFILE over divergent HOME on win32", ()
     resolveClaudeHomeDir(env, "win32"),
     path.resolve("/win/profile"),
   );
-  // USERPROFILE 미설정이면 HOME 으로 폴백
+  // USERPROFILE 미설정이면 HOME 이 아니라 os.homedir() 로 폴백한다 —
+  // win32 launcher(os.homedir())는 HOME 을 보지 않으므로 HOME 수용 시 발산.
   assert.equal(
     resolveClaudeHomeDir({ HOME: "/c/Users/x" }, "win32"),
-    path.resolve("/c/Users/x"),
+    os.homedir(),
   );
 });
 

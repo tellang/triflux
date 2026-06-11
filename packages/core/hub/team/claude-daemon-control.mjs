@@ -23,13 +23,15 @@ export function resolveClaudeHomeDir(
   env = process.env,
   platform = process.platform,
 ) {
-  // win32: claude daemon launcher 의 os.homedir() 는 USERPROFILE 기반이므로
-  // USERPROFILE 우선이어야 socket hash 가 daemon 과 일치한다. POSIX 는 HOME
-  // 우선 — sandbox HOME 오버라이드를 추적하는 provenance 해석(#382)과 일치.
+  // win32: claude daemon launcher 의 os.homedir() 는 USERPROFILE 기반이고
+  // HOME 을 보지 않는다. git-bash 가 HOME 을 따로 잡아도 launcher 폴백을
+  // 그대로 미러해야 socket hash 가 daemon 과 일치한다 (HOME 수용 금지).
   if (platform === "win32") {
     const userProfile = nullableEnv(env.USERPROFILE);
-    if (userProfile) return path.resolve(userProfile);
+    return userProfile ? path.resolve(userProfile) : os.homedir();
   }
+  // POSIX 는 HOME 우선 — sandbox HOME 오버라이드를 추적하는 provenance
+  // 해석(#382)과 일치 (os.homedir() 도 POSIX 에서는 HOME 을 우선한다).
   const home = nullableEnv(env.HOME);
   return home ? path.resolve(home) : os.homedir();
 }
