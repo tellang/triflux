@@ -1140,6 +1140,7 @@ export function createConductor(opts = {}) {
       const sandbox = buildWorkerSandboxEnv({
         cwd: resolvedConfig.workdir || process.cwd(),
         sessionId: resolvedConfig.id,
+        agent: resolvedConfig.agent,
         env: { ...process.env, ...(resolvedConfig.env || {}) },
       });
       resolvedConfig = {

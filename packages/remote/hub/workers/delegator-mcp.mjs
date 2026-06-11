@@ -971,6 +971,7 @@ export class DelegatorMcpWorker {
         args.workerIndex ||
         args.agentType ||
         "route",
+      agent: args.provider,
       env: baseEnv,
     });
     const env = { ...baseEnv, ...sandbox.env };
