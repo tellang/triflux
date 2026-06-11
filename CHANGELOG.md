@@ -2,6 +2,31 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.35.0] - 2026-06-11
+
+### Added
+- **[#390]** agy 인터랙티브 세션 hub 자동등록 훅 (PR #406) — PreInvocation 단일 이벤트, invocationNum 게이트, `~/.gemini/config/hooks.json` idempotent installer
+- tfx-live daemon/caller provenance + config-dir resolution 단일화 (PR #382)
+- cto: synapse 세션 repoRoot 파생 grouping — `live_session_groups` additive 키 (PR #405)
+
+### Fixed
+- **[#394]** swarm redundant winner를 clean commit evidence로 게이트 (PR #399)
+- **[#401]** antigravity-family swarm/team 워커 host HOME 보존 — OAuth keyring 단절 해소
+- **[#402]** prompt-guide P1: tfx-route 절대경로 앵커 + swarm worker 완료 계약 강화 + headless handoff grounding
+- **[#306]** antigravity readiness gate stale OAuth 차단 + Keychain raw-token 수용 (PR #410)
+- daemon control-key를 attach/ask/interrupt/kill 경로에 배선 — tfx-live ask EAUTH 해소 (PR #404)
+- **[#379]** agy HUD Keychain-first quota + 만료 파일 토큰 fallback
+- hud: 비-darwin에서 Antigravity Keychain `security` spawn 차단 (PR #403)
+- **[#391]** mcp: serena를 CORE_SERVERS 강제 enable에서 제거 (PR #400)
+- win32 daemon launcher homedir fallback (HOME 미수용)
+
+### Tests
+- worktree-cwd full npm test hermetic화 — `TFX_HUB_PID_DIR`/`TFX_HUB_STATE_DIR` seam + test-lock mkdtemp 격리, 4278 tests 0 fail (PR #412)
+- cross-platform Keychain 커버리지 — `TFX_HUD_KEYCHAIN_FORCE` seam
+
+### Changed
+- GEMINI.md에 gstack 스킬 라우팅/health stack 규칙 추가
+
 ## [Unreleased]
 
 ## [10.34.0] - 2026-06-10
