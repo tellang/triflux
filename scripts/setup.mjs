@@ -26,6 +26,7 @@ import {
   ensureTfxSection,
   getLatestRoutingTable,
 } from "./claudemd-sync.mjs";
+import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { addPluginRootFallbackToCommand } from "./lib/doctor-env-checks.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
@@ -1377,6 +1378,9 @@ function ensureCriticalSetup() {
   try {
     ensureCodexHooks();
   } catch {}
+  try {
+    ensureAgyHooks();
+  } catch {}
 }
 
 export {
@@ -1387,6 +1391,7 @@ export {
   cleanupStaleSkills,
   DEPRECATED_SKILLS,
   detectDevMode,
+  ensureAgyHooks,
   ensureCodexHooks,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
@@ -2164,6 +2169,20 @@ export async function runDeferred(stdinData) {
   } catch (error) {
     io.log(
       `  \x1b[33m⚠\x1b[0m Codex hooks 등록 실패: ${error.message || error}`,
+    );
+  }
+
+  try {
+    const agyHooksResult = ensureAgyHooks();
+    if (!agyHooksResult?.skipped && agyHooksResult?.changed) {
+      io.log(
+        "  \x1b[32m✓\x1b[0m Antigravity hooks: registered session sync hook",
+      );
+      synced++;
+    }
+  } catch (error) {
+    io.log(
+      `  \x1b[33m⚠\x1b[0m Antigravity hooks 등록 실패: ${error.message || error}`,
     );
   }
 
