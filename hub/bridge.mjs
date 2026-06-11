@@ -1270,8 +1270,11 @@ async function cmdDaemonAttach(args) {
     const payload = readBridgePayload(args);
     if (!payload.prompt) throw new Error("prompt is required");
 
-    const { attachClaudeDaemonSession, probeClaudeDaemonCandidates } =
-      await loadDaemonControl();
+    const {
+      attachClaudeDaemonSession,
+      buildDaemonControlAuth,
+      probeClaudeDaemonCandidates,
+    } = await loadDaemonControl();
     const probe = await probeClaudeDaemonCandidates({
       configDir: payload.configDir,
       env: process.env,
@@ -1291,6 +1294,9 @@ async function cmdDaemonAttach(args) {
         }),
       );
     }
+    const controlAuth = await buildDaemonControlAuth(
+      probe.daemon?.configDir ?? payload.configDir,
+    );
 
     let result;
     try {
@@ -1298,6 +1304,7 @@ async function cmdDaemonAttach(args) {
         controlSock: probe.controlSock,
         short,
         input: payload.prompt,
+        ...controlAuth,
         cols: numericOption(payload.cols, undefined),
         rows: numericOption(payload.rows, undefined),
         timeoutMs: numericOption(payload.timeoutMs, 30_000),
@@ -1331,8 +1338,11 @@ async function cmdDaemonInterrupt(args) {
   try {
     const payload = readBridgePayload(args);
 
-    const { interruptClaudeDaemonSession, probeClaudeDaemonCandidates } =
-      await loadDaemonControl();
+    const {
+      buildDaemonControlAuth,
+      interruptClaudeDaemonSession,
+      probeClaudeDaemonCandidates,
+    } = await loadDaemonControl();
     const probe = await probeClaudeDaemonCandidates({
       configDir: payload.configDir,
       env: process.env,
@@ -1352,12 +1362,16 @@ async function cmdDaemonInterrupt(args) {
         }),
       );
     }
+    const controlAuth = await buildDaemonControlAuth(
+      probe.daemon?.configDir ?? payload.configDir,
+    );
 
     let result;
     try {
       result = await interruptClaudeDaemonSession({
         controlSock: probe.controlSock,
         short,
+        ...controlAuth,
         cols: numericOption(payload.cols, undefined),
         rows: numericOption(payload.rows, undefined),
         timeoutMs: numericOption(payload.timeoutMs, 5000),

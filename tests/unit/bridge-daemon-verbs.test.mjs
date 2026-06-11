@@ -323,6 +323,12 @@ test("daemon-probe normalizes Claude agent-view state/status row variants", asyn
 
 test("daemon-attach resolves sessionId, sends prompt, and returns assistant text", async () => {
   await withTempConfig(async (configDir) => {
+    await fs.mkdir(path.join(configDir, "daemon"), { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "daemon", "control.key"),
+      "bridge-attach-secret\n",
+      "utf8",
+    );
     const paths = deriveClaudeDaemonPaths({ configDir });
     const fake = await listenFakeDaemon(paths.controlSock, {
       jobs: [{ short: "facefeed", sessionId: "session-attach" }],
@@ -361,6 +367,7 @@ test("daemon-attach resolves sessionId, sends prompt, and returns assistant text
           cols: 132,
           rows: 37,
           caps: { terminal: null, mux: null, ssh: false },
+          auth: "bridge-attach-secret",
         },
       ]);
     } finally {
@@ -399,6 +406,12 @@ test("daemon-attach returns the full failure response shape before input", async
 
 test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
   await withTempConfig(async (configDir) => {
+    await fs.mkdir(path.join(configDir, "daemon"), { recursive: true });
+    await fs.writeFile(
+      path.join(configDir, "daemon", "control.key"),
+      "bridge-interrupt-secret\n",
+      "utf8",
+    );
     const paths = deriveClaudeDaemonPaths({ configDir });
     const fake = await listenFakeInterruptDaemon(paths.controlSock, {
       jobs: [{ short: "facefeed", sessionId: "interrupt-session" }],
@@ -430,6 +443,7 @@ test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
           cols: 240,
           rows: 40,
           caps: { terminal: null, mux: null, ssh: false },
+          auth: "bridge-interrupt-secret",
         },
       ]);
     } finally {
