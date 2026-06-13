@@ -3328,72 +3328,42 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 4.5 Serena MCP
+    // 4.5 Serena MCP — 2026-06-10 core 에서 제거됨([Serena Core Removal]).
+    // serena 부재가 정상 상태이며, 잔존 시 부활로 간주해 제거를 권고한다(should-be-absent).
     section("Serena MCP");
     if (existsSync(CODEX_CONFIG_PATH)) {
       const codexConfig = readFileSync(CODEX_CONFIG_PATH, "utf8");
       const serenaConfig = inspectSerenaMcpConfig(codexConfig);
       if (!serenaConfig.present) {
-        warn("serena MCP 설정 없음");
-        info(
-          "권장: [mcp_servers.serena]에 --project-from-cwd, --context codex, startup_timeout_sec=30+ 설정",
-        );
+        ok("serena 미설정 (정상 — 2026-06-10 core 제거)");
         addDoctorCheck(report, {
           name: "serena-mcp",
-          status: "missing",
+          status: "ok",
           path: CODEX_CONFIG_PATH,
-          fix: "Codex config에 Serena MCP 설정을 추가하세요.",
+          note: "serena removed from core 2026-06-10; absence is expected.",
+        });
+      } else {
+        // 제거 결정 이후 serena 가 다시 나타났다 — 부활 감지(should-be-absent 위반).
+        warn("serena MCP 설정 잔존 — core 에서 제거됨(2026-06-10). 부활 감지");
+        info("제거 권장: ~/.codex/config.toml 의 [mcp_servers.serena] 삭제");
+        addDoctorCheck(report, {
+          name: "serena-mcp",
+          status: "issues",
+          path: CODEX_CONFIG_PATH,
+          resurrected: true,
+          fix: "serena 는 core 에서 제거되었습니다. ~/.codex/config.toml 의 [mcp_servers.serena] 항목을 삭제하세요.",
         });
         issues++;
-      } else {
-        const hasSerenaIssues =
-          !serenaConfig.hasProjectBinding || !serenaConfig.timeoutRecommended;
-
-        if (serenaConfig.hasProjectBinding) ok("project binding: 정상");
-        else {
-          warn("project binding 없음");
-          info("권장: --project-from-cwd 또는 --project <path>");
-          issues++;
-        }
-
-        if (serenaConfig.hasContextCodex) info("context codex: 설정됨");
-        else info("context codex: 미설정");
-
-        if (serenaConfig.startupTimeoutSec === null) {
-          warn("startup_timeout_sec 미설정");
-          info("권장: startup_timeout_sec = 30 이상");
-          issues++;
-        } else if (serenaConfig.timeoutRecommended) {
-          ok(`startup timeout: ${serenaConfig.startupTimeoutSec}s`);
-        } else {
-          warn(`startup timeout 낮음: ${serenaConfig.startupTimeoutSec}s`);
-          info("권장: startup_timeout_sec = 30 이상");
-          issues++;
-        }
-
-        addDoctorCheck(report, {
-          name: "serena-mcp",
-          status: hasSerenaIssues ? "issues" : "ok",
-          path: CODEX_CONFIG_PATH,
-          project_binding: serenaConfig.hasProjectBinding,
-          context_codex: serenaConfig.hasContextCodex,
-          startup_timeout_sec: serenaConfig.startupTimeoutSec,
-          ...(hasSerenaIssues
-            ? {
-                fix: "Serena MCP에 --project-from-cwd 와 startup_timeout_sec=30+ 를 설정하세요.",
-              }
-            : {}),
-        });
       }
     } else {
+      // config.toml 미존재 — serena 부재는 정상. 이슈로 집계하지 않는다.
+      ok("config.toml 미존재 — serena 진단 불필요");
       addDoctorCheck(report, {
         name: "serena-mcp",
-        status: "missing",
+        status: "ok",
         path: CODEX_CONFIG_PATH,
-        fix: "Codex config를 생성하고 Serena MCP 설정을 추가하세요.",
+        note: "config.toml absent; serena not required.",
       });
-      warn("config.toml 미존재 — Serena MCP 진단 건너뜀");
-      issues++;
     }
 
     // 5. Antigravity CLI
