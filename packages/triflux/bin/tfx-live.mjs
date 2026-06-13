@@ -2,9 +2,15 @@
 import { execFile } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join as pathJoin } from "node:path";
+import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import {
+  escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
+  probeRemoteEnv as probeRemoteHostEnv,
+  shellQuote as remoteShellQuote,
+  validateHost as validateRemoteHost,
+} from "../hub/team/remote-session.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +29,7 @@ const BRIDGE_TIMEOUT_BUFFER_MS = 15_000;
 // spill the JSON to a temp file and pass --payload-file instead.
 const PAYLOAD_FILE_THRESHOLD = 96 * 1024;
 const VALID_TRANSPORTS = ["tmux", "uds", "auto"];
+const BOOLEAN_FLAGS = new Set(["json"]);
 // uds-fallback diagnostics land here, written async so a failed daemon attach
 // never blocks the tmux fallback path (see writeUdsBugReport / doAskAuto).
 const BUG_REPORT_DIR =
@@ -63,6 +70,11 @@ function parseCli(argv) {
     const key = arg.slice(2);
     if (!key) {
       throw new Error("Empty flag is not valid");
+    }
+
+    if (BOOLEAN_FLAGS.has(key)) {
+      flags[key] = "1";
+      continue;
     }
 
     const value = rest[index + 1];
@@ -166,6 +178,152 @@ function buildTmuxCommand(remote, tmuxArgs) {
       shellQuote(["tmux", ...tmuxArgs]),
     ],
   };
+}
+
+function timeoutSeconds(timeoutMs) {
+  return String(Math.max(1, Math.ceil((timeoutMs ?? 1000) / 1000)));
+}
+
+function buildRemoteLiveArgv(verb, opts) {
+  const args = [
+    "tfx-live",
+    verb,
+    "--cli",
+    "claude",
+    "--transport",
+    opts.transport ?? "uds",
+  ];
+  if (opts.short) args.push("--short", opts.short);
+  if (opts.sessionId) args.push("--session-id", opts.sessionId);
+  if (opts.session) args.push("--session", opts.session);
+  if (opts.configDir) args.push("--config-dir", opts.configDir);
+  if (verb === "ask") args.push("--prompt", opts.prompt ?? "");
+  args.push("--timeout", timeoutSeconds(opts.timeoutMs));
+  if (verb === "ask" && opts.settleMs) {
+    args.push("--settle", String(opts.settleMs));
+  }
+  if (verb === "ask" && opts.pollIntervalMs) {
+    args.push("--poll-interval", String(opts.pollIntervalMs));
+  }
+  return args;
+}
+
+function buildRemoteLiveCommand(host, verb, opts, env = {}) {
+  validateRemoteHost(host);
+  const argv = buildRemoteLiveArgv(verb, opts);
+  if (env.os === "win32") {
+    const [commandPath, ...args] = argv;
+    const command = [
+      `& '${escapeRemotePwshSingleQuoted(commandPath)}'`,
+      ...args.map((arg) => `'${escapeRemotePwshSingleQuoted(arg)}'`),
+    ].join(" ");
+    // Live-unverified for Windows remotes; apply the same SSH single-argument
+    // contract proven on darwin so the remote login shell does not re-split it.
+    const remoteCmd = `pwsh -NoProfile -Command ${remoteShellQuote(command)}`;
+    return {
+      command: "ssh",
+      args: [host, remoteCmd],
+    };
+  }
+
+  const shell = env.os === "darwin" && env.shell === "zsh" ? "zsh" : "sh";
+  const inner = argv.map(remoteShellQuote).join(" ");
+  const remoteCmd = `${shell} -lc ${remoteShellQuote(inner)}`;
+  return {
+    command: "ssh",
+    args: [host, remoteCmd],
+  };
+}
+
+function tryParseJsonObject(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function parseRemoteLiveJson(stdout) {
+  const text = String(stdout).trim();
+  if (!text) {
+    throw new Error("remote tfx-live returned empty output");
+  }
+
+  const direct = tryParseJsonObject(text);
+  if (direct && typeof direct === "object" && !Array.isArray(direct)) {
+    return direct;
+  }
+
+  let parsed = null;
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let end = start; end < text.length; end += 1) {
+      const char = text[end];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+      } else if (char === "{") {
+        depth += 1;
+      } else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = tryParseJsonObject(text.slice(start, end + 1));
+          if (
+            candidate &&
+            typeof candidate === "object" &&
+            !Array.isArray(candidate)
+          ) {
+            parsed = candidate;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  if (parsed) return parsed;
+  throw new Error(`remote tfx-live output is not JSON: ${text.slice(0, 200)}`);
+}
+
+async function callRemoteLive(verb, opts, deps = {}) {
+  const host = validateRemoteHost(opts.remote);
+  const probeRemoteEnv = deps.probeRemoteEnv ?? probeRemoteHostEnv;
+  const execRemote = deps.sshExec ?? execFileAsync;
+  const env = await probeRemoteEnv(host);
+  const plan = buildRemoteLiveCommand(host, verb, opts, env);
+  const execOptions = {
+    timeout: (opts.timeoutMs ?? DEFAULT_ANSWER_TIMEOUT_MS) + 30_000,
+    maxBuffer: MAX_BUFFER,
+  };
+
+  try {
+    const { stdout } = await execRemote(plan.command, plan.args, execOptions);
+    return parseRemoteLiveJson(stdout);
+  } catch (error) {
+    if (error?.stdout) {
+      try {
+        return parseRemoteLiveJson(error.stdout);
+      } catch {
+        // stdout was not a tfx-live JSON result; fall through.
+      }
+    }
+    const stderr = error?.stderr ? String(error.stderr).trim() : "";
+    throw new Error(
+      `remote tfx-live ${verb} failed: ${stderr || error.message}`,
+    );
+  }
 }
 
 async function runTmux(remote, tmuxArgs, options = {}) {
@@ -395,6 +553,144 @@ function extractAssistantResponse(adapter, text, prompt = null) {
   }
 
   return response.join("\n").trim();
+}
+
+function normalizeClaudeTaskText(text) {
+  return String(text)
+    .replace(/[.…]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function isTaskListBoundary(line) {
+  const trimmed = line.trim();
+  return (
+    !trimmed ||
+    trimmed === "Working" ||
+    trimmed === "Completed" ||
+    /^[─-]{8,}$/.test(trimmed) ||
+    hasClaudeComposerPrompt(line) ||
+    /enter to open|space to reply|ctrl\+x to delete|\? for shortcuts/i.test(
+      trimmed,
+    )
+  );
+}
+
+function parseClaudeCompletedTaskListEntries(text) {
+  const lines = String(text)
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""));
+  const entries = [];
+  let inCompleted = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "Completed") {
+      inCompleted = true;
+      continue;
+    }
+    if (!inCompleted) {
+      continue;
+    }
+    if (isTaskListBoundary(line)) {
+      if (trimmed) {
+        inCompleted = false;
+      }
+      continue;
+    }
+    if (!/^\s*✻\s+/.test(line)) {
+      continue;
+    }
+
+    const body = trimmed.replace(/^✻\s+/, "");
+    const columns = body
+      .split(/\s{2,}/)
+      .map((column) => column.trim())
+      .filter(Boolean);
+    if (columns.length < 2) {
+      continue;
+    }
+
+    let responseIndex = columns.length - 1;
+    const tail = columns[responseIndex];
+    if (/^(?:\d+\s*[smhdw]|now|just now)$/i.test(tail)) {
+      responseIndex -= 1;
+    }
+    if (responseIndex <= 0) {
+      continue;
+    }
+
+    const summary = columns.slice(0, responseIndex).join(" ").trim();
+    const response = columns[responseIndex].trim();
+    if (!summary || !response) {
+      continue;
+    }
+    entries.push({
+      summary,
+      response,
+      key: `${normalizeClaudeTaskText(summary)}\0${normalizeClaudeTaskText(
+        response,
+      )}`,
+    });
+  }
+
+  return entries;
+}
+
+function claudeTaskMatchesPrompt(entry, prompt) {
+  if (!prompt) {
+    return true;
+  }
+  const summary = normalizeClaudeTaskText(entry.summary);
+  const normalizedPrompt = normalizeClaudeTaskText(prompt);
+  return (
+    Boolean(summary && normalizedPrompt) &&
+    (summary.includes(normalizedPrompt) || normalizedPrompt.includes(summary))
+  );
+}
+
+function extractClaudeCompletedTaskListResponse(text, options = {}) {
+  const beforeEntries = parseClaudeCompletedTaskListEntries(options.beforeText);
+  const beforeKeys = new Set(beforeEntries.map((entry) => entry.key));
+  const newEntries = parseClaudeCompletedTaskListEntries(text).filter(
+    (entry) => !beforeKeys.has(entry.key),
+  );
+  if (newEntries.length === 0) {
+    return "";
+  }
+  const promptMatches = options.prompt
+    ? newEntries.filter((entry) =>
+        claudeTaskMatchesPrompt(entry, options.prompt),
+      )
+    : [];
+  if (promptMatches.length > 0) {
+    return promptMatches[0].response;
+  }
+  if (newEntries.length === 1) {
+    return newEntries[0].response;
+  }
+  return newEntries.at(-1).response;
+}
+
+function hasClaudeCompletedTaskListResponse(text, options = {}) {
+  return extractClaudeCompletedTaskListResponse(text, options).length > 0;
+}
+
+function hasTmuxAssistantResponseAfterPrompt(
+  adapter,
+  text,
+  prompt,
+  beforeText,
+) {
+  return (
+    hasAssistantResponseAfterPrompt(adapter, text, prompt) ||
+    (adapter.cli === "claude" &&
+      hasClaudeCompletedTaskListResponse(text, {
+        beforeText,
+        prompt,
+      }))
+  );
 }
 
 async function capturePane(remote, session) {
@@ -805,6 +1101,63 @@ async function probeDaemon(bridgePath, ref, timeoutMs) {
   }
 }
 
+async function hasTmuxSession(adapter, opts) {
+  if (!opts.session) return false;
+  try {
+    await runTmux(opts.remote, ["has-session", "-t", opts.session]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function daemonProbeUnavailableReason(probe, targetAttachable) {
+  if (targetAttachable) return null;
+  if (!probe?.ok) return probe?.reason ?? "probe-failed";
+  return "target-not-found";
+}
+
+async function resolveAskTransport(adapter, opts, deps = {}) {
+  const transport = opts.transport ?? "tmux";
+  if (transport !== "auto") {
+    return {
+      transport,
+      transportSelected: transport,
+      transportProbe: null,
+    };
+  }
+
+  const tmuxProbe = deps.hasTmuxSession ?? hasTmuxSession;
+  const daemonProbe = deps.probeDaemon ?? probeDaemon;
+  const [tmux, probe] = await Promise.all([
+    tmuxProbe(adapter, opts),
+    daemonProbe(
+      opts.bridgePath,
+      {
+        short: opts.short,
+        sessionId: opts.sessionId,
+        configDir: opts.configDir,
+      },
+      opts.timeoutMs,
+    ),
+  ]);
+  const daemon = daemonProbeTargetAttachable(probe, opts);
+  const daemonReason = daemonProbeUnavailableReason(probe, daemon);
+  const transportProbe = {
+    tmux: tmux === true,
+    daemon,
+    ...(daemonReason ? { daemonReason } : {}),
+  };
+
+  return {
+    transport: "auto",
+    transportSelected: daemon ? "uds" : tmux ? "tmux" : "none",
+    transportProbe,
+    daemonProbe: probe,
+    daemonConfigDir: opts.configDir ?? probe?.raw?.daemon?.configDir ?? null,
+  };
+}
+
 async function doStart(adapter, opts) {
   const {
     session,
@@ -880,7 +1233,7 @@ async function doAskViaTmux(adapter, opts) {
     const doneSignal =
       !adapter.isBusy(visible) &&
       ready &&
-      hasAssistantResponseAfterPrompt(adapter, visible, prompt);
+      hasTmuxAssistantResponseAfterPrompt(adapter, visible, prompt, beforeRaw);
     if (doneSignal && quietPolls >= FALLBACK_QUIET_POLLS) {
       done = true;
       break;
@@ -891,6 +1244,15 @@ async function doAskViaTmux(adapter, opts) {
 
   raw = await capturePane(remote, session);
   response = extractAssistantResponse(adapter, raw, prompt);
+  if (!response && adapter.cli === "claude") {
+    response = extractClaudeCompletedTaskListResponse(raw, {
+      beforeText: beforeRaw,
+      prompt,
+    });
+    if (response) {
+      done = true;
+    }
+  }
   contextPctAfter = adapter.contextPct(raw);
 
   return addLoginGuard(adapter, raw, {
@@ -901,6 +1263,7 @@ async function doAskViaTmux(adapter, opts) {
     response,
     contextPctBefore,
     contextPctAfter,
+    matchedCompletion: done,
     done,
     raw,
   });
@@ -924,6 +1287,10 @@ async function doAsk(adapter, opts) {
     );
   }
 
+  if (opts.remote) {
+    return doAskViaRemoteLive(adapter, opts);
+  }
+
   if (transport === "uds") {
     if (!opts.bridgePath) {
       throw new Error(
@@ -934,6 +1301,16 @@ async function doAsk(adapter, opts) {
   }
 
   return doAskAuto(adapter, opts);
+}
+
+async function doAskViaRemoteLive(adapter, opts, deps = {}) {
+  const result = await callRemoteLive("ask", opts, deps);
+  return {
+    ...result,
+    cli: result.cli ?? adapter.cli,
+    remote: opts.remote,
+    remoteRelay: true,
+  };
 }
 
 async function doAskViaDaemon(opts, meta = {}) {
@@ -1087,23 +1464,26 @@ async function runTmuxFallback(adapter, opts, reason, udsResult) {
 }
 
 async function doAskAuto(adapter, opts) {
-  const probe = await probeDaemon(
-    opts.bridgePath,
-    { short: opts.short, sessionId: opts.sessionId, configDir: opts.configDir },
-    opts.timeoutMs,
-  );
-  // daemon-probe returns the full session list (it does not filter by the
-  // requested short), so confirm the target is actually attachable here rather
-  // than firing a doomed attach at a missing short.
-  const targetAttachable = daemonProbeTargetAttachable(probe, opts);
+  const resolution = await resolveAskTransport(adapter, opts);
+  const probe = resolution.daemonProbe;
 
-  if (targetAttachable) {
-    const daemonConfigDir = opts.configDir ?? probe.raw?.daemon?.configDir;
+  if (resolution.transportSelected === "tmux") {
+    const tmuxResult = await doAskViaTmux(adapter, opts);
+    return {
+      ...tmuxResult,
+      transport: "auto",
+      transportSelected: "tmux",
+      transportProbe: resolution.transportProbe,
+    };
+  }
+
+  if (resolution.transportSelected === "uds") {
+    const daemonConfigDir = resolution.daemonConfigDir;
     const udsResult = await doAskViaDaemon(
       { ...opts, configDir: daemonConfigDir },
       {
         transportSelected: "uds",
-        transportProbe: "ok",
+        transportProbe: resolution.transportProbe,
       },
     );
     if (udsResult.matchedCompletion) {
@@ -1123,27 +1503,48 @@ async function doAskAuto(adapter, opts) {
       probe,
       attachError,
     });
-    const fallback = await runTmuxFallback(
-      adapter,
-      opts,
-      "uds-attach-incomplete",
-      udsResult,
-    );
+    const fallback =
+      resolution.transportProbe?.tmux === true
+        ? await runTmuxFallback(
+            adapter,
+            opts,
+            "uds-attach-incomplete",
+            udsResult,
+          )
+        : {
+            cli: adapter.cli,
+            transport: "auto",
+            transportSelected: "none",
+            transportProbe: resolution.transportProbe,
+            response: "",
+            done: false,
+            error:
+              "uds unavailable (uds-attach-incomplete) and no tmux session for fallback",
+            udsError: udsResult.error ?? attachError,
+          };
     await reportPromise.catch(() => {});
     return fallback;
   }
 
   // uds is unavailable: daemon unreachable, or reachable but target not listed.
-  const reason = !probe.ok
-    ? (probe.reason ?? "probe-failed")
-    : "target-not-found";
+  const reason = resolution.transportProbe?.daemonReason ?? "target-not-found";
   const reportPromise = writeUdsBugReport(reason, {
     short: opts.short,
     sessionId: opts.sessionId,
     bridgePath: opts.bridgePath,
     probe,
   });
-  const fallback = await runTmuxFallback(adapter, opts, reason, null);
+  const fallback = {
+    cli: adapter.cli,
+    transport: "auto",
+    transportSelected: "none",
+    transportProbe: resolution.transportProbe,
+    response: "",
+    done: false,
+    error: opts.session
+      ? `uds unavailable (${reason}) and tmux session unavailable`
+      : `uds unavailable (${reason}) and no --session for tmux fallback`,
+  };
   await reportPromise.catch(() => {});
   return fallback;
 }
@@ -1206,6 +1607,16 @@ async function doInterruptViaDaemon(opts, meta = {}) {
   };
 }
 
+async function doInterruptViaRemoteLive(adapter, opts, deps = {}) {
+  const result = await callRemoteLive("interrupt", opts, deps);
+  return {
+    ...result,
+    cli: result.cli ?? adapter.cli,
+    remote: opts.remote,
+    remoteRelay: true,
+  };
+}
+
 async function doInterrupt(adapter, opts) {
   const transport = opts.transport ?? "tmux";
   if (transport === "tmux") {
@@ -1220,6 +1631,9 @@ async function doInterrupt(adapter, opts) {
     throw new Error(
       `--transport ${transport} requires --short or --session-id`,
     );
+  }
+  if (opts.remote) {
+    return doInterruptViaRemoteLive(adapter, opts);
   }
   if (!opts.bridgePath) {
     throw new Error(
@@ -1811,10 +2225,27 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  printJson({
-    ok: false,
-    error: error.message,
+export {
+  ADAPTERS,
+  buildRemoteLiveCommand,
+  callRemoteLive,
+  extractAssistantResponse,
+  extractClaudeCompletedTaskListResponse,
+  hasClaudeCompletedTaskListResponse,
+  parseRemoteLiveJson,
+  resolveAskTransport,
+};
+
+const isDirectRun =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === pathResolve(process.argv[1]);
+
+if (isDirectRun) {
+  main().catch((error) => {
+    printJson({
+      ok: false,
+      error: error.message,
+    });
+    process.exitCode = 1;
   });
-  process.exitCode = 1;
-});
+}
