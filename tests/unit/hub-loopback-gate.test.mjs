@@ -42,7 +42,10 @@ describe("isLoopbackRemoteAddress", () => {
 
 describe("isAuthorizedRequest — localhost-only 모드 (hubToken 없음)", () => {
   it("loopback 요청은 허용한다", () => {
-    assert.equal(isAuthorizedRequest(fakeReq("127.0.0.1"), "/status", null), true);
+    assert.equal(
+      isAuthorizedRequest(fakeReq("127.0.0.1"), "/status", null),
+      true,
+    );
     assert.equal(isAuthorizedRequest(fakeReq("::1"), "/status", null), true);
   });
 
@@ -58,7 +61,10 @@ describe("isAuthorizedRequest — localhost-only 모드 (hubToken 없음)", () =
   });
 
   it("remoteAddress 누락 시에도 차단한다", () => {
-    assert.equal(isAuthorizedRequest(fakeReq(undefined), "/status", null), false);
+    assert.equal(
+      isAuthorizedRequest(fakeReq(undefined), "/status", null),
+      false,
+    );
   });
 });
 
@@ -78,7 +84,11 @@ describe("isAuthorizedRequest — token 모드 (hubToken 있음)", () => {
 
   it("토큰 누락 또는 불일치는 차단한다", () => {
     assert.equal(
-      isAuthorizedRequest(fakeReq("192.168.1.99", {}), "/bridge/register", TOKEN),
+      isAuthorizedRequest(
+        fakeReq("192.168.1.99", {}),
+        "/bridge/register",
+        TOKEN,
+      ),
       false,
     );
     assert.equal(
