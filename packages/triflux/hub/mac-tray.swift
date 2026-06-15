@@ -47,6 +47,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 class WebViewController: NSViewController, WKNavigationDelegate, WKScriptMessageHandler {
     var webView: WKWebView!
     var port: String = "27888"
+    let canonicalPort = "27888"
+    var consecutiveFailures = 0
     var retryWorkItem: DispatchWorkItem?
     var onFocusComplete: (() -> Void)?
 
@@ -101,6 +103,14 @@ class WebViewController: NSViewController, WKNavigationDelegate, WKScriptMessage
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         logError("Failed to load: \(error.localizedDescription)")
+        consecutiveFailures += 1
+        if consecutiveFailures >= 3 && port != canonicalPort {
+            port = canonicalPort
+            consecutiveFailures = 0
+            logError("Switching to canonical port \(canonicalPort) after repeated failures")
+            loadTray()
+            return
+        }
         let retry = DispatchWorkItem { [weak self] in
             self?.loadTray()
         }
@@ -111,6 +121,7 @@ class WebViewController: NSViewController, WKNavigationDelegate, WKScriptMessage
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         retryWorkItem?.cancel()
         retryWorkItem = nil
+        consecutiveFailures = 0
         logError("Successfully loaded URL")
     }
 

@@ -9,11 +9,25 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveHubPortForContext } from "./hub-lifecycle.mjs";
 import { IS_MAC, IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 import { ensureHubForTray } from "./tray-lifecycle.mjs";
 
 const HUB_PID_FILE = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
 const DEFAULT_HUB_PORT = "27888";
+
+export function resolveTrayHubPort({
+  env = process.env,
+  cwd = process.cwd(),
+} = {}) {
+  return String(
+    resolveHubPortForContext({
+      env,
+      cwd,
+      defaultPort: Number(DEFAULT_HUB_PORT),
+    }),
+  );
+}
 
 function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
@@ -416,7 +430,7 @@ async function shutdown(reason = "shutdown") {
 export async function startTray() {
   if (IS_MAC) {
     const trayScript = fileURLToPath(import.meta.url);
-    const port = process.env.TFX_HUB_PORT || DEFAULT_HUB_PORT;
+    const port = resolveTrayHubPort();
     const serverPath = join(dirname(trayScript), "server.mjs");
     await ensureHubForTray({ port, serverPath });
     const reaped = reapExistingMacTrayProcesses({ scriptPath: trayScript });
