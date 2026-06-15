@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.35.2] - 2026-06-15
+
+### Fixed
+- tray: macOS 트레이를 눌러도 빈 popover만 뜨던 회귀 — 종료된 ephemeral 허브 포트(예: 28255)를 물고 무한 재시도하던 문제. `hub/tray.mjs`가 워크트리/ephemeral 누수 포트를 canonical 27888로 clamp(`resolveTrayHubPort`), `hub/mac-tray.swift`는 3회 연속 로드 실패 시 canonical 27888로 self-heal (PR #415)
+
 ## [10.35.0] - 2026-06-11
 
 ### Added
