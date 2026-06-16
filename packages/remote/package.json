@@ -1,6 +1,6 @@
 {
   "name": "@triflux/remote",
-  "version": "10.35.3",
+  "version": "10.36.0",
   "description": "triflux remote — team mode, psmux, MCP workers, SQLite store.",
   "type": "module",
   "main": "hub/index.mjs",

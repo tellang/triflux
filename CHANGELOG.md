@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.36.0] - 2026-06-16
+
+### Added
+- **[#416]** research: CloakBrowser stealth-fetch 백엔드 — `tfx-research` + `multilingual-parallel-research` 의 URL 콘텐츠 수집을 봇탐지 우회 stealth Chromium(Playwright drop-in)으로 직접 수행한다. `tfx stealth-fetch <url>` 서브커맨드 추가, http/https scheme allow-list 로 SSRF 경계 차단(import 전 거부), CloakBrowser 미설치/미지원/실패 시 기존 WebFetch/MCP-crawl 로 graceful 폴백(reason 4종 not_installed/unsupported_platform/runtime_error/blocked_scheme, exit code 0/2/3/4/5/6). 라이선스 non-redistributable 이라 번들 대신 optionalDependencies(cloakbrowser + playwright-core, 첫 launch 시 자동 다운로드)
+
 ## [10.35.3] - 2026-06-16
 
 ### Fixed
