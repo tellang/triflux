@@ -2708,6 +2708,7 @@ function statusBadge(status) {
     case "missing":
     case "missing-file":
     case "warning":
+    case "skipped":
       return `${YELLOW}${status}${RESET}`;
     case "mismatch":
     case "invalid":
@@ -2730,6 +2731,7 @@ function buildMcpStatusRows(statusInfo) {
       else if (row.status === "mismatch")
         detail = `expected ${row.expectedUrl || row.expectedCommand}`;
       else if (row.status === "invalid-config") detail = "parse error";
+      else if (row.status === "skipped") detail = row.message || "skipped";
       else if (row.status === "stdio") detail = "configured as stdio";
       return [
         row.name,

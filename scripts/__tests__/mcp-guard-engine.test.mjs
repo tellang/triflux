@@ -6,6 +6,7 @@ import { afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  inspectRegistryStatus,
   isWatchedPath,
   loadRegistry,
   remediate,
@@ -214,6 +215,98 @@ describe("mcp guard engine", () => {
     // env 없음 + hub.pid port 존재 → registry/default 27888 fallback.
     // pid port cascade 가 제거되어 29991 이 쓰이면 안 됨.
     assert.equal(resolveHubUrl(), "http://127.0.0.1:27888/mcp");
+  });
+
+  it("treats migrated empty Antigravity mcp_config.json as skipped instead of invalid", () => {
+    const homeDir = createHomeDir();
+    withHome(homeDir);
+
+    const antigravityPath = join(
+      homeDir,
+      ".gemini",
+      "config",
+      "mcp_config.json",
+    );
+    mkdirSync(dirname(antigravityPath), { recursive: true });
+    writeFileSync(join(homeDir, ".gemini", "config", ".migrated"), "", "utf8");
+    writeFileSync(antigravityPath, "", "utf8");
+
+    const registry = {
+      version: 1,
+      defaults: {
+        transport: "hub-url",
+        hub_base: "http://127.0.0.1:27888",
+      },
+      servers: {
+        "tfx-hub": {
+          transport: "hub-url",
+          url: "http://127.0.0.1:27888/mcp",
+          safe: true,
+          targets: ["antigravity"],
+        },
+      },
+      policies: {
+        stdio_action: "replace-with-hub",
+        unknown_server_action: "warn",
+        sync_denylist: [],
+        watched_paths: ["~/.gemini/config/mcp_config.json"],
+      },
+    };
+
+    const status = inspectRegistryStatus(registry);
+    assert.equal(status.configs[0].parseError, null);
+    assert.equal(status.configs[0].migrated, true);
+    assert.equal(status.rows[0].status, "skipped");
+    assert.match(status.rows[0].message, /migrated/i);
+  });
+
+  it("preserves migrated empty Antigravity mcp_config.json during registry sync", () => {
+    const homeDir = createHomeDir();
+    withHome(homeDir);
+
+    const antigravityPath = join(
+      homeDir,
+      ".gemini",
+      "config",
+      "mcp_config.json",
+    );
+    mkdirSync(dirname(antigravityPath), { recursive: true });
+    writeFileSync(join(homeDir, ".gemini", "config", ".migrated"), "", "utf8");
+    writeFileSync(antigravityPath, "", "utf8");
+
+    const registry = {
+      version: 1,
+      defaults: {
+        transport: "hub-url",
+        hub_base: "http://127.0.0.1:27888",
+      },
+      servers: {
+        "tfx-hub": {
+          transport: "hub-url",
+          url: "http://127.0.0.1:27888/mcp",
+          safe: true,
+          targets: ["antigravity"],
+        },
+      },
+      policies: {
+        stdio_action: "replace-with-hub",
+        unknown_server_action: "warn",
+        sync_denylist: [],
+        watched_paths: ["~/.gemini/config/mcp_config.json"],
+      },
+    };
+
+    const result = syncRegistryTargets({ registry });
+
+    assert.deepEqual(
+      result.actions.map((action) => ({
+        label: action.label,
+        status: action.status,
+        migrated: action.migrated,
+      })),
+      [{ label: "Antigravity", status: "skipped", migrated: true }],
+    );
+    assert.equal(readFileSync(antigravityPath, "utf8"), "");
   });
 
   it("syncs antigravity MCP config with Gemini-style JSON and http type", () => {

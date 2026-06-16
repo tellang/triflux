@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-06-16T08:38:54.896798+00:00",
+  "cwd": "/Users/tellang/Projects/tools/triflux/.worktrees/issue-doctor-378-409",
+  "codex_path": "/opt/homebrew/bin/codex",
+  "command": [
+    "/opt/homebrew/bin/codex",
+    "exec",
+    "Respond exactly: smoke_ok_409"
+  ],
+  "exit_code": 0,
+  "timed_out": false,
+  "stdout": "smoke_ok_409\n",
+  "stderr": "Reading additional input from stdin...\nOpenAI Codex v0.139.0\n--------\nworkdir: /Users/tellang/Projects/tools/triflux/.worktrees/issue-doctor-378-409\nmodel: gpt-5.5\nprovider: openai\napproval: never\nsandbox: workspace-write [workdir, /tmp, $TMPDIR]\nreasoning effort: xhigh\nreasoning summaries: none\nsession id: 019ecf95-6566-7ea1-baa4-fb5b8ffa7bfd\n--------\nuser\nRespond exactly: smoke_ok_409\nhook: SessionStart\nhook: SessionStart\nhook: SessionStart Completed\nhook: SessionStart Completed\nhook: UserPromptSubmit\nhook: UserPromptSubmit\nhook: UserPromptSubmit Completed\nhook: UserPromptSubmit Completed\ncodex\nsmoke_ok_409\nhook: Stop\nhook: Stop Completed\ntokens used\n22,643\n",
+  "reproduced_codex_apps_init_fail": false,
+  "notes": "No codex_apps initialization failure signature found in stderr during bounded local smoke.",
+  "codex_version_stdout": "codex-cli 0.139.0\n",
+  "codex_version_stderr": ""
+}

@@ -182,6 +182,15 @@ function isAntigravityConfig(filePath) {
   return normalized.endsWith("/.gemini/config/mcp_config.json");
 }
 
+function isMigratedAntigravityConfig(filePath, raw = null) {
+  if (!isAntigravityConfig(filePath)) return false;
+  const resolvedPath = resolveFilePath(filePath);
+  const markerPath = join(dirname(resolvedPath), ".migrated");
+  if (!existsSync(markerPath)) return false;
+  const contents = raw === null ? readFileSync(resolvedPath, "utf8") : raw;
+  return String(contents || "").trim() === "";
+}
+
 function plaintextSecretHeaderClient(filePath) {
   const client = detectClient(filePath);
   return client === "gemini" || client === "antigravity" ? client : null;
@@ -970,7 +979,23 @@ function scanJsonConfig(filePath) {
   }
 
   try {
-    const parsed = readJsonFile(filePath);
+    const raw = readFileSync(filePath, "utf8");
+    if (isMigratedAntigravityConfig(filePath, raw)) {
+      return {
+        filePath,
+        client: detectClient(filePath),
+        label: detectLabel(filePath),
+        exists: true,
+        parseError: null,
+        servers: [],
+        stdioServers: [],
+        migrated: true,
+        message:
+          "Antigravity migrated MCP config; deprecated mcp_config.json left empty",
+      };
+    }
+
+    const parsed = JSON.parse(raw);
     const mcpServers = parsed?.mcpServers;
     const servers =
       !mcpServers || typeof mcpServers !== "object"
@@ -1705,6 +1730,8 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         status = "missing-file";
       } else if (config.parseError) {
         status = "invalid-config";
+      } else if (config.migrated) {
+        status = "skipped";
       } else if (!actual) {
         status = "missing";
       } else if (expectedCommand) {
@@ -1733,6 +1760,8 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         actualUrl: actual?.url || "",
         actualCommand: actual?.command || "",
         status,
+        migrated: Boolean(config.migrated),
+        message: config.message || "",
         headerStatus: currentHeaderStatus,
         expectedHeaderNames: headerNames(expectedHeaders),
         actualHeaderNames: headerNames(actualHeaders),
@@ -2058,10 +2087,24 @@ export function syncRegistryTargets(options = {}) {
   );
   const actions = [];
   const invalidConfigs = new Set();
+  const skippedConfigs = new Set();
   const denylist = syncDenylistEntries(registry.policies);
 
   for (const target of syncTargets) {
     const snapshot = scanConfig(target.filePath);
+    if (snapshot.migrated) {
+      skippedConfigs.add(normalizeForMatch(target.filePath));
+      actions.push({
+        type: "sync",
+        filePath: target.filePath,
+        label: target.label,
+        status: "skipped",
+        migrated: true,
+        message: snapshot.message,
+      });
+      continue;
+    }
+
     if (snapshot.parseError) {
       invalidConfigs.add(normalizeForMatch(target.filePath));
       actions.push({
@@ -2097,6 +2140,10 @@ export function syncRegistryTargets(options = {}) {
   for (const target of primaryTargets) {
     const snapshot = scanConfig(target.filePath);
     const targetKey = normalizeForMatch(target.filePath);
+    if (snapshot.migrated || skippedConfigs.has(targetKey)) {
+      continue;
+    }
+
     if (snapshot.parseError) {
       if (!invalidConfigs.has(targetKey)) {
         actions.push({
