@@ -10,6 +10,7 @@ import {
   isWatchedPath,
   loadRegistry,
   remediate,
+  removeServerFromTargets,
   resolveHubUrl,
   scanForStdioServers,
   syncRegistryTargets,
@@ -297,6 +298,58 @@ describe("mcp guard engine", () => {
     };
 
     const result = syncRegistryTargets({ registry });
+
+    assert.deepEqual(
+      result.actions.map((action) => ({
+        label: action.label,
+        status: action.status,
+        migrated: action.migrated,
+      })),
+      [{ label: "Antigravity", status: "skipped", migrated: true }],
+    );
+    assert.equal(readFileSync(antigravityPath, "utf8"), "");
+  });
+
+  it("skips migrated empty Antigravity mcp_config.json during registry remove", () => {
+    const homeDir = createHomeDir();
+    withHome(homeDir);
+
+    const antigravityPath = join(
+      homeDir,
+      ".gemini",
+      "config",
+      "mcp_config.json",
+    );
+    mkdirSync(dirname(antigravityPath), { recursive: true });
+    writeFileSync(join(homeDir, ".gemini", "config", ".migrated"), "", "utf8");
+    writeFileSync(antigravityPath, "", "utf8");
+
+    const registry = {
+      version: 1,
+      defaults: {
+        transport: "hub-url",
+        hub_base: "http://127.0.0.1:27888",
+      },
+      servers: {
+        "tfx-hub": {
+          transport: "hub-url",
+          url: "http://127.0.0.1:27888/mcp",
+          safe: true,
+          targets: ["antigravity"],
+        },
+      },
+      policies: {
+        stdio_action: "replace-with-hub",
+        unknown_server_action: "warn",
+        sync_denylist: [],
+        watched_paths: ["~/.gemini/config/mcp_config.json"],
+      },
+    };
+
+    const result = removeServerFromTargets("tfx-hub", {
+      registry,
+      targets: ["antigravity"],
+    });
 
     assert.deepEqual(
       result.actions.map((action) => ({

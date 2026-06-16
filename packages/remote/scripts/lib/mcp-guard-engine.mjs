@@ -2044,6 +2044,19 @@ export function removeServerFromTargets(name, options = {}) {
     if (targetsFilter && !targetsFilter.has(target.client)) continue;
 
     const snapshot = scanConfig(target.filePath);
+    if (snapshot.migrated) {
+      actions.push({
+        type: "remove",
+        name: trimmedName,
+        filePath: target.filePath,
+        label: target.label,
+        status: "skipped",
+        migrated: true,
+        message: snapshot.message,
+      });
+      continue;
+    }
+
     if (snapshot.parseError) {
       actions.push({
         type: "remove",
