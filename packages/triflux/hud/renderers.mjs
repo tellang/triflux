@@ -326,7 +326,7 @@ export function getMicroLine(
   }
 
   // sv
-  const sv = formatSvPct(combinedSvPct || 0).trim();
+  const sv = formatSvPct(combinedSvPct).trim();
 
   const cols = getTerminalColumns() || 120;
   const line =
@@ -350,7 +350,7 @@ export function getClaudeRows(
   const ctxView = contextView || buildContextUsageView({}, null);
   const prefix = `${bold(claudeOrange("c"))}:`;
   // 절약 퍼센트
-  const svStr = formatSvPct(combinedSvPct || 0);
+  const svStr = formatSvPct(combinedSvPct);
   const svSuffix = `${dim("sv:")}${svStr}`;
 
   // API 실측 데이터
