@@ -150,7 +150,7 @@ describe("ensureAgyHooks", () => {
       PreInvocation: [
         {
           type: "command",
-          command: '/opt/node "/repo/hooks/agy-session-hook.mjs"',
+          command: '"/opt/node" "/repo/hooks/agy-session-hook.mjs"',
           timeout: 15,
         },
       ],
@@ -198,6 +198,45 @@ describe("ensureAgyHooks", () => {
     );
     const parsed = JSON.parse(readFileSync(hooksPath, "utf8"));
     assert.ok(parsed["triflux-session"].PreInvocation);
+  });
+
+  it("preserves a user-disabled triflux hook group", () => {
+    const geminiConfigHome = makeGeminiConfigHome();
+    const hooksPath = join(geminiConfigHome, "hooks.json");
+    writeFileSync(
+      hooksPath,
+      JSON.stringify({ "triflux-session": { enabled: false } }, null, 2) + "\n",
+      "utf8",
+    );
+
+    const result = ensureAgyHooks({
+      geminiConfigHome,
+      hookScriptPath: "/repo/hooks/agy-session-hook.mjs",
+      nodeBin: "/opt/node with spaces/node",
+      backupTimestamp: "20260608T010203",
+    });
+
+    assert.equal(result.changed, false);
+    assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), {
+      "triflux-session": { enabled: false },
+    });
+  });
+
+  it("quotes the node binary path in the installed command", () => {
+    const geminiConfigHome = makeGeminiConfigHome();
+    const hooksPath = join(geminiConfigHome, "hooks.json");
+
+    ensureAgyHooks({
+      geminiConfigHome,
+      hookScriptPath: "/repo/hooks/agy-session-hook.mjs",
+      nodeBin: "/opt/node with spaces/node",
+    });
+
+    const parsed = JSON.parse(readFileSync(hooksPath, "utf8"));
+    assert.equal(
+      parsed["triflux-session"].PreInvocation[0].command,
+      '"/opt/node with spaces/node" "/repo/hooks/agy-session-hook.mjs"',
+    );
   });
 
   it("skips the real-HOME install while the test runner is active (TEST_LOCK_PID)", () => {

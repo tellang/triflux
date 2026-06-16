@@ -243,6 +243,7 @@ function candidateResultSummary(result) {
     ...summary,
     ok: result.ok === true,
     error: result.error ?? null,
+    errorCode: result.errorCode ?? null,
     sessionCount: Array.isArray(result.sessions) ? result.sessions.length : 0,
   };
 }
@@ -270,6 +271,12 @@ function buildProbeResponse({
     reason = "target-not-found";
     error = "Claude daemon target not found in reachable candidates";
   } else if (results.length > 0) {
+    const errorCodes = results.map((result) => result.errorCode).filter(Boolean);
+    if (errorCodes.includes("stale-control-socket")) {
+      reason = "stale-control-socket";
+    } else if (errorCodes.includes("daemon-dir-missing")) {
+      reason = "daemon-dir-missing";
+    }
     error =
       results
         .map((result) => result.error)
@@ -341,6 +348,18 @@ export async function probeClaudeDaemonCandidates({
         error: ok ? null : list?.error || "Claude daemon list failed",
       });
     } catch (error) {
+      let errorCode = null;
+      if (error?.code === "ENOENT") {
+        try {
+          await fs.stat(candidate.daemonDir);
+          errorCode = "stale-control-socket";
+        } catch (statError) {
+          errorCode =
+            statError?.code === "ENOENT"
+              ? "daemon-dir-missing"
+              : "stale-control-socket";
+        }
+      }
       results.push({
         ok: false,
         candidate,
@@ -348,6 +367,7 @@ export async function probeClaudeDaemonCandidates({
         sessions: [],
         target: null,
         error: errorMessage(error),
+        errorCode,
       });
     }
   }
@@ -459,6 +479,7 @@ export async function readDaemonControlKey(
 }
 
 export async function buildDaemonControlAuth(configDir) {
+  if (!configDir) return {};
   const auth = await readDaemonControlKey(configDir);
   return auth ? { auth } : {};
 }

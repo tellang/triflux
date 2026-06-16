@@ -1113,7 +1113,20 @@ async function hasTmuxSession(adapter, opts) {
 
 function daemonProbeUnavailableReason(probe, targetAttachable) {
   if (targetAttachable) return null;
-  if (!probe?.ok) return probe?.reason ?? "probe-failed";
+  if (!probe?.ok) {
+    const candidateCodes = Array.isArray(probe?.raw?.candidateResults)
+      ? probe.raw.candidateResults
+          .map((entry) => entry?.errorCode)
+          .filter(Boolean)
+      : [];
+    if (candidateCodes.includes("stale-control-socket")) {
+      return "stale-control-socket";
+    }
+    if (candidateCodes.includes("daemon-dir-missing")) {
+      return "daemon-dir-missing";
+    }
+    return probe?.reason ?? "probe-failed";
+  }
   return "target-not-found";
 }
 
