@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.35.3] - 2026-06-16
+
+### Fixed
+- **[#417]** cto: `tfx cto status/collect/dashboard` 를 repo 루트가 아닌 하위 폴더(예: `packages/triflux`)에서 호출하면 lake 를 못 찾아 "run tfx cto collect" 가 반복되고 하위 폴더에 stray `.triflux/lake` 가 생기던 문제 — 신규 `cto/lake-root.mjs` 의 `resolveLakeRootDir` 가 `.git` 마커를 상위로 탐색해 git toplevel 기준으로 lake 를 해결한다(git worktree 는 자체 `.git` 에서 멈춰 lake 격리 유지, `.git` 미발견 시 cwd fallback). 단일 세션 auto-collect 도 허용(`triggered-solo`, 빈도는 기존 debounce + fresh-lake 가 제어)
+
 ## [10.35.2] - 2026-06-15
 
 ### Fixed
