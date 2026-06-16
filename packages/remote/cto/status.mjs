@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { resolveLakeRootDir } from "./lake-root.mjs";
+
 const SCHEMA_VERSION = "cto-lake.v1";
 const SYNAPSE_TIMEOUT_MS = 1500;
 
@@ -304,7 +306,7 @@ function renderHumanStatus(status) {
 }
 
 export async function runStatus(args = [], opts = {}) {
-  const rootDir = opts.rootDir || process.cwd();
+  const rootDir = opts.rootDir || resolveLakeRootDir(process.cwd());
   const lakeRoot = opts.lakeRoot || join(rootDir, ".triflux", "lake");
   const stdout = opts.stdout || process.stdout;
   const jsonOut = opts.json === true || hasFlag(args, "--json");

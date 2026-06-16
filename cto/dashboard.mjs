@@ -7,6 +7,8 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
+import { resolveLakeRootDir } from "./lake-root.mjs";
+
 const DEFAULT_INTERVAL_MS = 60_000;
 
 function hasFlag(args, flag) {
@@ -360,7 +362,7 @@ async function renderOnce({ lakeRoot, stdout, stdoutHtml, renders }) {
 }
 
 export async function runDashboard(args = [], opts = {}) {
-  const rootDir = opts.rootDir || process.cwd();
+  const rootDir = opts.rootDir || resolveLakeRootDir(process.cwd());
   const lakeRoot = opts.lakeRoot || join(rootDir, ".triflux", "lake");
   const stdout = opts.stdout || process.stdout;
   const watch = opts.watch === true || hasFlag(args, "--watch");
