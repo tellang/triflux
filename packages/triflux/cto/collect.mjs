@@ -17,6 +17,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { renderBrief } from "./brief.mjs";
+import { resolveLakeRootDir } from "./lake-root.mjs";
 
 const SCHEMA_VERSION = "cto-lake.v1";
 const SOURCE_REGISTRY = [
@@ -785,7 +786,7 @@ function hasFlag(args, flag) {
 }
 
 export async function runCollect(args = [], opts = {}) {
-  const rootDir = opts.rootDir || process.cwd();
+  const rootDir = opts.rootDir || resolveLakeRootDir(process.cwd());
   const lakeRoot = opts.lakeRoot || join(rootDir, ".triflux", "lake");
   const stdout = opts.stdout || process.stdout;
   const stderr = opts.stderr || process.stderr;

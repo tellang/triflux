@@ -89,6 +89,9 @@ describe("QLearningRouter", () => {
   beforeEach(() => {
     router = new QLearningRouter({
       epsilon: 0, // 탐색 비활성화 (결정적 테스트)
+      // update 의 decay 가 epsilon 을 epsilonMin(미지정 시 0.01)으로 끌어올려
+      // predict 에서 탐색이 재발하는 flaky 를 막는다.
+      epsilonMin: 0,
       modelPath: tmpModelPath,
     });
   });
@@ -303,6 +306,7 @@ describe("Q-table 영속화", () => {
   it("save → load: Q-table 복원", () => {
     const router1 = new QLearningRouter({
       epsilon: 0,
+      epsilonMin: 0, // update decay 가 epsilon 을 올려 save/load 로 탐색이 누출되는 flaky 방지
       modelPath: tmpModelPath,
     });
     for (let i = 0; i < 20; i++) {
@@ -314,6 +318,7 @@ describe("Q-table 영속화", () => {
 
     const router2 = new QLearningRouter({
       epsilon: 0,
+      epsilonMin: 0,
       modelPath: tmpModelPath,
     });
     const loaded = router2.load();

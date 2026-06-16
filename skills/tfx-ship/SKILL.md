@@ -1,8 +1,9 @@
 ---
 name: tfx-ship
 description: >
-  triflux 전용 릴리즈 자동화. 기존 scripts/release/* 래퍼 + AskUserQuestion 기반 버전 선택 +
-  CHANGELOG 편집 게이트 + Co-Authored-By/AI trailer 금지 강제. 'ship', '배포', '릴리즈',
+  triflux 전용 릴리즈 자동화. **GitHub Actions(release.yml dispatch / npm-publish.yml) 기반 CI 릴리즈가 기본 경로 —
+  npm publish 는 OIDC Trusted Publishing 으로 CI 가 수행하므로 로컬 npm login 불필요.** scripts/release/* 래퍼 +
+  AskUserQuestion 기반 버전 선택 + CHANGELOG 편집 게이트 + Co-Authored-By/AI trailer 금지 강제. 'ship', '배포', '릴리즈',
   'release', 'tfx-ship', 'publish' 같은 요청에 반드시 사용.
 argument-hint: "[patch|minor|major|<version>] [--skip-tests] [--no-publish] [--dry-run]"
 ---
@@ -27,10 +28,11 @@ triflux 는 아래 3채널로 동시 배포. 각 채널의 버전은 반드시 �
 | # | 채널 | 명령 | 우선순위 |
 |---|------|------|---------|
 | 1 | **GitHub Releases** | `gh release create vX.Y.Z --notes-file <notes>` | 공지 + changelog 공식 소스 |
-| 2 | **npm registry** | `node scripts/release/publish.mjs --execute` | primary distribution |
+| 2 | **npm registry** | **CI `npm-publish.yml`** (`v*` 태그 push 자동 / OIDC Trusted Publishing, `NPM_TOKEN` secret) | primary distribution |
 | 3 | **Claude Code marketplace** | `.claude-plugin/marketplace.json` (`source: npm` 참조) | `claude plugin add triflux` |
 | 4 | **pypi** (future, 비활성) | 현재 `pyproject.toml` 없음 | 활성화 시 Step 10.5 신설 |
 
+- **npm publish 는 로컬에서 하지 않는다** — `release.yml` dispatch 또는 `v*` 태그 push 시 `npm-publish.yml` 이 OIDC 로 발행한다. 로컬 `publish.mjs --execute` 는 CI 불가 시 폴백 전용.
 - marketplace 는 자체 publish 명령이 없음. marketplace.json 의 version 만 갱신하면 git push 로 반영됨 (GitHub 호스팅).
 - `release:check-sync` 가 package.json + marketplace.json + package-lock.json 3곳 version 일치를 강제한다.
 - pypi 는 triflux 가 Python 모듈을 가지게 되면 활성화. 현 단계는 플레이스홀더.
@@ -40,12 +42,47 @@ triflux 는 아래 3채널로 동시 배포. 각 채널의 버전은 반드시 �
 ## 전제 조건
 
 - `~/.claude/scripts/tfx-route.sh` 불필요 (CLI 워커 호출 없음)
-- `gh` CLI 인증됨 (`gh auth status`)
-- `npm` 사용 가능 + npm login 완료
-- 현재 브랜치: `main` (feature 브랜치에서는 차단)
-- `origin/main` 과 동기화된 상태 (behind 면 먼저 pull)
+- `gh` CLI 인증됨 (`gh auth status`) — `release.yml` dispatch / GitHub release 에 필요. 깨졌으면 웹 UI 대체
+- **npm 인증 불필요** — npm publish 는 CI(`npm-publish.yml`)가 OIDC/`NPM_TOKEN` 으로 수행 (로컬 `npm login` 필요 없음)
+- 릴리즈할 코드가 `origin/main` 에 있을 것 (CI 는 `--ref main` 으로 origin 을 checkout)
 
-## 실행 플로우
+## 기본 경로 — CI 릴리즈 (권장)
+
+> **npm publish 는 로컬에서 하지 않는다.** GitHub Actions 가 OIDC(Trusted Publishing)로 발행한다.
+> 워크플로우: `.github/workflows/{release,npm-publish,ci}.yml`
+
+- **`release.yml`** (`workflow_dispatch`, inputs: `version`, `channel`): 한 번의 dispatch 로 prepare(테스트/버전 bump) → 태그 + GitHub release(`publish.mjs --skip-npm`) → `npm-publish.yml` dispatch → npm publish 완료 대기 → `verify.mjs` 까지 전부 CI(ubuntu, node 24)에서 수행.
+- **`npm-publish.yml`** (`on: push tags ['v*']` + dispatch): `v*` 태그가 push 되면 자동 npm publish (`--provenance --access public`, `NPM_TOKEN` secret). 루트/core/triflux 3패키지 각각, 이미 게시된 버전은 skip.
+
+### 권장 실행 — release.yml 디스패치
+
+```bash
+gh workflow run release.yml --ref main -f version=<X.Y.Z> -f channel=stable
+# 진행 관찰
+gh run list --workflow release.yml -L1
+gh run watch "$(gh run list --workflow release.yml -L1 --json databaseId -q '.[0].databaseId')"
+```
+
+- gh 인증이 없는 환경(예: SSH→m2, hosts.yml PAT 만료)이면 **gh 가 정상인 머신(m5)에서** dispatch 하거나 **GitHub 웹 UI**(Actions → release → Run workflow)로 대체.
+- CHANGELOG 가 필요하면 dispatch 전에 main 에 별도 커밋으로 반영(아래 로컬 플로우 Step 4 양식 참조).
+
+### 경량 경로 — 태그만 push
+
+이미 검증된 hotfix 등 prepare/verify 없이 npm publish 만 트리거하려면:
+
+```bash
+# main 에서 bump 커밋(버전 3곳 동기화) 후
+git tag v<X.Y.Z> && git push origin v<X.Y.Z>   # → npm-publish.yml 자동 발동
+```
+
+> ⚠️ 이 경로는 GitHub release / verify 를 건너뛴다. 버전 동기화(package.json + marketplace.json + lock)는 직접 보장.
+
+---
+
+## 로컬 수동 플로우 (폴백 — CI 불가 시에만)
+
+> CI 가 정석이다. 아래는 Actions 가 막혔거나 로컬 디버깅 시의 수동 절차다.
+> **Step 10 의 로컬 `npm publish` 는 CI 와 중복이므로 평상시 실행 금지.**
 
 ### Step 0 — 환경 확인
 
@@ -205,21 +242,15 @@ gh release create "v${TARGET_VERSION}" \
 - 노트 본문 검증: Co-Authored-By / AI trailer 포함됐는지 grep 후 제거
 - `--draft` 로 초안 생성 후 수동 publish 도 가능 (안전 모드)
 
-### Step 10 — npm publish
+### Step 10 — npm publish (= CI 가 수행, 로컬 금지가 기본)
 
-`--no-publish` 플래그 없으면 **AskUserQuestion**:
+> **평상시 로컬에서 `npm publish` 하지 않는다.** Step 8 에서 `git push origin v<X.Y.Z>` 로 태그가 올라가면 `npm-publish.yml` 이 OIDC 로 자동 발행한다.
+> CI run 관찰: `gh run list --workflow npm-publish.yml -L1` → `gh run watch <id>`
 
-```
-npm registry 에 배포하시겠습니까?
+CI 가 완전히 불가능한 비상시에만, npm 인증을 갖춘 환경에서 수동 폴백:
 
-A) node scripts/release/publish.mjs --execute
-B) dry-run 으로 먼저 검증 (node scripts/release/publish.mjs --dry-run)
-C) 건너뜀 (수동 배포)
-```
-
-선택 A:
 ```bash
-node scripts/release/publish.mjs --execute
+node scripts/release/publish.mjs --execute   # 비상 폴백 전용 — 중복 publish 주의
 ```
 
 ### Step 10.5 — pypi publish (future, 현재 비활성)
@@ -277,14 +308,14 @@ github:  https://github.com/tellang/triflux/releases/tag/v${TARGET_VERSION}
 | Step 7 | commit 메시지에 AI trailer 감지 | 하드 차단 + 재작성 요청 |
 | Step 8 | push 거부 (remote 변경됨) | `git pull --rebase origin main` 후 재시도 |
 | Step 9 | gh release create 실패 | `gh auth status` 확인, 수동 재시도 |
-| Step 10 | npm publish 실패 | `npm login` 확인, 수동 재시도 |
+| Step 10 | npm publish(CI) 실패 | `gh run view <id> --log-failed` 로 `npm-publish.yml` 로그 확인. `NPM_TOKEN` secret / OIDC 설정 점검 |
 
 ## 플래그
 
 | 플래그 | 동작 |
 |--------|------|
 | `--skip-tests` | Step 5 의 `npm test` 건너뜀. stderr 경고 출력. 긴급 hotfix 전용 |
-| `--no-publish` | Step 10 의 `npm publish` 건너뜀. git push + GitHub release 만 |
+| `--no-publish` | 태그를 push 하지 않아 `npm-publish.yml` 미발동. main 커밋 + (수동) GitHub release 만 |
 | `--dry-run` | 모든 git push / publish 호출을 출력만 하고 skip. 검증 전용 |
 
 ## AI trailer 방지 상세
@@ -313,6 +344,6 @@ github:  https://github.com/tellang/triflux/releases/tag/v${TARGET_VERSION}
 
 - 버전 불일치: `npm run release:check-sync --fix`
 - pack CRLF 경고: 실제 변경 파일만 선별 `git add packages/triflux/...`
-- gh CLI 미인증: `gh auth login`
-- npm login 필요: `npm login`
+- gh CLI 미인증: `gh auth login` (또는 gh 정상인 머신/웹 UI 로 release.yml dispatch)
+- npm publish 는 CI(`npm-publish.yml`, OIDC)가 수행 — 로컬 `npm login` 불필요. CI 실패 시 `gh run view <id> --log-failed`
 - prepare.mjs stall: `scripts/release/prepare.mjs` 가 `stdio: ["ignore","pipe","pipe"]` + 10분 timeout 적용됨 (v10.9.32 fix 739da2d)

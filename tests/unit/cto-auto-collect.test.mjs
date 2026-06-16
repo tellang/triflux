@@ -20,6 +20,10 @@ const tmpRoots = [];
 function makeProjectRoot() {
   const root = mkdtempSync(join(tmpdir(), "tfx-cto-auto-test-"));
   tmpRoots.push(root);
+  // resolveLakeRootDir 가 toplevel 로 안 올라가도록 임시 root 를 git toplevel 로
+  // 만든다(.git 마커). 이게 없으면 mkdtemp 상위에서 우연히 .git 을 만날 때
+  // rootDir 가 흔들려 테스트가 비결정적이 된다.
+  mkdirSync(join(root, ".git"), { recursive: true });
   return root;
 }
 
@@ -59,7 +63,7 @@ describe("cto-auto-collect", () => {
     assert.equal(isCtoAutoCollectDisabled({}), false);
   });
 
-  it("triggers runCollect only when a same-project peer exists", async () => {
+  it("triggers runCollect with reason 'triggered' when a same-project peer exists", async () => {
     const root = makeProjectRoot();
     const calls = [];
     const collector = makeCollector({
@@ -83,24 +87,53 @@ describe("cto-auto-collect", () => {
     await collector.drain();
 
     assert.equal(result.triggered, true);
+    assert.equal(result.reason, "triggered");
+    assert.equal(result.peerCount, 1);
     assert.deepEqual(calls, [{ args: [], opts: { rootDir: root } }]);
   });
 
-  it("skips when there are no peers, when env disables it, and while debounced", async () => {
+  it("triggers solo collect when there are no peers (single-session)", async () => {
+    const root = makeProjectRoot();
+    const soloCalls = [];
+    const solo = makeCollector({
+      registry: { querySessions: () => [] },
+      runCollect: async (args, opts) => soloCalls.push({ args, opts }),
+    });
+    const result = solo.handleSessionStarted({
+      sessionId: "solo",
+      session: { cwd: root, worktreePath: root },
+    });
+    await solo.drain();
+    assert.equal(result.triggered, true);
+    assert.equal(result.reason, "triggered-solo");
+    assert.equal(result.peerCount, 0);
+    assert.deepEqual(soloCalls, [{ args: [], opts: { rootDir: root } }]);
+  });
+
+  it("falls through to solo collect when querySessions throws", async () => {
     const root = makeProjectRoot();
     const calls = [];
-    const noPeer = makeCollector({
-      registry: { querySessions: () => [] },
-      runCollect: async () => calls.push("no-peer"),
+    const collector = makeCollector({
+      registry: {
+        querySessions() {
+          throw new Error("registry down");
+        },
+      },
+      runCollect: async (args, opts) => calls.push({ args, opts }),
     });
-    assert.equal(
-      noPeer.handleSessionStarted({
-        sessionId: "solo",
-        session: { cwd: root, worktreePath: root },
-      }).reason,
-      "no-peers",
-    );
+    const result = collector.handleSessionStarted({
+      sessionId: "x",
+      session: { cwd: root, worktreePath: root },
+    });
+    await collector.drain();
+    assert.equal(result.triggered, true);
+    assert.equal(result.reason, "triggered-solo");
+    assert.deepEqual(calls, [{ args: [], opts: { rootDir: root } }]);
+  });
 
+  it("skips when env disables it, and while debounced", async () => {
+    const root = makeProjectRoot();
+    const calls = [];
     const disabled = makeCollector({
       env: { TFX_CTO_AUTO_COLLECT: "off" },
       registry: { querySessions: () => [{ sessionId: "peer" }] },

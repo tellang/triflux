@@ -517,7 +517,7 @@ function getRequestPath(url = "/") {
   }
 }
 
-function isLoopbackRemoteAddress(remoteAddress) {
+export function isLoopbackRemoteAddress(remoteAddress) {
   return (
     typeof remoteAddress === "string" &&
     LOOPBACK_REMOTE_ADDRESSES.has(remoteAddress)
@@ -563,7 +563,7 @@ function safeTokenCompare(a, b) {
   return timingSafeEqual(ha, hb);
 }
 
-function isAuthorizedRequest(req, path, hubToken) {
+export function isAuthorizedRequest(req, path, hubToken) {
   if (!hubToken) {
     return isLoopbackRemoteAddress(req.socket.remoteAddress);
   }

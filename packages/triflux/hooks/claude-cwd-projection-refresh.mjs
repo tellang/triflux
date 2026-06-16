@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ import { refreshClaudeSessionProjectionCwd } from "../hub/team/claude-session-pr
 
 function readStdin() {
   try {
-    return fs.readFile(0, "utf8");
+    return Promise.resolve(readFileSync(0, "utf8"));
   } catch {
     return Promise.resolve("");
   }

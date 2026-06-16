@@ -1460,13 +1460,25 @@ function ensureCriticalSetup() {
 
   try {
     ensureCodexProfiles();
-  } catch {}
+  } catch (error) {
+    process.stderr.write(
+      `[tfx-setup] ensureCodexProfiles 실패: ${error?.message || error}\n`,
+    );
+  }
   try {
     ensureCodexHooks();
-  } catch {}
+  } catch (error) {
+    process.stderr.write(
+      `[tfx-setup] ensureCodexHooks 실패: ${error?.message || error}\n`,
+    );
+  }
   try {
     ensureAgyHooks();
-  } catch {}
+  } catch (error) {
+    process.stderr.write(
+      `[tfx-setup] ensureAgyHooks 실패: ${error?.message || error}\n`,
+    );
+  }
 }
 
 export {
