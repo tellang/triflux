@@ -118,6 +118,31 @@ describe("swarm-planner", () => {
       assert.equal(shards[1].critical, false);
     });
 
+    it("parses redundancy separately from critical", () => {
+      const shards = parseShards(`
+## Shard: priority-only
+- critical: true
+- prompt: priority only
+
+## Shard: redundant-fallback
+- critical: true
+- redundancy: fallback
+- prompt: redundant fallback
+
+## Shard: redundant-same
+- agent: claude
+- redundancy: same-cli
+- prompt: redundant same cli
+`);
+
+      assert.equal(shards[0].critical, true);
+      assert.equal(shards[0].redundancy, false);
+      assert.equal(shards[1].critical, true);
+      assert.equal(shards[1].redundancy, "fallback");
+      assert.equal(shards[2].agent, "claude");
+      assert.equal(shards[2].redundancy, "same-cli");
+    });
+
     it("parses multi-line prompt", () => {
       const shards = parseShards(SAMPLE_PRD);
       assert.ok(shards[0].prompt.includes("REST API routes"));

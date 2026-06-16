@@ -90,6 +90,16 @@ const FALLBACK_AGENTS = Object.freeze({
   claude: "codex",
 });
 
+function resolveRedundantAgent(shard) {
+  const mode = shard?.redundancy;
+  if (!mode) return null;
+  if (mode === "same-cli") return shard.agent;
+  if (mode === true || mode === "fallback") {
+    return FALLBACK_AGENTS[shard.agent] || shard.agent;
+  }
+  return null;
+}
+
 function createNoopRegistry() {
   return Object.freeze({
     register() {},
@@ -2065,11 +2075,12 @@ export function createSwarmHypervisor(opts) {
         launched.add(name);
         await launchShard(shard);
 
-        // Launch redundant worker for critical shards
-        if (shard.critical) {
+        // Launch redundant worker only when explicitly requested.
+        const redundantAgent = resolveRedundantAgent(shard);
+        if (redundantAgent) {
           const redundantShard = {
             ...shard,
-            agent: FALLBACK_AGENTS[shard.agent] || shard.agent,
+            agent: redundantAgent,
           };
           await launchShard(redundantShard, true);
         }

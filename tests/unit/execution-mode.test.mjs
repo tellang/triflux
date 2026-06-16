@@ -296,6 +296,33 @@ test("resolveStdinPromptMode: default true; env=0|false opts out", () => {
   );
 });
 
+
+test("buildSpawnSpecForMode: codex skips MCP servers excluded by preflight and warns", () => {
+  const warnings = [];
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "codex",
+    prompt: "ACK",
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/codex",
+    env: {},
+    mcpServers: ["context7", "missing-server"],
+    excludeMcpServers: ["missing-server"],
+    onWarning: (message, details) => warnings.push({ message, details }),
+  });
+
+  assert.ok(
+    spec.args.includes("mcp_servers.context7.enabled=true"),
+    "known MCP server should still be enabled",
+  );
+  assert.ok(
+    !spec.args.includes("mcp_servers.missing-server.enabled=true"),
+    "unknown MCP server must be skipped before building codex command",
+  );
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /missing-server/u);
+  assert.equal(warnings[0].details.server, "missing-server");
+});
+
 test("buildSpawnSpecForMode: codex headless default uses stdinPrompt (prompt out of args)", () => {
   const prompt = "Please respond ACK.\n\n```bash\necho ok\n```\n";
   const spec = buildSpawnSpecForMode(MODES.HEADLESS, {

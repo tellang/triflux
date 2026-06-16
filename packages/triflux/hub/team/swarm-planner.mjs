@@ -11,6 +11,7 @@
 //   - mcp: server1, server2
 //   - depends: shard-name-1, shard-name-2
 //   - critical: true|false
+//   - redundancy: false|fallback|true|same-cli
 //   - prompt: |
 //       multi-line prompt text
 
@@ -24,6 +25,7 @@ const SHARD_DEFAULTS = Object.freeze({
   mcp: [],
   depends: [],
   critical: false,
+  redundancy: false,
   prompt: "",
   host: "",
 });
@@ -118,6 +120,15 @@ export function parseShards(content) {
         break;
       case "critical":
         current.critical = /^(true|yes|1)$/i.test(value);
+        break;
+      case "redundancy":
+        if (/^(true|yes|1|fallback)$/i.test(value)) {
+          current.redundancy = "fallback";
+        } else if (/^(same-cli|same_cli|same|primary)$/i.test(value)) {
+          current.redundancy = "same-cli";
+        } else {
+          current.redundancy = false;
+        }
         break;
       case "host":
         current.host = value;
