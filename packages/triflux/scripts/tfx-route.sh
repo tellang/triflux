@@ -1265,7 +1265,9 @@ route_agent() {
       CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── Antigravity CLI 레인 (Gemini CLI 후속) ───
-    # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic
+    # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic.
+    # #310: upstream callers are normalized through agent-map.json, but this
+    # direct route entrypoint intentionally keeps agy as a compatibility alias.
     designer|writer|gemini|antigravity|agy)
       # agy --print + --dangerously-skip-permissions 조합은 positional prompt에서
       # timeout이 재현되므로 wrapper 호출은 stdin pipe로 고정한다.
