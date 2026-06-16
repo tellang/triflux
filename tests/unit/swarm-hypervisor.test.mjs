@@ -805,7 +805,7 @@ describe("swarm-hypervisor", () => {
             if (args[0] === "rev-parse") return "deadbeefcafe";
             if (args[0] === "status") {
               // Only the redundant worktree carries uncommitted changes.
-              return cwd && cwd.includes("redundant") ? "?? src/junk.mjs" : "";
+              return cwd?.includes("redundant") ? "?? src/junk.mjs" : "";
             }
             return "";
           },
