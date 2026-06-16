@@ -18,6 +18,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
+import { createRequire } from "module";
 import { homedir } from "os";
 import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -32,6 +33,7 @@ import { addPluginRootFallbackToCommand } from "./lib/doctor-env-checks.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const require = createRequire(import.meta.url);
 // Windows 에서 os.homedir() 가 USERPROFILE 만 보고 process.env.HOME swap 을
 // 무시하기 때문에, integration test 가 fixture 격리한 spawn child 에서도
 // production ~/.codex/config.toml 을 건드릴 수 있다. (#193 회귀)
@@ -696,6 +698,90 @@ function isProtectedCodexConfigMutationEnv(env = process.env) {
     env.TFX_TEST === "1" ||
     Boolean(env.TRIFLUX_TEST_HOME)
   );
+}
+
+function isProtectedCloakBrowserInstallEnv(env = process.env) {
+  return (
+    env.NODE_ENV === "test" ||
+    env.CI === "true" ||
+    env.TFX_TEST === "1" ||
+    Boolean(env.TRIFLUX_TEST_HOME) ||
+    Boolean(env.TEST_LOCK_PID) ||
+    Boolean(env.NODE_TEST_CONTEXT) ||
+    Boolean(env.NODE_TEST_WORKER_ID) ||
+    env.TFX_SKIP_CLOAKBROWSER_SETUP === "1"
+  );
+}
+
+function isCloakBrowserSupportedPlatform(platform, arch) {
+  return (
+    (platform === "linux" && (arch === "x64" || arch === "arm64")) ||
+    (platform === "darwin" && (arch === "x64" || arch === "arm64")) ||
+    (platform === "win32" && arch === "x64")
+  );
+}
+
+function ensureCloakBrowser({
+  env = process.env,
+  platform = process.platform,
+  arch = process.arch,
+  requireResolve = require.resolve,
+  execFileSyncFn = execFileSync,
+  warn = (message) => console.warn(message),
+} = {}) {
+  if (isProtectedCloakBrowserInstallEnv(env)) {
+    return {
+      ok: true,
+      installed: false,
+      skipped: true,
+      reason: "protected-env",
+    };
+  }
+
+  if (!isCloakBrowserSupportedPlatform(platform, arch)) {
+    warn(
+      `[setup] cloakbrowser optional setup skipped: unsupported_platform (${platform}/${arch})`,
+    );
+    return {
+      ok: true,
+      installed: false,
+      skipped: true,
+      reason: "unsupported_platform",
+    };
+  }
+
+  try {
+    requireResolve("cloakbrowser", { paths: [PLUGIN_ROOT] });
+    return { ok: true, installed: true, skipped: false, reason: "installed" };
+  } catch {
+    // CloakBrowser downloads its browser binary lazily on first launch; there is
+    // no separate browser install command to run here.
+  }
+
+  try {
+    execFileSyncFn(
+      "npm",
+      ["install", "--no-save", "cloakbrowser", "playwright-core"],
+      {
+        cwd: PLUGIN_ROOT,
+        stdio: "ignore",
+        env,
+        timeout: 120_000,
+      },
+    );
+    return { ok: true, installed: true, skipped: false, reason: "installed" };
+  } catch (error) {
+    warn(
+      `[setup] cloakbrowser optional setup failed: ${_normalizeErrorMessage(error)}`,
+    );
+    return {
+      ok: false,
+      installed: false,
+      skipped: false,
+      reason: "install_failed",
+      error: _normalizeErrorMessage(error),
+    };
+  }
 }
 
 /**
@@ -1404,6 +1490,7 @@ export {
   DEPRECATED_SKILLS,
   detectDevMode,
   ensureAgyHooks,
+  ensureCloakBrowser,
   ensureCodexHooks,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
@@ -1490,6 +1577,15 @@ export async function runDeferred(stdinData) {
       result.action === "updated" ||
       result.action === "removed",
   ).length;
+  const cloakBrowserResult = ensureCloakBrowser({
+    warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
+  });
+  if (
+    cloakBrowserResult.reason === "installed" &&
+    cloakBrowserResult.installed
+  ) {
+    io.log("  \x1b[32m✓\x1b[0m cloakbrowser optional backend ready");
+  }
   if (pkgVersion && marker?.version === pkgVersion && !isForce) {
     if (claudeRoutingChangedCount > 0) {
       io.log(

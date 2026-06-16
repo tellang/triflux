@@ -123,6 +123,13 @@ AskUserQuestion:
   5. URL 콘텐츠 추출
 ```
 
+## URL 콘텐츠 수집 (stealth-first)
+
+Quick 모드 Step 1.5 에서 `5. URL 콘텐츠 추출` 을 선택했거나 Deep 모드에서 소스 URL 본문이 필요하면:
+1. 기본 경로로 먼저 `node scripts/lib/stealth-fetch.mjs <url>` 를 실행한다.
+2. exit 0 이면 stdout JSON 의 `html` 또는 `text` 를 URL 본문 근거로 사용한다.
+3. exit 3/4/5 이면 stderr/stdout 의 reason 을 확인하고 `stealth-fetch 폴백: <이유>` 1줄 경고 후 기존 폴백을 사용한다: WebFetch → Tavily extract → Exa fetch.
+
 ### Step 2: Antigravity Google Search 위임
 
 ```
