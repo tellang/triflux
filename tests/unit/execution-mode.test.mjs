@@ -296,7 +296,6 @@ test("resolveStdinPromptMode: default true; env=0|false opts out", () => {
   );
 });
 
-
 test("buildSpawnSpecForMode: codex skips MCP servers excluded by preflight and warns", () => {
   const warnings = [];
   const spec = buildSpawnSpecForMode(MODES.HEADLESS, {

@@ -76,7 +76,6 @@ test("resolveAskTransport reports none when neither transport target exists", as
   });
 });
 
-
 test("resolveAskTransport surfaces absent daemon directory diagnostics", async () => {
   const result = await resolveWith({
     tmux: false,

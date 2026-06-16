@@ -63,6 +63,7 @@ async function linkPackageDependencies(tmpNodeModules) {
 async function findNodeModules() {
   const candidates = [
     path.join(REPO_ROOT, "node_modules"),
+    path.resolve(REPO_ROOT, "../..", "node_modules"),
     path.resolve(REPO_ROOT, "../../..", "node_modules"),
   ];
   for (const candidate of candidates) {

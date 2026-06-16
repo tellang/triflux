@@ -271,7 +271,9 @@ function buildProbeResponse({
     reason = "target-not-found";
     error = "Claude daemon target not found in reachable candidates";
   } else if (results.length > 0) {
-    const errorCodes = results.map((result) => result.errorCode).filter(Boolean);
+    const errorCodes = results
+      .map((result) => result.errorCode)
+      .filter(Boolean);
     if (errorCodes.includes("stale-control-socket")) {
       reason = "stale-control-socket";
     } else if (errorCodes.includes("daemon-dir-missing")) {

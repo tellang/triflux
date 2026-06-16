@@ -978,8 +978,7 @@ test("buildDaemonControlAuth omits auth for explicit undefined configDir", async
   } finally {
     if (originalClaudeConfigDir === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
-    }
-    else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+    } else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
     await fs.rm(configDir, { recursive: true, force: true });
   }
 });
