@@ -43,6 +43,9 @@ export function resolvePluginRoot(callerUrl) {
   const breadcrumbRoot = readBreadcrumbRoot();
   if (isValidPluginRoot(breadcrumbRoot)) return breadcrumbRoot;
 
+  const pluginRoot = normalizeCandidate(process.env.PLUGIN_ROOT);
+  if (isValidPluginRoot(pluginRoot)) return pluginRoot;
+
   const envRoot = normalizeCandidate(process.env.CLAUDE_PLUGIN_ROOT);
   if (isValidPluginRoot(envRoot)) return envRoot;
 
