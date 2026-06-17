@@ -387,6 +387,58 @@ function normalizeLiveSession(session = {}) {
   };
 }
 
+const CTO_HYGIENE_COUNT_KEYS = Object.freeze([
+  "active_tasks",
+  "completed_tasks",
+  "stale_sessions",
+  "orphan_worktrees",
+  "superseded_checkpoints",
+  "unknown_owner",
+]);
+
+function compactNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function normalizeHygieneAction(action = {}) {
+  return {
+    kind: String(action.kind || ""),
+    id: String(action.id || ""),
+    status: String(action.status || ""),
+    action: String(action.action || ""),
+  };
+}
+
+function normalizeCtoHygiene(ctoStatus = {}) {
+  const hygiene =
+    ctoStatus?.hygiene && typeof ctoStatus.hygiene === "object"
+      ? ctoStatus.hygiene
+      : null;
+  if (!hygiene) return null;
+
+  const actionsSource = Array.isArray(hygiene.actions)
+    ? hygiene.actions
+    : Array.isArray(hygiene.rows)
+      ? hygiene.rows
+      : Array.isArray(ctoStatus?.hygiene_actions)
+        ? ctoStatus.hygiene_actions
+        : [];
+  const actions = actionsSource
+    .map(normalizeHygieneAction)
+    .filter(
+      (action) => action.kind || action.id || action.status || action.action,
+    );
+
+  return {
+    ...Object.fromEntries(
+      CTO_HYGIENE_COUNT_KEYS.map((key) => [key, compactNumber(hygiene[key])]),
+    ),
+    action_count: compactNumber(hygiene.action_count ?? actions.length),
+    actions: actions.slice(0, 2),
+  };
+}
+
 function normalizeCtoStatus(ctoStatus = {}, sessions = [], runtime = {}) {
   const explicitLive = Array.isArray(ctoStatus?.live_sessions)
     ? ctoStatus.live_sessions
@@ -407,11 +459,13 @@ function normalizeCtoStatus(ctoStatus = {}, sessions = [], runtime = {}) {
   const activeShards = Array.isArray(ctoStatus?.active_shards)
     ? ctoStatus.active_shards
     : [];
+  const hygiene = normalizeCtoHygiene(ctoStatus);
   return {
     schema_version: String(ctoStatus?.schema_version || "cto-lake.v1"),
     generated_at: ctoStatus?.generated_at || null,
     live_sessions: normalizedLiveSessions,
     active_shards: activeShards,
+    ...(hygiene ? { hygiene } : {}),
     summary: {
       live_session_count: normalizedLiveSessions.length,
       active_shard_count: activeShards.length,

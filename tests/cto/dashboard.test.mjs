@@ -159,6 +159,50 @@ describe("runDashboard", () => {
     }
   });
 
+  it("renders a Hygiene section from current status summary when available", async () => {
+    const rootDir = makeTempDir();
+    const lakeRoot = join(rootDir, ".test-lake");
+    try {
+      writeJson(
+        join(lakeRoot, "current.json"),
+        fixtureCurrent({
+          hygiene: {
+            active_tasks: 2,
+            completed_tasks: 1,
+            stale_sessions: 1,
+            orphan_worktrees: 1,
+            superseded_checkpoints: 3,
+            unknown_owner: 2,
+            action_count: 2,
+            actions: [
+              {
+                kind: "session",
+                id: "stale-session",
+                status: "stale",
+                action: "review_or_archive_session",
+              },
+            ],
+          },
+        }),
+      );
+
+      const result = await runDashboard([], {
+        lakeRoot,
+        stdout: { write() {} },
+      });
+
+      const html = readFileSync(result.path, "utf8");
+      assert.match(html, /<h2>Hygiene<\/h2>/u);
+      assert.match(html, /Active tasks/u);
+      assert.match(html, /Stale sessions/u);
+      assert.match(html, /stale-session/u);
+      assert.match(html, /review_or_archive_session/u);
+      assert.doesNotMatch(html, /Apply/u);
+    } finally {
+      cleanup(rootDir);
+    }
+  });
+
   it("renders graceful minimal HTML when current.json is missing", async () => {
     const rootDir = makeTempDir();
     const lakeRoot = join(rootDir, ".test-lake");

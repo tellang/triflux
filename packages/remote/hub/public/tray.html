@@ -224,6 +224,41 @@
       `).join('')}</div>`;
     }
 
+    function hygieneCount(hygiene, key) {
+      const value = Number(hygiene?.[key] || 0);
+      return Number.isFinite(value) && value > 0 ? value : 0;
+    }
+
+    function renderCtoHygiene(hygiene) {
+      if (!hygiene || typeof hygiene !== 'object') return '';
+      const actions = Array.isArray(hygiene.actions) ? hygiene.actions.slice(0, 2) : [];
+      const actionCount = hygieneCount(hygiene, 'action_count') || actions.length;
+      const actionHtml = actions.length > 0
+        ? `<div class="models-list">${actions.map(action => `
+            <div class="mini-card">
+              <div class="mini-head">
+                <div class="mini-title">${escapeHtml(action.id || action.kind || 'hygiene item')}</div>
+                <div class="value-pill status-text partial">${escapeHtml(action.status || 'action')}</div>
+              </div>
+              <div class="path-text">${escapeHtml(action.action || action.kind || '')}</div>
+            </div>
+          `).join('')}</div>`
+        : '<div class="mini-card muted">No hygiene actions reported</div>';
+      return `
+        <div class="section">
+          <div class="section-title">CTO Hygiene</div>
+          <div class="stats-grid">
+            <div class="stat-box"><div class="stat-label">Active tasks</div><div class="stat-value">${hygieneCount(hygiene, 'active_tasks')}<span class="stat-unit">open</span></div></div>
+            <div class="stat-box"><div class="stat-label">Stale sessions</div><div class="stat-value">${hygieneCount(hygiene, 'stale_sessions')}<span class="stat-unit">stale</span></div></div>
+            <div class="stat-box"><div class="stat-label">Orphan worktrees</div><div class="stat-value">${hygieneCount(hygiene, 'orphan_worktrees')}<span class="stat-unit">orphan</span></div></div>
+            <div class="stat-box"><div class="stat-label">Actions</div><div class="stat-value">${actionCount}<span class="stat-unit">dry-run</span></div></div>
+          </div>
+          <div class="path-text">${hygieneCount(hygiene, 'superseded_checkpoints')} superseded checkpoints · ${hygieneCount(hygiene, 'unknown_owner')} unknown owners</div>
+          ${actionHtml}
+        </div>
+      `;
+    }
+
     function liveFallbackRows(live) {
       return live.map(session => ({
         sessionId: session.sessionId,
@@ -499,6 +534,7 @@
           <div class="section-title">Agent Mix</div>
           <div class="models-list">${renderRuntimeClients(runtime)}</div>
         </div>
+        ${renderCtoHygiene(cto.hygiene)}
         <div class="section">
           <div class="section-title">Workspaces</div>
           <div class="agent-view">

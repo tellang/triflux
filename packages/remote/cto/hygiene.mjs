@@ -127,7 +127,9 @@ function eventTime(entry) {
 }
 
 function eventRef(entry) {
-  return entry?.ref && typeof entry.ref === "object" && !Array.isArray(entry.ref)
+  return entry?.ref &&
+    typeof entry.ref === "object" &&
+    !Array.isArray(entry.ref)
     ? entry.ref
     : {};
 }
@@ -180,7 +182,11 @@ export function compactHygieneCounts(projection) {
   return Object.fromEntries(COUNT_KEYS.map((key) => [key, counts[key] || 0]));
 }
 
-export function projectCtoHygiene({ current = {}, ledger = null, overlay = {} } = {}) {
+export function projectCtoHygiene({
+  current = {},
+  ledger = null,
+  overlay = {},
+} = {}) {
   const events = Array.isArray(ledger)
     ? ledger
     : Array.isArray(current?.ledger_tail)
@@ -203,7 +209,8 @@ export function projectCtoHygiene({ current = {}, ledger = null, overlay = {} } 
         break;
       }
       case "session_stale": {
-        const sessionId = typeof ref.session_id === "string" ? ref.session_id : null;
+        const sessionId =
+          typeof ref.session_id === "string" ? ref.session_id : null;
         if (!sessionId) break;
         upsertLatest(staleSessions, sessionId, { entry, ref });
         break;
@@ -211,7 +218,8 @@ export function projectCtoHygiene({ current = {}, ledger = null, overlay = {} } 
       case "worktree_created":
       case "worktree_removed": {
         const key =
-          (typeof ref.worktree_path_hash === "string" && ref.worktree_path_hash) ||
+          (typeof ref.worktree_path_hash === "string" &&
+            ref.worktree_path_hash) ||
           (typeof ref.worktree_label === "string" && ref.worktree_label) ||
           null;
         if (!key) break;
@@ -224,14 +232,19 @@ export function projectCtoHygiene({ current = {}, ledger = null, overlay = {} } 
           typeof ref.checkpoint_id === "string" ? ref.checkpoint_id : null;
         if (!checkpointId) break;
         if (ref.status === "superseded") {
-          upsertLatest(explicitSupersededCheckpoints, checkpointId, { entry, ref });
+          upsertLatest(explicitSupersededCheckpoints, checkpointId, {
+            entry,
+            ref,
+          });
         }
         const sessionId =
           (typeof ref.session_id === "string" && ref.session_id) ||
-          (typeof ref.restored_from_session_id === "string" && ref.restored_from_session_id) ||
+          (typeof ref.restored_from_session_id === "string" &&
+            ref.restored_from_session_id) ||
           null;
         if (!sessionId) break;
-        if (!checkpointsBySession.has(sessionId)) checkpointsBySession.set(sessionId, []);
+        if (!checkpointsBySession.has(sessionId))
+          checkpointsBySession.set(sessionId, []);
         checkpointsBySession.get(sessionId).push({ entry, ref, checkpointId });
         break;
       }
@@ -246,7 +259,9 @@ export function projectCtoHygiene({ current = {}, ledger = null, overlay = {} } 
   for (const [taskId, item] of tasks) {
     const completed = item.entry?.event === "task_completed";
     const status = statusOf(item.ref, completed ? "completed" : "active");
-    counts[completed || status === "completed" ? "completed_tasks" : "active_tasks"] += 1;
+    counts[
+      completed || status === "completed" ? "completed_tasks" : "active_tasks"
+    ] += 1;
     rows.push(
       rowFrom(
         "task",
@@ -254,7 +269,9 @@ export function projectCtoHygiene({ current = {}, ledger = null, overlay = {} } 
         completed || status === "completed" ? "completed" : status,
         item.entry,
         item.ref,
-        completed || status === "completed" ? null : "complete_or_reassign_task",
+        completed || status === "completed"
+          ? null
+          : "complete_or_reassign_task",
       ),
     );
   }
@@ -262,14 +279,23 @@ export function projectCtoHygiene({ current = {}, ledger = null, overlay = {} } 
   for (const [sessionId, item] of staleSessions) {
     counts.stale_sessions += 1;
     rows.push(
-      rowFrom("session", sessionId, "stale", item.entry, item.ref, "archive_or_resume_session"),
+      rowFrom(
+        "session",
+        sessionId,
+        "stale",
+        item.entry,
+        item.ref,
+        "archive_or_resume_session",
+      ),
     );
   }
 
   for (const session of overlay?.live_sessions || []) {
     const phase = String(session?.phase || session?.status || "").toLowerCase();
     if (phase !== "stale") continue;
-    const sessionId = String(session?.sessionId || session?.session_id || "").trim();
+    const sessionId = String(
+      session?.sessionId || session?.session_id || "",
+    ).trim();
     if (!sessionId || staleSessions.has(sessionId)) continue;
     counts.stale_sessions += 1;
     rows.push({
@@ -331,7 +357,9 @@ export function projectCtoHygiene({ current = {}, ledger = null, overlay = {} } 
     }
     return row;
   });
-  counts.unknown_owner = sortedRows.filter((row) => row.owner === "unknown").length;
+  counts.unknown_owner = sortedRows.filter(
+    (row) => row.owner === "unknown",
+  ).length;
 
   return {
     schema_version: "cto-hygiene.v1",

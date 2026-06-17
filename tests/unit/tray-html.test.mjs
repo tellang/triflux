@@ -137,6 +137,48 @@ describe("tray Sessions frontend", () => {
     assert.match(tabSessions.innerHTML, /data-agent-id="antigravity"/u);
   });
 
+  it("renders compact CTO Hygiene from the provided tray payload", () => {
+    const { context, tabSessions } = loadTrayRenderer();
+
+    context.renderSessions({
+      hub: { id: "hub-abcdef", projectRoot: "/repo" },
+      sessions: [],
+      cto: {
+        live_sessions: [],
+        active_shards: [],
+        hygiene: {
+          active_tasks: 2,
+          stale_sessions: 1,
+          orphan_worktrees: 1,
+          superseded_checkpoints: 3,
+          unknown_owner: 2,
+          action_count: 2,
+          actions: [
+            {
+              kind: "session",
+              id: "stale-session",
+              status: "stale",
+              action: "review_or_archive_session",
+            },
+          ],
+        },
+      },
+      runtime: { summary: { total: 0, clients: [] } },
+    });
+
+    assert.match(tabSessions.innerHTML, /CTO Hygiene/u);
+    assert.match(tabSessions.innerHTML, /Active tasks/u);
+    assert.match(
+      tabSessions.innerHTML,
+      />2<span class="stat-unit">open<\/span>/u,
+    );
+    assert.match(tabSessions.innerHTML, /Stale sessions/u);
+    assert.match(tabSessions.innerHTML, /stale-session/u);
+    assert.match(tabSessions.innerHTML, /review_or_archive_session/u);
+    assert.doesNotMatch(tabSessions.innerHTML, /apply/i);
+    assert.equal(context.__requests.length, 0);
+  });
+
   it("renders session detail as a single-column prompt and agents stream with C/X/A badges", () => {
     const { context, tabSessions } = loadTrayRenderer();
 
