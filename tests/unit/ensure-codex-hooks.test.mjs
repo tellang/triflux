@@ -195,4 +195,44 @@ describe("ensureCodexHooks", () => {
       "sha256:ea83cfae94429303fca497e00aeb83bfbfd4c82ecd5a740d8f221498210c7475",
     );
   });
+
+  it("sanitizes legacy inline Codex profiles while merging hooks.state", () => {
+    const codexHome = makeCodexHome();
+    writeFileSync(
+      join(codexHome, "config.toml"),
+      [
+        'profile = "gpt55_xhigh"',
+        'model = "gpt-5.5"',
+        "",
+        "[mcp_servers.tfx-hub]",
+        'url = "http://127.0.0.1:27888/mcp"',
+        "",
+        "[profiles.gpt55_xhigh]",
+        'model = "gpt-5.5"',
+        'model_reasoning_effort = "xhigh"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = ensureCodexHooks({
+      codexHome,
+      hookScriptPath: "/repo/hooks/codex-session-hook.mjs",
+      nodeBin: "/opt/node",
+      backupTimestamp: "20260617T010203",
+    });
+    const configAfter = readFileSync(join(codexHome, "config.toml"), "utf8");
+
+    assert.equal(result.changedConfig, true);
+    assert.deepEqual(result.removedLegacyProfiles, ["gpt55_xhigh"]);
+    assert.deepEqual(result.migratedLegacyProfiles, ["gpt55_xhigh"]);
+    assert.doesNotMatch(configAfter, /^profile\s*=/m);
+    assert.doesNotMatch(configAfter, /^\[profiles\./m);
+    assert.match(configAfter, /^\[mcp_servers\.tfx-hub\]/m);
+    assert.match(configAfter, /^\[hooks\.state\."/m);
+    assert.equal(
+      readFileSync(join(codexHome, "gpt55_xhigh.config.toml"), "utf8"),
+      'model = "gpt-5.5"\nmodel_reasoning_effort = "xhigh"\n',
+    );
+  });
 });
