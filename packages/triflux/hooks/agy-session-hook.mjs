@@ -67,6 +67,33 @@ export function normalizeMode(argvMode, payload) {
   return "register";
 }
 
+function swallowStdoutWrite(_chunk, encodingOrCallback, callback) {
+  const done =
+    typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+  if (typeof done === "function") done();
+  return true;
+}
+
+async function runHookSideEffectsWithStdoutSuppressed(fn) {
+  const originalStdoutWrite = stdout.write;
+  const originalConsoleDebug = console.debug;
+  const originalConsoleInfo = console.info;
+  const originalConsoleLog = console.log;
+
+  stdout.write = swallowStdoutWrite;
+  console.debug = () => {};
+  console.info = () => {};
+  console.log = () => {};
+  try {
+    return await fn();
+  } finally {
+    stdout.write = originalStdoutWrite;
+    console.debug = originalConsoleDebug;
+    console.info = originalConsoleInfo;
+    console.log = originalConsoleLog;
+  }
+}
+
 export async function runAgySessionHook(stdinData, opts = {}) {
   const output = "{}\n";
   const parsed = parsePayload(stdinData);
@@ -93,24 +120,26 @@ export async function runAgySessionHook(stdinData, opts = {}) {
     opts.drainPendingSynapse || defaultDrainPendingSynapse;
 
   try {
-    if (mode === "register") {
-      try {
-        await hubEnsureRun(sessionPayload);
-      } catch {}
-      try {
-        await Promise.resolve(registerInteractiveSession(sessionPayload));
-      } catch {}
-      try {
-        await drainPendingSynapse(1000);
-      } catch {}
-    } else if (mode === "heartbeat") {
-      try {
-        heartbeatInteractiveSession(sessionPayload);
-      } catch {}
-      try {
-        await drainPendingSynapse(500);
-      } catch {}
-    }
+    await runHookSideEffectsWithStdoutSuppressed(async () => {
+      if (mode === "register") {
+        try {
+          await hubEnsureRun(sessionPayload);
+        } catch {}
+        try {
+          await Promise.resolve(registerInteractiveSession(sessionPayload));
+        } catch {}
+        try {
+          await drainPendingSynapse(1000);
+        } catch {}
+      } else if (mode === "heartbeat") {
+        try {
+          heartbeatInteractiveSession(sessionPayload);
+        } catch {}
+        try {
+          await drainPendingSynapse(500);
+        } catch {}
+      }
+    });
   } catch {
     // agy session hooks are observational and must never block the session.
   }

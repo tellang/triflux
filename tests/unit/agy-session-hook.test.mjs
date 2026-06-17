@@ -76,6 +76,37 @@ describe("agy-session-hook adapter", () => {
     ]);
   });
 
+  it("suppresses side-effect stdout while preserving the final JSON hook result", async () => {
+    let captured = "";
+    const originalWrite = process.stdout.write;
+    process.stdout.write = (chunk, encodingOrCallback, callback) => {
+      captured += String(chunk);
+      const done =
+        typeof encodingOrCallback === "function"
+          ? encodingOrCallback
+          : callback;
+      if (typeof done === "function") done();
+      return true;
+    };
+    try {
+      const result = await runAgySessionHook(agyPayload({ invocationNum: 1 }), {
+        hubEnsureRun: async () => {
+          process.stdout.write("[mcp-sync] skipped: noisy side effect\n");
+          console.log("noisy console log");
+        },
+        registerInteractiveSession: () => {
+          process.stdout.write("[register] noisy side effect\n");
+        },
+        drainPendingSynapse: async () => {},
+      });
+
+      assert.equal(result, "{}\n");
+      assert.equal(captured, "{}\n");
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+  });
+
   it("heartbeat mode heartbeats the mapped payload and drains without hub ensure", async () => {
     const calls = [];
     const result = await runAgySessionHook(agyPayload({ invocationNum: 4 }), {
