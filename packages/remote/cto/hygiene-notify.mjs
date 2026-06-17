@@ -49,7 +49,9 @@ function normalizeRows(rows) {
     .sort((a, b) =>
       [a.kind, a.id, a.status, a.action, a.owner]
         .join("\u0000")
-        .localeCompare([b.kind, b.id, b.status, b.action, b.owner].join("\u0000")),
+        .localeCompare(
+          [b.kind, b.id, b.status, b.action, b.owner].join("\u0000"),
+        ),
     );
 }
 

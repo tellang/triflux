@@ -2,6 +2,22 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.37.0] - 2026-06-17
+
+### Added
+- **[#423]** cto: normalized hygiene event schema for participant/task/steward signals.
+- **[#424]** cto: hygiene dry-run/status projection for task-board drift before applying changes.
+- **[#425]** cto: participant session events so agent work can feed the CTO hygiene ledger.
+- **[#426]** cto: project-root-keyed hygiene steward apply flow with lease protection.
+- **[#427]** live: actionable CTO hygiene notifications in `tfx-live` without noisy status spam.
+- **[#428]** tray: compact CTO hygiene surface in the tray state/UI.
+
+### Fixed
+- **[#430]** codex: sanitize legacy `~/.codex/config.toml` profile state across Triflux config mutation paths so Codex 0.134+ `--profile gpt55_*` stays usable.
+
+### Tests
+- Added focused coverage for CTO hygiene events/status/apply/notifications/tray rendering and Codex profile config sanitization.
+
 ## [10.36.0] - 2026-06-16
 
 ### Added

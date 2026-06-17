@@ -1,5 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname } from "node:path";
+import { sanitizeCodexProfileConfig } from "./codex-profile-config.mjs";
 
 const require = createRequire(import.meta.url);
 let TOML = null;
@@ -100,14 +102,31 @@ export function patchMcpApprovalMode(source) {
 export function patchCodexConfigFile(path, { now = () => new Date() } = {}) {
   if (!path || !existsSync(path)) return { changed: false, count: 0 };
   const source = readFileSync(path, "utf8");
-  const patched = patchMcpApprovalMode(source);
-  if (!patched.changed) return patched;
+  const approvalPatched = patchMcpApprovalMode(source);
+  const profileSanitized = sanitizeCodexProfileConfig(approvalPatched.toml, {
+    codexHome: dirname(path),
+  });
+  const changed = approvalPatched.changed || profileSanitized.changed;
+  if (!changed) {
+    return {
+      changed: false,
+      count: 0,
+      removedProfiles: [],
+      migratedProfiles: [],
+    };
+  }
   const stamp = now()
     .toISOString()
     .replace(/[-:]/g, "")
     .replace(/\..*$/, "")
     .replace("T", "-");
   writeFileSync(`${path}.bak-${stamp}`, source);
-  writeFileSync(path, patched.toml);
-  return patched;
+  writeFileSync(path, profileSanitized.toml);
+  return {
+    changed: true,
+    count: approvalPatched.count,
+    removedProfiles: profileSanitized.removedProfiles,
+    migratedProfiles: profileSanitized.migratedProfiles,
+    toml: profileSanitized.toml,
+  };
 }
