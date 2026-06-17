@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   attachClaudeDaemonSession,
   buildDaemonAttachRequest,
+  buildDaemonControlAuth,
   buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths,
   extractClaudeDaemonAttachText,
@@ -953,6 +954,31 @@ test("resolveDaemonBridgeSessionId reads Claude job state bridge id", async () =
 
     assert.equal(bridgeSessionId, "cse_01NativeBridge");
   } finally {
+    await fs.rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("buildDaemonControlAuth omits auth for explicit undefined configDir", async () => {
+  const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const configDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "tfx-daemon-auth-default-"),
+  );
+  await fs.mkdir(path.join(configDir, "daemon"), { recursive: true });
+  await fs.writeFile(
+    path.join(configDir, "daemon", "control.key"),
+    "default-secret\n",
+    "utf8",
+  );
+  process.env.CLAUDE_CONFIG_DIR = configDir;
+  try {
+    assert.deepEqual(await buildDaemonControlAuth(undefined), {});
+    assert.deepEqual(await buildDaemonControlAuth(configDir), {
+      auth: "default-secret",
+    });
+  } finally {
+    if (originalClaudeConfigDir === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
     await fs.rm(configDir, { recursive: true, force: true });
   }
 });

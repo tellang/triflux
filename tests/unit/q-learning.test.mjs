@@ -193,6 +193,19 @@ describe("엡실론-그리디", () => {
     assert.ok(actions.size >= 2, `expected >= 2 actions, got ${actions.size}`);
   });
 
+  it("injectable random keeps exploration deterministic", () => {
+    const router = new QLearningRouter({
+      epsilon: 1,
+      random: () => 0.99,
+      modelPath: join(tmpdir(), "nofile.json"),
+    });
+
+    const result = router.predict("implement feature");
+
+    assert.equal(result.exploration, true);
+    assert.equal(result.action, "sonnet");
+  });
+
   it("epsilon=0 → 항상 활용", () => {
     const router = new QLearningRouter({
       epsilon: 0,

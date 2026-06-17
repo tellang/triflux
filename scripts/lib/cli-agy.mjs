@@ -10,6 +10,8 @@ export const id = "agy";
 export const cliType = "antigravity";
 export const command = "agy";
 
+// #310: agent-map.json normalizes upstream callers to antigravity,
+// but this adapter also accepts the direct `agy` route for compatibility.
 const AGENT_PROFILES = {
   antigravity: {
     profile: "agy_v1",

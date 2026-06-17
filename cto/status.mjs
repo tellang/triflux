@@ -31,6 +31,8 @@ function toIsoTime(value) {
   return null;
 }
 
+// Non-cryptographic djb2-style hash used only to produce stable redacted
+// labels for local paths. Do not use this as a trust boundary or secret token.
 function shortHash(value) {
   const str = String(value ?? "");
   let h = 5381;

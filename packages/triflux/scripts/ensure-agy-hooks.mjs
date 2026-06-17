@@ -31,13 +31,9 @@ function quoteCommandPath(value) {
 function buildCommand(nodeBin, hookScriptPath) {
   // No mode argument: the agy hook derives register vs heartbeat from the
   // payload's invocationNum (first invocation registers, later ones heartbeat).
-  // Format mirrors codex-session-hook's proven hook command (bare node bin +
-  // quoted script path). agy's hook executor is the same jetski family; quoting
-  // the node bin too is unverified against agy's exec model, so we keep the
-  // known-working shape rather than risk breaking hook execution. Install paths
-  // are controlled (node bin + npm package dir), so the residual $()-in-path
-  // expansion risk is not a realistic threat.
-  return `${nodeBin} ${quoteCommandPath(hookScriptPath)}`;
+  // Quote both executable and script path so installs under paths with spaces
+  // round-trip through agy's command executor without shell word-splitting.
+  return `${quoteCommandPath(nodeBin)} ${quoteCommandPath(hookScriptPath)}`;
 }
 
 function normalizeHooksJson(raw) {
@@ -110,7 +106,10 @@ export function ensureAgyHooks(opts = {}) {
   const original = existsSync(hooksPath) ? readFileSync(hooksPath, "utf8") : "";
   const hooksJson = normalizeHooksJson(original);
   // Upsert only our named group; every other user-authored group is preserved.
-  hooksJson[HOOK_GROUP_NAME] = desired;
+  // If the user explicitly disabled our group, keep that opt-out intact.
+  if (hooksJson[HOOK_GROUP_NAME]?.enabled !== false) {
+    hooksJson[HOOK_GROUP_NAME] = desired;
+  }
   const next = formatHooksJson(hooksJson);
 
   const changed = original !== next;

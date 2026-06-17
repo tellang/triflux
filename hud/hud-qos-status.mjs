@@ -177,8 +177,10 @@ async function main() {
   // 세션/누적 토큰 → context 대비 절약 배수 (개별 provider sv%)
   const ctxCapacity = deriveContextLimit(stdin);
   let codexSv = null;
+  let codexAccumulatorSv = null;
   if (svAccumulator?.codex?.tokens > 0) {
-    codexSv = svAccumulator.codex.tokens / ctxCapacity;
+    codexAccumulatorSv = svAccumulator.codex.tokens / ctxCapacity;
+    codexSv = codexAccumulatorSv;
   } else if (codexBuckets) {
     const main =
       codexBuckets.codex || codexBuckets[Object.keys(codexBuckets)[0]];
@@ -186,8 +188,10 @@ async function main() {
       codexSv = main.tokens.total_tokens / ctxCapacity;
   }
   let geminiSv = null;
+  let geminiAccumulatorSv = null;
   if (svAccumulator?.gemini?.tokens > 0) {
-    geminiSv = svAccumulator.gemini.tokens / ctxCapacity;
+    geminiAccumulatorSv = svAccumulator.gemini.tokens / ctxCapacity;
+    geminiSv = geminiAccumulatorSv;
   } else {
     const geminiTokens = geminiSession?.total || null;
     geminiSv = geminiTokens ? geminiTokens / ctxCapacity : null;
@@ -216,8 +220,15 @@ async function main() {
   const antigravitySlot1Bucket =
     antigravityModelFamily === "gemini" ? antigravityFamilyBucket : null;
 
-  // 합산 절약: Codex+Gemini sv% 합산 (컨텍스트 대비 위임 토큰 비율)
-  const combinedSvPct = Math.round(((codexSv ?? 0) + (geminiSv ?? 0)) * 100);
+  // 합산 절약은 svAccumulator 기반일 때만 표시한다.
+  // Codex bucket fallback은 account-window 누적 토큰이고 Gemini fallback은 latest
+  // session 토큰이라 서로 의미가 달라 합산하면 misleading cross-provider total이 된다.
+  const hasComparableSvAccumulator = Boolean(
+    codexAccumulatorSv != null || geminiAccumulatorSv != null,
+  );
+  const combinedSvPct = hasComparableSvAccumulator
+    ? Math.round(((codexAccumulatorSv ?? 0) + (geminiAccumulatorSv ?? 0)) * 100)
+    : null;
 
   // 인디케이터 인식 tier 선택 (stdin + Claude 사용량 기반)
   const CURRENT_TIER = selectTier(stdin, claudeUsageSnapshot.data);
@@ -230,7 +241,7 @@ async function main() {
       codexBuckets,
       antigravityReady ? null : geminiSession,
       antigravityReady ? null : geminiBucket,
-      antigravityReady ? Math.round((codexSv ?? 0) * 100) : combinedSvPct,
+      combinedSvPct,
       antigravityReady ? "a" : "g",
     );
     process.stdout.write(`\x1b[0m${microLine}\n`);

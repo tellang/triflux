@@ -20,6 +20,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { broker } from "../account-broker.mjs";
+import { runPreflight as runCodexPreflight } from "../codex-preflight.mjs";
 import {
   __internal__ as dynamicRoutingInternal,
   evaluateDynamicRoute,
@@ -564,13 +565,66 @@ export function createConductor(opts = {}) {
     const sentinelCapture = createSentinelCapture();
 
     const spawnCwd = session.config.workdir || launcher.cwd || undefined;
+    let excludeMcpServers = [];
+    const requestedMcpServers = Array.isArray(session.config.mcpServers)
+      ? session.config.mcpServers
+      : [];
+    if (session.config.agent === "codex" && requestedMcpServers.length > 0) {
+      const preflightFn = opts.deps?.codexPreflight || runCodexPreflight;
+      try {
+        const preflight = await preflightFn({
+          mcpServers: requestedMcpServers,
+          subcommand: "exec",
+          workdir: spawnCwd,
+        });
+        excludeMcpServers = Array.isArray(preflight?.excludeMcpServers)
+          ? preflight.excludeMcpServers
+          : [];
+        for (const warning of preflight?.warnings || []) {
+          eventLog.append("codex_preflight_warning", {
+            session: session.id,
+            warning,
+          });
+          emitter.emit("warning", {
+            type: "codex_preflight_warning",
+            session: session.id,
+            warning,
+          });
+        }
+      } catch (err) {
+        eventLog.append("codex_preflight_failed", {
+          session: session.id,
+          error: err.message,
+        });
+        emitter.emit("warning", {
+          type: "codex_preflight_failed",
+          session: session.id,
+          error: err.message,
+        });
+      }
+    }
+
     const spawnSpec = buildSpawnSpecForMode(MODES.HEADLESS, {
       cli: session.config.agent,
       prompt: session.config.prompt,
       profile: session.config.profile,
       model: session.config.model,
       mcpServers: session.config.mcpServers,
+      excludeMcpServers,
       resolveCommand: opts.deps?.resolveCliExecutable,
+      onWarning: (message, details = {}) => {
+        eventLog.append("mcp_server_skipped", {
+          session: session.id,
+          message,
+          ...details,
+        });
+        emitter.emit("warning", {
+          type: "mcp_server_skipped",
+          session: session.id,
+          message,
+          ...details,
+        });
+      },
     });
 
     // #90 branch guard: shard spawn cwd가 main 브랜치면 즉시 abort.

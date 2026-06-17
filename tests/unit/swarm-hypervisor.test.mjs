@@ -66,6 +66,7 @@ const CRITICAL_PRD = `
 - agent: codex
 - files: src/critical.mjs
 - critical: true
+- redundancy: fallback
 - prompt: critical work
 
 ## Shard: normal-shard
@@ -78,11 +79,26 @@ const CRITICAL_NO_FILES_PRD = `
 ## Shard: critical-shard
 - agent: codex
 - critical: true
+- redundancy: fallback
 - prompt: critical work
 
 ## Shard: normal-shard
 - agent: codex
 - prompt: normal work
+`;
+
+const CRITICAL_PRIORITY_ONLY_PRD = `
+## Shard: critical-shard
+- agent: codex
+- critical: true
+- prompt: critical work
+`;
+
+const REDUNDANCY_SAME_CLI_PRD = `
+## Shard: same-cli-shard
+- agent: claude
+- redundancy: same-cli
+- prompt: same cli redundant work
 `;
 
 const SINGLE_PRD = `
@@ -504,12 +520,47 @@ describe("swarm-hypervisor", () => {
       }
     });
 
-    it("launches redundant workers for critical shards", async () => {
-      const plan = planSwarm(null, { content: CRITICAL_PRD });
-      ({ hv } = createTestHypervisor(workdir, logsDir));
+    it("does not launch redundant workers for critical-only shards", async () => {
+      const plan = planSwarm(null, { content: CRITICAL_PRIORITY_ONLY_PRD });
+      const setup = createTestHypervisor(workdir, logsDir);
+      hv = setup.hv;
 
       await hv.launch(plan);
+
       assert.deepEqual(plan.criticalShards, ["critical-shard"]);
+      assert.equal(setup.conductors.length, 1);
+      assert.equal(plan.shards[0].redundancy, false);
+    });
+
+    it("launches fallback redundant workers only when redundancy requests fallback", async () => {
+      const plan = planSwarm(null, { content: CRITICAL_PRD });
+      const setup = createTestHypervisor(workdir, logsDir);
+      hv = setup.hv;
+
+      await hv.launch(plan);
+
+      assert.deepEqual(plan.criticalShards, ["critical-shard"]);
+      assert.equal(setup.conductors.length, 3);
+      assert.equal(setup.conductors[0].sessionConfig.agent, "codex");
+      assert.equal(setup.conductors[1].sessionConfig.agent, "gemini");
+      assert.ok(
+        setup.conductors[1].sessionConfig.worktreePath.includes(
+          "critical-shard-redundant",
+        ),
+      );
+    });
+
+    it("same-cli redundancy keeps explicitly requested agent", async () => {
+      const plan = planSwarm(null, { content: REDUNDANCY_SAME_CLI_PRD });
+      const setup = createTestHypervisor(workdir, logsDir);
+      hv = setup.hv;
+
+      await hv.launch(plan);
+
+      assert.equal(setup.conductors.length, 2);
+      assert.equal(setup.conductors[0].sessionConfig.agent, "claude");
+      assert.equal(setup.conductors[1].sessionConfig.agent, "claude");
+      assert.equal(plan.shards[0].redundancy, "same-cli");
     });
 
     it("does not let an invalid redundant completion kill a healthy primary", async () => {

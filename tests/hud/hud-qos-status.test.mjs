@@ -216,6 +216,33 @@ describe("HUD Breakpoints", () => {
     rmSync(join(mockOmcConfigDir, "hud.json"));
   });
 
+  it("does not combine sv from Codex bucket and Gemini session fallbacks when accumulator is missing", () => {
+    const accumulatorPaths = [
+      join(mockClaudeCacheDir, "sv-accumulator.json"),
+      join(mockOmcStateDir, "sv-accumulator.json"),
+    ];
+    const originals = accumulatorPaths.map((path) => ({
+      path,
+      content: existsSync(path) ? readFileSync(path, "utf8") : null,
+    }));
+    for (const path of accumulatorPaths) rmSync(path, { force: true });
+    try {
+      const output = stripAnsiText(runHudWithDimensions(120, 40));
+      assert.match(output, /^c: .*sv:\s*--%/m);
+      assert.doesNotMatch(output, /^c: .*sv:\s*150%/m);
+      assert.match(output, /^x: .*sv:\s*25%/m);
+      assert.match(output, /^g: .*sv:\s*60%/m);
+    } finally {
+      for (const original of originals) {
+        if (original.content == null) {
+          rmSync(original.path, { force: true });
+        } else {
+          writeFileSync(original.path, original.content);
+        }
+      }
+    }
+  });
+
   it("renders Antigravity as a and hides the Gemini g marker when ready", () => {
     const preflightPath = join(mockClaudeCacheDir, "tfx-preflight.json");
     const oauthPath = join(mockAntigravityCliDir, "oauth_creds.json");

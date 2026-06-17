@@ -164,6 +164,7 @@ export class QLearningRouter {
    * @param {number} [opts.epsilonMin=0.05] — 최소 엡실론
    * @param {number} [opts.minConfidence=0.6] — 최소 신뢰도 (이하면 폴백)
    * @param {string} [opts.modelPath] — Q-table 영속화 경로
+   * @param {() => number} [opts.random=Math.random] — 테스트/재현용 RNG seam
    */
   constructor(opts = {}) {
     this._lr = opts.learningRate ?? 0.1;
@@ -176,6 +177,8 @@ export class QLearningRouter {
     this._minConfidence = opts.minConfidence ?? 0.6;
     this._modelPath =
       opts.modelPath ?? join(homedir(), ".omc", "routing-model.json");
+    this._random =
+      typeof opts.random === "function" ? opts.random : Math.random;
 
     /** @type {Map<string, Map<string, number>>} state -> (action -> Q-value) */
     this._qTable = new Map();
@@ -223,12 +226,12 @@ export class QLearningRouter {
     const visits = this._visitCounts.get(state) || 0;
 
     // 엡실론-그리디: 탐색 vs 활용
-    const isExploration = Math.random() < this._epsilon;
+    const isExploration = this._random() < this._epsilon;
 
     let action;
     if (isExploration) {
       // 무작위 탐색
-      action = ACTIONS[Math.floor(Math.random() * ACTIONS.length)];
+      action = ACTIONS[Math.floor(this._random() * ACTIONS.length)];
     } else {
       // 최적 액션 선택 (최대 Q-value)
       let maxQ = -Infinity;

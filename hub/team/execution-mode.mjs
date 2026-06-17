@@ -156,7 +156,21 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
     "never",
   );
   if (Array.isArray(opts.mcpServers)) {
-    for (const server of opts.mcpServers) {
+    const excludedMcpServers = new Set(
+      (Array.isArray(opts.excludeMcpServers) ? opts.excludeMcpServers : [])
+        .map((server) => String(server ?? "").trim())
+        .filter(Boolean),
+    );
+    for (const rawServer of opts.mcpServers) {
+      const server = String(rawServer ?? "").trim();
+      if (!server) continue;
+      if (excludedMcpServers.has(server)) {
+        const message = `Skipping MCP server '${server}' because Codex preflight did not find an enabled config entry.`;
+        if (typeof opts.onWarning === "function") {
+          opts.onWarning(message, { type: "mcp_server_skipped", server });
+        }
+        continue;
+      }
       args.push("-c", `mcp_servers.${server}.enabled=true`);
     }
   }

@@ -76,6 +76,52 @@ test("resolveAskTransport reports none when neither transport target exists", as
   });
 });
 
+test("resolveAskTransport surfaces absent daemon directory diagnostics", async () => {
+  const result = await resolveWith({
+    tmux: false,
+    daemonProbe: {
+      ok: false,
+      reason: "daemon-unavailable",
+      raw: {
+        reason: "daemon-unavailable",
+        candidateResults: [
+          {
+            ok: false,
+            errorCode: "daemon-dir-missing",
+            controlSock: "/tmp/cc-daemon-501/abc/control.sock",
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(result.transportSelected, "none");
+  assert.equal(result.transportProbe.daemonReason, "daemon-dir-missing");
+});
+
+test("resolveAskTransport surfaces stale control socket diagnostics", async () => {
+  const result = await resolveWith({
+    tmux: false,
+    daemonProbe: {
+      ok: false,
+      reason: "daemon-unavailable",
+      raw: {
+        reason: "daemon-unavailable",
+        candidateResults: [
+          {
+            ok: false,
+            errorCode: "stale-control-socket",
+            controlSock: "/tmp/cc-daemon-501/abc/control.sock",
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(result.transportSelected, "none");
+  assert.equal(result.transportProbe.daemonReason, "stale-control-socket");
+});
+
 test("buildRemoteLiveCommand wraps darwin zsh remote tfx-live ask", () => {
   const plan = buildRemoteLiveCommand(
     "m2",
