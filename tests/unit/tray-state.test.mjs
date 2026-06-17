@@ -50,6 +50,67 @@ describe("tray-state contract", () => {
     );
   });
 
+  it("passes compact CTO hygiene counts and actions through to the tray payload", () => {
+    const payload = buildTrayStatePayload({
+      ctoStatus: {
+        schema_version: "cto-lake.v1",
+        hygiene: {
+          active_tasks: 2,
+          completed_tasks: 1,
+          stale_sessions: 1,
+          orphan_worktrees: 1,
+          superseded_checkpoints: 3,
+          unknown_owner: 2,
+        },
+        hygiene_actions: [
+          {
+            kind: "session",
+            id: "stale-session",
+            status: "stale",
+            action: "review_or_archive_session",
+          },
+          {
+            kind: "worktree",
+            id: "wt-old",
+            status: "orphaned",
+            action: "remove_or_reassign_worktree",
+          },
+          {
+            kind: "ignored",
+            id: "too-many",
+            status: "ignored",
+            action: "ignored",
+          },
+        ],
+      },
+    });
+
+    assert.deepEqual(payload.cto.hygiene, {
+      active_tasks: 2,
+      completed_tasks: 1,
+      stale_sessions: 1,
+      orphan_worktrees: 1,
+      superseded_checkpoints: 3,
+      unknown_owner: 2,
+      action_count: 3,
+      actions: [
+        {
+          kind: "session",
+          id: "stale-session",
+          status: "stale",
+          action: "review_or_archive_session",
+        },
+        {
+          kind: "worktree",
+          id: "wt-old",
+          status: "orphaned",
+          action: "remove_or_reassign_worktree",
+        },
+      ],
+    });
+    assert.equal(payload.cto.summary.live_session_count, 0);
+  });
+
   it("includes CTO overlay and MCP rows in one tray payload", () => {
     const payload = buildTrayStatePayload({
       hub: { id: "hub-123456", pid: 123456, port: 27888 },

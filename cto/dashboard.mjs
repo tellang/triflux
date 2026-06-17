@@ -196,6 +196,65 @@ function renderLedger(entries) {
   `;
 }
 
+const HYGIENE_METRICS = Object.freeze([
+  ["active_tasks", "Active tasks"],
+  ["stale_sessions", "Stale sessions"],
+  ["orphan_worktrees", "Orphan worktrees"],
+  ["superseded_checkpoints", "Superseded checkpoints"],
+  ["unknown_owner", "Unknown owners"],
+]);
+
+function hygieneCount(hygiene, key) {
+  const value = Number(hygiene?.[key] || 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function renderHygiene(hygiene) {
+  if (!hygiene || typeof hygiene !== "object") return "";
+  const actions = Array.isArray(hygiene.actions)
+    ? hygiene.actions.slice(0, 5)
+    : [];
+  const actionCount = hygieneCount(hygiene, "action_count") || actions.length;
+  return `
+    <section class="panel">
+      <h2>Hygiene</h2>
+      <table>
+        <tbody>
+          ${HYGIENE_METRICS.map(
+            ([key, label]) => `
+              <tr>
+                <th>${escapeHtml(label)}</th>
+                <td>${hygieneCount(hygiene, key)}</td>
+              </tr>
+            `,
+          ).join("")}
+          <tr>
+            <th>Actions</th>
+            <td>${actionCount}</td>
+          </tr>
+        </tbody>
+      </table>
+      ${
+        actions.length
+          ? `<ul class="items">
+              ${actions
+                .map(
+                  (action) => `
+                    <li>
+                      <strong>${escapeHtml(formatValue(action?.id || action?.kind, "item"))}</strong>
+                      <span>${escapeHtml(formatValue(action?.action || action?.kind, "review"))}</span>
+                      <em>${escapeHtml(formatValue(action?.status, "action"))}</em>
+                    </li>
+                  `,
+                )
+                .join("")}
+            </ul>`
+          : `<p class="empty">No hygiene actions reported.</p>`
+      }
+    </section>
+  `;
+}
+
 function pageShell(title, body) {
   return `<!doctype html>
 <html lang="en">
@@ -326,6 +385,7 @@ function renderCurrentHtml(current) {
           <h2>Swarm Shards</h2>
           ${renderShards(shards)}
         </section>
+        ${renderHygiene(current.hygiene || current.summary?.hygiene)}
         <section class="panel">
           <h2>Recent Ledger</h2>
           ${renderLedger(Array.isArray(current.ledger_tail) ? current.ledger_tail : [])}
