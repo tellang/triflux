@@ -7,9 +7,13 @@
 // (worktree/branch arrive asynchronously via heartbeat, never inline).
 
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
+  emitParticipantSessionStarted,
   heartbeatInteractiveSession,
   registerInteractiveSession,
 } from "../../hooks/session-start-fast.mjs";
@@ -21,6 +25,7 @@ function payloadJson(obj) {
 describe("registerInteractiveSession (SessionStart self-register)", () => {
   it("registers a minimal interactive payload from cwd alone (no git, no pid)", () => {
     const registered = [];
+    const ctoEvents = [];
     let gitCalled = false;
 
     registerInteractiveSession(
@@ -33,6 +38,11 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
         gitRunner: () => {
           gitCalled = true;
         },
+        ctoAppend: (lakeRoot, event) => ctoEvents.push({ lakeRoot, event }),
+        resolveLakeRoot: (cwd) => ({
+          projectRoot: cwd,
+          lakeRoot: `${cwd}/.triflux/lake`,
+        }),
       },
     );
 
@@ -50,6 +60,100 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
     assert.equal("pid" in meta, false);
     // git enrichment is scheduled (async), not run on the blocking path.
     assert.equal(gitCalled, true);
+    assert.equal(ctoEvents.length, 0, "CTO append is fire-and-forget");
+  });
+
+  it("emits a compact non-policy CTO session_started event", async () => {
+    const appended = [];
+
+    const result = await emitParticipantSessionStarted(
+      payloadJson({
+        session_id: "sess-cto",
+        cwd: "/home/dev/proj",
+        hook_event_name: "SessionStart",
+      }),
+      {
+        resolveLakeRoot: (cwd) => ({
+          projectRoot: "/home/dev/proj",
+          lakeRoot: `${cwd}/.triflux/lake`,
+        }),
+        ctoAppend: async (lakeRoot, event) => {
+          appended.push({ lakeRoot, event });
+          return { appended: true, event };
+        },
+        now: "2026-06-17T00:00:00.000Z",
+      },
+    );
+
+    assert.equal(result.appended, true);
+    assert.deepEqual(appended, [
+      {
+        lakeRoot: "/home/dev/proj/.triflux/lake",
+        event: {
+          event: "session_started",
+          source: "tfx_participant_hook",
+          session_id: "sess-cto",
+          project_root: "/home/dev/proj",
+          worktree_path: "/home/dev/proj",
+          branch: "",
+          status: "active",
+          actor: {
+            cli: "claude",
+            session_id: "sess-cto",
+            host: "local",
+          },
+          summary: "claude session_started sess-cto",
+          now: "2026-06-17T00:00:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("swallows CTO append failures without blocking SessionStart", async () => {
+    const result = await emitParticipantSessionStarted(
+      payloadJson({ session_id: "sess-fail", cwd: "/home/dev/proj" }),
+      {
+        resolveLakeRoot: () => ({
+          projectRoot: "/home/dev/proj",
+          lakeRoot: "/home/dev/proj/.triflux/lake",
+        }),
+        ctoAppend: async () => {
+          throw new Error("ledger unavailable");
+        },
+      },
+    );
+
+    assert.equal(result, null);
+  });
+
+  it("appends session_started to the canonical project CTO ledger", async () => {
+    const root = mkdtempSync(join(tmpdir(), "tfx-participant-cto-"));
+    try {
+      await emitParticipantSessionStarted(
+        payloadJson({
+          session_id: "sess-ledger",
+          cwd: root,
+          hook_event_name: "SessionStart",
+        }),
+        { now: "2026-06-17T00:00:00.000Z" },
+      );
+
+      const lines = readFileSync(
+        join(root, ".triflux", "lake", "ledger.jsonl"),
+        "utf8",
+      )
+        .trim()
+        .split("\n");
+      assert.equal(lines.length, 1);
+      const event = JSON.parse(lines[0]);
+      assert.equal(event.event, "session_started");
+      assert.equal(event.source, "tfx_participant_hook");
+      assert.equal(event.ref.session_id, "sess-ledger");
+      assert.equal(event.ref.actor.cli, "claude");
+      assert.equal(event.ref.status, "active");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("is a no-op when the payload has no session_id", () => {
@@ -90,6 +194,11 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
         register: (meta) => registered.push(meta),
         heartbeat: (sessionId, partial) =>
           heartbeats.push({ sessionId, partial }),
+        ctoAppend: () => {},
+        resolveLakeRoot: (cwd) => ({
+          projectRoot: cwd,
+          lakeRoot: `${cwd}/lake`,
+        }),
         // Resolve git context out-of-band, simulating async execFile callbacks.
         gitRunner: (_cwd, args, cb) => {
           if (args[1] === "--show-toplevel") {
@@ -127,6 +236,11 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
         register: (meta) => registered.push(meta),
         heartbeat: (sessionId, partial) =>
           heartbeats.push({ sessionId, partial }),
+        ctoAppend: () => {},
+        resolveLakeRoot: (cwd) => ({
+          projectRoot: cwd,
+          lakeRoot: `${cwd}/lake`,
+        }),
         // Non-repo: both git calls fail → empty strings.
         gitRunner: (_cwd, _args, cb) => setImmediate(() => cb("")),
       },
