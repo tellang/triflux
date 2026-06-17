@@ -1,7 +1,18 @@
-import { existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
+import { appendCtoEvent } from "./events.mjs";
 import { resolveLakeRootDir } from "./lake-root.mjs";
 
 const COUNT_KEYS = [
@@ -15,6 +26,10 @@ const COUNT_KEYS = [
 
 function hasFlag(args, flag) {
   return Array.isArray(args) && args.includes(flag);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function writeJson(stdout, payload) {
@@ -166,6 +181,14 @@ function rowFrom(kind, id, status, entry, ref, action) {
   return row;
 }
 
+function rowKey(kind, id) {
+  return `${kind}:${id}`;
+}
+
+function hygieneKeyForRow(row) {
+  return rowKey(row.kind, row.id);
+}
+
 function upsertLatest(map, key, value) {
   const existing = map.get(key);
   if (!existing || eventTime(value.entry) >= eventTime(existing.entry)) {
@@ -175,6 +198,24 @@ function upsertLatest(map, key, value) {
 
 function emptyCounts() {
   return Object.fromEntries(COUNT_KEYS.map((key) => [key, 0]));
+}
+
+function countsFromRows(rows) {
+  const counts = emptyCounts();
+  for (const row of rows) {
+    if (row.kind === "task") {
+      if (row.status === "completed") counts.completed_tasks += 1;
+      else counts.active_tasks += 1;
+    } else if (row.kind === "session" && row.status === "stale") {
+      counts.stale_sessions += 1;
+    } else if (row.kind === "worktree" && row.status === "orphaned") {
+      counts.orphan_worktrees += 1;
+    } else if (row.kind === "checkpoint" && row.status === "superseded") {
+      counts.superseded_checkpoints += 1;
+    }
+  }
+  counts.unknown_owner = rows.filter((row) => row.owner === "unknown").length;
+  return counts;
 }
 
 export function compactHygieneCounts(projection) {
@@ -197,10 +238,20 @@ export function projectCtoHygiene({
   const worktrees = new Map();
   const checkpointsBySession = new Map();
   const explicitSupersededCheckpoints = new Map();
+  const appliedByKey = new Map();
 
   for (const entry of events) {
     const ref = eventRef(entry);
     switch (entry?.event) {
+      case "hygiene_applied": {
+        const key =
+          typeof ref.hygiene_key === "string" && ref.hygiene_key.trim()
+            ? ref.hygiene_key.trim()
+            : null;
+        if (!key) break;
+        upsertLatest(appliedByKey, key, { entry, ref });
+        break;
+      }
       case "task_claimed":
       case "task_completed": {
         const taskId = typeof ref.task_id === "string" ? ref.task_id : null;
@@ -254,14 +305,10 @@ export function projectCtoHygiene({
   }
 
   const rows = [];
-  const counts = emptyCounts();
 
   for (const [taskId, item] of tasks) {
     const completed = item.entry?.event === "task_completed";
     const status = statusOf(item.ref, completed ? "completed" : "active");
-    counts[
-      completed || status === "completed" ? "completed_tasks" : "active_tasks"
-    ] += 1;
     rows.push(
       rowFrom(
         "task",
@@ -277,7 +324,6 @@ export function projectCtoHygiene({
   }
 
   for (const [sessionId, item] of staleSessions) {
-    counts.stale_sessions += 1;
     rows.push(
       rowFrom(
         "session",
@@ -297,7 +343,6 @@ export function projectCtoHygiene({
       session?.sessionId || session?.session_id || "",
     ).trim();
     if (!sessionId || staleSessions.has(sessionId)) continue;
-    counts.stale_sessions += 1;
     rows.push({
       kind: "session",
       id: sessionId,
@@ -312,7 +357,6 @@ export function projectCtoHygiene({
     if (item.entry?.event === "worktree_removed") continue;
     const status = statusOf(item.ref, "active");
     if (status !== "orphaned") continue;
-    counts.orphan_worktrees += 1;
     rows.push(
       rowFrom(
         "worktree",
@@ -337,7 +381,6 @@ export function projectCtoHygiene({
     }
   }
   for (const [checkpointId, item] of superseded) {
-    counts.superseded_checkpoints += 1;
     rows.push(
       rowFrom(
         "checkpoint",
@@ -350,16 +393,20 @@ export function projectCtoHygiene({
     );
   }
 
-  const sortedRows = rows.map((row) => {
-    if (row.owner === undefined) {
-      const { owner: _owner, ...rest } = row;
-      return rest;
-    }
-    return row;
-  });
-  counts.unknown_owner = sortedRows.filter(
-    (row) => row.owner === "unknown",
-  ).length;
+  const sortedRows = rows
+    .filter((row) => {
+      const applied = appliedByKey.get(hygieneKeyForRow(row));
+      if (!applied) return true;
+      return eventTime(applied.entry) < String(row.last_event_at || "");
+    })
+    .map((row) => {
+      if (row.owner === undefined) {
+        const { owner: _owner, ...rest } = row;
+        return rest;
+      }
+      return row;
+    });
+  const counts = countsFromRows(sortedRows);
 
   return {
     schema_version: "cto-hygiene.v1",
@@ -369,30 +416,212 @@ export function projectCtoHygiene({
   };
 }
 
+function safeLabel(value) {
+  return (
+    String(value || "project")
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/gu, "-")
+      .replace(/^-+|-+$/gu, "")
+      .slice(0, 40) || "project"
+  );
+}
+
+function rootHash(rootDir) {
+  return createHash("sha256")
+    .update(String(rootDir || ""))
+    .digest("hex")
+    .slice(0, 12);
+}
+
+export function ctoHygieneStewardLockPath(rootDir, lakeRoot) {
+  const label = safeLabel(basename(rootDir || "project"));
+  return join(lakeRoot, "stewards", `${label}-${rootHash(rootDir)}.apply.lock`);
+}
+
+export async function acquireCtoHygieneStewardLock(
+  rootDir,
+  lakeRoot,
+  opts = {},
+) {
+  const lockPath =
+    opts.lockPath || ctoHygieneStewardLockPath(rootDir, lakeRoot);
+  const timeoutMs = Math.max(0, Number(opts.timeoutMs) || 3000);
+  const retryMs = Math.max(1, Number(opts.retryMs) || 50);
+  const staleMs = Math.max(1000, Number(opts.staleMs) || 10 * 60_000);
+  const start = Date.now();
+
+  mkdirSync(dirname(lockPath), { recursive: true });
+
+  while (true) {
+    let fd = null;
+    try {
+      fd = openSync(lockPath, "wx", 0o600);
+      writeFileSync(
+        fd,
+        `${JSON.stringify(
+          {
+            pid: process.pid,
+            project_root: rootDir,
+            project_root_hash: rootHash(rootDir),
+            created_at: new Date().toISOString(),
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      return {
+        path: lockPath,
+        project_root: rootDir,
+        project_root_hash: rootHash(rootDir),
+        release() {
+          try {
+            closeSync(fd);
+          } catch {}
+          try {
+            unlinkSync(lockPath);
+          } catch {}
+        },
+      };
+    } catch (error) {
+      if (fd !== null) {
+        try {
+          closeSync(fd);
+        } catch {}
+      }
+      if (error?.code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > staleMs) {
+          unlinkSync(lockPath);
+          continue;
+        }
+      } catch {}
+      if (Date.now() - start >= timeoutMs) {
+        throw new Error(`cto hygiene steward lock busy: ${lockPath}`);
+      }
+      await sleep(retryMs);
+    }
+  }
+}
+
+const APPLICABLE_STATUSES = new Set([
+  "active",
+  "stale",
+  "superseded",
+  "orphaned",
+  "hidden",
+  "completed",
+]);
+
+function isApplicableRow(row) {
+  return Boolean(row?.action) || APPLICABLE_STATUSES.has(row?.status);
+}
+
+async function applyHygieneRows({
+  rootDir,
+  lakeRoot,
+  projection,
+  steward,
+  opts,
+}) {
+  const rows = projection.rows.filter(isApplicableRow);
+  const appended = [];
+  const now = opts.now || new Date().toISOString();
+  for (const row of rows) {
+    const result = await appendCtoEvent(
+      lakeRoot,
+      {
+        event: "hygiene_applied",
+        now,
+        source: "tfx_cto_hygiene_apply",
+        project_root: rootDir,
+        status: row.status,
+        hygiene_key: hygieneKeyForRow(row),
+        hygiene_kind: row.kind,
+        hygiene_id: row.id,
+        hygiene_action: row.action || `acknowledge_${row.status}`,
+        summary: `hygiene apply ${row.kind}:${row.id} ${row.status}`,
+        actor: { cli: "tfx cto hygiene --apply" },
+      },
+      {
+        stderr: opts.stderr,
+        lockRetries: opts.ledgerLockRetries,
+        lockRetryDelayMs: opts.ledgerLockRetryDelayMs,
+      },
+    );
+    if (result.appended) appended.push(result.event);
+  }
+  return {
+    steward: {
+      lock_path: steward.path,
+      project_root: steward.project_root,
+      project_root_hash: steward.project_root_hash,
+    },
+    applicable_count: rows.length,
+    applied_count: appended.length,
+    events: appended,
+  };
+}
+
 export async function runHygiene(args = [], opts = {}) {
   const rootDir = opts.rootDir || resolveLakeRootDir(process.cwd());
   const lakeRoot = opts.lakeRoot || join(rootDir, ".triflux", "lake");
   const stdout = opts.stdout || process.stdout;
   const jsonOut = opts.json === true || hasFlag(args, "--json");
   const dryRun = opts.dryRun === true || hasFlag(args, "--dry-run");
-  if (!dryRun) {
-    throw new Error("tfx cto hygiene only supports --dry-run");
+  const apply = opts.apply === true || hasFlag(args, "--apply");
+  if (dryRun && apply) {
+    throw new Error("tfx cto hygiene accepts only one of --dry-run or --apply");
+  }
+  if (!dryRun && !apply) {
+    throw new Error("tfx cto hygiene requires --dry-run or --apply");
   }
 
-  const currentPath = join(lakeRoot, "current.json");
-  const current = existsSync(currentPath) ? readJson(currentPath) : {};
-  const ledger = readJsonLines(join(lakeRoot, "ledger.jsonl"));
-  const overlay = await readLiveOverlay({ ...opts, rootDir, lakeRoot });
-  const projection = projectCtoHygiene({
-    current,
-    ledger: ledger.length > 0 ? ledger : null,
-    overlay,
-  });
+  const buildProjection = async () => {
+    const currentPath = join(lakeRoot, "current.json");
+    const current = existsSync(currentPath) ? readJson(currentPath) : {};
+    const ledger = readJsonLines(join(lakeRoot, "ledger.jsonl"));
+    const overlay = await readLiveOverlay({ ...opts, rootDir, lakeRoot });
+    return projectCtoHygiene({
+      current,
+      ledger: ledger.length > 0 ? ledger : null,
+      overlay,
+    });
+  };
+
+  let steward = null;
+  let projection;
+  let applyResult = null;
+  if (apply) {
+    steward = await acquireCtoHygieneStewardLock(rootDir, lakeRoot, {
+      timeoutMs: opts.stewardLockTimeoutMs,
+      retryMs: opts.stewardLockRetryMs,
+      staleMs: opts.stewardLockStaleMs,
+      lockPath: opts.stewardLockPath,
+    });
+    try {
+      projection = await buildProjection();
+      applyResult = await applyHygieneRows({
+        rootDir,
+        lakeRoot,
+        projection,
+        steward,
+        opts,
+      });
+      projection = { ...projection, dry_run: false, apply: applyResult };
+    } finally {
+      steward.release();
+    }
+  } else {
+    projection = await buildProjection();
+  }
 
   if (jsonOut) writeJson(stdout, projection);
   else {
     stdout.write(
-      `cto hygiene dry-run: ${projection.counts.active_tasks} active tasks, ${projection.counts.stale_sessions} stale sessions, ${projection.counts.orphan_worktrees} orphan worktrees\n`,
+      apply
+        ? `cto hygiene apply: ${applyResult.applied_count} event(s) appended for ${applyResult.applicable_count} actionable row(s)\n`
+        : `cto hygiene dry-run: ${projection.counts.active_tasks} active tasks, ${projection.counts.stale_sessions} stale sessions, ${projection.counts.orphan_worktrees} orphan worktrees\n`,
     );
   }
 

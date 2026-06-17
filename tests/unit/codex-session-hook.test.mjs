@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { runCodexSessionHook } from "../../hooks/codex-session-hook.mjs";
+import { registerInteractiveSession } from "../../hooks/session-start-fast.mjs";
 
 function payload(overrides = {}) {
   return JSON.stringify({
@@ -70,6 +71,34 @@ describe("codex-session-hook", () => {
     );
 
     assert.deepEqual(calls, ["heartbeat"]);
+  });
+
+  it("register path emits a codex participant CTO session_started event", async () => {
+    const events = [];
+    await runCodexSessionHook(payload(), {
+      argvMode: "register",
+      writeStdout: false,
+      hubEnsureRun: async () => {},
+      registerInteractiveSession: (stdinData) =>
+        registerInteractiveSession(stdinData, {
+          register: () => {},
+          heartbeat: () => {},
+          gitRunner: () => {},
+          resolveLakeRoot: () => ({
+            projectRoot: "/work/triflux",
+            lakeRoot: "/work/triflux/.triflux/lake",
+          }),
+          ctoAppend: (lakeRoot, event) => events.push({ lakeRoot, event }),
+        }),
+      drainPendingSynapse: async () => {},
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(events.length, 1);
+    assert.equal(events[0].lakeRoot, "/work/triflux/.triflux/lake");
+    assert.equal(events[0].event.event, "session_started");
+    assert.equal(events[0].event.actor.cli, "codex");
+    assert.equal(events[0].event.session_id, "codex-session-1");
   });
 
   it("keeps hook stdout JSON-only even when side effects log to stdout", async () => {

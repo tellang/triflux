@@ -11,6 +11,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sanitizeCodexProfileConfig } from "./lib/codex-profile-config.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = dirname(__dirname);
@@ -307,7 +308,14 @@ export function ensureCodexHooks(opts = {}) {
   const originalConfig = existsSync(configPath)
     ? readFileSync(configPath, "utf8")
     : "";
-  const nextConfig = mergeHooksState(originalConfig, stateEntries, hooksPath);
+  const profileSanitized = sanitizeCodexProfileConfig(originalConfig, {
+    codexHome,
+  });
+  const nextConfig = mergeHooksState(
+    profileSanitized.toml,
+    stateEntries,
+    hooksPath,
+  );
   const changedConfig = originalConfig !== nextConfig;
   if (changedConfig) {
     if (existsSync(configPath)) {
@@ -323,6 +331,8 @@ export function ensureCodexHooks(opts = {}) {
     skipped: false,
     changedHooks,
     changedConfig,
+    removedLegacyProfiles: profileSanitized.removedProfiles,
+    migratedLegacyProfiles: profileSanitized.migratedProfiles,
     hooksPath,
     configPath,
   };

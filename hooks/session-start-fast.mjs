@@ -40,6 +40,98 @@ function parseStartPayload(stdinData) {
   }
 }
 
+function inferParticipantCli(payload) {
+  const direct = String(
+    payload?.actor_cli || payload?.cli || payload?.actor?.cli || "",
+  )
+    .trim()
+    .toLowerCase();
+  if (direct) return direct;
+
+  const eventName = String(payload?.hook_event_name || "").trim();
+  if (eventName === "SessionStart") return "claude";
+  if (eventName.toLowerCase().replace(/-/g, "_") === "session_start") {
+    return "codex";
+  }
+  return "participant";
+}
+
+async function defaultAppendParticipantCtoEvent(lakeRoot, event) {
+  const { appendCtoEvent } = await import("../cto/events.mjs");
+  return appendCtoEvent(lakeRoot, event, {
+    lockRetries: 1,
+    lockRetryDelayMs: 0,
+  });
+}
+
+async function defaultResolveParticipantLakeRoot(cwd) {
+  const { resolveLakeRootDir } = await import("../cto/lake-root.mjs");
+  const projectRoot = resolveLakeRootDir(cwd, {
+    execFileSync: (cmd, args, options = {}) =>
+      execFileSync(cmd, args, {
+        ...options,
+        timeout: 500,
+        killSignal: "SIGKILL",
+      }),
+  });
+  return {
+    projectRoot,
+    lakeRoot: projectRoot ? join(projectRoot, ".triflux", "lake") : "",
+  };
+}
+
+/**
+ * Append a compact CTO `session_started` event for participant hooks.
+ * This is intentionally observational only: no cleanup, reconciliation, or
+ * summarization policy is performed here. Callers may fire-and-forget it.
+ *
+ * @param {string} stdinData SessionStart-shaped stdin JSON
+ * @param {object} [seams] test seams
+ * @returns {Promise<object|null>}
+ */
+export async function emitParticipantSessionStarted(stdinData, seams = {}) {
+  try {
+    const payload = parseStartPayload(stdinData);
+    const sessionId = String(payload?.session_id || "").trim();
+    if (!sessionId) return null;
+    const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
+    const resolveLakeRoot =
+      seams.resolveLakeRoot || defaultResolveParticipantLakeRoot;
+    const resolved = await resolveLakeRoot(cwd);
+    const projectRoot =
+      typeof resolved === "string"
+        ? resolved
+        : String(resolved?.projectRoot || "");
+    const lakeRoot =
+      typeof resolved === "string"
+        ? join(resolved, ".triflux", "lake")
+        : String(resolved?.lakeRoot || "");
+    if (!lakeRoot) return null;
+
+    const event = {
+      event: "session_started",
+      source: "tfx_participant_hook",
+      session_id: sessionId,
+      project_root: projectRoot || cwd,
+      worktree_path: cwd,
+      branch: typeof payload?.branch === "string" ? payload.branch : "",
+      status: "active",
+      actor: {
+        cli: inferParticipantCli(payload),
+        session_id: sessionId,
+        host: typeof payload?.host === "string" ? payload.host : "local",
+      },
+      summary: `${inferParticipantCli(payload)} session_started ${sessionId}`,
+      now: seams.now,
+    };
+
+    const append = seams.ctoAppend || defaultAppendParticipantCtoEvent;
+    return await append(lakeRoot, event);
+  } catch {
+    return null;
+  }
+}
+
 function readAncestorCommands(pid = process.ppid, maxDepth = 6) {
   if (process.platform === "win32") return [];
   const commands = [];
@@ -146,17 +238,18 @@ function defaultGitRunner(cwd, args, cb) {
  * @param {Function} [seams.register]  registerSynapseSession 대체
  * @param {Function} [seams.heartbeat] heartbeatSynapseSession 대체
  * @param {Function} [seams.gitRunner] git runner 대체
- * @returns {void} (enrich 는 백그라운드에서 완료)
+ * @returns {Promise<object|null>|null} CTO append promise; enrich 는 백그라운드에서 완료
  */
 export function registerInteractiveSession(stdinData, seams = {}) {
+  let ctoEvent = null;
   const register = seams.register || registerSynapseSession;
   const heartbeat = seams.heartbeat || heartbeatSynapseSession;
   const gitRunner = seams.gitRunner || defaultGitRunner;
   try {
     const payload = parseStartPayload(stdinData);
     const sessionId = String(payload?.session_id || "").trim();
-    if (!sessionId) return;
-    if (shouldSkipInteractiveRegistration(payload, seams)) return;
+    if (!sessionId) return null;
+    if (shouldSkipInteractiveRegistration(payload, seams)) return null;
     const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
 
     // 1) cwd 만으로 즉시 minimal register (블로킹 git 없음, latency 0).
@@ -170,6 +263,10 @@ export function registerInteractiveSession(stdinData, seams = {}) {
       isRemote: false,
     });
 
+    ctoEvent = emitParticipantSessionStarted(stdinData, seams).catch(
+      () => null,
+    );
+
     // 2) worktree/branch 는 블로킹 경로 밖에서 비동기 enrich → heartbeat partial.
     gitContextAsync(cwd, gitRunner)
       .then(({ worktreePath, branch }) => {
@@ -180,6 +277,7 @@ export function registerInteractiveSession(stdinData, seams = {}) {
   } catch {
     /* best-effort — never affects session start */
   }
+  return ctoEvent;
 }
 
 /**
@@ -371,9 +469,10 @@ function runBackground(stdinData) {
     .catch(() => {}); // 완전 무시
 
   // Synapse: 인터랙티브 세션 self-register (fire-and-forget, hub 미응답 무시)
-  registerInteractiveSession(stdinData);
+  const ctoEvent = registerInteractiveSession(stdinData);
 
   // session-vault은 external source — hook-orchestrator가 execFile로 실행
+  return { ctoEvent };
 }
 
 /**
@@ -392,7 +491,7 @@ export async function execute(stdinData, externalHooks = []) {
 
   // DEFERRED + BACKGROUND: fire-and-forget
   runDeferred(stdinData);
-  runBackground(stdinData);
+  const background = runBackground(stdinData);
 
   // hook-orchestrator process.exit(0)s immediately after we return, which would
   // drop the just-fired Synapse register POST before it flushes to the loopback
@@ -401,7 +500,10 @@ export async function execute(stdinData, externalHooks = []) {
   // and the ceiling caps a hub stall so SessionStart never hangs. The async
   // git-enrich heartbeat stays best-effort (it may not have fired yet) — losing
   // it only drops worktree/branch enrichment, not the core registration.
-  await drainPendingSynapse(1000);
+  await Promise.allSettled([
+    drainPendingSynapse(1000),
+    background?.ctoEvent || Promise.resolve(null),
+  ]);
 
   const totalDur = performance.now() - totalStart;
   log.info(

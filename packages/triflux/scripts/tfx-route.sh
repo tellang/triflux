@@ -128,6 +128,30 @@ _preflight_check_gh_auth
 # the real ~/.codex/config.toml (non-hermetic corruption guard). Defaults to the
 # real path for normal runs.
 _CODEX_CONFIG="${TFX_CODEX_CONFIG:-${HOME}/.codex/config.toml}"
+
+_sanitize_codex_legacy_profiles() {
+  local config="${1:-$_CODEX_CONFIG}"
+  [[ -f "$config" ]] || return 0
+  if ! grep -Eq '^[[:space:]]*profile[[:space:]]*=|^[[:space:]]*\[profiles\.' "$config" 2>/dev/null; then
+    return 0
+  fi
+  local route_dir node_bin sanitizer
+  route_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  sanitizer="${route_dir}/codex-profile-sanitize.mjs"
+  [[ -f "$sanitizer" ]] || {
+    echo "[tfx-route] 경고: Codex profile sanitizer 없음: $sanitizer" >&2
+    return 0
+  }
+  node_bin="${NODE_BIN:-$(command -v node 2>/dev/null || command -v node.exe 2>/dev/null || echo node)}"
+  if "$node_bin" "$sanitizer" "$config" --quiet; then
+    echo "[tfx-route] Codex legacy inline profiles sanitized before exec" >&2
+  else
+    echo "[tfx-route] 경고: Codex legacy profile sanitizer 실패 — --profile 실행이 실패할 수 있음" >&2
+  fi
+}
+
+_sanitize_codex_legacy_profiles "$_CODEX_CONFIG"
+
 _CODEX_HAS_SANDBOX=""
 if [[ -f "$_CODEX_CONFIG" ]] && awk '
   /^\[{1,2}mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
@@ -2374,6 +2398,9 @@ _codex_config_swap() {
       local stale_tmp="${config}.stale-restore.$$"
       if cp "$backup" "$stale_tmp" && mv "$stale_tmp" "$config"; then
         echo "[tfx-route] stale backup 감지 (pid=${owner_pid:-?} dead) — 원본 복원 후 swap 재진행" >&2
+        if declare -f _sanitize_codex_legacy_profiles >/dev/null 2>&1; then
+          _sanitize_codex_legacy_profiles "$config"
+        fi
       else
         echo "[tfx-route] 경고: stale backup 복원 실패, swap 스킵 (수동 확인: $backup)" >&2
         rm -f "$stale_tmp" 2>/dev/null
@@ -2452,6 +2479,9 @@ _codex_config_swap() {
       echo "[tfx-route] 경고: backup 삭제 실패: $backup (수동 정리 필요)" >&2
     fi
     rm -f "${backup}.owner" 2>/dev/null || true
+    if declare -f _sanitize_codex_legacy_profiles >/dev/null 2>&1; then
+      _sanitize_codex_legacy_profiles "$config"
+    fi
     echo "[tfx-route] config.toml 복원 완료" >&2
   fi
 }

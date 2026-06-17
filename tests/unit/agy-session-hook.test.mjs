@@ -6,6 +6,7 @@ import {
   runAgySessionHook,
   toSessionPayload,
 } from "../../hooks/agy-session-hook.mjs";
+import { registerInteractiveSession } from "../../hooks/session-start-fast.mjs";
 
 function agyPayload(overrides = {}) {
   return JSON.stringify({
@@ -31,13 +32,18 @@ describe("agy-session-hook adapter", () => {
         workspacePaths: ["/a", "/b"],
       }),
     );
-    assert.deepEqual(out, { session_id: "conv-1", cwd: "/a" });
+    assert.deepEqual(out, {
+      session_id: "conv-1",
+      cwd: "/a",
+      actor_cli: "agy",
+    });
   });
 
   it("toSessionPayload falls back to process.cwd() when no workspace path is present", () => {
     const out = JSON.parse(toSessionPayload({ conversationId: "conv-2" }));
     assert.equal(out.session_id, "conv-2");
     assert.equal(out.cwd, process.cwd());
+    assert.equal(out.actor_cli, "agy");
   });
 
   it("normalizeMode gates on invocationNum: first call registers, later calls heartbeat", () => {
@@ -99,6 +105,36 @@ describe("agy-session-hook adapter", () => {
       drainPendingSynapse: async () => calls.push("drain"),
     });
     assert.deepEqual(calls, ["ensure", "register", "drain"]);
+  });
+
+  it("register path emits an agy participant CTO session_started event", async () => {
+    const events = [];
+    await runAgySessionHook(agyPayload({ invocationNum: 1 }), {
+      writeStdout: false,
+      hubEnsureRun: async () => {},
+      registerInteractiveSession: (stdinData) =>
+        registerInteractiveSession(stdinData, {
+          register: () => {},
+          heartbeat: () => {},
+          gitRunner: () => {},
+          resolveLakeRoot: () => ({
+            projectRoot: "/work/triflux",
+            lakeRoot: "/work/triflux/.triflux/lake",
+          }),
+          ctoAppend: (lakeRoot, event) => events.push({ lakeRoot, event }),
+        }),
+      drainPendingSynapse: async () => {},
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(events.length, 1);
+    assert.equal(events[0].lakeRoot, "/work/triflux/.triflux/lake");
+    assert.equal(events[0].event.event, "session_started");
+    assert.equal(events[0].event.actor.cli, "agy");
+    assert.equal(
+      events[0].event.session_id,
+      "ec33ebf9-0cba-4100-8142-c61503f6c587",
+    );
   });
 
   it("stays a silent no-op when conversationId is missing", async () => {
