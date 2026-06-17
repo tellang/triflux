@@ -1,4 +1,4 @@
-const SUBCOMMANDS = ["collect", "status", "dashboard"];
+const SUBCOMMANDS = ["collect", "status", "dashboard", "hygiene"];
 
 function printUsage(subcommand) {
   if (subcommand) {
@@ -6,12 +6,13 @@ function printUsage(subcommand) {
   }
   console.log(`
 Usage
-  tfx cto <collect|status|dashboard> [options]
+  tfx cto <collect|status|dashboard|hygiene> [options]
 
 Subcommands
   collect     Refresh .triflux/lake/current.json from repo-local authority sources
   status      Print the current authority summary
   dashboard   Render the CTO console dashboard, optionally with --watch
+  hygiene     Project CTO hygiene counts and actionable dry-run rows
 `);
 }
 
@@ -30,6 +31,10 @@ export async function cmdCto(cmdArgs, opts = {}) {
     case "dashboard": {
       const { runDashboard } = await import("./dashboard.mjs");
       return runDashboard(rest, opts);
+    }
+    case "hygiene": {
+      const { runHygiene } = await import("./hygiene.mjs");
+      return runHygiene(rest, opts);
     }
     case undefined:
     case "":

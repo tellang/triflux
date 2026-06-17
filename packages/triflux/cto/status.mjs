@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { compactHygieneCounts, projectCtoHygiene } from "./hygiene.mjs";
 import { resolveLakeRootDir } from "./lake-root.mjs";
 
 const SCHEMA_VERSION = "cto-lake.v1";
@@ -254,6 +255,7 @@ function projectStatus(current, overlay) {
     live_sessions: liveSessions,
     live_session_groups: deriveLiveSessionGroups(liveSessions),
     active_shards: deriveActiveShards(current, overlay),
+    hygiene: compactHygieneCounts(projectCtoHygiene({ current, overlay })),
   };
 }
 
