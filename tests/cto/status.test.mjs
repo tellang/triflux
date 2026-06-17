@@ -115,6 +115,7 @@ describe("runStatus", () => {
         "ledger_tail",
         "live_sessions",
         "active_shards",
+        "hygiene",
       ];
       for (const key of existingKeys)
         assert.ok(key in parsed, `${key} missing`);
@@ -141,6 +142,14 @@ describe("runStatus", () => {
           members: ["agent-1"],
         },
       ]);
+      assert.deepEqual(parsed.hygiene, {
+        active_tasks: 0,
+        completed_tasks: 0,
+        stale_sessions: 0,
+        orphan_worktrees: 0,
+        superseded_checkpoints: 0,
+        unknown_owner: 0,
+      });
     } finally {
       cleanup(rootDir);
     }
@@ -203,6 +212,55 @@ describe("runStatus", () => {
       assert.deepEqual(parsed.live_sessions, []);
       assert.deepEqual(parsed.active_shards, []);
       assert.deepEqual(parsed.ledger_tail, current.ledger_tail);
+    } finally {
+      cleanup(rootDir);
+    }
+  });
+
+  it("includes compact hygiene summary derived from current ledger and live overlay", async () => {
+    const rootDir = makeTempDir();
+    const lakeRoot = join(rootDir, ".test-lake");
+    const out = captureStdout();
+    try {
+      writeJson(
+        join(lakeRoot, "current.json"),
+        fixtureCurrent({
+          ledger_tail: [
+            {
+              ts: "2026-06-17T00:00:00.000Z",
+              event: "task_claimed",
+              source: "test",
+              summary: "claim task-a",
+              ref: { task_id: "task-a" },
+            },
+            {
+              ts: "2026-06-17T00:01:00.000Z",
+              event: "session_stale",
+              source: "test",
+              summary: "session stale",
+              ref: { session_id: "session-old" },
+            },
+          ],
+        }),
+      );
+
+      await runStatus(["--json"], {
+        lakeRoot,
+        stdout: out.stdout,
+        synapseReader: async () => ({
+          sessions: [{ sessionId: "session-live", status: "active" }],
+        }),
+      });
+
+      const parsed = JSON.parse(out.read());
+      assert.deepEqual(parsed.hygiene, {
+        active_tasks: 1,
+        completed_tasks: 0,
+        stale_sessions: 1,
+        orphan_worktrees: 0,
+        superseded_checkpoints: 0,
+        unknown_owner: 2,
+      });
     } finally {
       cleanup(rootDir);
     }

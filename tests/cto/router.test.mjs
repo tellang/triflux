@@ -22,10 +22,11 @@ describe("cmdCto", () => {
     const output = await captureStdout(() => cmdCto([]));
 
     assert.match(output, /Usage/u);
-    assert.match(output, /tfx cto <collect\|status\|dashboard>/u);
+    assert.match(output, /tfx cto <collect\|status\|dashboard\|hygiene>/u);
     assert.match(output, /collect/u);
     assert.match(output, /status/u);
     assert.match(output, /dashboard/u);
+    assert.match(output, /hygiene/u);
   });
 
   it("prints usage for an unknown subcommand without throwing", async () => {
@@ -33,5 +34,49 @@ describe("cmdCto", () => {
 
     assert.match(output, /Unknown cto subcommand: bogus/u);
     assert.match(output, /Usage/u);
+  });
+
+  it("routes hygiene dry-run JSON without mutating the ledger", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } =
+      await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "tfx-cto-router-hygiene-"));
+    const lakeRoot = join(root, ".triflux", "lake");
+    let output = "";
+    try {
+      mkdirSync(lakeRoot, { recursive: true });
+      const ledgerPath = join(lakeRoot, "ledger.jsonl");
+      writeFileSync(
+        ledgerPath,
+        `${JSON.stringify({
+          ts: "2026-06-17T00:00:00.000Z",
+          event: "task_claimed",
+          source: "test",
+          summary: "claim task-a",
+          ref: { task_id: "task-a" },
+        })}\n`,
+        "utf8",
+      );
+
+      const result = await cmdCto(["hygiene", "--dry-run", "--json"], {
+        lakeRoot,
+        stdout: {
+          write: (chunk) => {
+            output += String(chunk);
+          },
+        },
+        synapseReader: async () => ({ sessions: [] }),
+      });
+
+      assert.equal(result.dry_run, true);
+      assert.equal(JSON.parse(output).counts.active_tasks, 1);
+      assert.equal(
+        readFileSync(ledgerPath, "utf8").split(/\r?\n/u).filter(Boolean).length,
+        1,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

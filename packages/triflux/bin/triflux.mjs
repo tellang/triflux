@@ -499,12 +499,13 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     },
   },
   cto: {
-    usage: "tfx cto <collect|status|dashboard> [options]",
+    usage: "tfx cto <collect|status|dashboard|hygiene> [options]",
     description: "repo-local authority layer console",
     subcommands: {
       collect: "refresh .triflux/lake/current.json from authority sources",
       status: "print the current authority summary",
       dashboard: "render the CTO console dashboard, optionally with --watch",
+      hygiene: "project CTO hygiene counts and actionable dry-run rows",
     },
   },
   multi: {
