@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -20,14 +27,28 @@ describe("resolveLakeRootDir", () => {
     );
   });
 
-  it("stops at a git worktree (.git file) instead of the main repo", () => {
-    // worktree 루트에 .git 파일이 있으므로 거기서 멈춘다 (lake 격리 유지).
+  it("resolves a linked git worktree to the canonical project root", () => {
+    // worktree 루트에 .git 파일이 있더라도 프로젝트당 CTO lake 는 하나여야 한다.
     const worktree = "/repo/.claude/worktrees/foo";
     const exists = (p) =>
       p === join(worktree, ".git") || p === join("/repo", ".git");
+    const fakeGit = (cmd, args) => {
+      assert.equal(cmd, "git");
+      assert.deepEqual(args, [
+        "-C",
+        join(worktree, "packages"),
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+      ]);
+      return `${join("/repo", ".git")}\n`;
+    };
     assert.equal(
-      resolveLakeRootDir(join(worktree, "packages"), { existsSync: exists }),
-      worktree,
+      resolveLakeRootDir(join(worktree, "packages"), {
+        existsSync: exists,
+        execFileSync: fakeGit,
+      }),
+      "/repo",
     );
   });
 
@@ -73,6 +94,47 @@ describe("resolveLakeRootDir", () => {
       const nested = join(root, "packages", "triflux");
       mkdirSync(nested, { recursive: true });
       assert.equal(resolveLakeRootDir(nested), root);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves a real linked worktree to the main checkout root", () => {
+    const root = mkdtempSync(join(tmpdir(), "tfx-lake-root-worktree-test-"));
+    const main = join(root, "main");
+    const linked = join(root, "linked");
+    try {
+      mkdirSync(main, { recursive: true });
+      execFileSync("git", ["init"], {
+        cwd: main,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      writeFileSync(join(main, "README.md"), "# fixture\n", "utf8");
+      execFileSync("git", ["add", "README.md"], {
+        cwd: main,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.email=tfx@example.invalid",
+          "-c",
+          "user.name=TFX Test",
+          "commit",
+          "-m",
+          "init",
+        ],
+        { cwd: main, stdio: ["ignore", "ignore", "ignore"] },
+      );
+      execFileSync("git", ["worktree", "add", linked, "-b", "linked"], {
+        cwd: main,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+      const nested = join(linked, "packages", "triflux");
+      mkdirSync(nested, { recursive: true });
+
+      assert.equal(resolveLakeRootDir(nested), realpathSync(main));
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
