@@ -5,6 +5,9 @@ import { homedir, tmpdir } from "node:os";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { runHygiene } from "../cto/hygiene.mjs";
+import { notifyCtoHygieneOnce } from "../cto/hygiene-notify.mjs";
+import { createNotifier } from "../hub/team/notify.mjs";
 import {
   escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
   probeRemoteEnv as probeRemoteHostEnv,
@@ -51,6 +54,8 @@ function usage() {
     "  tfx-live peer [--cli-a codex] [--cli-b claude] [--session-a peerA] [--session-b peerB] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--bridge ABS] [--remote HOST] [--cwd DIR] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
     "  tfx-live orchestrate --task TEXT [--mode peer|codex-led|claude-led] [--codex-transport exec|app-server-uds] [--cwd DIR] [--timeout 120]",
     "    Runs the Claude(UDS)+Codex orchestration engine. --codex-transport app-server-uds drives a real `codex app-server` over WebSocket-over-UDS (experimental); default exec keeps the codex stdio one-shot path.",
+    "  tfx-live cto-hygiene-notify --root DIR --state-file PATH [--json]",
+    "    One-shot CTO hygiene dry-run notification: sends only when actionable hygiene state changes; no polling or apply/steward lock.",
   ].join("\n");
 }
 
@@ -2207,6 +2212,45 @@ function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+async function ctoHygieneNotify(flags) {
+  const rootDir = flags.root ? pathResolve(flags.root) : process.cwd();
+  const stateFile = flags["state-file"]
+    ? pathResolve(flags["state-file"])
+    : pathJoin(rootDir, ".triflux", "cto-hygiene-notify-state.json");
+
+  const projection = await runHygiene(["--dry-run", "--json"], {
+    rootDir,
+    dryRun: true,
+    json: false,
+    stdout: {
+      write() {
+        return true;
+      },
+    },
+  });
+
+  const notifier = createNotifier({ stdout: process.stderr });
+  const result = await notifyCtoHygieneOnce(projection, {
+    notifier,
+    stateFile,
+  });
+  const payload = {
+    ok: true,
+    stateFile,
+    counts: projection.counts,
+    ...result,
+  };
+
+  if (flags.json) {
+    printJson(payload);
+    return;
+  }
+
+  process.stdout.write(
+    `cto hygiene notify: ${payload.reason} (${payload.hash})\n`,
+  );
+}
+
 async function main() {
   const { command, flags } = parseCli(process.argv.slice(2));
 
@@ -2233,6 +2277,8 @@ async function main() {
     await peer(flags);
   } else if (command === "orchestrate") {
     await orchestrate(flags);
+  } else if (command === "cto-hygiene-notify") {
+    await ctoHygieneNotify(flags);
   } else {
     throw new Error(`Unknown subcommand: ${command}\n${usage()}`);
   }
@@ -2242,6 +2288,7 @@ export {
   ADAPTERS,
   buildRemoteLiveCommand,
   callRemoteLive,
+  ctoHygieneNotify,
   extractAssistantResponse,
   extractClaudeCompletedTaskListResponse,
   hasClaudeCompletedTaskListResponse,

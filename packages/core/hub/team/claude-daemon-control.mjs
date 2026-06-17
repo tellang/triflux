@@ -1246,7 +1246,7 @@ export function attachClaudeDaemonSession({
         cancelCompletionTimer();
       }
     });
-    socket.on("close", () => {
+    const finishClosed = () => {
       if (!settled) {
         if (pendingCompletion) {
           finish(pendingCompletion);
@@ -1254,7 +1254,9 @@ export function attachClaudeDaemonSession({
         }
         finish({ timedOut: false, matchedCompletion: false, closed: true });
       }
-    });
+    };
+    socket.on("end", finishClosed);
+    socket.on("close", finishClosed);
   });
 }
 
