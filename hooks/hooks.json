@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 15
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 5
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 10
           }
         ]
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 3
           }
         ]
@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 10
           }
         ]
@@ -67,7 +67,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 5
           }
         ]
@@ -79,7 +79,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 5
           }
         ]
@@ -91,7 +91,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 35
           }
         ]
@@ -103,7 +103,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 5
           }
         ]
@@ -115,7 +115,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 5
           }
         ]
@@ -127,7 +127,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 5
           }
         ]
@@ -139,7 +139,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/hook-orchestrator.mjs\"",
+            "command": "node -e \"const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cp=require('node:child_process');const roots=[];try{roots.push(fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'),'utf8').trim())}catch{}roots.push(process.env.PLUGIN_ROOT,process.env.CLAUDE_PLUGIN_ROOT);try{roots.push(cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim())}catch{}roots.push(process.cwd());const root=roots.find(r=>r&&fs.existsSync(path.join(r,'hooks','hook-orchestrator.mjs')));if(!root){console.error('[triflux hook] cannot locate hooks/hook-orchestrator.mjs');process.exit(1)}const child=cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')],{stdio:'inherit',env:process.env,windowsHide:true});process.exit(child.status??(child.signal?1:0));\"",
             "timeout": 5
           }
         ]

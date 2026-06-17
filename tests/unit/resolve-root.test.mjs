@@ -39,18 +39,21 @@ describe("resolve-root", () => {
   let prevHome;
   let prevUserProfile;
   let prevClaudePluginRoot;
+  let prevPluginRoot;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "tfx-resolve-root-"));
     prevHome = process.env.HOME;
     prevUserProfile = process.env.USERPROFILE;
     prevClaudePluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    prevPluginRoot = process.env.PLUGIN_ROOT;
 
     const testHome = join(tempDir, "home");
     mkdirSync(testHome, { recursive: true });
     process.env.HOME = testHome;
     process.env.USERPROFILE = testHome;
     delete process.env.CLAUDE_PLUGIN_ROOT;
+    delete process.env.PLUGIN_ROOT;
   });
 
   afterEach(() => {
@@ -63,6 +66,9 @@ describe("resolve-root", () => {
     if (prevClaudePluginRoot === undefined)
       delete process.env.CLAUDE_PLUGIN_ROOT;
     else process.env.CLAUDE_PLUGIN_ROOT = prevClaudePluginRoot;
+
+    if (prevPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
+    else process.env.PLUGIN_ROOT = prevPluginRoot;
 
     rmSync(tempDir, { recursive: true, force: true });
   });
@@ -92,6 +98,16 @@ describe("resolve-root", () => {
 
     const { PLUGIN_ROOT } = await importFreshModule();
     assert.equal(toPosixPath(PLUGIN_ROOT), toPosixPath(envRoot));
+  });
+
+  it("breadcrumb이 없으면 PLUGIN_ROOT를 CLAUDE_PLUGIN_ROOT보다 우선 사용한다", async () => {
+    const pluginRoot = createValidPluginRoot(tempDir, "plugin-root");
+    const claudeRoot = createValidPluginRoot(tempDir, "claude-root");
+    process.env.PLUGIN_ROOT = pluginRoot;
+    process.env.CLAUDE_PLUGIN_ROOT = claudeRoot;
+
+    const { PLUGIN_ROOT } = await importFreshModule();
+    assert.equal(toPosixPath(PLUGIN_ROOT), toPosixPath(pluginRoot));
   });
 
   it("breadcrumb/env가 모두 실패하면 callerUrl 기반 fallback을 사용한다", async () => {
