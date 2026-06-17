@@ -45,7 +45,7 @@ export function toSessionPayload(payload) {
     typeof workspacePaths[0] === "string" && workspacePaths[0]
       ? workspacePaths[0]
       : process.cwd();
-  return JSON.stringify({ session_id: sessionId, cwd });
+  return JSON.stringify({ session_id: sessionId, cwd, actor_cli: "agy" });
 }
 
 // agy has no distinct SessionStart / UserPromptSubmit events. PreInvocation
@@ -98,7 +98,7 @@ export async function runAgySessionHook(stdinData, opts = {}) {
         await hubEnsureRun(sessionPayload);
       } catch {}
       try {
-        registerInteractiveSession(sessionPayload);
+        await Promise.resolve(registerInteractiveSession(sessionPayload));
       } catch {}
       try {
         await drainPendingSynapse(1000);

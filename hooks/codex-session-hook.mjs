@@ -99,7 +99,7 @@ export async function runCodexSessionHook(stdinData, opts = {}) {
           await hubEnsureRun(stdinData);
         } catch {}
         try {
-          registerInteractiveSession(stdinData);
+          await Promise.resolve(registerInteractiveSession(stdinData));
         } catch {}
         try {
           await drainPendingSynapse(1000);
