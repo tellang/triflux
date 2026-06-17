@@ -22,6 +22,7 @@ export const CTO_EVENT_TYPES = Object.freeze([
   "pr_merged_or_closed",
   "worktree_created",
   "worktree_removed",
+  "hygiene_applied",
 ]);
 
 export const CTO_HYGIENE_STATUSES = Object.freeze([
@@ -144,6 +145,10 @@ export function normalizeCtoEvent(input = {}) {
   putString(ref, "branch", input.branch);
   putString(ref, "last_seen_at", input.last_seen_at);
   putString(ref, "stale_reason", input.stale_reason);
+  putString(ref, "hygiene_key", input.hygiene_key);
+  putString(ref, "hygiene_kind", input.hygiene_kind);
+  putString(ref, "hygiene_id", input.hygiene_id);
+  putString(ref, "hygiene_action", input.hygiene_action);
   if (status) ref.status = status;
 
   const projectRoot = maybeString(input.project_root);
