@@ -197,6 +197,8 @@ export function deriveGeminiFamilyBucket(buckets) {
 
 export function buildGeminiAuthContext(accountId) {
   let oauth = readJson(GEMINI_OAUTH_PATH, null);
+  let authSource = oauth?.access_token ? "gemini-file" : "none";
+  let expiryMissing = oauth?.access_token ? oauth.expiry_date == null : false;
   const fileExpired =
     oauth?.expiry_date != null && oauth.expiry_date < Date.now();
   // Preserve a valid Gemini file token; agy Keychain is only a missing/expired fallback.
@@ -209,13 +211,15 @@ export function buildGeminiAuthContext(accountId) {
         ...fileRest
       } = oauth || {};
       oauth = { ...fileRest, ...keychainOAuth };
+      authSource = "antigravity-keychain";
+      expiryMissing = keychainOAuth.expiry_date == null;
     }
   }
   const tokenSource =
     oauth?.refresh_token || oauth?.id_token || oauth?.access_token || "";
   const tokenFingerprint = tokenSource ? makeHash(tokenSource) : "none";
   const cacheKey = `${accountId || "gemini-main"}::${tokenFingerprint}`;
-  return { oauth, tokenFingerprint, cacheKey };
+  return { oauth, tokenFingerprint, cacheKey, authSource, expiryMissing };
 }
 
 function firstPresent(...values) {
@@ -305,12 +309,76 @@ function getAntigravityTokenFromKeychain() {
   }
 }
 
+export function classifyGeminiQuotaFailure(response, authContext = {}) {
+  if (!response) return "network";
+  const error = response?.error || {};
+  const code = Number(error.code ?? response.code ?? response.status);
+  const status = String(error.status || response.status || "").toUpperCase();
+  const message = String(
+    error.message || error.code || response.error || response.message || "",
+  );
+  if (
+    code === 401 ||
+    code === 403 ||
+    status === "UNAUTHENTICATED" ||
+    status === "PERMISSION_DENIED" ||
+    /(unauthorized|forbidden|invalid authentication|invalid credentials|oauth|token|credential|auth)/i.test(
+      message,
+    )
+  ) {
+    return "auth";
+  }
+  if (
+    authContext.authSource === "antigravity-keychain" &&
+    authContext.expiryMissing === true &&
+    /(expired|invalid|unauthenticated|permission denied)/i.test(message)
+  ) {
+    return "auth";
+  }
+  return "api";
+}
+
+function formatGeminiQuotaFailure(response, authContext = {}, stage = "quota") {
+  const error =
+    response?.error?.message ||
+    response?.error?.status ||
+    response?.error?.code ||
+    response?.error ||
+    response?.message ||
+    "no buckets in response";
+  const base = String(error);
+  if (
+    authContext.authSource === "antigravity-keychain" &&
+    authContext.expiryMissing === true
+  ) {
+    return `expiry-less Antigravity Keychain token failed bounded ${stage} freshness probe: ${base}`;
+  }
+  return base;
+}
+
+function writeGeminiQuotaErrorCache(cache, authContext, errorType, errorHint) {
+  const sameKey = cache?.cacheKey === authContext.cacheKey;
+  writeJsonSafe(GEMINI_QUOTA_CACHE_PATH, {
+    ...(sameKey ? cache || {} : {}),
+    timestamp: sameKey && cache?.timestamp ? cache.timestamp : Date.now(),
+    cacheKey: authContext.cacheKey,
+    accountId: authContext.accountId || "gemini-main",
+    tokenFingerprint: authContext.tokenFingerprint,
+    authSource: authContext.authSource,
+    expiryMissing: authContext.expiryMissing === true,
+    error: true,
+    errorType,
+    errorHint,
+  });
+}
+
 // ============================================================================
 // Gemini 쿼터 API 호출 (5분 캐시)
 // ============================================================================
 export async function fetchGeminiQuota(accountId, options = {}) {
   const authContext = options.authContext || buildGeminiAuthContext(accountId);
   const { oauth, tokenFingerprint, cacheKey } = authContext;
+  authContext.accountId = accountId || "gemini-main";
   const forceRefresh = options.forceRefresh === true;
 
   // 1. 캐시 확인 (계정/토큰별)
@@ -330,35 +398,34 @@ export async function fetchGeminiQuota(accountId, options = {}) {
 
   if (!oauth?.access_token) {
     // access_token 없음: 에러 힌트를 캐시에 기록하고 stale 캐시 반환
-    writeJsonSafe(GEMINI_QUOTA_CACHE_PATH, {
-      ...(cache || {}),
-      timestamp: cache?.timestamp || Date.now(),
-      error: true,
-      errorType: "auth",
-      errorHint: "no access_token in oauth_creds.json",
-    });
+    writeGeminiQuotaErrorCache(
+      cache,
+      authContext,
+      "auth",
+      "no access_token in oauth_creds.json",
+    );
     return cache;
   }
   if (oauth.expiry_date && oauth.expiry_date < Date.now()) {
     // OAuth 토큰 만료: 에러 힌트를 캐시에 기록 (refresh_token 갱신은 Gemini CLI 담당)
-    writeJsonSafe(GEMINI_QUOTA_CACHE_PATH, {
-      ...(cache || {}),
-      timestamp: cache?.timestamp || Date.now(),
-      error: true,
-      errorType: "auth",
-      errorHint: `token expired at ${new Date(oauth.expiry_date).toISOString()}`,
-    });
+    writeGeminiQuotaErrorCache(
+      cache,
+      authContext,
+      "auth",
+      `token expired at ${new Date(oauth.expiry_date).toISOString()}`,
+    );
     return cache;
   }
 
   // 3. projectId (캐시 or API)
+  let loadCodeAssistResponse = null;
   const fetchProjectId = async () => {
-    const loadRes = await httpsPost(
+    loadCodeAssistResponse = await httpsPost(
       "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
       { metadata: { pluginType: "GEMINI" } },
       oauth.access_token,
     );
-    const id = loadRes?.cloudaicompanionProject;
+    const id = loadCodeAssistResponse?.cloudaicompanionProject;
     if (id)
       writeJsonSafe(GEMINI_PROJECT_CACHE_PATH, {
         cacheKey,
@@ -376,7 +443,19 @@ export async function fetchGeminiQuota(accountId, options = {}) {
   let projectId =
     projCache?.cacheKey === cacheKey ? projCache?.projectId : null;
   if (!projectId) projectId = await fetchProjectId();
-  if (!projectId) return cache;
+  if (!projectId) {
+    writeGeminiQuotaErrorCache(
+      cache,
+      authContext,
+      classifyGeminiQuotaFailure(loadCodeAssistResponse, authContext),
+      formatGeminiQuotaFailure(
+        loadCodeAssistResponse,
+        authContext,
+        "loadCodeAssist",
+      ),
+    );
+    return cache;
+  }
 
   // 4. retrieveUserQuota 호출
   let quotaRes = await httpsPost(
@@ -388,7 +467,19 @@ export async function fetchGeminiQuota(accountId, options = {}) {
   // projectId 캐시가 만료/변경된 경우 1회 재시도
   if (!quotaRes?.buckets && projCache?.projectId) {
     projectId = await fetchProjectId();
-    if (!projectId) return cache;
+    if (!projectId) {
+      writeGeminiQuotaErrorCache(
+        cache,
+        authContext,
+        classifyGeminiQuotaFailure(loadCodeAssistResponse, authContext),
+        formatGeminiQuotaFailure(
+          loadCodeAssistResponse,
+          authContext,
+          "loadCodeAssist",
+        ),
+      );
+      return cache;
+    }
     quotaRes = await httpsPost(
       "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
       { project: projectId },
@@ -398,18 +489,12 @@ export async function fetchGeminiQuota(accountId, options = {}) {
 
   if (!quotaRes?.buckets) {
     // API 응답에 buckets 없음: 에러 코드 또는 응답 내용을 캐시에 기록
-    const apiError =
-      quotaRes?.error?.message ||
-      quotaRes?.error?.code ||
-      quotaRes?.error ||
-      "no buckets in response";
-    writeJsonSafe(GEMINI_QUOTA_CACHE_PATH, {
-      ...(cache || {}),
-      timestamp: cache?.timestamp || Date.now(),
-      error: true,
-      errorType: "api",
-      errorHint: String(apiError),
-    });
+    writeGeminiQuotaErrorCache(
+      cache,
+      authContext,
+      classifyGeminiQuotaFailure(quotaRes, authContext),
+      formatGeminiQuotaFailure(quotaRes, authContext, "quota"),
+    );
     return cache;
   }
 

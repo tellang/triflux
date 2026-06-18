@@ -30,12 +30,18 @@ function parsePayload(stdinData) {
   }
 }
 
-// Antigravity hook payloads use camelCase system metadata (conversationId,
-// workspacePaths) rather than Codex's session_id/cwd. registerInteractiveSession
-// and heartbeatInteractiveSession parse the Codex shape, so we adapt the agy
-// payload into that shape before delegating. conversationId is the stable
-// per-conversation UUID (== session identity); the first mounted workspace path
-// is the effective cwd.
+/**
+ * Convert an Antigravity hook payload into the Codex-shaped session payload
+ * consumed by the shared fast session registration helpers.
+ *
+ * Antigravity hook payloads use camelCase system metadata (`conversationId`,
+ * `workspacePaths`) rather than Codex's `session_id`/`cwd`. The
+ * `conversationId` is the stable per-conversation UUID; the first mounted
+ * workspace path is the effective cwd.
+ *
+ * @param {Record<string, unknown> | null | undefined} payload
+ * @returns {string} JSON string with `{ session_id, cwd, actor_cli }`.
+ */
 export function toSessionPayload(payload) {
   const sessionId = String(payload?.conversationId || "").trim();
   const workspacePaths = Array.isArray(payload?.workspacePaths)
@@ -48,10 +54,18 @@ export function toSessionPayload(payload) {
   return JSON.stringify({ session_id: sessionId, cwd, actor_cli: "agy" });
 }
 
-// agy has no distinct SessionStart / UserPromptSubmit events. PreInvocation
-// fires before every model call, so the per-conversation invocationNum gates
-// register (first call == session start) vs heartbeat (subsequent calls).
-// An explicit argv mode (register|heartbeat) overrides, mirroring the codex hook.
+/**
+ * Decide whether a PreInvocation payload should register or heartbeat.
+ *
+ * agy has no distinct SessionStart/UserPromptSubmit events. PreInvocation fires
+ * before every model call, so per-conversation `invocationNum` gates register
+ * (first call) vs heartbeat (later calls). An explicit argv mode overrides this,
+ * mirroring the Codex hook.
+ *
+ * @param {string | null | undefined} argvMode
+ * @param {Record<string, unknown> | null | undefined} payload
+ * @returns {"register" | "heartbeat"}
+ */
 export function normalizeMode(argvMode, payload) {
   const direct = String(argvMode || "")
     .trim()
@@ -94,6 +108,23 @@ async function runHookSideEffectsWithStdoutSuppressed(fn) {
   }
 }
 
+/**
+ * Execute the observational Antigravity session hook.
+ *
+ * The hook always returns/writes an empty JSON object so hook stdout remains
+ * JSON-only and hook failures never block the user session.
+ *
+ * @param {string} stdinData
+ * @param {{
+ *   argvMode?: string,
+ *   writeStdout?: boolean,
+ *   hubEnsureRun?: (stdinData: string) => Promise<unknown> | unknown,
+ *   registerInteractiveSession?: (stdinData: string) => Promise<unknown> | unknown,
+ *   heartbeatInteractiveSession?: (stdinData: string) => Promise<unknown> | unknown,
+ *   drainPendingSynapse?: (timeoutMs?: number) => Promise<unknown> | unknown,
+ * }} [opts]
+ * @returns {Promise<string>}
+ */
 export async function runAgySessionHook(stdinData, opts = {}) {
   const output = "{}\n";
   const parsed = parsePayload(stdinData);

@@ -93,6 +93,8 @@ describe("Gemini HUD Antigravity auth", () => {
 
       assert.equal(context.oauth.access_token, "keychain-access-token");
       assert.equal(context.oauth.expiry_date > Date.now(), true);
+      assert.equal(context.authSource, "antigravity-keychain");
+      assert.equal(context.expiryMissing, false);
       assert.notEqual(context.tokenFingerprint, "none");
       assert.match(context.cacheKey, /^agy-main::/);
     } finally {
@@ -114,6 +116,8 @@ describe("Gemini HUD Antigravity auth", () => {
       const context = buildGeminiAuthContextInChild("agy-main");
 
       assert.equal(context.oauth.access_token, "raw-keychain-token");
+      assert.equal(context.authSource, "antigravity-keychain");
+      assert.equal(context.expiryMissing, true);
       assert.notEqual(context.tokenFingerprint, "none");
     } finally {
       process.env.HOME = originalHome;
@@ -139,6 +143,8 @@ describe("Gemini HUD Antigravity auth", () => {
 
       assert.equal(context.oauth.access_token, "file-access-token");
       assert.equal(context.oauth.refresh_token, "file-refresh-token");
+      assert.equal(context.authSource, "gemini-file");
+      assert.equal(context.expiryMissing, true);
     } finally {
       process.env.HOME = originalHome;
       process.env.PATH = originalPath;
@@ -189,6 +195,8 @@ describe("Gemini HUD Antigravity auth", () => {
       const context = buildGeminiAuthContextInChild("gemini-main");
 
       assert.equal(context.oauth.access_token, "valid-file-token");
+      assert.equal(context.authSource, "gemini-file");
+      assert.equal(context.expiryMissing, false);
     } finally {
       process.env.HOME = originalHome;
       process.env.PATH = originalPath;
@@ -224,6 +232,25 @@ describe("Gemini HUD Antigravity auth", () => {
 });
 
 describe("Gemini HUD unlimited quota", () => {
+  it("classifies quota failures so expiry-less Keychain tokens produce auth-specific cache errors", async () => {
+    const { classifyGeminiQuotaFailure } = await importHudModule(
+      "hud/providers/gemini.mjs",
+    );
+
+    assert.equal(
+      classifyGeminiQuotaFailure(
+        { error: { code: 401, status: "UNAUTHENTICATED" } },
+        { authSource: "antigravity-keychain", expiryMissing: true },
+      ),
+      "auth",
+    );
+    assert.equal(classifyGeminiQuotaFailure(null), "network");
+    assert.equal(
+      classifyGeminiQuotaFailure({ error: { code: 500, message: "backend" } }),
+      "api",
+    );
+  });
+
   it("returns an unlimited sentinel instead of coercing Infinity into a percent", async () => {
     const { deriveGeminiLimits } = await importHudModule(
       "hud/providers/gemini.mjs",
