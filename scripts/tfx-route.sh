@@ -1121,11 +1121,10 @@ resolve_gemini_profile() {
     const primaryRaw = process.argv[2] || '{}';
     const settingsRaw = process.argv[3] || '{}';
     const defaults = {
-      pro31: 'gemini-3.1-pro-preview',
-      flash3: 'gemini-3-flash-preview',
-      pro25: 'gemini-2.5-pro',
-      flash25: 'gemini-2.5-flash',
-      lite25: 'gemini-2.5-flash-lite'
+      flash35: 'Gemini 3.5 Flash (Medium)',
+      flash35_high: 'Gemini 3.5 Flash (High)',
+      pro31: 'Gemini 3.1 Pro (High)',
+      flash3: 'Gemini 3 Flash'
     };
 
     if (typeof name === 'string' && name.startsWith('gemini-')) {
@@ -1193,9 +1192,9 @@ resolve_gemini_profile() {
       }
     }
 
-    process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.pro25);
+    process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.flash35);
   " "$profile" "$_GEMINI_PROFILE_CACHE" "$settings_cache" 2>/dev/null)
-  echo "${result:-gemini-2.5-pro}"
+  echo "${result:-Gemini 3.5 Flash (Medium)}"
 }
 
 # ── 라우팅 테이블 ──
@@ -1289,7 +1288,9 @@ route_agent() {
       CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── Antigravity CLI 레인 (Gemini CLI 후속) ───
-    # 모델 선택 옵션 부재 (top-level), Antigravity 측 settings.json 으로 endemic.
+    # 모델은 run_antigravity_exec() 가 resolve_gemini_profile(TFX_GEMINI_PROFILE,
+    # 기본 flash35)로 해석해 `--model "<display name>"`을 agy_args 에 주입한다.
+    # CLI_ARGS 는 read -a 로 word-split 되므로 공백 포함 모델명을 여기 넣지 않는다.
     # #310: upstream callers are normalized through agent-map.json, but this
     # direct route entrypoint intentionally keeps agy as a compatibility alias.
     designer|writer|gemini|antigravity|agy)
@@ -2179,6 +2180,18 @@ run_antigravity_exec() {
   local worker_pid
   local -a agy_args=()
   read -r -a agy_args <<< "$CLI_ARGS"
+
+  # ── 프로필 기반 모델 주입 ──
+  # display name 에 공백/괄호가 있으므로(예: "Gemini 3.5 Flash (Medium)") CLI_ARGS
+  # 문자열이 아니라 agy_args 배열에 두 원소(--model, <display name>)로 append 해야
+  # "${agy_args[@]}" expand 시 단일 인자로 보존된다. 모델 SSOT 는 프로필 설정이다.
+  if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
+    local _agy_model
+    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-flash35}")"
+    if [[ -n "$_agy_model" ]]; then
+      agy_args+=("--model" "$_agy_model")
+    fi
+  fi
 
   if ! agy_supports_headless "$CLI_CMD"; then
     echo "[tfx-route] Antigravity CLI headless flags unsupported or missing: $CLI_CMD" >"$STDERR_LOG"
