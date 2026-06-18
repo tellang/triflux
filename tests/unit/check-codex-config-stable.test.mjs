@@ -41,6 +41,22 @@ const PROFILE_BLOCK = `[profiles.codex53_low]
 model = "gpt-5.3-codex"
 `;
 
+const OPENAI_RUNTIME_PLUGIN_BLOCK = `[plugins."pdf@openai-primary-runtime"]
+enabled = true
+
+[marketplaces.openai-primary-runtime]
+source = "/Users/tellang/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+`;
+
+const OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER = `[plugins."pdf@openai-primary-runtime"]
+enabled = true
+version = "26.601.10930"
+
+[marketplaces.openai-primary-runtime]
+source = "/Users/tellang/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+last_sync = "2026-06-18T00:00:00Z"
+`;
+
 function snapshot(raw) {
   return {
     exists: true,
@@ -83,10 +99,23 @@ describe("#193 classifySectionDiff", () => {
     const after = `${TFX_HUB_BLOCK}\n${HOOKS_STATE_BLOCK_AFTER}`;
     const result = classifySectionDiff(before, after);
     assert.equal(result.hooksStateOnly, true);
+    assert.equal(result.externalChurnOnly, true);
     assert.equal(result.changedSections.length, 2);
     for (const header of result.changedSections) {
       assert.match(header, /^hooks\.state\./);
     }
+  });
+
+  it("flags OpenAI primary runtime plugin churn as external-only", () => {
+    const before = `${TFX_HUB_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK}`;
+    const after = `${TFX_HUB_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER}`;
+    const result = classifySectionDiff(before, after);
+    assert.equal(result.hooksStateOnly, false);
+    assert.equal(result.externalChurnOnly, true);
+    assert.deepEqual(result.changedSections.sort(), [
+      "marketplaces.openai-primary-runtime",
+      'plugins."pdf@openai-primary-runtime"',
+    ]);
   });
 
   it("rejects whitelist when tfx-hub also drifts", () => {
@@ -94,6 +123,7 @@ describe("#193 classifySectionDiff", () => {
     const after = `${TFX_HUB_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_AFTER}`;
     const result = classifySectionDiff(before, after);
     assert.equal(result.hooksStateOnly, false);
+    assert.equal(result.externalChurnOnly, false);
     assert.ok(
       result.changedSections.some((h) => h === "mcp_servers.tfx-hub"),
       `expected mcp_servers.tfx-hub in ${JSON.stringify(result.changedSections)}`,
@@ -105,6 +135,7 @@ describe("#193 classifySectionDiff", () => {
     const after = `${HOOKS_STATE_BLOCK_AFTER}\n${PROFILE_BLOCK}`;
     const result = classifySectionDiff(before, after);
     assert.equal(result.hooksStateOnly, false);
+    assert.equal(result.externalChurnOnly, false);
     assert.ok(result.changedSections.includes("profiles.codex53_low"));
   });
 });
@@ -124,7 +155,20 @@ describe("#193 describeChange", () => {
     assert.ok(change !== null, "expected change");
     assert.equal(change.kind, "sha-changed");
     assert.equal(change.hooksStateOnly, true);
+    assert.equal(change.externalChurnOnly, true);
     assert.ok(change.message.startsWith("sha256 differs"));
+  });
+
+  it("classifies OpenAI runtime plugin churn as externalChurnOnly=true", () => {
+    const before = snapshot(`${TFX_HUB_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK}`);
+    const after = snapshot(
+      `${TFX_HUB_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER}`,
+    );
+    const change = describeChange(before, after);
+    assert.ok(change !== null, "expected change");
+    assert.equal(change.kind, "sha-changed");
+    assert.equal(change.hooksStateOnly, false);
+    assert.equal(change.externalChurnOnly, true);
   });
 
   it("classifies tfx-hub mutation as sha-changed + hooksStateOnly=false", () => {
@@ -136,6 +180,7 @@ describe("#193 describeChange", () => {
     assert.ok(change !== null, "expected change");
     assert.equal(change.kind, "sha-changed");
     assert.equal(change.hooksStateOnly, false);
+    assert.equal(change.externalChurnOnly, false);
   });
 
   it("rejects whitelist when hooks.state churn is mixed with other section drift", () => {

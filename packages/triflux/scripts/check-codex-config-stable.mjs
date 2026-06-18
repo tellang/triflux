@@ -14,11 +14,15 @@
 //   사용자가 npm test 도중 다른 터미널에서 codex 를 활성 사용 중이면 이
 //   외부 mutation 이 false positive 로 잡힌다. 따라서 hooks.state-only
 //   churn 은 informational warning 으로 분류하고 exit 0 으로 통과시킨다.
+//   Codex plugin mode also auto-materializes OpenAI primary runtime plugin
+//   registry sections (for example pdf@openai-primary-runtime); those are
+//   likewise Codex-owned external churn, not triflux-owned MCP drift.
 //   triflux 자체 mutation (e.g. tfx-hub URL drift) 은 기존대로 exit 2.
 //
 // Exit codes:
 //   0  = config 안정. wrap 한 명령의 exit code 그대로 반환 (보통 0).
-//        hooks.state-only churn 도 여기 포함 (informational warning 만 출력).
+//        hooks.state/OpenAI runtime plugin churn 도 여기 포함
+//        (informational warning 만 출력).
 //   2  = triflux 가드가 잡아야 할 mutation 감지. wrap 한 명령의 exit code
 //        와 무관하게 강제 fail.
 //   N  = wrap 한 명령이 N 으로 끝남 (mutation 없음).
@@ -32,6 +36,10 @@ import { join } from "node:path";
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
 const EXPECTED_TFX_HUB_URL = "http://127.0.0.1:27888/mcp";
 const HOOKS_STATE_PREFIX = "hooks.state.";
+const OPENAI_PRIMARY_RUNTIME_MARKETPLACE =
+  "marketplaces.openai-primary-runtime";
+const OPENAI_PRIMARY_RUNTIME_PLUGIN_RE =
+  /^plugins\."[^"]+@openai-primary-runtime"$/u;
 
 function readTfxHubUrl(raw) {
   const headerMatch =
@@ -79,11 +87,23 @@ export function splitTomlSections(raw) {
 
 // Classify which sections drifted between before / after payloads.
 // Returns:
-//   { hooksStateOnly: bool, changedSections: string[] }
+//   { hooksStateOnly: bool, externalChurnOnly: bool, changedSections: string[] }
 //
 // hooksStateOnly = true means every changed section header starts with
 // "hooks.state." (the oh-my-codex managed area). Empty diff returns
 // hooksStateOnly=false so callers don't accidentally whitelist "no change".
+//
+// externalChurnOnly additionally permits Codex-owned OpenAI primary runtime
+// plugin registry sections. It remains false for empty diffs and for any
+// triflux-owned or unknown section drift.
+function isExternalChurnSection(header) {
+  return (
+    header.startsWith(HOOKS_STATE_PREFIX) ||
+    header === OPENAI_PRIMARY_RUNTIME_MARKETPLACE ||
+    OPENAI_PRIMARY_RUNTIME_PLUGIN_RE.test(header)
+  );
+}
+
 export function classifySectionDiff(beforeRaw, afterRaw) {
   const beforeSections = splitTomlSections(beforeRaw);
   const afterSections = splitTomlSections(afterRaw);
@@ -109,7 +129,9 @@ export function classifySectionDiff(beforeRaw, afterRaw) {
   const hooksStateOnly =
     changedSections.length > 0 &&
     changedSections.every((h) => h.startsWith(HOOKS_STATE_PREFIX));
-  return { hooksStateOnly, changedSections };
+  const externalChurnOnly =
+    changedSections.length > 0 && changedSections.every(isExternalChurnSection);
+  return { hooksStateOnly, externalChurnOnly, changedSections };
 }
 
 function snapshotConfig() {
@@ -145,13 +167,12 @@ export function describeChange(before, after) {
   if (before.sha !== after.sha) {
     const beforeRaw = typeof before.raw === "string" ? before.raw : "";
     const afterRaw = typeof after.raw === "string" ? after.raw : "";
-    const { hooksStateOnly, changedSections } = classifySectionDiff(
-      beforeRaw,
-      afterRaw,
-    );
+    const { hooksStateOnly, externalChurnOnly, changedSections } =
+      classifySectionDiff(beforeRaw, afterRaw);
     return {
       kind: "sha-changed",
       hooksStateOnly,
+      externalChurnOnly,
       changedSections,
       message: `sha256 differs (size: ${before.size} → ${after.size})`,
     };
@@ -205,18 +226,24 @@ if (isMain) {
   const portDrift = describePortDrift(after);
   const hooksStateOnly =
     change?.kind === "sha-changed" && change.hooksStateOnly === true;
+  const externalChurnOnly =
+    change?.kind === "sha-changed" && change.externalChurnOnly === true;
 
-  // hooksStateOnly + port drift 없음 = informational warning + pass.
+  // External Codex-owned churn + port drift 없음 = informational warning + pass.
   // port drift 가 같이 잡혔으면 그건 triflux-owned section mutation 이라
   // 기존 fail path 를 탄다.
-  if (hooksStateOnly && !portDrift) {
+  if (externalChurnOnly && !portDrift) {
     process.stderr.write(
       [
         "",
-        "[check-codex-config-stable] hooks.state-only churn (whitelist)",
+        hooksStateOnly
+          ? "[check-codex-config-stable] hooks.state-only churn (whitelist)"
+          : "[check-codex-config-stable] Codex external plugin churn (whitelist)",
         `Path:     ${CODEX_CONFIG}`,
         `Sections: ${(change.changedSections || []).join(", ") || "(none)"}`,
-        "Reason:   oh-my-codex 가 codex CLI hook trust state 를 자동 갱신.",
+        hooksStateOnly
+          ? "Reason:   oh-my-codex 가 codex CLI hook trust state 를 자동 갱신."
+          : "Reason:   Codex plugin runtime 이 OpenAI primary runtime registry 를 자동 갱신.",
         "          triflux 외부 mutation 이므로 #193 가드의 false positive 다.",
         "Action:   informational only — pass-through.",
         "",

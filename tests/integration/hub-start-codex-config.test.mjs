@@ -8,6 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -31,6 +32,26 @@ function readJson(path) {
 
 function sleepMs(ms) {
   Atomics.wait(SLEEP_SAB, 0, 0, ms);
+}
+
+function getFreePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" ? address?.port : null;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+        } else if (Number.isFinite(port)) {
+          resolve(port);
+        } else {
+          reject(new Error("failed to allocate a free TCP port"));
+        }
+      });
+    });
+  });
 }
 
 function runHubStart(homeDir, port, { passPortArg = true } = {}) {
@@ -58,6 +79,24 @@ function runHubStart(homeDir, port, { passPortArg = true } = {}) {
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
+  );
+}
+
+function readConfigAfterHubStart(configPath, output) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (existsSync(configPath)) {
+      return readJson(configPath);
+    }
+    sleepMs(50);
+  }
+
+  throw new Error(
+    [
+      `Codex config was not created: ${configPath}`,
+      "tfx hub start output:",
+      String(output || "").trim() || "<empty>",
+    ].join("\n"),
   );
 }
 
@@ -89,15 +128,15 @@ function stopHubFromPidFile(homeDir) {
 }
 
 describe("tfx hub start re-enables Codex MCP config", () => {
-  it("hub already running path should still flip tfx-hub back to enabled", () => {
+  it("hub already running path should still flip tfx-hub back to enabled", async () => {
     const homeDir = makeIsolatedHome("tfx-hub-codex-");
-    const port = 28180 + Math.floor(Math.random() * 50);
+    const port = await getFreePort();
     const configPath = join(homeDir, ".codex", "config.json");
 
     try {
-      runHubStart(homeDir, port);
+      let output = runHubStart(homeDir, port);
 
-      let config = readJson(configPath);
+      let config = readConfigAfterHubStart(configPath, output);
       assert.equal(config.mcpServers["tfx-hub"].enabled, true);
       assert.equal(
         config.mcpServers["tfx-hub"].url,
@@ -107,9 +146,9 @@ describe("tfx hub start re-enables Codex MCP config", () => {
       config.mcpServers["tfx-hub"].enabled = false;
       writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 
-      runHubStart(homeDir, port);
+      output = runHubStart(homeDir, port);
 
-      config = readJson(configPath);
+      config = readConfigAfterHubStart(configPath, output);
       assert.equal(config.mcpServers["tfx-hub"].enabled, true);
       assert.equal(
         config.mcpServers["tfx-hub"].url,
@@ -125,15 +164,15 @@ describe("tfx hub start re-enables Codex MCP config", () => {
     }
   });
 
-  it("hub start without --port should honor TFX_HUB_PORT", () => {
+  it("hub start without --port should honor TFX_HUB_PORT", async () => {
     const homeDir = makeIsolatedHome("tfx-hub-env-port-");
-    const port = 28230 + Math.floor(Math.random() * 50);
+    const port = await getFreePort();
     const configPath = join(homeDir, ".codex", "config.json");
 
     try {
-      runHubStart(homeDir, port, { passPortArg: false });
+      const output = runHubStart(homeDir, port, { passPortArg: false });
 
-      const config = readJson(configPath);
+      const config = readConfigAfterHubStart(configPath, output);
       assert.equal(config.mcpServers["tfx-hub"].enabled, true);
       assert.equal(
         config.mcpServers["tfx-hub"].url,

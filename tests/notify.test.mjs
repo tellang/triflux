@@ -97,49 +97,113 @@ describe("createNotifier", () => {
     assert.match(calls[0].args[3], /Triflux failed/u);
   });
 
+  it("honors env toggles that disable local bell and toast side effects", async () => {
+    const calls = [];
+    const writes = [];
+    const notifier = createNotifier({
+      stdout: {
+        write(chunk) {
+          writes.push(chunk);
+          return true;
+        },
+      },
+      platform: "darwin",
+      env: {
+        TRIFLUX_NOTIFY_BELL: "0",
+        TRIFLUX_NOTIFY_TOAST: "0",
+      },
+      deps: {
+        execFile(command, args, options, callback) {
+          calls.push({ command, args, options });
+          callback(null, "", "");
+        },
+      },
+      hostname: "muted-host",
+    });
+
+    const result = await notifier.notify({
+      type: "ctoHygiene",
+      sessionId: "cto-hygiene",
+      summary: "CTO hygiene needs action: 1 active task",
+      timestamp: "2026-06-17T00:00:00.000Z",
+    });
+
+    assert.equal(result.results.bell.status, "skipped");
+    assert.equal(result.results.bell.reason, "disabled");
+    assert.equal(result.results.toast.status, "skipped");
+    assert.equal(result.results.toast.reason, "disabled");
+    assert.deepEqual(writes, []);
+    assert.deepEqual(calls, []);
+  });
+
+  it("keeps macOS toast notifications opt-in to avoid Script Editor prompts", async () => {
+    const calls = [];
+    const notifier = createNotifier({
+      stdout: {
+        write() {
+          return true;
+        },
+      },
+      platform: "darwin",
+      env: {},
+      deps: {
+        execFile(command, args, options, callback) {
+          calls.push({ command, args, options });
+          callback(null, "", "");
+        },
+      },
+      hostname: "mac-host",
+    })
+      .setChannel("bell", false)
+      .setChannel("webhook", false);
+
+    const result = await notifier.notify({
+      type: "ctoHygiene",
+      sessionId: "cto-hygiene",
+      summary: "CTO hygiene needs action: 1 active task",
+      timestamp: "2026-06-17T00:00:00.000Z",
+    });
+
+    assert.equal(result.results.toast.status, "skipped");
+    assert.equal(result.results.toast.reason, "disabled");
+    assert.deepEqual(calls, []);
+  });
+
   it("escapes AppleScript notification strings on macOS", async () => {
     const calls = [];
     const execFile = (command, args, options, callback) => {
       calls.push({ command, args, options });
       callback(null, "", "");
     };
-    const platformDescriptor = Object.getOwnPropertyDescriptor(
-      process,
-      "platform",
-    );
 
-    Object.defineProperty(process, "platform", { value: "darwin" });
-    try {
-      const notifier = createNotifier({
-        stdout: {
-          write() {
-            return true;
-          },
+    const notifier = createNotifier({
+      stdout: {
+        write() {
+          return true;
         },
-        env: {},
-        deps: { execFile },
-        hostname: 'host "mac" \\ runtime',
-      })
-        .setChannel("bell", false)
-        .setChannel("webhook", false);
+      },
+      platform: "darwin",
+      env: { TRIFLUX_NOTIFY_TOAST: "1" },
+      deps: { execFile },
+      hostname: 'host "mac" \\ runtime',
+    })
+      .setChannel("bell", false)
+      .setChannel("webhook", false);
 
-      const result = await notifier.notify({
-        type: "completed",
-        sessionId: 'session "quoted" \\ path',
-        summary: 'summary "quoted" \\ path',
-        timestamp: "2026-04-04T00:00:04.000Z",
-      });
+    const result = await notifier.notify({
+      type: "completed",
+      sessionId: 'session "quoted" \\ path',
+      summary: 'summary "quoted" \\ path',
+      timestamp: "2026-04-04T00:00:04.000Z",
+    });
 
-      assert.equal(result.results.toast.status, "sent");
-      assert.equal(calls.length, 1);
-      assert.equal(calls[0].command, "osascript");
-      assert.match(
-        calls[0].args[1],
-        /display notification "summary \\"quoted\\" \\\\ path session session \\"quoted\\" \\\\ path · host host \\"mac\\" \\\\ runtime" with title "Triflux completed"/u,
-      );
-    } finally {
-      Object.defineProperty(process, "platform", platformDescriptor);
-    }
+    assert.equal(result.results.toast.status, "sent");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, "osascript");
+    assert.match(
+      calls[0].args[1],
+      /display notification "summary \\"quoted\\" \\\\ path session session \\"quoted\\" \\\\ path · host host \\"mac\\" \\\\ runtime" with title "Triflux completed"/u,
+    );
   });
 
   it("posts JSON payload to webhook when TRIFLUX_NOTIFY_WEBHOOK is configured", async () => {

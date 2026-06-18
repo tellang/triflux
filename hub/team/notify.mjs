@@ -54,12 +54,17 @@ function normalizeEvent(event, defaults = {}) {
   });
 }
 
-function defaultChannelConfig(name, env) {
+function defaultChannelConfig(name, env, platform = process.platform) {
   switch (name) {
     case "bell":
-      return { enabled: true };
+      return { enabled: envFlag(env?.TRIFLUX_NOTIFY_BELL, true) };
     case "toast":
-      return { enabled: true };
+      return {
+        // macOS `osascript display notification` can surface Script Editor
+        // authorization/UI prompts. Keep it opt-in there; Windows keeps the
+        // historical toast default, and other platforms skip as unsupported.
+        enabled: envFlag(env?.TRIFLUX_NOTIFY_TOAST, platform !== "darwin"),
+      };
     case "webhook": {
       const url = String(env?.TRIFLUX_NOTIFY_WEBHOOK || "");
       return { enabled: Boolean(url), url };
@@ -69,8 +74,13 @@ function defaultChannelConfig(name, env) {
   }
 }
 
-function normalizeChannelConfig(name, value, env) {
-  const base = defaultChannelConfig(name, env);
+function envFlag(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return !["0", "false", "no", "off"].includes(String(value).toLowerCase());
+}
+
+function normalizeChannelConfig(name, value, env, platform) {
+  const base = defaultChannelConfig(name, env, platform);
   const patch =
     typeof value === "boolean"
       ? { enabled: value }
@@ -103,16 +113,21 @@ function normalizeChannelConfig(name, value, env) {
   return freezeRecord(next);
 }
 
-function normalizeChannels(channels, env) {
+function normalizeChannels(channels, env, platform) {
   const source = channels && typeof channels === "object" ? channels : {};
   const normalized = {};
   for (const name of NOTIFY_CHANNELS) {
-    normalized[name] = normalizeChannelConfig(name, source[name], env);
+    normalized[name] = normalizeChannelConfig(
+      name,
+      source[name],
+      env,
+      platform,
+    );
   }
   return Object.freeze(normalized);
 }
 
-function updateChannelConfig(channels, channel, config, env) {
+function updateChannelConfig(channels, channel, config, env, platform) {
   if (!NOTIFY_CHANNELS.includes(channel)) {
     throw new TypeError(`Unknown notify channel: ${channel}`);
   }
@@ -126,6 +141,7 @@ function updateChannelConfig(channels, channel, config, env) {
         ...(typeof config === "boolean" ? { enabled: config } : config || {}),
       },
       env,
+      platform,
     ),
   });
 }
@@ -322,7 +338,7 @@ function createNotifierInstance(channels, deps) {
 
   function setChannel(channel, config) {
     return createNotifierInstance(
-      updateChannelConfig(channels, channel, config, deps.env),
+      updateChannelConfig(channels, channel, config, deps.env, deps.platform),
       deps,
     );
   }
@@ -349,17 +365,21 @@ function createNotifierInstance(channels, deps) {
  */
 export function createNotifier(opts = {}) {
   const env = opts.env || process.env;
+  const platform = opts.platform || process.platform;
   const deps = Object.freeze({
     env,
     stdout: opts.stdout || process.stdout,
     execFile: opts.deps?.execFile || execFile,
     fetch: opts.deps?.fetch || globalThis.fetch?.bind(globalThis),
-    platform: opts.platform || process.platform,
+    platform,
     hostname: opts.hostname || os.hostname(),
     powerShellCandidates: Object.freeze(
       opts.deps?.powerShellCandidates || ["pwsh", "powershell.exe"],
     ),
   });
 
-  return createNotifierInstance(normalizeChannels(opts.channels, env), deps);
+  return createNotifierInstance(
+    normalizeChannels(opts.channels, env, platform),
+    deps,
+  );
 }

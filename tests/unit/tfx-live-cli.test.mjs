@@ -10,10 +10,17 @@ const execFileAsync = promisify(execFile);
 const CLI = path.resolve("bin/tfx-live.mjs");
 
 async function runTfxLive(args, options = {}) {
+  const { env: extraEnv, ...execOptions } = options;
   const result = await execFileAsync(process.execPath, [CLI, ...args], {
     timeout: 20_000,
     maxBuffer: 5 * 1024 * 1024,
-    ...options,
+    ...execOptions,
+    env: {
+      ...process.env,
+      TRIFLUX_NOTIFY_BELL: "0",
+      TRIFLUX_NOTIFY_TOAST: "0",
+      ...(extraEnv || {}),
+    },
   });
   return result.stdout;
 }
@@ -393,6 +400,8 @@ test("tfx-live cto-hygiene-notify notifies once for actionable unchanged hygiene
     assert.equal(first.actionable, true);
     assert.equal(first.notified, true);
     assert.equal(first.reason, "changed-actionable-state");
+    assert.equal(first.notify.results.bell.status, "skipped");
+    assert.equal(first.notify.results.toast.status, "skipped");
     assert.equal(second.ok, true);
     assert.equal(second.actionable, true);
     assert.equal(second.notified, false);
