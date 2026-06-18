@@ -2,6 +2,18 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.38.0] - 2026-06-18
+
+### Added
+- **[#435]** cto: `tfx cto event` 서브커맨드 — `context-save`/`context-restore`/PR lifecycle wrapper 가 정규화된 CTO lineage 이벤트(`checkpoint_saved`/`checkpoint_restored`/`pr_created`/`pr_merged_or_closed`)를 ledger 에 append 하는 repo-owned 통합 지점. wrapper preset(context-save·context-restore·pr-created·pr-merged·pr-closed·pr-merged-or-closed) + owner-surface 명시, router 테스트 동반. Closes #434.
+
+### Fixed
+- **[#433]** daemon/HUD: control-key auth 조회가 명시적 undefined config dir 에서 host auth 를 상속하지 않도록 하드닝하고, Gemini/Antigravity HUD quota refresh 오류를 auth 특화로 처리해 만료 없는 Keychain 토큰의 stale 캐시 carryover 를 차단 (Closes #411).
+- **[#431]** agy: session hook 의 stdout 을 JSON-only 로 유지 — 부수효과 noise 가 최종 `{}` 응답을 오염시키지 않도록 억제.
+
+### Tests
+- Added CTO router coverage proving checkpoint and PR lifecycle wrapper events append normalized ledger rows.
+
 ## [10.37.0] - 2026-06-17
 
 ### Added
