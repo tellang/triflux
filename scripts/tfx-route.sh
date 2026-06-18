@@ -1121,8 +1121,10 @@ resolve_gemini_profile() {
     const primaryRaw = process.argv[2] || '{}';
     const settingsRaw = process.argv[3] || '{}';
     const defaults = {
+      flash35_low: 'Gemini 3.5 Flash (Low)',
       flash35: 'Gemini 3.5 Flash (Medium)',
       flash35_high: 'Gemini 3.5 Flash (High)',
+      pro31_low: 'Gemini 3.1 Pro (Low)',
       pro31: 'Gemini 3.1 Pro (High)',
       flash3: 'Gemini 3 Flash'
     };
@@ -1288,15 +1290,28 @@ route_agent() {
       CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── Antigravity CLI 레인 (Gemini CLI 후속) ───
-    # 모델은 run_antigravity_exec() 가 resolve_gemini_profile(TFX_GEMINI_PROFILE,
-    # 기본 flash35)로 해석해 `--model "<display name>"`을 agy_args 에 주입한다.
+    # effort 차등: agent 별 GEMINI_PROFILE 을 설정하면 run_antigravity_exec() 가
+    # resolve_gemini_profile 로 해석해 `--model "<display name>"`을 agy_args 에
+    # 주입한다. 우선순위는 TFX_GEMINI_PROFILE(env) > GEMINI_PROFILE(agent) > flash35.
     # CLI_ARGS 는 read -a 로 word-split 되므로 공백 포함 모델명을 여기 넣지 않는다.
     # #310: upstream callers are normalized through agent-map.json, but this
     # direct route entrypoint intentionally keeps agy as a compatibility alias.
-    designer|writer|gemini|antigravity|agy)
+    designer)
+      # 디자인 = 시각/UX 추론 → 3.5 Flash (High)
+      CLI_ARGS="--print --dangerously-skip-permissions"
+      GEMINI_PROFILE="flash35_high"
+      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+    writer)
+      # 문서 작성 = 균형 → 3.5 Flash (Medium)
+      CLI_ARGS="--print --dangerously-skip-permissions"
+      GEMINI_PROFILE="flash35"
+      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+    gemini|antigravity|agy)
+      # 직접 호출 alias — 기본 flash35. TFX_GEMINI_PROFILE 로 override 가능.
       # agy --print + --dangerously-skip-permissions 조합은 positional prompt에서
       # timeout이 재현되므로 wrapper 호출은 stdin pipe로 고정한다.
       CLI_ARGS="--print --dangerously-skip-permissions"
+      GEMINI_PROFILE="flash35"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 탐색 (Claude-native: Glob/Grep/Read 직접 접근) ───
@@ -1489,6 +1504,12 @@ apply_cli_mode() {
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
         CLI_ARGS="--print --dangerously-skip-permissions"
+        # 주 라우팅(route_agent)과 동일하게 designer 만 effort 상향. 나머지는
+        # run_antigravity_exec 폴백(flash35) 또는 TFX_GEMINI_PROFILE override.
+        case "$AGENT_TYPE" in
+          designer) GEMINI_PROFILE="flash35_high" ;;
+          *)        GEMINI_PROFILE="flash35" ;;
+        esac
         CLI_EFFORT="agy_v1"
         DEFAULT_TIMEOUT=900
         echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
@@ -2187,7 +2208,7 @@ run_antigravity_exec() {
   # "${agy_args[@]}" expand 시 단일 인자로 보존된다. 모델 SSOT 는 프로필 설정이다.
   if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
     local _agy_model
-    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-flash35}")"
+    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-flash35}}")"
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
     fi

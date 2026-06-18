@@ -13,6 +13,10 @@ import { join } from "node:path";
 const DEFAULT_GEMINI_PROFILES = {
   model: "Gemini 3.5 Flash (Medium)",
   profiles: {
+    flash35_low: {
+      model: "Gemini 3.5 Flash (Low)",
+      hint: "3.5 Flash (Low) — 경량·저비용",
+    },
     flash35: {
       model: "Gemini 3.5 Flash (Medium)",
       hint: "3.5 Flash (Medium) — 기본, 비용·속도 균형",
@@ -21,9 +25,13 @@ const DEFAULT_GEMINI_PROFILES = {
       model: "Gemini 3.5 Flash (High)",
       hint: "3.5 Flash (High) — 코드/추론 강화",
     },
+    pro31_low: {
+      model: "Gemini 3.1 Pro (Low)",
+      hint: "3.1 Pro (Low) — 플래그십 경량",
+    },
     pro31: {
       model: "Gemini 3.1 Pro (High)",
-      hint: "3.1 Pro (High) — 플래그십 (긴 컨텍스트/복잡 추론)",
+      hint: "3.1 Pro (High) — 플래그십 최고 (긴 컨텍스트/복잡 추론)",
     },
     flash3: {
       model: "Gemini 3 Flash",
