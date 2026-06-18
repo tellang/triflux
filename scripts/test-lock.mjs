@@ -321,27 +321,7 @@ export function main(argv = process.argv.slice(2)) {
   const timeoutMs = parseTimeoutMs();
   const lock = acquireLock(timeoutMs);
   const testHubPidDir = mkdtempSync(join(tmpdir(), "tfx-test-hub-pid-"));
-
-  // forward args after -- to node --test
-  const args = preserveForceExitFailures(expandTestArgs(argv));
-  // stdio split (issue #192 F1): when prepare.mjs spawns this lock with
-  // ["ignore","pipe","pipe"], full inherit cascades the parent stdin=ignore
-  // to grand-child node --test, breaking ConPTY assumptions on Windows and
-  // surfacing as EXIT=1 (false-failed). Pipe stdin only — stdout/stderr stay
-  // inherited so the grand-child still streams to whoever attached to us.
-  const child = spawn(process.execPath, args, {
-    stdio: ["pipe", "inherit", "inherit"],
-    env: {
-      ...process.env,
-      TEST_LOCK_PID: String(process.pid),
-      TFX_HUB_PID_DIR: process.env.TFX_HUB_PID_DIR || testHubPidDir,
-      TFX_HUB_STATE_DIR: process.env.TFX_HUB_STATE_DIR || testHubPidDir,
-    },
-  });
-  updateChildPid(lock, child.pid);
-  // Close stdin immediately so node --test never blocks waiting for input.
-  child.stdin?.end();
-
+  let child = null;
   let finished = false;
   let requestedExitCode = null;
   let timeoutTimer = null;
@@ -390,14 +370,6 @@ export function main(argv = process.argv.slice(2)) {
     finish(requestedExitCode);
   }
 
-  timeoutTimer = setTimeout(() => {
-    console.error(
-      `\x1b[31m✗ test-lock child timed out after ${timeoutMs}ms (child PID ${child.pid})\x1b[0m`,
-    );
-    requestShutdown("SIGTERM", 124);
-  }, timeoutMs);
-  timeoutTimer.unref?.();
-
   process.once("exit", () => {
     if (!finished) terminateChild(child, "SIGTERM");
     releaseLock();
@@ -406,6 +378,27 @@ export function main(argv = process.argv.slice(2)) {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.once(signal, () => requestShutdown(signal));
   }
+
+  // Install termination handlers before spawning/advertising child state. The
+  // child can become ready before this wrapper reaches later setup lines on
+  // fast Linux CI; without early handlers an external SIGTERM can terminate the
+  // wrapper by signal instead of the controlled 128+signal exit path.
+  // forward args after -- to node --test
+  const args = preserveForceExitFailures(expandTestArgs(argv));
+  // stdio split (issue #192 F1): when prepare.mjs spawns this lock with
+  // ["ignore","pipe","pipe"], full inherit cascades the parent stdin=ignore
+  // to grand-child node --test, breaking ConPTY assumptions on Windows and
+  // surfacing as EXIT=1 (false-failed). Pipe stdin only — stdout/stderr stay
+  // inherited so the grand-child still streams to whoever attached to us.
+  child = spawn(process.execPath, args, {
+    stdio: ["pipe", "inherit", "inherit"],
+    env: {
+      ...process.env,
+      TEST_LOCK_PID: String(process.pid),
+      TFX_HUB_PID_DIR: process.env.TFX_HUB_PID_DIR || testHubPidDir,
+      TFX_HUB_STATE_DIR: process.env.TFX_HUB_STATE_DIR || testHubPidDir,
+    },
+  });
 
   child.on("error", (error) => {
     console.error(`test-lock failed to spawn child: ${error.message}`);
@@ -419,6 +412,18 @@ export function main(argv = process.argv.slice(2)) {
     }
     finish(code ?? signalToExitCode(signal));
   });
+
+  updateChildPid(lock, child.pid);
+  // Close stdin immediately so node --test never blocks waiting for input.
+  child.stdin?.end();
+
+  timeoutTimer = setTimeout(() => {
+    console.error(
+      `\x1b[31m✗ test-lock child timed out after ${timeoutMs}ms (child PID ${child?.pid ?? "unknown"})\x1b[0m`,
+    );
+    requestShutdown("SIGTERM", 124);
+  }, timeoutMs);
+  timeoutTimer.unref?.();
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === SCRIPT_PATH) {

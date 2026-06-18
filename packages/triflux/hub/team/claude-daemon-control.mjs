@@ -468,21 +468,29 @@ export function sendClaudeControlRequest(
 // 인증 미강제 daemon 으로 보고 auth 필드를 생략한다 (fail-open — 구버전 호환).
 export async function readDaemonControlKey(
   configDir = resolveClaudeConfigDir(),
+  { diagnostics } = {},
 ) {
+  if (!configDir) return undefined;
+  const keyPath = path.join(configDir, "daemon", "control.key");
   try {
-    const key = await fs.readFile(
-      path.join(configDir, "daemon", "control.key"),
-      "utf8",
-    );
+    const key = await fs.readFile(keyPath, "utf8");
     return key.trim() || undefined;
-  } catch {
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    if (Array.isArray(diagnostics)) {
+      diagnostics.push({
+        code: error?.code || "UNKNOWN",
+        path: keyPath,
+        message: error?.message || String(error),
+      });
+    }
     return undefined;
   }
 }
 
-export async function buildDaemonControlAuth(configDir) {
+export async function buildDaemonControlAuth(configDir, opts = {}) {
   if (!configDir) return {};
-  const auth = await readDaemonControlKey(configDir);
+  const auth = await readDaemonControlKey(configDir, opts);
   return auth ? { auth } : {};
 }
 

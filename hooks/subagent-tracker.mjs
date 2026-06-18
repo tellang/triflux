@@ -16,7 +16,11 @@ import { dirname, join } from "node:path";
 const STATE_VERSION = 1;
 const DEFAULT_TTL_MS = 2 * 60 * 60 * 1000;
 const MAX_COMPLETED = 20;
-const DEFAULT_LOCK_TIMEOUT_MS = 750;
+// Lifecycle hooks are best-effort, but under CI/Linux process contention a
+// 30-way SubagentStart burst can legitimately take around a second to drain.
+// Keep this bounded so hooks do not hang indefinitely, while avoiding silent
+// lifecycle drops during normal high-concurrency fan-out.
+const DEFAULT_LOCK_TIMEOUT_MS = 3000;
 const LOCK_RETRY_MS = 20;
 
 function readStdin() {
@@ -94,6 +98,16 @@ function withStateLock(statePath, fn, timeoutMs = DEFAULT_LOCK_TIMEOUT_MS) {
       sleepSync(LOCK_RETRY_MS);
     }
   }
+}
+
+function lockTimeoutMsFromOptions(opts = {}) {
+  if (Number.isFinite(opts.lockTimeoutMs)) return opts.lockTimeoutMs;
+  const raw = opts.env?.TRIFLUX_SUBAGENT_LOCK_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return DEFAULT_LOCK_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.trunc(parsed)
+    : DEFAULT_LOCK_TIMEOUT_MS;
 }
 
 function lifecycleKey(input) {
@@ -241,7 +255,7 @@ export function recordLifecycle(input, opts = {}) {
       writeState(statePath, state);
       return output;
     },
-    opts.lockTimeoutMs,
+    lockTimeoutMsFromOptions(opts),
   );
 }
 

@@ -15,6 +15,7 @@ import {
   extractClaudeDaemonAttachText,
   findDaemonJobByShort,
   interruptClaudeDaemonSession,
+  readDaemonControlKey,
   resolveDaemonBridgeSessionId,
   sendClaudeControlRequest,
   sendKillBySessionId,
@@ -979,6 +980,31 @@ test("buildDaemonControlAuth omits auth for explicit undefined configDir", async
     if (originalClaudeConfigDir === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
     } else process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir;
+    await fs.rm(configDir, { recursive: true, force: true });
+  }
+});
+
+test("readDaemonControlKey exposes diagnostics for unreadable non-ENOENT failures", async () => {
+  const configDir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "tfx-daemon-auth-diagnostic-"),
+  );
+  await fs.mkdir(path.join(configDir, "daemon", "control.key"), {
+    recursive: true,
+  });
+  const diagnostics = [];
+  try {
+    assert.equal(
+      await readDaemonControlKey(configDir, { diagnostics }),
+      undefined,
+    );
+    assert.equal(diagnostics.length, 1);
+    assert.match(diagnostics[0].code, /EISDIR|EACCES|EPERM/);
+    assert.match(diagnostics[0].path, /control\.key$/);
+    assert.deepEqual(
+      await buildDaemonControlAuth(configDir, { diagnostics: [] }),
+      {},
+    );
+  } finally {
     await fs.rm(configDir, { recursive: true, force: true });
   }
 });
