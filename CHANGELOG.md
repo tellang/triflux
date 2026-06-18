@@ -2,6 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.39.0] - 2026-06-18
+
+### Added
+- agy: Antigravity 레인 effort tier 프로필 풀셋(3.5 Flash Low/Medium/High, 3.1 Pro Low/High) + agent 별 모델 매핑(designer→3.5 Flash High, writer·직접 alias→Medium). 우선순위 `TFX_GEMINI_PROFILE`(env) > agent 기본 > flash35. `agy models` 실측 라인업 반영.
+
+### Fixed
+- agy: 레인이 `--model` 을 지정하지 않아 Antigravity 계정 기본 모델이 의도와 무관하게 사용되던 회귀 수정. `run_antigravity_exec` 가 프로필 기반 모델(display name)을 `agy_args` 배열에 주입하고, 호출처가 0이던 `resolve_gemini_profile` 을 실배선. deprecated 2.5 프로필(pro25/flash25/lite25) 제거 + 기존 사용자 설정 1회 마이그레이션(백업 동반).
+
+### Tests
+- gemini-profiles 마이그레이션 회귀 커버리지 추가(2.5 prune, 옛 ID→display name, 멱등).
+
 ## [10.38.0] - 2026-06-18
 
 ### Added
