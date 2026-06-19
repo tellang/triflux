@@ -4,6 +4,7 @@
 import { execSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
+import { codexProfileConfigOverrides } from "../scripts/lib/codex-profile-config.mjs";
 import { writePromptToTmpFile } from "./lib/prompt-tmp.mjs";
 import { IS_WINDOWS, killProcess } from "./platform.mjs";
 
@@ -172,7 +173,12 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
   } = opts;
 
   const parts = ["codex"];
-  if (profile) parts.push("--profile", profile);
+  // Select the effort profile via `-c` config overrides instead of
+  // `--profile <name>`. codex 0.134+ rejects `--profile X` whenever config.toml
+  // still contains an inline [profiles.X] table (and codex re-injects such
+  // tables when it rewrites config.toml), so the `-c model=.. -c
+  // model_reasoning_effort=..` form is immune and mutates no config.
+  const profileOverrides = profile ? codexProfileConfigOverrides(profile) : [];
 
   if (FEATURES.execSubcommand) {
     parts.push("exec");
@@ -182,6 +188,8 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
       parts.push("--output-last-message", resultFile);
     }
     if (FEATURES.colorNever) parts.push("--color", "never");
+    for (const override of profileOverrides)
+      parts.push("-c", shellQuote(override));
     // NOTE: `codex exec`는 --cwd 플래그를 지원하지 않는다. Node spawn의 cwd
     // 옵션으로 child process의 working directory를 제어한다 (conductor.mjs 참조).
     // opts.cwd는 기록용으로만 받아두고 CLI command에는 반영하지 않는다.
@@ -194,6 +202,8 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
   } else {
     parts.push("--dangerously-bypass-approvals-and-sandbox");
     if (skipGitRepoCheck) parts.push("--skip-git-repo-check");
+    for (const override of profileOverrides)
+      parts.push("-c", shellQuote(override));
   }
 
   const useStdin = resolveStdinPromptMode(stdinPrompt);

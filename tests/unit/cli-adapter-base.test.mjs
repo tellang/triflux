@@ -145,7 +145,14 @@ test("cli-adapter-base exports the shared codex exec builder and codex-compat re
       }),
       command,
     );
-    assert.match(command, /^codex --profile codex53_high exec /);
+    // Profile is now selected via `-c` config overrides, not `--profile`
+    // (codex 0.134+ rejects --profile X against an inline [profiles.X]).
+    assert.doesNotMatch(command, /--profile/);
+    assert.match(command, /^codex exec /);
+    assert.ok(
+      command.includes('-c "model_reasoning_effort=\\"high\\""'),
+      `expected -c effort override, got: ${command}`,
+    );
     assert.match(command, /--dangerously-bypass-approvals-and-sandbox/);
     assert.match(command, /--skip-git-repo-check/);
     assert.match(command, /--output-last-message \/tmp\/result\.txt/);
