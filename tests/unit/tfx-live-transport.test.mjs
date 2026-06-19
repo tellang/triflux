@@ -282,3 +282,38 @@ test("callRemoteLive uses injected remote env probe and ssh exec", async () => {
   assert.match(calls[1].args[1], /'\\''--transport'\\'' '\\''uds'\\''/);
   assert.doesNotMatch(calls[1].args[1], /'\\''--json'\\''/);
 });
+
+test("claude adapter registers an external-imports startup screen after trust", () => {
+  const names = ADAPTERS.claude.startupScreens.map((screen) => screen.name);
+  assert.ok(
+    names.includes("external-imports"),
+    "claude startupScreens must include an external-imports entry",
+  );
+  assert.ok(
+    names.indexOf("external-imports") > names.indexOf("trust"),
+    "external-imports must be registered after the trust screen",
+  );
+});
+
+test("external-imports startup screen detects the claude import prompt", () => {
+  const screen = ADAPTERS.claude.startupScreens.find(
+    (entry) => entry.name === "external-imports",
+  );
+  assert.ok(screen, "external-imports startup screen must exist");
+
+  assert.equal(
+    screen.isPresent(
+      "Allow external CLAUDE.md file imports?\n  Yes, allow external imports\n  No",
+    ),
+    true,
+  );
+  assert.equal(
+    screen.isPresent("allow external imports for this session"),
+    true,
+  );
+  assert.equal(
+    screen.isPresent("Quick safety check: trust this folder?"),
+    false,
+  );
+  assert.equal(screen.isPresent("ready for input"), false);
+});

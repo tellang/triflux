@@ -734,6 +734,12 @@ function isClaudeTrustPrompt(text) {
   return /Quick safety check|trust this folder/i.test(String(text));
 }
 
+function isClaudeExternalImportsPrompt(text) {
+  return /Allow external CLAUDE\.md file imports|allow external imports/i.test(
+    String(text),
+  );
+}
+
 function selectedLine(text) {
   // Menu selector glyphs only (exclude ASCII '>' which appears in codex's
   // "> You are in ..." trust-prompt header and would mis-target navigation).
@@ -843,6 +849,27 @@ async function dismissClaudeTrustPrompt(remote, session) {
   return { dismissed: false, raw };
 }
 
+async function dismissClaudeExternalImportsPrompt(remote, session) {
+  let raw = await captureVisible(remote, session);
+  if (!isClaudeExternalImportsPrompt(raw)) {
+    return { dismissed: false, raw };
+  }
+
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    if (/Yes, allow external imports/.test(selectedLine(raw))) {
+      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      return { dismissed: true, raw };
+    }
+
+    await runTmux(remote, ["send-keys", "-t", session, "Up"]);
+    await sleep(200);
+    raw = await captureVisible(remote, session);
+  }
+
+  await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+  return { dismissed: true, raw };
+}
+
 const ADAPTERS = {
   codex: {
     cli: "codex",
@@ -916,6 +943,11 @@ const ADAPTERS = {
         name: "trust",
         isPresent: isClaudeTrustPrompt,
         dismiss: dismissClaudeTrustPrompt,
+      },
+      {
+        name: "external-imports",
+        isPresent: isClaudeExternalImportsPrompt,
+        dismiss: dismissClaudeExternalImportsPrompt,
       },
     ],
   },
