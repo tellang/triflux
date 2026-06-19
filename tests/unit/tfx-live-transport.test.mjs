@@ -317,3 +317,43 @@ test("external-imports startup screen detects the claude import prompt", () => {
   );
   assert.equal(screen.isPresent("ready for input"), false);
 });
+
+test("claude adapter registers a tour startup screen after external-imports", () => {
+  const names = ADAPTERS.claude.startupScreens.map((screen) => screen.name);
+  assert.ok(
+    names.includes("tour"),
+    "claude startupScreens must include a tour entry",
+  );
+  assert.ok(
+    names.indexOf("tour") > names.indexOf("external-imports"),
+    "tour must be registered after the external-imports screen",
+  );
+});
+
+test("tour startup screen detects the claude welcome/tour prompt", () => {
+  const screen = ADAPTERS.claude.startupScreens.find(
+    (entry) => entry.name === "tour",
+  );
+  assert.ok(screen, "tour startup screen must exist");
+
+  // Real claude welcome screen renders both the confirm and cancel labels.
+  assert.equal(
+    screen.isPresent(
+      "Welcome to Claude Code\n  ❯ Take the tour\n    Skip for now",
+    ),
+    true,
+  );
+  // Requires BOTH labels — a stray "Skip for now" alone must not match.
+  assert.equal(screen.isPresent("Skip for now"), false);
+  assert.equal(screen.isPresent("Take the tour"), false);
+  // Must not collide with the other claude startup screens or the ready state.
+  assert.equal(
+    screen.isPresent("Allow external CLAUDE.md file imports?"),
+    false,
+  );
+  assert.equal(
+    screen.isPresent("Quick safety check: trust this folder?"),
+    false,
+  );
+  assert.equal(screen.isPresent("ready for input"), false);
+});
