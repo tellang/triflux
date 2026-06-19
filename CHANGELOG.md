@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.39.1] - 2026-06-19
+
+### Fixed
+- **[#439]** tfx-live: claude 의 업데이트 후 welcome/tour 시작화면(`Take the tour` / `Skip for now`)을 자동 dismiss. claude 는 codex 식 "Update available / Skip until next version" 차단 메뉴가 없어(업데이트는 백그라운드 auto-updater 가 처리) tour 프롬프트가 유일하게 skip 이 필요한 startup 화면이다. 이를 막던 갭을 claude 전용 detector/dismiss(`Skip for now` 선택, tour 시작 방지를 위한 blind-Enter 금지·Escape fallback)로 해소하고 `ADAPTERS.claude.startupScreens` 에 `tour` 엔트리를 추가했다.
+- **[#438]** tfx-live: claude 의 "Allow external CLAUDE.md file imports?" 시작화면을 자동 dismiss — 전역 CLAUDE.md 가 외부 파일을 @import 하는 환경에서 `tfx-live ask --cli claude --transport tmux` 가 ready 신호를 못 받아 timeout 으로 조용히 실패하던 버그를 수정.
+
 ## [10.39.0] - 2026-06-18
 
 ### Added
