@@ -259,27 +259,31 @@
       `;
     }
 
-    function liveFallbackRows(live) {
-      return live.map(session => ({
-        sessionId: session.sessionId,
-        status: session.phase || 'active',
-        agent_id: session.agent_id || session.agent?.id || '',
-        agent: session.agent || null,
-        promptText: session.promptText || '',
-        prompt: session.prompt || '',
-        userPrompt: session.userPrompt || '',
-        handoffPrompt: session.handoffPrompt || '',
-        command: session.command || '',
+        function liveFallbackRows(live) {
+          return live.map(session => ({
+            sessionId: session.sessionId,
+            status: session.phase || 'active',
+            agent_id: session.agent_id || session.agent?.id || '',
+            agent: session.agent || null,
+            role: session.role || '',
+            roles: session.roles || [],
+            metadata: session.metadata || {},
+            promptText: session.promptText || '',
+            prompt: session.prompt || '',
+            userPrompt: session.userPrompt || '',
+            handoffPrompt: session.handoffPrompt || '',
+            command: session.command || '',
         source: session.source || '',
         conversationId: session.conversationId || '',
         focusable: session.focusable !== false,
-        taskSummary: session.taskSummary || session.command || (session.pid ? `PID ${session.pid}` : ''),
-        pid: session.pid || '',
-        cwd: session.cwd || session.host || 'local runtime',
-        elapsed: session.elapsed || '',
-        started_at: session.started_at || null,
-      }));
-    }
+            taskSummary: session.taskSummary || session.command || (session.pid ? `PID ${session.pid}` : ''),
+            pid: session.pid || '',
+            cwd: session.cwd || session.host || 'local runtime',
+            worktreePath: session.worktreePath || '',
+            elapsed: session.elapsed || '',
+            started_at: session.started_at || null,
+          }));
+        }
 
     function compactText(value, fallback = '') {
       const text = String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -293,12 +297,20 @@
       return path.replace(/^\/Users\/[^/]+/, '~');
     }
 
-    function normalizeProjectPath(value) {
-      const path = String(value || '').trim();
-      if (!path) return '';
-      if (path === '/' || /^\/+$/u.test(path) || /^[A-Za-z]:[\\/]$/u.test(path)) return path;
-      return path.replace(/[\\/]+$/u, '') || path;
-    }
+        function normalizeProjectPath(value) {
+          const path = String(value || '').trim();
+          if (!path) return '';
+          if (path === '/' || /^\/+$/u.test(path) || /^[A-Za-z]:[\\/]$/u.test(path)) return path;
+          return path.replace(/[\\/]+$/u, '') || path;
+        }
+
+        function worktreeFamilyRoot(path) {
+          const normalized = normalizeProjectPath(path);
+          const parts = normalized.split(/[\\/]/u);
+          const index = parts.lastIndexOf('.worktrees');
+          if (index <= 0) return '';
+          return parts.slice(0, index).join(normalized.includes('\\') ? '\\' : '/') || '';
+        }
 
     function projectName(value) {
       const path = normalizeProjectPath(value);
@@ -306,12 +318,14 @@
       return path.split(/[\\/]/u).filter(Boolean).pop() || path;
     }
 
-    function projectPathFor(row, hub, fallback = '') {
-      const cwd = String(row?.cwd || row?.worktreePath || '').trim();
-      if (cwd && cwd !== 'local' && cwd !== 'local runtime') return normalizeProjectPath(cwd);
-      const root = String(hub?.projectRoot || fallback || '').trim();
-      return normalizeProjectPath(root || cwd || 'local');
-    }
+        function projectPathFor(row, hub, fallback = '') {
+          const cwd = normalizeProjectPath(String(row?.cwd || row?.worktreePath || '').trim());
+          const rawRoot = normalizeProjectPath(String(hub?.projectRoot || fallback || '').trim());
+          const familyRoot = worktreeFamilyRoot(rawRoot) || rawRoot;
+          if (familyRoot && cwd && (cwd === familyRoot || cwd.startsWith(`${familyRoot}/.worktrees/`) || cwd.startsWith(`${familyRoot}/worktrees/`))) return familyRoot;
+          if (cwd && cwd !== 'local' && cwd !== 'local runtime') return worktreeFamilyRoot(cwd) || cwd;
+          return normalizeProjectPath(familyRoot || cwd || 'local');
+        }
 
     function getProjectGroup(groups, projectPath) {
       const key = normalizeProjectPath(projectPath) || 'local';
@@ -319,33 +333,86 @@
       return groups.get(key);
     }
 
-    function buildProjectGroups(activeSessions, liveRows, hub) {
-      const groups = new Map();
-      const fallbackProject = hub.projectRoot || activeSessions[0]?.cwd || activeSessions[0]?.worktreePath || 'local';
-      for (const session of activeSessions) {
-        getProjectGroup(groups, projectPathFor(session, hub, fallbackProject)).ctos.push(session);
-      }
-
-      const ctoIds = new Set(activeSessions.map(session => session.sessionId).filter(Boolean));
-      for (const worker of liveRows) {
-        if (ctoIds.has(worker.sessionId)) continue;
-        getProjectGroup(groups, projectPathFor(worker, hub, fallbackProject)).workers.push(worker);
-      }
-
-      if (groups.size === 0 && fallbackProject) getProjectGroup(groups, fallbackProject);
-      for (const group of groups.values()) {
-        if (group.ctos.length === 0 && group.workers.length > 0) {
-          group.ctos.push({
-            sessionId: `cto-${shortId(hub.id || group.projectPath)}`,
-            status: 'active',
-            cwd: group.projectPath,
-            taskSummary: 'CTO runtime overlay',
-            synthetic: true,
-          });
+        function ctoRoleFromPayload(cto) {
+          return cto?.roles?.cto || cto?.succession?.cto || null;
         }
-      }
-      return [...groups.values()].sort((a, b) => a.projectPath.localeCompare(b.projectPath));
+
+        function normalizedRoleValue(value) {
+          return String(value || '').trim().toLowerCase();
+        }
+
+    function rowHasCtoRole(row, ctoRole) {
+      const sid = String(row?.sessionId || '').trim();
+      const agentId = String(row?.agent_id || row?.agent?.id || '').trim();
+      const leader = String(ctoRole?.leader_agent_id || '').trim();
+      if (leader) return Boolean(agentId === leader || sid === leader || sid === `cto:${leader}`);
+      if (ctoRole) return false;
+      const role = normalizedRoleValue(row?.role || row?.metadata?.role || row?.sessionKind);
+      const roles = Array.isArray(row?.roles || row?.metadata?.roles)
+        ? (row.roles || row.metadata.roles).map(normalizedRoleValue)
+        : String(row?.roles || row?.metadata?.roles || '').split(/[,\s]+/u).map(normalizedRoleValue);
+      if (role === 'cto' || roles.includes('cto') || row?.metadata?.cto === true) return true;
+      if (agentId === 'cto') return true;
+      if (/^cto[:._-]/iu.test(sid)) return true;
+      return false;
     }
+
+        function ctoRoleRow(ctoRole, hub, fallbackProject) {
+          if (!ctoRole) return null;
+          const status = ctoRole.status === 'active' ? 'active' : 'offline';
+          const leader = ctoRole.leader_agent_id || ctoRole.previous_leader_agent_id || 'unassigned';
+          return {
+            sessionId: ctoRole.leader_agent_id ? `cto:${ctoRole.leader_agent_id}` : `cto:${shortId(hub.id || fallbackProject || 'role')}`,
+            status,
+            cwd: hub.projectRoot || fallbackProject || 'local',
+            taskSummary: status === 'active'
+              ? `CTO leader ${leader} · epoch ${ctoRole.leader_epoch || 0} · pending ${ctoRole.pending_count || 0}`
+              : `CTO offline · previous ${leader} · candidates ${ctoRole.live_candidate_count || 0}`,
+            synthetic: true,
+            roleStatus: ctoRole,
+          };
+        }
+
+        function buildProjectGroups(activeSessions, liveRows, hub, ctoRole = null) {
+          const groups = new Map();
+          const fallbackProject = hub.projectRoot || activeSessions[0]?.cwd || activeSessions[0]?.worktreePath || 'local';
+          for (const session of activeSessions) {
+            const group = getProjectGroup(groups, projectPathFor(session, hub, fallbackProject));
+            if (rowHasCtoRole(session, ctoRole)) group.ctos.push(session);
+            else group.workers.push(session);
+          }
+
+          const activeSessionIds = new Set(
+            activeSessions
+              .map(session => session.sessionId)
+              .filter(Boolean)
+          );
+          for (const worker of liveRows) {
+            if (activeSessionIds.has(worker.sessionId)) continue;
+            const group = getProjectGroup(groups, projectPathFor(worker, hub, fallbackProject));
+            if (rowHasCtoRole(worker, ctoRole)) group.ctos.push(worker);
+            else group.workers.push(worker);
+          }
+
+          if (groups.size === 0 && fallbackProject) getProjectGroup(groups, fallbackProject);
+          const roleRow = ctoRoleRow(ctoRole, hub, fallbackProject);
+          if (roleRow) {
+            const project = projectPathFor(roleRow, hub, fallbackProject);
+            const group = getProjectGroup(groups, project);
+            const leader = String(ctoRole?.leader_agent_id || '').trim();
+            const existing = group.ctos.find(row => {
+              const sid = String(row?.sessionId || '').trim();
+              const agentId = String(row?.agent_id || row?.agent?.id || '').trim();
+              return sid === roleRow.sessionId || (leader && (sid === leader || agentId === leader));
+            });
+            if (existing) {
+              existing.roleStatus = ctoRole;
+            } else {
+              group.ctos.unshift(roleRow);
+            }
+          }
+          return [...groups.values()].sort((a, b) => a.projectPath.localeCompare(b.projectPath));
+        }
 
     function explicitPromptText(row) {
       return String(row?.promptText || row?.prompt || row?.userPrompt || row?.handoffPrompt || '').trim();
@@ -443,20 +510,24 @@
       `;
     }
 
-    function renderCtoChat(ctoRow, workers) {
-      const status = ctoRow.status || ctoRow.phase || 'active';
-      const title = compactText(ctoRow.sessionId || ctoRow.taskSummary || 'Session', 'Session');
-      const subtitle = compactText(hasPromptText(ctoRow) ? ctoRow.taskSummary || ctoRow.sessionKind || '' : displayPath(ctoRow.cwd || ctoRow.worktreePath || ''), '');
-      const promptHtml = hasPromptText(ctoRow)
-        ? `<div class="detail-section"><div class="detail-label">Prompt</div>${renderChatBubble(ctoRow, { side: 'cto' })}</div>`
-        : '';
-      const agentRows = workers.map(worker => hasPromptText(worker) ? renderChatBubble(worker, { side: 'worker' }) : renderRuntimeCard(worker)).join('');
-      const agentsHtml = workers.length
-        ? `<div class="detail-section"><div class="detail-label">Agents</div><div class="runtime-list">${agentRows}</div></div>`
-        : '';
-      const emptyHtml = promptHtml || agentsHtml ? '' : '<div class="detail-empty">No session details yet</div>';
-      return `
-        <details class="session-card" data-open-key="cto:${dataAttr(ctoRow.sessionId || title)}">
+        function renderCtoChat(ctoRow, workers) {
+          const status = ctoRow.status || ctoRow.phase || 'active';
+          const title = compactText(ctoRow.sessionId || ctoRow.taskSummary || 'Session', 'Session');
+          const subtitle = compactText(hasPromptText(ctoRow) ? ctoRow.taskSummary || ctoRow.sessionKind || '' : displayPath(ctoRow.cwd || ctoRow.worktreePath || ''), '');
+          const role = ctoRow.roleStatus || null;
+          const roleHtml = role
+            ? `<div class="detail-section"><div class="detail-label">Succession</div><div class="path-text">leader ${escapeHtml(role.leader_agent_id || 'none')} · epoch ${escapeHtml(role.leader_epoch || 0)} · pending ${escapeHtml(role.pending_count || 0)} · candidates ${escapeHtml(role.live_candidate_count || 0)}/${escapeHtml(role.candidate_count || 0)}</div></div>`
+            : '';
+          const promptHtml = hasPromptText(ctoRow)
+            ? `<div class="detail-section"><div class="detail-label">Prompt</div>${renderChatBubble(ctoRow, { side: 'cto' })}</div>`
+            : '';
+          const agentRows = workers.map(worker => hasPromptText(worker) ? renderChatBubble(worker, { side: 'worker' }) : renderRuntimeCard(worker)).join('');
+          const agentsHtml = workers.length
+            ? `<div class="detail-section"><div class="detail-label">Agents</div><div class="runtime-list">${agentRows}</div></div>`
+            : '';
+          const emptyHtml = roleHtml || promptHtml || agentsHtml ? '' : '<div class="detail-empty">No session details yet</div>';
+          return `
+            <details class="session-card" data-open-key="cto:${dataAttr(ctoRow.sessionId || title)}">
           <summary class="session-summary">
             <span class="agent-badge">T</span>
             <div style="min-width:0;">
@@ -465,10 +536,11 @@
             </div>
             <div class="agent-state ${escapeHtml(status)}">${escapeHtml(status)}</div>
           </summary>
-          <div class="session-detail">
-            ${promptHtml}
-            ${agentsHtml}
-            ${emptyHtml}
+              <div class="session-detail">
+                ${roleHtml}
+                ${promptHtml}
+                ${agentsHtml}
+                ${emptyHtml}
           </div>
         </details>
       `;
@@ -478,14 +550,15 @@
       return `${count} ${count === 1 ? one : many}`;
     }
 
-    function renderProjectGroup(group) {
-      const projectDisplayPath = displayPath(group.projectPath);
-      const projectLabel = projectName(group.projectPath);
-      const sessionCount = group.ctos.filter(row => !isSyntheticCto(row)).length;
-      const agentCount = group.workers.length;
-      const projectCount = [sessionCount ? pluralize(sessionCount, 'session') : '', agentCount ? pluralize(agentCount, 'agent') : '']
-        .filter(Boolean)
-        .join(' · ') || 'empty';
+        function renderProjectGroup(group) {
+          const projectDisplayPath = displayPath(group.projectPath);
+          const projectLabel = projectName(group.projectPath);
+          const sessionCount = group.ctos.filter(row => !isSyntheticCto(row)).length;
+          const agentCount = group.workers.length;
+          const ctoCount = group.ctos.length;
+          const projectCount = [ctoCount ? pluralize(ctoCount, 'CTO') : '', sessionCount ? pluralize(sessionCount, 'session') : '', agentCount ? pluralize(agentCount, 'agent') : '']
+            .filter(Boolean)
+            .join(' · ') || 'empty';
       let html = `
         <details class="project-group" data-open-key="project:${dataAttr(group.projectPath)}">
           <summary class="project-summary">
@@ -496,26 +569,49 @@
           <div class="project-path">${escapeHtml(projectDisplayPath)}</div>
           <div class="project-body">
       `;
-      const ctos = group.ctos.slice(0, 6);
-      const workers = group.workers.slice(0, 10);
-      for (const [index, ctoRow] of ctos.entries()) {
-        html += renderCtoChat(ctoRow, index === 0 ? workers : []);
-      }
-      html += '</div></details>';
-      return html;
-    }
+          const ctos = group.ctos.slice(0, 6);
+          const workers = group.workers.slice(0, 10);
+          for (const [index, ctoRow] of ctos.entries()) {
+            html += renderCtoChat(ctoRow, index === 0 ? workers : []);
+          }
+          if (ctos.length === 0 && workers.length > 0) {
+            const agentRows = workers.map(worker => hasPromptText(worker) ? renderChatBubble(worker, { side: 'worker' }) : renderRuntimeCard(worker)).join('');
+            html += `<div class="detail-section"><div class="detail-label">Agents</div><div class="runtime-list">${agentRows}</div></div>`;
+          }
+          html += '</div></details>';
+          return html;
+        }
+
+        function renderCtoRoleBanner(ctoRole) {
+          if (!ctoRole) return '';
+          const status = ctoRole.status || 'offline';
+          const leader = ctoRole.leader_agent_id || ctoRole.previous_leader_agent_id || 'none';
+          return `
+            <div class="section">
+              <div class="section-title">CTO Succession</div>
+              <div class="mini-card">
+                <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">
+                  <div class="mini-title"><span class="agent-badge">T</span> ${escapeHtml(leader)}</div>
+                  <div class="value-pill status-text ${escapeHtml(status)}">${escapeHtml(status)}</div>
+                </div>
+                <div class="path-text">epoch ${escapeHtml(ctoRole.leader_epoch || 0)} · pending ${escapeHtml(ctoRole.pending_count || 0)} · candidates ${escapeHtml(ctoRole.live_candidate_count || 0)}/${escapeHtml(ctoRole.candidate_count || 0)}${ctoRole.candidate_source ? ` · ${escapeHtml(ctoRole.candidate_source)}` : ''}</div>
+              </div>
+            </div>
+          `;
+        }
 
     function renderSessions(data) {
       const container = document.getElementById('tab-sessions');
       const openKeys = collectOpenDetailKeys(container);
       const hub = data?.hub || {};
       const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
-      const cto = data?.cto || {};
-      const live = Array.isArray(cto.live_sessions) ? cto.live_sessions : [];
-      const runtime = data?.runtime || {};
-      const activeSessions = sessions.filter(s => s.status !== 'stale');
-      const liveRows = liveFallbackRows(live);
-      const projectGroups = buildProjectGroups(activeSessions.slice(0, 10), liveRows, hub);
+          const cto = data?.cto || {};
+          const ctoRole = ctoRoleFromPayload(cto);
+          const live = Array.isArray(cto.live_sessions) ? cto.live_sessions : [];
+          const runtime = data?.runtime || {};
+          const activeSessions = sessions.filter(s => s.status !== 'stale');
+          const liveRows = liveFallbackRows(live);
+          const projectGroups = buildProjectGroups(activeSessions.slice(0, 10), liveRows, hub, ctoRole);
       const activeCount = activeSessions.filter(s => s.status === 'active').length;
       const idleCount = activeSessions.filter(s => s.status === 'idle').length;
       const staleCount = sessions.filter(s => s.status === 'stale').length;
@@ -530,11 +626,12 @@
           </div>
           <div class="path-text">${projectGroups.length} ${projectGroups.length === 1 ? 'workspace' : 'workspaces'} · ${cto.active_shards?.length || 0} shards · ${renderCopyChip('Hub', hub.id || String(hub.pid || ''))}</div>
         </div>
-        <div class="section">
-          <div class="section-title">Agent Mix</div>
-          <div class="models-list">${renderRuntimeClients(runtime)}</div>
-        </div>
-        ${renderCtoHygiene(cto.hygiene)}
+            <div class="section">
+              <div class="section-title">Agent Mix</div>
+              <div class="models-list">${renderRuntimeClients(runtime)}</div>
+            </div>
+            ${renderCtoRoleBanner(ctoRole)}
+            ${renderCtoHygiene(cto.hygiene)}
         <div class="section">
           <div class="section-title">Workspaces</div>
           <div class="agent-view">

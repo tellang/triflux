@@ -9,6 +9,9 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 import { startHub } from "../../hub/server.mjs";
+import { createMemoryStore } from "../../packages/core/hub/lib/memory-store.mjs";
+import { createRouter as createCoreRouter } from "../../packages/core/hub/router.mjs";
+import { createPipeServer as createRemotePipeServer } from "../../packages/remote/hub/pipe.mjs";
 
 function tempDbPath() {
   const dir = join(tmpdir(), `tfx-hub-pipe-test-${randomUUID()}`);
@@ -259,6 +262,324 @@ describe("Named Pipe 실시간 채널", () => {
     assert.deepEqual(drained.data.messages[0].payload, { command: "pause" });
 
     client.close();
+  });
+
+  it("takeover_role command는 CTO leader를 바꾸고 미처리 CTO 메시지를 새 leader에게 push해야 한다", async () => {
+    const oldLeader = await createPipeClient(hub.pipePath);
+    const newLeader = await createPipeClient(hub.pipePath);
+    const lead = await createPipeClient(hub.pipePath);
+
+    await oldLeader.request("command", {
+      action: "register",
+      agent_id: "pipe-cto-old",
+      cli: "claude",
+      capabilities: ["code"],
+      topics: [],
+      metadata: { role: "cto", cto_priority: 10 },
+      heartbeat_ttl_ms: 60000,
+    });
+    await newLeader.request("command", {
+      action: "register",
+      agent_id: "pipe-cto-new",
+      cli: "codex",
+      capabilities: ["cto"],
+      topics: [],
+      metadata: { role: "cto", cto_priority: 1 },
+      heartbeat_ttl_ms: 60000,
+    });
+
+    const oldEventPromise = oldLeader.nextEvent();
+    const published = await lead.request("command", {
+      action: "publish",
+      from: "pipe-lead",
+      to: "topic:cto",
+      topic: "cto",
+      payload: { decision: "pipe takeover" },
+    });
+    assert.equal(published.ok, true);
+    assert.equal(published.data.fanout_count, 1);
+    assert.equal((await oldEventPromise).payload.message.topic, "cto");
+
+    const newEventPromise = newLeader.nextEvent();
+    const takeover = await lead.request("command", {
+      action: "takeover_role",
+      role: "cto",
+      agent_id: "pipe-cto-new",
+      reason: "pipe_test",
+      requested_by: "test",
+    });
+    assert.equal(takeover.ok, true);
+    assert.equal(takeover.data.leader_agent_id, "pipe-cto-new");
+    assert.equal(takeover.data.transferred_count, 1);
+
+    const transferred = await newEventPromise;
+    assert.equal(transferred.payload.message.topic, "cto");
+    assert.deepEqual(transferred.payload.message.payload, {
+      decision: "pipe takeover",
+    });
+
+    const status = await lead.request("query", {
+      action: "status",
+      scope: "hub",
+    });
+    assert.equal(status.ok, true);
+    assert.equal(status.data.roles.cto.leader_agent_id, "pipe-cto-new");
+
+    oldLeader.close();
+    newLeader.close();
+    lead.close();
+  });
+
+  it("context replay는 topic:cto 감사 로그를 elected leader에게만 보여줘야 한다", async () => {
+    hub.router.registerAgent({
+      agent_id: "pipe-cto-audit-leader",
+      cli: "codex",
+      capabilities: ["cto"],
+      topics: [],
+      metadata: { role: "cto" },
+      heartbeat_ttl_ms: 60000,
+    });
+    hub.router.registerAgent({
+      agent_id: "pipe-cto-audit-standby",
+      cli: "claude",
+      capabilities: ["code"],
+      topics: ["cto"],
+      heartbeat_ttl_ms: 60000,
+    });
+    const takeover = hub.router.takeoverRole({
+      role: "cto",
+      agent_id: "pipe-cto-audit-leader",
+      reason: "audit_replay_test",
+      requested_by: "test",
+    });
+    assert.equal(takeover.ok, true);
+
+    const published = hub.router.handlePublish({
+      from: "lead",
+      to: "topic:cto",
+      topic: "cto",
+      payload: { decision: "audit replay must not fan out" },
+    });
+    assert.equal(published.ok, true);
+    assert.equal(published.data.fanout_count, 1);
+
+    const client = await createPipeClient(hub.pipePath);
+    const standbyContext = await client.request("query", {
+      action: "context",
+      agent_id: "pipe-cto-audit-standby",
+      max_messages: 20,
+    });
+    assert.equal(standbyContext.ok, true);
+    assert.deepEqual(standbyContext.data.messages, []);
+
+    const leaderContext = await client.request("query", {
+      action: "context",
+      agent_id: "pipe-cto-audit-leader",
+      max_messages: 20,
+    });
+    assert.equal(leaderContext.ok, true);
+    assert.equal(
+      leaderContext.data.messages.some(
+        (message) =>
+          message.topic === "cto" &&
+          message.payload?.decision === "audit replay must not fan out",
+      ),
+      true,
+    );
+
+    client.close();
+  });
+
+  it("context replay는 topic 구독 없는 explicit CTO leader에게도 감사 로그를 보여줘야 한다", async () => {
+    hub.router.registerAgent({
+      agent_id: "pipe-cto-explicit-audit-leader",
+      cli: "codex",
+      capabilities: ["cto"],
+      topics: [],
+      metadata: { role: "cto", cto_priority: 99 },
+      heartbeat_ttl_ms: 60000,
+    });
+    hub.router.registerAgent({
+      agent_id: "pipe-cto-explicit-audit-standby",
+      cli: "claude",
+      capabilities: ["code"],
+      topics: ["cto"],
+      heartbeat_ttl_ms: 60000,
+    });
+    const takeover = hub.router.takeoverRole({
+      role: "cto",
+      agent_id: "pipe-cto-explicit-audit-leader",
+      reason: "explicit_audit_replay_test",
+      requested_by: "test",
+    });
+    assert.equal(takeover.ok, true);
+
+    const payload = {
+      decision: `explicit audit replay ${randomUUID()}`,
+    };
+    const published = hub.router.handlePublish({
+      from: "lead",
+      to: "topic:cto",
+      topic: "cto",
+      payload,
+    });
+    assert.equal(published.ok, true);
+    assert.equal(published.data.fanout_count, 1);
+
+    const client = await createPipeClient(hub.pipePath);
+    const drained = await client.request("query", {
+      action: "drain",
+      agent_id: "pipe-cto-explicit-audit-leader",
+      max_messages: 10,
+      auto_ack: true,
+    });
+    assert.equal(drained.ok, true);
+    assert.equal(
+      drained.data.messages.some(
+        (message) => message.payload?.decision === payload.decision,
+      ),
+      true,
+    );
+    assert.equal(
+      hub.router
+        .getPendingMessages("pipe-cto-explicit-audit-leader")
+        .some((message) => message.payload?.decision === payload.decision),
+      false,
+    );
+
+    const leaderContext = await client.request("query", {
+      action: "context",
+      agent_id: "pipe-cto-explicit-audit-leader",
+      max_messages: 50,
+    });
+    assert.equal(leaderContext.ok, true);
+    assert.equal(
+      leaderContext.data.messages.some(
+        (message) => message.payload?.decision === payload.decision,
+      ),
+      true,
+    );
+
+    const standbyContext = await client.request("query", {
+      action: "context",
+      agent_id: "pipe-cto-explicit-audit-standby",
+      max_messages: 50,
+    });
+    assert.equal(standbyContext.ok, true);
+    assert.equal(
+      standbyContext.data.messages.some(
+        (message) => message.payload?.decision === payload.decision,
+      ),
+      false,
+    );
+
+    client.close();
+  });
+
+  it("HTTP /bridge/takeover-role도 CTO 승계 surface를 제공해야 한다", async () => {
+    hub.router.registerAgent({
+      agent_id: "http-cto-new",
+      cli: "codex",
+      capabilities: ["cto"],
+      topics: [],
+      metadata: { role: "cto", cto_priority: 3 },
+      heartbeat_ttl_ms: 60000,
+    });
+
+    const response = await fetch(
+      `http://127.0.0.1:${TEST_PORT}/bridge/takeover-role`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          role: "cto",
+          agent_id: "http-cto-new",
+          reason: "http_test",
+          requested_by: "test",
+        }),
+      },
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data.leader_agent_id, "http-cto-new");
+  });
+
+  it("HTTP /bridge/takeover-role은 malformed 요청을 거부해야 한다", async () => {
+    const missingAgent = await fetch(
+      `http://127.0.0.1:${TEST_PORT}/bridge/takeover-role`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role: "cto" }),
+      },
+    );
+    const missingAgentBody = await missingAgent.json();
+    assert.equal(missingAgent.status, 400);
+    assert.equal(missingAgentBody.ok, false);
+
+    const unsupportedRole = await fetch(
+      `http://127.0.0.1:${TEST_PORT}/bridge/takeover-role`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          role: "ceo",
+          agent_id: "http-cto-new",
+        }),
+      },
+    );
+    const unsupportedRoleBody = await unsupportedRole.json();
+    assert.equal(unsupportedRole.status, 409);
+    assert.equal(unsupportedRoleBody.ok, false);
+    assert.equal(unsupportedRoleBody.error.code, "ROLE_NOT_SUPPORTED");
+  });
+
+  it("packaged remote pipe uses packaged core router with takeover_role support", async () => {
+    const router = createCoreRouter(createMemoryStore());
+    const pipe = createRemotePipeServer({
+      router,
+      sessionId: `remote-package-${randomUUID()}`,
+    });
+
+    const oldRegister = await pipe.executeCommand("register", {
+      agent_id: "pkg-cto-old",
+      cli: "claude",
+      capabilities: ["cto"],
+      topics: [],
+      metadata: { role: "cto", cto_priority: 10 },
+      heartbeat_ttl_ms: 60000,
+    });
+    const newRegister = await pipe.executeCommand("register", {
+      agent_id: "pkg-cto-new",
+      cli: "codex",
+      capabilities: ["cto"],
+      topics: [],
+      metadata: { role: "cto", cto_priority: 1 },
+      heartbeat_ttl_ms: 60000,
+    });
+    assert.equal(oldRegister.ok, true);
+    assert.equal(newRegister.ok, true);
+
+    const published = await pipe.executeCommand("publish", {
+      from: "lead",
+      to: "topic:cto",
+      topic: "cto",
+      payload: { decision: "remote package takeover" },
+    });
+    assert.equal(published.ok, true);
+    assert.equal(published.data.fanout_count, 1);
+
+    const takeover = await pipe.executeCommand("takeover_role", {
+      role: "cto",
+      agent_id: "pkg-cto-new",
+      reason: "package_test",
+      requested_by: "test",
+    });
+    assert.equal(takeover.ok, true);
+    assert.equal(takeover.data.leader_agent_id, "pkg-cto-new");
+    assert.equal(takeover.data.transferred_count, 1);
   });
 
   it("assign/assign_result/assign_status 명령은 pipe 경로로 동작해야 한다", async () => {

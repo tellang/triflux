@@ -4,6 +4,11 @@ import { EventEmitter, once } from "node:events";
 import { uuidv7 } from "./lib/uuidv7.mjs";
 
 const ASSIGN_PENDING_STATUSES = new Set(["queued", "running"]);
+const ROLE_TOPICS = new Set(["cto"]);
+const ROLE_SOURCE_RANK = Object.freeze({
+  explicit: 2,
+  "topic-fallback": 1,
+});
 
 function uniqueStrings(values = []) {
   return Array.from(
@@ -11,6 +16,37 @@ function uniqueStrings(values = []) {
       (values || []).map((value) => String(value || "").trim()).filter(Boolean),
     ),
   );
+}
+
+function normalizeRoleName(value) {
+  const role = String(value || "")
+    .trim()
+    .toLowerCase();
+  return ROLE_TOPICS.has(role) ? role : "";
+}
+
+function normalizeRoleValues(value) {
+  if (Array.isArray(value))
+    return uniqueStrings(value).map((item) => item.toLowerCase());
+  if (typeof value === "string") {
+    return uniqueStrings(value.split(/[,\s]+/u)).map((item) =>
+      item.toLowerCase(),
+    );
+  }
+  return [];
+}
+
+function rolePriority(metadata = {}, roleName = "") {
+  const candidates = [
+    metadata?.[`${roleName}_priority`],
+    metadata?.role_priority,
+    metadata?.priority,
+  ];
+  for (const value of candidates) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return 0;
 }
 
 function clampAssignDuration(
@@ -90,6 +126,7 @@ export function createRouter(store) {
   const runtimeTopics = new Map();
   const queuesByAgent = new Map();
   const liveMessages = new Map();
+  const roleStates = new Map();
   const MAX_LATENCY_SAMPLES = 100;
   let latencyIdx = 0;
   const deliveryLatencies = new Array(MAX_LATENCY_SAMPLES).fill(0);
@@ -121,6 +158,340 @@ export function createRouter(store) {
 
   function listRuntimeTopics(agentId) {
     return normalizeAgentTopics(store, agentId, runtimeTopics.get(agentId));
+  }
+
+  function ensureRoleState(roleName) {
+    const role = normalizeRoleName(roleName);
+    if (!role) return null;
+    if (!roleStates.has(role)) {
+      roleStates.set(role, {
+        role,
+        leaderAgentId: null,
+        previousLeaderAgentId: null,
+        leaderEpoch: 0,
+        leaderSource: null,
+        status: "offline",
+        candidates: new Map(),
+        lastTransitionMs: null,
+        lastReason: "init",
+        transferredCount: 0,
+      });
+    }
+    return roleStates.get(role);
+  }
+
+  function hasRoleCapability(capabilities = [], roleName) {
+    const normalized = normalizeRoleValues(capabilities);
+    return normalized.some(
+      (capability) =>
+        capability === roleName ||
+        capability === `role:${roleName}` ||
+        capability === `${roleName}:leader` ||
+        capability === `${roleName}:candidate`,
+    );
+  }
+
+  function getRoleCandidateSource(agent, topics, roleName) {
+    if (!agent) return null;
+    const metadata = agent.metadata || {};
+    const roles = [
+      ...normalizeRoleValues(metadata.role),
+      ...normalizeRoleValues(metadata.roles),
+    ];
+    const explicit =
+      roles.includes(roleName) ||
+      metadata?.[roleName] === true ||
+      metadata?.is_cto === true ||
+      hasRoleCapability(agent.capabilities, roleName);
+    if (explicit) return "explicit";
+    return topics.includes(roleName) ? "topic-fallback" : null;
+  }
+
+  function buildRoleCandidate(agentId, roleName) {
+    const role = normalizeRoleName(roleName);
+    if (!agentId || !role) return null;
+    const agent = store.getAgent(agentId);
+    if (!agent) return null;
+    const topics = listRuntimeTopics(agentId);
+    const source = getRoleCandidateSource(agent, topics, role);
+    if (!source) return null;
+    return {
+      agent_id: agent.agent_id,
+      status: agent.status,
+      source,
+      priority: rolePriority(agent.metadata, role),
+      last_seen_ms: agent.last_seen_ms || 0,
+      lease_expires_ms: agent.lease_expires_ms || 0,
+      topics,
+      capabilities: agent.capabilities || [],
+    };
+  }
+
+  function refreshRoleCandidateForAgent(agentId) {
+    if (!agentId) return;
+    for (const roleName of ROLE_TOPICS) {
+      const role = ensureRoleState(roleName);
+      const candidate = buildRoleCandidate(agentId, roleName);
+      if (candidate) role.candidates.set(agentId, candidate);
+      else role.candidates.delete(agentId);
+    }
+  }
+
+  function refreshRoleCandidates(roleName) {
+    const role = ensureRoleState(roleName);
+    if (!role) return [];
+    const ids = new Set(role.candidates.keys());
+    for (const [agentId, topics] of runtimeTopics) {
+      if (topics.has(role.role)) ids.add(agentId);
+    }
+    for (const agent of store.getAgentsByTopic(role.role)) {
+      ids.add(agent.agent_id);
+    }
+    if (typeof store.listAllAgents === "function") {
+      for (const agent of store.listAllAgents()) ids.add(agent.agent_id);
+    }
+    for (const agentId of ids) refreshRoleCandidateForAgent(agentId);
+    return Array.from(role.candidates.values());
+  }
+
+  function isCandidateLive(candidate, now = Date.now()) {
+    return (
+      candidate?.status === "online" && Number(candidate.lease_expires_ms) > now
+    );
+  }
+
+  function sortRoleCandidates(candidates = []) {
+    return [...candidates].sort((left, right) => {
+      const sourceDelta =
+        (ROLE_SOURCE_RANK[right.source] || 0) -
+        (ROLE_SOURCE_RANK[left.source] || 0);
+      if (sourceDelta !== 0) return sourceDelta;
+      const priorityDelta =
+        Number(right.priority || 0) - Number(left.priority || 0);
+      if (priorityDelta !== 0) return priorityDelta;
+      const seenDelta =
+        Number(right.last_seen_ms || 0) - Number(left.last_seen_ms || 0);
+      if (seenDelta !== 0) return seenDelta;
+      return String(left.agent_id).localeCompare(String(right.agent_id));
+    });
+  }
+
+  function chooseRoleLeader(roleName) {
+    const now = Date.now();
+    return (
+      sortRoleCandidates(refreshRoleCandidates(roleName)).find((candidate) =>
+        isCandidateLive(candidate, now),
+      ) || null
+    );
+  }
+
+  function messageMatchesRole(record, roleName) {
+    const message = record?.message || {};
+    const to = message.to_agent ?? message.to;
+    return to === `topic:${roleName}`;
+  }
+
+  function roleTopicForMessage(message = {}) {
+    const to = message?.to_agent ?? message?.to;
+    if (!String(to || "").startsWith("topic:")) return "";
+    return normalizeRoleName(String(to).slice(6));
+  }
+
+  function isReplayAllowedForAgent(agentId, message = {}) {
+    const roleName = roleTopicForMessage(message);
+    if (!roleName) return true;
+    const targetAgentId = String(agentId || "").trim();
+    if (!targetAgentId) return false;
+    const role = getRoleSnapshot(roleName);
+    return role?.leader_agent_id === targetAgentId;
+  }
+
+  function shouldTrackWithoutRecipients(message) {
+    const to = message?.to_agent ?? message?.to;
+    if (!String(to || "").startsWith("topic:")) return false;
+    return ROLE_TOPICS.has(String(to).slice(6));
+  }
+
+  function isRoleMessageFullyHandled(record, roleName) {
+    if (!messageMatchesRole(record, roleName)) return true;
+    return (
+      record.recipients.size > 0 &&
+      record.ackedBy.size >= record.recipients.size
+    );
+  }
+
+  function isRoleRecipient(agentId, roleName, previousLeaderAgentId = null) {
+    if (!agentId) return false;
+    if (agentId === previousLeaderAgentId) return true;
+    return Boolean(buildRoleCandidate(agentId, roleName));
+  }
+
+  function countPendingForRole(roleName) {
+    const now = Date.now();
+    let count = 0;
+    for (const record of liveMessages.values()) {
+      if (!messageMatchesRole(record, roleName)) continue;
+      if (record.message.expires_at_ms <= now) continue;
+      if (isRoleMessageFullyHandled(record, roleName)) continue;
+      count += 1;
+    }
+    return count;
+  }
+
+  function transferRoleBacklog(
+    roleName,
+    newLeaderAgentId,
+    previousLeaderAgentId,
+  ) {
+    const role = ensureRoleState(roleName);
+    const now = Date.now();
+    const stats = { transferred_count: 0, skipped_count: 0, removed_count: 0 };
+    if (!role || !newLeaderAgentId) return stats;
+
+    for (const record of liveMessages.values()) {
+      const { message, recipients, ackedBy } = record;
+      if (!messageMatchesRole(record, role.role)) continue;
+      if (message.expires_at_ms <= now) {
+        stats.skipped_count += 1;
+        continue;
+      }
+      if (isRoleMessageFullyHandled(record, role.role)) {
+        stats.skipped_count += 1;
+        continue;
+      }
+
+      for (const recipient of Array.from(recipients)) {
+        if (
+          recipient !== newLeaderAgentId &&
+          isRoleRecipient(recipient, role.role, previousLeaderAgentId)
+        ) {
+          queuesByAgent.get(recipient)?.delete(message.id);
+          recipients.delete(recipient);
+          ackedBy.delete(recipient);
+          stats.removed_count += 1;
+        }
+      }
+
+      recipients.add(newLeaderAgentId);
+      const alreadyQueued = queuesByAgent
+        .get(newLeaderAgentId)
+        ?.has(message.id);
+      if (!alreadyQueued && !ackedBy.has(newLeaderAgentId)) {
+        queueMessage(newLeaderAgentId, message);
+        stats.transferred_count += 1;
+      } else {
+        stats.skipped_count += 1;
+      }
+      message.status = "delivered";
+      store.updateMessageStatus(message.id, "delivered");
+    }
+
+    role.transferredCount += stats.transferred_count;
+    return stats;
+  }
+
+  function buildRoleSnapshot(roleName, { refreshCandidates = true } = {}) {
+    const role = ensureRoleState(roleName);
+    if (!role) return null;
+    const now = Date.now();
+    const candidates = sortRoleCandidates(
+      refreshCandidates
+        ? refreshRoleCandidates(role.role)
+        : Array.from(role.candidates.values()),
+    );
+    const leader =
+      role.leaderAgentId && buildRoleCandidate(role.leaderAgentId, role.role);
+    const leaderLive = isCandidateLive(leader, now);
+    const liveCandidates = candidates.filter((candidate) =>
+      isCandidateLive(candidate, now),
+    );
+    return {
+      role: role.role,
+      status: leaderLive
+        ? "active"
+        : liveCandidates.length
+          ? "electable"
+          : "offline",
+      leader_agent_id: leaderLive ? role.leaderAgentId : null,
+      previous_leader_agent_id: role.previousLeaderAgentId || null,
+      leader_epoch: role.leaderEpoch,
+      lease_expires_ms: leaderLive ? leader.lease_expires_ms : null,
+      candidate_source: leaderLive
+        ? leader.source
+        : liveCandidates[0]?.source || null,
+      candidate_count: candidates.length,
+      live_candidate_count: liveCandidates.length,
+      pending_count: countPendingForRole(role.role),
+      transferred_count: role.transferredCount,
+      last_transition_ms: role.lastTransitionMs,
+      last_reason: role.lastReason,
+      candidates: candidates.slice(0, 16).map((candidate) => ({
+        agent_id: candidate.agent_id,
+        status: isCandidateLive(candidate, now) ? "online" : candidate.status,
+        source: candidate.source,
+        priority: candidate.priority,
+        last_seen_ms: candidate.last_seen_ms,
+        lease_expires_ms: candidate.lease_expires_ms,
+      })),
+    };
+  }
+
+  function ensureRoleLeader(
+    roleName,
+    { reason = "ensure", transferBacklog = true } = {},
+  ) {
+    const role = ensureRoleState(roleName);
+    if (!role) return null;
+    const now = Date.now();
+    const current =
+      role.leaderAgentId && buildRoleCandidate(role.leaderAgentId, role.role);
+    const best = chooseRoleLeader(role.role);
+    const currentLive = isCandidateLive(current, now);
+    const shouldPreemptFallback =
+      currentLive &&
+      current?.source === "topic-fallback" &&
+      best?.source === "explicit" &&
+      best.agent_id !== current.agent_id;
+
+    if (currentLive && !shouldPreemptFallback) {
+      role.status = "active";
+      role.leaderSource = current.source;
+      return buildRoleSnapshot(role.role);
+    }
+
+    if (!best) {
+      if (role.leaderAgentId) {
+        role.previousLeaderAgentId = role.leaderAgentId;
+        role.leaderAgentId = null;
+        role.leaderSource = null;
+        role.leaderEpoch += 1;
+        role.lastTransitionMs = Date.now();
+        role.lastReason = reason;
+      }
+      role.status = "offline";
+      return buildRoleSnapshot(role.role);
+    }
+
+    if (role.leaderAgentId !== best.agent_id) {
+      const previousLeaderAgentId = role.leaderAgentId;
+      role.previousLeaderAgentId =
+        previousLeaderAgentId || role.previousLeaderAgentId;
+      role.leaderAgentId = best.agent_id;
+      role.leaderSource = best.source;
+      role.leaderEpoch += 1;
+      role.status = "active";
+      role.lastTransitionMs = Date.now();
+      role.lastReason = reason;
+      if (transferBacklog) {
+        transferRoleBacklog(role.role, best.agent_id, previousLeaderAgentId);
+      }
+    }
+
+    return buildRoleSnapshot(role.role);
+  }
+
+  function getRoleSnapshot(roleName) {
+    return buildRoleSnapshot(roleName, { refreshCandidates: true });
   }
 
   function trackMessage(message, recipients) {
@@ -162,6 +533,14 @@ export function createRouter(store) {
     }
 
     const topic = to.slice(6);
+    if (ROLE_TOPICS.has(topic)) {
+      const role = ensureRoleLeader(topic, {
+        reason: "route",
+        transferBacklog: true,
+      });
+      return role?.leader_agent_id ? [role.leader_agent_id] : [];
+    }
+
     const recipients = new Set();
     for (const [agentId, topics] of runtimeTopics) {
       if (topics.has(topic)) recipients.add(agentId);
@@ -258,8 +637,10 @@ export function createRouter(store) {
       correlation_id,
     });
     const recipients = uniqueStrings(resolveRecipients(msg));
-    if (recipients.length) {
+    if (recipients.length || shouldTrackWithoutRecipients(msg)) {
       trackMessage(msg, recipients);
+    }
+    if (recipients.length) {
       for (const agentId of recipients) {
         queueMessage(agentId, msg);
       }
@@ -422,15 +803,37 @@ export function createRouter(store) {
     registerAgent(args) {
       const result = store.registerAgent(args);
       upsertRuntimeTopics(args.agent_id, args.topics || [], { replace: true });
+      refreshRoleCandidateForAgent(args.agent_id);
+      for (const roleName of ROLE_TOPICS) {
+        ensureRoleLeader(roleName, {
+          reason: "register",
+          transferBacklog: true,
+        });
+      }
       return result;
     },
 
     refreshAgentLease(agentId, ttlMs = 30000) {
-      return store.refreshLease(agentId, ttlMs);
+      const result = store.refreshLease(agentId, ttlMs);
+      refreshRoleCandidateForAgent(agentId);
+      for (const roleName of ROLE_TOPICS) {
+        ensureRoleLeader(roleName, {
+          reason: "heartbeat",
+          transferBacklog: true,
+        });
+      }
+      return result;
     },
 
     subscribeAgent(agentId, topics, { replace = false } = {}) {
       const nextTopics = upsertRuntimeTopics(agentId, topics, { replace });
+      refreshRoleCandidateForAgent(agentId);
+      for (const roleName of ROLE_TOPICS) {
+        ensureRoleLeader(roleName, {
+          reason: "subscribe",
+          transferBacklog: true,
+        });
+      }
       return { agent_id: agentId, topics: nextTopics };
     },
 
@@ -442,12 +845,25 @@ export function createRouter(store) {
       if (status === "offline") {
         runtimeTopics.delete(agentId);
       }
-      return store.updateAgentStatus(agentId, status);
+      const updated = store.updateAgentStatus(agentId, status);
+      refreshRoleCandidateForAgent(agentId);
+      for (const roleName of ROLE_TOPICS) {
+        ensureRoleLeader(roleName, {
+          reason: `status:${status}`,
+          transferBacklog: true,
+        });
+      }
+      return updated;
     },
 
     route(msg) {
       const recipients = uniqueStrings(resolveRecipients(msg));
-      if (!recipients.length) return 0;
+      if (!recipients.length) {
+        if (shouldTrackWithoutRecipients(msg) && !getMessageRecord(msg.id)) {
+          trackMessage(msg, []);
+        }
+        return 0;
+      }
       if (!getMessageRecord(msg.id)) {
         trackMessage(msg, recipients);
       }
@@ -460,6 +876,10 @@ export function createRouter(store) {
 
     getPendingMessages(agentId, options = {}) {
       return sortedPending(agentId, options);
+    },
+
+    canReplayMessageForAgent(agentId, message) {
+      return isReplayAllowedForAgent(agentId, message);
     },
 
     countPendingMessages(agentId) {
@@ -610,6 +1030,87 @@ export function createRouter(store) {
           message_id: msg.id,
           fanout_count: recipients.length,
           expires_at_ms: msg.expires_at_ms,
+          role: to === "topic:cto" ? getRoleSnapshot("cto") : undefined,
+        },
+      };
+    },
+
+    takeoverRole({
+      role = "cto",
+      agent_id,
+      reason = "manual",
+      requested_by = "manual",
+    } = {}) {
+      const roleName = normalizeRoleName(role);
+      if (!roleName) {
+        return {
+          ok: false,
+          error: {
+            code: "ROLE_NOT_SUPPORTED",
+            message: `unsupported role: ${role}`,
+          },
+        };
+      }
+      const targetAgentId = String(agent_id || "").trim();
+      if (!targetAgentId) {
+        return {
+          ok: false,
+          error: {
+            code: "AGENT_ID_REQUIRED",
+            message: "agent_id required",
+          },
+        };
+      }
+
+      refreshRoleCandidates(roleName);
+      const roleState = ensureRoleState(roleName);
+      const candidate = buildRoleCandidate(targetAgentId, roleName);
+      if (!isCandidateLive(candidate)) {
+        return {
+          ok: false,
+          error: {
+            code: "ROLE_CANDIDATE_UNAVAILABLE",
+            message: `${targetAgentId} is not a live ${roleName} candidate`,
+          },
+          data: {
+            role: buildRoleSnapshot(roleName),
+          },
+        };
+      }
+
+      const previousLeaderAgentId =
+        roleState.leaderAgentId && roleState.leaderAgentId !== targetAgentId
+          ? roleState.leaderAgentId
+          : roleState.previousLeaderAgentId || null;
+      const changed = roleState.leaderAgentId !== targetAgentId;
+      if (changed) {
+        roleState.previousLeaderAgentId = previousLeaderAgentId || null;
+        roleState.leaderAgentId = targetAgentId;
+        roleState.leaderSource = candidate.source;
+        roleState.leaderEpoch += 1;
+        roleState.status = "active";
+        roleState.lastTransitionMs = Date.now();
+        roleState.lastReason = reason || "manual";
+      }
+
+      const transfer = transferRoleBacklog(
+        roleName,
+        targetAgentId,
+        previousLeaderAgentId,
+      );
+      const snapshot = buildRoleSnapshot(roleName);
+      return {
+        ok: true,
+        data: {
+          role: roleName,
+          requested_by,
+          reason,
+          changed,
+          previous_leader_agent_id: previousLeaderAgentId,
+          leader_agent_id: snapshot.leader_agent_id,
+          leader_epoch: snapshot.leader_epoch,
+          ...transfer,
+          status: snapshot,
         },
       };
     },
@@ -897,6 +1398,9 @@ export function createRouter(store) {
           realtime_transport: "named-pipe",
           audit_store: store.type || "sqlite",
         };
+        data.roles = {
+          cto: getRoleSnapshot("cto"),
+        };
         if (include_metrics) {
           const depths = router.getQueueDepths();
           const stats = router.getDeliveryStats();
@@ -919,6 +1423,7 @@ export function createRouter(store) {
       if (scope === "agent" && agent_id) {
         const agent = store.getAgent(agent_id);
         if (agent) {
+          refreshRoleCandidateForAgent(agent_id);
           data.agent = {
             agent_id: agent.agent_id,
             status: agent.status,
@@ -926,6 +1431,18 @@ export function createRouter(store) {
             last_seen_ms: agent.last_seen_ms,
             topics: listRuntimeTopics(agent_id),
           };
+          const roles = {};
+          for (const roleName of ROLE_TOPICS) {
+            const candidate = buildRoleCandidate(agent_id, roleName);
+            if (candidate) {
+              roles[roleName] = {
+                candidate_source: candidate.source,
+                priority: candidate.priority,
+                leader: getRoleSnapshot(roleName)?.leader_agent_id === agent_id,
+              };
+            }
+          }
+          if (Object.keys(roles).length) data.agent.roles = roles;
         }
       }
 

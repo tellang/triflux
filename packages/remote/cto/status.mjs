@@ -55,6 +55,17 @@ export function deriveRepoRootFromCwd(cwd) {
   if (cwd.includes("\\") || /^[A-Za-z]:/u.test(cwd)) return cwd;
 
   const normalized = cwd.replace(/\/+$/u, "");
+  const gitWorktreeMarker = "/.worktrees/";
+  const gitWorktreeIndex = normalized.indexOf(gitWorktreeMarker);
+  if (gitWorktreeIndex > 0) {
+    const suffix = normalized.slice(
+      gitWorktreeIndex + gitWorktreeMarker.length,
+    );
+    if (/^[^/]+(?:\/|$)/u.test(suffix)) {
+      return normalized.slice(0, gitWorktreeIndex);
+    }
+  }
+
   const claudeMarker = "/.claude/worktrees/";
   const claudeIndex = normalized.indexOf(claudeMarker);
   if (claudeIndex > 0) {

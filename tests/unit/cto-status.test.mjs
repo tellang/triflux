@@ -190,6 +190,14 @@ describe("cto status active_shards / live_sessions projection", () => {
       deriveRepoRootFromCwd("/repo/app/.codex-swarm/wt-auth/src"),
       "/repo/app",
     );
+    assert.equal(
+      deriveRepoRootFromCwd("/repo/app/.worktrees/feature"),
+      "/repo/app",
+    );
+    assert.equal(
+      deriveRepoRootFromCwd("/repo/app/.worktrees/feature/src"),
+      "/repo/app",
+    );
     assert.equal(deriveRepoRootFromCwd("/repo/sibling"), "/repo/sibling");
     assert.equal(
       deriveRepoRootFromCwd("C:\\Users\\dev\\repo\\.claude\\worktrees\\x"),
@@ -216,6 +224,7 @@ describe("cto status active_shards / live_sessions projection", () => {
       "wt-feature-b",
       "src",
     );
+    const gitWorktreeCwd = join(parentCwd, ".worktrees", "feature-c", "src");
     const siblingCwd = join(sandboxDir, "sibling-repo");
 
     const status = await runStatus(["--json"], {
@@ -227,6 +236,7 @@ describe("cto status active_shards / live_sessions projection", () => {
           { sessionId: "parent", cwd: parentCwd },
           { sessionId: "claude-wt", cwd: claudeWorktreeCwd },
           { sessionId: "codex-wt", cwd: codexWorktreeCwd },
+          { sessionId: "git-wt", cwd: gitWorktreeCwd },
           { sessionId: "sibling", cwd: siblingCwd },
         ],
         active_shards: [],
@@ -239,9 +249,11 @@ describe("cto status active_shards / live_sessions projection", () => {
     assert.equal(byId.parent.cwdLabel, "parent-repo");
     assert.equal(byId["claude-wt"].cwdLabel, "feature-a");
     assert.equal(byId["codex-wt"].cwdLabel, "src");
+    assert.equal(byId["git-wt"].cwdLabel, "src");
     assert.equal(byId.parent.repoRootLabel, "parent-repo");
     assert.equal(byId["claude-wt"].repoRootHash, byId.parent.repoRootHash);
     assert.equal(byId["codex-wt"].repoRootHash, byId.parent.repoRootHash);
+    assert.equal(byId["git-wt"].repoRootHash, byId.parent.repoRootHash);
     assert.notEqual(byId.sibling.repoRootHash, byId.parent.repoRootHash);
 
     assert.equal(status.live_session_groups.length, 2);
@@ -252,6 +264,7 @@ describe("cto status active_shards / live_sessions projection", () => {
       "parent",
       "claude-wt",
       "codex-wt",
+      "git-wt",
     ]);
     assert.deepEqual(groupsByLabel["sibling-repo"].sessions, ["sibling"]);
 
@@ -259,6 +272,7 @@ describe("cto status active_shards / live_sessions projection", () => {
     assert.equal(serialized.includes(parentCwd), false);
     assert.equal(serialized.includes(claudeWorktreeCwd), false);
     assert.equal(serialized.includes(codexWorktreeCwd), false);
+    assert.equal(serialized.includes(gitWorktreeCwd), false);
     assert.equal(serialized.includes(siblingCwd), false);
   });
 });

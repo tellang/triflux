@@ -29,6 +29,17 @@ function normalizeTopics(topics) {
   return topics.map((topic) => String(topic || "").trim()).filter(Boolean);
 }
 
+function normalizeReplayTopics(topics) {
+  if (Array.isArray(topics)) return normalizeTopics(topics);
+  if (typeof topics === "string") {
+    return topics
+      .split(/[,\s]+/u)
+      .map((topic) => topic.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
 function getTeamBridgeMethod(methodName) {
   const method = getTeamBridge()?.[methodName];
   return typeof method === "function" ? method : null;
@@ -266,6 +277,12 @@ export function createPipeServer({
         return result;
       }
 
+      case "takeover_role": {
+        const result = router.takeoverRole(payload);
+        if (client) touchClient(client);
+        return result;
+      }
+
       case "handoff": {
         const result = router.handleHandoff(payload);
         if (client) touchClient(client);
@@ -454,13 +471,34 @@ export function createPipeServer({
       return pending.slice(0, maxMessages);
     }
 
+    const requestedTopics = normalizeReplayTopics(payload.topics);
+    const auditTopics = new Set(requestedTopics);
+    if (auditTopics.size === 0) {
+      const persistedTopics = store?.getAgent?.(agentId)?.topics || [];
+      for (const topic of persistedTopics) auditTopics.add(topic);
+      if (
+        typeof router.canReplayMessageForAgent === "function" &&
+        router.canReplayMessageForAgent(agentId, {
+          to_agent: "topic:cto",
+          topic: "cto",
+        })
+      ) {
+        auditTopics.add("cto");
+      }
+    }
+
     const audit = store.getAuditMessagesForAgent(agentId, {
       max_messages: maxMessages,
-      include_topics: payload.topics,
+      include_topics: Array.from(auditTopics),
     });
     const byId = new Map();
     for (const message of [...pending, ...audit]) {
       if (!message?.id || byId.has(message.id)) continue;
+      if (
+        typeof router.canReplayMessageForAgent === "function" &&
+        !router.canReplayMessageForAgent(agentId, message)
+      )
+        continue;
       byId.set(message.id, message);
     }
     return Array.from(byId.values())

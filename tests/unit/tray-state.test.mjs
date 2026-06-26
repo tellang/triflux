@@ -111,6 +111,60 @@ describe("tray-state contract", () => {
     assert.equal(payload.cto.summary.live_session_count, 0);
   });
 
+  it("passes CTO succession role metadata through to the tray payload", () => {
+    const payload = buildTrayStatePayload({
+      ctoStatus: {
+        roles: {
+          cto: {
+            status: "active",
+            leader_agent_id: "cto-leader",
+            previous_leader_agent_id: "cto-old",
+            leader_epoch: 3,
+            pending_count: 7,
+            candidate_source: "explicit",
+          },
+        },
+      },
+    });
+
+    assert.deepEqual(payload.cto.roles.cto, {
+      status: "active",
+      leader_agent_id: "cto-leader",
+      previous_leader_agent_id: "cto-old",
+      leader_epoch: 3,
+      pending_count: 7,
+      candidate_source: "explicit",
+    });
+  });
+
+  it("preserves arbitrary CTO leader agent ids in normalized live sessions", () => {
+    const payload = buildTrayStatePayload({
+      ctoStatus: {
+        roles: {
+          cto: {
+            status: "active",
+            leader_agent_id: "cto-agent-1",
+            leader_epoch: 2,
+          },
+        },
+        live_sessions: [
+          {
+            sessionId: "synapse-session-123",
+            agent_id: "cto-agent-1",
+            phase: "active",
+            cwd: "/repo",
+            role: "cto",
+            taskSummary: "actual role leader",
+          },
+        ],
+      },
+    });
+
+    assert.equal(payload.cto.live_sessions[0].agent_id, "cto-agent-1");
+    assert.equal(payload.cto.live_sessions[0].role, "cto");
+    assert.equal(payload.cto.roles.cto.leader_agent_id, "cto-agent-1");
+  });
+
   it("includes CTO overlay and MCP rows in one tray payload", () => {
     const payload = buildTrayStatePayload({
       hub: { id: "hub-123456", pid: 123456, port: 27888 },
