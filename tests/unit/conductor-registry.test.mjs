@@ -26,9 +26,10 @@ describe("conductor-registry send_input integration", () => {
     setConductorRegistry(previousRegistry);
   });
 
-  it("createTools는 send_input을 21번째 MCP 도구로 노출해야 한다", () => {
+  it("createTools는 takeover_role을 추가하고 send_input을 마지막 MCP 도구로 노출해야 한다", () => {
     const tools = createTools({}, {}, {}, null);
-    assert.equal(tools.length, 21);
+    assert.equal(tools.length, 22);
+    assert.ok(tools.some((tool) => tool.name === "takeover_role"));
     assert.equal(tools.at(-1)?.name, "send_input");
   });
 

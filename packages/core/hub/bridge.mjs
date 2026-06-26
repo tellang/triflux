@@ -119,6 +119,11 @@ const HUB_OPERATIONS = Object.freeze({
     action: "publish",
     httpPath: "/bridge/publish",
   },
+  takeoverRole: {
+    transport: "command",
+    action: "takeover_role",
+    httpPath: "/bridge/takeover-role",
+  },
   sendInput: {
     transport: "command",
     action: "send_input",
@@ -365,6 +370,7 @@ export function parseArgs(argv) {
     args: argv,
     options: {
       agent: { type: "string" },
+      "agent-id": { type: "string" },
       cli: { type: "string" },
       timeout: { type: "string" },
       topics: { type: "string" },
@@ -387,6 +393,7 @@ export function parseArgs(argv) {
       claim: { type: "boolean" },
       actor: { type: "string" },
       command: { type: "string" },
+      role: { type: "string" },
       "session-id": { type: "string" },
       reason: { type: "string" },
       type: { type: "string" },
@@ -699,6 +706,19 @@ async function cmdPublish(args) {
     HUB_OPERATIONS.publish,
     buildPublishBody(from, to, type, payload),
   );
+  const result = outcome?.result;
+  return emitJson(result || unavailableResult());
+}
+
+async function cmdTakeoverRole(args) {
+  const role = args.role || args[1] || "cto";
+  const agentId = args.agent || args["agent-id"] || args[2];
+  const outcome = await requestHub(HUB_OPERATIONS.takeoverRole, {
+    role,
+    agent_id: agentId,
+    reason: args.reason || "manual",
+    requested_by: args["requested-by"] || "bridge",
+  });
   const result = outcome?.result;
   return emitJson(result || unavailableResult());
 }
@@ -1554,6 +1574,8 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdHandoff(args);
     case "publish":
       return await cmdPublish(args);
+    case "takeover-role":
+      return await cmdTakeoverRole(args);
     case "send-input":
       return await cmdSendInput(args);
     case "context":
@@ -1610,7 +1632,7 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdRetryStatus(args);
     default:
       console.error(
-        "사용법: bridge.mjs <register|result|control|handoff|publish|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|daemon-probe|daemon-attach|daemon-interrupt|retry-run|retry-status> [--옵션]",
+        "사용법: bridge.mjs <register|result|control|handoff|publish|takeover-role|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|daemon-probe|daemon-attach|daemon-interrupt|retry-run|retry-status> [--옵션]",
       );
       process.exit(1);
   }

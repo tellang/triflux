@@ -49,6 +49,10 @@ function normalizeAgentId(value) {
   return "";
 }
 
+function rawAgentId(value) {
+  return String(value ?? "").trim();
+}
+
 function inferAgentId(value = {}) {
   const direct = normalizeAgentId(
     value.agent_id ??
@@ -84,7 +88,11 @@ function agentMeta(agentId) {
 export function normalizeTraySessions(snapshot) {
   return readSynapseSessions(snapshot)
     .map((session) => {
-      const agentId = inferAgentId(session);
+      const directAgentId = session?.agent_id ?? session?.agentId;
+      const agentId =
+        normalizeAgentId(directAgentId) ||
+        rawAgentId(directAgentId) ||
+        inferAgentId(session);
       return {
         sessionId: String(session?.sessionId || ""),
         host: typeof session?.host === "string" ? session.host : "local",
@@ -368,7 +376,11 @@ function runtimeToLiveOverlay(runtime) {
 }
 
 function normalizeLiveSession(session = {}) {
-  const agentId = inferAgentId(session);
+  const directAgentId = session.agent_id ?? session.agentId;
+  const agentId =
+    normalizeAgentId(directAgentId) ||
+    rawAgentId(directAgentId) ||
+    inferAgentId(session);
   return {
     ...session,
     sessionId: String(session.sessionId || ""),
@@ -460,11 +472,21 @@ function normalizeCtoStatus(ctoStatus = {}, sessions = [], runtime = {}) {
     ? ctoStatus.active_shards
     : [];
   const hygiene = normalizeCtoHygiene(ctoStatus);
+  const roles =
+    ctoStatus?.roles && typeof ctoStatus.roles === "object"
+      ? ctoStatus.roles
+      : null;
+  const succession =
+    ctoStatus?.succession && typeof ctoStatus.succession === "object"
+      ? ctoStatus.succession
+      : null;
   return {
     schema_version: String(ctoStatus?.schema_version || "cto-lake.v1"),
     generated_at: ctoStatus?.generated_at || null,
     live_sessions: normalizedLiveSessions,
     active_shards: activeShards,
+    ...(roles ? { roles } : {}),
+    ...(succession ? { succession } : {}),
     ...(hygiene ? { hygiene } : {}),
     summary: {
       live_session_count: normalizedLiveSessions.length,

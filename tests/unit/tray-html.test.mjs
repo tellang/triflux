@@ -137,6 +137,262 @@ describe("tray Sessions frontend", () => {
     assert.match(tabSessions.innerHTML, /data-agent-id="antigravity"/u);
   });
 
+  it("does not render every active session as a CTO T card", () => {
+    const { context, tabSessions } = loadTrayRenderer();
+
+    context.renderSessions({
+      hub: {
+        id: "hub-abcdef",
+        projectRoot: "/Users/tellang/Projects/tools/triflux",
+      },
+      sessions: [
+        {
+          sessionId: "codex-active-1",
+          status: "active",
+          cwd: "/Users/tellang/Projects/tools/triflux",
+          taskSummary: "ordinary codex session",
+        },
+        {
+          sessionId: "claude-active-2",
+          status: "active",
+          cwd: "/Users/tellang/Projects/tools/triflux",
+          taskSummary: "ordinary claude session",
+        },
+        {
+          sessionId: "old-stale-session",
+          status: "stale",
+          cwd: "/Users/tellang/Projects/tools/triflux",
+          taskSummary: "stale should not become CTO",
+        },
+      ],
+      cto: {
+        live_sessions: [],
+        active_shards: [],
+      },
+      runtime: { summary: { total: 0, clients: [] } },
+    });
+
+    assert.doesNotMatch(
+      tabSessions.innerHTML,
+      /data-open-key="cto:codex-active-1"/u,
+    );
+    assert.doesNotMatch(
+      tabSessions.innerHTML,
+      /data-open-key="cto:claude-active-2"/u,
+    );
+    assert.doesNotMatch(tabSessions.innerHTML, /old-stale-session/u);
+    assert.doesNotMatch(
+      tabSessions.innerHTML,
+      /<span class="agent-badge">T<\/span>/u,
+    );
+    assert.match(tabSessions.innerHTML, /ordinary codex session/u);
+    assert.match(tabSessions.innerHTML, /ordinary claude session/u);
+  });
+
+  it("renders one project-level CTO card from role succession state", () => {
+    const { context, tabSessions } = loadTrayRenderer();
+
+    context.renderSessions({
+      hub: {
+        id: "hub-abcdef",
+        projectRoot: "/Users/tellang/Projects/tools/triflux",
+      },
+      sessions: [
+        {
+          sessionId: "codex-worker",
+          status: "active",
+          cwd: "/Users/tellang/Projects/tools/triflux/.worktrees/fix-441",
+          taskSummary: "worker in a worktree",
+        },
+      ],
+      cto: {
+        roles: {
+          cto: {
+            status: "active",
+            leader_agent_id: "cto-agent",
+            leader_epoch: 4,
+            pending_count: 2,
+            candidate_count: 2,
+            live_candidate_count: 1,
+            candidate_source: "explicit",
+          },
+        },
+        live_sessions: [
+          {
+            sessionId: "cto-agent",
+            phase: "active",
+            agent_id: "cto-agent",
+            cwd: "/Users/tellang/Projects/tools/triflux/.worktrees/fix-441",
+            taskSummary: "actual CTO leader",
+          },
+        ],
+        active_shards: [],
+      },
+      runtime: { summary: { total: 1, clients: [] } },
+    });
+
+    assert.match(tabSessions.innerHTML, /CTO Succession/u);
+    assert.match(tabSessions.innerHTML, /epoch 4 · pending 2/u);
+    assert.match(tabSessions.innerHTML, /data-open-key="cto:cto-agent"/u);
+    assert.doesNotMatch(
+      tabSessions.innerHTML,
+      /data-open-key="cto:codex-worker"/u,
+    );
+    const ctoCardMatches = tabSessions.innerHTML.match(
+      /<details class="session-card"/gu,
+    );
+    assert.equal(ctoCardMatches?.length, 1);
+    const projectNameMatches = tabSessions.innerHTML.match(
+      /<span class="project-name">triflux<\/span>/gu,
+    );
+    assert.equal(projectNameMatches?.length, 1);
+  });
+
+  it("renders standby CTO candidates as agents, not extra CTO cards", () => {
+    const { context, tabSessions } = loadTrayRenderer();
+
+    context.renderSessions({
+      hub: {
+        id: "hub-abcdef",
+        projectRoot: "/Users/tellang/Projects/tools/triflux",
+      },
+      sessions: [],
+      cto: {
+        roles: {
+          cto: {
+            status: "active",
+            leader_agent_id: "cto-leader",
+            leader_epoch: 6,
+            pending_count: 1,
+            candidate_count: 2,
+            live_candidate_count: 2,
+          },
+        },
+        live_sessions: [
+          {
+            sessionId: "cto-leader",
+            phase: "active",
+            agent_id: "cto-leader",
+            cwd: "/Users/tellang/Projects/tools/triflux",
+            role: "cto",
+            taskSummary: "elected CTO leader",
+          },
+          {
+            sessionId: "cto-standby",
+            phase: "active",
+            agent_id: "cto-standby",
+            cwd: "/Users/tellang/Projects/tools/triflux",
+            role: "cto",
+            taskSummary: "hot standby candidate",
+          },
+        ],
+        active_shards: [],
+      },
+      runtime: { summary: { total: 2, clients: [] } },
+    });
+
+    const ctoCards = tabSessions.innerHTML.match(
+      /<details class="session-card"/gu,
+    );
+    assert.equal(ctoCards?.length, 1);
+    assert.match(tabSessions.innerHTML, /data-open-key="cto:cto-leader"/u);
+    assert.doesNotMatch(
+      tabSessions.innerHTML,
+      /data-open-key="cto:cto-standby"/u,
+    );
+    assert.match(tabSessions.innerHTML, /hot standby candidate/u);
+    assert.match(tabSessions.innerHTML, /<div class="detail-label">Agents/u);
+  });
+
+  it("deduplicates rows that appear in both synapse sessions and CTO live overlay", () => {
+    const { context, tabSessions } = loadTrayRenderer();
+
+    context.renderSessions({
+      hub: { id: "hub-abcdef", projectRoot: "/repo" },
+      sessions: [
+        {
+          sessionId: "worker-duplicate",
+          status: "active",
+          cwd: "/repo",
+          taskSummary: "same worker prompt",
+        },
+      ],
+      cto: {
+        live_sessions: [
+          {
+            sessionId: "worker-duplicate",
+            phase: "active",
+            cwd: "/repo",
+            taskSummary: "same worker prompt",
+          },
+        ],
+        active_shards: [],
+      },
+      runtime: { summary: { total: 1, clients: [] } },
+    });
+
+    const promptOccurrences =
+      tabSessions.innerHTML.match(/same worker prompt/gu) || [];
+    assert.equal(promptOccurrences.length, 2);
+  });
+
+  it("coalesces sibling linked worktrees when the hub project root is itself a worktree", () => {
+    const { context, tabSessions } = loadTrayRenderer();
+
+    context.renderSessions({
+      hub: {
+        id: "hub-abcdef",
+        projectRoot:
+          "/Users/tellang/Projects/tools/triflux/.worktrees/fix-cto-succession-441",
+      },
+      sessions: [
+        {
+          sessionId: "worker-a",
+          status: "active",
+          cwd: "/Users/tellang/Projects/tools/triflux/.worktrees/other-branch",
+          taskSummary: "sibling worktree worker",
+        },
+      ],
+      cto: {
+        roles: {
+          cto: {
+            status: "active",
+            leader_agent_id: "cto-agent",
+            leader_epoch: 5,
+            pending_count: 0,
+            candidate_count: 1,
+            live_candidate_count: 1,
+          },
+        },
+        live_sessions: [
+          {
+            sessionId: "cto-agent",
+            phase: "active",
+            agent_id: "cto-agent",
+            cwd: "/Users/tellang/Projects/tools/triflux/.worktrees/fix-cto-succession-441",
+            taskSummary: "CTO leader in current worktree",
+          },
+        ],
+        active_shards: [],
+      },
+      runtime: { summary: { total: 2, clients: [] } },
+    });
+
+    const projectNameMatches = tabSessions.innerHTML.match(
+      /<span class="project-name">triflux<\/span>/gu,
+    );
+    assert.equal(projectNameMatches?.length, 1);
+    assert.doesNotMatch(
+      tabSessions.innerHTML,
+      /<span class="project-name">other-branch<\/span>/u,
+    );
+    assert.doesNotMatch(
+      tabSessions.innerHTML,
+      /<span class="project-name">fix-cto-succession-441<\/span>/u,
+    );
+    assert.match(tabSessions.innerHTML, /sibling worktree worker/u);
+  });
+
   it("renders compact CTO Hygiene from the provided tray payload", () => {
     const { context, tabSessions } = loadTrayRenderer();
 

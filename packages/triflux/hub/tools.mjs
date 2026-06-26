@@ -183,6 +183,26 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
+    // ── 2-1. takeover_role ──
+    {
+      name: "takeover_role",
+      description:
+        "CTO 같은 허브 역할의 active leader를 명시적으로 승계하고 미처리 역할 메시지를 새 leader에게 이전합니다",
+      inputSchema: {
+        type: "object",
+        required: ["role", "agent_id"],
+        properties: {
+          role: { type: "string", enum: ["cto"], default: "cto" },
+          agent_id: { type: "string", pattern: "^[a-zA-Z0-9._:-]{3,64}$" },
+          reason: { type: "string" },
+          requested_by: { type: "string" },
+        },
+      },
+      handler: wrap("TAKEOVER_ROLE_FAILED", (args) => {
+        return router.takeoverRole(args);
+      }),
+    },
+
     // ── 3. publish ──
     {
       name: "publish",
@@ -841,7 +861,7 @@ export function createTools(store, router, hitl, pipe = null) {
       }),
     },
 
-    // ── 21. send_input ──
+    // ── 22. send_input ──
     {
       name: "send_input",
       description: "Send input text to a worker in INPUT_WAIT state",

@@ -17,6 +17,27 @@ function tempDbPath() {
   return join(dir, "test.db");
 }
 
+function createIsolatedRouter() {
+  const dbPath = tempDbPath();
+  const store = createStore(dbPath);
+  const router = createRouter(store);
+  return {
+    store,
+    router,
+    cleanup() {
+      router.stopSweeper();
+      store.close();
+      try {
+        rmSync(join(dbPath, ".."), { recursive: true, force: true });
+      } catch {}
+    },
+  };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 describe("createRouter()", { skip: SQLITE_SKIP }, () => {
   let store;
   let router;
@@ -135,6 +156,456 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
         result.data.fanout_count >= 2,
         `fanout_count(${result.data.fanout_count})는 최소 2여야 한다`,
       );
+    });
+  });
+
+  describe("CTO 역할 승계", () => {
+    it("topic:cto는 전체 팬아웃이 아니라 현재 CTO leader 한 명에게만 라우팅해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "cto-route-leader",
+          cli: "claude",
+          capabilities: ["code"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 10 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.registerAgent({
+          agent_id: "cto-topic-worker",
+          cli: "codex",
+          capabilities: ["code"],
+          topics: ["cto"],
+          heartbeat_ttl_ms: 60000,
+        });
+
+        const result = isolated.router.handlePublish({
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "please coordinate" },
+        });
+
+        assert.equal(result.ok, true);
+        assert.equal(result.data.fanout_count, 1);
+        assert.equal(
+          isolated.router.getPendingMessages("cto-route-leader").length,
+          1,
+        );
+        assert.equal(
+          isolated.router.getPendingMessages("cto-topic-worker").length,
+          0,
+        );
+        const status = isolated.router.getStatus("hub");
+        assert.equal(status.data.roles.cto.leader_agent_id, "cto-route-leader");
+        assert.equal(status.data.roles.cto.candidate_source, "explicit");
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("leader가 없을 때 들어온 topic:cto 메시지는 후보 등록 시 새 leader에게 이전되어야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        const published = isolated.router.handlePublish({
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "wait for a CTO" },
+        });
+
+        assert.equal(published.ok, true);
+        assert.equal(published.data.fanout_count, 0);
+        assert.equal(published.data.role.pending_count, 1);
+
+        isolated.router.registerAgent({
+          agent_id: "cto-late-leader",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto" },
+          heartbeat_ttl_ms: 60000,
+        });
+
+        const status = isolated.router.getStatus("hub");
+        assert.equal(status.data.roles.cto.leader_agent_id, "cto-late-leader");
+        assert.equal(status.data.roles.cto.pending_count, 1);
+
+        const pending = isolated.router.getPendingMessages("cto-late-leader");
+        assert.equal(pending.length, 1);
+        assert.equal(pending[0].topic, "cto");
+        assert.deepEqual(pending[0].payload, { decision: "wait for a CTO" });
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("legacy route(msg) 경로도 leader 없는 topic:cto backlog를 보존해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        const msg = isolated.store.enqueueMessage({
+          type: "event",
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "legacy route backlog" },
+        });
+
+        assert.equal(isolated.router.route(msg), 0);
+        assert.equal(
+          isolated.router.getStatus("hub").data.roles.cto.pending_count,
+          1,
+        );
+
+        isolated.router.registerAgent({
+          agent_id: "cto-legacy-route",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto" },
+          heartbeat_ttl_ms: 60000,
+        });
+
+        const pending = isolated.router.getPendingMessages("cto-legacy-route");
+        assert.equal(pending.length, 1);
+        assert.deepEqual(pending[0].payload, {
+          decision: "legacy route backlog",
+        });
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("이전 leader가 먼저 offline 된 뒤 나중에 새 후보가 등록되어도 backlog를 이전해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "cto-gap-old",
+          cli: "claude",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto" },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.handlePublish({
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "survive leader gap" },
+        });
+        assert.equal(
+          isolated.router.getPendingMessages("cto-gap-old").length,
+          1,
+        );
+
+        isolated.router.updateAgentStatus("cto-gap-old", "offline");
+        const gapStatus = isolated.router.getStatus("hub");
+        assert.equal(gapStatus.data.roles.cto.leader_agent_id, null);
+        assert.equal(
+          gapStatus.data.roles.cto.previous_leader_agent_id,
+          "cto-gap-old",
+        );
+        assert.equal(gapStatus.data.roles.cto.pending_count, 1);
+
+        isolated.router.registerAgent({
+          agent_id: "cto-gap-new",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto" },
+          heartbeat_ttl_ms: 60000,
+        });
+
+        const status = isolated.router.getStatus("hub");
+        assert.equal(status.data.roles.cto.leader_agent_id, "cto-gap-new");
+        assert.equal(
+          status.data.roles.cto.previous_leader_agent_id,
+          "cto-gap-old",
+        );
+        assert.equal(status.data.roles.cto.pending_count, 1);
+        assert.equal(
+          isolated.router.getPendingMessages("cto-gap-old").length,
+          0,
+        );
+        assert.equal(
+          isolated.router.getPendingMessages("cto-gap-new").length,
+          1,
+        );
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("leader가 offline 되면 새 CTO 후보로 승계하고 미처리 CTO 메시지를 이전해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "cto-old-leader",
+          cli: "claude",
+          capabilities: ["code"],
+          topics: [],
+          metadata: { roles: ["cto"], cto_priority: 10 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.registerAgent({
+          agent_id: "cto-new-leader",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 5 },
+          heartbeat_ttl_ms: 60000,
+        });
+
+        const ctoMessage = isolated.router.handlePublish({
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "unacked backlog" },
+        });
+        const directMessage = isolated.router.handlePublish({
+          from: "lead",
+          to: "cto-old-leader",
+          topic: "lead.control",
+          payload: { command: "do not reroute" },
+        });
+        const misleadingDirectMessage = isolated.router.handlePublish({
+          from: "lead",
+          to: "cto-old-leader",
+          topic: "ops.direct",
+          payload: { role: "cto", command: "metadata only; do not reroute" },
+        });
+        const directCtoTopicMessage = isolated.router.handlePublish({
+          from: "lead",
+          to: "cto-old-leader",
+          topic: "cto",
+          payload: { command: "direct topic metadata; do not reroute" },
+        });
+        assert.equal(ctoMessage.data.fanout_count, 1);
+        assert.equal(directMessage.data.fanout_count, 1);
+        assert.equal(misleadingDirectMessage.data.fanout_count, 1);
+        assert.equal(directCtoTopicMessage.data.fanout_count, 1);
+        assert.equal(
+          isolated.router.getPendingMessages("cto-old-leader").length,
+          4,
+        );
+
+        isolated.router.updateAgentStatus("cto-old-leader", "offline");
+        const status = isolated.router.getStatus("hub");
+        assert.equal(status.data.roles.cto.leader_agent_id, "cto-new-leader");
+        assert.equal(
+          status.data.roles.cto.previous_leader_agent_id,
+          "cto-old-leader",
+        );
+        assert.equal(status.data.roles.cto.pending_count, 1);
+
+        const newPending = isolated.router.getPendingMessages("cto-new-leader");
+        assert.equal(newPending.length, 1);
+        assert.equal(newPending[0].topic, "cto");
+
+        const oldPending = isolated.router.getPendingMessages("cto-old-leader");
+        assert.equal(oldPending.length, 3);
+        assert.deepEqual(oldPending.map((message) => message.topic).sort(), [
+          "cto",
+          "lead.control",
+          "ops.direct",
+        ]);
+
+        isolated.router.refreshAgentLease("cto-old-leader", 60000);
+        const afterOldHeartbeat = isolated.router.getStatus("hub");
+        assert.equal(
+          afterOldHeartbeat.data.roles.cto.leader_agent_id,
+          "cto-new-leader",
+        );
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("getStatus()는 read-only이며 만료 leader의 CTO backlog를 승계 이전하지 않아야 한다", async () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "cto-status-old",
+          cli: "claude",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 10 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.registerAgent({
+          agent_id: "cto-status-new",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 1 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.handlePublish({
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "status must not move this" },
+        });
+        isolated.store.db
+          .prepare("UPDATE agents SET lease_expires_ms=? WHERE agent_id=?")
+          .run(Date.now() - 1, "cto-status-old");
+
+        await delay(5);
+        const status = isolated.router.getStatus("hub");
+
+        assert.equal(status.ok, true);
+        assert.equal(status.data.roles.cto.leader_agent_id, null);
+        assert.equal(status.data.roles.cto.pending_count, 1);
+        assert.equal(
+          isolated.router.getPendingMessages("cto-status-old").length,
+          1,
+        );
+        assert.equal(
+          isolated.router.getPendingMessages("cto-status-new").length,
+          0,
+        );
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("직접 cto topic publish는 leader를 바꾸거나 CTO backlog를 고립시키면 안 된다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "cto-direct-topic-old",
+          cli: "claude",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 10 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.registerAgent({
+          agent_id: "cto-direct-topic-new",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 1 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.handlePublish({
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "move only on real role election" },
+        });
+        assert.equal(
+          isolated.router.getPendingMessages("cto-direct-topic-old").length,
+          1,
+        );
+
+        isolated.store.db
+          .prepare("UPDATE agents SET lease_expires_ms=? WHERE agent_id=?")
+          .run(Date.now() - 1, "cto-direct-topic-old");
+
+        const direct = isolated.router.handlePublish({
+          from: "lead",
+          to: "some-direct-recipient",
+          topic: "cto",
+          payload: { command: "not role addressed" },
+        });
+        assert.equal(direct.ok, true);
+        assert.equal(direct.data.role, undefined);
+
+        const afterDirect = isolated.router.getStatus("hub");
+        assert.equal(afterDirect.data.roles.cto.leader_agent_id, null);
+        assert.equal(afterDirect.data.roles.cto.pending_count, 1);
+        assert.equal(
+          isolated.router.getPendingMessages("cto-direct-topic-old").length,
+          1,
+        );
+        assert.equal(
+          isolated.router.getPendingMessages("cto-direct-topic-new").length,
+          0,
+        );
+
+        isolated.router.refreshAgentLease("cto-direct-topic-new", 60000);
+        const afterHeartbeat = isolated.router.getStatus("hub");
+        assert.equal(
+          afterHeartbeat.data.roles.cto.leader_agent_id,
+          "cto-direct-topic-new",
+        );
+        assert.equal(
+          isolated.router.getPendingMessages("cto-direct-topic-old").length,
+          0,
+        );
+        assert.equal(
+          isolated.router.getPendingMessages("cto-direct-topic-new").length,
+          1,
+        );
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("takeoverRole()은 명시 승계와 백로그 이전을 멱등하게 수행해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "cto-manual-old",
+          cli: "claude",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 10 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.registerAgent({
+          agent_id: "cto-manual-new",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 1 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.handlePublish({
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "manual takeover" },
+        });
+
+        const takeover = isolated.router.takeoverRole({
+          role: "cto",
+          agent_id: "cto-manual-new",
+          reason: "operator_request",
+          requested_by: "test",
+        });
+
+        assert.equal(takeover.ok, true);
+        assert.equal(takeover.data.changed, true);
+        assert.equal(takeover.data.previous_leader_agent_id, "cto-manual-old");
+        assert.equal(takeover.data.leader_agent_id, "cto-manual-new");
+        assert.equal(takeover.data.transferred_count, 1);
+        assert.equal(
+          isolated.router.getPendingMessages("cto-manual-new").length,
+          1,
+        );
+        assert.equal(
+          isolated.router.getPendingMessages("cto-manual-old").length,
+          0,
+        );
+
+        const again = isolated.router.takeoverRole({
+          role: "cto",
+          agent_id: "cto-manual-new",
+          reason: "operator_request",
+          requested_by: "test",
+        });
+        assert.equal(again.ok, true);
+        assert.equal(again.data.changed, false);
+        assert.equal(again.data.transferred_count, 0);
+        assert.equal(
+          isolated.router.getPendingMessages("cto-manual-new").length,
+          1,
+        );
+      } finally {
+        isolated.cleanup();
+      }
     });
   });
 

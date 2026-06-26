@@ -22,6 +22,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { runCollect } from "../cto/collect.mjs";
+import { resolveLakeRootDir } from "../cto/lake-root.mjs";
 import { runStatus as runCtoStatus } from "../cto/status.mjs";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
 import {
@@ -95,6 +96,7 @@ const LOOPBACK_REMOTE_ADDRESSES = new Set([
 const ALLOWED_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const CANONICAL_PROJECT_ROOT = resolveLakeRootDir(PROJECT_ROOT) || PROJECT_ROOT;
 const PUBLIC_DIR = resolve(join(PROJECT_ROOT, "hub", "public"));
 const CACHE_DIR = join(homedir(), ".claude", "cache");
 const HUB_DEFAULT_PORT = 27888;
@@ -865,7 +867,7 @@ function getBrokerPublicSnapshot(currentBroker = brokerInstance) {
 async function getTrayCtoStatus() {
   try {
     return await runCtoStatus(["--json"], {
-      rootDir: PROJECT_ROOT,
+      rootDir: CANONICAL_PROJECT_ROOT,
       stdout: { write() {} },
     });
   } catch (error) {
@@ -1446,12 +1448,22 @@ export async function startHub({
         const synapseSnapshot = synapseRegistry.snapshot();
         const broker = getBrokerPublicSnapshot(brokerInstance);
         const runtimeStatus = getRuntimeStatus({
-          projectRoots: [PROJECT_ROOT],
+          projectRoots: [
+            ...new Set([CANONICAL_PROJECT_ROOT, PROJECT_ROOT].filter(Boolean)),
+          ],
         });
-        const [ctoStatus, mcpStatus] = await Promise.all([
+        const [ctoStatus, mcpStatus, hubStatus] = await Promise.all([
           getTrayCtoStatus(),
           Promise.resolve(getTrayMcpStatus()),
+          pipe.executeQuery("status", {
+            scope: "hub",
+            include_metrics: true,
+          }),
         ]);
+        const mergedCtoStatus = {
+          ...(ctoStatus || {}),
+          roles: hubStatus?.data?.roles || ctoStatus?.roles || {},
+        };
 
         return writeJson(
           res,
@@ -1462,12 +1474,12 @@ export async function startHub({
               pid: process.pid,
               port,
               url: buildHubUrl(host, port),
-              projectRoot: PROJECT_ROOT,
+              projectRoot: CANONICAL_PROJECT_ROOT,
             },
             qos,
             synapseSnapshot,
             broker,
-            ctoStatus,
+            ctoStatus: mergedCtoStatus,
             mcpStatus,
             runtimeStatus,
           }),
@@ -1650,6 +1662,28 @@ export async function startHub({
           if (path === "/bridge/hitl/pending" && req.method === "GET") {
             const result = { ok: true, data: hitl.getPendingRequests() };
             return writeJson(res, result.ok ? 200 : 400, result);
+          }
+
+          if (path === "/bridge/takeover-role" && req.method === "POST") {
+            const {
+              role = "cto",
+              agent_id,
+              reason = "manual",
+              requested_by = "http",
+            } = body;
+            if (!role || !agent_id) {
+              return writeJson(res, 400, {
+                ok: false,
+                error: "role, agent_id 필수",
+              });
+            }
+            const result = await pipe.executeCommand("takeover_role", {
+              role,
+              agent_id,
+              reason,
+              requested_by,
+            });
+            return writeJson(res, result.ok ? 200 : 409, result);
           }
 
           if (path === "/bridge/register" && req.method === "POST") {
