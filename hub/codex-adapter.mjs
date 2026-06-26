@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { codexProfileConfigOverrides } from "../scripts/lib/codex-profile-config.mjs";
 import {
   buildExecCommand,
   createResult,
@@ -72,14 +73,21 @@ function buildAttempts(opts, preflight) {
 // ── Launch script ───────────────────────────────────────────────
 
 function createLaunchScriptText(opts) {
-  const parts = ["codex"];
-  if (opts.profile) parts.push("--profile", shellQuote(opts.profile));
-  parts.push(
+  const parts = [
+    "codex",
     "exec",
     "--dangerously-bypass-approvals-and-sandbox",
     "--skip-git-repo-check",
-    '$(cat "$PROMPT_FILE")',
-  );
+  ];
+  // Select the effort profile via `-c` config overrides instead of
+  // `--profile <name>` (see buildExecCommand): codex 0.134+ rejects `--profile
+  // X` whenever config.toml still contains an inline [profiles.X] table.
+  if (opts.profile) {
+    for (const override of codexProfileConfigOverrides(opts.profile)) {
+      parts.push("-c", shellQuote(override));
+    }
+  }
+  parts.push('$(cat "$PROMPT_FILE")');
   return [
     "#!/usr/bin/env bash",
     "set -euo pipefail",

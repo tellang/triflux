@@ -3,6 +3,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve as pathResolve } from "node:path";
 
+// scripts/lib is bundled into @triflux/remote itself (package.json files), so
+// import the local mirror relatively rather than via @triflux/core. The core
+// peer range (^10.0.0-alpha.1) could resolve to a build that predates this
+// export, which would fail at import time; the bundled copy is version-skew
+// safe and always carries the matching codexProfileConfigOverrides.
+import { codexProfileConfigOverrides } from "../../scripts/lib/codex-profile-config.mjs";
 import { whichCommand } from "@triflux/core/hub/platform.mjs";
 
 const WIN32_EXT_PRECEDENCE = [".cmd", ".exe", ".bat", ".ps1"];
@@ -147,7 +153,6 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
   }
 
   const args = [];
-  pushFlag(args, "--profile", opts.profile);
   args.push(
     "exec",
     "--dangerously-bypass-approvals-and-sandbox",
@@ -155,6 +160,14 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
     "--color",
     "never",
   );
+  // Select the effort profile via `-c` config overrides instead of
+  // `--profile <name>`: codex 0.134+ rejects `--profile X` whenever config.toml
+  // still contains an inline [profiles.X] table (which codex re-injects on
+  // config rewrite). These go straight to spawn argv (shell: false), so push
+  // the raw TOML-scalar overrides without shell-quoting.
+  for (const override of codexProfileConfigOverrides(opts.profile)) {
+    args.push("-c", override);
+  }
   if (Array.isArray(opts.mcpServers)) {
     const excludedMcpServers = new Set(
       (Array.isArray(opts.excludeMcpServers) ? opts.excludeMcpServers : [])

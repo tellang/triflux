@@ -166,7 +166,13 @@ test("buildLaunchScript emits headless codex exec wrapper", async () => {
   assert.match(script, /--dangerously-bypass-approvals-and-sandbox/);
   assert.match(script, /--skip-git-repo-check/);
   assert.match(script, /\$\(cat "\$PROMPT_FILE"\)/);
-  assert.match(script, /--profile "codex53_high"/);
+  // Profile selected via `-c` overrides, not `--profile` (codex 0.134+ rejects
+  // --profile X against an inline [profiles.X] in config.toml).
+  assert.doesNotMatch(script, /--profile/);
+  assert.ok(
+    script.includes('-c "model_reasoning_effort=\\"high\\""'),
+    `expected -c effort override, got: ${script}`,
+  );
 });
 
 test("execute returns stdout for successful codex exec", async () => {

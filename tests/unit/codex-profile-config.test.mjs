@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -11,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import {
+  codexProfileConfigOverrides,
   listLegacyCodexProfileSections,
   sanitizeCodexProfileConfig,
   sanitizeCodexProfileConfigFile,
@@ -125,5 +127,41 @@ describe("codex legacy profile config sanitizer", () => {
       false,
     );
     assert.doesNotMatch(readFileSync(configPath, "utf8"), /^\[profiles\./m);
+    // Atomic write must not leave behind a `.tmp-*` staging file; rename
+    // consumes it. A leftover temp would mean a torn/aborted write.
+    assert.equal(
+      readdirSync(codexHome).some((name) => name.includes(".tmp-")),
+      false,
+      "atomic sanitize should leave no .tmp- staging file",
+    );
+  });
+});
+
+describe("codexProfileConfigOverrides", () => {
+  it("reads model + reasoning effort from the per-profile file", () => {
+    const codexHome = makeHome();
+    writeFileSync(
+      join(codexHome, "gpt55_high.config.toml"),
+      'model = "gpt-5.5"\nmodel_reasoning_effort = "high"\n',
+    );
+    assert.deepEqual(codexProfileConfigOverrides("gpt55_high", { codexHome }), [
+      'model="gpt-5.5"',
+      'model_reasoning_effort="high"',
+    ]);
+  });
+
+  it("falls back to the _<effort> naming convention when the file is absent", () => {
+    const codexHome = makeHome();
+    // no gpt55_xhigh.config.toml written → derive effort only, leave model unset
+    assert.deepEqual(
+      codexProfileConfigOverrides("gpt55_xhigh", { codexHome }),
+      ['model_reasoning_effort="xhigh"'],
+    );
+  });
+
+  it("returns [] for an unknown profile with no file and no effort suffix", () => {
+    const codexHome = makeHome();
+    assert.deepEqual(codexProfileConfigOverrides("auto", { codexHome }), []);
+    assert.deepEqual(codexProfileConfigOverrides("", { codexHome }), []);
   });
 });
