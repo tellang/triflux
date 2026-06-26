@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.40.0] - 2026-06-26
+
+### Added
+- **[#442]** cto: CTO coordinator 역할에 succession/failover 도입 — `topic:cto` 단일 리더 선출(`chooseRoleLeader`/`ensureRoleLeader`) + 리더 offline 시 standby heir 승격으로 offline CTO 가 live cross-session coordination 을 멈추지 않게 했다. 미ack 백로그를 신규 리더로 dedup·죽은 리더 no-leak 으로 이관(`transferRoleBacklog`), 수동 override(`takeover_role`)를 MCP tool·pipe command·HTTP `/bridge/takeover-role`·bridge CLI 로 노출, tray 에 CTO succession 상태 카드 추가. lease 권위로 split-brain 없음. `packages/{core,remote,triflux}` byte-identical 미러. Closes #441.
+
+### Fixed
+- **[#440]** codex: hub headless codex exec(conductor/swarm)가 effort 프로파일을 `--profile <name>` 대신 `-c model=.. -c model_reasoning_effort=..` config override 로 선택 — codex 0.134+ 의 inline `[profiles.X]` 충돌과 swarm 워커 config write race 양쪽에 면역(config 무변경). `codexProfileConfigOverrides` 신설(`~/.codex/<name>.config.toml` SSOT, `_<effort>` naming fallback) + `sanitizeCodexProfileConfigFile` atomic write(temp+rename). remote 미러는 core peer-skew 회피용 자체 번들 상대 import.
+
 ## [10.39.1] - 2026-06-19
 
 ### Fixed
