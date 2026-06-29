@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -61,6 +61,14 @@ describe("GeminiWorker compatibility alias", { timeout: 15000 }, () => {
 });
 
 describe("ClaudeWorker", { timeout: 15000 }, () => {
+  const argvOutFiles = new Set();
+
+  after(() => {
+    for (const file of argvOutFiles) {
+      rmSync(file, { force: true });
+    }
+  });
+
   it("여러 turn을 같은 세션으로 처리하고 history를 유지해야 한다", async () => {
     const worker = new ClaudeWorker({
       command: process.execPath,
@@ -91,6 +99,62 @@ describe("ClaudeWorker", { timeout: 15000 }, () => {
     const result = await worker.run("needs control");
     assert.match(result.response, /claude:needs control/);
     await worker.stop();
+  });
+
+  it("passes --model and --effort through to the claude CLI", async () => {
+    const argvOut = resolve(
+      PROJECT_ROOT,
+      `.tmp-claude-argv-${process.pid}-${Date.now()}.json`,
+    );
+    argvOutFiles.add(argvOut);
+    const worker = new ClaudeWorker({
+      command: process.execPath,
+      commandArgs: [CLAUDE_FIXTURE],
+      model: "opus",
+      effort: "xhigh",
+      env: { FAKE_CLAUDE_ARGV_OUT: argvOut },
+      timeoutMs: 5000,
+      allowDangerouslySkipPermissions: true,
+    });
+
+    const result = await worker.run("argv check");
+    assert.match(result.response, /claude:argv check/);
+
+    const argv = JSON.parse(readFileSync(argvOut, "utf8"));
+    const modelIndex = argv.indexOf("--model");
+    const effortIndex = argv.indexOf("--effort");
+    assert.notEqual(modelIndex, -1);
+    assert.notEqual(effortIndex, -1);
+    assert.equal(argv[modelIndex + 1], "opus");
+    assert.equal(argv[effortIndex + 1], "xhigh");
+    await worker.stop();
+    rmSync(argvOut, { force: true });
+    argvOutFiles.delete(argvOut);
+  });
+
+  it("omits --effort when no claude effort is provided", async () => {
+    const argvOut = resolve(
+      PROJECT_ROOT,
+      `.tmp-claude-argv-${process.pid}-${Date.now()}.json`,
+    );
+    argvOutFiles.add(argvOut);
+    const worker = new ClaudeWorker({
+      command: process.execPath,
+      commandArgs: [CLAUDE_FIXTURE],
+      model: "opus",
+      env: { FAKE_CLAUDE_ARGV_OUT: argvOut },
+      timeoutMs: 5000,
+      allowDangerouslySkipPermissions: true,
+    });
+
+    const result = await worker.run("argv omit effort check");
+    assert.match(result.response, /claude:argv omit effort check/);
+
+    const argv = JSON.parse(readFileSync(argvOut, "utf8"));
+    assert.equal(argv.includes("--effort"), false);
+    await worker.stop();
+    rmSync(argvOut, { force: true });
+    argvOutFiles.delete(argvOut);
   });
 });
 

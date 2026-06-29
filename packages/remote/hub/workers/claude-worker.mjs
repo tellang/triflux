@@ -113,6 +113,7 @@ function buildClaudeArgs(worker, options) {
   if (options.includePartialMessages) args.push("--include-partial-messages");
   if (options.replayUserMessages) args.push("--replay-user-messages");
   if (options.model) args.push("--model", options.model);
+  if (options.effort) args.push("--effort", options.effort);
   if (options.allowDangerouslySkipPermissions)
     args.push("--dangerously-skip-permissions");
   if (options.permissionMode)
@@ -143,6 +144,7 @@ export class ClaudeWorker {
     this.cwd = options.cwd || process.cwd();
     this.env = { ...process.env, ...(options.env || {}) };
     this.model = options.model || null;
+    this.effort = options.effort || null;
     this.permissionMode = options.permissionMode || null;
     this.allowDangerouslySkipPermissions =
       options.allowDangerouslySkipPermissions !== false;
@@ -323,6 +325,7 @@ export class ClaudeWorker {
 
     const args = buildClaudeArgs(this, {
       model: this.model,
+      effort: this.effort,
       permissionMode: this.permissionMode,
       allowDangerouslySkipPermissions: this.allowDangerouslySkipPermissions,
       includePartialMessages: this.includePartialMessages,

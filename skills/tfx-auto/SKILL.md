@@ -72,7 +72,9 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 > **MANDATORY RULES**
 >
 > 1. **실행**: CLI 에이전트는 반드시 `Bash("bash ~/.claude/scripts/tfx-route.sh ...")`. Claude 네이티브(explore/verifier/test-engineer/qa-tester)만 `Agent()`.
-> 2. **비용**: Codex 우선 → Antigravity → Claude 최후 수단. `claude` 선택 전 "Codex로 가능한가?" 재확인.
+> 2. **비용/편향 분리**: 실행 워커 비용은 Codex/Antigravity 우선으로 낮추되, consensus/debate/panel에서는 Claude/Opus를 최후수단이 아니라 counter-bias outvoice로 둔다. Claude가 실행을 맡는 경우는 명시적 `--cli claude`, Claude-native host role, 또는 fallback뿐이다.
+> 2-a. **Anti-bias triad**: Triflux의 본가 목적은 Codex↔Claude 균형으로 단일 모델 편향을 줄이는 것이다. `triad`는 Claude/Opus(counter-bias outvoice) + Codex(implementation/reality check) + Antigravity(product/UX auxiliary)를 보존하고, disputed/minority view를 삭제하지 않는다.
+> 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux의 `CLI_EFFORT`/profile 값은 `low|medium|high|xhigh|max` Claude effort로 매핑한다(`ultracode`는 `claude --effort` 값이 아니라 하니스 모드이므로 기본 effort로 매핑된다). skill 문서가 모델 ID를 하드코딩하지 않는다.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
 > 4. **트리아지**: Codex `exec --full-auto` 분류 + Opus 인라인 분해. Agent 스폰 금지.
 > 5. **thorough**: `-t`/`--thorough` 시 파이프라인 init 필수. 커맨드 숏컷은 항상 quick.
@@ -114,7 +116,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--shape` | `debate` | 옵션 비교 + 점수화 + 최종 추천 | debate renderer |
 | `--shape` | `panel` | 전문가 roster 기반 시뮬레이션 | panel renderer |
 | `--cli-set` | `triad` (기본) | Claude + Codex + Antigravity | consensus participants |
-| `--cli-set` | `no-antigravity` | Claude + Codex partial degrade | consensus participants |
+| `--cli-set` | `no-antigravity` | Claude/Opus outvoice + Codex partial degrade | consensus participants |
 | `--cli-set` | `custom` | 기존 3 CLI 내부 subset/repetition 만 허용 | consensus participants |
 | `--options` | `"A|B|C"` | debate 비교 대상 | debate normalizer |
 | `--criteria` | `"latency|complexity|operability"` | debate 평가 기준 | debate normalizer |
@@ -284,8 +286,8 @@ shape 의미:
 
 | 값 | 의미 | 비고 |
 |----|------|------|
-| `triad` | Claude + Codex + Antigravity | 기본값 |
-| `no-antigravity` | Claude + Codex | Antigravity 미가용 degrade |
+| `triad` | Claude/Opus outvoice + Codex + Antigravity | 기본값 |
+| `no-antigravity` | Claude/Opus outvoice + Codex | Antigravity 미가용 degrade |
 | `custom` | 기존 3 CLI 내부 subset/repetition 만 허용 | 신규 provider 추가 금지 |
 
 shape 입력 정규화:
@@ -331,7 +333,7 @@ shape 별 `shape_input`:
 2. `--mode consensus` 확인
 3. `--shape` 기본값 보정 (`consensus`)
 4. shape 별 payload 정규화
-5. Claude native + headless Codex/Antigravity 동시 dispatch
+5. Claude/Opus outvoice + headless Codex/Antigravity 동시 dispatch
 6. 결과 수집
 7. 공통 `meta_judgment` 생성
 8. shape renderer 로 markdown/json 출력
@@ -386,7 +388,7 @@ shape 별 orchestration 정책:
 
 - 목적: 각 participant 의 findings 를 합의/충돌 항목으로 압축하고 `FIX_FIRST` / `merge` / `defer` 같은 실행 결정을 빠르게 내린다.
 - 수집 단위: 옵션 비교가 아니라 finding/assertion 단위다. 동일 결론이라도 근거가 다르면 separate evidence 로 보존한다.
-- 합의 판정: 3자 중 2자 이상이 같은 remediation 또는 risk assessment 를 지지하면 provisional agreement 로 분류하고, Claude 가 최종 `resolved_items` 승격 여부를 결정한다.
+- 합의 판정: 3자 중 2자 이상이 같은 remediation 또는 risk assessment 를 지지하면 provisional agreement 로 분류하고, Claude/Opus outvoice가 반론을 제공하고 lead가 최종 `resolved_items` 승격 여부를 결정한다.
 - 충돌 승격: P1/P2 급 충돌은 score 와 무관하게 `user_decision_needed` 또는 `FIX_FIRST` 로 승격한다. score 가 높아도 안전 이슈를 묻지 않는다.
 - degrade: `no-antigravity` 또는 partial timeout 시 2자 합의를 허용하되 root meta 의 `status=partial` 과 누락 participant 이유를 반드시 남긴다.
 
@@ -559,7 +561,7 @@ shape 별 orchestration 정책:
 - roster 규칙: `--experts` 미지정 시 기본 roster 를 채우되 각 CLI 가 서로 다른 전문성을 대표하도록 배분한다. 동일 전문가를 중복 배정하지 않는다.
 - 발언 구조: participant raw answer 를 그대로 이어붙이지 말고 `expert -> thesis -> supporting evidence -> concern -> recommendation` 구조로 정리한다.
 - 합의 규칙: panel 은 unanimity 보다 "majority view + minority view + open questions" 보존이 중요하다. minority 가 P1/P2 를 제기하면 별도 `open_questions` 로 승격한다.
-- moderator 역할: Claude 는 moderator 로서 panel synthesis 를 담당하지만, 자기 의견을 추가 participant 처럼 중복 집계하지 않는다.
+- moderator 역할: Claude/Opus outvoice 는 moderator 로서 panel synthesis 를 담당하지만, 자기 의견을 추가 participant 처럼 중복 집계하지 않는다.
 
 출력 schema 예시:
 
@@ -853,7 +855,9 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 
 | 입력 | CLI | MCP |
 |------|-----|-----|
-| codex / executor / build-fixer / spark / debugger / deep-executor | Codex | implement |
+| codex / executor / spark | Codex (high; 복잡 구현은 deep-executor/xhigh) | implement |
+| debugger / deep-executor | Codex (xhigh) | implement |
+| build-fixer | Codex (low) | implement |
 | architect / planner / critic / analyst | Codex (xhigh) | analyze |
 | scientist / document-specialist | Codex | analyze |
 | code-reviewer / security-reviewer / quality-reviewer | Codex (review) | review |

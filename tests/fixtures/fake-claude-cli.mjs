@@ -1,6 +1,20 @@
 #!/usr/bin/env node
 
+import { writeFileSync } from "node:fs";
 import readline from "node:readline";
+
+// Test seam: when FAKE_CLAUDE_ARGV_OUT is set, dump the CLI argv the worker
+// spawned us with so a test can assert flags like --model / --effort.
+if (process.env.FAKE_CLAUDE_ARGV_OUT) {
+  try {
+    writeFileSync(
+      process.env.FAKE_CLAUDE_ARGV_OUT,
+      JSON.stringify(process.argv.slice(2)),
+    );
+  } catch {
+    /* best-effort; never block the fake session */
+  }
+}
 
 const SESSION_ID = "11111111-1111-1111-1111-111111111111";
 const rl = readline.createInterface({
