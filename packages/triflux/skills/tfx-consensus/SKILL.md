@@ -43,6 +43,7 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) tfx-consensus -> tfx-auto --mode consensus"
 tfx-consensus 는 여전히 consensus family 의 canonical semantics 를 대표하지만, 별도 엔진으로 유지하지 않는다. Phase 4a 부터 공통 orchestration, participant 상태, artifact 경로, `meta_judgment` 스키마를 `tfx-auto --mode consensus` 가 소유한다.
 
 공통 계약:
+- Triflux anti-bias contract: `triad`는 Claude/Opus counter-bias outvoice + Codex implementation/reality check + Antigravity product/UX auxiliary 관점을 보존한다. Claude/Opus는 합의에서 minority/dispute를 지우는 최종 심판이 아니라 반론/위험/필요 증거를 명시하는 outvoice다.
 - artifact 경로: `.omc/artifacts/consensus/<session-id>/consensus.{md,json}`
 - 공통 메타 유틸: `hub/team/consensus-meta.mjs`
 - 공통 root 메타: `mode`, `shape`, `topic`, `cli_set`, `participants`, `status`

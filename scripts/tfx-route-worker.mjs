@@ -77,6 +77,10 @@ function parseArgs(argv) {
         args.model = next;
         index += 1;
         break;
+      case "--effort":
+        args.effort = next;
+        index += 1;
+        break;
       case "--timeout-ms":
         args.timeoutMs = Number(next);
         index += 1;
@@ -219,6 +223,7 @@ const worker = await createWorker(args.type, {
   command: args.command,
   commandArgs: parseJsonArray(args.commandArgsJson, "--command-args-json"),
   model: args.model,
+  effort: args.effort,
   timeoutMs: args.timeoutMs,
   approvalMode: args.approvalMode,
   permissionMode: args.permissionMode,

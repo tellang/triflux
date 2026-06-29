@@ -1873,12 +1873,35 @@ get_claude_model() {
   esac
 }
 
+get_claude_effort() {
+  # Claude Code exposes a separate --effort flag. Preserve high-end effort
+  # levels instead of collapsing them into "high". `claude --effort` accepts
+  # exactly low/medium/high/xhigh/max (an unknown value warns and falls back to
+  # the default).
+  case "$CLI_EFFORT" in
+    low) echo "low" ;;
+    medium) echo "medium" ;;
+    high) echo "high" ;;
+    xhigh) echo "xhigh" ;;
+    max) echo "max" ;;
+    *max*) echo "max" ;;
+    *xhigh*) echo "xhigh" ;;
+    *high*) echo "high" ;;
+    *med*|n/a|agy_v1|"") echo "medium" ;;
+    *low*) echo "low" ;;
+    *) echo "medium" ;;
+  esac
+}
+
 emit_claude_native_metadata() {
   local model
   model=$(get_claude_model)
+  local effort
+  effort=$(get_claude_effort)
   echo "ROUTE_TYPE=claude-native"
   echo "AGENT=$AGENT_TYPE"
   echo "MODEL=$model"
+  echo "EFFORT=$effort"
   echo "RUN_MODE=$RUN_MODE"
   echo "OPUS_OVERSIGHT=$OPUS_OVERSIGHT"
   echo "TIMEOUT=$TIMEOUT_SEC"
@@ -3022,12 +3045,14 @@ EOF
     fi
 
   elif [[ "$CLI_TYPE" == "claude" ]]; then
-    local claude_model
+    local claude_model claude_effort
     claude_model=$(get_claude_model)
+    claude_effort=$(get_claude_effort)
     local -a claude_worker_args=(
       "--command" "$CLI_CMD"
       "--command-args-json" "$CLAUDE_BIN_ARGS_JSON"
       "--model" "$claude_model"
+      "--effort" "$claude_effort"
       "--permission-mode" "bypassPermissions"
       "--allow-dangerously-skip-permissions"
     )
