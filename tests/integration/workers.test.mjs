@@ -131,6 +131,31 @@ describe("ClaudeWorker", { timeout: 15000 }, () => {
     rmSync(argvOut, { force: true });
     argvOutFiles.delete(argvOut);
   });
+
+  it("omits --effort when no claude effort is provided", async () => {
+    const argvOut = resolve(
+      PROJECT_ROOT,
+      `.tmp-claude-argv-${process.pid}-${Date.now()}.json`,
+    );
+    argvOutFiles.add(argvOut);
+    const worker = new ClaudeWorker({
+      command: process.execPath,
+      commandArgs: [CLAUDE_FIXTURE],
+      model: "opus",
+      env: { FAKE_CLAUDE_ARGV_OUT: argvOut },
+      timeoutMs: 5000,
+      allowDangerouslySkipPermissions: true,
+    });
+
+    const result = await worker.run("argv omit effort check");
+    assert.match(result.response, /claude:argv omit effort check/);
+
+    const argv = JSON.parse(readFileSync(argvOut, "utf8"));
+    assert.equal(argv.includes("--effort"), false);
+    await worker.stop();
+    rmSync(argvOut, { force: true });
+    argvOutFiles.delete(argvOut);
+  });
 });
 
 describe("createWorker()", { timeout: 15000 }, () => {

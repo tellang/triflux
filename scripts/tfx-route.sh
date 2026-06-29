@@ -1887,9 +1887,10 @@ get_claude_effort() {
     *max*) echo "max" ;;
     *xhigh*) echo "xhigh" ;;
     *high*) echo "high" ;;
-    *med*|n/a|agy_v1|"") echo "medium" ;;
+    *med*) echo "medium" ;;
+    n/a|agy_v1|"") echo "" ;;
     *low*) echo "low" ;;
-    *) echo "medium" ;;
+    *) echo "" ;;
   esac
 }
 
@@ -3052,10 +3053,10 @@ EOF
       "--command" "$CLI_CMD"
       "--command-args-json" "$CLAUDE_BIN_ARGS_JSON"
       "--model" "$claude_model"
-      "--effort" "$claude_effort"
       "--permission-mode" "bypassPermissions"
       "--allow-dangerously-skip-permissions"
     )
+    [ -n "$claude_effort" ] && claude_worker_args+=("--effort" "$claude_effort")
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
