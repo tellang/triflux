@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.41.0] - 2026-06-29
+
+### Added
+- **[#443]** route: claude lane 이 Claude Code CLI 에 `--model`/`--effort` 를 전달하는 effort 사다리 도입 — `tfx-route.sh::get_claude_effort()` 가 `CLI_EFFORT`/profile 값을 `low|medium|high|xhigh|max` 로 매핑하고 `tfx-route-worker.mjs` parseArgs → `claude-worker.mjs buildClaudeArgs` 로 배선한다. `n/a`/미지정 effort 는 `--effort` 를 생략해 사용자 `settings.json` effortLevel 을 보존한다(append 는 non-empty 일 때만). 죽은 `ultracode→max` 분기를 제거하고(ultracode 는 하니스 모드이지 `claude --effort` 값이 아니다) consensus `triad` 문서를 anti-bias 로 재정리했다. `FAKE_CLAUDE_ARGV_OUT` argv 단언 테스트 추가. `packages/{triflux,remote}` 미러.
+
+### Fixed
+- **[#444]** hub: 120s stale-agent sweep 가 크래시/stale 역할 리더를 능동 재선출하도록 `reelectStaleRoles()` 추가 — 이전엔 register/heartbeat/subscribe/route 같은 agent 이벤트에만 재선출이 발생해, 리더가 조용히 크래시하면 후속 이벤트 전까지 죽은 리더를 가리켰다(P2-① 갭). `!isCandidateLive` 가드로 healthy 리더엔 순수 no-op(epoch churn 없음)이며, stale 리더면 `ensureRoleLeader` 가 heir 선출 + 백로그 이관을 수행한다. heir tiebreak·N>1 백로그 이관·3-leader sweep 체인 no-leak 테스트 3종. `packages/{core,triflux}` byte-identical 미러.
+
 ## [10.40.0] - 2026-06-26
 
 ### Added
