@@ -607,6 +607,142 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
         isolated.cleanup();
       }
     });
+
+    it("동일 우선순위 CTO 후보는 agent_id 오름차순으로 결정적으로 leader를 선출해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        for (const agent_id of ["cto-aaa", "cto-bbb", "cto-ccc"]) {
+          isolated.store.registerAgent({
+            agent_id,
+            cli: "codex",
+            capabilities: ["cto"],
+            topics: [],
+            metadata: { role: "cto", cto_priority: 5 },
+            heartbeat_ttl_ms: 60000,
+          });
+        }
+        isolated.store.db
+          .prepare(
+            "UPDATE agents SET last_seen_ms=? WHERE agent_id IN (?, ?, ?)",
+          )
+          .run(1234567890, "cto-aaa", "cto-bbb", "cto-ccc");
+
+        isolated.router.reelectStaleRoles();
+        const status = isolated.router.getStatus("hub");
+        assert.equal(status.data.roles.cto.leader_agent_id, "cto-aaa");
+
+        isolated.router.reelectStaleRoles();
+        const again = isolated.router.getStatus("hub");
+        assert.equal(again.data.roles.cto.leader_agent_id, "cto-aaa");
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("leader 장애 시 2개 이상 CTO backlog를 새 heir에게 모두 이전해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "A",
+          cli: "claude",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 10 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.registerAgent({
+          agent_id: "B",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 1 },
+          heartbeat_ttl_ms: 60000,
+        });
+
+        for (const decision of ["one", "two", "three"]) {
+          isolated.router.handlePublish({
+            from: "lead",
+            to: "topic:cto",
+            topic: "cto",
+            payload: { decision },
+          });
+        }
+
+        assert.equal(isolated.router.getPendingMessages("A").length, 3);
+
+        isolated.router.updateAgentStatus("A", "offline");
+        const status = isolated.router.getStatus("hub");
+        assert.equal(status.data.roles.cto.leader_agent_id, "B");
+        assert.equal(status.data.roles.cto.pending_count, 3);
+        assert.equal(status.data.roles.cto.transferred_count, 3);
+        assert.equal(isolated.router.getPendingMessages("B").length, 3);
+        assert.equal(isolated.router.getPendingMessages("A").length, 0);
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("sweep 재선출 경로는 A→B→C 연쇄 승계 후 후보 snapshot을 누수 없이 유지해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "A",
+          cli: "claude",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 10 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.registerAgent({
+          agent_id: "B",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 5 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.registerAgent({
+          agent_id: "C",
+          cli: "codex",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 1 },
+          heartbeat_ttl_ms: 60000,
+        });
+        isolated.router.handlePublish({
+          from: "lead",
+          to: "topic:cto",
+          topic: "cto",
+          payload: { decision: "chain failover" },
+        });
+
+        isolated.store.db
+          .prepare("UPDATE agents SET lease_expires_ms=? WHERE agent_id=?")
+          .run(Date.now() - 1, "A");
+        isolated.router.reelectStaleRoles();
+        const afterA = isolated.router.getStatus("hub");
+        assert.equal(afterA.data.roles.cto.leader_agent_id, "B");
+        assert.equal(afterA.data.roles.cto.previous_leader_agent_id, "A");
+
+        isolated.store.db
+          .prepare("UPDATE agents SET lease_expires_ms=? WHERE agent_id=?")
+          .run(Date.now() - 1, "B");
+        isolated.router.reelectStaleRoles();
+        const afterB = isolated.router.getStatus("hub");
+        const cto = afterB.data.roles.cto;
+        assert.equal(cto.leader_agent_id, "C");
+        assert.equal(cto.previous_leader_agent_id, "B");
+        assert.equal(cto.candidate_count, 3);
+        assert.equal(cto.live_candidate_count, 1);
+        assert.equal(cto.candidates.length, 3);
+        assert.equal(
+          new Set(cto.candidates.map((candidate) => candidate.agent_id)).size,
+          3,
+        );
+      } finally {
+        isolated.cleanup();
+      }
+    });
   });
 
   // ── handleAsk ──

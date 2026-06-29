@@ -1343,6 +1343,7 @@ export function createRouter(store) {
       staleTimer = setInterval(() => {
         try {
           store.sweepStaleAgents();
+          router.reelectStaleRoles();
         } catch {}
       }, 120000);
       sweepTimer.unref();
@@ -1357,6 +1358,18 @@ export function createRouter(store) {
       if (staleTimer) {
         clearInterval(staleTimer);
         staleTimer = null;
+      }
+    },
+
+    reelectStaleRoles({ reason = "sweep" } = {}) {
+      for (const roleName of ROLE_TOPICS) {
+        const role = roleStates.get(roleName);
+        const leader = role?.leaderAgentId
+          ? buildRoleCandidate(role.leaderAgentId, roleName)
+          : null;
+        if (!isCandidateLive(leader)) {
+          ensureRoleLeader(roleName, { reason });
+        }
       }
     },
 
