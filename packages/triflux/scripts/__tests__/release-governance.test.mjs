@@ -165,7 +165,13 @@ describe("release governance scripts", () => {
       );
       assert.deepEqual(
         tagOnlyPublish.steps.map((step) => step.label),
-        ["git tag", "git push", "gh release create"],
+        [
+          "git tag",
+          "git push branch",
+          "git push tag",
+          "wait for tag",
+          "gh release create",
+        ],
       );
 
       const executed = [];
@@ -178,6 +184,9 @@ describe("release governance scripts", () => {
         execFileSyncFn: (command, args) => {
           executed.push([command, ...args].join(" "));
           if (command === "git" && args[0] === "rev-parse") return "tag\n";
+          if (command === "git" && args[0] === "ls-remote") {
+            return "abc123\trefs/tags/v1.2.3\n";
+          }
           if (command === "gh" && args[0] === "release") {
             return '{"tagName":"v1.2.3"}\n';
           }
@@ -187,7 +196,9 @@ describe("release governance scripts", () => {
       assert.equal(resumedPublish.allowExistingArtifacts, true);
       assert.deepEqual(executed, [
         "git rev-parse --verify v1.2.3",
-        "git push origin HEAD --tags",
+        "git push origin HEAD",
+        "git push origin v1.2.3",
+        "git ls-remote --tags origin v1.2.3",
         "gh release view v1.2.3 --json tagName",
       ]);
 
@@ -222,6 +233,41 @@ describe("release governance scripts", () => {
     }
   });
 
+  it("tag-only(CI) 모드는 preflight로 HEAD==origin/main을 검증하고 branch push를 생략한다", async () => {
+    const root = makeRepo();
+    const prevRef = process.env.GITHUB_REF_NAME;
+    process.env.GITHUB_REF_NAME = "main";
+    try {
+      assertVersionSync({ rootDir: root, fix: true });
+      const executed = [];
+      await publishRelease({
+        rootDir: root,
+        version: "1.2.3",
+        dryRun: false,
+        publishNpm: false,
+        pushBranch: false,
+        createGithubRelease: false,
+        tagPoll: { attempts: 1, sleepFn: async () => {} },
+        execFileSyncFn: (command, args) => {
+          executed.push([command, ...args].join(" "));
+          if (command === "git" && args[0] === "rev-parse") {
+            return "deadbeef\n";
+          }
+          return "";
+        },
+      });
+      assert.ok(executed.includes("git fetch origin main"));
+      assert.ok(executed.includes("git rev-parse HEAD"));
+      assert.ok(executed.includes("git rev-parse origin/main"));
+      assert.ok(executed.includes("git push origin v1.2.3"));
+      assert.ok(!executed.includes("git push origin HEAD"));
+    } finally {
+      if (prevRef === undefined) delete process.env.GITHUB_REF_NAME;
+      else process.env.GITHUB_REF_NAME = prevRef;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("release workflows use trusted publishing and skip duplicate tag publishes", () => {
     const releaseWorkflow = readFileSync(
       new URL("../../.github/workflows/release.yml", import.meta.url),
@@ -230,6 +276,7 @@ describe("release governance scripts", () => {
     assert.match(releaseWorkflow, /actions:\s*write/);
     assert.match(releaseWorkflow, /node-version:\s*24/);
     assert.match(releaseWorkflow, /publish\.mjs.*--skip-npm.*--allow-existing/);
+    assert.match(releaseWorkflow, /publish\.mjs.*--tag-only/);
     assert.match(
       releaseWorkflow,
       /gh workflow run npm-publish\.yml --ref \$\{\{ github\.ref_name \}\}/,

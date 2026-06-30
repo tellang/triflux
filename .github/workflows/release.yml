@@ -42,7 +42,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/release/publish.mjs --version ${{ inputs.version }} --channel ${{ inputs.channel }} --skip-npm --allow-existing --execute
+        # npm-publish is triggered by explicit workflow_dispatch; GITHUB_TOKEN tag pushes do not recursively trigger it, and npm-view skips make duplicate dispatch idempotent.
+        run: node scripts/release/publish.mjs --version ${{ inputs.version }} --channel ${{ inputs.channel }} --skip-npm --allow-existing --tag-only --execute
 
       - name: Dispatch npm publish
         env:
