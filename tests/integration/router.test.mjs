@@ -639,6 +639,34 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
       }
     });
 
+    it("살아있는 leader가 있으면 reelectStaleRoles는 leader_epoch/transferred_count를 churn하지 않아야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.router.registerAgent({
+          agent_id: "cto-live-leader",
+          cli: "claude",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 10 },
+          heartbeat_ttl_ms: 60000,
+        });
+
+        isolated.router.reelectStaleRoles();
+        const before = isolated.router.getStatus("hub").data.roles.cto;
+        assert.equal(before.leader_agent_id, "cto-live-leader");
+
+        isolated.router.reelectStaleRoles();
+        isolated.router.reelectStaleRoles();
+        const after = isolated.router.getStatus("hub").data.roles.cto;
+
+        assert.equal(after.leader_agent_id, "cto-live-leader");
+        assert.equal(after.leader_epoch, before.leader_epoch);
+        assert.equal(after.transferred_count, before.transferred_count);
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
     it("leader 장애 시 2개 이상 CTO backlog를 새 heir에게 모두 이전해야 한다", () => {
       const isolated = createIsolatedRouter();
       try {
