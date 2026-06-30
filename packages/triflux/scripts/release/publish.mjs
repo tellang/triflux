@@ -3,6 +3,40 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertVersionSync, parseArgs, ROOT, runCommand } from "./lib.mjs";
 
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function waitForRemoteTag(
+  tagName,
+  {
+    rootDir = ROOT,
+    execFileSyncFn,
+    attempts = 30,
+    intervalMs = 2000,
+    sleepFn = defaultSleep,
+  } = {},
+) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const out = runCommand(
+        "git",
+        ["ls-remote", "--tags", "origin", tagName],
+        {
+          cwd: rootDir,
+          execFileSyncFn,
+          stdio: "pipe",
+        },
+      );
+      if (String(out).includes(`refs/tags/${tagName}`)) return true;
+    } catch {
+      // Transient network/auth blips are retried below.
+    }
+    if (attempt < attempts - 1) await sleepFn(intervalMs);
+  }
+  throw new Error(
+    `Tag ${tagName} not visible on origin after ${attempts} attempts`,
+  );
+}
+
 export async function publishRelease({
   version,
   rootDir = ROOT,
@@ -12,6 +46,8 @@ export async function publishRelease({
   publishNpm = true,
   provenance = false,
   allowExistingArtifacts = false,
+  pushBranch = true,
+  tagPoll = {},
   execFileSyncFn,
 } = {}) {
   const sync = assertVersionSync({ rootDir });
@@ -73,14 +109,27 @@ export async function publishRelease({
         }))
       : []),
     { label: "git tag", command: "git", args: ["tag", `v${releaseVersion}`] },
-    {
-      label: "git push",
-      command: "git",
-      args: ["push", "origin", "HEAD", "--tags"],
-    },
   ];
+  if (pushBranch) {
+    steps.push({
+      label: "git push branch",
+      command: "git",
+      args: ["push", "origin", "HEAD"],
+    });
+  }
+  steps.push({
+    label: "git push tag",
+    command: "git",
+    args: ["push", "origin", `v${releaseVersion}`],
+  });
 
   if (createGithubRelease) {
+    steps.push({
+      label: "wait for tag",
+      kind: "wait-tag",
+      command: "git",
+      args: ["ls-remote", "--tags", "origin", `v${releaseVersion}`],
+    });
     steps.push({
       label: "gh release create",
       command: "gh",
@@ -125,9 +174,43 @@ export async function publishRelease({
   };
 
   if (!dryRun) {
+    if (!pushBranch) {
+      const branch = process.env.GITHUB_REF_NAME || "main";
+      runCommand("git", ["fetch", "origin", branch], {
+        cwd: rootDir,
+        execFileSyncFn,
+      });
+      const head = String(
+        runCommand("git", ["rev-parse", "HEAD"], {
+          cwd: rootDir,
+          execFileSyncFn,
+          stdio: "pipe",
+        }),
+      ).trim();
+      const remote = String(
+        runCommand("git", ["rev-parse", `origin/${branch}`], {
+          cwd: rootDir,
+          execFileSyncFn,
+          stdio: "pipe",
+        }),
+      ).trim();
+      if (head !== remote) {
+        throw new Error(
+          `Refusing tag-only publish: HEAD ${head} != origin/${branch} ${remote} (stale checkout or unpushed ${branch})`,
+        );
+      }
+    }
     for (const step of steps) {
       const tagName = `v${releaseVersion}`;
       if (step.label === "git tag" && shouldSkipExistingTag(tagName)) {
+        continue;
+      }
+      if (step.kind === "wait-tag") {
+        await waitForRemoteTag(tagName, {
+          rootDir,
+          execFileSyncFn,
+          ...tagPoll,
+        });
         continue;
       }
       if (
@@ -151,6 +234,7 @@ export async function publishRelease({
     publishNpm,
     provenance,
     allowExistingArtifacts,
+    pushBranch,
     dryRun,
     notesPath,
     steps: steps.map((step) => ({
@@ -175,6 +259,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     publishNpm: !args["skip-npm"],
     provenance: Boolean(args.provenance || envProvenance),
     allowExistingArtifacts: Boolean(args["allow-existing"]),
+    pushBranch: !args["tag-only"],
   });
   console.log(JSON.stringify(result, null, 2));
 }
