@@ -7,6 +7,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { repoScopeHash } from "../../hub/lib/repo-scope.mjs";
 import { createRouter } from "../../hub/router.mjs";
 import { createStore } from "../../hub/store.mjs";
 import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
@@ -1009,5 +1010,30 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
       r3.stopSweeper(); // 시작 안 했어도 에러 없어야 함
       assert.ok(true);
     });
+  });
+});
+
+describe("CTO per-project scope", { skip: SQLITE_SKIP }, () => {
+  it("registerAgent derives scope from metadata.cwd when repoRootHash absent", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      isolated.router.registerAgent({
+        agent_id: "cto-cwd",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", cwd: "/repo/x/.worktrees/feat" },
+        heartbeat_ttl_ms: 60000,
+      });
+      const stored = isolated.store.getAgent("cto-cwd");
+      assert.equal(typeof stored.metadata.repoRootHash, "string");
+      assert.notEqual(stored.metadata.repoRootHash, "global");
+      assert.equal(
+        stored.metadata.repoRootHash,
+        repoScopeHash("/repo/x/.worktrees/feat"),
+      );
+    } finally {
+      isolated.cleanup();
+    }
   });
 });

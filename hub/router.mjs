@@ -1,6 +1,7 @@
 // hub/router.mjs — 실시간 라우팅/수신함 상태 관리자
 // SQLite는 감사 로그만 담당하고, 실제 배달 상태는 메모리에서 관리한다.
 import { EventEmitter, once } from "node:events";
+import { repoScopeHash } from "./lib/repo-scope.mjs";
 import { uuidv7 } from "./lib/uuidv7.mjs";
 
 const ASSIGN_PENDING_STATUSES = new Set(["queued", "running"]);
@@ -158,6 +159,19 @@ export function createRouter(store) {
 
   function listRuntimeTopics(agentId) {
     return normalizeAgentTopics(store, agentId, runtimeTopics.get(agentId));
+  }
+
+  function normalizeRegisterScope(metadata = {}) {
+    const meta = metadata && typeof metadata === "object" ? metadata : {};
+    if (typeof meta.repoRootHash === "string" && meta.repoRootHash) return meta;
+    const source =
+      typeof meta.repo_root === "string" && meta.repo_root
+        ? meta.repo_root
+        : typeof meta.cwd === "string"
+          ? meta.cwd
+          : "";
+    if (!source) return meta;
+    return { ...meta, repoRootHash: repoScopeHash(source) };
   }
 
   function ensureRoleState(roleName) {
@@ -801,7 +815,8 @@ export function createRouter(store) {
     deliveryEmitter,
 
     registerAgent(args) {
-      const result = store.registerAgent(args);
+      const metadata = normalizeRegisterScope(args.metadata);
+      const result = store.registerAgent({ ...args, metadata });
       upsertRuntimeTopics(args.agent_id, args.topics || [], { replace: true });
       refreshRoleCandidateForAgent(args.agent_id);
       for (const roleName of ROLE_TOPICS) {
