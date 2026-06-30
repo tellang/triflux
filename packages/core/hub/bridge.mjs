@@ -20,6 +20,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs as nodeParseArgs } from "node:util";
 
+import { buildRegisterScopeMetadata } from "./lib/repo-scope.mjs";
 import { getPipelineStateDbPath } from "./pipeline/state.mjs";
 import {
   createRetryStateMachine,
@@ -621,6 +622,7 @@ async function cmdRegister(args) {
     metadata: {
       pid: process.ppid,
       registered_at: Date.now(),
+      ...buildRegisterScopeMetadata(process.cwd()),
     },
   });
   const result = outcome?.result;

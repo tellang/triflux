@@ -1,9 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-
+import { deriveRepoRootFromCwd, shortHash } from "@triflux/core/hub/lib/repo-scope.mjs";
 import { compactHygieneCounts, projectCtoHygiene } from "./hygiene.mjs";
 import { resolveLakeRootDir } from "./lake-root.mjs";
+
+export { deriveRepoRootFromCwd };
 
 const SCHEMA_VERSION = "cto-lake.v1";
 const SYNAPSE_TIMEOUT_MS = 1500;
@@ -32,59 +34,11 @@ function toIsoTime(value) {
   return null;
 }
 
-// Non-cryptographic djb2-style hash used only to produce stable redacted
-// labels for local paths. Do not use this as a trust boundary or secret token.
-function shortHash(value) {
-  const str = String(value ?? "");
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) {
-    h = (h * 33) ^ str.charCodeAt(i);
-  }
-  return (h >>> 0).toString(36);
-}
-
 function pathLabel(value) {
   const str = String(value ?? "").replace(/[/\\]+$/u, "");
   if (!str) return "";
   const segments = str.split(/[/\\]+/u);
   return segments[segments.length - 1] || "";
-}
-
-export function deriveRepoRootFromCwd(cwd) {
-  if (typeof cwd !== "string" || !cwd) return "";
-  if (cwd.includes("\\") || /^[A-Za-z]:/u.test(cwd)) return cwd;
-
-  const normalized = cwd.replace(/\/+$/u, "");
-  const gitWorktreeMarker = "/.worktrees/";
-  const gitWorktreeIndex = normalized.indexOf(gitWorktreeMarker);
-  if (gitWorktreeIndex > 0) {
-    const suffix = normalized.slice(
-      gitWorktreeIndex + gitWorktreeMarker.length,
-    );
-    if (/^[^/]+(?:\/|$)/u.test(suffix)) {
-      return normalized.slice(0, gitWorktreeIndex);
-    }
-  }
-
-  const claudeMarker = "/.claude/worktrees/";
-  const claudeIndex = normalized.indexOf(claudeMarker);
-  if (claudeIndex > 0) {
-    const suffix = normalized.slice(claudeIndex + claudeMarker.length);
-    if (/^[^/]+(?:\/|$)/u.test(suffix)) {
-      return normalized.slice(0, claudeIndex);
-    }
-  }
-
-  const codexMarker = "/.codex-swarm/";
-  const codexIndex = normalized.indexOf(codexMarker);
-  if (codexIndex > 0) {
-    const suffix = normalized.slice(codexIndex + codexMarker.length);
-    if (/^wt-[^/]+(?:\/|$)/u.test(suffix)) {
-      return normalized.slice(0, codexIndex);
-    }
-  }
-
-  return cwd;
 }
 
 function redactedCwdFields(cwd) {

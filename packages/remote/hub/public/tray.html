@@ -337,6 +337,13 @@
           return cto?.roles?.cto || cto?.succession?.cto || null;
         }
 
+        function ctoRoleScopesFromPayload(cto) {
+          const scopes = cto?.role_scopes?.cto;
+          if (Array.isArray(scopes) && scopes.length) return scopes;
+          const single = ctoRoleFromPayload(cto);
+          return single ? [single] : [];
+        }
+
         function normalizedRoleValue(value) {
           return String(value || '').trim().toLowerCase();
         }
@@ -361,10 +368,15 @@
           if (!ctoRole) return null;
           const status = ctoRole.status === 'active' ? 'active' : 'offline';
           const leader = ctoRole.leader_agent_id || ctoRole.previous_leader_agent_id || 'unassigned';
+          const scope = ctoRole.scope || ctoRole.repo_root_hash || '';
+          const projectCwd = ctoRole.repo_root || hub.projectRoot || fallbackProject || 'local';
+          const idHint = ctoRole.leader_agent_id
+            ? `cto:${ctoRole.leader_agent_id}`
+            : `cto:${scope || shortId(hub.id || fallbackProject || 'role')}`;
           return {
-            sessionId: ctoRole.leader_agent_id ? `cto:${ctoRole.leader_agent_id}` : `cto:${shortId(hub.id || fallbackProject || 'role')}`,
+            sessionId: idHint,
             status,
-            cwd: hub.projectRoot || fallbackProject || 'local',
+            cwd: projectCwd,
             taskSummary: status === 'active'
               ? `CTO leader ${leader} · epoch ${ctoRole.leader_epoch || 0} · pending ${ctoRole.pending_count || 0}`
               : `CTO offline · previous ${leader} · candidates ${ctoRole.live_candidate_count || 0}`,
@@ -373,12 +385,13 @@
           };
         }
 
-        function buildProjectGroups(activeSessions, liveRows, hub, ctoRole = null) {
+        function buildProjectGroups(activeSessions, liveRows, hub, ctoRoles = []) {
           const groups = new Map();
           const fallbackProject = hub.projectRoot || activeSessions[0]?.cwd || activeSessions[0]?.worktreePath || 'local';
+          const primaryRole = ctoRoles[0] || null;
           for (const session of activeSessions) {
             const group = getProjectGroup(groups, projectPathFor(session, hub, fallbackProject));
-            if (rowHasCtoRole(session, ctoRole)) group.ctos.push(session);
+            if (rowHasCtoRole(session, primaryRole)) group.ctos.push(session);
             else group.workers.push(session);
           }
 
@@ -390,13 +403,15 @@
           for (const worker of liveRows) {
             if (activeSessionIds.has(worker.sessionId)) continue;
             const group = getProjectGroup(groups, projectPathFor(worker, hub, fallbackProject));
-            if (rowHasCtoRole(worker, ctoRole)) group.ctos.push(worker);
+            if (rowHasCtoRole(worker, primaryRole)) group.ctos.push(worker);
             else group.workers.push(worker);
           }
 
           if (groups.size === 0 && fallbackProject) getProjectGroup(groups, fallbackProject);
-          const roleRow = ctoRoleRow(ctoRole, hub, fallbackProject);
-          if (roleRow) {
+
+          for (const ctoRole of ctoRoles) {
+            const roleRow = ctoRoleRow(ctoRole, hub, fallbackProject);
+            if (!roleRow) continue;
             const project = projectPathFor(roleRow, hub, fallbackProject);
             const group = getProjectGroup(groups, project);
             const leader = String(ctoRole?.leader_agent_id || '').trim();
@@ -607,11 +622,12 @@
       const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
           const cto = data?.cto || {};
           const ctoRole = ctoRoleFromPayload(cto);
+          const ctoRoles = ctoRoleScopesFromPayload(cto);
           const live = Array.isArray(cto.live_sessions) ? cto.live_sessions : [];
           const runtime = data?.runtime || {};
           const activeSessions = sessions.filter(s => s.status !== 'stale');
           const liveRows = liveFallbackRows(live);
-          const projectGroups = buildProjectGroups(activeSessions.slice(0, 10), liveRows, hub, ctoRole);
+          const projectGroups = buildProjectGroups(activeSessions.slice(0, 10), liveRows, hub, ctoRoles);
       const activeCount = activeSessions.filter(s => s.status === 'active').length;
       const idleCount = activeSessions.filter(s => s.status === 'idle').length;
       const staleCount = sessions.filter(s => s.status === 'stale').length;

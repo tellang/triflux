@@ -1463,6 +1463,8 @@ export async function startHub({
         const mergedCtoStatus = {
           ...(ctoStatus || {}),
           roles: hubStatus?.data?.roles || ctoStatus?.roles || {},
+          role_scopes:
+            hubStatus?.data?.role_scopes || ctoStatus?.role_scopes || {},
         };
 
         return writeJson(

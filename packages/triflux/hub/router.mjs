@@ -1,6 +1,7 @@
 // hub/router.mjs — 실시간 라우팅/수신함 상태 관리자
 // SQLite는 감사 로그만 담당하고, 실제 배달 상태는 메모리에서 관리한다.
 import { EventEmitter, once } from "node:events";
+import { DEFAULT_ROLE_SCOPE, repoScopeHash } from "./lib/repo-scope.mjs";
 import { uuidv7 } from "./lib/uuidv7.mjs";
 
 const ASSIGN_PENDING_STATUSES = new Set(["queued", "running"]);
@@ -160,12 +161,41 @@ export function createRouter(store) {
     return normalizeAgentTopics(store, agentId, runtimeTopics.get(agentId));
   }
 
-  function ensureRoleState(roleName) {
+  function roleScopeKey(role, scope) {
+    return `${role}::${scope || DEFAULT_ROLE_SCOPE}`;
+  }
+
+  function scopeFromAgent(agent) {
+    const hash = agent?.metadata?.repoRootHash;
+    return typeof hash === "string" && hash ? hash : DEFAULT_ROLE_SCOPE;
+  }
+
+  function scopeForAgent(agentId) {
+    return scopeFromAgent(store.getAgent(agentId));
+  }
+
+  function normalizeRegisterScope(metadata = {}) {
+    const meta = metadata && typeof metadata === "object" ? metadata : {};
+    if (typeof meta.repoRootHash === "string" && meta.repoRootHash) return meta;
+    const source =
+      typeof meta.repo_root === "string" && meta.repo_root
+        ? meta.repo_root
+        : typeof meta.cwd === "string"
+          ? meta.cwd
+          : "";
+    if (!source) return meta;
+    return { ...meta, repoRootHash: repoScopeHash(source) };
+  }
+
+  function ensureRoleState(roleName, scope = DEFAULT_ROLE_SCOPE) {
     const role = normalizeRoleName(roleName);
     if (!role) return null;
-    if (!roleStates.has(role)) {
-      roleStates.set(role, {
+    const scopeKey = scope || DEFAULT_ROLE_SCOPE;
+    const key = roleScopeKey(role, scopeKey);
+    if (!roleStates.has(key)) {
+      roleStates.set(key, {
         role,
+        scope: scopeKey,
         leaderAgentId: null,
         previousLeaderAgentId: null,
         leaderEpoch: 0,
@@ -177,7 +207,7 @@ export function createRouter(store) {
         transferredCount: 0,
       });
     }
-    return roleStates.get(role);
+    return roleStates.get(key);
   }
 
   function hasRoleCapability(capabilities = [], roleName) {
@@ -217,6 +247,11 @@ export function createRouter(store) {
     if (!source) return null;
     return {
       agent_id: agent.agent_id,
+      scope: scopeFromAgent(agent),
+      repo_root:
+        typeof agent.metadata?.repo_root === "string"
+          ? agent.metadata.repo_root
+          : "",
       status: agent.status,
       source,
       priority: rolePriority(agent.metadata, role),
@@ -230,15 +265,34 @@ export function createRouter(store) {
   function refreshRoleCandidateForAgent(agentId) {
     if (!agentId) return;
     for (const roleName of ROLE_TOPICS) {
-      const role = ensureRoleState(roleName);
       const candidate = buildRoleCandidate(agentId, roleName);
+      const scope = candidate?.scope || scopeForAgent(agentId);
+      // An agent belongs to exactly one scope. Purge it from every other
+      // scope's candidates, and if it was that scope's leader, vacate the seat
+      // so a stale cross-scope leader cannot linger.
+      for (const state of roleStates.values()) {
+        if (state.role !== roleName || state.scope === scope) continue;
+        if (
+          state.candidates.delete(agentId) &&
+          state.leaderAgentId === agentId
+        ) {
+          state.previousLeaderAgentId = state.leaderAgentId;
+          state.leaderAgentId = null;
+          state.leaderSource = null;
+          state.status = "offline";
+          state.leaderEpoch += 1;
+          state.lastTransitionMs = Date.now();
+          state.lastReason = "scope-moved";
+        }
+      }
+      const role = ensureRoleState(roleName, scope);
       if (candidate) role.candidates.set(agentId, candidate);
       else role.candidates.delete(agentId);
     }
   }
 
-  function refreshRoleCandidates(roleName) {
-    const role = ensureRoleState(roleName);
+  function refreshRoleCandidates(roleName, scope = DEFAULT_ROLE_SCOPE) {
+    const role = ensureRoleState(roleName, scope);
     if (!role) return [];
     const ids = new Set(role.candidates.keys());
     for (const [agentId, topics] of runtimeTopics) {
@@ -250,6 +304,8 @@ export function createRouter(store) {
     if (typeof store.listAllAgents === "function") {
       for (const agent of store.listAllAgents()) ids.add(agent.agent_id);
     }
+    // refreshRoleCandidateForAgent files each agent under its own scope, so
+    // after refreshing, role.candidates holds only this scope's candidates.
     for (const agentId of ids) refreshRoleCandidateForAgent(agentId);
     return Array.from(role.candidates.values());
   }
@@ -276,25 +332,66 @@ export function createRouter(store) {
     });
   }
 
-  function chooseRoleLeader(roleName) {
+  function chooseRoleLeader(roleName, scope = DEFAULT_ROLE_SCOPE) {
     const now = Date.now();
     return (
-      sortRoleCandidates(refreshRoleCandidates(roleName)).find((candidate) =>
-        isCandidateLive(candidate, now),
+      sortRoleCandidates(refreshRoleCandidates(roleName, scope)).find(
+        (candidate) => isCandidateLive(candidate, now),
       ) || null
     );
   }
 
-  function messageMatchesRole(record, roleName) {
+  function listRoleScopes(roleName) {
+    const role = normalizeRoleName(roleName);
+    if (!role) return [];
+    const ids = new Set();
+    for (const [agentId, topics] of runtimeTopics) {
+      if (topics.has(role)) ids.add(agentId);
+    }
+    for (const agent of store.getAgentsByTopic(role)) ids.add(agent.agent_id);
+    if (typeof store.listAllAgents === "function") {
+      for (const agent of store.listAllAgents()) ids.add(agent.agent_id);
+    }
+    for (const agentId of ids) refreshRoleCandidateForAgent(agentId);
+    const scopes = new Set();
+    for (const state of roleStates.values()) {
+      if (state.role === role) scopes.add(state.scope);
+    }
+    if (!scopes.size) scopes.add(DEFAULT_ROLE_SCOPE);
+    return Array.from(scopes);
+  }
+
+  function messageMatchesRole(record, roleName, scope = null) {
     const message = record?.message || {};
     const to = message.to_agent ?? message.to;
-    return to === `topic:${roleName}`;
+    const toStr = String(to || "");
+    if (!toStr.startsWith("topic:")) return false;
+    const [bare] = toStr.slice(6).split("@");
+    if (normalizeRoleName(bare) !== normalizeRoleName(roleName)) return false;
+    if (scope == null) return true;
+    return messageRoleScope(message) === (scope || DEFAULT_ROLE_SCOPE);
   }
 
   function roleTopicForMessage(message = {}) {
     const to = message?.to_agent ?? message?.to;
-    if (!String(to || "").startsWith("topic:")) return "";
-    return normalizeRoleName(String(to).slice(6));
+    const toStr = String(to || "");
+    if (!toStr.startsWith("topic:")) return "";
+    const [bare] = toStr.slice(6).split("@");
+    return normalizeRoleName(bare);
+  }
+
+  function messageRoleScope(message = {}) {
+    return (
+      message.role_scope || message.payload?.role_scope || DEFAULT_ROLE_SCOPE
+    );
+  }
+
+  function resolveMessageRoleScope(to, from) {
+    const toStr = String(to || "");
+    if (!toStr.startsWith("topic:")) return null;
+    const [bare, explicit] = toStr.slice(6).split("@");
+    if (!ROLE_TOPICS.has(bare)) return null;
+    return explicit || scopeForAgent(from) || DEFAULT_ROLE_SCOPE;
   }
 
   function isReplayAllowedForAgent(agentId, message = {}) {
@@ -302,37 +399,49 @@ export function createRouter(store) {
     if (!roleName) return true;
     const targetAgentId = String(agentId || "").trim();
     if (!targetAgentId) return false;
-    const role = getRoleSnapshot(roleName);
+    const explicit = message.role_scope || message.payload?.role_scope;
+    const scope = explicit || scopeForAgent(targetAgentId);
+    const role = getRoleSnapshot(roleName, scope);
     return role?.leader_agent_id === targetAgentId;
   }
 
   function shouldTrackWithoutRecipients(message) {
     const to = message?.to_agent ?? message?.to;
-    if (!String(to || "").startsWith("topic:")) return false;
-    return ROLE_TOPICS.has(String(to).slice(6));
+    const toStr = String(to || "");
+    if (!toStr.startsWith("topic:")) return false;
+    const [bare] = toStr.slice(6).split("@");
+    return ROLE_TOPICS.has(bare);
   }
 
-  function isRoleMessageFullyHandled(record, roleName) {
-    if (!messageMatchesRole(record, roleName)) return true;
+  function isRoleMessageFullyHandled(record, roleName, scope = null) {
+    if (!messageMatchesRole(record, roleName, scope)) return true;
     return (
       record.recipients.size > 0 &&
       record.ackedBy.size >= record.recipients.size
     );
   }
 
-  function isRoleRecipient(agentId, roleName, previousLeaderAgentId = null) {
+  function isRoleRecipient(
+    agentId,
+    roleName,
+    scope,
+    previousLeaderAgentId = null,
+  ) {
     if (!agentId) return false;
     if (agentId === previousLeaderAgentId) return true;
-    return Boolean(buildRoleCandidate(agentId, roleName));
+    const candidate = buildRoleCandidate(agentId, roleName);
+    return (
+      Boolean(candidate) && candidate.scope === (scope || DEFAULT_ROLE_SCOPE)
+    );
   }
 
-  function countPendingForRole(roleName) {
+  function countPendingForRole(roleName, scope = DEFAULT_ROLE_SCOPE) {
     const now = Date.now();
     let count = 0;
     for (const record of liveMessages.values()) {
-      if (!messageMatchesRole(record, roleName)) continue;
+      if (!messageMatchesRole(record, roleName, scope)) continue;
       if (record.message.expires_at_ms <= now) continue;
-      if (isRoleMessageFullyHandled(record, roleName)) continue;
+      if (isRoleMessageFullyHandled(record, roleName, scope)) continue;
       count += 1;
     }
     return count;
@@ -340,22 +449,24 @@ export function createRouter(store) {
 
   function transferRoleBacklog(
     roleName,
+    scope,
     newLeaderAgentId,
     previousLeaderAgentId,
   ) {
-    const role = ensureRoleState(roleName);
+    const role = ensureRoleState(roleName, scope);
     const now = Date.now();
     const stats = { transferred_count: 0, skipped_count: 0, removed_count: 0 };
     if (!role || !newLeaderAgentId) return stats;
+    const scopeKey = role.scope;
 
     for (const record of liveMessages.values()) {
       const { message, recipients, ackedBy } = record;
-      if (!messageMatchesRole(record, role.role)) continue;
+      if (!messageMatchesRole(record, role.role, scopeKey)) continue;
       if (message.expires_at_ms <= now) {
         stats.skipped_count += 1;
         continue;
       }
-      if (isRoleMessageFullyHandled(record, role.role)) {
+      if (isRoleMessageFullyHandled(record, role.role, scopeKey)) {
         stats.skipped_count += 1;
         continue;
       }
@@ -363,7 +474,7 @@ export function createRouter(store) {
       for (const recipient of Array.from(recipients)) {
         if (
           recipient !== newLeaderAgentId &&
-          isRoleRecipient(recipient, role.role, previousLeaderAgentId)
+          isRoleRecipient(recipient, role.role, scopeKey, previousLeaderAgentId)
         ) {
           queuesByAgent.get(recipient)?.delete(message.id);
           recipients.delete(recipient);
@@ -390,23 +501,35 @@ export function createRouter(store) {
     return stats;
   }
 
-  function buildRoleSnapshot(roleName, { refreshCandidates = true } = {}) {
-    const role = ensureRoleState(roleName);
+  function buildRoleSnapshot(
+    roleName,
+    scope = DEFAULT_ROLE_SCOPE,
+    { refreshCandidates = true } = {},
+  ) {
+    const role = ensureRoleState(roleName, scope);
     if (!role) return null;
     const now = Date.now();
     const candidates = sortRoleCandidates(
       refreshCandidates
-        ? refreshRoleCandidates(role.role)
+        ? refreshRoleCandidates(role.role, role.scope)
         : Array.from(role.candidates.values()),
     );
     const leader =
       role.leaderAgentId && buildRoleCandidate(role.leaderAgentId, role.role);
-    const leaderLive = isCandidateLive(leader, now);
+    const leaderLive =
+      isCandidateLive(leader, now) && leader.scope === role.scope;
     const liveCandidates = candidates.filter((candidate) =>
       isCandidateLive(candidate, now),
     );
+    const repoRoot =
+      (leaderLive && leader.repo_root) ||
+      candidates.find((candidate) => candidate.repo_root)?.repo_root ||
+      "";
     return {
       role: role.role,
+      scope: role.scope,
+      repo_root_hash: role.scope,
+      repo_root: repoRoot,
       status: leaderLive
         ? "active"
         : liveCandidates.length
@@ -421,7 +544,7 @@ export function createRouter(store) {
         : liveCandidates[0]?.source || null,
       candidate_count: candidates.length,
       live_candidate_count: liveCandidates.length,
-      pending_count: countPendingForRole(role.role),
+      pending_count: countPendingForRole(role.role, role.scope),
       transferred_count: role.transferredCount,
       last_transition_ms: role.lastTransitionMs,
       last_reason: role.lastReason,
@@ -438,14 +561,19 @@ export function createRouter(store) {
 
   function ensureRoleLeader(
     roleName,
+    scope = DEFAULT_ROLE_SCOPE,
     { reason = "ensure", transferBacklog = true } = {},
   ) {
-    const role = ensureRoleState(roleName);
+    const role = ensureRoleState(roleName, scope);
     if (!role) return null;
     const now = Date.now();
-    const current =
+    const currentCandidate =
       role.leaderAgentId && buildRoleCandidate(role.leaderAgentId, role.role);
-    const best = chooseRoleLeader(role.role);
+    const current =
+      currentCandidate && currentCandidate.scope === role.scope
+        ? currentCandidate
+        : null;
+    const best = chooseRoleLeader(role.role, role.scope);
     const currentLive = isCandidateLive(current, now);
     const shouldPreemptFallback =
       currentLive &&
@@ -456,7 +584,7 @@ export function createRouter(store) {
     if (currentLive && !shouldPreemptFallback) {
       role.status = "active";
       role.leaderSource = current.source;
-      return buildRoleSnapshot(role.role);
+      return buildRoleSnapshot(role.role, role.scope);
     }
 
     if (!best) {
@@ -469,7 +597,7 @@ export function createRouter(store) {
         role.lastReason = reason;
       }
       role.status = "offline";
-      return buildRoleSnapshot(role.role);
+      return buildRoleSnapshot(role.role, role.scope);
     }
 
     if (role.leaderAgentId !== best.agent_id) {
@@ -483,15 +611,20 @@ export function createRouter(store) {
       role.lastTransitionMs = Date.now();
       role.lastReason = reason;
       if (transferBacklog) {
-        transferRoleBacklog(role.role, best.agent_id, previousLeaderAgentId);
+        transferRoleBacklog(
+          role.role,
+          role.scope,
+          best.agent_id,
+          previousLeaderAgentId,
+        );
       }
     }
 
-    return buildRoleSnapshot(role.role);
+    return buildRoleSnapshot(role.role, role.scope);
   }
 
-  function getRoleSnapshot(roleName) {
-    return buildRoleSnapshot(roleName, { refreshCandidates: true });
+  function getRoleSnapshot(roleName, scope = DEFAULT_ROLE_SCOPE) {
+    return buildRoleSnapshot(roleName, scope, { refreshCandidates: true });
   }
 
   function trackMessage(message, recipients) {
@@ -532,9 +665,15 @@ export function createRouter(store) {
       return [to];
     }
 
-    const topic = to.slice(6);
+    const rawTopic = to.slice(6);
+    const [topic, explicitScope] = rawTopic.split("@");
     if (ROLE_TOPICS.has(topic)) {
-      const role = ensureRoleLeader(topic, {
+      const scope =
+        msg.role_scope ||
+        explicitScope ||
+        scopeForAgent(msg.from ?? msg.from_agent);
+      msg.role_scope = scope || DEFAULT_ROLE_SCOPE;
+      const role = ensureRoleLeader(topic, msg.role_scope, {
         reason: "route",
         transferBacklog: true,
       });
@@ -625,6 +764,7 @@ export function createRouter(store) {
     trace_id,
     correlation_id,
   }) {
+    const roleScope = resolveMessageRoleScope(to, from);
     const msg = store.auditLog({
       type,
       from,
@@ -635,6 +775,7 @@ export function createRouter(store) {
       payload,
       trace_id,
       correlation_id,
+      role_scope: roleScope,
     });
     const recipients = uniqueStrings(resolveRecipients(msg));
     if (recipients.length || shouldTrackWithoutRecipients(msg)) {
@@ -801,11 +942,13 @@ export function createRouter(store) {
     deliveryEmitter,
 
     registerAgent(args) {
-      const result = store.registerAgent(args);
+      const metadata = normalizeRegisterScope(args.metadata);
+      const result = store.registerAgent({ ...args, metadata });
       upsertRuntimeTopics(args.agent_id, args.topics || [], { replace: true });
       refreshRoleCandidateForAgent(args.agent_id);
+      const scope = scopeForAgent(args.agent_id);
       for (const roleName of ROLE_TOPICS) {
-        ensureRoleLeader(roleName, {
+        ensureRoleLeader(roleName, scope, {
           reason: "register",
           transferBacklog: true,
         });
@@ -816,8 +959,9 @@ export function createRouter(store) {
     refreshAgentLease(agentId, ttlMs = 30000) {
       const result = store.refreshLease(agentId, ttlMs);
       refreshRoleCandidateForAgent(agentId);
+      const scope = scopeForAgent(agentId);
       for (const roleName of ROLE_TOPICS) {
-        ensureRoleLeader(roleName, {
+        ensureRoleLeader(roleName, scope, {
           reason: "heartbeat",
           transferBacklog: true,
         });
@@ -828,8 +972,9 @@ export function createRouter(store) {
     subscribeAgent(agentId, topics, { replace = false } = {}) {
       const nextTopics = upsertRuntimeTopics(agentId, topics, { replace });
       refreshRoleCandidateForAgent(agentId);
+      const scope = scopeForAgent(agentId);
       for (const roleName of ROLE_TOPICS) {
-        ensureRoleLeader(roleName, {
+        ensureRoleLeader(roleName, scope, {
           reason: "subscribe",
           transferBacklog: true,
         });
@@ -842,13 +987,14 @@ export function createRouter(store) {
     },
 
     updateAgentStatus(agentId, status) {
+      const scope = scopeForAgent(agentId);
       if (status === "offline") {
         runtimeTopics.delete(agentId);
       }
       const updated = store.updateAgentStatus(agentId, status);
       refreshRoleCandidateForAgent(agentId);
       for (const roleName of ROLE_TOPICS) {
-        ensureRoleLeader(roleName, {
+        ensureRoleLeader(roleName, scope, {
           reason: `status:${status}`,
           transferBacklog: true,
         });
@@ -1030,14 +1176,21 @@ export function createRouter(store) {
           message_id: msg.id,
           fanout_count: recipients.length,
           expires_at_ms: msg.expires_at_ms,
-          role: to === "topic:cto" ? getRoleSnapshot("cto") : undefined,
+          role: roleTopicForMessage(msg)
+            ? getRoleSnapshot(roleTopicForMessage(msg), messageRoleScope(msg))
+            : undefined,
         },
       };
+    },
+
+    getRoleSnapshot(roleName, scope) {
+      return getRoleSnapshot(roleName, scope);
     },
 
     takeoverRole({
       role = "cto",
       agent_id,
+      scope,
       reason = "manual",
       requested_by = "manual",
     } = {}) {
@@ -1062,18 +1215,19 @@ export function createRouter(store) {
         };
       }
 
-      refreshRoleCandidates(roleName);
-      const roleState = ensureRoleState(roleName);
+      const resolvedScope = scope || scopeForAgent(targetAgentId);
+      refreshRoleCandidates(roleName, resolvedScope);
+      const roleState = ensureRoleState(roleName, resolvedScope);
       const candidate = buildRoleCandidate(targetAgentId, roleName);
-      if (!isCandidateLive(candidate)) {
+      if (!isCandidateLive(candidate) || candidate.scope !== roleState.scope) {
         return {
           ok: false,
           error: {
             code: "ROLE_CANDIDATE_UNAVAILABLE",
-            message: `${targetAgentId} is not a live ${roleName} candidate`,
+            message: `${targetAgentId} is not a live ${roleName} candidate in scope ${roleState.scope}`,
           },
           data: {
-            role: buildRoleSnapshot(roleName),
+            role: buildRoleSnapshot(roleName, roleState.scope),
           },
         };
       }
@@ -1095,14 +1249,16 @@ export function createRouter(store) {
 
       const transfer = transferRoleBacklog(
         roleName,
+        roleState.scope,
         targetAgentId,
         previousLeaderAgentId,
       );
-      const snapshot = buildRoleSnapshot(roleName);
+      const snapshot = buildRoleSnapshot(roleName, roleState.scope);
       return {
         ok: true,
         data: {
           role: roleName,
+          scope: roleState.scope,
           requested_by,
           reason,
           changed,
@@ -1363,12 +1519,14 @@ export function createRouter(store) {
 
     reelectStaleRoles({ reason = "sweep" } = {}) {
       for (const roleName of ROLE_TOPICS) {
-        const role = roleStates.get(roleName);
-        const leader = role?.leaderAgentId
-          ? buildRoleCandidate(role.leaderAgentId, roleName)
-          : null;
-        if (!isCandidateLive(leader)) {
-          ensureRoleLeader(roleName, { reason });
+        for (const scope of listRoleScopes(roleName)) {
+          const role = roleStates.get(roleScopeKey(roleName, scope));
+          const leader = role?.leaderAgentId
+            ? buildRoleCandidate(role.leaderAgentId, roleName)
+            : null;
+          if (!isCandidateLive(leader) || leader.scope !== scope) {
+            ensureRoleLeader(roleName, scope, { reason });
+          }
         }
       }
     },
@@ -1412,7 +1570,12 @@ export function createRouter(store) {
           audit_store: store.type || "sqlite",
         };
         data.roles = {
-          cto: getRoleSnapshot("cto"),
+          cto: getRoleSnapshot("cto", DEFAULT_ROLE_SCOPE),
+        };
+        data.role_scopes = {
+          cto: listRoleScopes("cto").map((scope) =>
+            getRoleSnapshot("cto", scope),
+          ),
         };
         if (include_metrics) {
           const depths = router.getQueueDepths();
