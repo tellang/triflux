@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS messages (
   correlation_id TEXT NOT NULL,
   trace_id TEXT NOT NULL,
   payload_json TEXT NOT NULL DEFAULT '{}',
-  status TEXT NOT NULL CHECK (status IN ('queued','delivered','acked','expired','dead_letter'))
+  status TEXT NOT NULL CHECK (status IN ('queued','delivered','acked','expired','dead_letter')),
+  role_scope TEXT
 );
 
 -- 메시지 수신함 (배달 추적)

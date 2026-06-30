@@ -111,7 +111,7 @@ export function createStore(dbPath, options = {}) {
   db.exec(
     "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)",
   );
-  const SCHEMA_VERSION = "4";
+  const SCHEMA_VERSION = "5";
   const curVer = (() => {
     try {
       return db
@@ -149,6 +149,7 @@ export function createStore(dbPath, options = {}) {
     "adaptive_state_json",
     "TEXT NOT NULL DEFAULT '{}'",
   );
+  ensureColumn(db, "messages", "role_scope", "TEXT");
 
   const S = {
     upsertAgent: db.prepare(`
@@ -184,8 +185,8 @@ export function createStore(dbPath, options = {}) {
     ),
 
     insertAuditMessage: db.prepare(`
-      INSERT INTO messages (id, type, from_agent, to_agent, topic, priority, ttl_ms, created_at_ms, expires_at_ms, correlation_id, trace_id, payload_json, status)
-      VALUES (@id, @type, @from_agent, @to_agent, @topic, @priority, @ttl_ms, @created_at_ms, @expires_at_ms, @correlation_id, @trace_id, @payload_json, @status)`),
+      INSERT INTO messages (id, type, from_agent, to_agent, topic, priority, ttl_ms, created_at_ms, expires_at_ms, correlation_id, trace_id, payload_json, status, role_scope)
+      VALUES (@id, @type, @from_agent, @to_agent, @topic, @priority, @ttl_ms, @created_at_ms, @expires_at_ms, @correlation_id, @trace_id, @payload_json, @status, @role_scope)`),
     getMsg: db.prepare("SELECT * FROM messages WHERE id=?"),
     getResponse: db.prepare(
       "SELECT * FROM messages WHERE correlation_id=? AND type='response' ORDER BY created_at_ms DESC LIMIT 1",
@@ -456,6 +457,7 @@ export function createStore(dbPath, options = {}) {
       trace_id,
       correlation_id,
       status = "queued",
+      role_scope = null,
     }) {
       const now = Date.now();
       const row = {
@@ -472,6 +474,7 @@ export function createStore(dbPath, options = {}) {
         trace_id: trace_id || uuidv7(),
         payload_json: JSON.stringify(payload),
         status,
+        role_scope: role_scope ?? null,
       };
       S.insertAuditMessage.run(row);
       return { ...row, payload };

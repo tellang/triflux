@@ -1036,4 +1036,365 @@ describe("CTO per-project scope", { skip: SQLITE_SKIP }, () => {
       isolated.cleanup();
     }
   });
+
+  it("elects an independent CTO leader per repoRootHash scope", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      isolated.router.registerAgent({
+        agent_id: "cto-proj-a",
+        cli: "claude",
+        capabilities: ["code"],
+        topics: [],
+        metadata: {
+          role: "cto",
+          cto_priority: 5,
+          repoRootHash: "aaa",
+          repo_root: "/repo/a",
+        },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "cto-proj-b",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: {
+          role: "cto",
+          cto_priority: 5,
+          repoRootHash: "bbb",
+          repo_root: "/repo/b",
+        },
+        heartbeat_ttl_ms: 60000,
+      });
+
+      const a = isolated.router.getRoleSnapshot("cto", "aaa");
+      const b = isolated.router.getRoleSnapshot("cto", "bbb");
+      assert.equal(a.leader_agent_id, "cto-proj-a");
+      assert.equal(a.scope, "aaa");
+      assert.equal(a.repo_root, "/repo/a");
+      assert.equal(b.leader_agent_id, "cto-proj-b");
+
+      isolated.router.updateAgentStatus("cto-proj-a", "offline");
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "aaa").status,
+        "offline",
+      );
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "bbb").leader_agent_id,
+        "cto-proj-b",
+      );
+    } finally {
+      isolated.cleanup();
+    }
+  });
+
+  it("does not keep a phantom leader after the leader moves scope", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      isolated.router.registerAgent({
+        agent_id: "mover",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "aaa").leader_agent_id,
+        "mover",
+      );
+
+      isolated.router.registerAgent({
+        agent_id: "mover",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "bbb" },
+        heartbeat_ttl_ms: 60000,
+      });
+
+      assert.notEqual(
+        isolated.router.getRoleSnapshot("cto", "aaa").leader_agent_id,
+        "mover",
+      );
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "bbb").leader_agent_id,
+        "mover",
+      );
+    } finally {
+      isolated.cleanup();
+    }
+  });
+
+  it("sweep re-elects a stale leader only within its own scope", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      for (const [id, hash, pr] of [
+        ["a1", "aaa", 10],
+        ["a2", "aaa", 1],
+        ["b1", "bbb", 1],
+      ]) {
+        isolated.router.registerAgent({
+          agent_id: id,
+          cli: "codex",
+          capabilities: ["code"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: pr, repoRootHash: hash },
+          heartbeat_ttl_ms: 60000,
+        });
+      }
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "aaa").leader_agent_id,
+        "a1",
+      );
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "bbb").leader_agent_id,
+        "b1",
+      );
+
+      isolated.router.updateAgentStatus("a1", "offline");
+      isolated.router.reelectStaleRoles({ reason: "sweep" });
+
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "aaa").leader_agent_id,
+        "a2",
+      );
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "bbb").leader_agent_id,
+        "b1",
+      );
+    } finally {
+      isolated.cleanup();
+    }
+  });
+
+  it("routes topic:cto to the sender's project leader", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      isolated.router.registerAgent({
+        agent_id: "cto-a",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "cto-b",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "bbb" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "worker-a",
+        cli: "claude",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+
+      const published = isolated.router.handlePublish({
+        from: "worker-a",
+        to: "topic:cto",
+        topic: "cto",
+        payload: { decision: "scoped to aaa" },
+      });
+      assert.equal(published.data.fanout_count, 1);
+      assert.equal(isolated.router.getPendingMessages("cto-a").length, 1);
+      assert.equal(isolated.router.getPendingMessages("cto-b").length, 0);
+    } finally {
+      isolated.cleanup();
+    }
+  });
+
+  it("transfers backlog only within the failed leader's scope", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      isolated.router.registerAgent({
+        agent_id: "a-old",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", cto_priority: 10, repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "a-new",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", cto_priority: 1, repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "b-leader",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "bbb" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "worker-a",
+        cli: "claude",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+
+      isolated.router.handlePublish({
+        from: "worker-a",
+        to: "topic:cto",
+        topic: "cto",
+        payload: { decision: "aaa backlog" },
+      });
+      assert.equal(isolated.router.getPendingMessages("a-old").length, 1);
+
+      isolated.router.updateAgentStatus("a-old", "offline");
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "aaa").leader_agent_id,
+        "a-new",
+      );
+      assert.equal(isolated.router.getPendingMessages("a-new").length, 1);
+      assert.equal(isolated.router.getPendingMessages("b-leader").length, 0);
+    } finally {
+      isolated.cleanup();
+    }
+  });
+
+  it("replay gating is scoped: persisted role_scope and agent-scope fallback", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      isolated.router.registerAgent({
+        agent_id: "cto-a",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "cto-b",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "bbb" },
+        heartbeat_ttl_ms: 60000,
+      });
+
+      const scopedMsg = {
+        id: "m1",
+        to_agent: "topic:cto",
+        topic: "cto",
+        role_scope: "aaa",
+        payload: {},
+      };
+      assert.equal(
+        isolated.router.canReplayMessageForAgent("cto-a", scopedMsg),
+        true,
+      );
+      assert.equal(
+        isolated.router.canReplayMessageForAgent("cto-b", scopedMsg),
+        false,
+      );
+
+      const probe = { to_agent: "topic:cto", topic: "cto" };
+      assert.equal(
+        isolated.router.canReplayMessageForAgent("cto-a", probe),
+        true,
+      );
+      assert.equal(
+        isolated.router.canReplayMessageForAgent("cto-b", probe),
+        true,
+      );
+    } finally {
+      isolated.cleanup();
+    }
+  });
+
+  it("takeoverRole promotes within the target agent's scope only", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      isolated.router.registerAgent({
+        agent_id: "a-leader",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", cto_priority: 10, repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "a-other",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", cto_priority: 1, repoRootHash: "aaa" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "b-leader",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "bbb" },
+        heartbeat_ttl_ms: 60000,
+      });
+
+      const res = isolated.router.takeoverRole({
+        role: "cto",
+        agent_id: "a-other",
+      });
+      assert.equal(res.ok, true);
+      assert.equal(res.data.scope, "aaa");
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "aaa").leader_agent_id,
+        "a-other",
+      );
+      assert.equal(
+        isolated.router.getRoleSnapshot("cto", "bbb").leader_agent_id,
+        "b-leader",
+      );
+    } finally {
+      isolated.cleanup();
+    }
+  });
+
+  it("getStatus exposes role_scopes per project and keeps global back-compat", () => {
+    const isolated = createIsolatedRouter();
+    try {
+      isolated.router.registerAgent({
+        agent_id: "g-leader",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto" },
+        heartbeat_ttl_ms: 60000,
+      });
+      isolated.router.registerAgent({
+        agent_id: "a-leader",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        metadata: { role: "cto", repoRootHash: "aaa", repo_root: "/repo/a" },
+        heartbeat_ttl_ms: 60000,
+      });
+
+      const status = isolated.router.getStatus("hub");
+      assert.equal(status.data.roles.cto.leader_agent_id, "g-leader");
+      assert.equal(status.data.roles.cto.scope, "global");
+
+      const scopes = status.data.role_scopes.cto;
+      assert.ok(Array.isArray(scopes));
+      const aaa = scopes.find((s) => s.scope === "aaa");
+      assert.equal(aaa.leader_agent_id, "a-leader");
+      assert.equal(aaa.repo_root, "/repo/a");
+      assert.equal(aaa.repo_root_hash, "aaa");
+    } finally {
+      isolated.cleanup();
+    }
+  });
 });
