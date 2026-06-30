@@ -388,10 +388,18 @@
         function buildProjectGroups(activeSessions, liveRows, hub, ctoRoles = []) {
           const groups = new Map();
           const fallbackProject = hub.projectRoot || activeSessions[0]?.cwd || activeSessions[0]?.worktreePath || 'local';
-          const primaryRole = ctoRoles[0] || null;
+          // A row is a CTO row if it is the live leader of ANY scope. Checking
+          // only ctoRoles[0] would misfile the real leaders of the 2nd..Nth
+          // project as workers. Standby candidates (cto metadata but not a
+          // leader) stay agents — only fall back to metadata detection when no
+          // scope role is present at all (mirrors single-role rowHasCtoRole).
+          const isCtoRow = (row) =>
+            ctoRoles.length
+              ? ctoRoles.some((r) => r?.leader_agent_id && rowHasCtoRole(row, r))
+              : rowHasCtoRole(row, null);
           for (const session of activeSessions) {
             const group = getProjectGroup(groups, projectPathFor(session, hub, fallbackProject));
-            if (rowHasCtoRole(session, primaryRole)) group.ctos.push(session);
+            if (isCtoRow(session)) group.ctos.push(session);
             else group.workers.push(session);
           }
 
@@ -403,7 +411,7 @@
           for (const worker of liveRows) {
             if (activeSessionIds.has(worker.sessionId)) continue;
             const group = getProjectGroup(groups, projectPathFor(worker, hub, fallbackProject));
-            if (rowHasCtoRole(worker, primaryRole)) group.ctos.push(worker);
+            if (isCtoRow(worker)) group.ctos.push(worker);
             else group.workers.push(worker);
           }
 

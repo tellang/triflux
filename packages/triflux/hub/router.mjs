@@ -1573,8 +1573,8 @@ export function createRouter(store) {
           cto: getRoleSnapshot("cto", DEFAULT_ROLE_SCOPE),
         };
         data.role_scopes = {
-          cto: listRoleScopes("cto").map((scope) =>
-            getRoleSnapshot("cto", scope),
+          cto: listRoleScopes("cto").map((roleScope) =>
+            getRoleSnapshot("cto", roleScope),
           ),
         };
         if (include_metrics) {

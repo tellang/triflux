@@ -269,6 +269,7 @@ export function createMemoryStore() {
       trace_id,
       correlation_id,
       status = "queued",
+      role_scope = null,
     }) {
       const now = Date.now();
       const row = {
@@ -285,6 +286,7 @@ export function createMemoryStore() {
         trace_id: trace_id || uuidv7(),
         payload: clone(payload || {}),
         status,
+        role_scope: role_scope ?? null,
       };
       return upsertMessage(row);
     },
