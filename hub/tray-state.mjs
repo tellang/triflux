@@ -476,6 +476,10 @@ function normalizeCtoStatus(ctoStatus = {}, sessions = [], runtime = {}) {
     ctoStatus?.roles && typeof ctoStatus.roles === "object"
       ? ctoStatus.roles
       : null;
+  const roleScopes =
+    ctoStatus?.role_scopes && typeof ctoStatus.role_scopes === "object"
+      ? ctoStatus.role_scopes
+      : null;
   const succession =
     ctoStatus?.succession && typeof ctoStatus.succession === "object"
       ? ctoStatus.succession
@@ -486,6 +490,7 @@ function normalizeCtoStatus(ctoStatus = {}, sessions = [], runtime = {}) {
     live_sessions: normalizedLiveSessions,
     active_shards: activeShards,
     ...(roles ? { roles } : {}),
+    ...(roleScopes ? { role_scopes: roleScopes } : {}),
     ...(succession ? { succession } : {}),
     ...(hygiene ? { hygiene } : {}),
     summary: {

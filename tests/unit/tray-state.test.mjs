@@ -531,4 +531,38 @@ describe("tray-state contract", () => {
       started_at: null,
     });
   });
+
+  it("forwards cto.role_scopes through buildTrayStatePayload", () => {
+    const payload = buildTrayStatePayload({
+      hub: { id: "h1", projectRoot: "/repo/a" },
+      ctoStatus: {
+        roles: { cto: { role: "cto", scope: "global", leader_agent_id: null } },
+        role_scopes: {
+          cto: [
+            {
+              role: "cto",
+              scope: "aaa",
+              repo_root: "/repo/a",
+              repo_root_hash: "aaa",
+              leader_agent_id: "a-leader",
+              status: "active",
+              leader_epoch: 1,
+            },
+            {
+              role: "cto",
+              scope: "bbb",
+              repo_root: "/repo/b",
+              repo_root_hash: "bbb",
+              leader_agent_id: "b-leader",
+              status: "active",
+              leader_epoch: 1,
+            },
+          ],
+        },
+      },
+    });
+    assert.ok(Array.isArray(payload.cto.role_scopes.cto));
+    assert.equal(payload.cto.role_scopes.cto.length, 2);
+    assert.equal(payload.cto.role_scopes.cto[0].repo_root, "/repo/a");
+  });
 });
