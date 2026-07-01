@@ -59,6 +59,8 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 
 ## CLI 우선순위 정책 — default = Codex
 
+> 근거(why): [ADR-0004 — 기본 구현 CLI = Codex](../../docs/adr/0004-codex-as-default-cli.md). 이 절이 SSOT(어떻게), ADR은 결정 이력(왜).
+
 triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR) 이 거의 전부 Codex 단독 또는 Codex worker spawn 으로 진행됐다. 이 운영 fact 를 default policy 로 명시한다.
 
 | 우선순위 | CLI / 모델 | default 적용 lane |
@@ -106,7 +108,7 @@ headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx
 
 **Claude 네이티브** (CLI 불필요): tfx-find, tfx-forge, tfx-prune, tfx-index, tfx-setup, tfx-doctor, tfx-hooks, tfx-hub
 
-**Headless UI default** — `tfx-auto`, `tfx multi`, `tfx swarm` 로컬 shard 의 headless 워커는 default 로 `claude agents` 패널에 노출 (`--native-bridge-ui agents`). opt-out: `--no-native-bridge-ui`. interactive (tmux/wt) 경로는 default-off. `tfx swarm` 원격 shard 는 `registerSwarmShard()` 가 warn + skip 만 하고 원격 daemon 등록은 후속 PRD. 상세 행동표는 `CLAUDE.md` 의 `<native-bridge>` 섹션.
+**Headless UI default** — `tfx-auto`, `tfx multi`, `tfx swarm` 로컬 shard 의 headless 워커는 default 로 `claude agents` 패널에 노출 (`--native-bridge-ui agents`). opt-out: `--no-native-bridge-ui`. interactive (tmux/wt) 경로는 default-off. `tfx swarm` 원격 shard 는 `registerSwarmShard()` 가 warn + skip 만 하고 원격 daemon 등록은 후속 PRD. 상세 행동표는 `CLAUDE.md` 의 `<native-bridge>` 섹션. 근거(why): [ADR-0008 — headless 워커 native-bridge 기본 노출](../../docs/adr/0008-native-bridge-ui-default-on.md).
 
 자원 우선순위: remote-spawn > swarm > multi > Light > 로컬 단독
 

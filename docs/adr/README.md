@@ -10,6 +10,12 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0001](0001-record-architecture-decisions.md) | ADR로 아키텍처 결정을 기록한다 | Accepted | — |
 | [0002](0002-doc-and-devflow-architecture.md) | 문서 파운데이션 + 개발 플로우 아키텍처 | Accepted | 0001 |
 | [0003](0003-tfx-skill-passing-prose-injection.md) | headless CLI 스킬 전달 = 즉석 prose 주입 | Accepted | 0002 |
+| [0004](0004-codex-as-default-cli.md) | 기본 구현 CLI = Codex | Accepted | 0002 |
+| [0005](0005-packages-three-layer-mirror.md) | packages/ 3-layer single-source 미러 | Accepted | 0002 |
+| [0006](0006-escalation-chain-codex-to-claude-opus.md) | 재시도 승격 체인 codex→claude opus 2단계 | Accepted | 0002, 0004 |
+| [0007](0007-hub-default-port-27888.md) | hub 기본 포트 27888 고정 | Accepted | 0002 |
+| [0008](0008-native-bridge-ui-default-on.md) | headless 워커 native-bridge 기본 노출 | Accepted | 0002 |
+| [0009](0009-stack-coexistence-three-layer.md) | gstack·sp·triflux 단방향 3-layer 공존 | Accepted | 0002 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

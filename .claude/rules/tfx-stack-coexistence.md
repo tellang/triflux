@@ -1,5 +1,7 @@
 # 스택 공존 가이드 — gstack + superpowers + triflux
 
+> 근거(why): [ADR-0009 — gstack·sp·triflux 단방향 3-layer 공존](../../docs/adr/0009-stack-coexistence-three-layer.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
+
 ## 공존 원칙
 
 - 세 시스템은 흡수/대체 관계가 아니라 레이어 분리 관계다.

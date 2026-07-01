@@ -13,8 +13,9 @@
 - ✅ **Phase 0 완료·커밋** — gitignore 공개경계 교정(`e4b7f47f`), ADR 부트스트랩 0001/0002+보드+CONVENTIONS(`79d37f69`), `.document-harness.toml`(`eae48822`), 구조 테스트(`9be4cba2`). ADR 구조 테스트 3/3 pass. gitignore 교정 untracked-probe로 검증(docs/adr 등 trackable, superpowers/plans LOCAL 유지).
 - ✅ **Phase 1 완료·커밋** — docs/README 인덱스+_archive 규약(`dedb865d`), CONTRIBUTING+ARCHITECTURE+README 포인터(`557da744`), docs/process(`db6f2967`), tfx-doc-governance 규칙(`0d9cca3c`). 5종 병렬 서브에이전트 저작, 링크 정합.
 - ✅ **Phase 2 완료·커밋** — design PRD 2건 → docs/prd 이동(`b3eb78c2`), decision-tfx-skill-passing → ADR-0003 승격+보드등재+원본배너(`f35ad3bb`). 구조 테스트 3/3(0003 포함).
-- ⏳ **Phase 3 미착수** — 3.1 psmux 3-way(psmux 버전 실측 + 결정 + 코드/미러 가능성, Windows 전용), 3.2 CODEX/GEMINI resync, 3.3 ROADMAP/TODOS/decisions.md, 3.4 PRD 템플릿 codex-exec 정합. 판단·검증 필요 항목이라 별도 리뷰 배치로 진행.
-- 📋 **Phase 4~5** — 로드맵(backfill ADR / threshold-gated 자동화).
+- ✅ **Phase 3 완료·머지(PR #452)** — 3.1 psmux 정책 3-way 정합(codex-conventions → tfx-psmux RULE 5 SSOT + 버전-safe fallback, 코드/미러 무변경 = option B), 3.2 CODEX/GEMINI resync(deprecated alias 제거), 3.3 ROADMAP/TODOS stale 배너, 3.4 PRD 템플릿 codex-exec 축약. `docs/decisions.md`는 `docs/*` ignore로 드롭(ADR 보드가 정본).
+- ✅ **Phase 4 완료·커밋(브랜치 `worktree-docs-adr-phase4`)** — 과거 횡단 결정 6건 backfill: ADR-0004(Codex 기본 CLI)·0005(packages 3-layer mirror)·0006(escalation chain, #356/#363)·0007(hub 포트 27888, #82/#158)·0008(native-bridge UI default, #323)·0009(stack 3-layer 공존). 각 accepted + 상태보드 등재(9행) + 대응 `.claude/rules/` 역참조 링크. 구조 테스트 3/3, PR 참조 실측 검증.
+- 🚧 **Phase 5 게이트 미충족 → 의도적 defer** — `.document-harness.toml` `automation_trigger`(ADR>25 **또는** drift 2회) 미달(현재 ADR **9개** < 25, 관측 drift **0**). ADR-0002 거버넌스가 "조기 자동화 금지(P4)"를 명시하므로, 게이트 미충족 시 자동화(link-check·상태보드 autogen·PATCHLOG)를 짓지 않는 것이 설계상 정답. 게이트 도달(ADR 26개째 또는 보드 drift 2회 관측) 시 별도 plan으로 착수.
 
 ## Global Constraints
 
