@@ -8,6 +8,14 @@
 
 **Tech Stack:** Markdown 문서, TOML 정책 파일, `.gitignore` allowlist, Node `node:test`(구조 검증), 기존 `npm test` / `npm run lint`(biome) 파이프라인. 신규 시스템 의존성 없음(lychee/mdschema는 Phase 5 옵션).
 
+## 실행 상태 (2026-07-01, 브랜치 `worktree-docs-adr-foundation`)
+
+- ✅ **Phase 0 완료·커밋** — gitignore 공개경계 교정(`e4b7f47f`), ADR 부트스트랩 0001/0002+보드+CONVENTIONS(`79d37f69`), `.document-harness.toml`(`eae48822`), 구조 테스트(`9be4cba2`). ADR 구조 테스트 3/3 pass. gitignore 교정 untracked-probe로 검증(docs/adr 등 trackable, superpowers/plans LOCAL 유지).
+- ✅ **Phase 1 완료·커밋** — docs/README 인덱스+_archive 규약(`dedb865d`), CONTRIBUTING+ARCHITECTURE+README 포인터(`557da744`), docs/process(`db6f2967`), tfx-doc-governance 규칙(`0d9cca3c`). 5종 병렬 서브에이전트 저작, 링크 정합.
+- ✅ **Phase 2 완료·커밋** — design PRD 2건 → docs/prd 이동(`b3eb78c2`), decision-tfx-skill-passing → ADR-0003 승격+보드등재+원본배너(`f35ad3bb`). 구조 테스트 3/3(0003 포함).
+- ⏳ **Phase 3 미착수** — 3.1 psmux 3-way(psmux 버전 실측 + 결정 + 코드/미러 가능성, Windows 전용), 3.2 CODEX/GEMINI resync, 3.3 ROADMAP/TODOS/decisions.md, 3.4 PRD 템플릿 codex-exec 정합. 판단·검증 필요 항목이라 별도 리뷰 배치로 진행.
+- 📋 **Phase 4~5** — 로드맵(backfill ADR / threshold-gated 자동화).
+
 ## Global Constraints
 
 - **`.claude/rules/`의 기존 9개는 이동/흡수/재작성 금지**(harness auto-load 속성 보존). 새 문서는 rules를 "가리키기만" 한다. **예외 2건**: 신규 `tfx-doc-governance.md` 1개 추가(Task 1.5), psmux 모순 해소 시 `tfx-psmux.md` 수정 가능성(Task 3.1) — 이 둘은 **auto-load 정책 변경**이므로 별도 리뷰 대상.
