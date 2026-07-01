@@ -1,5 +1,7 @@
 # triflux — Gemini 프로젝트 지시
 
+> 정책 SSOT는 `.claude/rules/`, 결정 근거는 `docs/adr/README.md`.
+
 triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M context 활용·웹 검색·헤드리스 합의의 한 축으로 사용된다.
 
 전체 프로젝트 컨텍스트는 `CLAUDE.md`를 참조한다 (이 파일은 Gemini 관점만 다룸).
@@ -14,13 +16,13 @@ triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M 
 ## Gemini의 역할
 - 빠른 웹 검색 (Google Search 통합) — `tfx-research --quick`
 - 3-CLI 합의(consensus/debate/panel)에서 Gemini 시점 제공
-- 1M context 활용 — 큰 코드베이스 분석 / `tfx-deep-interview`는 Gemini 단독
+- 1M context 활용 — 큰 코드베이스 분석 / `tfx-interview`는 Gemini 단독
 - swarm/multi headless 병렬 실행의 워커
 
 ## headless-guard
 - `agy --dangerously-skip-permissions --print=` 직접 호출은 차단됨
-- 반드시 tfx 스킬 경유: tfx-auto, tfx-gemini, tfx-multi, tfx-swarm 등
-- 일반 호출: `tfx-route.sh --cli gemini ...`
+- 반드시 tfx 스킬 경유: tfx-auto (--cli antigravity), tfx-multi, tfx-swarm 등
+- 일반 호출: `tfx-route.sh --cli antigravity ...` (legacy `--cli gemini`는 agy 미가용 시 fallback)
 
 ## 디렉터리 import 금지 (EISDIR)
 - `@./path/` 처럼 디렉터리 import하면 Gemini ImportProcessor가 fs.readFile을 호출해 EISDIR로 크래시 (gemini-cli #6450, #4760)
@@ -29,7 +31,7 @@ triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M 
 ## 핵심 운영 컨텍스트 (요약 — 상세는 CLAUDE.md)
 - psmux/WT 규칙: `tfx-psmux-rules` 스킬 / WT 프리징 방지 (exit → sleep 2 → kill)
 - AccountBroker 싱글턴: 계정별 CircuitBreaker, busy 플래그, 이벤트 기반 HUD 연동
-- 원격 실행: tfx-remote-spawn (SSH → Claude Code → 내부 tfx 라우팅)
+- 원격 실행: tfx-remote (SSH → Claude Code → 내부 tfx 라우팅)
 - Headless 결과 회수: task-notification 완료 후 output 파일 읽기
   - 완료 마커: `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`
 
