@@ -10,8 +10,8 @@ const execFileAsync = promisify(execFile);
 const CLI = path.resolve("bin/tfx-live.mjs");
 
 async function runTfxLive(args, options = {}) {
-  const { env: extraEnv, ...execOptions } = options;
-  const result = await execFileAsync(process.execPath, [CLI, ...args], {
+  const { env: extraEnv, cli, ...execOptions } = options;
+  const result = await execFileAsync(process.execPath, [cli || CLI, ...args], {
     timeout: 20_000,
     maxBuffer: 5 * 1024 * 1024,
     ...execOptions,
@@ -60,6 +60,19 @@ test("tfx-live help documents UDS-first auto default", async () => {
     stdout,
     /auto is the default for Claude when --short\/--session-id is present/,
   );
+});
+
+test("tfx-live runs main() when invoked through a symlink (npm global bin shim)", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-symlink-"));
+  try {
+    const symlinkPath = path.join(dir, "tfx-live");
+    await fs.symlink(CLI, symlinkPath);
+    const stdout = await runTfxLive(["--help"], { cli: symlinkPath });
+
+    assert.match(stdout, /tfx-live ask/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("tfx-live probe returns daemon-probe JSON through bundled bridge", async () => {

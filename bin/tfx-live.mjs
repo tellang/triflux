@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
@@ -2368,11 +2369,19 @@ export {
   resolveAskTransport,
 };
 
-const isDirectRun =
-  process.argv[1] &&
-  fileURLToPath(import.meta.url) === pathResolve(process.argv[1]);
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(process.argv[1]) === modulePath;
+  } catch {
+    // process.argv[1] doesn't resolve on disk (e.g. `node -e`) — fall back
+    // to a non-symlink-aware comparison instead of treating it as not-main.
+    return pathResolve(process.argv[1]) === modulePath;
+  }
+}
 
-if (isDirectRun) {
+if (isMainModule()) {
   main().catch((error) => {
     printJson({
       ok: false,
