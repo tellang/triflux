@@ -1,0 +1,33 @@
+# document-harness 프로젝트 설정 (calibration)
+# 근거: docs/adr/0002-doc-and-devflow-architecture.md · 운영규칙: docs/adr/CONVENTIONS.md
+# 정책: 3 MUST 강제 + 나머지는 advisory(SHOULD) 또는 보류(deferred). 이 한 곳이 SSOT.
+
+root_marker = "docs"
+
+[enforce]
+# MUST — 위반 = fail
+adr_lifecycle        = "must"      # 상태머신: proposed→accepted→superseded/deprecated/rejected/withdrawn
+archive_on_supersede = "must"      # supersede/deprecate → docs/_archive/ (수동·삭제금지)
+required_headings    = "must"      # ADR 본문 `## 결정` + `## 검토한 대안` 존재 (tests/unit/docs-adr-structure.test.mjs)
+
+# SHOULD — 경고, 비차단
+frontmatter_template = "should"    # 권장 YAML frontmatter
+naming_convention    = "should"    # NNNN-kebab
+folder_layout        = "should"    # docs 목적별 분리
+
+# 보류 — automation_trigger 충족 전까지 OFF
+status_board_autogen = "deferred"
+patchlog             = "deferred"  # docs/PATCHLOG.md (ADR↔commit)
+link_check           = "deferred"  # lychee 등
+mdschema_contract    = "deferred"  # 외부 구조 계약 검증
+
+[automation_trigger]
+# 이 조건 충족 시 위 deferred 항목을 켜고 index/lint/archive 자동화 도입
+adr_count_over     = 25
+drift_observations = 2
+
+[paths]
+adr         = "docs/adr"
+archive     = "docs/_archive"
+conventions = "docs/adr/CONVENTIONS.md"
+index       = "docs/README.md"
