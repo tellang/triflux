@@ -1,12 +1,14 @@
 # triflux — Codex 프로젝트 지시
 
+> 정책 SSOT는 `.claude/rules/`, 결정 근거는 `docs/adr/README.md`.
+
 triflux 워크스페이스에서 Codex CLI의 역할과 운영 규칙. Claude/Gemini와 함께 3-CLI 합의·교차 검증·헤드리스 병렬 실행의 한 축으로 사용된다.
 
 전체 프로젝트 컨텍스트는 `CLAUDE.md`를 참조한다 (이 파일은 Codex 관점만 다룸).
 
 ## Codex의 역할
 - 교차 검증: Claude가 작성한 코드의 독립 리뷰 (동일 모델 self-approve 금지)
-- 단일 파일 오토파일럿: tfx-autopilot, tfx-codex
+- 단일 파일 오토파일럿: tfx-autopilot, tfx-auto --cli codex
 - 3-CLI 합의(consensus/debate/panel)에서 Codex 시점 제공
 - swarm/multi headless 병렬 실행의 워커
 
@@ -25,7 +27,7 @@ triflux 워크스페이스에서 Codex CLI의 역할과 운영 규칙. Claude/Ge
 
 ## headless-guard
 - `codex exec` / `agy --dangerously-skip-permissions --print=` 직접 호출은 차단됨
-- 반드시 tfx 스킬 경유: tfx-auto, tfx-codex, tfx-multi, tfx-swarm 등
+- 반드시 tfx 스킬 경유: tfx-auto (--cli codex), tfx-multi, tfx-swarm 등
 
 ## Headless 결과 회수
 - task-notification 완료 **후** output 파일 읽기 (그 전에는 시작 메시지만)
@@ -35,7 +37,7 @@ triflux 워크스페이스에서 Codex CLI의 역할과 운영 규칙. Claude/Ge
 ## SSH 패턴
 - `hosts.json`의 `os` 필드로 셸 판단 (windows=PowerShell, darwin=zsh, linux=bash)
 - SSH 너머로 codex 직접 실행 금지 (config.toml 충돌 + TTY 문제)
-- 원격에서 codex가 필요하면: tfx-remote-spawn → Claude Code → Claude가 내부에서 codex 호출
+- 원격에서 codex가 필요하면: tfx-remote → Claude Code → Claude가 내부에서 codex 호출
 
 ## Working agreements
 - 한국어 우선, 기술 용어 원어 유지

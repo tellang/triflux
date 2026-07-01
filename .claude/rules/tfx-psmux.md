@@ -142,6 +142,8 @@ for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"
 done
 ```
 
+> 참고: `detach-client` 는 `|| true` 로 감싸므로 **미지원 구버전 psmux(≤3.3.x)에서는 자동 no-op** 후 kill 로 진행된다(detach-first 순서는 버전 무관 안전). `scripts/lib/psmux-info.mjs` 가 `detach-client` 를 OPTIONAL 로 두는 것과 정합하며, `docs/codex-conventions.md` 의 옛 `exit`→sleep5 안내는 이 RULE 로 위임·폐기됐다.
+
 ### MUST NOT
 
 ```bash

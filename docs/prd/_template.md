@@ -34,11 +34,10 @@ export function <name>(<args>)
 ## Codex 실행 제약 (자동 삽입됨)
 <!-- codex-swarm 스킬이 이 섹션을 자동으로 프롬프트에 주입합니다.
      PRD 작성자는 이 섹션을 수정하지 마세요. -->
-- stdin redirect 금지: `codex < file` → "stdin is not a terminal" 에러
-- `codex exec "$(cat prompt.md)" --dangerously-bypass-approvals-and-sandbox` 사용
-- `codex exec`는 `--profile` 미지원. config.toml 기본 모델 사용
-- `--full-auto` CLI 플래그 금지 (config.toml sandbox와 충돌)
-- 테스트 병렬 실행 시 `.test-lock/pid.lock` 충돌 가능 — 순차 실행 권장
+> Codex/swarm 실행 규칙(프로필·exec 제약·sandbox)의 정본은 [.claude/rules/tfx-psmux.md](../../.claude/rules/tfx-psmux.md)·[tfx-escalation-chain.md](../../.claude/rules/tfx-escalation-chain.md) 및 `hub/team/build-worker-prompt.mjs`. 아래는 요지.
+- exec 호출 방식(프롬프트 전달·approval/sandbox 플래그)은 codex 버전에 따라 달라질 수 있으므로 단정하지 말고 위 SSOT와 `hub/team/build-worker-prompt.mjs`를 따른다.
+- 모델·effort·sandbox·프로필은 CLI 하드코딩 대신 프로필/`config.toml`을 SSOT로 사용하고, `config.toml`에 이미 있는 값은 CLI 플래그로 중복 지정하지 않는다.
+- 테스트 병렬 실행 시 `.test-lock/pid.lock` 충돌 가능 — 순차 실행 권장.
 
 ## 완료 조건 (필수)
 작업이 끝나면 반드시:

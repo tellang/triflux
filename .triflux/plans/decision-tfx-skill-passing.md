@@ -1,5 +1,7 @@
 # DECISION — tfx-auto의 codex/agy 스킬 전달 방식
 
+> ⬆️ 이 결정은 [ADR-0003](../../docs/adr/0003-tfx-skill-passing-prose-injection.md)으로 승격됨(정본). 아래는 승격 시점의 상세 기록(구현 불변식·테스트).
+
 > 출처: 세션 d8696d4e research 워크플로우(omc gh + codex/agy 네이티브 스킬 + gemini 환각, 4 agents) + tfx-route.sh 정적 감사. 2026-06-08.
 
 ## 1. 결정 (DECIDE)

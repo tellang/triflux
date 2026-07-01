@@ -264,6 +264,8 @@ state without replaying the entire conversation.
 
 ## Architecture
 
+> 상세 구조·패키지 레이아웃·실행 경로는 [ARCHITECTURE.md](ARCHITECTURE.md), 문서 전체 지도는 [docs/README.md](docs/README.md) 참조.
+
 <p align="center">
   <img src="docs/assets/architecture.svg" alt="triflux architecture" width="680">
 </p>
