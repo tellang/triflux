@@ -1,5 +1,7 @@
 # TODOS
 
+> ⚠️ 이 문서는 스냅샷이며 stale할 수 있습니다. 확정된 결정의 정본은 [docs/adr/README.md](docs/adr/README.md), 문서 지도는 [docs/README.md](docs/README.md).
+
 ## [Tier 2] 이중 적응형 시스템 통합
 
 **What:** hook-adaptive-collector(파일 3-tier)와 Hub(SQLite adaptive_rules)이 독립적으로 동작하는 문제 해결. sync bridge 또는 단일 경로로 통합.

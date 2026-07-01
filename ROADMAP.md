@@ -1,5 +1,7 @@
 # triflux ROADMAP
 
+> ⚠️ 이 문서는 스냅샷이며 stale할 수 있습니다. 확정된 결정의 정본은 [docs/adr/README.md](docs/adr/README.md), 문서 지도는 [docs/README.md](docs/README.md).
+
 > 단일 장부. 체크포인트/Issue/plan이 여기저기 흩어진 것을 **치명도(Crit) × 회귀(Regr)** 로 하나의 우선순위로 정렬.
 
 ## Scoring Rubric
