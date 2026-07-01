@@ -11,8 +11,9 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-
+import { getCtoHygieneApplyMode } from "@triflux/core/hub/lib/cto-env.mjs";
 import { appendCtoEvent } from "./events.mjs";
+import { applyHygieneArchiveActions } from "./hygiene-actions.mjs";
 import { resolveLakeRootDir } from "./lake-root.mjs";
 
 const COUNT_KEYS = [
@@ -178,6 +179,18 @@ function rowFrom(kind, id, status, entry, ref, action) {
   if (entry?.summary) row.summary = String(entry.summary);
   if (action) row.action = action;
   if (action && !hasKnownOwner(ref)) row.owner = "unknown";
+  if (typeof ref?.artifact_path === "string" && ref.artifact_path.trim()) {
+    row.artifact_path = ref.artifact_path.trim();
+  }
+  if (
+    typeof ref?.project_root_hash === "string" &&
+    ref.project_root_hash.trim()
+  ) {
+    row.project_root_hash = ref.project_root_hash.trim();
+  }
+  if (typeof ref?.session_id === "string" && ref.session_id.trim()) {
+    row.session_id = ref.session_id.trim();
+  }
   return row;
 }
 
@@ -517,17 +530,52 @@ function isApplicableRow(row) {
   return Boolean(row?.action) || APPLICABLE_STATUSES.has(row?.status);
 }
 
+const ARCHIVE_ACK_STATUSES = new Set(["archived", "already_archived"]);
+
+function hygieneApplyActor(opts = {}) {
+  const actor = { cli: "tfx cto hygiene --apply" };
+  if (typeof opts.actorSessionId === "string" && opts.actorSessionId.trim()) {
+    actor.session_id = opts.actorSessionId.trim();
+  }
+  return actor;
+}
+
 async function applyHygieneRows({
   rootDir,
   lakeRoot,
   projection,
   steward,
+  active,
+  approvals,
   opts,
 }) {
   const rows = projection.rows.filter(isApplicableRow);
   const appended = [];
   const now = opts.now || new Date().toISOString();
+  const actions = await applyHygieneArchiveActions({
+    rootDir,
+    lakeRoot,
+    projection: { ...projection, rows },
+    dryRun: false,
+    now,
+    applyMode: opts.applyMode || getCtoHygieneApplyMode(),
+    active,
+    humanAck: opts.humanAck,
+    humanGate: opts.humanGate,
+    actorSessionId: opts.actorSessionId,
+    approvals,
+    fsOps: opts.fsOps,
+  });
+  const operationByKey = new Map(
+    (actions.operations || []).map((operation) => [
+      operation.hygiene_key,
+      operation,
+    ]),
+  );
   for (const row of rows) {
+    const hygieneKey = hygieneKeyForRow(row);
+    const operation = operationByKey.get(hygieneKey);
+    if (operation && !ARCHIVE_ACK_STATUSES.has(operation.status)) continue;
     const result = await appendCtoEvent(
       lakeRoot,
       {
@@ -536,12 +584,12 @@ async function applyHygieneRows({
         source: "tfx_cto_hygiene_apply",
         project_root: rootDir,
         status: row.status,
-        hygiene_key: hygieneKeyForRow(row),
+        hygiene_key: hygieneKey,
         hygiene_kind: row.kind,
         hygiene_id: row.id,
         hygiene_action: row.action || `acknowledge_${row.status}`,
         summary: `hygiene apply ${row.kind}:${row.id} ${row.status}`,
-        actor: { cli: "tfx cto hygiene --apply" },
+        actor: hygieneApplyActor(opts),
       },
       {
         stderr: opts.stderr,
@@ -559,6 +607,7 @@ async function applyHygieneRows({
     },
     applicable_count: rows.length,
     applied_count: appended.length,
+    actions,
     events: appended,
   };
 }
@@ -582,15 +631,21 @@ export async function runHygiene(args = [], opts = {}) {
     const current = existsSync(currentPath) ? readJson(currentPath) : {};
     const ledger = readJsonLines(join(lakeRoot, "ledger.jsonl"));
     const overlay = await readLiveOverlay({ ...opts, rootDir, lakeRoot });
-    return projectCtoHygiene({
-      current,
-      ledger: ledger.length > 0 ? ledger : null,
+    return {
+      ledger,
       overlay,
-    });
+      projection: projectCtoHygiene({
+        current,
+        ledger: ledger.length > 0 ? ledger : null,
+        overlay,
+      }),
+    };
   };
 
   let steward = null;
   let projection;
+  let overlay = { live_sessions: [] };
+  let ledger = [];
   let applyResult = null;
   if (apply) {
     steward = await acquireCtoHygieneStewardLock(rootDir, lakeRoot, {
@@ -600,12 +655,14 @@ export async function runHygiene(args = [], opts = {}) {
       lockPath: opts.stewardLockPath,
     });
     try {
-      projection = await buildProjection();
+      ({ projection, overlay, ledger } = await buildProjection());
       applyResult = await applyHygieneRows({
         rootDir,
         lakeRoot,
         projection,
         steward,
+        active: overlay,
+        approvals: ledger.filter((entry) => entry?.event === "hygiene_applied"),
         opts,
       });
       projection = { ...projection, dry_run: false, apply: applyResult };
@@ -613,7 +670,20 @@ export async function runHygiene(args = [], opts = {}) {
       steward.release();
     }
   } else {
-    projection = await buildProjection();
+    ({ projection, overlay } = await buildProjection());
+    projection = {
+      ...projection,
+      actions: await applyHygieneArchiveActions({
+        rootDir,
+        lakeRoot,
+        projection,
+        dryRun: true,
+        now: opts.now || new Date().toISOString(),
+        applyMode: opts.applyMode || getCtoHygieneApplyMode(),
+        active: overlay,
+        fsOps: opts.fsOps,
+      }),
+    };
   }
 
   if (jsonOut) writeJson(stdout, projection);
