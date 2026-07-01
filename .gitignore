@@ -15,7 +15,7 @@
 .serena/
 .playwright-mcp/
 .mcp.json
-CLAUDE.md
+# CLAUDE.md 는 공개 SSOT(tracked + npm files) — ignore 하지 않는다 (ADR-0002)
 
 # 내부 문서 — 기본 전체 제외, 필요한 것만 허용
 docs/*
@@ -28,6 +28,23 @@ docs/*
 !docs/research/
 !docs/codex-conventions.md
 !docs/legacy-skill-aliases.md
+# 문서 파운데이션 공개 경계 (ADR-0002) — 의도적 공개 하위트리 명시
+!docs/adr/
+!docs/adr/**
+!docs/_archive/
+!docs/_archive/**
+!docs/process/
+!docs/process/**
+!docs/recovery/
+!docs/recovery/**
+!docs/troubleshooting/
+!docs/troubleshooting/**
+!docs/README.md
+# docs/superpowers: 부모가 docs/* 로 막혀 있어 2단계 re-include (specs 공개, plans LOCAL 유지)
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/specs/
+!docs/superpowers/specs/**
 
 # 리서치 (대외비 — 클론 레포, 분석 보고서, 설계문서)
 research/
