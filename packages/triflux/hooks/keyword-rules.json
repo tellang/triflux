@@ -63,6 +63,40 @@
       "mcp_route": null
     },
     {
+      "id": "tfx-harness",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?harness\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-harness",
+      "priority": 1,
+      "supersedes": ["tfx-unified"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-harness-meta",
+      "patterns": [
+        {
+          "source": "(?:어떤\\s*스킬|스킬\\s*추천|스킬\\s*라우팅|작업\\s*라우팅|메타\\s*라우팅)",
+          "flags": "i"
+        },
+        {
+          "source": "\\bwhich\\s+skill\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-harness",
+      "priority": 2,
+      "supersedes": ["tfx-unified"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
       "id": "tfx-unified",
       "patterns": [
         {
@@ -160,7 +194,7 @@
         }
       ],
       "skill": "tfx-hub",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -175,7 +209,7 @@
         }
       ],
       "skill": "tfx-doctor",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -190,7 +224,7 @@
         }
       ],
       "skill": "tfx-setup",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -205,7 +239,7 @@
         }
       ],
       "skill": "tfx-research",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -220,7 +254,7 @@
         }
       ],
       "skill": "tfx-interview",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
