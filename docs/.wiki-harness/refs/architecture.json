@@ -1,0 +1,101 @@
+{
+  "schema_version": "2",
+  "id": "architecture",
+  "path": "docs/architecture.reading.md",
+  "source": "ARCHITECTURE.md",
+  "title": "triflux 아키텍처 (리딩 노트)",
+  "doc_type": "reading-note",
+  "status": "Active",
+  "updated_at": "2026-07-07T00:00:00Z",
+  "polish": {
+    "grade": "B",
+    "run_id": "2026-07-07-001",
+    "language": "ko",
+    "skill": "polishing-text",
+    "change_pct": 1.3,
+    "human_review_needed": false
+  },
+  "footnotes": {
+    "term-swarm": {
+      "label": "term-swarm",
+      "type": "term",
+      "word": "스웜",
+      "definition": "PRD 단위로 worktree를 격리하고 여러 모델·기기에 워커를 병렬 배정해 코드 변경을 동시에 진행시키는 triflux 실행 모드(`tfx-swarm`). 완료 후 자동 병합까지 포함한다."
+    },
+    "en-guard": {
+      "label": "en-guard",
+      "type": "en",
+      "word": "가드",
+      "definition": "guard."
+    },
+    "en-hub": {
+      "label": "en-hub",
+      "type": "en",
+      "word": "허브",
+      "definition": "Hub."
+    },
+    "abbr-ssot": {
+      "label": "abbr-ssot",
+      "type": "abbr",
+      "word": "source of truth",
+      "definition": "SSOT — Single Source of Truth(단일 진실 공급원). 같은 정보가 여러 곳에 있을 때 \"여기가 정본\"이라고 가리키는 한 곳."
+    },
+    "term-cross-check": {
+      "label": "term-cross-check",
+      "type": "term",
+      "word": "cross-check",
+      "definition": "Codex가 만든 결과를 Antigravity가 다시 읽고 가독성·논리를 검증하는 2차 확인. 실행 권한을 넘기는 게 아니라 검토만 한다."
+    },
+    "term-meta-routing": {
+      "label": "term-meta-routing",
+      "type": "term",
+      "word": "메타 라우팅",
+      "definition": "Claude가 직접 코드를 실행하지 않고 \"이 작업을 어떤 스킬·CLI로 보낼지\"만 판정하는 역할. `/tfx-harness`가 대표적이다."
+    },
+    "abbr-mcp": {
+      "label": "abbr-mcp",
+      "type": "abbr",
+      "word": "MCP",
+      "definition": "MCP — Model Context Protocol. 에이전트가 외부 도구(hub 포함)를 표준화된 방식으로 호출하게 해주는 프로토콜."
+    },
+    "term-psmux": {
+      "label": "term-psmux",
+      "type": "term",
+      "word": "psmux",
+      "definition": "Windows 전용 tmux 유사 터미널 멀티플렉서. triflux가 Windows Terminal 패인·세션을 관리 API 경유로만 조작하도록 강제할 때 대상이 되는 도구다."
+    },
+    "code-headless-guard": {
+      "label": "code-headless-guard",
+      "type": "code",
+      "word": "headless-guard",
+      "definition": "PreToolUse 훅 — primary multiplexer가 있으면 Bash(tfx-route.sh) 개별 호출을 headless 명령으로 자동 변환하고, `codex exec`/`agy`/`gemini` 직접 래핑을 차단한다.",
+      "file": "scripts/headless-guard.mjs",
+      "line": "187",
+      "signature": "async function main()",
+      "role": "PreToolUse 훅 — direct codex/agy/gemini 래핑 차단 + headless 자동 변환",
+      "vscode_link": "vscode://file/Users/tellang/Projects/tools/triflux/scripts/headless-guard.mjs:187"
+    },
+    "code-safety-guard": {
+      "label": "code-safety-guard",
+      "type": "code",
+      "word": "safety-guard",
+      "definition": "PreToolUse:Bash 훅 — 위험한 Bash 명령을 사전 차단(exit 2)하거나 경고(additionalContext)한다.",
+      "file": "hooks/safety-guard.mjs",
+      "line": "312",
+      "signature": "function main()",
+      "role": "PreToolUse:Bash 훅 — 위험 명령 차단/경고",
+      "vscode_link": "vscode://file/Users/tellang/Projects/tools/triflux/hooks/safety-guard.mjs:312"
+    },
+    "code-tfx-route": {
+      "label": "code-tfx-route",
+      "type": "code",
+      "word": "tfx-route.sh",
+      "definition": "CLI 라우팅 엔진 진입점 — agent_type/prompt/mcp_profile/timeout/context_file 인자를 받아 Codex/Antigravity/Claude lane으로 dispatch한다.",
+      "file": "scripts/tfx-route.sh",
+      "line": "290",
+      "signature": "case \"${1:-}\" in",
+      "role": "CLI 라우팅 엔진 진입점 dispatch",
+      "vscode_link": "vscode://file/Users/tellang/Projects/tools/triflux/scripts/tfx-route.sh:290"
+    }
+  }
+}

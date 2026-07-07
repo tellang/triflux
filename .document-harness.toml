@@ -14,6 +14,7 @@ required_headings    = "must"      # ADR 본문 `## 결정` + `## 검토한 대�
 frontmatter_template = "should"    # 권장 YAML frontmatter
 naming_convention    = "should"    # NNNN-kebab
 folder_layout        = "should"    # docs 목적별 분리
+raw_refined_link     = "should"    # docs/req/ kind:raw ↔ kind:refined 양방향 링크. 2026-07-07 부트스트랩 파일럿(0001) 1건 — 쌍이 늘어나면 must로 승격
 
 # 보류 — automation_trigger 충족 전까지 OFF
 status_board_autogen = "deferred"
@@ -28,6 +29,8 @@ drift_observations = 2
 
 [paths]
 adr         = "docs/adr"
+req         = "docs/req"
 archive     = "docs/_archive"
 conventions = "docs/adr/CONVENTIONS.md"
 index       = "docs/README.md"
+decisions   = "docs/DECISIONS.md"
