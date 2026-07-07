@@ -84,3 +84,37 @@ describe("keyword-rules.json: skill target 검증", () => {
     );
   });
 });
+
+describe("tfx-harness 라우팅 우선순위 (동순위 가로채기 회귀 가드)", () => {
+  async function resolveFor(text) {
+    const { compileRules, loadRules, matchRules, resolveConflicts } =
+      await import("../../scripts/lib/keyword-rules.mjs");
+    const rules = loadRules(join(REPO_ROOT, "hooks/keyword-rules.json"));
+    const compiled = compileRules(rules);
+    return resolveConflicts(matchRules(compiled, text));
+  }
+
+  it("명시 'tfx-harness' 토큰은 priority 1로 선택된다", async () => {
+    const resolved = await resolveFor("tfx-harness로 라우팅 판정해줘");
+    assert.equal(resolved[0]?.id, "tfx-harness");
+  });
+
+  it("광역 메타 문구는 priority 2 — 명시 스킬 룰(tfx-swarm)을 가로채지 않는다", async () => {
+    const resolved = await resolveFor(
+      "tfx swarm으로 돌릴 건데 어떤 스킬이 맞아?",
+    );
+    assert.equal(resolved[0]?.id, "tfx-swarm");
+    const meta = resolved.find((match) => match.id === "tfx-harness-meta");
+    assert.ok(meta, "meta 룰은 함께 매치되되 최우선이 아니어야 한다");
+  });
+
+  it("메타 문구 단독은 tfx-harness-meta가 tfx-unified를 supersede한다", async () => {
+    const resolved = await resolveFor("어떤 스킬 쓰는 게 맞아? 스킬 추천해줘");
+    assert.equal(resolved[0]?.id, "tfx-harness-meta");
+    assert.equal(resolved[0]?.skill, "tfx-harness");
+    assert.equal(
+      resolved.some((match) => match.id === "tfx-unified"),
+      false,
+    );
+  });
+});
