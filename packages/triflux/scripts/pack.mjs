@@ -73,6 +73,7 @@ const CORE_DIRS = [
 const REMOTE_FILES = [
   "hub/server.mjs",
   "hub/store.mjs",
+  "hub/schema.sql",
   "hub/store-adapter.mjs",
   "hub/pipe.mjs",
   "hub/tools.mjs",

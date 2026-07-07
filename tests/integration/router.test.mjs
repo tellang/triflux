@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createRouter } from "../../hub/router.mjs";
 import { createStore } from "../../hub/store.mjs";
+import { createRouter as createCoreRouter } from "../../packages/core/hub/router.mjs";
+import { createStore as createRemoteStore } from "../../packages/remote/hub/store.mjs";
 import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 function tempDbPath() {
@@ -21,6 +23,23 @@ function createIsolatedRouter() {
   const dbPath = tempDbPath();
   const store = createStore(dbPath);
   const router = createRouter(store);
+  return {
+    store,
+    router,
+    cleanup() {
+      router.stopSweeper();
+      store.close();
+      try {
+        rmSync(join(dbPath, ".."), { recursive: true, force: true });
+      } catch {}
+    },
+  };
+}
+
+function createIsolatedRemoteRouter() {
+  const dbPath = tempDbPath();
+  const store = createRemoteStore(dbPath);
+  const router = createCoreRouter(store);
   return {
     store,
     router,
@@ -58,6 +77,43 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
   });
 
   // ── handlePublish ──
+
+  describe("remote SQLite store compatibility", () => {
+    it("core router registration succeeds and returns effective online presence", () => {
+      const isolated = createIsolatedRemoteRouter();
+      try {
+        const registered = isolated.router.registerAgent({
+          agent_id: "remote-sqlite-agent",
+          cli: "codex",
+          capabilities: ["code"],
+          topics: ["remote.test"],
+          heartbeat_ttl_ms: 60000,
+        });
+
+        assert.equal(registered.ok, true);
+        assert.equal(registered.data.effective.updated, true);
+        assert.equal(registered.data.effective.online, true);
+        assert.equal(registered.data.effective.status, "online");
+        assert.equal(
+          registered.data.effective.lease_expires_ms,
+          registered.data.lease_expires_ms,
+        );
+        assert.ok(
+          registered.data.effective.last_seen_ms <=
+            registered.data.server_time_ms,
+        );
+
+        const persisted = isolated.store.getAgent("remote-sqlite-agent");
+        assert.equal(persisted.status, "online");
+        assert.equal(
+          persisted.lease_expires_ms,
+          registered.data.lease_expires_ms,
+        );
+      } finally {
+        isolated.cleanup();
+      }
+    });
+  });
 
   describe("handlePublish()", () => {
     it("직접 에이전트 대상 발행 시 ok: true와 message_id를 반환해야 한다", () => {
