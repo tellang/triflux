@@ -155,10 +155,7 @@ export function createTools(store, router, hitl, pipe = null) {
           },
         },
       },
-      handler: wrap("REGISTER_FAILED", (args) => {
-        const data = router.registerAgent(args);
-        return { ok: true, data };
-      }),
+      handler: wrap("REGISTER_FAILED", (args) => router.registerAgent(args)),
     },
 
     // ── 2. status ──

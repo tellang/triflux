@@ -1725,7 +1725,7 @@ export async function startHub({
               });
               recordWorker(agent_id, "spawned", command, 0);
             }
-            return writeJson(res, 200, result);
+            return writeJson(res, result.ok ? 200 : 409, result);
           }
 
           if (path === "/bridge/result" && req.method === "POST") {

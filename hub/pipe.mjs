@@ -222,6 +222,7 @@ export function createPipeServer({
     switch (action) {
       case "register": {
         const result = router.registerAgent(payload);
+        if (!result?.ok) return result;
         if (client) {
           client.agentId = payload.agent_id;
           client.subscriptions = new Set(
@@ -230,7 +231,7 @@ export function createPipeServer({
           touchClient(client);
           pushPendingMessages(client.agentId);
         }
-        return { ok: true, data: { ...result, pipe_path: pipePath } };
+        return { ok: true, data: { ...result.data, pipe_path: pipePath } };
       }
 
       case "subscribe": {
