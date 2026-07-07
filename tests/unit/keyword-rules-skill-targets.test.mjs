@@ -108,6 +108,14 @@ describe("tfx-harness 라우팅 우선순위 (동순위 가로채기 회귀 가�
     assert.ok(meta, "meta 룰은 함께 매치되되 최우선이 아니어야 한다");
   });
 
+  it("priority 1 명시 토큰(tfx-hub 등)은 메타 문구와 섞여도 가로채이지 않는다", async () => {
+    const resolved = await resolveFor(
+      "tfx hub 상태 보려는데 어떤 스킬이 맞아?",
+    );
+    assert.equal(resolved[0]?.id, "tfx-hub");
+    assert.ok(resolved.some((match) => match.id === "tfx-harness-meta"));
+  });
+
   it("메타 문구 단독은 tfx-harness-meta가 tfx-unified를 supersede한다", async () => {
     const resolved = await resolveFor("어떤 스킬 쓰는 게 맞아? 스킬 추천해줘");
     assert.equal(resolved[0]?.id, "tfx-harness-meta");

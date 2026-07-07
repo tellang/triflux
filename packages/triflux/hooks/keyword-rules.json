@@ -194,7 +194,7 @@
         }
       ],
       "skill": "tfx-hub",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -209,7 +209,7 @@
         }
       ],
       "skill": "tfx-doctor",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -224,7 +224,7 @@
         }
       ],
       "skill": "tfx-setup",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -239,7 +239,7 @@
         }
       ],
       "skill": "tfx-research",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -254,7 +254,7 @@
         }
       ],
       "skill": "tfx-interview",
-      "priority": 2,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
