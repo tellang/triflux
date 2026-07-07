@@ -871,7 +871,10 @@ test("attachClaudeDaemonSession marks socket close before completion as closed",
       timeoutMs: 1000,
     });
 
-    assert.equal(result.inputSent, false);
+    // 서버가 handshake와 FIN을 연달아 보내므로 클라이언트가 input을 쓰기 전에
+    // close를 관찰할 수도(inputSent=false), 못 할 수도(inputSent=true) 있다.
+    // 이 순서는 스케줄링 우연이라 단언하지 않는다(2026-07-07 CI flake 실측 2회).
+    // 본질 계약: 완료 마커 없이 닫히면 closed=true, timeout으로 오분류하지 않는다.
     assert.equal(result.closed, true);
     assert.equal(result.matchedCompletion, false);
     assert.equal(result.timedOut, false);
