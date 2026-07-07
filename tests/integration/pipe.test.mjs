@@ -191,6 +191,40 @@ describe("Named Pipe 실시간 채널", () => {
     restoreHubStateDir?.();
   });
 
+  it("register presence 실패는 pipe transport가 ok:true로 감싸지 않아야 한다", async () => {
+    const pipe = createRemotePipeServer({
+      sessionId: `remote-register-failure-${randomUUID()}`,
+      router: {
+        registerAgent() {
+          return {
+            ok: false,
+            error: {
+              code: "REGISTER_PRESENCE_NOT_UPDATED",
+              message: "stuck-agent register did not update effective presence",
+            },
+            data: {
+              agent_id: "stuck-agent",
+              lease_expires_ms: Date.now() + 60000,
+              effective: { online: false, status: "offline" },
+            },
+          };
+        },
+      },
+    });
+
+    const result = await pipe.executeCommand("register", {
+      agent_id: "stuck-agent",
+      cli: "claude",
+      capabilities: ["cto"],
+      topics: [],
+      heartbeat_ttl_ms: 60000,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "REGISTER_PRESENCE_NOT_UPDATED");
+    assert.equal(result.data.effective.status, "offline");
+  });
+
   it("구독된 에이전트는 publish 후 메시지를 실시간 push로 받아야 한다", async () => {
     const subscriber = await createPipeClient(hub.pipePath);
     const publisher = await createPipeClient(hub.pipePath);

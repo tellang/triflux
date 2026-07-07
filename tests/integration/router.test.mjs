@@ -9,6 +9,8 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createRouter } from "../../hub/router.mjs";
 import { createStore } from "../../hub/store.mjs";
+import { createRouter as createCoreRouter } from "../../packages/core/hub/router.mjs";
+import { createStore as createRemoteStore } from "../../packages/remote/hub/store.mjs";
 import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 function tempDbPath() {
@@ -21,6 +23,23 @@ function createIsolatedRouter() {
   const dbPath = tempDbPath();
   const store = createStore(dbPath);
   const router = createRouter(store);
+  return {
+    store,
+    router,
+    cleanup() {
+      router.stopSweeper();
+      store.close();
+      try {
+        rmSync(join(dbPath, ".."), { recursive: true, force: true });
+      } catch {}
+    },
+  };
+}
+
+function createIsolatedRemoteRouter() {
+  const dbPath = tempDbPath();
+  const store = createRemoteStore(dbPath);
+  const router = createCoreRouter(store);
   return {
     store,
     router,
@@ -58,6 +77,45 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
   });
 
   // ── handlePublish ──
+
+  describe("remote SQLite store compatibility", () => {
+    it("core router registration succeeds and returns effective online presence", () => {
+      const isolated = createIsolatedRemoteRouter();
+      try {
+        const registered = isolated.router.registerAgent({
+          agent_id: "remote-sqlite-agent",
+          cli: "codex",
+          capabilities: ["code"],
+          topics: ["remote.test"],
+          heartbeat_ttl_ms: 60000,
+        });
+
+        assert.equal(registered.ok, true);
+        assert.equal(registered.data.effective.updated, true);
+        assert.equal(registered.data.hub_pid, process.pid);
+        assert.equal(registered.data.effective.store_type, "sqlite");
+        assert.equal(registered.data.effective.online, true);
+        assert.equal(registered.data.effective.status, "online");
+        assert.equal(
+          registered.data.effective.lease_expires_ms,
+          registered.data.lease_expires_ms,
+        );
+        assert.ok(
+          registered.data.effective.last_seen_ms <=
+            registered.data.server_time_ms,
+        );
+
+        const persisted = isolated.store.getAgent("remote-sqlite-agent");
+        assert.equal(persisted.status, "online");
+        assert.equal(
+          persisted.lease_expires_ms,
+          registered.data.lease_expires_ms,
+        );
+      } finally {
+        isolated.cleanup();
+      }
+    });
+  });
 
   describe("handlePublish()", () => {
     it("직접 에이전트 대상 발행 시 ok: true와 message_id를 반환해야 한다", () => {
@@ -160,6 +218,104 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
   });
 
   describe("CTO 역할 승계", () => {
+    it("ineffective register는 ok:false로 반환하고 role election을 진행하지 않아야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        isolated.store.registerAgent = () => ({
+          agent_id: "stuck-cto",
+          lease_id: "lease-stuck",
+          lease_expires_ms: Date.now() + 60000,
+          server_time_ms: Date.now(),
+          effective: {
+            updated: false,
+            online: false,
+            status: "offline",
+            last_seen_ms: Date.now() - 60000,
+            lease_expires_ms: Date.now() - 1,
+          },
+        });
+
+        const registered = isolated.router.registerAgent({
+          agent_id: "stuck-cto",
+          cli: "claude",
+          capabilities: ["cto"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 100 },
+          heartbeat_ttl_ms: 60000,
+        });
+
+        assert.equal(registered.ok, false);
+        assert.equal(registered.error.code, "REGISTER_PRESENCE_NOT_UPDATED");
+        assert.equal(registered.data.hub_pid, process.pid);
+        assert.equal(
+          isolated.router.getStatus("hub").data.roles.cto.leader_agent_id,
+          null,
+        );
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
+    it("offline explicit CTO 재등록은 DB presence를 복구하고 takeover 가능해야 한다", () => {
+      const isolated = createIsolatedRouter();
+      try {
+        let registered = isolated.router.registerAgent({
+          agent_id: "claude-callbot-main",
+          cli: "claude",
+          capabilities: ["code"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 100, cwd: process.cwd() },
+          heartbeat_ttl_ms: 60000,
+        });
+        assert.equal(registered.ok, true);
+
+        isolated.router.updateAgentStatus("claude-callbot-main", "offline");
+        registered = isolated.router.registerAgent({
+          agent_id: "fallback-cto",
+          cli: "claude",
+          capabilities: ["code"],
+          topics: ["cto"],
+          metadata: { cwd: process.cwd() },
+          heartbeat_ttl_ms: 60000,
+        });
+        assert.equal(registered.ok, true);
+        assert.equal(
+          isolated.router.getStatus("hub").data.roles.cto.leader_agent_id,
+          "fallback-cto",
+        );
+
+        const before = isolated.store.getAgent("claude-callbot-main");
+        assert.equal(before.status, "offline");
+
+        registered = isolated.router.registerAgent({
+          agent_id: "claude-callbot-main",
+          cli: "claude",
+          capabilities: ["code"],
+          topics: [],
+          metadata: { role: "cto", cto_priority: 100, cwd: process.cwd() },
+          heartbeat_ttl_ms: 7200000,
+        });
+        assert.equal(registered.ok, true);
+        assert.equal(registered.data.effective.status, "online");
+
+        const row = isolated.store.getAgent("claude-callbot-main");
+        assert.equal(row.status, "online");
+        assert.equal(row.lease_expires_ms, registered.data.lease_expires_ms);
+        assert.ok(row.last_seen_ms >= registered.data.server_time_ms - 50);
+
+        const takeover = isolated.router.takeoverRole({
+          role: "cto",
+          agent_id: "claude-callbot-main",
+          reason: "regression-454",
+          requested_by: "test",
+        });
+        assert.equal(takeover.ok, true);
+        assert.equal(takeover.data.leader_agent_id, "claude-callbot-main");
+      } finally {
+        isolated.cleanup();
+      }
+    });
+
     it("topic:cto는 전체 팬아웃이 아니라 현재 CTO leader 한 명에게만 라우팅해야 한다", () => {
       const isolated = createIsolatedRouter();
       try {

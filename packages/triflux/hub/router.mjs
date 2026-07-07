@@ -260,6 +260,26 @@ export function createRouter(store) {
     );
   }
 
+  function registerPresenceIsEffective(result) {
+    const effective = result?.effective;
+    return (
+      effective?.online === true &&
+      effective.status === "online" &&
+      Number(effective.lease_expires_ms) === Number(result?.lease_expires_ms)
+    );
+  }
+
+  function registerPresenceFailure(agentId, result) {
+    return {
+      ok: false,
+      error: {
+        code: "REGISTER_PRESENCE_NOT_UPDATED",
+        message: `${agentId} register did not update effective presence`,
+      },
+      data: { ...result, hub_pid: process.pid },
+    };
+  }
+
   function sortRoleCandidates(candidates = []) {
     return [...candidates].sort((left, right) => {
       const sourceDelta =
@@ -802,6 +822,9 @@ export function createRouter(store) {
 
     registerAgent(args) {
       const result = store.registerAgent(args);
+      if (!registerPresenceIsEffective(result)) {
+        return registerPresenceFailure(args.agent_id, result);
+      }
       upsertRuntimeTopics(args.agent_id, args.topics || [], { replace: true });
       refreshRoleCandidateForAgent(args.agent_id);
       for (const roleName of ROLE_TOPICS) {
@@ -810,7 +833,7 @@ export function createRouter(store) {
           transferBacklog: true,
         });
       }
-      return result;
+      return { ok: true, data: { ...result, hub_pid: process.pid } };
     },
 
     refreshAgentLease(agentId, ttlMs = 30000) {

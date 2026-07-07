@@ -177,6 +177,15 @@ export function createMemoryStore() {
         lease_id: uuidv7(),
         lease_expires_ms: next.lease_expires_ms,
         server_time_ms: now,
+        effective: {
+          updated: true,
+          online: next.status === "online",
+          status: next.status,
+          last_seen_ms: next.last_seen_ms,
+          lease_expires_ms: next.lease_expires_ms,
+          store_type: "memory",
+          db_path: null,
+        },
       };
     },
 

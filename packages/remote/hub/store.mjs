@@ -381,7 +381,8 @@ export function createStore(dbPath, options = {}) {
     }) {
       const now = Date.now();
       const leaseExpires = now + heartbeat_ttl_ms;
-      S.upsertAgent.run({
+      const leaseId = uuidv7();
+      const write = S.upsertAgent.run({
         agent_id,
         cli,
         pid: pid ?? null,
@@ -392,11 +393,23 @@ export function createStore(dbPath, options = {}) {
         status: "online",
         metadata_json: JSON.stringify(metadata),
       });
+      const persisted = parseAgentRow(S.getAgent.get(agent_id));
       return {
         agent_id,
-        lease_id: uuidv7(),
+        lease_id: leaseId,
         lease_expires_ms: leaseExpires,
         server_time_ms: now,
+        effective: {
+          updated: write.changes > 0,
+          online:
+            persisted?.status === "online" &&
+            Number(persisted.lease_expires_ms) === leaseExpires,
+          status: persisted?.status ?? null,
+          last_seen_ms: persisted?.last_seen_ms ?? null,
+          lease_expires_ms: persisted?.lease_expires_ms ?? null,
+          store_type: "sqlite",
+          db_path: dbPath ?? null,
+        },
       };
     },
 

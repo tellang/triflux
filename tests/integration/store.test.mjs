@@ -72,6 +72,11 @@ describe("createStore()", { skip: SQLITE_SKIP }, () => {
       assert.ok(result.agent_id);
       assert.ok(result.lease_expires_ms > Date.now());
       assert.ok(result.lease_id);
+      assert.equal(result.effective?.online, true);
+      assert.equal(result.effective?.status, "online");
+      assert.equal(result.effective?.lease_expires_ms, result.lease_expires_ms);
+      assert.equal(result.effective?.store_type, "sqlite");
+      assert.equal(result.effective?.db_path, dbPath);
     });
 
     it("getAgent()는 등록된 에이전트를 반환해야 한다", () => {
@@ -131,6 +136,36 @@ describe("createStore()", { skip: SQLITE_SKIP }, () => {
       });
       const agent = store.getAgent("upsert-agent");
       assert.equal(agent.cli, "gemini");
+    });
+
+    it("offline agent 재등록 시 persisted presence를 online으로 복구해야 한다", () => {
+      store.registerAgent({
+        agent_id: "revived-agent",
+        cli: "claude",
+        capabilities: ["cto"],
+        topics: [],
+        metadata: { role: "cto" },
+        heartbeat_ttl_ms: 30000,
+      });
+      assert.equal(store.updateAgentStatus("revived-agent", "offline"), true);
+      assert.equal(store.getAgent("revived-agent").status, "offline");
+
+      const result = store.registerAgent({
+        agent_id: "revived-agent",
+        cli: "claude",
+        capabilities: ["cto"],
+        topics: ["cto"],
+        metadata: { role: "cto", cto_priority: 100 },
+        heartbeat_ttl_ms: 7200000,
+      });
+      const agent = store.getAgent("revived-agent");
+
+      assert.equal(result.effective?.online, true);
+      assert.equal(result.effective?.status, "online");
+      assert.equal(agent.status, "online");
+      assert.equal(agent.lease_expires_ms, result.lease_expires_ms);
+      assert.equal(result.effective?.lease_expires_ms, result.lease_expires_ms);
+      assert.ok(agent.last_seen_ms >= result.server_time_ms - 50);
     });
   });
 
