@@ -15,8 +15,12 @@ function isExplicitlyOn(name) {
   return ON_VALUES.has(normalizeEnvValue(name));
 }
 
+export function isCtoDisabled() {
+  return isExplicitlyOff("TFX_CTO");
+}
+
 export function isCtoManagerEnabled() {
-  if (isExplicitlyOff("TFX_CTO")) return false;
+  if (isCtoDisabled()) return false;
   return isExplicitlyOn("TFX_CTO_MANAGER");
 }
 

@@ -153,3 +153,7 @@ swarm-prompts/
 .claude/settings.local.json
 .gstack/
 .superpowers/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store

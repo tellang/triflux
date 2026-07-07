@@ -245,7 +245,21 @@ export async function applyHygieneArchiveActions({
       });
       continue;
     }
-    assertLakePath(lakeRoot, sourcePath, "archive source");
+    // lake 밖 산출물은 자동 이동 대상이 아니다 — 크래시 대신 skip으로 보고한다.
+    // (checkpoint 등 실제 산출물은 대부분 lake 밖에 있으므로 throw 하면 apply 전체가 죽는다.)
+    if (!isInside(lakeRoot, sourcePath)) {
+      operations.push({
+        hygiene_key: hygieneKey,
+        kind: row.kind,
+        id: row.id,
+        action: row.action,
+        source_path: sourcePath,
+        status: "skipped",
+        reason: "source_outside_lake",
+        bytes: 0,
+      });
+      continue;
+    }
 
     const targetPath = targetPathFor({ lakeRoot, row, sourcePath, now });
     assertLakePath(lakeRoot, targetPath, "archive target");
