@@ -62,8 +62,8 @@
     .mini-head, .mcp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-width: 0; }
     .mini-title, .mcp-name { font-size: 12px; font-weight: 650; line-height: 1.25; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .path-text { font-size: 10px; color: var(--text-muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .focus-btn { background: transparent; border: 1px solid rgba(10,132,255,0.45); color: #64b5ff; font-size: 10px; line-height: 1; padding: 4px 7px; cursor: pointer; border-radius: 6px; flex: 0 0 auto; }
-    .focus-btn:hover { background: var(--accent); color: #fff; }
+    .copy-btn { background: transparent; border: 1px solid rgba(10,132,255,0.45); color: #64b5ff; font-size: 10px; line-height: 1; padding: 4px 7px; cursor: pointer; border-radius: 6px; flex: 0 0 auto; }
+    .copy-btn:hover { background: var(--accent); color: #fff; }
     .agent-view { display: flex; flex-direction: column; gap: 8px; }
     .project-group { min-width: 0; border: 1px solid rgba(255,255,255,0.06); background: rgba(0,0,0,0.13); border-radius: 9px; overflow: hidden; }
     .project-group > summary, .session-card > summary, .bubble-wrap > summary { list-style: none; }
@@ -115,6 +115,8 @@
     .chip { display: inline-flex; align-items: center; gap: 5px; min-height: 20px; border-radius: 999px; padding: 3px 7px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.07); font-size: 10px; color: rgba(255,255,255,0.76); }
     .copy-chip { cursor: pointer; }
     .copy-chip:hover { border-color: rgba(10,132,255,0.42); color: #8ec9ff; }
+    .copy-chip, .copy-btn { -webkit-user-drag: none; }
+    .chat-session-id, .bubble-preview, .bubble-full, .runtime-sub, .path-text, .session-summary-title, .session-summary-sub, .project-path { -webkit-user-select: text; user-select: text; }
     .chip.on { color: var(--success); border-color: rgba(50,215,75,0.25); background: rgba(50,215,75,0.08); }
     .chip.partial { color: var(--warning); border-color: rgba(255,214,10,0.25); background: rgba(255,214,10,0.08); }
     .chip.off { color: var(--danger); border-color: rgba(255,69,58,0.25); background: rgba(255,69,58,0.08); }
@@ -190,7 +192,45 @@
     }
     function renderCopyChip(label, value) {
       if (!value) return '';
-      return `<span class="chip copy-chip" title="Copy ${escapeHtml(label)}" data-copy-text="${dataAttr(value)}">${escapeHtml(label)} ${escapeHtml(shortId(value))}</span>`;
+      return `<span class="chip copy-chip" draggable="false" title="Copy ${escapeHtml(label)}" data-copy-text="${dataAttr(value)}">${escapeHtml(label)} ${escapeHtml(shortId(value))}</span>`;
+    }
+
+    function shellQuote(value) {
+      const text = String(value ?? '').trim();
+      return `'${text.replace(/'/g, `'\\''`)}'`;
+    }
+
+    function commandCwd(row) {
+      const cwd = String(row?.cwd || row?.worktreePath || '').trim();
+      if (!cwd || cwd === 'local' || cwd === 'local runtime') return '';
+      if (/^https?:\/\//iu.test(cwd)) return '';
+      return cwd;
+    }
+
+    function sessionAttachCommand(row) {
+      const sid = String(row?.sessionId || '').trim();
+      if (!sid) return '';
+      const agentId = String(row?.agent_id || row?.agent?.id || '').trim().toLowerCase();
+      const cwd = commandCwd(row);
+      const prefix = cwd ? `cd ${shellQuote(cwd)} && ` : '';
+      if (agentId === 'codex') return `${prefix}codex resume ${shellQuote(sid)}`;
+      if (agentId === 'claude') return `${prefix}claude --resume ${shellQuote(sid)}`;
+      if (agentId === 'antigravity') {
+        const conversationId = String(row?.conversationId || '').trim();
+        const token = conversationId || sid;
+        const suffix = token === sid ? '' : ` # session ${sid}`;
+        return `${prefix}agy --conversation ${shellQuote(token)}${suffix}`;
+      }
+      return `${prefix}tfx-live start --session ${shellQuote(sid)} --resume ${shellQuote(sid)}`;
+    }
+
+    function renderSessionCopyButton(row) {
+      const sid = String(row?.sessionId || '').trim();
+      const command = sessionAttachCommand(row);
+      if (!sid || !command) return '';
+      const pid = numericPid(row?.pid);
+      const agentId = row?.agent_id || row?.agent?.id || '';
+      return `<button class="copy-btn" draggable="false" data-copy-text="${dataAttr(command)}" data-session-id="${dataAttr(sid)}" data-pid="${dataAttr(pid)}" data-agent-id="${dataAttr(agentId)}" title="Copy launch command">Copy</button>`;
     }
 
     function collectOpenDetailKeys(container) {
@@ -471,10 +511,8 @@
 
     function renderChatBubble(row, { side = 'worker' } = {}) {
       const sid = row.sessionId || '';
-      const pid = numericPid(row.pid);
-      const agentId = row.agent_id || row.agent?.id || '';
       const text = bubbleText(row, side === 'cto' ? 'CTO prompt unavailable' : 'Worker prompt unavailable');
-      const focusDisabled = row.synthetic || !sid;
+      const copyButton = row.synthetic ? '' : renderSessionCopyButton(row);
       const badge = side === 'cto'
         ? '<span class="agent-badge">T</span>'
         : renderAgentTag(row.agent) || '<span class="agent-badge">A</span>';
@@ -482,7 +520,7 @@
         <div class="bubble-card ${escapeHtml(side)}">
           <div class="chat-session-title">
             <span style="display:flex;align-items:center;gap:6px;min-width:0;">${badge}<span class="chat-session-id">${escapeHtml(sid || side)}</span></span>
-            ${focusDisabled ? '' : `<button class="focus-btn" data-focus-session="1" data-session-id="${dataAttr(sid)}" data-pid="${dataAttr(pid)}" data-agent-id="${dataAttr(agentId)}">Focus</button>`}
+            ${copyButton}
           </div>
           <details class="bubble-wrap" data-open-key="bubble:${escapeHtml(side)}:${dataAttr(sid || text.slice(0, 24))}">
             <summary class="bubble-preview">${escapeHtml(compactText(text, 'prompt'))}</summary>
@@ -494,10 +532,8 @@
 
     function renderRuntimeCard(row) {
       const sid = row.sessionId || '';
-      const pid = numericPid(row.pid);
-      const agentId = row.agent_id || row.agent?.id || '';
       const status = row.status || row.phase || 'active';
-      const focusDisabled = row.focusable === false || !sid || !pid;
+      const copyButton = row.focusable === false ? '' : renderSessionCopyButton(row);
       return `
         <div class="runtime-card">
           ${renderAgentTag(row.agent)}
@@ -505,7 +541,7 @@
             <div class="runtime-title"><span class="runtime-command">${escapeHtml(commandLabel(row))}</span><span class="agent-state ${escapeHtml(status)}">${escapeHtml(status)}</span></div>
             <div class="runtime-sub">${escapeHtml(displayPath(row.cwd || row.host || 'local runtime'))}${row.elapsed ? ` · ${escapeHtml(row.elapsed)}` : ''}</div>
           </div>
-          ${focusDisabled ? '' : `<button class="focus-btn" data-focus-session="1" data-session-id="${dataAttr(sid)}" data-pid="${dataAttr(pid)}" data-agent-id="${dataAttr(agentId)}">Focus</button>`}
+          ${copyButton}
         </div>
       `;
     }
@@ -703,53 +739,14 @@
         setTimeout(() => { element.textContent = previous; }, 700);
       }
     }
-    function postNativeTrayMessage(message) {
-      try {
-        window?.webkit?.messageHandlers?.tray?.postMessage(message);
-      } catch (_err) {
-        // Browser fallback: the web tray can run without a native wrapper.
-      }
-    }
-
-    async function focusSession(sid, pid, agentId, button) {
-      if (!sid) return;
-      const previous = button?.textContent || 'Focus';
-      if (button) {
-        button.disabled = true;
-        button.textContent = 'Focusing…';
-      }
-      try {
-        const res = await fetch('/api/focus-session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: sid, pid: pid || undefined, agentId: agentId || undefined })
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok || body?.ok === false || body?.focus?.ok === false) throw new Error(body?.error || body?.focus?.error || 'focus failed');
-        if (button) button.textContent = 'Focused';
-        postNativeTrayMessage({ type: 'focus-complete' });
-      } catch (err) {
-        console.error(err);
-        if (button) button.textContent = 'Failed';
-      } finally {
-        setTimeout(() => {
-          if (button) {
-            button.textContent = previous;
-            button.disabled = false;
-          }
-        }, 650);
-      }
-    }
     document.addEventListener('click', event => {
       const copyTarget = event.target.closest('[data-copy-text]');
       if (copyTarget) {
         copyText(copyTarget.dataset.copyText, copyTarget);
-        return;
       }
-      const focusTarget = event.target.closest('[data-focus-session]');
-      if (focusTarget) {
-        focusSession(focusTarget.dataset.sessionId, Number(focusTarget.dataset.pid || 0), focusTarget.dataset.agentId || '', focusTarget);
-      }
+    });
+    document.addEventListener('dragstart', event => {
+      if (event.target.closest('[data-copy-text]')) event.preventDefault();
     });
 
     setInterval(fetchState, 3000);
