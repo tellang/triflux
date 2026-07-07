@@ -2,6 +2,8 @@
 
 ## 멘탈 모델
 
+> 근거(why): [ADR-0005 — packages/ 3-layer single-source 미러](../../docs/adr/0005-packages-three-layer-mirror.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
+
 triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어를 동시에 유지한다. root 가 source of truth 다. mirror 작업은 drift 가 생기지 않도록 레이어별 룰을 다르게 적용한다.
 
 | 레이어 | 역할 | mirror 룰 |

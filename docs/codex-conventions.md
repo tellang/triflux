@@ -52,19 +52,10 @@ psmux send-keys -t "codex-swarm-{id}" \
 ```
 
 ### 정리 (WT 프리징 방지)
-```bash
-# 1. exit 전송 → 셸 종료
-psmux send-keys -t "$s" "exit" Enter
-# 2. WT pane 자동 닫힘 대기 (최소 5초)
-sleep 5
-# 3. 잔여 세션만 kill (pane 닫힌 후)
-psmux kill-session -t "$s" 2>/dev/null
-```
 
-**절대 금지**: WT pane이 attach된 상태에서 `psmux kill-session` 직접 실행
-→ WT ConPTY 레이스 → 프리징 (microsoft/terminal#17871)
+> ⚠️ **정본은 SSOT [.claude/rules/tfx-psmux.md](../.claude/rules/tfx-psmux.md) RULE 5.** 세션 정리는 **detach-first**(`detach-client` → `sleep 2` → `kill-session`)를 따른다. 과거 이 문서가 안내하던 `send-keys "exit"` → `sleep 5` 방식은 RULE 5의 **MUST NOT**이므로 폐기한다. `detach-client` 미지원 구버전 psmux에서는 detach 루프가 `|| true`로 자동 no-op 후 kill로 진행되어 순서가 버전 무관 안전하다.
 
-`psmux detach-client`는 3.3.x에서 미지원. exit + 대기가 유일한 안전 경로.
+**절대 금지**: WT pane이 attach된 상태에서 `psmux kill-session` 직접 실행 → WT ConPTY 레이스 → 프리징 (microsoft/terminal#17871).
 
 ## 5. 병렬 실행 제약
 

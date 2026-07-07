@@ -3,6 +3,8 @@
 `/tfx-auto --retry auto-escalate` 가 사용하는 CLI 승격 체인.
 각 단계에서 `--max-iterations` (기본 3) 소진 시 다음 단계로 전이.
 
+> 근거(why): [ADR-0006 — 재시도 승격 체인 codex→claude opus 2단계](../../docs/adr/0006-escalation-chain-codex-to-claude-opus.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
+
 ## DEFAULT_ESCALATION_CHAIN
 
 `hub/team/retry-state-machine.mjs` 의 `DEFAULT_ESCALATION_CHAIN` 상수.

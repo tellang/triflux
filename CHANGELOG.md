@@ -2,6 +2,16 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.41.1] - 2026-07-01
+
+### Fixed
+- **[#449]** bin: `tfx-doctor`/`tfx-setup` shim 이 설치된 CLI(npm 글로벌 심링크)에서 조용히 no-op 하던 버그 수정 — 두 shim 은 `process.argv` 에 서브커맨드를 주입한 뒤 `triflux.mjs` 를 동적 import 하면서 `argv[1]` 을 shim 자기 경로로 남겼다. `triflux.mjs` 의 `isMainModule()` guard 는 `argv[1]` 을 자신의 실제 경로와 비교하므로 매칭이 실패해 설치된 `tfx-doctor`/`tfx-setup` 이 출력 없이 exit 0 으로 끝났다(#448 과 같은 버그 class, 다른 메커니즘). `argv[1]` 을 `fileURLToPath(new URL("./triflux.mjs", import.meta.url))` 로 지정해 해결. direct + symlink 4종 회귀 테스트 추가(`tests/unit/tfx-cli-shim-entrypoint.test.mjs`). `packages/triflux` 미러.
+- **[#448]** tfx-live: CLI main-module guard 가 심링크를 따라가도록 수정 — `path.resolve()` 는 심링크를 resolve 하지 않는데 npm 글로벌 설치는 항상 심링크(`tfx-live -> .../bin/tfx-live.mjs`)로 CLI 를 노출하므로, 설치된 `tfx-live` 실행 시 guard 비교가 실패해 `main()` 이 호출되지 않고 조용히 exit 0 했다. `bin/triflux.mjs` 가 이미 쓰던 `realpathSync` 기반 `isMainModule()` guard 를 이식하고(그래서 `tfx`/`triflux` 는 영향 없었다) 심링크 경유 회귀 테스트 추가. `packages/triflux` byte-identical 미러.
+- **[#446]** release: tag-only push 에 stale-HEAD preflight + remote-tag readiness poll 추가 — 사전 bump push 직후 dispatch 시 CI checkout 이 stale main 을 받아 tag 가 잘못된 커밋에 찍히거나 `gh release create` 가 아직 전파 안 된 tag 를 못 보던 레이스를 완화.
+
+### Changed
+- **[#445]** test(hub): CTO sweeper live-leader no-op 불변식(epoch + transfer invariance)을 회귀로 잠금.
+
 ## [10.41.0] - 2026-06-29
 
 ### Added
