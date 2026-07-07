@@ -183,6 +183,8 @@ export function createMemoryStore() {
           status: next.status,
           last_seen_ms: next.last_seen_ms,
           lease_expires_ms: next.lease_expires_ms,
+          store_type: "memory",
+          db_path: null,
         },
       };
     },

@@ -276,7 +276,7 @@ export function createRouter(store) {
         code: "REGISTER_PRESENCE_NOT_UPDATED",
         message: `${agentId} register did not update effective presence`,
       },
-      data: result,
+      data: { ...result, hub_pid: process.pid },
     };
   }
 
@@ -833,7 +833,7 @@ export function createRouter(store) {
           transferBacklog: true,
         });
       }
-      return { ok: true, data: result };
+      return { ok: true, data: { ...result, hub_pid: process.pid } };
     },
 
     refreshAgentLease(agentId, ttlMs = 30000) {

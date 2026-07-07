@@ -407,6 +407,8 @@ export function createStore(dbPath, options = {}) {
           status: persisted?.status ?? null,
           last_seen_ms: persisted?.last_seen_ms ?? null,
           lease_expires_ms: persisted?.lease_expires_ms ?? null,
+          store_type: "sqlite",
+          db_path: dbPath ?? null,
         },
       };
     },

@@ -85,6 +85,7 @@ describe("hub/store-adapter.mjs", () => {
         heartbeat_ttl_ms: 30000,
       });
       assert.equal(agent.agent_id, "sqlite-agent");
+      assert.equal(agent.effective?.store_type, "sqlite");
 
       const message = store.enqueueMessage({
         type: "event",
@@ -126,6 +127,8 @@ describe("hub/store-adapter.mjs", () => {
       heartbeat_ttl_ms: 60000,
     });
     assert.equal(registered.agent_id, "memory-agent");
+    assert.equal(registered.effective?.store_type, "memory");
+    assert.equal(registered.effective?.db_path, null);
     assert.equal(store.getAgent("memory-agent")?.status, "online");
 
     const message = store.enqueueMessage({

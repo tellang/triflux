@@ -92,6 +92,8 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
 
         assert.equal(registered.ok, true);
         assert.equal(registered.data.effective.updated, true);
+        assert.equal(registered.data.hub_pid, process.pid);
+        assert.equal(registered.data.effective.store_type, "sqlite");
         assert.equal(registered.data.effective.online, true);
         assert.equal(registered.data.effective.status, "online");
         assert.equal(
@@ -244,6 +246,7 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
 
         assert.equal(registered.ok, false);
         assert.equal(registered.error.code, "REGISTER_PRESENCE_NOT_UPDATED");
+        assert.equal(registered.data.hub_pid, process.pid);
         assert.equal(
           isolated.router.getStatus("hub").data.roles.cto.leader_agent_id,
           null,

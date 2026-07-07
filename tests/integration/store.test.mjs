@@ -75,6 +75,8 @@ describe("createStore()", { skip: SQLITE_SKIP }, () => {
       assert.equal(result.effective?.online, true);
       assert.equal(result.effective?.status, "online");
       assert.equal(result.effective?.lease_expires_ms, result.lease_expires_ms);
+      assert.equal(result.effective?.store_type, "sqlite");
+      assert.equal(result.effective?.db_path, dbPath);
     });
 
     it("getAgent()는 등록된 에이전트를 반환해야 한다", () => {
