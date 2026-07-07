@@ -16,9 +16,16 @@ function loadTrayRenderer() {
   const tabGateway = { innerHTML: "" };
   const nativeMessages = [];
   const requests = [];
+  const clipboardWrites = [];
   const context = {
     console,
-    navigator: { clipboard: { writeText: async () => {} } },
+    navigator: {
+      clipboard: {
+        writeText: async (text) => {
+          clipboardWrites.push(text);
+        },
+      },
+    },
     setTimeout: (fn) => {
       fn();
       return 1;
@@ -53,6 +60,7 @@ function loadTrayRenderer() {
     },
     __requests: requests,
     __nativeMessages: nativeMessages,
+    __clipboardWrites: clipboardWrites,
   };
   vm.createContext(context);
   vm.runInContext(script, context);
@@ -863,24 +871,63 @@ describe("tray Sessions frontend", () => {
     assert.doesNotMatch(html, /function renderAgentLine/u);
   });
 
-  it("focus button reports success and asks the native popover to close", async () => {
-    const { context } = loadTrayRenderer();
-    const button = { textContent: "Focus", disabled: false };
+  it("renders copyable agent resume commands instead of focus actions", () => {
+    const { context, tabSessions } = loadTrayRenderer();
 
-    await context.focusSession("claude-101", 101, "claude", button);
-
-    assert.equal(context.__requests.length, 1);
-    assert.equal(context.__requests[0].url, "/api/focus-session");
-    assert.deepEqual(JSON.parse(context.__requests[0].options.body), {
-      sessionId: "claude-101",
-      pid: 101,
-      agentId: "claude",
+    context.renderSessions({
+      hub: {
+        id: "hub-abcdef",
+        projectRoot: "/Users/tellang/Projects/tools/triflux",
+      },
+      sessions: [],
+      cto: {
+        live_sessions: [
+          {
+            sessionId: "019f3a01-1616-7e91-8b37-c951c9a01101",
+            phase: "active",
+            agent_id: "antigravity",
+            agent: { id: "antigravity", label: "Antigravity", icon: "A" },
+            cwd: "/Users/tellang/Projects/mnk-callbot",
+            conversationId: "agy-conversation-1",
+            taskSummary: "AGY runtime",
+          },
+          {
+            sessionId: "14cadafc-1b8f-48b5-804d-0a70105481cc",
+            phase: "active",
+            agent_id: "claude",
+            agent: { id: "claude", label: "Claude", icon: "C" },
+            cwd: "/Users/tellang/Projects/mnk-callbot",
+            promptText: "cto 살아있어 다시 세웠어",
+          },
+          {
+            sessionId: "d4bb3841-bf9c-4f9a-b9e1-3df50caecda2",
+            phase: "active",
+            agent_id: "codex",
+            agent: { id: "codex", label: "Codex", icon: "X" },
+            pid: 24978,
+            cwd: "/Users/tellang/Projects/mnk-callbot",
+            command: "codex",
+            taskSummary: "codex",
+          },
+        ],
+        active_shards: [],
+      },
+      runtime: { summary: { total: 3, clients: [] } },
     });
-    assert.equal(button.textContent, "Focus");
-    assert.equal(button.disabled, false);
-    assert.equal(
-      JSON.stringify(context.__nativeMessages),
-      JSON.stringify([{ type: "focus-complete" }]),
+
+    assert.match(
+      tabSessions.innerHTML,
+      /data-copy-text="cd &#39;\/Users\/tellang\/Projects\/mnk-callbot&#39; &amp;&amp; agy --conversation &#39;agy-conversation-1&#39; # session 019f3a01-1616-7e91-8b37-c951c9a01101"/u,
     );
+    assert.match(
+      tabSessions.innerHTML,
+      /data-copy-text="cd &#39;\/Users\/tellang\/Projects\/mnk-callbot&#39; &amp;&amp; claude --resume &#39;14cadafc-1b8f-48b5-804d-0a70105481cc&#39;"/u,
+    );
+    assert.match(
+      tabSessions.innerHTML,
+      /data-copy-text="cd &#39;\/Users\/tellang\/Projects\/mnk-callbot&#39; &amp;&amp; codex resume &#39;d4bb3841-bf9c-4f9a-b9e1-3df50caecda2&#39;"/u,
+    );
+    assert.doesNotMatch(tabSessions.innerHTML, /data-focus-session/u);
+    assert.doesNotMatch(tabSessions.innerHTML, />Focus</u);
   });
 });
