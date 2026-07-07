@@ -14,9 +14,10 @@
 | 알고 싶은 것 | 먼저 볼 문서 |
 |---|---|
 | **무엇을 만드나 / 요구사항** | [prd/](prd/) — 제품 요구(PRD) · 템플릿 [prd/_template.md](prd/_template.md) |
-| **왜 이렇게 정했나 (결정 근거)** | [adr/](adr/) — 번호화된 불변 ADR · 상태보드 [adr/README.md](adr/README.md) · 운영 규약 [adr/CONVENTIONS.md](adr/CONVENTIONS.md) |
+| **원문 요구 ↔ 확정 요구 (추적성)** | [req/](req/) — raw(원문 ask) ↔ refined(확정 요구사항) 양방향 링크. PRD보다 앞 단계 |
+| **왜 이렇게 정했나 (결정 근거)** | [adr/](adr/) — 번호화된 불변 ADR · 상태보드 [adr/README.md](adr/README.md) · 운영 규약 [adr/CONVENTIONS.md](adr/CONVENTIONS.md) · 경량 결정로그 [DECISIONS.md](DECISIONS.md) |
 | **항상 지킬 에이전트 규칙** | [../.claude/rules/](../.claude/rules/) — 정책 SSOT. 하네스가 auto-load한다. 문서는 이 규칙을 "가리키기만" 한다 |
-| **시스템 구조** | [../ARCHITECTURE.md](../ARCHITECTURE.md) — 패키지·데이터 흐름·미러 관계 |
+| **시스템 구조** | [../ARCHITECTURE.md](../ARCHITECTURE.md) — 패키지·데이터 흐름·미러 관계 · 각주 리딩 노트 [architecture.reading.md](architecture.reading.md)(옵시디언, wiki-harness) |
 | **개발 / 기여 프로세스** | [process/](process/) — 브랜치 정책·PR 리뷰 계약 · 진입점 [../CONTRIBUTING.md](../CONTRIBUTING.md) |
 | **설계 서사 (design)** | [design/](design/) — 설계 노트·office-hours·실행 모드 등 서술형 설계 자료 |
 | **조사 / 근거 자료** | [research/](research/) — 리서치·감사·분석 리포트 |
@@ -28,7 +29,7 @@
 
 | 표면 | 지배 파일 | 대상 |
 |---|---|---|
-| **GitHub (공개 커밋)** | `.gitignore` | `docs/{adr,prd,design,research,process}/`, `../.claude/rules/`, 루트 `README`·`CONTRIBUTING`·`ARCHITECTURE`·`CHANGELOG`·`CLAUDE`·`AGENTS`·`CODEX`·`GEMINI`, `.document-harness.toml`, `.triflux/plans/` |
+| **GitHub (공개 커밋)** | `.gitignore` | `docs/{adr,prd,req,design,research,process,recovery,troubleshooting}/`, `docs/DECISIONS.md`, `docs/architecture.reading.md`, `docs/.obsidian/`, `docs/.wiki-harness/`, `../.claude/rules/`, 루트 `README`·`CONTRIBUTING`·`ARCHITECTURE`·`CHANGELOG`·`CLAUDE`·`AGENTS`·`CODEX`·`GEMINI`, `.document-harness.toml`, `.triflux/plans/` |
 | **LOCAL (git-ignore, 커밋 안 함)** | `.gitignore` | `.omx/`·`.omc/`·`.tfx/` 런타임, `.triflux/{lake,reports,swarm-logs,subagents}/`, `docs/superpowers/plans/`, 토큰·시크릿·호스트 등 비공개 값 |
 | **npm tarball** | `package.json`의 `files` | docs 중 `docs/assets`만 포함(나머지 docs 제외) |
 

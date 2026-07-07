@@ -39,6 +39,17 @@ docs/*
 !docs/recovery/**
 !docs/troubleshooting/
 !docs/troubleshooting/**
+!docs/req/
+!docs/req/**
+!docs/DECISIONS.md
+!docs/architecture.reading.md
+!docs/.obsidian/
+!docs/.obsidian/**
+# obsidian 로컬 UI 세션 상태(열린 탭·패널 크기) — 머신마다 churn, vault 설정은 아님
+docs/.obsidian/workspace.json
+docs/.obsidian/workspace-mobile.json
+!docs/.wiki-harness/
+!docs/.wiki-harness/**
 !docs/README.md
 # docs/superpowers: 부모가 docs/* 로 막혀 있어 2단계 re-include (specs 공개, plans LOCAL 유지)
 !docs/superpowers/
