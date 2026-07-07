@@ -62,6 +62,7 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 ## mirror 범위 (in / out)
 
 **mirror 대상** (root → packages 동기 필수):
+- `cto/*` → `packages/triflux/cto/` (byte-identical), `packages/remote/cto/` (root 상대 import 는 그대로, `../hub/lib/*` 등 hub 의존은 `@triflux/core/hub/...` 로 import 변환 — Edit 만, cp 는 변환 없는 파일 한정). remote 는 CLI 디스패처 `cto/index.mjs` 를 mirror 하지 않는다(모듈만). packages/core 는 cto/ 를 mirror 하지 않는다.
 - `hub/lib/*` → `packages/core/hub/lib/`, `packages/triflux/hub/lib/`
 - `hub/team/*`, `hub/*.mjs` (entry/runtime) → `packages/triflux/hub/`, `packages/remote/hub/` (해당 모듈만; `packages/core/hub/team/` 는 self-import 대상만 minimal mirror, 예: `retry-state-machine.mjs`)
 - `mesh/*` → `packages/core/mesh/`, `packages/triflux/mesh/` (PR #320 — root subset)
