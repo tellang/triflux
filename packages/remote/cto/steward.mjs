@@ -200,7 +200,9 @@ export async function runSteward(args = [], opts = {}) {
 
   // 가드레일 2 (PRD single-instance): watch 루프는 lake당 하나만 돈다.
   const loopLockPath = stewardLoopLockPath(lakeRoot);
+  const loopLockStaleMs = Math.max(LOOP_LOCK_STALE_MS, parsed.intervalMs * 3);
   let loopLock = null;
+  let loopLockHeartbeat = null;
   if (!stoppedReason && parsed.watch) {
     const acquireLock =
       injectedAcquireLoopLock ||
@@ -208,9 +210,21 @@ export async function runSteward(args = [], opts = {}) {
         acquireCtoHygieneStewardLock(rootDir, lakeRoot, {
           lockPath,
           timeoutMs: 0,
-          staleMs: Math.max(LOOP_LOCK_STALE_MS, parsed.intervalMs * 3),
+          staleMs: loopLockStaleMs,
         }));
     loopLock = await acquireLock(loopLockPath);
+    // 한 cycle이 staleMs보다 길어져도 다른 인스턴스가 락을 stale로 오판해
+    // 훔치지 못하도록, 작업 진행 중에도 주기적으로 mtime을 갱신한다.
+    if (loopLock?.path) {
+      const heartbeatMs = Math.max(30_000, Math.floor(loopLockStaleMs / 3));
+      loopLockHeartbeat = setInterval(() => {
+        try {
+          const touch = new Date();
+          utimesSync(loopLock.path, touch, touch);
+        } catch {}
+      }, heartbeatMs);
+      loopLockHeartbeat.unref?.();
+    }
   }
 
   let sigintHandler = null;
@@ -243,6 +257,17 @@ export async function runSteward(args = [], opts = {}) {
         lastCollect = collectResult;
       }
 
+      // collect 도중 중단/kill-switch가 들어왔으면 이번 cycle의 hygiene(특히
+      // apply)을 시작하지 않는다 — 중단 요청 이후의 fs-mutation 금지.
+      if (ctoDisabled()) {
+        stoppedReason = "disabled";
+        break;
+      }
+      if (signal.aborted) {
+        stoppedReason = "signal";
+        break;
+      }
+
       const hygieneArgs = parsed.apply
         ? ["--apply", "--json"]
         : ["--dry-run", "--json"];
@@ -268,12 +293,6 @@ export async function runSteward(args = [], opts = {}) {
             collectResult !== null ? "ok" : "skipped"
           } hygiene=ok\n`,
         );
-      }
-      if (loopLock?.path) {
-        try {
-          const touch = new Date();
-          utimesSync(loopLock.path, touch, touch);
-        } catch {}
       }
       if (typeof onRun === "function") {
         await onRun(run, {
@@ -302,6 +321,7 @@ export async function runSteward(args = [], opts = {}) {
     }
   } finally {
     if (sigintHandler) process.off("SIGINT", sigintHandler);
+    if (loopLockHeartbeat) clearInterval(loopLockHeartbeat);
     loopLock?.release?.();
   }
 

@@ -601,4 +601,53 @@ describe("runSteward", () => {
     assert.equal(result.run_count, 1);
     assert.equal(result.stopped_reason, "single-run");
   });
+
+  it("collect 도중 abort되면 그 cycle의 hygiene(apply)은 실행되지 않는다", async () => {
+    const controller = new AbortController();
+    let hygieneCalls = 0;
+    const result = await runSteward(["--watch", "--apply"], {
+      collectFn: async () => {
+        controller.abort();
+        return { schema_version: "cto-lake.v1" };
+      },
+      hygieneFn: async () => {
+        hygieneCalls += 1;
+        return { schema_version: "cto-hygiene.v1" };
+      },
+      acquireLoopLockFn: async () => null,
+      installSignalHandler: false,
+      signal: controller.signal,
+      stdout: silentStdoutBuffer().stdout,
+      rootDir: "/repo",
+      lakeRoot: "/repo/.triflux/lake",
+    });
+
+    assert.equal(hygieneCalls, 0);
+    assert.equal(result.run_count, 0);
+    assert.equal(result.stopped_reason, "signal");
+  });
+
+  it("collect 도중 kill-switch가 켜지면 그 cycle의 hygiene은 실행되지 않는다", async () => {
+    let disabled = false;
+    let hygieneCalls = 0;
+    const result = await runSteward(["--watch", "--max-runs", "3"], {
+      collectFn: async () => {
+        disabled = true;
+        return { schema_version: "cto-lake.v1" };
+      },
+      hygieneFn: async () => {
+        hygieneCalls += 1;
+        return { schema_version: "cto-hygiene.v1" };
+      },
+      isCtoDisabledFn: () => disabled,
+      acquireLoopLockFn: async () => null,
+      stdout: silentStdoutBuffer().stdout,
+      rootDir: "/repo",
+      lakeRoot: "/repo/.triflux/lake",
+    });
+
+    assert.equal(hygieneCalls, 0);
+    assert.equal(result.run_count, 0);
+    assert.equal(result.stopped_reason, "disabled");
+  });
 });
