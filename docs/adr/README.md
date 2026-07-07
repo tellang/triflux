@@ -16,6 +16,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0007](0007-hub-default-port-27888.md) | hub 기본 포트 27888 고정 | Accepted | 0002 |
 | [0008](0008-native-bridge-ui-default-on.md) | headless 워커 native-bridge 기본 노출 | Accepted | 0002 |
 | [0009](0009-stack-coexistence-three-layer.md) | gstack·sp·triflux 단방향 3-layer 공존 | Accepted | 0002 |
+| [0010](0010-cto-lake-hub-role-boundary.md) | CTO lake ↔ Hub role 경계 — liveness/history 평면 분리 | Proposed | 0005, 0007 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 
