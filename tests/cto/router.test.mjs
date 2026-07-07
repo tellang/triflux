@@ -24,12 +24,13 @@ describe("cmdCto", () => {
     assert.match(output, /Usage/u);
     assert.match(
       output,
-      /tfx cto <collect\|status\|dashboard\|hygiene\|event>/u,
+      /tfx cto <collect\|status\|dashboard\|hygiene\|steward\|event>/u,
     );
     assert.match(output, /collect/u);
     assert.match(output, /status/u);
     assert.match(output, /dashboard/u);
     assert.match(output, /hygiene/u);
+    assert.match(output, /steward/u);
     assert.match(output, /event/u);
   });
 
@@ -38,6 +39,30 @@ describe("cmdCto", () => {
 
     assert.match(output, /Unknown cto subcommand: bogus/u);
     assert.match(output, /Usage/u);
+  });
+
+  it("routes steward dry-run JSON", async () => {
+    let output = "";
+    const result = await cmdCto(
+      ["steward", "--no-collect", "--dry-run", "--json"],
+      {
+        hygieneFn: async (args) => ({
+          schema_version: "cto-hygiene.v1",
+          dry_run: args.includes("--dry-run"),
+          rows: [],
+        }),
+        stdout: {
+          write: (chunk) => {
+            output += String(chunk);
+          },
+        },
+      },
+    );
+
+    assert.equal(result.schema_version, "cto-steward.v1");
+    assert.equal(result.mode, "dry-run");
+    assert.equal(result.collect_enabled, false);
+    assert.equal(JSON.parse(output).schema_version, "cto-steward.v1");
   });
 
   it("routes hygiene dry-run JSON without mutating the ledger", async () => {

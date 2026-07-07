@@ -499,13 +499,60 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     },
   },
   cto: {
-    usage: "tfx cto <collect|status|dashboard|hygiene|event> [options]",
+    usage: "tfx cto <collect|status|dashboard|hygiene|steward|event> [options]",
     description: "repo-local authority layer console",
     subcommands: {
       collect: "refresh .triflux/lake/current.json from authority sources",
       status: "print the current authority summary",
       dashboard: "render the CTO console dashboard, optionally with --watch",
       hygiene: "project CTO hygiene counts and actionable dry-run rows",
+      steward: {
+        usage:
+          "tfx cto steward [--watch] [--max-runs N] [--interval-ms N] [--apply|--dry-run] [--json] [--no-collect]",
+        description:
+          "periodically collect and invoke one-shot CTO hygiene without destructive cleanup",
+        options: [
+          {
+            name: "--watch",
+            type: "boolean",
+            description:
+              "run repeatedly until interrupted or --max-runs is reached",
+          },
+          {
+            name: "--max-runs",
+            type: "number",
+            description:
+              "maximum steward iterations; required for --watch --json",
+          },
+          {
+            name: "--interval-ms",
+            type: "number",
+            description: "delay between watch iterations in milliseconds",
+          },
+          {
+            name: "--apply",
+            type: "boolean",
+            description:
+              "invoke hygiene apply mode (ledger acknowledgement only)",
+          },
+          {
+            name: "--dry-run",
+            type: "boolean",
+            description: "invoke hygiene dry-run mode (default)",
+          },
+          {
+            name: "--json",
+            type: "boolean",
+            description:
+              "print one finite steward JSON summary object; with --watch requires --max-runs",
+          },
+          {
+            name: "--no-collect",
+            type: "boolean",
+            description: "skip the collect pass before hygiene",
+          },
+        ],
+      },
       event:
         "append wrapper lineage events: context-save, context-restore, pr-created, pr-merged-or-closed",
     },

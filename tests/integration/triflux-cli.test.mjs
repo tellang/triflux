@@ -113,6 +113,25 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.ok(delegate.outputSchema);
   });
 
+  it("schema cto includes steward and steward flags", () => {
+    const cto = parseStdoutJson(runCli(["schema", "cto"]));
+    assert.ok(cto.subcommands.steward, "steward subcommand missing");
+    const flagNames = cto.subcommands.steward.options.map(
+      (option) => option.name,
+    );
+    for (const flag of [
+      "--watch",
+      "--max-runs",
+      "--interval-ms",
+      "--apply",
+      "--dry-run",
+      "--json",
+      "--no-collect",
+    ]) {
+      assert.ok(flagNames.includes(flag), `steward flag missing: ${flag}`);
+    }
+  });
+
   it("setup --dry-run은 JSON 액션 목록을 반환해야 한다", () => {
     const result = runCli(["setup", "--dry-run"]);
     const payload = parseStdoutJson(result);
