@@ -2,6 +2,22 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.42.0] - 2026-07-07
+
+### Added
+- **[#473]** cto: resident CTO manager 선행 슬라이스 — TFX_CTO_* kill-switch(cto-env), hygiene archive 실행부(move-not-delete), log-retention, `tfx cto steward` 주기 루프(kill-switch 매 cycle + collect↔hygiene 사이 재확인, lake당 single-instance 락 + 작업 중 heartbeat, SIGINT graceful)
+- **[#475]** skills: tfx-harness Claude 정본(internal 메타 라우터) + keyword 우선순위 계층(명시 토큰=priority 1) + 라우팅 회귀 테스트
+
+### Fixed
+- **[#455]** hub: register presence 사후검증(effective readback) + 미반영 시 `REGISTER_PRESENCE_NOT_UPDATED`(409). 응답에 `hub_pid`/`store_type`/`db_path` 노출 — 다른 hub 인스턴스/memory 폴백 등록 감지 가능 (Refs #454)
+- **[#473]** cto: hygiene apply가 lake 밖 artifact에서 전체 크래시하던 것을 `skipped/source_outside_lake` 정직 보고로 수정 (ack 없음)
+- **[#474]** tray: 깨진 Focus 버튼을 에이전트별 attach/resume 명령 복사로 교체
+
+### Docs
+- **[#476]** ADR-0010 CTO lake ↔ Hub role 경계 + 실행 규칙 SSOT(`.claude/rules/tfx-cto-hub-boundary.md`) + mirror-policy cto/ 표
+- **[#452][#453]** 문서 파운데이션 + ADR 체계(0001~0009 backfill)
+- **[#477]** document-harness/wiki-harness 갭 3건 부트스트랩
+
 ## [10.41.1] - 2026-07-01
 
 ### Fixed
