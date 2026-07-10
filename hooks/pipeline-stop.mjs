@@ -152,7 +152,7 @@ function contextPercentsFromObject(value) {
     value.total_tokens ??
     value.totalTokens;
   // Fall back to a 1M context window when the payload omits one — Opus 4.x
-  // [1M] and Codex gpt-5.5 both run on a 1M window, and assuming 200K there
+  // [1M] and Codex GPT-5.6 family run on a 1M window, and assuming 200K there
   // false-positives at ~15% real usage. Override via
   // TFX_CONTEXT_DEFAULT_MAX_TOKENS for narrower setups.
   const envFallback = Number(process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS);

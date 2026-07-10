@@ -49,7 +49,12 @@ function _withTempCodex(configContent, fn) {
 // ── REQUIRED_CODEX_PROFILES 확장 확인 ──
 
 describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
-  const requiredNames = ["gpt55_xhigh", "gpt55_high", "gpt55_med", "gpt55_low"];
+  const requiredNames = [
+    "gpt56_sol_xhigh",
+    "gpt56_terra_high",
+    "gpt56_terra_med",
+    "gpt56_luna_low",
+  ];
 
   for (const name of requiredNames) {
     it(`REQUIRED_CODEX_PROFILES에 ${name} 이 포함되어야 한다`, () => {
@@ -85,10 +90,10 @@ describe("REQUIRED_TOP_LEVEL_SETTINGS: 필수 top-level 설정 목록", () => {
     assert.ok(keys.includes("service_tier"), "service_tier missing");
   });
 
-  it("model 기본값은 gpt-5.5", () => {
+  it("model 기본값은 gpt-5.6-sol", () => {
     const entry = REQUIRED_TOP_LEVEL_SETTINGS.find((s) => s.key === "model");
     assert.ok(
-      entry?.value.includes("gpt-5.5"),
+      entry?.value.includes("gpt-5.6-sol"),
       `unexpected model default: ${entry?.value}`,
     );
   });
@@ -261,7 +266,7 @@ describe("LEGACY_CODEX_PROFILE_NAMES: 구형 프로필 정리 목록", () => {
     }
   });
 
-  it("현행 gpt55_* 는 legacy 목록에 없다 (정리 대상 아님)", () => {
+  it("현행 gpt56_* 는 legacy 목록에 없다 (정리 대상 아님)", () => {
     for (const p of REQUIRED_CODEX_PROFILES) {
       assert.equal(
         LEGACY_CODEX_PROFILE_NAMES.includes(p.name),

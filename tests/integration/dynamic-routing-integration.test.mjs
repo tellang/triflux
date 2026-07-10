@@ -59,7 +59,7 @@ function fakePolicyForScenario(scenarioId, when, then) {
     fallback: {
       default_mode: "codex-default",
       default_cli: "codex",
-      default_model: "gpt-5.5",
+      default_model: "gpt-5.6-terra",
     },
   };
 }

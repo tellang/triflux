@@ -136,16 +136,16 @@ describe("tfx-route retry snapshot profile plumbing", () => {
   it("does not change codex argv when no retry snapshot is provided", () => {
     const args = runRoute();
 
-    assert.deepEqual(profileValues(args), ["gpt55_high"]);
+    assert.deepEqual(profileValues(args), ["gpt56_terra_high"]);
   });
 
   it("uses bridge cliInvocation.argv from TFX_RETRY_SNAPSHOT as the single codex profile", () => {
     const dir = makeTempDir();
     const snapshot = path.join(dir, "retry-snapshot.json");
-    writeRetrySnapshot(snapshot, "gpt55_xhigh");
+    writeRetrySnapshot(snapshot, "gpt56_sol_xhigh");
 
     const args = runRoute({ snapshot });
 
-    assert.deepEqual(profileValues(args), ["gpt55_xhigh"]);
+    assert.deepEqual(profileValues(args), ["gpt56_sol_xhigh"]);
   });
 });

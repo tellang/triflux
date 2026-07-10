@@ -146,7 +146,11 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
         lastFailureReason: null,
         cliIndex: 0,
         cliChain: [
-          { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
+          {
+            cli: "codex",
+            model: "gpt-5.6-terra",
+            profile: "gpt56_terra_high",
+          },
           { cli: "claude", model: "opus-4-8" },
         ],
         mode: "auto-escalate",
@@ -159,14 +163,14 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
     const status = runBridge(["retry-status", "--snapshot", snapshot]);
     assert.deepEqual(status.cli, {
       cli: "codex",
-      model: "gpt-5.5",
-      profile: "gpt55_high",
+      model: "gpt-5.6-terra",
+      profile: "gpt56_terra_high",
     });
     assert.deepEqual(status.cliInvocation, {
       cli: "codex",
-      model: "gpt-5.5",
-      profile: "gpt55_high",
-      argv: ["--profile", "gpt55_high"],
+      model: "gpt-5.6-terra",
+      profile: "gpt56_terra_high",
+      argv: ["--profile", "gpt56_terra_high"],
     });
   });
 });

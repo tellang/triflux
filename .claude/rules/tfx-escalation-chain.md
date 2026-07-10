@@ -11,7 +11,7 @@
 
 | # | CLI | 모델 | profile | 이유 |
 |---|-----|------|---------|------|
-| 1 | codex | gpt-5.5 | 미지정 | 코드/추론/비용에서 gpt-5.4-mini / gpt-5.3-codex 중간 단계를 대체. profile 미지정 시 `config.toml` 기본값 사용. |
+| 1 | codex | gpt-5.6-sol | gpt56_sol_xhigh | 최상위 Codex 복구 단계. |
 | 2 | claude | opus-4-8 | 미지정 | 최종 수단, 복잡 아키텍처/합의 요구 시 |
 
 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
@@ -30,7 +30,7 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 {
   "version": 1,
   "chain": [
-    { "cli": "codex", "model": "gpt-5.5", "profile": "gpt55_high" },
+    { "cli": "codex", "model": "gpt-5.6-sol", "profile": "gpt56_sol_xhigh" },
     { "cli": "claude", "model": "opus-4-8" }
   ]
 }
@@ -39,7 +39,7 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 체인 항목 필드:
 - `cli` (codex|antigravity|claude)
 - `model` (CLI 가 해석하는 문자열)
-- `profile` (optional): `gpt55_low` / `gpt55_med` / `gpt55_high` / `gpt55_xhigh` 같은 CLI profile 이름. 지정되면 파싱/전달만 하며, 없으면 기존 동작과 동일하게 각 CLI/config 기본값을 따른다.
+- `profile` (optional): `gpt56_luna_low` / `gpt56_terra_med` / `gpt56_terra_high` / `gpt56_sol_xhigh` 같은 CLI profile 이름. 지정되면 파싱/전달만 하며, 없으면 기존 동작과 동일하게 각 CLI/config 기본값을 따른다.
 
 ## 사용 예시
 

@@ -234,14 +234,14 @@ describe("tfx-route.mjs — buildRoutePlan (agent-map.json 전수)", () => {
 });
 
 describe("cli-codex.mjs — 핵심 매핑", () => {
-  test("executor → gpt55_high / 1080s / fg / mcp=implement", () => {
+  test("executor → gpt56_terra_high / 1080s / fg / mcp=implement", () => {
     const p = codexAdapter.plan({
       agent: "executor",
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.effort, "gpt55_high");
-    assert.equal(p.profile, "gpt55_high");
+    assert.equal(p.effort, "gpt56_terra_high");
+    assert.equal(p.profile, "gpt56_terra_high");
     assert.equal(p.timeoutMs, 1_080_000);
     assert.equal(p.runMode, "fg");
     assert.equal(p.opusOversight, false);
@@ -249,13 +249,13 @@ describe("cli-codex.mjs — 핵심 매핑", () => {
     assert.equal(p.subcommand, "exec");
   });
 
-  test("architect → gpt55_xhigh / 3600s / bg / opus oversight", () => {
+  test("architect → gpt56_sol_xhigh / 3600s / bg / opus oversight", () => {
     const p = codexAdapter.plan({
       agent: "architect",
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.effort, "gpt55_xhigh");
+    assert.equal(p.effort, "gpt56_sol_xhigh");
     assert.equal(p.timeoutMs, 3_600_000);
     assert.equal(p.runMode, "bg");
     assert.equal(p.opusOversight, true);
@@ -298,7 +298,7 @@ describe("cli-codex.mjs — 핵심 매핑", () => {
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.effort, "gpt55_high");
+    assert.equal(p.effort, "gpt56_terra_high");
     assert.equal(p.timeoutMs, 1_080_000);
   });
 

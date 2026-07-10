@@ -186,10 +186,10 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.ok(codexProfiles, "codex-profiles action missing");
     assert.equal(codexProfiles.change, "update");
     assert.deepEqual(codexProfiles.profiles, [
-      "gpt55_xhigh",
-      "gpt55_high",
-      "gpt55_med",
-      "gpt55_low",
+      "gpt56_sol_xhigh",
+      "gpt56_terra_high",
+      "gpt56_terra_med",
+      "gpt56_luna_low",
     ]);
     if (process.platform === "win32") {
       assert.equal(codexProfiles.windowsSandbox, true);
@@ -415,16 +415,16 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     );
     const codexDir = join(homeDir, ".codex");
     assert.equal(
-      readFileSync(join(codexDir, "gpt55_high.config.toml"), "utf8"),
-      'model = "gpt-5.5"\nmodel_reasoning_effort = "high"\n',
+      readFileSync(join(codexDir, "gpt56_terra_high.config.toml"), "utf8"),
+      'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt55_xhigh.config.toml"), "utf8"),
-      'model = "gpt-5.5"\nmodel_reasoning_effort = "xhigh"\n',
+      readFileSync(join(codexDir, "gpt56_sol_xhigh.config.toml"), "utf8"),
+      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "xhigh"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt55_low.config.toml"), "utf8"),
-      'model = "gpt-5.5"\nmodel_reasoning_effort = "low"\n',
+      readFileSync(join(codexDir, "gpt56_luna_low.config.toml"), "utf8"),
+      'model = "gpt-5.6-luna"\nmodel_reasoning_effort = "low"\n',
     );
     // 커스텀 inline 프로필도 별도 파일로 이관되어야 한다 (내용 보존, codex 0.134+).
     assert.equal(

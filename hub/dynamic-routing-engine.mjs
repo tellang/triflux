@@ -45,7 +45,7 @@ function makeFallback(policy, trigger, inputsHash, now) {
       {
         cli: fb.default_cli ?? "codex",
         accountId: null,
-        model: fb.default_model ?? "gpt-5.5",
+        model: fb.default_model ?? "gpt-5.6-terra",
         riskTier: "safe",
         reason: trigger,
       },

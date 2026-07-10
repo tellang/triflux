@@ -109,7 +109,7 @@
   "fallback": {
     "default_mode": "codex-default",
     "default_cli": "codex",
-    "default_model": "gpt-5.5",
+    "default_model": "gpt-5.6-terra",
     "triggers": [
       "hud_null",
       "hud_stale_gte_15min",

@@ -41,10 +41,14 @@ export const MODES = Object.freeze({
 const ESCALATION_CHAIN_CONFIG_PATH = ".triflux/config/escalation-chain.json";
 
 // Escalation chain (2026-05-27 정책):
-//   1. codex gpt-5.5   — 코드/추론/비용에서 mini/5.3-codex 중간 단계를 대체
+//   1. codex gpt-5.6-sol — 기존 최상위 Codex escalation 단계
 //   2. claude opus-4-8 — 최종 수단
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
-  Object.freeze({ cli: "codex", model: "gpt-5.5" }),
+  Object.freeze({
+    cli: "codex",
+    model: "gpt-5.6-sol",
+    profile: "gpt56_sol_xhigh",
+  }),
   Object.freeze({ cli: "claude", model: "opus-4-8" }),
 ]);
 

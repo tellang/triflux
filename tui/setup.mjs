@@ -36,10 +36,10 @@ const CODEX_DIR = join(homedir(), ".codex");
 const GEMINI_DIR = join(homedir(), ".gemini");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const REQUIRED_CODEX_PROFILE_NAMES = [
-  "gpt55_xhigh",
-  "gpt55_high",
-  "gpt55_med",
-  "gpt55_low",
+  "gpt56_sol_xhigh",
+  "gpt56_terra_high",
+  "gpt56_terra_med",
+  "gpt56_luna_low",
 ];
 
 const STABLE_NODE_COMMAND_CANDIDATES = Object.freeze([

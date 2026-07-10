@@ -154,13 +154,13 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 gpt-5.5 → opus-4-8 2단계 순", () => {
+    it("DEFAULT_ESCALATION_CHAIN 은 gpt-5.6-sol → opus-4-8 2단계 순", () => {
       assert.equal(DEFAULT_ESCALATION_CHAIN.length, 2);
       const [s1, s2] = DEFAULT_ESCALATION_CHAIN;
 
       assert.equal(s1.cli, "codex");
-      assert.equal(s1.model, "gpt-5.5");
-      assert.equal(s1.profile, undefined);
+      assert.equal(s1.model, "gpt-5.6-sol");
+      assert.equal(s1.profile, "gpt56_sol_xhigh");
 
       assert.equal(s2.cli, "claude");
       assert.equal(s2.model, "opus-4-8");

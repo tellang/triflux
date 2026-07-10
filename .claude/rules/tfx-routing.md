@@ -65,7 +65,7 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 
 | 우선순위 | CLI / 모델 | default 적용 lane |
 |---------|-----------|-------------------|
-| 1차 (default) | **Codex** (gpt-5.5) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
+| 1차 (default) | **Codex** (GPT-5.6 family) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
 | 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
 | 한정 (Claude 만) | **Claude** (opus-4-8) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
 

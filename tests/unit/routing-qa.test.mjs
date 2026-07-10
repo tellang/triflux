@@ -248,28 +248,28 @@ describe("route_agent: 에이전트→CLI 매핑", () => {
 // 5. route_agent(): effort/timeout 매핑
 // ========================================================================
 describe("route_agent: effort 레벨 검증", () => {
-  it("executor → gpt55_high effort", () => {
-    assert.equal(ROUTE_TABLE.executor?.CLI_EFFORT, "gpt55_high");
+  it("executor → gpt56_terra_high effort", () => {
+    assert.equal(ROUTE_TABLE.executor?.CLI_EFFORT, "gpt56_terra_high");
   });
 
-  it("build-fixer → gpt55_low effort", () => {
-    assert.equal(ROUTE_TABLE["build-fixer"]?.CLI_EFFORT, "gpt55_low");
+  it("build-fixer → gpt56_luna_low effort", () => {
+    assert.equal(ROUTE_TABLE["build-fixer"]?.CLI_EFFORT, "gpt56_luna_low");
   });
 
-  it("deep-executor → gpt55_xhigh effort", () => {
-    assert.equal(ROUTE_TABLE["deep-executor"]?.CLI_EFFORT, "gpt55_xhigh");
+  it("deep-executor → gpt56_sol_xhigh effort", () => {
+    assert.equal(ROUTE_TABLE["deep-executor"]?.CLI_EFFORT, "gpt56_sol_xhigh");
   });
 
-  it("spark → gpt55_low effort", () => {
-    assert.equal(ROUTE_TABLE.spark?.CLI_EFFORT, "gpt55_low");
+  it("spark → gpt56_luna_low effort", () => {
+    assert.equal(ROUTE_TABLE.spark?.CLI_EFFORT, "gpt56_luna_low");
   });
 
-  it("code-reviewer → gpt55_high effort", () => {
-    assert.equal(ROUTE_TABLE["code-reviewer"]?.CLI_EFFORT, "gpt55_high");
+  it("code-reviewer → gpt56_terra_high effort", () => {
+    assert.equal(ROUTE_TABLE["code-reviewer"]?.CLI_EFFORT, "gpt56_terra_high");
   });
 
-  it("codex alias → gpt55_high effort (executor와 동일)", () => {
-    assert.equal(ROUTE_TABLE.codex?.CLI_EFFORT, "gpt55_high");
+  it("codex alias → gpt56_terra_high effort (executor와 동일)", () => {
+    assert.equal(ROUTE_TABLE.codex?.CLI_EFFORT, "gpt56_terra_high");
   });
 
   it("gemini alias → agy_v1 effort", () => {
@@ -493,7 +493,7 @@ describe("tfx-route.sh: 기본 검증", () => {
       /apply_dynamic_routing_override\(\)\s*\{([\s\S]*?)^}/m,
     )?.[1];
     assert.ok(fn, "apply_dynamic_routing_override 함수가 있어야 함");
-    assert.match(fn, /codex\)[\s\S]*CLI_ARGS="exec --profile gpt55_high/);
+    assert.match(fn, /codex\)[\s\S]*CLI_ARGS="exec --profile gpt56_terra_high/);
     assert.match(
       fn,
       /antigravity\)[\s\S]*CLI_ARGS="--print --dangerously-skip-permissions"/,
