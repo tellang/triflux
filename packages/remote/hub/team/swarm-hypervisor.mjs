@@ -189,7 +189,6 @@ function isInteractiveNativeBridgeShard(shard) {
  * @param {number} [opts.maxRestarts=2] — per-shard max restarts
  * @param {boolean} [opts.nativeBridge=false] — expose local shards in Claude agents
  * @param {number} [opts.graceMs=10000] — conductor shutdown grace period
- * @param {number} [opts.integrationTimeoutMs=60000] — max time for integration phase
  * @param {boolean} [opts.keepFailedWorktrees=false] — preserve failed shard worktrees for debugging
  * @param {object} [opts.probeOpts] — health probe overrides
  * @param {object} [opts.deps] — dependency injection for testing
@@ -205,7 +204,6 @@ export function createSwarmHypervisor(opts) {
     nativeBridge = false,
     graceMs = 10_000,
     keepFailedWorktrees = false,
-    _integrationTimeoutMs = 60_000,
     probeOpts = {},
     _deps = {},
   } = opts;

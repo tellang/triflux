@@ -1460,7 +1460,7 @@ apply_cli_mode() {
         CLI_TYPE="codex"; CLI_CMD="codex"
         case "$AGENT_TYPE" in
           designer|antigravity|agy|gemini)
-            CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"; CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=600 ;;
+            CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"; CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=3600 ;;
           writer)
             CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"; CLI_EFFORT="gpt56_luna_low"; DEFAULT_TIMEOUT=180 ;;
           *)

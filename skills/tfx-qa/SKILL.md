@@ -83,8 +83,10 @@ Agent(
 
 **Codex + Antigravity headless:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가. OWASP Top 10, O(n²), 메모리 누수, 입력 검증 누락. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --assign 'antigravity:UX/접근성 전문가. API 응답 일관성, 에러 메시지, WCAG 2.1 AA, 문서-동작 일치. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가. OWASP Top 10, O(n²), 메모리 누수, 입력 검증 누락. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --assign 'antigravity:UX/접근성 전문가. API 응답 일관성, 에러 메시지, WCAG 2.1 AA, 문서-동작 일치. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --timeout 1800", run_in_background=true)
 ```
+
+> 배리어: 위 dispatch는 background — task-notification 완료(`=== HEADLESS_COMPLETE ... ===` 마커) 후 출력 파일에서 verifier 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: Consensus Scoring
 - 동일 파일+라인±5 + 유사 카테고리 → 동일 이슈
@@ -93,8 +95,10 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cod
 #### Step 4: 합의된 Critical/High 수정
 
 ```
-Bash("tfx multi --teammate-mode headless --assign 'codex:합의된 이슈 수정. 최소 변경으로 수정 + 테스트 재실행: {consensus_findings}:fixer' --timeout 300")
+Bash("tfx multi --teammate-mode headless --assign 'codex:합의된 이슈 수정. 최소 변경으로 수정 + 테스트 재실행: {consensus_findings}:fixer' --timeout 900", run_in_background=true)
 ```
+
+> 배리어: fixer도 background — task-notification 완료 후 수정 결과를 확인한 다음에만 Step 5 보고서를 작성한다.
 
 #### Step 5: 종합 보고서
 

@@ -84,8 +84,10 @@ Agent(
 
 **Codex + Antigravity headless:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:시니어+보안 엔지니어로서 분석하라. 대상: {target}. 렌즈: 구현 품질, 성능, OWASP, 안정성, 기술 부채. JSON: { findings: [...], metrics: {...}, health_score: 0-100 }:security-engineer' --assign 'antigravity:UX 엔지니어+테크니컬 라이터로서 분석하라. 대상: {target}. 렌즈: DX, 문서화, 접근성, 국제화, 네이밍. JSON: { findings: [...], documentation_score: 0-100, health_score: 0-100 }:ux-engineer' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:시니어+보안 엔지니어로서 분석하라. 대상: {target}. 렌즈: 구현 품질, 성능, OWASP, 안정성, 기술 부채. JSON: { findings: [...], metrics: {...}, health_score: 0-100 }:security-engineer' --assign 'antigravity:UX 엔지니어+테크니컬 라이터로서 분석하라. 대상: {target}. 렌즈: DX, 문서화, 접근성, 국제화, 네이밍. JSON: { findings: [...], documentation_score: 0-100, health_score: 0-100 }:ux-engineer' --timeout 1800", run_in_background=true)
 ```
+
+> 배리어: 위 dispatch는 background — task-notification 완료(`=== HEADLESS_COMPLETE ... ===` 마커) 후 출력 파일에서 두 분석 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: Tri-Debate (교차검증) — Bash + Agent 동시 호출
 

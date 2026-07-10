@@ -93,8 +93,10 @@ Agent(
 ```
 Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
   --assign 'codex:시니어 엔지니어 기술 설계. 기능: [TASK]. 코드베이스: [RECON]. JSON: { architecture, components, data_models, api, files, impl_notes, confidence }:architect' \
-  --timeout 600")
+  --timeout 1800", run_in_background=true)
 ```
+
+> 배리어: 위 dispatch는 background — architect JSON을 소비하는 단계 전에 task-notification 완료(`=== HEADLESS_COMPLETE ... ===` 마커)를 확인하고 출력 파일에서 결과를 회수한다.
 
 **Agent (Claude Critic fallback, schema-valid path):**
 ```

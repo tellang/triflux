@@ -82,7 +82,7 @@ ELSE:
 > headless-guard가 이 규칙 위반을 **자동 차단**한다.
 
 1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
-2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 600")` **만** 사용
+2. Codex·Antigravity → `Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 1800", run_in_background=true)` **만** 사용 — foreground Bash는 하니스가 600s에 강제 종료. 결과는 task-notification 후 회수
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
@@ -115,8 +115,10 @@ Agent(
 
 **Codex + Antigravity headless dispatch:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --assign 'antigravity:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --timeout 600")
+Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --assign 'antigravity:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --timeout 1800", run_in_background=true)
 ```
+
+> 배리어: 위 dispatch는 background — task-notification 완료(`=== HEADLESS_COMPLETE ... ===` 마커) 후 출력 파일에서 Codex/Antigravity findings를 회수하고, Agent 결과도 TaskOutput으로 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: Consensus Scoring
 
@@ -161,7 +163,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cod
 
 | 오류 | 조치 |
 |------|------|
-| headless dispatch 타임아웃 | `--timeout` 900 으로 올려 재시도 |
+| headless dispatch 타임아웃 | 부분 출력(PARTIAL OUTPUT/.partial) 먼저 회수, 미완료분만 `--timeout 3600` + run_in_background 로 재시도 |
 | Agent 결과 미수신 | Step 2를 Agent만 단독 재실행 |
 | consensus 0% | 대상 범위가 너무 넓음 — 파일 단위 분할 후 재실행 |
 | `tfx multi` 명령 실패 | `tfx status`로 teammate 연결 상태 확인 |
