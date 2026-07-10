@@ -50,9 +50,11 @@ export function getCodexEmail() {
 }
 
 // resets_at이 지난 윈도우의 used_percent를 0으로 보정
-export function expireStaleCodexBuckets(buckets) {
+export function expireStaleCodexBuckets(
+  buckets,
+  nowSec = Math.floor(Date.now() / 1000),
+) {
   if (!buckets) return buckets;
-  const nowSec = Math.floor(Date.now() / 1000);
   const result = {};
   for (const [key, bucket] of Object.entries(buckets)) {
     if (!bucket) {
@@ -63,13 +65,13 @@ export function expireStaleCodexBuckets(buckets) {
     if (bucket.primary?.resets_at && bucket.primary.resets_at <= nowSec) {
       updated = {
         ...updated,
-        primary: { ...updated.primary, used_percent: 0 },
+        primary: { ...updated.primary, used_percent: 0, expired: true },
       };
     }
     if (bucket.secondary?.resets_at && bucket.secondary.resets_at <= nowSec) {
       updated = {
         ...updated,
-        secondary: { ...updated.secondary, used_percent: 0 },
+        secondary: { ...updated.secondary, used_percent: 0, expired: true },
       };
     }
     result[key] = updated;
@@ -83,17 +85,18 @@ export function expireStaleCodexBuckets(buckets) {
 // 최근 7일간 세션 파일을 스캔해 가장 최신 rate_limits 버킷을 수집한다.
 // 합성 버킷(token_count 기반)은 2일 이내 데이터만 허용하여 stale 방지.
 // ============================================================================
-export function getCodexRateLimits() {
-  const now = new Date();
+export function getCodexRateLimits({
+  sessionsRoot = join(homedir(), ".codex", "sessions"),
+  now = new Date(),
+  maxLinesPerFile = 800,
+} = {}) {
   let syntheticBucket = null; // 최근 token_count에서 합성 (행 활성화 + 토큰 데이터용)
 
   // 7일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
   for (let dayOffset = 0; dayOffset <= 6; dayOffset++) {
     const d = new Date(now.getTime() - dayOffset * 86_400_000);
     const sessDir = join(
-      homedir(),
-      ".codex",
-      "sessions",
+      sessionsRoot,
       String(d.getFullYear()),
       String(d.getMonth() + 1).padStart(2, "0"),
       String(d.getDate()).padStart(2, "0"),
@@ -110,18 +113,23 @@ export function getCodexRateLimits() {
     }
 
     const mergedBuckets = {};
+    const futurePrimaryResets = new Set();
+    const nowSec = Math.floor(now.getTime() / 1000);
     for (const file of files) {
       try {
         const content = readFileSync(join(sessDir, file), "utf-8");
+        const found = {};
         const lines = content.trim().split("\n").reverse();
+        let scanned = 0;
         for (const line of lines) {
+          if (++scanned > maxLinesPerFile) break;
           try {
             const evt = JSON.parse(line);
             const rl = evt?.payload?.rate_limits;
-            if (rl?.limit_id && !mergedBuckets[rl.limit_id]) {
+            if (rl?.limit_id && !found[rl.limit_id]) {
               // window_minutes 기준으로 5h/1w 슬롯 정규화
               const { primary, secondary } = normalizeBuckets(rl);
-              mergedBuckets[rl.limit_id] = {
+              found[rl.limit_id] = {
                 limitId: rl.limit_id,
                 limitName: rl.limit_name,
                 primary,
@@ -131,6 +139,9 @@ export function getCodexRateLimits() {
                 contextWindow: evt.payload?.info?.model_context_window,
                 timestamp: evt.timestamp,
               };
+              if (rl.limit_id === "codex" && primary?.resets_at > nowSec) {
+                futurePrimaryResets.add(primary.resets_at);
+              }
             } else if (
               dayOffset <= 1 &&
               !rl &&
@@ -152,7 +163,22 @@ export function getCodexRateLimits() {
           } catch {
             /* 라인 파싱 실패 무시 */
           }
-          if (Object.keys(mergedBuckets).length >= CODEX_MIN_BUCKETS) break;
+          if (Object.keys(found).length >= CODEX_MIN_BUCKETS) break;
+        }
+        for (const [id, snapshot] of Object.entries(found)) {
+          const previous = mergedBuckets[id];
+          const previousTimestamp = previous
+            ? Date.parse(previous.timestamp)
+            : Number.NaN;
+          const snapshotTimestamp = Date.parse(snapshot.timestamp);
+          if (
+            !previous ||
+            (Number.isFinite(snapshotTimestamp) &&
+              (!Number.isFinite(previousTimestamp) ||
+                snapshotTimestamp > previousTimestamp))
+          ) {
+            mergedBuckets[id] = snapshot;
+          }
         }
       } catch {
         /* 파일 읽기 실패 무시 */
@@ -165,8 +191,13 @@ export function getCodexRateLimits() {
           mergedBuckets.codex || mergedBuckets[Object.keys(mergedBuckets)[0]];
         if (main && !main.tokens) main.tokens = syntheticBucket.tokens;
       }
-      expireStaleCodexBuckets(mergedBuckets);
-      return mergedBuckets;
+      if (mergedBuckets.codex && futurePrimaryResets.size >= 2) {
+        const resetTimes = [...futurePrimaryResets].sort((a, b) => a - b);
+        if (resetTimes.at(-1) - resetTimes[0] > 90) {
+          mergedBuckets.codex.mixedWindows = true;
+        }
+      }
+      return expireStaleCodexBuckets(mergedBuckets, nowSec);
     }
   }
   // 실제 rate_limits 없음 → 합성 버킷이라도 반환 (행 활성화)
@@ -178,11 +209,11 @@ export function readCodexRateLimitSnapshot() {
   if (!cache?.buckets) {
     return { buckets: null, shouldRefresh: true };
   }
-  expireStaleCodexBuckets(cache.buckets);
+  const buckets = expireStaleCodexBuckets(cache.buckets);
   const ts = Number(cache.timestamp);
   const ageMs = Number.isFinite(ts) ? Date.now() - ts : Number.MAX_SAFE_INTEGER;
   const isFresh = ageMs < CODEX_QUOTA_STALE_MS;
-  return { buckets: cache.buckets, shouldRefresh: !isFresh };
+  return { buckets, shouldRefresh: !isFresh };
 }
 
 export function refreshCodexRateLimitsCache() {

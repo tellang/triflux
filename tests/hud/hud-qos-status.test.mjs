@@ -56,6 +56,7 @@ before(() => {
       timestamp: Date.now(),
       buckets: {
         codex: {
+          timestamp: new Date().toISOString(),
           primary: {
             used_percent: 88,
             resets_at: Math.floor(fakeTimestampMs / 1000),
@@ -207,13 +208,14 @@ describe("HUD Breakpoints", () => {
   });
 
   it("respects explicit tier flags in hud.json (forced compact)", () => {
-    writeFileSync(
-      join(mockOmcConfigDir, "hud.json"),
-      JSON.stringify({ tier: "compact" }),
-    );
-    const output = runHudWithDimensions(150, 40); // Even with large cols, it should be compact
-    matchSnapshot("forced_compact_tier", normalizeOutput(output));
-    rmSync(join(mockOmcConfigDir, "hud.json"));
+    const hudConfigPath = join(mockOmcConfigDir, "hud.json");
+    writeFileSync(hudConfigPath, JSON.stringify({ tier: "compact" }));
+    try {
+      const output = runHudWithDimensions(150, 40); // Even with large cols, it should be compact
+      matchSnapshot("forced_compact_tier", normalizeOutput(output));
+    } finally {
+      rmSync(hudConfigPath, { force: true });
+    }
   });
 
   it("does not combine sv from Codex bucket and Gemini session fallbacks when accumulator is missing", () => {
