@@ -1249,45 +1249,45 @@ route_agent() {
   case "$agent" in
     # ─── 구현 레인 ───
     executor|codex)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
-      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
+      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     build-fixer)
-      # 빌드 수정 — npm/biome/test-lock 등 도메인 지식 필요. base capability 우위로 gpt55_low (fast tier).
-      CLI_ARGS="exec --profile gpt55_low ${codex_base}"
-      CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      # 빌드 수정 — npm/biome/test-lock 등 도메인 지식 필요. base capability 우위로 gpt56_luna_low (fast tier).
+      CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"
+      CLI_EFFORT="gpt56_luna_low"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     cleanup|deslop)
-      # 슬롭/정리 — 패턴 매칭 위주. gpt-5.5 mid로 lightweight lane 통일.
-      CLI_ARGS="exec --profile gpt55_med ${codex_base}"
-      CLI_EFFORT="gpt55_med"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      # 슬롭/정리 — 패턴 매칭 위주. GPT-5.6 family mid로 lightweight lane 통일.
+      CLI_ARGS="exec --profile gpt56_terra_med ${codex_base}"
+      CLI_EFFORT="gpt56_terra_med"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     debugger)
-      # 디버깅 — 깊은 코드 추적 필요, gpt-5.5 xhigh
-      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
-      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      # 디버깅 — 깊은 코드 추적 필요, GPT-5.6 family xhigh
+      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"
+      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
-    # ─── 설계/분석 레인 (gpt-5.5 xhigh — 5.4 폐기, 5.5 격상) ───
+    # ─── 설계/분석 레인 (GPT-5.6 Sol xhigh) ───
     deep-executor|architect|critic)
-      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
-      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"
+      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
     planner|analyst)
-      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
-      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"
+      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
 
-    # ─── 리뷰 레인 (gpt-5.5 — 코드 리뷰도 5.5가 강함) ───
+    # ─── 리뷰 레인 (GPT-5.6 Terra/Sol) ───
     code-reviewer|quality-reviewer)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
-      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
+      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     security-reviewer)
       # 보안 = 깊은 사고 → xhigh
-      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base} review"
-      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
+      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base} review"
+      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
 
     # ─── 리서치 레인 ───
     scientist|document-specialist)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
-      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
+      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     scientist-deep)
-      CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"
-      CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"
+      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── Antigravity CLI 레인 (Gemini CLI 후속) ───
     # effort 차등: agent 별 GEMINI_PROFILE 을 설정하면 run_antigravity_exec() 가
@@ -1320,25 +1320,25 @@ route_agent() {
 
     # ─── 검증/테스트 ───
     verifier)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
-      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
+      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     test-engineer)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
-      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
+      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     qa-tester)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
-      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
+      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 경량 ───
     spark)
-      CLI_ARGS="exec --profile gpt55_low ${codex_base}"
-      CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"
+      CLI_EFFORT="gpt56_luna_low"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     # ─── agent-map.json에만 정의된 신규 에이전트 (CLI_TYPE별 기본값) ───
     *)
       case "$CLI_TYPE" in
         codex)
-          CLI_ARGS="exec --profile gpt55_high ${codex_base}"
-          CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+          CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
+          CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
         gemini|antigravity)
           CLI_ARGS="--print --dangerously-skip-permissions"
           CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
@@ -1460,11 +1460,11 @@ apply_cli_mode() {
         CLI_TYPE="codex"; CLI_CMD="codex"
         case "$AGENT_TYPE" in
           designer|antigravity|agy|gemini)
-            CLI_ARGS="exec --profile gpt55_xhigh ${codex_base}"; CLI_EFFORT="gpt55_xhigh"; DEFAULT_TIMEOUT=600 ;;
+            CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"; CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=600 ;;
           writer)
-            CLI_ARGS="exec --profile gpt55_low ${codex_base}"; CLI_EFFORT="gpt55_low"; DEFAULT_TIMEOUT=180 ;;
+            CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"; CLI_EFFORT="gpt56_luna_low"; DEFAULT_TIMEOUT=180 ;;
           *)
-            CLI_ARGS="exec --profile gpt55_high ${codex_base}"; CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080 ;;
+            CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"; CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1080 ;;
         esac
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
       fi ;;
@@ -1550,10 +1550,10 @@ apply_plan_guard() {
 
   local replacement=""
   case "$CLI_EFFORT" in
-    spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt55_low" ;;
-    spark53_med|codex53_med|mini54_med) replacement="gpt55_med" ;;
-    codex53_xhigh|gpt54_xhigh) replacement="gpt55_xhigh" ;;
-    spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt55_high" ;;
+    gpt55_low|spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt56_luna_low" ;;
+    gpt55_med|spark53_med|codex53_med|mini54_med) replacement="gpt56_terra_med" ;;
+    gpt55_xhigh|codex53_xhigh|gpt54_xhigh) replacement="gpt56_sol_xhigh" ;;
+    gpt55_high|spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt56_terra_high" ;;
   esac
   [[ -z "$replacement" ]] && return
 
@@ -1583,29 +1583,29 @@ apply_no_claude_native_mode() {
 
   case "$AGENT_TYPE" in
     explore)
-      CLI_ARGS="exec --profile gpt55_low ${codex_base}"
-      CLI_EFFORT="gpt55_low"
+      CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"
+      CLI_EFFORT="gpt56_luna_low"
       DEFAULT_TIMEOUT=600
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
     verifier)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
-      CLI_EFFORT="gpt55_high"
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
+      CLI_EFFORT="gpt56_terra_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
     test-engineer)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
-      CLI_EFFORT="gpt55_high"
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
+      CLI_EFFORT="gpt56_terra_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
     qa-tester)
-      CLI_ARGS="exec --profile gpt55_high ${codex_base} review"
-      CLI_EFFORT="gpt55_high"
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
+      CLI_EFFORT="gpt56_terra_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
@@ -1749,8 +1749,8 @@ apply_dynamic_routing_override() {
       local codex_base
       codex_base="$(build_codex_base)"
       CLI_CMD="codex"
-      CLI_ARGS="exec --profile gpt55_high ${codex_base}"
-      CLI_EFFORT="gpt55_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
+      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
       ;;
     antigravity)
       CLI_CMD="agy"
@@ -2592,12 +2592,12 @@ run_codex_exec() {
   _attempt_codex_run
 
   # Tier-fallback: ChatGPT account가 높은 reasoning profile을 거부하면
-  # gpt-5.5 low로만 1회 재시도한다. 구형 gpt-5.4 계열로는 더 이상 다운그레이드하지 않는다.
+  # GPT-5.6 family low로만 1회 재시도한다. 구형 gpt-5.4 계열로는 더 이상 다운그레이드하지 않는다.
   # 출처: Issue #211 — codex CLI tier-aware fallback.
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
-      gpt55_xhigh|gpt55_high|gpt55_med) fallback_profile="gpt55_low" ;;
+      gpt56_sol_xhigh|gpt56_terra_high|gpt56_terra_med) fallback_profile="gpt56_luna_low" ;;
     esac
     if [[ -n "$fallback_profile" ]]; then
       echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2

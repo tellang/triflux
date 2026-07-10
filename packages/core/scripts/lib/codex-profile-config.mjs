@@ -29,7 +29,7 @@ function readProfileScalar(raw, key) {
 }
 
 /**
- * Resolve a Codex effort profile name (e.g. "gpt55_high") to the `-c key=value`
+ * Resolve a Codex effort profile name (e.g. "gpt56_terra_high") to the `-c key=value`
  * config overrides that `codex exec` accepts, so the headless CLI lanes can
  * select a profile WITHOUT `codex exec --profile <name>`. codex 0.134+ rejects
  * `--profile X` whenever config.toml still contains an inline `[profiles.X]`
@@ -47,7 +47,7 @@ function readProfileScalar(raw, key) {
  *
  * @param {string} profileName
  * @param {{ codexHome?: string }} [opts]
- * @returns {string[]} e.g. ['model="gpt-5.5"', 'model_reasoning_effort="high"']
+ * @returns {string[]} e.g. ['model="gpt-5.6-terra"', 'model_reasoning_effort="high"']
  */
 export function codexProfileConfigOverrides(profileName, opts = {}) {
   if (typeof profileName !== "string" || !profileName) return [];

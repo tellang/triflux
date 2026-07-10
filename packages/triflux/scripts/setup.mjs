@@ -73,28 +73,32 @@ const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 const WINDOWS_HUB_AUTOSTART_TASK = "TrifluxHubEnsure";
 
 const REQUIRED_CODEX_PROFILES = [
-  // gpt-5.5 — 새 main 플래그십. xhigh/high/med/low 4 tier 전부 보장.
+  // GPT-5.6 family — 기존 xhigh/high/med/low 의미를 모델별 lane으로 유지.
   {
-    name: "gpt55_xhigh",
-    lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "xhigh"'],
+    name: "gpt56_sol_xhigh",
+    lines: ['model = "gpt-5.6-sol"', 'model_reasoning_effort = "xhigh"'],
   },
   {
-    name: "gpt55_high",
-    lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "high"'],
+    name: "gpt56_terra_high",
+    lines: ['model = "gpt-5.6-terra"', 'model_reasoning_effort = "high"'],
   },
   {
-    name: "gpt55_med",
-    lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "medium"'],
+    name: "gpt56_terra_med",
+    lines: ['model = "gpt-5.6-terra"', 'model_reasoning_effort = "medium"'],
   },
   {
-    name: "gpt55_low",
-    lines: ['model = "gpt-5.5"', 'model_reasoning_effort = "low"'],
+    name: "gpt56_luna_low",
+    lines: ['model = "gpt-5.6-luna"', 'model_reasoning_effort = "low"'],
   },
 ];
 
 // Codex 0.134 마이그레이션: triflux 가 과거에 inline [profiles.*] 로 썼던 구형 프로필.
 // config.toml 에서 제거 대상 (retired 모델 — 별도 파일로 만들지 않는다).
 const LEGACY_CODEX_PROFILE_NAMES = [
+  "gpt55_xhigh",
+  "gpt55_high",
+  "gpt55_med",
+  "gpt55_low",
   "codex53_high",
   "codex53_xhigh",
   "codex53_med",
@@ -850,7 +854,7 @@ function ensureCodexHubServerConfig({
 // Only injected when the key is completely absent — existing user values are
 // never overwritten, regardless of what value was set.
 const REQUIRED_TOP_LEVEL_SETTINGS = [
-  { key: "model", value: '"gpt-5.5"' },
+  { key: "model", value: '"gpt-5.6-sol"' },
   { key: "model_reasoning_effort", value: '"high"' },
   { key: "service_tier", value: '"fast"' },
 ];
@@ -925,7 +929,7 @@ function ensureCodexProfiles() {
       }
     }
     // config.toml 의 모든 inline [profiles.*] 마이그레이션 (Codex 0.134 는 inline 거부).
-    //   - 관리 gpt55_*: 위에서 canonical 별도 파일을 썼으므로 inline 만 제거.
+    //   - 관리 gpt56_*: 위에서 canonical 별도 파일을 썼으므로 inline 만 제거.
     //   - 구형 retired (codex53/spark53/gpt54/mini54): inline 제거, 재생성 안 함.
     //   - 그 외 사용자 커스텀: 본문을 보존해 별도 파일로 이관한 뒤 inline 제거.
     //     (별도 파일이 이미 있으면 덮어쓰지 않는다 — 사용자 수정 보존.)

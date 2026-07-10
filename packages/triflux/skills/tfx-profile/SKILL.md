@@ -43,7 +43,7 @@ options:
 ```
 | 프로파일 | 모델 | Effort |
 |----------|------|--------|
-| gpt55_high | config.toml의 현재 프로필 값 | high |
+| gpt56_terra_high | 프로필 설정의 현재 모델 | high |
 | ...  | ...           | ...  |
 ```
 
@@ -73,10 +73,10 @@ options:
 2. AskUserQuestion으로 프로필/alias 선택:
    ```
    options:
-     - label: "gpt55_high"  → 기본 고품질 (Recommended)
-     - label: "gpt55_med"   → 균형형
-     - label: "gpt55_low"   → 빠른 경량
-     - label: "gpt55_xhigh" → 최대 추론
+     - label: "gpt56_terra_high" → 기본 고품질 (Recommended)
+     - label: "gpt56_terra_med"  → 균형형
+     - label: "gpt56_luna_low"   → 빠른 경량
+     - label: "gpt56_sol_xhigh"  → 최대 추론
      - label: "custom"      → 사용자가 관리하는 프로필
    ```
 3. AskUserQuestion으로 effort 선택: `low | medium | high | xhigh`
@@ -181,10 +181,10 @@ options:
 
 | 프로필 | 용도 |
 |------|------|
-| gpt55_high | 기본 고품질 |
-| gpt55_xhigh | 최대 추론 |
-| gpt55_med | 균형형 |
-| gpt55_low | 빠른 경량 |
+| gpt56_terra_high | 기본 고품질 |
+| gpt56_sol_xhigh | 최대 추론 |
+| gpt56_terra_med | 균형형 |
+| gpt56_luna_low | 빠른 경량 |
 | custom | 사용자가 관리하는 프로필 |
 
 ### Codex Effort 레벨

@@ -329,7 +329,7 @@ export function buildContextUsageView(stdin, snapshot = null) {
 }
 
 export function createContextMonitor(options = {}) {
-  // Default to a 1M context window (Opus 4.x [1M] / Codex gpt-5.5 both run on
+  // Default to a 1M context window (Opus 4.x [1M] / Codex GPT-5.6 family runs on
   // a 1M window) when no explicit limit is supplied, so the cached percent the
   // Stop hook reads is not inflated against a 200K assumption — assuming 200K
   // there false-positives at ~15% real usage and blocks legitimate stops.

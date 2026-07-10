@@ -87,7 +87,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     assert.equal(plan.agent, "executor");
     assert.equal(plan.cliType, "codex");
     assert.equal(plan.adapter, "codex");
-    assert.equal(plan.effort, "gpt55_high");
+    assert.equal(plan.effort, "gpt56_terra_high");
     assert.equal(plan.runMode, "fg");
   });
 
