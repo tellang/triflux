@@ -6,6 +6,11 @@ import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 
 import { execute as defaultExecuteCodex } from "@triflux/core/hub/codex-adapter.mjs";
+import {
+  createActivityLifecycle,
+  isActivityLifecycleEnabled,
+  resolveHardCeilingMs,
+} from "@triflux/core/hub/lib/worker-lifecycle.mjs";
 import { JsonRpcWsUdsClient } from "../workers/lib/jsonrpc-ws-uds.mjs";
 import {
   buildClaudePromptDispatchPayload,
@@ -141,8 +146,11 @@ export async function runUdsOrchestration({ mode, task, claude, codex } = {}) {
   throw new Error(`Unsupported UDS orchestration mode: ${selectedMode}`);
 }
 
-function scanMessage(message, marker, state) {
+function scanMessage(message, marker, state, onActivity = () => {}) {
   const scan = (text) => {
+    // Only stream/snapshot content advances liveness. "state" heartbeats do
+    // not keep an otherwise silent turn alive forever.
+    onActivity();
     state.streamBytes += Buffer.byteLength(text);
     state.stream.push(text);
     if (/⏺/.test(stripAnsi(text))) state.assistantStarted = true;
@@ -167,7 +175,10 @@ export function subscribeClaudeUntilMarker(
   controlSock,
   short,
   marker,
-  { timeoutMs = DEFAULT_TIMEOUT_MS } = {},
+  {
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    maxTurnMs = Math.min(resolveHardCeilingMs(), 15 * 60_000),
+  } = {},
 ) {
   return new Promise((resolve) => {
     const socket = net.connect(controlSock);
@@ -185,7 +196,23 @@ export function subscribeClaudeUntilMarker(
       stream: [],
       assistantStarted: false,
     };
-    const timer = setTimeout(() => finish({ timedOut: true }), timeoutMs);
+    const activityEnabled = isActivityLifecycleEnabled();
+    const lifecycle = createActivityLifecycle({
+      enabled: activityEnabled,
+      interventionMs: timeoutMs,
+      hardCeilingMs: maxTurnMs,
+    });
+    let timer = null;
+
+    const armTimer = () => {
+      timer = setTimeout(async () => {
+        if (!activityEnabled) return finish({ timedOut: true });
+        const reason = await lifecycle.check();
+        if (reason) return finish({ timedOut: true, timeoutReason: reason });
+        armTimer();
+      }, timeoutMs);
+    };
+    armTimer();
 
     function finish(extra = {}) {
       if (finished) return;
@@ -209,7 +236,7 @@ export function subscribeClaudeUntilMarker(
         data = data.slice(index + 1);
         if (!line) continue;
         try {
-          scanMessage(JSON.parse(line), marker, state);
+          scanMessage(JSON.parse(line), marker, state, () => lifecycle.observe());
         } catch (_error) {
           state.messageCount += 1;
         }
@@ -263,6 +290,7 @@ export function createClaudeUdsEndpoint({
   daemonPaths = deriveClaudeDaemonPaths(),
   cwd = process.cwd(),
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  maxTurnMs = Math.min(resolveHardCeilingMs(), 15 * 60_000),
   markerFactory = () =>
     `TFX_UDS_ORCH_DONE_${crypto.randomBytes(6).toString("hex")}`,
   shortFactory,
@@ -299,7 +327,7 @@ export function createClaudeUdsEndpoint({
         sock,
         payload.short,
         marker,
-        { timeoutMs },
+        { timeoutMs, maxTurnMs },
       );
       await teardownDaemonJob({
         controlSock: sock,
@@ -441,6 +469,7 @@ export function createCodexAppServerUdsEndpoint({
   cwd = process.cwd(),
   model,
   timeoutMs = DEFAULT_CODEX_APP_SERVER_UDS_TIMEOUT_MS,
+  maxTurnMs = Math.min(resolveHardCeilingMs(), 15 * 60_000),
   bootstrapTimeoutMs = DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
   clientFactory = (opts) => new JsonRpcWsUdsClient(opts),
   spawnFn = spawn,
@@ -536,10 +565,12 @@ export function createCodexAppServerUdsEndpoint({
         let offDelta = () => {};
         let offError = () => {};
         let offDone = () => {};
+        let offActivity = () => {};
         const cleanup = () => {
           offDelta();
           offError();
           offDone();
+          offActivity();
         };
         const completion = new Promise((resolve) => {
           offDelta = client.onNotification(
@@ -566,12 +597,32 @@ export function createCodexAppServerUdsEndpoint({
           { threadId, input: [{ type: "text", text: prompt }] },
           timeoutMs,
         );
+        const activityEnabled = isActivityLifecycleEnabled();
+        const lifecycle = createActivityLifecycle({
+          enabled: activityEnabled,
+          interventionMs: timeoutMs,
+          hardCeilingMs: maxTurnMs,
+        });
+        offActivity = client.onNotification("*", () => lifecycle.observe());
         let timeoutHandle = null;
         const timeoutPromise = new Promise((resolve) => {
-          timeoutHandle = setTimeout(() => {
-            cleanup();
-            resolve({ status: "timeout" });
-          }, timeoutMs);
+          const arm = () => {
+            timeoutHandle = setTimeout(async () => {
+              if (!activityEnabled) {
+                cleanup();
+                resolve({ status: "timeout" });
+                return;
+              }
+              const reason = await lifecycle.check();
+              if (reason) {
+                cleanup();
+                resolve({ status: "timeout", reason });
+                return;
+              }
+              arm();
+            }, timeoutMs);
+          };
+          arm();
         });
         let settled;
         try {

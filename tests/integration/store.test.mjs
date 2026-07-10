@@ -295,6 +295,24 @@ describe("createStore()", { skip: SQLITE_SKIP }, () => {
       assert.equal(retried.completed_at_ms, null);
     });
 
+    it("dispatched_at_ms를 보존하고 retry에서 초기화한다", () => {
+      const job = store.createAssign({
+        supervisor_agent: "lead-dispatch",
+        worker_agent: "worker-dispatch",
+        task: "dispatch lifecycle",
+      });
+      assert.equal(job.dispatched_at_ms, null);
+      const dispatched = store.updateAssignStatus(job.job_id, "queued", {
+        dispatched_at_ms: 1234,
+      });
+      assert.equal(dispatched.dispatched_at_ms, 1234);
+      assert.equal(
+        store.updateAssignStatus(job.job_id, "running", {}).dispatched_at_ms,
+        1234,
+      );
+      assert.equal(store.retryAssign(job.job_id).dispatched_at_ms, null);
+    });
+
     it("listAssigns()는 supervisor/status 필터를 적용해야 한다", () => {
       store.createAssign({
         supervisor_agent: "lead-filter-a",

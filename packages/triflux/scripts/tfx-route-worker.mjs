@@ -85,6 +85,10 @@ function parseArgs(argv) {
         args.timeoutMs = Number(next);
         index += 1;
         break;
+      case "--stall-ms":
+        args.stallMs = Number(next);
+        index += 1;
+        break;
       case "--approval-mode":
         args.approvalMode = next;
         index += 1;
@@ -225,6 +229,7 @@ const worker = await createWorker(args.type, {
   model: args.model,
   effort: args.effort,
   timeoutMs: args.timeoutMs,
+  stallMs: args.stallMs,
   approvalMode: args.approvalMode,
   permissionMode: args.permissionMode,
   allowDangerouslySkipPermissions: args.allowDangerouslySkipPermissions,

@@ -2,6 +2,11 @@
 // register/status/publish/ask/poll/handoff/HITL + team proxy
 // 모든 도구 응답: { ok: boolean, error?: { code, message }, data?: ... }
 
+import {
+  DEFAULT_ASSIGN_TIMEOUT_MS,
+  DEFAULT_ASSIGN_TTL_MS,
+  DEFAULT_HANDOFF_TTL_MS,
+} from "./lib/timeout-defaults.mjs";
 import { createPipeline, ensurePipelineTable } from "./pipeline/index.mjs";
 import {
   initPipelineState,
@@ -359,7 +364,7 @@ export function createTools(store, router, hitl, pipe = null) {
             type: "integer",
             minimum: 1000,
             maximum: 86400000,
-            default: 600000,
+            default: DEFAULT_HANDOFF_TTL_MS,
           },
           trace_id: { type: "string" },
           correlation_id: { type: "string" },
@@ -396,13 +401,13 @@ export function createTools(store, router, hitl, pipe = null) {
             type: "integer",
             minimum: 1000,
             maximum: 86400000,
-            default: 600000,
+            default: DEFAULT_ASSIGN_TTL_MS,
           },
           timeout_ms: {
             type: "integer",
             minimum: 1000,
             maximum: 86400000,
-            default: 600000,
+            default: DEFAULT_ASSIGN_TIMEOUT_MS,
           },
           max_retries: { type: "integer", minimum: 0, maximum: 20, default: 0 },
           trace_id: { type: "string" },

@@ -477,6 +477,38 @@ describe("CodexAppServerWorker — AC-8 timeout", () => {
     );
     await worker.stop();
   });
+
+  it("12b. notifications re-arm the idle timeout until the turn completes", async () => {
+    const { worker, childRef } = makeWorker();
+    const p = worker.execute("x", { timeoutMs: 35, hardCeilingMs: 500 });
+    await tick();
+    const client = FakeClientBase.last;
+    for (let i = 0; i < 3; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      emitAgentDeltas(client, [`part-${i}`]);
+    }
+    emitTurnCompleted(client, "completed");
+    const r = await p;
+    assert.equal(r.exitCode, 0);
+    assert.equal(r.output, "part-0part-1part-2");
+    assert.deepEqual(childRef.child.signals, []);
+    await worker.stop();
+  });
+
+  it("12c. hard ceiling still terminates an active turn", async () => {
+    const { worker, childRef } = makeWorker({ interveneFn: () => "terminate" });
+    const p = worker.execute("x", { timeoutMs: 20, hardCeilingMs: 80 });
+    await tick();
+    const client = FakeClientBase.last;
+    for (let i = 0; i < 3; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      emitAgentDeltas(client, [`part-${i}`]);
+    }
+    const r = await p;
+    assert.equal(r.exitCode, CODEX_APP_SERVER_TIMEOUT_EXIT_CODE);
+    assert.ok(childRef.child.signals.includes("SIGTERM"));
+    await worker.stop();
+  });
 });
 
 describe("CodexAppServerWorker — AC-12 publish invariants", () => {

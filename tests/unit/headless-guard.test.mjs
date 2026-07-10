@@ -16,21 +16,15 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 import { BASH_EXE } from "../helpers/bash-path.mjs";
+import {
+  buildCommand,
+  LANE_TIMEOUT_FALLBACK_SEC,
+  parseRouteCommand,
+  resolveLaneTimeoutSec,
+  shouldBypassHeadless,
+} from "../../scripts/headless-guard.mjs";
 
 const GUARD_PATH = join(process.cwd(), "scripts", "headless-guard.mjs");
-
-/**
- * headless-guard를 직접 실행하여 출력을 확인한다.
- * psmux 미설치 환경에서는 exit(0) → 통과하므로, 이 테스트는
- * parseRouteCommand의 로직만 독립 검증한다.
- */
-
-// parseRouteCommand를 직접 테스트하기 위해 동적 import
-async function _loadGuard() {
-  // headless-guard.mjs는 main()을 즉시 실행하므로 직접 import 불가.
-  // 대신 parseRouteCommand 로직을 인라인 미러로 테스트.
-  return null;
-}
 
 function createFakePsmux(binDir) {
   if (process.platform === "win32") {
@@ -128,61 +122,6 @@ function runGuardWithInput(payload, extraEnv = {}, options = {}) {
   }
 }
 
-// parseRouteCommand 미러 (headless-guard.mjs와 동일 로직)
-function parseRouteCommand(cmd) {
-  const MCP_PROFILES = ["implement", "analyze", "review", "docs"];
-
-  const agentMatch = cmd.match(/tfx-route\.sh\s+(\S+)\s+/);
-  if (!agentMatch) return null;
-
-  const agent = agentMatch[1];
-  const afterAgent = cmd.slice(agentMatch.index + agentMatch[0].length);
-
-  let mcp = "";
-  let promptRaw = afterAgent;
-  for (const profile of MCP_PROFILES) {
-    const profileIdx = afterAgent.lastIndexOf(` ${profile}`);
-    if (profileIdx >= 0) {
-      mcp = profile;
-      promptRaw = afterAgent.slice(0, profileIdx);
-      break;
-    }
-  }
-
-  const prompt = promptRaw
-    .replace(/^['"]/, "")
-    .replace(/['"]$/, "")
-    .replace(/'\\''/g, "'")
-    .replace(/'"'"'/g, "'")
-    .trim();
-
-  const flags = {};
-  const timeoutMatch = cmd.match(/(?:^|\s)(\d{2,4})(?:\s|$)/);
-  if (timeoutMatch) flags.timeout = parseInt(timeoutMatch[1], 10);
-
-  if (process.env.TFX_VERBOSE === "1") flags.verbose = true;
-  if (process.env.TFX_NO_AUTO_ATTACH === "1") flags.noAutoAttach = true;
-
-  return { agent, prompt, mcp, flags };
-}
-
-function buildCommand(parsed) {
-  const VALID_MCP = new Set(["implement", "analyze", "review", "docs"]);
-  const f = parsed.flags || {};
-  const safePrompt = parsed.prompt.replace(/'/g, "'\\''");
-
-  const parts = ["tfx multi --teammate-mode headless"];
-  if (!f.noAutoAttach) parts.push("--auto-attach");
-  if (!f.noAutoAttach) parts.push("--dashboard"); // 워커 요약 스플릿이 기본
-  if (f.verbose) parts.push("--verbose");
-  parts.push(`--assign '${parsed.agent}:${safePrompt}:${parsed.agent}'`);
-  if (parsed.mcp && VALID_MCP.has(parsed.mcp))
-    parts.push(`--mcp-profile ${parsed.mcp}`);
-  parts.push(`--timeout ${f.timeout || 600}`);
-
-  return parts.join(" ");
-}
-
 describe("parseRouteCommand", () => {
   it("기본 파싱: agent + prompt + mcp", () => {
     const r = parseRouteCommand(
@@ -213,9 +152,65 @@ describe("parseRouteCommand", () => {
     );
     assert.equal(r.flags.timeout, 300);
   });
+
+  it("5자리 timeout을 추출한다", () => {
+    const r = parseRouteCommand(
+      "bash ~/.claude/scripts/tfx-route.sh executor 'prompt' implement 21600",
+    );
+    assert.equal(r.flags.timeout, 21600);
+  });
+
+  it("import해도 main이 실행되지 않는다", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["-e", `import(${JSON.stringify(pathToFileURL(GUARD_PATH).href)})`],
+      { encoding: "utf8" },
+    );
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, "");
+  });
+});
+
+describe("resolveLaneTimeoutSec — lane 기본 SSOT 소비", () => {
+  it("agent-map 등재 agent는 어댑터 plan()과 동일한 초를 산출한다", async () => {
+    const codex = await import("../../scripts/lib/cli-codex.mjs");
+    const expected = Math.round(codex.plan({ agent: "executor" }).timeoutMs / 1000);
+    assert.equal(await resolveLaneTimeoutSec("executor"), expected);
+  });
+
+  it("antigravity lane도 어댑터와 일치한다", async () => {
+    const agy = await import("../../scripts/lib/cli-agy.mjs");
+    const expected = Math.round(
+      agy.plan({ agent: "antigravity" }).timeoutMs / 1000,
+    );
+    assert.equal(await resolveLaneTimeoutSec("antigravity"), expected);
+  });
+
+  it("미등록 agent는 fallback을 반환한다", async () => {
+    assert.equal(
+      await resolveLaneTimeoutSec("no-such-agent-xyz"),
+      LANE_TIMEOUT_FALLBACK_SEC,
+    );
+  });
+
+  it("reserved tfx 서브커맨드(multi)도 throw 대신 fallback을 반환한다", async () => {
+    assert.equal(await resolveLaneTimeoutSec("multi"), LANE_TIMEOUT_FALLBACK_SEC);
+  });
 });
 
 describe("headless-guard decision matrix (runtime)", () => {
+  it("multi-worker autoRoute는 lane 기본으로 timeout을 상향 주입한다", async () => {
+    const codex = await import("../../scripts/lib/cli-codex.mjs");
+    const lane = Math.round(codex.plan({ agent: "executor" }).timeoutMs / 1000);
+    const result = runGuardWithBashCommand(
+      "bash ~/.claude/scripts/tfx-route.sh executor 'fix bug' implement 120 --multi",
+    );
+    assert.equal(result.status, 0);
+    const payload = JSON.parse((result.stdout || "").trim());
+    const built = payload?.hookSpecificOutput?.updatedInput?.command || "";
+    assert.match(built, new RegExp(`--timeout ${lane}\\b`));
+  });
+
   it("psmux 설치 + direct codex exec는 deny되고 하드스톱 메시지를 제공한다", () => {
     const result = runGuardWithBashCommand("codex exec 'hello'");
     assert.equal(result.status, 2);
@@ -512,7 +507,7 @@ describe("buildCommand — 플래그 보존", () => {
     const cmd = buildCommand(parsed);
     assert.ok(cmd.includes("--auto-attach"));
     assert.ok(cmd.includes("--dashboard"));
-    assert.ok(cmd.includes("--timeout 600"));
+    assert.ok(cmd.includes(`--timeout ${LANE_TIMEOUT_FALLBACK_SEC}`));
   });
 
   it("dashboard 플래그 전달", () => {
@@ -550,20 +545,48 @@ describe("buildCommand — 플래그 보존", () => {
     assert.ok(!cmd.includes("--dashboard"));
   });
 
-  it("커스텀 timeout 전달", () => {
+  it("명시 timeout이 lane 기본보다 작으면 lane 기본으로 상향된다 (ISSUE-5 max 계약)", () => {
     const parsed = {
       agent: "executor",
       prompt: "fix",
       mcp: "implement",
       flags: { timeout: 300 },
     };
-    const cmd = buildCommand(parsed);
-    assert.ok(cmd.includes("--timeout 300"));
+    const cmd = buildCommand(parsed, { laneTimeoutSec: 1080 });
+    assert.ok(cmd.includes("--timeout 1080"));
+  });
+
+  it("명시 timeout이 lane 기본보다 크면 명시값을 존중한다 (route override 금지)", () => {
+    const parsed = {
+      agent: "executor",
+      prompt: "fix",
+      mcp: "implement",
+      flags: { timeout: 3600 },
+    };
+    const cmd = buildCommand(parsed, { laneTimeoutSec: 1080 });
+    assert.ok(cmd.includes("--timeout 3600"));
+  });
+
+  it("0 또는 비수치 timeout은 lane 기본으로 대체한다", () => {
+    const parsed = {
+      agent: "executor",
+      prompt: "fix",
+      mcp: "implement",
+      flags: { timeout: 0 },
+    };
+    assert.ok(
+      buildCommand(parsed, { laneTimeoutSec: 1080 }).includes("--timeout 1080"),
+    );
+    assert.ok(
+      buildCommand({ ...parsed, flags: { timeout: "bad" } }, { laneTimeoutSec: 1080 }).includes(
+        "--timeout 1080",
+      ),
+    );
   });
 
   it("MCP 없으면 --mcp-profile 생략", () => {
     const parsed = { agent: "executor", prompt: "fix", mcp: "", flags: {} };
-    const cmd = buildCommand(parsed);
+    const cmd = buildCommand(parsed, { laneTimeoutSec: 100 });
     assert.ok(!cmd.includes("--mcp-profile"));
   });
 
@@ -574,7 +597,7 @@ describe("buildCommand — 플래그 보존", () => {
       mcp: "implement",
       flags: { dashboard: true, verbose: true, timeout: 180 },
     };
-    const cmd = buildCommand(parsed);
+    const cmd = buildCommand(parsed, { laneTimeoutSec: 100 });
     assert.ok(cmd.includes("--dashboard"));
     assert.ok(cmd.includes("--verbose"));
     assert.ok(cmd.includes("--auto-attach"));
@@ -594,13 +617,6 @@ describe("buildCommand — 플래그 보존", () => {
     assert.ok(cmd.includes("it'\\''s a test"));
   });
 });
-
-// P1a: 단일 워커 우회 로직 미러
-function shouldBypassHeadless(cmd) {
-  if (process.env.TFX_FORCE_HEADLESS) return false;
-  const isMultiWorker = /\s--(multi|parallel)\b/.test(cmd);
-  return !isMultiWorker;
-}
 
 describe("P1a: 단일 워커 headless 우회", () => {
   it("단일 tfx-route.sh → 우회 (headless 변환 안 함)", () => {
@@ -627,24 +643,23 @@ describe("P1a: 단일 워커 headless 우회", () => {
   });
 
   it("TFX_FORCE_HEADLESS=1 → 단일이어도 headless 변환", () => {
-    const orig = process.env.TFX_FORCE_HEADLESS;
-    process.env.TFX_FORCE_HEADLESS = "1";
     assert.equal(
-      shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' implement"),
+      shouldBypassHeadless(
+        "bash tfx-route.sh executor 'fix bug' implement",
+        { TFX_FORCE_HEADLESS: "1" },
+      ),
       false,
     );
-    if (orig === undefined) delete process.env.TFX_FORCE_HEADLESS;
-    else process.env.TFX_FORCE_HEADLESS = orig;
   });
 
   it("TFX_FORCE_HEADLESS 미설정 + 단일 워커 → 우회", () => {
-    const orig = process.env.TFX_FORCE_HEADLESS;
-    delete process.env.TFX_FORCE_HEADLESS;
     assert.equal(
-      shouldBypassHeadless("bash tfx-route.sh codex 'analyze code' review"),
+      shouldBypassHeadless(
+        "bash tfx-route.sh codex 'analyze code' review",
+        {},
+      ),
       true,
     );
-    if (orig) process.env.TFX_FORCE_HEADLESS = orig;
   });
 });
 
@@ -1239,23 +1254,6 @@ describe("#62: session-stale-cleanup (runtime)", () => {
         isWindows: true,
       }),
       false,
-    );
-  });
-});
-
-describe("parseRouteCommand 소스 패리티", () => {
-  it("parseRouteCommand 소스 코드와 테스트 미러가 일치해야 한다", () => {
-    const source = readFileSync(
-      join(process.cwd(), "scripts", "headless-guard.mjs"),
-      "utf8",
-    );
-    assert.ok(
-      source.includes("MCP_PROFILES"),
-      "MCP_PROFILES 상수가 소스에 존재",
-    );
-    assert.ok(
-      source.includes("timeoutMatch"),
-      "timeout 매칭 로직이 소스에 존재",
     );
   });
 });

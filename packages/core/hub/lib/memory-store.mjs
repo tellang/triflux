@@ -1,6 +1,10 @@
 // hub/lib/memory-store.mjs — In-memory store (SQLite-free fallback for @triflux/core)
 
 import { recalcConfidence } from "../reflexion.mjs";
+import {
+  clampDurationMs,
+  DEFAULT_ASSIGN_TIMEOUT_MS,
+} from "./timeout-defaults.mjs";
 import { uuidv7 } from "./uuidv7.mjs";
 
 export function clone(value) {
@@ -17,12 +21,6 @@ function clampPriority(value, fallback = 5) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(1, Math.min(Math.trunc(num), 9));
-}
-
-function clampDuration(value, fallback = 600000, min = 1000, max = 86400000) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.max(min, Math.min(Math.trunc(num), max));
 }
 
 export function clampConfidence(value, fallback = 0.5) {
@@ -200,6 +198,7 @@ export function createMemoryStore() {
           agent_id: agentId,
           lease_expires_ms: Date.now() + ttlMs,
           server_time_ms: Date.now(),
+          effective: { updated: false, store_type: "memory", db_path: null },
         };
       const now = Date.now();
       current.last_seen_ms = now;
@@ -209,6 +208,7 @@ export function createMemoryStore() {
         agent_id: agentId,
         lease_expires_ms: current.lease_expires_ms,
         server_time_ms: now,
+        effective: { updated: true, store_type: "memory", db_path: null },
       };
     },
 
@@ -464,9 +464,10 @@ export function createMemoryStore() {
       retry_count = 0,
       max_retries = 0,
       priority = 5,
-      ttl_ms = 600000,
-      timeout_ms = 600000,
+      ttl_ms = DEFAULT_ASSIGN_TIMEOUT_MS,
+      timeout_ms = DEFAULT_ASSIGN_TIMEOUT_MS,
       deadline_ms,
+      dispatched_at_ms = null,
       trace_id,
       correlation_id,
       last_message_id = null,
@@ -474,7 +475,10 @@ export function createMemoryStore() {
       error = null,
     }) {
       const now = Date.now();
-      const normalizedTimeout = clampDuration(timeout_ms, 600000);
+      const normalizedTimeout = clampDurationMs(
+        timeout_ms,
+        DEFAULT_ASSIGN_TIMEOUT_MS,
+      );
       const row = {
         job_id: job_id || uuidv7(),
         supervisor_agent,
@@ -487,7 +491,7 @@ export function createMemoryStore() {
         retry_count: Math.max(0, Number(retry_count) || 0),
         max_retries: Math.max(0, Number(max_retries) || 0),
         priority: clampPriority(priority, 5),
-        ttl_ms: clampDuration(ttl_ms, normalizedTimeout),
+        ttl_ms: clampDurationMs(ttl_ms, normalizedTimeout),
         timeout_ms: normalizedTimeout,
         deadline_ms: Number.isFinite(Number(deadline_ms))
           ? Math.trunc(Number(deadline_ms))
@@ -500,6 +504,10 @@ export function createMemoryStore() {
         created_at_ms: now,
         updated_at_ms: now,
         started_at_ms: status === "running" ? now : null,
+        dispatched_at_ms:
+          dispatched_at_ms == null || !Number.isFinite(Number(dispatched_at_ms))
+            ? null
+            : Math.trunc(Number(dispatched_at_ms)),
         completed_at_ms: ["succeeded", "failed", "timed_out"].includes(status)
           ? now
           : null,
@@ -524,7 +532,7 @@ export function createMemoryStore() {
       const isTerminal = ["succeeded", "failed", "timed_out"].includes(
         nextStatus,
       );
-      const nextTimeout = clampDuration(
+      const nextTimeout = clampDurationMs(
         patch.timeout_ms ?? current.timeout_ms,
         current.timeout_ms,
       );
@@ -552,7 +560,7 @@ export function createMemoryStore() {
           patch.priority ?? current.priority,
           current.priority || 5,
         ),
-        ttl_ms: clampDuration(
+        ttl_ms: clampDurationMs(
           patch.ttl_ms ?? current.ttl_ms,
           current.ttl_ms || nextTimeout,
         ),
@@ -589,6 +597,9 @@ export function createMemoryStore() {
           : nextStatus === "running"
             ? current.started_at_ms || now
             : current.started_at_ms,
+        dispatched_at_ms: Object.hasOwn(patch, "dispatched_at_ms")
+          ? patch.dispatched_at_ms
+          : current.dispatched_at_ms,
         completed_at_ms: Object.hasOwn(patch, "completed_at_ms")
           ? patch.completed_at_ms
           : isTerminal
@@ -654,7 +665,7 @@ export function createMemoryStore() {
         current.attempt + 1,
         Number(patch.attempt ?? current.attempt + 1) || 1,
       );
-      const nextTimeout = clampDuration(
+      const nextTimeout = clampDurationMs(
         patch.timeout_ms ?? current.timeout_ms,
         current.timeout_ms,
       );
@@ -666,6 +677,7 @@ export function createMemoryStore() {
         deadline_ms: Date.now() + nextTimeout,
         completed_at_ms: null,
         started_at_ms: null,
+        dispatched_at_ms: null,
         last_retry_at_ms: Date.now(),
         result: patch.result ?? null,
         error: Object.hasOwn(patch, "error") ? patch.error : current.error,

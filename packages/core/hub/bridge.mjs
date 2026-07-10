@@ -99,6 +99,11 @@ const HUB_OPERATIONS = Object.freeze({
     action: "register",
     httpPath: "/bridge/register",
   },
+  heartbeat: {
+    transport: "command",
+    action: "heartbeat",
+    httpPath: "/bridge/heartbeat",
+  },
   result: {
     transport: "command",
     action: "result",
@@ -635,6 +640,14 @@ async function cmdRegister(args) {
   }
 
   return emitJson(result || unavailableResult());
+}
+
+async function cmdHeartbeat(args) {
+  const outcome = await requestHub(HUB_OPERATIONS.heartbeat, {
+    agent_id: args.agent,
+    ttl_ms: args["ttl-ms"] != null ? Number(args["ttl-ms"]) : undefined,
+  });
+  return emitJson(outcome?.result || unavailableResult());
 }
 
 async function cmdResult(args) {
@@ -1559,6 +1572,68 @@ async function cmdRetryStatus(args) {
   return true;
 }
 
+// intervene-run은 hub transport를 거치지 않는다. heartbeat가 hub 장애 중에도
+// process/daemon/pane 사다리를 실행할 수 있도록 순수 로컬 모듈만 호출한다.
+async function cmdInterveneRun(args) {
+  try {
+    const payload = readBridgePayload(args);
+    const intervention = await import("./team/intervention.mjs");
+    let rolloutFile = payload.rolloutFile || null;
+    if (!rolloutFile && payload.cli === "codex" && payload.pid) {
+      rolloutFile = await intervention.resolveCodexRolloutFile({
+        pid: numericOption(payload.pid, undefined),
+        codexHome: payload.codexHome,
+      });
+    }
+    const seconds = (value) => {
+      const parsed = numericOption(value, undefined);
+      return parsed > 0 ? parsed * 1_000 : undefined;
+    };
+    const readActivitySignature = intervention.createFileActivitySource({
+      files: [payload.stdoutLog, payload.stderrLog, payload.resultFile].filter(
+        Boolean,
+      ),
+      rolloutFile,
+    });
+    const ladder = intervention.createInterventionLadder({
+      target: {
+        channel: payload.channel,
+        pid: numericOption(payload.pid, undefined),
+        paneId: payload.paneId,
+        interactive: payload.interactive === true,
+        cli: payload.cli,
+        sessionId: payload.sessionId,
+        codexHome: payload.codexHome,
+        rolloutFile,
+        daemon: payload.daemon,
+      },
+      reinstructPrompt: payload.reinstructPrompt || undefined,
+      readActivitySignature,
+      config: {
+        ...(seconds(payload.reinstructWaitSec)
+          ? { reinstructWaitMs: seconds(payload.reinstructWaitSec) }
+          : {}),
+        ...(seconds(payload.resumeWaitSec)
+          ? { resumeWaitMs: seconds(payload.resumeWaitSec) }
+          : {}),
+        ...(seconds(payload.sigtermGraceSec)
+          ? { sigtermGraceMs: seconds(payload.sigtermGraceSec) }
+          : {}),
+      },
+      log: (event) =>
+        process.stderr.write(`[tfx-intervene] ${JSON.stringify(event)}\n`),
+    });
+    return emitJson(await ladder.intervene());
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      outcome: "failed",
+      step: null,
+      error: error?.message || String(error),
+    });
+  }
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
@@ -1566,6 +1641,8 @@ export async function main(argv = process.argv.slice(2)) {
   switch (cmd) {
     case "register":
       return await cmdRegister(args);
+    case "heartbeat":
+      return await cmdHeartbeat(args);
     case "result":
       return await cmdResult(args);
     case "control":
@@ -1630,9 +1707,11 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdRetryRun(args);
     case "retry-status":
       return await cmdRetryStatus(args);
+    case "intervene-run":
+      return await cmdInterveneRun(args);
     default:
       console.error(
-        "사용법: bridge.mjs <register|result|control|handoff|publish|takeover-role|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|daemon-probe|daemon-attach|daemon-interrupt|retry-run|retry-status> [--옵션]",
+        "사용법: bridge.mjs <register|heartbeat|result|control|handoff|publish|takeover-role|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|daemon-probe|daemon-attach|daemon-interrupt|retry-run|retry-status|intervene-run> [--옵션]",
       );
       process.exit(1);
   }

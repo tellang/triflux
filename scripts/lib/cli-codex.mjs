@@ -5,6 +5,7 @@
 //
 // 진입점: tfx-route.mjs → selectAdapter("codex") → plan({...}).
 // 출처: scripts/tfx-route.sh route_agent() L1001-L1079 case 문 미러.
+// timeoutSec은 lane 예상 소요 시간(advisory)이다. hard ceiling 집행은 Bash route가 소유한다.
 
 export const id = "codex";
 export const cliType = "codex";

@@ -1,6 +1,13 @@
 // hub/router.mjs — 실시간 라우팅/수신함 상태 관리자
 // SQLite는 감사 로그만 담당하고, 실제 배달 상태는 메모리에서 관리한다.
 import { EventEmitter, once } from "node:events";
+import {
+  clampDurationMs,
+  DEFAULT_ASSIGN_TIMEOUT_MS,
+  DEFAULT_ASSIGN_TTL_MS,
+  DEFAULT_HANDOFF_TTL_MS,
+  resolveHardCeilingMs,
+} from "./lib/timeout-defaults.mjs";
 import { uuidv7 } from "./lib/uuidv7.mjs";
 
 const ASSIGN_PENDING_STATUSES = new Set(["queued", "running"]);
@@ -47,17 +54,6 @@ function rolePriority(metadata = {}, roleName = "") {
     if (Number.isFinite(numeric)) return numeric;
   }
   return 0;
-}
-
-function clampAssignDuration(
-  value,
-  fallback = 600000,
-  min = 1000,
-  max = 86400000,
-) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.max(min, Math.min(Math.trunc(num), max));
 }
 
 function normalizeAssignTerminalStatus(input, metadata = {}) {
@@ -606,9 +602,29 @@ export function createRouter(store) {
       record.message.status = "delivered";
       store.updateMessageStatus(messageId, "delivered");
       recordLatency(delivery.delivered_at_ms - record.message.created_at_ms);
+      rearmAssignDeadlineOnDispatch(record.message, delivery.delivered_at_ms);
       return true;
     }
     return false;
+  }
+
+  function rearmAssignDeadlineOnDispatch(message, deliveredAtMs) {
+    if (message?.payload?.kind !== "assign.job") return;
+    const jobId = message.payload.assign_job_id;
+    if (!jobId) return;
+    const job = store.getAssign(jobId);
+    if (
+      !job ||
+      !ASSIGN_PENDING_STATUSES.has(job.status) ||
+      job.dispatched_at_ms
+    )
+      return;
+    if (Number(message.payload.attempt) !== job.attempt) return;
+    store.updateAssignStatus(job.job_id, job.status, {
+      dispatched_at_ms: deliveredAtMs,
+      deadline_ms:
+        deliveredAtMs + clampDurationMs(job.timeout_ms, job.timeout_ms),
+    });
   }
 
   function ackMessages(ids, agentId) {
@@ -706,7 +722,7 @@ export function createRouter(store) {
       to: job.supervisor_agent,
       topic: "assign.result",
       priority: Math.max(5, job.priority || 5),
-      ttl_ms: job.ttl_ms || job.timeout_ms || 600000,
+      ttl_ms: job.ttl_ms || job.timeout_ms || DEFAULT_ASSIGN_TTL_MS,
       payload: {
         event,
         ...buildAssignSnapshot(job),
@@ -725,7 +741,7 @@ export function createRouter(store) {
       to: job.worker_agent,
       topic: job.topic || "assign.job",
       priority: job.priority || 5,
-      ttl_ms: job.ttl_ms || job.timeout_ms || 600000,
+      ttl_ms: job.ttl_ms || job.timeout_ms || DEFAULT_ASSIGN_TTL_MS,
       payload: {
         kind: "assign.job",
         reason,
@@ -797,6 +813,24 @@ export function createRouter(store) {
     const timedOut = store.updateAssignStatus(job.job_id, "timed_out", {
       error: job.error ?? { message: "assign job timed out" },
     });
+    if (timedOut?.worker_agent) {
+      dispatchMessage({
+        type: "event",
+        from: "assign-router",
+        to: timedOut.worker_agent,
+        topic: "assign.cancel",
+        priority: 8,
+        ttl_ms: clampDurationMs(timedOut.ttl_ms, DEFAULT_ASSIGN_TTL_MS),
+        payload: {
+          kind: "assign.cancel",
+          assign_job_id: timedOut.job_id,
+          attempt: timedOut.attempt,
+          reason: "timed_out",
+        },
+        trace_id: timedOut.trace_id,
+        correlation_id: timedOut.correlation_id,
+      });
+    }
 
     if (timedOut.retry_count < timedOut.max_retries) {
       return scheduleAssignRetry(
@@ -1146,7 +1180,7 @@ export function createRouter(store) {
       acceptance_criteria,
       context_refs,
       priority = 5,
-      ttl_ms = 600000,
+      ttl_ms = DEFAULT_HANDOFF_TTL_MS,
       trace_id,
       correlation_id,
     }) {
@@ -1174,8 +1208,8 @@ export function createRouter(store) {
       task = "",
       payload = {},
       priority = 5,
-      ttl_ms = 600000,
-      timeout_ms = 600000,
+      ttl_ms = DEFAULT_ASSIGN_TTL_MS,
+      timeout_ms = DEFAULT_ASSIGN_TIMEOUT_MS,
       max_retries = 0,
       trace_id,
       correlation_id,
@@ -1232,16 +1266,6 @@ export function createRouter(store) {
           },
         };
       }
-      if (Number.isFinite(Number(attempt)) && Number(attempt) !== job.attempt) {
-        return {
-          ok: false,
-          error: {
-            code: "ASSIGN_ATTEMPT_MISMATCH",
-            message: `stale assign result for attempt ${attempt} (current ${job.attempt})`,
-          },
-        };
-      }
-
       const mergedMetadata = {
         ...(payload?.metadata || {}),
         ...(metadata || {}),
@@ -1255,11 +1279,37 @@ export function createRouter(store) {
         (Object.hasOwn(payload || {}, "result") ? payload.result : payload);
       const nextError = error ?? payload?.error ?? null;
 
+      if (Number.isFinite(Number(attempt)) && Number(attempt) !== job.attempt) {
+        const preserved = notifyAssignSupervisor(job, "late_result", {
+          stale_attempt: Number(attempt),
+          late_status: normalizedStatus,
+          late_result: nextResult,
+          late_error: nextError,
+          reported_by: worker_agent || job.worker_agent,
+        });
+        return {
+          ok: false,
+          error: {
+            code: "ASSIGN_ATTEMPT_MISMATCH",
+            message: `stale assign result for attempt ${attempt} (current ${job.attempt})`,
+            details: {
+              preserved: Boolean(preserved),
+              preserved_message_id: preserved?.id ?? null,
+            },
+          },
+        };
+      }
+
       if (normalizedStatus === "running") {
+        const nowMs = Date.now();
+        const ceilingAtMs =
+          (job.dispatched_at_ms || job.created_at_ms) + resolveHardCeilingMs();
         const running = store.updateAssignStatus(job.job_id, "running", {
-          started_at_ms: job.started_at_ms || Date.now(),
-          deadline_ms:
-            Date.now() + clampAssignDuration(job.timeout_ms, job.timeout_ms),
+          started_at_ms: job.started_at_ms || nowMs,
+          deadline_ms: Math.min(
+            nowMs + clampDurationMs(job.timeout_ms, job.timeout_ms),
+            ceilingAtMs,
+          ),
           result: nextResult,
           error: nextError,
         });
@@ -1328,11 +1378,43 @@ export function createRouter(store) {
     sweepExpired() {
       const now = Date.now();
       let expired = 0;
+      const deadLettered = [];
       for (const [messageId, record] of Array.from(liveMessages.entries())) {
         if (record.message.expires_at_ms > now) continue;
         store.moveToDeadLetter(messageId, "ttl_expired", null);
+        deadLettered.push(record.message);
         removeMessage(messageId);
         expired += 1;
+      }
+      for (const message of deadLettered) {
+        if (
+          !["handoff", "request"].includes(message.type) ||
+          message.payload?.kind === "assign.job"
+        )
+          continue;
+        if (
+          !message.from_agent ||
+          String(message.from_agent).startsWith("topic:")
+        )
+          continue;
+        dispatchMessage({
+          type: "event",
+          from: "hub-sweeper",
+          to: message.from_agent,
+          topic: "handoff.dead_letter",
+          priority: 7,
+          ttl_ms: 300000,
+          payload: {
+            kind: "handoff.dead_letter",
+            message_id: message.id,
+            original_topic: message.topic,
+            original_to: message.to_agent,
+            reason: "ttl_expired",
+            task: message.payload?.task ?? null,
+          },
+          trace_id: message.trace_id,
+          correlation_id: message.correlation_id,
+        });
       }
       return { messages: expired };
     },

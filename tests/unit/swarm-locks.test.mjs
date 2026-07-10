@@ -87,6 +87,22 @@ describe("swarm-locks", () => {
     });
   });
 
+  describe("renew", () => {
+    it("소유한 lease의 TTL을 연장한다", async () => {
+      const locks = createSwarmLocks({ repoRoot: tmpDir, ttlMs: 80 });
+      locks.acquire("worker-1", ["src/a.mjs"]);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(locks.renew("worker-1"), 1);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(locks.check("worker-2", "src/a.mjs").allowed, false);
+    });
+
+    it("소유하지 않은 워커는 갱신하지 않는다", () => {
+      const locks = createSwarmLocks({ repoRoot: tmpDir });
+      assert.equal(locks.renew("ghost"), 0);
+    });
+  });
+
   describe("check", () => {
     it("allows worker to write its own locked files", () => {
       const locks = createSwarmLocks({ repoRoot: tmpDir });

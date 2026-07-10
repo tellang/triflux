@@ -10,6 +10,7 @@ import {
 } from "@triflux/core/hub/pipeline/state.mjs";
 import { sendInputToConductorSession } from "./team/conductor-registry.mjs";
 import { getTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
+import { DEFAULT_ASSIGN_TIMEOUT_MS, DEFAULT_ASSIGN_TTL_MS, DEFAULT_HANDOFF_TTL_MS } from "@triflux/core/hub/lib/timeout-defaults.mjs";
 
 const TEAM_BRIDGE_NOT_REGISTERED = "bridge_not_registered";
 
@@ -359,7 +360,7 @@ export function createTools(store, router, hitl, pipe = null) {
             type: "integer",
             minimum: 1000,
             maximum: 86400000,
-            default: 600000,
+            default: DEFAULT_HANDOFF_TTL_MS,
           },
           trace_id: { type: "string" },
           correlation_id: { type: "string" },
@@ -396,13 +397,13 @@ export function createTools(store, router, hitl, pipe = null) {
             type: "integer",
             minimum: 1000,
             maximum: 86400000,
-            default: 600000,
+            default: DEFAULT_ASSIGN_TTL_MS,
           },
           timeout_ms: {
             type: "integer",
             minimum: 1000,
             maximum: 86400000,
-            default: 600000,
+            default: DEFAULT_ASSIGN_TIMEOUT_MS,
           },
           max_retries: { type: "integer", minimum: 0, maximum: 20, default: 0 },
           trace_id: { type: "string" },

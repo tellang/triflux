@@ -12,6 +12,7 @@ import {
   createCodexExecEndpoint,
   extractClaudeUdsText,
   runUdsOrchestration,
+  subscribeClaudeUntilMarker,
 } from "../../hub/team/uds-orchestrator.mjs";
 
 function scriptedEndpoint(name, replies) {
@@ -129,6 +130,37 @@ function writeJson(socket, value, { end = false } = {}) {
   if (end) socket.end(line);
   else socket.write(line);
 }
+
+test("Claude UDS marker subscription extends its idle window for stream activity", async () => {
+  await withFakeClaudeDaemon(
+    (request, socket) => {
+      if (request.op !== "subscribe") return;
+      setTimeout(
+        () => writeJson(socket, { type: "stream", line: "⏺ first\\n" }),
+        15,
+      );
+      setTimeout(
+        () => writeJson(socket, { type: "stream", line: "still working\\n" }),
+        35,
+      );
+      setTimeout(
+        () => writeJson(socket, { type: "stream", line: "DONE\\n" }),
+        55,
+      );
+    },
+    async (paths) => {
+      const result = await subscribeClaudeUntilMarker(
+        paths.controlSock,
+        "active123",
+        "DONE",
+        { timeoutMs: 30, maxTurnMs: 250 },
+      );
+      assert.equal(result.markerSeen, true);
+      assert.equal(result.timedOut, undefined);
+      assert.ok(result.elapsedMs >= 50, `expected extension, got ${result.elapsedMs}ms`);
+    },
+  );
+});
 
 test("createClaudeUdsEndpoint dispatches with shared daemon helper, captures marker text, and tears down", async () => {
   await withFakeClaudeDaemon(

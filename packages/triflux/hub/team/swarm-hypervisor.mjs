@@ -21,6 +21,7 @@ import {
 } from "../dynamic-routing-engine.mjs";
 import { cleanupShardProcesses } from "../lib/process-utils.mjs";
 import { getHostConfig } from "../lib/ssh-command.mjs";
+import { DEFAULT_SWARM_LOCK_TTL_MS } from "../lib/timeout-defaults.mjs";
 import { buildWorkerPrompt } from "./build-worker-prompt.mjs";
 import { registerSwarmShard } from "./claude-native-bridge.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
@@ -1909,6 +1910,7 @@ export function createSwarmHypervisor(opts) {
    */
   /** Hub keepalive — Hub crash recovery (idle timeout은 기본 비활성이므로 crash 복구 용도) */
   let hubKeepaliveTimer = null;
+  let lockRenewTimer = null;
   function startHubKeepalive() {
     // 5분마다 Hub /status 핑 — crash 감지 시 ensureHubAlive로 재시작
     hubKeepaliveTimer = setInterval(
@@ -1956,6 +1958,22 @@ export function createSwarmHypervisor(opts) {
       clearInterval(hubKeepaliveTimer);
       hubKeepaliveTimer = null;
     }
+  }
+
+  function startLockRenewal() {
+    lockRenewTimer = setInterval(() => {
+      if (!lockManager) return;
+      for (const shardName of workers.keys()) {
+        if (!completedShards.has(shardName) && !failures.has(shardName))
+          lockManager.renew(shardName);
+      }
+    }, DEFAULT_SWARM_LOCK_TTL_MS / 2);
+    lockRenewTimer.unref?.();
+  }
+
+  function stopLockRenewal() {
+    if (lockRenewTimer) clearInterval(lockRenewTimer);
+    lockRenewTimer = null;
   }
 
   async function launch(swarmPlan) {
@@ -2051,6 +2069,7 @@ export function createSwarmHypervisor(opts) {
       persistPath: join(workdir, ".triflux", "swarm-locks.json"),
     });
 
+    startLockRenewal();
     // Hub keepalive 시작
     startHubKeepalive();
 
@@ -2106,6 +2125,7 @@ export function createSwarmHypervisor(opts) {
    */
   async function shutdown(reason = "shutdown") {
     stopHubKeepalive();
+    stopLockRenewal();
     eventLog.append("swarm_shutdown", { reason, state });
 
     const shutdowns = [];

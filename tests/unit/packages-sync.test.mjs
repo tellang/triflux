@@ -46,10 +46,16 @@ function sha256File(absPath) {
 
 function packageExpectedContent(pkg, rel, rootContent) {
   if (pkg !== "remote") return rootContent;
-  if (rel !== "hub/team/uds-orchestrator.mjs") return rootContent;
-  return rootContent.replace(
-    'from "../codex-adapter.mjs"',
-    'from "@triflux/core/hub/codex-adapter.mjs"',
+  let content = rootContent;
+  if (rel === "hub/team/uds-orchestrator.mjs") {
+    content = content.replace(
+      'from "../codex-adapter.mjs"',
+      'from "@triflux/core/hub/codex-adapter.mjs"',
+    );
+  }
+  return content.replace(
+    'from "../lib/worker-lifecycle.mjs"',
+    'from "@triflux/core/hub/lib/worker-lifecycle.mjs"',
   );
 }
 

@@ -145,6 +145,13 @@ describe("hub/store-adapter.mjs", () => {
       worker_agent: "memory-agent",
       task: "fallback works",
     });
+    assert.equal(job.dispatched_at_ms, null);
+    assert.equal(
+      store.updateAssignStatus(job.job_id, "queued", { dispatched_at_ms: 1234 })
+        .dispatched_at_ms,
+      1234,
+    );
+    assert.equal(store.retryAssign(job.job_id).dispatched_at_ms, null);
     const done = store.updateAssignStatus(job.job_id, "succeeded", {
       result: { ok: true },
     });

@@ -5,6 +5,7 @@
 //
 // 출처: scripts/tfx-route.sh route_agent() L1052-L1059, run_codex_exec() L2036-L2046.
 //        .claude/rules/tfx-update-logic.md Antigravity CLI 1.0.0 정밀 sanity matrix.
+// timeoutSec은 lane 예상 소요 시간(advisory)이다. hard ceiling 집행은 Bash route가 소유한다.
 
 export const id = "agy";
 export const cliType = "antigravity";

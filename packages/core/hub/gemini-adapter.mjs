@@ -9,6 +9,7 @@ import {
   normalizePathForShell,
   runProcess,
 } from "./cli-adapter-base.mjs";
+import { isActivityLifecycleEnabled } from "./lib/worker-lifecycle.mjs";
 import { whichCommandAsync } from "./platform.mjs";
 
 function shellSingleQuote(value) {
@@ -88,7 +89,8 @@ function buildAttempts(opts, preflight) {
     excludeMcpServers: [...(preflight.excludeMcpServers || [])],
   };
   if (opts.retryOnFail === false) return [base];
-  return [base, { ...base, timeout: timeout * 2, allowedMcpServers: [] }];
+  const retryTimeout = isActivityLifecycleEnabled() ? timeout : timeout * 2;
+  return [base, { ...base, timeout: retryTimeout, allowedMcpServers: [] }];
 }
 
 // ── Public: buildExecArgs ───────────────────────────────────────

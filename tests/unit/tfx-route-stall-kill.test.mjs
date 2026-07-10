@@ -50,15 +50,15 @@ describe("#144/#66 heartbeat stall kill — shape", () => {
     assert.match(hb, /kill -KILL "\$pid"/, "SIGKILL 강제 경로 필수");
   });
 
-  it("kill_on_stall 기본값은 classify 이고, grace 기본값은 30초 (#165)", () => {
-    // PR #160: default 1 → 0 으로 임시 후퇴 (false kill 방지)
-    // PR #165: 0 → classify 승격. evidence 는 남기되 kill 은 명시적 opt-in.
+  it("kill_on_stall 기본값은 kill 이고, stall 기본값은 1200초다", () => {
+    // T1: 외부 timeout이 hard ceiling으로 이동했으므로 heartbeat가 기본 방어선이다.
     const hb = extractFunction("heartbeat_monitor");
-    assert.match(hb, /kill_on_stall="\$\{TFX_STALL_KILL:-classify\}"/);
+    assert.match(hb, /TFX_STALL_THRESHOLD:-1200/);
+    assert.match(hb, /kill_on_stall="\$\{TFX_STALL_KILL:-kill\}"/);
     assert.match(hb, /kill_grace="\$\{TFX_STALL_KILL_GRACE:-30\}"/);
   });
 
-  it("TFX_STALL_KILL 은 kill / classify / off 세 모드를 지원한다 (#165)", () => {
+  it("TFX_STALL_KILL 은 kill / intervene / classify / off 모드를 지원한다", () => {
     const hb = extractFunction("heartbeat_monitor");
     // case 문에 세 모드 모두 존재해야 함
     assert.match(hb, /1\|on\|kill/, "kill alias (1|on|kill) case arm 필요");
@@ -67,6 +67,13 @@ describe("#144/#66 heartbeat stall kill — shape", () => {
       /classify\|0\|off\|disabled/,
       "no-kill alias (classify|0|off|disabled) case arm 필요",
     );
+    assert.match(
+      hb,
+      /intervene\|ladder/,
+      "intervene ladder case arm 필요",
+    );
+    assert.match(hb, /intervene-run/, "bridge intervene-run 배선 필요");
+    assert.match(hb, /--payload-file -/, "intervene JSON은 stdin으로 전달해야 함");
     assert.match(
       hb,
       /STALL_CLASSIFY/,
@@ -117,7 +124,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     }
   });
 
-  function buildStallScript({ killMode, stdoutLog, stderrLog }) {
+  function buildStallScript({ killMode, stdoutLog, stderrLog, bridgeScript }) {
     const hb = extractFunction("heartbeat_monitor");
     const findForks = extractFunction("_find_fork_pids");
     const rolloutActivity = extractFunction("_codex_rollout_activity_bytes");
@@ -134,6 +141,12 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       "export TFX_STALL_KILL_GRACE=1",
       `STDOUT_LOG='${stdoutLog}'`,
       `STDERR_LOG='${stderrLog}'`,
+      ...(bridgeScript
+        ? [
+            `TFX_BRIDGE_SCRIPT='${bridgeScript}'`,
+            'resolve_bridge_script() { printf "%s\\n" "$TFX_BRIDGE_SCRIPT"; }',
+          ]
+        : []),
       "TIMESTAMP=$(date +%s)",
       "",
       findForks,
@@ -317,7 +330,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     assert.match(result.stderr, /RESULT=child_terminated/);
   });
 
-  it("TFX_STALL_KILL=classify (default) 이면 stall 은 STALL_CLASSIFY 로그만 내고 kill 안 한다 (#165)", () => {
+  it("TFX_STALL_KILL=classify 이면 stall 은 STALL_CLASSIFY 로그만 내고 kill 안 한다 (#165)", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "tfx-stall-classify-"));
     cleanupDirs.push(dir);
     const stdoutLog = path.join(dir, "stdout.log");
@@ -351,6 +364,48 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       /SIGTERM/,
       "classify mode 에서는 SIGTERM 이 발사되면 안 됨",
     );
+  });
+
+  it("intervene 실패는 stdin JSON을 bridge에 전달한 뒤 기존 kill ladder로 fallback한다", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "tfx-stall-intervene-"));
+    cleanupDirs.push(dir);
+    const stdoutLog = path.join(dir, "stdout.log");
+    const stderrLog = path.join(dir, "stderr.log");
+    const marker = path.join(dir, "intervene-payload.json");
+    const bridgeScript = path.join(dir, "bridge-fail.mjs");
+    const scriptFile = path.join(dir, "run.sh");
+    writeFileSync(stdoutLog, "");
+    writeFileSync(stderrLog, "");
+    writeFileSync(
+      bridgeScript,
+      `import { readFileSync, writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(marker)}, readFileSync(0, "utf8"));\nprocess.exit(1);\n`,
+    );
+    writeFileSync(
+      scriptFile,
+      buildStallScript({
+        killMode: "intervene",
+        stdoutLog,
+        stderrLog,
+        bridgeScript,
+      }),
+    );
+    const result = spawnSync("bash", [scriptFile], {
+      encoding: "utf8",
+      cwd: REPO_ROOT,
+      timeout: 20_000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stderr, /status=STALL_INTERVENE/);
+    assert.match(result.stderr, /intervention 실패/);
+    assert.match(result.stderr, /status=STALL_KILL/);
+    assert.match(result.stderr, /RESULT=child_terminated/);
+
+    const payload = JSON.parse(readFileSync(marker, "utf8"));
+    assert.equal(payload.channel, "process");
+    assert.equal(typeof payload.pid, "number");
+    assert.equal(payload.stdoutLog, stdoutLog);
+    assert.equal(payload.stderrLog, stderrLog);
+    assert.equal(payload.rolloutFile, null);
   });
 
   it("Codex rollout jsonl activity resets stall detection when stdout/stderr stay empty (#267)", () => {

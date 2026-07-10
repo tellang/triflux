@@ -13,6 +13,12 @@ import { isAbsolute } from "node:path";
 import process from "node:process";
 
 import {
+  createActivityLifecycle,
+  isActivityLifecycleEnabled,
+  resolveHardCeilingMs,
+  resolveStallInterventionMs,
+} from "@triflux/core/hub/lib/worker-lifecycle.mjs";
+import {
   JsonRpcProtocolError,
   JsonRpcStdioClient,
   JsonRpcTransportError,
@@ -25,6 +31,7 @@ export const CODEX_APP_SERVER_TRANSPORT_EXIT_CODE = 70;
 export const CODEX_APP_SERVER_TIMEOUT_EXIT_CODE = 124;
 
 export const DEFAULT_CODEX_APP_SERVER_BOOTSTRAP_TIMEOUT_MS = 10_000;
+// Legacy wall-clock default retained for TFX_ACTIVITY_LIFECYCLE=0 compatibility.
 export const DEFAULT_CODEX_APP_SERVER_EXECUTION_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_UNKNOWN_METHOD_WARN_THRESHOLD = 5;
 /**
@@ -327,6 +334,7 @@ export class CodexAppServerWorker {
    * @param {number} [options.unknownMethodWarnThreshold]
    * @param {(method: string) => void} [options.onUnknownMethod]
    * @param {(label: string, payload: object) => void} [options.warn]
+   * @param {(context: object) => Promise<boolean|string>|boolean|string} [options.interveneFn]
    */
   constructor(options = {}) {
     this.command = options.command || process.env.CODEX_BIN || "codex";
@@ -370,6 +378,8 @@ export class CodexAppServerWorker {
       typeof options.onUnknownMethod === "function"
         ? options.onUnknownMethod
         : null;
+    this._interveneFn =
+      typeof options.interveneFn === "function" ? options.interveneFn : null;
 
     /** @type {import('node:child_process').ChildProcess | null} */
     this.child = null;
@@ -643,6 +653,8 @@ export class CodexAppServerWorker {
     }
 
     const outputParts = [];
+    let lastActivityAt = Date.now();
+    let activityLifecycle = null;
     const unknownMethodsThisTurn = new Set();
     let threadId =
       typeof opts.threadId === "string" && opts.threadId ? opts.threadId : null;
@@ -714,6 +726,10 @@ export class CodexAppServerWorker {
       };
 
       const handleNotification = (method, params) => {
+        // Any notification, including unknown and opt-out methods, proves the
+        // transport is live. Content filtering below remains unchanged.
+        lastActivityAt = Date.now();
+        activityLifecycle?.observe();
         // AC5 defense: opt-out should already be filtered server-side.
         if (OPT_OUT_METHODS.includes(method)) return;
 
@@ -854,16 +870,40 @@ export class CodexAppServerWorker {
         };
       }
 
-      // Timeout: SIGTERM + partial WorkerResult (AC8)
+      // In activity mode timeoutMs is the inactivity window. Notifications
+      // re-arm the lifecycle; hardCeilingMs remains the leak-prevention bound.
+      const activityEnabled = isActivityLifecycleEnabled();
       const timeoutMs = Number.isFinite(opts.timeoutMs)
         ? opts.timeoutMs
-        : DEFAULT_CODEX_APP_SERVER_EXECUTION_TIMEOUT_MS;
+        : activityEnabled
+          ? resolveStallInterventionMs()
+          : DEFAULT_CODEX_APP_SERVER_EXECUTION_TIMEOUT_MS;
+      const hardCeilingMs = Number.isFinite(opts.hardCeilingMs)
+        ? opts.hardCeilingMs
+        : resolveHardCeilingMs();
       // Capture current child so a stale timer (post-result) cannot SIGTERM a
       // later reused worker's child process.
       const capturedChild = this.child;
+      activityLifecycle = createActivityLifecycle({
+        enabled: activityEnabled,
+        interventionMs: timeoutMs,
+        hardCeilingMs,
+        onIntervene: async (context) => {
+          if (this._interveneFn) {
+            const result = await this._interveneFn({
+              threadId,
+              client,
+              lastActivityAt,
+              ...context,
+            });
+            return result === true || result === "resolved";
+          }
+          return false;
+        },
+      });
       const timeoutPromise = new Promise((resolve) => {
-        timer = setTimeout(() => {
-          this._warn("execution timeout", { timeoutMs });
+        const fire = (reason) => {
+          this._warn("execution timeout", { timeoutMs, reason });
           try {
             capturedChild?.kill?.("SIGTERM");
           } catch {}
@@ -878,7 +918,16 @@ export class CodexAppServerWorker {
             ),
             raw: null,
           });
-        }, timeoutMs);
+        };
+        const arm = () => {
+          timer = setTimeout(async () => {
+            if (!activityEnabled) return fire("timeout");
+            const reason = await activityLifecycle.check({ threadId, client });
+            if (reason) return fire(reason);
+            arm();
+          }, timeoutMs);
+        };
+        arm();
       });
 
       const result = await Promise.race([resultPromise, timeoutPromise]);

@@ -11,6 +11,7 @@ import {
   shellQuote,
 } from "./cli-adapter-base.mjs";
 import { runPreflight } from "./codex-preflight.mjs";
+import { isActivityLifecycleEnabled } from "./lib/worker-lifecycle.mjs";
 
 // ── Codex-specific stall inference ──────────────────────────────
 
@@ -64,9 +65,10 @@ function buildAttempts(opts, preflight) {
     forceBypass: preflight.needsBypass,
   };
   if (opts.retryOnFail === false) return [base];
+  const retryTimeout = isActivityLifecycleEnabled() ? timeout : timeout * 2;
   return [
     base,
-    { ...base, timeout: timeout * 2, excluded: requested, forceBypass: true },
+    { ...base, timeout: retryTimeout, excluded: requested, forceBypass: true },
   ];
 }
 
@@ -183,6 +185,8 @@ async function runCodex(prompt, workdir, preflight, attempt, lease) {
     resultFile,
     inferStallMode,
     spawnEnv,
+    cli: "codex",
+    codexHome: spawnEnv?.CODEX_HOME,
   });
 }
 

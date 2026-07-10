@@ -269,6 +269,9 @@ export function createPipeServer({
           payload.heartbeat_ttl_ms || heartbeatTtlMs,
         );
         if (client) touchClient(client);
+        if (result?.effective?.updated === false) {
+          return { ok: false, error: { code: "AGENT_NOT_FOUND", message: `heartbeat target not registered: ${agentId}` } };
+        }
         return { ok: true, data: result };
       }
 

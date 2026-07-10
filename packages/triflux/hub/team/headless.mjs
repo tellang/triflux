@@ -23,6 +23,12 @@ import { fileURLToPath } from "node:url";
 import { requestJson } from "../bridge.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
+import {
+  createActivityLifecycle,
+  isActivityLifecycleEnabled,
+  resolveHardCeilingMs,
+  resolveStallInterventionMs,
+} from "../lib/worker-lifecycle.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 import { getBackend } from "./backend.mjs";
 import {
@@ -36,6 +42,10 @@ import {
 import { startClaudeNativeBridge } from "./claude-native-bridge.mjs";
 import { removeClaudeSessionProjection } from "./claude-session-projection.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
+import {
+  createFileActivitySource,
+  createInterventionLadder,
+} from "./intervention.mjs";
 import {
   formatHandoffForLead,
   HANDOFF_INSTRUCTION_SHORT,
@@ -179,9 +189,17 @@ function buildRouteBackedHeadlessCommand(
       : "";
   const timeoutArg = timeout ? ` ${shellQuote(timeout)}` : "";
   const routeMode = resolvedCli === "antigravity" ? "antigravity" : resolvedCli;
+  const lifecycleEnv = [
+    "TFX_HARD_CEILING_SEC",
+    "TFX_STALL_THRESHOLD",
+    "TFX_STALL_INTERVENTION_SEC",
+  ]
+    .filter((key) => process.env[key])
+    .map((key) => `${key}=${shellQuote(process.env[key])} `)
+    .join("");
   const script =
     `__tfx_prompt=$(cat ${shellQuote(promptFile)}); ` +
-    `TFX_CLI_MODE=${shellQuote(routeMode)} ` +
+    `${lifecycleEnv}TFX_CLI_MODE=${shellQuote(routeMode)} ` +
     `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)}${timeoutArg} ` +
     `> ${shellQuote(resultFile)} 2>${shellQuote(`${resultFile}.err`)} < /dev/null`;
   return `bash -lc ${shellQuote(script)}`;
@@ -195,6 +213,11 @@ export function getHeadlessLeadAgentId(sessionName) {
   return `headless-${sessionName}-lead`;
 }
 
+const HUB_CLI_VALUES = new Set(["codex", "gemini", "claude", "other"]);
+function normalizeCliForHub(cli) {
+  return HUB_CLI_VALUES.has(cli) ? cli : "other";
+}
+
 export async function registerHeadlessWorker(
   sessionName,
   index,
@@ -203,7 +226,8 @@ export async function registerHeadlessWorker(
 ) {
   await requestJsonFn("/bridge/register", {
     body: {
-      agentId: getHeadlessWorkerAgentId(sessionName, index),
+      agent_id: getHeadlessWorkerAgentId(sessionName, index),
+      cli: normalizeCliForHub(cli),
       topics: ["headless.worker"],
       capabilities: [cli],
     },
@@ -474,8 +498,10 @@ export function readResult(resultFile, paneId) {
 export const STALL_DEFAULTS = Object.freeze({
   pollInterval: 5_000,
   stallTimeout: 120_000,
-  completionTimeout: 900_000,
+  interventionTimeout: resolveStallInterventionMs(),
+  hardCeiling: resolveHardCeilingMs(),
   maxRestarts: 2,
+  maxInterventions: 1,
 });
 
 /** CLI pane stall 감지 에러 (STALL_EXHAUSTED | COMPLETION_TIMEOUT) */
@@ -543,6 +569,103 @@ export function createStallMonitor(paneId, resultFile, config, deps = {}) {
   });
 }
 
+function createHeadlessIntervention(dispatch, fallback) {
+  return async (context) => {
+    if (typeof fallback === "function") return (await fallback(context)) === true;
+
+    const isDaemon = context.channel === "daemon";
+    const readActivitySignature = isDaemon
+      ? createFileActivitySource({ files: [dispatch.resultFile] })
+      : () => {
+          let mtime = 0;
+          try {
+            mtime = statSync(dispatch.resultFile).mtimeMs;
+          } catch {
+            /* result file has not been written yet */
+          }
+          return `${capturePsmuxPane(context.paneId || dispatch.paneId, 50)}\0${mtime}`;
+        };
+    const ladder = createInterventionLadder({
+      target: isDaemon
+        ? {
+            channel: "claude-daemon",
+            cli: dispatch.cli || "claude",
+            sessionId: dispatch.sessionId,
+            daemon: {
+              controlSock: dispatch.controlSock,
+              short: dispatch.daemonShort,
+              sessionId: dispatch.sessionId,
+              configDir: dispatch.daemonPaths?.configDir,
+            },
+          }
+        : {
+            channel: "tmux-pane",
+            paneId: context.paneId || dispatch.paneId,
+            cli: dispatch.cli,
+            sessionId: dispatch.sessionId,
+          },
+      readActivitySignature,
+      deps: {
+        // 이 트랙이 재실행 소유자다. pane 채널은 기존 completion wrapper를 다시
+        // dispatch하여 token/result 계약을 보존한다.
+        resumeHandler: async () => {
+          if (isDaemon || !dispatch.command) return { ok: false };
+          const restarted = dispatchCommand(
+            context.sessionName,
+            context.paneId || dispatch.paneId,
+            dispatch.command,
+          );
+          return { ok: Boolean(restarted) };
+        },
+      },
+    });
+    const outcome = await ladder.intervene();
+    return outcome.outcome === "reactivated" || outcome.outcome === "resumed";
+  };
+}
+
+export function createActivityPollGuard({
+  resultFile,
+  lifecycle,
+  interveneContext,
+  statSyncFn = statSync,
+}) {
+  const controller = new AbortController();
+  let lastMtime = 0;
+  let checking = false;
+
+  const finishIfTimedOut = async () => {
+    if (checking || controller.signal.aborted) return;
+    checking = true;
+    try {
+      if (await lifecycle.check(interveneContext)) controller.abort();
+    } finally {
+      checking = false;
+    }
+  };
+
+  return Object.freeze({
+    signal: controller.signal,
+    observe(content) {
+      let mtime = 0;
+      try {
+        mtime = statSyncFn(resultFile).mtimeMs;
+      } catch {
+        /* result file has not been created yet */
+      }
+      lifecycle.observe(`${content}\0${mtime}`);
+      lastMtime = mtime || lastMtime;
+      void finishIfTimedOut();
+    },
+    get timeoutReason() {
+      return lifecycle.timeoutReason;
+    },
+    get lastMtime() {
+      return lastMtime;
+    },
+  });
+}
+
 /**
  * 하이브리드 stall 감지 대기 — output 변화 + resultFile mtime 모니터링.
  * 2분 무변화 시 pane kill → re-dispatch (최대 2회 재시작).
@@ -553,7 +676,8 @@ export function createStallMonitor(paneId, resultFile, config, deps = {}) {
  * @param {object} [opts]
  * @param {number} [opts.pollInterval=5000] — 폴링 간격 ms
  * @param {number} [opts.stallTimeout=120000] — 무변화 stall 판정 ms
- * @param {number} [opts.completionTimeout=900000] — 전체 타임아웃 ms
+ * @param {number} [opts.hardCeiling] — 활동과 무관한 절대 상한 ms
+ * @param {number} [opts.completionTimeout] — hardCeiling의 하위호환 alias
  * @param {number} [opts.maxRestarts=2] — 최대 재시작 횟수
  * @param {string} [opts.command] — re-dispatch용 원본 명령
  * @param {string} [opts.token] — completion token
@@ -569,13 +693,18 @@ export async function waitForCompletionWithStallDetect(
   const {
     pollInterval = 5000,
     stallTimeout = 120000,
-    completionTimeout = 900000,
     maxRestarts = 2,
+    maxInterventions = 1,
     command,
     token,
     onPoll,
+    onIntervene,
     _deps,
   } = opts;
+  const hardCeiling =
+    opts.hardCeiling ??
+    opts.completionTimeout ??
+    (isActivityLifecycleEnabled() ? resolveHardCeilingMs() : 900_000);
 
   // 의존성 (테스트 시 _deps로 주입 가능)
   const deps = _deps || {};
@@ -601,6 +730,8 @@ export async function waitForCompletionWithStallDetect(
   };
 
   let restarts = 0;
+  let interventions = 0;
+  const runStartedAt = Date.now();
   let currentPaneId = paneId;
   let stallDetected = false;
   let currentToken = token;
@@ -610,7 +741,6 @@ export async function waitForCompletionWithStallDetect(
     let lastOutput = "";
     let lastMtime = 0;
     let lastChangeAt = Date.now();
-    const startedAt = Date.now();
 
     // 초기 resultFile mtime
     try {
@@ -623,8 +753,8 @@ export async function waitForCompletionWithStallDetect(
       await new Promise((r) => setTimeout(r, pollInterval));
       const now = Date.now();
 
-      // 전체 타임아웃
-      if (now - startedAt > completionTimeout) {
+      // 절대 상한은 재시작과 활동 여부를 관통하는 유일한 wall-clock kill이다.
+      if (now - runStartedAt > hardCeiling) {
         // Issue #118: timeout kill 전에 capture-pane 출력을 .partial 파일로 persist.
         // resultFile(`.txt`)이 아직 생성되지 않았을 수 있으므로 readResult 가 fallback 으로 읽는다.
         try {
@@ -642,6 +772,7 @@ export async function waitForCompletionWithStallDetect(
           restarts,
           stallDetected,
           timedOut: true,
+          timeoutReason: "hard_ceiling",
           paneId: currentPaneId,
           token: currentToken,
           logPath: currentLogPath,
@@ -721,11 +852,34 @@ export async function waitForCompletionWithStallDetect(
         stallDetected = true;
 
         if (restarts >= maxRestarts) {
+          if (onIntervene && interventions < maxInterventions) {
+            interventions += 1;
+            let handled = false;
+            try {
+              handled =
+                (await onIntervene({
+                  channel: "pane",
+                  sessionName,
+                  paneId: currentPaneId,
+                  resultFile,
+                  inactiveMs: now - lastChangeAt,
+                  restarts,
+                  interventions,
+                })) === true;
+            } catch {
+              handled = false;
+            }
+            if (handled) {
+              lastChangeAt = Date.now();
+              continue;
+            }
+          }
           const err = new Error("CLI가 반복적으로 멈춤. 수동 확인 필요.");
           err.code = "STALL_EXHAUSTED";
           err.category = "transient";
           err.recovery = "CLI가 반복적으로 멈춤. 수동 확인 필요.";
           err.restarts = restarts;
+          err.interventions = interventions;
           throw err;
         }
 
@@ -1103,6 +1257,7 @@ async function awaitAll(
   safeProgress,
   progressIntervalSec,
   stallOpts,
+  lifecycle,
 ) {
   // 병렬 대기 (Promise.all — 모든 pane 동시 폴링, 총 시간 = max(개별 시간))
   return Promise.all(
@@ -1155,12 +1310,23 @@ async function awaitAll(
             {
               pollInterval: stallOpts.pollInterval,
               stallTimeout: stallOpts.stallTimeout,
-              completionTimeout:
-                stallOpts.completionTimeout ?? timeoutSec * 1000,
+              hardCeiling:
+                lifecycle?.enabled
+                  ? (stallOpts.hardCeiling ??
+                    stallOpts.completionTimeout ??
+                    lifecycle.hardCeilingMs)
+                  : (stallOpts.completionTimeout ?? timeoutSec * 1000),
               maxRestarts: stallOpts.maxRestarts,
+              maxInterventions: stallOpts.maxInterventions,
               command: d.command,
               token: d.token,
               onPoll: stallPollCb,
+              onIntervene: lifecycle?.enabled
+                ? createHeadlessIntervention(
+                    d,
+                    stallOpts.onIntervene ?? lifecycle.onIntervene,
+                  )
+                : undefined,
             },
           );
           if (stallResult.paneId) d.paneId = stallResult.paneId;
@@ -1183,6 +1349,40 @@ async function awaitAll(
           } else {
             throw stallErr;
           }
+        }
+      } else if (lifecycle?.enabled) {
+        if (d.logPath) pollOpts.logPath = d.logPath;
+        const activity = createActivityLifecycle({
+          interventionMs: lifecycle.interventionMs,
+          hardCeilingMs: lifecycle.hardCeilingMs,
+          onIntervene: createHeadlessIntervention(d, lifecycle.onIntervene),
+        });
+        const guard = createActivityPollGuard({
+          resultFile: d.resultFile,
+          lifecycle: activity,
+          interveneContext: {
+            channel: "pane",
+            sessionName,
+            paneId: d.paneId || d.paneName,
+            resultFile: d.resultFile,
+          },
+        });
+        const userOnPoll = pollOpts.onPoll;
+        pollOpts.onPoll = (info) => {
+          guard.observe(info.content);
+          userOnPoll?.(info);
+        };
+        pollOpts.signal = guard.signal;
+        completion = await waitForCompletion(
+          sessionName,
+          d.paneId || d.paneName,
+          d.token,
+          Math.ceil(lifecycle.hardCeilingMs / 1000),
+          pollOpts,
+        );
+        if (!completion.matched && !completion.sessionDead) {
+          completion.timedOut = true;
+          completion.timeoutReason = guard.timeoutReason || "hard_ceiling";
         }
       } else {
         // 기존 waitForCompletion 경로
@@ -1231,23 +1431,32 @@ async function awaitAll(
   );
 }
 
-async function waitForDaemonCompletion(
+export async function waitForDaemonCompletion(
   dispatch,
   timeoutSec,
   safeProgress,
   progressIntervalSec,
+  lifecycle = null,
 ) {
   const messages = [];
   const socket = net.connect(dispatch.controlSock);
   let buffer = "";
   let settled = false;
   let lastProgressAt = 0;
+  const activity = lifecycle?.enabled
+    ? createActivityLifecycle({
+        interventionMs: lifecycle.interventionMs,
+        hardCeilingMs: lifecycle.hardCeilingMs,
+        onIntervene: createHeadlessIntervention(dispatch, lifecycle.onIntervene),
+      })
+    : null;
 
   return await new Promise((resolve) => {
-    const finish = (completion) => {
+    const finish = (completion, timeoutReason = "") => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearInterval(timer);
       socket.destroy();
       const finalCompletion =
         completion ||
@@ -1255,6 +1464,10 @@ async function waitForDaemonCompletion(
           token: dispatch.token,
           resultFile: dispatch.resultFile,
         });
+      if (!finalCompletion.matched && timeoutReason) {
+        finalCompletion.timedOut = true;
+        finalCompletion.timeoutReason = timeoutReason;
+      }
       if (finalCompletion.matched) {
         dispatch.daemonCompletionMatched = true;
         cleanupDaemonDispatches([dispatch]).catch(() => {});
@@ -1273,18 +1486,28 @@ async function waitForDaemonCompletion(
       resolve(finalCompletion);
     };
 
-    const timer = setTimeout(
-      () => {
-        finish({ matched: false, exitCode: null });
-      },
-      Math.max(0, timeoutSec * 1000),
-    );
+    const timer = activity
+      ? setInterval(() => {
+          void activity
+            .check({
+              channel: "daemon",
+              controlSock: dispatch.controlSock,
+              daemonShort: dispatch.daemonShort,
+              resultFile: dispatch.resultFile,
+            })
+            .then((reason) => {
+              if (reason) finish(null, reason);
+            });
+        }, lifecycle.checkIntervalMs ?? 5_000)
+      : setTimeout(
+          () => finish(null, "wall_clock"),
+          Math.max(0, timeoutSec * 1000),
+        );
+    if (typeof timer.unref === "function") timer.unref();
 
-    socket.on("error", () => {
-      finish({ matched: false, exitCode: null });
-    });
+    socket.on("error", () => finish(null, "socket_error"));
     socket.on("close", () => {
-      if (!settled) finish({ matched: false, exitCode: null });
+      if (!settled) finish(null, "socket_closed");
     });
     socket.on("connect", () => {
       socket.write(
@@ -1305,6 +1528,7 @@ async function waitForDaemonCompletion(
         if (!line.trim()) continue;
         const message = JSON.parse(line);
         messages.push(message);
+        activity?.observe();
         if (
           safeProgress &&
           progressIntervalSec > 0 &&
@@ -1337,6 +1561,7 @@ async function awaitAllDaemon(
   timeoutSec,
   safeProgress,
   progressIntervalSec,
+  lifecycle,
 ) {
   return Promise.all(
     dispatches.map(async (d) => {
@@ -1345,6 +1570,7 @@ async function awaitAllDaemon(
         timeoutSec,
         safeProgress,
         progressIntervalSec,
+        lifecycle,
       );
       const output = readResult(d.resultFile, d.paneId);
       unregisterHeadlessSynapseWorker(d.workerId);
@@ -1449,7 +1675,7 @@ function collectGitDiffFiles(cwd) {
  * @param {string} sessionName — psmux 세션 이름
  * @param {Array<{cli: string, prompt: string, role?: string}>} assignments
  * @param {object} [opts]
- * @param {number} [opts.timeoutSec=300] — 각 워커 타임아웃
+ * @param {number} [opts.timeoutSec=900] — lane 예산; lifecycle 활성 시 kill 판정에는 쓰지 않음
  * @param {string} [opts.layout='2x2'] — pane 레이아웃
  * @param {(event: object) => void} [opts.onProgress] — 진행 콜백
  * @param {number} [opts.progressIntervalSec=0] — N초마다 progress 이벤트 발화 (0=비활성)
@@ -1458,7 +1684,7 @@ function collectGitDiffFiles(cwd) {
  * @returns {{ sessionName: string, results: Array<{cli: string, paneName: string, matched: boolean, exitCode: number|null, output: string, sessionDead?: boolean}> }}
  */
 export async function runHeadless(sessionName, assignments, opts = {}) {
-  const {
+  let {
     timeoutSec = 900,
     layout = "2x2",
     onProgress,
@@ -1469,7 +1695,17 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     stallDetect,
     nativeBridge = false,
     nativeBridgeMode = "roster",
+    onIntervene,
   } = opts;
+  if (!Number.isFinite(Number(timeoutSec)) || Number(timeoutSec) <= 0)
+    timeoutSec = 900;
+  else timeoutSec = Number(timeoutSec);
+  const lifecycle = {
+    enabled: isActivityLifecycleEnabled(),
+    interventionMs: resolveStallInterventionMs(),
+    hardCeilingMs: resolveHardCeilingMs(),
+    onIntervene,
+  };
 
   mkdirSync(RESULT_DIR, { recursive: true });
   const normalizedAssignments = (assignments || []).map((assignment, index) =>
@@ -1632,11 +1868,41 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     }).catch(() => {});
   };
 
+  const HUB_ACTIVITY_MIN_INTERVAL_MS = 30_000;
+  const lastHubBeatByWorker = new Map();
+  const feedHubActivity = (event) => {
+    if (event?.type !== "progress" || !event.paneName) return;
+    const match = event.paneName.match(/worker-(\d+)/);
+    if (!match) return;
+    const idx = parseInt(match[1], 10) - 1;
+    const agentId = getHeadlessWorkerAgentId(sessionName, idx);
+    const nowMs = Date.now();
+    if (
+      (lastHubBeatByWorker.get(agentId) || 0) + HUB_ACTIVITY_MIN_INTERVAL_MS >
+      nowMs
+    )
+      return;
+    lastHubBeatByWorker.set(agentId, nowMs);
+    requestJson("/bridge/heartbeat", {
+      method: "POST",
+      body: { agent_id: agentId },
+      timeoutMs: 500,
+    }).catch(() => {});
+    const assignJobId = normalizedAssignments[idx]?.assignJobId;
+    if (assignJobId)
+      requestJson("/bridge/assign/result", {
+        method: "POST",
+        body: { job_id: assignJobId, worker_agent: agentId, status: "running" },
+        timeoutMs: 500,
+      }).catch(() => {});
+  };
+
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
     nativeBridgeHandle?.handleProgress(event);
     feedTui(event);
     feedSynapse(event);
+    feedHubActivity(event);
     if (onProgress) {
       try {
         onProgress(event);
@@ -1681,6 +1947,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
             timeoutSec,
             safeProgress,
             progressIntervalSec,
+            lifecycle,
           )
         : await awaitAll(
             sessionName,
@@ -1689,6 +1956,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
             safeProgress,
             progressIntervalSec,
             stallDetect,
+            lifecycle,
           );
     const collected = await collectResults(sessionName, results);
     for (const result of collected) nativeBridgeHandle?.completeWorker(result);

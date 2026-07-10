@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -70,6 +71,65 @@ async function withSandbox(fn) {
 
 function importFresh(relativePath) {
   return import(`${relativePath}?t=${Date.now()}-${Math.random()}`);
+}
+
+function createRunProcessHarness() {
+  const child = new EventEmitter();
+  child.pid = 42_424;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+
+  let now = 0;
+  let stallTick = null;
+  let timeoutSchedules = 0;
+  let terminations = 0;
+  const timerHandle = () => ({ unref() {} });
+
+  return {
+    child,
+    deps: {
+      now: () => now,
+      spawn: () => child,
+      setTimeout: () => {
+        timeoutSchedules += 1;
+        return timerHandle();
+      },
+      clearTimeout: () => {},
+      setInterval: (callback) => {
+        stallTick = callback;
+        return timerHandle();
+      },
+      clearInterval: () => {},
+      terminateChild: async () => {
+        terminations += 1;
+        child.emit("close", null);
+      },
+    },
+    advanceTo(value) {
+      now = value;
+    },
+    checkStall() {
+      assert.ok(stallTick, "runProcess must schedule its stall check");
+      stallTick();
+    },
+    get timeoutSchedules() {
+      return timeoutSchedules;
+    },
+    get terminations() {
+      return terminations;
+    },
+  };
+}
+
+async function withActivityLifecycle(fn) {
+  const previous = process.env.TFX_ACTIVITY_LIFECYCLE;
+  process.env.TFX_ACTIVITY_LIFECYCLE = "1";
+  try {
+    await fn();
+  } finally {
+    if (previous === undefined) delete process.env.TFX_ACTIVITY_LIFECYCLE;
+    else process.env.TFX_ACTIVITY_LIFECYCLE = previous;
+  }
 }
 
 test("buildExecCommand: stdin-prompt mode (macOS hook regression fix) keeps argv short", async () => {
@@ -173,44 +233,108 @@ test("cli-adapter-base exports the shared codex exec builder and codex-compat re
 });
 
 test("runProcess treats resultFile updates as progress during quiet CLI execution", async () => {
-  await withSandbox(async ({ root }) => {
-    const { runProcess } = await importFresh("../../hub/cli-adapter-base.mjs");
-    const resultFile = join(root, "result.txt");
-    // Write the script to a file to avoid shell-quoting hazards (backticks /
-    // ${...} get expanded by the shell when passed via `node -e "..."`).
-    const scriptPath = join(root, "tick.cjs");
-    writeFileSync(
-      scriptPath,
-      [
-        "const { writeFileSync } = require('node:fs');",
-        "const file = process.env.RESULT_FILE;",
-        "let n = 0;",
-        "const timer = setInterval(() => {",
-        "  n += 1;",
-        "  writeFileSync(file, 'tick-' + n, 'utf8');",
-        "  if (n >= 6) { clearInterval(timer); process.exit(0); }",
-        "}, 75);",
-      ].join("\n"),
-      "utf8",
-    );
-
-    const result = await runProcess(
-      `node ${JSON.stringify(scriptPath)}`,
-      root,
-      3_000,
-      {
+  await withActivityLifecycle(() =>
+    withSandbox(async ({ root }) => {
+      const { runProcess } = await importFresh(
+        "../../hub/cli-adapter-base.mjs",
+      );
+      const resultFile = join(root, "result.txt");
+      const harness = createRunProcessHarness();
+      const resultPromise = runProcess("ignored", root, 10, {
         resultFile,
-        stallCheckIntervalMs: 50,
-        stallThresholdMs: 150,
+        stallCheckIntervalMs: 1,
+        stallThresholdMs: 10,
+        hardCeilingMs: 100,
         inferStallMode: () => "stall",
-        spawnEnv: { ...process.env, RESULT_FILE: resultFile },
-      },
-    );
+        onStallIntervene: () => false,
+        deps: harness.deps,
+      });
 
-    assert.equal(existsSync(resultFile), true);
-    assert.equal(result.ok, true);
-    assert.equal(result.exitCode, 0);
-    assert.equal(result.failureMode, null);
-    assert.equal(result.output, "tick-6");
-  });
+      for (let tick = 1; tick <= 6; tick += 1) {
+        harness.advanceTo(tick * 9);
+        writeFileSync(resultFile, "x".repeat(tick), "utf8");
+        harness.checkStall();
+      }
+      harness.child.emit("close", 0);
+      const result = await resultPromise;
+
+      assert.equal(existsSync(resultFile), true);
+      assert.equal(result.ok, true);
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.failureMode, null);
+      assert.equal(result.output, "xxxxxx");
+      assert.equal(result.duration, 54);
+      assert.equal(harness.timeoutSchedules, 0);
+      assert.equal(harness.terminations, 0);
+    }),
+  );
+});
+
+test("runProcess lets active stdout outlive its advisory timeout", async () => {
+  await withActivityLifecycle(() =>
+    withSandbox(async ({ root }) => {
+      const { runProcess } = await importFresh(
+        "../../hub/cli-adapter-base.mjs",
+      );
+      const harness = createRunProcessHarness();
+      const resultPromise = runProcess("ignored", root, 10, {
+        stallCheckIntervalMs: 1,
+        stallThresholdMs: 10,
+        hardCeilingMs: 100,
+        onStallIntervene: () => false,
+        deps: harness.deps,
+      });
+
+      for (let tick = 1; tick <= 5; tick += 1) {
+        harness.advanceTo(tick * 9);
+        harness.child.stdout.emit("data", "tick\n");
+        harness.checkStall();
+      }
+      harness.child.emit("close", 0);
+      const result = await resultPromise;
+
+      assert.equal(result.ok, true);
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.failureMode, null);
+      assert.equal(result.output, "tick\n".repeat(5));
+      assert.equal(result.duration, 45);
+      assert.equal(harness.timeoutSchedules, 0);
+      assert.equal(harness.terminations, 0);
+    }),
+  );
+});
+
+test("runProcess terminates only after stdout becomes inactive", async () => {
+  await withActivityLifecycle(() =>
+    withSandbox(async ({ root }) => {
+      const { runProcess } = await importFresh(
+        "../../hub/cli-adapter-base.mjs",
+      );
+      const harness = createRunProcessHarness();
+      const resultPromise = runProcess("ignored", root, 10, {
+        stallCheckIntervalMs: 1,
+        stallThresholdMs: 10,
+        hardCeilingMs: 100,
+        inferStallMode: () => "stall",
+        onStallIntervene: () => false,
+        deps: harness.deps,
+      });
+
+      harness.advanceTo(9);
+      harness.child.stdout.emit("data", "tick\n");
+      harness.checkStall();
+      assert.equal(harness.terminations, 0);
+
+      harness.advanceTo(19);
+      harness.checkStall();
+      const result = await resultPromise;
+
+      assert.equal(result.ok, false);
+      assert.equal(result.failureMode, "stall");
+      assert.equal(result.output, "tick\n");
+      assert.equal(result.duration, 19);
+      assert.equal(harness.timeoutSchedules, 0);
+      assert.equal(harness.terminations, 1);
+    }),
+  );
 });

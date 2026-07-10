@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS assign_jobs (
   created_at_ms INTEGER NOT NULL,
   updated_at_ms INTEGER NOT NULL,
   started_at_ms INTEGER,
+  dispatched_at_ms INTEGER,
   completed_at_ms INTEGER,
   last_retry_at_ms INTEGER
 );

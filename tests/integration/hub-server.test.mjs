@@ -22,8 +22,8 @@ function tempDbPath() {
   return join(dir, "test.db");
 }
 
-// 테스트용 포트 (기본 27888과 충돌 방지)
-const TEST_PORT = 27990 + Math.floor(Math.random() * 100);
+// OS가 할당한 ephemeral port를 사용해 병렬 테스트 포트 충돌을 피한다.
+const TEST_PORT = 0;
 const TEST_TOKEN = "hub-server-test-token";
 const CLAUDE_HOME = join(homedir(), ".claude");
 const TEAMS_ROOT = join(CLAUDE_HOME, "teams");
@@ -108,9 +108,9 @@ describe("startHub() 라이프사이클", () => {
       port: TEST_PORT,
       dbPath,
       host: "127.0.0.1",
-      sessionId: `test-${TEST_PORT}`,
+      sessionId: `test-ephemeral`,
     });
-    baseUrl = `http://127.0.0.1:${TEST_PORT}`;
+    baseUrl = `http://127.0.0.1:${hub.port}`;
   });
 
   after(async () => {
@@ -123,7 +123,7 @@ describe("startHub() 라이프사이클", () => {
   });
 
   it("startHub()는 port, host, url, pid를 포함한 객체를 반환해야 한다", () => {
-    assert.equal(hub.port, TEST_PORT);
+    assert.ok(hub.port > 0);
     assert.equal(hub.host, "127.0.0.1");
     assert.ok(hub.url.startsWith("http://"));
     assert.equal(hub.pid, process.pid);
@@ -141,7 +141,7 @@ describe("startHub() 라이프사이클", () => {
         "hub" in body || "sessions" in body,
         "/status 응답에 hub 또는 sessions가 있어야 한다",
       );
-      assert.equal(body.port, TEST_PORT);
+      assert.equal(body.port, hub.port);
       assert.equal(body.pid, process.pid);
       assert.equal(body.auth_mode, "token-required");
     });
@@ -438,6 +438,59 @@ describe("startHub() 라이프사이클", () => {
         body: JSON.stringify({ agent_id: "incomplete-agent" }),
       });
       assert.equal(res.status, 400);
+    });
+
+    it("timeout_sec 미지정 등록은 활동 heartbeat lease floor를 적용한다", async () => {
+      const res = await fetch(`${baseUrl}/bridge/register`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({
+          agent_id: "long-worker",
+          cli: "codex",
+          topics: [],
+          capabilities: [],
+        }),
+      });
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.ok(body.data.lease_expires_ms - Date.now() >= 1_310_000);
+    });
+  });
+
+  describe("POST /bridge/heartbeat", () => {
+    it("등록된 agent의 lease를 갱신한다", async () => {
+      await fetch(`${baseUrl}/bridge/register`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({
+          agent_id: "hb-agent",
+          cli: "codex",
+          timeout_sec: 60,
+          topics: [],
+          capabilities: [],
+        }),
+      });
+      const res = await fetch(`${baseUrl}/bridge/heartbeat`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({ agent_id: "hb-agent" }),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.data.effective.updated, true);
+    });
+
+    it("미등록 agent는 false-positive 성공 없이 404를 반환한다", async () => {
+      const res = await fetch(`${baseUrl}/bridge/heartbeat`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({ agent_id: "hb-ghost-9999" }),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 404);
+      assert.equal(body.ok, false);
+      assert.equal(body.error.code, "AGENT_NOT_FOUND");
     });
   });
 

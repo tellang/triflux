@@ -45,6 +45,13 @@ import {
 } from "./lib/process-utils.mjs";
 import * as spawnTrace from "./lib/spawn-trace.mjs";
 import {
+  clampDurationMs,
+  DEFAULT_ASSIGN_TIMEOUT_MS,
+  DEFAULT_ASSIGN_TTL_MS,
+  DEFAULT_REGISTER_TIMEOUT_SEC,
+  resolveWorkerLeaseTtlMs,
+} from "./lib/timeout-defaults.mjs";
+import {
   recordRequest,
   recordWorker,
   snapshot as traceSnapshot,
@@ -143,7 +150,7 @@ function buildHubUrl(host, port) {
 
 function parseHubPort(value) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function isPidAlive(pid, killFn = process.kill) {
@@ -963,16 +970,23 @@ export async function startHub({
   createDelegatorWorker = createDelegatorMcpWorker,
 } = {}) {
   const resolvedPort = parseHubPort(portOpt);
-  const portSpecified = Number.isFinite(resolvedPort) && resolvedPort > 0;
+  const portSpecified = Number.isFinite(resolvedPort);
+  const ephemeralPort = resolvedPort === 0;
   const livePeer = detectLivePeer();
   const livePidPort = parseHubPort(livePeer?.port);
-  const port = portSpecified
+  let port = portSpecified
     ? resolvedPort
     : resolveHubPort(process.env, {
         detectPeer: () => livePeer,
       });
 
-  if (portSpecified && livePeer.alive && livePidPort && port !== livePidPort) {
+  if (
+    portSpecified &&
+    !ephemeralPort &&
+    livePeer.alive &&
+    livePidPort &&
+    port !== livePidPort
+  ) {
     hubLog.warn(
       {
         requestedPort: port,
@@ -983,12 +997,14 @@ export async function startHub({
     );
   }
 
-  const existingHub = await tryReuseExistingHub({
-    port,
-    portSpecified,
-    host,
-    detectPeer: () => livePeer,
-  });
+  const existingHub = ephemeralPort
+    ? null
+    : await tryReuseExistingHub({
+        port,
+        portSpecified,
+        host,
+        detectPeer: () => livePeer,
+      });
   if (existingHub) return existingHub;
 
   attachBrokerDiagnostics(brokerInstance);
@@ -1026,21 +1042,23 @@ export async function startHub({
     lockHeld = false;
   };
 
-  const lockedExistingHub = await tryReuseExistingHub({
-    port,
-    portSpecified,
-    host,
-    detectPeer: () => detectLivePeer(),
-  });
+  const lockedExistingHub = ephemeralPort
+    ? null
+    : await tryReuseExistingHub({
+        port,
+        portSpecified,
+        host,
+        detectPeer: () => detectLivePeer(),
+      });
   if (lockedExistingHub) {
     releaseStartupLock();
     return lockedExistingHub;
   }
 
   const HUB_TOKEN = process.env.TFX_HUB_TOKEN?.trim() || null;
-  if (HUB_TOKEN) {
+  if (!ephemeralPort && HUB_TOKEN) {
     writeOwnedTokenFile({ token: HUB_TOKEN, port });
-  } else {
+  } else if (!ephemeralPort) {
     cleanupOwnedTokenFile({ token: HUB_TOKEN, port });
   }
 
@@ -1690,7 +1708,7 @@ export async function startHub({
             const {
               agent_id,
               cli,
-              timeout_sec = 600,
+              timeout_sec = DEFAULT_REGISTER_TIMEOUT_SEC,
               topics = [],
               capabilities = [],
               metadata = {},
@@ -1709,7 +1727,12 @@ export async function startHub({
               metadata?.task ||
               cli;
             const workerStartedAt = performance.now();
-            const heartbeat_ttl_ms = (timeout_sec + 120) * 1000;
+            const hasExplicitTimeout = Number.isFinite(
+              Number(body.timeout_sec),
+            );
+            const heartbeat_ttl_ms = hasExplicitTimeout
+              ? (timeout_sec + 120) * 1000
+              : Math.max((timeout_sec + 120) * 1000, resolveWorkerLeaseTtlMs());
             const result = await pipe.executeCommand("register", {
               agent_id,
               cli,
@@ -1748,6 +1771,20 @@ export async function startHub({
               correlation_id,
             });
             return writeJson(res, 200, result);
+          }
+
+          if (path === "/bridge/heartbeat" && req.method === "POST") {
+            const { agent_id, ttl_ms } = body;
+            if (!agent_id)
+              return writeJson(res, 400, { ok: false, error: "agent_id 필수" });
+            const result = await pipe.executeCommand("heartbeat", {
+              agent_id,
+              heartbeat_ttl_ms: clampDurationMs(
+                ttl_ms,
+                resolveWorkerLeaseTtlMs(),
+              ),
+            });
+            return writeJson(res, result.ok ? 200 : 404, result);
           }
 
           if (path === "/bridge/control" && req.method === "POST") {
@@ -1881,8 +1918,8 @@ export async function startHub({
               topic = "assign.job",
               payload = {},
               priority = 5,
-              ttl_ms = 600000,
-              timeout_ms = 600000,
+              ttl_ms = DEFAULT_ASSIGN_TTL_MS,
+              timeout_ms = DEFAULT_ASSIGN_TIMEOUT_MS,
               max_retries = 0,
               trace_id,
               correlation_id,
@@ -2352,7 +2389,7 @@ export async function startHub({
     try {
       store.close();
     } catch {}
-    if (!preserveTokenFile) {
+    if (!ephemeralPort && !preserveTokenFile) {
       cleanupOwnedTokenFile({ token: HUB_TOKEN, port });
     }
     releaseStartupLock();
@@ -2426,6 +2463,9 @@ export async function startHub({
       httpServer.listen(port, host, () => {
         httpServer.off("error", onError);
         try {
+          const boundAddress = httpServer.address();
+          if (boundAddress && typeof boundAddress === "object")
+            port = boundAddress.port;
           let idleTimer = null;
           let stopPromise = null;
 
@@ -2446,25 +2486,28 @@ export async function startHub({
             idleTimeoutMs: hubIdleTimeoutMs,
           };
 
-          writeState({
-            pid: process.pid,
-            port,
-            host,
-            auth_mode: HUB_TOKEN ? "token-required" : "localhost-only",
-            url: info.url,
-            pipe_path: pipe.path,
-            pipePath: pipe.path,
-            assign_callback_pipe_path: assignCallbacks.path,
-            assignCallbackPipePath: assignCallbacks.path,
-            authMode: HUB_TOKEN ? "token-required" : "localhost-only",
-            startedAt,
-            started: startedAtMs,
-            version,
-            sessionId,
-            session_id: sessionId,
-          });
+          if (!ephemeralPort) {
+            writeState({
+              pid: process.pid,
+              port,
+              host,
+              auth_mode: HUB_TOKEN ? "token-required" : "localhost-only",
+              url: info.url,
+              pipe_path: pipe.path,
+              pipePath: pipe.path,
+              assign_callback_pipe_path: assignCallbacks.path,
+              assignCallbackPipePath: assignCallbacks.path,
+              authMode: HUB_TOKEN ? "token-required" : "localhost-only",
+              startedAt,
+              started: startedAtMs,
+              version,
+              sessionId,
+              session_id: sessionId,
+            });
+          }
           releaseStartupLock();
-          void syncHubMcpSettingsIfAvailable({ hubUrl: info.url });
+          if (!ephemeralPort)
+            void syncHubMcpSettingsIfAvailable({ hubUrl: info.url });
 
           hubLog.info(
             {
@@ -2551,8 +2594,10 @@ export async function startHub({
                 synapseRegistry.destroy();
               } catch {}
               store.close();
-              cleanupOwnedPidFile();
-              cleanupOwnedTokenFile({ token: HUB_TOKEN, port });
+              if (!ephemeralPort) {
+                cleanupOwnedPidFile();
+                cleanupOwnedTokenFile({ token: HUB_TOKEN, port });
+              }
               httpServer.closeAllConnections();
               await new Promise((resolveClose) =>
                 httpServer.close(resolveClose),

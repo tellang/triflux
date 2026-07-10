@@ -6,7 +6,14 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 
 import { codexProfileConfigOverrides } from "../scripts/lib/codex-profile-config.mjs";
 import { writePromptToTmpFile } from "./lib/prompt-tmp.mjs";
+import {
+  createActivityLifecycle,
+  isActivityLifecycleEnabled,
+  resolveHardCeilingMs,
+  resolveStallInterventionMs,
+} from "./lib/worker-lifecycle.mjs";
 import { IS_WINDOWS, killProcess } from "./platform.mjs";
+import { createInterventionLadder } from "./team/intervention.mjs";
 
 // ── Quota retry-after 파싱 ──────────────────────────────────────
 
@@ -397,19 +404,36 @@ export async function terminateChild(pid, opts = {}) {
  *
  * @param {string} command — shell command to run
  * @param {string} workdir — cwd for the child process
- * @param {number} timeout — max duration in ms
+ * @param {number} timeout — legacy wall-clock duration (TFX_ACTIVITY_LIFECYCLE=0 only)
  * @param {object} [opts]
  * @param {string} [opts.resultFile] — file to read output from (if CLI writes there)
  * @param {function} [opts.inferStallMode] — (stdout, stderr) => string. Default: () => 'timeout'
  * @param {number} [opts.stallCheckIntervalMs] — stall check interval (default 10_000)
- * @param {number} [opts.stallThresholdMs] — stall threshold (default 30_000)
+ * @param {number} [opts.stallThresholdMs] — inactivity threshold
+ * @param {number} [opts.hardCeilingMs] — activity-independent maximum duration
+ * @param {(context: object) => Promise<boolean|string>|boolean|string} [opts.onStallIntervene]
+ *   T5 intervention seam; true or "resolved" keeps the process alive
+ * @param {object} [opts.deps] — clock/process/timer overrides for deterministic tests
  * @returns {Promise<object>} createResult-shaped object
  */
 export async function runProcess(command, workdir, timeout, opts = {}) {
-  const startedAt = Date.now();
+  const deps = opts.deps || {};
+  const now = deps.now || Date.now;
+  const spawnProcess = deps.spawn || spawn;
+  const scheduleTimeout = deps.setTimeout || setTimeout;
+  const cancelTimeout = deps.clearTimeout || clearTimeout;
+  const scheduleInterval = deps.setInterval || setInterval;
+  const cancelInterval = deps.clearInterval || clearInterval;
+  const terminateProcess = deps.terminateChild || terminateChild;
+  const startedAt = now();
   const inferStallMode = opts.inferStallMode || (() => "timeout");
   const stallCheckIntervalMs = opts.stallCheckIntervalMs ?? 10_000;
-  const stallThresholdMs = opts.stallThresholdMs ?? 30_000;
+  const legacyLifecycle = !isActivityLifecycleEnabled();
+  const stallThresholdMs =
+    opts.stallThresholdMs ??
+    (legacyLifecycle ? 30_000 : resolveStallInterventionMs());
+  const hardCeilingMs = opts.hardCeilingMs ?? resolveHardCeilingMs();
+  const earlyClassifyMs = opts.earlyClassifyMs ?? 30_000;
   const resultFile = opts.resultFile || null;
 
   let stdout = "";
@@ -421,7 +445,7 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
   try {
     // PRD A1: opts.spawnEnv 가 있으면 그 env 로 spawn (lease 의 authFile/env 적용).
     // undefined 면 spawn 의 default 동작 (부모 process env inherit) 유지.
-    child = spawn(command, {
+    child = spawnProcess(command, {
       cwd: workdir,
       shell: true,
       windowsHide: true,
@@ -430,7 +454,7 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
   } catch (error) {
     return createResult(false, {
       stderr: String(error?.message || error),
-      duration: Date.now() - startedAt,
+      duration: now() - startedAt,
     });
   }
 
@@ -446,9 +470,40 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
 
   let lastBytes = 0;
   let lastResultFileSignature = resultFileSignature();
-  let lastChange = Date.now();
+  let lastChange = now();
+  const activitySignature = () =>
+    `${Buffer.byteLength(stdout) + Buffer.byteLength(stderr)}:${resultFileSignature()}`;
+  let ladder = null;
+  const lifecycle = createActivityLifecycle({
+    enabled: !legacyLifecycle,
+    interventionMs: stallThresholdMs,
+    hardCeilingMs,
+    now,
+    onIntervene: async (context) => {
+      if (typeof opts.onStallIntervene === "function") {
+        const result = await opts.onStallIntervene(context);
+        return result === true || result === "resolved";
+      }
+      ladder ??= createInterventionLadder({
+        target: {
+          pid: child.pid,
+          cli: opts.cli,
+          codexHome: opts.codexHome,
+          rolloutFile: opts.rolloutFile,
+        },
+        readActivitySignature: activitySignature,
+        deps:
+          typeof opts.resumeHandler === "function"
+            ? { resumeHandler: opts.resumeHandler }
+            : {},
+      });
+      const result = await ladder.intervene();
+      return result?.outcome === "reactivated" || result?.outcome === "resumed";
+    },
+  });
   const touch = () => {
-    lastChange = Date.now();
+    lastChange = now();
+    lifecycle.observe(activitySignature());
   };
   child.stdout?.on("data", (chunk) => {
     stdout += String(chunk);
@@ -466,13 +521,15 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
   const stopFor = async (mode) => {
     if (failureMode) return;
     failureMode = mode;
-    await terminateChild(child.pid);
+    await terminateProcess(child.pid);
   };
 
-  const timeoutTimer = setTimeout(() => {
-    void stopFor("timeout");
-  }, timeout);
-  const stallTimer = setInterval(() => {
+  const timeoutTimer = legacyLifecycle
+    ? scheduleTimeout(() => {
+        void stopFor("timeout");
+      }, timeout)
+    : null;
+  const stallTimer = scheduleInterval(() => {
     const size = Buffer.byteLength(stdout) + Buffer.byteLength(stderr);
     const currentResultFileSignature = resultFileSignature();
     if (
@@ -482,13 +539,37 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
       lastBytes = size;
       lastResultFileSignature = currentResultFileSignature;
       touch();
+    }
+    if (legacyLifecycle) {
+      if (now() - lastChange >= stallThresholdMs)
+        void stopFor(inferStallMode(stdout, stderr));
       return;
     }
-    if (Date.now() - lastChange >= stallThresholdMs)
+    const quietMs = now() - lastChange;
+    const mode = inferStallMode(stdout, stderr);
+    if (
+      quietMs >= earlyClassifyMs &&
+      (mode === "rate_limited" || mode === "auth_stall")
+    ) {
       void stopFor(inferStallMode(stdout, stderr));
+      return;
+    }
+    void lifecycle
+      .check({
+        pid: child.pid,
+        command,
+        workdir,
+        mode,
+        stdoutTail: stdout.slice(-2000),
+        stderrTail: stderr.slice(-2000),
+      })
+      .then((reason) => {
+        if (!reason) return;
+        void stopFor(reason === "hard_ceiling" ? "timeout" : mode);
+      });
   }, stallCheckIntervalMs);
-  timeoutTimer.unref?.();
-  stallTimer.unref?.();
+  timeoutTimer?.unref?.();
+  stallTimer?.unref?.();
 
   await new Promise((resolve) =>
     child.on("close", (code) => {
@@ -496,8 +577,8 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
       resolve();
     }),
   );
-  clearTimeout(timeoutTimer);
-  clearInterval(stallTimer);
+  if (timeoutTimer) cancelTimeout(timeoutTimer);
+  cancelInterval(stallTimer);
 
   const fileOutput =
     resultFile && existsSync(resultFile)
@@ -509,7 +590,7 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
     output,
     stderr,
     exitCode,
-    duration: Date.now() - startedAt,
+    duration: now() - startedAt,
     failureMode: ok ? null : failureMode || "crash",
   });
 }

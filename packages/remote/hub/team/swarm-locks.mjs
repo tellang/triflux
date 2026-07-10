@@ -5,8 +5,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
+import { DEFAULT_SWARM_LOCK_TTL_MS } from "@triflux/core/hub/lib/timeout-defaults.mjs";
 
-const LOCK_TTL_MS = 10 * 60_000; // 10 minutes default TTL
+const LOCK_TTL_MS = DEFAULT_SWARM_LOCK_TTL_MS;
 
 // Distribution-critical paths. A swarm worker that modifies these without
 // having them explicitly listed in its shard lease is almost certainly a
@@ -208,6 +209,20 @@ export function createSwarmLocks(opts = {}) {
     return count;
   }
 
+  function renew(workerId) {
+    pruneExpired();
+    const ts = now();
+    let count = 0;
+    for (const entry of locks.values()) {
+      if (entry.workerId === workerId) {
+        entry.acquiredAt = ts;
+        count += 1;
+      }
+    }
+    if (count > 0) persist();
+    return count;
+  }
+
   /**
    * Check if a file write would violate any lease.
    * @param {string} workerId — the worker attempting the write
@@ -308,6 +323,7 @@ export function createSwarmLocks(opts = {}) {
   return Object.freeze({
     acquire,
     release,
+    renew,
     check,
     validateChanges,
     snapshot,

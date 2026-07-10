@@ -252,10 +252,14 @@ describe("waitForCompletionWithStallDetect", () => {
     );
   });
 
-  it("completionTimeout 초과 시 timedOut=true 결과를 반환한다", async () => {
+  it("활동이 지속되는 워커는 이전 completionTimeout을 넘어 완료까지 대기한다", async () => {
     let call = 0;
     const deps = createDeps({
-      capturePsmuxPane: () => `changing-${call++}`, // 출력 변화 → stall 방지
+      capturePsmuxPane: () => {
+        call++;
+        if (call >= 10) return "changing\nTFX_DONE_t6:0";
+        return `changing-${call}`;
+      },
     });
 
     const result = await waitForCompletionWithStallDetect(
@@ -266,13 +270,69 @@ describe("waitForCompletionWithStallDetect", () => {
         token: "t6",
         pollInterval: 15,
         stallTimeout: 500,
-        completionTimeout: 60, // 60ms 전체 타임아웃
+        completionTimeout: 60,
+        hardCeiling: 5000,
+        _deps: deps,
+      },
+    );
+
+    assert.equal(result.matched, true);
+    assert.equal(result.timedOut, false);
+  });
+
+  it("무활동으로 재시작이 소진되면 onIntervene seam을 한 번 호출한다", async () => {
+    const deps = createDeps();
+    let calls = 0;
+
+    await assert.rejects(
+      () =>
+        waitForCompletionWithStallDetect("sess", "0.1", "/tmp/r.txt", {
+          token: "t6-inactive",
+          pollInterval: 10,
+          stallTimeout: 40,
+          hardCeiling: 5000,
+          maxRestarts: 0,
+          onIntervene: async (ctx) => {
+            calls++;
+            assert.equal(ctx.channel, "pane");
+            assert.equal(ctx.sessionName, "sess");
+            return false;
+          },
+          _deps: deps,
+        }),
+      (err) => {
+        assert.equal(err.code, "STALL_EXHAUSTED");
+        assert.equal(err.interventions, 1);
+        return true;
+      },
+    );
+
+    assert.equal(calls, 1);
+  });
+
+  it("hardCeiling은 활동이 계속돼도 timeoutReason과 함께 발화한다", async () => {
+    let call = 0;
+    const deps = createDeps({
+      capturePsmuxPane: () => `changing-${call++}`,
+    });
+
+    const result = await waitForCompletionWithStallDetect(
+      "sess",
+      "0.1",
+      "/tmp/r.txt",
+      {
+        token: "t6-ceiling",
+        pollInterval: 15,
+        stallTimeout: 5000,
+        completionTimeout: 5000,
+        hardCeiling: 60,
         _deps: deps,
       },
     );
 
     assert.equal(result.matched, false);
     assert.equal(result.timedOut, true);
+    assert.equal(result.timeoutReason, "hard_ceiling");
   });
 
   it("onPoll 콜백이 매 폴링마다 호출된다", async () => {

@@ -1005,6 +1005,26 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
       assert.equal(result.data.assigned_to, "handoff-target");
       assert.equal(result.data.state, "queued");
     });
+
+    it("만료된 handoff를 발신자에게 dead-letter로 통지한다", async () => {
+      router.handleHandoff({
+        from: "handoff-sender-dead-letter",
+        to: "handoff-ghost-dead-letter",
+        topic: "task.handoff",
+        task: "만료 통지",
+        ttl_ms: 1000,
+      });
+      await delay(1100);
+      router.sweepExpired();
+      const notices = router.getPendingMessages("handoff-sender-dead-letter", {
+        max_messages: 20,
+      });
+      const notice = notices.find(
+        (message) => message.topic === "handoff.dead_letter",
+      );
+      assert.ok(notice);
+      assert.equal(notice.payload.original_to, "handoff-ghost-dead-letter");
+    });
   });
 
   // ── assignAsync / reportAssignResult ──
@@ -1120,6 +1140,80 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
 
       const updated = store.getAssign(job.job_id);
       assert.equal(updated.status, "timed_out");
+    });
+
+    it("최초 배달 시 deadline을 재장전하고 dispatched_at_ms를 기록한다", () => {
+      store.registerAgent({
+        agent_id: "assign-worker-dispatch",
+        cli: "codex",
+        capabilities: [],
+        topics: [],
+        heartbeat_ttl_ms: 60000,
+      });
+      const created = router.assignAsync({
+        supervisor_agent: "assign-lead-dispatch",
+        worker_agent: "assign-worker-dispatch",
+        task: "delivery",
+        timeout_ms: 5000,
+      });
+      const before = store.getAssign(created.data.job_id);
+      assert.equal(before.dispatched_at_ms, null);
+      router.drainAgent("assign-worker-dispatch", { max_messages: 10 });
+      const after = store.getAssign(created.data.job_id);
+      assert.ok(after.dispatched_at_ms >= before.created_at_ms);
+      assert.equal(after.deadline_ms, after.dispatched_at_ms + 5000);
+    });
+
+    it("attempt mismatch 결과를 supervisor에게 late_result로 보존한다", () => {
+      const created = router.assignAsync({
+        supervisor_agent: "assign-lead-late",
+        worker_agent: "assign-worker-late",
+        task: "late",
+        max_retries: 1,
+      });
+      router.retryAssign(created.data.job_id);
+      const late = router.reportAssignResult({
+        job_id: created.data.job_id,
+        worker_agent: "assign-worker-late",
+        status: "completed",
+        attempt: 1,
+        result: { summary: "late" },
+      });
+      assert.equal(late.ok, false);
+      assert.equal(late.error.code, "ASSIGN_ATTEMPT_MISMATCH");
+      assert.equal(late.error.details.preserved, true);
+      const notices = router.getPendingMessages("assign-lead-late", {
+        max_messages: 20,
+      });
+      assert.ok(
+        notices.some(
+          (message) =>
+            message.topic === "assign.result" &&
+            message.payload?.event === "late_result",
+        ),
+      );
+      assert.equal(store.getAssign(created.data.job_id).status, "queued");
+    });
+
+    it("timeout 시 원 워커에 assign.cancel 이벤트를 발행한다", () => {
+      const job = store.createAssign({
+        supervisor_agent: "assign-lead-cancel",
+        worker_agent: "assign-worker-cancel",
+        task: "cancel",
+        max_retries: 1,
+        deadline_ms: Date.now() - 10,
+      });
+      router.sweepTimedOutAssigns();
+      const messages = router.getPendingMessages("assign-worker-cancel", {
+        max_messages: 20,
+      });
+      assert.ok(
+        messages.some(
+          (message) =>
+            message.topic === "assign.cancel" &&
+            message.payload.assign_job_id === job.job_id,
+        ),
+      );
     });
   });
 

@@ -1,14 +1,86 @@
 #!/usr/bin/env node
-// tests/fixtures/bin/timeout — GNU timeout shim for Windows Git Bash
-// Windows Git Bash resolves 'timeout' to C:\Windows\System32\TIMEOUT.EXE which
-// only supports interactive waiting and cannot wrap command execution.
-// This shim implements: timeout DURATION COMMAND [ARGS...]
-// by spawning the command directly (no actual time limit in tests).
-import { spawnSync } from 'node:child_process';
+// tests/fixtures/bin/timeout — GNU timeout shim for Windows Git Bash (cross-platform)
+// Implements: timeout [-k KILL_DUR] [-s SIG] DURATION COMMAND [ARGS...]
+// DURATION 초과 시 SIG(기본 SIGTERM) 전송 후 exit 124.
+// DURATION 0 = 무제한. usage 오류 = 125, spawn 실패 = 127.
 
-// argv[0]=node, argv[1]=this script, argv[2]=duration, argv[3]=command, argv[4+]=args
-const [, , /* duration */, command, ...args] = process.argv;
-if (!command) process.exit(1);
+import { spawn } from "node:child_process";
 
-const result = spawnSync(command, args, { stdio: 'inherit', shell: false });
-process.exit(result.status ?? 1);
+function parseDuration(raw) {
+  const match = /^(\d+(?:\.\d+)?)([smhd]?)$/.exec(String(raw ?? ""));
+  if (!match) return NaN;
+  return Number(match[1]) * { "": 1, s: 1, m: 60, h: 3600, d: 86400 }[match[2]];
+}
+
+function usageError() {
+  process.exit(125);
+}
+
+const argv = process.argv.slice(2);
+let killAfterSec = 0;
+let signal = "SIGTERM";
+
+while (argv.length > 0 && argv[0].startsWith("-")) {
+  const flag = argv.shift();
+  if (flag === "--") break;
+
+  if (flag === "-k" || flag === "--kill-after") {
+    killAfterSec = parseDuration(argv.shift());
+  } else if (flag.startsWith("--kill-after=")) {
+    killAfterSec = parseDuration(flag.slice("--kill-after=".length));
+  } else if (flag === "-s" || flag === "--signal") {
+    signal = String(argv.shift() ?? "").toUpperCase();
+  } else if (flag.startsWith("--signal=")) {
+    signal = flag.slice("--signal=".length).toUpperCase();
+  } else {
+    usageError();
+  }
+}
+
+const durationSec = parseDuration(argv.shift());
+const [command, ...args] = argv;
+if (!command || !Number.isFinite(durationSec) || !Number.isFinite(killAfterSec)) {
+  usageError();
+}
+if (!signal) usageError();
+if (!signal.startsWith("SIG")) signal = `SIG${signal}`;
+
+const child = spawn(command, args, { stdio: "inherit", shell: false });
+let timedOut = false;
+let timer = null;
+let killTimer = null;
+
+if (durationSec > 0) {
+  timer = setTimeout(() => {
+    timedOut = true;
+    try {
+      child.kill(signal);
+    } catch {
+      // Child may have already exited.
+    }
+    if (killAfterSec > 0) {
+      killTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Child may have already exited.
+        }
+      }, killAfterSec * 1000);
+      killTimer.unref();
+    }
+  }, durationSec * 1000);
+  timer.unref();
+}
+
+child.on("error", () => {
+  if (timer) clearTimeout(timer);
+  if (killTimer) clearTimeout(killTimer);
+  process.exit(127);
+});
+
+child.on("exit", (code, childSignal) => {
+  if (timer) clearTimeout(timer);
+  if (killTimer) clearTimeout(killTimer);
+  if (timedOut) process.exit(124);
+  process.exit(code ?? (childSignal ? 128 + 15 : 1));
+});

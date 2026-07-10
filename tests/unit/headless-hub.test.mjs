@@ -31,13 +31,28 @@ describe("headless hub helpers", () => {
         path: "/bridge/register",
         options: {
           body: {
-            agentId: "headless-sess-1-2",
+            agent_id: "headless-sess-1-2",
+            cli: "codex",
             topics: ["headless.worker"],
             capabilities: ["codex"],
           },
         },
       },
     ]);
+  });
+
+  it("지원하지 않는 CLI는 hub의 other로 정규화한다", async () => {
+    const calls = [];
+    await registerHeadlessWorker(
+      "sess-1",
+      0,
+      "antigravity",
+      async (path, options) => {
+        calls.push({ path, options });
+        return { ok: true };
+      },
+    );
+    assert.equal(calls[0].options.body.cli, "other");
   });
 
   it("publishHeadlessResult가 bridge publish payload를 보낸다", async () => {

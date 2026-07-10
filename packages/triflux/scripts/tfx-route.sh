@@ -45,10 +45,18 @@ elif command -v gtimeout >/dev/null 2>&1; then
 elif command -v timeout >/dev/null 2>&1; then
   TIMEOUT_BIN="timeout"   # Linux 기본
 else
-  echo "[tfx-route] WARNING: timeout 명령을 찾을 수 없습니다. macOS: brew install coreutils (gtimeout 제공)" >&2
+  echo "[tfx-route] WARNING: timeout 명령을 찾을 수 없습니다 — TFX_HARD_CEILING_SEC 최후 방어선(기본 6h)이 비활성화됩니다. hung 워커 방어는 heartbeat stall kill 뿐입니다. macOS: brew install coreutils (gtimeout 제공)" >&2
   # timeout 없이 실행 — 첫 인자(초)를 무시하고 나머지 명령을 그대로 실행
   _no_timeout() { shift; "$@"; }
   TIMEOUT_BIN="_no_timeout"
+fi
+
+# 활동 기반 수명주기: wall-clock timeout은 hard ceiling에서만 집행한다.
+# coreutils timeout -k는 SIGTERM을 무시하는 프로세스를 5초 후 SIGKILL한다.
+if [[ "$TIMEOUT_BIN" == "_no_timeout" ]]; then
+  TIMEOUT_CMD=("_no_timeout")
+else
+  TIMEOUT_CMD=("$TIMEOUT_BIN" "-k" "${TFX_HARD_CEILING_KILL_GRACE:-5}")
 fi
 
 # ── 임시 디렉토리 정규화 ──
@@ -1975,14 +1983,13 @@ _codex_rollout_activity_bytes() {
 # heartbeat_monitor PID [INTERVAL] [STALL_THRESHOLD]
 # - PID: 감시할 워커 프로세스 PID
 # - INTERVAL: heartbeat 출력 간격 (초, 기본 10)
-# - STALL_THRESHOLD: stall 경고 임계값 (초, 기본 60)
+# - STALL_THRESHOLD: stall 경고 임계값 (초, 기본 1200)
 # 환경변수: TFX_HEARTBEAT (0이면 비활성화), TFX_HEARTBEAT_INTERVAL, TFX_STALL_THRESHOLD
 heartbeat_monitor() {
   [[ "${TFX_HEARTBEAT:-1}" -eq 0 ]] && return 0
   local pid="$1"
   local interval="${2:-${TFX_HEARTBEAT_INTERVAL:-10}}"
-  # 땜빵(PLANNING P4 구현 전): 60 → 300. MCP init/재시도 여유 + false STALL 감소.
-  local stall_threshold="${3:-${TFX_STALL_THRESHOLD:-300}}"
+  local stall_threshold="${3:-${TFX_STALL_THRESHOLD:-1200}}"
   local expected_duration="${TFX_EXPECTED_DURATION_SEC:-}"
   local last_size=0 stall_count=0
   local pid_gone=false
@@ -2063,24 +2070,46 @@ heartbeat_monitor() {
         stall_count=0
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=${probe_state}(probe-grace)" >&2
       elif [[ "$stall_count" -ge "$stall_threshold" ]]; then
-        # STALL 판정 modes (#165 PLANNING P4):
-        #   off  (alias: 0, disabled)  — silent. kill 안 함, STALL_CLASSIFY 로그도 없음
-        #   classify (default)          — kill 안 함. STALL_CLASSIFY 로그로 evidence 노출
-        #   kill (alias: 1, on)         — threshold+grace 초과 시 SIGTERM→SIGKILL
-        # PR #160 에서 default 1 → 0 으로 임시 후퇴 (false kill 방지). 본 PR(#165) 에서
-        # classify 로 승격 — evidence 는 남기되 false kill 리스크 없음.
-        local kill_on_stall="${TFX_STALL_KILL:-classify}"
-        [[ -z "$kill_on_stall" ]] && kill_on_stall="classify"
+        # 외곽 timeout이 hard ceiling으로 이동했으므로 기본 stall 방어는 kill이다.
+        # intervene는 bridge의 4단 개입 사다리를 실행하고, 실패하면 아래 kill 블록으로 간다.
+        local kill_on_stall="${TFX_STALL_KILL:-kill}"
+        [[ -z "$kill_on_stall" ]] && kill_on_stall="kill"
         local kill_grace="${TFX_STALL_KILL_GRACE:-30}"
-        local _should_kill=0
+        local _should_kill=0 _should_intervene=0
         case "$kill_on_stall" in
           1|on|kill) _should_kill=1 ;;
+          intervene|ladder) _should_intervene=1 ;;
           classify|0|off|disabled) ;;
           *)
             echo "[tfx-heartbeat] pid=$pid warning TFX_STALL_KILL=$kill_on_stall unknown, fallback classify" >&2
             kill_on_stall="classify"
             ;;
         esac
+        if [[ "$_should_intervene" -eq 1 ]]; then
+          local _bridge_script="" _intervene_payload="" _rollout_file="${TFX_CODEX_ROLLOUT_FILE:-}"
+          if declare -f resolve_bridge_script >/dev/null 2>&1; then
+            _bridge_script="$(resolve_bridge_script 2>/dev/null || true)"
+          fi
+          if [[ -n "$_bridge_script" && -f "$_bridge_script" ]] && command -v "${NODE_BIN:-node}" >/dev/null 2>&1; then
+            _intervene_payload="$("${NODE_BIN:-node}" -e '
+const [pid, stdoutLog, stderrLog, rolloutFile, cli, codexHome] = process.argv.slice(1);
+process.stdout.write(JSON.stringify({
+  channel: "process", pid: Number(pid), stdoutLog, stderrLog,
+  rolloutFile: rolloutFile || null, cli: cli || undefined, codexHome: codexHome || undefined,
+}));
+' "$pid" "$STDOUT_LOG" "$STDERR_LOG" "$_rollout_file" "${CLI_TYPE:-}" "${CODEX_HOME:-${TFX_CODEX_HOME:-}}")" || _intervene_payload=""
+            echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL_INTERVENE stall=${stall_count}s" >&2
+            if [[ -n "$_intervene_payload" ]] && printf '%s\n' "$_intervene_payload" | "${NODE_BIN:-node}" "$_bridge_script" intervene-run --payload-file -; then
+              stall_count=0
+              last_size=$current_size
+              continue
+            fi
+          fi
+          echo "[tfx-heartbeat] pid=$pid intervention 실패 — SIGTERM→SIGKILL fallback으로 진행" >&2
+          _should_kill=1
+          # intervene 실패는 바로 기존 kill ladder를 실행한다.
+          stall_count=$((stall_threshold + kill_grace))
+        fi
         if [[ "$_should_kill" -eq 1 && "$stall_count" -ge $((stall_threshold + kill_grace)) ]]; then
           echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL_KILL stall=${stall_count}s — SIGTERM" >&2
           # Snapshot child PIDs before SIGTERM — wrapper 가 SIGTERM 을 수용해 죽으면
@@ -2203,15 +2232,16 @@ run_stream_worker() {
     "$NODE_BIN"
     "$runner_script"
     "--type" "$worker_type"
-    "--timeout-ms" "$((TIMEOUT_SEC * 1000))"
+    "--timeout-ms" "$((HARD_CEILING_SEC * 1000))"
+    "--stall-ms" "$((STALL_THRESHOLD_SEC * 1000))"
     "--cwd" "$PWD"
     "$@"
   )
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
   _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
@@ -2244,9 +2274,9 @@ run_antigravity_exec() {
   fi
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${agy_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${agy_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
   if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
@@ -2570,15 +2600,15 @@ run_codex_exec() {
     if [[ "$use_tee_flag" == "true" ]]; then
       if [[ "$CLI_TYPE" == "antigravity" ]]; then
         # agy --print + skip-permissions positional prompt는 timeout이 재현되어 stdin pipe로 고정한다.
-        printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+        printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
       else
-        "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
       fi
     else
       if [[ "$CLI_TYPE" == "antigravity" ]]; then
-        printf '%s' "$prompt" | "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+        printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
       else
-        "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
       fi
     fi
     worker_pid=$!
@@ -2647,7 +2677,7 @@ run_codex_mcp() {
     "--profile" "$CLI_EFFORT"
     "--approval-policy" "never"
     "--sandbox" "danger-full-access"
-    "--timeout-ms" "$((TIMEOUT_SEC * 1000))"
+    "--timeout-ms" "$((HARD_CEILING_SEC * 1000))"
     "--codex-command" "$CODEX_BIN"
   )
 
@@ -2677,9 +2707,9 @@ run_codex_mcp() {
   esac
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    "$TIMEOUT_BIN" "$TIMEOUT_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
   # Track codex MCP child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
@@ -2749,7 +2779,29 @@ main() {
     TIMEOUT_SEC="$DEFAULT_TIMEOUT"
   fi
 
-  TFX_EXPECTED_DURATION_SEC="${TFX_EXPECTED_DURATION_SEC:-$(estimate_expected_duration_sec "$AGENT_TYPE" "$MCP_PROFILE" "$PROMPT")}"
+  # TIMEOUT_SEC/DEFAULT_TIMEOUT은 예상 소요 시간(advisory)만 나타낸다.
+  # 실제 wall-clock 종료는 아래 hard ceiling만 수행한다.
+  HARD_CEILING_SEC="${TFX_HARD_CEILING_SEC:-21600}"
+  if ! [[ "$HARD_CEILING_SEC" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[tfx-route] 경고: TFX_HARD_CEILING_SEC='$HARD_CEILING_SEC' 무효 — 21600 사용" >&2
+    HARD_CEILING_SEC=21600
+  fi
+  if [[ "${TFX_TIMEOUT_MODE:-activity}" == "wallclock" ]]; then
+    HARD_CEILING_SEC="$TIMEOUT_SEC"
+  elif [[ "$HARD_CEILING_SEC" -lt "$TIMEOUT_SEC" ]]; then
+    echo "[tfx-route] 경고: hard ceiling(${HARD_CEILING_SEC}s) < expected(${TIMEOUT_SEC}s) — expected로 승격" >&2
+    HARD_CEILING_SEC="$TIMEOUT_SEC"
+  fi
+  STALL_THRESHOLD_SEC="${TFX_STALL_THRESHOLD:-1200}"
+  if ! [[ "$STALL_THRESHOLD_SEC" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[tfx-route] 경고: TFX_STALL_THRESHOLD='$STALL_THRESHOLD_SEC' 무효 — 1200 사용" >&2
+    STALL_THRESHOLD_SEC=1200
+  fi
+
+  local _est_dur
+  _est_dur=$(estimate_expected_duration_sec "$AGENT_TYPE" "$MCP_PROFILE" "$PROMPT")
+  [[ "$TIMEOUT_SEC" -gt "$_est_dur" ]] && _est_dur="$TIMEOUT_SEC"
+  TFX_EXPECTED_DURATION_SEC="${TFX_EXPECTED_DURATION_SEC:-$_est_dur}"
   export TFX_EXPECTED_DURATION_SEC
 
   # 컨텍스트 파일 → 프롬프트에 주입
@@ -2818,7 +2870,7 @@ FALLBACK_EOF
   local codex_transport_effective="n/a"
 
   # 메타정보 (stderr)
-  echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE timeout=${TIMEOUT_SEC}s" >&2
+  echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
   echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE resolved_profile=$MCP_RESOLVED_PROFILE verifier_override=$TFX_VERIFIER_OVERRIDE" >&2
   if [[ ${#GEMINI_ALLOWED_SERVERS[@]} -gt 0 ]]; then
     echo "[tfx-route] allowed_mcp_servers=$(IFS=,; echo "${GEMINI_ALLOWED_SERVERS[*]}")" >&2
@@ -3113,11 +3165,11 @@ EOF
       output_preview=$(head -c 2048 "$STDOUT_LOG" 2>/dev/null || echo "출력 없음")
       team_complete_task "success" "$output_preview"
     elif [[ "$exit_code" -eq 124 ]]; then
-      team_complete_task "timeout" "타임아웃 (${TIMEOUT_SEC}초)"
+      team_complete_task "timeout" "하드실링/무활동 종료 (ceiling=${HARD_CEILING_SEC}s, expected=${TIMEOUT_SEC}s)"
     elif [[ "$exit_code" -eq 143 ]]; then
-      team_complete_task "timeout" "외부 시그널로 종료 (SIGTERM, ${TIMEOUT_SEC}초)"
+      team_complete_task "timeout" "외부 시그널로 종료 (SIGTERM, ceiling=${HARD_CEILING_SEC}s, expected=${TIMEOUT_SEC}s)"
     elif [[ "$exit_code" -eq 137 ]]; then
-      team_complete_task "timeout" "외부 시그널로 종료 (SIGKILL, ${TIMEOUT_SEC}초)"
+      team_complete_task "timeout" "외부 시그널로 종료 (SIGKILL, ceiling=${HARD_CEILING_SEC}s, expected=${TIMEOUT_SEC}s)"
     elif [[ "$exit_code" -eq 130 ]]; then
       team_complete_task "failed" "사용자 인터럽트 (SIGINT)"
     else

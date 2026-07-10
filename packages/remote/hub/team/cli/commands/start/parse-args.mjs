@@ -74,7 +74,7 @@ export function parseTeamArgs(args = []) {
   const assigns = []; // --assign "codex:프롬프트:역할" 형식
   let autoAttach = true;
   let progressive = true;
-  let timeoutSec = 300;
+  let timeoutSec = 0;
   let verbose = false;
   let dashboard = true;
   let dashboardLayout = "lite";
@@ -130,7 +130,7 @@ export function parseTeamArgs(args = []) {
     } else if (current === "--no-progressive") {
       progressive = false;
     } else if (current === "--timeout" && args[index + 1]) {
-      timeoutSec = Number(args[++index]) || 300;
+      timeoutSec = Number(args[++index]) || 0;
     } else if (current === "--mcp-profile" && args[index + 1]) {
       mcpProfile = args[++index].trim();
     } else if ((current === "--model" || current === "-m") && args[index + 1]) {

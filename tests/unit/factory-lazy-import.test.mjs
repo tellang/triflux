@@ -12,11 +12,20 @@ import { createWorker as createInstalledWorker } from "../../hub/workers/factory
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
 const WORKERS_DIR = resolve(PROJECT_ROOT, "hub", "workers");
+const HUB_LIB_DIR = resolve(PROJECT_ROOT, "hub", "lib");
+const FIXTURE_HUB_LIB_FILES = [
+  "worker-lifecycle.mjs",
+  "timeout-defaults.mjs",
+];
 
 async function importFactoryFromSdkMissingTree() {
   const root = mkdtempSync(join(tmpdir(), "triflux-factory-no-sdk-"));
   mkdirSync(join(root, "hub"), { recursive: true });
   cpSync(WORKERS_DIR, join(root, "hub", "workers"), { recursive: true });
+  mkdirSync(join(root, "hub", "lib"), { recursive: true });
+  for (const file of FIXTURE_HUB_LIB_FILES) {
+    cpSync(resolve(HUB_LIB_DIR, file), join(root, "hub", "lib", file));
+  }
 
   try {
     const factoryUrl = pathToFileURL(

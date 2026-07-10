@@ -5,6 +5,7 @@
 //
 // 출처: scripts/tfx-route.sh route_agent() L1062-L1063 (explore|claude),
 //        L1196-L1203 (TFX_CLI_MODE=gemini fallback), TFX_VERIFIER_OVERRIDE=claude.
+// timeoutSec은 lane 예상 소요 시간(advisory)이다. hard ceiling 집행은 Bash route가 소유한다.
 
 export const id = "claude";
 export const cliType = "claude-native";
