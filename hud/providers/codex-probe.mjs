@@ -2,6 +2,94 @@
 // 세션 이벤트(snake_case) 파이프라인에 합류 가능한 스냅샷을 만든다.
 
 import { spawn } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
+function readJwtExpSec(token) {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString("utf-8"),
+    );
+    return Number(payload.exp) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function readJsonFile(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+const EXP_MARGIN_SEC = 600;
+
+function accessTokenUsable(auth, nowMs) {
+  const token = auth?.tokens?.access_token;
+  if (!token) return false;
+  const exp = readJwtExpSec(token);
+  return exp > Math.floor(nowMs / 1000) + EXP_MARGIN_SEC;
+}
+
+export function recordProbe(stateFilePath, key, nowMs) {
+  const state = readJsonFile(stateFilePath) || {};
+  state[key] = nowMs;
+  try {
+    mkdirSync(dirname(stateFilePath), { recursive: true });
+    writeFileSync(stateFilePath, JSON.stringify(state));
+  } catch {
+    // 상태 기록 실패는 무시 — 다음 사이클에 재시도
+  }
+}
+
+export function listProbeTargets({
+  codexAuthPath,
+  brokerCacheDir,
+  stateFilePath,
+  ttlMs,
+  nowMs,
+}) {
+  const state = readJsonFile(stateFilePath) || {};
+  const due = (key) =>
+    !(Number(state[key]) > 0 && nowMs - Number(state[key]) < ttlMs);
+  const targets = [];
+
+  const currentAuth = readJsonFile(codexAuthPath);
+  if (currentAuth && accessTokenUsable(currentAuth, nowMs) && due("current")) {
+    targets.push({ key: "current", codexHome: dirname(codexAuthPath) });
+  }
+
+  if (brokerCacheDir && existsSync(brokerCacheDir)) {
+    let files = [];
+    try {
+      files = readdirSync(brokerCacheDir).filter((file) =>
+        /^codex-auth-.+\.json$/.test(file),
+      );
+    } catch {
+      files = [];
+    }
+    for (const file of files) {
+      const key = file.replace(/^codex-auth-/, "").replace(/\.json$/, "");
+      if (!due(key)) continue;
+      const auth = readJsonFile(join(brokerCacheDir, file));
+      if (!auth || !accessTokenUsable(auth, nowMs)) continue;
+      const home = mkdtempSync(join(tmpdir(), `tfx-probe-home-${key}-`));
+      writeFileSync(join(home, "auth.json"), JSON.stringify(auth));
+      targets.push({ key, codexHome: home });
+    }
+  }
+  return targets;
+}
 
 function toSnakeBucket(bucket) {
   if (!bucket) return null;

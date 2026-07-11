@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  listProbeTargets,
   normalizeAppServerRateLimits,
   probeRateLimitsViaAppServer,
+  recordProbe,
 } from "../../hud/providers/codex-probe.mjs";
 
 const FIXTURE = {
@@ -156,4 +163,74 @@ test("probeRateLimitsViaAppServer: 스폰 실패면 null", async () => {
     timeoutMs: 500,
   });
   assert.equal(out, null);
+});
+
+function jwtWithExp(expSec) {
+  const b64 = (value) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${b64({ alg: "none" })}.${b64({ exp: expSec, email: "t@t" })}.x`;
+}
+
+function makeAuthDir(root, name, expSec) {
+  const dir = join(root, name);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "auth.json"),
+    JSON.stringify({
+      tokens: {
+        access_token: jwtWithExp(expSec),
+        id_token: jwtWithExp(expSec),
+      },
+    }),
+  );
+  return dir;
+}
+
+test("listProbeTargets: 현재 계정 + 브로커 캐시 열거, 만료 임박 제외, TTL 스로틀", () => {
+  const root = mkdtempSync(join(tmpdir(), "tfx-probe-targets-"));
+  const nowMs = Date.parse("2026-07-11T09:00:00Z");
+  const okExp = Math.floor(nowMs / 1000) + 3600;
+  const nearExp = Math.floor(nowMs / 1000) + 60;
+  const codexDir = makeAuthDir(root, "codex-home", okExp);
+  const brokerDir = join(root, "broker");
+  mkdirSync(brokerDir, { recursive: true });
+  writeFileSync(
+    join(brokerDir, "codex-auth-alpha.json"),
+    JSON.stringify({ tokens: { access_token: jwtWithExp(okExp) } }),
+  );
+  writeFileSync(
+    join(brokerDir, "codex-auth-beta.json"),
+    JSON.stringify({ tokens: { access_token: jwtWithExp(nearExp) } }),
+  );
+  const stateFile = join(root, "probe-state.json");
+
+  const targets = listProbeTargets({
+    codexAuthPath: join(codexDir, "auth.json"),
+    brokerCacheDir: brokerDir,
+    stateFilePath: stateFile,
+    ttlMs: 300000,
+    nowMs,
+  });
+  const keys = targets.map((target) => target.key).sort();
+  assert.deepEqual(keys, ["alpha", "current"]);
+  for (const target of targets) {
+    assert.ok(target.codexHome, `codexHome 필요: ${target.key}`);
+    const auth = JSON.parse(
+      readFileSync(join(target.codexHome, "auth.json"), "utf-8"),
+    );
+    assert.ok(auth.tokens.access_token);
+  }
+
+  recordProbe(stateFile, "alpha", nowMs);
+  const second = listProbeTargets({
+    codexAuthPath: join(codexDir, "auth.json"),
+    brokerCacheDir: brokerDir,
+    stateFilePath: stateFile,
+    ttlMs: 300000,
+    nowMs: nowMs + 1000,
+  });
+  assert.deepEqual(
+    second.map((target) => target.key),
+    ["current"],
+  );
 });
