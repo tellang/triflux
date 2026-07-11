@@ -5,12 +5,12 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 
-import { execute as defaultExecuteCodex } from "@triflux/core/hub/codex-adapter.mjs";
+import { execute as defaultExecuteCodex } from "../codex-adapter.mjs";
 import {
   createActivityLifecycle,
   isActivityLifecycleEnabled,
   resolveHardCeilingMs,
-} from "@triflux/core/hub/lib/worker-lifecycle.mjs";
+} from "../lib/worker-lifecycle.mjs";
 import { JsonRpcWsUdsClient } from "../workers/lib/jsonrpc-ws-uds.mjs";
 import {
   buildClaudePromptDispatchPayload,
@@ -236,7 +236,9 @@ export function subscribeClaudeUntilMarker(
         data = data.slice(index + 1);
         if (!line) continue;
         try {
-          scanMessage(JSON.parse(line), marker, state, () => lifecycle.observe());
+          scanMessage(JSON.parse(line), marker, state, () =>
+            lifecycle.observe(),
+          );
         } catch (_error) {
           state.messageCount += 1;
         }
