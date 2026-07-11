@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { codexWhite, dim } from "../../hud/colors.mjs";
+import { CODEX_WHITE, codexWhite, dim } from "../../hud/colors.mjs";
 import {
   classifyBucket,
   expireStaleCodexBuckets,
@@ -11,7 +11,11 @@ import {
   normalizeBuckets,
 } from "../../hud/providers/codex.mjs";
 import { getProviderRow } from "../../hud/renderers.mjs";
-import { formatPercentCell } from "../../hud/utils.mjs";
+import { tierBar, tierDimBar } from "../../hud/terminal.mjs";
+import {
+  formatPercentCell,
+  formatPlaceholderPercentCell,
+} from "../../hud/utils.mjs";
 
 function sessionDirFor(sessionsRoot, date) {
   return join(
@@ -336,10 +340,10 @@ describe("Codex multi-window selection", () => {
   });
 });
 
-describe("Codex window freshness rendering", () => {
-  function renderCodexFullRow(snapshot) {
+describe("Codex quota rendering", () => {
+  function renderCodexRow(tier, snapshot) {
     return getProviderRow(
-      "full",
+      tier,
       "codex",
       "x",
       codexWhite,
@@ -353,20 +357,24 @@ describe("Codex window freshness rendering", () => {
     );
   }
 
-  it("falls back to the primary timestamp for legacy snapshots without secondaryTimestamp", () => {
+  it("renders legacy stale snapshots with provider colors and filled gauges", () => {
     const staleTimestamp = new Date(Date.now() - 31 * 60 * 1000).toISOString();
-    const row = renderCodexFullRow({
+    const row = renderCodexRow("full", {
       timestamp: staleTimestamp,
       primary: { used_percent: 12 },
       secondary: { used_percent: 43 },
     });
 
-    assert.ok(row.left.includes(dim(formatPercentCell(12))));
-    assert.ok(row.left.includes(dim(formatPercentCell(43))));
+    assert.ok(row.left.includes(codexWhite(formatPercentCell(12))));
+    assert.ok(row.left.includes(codexWhite(formatPercentCell(43))));
+    assert.ok(row.left.includes(tierBar("full", 12, CODEX_WHITE)));
+    assert.ok(row.left.includes(tierBar("full", 43, CODEX_WHITE)));
+    assert.ok(!row.left.includes(dim(formatPercentCell(12))));
+    assert.ok(!row.left.includes(dim(formatPercentCell(43))));
   });
 
-  it("dims only the stale weekly percentage and gauge when five-hour data is fresh", () => {
-    const row = renderCodexFullRow({
+  it("renders a stale weekly window the same as a fresh five-hour window", () => {
+    const row = renderCodexRow("full", {
       timestamp: new Date().toISOString(),
       secondaryTimestamp: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
       primary: { used_percent: 12 },
@@ -374,9 +382,67 @@ describe("Codex window freshness rendering", () => {
     });
 
     assert.ok(row.left.includes(codexWhite(formatPercentCell(12))));
-    assert.ok(row.left.includes(dim(formatPercentCell(43))));
-    assert.ok(
-      row.left.includes(`${dim("░".repeat(5))} ${dim(formatPercentCell(43))}`),
+    assert.ok(row.left.includes(codexWhite(formatPercentCell(43))));
+    assert.ok(row.left.includes(tierBar("full", 12, CODEX_WHITE)));
+    assert.ok(row.left.includes(tierBar("full", 43, CODEX_WHITE)));
+    assert.ok(!row.left.includes(dim(formatPercentCell(43))));
+  });
+
+  it("renders stale values with provider colors in every tier", () => {
+    const snapshot = {
+      timestamp: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
+      primary: { used_percent: 12 },
+      secondary: { used_percent: 43 },
+    };
+
+    for (const tier of ["nano", "micro"]) {
+      const row = renderCodexRow(tier, snapshot);
+      assert.ok(row.left.includes(codexWhite("12%")), tier);
+      assert.ok(row.left.includes(codexWhite("43%")), tier);
+      assert.ok(!row.left.includes(dim("12%")), tier);
+      assert.ok(!row.left.includes(dim("43%")), tier);
+    }
+
+    for (const tier of ["minimal", "compact"]) {
+      const row = renderCodexRow(tier, snapshot);
+      assert.ok(row.left.includes(codexWhite(formatPercentCell(12))), tier);
+      assert.ok(row.left.includes(codexWhite(formatPercentCell(43))), tier);
+      assert.ok(!row.left.includes(dim(formatPercentCell(12))), tier);
+      assert.ok(!row.left.includes(dim(formatPercentCell(43))), tier);
+    }
+  });
+
+  it("keeps null placeholders dimmed with empty gauges", () => {
+    const snapshot = {
+      timestamp: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
+      primary: null,
+      secondary: null,
+    };
+    const fullRow = renderCodexRow("full", snapshot);
+
+    assert.equal(
+      fullRow.left.split(tierDimBar("full")).length - 1,
+      2,
+      "full tier should keep two dim empty gauges",
     );
+    assert.equal(
+      fullRow.left.split(dim(formatPlaceholderPercentCell())).length - 1,
+      2,
+      "full tier should keep two dim percentage placeholders",
+    );
+
+    for (const tier of ["nano", "micro"]) {
+      const row = renderCodexRow(tier, snapshot);
+      assert.equal(row.left.split(dim("--%")).length - 1, 2, tier);
+    }
+
+    for (const tier of ["minimal", "compact"]) {
+      const row = renderCodexRow(tier, snapshot);
+      assert.equal(
+        row.left.split(dim(formatPlaceholderPercentCell())).length - 1,
+        2,
+        tier,
+      );
+    }
   });
 });
