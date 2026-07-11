@@ -1,10 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -75,10 +70,7 @@ const FIXTURE = {
 };
 
 test("normalizeAppServerRateLimits: byLimitId 전체를 snake_case 스냅샷으로 변환", () => {
-  const out = normalizeAppServerRateLimits(
-    FIXTURE,
-    "2026-07-11T09:00:00.000Z",
-  );
+  const out = normalizeAppServerRateLimits(FIXTURE, "2026-07-11T09:00:00.000Z");
   const codex = out.find((s) => s.limitId === "codex");
   assert.equal(codex.primary.used_percent, 45);
   assert.equal(codex.primary.window_minutes, 300);

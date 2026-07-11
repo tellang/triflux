@@ -15,7 +15,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
-import { BASH_EXE } from "../helpers/bash-path.mjs";
 import {
   buildCommand,
   LANE_TIMEOUT_FALLBACK_SEC,
@@ -23,6 +22,7 @@ import {
   resolveLaneTimeoutSec,
   shouldBypassHeadless,
 } from "../../scripts/headless-guard.mjs";
+import { BASH_EXE } from "../helpers/bash-path.mjs";
 
 const GUARD_PATH = join(process.cwd(), "scripts", "headless-guard.mjs");
 
@@ -174,7 +174,9 @@ describe("parseRouteCommand", () => {
 describe("resolveLaneTimeoutSec — lane 기본 SSOT 소비", () => {
   it("agent-map 등재 agent는 어댑터 plan()과 동일한 초를 산출한다", async () => {
     const codex = await import("../../scripts/lib/cli-codex.mjs");
-    const expected = Math.round(codex.plan({ agent: "executor" }).timeoutMs / 1000);
+    const expected = Math.round(
+      codex.plan({ agent: "executor" }).timeoutMs / 1000,
+    );
     assert.equal(await resolveLaneTimeoutSec("executor"), expected);
   });
 
@@ -194,7 +196,10 @@ describe("resolveLaneTimeoutSec — lane 기본 SSOT 소비", () => {
   });
 
   it("reserved tfx 서브커맨드(multi)도 throw 대신 fallback을 반환한다", async () => {
-    assert.equal(await resolveLaneTimeoutSec("multi"), LANE_TIMEOUT_FALLBACK_SEC);
+    assert.equal(
+      await resolveLaneTimeoutSec("multi"),
+      LANE_TIMEOUT_FALLBACK_SEC,
+    );
   });
 });
 
@@ -578,9 +583,10 @@ describe("buildCommand — 플래그 보존", () => {
       buildCommand(parsed, { laneTimeoutSec: 1080 }).includes("--timeout 1080"),
     );
     assert.ok(
-      buildCommand({ ...parsed, flags: { timeout: "bad" } }, { laneTimeoutSec: 1080 }).includes(
-        "--timeout 1080",
-      ),
+      buildCommand(
+        { ...parsed, flags: { timeout: "bad" } },
+        { laneTimeoutSec: 1080 },
+      ).includes("--timeout 1080"),
     );
   });
 
@@ -644,20 +650,16 @@ describe("P1a: 단일 워커 headless 우회", () => {
 
   it("TFX_FORCE_HEADLESS=1 → 단일이어도 headless 변환", () => {
     assert.equal(
-      shouldBypassHeadless(
-        "bash tfx-route.sh executor 'fix bug' implement",
-        { TFX_FORCE_HEADLESS: "1" },
-      ),
+      shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' implement", {
+        TFX_FORCE_HEADLESS: "1",
+      }),
       false,
     );
   });
 
   it("TFX_FORCE_HEADLESS 미설정 + 단일 워커 → 우회", () => {
     assert.equal(
-      shouldBypassHeadless(
-        "bash tfx-route.sh codex 'analyze code' review",
-        {},
-      ),
+      shouldBypassHeadless("bash tfx-route.sh codex 'analyze code' review", {}),
       true,
     );
   });

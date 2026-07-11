@@ -67,13 +67,13 @@ describe("#144/#66 heartbeat stall kill — shape", () => {
       /classify\|0\|off\|disabled/,
       "no-kill alias (classify|0|off|disabled) case arm 필요",
     );
+    assert.match(hb, /intervene\|ladder/, "intervene ladder case arm 필요");
+    assert.match(hb, /intervene-run/, "bridge intervene-run 배선 필요");
     assert.match(
       hb,
-      /intervene\|ladder/,
-      "intervene ladder case arm 필요",
+      /--payload-file -/,
+      "intervene JSON은 stdin으로 전달해야 함",
     );
-    assert.match(hb, /intervene-run/, "bridge intervene-run 배선 필요");
-    assert.match(hb, /--payload-file -/, "intervene JSON은 stdin으로 전달해야 함");
     assert.match(
       hb,
       /STALL_CLASSIFY/,

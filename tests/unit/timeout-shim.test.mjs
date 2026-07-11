@@ -64,7 +64,10 @@ describe("timeout fixture shim", () => {
   it("사용법 오류는 125를 반환한다", () => {
     assert.equal(runTimeout([]).status, 125);
     assert.equal(runTimeout(["abc", process.execPath, "-e", "0"]).status, 125);
-    assert.equal(runTimeout(["-x", "5", process.execPath, "-e", "0"]).status, 125);
+    assert.equal(
+      runTimeout(["-x", "5", process.execPath, "-e", "0"]).status,
+      125,
+    );
   });
 
   it("자식 spawn 실패는 127을 반환한다", () => {

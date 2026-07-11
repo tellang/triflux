@@ -157,7 +157,10 @@ test("Claude UDS marker subscription extends its idle window for stream activity
       );
       assert.equal(result.markerSeen, true);
       assert.equal(result.timedOut, undefined);
-      assert.ok(result.elapsedMs >= 50, `expected extension, got ${result.elapsedMs}ms`);
+      assert.ok(
+        result.elapsedMs >= 50,
+        `expected extension, got ${result.elapsedMs}ms`,
+      );
     },
   );
 });
