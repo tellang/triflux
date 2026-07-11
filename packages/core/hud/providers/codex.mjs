@@ -8,7 +8,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   CODEX_AUTH_PATH,
+  CODEX_BROKER_AUTH_CACHE_DIR,
   CODEX_MIN_BUCKETS,
+  CODEX_PROBE_STATE_PATH,
+  CODEX_PROBE_TIMEOUT_MS,
+  CODEX_PROBE_TTL_MS,
   CODEX_QUOTA_CACHE_PATH,
   CODEX_QUOTA_STALE_MS,
   CODEX_REFRESH_FLAG,
@@ -16,6 +20,11 @@ import {
   SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
 import { decodeJwtEmail, readJson, writeJsonSafe } from "../utils.mjs";
+import {
+  listProbeTargets,
+  probeRateLimitsViaAppServer,
+  recordProbe,
+} from "./codex-probe.mjs";
 
 // window_minutes 기반 5h/1w 슬롯 분류
 // 5h: ≤360min (300min 표준, ±20% 허용)
@@ -208,9 +217,10 @@ export function getCodexRateLimits({
   sessionsRoot = join(homedir(), ".codex", "sessions"),
   now = new Date(),
   maxLinesPerFile = 800,
+  extraSnapshots = [],
 } = {}) {
   let syntheticBucket = null; // 최근 token_count에서 합성 (행 활성화 + 토큰 데이터용)
-  const recentSnapshots = [];
+  const recentSnapshots = [...extraSnapshots];
   const nowSec = Math.floor(now.getTime() / 1000);
 
   // 7일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
@@ -320,8 +330,40 @@ export function readCodexRateLimitSnapshot() {
   return { buckets, shouldRefresh: !isFresh };
 }
 
-export function refreshCodexRateLimitsCache() {
-  const buckets = getCodexRateLimits();
+export async function collectProbeSnapshots(now = new Date()) {
+  if (process.env.TFX_CODEX_PROBE === "0") return [];
+  let targets = [];
+  try {
+    targets = listProbeTargets({
+      codexAuthPath: CODEX_AUTH_PATH,
+      brokerCacheDir: CODEX_BROKER_AUTH_CACHE_DIR,
+      stateFilePath: CODEX_PROBE_STATE_PATH,
+      ttlMs: Number(process.env.TFX_CODEX_PROBE_TTL_MS) || CODEX_PROBE_TTL_MS,
+      nowMs: now.getTime(),
+    });
+  } catch {
+    return [];
+  }
+  const settled = await Promise.allSettled(
+    targets.map(async (target) => {
+      const snapshots = await probeRateLimitsViaAppServer({
+        codexHome: target.codexHome,
+        timeoutMs: CODEX_PROBE_TIMEOUT_MS,
+        now,
+      });
+      recordProbe(CODEX_PROBE_STATE_PATH, target.key, now.getTime());
+      return snapshots || [];
+    }),
+  );
+  return settled.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : [],
+  );
+}
+
+export async function refreshCodexRateLimitsCache() {
+  const now = new Date();
+  const extraSnapshots = await collectProbeSnapshots(now);
+  const buckets = getCodexRateLimits({ now, extraSnapshots });
   // buckets가 null이어도 캐시 갱신 (stale 데이터 제거)
   writeJsonSafe(CODEX_QUOTA_CACHE_PATH, { timestamp: Date.now(), buckets });
   return buckets;

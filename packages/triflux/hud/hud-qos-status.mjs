@@ -97,7 +97,7 @@ async function main() {
   }
 
   if (process.argv.includes(CODEX_REFRESH_FLAG)) {
-    refreshCodexRateLimitsCache();
+    await refreshCodexRateLimitsCache();
     return;
   }
 
