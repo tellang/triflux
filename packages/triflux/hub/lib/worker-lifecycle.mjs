@@ -56,9 +56,11 @@ export function createActivityLifecycle({
   }
 
   return Object.freeze({
-    observe(signature) {
+    observe(...args) {
       if (!enabled) return false;
-      const changed = arguments.length === 0 || !hasSignature || signature !== lastSignature;
+      const [signature] = args;
+      const changed =
+        args.length === 0 || !hasSignature || signature !== lastSignature;
       if (changed) {
         lastSignature = signature;
         hasSignature = true;
@@ -73,7 +75,8 @@ export function createActivityLifecycle({
         timeoutReason = "hard_ceiling";
         return timeoutReason;
       }
-      if (current - lastActivityAt < interventionMs || pendingIntervention) return "";
+      if (current - lastActivityAt < interventionMs || pendingIntervention)
+        return "";
       if (await intervene(context)) return "";
       timeoutReason = "inactivity";
       return timeoutReason;

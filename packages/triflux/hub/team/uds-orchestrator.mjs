@@ -236,7 +236,9 @@ export function subscribeClaudeUntilMarker(
         data = data.slice(index + 1);
         if (!line) continue;
         try {
-          scanMessage(JSON.parse(line), marker, state, () => lifecycle.observe());
+          scanMessage(JSON.parse(line), marker, state, () =>
+            lifecycle.observe(),
+          );
         } catch (_error) {
           state.messageCount += 1;
         }

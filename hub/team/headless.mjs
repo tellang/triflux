@@ -43,14 +43,14 @@ import { startClaudeNativeBridge } from "./claude-native-bridge.mjs";
 import { removeClaudeSessionProjection } from "./claude-session-projection.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
-  createFileActivitySource,
-  createInterventionLadder,
-} from "./intervention.mjs";
-import {
   formatHandoffForLead,
   HANDOFF_INSTRUCTION_SHORT,
   processHandoff,
 } from "./handoff.mjs";
+import {
+  createFileActivitySource,
+  createInterventionLadder,
+} from "./intervention.mjs";
 import {
   capturePsmuxPane,
   createPsmuxSession,
@@ -571,7 +571,8 @@ export function createStallMonitor(paneId, resultFile, config, deps = {}) {
 
 function createHeadlessIntervention(dispatch, fallback) {
   return async (context) => {
-    if (typeof fallback === "function") return (await fallback(context)) === true;
+    if (typeof fallback === "function")
+      return (await fallback(context)) === true;
 
     const isDaemon = context.channel === "daemon";
     const readActivitySignature = isDaemon
@@ -1310,12 +1311,11 @@ async function awaitAll(
             {
               pollInterval: stallOpts.pollInterval,
               stallTimeout: stallOpts.stallTimeout,
-              hardCeiling:
-                lifecycle?.enabled
-                  ? (stallOpts.hardCeiling ??
-                    stallOpts.completionTimeout ??
-                    lifecycle.hardCeilingMs)
-                  : (stallOpts.completionTimeout ?? timeoutSec * 1000),
+              hardCeiling: lifecycle?.enabled
+                ? (stallOpts.hardCeiling ??
+                  stallOpts.completionTimeout ??
+                  lifecycle.hardCeilingMs)
+                : (stallOpts.completionTimeout ?? timeoutSec * 1000),
               maxRestarts: stallOpts.maxRestarts,
               maxInterventions: stallOpts.maxInterventions,
               command: d.command,
@@ -1447,7 +1447,10 @@ export async function waitForDaemonCompletion(
     ? createActivityLifecycle({
         interventionMs: lifecycle.interventionMs,
         hardCeilingMs: lifecycle.hardCeilingMs,
-        onIntervene: createHeadlessIntervention(dispatch, lifecycle.onIntervene),
+        onIntervene: createHeadlessIntervention(
+          dispatch,
+          lifecycle.onIntervene,
+        ),
       })
     : null;
 
