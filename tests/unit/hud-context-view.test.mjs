@@ -21,11 +21,16 @@ describe("buildContextUsageView stdin priority", () => {
     assert.match(view.display, /600\/1K/);
   });
 
-  it("stdin 없을 때 modelHintLimit fallback 동작", () => {
+  it("stdin 없을 때 hub 누적 monitor 스냅샷을 현재 CTX로 렌더하지 않는다", () => {
     const view = buildContextUsageView(
       {},
-      { usedTokens: 100, limitTokens: 200_000 },
+      { usedTokens: 2_444_783, limitTokens: 1_000_000 },
     );
-    assert.ok(view.limitTokens >= 1);
+    assert.equal(view.display, "--");
+    assert.equal(view.usedTokens, 0);
+    assert.equal(view.limitTokens, 0);
+    assert.equal(view.percent, 0);
+    assert.equal(view.warningLevel, "ok");
+    assert.equal(view.source, "none");
   });
 });

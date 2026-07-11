@@ -283,26 +283,23 @@ export function deriveContextLimit(stdin) {
 
 export function buildContextUsageView(stdin, snapshot = null) {
   const stdinUsage = getStdinContextUsage(stdin);
-  const monitor = snapshot || readContextMonitorSnapshot();
-  const modelId = stdin?.model?.id ?? stdin?.model;
-  const modelHintLimit = resolveModelLimit(modelId);
-  const monitorLimit = Number(monitor?.limitTokens || 0);
-  const stdinLimit = stdinUsage?.limitTokens;
-  // When a model id is known it is the authoritative per-model ceiling: the
-  // monitor's cached limitTokens is just a default-derived accumulator (now 1M
-  // by default) and must not override a known model's real window in either
-  // direction — it would inflate a 200K model (Sonnet 4.5 / Haiku) up to 1M.
-  // The model hint already upgrades a stale-low monitor on its own (#88).
-  const limitTokens =
-    stdinLimit != null && stdinLimit > 0
-      ? Math.max(1, stdinLimit)
-      : modelId
-        ? Math.max(1, modelHintLimit)
-        : Math.max(1, monitorLimit || modelHintLimit);
+  if (!stdinUsage) {
+    return {
+      usedTokens: 0,
+      limitTokens: 0,
+      percent: 0,
+      display: "--",
+      warningLevel: "ok",
+      warningMessage: "",
+      warningTag: "",
+      source: "none",
+    };
+  }
 
-  const usedTokens = stdinUsage?.usedTokens ?? Number(monitor?.usedTokens || 0);
-  const percent =
-    limitTokens > 0 ? clampPercent((usedTokens / limitTokens) * 100) : 0;
+  const modelId = stdin?.model?.id ?? stdin?.model;
+  const limitTokens = Math.max(1, stdinUsage.limitTokens);
+  const usedTokens = stdinUsage.usedTokens;
+  const percent = clampPercent((usedTokens / limitTokens) * 100);
 
   const warning = classifyContextThreshold(percent);
   const showInfoOnlyStatus = !(
@@ -324,7 +321,7 @@ export function buildContextUsageView(stdin, snapshot = null) {
           : warning.level === "info"
             ? "ℹ 절반 이상 사용"
             : "",
-    source: stdinUsage?.source || (monitor ? "monitor" : "none"),
+    source: stdinUsage.source,
   };
 }
 

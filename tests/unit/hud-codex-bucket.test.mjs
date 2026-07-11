@@ -1,24 +1,57 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
-// providers/codex.mjs에서 내부 함수를 테스트하기 위해 동적 import
-// normalizeBuckets/classifyBucket은 모듈 내부 함수이므로,
-// export된 getCodexRateLimits의 동작을 통해 간접 검증한다.
-// 직접 단위 테스트를 위해 함수를 export 해야 함.
+import {
+  classifyBucket,
+  expireStaleCodexBuckets,
+  getCodexRateLimits,
+  normalizeBuckets,
+} from "../../hud/providers/codex.mjs";
+
+function sessionDirFor(sessionsRoot, date) {
+  return join(
+    sessionsRoot,
+    String(date.getFullYear()),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  );
+}
+
+function writeRollout(sessionsRoot, date, filename, events) {
+  const dir = sessionDirFor(sessionsRoot, date);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, filename),
+    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+  );
+}
+
+function rateLimitEvent({ timestamp, usedPercent, resetsAt }) {
+  return {
+    timestamp,
+    payload: {
+      rate_limits: {
+        limit_id: "codex",
+        limit_name: "Codex",
+        primary: {
+          used_percent: usedPercent,
+          window_minutes: 300,
+          resets_at: resetsAt,
+        },
+        secondary: {
+          used_percent: 20,
+          window_minutes: 10080,
+          resets_at: resetsAt + 7 * 24 * 60 * 60,
+        },
+      },
+    },
+  };
+}
 
 describe("Codex bucket normalization", () => {
-  // classifyBucket 직접 테스트를 위해 모듈 로드
-  let classifyBucket;
-  let normalizeBuckets;
-
-  it("should import internal functions", async () => {
-    const mod = await import("../../hud/providers/codex.mjs");
-    classifyBucket = mod.classifyBucket;
-    normalizeBuckets = mod.normalizeBuckets;
-    assert.ok(classifyBucket, "classifyBucket should be exported");
-    assert.ok(normalizeBuckets, "normalizeBuckets should be exported");
-  });
-
   // --- classifyBucket ---
 
   it("classifies 300min as five_hour", () => {
@@ -109,5 +142,97 @@ describe("Codex bucket normalization", () => {
     const { primary, secondary } = normalizeBuckets(rl);
     assert.equal(primary, null);
     assert.equal(secondary, null);
+  });
+});
+
+describe("Codex multi-window selection", () => {
+  it("merges today and yesterday, clusters 90s reset jitter, and selects max-used active window", () => {
+    const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-quota-"));
+    const now = new Date("2026-07-11T06:50:00.000Z");
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const yesterday = new Date(now.getTime() - 86_400_000);
+    try {
+      writeRollout(sessionsRoot, now, "rollout-low.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T06:45:15.000Z",
+          usedPercent: 6,
+          resetsAt: nowSec + 4 * 60 * 60,
+        }),
+      ]);
+      writeRollout(sessionsRoot, yesterday, "rollout-high-old.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T06:00:00.000Z",
+          usedPercent: 65,
+          resetsAt: nowSec + 30 * 60,
+        }),
+      ]);
+      writeRollout(sessionsRoot, yesterday, "rollout-high-new.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T06:12:46.000Z",
+          usedPercent: 70,
+          resetsAt: nowSec + 30 * 60 + 1,
+        }),
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(buckets.codex.primary.used_percent, 70);
+      assert.equal(buckets.codex.primary.resets_at, nowSec + 30 * 60 + 1);
+      assert.equal(buckets.codex.mixedWindows, true);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores an expired high-used window when an active window exists", () => {
+    const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-expiry-"));
+    const now = new Date("2026-07-11T06:50:00.000Z");
+    const nowSec = Math.floor(now.getTime() / 1000);
+    try {
+      writeRollout(sessionsRoot, now, "rollout-active.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T06:40:00.000Z",
+          usedPercent: 40,
+          resetsAt: nowSec + 10 * 60,
+        }),
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-expired.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T06:49:00.000Z",
+          usedPercent: 95,
+          resetsAt: nowSec - 60,
+        }),
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(buckets.codex.primary.used_percent, 40);
+      assert.equal(buckets.codex.primary.expired, undefined);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("marks stale cached windows expired and zeroes their usage", () => {
+    const nowSec = 1_800_000_000;
+    const buckets = expireStaleCodexBuckets(
+      {
+        codex: {
+          primary: { used_percent: 88, resets_at: nowSec - 1 },
+          secondary: { used_percent: 45, resets_at: nowSec + 1 },
+        },
+      },
+      nowSec,
+    );
+
+    assert.deepEqual(buckets.codex.primary, {
+      used_percent: 0,
+      resets_at: nowSec - 1,
+      expired: true,
+    });
+    assert.deepEqual(buckets.codex.secondary, {
+      used_percent: 45,
+      resets_at: nowSec + 1,
+    });
   });
 });

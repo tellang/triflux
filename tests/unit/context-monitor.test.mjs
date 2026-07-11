@@ -9,6 +9,7 @@ import {
   buildContextUsageView,
   classifyContextThreshold,
   createContextMonitor,
+  deriveContextLimit,
   estimateTokens,
   formatContextUsage,
   parseUsageFromPayload,
@@ -73,90 +74,83 @@ describe("hud/context-monitor.mjs", () => {
   });
 
   it("stdin이 context_window_size를 주지 않으면 model.id로 한도를 추정한다 (Opus 4.7 → 1M)", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-7" } },
-      null,
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-opus-4-7" } }),
+      1_000_000,
     );
-    assert.equal(view.limitTokens, 1_000_000);
   });
 
   it("Opus 4.8도 1M으로 추정한다 (Anthropic 공식 1M 모델)", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-8" } },
-      null,
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-opus-4-8" } }),
+      1_000_000,
     );
-    assert.equal(view.limitTokens, 1_000_000);
   });
 
   it("Opus 4.8 [1m] suffix 모델도 1M으로 추정한다 (현재 세션 모델 ID)", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-8[1m]" } },
-      null,
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-opus-4-8[1m]" } }),
+      1_000_000,
     );
-    assert.equal(view.limitTokens, 1_000_000);
   });
 
   it("model.id에 [1m] suffix가 있으면 1M으로 추정한다", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-7[1m]" } },
-      null,
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-opus-4-7[1m]" } }),
+      1_000_000,
     );
-    assert.equal(view.limitTokens, 1_000_000);
   });
 
-  it("monitor snapshot의 stale 200K 한도는 model hint 1M으로 오버라이드된다 (#88)", () => {
+  it("stdin 사용량이 없으면 stale monitor 스냅샷을 CTX로 표시하지 않는다", () => {
     const view = buildContextUsageView(
       { model: { id: "claude-opus-4-7" } },
       { usedTokens: 44_000, limitTokens: 200_000 },
     );
-    assert.equal(view.limitTokens, 1_000_000);
+    assert.equal(view.limitTokens, 0);
+    assert.equal(view.display, "--");
     assert.equal(view.warningLevel, "ok");
   });
 
-  it("Opus 4.8의 stale 200K 한도도 model hint 1M으로 오버라이드된다", () => {
+  it("model hint가 있어도 stdin 사용량이 없으면 CTX를 표시하지 않는다", () => {
     const view = buildContextUsageView(
       { model: { id: "claude-opus-4-8" } },
       { usedTokens: 44_000, limitTokens: 200_000 },
     );
-    assert.equal(view.limitTokens, 1_000_000);
+    assert.equal(view.limitTokens, 0);
+    assert.equal(view.source, "none");
     assert.equal(view.warningLevel, "ok");
   });
 
   it("알 수 없는 모델 + stdin size 없음 + monitor 없음 = 기본 200K", () => {
-    const view = buildContextUsageView(
-      { model: { id: "unknown-model" } },
-      null,
+    assert.equal(
+      deriveContextLimit({ model: { id: "unknown-model" } }),
+      200_000,
     );
-    assert.equal(view.limitTokens, 200_000);
   });
 
   it("Opus 4.6도 1M으로 추정한다 (Anthropic 공식 1M 모델)", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-6" } },
-      null,
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-opus-4-6" } }),
+      1_000_000,
     );
-    assert.equal(view.limitTokens, 1_000_000);
   });
 
   it("Sonnet 4.6도 1M으로 추정한다 (Anthropic 공식 1M 모델)", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-sonnet-4-6" } },
-      null,
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-sonnet-4-6" } }),
+      1_000_000,
     );
-    assert.equal(view.limitTokens, 1_000_000);
   });
 
   it("Sonnet 4.5는 200K (Anthropic 공식 기본 컨텍스트)", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-sonnet-4-5" } },
-      null,
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-sonnet-4-5" } }),
+      200_000,
     );
-    assert.equal(view.limitTokens, 200_000);
   });
 
   it("model이 raw string 으로 전달돼도 한도를 올바르게 추정한다", () => {
-    const view = buildContextUsageView({ model: "claude-opus-4-7" }, null);
-    assert.equal(view.limitTokens, 1_000_000);
+    assert.equal(deriveContextLimit({ model: "claude-opus-4-7" }), 1_000_000);
   });
 
   it("요청/응답 기록 후 snapshot과 리포트를 저장한다", () => {

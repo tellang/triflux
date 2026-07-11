@@ -79,6 +79,98 @@ export function expireStaleCodexBuckets(
   return result;
 }
 
+const RESET_CLUSTER_TOLERANCE_SEC = 90;
+
+function isNewerSnapshot(candidate, current) {
+  if (!current) return true;
+  const candidateTimestamp = Date.parse(candidate.timestamp);
+  const currentTimestamp = Date.parse(current.timestamp);
+  return (
+    Number.isFinite(candidateTimestamp) &&
+    (!Number.isFinite(currentTimestamp) ||
+      candidateTimestamp > currentTimestamp)
+  );
+}
+
+function selectCodexSnapshot(snapshots, nowSec) {
+  const groups = [];
+  const ungrouped = [];
+
+  for (const snapshot of snapshots) {
+    const resetAt = Number(snapshot.primary?.resets_at);
+    if (!Number.isFinite(resetAt)) {
+      ungrouped.push(snapshot);
+      continue;
+    }
+
+    let group = groups.find(
+      (candidate) =>
+        Math.max(candidate.maxResetAt, resetAt) -
+          Math.min(candidate.minResetAt, resetAt) <=
+        RESET_CLUSTER_TOLERANCE_SEC,
+    );
+    if (!group) {
+      group = {
+        minResetAt: resetAt,
+        maxResetAt: resetAt,
+        latest: snapshot,
+      };
+      groups.push(group);
+      continue;
+    }
+
+    group.minResetAt = Math.min(group.minResetAt, resetAt);
+    group.maxResetAt = Math.max(group.maxResetAt, resetAt);
+    if (isNewerSnapshot(snapshot, group.latest)) group.latest = snapshot;
+  }
+
+  const activeGroups = groups.filter(
+    (group) => Number(group.latest.primary?.resets_at) > nowSec,
+  );
+  let selected = null;
+  if (activeGroups.length > 0) {
+    selected = activeGroups
+      .map((group) => group.latest)
+      .sort((a, b) => {
+        const usedDifference =
+          Number(b.primary?.used_percent || 0) -
+          Number(a.primary?.used_percent || 0);
+        if (usedDifference !== 0) return usedDifference;
+        return Date.parse(b.timestamp) - Date.parse(a.timestamp);
+      })[0];
+  } else {
+    for (const snapshot of [
+      ...groups.map((group) => group.latest),
+      ...ungrouped,
+    ]) {
+      if (isNewerSnapshot(snapshot, selected)) selected = snapshot;
+    }
+  }
+
+  if (selected && activeGroups.length >= 2) {
+    selected = { ...selected, mixedWindows: true };
+  }
+  return selected;
+}
+
+function mergeRateLimitSnapshots(snapshots, nowSec) {
+  const merged = {};
+  const codexSnapshots = [];
+  for (const snapshot of snapshots) {
+    if (snapshot.limitId === "codex") {
+      codexSnapshots.push(snapshot);
+      continue;
+    }
+    if (isNewerSnapshot(snapshot, merged[snapshot.limitId])) {
+      merged[snapshot.limitId] = snapshot;
+    }
+  }
+
+  const codex = selectCodexSnapshot(codexSnapshots, nowSec);
+  if (codex) merged.codex = codex;
+  return merged;
+}
+
 // ============================================================================
 // Codex 세션 JSONL에서 실제 rate limits 추출
 // 한계: rate_limits는 세션별 스냅샷이므로 여러 세션 간 토큰 합산은 불가.
@@ -91,6 +183,8 @@ export function getCodexRateLimits({
   maxLinesPerFile = 800,
 } = {}) {
   let syntheticBucket = null; // 최근 token_count에서 합성 (행 활성화 + 토큰 데이터용)
+  const recentSnapshots = [];
+  const nowSec = Math.floor(now.getTime() / 1000);
 
   // 7일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
   for (let dayOffset = 0; dayOffset <= 6; dayOffset++) {
@@ -101,20 +195,19 @@ export function getCodexRateLimits({
       String(d.getMonth() + 1).padStart(2, "0"),
       String(d.getDate()).padStart(2, "0"),
     );
-    if (!existsSync(sessDir)) continue;
-    let files;
-    try {
-      files = readdirSync(sessDir)
-        .filter((f) => f.endsWith(".jsonl"))
-        .sort()
-        .reverse();
-    } catch {
-      continue;
+    let files = [];
+    if (existsSync(sessDir)) {
+      try {
+        files = readdirSync(sessDir)
+          .filter((f) => f.endsWith(".jsonl"))
+          .sort()
+          .reverse();
+      } catch {
+        files = [];
+      }
     }
 
-    const mergedBuckets = {};
-    const futurePrimaryResets = new Set();
-    const nowSec = Math.floor(now.getTime() / 1000);
+    const daySnapshots = [];
     for (const file of files) {
       try {
         const content = readFileSync(join(sessDir, file), "utf-8");
@@ -139,9 +232,6 @@ export function getCodexRateLimits({
                 contextWindow: evt.payload?.info?.model_context_window,
                 timestamp: evt.timestamp,
               };
-              if (rl.limit_id === "codex" && primary?.resets_at > nowSec) {
-                futurePrimaryResets.add(primary.resets_at);
-              }
             } else if (
               dayOffset <= 1 &&
               !rl &&
@@ -165,37 +255,24 @@ export function getCodexRateLimits({
           }
           if (Object.keys(found).length >= CODEX_MIN_BUCKETS) break;
         }
-        for (const [id, snapshot] of Object.entries(found)) {
-          const previous = mergedBuckets[id];
-          const previousTimestamp = previous
-            ? Date.parse(previous.timestamp)
-            : Number.NaN;
-          const snapshotTimestamp = Date.parse(snapshot.timestamp);
-          if (
-            !previous ||
-            (Number.isFinite(snapshotTimestamp) &&
-              (!Number.isFinite(previousTimestamp) ||
-                snapshotTimestamp > previousTimestamp))
-          ) {
-            mergedBuckets[id] = snapshot;
-          }
-        }
+        daySnapshots.push(...Object.values(found));
       } catch {
         /* 파일 읽기 실패 무시 */
       }
     }
-    // 실제 rate_limits 발견 → 토큰 데이터 병합 후 즉시 반환
+
+    if (dayOffset <= 1) {
+      recentSnapshots.push(...daySnapshots);
+      if (dayOffset === 0) continue;
+    }
+
+    const snapshots = dayOffset <= 1 ? recentSnapshots : daySnapshots;
+    const mergedBuckets = mergeRateLimitSnapshots(snapshots, nowSec);
     if (Object.keys(mergedBuckets).length > 0) {
       if (syntheticBucket) {
         const main =
           mergedBuckets.codex || mergedBuckets[Object.keys(mergedBuckets)[0]];
         if (main && !main.tokens) main.tokens = syntheticBucket.tokens;
-      }
-      if (mergedBuckets.codex && futurePrimaryResets.size >= 2) {
-        const resetTimes = [...futurePrimaryResets].sort((a, b) => a - b);
-        if (resetTimes.at(-1) - resetTimes[0] > 90) {
-          mergedBuckets.codex.mixedWindows = true;
-        }
       }
       return expireStaleCodexBuckets(mergedBuckets, nowSec);
     }

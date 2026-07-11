@@ -50,6 +50,13 @@ export const CONTEXT_MONITOR_CACHE_PATH = join(
   "tfx-hub",
   "context-monitor.json",
 );
+export const HUB_REQUEST_MONITOR_CACHE_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "tfx-hub",
+  "hub-request-context-monitor.json",
+);
 export const CONTEXT_MONITOR_LEGACY_PATH = join(
   homedir(),
   ".omc",

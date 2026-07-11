@@ -11,6 +11,7 @@
  * health/status 체크는 로깅을 건너뛴다.
  */
 
+import { HUB_REQUEST_MONITOR_CACHE_PATH } from "../../hud/constants.mjs";
 import { createContextMonitor } from "../../hud/context-monitor.mjs";
 import {
   getCorrelationId,
@@ -19,7 +20,9 @@ import {
 import { createModuleLogger } from "../../scripts/lib/logger.mjs";
 
 const log = createModuleLogger("hub");
-const contextMonitor = createContextMonitor();
+const contextMonitor = createContextMonitor({
+  cachePath: HUB_REQUEST_MONITOR_CACHE_PATH,
+});
 
 const SKIP_PATHS = new Set(["/health", "/healthz", "/status", "/ready"]);
 const MAX_CAPTURE_BYTES = 256 * 1024;

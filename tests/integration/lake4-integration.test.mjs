@@ -25,7 +25,7 @@ describe("lake4 integration", () => {
     assert.equal(infoView.warningLevel, "info");
     assert.equal(infoView.source, "stdin.tokens");
 
-    const criticalView = buildContextUsageView(
+    const unavailableView = buildContextUsageView(
       {},
       {
         usedTokens: 900,
@@ -33,8 +33,8 @@ describe("lake4 integration", () => {
       },
     );
 
-    assert.equal(criticalView.display, "900/1K (90%)");
-    assert.equal(criticalView.warningLevel, "critical");
-    assert.equal(criticalView.source, "monitor");
+    assert.equal(unavailableView.display, "--");
+    assert.equal(unavailableView.warningLevel, "ok");
+    assert.equal(unavailableView.source, "none");
   });
 });

@@ -6,11 +6,21 @@ import {
   shouldSuppressInfoOnlyContextStatus,
 } from "../../hud/context-monitor.mjs";
 
+function stdinContext(modelId, usedTokens) {
+  return {
+    model: { id: modelId },
+    context_window: {
+      context_window_size: 1_000_000,
+      current_usage: { total_tokens: usedTokens },
+    },
+  };
+}
+
 describe("Opus 4.7 duplicate status suppression", () => {
   it("claude-opus-4-7 계열에서는 info-only 상태 태그를 숨긴다", () => {
     const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-7" } },
-      { usedTokens: 700_000, limitTokens: 200_000 },
+      stdinContext("claude-opus-4-7", 700_000),
+      null,
     );
 
     assert.equal(view.warningLevel, "info");
@@ -20,8 +30,8 @@ describe("Opus 4.7 duplicate status suppression", () => {
 
   it("claude-opus-4-8 계열에서도 info-only 상태 태그를 숨긴다", () => {
     const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-8" } },
-      { usedTokens: 700_000, limitTokens: 200_000 },
+      stdinContext("claude-opus-4-8", 700_000),
+      null,
     );
 
     assert.equal(shouldSuppressInfoOnlyContextStatus("claude-opus-4-8"), true);
@@ -32,8 +42,8 @@ describe("Opus 4.7 duplicate status suppression", () => {
 
   it("claude-opus-4-8[1m] 계열에서도 info-only 상태 태그를 숨긴다 (현재 세션 모델 ID)", () => {
     const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-8[1m]" } },
-      { usedTokens: 700_000, limitTokens: 200_000 },
+      stdinContext("claude-opus-4-8[1m]", 700_000),
+      null,
     );
 
     assert.equal(
@@ -47,8 +57,8 @@ describe("Opus 4.7 duplicate status suppression", () => {
 
   it("[1m] suffix 모델도 info-only 상태 태그를 숨긴다", () => {
     const view = buildContextUsageView(
-      { model: { id: "claude-sonnet-4-5[1m]" } },
-      { usedTokens: 700_000, limitTokens: 200_000 },
+      stdinContext("claude-sonnet-4-5[1m]", 700_000),
+      null,
     );
 
     assert.equal(
@@ -62,12 +72,12 @@ describe("Opus 4.7 duplicate status suppression", () => {
 
   it("warn/critical 구간은 Opus 4.7에서도 그대로 유지한다", () => {
     const warnView = buildContextUsageView(
-      { model: { id: "claude-opus-4-7" } },
-      { usedTokens: 850_000, limitTokens: 200_000 },
+      stdinContext("claude-opus-4-7", 850_000),
+      null,
     );
     const criticalView = buildContextUsageView(
-      { model: { id: "claude-opus-4-7[1m]" } },
-      { usedTokens: 950_000, limitTokens: 200_000 },
+      stdinContext("claude-opus-4-7[1m]", 950_000),
+      null,
     );
 
     assert.equal(warnView.warningLevel, "warn");
@@ -78,12 +88,12 @@ describe("Opus 4.7 duplicate status suppression", () => {
 
   it("warn/critical 구간은 Opus 4.8에서도 그대로 유지한다", () => {
     const warnView = buildContextUsageView(
-      { model: { id: "claude-opus-4-8" } },
-      { usedTokens: 850_000, limitTokens: 200_000 },
+      stdinContext("claude-opus-4-8", 850_000),
+      null,
     );
     const criticalView = buildContextUsageView(
-      { model: { id: "claude-opus-4-8[1m]" } },
-      { usedTokens: 950_000, limitTokens: 200_000 },
+      stdinContext("claude-opus-4-8[1m]", 950_000),
+      null,
     );
 
     assert.equal(warnView.warningLevel, "warn");
