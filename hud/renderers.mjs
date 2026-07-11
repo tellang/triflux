@@ -61,6 +61,15 @@ function isCodexSnapshotStale(snapshot) {
   );
 }
 
+function getCodexWindowStaleness(snapshot) {
+  return {
+    primary: isCodexSnapshotStale(snapshot),
+    secondary: isCodexSnapshotStale({
+      timestamp: snapshot?.secondaryTimestamp ?? snapshot?.timestamp,
+    }),
+  };
+}
+
 function formatGeminiLimitValue(limit, provFn) {
   if (limit?.unlimited) return provFn("\u221E");
   const usedP = limit?.usedPct;
@@ -557,6 +566,7 @@ export function getProviderRow(
         realQuota.buckets.codex ||
         realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
+        const staleWindows = getCodexWindowStaleness(main);
         const fiveP =
           main.primary?.used_percent != null
             ? clampPercent(main.primary.used_percent)
@@ -567,11 +577,15 @@ export function getProviderRow(
             : null;
         const fCellN =
           fiveP != null
-            ? colorByProvider(fiveP, `${fiveP}%`, provFn)
+            ? staleWindows.primary
+              ? dim(`${fiveP}%`)
+              : colorByProvider(fiveP, `${fiveP}%`, provFn)
             : dim("--%");
         const wCellN =
           weekP != null
-            ? colorByProvider(weekP, `${weekP}%`, provFn)
+            ? staleWindows.secondary
+              ? dim(`${weekP}%`)
+              : colorByProvider(weekP, `${weekP}%`, provFn)
             : dim("--%");
         return {
           prefix: minPrefix,
@@ -615,7 +629,7 @@ export function getProviderRow(
         realQuota.buckets.codex ||
         realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
-        const staleSnapshot = isCodexSnapshotStale(main);
+        const staleWindows = getCodexWindowStaleness(main);
         const fiveP =
           main.primary?.used_percent != null
             ? clampPercent(main.primary.used_percent)
@@ -626,13 +640,13 @@ export function getProviderRow(
             : null;
         const fCell =
           fiveP != null
-            ? staleSnapshot
+            ? staleWindows.primary
               ? dim(formatPercentCell(fiveP))
               : colorByProvider(fiveP, formatPercentCell(fiveP), provFn)
             : dim(formatPlaceholderPercentCell());
         const wCell =
           weekP != null
-            ? staleSnapshot
+            ? staleWindows.secondary
               ? dim(formatPercentCell(weekP))
               : colorByProvider(weekP, formatPercentCell(weekP), provFn)
             : dim(formatPlaceholderPercentCell());
@@ -678,7 +692,7 @@ export function getProviderRow(
         realQuota.buckets.codex ||
         realQuota.buckets[Object.keys(realQuota.buckets)[0]];
       if (main) {
-        const staleSnapshot = isCodexSnapshotStale(main);
+        const staleWindows = getCodexWindowStaleness(main);
         const fiveP =
           main.primary?.used_percent != null
             ? clampPercent(main.primary.used_percent)
@@ -689,13 +703,13 @@ export function getProviderRow(
             : null;
         const fCell =
           fiveP != null
-            ? staleSnapshot
+            ? staleWindows.primary
               ? dim(formatPercentCell(fiveP))
               : colorByProvider(fiveP, formatPercentCell(fiveP), provFn)
             : dim(formatPlaceholderPercentCell());
         const wCell =
           weekP != null
-            ? staleSnapshot
+            ? staleWindows.secondary
               ? dim(formatPercentCell(weekP))
               : colorByProvider(weekP, formatPercentCell(weekP), provFn)
             : dim(formatPlaceholderPercentCell());
@@ -752,7 +766,7 @@ export function getProviderRow(
       realQuota.buckets.codex ||
       realQuota.buckets[Object.keys(realQuota.buckets)[0]];
     if (main) {
-      const staleSnapshot = isCodexSnapshotStale(main);
+      const staleWindows = getCodexWindowStaleness(main);
       const fiveP =
         main.primary?.used_percent != null
           ? clampPercent(main.primary.used_percent)
@@ -766,23 +780,27 @@ export function getProviderRow(
         formatResetRemainingDayHour(main.secondary?.resets_at) || "n/a";
       const fCell =
         fiveP != null
-          ? staleSnapshot
+          ? staleWindows.primary
             ? dim(formatPercentCell(fiveP))
             : colorByProvider(fiveP, formatPercentCell(fiveP), provFn)
           : dim(formatPlaceholderPercentCell());
       const wCell =
         weekP != null
-          ? staleSnapshot
+          ? staleWindows.secondary
             ? dim(formatPercentCell(weekP))
             : colorByProvider(weekP, formatPercentCell(weekP), provFn)
           : dim(formatPlaceholderPercentCell());
       const fBar =
         fiveP != null
-          ? tierBar(currentTier, fiveP, provAnsi)
+          ? staleWindows.primary
+            ? tierDimBar(currentTier)
+            : tierBar(currentTier, fiveP, provAnsi)
           : tierDimBar(currentTier);
       const wBar =
         weekP != null
-          ? tierBar(currentTier, weekP, provAnsi)
+          ? staleWindows.secondary
+            ? tierDimBar(currentTier)
+            : tierBar(currentTier, weekP, provAnsi)
           : tierDimBar(currentTier);
       quotaSection =
         `${dim("5h:")}${fBar}${fCell} ` +

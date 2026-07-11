@@ -3,13 +3,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-
+import { codexWhite, dim } from "../../hud/colors.mjs";
 import {
   classifyBucket,
   expireStaleCodexBuckets,
   getCodexRateLimits,
   normalizeBuckets,
 } from "../../hud/providers/codex.mjs";
+import { getProviderRow } from "../../hud/renderers.mjs";
+import { formatPercentCell } from "../../hud/utils.mjs";
 
 function sessionDirFor(sessionsRoot, date) {
   return join(
@@ -29,7 +31,16 @@ function writeRollout(sessionsRoot, date, filename, events) {
   );
 }
 
-function rateLimitEvent({ timestamp, usedPercent, resetsAt }) {
+function rateLimitEvent({
+  timestamp,
+  usedPercent,
+  resetsAt,
+  secondaryUsedPercent = 20,
+  secondaryResetsAt = resetsAt + 7 * 24 * 60 * 60,
+  credits,
+  totalTokenUsage,
+  contextWindow,
+}) {
   return {
     timestamp,
     payload: {
@@ -42,10 +53,15 @@ function rateLimitEvent({ timestamp, usedPercent, resetsAt }) {
           resets_at: resetsAt,
         },
         secondary: {
-          used_percent: 20,
+          used_percent: secondaryUsedPercent,
           window_minutes: 10080,
-          resets_at: resetsAt + 7 * 24 * 60 * 60,
+          resets_at: secondaryResetsAt,
         },
+        credits,
+      },
+      info: {
+        total_token_usage: totalTokenUsage,
+        model_context_window: contextWindow,
       },
     },
   };
@@ -213,6 +229,89 @@ describe("Codex multi-window selection", () => {
     }
   });
 
+  it("selects an active heavy weekly window independently from the active five-hour window", () => {
+    const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-weekly-"));
+    const now = new Date("2026-07-11T06:50:00.000Z");
+    const nowSec = Math.floor(now.getTime() / 1000);
+    try {
+      writeRollout(sessionsRoot, now, "rollout-active-primary.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T06:45:00.000Z",
+          usedPercent: 12,
+          resetsAt: nowSec + 4 * 60 * 60,
+          secondaryUsedPercent: 4,
+          secondaryResetsAt: nowSec + 7 * 24 * 60 * 60,
+          credits: { balance: 9 },
+          totalTokenUsage: { total_tokens: 1234 },
+          contextWindow: 200_000,
+        }),
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-heavy-weekly.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-10T08:21:00.000Z",
+          usedPercent: 95,
+          resetsAt: nowSec - 60,
+          secondaryUsedPercent: 43,
+          secondaryResetsAt: nowSec + 5 * 24 * 60 * 60,
+          credits: { balance: 1 },
+          totalTokenUsage: { total_tokens: 9999 },
+          contextWindow: 99_999,
+        }),
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(buckets.codex.primary.used_percent, 12);
+      assert.equal(buckets.codex.secondary.used_percent, 43);
+      assert.equal(buckets.codex.timestamp, "2026-07-11T06:45:00.000Z");
+      assert.equal(
+        buckets.codex.secondaryTimestamp,
+        "2026-07-10T08:21:00.000Z",
+      );
+      assert.deepEqual(buckets.codex.credits, { balance: 9 });
+      assert.deepEqual(buckets.codex.tokens, { total_tokens: 1234 });
+      assert.equal(buckets.codex.contextWindow, 200_000);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("marks mixed windows when only weekly windows form multiple active groups", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-weekly-mixed-"),
+    );
+    const now = new Date("2026-07-11T06:50:00.000Z");
+    const nowSec = Math.floor(now.getTime() / 1000);
+    try {
+      writeRollout(sessionsRoot, now, "rollout-weekly-a.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T06:40:00.000Z",
+          usedPercent: 10,
+          resetsAt: nowSec + 4 * 60 * 60,
+          secondaryUsedPercent: 21,
+          secondaryResetsAt: nowSec + 3 * 24 * 60 * 60,
+        }),
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-weekly-b.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T06:45:00.000Z",
+          usedPercent: 11,
+          resetsAt: nowSec + 4 * 60 * 60 + 30,
+          secondaryUsedPercent: 22,
+          secondaryResetsAt: nowSec + 5 * 24 * 60 * 60,
+        }),
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(buckets.codex.primary.used_percent, 11);
+      assert.equal(buckets.codex.secondary.used_percent, 22);
+      assert.equal(buckets.codex.mixedWindows, true);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
   it("marks stale cached windows expired and zeroes their usage", () => {
     const nowSec = 1_800_000_000;
     const buckets = expireStaleCodexBuckets(
@@ -234,5 +333,50 @@ describe("Codex multi-window selection", () => {
       used_percent: 45,
       resets_at: nowSec + 1,
     });
+  });
+});
+
+describe("Codex window freshness rendering", () => {
+  function renderCodexFullRow(snapshot) {
+    return getProviderRow(
+      "full",
+      "codex",
+      "x",
+      codexWhite,
+      {},
+      {},
+      {},
+      { type: "codex", buckets: { codex: snapshot } },
+      null,
+      null,
+      null,
+    );
+  }
+
+  it("falls back to the primary timestamp for legacy snapshots without secondaryTimestamp", () => {
+    const staleTimestamp = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+    const row = renderCodexFullRow({
+      timestamp: staleTimestamp,
+      primary: { used_percent: 12 },
+      secondary: { used_percent: 43 },
+    });
+
+    assert.ok(row.left.includes(dim(formatPercentCell(12))));
+    assert.ok(row.left.includes(dim(formatPercentCell(43))));
+  });
+
+  it("dims only the stale weekly percentage and gauge when five-hour data is fresh", () => {
+    const row = renderCodexFullRow({
+      timestamp: new Date().toISOString(),
+      secondaryTimestamp: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
+      primary: { used_percent: 12 },
+      secondary: { used_percent: 43 },
+    });
+
+    assert.ok(row.left.includes(codexWhite(formatPercentCell(12))));
+    assert.ok(row.left.includes(dim(formatPercentCell(43))));
+    assert.ok(
+      row.left.includes(`${dim("░".repeat(5))} ${dim(formatPercentCell(43))}`),
+    );
   });
 });

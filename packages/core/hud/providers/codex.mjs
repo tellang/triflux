@@ -92,12 +92,12 @@ function isNewerSnapshot(candidate, current) {
   );
 }
 
-function selectCodexSnapshot(snapshots, nowSec) {
+function selectCodexWindowSnapshot(snapshots, nowSec, windowKey) {
   const groups = [];
   const ungrouped = [];
 
   for (const snapshot of snapshots) {
-    const resetAt = Number(snapshot.primary?.resets_at);
+    const resetAt = Number(snapshot[windowKey]?.resets_at);
     if (!Number.isFinite(resetAt)) {
       ungrouped.push(snapshot);
       continue;
@@ -125,7 +125,7 @@ function selectCodexSnapshot(snapshots, nowSec) {
   }
 
   const activeGroups = groups.filter(
-    (group) => Number(group.latest.primary?.resets_at) > nowSec,
+    (group) => Number(group.latest[windowKey]?.resets_at) > nowSec,
   );
   let selected = null;
   if (activeGroups.length > 0) {
@@ -133,8 +133,8 @@ function selectCodexSnapshot(snapshots, nowSec) {
       .map((group) => group.latest)
       .sort((a, b) => {
         const usedDifference =
-          Number(b.primary?.used_percent || 0) -
-          Number(a.primary?.used_percent || 0);
+          Number(b[windowKey]?.used_percent || 0) -
+          Number(a[windowKey]?.used_percent || 0);
         if (usedDifference !== 0) return usedDifference;
         return Date.parse(b.timestamp) - Date.parse(a.timestamp);
       })[0];
@@ -147,8 +147,35 @@ function selectCodexSnapshot(snapshots, nowSec) {
     }
   }
 
-  if (selected && activeGroups.length >= 2) {
-    selected = { ...selected, mixedWindows: true };
+  return { snapshot: selected, activeGroupCount: activeGroups.length };
+}
+
+function selectCodexSnapshot(snapshots, nowSec) {
+  const primarySelection = selectCodexWindowSnapshot(
+    snapshots,
+    nowSec,
+    "primary",
+  );
+  const secondarySelection = selectCodexWindowSnapshot(
+    snapshots,
+    nowSec,
+    "secondary",
+  );
+  const primarySnapshot = primarySelection.snapshot;
+  if (!primarySnapshot) return null;
+
+  const secondarySnapshot = secondarySelection.snapshot;
+  const selected = {
+    ...primarySnapshot,
+    secondary: secondarySnapshot?.secondary || null,
+    secondaryTimestamp:
+      secondarySnapshot?.timestamp || primarySnapshot.timestamp,
+  };
+  if (
+    primarySelection.activeGroupCount >= 2 ||
+    secondarySelection.activeGroupCount >= 2
+  ) {
+    selected.mixedWindows = true;
   }
   return selected;
 }
