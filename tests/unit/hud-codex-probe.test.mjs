@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
-import { normalizeAppServerRateLimits } from "../../hud/providers/codex-probe.mjs";
+import {
+  normalizeAppServerRateLimits,
+  probeRateLimitsViaAppServer,
+} from "../../hud/providers/codex-probe.mjs";
 
 const FIXTURE = {
   rateLimits: {
@@ -90,4 +96,64 @@ test("normalizeAppServerRateLimits: byLimitId 없으면 top-level rateLimits 폴
 test("normalizeAppServerRateLimits: null/빈 응답은 빈 배열", () => {
   assert.deepEqual(normalizeAppServerRateLimits(null, "t"), []);
   assert.deepEqual(normalizeAppServerRateLimits({}, "t"), []);
+});
+
+function writeFakeServer(body) {
+  const dir = mkdtempSync(join(tmpdir(), "tfx-probe-test-"));
+  const path = join(dir, "fake-app-server.mjs");
+  writeFileSync(path, body);
+  return path;
+}
+
+const FAKE_OK = `
+let buf = "";
+process.stdin.on("data", (d) => {
+  buf += d.toString();
+  let i;
+  while ((i = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, i); buf = buf.slice(i + 1);
+    if (!line.trim()) continue;
+    const msg = JSON.parse(line);
+    if (msg.method === "initialize") {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { codexHome: process.env.CODEX_HOME || "" } }) + "\\n");
+    } else if (msg.method === "account/rateLimits/read") {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {
+        rateLimits: { limitId: "codex", limitName: null,
+          primary: { usedPercent: 45, windowDurationMins: 300, resetsAt: 1783767909 },
+          secondary: { usedPercent: 7, windowDurationMins: 10080, resetsAt: 1784354709 },
+          credits: null, individualLimit: null, planType: "pro", rateLimitReachedType: null } } }) + "\\n");
+    }
+  }
+});
+`;
+
+test("probeRateLimitsViaAppServer: 정상 왕복 → 정규화 스냅샷", async () => {
+  const fake = writeFakeServer(FAKE_OK);
+  const out = await probeRateLimitsViaAppServer({
+    spawnBin: process.execPath,
+    spawnArgs: [fake],
+    timeoutMs: 5000,
+    now: new Date("2026-07-11T09:00:00.000Z"),
+  });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].primary.used_percent, 45);
+  assert.equal(out[0].timestamp, "2026-07-11T09:00:00.000Z");
+});
+
+test("probeRateLimitsViaAppServer: 타임아웃이면 null (fail-open)", async () => {
+  const fake = writeFakeServer("setInterval(() => {}, 1000);");
+  const out = await probeRateLimitsViaAppServer({
+    spawnBin: process.execPath,
+    spawnArgs: [fake],
+    timeoutMs: 300,
+  });
+  assert.equal(out, null);
+});
+
+test("probeRateLimitsViaAppServer: 스폰 실패면 null", async () => {
+  const out = await probeRateLimitsViaAppServer({
+    spawnBin: "/nonexistent/bin/never",
+    timeoutMs: 500,
+  });
+  assert.equal(out, null);
 });
