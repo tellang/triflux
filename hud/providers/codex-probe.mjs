@@ -119,7 +119,7 @@ export function normalizeAppServerRateLimits(result, nowIso) {
   const byId = result.rateLimitsByLimitId;
   if (byId && typeof byId === "object" && Object.keys(byId).length > 0) {
     return Object.values(byId)
-      .filter((e) => e && e.limitId)
+      .filter((e) => e?.limitId)
       .map((e) => toSnapshot(e, nowIso));
   }
   if (result.rateLimits?.limitId) {
@@ -195,9 +195,7 @@ export function probeRateLimitsViaAppServer({
         } else if (msg.id === 2) {
           if (msg.error) finish(null);
           else {
-            finish(
-              normalizeAppServerRateLimits(msg.result, now.toISOString()),
-            );
+            finish(normalizeAppServerRateLimits(msg.result, now.toISOString()));
           }
         }
       }

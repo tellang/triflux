@@ -166,6 +166,50 @@ describe("Codex bucket normalization", () => {
 });
 
 describe("Codex multi-window selection", () => {
+  it("getCodexRateLimits: probe extraSnapshots가 낡은 세션 데이터를 이긴다", () => {
+    const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-probe-"));
+    const now = new Date("2026-07-11T09:00:00.000Z");
+    const nowSec = Math.floor(now.getTime() / 1000);
+    try {
+      writeRollout(sessionsRoot, now, "rollout-stale.jsonl", [
+        rateLimitEvent({
+          timestamp: "2026-07-11T07:00:00.000Z",
+          usedPercent: 6,
+          resetsAt: nowSec + 3600,
+        }),
+      ]);
+      const probeSnapshot = {
+        limitId: "codex",
+        limitName: null,
+        primary: {
+          used_percent: 45,
+          window_minutes: 300,
+          resets_at: nowSec + 3600,
+        },
+        secondary: {
+          used_percent: 7,
+          window_minutes: 10080,
+          resets_at: nowSec + 86_400 * 6,
+        },
+        credits: null,
+        tokens: null,
+        contextWindow: null,
+        timestamp: now.toISOString(),
+        probe: true,
+      };
+
+      const buckets = getCodexRateLimits({
+        sessionsRoot,
+        now,
+        extraSnapshots: [probeSnapshot],
+      });
+
+      assert.equal(buckets.codex.primary.used_percent, 45);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
   it("merges today and yesterday, clusters 90s reset jitter, and selects max-used active window", () => {
     const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-quota-"));
     const now = new Date("2026-07-11T06:50:00.000Z");
