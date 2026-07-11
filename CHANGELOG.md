@@ -2,6 +2,24 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.43.0] - 2026-07-11
+
+### Added
+- hud: codex quota 능동 프로브 — `codex app-server`의 `account/rateLimits/read` JSON-RPC(모델 토큰 0 소모)로 5h/1w 쿼터를 주기 갱신. 계정별 TTL 스로틀(기본 5분) + JWT 만료 임박 계정 skip(refresh 강제 금지) + 실패 시 passive 세션 스캔 fail-open. opt-out `TFX_CODEX_PROBE=0`
+
+### Fixed
+- hud: CTX 평면 혼동 — hub request-logger의 데몬 누적 토큰 카운터가 세션 컨텍스트로 오독·영구 100% critical 표시되던 결함. hub monitor 캐시 경로 분리 + stdin 컨텍스트 부재 시 `CTX:--`
+- hud: codex 5h 창 멀티계정 last-writer-wins — 최신 이벤트를 낸 경량 계정 창이 주력 계정 소진(실측 70%)을 가리던 결함. resets_at 90s 클러스터링 + 활성 창 중 max-used 선택 + 오늘·어제 병합 스캔(자정 넘김 세션 가림 제거)
+- hud: 1w 주간 창을 5h 선택에 얹지 않고 독립 선택 — 5h 창이 만료된 계정의 주간 소진(실측 40~43%)이 표시되지 않던 결함
+- mirror: packages/remote uds-orchestrator import 변환 복원
+
+### Changed
+- hud: codex stale 시각 처리(30분 초과 dim/빈 게이지) 제거 — 값이 있으면 항상 색·게이지 표시 (능동 프로브가 낡음을 데이터로 해소)
+
+### Tests
+- hud: codex 창 선택·freshness/expiry·프로브(정규화/stdio 왕복/계정 열거/TTL) 영구 회귀 스위트 편입
+- chore: lifecycle 커밋의 Biome format/organizeImports 드리프트 정리 (CI lint 차단 해소)
+
 ## [10.42.0] - 2026-07-07
 
 ### Added
