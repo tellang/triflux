@@ -1,6 +1,6 @@
 {
   "name": "@triflux/core",
-  "version": "10.42.0",
+  "version": "10.43.0",
   "description": "triflux core — CLI routing, pipeline, adapters. Zero native dependencies.",
   "type": "module",
   "main": "hub/index.mjs",
