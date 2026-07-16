@@ -7,6 +7,7 @@ import {
   getCtoMode,
   isCtoManagerEnabled,
   isCtoRetentionEnabled,
+  resolveRoleControlSnapshot,
 } from "../../hub/lib/cto-env.mjs";
 
 const ENV_KEYS = [
@@ -140,4 +141,46 @@ describe("cto env readers", () => {
     process.env.TFX_CTO_MAX_TOKENS = "4096";
     assert.equal(getCtoMaxTokens(), 4096);
   });
+});
+
+describe("resolveRoleControlSnapshot", () => {
+  const cases = [
+    [
+      {
+        TFX_CTO: "0",
+        TFX_CTO_MANAGER: "1",
+        TFX_LEAD_MANAGER: "1",
+        TFX_CTO_NORTH_STAR: "1",
+        TFX_CTO_AUTO_COLLECT: "1",
+      },
+      [false, false, false, false],
+    ],
+    [{}, [false, false, true, true]],
+    [{ TFX_CTO_MANAGER: "1" }, [true, false, true, true]],
+    [{ TFX_CTO_MANAGER: "1", TFX_LEAD_MANAGER: "1" }, [true, true, true, true]],
+    [
+      { TFX_CTO_MANAGER: "1", TFX_CTO_NORTH_STAR: "0" },
+      [true, false, false, true],
+    ],
+    [
+      { TFX_CTO_MANAGER: "1", TFX_CTO_AUTO_COLLECT: "off" },
+      [true, false, true, false],
+    ],
+  ];
+
+  for (const [env, expected] of cases) {
+    it(`resolves ${JSON.stringify(env)}`, () => {
+      const snapshot = resolveRoleControlSnapshot(env, { generation: 7 });
+      assert.equal(snapshot.generation, 7);
+      assert.deepEqual(
+        [
+          snapshot.cto_manager_enabled,
+          snapshot.lead_manager_enabled,
+          snapshot.north_star_enabled,
+          snapshot.auto_collect_enabled,
+        ],
+        expected,
+      );
+    });
+  }
 });

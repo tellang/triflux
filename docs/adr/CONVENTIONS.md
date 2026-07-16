@@ -12,6 +12,7 @@
 ## SHOULD (맞추면 됨, 차단 게이트 아님)
 
 - 파일명 `docs/adr/NNNN-kebab-title.md`, 4자리 zero-pad, 순차 단조 증가(삭제 후 재사용 금지). 산문 참조는 `ADR-0007`.
+- **번호 발번은 `max(로컬 디스크, git ls-tree origin/main) + 1`로 교차확인한다** — 멀티세션/swarm 환경에서 로컬만 보면 두 세션이 같은 번호를 이중배정할 수 있다(선제 방어; mnk-callbot 0054/0055 이중배정 사고 근거). 발번 후 즉시 상태보드 등재+커밋.
 - `NNNN`는 **크로스폴더 척추** — 동일 주제가 `docs/prd/`·`.triflux/plans/`로 퍼지면 같은 번호를 재사용해 파일명만으로 추적.
 - 아래 권장 frontmatter 템플릿 사용.
 

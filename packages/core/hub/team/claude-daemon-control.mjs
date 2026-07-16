@@ -464,28 +464,41 @@ export function sendClaudeControlRequest(
 
 // claude daemon 은 control.sock 의 mutating op(dispatch 등)에 control-key
 // 인증을 강제한다 (미제시 시 EAUTH "didn't present the daemon control key").
-// key 는 <configDir>/daemon/control.key (configDir 스코프별). 파일이 없으면
-// 인증 미강제 daemon 으로 보고 auth 필드를 생략한다 (fail-open — 구버전 호환).
+// OMC runtime config 는 .omc-launch-profile.json 의 sourceConfigDir 에서 key 를
+// 발급한다. control.sock 은 runtime config hash 를 쓰더라도 auth 는 발급 config
+// 에서 읽어야 한다. 일반 daemon 은 <configDir>/daemon/control.key 를 사용한다.
+// 어느 경로에도 파일이 없으면 인증 미강제 daemon 으로 보고 auth 를 생략한다
+// (fail-open — 구버전 호환).
 export async function readDaemonControlKey(
   configDir = resolveClaudeConfigDir(),
   { diagnostics } = {},
 ) {
   if (!configDir) return undefined;
-  const keyPath = path.join(configDir, "daemon", "control.key");
-  try {
-    const key = await fs.readFile(keyPath, "utf8");
-    return key.trim() || undefined;
-  } catch (error) {
-    if (error?.code === "ENOENT") return undefined;
-    if (Array.isArray(diagnostics)) {
-      diagnostics.push({
-        code: error?.code || "UNKNOWN",
-        path: keyPath,
-        message: error?.message || String(error),
-      });
+
+  const runtimeConfigDir = path.resolve(configDir);
+  const omcProfile = await readOmcLaunchProfile(runtimeConfigDir);
+  const keyConfigDirs = [omcProfile?.sourceConfigDir, runtimeConfigDir].filter(
+    (candidate, index, entries) =>
+      candidate && entries.indexOf(candidate) === index,
+  );
+
+  for (const keyConfigDir of keyConfigDirs) {
+    const keyPath = path.join(keyConfigDir, "daemon", "control.key");
+    try {
+      const key = await fs.readFile(keyPath, "utf8");
+      if (key.trim()) return key.trim();
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      if (Array.isArray(diagnostics)) {
+        diagnostics.push({
+          code: error?.code || "UNKNOWN",
+          path: keyPath,
+          message: error?.message || String(error),
+        });
+      }
     }
-    return undefined;
   }
+  return undefined;
 }
 
 export async function buildDaemonControlAuth(configDir, opts = {}) {
