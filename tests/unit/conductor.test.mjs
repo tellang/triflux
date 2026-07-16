@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -772,5 +772,45 @@ describe("conductor: broker no-lease policy", () => {
     );
     assert.ok(spawn, "spawn event missing after broker_no_lease");
     assert.equal(spawn.agent, "codex");
+  });
+});
+
+describe("conductor: remote Codex profile guard", () => {
+  it("remote nested Codex downgrades process ultra to max", async () => {
+    await conductor.shutdown("recreate_for_remote_profile_guard");
+    const calls = [];
+    const spawn = (...args) => {
+      calls.push(args);
+      return makeMockSpawn()(...args);
+    };
+    conductor = makeConductor(logsDir, { deps: { spawn } });
+    const codexHome = join(logsDir, "codex-home");
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(
+      join(codexHome, "gpt56_sol_max.config.toml"),
+      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+    );
+
+    const previous = process.env.TFX_CODEX_PROFILE;
+    try {
+      process.env.TFX_CODEX_PROFILE = "ultra";
+      conductor.spawnSession(
+        minConfig({
+          id: "remote-codex-ultra-guard",
+          agent: "codex",
+          remote: true,
+          host: "example.test",
+          env: { CODEX_HOME: codexHome },
+        }),
+      );
+
+      await waitFor(() => calls.length > 0);
+      const remoteCommand = calls[0][1].at(-1);
+      assert.match(remoteCommand, /model_reasoning_effort=.*max/u);
+      assert.doesNotMatch(remoteCommand, /model_reasoning_effort=.*ultra/u);
+    } finally {
+      if (previous === undefined) delete process.env.TFX_CODEX_PROFILE;
+      else process.env.TFX_CODEX_PROFILE = previous;
+    }
   });
 });

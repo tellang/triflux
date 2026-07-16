@@ -19,6 +19,8 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRegistry } from "@triflux/core/mesh/mesh-registry.mjs";
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
+import { codexProfileConfigOverrides } from "../../scripts/lib/codex-profile-config.mjs";
 import { broker } from "@triflux/core/hub/account-broker.mjs";
 import { runPreflight as runCodexPreflight } from "@triflux/core/hub/codex-preflight.mjs";
 import {
@@ -608,7 +610,9 @@ export function createConductor(opts = {}) {
       cli: session.config.agent,
       prompt: session.config.prompt,
       profile: session.config.profile,
+      role: session.config.role,
       model: session.config.model,
+      env: session.config.env,
       mcpServers: session.config.mcpServers,
       excludeMcpServers,
       resolveCommand: opts.deps?.resolveCliExecutable,
@@ -902,8 +906,25 @@ export function createConductor(opts = {}) {
     } else if (agent === "gemini") {
       remoteBin = "gemini -y";
     } else {
-      remoteBin =
-        "codex exec -s danger-full-access --dangerously-bypass-approvals-and-sandbox";
+      const codexHome = session.config.env?.CODEX_HOME;
+      const profile = resolveNestedCodexAgentProfile(
+        session.config.role || "executor",
+        {
+          profileOverride:
+            session.config.profile ??
+            session.config.env?.TFX_CODEX_PROFILE ??
+            process.env.TFX_CODEX_PROFILE ??
+            "auto",
+          codexHome,
+        },
+      );
+      const configArgs = codexProfileConfigOverrides(profile, {
+        codexHome,
+        disallowUltra: true,
+      })
+        .map((override) => `-c '${override.replace(/'/g, `'\\''`)}'`)
+        .join(" ");
+      remoteBin = `codex exec${configArgs ? ` ${configArgs}` : ""} -s danger-full-access --dangerously-bypass-approvals-and-sandbox`;
     }
 
     // prompt는 stdin으로 전달 — 셸 이스케이프 문제 완전 회피

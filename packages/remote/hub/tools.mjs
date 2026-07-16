@@ -2,6 +2,11 @@
 // register/status/publish/ask/poll/handoff/HITL + team proxy
 // 모든 도구 응답: { ok: boolean, error?: { code, message }, data?: ... }
 
+import {
+  DEFAULT_ASSIGN_TIMEOUT_MS,
+  DEFAULT_ASSIGN_TTL_MS,
+  DEFAULT_HANDOFF_TTL_MS,
+} from "@triflux/core/hub/lib/timeout-defaults.mjs";
 import { createPipeline, ensurePipelineTable } from "@triflux/core/hub/pipeline/index.mjs";
 import {
   initPipelineState,
@@ -10,7 +15,6 @@ import {
 } from "@triflux/core/hub/pipeline/state.mjs";
 import { sendInputToConductorSession } from "./team/conductor-registry.mjs";
 import { getTeamBridge } from "@triflux/core/hub/team-bridge.mjs";
-import { DEFAULT_ASSIGN_TIMEOUT_MS, DEFAULT_ASSIGN_TTL_MS, DEFAULT_HANDOFF_TTL_MS } from "@triflux/core/hub/lib/timeout-defaults.mjs";
 
 const TEAM_BRIDGE_NOT_REGISTERED = "bridge_not_registered";
 

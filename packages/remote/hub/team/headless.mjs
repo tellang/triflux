@@ -20,6 +20,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
 import { requestJson } from "@triflux/core/hub/bridge.mjs";
 import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
 import { getMaxSpawnPerSec } from "@triflux/core/hub/lib/spawn-trace.mjs";
@@ -43,14 +44,14 @@ import { startClaudeNativeBridge } from "./claude-native-bridge.mjs";
 import { removeClaudeSessionProjection } from "./claude-session-projection.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
-  createFileActivitySource,
-  createInterventionLadder,
-} from "./intervention.mjs";
-import {
   formatHandoffForLead,
   HANDOFF_INSTRUCTION_SHORT,
   processHandoff,
 } from "./handoff.mjs";
+import {
+  createFileActivitySource,
+  createInterventionLadder,
+} from "./intervention.mjs";
 import {
   capturePsmuxPane,
   createPsmuxSession,
@@ -366,6 +367,14 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   writeFileSync(promptFile, fullPrompt, "utf8");
   void IS_WINDOWS; // referenced for diagnostic guard chain below
 
+  const codexProfile =
+    resolvedCli === "codex"
+      ? resolveNestedCodexAgentProfile(opts.role || cli, {
+          profileOverride:
+            opts.profile ?? process.env.TFX_CODEX_PROFILE ?? "auto",
+          codexHome: process.env.CODEX_HOME,
+        })
+      : undefined;
   const backendCommand =
     resolvedCli === "antigravity"
       ? buildRouteBackedHeadlessCommand(resolvedCli, promptFile, resultFile, {
@@ -375,6 +384,9 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
       : getBackend(resolvedCli).buildArgs(fullPrompt, resultFile, {
           ...opts,
           model,
+          profile: codexProfile,
+          codexHome: process.env.CODEX_HOME,
+          disallowUltra: true,
           promptFile,
         });
   const safeCwd =
@@ -571,7 +583,8 @@ export function createStallMonitor(paneId, resultFile, config, deps = {}) {
 
 function createHeadlessIntervention(dispatch, fallback) {
   return async (context) => {
-    if (typeof fallback === "function") return (await fallback(context)) === true;
+    if (typeof fallback === "function")
+      return (await fallback(context)) === true;
 
     const isDaemon = context.channel === "daemon";
     const readActivitySignature = isDaemon
@@ -606,6 +619,8 @@ function createHeadlessIntervention(dispatch, fallback) {
           },
       readActivitySignature,
       deps: {
+        // 이 트랙이 재실행 소유자다. pane 채널은 기존 completion wrapper를 다시
+        // dispatch하여 token/result 계약을 보존한다.
         resumeHandler: async () => {
           if (isDaemon || !dispatch.command) return { ok: false };
           const restarted = dispatchCommand(
@@ -631,6 +646,7 @@ export function createActivityPollGuard({
   const controller = new AbortController();
   let lastMtime = 0;
   let checking = false;
+
   const finishIfTimedOut = async () => {
     if (checking || controller.signal.aborted) return;
     checking = true;
@@ -640,6 +656,7 @@ export function createActivityPollGuard({
       checking = false;
     }
   };
+
   return Object.freeze({
     signal: controller.signal,
     observe(content) {
@@ -989,6 +1006,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
         mcp: assignment.mcp,
         role: assignment.role,
         model: assignment.model,
+        profile: assignment.profile,
         cwd: assignment.cwd || assignment.workdir,
       },
     );
@@ -1071,6 +1089,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
           mcp: assignment.mcp,
           role: assignment.role,
           model: assignment.model,
+          profile: assignment.profile,
           cwd: assignment.cwd || assignment.workdir,
         },
       );
@@ -1134,6 +1153,7 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
           mcp: assignment.mcp,
           role: assignment.role,
           model: assignment.model,
+          profile: assignment.profile,
           cwd: assignment.cwd || assignment.workdir,
         },
       );
@@ -1306,12 +1326,11 @@ async function awaitAll(
             {
               pollInterval: stallOpts.pollInterval,
               stallTimeout: stallOpts.stallTimeout,
-              hardCeiling:
-                lifecycle?.enabled
-                  ? (stallOpts.hardCeiling ??
-                    stallOpts.completionTimeout ??
-                    lifecycle.hardCeilingMs)
-                  : (stallOpts.completionTimeout ?? timeoutSec * 1000),
+              hardCeiling: lifecycle?.enabled
+                ? (stallOpts.hardCeiling ??
+                  stallOpts.completionTimeout ??
+                  lifecycle.hardCeilingMs)
+                : (stallOpts.completionTimeout ?? timeoutSec * 1000),
               maxRestarts: stallOpts.maxRestarts,
               maxInterventions: stallOpts.maxInterventions,
               command: d.command,
@@ -1443,7 +1462,10 @@ export async function waitForDaemonCompletion(
     ? createActivityLifecycle({
         interventionMs: lifecycle.interventionMs,
         hardCeilingMs: lifecycle.hardCeilingMs,
-        onIntervene: createHeadlessIntervention(dispatch, lifecycle.onIntervene),
+        onIntervene: createHeadlessIntervention(
+          dispatch,
+          lifecycle.onIntervene,
+        ),
       })
     : null;
 
@@ -1873,11 +1895,24 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     const idx = parseInt(match[1], 10) - 1;
     const agentId = getHeadlessWorkerAgentId(sessionName, idx);
     const nowMs = Date.now();
-    if ((lastHubBeatByWorker.get(agentId) || 0) + HUB_ACTIVITY_MIN_INTERVAL_MS > nowMs) return;
+    if (
+      (lastHubBeatByWorker.get(agentId) || 0) + HUB_ACTIVITY_MIN_INTERVAL_MS >
+      nowMs
+    )
+      return;
     lastHubBeatByWorker.set(agentId, nowMs);
-    requestJson("/bridge/heartbeat", { method: "POST", body: { agent_id: agentId }, timeoutMs: 500 }).catch(() => {});
+    requestJson("/bridge/heartbeat", {
+      method: "POST",
+      body: { agent_id: agentId },
+      timeoutMs: 500,
+    }).catch(() => {});
     const assignJobId = normalizedAssignments[idx]?.assignJobId;
-    if (assignJobId) requestJson("/bridge/assign/result", { method: "POST", body: { job_id: assignJobId, worker_agent: agentId, status: "running" }, timeoutMs: 500 }).catch(() => {});
+    if (assignJobId)
+      requestJson("/bridge/assign/result", {
+        method: "POST",
+        body: { job_id: assignJobId, worker_agent: agentId, status: "running" },
+        timeoutMs: 500,
+      }).catch(() => {});
   };
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)

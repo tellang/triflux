@@ -2,12 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve as pathResolve } from "node:path";
-
-// scripts/lib is bundled into @triflux/remote itself (package.json files), so
-// import the local mirror relatively rather than via @triflux/core. The core
-// peer range (^10.0.0-alpha.1) could resolve to a build that predates this
-// export, which would fail at import time; the bundled copy is version-skew
-// safe and always carries the matching codexProfileConfigOverrides.
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
 import { codexProfileConfigOverrides } from "../../scripts/lib/codex-profile-config.mjs";
 import { whichCommand } from "@triflux/core/hub/platform.mjs";
 
@@ -165,7 +160,19 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
   // still contains an inline [profiles.X] table (which codex re-injects on
   // config rewrite). These go straight to spawn argv (shell: false), so push
   // the raw TOML-scalar overrides without shell-quoting.
-  for (const override of codexProfileConfigOverrides(opts.profile)) {
+  const codexHome = opts.env?.CODEX_HOME;
+  const codexProfile = resolveNestedCodexAgentProfile(opts.role || "executor", {
+    profileOverride:
+      opts.profile ??
+      opts.env?.TFX_CODEX_PROFILE ??
+      process.env.TFX_CODEX_PROFILE ??
+      "auto",
+    codexHome,
+  });
+  for (const override of codexProfileConfigOverrides(codexProfile, {
+    codexHome,
+    disallowUltra: true,
+  })) {
     args.push("-c", override);
   }
   if (Array.isArray(opts.mcpServers)) {

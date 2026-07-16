@@ -118,6 +118,8 @@ export function buildExecArgs(opts = {}) {
   const prompt = typeof opts.prompt === "string" ? opts.prompt : "";
   const command = buildExecCommand(prompt, opts.resultFile || null, {
     profile: opts.profile,
+    codexHome: opts.codexHome,
+    disallowUltra: opts.disallowUltra,
     skipGitRepoCheck: true,
     sandboxBypass: true,
     cwd: opts.cwd,

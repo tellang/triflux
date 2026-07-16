@@ -20,8 +20,8 @@ import {
   isDynamicRoutingEnabled,
 } from "@triflux/core/hub/dynamic-routing-engine.mjs";
 import { cleanupShardProcesses } from "@triflux/core/hub/lib/process-utils.mjs";
-import { DEFAULT_SWARM_LOCK_TTL_MS } from "@triflux/core/hub/lib/timeout-defaults.mjs";
 import { getHostConfig } from "@triflux/core/hub/lib/ssh-command.mjs";
+import { DEFAULT_SWARM_LOCK_TTL_MS } from "@triflux/core/hub/lib/timeout-defaults.mjs";
 import { buildWorkerPrompt } from "./build-worker-prompt.mjs";
 import { registerSwarmShard } from "./claude-native-bridge.mjs";
 import { createConductor, STATES } from "./conductor.mjs";
@@ -678,6 +678,7 @@ export function createSwarmHypervisor(opts) {
     const config = {
       id: buildSwarmSessionId(shard),
       agent: shard.agent,
+      role: shard.role,
       // #125: append Completion Protocol appendix so workers emit a
       // sentinel-framed JSON payload that conductor can reliably capture.
       prompt: buildWorkerPrompt(shard.prompt, {
@@ -1964,7 +1965,8 @@ export function createSwarmHypervisor(opts) {
     lockRenewTimer = setInterval(() => {
       if (!lockManager) return;
       for (const shardName of workers.keys()) {
-        if (!completedShards.has(shardName) && !failures.has(shardName)) lockManager.renew(shardName);
+        if (!completedShards.has(shardName) && !failures.has(shardName))
+          lockManager.renew(shardName);
       }
     }, DEFAULT_SWARM_LOCK_TTL_MS / 2);
     lockRenewTimer.unref?.();

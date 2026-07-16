@@ -36,6 +36,8 @@ const CODEX_DIR = join(homedir(), ".codex");
 const GEMINI_DIR = join(homedir(), ".gemini");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const REQUIRED_CODEX_PROFILE_NAMES = [
+  "gpt56_sol_ultra",
+  "gpt56_sol_max",
   "gpt56_sol_xhigh",
   "gpt56_terra_high",
   "gpt56_terra_med",

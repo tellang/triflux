@@ -1361,6 +1361,7 @@ TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
+TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
 # Preflight 캐시 일괄 로드 — CLI/Hub 가용성 + Codex 요금제를 환경변수로 내보냄
 # 하위 프로세스(스킬 포함)가 TFX_CODEX_OK, TFX_GEMINI_OK, TFX_ANTIGRAVITY_OK, TFX_HUB_OK로 즉시 참조 가능
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
@@ -1418,6 +1419,13 @@ case "$TFX_CODEX_TRANSPORT" in
   auto|mcp|exec) ;;
   *)
     echo "ERROR: TFX_CODEX_TRANSPORT 값은 auto, mcp, exec 중 하나여야 합니다. (현재: $TFX_CODEX_TRANSPORT)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_CODEX_PROFILE" in
+  auto|max|ultra|gpt56_luna_low|gpt56_terra_med|gpt56_terra_high|gpt56_sol_xhigh|gpt56_sol_max|gpt56_sol_ultra) ;;
+  *)
+    echo "ERROR: TFX_CODEX_PROFILE 값은 auto, max, ultra 또는 canonical gpt56_* profile이어야 합니다. (현재: $TFX_CODEX_PROFILE)" >&2
     exit 1
     ;;
 esac
@@ -1637,6 +1645,116 @@ apply_no_claude_native_mode() {
 ## bridge retry-run/status exposes cliInvocation.argv for escalation-chain
 ## profile steps. Consume those argv directly instead of duplicating profile
 ## resolution here.
+resolve_safe_retry_codex_profile() {
+  local profile="$1"
+  case "$profile" in
+    ultra|gpt56_sol_ultra|*_ultra)
+      echo "gpt56_sol_max"
+      return
+      ;;
+    gpt56_luna_low|gpt56_terra_med|gpt56_terra_high|gpt56_sol_xhigh|gpt56_sol_max)
+      echo "$profile"
+      return
+      ;;
+  esac
+
+  local codex_home profile_file effort
+  codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
+  profile_file="${codex_home}/${profile}.config.toml"
+  if [[ ! -f "$profile_file" ]]; then
+    echo "gpt56_terra_high"
+    return
+  fi
+  effort=$(awk -F= '
+    /^[[:space:]]*model_reasoning_effort[[:space:]]*=/ {
+      value=$2
+      sub(/[[:space:]]*#.*/, "", value)
+      gsub(/^[[:space:]"'"'']+|[[:space:]"'"'']+$/, "", value)
+      print tolower(value)
+      exit
+    }
+  ' "$profile_file" 2>/dev/null || true)
+  case "$effort" in
+    ultra) echo "gpt56_sol_max" ;;
+    "") echo "gpt56_terra_high" ;;
+    *) echo "$profile" ;;
+  esac
+}
+
+read_codex_profile_effort() {
+  local profile="$1"
+  local codex_home profile_file effort
+  codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
+  profile_file="${codex_home}/${profile}.config.toml"
+  if [[ -f "$profile_file" ]]; then
+    effort=$(awk -F= '
+      /^[[:space:]]*model_reasoning_effort[[:space:]]*=/ {
+        value=$2
+        sub(/[[:space:]]*#.*/, "", value)
+        gsub(/^[[:space:]"'"'']+|[[:space:]"'"'']+$/, "", value)
+        print tolower(value)
+        exit
+      }
+    ' "$profile_file" 2>/dev/null || true)
+    echo "$effort"
+    return
+  fi
+  case "$profile" in
+    *_ultra) echo "ultra" ;;
+    *_max) echo "max" ;;
+    *_xhigh) echo "xhigh" ;;
+    *_high) echo "high" ;;
+    *_med|*_medium) echo "medium" ;;
+    *_low) echo "low" ;;
+    *) echo "" ;;
+  esac
+}
+
+apply_codex_concrete_effort_guard() {
+  [[ "${CLI_TYPE:-}" == "codex" ]] || return 0
+
+  local -a args=()
+  read -r -a args <<< "$CLI_ARGS"
+  local profile="" i
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      --profile) profile="${args[$((i + 1))]:-}" ;;
+      --profile=*) profile="${args[$i]#--profile=}" ;;
+    esac
+  done
+  [[ -n "$profile" ]] || return 0
+
+  local allow_ultra=0
+  if [[ "$TFX_CODEX_PROFILE" == "ultra" || "$TFX_CODEX_PROFILE" == "gpt56_sol_ultra" ]]; then
+    if ! is_nested_codex_runtime && [[ -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+      case "$AGENT_TYPE" in
+        deep-executor|scientist-deep) allow_ultra=1 ;;
+      esac
+    fi
+  fi
+
+  local effort target_effort=""
+  effort="$(read_codex_profile_effort "$profile")"
+  case "$profile" in
+    gpt56_sol_max) target_effort="max" ;;
+    gpt56_sol_ultra)
+      [[ "$allow_ultra" -eq 1 ]] && target_effort="ultra" || target_effort="max"
+      ;;
+    *)
+      if [[ "$effort" == "ultra" ]]; then
+        [[ "$allow_ultra" -eq 1 ]] && target_effort="ultra" || target_effort="max"
+      fi
+      ;;
+  esac
+  [[ -n "$target_effort" ]] || return 0
+
+  CLI_ARGS+=" -c model=\"gpt-5.6-sol\" -c model_reasoning_effort=\"${target_effort}\""
+  CLI_EFFORT="gpt56_sol_${target_effort}"
+  CODEX_MODEL_OVERRIDE="gpt-5.6-sol"
+  CODEX_REASONING_EFFORT_OVERRIDE="$target_effort"
+  echo "[tfx-route] final Codex effort guard: ${profile}/${effort:-unknown} -> ${target_effort}" >&2
+}
+
 apply_retry_snapshot_cli_invocation() {
   [[ "${CLI_TYPE:-}" == "codex" ]] || return 0
 
@@ -1688,10 +1806,24 @@ apply_retry_snapshot_cli_invocation() {
       --profile)
         retry_has_profile=1
         retry_profile="${retry_args[$((i + 1))]:-}"
+        local safe_retry_profile
+        safe_retry_profile="$(resolve_safe_retry_codex_profile "$retry_profile")"
+        if [[ "$safe_retry_profile" != "$retry_profile" ]]; then
+          echo "[tfx-route] retry Codex profile guard: ${retry_profile} -> ${safe_retry_profile}" >&2
+          retry_profile="$safe_retry_profile"
+          retry_args[$((i + 1))]="$safe_retry_profile"
+        fi
         ;;
       --profile=*)
         retry_has_profile=1
         retry_profile="${retry_args[$i]#--profile=}"
+        local safe_retry_profile
+        safe_retry_profile="$(resolve_safe_retry_codex_profile "$retry_profile")"
+        if [[ "$safe_retry_profile" != "$retry_profile" ]]; then
+          echo "[tfx-route] retry Codex profile guard: ${retry_profile} -> ${safe_retry_profile}" >&2
+          retry_profile="$safe_retry_profile"
+          retry_args[$i]="--profile=$safe_retry_profile"
+        fi
         ;;
     esac
   done
@@ -1771,6 +1903,45 @@ apply_dynamic_routing_override() {
       CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
       ;;
   esac
+}
+
+is_nested_codex_runtime() {
+  [[ -n "${TFX_TEAM_NAME:-}" || -n "${TFX_WORKER_INDEX:-}" || -n "${TFX_WORKER_SANDBOX_SCOPE:-}" ]]
+}
+
+apply_codex_profile_override() {
+  [[ "$CLI_TYPE" != "codex" ]] && return
+  [[ "$TFX_CODEX_PROFILE" == "auto" ]] && return
+
+  local requested="$TFX_CODEX_PROFILE"
+  local profile="$requested"
+  case "$requested" in
+    max) profile="gpt56_sol_max" ;;
+    ultra) profile="gpt56_sol_ultra" ;;
+  esac
+
+  if [[ "$profile" == "gpt56_sol_ultra" ]]; then
+    local downgrade_reason=""
+    case "$AGENT_TYPE" in
+      deep-executor|scientist-deep) ;;
+      *) downgrade_reason="agent ${AGENT_TYPE} is not ultra-eligible" ;;
+    esac
+    if is_nested_codex_runtime; then
+      downgrade_reason="nested team/worker runtime"
+    fi
+    if [[ -n "$downgrade_reason" ]]; then
+      echo "[tfx-route] Codex ultra -> max: ${downgrade_reason}" >&2
+      profile="gpt56_sol_max"
+    fi
+  fi
+
+  local codex_base
+  codex_base="$(build_codex_base)"
+  local review_suffix=""
+  [[ "$CLI_ARGS" == *" review" ]] && review_suffix=" review"
+  CLI_ARGS="exec --profile ${profile} ${codex_base}${review_suffix}"
+  CLI_EFFORT="$profile"
+  echo "[tfx-route] Codex profile override: ${requested} -> ${profile}" >&2
 }
 
 apply_verifier_override() {
@@ -2627,17 +2798,22 @@ run_codex_exec() {
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
-      gpt56_sol_xhigh|gpt56_terra_high|gpt56_terra_med) fallback_profile="gpt56_luna_low" ;;
+      gpt56_sol_ultra|gpt56_sol_max|gpt56_sol_xhigh|gpt56_terra_high|gpt56_terra_med) fallback_profile="gpt56_luna_low" ;;
     esac
     if [[ -n "$fallback_profile" ]]; then
       echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2
       local -a new_args=()
-      local skip_next=0
-      for arg in "${codex_args[@]}"; do
-        if [[ "$skip_next" -eq 1 ]]; then
-          new_args+=("$fallback_profile"); skip_next=0
-        elif [[ "$arg" == "--profile" ]]; then
-          new_args+=("$arg"); skip_next=1
+      local i arg next_arg
+      for ((i = 0; i < ${#codex_args[@]}; i++)); do
+        arg="${codex_args[$i]}"
+        next_arg="${codex_args[$((i + 1))]:-}"
+        if [[ "$arg" == "--profile" ]]; then
+          new_args+=("$arg" "$fallback_profile")
+          i=$((i + 1))
+        elif [[ "$arg" == --profile=* ]]; then
+          new_args+=("--profile=$fallback_profile")
+        elif [[ "$arg" == "-c" && ( "$next_arg" == model=* || "$next_arg" == model_reasoning_effort=* ) ]]; then
+          i=$((i + 1))
         else
           new_args+=("$arg")
         fi
@@ -2680,6 +2856,13 @@ run_codex_mcp() {
     "--timeout-ms" "$((HARD_CEILING_SEC * 1000))"
     "--codex-command" "$CODEX_BIN"
   )
+
+  if [[ -n "${CODEX_MODEL_OVERRIDE:-}" ]]; then
+    mcp_args+=("--model" "$CODEX_MODEL_OVERRIDE")
+  fi
+  if [[ -n "${CODEX_REASONING_EFFORT_OVERRIDE:-}" ]]; then
+    mcp_args+=("--reasoning-effort" "$CODEX_REASONING_EFFORT_OVERRIDE")
+  fi
 
   if [[ -n "$CODEX_CONFIG_JSON" && "$CODEX_CONFIG_JSON" != "{}" ]]; then
     mcp_args+=("--config-json" "$CODEX_CONFIG_JSON")
@@ -2744,7 +2927,9 @@ main() {
   apply_plan_guard
   apply_verifier_override
   apply_dynamic_routing_override
+  apply_codex_profile_override
   apply_retry_snapshot_cli_invocation
+  apply_codex_concrete_effort_guard
 
   # CLI 경로 해석
   case "$CLI_CMD" in

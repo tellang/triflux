@@ -32,13 +32,6 @@ import {
 import { broker as brokerInstance, reloadBroker } from "@triflux/core/hub/account-broker.mjs";
 import { createAdaptiveEngine } from "@triflux/core/hub/adaptive.mjs";
 import { createAssignCallbackServer } from "@triflux/core/hub/assign-callbacks.mjs";
-import {
-  clampDurationMs,
-  DEFAULT_ASSIGN_TIMEOUT_MS,
-  DEFAULT_ASSIGN_TTL_MS,
-  DEFAULT_REGISTER_TIMEOUT_SEC,
-  resolveWorkerLeaseTtlMs,
-} from "@triflux/core/hub/lib/timeout-defaults.mjs";
 import { DelegatorService } from "@triflux/core/hub/delegator/index.mjs";
 import { createHitlManager } from "@triflux/core/hub/hitl.mjs";
 import {
@@ -51,6 +44,13 @@ import {
   cleanupStaleFsmonitorDaemons,
 } from "@triflux/core/hub/lib/process-utils.mjs";
 import * as spawnTrace from "@triflux/core/hub/lib/spawn-trace.mjs";
+import {
+  clampDurationMs,
+  DEFAULT_ASSIGN_TIMEOUT_MS,
+  DEFAULT_ASSIGN_TTL_MS,
+  DEFAULT_REGISTER_TIMEOUT_SEC,
+  resolveWorkerLeaseTtlMs,
+} from "@triflux/core/hub/lib/timeout-defaults.mjs";
 import {
   recordRequest,
   recordWorker,
@@ -980,7 +980,13 @@ export async function startHub({
         detectPeer: () => livePeer,
       });
 
-  if (portSpecified && !ephemeralPort && livePeer.alive && livePidPort && port !== livePidPort) {
+  if (
+    portSpecified &&
+    !ephemeralPort &&
+    livePeer.alive &&
+    livePidPort &&
+    port !== livePidPort
+  ) {
     hubLog.warn(
       {
         requestedPort: port,
@@ -991,9 +997,14 @@ export async function startHub({
     );
   }
 
-  const existingHub = ephemeralPort ? null : await tryReuseExistingHub({
-    port, portSpecified, host, detectPeer: () => livePeer,
-  });
+  const existingHub = ephemeralPort
+    ? null
+    : await tryReuseExistingHub({
+        port,
+        portSpecified,
+        host,
+        detectPeer: () => livePeer,
+      });
   if (existingHub) return existingHub;
 
   attachBrokerDiagnostics(brokerInstance);
@@ -1031,12 +1042,14 @@ export async function startHub({
     lockHeld = false;
   };
 
-  const lockedExistingHub = ephemeralPort ? null : await tryReuseExistingHub({
-    port,
-    portSpecified,
-    host,
-    detectPeer: () => detectLivePeer(),
-  });
+  const lockedExistingHub = ephemeralPort
+    ? null
+    : await tryReuseExistingHub({
+        port,
+        portSpecified,
+        host,
+        detectPeer: () => detectLivePeer(),
+      });
   if (lockedExistingHub) {
     releaseStartupLock();
     return lockedExistingHub;
@@ -1714,7 +1727,9 @@ export async function startHub({
               metadata?.task ||
               cli;
             const workerStartedAt = performance.now();
-            const hasExplicitTimeout = Number.isFinite(Number(body.timeout_sec));
+            const hasExplicitTimeout = Number.isFinite(
+              Number(body.timeout_sec),
+            );
             const heartbeat_ttl_ms = hasExplicitTimeout
               ? (timeout_sec + 120) * 1000
               : Math.max((timeout_sec + 120) * 1000, resolveWorkerLeaseTtlMs());
@@ -1760,10 +1775,14 @@ export async function startHub({
 
           if (path === "/bridge/heartbeat" && req.method === "POST") {
             const { agent_id, ttl_ms } = body;
-            if (!agent_id) return writeJson(res, 400, { ok: false, error: "agent_id 필수" });
+            if (!agent_id)
+              return writeJson(res, 400, { ok: false, error: "agent_id 필수" });
             const result = await pipe.executeCommand("heartbeat", {
               agent_id,
-              heartbeat_ttl_ms: clampDurationMs(ttl_ms, resolveWorkerLeaseTtlMs()),
+              heartbeat_ttl_ms: clampDurationMs(
+                ttl_ms,
+                resolveWorkerLeaseTtlMs(),
+              ),
             });
             return writeJson(res, result.ok ? 200 : 404, result);
           }
@@ -2445,7 +2464,8 @@ export async function startHub({
         httpServer.off("error", onError);
         try {
           const boundAddress = httpServer.address();
-          if (boundAddress && typeof boundAddress === "object") port = boundAddress.port;
+          if (boundAddress && typeof boundAddress === "object")
+            port = boundAddress.port;
           let idleTimer = null;
           let stopPromise = null;
 
@@ -2466,25 +2486,28 @@ export async function startHub({
             idleTimeoutMs: hubIdleTimeoutMs,
           };
 
-          if (!ephemeralPort) writeState({
-            pid: process.pid,
-            port,
-            host,
-            auth_mode: HUB_TOKEN ? "token-required" : "localhost-only",
-            url: info.url,
-            pipe_path: pipe.path,
-            pipePath: pipe.path,
-            assign_callback_pipe_path: assignCallbacks.path,
-            assignCallbackPipePath: assignCallbacks.path,
-            authMode: HUB_TOKEN ? "token-required" : "localhost-only",
-            startedAt,
-            started: startedAtMs,
-            version,
-            sessionId,
-            session_id: sessionId,
-          });
+          if (!ephemeralPort) {
+            writeState({
+              pid: process.pid,
+              port,
+              host,
+              auth_mode: HUB_TOKEN ? "token-required" : "localhost-only",
+              url: info.url,
+              pipe_path: pipe.path,
+              pipePath: pipe.path,
+              assign_callback_pipe_path: assignCallbacks.path,
+              assignCallbackPipePath: assignCallbacks.path,
+              authMode: HUB_TOKEN ? "token-required" : "localhost-only",
+              startedAt,
+              started: startedAtMs,
+              version,
+              sessionId,
+              session_id: sessionId,
+            });
+          }
           releaseStartupLock();
-          if (!ephemeralPort) void syncHubMcpSettingsIfAvailable({ hubUrl: info.url });
+          if (!ephemeralPort)
+            void syncHubMcpSettingsIfAvailable({ hubUrl: info.url });
 
           hubLog.info(
             {

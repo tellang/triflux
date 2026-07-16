@@ -13,7 +13,8 @@ argument-hint: "[--list] [--codex | --gemini]"
 # tfx-profile — Codex/Antigravity 프로파일 매니저
 
 > CLI 프로파일의 모델/effort를 AskUserQuestion 선택지로 관리합니다.
-> Codex(`~/.codex/config.toml`)와 Antigravity(`~/.gemini/triflux-profiles.json`) 모두 지원.
+> Codex(`~/.codex/config.toml` + `~/.codex/<profile>.config.toml`)와
+> Antigravity(`~/.gemini/triflux-profiles.json`) 모두 지원.
 
 ## 워크플로우
 
@@ -36,9 +37,10 @@ options:
 
 ## Codex 워크플로우
 
-### Step 1: config.toml 읽기 + 현재 상태 표시
+### Step 1: Codex 설정 읽기 + 현재 상태 표시
 
-`~/.codex/config.toml`을 Read 도구로 읽고 프로파일 테이블을 마크다운으로 출력한다:
+`~/.codex/config.toml`의 top-level 기본값과
+`~/.codex/*.config.toml` 프로파일 파일을 읽어 테이블을 출력한다:
 
 ```
 | 프로파일 | 모델 | Effort |
@@ -76,11 +78,13 @@ options:
      - label: "gpt56_terra_high" → 기본 고품질 (Recommended)
      - label: "gpt56_terra_med"  → 균형형
      - label: "gpt56_luna_low"   → 빠른 경량
-     - label: "gpt56_sol_xhigh"  → 최대 추론
+     - label: "gpt56_sol_xhigh"  → 고강도 추론
+     - label: "gpt56_sol_max"    → 최난도 단일 작업
+     - label: "gpt56_sol_ultra"  → 최상위 자동 위임 (비중첩 전용)
      - label: "custom"      → 사용자가 관리하는 프로필
    ```
-3. AskUserQuestion으로 effort 선택: `low | medium | high | xhigh`
-4. Edit 도구로 config.toml 수정
+3. AskUserQuestion으로 effort 선택: `low | medium | high | xhigh | max | ultra`
+4. Edit 도구로 `~/.codex/<선택한 이름>.config.toml` 수정
 
 #### 기본 모델 변경
 
@@ -88,12 +92,12 @@ options:
 
 #### 프로파일 추가/삭제
 
-추가: 이름 → 모델 → effort → `[profiles.name]` 섹션 추가
-삭제: 선택 → 확인 → 섹션 제거
+추가: 이름 → 모델 → effort → `~/.codex/<name>.config.toml` 생성
+삭제: 선택 → 확인 → 해당 `~/.codex/<name>.config.toml` 삭제
 
 ### Step 4: 결과 확인
 
-변경된 config.toml을 다시 읽어 업데이트된 테이블 표시.
+변경된 top-level config와 프로파일 파일을 다시 읽어 업데이트된 테이블 표시.
 
 ---
 
@@ -162,12 +166,14 @@ options:
 
 ## 수정 규칙
 
-### Codex (config.toml)
+### Codex
 
 - **백업 필수**: 수정 전 원본 기억
-- **프로파일 섹션 형식**: `[profiles.name]\nmodel = "..."\nmodel_reasoning_effort = "..."`
-- **다른 섹션 건드리지 않기**: `[notice]`, `[features]`, `[mcp_servers.*]` 등 절대 수정 금지
-- **Edit 도구 사용**: old_string → new_string으로 정확한 섹션만 치환
+- **프로파일 파일 형식**: `~/.codex/<name>.config.toml` 안에
+  `model = "..."`와 `model_reasoning_effort = "..."`를 top-level 키로 기록
+- **inline 프로파일 금지**: `config.toml`에 `[profiles.<name>]` 섹션을 추가하지 않기
+- **기본값만 config.toml에서 수정**: top-level `model`,
+  `model_reasoning_effort` 외 `[notice]`, `[features]`, `[mcp_servers.*]` 등은 건드리지 않기
 
 ### Antigravity (triflux-profiles.json)
 
@@ -182,7 +188,9 @@ options:
 | 프로필 | 용도 |
 |------|------|
 | gpt56_terra_high | 기본 고품질 |
-| gpt56_sol_xhigh | 최대 추론 |
+| gpt56_sol_xhigh | 고강도 추론 |
+| gpt56_sol_max | 최난도 단일 작업 |
+| gpt56_sol_ultra | 최상위 자동 위임 (비중첩 전용) |
 | gpt56_terra_med | 균형형 |
 | gpt56_luna_low | 빠른 경량 |
 | custom | 사용자가 관리하는 프로필 |
@@ -194,7 +202,9 @@ options:
 | low | 빠른 응답, 최소 추론 |
 | medium | 균형 잡힌 추론 |
 | high | 깊은 추론 |
-| xhigh | 최대 추론 (느림) |
+| xhigh | 고강도 추론 |
+| max | 최난도 단일 작업용 최대 추론 |
+| ultra | 최대 추론 + 자동 작업 위임; 팀/스웜 내부 사용 금지 |
 
 ### Antigravity 프로필
 

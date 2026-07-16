@@ -678,6 +678,7 @@ export function createSwarmHypervisor(opts) {
     const config = {
       id: buildSwarmSessionId(shard),
       agent: shard.agent,
+      role: shard.role,
       // #125: append Completion Protocol appendix so workers emit a
       // sentinel-framed JSON payload that conductor can reliably capture.
       prompt: buildWorkerPrompt(shard.prompt, {

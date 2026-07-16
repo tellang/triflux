@@ -51,6 +51,8 @@ const CORE_FILES = [
   // Phase 1 dynamic routing (#251 + #263 + #264 + wire-ups)
   "hub/dynamic-routing-engine.mjs",
   "hub/routing-snapshot.mjs",
+  "hub/role-contract.mjs",
+  "hub/role-control-events.mjs",
 ];
 
 const CORE_DIRS = [
@@ -60,6 +62,7 @@ const CORE_DIRS = [
   "hub/delegator",
   "hub/lib",
   "hub/middleware",
+  "hub/team/intervention.mjs",
   "hub/team/retry-state-machine.mjs",
   "hub/team/claude-agent-session-normalizer.mjs",
   "hub/team/claude-daemon-control.mjs",
@@ -88,6 +91,7 @@ const REMOTE_FILES = [
   "cto/brief.mjs",
   "cto/collect.mjs",
   "cto/events.mjs",
+  "cto/hygiene-actions.mjs",
   "cto/hygiene-notify.mjs",
   "cto/hygiene.mjs",
   "cto/lake-root.mjs",
@@ -96,6 +100,7 @@ const REMOTE_FILES = [
 ];
 
 const REMOTE_DIRS = ["hub/team", "hub/workers", "hub/public"];
+const REMOTE_CORE_PROXIES = ["hub/lib/cto-env.mjs"];
 
 const TRIFLUX_DIRS = [
   "bin",
@@ -301,6 +306,12 @@ function packRemote() {
   cleanDist(dest);
   for (const f of REMOTE_FILES) copyItem(f, dest);
   for (const d of REMOTE_DIRS) copyItem(d, dest);
+  for (const proxy of REMOTE_CORE_PROXIES) {
+    const target = join(dest, proxy);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, `export * from "@triflux/core/${proxy}";\n`);
+    console.log(`  WRITE ${proxy}`);
+  }
   // shared scripts/lib needed by delegator-mcp.mjs (dynamic resolve)
   copyItem("scripts/lib", dest);
   writeIndex(dest, REMOTE_INDEX);

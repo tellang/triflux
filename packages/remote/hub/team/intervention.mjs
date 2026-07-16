@@ -5,11 +5,11 @@ import { statSync } from "node:fs";
 import { readdir, readlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import { isPidAlive } from "@triflux/core/hub/lib/process-utils.mjs";
-import { killProcess } from "@triflux/core/hub/platform.mjs";
 import {
   resolveHardCeilingMs,
   resolveStallInterventionMs as resolveStallThresholdMs,
 } from "@triflux/core/hub/lib/timeout-defaults.mjs";
+import { killProcess } from "@triflux/core/hub/platform.mjs";
 
 export { resolveHardCeilingMs, resolveStallThresholdMs };
 

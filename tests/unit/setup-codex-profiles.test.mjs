@@ -50,6 +50,8 @@ function _withTempCodex(configContent, fn) {
 
 describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
   const requiredNames = [
+    "gpt56_sol_ultra",
+    "gpt56_sol_max",
     "gpt56_sol_xhigh",
     "gpt56_terra_high",
     "gpt56_terra_med",
@@ -74,6 +76,18 @@ describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
         `profile ${p.name} missing lines`,
       );
     }
+  });
+
+  it("Sol max/ultra 프로필은 서로 다른 reasoning effort를 고정한다", () => {
+    const byName = new Map(REQUIRED_CODEX_PROFILES.map((p) => [p.name, p]));
+    assert.deepEqual(byName.get("gpt56_sol_max")?.lines, [
+      'model = "gpt-5.6-sol"',
+      'model_reasoning_effort = "max"',
+    ]);
+    assert.deepEqual(byName.get("gpt56_sol_ultra")?.lines, [
+      'model = "gpt-5.6-sol"',
+      'model_reasoning_effort = "ultra"',
+    ]);
   });
 });
 

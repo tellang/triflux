@@ -113,7 +113,7 @@ Bash("triflux setup")
 #### 단계 3: Codex 프로파일
 
 `~/.codex/config.toml`을 Read 도구로 읽어 필수 프로파일 존재 여부 확인.
-필수: `gpt56_sol_xhigh`, `gpt56_terra_high`, `gpt56_terra_med`, `gpt56_luna_low`.
+필수: `gpt56_sol_ultra`, `gpt56_sol_max`, `gpt56_sol_xhigh`, `gpt56_terra_high`, `gpt56_terra_med`, `gpt56_luna_low`.
 
 - 모두 존재 → ✅ 표시
 - 누락 있으면 → AskUserQuestion:

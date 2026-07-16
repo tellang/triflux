@@ -5,6 +5,14 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 describe("remote package assembly", () => {
+  it("copies the core Codex intervention dependency", () => {
+    const packScript = readFileSync("scripts/pack.mjs", "utf8");
+    assert.match(
+      packScript,
+      new RegExp(JSON.stringify("hub/team/intervention.mjs"), "u"),
+    );
+  });
+
   it("copies tray and CTO runtime dependencies into @triflux/remote", () => {
     const packScript = readFileSync("scripts/pack.mjs", "utf8");
 
@@ -16,6 +24,7 @@ describe("remote package assembly", () => {
       "hub/tray-state.mjs",
       "cto/brief.mjs",
       "cto/collect.mjs",
+      "cto/hygiene-actions.mjs",
       "cto/status.mjs",
       "cto/current.schema.json",
     ]) {

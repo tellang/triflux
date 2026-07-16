@@ -146,9 +146,11 @@ export function resolveCodexProfileConfig(profileName) {
   } catch {
     // Profile file absent (non-file alias). Derive effort from the naming
     // convention; leave model unset so codex uses its config.toml default.
-    const suffix = /_(xhigh|high|med|medium|low)$/.exec(profileName);
+    const suffix = /_(ultra|max|xhigh|high|med|medium|low)$/.exec(profileName);
     if (suffix) {
       const map = {
+        ultra: "ultra",
+        max: "max",
         xhigh: "xhigh",
         high: "high",
         med: "medium",
@@ -193,15 +195,26 @@ export function buildCodexArguments(prompt, opts = {}) {
   // profile effort merges on top of any opts.config.
   if (typeof opts.profile === "string" && opts.profile) {
     const resolved = resolveCodexProfileConfig(opts.profile);
-    if (resolved.model && typeof args.model !== "string") {
-      args.model = resolved.model;
+    const profileDerivedUltra =
+      resolved.reasoningEffort?.toLowerCase() === "ultra";
+    if (typeof args.model !== "string") {
+      if (profileDerivedUltra) args.model = "gpt-5.6-sol";
+      else if (resolved.model) args.model = resolved.model;
     }
     if (resolved.reasoningEffort) {
       args.config = {
         ...(args.config || {}),
-        model_reasoning_effort: resolved.reasoningEffort,
+        model_reasoning_effort: profileDerivedUltra
+          ? "max"
+          : resolved.reasoningEffort,
       };
     }
+  }
+  if (typeof opts.reasoningEffort === "string" && opts.reasoningEffort) {
+    args.config = {
+      ...(args.config || {}),
+      model_reasoning_effort: opts.reasoningEffort,
+    };
   }
 
   return args;
@@ -693,6 +706,9 @@ function parseCliArgs(argv) {
         break;
       case "--model":
         options.model = next();
+        break;
+      case "--reasoning-effort":
+        options.reasoningEffort = next();
         break;
       case "--approval-policy":
         options.approvalPolicy = next();

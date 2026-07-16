@@ -165,6 +165,8 @@ export function buildRoutePlan(request, agentMap) {
     mcpProfile: request.mcpProfile ?? "auto",
     timeoutSec: request.timeoutSec,
     contextFile: request.contextFile,
+    profileOverride: request.profileOverride,
+    nested: request.nested,
   });
   return {
     agent: request.agent,
@@ -272,7 +274,18 @@ async function main(argv) {
   }
 
   const agentMap = loadAgentMap();
-  const plan = buildRoutePlan(request, agentMap);
+  const plan = buildRoutePlan(
+    {
+      ...request,
+      profileOverride: process.env.TFX_CODEX_PROFILE,
+      nested: Boolean(
+        process.env.TFX_TEAM_NAME ||
+          process.env.TFX_WORKER_INDEX ||
+          process.env.TFX_WORKER_SANDBOX_SCOPE,
+      ),
+    },
+    agentMap,
+  );
 
   if (request.mode === "route-print") {
     process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);

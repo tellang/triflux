@@ -5,7 +5,11 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clampDurationMs, DEFAULT_ASSIGN_TIMEOUT_MS, DEFAULT_ASSIGN_TTL_MS } from "@triflux/core/hub/lib/timeout-defaults.mjs";
+import {
+  clampDurationMs,
+  DEFAULT_ASSIGN_TIMEOUT_MS,
+  DEFAULT_ASSIGN_TTL_MS,
+} from "@triflux/core/hub/lib/timeout-defaults.mjs";
 import { uuidv7 } from "@triflux/core/hub/lib/uuidv7.mjs";
 import { recalcConfidence } from "@triflux/core/hub/reflexion.mjs";
 
@@ -421,7 +425,11 @@ export function createStore(dbPath, options = {}) {
         agent_id: agentId,
         lease_expires_ms: now + ttlMs,
         server_time_ms: now,
-        effective: { updated: write.changes > 0, store_type: "sqlite", db_path: dbPath ?? null },
+        effective: {
+          updated: write.changes > 0,
+          store_type: "sqlite",
+          db_path: dbPath ?? null,
+        },
       };
     },
 
@@ -638,7 +646,10 @@ export function createStore(dbPath, options = {}) {
       error = null,
     }) {
       const now = Date.now();
-      const normalizedTimeout = clampDurationMs(timeout_ms, DEFAULT_ASSIGN_TIMEOUT_MS);
+      const normalizedTimeout = clampDurationMs(
+        timeout_ms,
+        DEFAULT_ASSIGN_TIMEOUT_MS,
+      );
       const row = {
         job_id: job_id || uuidv7(),
         supervisor_agent,
@@ -761,7 +772,9 @@ export function createStore(dbPath, options = {}) {
           : nextStatus === "running"
             ? current.started_at_ms || now
             : current.started_at_ms,
-        dispatched_at_ms: Object.hasOwn(patch, "dispatched_at_ms") ? patch.dispatched_at_ms : current.dispatched_at_ms,
+        dispatched_at_ms: Object.hasOwn(patch, "dispatched_at_ms")
+          ? patch.dispatched_at_ms
+          : current.dispatched_at_ms,
         completed_at_ms: Object.hasOwn(patch, "completed_at_ms")
           ? patch.completed_at_ms
           : isTerminal
