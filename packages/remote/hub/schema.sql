@@ -11,7 +11,11 @@ CREATE TABLE IF NOT EXISTS agents (
   last_seen_ms INTEGER NOT NULL,
   lease_expires_ms INTEGER NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('online','stale','offline')),
-  metadata_json TEXT NOT NULL DEFAULT '{}'
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  project_id TEXT,
+  session_id TEXT,
+  host_id TEXT,
+  transport_locators_json TEXT NOT NULL DEFAULT '[]'
 );
 
 -- 메시지 테이블
@@ -28,7 +32,61 @@ CREATE TABLE IF NOT EXISTS messages (
   correlation_id TEXT NOT NULL,
   trace_id TEXT NOT NULL,
   payload_json TEXT NOT NULL DEFAULT '{}',
-  status TEXT NOT NULL CHECK (status IN ('queued','delivered','acked','expired','dead_letter'))
+  status TEXT NOT NULL CHECK (status IN ('queued','delivered','acked','expired','dead_letter')),
+  role_key_wire TEXT
+);
+
+-- 동적 역할 레지스트리 (schema v6)
+CREATE TABLE IF NOT EXISTS role_registry (
+  role_key_wire TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  role_kind TEXT NOT NULL CHECK (role_kind IN ('cto','lead')),
+  scope_id TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'electable',
+      'elected-probing',
+      'active',
+      'unreachable',
+      'quarantined'
+    )
+  ),
+  holder_agent_id TEXT,
+  previous_holder_agent_id TEXT,
+  epoch INTEGER NOT NULL DEFAULT 0 CHECK (epoch >= 0),
+  activation_seq INTEGER NOT NULL DEFAULT 0 CHECK (activation_seq >= 0),
+  activation_id TEXT,
+  activation_deadline_ms INTEGER,
+  holder_lease_expires_ms INTEGER,
+  charter_version TEXT,
+  charter_acked_epoch INTEGER,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  next_probe_ms INTEGER,
+  blocked_reason TEXT,
+  last_transition_ms INTEGER NOT NULL,
+  last_reason TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 0,
+  CHECK (
+    (role_kind = 'cto' AND scope_id = '') OR
+    (role_kind = 'lead' AND scope_id <> '')
+  ),
+  UNIQUE(project_id, role_kind, scope_id)
+);
+
+CREATE TABLE IF NOT EXISTS role_candidates (
+  role_key_wire TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('grant','standup','operator')),
+  priority INTEGER NOT NULL DEFAULT 0,
+  transport_locators_json TEXT NOT NULL DEFAULT '[]',
+  consecutive_probe_failures INTEGER NOT NULL DEFAULT 0,
+  excluded_until_ms INTEGER,
+  last_probe_ms INTEGER,
+  last_probe_code TEXT,
+  updated_at_ms INTEGER NOT NULL,
+  PRIMARY KEY(role_key_wire, agent_id),
+  FOREIGN KEY(role_key_wire)
+    REFERENCES role_registry(role_key_wire) ON DELETE CASCADE
 );
 
 -- 메시지 수신함 (배달 추적)
@@ -73,6 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_correlation ON messages(correlation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_trace ON messages(trace_id);
 CREATE INDEX IF NOT EXISTS idx_messages_expires ON messages(expires_at_ms);
 CREATE INDEX IF NOT EXISTS idx_messages_priority ON messages(priority DESC, created_at_ms ASC);
+CREATE INDEX IF NOT EXISTS idx_messages_role_key ON messages(role_key_wire, status, expires_at_ms);
 CREATE INDEX IF NOT EXISTS idx_inbox_agent ON message_inbox(agent_id, delivered_at_ms);
 CREATE INDEX IF NOT EXISTS idx_inbox_message ON message_inbox(message_id);
 CREATE INDEX IF NOT EXISTS idx_human_requests_state ON human_requests(state);
