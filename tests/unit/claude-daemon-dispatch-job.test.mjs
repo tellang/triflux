@@ -12,7 +12,7 @@ import {
 } from "../../hub/team/claude-daemon-control.mjs";
 
 // 데몬 control.sock 을 흉내내는 최소 서버. dispatch/list/kill 요청을 기록한다.
-async function listenDaemon(sockPath, { short, pid }) {
+async function listenDaemon(sockPath, { short, pid, expectedAuth }) {
   const requests = [];
   const server = net.createServer((socket) => {
     socket.setEncoding("utf8");
@@ -22,6 +22,20 @@ async function listenDaemon(sockPath, { short, pid }) {
       if (!data.includes("\n")) return;
       const request = JSON.parse(data.slice(0, data.indexOf("\n")));
       requests.push(request);
+      if (
+        request.op === "dispatch" &&
+        expectedAuth !== undefined &&
+        request.auth !== expectedAuth
+      ) {
+        socket.end(
+          `${JSON.stringify({
+            ok: false,
+            code: "EAUTH",
+            error: "dispatch rejected: invalid daemon control key",
+          })}\n`,
+        );
+        return;
+      }
       if (request.op === "list") {
         socket.end(
           `${JSON.stringify({
@@ -275,6 +289,100 @@ test("dispatchClaudeDaemonJob presents daemon control.key as auth when present",
       "feedface00112233",
       "control.key must be presented as auth (daemon enforces EAUTH otherwise)",
     );
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dispatchClaudeDaemonJob reads the source control.key for an OMC runtime config", async () => {
+  const tmp = await fs.mkdtemp(
+    path.join(os.tmpdir(), "tfx-dispatch-omc-auth-"),
+  );
+  const sourceConfigDir = path.join(tmp, "claude");
+  const runtimeConfigDir = path.join(sourceConfigDir, ".omc-launch");
+  const paths = deriveClaudeDaemonPaths({ configDir: runtimeConfigDir });
+  const controlKey = "omc-source-control-key";
+  await fs.mkdir(paths.daemonDir, { recursive: true });
+  await fs.mkdir(runtimeConfigDir, { recursive: true });
+  await fs.mkdir(path.join(sourceConfigDir, "daemon"), { recursive: true });
+  await fs.writeFile(
+    path.join(runtimeConfigDir, ".omc-launch-profile.json"),
+    JSON.stringify({ sourceConfigDir }),
+    "utf8",
+  );
+  await fs.writeFile(
+    path.join(sourceConfigDir, "daemon", "control.key"),
+    `${controlKey}\n`,
+    "utf8",
+  );
+  const short = "omca1234";
+  const { server, requests } = await listenDaemon(paths.controlSock, {
+    short,
+    pid: process.pid,
+    expectedAuth: controlKey,
+  });
+
+  try {
+    await dispatchClaudeDaemonJob({
+      paths,
+      controlSock: paths.controlSock,
+      payload: { proto: 1, short, sessionId: "omca1234-sess", cwd: "/tmp/p" },
+      agent: "codex",
+      name: "OMC auth worker",
+      cwd: "/tmp/p",
+      _deps: {
+        getProcStart: () => "Mon Jan 1 00:00:00 2026",
+        resolveDaemonBridgeSessionId: async () => "cse_01OmcAuth",
+      },
+    });
+    const dispatch = requests.find((request) => request.op === "dispatch");
+    assert.equal(dispatch.auth, controlKey);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("dispatchClaudeDaemonJob preserves EAUTH when the OMC source control.key is absent", async () => {
+  const tmp = await fs.mkdtemp(
+    path.join(os.tmpdir(), "tfx-dispatch-omc-noauth-"),
+  );
+  const sourceConfigDir = path.join(tmp, "claude");
+  const runtimeConfigDir = path.join(sourceConfigDir, ".omc-launch");
+  const paths = deriveClaudeDaemonPaths({ configDir: runtimeConfigDir });
+  await fs.mkdir(paths.daemonDir, { recursive: true });
+  await fs.mkdir(runtimeConfigDir, { recursive: true });
+  await fs.writeFile(
+    path.join(runtimeConfigDir, ".omc-launch-profile.json"),
+    JSON.stringify({ sourceConfigDir }),
+    "utf8",
+  );
+  const { server, requests } = await listenDaemon(paths.controlSock, {
+    short: "omcno567",
+    pid: process.pid,
+    expectedAuth: "omc-source-control-key",
+  });
+
+  try {
+    await assert.rejects(
+      dispatchClaudeDaemonJob({
+        paths,
+        controlSock: paths.controlSock,
+        payload: {
+          proto: 1,
+          short: "omcno567",
+          sessionId: "omcno567-sess",
+          cwd: "/tmp/p",
+        },
+        agent: "codex",
+        name: "OMC missing auth worker",
+        cwd: "/tmp/p",
+      }),
+      /invalid daemon control key/,
+    );
+    const dispatch = requests.find((request) => request.op === "dispatch");
+    assert.equal(dispatch.auth, undefined);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await fs.rm(tmp, { recursive: true, force: true });
