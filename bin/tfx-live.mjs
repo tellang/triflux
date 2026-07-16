@@ -23,7 +23,9 @@ const DEFAULT_POLL_INTERVAL_MS = 1500;
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ANSWER_TIMEOUT_MS = 60_000;
 const FALLBACK_QUIET_POLLS = 3;
-const CAPTURE_START = "-200";
+// Capture the complete pane history so a long TUI response does not lose its
+// leading lines. runTmux's MAX_BUFFER remains the memory/output ceiling.
+const CAPTURE_START = "-";
 const MAX_BUFFER = 10 * 1024 * 1024;
 // execFile timeout for a bridge verb = attach timeout + this buffer, so the
 // helper's own timeoutMs fires first and returns {timedOut:true} rather than
