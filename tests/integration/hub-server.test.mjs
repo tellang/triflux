@@ -964,7 +964,6 @@ describe("startHub() 라이프사이클", () => {
 });
 
 describe("startHub() localhost-only 모드", () => {
-  const LOCAL_ONLY_PORT = TEST_PORT + 200;
   let hub;
   let baseUrl;
   let restoreHubStateDir;
@@ -974,12 +973,12 @@ describe("startHub() localhost-only 모드", () => {
     delete process.env.TFX_HUB_TOKEN;
     const dbPath = tempDbPath();
     hub = await startHub({
-      port: LOCAL_ONLY_PORT,
+      port: TEST_PORT,
       dbPath,
       host: "0.0.0.0",
-      sessionId: `test-${LOCAL_ONLY_PORT}`,
+      sessionId: `test-localhost-only-${randomUUID()}`,
     });
-    baseUrl = `http://127.0.0.1:${LOCAL_ONLY_PORT}`;
+    baseUrl = `http://127.0.0.1:${hub.port}`;
   });
 
   after(async () => {
@@ -1026,7 +1025,6 @@ describe("startHub() localhost-only 모드", () => {
 });
 
 describe("startHub() token-required + 원격 바인드 — raw /synapse/sessions loopback 강제", () => {
-  const REMOTE_SYNAPSE_PORT = TEST_PORT + 300;
   let hub;
   let baseUrl;
   let restoreHubStateDir;
@@ -1036,12 +1034,12 @@ describe("startHub() token-required + 원격 바인드 — raw /synapse/sessions
     process.env.TFX_HUB_TOKEN = TEST_TOKEN;
     const dbPath = tempDbPath();
     hub = await startHub({
-      port: REMOTE_SYNAPSE_PORT,
+      port: TEST_PORT,
       dbPath,
       host: "0.0.0.0",
-      sessionId: `test-${REMOTE_SYNAPSE_PORT}`,
+      sessionId: `test-remote-synapse-${randomUUID()}`,
     });
-    baseUrl = `http://127.0.0.1:${REMOTE_SYNAPSE_PORT}`;
+    baseUrl = `http://127.0.0.1:${hub.port}`;
   });
 
   after(async () => {
