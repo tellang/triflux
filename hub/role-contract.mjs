@@ -1,4 +1,7 @@
-const PROJECT_ID_RE = /^prj_[A-Za-z0-9_-]{22}$/u;
+export const PROJECT_ID_PATTERN = "^prj_[A-Za-z0-9_-]{22}$";
+export const HOST_ID_PATTERN = "^hst_[A-Za-z0-9_-]+$";
+
+const PROJECT_ID_RE = new RegExp(PROJECT_ID_PATTERN, "u");
 const SCOPE_ID_RE = /^scp_[A-Za-z0-9_-]{22}$/u;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/u;
 

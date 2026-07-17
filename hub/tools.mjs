@@ -13,6 +13,7 @@ import {
   listPipelineStates,
   readPipelineState,
 } from "./pipeline/state.mjs";
+import { HOST_ID_PATTERN, PROJECT_ID_PATTERN } from "./role-contract.mjs";
 import { sendInputToConductorSession } from "./team/conductor-registry.mjs";
 import { getTeamBridge } from "./team-bridge.mjs";
 
@@ -153,9 +154,9 @@ export function createTools(store, router, hitl, pipe = null) {
           },
           topics: { type: "array", items: { type: "string" }, maxItems: 64 },
           metadata: { type: "object" },
-          project_id: { type: "string", pattern: "^prj_[A-Za-z0-9_-]{22}$" },
+          project_id: { type: "string", pattern: PROJECT_ID_PATTERN },
           session_id: { type: "string", minLength: 1, maxLength: 256 },
-          host_id: { type: "string", pattern: "^hst_[A-Za-z0-9_-]+$" },
+          host_id: { type: "string", pattern: HOST_ID_PATTERN },
           transport_locators_json: {
             description:
               "tfx.transport-locator.v1 객체 배열 또는 그 JSON 문자열",

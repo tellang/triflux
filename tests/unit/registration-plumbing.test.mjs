@@ -168,6 +168,27 @@ describe("registration scoped identity plumbing", { skip: SQLITE_SKIP }, () => {
 });
 
 describe("SessionStart scoped registration metadata", () => {
+  it("normalizes a raw TFX_HOST_ID into a valid opaque locator identity", () => {
+    const previous = process.env.TFX_HOST_ID;
+    process.env.TFX_HOST_ID = "MacBook Pro / raw host";
+    try {
+      const identity = buildSynapseRegistrationMeta(
+        { sessionKind: "interactive", sessionId: "host-normalization" },
+        { nowMs: () => 1000 },
+      );
+      assert.match(identity.host_id, /^hst_[A-Za-z0-9_-]{22}$/u);
+      assert.equal(identity.project_id, undefined);
+      assert.equal(Object.hasOwn(identity, "project_id"), false);
+      assert.equal(
+        JSON.parse(identity.transport_locators_json)[0].host_id,
+        identity.host_id,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.TFX_HOST_ID;
+      else process.env.TFX_HOST_ID = previous;
+    }
+  });
+
   it("loads tracked project identity and emits only detectable Codex tmux locator", () => {
     const root = mkdtempSync(join(tmpdir(), "tfx-session-registration-"));
     TEMP_DIRS.push(root);

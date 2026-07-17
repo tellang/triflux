@@ -161,6 +161,13 @@ describe("hub store role registry", { skip: SQLITE_SKIP }, () => {
           state: "electable",
         },
         {
+          role_key_wire: "invalid-active-without-holder",
+          project_id: PROJECT_A,
+          role_kind: "cto",
+          scope_id: "",
+          state: "active",
+        },
+        {
           role_key_wire: "invalid-state",
           project_id: PROJECT_A,
           role_kind: "cto",

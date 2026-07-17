@@ -131,6 +131,26 @@ function ensureV7Columns(db) {
   }
 }
 
+// schema.sql의 CHECK는 CREATE TABLE IF NOT EXISTS 특성상 기존 테이블에 소급되지
+// 않는다. 매 부팅 실행되는 이 트리거가 legacy DB의 유일한 방어선이므로, 신규 DB
+// (CHECK)와 legacy DB(트리거)의 오류 문구를 의도적으로 동일하게 맞춘다.
+function ensureRoleRegistryIntegrityGuards(db) {
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS role_registry_active_holder_insert
+    BEFORE INSERT ON role_registry
+    WHEN NEW.state = 'active' AND NEW.holder_agent_id IS NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'CHECK constraint failed: active role requires holder_agent_id');
+    END;
+    CREATE TRIGGER IF NOT EXISTS role_registry_active_holder_update
+    BEFORE UPDATE OF state, holder_agent_id ON role_registry
+    WHEN NEW.state = 'active' AND NEW.holder_agent_id IS NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'CHECK constraint failed: active role requires holder_agent_id');
+    END;
+  `);
+}
+
 function storeFingerprint(dbPath) {
   return `sqlite:${createHash("sha256").update(String(dbPath)).digest("hex")}`;
 }
@@ -165,7 +185,7 @@ export function createStore(dbPath, options = {}) {
   db.exec(
     "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)",
   );
-  const SCHEMA_VERSION = "7";
+  const SCHEMA_VERSION = "8";
   const curVer = (() => {
     try {
       return db
@@ -198,6 +218,7 @@ export function createStore(dbPath, options = {}) {
   // 매 부팅 실행해 부분 적용된 마이그레이션도 안전하게 복구한다.
   ensureV6Columns(db);
   ensureV7Columns(db);
+  ensureRoleRegistryIntegrityGuards(db);
   ensureColumn(
     db,
     "reflexion_entries",
@@ -606,8 +627,16 @@ export function createStore(dbPath, options = {}) {
     if (current.activation_id !== expected.activation_id) {
       return "stale_activation_id";
     }
-    return "cas_conflict";
+    return null;
   }
+
+  // db.transaction()은 DEFERRED BEGIN이라 read→write 승격 시점에
+  // SQLITE_BUSY_SNAPSHOT을 낼 수 있다. 역할 레지스트리 쓰기는 reserveRole /
+  // recoverRegistry와 동일하게 BEGIN IMMEDIATE로 쓰기 락을 선점한다.
+  const immediateTx = (fn) => {
+    const tx = db.transaction(fn);
+    return (input) => tx.immediate(input);
+  };
 
   const reserveRole = db.transaction((input) => {
     const identity = roleIdentity(input);
@@ -685,12 +714,15 @@ export function createStore(dbPath, options = {}) {
       const latest = S.getRole.get(identity.role_key_wire) ?? null;
       return {
         ok: false,
-        reason: roleFailureReason(latest, {
-          version: current.version,
-          epoch: current.epoch,
-          activation_seq: current.activation_seq,
-          activation_id: current.activation_id,
-        }),
+        // 쓰기가 0행을 건드렸는데 재조회가 기대값과 일치하면 원인을 특정할 수
+        // 없다. reason이 null로 새지 않도록 cas_conflict를 catch-all로 둔다.
+        reason:
+          roleFailureReason(latest, {
+            version: current.version,
+            epoch: current.epoch,
+            activation_seq: current.activation_seq,
+            activation_id: current.activation_id,
+          }) ?? "cas_conflict",
         role: latest,
       };
     }
@@ -713,7 +745,13 @@ export function createStore(dbPath, options = {}) {
         S.recoverExpiredRole.run(guard);
       } else if (role.holder_agent_id) {
         S.recoverLiveRole.run({ ...guard, activation_id: uuidv7() });
-      } else if (role.activation_id || role.state === "elected-probing") {
+      } else if (
+        role.activation_id ||
+        role.state === "elected-probing" ||
+        // holder 없는 active는 v7 이전 DB가 남길 수 있는 phantom authority다.
+        // 트리거는 신규 유입만 막으므로 기존 행은 여기서 electable로 되돌린다.
+        role.state === "active"
+      ) {
         S.recoverOrphanedActivation.run(guard);
       }
     }
@@ -874,7 +912,7 @@ export function createStore(dbPath, options = {}) {
       return reserveRole.immediate(input);
     },
 
-    compareAndSetRole(input) {
+    compareAndSetRole: immediateTx((input) => {
       const identity = roleIdentity(input);
       const current = S.getRole.get(identity.role_key_wire) ?? null;
       if (!current) return { ok: false, reason: "not_found", role: null };
@@ -911,7 +949,7 @@ export function createStore(dbPath, options = {}) {
       }
 
       const reason = roleFailureReason(current, expected);
-      if (reason !== "cas_conflict") {
+      if (reason !== null) {
         return { ok: false, reason, role: current };
       }
 
@@ -971,12 +1009,12 @@ export function createStore(dbPath, options = {}) {
         const latest = S.getRole.get(identity.role_key_wire) ?? null;
         return {
           ok: false,
-          reason: roleFailureReason(latest, expected),
+          reason: roleFailureReason(latest, expected) ?? "cas_conflict",
           role: latest,
         };
       }
       return { ok: true, role: S.getRole.get(identity.role_key_wire) };
-    },
+    }),
 
     listRoleKeys(filter = {}) {
       const clauses = [];
