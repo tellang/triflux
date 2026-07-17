@@ -149,6 +149,14 @@ export function createTools(store, router, hitl, pipe = null) {
           },
           topics: { type: "array", items: { type: "string" }, maxItems: 64 },
           metadata: { type: "object" },
+          project_id: { type: "string", pattern: "^prj_[A-Za-z0-9_-]{22}$" },
+          session_id: { type: "string", minLength: 1, maxLength: 256 },
+          host_id: { type: "string", pattern: "^hst_[A-Za-z0-9_-]+$" },
+          transport_locators_json: {
+            description:
+              "tfx.transport-locator.v1 객체 배열 또는 그 JSON 문자열",
+            oneOf: [{ type: "array", items: { type: "object" } }, { type: "string" }],
+          },
           heartbeat_ttl_ms: {
             type: "integer",
             minimum: 10000,

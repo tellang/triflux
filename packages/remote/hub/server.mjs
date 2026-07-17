@@ -1545,6 +1545,38 @@ export async function startHub({
         try {
           const body = await parseBody(req);
           const { sessionId } = body || {};
+          if (body?.agent_id && body?.cli) {
+            const registered = router.registerAgent({
+              agent_id: body.agent_id,
+              cli: body.cli,
+              capabilities: Array.isArray(body.capabilities)
+                ? body.capabilities
+                : [],
+              topics: Array.isArray(body.topics) ? body.topics : [],
+              heartbeat_ttl_ms: body.heartbeat_ttl_ms ?? 300000,
+              metadata:
+                body.metadata && typeof body.metadata === "object"
+                  ? body.metadata
+                  : { source: "session_start" },
+              ...(Object.hasOwn(body, "project_id")
+                ? { project_id: body.project_id }
+                : {}),
+              ...(Object.hasOwn(body, "session_id")
+                ? { session_id: body.session_id }
+                : {}),
+              ...(Object.hasOwn(body, "host_id")
+                ? { host_id: body.host_id }
+                : {}),
+              ...(Object.hasOwn(body, "transport_locators_json")
+                ? { transport_locators_json: body.transport_locators_json }
+                : {}),
+            });
+            if (!registered?.ok) {
+              throw new Error(
+                registered?.error?.message || "hub agent register failed",
+              );
+            }
+          }
           const result = synapseRegistry.register(sessionId, body);
           if (!result?.ok) {
             throw new Error(result?.reason || "register failed");
@@ -1699,6 +1731,10 @@ export async function startHub({
               topics = [],
               capabilities = [],
               metadata = {},
+              project_id,
+              session_id,
+              host_id,
+              transport_locators_json,
             } = body;
             if (!agent_id || !cli) {
               return writeJson(res, 400, {
@@ -1725,6 +1761,12 @@ export async function startHub({
               topics,
               heartbeat_ttl_ms,
               metadata,
+              ...(project_id === undefined ? {} : { project_id }),
+              ...(session_id === undefined ? {} : { session_id }),
+              ...(host_id === undefined ? {} : { host_id }),
+              ...(transport_locators_json === undefined
+                ? {}
+                : { transport_locators_json }),
             });
             if (result.ok) {
               workerSpans.set(agent_id, {
