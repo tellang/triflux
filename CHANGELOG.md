@@ -2,6 +2,25 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.44.0] - 2026-07-17
+
+### Added
+- hub: schema v6 + store role registry CAS/recovery (C6a-2, #484) — `role_registry`/`role_candidates` SQLite 영속화, epoch·activation 4중 술어 CAS(NULL-safe), 재시작 recovery seam. production dispatch 무변경(inert)
+- hub: registration plumbing (C6a-3, #489) — 세션 등록 경로에 `project_id`/`session_id`/`host_id`/transport locator 배관. 필드 전부 optional(legacy 하위호환 실증), locator normalized schema + expiry≤lease 강제, tmux 소켓 경로 opaque 해싱
+- routing: codex max/ultra 프로파일 레인 (#490) — `TFX_CODEX_PROFILE=max`→`gpt56_sol_max`, `ultra`는 deep-executor/scientist-deep 단독 실행 한정, nested/sandbox 강등, retry snapshot 우선. agent-route-policy 중앙화 구조로 포팅
+- routing: keyword hook에 `repo_scope`(path segment 가드)/`explicit`(종결 라우팅 우선)/`disabled` 메커니즘 + 전용 명시토큰 규칙 6종 (#487)
+- core: role contract kernel(pack CORE_FILES) 등록 (#485)
+
+### Fixed
+- swarm: rootDir 통합 제거 (#488) — ff-merge 실패 시 사용자 체크아웃에서 `reset --hard`로 미커밋 변경을 소거하던 데이터손실 경로를 임시 worktree 통합으로 구조적 제거 + preflight에 rootDir dirty×lease 교집합 NO-GO. 사고 재현 회귀테스트 동봉
+- mirror: `packages/core/hub/router.mjs` 드리프트 봉합 + `check-mirror CORE_FILE_MIRRORS`에 router 등록 (published `@triflux/remote`가 등록 신원을 조용히 버리던 결함, #489)
+- routing: keyword detector가 모듈 import 시 stdin 대기로 행 걸리던 문제(direct-run 가드, 심링크 경로 포함) (#487)
+- test: deep-interview 트리거 검증을 lane2-d 좁힌 표면에 정렬 — main CI red 해소 (#487)
+
+### Changed
+- routing: Codex agent 정책을 `agent-route-policy.mjs`로 중앙화 + H03/H06/H09 우선순위 잠금 + tfx-harness SSOT-reading 어댑터
+- docs: ADR-0011(능동 역할 시스템) accepted 승격 (#486)
+
 ## [10.43.0] - 2026-07-11
 
 ### Added
