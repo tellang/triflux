@@ -41,3 +41,26 @@ describe("lane2-d routing contract: Agent model guard", () => {
     assert.match(route, /handoff model 해석 실패/);
   });
 });
+
+describe("lane2-d routing contract: SSOT-reading harness adapters", () => {
+  const rootHarness = join(process.cwd(), "skills", "tfx-harness", "SKILL.md");
+  const codexHarness = join(
+    process.cwd(),
+    "adapters",
+    "codex",
+    "skills",
+    "tfx-harness",
+    "SKILL.md",
+  );
+
+  for (const harness of [rootHarness, codexHarness]) {
+    it(`${harness} returns exactly one branch and owner without copying a routing table`, () => {
+      const content = readFileSync(harness, "utf8");
+      assert.match(content, /\.claude\/rules\/tfx-routing\.md/);
+      assert.match(content, /branch: D<n>/);
+      assert.match(content, /owner: <exactly one immediate owner>/);
+      assert.doesNotMatch(content, /\|\s*D0\s*\|/);
+      assert.doesNotMatch(content, /\|\s*owner\s*\|/i);
+    });
+  }
+});

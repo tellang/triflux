@@ -94,6 +94,7 @@ import {
   SKILL_ALIASES,
   SYNC_MAP,
   syncAliasedSkillDir,
+  syncCodexHarnessAdapter,
 } from "../scripts/setup.mjs";
 import { cleanupTmpFiles } from "../scripts/tmp-cleanup.mjs";
 
@@ -2201,6 +2202,19 @@ function cmdSetup(options = {}) {
         `구형 스킬 ${staleCleanup.count}개 제거: ${staleCleanup.removed.join(", ")}`,
       );
     }
+  }
+
+  const codexHarnessSync = syncCodexHarnessAdapter();
+  if (!codexHarnessSync.ok) {
+    fail(`Codex tfx-harness: ${codexHarnessSync.reason}`);
+    return;
+  }
+  if (codexHarnessSync.action === "synced") {
+    ok("Codex tfx-harness adapter: 동기화됨");
+  } else if (codexHarnessSync.action === "skipped") {
+    warn(
+      `Codex tfx-harness adapter: 사용자 스킬 보존 (backup: ${codexHarnessSync.backupDir})`,
+    );
   }
 
   // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──

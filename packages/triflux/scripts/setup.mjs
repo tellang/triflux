@@ -14,6 +14,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -498,6 +499,7 @@ const SKILL_ALIASES = [
 
 const DEPRECATED_SKILLS = ["tfx-codex-route", "tfx-gemini-route"];
 const LOCAL_DEV_SKILL_MARKER = ".triflux-local-skill";
+const MANAGED_CODEX_SKILL_MARKER = ".triflux-managed-skill";
 
 // ── 구형 Codex 모델 (마이그레이션 안내 대상) ──
 
@@ -577,6 +579,76 @@ function cleanupStaleSkills(installedDir, pkgDir) {
 
 function isLocalDevSkillDir(skillPath) {
   return existsSync(join(skillPath, LOCAL_DEV_SKILL_MARKER));
+}
+
+function skillTreeMatches(srcDir, dstDir) {
+  if (!existsSync(srcDir) || !existsSync(dstDir)) return false;
+  for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = join(srcDir, entry.name);
+    const dstPath = join(dstDir, entry.name);
+    if (entry.isDirectory()) {
+      if (!skillTreeMatches(srcPath, dstPath)) return false;
+      continue;
+    }
+    if (!existsSync(dstPath)) return false;
+    if (!readFileSync(srcPath).equals(readFileSync(dstPath))) return false;
+  }
+  return true;
+}
+
+/**
+ * Sync the tracked Codex tfx-harness adapter without taking ownership of a
+ * pre-existing user skill. A missing source is a hard failure; a conflicting
+ * destination is backed up and deliberately left untouched.
+ */
+function syncCodexHarnessAdapter({
+  sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
+  destinationDir = join(CODEX_DIR, "skills", "tfx-harness"),
+} = {}) {
+  const sourceSkill = join(sourceDir, "SKILL.md");
+  if (!existsSync(sourceSkill)) {
+    return {
+      ok: false,
+      action: "blocked",
+      reason: "codex_harness_adapter_source_missing",
+      sourceDir,
+      destinationDir,
+    };
+  }
+
+  const managed = existsSync(join(destinationDir, MANAGED_CODEX_SKILL_MARKER));
+  const current = skillTreeMatches(sourceDir, destinationDir);
+  if (current && managed) {
+    return { ok: true, action: "noop", sourceDir, destinationDir };
+  }
+
+  if (existsSync(destinationDir) && !managed) {
+    const backupDir = `${destinationDir}.triflux-backup-${Date.now()}`;
+    cpSync(destinationDir, backupDir, { recursive: true });
+    return {
+      ok: true,
+      action: "skipped",
+      reason: "user_owned_codex_skill",
+      sourceDir,
+      destinationDir,
+      backupDir,
+    };
+  }
+
+  const tempDir = `${destinationDir}.triflux-tmp-${process.pid}-${Date.now()}`;
+  mkdirSync(dirname(destinationDir), { recursive: true });
+  cpSync(sourceDir, tempDir, { recursive: true });
+  writeFileSync(
+    join(tempDir, MANAGED_CODEX_SKILL_MARKER),
+    "managed by triflux\n",
+  );
+
+  if (existsSync(destinationDir)) {
+    const previousDir = `${destinationDir}.triflux-previous-${Date.now()}`;
+    renameSync(destinationDir, previousDir);
+  }
+  renameSync(tempDir, destinationDir);
+  return { ok: true, action: "synced", sourceDir, destinationDir };
 }
 
 /**
@@ -1526,6 +1598,7 @@ export {
   SYNC_MAP,
   scanHudFiles,
   syncAliasedSkillDir,
+  syncCodexHarnessAdapter,
   syncWorkerPackages,
   validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
@@ -1581,6 +1654,16 @@ export async function runDeferred(stdinData) {
       result.action === "updated" ||
       result.action === "removed",
   ).length;
+  const codexHarnessSync = syncCodexHarnessAdapter();
+  if (!codexHarnessSync.ok) {
+    io.log(`  \x1b[31m✗\x1b[0m Codex tfx-harness: ${codexHarnessSync.reason}`);
+    return io.result(1);
+  }
+  if (codexHarnessSync.action === "skipped") {
+    io.log(
+      `  \x1b[33m⚠\x1b[0m Codex tfx-harness: user skill preserved; backup ${codexHarnessSync.backupDir}`,
+    );
+  }
   const cloakBrowserResult = ensureCloakBrowser({
     warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
   });
@@ -1601,7 +1684,8 @@ export async function runDeferred(stdinData) {
     return io.result(0);
   }
 
-  let synced = claudeRoutingChangedCount;
+  let synced =
+    claudeRoutingChangedCount + (codexHarnessSync.action === "synced" ? 1 : 0);
 
   // ── Memory Doctor (P0 자동 수정) ──
   const isCIEnv = process.env.CI === "true" || process.env.DOCKER === "true";
