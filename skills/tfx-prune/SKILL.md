@@ -1,11 +1,13 @@
 ---
 internal: true
 name: tfx-prune
-description: "AI가 생성한 불필요한 코드(슬롭)를 제거할 때 사용한다. 'deslop', '슬롭 제거', 'anti-slop', '코드 정리', '불필요한 코드 제거', '과잉 추상화 정리' 같은 요청에 반드시 사용. AI 생성 코드의 중복, 불필요 추상화, 과잉 에러 핸들링을 정리할 때 적극 활용."
+description: "명시 `tfx-prune` 또는 TFX 3자 합의 cleanup을 요청할 때 사용한다. 무수식 AI slop/deslop/refactor는 host ai-slop-cleaner가 소유한다."
 argument-hint: "[파일 경로 또는 git diff 범위]"
 ---
 
 # tfx-prune — Tri-Verified AI Slop Remover
+
+라우팅 정본 D8은 `.claude/rules/tfx-routing.md`를 따른다.
 
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
 > 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.

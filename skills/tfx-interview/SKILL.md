@@ -1,11 +1,13 @@
 ---
 internal: true
 name: tfx-interview
-description: "요구사항이 모호하거나 구현 전 명확화가 필요할 때 사용한다. 'interview', 'deep-interview', '딥인터뷰', '소크라테스', '깊이 탐색', '요구사항 분석', '인터뷰', '요구사항 정리', '뭘 만들어야 하는지 모르겠어', '명확하게 해줘' 같은 요청에 반드시 사용. 구현 시작 전 스펙을 확정하고 싶을 때 적극 활용."
+description: "명시 `tfx-interview` 또는 TFX 정량·다중 CLI 요구사항 탐색을 요청할 때 사용한다. 무수식 일반 요구사항 명확화는 host deep-interview가 소유한다."
 argument-hint: "<구현할 주제 또는 요구사항>"
 ---
 
 # tfx-interview — Quantified Socratic Requirements Exploration
+
+라우팅 정본 D2는 `.claude/rules/tfx-routing.md`를 따른다.
 
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
 > 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
