@@ -34,6 +34,8 @@ const CORE_FILES = [
   "hub/intent.mjs",
   "hub/token-mode.mjs",
   "hub/router.mjs",
+  "hub/role-contract.mjs",
+  "hub/role-control-events.mjs",
   "hub/hitl.mjs",
   "hub/assign-callbacks.mjs",
   "hub/fullcycle.mjs",
