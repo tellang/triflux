@@ -37,7 +37,7 @@ Bash("codex --profile xhigh exec --dangerously-bypass-approvals-and-sandbox --sk
 #          ↑ --profile은 exec 앞에, --skip-git-repo-check은 exec 뒤에
 
 # Claude 네이티브 (탐색/검증)
-Agent(subagent_type="oh-my-claudecode:explore", prompt="{작업}")
+Agent(subagent_type="oh-my-claudecode:explore", model="haiku", prompt="{작업}")
 ```
 
 ## 커맨드

@@ -2801,6 +2801,14 @@ ${ctx_content}
   # Claude 네이티브 에이전트는 이 스크립트로 처리 불가
   if [[ "$CLI_TYPE" == "claude-native" ]]; then
     if [[ -n "$TFX_TEAM_NAME" ]]; then
+      local native_model native_adapter
+      native_adapter="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cli-claude.mjs"
+      [[ -f "$native_adapter" ]] || native_adapter="${TFX_PKG_ROOT:-}/scripts/lib/cli-claude.mjs"
+      native_model=$("$NODE_BIN" -e 'import(process.argv[1]).then(({plan}) => process.stdout.write(plan({agent: process.argv[2]}).model || ""))' "$native_adapter" "$AGENT_TYPE" 2>/dev/null)
+      if [[ -z "$native_model" ]]; then
+        echo "ERROR: Claude native handoff model 해석 실패: $AGENT_TYPE" >&2
+        exit 1
+      fi
       # 팀 모드: Hub에 fallback 필요 시그널 전송 후 구조화된 출력
       echo "[tfx-route] claude-native 역할($AGENT_TYPE)은 tfx-route.sh로 실행 불가 — Claude Agent fallback 필요" >&2
       team_complete_task "fallback" "claude-native 역할 실행 불가: ${AGENT_TYPE}. Claude Task(sonnet) 에이전트로 위임하세요."
@@ -2808,7 +2816,7 @@ ${ctx_content}
 === TFX_NEEDS_FALLBACK ===
 agent_type: ${AGENT_TYPE}
 reason: claude-native roles require Claude Agent tools (Read/Edit/Grep). tfx-route.sh cannot provide these.
-action: Lead should spawn Agent(subagent_type="${AGENT_TYPE}") for this task.
+action: Lead should spawn Agent(subagent_type="${AGENT_TYPE}", model="${native_model}") for this task.
 task_id: ${TFX_TEAM_TASK_ID:-none}
 FALLBACK_EOF
       exit 0

@@ -64,7 +64,7 @@ OMC Native Agent Team과 triflux headless 실행 엔진을 결합하여
 **현재 (Native Agent 직접 실행):**
 ```js
 // OMC skill 내부
-Agent({ subagent_type: "executor", prompt: subtask })
+Agent({ subagent_type: "executor", model: "sonnet", prompt: subtask })
 ```
 
 **변경 후 (headless CLI 위임):**

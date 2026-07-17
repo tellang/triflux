@@ -98,4 +98,37 @@ describe("lint-skills", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("실행형 Agent 호출은 model=이 없으면 실패한다", () => {
+    const root = makeTempDir();
+    try {
+      const skillsDir = join(root, "skills");
+      writeSkill(
+        root,
+        "tfx-agent",
+        '---\nname: tfx-agent\ndescription: 한국어 설명\n---\nAgent(subagent_type="explore", prompt="x")',
+      );
+      const result = lintSkills({ skillsDir });
+      assert.equal(result.ok, false);
+      assert.equal(result.problems[0]?.code, "agent-model-required");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("model=이 있는 실행형 Agent와 prose signature는 통과한다", () => {
+    const root = makeTempDir();
+    try {
+      const skillsDir = join(root, "skills");
+      writeSkill(
+        root,
+        "tfx-agent-ok",
+        '---\nname: tfx-agent-ok\ndescription: 한국어 설명\n---\nAgent()\nAgent(subagent_type="explore", model="haiku", prompt="x")',
+      );
+      const result = lintSkills({ skillsDir });
+      assert.equal(result.ok, true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

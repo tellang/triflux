@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
@@ -25,5 +27,17 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
   it("preserves direct-Codex designer and writer overrides in the policy", () => {
     assert.equal(CODEX_AGENT_POLICY.designer.profile, "gpt56_sol_xhigh");
     assert.equal(CODEX_AGENT_POLICY.writer.profile, "gpt56_luna_low");
+  });
+});
+
+describe("lane2-d routing contract: Agent model guard", () => {
+  it("generated native handoff resolves and includes model=", () => {
+    const route = readFileSync(
+      join(process.cwd(), "scripts/tfx-route.sh"),
+      "utf8",
+    );
+    assert.match(route, /cli-claude\.mjs/);
+    assert.match(route, /model="\$\{native_model\}"/);
+    assert.match(route, /handoff model 해석 실패/);
   });
 });
