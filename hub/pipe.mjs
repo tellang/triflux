@@ -220,6 +220,35 @@ export function createPipeServer({
 
   async function processCommand(client, action, payload = {}) {
     switch (action) {
+      case "ensure_role": {
+        if (client && !client.agentId) {
+          return {
+            ok: false,
+            error: {
+              code: "PRINCIPAL_REQUIRED",
+              message: "agent registration required before ensure_role",
+            },
+          };
+        }
+        return router.requestEnsureRole(payload, {
+          principal: client?.agentId
+            ? { type: "agent", agent_id: client.agentId }
+            : {
+                type: "system",
+                service: "team-pipeline",
+                project_id: payload?.role_key?.project_id,
+              },
+        });
+      }
+
+      case "ack_role_activation":
+        return router.ackRoleActivation(payload, {
+          principal: {
+            type: "agent",
+            agent_id: client?.agentId,
+          },
+        });
+
       case "register": {
         const result = router.registerAgent(payload);
         if (!result?.ok) return result;
@@ -814,8 +843,12 @@ export function createPipeServer({
       };
     },
 
-    async executeCommand(action, payload) {
-      return await processCommand(null, action, payload);
+    async executeCommand(action, payload, context = {}) {
+      const client =
+        context.connection_bound || context.agent_id
+          ? { agentId: context.agent_id ?? null }
+          : null;
+      return await processCommand(client, action, payload);
     },
 
     async executeQuery(action, payload) {

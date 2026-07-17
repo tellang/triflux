@@ -14,6 +14,7 @@ import { compareMirror } from "../../scripts/release/check-packages-mirror.mjs";
 const CORE_MIRRORS = new Map([
   ["hub/bridge.mjs", "packages/core/hub/bridge.mjs"],
   ["hub/router.mjs", "packages/core/hub/router.mjs"],
+  ["hub/role-activator.mjs", "packages/core/hub/role-activator.mjs"],
   [
     "hub/team/retry-state-machine.mjs",
     "packages/core/hub/team/retry-state-machine.mjs",
@@ -220,4 +221,25 @@ test("compareMirror reports clean when packages/core/hud matches root hud", (t) 
     i.path.startsWith("packages/core/hud/"),
   );
   assert.deepEqual(hudIssues, []);
+});
+
+test("compareMirror detects a missing packages/remote role runtime adapter", (t) => {
+  const repoRoot = makeFixture(t);
+  write(
+    repoRoot,
+    "hub/role-activator-tfx-live.mjs",
+    "export const adapter = true;\n",
+  );
+  write(repoRoot, "packages/remote/package.json", "{}\n");
+
+  const result = compareMirror({ fix: false, repoRoot });
+
+  assert.equal(result.ok, false);
+  assert.ok(
+    findIssue(
+      result,
+      "packages/remote/hub/role-activator-tfx-live.mjs",
+      "missing-in-mirror",
+    ),
+  );
 });

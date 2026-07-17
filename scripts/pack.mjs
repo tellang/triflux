@@ -34,6 +34,7 @@ const CORE_FILES = [
   "hub/intent.mjs",
   "hub/token-mode.mjs",
   "hub/router.mjs",
+  "hub/role-activator.mjs",
   "hub/role-contract.mjs",
   "hub/role-control-events.mjs",
   "hub/hitl.mjs",
@@ -77,6 +78,7 @@ const CORE_DIRS = [
 
 const REMOTE_FILES = [
   "hub/server.mjs",
+  "hub/role-activator-tfx-live.mjs",
   "hub/store.mjs",
   "hub/schema.sql",
   "hub/store-adapter.mjs",

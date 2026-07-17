@@ -38,6 +38,7 @@ import {
   reapExistingHubProcesses,
   resolveHubPortForContext,
 } from "./hub-lifecycle.mjs";
+import { resolveRoleControlSnapshot } from "./lib/cto-env.mjs";
 import {
   cleanupOrphanNodeProcesses,
   cleanupOrphanRuntimeProcesses,
@@ -60,6 +61,8 @@ import { focusSessionOnMac } from "./mac-focus.mjs";
 import { logQuotaRefreshFailures } from "@triflux/core/hub/middleware/quota-middleware.mjs";
 import { wrapRequestHandler } from "@triflux/core/hub/middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
+import { createRoleActivator } from "@triflux/core/hub/role-activator.mjs";
+import { createTfxLiveRoleAdapter } from "./role-activator-tfx-live.mjs";
 import { createRouter } from "@triflux/core/hub/router.mjs";
 import { createAdaptiveFingerprintService } from "@triflux/core/hub/session-fingerprint.mjs";
 import {
@@ -1063,7 +1066,44 @@ export async function startHub({
   }
 
   const store = await createStoreAdapter(dbPath);
-  const router = createRouter(store);
+  const roleStoreMethods = [
+    "getAgent",
+    "getRole",
+    "upsertRoleReservation",
+    "compareAndSetRole",
+    "listRoleCandidates",
+    "updateCandidateReachability",
+    "listRolesWithExpiredHolder",
+    "listPendingRoleMessages",
+    "recoverRoleRegistry",
+  ];
+  const roleStoreReady = roleStoreMethods.every(
+    (method) => typeof store[method] === "function",
+  );
+  let roleControlSnapshot = resolveRoleControlSnapshot(process.env);
+  const getRoleControlSnapshot = () => {
+    roleControlSnapshot = resolveRoleControlSnapshot(process.env, {
+      previous: roleControlSnapshot,
+    });
+    return roleControlSnapshot;
+  };
+  let router;
+  const roleActivator = roleStoreReady
+    ? createRoleActivator({
+        store,
+        adapter: createTfxLiveRoleAdapter({ projectRoot: PROJECT_ROOT }),
+        getControlSnapshot: getRoleControlSnapshot,
+        getCharterVersion: (roleKind) =>
+          roleKind === "lead" ? "tfx.lead-charter.v1" : "tfx.cto-charter.v1",
+        logger: hubLog,
+        onRoleActive: ({ role }) => router?.activateScopedRoleHolder(role) ?? 0,
+      })
+    : null;
+  router = createRouter(store, { roleActivator });
+  if (roleActivator) {
+    const recovered = store.recoverRoleRegistry(Date.now());
+    roleActivator.ensureRecoveredRoles(recovered);
+  }
   const fingerprintService = createAdaptiveFingerprintService({ store });
 
   // Neural Memory adaptive engine 초기화
@@ -2469,6 +2509,9 @@ export async function startHub({
       await delegatorWorker.stop();
     } catch {}
     try {
+      roleActivator?.close();
+    } catch {}
+    try {
       store.close();
     } catch {}
     if (!ephemeralPort && !preserveTokenFile) {
@@ -2675,6 +2718,7 @@ export async function startHub({
               try {
                 synapseRegistry.destroy();
               } catch {}
+              roleActivator?.close();
               store.close();
               if (!ephemeralPort) {
                 cleanupOwnedPidFile();
