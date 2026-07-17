@@ -18,6 +18,15 @@ const EFFORT_BY_SUFFIX = {
   low: "low",
 };
 
+const CANONICAL_PROFILE_VALUES = Object.freeze({
+  gpt56_luna_low: { model: "gpt-5.6-luna", effort: "low" },
+  gpt56_terra_med: { model: "gpt-5.6-terra", effort: "medium" },
+  gpt56_terra_high: { model: "gpt-5.6-terra", effort: "high" },
+  gpt56_sol_xhigh: { model: "gpt-5.6-sol", effort: "xhigh" },
+  gpt56_sol_max: { model: "gpt-5.6-sol", effort: "max" },
+  gpt56_sol_ultra: { model: "gpt-5.6-sol", effort: "ultra" },
+});
+
 function readProfileScalar(raw, key) {
   const match = String(raw).match(
     new RegExp(
@@ -75,6 +84,10 @@ export function resolveCodexProfileConfigValues(profileName, opts = {}) {
 
 export function codexProfileConfigOverrides(profileName, opts = {}) {
   let { model, effort } = resolveCodexProfileConfigValues(profileName, opts);
+  if (opts.enforceCanonicalProfile === true) {
+    const canonical = CANONICAL_PROFILE_VALUES[profileName];
+    if (canonical) ({ model, effort } = canonical);
+  }
   if (opts.disallowUltra === true && effort?.toLowerCase() === "ultra") {
     model = "gpt-5.6-sol";
     effort = "max";

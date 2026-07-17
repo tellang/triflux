@@ -167,7 +167,7 @@ export const CODEX_MCP_EXECUTION_EXIT_CODE = 1;
  *
  * @param {string} prompt
  * @param {string|null} resultFile — null이면 --output-last-message 생략
- * @param {{ profile?: string, codexHome?: string, disallowUltra?: boolean, skipGitRepoCheck?: boolean, sandboxBypass?: boolean, cwd?: string, mcpServers?: string[], stdinPrompt?: boolean }} [opts]
+ * @param {{ profile?: string, codexHome?: string, disallowUltra?: boolean, enforceCanonicalProfile?: boolean, skipGitRepoCheck?: boolean, sandboxBypass?: boolean, cwd?: string, mcpServers?: string[], stdinPrompt?: boolean }} [opts]
  * @returns {string} 실행할 셸 커맨드
  */
 export function buildExecCommand(prompt, resultFile = null, opts = {}) {
@@ -179,6 +179,7 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
     stdinPrompt,
     codexHome,
     disallowUltra,
+    enforceCanonicalProfile,
   } = opts;
 
   const parts = ["codex"];
@@ -188,7 +189,11 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
   // tables when it rewrites config.toml), so the `-c model=.. -c
   // model_reasoning_effort=..` form is immune and mutates no config.
   const profileOverrides = profile
-    ? codexProfileConfigOverrides(profile, { codexHome, disallowUltra })
+    ? codexProfileConfigOverrides(profile, {
+        codexHome,
+        disallowUltra,
+        enforceCanonicalProfile,
+      })
     : [];
 
   if (FEATURES.execSubcommand) {

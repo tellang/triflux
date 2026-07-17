@@ -120,6 +120,7 @@ export function buildExecArgs(opts = {}) {
     profile: opts.profile,
     codexHome: opts.codexHome,
     disallowUltra: opts.disallowUltra,
+    enforceCanonicalProfile: opts.enforceCanonicalProfile,
     skipGitRepoCheck: true,
     sandboxBypass: true,
     cwd: opts.cwd,

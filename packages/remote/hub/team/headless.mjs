@@ -370,8 +370,8 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const codexProfile =
     resolvedCli === "codex"
       ? resolveNestedCodexAgentProfile(opts.role || cli, {
-          profileOverride:
-            opts.profile ?? process.env.TFX_CODEX_PROFILE ?? "auto",
+          profileOverride: opts.profile ?? "auto",
+          globalProfile: process.env.TFX_CODEX_PROFILE,
           codexHome: process.env.CODEX_HOME,
         })
       : undefined;
@@ -387,6 +387,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
           profile: codexProfile,
           codexHome: process.env.CODEX_HOME,
           disallowUltra: true,
+          enforceCanonicalProfile: true,
           promptFile,
         });
   const safeCwd =

@@ -162,16 +162,14 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
   // the raw TOML-scalar overrides without shell-quoting.
   const codexHome = opts.env?.CODEX_HOME;
   const codexProfile = resolveNestedCodexAgentProfile(opts.role || "executor", {
-    profileOverride:
-      opts.profile ??
-      opts.env?.TFX_CODEX_PROFILE ??
-      process.env.TFX_CODEX_PROFILE ??
-      "auto",
+    profileOverride: opts.profile ?? "auto",
+    globalProfile: opts.env?.TFX_CODEX_PROFILE ?? process.env.TFX_CODEX_PROFILE,
     codexHome,
   });
   for (const override of codexProfileConfigOverrides(codexProfile, {
     codexHome,
     disallowUltra: true,
+    enforceCanonicalProfile: true,
   })) {
     args.push("-c", override);
   }

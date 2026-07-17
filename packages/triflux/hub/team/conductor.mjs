@@ -910,17 +910,17 @@ export function createConductor(opts = {}) {
       const profile = resolveNestedCodexAgentProfile(
         session.config.role || "executor",
         {
-          profileOverride:
-            session.config.profile ??
+          profileOverride: session.config.profile ?? "auto",
+          globalProfile:
             session.config.env?.TFX_CODEX_PROFILE ??
-            process.env.TFX_CODEX_PROFILE ??
-            "auto",
+            process.env.TFX_CODEX_PROFILE,
           codexHome,
         },
       );
       const configArgs = codexProfileConfigOverrides(profile, {
         codexHome,
         disallowUltra: true,
+        enforceCanonicalProfile: true,
       })
         .map((override) => `-c '${override.replace(/'/g, `'\\''`)}'`)
         .join(" ");

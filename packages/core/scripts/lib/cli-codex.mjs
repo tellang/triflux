@@ -14,7 +14,13 @@ export const command = "codex";
 import {
   CODEX_AGENT_POLICY,
   resolveCodexAgentPolicy,
+  resolveCodexAgentProfile,
+  resolveNestedCodexAgentProfile,
 } from "./agent-route-policy.mjs";
+
+// Compatibility re-exports for launchers which historically imported these
+// helpers from this adapter. The policy module owns the semantics.
+export { resolveCodexAgentProfile, resolveNestedCodexAgentProfile };
 
 export function plan({
   agent,
@@ -22,18 +28,26 @@ export function plan({
   mcpProfile = "auto",
   timeoutSec,
   contextFile,
+  profileOverride = "auto",
+  retryProfile = null,
+  nested = false,
 } = {}) {
   if (!agent) {
     throw new Error("[cli-codex] agent required");
   }
   const cfg = resolveCodexAgentPolicy(agent);
+  const profile = resolveCodexAgentProfile(agent, {
+    profileOverride,
+    retryProfile,
+    nested,
+  });
   const effectiveTimeoutSec =
     Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec : cfg.timeoutSec;
   return {
     command,
     subcommand: cfg.subcommand ?? "exec",
-    profile: cfg.profile,
-    effort: cfg.profile,
+    profile,
+    effort: profile,
     timeoutMs: effectiveTimeoutSec * 1000,
     runMode: cfg.runMode,
     opusOversight: cfg.opusOversight,

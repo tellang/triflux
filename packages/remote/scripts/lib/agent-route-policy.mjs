@@ -1,5 +1,7 @@
 // Canonical Codex role policy. Concrete model IDs stay in profile config files.
 
+import { resolveCodexProfileConfigValues } from "./codex-profile-config.mjs";
+
 const policy = {
   executor: {
     profile: "gpt56_terra_high",
@@ -203,10 +205,54 @@ export const CODEX_AGENT_POLICY = Object.freeze(
 );
 export const DEFAULT_CODEX_AGENT = "executor";
 
+export const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
+  new Set([
+    "gpt56_luna_low", "gpt56_terra_med", "gpt56_terra_high", "gpt56_sol_xhigh",
+    "gpt56_sol_max", "gpt56_sol_ultra",
+  ]),
+);
+export const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
+  new Set(["deep-executor", "scientist-deep"]),
+);
+const NESTED_GLOBAL_PROFILE_OVERRIDES = new Set([
+  "max", "ultra", "gpt56_sol_max", "gpt56_sol_ultra",
+]);
+
 export function resolveCodexAgentPolicy(agent) {
   return freezePolicy(
     CODEX_AGENT_POLICY[agent] ?? CODEX_AGENT_POLICY[DEFAULT_CODEX_AGENT],
   );
+}
+
+export function resolveCodexAgentProfile(
+  agent,
+  { profileOverride = "auto", retryProfile = null, nested = false, allowCustom = false } = {},
+) {
+  const defaultProfile = resolveCodexAgentPolicy(agent).profile;
+  const retryRequested = String(retryProfile ?? "").trim();
+  const requested = retryRequested || String(profileOverride || "auto").trim();
+  if (!requested || requested === "auto") return defaultProfile;
+  const canonical = requested === "max" ? "gpt56_sol_max" : requested === "ultra" ? "gpt56_sol_ultra" : requested;
+  if (!CANONICAL_CODEX_PROFILE_OVERRIDES.has(canonical)) {
+    if (allowCustom) return requested;
+    throw new Error(`[agent-route-policy] unsupported profile override: ${requested}`);
+  }
+  if (canonical !== "gpt56_sol_ultra") return canonical;
+  return nested || !ULTRA_ELIGIBLE_CODEX_AGENTS.has(agent) ? "gpt56_sol_max" : canonical;
+}
+
+export function resolveNestedCodexAgentProfile(
+  agent,
+  { profileOverride = "auto", globalProfile = "auto", retryProfile = null, codexHome } = {},
+) {
+  const explicitProfile = String(profileOverride || "auto").trim();
+  const globalOverride = String(globalProfile || "auto").trim();
+  const effectiveOverride = explicitProfile !== "auto" ? explicitProfile : NESTED_GLOBAL_PROFILE_OVERRIDES.has(globalOverride) ? globalOverride : "auto";
+  const fallback = resolveCodexAgentProfile(agent);
+  const candidate = resolveCodexAgentProfile(agent, { profileOverride: effectiveOverride, retryProfile, nested: true, allowCustom: true });
+  const { effort } = resolveCodexProfileConfigValues(candidate, { codexHome });
+  if (!effort) return fallback;
+  return effort.toLowerCase() === "ultra" ? "gpt56_sol_max" : candidate;
 }
 
 export function describeCodexAgentPolicy() {
