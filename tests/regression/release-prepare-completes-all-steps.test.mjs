@@ -174,7 +174,7 @@ describe("release:prepare regression — step sequence completeness", () => {
         dryRun: false,
         execFileSyncFn: fn,
       }),
-      /test step failed/,
+      /\[prepare\] step=npm-test failed/,
     );
 
     // 단락 검증: test 만 호출됐고, lint/pack 은 호출 안 됨

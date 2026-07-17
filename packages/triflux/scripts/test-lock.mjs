@@ -386,7 +386,7 @@ export function main(argv = process.argv.slice(2)) {
   // forward args after -- to node --test
   const args = preserveForceExitFailures(expandTestArgs(argv));
   // stdio split (issue #192 F1): when prepare.mjs spawns this lock with
-  // ["ignore","pipe","pipe"], full inherit cascades the parent stdin=ignore
+  // ["ignore","inherit","inherit"], full inherit cascades the parent stdin=ignore
   // to grand-child node --test, breaking ConPTY assumptions on Windows and
   // surfacing as EXIT=1 (false-failed). Pipe stdin only — stdout/stderr stay
   // inherited so the grand-child still streams to whoever attached to us.

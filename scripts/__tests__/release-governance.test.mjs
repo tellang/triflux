@@ -407,7 +407,11 @@ describe("release governance scripts", () => {
           call.args[0]?.endsWith("test-lock.mjs"),
       );
       assert.ok(testCall);
-      assert.equal(testCall.options.stdio, "inherit");
+      assert.deepEqual(testCall.options.stdio, [
+        "ignore",
+        "inherit",
+        "inherit",
+      ]);
       assert.equal(testCall.options.timeout, 10 * 60 * 1000);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -447,10 +451,53 @@ describe("release governance scripts", () => {
             error.message,
             "[prepare] step=npm-test failed (exit code=17)",
           );
+          assert.equal(error.cause.message, "test command failed");
           assert.doesNotMatch(error.message, /failing test output/);
           return true;
         },
       );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prepareRelease preserves timeout and signal diagnostics", async () => {
+    const root = makeRepo();
+    try {
+      assertVersionSync({ rootDir: root, fix: true });
+      for (const failure of [
+        { code: "ETIMEDOUT", expected: "timeout after 600000ms" },
+        { signal: "SIGKILL", expected: "signal=SIGKILL" },
+      ]) {
+        const execStub = (command, args) => {
+          if (command === "git" && args[0] === "status") return "";
+          if (command === "git" && args[0] === "describe") return "v1.2.2";
+          if (command === "git" && args[0] === "log")
+            return "abc1234 feat: sample\n";
+          if (args[0]?.endsWith("test-lock.mjs")) {
+            const error = new Error("test command failed");
+            Object.assign(error, failure);
+            throw error;
+          }
+          return "";
+        };
+
+        await assert.rejects(
+          prepareRelease({
+            rootDir: root,
+            version: "1.2.3",
+            allowDirty: true,
+            dryRun: false,
+            execFileSyncFn: execStub,
+          }),
+          (error) => {
+            assert.match(error.message, new RegExp(failure.expected));
+            assert.equal(error.cause.code, failure.code);
+            assert.equal(error.cause.signal, failure.signal);
+            return true;
+          },
+        );
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -90,7 +90,7 @@ export async function prepareRelease({
       // test name and assertion details instead of truncating a captured
       // execFileSync error object.
       options: {
-        stdio: "inherit",
+        stdio: ["ignore", "inherit", "inherit"],
         timeoutMs: TEST_TIMEOUT_MS,
         shell: false,
       },
@@ -124,8 +124,14 @@ export async function prepareRelease({
         const exitCode = Number.isInteger(error?.status)
           ? error.status
           : "unknown";
+        const signal = error?.signal ? `, signal=${error.signal}` : "";
+        const timeout =
+          error?.code === "ETIMEDOUT"
+            ? `, timeout after ${step.options?.timeoutMs ?? "unknown"}ms`
+            : "";
         throw new Error(
-          `[prepare] step=${step.name} failed (exit code=${exitCode})`,
+          `[prepare] step=${step.name} failed (exit code=${exitCode}${signal}${timeout})`,
+          { cause: error },
         );
       }
     }
