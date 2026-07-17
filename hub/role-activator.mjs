@@ -509,16 +509,11 @@ export function createRoleActivator(options = {}) {
       ) {
         return;
       }
-      store.compareAndSetRole({
-        ...activationGuard(current),
-        patch: {
-          state: "unreachable",
-          activation_deadline_ms: null,
-          next_probe_ms: now(),
-          last_transition_ms: now(),
-          last_reason: "ack_timeout",
-        },
-      });
+      markCandidateFailure(
+        { ...plan, role: current },
+        plan.holder,
+        "ack_timeout",
+      );
     }, delay);
     timer?.unref?.();
     ackTimers.set(plan.role.activation_id, timer);

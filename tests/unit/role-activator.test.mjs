@@ -1106,6 +1106,9 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     currentTime += scheduled[0].delay;
     scheduled[0].fn();
     assert.equal(store.getRole(CTO_WIRE).state, "unreachable");
+    const failedCandidate = store.listRoleCandidates(CTO_WIRE)[0];
+    assert.equal(failedCandidate.consecutive_probe_failures, 1);
+    assert.ok(failedCandidate.excluded_until_ms > currentTime);
 
     const lateAck = activator.ackActivation(
       {
@@ -1126,6 +1129,7 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     );
     assert.equal(lateAck.code, "STALE_EPOCH");
 
+    currentTime = failedCandidate.excluded_until_ms;
     const retry = await activator.ensureRoleAwake(
       ensureRequest({ cause_id: "retry" }),
       { principal: { type: "system", project_id: PROJECT_ID } },
@@ -1135,6 +1139,111 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     assert.equal(second.holder_agent_id, first.holder_agent_id);
     assert.equal(second.epoch, first.epoch + 1);
     assert.notEqual(second.activation_id, first.activation_id);
+    activator.close();
+    store.close();
+  });
+
+  it("quarantines a probe/wake-successful candidate that never ACKs within max failures", async () => {
+    const store = tempStore();
+    let currentTime = 1_000;
+    let activationIndex = 0;
+    const scheduled = [];
+    const events = [];
+    store.upsertRoleReservation({
+      role_key_wire: CTO_WIRE,
+      holder_agent_id: null,
+      state: "electable",
+      activation_id: null,
+      last_transition_ms: currentTime,
+      last_reason: "test_seed",
+    });
+    seedCandidate(store, "candidate-ack-timeout", 100, [
+      { ...tmuxLocator("tmux-ack-timeout"), expires_at_ms: 1_000_000 },
+    ]);
+    let probeCalls = 0;
+    let wakeCalls = 0;
+    const activator = createRoleActivator({
+      store,
+      adapter: {
+        supports: () => true,
+        probe: async (locator) => {
+          probeCalls += 1;
+          return {
+            schema_version: "tfx-live.transport-probe.v1",
+            ok: true,
+            reachable: true,
+            wakeable: true,
+            transport_selected: locator.kind,
+            transport_id: locator.transport_id,
+            host_id: locator.host_id,
+            latency_ms: 1,
+            observed_at_ms: currentTime,
+            reason_code: "ok",
+          };
+        },
+        wake: async () => {
+          wakeCalls += 1;
+          return { ok: true };
+        },
+        standup: async () => tmuxLocator("unexpected"),
+        cancel: async () => {},
+      },
+      getControlSnapshot: () => enabledControl(),
+      getCharterVersion: () => "charter.v1",
+      uuid: () => `activation-ack-timeout-${++activationIndex}`,
+      now: () => currentTime,
+      rng: () => 0.5,
+      scheduleTimeout: (fn, delay) => {
+        const timer = { fn, delay, unref() {} };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearScheduledTimeout: () => {},
+      onControlEvent: (event) => events.push(event),
+    });
+
+    for (let failure = 1; failure <= 3; failure += 1) {
+      const outcome = await activator.ensureRoleAwake(
+        ensureRequest({ cause_id: `ack-timeout-${failure}` }),
+        { principal: { type: "system", project_id: PROJECT_ID } },
+      );
+      assert.equal(outcome.status, "awaiting_ack");
+      assert.equal(scheduled.length, failure);
+
+      currentTime += scheduled.at(-1).delay;
+      scheduled.at(-1).fn();
+
+      const role = store.getRole(CTO_WIRE);
+      const candidate = store.listRoleCandidates(CTO_WIRE)[0];
+      assert.equal(role.state, "unreachable");
+      assert.equal(role.retry_count, failure);
+      assert.equal(role.last_reason, "ack_timeout");
+      assert.equal(candidate.consecutive_probe_failures, failure);
+      assert.equal(candidate.last_probe_code, "ack_timeout");
+      assert.equal(role.next_probe_ms, candidate.excluded_until_ms);
+
+      const held = activator.requestEnsureRole(
+        ensureRequest({ cause_id: `ack-timeout-backoff-${failure}` }),
+        { principal: { type: "system", project_id: PROJECT_ID } },
+      );
+      assert.equal(held.disposition, "joined");
+      assert.equal(probeCalls, failure);
+      assert.equal(wakeCalls, failure);
+
+      if (failure < 3) currentTime = candidate.excluded_until_ms;
+    }
+
+    const quarantined = store.listRoleCandidates(CTO_WIRE)[0];
+    assert.equal(quarantined.excluded_until_ms - currentTime, 120_000);
+    assert.equal(events.length, 3);
+    assert.equal(
+      events.every(
+        (event) =>
+          event.control_action === "candidate_exclude" &&
+          event.reason_code === "ack_timeout",
+      ),
+      true,
+    );
     activator.close();
     store.close();
   });
