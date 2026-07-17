@@ -1,13 +1,13 @@
 ---
 id: 0011
 title: 능동 역할 시스템 — CTO + scoped lead (C+A 하이브리드)
-status: proposed
+status: accepted
 date: 2026-07-16
 deciders: [tellang]
 supersedes: []
 superseded_by: null
 relates: [0010]
-pr: null
+pr: "#483, #484, #485"
 ---
 
 # ADR-0011: 능동 역할 시스템 — CTO + scoped lead (C+A 하이브리드)
