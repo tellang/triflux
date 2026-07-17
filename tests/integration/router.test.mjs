@@ -636,7 +636,7 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
           metadata: { role: "cto", cto_priority: 10 },
           heartbeat_ttl_ms: 60000,
         });
-        isolated.router.registerAgent({
+        const newRegistration = isolated.router.registerAgent({
           agent_id: "cto-direct-topic-new",
           cli: "codex",
           capabilities: ["cto"],
@@ -680,7 +680,11 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
           0,
         );
 
-        isolated.router.refreshAgentLease("cto-direct-topic-new", 60000);
+        isolated.router.refreshAgentLease(
+          "cto-direct-topic-new",
+          60000,
+          newRegistration.data.presence_generation,
+        );
         const afterHeartbeat = isolated.router.getStatus("hub");
         assert.equal(
           afterHeartbeat.data.roles.cto.leader_agent_id,

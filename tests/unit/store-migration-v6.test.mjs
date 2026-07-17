@@ -94,7 +94,7 @@ afterEach(() => {
   }
 });
 
-describe("hub store schema v6 migration", { skip: SQLITE_SKIP }, () => {
+describe("hub store schema v7 migration", { skip: SQLITE_SKIP }, () => {
   it("migrates a real v5 database without losing agents or messages", () => {
     const dbPath = makeV5Database();
     const first = createStore(dbPath);
@@ -104,7 +104,7 @@ describe("hub store schema v6 migration", { skip: SQLITE_SKIP }, () => {
         .prepare("SELECT value FROM _meta WHERE key='schema_version'")
         .pluck()
         .get(),
-      "6",
+      "7",
     );
     assert.deepEqual(first.getAgent("legacy-agent"), {
       agent_id: "legacy-agent",
@@ -112,6 +112,7 @@ describe("hub store schema v6 migration", { skip: SQLITE_SKIP }, () => {
       pid: 42,
       last_seen_ms: 100,
       lease_expires_ms: 200,
+      presence_generation: 0,
       status: "online",
       project_id: null,
       session_id: null,

@@ -459,7 +459,7 @@ describe("startHub() 라이프사이클", () => {
 
   describe("POST /bridge/heartbeat", () => {
     it("등록된 agent의 lease를 갱신한다", async () => {
-      await fetch(`${baseUrl}/bridge/register`, {
+      const registerRes = await fetch(`${baseUrl}/bridge/register`, {
         method: "POST",
         headers: bridgeHeaders(),
         body: JSON.stringify({
@@ -470,10 +470,16 @@ describe("startHub() 라이프사이클", () => {
           capabilities: [],
         }),
       });
+      const registered = await registerRes.json();
       const res = await fetch(`${baseUrl}/bridge/heartbeat`, {
         method: "POST",
         headers: bridgeHeaders(),
-        body: JSON.stringify({ agent_id: "hb-agent" }),
+        body: JSON.stringify({
+          agent_id: "hb-agent",
+          presence_generation: registered.data.presence_generation,
+          hub_instance_id: registered.data.hub_instance_id,
+          store_fingerprint: registered.data.store_fingerprint,
+        }),
       });
       const body = await res.json();
       assert.equal(res.status, 200);
@@ -490,7 +496,7 @@ describe("startHub() 라이프사이클", () => {
       const body = await res.json();
       assert.equal(res.status, 404);
       assert.equal(body.ok, false);
-      assert.equal(body.error.code, "AGENT_NOT_FOUND");
+      assert.equal(body.error.code, "STALE_PRESENCE_OWNER");
     });
   });
 
@@ -510,7 +516,6 @@ describe("startHub() 라이프사이클", () => {
           capabilities: ["code"],
         }),
       });
-
       const res = await fetch(`${baseUrl}/bridge/result`, {
         method: "POST",
         headers: bridgeHeaders(),
@@ -656,7 +661,7 @@ describe("startHub() 라이프사이클", () => {
     });
 
     it("POST /bridge/status는 멤버 상태 보고를 반영해야 한다", async () => {
-      await fetch(`${baseUrl}/bridge/register`, {
+      const registerRes = await fetch(`${baseUrl}/bridge/register`, {
         method: "POST",
         headers: bridgeHeaders(),
         body: JSON.stringify({
@@ -667,6 +672,7 @@ describe("startHub() 라이프사이클", () => {
           capabilities: ["code"],
         }),
       });
+      const registered = await registerRes.json();
 
       const reportRes = await fetch(`${baseUrl}/bridge/status`, {
         method: "POST",
@@ -674,6 +680,9 @@ describe("startHub() 라이프사이클", () => {
         body: JSON.stringify({
           agent_id: "status-agent",
           status: "paused",
+          presence_generation: registered.data.presence_generation,
+          hub_instance_id: registered.data.hub_instance_id,
+          store_fingerprint: registered.data.store_fingerprint,
         }),
       });
       assert.equal(reportRes.status, 200);
@@ -710,7 +719,6 @@ describe("startHub() 라이프사이클", () => {
           capabilities: ["x"],
         }),
       });
-
       const res = await fetch(`${baseUrl}/bridge/context`, {
         method: "POST",
         headers: bridgeHeaders(),
@@ -736,7 +744,7 @@ describe("startHub() 라이프사이클", () => {
 
   describe("POST /bridge/deregister", () => {
     it("등록된 에이전트 해제 시 ok: true와 offline 상태를 반환해야 한다", async () => {
-      await fetch(`${baseUrl}/bridge/register`, {
+      const registerRes = await fetch(`${baseUrl}/bridge/register`, {
         method: "POST",
         headers: bridgeHeaders(),
         body: JSON.stringify({
@@ -747,11 +755,17 @@ describe("startHub() 라이프사이클", () => {
           capabilities: ["x"],
         }),
       });
+      const registered = await registerRes.json();
 
       const res = await fetch(`${baseUrl}/bridge/deregister`, {
         method: "POST",
         headers: bridgeHeaders(),
-        body: JSON.stringify({ agent_id: "dereg-agent" }),
+        body: JSON.stringify({
+          agent_id: "dereg-agent",
+          presence_generation: registered.data.presence_generation,
+          hub_instance_id: registered.data.hub_instance_id,
+          store_fingerprint: registered.data.store_fingerprint,
+        }),
       });
       assert.equal(res.status, 200);
       const body = await res.json();

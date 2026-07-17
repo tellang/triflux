@@ -376,6 +376,9 @@ export function createRouter(store) {
   const queuesByAgent = new Map();
   const liveMessages = new Map();
   const roleStates = new Map();
+  const hubInstanceId = uuidv7();
+  const storeFingerprint =
+    store.fingerprint || `${store.type || "unknown"}:unknown`;
   const updateRegistrationIdentity = store.db?.prepare
     ? store.db.prepare(`
         UPDATE agents SET
@@ -391,6 +394,70 @@ export function createRouter(store) {
   const MAX_LATENCY_SAMPLES = 100;
   let latencyIdx = 0;
   const deliveryLatencies = new Array(MAX_LATENCY_SAMPLES).fill(0);
+
+  function hubIdentity() {
+    return {
+      hub_instance_id: hubInstanceId,
+      store_fingerprint: storeFingerprint,
+    };
+  }
+
+  function validateCallerIdentity(input = {}) {
+    if (
+      input.hub_instance_id != null &&
+      input.hub_instance_id !== hubInstanceId
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "STALE_HUB_INSTANCE",
+          message: "caller is bound to a previous hub instance",
+        },
+        data: hubIdentity(),
+      };
+    }
+    if (
+      input.store_fingerprint != null &&
+      input.store_fingerprint !== storeFingerprint
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "STORE_FINGERPRINT_MISMATCH",
+          message: "caller store fingerprint does not match this hub",
+        },
+        data: hubIdentity(),
+      };
+    }
+    return null;
+  }
+
+  function isControlPlaneRegistration(args = {}) {
+    const metadata = args.metadata || {};
+    const values = [
+      ...(Array.isArray(args.capabilities) ? args.capabilities : []),
+      ...(Array.isArray(args.topics) ? args.topics : []),
+      metadata.role,
+      ...(Array.isArray(metadata.roles) ? metadata.roles : []),
+    ]
+      .flat()
+      .map((value) => String(value || "").toLowerCase());
+    return (
+      metadata.control_plane === true ||
+      values.some((value) => value === "cto" || value === "role:cto")
+    );
+  }
+
+  function staleOwnerFailure(agentId, result) {
+    return {
+      ok: false,
+      error: {
+        code: "STALE_PRESENCE_OWNER",
+        message: `stale presence owner: ${agentId}`,
+      },
+      data: { ...result, ...hubIdentity() },
+    };
+  }
 
   function ensureAgentQueue(agentId) {
     let queue = queuesByAgent.get(agentId);
@@ -1120,6 +1187,18 @@ export function createRouter(store) {
     deliveryEmitter,
 
     registerAgent(args) {
+      const identityFailure = validateCallerIdentity(args);
+      if (identityFailure) return identityFailure;
+      if (isControlPlaneRegistration(args) && store.type !== "sqlite") {
+        return {
+          ok: false,
+          error: {
+            code: "CONTROL_PLANE_STORE_DEGRADED",
+            message: "control-plane presence requires durable SQLite storage",
+          },
+          data: { ...hubIdentity(), store_type: store.type || "unknown" },
+        };
+      }
       const identity = normalizeRegistrationIdentity(args);
       const result = store.registerAgent(args);
       if (!registerPresenceIsEffective(result)) {
@@ -1139,11 +1218,22 @@ export function createRouter(store) {
           transferBacklog: true,
         });
       }
-      return { ok: true, data: { ...result, hub_pid: process.pid } };
+      return {
+        ok: true,
+        data: { ...result, hub_pid: process.pid, ...hubIdentity() },
+      };
     },
 
-    refreshAgentLease(agentId, ttlMs = 30000) {
-      const result = store.refreshLease(agentId, ttlMs);
+    refreshAgentLease(
+      agentId,
+      ttlMs = 30000,
+      presenceGeneration,
+      callerIdentity = {},
+    ) {
+      const identityFailure = validateCallerIdentity(callerIdentity);
+      if (identityFailure) return identityFailure;
+      const result = store.refreshLease(agentId, ttlMs, presenceGeneration);
+      if (result?.effective?.updated === false) return result;
       refreshRoleCandidateForAgent(agentId);
       for (const roleName of ROLE_TOPICS) {
         ensureRoleLeader(roleName, {
@@ -1171,10 +1261,15 @@ export function createRouter(store) {
     },
 
     updateAgentStatus(agentId, status) {
+      const agent = store.getAgent(agentId);
       if (status === "offline") {
         runtimeTopics.delete(agentId);
       }
-      const updated = store.updateAgentStatus(agentId, status);
+      const updated = store.updateAgentStatus(
+        agentId,
+        status,
+        agent?.presence_generation,
+      );
       refreshRoleCandidateForAgent(agentId);
       for (const roleName of ROLE_TOPICS) {
         ensureRoleLeader(roleName, {
@@ -1183,6 +1278,39 @@ export function createRouter(store) {
         });
       }
       return updated;
+    },
+
+    transitionAgentStatus(
+      agentId,
+      status,
+      presenceGeneration,
+      callerIdentity = {},
+    ) {
+      const identityFailure = validateCallerIdentity(callerIdentity);
+      if (identityFailure) return identityFailure;
+      const updated = store.updateAgentStatus(
+        agentId,
+        status,
+        presenceGeneration,
+      );
+      if (!updated) return staleOwnerFailure(agentId, { status });
+      if (status === "offline") runtimeTopics.delete(agentId);
+      refreshRoleCandidateForAgent(agentId);
+      for (const roleName of ROLE_TOPICS) {
+        ensureRoleLeader(roleName, {
+          reason: `status:${status}`,
+          transferBacklog: true,
+        });
+      }
+      return {
+        ok: true,
+        data: {
+          agent_id: agentId,
+          status,
+          presence_generation: presenceGeneration,
+          ...hubIdentity(),
+        },
+      };
     },
 
     route(msg) {
@@ -1369,7 +1497,14 @@ export function createRouter(store) {
       agent_id,
       reason = "manual",
       requested_by = "manual",
+      hub_instance_id,
+      store_fingerprint,
     } = {}) {
+      const identityFailure = validateCallerIdentity({
+        hub_instance_id,
+        store_fingerprint,
+      });
+      if (identityFailure) return identityFailure;
       const roleName = normalizeRoleName(role);
       if (!roleName) {
         return {
@@ -1440,6 +1575,7 @@ export function createRouter(store) {
           leader_epoch: snapshot.leader_epoch,
           ...transfer,
           status: snapshot,
+          ...hubIdentity(),
         },
       };
     },
@@ -1777,8 +1913,19 @@ export function createRouter(store) {
 
     getStatus(
       scope = "hub",
-      { agent_id, trace_id, include_metrics = true } = {},
+      {
+        agent_id,
+        trace_id,
+        include_metrics = true,
+        hub_instance_id,
+        store_fingerprint,
+      } = {},
     ) {
+      const identityFailure = validateCallerIdentity({
+        hub_instance_id,
+        store_fingerprint,
+      });
+      if (identityFailure) return identityFailure;
       const data = {};
 
       if (scope === "hub" || scope === "queue") {
@@ -1787,6 +1934,7 @@ export function createRouter(store) {
           uptime_ms: (process.uptime() * 1000) | 0,
           realtime_transport: "named-pipe",
           audit_store: store.type || "sqlite",
+          ...hubIdentity(),
         };
         data.roles = {
           cto: getRoleSnapshot("cto"),
@@ -1840,7 +1988,7 @@ export function createRouter(store) {
         data.trace = store.getMessagesByTrace(trace_id);
       }
 
-      return { ok: true, data };
+      return { ok: true, data: { ...data, ...hubIdentity() } };
     },
   };
 

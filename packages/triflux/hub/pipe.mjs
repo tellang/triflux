@@ -267,15 +267,18 @@ export function createPipeServer({
         const result = router.refreshAgentLease(
           agentId,
           payload.heartbeat_ttl_ms || heartbeatTtlMs,
+          payload.presence_generation,
+          payload,
         );
         if (client) touchClient(client);
         if (result?.effective?.updated === false) {
           return {
             ok: false,
             error: {
-              code: "AGENT_NOT_FOUND",
-              message: `heartbeat target not registered: ${agentId}`,
+              code: "STALE_PRESENCE_OWNER",
+              message: `stale or unknown presence owner: ${agentId}`,
             },
+            data: result,
           };
         }
         return { ok: true, data: result };
@@ -357,12 +360,14 @@ export function createPipeServer({
 
       case "deregister": {
         const agentId = resolveAgentId(client, payload);
-        router.updateAgentStatus(agentId, "offline");
+        const result = router.transitionAgentStatus(
+          agentId,
+          "offline",
+          payload.presence_generation,
+          payload,
+        );
         if (client) touchClient(client);
-        return {
-          ok: true,
-          data: { agent_id: agentId, status: "offline" },
-        };
+        return result;
       }
 
       case "send_input": {

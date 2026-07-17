@@ -164,6 +164,8 @@ export function createTools(store, router, hitl, pipe = null) {
               { type: "string" },
             ],
           },
+          hub_instance_id: { type: "string" },
+          store_fingerprint: { type: "string" },
           heartbeat_ttl_ms: {
             type: "integer",
             minimum: 10000,
@@ -189,6 +191,8 @@ export function createTools(store, router, hitl, pipe = null) {
           agent_id: { type: "string" },
           trace_id: { type: "string" },
           include_metrics: { type: "boolean", default: true },
+          hub_instance_id: { type: "string" },
+          store_fingerprint: { type: "string" },
         },
       },
       handler: wrap("STATUS_FAILED", (args) => {
@@ -209,6 +213,8 @@ export function createTools(store, router, hitl, pipe = null) {
           agent_id: { type: "string", pattern: "^[a-zA-Z0-9._:-]{3,64}$" },
           reason: { type: "string" },
           requested_by: { type: "string" },
+          hub_instance_id: { type: "string" },
+          store_fingerprint: { type: "string" },
         },
       },
       handler: wrap("TAKEOVER_ROLE_FAILED", (args) => {

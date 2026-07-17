@@ -9,9 +9,10 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
 import { startHub } from "../../hub/server.mjs";
-import { createMemoryStore } from "../../packages/core/hub/lib/memory-store.mjs";
 import { createRouter as createCoreRouter } from "../../packages/core/hub/router.mjs";
 import { createPipeServer as createRemotePipeServer } from "../../packages/remote/hub/pipe.mjs";
+import { createStore as createRemoteStore } from "../../packages/remote/hub/store.mjs";
+import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 function tempDbPath() {
   const dir = join(tmpdir(), `tfx-hub-pipe-test-${randomUUID()}`);
@@ -570,50 +571,58 @@ describe("Named Pipe 실시간 채널", () => {
     assert.equal(unsupportedRoleBody.error.code, "ROLE_NOT_SUPPORTED");
   });
 
-  it("packaged remote pipe uses packaged core router with takeover_role support", async () => {
-    const router = createCoreRouter(createMemoryStore());
+  it("packaged remote pipe uses packaged core router with takeover_role support", {
+    skip: SQLITE_SKIP,
+  }, async () => {
+    const store = createRemoteStore(tempDbPath());
+    const router = createCoreRouter(store);
     const pipe = createRemotePipeServer({
       router,
       sessionId: `remote-package-${randomUUID()}`,
     });
 
-    const oldRegister = await pipe.executeCommand("register", {
-      agent_id: "pkg-cto-old",
-      cli: "claude",
-      capabilities: ["cto"],
-      topics: [],
-      metadata: { role: "cto", cto_priority: 10 },
-      heartbeat_ttl_ms: 60000,
-    });
-    const newRegister = await pipe.executeCommand("register", {
-      agent_id: "pkg-cto-new",
-      cli: "codex",
-      capabilities: ["cto"],
-      topics: [],
-      metadata: { role: "cto", cto_priority: 1 },
-      heartbeat_ttl_ms: 60000,
-    });
-    assert.equal(oldRegister.ok, true);
-    assert.equal(newRegister.ok, true);
+    try {
+      const oldRegister = await pipe.executeCommand("register", {
+        agent_id: "pkg-cto-old",
+        cli: "claude",
+        capabilities: ["cto"],
+        topics: [],
+        metadata: { role: "cto", cto_priority: 10 },
+        heartbeat_ttl_ms: 60000,
+      });
+      const newRegister = await pipe.executeCommand("register", {
+        agent_id: "pkg-cto-new",
+        cli: "codex",
+        capabilities: ["cto"],
+        topics: [],
+        metadata: { role: "cto", cto_priority: 1 },
+        heartbeat_ttl_ms: 60000,
+      });
+      assert.equal(oldRegister.ok, true);
+      assert.equal(newRegister.ok, true);
 
-    const published = await pipe.executeCommand("publish", {
-      from: "lead",
-      to: "topic:cto",
-      topic: "cto",
-      payload: { decision: "remote package takeover" },
-    });
-    assert.equal(published.ok, true);
-    assert.equal(published.data.fanout_count, 1);
+      const published = await pipe.executeCommand("publish", {
+        from: "lead",
+        to: "topic:cto",
+        topic: "cto",
+        payload: { decision: "remote package takeover" },
+      });
+      assert.equal(published.ok, true);
+      assert.equal(published.data.fanout_count, 1);
 
-    const takeover = await pipe.executeCommand("takeover_role", {
-      role: "cto",
-      agent_id: "pkg-cto-new",
-      reason: "package_test",
-      requested_by: "test",
-    });
-    assert.equal(takeover.ok, true);
-    assert.equal(takeover.data.leader_agent_id, "pkg-cto-new");
-    assert.equal(takeover.data.transferred_count, 1);
+      const takeover = await pipe.executeCommand("takeover_role", {
+        role: "cto",
+        agent_id: "pkg-cto-new",
+        reason: "package_test",
+        requested_by: "test",
+      });
+      assert.equal(takeover.ok, true);
+      assert.equal(takeover.data.leader_agent_id, "pkg-cto-new");
+      assert.equal(takeover.data.transferred_count, 1);
+    } finally {
+      router.stopSweeper();
+      store.close();
+    }
   });
 
   it("assign/assign_result/assign_status 명령은 pipe 경로로 동작해야 한다", async () => {
