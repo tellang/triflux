@@ -123,10 +123,43 @@ function lintBodyModelNames({ file, body, startLine }) {
 
 function lintAgentModels({ file, body, startLine }) {
   const problems = [];
-  const callRe = /Agent\s*\(([\s\S]*?)\)/g;
+  const agentStartRe = /\bAgent\s*\(/g;
   let match;
-  while ((match = callRe.exec(body)) !== null) {
-    const call = match[1];
+  while ((match = agentStartRe.exec(body)) !== null) {
+    const openParenIndex = match.index + match[0].lastIndexOf("(");
+    let quote = null;
+    let depth = 1;
+    let closeParenIndex = -1;
+
+    for (let index = openParenIndex + 1; index < body.length; index += 1) {
+      const character = body[index];
+
+      if (quote) {
+        if (character === "\\") {
+          index += 1;
+        } else if (character === quote) {
+          quote = null;
+        }
+        continue;
+      }
+
+      if (character === '"' || character === "'" || character === "`") {
+        quote = character;
+      } else if (character === "(") {
+        depth += 1;
+      } else if (character === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          closeParenIndex = index;
+          break;
+        }
+      }
+    }
+
+    if (closeParenIndex === -1) continue;
+
+    const call = body.slice(openParenIndex + 1, closeParenIndex);
+    agentStartRe.lastIndex = closeParenIndex + 1;
     if (!/\bsubagent_type\s*=/.test(call) || !/\bprompt\s*=/.test(call)) {
       continue;
     }

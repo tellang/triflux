@@ -131,4 +131,39 @@ describe("lint-skills", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("문자열 안의 괄호가 있어도 model=이 있는 실행형 Agent를 통과시킨다", () => {
+    const root = makeTempDir();
+    try {
+      const skillsDir = join(root, "skills");
+      writeSkill(
+        root,
+        "tfx-agent-nested-model",
+        '---\nname: tfx-agent-nested-model\ndescription: 한국어 설명\n---\nAgent(subagent_type="x", prompt="do (this)", model="haiku")',
+      );
+      const result = lintSkills({ skillsDir });
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.problems, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("문자열 안의 괄호가 있어도 model= 없는 실행형 Agent를 실패 처리한다", () => {
+    const root = makeTempDir();
+    try {
+      const skillsDir = join(root, "skills");
+      writeSkill(
+        root,
+        "tfx-agent-nested-missing-model",
+        '---\nname: tfx-agent-nested-missing-model\ndescription: 한국어 설명\n---\nAgent(prompt="foo(bar)", subagent_type="x")',
+      );
+      const result = lintSkills({ skillsDir });
+      assert.equal(result.ok, false);
+      assert.equal(result.problems.length, 1);
+      assert.equal(result.problems[0]?.code, "agent-model-required");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
