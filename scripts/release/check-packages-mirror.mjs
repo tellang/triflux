@@ -40,6 +40,10 @@ const CORE_FILE_MIRRORS = [
     target: "packages/core/hub/bridge.mjs",
   },
   {
+    source: "hub/router.mjs",
+    target: "packages/core/hub/router.mjs",
+  },
+  {
     source: "hub/team/retry-state-machine.mjs",
     target: "packages/core/hub/team/retry-state-machine.mjs",
   },

@@ -9,6 +9,7 @@ import {
   resolveHardCeilingMs,
 } from "./lib/timeout-defaults.mjs";
 import { uuidv7 } from "./lib/uuidv7.mjs";
+import { normalizeRoleKey } from "./role-contract.mjs";
 
 const ASSIGN_PENDING_STATUSES = new Set(["queued", "running"]);
 const ROLE_TOPICS = new Set(["cto"]);
@@ -16,6 +17,258 @@ const ROLE_SOURCE_RANK = Object.freeze({
   explicit: 2,
   "topic-fallback": 1,
 });
+const TRANSPORT_LOCATOR_SCHEMA_VERSION = "tfx.transport-locator.v1";
+const TRANSPORT_KINDS = new Set(["claude-uds", "tmux"]);
+const TRANSPORT_CAPABILITIES = new Set([
+  "probe",
+  "wake",
+  "activate",
+  "interrupt",
+]);
+const HOST_ID_RE = /^hst_[A-Za-z0-9_-]+$/u;
+
+function registrationError(code, message = code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function registrationString(value, code, { maxLength = 256 } = {}) {
+  if (typeof value !== "string" || !value.trim() || value.length > maxLength) {
+    throw registrationError(code);
+  }
+  return value.trim();
+}
+
+function registrationLogicalRef(value, code, { maxLength = 128 } = {}) {
+  const normalized = registrationString(value, code, { maxLength });
+  if (!/^[A-Za-z0-9._:-]+$/u.test(normalized)) {
+    throw registrationError(code);
+  }
+  return normalized;
+}
+
+function assertExactFields(value, allowed, code) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).some((field) => !allowed.has(field))
+  ) {
+    throw registrationError(code);
+  }
+}
+
+function normalizeTransportLocator(
+  value,
+  { cli, hostId, now, leaseExpiresMs },
+) {
+  assertExactFields(
+    value,
+    new Set([
+      "schema_version",
+      "transport_id",
+      "kind",
+      "host_id",
+      "capabilities",
+      "priority",
+      "expires_at_ms",
+      "locator",
+    ]),
+    "TRANSPORT_LOCATOR_INVALID",
+  );
+  if (value.schema_version !== TRANSPORT_LOCATOR_SCHEMA_VERSION) {
+    throw registrationError("TRANSPORT_LOCATOR_SCHEMA_UNSUPPORTED");
+  }
+  const transportId = registrationLogicalRef(
+    value.transport_id,
+    "TRANSPORT_ID_INVALID",
+    { maxLength: 128 },
+  );
+  if (!TRANSPORT_KINDS.has(value.kind)) {
+    throw registrationError("TRANSPORT_KIND_UNSUPPORTED");
+  }
+  if (cli === "codex" && value.kind !== "tmux") {
+    throw registrationError("CODEX_TRANSPORT_UNSUPPORTED");
+  }
+  const locatorHostId = registrationString(value.host_id, "HOST_ID_INVALID", {
+    maxLength: 128,
+  });
+  if (!HOST_ID_RE.test(locatorHostId) || (hostId && locatorHostId !== hostId)) {
+    throw registrationError("HOST_ID_INVALID");
+  }
+  if (!Array.isArray(value.capabilities)) {
+    throw registrationError("TRANSPORT_CAPABILITIES_INVALID");
+  }
+  const capabilities = uniqueStrings(value.capabilities);
+  if (
+    capabilities.length !== value.capabilities.length ||
+    capabilities.some((capability) => !TRANSPORT_CAPABILITIES.has(capability))
+  ) {
+    throw registrationError("TRANSPORT_CAPABILITIES_INVALID");
+  }
+  if (!Number.isSafeInteger(value.priority)) {
+    throw registrationError("TRANSPORT_PRIORITY_INVALID");
+  }
+  if (
+    !Number.isSafeInteger(value.expires_at_ms) ||
+    value.expires_at_ms <= now ||
+    value.expires_at_ms > leaseExpiresMs
+  ) {
+    throw registrationError("TRANSPORT_EXPIRY_INVALID");
+  }
+
+  let locator;
+  if (value.kind === "claude-uds") {
+    assertExactFields(
+      value.locator,
+      new Set(["session_id", "short", "bridge_id"]),
+      "TRANSPORT_LOCATOR_INVALID",
+    );
+    const sessionId = value.locator.session_id;
+    const short = value.locator.short;
+    if (!sessionId && !short) {
+      throw registrationError("CLAUDE_UDS_SESSION_REQUIRED");
+    }
+    locator = {
+      ...(sessionId
+        ? {
+            session_id: registrationLogicalRef(
+              sessionId,
+              "CLAUDE_UDS_SESSION_INVALID",
+            ),
+          }
+        : {}),
+      ...(short
+        ? {
+            short: registrationLogicalRef(short, "CLAUDE_UDS_SHORT_INVALID", {
+              maxLength: 128,
+            }),
+          }
+        : {}),
+      bridge_id: registrationLogicalRef(
+        value.locator.bridge_id,
+        "CLAUDE_UDS_BRIDGE_INVALID",
+        { maxLength: 128 },
+      ),
+    };
+  } else {
+    assertExactFields(
+      value.locator,
+      new Set(["session_name", "mux_server_id"]),
+      "TRANSPORT_LOCATOR_INVALID",
+    );
+    locator = {
+      session_name: registrationLogicalRef(
+        value.locator.session_name,
+        "TMUX_SESSION_INVALID",
+        { maxLength: 128 },
+      ),
+      mux_server_id: registrationLogicalRef(
+        value.locator.mux_server_id,
+        "TMUX_SERVER_INVALID",
+        { maxLength: 128 },
+      ),
+    };
+  }
+
+  return {
+    schema_version: TRANSPORT_LOCATOR_SCHEMA_VERSION,
+    transport_id: transportId,
+    kind: value.kind,
+    host_id: locatorHostId,
+    capabilities,
+    priority: value.priority,
+    expires_at_ms: value.expires_at_ms,
+    locator,
+  };
+}
+
+export function normalizeRegistrationIdentity(args = {}, now = Date.now()) {
+  const hasProjectId = Object.hasOwn(args, "project_id");
+  const hasSessionId = Object.hasOwn(args, "session_id");
+  const hasHostId = Object.hasOwn(args, "host_id");
+  const hasLocatorJson = Object.hasOwn(args, "transport_locators_json");
+  const hasLocators = Object.hasOwn(args, "transport_locators");
+  if (
+    !hasProjectId &&
+    !hasSessionId &&
+    !hasHostId &&
+    !hasLocatorJson &&
+    !hasLocators
+  ) {
+    return null;
+  }
+
+  const projectId = hasProjectId
+    ? normalizeRoleKey({ project_id: args.project_id, role_kind: "cto" })
+        .project_id
+    : null;
+  const sessionId = hasSessionId
+    ? registrationString(args.session_id, "SESSION_ID_INVALID")
+    : null;
+  const hostId = hasHostId
+    ? registrationString(args.host_id, "HOST_ID_INVALID", { maxLength: 128 })
+    : null;
+  if (hostId && !HOST_ID_RE.test(hostId)) {
+    throw registrationError("HOST_ID_INVALID");
+  }
+
+  let rawLocators = [];
+  if (hasLocatorJson) {
+    if (Array.isArray(args.transport_locators_json)) {
+      rawLocators = args.transport_locators_json;
+    } else if (typeof args.transport_locators_json === "string") {
+      try {
+        rawLocators = JSON.parse(args.transport_locators_json);
+      } catch {
+        throw registrationError("TRANSPORT_LOCATORS_JSON_INVALID");
+      }
+    } else {
+      throw registrationError("TRANSPORT_LOCATORS_JSON_INVALID");
+    }
+  } else if (hasLocators) {
+    rawLocators = args.transport_locators;
+  }
+  if (!Array.isArray(rawLocators)) {
+    throw registrationError("TRANSPORT_LOCATORS_INVALID");
+  }
+
+  const ttlMs = Number(args.heartbeat_ttl_ms ?? 30000);
+  if (rawLocators.length > 0 && (!Number.isFinite(ttlMs) || ttlMs <= 0)) {
+    throw registrationError("HEARTBEAT_TTL_INVALID");
+  }
+  const leaseExpiresMs = now + ttlMs;
+  const normalizedLocators = rawLocators
+    .map((locator) =>
+      normalizeTransportLocator(locator, {
+        cli: args.cli,
+        hostId,
+        now,
+        leaseExpiresMs,
+      }),
+    )
+    .sort(
+      (left, right) =>
+        right.priority - left.priority ||
+        left.transport_id.localeCompare(right.transport_id),
+    );
+  const resolvedHostId = hostId || normalizedLocators[0]?.host_id || null;
+  if (
+    resolvedHostId &&
+    normalizedLocators.some((locator) => locator.host_id !== resolvedHostId)
+  ) {
+    throw registrationError("HOST_ID_INVALID");
+  }
+
+  return {
+    project_id: projectId,
+    session_id: sessionId,
+    host_id: resolvedHostId,
+    transport_locators_json:
+      hasLocatorJson || hasLocators ? JSON.stringify(normalizedLocators) : null,
+  };
+}
 
 function uniqueStrings(values = []) {
   return Array.from(
@@ -123,6 +376,18 @@ export function createRouter(store) {
   const queuesByAgent = new Map();
   const liveMessages = new Map();
   const roleStates = new Map();
+  const updateRegistrationIdentity = store.db?.prepare
+    ? store.db.prepare(`
+        UPDATE agents SET
+          project_id=COALESCE(@project_id, project_id),
+          session_id=COALESCE(@session_id, session_id),
+          host_id=COALESCE(@host_id, host_id),
+          transport_locators_json=COALESCE(
+            @transport_locators_json,
+            transport_locators_json
+          )
+        WHERE agent_id=@agent_id`)
+    : null;
   const MAX_LATENCY_SAMPLES = 100;
   let latencyIdx = 0;
   const deliveryLatencies = new Array(MAX_LATENCY_SAMPLES).fill(0);
@@ -855,9 +1120,16 @@ export function createRouter(store) {
     deliveryEmitter,
 
     registerAgent(args) {
+      const identity = normalizeRegistrationIdentity(args);
       const result = store.registerAgent(args);
       if (!registerPresenceIsEffective(result)) {
         return registerPresenceFailure(args.agent_id, result);
+      }
+      if (identity && updateRegistrationIdentity) {
+        updateRegistrationIdentity.run({
+          agent_id: args.agent_id,
+          ...identity,
+        });
       }
       upsertRuntimeTopics(args.agent_id, args.topics || [], { replace: true });
       refreshRoleCandidateForAgent(args.agent_id);
