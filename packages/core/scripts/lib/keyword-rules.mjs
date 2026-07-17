@@ -26,6 +26,7 @@ function normalizeState(state) {
 
 function normalizeRule(rule) {
   if (!rule || typeof rule !== "object") return null;
+  if (rule.disabled === true) return null;
   if (typeof rule.id !== "string" || !rule.id.trim()) return null;
   if (!Array.isArray(rule.patterns) || rule.patterns.length === 0) return null;
   if (typeof rule.priority !== "number" || !Number.isFinite(rule.priority))
@@ -61,6 +62,13 @@ function normalizeRule(rule) {
   const state = normalizeState(rule.state);
   if (rule.state != null && state == null) return null;
 
+  // repo_scope: path segment 화이트리스트 (빈 배열 = 전역). explicit: 종결 라우팅 마커.
+  const repoScope = Array.isArray(rule.repo_scope)
+    ? rule.repo_scope
+        .filter((s) => typeof s === "string" && s.trim())
+        .map((s) => s.trim())
+    : [];
+
   return {
     id: rule.id.trim(),
     patterns,
@@ -72,6 +80,8 @@ function normalizeRule(rule) {
     exclusive: rule.exclusive === true,
     state,
     mcp_route: mcpRoute,
+    repo_scope: repoScope,
+    explicit: rule.explicit === true,
   };
 }
 
@@ -149,6 +159,8 @@ export function matchRules(compiledRules, cleanText) {
       exclusive: rule.exclusive === true,
       state: rule.state || null,
       mcp_route: rule.mcp_route || null,
+      repo_scope: rule.repo_scope || [],
+      explicit: rule.explicit === true,
     });
   }
 

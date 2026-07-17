@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { resolveCodexAgentPolicy } from "../../scripts/lib/agent-route-policy.mjs";
 import {
   compileRules,
   loadRules,
@@ -19,7 +20,8 @@ const RULES_PATH = join(ROOT, "hooks/keyword-rules.json");
 const ROUTE_SH = toBashPath(join(ROOT, "scripts/tfx-route.sh"));
 
 // ── 헬퍼: route_agent 라우팅 테이블 파싱 ──
-// CLI_TYPE: agent-map.json 단일 소스, 상세 설정(effort/runMode): case 문 파싱
+// CLI_TYPE: agent-map.json 단일 소스. Codex 상세 설정은 policy SSOT,
+// 다른 provider 설정은 route_agent() case 문에서 파싱한다.
 function parseRouteTable() {
   const agentMap = JSON.parse(
     readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"),
@@ -30,6 +32,15 @@ function parseRouteTable() {
 
   const funcBody = funcMatch[1];
   const table = {};
+  for (const [agent, rawType] of Object.entries(agentMap)) {
+    if (rawType !== "codex") continue;
+    const policy = resolveCodexAgentPolicy(agent);
+    table[agent] = {
+      CLI_TYPE: "codex",
+      CLI_EFFORT: policy.profile,
+      RUN_MODE: policy.runMode,
+    };
+  }
   const caseRe = /^\s+(\S+(?:\|[^)]+)?)\)\s*\n([\s\S]*?)\s*;;\s*$/gm;
   let m;
   while ((m = caseRe.exec(funcBody)) !== null) {
@@ -39,6 +50,7 @@ function parseRouteTable() {
     const runMode = block.match(/RUN_MODE="([^"]+)"/)?.[1] || null;
     for (const agent of agents) {
       const rawType = agentMap[agent] || null;
+      if (rawType === "codex") continue;
       const cliType = rawType === "claude" ? "claude-native" : rawType;
       table[agent] = {
         CLI_TYPE: cliType,

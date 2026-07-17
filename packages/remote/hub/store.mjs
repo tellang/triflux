@@ -1,5 +1,5 @@
-// hub/store.mjs — SQLite 감사 로그/메타데이터 저장소
-// 실시간 배달 큐는 router/pipe가 담당하고, SQLite는 재생/감사 용도로만 유지한다.
+// hub/store.mjs — SQLite 감사 로그/메타데이터/역할 레지스트리 저장소
+// 실시간 배달은 router/pipe가 담당하고, 역할 권한과 복구 상태는 SQLite가 보존한다.
 
 import { mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -12,6 +12,10 @@ import {
 } from "@triflux/core/hub/lib/timeout-defaults.mjs";
 import { uuidv7 } from "@triflux/core/hub/lib/uuidv7.mjs";
 import { recalcConfidence } from "@triflux/core/hub/reflexion.mjs";
+import {
+  decodeRoleKey,
+  ROLE_REACHABILITY_STATES,
+} from "@triflux/core/hub/role-contract.mjs";
 
 export { uuidv7 };
 
@@ -76,6 +80,21 @@ function parseReflexionRow(row) {
   };
 }
 
+function parseRoleCandidateRow(row) {
+  if (!row) return null;
+  const { transport_locators_json, ...rest } = row;
+  return {
+    ...rest,
+    transport_locators: parseJson(transport_locators_json, []),
+  };
+}
+
+function hasTable(db, tableName) {
+  return !!db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
+    .get(tableName);
+}
+
 function hasColumn(db, tableName, columnName) {
   const rows = db.prepare(`PRAGMA table_info(${tableName})`).all();
   return rows.some((row) => row.name === columnName);
@@ -84,6 +103,23 @@ function hasColumn(db, tableName, columnName) {
 function ensureColumn(db, tableName, columnName, definition) {
   if (hasColumn(db, tableName, columnName)) return;
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+}
+
+function ensureV6Columns(db) {
+  if (hasTable(db, "agents")) {
+    ensureColumn(db, "agents", "project_id", "TEXT");
+    ensureColumn(db, "agents", "session_id", "TEXT");
+    ensureColumn(db, "agents", "host_id", "TEXT");
+    ensureColumn(
+      db,
+      "agents",
+      "transport_locators_json",
+      "TEXT NOT NULL DEFAULT '[]'",
+    );
+  }
+  if (hasTable(db, "messages")) {
+    ensureColumn(db, "messages", "role_key_wire", "TEXT");
+  }
 }
 
 /**
@@ -116,7 +152,7 @@ export function createStore(dbPath, options = {}) {
   db.exec(
     "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)",
   );
-  const SCHEMA_VERSION = "5";
+  const SCHEMA_VERSION = "6";
   const curVer = (() => {
     try {
       return db
@@ -130,6 +166,9 @@ export function createStore(dbPath, options = {}) {
   // 마이그레이션 전략: 스키마 버전이 다르면 schema.sql을 재실행한다.
   // schema.sql은 CREATE TABLE IF NOT EXISTS 패턴을 사용하므로 멱등하게 적용된다.
   // 비파괴적 컬럼 추가는 자동으로 처리되지만, 컬럼 제거/이름 변경은 수동 마이그레이션이 필요하다.
+  // v5 테이블에는 schema.sql의 v6 인덱스가 참조하는 컬럼이 없으므로
+  // CREATE IF NOT EXISTS 재실행 전에 멱등 컬럼 seam을 먼저 적용한다.
+  ensureV6Columns(db);
   if (curVer !== SCHEMA_VERSION) {
     if (curVer != null) {
       // 이미 버전이 기록된 DB에서 버전 불일치가 발생한 경우 경고한다.
@@ -142,6 +181,8 @@ export function createStore(dbPath, options = {}) {
       "INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)",
     ).run(SCHEMA_VERSION);
   }
+  // 매 부팅 실행해 부분 적용된 마이그레이션도 안전하게 복구한다.
+  ensureV6Columns(db);
   ensureColumn(
     db,
     "reflexion_entries",
@@ -189,9 +230,164 @@ export function createStore(dbPath, options = {}) {
       "UPDATE agents SET status='offline' WHERE status='stale' AND lease_expires_ms < ? - 300000",
     ),
 
+    getRole: db.prepare(
+      "SELECT * FROM role_registry WHERE role_key_wire = ?",
+    ),
+    insertRoleReservation: db.prepare(`
+      INSERT INTO role_registry (
+        role_key_wire, project_id, role_kind, scope_id, state,
+        holder_agent_id, previous_holder_agent_id, epoch, activation_seq,
+        activation_id, activation_deadline_ms, holder_lease_expires_ms,
+        charter_version, charter_acked_epoch, retry_count, next_probe_ms,
+        blocked_reason, last_transition_ms, last_reason, version
+      ) VALUES (
+        @role_key_wire, @project_id, @role_kind, @scope_id, @state,
+        @holder_agent_id, @previous_holder_agent_id, @epoch, @activation_seq,
+        @activation_id, @activation_deadline_ms, @holder_lease_expires_ms,
+        @charter_version, @charter_acked_epoch, @retry_count, @next_probe_ms,
+        @blocked_reason, @last_transition_ms, @last_reason, @version
+      )`),
+    updateRoleReservation: db.prepare(`
+      UPDATE role_registry SET
+        state=@state,
+        holder_agent_id=@holder_agent_id,
+        previous_holder_agent_id=@previous_holder_agent_id,
+        epoch=@epoch,
+        activation_seq=@activation_seq,
+        activation_id=@activation_id,
+        activation_deadline_ms=@activation_deadline_ms,
+        holder_lease_expires_ms=@holder_lease_expires_ms,
+        charter_version=@charter_version,
+        charter_acked_epoch=@charter_acked_epoch,
+        retry_count=@retry_count,
+        next_probe_ms=@next_probe_ms,
+        blocked_reason=@blocked_reason,
+        last_transition_ms=@last_transition_ms,
+        last_reason=@last_reason,
+        version=version + 1
+      WHERE role_key_wire=@role_key_wire
+        AND version=@expected_version
+        AND epoch=@expected_epoch`),
+    compareAndSetRole: db.prepare(`
+      UPDATE role_registry SET
+        state=@state,
+        holder_agent_id=@holder_agent_id,
+        previous_holder_agent_id=@previous_holder_agent_id,
+        activation_id=@activation_id,
+        activation_deadline_ms=@activation_deadline_ms,
+        holder_lease_expires_ms=@holder_lease_expires_ms,
+        charter_version=@charter_version,
+        charter_acked_epoch=@charter_acked_epoch,
+        retry_count=@retry_count,
+        next_probe_ms=@next_probe_ms,
+        blocked_reason=@blocked_reason,
+        last_transition_ms=@last_transition_ms,
+        last_reason=@last_reason,
+        version=version + 1
+      WHERE role_key_wire=@role_key_wire
+        AND epoch=@expected_epoch
+        AND activation_seq=@expected_activation_seq
+        AND activation_id IS @expected_activation_id
+        AND version=@expected_version`),
+    listRoles: db.prepare(
+      "SELECT * FROM role_registry ORDER BY role_key_wire",
+    ),
+    expiredHolderRoles: db.prepare(`
+      SELECT * FROM role_registry
+      WHERE holder_agent_id IS NOT NULL
+        AND (holder_lease_expires_ms IS NULL OR holder_lease_expires_ms <= ?)
+      ORDER BY role_key_wire`),
+    listRoleCandidates: db.prepare(`
+      SELECT * FROM role_candidates
+      WHERE role_key_wire = ?
+      ORDER BY priority DESC, updated_at_ms DESC, agent_id`),
+    getRoleCandidate: db.prepare(`
+      SELECT * FROM role_candidates
+      WHERE role_key_wire = ? AND agent_id = ?`),
+    upsertRoleCandidate: db.prepare(`
+      INSERT INTO role_candidates (
+        role_key_wire, agent_id, source, priority, transport_locators_json,
+        consecutive_probe_failures, excluded_until_ms, last_probe_ms,
+        last_probe_code, updated_at_ms
+      ) VALUES (
+        @role_key_wire, @agent_id, @source, @priority,
+        @transport_locators_json, @consecutive_probe_failures,
+        @excluded_until_ms, @last_probe_ms, @last_probe_code, @updated_at_ms
+      )
+      ON CONFLICT(role_key_wire, agent_id) DO UPDATE SET
+        source=excluded.source,
+        priority=excluded.priority,
+        transport_locators_json=excluded.transport_locators_json,
+        consecutive_probe_failures=excluded.consecutive_probe_failures,
+        excluded_until_ms=excluded.excluded_until_ms,
+        last_probe_ms=excluded.last_probe_ms,
+        last_probe_code=excluded.last_probe_code,
+        updated_at_ms=excluded.updated_at_ms`),
+    updateCandidateReachability: db.prepare(`
+      UPDATE role_candidates SET
+        consecutive_probe_failures=@consecutive_probe_failures,
+        excluded_until_ms=@excluded_until_ms,
+        last_probe_ms=@last_probe_ms,
+        last_probe_code=@last_probe_code,
+        updated_at_ms=@updated_at_ms
+      WHERE role_key_wire=@role_key_wire AND agent_id=@agent_id`),
+    pendingRoleMessages: db.prepare(`
+      SELECT * FROM messages
+      WHERE role_key_wire=?
+        AND status IN ('queued','delivered')
+        AND expires_at_ms > ?
+      ORDER BY priority DESC, created_at_ms ASC, id`),
+    recoverExpiredRole: db.prepare(`
+      UPDATE role_registry SET
+        state='electable',
+        previous_holder_agent_id=holder_agent_id,
+        holder_agent_id=NULL,
+        epoch=epoch + 1,
+        activation_seq=activation_seq + 1,
+        activation_id=NULL,
+        activation_deadline_ms=NULL,
+        holder_lease_expires_ms=NULL,
+        charter_acked_epoch=NULL,
+        blocked_reason=NULL,
+        last_transition_ms=@now,
+        last_reason='restart_holder_lease_expired',
+        version=version + 1
+      WHERE role_key_wire=@role_key_wire
+        AND version=@expected_version
+        AND epoch=@expected_epoch`),
+    recoverLiveRole: db.prepare(`
+      UPDATE role_registry SET
+        state='elected-probing',
+        epoch=epoch + 1,
+        activation_seq=activation_seq + 1,
+        activation_id=@activation_id,
+        activation_deadline_ms=NULL,
+        charter_acked_epoch=NULL,
+        blocked_reason=NULL,
+        last_transition_ms=@now,
+        last_reason='restart_reprobe_required',
+        version=version + 1
+      WHERE role_key_wire=@role_key_wire
+        AND version=@expected_version
+        AND epoch=@expected_epoch`),
+    recoverOrphanedActivation: db.prepare(`
+      UPDATE role_registry SET
+        state='electable',
+        epoch=epoch + 1,
+        activation_seq=activation_seq + 1,
+        activation_id=NULL,
+        activation_deadline_ms=NULL,
+        charter_acked_epoch=NULL,
+        last_transition_ms=@now,
+        last_reason='restart_activation_fenced',
+        version=version + 1
+      WHERE role_key_wire=@role_key_wire
+        AND version=@expected_version
+        AND epoch=@expected_epoch`),
+
     insertAuditMessage: db.prepare(`
-      INSERT INTO messages (id, type, from_agent, to_agent, topic, priority, ttl_ms, created_at_ms, expires_at_ms, correlation_id, trace_id, payload_json, status)
-      VALUES (@id, @type, @from_agent, @to_agent, @topic, @priority, @ttl_ms, @created_at_ms, @expires_at_ms, @correlation_id, @trace_id, @payload_json, @status)`),
+      INSERT INTO messages (id, type, from_agent, to_agent, topic, priority, ttl_ms, created_at_ms, expires_at_ms, correlation_id, trace_id, payload_json, status, role_key_wire)
+      VALUES (@id, @type, @from_agent, @to_agent, @topic, @priority, @ttl_ms, @created_at_ms, @expires_at_ms, @correlation_id, @trace_id, @payload_json, @status, @role_key_wire)`),
     getMsg: db.prepare("SELECT * FROM messages WHERE id=?"),
     getResponse: db.prepare(
       "SELECT * FROM messages WHERE correlation_id=? AND type='response' ORDER BY created_at_ms DESC LIMIT 1",
@@ -363,6 +559,160 @@ export function createStore(dbPath, options = {}) {
     return Math.max(1, Math.min(Math.trunc(num), 9));
   }
 
+  function roleIdentity(input) {
+    const roleKeyWire = input?.role_key_wire ?? input?.roleKeyWire;
+    const decoded = decodeRoleKey(roleKeyWire);
+    const identity = {
+      role_key_wire: roleKeyWire,
+      project_id: decoded.project_id,
+      role_kind: decoded.role_kind,
+      scope_id: decoded.scope_id ?? "",
+    };
+    for (const field of ["project_id", "role_kind", "scope_id"]) {
+      if (Object.hasOwn(input, field) && input[field] !== identity[field]) {
+        throw new Error(`role key identity mismatch: ${field}`);
+      }
+    }
+    return identity;
+  }
+
+  function roleFailureReason(current, expected) {
+    if (!current) return "not_found";
+    if (current.version !== expected.version) return "stale_version";
+    if (current.epoch !== expected.epoch) return "stale_epoch";
+    if (current.activation_seq !== expected.activation_seq) {
+      return "stale_activation_seq";
+    }
+    if (current.activation_id !== expected.activation_id) {
+      return "stale_activation_id";
+    }
+    return "cas_conflict";
+  }
+
+  const reserveRole = db.transaction((input) => {
+    const identity = roleIdentity(input);
+    const current = S.getRole.get(identity.role_key_wire) ?? null;
+    const expectedVersion =
+      input.expected_version ?? input.expectedVersion ?? current?.version;
+    const expectedEpoch =
+      input.expected_epoch ?? input.expectedEpoch ?? current?.epoch;
+
+    if (current && expectedVersion !== current.version) {
+      return { ok: false, reason: "stale_version", role: current };
+    }
+    if (current && expectedEpoch !== current.epoch) {
+      return { ok: false, reason: "stale_epoch", role: current };
+    }
+
+    const nextEpoch =
+      input.epoch ?? input.next_epoch ?? (current ? current.epoch + 1 : 0);
+    if (current && nextEpoch !== current.epoch + 1) {
+      return { ok: false, reason: "stale_epoch", role: current };
+    }
+    const nextActivationSeq =
+      input.activation_seq ??
+      input.next_activation_seq ??
+      (current ? current.activation_seq + 1 : 0);
+    if (current && nextActivationSeq !== current.activation_seq + 1) {
+      return { ok: false, reason: "stale_activation_seq", role: current };
+    }
+
+    const state =
+      input.state ?? (input.holder_agent_id ? "elected-probing" : "electable");
+    if (!ROLE_REACHABILITY_STATES.includes(state)) {
+      throw new Error(`invalid role reachability state: ${state}`);
+    }
+    const row = {
+      ...identity,
+      state,
+      holder_agent_id: input.holder_agent_id ?? null,
+      previous_holder_agent_id:
+        input.previous_holder_agent_id ??
+        (current?.holder_agent_id !== input.holder_agent_id
+          ? current?.holder_agent_id ?? null
+          : current?.previous_holder_agent_id ?? null),
+      epoch: nextEpoch,
+      activation_seq: nextActivationSeq,
+      activation_id:
+        input.activation_id ??
+        (input.holder_agent_id ? uuidv7() : current?.activation_id ?? null),
+      activation_deadline_ms:
+        input.activation_deadline_ms ?? current?.activation_deadline_ms ?? null,
+      holder_lease_expires_ms:
+        input.holder_lease_expires_ms ??
+        current?.holder_lease_expires_ms ??
+        null,
+      charter_version: input.charter_version ?? current?.charter_version ?? null,
+      charter_acked_epoch:
+        input.charter_acked_epoch ?? current?.charter_acked_epoch ?? null,
+      retry_count: input.retry_count ?? current?.retry_count ?? 0,
+      next_probe_ms: input.next_probe_ms ?? current?.next_probe_ms ?? null,
+      blocked_reason:
+        input.blocked_reason === undefined
+          ? current?.blocked_reason ?? null
+          : input.blocked_reason,
+      last_transition_ms: input.last_transition_ms ?? Date.now(),
+      last_reason: input.last_reason ?? "role_reserved",
+      version: 0,
+      expected_version: current?.version,
+      expected_epoch: current?.epoch,
+    };
+
+    if (!current) {
+      S.insertRoleReservation.run(row);
+    } else if (S.updateRoleReservation.run(row).changes !== 1) {
+      const latest = S.getRole.get(identity.role_key_wire) ?? null;
+      return {
+        ok: false,
+        reason: roleFailureReason(latest, {
+          version: current.version,
+          epoch: current.epoch,
+          activation_seq: current.activation_seq,
+          activation_id: current.activation_id,
+        }),
+        role: latest,
+      };
+    }
+    return { ok: true, role: S.getRole.get(identity.role_key_wire) };
+  });
+
+  const recoverRegistry = db.transaction((now) => {
+    for (const role of S.listRoles.all()) {
+      const guard = {
+        role_key_wire: role.role_key_wire,
+        expected_version: role.version,
+        expected_epoch: role.epoch,
+        now,
+      };
+      if (
+        role.holder_agent_id &&
+        (role.holder_lease_expires_ms == null ||
+          role.holder_lease_expires_ms <= now)
+      ) {
+        S.recoverExpiredRole.run(guard);
+      } else if (role.holder_agent_id) {
+        S.recoverLiveRole.run({ ...guard, activation_id: uuidv7() });
+      } else if (role.activation_id || role.state === "elected-probing") {
+        S.recoverOrphanedActivation.run(guard);
+      }
+    }
+
+    const roles = S.listRoles.all();
+    return {
+      roles,
+      candidates: roles.flatMap((role) =>
+        S.listRoleCandidates
+          .all(role.role_key_wire)
+          .map(parseRoleCandidateRow),
+      ),
+      pending_messages: roles.flatMap((role) =>
+        S.pendingRoleMessages
+          .all(role.role_key_wire, now)
+          .map(parseMessageRow),
+      ),
+    };
+  });
+
   const store = {
     db,
     uuidv7,
@@ -464,6 +814,233 @@ export function createStore(dbPath, options = {}) {
       return S.setAgentStatus.run(status, agentId).changes > 0;
     },
 
+    getRole(roleKeyWire) {
+      decodeRoleKey(roleKeyWire);
+      return S.getRole.get(roleKeyWire) ?? null;
+    },
+
+    upsertRoleReservation(input) {
+      return reserveRole.immediate(input);
+    },
+
+    compareAndSetRole(input) {
+      const identity = roleIdentity(input);
+      const current = S.getRole.get(identity.role_key_wire) ?? null;
+      if (!current) return { ok: false, reason: "not_found", role: null };
+
+      const hasExpectedActivationSeq =
+        Object.hasOwn(input, "expected_activation_seq") ||
+        Object.hasOwn(input, "expectedActivationSeq") ||
+        Object.hasOwn(input, "activation_seq");
+      const hasExpectedActivationId =
+        Object.hasOwn(input, "expected_activation_id") ||
+        Object.hasOwn(input, "expectedActivationId") ||
+        Object.hasOwn(input, "activation_id");
+      const expected = {
+        version: input.expected_version ?? input.expectedVersion ?? input.version,
+        epoch: input.expected_epoch ?? input.expectedEpoch ?? input.epoch,
+        activation_seq:
+          input.expected_activation_seq ??
+          input.expectedActivationSeq ??
+          input.activation_seq,
+        activation_id: Object.hasOwn(input, "expected_activation_id")
+          ? input.expected_activation_id
+          : Object.hasOwn(input, "expectedActivationId")
+            ? input.expectedActivationId
+            : input.activation_id,
+      };
+      if (
+        expected.version == null ||
+        expected.epoch == null ||
+        !hasExpectedActivationSeq ||
+        !hasExpectedActivationId
+      ) {
+        return { ok: false, reason: "invalid_cas", role: current };
+      }
+
+      const reason = roleFailureReason(current, expected);
+      if (reason !== "cas_conflict") {
+        return { ok: false, reason, role: current };
+      }
+
+      const patch = input.patch ?? input.changes ?? {};
+      const state = patch.state ?? current.state;
+      if (!ROLE_REACHABILITY_STATES.includes(state)) {
+        throw new Error(`invalid role reachability state: ${state}`);
+      }
+      const next = {
+        role_key_wire: identity.role_key_wire,
+        expected_version: expected.version,
+        expected_epoch: expected.epoch,
+        expected_activation_seq: expected.activation_seq,
+        expected_activation_id: expected.activation_id,
+        state,
+        holder_agent_id:
+          patch.holder_agent_id === undefined
+            ? current.holder_agent_id
+            : patch.holder_agent_id,
+        previous_holder_agent_id:
+          patch.previous_holder_agent_id === undefined
+            ? current.previous_holder_agent_id
+            : patch.previous_holder_agent_id,
+        activation_id:
+          patch.activation_id === undefined
+            ? current.activation_id
+            : patch.activation_id,
+        activation_deadline_ms:
+          patch.activation_deadline_ms === undefined
+            ? current.activation_deadline_ms
+            : patch.activation_deadline_ms,
+        holder_lease_expires_ms:
+          patch.holder_lease_expires_ms === undefined
+            ? current.holder_lease_expires_ms
+            : patch.holder_lease_expires_ms,
+        charter_version:
+          patch.charter_version === undefined
+            ? current.charter_version
+            : patch.charter_version,
+        charter_acked_epoch:
+          patch.charter_acked_epoch === undefined
+            ? current.charter_acked_epoch
+            : patch.charter_acked_epoch,
+        retry_count: patch.retry_count ?? current.retry_count,
+        next_probe_ms:
+          patch.next_probe_ms === undefined
+            ? current.next_probe_ms
+            : patch.next_probe_ms,
+        blocked_reason:
+          patch.blocked_reason === undefined
+            ? current.blocked_reason
+            : patch.blocked_reason,
+        last_transition_ms: patch.last_transition_ms ?? Date.now(),
+        last_reason: patch.last_reason ?? current.last_reason,
+      };
+      if (S.compareAndSetRole.run(next).changes !== 1) {
+        const latest = S.getRole.get(identity.role_key_wire) ?? null;
+        return {
+          ok: false,
+          reason: roleFailureReason(latest, expected),
+          role: latest,
+        };
+      }
+      return { ok: true, role: S.getRole.get(identity.role_key_wire) };
+    },
+
+    listRoleKeys(filter = {}) {
+      const clauses = [];
+      const params = {};
+      for (const field of ["project_id", "role_kind", "scope_id", "state"]) {
+        if (filter[field] !== undefined) {
+          clauses.push(`${field}=@${field}`);
+          params[field] = filter[field];
+        }
+      }
+      if (Array.isArray(filter.states) && filter.states.length > 0) {
+        clauses.push(
+          `state IN (${filter.states.map((_, index) => `@state_${index}`).join(",")})`,
+        );
+        filter.states.forEach((state, index) => {
+          params[`state_${index}`] = state;
+        });
+      }
+      const where = clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "";
+      return db
+        .prepare(
+          `SELECT role_key_wire FROM role_registry${where} ORDER BY role_key_wire`,
+        )
+        .pluck()
+        .all(params);
+    },
+
+    listRolesWithExpiredHolder(now) {
+      return S.expiredHolderRoles.all(now);
+    },
+
+    listRoleCandidates(roleKeyWire) {
+      decodeRoleKey(roleKeyWire);
+      return S.listRoleCandidates.all(roleKeyWire).map(parseRoleCandidateRow);
+    },
+
+    upsertRoleCandidate(input) {
+      const { role_key_wire } = roleIdentity(input);
+      const current = S.getRoleCandidate.get(role_key_wire, input.agent_id);
+      S.upsertRoleCandidate.run({
+        role_key_wire,
+        agent_id: input.agent_id,
+        source: input.source ?? current?.source ?? "operator",
+        priority: input.priority ?? current?.priority ?? 0,
+        transport_locators_json: JSON.stringify(
+          input.transport_locators ??
+            parseJson(current?.transport_locators_json, []),
+        ),
+        consecutive_probe_failures:
+          input.consecutive_probe_failures ??
+          current?.consecutive_probe_failures ??
+          0,
+        excluded_until_ms:
+          input.excluded_until_ms === undefined
+            ? current?.excluded_until_ms ?? null
+            : input.excluded_until_ms,
+        last_probe_ms:
+          input.last_probe_ms === undefined
+            ? current?.last_probe_ms ?? null
+            : input.last_probe_ms,
+        last_probe_code:
+          input.last_probe_code === undefined
+            ? current?.last_probe_code ?? null
+            : input.last_probe_code,
+        updated_at_ms: input.updated_at_ms ?? Date.now(),
+      });
+      return parseRoleCandidateRow(
+        S.getRoleCandidate.get(role_key_wire, input.agent_id),
+      );
+    },
+
+    updateCandidateReachability(input) {
+      const { role_key_wire } = roleIdentity(input);
+      const current = S.getRoleCandidate.get(role_key_wire, input.agent_id);
+      if (!current) return { ok: false, reason: "not_found" };
+
+      let failures =
+        input.consecutive_probe_failures ??
+        current.consecutive_probe_failures;
+      if (input.probe_failed === true || input.increment_probe_failures === true) {
+        failures = current.consecutive_probe_failures + 1;
+      } else if (input.probe_succeeded === true) {
+        failures = 0;
+      }
+      S.updateCandidateReachability.run({
+        role_key_wire,
+        agent_id: input.agent_id,
+        consecutive_probe_failures: failures,
+        excluded_until_ms:
+          input.excluded_until_ms === undefined
+            ? current.excluded_until_ms
+            : input.excluded_until_ms,
+        last_probe_ms: input.last_probe_ms ?? Date.now(),
+        last_probe_code:
+          input.last_probe_code === undefined
+            ? current.last_probe_code
+            : input.last_probe_code,
+        updated_at_ms: input.updated_at_ms ?? Date.now(),
+      });
+      return {
+        ok: true,
+        candidate: parseRoleCandidateRow(
+          S.getRoleCandidate.get(role_key_wire, input.agent_id),
+        ),
+      };
+    },
+
+    listPendingRoleMessages(roleKeyWire, now) {
+      decodeRoleKey(roleKeyWire);
+      return S.pendingRoleMessages.all(roleKeyWire, now).map(parseMessageRow);
+    },
+
+    recoverRoleRegistry(now) {
+      return recoverRegistry.immediate(now);
+    },
+
     auditLog({
       type,
       from,
@@ -475,6 +1052,7 @@ export function createStore(dbPath, options = {}) {
       trace_id,
       correlation_id,
       status = "queued",
+      role_key_wire = null,
     }) {
       const now = Date.now();
       const row = {
@@ -491,6 +1069,7 @@ export function createStore(dbPath, options = {}) {
         trace_id: trace_id || uuidv7(),
         payload_json: JSON.stringify(payload),
         status,
+        role_key_wire,
       };
       S.insertAuditMessage.run(row);
       return { ...row, payload };

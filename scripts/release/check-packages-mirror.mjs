@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = join(SCRIPT_DIR, "..", "..");
 const MIRROR_TOPS = [
+  "adapters",
   "bin",
   "config",
   "cto",

@@ -121,6 +121,66 @@ function lintBodyModelNames({ file, body, startLine }) {
   return problems;
 }
 
+function lintAgentModels({ file, body, startLine }) {
+  const problems = [];
+  const agentStartRe = /\bAgent\s*\(/g;
+  let match;
+  while ((match = agentStartRe.exec(body)) !== null) {
+    const openParenIndex = match.index + match[0].lastIndexOf("(");
+    let quote = null;
+    let depth = 1;
+    let closeParenIndex = -1;
+
+    for (let index = openParenIndex + 1; index < body.length; index += 1) {
+      const character = body[index];
+
+      if (quote) {
+        if (character === "\\") {
+          index += 1;
+        } else if (character === quote) {
+          quote = null;
+        }
+        continue;
+      }
+
+      if (character === '"' || character === "'" || character === "`") {
+        quote = character;
+      } else if (character === "(") {
+        depth += 1;
+      } else if (character === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          closeParenIndex = index;
+          break;
+        }
+      }
+    }
+
+    if (closeParenIndex === -1) continue;
+
+    const call = body.slice(openParenIndex + 1, closeParenIndex);
+    agentStartRe.lastIndex = closeParenIndex + 1;
+    if (!/\bsubagent_type\s*=/.test(call) || !/\bprompt\s*=/.test(call)) {
+      continue;
+    }
+    if (/\bmodel\s*=/.test(call)) continue;
+    const line =
+      startLine + body.slice(0, match.index).split(/\r?\n/).length - 1;
+    problems.push(
+      createProblem({
+        file,
+        line,
+        code: "agent-model-required",
+        problem: "executable Agent call is missing model=",
+        cause:
+          "실행형 Agent 호출은 모델 선택을 명시해야 라우팅 drift를 막을 수 있습니다.",
+        fix: "Add model=<resolved-native-model> to the Agent call.",
+      }),
+    );
+  }
+  return problems;
+}
+
 function lintSkillFile({ file, rootDir }) {
   const content = readFileSync(file, "utf8");
   const { data, body } = parseFrontmatter(content);
@@ -129,6 +189,11 @@ function lintSkillFile({ file, rootDir }) {
   return [
     ...lintFrontmatter({ file: relativeFile, data }),
     ...lintBodyModelNames({
+      file: relativeFile,
+      body,
+      startLine: bodyStartLine(content),
+    }),
+    ...lintAgentModels({
       file: relativeFile,
       body,
       startLine: bodyStartLine(content),

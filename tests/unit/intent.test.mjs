@@ -69,13 +69,13 @@ describe("intent", () => {
     assert.equal(r.routing.effort, "gpt56_terra_high");
   });
 
-  // 8. classifyIntent: document → writer/docs/pro
-  it("classifyIntent: document routes to writer/docs/pro", () => {
+  // 8. classifyIntent: document → writer/docs/direct-Codex policy
+  it("classifyIntent: document derives writer effort from the policy", () => {
     const r = classifyIntent("이 모듈 문서화해줘");
     assert.equal(r.category, "document");
     assert.equal(r.routing.agent, "writer");
     assert.equal(r.routing.mcp, "docs");
-    assert.equal(r.routing.effort, "pro");
+    assert.equal(r.routing.effort, "gpt56_luna_low");
   });
 
   // 9. quickClassify: 한국어 + 영어 혼용 프롬프트
@@ -110,8 +110,8 @@ describe("intent", () => {
     assert.equal(Object.keys(INTENT_CATEGORIES).length, 10);
   });
 
-  // 12. All categories have agent, mcp, effort fields
-  it("all categories have agent, mcp, effort fields", () => {
+  // 12. Intent categories keep only intent ownership; policy derives effort.
+  it("all categories have agent and mcp without copied effort", () => {
     for (const [name, cat] of Object.entries(INTENT_CATEGORIES)) {
       assert.ok(
         typeof cat.agent === "string",
@@ -121,10 +121,7 @@ describe("intent", () => {
         cat.mcp === null || typeof cat.mcp === "string",
         `${name}.mcp should be string|null`,
       );
-      assert.ok(
-        cat.effort === null || typeof cat.effort === "string",
-        `${name}.effort should be string|null`,
-      );
+      assert.equal(cat.effort, undefined, `${name} must not copy effort`);
     }
   });
 

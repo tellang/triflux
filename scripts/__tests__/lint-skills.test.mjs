@@ -98,4 +98,72 @@ describe("lint-skills", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("실행형 Agent 호출은 model=이 없으면 실패한다", () => {
+    const root = makeTempDir();
+    try {
+      const skillsDir = join(root, "skills");
+      writeSkill(
+        root,
+        "tfx-agent",
+        '---\nname: tfx-agent\ndescription: 한국어 설명\n---\nAgent(subagent_type="explore", prompt="x")',
+      );
+      const result = lintSkills({ skillsDir });
+      assert.equal(result.ok, false);
+      assert.equal(result.problems[0]?.code, "agent-model-required");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("model=이 있는 실행형 Agent와 prose signature는 통과한다", () => {
+    const root = makeTempDir();
+    try {
+      const skillsDir = join(root, "skills");
+      writeSkill(
+        root,
+        "tfx-agent-ok",
+        '---\nname: tfx-agent-ok\ndescription: 한국어 설명\n---\nAgent()\nAgent(subagent_type="explore", model="haiku", prompt="x")',
+      );
+      const result = lintSkills({ skillsDir });
+      assert.equal(result.ok, true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("문자열 안의 괄호가 있어도 model=이 있는 실행형 Agent를 통과시킨다", () => {
+    const root = makeTempDir();
+    try {
+      const skillsDir = join(root, "skills");
+      writeSkill(
+        root,
+        "tfx-agent-nested-model",
+        '---\nname: tfx-agent-nested-model\ndescription: 한국어 설명\n---\nAgent(subagent_type="x", prompt="do (this)", model="haiku")',
+      );
+      const result = lintSkills({ skillsDir });
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.problems, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("문자열 안의 괄호가 있어도 model= 없는 실행형 Agent를 실패 처리한다", () => {
+    const root = makeTempDir();
+    try {
+      const skillsDir = join(root, "skills");
+      writeSkill(
+        root,
+        "tfx-agent-nested-missing-model",
+        '---\nname: tfx-agent-nested-missing-model\ndescription: 한국어 설명\n---\nAgent(prompt="foo(bar)", subagent_type="x")',
+      );
+      const result = lintSkills({ skillsDir });
+      assert.equal(result.ok, false);
+      assert.equal(result.problems.length, 1);
+      assert.equal(result.problems[0]?.code, "agent-model-required");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

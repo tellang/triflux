@@ -28,6 +28,24 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 저장/복원 | `/gstack-context-save` / `/gstack-context-restore` | 진행 상태는 gstack checkpoint 계열이 소유한다. |
 | 회고/슬롭 정리 | `/gstack /retro` 또는 `/tfx-prune` | 세션 회고는 gstack, AI 생성 슬롭 제거는 triflux. |
 
+## 스킬 선택 결정트리 (SSOT)
+
+우선순위는 **명시 스킬/플래그 > D0–D11 결정트리 > 위 quick reference > 개별 description**이다. 위 표는 파생 참조이며 충돌하면 이 결정트리가 이긴다.
+
+- D0: 명시 `/skill`, `$skill`, `tfx-*`, `--mode/--cli`는 안전 위반이 없으면 유지한다.
+- D1: “어떤 스킬/경로?”만 묻는 요청은 `tfx-harness`가 recommendation-only로 owner 하나를 반환한다.
+- D2: 목표·non-goal·acceptance criteria가 불명확하면 host `deep-interview`; 명시 TFX 변형이면 `tfx-interview`.
+- D3: 제품 수요·wedge 단계는 `office-hours`; D4 해법/UX 발산은 `brainstorming`.
+- D5: 승인된 spec의 실행 계획은 `writing-plans`; 명시 TFX 다중모델 합의는 `tfx-plan`.
+- D6: 실패/버그/test failure는 `systematic-debugging` 후 `tfx-auto`; 정상 구조 설명은 `tfx-analysis`.
+- D7: 로컬 파일·심볼은 `tfx-find`; 외부·최신·공식 문서는 `tfx-research`.
+- D8: 무수식 AI slop/deslop/refactor는 host `ai-slop-cleaner`; 명시 TFX 3자 cleanup만 `tfx-prune`; 회고는 `retro`. “정리” 한 단어로 cleanup을 강제하지 않는다.
+- D9: web/app flow는 `qa`; code verdict는 review backend; 완료 주장은 `verification-before-completion`이 필수다.
+- D10: 명확한 직접 구현은 TDD 필요 여부 뒤 `tfx-auto`; 2+ code-changing lane은 worktree/team/swarm.
+- D11: fresh verification 없이 ship 금지. triflux release는 `tfx-ship`, 일반 release는 `ship`, 중단/재개는 context save/restore.
+
+owner availability를 실제로 검출한 경우에만 `owner unavailable → tfx-X fallback`을 명시해 fallback할 수 있다. availability가 unknown이면 추측 fallback하지 않는다.
+
 ## 행동 유형 → 스킬 매핑
 
 | 의도 | 자연어 신호 | 스킬 |

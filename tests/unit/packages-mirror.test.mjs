@@ -95,6 +95,20 @@ test("check-packages-mirror walks skills/ top-level dir", () => {
   });
 });
 
+test("check-packages-mirror walks adapters/ top-level dir", () => {
+  withMirrorProbe("adapters/__mirror_probe_temp__.txt", () => {
+    const result = compareMirror({ fix: false });
+    const found = result.issues.find((i) =>
+      i.path.endsWith("adapters/__mirror_probe_temp__.txt"),
+    );
+    assert.ok(
+      found,
+      "adapters/ drift was not flagged — MIRROR_TOPS regression",
+    );
+    assert.equal(found.kind, "missing-in-mirror");
+  });
+});
+
 test("check-packages-mirror skips skills/tfx-workspace", () => {
   // tfx-workspace is excluded from npm tarball via
   // packages/triflux/package.json files negation ("!skills/tfx-workspace"),

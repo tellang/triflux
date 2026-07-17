@@ -21,23 +21,29 @@ function topId(text) {
   return resolveConflicts(matchRules(compiled, text))[0]?.id;
 }
 
-// root cause ① — 리뷰/분석/계획/테스트/리서치/클린업 동사군을 tfx-unified 에서
-// 분리해 각 전용 스킬로 라우팅한다 (예전엔 tfx-unified 가 전부 삼켰다).
-describe("keyword routing: 동사군 분리 (root cause ①)", () => {
+// root cause ① 의 hook 계층 동사군 분리는 lane2-d 잠금(2026-07-17,
+// tests/unit/lane2-d-routing-contract.test.mjs "locked prompt matrix")이 우선해
+// 접었다 — hook 은 광역 동사를 tfx-unified 로 유지하고, 세분화는 D-트리(모델
+// 계층)가 담당한다. 전용 규칙은 명시 토큰 전용으로 존재한다(root cause ② 블록).
+describe("keyword routing: 광역 동사는 tfx-unified 유지 (lane2-d 잠금)", () => {
   const cases = [
-    ["리뷰해줘 이 코드", "tfx-review"],
-    ["검토해줘", "tfx-review"],
-    ["review this PR", "tfx-review"],
-    ["분석해줘 구조", "tfx-analysis"],
-    ["analyze this module", "tfx-analysis"],
-    ["계획 세워줘", "tfx-plan"],
-    ["설계해줘", "tfx-plan"],
-    ["테스트 돌려봐", "tfx-qa"],
-    ["검증해줘", "tfx-qa"],
-    ["찾아봐 최신 정보", "tfx-research"],
-    ["조사해줘", "tfx-research"],
-    ["정리해줘 슬롭", "tfx-prune"],
-    ["클린업 해줘", "tfx-prune"],
+    ["리뷰해줘 이 코드", "tfx-unified"],
+    ["검토해줘", "tfx-unified"],
+    ["review this PR", "tfx-unified"],
+    ["분석해줘 구조", "tfx-unified"],
+    ["analyze this module", "tfx-unified"],
+    ["계획 세워줘", "tfx-unified"],
+    ["설계해줘", "tfx-unified"],
+    ["테스트 돌려봐", "tfx-unified"],
+    ["검증해줘", "tfx-unified"],
+    ["찾아봐 최신 정보", "tfx-unified"],
+    ["조사해줘", "tfx-unified"],
+    ["만들어줘 함수", "tfx-unified"],
+    ["고쳐줘 버그", "tfx-unified"],
+    ["implement this", "tfx-unified"],
+    // H-결정(D8, 2026-07-17): 무수식 slop/cleanup 은 host ai-slop-cleaner 소유.
+    ["정리해줘 슬롭", "host-ai-slop-cleaner"],
+    ["클린업 해줘", "host-ai-slop-cleaner"],
   ];
   for (const [text, expected] of cases) {
     it(`'${text}' → ${expected}`, () => {
@@ -46,26 +52,12 @@ describe("keyword routing: 동사군 분리 (root cause ①)", () => {
   }
 });
 
-describe("keyword routing: tfx-unified 는 구현 동사만 (root cause ①)", () => {
-  for (const text of [
-    "만들어줘 함수",
-    "고쳐줘 버그",
-    "implement this",
-    "build it",
-    "fix the bug",
-  ]) {
-    it(`'${text}' → tfx-unified`, () => {
-      assert.equal(topId(text), "tfx-unified");
-    });
-  }
-});
-
 // root cause ② — 전용 규칙은 priority 1 + supersedes:['tfx-unified'] 로 명시
 // 호출/복합 의도에서 generic router 가로채기를 억제한다.
 describe("keyword routing: 전용 규칙이 tfx-unified 를 supersede (root cause ②)", () => {
-  it("구현+리뷰 복합 → tfx-review 가 tfx-unified 를 supersede", () => {
+  it("구현+명시토큰 복합 → tfx-review 가 tfx-unified 를 supersede", () => {
     const resolved = resolveConflicts(
-      matchRules(compiled, "만들어줘 그리고 검토해줘"),
+      matchRules(compiled, "만들어줘 그리고 tfx-review 해줘"),
     );
     assert.equal(resolved[0].id, "tfx-review");
     assert.equal(
@@ -119,15 +111,17 @@ describe("keyword routing: tfx-ship repo 스코프 (root cause ③)", () => {
     assert.equal(shipRule.explicit, true);
   });
 
-  it("전역 매칭(release/publish/맨 명사 배포) 은 제거됨", () => {
+  it("영문 release/publish 전역 패턴은 제거, 배포/릴리즈는 repo_scope 로 가드", () => {
     const sources = shipRule.patterns.map((p) => p.source);
     assert.ok(
       !sources.some((s) => /release|publish/i.test(s)),
       "release/publish 전역 패턴이 없어야 함",
     );
+    // lane2-d 잠금("배포 검증해줘" → tfx-ship)과의 조정: 맨 명사 배포 패턴은
+    // 유지하되 repo_scope=["triflux"] 로 타 repo 하이재킹을 차단한다.
     assert.ok(
-      !sources.includes("배포(?!자|사|장|처)"),
-      "맨 명사 배포 패턴이 없어야 함",
+      sources.includes("배포(?!자|사|장|처)"),
+      "배포 패턴은 유지 (repo_scope 가드)",
     );
   });
 
@@ -179,11 +173,93 @@ describe("keyword routing: 우선순위 역전 방지 (root cause ④)", () => {
   });
 });
 
+// Codex 리뷰 P2 회귀 가드 2건 (PR #487)
+describe("keyword routing: 명시 토큰이 광역 클린업 매처를 이긴다 (P2-1)", () => {
+  it("'tfx-prune으로 클린업 해줘' → selectPrimaryMatch 가 tfx-prune 선택", () => {
+    const resolved = resolveConflicts(
+      matchRules(compiled, "tfx-prune으로 클린업 해줘"),
+    );
+    // 정렬상 host-ai-slop-cleaner 가 앞서더라도 explicit 규칙이 이겨야 한다.
+    assert.equal(selectPrimaryMatch(resolved).id, "tfx-prune");
+  });
+
+  it("전용 명시토큰 규칙은 전부 explicit:true", () => {
+    for (const id of [
+      "tfx-review",
+      "tfx-analysis",
+      "tfx-plan",
+      "tfx-qa",
+      "tfx-research",
+      "tfx-find",
+      "tfx-prune",
+    ]) {
+      const rule = rules.find((x) => x.id === id);
+      assert.equal(rule.explicit, true, `${id} explicit=true`);
+    }
+  });
+});
+
+describe("keyword routing: direct-run 가드는 심링크 실행을 허용 (P2-2)", () => {
+  it("심링크 경유 실행에서도 main() 이 구동돼 JSON 을 출력한다", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { mkdtempSync, symlinkSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "kw-symlink-"));
+    const link = join(dir, "keyword-detector-link.mjs");
+    symlinkSync(join(ROOT, "scripts/keyword-detector.mjs"), link);
+    const out = execFileSync(process.execPath, [link], {
+      input: JSON.stringify({ prompt: "만들어줘 함수", cwd: ROOT }),
+      encoding: "utf8",
+    });
+    const parsed = JSON.parse(out.trim().split("\n").at(-1));
+    assert.equal(parsed.continue, true);
+    assert.match(
+      parsed.hookSpecificOutput?.additionalContext ?? "",
+      /tfx-unified/,
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe("keyword routing: disabled 규칙 존중", () => {
-  it("gstack-ship(disabled:true) 은 로드되지 않는다", () => {
+  it("disabled:true 규칙은 loadRules 가 제외한다 (fixture)", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "kw-rules-"));
+    const fixture = join(dir, "rules.json");
+    writeFileSync(
+      fixture,
+      JSON.stringify({
+        rules: [
+          {
+            id: "enabled-rule",
+            patterns: [{ source: "foo", flags: "i" }],
+            skill: "x",
+            priority: 1,
+          },
+          {
+            id: "disabled-rule",
+            patterns: [{ source: "bar", flags: "i" }],
+            skill: "y",
+            priority: 1,
+            disabled: true,
+          },
+        ],
+      }),
+    );
+    const loaded = loadRules(fixture);
+    assert.deepEqual(
+      loaded.map((r) => r.id),
+      ["enabled-rule"],
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  // H-결정(151baa86, 2026-07-17): gstack-ship 재활성화 — 회귀 가드.
+  it("gstack-ship 은 활성 상태다 (재활성화 결정 존중)", () => {
     assert.equal(
       rules.some((r) => r.id === "gstack-ship"),
-      false,
+      true,
     );
   });
 });

@@ -26,6 +26,7 @@ const EXTERNAL_GSTACK_TARGETS = new Set([
   "retro",
   "ship",
 ]);
+const EXTERNAL_HOST_TARGETS = new Set(["ai-slop-cleaner"]);
 
 function readRules(mirrorPath) {
   const text = readFileSync(join(REPO_ROOT, mirrorPath), "utf8");
@@ -43,6 +44,7 @@ function isKnownTarget(name) {
   if (typeof name !== "string") return false;
   if (isTrifluxSkill(name)) return true;
   if (EXTERNAL_GSTACK_TARGETS.has(name)) return true;
+  if (EXTERNAL_HOST_TARGETS.has(name)) return true;
   return false;
 }
 

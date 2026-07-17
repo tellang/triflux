@@ -3,6 +3,7 @@
 
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
+import { resolveCodexAgentPolicy } from "../scripts/lib/agent-route-policy.mjs";
 import { whichCommand } from "./platform.mjs";
 
 /** 캐시 엔트리: { category, confidence, ts } */
@@ -61,30 +62,26 @@ function _tryCodexClassify(prompt) {
  * triflux 특화 의도 카테고리 (10개)
  */
 export const INTENT_CATEGORIES = {
-  // 모델 정책 (2026-04-25):
-  // - GPT-5.6 family = 기존 semantic tier를 Sol/Terra/Luna lane으로 매핑
-  // - gpt-5.4-mini = 자잘/부가/가성비 (fast tier 가능)
-  // - gpt-5.3-codex = escalation 가성비 중간 (fast 미지원)
-  // - 기존 effort는 유지하고 모델만 GPT-5.6 family로 교체
-  implement: {
-    agent: "executor",
-    mcp: "implement",
-    effort: "gpt56_terra_high",
-  },
-  debug: { agent: "debugger", mcp: "implement", effort: "gpt56_sol_xhigh" },
-  analyze: { agent: "analyst", mcp: "analyze", effort: "gpt56_sol_xhigh" },
-  design: { agent: "architect", mcp: "analyze", effort: "gpt56_sol_xhigh" },
-  review: { agent: "code-reviewer", mcp: "review", effort: "gpt56_terra_high" },
-  document: { agent: "writer", mcp: "docs", effort: "pro" },
-  research: { agent: "scientist", mcp: "analyze", effort: "gpt56_terra_high" },
-  "quick-fix": {
-    agent: "build-fixer",
-    mcp: "implement",
-    effort: "gpt56_luna_low",
-  },
-  explain: { agent: "writer", mcp: "docs", effort: "flash" },
-  test: { agent: "test-engineer", mcp: null, effort: null },
+  implement: { agent: "executor", mcp: "implement" },
+  debug: { agent: "debugger", mcp: "implement" },
+  analyze: { agent: "analyst", mcp: "analyze" },
+  design: { agent: "architect", mcp: "analyze" },
+  review: { agent: "code-reviewer", mcp: "review" },
+  document: { agent: "writer", mcp: "docs" },
+  research: { agent: "scientist", mcp: "analyze" },
+  "quick-fix": { agent: "build-fixer", mcp: "implement" },
+  explain: { agent: "writer", mcp: "docs" },
+  test: { agent: "test-engineer", mcp: null },
 };
+
+function routingFor(category) {
+  const route = INTENT_CATEGORIES[category] || INTENT_CATEGORIES.implement;
+  return {
+    agent: route.agent,
+    mcp: route.mcp,
+    effort: resolveCodexAgentPolicy(route.agent).profile,
+  };
+}
 
 /** @internal 키워드 → 카테고리 매핑 패턴 */
 const KEYWORD_PATTERNS = [
@@ -267,17 +264,12 @@ export function classifyIntent(prompt) {
   // 캐시 확인
   const cached = _getCached(hash);
   if (cached) {
-    const routing =
-      INTENT_CATEGORIES[cached.category] || INTENT_CATEGORIES.implement;
+    const routing = routingFor(cached.category);
     return {
       category: cached.category,
       confidence: cached.confidence,
       reasoning: `cache-hit: ${cached.category} (${cached.confidence.toFixed(2)})`,
-      routing: {
-        agent: routing.agent,
-        mcp: routing.mcp,
-        effort: routing.effort,
-      },
+      routing,
     };
   }
 
@@ -308,12 +300,12 @@ export function classifyIntent(prompt) {
   // 캐시 저장
   _intentCache.set(hash, { category, confidence, ts: Date.now() });
 
-  const routing = INTENT_CATEGORIES[category] || INTENT_CATEGORIES.implement;
+  const routing = routingFor(category);
   return {
     category,
     confidence,
     reasoning,
-    routing: { agent: routing.agent, mcp: routing.mcp, effort: routing.effort },
+    routing,
   };
 }
 

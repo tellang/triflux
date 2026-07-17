@@ -26,6 +26,7 @@ const {
   isSetupUserStateFile,
   SETUP_USER_STATE_FILES,
   getWorkerPackageSyncEntries,
+  syncCodexHarnessAdapter,
   syncWorkerPackages,
 } = await import("../../scripts/setup.mjs");
 
@@ -119,6 +120,75 @@ describe("setup-sync: --sync 플래그 파싱", () => {
       !result.includes("[sync]"),
       `Expected no [sync] in output, got: ${result}`,
     );
+  });
+});
+
+describe("setup-sync: Codex tfx-harness adapter", () => {
+  it("temp HOME에 adapter를 동기화하고 재실행해도 idempotent하다", () => {
+    execFileSync(
+      process.execPath,
+      [join(PROJECT_ROOT, "scripts", "setup.mjs"), "--sync"],
+      {
+        timeout: 15000,
+        encoding: "utf8",
+        env: SETUP_TEST_ENV,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const source = join(
+      PROJECT_ROOT,
+      "adapters",
+      "codex",
+      "skills",
+      "tfx-harness",
+      "SKILL.md",
+    );
+    const installed = join(
+      SETUP_TEST_HOME,
+      ".codex",
+      "skills",
+      "tfx-harness",
+      "SKILL.md",
+    );
+    assert.equal(readFileSync(installed, "utf8"), readFileSync(source, "utf8"));
+
+    const result = syncCodexHarnessAdapter({
+      destinationDir: join(SETUP_TEST_HOME, ".codex", "skills", "tfx-harness"),
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.action, "noop");
+  });
+
+  it("user-owned Codex skill은 backup 뒤 명시적으로 skip한다", () => {
+    const sourceDir = join(TMP_DIR, "codex-adapter-source");
+    const destinationDir = join(TMP_DIR, "codex-adapter-destination");
+    mkdirSync(sourceDir, { recursive: true });
+    mkdirSync(destinationDir, { recursive: true });
+    writeFileSync(join(sourceDir, "SKILL.md"), "tracked adapter\n");
+    writeFileSync(join(destinationDir, "SKILL.md"), "user adapter\n");
+
+    const result = syncCodexHarnessAdapter({ sourceDir, destinationDir });
+    assert.equal(result.ok, true);
+    assert.equal(result.action, "skipped");
+    assert.equal(result.reason, "user_owned_codex_skill");
+    assert.equal(
+      readFileSync(join(destinationDir, "SKILL.md"), "utf8"),
+      "user adapter\n",
+    );
+    assert.equal(
+      readFileSync(join(result.backupDir, "SKILL.md"), "utf8"),
+      "user adapter\n",
+    );
+  });
+
+  it("tracked adapter source가 없으면 fail-closed한다", () => {
+    const result = syncCodexHarnessAdapter({
+      sourceDir: join(TMP_DIR, "missing-codex-adapter"),
+      destinationDir: join(TMP_DIR, "unused-codex-adapter"),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.action, "blocked");
+    assert.equal(result.reason, "codex_harness_adapter_source_missing");
   });
 });
 
