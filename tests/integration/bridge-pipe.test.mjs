@@ -108,6 +108,22 @@ describe("bridge.mjs pipe-first", () => {
     assert.equal(result.transport, "http");
   });
 
+  it("generation 없이 실행한 heartbeat CLI는 임시 Hub에서 성공해야 한다", async () => {
+    const agentId = `legacy-heartbeat-${randomUUID().slice(0, 8)}`;
+    const registered = await hub.pipe.executeCommand("register", {
+      agent_id: agentId,
+      cli: "codex",
+      topics: [],
+      capabilities: [],
+      heartbeat_ttl_ms: 60_000,
+    });
+    assert.equal(registered.ok, true);
+
+    const result = await execBridge(["heartbeat", "--agent", agentId]);
+    assert.equal(result.ok, true);
+    assert.equal(result.data.effective.updated, true);
+  });
+
   it("control은 HTTP가 죽어 있어도 pipe로 전달되어야 한다", async () => {
     const agentId = "pipe-control-agent";
     await hub.pipe.executeCommand("register", {

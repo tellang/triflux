@@ -458,12 +458,37 @@ describe("startHub() 라이프사이클", () => {
   });
 
   describe("POST /bridge/heartbeat", () => {
-    it("등록된 agent의 lease를 갱신한다", async () => {
+    it("진짜 레거시 heartbeat는 identity 없이 lease를 갱신한다", async () => {
       const registerRes = await fetch(`${baseUrl}/bridge/register`, {
         method: "POST",
         headers: bridgeHeaders(),
         body: JSON.stringify({
-          agent_id: "hb-agent",
+          agent_id: "hb-legacy-agent",
+          cli: "codex",
+          timeout_sec: 60,
+          topics: [],
+          capabilities: [],
+        }),
+      });
+      assert.equal(registerRes.status, 200);
+
+      const res = await fetch(`${baseUrl}/bridge/heartbeat`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({ agent_id: "hb-legacy-agent" }),
+      });
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.data.effective.updated, true);
+    });
+
+    it("identity-only heartbeat는 lease를 갱신한다", async () => {
+      const registerRes = await fetch(`${baseUrl}/bridge/register`, {
+        method: "POST",
+        headers: bridgeHeaders(),
+        body: JSON.stringify({
+          agent_id: "hb-identity-only-agent",
           cli: "codex",
           timeout_sec: 60,
           topics: [],
@@ -471,11 +496,12 @@ describe("startHub() 라이프사이클", () => {
         }),
       });
       const registered = await registerRes.json();
+
       const res = await fetch(`${baseUrl}/bridge/heartbeat`, {
         method: "POST",
         headers: bridgeHeaders(),
         body: JSON.stringify({
-          agent_id: "hb-agent",
+          agent_id: "hb-identity-only-agent",
           hub_instance_id: registered.data.hub_instance_id,
           store_fingerprint: registered.data.store_fingerprint,
         }),

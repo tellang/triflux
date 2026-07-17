@@ -214,7 +214,7 @@ describe("presence fencing", { skip: SQLITE_SKIP }, () => {
     }
   });
 
-  it("rejects a stale caller after a hub restart", () => {
+  it("full-identity heartbeat rejects a stale caller after a hub restart", () => {
     const store = makeStore();
     const firstHub = createRouter(store);
     try {
