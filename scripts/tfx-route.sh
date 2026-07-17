@@ -1253,51 +1253,39 @@ route_agent() {
     claude-native) CLI_CMD=""; CLI_ARGS="" ;;
   esac
 
-  # ── 에이전트별 상세 설정 ──
+  # ── Codex role policy: Node SSOT의 enum-validated TSV만 shell이 조립한다. ──
+  if [[ "$CLI_TYPE" == "codex" ]]; then
+    local route_dir policy_file policy_row policy_profile policy_timeout policy_mode policy_oversight policy_mcp policy_subcommand
+    route_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    policy_file="$route_dir/lib/agent-route-policy.mjs"
+    if [[ ! -f "$policy_file" && -n "$TFX_PKG_ROOT" ]]; then
+      policy_file="$TFX_PKG_ROOT/scripts/lib/agent-route-policy.mjs"
+    fi
+    if [[ ! -f "$policy_file" ]]; then
+      echo "ERROR: agent route policy 미발견 (경로: $policy_file)" >&2
+      exit 1
+    fi
+    policy_row=$("$NODE_BIN" "$policy_file" --format tsv --agent "$agent") || {
+      echo "ERROR: Codex agent route policy 조회 실패: $agent" >&2
+      exit 1
+    }
+    IFS=$'\t' read -r policy_profile policy_timeout policy_mode policy_oversight policy_mcp policy_subcommand <<< "$policy_row"
+    case "$policy_profile" in gpt56_sol_xhigh|gpt56_terra_high|gpt56_terra_med|gpt56_luna_low) ;; *) echo "ERROR: invalid Codex profile policy" >&2; exit 1 ;; esac
+    [[ "$policy_timeout" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: invalid Codex timeout policy" >&2; exit 1; }
+    case "$policy_mode" in fg|bg) ;; *) echo "ERROR: invalid Codex run mode policy" >&2; exit 1 ;; esac
+    case "$policy_oversight" in true|false) ;; *) echo "ERROR: invalid Codex oversight policy" >&2; exit 1 ;; esac
+    case "$policy_mcp" in implement|analyze|review) ;; *) echo "ERROR: invalid Codex MCP hint policy" >&2; exit 1 ;; esac
+    case "$policy_subcommand" in exec|review) ;; *) echo "ERROR: invalid Codex subcommand policy" >&2; exit 1 ;; esac
+    CLI_ARGS="exec --profile ${policy_profile} ${codex_base}"
+    [[ "$policy_subcommand" == "review" ]] && CLI_ARGS+=" review"
+    CLI_EFFORT="$policy_profile"; DEFAULT_TIMEOUT="$policy_timeout"; RUN_MODE="$policy_mode"; OPUS_OVERSIGHT="$policy_oversight"
+    AGENT_MCP_HINT="$policy_mcp"
+    return
+  fi
+
+  # ── Non-Codex provider settings ──
   case "$agent" in
-    # ─── 구현 레인 ───
-    executor|codex)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
-      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-    build-fixer)
-      # 빌드 수정 — npm/biome/test-lock 등 도메인 지식 필요. base capability 우위로 gpt56_luna_low (fast tier).
-      CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"
-      CLI_EFFORT="gpt56_luna_low"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-    cleanup|deslop)
-      # 슬롭/정리 — 패턴 매칭 위주. GPT-5.6 family mid로 lightweight lane 통일.
-      CLI_ARGS="exec --profile gpt56_terra_med ${codex_base}"
-      CLI_EFFORT="gpt56_terra_med"; DEFAULT_TIMEOUT=540; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-    debugger)
-      # 디버깅 — 깊은 코드 추적 필요, GPT-5.6 family xhigh
-      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"
-      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-
-    # ─── 설계/분석 레인 (GPT-5.6 Sol xhigh) ───
-    deep-executor|architect|critic)
-      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"
-      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
-    planner|analyst)
-      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"
-      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="fg"; OPUS_OVERSIGHT="true" ;;
-
-    # ─── 리뷰 레인 (GPT-5.6 Terra/Sol) ───
-    code-reviewer|quality-reviewer)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
-      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-    security-reviewer)
-      # 보안 = 깊은 사고 → xhigh
-      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base} review"
-      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=1800; RUN_MODE="bg"; OPUS_OVERSIGHT="true" ;;
-
-    # ─── 리서치 레인 ───
-    scientist|document-specialist)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
-      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1440; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-    scientist-deep)
-      CLI_ARGS="exec --profile gpt56_sol_xhigh ${codex_base}"
-      CLI_EFFORT="gpt56_sol_xhigh"; DEFAULT_TIMEOUT=3600; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-
-    # ─── Antigravity CLI 레인 (Gemini CLI 후속) ───
+    # ─── Antigravity CLI lane ───
     # effort 차등: agent 별 GEMINI_PROFILE 을 설정하면 run_antigravity_exec() 가
     # resolve_gemini_profile 로 해석해 `--model "<display name>"`을 agy_args 에
     # 주입한다. 우선순위는 TFX_GEMINI_PROFILE(env) > GEMINI_PROFILE(agent) > flash35.
@@ -1326,27 +1314,9 @@ route_agent() {
     explore|claude)
       CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
 
-    # ─── 검증/테스트 ───
-    verifier)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
-      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-    test-engineer)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
-      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-    qa-tester)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
-      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-
-    # ─── 경량 ───
-    spark)
-      CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"
-      CLI_EFFORT="gpt56_luna_low"; DEFAULT_TIMEOUT=180; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
     # ─── agent-map.json에만 정의된 신규 에이전트 (CLI_TYPE별 기본값) ───
     *)
       case "$CLI_TYPE" in
-        codex)
-          CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
-          CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
         gemini|antigravity)
           CLI_ARGS="--print --dangerously-skip-permissions"
           CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;

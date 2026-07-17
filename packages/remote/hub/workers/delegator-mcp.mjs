@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod";
+import { resolveCodexAgentPolicy } from "@triflux/core/scripts/lib/agent-route-policy.mjs";
 import { resolveBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import { runHeadlessWithCleanup } from "../team/headless.mjs";
 import { buildWorkerSandboxEnv } from "../team/worker-sandbox.mjs";
@@ -33,56 +34,10 @@ const { buildPromptHint, getCodexMcpConfig, SUPPORTED_MCP_PROFILES } =
   await import(pathToFileURL(mcpFilterPath).href);
 const SERVER_INFO = { name: "triflux-delegator", version: "1.0.0" };
 const DEFAULT_CONTEXT_BYTES = 32 * 1024;
-const DEFAULT_ROUTE_TIMEOUT_SEC = 120;
 const DIRECT_PROGRESS_START = 5;
 const DIRECT_PROGRESS_RUNNING = 60;
 const DIRECT_PROGRESS_DONE = 100;
 const SEARCH_ENGINE_CACHE_PATH = [".omc", "state", "search-engines.json"];
-
-const AGENT_TIMEOUT_SEC = Object.freeze({
-  executor: 1080,
-  "build-fixer": 540,
-  debugger: 900,
-  "deep-executor": 3600,
-  architect: 3600,
-  planner: 3600,
-  critic: 3600,
-  analyst: 3600,
-  "code-reviewer": 1800,
-  "security-reviewer": 1800,
-  "quality-reviewer": 1800,
-  scientist: 1440,
-  "scientist-deep": 3600,
-  "document-specialist": 1440,
-  designer: 900,
-  writer: 900,
-  explore: 300,
-  verifier: 1200,
-  "test-engineer": 300,
-  "qa-tester": 300,
-  spark: 180,
-});
-
-const CODEX_PROFILE_BY_AGENT = Object.freeze({
-  executor: "gpt56_terra_high",
-  "build-fixer": "gpt56_luna_low",
-  debugger: "gpt56_sol_xhigh",
-  "deep-executor": "gpt56_sol_xhigh",
-  architect: "gpt56_sol_xhigh",
-  planner: "gpt56_sol_xhigh",
-  critic: "gpt56_sol_xhigh",
-  analyst: "gpt56_sol_xhigh",
-  "code-reviewer": "gpt56_terra_high",
-  "security-reviewer": "gpt56_sol_xhigh",
-  "quality-reviewer": "gpt56_terra_high",
-  scientist: "gpt56_terra_high",
-  "scientist-deep": "gpt56_sol_xhigh",
-  "document-specialist": "gpt56_terra_high",
-  verifier: "gpt56_terra_high",
-  designer: "gpt56_sol_xhigh",
-  writer: "gpt56_luna_low",
-  spark: "gpt56_luna_low",
-});
 
 const REVIEW_INSTRUCTION_BY_AGENT = Object.freeze({
   "code-reviewer":
@@ -137,7 +92,7 @@ function resolveRouteScript(explicitPath, cwd = process.cwd()) {
 }
 
 function resolveCodexProfile(agentType) {
-  return CODEX_PROFILE_BY_AGENT[agentType] || "high";
+  return resolveCodexAgentPolicy(agentType).profile;
 }
 
 function normalizeProvider(provider = "auto") {
@@ -154,8 +109,7 @@ function resolveTimeoutMs(agentType, timeoutMs) {
     return Math.trunc(timeoutMs);
   }
 
-  const timeoutSec = AGENT_TIMEOUT_SEC[agentType] || DEFAULT_ROUTE_TIMEOUT_SEC;
-  return timeoutSec * 1000;
+  return resolveCodexAgentPolicy(agentType).timeoutSec * 1000;
 }
 
 function resolveTimeoutSec(agentType, timeoutMs) {

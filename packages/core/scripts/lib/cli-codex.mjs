@@ -4,169 +4,17 @@
 // 산출한다. 실제 spawn 은 Phase 1 에서 이관된다 (현재는 tfx-route.sh 가 수행).
 //
 // 진입점: tfx-route.mjs → selectAdapter("codex") → plan({...}).
-// 출처: scripts/tfx-route.sh route_agent() L1001-L1079 case 문 미러.
+// 출처: agent-route-policy.mjs 의 canonical Codex role policy.
 // timeoutSec은 lane 예상 소요 시간(advisory)이다. hard ceiling 집행은 Bash route가 소유한다.
 
 export const id = "codex";
 export const cliType = "codex";
 export const command = "codex";
 
-const AGENT_PROFILES = {
-  executor: {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1080,
-    runMode: "fg",
-    opusOversight: false,
-    mcpHint: "implement",
-  },
-  codex: {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1080,
-    runMode: "fg",
-    opusOversight: false,
-    mcpHint: "implement",
-  },
-  "build-fixer": {
-    profile: "gpt56_luna_low",
-    timeoutSec: 540,
-    runMode: "fg",
-    opusOversight: false,
-    mcpHint: "implement",
-  },
-  cleanup: {
-    profile: "gpt56_terra_med",
-    timeoutSec: 540,
-    runMode: "fg",
-    opusOversight: false,
-    mcpHint: "implement",
-  },
-  deslop: {
-    profile: "gpt56_terra_med",
-    timeoutSec: 540,
-    runMode: "fg",
-    opusOversight: false,
-    mcpHint: "implement",
-  },
-  debugger: {
-    profile: "gpt56_sol_xhigh",
-    timeoutSec: 900,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "implement",
-  },
-  "deep-executor": {
-    profile: "gpt56_sol_xhigh",
-    timeoutSec: 3600,
-    runMode: "bg",
-    opusOversight: true,
-    mcpHint: "implement",
-  },
-  architect: {
-    profile: "gpt56_sol_xhigh",
-    timeoutSec: 3600,
-    runMode: "bg",
-    opusOversight: true,
-    mcpHint: "analyze",
-  },
-  critic: {
-    profile: "gpt56_sol_xhigh",
-    timeoutSec: 3600,
-    runMode: "bg",
-    opusOversight: true,
-    mcpHint: "analyze",
-  },
-  planner: {
-    profile: "gpt56_sol_xhigh",
-    timeoutSec: 3600,
-    runMode: "fg",
-    opusOversight: true,
-    mcpHint: "analyze",
-  },
-  analyst: {
-    profile: "gpt56_sol_xhigh",
-    timeoutSec: 3600,
-    runMode: "fg",
-    opusOversight: true,
-    mcpHint: "analyze",
-  },
-  "code-reviewer": {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1800,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "review",
-    subcommand: "review",
-  },
-  "quality-reviewer": {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1800,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "review",
-    subcommand: "review",
-  },
-  "security-reviewer": {
-    profile: "gpt56_sol_xhigh",
-    timeoutSec: 1800,
-    runMode: "bg",
-    opusOversight: true,
-    mcpHint: "review",
-    subcommand: "review",
-  },
-  scientist: {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1440,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "analyze",
-  },
-  "document-specialist": {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1440,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "analyze",
-  },
-  "scientist-deep": {
-    profile: "gpt56_sol_xhigh",
-    timeoutSec: 3600,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "analyze",
-  },
-  verifier: {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1200,
-    runMode: "fg",
-    opusOversight: false,
-    mcpHint: "review",
-    subcommand: "review",
-  },
-  "test-engineer": {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1200,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "implement",
-  },
-  "qa-tester": {
-    profile: "gpt56_terra_high",
-    timeoutSec: 1200,
-    runMode: "bg",
-    opusOversight: false,
-    mcpHint: "review",
-    subcommand: "review",
-  },
-  spark: {
-    profile: "gpt56_luna_low",
-    timeoutSec: 180,
-    runMode: "fg",
-    opusOversight: false,
-    mcpHint: "implement",
-  },
-};
-
-const DEFAULT_PROFILE = AGENT_PROFILES.executor;
+import {
+  CODEX_AGENT_POLICY,
+  resolveCodexAgentPolicy,
+} from "./agent-route-policy.mjs";
 
 export function plan({
   agent,
@@ -178,7 +26,7 @@ export function plan({
   if (!agent) {
     throw new Error("[cli-codex] agent required");
   }
-  const cfg = AGENT_PROFILES[agent] ?? DEFAULT_PROFILE;
+  const cfg = resolveCodexAgentPolicy(agent);
   const effectiveTimeoutSec =
     Number.isFinite(timeoutSec) && timeoutSec > 0 ? timeoutSec : cfg.timeoutSec;
   return {
@@ -196,5 +44,5 @@ export function plan({
 }
 
 export function describe() {
-  return { id, cliType, command, agents: Object.keys(AGENT_PROFILES) };
+  return { id, cliType, command, agents: Object.keys(CODEX_AGENT_POLICY) };
 }
