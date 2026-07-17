@@ -1233,7 +1233,8 @@ export function createRouter(store) {
       const identityFailure = validateCallerIdentity(callerIdentity);
       if (identityFailure) return identityFailure;
       const result = store.refreshLease(agentId, ttlMs, presenceGeneration);
-      if (result?.effective?.updated === false) return result;
+      if (result?.effective?.updated === false)
+        return staleOwnerFailure(agentId, result);
       refreshRoleCandidateForAgent(agentId);
       for (const roleName of ROLE_TOPICS) {
         ensureRoleLeader(roleName, {
@@ -1241,7 +1242,7 @@ export function createRouter(store) {
           transferBacklog: true,
         });
       }
-      return result;
+      return { ok: true, data: result };
     },
 
     subscribeAgent(agentId, topics, { replace = false } = {}) {
@@ -1260,15 +1261,14 @@ export function createRouter(store) {
       return listRuntimeTopics(agentId);
     },
 
-    updateAgentStatus(agentId, status) {
-      const agent = store.getAgent(agentId);
+    updateAgentStatus(agentId, status, presenceGeneration) {
       if (status === "offline") {
         runtimeTopics.delete(agentId);
       }
       const updated = store.updateAgentStatus(
         agentId,
         status,
-        agent?.presence_generation,
+        presenceGeneration,
       );
       refreshRoleCandidateForAgent(agentId);
       for (const roleName of ROLE_TOPICS) {

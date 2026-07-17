@@ -271,17 +271,7 @@ export function createPipeServer({
           payload,
         );
         if (client) touchClient(client);
-        if (result?.effective?.updated === false) {
-          return {
-            ok: false,
-            error: {
-              code: "STALE_PRESENCE_OWNER",
-              message: `stale or unknown presence owner: ${agentId}`,
-            },
-            data: result,
-          };
-        }
-        return { ok: true, data: result };
+        return result;
       }
 
       case "publish": {

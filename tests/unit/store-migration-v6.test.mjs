@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
+import { createRouter } from "../../hub/router.mjs";
 import { createStore } from "../../hub/store.mjs";
 import { loadBetterSqlite3ForTest, SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
@@ -56,12 +57,12 @@ function makeV5Database() {
     "legacy-agent",
     "codex",
     42,
-    '["code"]',
-    '["legacy"]',
+    '["code","cto"]',
+    '["cto"]',
     100,
     200,
     "online",
-    '{"kept":true}',
+    '{"kept":true,"role":"cto"}',
   );
   db.prepare(`
     INSERT INTO messages (
@@ -118,9 +119,9 @@ describe("hub store schema v7 migration", { skip: SQLITE_SKIP }, () => {
       session_id: null,
       host_id: null,
       transport_locators_json: "[]",
-      capabilities: ["code"],
-      topics: ["legacy"],
-      metadata: { kept: true },
+      capabilities: ["code", "cto"],
+      topics: ["cto"],
+      metadata: { kept: true, role: "cto" },
     });
     assert.equal(first.getMessage("legacy-message").payload.kept, true);
     assert.equal(first.getMessage("legacy-message").role_key_wire, null);
@@ -143,5 +144,33 @@ describe("hub store schema v7 migration", { skip: SQLITE_SKIP }, () => {
       0,
     );
     second.close();
+  });
+
+  it("generation=0으로 마이그레이션된 장기 lease CTO는 legacy heartbeat 후 재등록으로 self-heal한다", () => {
+    const store = createStore(makeV5Database());
+    const router = createRouter(store);
+    try {
+      const legacy = store.getAgent("legacy-agent");
+      assert.equal(legacy.presence_generation, 0);
+      assert.equal(legacy.metadata.role, "cto");
+
+      const heartbeat = router.refreshAgentLease("legacy-agent", 7_200_000);
+      assert.equal(heartbeat.ok, true);
+      assert.equal(heartbeat.data.effective.updated, true);
+
+      const renewed = router.registerAgent({
+        agent_id: "legacy-agent",
+        cli: "codex",
+        capabilities: ["code", "cto"],
+        topics: ["cto"],
+        heartbeat_ttl_ms: 7_200_000,
+        metadata: { kept: true, role: "cto" },
+      });
+      assert.equal(renewed.ok, true);
+      assert.equal(renewed.data.presence_generation, 1);
+    } finally {
+      router.stopSweeper();
+      store.close();
+    }
   });
 });

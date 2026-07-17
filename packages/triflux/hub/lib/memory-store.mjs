@@ -197,7 +197,11 @@ export function createMemoryStore() {
 
     refreshLease(agentId, ttlMs = 30000, presenceGeneration) {
       const current = agents.get(agentId);
-      if (!current || current.presence_generation !== presenceGeneration)
+      if (
+        !current ||
+        (presenceGeneration != null &&
+          current.presence_generation !== presenceGeneration)
+      )
         return {
           agent_id: agentId,
           lease_expires_ms: Date.now() + ttlMs,
@@ -257,23 +261,28 @@ export function createMemoryStore() {
 
     sweepStaleAgents() {
       const now = Date.now();
+      const candidates = Array.from(agents.values(), (agent) => ({
+        agent_id: agent.agent_id,
+        presence_generation: agent.presence_generation,
+      }));
       let stale = 0;
       let offline = 0;
-      for (const agent of agents.values()) {
-        const observedGeneration = agent.presence_generation;
+      for (const candidate of candidates) {
+        const agent = agents.get(candidate.agent_id);
+        if (
+          !agent ||
+          agent.presence_generation !== candidate.presence_generation
+        )
+          continue;
         if (agent.status === "online" && agent.lease_expires_ms < now) {
-          if (agent.presence_generation === observedGeneration) {
-            agent.status = "stale";
-            stale += 1;
-          }
+          agent.status = "stale";
+          stale += 1;
         } else if (
           agent.status === "stale" &&
           agent.lease_expires_ms < now - 300000
         ) {
-          if (agent.presence_generation === observedGeneration) {
-            agent.status = "offline";
-            offline += 1;
-          }
+          agent.status = "offline";
+          offline += 1;
         }
       }
       return { stale, offline };
@@ -281,7 +290,11 @@ export function createMemoryStore() {
 
     updateAgentStatus(agentId, status, presenceGeneration) {
       const current = agents.get(agentId);
-      if (!current || current.presence_generation !== presenceGeneration)
+      if (
+        !current ||
+        (presenceGeneration != null &&
+          current.presence_generation !== presenceGeneration)
+      )
         return false;
       current.status = status;
       return true;

@@ -476,7 +476,6 @@ describe("startHub() 라이프사이클", () => {
         headers: bridgeHeaders(),
         body: JSON.stringify({
           agent_id: "hb-agent",
-          presence_generation: registered.data.presence_generation,
           hub_instance_id: registered.data.hub_instance_id,
           store_fingerprint: registered.data.store_fingerprint,
         }),

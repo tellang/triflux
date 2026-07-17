@@ -7,7 +7,10 @@ import { afterEach, describe, it, mock } from "node:test";
 
 import { createRouter } from "../../hub/router.mjs";
 import { createStore } from "../../hub/store.mjs";
-import { createStoreAdapter } from "../../hub/store-adapter.mjs";
+import {
+  createMemoryStore,
+  createStoreAdapter,
+} from "../../hub/store-adapter.mjs";
 import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 const tempDirs = [];
@@ -80,7 +83,9 @@ describe("presence fencing", { skip: SQLITE_SKIP }, () => {
       const store = makeStore();
       const router = createRouter(store);
       try {
-        const first = router.registerAgent(registration("fenced-agent", 60_000)).data;
+        const first = router.registerAgent(
+          registration("fenced-agent", 60_000),
+        ).data;
         now += 60_001;
         let second = null;
 
@@ -93,7 +98,7 @@ describe("presence fencing", { skip: SQLITE_SKIP }, () => {
                 "fenced-agent",
                 60_000,
                 first.presence_generation,
-              ).effective.updated,
+              ).data.effective.updated,
               second === null,
             );
           } else if (operation === "deregisterA") {
@@ -119,6 +124,93 @@ describe("presence fencing", { skip: SQLITE_SKIP }, () => {
         store.close();
         mock.restoreAll();
       }
+    }
+  });
+
+  it("generation 없는 legacy heartbeat와 status 전이는 통과하고, 제공 시에는 fencing한다", () => {
+    const store = makeStore();
+    const router = createRouter(store);
+    try {
+      const first = router.registerAgent(registration()).data;
+      assert.equal(router.refreshAgentLease("fenced-agent", 60_000).ok, true);
+      assert.equal(router.updateAgentStatus("fenced-agent", "offline"), true);
+
+      const second = router.registerAgent(registration()).data;
+      const stale = router.refreshAgentLease(
+        "fenced-agent",
+        60_000,
+        first.presence_generation,
+      );
+      assert.equal(stale.ok, false);
+      assert.equal(stale.error.code, "STALE_PRESENCE_OWNER");
+      assert.equal(
+        router.updateAgentStatus(
+          "fenced-agent",
+          "offline",
+          first.presence_generation,
+        ),
+        false,
+      );
+      assert.equal(
+        store.getAgent("fenced-agent").presence_generation,
+        second.presence_generation,
+      );
+      assert.equal(store.getAgent("fenced-agent").status, "online");
+    } finally {
+      router.stopSweeper();
+      store.close();
+    }
+  });
+
+  it("SQLite와 memory store는 opt-in fencing 및 stale sweep 결과가 같다", () => {
+    let now = 1_000;
+    mock.method(Date, "now", () => now);
+    const summarize = (store) => {
+      const first = store.registerAgent(registration("equivalent-agent", 100));
+      const legacyHeartbeat = store.refreshLease("equivalent-agent", 100);
+      const second = store.registerAgent(registration("equivalent-agent", 100));
+      const staleHeartbeat = store.refreshLease(
+        "equivalent-agent",
+        100,
+        first.presence_generation,
+      );
+      const legacyStatus = store.updateAgentStatus(
+        "equivalent-agent",
+        "offline",
+      );
+      const fencedStatus = store.updateAgentStatus(
+        "equivalent-agent",
+        "offline",
+        first.presence_generation,
+      );
+
+      store.registerAgent(registration("sweep-agent", 100));
+      now += 101;
+      const stale = store.sweepStaleAgents();
+      now += 300_001;
+      const offline = store.sweepStaleAgents();
+      return {
+        firstGeneration: first.presence_generation,
+        secondGeneration: second.presence_generation,
+        legacyHeartbeat: legacyHeartbeat.effective.updated,
+        staleHeartbeat: staleHeartbeat.effective.updated,
+        legacyStatus,
+        fencedStatus,
+        stale,
+        offline,
+      };
+    };
+
+    const sqlite = makeStore();
+    const memory = createMemoryStore();
+    try {
+      const sqliteResult = summarize(sqlite);
+      now = 1_000;
+      const memoryResult = summarize(memory);
+      assert.deepEqual(memoryResult, sqliteResult);
+    } finally {
+      sqlite.close();
+      memory.close();
     }
   });
 

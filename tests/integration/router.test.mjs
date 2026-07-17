@@ -269,7 +269,11 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
         });
         assert.equal(registered.ok, true);
 
-        isolated.router.updateAgentStatus("claude-callbot-main", "offline");
+        isolated.router.updateAgentStatus(
+          "claude-callbot-main",
+          "offline",
+          registered.data.presence_generation,
+        );
         registered = isolated.router.registerAgent({
           agent_id: "fallback-cto",
           cli: "claude",
@@ -435,7 +439,7 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
     it("이전 leader가 먼저 offline 된 뒤 나중에 새 후보가 등록되어도 backlog를 이전해야 한다", () => {
       const isolated = createIsolatedRouter();
       try {
-        isolated.router.registerAgent({
+        const oldLeader = isolated.router.registerAgent({
           agent_id: "cto-gap-old",
           cli: "claude",
           capabilities: ["cto"],
@@ -454,7 +458,11 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
           1,
         );
 
-        isolated.router.updateAgentStatus("cto-gap-old", "offline");
+        isolated.router.updateAgentStatus(
+          "cto-gap-old",
+          "offline",
+          oldLeader.data.presence_generation,
+        );
         const gapStatus = isolated.router.getStatus("hub");
         assert.equal(gapStatus.data.roles.cto.leader_agent_id, null);
         assert.equal(
@@ -495,7 +503,7 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
     it("leader가 offline 되면 새 CTO 후보로 승계하고 미처리 CTO 메시지를 이전해야 한다", () => {
       const isolated = createIsolatedRouter();
       try {
-        isolated.router.registerAgent({
+        const oldLeader = isolated.router.registerAgent({
           agent_id: "cto-old-leader",
           cli: "claude",
           capabilities: ["code"],
@@ -545,7 +553,11 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
           4,
         );
 
-        isolated.router.updateAgentStatus("cto-old-leader", "offline");
+        isolated.router.updateAgentStatus(
+          "cto-old-leader",
+          "offline",
+          oldLeader.data.presence_generation,
+        );
         const status = isolated.router.getStatus("hub");
         assert.equal(status.data.roles.cto.leader_agent_id, "cto-new-leader");
         assert.equal(
@@ -830,7 +842,7 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
     it("leader 장애 시 2개 이상 CTO backlog를 새 heir에게 모두 이전해야 한다", () => {
       const isolated = createIsolatedRouter();
       try {
-        isolated.router.registerAgent({
+        const firstLeader = isolated.router.registerAgent({
           agent_id: "A",
           cli: "claude",
           capabilities: ["cto"],
@@ -858,7 +870,11 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
 
         assert.equal(isolated.router.getPendingMessages("A").length, 3);
 
-        isolated.router.updateAgentStatus("A", "offline");
+        isolated.router.updateAgentStatus(
+          "A",
+          "offline",
+          firstLeader.data.presence_generation,
+        );
         const status = isolated.router.getStatus("hub");
         assert.equal(status.data.roles.cto.leader_agent_id, "B");
         assert.equal(status.data.roles.cto.pending_count, 3);

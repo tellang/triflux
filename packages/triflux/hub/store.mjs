@@ -233,8 +233,14 @@ export function createStore(dbPath, options = {}) {
     heartbeat: db.prepare(
       "UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=? AND presence_generation=?",
     ),
+    heartbeatWithoutGeneration: db.prepare(
+      "UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=?",
+    ),
     setAgentStatus: db.prepare(
       "UPDATE agents SET status=? WHERE agent_id=? AND presence_generation=?",
+    ),
+    setAgentStatusWithoutGeneration: db.prepare(
+      "UPDATE agents SET status=? WHERE agent_id=?",
     ),
     onlineAgents: db.prepare("SELECT * FROM agents WHERE status != 'offline'"),
     allAgents: db.prepare("SELECT * FROM agents"),
@@ -785,12 +791,10 @@ export function createStore(dbPath, options = {}) {
 
     refreshLease(agentId, ttlMs = 30000, presenceGeneration) {
       const now = Date.now();
-      const write = S.heartbeat.run(
-        now,
-        now + ttlMs,
-        agentId,
-        presenceGeneration,
-      );
+      const write =
+        presenceGeneration == null
+          ? S.heartbeatWithoutGeneration.run(now, now + ttlMs, agentId)
+          : S.heartbeat.run(now, now + ttlMs, agentId, presenceGeneration);
       return {
         agent_id: agentId,
         lease_expires_ms: now + ttlMs,
@@ -854,7 +858,10 @@ export function createStore(dbPath, options = {}) {
 
     updateAgentStatus(agentId, status, presenceGeneration) {
       return (
-        S.setAgentStatus.run(status, agentId, presenceGeneration).changes > 0
+        (presenceGeneration == null
+          ? S.setAgentStatusWithoutGeneration.run(status, agentId)
+          : S.setAgentStatus.run(status, agentId, presenceGeneration)
+        ).changes > 0
       );
     },
 
