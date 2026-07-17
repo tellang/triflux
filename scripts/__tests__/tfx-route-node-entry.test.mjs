@@ -262,6 +262,42 @@ describe("cli-codex.mjs — 핵심 매핑", () => {
     assert.equal(p.mcpProfile, "analyze");
   });
 
+  test("explicit max override selects the canonical Sol max profile", () => {
+    const p = codexAdapter.plan({
+      agent: "architect",
+      prompt: "x",
+      mcpProfile: "auto",
+      profileOverride: "max",
+    });
+    assert.equal(p.profile, "gpt56_sol_max");
+    assert.equal(p.effort, "gpt56_sol_max");
+  });
+
+  test("ultra is limited to top-level deep execution and research", () => {
+    const topLevel = codexAdapter.plan({
+      agent: "deep-executor",
+      prompt: "x",
+      profileOverride: "ultra",
+      nested: false,
+    });
+    const nested = codexAdapter.plan({
+      agent: "deep-executor",
+      prompt: "x",
+      profileOverride: "ultra",
+      nested: true,
+    });
+    const ineligible = codexAdapter.plan({
+      agent: "architect",
+      prompt: "x",
+      profileOverride: "ultra",
+      nested: false,
+    });
+
+    assert.equal(topLevel.profile, "gpt56_sol_ultra");
+    assert.equal(nested.profile, "gpt56_sol_max");
+    assert.equal(ineligible.profile, "gpt56_sol_max");
+  });
+
   test("security-reviewer → review 서브커맨드 + opus oversight", () => {
     const p = codexAdapter.plan({
       agent: "security-reviewer",

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -300,6 +301,106 @@ describe("headless: buildHeadlessCommand", async () => {
     assert.ok(cmd.includes("codex exec"), `codex exec가 포함되어야 함: ${cmd}`);
     assert.ok(cmd.includes("--color never"));
     assert.ok(cmd.includes("/tmp/result.txt"));
+    assert.ok(
+      /model_reasoning_effort=\\?"high\\?"/u.test(cmd),
+      `headless Codex가 전역 ultra를 상속하지 않고 역할 프로필을 써야 함: ${cmd}`,
+    );
+    assert.ok(!/model_reasoning_effort=\\?"ultra\\?"/u.test(cmd));
+  });
+
+  it("headless architect → gpt56_sol_xhigh 역할 프로필", () => {
+    const cmd = buildHeadlessCommand(
+      "codex",
+      "architecture",
+      "/tmp/result.txt",
+      { role: "architect" },
+    );
+    assert.ok(
+      /model_reasoning_effort=\\?"xhigh\\?"/u.test(cmd),
+      `architect profile 누락: ${cmd}`,
+    );
+  });
+
+  it("headless preserves an explicit profile but downgrades nested ultra", () => {
+    const explicitMax = buildHeadlessCommand(
+      "codex",
+      "hard task",
+      "/tmp/result.txt",
+      { role: "executor", profile: "gpt56_sol_max" },
+    );
+    const nestedUltra = buildHeadlessCommand(
+      "codex",
+      "fan out",
+      "/tmp/result.txt",
+      { role: "deep-executor", profile: "gpt56_sol_ultra" },
+    );
+
+    assert.ok(/model_reasoning_effort=\\?"max\\?"/u.test(explicitMax));
+    assert.ok(/model_reasoning_effort=\\?"max\\?"/u.test(nestedUltra));
+    assert.ok(!/model_reasoning_effort=\\?"ultra\\?"/u.test(nestedUltra));
+  });
+
+  it("headless applies TFX_CODEX_PROFILE but never inherits auto/global ultra", () => {
+    const previous = process.env.TFX_CODEX_PROFILE;
+    try {
+      process.env.TFX_CODEX_PROFILE = "max";
+      const explicitMax = buildHeadlessCommand(
+        "codex",
+        "hard task",
+        "/tmp/result.txt",
+        { role: "executor" },
+      );
+      process.env.TFX_CODEX_PROFILE = "auto";
+      const automatic = buildHeadlessCommand(
+        "codex",
+        "worker task",
+        "/tmp/result.txt",
+        { role: "executor" },
+      );
+
+      assert.ok(/model_reasoning_effort=\\?"max\\?"/u.test(explicitMax));
+      assert.ok(/model_reasoning_effort=\\?"high\\?"/u.test(automatic));
+      assert.ok(!/model_reasoning_effort=\\?"ultra\\?"/u.test(automatic));
+    } finally {
+      if (previous === undefined) delete process.env.TFX_CODEX_PROFILE;
+      else process.env.TFX_CODEX_PROFILE = previous;
+    }
+  });
+
+  it("headless resolves custom profile effort before applying the nested guard", () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "tfx-headless-profile-"));
+    const previous = process.env.CODEX_HOME;
+    try {
+      process.env.CODEX_HOME = codexHome;
+      writeFileSync(
+        join(codexHome, "private.config.toml"),
+        'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+      );
+      writeFileSync(
+        join(codexHome, "gpt56_sol_max.config.toml"),
+        'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+      );
+      const customUltra = buildHeadlessCommand(
+        "codex",
+        "nested custom task",
+        "/tmp/result.txt",
+        { role: "deep-executor", profile: "private" },
+      );
+      const missingCustom = buildHeadlessCommand(
+        "codex",
+        "nested missing profile",
+        "/tmp/result.txt",
+        { role: "executor", profile: "missing-private" },
+      );
+
+      assert.ok(/model_reasoning_effort=\\?"max\\?"/u.test(customUltra));
+      assert.ok(!/model_reasoning_effort=\\?"ultra\\?"/u.test(customUltra));
+      assert.ok(/model_reasoning_effort=\\?"high\\?"/u.test(missingCustom));
+    } finally {
+      if (previous === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previous;
+      rmSync(codexHome, { recursive: true, force: true });
+    }
   });
 
   it("gemini → tfx-route.sh antigravity 경로로 위임한다", () => {

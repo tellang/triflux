@@ -41,13 +41,13 @@ export const MODES = Object.freeze({
 const ESCALATION_CHAIN_CONFIG_PATH = ".triflux/config/escalation-chain.json";
 
 // Escalation chain (2026-05-27 정책):
-//   1. codex gpt-5.6-sol — 기존 최상위 Codex escalation 단계
+//   1. codex gpt-5.6-sol max — 최난도 단일 작업용 Codex escalation 단계
 //   2. claude opus-4-8 — 최종 수단
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
   Object.freeze({
     cli: "codex",
     model: "gpt-5.6-sol",
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt56_sol_max",
   }),
   Object.freeze({ cli: "claude", model: "opus-4-8" }),
 ]);
@@ -295,7 +295,12 @@ function normalizeEscalationChainEntry(entry, index, source) {
     model: entry.model,
   };
   if (typeof entry.profile === "string" && entry.profile.trim() !== "") {
-    normalized.profile = entry.profile;
+    const profile = entry.profile.trim();
+    normalized.profile =
+      entry.cli === "codex" &&
+      (profile === "ultra" || profile === "gpt56_sol_ultra")
+        ? "gpt56_sol_max"
+        : profile;
   }
   return normalized;
 }

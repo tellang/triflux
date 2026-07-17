@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -341,6 +344,88 @@ test("buildSpawnSpecForMode: codex headless default uses stdinPrompt (prompt out
       prompt,
       "prompt must not appear in args when stdinPrompt=true",
     );
+  }
+});
+
+test("buildSpawnSpecForMode: nested Codex gets an explicit role profile", () => {
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "codex",
+    prompt: "ACK",
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/codex",
+    env: {},
+  });
+
+  assert.ok(spec.args.includes('model_reasoning_effort="high"'));
+  assert.ok(!spec.args.includes('model_reasoning_effort="ultra"'));
+});
+
+test("buildSpawnSpecForMode: nested Codex downgrades env ultra to max", () => {
+  const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "codex",
+    prompt: "ACK",
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/codex",
+    env: { TFX_CODEX_PROFILE: "ultra" },
+  });
+
+  assert.ok(spec.args.includes('model_reasoning_effort="max"'));
+  assert.ok(!spec.args.includes('model_reasoning_effort="ultra"'));
+});
+
+test("buildSpawnSpecForMode: empty session env still inherits and guards process ultra", () => {
+  const previous = process.env.TFX_CODEX_PROFILE;
+  try {
+    process.env.TFX_CODEX_PROFILE = "ultra";
+    const spec = buildSpawnSpecForMode(MODES.HEADLESS, {
+      cli: "codex",
+      prompt: "ACK",
+      platform: "linux",
+      resolveCommand: () => "/usr/local/bin/codex",
+      env: {},
+    });
+
+    assert.ok(spec.args.includes('model_reasoning_effort="max"'));
+    assert.ok(!spec.args.includes('model_reasoning_effort="ultra"'));
+  } finally {
+    if (previous === undefined) delete process.env.TFX_CODEX_PROFILE;
+    else process.env.TFX_CODEX_PROFILE = previous;
+  }
+});
+
+test("buildSpawnSpecForMode: custom nested profiles cannot hide ultra or inherit globals", () => {
+  const codexHome = mkdtempSync(join(tmpdir(), "tfx-nested-profile-"));
+  try {
+    writeFileSync(
+      join(codexHome, "private.config.toml"),
+      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+    );
+    writeFileSync(
+      join(codexHome, "gpt56_sol_max.config.toml"),
+      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+    );
+    const customUltra = buildSpawnSpecForMode(MODES.HEADLESS, {
+      cli: "codex",
+      prompt: "ACK",
+      profile: "private",
+      platform: "linux",
+      resolveCommand: () => "/usr/local/bin/codex",
+      env: { CODEX_HOME: codexHome },
+    });
+    const missingCustom = buildSpawnSpecForMode(MODES.HEADLESS, {
+      cli: "codex",
+      prompt: "ACK",
+      profile: "missing-private",
+      platform: "linux",
+      resolveCommand: () => "/usr/local/bin/codex",
+      env: { CODEX_HOME: codexHome },
+    });
+
+    assert.ok(customUltra.args.includes('model_reasoning_effort="max"'));
+    assert.ok(!customUltra.args.includes('model_reasoning_effort="ultra"'));
+    assert.ok(missingCustom.args.includes('model_reasoning_effort="high"'));
+  } finally {
+    rmSync(codexHome, { recursive: true, force: true });
   }
 });
 

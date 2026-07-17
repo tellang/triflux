@@ -74,7 +74,15 @@ const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 const WINDOWS_HUB_AUTOSTART_TASK = "TrifluxHubEnsure";
 
 const REQUIRED_CODEX_PROFILES = [
-  // GPT-5.6 family — 기존 xhigh/high/med/low 의미를 모델별 lane으로 유지.
+  // GPT-5.6 family — max/ultra are explicit exception lanes, not role defaults.
+  {
+    name: "gpt56_sol_ultra",
+    lines: ['model = "gpt-5.6-sol"', 'model_reasoning_effort = "ultra"'],
+  },
+  {
+    name: "gpt56_sol_max",
+    lines: ['model = "gpt-5.6-sol"', 'model_reasoning_effort = "max"'],
+  },
   {
     name: "gpt56_sol_xhigh",
     lines: ['model = "gpt-5.6-sol"', 'model_reasoning_effort = "xhigh"'],

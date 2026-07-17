@@ -59,7 +59,12 @@ function writeRetrySnapshot(file, profile) {
   );
 }
 
-function runRoute({ snapshot } = {}) {
+function runRoute({
+  snapshot,
+  agent = "executor",
+  env: envOverrides = {},
+  profileFiles = {},
+} = {}) {
   const dir = makeTempDir();
   const binDir = path.join(dir, "bin");
   const home = path.join(dir, "home");
@@ -70,7 +75,11 @@ function runRoute({ snapshot } = {}) {
 
   mkdirSync(binDir, { recursive: true });
   mkdirSync(home, { recursive: true });
+  mkdirSync(path.join(home, ".codex"), { recursive: true });
   mkdirSync(tfxTmp, { recursive: true });
+  for (const [name, content] of Object.entries(profileFiles)) {
+    writeFileSync(path.join(home, ".codex", `${name}.config.toml`), content);
+  }
   writeFileSync(path.join(dir, ".keep"), "");
   writeExecutable(
     fakeCodex,
@@ -107,10 +116,15 @@ echo "fake codex ok"
     TFX_HEARTBEAT: "0",
     TFX_PREFLIGHT_LOADED: "1",
     TFX_TMP: tfxTmp,
+    TFX_CODEX_PROFILE: "auto",
+    TFX_TEAM_NAME: "",
+    TFX_WORKER_INDEX: "",
+    TFX_WORKER_SANDBOX_SCOPE: "",
+    ...envOverrides,
   };
   if (snapshot) env.TFX_RETRY_SNAPSHOT = snapshot;
 
-  const result = spawnSync("bash", [ROUTE, "executor", "hello"], {
+  const result = spawnSync("bash", [ROUTE, agent, "hello"], {
     cwd: REPO_ROOT,
     env,
     encoding: "utf8",
@@ -132,6 +146,16 @@ function profileValues(args) {
   return values;
 }
 
+function configValues(args, key) {
+  const values = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] !== "-c") continue;
+    const value = args[i + 1] || "";
+    if (value.startsWith(`${key}=`)) values.push(value.slice(key.length + 1));
+  }
+  return values;
+}
+
 describe("tfx-route retry snapshot profile plumbing", () => {
   it("does not change codex argv when no retry snapshot is provided", () => {
     const args = runRoute();
@@ -147,5 +171,116 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     const args = runRoute({ snapshot });
 
     assert.deepEqual(profileValues(args), ["gpt56_sol_xhigh"]);
+  });
+
+  it("applies an explicit max profile override", () => {
+    const args = runRoute({ env: { TFX_CODEX_PROFILE: "max" } });
+
+    assert.deepEqual(profileValues(args), ["gpt56_sol_max"]);
+  });
+
+  it("allows ultra only for a top-level deep-executor", () => {
+    const args = runRoute({
+      agent: "deep-executor",
+      env: { TFX_CODEX_PROFILE: "ultra" },
+    });
+
+    assert.deepEqual(profileValues(args), ["gpt56_sol_ultra"]);
+  });
+
+  it("downgrades nested ultra to max", () => {
+    const args = runRoute({
+      agent: "deep-executor",
+      env: { TFX_CODEX_PROFILE: "ultra", TFX_TEAM_NAME: "nested-team" },
+    });
+
+    assert.deepEqual(profileValues(args), ["gpt56_sol_max"]);
+  });
+
+  it("retry snapshot remains authoritative over the explicit profile override", () => {
+    const dir = makeTempDir();
+    const snapshot = path.join(dir, "retry-snapshot.json");
+    writeRetrySnapshot(snapshot, "gpt56_sol_max");
+
+    const args = runRoute({
+      snapshot,
+      agent: "deep-executor",
+      env: { TFX_CODEX_PROFILE: "ultra" },
+    });
+
+    assert.deepEqual(profileValues(args), ["gpt56_sol_max"]);
+  });
+
+  it("retry snapshot cannot reintroduce ultra inside a nested runtime", () => {
+    const dir = makeTempDir();
+    const snapshot = path.join(dir, "retry-snapshot.json");
+    writeRetrySnapshot(snapshot, "gpt56_sol_ultra");
+
+    const args = runRoute({
+      snapshot,
+      agent: "deep-executor",
+      env: { TFX_TEAM_NAME: "nested-team" },
+    });
+
+    assert.deepEqual(profileValues(args), ["gpt56_sol_max"]);
+  });
+
+  it("custom retry profiles cannot hide ultra or fall through to global config", () => {
+    const dir = makeTempDir();
+    const customSnapshot = path.join(dir, "custom-retry-snapshot.json");
+    const missingSnapshot = path.join(dir, "missing-retry-snapshot.json");
+    writeRetrySnapshot(customSnapshot, "private");
+    writeRetrySnapshot(missingSnapshot, "missing-private");
+
+    const customUltra = runRoute({
+      snapshot: customSnapshot,
+      agent: "deep-executor",
+      profileFiles: {
+        private: 'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+      },
+    });
+    const missingCustom = runRoute({
+      snapshot: missingSnapshot,
+      agent: "deep-executor",
+    });
+
+    assert.deepEqual(profileValues(customUltra), ["gpt56_sol_max"]);
+    assert.deepEqual(profileValues(missingCustom), ["gpt56_terra_high"]);
+  });
+
+  it("final shell argv enforces concrete max/ultra semantics over mutable profile files", () => {
+    const mutatedMax =
+      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n';
+    const mutatedUltra =
+      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "max"\n';
+    const mutatedDefault =
+      'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "ultra"\n';
+
+    const explicitMax = runRoute({
+      env: { TFX_CODEX_PROFILE: "max" },
+      profileFiles: { gpt56_sol_max: mutatedMax },
+    });
+    const explicitUltra = runRoute({
+      agent: "deep-executor",
+      env: { TFX_CODEX_PROFILE: "ultra" },
+      profileFiles: { gpt56_sol_ultra: mutatedUltra },
+    });
+    const nestedDefault = runRoute({
+      env: { TFX_TEAM_NAME: "nested-team" },
+      profileFiles: { gpt56_terra_high: mutatedDefault },
+    });
+
+    assert.equal(
+      configValues(explicitMax, "model_reasoning_effort").at(-1),
+      '"max"',
+    );
+    assert.equal(
+      configValues(explicitUltra, "model_reasoning_effort").at(-1),
+      '"ultra"',
+    );
+    assert.equal(
+      configValues(nestedDefault, "model_reasoning_effort").at(-1),
+      '"max"',
+    );
   });
 });

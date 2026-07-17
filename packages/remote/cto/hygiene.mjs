@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { getCtoHygieneApplyMode } from "@triflux/core/hub/lib/cto-env.mjs";
+import { getCtoHygieneApplyMode } from "../hub/lib/cto-env.mjs";
 import { appendCtoEvent } from "./events.mjs";
 import { applyHygieneArchiveActions } from "./hygiene-actions.mjs";
 import { resolveLakeRootDir } from "./lake-root.mjs";

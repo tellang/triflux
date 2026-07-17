@@ -50,7 +50,9 @@ const EFFORT_LEVELS = [
   { label: "low", hint: "빠른 응답, 최소 추론" },
   { label: "medium", hint: "균형 잡힌 추론" },
   { label: "high", hint: "깊은 추론" },
-  { label: "xhigh", hint: "최대 추론 (느림)" },
+  { label: "xhigh", hint: "고강도 추론" },
+  { label: "max", hint: "최난도 단일 작업" },
+  { label: "ultra", hint: "최대 추론 + 자동 위임 (최상위 전용)" },
 ];
 
 // ── TOML Parsing ──
@@ -186,7 +188,14 @@ function showStatus(config) {
 
 function effortColor(effort) {
   if (!effort) return `${DIM}inherit${RESET}`;
-  const colors = { low: GREEN, medium: CYAN, high: YELLOW, xhigh: RED };
+  const colors = {
+    low: GREEN,
+    medium: CYAN,
+    high: YELLOW,
+    xhigh: RED,
+    max: RED,
+    ultra: RED,
+  };
   return `${colors[effort] || ""}${effort}${RESET}`;
 }
 

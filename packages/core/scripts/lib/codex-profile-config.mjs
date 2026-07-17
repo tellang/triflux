@@ -9,12 +9,23 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 const EFFORT_BY_SUFFIX = {
+  ultra: "ultra",
+  max: "max",
   xhigh: "xhigh",
   high: "high",
   med: "medium",
   medium: "medium",
   low: "low",
 };
+
+const CANONICAL_PROFILE_VALUES = Object.freeze({
+  gpt56_luna_low: { model: "gpt-5.6-luna", effort: "low" },
+  gpt56_terra_med: { model: "gpt-5.6-terra", effort: "medium" },
+  gpt56_terra_high: { model: "gpt-5.6-terra", effort: "high" },
+  gpt56_sol_xhigh: { model: "gpt-5.6-sol", effort: "xhigh" },
+  gpt56_sol_max: { model: "gpt-5.6-sol", effort: "max" },
+  gpt56_sol_ultra: { model: "gpt-5.6-sol", effort: "ultra" },
+});
 
 function readProfileScalar(raw, key) {
   const match = String(raw).match(
@@ -49,8 +60,10 @@ function readProfileScalar(raw, key) {
  * @param {{ codexHome?: string }} [opts]
  * @returns {string[]} e.g. ['model="gpt-5.6-terra"', 'model_reasoning_effort="high"']
  */
-export function codexProfileConfigOverrides(profileName, opts = {}) {
-  if (typeof profileName !== "string" || !profileName) return [];
+export function resolveCodexProfileConfigValues(profileName, opts = {}) {
+  if (typeof profileName !== "string" || !profileName) {
+    return { model: null, effort: null };
+  }
   const codexHome =
     opts.codexHome || process.env.CODEX_HOME || join(homedir(), ".codex");
   let model = null;
@@ -63,8 +76,21 @@ export function codexProfileConfigOverrides(profileName, opts = {}) {
     model = readProfileScalar(raw, "model");
     effort = readProfileScalar(raw, "model_reasoning_effort");
   } catch {
-    const suffix = /_(xhigh|high|med|medium|low)$/.exec(profileName);
+    const suffix = /_(ultra|max|xhigh|high|med|medium|low)$/.exec(profileName);
     if (suffix) effort = EFFORT_BY_SUFFIX[suffix[1]] || null;
+  }
+  return { model, effort };
+}
+
+export function codexProfileConfigOverrides(profileName, opts = {}) {
+  let { model, effort } = resolveCodexProfileConfigValues(profileName, opts);
+  if (opts.enforceCanonicalProfile === true) {
+    const canonical = CANONICAL_PROFILE_VALUES[profileName];
+    if (canonical) ({ model, effort } = canonical);
+  }
+  if (opts.disallowUltra === true && effort?.toLowerCase() === "ultra") {
+    model = "gpt-5.6-sol";
+    effort = "max";
   }
   const overrides = [];
   if (model) overrides.push(`model="${model}"`);

@@ -186,6 +186,8 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.ok(codexProfiles, "codex-profiles action missing");
     assert.equal(codexProfiles.change, "update");
     assert.deepEqual(codexProfiles.profiles, [
+      "gpt56_sol_ultra",
+      "gpt56_sol_max",
       "gpt56_sol_xhigh",
       "gpt56_terra_high",
       "gpt56_terra_med",
@@ -421,6 +423,14 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.equal(
       readFileSync(join(codexDir, "gpt56_sol_xhigh.config.toml"), "utf8"),
       'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "xhigh"\n',
+    );
+    assert.equal(
+      readFileSync(join(codexDir, "gpt56_sol_max.config.toml"), "utf8"),
+      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "max"\n',
+    );
+    assert.equal(
+      readFileSync(join(codexDir, "gpt56_sol_ultra.config.toml"), "utf8"),
+      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
     );
     assert.equal(
       readFileSync(join(codexDir, "gpt56_luna_low.config.toml"), "utf8"),

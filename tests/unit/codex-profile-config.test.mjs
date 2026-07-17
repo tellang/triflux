@@ -159,6 +159,33 @@ describe("codexProfileConfigOverrides", () => {
     );
   });
 
+  it("derives max and ultra from canonical profile suffixes", () => {
+    const codexHome = makeHome();
+    assert.deepEqual(
+      codexProfileConfigOverrides("gpt56_sol_max", { codexHome }),
+      ['model_reasoning_effort="max"'],
+    );
+    assert.deepEqual(
+      codexProfileConfigOverrides("gpt56_sol_ultra", { codexHome }),
+      ['model_reasoning_effort="ultra"'],
+    );
+  });
+
+  it("can enforce canonical values for nested role profiles", () => {
+    const codexHome = makeHome();
+    writeFileSync(
+      join(codexHome, "gpt56_sol_xhigh.config.toml"),
+      'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"\n',
+    );
+    assert.deepEqual(
+      codexProfileConfigOverrides("gpt56_sol_xhigh", {
+        codexHome,
+        enforceCanonicalProfile: true,
+      }),
+      ['model="gpt-5.6-sol"', 'model_reasoning_effort="xhigh"'],
+    );
+  });
+
   it("returns [] for an unknown profile with no file and no effort suffix", () => {
     const codexHome = makeHome();
     assert.deepEqual(codexProfileConfigOverrides("auto", { codexHome }), []);

@@ -6,6 +6,8 @@ import {
   CODEX_AGENT_POLICY,
   DEFAULT_CODEX_AGENT,
   resolveCodexAgentPolicy,
+  resolveCodexAgentProfile,
+  resolveNestedCodexAgentProfile,
 } from "../../scripts/lib/agent-route-policy.mjs";
 import {
   compileRules,
@@ -32,6 +34,53 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
   it("preserves direct-Codex designer and writer overrides in the policy", () => {
     assert.equal(CODEX_AGENT_POLICY.designer.profile, "gpt56_sol_xhigh");
     assert.equal(CODEX_AGENT_POLICY.writer.profile, "gpt56_luna_low");
+  });
+
+  it("resolves max and top-level eligible ultra in the policy", () => {
+    assert.equal(
+      resolveCodexAgentProfile("architect", { profileOverride: "max" }),
+      "gpt56_sol_max",
+    );
+    assert.equal(
+      resolveCodexAgentProfile("deep-executor", {
+        profileOverride: "ultra",
+      }),
+      "gpt56_sol_ultra",
+    );
+  });
+
+  it("downgrades ineligible or nested ultra and lets retry snapshots win", () => {
+    assert.equal(
+      resolveCodexAgentProfile("architect", { profileOverride: "ultra" }),
+      "gpt56_sol_max",
+    );
+    assert.equal(
+      resolveCodexAgentProfile("scientist-deep", {
+        profileOverride: "ultra",
+        nested: true,
+      }),
+      "gpt56_sol_max",
+    );
+    assert.equal(
+      resolveCodexAgentProfile("deep-executor", {
+        profileOverride: "ultra",
+        retryProfile: "gpt56_sol_max",
+      }),
+      "gpt56_sol_max",
+    );
+  });
+
+  it("headless roles ignore ordinary global profiles but retain max/ultra lanes", () => {
+    assert.equal(
+      resolveNestedCodexAgentProfile("architect", {
+        globalProfile: "gpt56_terra_high",
+      }),
+      "gpt56_sol_xhigh",
+    );
+    assert.equal(
+      resolveNestedCodexAgentProfile("executor", { globalProfile: "max" }),
+      "gpt56_sol_max",
+    );
   });
 });
 

@@ -160,7 +160,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
 
       assert.equal(s1.cli, "codex");
       assert.equal(s1.model, "gpt-5.6-sol");
-      assert.equal(s1.profile, "gpt56_sol_xhigh");
+      assert.equal(s1.profile, "gpt56_sol_max");
 
       assert.equal(s2.cli, "claude");
       assert.equal(s2.model, "opus-4-8");
@@ -183,6 +183,22 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       const restored = createRetryStateMachine({ mode: "auto-escalate" });
       restored.applySnapshot(sm.serialize());
       assert.deepEqual(restored.getCurrent().cliChain, chain);
+    });
+
+    it("custom Codex ultra retry profile은 max로 정규화한다", () => {
+      const sm = createRetryStateMachine({
+        mode: "auto-escalate",
+        cliChain: [
+          {
+            cli: "codex",
+            model: "gpt-5.6-sol",
+            profile: "gpt56_sol_ultra",
+          },
+          { cli: "claude", model: "opus-4-8" },
+        ],
+      });
+
+      assert.equal(sm.getCurrent().cliChain[0].profile, "gpt56_sol_max");
     });
 
     it(".triflux/config/escalation-chain.json override 는 profile 필드를 읽는다", () => {

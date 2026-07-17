@@ -79,6 +79,14 @@ describe("resolveCodexProfileConfig", () => {
       model: null,
       reasoningEffort: "medium",
     });
+    assert.deepEqual(resolveCodexProfileConfig("gpt56_sol_max"), {
+      model: null,
+      reasoningEffort: "max",
+    });
+    assert.deepEqual(resolveCodexProfileConfig("gpt56_sol_ultra"), {
+      model: null,
+      reasoningEffort: "ultra",
+    });
   });
 
   it("returns nulls for an unknown non-file alias", () => {
@@ -131,6 +139,29 @@ describe("buildCodexArguments — codex 0.137 profile regression guard", () => {
     });
     assert.equal(args.config.foo, "bar");
     assert.equal(args.config.model_reasoning_effort, "xhigh");
+  });
+
+  it("lets the final concrete reasoning override win over a mutable profile", () => {
+    const args = buildCodexArguments("hi", {
+      profile: "gpt56_sol_ultra",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "max",
+    });
+    assert.equal(args.config.model_reasoning_effort, "max");
+  });
+
+  it("downgrades profile-derived ultra unless an explicit final override opts in", () => {
+    const guarded = buildCodexArguments("hi", {
+      profile: "gpt56_sol_ultra",
+    });
+    const explicit = buildCodexArguments("hi", {
+      profile: "gpt56_sol_ultra",
+      reasoningEffort: "ultra",
+    });
+
+    assert.equal(guarded.model, "gpt-5.6-sol");
+    assert.equal(guarded.config.model_reasoning_effort, "max");
+    assert.equal(explicit.config.model_reasoning_effort, "ultra");
   });
 
   it("only sets the accepted Codex tool fields", () => {

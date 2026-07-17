@@ -20,6 +20,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
 import { requestJson } from "../bridge.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
@@ -366,6 +367,14 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   writeFileSync(promptFile, fullPrompt, "utf8");
   void IS_WINDOWS; // referenced for diagnostic guard chain below
 
+  const codexProfile =
+    resolvedCli === "codex"
+      ? resolveNestedCodexAgentProfile(opts.role || cli, {
+          profileOverride: opts.profile ?? "auto",
+          globalProfile: process.env.TFX_CODEX_PROFILE,
+          codexHome: process.env.CODEX_HOME,
+        })
+      : undefined;
   const backendCommand =
     resolvedCli === "antigravity"
       ? buildRouteBackedHeadlessCommand(resolvedCli, promptFile, resultFile, {
@@ -375,6 +384,10 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
       : getBackend(resolvedCli).buildArgs(fullPrompt, resultFile, {
           ...opts,
           model,
+          profile: codexProfile,
+          codexHome: process.env.CODEX_HOME,
+          disallowUltra: true,
+          enforceCanonicalProfile: true,
           promptFile,
         });
   const safeCwd =
@@ -994,6 +1007,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
         mcp: assignment.mcp,
         role: assignment.role,
         model: assignment.model,
+        profile: assignment.profile,
         cwd: assignment.cwd || assignment.workdir,
       },
     );
@@ -1076,6 +1090,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
           mcp: assignment.mcp,
           role: assignment.role,
           model: assignment.model,
+          profile: assignment.profile,
           cwd: assignment.cwd || assignment.workdir,
         },
       );
@@ -1139,6 +1154,7 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
           mcp: assignment.mcp,
           role: assignment.role,
           model: assignment.model,
+          profile: assignment.profile,
           cwd: assignment.cwd || assignment.workdir,
         },
       );

@@ -25,6 +25,16 @@ triflux 워크스페이스에서 Codex CLI의 역할과 운영 규칙. Claude/Ge
   - `sandbox = "workspace-write"` 있으면 `-s` / `--full-auto` 생략
 - 안전 패턴: config.toml에 기본값 + CLI는 `--profile` 선택만
 
+## Reasoning effort 예외 레인
+
+- 기본 역할 라우팅은 `low` / `medium` / `high` / `xhigh` 프로필을 유지한다.
+- 최난도 단일 작업은 `TFX_CODEX_PROFILE=max`로 `gpt56_sol_max`를 선택한다.
+- `TFX_CODEX_PROFILE=ultra`는 최상위 단독 `deep-executor` 또는
+  `scientist-deep`에서만 허용한다.
+- Team/headless/worker 내부의 `ultra` 요청은 중첩 fan-out을 막기 위해
+  `gpt56_sol_max`로 강등한다.
+- `--retry auto-escalate`의 Codex 단계는 `gpt56_sol_max`를 사용한다.
+
 ## headless-guard
 - `codex exec` / `agy --dangerously-skip-permissions --print=` 직접 호출은 차단됨
 - 반드시 tfx 스킬 경유: tfx-auto (--cli codex), tfx-multi, tfx-swarm 등

@@ -5,11 +5,11 @@ import { statSync } from "node:fs";
 import { readdir, readlink } from "node:fs/promises";
 import { promisify } from "node:util";
 import { isPidAlive } from "../lib/process-utils.mjs";
-import { killProcess } from "../platform.mjs";
 import {
   resolveHardCeilingMs,
   resolveStallInterventionMs as resolveStallThresholdMs,
 } from "../lib/timeout-defaults.mjs";
+import { killProcess } from "../platform.mjs";
 
 export { resolveHardCeilingMs, resolveStallThresholdMs };
 
