@@ -128,10 +128,6 @@
           "flags": "i"
         },
         {
-          "source": "(?:정리해|슬롭|클린업)",
-          "flags": "i"
-        },
-        {
           "source": "(?:병렬|동시에|parallel|concurrent)",
           "flags": "i"
         },
@@ -151,6 +147,36 @@
       "skill": "tfx-auto",
       "priority": 2,
       "supersedes": ["tfx-auto-codex"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "host-ai-slop-cleaner",
+      "patterns": [
+        {
+          "source": "(?:AI\\s*슬롭|ai\\s*slop|anti[\\s-]?slop|deslop)",
+          "flags": "i"
+        }
+      ],
+      "skill": "ai-slop-cleaner",
+      "priority": 1,
+      "supersedes": [],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null
+    },
+    {
+      "id": "tfx-prune",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?prune\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-prune",
+      "priority": 1,
+      "supersedes": [],
       "exclusive": false,
       "state": null,
       "mcp_route": null
@@ -586,7 +612,6 @@
     },
     {
       "id": "gstack-ship",
-      "disabled": true,
       "patterns": [
         {
           "source": "(?:배포해|PR\\s*만들|릴리스\\s*해|머지하고\\s*배포)",
@@ -598,7 +623,7 @@
         }
       ],
       "skill": "ship",
-      "priority": 5,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -627,12 +652,12 @@
       "id": "gstack-cso",
       "patterns": [
         {
-          "source": "(?:보안\\s*(?:감사|점검|리뷰|스캔)|\\bcso\\b|\\bOWASP\\b|\\bSTRIDE\\b)",
+          "source": "(?:보안\\s*(?:감사|점검|리뷰|검토|스캔)|\\bcso\\b|\\bOWASP\\b|\\bSTRIDE\\b)",
           "flags": "i"
         }
       ],
       "skill": "cso",
-      "priority": 5,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -651,7 +676,7 @@
         }
       ],
       "skill": "qa",
-      "priority": 5,
+      "priority": 1,
       "supersedes": [],
       "exclusive": false,
       "state": null,
@@ -744,7 +769,7 @@
         }
       ],
       "skill": "tfx-ship",
-      "priority": 3,
+      "priority": 1,
       "supersedes": ["gstack-ship"],
       "exclusive": false,
       "state": null,
