@@ -375,14 +375,18 @@ export function createRoleActivator(options = {}) {
     ) {
       return { receipt: receipt("joined", roleKeyWire, current) };
     }
+    let candidates;
     if (
       ["unreachable", "quarantined"].includes(current?.state) &&
       Number(current.next_probe_ms) > now()
     ) {
-      return { receipt: receipt("joined", roleKeyWire, current) };
+      candidates = eligibleCandidates(roleKey, roleKeyWire);
+      if (!candidates.length) {
+        return { receipt: receipt("joined", roleKeyWire, current) };
+      }
     }
 
-    const candidates = eligibleCandidates(roleKey, roleKeyWire);
+    candidates ??= eligibleCandidates(roleKey, roleKeyWire);
     const holder = candidates[0] || null;
     const plan = reserve(roleKey, current, holder, normalized.trigger);
     return { plan, candidates };
@@ -791,12 +795,9 @@ export function createRoleActivator(options = {}) {
         },
       );
     } catch (error) {
-      const reasonCode = error?.code || "standup_wake_failed";
-      const deferred = deferStandupRetry(plan, reasonCode);
-      return {
-        status: deferred.role?.state || "unreachable",
-        reason_code: reasonCode,
-        role: deferred.role,
+      wake = {
+        ok: false,
+        reason_code: error?.code || "standup_wake_failed",
       };
     }
     const afterWake = await gate(plan);

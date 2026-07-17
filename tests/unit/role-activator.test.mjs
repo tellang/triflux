@@ -271,6 +271,50 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     store.close();
   });
 
+  it("generation-fences a rejected standup wake before deferring its retry", async () => {
+    const store = tempStore();
+    const wakeStarted = deferred();
+    const wakeGate = deferred();
+    const cancelled = [];
+    const activator = createRoleActivator({
+      store,
+      adapter: {
+        supports: () => true,
+        probe: async () => ({ ok: false }),
+        wake: async () => {
+          wakeStarted.resolve();
+          return await wakeGate.promise;
+        },
+        standup: async () => tmuxLocator("standup-wake-generation"),
+        cancel: async (activationId) => cancelled.push(activationId),
+      },
+      getControlSnapshot: () => enabledControl(1),
+      getCharterVersion: () => "charter.v1",
+      uuid: () => "activation-standup-wake-generation",
+      now: () => 1_000,
+      rng: () => 0.5,
+    });
+
+    const flight = activator.ensureRoleAwake(ensureRequest(), {
+      principal: { type: "system", project_id: PROJECT_ID },
+    });
+    await wakeStarted.promise;
+    activator.updateControlSnapshot(enabledControl(2));
+    const wakeError = new Error("wake failed after reload");
+    wakeError.code = "standup_transport_error";
+    wakeGate.reject(wakeError);
+
+    const outcome = await flight;
+    const role = store.getRole(CTO_WIRE);
+    assert.equal(outcome.status, "cancelled");
+    assert.deepEqual(cancelled, ["activation-standup-wake-generation"]);
+    assert.equal(role.state, "electable");
+    assert.equal(Number(role.retry_count || 0), 0);
+    assert.equal(role.next_probe_ms, null);
+    activator.close();
+    store.close();
+  });
+
   it("fails over an unreachable elected candidate and activates only after a fenced ACK", async () => {
     const store = tempStore();
     store.upsertRoleReservation({
@@ -1141,6 +1185,96 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     assert.equal(second.holder_agent_id, first.holder_agent_id);
     assert.equal(second.epoch, first.epoch + 1);
     assert.notEqual(second.activation_id, first.activation_id);
+    activator.close();
+    store.close();
+  });
+
+  it("fails over immediately after ACK timeout when another candidate is eligible", async () => {
+    const store = tempStore();
+    let currentTime = 1_000;
+    let activationIndex = 0;
+    const scheduled = [];
+    const wakes = [];
+    store.upsertRoleReservation({
+      role_key_wire: CTO_WIRE,
+      holder_agent_id: null,
+      state: "electable",
+      activation_id: null,
+      last_transition_ms: currentTime,
+      last_reason: "test_seed",
+    });
+    seedCandidate(store, "candidate-ack-timeout-first", 200, [
+      tmuxLocator("tmux-ack-timeout-first"),
+    ]);
+    seedCandidate(store, "candidate-ack-timeout-fallback", 100, [
+      tmuxLocator("tmux-ack-timeout-fallback"),
+    ]);
+    const activator = createRoleActivator({
+      store,
+      adapter: {
+        supports: () => true,
+        probe: async (locator) => ({
+          schema_version: "tfx-live.transport-probe.v1",
+          ok: true,
+          reachable: true,
+          wakeable: true,
+          transport_selected: locator.kind,
+          transport_id: locator.transport_id,
+          host_id: locator.host_id,
+          latency_ms: 1,
+          observed_at_ms: currentTime,
+          reason_code: "ok",
+        }),
+        wake: async (locator) => {
+          wakes.push(locator.transport_id);
+          return { ok: true };
+        },
+        standup: async () => assert.fail("eligible fallback must be selected"),
+        cancel: async () => {},
+      },
+      getControlSnapshot: () => enabledControl(),
+      getCharterVersion: () => "charter.v1",
+      uuid: () => `activation-ack-failover-${++activationIndex}`,
+      now: () => currentTime,
+      rng: () => 0.5,
+      config: {
+        max_probe_failures: 1,
+        candidate_quarantine_ms: 120_000,
+      },
+      scheduleTimeout: (fn, delay) => {
+        const timer = { fn, delay, unref() {} };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearScheduledTimeout: () => {},
+    });
+
+    const first = await activator.ensureRoleAwake(ensureRequest(), {
+      principal: { type: "system", project_id: PROJECT_ID },
+    });
+    assert.equal(first.status, "awaiting_ack");
+    assert.equal(first.holder_agent_id, "candidate-ack-timeout-first");
+
+    currentTime += scheduled[0].delay;
+    scheduled[0].fn();
+    const failed = store
+      .listRoleCandidates(CTO_WIRE)
+      .find(
+        (candidate) => candidate.agent_id === "candidate-ack-timeout-first",
+      );
+    assert.equal(failed.excluded_until_ms - currentTime, 120_000);
+
+    const failover = await activator.ensureRoleAwake(
+      ensureRequest({ cause_id: "ack-timeout-failover" }),
+      { principal: { type: "system", project_id: PROJECT_ID } },
+    );
+    assert.equal(failover.status, "awaiting_ack");
+    assert.equal(failover.holder_agent_id, "candidate-ack-timeout-fallback");
+    assert.ok(currentTime < failed.excluded_until_ms);
+    assert.deepEqual(wakes, [
+      "tmux-ack-timeout-first",
+      "tmux-ack-timeout-fallback",
+    ]);
     activator.close();
     store.close();
   });
