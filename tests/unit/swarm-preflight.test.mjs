@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -10,7 +11,21 @@ import {
 } from "../../hub/team/swarm-preflight.mjs";
 
 function makeTmpDir() {
-  return mkdtempSync(join(tmpdir(), `tfx-swarm-preflight-${process.pid}-`));
+  const repoRoot = mkdtempSync(
+    join(tmpdir(), `tfx-swarm-preflight-${process.pid}-`),
+  );
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repoRoot });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "base"], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: "Triflux Test",
+      GIT_AUTHOR_EMAIL: "test@triflux.local",
+      GIT_COMMITTER_NAME: "Triflux Test",
+      GIT_COMMITTER_EMAIL: "test@triflux.local",
+    },
+  });
+  return repoRoot;
 }
 
 function writePrd(dir, content) {
@@ -79,6 +94,83 @@ describe("swarm-preflight", () => {
       shards: ["a", "b"],
     });
     assert.match(report.errors.join("\n"), /lease conflict/u);
+  });
+
+  it("returns NO-GO with file names when tracked rootDir changes overlap leases", () => {
+    const repoRoot = makeTmpDir();
+    const leasedFile = join(repoRoot, "src", "api.mjs");
+    mkdirSync(join(repoRoot, "src"), { recursive: true });
+    writeFileSync(leasedFile, "export const value = 1;\n");
+    execFileSync("git", ["add", "src/api.mjs"], { cwd: repoRoot });
+    execFileSync("git", ["commit", "-q", "-m", "add api"], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Triflux Test",
+        GIT_AUTHOR_EMAIL: "test@triflux.local",
+        GIT_COMMITTER_NAME: "Triflux Test",
+        GIT_COMMITTER_EMAIL: "test@triflux.local",
+      },
+    });
+    writeFileSync(leasedFile, "export const value = 2;\n");
+    const prdPath = writePrd(
+      repoRoot,
+      `
+## Shard: api
+- agent: codex
+- files: src/api.mjs
+- prompt: Update API.
+`,
+    );
+
+    const report = runSwarmPreflight(prdPath, {
+      repoRoot,
+      deps: { whichCommand: () => "/usr/bin/true" },
+    });
+
+    assert.equal(report.ok, false);
+    assert.equal(report.verdict, "no-go");
+    assert.deepEqual(report.checks.rootDirtyLease.overlappingFiles, [
+      "src/api.mjs",
+    ]);
+    assert.match(report.errors.join("\n"), /src\/api\.mjs/u);
+    assert.match(formatPreflightReport(report), /src\/api\.mjs/u);
+  });
+
+  it("keeps GO when tracked rootDir changes do not overlap leases", () => {
+    const repoRoot = makeTmpDir();
+    writeFileSync(join(repoRoot, "notes.md"), "base\n");
+    execFileSync("git", ["add", "notes.md"], { cwd: repoRoot });
+    execFileSync("git", ["commit", "-q", "-m", "add notes"], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Triflux Test",
+        GIT_AUTHOR_EMAIL: "test@triflux.local",
+        GIT_COMMITTER_NAME: "Triflux Test",
+        GIT_COMMITTER_EMAIL: "test@triflux.local",
+      },
+    });
+    writeFileSync(join(repoRoot, "notes.md"), "dirty but unrelated\n");
+    const prdPath = writePrd(
+      repoRoot,
+      `
+## Shard: api
+- agent: codex
+- files: src/api.mjs
+- prompt: Update API.
+`,
+    );
+
+    const report = runSwarmPreflight(prdPath, {
+      repoRoot,
+      deps: { whichCommand: () => "/usr/bin/true" },
+    });
+
+    assert.equal(report.ok, true);
+    assert.equal(report.verdict, "go");
+    assert.deepEqual(report.checks.rootDirtyLease.dirtyFiles, ["notes.md"]);
+    assert.deepEqual(report.checks.rootDirtyLease.overlappingFiles, []);
   });
 
   it("returns NO-GO for explicit missing hosts", () => {
