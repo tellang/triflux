@@ -1,6 +1,7 @@
 // hub/team/swarm-preflight.mjs — PRD swarm preflight report/gate (#188)
 // Predicts launch-time blockers before any worker session or worktree spawn.
 
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { readHosts, resolveHost } from "../lib/hosts-compat.mjs";
 import { whichCommand } from "../platform.mjs";
@@ -81,6 +82,44 @@ function checkSensitive(plan, sensitiveDeny) {
     }
   }
   return makeCheck("sensitiveDeny", true, { matches });
+}
+
+function parseTrackedStatus(rawStatus) {
+  const files = [];
+  const records = String(rawStatus || "").split("\0");
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index];
+    if (record.length < 4) continue;
+    const status = record.slice(0, 2);
+    files.push(normalizePath(record.slice(3)));
+    if (/[RC]/u.test(status) && records[index + 1]) {
+      files.push(normalizePath(records[++index]));
+    }
+  }
+  return unique(files);
+}
+
+function checkRootDirtyLease(plan, repoRoot, deps = {}) {
+  const gitStatus =
+    deps.gitStatus ||
+    ((cwd) =>
+      execFileSync(
+        "git",
+        ["status", "--porcelain=v1", "-z", "--untracked-files=no"],
+        { cwd, encoding: "utf8", windowsHide: true },
+      ));
+  const dirtyFiles = parseTrackedStatus(gitStatus(repoRoot));
+  const leasedFiles = unique(
+    [...plan.leaseMap.values()].flat().map(normalizePath),
+  );
+  const leaseSet = new Set(leasedFiles);
+  const overlappingFiles = dirtyFiles.filter((file) => leaseSet.has(file));
+
+  return makeCheck("rootDirtyLease", overlappingFiles.length === 0, {
+    dirtyFiles,
+    leasedFiles,
+    overlappingFiles,
+  });
 }
 
 function checkHosts(plan, repoRoot) {
@@ -216,6 +255,13 @@ function collectMessages(checks) {
     );
   }
 
+  const rootDirtyLease = checks.rootDirtyLease;
+  if (rootDirtyLease && !rootDirtyLease.ok) {
+    errors.push(
+      `rootDir tracked changes overlap shard leases: ${rootDirtyLease.overlappingFiles.join(", ")}`,
+    );
+  }
+
   return { errors: unique(errors), warnings: unique(warnings) };
 }
 
@@ -258,6 +304,7 @@ export function runSwarmPreflight(prdPath, opts = {}) {
     leases: makeCheck("leases", plan.conflicts.length === 0, {
       conflicts: [...plan.conflicts],
     }),
+    rootDirtyLease: checkRootDirtyLease(plan, repoRoot, opts.deps),
     sensitiveDeny: checkSensitive(plan, sensitiveDeny),
     hosts: checkHosts(plan, repoRoot),
     workerCli: checkLocalWorkerClis(plan, opts.deps),

@@ -4,8 +4,16 @@
 // Remote support: host option → SSH-based git operations via remote-session.mjs.
 
 import { execFile } from "node:child_process";
-import { access, mkdir, readdir, realpath, rm } from "node:fs/promises";
-import { normalize, relative, resolve } from "node:path";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, normalize, relative, resolve } from "node:path";
 import { remoteGit, validateHost } from "./remote-session.mjs";
 
 const SWARM_ROOT = ".codex-swarm";
@@ -327,24 +335,23 @@ export async function rebaseShardOntoIntegration({
     }
   }
 
-  // #127 BUG-E: capture caller's branch BEFORE any checkout. Without
-  // restoring it in finally, this function leaks main repo HEAD onto
-  // integrationBranch and every subsequent Edit/commit lands on the swarm
-  // temp branch silently (observed 2026-04-20: probe + edits + commits all
-  // ended up on swarm/.../merge while user thought they were on main).
-  let originalBranch = null;
-  try {
-    const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
-    if (head && head !== "HEAD") originalBranch = head;
-  } catch {
-    /* detached HEAD or unknown — skip restore */
-  }
-
-  // Backup integration HEAD for rollback
+  // #127 BUG-E accident history: this function used to checkout the
+  // integration branch in rootDir, leak rootDir HEAD, and redirect later user
+  // edits/commits into swarm/.../merge. Integration now happens exclusively in
+  // a disposable worktree, so rootDir HEAD never moves and needs no restore.
+  //
+  // #129 BUG-J accident history: checkout failure was followed by a blind
+  // reset --hard (or branch -f rollback) against rootDir, which rewound the
+  // caller branch. Rollback now resets only the disposable worktree; there is
+  // no rootDir reset path and therefore no stash-create last-resort path.
   const backupCommit = await git(["rev-parse", integrationBranch], rootDir);
 
   let shaList = [];
   let ffError = null;
+  let integrationWorktreeAdded = false;
+  const integrationWorktree = await mkdtemp(
+    join(tmpdir(), "tfx-swarm-integration-"),
+  );
 
   try {
     const log = await git(
@@ -361,11 +368,15 @@ export async function rebaseShardOntoIntegration({
       .map((s) => s.trim())
       .filter(Boolean);
 
-    await git(["checkout", integrationBranch], rootDir);
+    await git(
+      ["worktree", "add", "--quiet", integrationWorktree, integrationBranch],
+      rootDir,
+    );
+    integrationWorktreeAdded = true;
 
     try {
-      await git(["merge", "--ff-only", shardBranch], rootDir);
-      const headCommit = await git(["rev-parse", "HEAD"], rootDir);
+      await git(["merge", "--ff-only", shardBranch], integrationWorktree);
+      const headCommit = await git(["rev-parse", "HEAD"], integrationWorktree);
       return {
         ok: true,
         headCommit,
@@ -376,12 +387,15 @@ export async function rebaseShardOntoIntegration({
     } catch (err) {
       ffError = err;
       try {
-        await git(["merge", "--abort"], rootDir);
+        await git(["merge", "--abort"], integrationWorktree);
       } catch {
         /* ff-only usually leaves no merge state */
       }
       try {
-        await git(["reset", "--hard", backupCommit], rootDir);
+        // Safe destructive operation: this cwd is the disposable integration
+        // worktree, never rootDir. It restores the integration ref before the
+        // cherry-pick fallback without touching user files.
+        await git(["reset", "--hard", backupCommit], integrationWorktree);
       } catch {
         /* fallback below will report if cherry-pick also fails */
       }
@@ -391,10 +405,10 @@ export async function rebaseShardOntoIntegration({
     // fail when histories diverge or a shard branch is checked out by a swarm
     // worktree. Cherry-pick reads commits without moving the shard branch ref.
     for (const sha of shaList) {
-      await git(["cherry-pick", sha], rootDir);
+      await git(["cherry-pick", sha], integrationWorktree);
     }
 
-    const headCommit = await git(["rev-parse", "HEAD"], rootDir);
+    const headCommit = await git(["rev-parse", "HEAD"], integrationWorktree);
     return {
       ok: true,
       headCommit,
@@ -406,42 +420,17 @@ export async function rebaseShardOntoIntegration({
         : "cherry-pick fallback",
     };
   } catch (err) {
-    try {
-      await git(["cherry-pick", "--abort"], rootDir);
-    } catch {
-      /* already clean */
-    }
-
-    // #129 BUG-J: Roll back integrationBranch without mutating whatever
-    // branch HEAD currently points at. The previous implementation did a
-    // blind `reset --hard backupCommit` on current HEAD — if the earlier
-    // `git checkout integrationBranch` inside the try block failed (e.g.
-    // integrationBranch was already checked out by a swarm worktree) the
-    // caller's branch silently rewound to integrationBranch's backup commit.
-    // Observed 2026-04-20: fix branch tree lost to main HEAD during swarm
-    // probe, requiring `git merge --ff-only origin/<branch>` recovery.
-    let currentBranch = null;
-    try {
-      const head = await git(["rev-parse", "--abbrev-ref", "HEAD"], rootDir);
-      if (head && head !== "HEAD") currentBranch = head;
-    } catch {
-      /* detached — fall through to ref-only update */
-    }
-
-    if (currentBranch === integrationBranch) {
-      // HEAD is on integrationBranch — reset advances this branch only.
+    if (integrationWorktreeAdded) {
       try {
-        await git(["reset", "--hard", backupCommit], rootDir);
+        await git(["cherry-pick", "--abort"], integrationWorktree);
+      } catch {
+        /* already clean */
+      }
+      try {
+        // #129 rollback is now local to the disposable integration worktree.
+        await git(["reset", "--hard", backupCommit], integrationWorktree);
       } catch {
         /* best-effort */
-      }
-    } else {
-      // HEAD is elsewhere (originalBranch, detached, or another branch).
-      // Update the integrationBranch ref directly; never touch current HEAD.
-      try {
-        await git(["branch", "-f", integrationBranch, backupCommit], rootDir);
-      } catch {
-        /* best-effort: branch may be checked out in another worktree */
       }
     }
 
@@ -453,14 +442,22 @@ export async function rebaseShardOntoIntegration({
       fallbackReason: ffError?.message || null,
     };
   } finally {
-    // Always restore caller's branch. Skip if originalBranch is null
-    // (detached HEAD case) or already on target.
-    if (originalBranch) {
+    if (integrationWorktreeAdded) {
       try {
-        await git(["checkout", originalBranch], rootDir);
+        await git(
+          ["worktree", "remove", "--force", integrationWorktree],
+          rootDir,
+        );
       } catch {
-        /* best-effort — caller will see HEAD on integrationBranch */
+        await rm(integrationWorktree, { recursive: true, force: true });
+        try {
+          await git(["worktree", "prune"], rootDir);
+        } catch {
+          /* best-effort metadata cleanup */
+        }
       }
+    } else {
+      await rm(integrationWorktree, { recursive: true, force: true });
     }
   }
 }
