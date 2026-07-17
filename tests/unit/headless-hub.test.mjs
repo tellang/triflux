@@ -97,17 +97,50 @@ describe("headless hub helpers", () => {
     assert.deepEqual(calls, [
       {
         path: "/bridge/deregister",
-        options: { body: { agentId: "headless-sess-1-0" } },
+        options: { body: { agent_id: "headless-sess-1-0" } },
       },
       {
         path: "/bridge/deregister",
-        options: { body: { agentId: "headless-sess-1-1" } },
+        options: { body: { agent_id: "headless-sess-1-1" } },
       },
       {
         path: "/bridge/deregister",
-        options: { body: { agentId: "headless-sess-1-2" } },
+        options: { body: { agent_id: "headless-sess-1-2" } },
       },
     ]);
+  });
+
+  it("headless deregister가 register의 fenced ownership을 전달한다", async () => {
+    const calls = [];
+    const requestJson = async (path, options) => {
+      calls.push({ path, options });
+      if (path === "/bridge/register") {
+        return {
+          ok: true,
+          data: {
+            presence_generation: 7,
+            hub_instance_id: "hub-current",
+            store_fingerprint: "sqlite:test",
+          },
+        };
+      }
+      return { ok: true };
+    };
+
+    await registerHeadlessWorker("fenced-session", 0, "codex", requestJson);
+    await deregisterHeadlessWorkers("fenced-session", 1, requestJson);
+
+    assert.deepEqual(calls[1], {
+      path: "/bridge/deregister",
+      options: {
+        body: {
+          agent_id: "headless-fenced-session-0",
+          presence_generation: 7,
+          hub_instance_id: "hub-current",
+          store_fingerprint: "sqlite:test",
+        },
+      },
+    });
   });
 
   it("Hub 호출 실패를 삼켜 기존 동작을 유지한다", async () => {

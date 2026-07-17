@@ -215,6 +215,7 @@ export function getHeadlessLeadAgentId(sessionName) {
 }
 
 const HUB_CLI_VALUES = new Set(["codex", "gemini", "claude", "other"]);
+const presenceOwnerByAgent = new Map();
 function normalizeCliForHub(cli) {
   return HUB_CLI_VALUES.has(cli) ? cli : "other";
 }
@@ -225,14 +226,23 @@ export async function registerHeadlessWorker(
   cli,
   requestJsonFn = requestJson,
 ) {
-  await requestJsonFn("/bridge/register", {
+  const agentId = getHeadlessWorkerAgentId(sessionName, index);
+  const result = await requestJsonFn("/bridge/register", {
     body: {
-      agent_id: getHeadlessWorkerAgentId(sessionName, index),
+      agent_id: agentId,
       cli: normalizeCliForHub(cli),
       topics: ["headless.worker"],
       capabilities: [cli],
     },
-  }).catch(() => {});
+  }).catch(() => null);
+  if (result?.ok && result.data?.presence_generation != null) {
+    presenceOwnerByAgent.set(agentId, {
+      presence_generation: result.data.presence_generation,
+      hub_instance_id: result.data.hub_instance_id,
+      store_fingerprint: result.data.store_fingerprint,
+    });
+  }
+  return result;
 }
 
 export async function publishHeadlessResult(
@@ -260,8 +270,15 @@ export async function deregisterHeadlessWorkers(
   await Promise.all(
     Array.from({ length: workerCount }, (_, index) =>
       requestJsonFn("/bridge/deregister", {
-        body: { agentId: getHeadlessWorkerAgentId(sessionName, index) },
-      }).catch(() => {}),
+        body: {
+          agent_id: getHeadlessWorkerAgentId(sessionName, index),
+          ...(presenceOwnerByAgent.get(getHeadlessWorkerAgentId(sessionName, index)) || {}),
+        },
+      })
+        .catch(() => {})
+        .finally(() =>
+          presenceOwnerByAgent.delete(getHeadlessWorkerAgentId(sessionName, index)),
+        ),
     ),
   );
 }
@@ -1904,7 +1921,10 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     lastHubBeatByWorker.set(agentId, nowMs);
     requestJson("/bridge/heartbeat", {
       method: "POST",
-      body: { agent_id: agentId },
+      body: {
+        agent_id: agentId,
+        ...(presenceOwnerByAgent.get(agentId) || {}),
+      },
       timeoutMs: 500,
     }).catch(() => {});
     const assignJobId = normalizedAssignments[idx]?.assignJobId;

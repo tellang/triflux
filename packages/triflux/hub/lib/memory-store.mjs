@@ -142,6 +142,7 @@ export function createMemoryStore() {
   const store = {
     type: "memory",
     db: null,
+    fingerprint: "memory:ephemeral",
     uuidv7,
 
     close() {},
@@ -166,6 +167,7 @@ export function createMemoryStore() {
         topics: clone(topics),
         last_seen_ms: now,
         lease_expires_ms: now + heartbeat_ttl_ms,
+        presence_generation: Number(current.presence_generation || 0) + 1,
         status: "online",
         metadata: clone(metadata),
       };
@@ -173,6 +175,7 @@ export function createMemoryStore() {
       return {
         agent_id,
         lease_id: uuidv7(),
+        presence_generation: next.presence_generation,
         lease_expires_ms: next.lease_expires_ms,
         server_time_ms: now,
         effective: {
@@ -183,6 +186,7 @@ export function createMemoryStore() {
           lease_expires_ms: next.lease_expires_ms,
           store_type: "memory",
           db_path: null,
+          store_fingerprint: "memory:ephemeral",
         },
       };
     },
@@ -191,14 +195,23 @@ export function createMemoryStore() {
       return clone(agents.get(id) || null);
     },
 
-    refreshLease(agentId, ttlMs = 30000) {
+    refreshLease(agentId, ttlMs = 30000, presenceGeneration) {
       const current = agents.get(agentId);
-      if (!current)
+      if (
+        !current ||
+        (presenceGeneration != null &&
+          current.presence_generation !== presenceGeneration)
+      )
         return {
           agent_id: agentId,
           lease_expires_ms: Date.now() + ttlMs,
           server_time_ms: Date.now(),
-          effective: { updated: false, store_type: "memory", db_path: null },
+          effective: {
+            updated: false,
+            store_type: "memory",
+            db_path: null,
+            store_fingerprint: "memory:ephemeral",
+          },
         };
       const now = Date.now();
       current.last_seen_ms = now;
@@ -208,7 +221,12 @@ export function createMemoryStore() {
         agent_id: agentId,
         lease_expires_ms: current.lease_expires_ms,
         server_time_ms: now,
-        effective: { updated: true, store_type: "memory", db_path: null },
+        effective: {
+          updated: true,
+          store_type: "memory",
+          db_path: null,
+          store_fingerprint: "memory:ephemeral",
+        },
       };
     },
 
@@ -243,9 +261,19 @@ export function createMemoryStore() {
 
     sweepStaleAgents() {
       const now = Date.now();
+      const candidates = Array.from(agents.values(), (agent) => ({
+        agent_id: agent.agent_id,
+        presence_generation: agent.presence_generation,
+      }));
       let stale = 0;
       let offline = 0;
-      for (const agent of agents.values()) {
+      for (const candidate of candidates) {
+        const agent = agents.get(candidate.agent_id);
+        if (
+          !agent ||
+          agent.presence_generation !== candidate.presence_generation
+        )
+          continue;
         if (agent.status === "online" && agent.lease_expires_ms < now) {
           agent.status = "stale";
           stale += 1;
@@ -260,9 +288,14 @@ export function createMemoryStore() {
       return { stale, offline };
     },
 
-    updateAgentStatus(agentId, status) {
+    updateAgentStatus(agentId, status, presenceGeneration) {
       const current = agents.get(agentId);
-      if (!current) return false;
+      if (
+        !current ||
+        (presenceGeneration != null &&
+          current.presence_generation !== presenceGeneration)
+      )
+        return false;
       current.status = status;
       return true;
     },

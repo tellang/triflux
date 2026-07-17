@@ -1,6 +1,7 @@
 // hub/store.mjs — SQLite 감사 로그/메타데이터/역할 레지스트리 저장소
 // 실시간 배달은 router/pipe가 담당하고, 역할 권한과 복구 상태는 SQLite가 보존한다.
 
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -119,6 +120,21 @@ function ensureV6Columns(db) {
   }
 }
 
+function ensureV7Columns(db) {
+  if (hasTable(db, "agents")) {
+    ensureColumn(
+      db,
+      "agents",
+      "presence_generation",
+      "INTEGER NOT NULL DEFAULT 0",
+    );
+  }
+}
+
+function storeFingerprint(dbPath) {
+  return `sqlite:${createHash("sha256").update(String(dbPath)).digest("hex")}`;
+}
+
 /**
  * 저장소 생성
  * @param {string} dbPath
@@ -149,7 +165,7 @@ export function createStore(dbPath, options = {}) {
   db.exec(
     "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)",
   );
-  const SCHEMA_VERSION = "6";
+  const SCHEMA_VERSION = "7";
   const curVer = (() => {
     try {
       return db
@@ -166,6 +182,7 @@ export function createStore(dbPath, options = {}) {
   // v5 테이블에는 schema.sql의 v6 인덱스가 참조하는 컬럼이 없으므로
   // CREATE IF NOT EXISTS 재실행 전에 멱등 컬럼 seam을 먼저 적용한다.
   ensureV6Columns(db);
+  ensureV7Columns(db);
   if (curVer !== SCHEMA_VERSION) {
     if (curVer != null) {
       // 이미 버전이 기록된 DB에서 버전 불일치가 발생한 경우 경고한다.
@@ -180,6 +197,7 @@ export function createStore(dbPath, options = {}) {
   }
   // 매 부팅 실행해 부분 적용된 마이그레이션도 안전하게 복구한다.
   ensureV6Columns(db);
+  ensureV7Columns(db);
   ensureColumn(
     db,
     "reflexion_entries",
@@ -196,8 +214,8 @@ export function createStore(dbPath, options = {}) {
 
   const S = {
     upsertAgent: db.prepare(`
-      INSERT INTO agents (agent_id, cli, pid, capabilities_json, topics_json, last_seen_ms, lease_expires_ms, status, metadata_json)
-      VALUES (@agent_id, @cli, @pid, @capabilities_json, @topics_json, @last_seen_ms, @lease_expires_ms, @status, @metadata_json)
+      INSERT INTO agents (agent_id, cli, pid, capabilities_json, topics_json, last_seen_ms, lease_expires_ms, presence_generation, status, metadata_json)
+      VALUES (@agent_id, @cli, @pid, @capabilities_json, @topics_json, @last_seen_ms, @lease_expires_ms, 1, @status, @metadata_json)
       ON CONFLICT(agent_id) DO UPDATE SET
         cli=excluded.cli,
         pid=excluded.pid,
@@ -205,6 +223,7 @@ export function createStore(dbPath, options = {}) {
         topics_json=excluded.topics_json,
         last_seen_ms=excluded.last_seen_ms,
         lease_expires_ms=excluded.lease_expires_ms,
+        presence_generation=agents.presence_generation + 1,
         status=excluded.status,
         metadata_json=excluded.metadata_json`),
     getAgent: db.prepare("SELECT * FROM agents WHERE agent_id = ?"),
@@ -212,19 +231,27 @@ export function createStore(dbPath, options = {}) {
       "UPDATE agents SET topics_json=?, last_seen_ms=? WHERE agent_id=?",
     ),
     heartbeat: db.prepare(
+      "UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=? AND presence_generation=?",
+    ),
+    heartbeatWithoutGeneration: db.prepare(
       "UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=?",
     ),
-    setAgentStatus: db.prepare("UPDATE agents SET status=? WHERE agent_id=?"),
+    setAgentStatus: db.prepare(
+      "UPDATE agents SET status=? WHERE agent_id=? AND presence_generation=?",
+    ),
+    setAgentStatusWithoutGeneration: db.prepare(
+      "UPDATE agents SET status=? WHERE agent_id=?",
+    ),
     onlineAgents: db.prepare("SELECT * FROM agents WHERE status != 'offline'"),
     allAgents: db.prepare("SELECT * FROM agents"),
     agentsByTopic: db.prepare(
       "SELECT a.* FROM agents a, json_each(a.topics_json) t WHERE t.value=? AND a.status != 'offline'",
     ),
     markStale: db.prepare(
-      "UPDATE agents SET status='stale' WHERE status='online' AND lease_expires_ms < ?",
+      "UPDATE agents SET status='stale' WHERE agent_id=? AND presence_generation=? AND status='online' AND lease_expires_ms < ?",
     ),
     markOffline: db.prepare(
-      "UPDATE agents SET status='offline' WHERE status='stale' AND lease_expires_ms < ? - 300000",
+      "UPDATE agents SET status='offline' WHERE agent_id=? AND presence_generation=? AND status='stale' AND lease_expires_ms < ? - 300000",
     ),
 
     getRole: db.prepare("SELECT * FROM role_registry WHERE role_key_wire = ?"),
@@ -705,6 +732,8 @@ export function createStore(dbPath, options = {}) {
 
   const store = {
     db,
+    type: "sqlite",
+    fingerprint: storeFingerprint(dbPath),
     uuidv7,
 
     close() {
@@ -738,6 +767,7 @@ export function createStore(dbPath, options = {}) {
       return {
         agent_id,
         lease_id: leaseId,
+        presence_generation: persisted?.presence_generation ?? null,
         lease_expires_ms: leaseExpires,
         server_time_ms: now,
         effective: {
@@ -750,6 +780,7 @@ export function createStore(dbPath, options = {}) {
           lease_expires_ms: persisted?.lease_expires_ms ?? null,
           store_type: "sqlite",
           db_path: dbPath ?? null,
+          store_fingerprint: storeFingerprint(dbPath),
         },
       };
     },
@@ -758,9 +789,12 @@ export function createStore(dbPath, options = {}) {
       return parseAgentRow(S.getAgent.get(id));
     },
 
-    refreshLease(agentId, ttlMs = 30000) {
+    refreshLease(agentId, ttlMs = 30000, presenceGeneration) {
       const now = Date.now();
-      const write = S.heartbeat.run(now, now + ttlMs, agentId);
+      const write =
+        presenceGeneration == null
+          ? S.heartbeatWithoutGeneration.run(now, now + ttlMs, agentId)
+          : S.heartbeat.run(now, now + ttlMs, agentId, presenceGeneration);
       return {
         agent_id: agentId,
         lease_expires_ms: now + ttlMs,
@@ -769,6 +803,7 @@ export function createStore(dbPath, options = {}) {
           updated: write.changes > 0,
           store_type: "sqlite",
           db_path: dbPath ?? null,
+          store_fingerprint: storeFingerprint(dbPath),
         },
       };
     },
@@ -794,14 +829,40 @@ export function createStore(dbPath, options = {}) {
 
     sweepStaleAgents() {
       const now = Date.now();
+      const candidates = S.allAgents.all();
+      let stale = 0;
+      let offline = 0;
+      for (const candidate of candidates) {
+        if (candidate.status === "online" && candidate.lease_expires_ms < now) {
+          stale += S.markStale.run(
+            candidate.agent_id,
+            candidate.presence_generation,
+            now,
+          ).changes;
+        } else if (
+          candidate.status === "stale" &&
+          candidate.lease_expires_ms < now - 300000
+        ) {
+          offline += S.markOffline.run(
+            candidate.agent_id,
+            candidate.presence_generation,
+            now,
+          ).changes;
+        }
+      }
       return {
-        stale: S.markStale.run(now).changes,
-        offline: S.markOffline.run(now).changes,
+        stale,
+        offline,
       };
     },
 
-    updateAgentStatus(agentId, status) {
-      return S.setAgentStatus.run(status, agentId).changes > 0;
+    updateAgentStatus(agentId, status, presenceGeneration) {
+      return (
+        (presenceGeneration == null
+          ? S.setAgentStatusWithoutGeneration.run(status, agentId)
+          : S.setAgentStatus.run(status, agentId, presenceGeneration)
+        ).changes > 0
+      );
     },
 
     getRole(roleKeyWire) {

@@ -634,8 +634,12 @@ async function cmdRegister(args) {
     return emitJson({
       ok: true,
       agent_id: agentId,
+      lease_id: result.data?.lease_id,
+      presence_generation: result.data?.presence_generation,
       lease_expires_ms: result.data?.lease_expires_ms,
       pipe_path: result.data?.pipe_path || getHubPipePath(),
+      hub_instance_id: result.data?.hub_instance_id,
+      store_fingerprint: result.data?.store_fingerprint,
     });
   }
 
@@ -646,6 +650,10 @@ async function cmdHeartbeat(args) {
   const outcome = await requestHub(HUB_OPERATIONS.heartbeat, {
     agent_id: args.agent,
     ttl_ms: args["ttl-ms"] != null ? Number(args["ttl-ms"]) : undefined,
+    presence_generation:
+      args.generation != null ? Number(args.generation) : undefined,
+    hub_instance_id: args["hub-instance-id"],
+    store_fingerprint: args["store-fingerprint"],
   });
   return emitJson(outcome?.result || unavailableResult());
 }
@@ -731,6 +739,8 @@ async function cmdTakeoverRole(args) {
     agent_id: agentId,
     reason: args.reason || "manual",
     requested_by: args["requested-by"] || "bridge",
+    hub_instance_id: args["hub-instance-id"],
+    store_fingerprint: args["store-fingerprint"],
   });
   const result = outcome?.result;
   return emitJson(result || unavailableResult());
@@ -748,6 +758,8 @@ async function cmdSendInput(args) {
 async function cmdContext(args) {
   const outcome = await requestHub(HUB_OPERATIONS.context, {
     agent_id: args.agent,
+    presence_generation:
+      args.generation != null ? Number(args.generation) : undefined,
     topics: args.topics ? args.topics.split(",") : undefined,
     max_messages: parseInt(args.max || "10", 10),
     auto_ack: true,
@@ -793,12 +805,12 @@ async function cmdContext(args) {
 async function cmdDeregister(args) {
   const outcome = await requestHub(HUB_OPERATIONS.deregister, {
     agent_id: args.agent,
+    presence_generation:
+      args.generation != null ? Number(args.generation) : undefined,
+    hub_instance_id: args["hub-instance-id"],
+    store_fingerprint: args["store-fingerprint"],
   });
   const result = outcome?.result;
-
-  if (result?.ok) {
-    return emitJson({ ok: true, agent_id: args.agent, status: "offline" });
-  }
 
   return emitJson(result || unavailableResult());
 }

@@ -170,7 +170,12 @@ describe("/status include_metrics opt-in", () => {
     const deregisterRes = await fetch(`${baseUrl}/bridge/deregister`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agent_id: agentId }),
+      body: JSON.stringify({
+        agent_id: agentId,
+        presence_generation: registerBody.data.presence_generation,
+        hub_instance_id: registerBody.data.hub_instance_id,
+        store_fingerprint: registerBody.data.store_fingerprint,
+      }),
     });
     assert.equal(deregisterRes.status, 200);
     const deregisterBody = await deregisterRes.json();

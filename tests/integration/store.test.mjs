@@ -106,14 +106,18 @@ describe("createStore()", { skip: SQLITE_SKIP }, () => {
     });
 
     it("updateAgentStatus()는 에이전트 상태를 변경해야 한다", () => {
-      store.registerAgent({
+      const registered = store.registerAgent({
         agent_id: "test-agent-status",
         cli: "claude",
         capabilities: ["orchestration"],
         topics: [],
         heartbeat_ttl_ms: 30000,
       });
-      const changed = store.updateAgentStatus("test-agent-status", "offline");
+      const changed = store.updateAgentStatus(
+        "test-agent-status",
+        "offline",
+        registered.presence_generation,
+      );
       assert.equal(changed, true);
       const agent = store.getAgent("test-agent-status");
       assert.equal(agent.status, "offline");
@@ -139,7 +143,7 @@ describe("createStore()", { skip: SQLITE_SKIP }, () => {
     });
 
     it("offline agent 재등록 시 persisted presence를 online으로 복구해야 한다", () => {
-      store.registerAgent({
+      const first = store.registerAgent({
         agent_id: "revived-agent",
         cli: "claude",
         capabilities: ["cto"],
@@ -147,7 +151,14 @@ describe("createStore()", { skip: SQLITE_SKIP }, () => {
         metadata: { role: "cto" },
         heartbeat_ttl_ms: 30000,
       });
-      assert.equal(store.updateAgentStatus("revived-agent", "offline"), true);
+      assert.equal(
+        store.updateAgentStatus(
+          "revived-agent",
+          "offline",
+          first.presence_generation,
+        ),
+        true,
+      );
       assert.equal(store.getAgent("revived-agent").status, "offline");
 
       const result = store.registerAgent({

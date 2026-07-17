@@ -52,7 +52,12 @@ describe("hub auth 다중 엔드포인트 E2E", () => {
       // deregister
       const deregRes = await authFetch(h.baseUrl, "/bridge/deregister", {
         token,
-        body: { agent_id: agentId },
+        body: {
+          agent_id: agentId,
+          presence_generation: regBody.data.presence_generation,
+          hub_instance_id: regBody.data.hub_instance_id,
+          store_fingerprint: regBody.data.store_fingerprint,
+        },
       });
       assert.equal(deregRes.status, 200);
       const deregBody = await deregRes.json();

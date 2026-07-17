@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS agents (
   topics_json TEXT NOT NULL DEFAULT '[]',
   last_seen_ms INTEGER NOT NULL,
   lease_expires_ms INTEGER NOT NULL,
+  presence_generation INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL CHECK (status IN ('online','stale','offline')),
   metadata_json TEXT NOT NULL DEFAULT '{}',
   project_id TEXT,

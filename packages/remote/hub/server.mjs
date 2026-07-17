@@ -1720,6 +1720,8 @@ export async function startHub({
               agent_id,
               reason = "manual",
               requested_by = "http",
+              hub_instance_id,
+              store_fingerprint,
             } = body;
             if (!role || !agent_id) {
               return writeJson(res, 400, {
@@ -1732,6 +1734,8 @@ export async function startHub({
               agent_id,
               reason,
               requested_by,
+              hub_instance_id,
+              store_fingerprint,
             });
             return writeJson(res, result.ok ? 200 : 409, result);
           }
@@ -1748,6 +1752,8 @@ export async function startHub({
               session_id,
               host_id,
               transport_locators_json,
+              hub_instance_id,
+              store_fingerprint,
             } = body;
             if (!agent_id || !cli) {
               return writeJson(res, 400, {
@@ -1782,6 +1788,8 @@ export async function startHub({
               ...(transport_locators_json === undefined
                 ? {}
                 : { transport_locators_json }),
+              ...(hub_instance_id === undefined ? {} : { hub_instance_id }),
+              ...(store_fingerprint === undefined ? {} : { store_fingerprint }),
             });
             if (result.ok) {
               workerSpans.set(agent_id, {
@@ -1816,7 +1824,13 @@ export async function startHub({
           }
 
           if (path === "/bridge/heartbeat" && req.method === "POST") {
-            const { agent_id, ttl_ms } = body;
+            const {
+              agent_id,
+              ttl_ms,
+              presence_generation,
+              hub_instance_id,
+              store_fingerprint,
+            } = body;
             if (!agent_id)
               return writeJson(res, 400, { ok: false, error: "agent_id 필수" });
             const result = await pipe.executeCommand("heartbeat", {
@@ -1825,6 +1839,9 @@ export async function startHub({
                 ttl_ms,
                 resolveWorkerLeaseTtlMs(),
               ),
+              presence_generation,
+              hub_instance_id,
+              store_fingerprint,
             });
             return writeJson(res, result.ok ? 200 : 404, result);
           }
@@ -1905,6 +1922,9 @@ export async function startHub({
               status,
               include_metrics = true,
               trace_id,
+              presence_generation,
+              hub_instance_id,
+              store_fingerprint,
             } = body;
 
             if (agent_id && status) {
@@ -1925,7 +1945,15 @@ export async function startHub({
               ]).has(normalizedStatus)
                 ? normalizedStatus
                 : "online";
-              router.updateAgentStatus(normalizedAgentId, statusForStore);
+              const transition = router.transitionAgentStatus(
+                normalizedAgentId,
+                statusForStore,
+                presence_generation,
+                { hub_instance_id, store_fingerprint },
+              );
+              if (!transition.ok) {
+                return writeJson(res, 409, transition);
+              }
               const snapshot = await pipe.executeQuery("status", {
                 scope: "agent",
                 agent_id: normalizedAgentId,
@@ -1939,6 +1967,8 @@ export async function startHub({
                   reported_status: normalizedStatus,
                   reported_at_ms: Date.now(),
                   snapshot: snapshot?.data?.agent || null,
+                  hub_instance_id: transition.data.hub_instance_id,
+                  store_fingerprint: transition.data.store_fingerprint,
                 },
               });
             }
@@ -1948,6 +1978,8 @@ export async function startHub({
               agent_id,
               include_metrics,
               trace_id,
+              hub_instance_id,
+              store_fingerprint,
             });
             return writeJson(res, 200, result);
           }
@@ -2167,12 +2199,20 @@ export async function startHub({
           }
 
           if (path === "/bridge/deregister" && req.method === "POST") {
-            const { agent_id } = body;
+            const {
+              agent_id,
+              presence_generation,
+              hub_instance_id,
+              store_fingerprint,
+            } = body;
             if (!agent_id) {
               return writeJson(res, 400, { ok: false, error: "agent_id 필수" });
             }
             const result = await pipe.executeCommand("deregister", {
               agent_id,
+              presence_generation,
+              hub_instance_id,
+              store_fingerprint,
             });
             if (result.ok) {
               finishWorkerTrace(agent_id, "deregister");
