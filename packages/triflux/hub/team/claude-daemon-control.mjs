@@ -321,10 +321,12 @@ export async function probeClaudeDaemonCandidates({
   short,
   sessionId,
   timeoutMs = 6000,
+  tmpRoot = "/tmp",
 } = {}) {
   const candidates = await buildClaudeDaemonDiscoveryCandidates({
     configDir,
     env,
+    tmpRoot,
   });
   const callerProvenance = detectCallerProvenance(env);
   const targetRequested = Boolean(short || sessionId);

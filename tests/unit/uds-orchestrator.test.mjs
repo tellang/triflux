@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -91,9 +90,10 @@ test("peer mode asks Claude UDS and Codex as peers, then synthesizes", async () 
 });
 
 async function withFakeClaudeDaemon(handler, fn) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "uds-orchestrator-"));
+  const dir = await fs.mkdtemp("/tmp/tfx-uds-");
   const paths = deriveClaudeDaemonPaths({
     configDir: path.join(dir, "claude"),
+    tmpRoot: dir,
   });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   const requests = [];

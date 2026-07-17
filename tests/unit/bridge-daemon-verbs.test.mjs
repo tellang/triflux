@@ -18,6 +18,11 @@ const PROJECT_ROOT = path.resolve(
   "..",
 );
 const BRIDGE = path.join(PROJECT_ROOT, "hub", "bridge.mjs");
+const TEST_DAEMON_TMP_ROOT = await fs.mkdtemp("/tmp/tfx-bds-");
+
+test.after(async () => {
+  await fs.rm(TEST_DAEMON_TMP_ROOT, { recursive: true, force: true });
+});
 
 function parseBridgeStdout(stdout) {
   const line = String(stdout).trim().split("\n").filter(Boolean).at(-1);
@@ -26,13 +31,25 @@ function parseBridgeStdout(stdout) {
 }
 
 async function runBridge(args, options = {}) {
-  try {
-    const result = await execFileAsync(process.execPath, [BRIDGE, ...args], {
-      cwd: PROJECT_ROOT,
-      encoding: "utf8",
-      env: { ...process.env, ...options.env },
-      input: options.input,
+  const commandArgs = [...args];
+  const payloadIndex = commandArgs.indexOf("--payload");
+  if (payloadIndex !== -1) {
+    commandArgs[payloadIndex + 1] = JSON.stringify({
+      ...JSON.parse(commandArgs[payloadIndex + 1]),
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
     });
+  }
+  try {
+    const result = await execFileAsync(
+      process.execPath,
+      [BRIDGE, ...commandArgs],
+      {
+        cwd: PROJECT_ROOT,
+        encoding: "utf8",
+        env: { ...process.env, ...options.env },
+        input: options.input,
+      },
+    );
     return parseBridgeStdout(result.stdout);
   } catch (error) {
     if (options.allowFailure && error.stdout) {
@@ -168,7 +185,10 @@ async function withTempConfig(fn) {
   const configDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "triflux-bridge-daemon-"),
   );
-  const daemonDir = deriveClaudeDaemonPaths({ configDir }).daemonDir;
+  const daemonDir = deriveClaudeDaemonPaths({
+    configDir,
+    tmpRoot: TEST_DAEMON_TMP_ROOT,
+  }).daemonDir;
   try {
     return await fn(configDir);
   } finally {
@@ -198,10 +218,16 @@ async function withTempClaudeHome(fn) {
     await fs.rm(home, { recursive: true, force: true });
     await Promise.all(
       configDirs.map((configDir) =>
-        fs.rm(deriveClaudeDaemonPaths({ configDir }).daemonDir, {
-          recursive: true,
-          force: true,
-        }),
+        fs.rm(
+          deriveClaudeDaemonPaths({
+            configDir,
+            tmpRoot: TEST_DAEMON_TMP_ROOT,
+          }).daemonDir,
+          {
+            recursive: true,
+            force: true,
+          },
+        ),
       ),
     );
   }
@@ -245,7 +271,10 @@ test("readBridgePayload parses --payload-file - from stdin text", () => {
 
 test("daemon-probe lists fake daemon sessions and resolves target by short", async () => {
   await withTempConfig(async (configDir) => {
-    const paths = deriveClaudeDaemonPaths({ configDir });
+    const paths = deriveClaudeDaemonPaths({
+      configDir,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const fake = await listenFakeDaemon(paths.controlSock, {
       jobs: [{ short: "abcd1234", sessionId: "sess-1", state: "ready" }],
     });
@@ -285,7 +314,10 @@ test("daemon-probe lists fake daemon sessions and resolves target by short", asy
 
 test("daemon-probe normalizes Claude agent-view state/status row variants", async () => {
   await withTempConfig(async (configDir) => {
-    const paths = deriveClaudeDaemonPaths({ configDir });
+    const paths = deriveClaudeDaemonPaths({
+      configDir,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const fake = await listenFakeDaemon(paths.controlSock, {
       jobs: [
         {
@@ -329,7 +361,10 @@ test("daemon-attach resolves sessionId, sends prompt, and returns assistant text
       "bridge-attach-secret\n",
       "utf8",
     );
-    const paths = deriveClaudeDaemonPaths({ configDir });
+    const paths = deriveClaudeDaemonPaths({
+      configDir,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const fake = await listenFakeDaemon(paths.controlSock, {
       jobs: [{ short: "facefeed", sessionId: "session-attach" }],
     });
@@ -339,6 +374,7 @@ test("daemon-attach resolves sessionId, sends prompt, and returns assistant text
         payloadPath,
         JSON.stringify({
           configDir,
+          tmpRoot: TEST_DAEMON_TMP_ROOT,
           sessionId: "session-attach",
           prompt: "say bridge ok",
           timeoutMs: 1500,
@@ -412,7 +448,10 @@ test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
       "bridge-interrupt-secret\n",
       "utf8",
     );
-    const paths = deriveClaudeDaemonPaths({ configDir });
+    const paths = deriveClaudeDaemonPaths({
+      configDir,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const fake = await listenFakeInterruptDaemon(paths.controlSock, {
       jobs: [{ short: "facefeed", sessionId: "interrupt-session" }],
     });
@@ -454,7 +493,10 @@ test("daemon-interrupt attaches to a daemon PTY and sends Escape", async () => {
 
 test("daemon-probe discovers an OMC runtime daemon in ambient OMX caller env", async () => {
   await withTempClaudeHome(async ({ home, omcRuntime }) => {
-    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const omcPaths = deriveClaudeDaemonPaths({
+      configDir: omcRuntime,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const jobs = [{ short: "omc12345", sessionId: "omc-session" }];
     const fake = await listenFakeDaemon(omcPaths.controlSock, { jobs });
     try {
@@ -512,7 +554,10 @@ test("daemon-probe discovers an OMC runtime daemon in ambient OMX caller env", a
 
 test("daemon-attach in ambient mode selects OMC runtime and resolves compact session ids", async () => {
   await withTempClaudeHome(async ({ home, omcRuntime }) => {
-    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const omcPaths = deriveClaudeDaemonPaths({
+      configDir: omcRuntime,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const fake = await listenFakeDaemon(omcPaths.controlSock, {
       jobs: [{ short: "facefeed", d: { sessionId: "compact-session" } }],
     });
@@ -562,7 +607,10 @@ test("daemon-attach in ambient mode selects OMC runtime and resolves compact ses
 
 test("daemon-interrupt in ambient mode selects OMC runtime before sending Escape", async () => {
   await withTempClaudeHome(async ({ home, omcRuntime }) => {
-    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const omcPaths = deriveClaudeDaemonPaths({
+      configDir: omcRuntime,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const fake = await listenFakeInterruptDaemon(omcPaths.controlSock, {
       jobs: [{ short: "cab005e", sessionId: "interrupt-session" }],
     });
@@ -612,8 +660,14 @@ test("daemon-interrupt in ambient mode selects OMC runtime before sending Escape
 
 test("daemon-attach rejects duplicate ambient targets before attaching", async () => {
   await withTempClaudeHome(async ({ home, defaultConfig, omcRuntime }) => {
-    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
-    const defaultPaths = deriveClaudeDaemonPaths({ configDir: defaultConfig });
+    const omcPaths = deriveClaudeDaemonPaths({
+      configDir: omcRuntime,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
+    const defaultPaths = deriveClaudeDaemonPaths({
+      configDir: defaultConfig,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const omcFake = await listenFakeDaemon(omcPaths.controlSock, {
       jobs: [{ short: "dupe0001", sessionId: "omc-dupe" }],
     });
@@ -662,7 +716,10 @@ test("daemon-attach rejects duplicate ambient targets before attaching", async (
 
 test("explicit configDir is exact-only and never falls back to ambient OMC", async () => {
   await withTempClaudeHome(async ({ home, omcRuntime, customConfig }) => {
-    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const omcPaths = deriveClaudeDaemonPaths({
+      configDir: omcRuntime,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const fake = await listenFakeDaemon(omcPaths.controlSock, {
       jobs: [{ short: "omc12345", sessionId: "omc-session" }],
     });
@@ -704,7 +761,10 @@ test("explicit configDir is exact-only and never falls back to ambient OMC", asy
 
 test("CLAUDE_CONFIG_DIR env mode is strict and never falls back to ambient OMC", async () => {
   await withTempClaudeHome(async ({ home, defaultConfig, omcRuntime }) => {
-    const omcPaths = deriveClaudeDaemonPaths({ configDir: omcRuntime });
+    const omcPaths = deriveClaudeDaemonPaths({
+      configDir: omcRuntime,
+      tmpRoot: TEST_DAEMON_TMP_ROOT,
+    });
     const fake = await listenFakeDaemon(omcPaths.controlSock, {
       jobs: [{ short: "omc12345", sessionId: "omc-session" }],
     });

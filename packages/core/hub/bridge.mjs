@@ -1303,6 +1303,7 @@ async function cmdDaemonProbe(args) {
       short: payload.short,
       sessionId: payload.sessionId,
       timeoutMs: numericOption(payload.timeoutMs, 6000),
+      tmpRoot: payload.tmpRoot,
     });
     return emitJson(probe);
   } catch (error) {
@@ -1326,6 +1327,7 @@ async function cmdDaemonAttach(args) {
       short: payload.short,
       sessionId: payload.sessionId,
       timeoutMs: numericOption(payload.timeoutMs, 6000),
+      tmpRoot: payload.tmpRoot,
     });
     if (!probe.ok) return emitJson(daemonAttachProbeFailureResult(probe));
     const short = payload.short ?? probe.target?.short;
@@ -1394,6 +1396,7 @@ async function cmdDaemonInterrupt(args) {
       short: payload.short,
       sessionId: payload.sessionId,
       timeoutMs: numericOption(payload.timeoutMs, 6000),
+      tmpRoot: payload.tmpRoot,
     });
     if (!probe.ok) return emitJson(daemonInterruptProbeFailureResult(probe));
     const short = payload.short ?? probe.target?.short;
