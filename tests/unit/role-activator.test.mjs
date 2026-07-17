@@ -235,6 +235,42 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     store.close();
   });
 
+  it("defers a standup retry when waking the stood-up session throws", async () => {
+    const store = tempStore();
+    const activator = createRoleActivator({
+      store,
+      adapter: {
+        supports: () => true,
+        probe: async () => ({ ok: false }),
+        wake: async () => {
+          const error = new Error("wake failed");
+          error.code = "standup_transport_error";
+          throw error;
+        },
+        standup: async () => tmuxLocator("standup-wake-throws"),
+        cancel: async () => {},
+      },
+      getControlSnapshot: () => enabledControl(),
+      getCharterVersion: () => "charter.v1",
+      uuid: () => "activation-standup-wake-throws",
+      now: () => 1_000,
+      rng: () => 0.5,
+    });
+
+    const outcome = await activator.ensureRoleAwake(ensureRequest(), {
+      principal: { type: "system", project_id: PROJECT_ID },
+    });
+
+    assert.equal(outcome.status, "unreachable");
+    assert.equal(outcome.reason_code, "standup_transport_error");
+    assert.equal(outcome.role.state, "unreachable");
+    assert.equal(outcome.role.retry_count, 1);
+    assert.equal(outcome.role.activation_id, null);
+    assert.ok(outcome.role.next_probe_ms > 1_000);
+    activator.close();
+    store.close();
+  });
+
   it("fails over an unreachable elected candidate and activates only after a fenced ACK", async () => {
     const store = tempStore();
     store.upsertRoleReservation({

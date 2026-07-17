@@ -776,23 +776,34 @@ export function createRoleActivator(options = {}) {
     // C3 binds the stood-up session identity/grant and delivers its charter
     // ACK. C6a-4 still sends the activation now and bounds retries until that
     // binding exists, so a missing C3 hook cannot create a tight orphan loop.
-    const wake = await adapter.wake(
-      locator,
-      {
-        schema_version: "tfx.role-activation.v1",
-        role_key: plan.roleKey,
-        role_key_wire: plan.roleKeyWire,
-        epoch: plan.role.epoch,
-        activation_seq: plan.role.activation_seq,
-        activation_id: plan.role.activation_id,
-        charter_version: plan.role.charter_version,
-        holder_cli: "claude",
-      },
-      {
-        timeout_ms: config.probe_timeout_ms,
-        signal: flights.get(plan.roleKeyWire)?.controller.signal,
-      },
-    );
+    let wake;
+    try {
+      wake = await adapter.wake(
+        locator,
+        {
+          schema_version: "tfx.role-activation.v1",
+          role_key: plan.roleKey,
+          role_key_wire: plan.roleKeyWire,
+          epoch: plan.role.epoch,
+          activation_seq: plan.role.activation_seq,
+          activation_id: plan.role.activation_id,
+          charter_version: plan.role.charter_version,
+          holder_cli: "claude",
+        },
+        {
+          timeout_ms: config.probe_timeout_ms,
+          signal: flights.get(plan.roleKeyWire)?.controller.signal,
+        },
+      );
+    } catch (error) {
+      const reasonCode = error?.code || "standup_wake_failed";
+      const deferred = deferStandupRetry(plan, reasonCode);
+      return {
+        status: deferred.role?.state || "unreachable",
+        reason_code: reasonCode,
+        role: deferred.role,
+      };
+    }
     const afterWake = await gate(plan);
     if (afterWake) return afterWake;
     if (wake?.ok !== true) {
