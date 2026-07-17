@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -48,9 +47,9 @@ async function listenDaemon(sockPath) {
 }
 
 test("local shard registers Triflux swarm shard row with shard display name", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-swarm-bridge-"));
+  const tmp = await fs.mkdtemp("/tmp/tfx-swarm-bridge-");
   const configDir = path.join(tmp, "claude");
-  const paths = deriveClaudeDaemonPaths({ configDir });
+  const paths = deriveClaudeDaemonPaths({ configDir, tmpRoot: tmp });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   const { server, requests } = await listenDaemon(paths.controlSock);
 
@@ -67,6 +66,7 @@ test("local shard registers Triflux swarm shard row with shard display name", as
       cwd: "/tmp/project",
       host: "local",
       configDir,
+      tmpRoot: tmp,
       _deps: {
         resolveDaemonBridgeSessionId: async () => "cse_01SwarmBridge",
       },

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -56,9 +55,9 @@ async function listenDaemon(sockPath, { short, pid, expectedAuth }) {
 }
 
 test("dispatchClaudeDaemonJob emits op:dispatch, resolves pid+bridge, writes projection", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-job-"));
+  const tmp = await fs.mkdtemp("/tmp/tfx-dispatch-job-");
   const configDir = path.join(tmp, "claude");
-  const paths = deriveClaudeDaemonPaths({ configDir });
+  const paths = deriveClaudeDaemonPaths({ configDir, tmpRoot: tmp });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   const short = "abcd1234";
   const { server, requests } = await listenDaemon(paths.controlSock, {
@@ -120,9 +119,9 @@ test("dispatchClaudeDaemonJob emits op:dispatch, resolves pid+bridge, writes pro
 });
 
 test("dispatchClaudeDaemonJob projection:'skip' does not build/write a projection", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-skip-"));
+  const tmp = await fs.mkdtemp("/tmp/tfx-dispatch-skip-");
   const configDir = path.join(tmp, "claude");
-  const paths = deriveClaudeDaemonPaths({ configDir });
+  const paths = deriveClaudeDaemonPaths({ configDir, tmpRoot: tmp });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   const short = "skip5678";
   const { server, requests } = await listenDaemon(paths.controlSock, {
@@ -161,9 +160,9 @@ test("dispatchClaudeDaemonJob projection:'skip' does not build/write a projectio
 });
 
 test("dispatchClaudeDaemonJob throws when daemon dispatch is not ok", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-fail-"));
+  const tmp = await fs.mkdtemp("/tmp/tfx-dispatch-fail-");
   const configDir = path.join(tmp, "claude");
-  const paths = deriveClaudeDaemonPaths({ configDir });
+  const paths = deriveClaudeDaemonPaths({ configDir, tmpRoot: tmp });
   await fs.mkdir(paths.daemonDir, { recursive: true });
 
   const server = net.createServer((socket) => {
@@ -254,9 +253,9 @@ test("teardownClaudeDaemonJob passes daemon control auth to short kill", async (
 });
 
 test("dispatchClaudeDaemonJob presents daemon control.key as auth when present", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-auth-"));
+  const tmp = await fs.mkdtemp("/tmp/tfx-dispatch-auth-");
   const configDir = path.join(tmp, "claude");
-  const paths = deriveClaudeDaemonPaths({ configDir });
+  const paths = deriveClaudeDaemonPaths({ configDir, tmpRoot: tmp });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   await fs.mkdir(path.join(configDir, "daemon"), { recursive: true });
   await fs.writeFile(
@@ -296,12 +295,13 @@ test("dispatchClaudeDaemonJob presents daemon control.key as auth when present",
 });
 
 test("dispatchClaudeDaemonJob reads the source control.key for an OMC runtime config", async () => {
-  const tmp = await fs.mkdtemp(
-    path.join(os.tmpdir(), "tfx-dispatch-omc-auth-"),
-  );
+  const tmp = await fs.mkdtemp("/tmp/tfx-dispatch-omc-auth-");
   const sourceConfigDir = path.join(tmp, "claude");
   const runtimeConfigDir = path.join(sourceConfigDir, ".omc-launch");
-  const paths = deriveClaudeDaemonPaths({ configDir: runtimeConfigDir });
+  const paths = deriveClaudeDaemonPaths({
+    configDir: runtimeConfigDir,
+    tmpRoot: tmp,
+  });
   const controlKey = "omc-source-control-key";
   await fs.mkdir(paths.daemonDir, { recursive: true });
   await fs.mkdir(runtimeConfigDir, { recursive: true });
@@ -345,12 +345,13 @@ test("dispatchClaudeDaemonJob reads the source control.key for an OMC runtime co
 });
 
 test("dispatchClaudeDaemonJob preserves EAUTH when the OMC source control.key is absent", async () => {
-  const tmp = await fs.mkdtemp(
-    path.join(os.tmpdir(), "tfx-dispatch-omc-noauth-"),
-  );
+  const tmp = await fs.mkdtemp("/tmp/tfx-dispatch-omc-noauth-");
   const sourceConfigDir = path.join(tmp, "claude");
   const runtimeConfigDir = path.join(sourceConfigDir, ".omc-launch");
-  const paths = deriveClaudeDaemonPaths({ configDir: runtimeConfigDir });
+  const paths = deriveClaudeDaemonPaths({
+    configDir: runtimeConfigDir,
+    tmpRoot: tmp,
+  });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   await fs.mkdir(runtimeConfigDir, { recursive: true });
   await fs.writeFile(
@@ -390,9 +391,9 @@ test("dispatchClaudeDaemonJob preserves EAUTH when the OMC source control.key is
 });
 
 test("dispatchClaudeDaemonJob omits auth when control.key is absent (legacy daemon)", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-noauth-"));
+  const tmp = await fs.mkdtemp("/tmp/tfx-dispatch-noauth-");
   const configDir = path.join(tmp, "claude");
-  const paths = deriveClaudeDaemonPaths({ configDir });
+  const paths = deriveClaudeDaemonPaths({ configDir, tmpRoot: tmp });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   const short = "noau5678";
   const { server, requests } = await listenDaemon(paths.controlSock, {
@@ -422,9 +423,9 @@ test("dispatchClaudeDaemonJob omits auth when control.key is absent (legacy daem
 });
 
 test("dispatchClaudeDaemonJob preserves daemon rejection reason in error message", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-dispatch-reject-"));
+  const tmp = await fs.mkdtemp("/tmp/tfx-dispatch-reject-");
   const configDir = path.join(tmp, "claude");
-  const paths = deriveClaudeDaemonPaths({ configDir });
+  const paths = deriveClaudeDaemonPaths({ configDir, tmpRoot: tmp });
   await fs.mkdir(paths.daemonDir, { recursive: true });
   const server = net.createServer((socket) => {
     socket.setEncoding("utf8");
