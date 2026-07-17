@@ -97,6 +97,102 @@
       "mcp_route": null
     },
     {
+      "id": "tfx-review",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?review\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-review",
+      "priority": 1,
+      "supersedes": ["tfx-unified"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null,
+      "explicit": true
+    },
+    {
+      "id": "tfx-analysis",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?analysis\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-analysis",
+      "priority": 1,
+      "supersedes": ["tfx-unified"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null,
+      "explicit": true
+    },
+    {
+      "id": "tfx-plan",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?plan\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-plan",
+      "priority": 1,
+      "supersedes": ["tfx-unified"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null,
+      "explicit": true
+    },
+    {
+      "id": "tfx-qa",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?qa\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-qa",
+      "priority": 1,
+      "supersedes": ["tfx-unified"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null,
+      "explicit": true
+    },
+    {
+      "id": "tfx-research",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?research\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-research",
+      "priority": 1,
+      "supersedes": ["tfx-unified"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null,
+      "explicit": true
+    },
+    {
+      "id": "tfx-find",
+      "patterns": [
+        {
+          "source": "\\btfx[\\s-]?find\\b",
+          "flags": "i"
+        }
+      ],
+      "skill": "tfx-find",
+      "priority": 1,
+      "supersedes": ["tfx-unified"],
+      "exclusive": false,
+      "state": null,
+      "mcp_route": null,
+      "explicit": true
+    },
+    {
       "id": "tfx-unified",
       "patterns": [
         {
@@ -157,6 +253,10 @@
         {
           "source": "(?:AI\\s*슬롭|ai\\s*slop|anti[\\s-]?slop|deslop)",
           "flags": "i"
+        },
+        {
+          "source": "(?:슬롭|클린업)",
+          "flags": "i"
         }
       ],
       "skill": "ai-slop-cleaner",
@@ -176,10 +276,11 @@
       ],
       "skill": "tfx-prune",
       "priority": 1,
-      "supersedes": [],
+      "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "explicit": true
     },
     {
       "id": "tfx-codex",
@@ -748,14 +849,6 @@
           "flags": "i"
         },
         {
-          "source": "\\brelease\\b",
-          "flags": "i"
-        },
-        {
-          "source": "\\bpublish\\b",
-          "flags": "i"
-        },
-        {
           "source": "배포(?!자|사|장|처)",
           "flags": ""
         },
@@ -773,7 +866,9 @@
       "supersedes": ["gstack-ship"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "repo_scope": ["triflux"],
+      "explicit": true
     }
   ]
 }
