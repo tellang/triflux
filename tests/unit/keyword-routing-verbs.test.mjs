@@ -173,6 +173,54 @@ describe("keyword routing: 우선순위 역전 방지 (root cause ④)", () => {
   });
 });
 
+// Codex 리뷰 P2 회귀 가드 2건 (PR #487)
+describe("keyword routing: 명시 토큰이 광역 클린업 매처를 이긴다 (P2-1)", () => {
+  it("'tfx-prune으로 클린업 해줘' → selectPrimaryMatch 가 tfx-prune 선택", () => {
+    const resolved = resolveConflicts(
+      matchRules(compiled, "tfx-prune으로 클린업 해줘"),
+    );
+    // 정렬상 host-ai-slop-cleaner 가 앞서더라도 explicit 규칙이 이겨야 한다.
+    assert.equal(selectPrimaryMatch(resolved).id, "tfx-prune");
+  });
+
+  it("전용 명시토큰 규칙은 전부 explicit:true", () => {
+    for (const id of [
+      "tfx-review",
+      "tfx-analysis",
+      "tfx-plan",
+      "tfx-qa",
+      "tfx-research",
+      "tfx-find",
+      "tfx-prune",
+    ]) {
+      const rule = rules.find((x) => x.id === id);
+      assert.equal(rule.explicit, true, `${id} explicit=true`);
+    }
+  });
+});
+
+describe("keyword routing: direct-run 가드는 심링크 실행을 허용 (P2-2)", () => {
+  it("심링크 경유 실행에서도 main() 이 구동돼 JSON 을 출력한다", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { mkdtempSync, symlinkSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "kw-symlink-"));
+    const link = join(dir, "keyword-detector-link.mjs");
+    symlinkSync(join(ROOT, "scripts/keyword-detector.mjs"), link);
+    const out = execFileSync(process.execPath, [link], {
+      input: JSON.stringify({ prompt: "만들어줘 함수", cwd: ROOT }),
+      encoding: "utf8",
+    });
+    const parsed = JSON.parse(out.trim().split("\n").at(-1));
+    assert.equal(parsed.continue, true);
+    assert.match(
+      parsed.hookSpecificOutput?.additionalContext ?? "",
+      /tfx-unified/,
+    );
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe("keyword routing: disabled 규칙 존중", () => {
   it("disabled:true 규칙은 loadRules 가 제외한다 (fixture)", async () => {
     const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");

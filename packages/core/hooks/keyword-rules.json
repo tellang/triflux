@@ -109,7 +109,8 @@
       "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "explicit": true
     },
     {
       "id": "tfx-analysis",
@@ -124,7 +125,8 @@
       "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "explicit": true
     },
     {
       "id": "tfx-plan",
@@ -139,7 +141,8 @@
       "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "explicit": true
     },
     {
       "id": "tfx-qa",
@@ -154,7 +157,8 @@
       "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "explicit": true
     },
     {
       "id": "tfx-research",
@@ -169,7 +173,8 @@
       "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "explicit": true
     },
     {
       "id": "tfx-find",
@@ -184,7 +189,8 @@
       "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "explicit": true
     },
     {
       "id": "tfx-unified",
@@ -273,7 +279,8 @@
       "supersedes": ["tfx-unified"],
       "exclusive": false,
       "state": null,
-      "mcp_route": null
+      "mcp_route": null,
+      "explicit": true
     },
     {
       "id": "tfx-codex",

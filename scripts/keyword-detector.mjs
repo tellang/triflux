@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -341,10 +341,13 @@ function main() {
 // stdin 대기로 행이 걸리지 않도록 direct-run 가드.
 const isDirectRun = (() => {
   try {
-    return (
-      typeof process.argv[1] === "string" &&
-      fileURLToPath(import.meta.url) === resolve(process.argv[1])
-    );
+    if (typeof process.argv[1] !== "string" || !process.argv[1]) return false;
+    const selfPath = fileURLToPath(import.meta.url);
+    const argvPath = resolve(process.argv[1]);
+    if (selfPath === argvPath) return true;
+    // 심링크 설치 경로: argv[1]이 심링크면 import.meta.url(실경로)과 어긋난다.
+    // canonical 경로로 재비교 (realpath 실패 시 non-direct 취급).
+    return selfPath === realpathSync(argvPath);
   } catch {
     return false;
   }
