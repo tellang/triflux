@@ -963,6 +963,7 @@ export function createRoleActivator(options = {}) {
         state: "active",
         charter_acked_epoch: current.epoch,
         activation_deadline_ms: null,
+        retry_count: 0,
         blocked_reason: null,
         last_transition_ms: now(),
         last_reason: "activation_acked",
@@ -1029,6 +1030,13 @@ export function createRoleActivator(options = {}) {
     reason = "candidate_registered",
   ) {
     const roleKey = normalizeRoleKey(roleKeyInput);
+    const control = controlSnapshot();
+    if (!managerEnabled(control, roleKey.role_kind) || managerCircuitReason) {
+      return {
+        ok: false,
+        reason_code: managerCircuitReason || blockedReason(control),
+      };
+    }
     const roleKeyWire = encodeRoleKey(roleKey);
     const candidateResult = store.updateCandidateReachability({
       role_key_wire: roleKeyWire,

@@ -356,6 +356,7 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     assert.equal(probing.state, "elected-probing");
     assert.equal(probing.holder_agent_id, "candidate-tmux");
     assert.equal(probing.epoch, 2);
+    assert.equal(probing.retry_count, 1);
     assert.equal(
       store.listRoleCandidates(CTO_WIRE)[0].consecutive_probe_failures,
       1,
@@ -382,6 +383,7 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     );
     assert.equal(ack.ok, true);
     assert.equal(ack.role.state, "active");
+    assert.equal(ack.role.retry_count, 0);
     assert.equal(activeTransitions.length, 1);
     assert.equal(activeTransitions[0].role.holder_agent_id, "candidate-tmux");
 
@@ -1340,6 +1342,67 @@ describe("role activator", { skip: SQLITE_SKIP }, () => {
     assert.equal(restored.role.state, "electable");
     assert.equal(restored.candidate.excluded_until_ms, null);
     assert.equal(restored.candidate.consecutive_probe_failures, 0);
+    store.close();
+  });
+
+  it("does not restore a quarantined role when candidate changes while the manager is disabled", () => {
+    const store = tempStore();
+    const currentTime = 1_000;
+    store.upsertRoleReservation({
+      role_key_wire: CTO_WIRE,
+      holder_agent_id: null,
+      state: "quarantined",
+      activation_id: null,
+      retry_count: 3,
+      next_probe_ms: 121_000,
+      last_transition_ms: currentTime,
+      last_reason: "ack_timeout",
+    });
+    seedCandidate(store, "candidate-disabled-notify", 100, [
+      tmuxLocator("tmux-disabled-notify"),
+    ]);
+    store.updateCandidateReachability({
+      role_key_wire: CTO_WIRE,
+      agent_id: "candidate-disabled-notify",
+      consecutive_probe_failures: 3,
+      excluded_until_ms: 121_000,
+      last_probe_ms: currentTime,
+      last_probe_code: "ack_timeout",
+      updated_at_ms: currentTime,
+    });
+    const beforeRole = store.getRole(CTO_WIRE);
+    const beforeCandidate = store.listRoleCandidates(CTO_WIRE)[0];
+    const activator = createRoleActivator({
+      store,
+      adapter: {
+        supports: () => true,
+        probe: async () => assert.fail("probe must remain disabled"),
+        wake: async () => assert.fail("wake must remain disabled"),
+        standup: async () => assert.fail("standup must remain disabled"),
+        cancel: async () => {},
+      },
+      getControlSnapshot: () => ({
+        ...enabledControl(),
+        cto_manager_enabled: false,
+      }),
+      getCharterVersion: () => "charter.v1",
+      uuid: () => "activation-disabled-notify",
+      now: () => currentTime,
+      rng: () => 0.5,
+    });
+
+    const outcome = activator.notifyCandidateChanged(
+      CTO_KEY,
+      "candidate-disabled-notify",
+      "locator_registered",
+    );
+
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.reason_code, "manager_disabled");
+    assert.deepEqual(store.getRole(CTO_WIRE), beforeRole);
+    assert.deepEqual(store.listRoleCandidates(CTO_WIRE)[0], beforeCandidate);
+    assert.equal(store.getRole(CTO_WIRE).state, "quarantined");
+    activator.close();
     store.close();
   });
 
