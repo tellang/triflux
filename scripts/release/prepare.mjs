@@ -86,12 +86,12 @@ export async function prepareRelease({
         "scripts/__tests__/**/*.test.mjs",
       ],
       skip: skipTests,
-      // maxBuffer: 1 MiB default is too small for piped node --test verbose
-      // output. 128 MiB matches the prior npm-test ceiling.
+      // Stream test output directly so GitHub Actions preserves the failing
+      // test name and assertion details instead of truncating a captured
+      // execFileSync error object.
       options: {
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: "inherit",
         timeoutMs: TEST_TIMEOUT_MS,
-        maxBuffer: 128 * 1024 * 1024,
         shell: false,
       },
     },
@@ -114,11 +114,20 @@ export async function prepareRelease({
         continue;
       }
       logStep(step.name);
-      runCommand(step.command, step.args, {
-        cwd: rootDir,
-        execFileSyncFn,
-        ...step.options,
-      });
+      try {
+        runCommand(step.command, step.args, {
+          cwd: rootDir,
+          execFileSyncFn,
+          ...step.options,
+        });
+      } catch (error) {
+        const exitCode = Number.isInteger(error?.status)
+          ? error.status
+          : "unknown";
+        throw new Error(
+          `[prepare] step=${step.name} failed (exit code=${exitCode})`,
+        );
+      }
     }
   } else {
     for (const step of steps) {
