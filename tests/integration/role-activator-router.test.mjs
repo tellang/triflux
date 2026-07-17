@@ -248,6 +248,49 @@ describe("router role activator integration", { skip: SQLITE_SKIP }, () => {
     }
   });
 
+  it("keeps legacy CTO re-election alive when scoped expiry activation throws", () => {
+    const store = tempStore();
+    const warnings = [];
+    const activatorError = new Error("role store unavailable");
+    const router = createRouter(store, {
+      roleActivator: {
+        ensureExpiredRoles() {
+          throw activatorError;
+        },
+      },
+      logger: {
+        warn(payload, event) {
+          warnings.push({ payload, event });
+        },
+      },
+    });
+    try {
+      store.registerAgent({
+        agent_id: "legacy-cto-fallback",
+        cli: "claude",
+        capabilities: ["cto"],
+        topics: [],
+        metadata: { role: "cto", cto_priority: 10 },
+        heartbeat_ttl_ms: 120_000,
+      });
+
+      router.reelectStaleRoles({ reason: "activator-fault" });
+
+      assert.equal(
+        router.getStatus("hub").data.roles.cto.leader_agent_id,
+        "legacy-cto-fallback",
+      );
+      assert.deepEqual(warnings, [
+        {
+          payload: { err: activatorError },
+          event: "role_activator.expiry_sweep_degraded",
+        },
+      ]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("transfers scoped backlog only for the current active holder fence", () => {
     const store = tempStore();
     const activator = fakeActivator();

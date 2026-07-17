@@ -1099,10 +1099,14 @@ export async function startHub({
         onRoleActive: ({ role }) => router?.activateScopedRoleHolder(role) ?? 0,
       })
     : null;
-  router = createRouter(store, { roleActivator });
+  router = createRouter(store, { roleActivator, logger: hubLog });
   if (roleActivator) {
     const recovered = store.recoverRoleRegistry(Date.now());
-    roleActivator.ensureRecoveredRoles(recovered);
+    try {
+      roleActivator.ensureRecoveredRoles(recovered);
+    } catch (err) {
+      hubLog.warn({ err }, "role_activator.recovery_degraded");
+    }
   }
   const fingerprintService = createAdaptiveFingerprintService({ store });
 

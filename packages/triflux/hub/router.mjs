@@ -370,6 +370,7 @@ function waitForEmitterOnce(emitter, eventName, timeoutMs) {
  */
 export function createRouter(store, options = {}) {
   const roleActivator = options.roleActivator || null;
+  const hubLog = options.logger || null;
   let sweepTimer = null;
   let staleTimer = null;
   const responseEmitter = new EventEmitter();
@@ -2039,7 +2040,11 @@ export function createRouter(store, options = {}) {
     },
 
     reelectStaleRoles({ reason = "sweep" } = {}) {
-      roleActivator?.ensureExpiredRoles?.(Date.now());
+      try {
+        roleActivator?.ensureExpiredRoles?.(Date.now());
+      } catch (err) {
+        hubLog?.warn?.({ err }, "role_activator.expiry_sweep_degraded");
+      }
       for (const roleName of ROLE_TOPICS) {
         const role = roleStates.get(roleName);
         const leader = role?.leaderAgentId
