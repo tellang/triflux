@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   compileRules,
@@ -88,6 +88,27 @@ export function sanitizeForKeywordDetection(text) {
     .replace(/(^|[\s"'`(])(?:\/|\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+/gm, "$1 ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// repo_scope 는 path segment 단위로 매칭한다 — "triflux" 는 .../tools/triflux/... 에만
+// 매칭되고 .../triflux-ideas 같은 부분 문자열에는 매칭되지 않는다. 빈 scope = 전역.
+export function matchesRepoScope(path, scopes) {
+  if (!Array.isArray(scopes) || scopes.length === 0) return true;
+  if (typeof path !== "string" || !path) return false;
+  const segments = path.split(/[\\/]+/).filter(Boolean);
+  return scopes.some((scope) => segments.includes(scope));
+}
+
+// resolvedMatches[0] 단일 승자의 우선순위 역전 방지 — explicit(종결 라우팅) 규칙이
+// 있으면 정렬 순서와 무관하게 그 규칙이 이긴다. 없으면 정렬 선두 유지.
+export function selectPrimaryMatch(resolvedMatches) {
+  if (!Array.isArray(resolvedMatches) || resolvedMatches.length === 0) {
+    return null;
+  }
+  const explicitMatch = resolvedMatches.find(
+    (match) => match?.explicit === true,
+  );
+  return explicitMatch ?? resolvedMatches[0];
 }
 
 function createHookOutput(additionalContext) {
@@ -263,13 +284,21 @@ function main() {
     return;
   }
 
-  const selected = resolvedMatches[0];
   const baseDir =
     typeof payload.cwd === "string" && payload.cwd
       ? payload.cwd
       : typeof payload.directory === "string" && payload.directory
         ? payload.directory
         : process.cwd();
+
+  const scopedMatches = resolvedMatches.filter((match) =>
+    matchesRepoScope(baseDir, match.repo_scope),
+  );
+  const selected = selectPrimaryMatch(scopedMatches);
+  if (!selected) {
+    console.log(JSON.stringify(createSuppressOutput()));
+    return;
+  }
 
   activateState(baseDir, selected.state, prompt, payload);
 
@@ -308,9 +337,24 @@ function main() {
   console.log(JSON.stringify(createSuppressOutput()));
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(`[triflux-keyword-detector] 예외 발생: ${error.message}`);
-  console.log(JSON.stringify(createSuppressOutput()));
+// 훅 실행(node scripts/keyword-detector.mjs)일 때만 main 구동 — 테스트 import 시
+// stdin 대기로 행이 걸리지 않도록 direct-run 가드.
+const isDirectRun = (() => {
+  try {
+    return (
+      typeof process.argv[1] === "string" &&
+      fileURLToPath(import.meta.url) === resolve(process.argv[1])
+    );
+  } catch {
+    return false;
+  }
+})();
+
+if (isDirectRun) {
+  try {
+    main();
+  } catch (error) {
+    console.error(`[triflux-keyword-detector] 예외 발생: ${error.message}`);
+    console.log(JSON.stringify(createSuppressOutput()));
+  }
 }
