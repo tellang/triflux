@@ -44,6 +44,10 @@ const CORE_FILE_MIRRORS = [
     target: "packages/core/hub/router.mjs",
   },
   {
+    source: "hub/role-activator.mjs",
+    target: "packages/core/hub/role-activator.mjs",
+  },
+  {
     source: "hub/team/retry-state-machine.mjs",
     target: "packages/core/hub/team/retry-state-machine.mjs",
   },
@@ -105,6 +109,12 @@ const REMOTE_NON_MIRROR = new Set([
   "LICENSE",
   "hub/index.mjs", // pack-generated barrel (REMOTE_INDEX), not a root mirror
 ]);
+const REMOTE_REQUIRED_MIRRORS = [
+  {
+    source: "hub/role-activator-tfx-live.mjs",
+    target: "packages/remote/hub/role-activator-tfx-live.mjs",
+  },
+];
 
 function extractImportSpecifiers(content) {
   // Strip comments first so JSDoc usage examples (`* import x from './y'`) and
@@ -124,6 +134,15 @@ function checkRemoteMirror(repoRoot) {
   const remoteRoot = join(repoRoot, "packages", "remote");
   const coreRoot = join(repoRoot, "packages", "core");
   if (!existsSync(remoteRoot)) return issues;
+
+  for (const mirror of REMOTE_REQUIRED_MIRRORS) {
+    if (
+      existsSync(join(repoRoot, mirror.source)) &&
+      !existsSync(join(repoRoot, mirror.target))
+    ) {
+      issues.push({ path: mirror.target, kind: "missing-in-mirror" });
+    }
+  }
 
   for (const rel of walkRelFiles(remoteRoot)) {
     if (REMOTE_NON_MIRROR.has(rel)) continue;

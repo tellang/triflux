@@ -653,19 +653,23 @@ export function createStore(dbPath, options = {}) {
           : (current?.previous_holder_agent_id ?? null)),
       epoch: nextEpoch,
       activation_seq: nextActivationSeq,
-      activation_id:
-        input.activation_id ??
-        (input.holder_agent_id ? uuidv7() : (current?.activation_id ?? null)),
-      activation_deadline_ms:
-        input.activation_deadline_ms ?? current?.activation_deadline_ms ?? null,
-      holder_lease_expires_ms:
-        input.holder_lease_expires_ms ??
-        current?.holder_lease_expires_ms ??
-        null,
-      charter_version:
-        input.charter_version ?? current?.charter_version ?? null,
-      charter_acked_epoch:
-        input.charter_acked_epoch ?? current?.charter_acked_epoch ?? null,
+      activation_id: Object.hasOwn(input, "activation_id")
+        ? input.activation_id
+        : input.holder_agent_id
+          ? uuidv7()
+          : (current?.activation_id ?? null),
+      activation_deadline_ms: Object.hasOwn(input, "activation_deadline_ms")
+        ? input.activation_deadline_ms
+        : (current?.activation_deadline_ms ?? null),
+      holder_lease_expires_ms: Object.hasOwn(input, "holder_lease_expires_ms")
+        ? input.holder_lease_expires_ms
+        : (current?.holder_lease_expires_ms ?? null),
+      charter_version: Object.hasOwn(input, "charter_version")
+        ? input.charter_version
+        : (current?.charter_version ?? null),
+      charter_acked_epoch: Object.hasOwn(input, "charter_acked_epoch")
+        ? input.charter_acked_epoch
+        : (current?.charter_acked_epoch ?? null),
       retry_count: input.retry_count ?? current?.retry_count ?? 0,
       next_probe_ms: input.next_probe_ms ?? current?.next_probe_ms ?? null,
       blocked_reason:

@@ -9,7 +9,11 @@ import {
   resolveHardCeilingMs,
 } from "./lib/timeout-defaults.mjs";
 import { uuidv7 } from "./lib/uuidv7.mjs";
-import { normalizeRoleKey } from "./role-contract.mjs";
+import {
+  decodeRoleKey,
+  encodeRoleKey,
+  normalizeRoleKey,
+} from "./role-contract.mjs";
 
 const ASSIGN_PENDING_STATUSES = new Set(["queued", "running"]);
 const ROLE_TOPICS = new Set(["cto"]);
@@ -364,7 +368,9 @@ function waitForEmitterOnce(emitter, eventName, timeoutMs) {
  * 라우터 생성
  * @param {object} store
  */
-export function createRouter(store) {
+export function createRouter(store, options = {}) {
+  const roleActivator = options.roleActivator || null;
+  const hubLog = options.logger || null;
   let sweepTimer = null;
   let staleTimer = null;
   const responseEmitter = new EventEmitter();
@@ -486,6 +492,57 @@ export function createRouter(store) {
 
   function listRuntimeTopics(agentId) {
     return normalizeAgentTopics(store, agentId, runtimeTopics.get(agentId));
+  }
+
+  function scopedRoleForMessage(message = {}) {
+    const to = String(message.to_agent ?? message.to ?? "");
+    const prefix = "topic:role:";
+    if (to.startsWith(prefix)) {
+      const roleKeyWire = to.slice(prefix.length);
+      try {
+        return { roleKey: decodeRoleKey(roleKeyWire), roleKeyWire };
+      } catch {
+        return null;
+      }
+    }
+    if (to !== "topic:cto") return null;
+    const from = message.from_agent ?? message.from;
+    const projectId = message.project_id ?? store.getAgent(from)?.project_id;
+    if (!projectId) return null;
+    try {
+      const roleKey = normalizeRoleKey({
+        project_id: projectId,
+        role_kind: "cto",
+      });
+      return { roleKey, roleKeyWire: encodeRoleKey(roleKey) };
+    } catch {
+      return null;
+    }
+  }
+
+  function requestRoleActivation(message, trigger = "publish_no_holder") {
+    if (!roleActivator?.requestEnsureRole) return undefined;
+    const scoped = scopedRoleForMessage(message);
+    if (!scoped) return undefined;
+    try {
+      return roleActivator.requestEnsureRole(
+        {
+          schema_version: "tfx.ensure-role.v1",
+          role_key: scoped.roleKey,
+          trigger,
+          cause_id: String(message.id || message.correlation_id || uuidv7()),
+        },
+        {
+          principal: {
+            type: "system",
+            service: trigger === "session_start" ? "session-hook" : "router",
+            project_id: scoped.roleKey.project_id,
+          },
+        },
+      );
+    } catch {
+      return undefined;
+    }
   }
 
   function ensureRoleState(roleName) {
@@ -655,6 +712,7 @@ export function createRouter(store) {
   }
 
   function shouldTrackWithoutRecipients(message) {
+    if (roleActivator && scopedRoleForMessage(message)) return true;
     const to = message?.to_agent ?? message?.to;
     if (!String(to || "").startsWith("topic:")) return false;
     return ROLE_TOPICS.has(String(to).slice(6));
@@ -874,10 +932,69 @@ export function createRouter(store) {
     deliveryEmitter.emit("message", agentId, message);
   }
 
+  function activateScopedRoleHolder(role) {
+    if (!role?.role_key_wire || !role.holder_agent_id) return 0;
+    const current = store.getRole(role.role_key_wire);
+    if (
+      !current ||
+      current.state !== "active" ||
+      current.charter_acked_epoch !== current.epoch ||
+      current.holder_agent_id !== role.holder_agent_id ||
+      current.epoch !== role.epoch ||
+      current.activation_seq !== role.activation_seq ||
+      current.activation_id !== role.activation_id ||
+      current.version !== role.version
+    ) {
+      return 0;
+    }
+
+    let transferred = 0;
+    for (const message of store.listPendingRoleMessages(
+      role.role_key_wire,
+      Date.now(),
+    )) {
+      let record = getMessageRecord(message.id);
+      if (!record) {
+        trackMessage(message, [current.holder_agent_id]);
+        record = getMessageRecord(message.id);
+      } else {
+        record.recipients.add(current.holder_agent_id);
+      }
+      if (!queuesByAgent.get(current.holder_agent_id)?.has(message.id)) {
+        queueMessage(current.holder_agent_id, record.message);
+        transferred += 1;
+      }
+      record.message.status = "delivered";
+      store.updateMessageStatus(message.id, "delivered");
+    }
+    return transferred;
+  }
+
   function resolveRecipients(msg) {
     const to = msg.to_agent ?? msg.to;
     if (!to?.startsWith("topic:")) {
       return [to];
+    }
+
+    if (roleActivator) {
+      const scoped = scopedRoleForMessage(msg);
+      if (scoped) {
+        const role = store.getRole(scoped.roleKeyWire);
+        const managed = roleActivator.isRoleManaged?.(scoped.roleKey) !== false;
+        if (role && managed) {
+          const holder = role.holder_agent_id
+            ? store.getAgent(role.holder_agent_id)
+            : null;
+          const active =
+            role.state === "active" &&
+            role.charter_acked_epoch === role.epoch &&
+            Number(role.holder_lease_expires_ms) > Date.now() &&
+            holder?.status === "online" &&
+            Number(holder.lease_expires_ms) > Date.now();
+          return active ? [role.holder_agent_id] : [];
+        }
+        if (to !== "topic:cto") return [];
+      }
     }
 
     const topic = to.slice(6);
@@ -993,6 +1110,8 @@ export function createRouter(store) {
     trace_id,
     correlation_id,
   }) {
+    const messageIdentity = { from, to, project_id: payload?.project_id };
+    const scoped = scopedRoleForMessage(messageIdentity);
     const msg = store.auditLog({
       type,
       from,
@@ -1003,6 +1122,7 @@ export function createRouter(store) {
       payload,
       trace_id,
       correlation_id,
+      role_key_wire: scoped?.roleKeyWire ?? null,
     });
     const recipients = uniqueStrings(resolveRecipients(msg));
     if (recipients.length || shouldTrackWithoutRecipients(msg)) {
@@ -1018,7 +1138,11 @@ export function createRouter(store) {
     if (msg.type === "response") {
       responseEmitter.emit(msg.correlation_id, msg.payload);
     }
-    return { msg, recipients };
+    const activation =
+      recipients.length === 0
+        ? requestRoleActivation(msg, "publish_no_holder")
+        : undefined;
+    return { msg, recipients, activation };
   }
 
   function buildAssignSnapshot(job, extra = {}) {
@@ -1186,6 +1310,29 @@ export function createRouter(store) {
     responseEmitter,
     deliveryEmitter,
 
+    activateScopedRoleHolder,
+
+    requestEnsureRole(request, context = {}) {
+      if (!roleActivator?.requestEnsureRole) {
+        return {
+          accepted: false,
+          disposition: "manager_disabled",
+          role_key_wire: encodeRoleKey(request.role_key),
+          state: "electable",
+          epoch: 0,
+          blocked_reason: "activator_unavailable",
+        };
+      }
+      return roleActivator.requestEnsureRole(request, context);
+    },
+
+    ackRoleActivation(ack, context = {}) {
+      if (!roleActivator?.ackActivation) {
+        return { ok: false, code: "ROLE_ACTIVATOR_UNAVAILABLE" };
+      }
+      return roleActivator.ackActivation(ack, context);
+    },
+
     registerAgent(args) {
       const identityFailure = validateCallerIdentity(args);
       if (identityFailure) return identityFailure;
@@ -1217,6 +1364,17 @@ export function createRouter(store) {
           reason: "register",
           transferBacklog: true,
         });
+      }
+      if (roleActivator && identity?.project_id && identity?.session_id) {
+        requestRoleActivation(
+          {
+            id: identity.session_id,
+            from_agent: args.agent_id,
+            to_agent: "topic:cto",
+            project_id: identity.project_id,
+          },
+          "session_start",
+        );
       }
       return {
         ok: true,
@@ -1319,6 +1477,7 @@ export function createRouter(store) {
         if (shouldTrackWithoutRecipients(msg) && !getMessageRecord(msg.id)) {
           trackMessage(msg, []);
         }
+        requestRoleActivation(msg, "publish_no_holder");
         return 0;
       }
       if (!getMessageRecord(msg.id)) {
@@ -1470,7 +1629,7 @@ export function createRouter(store) {
       message_type,
     }) {
       const type = message_type || (correlation_id ? "response" : "event");
-      const { msg, recipients } = dispatchMessage({
+      const { msg, recipients, activation } = dispatchMessage({
         type,
         from,
         to,
@@ -1487,7 +1646,13 @@ export function createRouter(store) {
           message_id: msg.id,
           fanout_count: recipients.length,
           expires_at_ms: msg.expires_at_ms,
-          role: to === "topic:cto" ? getRoleSnapshot("cto") : undefined,
+          role:
+            roleActivator && scopedRoleForMessage(msg)
+              ? roleActivator.getRoleSnapshot(scopedRoleForMessage(msg).roleKey)
+              : to === "topic:cto"
+                ? getRoleSnapshot("cto")
+                : undefined,
+          activation,
         },
       };
     },
@@ -1875,6 +2040,11 @@ export function createRouter(store) {
     },
 
     reelectStaleRoles({ reason = "sweep" } = {}) {
+      try {
+        roleActivator?.ensureExpiredRoles?.(Date.now());
+      } catch (err) {
+        hubLog?.warn?.({ err }, "role_activator.expiry_sweep_degraded");
+      }
       for (const roleName of ROLE_TOPICS) {
         const role = roleStates.get(roleName);
         const leader = role?.leaderAgentId
