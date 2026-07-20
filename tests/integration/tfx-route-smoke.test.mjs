@@ -349,6 +349,42 @@ describe("tfx-route.sh — Codex MCP transport", () => {
     assert.notEqual(result.status, 0, out(result));
     assert.match(out(result), /exit_code: 68/);
   });
+
+  it("exit 0 이지만 MCP transport 채널이 죽어 stderr 노이즈만 복구된 경우 실패로 승격해야 한다(#result-verification)", () => {
+    // 버그 재현: 워커가 빈손으로 죽고 recover_codex_stdout 이 stderr 크래시
+    // 노이즈를 stdout 으로 backfill → 옛 가드는 `! -s STDOUT_LOG` 가 깨져 success
+    // 로 오보고했다. 이제 복구 플래그 + transport 서명으로 실패(68)로 승격한다.
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-mcp-crash' minimal`,
+      fixtureEnv({ FAKE_CODEX_MODE: "exec-mcp-crash" }),
+    );
+
+    assert.notEqual(result.status, 0, out(result));
+    assert.match(out(result), /exit_code: 68/);
+    assert.doesNotMatch(
+      out(result),
+      /status: success\b/,
+      "복구된 stderr 노이즈를 success 로 오보고하면 안 된다",
+    );
+  });
+
+  it("진짜 stdout 산출물이 있으면 stderr 에 transport 서명이 있어도 성공을 유지해야 한다(#result-verification P3-2)", () => {
+    // false-positive 경계: 진짜 출력 + 채널 teardown 로그 공존 → recover 미진입
+    // (flag=0) → no_genuine_output=no → 절대 승격 안 됨. 정상 성공을 지킨다.
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-real-output' minimal`,
+      fixtureEnv({ FAKE_CODEX_MODE: "exec-output-and-crash" }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /exit_code: 0/);
+    assert.doesNotMatch(
+      out(result),
+      /exit_code: 68/,
+      "진짜 출력이 있으면 transport 서명이 있어도 승격하면 안 된다",
+    );
+    assert.match(out(result), /EXEC:hello-real-output/);
+  });
 });
 
 describe("tfx-route.sh — 역할별 MCP profile 필터", () => {

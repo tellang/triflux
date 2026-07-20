@@ -183,6 +183,34 @@ function runExec() {
     process.exit(0);
   }
 
+  // MCP transport 채널이 실행 중 죽는 케이스 재현: exit 0 + 빈 stdout +
+  // stderr 크래시 노이즈. recover_codex_stdout 이 이 노이즈를 stdout 으로
+  // backfill 해 옛 `! -s STDOUT_LOG` 가드를 무력화하던 버그를 재현한다(#result-verification).
+  if (mode === "exec-mcp-crash") {
+    process.stderr.write(
+      [
+        "OpenAI Codex",
+        "mcp: connecting http://127.0.0.1:8101/mcp",
+        "rmcp::transport worker quit with fatal: Transport channel closed",
+        "workdir: /tmp/x",
+        "tokens used",
+        "1,234",
+      ].join("\n") + "\n",
+    );
+    process.exit(0);
+  }
+
+  // 진짜 stdout 산출물 + stderr 에 transport 서명이 공존하는 경계 케이스: 채널
+  // teardown 로그가 있어도 진짜 출력이 있으면 성공을 유지해야 한다(false-fail 방지,
+  // #result-verification P3-2). recover 미진입(flag=0) → no_genuine_output=no → 미승격.
+  if (mode === "exec-output-and-crash") {
+    process.stderr.write(
+      "rmcp::transport worker quit with fatal: Transport channel closed\n",
+    );
+    process.stdout.write(`EXEC:${prompt}`);
+    process.exit(0);
+  }
+
   let output = `EXEC:${prompt}`;
   if (process.env.FAKE_CODEX_ECHO_CONFIG === "1" && configFlags.length) {
     output += `\nCONFIG:${configFlags.join("|")}`;
