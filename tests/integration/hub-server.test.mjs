@@ -6,14 +6,17 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
 import { startHub } from "../../hub/server.mjs";
+import { createStore } from "../../hub/store.mjs";
+import { createStoreAdapter } from "../../hub/store-adapter.mjs";
 import {
   createConductorRegistry,
   getConductorRegistry,
   setConductorRegistry,
 } from "../../hub/team/conductor-registry.mjs";
+import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 // 임시 DB 경로 생성
 function tempDbPath() {
@@ -1102,4 +1105,153 @@ describe("startHub() token-required + 원격 바인드 — raw /synapse/sessions
   // raw /synapse/sessions 의 loopback-only 게이트(원격 주소 차단)는
   // isLoopbackRemoteAddress 단위 테스트(tests/unit/hub-loopback-gate.test.mjs)로 검증한다.
   // self-IP 로 원격을 흉내내는 fetch 는 병렬 부하에서 hang 하므로 제거했다.
+});
+
+describe("startHub() B0 startup expiry recovery", { skip: SQLITE_SKIP }, () => {
+  it("temp SQLite 재시작에서 만료 queued/delivered만 첫 startup에 terminalize한다", async () => {
+    const restoreHubStateDir = setTempHubStateDir("hub-server-b0-restart");
+    const dbPath = tempDbPath();
+    let now = 30_000;
+    mock.method(Date, "now", () => now);
+    let firstHub;
+    let secondHub;
+    try {
+      const seed = createStore(dbPath);
+      const expiredQueued = seed.enqueueMessage({
+        type: "event",
+        from: "b0",
+        to: "target",
+        topic: "expired.queued",
+        ttl_ms: 100,
+        payload: {},
+      });
+      const expiredDelivered = seed.enqueueMessage({
+        type: "event",
+        from: "b0",
+        to: "target",
+        topic: "expired.delivered",
+        ttl_ms: 100,
+        payload: {},
+      });
+      seed.updateMessageStatus(expiredDelivered.id, "delivered");
+      const liveQueued = seed.enqueueMessage({
+        type: "event",
+        from: "b0",
+        to: "target",
+        topic: "live.queued",
+        ttl_ms: 101,
+        payload: {},
+      });
+      const liveDelivered = seed.enqueueMessage({
+        type: "event",
+        from: "b0",
+        to: "target",
+        topic: "live.delivered",
+        ttl_ms: 101,
+        payload: {},
+      });
+      seed.updateMessageStatus(liveDelivered.id, "delivered");
+      const acked = seed.enqueueMessage({
+        type: "event",
+        from: "b0",
+        to: "target",
+        topic: "acked",
+        ttl_ms: 100,
+        payload: {},
+      });
+      seed.updateMessageStatus(acked.id, "acked");
+      const existingDlq = seed.enqueueMessage({
+        type: "event",
+        from: "b0",
+        to: "target",
+        topic: "existing-dlq",
+        ttl_ms: 100,
+        payload: {},
+      });
+      seed.moveToDeadLetter(existingDlq.id, "existing_reason", "existing");
+      seed.close();
+
+      now = 30_100;
+      firstHub = await startHub({
+        port: 0,
+        dbPath,
+        host: "127.0.0.1",
+        sessionId: `b0-first-${randomUUID()}`,
+      });
+      assert.equal(
+        firstHub.store.getMessage(expiredQueued.id).status,
+        "dead_letter",
+      );
+      assert.equal(
+        firstHub.store.getMessage(expiredDelivered.id).status,
+        "dead_letter",
+      );
+      assert.equal(firstHub.store.getMessage(liveQueued.id).status, "queued");
+      assert.equal(
+        firstHub.store.getMessage(liveDelivered.id).status,
+        "delivered",
+      );
+      assert.equal(firstHub.store.getMessage(acked.id).status, "acked");
+      assert.equal(firstHub.store.getDeadLetters(20).length, 3);
+      await firstHub.stop();
+      firstHub = null;
+
+      secondHub = await startHub({
+        port: 0,
+        dbPath,
+        host: "127.0.0.1",
+        sessionId: `b0-second-${randomUUID()}`,
+      });
+      assert.equal(secondHub.store.getDeadLetters(20).length, 3);
+      assert.equal(
+        secondHub.store
+          .getDeadLetters(20)
+          .filter((entry) => entry.reason === "ttl_expired").length,
+        2,
+      );
+    } finally {
+      await secondHub?.stop();
+      await firstHub?.stop();
+      mock.restoreAll();
+      restoreHubStateDir();
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    }
+  });
+
+  it("startup sweep fault는 transport를 열지 않고 lock/pipe를 정리한다", async () => {
+    const restoreHubStateDir = setTempHubStateDir("hub-server-b0-fault");
+    const dbPath = tempDbPath();
+    const sessionId = `b0-fault-${randomUUID()}`;
+    let recoveredHub;
+    try {
+      const faultStore = await createStoreAdapter(dbPath);
+      faultStore.sweepExpired = () => {
+        throw Object.assign(new Error("injected startup sweep failure"), {
+          code: "B0_SWEEP_FAULT",
+        });
+      };
+      await assert.rejects(
+        startHub({
+          port: 0,
+          dbPath,
+          host: "127.0.0.1",
+          sessionId,
+          createStoreAdapterFn: () => faultStore,
+        }),
+        { code: "B0_SWEEP_FAULT" },
+      );
+
+      recoveredHub = await startHub({
+        port: 0,
+        dbPath,
+        host: "127.0.0.1",
+        sessionId,
+      });
+      assert.equal(recoveredHub.reused, false);
+    } finally {
+      await recoveredHub?.stop();
+      restoreHubStateDir();
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    }
+  });
 });

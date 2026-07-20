@@ -1308,4 +1308,84 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
       assert.ok(true);
     });
   });
+
+  describe("B0 store-authoritative expiry sweep", () => {
+    it("DLQ insert을 claim한 handoff에만 startup notice를 한 번 만든다", () => {
+      const fixture = createIsolatedRouter();
+      try {
+        const handoff = fixture.router.handleHandoff({
+          from: "expiry-notice-sender",
+          to: "expiry-notice-target",
+          topic: "expiry.notice",
+          task: "expired handoff",
+          ttl_ms: 100,
+        });
+        const source = fixture.store.getMessage(
+          handoff.data.handoff_message_id,
+        );
+        const first = fixture.router.sweepExpired({
+          now_ms: source.expires_at_ms,
+          source: "startup",
+        });
+        const second = fixture.router.sweepExpired({
+          now_ms: source.expires_at_ms,
+          source: "periodic",
+        });
+        const notices = fixture.router
+          .getPendingMessages("expiry-notice-sender", { max_messages: 20 })
+          .filter((message) => message.topic === "handoff.dead_letter");
+
+        assert.equal(first.messages, 1);
+        assert.equal(second.messages, 0);
+        assert.equal(notices.length, 1);
+        assert.deepEqual(
+          {
+            expired_at_ms: notices[0].payload.expired_at_ms,
+            failed_at_ms: notices[0].payload.failed_at_ms,
+            recovery_source: notices[0].payload.recovery_source,
+          },
+          {
+            expired_at_ms: source.expires_at_ms,
+            failed_at_ms: source.expires_at_ms,
+            recovery_source: "startup",
+          },
+        );
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it("store가 먼저 terminalize해도 stale memory를 정리하고 notice를 재발행하지 않는다", () => {
+      const fixture = createIsolatedRouter();
+      try {
+        const handoff = fixture.router.handleHandoff({
+          from: "expiry-stale-sender",
+          to: "expiry-stale-target",
+          topic: "expiry.stale",
+          task: "stale memory",
+          ttl_ms: 100,
+        });
+        const source = fixture.store.getMessage(
+          handoff.data.handoff_message_id,
+        );
+        assert.equal(
+          fixture.store.sweepExpired({ now_ms: source.expires_at_ms }).messages,
+          1,
+        );
+        const result = fixture.router.sweepExpired({
+          now_ms: source.expires_at_ms,
+          source: "manual",
+        });
+        const notices = fixture.router
+          .getPendingMessages("expiry-stale-sender", { max_messages: 20 })
+          .filter((message) => message.topic === "handoff.dead_letter");
+
+        assert.equal(result.messages, 0);
+        assert.equal(notices.length, 0);
+        assert.equal(fixture.store.getMessage(source.id).status, "dead_letter");
+      } finally {
+        fixture.cleanup();
+      }
+    });
+  });
 });

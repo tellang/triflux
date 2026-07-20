@@ -1783,18 +1783,15 @@ export function createRouter(store) {
       return scheduleAssignRetry(job, reason, job.error, requested_by);
     },
 
-    sweepExpired() {
-      const now = Date.now();
-      let expired = 0;
-      const deadLettered = [];
+    sweepExpired({ now_ms = Date.now(), source = "manual" } = {}) {
+      const result = store.sweepExpired({ now_ms });
       for (const [messageId, record] of Array.from(liveMessages.entries())) {
-        if (record.message.expires_at_ms > now) continue;
-        store.moveToDeadLetter(messageId, "ttl_expired", null);
-        deadLettered.push(record.message);
+        if (record.message.expires_at_ms > now_ms) continue;
         removeMessage(messageId);
-        expired += 1;
       }
-      for (const message of deadLettered) {
+      for (const transition of result.transitions) {
+        if (!transition.dlq_inserted) continue;
+        const { message } = transition;
         if (
           !["handoff", "request"].includes(message.type) ||
           message.payload?.kind === "assign.job"
@@ -1819,12 +1816,15 @@ export function createRouter(store) {
             original_to: message.to_agent,
             reason: "ttl_expired",
             task: message.payload?.task ?? null,
+            expired_at_ms: message.expires_at_ms,
+            failed_at_ms: transition.failed_at_ms,
+            recovery_source: source,
           },
           trace_id: message.trace_id,
           correlation_id: message.correlation_id,
         });
       }
-      return { messages: expired };
+      return result;
     },
 
     sweepTimedOutAssigns() {
@@ -1845,19 +1845,49 @@ export function createRouter(store) {
       return { timed_out, retried };
     },
 
-    startSweeper() {
+    startSweeper({
+      run_immediately = false,
+      interval_ms = 10000,
+      onSweepError,
+    } = {}) {
       if (sweepTimer) return;
-      sweepTimer = setInterval(() => {
+      const reportSweepError = (source, error, failures) => {
+        if (typeof onSweepError === "function") {
+          onSweepError({ source, error, consecutive_failures: failures });
+        }
+      };
+      let sweepFailures = 0;
+      let assignFailures = 0;
+      const runSweep = () => {
         try {
-          router.sweepExpired();
+          router.sweepExpired({ source: "periodic" });
+          sweepFailures = 0;
+        } catch (error) {
+          sweepFailures += 1;
+          reportSweepError("periodic", error, sweepFailures);
+        }
+        try {
           router.sweepTimedOutAssigns();
-        } catch {}
-      }, 10000);
+          assignFailures = 0;
+        } catch (error) {
+          assignFailures += 1;
+          reportSweepError("assign_timeout", error, assignFailures);
+        }
+      };
+      if (run_immediately) runSweep();
+      sweepTimer = setInterval(() => {
+        runSweep();
+      }, interval_ms);
+      let staleFailures = 0;
       staleTimer = setInterval(() => {
         try {
           store.sweepStaleAgents();
           router.reelectStaleRoles();
-        } catch {}
+          staleFailures = 0;
+        } catch (error) {
+          staleFailures += 1;
+          reportSweepError("stale_agents", error, staleFailures);
+        }
       }, 120000);
       sweepTimer.unref();
       staleTimer.unref();

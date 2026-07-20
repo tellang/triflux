@@ -6,9 +6,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 
+import { createHitlManager } from "../../hub/hitl.mjs";
 import { createStore, uuidv7 } from "../../hub/store.mjs";
+import { createMemoryStore } from "../../hub/store-adapter.mjs";
 import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
 // ── 헬퍼: 격리된 임시 DB 경로 생성 ──
@@ -416,5 +418,202 @@ describe("createStore()", { skip: SQLITE_SKIP }, () => {
       const dls = store.getDeadLetters(10);
       assert.ok(dls.some((dl) => dl.message_id === msg.id));
     });
+  });
+});
+
+function makeSweepStore(kind) {
+  if (kind === "memory") {
+    return { store: createMemoryStore(), cleanup() {} };
+  }
+  const dbPath = tempDbPath();
+  const store = createStore(dbPath);
+  return {
+    store,
+    cleanup() {
+      store.close();
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+    },
+  };
+}
+
+describe("sweepExpired() B0 contract", { skip: SQLITE_SKIP }, () => {
+  for (const kind of ["sqlite", "memory"]) {
+    it(`${kind}: queued/delivered만 <= 경계에서 한 번 terminalize한다`, () => {
+      let now = 10_000;
+      mock.method(Date, "now", () => now);
+      const fixture = makeSweepStore(kind);
+      const { store } = fixture;
+      try {
+        const enqueue = (status, ttl_ms) => {
+          const message = store.enqueueMessage({
+            type: "event",
+            from: "expiry-contract",
+            to: "target",
+            topic: "expiry.contract",
+            ttl_ms,
+            payload: {},
+          });
+          store.updateMessageStatus(message.id, status);
+          return message;
+        };
+        const queuedPast = enqueue("queued", 99);
+        const deliveredExact = enqueue("delivered", 100);
+        const queuedFuture = enqueue("queued", 101);
+        const acked = enqueue("acked", 100);
+        const deadLetter = enqueue("dead_letter", 100);
+
+        now = 10_100;
+        const first = store.sweepExpired({ now_ms: now });
+        const second = store.sweepExpired({ now_ms: now });
+
+        assert.equal(first.now_ms, now);
+        assert.equal(first.messages, 2);
+        assert.equal(first.transitions.length, 2);
+        assert.deepEqual(
+          first.transitions.map((entry) => entry.previous_status).sort(),
+          ["delivered", "queued"],
+        );
+        assert.ok(
+          first.transitions.every((entry) => entry.reason === "ttl_expired"),
+        );
+        assert.ok(
+          first.transitions.every((entry) => entry.failed_at_ms === now),
+        );
+        assert.ok(first.transitions.every((entry) => entry.dlq_inserted));
+        assert.equal(second.messages, 0);
+        assert.equal(store.getMessage(queuedPast.id).status, "dead_letter");
+        assert.equal(store.getMessage(deliveredExact.id).status, "dead_letter");
+        assert.equal(store.getMessage(queuedFuture.id).status, "queued");
+        assert.equal(store.getMessage(acked.id).status, "acked");
+        assert.equal(store.getMessage(deadLetter.id).status, "dead_letter");
+        assert.equal(
+          store
+            .getDeadLetters(20)
+            .filter((entry) => entry.reason === "ttl_expired").length,
+          2,
+        );
+      } finally {
+        fixture.cleanup();
+        mock.restoreAll();
+      }
+    });
+
+    it(`${kind}: first writer와 기존 DLQ를 보존하고 HITL을 건드리지 않는다`, () => {
+      let now = 20_000;
+      mock.method(Date, "now", () => now);
+      const fixture = makeSweepStore(kind);
+      const { store } = fixture;
+      try {
+        const errorFirst = store.enqueueMessage({
+          type: "event",
+          from: "expiry",
+          to: "target",
+          topic: "error-first",
+          ttl_ms: 10,
+          payload: {},
+        });
+        assert.equal(
+          store.moveToDeadLetter(errorFirst.id, "delivery_error", "original"),
+          true,
+        );
+        now = 20_010;
+        assert.equal(store.sweepExpired({ now_ms: now }).messages, 0);
+        assert.equal(
+          store
+            .getDeadLetters(20)
+            .find((entry) => entry.message_id === errorFirst.id).reason,
+          "delivery_error",
+        );
+
+        const existingDlq = store.enqueueMessage({
+          type: "event",
+          from: "expiry",
+          to: "target",
+          topic: "existing-dlq",
+          ttl_ms: 10,
+          payload: {},
+        });
+        store.moveToDeadLetter(existingDlq.id, "prior_reason", "prior");
+        store.updateMessageStatus(existingDlq.id, "queued");
+        now = 20_020;
+        const result = store.sweepExpired({ now_ms: now });
+        assert.equal(result.messages, 1);
+        assert.equal(result.transitions[0].dlq_inserted, false);
+        const preserved = store
+          .getDeadLetters(20)
+          .find((entry) => entry.message_id === existingDlq.id);
+        assert.deepEqual(
+          {
+            reason: preserved.reason,
+            failed_at_ms: preserved.failed_at_ms,
+            last_error: preserved.last_error,
+          },
+          { reason: "prior_reason", failed_at_ms: 20_010, last_error: "prior" },
+        );
+
+        const forwarded = [];
+        const hitl = createHitlManager(store, {
+          handlePublish(message) {
+            forwarded.push(message);
+            return { data: { message_id: "timeout-forwarded" } };
+          },
+        });
+        const request = store.insertHumanRequest({
+          requester_agent: "expiry",
+          kind: "approval",
+          prompt: "continue",
+          deadline_ms: 0,
+          default_action: "timeout_continue",
+        });
+        store.sweepExpired({ now_ms: now });
+        assert.equal(
+          store.getHumanRequest(request.request_id).state,
+          "pending",
+        );
+        assert.equal(hitl.checkTimeouts(), 1);
+        assert.equal(
+          store.getHumanRequest(request.request_id).state,
+          "timed_out",
+        );
+        assert.equal(forwarded[0].payload.action, "timeout_continue");
+      } finally {
+        fixture.cleanup();
+        mock.restoreAll();
+      }
+    });
+  }
+
+  it("sqlite: DLQ insert fault는 status claim도 rollback한다", () => {
+    let now = 40_000;
+    mock.method(Date, "now", () => now);
+    const dbPath = tempDbPath();
+    const store = createStore(dbPath, {
+      beforeDeadLetterInsert() {
+        throw new Error("injected dead letter insert fault");
+      },
+    });
+    try {
+      const message = store.enqueueMessage({
+        type: "event",
+        from: "expiry",
+        to: "target",
+        topic: "rollback",
+        ttl_ms: 1,
+        payload: {},
+      });
+      now = message.expires_at_ms;
+      assert.throws(() => store.sweepExpired({ now_ms: now }), /injected/);
+      assert.equal(store.getMessage(message.id).status, "queued");
+      assert.equal(
+        store
+          .getDeadLetters(20)
+          .some((entry) => entry.message_id === message.id),
+        false,
+      );
+    } finally {
+      store.close();
+      rmSync(join(dbPath, ".."), { recursive: true, force: true });
+      mock.restoreAll();
+    }
   });
 });
